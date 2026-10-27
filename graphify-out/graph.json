@@ -15083,37 +15083,37 @@
       "label": "emit()",
       "file_type": "code",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L55",
+      "source_location": "L58",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_fixtures_echo_worker_emit",
       "community": 186,
       "community_name": "Echo Test Worker",
-      "norm_label": "emit()",
-      "id": "core_tests_fixtures_echo_worker_emit"
+      "norm_label": "emit()"
     },
     {
       "label": "main()",
       "file_type": "code",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L60",
+      "source_location": "L63",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_fixtures_echo_worker_main",
       "community": 186,
       "community_name": "Echo Test Worker",
-      "norm_label": "main()",
-      "id": "core_tests_fixtures_echo_worker_main"
+      "norm_label": "main()"
     },
     {
       "label": "_on_sigterm()",
       "file_type": "code",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L38",
+      "source_location": "L41",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_fixtures_echo_worker_on_sigterm",
       "community": 186,
       "community_name": "Echo Test Worker",
-      "norm_label": "_on_sigterm()",
-      "id": "core_tests_fixtures_echo_worker_on_sigterm"
+      "norm_label": "_on_sigterm()"
     },
     {
       "label": "test_ddb_native_map_single_element_update()",
@@ -15779,25 +15779,25 @@
       "label": "_assert_process_gone()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L231",
+      "source_location": "L238",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_assert_process_gone",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_assert_process_gone()",
-      "id": "core_tests_test_subprocess_engine_assert_process_gone"
+      "norm_label": "_assert_process_gone()"
     },
     {
       "label": "_color_env_independent()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L461",
+      "source_location": "L468",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_color_env_independent",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_color_env_independent()",
-      "id": "core_tests_test_subprocess_engine_color_env_independent"
+      "norm_label": "_color_env_independent()"
     },
     {
       "label": "_engine()",
@@ -15806,10 +15806,10 @@
       "source_location": "L24",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_engine",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_engine()",
-      "id": "core_tests_test_subprocess_engine_engine"
+      "norm_label": "_engine()"
     },
     {
       "label": "_job()",
@@ -15818,22 +15818,22 @@
       "source_location": "L30",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_job",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_job()",
-      "id": "core_tests_test_subprocess_engine_job"
+      "norm_label": "_job()"
     },
     {
       "label": "_kill_quietly()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L254",
+      "source_location": "L261",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_kill_quietly",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_kill_quietly()",
-      "id": "core_tests_test_subprocess_engine_kill_quietly"
+      "norm_label": "_kill_quietly()"
     },
     {
       "label": "_mode_job()",
@@ -15842,10 +15842,10 @@
       "source_location": "L160",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_mode_job",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_mode_job()",
-      "id": "core_tests_test_subprocess_engine_mode_job"
+      "norm_label": "_mode_job()"
     },
     {
       "label": "_rm()",
@@ -15854,10 +15854,10 @@
       "source_location": "L20",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rm",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_rm()",
-      "id": "core_tests_test_subprocess_engine_rm"
+      "norm_label": "_rm()"
     },
     {
       "label": "test_adapter_crash_is_error()",
@@ -15866,10 +15866,10 @@
       "source_location": "L71",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_crash_is_error",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_crash_is_error()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_crash_is_error"
+      "norm_label": "test_adapter_crash_is_error()"
     },
     {
       "label": "test_adapter_network_error_with_schedule_classified_and_retried()",
@@ -15878,10 +15878,10 @@
       "source_location": "L94",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_network_error_with_schedule_classified_and_retried()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried"
+      "norm_label": "test_adapter_network_error_with_schedule_classified_and_retried()"
     },
     {
       "label": "test_adapter_network_exit_maps_to_network_error()",
@@ -15890,10 +15890,10 @@
       "source_location": "L81",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_network_exit_maps_to_network_error()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error"
+      "norm_label": "test_adapter_network_exit_maps_to_network_error()"
     },
     {
       "label": "test_adapter_roundtrip_pass()",
@@ -15902,10 +15902,10 @@
       "source_location": "L44",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_roundtrip_pass()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass"
+      "norm_label": "test_adapter_roundtrip_pass()"
     },
     {
       "label": "test_adapter_sigkill_backstop_on_deaf_worker()",
@@ -15914,10 +15914,10 @@
       "source_location": "L120",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_sigkill_backstop_on_deaf_worker()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker"
+      "norm_label": "test_adapter_sigkill_backstop_on_deaf_worker()"
     },
     {
       "label": "test_adapter_stop_hanging_worker()",
@@ -15926,10 +15926,10 @@
       "source_location": "L105",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_stop_hanging_worker()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker"
+      "norm_label": "test_adapter_stop_hanging_worker()"
     },
     {
       "label": "test_adapter_with_schedule_pass()",
@@ -15938,70 +15938,70 @@
       "source_location": "L62",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_adapter_with_schedule_pass()",
-      "id": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass"
+      "norm_label": "test_adapter_with_schedule_pass()"
     },
     {
       "label": "test_bad_event_line_stops_the_still_running_worker()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L358",
+      "source_location": "L365",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_bad_event_line_stops_the_still_running_worker()",
-      "id": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker"
+      "norm_label": "test_bad_event_line_stops_the_still_running_worker()"
     },
     {
       "label": "test_concurrent_stop_calls_on_same_handle_are_safe()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L264",
+      "source_location": "L271",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_concurrent_stop_calls_on_same_handle_are_safe()",
-      "id": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe"
+      "norm_label": "test_concurrent_stop_calls_on_same_handle_are_safe()"
     },
     {
       "label": "test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L300",
+      "source_location": "L307",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout()",
-      "id": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout"
+      "norm_label": "test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout()"
     },
     {
       "label": "test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L327",
+      "source_location": "L334",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout()",
-      "id": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout"
+      "norm_label": "test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout()"
     },
     {
       "label": "test_done_then_slow_worker_keeps_content_verdict_despite_deadline()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L346",
+      "source_location": "L353",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_done_then_slow_worker_keeps_content_verdict_despite_deadline()",
-      "id": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline"
+      "norm_label": "test_done_then_slow_worker_keeps_content_verdict_despite_deadline()"
     },
     {
       "label": "test_fail_fast_stops_multiple_deaf_victims_in_parallel()",
@@ -16010,58 +16010,58 @@
       "source_location": "L165",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_fail_fast_stops_multiple_deaf_victims_in_parallel()",
-      "id": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel"
+      "norm_label": "test_fail_fast_stops_multiple_deaf_victims_in_parallel()"
     },
     {
       "label": "test_log_sink_receives_worker_logs_and_keeps_stderr_clean()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L418",
+      "source_location": "L425",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_log_sink_receives_worker_logs_and_keeps_stderr_clean()",
-      "id": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean"
+      "norm_label": "test_log_sink_receives_worker_logs_and_keeps_stderr_clean()"
     },
     {
       "label": "test_palette_excludes_verdict_and_default_colors()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L484",
+      "source_location": "L491",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_palette_excludes_verdict_and_default_colors()",
-      "id": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors"
+      "norm_label": "test_palette_excludes_verdict_and_default_colors()"
     },
     {
       "label": "test_scope_started_carries_session_id()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L394",
+      "source_location": "L401",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_scope_started_carries_session_id()",
-      "id": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id"
+      "norm_label": "test_scope_started_carries_session_id()"
     },
     {
       "label": "test_session_id_captured_from_scope_started_on_timeout()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L382",
+      "source_location": "L389",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_session_id_captured_from_scope_started_on_timeout()",
-      "id": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout"
+      "norm_label": "test_session_id_captured_from_scope_started_on_timeout()"
     },
     {
       "label": "test_silent_worker_timeout_fires_via_heartbeat()",
@@ -16070,22 +16070,22 @@
       "source_location": "L142",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_silent_worker_timeout_fires_via_heartbeat()",
-      "id": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat"
+      "norm_label": "test_silent_worker_timeout_fires_via_heartbeat()"
     },
     {
       "label": "_wait_pids()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L244",
+      "source_location": "L251",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_wait_pids",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "_wait_pids()",
-      "id": "core_tests_test_subprocess_engine_wait_pids"
+      "norm_label": "_wait_pids()"
     },
     {
       "label": "_default_targets()",
@@ -21767,37 +21767,37 @@
       "label": "test_pump_log_colors_prefix_only_when_policy_says_so()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L492",
+      "source_location": "L499",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_pump_log_colors_prefix_only_when_policy_says_so",
       "community": 31,
       "community_name": "_read_events",
-      "norm_label": "test_pump_log_colors_prefix_only_when_policy_says_so()",
-      "id": "core_tests_test_subprocess_engine_test_pump_log_colors_prefix_only_when_policy_says_so"
+      "norm_label": "test_pump_log_colors_prefix_only_when_policy_says_so()"
     },
     {
       "label": "test_pump_log_masks_tunnel_credentials_in_sink_and_stderr()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L436",
+      "source_location": "L443",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr",
       "community": 31,
       "community_name": "_read_events",
-      "norm_label": "test_pump_log_masks_tunnel_credentials_in_sink_and_stderr()",
-      "id": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr"
+      "norm_label": "test_pump_log_masks_tunnel_credentials_in_sink_and_stderr()"
     },
     {
       "label": "test_scope_colors_assigned_in_order_without_collision_and_stable()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L473",
+      "source_location": "L480",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_scope_colors_assigned_in_order_without_collision_and_stable",
       "community": 31,
       "community_name": "_read_events",
-      "norm_label": "test_scope_colors_assigned_in_order_without_collision_and_stable()",
-      "id": "core_tests_test_subprocess_engine_test_scope_colors_assigned_in_order_without_collision_and_stable"
+      "norm_label": "test_scope_colors_assigned_in_order_without_collision_and_stable()"
     },
     {
       "label": "registrySize()",
@@ -24407,13 +24407,13 @@
       "label": "test_large_job_and_noisy_worker_do_not_deadlock()",
       "file_type": "code",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L403",
+      "source_location": "L410",
       "_callable": true,
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
       "community": 4,
       "community_name": "RunState",
-      "norm_label": "test_large_job_and_noisy_worker_do_not_deadlock()",
-      "id": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock"
+      "norm_label": "test_large_job_and_noisy_worker_do_not_deadlock()"
     },
     {
       "label": "_device_jobs()",
@@ -48461,10 +48461,10 @@
       "source_file": "core/tests/fixtures/echo_worker.py",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "core_tests_fixtures_echo_worker",
       "community": 186,
       "community_name": "Echo Test Worker",
-      "norm_label": "echo_worker.py",
-      "id": "core_tests_fixtures_echo_worker"
+      "norm_label": "echo_worker.py"
     },
     {
       "label": "\u6d4b\u8bd5\u7528\u5047 worker\uff1a\u8bfb stdin \u7684 job JSON\uff0c\u5410\u9884\u8bbe ADR 0024 \u4e8b\u4ef6\u5230 stdout\u3002 \u4e0d\u63a5\u4efb\u4f55\u771f\u5f15\u64ce\u2014\u2014\u53ea\u9a8c\u8bc1\u5b50\u8fdb\u7a0b adapter\u2026",
@@ -48472,10 +48472,10 @@
       "source_file": "core/tests/fixtures/echo_worker.py",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "core_tests_fixtures_echo_worker_rationale_1",
       "community": 186,
       "community_name": "Echo Test Worker",
-      "norm_label": "\u6d4b\u8bd5\u7528\u5047 worker:\u8bfb stdin \u7684 job json,\u5410\u9884\u8bbe adr 0024 \u4e8b\u4ef6\u5230 stdout\u3002 \u4e0d\u63a5\u4efb\u4f55\u771f\u5f15\u64ce\u2014\u2014\u53ea\u9a8c\u8bc1\u5b50\u8fdb\u7a0b adapter...",
-      "id": "core_tests_fixtures_echo_worker_rationale_1"
+      "norm_label": "\u6d4b\u8bd5\u7528\u5047 worker:\u8bfb stdin \u7684 job json,\u5410\u9884\u8bbe adr 0024 \u4e8b\u4ef6\u5230 stdout\u3002 \u4e0d\u63a5\u4efb\u4f55\u771f\u5f15\u64ce\u2014\u2014\u53ea\u9a8c\u8bc1\u5b50\u8fdb\u7a0b adapter..."
     },
     {
       "label": "test_cloud_infra.py",
@@ -49000,10 +49000,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_journey_0013_mobile_devices_implementation",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "0013-mobile-devices-implementation.md"
+      "norm_label": "0013-mobile-devices-implementation.md",
+      "id": "docs_journey_0013_mobile_devices_implementation"
     },
     {
       "label": "documenting \u6e05\u5355\uff08ADR 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b\uff0c\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210\uff09",
@@ -49011,10 +49011,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L27",
       "_origin": "ast",
-      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)"
+      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)",
+      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
     },
     {
       "label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9\uff08ADR \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1\uff09",
@@ -49022,10 +49022,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L54",
       "_origin": "ast",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)"
+      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
     },
     {
       "label": "\u73b0\u573a",
@@ -49033,10 +49033,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L7",
       "_origin": "ast",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u73b0\u573a"
+      "norm_label": "\u73b0\u573a",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
@@ -49044,10 +49044,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L3",
       "_origin": "ast",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
     },
     {
       "label": "RunState",
@@ -49198,10 +49198,10 @@
       "source_file": "core/tests/test_subprocess_engine.py",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "test_subprocess_engine.py",
-      "id": "core_tests_test_subprocess_engine"
+      "norm_label": "test_subprocess_engine.py"
     },
     {
       "label": "fixture",
@@ -49209,10 +49209,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
+      "id": "fixture",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "fixture",
-      "id": "fixture"
+      "norm_label": "fixture"
     },
     {
       "label": "Job",
@@ -49220,10 +49220,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
+      "id": "job",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "job",
-      "id": "job"
+      "norm_label": "job"
     },
     {
       "label": "RunMeta",
@@ -49231,10 +49231,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
+      "id": "runmeta",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "runmeta",
-      "id": "runmeta"
+      "norm_label": "runmeta"
     },
     {
       "label": "SubprocessEngine",
@@ -49242,10 +49242,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
+      "id": "subprocessengine",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "subprocessengine",
-      "id": "subprocessengine"
+      "norm_label": "subprocessengine"
     },
     {
       "label": "\u5b50\u8fdb\u7a0b Engine adapter \u96c6\u6210\u6d4b\u8bd5\uff08ADR 0026 \u673a\u5236\u5c42\uff09\u3002 \u7528 tests/fixtures/echo_worker.py \u5f53\u771f\u5b50\u8fdb\u7a0b\u2026",
@@ -49253,10 +49253,10 @@
       "source_file": "core/tests/test_subprocess_engine.py",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_1",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u5b50\u8fdb\u7a0b engine adapter \u96c6\u6210\u6d4b\u8bd5(adr 0026 \u673a\u5236\u5c42)\u3002 \u7528 tests/fixtures/echo_worker.py \u5f53\u771f\u5b50\u8fdb\u7a0b...",
-      "id": "core_tests_test_subprocess_engine_rationale_1"
+      "norm_label": "\u5b50\u8fdb\u7a0b engine adapter \u96c6\u6210\u6d4b\u8bd5(adr 0026 \u673a\u5236\u5c42)\u3002 \u7528 tests/fixtures/echo_worker.py \u5f53\u771f\u5b50\u8fdb\u7a0b..."
     },
     {
       "label": "fail-fast \u5bf9\u591a\u4e2a\u4ecd\u5728\u8fd0\u884c\u7684\u771f\u5b50\u8fdb\u7a0b\uff1a\u5148\u5168\u90e8\u843d\u5b9a\u518d\u5e76\u884c\u53d1\u505c\u6b62\u8bf7\u6c42\u3002\u5173\u6389\u5fc3\u8df3\uff0cvictim \u7684\u7ebf\u7a0b\u963b\u585e\u5728\u7ba1\u9053\u8bfb\u4e0a\u3001\u770b\u4e0d\u5230 abort_flag\uff0c\u2026",
@@ -49264,109 +49264,109 @@
       "source_file": "core/tests/test_subprocess_engine.py",
       "source_location": "L166",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_166",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "fail-fast \u5bf9\u591a\u4e2a\u4ecd\u5728\u8fd0\u884c\u7684\u771f\u5b50\u8fdb\u7a0b:\u5148\u5168\u90e8\u843d\u5b9a\u518d\u5e76\u884c\u53d1\u505c\u6b62\u8bf7\u6c42\u3002\u5173\u6389\u5fc3\u8df3,victim \u7684\u7ebf\u7a0b\u963b\u585e\u5728\u7ba1\u9053\u8bfb\u4e0a\u3001\u770b\u4e0d\u5230 abort_flag,...",
-      "id": "core_tests_test_subprocess_engine_rationale_166"
+      "norm_label": "fail-fast \u5bf9\u591a\u4e2a\u4ecd\u5728\u8fd0\u884c\u7684\u771f\u5b50\u8fdb\u7a0b:\u5148\u5168\u90e8\u843d\u5b9a\u518d\u5e76\u884c\u53d1\u505c\u6b62\u8bf7\u6c42\u3002\u5173\u6389\u5fc3\u8df3,victim \u7684\u7ebf\u7a0b\u963b\u585e\u5728\u7ba1\u9053\u8bfb\u4e0a\u3001\u770b\u4e0d\u5230 abort_flag,..."
     },
     {
       "label": "\u7b49 pid \u6587\u4ef6\u91cc\u51fa\u73b0\u81f3\u5c11 n \u884c\uff08\u5b59\u8fdb\u7a0b\u7531\u5b83\u81ea\u5df1\u767b\u8bb0\uff0c\u53ef\u80fd\u6bd4\u7236\u8fdb\u7a0b\u665a\u4e00\u70b9\uff09\uff1b\u5230\u65f6\u8fd4\u56de\u5f53\u524d\u5df2\u6709\u7684\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L245",
+      "source_location": "L252",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_252",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u7b49 pid \u6587\u4ef6\u91cc\u51fa\u73b0\u81f3\u5c11 n \u884c(\u5b59\u8fdb\u7a0b\u7531\u5b83\u81ea\u5df1\u767b\u8bb0,\u53ef\u80fd\u6bd4\u7236\u8fdb\u7a0b\u665a\u4e00\u70b9);\u5230\u65f6\u8fd4\u56de\u5f53\u524d\u5df2\u6709\u7684\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_245"
+      "norm_label": "\u7b49 pid \u6587\u4ef6\u91cc\u51fa\u73b0\u81f3\u5c11 n \u884c(\u5b59\u8fdb\u7a0b\u7531\u5b83\u81ea\u5df1\u767b\u8bb0,\u53ef\u80fd\u6bd4\u7236\u8fdb\u7a0b\u665a\u4e00\u70b9);\u5230\u65f6\u8fd4\u56de\u5f53\u524d\u5df2\u6709\u7684\u3002"
     },
     {
       "label": "\u540c\u4e00 handle \u7684\u4e24\u6b21 stop \u91cd\u53e0\uff08\u4e3b\u7ebf\u7a0b\u7684\u6279\u91cf\u505c\u4e0e worker \u7ebf\u7a0b\u6536\u5c3e\u65f6\u7684\u5e42\u7b49\u505c\uff09\uff1a\u90fd\u6b63\u5e38\u8fd4\u56de\u3001\u4e0d\u629b\uff0c\u8fdb\u7a0b\u88ab\u56de\u6536\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L265",
+      "source_location": "L272",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_272",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u540c\u4e00 handle \u7684\u4e24\u6b21 stop \u91cd\u53e0(\u4e3b\u7ebf\u7a0b\u7684\u6279\u91cf\u505c\u4e0e worker \u7ebf\u7a0b\u6536\u5c3e\u65f6\u7684\u5e42\u7b49\u505c):\u90fd\u6b63\u5e38\u8fd4\u56de\u3001\u4e0d\u629b,\u8fdb\u7a0b\u88ab\u56de\u6536\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_265"
+      "norm_label": "\u540c\u4e00 handle \u7684\u4e24\u6b21 stop \u91cd\u53e0(\u4e3b\u7ebf\u7a0b\u7684\u6279\u91cf\u505c\u4e0e worker \u7ebf\u7a0b\u6536\u5c3e\u65f6\u7684\u5e42\u7b49\u505c):\u90fd\u6b63\u5e38\u8fd4\u56de\u3001\u4e0d\u629b,\u8fdb\u7a0b\u88ab\u56de\u6536\u3002"
     },
     {
       "label": "\u5f3a\u6740\u540e\u4e8b\u4ef6\u7ba1\u9053\u4ecd\u4e0d EOF\uff08\u5b59\u8fdb\u7a0b\u6301\u6709\u5199\u7aef\uff09\uff1areader \u7ebf\u7a0b\u6c38\u8fdc\u8bfb\u4e0d\u5230 EOF\uff0cschedule \u53ea\u80fd\u5728\u6392\u7a7a\u4e0a\u754c\u5230\u70b9\u7ed3\u675f\u6d88\u8d39\u3001\u6309\u9000\u51fa\u7801\u672a\u77e5\u2026",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L301",
+      "source_location": "L308",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_308",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u5f3a\u6740\u540e\u4e8b\u4ef6\u7ba1\u9053\u4ecd\u4e0d eof(\u5b59\u8fdb\u7a0b\u6301\u6709\u5199\u7aef):reader \u7ebf\u7a0b\u6c38\u8fdc\u8bfb\u4e0d\u5230 eof,schedule \u53ea\u80fd\u5728\u6392\u7a7a\u4e0a\u754c\u5230\u70b9\u7ed3\u675f\u6d88\u8d39\u3001\u6309\u9000\u51fa\u7801\u672a\u77e5...",
-      "id": "core_tests_test_subprocess_engine_rationale_301"
+      "norm_label": "\u5f3a\u6740\u540e\u4e8b\u4ef6\u7ba1\u9053\u4ecd\u4e0d eof(\u5b59\u8fdb\u7a0b\u6301\u6709\u5199\u7aef):reader \u7ebf\u7a0b\u6c38\u8fdc\u8bfb\u4e0d\u5230 eof,schedule \u53ea\u80fd\u5728\u6392\u7a7a\u4e0a\u754c\u5230\u70b9\u7ed3\u675f\u6d88\u8d39\u3001\u6309\u9000\u51fa\u7801\u672a\u77e5..."
     },
     {
       "label": "\u5185\u5bb9\u5b8c\u6574\uff08scope_done \u5df2\u5230\uff09\u540e worker \u6302\u6b7b\u4e14\u65e0\u89c6 SIGTERM\uff1adeadline \u5230\u70b9\u50ac\u505c \u2192 \u5bbd\u9650\u8017\u5c3d SIGKILL \u2192 \u7ba1\u9053\u2026",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L328",
+      "source_location": "L335",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_335",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u5185\u5bb9\u5b8c\u6574(scope_done \u5df2\u5230)\u540e worker \u6302\u6b7b\u4e14\u65e0\u89c6 sigterm:deadline \u5230\u70b9\u50ac\u505c \u2192 \u5bbd\u9650\u8017\u5c3d sigkill \u2192 \u7ba1\u9053...",
-      "id": "core_tests_test_subprocess_engine_rationale_328"
+      "norm_label": "\u5185\u5bb9\u5b8c\u6574(scope_done \u5df2\u5230)\u540e worker \u6302\u6b7b\u4e14\u65e0\u89c6 sigterm:deadline \u5230\u70b9\u50ac\u505c \u2192 \u5bbd\u9650\u8017\u5c3d sigkill \u2192 \u7ba1\u9053..."
     },
     {
       "label": "\u5185\u5bb9\u5b8c\u6574\u540e\u6536\u5c3e\u62d6\u8fc7\u9884\u7b97\u3001\u88ab\u50ac\u505c\u540e\u534f\u4f5c\u4ee5 0 \u9000\u51fa\uff1a\u5224\u5b9a\u6309\u5185\u5bb9\uff08PASSED\uff09\uff0c\u4e0d\u8bb0\u8d85\u65f6\uff08ADR 0034 \u673a\u5236\u4e8c\u300c\u5185\u5bb9\u5b8c\u6574\u540e\u4e0d\u518d\u4ef2\u88c1\u300d\uff09\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L347",
+      "source_location": "L354",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_354",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u5185\u5bb9\u5b8c\u6574\u540e\u6536\u5c3e\u62d6\u8fc7\u9884\u7b97\u3001\u88ab\u50ac\u505c\u540e\u534f\u4f5c\u4ee5 0 \u9000\u51fa:\u5224\u5b9a\u6309\u5185\u5bb9(passed),\u4e0d\u8bb0\u8d85\u65f6(adr 0034 \u673a\u5236\u4e8c\u300c\u5185\u5bb9\u5b8c\u6574\u540e\u4e0d\u518d\u4ef2\u88c1\u300d)\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_347"
+      "norm_label": "\u5185\u5bb9\u5b8c\u6574\u540e\u6536\u5c3e\u62d6\u8fc7\u9884\u7b97\u3001\u88ab\u50ac\u505c\u540e\u534f\u4f5c\u4ee5 0 \u9000\u51fa:\u5224\u5b9a\u6309\u5185\u5bb9(passed),\u4e0d\u8bb0\u8d85\u65f6(adr 0034 \u673a\u5236\u4e8c\u300c\u5185\u5bb9\u5b8c\u6574\u540e\u4e0d\u518d\u4ef2\u88c1\u300d)\u3002"
     },
     {
       "label": "\u4e8b\u4ef6\u884c\u89e3\u6790\u5931\u8d25\uff08worker \u8fdd\u7ea6\uff09\u540e worker \u8fd8\u6d3b\u7740\uff1aschedule \u8bb0\u672a\u77e5\u9000\u51fa\u3001\u5e76\u5411\u5b83\u53d1\u505c\u6b62\u8bf7\u6c42\uff0c\u8fdb\u7a0b\u88ab\u56de\u6536\u3001\u4e0d\u7559\u5b64\u513f\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L359",
+      "source_location": "L366",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_366",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u4e8b\u4ef6\u884c\u89e3\u6790\u5931\u8d25(worker \u8fdd\u7ea6)\u540e worker \u8fd8\u6d3b\u7740:schedule \u8bb0\u672a\u77e5\u9000\u51fa\u3001\u5e76\u5411\u5b83\u53d1\u505c\u6b62\u8bf7\u6c42,\u8fdb\u7a0b\u88ab\u56de\u6536\u3001\u4e0d\u7559\u5b64\u513f\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_359"
+      "norm_label": "\u4e8b\u4ef6\u884c\u89e3\u6790\u5931\u8d25(worker \u8fdd\u7ea6)\u540e worker \u8fd8\u6d3b\u7740:schedule \u8bb0\u672a\u77e5\u9000\u51fa\u3001\u5e76\u5411\u5b83\u53d1\u505c\u6b62\u8bf7\u6c42,\u8fdb\u7a0b\u88ab\u56de\u6536\u3001\u4e0d\u7559\u5b64\u513f\u3002"
     },
     {
       "label": "log_sink\uff08ADR 0041 \u51b3\u7b56\u4e8c\uff09\uff1a\u7ed9\u4e86\u6587\u4ef6\u53e5\u67c4\uff0cworker \u7684 stdout/stderr \u900f\u4f20\u5168\u5199 sink\uff08\u65e0\u989c\u8272\u7801\uff09\u3001\u672c\u8fdb\u7a0b stderr\u2026",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L419",
+      "source_location": "L426",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_426",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "log_sink(adr 0041 \u51b3\u7b56\u4e8c):\u7ed9\u4e86\u6587\u4ef6\u53e5\u67c4,worker \u7684 stdout/stderr \u900f\u4f20\u5168\u5199 sink(\u65e0\u989c\u8272\u7801)\u3001\u672c\u8fdb\u7a0b stderr...",
-      "id": "core_tests_test_subprocess_engine_rationale_419"
+      "norm_label": "log_sink(adr 0041 \u51b3\u7b56\u4e8c):\u7ed9\u4e86\u6587\u4ef6\u53e5\u67c4,worker \u7684 stdout/stderr \u900f\u4f20\u5168\u5199 sink(\u65e0\u989c\u8272\u7801)\u3001\u672c\u8fdb\u7a0b stderr..."
     },
     {
       "label": "\u672c\u6a21\u5757\u7684\u989c\u8272\u65ad\u8a00\u4e0d\u53d7\u8fd0\u884c\u6d4b\u8bd5\u7684 shell \u5f71\u54cd\uff1a\u6e05\u6389 NO_COLOR / FORCE_COLOR / TERM=dumb\uff0c\u8ba9\u300c\u662f\u5426\u7ec8\u7aef\u300d\u6210\u4e3a\u552f\u4e00\u53d8\u91cf\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L462",
+      "source_location": "L469",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_469",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u672c\u6a21\u5757\u7684\u989c\u8272\u65ad\u8a00\u4e0d\u53d7\u8fd0\u884c\u6d4b\u8bd5\u7684 shell \u5f71\u54cd:\u6e05\u6389 no_color / force_color / term=dumb,\u8ba9\u300c\u662f\u5426\u7ec8\u7aef\u300d\u6210\u4e3a\u552f\u4e00\u53d8\u91cf\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_462"
+      "norm_label": "\u672c\u6a21\u5757\u7684\u989c\u8272\u65ad\u8a00\u4e0d\u53d7\u8fd0\u884c\u6d4b\u8bd5\u7684 shell \u5f71\u54cd:\u6e05\u6389 no_color / force_color / term=dumb,\u8ba9\u300c\u662f\u5426\u7ec8\u7aef\u300d\u6210\u4e3a\u552f\u4e00\u53d8\u91cf\u3002"
     },
     {
       "label": "\u7ea2\u7eff\u7559\u7ed9\u5224\u5b9a\u8bed\u4e49\uff08\u901a\u8fc7\u7eff / \u5931\u8d25\u7ea2\uff09\uff0c\u767d\u4e0e\u9ed8\u8ba4\u8272\u7559\u7ed9 core \u81ea\u8eab\u7684\u884c\u3002",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L485",
+      "source_location": "L492",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_492",
       "community": 196,
       "community_name": "test_subprocess_engine.py",
-      "norm_label": "\u7ea2\u7eff\u7559\u7ed9\u5224\u5b9a\u8bed\u4e49(\u901a\u8fc7\u7eff / \u5931\u8d25\u7ea2),\u767d\u4e0e\u9ed8\u8ba4\u8272\u7559\u7ed9 core \u81ea\u8eab\u7684\u884c\u3002",
-      "id": "core_tests_test_subprocess_engine_rationale_485"
+      "norm_label": "\u7ea2\u7eff\u7559\u7ed9\u5224\u5b9a\u8bed\u4e49(\u901a\u8fc7\u7eff / \u5931\u8d25\u7ea2),\u767d\u4e0e\u9ed8\u8ba4\u8272\u7559\u7ed9 core \u81ea\u8eab\u7684\u884c\u3002"
     },
     {
       "label": "worker \u652f\u6301\u7684\u6d4b\u8bd5\u76ee\u6807\uff08ADR 0049 \u51b3\u7b56 2 \u7684\u7f3a\u952e\u8bed\u4e49\uff09\uff1a\u7f3a targets \u7684\u65e7 worker \u53ea\u652f\u6301\u684c\u9762\u7f51\u9875\u2014\u20141.5 \u4e4b\u524d\u6240\u6709\u2026",
@@ -50620,10 +50620,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0015-mobile-devices-implementation-batches.md"
+      "norm_label": "0015-mobile-devices-implementation-batches.md",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches"
     },
     {
       "label": "0. B0-navigation\uff1a\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e\uff081.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4\uff0c\u81ea\u5df1\u53d1\uff09",
@@ -50631,10 +50631,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L8",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0. b0-navigation:\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e(1.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4,\u81ea\u5df1\u53d1)"
+      "norm_label": "0. b0-navigation:\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e(1.4 \u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4,\u81ea\u5df1\u53d1)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1"
     },
     {
       "label": "1. B1-capabilities\uff1a\u80fd\u529b\u81ea\u8ff0\u589e\u952e\uff08\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875\uff1bCLI \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6\uff1bdoctor\u3001list-deterministic \u5448\u73b0\uff09",
@@ -50642,10 +50642,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L48",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)"
+      "norm_label": "1. b1-capabilities:\u80fd\u529b\u81ea\u8ff0\u589e\u952e(\u4e24\u4e2a worker \u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875;cli \u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6;doctor\u3001list-deterministic \u5448\u73b0)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
     },
     {
       "label": "2. B5-core-events-termination\uff1acore \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 SKIPPED\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
@@ -50653,10 +50653,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L117",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0"
+      "norm_label": "2. b5-core-events-termination:core \u4fa7\u4f1a\u8bdd\u4e8b\u4ef6\u3001scope \u7ea7 error\u3001\u5408\u6210 skipped\u3001\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868\u3001\u8ba1\u91cf\u5408\u8ba1\u3001explain \u5448\u73b0",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
     },
     {
       "label": "3. B2-core-target-job\uff1a\u6d4b\u8bd5\u76ee\u6807\u4e0e Job \u5f62\u6001\uff08core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0\uff09",
@@ -50664,10 +50664,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L200",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)"
+      "norm_label": "3. b2-core-target-job:\u6d4b\u8bd5\u76ee\u6807\u4e0e job \u5f62\u6001(core \u4fa7 tag \u5f52\u7ea6\u3001target \u4e24\u5f62\u6001\u3001\u6309\u76ee\u6807\u7684 timeout\u3001plan \u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd\u3001\u4e24\u4e2a worker \u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
     },
     {
       "label": "4. B3-config-submit\uff1a\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001CLI \u4fa7\u5e94\u7528\u4e0a\u4f20",
@@ -50675,10 +50675,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L271",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20"
+      "norm_label": "4. b3-config-submit:\u9879\u76ee\u914d\u7f6e\u6587\u4ef6\u3001\u7ec4\u5408\u6839\u586b device_request\u3001definition \u683c\u5f0f\u7248\u672c\u3001cli \u4fa7\u5e94\u7528\u4e0a\u4f20",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
     },
     {
       "label": "5. B4-steps-registry\uff1a\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c\uff08targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762\uff09",
@@ -50686,10 +50686,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L354",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)"
+      "norm_label": "5. b4-steps-registry:\u786e\u5b9a\u6027 step \u591a\u53e5\u67c4\u6ce8\u518c(targets\u3001requires\u3001driver \u4ee3\u7406\u7684\u6ce8\u518c\u9762)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
     },
     {
       "label": "6. B7-tunnel\uff1a\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie\uff08\u684c\u9762\u5148\u884c\uff09\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
@@ -50697,10 +50697,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L410",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761"
+      "norm_label": "6. b7-tunnel:\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie(\u684c\u9762\u5148\u884c)\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
     },
     {
       "label": "7. B8-deploy-iac\uff1a\u90e8\u7f72\u4fa7\uff1a\u6743\u9650\u3001Device Farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001SSM\u3001doctor \u8bbe\u5907\u9879",
@@ -50708,10 +50708,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L482",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879"
+      "norm_label": "7. b8-deploy-iac:\u90e8\u7f72\u4fa7:\u6743\u9650\u3001device farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001ssm\u3001doctor \u8bbe\u5907\u9879",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
     },
     {
       "label": "8. B6-midscene-device\uff1aMidscene worker \u8bbe\u5907\u6a21\u5757\uff08\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence\uff09",
@@ -50719,10 +50719,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L553",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)"
+      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -50730,10 +50730,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L3",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "label": "\u6bcf\u5f15\u64ce\u4e00\u4e2a FargateEngine\uff08\u5bf9\u79f0 build_engines \u7684 SubprocessEngine dict\uff1bcore \u5f15\u64ce\u65e0\u5173\uff0cADR\u2026",
@@ -55370,12 +55370,12 @@
       "label": "worker \u65e5\u5fd7\u9010\u884c\u8f6c\u53d1\u65f6\u76d6\u4f4f\u96a7\u9053\u51ed\u636e\uff08ADR 0035 \u51b3\u7b56 5\uff09\uff1a\u5199 log_sink \u4e0e\u5199\u672c\u8fdb\u7a0b stderr \u4e24\u6761\u5206\u652f\u90fd\u8981\u76d6\u3002 \u76f4\u63a5\u5582\u2026",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L437",
+      "source_location": "L444",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_444",
       "community": 31,
       "community_name": "_read_events",
-      "norm_label": "worker \u65e5\u5fd7\u9010\u884c\u8f6c\u53d1\u65f6\u76d6\u4f4f\u96a7\u9053\u51ed\u636e(adr 0035 \u51b3\u7b56 5):\u5199 log_sink \u4e0e\u5199\u672c\u8fdb\u7a0b stderr \u4e24\u6761\u5206\u652f\u90fd\u8981\u76d6\u3002 \u76f4\u63a5\u5582...",
-      "id": "core_tests_test_subprocess_engine_rationale_437"
+      "norm_label": "worker \u65e5\u5fd7\u9010\u884c\u8f6c\u53d1\u65f6\u76d6\u4f4f\u96a7\u9053\u51ed\u636e(adr 0035 \u51b3\u7b56 5):\u5199 log_sink \u4e0e\u5199\u672c\u8fdb\u7a0b stderr \u4e24\u6761\u5206\u652f\u90fd\u8981\u76d6\u3002 \u76f4\u63a5\u5582..."
     },
     {
       "label": "PLAYWRIGHT_TARGET",
@@ -57878,12 +57878,12 @@
       "label": "pump \u7ebf\u7a0b\u5fc5\u987b**\u5148\u4e8e**\u5199 stdin \u8d77\uff1ajob JSON >64KB\uff08DocString\uff09\u00d7 worker \u8bfb stdin \u524d\u5148\u5410 >64KB\u2026",
       "file_type": "rationale",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L404",
+      "source_location": "L411",
       "_origin": "ast",
+      "id": "core_tests_test_subprocess_engine_rationale_411",
       "community": 4,
       "community_name": "RunState",
-      "norm_label": "pump \u7ebf\u7a0b\u5fc5\u987b**\u5148\u4e8e**\u5199 stdin \u8d77:job json >64kb(docstring)\u00d7 worker \u8bfb stdin \u524d\u5148\u5410 >64kb...",
-      "id": "core_tests_test_subprocess_engine_rationale_404"
+      "norm_label": "pump \u7ebf\u7a0b\u5fc5\u987b**\u5148\u4e8e**\u5199 stdin \u8d77:job json >64kb(docstring)\u00d7 worker \u8bfb stdin \u524d\u5148\u5410 >64kb..."
     },
     {
       "label": "\u4e09\u79cd\u5f62\u6001\uff08engines/fixtures/job-lines.json \u7684\u540c\u4e00\u7ec4\u8f93\u5165\uff09\uff1a\u684c\u9762\u65e0\u9884\u7b97\u3001Android \u7f51\u9875\uff08\u6309\u7248\u672c\u65cf\u9009\u8bbe\u5907\uff09\u3001iOS\u2026",
@@ -92729,12 +92729,12 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L93",
+      "source_location": "L100",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_fixtures_echo_worker_main",
-      "target": "core_tests_fixtures_echo_worker_emit"
+      "target": "core_tests_fixtures_echo_worker_emit",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105822,7 +105822,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L468",
+      "source_location": "L475",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_color_env_independent",
@@ -105836,9 +105836,9 @@
       "source_location": "L31",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_job",
-      "target": "job"
+      "target": "job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105848,9 +105848,9 @@
       "source_location": "L162",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_mode_job",
-      "target": "job"
+      "target": "job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105860,9 +105860,9 @@
       "source_location": "L72",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_crash_is_error",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105872,9 +105872,9 @@
       "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_crash_is_error",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105884,9 +105884,9 @@
       "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_crash_is_error",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105896,9 +105896,9 @@
       "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105908,9 +105908,9 @@
       "source_location": "L98",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105920,9 +105920,9 @@
       "source_location": "L98",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105932,9 +105932,9 @@
       "source_location": "L83",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105944,9 +105944,9 @@
       "source_location": "L85",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105956,9 +105956,9 @@
       "source_location": "L45",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105968,9 +105968,9 @@
       "source_location": "L46",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105980,9 +105980,9 @@
       "source_location": "L123",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -105992,9 +105992,9 @@
       "source_location": "L124",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106004,9 +106004,9 @@
       "source_location": "L106",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106016,9 +106016,9 @@
       "source_location": "L107",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106028,9 +106028,9 @@
       "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106040,9 +106040,9 @@
       "source_location": "L64",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106052,201 +106052,177 @@
       "source_location": "L64",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L364",
+      "source_location": "L371",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L365",
+      "source_location": "L372",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L365",
+      "source_location": "L372",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L268",
+      "source_location": "L275",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L269",
+      "source_location": "L276",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L308",
+      "source_location": "L315",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L313",
+      "source_location": "L320",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L313",
+      "source_location": "L320",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L319",
+      "source_location": "L326",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_wait_pids"
+      "target": "core_tests_test_subprocess_engine_wait_pids",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L321",
+      "source_location": "L328",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_assert_process_gone"
+      "target": "core_tests_test_subprocess_engine_assert_process_gone",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L324",
+      "source_location": "L331",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_kill_quietly"
+      "target": "core_tests_test_subprocess_engine_kill_quietly",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L333",
+      "source_location": "L340",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L335",
+      "source_location": "L342",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L335",
+      "source_location": "L342",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_rm"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L343",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
-      "target": "core_tests_test_subprocess_engine_assert_process_gone"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L348",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106256,21 +106232,45 @@
       "source_location": "L350",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
-      "target": "core_tests_test_subprocess_engine_job"
+      "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
+      "target": "core_tests_test_subprocess_engine_assert_process_gone",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L350",
+      "source_location": "L355",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/tests/test_subprocess_engine.py",
+      "source_location": "L357",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "core/tests/test_subprocess_engine.py",
+      "source_location": "L357",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106280,9 +106280,9 @@
       "source_location": "L173",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106292,69 +106292,69 @@
       "source_location": "L188",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
-      "target": "core_tests_test_subprocess_engine_mode_job"
+      "target": "core_tests_test_subprocess_engine_mode_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L217",
+      "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L409",
+      "source_location": "L416",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L411",
+      "source_location": "L418",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
-      "target": "job"
+      "target": "job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L426",
+      "source_location": "L433",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L427",
+      "source_location": "L434",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106362,7 +106362,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L496",
+      "source_location": "L503",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_pump_log_colors_prefix_only_when_policy_says_so",
@@ -106374,7 +106374,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L446",
+      "source_location": "L453",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr",
@@ -106386,7 +106386,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L477",
+      "source_location": "L484",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_scope_colors_assigned_in_order_without_collision_and_stable",
@@ -106397,60 +106397,60 @@
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L395",
+      "source_location": "L402",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L396",
+      "source_location": "L403",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L383",
+      "source_location": "L390",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L385",
+      "source_location": "L392",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L385",
+      "source_location": "L392",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106460,9 +106460,9 @@
       "source_location": "L143",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106472,9 +106472,9 @@
       "source_location": "L148",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -106484,9 +106484,9 @@
       "source_location": "L148",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -135400,13 +135400,13 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L460",
+      "source_location": "L467",
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_color_env_independent",
-      "target": "fixture"
+      "target": "fixture",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -136832,9 +136832,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_rm",
-      "target": "job"
+      "target": "job",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -143852,9 +143852,9 @@
       "source_location": "L13",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_gherkai_core_model"
+      "target": "core_gherkai_core_model",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -143864,9 +143864,9 @@
       "source_location": "L14",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_gherkai_core_schedule"
+      "target": "core_gherkai_core_schedule",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -143876,9 +143876,9 @@
       "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_fake_engine"
+      "target": "core_tests_fake_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -150152,9 +150152,9 @@
       "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_engine",
-      "target": "subprocessengine"
+      "target": "subprocessengine",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -150164,9 +150164,9 @@
       "source_location": "L160",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_mode_job",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -150176,9 +150176,9 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_rm",
-      "target": "runmeta"
+      "target": "runmeta",
+      "confidence_score": 1.0
     },
     {
       "relation": "references",
@@ -150953,12 +150953,12 @@
       "context": "submodule_import",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L467",
+      "source_location": "L474",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_gherkai_core_adapters_subprocess_engine"
+      "target": "core_gherkai_core_adapters_subprocess_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -160415,34 +160415,34 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L38",
+      "source_location": "L41",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_fixtures_echo_worker",
-      "target": "core_tests_fixtures_echo_worker_on_sigterm"
+      "target": "core_tests_fixtures_echo_worker_on_sigterm",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L55",
+      "source_location": "L58",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_fixtures_echo_worker",
-      "target": "core_tests_fixtures_echo_worker_emit"
+      "target": "core_tests_fixtures_echo_worker_emit",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L60",
+      "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_fixtures_echo_worker",
-      "target": "core_tests_fixtures_echo_worker_main"
+      "target": "core_tests_fixtures_echo_worker_main",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165445,9 +165445,9 @@
       "source_location": "L105",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker"
+      "target": "core_tests_test_subprocess_engine_test_adapter_stop_hanging_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165456,9 +165456,9 @@
       "source_location": "L120",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker"
+      "target": "core_tests_test_subprocess_engine_test_adapter_sigkill_backstop_on_deaf_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165467,9 +165467,9 @@
       "source_location": "L142",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat"
+      "target": "core_tests_test_subprocess_engine_test_silent_worker_timeout_fires_via_heartbeat",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165478,9 +165478,9 @@
       "source_location": "L160",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_mode_job"
+      "target": "core_tests_test_subprocess_engine_mode_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165489,9 +165489,9 @@
       "source_location": "L165",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel"
+      "target": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165500,20 +165500,20 @@
       "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_rm"
+      "target": "core_tests_test_subprocess_engine_rm",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L231",
+      "source_location": "L238",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_assert_process_gone"
+      "target": "core_tests_test_subprocess_engine_assert_process_gone",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165522,42 +165522,42 @@
       "source_location": "L24",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_engine"
+      "target": "core_tests_test_subprocess_engine_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L244",
+      "source_location": "L251",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_wait_pids"
+      "target": "core_tests_test_subprocess_engine_wait_pids",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L254",
+      "source_location": "L261",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_kill_quietly"
+      "target": "core_tests_test_subprocess_engine_kill_quietly",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L264",
+      "source_location": "L271",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe"
+      "target": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165566,108 +165566,97 @@
       "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_job"
+      "target": "core_tests_test_subprocess_engine_job",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L300",
+      "source_location": "L307",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout"
+      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L327",
+      "source_location": "L334",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout"
+      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L346",
+      "source_location": "L353",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline"
+      "target": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L358",
+      "source_location": "L365",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker"
+      "target": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L382",
+      "source_location": "L389",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout"
+      "target": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L394",
+      "source_location": "L401",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id"
+      "target": "core_tests_test_subprocess_engine_test_scope_started_carries_session_id",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L403",
+      "source_location": "L410",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock"
+      "target": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L418",
+      "source_location": "L425",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean"
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L436",
-      "weight": 1.0,
-      "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr"
+      "target": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165676,53 +165665,64 @@
       "source_location": "L44",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass"
+      "target": "core_tests_test_subprocess_engine_test_adapter_roundtrip_pass",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L461",
+      "source_location": "L443",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_color_env_independent"
+      "target": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L473",
+      "source_location": "L468",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_scope_colors_assigned_in_order_without_collision_and_stable"
+      "target": "core_tests_test_subprocess_engine_color_env_independent",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L484",
+      "source_location": "L480",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors"
+      "target": "core_tests_test_subprocess_engine_test_scope_colors_assigned_in_order_without_collision_and_stable",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L492",
+      "source_location": "L491",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_pump_log_colors_prefix_only_when_policy_says_so"
+      "target": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "core/tests/test_subprocess_engine.py",
+      "source_location": "L499",
+      "weight": 1.0,
+      "_origin": "ast",
+      "source": "core_tests_test_subprocess_engine",
+      "target": "core_tests_test_subprocess_engine_test_pump_log_colors_prefix_only_when_policy_says_so",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165731,9 +165731,9 @@
       "source_location": "L62",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass"
+      "target": "core_tests_test_subprocess_engine_test_adapter_with_schedule_pass",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165742,9 +165742,9 @@
       "source_location": "L71",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_crash_is_error"
+      "target": "core_tests_test_subprocess_engine_test_adapter_crash_is_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165753,9 +165753,9 @@
       "source_location": "L81",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error"
+      "target": "core_tests_test_subprocess_engine_test_adapter_network_exit_maps_to_network_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -165764,9 +165764,9 @@
       "source_location": "L94",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine",
-      "target": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried"
+      "target": "core_tests_test_subprocess_engine_test_adapter_network_error_with_schedule_classified_and_retried",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -171968,9 +171968,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "confidence_score": 1.0
+      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
     },
     {
       "relation": "contains",
@@ -171979,9 +171979,9 @@
       "source_location": "L27",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
-      "confidence_score": 1.0
+      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
     },
     {
       "relation": "contains",
@@ -171990,9 +171990,9 @@
       "source_location": "L54",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
-      "confidence_score": 1.0
+      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
     },
     {
       "relation": "contains",
@@ -172001,9 +172001,9 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
-      "confidence_score": 1.0
+      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
     },
     {
       "relation": "contains",
@@ -172012,9 +172012,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "relation": "contains",
@@ -172023,9 +172023,9 @@
       "source_location": "L117",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_2_b5_core_events_termination_core_\u4fa7\u4f1a\u8bdd\u4e8b\u4ef6_scope_\u7ea7_error_\u5408\u6210_skipped_\u7ec8\u7ed3\u51fd\u6570\u4e0e\u771f\u503c\u8868_\u8ba1\u91cf\u5408\u8ba1_explain_\u5448\u73b0"
     },
     {
       "relation": "contains",
@@ -172034,9 +172034,9 @@
       "source_location": "L200",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_3_b2_core_target_job_\u6d4b\u8bd5\u76ee\u6807\u4e0e_job_\u5f62\u6001_core_\u4fa7_tag_\u5f52\u7ea6_target_\u4e24\u5f62\u6001_\u6309\u76ee\u6807\u7684_timeout_plan_\u6807\u6ce8\u4e0e\u76ee\u6807\u62d2\u7edd_\u4e24\u4e2a_worker_\u5efa\u4f1a\u8bdd\u524d\u81ea\u68c0"
     },
     {
       "relation": "contains",
@@ -172045,9 +172045,9 @@
       "source_location": "L271",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_4_b3_config_submit_\u9879\u76ee\u914d\u7f6e\u6587\u4ef6_\u7ec4\u5408\u6839\u586b_device_request_definition_\u683c\u5f0f\u7248\u672c_cli_\u4fa7\u5e94\u7528\u4e0a\u4f20"
     },
     {
       "relation": "contains",
@@ -172056,9 +172056,9 @@
       "source_location": "L354",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_5_b4_steps_registry_\u786e\u5b9a\u6027_step_\u591a\u53e5\u67c4\u6ce8\u518c_targets_requires_driver_\u4ee3\u7406\u7684\u6ce8\u518c\u9762"
     },
     {
       "relation": "contains",
@@ -172067,9 +172067,9 @@
       "source_location": "L410",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761"
     },
     {
       "relation": "contains",
@@ -172078,9 +172078,9 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_1_b1_capabilities_\u80fd\u529b\u81ea\u8ff0\u589e\u952e_\u4e24\u4e2a_worker_\u53ea\u58f0\u660e\u684c\u9762\u7f51\u9875_cli_\u552f\u4e00\u6821\u9a8c\u5904\u4e0e\u4ea4\u96c6_doctor_list_deterministic_\u5448\u73b0"
     },
     {
       "relation": "contains",
@@ -172089,9 +172089,9 @@
       "source_location": "L482",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879"
     },
     {
       "relation": "contains",
@@ -172100,9 +172100,9 @@
       "source_location": "L553",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
     },
     {
       "relation": "contains",
@@ -172111,9 +172111,9 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_0_b0_navigation_\u5bfc\u822a\u89c4\u5219\u4e0e\u6ce8\u518c\u9762\u5173\u952e\u5b57\u58f0\u660e_1_4_\u884c\u4e3a\u7684\u4e0d\u517c\u5bb9\u53d8\u66f4_\u81ea\u5df1\u53d1"
     },
     {
       "relation": "contains",
@@ -197906,9 +197906,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_fixtures_echo_worker_rationale_1",
-      "target": "core_tests_fixtures_echo_worker"
+      "target": "core_tests_fixtures_echo_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -200414,9 +200414,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_rationale_1",
-      "target": "core_tests_test_subprocess_engine"
+      "target": "core_tests_test_subprocess_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -200425,130 +200425,130 @@
       "source_location": "L166",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "core_tests_test_subprocess_engine_rationale_166",
-      "target": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel"
+      "target": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L245",
+      "source_location": "L252",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_245",
-      "target": "core_tests_test_subprocess_engine_wait_pids"
+      "source": "core_tests_test_subprocess_engine_rationale_252",
+      "target": "core_tests_test_subprocess_engine_wait_pids",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L265",
+      "source_location": "L272",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_265",
-      "target": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe"
+      "source": "core_tests_test_subprocess_engine_rationale_272",
+      "target": "core_tests_test_subprocess_engine_test_concurrent_stop_calls_on_same_handle_are_safe",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L301",
+      "source_location": "L308",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_301",
-      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout"
+      "source": "core_tests_test_subprocess_engine_rationale_308",
+      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L328",
+      "source_location": "L335",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_328",
-      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout"
+      "source": "core_tests_test_subprocess_engine_rationale_335",
+      "target": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L347",
+      "source_location": "L354",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_347",
-      "target": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline"
+      "source": "core_tests_test_subprocess_engine_rationale_354",
+      "target": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L359",
+      "source_location": "L366",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_359",
-      "target": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker"
+      "source": "core_tests_test_subprocess_engine_rationale_366",
+      "target": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L404",
+      "source_location": "L411",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_404",
-      "target": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock"
+      "source": "core_tests_test_subprocess_engine_rationale_411",
+      "target": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L419",
+      "source_location": "L426",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_419",
-      "target": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean"
+      "source": "core_tests_test_subprocess_engine_rationale_426",
+      "target": "core_tests_test_subprocess_engine_test_log_sink_receives_worker_logs_and_keeps_stderr_clean",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L437",
+      "source_location": "L444",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_437",
-      "target": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr"
+      "source": "core_tests_test_subprocess_engine_rationale_444",
+      "target": "core_tests_test_subprocess_engine_test_pump_log_masks_tunnel_credentials_in_sink_and_stderr",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L462",
+      "source_location": "L469",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_462",
-      "target": "core_tests_test_subprocess_engine_color_env_independent"
+      "source": "core_tests_test_subprocess_engine_rationale_469",
+      "target": "core_tests_test_subprocess_engine_color_env_independent",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L485",
+      "source_location": "L492",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
-      "source": "core_tests_test_subprocess_engine_rationale_485",
-      "target": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors"
+      "source": "core_tests_test_subprocess_engine_rationale_492",
+      "target": "core_tests_test_subprocess_engine_test_palette_excludes_verdict_and_default_colors",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -210690,12 +210690,12 @@
       "context": "argument",
       "confidence": "INFERRED",
       "source_file": "core/tests/fixtures/echo_worker.py",
-      "source_location": "L85",
+      "source_location": "L92",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 0.5,
       "source": "core_tests_fixtures_echo_worker_main",
-      "target": "core_tests_fixtures_echo_worker_on_sigterm"
+      "target": "core_tests_fixtures_echo_worker_on_sigterm",
+      "confidence_score": 0.5
     },
     {
       "relation": "indirect_call",
@@ -214828,7 +214828,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L217",
+      "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
@@ -221992,7 +221992,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L365",
+      "source_location": "L372",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
@@ -222004,7 +222004,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L365",
+      "source_location": "L372",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
@@ -222016,7 +222016,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L366",
+      "source_location": "L373",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_bad_event_line_stops_the_still_running_worker",
@@ -222028,7 +222028,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L313",
+      "source_location": "L320",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
@@ -222040,7 +222040,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L313",
+      "source_location": "L320",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
@@ -222052,7 +222052,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L314",
+      "source_location": "L321",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout",
@@ -222064,7 +222064,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L335",
+      "source_location": "L342",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
@@ -222076,7 +222076,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L335",
+      "source_location": "L342",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
@@ -222088,7 +222088,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L336",
+      "source_location": "L343",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout",
@@ -222100,7 +222100,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L350",
+      "source_location": "L357",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
@@ -222112,7 +222112,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L350",
+      "source_location": "L357",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
@@ -222124,7 +222124,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L351",
+      "source_location": "L358",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_done_then_slow_worker_keeps_content_verdict_despite_deadline",
@@ -222148,7 +222148,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L217",
+      "source_location": "L224",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
@@ -222160,7 +222160,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L218",
+      "source_location": "L225",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_fail_fast_stops_multiple_deaf_victims_in_parallel",
@@ -222172,7 +222172,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L410",
+      "source_location": "L417",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
@@ -222184,7 +222184,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L410",
+      "source_location": "L417",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
@@ -222196,7 +222196,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L412",
+      "source_location": "L419",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_large_job_and_noisy_worker_do_not_deadlock",
@@ -222208,7 +222208,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L384",
+      "source_location": "L391",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
@@ -222220,7 +222220,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L385",
+      "source_location": "L392",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
@@ -222232,7 +222232,7 @@
       "confidence": "INFERRED",
       "confidence_score": 0.8,
       "source_file": "core/tests/test_subprocess_engine.py",
-      "source_location": "L386",
+      "source_location": "L393",
       "weight": 1.0,
       "_origin": "ast",
       "source": "core_tests_test_subprocess_engine_test_session_id_captured_from_scope_started_on_timeout",
@@ -238091,5 +238091,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "5d3c67adf22f8f54c57ca8037a40d846e34686dc"
+  "built_at_commit": "a7728f5f3a197ee8550b699538e523305ad0076c"
 }

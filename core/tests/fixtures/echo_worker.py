@@ -21,11 +21,14 @@
   WORKER_MODE=bad_line → 吐 scope_started 后写一行不是 JSON 的东西，然后等 SIGTERM——测 core 解析失败后仍停掉活着的 worker
   mode 也可以由 job 的 scope.name 以 "mode:<名>" 指定：同一个 engine 实例下的各个 job 由此使用不同的行为（需要多个 job 同时运行的 fail-fast 测试会用到）。
   WORKER_PID_FILE=<路径> → 启动时把自己的 pid 写进去（测试据此确认进程确已被回收）。
-  WORKER_PID_DIR=<目录> → 启动时把自己的 pid 写进 <目录>/<scope id>.pid（同一 engine 实例下多个 job 各自可辨）。
+  WORKER_LOCK_DIR=<目录> → 启动时在 <目录>/<scope id>.lock 上持有一把 flock 直到进程结束（先在临时名上加锁再改名，文件一出现即已上锁）：
+                       测试据此观察进程**死亡**的时刻——内核在进程退出时释放锁，与父进程何时回收（僵尸期 kill(pid, 0) 仍成功）、
+                       管道何时 EOF、日志线程何时收尾都无关；同一 engine 实例下多个 job 各自可辨。
   WORKER_CRASH_AFTER_FILE=<路径> → crash 形态先等这个文件出现（至多 10 秒）再崩：让测试控制「其它 job 都就绪之后再触发 fail-fast」。
 
 EVENTS: 真 worker 的 scope_started 带 sessionId（ADR 0028 血缘随首事件回传），echo 也带，保协议一致。
 """
+import fcntl
 import json
 import os
 import signal
@@ -73,10 +76,14 @@ def main():
     if pid_file:
         with open(pid_file, "a", encoding="utf-8") as fh:
             fh.write(f"{os.getpid()}\n")
-    pid_dir = os.environ.get("WORKER_PID_DIR")
-    if pid_dir:
-        with open(os.path.join(pid_dir, f"{scope['id']}.pid"), "w", encoding="utf-8") as fh:
-            fh.write(f"{os.getpid()}\n")
+    lock_dir = os.environ.get("WORKER_LOCK_DIR")
+    if lock_dir:
+        # 先在临时名上加锁、再改名到最终名：观察方看到最终名时锁一定已被持有，不会把「文件已建、锁未加」误判成死亡。
+        # fd 不关、进程结束时由内核释放锁；os.open 的 fd 默认不可继承，不会随 exec 的子进程泄漏出去。
+        tmp = os.path.join(lock_dir, f".{scope['id']}.lock.tmp")
+        fd = os.open(tmp, os.O_RDWR | os.O_CREAT, 0o644)
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.rename(tmp, os.path.join(lock_dir, f"{scope['id']}.lock"))
 
     if mode == "deaf":
         # 忽略 SIGTERM（模拟无视优雅停/handler 失效）→ 逼 adapter 走 grace 超时 → SIGKILL 兜底。

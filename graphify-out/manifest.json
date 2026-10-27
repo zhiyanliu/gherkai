@@ -10,8 +10,8 @@
     "semantic_hash": "795f0661754fff31f386a75262016038"
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793012047.9972472,
-    "ast_hash": "bb9690da3ea6e16d779d6e3bbb1f191f",
+    "mtime": 1793064840.2901661,
+    "ast_hash": "970b51a36031f13c7f8089400c1d580e",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -40,8 +40,8 @@
     "semantic_hash": ""
   },
   "core/tests/fixtures/echo_worker.py": {
-    "mtime": 1793012047.9952583,
-    "ast_hash": "7adbdc96ea95a3361b2c85590853bff3",
+    "mtime": 1793064629.0919476,
+    "ast_hash": "18e1479f2106a4e7b0b848ce5c466a96",
     "semantic_hash": ""
   },
   "core/tests/test_arg_offload.py": {
@@ -90,8 +90,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_plan.py": {
-    "mtime": 1793012047.9963715,
-    "ast_hash": "b9ce4ecb011a8465b069f17c063ed88f",
+    "mtime": 1793064809.7612844,
+    "ast_hash": "684ddf4a0553e922892a91c4915b9582",
     "semantic_hash": ""
   },
   "core/tests/test_project.py": {
@@ -135,8 +135,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_subprocess_engine.py": {
-    "mtime": 1793012047.995521,
-    "ast_hash": "c0ea9e0d3846f5cd5209d0f147214f01",
+    "mtime": 1793064629.0922744,
+    "ast_hash": "427e229d08d56fdc0e742643b382997a",
     "semantic_hash": ""
   },
   "core/tests/test_wire.py": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793011922.5731986,
-    "ast_hash": "f7de45ae29fc5003faa01cb7af38242f",
+    "mtime": 1793064859.6862204,
+    "ast_hash": "bfb36405a7d92ce3d1222335efad4890",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -595,8 +595,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
-    "mtime": 1793011922.5704587,
-    "ast_hash": "a2c85ffa81a3d7968c65e29b6e4b75a4",
+    "mtime": 1793064809.761146,
+    "ast_hash": "34af44db618d1daee7903214294f7402",
     "semantic_hash": ""
   },
   "core/gherkai_core/serialize.py": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793012328.530846,
-    "ast_hash": "bdc9628e291baa4256fba5b19d77a294",
+    "mtime": 1793064925.3960977,
+    "ast_hash": "640e2851c6212be2bad0fe9eeddb3f3f",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793063877.364522,
-    "ast_hash": "03f893c62ca905171b1caafd789ccf0b",
+    "mtime": 1793064925.3959162,
+    "ast_hash": "ec4ce24e155aabeed07f59856ae8e905",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

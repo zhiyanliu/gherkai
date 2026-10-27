@@ -171,7 +171,7 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
 
     gate = tmp_path / "crash-now"
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER],
-                              env={**os.environ, "WORKER_MODE": "pass", "WORKER_CRASH_AFTER_FILE": str(gate), "WORKER_PID_DIR": str(tmp_path)})
+                              env={**os.environ, "WORKER_MODE": "pass", "WORKER_CRASH_AFTER_FILE": str(gate), "WORKER_LOCK_DIR": str(tmp_path)})
     ready: set[str] = set()
     lock = threading.Lock()
 
@@ -194,22 +194,29 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
         if jr.scope_id == "c":
             stop_phase_start.append(time.monotonic())
 
-    # 只量「victim 进程何时死掉」：由测试线程按 pid 轮询，不含 reader 读到 EOF、日志线程收尾、线程池收尾这些与并行无关的等待
+    # 只量「victim 进程何时死掉」：victim 启动时在 <scope>.lock 上持有 flock，内核在它退出那一刻释放锁；测试线程轮询非阻塞加锁、
+    # 加到即死亡时刻。按 pid 轮询不行：强杀后到被回收之前进程是僵尸、kill(pid, 0) 仍成功，而回收发生在 reader 读到 EOF、
+    # 日志线程收尾之后——那些等待与并行无关，不能混进度量。锁文件由 victim 先在临时名上加锁再改名，出现即已上锁、无空读竞态。
+    import fcntl
     import threading as _threading
     deaths: dict[str, float] = {}
 
     def watch(scope_id: str):
-        pid_file = tmp_path / f"{scope_id}.pid"
-        while not pid_file.exists():
+        lock_file = tmp_path / f"{scope_id}.lock"
+        while not lock_file.exists():
             time.sleep(0.02)
-        pid = int(pid_file.read_text().split()[0])
-        while True:
-            try:
-                os.kill(pid, 0)
-            except ProcessLookupError:
+        fd = os.open(lock_file, os.O_RDONLY)
+        try:
+            while True:
+                try:
+                    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    time.sleep(0.02)
+                    continue
                 deaths[scope_id] = time.monotonic()
                 return
-            time.sleep(0.02)
+        finally:
+            os.close(fd)
 
     watchers = [_threading.Thread(target=watch, args=(s,), daemon=True) for s in ("v1", "v2")]
     for t in watchers:
