@@ -25,7 +25,7 @@ handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）
 
 worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发是**两级、短路、无优先级配置**（Nova `run_scope.py` `_run_step`、Midscene `run-scope.mts` `runStep`，同序）：
 
-1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 按当前目标取句柄（desktop/web 取 `playwright`，设备目标取覆盖该（设备, 界面类型）组合的 `webdriver` 条目）调用，**不投票**；目标上没有句柄时走 AI、不顺延到别的模式、不记 error（ADR 0050 决策 1）。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，它的 handler 调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中的 step 带 DataTable / DocString → 记 `error`。
+1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 按当前目标取句柄（desktop/web 取 `playwright`，设备目标取覆盖该（设备, 界面类型）组合的 `webdriver` 条目）调用，**不投票**；目标上没有句柄时走 AI、不顺延到别的模式、不记 error（ADR 0050 决策 1）。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，它的 handler 调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中且目标上有句柄的 step 带 DataTable / DocString → 记 `error`（没有句柄、走 AI 的照常把参数交给 AI）。plan 侧对「命中但该 scope 目标上没有实现」的 step 不标「确定性」、`deterministic` 为 null、stderr 说明走 AI（`__main__._probe_deterministic_dispatch` 用自述清单的交集目标核对，ADR 0049 决策 3、6）。
 2. **AI catch-all**：`Then` → 断言 + N 票；`When`/`Given` → 动作。
 
 命中之后的判定映射（两引擎逐条对齐）：

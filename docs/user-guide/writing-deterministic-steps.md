@@ -103,9 +103,9 @@ deterministic(r'页面地址匹配 "(?P<pattern>[^"]+)"',
 
 每个 `webdriver` 条目用两个数组声明适用范围：`uiKinds`（`web` 网页、`app` 应用）与 `devices`（`android`、`ios`）。**两个数组各自独立，条目覆盖它们的全部组合**：`uiKinds: ["web", "app"]` 加 `devices: ["android", "ios"]` 表示同一个 handler 在四个目标上都生效；不写就是全部取值。Android 与 iOS 的选择器不同时写两个条目、各给一个 `devices`，不要在一个 handler 里按平台分支：适用范围要在执行前就能从注册表看出来，`gherkai list-deterministic` 的「目标」列与 `gherkai plan` 的标注才能逐目标告诉用例作者这一步走确定性还是走 AI。要排除某个组合，就拆成两个条目。
 
-`requires` 声明这个条目在设备上执行的前提，目前只有一个取值 `web_context`：条目要在网页上下文里读写页面（例如读地址）。带这个前提的条目 `uiKinds` 只能是 `["web"]`。设备不提供网页上下文时，这一步记 `error`、不交给 AI；详见 [`writing-features.md`](./writing-features.md) 里对设备目标的说明。
+`requires` 声明这个条目在设备上执行的前提，目前只有一个取值 `web_context`：条目要在网页上下文里读写页面（例如读地址）。带这个前提的条目 `uiKinds` 只能是 `["web"]`。设备不提供网页上下文时，这一步记 `error`、不交给 AI。
 
-以下写法在注册时就被拒绝，worker 不启动并点名文件：不认识的句柄种类；对象里一个句柄都没有；`webdriver` 给了空列表；条目缺 `handler`；`uiKinds` / `devices` / `requires` 出现取值范围之外的值、重复或空列表；带 `web_context` 的条目 `uiKinds` 不是恰好 `["web"]`；两个条目覆盖了同一个（设备, 界面类型）组合——不论它们的 `requires` 是否相同，一个 step 在一个目标上只能有一份实现，没有「带前提的一份加兜底的一份」。
+以下写法在注册时就被拒绝，worker 不启动并点名文件：不认识的句柄种类；对象里一个句柄都没有；`webdriver` 给了空列表；条目缺 `handler`；`uiKinds` / `devices` / `requires` 出现取值范围之外的值或重复，`uiKinds` / `devices` 给了空列表（`requires` 给空列表等于不写），或三者之一显式写成 `null`（缺省就不要给这个字段）；带 `web_context` 的条目 `uiKinds` 不是恰好 `["web"]`；两个条目覆盖了同一个（设备, 界面类型）组合——不论它们的 `requires` 是否相同，一个 step 在一个目标上只能有一份实现，没有「带前提的一份加兜底的一份」。
 
 ## handler 拿到什么
 
@@ -118,7 +118,7 @@ deterministic(r'页面地址匹配 "(?P<pattern>[^"]+)"',
 | 无具名组时 | 只收 `ctx` | `groups` 是空对象 |
 | 同步 / 异步 | **必须是同步 `def`**：写成 `async def` 的那一步直接记 `error`，因为函数体里的断言不会被执行 | 可以是 `async`，worker 会 `await` |
 
-handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂在确定性 step 上的 DataTable / DocString 会让这一步记 `error`，不会被静默丢掉。
+handler 只拿到上下文与具名组。多行参数只对 AI step 有效：命中确定性 step、且它在当前目标上有实现时，挂在这一步上的 DataTable / DocString 会让它记 `error`，不会被静默丢掉；在当前目标上没有实现、改由 AI 执行的 step，参数照常交给 AI。
 
 需要异步判定时只能写在 Midscene 侧。
 
@@ -167,7 +167,7 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂
 
 引擎内建的导航与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
 
-匹配只看文本、不看目标。命中之后，worker 再按这个 scope 的目标（桌面网页取 `playwright`，设备目标取覆盖该组合的 `webdriver` 条目）取实现；命中的 step 在当前目标上没有实现时，这一步**改由 AI 执行**，不会去找下一条能匹配的模式、也不记 `error`。`gherkai plan` 对这种情形不标注（走 AI 的 step 一律不标）。
+匹配只看文本、不看目标。命中之后，worker 再按这个 scope 的目标（桌面网页取 `playwright`，设备目标取覆盖该组合的 `webdriver` 条目）取实现；命中的 step 在当前目标上没有实现时，这一步**改由 AI 执行**，不会去找下一条能匹配的模式、也不记 `error`。`gherkai plan` 对这种 step 不标「确定性」，并在提示里说明它在该目标上没有实现、将由 AI 执行；`--json` 里它的 `deterministic` 为 `null`。
 
 ## 内建的导航与 `steps/` 模板
 
