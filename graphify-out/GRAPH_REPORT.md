@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `418236b7`
+- Built from commit: `984933e8`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1607,7 +1607,7 @@ Nodes (3): deterministic, 示范用确定性 step（Nova Act 侧）：断言当�
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **681 isolated node(s):** `背景与问题`, `1. 一个 scope 一个远程访问会话，scenario 之间不复位`, `2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034`, `3. 设备解析、创建与孤儿防护`, `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` (+676 more)
+- **681 isolated node(s):** `现场`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）`, `实施期要核的点（ADR 已定、实施时顺手验证）`, `0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）`, `1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）` (+676 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **170 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
