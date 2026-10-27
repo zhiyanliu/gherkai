@@ -601,6 +601,12 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
             f"定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。"
         )
     if not info.matches_target_platform():
+        if info.multi_platform:
+            raise WorkerCommandError(
+                f"镜像 {image!r} 在本机是多平台索引，但没有 linux/amd64 的内容可推（worker 固定 linux/amd64，云端 worker 任务是 X86_64）。\n"
+                f"重 build 时只构建这一个平台：docker build --platform linux/amd64 -t {image} .\n"
+                f"（容器引擎用的是 containerd 镜像存储：多平台镜像只有拉取或构建到本机的平台才有内容。）"
+            )
         raise WorkerCommandError(
             f"镜像 {image!r} 的平台是 {info.platform}，worker 固定 linux/amd64（云端 worker 任务是 X86_64）。\n"
             f"重 build 时带上平台：docker build --platform linux/amd64 -t {image} .\n"

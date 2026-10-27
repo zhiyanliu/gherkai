@@ -36,7 +36,9 @@ if sys.argv[1:2] == ["login"]:
 with open(os.environ["FAKE_DOCKER_LOG"], "a", encoding="utf-8") as f:
     f.write(json.dumps(entry) + "\\n")
 spec = json.loads(os.environ.get("FAKE_DOCKER_SPEC") or "{}")
-r = spec.get(" ".join(sys.argv[1:3])) or spec.get(sys.argv[1]) or {}
+# 带 --platform 的 inspect（多平台索引的目标平台视图）可用 "image inspect --platform" 单独指定响应；没指定则与不带的同一份
+k2 = " ".join(sys.argv[1:3])
+r = (spec.get(k2 + " --platform") if "--platform" in sys.argv else None) or spec.get(k2) or spec.get(sys.argv[1]) or {}
 sys.stdout.write(r.get("stdout", ""))
 sys.stderr.write(r.get("stderr", ""))
 sys.exit(int(r.get("rc", 0)))
@@ -120,6 +122,46 @@ def test_inspect_parses_os_arch_and_repo_digests(tmp_path, monkeypatch):
     assert (info.exists, info.os, info.architecture) == (True, "linux", "amd64")
     assert info.repo_digests == (f"{ECR_REPO}@sha256:{'d' * 64}",)
     assert fake.calls[0]["argv"] == ["image", "inspect", "acme:login", "--format", "{{json .}}"]
+    assert len(fake.calls) == 1 and info.multi_platform is False  # 单平台镜像：顶层字段有值，不再问平台视图
+
+
+_INDEX_TOP = dict(Os="", Architecture="", RepoDigests=["alpine@sha256:" + "e" * 64],
+                  Descriptor={"mediaType": "application/vnd.oci.image.index.v1+json", "digest": "sha256:" + "e" * 64})
+_PLATFORM_ARGV = ["image", "inspect", "alpine:3.20", "--format", "{{json .}}", "--platform", "linux/amd64"]
+
+
+def test_inspect_multi_platform_index_with_amd64_content_matches(tmp_path, monkeypatch):
+    """containerd 镜像存储下的多平台索引（顶层 Os / Architecture 空串）：问目标平台视图，本机有 linux/amd64 的内容 → 匹配；
+    RepoDigests 取顶层那次（索引 digest，推送后 ECS 从索引选 amd64，ADR 0038 实测项 7）。"""
+    spec = _inspect_spec(**_INDEX_TOP)
+    spec["image inspect --platform"] = {"rc": 0, "stdout": json.dumps(dict(Os="linux", Architecture="amd64", RepoDigests=_INDEX_TOP["RepoDigests"]))}
+    fake = _Fake(tmp_path, monkeypatch, spec)
+    info = fake.engine.inspect("alpine:3.20")
+    assert info == ImageInfo(exists=True, os="linux", architecture="amd64", repo_digests=tuple(_INDEX_TOP["RepoDigests"]), multi_platform=True)
+    assert info.matches_target_platform()
+    assert [c["argv"] for c in fake.calls] == [["image", "inspect", "alpine:3.20", "--format", "{{json .}}"], _PLATFORM_ARGV]
+
+
+@pytest.mark.parametrize("view", [
+    {"rc": 0, "stdout": json.dumps(dict(Os="", Architecture=""))},  # 索引列了 amd64、内容没拉（真机形态：退出码 0、两字段仍空）
+    {"rc": 1, "stderr": "Error response from daemon: image with reference alpine:3.20 was found but does not provide the specified platform (linux/amd64)"},
+])
+def test_inspect_multi_platform_index_without_amd64_content_is_rejected_not_an_error(tmp_path, monkeypatch, view):
+    spec = _inspect_spec(**_INDEX_TOP)
+    spec["image inspect --platform"] = view
+    fake = _Fake(tmp_path, monkeypatch, spec)
+    info = fake.engine.inspect("alpine:3.20")
+    assert info.exists and info.multi_platform and (info.os, info.architecture) == (None, None)
+    assert not info.matches_target_platform() and info.platform == "?/?"
+
+
+def test_inspect_platform_view_other_failure_raises(tmp_path, monkeypatch):
+    """平台视图因别的原因失败（daemon 中途挂了、CLI 不认 --platform）→ ContainerError 带原文，不伪装成「平台不匹配」。"""
+    spec = _inspect_spec(**_INDEX_TOP)
+    spec["image inspect --platform"] = {"rc": 125, "stderr": "unknown flag: --platform"}
+    fake = _Fake(tmp_path, monkeypatch, spec)
+    with pytest.raises(ContainerError, match="unknown flag"):
+        fake.engine.inspect("alpine:3.20")
 
 
 def test_inspect_missing_image_is_not_an_error(tmp_path, monkeypatch):
@@ -199,17 +241,21 @@ def test_real_local_image_has_no_repo_digests_and_is_amd64():
 
 @real_docker
 def test_real_arm64_image_is_rejected_by_the_platform_gate():
-    """arm 变体真镜像 → 架构判据拒（即 push-worker 以退出码 2 结束那一支）。
+    """只拉了 arm64 的真镜像 → 架构判据拒（即 push-worker 以退出码 2 结束那一支）。
 
-    用 alpine（小）代替真 worker 镜像：判据只看 `Os`/`Architecture`，与镜像内容无关。arm Mac 上漏
-    `--platform linux/amd64` build 出来的就是这个形态，其后果本会拖到 Fargate 启动期 `exec format error`。
+    用 alpine（小）代替真 worker 镜像：判据只看平台，与镜像内容无关。arm Mac 上漏 `--platform linux/amd64` build 出来的就是
+    这个形态，其后果本会拖到 Fargate 启动期 `exec format error`。两种镜像存储给出两种形态、都要拒：overlay2 把它装成 arm64 的
+    单平台镜像；containerd 镜像存储（Docker 29 新装的缺省、GitHub 托管 runner）下本地引用是多平台索引、本机没有 linux/amd64 的内容。
     """
     engine = resolve_container_engine()
     assert subprocess.run(["docker", "pull", "--platform", "linux/arm64", "alpine:3.20"],
                           capture_output=True).returncode == 0, "拉 arm64 alpine 失败（需要网络）"
     info = engine.inspect("alpine:3.20")
-    assert info.exists and info.architecture == "arm64", info
-    assert not info.matches_target_platform()
+    assert info.exists and not info.matches_target_platform(), info
+    if info.multi_platform:
+        assert (info.os, info.architecture) == (None, None), info  # 索引形态：目标平台没有内容
+    else:
+        assert info.architecture == "arm64", info  # 单平台形态：就是 arm64
 
 
 @real_docker

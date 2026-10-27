@@ -37,6 +37,7 @@ SUPPORTED_ENGINES = ("docker",)
 # worker 镜像的目标平台（ADR 0038「架构」：固定 linux/amd64，模板 revision 的 runtimePlatform 为 X86_64）。
 TARGET_OS = "linux"
 TARGET_ARCH = "amd64"
+TARGET_PLATFORM = f"{TARGET_OS}/{TARGET_ARCH}"
 
 
 class ContainerError(Exception):
@@ -61,6 +62,9 @@ class ImageInfo:
     os: str | None = None
     architecture: str | None = None
     repo_digests: tuple[str, ...] = field(default_factory=tuple)
+    # 本地引用是多平台索引（containerd 镜像存储下 pull / buildx 多平台的产物）：`os` / `architecture` 取自目标平台的视图——
+    # 本机有 linux/amd64 的内容时是 linux / amd64，索引列了该平台却没有内容、或根本不含该平台时为 None（ADR 0038 步 2）。
+    multi_platform: bool = False
 
     @property
     def platform(self) -> str:
@@ -133,12 +137,39 @@ class ContainerEngine:
         except (ValueError, IndexError) as exc:
             raise ContainerError(f"读不懂 `{self.binary} image inspect {ref}` 的输出：{exc}") from exc
         digests = data.get("RepoDigests") or []
+        os_, arch = data.get("Os") or None, data.get("Architecture") or None
+        multi_platform = False
+        if os_ is None and arch is None:
+            # containerd 镜像存储（Docker 29 起新装的缺省，GitHub 托管 runner 亦然）下，本地引用若是多平台索引，顶层给的是**本机
+            # 平台那一份**的视图：本机平台的内容在就有值，不在（如 amd64 主机只拉了 arm64、arm 主机只构建了 linux/amd64）就是空串、
+            # `Descriptor` 是 index——不能据此说「平台未知」就拒，要问目标平台的视图：本机有 linux/amd64 的内容时视图给出 linux/amd64；
+            # 索引列了该平台却没拉取内容时视图仍为空；索引根本不含该平台时引擎报错（Docker 29.1.3 真机核过，ADR 0038 实测项 7）。
+            # 旧的 overlay2 存储装不下索引、顶层字段恒有值，不会走到这里。
+            multi_platform = True
+            os_, arch = self._target_platform_view(ref)
         return ImageInfo(
             exists=True,
-            os=data.get("Os"),
-            architecture=data.get("Architecture"),
+            os=os_,
+            architecture=arch,
             repo_digests=tuple(str(d) for d in digests),
+            multi_platform=multi_platform,
         )
+
+    def _target_platform_view(self, ref: str) -> tuple[str | None, str | None]:
+        """多平台索引的目标平台视图（`inspect --platform linux/amd64`）：返回 (os, architecture)，本机没有该平台的内容 → (None, None)。"""
+        out = subprocess.run([self.binary, "image", "inspect", ref, "--format", "{{json .}}", "--platform", TARGET_PLATFORM],
+                             capture_output=True, text=True)
+        if out.returncode != 0:
+            err = (out.stderr or "") + (out.stdout or "")
+            if "does not provide the specified platform" in err or "No such image" in err or "no such image" in err:
+                return None, None  # 索引不含目标平台：引擎按「找到了镜像但没有这个平台」报
+            raise ContainerError(f"`{self.binary} image inspect {ref} --platform {TARGET_PLATFORM}` 失败（exit {out.returncode}）："
+                                 f"{_tail(err)}")
+        try:
+            data = json.loads(out.stdout.strip().splitlines()[0])
+        except (ValueError, IndexError) as exc:
+            raise ContainerError(f"读不懂 `{self.binary} image inspect {ref} --platform {TARGET_PLATFORM}` 的输出：{exc}") from exc
+        return data.get("Os") or None, data.get("Architecture") or None  # 列了却没拉取内容时两字段仍为空串
 
     def tag(self, src: str, dst: str) -> None:
         self._run(["tag", src, dst])

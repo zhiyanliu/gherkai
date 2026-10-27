@@ -117,9 +117,11 @@ class FakeContainer:
     用来让「取第一条」这种实现方式必然测红。
     """
 
-    def __init__(self, *, arch: str = "amd64", os_: str = "linux", exists: bool = True,
-                 digests: list[str] | None = None, ghcr_noise: bool = True, probe_error: str | None = None):
+    def __init__(self, *, arch: str | None = "amd64", os_: str | None = "linux", exists: bool = True,
+                 digests: list[str] | None = None, ghcr_noise: bool = True, probe_error: str | None = None,
+                 multi_platform: bool = False):
         self.arch, self.os_, self.exists = arch, os_, exists
+        self.multi_platform = multi_platform  # 本地引用是多平台索引（containerd 镜像存储）
         self.probe_error = probe_error
         self.ghcr_noise = ghcr_noise
         self._queue = list(digests or [])
@@ -145,10 +147,11 @@ class FakeContainer:
             if self.ghcr_noise:
                 entries.append(f"ghcr.io/zhiyanliu/gherkai-worker-novaact@sha256:{'a' * 64}")
             entries.append(f"{repo_uri}@{self.pushed[ref]}")
-            return ImageInfo(exists=True, os=self.os_, architecture=self.arch, repo_digests=tuple(entries))
+            return ImageInfo(exists=True, os=self.os_, architecture=self.arch, repo_digests=tuple(entries),
+                             multi_platform=self.multi_platform)
         if not self.exists:
             return ImageInfo(exists=False)
-        return ImageInfo(exists=True, os=self.os_, architecture=self.arch)
+        return ImageInfo(exists=True, os=self.os_, architecture=self.arch, multi_platform=self.multi_platform)
 
     def tag(self, src, dst):
         self.calls.append(("tag", src, dst))
@@ -319,6 +322,19 @@ def test_arch_mismatch_exits_2_before_touching_ecr_or_ecs(aws):
     rc, text = _push(aws, c)
     assert rc == 2
     assert "linux/arm64" in text and "--platform linux/amd64" in text
+    assert aws.ecr.calls == [] and aws.ecs.calls == []
+    assert not any(k in ("tag", "push", "login") for k, *_ in c.calls)
+
+
+def test_push_rejects_multi_platform_index_without_amd64_content_with_its_own_hint(aws, capsys):
+    """containerd 镜像存储下的多平台索引、本机没有 linux/amd64 内容：同样在任何 ECR/ECS 动作之前拦下，提示说清是索引没有内容、
+    而不是「平台是 ?/?」（ADR 0038 步 2）。对偶：索引里有 amd64 内容则照常通过架构判据（别的用例走的 amd64 路径不受影响）。"""
+    seed_backend(aws)
+    aws = workers.Aws(ssm=aws.ssm, ecs=Spy(aws.ecs), ecr=Spy(aws.ecr), ddb=aws.ddb)
+    c = FakeContainer(arch=None, os_=None, multi_platform=True)
+    rc, text = _push(aws, c)
+    assert rc == 2
+    assert "多平台索引" in text and "--platform linux/amd64" in text and "?/?" not in text
     assert aws.ecr.calls == [] and aws.ecs.calls == []
     assert not any(k in ("tag", "push", "login") for k, *_ in c.calls)
 
