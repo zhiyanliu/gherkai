@@ -24,7 +24,7 @@
 | **variant** | 一套具名的确定性 step 集 = 一个定制镜像；名字由测试开发自取（`login`、`checkout-v2`）；基础镜像同步进 ECR 的那份固定叫 `base` | 使用方私有 ECR，tag = `<CLI 版本>-<variant>` |
 | **默认指针** | 提交时不给 `--worker-variant` 就用哪个 variant；部署级一个；deploy 初始化为 `base` | SSM |
 | **revision** | 每个（引擎，variant）一个 task-def revision：从模板复制、镜像栏换成 `repo@sha256:<digest>`、以 tags 记血缘与退休时刻 | ECS task-def family `{prefix}{engine}-worker` |
-| **模板 revision**（revision 的母本） | deploy 时 CDK 建出的那个 revision，承载 cpu / memory / task role / execution role / 日志组 / `runtimePlatform`（X86_64）等只有部署后才存在或全局固定的值；**镜像栏保留 `tag="latest"` 作占位**（CDK 必填；该 tag 在 ECR 里可以不存在）——它**永不被 RunTask**、只作复制母本；definition 缺字段时的兼容回落走默认指针（见「运行时与 preflight」节） | ECS；其 ARN 由 stack 资源写进 SSM |
+| **模板 revision**（revision 的母本） | deploy 时 CDK 建出的那个 revision，承载 cpu / memory / task role / execution role / 日志组 / `runtimePlatform`（X86_64）等只有部署后才存在或全局固定的值；**镜像栏保留 `tag="latest"` 作占位**（CDK 必填；该 tag 在 ECR 里可以不存在）——它**永不被 RunTask**、只作复制母本；definition 缺字段按定义违约标 error、不回落（见「运行时与 preflight」节「读侧不留兼容路径」） | ECS；其 ARN 由 stack 资源写进 SSM |
 | **架构** | 固定 linux/amd64；push-worker 推送前 `inspect` 校验，不匹配退 2 | 模板 revision 的 `runtimePlatform`，variant revision 原样复制 |
 
 **tag 命名 = 单一真源、同时是单一校验点**：`gherkai_runtime.names.image_tag(version, variant)` → `<归一化版本>-<variant>`。PEP 440 的 `+`（本地段）与 `!`（epoch）不在 docker/ECR tag 字符集 `[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}` 内（`1.4.0.post3.dev0+28c1684` 直接 `docker tag` 报 `invalid reference format`，实测），函数把 `+`/`!` → `.`、返回前按正则校验、不匹配即抛。同处新增 `names.ecr_repo_name(prefix, engine)`（= `task_def_name`），收拢曾散在 `stack.py` 注释与（已退役的）`tools/build_push_workers.py` 内联副本里的「ECR repo 名复用 task-def family 名」规则。
@@ -120,12 +120,12 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 ## 与版本升级的交互
 
-[0037](./0037-distribution-and-packaging.md) 决策 7 的「升级即三步」中，本 ADR 负责第 ②③ 步的镜像半边：②`gherkai deploy` 同步新版本 `base`、登记新模板、对新版本已有的 variant 重派生（升级当下通常没有）；③团队有自定义 variant 或自定义默认的，从新版本基础镜像重新 build 各引擎镜像、`push-worker` 推上去。**默认指针不重置**：它记的是 variant 名（如 `common`），新版本 `1.5.0-common` 未推之前 preflight 退 2、提示「默认 variant `common` 在 1.5.0 尚无镜像：`push-worker … --variant common`，或临时 `--worker-variant base`」；推上去即恢复，不必再 `--set-default`。升级窗口内**运行中的旧 run** 按「读侧兼容口径」处理（只在引入本 ADR 的那一次升级里会换到默认 variant，之后的升级不受影响）。
+[0037](./0037-distribution-and-packaging.md) 决策 7 的「升级即三步」中，本 ADR 负责第 ②③ 步的镜像半边：②`gherkai deploy` 同步新版本 `base`、登记新模板、对新版本已有的 variant 重派生（升级当下通常没有）；③团队有自定义 variant 或自定义默认的，从新版本基础镜像重新 build 各引擎镜像、`push-worker` 推上去。**默认指针不重置**：它记的是 variant 名（如 `common`），新版本 `1.5.0-common` 未推之前 preflight 退 2、提示「默认 variant `common` 在 1.5.0 尚无镜像：`push-worker … --variant common`，或临时 `--worker-variant base`」；推上去即恢复，不必再 `--set-default`。升级窗口内**运行中的旧 run**（definition 无 `worker_task_defs`）由推进器标 error、不执行（「读侧不留兼容路径」；[0037](./0037-distribution-and-packaging.md) 决策 7 不设存量兼容）。
 
 ## 对既有 ADR 的影响
 
-- **[0033](./0033-iac-aws-backend-and-composition-wiring.md)（Partially-superseded-by 本 ADR，与 0037 并列、各自独立翻牌）**：task-def 焊死 `tag="latest"` 且 RunTask 传 family → 每（引擎，variant）一个 digest 引用的 revision、RunTask 传显式 revision（模板 revision 保留 `latest` 占位、不再被正常 RunTask）；「必须 `--platform linux/amd64`」陷阱**保留**，但 push-worker 推送前校验架构、把失败从 Fargate 启动期提前到推送前；`tools/build_push_workers.py` → `gherkai deploy push-worker`；runs 表 STATE item 加顶层属性 `worker_task_def_arns` + 按 `status` 的稀疏 GSI；SSM 参数族加三类（`worker-template/<engine>`、`worker-image/<engine>/<tag>`、`worker-default`）；推进器 Lambda 加 SSM 读权限（兼容回落）；「资源清单」末段的编排机器权限清单按上「权限面增量」更新；preflight 加 variant 解析一项。ECR repo 命名（`{prefix}{engine}-worker`、`RETAIN`）、container 名契约、cluster/task-def family 名、`_worker_subnet_ids` 不动。
-- **[0034](./0034-detached-batch-reconciler.md)（扩展、Status 不动）**：definition 加 `worker_variant` / `worker_task_defs`（沿用其「随 definition 走、宿主只读回」惯例），STATE 顶层加 `worker_task_def_arns`（沿用其 `detached` 顶层标记先例）；kicker/reconciler 的 CloudLauncher 起 task 改用 definition 里的 revision，缺失时按后端默认指针解析兼容。
+- **[0033](./0033-iac-aws-backend-and-composition-wiring.md)（Partially-superseded-by 本 ADR，与 0037 并列、各自独立翻牌）**：task-def 焊死 `tag="latest"` 且 RunTask 传 family → 每（引擎，variant）一个 digest 引用的 revision、RunTask 传显式 revision（模板 revision 保留 `latest` 占位、不再被正常 RunTask）；「必须 `--platform linux/amd64`」陷阱**保留**，但 push-worker 推送前校验架构、把失败从 Fargate 启动期提前到推送前；`tools/build_push_workers.py` → `gherkai deploy push-worker`；runs 表 STATE item 加顶层属性 `worker_task_def_arns` + 按 `status` 的稀疏 GSI；SSM 参数族加三类（`worker-template/<engine>`、`worker-image/<engine>/<tag>`、`worker-default`）；推进器 Lambda 不加 SSM 读权限（曾为兼容回落加过，随「读侧不留兼容路径」撤除）；「资源清单」末段的编排机器权限清单按上「权限面增量」更新；preflight 加 variant 解析一项。ECR repo 命名（`{prefix}{engine}-worker`、`RETAIN`）、container 名契约、cluster/task-def family 名、`_worker_subnet_ids` 不动。
+- **[0034](./0034-detached-batch-reconciler.md)（扩展、Status 不动）**：definition 加 `worker_variant` / `worker_task_defs`（沿用其「随 definition 走、宿主只读回」惯例），STATE 顶层加 `worker_task_def_arns`（沿用其 `detached` 顶层标记先例）；kicker/reconciler 的 CloudLauncher 起 task 改用 definition 里的 revision，缺失按定义违约标 error（「读侧不留兼容路径」）。
 - **[0016](./0016-execution-architecture-core-lib-run-model.md)（扩展、Status 不动）**：其「数据模型」节 definition 行的 run 级字段枚举（已逐字段带 ADR 指针）已补 `worker_variant` / `worker_task_defs` → 本 ADR。
 - **[0037](./0037-distribution-and-packaging.md)**：其决策 5 只定两层分工与基础镜像通道，机制、模板、被拒方案全部在本 ADR；两者 Status 独立翻牌。
 - **[0032](./0032-fargate-execution-environment.md)**：grace / `stopTimeout` 等执行面韧性不动；模板 revision 携带它们、variant revision 复制它们。
@@ -136,8 +136,8 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 
 ## 落地次序与依赖（依赖关系，非进度追踪；已全部落地，本节编号只在本节内部使用，其它文档不引用它）
 
-1. `names.image_tag` / `names.ecr_repo_name`（依赖 0037 的 runtime 包化）；`RunMeta.worker_variant` / `worker_task_defs` + STATE 顶层 `worker_task_def_arns` + `FargateEngine` / `CloudLauncher` 改显式 revision、缺失按默认指针解析（可在 0037 之前先落：把当前 IaC 建的唯一 revision 当作解析结果，行为不变）。
-2. IaC：stack 写 `worker-template/<engine>` 参数、推进器 SSM 读权限、runs 表 status GSI。
+1. `names.image_tag` / `names.ecr_repo_name`（依赖 0037 的 runtime 包化）；`RunMeta.worker_variant` / `worker_task_defs` + STATE 顶层 `worker_task_def_arns` + `FargateEngine` / `CloudLauncher` 改显式 revision、缺失按定义违约标 error（施工期曾先按默认指针解析过渡，随 0037 决策 7 撤除）。
+2. IaC：stack 写 `worker-template/<engine>` 参数、runs 表 status GSI（推进器曾授 SSM 读权限、已撤）。
 3. `gherkai-deploy-aws` 内容器引擎口子（docker）、`push-worker`（八步 + 血缘/退休 tags + 清理 pass）、`list-workers`。
 4. `gherkai deploy` 的 worker 镜像四步；preflight 的 variant 解析 + 严格退 2 + 打印；权限清单更新（依赖 0037 决策 8 的基础镜像已在 GHCR）。
 5. `tools/build_push_workers.py` 退役；`deploy_aws/README.md`、Dockerfile 注释与 CONTEXT 校准。
@@ -151,7 +151,7 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 5. 升级演练：CLI 升版后 deploy → 默认指针悬空的 preflight 提示 → push 同名 variant 后恢复，不需 `--set-default`；CLI 版本超前于后端时 push-worker 被 skew 前置拦下。（**真账户已验**（跳板机克隆打本地 tag 得纯 `1.4.0` CLI + 改写 SSM 版本戳模拟后端版本）：戳 1.3.0 → `list-workers`/`submit` 均 block 退 2、push-worker 侧多给带 `[deploy-aws]` extra 的 uvx 出路；戳 1.5.0 → warn 不拦；戳 1.4.0 → 静默放行、`1.4.0-base` 未推 → submit 退 2 点名 push；push 同名 `base` → submit 解析到新映射、run passed、默认指针未动。**真 `gherkai deploy` 写新版本戳 + 同步 GHCR 基础镜像已验**：用发行版 `uvx --from 'gherkai[deploy-aws]==1.4.0' gherkai deploy` 把验证环境从 dev 版升到 1.4.0——SSM 戳变 `1.4.0`、两引擎从 GHCR 拉 `1.4.0` 基础镜像推成 ECR `1.4.0-base` 并注册 revision、默认指针不动、无需重派生（新版本尚无其它 variant）；随后 `uvx gherkai==1.4.0 submit` 的 run 用新 revision 跑通。）
 6. 本地未推送镜像的 `inspect` 确认 `RepoDigests` 为空，推送后取到的 digest 与 ECR `describe-images` 一致、注册的 revision 能被 RunTask 拉起。（**已验**：真 docker——未推送镜像 `RepoDigests` 空、`docker tag` 到 ECR ref 后仍空、arm64 镜像被步 2 拒；真账户——推后取到的 digest 被 `describe-images` 认（preflight 三环通过），kicker 起的 Fargate task 的 `taskDefinitionArn` 正是注册出的 `…-worker:2`（显式 revision、非 family 最新），两引擎 task 各 exit 0、run passed。）
 7. 多平台本地镜像在 amd64 主机上被 `inspect` 塌成单平台视图而放行——**定为已知边界、不补 manifest 级校验**。实测：Docker 默认镜像存储（overlay2）**装不下多平台镜像**——`docker buildx build --platform linux/amd64,linux/arm64 --load` 直接报 `docker exporter does not currently support exporting manifest lists`，即缺口只存在于开了 containerd 镜像存储的机器。推演（未真跑 containerd 存储）：amd64 主机上含 amd64 的多平台镜像通过校验后 `docker push` 推的是 index，推后 `RepoDigests` 即 index digest，task-def 按它引用，ECS 从 index 选 amd64——**无安全问题**；arm 主机上 `inspect` 得 arm64 → 被拒（过严但安全，按文档只构 amd64 单平台即可）。
-- **mock / 无凭证层的覆盖面**（真账户证据见上各条）：真 synth 出的模板含 runs 表 `status-index`（INCLUDE `worker_task_def_arns`）、推进器 SSM 读策略、ECR 无 lifecycle、无模板 env；moto 验了八步幂等（二元组查重、孤儿复用、退休 tag）、清理的两个前置条件（静默期 + GSI Query）、重派生、指针不重置、`--set-default` 只警告、skew 前置；**跨组件真互通**——真 `DynamoDBRunStore.create_run` 写的 STATE 属性被真实的清理引用检查在真 GSI 形状上读到（含终态即不再引用、META 无顶层 status 的稀疏性），真 push 写的 SSM/ECS/ECR 三件套被提交侧与宿主侧两个 `resolve_*` 原样读回。
+- **mock / 无凭证层的覆盖面**（真账户证据见上各条）：真 synth 出的模板含 runs 表 `status-index`（INCLUDE `worker_task_def_arns`）、推进器角色无 SSM 读策略、ECR 无 lifecycle、无模板 env；moto 验了八步幂等（二元组查重、孤儿复用、退休 tag）、清理的两个前置条件（静默期 + GSI Query）、重派生、指针不重置、`--set-default` 只警告、skew 前置；**跨组件真互通**——真 `DynamoDBRunStore.create_run` 写的 STATE 属性被真实的清理引用检查在真 GSI 形状上读到（含终态即不再引用、META 无顶层 status 的稀疏性），真 push 写的 SSM/ECS/ECR 三件套被提交侧的 `resolve_worker_variant` 原样读回。
 
 ## 被拒方案（护栏，防未来重踩）
 
@@ -164,8 +164,8 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 - **推送前用本地 `inspect` 的 image Id 当 digest**：那是 config digest，不是 manifest digest，注册能过、RunTask 才 `manifest unknown`；digest 只在推送后取。
 - **不可变 ECR tag（重推同名 variant 须先删）**：bugfix 不想改名是正当需求；replace 交给使用方，run 内一致性由 digest 引用的 revision 保证。
 - **默认镜像 = 不带 variant 后缀的裸版本 tag，重推即覆盖**：会把 `base` 从映射里抹掉、退路只能重拉；默认改为指针，所有镜像都有 variant 名。
-- **RunTask 传 family（取最新 ACTIVE revision）**：多 variant 下任何一次 push 都会劫持默认；一律显式 revision。缺失字段时也不回落 family，按默认指针解析。
-- **缺字段时回落模板 revision（`latest` 占位）**：全新 prefix 从未推过 `latest`，RunTask 拉镜像直接失败、错误拖到 Fargate 启动期；按后端默认指针解析。
+- **RunTask 传 family（取最新 ACTIVE revision）**：多 variant 下任何一次 push 都会劫持默认；一律显式 revision。缺失字段时也不回落 family，按定义违约标 error。
+- **缺字段时回落模板 revision（`latest` 占位）**：全新 prefix 从未推过 `latest`，RunTask 拉镜像直接失败、错误拖到 Fargate 启动期；缺字段按定义违约标 error（默认指针解析也曾作为回落、已随「读侧不留兼容路径」撤除）。
 - **revision 按 tag 引用镜像**：重推同名 variant 会让运行中 run 的后续 job 换镜像；按 digest 引用。
 - **push-worker 抄「最近一次」revision 作模板**：最近一次可能是某个 variant 的、且模板改过后已过期；永远从 deploy 登记的模板 revision 复制。
 - **模板 revision ARN 由 deploy 命令事后 `put_parameter`**：回滚留错值；stack 资源随事务。

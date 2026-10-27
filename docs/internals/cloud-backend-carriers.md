@@ -89,7 +89,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 
 ![提交时刻把 variant 解析为本 run 每个引擎的显式 revision 并写入 run 记录；之后重推同名 variant 只产生新 digest、新 revision 与新映射，起 task 仍照定义使用提交时固定的那一个](../diagrams/cloud-backend-carriers-revision-pinning.svg)
 
-图注（提交时刻固定 revision）：图上的「云端起 task 侧」即正文第 3 条的云端推进器（kicker / reconciler 两个 Lambda）；那条回读边属于**云端侧**，即两个推进 Lambda 从 definition 读回那批 revision 再起 task。前台 `run --backend cloud` 不回读，它直接使用本进程 preflight 解析出的同一批（与写进 definition 的同源，`--no-report` 时不生成 run 记录），固定的效果相同。三环解析的完整判据（缺任一环即拒、绝不回落）见上面第 1 条；definition 里没有那两个字段的老 run 走上面第 4 条的兼容路径，图上不画。两张图的分工：§1 那张画**静态从属**（镜像挂在哪个 revision、由谁指向），本图画**时间先后**（提交时刻 / run 运行期间被重推 / 之后起 task）；推进链与事件通道两张图都不画，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
+图注（提交时刻固定 revision）：图上的「云端起 task 侧」即正文第 3 条的云端推进器（kicker / reconciler 两个 Lambda）；那条回读边属于**云端侧**，即两个推进 Lambda 从 definition 读回那批 revision 再起 task。前台 `run --backend cloud` 不回读，它直接使用本进程 preflight 解析出的同一批（与写进 definition 的同源，`--no-report` 时不生成 run 记录），固定的效果相同。三环解析的完整判据（缺任一环即拒、绝不回落）见上面第 1 条；definition 里没有那两个字段的提交记录按上面第 4 条标 error、不执行，图上不画。两张图的分工：§1 那张画**静态从属**（镜像挂在哪个 revision、由谁指向），本图画**时间先后**（提交时刻 / run 运行期间被重推 / 之后起 task）；推进链与事件通道两张图都不画，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
 第 3 条的正确性有两道配套护栏，都在回收侧：
 
