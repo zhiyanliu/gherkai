@@ -33,13 +33,23 @@ export const INCOMPLETE_DEFINITION_MESSAGE = "后端未传递会话预热地址�
 export const WARMUP_DENIED_MESSAGE =
   "隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；请重新提交这次运行";
 export const warmupErrorMessage = (attempts: number, reason: string): string =>
-  `隧道会话预热未能确认就绪（已重试 ${attempts} 次）：${reason}——隧道可能已拆除或本机应用不可达；请确认隧道仍在后重新提交`;
+  `隧道会话预热未能确认就绪（已尝试 ${attempts} 次）：${reason}——隧道可能已拆除，或浏览器到隧道入口的网络不通；请确认隧道仍在后重新提交`;
 
 const TERMINAL_TITLES = new Set<string>(Object.values(WARMUP_TITLES));
 
 export interface WarmupFailure {
   errorType: "precheck_failed" | "engine_error";
   message: string;
+}
+
+/** 预热失败时主流程的出口（ADR 0051 决策 13、决策 5）：会话已释放之后调用；归因与 sessionId 恒经 scope_done 传递，释放失败只体现在退出码 1
+ *  （桌面靠退出码让泄漏可观测），不吞掉归因、不变成 worker fatal。 */
+export function warmupFailureOutcome(failure: WarmupFailure, scopeId: string, sessionId: string | null, cleanupFailed: boolean):
+    { event: Record<string, unknown>; exitCode: number } {
+  return {
+    event: { type: "scope_done", scopeId, sessionId, status: "error", errorType: failure.errorType, message: failure.message },
+    exitCode: cleanupFailed ? 1 : 0,
+  };
 }
 
 /** 预热失败在 run-scope 主流程里以异常形态穿出 try（好让既有的 cleanup / 排空路径照常执行），catch 里按它发 scope_done。 */
@@ -90,7 +100,7 @@ export async function warmupSession(page: WarmupPage, url: string, deps: WarmupD
       return { errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE };
     }
     last = title === WARMUP_TITLES.error ? `预热页面标记为 ${title}`
-      : `预热页面在 ${WARMUP_MARKER_WAIT_MS / 1000} 秒内没有给出任何标记（响应状态 ${status}，页面标题 ${JSON.stringify(title)}）`;
+      : `预热页面在 ${WARMUP_MARKER_WAIT_MS / 1000} 秒内没有给出任何标记（响应状态 ${status ?? "未知"}，页面标题 ${title || "空"}）`;
     deps.log(`worker: tunnel warmup not ready (attempt ${attempt + 1}): ${last}`);
   }
   return { errorType: "engine_error", message: warmupErrorMessage(WARMUP_ATTEMPTS, last) };

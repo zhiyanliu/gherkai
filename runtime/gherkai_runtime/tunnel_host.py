@@ -13,7 +13,7 @@ run 生命周期，ADR 0016「演进」节）；入口前端（cli / 未来 WebU
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from gherkai_core.model import TERMINAL_STATUSES, Job
 
@@ -47,8 +47,8 @@ class TunnelSetup:
 
     jobs: tuple[Job, ...]
     extra_http_headers: dict[str, str]
-    warmup_url: str
     info: _tunnel.TunnelInfo
+    warmup_url: str = field(repr=False)  # 含本次令牌：不进 repr（日志与异常里打印对象时不带出来）
 
 
 def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -> TunnelSetup:
@@ -59,7 +59,7 @@ def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -
     """
     info = _tunnel.make_tunnel(provider).start(local_origin)
     mapped = _tunnel.map_origin_in_jobs(list(jobs), local_origin, info.url)  # 干净的隧道地址，不内嵌凭据（ADR 0051 决策 13）
-    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), warmup_url=info.warmup_url, info=info)
+    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), info=info, warmup_url=info.warmup_url)
 
 
 def compute_watch_ttl_s(

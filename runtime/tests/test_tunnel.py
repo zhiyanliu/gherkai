@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from gherkai_core.model import Job, Scenario, Step, StepArgument
 from gherkai_runtime import tunnel
@@ -60,6 +61,29 @@ def test_traffic_policy_has_four_rules_cookie_spec_and_markers():
         tunnel.render_traffic_policy("short", "b" * 32)  # 形态不对的秘密不进策略（模板替换无转义面）
 
 
+def test_traffic_policy_parses_as_yaml_with_rule_order_statuses_and_gate_semantics():
+    """ngrok 读的是解析后的结构、不是字面量，所以按 YAML 解析后核：四条规则按序 warmup-ok / warmup-reject / check-ok / gate，
+    状态码 200 / 401 / 200 / 401；预热放行限 GET 且带令牌比对；no-referrer 只在预热放行页；校验路径放行是空响应体、只带 cache-control；
+    总闸只认 cookie、不认令牌（令牌只用来换一次 cookie，ADR 0051 决策 13）。"""
+    token, cookie = "a" * 32, "b" * 32
+    rules = yaml.safe_load(tunnel.render_traffic_policy(token, cookie))["on_http_request"]
+    assert [r["name"] for r in rules] == ["warmup-ok", "warmup-reject", "check-ok", "gate"]
+    assert [r["actions"][0]["config"]["status_code"] for r in rules] == [200, 401, 200, 401]
+    assert all(len(r["actions"]) == 1 and r["actions"][0]["type"] == "custom-response" for r in rules)
+    assert all(r["actions"][0]["config"]["headers"]["cache-control"] == "no-store" for r in rules)
+    ok, reject, check, gate = rules
+    assert f"req.url.path == '{tunnel.WARMUP_PATH}'" in ok["expressions"] and "req.method == 'GET'" in ok["expressions"]
+    assert f"'{token}' in req.url.query_params['{tunnel.TOKEN_PARAM}']" in ok["expressions"]
+    assert ok["actions"][0]["config"]["headers"]["referrer-policy"] == "no-referrer"
+    assert sum("referrer-policy" in r["actions"][0]["config"]["headers"] for r in rules) == 1
+    assert reject["expressions"] == [f"req.url.path == '{tunnel.WARMUP_PATH}'"]
+    assert check["actions"][0]["config"]["content"] == "" and check["actions"][0]["config"]["headers"] == {"cache-control": "no-store"}
+    assert check["expressions"][0] == f"req.url.path == '{tunnel.CHECK_PATH}'"
+    assert tunnel.COOKIE_NAME in check["expressions"][1] and cookie in check["expressions"][1] and token not in check["expressions"][1]
+    assert len(gate["expressions"]) == 1 and tunnel.CHECK_PATH in gate["expressions"][0] and cookie in gate["expressions"][0]
+    assert token not in gate["expressions"][0]
+
+
 # ---------- map_origin_in_jobs：带边界的识别（ADR 0035 决策 2） ----------
 
 def _job_with(text: str, argument: StepArgument | None = None) -> Job:
@@ -89,7 +113,16 @@ ORIGIN = "http://localhost:3000"
     ("http://localhost:30001/x", "http://localhost:30001/x"),
     ("xhttp://localhost:3000", "xhttp://localhost:3000"),
     ("http://localhost:3000abc", "http://localhost:3000abc"),
-])
+    # 不命中：紧跟的是地址字符、但不是路径 / 查询 / 片段起点，也不只是收尾标点——它是另一个地址
+    ("http://localhost:3000:8080/x", "http://localhost:3000:8080/x"),
+    ("http://localhost:3000@evil/", "http://localhost:3000@evil/"),
+    ("http://localhost:3000%2Fx", "http://localhost:3000%2Fx"),
+    ("http://localhost:3000http://localhost:3000/x", "http://localhost:3000http://localhost:3000/x"),
+    # 嵌套与相邻：地址出现在另一个地址的查询值里、或只隔一个逗号，逐处识别
+    ("http://localhost:3000/go?next=http://localhost:3000/x", "https://abc.ngrok-free.app/go?next=https://abc.ngrok-free.app/x"),
+    ("http://localhost:3000/a,http://localhost:3000/b", "https://abc.ngrok-free.app/a,https://abc.ngrok-free.app/b"),
+] + [(f"见 {ORIGIN}{ch} 处", f"见 {BASE}{ch} 处") for ch in sorted(tunnel._TRAILING_PUNCT)]  # 每个收尾标点单独核，不只核组合
+  + [(f"（{ORIGIN}）。", f"（{BASE}）。")])
 def test_replace_origin_boundaries(text, expected):
     assert tunnel.replace_origin(text, ORIGIN, BASE) == expected
 
@@ -164,6 +197,8 @@ def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
     assert len(cookie) == 32 and cookie != token
     info2 = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start("http://localhost:3000")
     assert info2.warmup_url != info.warmup_url
+    policy2 = open(spawned["cmd"][spawned["cmd"].index("--traffic-policy-file") + 1], encoding="utf-8").read()
+    assert re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy2).group(1) != cookie  # cookie 值也每次不同，不只是令牌
     with pytest.raises(TypeError):
         t.start("http://localhost:3000", with_auth=False)  # 曾有的开关已删：隧道模式恒带鉴权
 

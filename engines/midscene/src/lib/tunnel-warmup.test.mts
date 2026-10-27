@@ -18,6 +18,10 @@ test("边缘契约常量与跨语言 fixture 一致（runtime、Nova、Midscene 
   assert.deepEqual({ ...W.WARMUP_TITLES }, fx.titles);
   assert.deepEqual({ ...W.WARMUP_MARKERS }, fx.markers);
   assert.deepEqual([W.SESSION_WARMUP_URL_ENV, W.EXTRA_HTTP_HEADERS_ENV, W.SESSION_WARMUP_KEY], [fx.env.warmup_url, fx.env.extra_http_headers, fx.capability_key]);
+  // 三条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
+  assert.equal(W.INCOMPLETE_DEFINITION_MESSAGE, fx.messages.incomplete_definition);
+  assert.equal(W.WARMUP_DENIED_MESSAGE, fx.messages.denied);
+  assert.equal(W.warmupErrorMessage(3, "原因"), fx.messages.error_template.replace("{attempts}", "3").replace("{reason}", "原因"));
 });
 
 /** 每次 goto 按序给出一个结果（数字状态码 / null / Error 实例）；title 按序给出，最后一个值一直保持。 */
@@ -67,7 +71,7 @@ test("导航抛网络类异常：吞在有界重试里、不向上抛，耗尽�
   const { page, gotos } = fakePage([Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }), new Error("Timeout"), new Error("x")], [""]);
   const f = await W.warmupSession(page, WARMUP_URL, deps());
   assert.equal(f?.errorType, "engine_error");
-  assert.match(f!.message, /已重试 3 次/);
+  assert.match(f!.message, /已尝试 3 次/);
   assert.equal(gotos.length, 3);
 });
 
@@ -76,6 +80,21 @@ test("预算内没有任何标记 → engine_error，消息说明", async () => 
   const f = await W.warmupSession(page, WARMUP_URL, deps());
   assert.equal(f?.errorType, "engine_error");
   assert.match(f!.message, /没有给出任何标记/);
+  assert.match(f!.message, /响应状态 200，页面标题 gherkai-tunnel-warmup/);
+  const f2 = await W.warmupSession(fakePage([null, null, null], [""]).page, WARMUP_URL, deps());  // 没有响应对象、空标题：说「未知」「空」
+  assert.match(f2!.message, /响应状态 未知，页面标题 空/);
+  assert.doesNotMatch(f2!.message, /null|undefined|""/);
+});
+
+test("warmupFailureOutcome：按归因发 scope_done{error}，退出码只随 cleanupFailed（预热失败本身 0、释放失败才 1）", () => {
+  const failure: W.WarmupFailure = { errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE };
+  const ok = W.warmupFailureOutcome(failure, "s", "sess-1", false);
+  assert.deepEqual(ok.event, { type: "scope_done", scopeId: "s", sessionId: "sess-1", status: "error", errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE });
+  assert.equal(ok.exitCode, 0);
+  const leaked = W.warmupFailureOutcome({ errorType: "engine_error", message: "m" }, "s", null, true);
+  assert.equal(leaked.exitCode, 1);
+  assert.equal(leaked.event.sessionId, null);
+  assert.equal(leaked.event.errorType, "engine_error");
 });
 
 test("主入口的完整性判据：有额外请求头、没有预热地址 → 唯一事件 scope_done{precheck_failed}，不建会话、退出码 0（真子进程）", async () => {

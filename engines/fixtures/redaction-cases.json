@@ -92,6 +92,42 @@
     [
       "https://u:p@h/x?gherkai_tunnel_token=t",
       "https://***@h/x?gherkai_tunnel_token=***"
+    ],
+    [
+      "https://h/a?gherkai_tunnel_token=abc#frag",
+      "https://h/a?gherkai_tunnel_token=***#frag"
+    ],
+    [
+      "https://h/a?X-Amz-Signature=abc\\def",
+      "https://h/a?X-Amz-Signature=***\\def"
+    ],
+    [
+      "<a>https://h/a?X-Amz-Signature=abc<br>",
+      "<a>https://h/a?X-Amz-Signature=***<br>"
+    ],
+    [
+      "https://x.amazonaws.com/remote-endpoint/tok123#frag",
+      "https://x.amazonaws.com/remote-endpoint/***#frag"
+    ],
+    [
+      "https://x.amazonaws.com/remote-endpoint/tok123?a=1",
+      "https://x.amazonaws.com/remote-endpoint/***?a=1"
+    ],
+    [
+      "https://u:密钥@h/",
+      "https://u:密钥@h/"
+    ],
+    [
+      "{\"ep\":\"https://x.amazonaws.com/remote-endpoint/tok123\"}",
+      "{\"ep\":\"https://x.amazonaws.com/remote-endpoint/***\"}"
+    ],
+    [
+      "端点 https://x.amazonaws.com/remote-endpoint/tok123 之后",
+      "端点 https://x.amazonaws.com/remote-endpoint/*** 之后"
+    ],
+    [
+      "https://h/a?gherkai_tunnel_toKen=abc",
+      "https://h/a?gherkai_tunnel_toKen=abc"
     ]
   ]
 }

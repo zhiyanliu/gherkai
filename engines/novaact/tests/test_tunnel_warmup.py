@@ -24,6 +24,9 @@ def test_edge_contract_constants_match_the_cross_language_fixture():
     assert (C.WARMUP_PATH, C.CHECK_PATH, C.TOKEN_PARAM, C.COOKIE_NAME) == (fx["warmup_path"], fx["check_path"], fx["token_param"], fx["cookie_name"])
     assert C.WARMUP_TITLES == fx["titles"] and C.WARMUP_MARKERS == fx["markers"]
     assert (C.SESSION_WARMUP_URL_ENV, C.EXTRA_HTTP_HEADERS_ENV, C.SESSION_WARMUP_KEY) == (fx["env"]["warmup_url"], fx["env"]["extra_http_headers"], fx["capability_key"])
+    # 三条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
+    assert (C.INCOMPLETE_DEFINITION_MESSAGE, C.WARMUP_DENIED_MESSAGE, C.WARMUP_ERROR_MESSAGE) == (
+        fx["messages"]["incomplete_definition"], fx["messages"]["denied"], fx["messages"]["error_template"])
 
 
 class _Resp:
@@ -94,13 +97,37 @@ def test_navigation_exceptions_are_swallowed_into_engine_error_not_raised():
     """导航抛网络类异常：不向上抛（外层的建连重试域看不到它、不会以退出码 80 收场），有界重试后归 engine_error。"""
     page = _FakePage([ConnectionError("reset"), TimeoutError("slow"), ConnectionError("reset")], [""])
     f = _warm(page)
-    assert f is not None and f.error_type == "engine_error" and "已重试 3 次" in f.message and len(page.gotos) == 3
+    assert f is not None and f.error_type == "engine_error" and "已尝试 3 次" in f.message and len(page.gotos) == 3
 
 
 def test_no_marker_within_budget_is_engine_error():
     page = _FakePage([200, 200, 200], ["gherkai-tunnel-warmup"])
     f = _warm(page)
     assert f is not None and f.error_type == "engine_error" and "没有给出任何标记" in f.message
+    assert "响应状态 200，页面标题 gherkai-tunnel-warmup" in f.message
+    f2 = _warm(_FakePage([None, None, None], [""]))  # 没有响应对象、空标题：说「未知」「空」，不把 None / 空字符串字面量塞进产品消息
+    assert f2 is not None and "响应状态 未知，页面标题 空" in f2.message and "None" not in f2.message and "''" not in f2.message
+
+
+def test_stop_signal_interrupts_warmup_before_navigation_and_during_marker_wait():
+    """停止信号（ADR 0024 flag-only）：预热的退避与等标记都看 stop，收到即抛 WarmupStopped——不算失败、不发 scope_done。
+    预热最坏要一两分钟（3 次导航各 30 秒超时加 10 秒等标记），不能让 SIGTERM 等满它再撞 SIGKILL。"""
+    page = _FakePage([200], ["gherkai-tunnel-warmup"])
+    with pytest.raises(W.WarmupStopped):
+        W.warmup_session(page, WARMUP_URL, log=lambda s: None, sleep=lambda s: None, monotonic=_clock(), stop=lambda: True)
+    assert page.gotos == []  # 导航之前就停
+
+    flag = {"stop": False}
+
+    class _StopAfterGoto(_FakePage):
+        def goto(self, url, **kw):
+            flag["stop"] = True  # 导航期间收到信号
+            return super().goto(url, **kw)
+
+    page2 = _StopAfterGoto([200], ["gherkai-tunnel-warmup"])
+    with pytest.raises(W.WarmupStopped):
+        W.warmup_session(page2, WARMUP_URL, log=lambda s: None, sleep=lambda s: None, monotonic=lambda: 0.0, stop=lambda: flag["stop"])
+    assert page2.gotos == [WARMUP_URL]  # 等标记的预算远没到（假时钟不动），是停止信号让它退出
 
 
 # ---- main 级：假会话驱动（对称 test_evidence 的 main_fakes）----
@@ -175,7 +202,8 @@ def driven(monkeypatch, tmp_path):
     monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
     real_warmup = W.warmup_session  # 先取真函数再打桩：桩里不能再经模块属性引用（那已是桩自己）
     monkeypatch.setattr(W, "warmup_session",
-                        lambda page, url, *, log: real_warmup(page, url, log=log, sleep=lambda s: None, monotonic=_clock()))
+                        lambda page, url, *, log, sleep=None, stop=lambda: False:
+                        real_warmup(page, url, log=log, sleep=lambda s: None, monotonic=_clock(), stop=stop))
     monkeypatch.setenv("NOVA_LOGS_DIR", str(tmp_path))
     monkeypatch.delenv("ARTIFACT_S3_BUCKET", raising=False)
     monkeypatch.delenv(C.EXTRA_HTTP_HEADERS_ENV, raising=False)
@@ -225,6 +253,70 @@ def test_warmup_navigation_failures_end_as_engine_error_with_exit_0(driven, monk
     assert rs.main() == 0
     assert [e["type"] for e in sink.events] == ["scope_done"] and sink.events[0]["errorType"] == "engine_error"
     assert trace.count(("nova_init",)) == 1  # 预热的导航失败不进建连重试域：没有重建会话
+
+
+def test_warmup_precedes_scope_started_and_scenarios(driven, monkeypatch):
+    """次序：预热导航 → scope_started → scenario_started → 执行 → scenario_done → scope_done；预热只做一次，不按 scenario 重做。"""
+    trace, sink, box = driven
+    monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
+        lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x", "name": "x"},
+                            "scenarios": [{"id": "x:1", "name": "s", "steps": [{"index": 0, "keyword": "Given", "text": "a"}]},
+                                          {"id": "x:2", "name": "t", "steps": [{"index": 0, "keyword": "Given", "text": "b"}]}],
+                            "target": {"device": "desktop", "uiKind": "web"}, "engine": "novaact", "assertionVotes": 1,
+                            "timeoutS": None, "deviceRequest": None}))})())
+
+    class _TracingPage(_FakePage):
+        def goto(self, url, **kw):
+            trace.append(("goto", url))
+            return super().goto(url, **kw)
+
+    box["page"] = _TracingPage([200], [C.WARMUP_TITLES["ready"]])
+    monkeypatch.setattr(rs, "_run_scenario",
+                        lambda nova, sid, steps, votes_n, sink, *, scope_id: trace.append(("run_scenario", sid)) or ["passed"])
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 0
+    assert [t for t in trace if t[0] in ("goto", "emit", "run_scenario")] == [
+        ("goto", WARMUP_URL), ("emit", "scope_started"),
+        ("emit", "scenario_started"), ("run_scenario", "x:1"), ("emit", "scenario_done"),
+        ("emit", "scenario_started"), ("run_scenario", "x:2"), ("emit", "scenario_done"),
+        ("emit", "scope_done")]
+
+
+def test_release_failure_after_warmup_rejection_exits_1_without_reconnecting(driven, monkeypatch):
+    """预热失败后释放会话出错：不进建连重试域（不重建会话）、归因不被覆盖、scope_done 照发、退出码 1 让泄漏可观测
+    （ADR 0051 决策 5 与 13；对照 Midscene 的 cleanupFailed）。"""
+    trace, sink, box = driven
+    box["page"] = _FakePage([401], ["gherkai-tunnel-auth-required"])
+
+    class _LeakyNovaAct(_FakeNovaAct):
+        def __exit__(self, *a):
+            super().__exit__(*a)
+            raise RuntimeError("stop session failed")
+
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: _LeakyNovaAct(box["page"], trace, **k))
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_done"]
+    assert sink.events[0]["status"] == "error" and sink.events[0]["errorType"] == "precheck_failed"
+    assert trace.count(("nova_init",)) == 1  # 释放失败不是建连失败：没有重建会话
+
+
+def test_stop_during_warmup_releases_session_quietly_with_exit_0(driven, monkeypatch):
+    """预热途中收到停止信号：正常 return 释放会话、不发任何事件、退出码 0——与 scenario 边界的协作停走同一条路径（ADR 0024 flag-only）。"""
+    trace, sink, box = driven
+
+    class _StopPage(_FakePage):
+        def goto(self, url, **kw):
+            rs._stop.set()
+            return super().goto(url, **kw)
+
+    box["page"] = _StopPage([200], ["gherkai-tunnel-warmup"])
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 0
+    assert sink.events == [] and ("nova_exit",) in trace
 
 
 def test_no_tunnel_env_is_zero_change(driven):

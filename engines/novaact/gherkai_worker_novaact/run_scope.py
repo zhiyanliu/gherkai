@@ -895,6 +895,7 @@ def main() -> int:
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
     warmup_failure: _warmup.WarmupFailure | None = None  # 会话预热的归因（ADR 0051 决策 13）：非 None 即不发 scope_started、经 scope_done 传递
+    warmup_release_error: BaseException | None = None  # 预热失败后释放会话时抛出的异常：不回建连重试域，只让退出码为 1
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
@@ -940,7 +941,10 @@ def main() -> int:
                 # scope_started、正常 return 让两层 with 释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
                 # 不进外层的建连重试域、不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。
                 if warmup_url:
-                    warmup_failure = _warmup.warmup_session(nova.page, warmup_url, log=log)
+                    try:
+                        warmup_failure = _warmup.warmup_session(nova.page, warmup_url, log=log, sleep=_stop.wait, stop=_stop.is_set)
+                    except _warmup.WarmupStopped:
+                        return  # 停止信号（ADR 0024 flag-only）：正常 return 释放会话，main 尾按 _stop 走停止路径
                     if warmup_failure is not None:
                         log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
                         return
@@ -978,6 +982,12 @@ def main() -> int:
                     _run_session()
                     break  # 成功（运行结束，或 _run_session 内因 _stop 协作式 return）
                 except Exception as e:  # noqa: BLE001  建连域异常（_run_session 内 with __exit__ 已清本次部分会话）
+                    if warmup_failure is not None:
+                        # 预热已失败、会话已建起：释放阶段（两层 with 的 __exit__）抛出的异常不是建连失败，不回重试域、不重建会话、
+                        # 不覆盖已有归因（ADR 0051 决策 13、决策 5：归因经 scope_done、释放失败只体现在退出码）。
+                        warmup_release_error = e
+                        log(f"worker: 预热失败后释放会话出错：{type(e).__name__}: {e}")
+                        break
                     # connecting=True：本分支即建连域（started=True 时下句直接 raise，走不到判定），
                     # 故额外认 Playwright TargetClosedError（连接被网络断的下游症状，ADR 0028）。
                     if started or not _is_transient_network(e, connecting=True):
@@ -1013,7 +1023,7 @@ def main() -> int:
         # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在 _run_session 的 with 退出时释放；按执行前失败发 scope 级 error、以 0 退出。
         sink.emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id, "status": "error",
                    "errorType": warmup_failure.error_type, "message": warmup_failure.message})
-        return 0
+        return 1 if warmup_release_error is not None else 0  # 释放失败让退出码为 1（桌面靠它让泄漏可观测）
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
     # kind=summary（引擎特有富信息载体、非人看报告，经不透明指针给 agent，ADR 0027）。SDK 把它落在

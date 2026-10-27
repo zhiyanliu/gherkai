@@ -390,3 +390,25 @@ def test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel(tmp_pat
     assert LocalRunStore(tmp_path).load_run_state("run-d").status == Status.PASSED  # 推到终态
     assert list((tmp_path / "run-d" / "jobs").glob("*.json"))  # 判定真值已落（tick 在 CAS 前写）
     assert stopped == [4242] and not (tmp_path / "run-d" / "tunnel.json").exists()  # 拆了隧道、交棒文件已清
+
+
+def test_build_local_reconcile_reads_session_warmup_url_back_from_definition(tmp_path, monkeypatch):
+    """预热地址随 definition 走（ADR 0051 决策 13）：per-run 重建端从 run_meta 读回、注进两个引擎的 worker env；
+    宿主进程继承的同名值不算（三个宿主下同一个 run 要用同一个值）。"""
+    from gherkai_runtime.detached import build_local_reconcile
+
+    url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
+    meta = RunMeta(run_id="run-w", created_at="t0", jobs=(_job("a"),),
+                   extra_http_headers=(("ngrok-skip-browser-warning", "1"),), session_warmup_url=url)
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-w", status=Status.PENDING,
+                                    jobs={"a": JobState("a", Status.PENDING)},
+                                    started_at="t0", high_water_mark=0))
+    monkeypatch.setenv("GHERKAI_SESSION_WARMUP_URL", "https://leaked/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=x")
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node /nonexistent/midscene.mjs")  # 不找真 worker、只看注入面
+    launcher = build_local_reconcile(str(tmp_path), "run-w", max_concurrency=1, region=None, profile=None)[3]
+    for engine in ("novaact", "midscene"):
+        env = launcher._resolver(engine)._env
+        assert env["GHERKAI_SESSION_WARMUP_URL"] == url, engine
+        assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}', engine

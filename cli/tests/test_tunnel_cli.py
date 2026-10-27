@@ -1,6 +1,6 @@
 """--expose-local 的 CLI 接线测试（ADR 0035）：fake tunnel provider——不真起 ngrok、不连 AWS。
 
-「ngrok 真起得来 / 隧道 URL 真可达 / 浏览器真过 basic-auth」是真实边界，由真实运行验证；
+「ngrok 真起得来 / 隧道 URL 真可达 / 浏览器凭令牌换到 cookie 后业务请求过边缘」是真实边界，由真实运行验证；
 此处锁「接线 + 映射 + 生命周期交棒」的纯逻辑。
 """
 from __future__ import annotations
@@ -55,6 +55,51 @@ def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch):
     assert dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
     assert meta.session_warmup_url == INFO.warmup_url  # 预热地址随 definition 走
     assert ("make", "ngrok") in calls and ("start", "http://localhost:3000") in calls
+
+
+def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch):
+    """同步本机 run：注给 build_engines 的预热地址与写进 definition 的是同一个值（ADR 0051 决策 13）——预热地址四处接线之一；
+    丢了它 worker 会按 definition 完整性判 precheck_failed，而单测 fake 掉 schedule 后没有任何事能暴露这一处漏接。"""
+    calls, box = [], {}
+    _patch_tunnel(monkeypatch, calls)
+    real_build = m.compose.build_engines
+
+    def spy_build(**kwargs):
+        box["kwargs"] = kwargs
+        return real_build()
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        box["run_meta"] = run_meta
+        return RunResult(run_meta=run_meta, status=Status.PASSED,
+                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+
+    monkeypatch.setattr(m.compose, "build_engines", spy_build)
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", "http://localhost:3000"]) == 0
+    assert box["kwargs"]["session_warmup_url"] == INFO.warmup_url == box["run_meta"].session_warmup_url
+    assert box["kwargs"]["extra_http_headers"] == {"ngrok-skip-browser-warning": "1"}
+
+
+def test_run_cloud_wires_session_warmup_url_into_fargate_engines(tmp_path, monkeypatch):
+    """同步云端 run：同一处接线的 Fargate 侧——预热地址进 build_fargate_engines，与 definition 同值（ADR 0051 决策 13）。"""
+    from test_backend_cloud import _patch_cloud_handles
+
+    calls, box, record = [], {}, []
+    _patch_tunnel(monkeypatch, calls)
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        box["run_meta"] = run_meta
+        return RunResult(run_meta=run_meta, status=Status.PASSED,
+                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
+                 "--region", "us-east-1", "--quiet", "--expose-local", "http://localhost:3000"])
+    assert rc == 0
+    assert len(made["fargate"]) == 1
+    assert made["fargate"][0]["session_warmup_url"] == INFO.warmup_url == box["run_meta"].session_warmup_url
+    assert made["fargate"][0]["extra_http_headers"] == {"ngrok-skip-browser-warning": "1"}
 
 
 def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):

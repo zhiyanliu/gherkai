@@ -78,9 +78,9 @@ _WARMUP_PAGE = (
     '<meta name="viewport" content="width=device-width"></head>'
     '<body style="font-size:40px"><h1 id="m">GHERKAI TUNNEL WARMUP</h1>'
     "<script>fetch('__CHECK_PATH__',{credentials:'same-origin',cache:'no-store'})"
-    ".then(function(r){var ok=r.status===200;"
-    "document.title=ok?'__T_READY__':'__T_DENIED__';"
-    "document.getElementById('m').textContent=ok?'__M_READY__':'__M_DENIED__ '+r.status;})"
+    ".then(function(r){var s=r.status;"
+    "document.title=s===200?'__T_READY__':s===401?'__T_DENIED__':'__T_ERROR__';"
+    "document.getElementById('m').textContent=s===200?'__M_READY__':s===401?'__M_DENIED__':'__M_ERROR__ '+s;})"
     ".catch(function(e){document.title='__T_ERROR__';document.getElementById('m').textContent='__M_ERROR__';});</script>"
     "</body></html>"
 )
@@ -88,6 +88,8 @@ _AUTH_REQUIRED_PAGE = (
     "<!doctype html><html><head><title>__T_AUTH__</title></head>"
     "<body style='font-size:40px'><h1>__M_AUTH__</h1><p>This address needs a test session.</p></body></html>"
 )
+# 预热页面的脚本只把 401 判为 DENIED（确定性拒绝）；429、5xx 这类拿不准的响应与请求失败一样判 ERROR，由 worker 有界重试（ADR 0051 决策 13
+# 的归因：只有鉴权失败才是 precheck_failed）。
 # 四条规则（ADR 0051 决策 13「边缘策略」，与真账户实测通过的那份逐条相同）：
 # ① 预热路径 + GET + 令牌相等 → 200 预热页，下发 cookie；② 预热路径其余情形 → 401；③ 校验路径只凭 cookie 放行 → 200 空体；
 # ④ 其余路径 cookie 不等于 C → 401，命中则原样转发（校验路径的拒绝也落到这条）。同名 cookie 任一命中即放行。
@@ -129,9 +131,8 @@ _POLICY_TEMPLATE = """on_http_request:
         config:
           status_code: 200
           headers:
-            content-type: "text/plain"
             cache-control: "no-store"
-          content: "ok"
+          content: ""
   - name: gate
     expressions:
       - "req.url.path == '__CHECK_PATH__' || !('__COOKIE_NAME__' in req.cookies) || !req.cookies['__COOKIE_NAME__'].exists(c, c.value == '__C__')"
@@ -289,13 +290,14 @@ _TRAILING_PUNCT = set(".,;:!)]'")
 def replace_origin(text: str, origin: str, base: str) -> str:
     """把文本里每个「作为一个地址出现」的 origin 换成 base：origin 之后的 URL 字符段 R 为空、以 / ? # 开头、或全部由句末标点组成才算命中
     （`http://localhost:3000/x`、`去 http://localhost:3000。`、`(see http://localhost:3000)` 命中；`http://localhost:3000.evil/`、
-    `http://localhost:30001/x` 不命中——那是别的主机或端口）。一段文本里可以有多处命中。"""
-    pattern = re.compile(_LEFT_BOUNDARY + re.escape(origin) + "(?P<rest>[" + _URL_CHARS + "]*)")
+    `http://localhost:30001/x` 不命中——那是别的主机或端口）。一段文本里可以有多处命中，**逐处独立判定**：R 只向前看、不被消费，
+    所以 `…/?next=http://localhost:3000/x` 里内层那一处同样参与识别（外层不命中也不影响内层）。"""
+    pattern = re.compile(_LEFT_BOUNDARY + re.escape(origin) + "(?=(?P<rest>[" + _URL_CHARS + "]*))")
 
     def _sub(m: re.Match) -> str:
         rest = m.group("rest")
         if rest == "" or rest[0] in "/?#" or set(rest) <= _TRAILING_PUNCT:
-            return base + rest
+            return base
         return m.group(0)
 
     return pattern.sub(_sub, text)

@@ -268,12 +268,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "只有本机运行才用它：--backend cloud 的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定，"
              "在云端执行时给了本 flag 直接以退出码 2 结束",
     )
-    # 隧道暴露本机应用的整套机制（凭据轮换、生命周期、谁负责拆）见 ADR 0035。
+    # 隧道暴露本机应用的整套机制（令牌换 cookie 的鉴权、生命周期、谁负责拆）见 ADR 0035 与 ADR 0051 决策 13。
     run.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="把「本机可达」的被测应用经隧道暴露给云端浏览器：值为 feature 中书写的原始 origin"
-             "（如 http://localhost:3000，也可是局域网地址），gherkai 会起隧道并把 job 文本中该前缀替换为公网 URL"
-             "（含每 run 一换的 basic-auth 凭据）。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
+             "（如 http://localhost:3000，也可是局域网地址），gherkai 会起隧道并把 job 文本中作为地址出现的该值替换成隧道的公网地址；"
+             "访问受本次运行专用的会话保护（引擎的浏览器在第一个场景之前凭令牌换到会话 cookie），运行结束即拆除。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
     )
     run.add_argument(
         "--tunnel", choices=sorted(_tunnel_providers()), default=None,
@@ -2538,7 +2538,7 @@ def _cmd_run(args) -> int:
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
     if use_json:
-        out = redact_deep(render.to_dict(result))  # 定义里的隧道地址带凭据，展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
+        out = redact_deep(render.to_dict(result))  # 定义里的预热地址带令牌、证据里的地址可能带签名类参数：展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
         if artifacts:
             out["artifacts"] = artifacts
         print(json.dumps(out, ensure_ascii=False, indent=2))

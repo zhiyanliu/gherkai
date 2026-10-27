@@ -42,7 +42,7 @@ import { buildInstruction } from "./argument.mjs";
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
 import { errorText, oneLineError } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
-import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV, WarmupFailureError, warmupSession } from "../lib/tunnel-warmup.mjs";
+import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV, WarmupFailureError, warmupFailureOutcome, warmupSession } from "../lib/tunnel-warmup.mjs";
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
 const BROWSER_ID = "aws.browser.v1";
@@ -699,11 +699,12 @@ export async function main(): Promise<number> {
     // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
     // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
     await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false);
-    if (e instanceof WarmupFailureError && !cleanupFailed) {
-      // 会话预热失败（ADR 0051 决策 13、决策 4）：会话已释放；按执行前失败发 scope 级 error、以 0 退出（不是 worker fatal、不是退出码 80）。
-      await eventSink.emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, status: "error",
-        errorType: e.failure.errorType, message: e.failure.message });
-      return 0;
+    if (e instanceof WarmupFailureError) {
+      // 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在上面 cleanup 里释放；归因与 sessionId 恒经 scope_done 传递，释放失败只让退出码为 1
+      // （不是 worker fatal、不是退出码 80）。
+      const { event, exitCode } = warmupFailureOutcome(e.failure, scope.id, sessionId ?? null, cleanupFailed);
+      await eventSink.emit(event as any);
+      return exitCode;
     }
     // 建连重试耗尽（网络瞬时故障）→ 以网络故障退出码退出（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
     if (networkExhausted && !cleanupFailed) {

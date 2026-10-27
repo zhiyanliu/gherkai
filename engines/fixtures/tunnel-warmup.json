@@ -1,5 +1,5 @@
 {
-  "_comment": "隧道「令牌换 cookie」的边缘契约常量（ADR 0051 决策 13）。真源在 runtime/gherkai_runtime/tunnel.py（组合根生成策略与预热地址），两个 worker 各持一份同值（Nova lib/constants.py、Midscene lib/tunnel-warmup.mts），三方测试都读本文件断言相等。titles 是预热页面的 document.title（桌面 worker 读），markers 是正文标记（设备 worker 在控件树里找）。",
+  "_comment": "隧道「令牌换 cookie」的边缘契约常量（ADR 0051 决策 13）。真源在 runtime/gherkai_runtime/tunnel.py（组合根生成策略与预热地址），两个 worker 各持一份同值（Nova lib/constants.py、Midscene lib/tunnel-warmup.mts），三方测试都读本文件断言相等。titles 是预热页面的 document.title（桌面 worker 读），markers 是正文标记（设备 worker 在控件树里找）。 messages 是两个 worker 逐字相同的三句产品语言消息（error_template 里 {attempts} / {reason} 是占位）。",
   "warmup_path": "/.well-known/gherkai-tunnel-auth",
   "check_path": "/.well-known/gherkai-tunnel-check",
   "token_param": "gherkai_tunnel_token",
@@ -20,5 +20,10 @@
     "warmup_url": "GHERKAI_SESSION_WARMUP_URL",
     "extra_http_headers": "GHERKAI_EXTRA_HTTP_HEADERS"
   },
-  "capability_key": "session_warmup"
+  "capability_key": "session_warmup",
+  "messages": {
+    "incomplete_definition": "后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署后再提交",
+    "denied": "隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；请重新提交这次运行",
+    "error_template": "隧道会话预热未能确认就绪（已尝试 {attempts} 次）：{reason}——隧道可能已拆除，或浏览器到隧道入口的网络不通；请确认隧道仍在后重新提交"
+  }
 }

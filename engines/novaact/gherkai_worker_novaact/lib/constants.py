@@ -65,4 +65,4 @@ WARMUP_ATTEMPTS = 3
 INCOMPLETE_DEFINITION_MESSAGE = "后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署后再提交"
 WARMUP_DENIED_MESSAGE = ("隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；"
                          "请重新提交这次运行")
-WARMUP_ERROR_MESSAGE = "隧道会话预热未能确认就绪（已重试 {attempts} 次）：{reason}——隧道可能已拆除或本机应用不可达；请确认隧道仍在后重新提交"
+WARMUP_ERROR_MESSAGE = "隧道会话预热未能确认就绪（已尝试 {attempts} 次）：{reason}——隧道可能已拆除，或浏览器到隧道入口的网络不通；请确认隧道仍在后重新提交"

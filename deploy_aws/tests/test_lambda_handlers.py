@@ -499,8 +499,9 @@ _SENTINEL = object()
 
 
 def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
-              worker_task_defs=_SENTINEL) -> DynamoDBRunStore:
-    """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。"""
+              worker_task_defs=_SENTINEL, extra_http_headers=None, session_warmup_url=None) -> DynamoDBRunStore:
+    """建一个单 job、全 pending 的 run（detached 标记按参数）——同 submit / 同步 cloud run 的 create_run 形态。
+    `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。"""
     store = DynamoDBRunStore(runs_table, detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
@@ -509,7 +510,9 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
     store.create_run(
         RunMeta(run_id="run-1", created_at="t0", jobs=(job,), max_concurrency=max_concurrency,
                 worker_variant="base" if worker_task_defs else None,
-                worker_task_defs=worker_task_defs),
+                worker_task_defs=worker_task_defs,
+                extra_http_headers=tuple(extra_http_headers.items()) if extra_http_headers else None,
+                session_warmup_url=session_warmup_url),
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
     return store
@@ -804,6 +807,25 @@ def test_build_uses_definition_worker_task_defs_verbatim(cloud_env):
     _seed_run(cloud_env["runs"], detached=True)
     engines = reconciler._build("run-1")[3]._resolver("novaact")
     assert engines._task_def == _WORKER_REV
+
+
+def test_build_reads_session_warmup_url_back_into_worker_env(cloud_env):
+    """云端推进器从 definition 读回预热地址（ADR 0051 决策 13）：与额外请求头一起进 FargateEngine 的附加 env、经 RunTask overrides
+    到容器——容器不继承任何宿主 env，漏接这一处 worker 就按 definition 完整性判 precheck_failed，而本机单测里没有别的东西能暴露它。"""
+    import json as _json
+
+    url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
+    _seed_run(cloud_env["runs"], detached=True, extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url)
+    env = reconciler._build("run-1")[3]._resolver("novaact")._extra_env
+    assert env["GHERKAI_SESSION_WARMUP_URL"] == url
+    assert _json.loads(env["GHERKAI_EXTRA_HTTP_HEADERS"]) == {"ngrok-skip-browser-warning": "1"}
+
+
+def test_build_without_tunnel_injects_no_warmup_env(cloud_env):
+    """对偶：不经隧道的 run 不出现预热地址与额外请求头两个键（worker 以「有请求头没预热地址」判 definition 不完整，所以两键必须同在同缺）。"""
+    _seed_run(cloud_env["runs"], detached=True)
+    env = reconciler._build("run-1")[3]._resolver("novaact")._extra_env
+    assert "GHERKAI_SESSION_WARMUP_URL" not in env and "GHERKAI_EXTRA_HTTP_HEADERS" not in env
 
 
 def test_build_marks_run_error_when_definition_lacks_worker_task_defs(cloud_env, capsys):

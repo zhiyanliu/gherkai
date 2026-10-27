@@ -546,7 +546,7 @@ class RunMeta:
     # `GHERKAI_SESSION_WARMUP_URL` 注给 worker，worker 在第一个 scenario 之前导航一次换会话 cookie。载体是 definition 的理由
     # 同 extra_http_headers：起 worker 的宿主与起隧道的 CLI 进程可能不同机器。None 表示不经隧道。core 只搬运、不解释语义；
     # 带令牌，展示层按 ADR 0035 决策 5 脱敏。字段名与 env 名同词。
-    session_warmup_url: str | None = None
+    session_warmup_url: str | None = field(default=None, repr=False)  # 含本次隧道令牌：不进 repr（打印 RunMeta 时不带出来）
 
 
 @dataclass(frozen=True)

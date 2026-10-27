@@ -461,7 +461,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
         if url:
             scope_doc["console_url"] = url
         scopes.append(scope_doc)
-    return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 定义里的隧道地址与证据可能带凭据：整份脱敏（ADR 0035 决策 5）
+    return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 预热地址的令牌与证据里的签名类参数可能出现：整份脱敏（ADR 0035 决策 5）
 
 
 def _device_keys_for_explain(jr: JobResult) -> dict:

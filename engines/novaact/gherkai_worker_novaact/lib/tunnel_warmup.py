@@ -32,18 +32,28 @@ class WarmupFailure:
     message: str
 
 
+class WarmupStopped(Exception):
+    """预热期间收到停止信号（ADR 0024 flag-only 协作停）：调用方按停止路径收尾，不算失败、不发 scope_done。"""
+
+
 def _one_line(text: str) -> str:
     first = next((ln.strip() for ln in str(text).splitlines() if ln.strip()), "")
     return redact_secrets(" ".join(first.split()))[:200]
 
 
-def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sleep, monotonic=time.monotonic) -> WarmupFailure | None:
+def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sleep, monotonic=time.monotonic,
+                   stop: Callable[[], bool] = lambda: False) -> WarmupFailure | None:
     """对 `page` 导航预热地址、等页面标题落成四个标记之一；返回 None 表示就绪，否则返回归因与产品语言的消息。
-    `page` 是 Playwright 同步 Page（Nova SDK 的 nova.page）。"""
+    `page` 是 Playwright 同步 Page（Nova SDK 的 nova.page）。`stop` 是停止信号的判据（调用方传 `_stop.is_set`）、`sleep` 传
+    `_stop.wait`：退避与等标记都能被停止信号唤醒，收到信号即抛 WarmupStopped——预热最坏要一两分钟，不能让 SIGTERM 等满它再撞 SIGKILL。"""
     last = "没有拿到预热页面"
     for attempt in range(WARMUP_ATTEMPTS):
+        if stop():
+            raise WarmupStopped()
         if attempt:
             sleep(min(2.0 * attempt, 5.0))
+            if stop():
+                raise WarmupStopped()
         try:
             resp = page.goto(url, wait_until="domcontentloaded", timeout=WARMUP_NAV_TIMEOUT_MS)
         except Exception as e:  # noqa: BLE001  导航失败（含网络类异常）走 ERROR 路线：有界重试、不向上抛、不进建连重试域
@@ -57,18 +67,18 @@ def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sle
             status = None
         if status == 401:  # 令牌错：预热路径直接 401 页（AUTH REQUIRED）
             return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
-        title = _wait_for_marker(page, sleep=sleep, monotonic=monotonic)
+        title = _wait_for_marker(page, sleep=sleep, monotonic=monotonic, stop=stop)
         if title == WARMUP_TITLES["ready"]:
             return None
         if title in (WARMUP_TITLES["denied"], WARMUP_TITLES["auth_required"]):
             return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
         last = (f"预热页面标记为 {title}" if title == WARMUP_TITLES["error"]
-                else f"预热页面在 {WARMUP_MARKER_WAIT_S:g} 秒内没有给出任何标记（响应状态 {status}，页面标题 {title!r}）")
+                else f"预热页面在 {WARMUP_MARKER_WAIT_S:g} 秒内没有给出任何标记（响应状态 {status if status is not None else '未知'}，页面标题 {title or '空'}）")
         log(f"worker: tunnel warmup not ready (attempt {attempt + 1}): {last}")
     return WarmupFailure("engine_error", WARMUP_ERROR_MESSAGE.format(attempts=WARMUP_ATTEMPTS, reason=last))
 
 
-def _wait_for_marker(page, *, sleep, monotonic) -> str | None:
+def _wait_for_marker(page, *, sleep, monotonic, stop) -> str | None:
     deadline = monotonic() + WARMUP_MARKER_WAIT_S
     title: str | None = None
     while True:
@@ -80,4 +90,6 @@ def _wait_for_marker(page, *, sleep, monotonic) -> str | None:
             return title
         if monotonic() >= deadline:
             return title
+        if stop():
+            raise WarmupStopped()
         sleep(0.25)
