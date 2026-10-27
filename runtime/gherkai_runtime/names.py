@@ -28,7 +28,14 @@ ENGINES = ("novaact", "midscene")
 # 后端 SSM 参数的相对键（全路径为 `ssm_path(prefix, 键)`；参数族真值表见 ADR 0038「SSM 参数与命名真源」、0037 决策 6）。
 # 调用点一律引常量、不写裸字面量——推送方/解析方/IaC/Lambda 拼的必须是同一个键。
 BACKEND_VERSION_KEY = "version"        # 后端版本戳（stack 资源随部署事务写；提交侧 skew 比对读）
-DEVICE_FARM_PROJECT_KEY = "device-farm-project"  # 云端 Device Farm 项目 ARN（deploy 找回或建立后写，ADR 0051 决策 10；提交侧填设备请求时读）
+DEVICE_FARM_PROJECT_KEY = "device-farm-project"
+
+# 安装包在产物桶里的布局与保留承诺（ADR 0051 决策 9）：键前缀、对象标签（部署侧按它配生命周期规则）、过期天数 E 与「已提交 run 引用的对象
+# 至少保留」天数 R；上传侧的复用窗口是 E 减 R。IaC 与上传侧共用这一处定义，改一处两侧同变。
+APP_OBJECT_PREFIX = "apps/"
+APP_OBJECT_TAG = "gherkai=app"       # S3 Tagging 的查询串写法（k=v）
+APP_OBJECT_EXPIRE_DAYS = 14
+APP_OBJECT_RETAIN_DAYS = 7  # 云端 Device Farm 项目 ARN（deploy 找回或建立后写，ADR 0051 决策 10；提交侧填设备请求时读）
 SUBNETS_KEY = "subnets"                # worker 子网 ID 列表
 SECURITY_GROUPS_KEY = "security-groups"  # worker 安全组 ID
 VPC_KEY = "vpc"                       # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）

@@ -1172,15 +1172,10 @@ def _target_rejections(jobs, caps: dict) -> list[str]:
 def _validate_definition(jobs) -> int | None:
     """写 definition 之前的结构校验（ADR 0048 决策 3 的第一处；第二处在推进器读 definition 时）。返回 2 或 None。
 
-    应用目标的安装包位置要由上传那一步补齐（ADR 0051 决策 9，尚未接入）——这一种按产品语言单独拒绝（说清为什么不能、怎么改），
-    否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。其余 DefinitionContractError 只会由 plan 产出的畸形 job 或
-    组合根漏填触发（内部错误、不因使用方输入发生），按契约型异常原样转述（ADR 0039 例外条）。
+    设备请求与应用条目的位置都已由前面的解析与上传填入，走到这里的 DefinitionContractError 只会由 plan 产出的畸形 job 或组合根漏填触发
+    （内部错误、不因使用方输入发生），按契约型异常原样转述（ADR 0039 例外条）。
     """
     for j in jobs:
-        if j.target.app is not None and j.target.app.bucket is None:
-            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能上传安装包，"
-                      f"暂不能运行或提交。要先在网页上执行，去掉这个 scope 的 @app 标签。")
-            return 2
         try:
             validate_job_definition(j)
         except DefinitionContractError as e:
@@ -1250,6 +1245,92 @@ def _fill_device_requests(args, jobs, selections: dict, project_arn: str) -> lis
                                                acquire_timeout_s=acquire_s)
         out.append(replace(j, device_request=request))
     return out
+
+
+def _app_entries(args, jobs) -> "dict | int":
+    """每个应用 job 的安装包（ADR 0053 决策 3 [apps]）：配置文件 [apps.<别名>.<平台>] 的 file（已按配置文件目录绝对化），不存在以退出码 2
+    结束。plan 也调它、只核对存在（零 AWS）；上传在 run / submit。返回 {(别名, 平台): 路径}。"""
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    out: dict = {}
+    for j in jobs:
+        app = j.target.app
+        if app is None:
+            continue
+        entry = cfg.apps.get(app.alias, {}).get(j.target.device)
+        if entry is None:  # plan 层已按 FeatureContractError 拒绝，保险分支
+            _progress(f"scope {j.scope_id!r} 的 @app:{app.alias} 在配置文件里没有 {j.target.device} 平台的条目")
+            return 2
+        if not entry.file.is_file():
+            _progress(f"安装包不存在：{entry.file}（配置文件 [apps.{app.alias}.{j.target.device}] 的 file）")
+            return 2
+        out[(app.alias, j.target.device)] = entry.file
+    return out
+
+
+def _local_app_bucket(args, entries: dict) -> "str | int | None":
+    """本机后端放安装包的 S3 桶（ADR 0053 决策 3）：选项 > 环境变量 > 配置文件 [devices] app-bucket；没有应用 job 返回 None；有而缺失以退出码 2 结束。"""
+    if not entries:
+        return None
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    bucket = (getattr(args, "app_bucket", None) or os.environ.get(_devsel.APP_BUCKET_ENV)
+              or (cfg.devices.app_bucket if cfg.devices is not None else None))
+    if not bucket:
+        _progress("本机运行应用 scope 需要一个放安装包的 S3 桶，但没有指定：请在 gherkai.toml 的 [devices] 里给出 app-bucket，"
+                  f"或用 {_devsel.APP_BUCKET_FLAG} / 环境变量 {_devsel.APP_BUCKET_ENV} 指定。")
+        return 2
+    return bucket
+
+
+def _fill_app_locations(args, jobs, entries: dict, *, bucket: str, managed: bool, region, profile) -> "list | int":
+    """把每个应用 job 的安装包放进桶（按内容哈希，同一文件在一个 run 内只算一次哈希、只传一次）并把 bucket / key / sha256 填进应用条目
+    （ADR 0051 决策 9、0048 决策 3）。失败以退出码 2 结束、不落下半成品 run。"""
+    if not entries:
+        return list(jobs)
+    from datetime import datetime, timezone
+
+    from gherkai_runtime import app_upload
+
+    try:
+        s3 = compose._make_s3_client(region=region, profile=profile)
+    except ImportError as e:
+        _progress(f"上传安装包需要 boto3：{e}")
+        return 2
+    now = datetime.now(timezone.utc)
+    done: dict = {}
+    out = []
+    for j in jobs:
+        app = j.target.app
+        if app is None:
+            out.append(j)
+            continue
+        file = entries[(app.alias, j.target.device)]
+        if (str(file), bucket) not in done:
+            try:
+                loc = app_upload.ensure_app_object(bucket, file, managed=managed, s3=s3, now=now, on_warn=_progress)
+            except app_upload.AppUploadError as e:
+                _progress(str(e))
+                return 2
+            except Exception as e:
+                if compose.is_botocore_error(e):
+                    _progress(f"上传安装包 {file} 到 S3 桶 {bucket} 失败（凭证 / 权限 / 网络）：{e}")
+                    return 2
+                raise
+            done[(str(file), bucket)] = loc
+            _progress(f"安装包 {file.name}：{'已上传到' if loc.uploaded else '复用'} s3://{bucket}/{loc.key}" + ("（已刷新保留期）" if loc.refreshed else ""))
+        loc = done[(str(file), bucket)]
+        out.append(replace(j, target=replace(j.target, app=replace(app, bucket=loc.bucket, key=loc.key, sha256=loc.sha256))))
+    return out
+
+
+def _cloud_app_locations(args, target, jobs) -> "list | int":
+    """云端后端：安装包进部署的产物桶、由本工具管理（打标签、按保留承诺刷新）；选项 / 环境变量 / 配置文件给的应用桶不生效、只提示（ADR 0053 决策 3）。"""
+    entries = getattr(args, "app_entries", {})
+    if not entries:
+        return list(jobs)
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    if getattr(args, "app_bucket", None) or os.environ.get(_devsel.APP_BUCKET_ENV) or (cfg.devices is not None and cfg.devices.app_bucket):
+        _progress(f"注：云端后端把安装包放进部署的产物桶，{_devsel.APP_BUCKET_FLAG}、环境变量 {_devsel.APP_BUCKET_ENV} 与配置文件里的 app-bucket 不生效")
+    return _fill_app_locations(args, jobs, entries, bucket=target.bucket, managed=True, region=target.region, profile=target.profile)
 
 
 def _cloud_device_requests(args, target, jobs) -> "list | int":
@@ -1524,17 +1605,31 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
     if bad is not None:
         return bad
     args.device_selections = selections
+    entries = _app_entries(args, jobs)  # 安装包存在性（零 AWS）：两个后端都在提交前核
+    if isinstance(entries, int):
+        return entries
+    args.app_entries = entries
     if args.backend != "cloud":
-        # 本机后端：项目 ARN 来自选项 / 环境变量 / 配置文件，设备请求在此填入，随后做写 definition 之前的结构校验（ADR 0048 决策 3）
+        # 本机后端：项目 ARN 来自选项 / 环境变量 / 配置文件，设备请求在此填入；安装包放进使用方的应用桶、补齐位置；随后做写 definition
+        # 之前的结构校验（ADR 0048 决策 3）。上传是本块唯一的 AWS 调用，排在全部零副作用校验之后、落库之前。
         project_arn = _local_project_arn(args, selections)
         if isinstance(project_arn, int):
             return project_arn
         if project_arn is not None:
             jobs = _fill_device_requests(args, jobs, selections, project_arn)
+        bucket = _local_app_bucket(args, entries)
+        if isinstance(bucket, int):
+            return bucket
+        if bucket is not None:
+            region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+            jobs = _fill_app_locations(args, jobs, entries, bucket=bucket, managed=False, region=region, profile=profile)
+            if isinstance(jobs, int):
+                return jobs
         bad = _validate_definition(jobs)
         if bad is not None:
             return bad
-    # 云端后端：项目 ARN 读 SSM，放在版本 skew 闸与资源 preflight 之后（各云端分支调 _cloud_device_requests），那里再做写前校验
+    # 云端后端：项目 ARN 读 SSM、安装包进产物桶，放在版本 skew 闸与资源 preflight 之后（各云端分支调 _cloud_device_requests /
+    # _cloud_app_locations），那里再做写前校验
     return jobs, steps_dir
 
 
@@ -1596,6 +1691,8 @@ def _cmd_plan(args) -> int:
     for platform, sel in devices.items():
         if sel is None:
             _progress(_devsel.unspecified_message(platform))
+    if isinstance(_app_entries(args, jobs), int):  # 应用 scope 的安装包只核对存在，不读内容、不算哈希（ADR 0053 决策 3）
+        return 2
 
     # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
     # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
@@ -1938,6 +2035,9 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     run_meta = replace(run_meta, **_worker_meta_fields(resolutions))
     # 设备请求（项目 ARN 读 SSM）与写 definition 之前的结构校验（ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、落库之前
     filled = _cloud_device_requests(args, target, run_meta.jobs)
+    if isinstance(filled, int):
+        return filled
+    filled = _cloud_app_locations(args, target, filled)
     if isinstance(filled, int):
         return filled
     run_meta = replace(run_meta, jobs=tuple(filled))
@@ -2572,6 +2672,9 @@ def _cmd_run(args) -> int:
         run_meta = replace(run_meta, **worker_meta)  # 落进 definition（下面 persistence.begin 写它）
         # 设备请求（项目 ARN 读 SSM）与写 definition 之前的结构校验（ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、begin 之前
         filled = _cloud_device_requests(args, target, run_meta.jobs)
+        if isinstance(filled, int):
+            return filled
+        filled = _cloud_app_locations(args, target, filled)
         if isinstance(filled, int):
             return filled
         jobs = list(filled)

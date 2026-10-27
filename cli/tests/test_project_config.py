@@ -306,6 +306,7 @@ def test_devices_and_apps_parse_into_typed_config(tmp_path):
 
 def test_apps_table_reaches_plan_as_alias_to_app_id(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
+    (tmp_path / "app.apk").write_bytes(b"x")   # plan 只核对安装包存在
     _toml(tmp_path, "[apps.wiki]\nandroid = { file = 'app.apk', package = 'org.wikipedia' }\n")
     monkeypatch.setattr(compose, "query_capabilities", _android_caps)
     monkeypatch.setattr(compose, "match_deterministic", _no_match)
@@ -469,3 +470,101 @@ def test_cloud_submit_reads_project_arn_from_ssm_after_preflight_and_rejects_whe
     assert m.main(["submit", str(feat), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-"]) == 2
     assert "部署未启用设备支持" in capsys.readouterr().err
     assert len(made["ddb_tables"]) == tables_before   # 没落库
+
+
+# ---- 应用安装包：定位、上传与填位置（ADR 0051 决策 9、ADR 0048 决策 3）----
+
+APP_FEATURE_TWO_SCOPES = ("Feature: F\n  @scope:a @device:android @app:wiki\n  Scenario: a\n    When \"做事\"\n"
+                          "  @scope:b @device:android @app:wiki\n  Scenario: b\n    When \"做事\"\n")
+
+
+class _UploadS3:
+    """假 S3 client：对象不存在（404）→ 记录 upload_file 入参。"""
+
+    def __init__(self):
+        self.uploads: list = []
+
+    def head_object(self, **kw):
+        from botocore.exceptions import ClientError
+        raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject")
+
+    def upload_file(self, Filename, Bucket, Key, ExtraArgs=None):
+        self.uploads.append((Filename, Bucket, Key, ExtraArgs))
+
+
+def _app_project(tmp_path: Path, *, app_bucket: str | None = "my-apps") -> Path:
+    (tmp_path / "build").mkdir(exist_ok=True)
+    (tmp_path / "build" / "app.apk").write_bytes(b"apk-bytes")
+    bucket_line = f"app-bucket = '{app_bucket}'\n" if app_bucket else ""
+    _toml(tmp_path, (f"[devices]\nproject-arn = '{PROJECT_ARN}'\n{bucket_line}[devices.android]\narn = '{DEV_ARN}'\n"
+                     "[apps.wiki]\nandroid = { file = 'build/app.apk', package = 'org.wikipedia' }\n"))
+    return tmp_path / "build" / "app.apk"
+
+
+def test_local_run_uploads_each_installer_once_and_fills_app_location(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    apk = _app_project(tmp_path)
+    s3 = _UploadS3()
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    reports = tmp_path / "r"
+    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0
+    sha = hashlib.sha256(b"apk-bytes").hexdigest()
+    assert s3.uploads == [(str(apk), "my-apps", f"apps/{sha}/app.apk", None)]   # 两个 scope 同一文件：只传一次、本机桶不打标签
+    meta = json.loads(next(reports.glob("*/run_meta.json")).read_text(encoding="utf-8"))
+    for job in meta["jobs"]:
+        assert job["target"]["app"] == {"alias": "wiki", "app_id": "org.wikipedia", "bucket": "my-apps", "key": f"apps/{sha}/app.apk", "sha256": sha}
+    assert "已上传到 s3://my-apps/" in capsys.readouterr().err
+
+
+def test_missing_installer_exits_2_in_plan_and_run(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _app_project(tmp_path)
+    (tmp_path / "build" / "app.apk").unlink()
+    feat = _feature(tmp_path, APP_FEATURE_TWO_SCOPES)
+    assert m.main(["plan", str(feat)]) == 2
+    assert "安装包不存在" in capsys.readouterr().err
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--no-report"]) == 2
+    assert "[apps.wiki.android]" in capsys.readouterr().err
+
+
+def test_local_app_run_without_bucket_exits_2(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path, app_bucket=None)
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--no-report"]) == 2
+    err = capsys.readouterr().err
+    assert "app-bucket" in err and "--app-bucket" in err and "GHERKAI_APP_BUCKET" in err
+
+
+def test_cloud_submit_puts_installer_in_artifacts_bucket_with_tag(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from test_backend_cloud import _definition, _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)   # 配置里的 app-bucket 在云端不生效
+    record: list = []
+    _, made, _ = _patch_cloud_handles(monkeypatch, record)
+    s3 = _UploadS3()
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+    monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: "arn:aws:devicefarm:us-west-2:333333333333:project:cloud")
+    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-"]) == 0
+    err = capsys.readouterr().err
+    assert "app-bucket 不生效" in err
+    sha = hashlib.sha256(b"apk-bytes").hexdigest()
+    assert len(s3.uploads) == 1 and s3.uploads[0][1:] == ("p-artifacts", f"apps/{sha}/app.apk", {"Tagging": "gherkai=app"})
+    d = _definition(made["ddb_tables"][0])
+    assert d["jobs"][0]["target"]["app"]["bucket"] == "p-artifacts" and d["jobs"][0]["target"]["app"]["sha256"] == sha

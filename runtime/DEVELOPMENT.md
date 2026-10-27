@@ -33,6 +33,7 @@
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
+- `app_upload.py` —— 安装包上传到 S3 应用前缀（ADR 0051 决策 9）：按内容哈希定键、managed 桶打标签与按保留承诺同键刷新、本机应用桶只做存在性复用；s3 client 由调用方注入
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
   避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
   **唯一归一化与校验点**，ADR 0038）
