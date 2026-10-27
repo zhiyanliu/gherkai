@@ -934,3 +934,22 @@ test("模型家族推不出 → worker 启动期即非零退出，连自述入�
   // stdout 无 JSON 载荷，说明校验真的排在入口分派之前（挪到建连时这里会照出一个完整自述对象、rc 也回 0）。
   assert.equal(/[{[]/.test(out), false, `stdout 不该有 JSON 载荷：${out}`);
 });
+
+test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用任何 handler、走 AI 分支、不记 error（ADR 0050 决策 1；0049 决策 9）", async () => {
+  const { runStep } = await importMod();
+  const { deterministic, _clear, match } = await import("./deterministic.mjs");
+  let called = 0;
+  deterministic("设备专用 (?<x>.+)", { webdriver: { uiKinds: ["app"], devices: ["android"], handler: () => { called += 1; } } },
+    { description: "测试：只有设备句柄", example: "When 设备专用 x" });
+  try {
+    assert.ok(match("设备专用 x"), "文本确实命中这条模式");
+    const { agent, calls } = fakeAgent();
+    assert.equal(await runStep(agent, fakePage, "sc:0", step("When", "设备专用 x"), 1, testSink), "passed");
+    assert.deepEqual(calls, ["aiAct"]);  // 走了 AI
+    assert.equal(called, 0);  // 没把 page 喂给 webdriver handler
+    assert.equal(events().filter((e) => e.type === "step_done").at(-1).status, "passed");
+  } finally {
+    _clear();
+    await import("./deterministic.steps.mjs");  // 其它测试还要内建导航条目：清表后重新导入不会再注册（ESM 缓存），故只在本文件末尾放本用例
+  }
+});

@@ -11,6 +11,7 @@ import {
   deterministic,
   match,
   matchBatch,
+  selectHandler,
   _clear,
   DeterministicConflict,
   DeterministicAssertion,
@@ -47,7 +48,9 @@ test("handler 抛 DeterministicAssertion 可被识别为 failed", () => {
   }, { description: "测试", example: "Then 测试" });
   const hit = match("必假");
   assert.ok(hit);
-  assert.throws(() => hit!.handler({ page: {} as any }, hit!.groups), DeterministicAssertion);
+  const sel = selectHandler(hit!, { device: "desktop", uiKind: "web" });
+  assert.equal(sel?.kind, "playwright");
+  assert.throws(() => (sel as any).fn({ page: {} as any }, hit!.groups), DeterministicAssertion);
 });
 
 test("无具名组 → groups 为空对象", () => {
@@ -143,4 +146,91 @@ test("注册表语义的跨语言对拍：同一组注册输入，清单的 keyw
     const item = "keyword" in p ? { keyword: p.keyword, text: p.text } : p.text;
     assert.deepEqual(matchBatch([item]), [sub(p.expect)], JSON.stringify(p));
   }
+});
+
+// ---- 多句柄注册面（ADR 0050 决策 1）：跨语言 fixture、单函数兼容、按目标选句柄、不顺延 ----
+
+const HANDLES_FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/deterministic-handles.json");
+const META = { description: "d", example: "Given e" };
+
+/** fixture 的 handlers 是协议面方言（snake_case、<fn> 占位）：换成 TS 注册面的形态。 */
+function toHandlers(v: unknown): any {
+  if (v === "<fn>") return () => {};
+  if (v === "<not-a-function>") return 42;
+  if (Array.isArray(v)) return v.map(toHandlers);
+  if (v && typeof v === "object") {
+    return Object.fromEntries(Object.entries(v).map(([k, x]) => [k === "ui_kinds" ? "uiKinds" : k, toHandlers(x)]));
+  }
+  return v;
+}
+
+test("多句柄注册的跨语言对拍：同一组注册输入推出的 targets 与 Nova 侧逐字节一致；非法输入两侧都在注册期失败（ADR 0050 决策 1）", () => {
+  const fx = JSON.parse(fs.readFileSync(HANDLES_FIXTURE, "utf8")) as {
+    valid: Array<{ name: string; handlers: unknown; targets: unknown }>;
+    invalid: Array<{ name: string; handlers: unknown; error_contains: string }>;
+  };
+  for (const c of fx.valid) {
+    _clear();
+    deterministic("p", toHandlers(c.handlers), META);
+    assert.deepEqual(listRegistry()[0].targets, c.targets, c.name);
+  }
+  for (const c of fx.invalid) {
+    _clear();
+    assert.throws(() => deterministic("p", toHandlers(c.handlers), META),
+      (e: Error) => e.message.includes(c.error_contains), `${c.name}：消息应含「${c.error_contains}」`);
+    assert.equal(listRegistry().length, 0, `${c.name}：注册失败不该留下条目`);
+  }
+});
+
+test("单函数写法保持有效：targets 恰为 desktop/web，selectHandler(desktop/web) 返回它本身（ADR 0050 决策 1；0049 决策 2）", () => {
+  const fn = () => {};
+  deterministic("单函数", fn, META);
+  assert.deepEqual(listRegistry()[0].targets, [{ device: "desktop", ui_kinds: ["web"] }]);
+  const hit = match("单函数")!;
+  assert.deepEqual(selectHandler(hit, { device: "desktop", uiKind: "web" }), { kind: "playwright", fn });
+  assert.equal(selectHandler(hit, { device: "android", uiKind: "web" }), null);
+});
+
+test("不顺延红线：命中与目标无关——只写 webdriver 的 A 与写 playwright 的 B 同时命中仍是冲突；只命中 A 时桌面上取不到句柄返回 null、不回落到 B；matchBatch 形态不变", () => {
+  deterministic("地址(?<a>.+)", { webdriver: { uiKinds: ["app"], devices: ["android"], handler: () => {} } }, META);
+  deterministic("(?<b>地址.+)", () => {}, META);
+  assert.throws(() => match("地址匹配 x"), DeterministicConflict);
+  _clear();
+  deterministic("地址(?<a>.+)", { webdriver: { uiKinds: ["app"], devices: ["android"], handler: () => {} } }, META);
+  deterministic("别的(?<b>.+)", () => {}, META);
+  const hit = match("地址匹配 x")!;
+  assert.equal(selectHandler(hit, { device: "desktop", uiKind: "web" }), null);
+  assert.equal(selectHandler(hit, { device: "android", uiKind: "web" }), null);  // 条目只覆盖 android/app
+  assert.equal(selectHandler(hit, { device: "ios", uiKind: "app" }), null);
+  assert.equal(selectHandler(hit, { device: "android", uiKind: "app" })?.kind, "webdriver");
+  assert.deepEqual(matchBatch([{ keyword: "When", text: "地址匹配 x" }]), [{ pattern: "地址(?<a>.+)", description: "d" }]);  // 无 targets 字段
+});
+
+test("地址核对的 webdriver 写法：requires web_context 的条目推出 desktop 无前提加 android / ios 带前提；用伪 ctx 调 handler 两向判定（ADR 0050 决策 1、2）", async () => {
+  deterministic('页面地址匹配 "(?<pattern>[^"]+)"', {
+    playwright: ({ page }, { pattern }) => { if (!new RegExp(pattern).test(page.url())) throw new DeterministicAssertion("地址不匹配"); },
+    webdriver: [{ uiKinds: ["web"], requires: ["web_context"], handler: async (ctx, { pattern }) => ctx.withWebContext(async () => {
+      const url = await ctx.driver.getUrl();
+      if (!new RegExp(pattern).test(url)) throw new DeterministicAssertion(`地址 ${url} 不匹配 ${pattern}`);
+    }) }],
+  }, { description: "核对当前页面地址", example: 'Then 页面地址匹配 "/wiki/OpenAI"', keywords: ["Then"] });
+  assert.deepEqual(listRegistry()[0].targets, [
+    { device: "desktop", ui_kinds: ["web"] },
+    { device: "android", ui_kinds: ["web"], requires: ["web_context"] },
+    { device: "ios", ui_kinds: ["web"], requires: ["web_context"] },
+  ]);
+  const hit = match('页面地址匹配 "/wiki/OpenAI"', "Then")!;
+  const sel = selectHandler(hit, { device: "android", uiKind: "web" });
+  assert.equal(sel?.kind, "webdriver");
+  assert.deepEqual((sel as any).requires, ["web_context"]);
+  assert.equal(selectHandler(hit, { device: "android", uiKind: "app" }), null);
+  const entered: string[] = [];
+  const ctx = (url: string) => ({
+    driver: { getUrl: async () => url } as any, device: { platform: "android", osVersion: "14", scale: 1 }, uiKind: "web", appId: null, app: null,
+    log: () => {}, withWebContext: async <T,>(fn: () => Promise<T> | T) => { entered.push("in"); try { return await fn(); } finally { entered.push("out"); } },
+  });
+  await (sel as any).fn(ctx("https://x.example/wiki/OpenAI"), hit.groups);
+  assert.deepEqual(entered, ["in", "out"]);
+  await assert.rejects(() => (sel as any).fn(ctx("https://x.example/other"), hit.groups), DeterministicAssertion);
+  assert.deepEqual(entered, ["in", "out", "in", "out"]);  // 抛错也切回
 });

@@ -398,14 +398,17 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
             sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
                        "status": "error", "errorType": "engine_error", "message": _one_line(str(reg_err))})
             return "error"
-        if hit is not None:
+        # 命中之后按当前目标取句柄（ADR 0050 决策 1）：本引擎只有桌面路径 desktop/web；命中的模式在这个目标上没有句柄（只写了
+        # webdriver 条目的 Python step）→ 走 AI、不调用任何 handler、不记 error、不顺延到别的模式（ADR 0049 决策 9）。
+        selected = _deterministic.select_handler(hit, "desktop", "web") if hit is not None else None
+        if selected is not None:
             if step.get("argument") is not None:
                 # 确定性 handler 不接收多行参数（ADR 0024）：带了即记 error，不静默忽略
                 sink.emit({"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
                            "status": "error", "errorType": "engine_error",
                            "message": f"确定性 step 不接受多行参数（DataTable / DocString）：{text}"})
                 return "error"
-            handler, groups = hit
+            handler, groups = selected[1], hit.groups
             ctx = _DeterministicCtx(nova)
             try:
                 ret = handler(ctx, **groups)

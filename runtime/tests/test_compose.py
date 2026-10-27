@@ -1646,3 +1646,14 @@ def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env
         with pytest.raises(RuntimeError, match="格式版本"):
             compose.query_capabilities("novaact")
         assert compose._CAPABILITIES_CACHE == {}
+
+
+def test_step_targets_from_registry_fixture_pass_the_cli_contract_check():
+    """worker 由句柄推出的 step 级 targets（跨语言 fixture 的全部合法用例）都能通过 CLI 唯一的自述契约校验（ADR 0049 决策 1、0050 决策 1）：
+    两侧 worker 的输出形态与 CLI 的接受形态由同一份 fixture 串起来，推出规则改了而契约没跟上会在这里红。"""
+    import json
+    from pathlib import Path
+
+    fx = json.loads((Path(__file__).resolve().parents[2] / "engines" / "fixtures" / "deterministic-handles.json").read_text(encoding="utf-8"))
+    for case in fx["valid"]:
+        compose._validate_targets("midscene", case["targets"], where=f"确定性 step（{case['name']}）", top_level=False)

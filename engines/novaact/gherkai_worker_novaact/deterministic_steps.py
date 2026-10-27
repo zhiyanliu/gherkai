@@ -25,6 +25,8 @@ handler 约定（见 `deterministic.py`）：
   - 签名 `def h(ctx, **groups)`：ctx.page 是 Playwright Page、ctx.navigate(url) 是引擎的导航原语；
     groups 是正则具名组 (?P<name>...)。
   - 判定失败抛 AssertionError → step 记 failed；抛其它 → error。
+  - 多句柄形态（`deterministic(pattern, {'playwright': fn, 'webdriver': [...]}, description=…, example=…)`，ADR 0050 决策 1）
+    本引擎接受、同一套注册期校验，但没有设备路径：webdriver 条目只进自述清单、不被调用（ADR 0049 决策 9），故本文件不示范。
 
 Midscene 侧的对齐脚手架见 `@gherkai/worker-midscene` 的 `worker/deterministic.steps` 模块。
 """

@@ -291,6 +291,8 @@ PROSE_DOCUMENTED_KEYS = frozenset({
 # 形如键但不是键的 token：引擎名、状态值、错误码、doctor 的段名与项名、目录名、子命令名、JSON 字面量。
 # 命中未登记的即红，逼人显式登记（写 skill 时随手加一个反引号词，很容易实际是把键名记错了）。
 NON_KEY_TOKENS = frozenset({
+    # webdriver 句柄 ctx 的字段名（references/engines.md 第 3 节）：handler 的入参，不是 CLI JSON 的键
+    "driver", "log",
     # 引擎名
     "novaact", "midscene",
     # skill 正文里举的 scope 通名反例（教人别用的名字，不是键）

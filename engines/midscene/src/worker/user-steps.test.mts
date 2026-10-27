@@ -195,3 +195,36 @@ test("实际运行: 一条都不注册的 steps 文件 → 非零退出 + 点名
   assert.notEqual(code, 0);
   assert.match(err, /noop\.mts 一条确定性 step 都没注册/);
 });
+
+test("实际运行: 使用方 steps 文件用多句柄形态注册 → --capabilities 的 targets 带设备条目（ADR 0050 决策 1；0037 决策 4）", async () => {
+  const root = tmpSteps({
+    "multi.mts": `import { deterministic, DeterministicAssertion } from "@gherkai/worker-midscene";
+import type { WebdriverCtx } from "@gherkai/worker-midscene";
+deterministic('页面地址匹配 "(?<pattern>[^"]+)"', {
+  playwright: ({ page }, { pattern }) => { if (!new RegExp(pattern).test(page.url())) throw new DeterministicAssertion("x"); },
+  webdriver: [{ uiKinds: ["web"], requires: ["web_context"], handler: async (ctx: WebdriverCtx, { pattern }) =>
+    ctx.withWebContext(async () => { if (!new RegExp(pattern).test(await ctx.driver.getUrl())) throw new DeterministicAssertion("x"); }) }],
+}, { description: "d", example: 'Then 页面地址匹配 "/x"', keywords: ["Then"] });\n`,
+  });
+  const { code, out, err } = await runBin(root);
+  assert.equal(code, 0, `应以退出码 0 结束，stderr=${err}`);
+  const entry = JSON.parse(out).deterministic_steps.find((e: { pattern: string }) => e.pattern === '页面地址匹配 "(?<pattern>[^"]+)"');
+  assert.deepEqual(entry.targets, [
+    { device: "desktop", ui_kinds: ["web"] },
+    { device: "android", ui_kinds: ["web"], requires: ["web_context"] },
+    { device: "ios", ui_kinds: ["web"], requires: ["web_context"] },
+  ]);
+});
+
+test("实际运行: 注册期校验失败的 steps 文件（两个条目覆盖同一组合）→ 非零退出 + 点名该文件（ADR 0050 决策 1；0037 决策 4）", async () => {
+  const root = tmpSteps({
+    "overlap.mts": `import { deterministic } from "@gherkai/worker-midscene";
+deterministic("重叠", { webdriver: [{ devices: ["android"], handler: () => {} }, { uiKinds: ["web"], devices: ["android"], handler: () => {} }] },
+  { description: "d", example: "When 重叠" });\n`,
+  });
+  const { code, out, err } = await runBin(root);
+  assert.notEqual(code, 0, "注册期校验失败必须非零退出");
+  assert.match(err, /overlap\.mts/);
+  assert.match(err, /覆盖同一个/);
+  assert.equal(out, "");
+});

@@ -31,6 +31,8 @@ deterministic(
 
 用 `gherkai list-deterministic --engine midscene --steps-dir ./steps` 查当前注册了哪些。
 
+同一条 step 要在设备目标上也执行时，第二个参数换成按句柄种类分键的对象 `{ playwright, webdriver: [...] }`，写法与字段见下面「确定性 step 的完整写法」一页。
+
 ## 文档
 
 - 装什么、要哪些 AWS 前置、第一次怎么完整运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md

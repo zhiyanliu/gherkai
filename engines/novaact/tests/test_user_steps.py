@@ -261,3 +261,39 @@ def _clean_env() -> dict:
 
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     return {k: v for k, v in os.environ.items() if k in keep}
+
+
+def test_capabilities_subprocess_reports_targets_of_multi_handle_registration(tmp_path):
+    """真子进程：使用方 steps 文件用多句柄形态注册 → `--capabilities` 的 deterministic_steps 条目带设备目标（ADR 0050 决策 1；0037 决策 4）。"""
+    (tmp_path / "multi.py").write_text(
+        "from gherkai_worker_novaact.deterministic import deterministic\n"
+        "def on_desktop(ctx, pattern):\n    pass\n"
+        "def on_device(ctx, pattern):\n    pass\n"
+        "deterministic(r'页面地址匹配 \"(?P<pattern>[^\"]+)\"', {'playwright': on_desktop,\n"
+        "              'webdriver': [{'ui_kinds': ['web'], 'requires': ['web_context'], 'handler': on_device}]},\n"
+        "              description='d', example='Then 页面地址匹配 \"/x\"', keywords=('Then',))\n",
+        encoding="utf-8")
+    proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
+                          capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)})
+    assert proc.returncode == 0, proc.stderr.decode()[-500:]
+    caps = json.loads(proc.stdout.decode("utf-8"))
+    entry = next(e for e in caps["deterministic_steps"] if e["pattern"] == r'页面地址匹配 "(?P<pattern>[^"]+)"')
+    assert entry["targets"] == [{"device": "desktop", "ui_kinds": ["web"]},
+                                {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]},
+                                {"device": "ios", "ui_kinds": ["web"], "requires": ["web_context"]}]
+    assert entry["keywords"] == ["Then"]
+
+
+def test_registration_validation_failure_makes_loader_exit_nonzero_naming_file(tmp_path):
+    """注册期校验失败（两个条目覆盖同一组合）按加载失败处理：worker 非 0 退出、stderr 点名文件（ADR 0050 决策 1；0037 决策 4）。"""
+    (tmp_path / "overlap.py").write_text(
+        "from gherkai_worker_novaact.deterministic import deterministic\n"
+        "def h(ctx):\n    pass\n"
+        "deterministic('重叠', {'webdriver': [{'devices': ['android'], 'handler': h}, {'ui_kinds': ['web'], 'devices': ['android'], 'handler': h}]},\n"
+        "              description='d', example='When 重叠')\n", encoding="utf-8")
+    proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact", "--capabilities"],
+                          capture_output=True, timeout=60, env={**_clean_env(), "GHERKAI_STEPS_DIR": str(tmp_path)})
+    assert proc.returncode == EX_STEPS_LOAD, (proc.returncode, proc.stderr.decode()[-500:])
+    err = proc.stderr.decode("utf-8")
+    assert "overlap.py" in err and "覆盖同一个" in err
+    assert proc.stdout.decode("utf-8").strip() == ""

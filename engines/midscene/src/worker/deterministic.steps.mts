@@ -37,6 +37,8 @@ import { deterministic } from "./deterministic.mjs";
 export const ADDRESS_PATTERN = String.raw`^[ \t\r\n\f\v\u00a0\u3000]*(?<q1>"?)(?<url>[A-Za-z][A-Za-z0-9+.\-]*://[^" \t\r\n\f\v\u00a0\u3000]+)(?:(?<q2>")|(?<![.,;:!?)\]}。，、；：！？）】」』〉》］｝〕．…”’〗]))[ \t\r\n\f\v\u00a0\u3000]*$`;
 export const WEB_SCHEMES = ["http", "https"];
 
+// 内建导航目前只有 playwright 句柄（桌面网页）；设备目标上的导航（应用目标经 DeepLink 交给被测应用、网页目标按能力探测择路，
+// ADR 0048 决策 7、0052 决策 4）作为同一条目的 webdriver 句柄随设备模块加入。多句柄写法见 `deterministic.mts` 头注释与 index.mts 示例。
 deterministic(
   ADDRESS_PATTERN,
   async ({ navigate }, { q1, url, q2 }) => {

@@ -427,3 +427,19 @@ def test_failed_act_without_metadata_has_no_cost(captured):
     nova = _FakeNova(act_raises=ConnectionError("reset"))
     assert rs._run_step(nova, "sc:0", _step("When", '"做事"'), 1, captured) == "error"
     assert "cost" not in _done(captured)
+
+
+def test_hit_with_only_webdriver_handler_goes_to_ai_on_desktop(captured):
+    """命中只有 webdriver 句柄的 step（ADR 0050 决策 1；0049 决策 9）：本引擎没有设备路径，不调用任何 handler、走 AI 分支、不记 error。"""
+    called = []
+    saved = list(_d._REGISTRY)
+    try:
+        _d.deterministic(r"设备专用 (?P<x>.+)", {"webdriver": {"ui_kinds": ["app"], "devices": ["android"], "handler": lambda ctx, **g: called.append(1)}},
+                         description="测试：只有设备句柄", example="When 设备专用 x")
+        assert _d.match("设备专用 x") is not None  # 文本确实命中这条模式
+        nova = _FakeNova()
+        assert rs._run_step(nova, "sc:0", _step("When", "设备专用 x"), 1, captured) == "passed"
+        assert nova.calls[0][0] == "act" and called == []  # 走了 AI、没把 page 喂给 webdriver handler
+        assert _done(captured)["status"] == "passed"
+    finally:
+        _d._REGISTRY[:] = saved

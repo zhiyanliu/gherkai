@@ -23,8 +23,11 @@ def test_register_and_match_with_named_groups():
     d.deterministic(r'页面地址匹配 "(?P<pattern>.+)"', description="测试", example="Then 测试")(lambda ctx, pattern: seen.append(pattern))
     hit = d.match('页面地址匹配 "/wiki/OpenAI"')
     assert hit is not None
-    handler, groups = hit
-    assert groups == {"pattern": "/wiki/OpenAI"}
+    assert hit.groups == {"pattern": "/wiki/OpenAI"}
+    kind, handler = d.select_handler(hit, "desktop", "web")  # 装饰器写法等价于只有 playwright 句柄
+    assert kind == "playwright"
+    handler(object(), **hit.groups)
+    assert seen == ["/wiki/OpenAI"]
 
 
 def test_miss_returns_none():
@@ -49,16 +52,16 @@ def test_handler_assertion_propagates():
 
     hit = d.match("必假")
     assert hit is not None
-    handler, groups = hit
+    _kind, handler = d.select_handler(hit, "desktop", "web")
     with pytest.raises(AssertionError, match="故意失败"):
-        handler(object(), **groups)
+        handler(object(), **hit.groups)
 
 
 def test_no_named_groups_empty_dict():
     d.deterministic(r"固定文本", description="测试", example="Then 测试")(lambda ctx: None)
     hit = d.match("固定文本")
     assert hit is not None
-    _, groups = hit
+    groups = hit.groups
     assert groups == {}
 
 
@@ -212,3 +215,71 @@ def test_worker_match_steps_mode_real_subprocess():
     assert got[1] == {"keyword_mismatch": got[0]["pattern"], "keywords": ["Given", "When"]}  # Then 后只有地址
     assert got[2] is None  # 句子里还有别的内容 → 不是导航、走 AI
     assert got[3] is not None and got[3]["pattern"] == got[0]["pattern"]  # 旧形态的裸字符串仍可用
+
+
+# ---- 多句柄注册面（ADR 0050 决策 1）：跨语言 fixture、单函数兼容、按目标选句柄、不顺延 ----
+
+def _handles_fixture():
+    import json as _json
+    from pathlib import Path
+    return _json.loads((Path(__file__).resolve().parents[2] / "fixtures" / "deterministic-handles.json").read_text(encoding="utf-8"))
+
+
+def _to_handlers(v):
+    """fixture 的 handlers 是协议面方言（snake_case 与 Python 同词；<fn> 占位）：换成 Python 注册面的形态。"""
+    if v == "<fn>":
+        return lambda ctx, **groups: None
+    if v == "<not-a-function>":
+        return 42
+    if isinstance(v, list):
+        return [_to_handlers(x) for x in v]
+    if isinstance(v, dict):
+        return {k: _to_handlers(x) for k, x in v.items()}
+    return v
+
+
+def test_multi_handle_registration_cross_engine_fixture():
+    """多句柄注册的跨语言对拍（ADR 0050 决策 1）：同一组注册输入推出的 targets 与 Midscene 侧逐字节一致（固定写出顺序）；
+    非法输入两侧都在注册期失败、消息含同一片段。"""
+    fx = _handles_fixture()
+    for c in fx["valid"]:
+        d.clear()
+        d.deterministic("p", _to_handlers(c["handlers"]), description="d", example="Given e")
+        assert d.list_registry()[0]["targets"] == c["targets"], c["name"]
+    for c in fx["invalid"]:
+        d.clear()
+        with pytest.raises(ValueError) as ei:
+            d.deterministic("p", _to_handlers(c["handlers"]), description="d", example="Given e")
+        assert c["error_contains"] in str(ei.value), (c["name"], str(ei.value))
+        assert d.list_registry() == [], c["name"]
+
+
+def test_decorator_form_is_playwright_only_and_select_handler_by_target():
+    """装饰器写法保持有效：targets 恰为 desktop/web，select_handler(desktop, web) 返回它本身，设备目标上取不到（ADR 0050 决策 1；0049 决策 2）。"""
+    @d.deterministic(r"单函数", description="d", example="Given e")
+    def fn(ctx):
+        pass
+
+    assert d.list_registry()[0]["targets"] == [{"device": "desktop", "ui_kinds": ["web"]}]
+    hit = d.match("单函数")
+    assert d.select_handler(hit, "desktop", "web") == ("playwright", fn)
+    assert d.select_handler(hit, "android", "web") is None
+
+
+def test_no_fallthrough_hit_is_target_independent_and_select_returns_none():
+    """不顺延红线（ADR 0050 决策 1；0049 决策 3、9）：只写 webdriver 的 A 与写 playwright 的 B 同时命中仍是冲突；只命中 A 时桌面上取不到
+    句柄返回 None、不回落到 B；match_batch 形态不变（无 targets 字段）。本引擎没有设备路径，这类 step 永远走 AI、靠 targets 自述让人看见。"""
+    wd = lambda ctx, **groups: None
+    d.deterministic(r"地址(?P<a>.+)", {"webdriver": {"ui_kinds": ["app"], "devices": ["android"], "handler": wd}}, description="d", example="Given e")
+    d.deterministic(r"(?P<b>地址.+)", lambda ctx, **groups: None, description="d", example="Given e")
+    with pytest.raises(d.DeterministicConflict):
+        d.match("地址匹配 x")
+    d.clear()
+    d.deterministic(r"地址(?P<a>.+)", {"webdriver": {"ui_kinds": ["app"], "devices": ["android"], "handler": wd}}, description="d", example="Given e")
+    d.deterministic(r"别的(?P<b>.+)", lambda ctx, **groups: None, description="d", example="Given e")
+    hit = d.match("地址匹配 x")
+    assert hit is not None and hit.groups == {"a": "匹配 x"}
+    assert d.select_handler(hit, "desktop", "web") is None
+    assert d.select_handler(hit, "android", "web") is None  # 条目只覆盖 android/app
+    assert d.select_handler(hit, "android", "app") == ("webdriver", wd, ())
+    assert d.match_batch([{"keyword": "When", "text": "地址匹配 x"}]) == [{"pattern": r"地址(?P<a>.+)", "description": "d"}]

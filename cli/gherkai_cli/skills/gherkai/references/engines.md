@@ -65,6 +65,7 @@ deterministic(
 
 共同规则：
 
+- webdriver 句柄（设备目标）的 ctx 有七个字段：`driver`（WebdriverIO 客户端，step 结束后不可再用）、`device`（platform / osVersion / scale）、`uiKind`、`appId` 与 `app`（只在应用目标上有值，`app.restart()` 重启被测应用）、`log`、`withWebContext(fn)`（切进被测对象的网页上下文执行、结束后切回）；step 结束时会话须处在原生上下文。Nova Act 没有设备路径，Python 侧的 webdriver 条目只进清单、不被调用。
 - 签名为 `(ctx, 具名组…)`：Nova 是 `handler(ctx, **groups)`，Midscene 是 `(ctx, groups) => …`；`ctx.page` 都是 Playwright 的 Page，具名组 Python 写 `(?P<name>…)`、JS 写 `(?<name>…)`。**Nova 的 handler 必须是同步函数**（不能 `async def`——写成 async 的那一步直接记 error，不会静默通过）；Midscene 的可以是 async 箭头函数（上面示例就是）。要写异步判定，只能落在 Midscene 侧。
 - `description` / `example` **必填**：它们就是 `gherkai list-deterministic` 的「示例」「说明」两列与 `gherkai plan` 命中标注里的那句说明，缺了启动即报错、点名 pattern。
 - 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）时该步判 **failed**；抛其它异常时判 **error**。

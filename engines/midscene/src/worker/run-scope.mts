@@ -36,7 +36,7 @@ import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/
 import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
-import { match as matchDeterministic, DeterministicAssertion, DeterministicConflict, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
+import { match as matchDeterministic, selectHandler, DeterministicAssertion, DeterministicConflict, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
@@ -808,7 +808,11 @@ async function runStep(
       }
       throw e;
     }
-    if (hit) {
+    // 命中之后按当前目标取句柄（ADR 0050 决策 1）：本 worker 的桌面路径只有 desktop/web；命中的 pattern 在这个目标上没有句柄
+    // （只写了 webdriver 条目的 step）→ 走 AI、不调用任何 handler、不记 error、不顺延到别的 pattern。设备路径的 requires 前置
+    // 判定与 WebdriverCtx 构造随设备模块落在它自己的派发里（ADR 0048 决策 6）。
+    const selected = hit ? selectHandler(hit, { device: "desktop", uiKind: "web" }) : null;
+    if (selected !== null && selected.kind === "playwright") {
       if (step.argument != null) {
         // 确定性 handler 不接收多行参数（ADR 0024）：带了即记 error，不静默忽略
         await sink.emit({ type: "step_done", scenarioId, stepIndex: index, status: "error", errorType: "engine_error",
@@ -816,7 +820,7 @@ async function runStep(
         return "error";
       }
       try {
-        await hit.handler({ page, navigate: (url) => page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).then(() => undefined) }, hit.groups);
+        await selected.fn({ page, navigate: (url) => page.goto(url, { waitUntil: "domcontentloaded", timeout: 60_000 }).then(() => undefined) }, hit!.groups);
       } catch (e) {
         if (e instanceof DeterministicAssertion || (e as Error).name === "AssertionError") {
           await sink.emit({
