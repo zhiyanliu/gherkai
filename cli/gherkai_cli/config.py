@@ -1,7 +1,7 @@
 """项目配置文件 gherkai.toml：定位、读取与形态校验（ADR 0053）。
 
 只有运行侧 CLI 读它（决策 1）。本模块只产出**原始配置**（按节分开的值与来源路径）；把它合成到选项与环境变量之间
-（决策 2 的取值顺序）是 `__main__._apply_project_config` 的事——`[common]` / `[cloud]` 的键是否合法取决于 argparse 的
+（决策 2 的取值顺序）是 `settings.apply_project_config` 的事——`[common]` / `[cloud]` 的键是否合法取决于 argparse 的
 选项面，由调用方把允许的键集传进来，本模块不 import argparse、不知道命令。
 路径类值（决策 2）相对配置文件所在目录：`[apps]` 的 `file` 在这里绝对化；`steps-dir` 与 `report-dir` 由调用方经
 `ProjectConfig.resolve_path` 绝对化（`report-dir` 只在本机后端下是路径，云端是桶内键前缀、原样使用，后端在本模块之外才知道）。

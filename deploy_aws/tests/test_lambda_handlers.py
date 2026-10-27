@@ -839,10 +839,14 @@ def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_
     s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
     assert reconciler._load_definition(s, "r", "t") is None and s.finalized == [("r", Status.ERROR)]
     assert "9.9.0" in capsys.readouterr().out
-    assert "9.9.0" in s.message and s.message.startswith("提交记录不能由本后端执行")  # run 级消息随终态写入，status 可见原因
+    # run 级消息随终态写入、status 可见：产品语言整句（谁写的、两边各第几版、怎么办），不是异常原文
+    assert s.message.startswith("提交记录由更新版本的 gherkai 9.9.0 写出") and "第 2 版" in s.message and "重新提交" in s.message
     s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
     assert reconciler._load_definition(s2, "r", "t") is None and s2.finalized == [("r", Status.ERROR)]
-    assert "缺键 target" in s2.message
+    assert s2.message.startswith("提交记录不完整或形态不对") and "缺键 target" not in s2.message  # 契约异常的原文只进诊断行
+    assert "缺键 target" in capsys.readouterr().out
+    s_old = _Store(exc=UnsupportedDefinitionSchema(0, 1, cli_version="1.4.9"))
+    assert reconciler._load_definition(s_old, "r", "t") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
     s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
     assert reconciler._load_definition(s3, "r", "t") is None and s3.finalized == [("r", Status.ERROR)]
     assert "worker 镜像版本" in s3.message

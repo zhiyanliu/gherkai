@@ -328,13 +328,10 @@ class DynamoDBRunStore:
         # 把「版本不合」变成一个裸异常、绕过调用方按 UnsupportedDefinitionSchema 的处置。
         require_definition_schema(meta_dict)
         if self._arg_offloader is not None:
-            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）。遍历途中撞到的形状错
-            # （缺 scenario id、缺 step index 等）是同版本下的定义违约，翻成 DefinitionContractError 让读端按同一类处置。
-            try:
-                meta_dict = self._arg_offloader.restore(meta_dict, run_id)
-            except (KeyError, TypeError, AttributeError) as e:
-                from gherkai_core.errors import DefinitionContractError
-                raise DefinitionContractError(f"definition 的 scenario / step 形态不对，无法还原外置的 step 参数（{type(e).__name__}：{e}）") from None
+            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）。遍历途中的形状错由 offloader
+            # 翻成 DefinitionContractError（同版本下的定义违约）；S3 取回失败与装配错误（句柄类型不对）原样上抛——它们不是 definition
+            # 的问题，读端若把它们当定义违约，会把一个可重试的故障永久标成 error
+            meta_dict = self._arg_offloader.restore(meta_dict, run_id)
         elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
             # offloader 属组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿

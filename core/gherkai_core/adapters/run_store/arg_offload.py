@@ -24,16 +24,22 @@ from gherkai_core.adapters._boto import require_boto3
 def _iter_arguments(meta_dict: dict):
     """遍历 run_meta_to_dict 产物里每个带 argument 的 step，yield (arg_dict, scope_id, scenario_id, step_index)。
 
-    位置驱动（走 jobs→scenarios→steps 的 def 结构），不猜内容；只碰确有 argument 的 step。
+    位置驱动（走 jobs→scenarios→steps 的 def 结构），不猜内容；只碰确有 argument 的 step。遍历途中撞到的形状错（缺 scope_id /
+    scenario id / step index、容器类型不对）是同版本下的定义违约（ADR 0037 决策 7），在这里翻成 DefinitionContractError；
+    消费方（取回、消解）自己的失败——S3 取回、句柄装配错——不在这里、原样上抛。
     """
-    for job in meta_dict.get("jobs", []):
-        scope_id = job["scope_id"]
-        for sc in job.get("scenarios", []):
-            scenario_id = sc["id"]
-            for step in sc.get("steps", []):
-                arg = step.get("argument")
-                if arg is not None:
-                    yield arg, scope_id, scenario_id, step["index"]
+    try:
+        for job in meta_dict.get("jobs", []):
+            scope_id = job["scope_id"]
+            for sc in job.get("scenarios", []):
+                scenario_id = sc["id"]
+                for step in sc.get("steps", []):
+                    arg = step.get("argument")
+                    if arg is not None:
+                        yield arg, scope_id, scenario_id, step["index"]
+    except (KeyError, TypeError, AttributeError) as e:
+        from gherkai_core.errors import DefinitionContractError
+        raise DefinitionContractError(f"definition 的 job / scenario / step 形态不对，无法定位 step 参数（{type(e).__name__}：{e}）") from e
 
 
 def has_pointers(meta_dict: dict) -> bool:

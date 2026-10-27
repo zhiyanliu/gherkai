@@ -13,7 +13,7 @@ ADR 0037 决策 7）：本模块不自己去要版本，既避免与 `__main__` 
 从源码直接运行取不到 → 标记记 `UNKNOWN_VERSION`、安装照常完成（与「取不到就跳过比较」的分叉一致）；
 `_dist_version()` 给 `--version` 显示用的占位串绝不写进标记。
 
-**输出面**：stdout 只属 `--print`（供管道），其余全部诊断走 stderr（同 `__main__._progress` 的约定）。
+**输出面**：stdout 只属 `--print`（供管道），其余全部诊断走 stderr（同 `console.progress` 的约定）。
 退出码只有 0 / 2。
 """
 from __future__ import annotations

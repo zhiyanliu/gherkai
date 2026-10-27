@@ -250,27 +250,40 @@ def _load_definition(run_store, run_id: str, label: str):
     """读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
     **不推进该 run、记一条诊断并把 run 标为 error、原因写进运行态的 run 级 message**——重放投影没有退出码可交给使用方，只「不推进」会让
     run 永停 RUNNING（ADR 0034 对无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态，message 让 `status` 看得见原因
-    （团队成员未必有 CloudWatch 的读权限）。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端
-    默认指针回落（那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。返回 RunMeta；不存在或已标 error 返回 None。"""
+    （团队成员未必有 CloudWatch 的读权限）。message 是产品语言的整句、长度有界（说清谁写的、两边各第几版、怎么办）；契约异常的原文
+    只进 CloudWatch 的诊断行、不进运行态——它带内部字段名与形状描述，是给 contributor 的。不为旧 definition 留兼容路径：
+    worker_task_defs 缺失不再按后端默认指针回落（那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。返回 RunMeta；不存在或已标 error 返回 None。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
     from gherkai_core.model import Status
     from gherkai_runtime import compose
 
-    def _mark(reason: str):
-        message = f"提交记录不能由本后端执行：{reason}"
-        print(f"{label}: run {run_id} 不推进、标为 error——{message}")
+    def _mark(message: str, detail: str | None = None):
+        print(f"{label}: run {run_id} 不推进、标为 error——{message}" + (f"；诊断：{detail}" if detail else ""))
         run_store.try_finalize(run_id, Status.ERROR, compose.now_iso(), message=message)
         return None
 
     try:
         meta = run_store.load_run_meta(run_id)
-    except (UnsupportedDefinitionSchema, DefinitionContractError) as exc:
-        return _mark(str(exc))
+    except UnsupportedDefinitionSchema as exc:
+        return _mark(_schema_mismatch_message(exc))
+    except DefinitionContractError as exc:
+        return _mark("提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交", str(exc))
     if meta is None:
         return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
     if not meta.worker_task_defs:
-        return _mark("云端提交记录没有记 worker 镜像版本（提交侧应在解析 variant 后写入）")
+        return _mark("提交记录没有记 worker 镜像版本，后端不能执行它；请用与后端同版本的 gherkai 重新提交")
     return meta
+
+
+def _schema_mismatch_message(exc) -> str:
+    """后端读到结构版本不等于自己认的提交记录时写进 run 级 message 的整句（ADR 0037 决策 7）：谁写的、两边各第几版、怎么办。
+    与 CLI 侧同一事件的句子分开写：那边的出路是升级本机或用写端版本查看，这边的出路是升级后端或用后端版本重新提交。"""
+    by = f"gherkai {exc.cli_version}" if exc.cli_version else "gherkai（版本未知）"
+    if exc.found > exc.supported:
+        return (f"提交记录由更新版本的 {by} 写出（记录是第 {exc.found} 版，后端只认第 {exc.supported} 版），后端不能执行它；"
+                "请部署方把后端升级到提交侧的版本，或用后端版本的 gherkai 重新提交")
+    return (f"提交记录由更早版本的 {by} 写出（记录是第 {exc.found} 版，后端只认第 {exc.supported} 版），后端不能执行它；"
+            "请把提交侧的 gherkai 升级到后端的版本后重新提交")
 
 
 def _build(run_id: str):
@@ -430,7 +443,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
             # 瞬时 5xx 抛，而这一步在 finalize 的 commit point **之后**执行：commit 后的失败无人重试（ADR 0030
             # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，连坐同批其它
-            # run 的事件（同上面 WorkerVariantError 逐 run 隔离的理由）。故整段隔离、失败按缺值走
+            # run 的事件（同下面超时兜底检查的隔离理由）。故整段隔离、失败按缺值走
             # （ADR 0034 收尾节把 run 级墙钟划在「派生、失败隔离」那一侧）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
@@ -443,7 +456,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             print(f"{label}: run {run_id} advanced (not done)")
             # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该连坐已经
             # 推进成功的这一步——抛出去会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，
-            # 同批其它 run 的事件一并永久丢失（同本函数另两处隔离的理由：WorkerVariantError 与 run 级墙钟）。
+            # 同批其它 run 的事件一并永久丢失（同上面 run 级墙钟的隔离理由）。
             try:
                 _scan_overdue_timeouts(run_id, built)
             except Exception as exc:

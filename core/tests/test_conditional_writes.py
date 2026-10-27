@@ -383,3 +383,18 @@ def test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise(run
     run_store.create_run(meta2, _initial(meta2))
     assert run_store.try_finalize("run-2", Status.PASSED, "t1") is True
     assert run_store.load_run_state("run-2").message is None
+
+
+def test_finalized_run_keeps_message_against_later_projection_and_claim(run_store):
+    """run 级消息的边界护栏：已带消息终结的 run，再来更高 HWM 的投影被挡（status、ended_at、message 全不变）；job 认领也不抹掉消息
+    （local 的读改写与 DDB 的逐属性 SET 对拍）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    later = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=5)
+    assert run_store.project_state("run-1", later) is False
+    state = run_store.load_run_state("run-1")
+    assert (state.status, state.ended_at, state.message) == (Status.ERROR, "t1", "原因")
+    run_store.try_claim_job("run-1", "a", claimed_at="c1")
+    assert run_store.load_run_state("run-1").message == "原因"

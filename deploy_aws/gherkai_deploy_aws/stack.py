@@ -489,16 +489,10 @@ class BackendStack(Stack):
         subnets_env = ",".join(self._worker_subnet_ids(vpc))
         # **模板 revision ARN 不注给推进器**（ADR 0038 被拒方案「缺字段时回落模板 revision」）：模板的镜像栏是
         # `latest` 占位、在从未推过 `latest` 的全新 prefix 上根本拉不到，回落它只会把错误拖到 Fargate 启动期。
-        # 推进器遇上没有 `worker_task_defs` 的旧 definition 时**按后端默认指针解析**（读 SSM `worker-default`
-        # + `worker-image/<engine>/<后端版本>-<默认 variant>`，权限见下 `ssm_read`）——故推进器一侧不需要模板 ARN，
-        # 曾短暂注入过的 `WORKER_TEMPLATE_ARNS` env 随本决策撤掉。模板 ARN 只经 SSM 给部署方的 `push-worker`
-        # 复制母本用（见 `_one_task_def`）。
-        # 推进器读 SSM：兼容回落要读默认指针与 worker-image 映射（ADR 0038「权限面增量·云端推进器」）。
-        # 资源域是本 prefix 的参数子树（路径形态走 `names.ssm_path`，别在此复刻 `/{prefix}backend/` 串）。
-        ssm_read = iam.PolicyStatement(
-            actions=["ssm:GetParameter", "ssm:GetParametersByPath"],
-            resources=[f"arn:aws:ssm:{self.region}:{self.account}:parameter{names.ssm_path(self.prefix, '*')}"],
-        )
+        # 推进器只照 definition 里的显式 revision 起 task；没有 `worker_task_defs` 的 definition 按定义违约标 error、不解析
+        # 默认指针（ADR 0038「读侧不留兼容路径」）——故推进器既不需要模板 ARN，也不读 SSM（曾为兼容回落授过 `/{prefix}backend/*`
+        # 的读权限，随兼容路径一并撤除；曾短暂注入过的 `WORKER_TEMPLATE_ARNS` env 同理）。模板 ARN 只经 SSM 给部署方的
+        # `push-worker` 复制母本用（见 `_one_task_def`）。
 
         # ① 退出观察者 Lambda（薄；只 events 表 PutItem 写 task_exited）
         exit_observer = lambda_.Function(
@@ -586,7 +580,7 @@ class BackendStack(Stack):
             function_name=names.default_name(self.prefix, names.BASE_RECONCILER_LAMBDA),  # 真同源（gherkai_runtime.names）——cli preflight 据 --prefix 拼同名探活（ADR 0033）
             handler="reconciler.handler", code=code, environment=advancer_env,
             task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
-            scheduler_role=scheduler_role, ssm_read=ssm_read,
+            scheduler_role=scheduler_role,
         )
         # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
         # filter **排除 REMOVE**：events 表开 TTL（见 `_storage` 的 time_to_live_attribute），过期删除同样进
@@ -609,7 +603,7 @@ class BackendStack(Stack):
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code, environment=advancer_env,
             task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
-            scheduler_role=scheduler_role, ssm_read=ssm_read,
+            scheduler_role=scheduler_role,
         )
         # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter，ADR 0034）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
@@ -632,7 +626,7 @@ class BackendStack(Stack):
         CfnOutput(self, "KickerFnName", value=kicker.function_name)
 
     def _advancer_function(self, construct_id: str, *, function_name: str, handler: str, code, environment: dict,
-                           task_def_arns: list, timeout_schedule_arns: list, scheduler_role, ssm_read):
+                           task_def_arns: list, timeout_schedule_arns: list, scheduler_role):
         """推进器 Lambda（reconciler / kicker）的同一套装配：Function + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略。
 
         两个推进器分工不同、权限面与 env 相同（ADR 0034）——曾整段复写两遍，单侧改漏即权限分叉（首批能起、续起失败）。
@@ -669,7 +663,6 @@ class BackendStack(Stack):
         fn.add_to_role_policy(iam.PolicyStatement(
             actions=["scheduler:CreateSchedule", "scheduler:DeleteSchedule"], resources=timeout_schedule_arns))
         fn.add_to_role_policy(iam.PolicyStatement(actions=["iam:PassRole"], resources=[scheduler_role.role_arn]))
-        fn.add_to_role_policy(ssm_read)  # 兼容回落读默认指针 + worker-image 映射（ADR 0038）
         # PassRole：RunTask 要把 execution role + 各 task role 传给起的 task——须显式授 iam:PassRole 到这些 role ARN。
         fn.add_to_role_policy(iam.PolicyStatement(
             actions=["iam:PassRole"],

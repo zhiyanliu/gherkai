@@ -263,29 +263,18 @@ def test_worker_template_arn_is_not_injected_into_any_lambda_env():
         assert "worker-template" not in joined, f"{name} 的 env 里出现了模板参数路径：{env}"
 
 
-def test_advancers_can_read_backend_ssm_params_for_the_compat_fallback():
-    """两个推进器（reconciler/kicker）都要能读 `/{prefix}backend/*`（ADR 0038「权限面增量·云端推进器」）：
-    没有 `worker_task_defs` 的旧 definition 靠读默认指针 + worker-image 映射解析 revision。
-
-    退出观察者**不该有**：它只写 task_exited、从不起 task，多授一份读权限是把职责边界糊掉。
-    """
+def test_lambda_roles_hold_no_ssm_read():
+    """三个 Lambda（reconciler / kicker / 退出观察者）都不读 SSM：definition 缺 `worker_task_defs` 按定义违约标 error、不解析默认指针
+    （ADR 0038「读侧不留兼容路径」），曾为兼容回落授给两个推进器的 `/{prefix}backend/*` 读权限随之撤除——最小权限，别让一份失实理由的
+    授权留在角色上。"""
     t = _template()
     with_ssm = {}
     for name, policy in t.find_resources("AWS::IAM::Policy").items():
         for stmt in policy["Properties"]["PolicyDocument"]["Statement"]:
             actions = stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
-            if "ssm:GetParameter" not in actions:
-                continue
-            assert "ssm:GetParametersByPath" in actions, f"枚举映射要 GetParametersByPath：{stmt}"
-            with_ssm[name] = (stmt["Resource"], json.dumps(policy["Properties"]["Roles"]))
-    assert len(with_ssm) == 2, f"应恰有 reconciler/kicker 两个角色拿到 SSM 读，实际 {sorted(with_ssm)}"
-    roles = [r for _res, r in with_ssm.values()]
-    # 按角色归属断言（不只数个数——数对了也可能是「exit-observer 多了、reconciler 少了」）
-    assert any("Reconciler" in r for r in roles) and any("Kicker" in r for r in roles), roles
-    assert not any("ExitObserver" in r for r in roles), roles
-    for name, (resource, _roles) in with_ssm.items():
-        arn = json.dumps(resource, ensure_ascii=False)
-        assert "parameter/gherkai-backend/*" in arn, f"{name} 的 SSM 资源域不是本 prefix 的参数子树：{resource}"
+            if any(a.startswith("ssm:") for a in actions):
+                with_ssm[name] = json.dumps(policy["Properties"]["Roles"])
+    assert not with_ssm, f"Lambda 角色不该有 SSM 权限：{with_ssm}"
 
 
 def _joined_refs(value) -> list[str]:

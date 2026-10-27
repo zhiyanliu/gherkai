@@ -158,7 +158,7 @@ def _mapping_path(prefix: str, engine: str, tag: str) -> str:
 
 
 def _record_json(*, template_arn: str, revision_arn: str, digest: str, pushed_at: str) -> str:
-    """映射记录的 JSON——**四个键名是跨组件契约**（提交侧 preflight 与推进器兼容路径都读它，ADR 0038）。"""
+    """映射记录的 JSON——**四个键名是跨组件契约**（提交侧 preflight 的 variant 解析读它，ADR 0038）。"""
     return json.dumps({"template_arn": template_arn, "revision_arn": revision_arn,
                        "digest": digest, "pushed_at": pushed_at}, ensure_ascii=False)
 

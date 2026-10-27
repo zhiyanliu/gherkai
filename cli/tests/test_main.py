@@ -2352,3 +2352,20 @@ def test_help_hides_internal_entry_points(capsys):
     with pytest.raises(SystemExit) as e2:
         m.main(["_reconcile", "--help"])
     assert e2.value.code == 0
+
+
+def test_complete_definition_entry_points_run_the_pre_write_check(capsys):
+    """两个填完入口（ADR 0048 决策 3）：没有设备请求的设备 job 在本机与云端入口都以退出码 2 被拒，校验在入口内部、调用方不另调。"""
+    from types import SimpleNamespace
+
+    from gherkai_cli import config as cfgmod
+    from gherkai_cli import submission
+    from gherkai_core.model import Job, Scenario, Step, Target
+
+    scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
+    device = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
+    args = SimpleNamespace(region=None, profile=None, project_config=cfgmod.NO_CONFIG)
+    assert submission.complete_local_definition(args, submission.Prepared(jobs=[device], steps_dir=None)) == 2
+    assert "设备请求" in capsys.readouterr().err
+    assert submission.complete_cloud_definition(args, None, submission.Prepared(jobs=[device], steps_dir=None), [device]) == 2
+    assert "设备请求" in capsys.readouterr().err

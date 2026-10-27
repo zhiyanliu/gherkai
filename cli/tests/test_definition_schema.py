@@ -148,8 +148,21 @@ def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback
     d["jobs"][0].pop("target")
     path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
     cmd, *rest = argv_head
+    before = (reports / run_id / "run_state.json").read_text(encoding="utf-8")
     assert m.main([cmd, run_id, *rest, "--report-dir", str(reports)]) == 2
     err = capsys.readouterr().err
     assert "提交记录不完整" in err and "target" in err
-    state = json.loads((reports / run_id / "run_state.json").read_text(encoding="utf-8"))
-    assert "message" not in state  # 本机不写 run 级消息
+    assert (reports / run_id / "run_state.json").read_text(encoding="utf-8") == before  # 运行态不动、本机不写 run 级消息
+
+
+@pytest.mark.parametrize("argv_head", [["status"], ["status", "--wait"], ["explain"]], ids=["status", "status-wait", "explain"])
+def test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(tmp_path, monkeypatch, capsys, argv_head):
+    """读头阶段的形态违约（结构版本字段不是整数）：三个本机读端都以退出码 2 结束并说明，不是裸异常；运行态不被改动、不写 run 级消息
+    （本机读端有退出码可交，ADR 0037 决策 7）。"""
+    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
+    _rewrite_schema(reports, run_id, True)
+    before = (reports / run_id / "run_state.json").read_text(encoding="utf-8")
+    cmd, *rest = argv_head
+    assert m.main([cmd, run_id, *rest, "--report-dir", str(reports)]) == 2
+    assert "提交记录不完整" in capsys.readouterr().err
+    assert (reports / run_id / "run_state.json").read_text(encoding="utf-8") == before

@@ -1326,8 +1326,9 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
 
 # ============================================================================
 # worker variant 解析（ADR 0038）：variant 名 → 各引擎的 task-def **revision** ARN。
-# **住产品本体、不住入口前端**：提交侧 preflight（严格拦下、退出码 2 并打印）与云端推进器的兼容回落读的是同一批 SSM
-# 参数、同一套 miss 判据、同一套提示语分叉——两处各写一遍必漂（同 names 抽包、同 check_backend_skew 的理由）。
+# **住产品本体、不住入口前端**：提交侧 preflight（严格拦下、退出码 2 并打印）与 doctor 的默认 variant 标注读的是同一批 SSM
+# 参数、同一套 miss 判据——各写一遍必漂（同 names 抽包、同 check_backend_skew 的理由）。推进器不读 SSM：definition 缺
+# worker_task_defs 按定义违约标 error、不解析默认指针（ADR 0038「读侧不留兼容路径」）。
 # ============================================================================
 
 
@@ -1389,8 +1390,7 @@ def _ssm_get(ssm, path: str) -> str | None:
 def read_worker_default(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
     """读部署级默认 variant 指针（SSM `worker-default`，ADR 0038）。缺失 → None（调用方决定怎么报）。
 
-    单独公开是因为有三个消费者：两个解析函数（variant 缺省取值）与推进器的兼容路径日志（要点名解析到了哪个
-    variant——「用的是哪份」必须在日志里可见）。
+    单独公开是因为有两个消费者：`resolve_worker_variant` 的 variant 缺省取值与 doctor 的默认 variant 标注。
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
@@ -1542,46 +1542,6 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
             raw = c.get("stopTimeout")
             return int(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) else None
     return None
-
-
-def resolve_default_worker_task_defs(
-    *, prefix: str, engines: Iterable[str], backend_version: str | None,
-    region=None, profile=None, ssm=None,
-) -> dict[str, str]:
-    """**宿主的兼容路径**（ADR 0038「读侧兼容口径」）：definition 里没有 `worker_task_defs` 的 run，按**后端
-    当前默认指针**解析出引擎 → revision ARN。解析不出即抛，**绝不回落 family 最新 ACTIVE、绝不回落模板 revision**。
-
-    这样的 run 有两个来源：引入本机制的那次升级前提交、升级窗口内仍在运行的 run；以及旧 CLI 提交到新后端的 run
-    （ADR 0037 决策 7「CLI 旧于后端 → 警告不拦」允许）。用**后端**版本拼 tag（不是提交者 CLI 版本——definition
-    里根本没记，且后端只解析自己版本命名空间下的映射）。
-
-    比 `resolve_worker_variant` 少两环（不 Describe revision、不查 ECR digest）是有意的：这里运行在推进器
-    Lambda 的热路径上，而**它拿到的 ARN 立刻要交给 RunTask** ——revision 被注销/镜像被删的话 RunTask 自己就会
-    报，多两次 API 调用只是把同一个错误提前一点、换不来新信息。提交侧 preflight 的三环校验是为了「别让提交者
-    提交完才发现」，宿主没有这个动机。
-    """
-    if ssm is None:
-        ssm = _make_ssm_client(region=region, profile=profile)
-    if not backend_version:
-        raise WorkerVariantError(
-            f"兼容路径无从解析 worker 镜像：读不到后端版本戳（SSM {_names.ssm_path(prefix, _names.BACKEND_VERSION_KEY)}）——"
-            f"镜像 tag 含版本。请部署方运行一次 `gherkai deploy` 把戳写上。")
-    variant = read_worker_default(prefix=prefix, ssm=ssm)
-    if variant is None:
-        raise _no_default_pointer_error(prefix)
-    tag = _names.image_tag(backend_version, variant)
-    out: dict[str, str] = {}
-    for engine in sorted(set(engines)):
-        rec = _read_worker_image_record(ssm, prefix=prefix, engine=engine, tag=tag)
-        if rec is None:
-            raise WorkerVariantError(
-                f"兼容路径解析失败：引擎 {engine} 在后端版本 {backend_version} 下没有默认 variant {variant!r} "
-                f"的镜像映射（SSM {_names.ssm_path(prefix, _names.worker_image_key(engine, tag))}）。"
-                f"部署方运行 `gherkai deploy`（同步基础镜像并初始化默认指针），或推上这个 variant："
-                f"`gherkai deploy push-worker <本地镜像> --engine {engine} --variant {variant}`。",
-                engine=engine, variant=variant)
-        out[engine] = rec["revision_arn"]
-    return out
 
 
 def preflight_cloud_resources(

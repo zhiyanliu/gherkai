@@ -2,6 +2,8 @@
 预算超过会话上限都拒绝；target 必有，缺键即版本不一致；消息是产品语言、不带内部指代；与能力自述同一份 WORKER_TARGETS。"""
 from __future__ import annotations
 
+import pytest
+
 from gherkai_worker_novaact import run_scope as rs
 from gherkai_worker_novaact.lib.precheck import PROTOCOL_SCHEMA_VERSION, precheck_job, precheck_schema, precheck_target, target_label
 
@@ -78,8 +80,10 @@ def test_target_label_matches_cli_wording():
     assert target_label("desktop", "web") == "桌面网页" and target_label("android", "app") == "Android 应用" and target_label("ios", "web") == "iOS 网页"
 
 
-def test_main_entry_rejects_job_without_schema_version_before_reading_anything_else():
-    """版本核对先于读 job 行的任何别的键：缺 schemaVersion 的桌面 job（scenarios 也缺）只得到一条 precheck_failed，不是 KeyError 退出。"""
+@pytest.mark.parametrize("scope_id, expect", [("old", "old"), ([1], "unknown"), (True, "unknown")], ids=["text", "list", "bool"])
+def test_main_entry_rejects_job_without_schema_version_before_reading_anything_else(scope_id, expect):
+    """版本核对先于读 job 行的任何别的键：缺 schemaVersion 的桌面 job（scenarios 也缺）只得到一条 precheck_failed，不是 KeyError 退出；
+    scopeId 尽力取，不是非空文本时记 unknown（与 Midscene 侧同一兜底）。"""
     import json
     import os
     import subprocess
@@ -88,10 +92,10 @@ def test_main_entry_rejects_job_without_schema_version_before_reading_anything_e
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     env = {k: v for k, v in os.environ.items() if k in keep}
     env["AWS_EC2_METADATA_DISABLED"] = "true"
-    job = {"scope": {"id": "old", "name": "old"}, "engine": "novaact", "assertionVotes": 1}
+    job = {"scope": {"id": scope_id, "name": "old"}, "engine": "novaact", "assertionVotes": 1}
     proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact"], input=(json.dumps(job) + "\n").encode("utf-8"),
                           capture_output=True, timeout=120, env=env)
     assert proc.returncode == 0, proc.stderr.decode()[-800:]
     events = [json.loads(l) for l in proc.stdout.decode("utf-8").splitlines() if l.startswith("{") and '"type"' in l]
     assert [e["type"] for e in events] == ["scope_done"], (events, proc.stderr.decode()[-500:])
-    assert events[0]["scopeId"] == "old" and events[0]["errorType"] == "precheck_failed" and "格式版本是 缺失" in events[0]["message"]
+    assert events[0]["scopeId"] == expect and events[0]["errorType"] == "precheck_failed" and "格式版本是 缺失" in events[0]["message"]

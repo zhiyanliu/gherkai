@@ -72,10 +72,14 @@ def configurable_keys(parser: argparse.ArgumentParser) -> dict[str, set[str]]:
     return {"common": common, "cloud": cloud}
 
 
+_BUILTIN_TYPE_REASONS = {int: "应为整数", float: "应为数字"}
+
+
 def convert_config_value(action, raw, *, section: str, key: str, path):
     """配置值经与 argparse 同一套类型与取值范围校验（ADR 0053 决策 3）：非法值的报错形态与命令行上给错一致。
-    按 TOML 的原生类型直接校验：带 type 的选项把原值交给同一个 type 函数（int / float / 自定义校验都接受数字本身），没有 type 的选项
-    要求文本；可重复给的选项接受文本列表，其余只接受单个值。"""
+    按 TOML 的原生类型直接校验、不经字符串绕一圈：整数选项只接受 TOML 整数（浮点不截断——命令行上给 4.7 同样被拒）；浮点选项与
+    自定义校验函数接受整数与浮点（拿到数字本身）；没有 type 的选项要求文本；布尔一律拒绝；可重复给的选项接受文本列表，其余只接受
+    单个值。内建 int / float 的失败按产品语言给理由（不把解释器的英文原文带给使用方），自定义校验函数自己写的消息原样保留。"""
     def fail(reason: str):
         raise _config.ConfigError(f"配置文件 {path} 的 [{section}] {key} 取值 {raw!r} 无效：{reason}（要求与命令行选项 --{key} 相同）")
 
@@ -87,10 +91,14 @@ def convert_config_value(action, raw, *, section: str, key: str, path):
         if isinstance(item, bool):
             fail("不接受布尔值")
         if callable(action.type):
+            if action.type is int and isinstance(item, float):
+                fail("应为整数")
             try:
                 value = action.type(item)
-            except (ValueError, TypeError, argparse.ArgumentTypeError) as e:
-                fail(str(e) or "类型不对")
+            except argparse.ArgumentTypeError as e:  # 自定义校验函数自己的消息（已是产品语言）
+                fail(str(e))
+            except (ValueError, TypeError, OverflowError) as e:
+                fail(_BUILTIN_TYPE_REASONS.get(action.type) or str(e) or "类型不对")
         else:
             if not isinstance(item, str):
                 fail("应为文本")

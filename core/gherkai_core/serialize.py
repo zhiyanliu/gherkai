@@ -114,7 +114,9 @@ def _require(d: dict, key: str, what: str):
     """固定键集的读法：键必须在（值可为 null），缺键按定义违约报——不再用缺省值兜（那是结构版本号之前的兼容手法）。"""
     if not isinstance(d, dict) or key not in d:
         from gherkai_core.errors import DefinitionContractError
-        raise DefinitionContractError(f"definition 里的 {what} 缺键 {key}（结构版本 {DEFINITION_SCHEMA_VERSION} 的键集固定，不适用的值写 null）：{d!r}")
+        # 诊断只列已有键、不附整份 dict：run 级 dict 内联还原后可达数百 KB、还含隧道请求头，整份 repr 既无界也会把密文带进日志
+        have = f"已有键 {sorted(d)}" if isinstance(d, dict) else f"它不是对象而是 {type(d).__name__}"
+        raise DefinitionContractError(f"definition 里的 {what} 缺键 {key}（结构版本 {DEFINITION_SCHEMA_VERSION} 的键集固定，不适用的值写 null）；{have}")
     return d[key]
 
 

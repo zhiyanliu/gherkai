@@ -21,6 +21,7 @@ finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
@@ -81,11 +82,7 @@ class LocalRunStore:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
         jobs = dict(state.jobs)
         jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
-        self._write_state(
-            RunState(run_id=state.run_id, status=state.status, jobs=jobs,
-                     started_at=state.started_at, ended_at=state.ended_at,
-                     high_water_mark=state.high_water_mark)  # 保留（同步路径恒 None；无状态路径不走此方法）
-        )
+        self._write_state(replace(state, jobs=jobs))  # 其余字段原样保留（含 run 级 message）；用 replace 而不是逐字段重建，新字段不会被漏掉
 
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
         """commit point：写总 status + ended_at（各 job 态此前已由 update_job_state 刷过）。"""
@@ -95,9 +92,7 @@ class LocalRunStore:
         # ended_at 直传（不写 `or None`）：签名是 str、finalize 语义就是落一个具体 ended_at；
         # 用 falsy 兜会把合法空串静默吞成 None（omit-when-None 后键消失，已 finalize 的 run 看似未 finalize）。
         self._write_state(
-            RunState(run_id=state.run_id, status=status, jobs=state.jobs,
-                     started_at=state.started_at, ended_at=ended_at,
-                     high_water_mark=state.high_water_mark)  # 保留（同步路径恒 None）
+            replace(state, status=status, ended_at=ended_at)  # 其余字段原样保留
         )
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
@@ -164,9 +159,7 @@ class LocalRunStore:
             jobs = dict(state.jobs)
             jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
                                       claimed_at=claimed_at)
-            return RunState(run_id=state.run_id, status=state.status, jobs=jobs,
-                            started_at=state.started_at, ended_at=state.ended_at,
-                            high_water_mark=state.high_water_mark)
+            return replace(state, jobs=jobs)  # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid 对拍
         return self._locked_rmw(run_id, mutate)
 
     def project_state(self, run_id: str, state: RunState) -> bool:
@@ -207,9 +200,8 @@ class LocalRunStore:
                         claimed_at=js.claimed_at or cur_js.claimed_at)
             # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值是
             # 终态聚合值、一律不用（规则与理由见 projected_run_status）。
-            return RunState(run_id=state.run_id, status=projected_run_status(state.jobs), jobs=jobs,
-                            started_at=state.started_at or cur.started_at,
-                            ended_at=state.ended_at, high_water_mark=state.high_water_mark)
+            return replace(cur, status=projected_run_status(state.jobs), jobs=jobs, started_at=state.started_at or cur.started_at,
+                           ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
@@ -217,7 +209,5 @@ class LocalRunStore:
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已终态：别人已 finalize → 幂等跳过
-            return RunState(run_id=state.run_id, status=status, jobs=state.jobs,
-                            started_at=state.started_at, ended_at=ended_at,
-                            high_water_mark=state.high_water_mark, message=message)
+            return replace(state, status=status, ended_at=ended_at, message=message)
         return self._locked_rmw(run_id, mutate)

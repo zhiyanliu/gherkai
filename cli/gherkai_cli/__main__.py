@@ -1442,10 +1442,12 @@ def _cmd_submit(args) -> int:
         nonlocal handed_off
         handed_off = True
 
-    _submit = _submit_cloud if args.backend == "cloud" else _submit_local
     try:
-        rc_ = _submit(args, run_id, run_meta, initial,
-                      tunnel_info=tunnel_info, on_handoff=_mark_handoff, prepared=prepped)
+        if args.backend == "cloud":
+            rc_ = _submit_cloud(args, run_id, run_meta, initial,
+                                tunnel_info=tunnel_info, on_handoff=_mark_handoff, prepared=prepped)
+        else:
+            rc_ = _submit_local(args, run_id, run_meta, initial, tunnel_info=tunnel_info, on_handoff=_mark_handoff)
     finally:
         if tunnel_info is not None and not handed_off:
             from gherkai_runtime.tunnel import stop_tunnel
@@ -1456,7 +1458,7 @@ def _cmd_submit(args) -> int:
     return rc_
 
 
-def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None, prepared=None) -> int:
+def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None) -> int:
     """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。
 
     `on_handoff`（给了就调）在 fork 成功那一刻通知调用方「隧道已有后台宿主」——它是 `_cmd_submit` 里
@@ -1511,6 +1513,17 @@ def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str
     how = (f"：uvx --from 'gherkai=={writer}' gherkai status {run_id} …" if writer else "")
     return (f"这个 run 的提交记录由更早版本的 {by} 写出，本机的 gherkai 不再读取这种记录格式"
             f"（记录是第 {found} 版，本机只认第 {DEFINITION_SCHEMA_VERSION} 版）。用写出它的那个版本查看{how}，或用当前版本重新提交。")
+
+
+def _definition_header_gate(run_store, run_id: str) -> int | None:
+    """读 definition 的头（结构版本与写端版本）并过版本闸（ADR 0037 决策 7）。头本身读不出来（同版本下的形态违约，如版本字段不是整数）
+    也以退出码 2 结束并说明——不让它变成裸异常；三个本机 / 云端读端（status、explain）都经这里。"""
+    try:
+        header = run_store.peek_definition_header(run_id)
+    except DefinitionContractError as e:
+        _progress(_definition_contract_message(e))
+        return 2
+    return _definition_schema_gate(header, run_id)
 
 
 def _definition_schema_gate(header: "tuple[int, str | None] | None", run_id: str) -> int | None:
@@ -1617,7 +1630,7 @@ def _worker_meta_fields(resolutions: dict) -> dict:
     }
 
 
-def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None, prepared=None) -> int:
+def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None, prepared: Prepared) -> int:
     """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
 
     `on_handoff` 语义同 `_submit_local`：这里的宿主是隧道守护进程，故只在它 fork 成功后调（没起隧道时
@@ -1782,7 +1795,7 @@ def _cmd_status(args) -> int:
 
     # definition 的结构版本先于读任何别的东西（ADR 0037 决策 7）：别的版本写出的 run 目录连运行态的形状都不保证按本版本解释得了，
     # 先读运行态会把「请升级」变成一个解析异常。run 不存在（读不到头）放过、落到下面的存在性检查。
-    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)
+    bad = _definition_header_gate(run_store, args.run_id)
     if bad is not None:
         return bad
     # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退出码 2 + 提示」，
@@ -1839,6 +1852,9 @@ def _status_cloud(args) -> int:
     # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
     try:
         header = run_store.peek_definition_header(args.run_id)
+    except DefinitionContractError as e:  # 头本身读不出来（版本字段不是整数等形态违约）：同一句、退出码 2
+        _progress(_definition_contract_message(e))
+        return 2
     except Exception as e:
         if compose.is_botocore_error(e):
             _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
@@ -2061,7 +2077,7 @@ def _cmd_explain(args) -> int:
 
     report_root = Path(args.report_dir).resolve()
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
-    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # 先于读运行态（ADR 0037 决策 7）
+    bad = _definition_header_gate(run_store, args.run_id)  # 先于读运行态（ADR 0037 决策 7）
     if bad is not None:
         return bad
     if (state := run_store.load_run_state(args.run_id)) is None:
@@ -2099,7 +2115,7 @@ def _explain_cloud(args) -> int:
         run_store, result_store, _rp, _mk = compose.build_cloud_stores(
             table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
             region=target.region, profile=target.profile)
-        bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # 先于运行态读（ADR 0037 决策 7）
+        bad = _definition_header_gate(run_store, args.run_id)  # 先于运行态读（ADR 0037 决策 7）
         if bad is not None:
             return bad
         state = run_store.load_run_state(args.run_id)
@@ -2132,9 +2148,9 @@ def _explain_cloud(args) -> int:
 
 
 def _definition_contract_message(e: DefinitionContractError) -> str:
-    """本机接力宿主（`status --wait` 与 per-run 进程）读到形态违约的提交记录时的一句（ADR 0037 决策 7 的 CLI 读端）：CLI 有退出码可交给
-    使用方，故不像云端推进器那样把 run 标 error、写 run 级消息，直接以退出码 2 结束并说明。"""
-    return f"这个 run 的提交记录不完整，本机不能接力推进：{e}（用写出它的那个版本查看，或重新提交）"
+    """本机读端（`status` / `explain` 读头、`status --wait` 与 per-run 进程接力）读到同版本下形态违约的提交记录时的一句（ADR 0037 决策 7
+    的 CLI 读端）：CLI 有退出码可交给使用方，故不像云端推进器那样把 run 标 error、写 run 级消息，直接以退出码 2 结束并说明。"""
+    return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
 
 
 def _cmd_reconcile(args) -> int:

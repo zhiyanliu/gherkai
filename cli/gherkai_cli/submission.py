@@ -2,8 +2,8 @@
 definition 填完整的次序，收在这一个模块里。
 
 **次序是契约**（不是约定）：`Prepared` 是共享前置的产物——零 AWS、零副作用的解析结果；`complete_local_definition` 与
-`complete_cloud_definition` 是本机 / 云端各自把 definition 填完的唯一入口，内部按「账号比对（STS）→ 设备请求 → 安装包上传 → 写前
-结构校验」排好；调用方只在正确的位置各调一次——本机在自己的选项校验之后、起隧道之前，云端在版本 skew 闸与资源 preflight 之后、落库之前。
+`complete_cloud_definition` 是本机 / 云端各自把 definition 填完的唯一入口，各自的次序排定：本机「账号比对（STS）→ 设备请求 → 安装包上传
+→ 写前结构校验」，云端「读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前结构校验」；调用方只在正确的位置各调一次——本机在自己的选项校验之后、起隧道之前，云端在版本 skew 闸与资源 preflight 之后、落库之前。
 此前这些步骤散在共享前置与两个云端分支里靠调用顺序维持，「先上传再被拒」的缺陷正出自那种形态。
 纯解析（目标拒绝、设备选择、安装包定位）也住这里，plan 复用它们做标注与存在性核对。进度与诊断经 `console.progress` 打到 stderr。
 """
@@ -119,7 +119,10 @@ def warn_project_account(args, project_arn: str, source: str) -> None:
     region, profile = compose.resolve_aws_identity(args.region, args.profile, **identity_layers(args))
     try:
         ident = compose.probe_aws_identity(region=region, profile=profile)
-    except Exception as e:  # 凭证不可用 / 未装 aws 依赖 / 网络：核对是辅助提示，不因它拦运行
+    except Exception as e:
+        if not (isinstance(e, ImportError) or compose.is_botocore_error(e)):
+            raise  # 别的异常是程序错误，不吞
+        # 凭证不可用 / 未装 aws 依赖 / 网络：核对是辅助提示，不因它拦运行
         progress(f"未能核对 Device Farm 项目所属的账号（{e}），继续执行")
         return
     mine = ident.get("account")
@@ -261,7 +264,7 @@ def cloud_device_requests(args, target, prepared: "Prepared", jobs) -> "list | i
 
 def complete_local_definition(args, prepared: "Prepared") -> "list | int":
     """本机后端填完 definition（ADR 0048 决策 3）：项目 ARN 所属账号的比对（STS，只警告）、设备请求填入、安装包上传（S3）并补齐位置，
-    最后做写 definition 之前的结构校验。这是本机路径上**仅有的两次 AWS 调用**，调用方把它排在全部零副作用校验（含 `run` 的
+    最后做写 definition 之前的结构校验。这是本机路径上**仅有的两步 AWS 操作**（账号比对与安装包上传），调用方把它排在全部零副作用校验（含 `run` 的
     `--grace`、`submit` 的 `--tunnel-ttl`）之后、起隧道与落库之前——配置错的 run 不该先上传几百 MB 再被拒。返回填完的 jobs 或退出码 2。"""
     jobs = list(prepared.jobs)
     if prepared.local_project_arn is not None:

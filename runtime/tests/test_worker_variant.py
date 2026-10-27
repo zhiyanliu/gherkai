@@ -232,41 +232,6 @@ def test_invalid_variant_name_rejected_at_tag_layer(aws):
         _resolve(aws, variant="bad/name")
 
 
-# ---- 宿主的兼容路径：definition 缺 worker_task_defs → 按后端默认指针解析 ----
-def test_default_task_defs_for_legacy_definition(aws):
-    """旧 definition 的兼容路径（ADR 0038「读侧兼容口径」）：**后端**版本 + 默认指针 → revision ARN。"""
-    recs = _seed(aws, variant="base", engines=("novaact", "midscene"), version="1.5.0")
-    got = compose.resolve_default_worker_task_defs(
-        prefix=_PREFIX, engines=["novaact", "midscene"], backend_version="1.5.0", ssm=aws["ssm"])
-    assert got == {e: recs[e]["revision_arn"] for e in ("novaact", "midscene")}
-
-
-def test_default_task_defs_missing_pointer_raises(aws):
-    """默认指针缺失 → 抛（**不回落 family 最新 ACTIVE、不回落模板 revision**，ADR 0038 被拒方案两条）。"""
-    _seed(aws, variant="base", set_default=False)
-    with pytest.raises(compose.WorkerVariantError):
-        compose.resolve_default_worker_task_defs(
-            prefix=_PREFIX, engines=["novaact"], backend_version=_VERSION, ssm=aws["ssm"])
-
-
-def test_default_task_defs_missing_mapping_raises(aws):
-    """默认 variant 在该引擎/该后端版本下无映射（如升级后没重推同名 variant）→ 抛，点名修复动作。"""
-    _seed(aws, variant="common", engines=("novaact",), version="1.4.0")
-    with pytest.raises(compose.WorkerVariantError) as e:
-        compose.resolve_default_worker_task_defs(  # 后端已是 1.5.0、common 只有 1.4.0 的
-            prefix=_PREFIX, engines=["novaact"], backend_version="1.5.0", ssm=aws["ssm"])
-    assert "common" in str(e.value) and "push-worker" in str(e.value)
-
-
-def test_default_task_defs_no_backend_stamp_raises(aws):
-    """后端无版本戳 → 抛（tag 含版本、无从拼）；不猜一个版本、不回落 family。"""
-    _seed(aws, variant="base")
-    with pytest.raises(compose.WorkerVariantError) as e:
-        compose.resolve_default_worker_task_defs(
-            prefix=_PREFIX, engines=["novaact"], backend_version=None, ssm=aws["ssm"])
-    assert "版本戳" in str(e.value)
-
-
 def test_read_worker_default_missing_is_none(aws):
     """默认指针缺失 → None（不抛）：调用方各自决定怎么报（解析函数抛带指引的错、日志只是点名）。"""
     assert compose.read_worker_default(prefix=_PREFIX, ssm=aws["ssm"]) is None

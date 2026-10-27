@@ -10,6 +10,7 @@ import pytest
 from gherkai_cli import __main__ as m
 from gherkai_cli import config as cfgmod
 from gherkai_cli import settings
+from gherkai_cli import device_selection as devsel
 from gherkai_runtime import compose
 
 from test_main import _fake_locator, _fake_schedule_factory, _no_provider
@@ -112,6 +113,11 @@ def test_explicit_missing_config_exits_2_before_anything_else(tmp_path, monkeypa
     ("[common]\nmax-concurrency = true\n", "类型不对"),                   # 布尔不是任何选项的合法类型
     ("[common]\ndefault-engine = ['midscene']\n", "不接受列表"),           # 单值选项给了列表
     ("[cloud]\nscope = 'x'\n", "[cloud]"),                               # 按次选择型不进配置文件
+    ("[common]\nmax-concurrency = 4.7\n", "应为整数"),                      # 整数选项给浮点：不截断，与命令行同拒
+    ("[common]\nassertion-votes = 2.0\n", "应为整数"),
+    ("[common]\nmax-concurrency = inf\n", "应为整数"),                      # 无穷大不成为裸 OverflowError
+    ("[common]\nmax-concurrency = 'abc'\n", "应为整数"),                    # 内建类型的失败给产品语言理由
+    ("[common]\ntunnel-ttl = 'x'\n", "应为数字"),
 ])
 def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch, capsys, body, needle):
     monkeypatch.chdir(tmp_path)
@@ -119,6 +125,23 @@ def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch,
     assert m.main(["submit", str(_feature(tmp_path)), "--backend", "cloud"]) == 2
     err = capsys.readouterr().err
     assert "gherkai.toml" in err and needle in err
+
+
+def test_config_numbers_keep_native_types_and_reasons_are_product_language():
+    """按 TOML 原生类型校验（ADR 0053 决策 3）：整数给浮点选项成浮点、自定义校验函数拿到数字本身、整数选项收整数；内建类型失败时
+    解释器的英文原文不进消息。"""
+    p = m._build_parser()
+
+    def conv(dest, raw):
+        return settings.convert_config_value(settings.find_option_action(p, dest), raw, section="common", key=dest.replace("_", "-"), path="x.toml")
+
+    assert conv("tunnel_ttl", 30) == 30.0 and conv("default_job_timeout", 600) == 600.0 and conv("max_concurrency", 3) == 3
+    with pytest.raises(cfgmod.ConfigError) as e:
+        conv("max_concurrency", "abc")
+    assert "应为整数" in str(e.value) and "invalid literal" not in str(e.value)
+    with pytest.raises(cfgmod.ConfigError) as e:
+        conv("grace", "x")
+    assert "应为数字" in str(e.value) and "could not convert" not in str(e.value)
 
 
 def test_default_location_absent_is_not_an_error(tmp_path, monkeypatch, capsys):
@@ -418,9 +441,13 @@ def test_local_run_fills_device_request_and_only_warns_on_account_mismatch(tmp_p
     feat = _feature(tmp_path, DEVICE_FEATURE)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    resolved = []
+    real_resolve = devsel.resolve_local_project_arn
+    monkeypatch.setattr(devsel, "resolve_local_project_arn", lambda **kw: (resolved.append(1), real_resolve(**kw))[1])
     reports = tmp_path / "r"
     assert m.main(["run", str(feat), "--report-dir", str(reports)]) == 0
     assert "不一致" not in capsys.readouterr().err
+    assert len(resolved) == 1   # 项目 ARN 连来源只解析一次、随 Prepared 走（不在账号比对时再解析一遍）
     meta = json.loads(next(reports.glob("*/run_meta.json")).read_text(encoding="utf-8"))
     assert meta["jobs"][0]["device_request"] == {"provider": "aws-device-farm", "billing_method": "UNMETERED", "project_arn": PROJECT_ARN,
                                                  "acquire_timeout_s": 900.0, "device_arn": DEV_ARN}   # 平台子表的计费覆盖顶层；获取预算来自配置
@@ -429,9 +456,11 @@ def test_local_run_fills_device_request_and_only_warns_on_account_mismatch(tmp_p
     assert m.main(["run", str(feat), "--report-dir", str(tmp_path / "r2")]) == 0
     err = capsys.readouterr().err
     assert "111111111111" in err and "222222222222" in err and "不一致" in err   # 警告点名两个账号、不拦
+    assert "gherkai.toml" in err and "[devices] project-arn" in err and len(resolved) == 2   # 来源说明来自 Prepared 里那一次解析
 
     def boom(**kw):
-        raise RuntimeError("no credentials")
+        from botocore.exceptions import NoCredentialsError
+        raise NoCredentialsError()
 
     monkeypatch.setattr(compose, "probe_aws_identity", boom)
     assert m.main(["run", str(feat), "--report-dir", str(tmp_path / "r3")]) == 0
@@ -670,17 +699,15 @@ def test_invalid_grace_or_ttl_is_rejected_before_any_aws_call(tmp_path, monkeypa
     s3 = _UploadS3()
     monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
 
-    def no_sts(**kw):
-        raise AssertionError("选项校验失败时不该调 STS")
-
-    monkeypatch.setattr(compose, "probe_aws_identity", no_sts)
+    sts_calls = []
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: sts_calls.append(1))  # 记次数：抛 AssertionError 会被当成「核对失败」吞掉
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("不该走到 fork")))
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     feat = _feature(tmp_path, APP_FEATURE_TWO_SCOPES)
     assert m.main(["run", str(feat), "--no-report", "--grace", "0"]) == 2
-    assert "--grace" in capsys.readouterr().err and s3.uploads == []
+    assert "--grace" in capsys.readouterr().err and s3.uploads == [] and sts_calls == []
     assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--tunnel-ttl", "0"]) == 2
-    assert "--tunnel-ttl" in capsys.readouterr().err and s3.uploads == []
+    assert "--tunnel-ttl" in capsys.readouterr().err and s3.uploads == [] and sts_calls == []
 
 
 def test_first_upload_failure_exits_2_with_product_message(tmp_path, monkeypatch, capsys):

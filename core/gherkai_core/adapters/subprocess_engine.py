@@ -191,7 +191,7 @@ def _read_events(
 # 8 色为 33-36（黄/品/蓝/青）与 93-96（各自亮版）。两组有意排除：
 #   - 31/91（红）与 32/92（绿）——ADR 0047 起判定汇总里红表示失败、绿表示通过，日志前缀再用红绿会被读成判定；
 #   - 37/39/97（白/默认/亮白）——默认前景色保留给 cli main/core 自己的输出（`[core <scope>:event]` 进度、plan:/run_id=
-#     等，见 cli/gherkai_cli/__main__.py 的 _progress），core 行与 worker 行的颜色域物理不相交、并发时一眼能分辨。
+#     等，见 cli/gherkai_cli/console.py 的 progress），core 行与 worker 行的颜色域物理不相交、并发时一眼能分辨。
 # 颜色按 job **启动顺序**依次分配（`_scope_color`）：同一次运行内前 8 个 scope 互不撞色，同一 plan 下颜色稳定；曾按
 # scope_id 的 Python 哈希取模，4 个 scope 约四成的运行会撞色、且哈希按进程随机化导致每次运行颜色不同。
 _ANSI_COLORS = (33, 35, 34, 36, 93, 95, 94, 96)
