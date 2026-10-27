@@ -362,6 +362,8 @@
 
 规模 M。
 
+**进度（2026-10-27）**：开工前与 owner 对齐三条实现期决定并落 ADR 0050：step 级 targets 固定写出顺序（desktop → android → ios、web → app、无前提在前；只管自述输出，不参与匹配与派发——owner 先问清「为什么要规范序」「uiKinds × devices 是配对还是全乘积」后拍定）、Python 多句柄形态取 snake_case 字段的普通函数调用、WebdriverCtx.driver 以类型引用 webdriverio（已是 devDependency）。已落地（code 一笔、文档一笔）：两侧注册面与注册期校验、targets 推出、match / selectHandler 分离与桌面派发接线、类型导出、跨语言 fixture `engines/fixtures/deterministic-handles.json`（7 条合法、16 条非法）与 CLI 契约校验的交叉核对、模板 `url_matches.mts` 两份实现（真 worker 读 features/steps 核过自述）、用户指南 / skill / internals / CHANGELOG。**留给后续批次**：内建导航的 webdriver 句柄与设备路径的 requires 前置判定、WebdriverCtx 构造（B6）；用户指南的测试分层（离线 WebdriverIO 加 Chrome for Testing、缓存目录）与写作方法六条（ADR 0050 决策 3、4）等设备路径真能运行后再写（B6 或文档批）；engines.md 矩阵的句柄列随 Midscene 自述带设备目标时更新（B6）。整仓 pytest 2447 绿、3 跳过；Midscene 224 绿。**待双轨复核（workflow 加 Codex）。**
+
 
 **依赖**
 
