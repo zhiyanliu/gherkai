@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a98aac4d`
+- Built from commit: `b3bc0b9c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1475,7 +1475,7 @@ Nodes (3): fixture, 两个 adapter 各来一遍（对拍）。local 用 tmp_path
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **640 isolated node(s):** `StepArgument`, `Row`, `Job`, `JobApp`, `JobDeviceRequest` (+635 more)
+- **640 isolated node(s):** `现场`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）`, `实施期要核的点（ADR 已定、实施时顺手验证）`, `0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）`, `1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）` (+635 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **143 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
