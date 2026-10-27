@@ -142,7 +142,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `本机运行设备 scope 需要一个 Device Farm 项目，但没有指定` / `需要一个放安装包的 S3 桶，但没有指定` | 本机后端驱动真机要自己给项目与应用桶 | 在 `[devices]` 给 `project-arn` / `app-bucket`，或用 `--device-farm-project-arn` / `--app-bucket`、环境变量 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` |
 | `注意：Device Farm 项目 … 属于账号 X，当前凭证属于账号 Y` | 项目 ARN 与当前凭证不在同一账号，多半是复制了别的环境的 ARN | 换对的项目或凭证；这条只警告不拦 |
 | `安装包不存在：…（配置文件 [apps.<别名>.<平台>] 的 file）` | `file` 指向的文件不在 | 路径相对配置文件所在目录，核对路径与构建产物 |
-| 云端 run 的 `status` 为 `error`、状态行下有 `message=提交记录不能由本后端执行：…`，没有任何 job 开始过 | 后端读到了它不能执行的提交记录：提交记录的格式版本与后端不一致、记录不完整，或没有记 worker 镜像版本 | 按 `message` 里的原因处置：版本不一致的请部署方把后端升级到与提交侧同一版本（或用后端版本的 CLI 重新提交）；其它情况重新提交 |
+| 云端 run 的 `status` 为 `error`、状态行下有一行 `message=…` 说提交记录由更新或更早版本写出、不完整、或没有记 worker 镜像版本，没有任何 job 开始过 | 后端读到了它不能执行的提交记录：提交记录的格式版本与后端不一致、记录不完整，或没有记 worker 镜像版本 | 按 `message` 里的原因处置：版本不一致的请部署方把后端升级到与提交侧同一版本（或用后端版本的 CLI 重新提交）；其它情况重新提交 |
 | `status` / `explain` 以退出码 2 结束，`这个 run 的提交记录由更新版本的 gherkai … 写出` 或 `由更早版本的 … 写出` | 提交记录的格式与本机 CLI 不一致 | 更新的：`uv tool upgrade gherkai`；更早的：用写出它的那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或重新提交。同一个报告目录不要混用 1.4 与 1.5 的 CLI |
 | job 判 `error`、类别 `precheck_failed`，消息「这个 job 的格式版本是 …：命令行工具与 worker 的版本不一致」或「这个 job 没有带测试目标」 | 起 job 的命令行工具与 worker 不是同一版本 | 把两者装成同一版本；云端用与命令行工具同版本的 worker 镜像（部署方运行 `gherkai deploy`） |
 

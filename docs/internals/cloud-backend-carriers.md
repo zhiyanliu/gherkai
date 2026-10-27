@@ -85,7 +85,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 1. preflight 把 `--worker-variant`（缺省即默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 中仍存在（三相时序见下图）；任一环缺失即以退出码 2 结束，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
 2. 解析结果写进 definition：`RunMeta.worker_variant`（人读）+ `RunMeta.worker_task_defs`（引擎到 revision ARN 的映射），同一批 ARN 另以扁平形式写入 runs 表 STATE item 的顶层属性 `worker_task_def_arns`。
 3. 云端推进器（kicker / reconciler）与前台 `run` 的 `FargateEngine` 一律**照 definition 起 task**，用显式 revision、永不用 family 取最新；revision 的镜像栏是 `repo@sha256:<digest>`。
-4. definition 里没有 `worker_task_defs` 的老 run（引入该机制前提交的、或旧 CLI 提交到新后端的）走**兼容路径**：按后端当前默认指针解析，并在 CloudWatch 输出一行 `worker-compat:`，其中标明 variant / 版本 / 引擎。解析失败时只跳过该 run（events Stream 一批含多个 run，向外抛异常会让该批次重投后丢弃）。
+4. definition 里没有 `worker_task_defs` 的提交记录（旧 CLI 写出的）**不被执行**：推进器把该 run 标为 `error`、原因写进 run 级 `message`（`status` 可见），不按默认指针解析；同批别的 run 不受影响（events Stream 一批含多个 run，向外抛异常才会让该批次重投后丢弃）。
 
 ![提交时刻把 variant 解析为本 run 每个引擎的显式 revision 并写入 run 记录；之后重推同名 variant 只产生新 digest、新 revision 与新映射，起 task 仍照定义使用提交时固定的那一个](../diagrams/cloud-backend-carriers-revision-pinning.svg)
 
@@ -96,7 +96,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 - **ECR 仓库不设任何 lifecycle 规则**：正在运行的 run 的旧 revision 按 digest 指向被重推后转为 untagged 的那一层，因此这两个 repo 上**不得添加 untagged 过期规则**；随之而来的 untagged 层增长是已知的存储成本（该决策的理由与代价记录见本节末权威行的 ADR 0038）。
 - **删 revision 要满足清理的两个前置条件**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）**且**无未到终态的 run 引用它。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、运行中 run 引用检查静默失效。任一条不满足则留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对运行中 run 引用检查不可见。
 
-> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」「运行时与 preflight」（含被拒方案：RunTask 传 family、缺字段回落模板、ECR untagged 过期规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（definition 随 run 走、宿主只读回）；code：`compose.resolve_worker_variant` / `resolve_default_worker_task_defs`、`workers.cleanup_pass`、`core/gherkai_core/adapters/run_store/ddb.py` 的 `create_run`。
+> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」「运行时与 preflight」（含被拒方案：RunTask 传 family、缺字段回落模板、ECR untagged 过期规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（definition 随 run 走、宿主只读回）；code：`compose.resolve_worker_variant`、`workers.cleanup_pass`、`core/gherkai_core/adapters/run_store/ddb.py` 的 `create_run`。
 
 ## 6. 一个 prefix 即一套环境；多版本并存依靠多 prefix
 
