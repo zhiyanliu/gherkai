@@ -37,7 +37,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | `engine_error`；两侧都先经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b） |
 | 一条 step 命中多条模式 → `DeterministicConflict` | `error` | 同上，冲突模式清单在 `message` 里 |
 | 命中一条模式但关键字不在其 `keywords` 里 → `DeterministicKeywordMismatch` | `error` | `engine_error`，消息给出该条目接受的关键字 |
-| 命中的 step 带 DataTable / DocString | `error` | `engine_error`，确定性 step 不接收多行参数 |
+| 命中、且在当前目标上有句柄的 step 带 DataTable / DocString | `error` | `engine_error`，确定性 step 不接收多行参数（目标上没有句柄、走 AI 的 step 把参数照常交给 AI） |
 
 两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突（内建导航的模式自带 `^…$` 锚定，那是条目自己写的、不是匹配面的规则）；**内建导航在注册表里**，因此它出现在 `list-deterministic` 清单、也被 `plan` 标注。1.4 及之前版本它是独立于注册表的一级，两处都看不到它。
 
@@ -60,7 +60,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 - **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，使用方的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单列出的、`plan` 标注的、实际执行时派发的，是同一份真值，**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
 - **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数与关键字如何处置」上分叉（实际执行时抛 `DeterministicConflict` / `DeterministicKeywordMismatch`，预检返回结构化 `{"conflict": [...]}` / `{"keyword_mismatch": …, "keywords": […]}`），匹配语义本身只有一份实现。
 
-`plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎至多 spawn 一次瞬时本地 worker（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code）。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
+`plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎至多 spawn 两次瞬时本地 worker：一次 match 查询（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code），一次能力自述（`compose.query_capabilities`，按引擎与 steps 目录缓存，目标核对与命中的目标核对共用）。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
 
 文本视图只标注少数派：命中标 `← 确定性: <description>`、冲突与关键字不符标 `← ⚠`，走 AI 的**不标**（噪声控制，`render.py` `_dispatch_hint`）。`--json` 的 `deterministic` 键是四态（`null` / 命中 / `conflict` / `keyword_mismatch`），在每个 step 上一律省略也有含义；字段级语义见 [`cli-json-contract.md`](./cli-json-contract.md)，本文不重复。冲突与关键字不符在 `plan` 只产生 ⚠ 与 stderr 警告，**退出码仍 0**：feature 作者手上能做的只有改 step 措辞，修注册表不是他能做的动作。
 
