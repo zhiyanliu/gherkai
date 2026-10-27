@@ -1209,7 +1209,8 @@ def _available_step_targets(engine: str, steps_dir: str | None) -> "dict[str, li
         caps = compose.query_capabilities(engine, steps_dir=steps_dir)
     except compose.WorkerSelfDescribeError:
         raise
-    except (compose.WorkerNotFoundError, ValueError, RuntimeError):
+    except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
+        _progress(f"（标注降级）引擎 {engine} 的能力自述取不到，命中的确定性 step 不按 scope 目标核对、一律标为确定性：{e}")
         return None
     supported = compose.worker_targets(caps)
     return {e["pattern"]: compose.available_targets(compose.step_targets(e), supported) for e in caps["deterministic_steps"]}

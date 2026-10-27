@@ -2398,3 +2398,18 @@ def test_plan_marks_hit_without_handle_on_scope_target_as_ai(tmp_path, monkeypat
     assert m.main(["plan", str(f), "--json"]) == 0
     steps = json.loads(capsys.readouterr().out)["jobs"][0]["scenarios"][0]["steps"]
     assert steps[0]["deterministic"] is None and steps[1]["deterministic"] == {"pattern": "p", "description": "URL 断言"}
+
+
+def test_plan_degrades_target_check_with_a_note_when_capabilities_unavailable(tmp_path, monkeypatch, capsys):
+    """能力自述取不到时按目标核对那一步降级（命中仍标确定性），stderr 有降级提示而不是静默；match 查询本身不受影响。"""
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda engine, items, steps_dir=None: [({"pattern": "p", "description": "URL 断言"} if "页面地址" in it["text"] else None) for it in items])
+
+    def boom(engine, *, steps_dir=None, **kw):
+        raise RuntimeError("自述起不来")
+
+    monkeypatch.setattr(m.compose, "query_capabilities", boom)
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
+    captured = capsys.readouterr()
+    assert "← 确定性: URL 断言" in captured.out
+    assert "标注降级" in captured.err and "不按 scope 目标核对" in captured.err
