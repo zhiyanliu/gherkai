@@ -10,8 +10,8 @@
     "semantic_hash": "795f0661754fff31f386a75262016038"
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793064840.2901661,
-    "ast_hash": "970b51a36031f13c7f8089400c1d580e",
+    "mtime": 1793066315.2396574,
+    "ast_hash": "173126a8f49834ab0518ac4f7e09c756",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793065473.4364176,
-    "ast_hash": "704bb216c8af26d6764ecdbdcd31eeed",
+    "mtime": 1793066266.5974734,
+    "ast_hash": "88722db7e89bad90ff76c9202898ee4c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -560,8 +560,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/model.py": {
-    "mtime": 1793008735.456743,
-    "ast_hash": "74ab3007f012bb76d33018b94a3d221b",
+    "mtime": 1793066266.5976417,
+    "ast_hash": "cd69ade073898b19be4bb146dbbaacc3",
     "semantic_hash": ""
   },
   "core/gherkai_core/parse.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": "cb5346fd214c36aabf47fdf937c0281b"
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1793011922.5740259,
-    "ast_hash": "d2bd171dba87cefa00831a14def46d5b",
+    "mtime": 1793066266.5979238,
+    "ast_hash": "2bbf3dea919914c7b047019af234c2af",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -650,8 +650,8 @@
     "semantic_hash": "6e9cfc5c2c320e755ab52bf93596c2de"
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1792996797.0261798,
-    "ast_hash": "76744e43c8950888f585fe3959b76194",
+    "mtime": 1793066544.7244153,
+    "ast_hash": "baa144fa3a994d42854905428ffbee8d",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
@@ -665,8 +665,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_tunnel_host.py": {
-    "mtime": 1792988868.9682086,
-    "ast_hash": "20d1365c03133e3d4602f31c3c2ec45c",
+    "mtime": 1793066315.239382,
+    "ast_hash": "c7fc635e154020c0c6f5a0576717c915",
     "semantic_hash": ""
   },
   "runtime/README.md": {
@@ -1050,8 +1050,8 @@
     "semantic_hash": "d09837458cc22adedb261d4509d97d26"
   },
   "cli/DEVELOPMENT.md": {
-    "mtime": 1792027607.6425176,
-    "ast_hash": "c4371a8d16e151c9328d7d7c89779444",
+    "mtime": 1793066577.2247934,
+    "ast_hash": "eeaf85ae9358b9df7b9a7af342c7553f",
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1793011922.5746675,
-    "ast_hash": "37dcf5ffcd45df02cf044e101b6e27a7",
+    "mtime": 1793066315.2760713,
+    "ast_hash": "e625a6eceaa646821c95a407c338b75f",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1793011922.574293,
-    "ast_hash": "6778cceba677211ec36c837d865602ac",
+    "mtime": 1793066577.2249799,
+    "ast_hash": "22c190715678b78db425bfb131c3ddd8",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1793011922.5744202,
-    "ast_hash": "94e2c176642941e196b07d7ac59ee958",
+    "mtime": 1793066315.2399354,
+    "ast_hash": "773108fc793f9e034f08ff885cddd98b",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1915,8 +1915,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793065708.653913,
-    "ast_hash": "a15fceb4ff70c78dbfe4d00a99c8c9f2",
+    "mtime": 1793066693.365391,
+    "ast_hash": "f2bd48c94127079fadab05498d21d4a2",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2002,6 +2002,16 @@
   "engines/novaact/tests/test_precheck.py": {
     "mtime": 1793012047.99753,
     "ast_hash": "2791d613ea22015be1abf4e38654d3c0",
+    "semantic_hash": ""
+  },
+  "cli/gherkai_cli/config.py": {
+    "mtime": 1793065915.167236,
+    "ast_hash": "9eb96f310bddc64af57ddf99586dd48e",
+    "semantic_hash": ""
+  },
+  "cli/tests/test_project_config.py": {
+    "mtime": 1793066577.2246294,
+    "ast_hash": "35dce7feb018074b49a4ded758a7d151",
     "semantic_hash": ""
   }
 }

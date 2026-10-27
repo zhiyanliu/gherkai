@@ -12,6 +12,7 @@
 
 - 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。旧版本 worker 没有这些字段时按「只支持桌面网页」处理，不报错。
 - 用户指南新增引擎能力矩阵一页（`docs/user-guide/engines.md`）：引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式。
+- 项目配置文件 `gherkai.toml`：把每个项目基本固定的选项写进文件、随 `.feature` 一起入库共享。`run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-deterministic` 读它，按 `--config`、环境变量 `GHERKAI_CONFIG`、当前目录的 `gherkai.toml` 依次查找，不向上级目录查找；取值顺序是命令行选项、环境变量、配置文件、内建默认依次优先。`[common]` 与 `[cloud]` 的键与选项长名同词（`default-engine`、`steps-dir`、`prefix` 等；`[cloud]` 只在 `--backend cloud` 下生效），只影响本次调用的选项（`--scope`、`--tags`、`--json`、`--fail-fast` 等）不进文件；`[devices]` 给设备选择与计费方式，`[apps]` 给 `@app:<别名>` 对应的安装包与包名或 bundle id。路径类值（`steps-dir`、本机后端的 `report-dir`、`[apps]` 的 `file`）相对配置文件所在目录。不认识的节或键、取值不合法、`os-version` 写成数字都以退出码 2 结束并点名文件与位置。`gherkai doctor` 多一行 `config.file` 显示本次加载的配置文件。
 - 判定记录为设备会话预留的字段：`run --json` 与 `explain --json` 的 job 可带 `sessions[]`（每个远程访问会话的名称、来源、是否确认停止、占用秒数）与 `device_observed_s` / `device_observed_missing` 两个计量键，run 级同样合计；桌面用例不出现这些键。文本输出与报告页对设备 job 显示设备描述、Device Farm 控制台链接、设备占用时长，并列出未能确认停止的会话名；`explain` 对设备目标的证据显示这一步的执行方式、页面地址、控件摘要与控件树文件地址，设备上判为 failed / error 的 step 缺证据时按抽取失败提示。worker 在被测对象未就绪时报出的 scope 级错误会把未执行的 scenario 标为 `skipped`、旁注「未执行（scope 级错误，原因见 job 判定）」。
 
 ### 变化

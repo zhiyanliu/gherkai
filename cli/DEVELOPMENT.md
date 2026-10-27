@@ -16,6 +16,7 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 ```
 cli/gherkai_cli/
 ├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**别改用 `argparse.SUPPRESS`**——会以「==SUPPRESS==」漏进 `--help`，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── config.py     ← 项目配置文件 gherkai.toml 的定位、读取与形态校验（ADR 0053）；合成进取值顺序的是 `__main__._apply_project_config`，本模块不知道命令与 argparse
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 ├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）

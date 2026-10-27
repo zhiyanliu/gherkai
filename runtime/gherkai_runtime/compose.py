@@ -827,8 +827,10 @@ def build_local_stores(*, report_dir: str | Path):
     return run_store, result_store, report_store, make_artifacts
 
 
-def resolve_region(explicit_region: str | None, profile: str | None) -> str | None:
-    """把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION > profile config。
+def resolve_region(explicit_region: str | None, profile: str | None, *, config_region: str | None = None) -> str | None:
+    """把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION > 配置文件 region > profile config。
+
+    配置文件层（ADR 0053 决策 2）排在环境变量之后、profile config 之前：环境变量是本次调用的临时覆盖，文件是项目基线。
 
     **profile config 回落是关键**：Nova worker 的 AgentCore `validate_region` 要求显式合法 region 字符串、不查 boto
     默认链/profile config——若不在此把 profile 里的 region 落实成字符串，只在 profile 里配了 region 的使用方下 worker region=None 会
@@ -838,10 +840,10 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     依赖 boto3」不变量（否则纯 local + 无 region env 的使用方执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
     真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None，即 fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
     """
-    r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION")
+    r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or config_region
     if r:
         return r
-    # 前三级 miss：回落 profile config（--profile 或 AWS_PROFILE 指向的 profile 的 region 字段）。
+    # 前四级 miss：回落 profile config（--profile 或 AWS_PROFILE 指向的 profile 的 region 字段）。
     # 缺 boto3（纯 local 未装 aws extra）→ 当作读不到 → None fail-loud（不让纯 local 硬依赖 boto3）。
     try:
         import boto3
@@ -850,16 +852,18 @@ def resolve_region(explicit_region: str | None, profile: str | None) -> str | No
     return boto3.session.Session(profile_name=profile).region_name
 
 
-def resolve_aws_identity(region: str | None, profile: str | None) -> tuple[str | None, str | None]:
-    """AWS 身份解析链的唯一实现：profile 取 flag，缺则取 `AWS_PROFILE`；region 经 `resolve_region` 落实成具体字符串。
+def resolve_aws_identity(region: str | None, profile: str | None, *, config_region: str | None = None,
+                         config_profile: str | None = None) -> tuple[str | None, str | None]:
+    """AWS 身份解析链的唯一实现：profile 取 flag，缺则取 `AWS_PROFILE`，再缺取配置文件的 profile（ADR 0053 决策 2）；
+    region 经 `resolve_region` 落实成具体字符串（配置文件层同样排在环境变量之后）。
 
     `resolve_cloud_target` 与 `detached.build_local_reconcile` 都经此、不各写一份——两份就会漂移，
     而漂移的后果是同一个 run 在提交进程与后台宿主下拿到不同的 region/profile。
     解析顺序有依赖：profile 先定，region 的末级回落（profile config）要用它。
     region 可为 None（全 miss 即真无 region，按 `resolve_region` 的 fail-loud 口径原样透出、不在此兜）。
     """
-    profile = profile or os.environ.get("AWS_PROFILE")
-    return resolve_region(region, profile), profile
+    profile = profile or os.environ.get("AWS_PROFILE") or config_profile
+    return resolve_region(region, profile, config_region=config_region), profile
 
 
 @dataclass(frozen=True)
@@ -892,25 +896,29 @@ def resolve_cloud_target(
     *, prefix: str | None = None, region: str | None = None, profile: str | None = None,
     runs_table: str | None = None, events_table: str | None = None,
     bucket: str | None = None, cluster: str | None = None,
+    config_prefix: str | None = None, config_runs_table: str | None = None, config_bucket: str | None = None,
+    config_region: str | None = None, config_profile: str | None = None,
 ) -> CloudTarget:
     """把入口前端已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。
 
-    解析链逐资源不同、**有意非齐整**（保既有 CLI 行为，别为对称乱加 env 兜底）：
-    - prefix：flag > `AWS_RESOURCE_PREFIX` > `DEFAULT_PREFIX`；
-    - runs_table / bucket：flag > `AWS_DDB_TABLE` / `AWS_S3_BUCKET` > prefix 默认名（历史 env 面）；
+    解析链逐资源不同、**有意非齐整**（保既有 CLI 行为，别为对称乱加 env 兜底）；配置文件层（ADR 0053 决策 2）一律排在
+    环境变量之后、默认名之前，由入口前端经 config_* 形参传入（有环境变量层的项才有这个形参；events_table / cluster 没有
+    环境变量层，配置值由入口前端直接当 flag 值传）：
+    - prefix：flag > `AWS_RESOURCE_PREFIX` > 配置文件 > `DEFAULT_PREFIX`；
+    - runs_table / bucket：flag > `AWS_DDB_TABLE` / `AWS_S3_BUCKET` > 配置文件 > prefix 默认名（历史 env 面）；
     - events_table / cluster / 三 Lambda：flag（Lambda 无 flag）> prefix 默认名，**无 env 兜底**；
-    - profile / region：经 `resolve_aws_identity`（flag > `AWS_PROFILE`；region 落实成具体字符串，见其 docstring）。
+    - profile / region：经 `resolve_aws_identity`（flag > `AWS_PROFILE` > 配置文件；region 落实成具体字符串，见其 docstring）。
     """
-    region, profile = resolve_aws_identity(region, profile)
-    prefix = prefix or os.environ.get("AWS_RESOURCE_PREFIX") or _names.DEFAULT_PREFIX
+    region, profile = resolve_aws_identity(region, profile, config_region=config_region, config_profile=config_profile)
+    prefix = prefix or os.environ.get("AWS_RESOURCE_PREFIX") or config_prefix or _names.DEFAULT_PREFIX
     return CloudTarget(
         prefix=prefix,
         region=region,
         profile=profile,
-        runs_table=(runs_table or os.environ.get("AWS_DDB_TABLE")
+        runs_table=(runs_table or os.environ.get("AWS_DDB_TABLE") or config_runs_table
                     or _names.default_name(prefix, _names.BASE_RUNS_TABLE)),
         events_table=events_table or _names.default_name(prefix, _names.BASE_EVENTS_TABLE),
-        bucket=(bucket or os.environ.get("AWS_S3_BUCKET")
+        bucket=(bucket or os.environ.get("AWS_S3_BUCKET") or config_bucket
                 or _names.default_name(prefix, _names.BASE_BUCKET)),
         cluster=cluster or _names.default_name(prefix, _names.BASE_CLUSTER),
         kicker_lambda=_names.default_name(prefix, _names.BASE_KICKER_LAMBDA),

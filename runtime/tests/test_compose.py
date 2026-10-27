@@ -454,21 +454,21 @@ def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
 def test_resolve_aws_identity_takes_profile_from_env(monkeypatch):
     """profile 入参为 None 时取 `AWS_PROFILE`，并把它喂给 region 解析（profile config 那一级要用它）。"""
     monkeypatch.setenv("AWS_PROFILE", "env-prof")
-    monkeypatch.setattr(compose, "resolve_region", lambda r, p: f"region-of-{p}")  # 不摸真 ~/.aws
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: f"region-of-{p}")  # 不摸真 ~/.aws
     assert compose.resolve_aws_identity(None, None) == ("region-of-env-prof", "env-prof")
 
 
 def test_resolve_aws_identity_flag_wins_over_env(monkeypatch):
     """对偶（防「恒取 env」的假绿反面）：显式 profile 覆盖 `AWS_PROFILE`；显式 region 照样过 resolve_region。"""
     monkeypatch.setenv("AWS_PROFILE", "env-prof")
-    monkeypatch.setattr(compose, "resolve_region", lambda r, p: r)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: r)
     assert compose.resolve_aws_identity("us-west-2", "flag-prof") == ("us-west-2", "flag-prof")
 
 
 def test_resolve_cloud_target_goes_through_resolve_aws_identity(monkeypatch):
     """cloud 目标解析不自写一份身份解析链——换掉唯一实现即整条链改变（单一事实源锁定）。"""
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    monkeypatch.setattr(compose, "resolve_aws_identity", lambda r, p: ("region-x", "profile-x"))
+    monkeypatch.setattr(compose, "resolve_aws_identity", lambda r, p, **kw: ("region-x", "profile-x"))
     t = compose.resolve_cloud_target(prefix="p-")
     assert (t.region, t.profile) == ("region-x", "profile-x")
 
@@ -914,7 +914,7 @@ def test_resolve_cloud_target_flags_win_over_env(monkeypatch):
 
 def test_resolve_cloud_target_default_prefix_when_nothing_given(monkeypatch):
     _clear_aws_env(monkeypatch)
-    monkeypatch.setattr(compose, "resolve_region", lambda r, p: None)  # 不摸真 ~/.aws
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: None)  # 不摸真 ~/.aws
     t = compose.resolve_cloud_target()
     assert t.prefix == names.DEFAULT_PREFIX and t.runs_table == f"{names.DEFAULT_PREFIX}runs"
     assert t.region is None and t.profile is None  # 真无 → fail-loud，不硬编码 east
@@ -1567,3 +1567,44 @@ def test_run_duration_ms_from_run_state_timestamps():
     assert compose.run_duration_ms(None) is None
     assert compose.run_duration_ms(RunState(run_id="r", status=Status.PASSED, jobs={}, high_water_mark=0,
                                             started_at="t0", ended_at="t9")) is None  # 解析不了 → 派生指标显「?」，不炸收尾
+
+
+# ---- 配置文件层（ADR 0053 决策 2）：排在环境变量之后、默认之前 ----
+
+def test_resolve_region_config_layer_after_env_before_profile_config(monkeypatch):
+    monkeypatch.delenv("AWS_REGION", raising=False)
+    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
+    import boto3
+
+    def _never(*a, **k):
+        raise AssertionError("配置文件给了 region 就不该再读 profile config")
+
+    monkeypatch.setattr(boto3.session, "Session", _never)
+    assert compose.resolve_region(None, "prof", config_region="eu-west-1") == "eu-west-1"
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "ap-south-1")
+    assert compose.resolve_region(None, "prof", config_region="eu-west-1") == "ap-south-1"  # 环境变量胜过配置文件
+    assert compose.resolve_region("us-west-2", "prof", config_region="eu-west-1") == "us-west-2"
+
+
+def test_resolve_aws_identity_config_profile_after_env(monkeypatch):
+    monkeypatch.delenv("AWS_PROFILE", raising=False)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: (r, p, kw.get("config_region")))
+    assert compose.resolve_aws_identity(None, None, config_region="cfg-r", config_profile="cfg-p") == ((None, "cfg-p", "cfg-r"), "cfg-p")
+    monkeypatch.setenv("AWS_PROFILE", "env-p")
+    assert compose.resolve_aws_identity(None, None, config_profile="cfg-p")[1] == "env-p"
+    assert compose.resolve_aws_identity(None, "flag-p", config_profile="cfg-p")[1] == "flag-p"
+
+
+def test_resolve_cloud_target_config_layer_after_env_before_default(monkeypatch):
+    _clear_aws_env(monkeypatch)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: None)
+    t = compose.resolve_cloud_target(config_prefix="cfg-", config_runs_table="cfg-runs", config_bucket="cfg-bucket")
+    assert (t.prefix, t.runs_table, t.bucket, t.events_table) == ("cfg-", "cfg-runs", "cfg-bucket", "cfg-events")
+    monkeypatch.setenv("AWS_RESOURCE_PREFIX", "env-")
+    monkeypatch.setenv("AWS_DDB_TABLE", "env-runs")
+    monkeypatch.setenv("AWS_S3_BUCKET", "env-bucket")
+    t = compose.resolve_cloud_target(config_prefix="cfg-", config_runs_table="cfg-runs", config_bucket="cfg-bucket")
+    assert (t.prefix, t.runs_table, t.bucket) == ("env-", "env-runs", "env-bucket")   # 配置文件不越过环境变量
+    t = compose.resolve_cloud_target(prefix="flag-", runs_table="flag-runs", bucket="flag-bucket",
+                                     config_prefix="cfg-", config_runs_table="cfg-runs", config_bucket="cfg-bucket")
+    assert (t.prefix, t.runs_table, t.bucket) == ("flag-", "flag-runs", "flag-bucket")

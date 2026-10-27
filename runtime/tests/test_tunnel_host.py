@@ -103,7 +103,7 @@ def _state(status: Status) -> RunState:
 def test_watch_stops_tunnel_on_terminal_state(monkeypatch):
     stopped = []
     monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
-    monkeypatch.setattr(compose, "resolve_region", lambda r, p: r)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: r)
     _patch_run_store(monkeypatch, [_state(Status.RUNNING), _state(Status.PASSED)])
     import time as _t
 
@@ -117,7 +117,7 @@ def test_watch_ttl_fallback_when_run_never_settles(monkeypatch):
     """读库一直异常（run 卡死/查询异常）→ 不致命、继续轮询，TTL 到点拆隧道自杀（防 ngrok 泄漏）。"""
     stopped, warned = [], []
     monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
-    monkeypatch.setattr(compose, "resolve_region", lambda r, p: r)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: r)
     _patch_run_store(monkeypatch, [RuntimeError("ddb down")])
     import time as _t
 

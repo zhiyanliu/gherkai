@@ -28,6 +28,7 @@ from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_runtime import compose
 from gherkai_runtime import names as _names
 
+from gherkai_cli import config as _config
 from gherkai_cli import deploy as _deploy
 from gherkai_cli import render
 from gherkai_cli import skill_install as _skill_install
@@ -36,6 +37,155 @@ from gherkai_cli import skill_install as _skill_install
 # run / submit 的并发默认值（ADR 0026「并发上限」定为 4）：并发只改同时开几个浏览器会话，不改 job 数与总费用；
 # status --wait 与 reconcile 的同名 flag 只是提交记录缺值时的回落，取同一常量避免漂移。
 DEFAULT_MAX_CONCURRENCY = 4
+
+# ---- 项目配置文件 gherkai.toml（ADR 0053）：七个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----
+_CONFIG_COMMANDS = ("run", "plan", "submit", "status", "explain", "doctor", "list-deterministic")
+# 按次选择型选项（ADR 0053 决策 3 的排除名单，用 argparse 的 dest 名）：只影响本次的范围、输出形态、中止方式、落盘取舍或
+# 查询对象，不进配置文件——写进文件会让某次调用的范围或中止语义在不显眼处改变。护栏 test_project_config 从 argparse 差集
+# 核对：七个命令的全部长选项恰好由本名单、_CLOUD_OPTIONS、_DEVICE_OPTIONS 与 [common] 同词键四者拼成，新增选项漏归类即失败。
+_PER_CALL_OPTIONS = frozenset({"scope", "tags", "scenario", "step", "json", "quiet", "wait", "all", "full",
+                               "fail_fast", "no_report", "engine", "config"})
+# 只在 --backend cloud 下起作用的选项 → [cloud] 节；本机后端下 [cloud] 整节静默不生效（ADR 0053 决策 3）
+_CLOUD_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "events_table", "cluster", "subnet", "security_group",
+                            "worker_variant"})
+# 有环境变量层的选项：配置值**不写进 args**（否则配置越过环境变量，正是决策 2 要避免的），而是经各解析链的 config_* 形参
+# 插在环境变量之后（prefix / ddb-table / s3-bucket 在 compose.resolve_cloud_target，region / profile 在 resolve_aws_identity，
+# steps-dir 在 _steps_dir_or_error）
+_ENV_LAYER_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "region", "profile", "steps_dir"})
+# 设备专用选项 → [devices] 的键（ADR 0053 决策 6 映射表）：命令行平铺带平台前缀、配置文件有节层级；它们有环境变量层
+# （GHERKAI_*），解析在设备请求解析那一步、不经本节的同词规则
+_DEVICE_OPTIONS = {"android_device_arn": ("devices.android", "arn"), "ios_device_arn": ("devices.ios", "arn"),
+                   "device_farm_project_arn": ("devices", "project-arn"), "app_bucket": ("devices", "app-bucket")}
+# 内建默认：argparse 侧这些选项改成 None 哨兵（分得出「使用方没给」），配置合成之后在这里补
+_BUILTIN_DEFAULTS = {"default_engine": "novaact", "assertion_votes": 1, "max_concurrency": DEFAULT_MAX_CONCURRENCY,
+                     "report_dir": "reports", "backend": "local", "tunnel": "ngrok"}
+
+
+def _subparser(parser: argparse.ArgumentParser, name: str) -> argparse.ArgumentParser:
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            return action.choices[name]
+    raise KeyError(name)
+
+
+def _configurable_keys(parser: argparse.ArgumentParser) -> dict[str, set[str]]:
+    """从 argparse 推出 [common] / [cloud] 两节接受的键（选项长名去掉 `--`，ADR 0053 决策 3 的同词规则）：七个读配置命令的全部
+    长选项，减去按次选择型与设备专用选项，再按是否只在云端生效分到两节。单一真源在 argparse：新增选项自动进入接受集，归类由
+    三份名单决定。"""
+    common: set[str] = set()
+    cloud: set[str] = set()
+    for name in _CONFIG_COMMANDS:
+        for action in _subparser(parser, name)._actions:
+            dest = action.dest
+            if not action.option_strings or dest == "help" or dest in _PER_CALL_OPTIONS or dest in _DEVICE_OPTIONS:
+                continue
+            (cloud if dest in _CLOUD_OPTIONS else common).add(dest.replace("_", "-"))
+    return {"common": common, "cloud": cloud}
+
+
+def _convert_config_value(action, raw, *, section: str, key: str, path):
+    """配置值经与 argparse 同一套类型转换与取值范围校验（ADR 0053 决策 3）：非法值的报错形态与命令行上给错一致。
+    可重复给的选项（append）接受文本列表；其余只接受单个值。"""
+    def fail(reason: str):
+        raise _config.ConfigError(f"配置文件 {path} 的 [{section}] {key} 取值 {raw!r} 无效：{reason}（要求与命令行选项 --{key} 相同）")
+
+    repeat = isinstance(action, argparse._AppendAction)
+    if isinstance(raw, list) and not repeat:
+        fail("这个选项只接受一个值，不接受列表")
+    out = []
+    for item in (raw if isinstance(raw, list) else [raw]):
+        text = str(item)
+        try:
+            value = action.type(text) if callable(action.type) else text
+        except (ValueError, TypeError, argparse.ArgumentTypeError) as e:
+            fail(str(e) or "类型不对")
+        if action.choices is not None and value not in action.choices:
+            fail(f"只能是 {'、'.join(str(c) for c in action.choices)} 之一")
+        out.append(value)
+    return out if repeat else out[0]
+
+
+def _apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
+    """parse_args 之后、分派之前：读项目配置文件并合成取值顺序（ADR 0053 决策 1、2、3）。返回 2（配置文件不可用）或 None。
+
+    只对七个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值已在 definition 里，或由提交侧按解析后的值经
+    argv 传入）、`deploy` / `destroy` / `skill` / `list-engines` 不读。
+    三类选项三种去向：①没有环境变量层的 → 配置值填进仍为 None 的 args 字段（选项已给则不动），最后补内建默认；
+    ②有环境变量层的（_ENV_LAYER_OPTIONS）→ 只做类型校验、存进 `args.config_values`，由各解析链经 config_* 形参放在环境变量
+    之后；③ [cloud] 整节只在 --backend cloud 下生效，backend 自身先按「选项 > [common] > 内建」定下来。
+    [common] 里对当前命令不存在的键忽略（配置文件是项目级的，各命令只取自己有的那几项）。
+    路径类值相对配置文件所在目录（决策 2）：steps-dir 恒绝对化；report-dir 只在本机后端下绝对化（云端是桶内键前缀、原样）。
+    """
+    if getattr(args, "command", None) not in _CONFIG_COMMANDS:
+        return None
+    sub = _subparser(parser, args.command)
+    keys = _configurable_keys(parser)
+    try:
+        path, origin = _config.locate_config(getattr(args, "config", None))
+        cfg = _config.load_project_config(path, common_keys=keys["common"], cloud_keys=keys["cloud"])
+    except _config.ConfigError as e:
+        _progress(str(e))
+        return 2
+    args.project_config = cfg
+    args.config_origin = origin
+    args.config_values = {}    # 有环境变量层的选项：dest → 已校验的配置值（解析链经 config_* 形参取用）
+    args.config_filled = set()  # 由配置填进 args 的 dest（提示语按来源分流时用）
+    actions = {a.dest: a for a in sub._actions if a.option_strings and a.dest != "help"}
+    try:
+        if "backend" in actions and args.backend is None and "backend" in cfg.common:
+            args.backend = _convert_config_value(actions["backend"], cfg.common["backend"], section="common", key="backend", path=cfg.path)
+            args.config_filled.add("backend")
+        if "backend" in actions and args.backend is None:
+            args.backend = _BUILTIN_DEFAULTS["backend"]
+        use_cloud = getattr(args, "backend", None) == "cloud"
+        for dest, action in actions.items():
+            if dest == "backend" or dest in _PER_CALL_OPTIONS or dest in _DEVICE_OPTIONS:
+                continue
+            section = "cloud" if dest in _CLOUD_OPTIONS else "common"
+            if section == "cloud" and not use_cloud:
+                continue
+            key = dest.replace("_", "-")
+            source = cfg.cloud if section == "cloud" else cfg.common
+            if key not in source:
+                continue
+            value = _convert_config_value(action, source[key], section=section, key=key, path=cfg.path)
+            if dest in _ENV_LAYER_OPTIONS:
+                args.config_values[dest] = cfg.resolve_path(value) if dest == "steps_dir" else value
+                continue
+            if getattr(args, dest) is not None:
+                continue
+            if dest == "report_dir" and not use_cloud:
+                value = cfg.resolve_path(value)
+            setattr(args, dest, value)
+            args.config_filled.add(dest)
+    except _config.ConfigError as e:
+        _progress(str(e))
+        return 2
+    for dest, default in _BUILTIN_DEFAULTS.items():
+        if dest in actions and getattr(args, dest) is None:
+            setattr(args, dest, default)
+    return None
+
+
+def _identity_layers(args) -> dict:
+    """`compose.resolve_aws_identity` 的配置文件层（region / profile 排在环境变量之后，ADR 0053 决策 2）。"""
+    vals = getattr(args, "config_values", {})
+    return {"config_region": vals.get("region"), "config_profile": vals.get("profile")}
+
+
+def _config_layers(args) -> dict:
+    """`compose.resolve_cloud_target` 的配置文件层：身份两项加 prefix / ddb-table / s3-bucket（都有环境变量层，排在它之后）。
+    events-table / cluster 没有环境变量层，配置值已由 `_apply_project_config` 直接填进 args、按选项值传入。"""
+    vals = getattr(args, "config_values", {})
+    return {**_identity_layers(args), "config_prefix": vals.get("prefix"),
+            "config_runs_table": vals.get("ddb_table"), "config_bucket": vals.get("s3_bucket")}
+
+
+def _add_config_flag(p: argparse.ArgumentParser) -> None:
+    """七个读项目配置文件的子命令共用（ADR 0053 决策 1）。"""
+    p.add_argument("--config", default=None, metavar="FILE",
+                   help="项目配置文件 gherkai.toml 的路径（不给时依次找环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml；"
+                        "都没有就不用配置文件）。取值顺序：命令行选项 > 环境变量 > 配置文件 > 内建默认")
 
 
 def _dist_version() -> str:
@@ -193,16 +343,17 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     run = sub.add_parser("run", help="运行一个或多个 .feature")
     run.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
+    _add_config_flag(run)
     run.add_argument(
-        "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
+        "--default-engine", choices=sorted(_names.ENGINES), default=None,
         help="未标 @engine 的 scope 用的默认引擎（默认 novaact）；标了 @engine: 的 scope 按 tag 走、不受此影响",
     )
     run.add_argument(
-        "--assertion-votes", type=int, default=1, metavar="N",
+        "--assertion-votes", type=int, default=None, metavar="N",
         help="AI 断言（Then）投票次数（默认 1 即单次判定）；调高（如 3/5）启用抖动检测：执行 N 次取多数票",
     )
     run.add_argument(
-        "--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
+        "--max-concurrency", type=int, default=None,
         help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}；并发只改同时开几个浏览器会话、不改 job 数与总费用，"
              "配额紧可调低）",
     )
@@ -228,7 +379,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "（含每 run 一换的 basic-auth 凭据）。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
     )
     run.add_argument(
-        "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
+        "--tunnel", choices=sorted(_tunnel_providers()), default=None,
         help="--expose-local 用的隧道 provider（默认 ngrok，当前唯一实现）",
     )
     _add_selection_flags(run)
@@ -241,7 +392,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                           "只打一行位置（云端后端的 worker 在云端运行、日志在 CloudWatch，无此文件）；仍打文本汇总")
     # RunReport 是 run 的应得产物：默认总归集（manifest.json + index.html）到 <report-dir>/<run_id>/。
     run.add_argument(
-        "--report-dir", default="reports", metavar="DIR",
+        "--report-dir", default=None, metavar="DIR",
         help="归集报告落点（默认 reports/；每次 run 落 DIR/<run_id>/）",
     )
     run.add_argument(
@@ -252,7 +403,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local 是文件落盘（默认）；cloud 是 DDB/S3。
     # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
     run.add_argument(
-        "--backend", choices=["local", "cloud"], default="local",
+        "--backend", choices=["local", "cloud"], default=None,
         help="落库后端：local 把文件落 --report-dir（默认）；cloud 把状态落 DynamoDB、结果与报告落 S3",
     )
     run.add_argument(
@@ -305,6 +456,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 瞬时 worker 自述子进程做 match，不执行 job）。
     pl = sub.add_parser("plan", help="对 .feature 做用例预检：看 scope/job 分组 + 校验配置，不实际运行（零费用）")
     pl.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
+    _add_config_flag(pl)
     pl.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
         help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
@@ -312,11 +464,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "标了 @timeout:N 的按 tag 走——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
     )
     pl.add_argument(
-        "--default-engine", choices=sorted(_names.ENGINES), default="novaact",
+        "--default-engine", choices=sorted(_names.ENGINES), default=None,
         help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故用例预检也可设",
     )
     pl.add_argument(
-        "--assertion-votes", type=int, default=1, metavar="N",
+        "--assertion-votes", type=int, default=None, metavar="N",
         help="AI 断言投票次数（默认 1）——影响分组产出的投票次数，故用例预检也可设",
     )
     _add_selection_flags(pl)
@@ -334,11 +486,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 本机后端：submit setsid fork 一个 per-run 进程执行 reconcile loop（本机推进，无需常驻），CLI 立即退出。
     sm = sub.add_parser("submit", help="[后台运行] 提交 .feature 到后台运行、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
-    sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default="novaact",
+    _add_config_flag(sm)
+    sm.add_argument("--default-engine", choices=sorted(_names.ENGINES), default=None,
                     help="未标 @engine 的 scope 用的默认引擎")
     _add_selection_flags(sm)
-    sm.add_argument("--assertion-votes", type=int, default=1, metavar="N", help="AI 断言投票次数（默认 1）")
-    sm.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
+    sm.add_argument("--assertion-votes", type=int, default=None, metavar="N", help="AI 断言投票次数（默认 1）")
+    sm.add_argument("--max-concurrency", type=int, default=None,
                     help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}）；随提交记录生效，云端后端受部署侧上限"
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
@@ -353,7 +506,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "cloud 下是隧道守护进程，本机需保持开机联网直到 run 终态）",
     )
     sm.add_argument(
-        "--tunnel", choices=sorted(_tunnel_providers()), default="ngrok",
+        "--tunnel", choices=sorted(_tunnel_providers()), default=None,
         help="--expose-local 用的隧道 provider（默认 ngrok）",
     )
     sm.add_argument(
@@ -361,14 +514,14 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认为这个 run 各 job 预算之和 + 启动余量）；"
              "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
-    sm.add_argument("--report-dir", default="reports", metavar="DIR",
+    sm.add_argument("--report-dir", default=None, metavar="DIR",
                     help="归集报告落点（默认 reports/）；云端后端须与后端部署的 REPORT_DIR 一致"
                          "（提交前会比对，不一致即以退出码 2 结束）")
     sm.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
-    sm.add_argument("--backend", choices=["local", "cloud"], default="local",
+    sm.add_argument("--backend", choices=["local", "cloud"], default=None,
                     help="local 由本机后台进程推进（默认）；cloud 由 Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也会运行到结束）")
     sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
@@ -388,8 +541,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     st = sub.add_parser("status", help="[后台运行] 查一个 run 的进度/结果（--wait 轮询到完成）")
     st.add_argument("run_id", help="submit 返回的 run_id")
-    st.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
-    st.add_argument("--report-dir", default="reports", metavar="DIR",
+    _add_config_flag(st)
+    st.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与 submit 一致")
+    st.add_argument("--report-dir", default=None, metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
     # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
     # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲提交者看得见的差别。
@@ -397,7 +551,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local 在本机接着把它推到底；"
                          "cloud 检测卡住即触发云端接力）")
     # 本 flag 只是回落值：RunMeta 带 max_concurrency 时以它为准（提交时定的并发闸才是这个 run 的口径）。
-    st.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY,
+    st.add_argument("--max-concurrency", type=int, default=None,
                     help="[local --wait] 接力推进的并发上限：默认按提交时的值走，提交记录里没有值才用这里给的")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（这个 run 的运行态 + 产物落点）")
     st.add_argument("--prefix", default=None, metavar="P",
@@ -411,6 +565,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex = sub.add_parser("explain", help="看一个 run 的每步证据：问了 AI 什么、AI 看见了什么、为什么这么判"
                                        "（只读；不表判定，退出码只有 0/2）")
     ex.add_argument("run_id", help="run/submit 打印的 run_id")
+    _add_config_flag(ex)
     ex.add_argument("scope_id", nargs="?", default=None,
                     help="只看这一个 scope（缺省为该 run 的全部 job）；值为报告/JSON 里的 scope_id")
     ex.add_argument("--scenario", action="append", default=None, metavar="SEL",
@@ -424,8 +579,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--full", action="store_true",
                     help="逐 frame 全文展开（默认每次 AI 调用只显示最后一段推理与它的截图）")
     ex.add_argument("--json", action="store_true", help="输出机器可读 JSON（内嵌证据全文）")
-    ex.add_argument("--backend", choices=["local", "cloud"], default="local", help="须与 submit 一致")
-    ex.add_argument("--report-dir", default="reports", metavar="DIR",
+    ex.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与 submit 一致")
+    ex.add_argument("--report-dir", default=None, metavar="DIR",
                     help="run 落点（local）/ 后端报告与判定明细前缀（cloud）——须与 submit 一致")
     ex.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
     ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
@@ -458,20 +613,22 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     le.add_argument("--json", action="store_true", help="输出机器可读 JSON（每引擎 available/cmd/source/hint）")
 
     dr = sub.add_parser("doctor", help="自检环境（只读）：引擎 worker、steps 目录、凭证、后端资源与版本、部署工具链；必修项全过则退出码为 0，任一必修项失败则退出码为 2（可选能力缺失只标 -）")
-    dr.add_argument("--backend", choices=["local", "cloud"], default="local",
+    dr.add_argument("--backend", choices=["local", "cloud"], default=None,
                     help="cloud（或给了 --prefix）时连带查凭证与后端；local 只查本机")
     dr.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
     dr.add_argument("--region", default=None, metavar="R")
     dr.add_argument("--profile", default=None, metavar="NAME")
-    dr.add_argument("--report-dir", default="reports", metavar="DIR", help="[cloud] 与后端报告前缀比对（须与 submit 用的一致）")
+    dr.add_argument("--report-dir", default=None, metavar="DIR", help="[cloud] 与后端报告前缀比对（须与 submit 用的一致）")
     dr.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP)
     dr.add_argument("--json", action="store_true", help="输出机器可读 JSON（{ok, checks[]}）")
+    _add_config_flag(dr)
 
     # list-deterministic：按引擎查询确定性 step 能力清单（ADR 0036：worker 自述，feature 作者可发现）
     ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；零费用）")
     ld.add_argument("--engine", choices=sorted(_names.ENGINES), default="novaact",
                     help="查哪个引擎的注册表（默认 novaact，对齐 run 的 --default-engine 缺省）")
     ld.add_argument("--json", action="store_true", help="输出机器可读 JSON")
+    _add_config_flag(ld)
     ld.add_argument(
         "--steps-dir", default=None, metavar="DIR",
         help=_STEPS_DIR_HELP + "——清单据此含使用方定制 step（自述入口同样加载该目录）",
@@ -521,8 +678,12 @@ def _tunnel_providers() -> list[str]:
 def _steps_dir_or_error(args) -> "tuple[str | None, str | None]":
     """`_resolve_steps_dir` 的**不打印**内核：返回 (绝对路径 | None, 错误串 | None)。doctor 把错误串放进机读 detail；
     其余调用点经 `_resolve_steps_dir` 打印并以退出码 2 结束。判据见 `_resolve_steps_dir` docstring。"""
+    # 取值顺序（ADR 0037 决策 4、ADR 0053 决策 2）：--steps-dir > env GHERKAI_STEPS_DIR > 配置文件 steps-dir（已按配置文件目录
+    # 绝对化）> ./steps（存在才用）。显式给出的三层不是目录都以退出码 2 结束。
+    cfg_path = getattr(getattr(args, "project_config", None), "path", None)
     for value, origin in ((getattr(args, "steps_dir", None), "--steps-dir"),
-                          (os.environ.get("GHERKAI_STEPS_DIR"), "env GHERKAI_STEPS_DIR")):
+                          (os.environ.get("GHERKAI_STEPS_DIR"), "env GHERKAI_STEPS_DIR"),
+                          (getattr(args, "config_values", {}).get("steps_dir"), f"配置文件 {cfg_path} 的 steps-dir")):
         if value:
             if not Path(value).is_dir():
                 return None, (f"{origin}={value!r} 不是目录：其中的确定性 step 一条都加载不了。"
@@ -557,8 +718,9 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int) or args.backend != "cloud":
         return steps_dir
-    if args.steps_dir:
-        _progress("注：--backend cloud 下 --steps-dir 不生效——云端 worker 的确定性 step 构建在定制镜像里"
+    if args.steps_dir or getattr(args, "config_values", {}).get("steps_dir"):
+        # 配置文件给的 steps-dir 同样提示（ADR 0053 决策 3 对本机后端专用项采用同一形态）
+        _progress("注：--backend cloud 下 --steps-dir 不生效（配置文件里的 steps-dir 同样）——云端 worker 的确定性 step 构建在定制镜像里"
                   "（构建镜像时 COPY steps/），本机目录进不了容器")
     return None
 
@@ -698,6 +860,11 @@ def _cmd_doctor(args) -> int:
         checks.append({"section": section, "name": name, "ok": bool(ok), "required": required, "detail": detail})
 
     add("cli", "version", True, f"gherkai {_dist_version()}，Python {sys.version.split()[0]}", required=False)
+    # 本次加载的配置文件（ADR 0053 决策 1）：排查「我改的配置为什么没生效」的第一眼
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    add("config", "file", True,
+        str(cfg.path) if cfg.path is not None
+        else "未使用配置文件（按 --config、环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml 查找）", required=False)
 
     rows = _probe_engines()
     for r in rows:
@@ -762,7 +929,8 @@ def _cmd_doctor(args) -> int:
         cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）：{e}"
         try:
             # region 落实要读 profile config：profile 名不存在在这里就炸，与探针失败共用一句诊断（对 agent 是同一件事）
-            target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile)
+            target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile,
+                                                  **_config_layers(args))
         except Exception as e:
             add("aws", "identity", False, cred_fail.format(e=e))
             add("backend", "reachability", False, "未查：凭证先过不了", required=False)
@@ -1047,8 +1215,11 @@ def _load_and_plan(args) -> "list | int":
         )
     # 2) plan：.feature → Job[]（uri 互异/engine 冲突等违约 → FeatureContractError；gherkin 语法错 → FeatureParseError）
     try:
-        # 取设备预算（ADR 0051 决策 2）：内建 600 秒；项目配置覆盖接上后改由配置给出。设备 scope 的缺省墙钟与下限由它推出。
-        acquire_s = DEFAULT_ACQUIRE_TIMEOUT_S
+        # 获取预算（ADR 0051 决策 2）：项目配置 [devices] acquire-timeout-s > 内建 600 秒；设备 scope 的缺省墙钟与下限由它推出。
+        project = getattr(args, "project_config", _config.NO_CONFIG)
+        acquire_s = (project.devices.acquire_timeout_s
+                     if project.devices is not None and project.devices.acquire_timeout_s is not None
+                     else DEFAULT_ACQUIRE_TIMEOUT_S)
         cfg = PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
@@ -1059,7 +1230,7 @@ def _load_and_plan(args) -> "list | int":
             default_desktop_job_timeout_s=300.0,
             default_device_job_timeout_s=acquire_s + 900.0,
             min_device_job_timeout_s=acquire_s + 180.0,
-            apps={},  # 应用别名表由项目配置给出（ADR 0053 [apps]），配置文件接上前为空：@app 一律报「查不到」
+            apps=project.app_ids(),  # 应用别名表（ADR 0053 [apps]）：别名 → 平台 → 包名或 bundle id，纯数据
         )
         select = _build_selector(args)
         jobs = plan(features, cfg, select=select)
@@ -1430,10 +1601,13 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     # setsid fork per-run 进程（start_new_session=True 即脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
     cmd = [sys.executable, "-m", "gherkai_cli", "_reconcile", run_id,
            "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency)]
-    if args.region:
-        cmd += ["--region", args.region]
-    if args.profile:
-        cmd += ["--profile", args.profile]
+    # region / profile 传**解析后的值**（选项 > 环境变量 > 配置文件）：per-run 进程不读配置文件（ADR 0053 决策 1），
+    # 只传原始选项会让配置文件给的 region 到不了它；环境变量两边都看得见、传了也无害。
+    region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+    if region:
+        cmd += ["--region", region]
+    if profile:
+        cmd += ["--profile", profile]
     # per-run 的 stdout/stderr 落 <run_dir>/reconcile.log（曾全 DEVNULL：worker 崩溃 traceback 零落地，
     # detached 排障只能手工复刻 per-run 前台重新运行——真实案例：worker region=None 崩、error 无任何线索）。
     # 子进程持有 fd，父进程开完即交给 Popen；append 模式容多次接力追加。
@@ -1553,7 +1727,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     # 它们在这条路上只被下面的 preflight 探针消费，与写进提交记录的内容无关。
     target = compose.resolve_cloud_target(
         prefix=args.prefix, region=args.region, profile=args.profile,
-        runs_table=args.ddb_table, bucket=args.s3_bucket,
+        runs_table=args.ddb_table, bucket=args.s3_bucket, **_config_layers(args),
     )
 
     # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
@@ -1706,8 +1880,9 @@ def _cmd_status(args) -> int:
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
         # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+        region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
         detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
-                                       region=args.region, profile=args.profile)
+                                       region=region, profile=profile)
 
     state = run_store.load_run_state(args.run_id)
     if state is None:  # 不可达（上面已查过），保险分支
@@ -1729,7 +1904,7 @@ def _status_cloud(args) -> int:
     import time as _time
 
     target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
-                                          profile=args.profile, runs_table=args.ddb_table)
+                                          profile=args.profile, runs_table=args.ddb_table, **_config_layers(args))
     kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需提交者配
 
     # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）。**status 不解析 variant**（ADR 0038）：它只读运行态、
@@ -1973,7 +2148,7 @@ def _explain_cloud(args) -> int:
     另需该桶的读对象权限（判定明细与证据），不带 scope_id 时还需列举对象；不需要 status --wait 的 Lambda 调用权限。
     """
     target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
-                                          profile=args.profile, runs_table=args.ddb_table)
+                                          profile=args.profile, runs_table=args.ddb_table, **_config_layers(args))
     skew_rc, _backend_version = _cloud_skew_gate(target)
     if skew_rc is not None:
         return skew_rc
@@ -2154,7 +2329,7 @@ def _cmd_run(args) -> int:
     target = compose.resolve_cloud_target(
         prefix=args.prefix, region=args.region, profile=args.profile,
         runs_table=args.ddb_table, events_table=args.events_table,
-        bucket=args.s3_bucket, cluster=args.cluster,
+        bucket=args.s3_bucket, cluster=args.cluster, **_config_layers(args),
     )
 
     # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud 即 Fargate 执行，**与 report 正交**——`--no-report` 只关
@@ -2440,6 +2615,9 @@ def main(argv: list[str] | None = None) -> int:
         _progress(provider_err)
         return 2
     args = parser.parse_args(argv)
+    bad = _apply_project_config(args, parser)  # 项目配置文件合成进取值顺序（ADR 0053）；不可用即以退出码 2 结束
+    if bad is not None:
+        return bad
 
     if args.command == "list-deterministic":
         return _cmd_list_deterministic(args)

@@ -982,7 +982,8 @@ def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypat
     assert len(run_dirs) == 1
     meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
     assert meta["max_concurrency"] == 3
-    assert ["--max-concurrency", "3"] == forked[0][-2:]  # per-run 仍带 flag（回落值）
+    argv = forked[0]
+    assert argv[argv.index("--max-concurrency") + 1] == "3"  # per-run 仍带 flag（回落值）；其后还带解析后的 region / profile
 
 
 def test_version_flag_prints_dist_version(capsys):
@@ -1704,7 +1705,7 @@ def test_doctor_cloud_credential_failure_is_required_and_exits_2(monkeypatch, ca
 def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsys):
     """region 解析不出 → aws.region 必修失败、后端标未查，不会把 NoRegionError 误诊成「prefix 配错」。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
-    monkeypatch.setattr(m.compose, "resolve_region", lambda r, p: None)
+    monkeypatch.setattr(m.compose, "resolve_region", lambda r, p, **kw: None)
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: (_ for _ in ()).throw(AssertionError("不该被调")))
     assert m.main(["doctor", "--backend", "cloud", "--json"]) == 2
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}

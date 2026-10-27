@@ -59,6 +59,8 @@ class Scenario:
 
 # 获取预算的内建默认秒数（ADR 0051 决策 2）：项目配置可覆盖、上界 3600；设备 scope 的缺省墙钟与下限由它推出（加 900 / 加 180）。
 DEFAULT_ACQUIRE_TIMEOUT_S = 600.0
+# 获取预算的上界（ADR 0051 决策 2）：项目配置 [devices] acquire-timeout-s 不得超过它，超过在读配置时拒绝。
+MAX_ACQUIRE_TIMEOUT_S = 3600.0
 # 合法的 (device, ui_kind) 组合（ADR 0048 决策 1）：桌面只有网页，不为桌面应用预留空位。
 VALID_TARGETS: frozenset[tuple[str, str]] = frozenset({
     ("desktop", "web"), ("android", "web"), ("android", "app"), ("ios", "web"), ("ios", "app"),
