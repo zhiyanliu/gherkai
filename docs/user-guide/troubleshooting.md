@@ -127,9 +127,8 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `--expose-local 隧道未就绪：找不到 ngrok 可执行文件` | ngrok 没装，或不在 PATH 上 | 装好 ngrok（https://ngrok.com/download ）并确认 `ngrok version` 能正常执行 |
 | `ngrok 隧道未就绪（…s 内拿不到公网 URL）`，提示 authtoken 未配置或无外网 | authtoken 没配，或本机连不上外网 | 运行 `ngrok config add-authtoken <token>`，或设 `NGROK_AUTHTOKEN`；两处任一即可。前置与限制见[测本机应用](./local-app-testing.md) |
-
 | 本机后端 `--expose-local` 以退出码 2 结束，提示「worker 不支持本机应用测试需要的会话预热」 | 引擎 worker 比命令行工具旧，不会在隧道上做会话预热 | 把 worker 与命令行工具装成同一个版本（`uv tool upgrade gherkai`；Midscene 侧 `npm i -g @gherkai/worker-midscene@<同版本>`） |
-| run 里每个 scope 都没执行任何 step，job 的消息以「隧道会话预热」或「后端未传递会话预热地址」开头 | 隧道的会话预热失败：令牌不被接受、隧道已拆或本机应用不可达、云端后端旧于命令行工具 | 按消息处置，见[测本机应用](./local-app-testing.md)的「常见故障」 |
+| run 里每个 scope 都没执行任何 step，job 的消息以「隧道会话预热」或「后端未传递会话预热地址」开头 | 隧道的会话预热失败：令牌不被接受、隧道已拆或浏览器到隧道入口的网络不通、云端后端旧于命令行工具 | 按消息处置，见[测本机应用](./local-app-testing.md)的「常见故障」 |
 
 `gherkai doctor` 不查隧道前置，隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。
 
