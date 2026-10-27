@@ -831,17 +831,21 @@ def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_
                 raise self.exc
             return self.meta
 
-        def try_finalize(self, run_id, status, ended_at):
+        def try_finalize(self, run_id, status, ended_at, *, message=None):
             self.finalized.append((run_id, status))
+            self.message = message
             return True
 
     s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
     assert reconciler._load_definition(s, "r", "t") is None and s.finalized == [("r", Status.ERROR)]
     assert "9.9.0" in capsys.readouterr().out
+    assert "9.9.0" in s.message and s.message.startswith("提交记录不能由本后端执行")  # run 级消息随终态写入，status 可见原因
     s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
     assert reconciler._load_definition(s2, "r", "t") is None and s2.finalized == [("r", Status.ERROR)]
+    assert "缺键 target" in s2.message
     s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
     assert reconciler._load_definition(s3, "r", "t") is None and s3.finalized == [("r", Status.ERROR)]
+    assert "worker 镜像版本" in s3.message
     ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"})
     s4 = _Store(meta=ok)
     assert reconciler._load_definition(s4, "r", "t") is ok and s4.finalized == []
@@ -855,26 +859,6 @@ def test_kicker_uses_definition_worker_task_defs(cloud_env):
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.kicker_handler({"run_id": "run-1"}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 运行到 CAS 抢占
-
-
-def test_tick_runs_isolates_a_run_whose_worker_revision_cannot_be_resolved(monkeypatch, capsys):
-    """兼容路径解析不出的 run 只跳过它自己、不连坐同批其它 run：events Stream 一个 batch 含多个 run，抛出去
-    就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。「不回落 family/模板」不变——拒的是换镜像、不是拒隔离。"""
-    from gherkai_runtime.compose import WorkerVariantError
-
-    built_for = []
-
-    def fake_build(rid):
-        if rid == "bad":
-            raise WorkerVariantError("默认 variant 在 novaact 无映射", engine="novaact", variant="base")
-        built_for.append(rid)
-        return None  # None 表示非 detached 或本批无事可做
-
-    monkeypatch.setattr(reconciler, "_build", fake_build)
-    out = reconciler._tick_runs({"bad", "good"}, "t")
-    assert out["ok"] and set(out["runs"]) == {"bad", "good"} and built_for == ["good"]
-    printed = capsys.readouterr().out
-    assert "bad" in printed and "解析失败" in printed
 
 
 def test_run_ids_scope_id_containing_hash_is_split_from_the_left():

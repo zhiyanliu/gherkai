@@ -1634,3 +1634,15 @@ def test_run_requires_backend_stamp_predicate():
     assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop, device))) is True
     assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,),
                                                       session_warmup_url="https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T")) is True
+
+
+def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """能力自述的协议版本比较整数严格：true 不是 1、"1" 不是 1（与 worker 核 job 行 schemaVersion 的口径对称）。"""
+    import subprocess
+
+    for bad in (b"true", b'"1"', b"1.0"):
+        payload = b'{"schema_version": ' + bad + b', "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}]' + _OK_TAIL + b'}'
+        monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
+        with pytest.raises(RuntimeError, match="格式版本"):
+            compose.query_capabilities("novaact")
+        assert compose._CAPABILITIES_CACHE == {}

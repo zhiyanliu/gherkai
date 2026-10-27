@@ -212,12 +212,12 @@ class LocalRunStore:
                             ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)
 
-    def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
-        """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。"""
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
+        """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已终态：别人已 finalize → 幂等跳过
             return RunState(run_id=state.run_id, status=status, jobs=state.jobs,
                             started_at=state.started_at, ended_at=ended_at,
-                            high_water_mark=state.high_water_mark)
+                            high_water_mark=state.high_water_mark, message=message)
         return self._locked_rmw(run_id, mutate)

@@ -584,6 +584,11 @@ class RunState:
     # 挡 stale 实例的 lost-update（把 passed 刷回 running）。仅无状态路径（submit/reconciler）用；同步 run
     # 路径单进程内 RunPersistence._lock 串行、不并发写，此字段留 None（不参与、不落盘键，向后兼容旧 run_state.json）。
     high_water_mark: int | None = None
+    # run 级消息（ADR 0037 决策 7）：只在推进器**不经任何 job 就把 run 置为终态**时有值（提交记录的结构版本不是本后端认的、定义违约、
+    # 缺 worker 镜像版本），随 try_finalize 的同一次条件写落库，让 `status` 看得见原因（团队成员未必有 CloudWatch 的读权限）。
+    # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain），这里只给「没有任何 job 能承载」的原因；
+    # 同步 run 不写（失败有自己的退出码与输出）。omit-when-None（同 started_at）。
+    message: str | None = None
 
 
 def run_state_from_result(result: RunResult) -> RunState:

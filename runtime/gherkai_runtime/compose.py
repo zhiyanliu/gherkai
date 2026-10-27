@@ -526,7 +526,8 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"要问的是引擎 {engine} 的 worker，回答的却自称 {caps.get('engine')!r}"
             "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
         )
-    if caps.get("schema_version") != PROTOCOL_SCHEMA_VERSION:
+    found = caps.get("schema_version")
+    if isinstance(found, bool) or not isinstance(found, int) or found != PROTOCOL_SCHEMA_VERSION:  # true 不是 1（与 worker 核 job 行的口径对称）
         raise RuntimeError(
             f"引擎 {engine} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
             f"{PROTOCOL_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
@@ -1112,8 +1113,8 @@ def build_fargate_engines(
     definition 里的显式 revision，永不用 family 取最新」）：传 family 名会让 ECS 取该 family 最新 ACTIVE
     revision——多 variant 下任何一次 `push-worker` 都会劫持正在运行的 run（中途换 step 集）。**故意不给缺省值**：
     缺省成 family 名就是把这条不变量做成「忘了传就静默破」，改成必给关键字 → 漏传即 `TypeError`，在装配点
-    就炸。真值来源两条（都在调用方，本函数只认 ARN）：definition 的 `RunMeta.worker_task_defs`（正常路径，
-    提交侧 preflight 解析）、`resolve_default_worker_task_defs`（旧 definition 的兼容路径）。
+    就炸。真值只有一条（在调用方，本函数只认 ARN）：definition 的 `RunMeta.worker_task_defs`（提交侧 preflight 解析后写入；
+    云端推进器读到缺值按定义违约标 error、不回落默认指针，ADR 0037 决策 7）。
     映射里**没有的引擎装一个 `_UnavailableEngine` 空占位项**（一用即抛、点名该引擎）——本 run 没用到的引擎不该
     连坐，而真去起它时爆的是带指引的异常、不是 `KeyError`。
     - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。

@@ -149,11 +149,13 @@ class RunStore(Protocol):
         """
         ...
 
-    def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
         """状态机单调条件写：仅当 run 总 status 当前为非终态（pending/running）才写终态，成功 True（机制三）。
 
         挡「已 finalize 的 run 被 stale 投影刷回」+ 保 commit 恰一次（多实例同时见全终态、只有一个写成功、
         触发一次 RunReport 聚合）。已是终态 → False（幂等：别人已 finalize）。
+        message 是 run 级消息（ADR 0037 决策 7）：推进器不经任何 job 就把 run 置为终态时的原因，与终态同一次写入；
+        正常收尾不给（None 不写键）。
         """
         ...
 

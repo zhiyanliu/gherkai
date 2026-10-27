@@ -110,6 +110,7 @@
 | `status` | `pending` / `running` / `passed` / `failed` / `error` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
+| `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，仅在终态后有内容 |
 

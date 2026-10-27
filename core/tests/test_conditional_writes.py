@@ -365,3 +365,21 @@ def test_stale_projection_never_regresses_terminal_job_on_real_ddb(real_aws):
     assert store.project_state(rid, older) is False  # 更小 HWM：整次投影被挡
     got = store.load_run_state(rid)
     assert got.jobs["a"].status == Status.PASSED and got.high_water_mark == 3
+
+
+def test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise(run_store):
+    """run 级消息（ADR 0037 决策 7）：随 try_finalize 同一次写入、读回原文；不给时读回 None（不写键）；已终态的 run 再带消息 finalize
+    被挡，库里的消息不变。两 adapter 同语义。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.load_run_state("run-1").message is None
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="提交记录不能由本后端执行：结构版本 2") is True
+    state = run_store.load_run_state("run-1")
+    assert state.status == Status.ERROR and state.message == "提交记录不能由本后端执行：结构版本 2"
+    assert run_store.try_finalize("run-1", Status.PASSED, "t2", message="别人") is False
+    assert run_store.load_run_state("run-1").message == "提交记录不能由本后端执行：结构版本 2"
+
+    meta2 = _meta("run-2", "a")
+    run_store.create_run(meta2, _initial(meta2))
+    assert run_store.try_finalize("run-2", Status.PASSED, "t1") is True
+    assert run_store.load_run_state("run-2").message is None

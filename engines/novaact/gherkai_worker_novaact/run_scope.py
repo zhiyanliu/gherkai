@@ -870,7 +870,8 @@ def main() -> int:
     if rejected is not None:
         log(f"worker: precheck failed — {rejected}")
         raw_scope = job.get("scope") if isinstance(job, dict) else None
-        scope_id = raw_scope.get("id") if isinstance(raw_scope, dict) and raw_scope.get("id") else "unknown"
+        raw_id = raw_scope.get("id") if isinstance(raw_scope, dict) else None
+        scope_id = raw_id if isinstance(raw_id, str) and raw_id else "unknown"  # 形状未知时记 unknown（与 Midscene 侧同一兜底）
         sink.emit({"type": "scope_done", "scopeId": scope_id, "status": "error", "errorType": "precheck_failed", "message": rejected})
         return 0
     scope = job["scope"]

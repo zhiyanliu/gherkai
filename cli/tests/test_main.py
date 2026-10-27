@@ -14,6 +14,7 @@ from gherkai_core.model import JobResult, RunResult, Status
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 
 from gherkai_cli import __main__ as m
+from gherkai_cli import submission
 from gherkai_runtime import compose
 
 from conftest import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
@@ -278,8 +279,8 @@ def test_validate_definition_rejects_plan_form_device_job_before_writing():
     scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
     device = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
     desktop = Job(scope_id="w", scope_name="w", engine="midscene", scenarios=scs, timeout_s=300.0)
-    assert m._validate_definition([desktop]) is None
-    assert m._validate_definition([desktop, device]) == 2
+    assert submission.validate_definition([desktop]) is None
+    assert submission.validate_definition([desktop, device]) == 2
 
 
 def test_plan_json_app_entry_is_exactly_alias_and_app_id():
@@ -349,11 +350,11 @@ def test_target_rejections_flag_timeout_over_session_limit():
     caps = {"targets": [{"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}, {"device": "desktop", "ui_kinds": ["web"]}]}
     scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
     over = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=9000.0, target=Target(device="android", ui_kind="web"))
-    [msg] = m._target_rejections([over], caps)
+    [msg] = submission.target_rejections([over], caps)
     assert "超过了引擎 midscene 在 Android 网页上的会话上限 8000 秒" in msg and "--default-job-timeout" in msg
     within = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=7000.0, target=Target(device="android", ui_kind="web"))
     desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=99999.0)
-    assert m._target_rejections([within, desktop], caps) == []
+    assert submission.target_rejections([within, desktop], caps) == []
 
 
 def test_plan_json_shape(tmp_path, capsys):
@@ -790,6 +791,19 @@ def test_terminal_status_consumers_use_core_single_source():
         src = Path(mod.__file__).read_text(encoding="utf-8")
         # 白名单副本的字面特征（正列终态集）——出现即回归
         assert "Status.PASSED, Status.FAILED" not in src, f"{mod.__name__} 又正列了一份终态白名单"
+
+
+def test_render_status_shows_run_level_message_in_text_and_json(capsys):
+    """run 级消息（ADR 0037 决策 7）：文本在状态行下多一行、--json 多一个键；没有消息时两处都没有。退出码不变（error 仍 1）。"""
+    from gherkai_core.model import RunState
+    told = RunState(run_id="r", status=Status.ERROR, jobs={}, message="提交记录不能由本后端执行：结构版本 2，本后端认 1")
+    assert m._render_status(told, _args(), wait_hint="x", locations=_LOCS) == 1
+    out = capsys.readouterr().out
+    assert out.splitlines()[0] == "run r: error" and "message=提交记录不能由本后端执行：结构版本 2，本后端认 1" in out
+    assert m._render_status(told, _args(json_=True), wait_hint="x", locations=_LOCS) == 1
+    assert json.loads(capsys.readouterr().out)["message"] == told.message
+    assert m._render_status(_mk_state(Status.ERROR), _args(json_=True), wait_hint="x", locations=_LOCS) == 1
+    assert "message" not in json.loads(capsys.readouterr().out)
 
 
 def test_render_status_wait_pending_no_hint(capsys):

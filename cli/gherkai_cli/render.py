@@ -193,6 +193,8 @@ def render_run_state(state: RunState) -> str:
     local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是前端的事，故住这里而非产品本体层。
     """
     lines = [f"run {state.run_id}: {state.status.value}"]
+    if state.message:  # run 级消息（ADR 0037 决策 7）：推进器不经任何 job 就终结 run 时的原因，紧跟状态行
+        lines.append(f"message={state.message}")
     if state.jobs:  # job 清单是同构表（ADR 0047）；无会话血缘的 job 该格显示 -
         lines.append(render_table(["scope_id", "状态", "session"],
                                   [[sid, status_text(js.status.value), js.session_id or None] for sid, js in state.jobs.items()]))

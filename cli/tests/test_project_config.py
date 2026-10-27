@@ -9,6 +9,7 @@ import pytest
 
 from gherkai_cli import __main__ as m
 from gherkai_cli import config as cfgmod
+from gherkai_cli import settings
 from gherkai_runtime import compose
 
 from test_main import _fake_locator, _fake_schedule_factory, _no_provider
@@ -57,15 +58,15 @@ def _no_match(*a, **k):
 def test_every_long_option_is_classified_and_the_derived_key_sets_match():
     """七个读配置命令的每个长选项都落在四份名单之一；由 argparse 推出的 [common] / [cloud] 接受集恰等于名单（多一键或少一键都红）。"""
     parser = m._build_parser()
-    for name in m._CONFIG_COMMANDS:
-        flags = {s for a in m._subparser(parser, name)._actions for s in a.option_strings if s.startswith("--")} - {"--help"}
+    for name in settings.CONFIG_COMMANDS:
+        flags = {s for a in settings.subparser(parser, name)._actions for s in a.option_strings if s.startswith("--")} - {"--help"}
         unclassified = flags - PER_CALL - COMMON - CLOUD - set(DEVICE)
         assert not unclassified, f"{name} 的选项 {sorted(unclassified)} 没归入按次选择型 / [common] / [cloud] / 设备映射表任一类"
-    keys = m._configurable_keys(parser)
+    keys = settings.configurable_keys(parser)
     assert keys["common"] == {f[2:] for f in COMMON}
     assert keys["cloud"] == {f[2:] for f in CLOUD}
-    assert {f[2:].replace("-", "_") for f in DEVICE} == set(m._DEVICE_OPTIONS)
-    assert {"--" + d.replace("_", "-"): v for d, v in m._DEVICE_OPTIONS.items()} == DEVICE
+    assert {f[2:].replace("-", "_") for f in DEVICE} == set(settings.DEVICE_OPTIONS)
+    assert {"--" + d.replace("_", "-"): v for d, v in settings.DEVICE_OPTIONS.items()} == DEVICE
     # [devices] 的键表直接对照 ADR 0053 决策 3（没有对应选项的键由此守）
     assert cfgmod.DEVICES_KEYS == ("billing-method", "acquire-timeout-s", "project-arn", "app-bucket")
     assert cfgmod.PLATFORM_KEYS == ("arn", "os-version", "billing-method")
@@ -141,9 +142,9 @@ def test_builtin_defaults_fill_after_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     parser = m._build_parser()
     args = parser.parse_args(["run", str(_feature(tmp_path))])
-    assert m._apply_project_config(args, parser) is None
+    assert settings.apply_project_config(args, parser) is None
     assert (args.default_engine, args.assertion_votes, args.max_concurrency, args.report_dir, args.backend, args.tunnel) == \
-        ("novaact", 1, m.DEFAULT_MAX_CONCURRENCY, "reports", "local", "ngrok")
+        ("novaact", 1, settings.DEFAULT_MAX_CONCURRENCY, "reports", "local", "ngrok")
     assert args.project_config is cfgmod.NO_CONFIG and args.config_values == {}
 
 
@@ -155,7 +156,7 @@ def test_config_steps_dir_sits_below_env_and_is_relative_to_config_dir(tmp_path,
     parser = m._build_parser()
     args = parser.parse_args(["plan", str(_feature(tmp_path)), "--config", str(cfg_dir / "gherkai.toml")])
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
-    assert m._apply_project_config(args, parser) is None
+    assert settings.apply_project_config(args, parser) is None
     assert m._steps_dir_or_error(args) == (str((cfg_dir / "my-steps").resolve()), None)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", str(env_steps))
     assert m._steps_dir_or_error(args) == (str(env_steps.resolve()), None)   # 环境变量胜过配置文件
@@ -204,13 +205,13 @@ def test_report_dir_relative_to_config_dir_only_for_local_backend(tmp_path, monk
     parser = m._build_parser()
     cfg = str(cfg_dir / "gherkai.toml")
     local = parser.parse_args(["submit", str(_feature(tmp_path)), "--config", cfg])
-    assert m._apply_project_config(local, parser) is None
+    assert settings.apply_project_config(local, parser) is None
     assert local.report_dir == str((cfg_dir / "out").resolve())
     cloud = parser.parse_args(["submit", str(_feature(tmp_path)), "--config", cfg, "--backend", "cloud"])
-    assert m._apply_project_config(cloud, parser) is None
+    assert settings.apply_project_config(cloud, parser) is None
     assert cloud.report_dir == "out"   # 云端是桶内键前缀，原样
     flagged = parser.parse_args(["submit", str(_feature(tmp_path)), "--config", cfg, "--report-dir", "rel"])
-    assert m._apply_project_config(flagged, parser) is None
+    assert settings.apply_project_config(flagged, parser) is None
     assert flagged.report_dir == "rel"  # 选项给的路径仍相对当前目录、不碰
 
 
@@ -347,8 +348,8 @@ def _android_env(monkeypatch):
 def test_device_flags_are_on_run_and_submit_and_only_device_arns_on_plan():
     parser = m._build_parser()
     for name in ("run", "submit"):
-        assert set(DEVICE) <= {s for a in m._subparser(parser, name)._actions for s in a.option_strings}
-    plan_flags = {s for a in m._subparser(parser, "plan")._actions for s in a.option_strings}
+        assert set(DEVICE) <= {s for a in settings.subparser(parser, name)._actions for s in a.option_strings}
+    plan_flags = {s for a in settings.subparser(parser, "plan")._actions for s in a.option_strings}
     assert {"--android-device-arn", "--ios-device-arn"} <= plan_flags
     assert not ({"--device-farm-project-arn", "--app-bucket"} & plan_flags)   # 对 plan 的输出没有作用、不收
 
@@ -619,10 +620,10 @@ def test_doctor_with_prefix_only_treats_report_dir_as_key_prefix_and_applies_clo
     _toml(tmp_path, "[common]\nreport-dir = 'reports'\n[cloud]\nprefix = 'p-'\n")
     parser = m._build_parser()
     args = parser.parse_args(["doctor", "--prefix", "stage-"])
-    assert m._apply_project_config(args, parser) is None
+    assert settings.apply_project_config(args, parser) is None
     assert args.report_dir == "reports" and args.config_values.get("prefix") == "p-"   # 云端：键前缀原样；[cloud] 生效（选项 prefix 在解析链里更高）
     local = parser.parse_args(["doctor"])
-    assert m._apply_project_config(local, parser) is None
+    assert settings.apply_project_config(local, parser) is None
     assert local.report_dir == str((tmp_path / "reports").resolve()) and "prefix" not in local.config_values
 
 

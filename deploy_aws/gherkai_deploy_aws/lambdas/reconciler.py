@@ -17,9 +17,9 @@ min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 en
 配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 
 **worker 镜像用哪个 task-def revision 不经 env**（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）：
-正常路径读 definition 的 `RunMeta.worker_task_defs`；旧 definition 缺该字段时按**后端当前默认指针**从 SSM
-解析（见 `_build` 的兼容路径）。**推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未
-推过该 tag，拉镜像会拖到 Fargate 启动期才炸（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
+只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 把 run 标 error、不推进
+（ADR 0037 决策 7 不留兼容分支）。**推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未推过该 tag，拉镜像会拖到
+Fargate 启动期才炸（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
 """
 from __future__ import annotations
 
@@ -248,16 +248,18 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
 
 def _load_definition(run_store, run_id: str, label: str):
     """读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
-    **不推进该 run、记一条诊断并把 run 标为 error**——重放投影没有退出码可交给使用方，只「不推进」会让 run 永停 RUNNING（ADR 0034 对
-    无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端
+    **不推进该 run、记一条诊断并把 run 标为 error、原因写进运行态的 run 级 message**——重放投影没有退出码可交给使用方，只「不推进」会让
+    run 永停 RUNNING（ADR 0034 对无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态，message 让 `status` 看得见原因
+    （团队成员未必有 CloudWatch 的读权限）。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端
     默认指针回落（那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。返回 RunMeta；不存在或已标 error 返回 None。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
     from gherkai_core.model import Status
     from gherkai_runtime import compose
 
     def _mark(reason: str):
-        print(f"{label}: run {run_id} 的提交记录不能由本后端执行，不推进、标为 error：{reason}")
-        run_store.try_finalize(run_id, Status.ERROR, compose.now_iso())
+        message = f"提交记录不能由本后端执行：{reason}"
+        print(f"{label}: run {run_id} 不推进、标为 error——{message}")
+        run_store.try_finalize(run_id, Status.ERROR, compose.now_iso(), message=message)
         return None
 
     try:
@@ -411,18 +413,11 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
     from gherkai_core.reconcile import tick
     from gherkai_runtime import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
 
-    from gherkai_runtime.compose import WorkerVariantError
-
     prebuilt = prebuilt or {}
     for run_id in run_ids:
-        # 逐 run 隔离：一个 run 装配时的 worker revision 相关失败不能连坐同批其它 run——events Stream 一个 batch 含多个 run，
-        # 抛出去就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。该 run 记一行、留给下批。definition 本身的问题（结构版本、
-        # 缺 worker_task_defs）不走这里：_load_definition 已把那个 run 标 error、返回 None。
-        try:
-            built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
-        except WorkerVariantError as exc:
-            print(f"{label}: run {run_id} 本批跳过——worker revision 解析失败：{exc}")
-            continue
+        # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs）由 _load_definition 把那个 run 标 error、返回 None，
+        # 不在这里抛、不连坐同批其它 run；装配期的 AWS 调用失败照常抛出、本次 invocation 失败、events Stream 重试本批。
+        built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built

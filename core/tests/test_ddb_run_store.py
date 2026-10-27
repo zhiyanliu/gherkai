@@ -240,3 +240,18 @@ def test_peek_rejects_fractional_and_accepts_integral_decimal(ddb_run_store):
         ddb_run_store.peek_definition_header("frac")
     ddb_run_store._table.put_item(Item={"run_id": "whole", "item_type": "META", "schema_version": Decimal("1"), "cli_version": "1.5.0", "meta_json": "{}"})
     assert ddb_run_store.peek_definition_header("whole") == (1, "1.5.0")
+
+
+def test_load_run_meta_checks_schema_before_restoring_offloaded_arguments(ddb_run_store_offload):
+    """版本核对先于参数还原：别的版本写出的 META 不该先在还原遍历里抛 KeyError（那会绕过读端按版本不合的处置）。"""
+    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+
+    ddb_run_store_offload._table.put_item(Item={"run_id": "future", "item_type": "META", "schema_version": 2,
+                                                "meta_json": '{"schema_version": 2, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+    with pytest.raises(UnsupportedDefinitionSchema):
+        ddb_run_store_offload.load_run_meta("future")
+    # 同版本下还原遍历撞到的形状错归定义违约，不漏 KeyError
+    ddb_run_store_offload._table.put_item(Item={"run_id": "malformed", "item_type": "META", "schema_version": 1,
+                                                "meta_json": '{"schema_version": 1, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+    with pytest.raises(DefinitionContractError):
+        ddb_run_store_offload.load_run_meta("malformed")

@@ -792,3 +792,17 @@ def test_definition_scenario_step_and_argument_keys_are_required(mutate, match):
     mutate(d)
     with pytest.raises(DefinitionContractError, match=match):
         run_meta_from_dict(d)
+
+
+def test_run_state_message_is_omitted_when_none_and_round_trips_when_set():
+    """RunState.message（ADR 0037 决策 7）按运行态既有惯例 omit-when-None：无值不出键，有值原文往返。"""
+    from gherkai_core.model import JobState, RunState, Status
+    from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
+
+    plain = RunState(run_id="r", status=Status.PASSED, jobs={"a": JobState("a", Status.PASSED)})
+    assert "message" not in run_state_to_dict(plain)
+    assert run_state_from_dict(run_state_to_dict(plain)).message is None
+    told = RunState(run_id="r", status=Status.ERROR, jobs={}, message="提交记录不能由本后端执行：缺 worker 镜像版本")
+    d = run_state_to_dict(told)
+    assert d["message"] == told.message
+    assert run_state_from_dict(d).message == told.message

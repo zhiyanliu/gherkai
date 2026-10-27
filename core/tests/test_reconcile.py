@@ -201,9 +201,9 @@ class _OrderRecordingRunStore(LocalRunStore):
         super().__init__(root)
         self.seq = seq
 
-    def try_finalize(self, run_id, status, ended_at):
+    def try_finalize(self, run_id, status, ended_at, *, message=None):
         self.seq.append(("finalize", status))
-        return super().try_finalize(run_id, status, ended_at)
+        return super().try_finalize(run_id, status, ended_at, message=message)
 
 
 def test_finalize_writes_verdicts_before_commit_point(tmp_path):

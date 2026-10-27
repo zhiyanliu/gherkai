@@ -9,8 +9,8 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
-- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?,
-  jobs=<原生 Map>}`（`?` = omit-when-None；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
+- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?, message?,
+  jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
   数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
@@ -30,6 +30,7 @@ from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
 from gherkai_core.model import JobState, RunMeta, RunState, Status
 from gherkai_core.serialize import (
+    require_definition_schema,
     run_meta_from_dict,
     run_meta_to_dict,
 )
@@ -89,6 +90,8 @@ def _state_scalars(state: RunState) -> dict:
         d["ended_at"] = state.ended_at
     if state.high_water_mark is not None:
         d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态批量运行投影写时有）
+    if state.message is not None:
+        d["message"] = state.message  # run 级消息（ADR 0037 决策 7）
     return d
 
 
@@ -286,17 +289,22 @@ class DynamoDBRunStore:
                 continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
         return True
 
-    def try_finalize(self, run_id: str, status: Status, ended_at: str) -> bool:
-        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。"""
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
+        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。
+        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 不写键（omit-when-None）。"""
+        update = "SET #st = :s, ended_at = :e"
+        names = {"#st": "status"}  # status 是 DDB 保留字；message 走 names 以防同类
+        values = {":s": status.value, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        if message is not None:
+            update += ", #msg = :m"
+            names["#msg"] = "message"
+            values[":m"] = message
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET #st = :s, ended_at = :e",
-                ExpressionAttributeNames={"#st": "status"},
-                ExpressionAttributeValues={
-                    ":s": status.value, ":e": ended_at,
-                    ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
-                },
+                UpdateExpression=update,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
                 ConditionExpression="#st IN (:pending, :running)",  # 仅非终态可迁；已终态 → CCF（幂等）
             )
             return True
@@ -316,9 +324,17 @@ class DynamoDBRunStore:
         if item is None:
             return None
         meta_dict = json.loads(item["meta_json"])
+        # 结构版本先于一切（ADR 0037 决策 7）：参数还原要按本版本认的形状遍历 definition，别的版本写出的 META 可能让它先抛 KeyError，
+        # 把「版本不合」变成一个裸异常、绕过调用方按 UnsupportedDefinitionSchema 的处置。
+        require_definition_schema(meta_dict)
         if self._arg_offloader is not None:
-            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）
-            meta_dict = self._arg_offloader.restore(meta_dict, run_id)
+            # content_ref/rows_ref 取回、消解回内联，再交 serialize（对 core 透明，ADR 0030 决定六）。遍历途中撞到的形状错
+            # （缺 scenario id、缺 step index 等）是同版本下的定义违约，翻成 DefinitionContractError 让读端按同一类处置。
+            try:
+                meta_dict = self._arg_offloader.restore(meta_dict, run_id)
+            except (KeyError, TypeError, AttributeError) as e:
+                from gherkai_core.errors import DefinitionContractError
+                raise DefinitionContractError(f"definition 的 scenario / step 形态不对，无法还原外置的 step 参数（{type(e).__name__}：{e}）") from None
         elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
             # offloader 属组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
@@ -366,6 +382,7 @@ class DynamoDBRunStore:
             ended_at=item.get("ended_at"),
             # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
             high_water_mark=int(hwm) if hwm is not None else None,
+            message=item.get("message"),
         )
 
     def is_detached(self, run_id: str) -> bool:
