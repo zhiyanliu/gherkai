@@ -982,9 +982,8 @@ def _validate_definition(jobs) -> int | None:
     """
     for j in jobs:
         if not j.target.is_desktop and j.device_request is None:
-            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能为它指定测试设备"
-                      f"（设备所在的 Device Farm 项目等信息要由项目配置文件提供，配置文件的读取尚未接入），暂不能运行或提交。"
-                      f"要先在桌面网页上执行，去掉这个 scope 的 @device 与 @app 标签。")
+            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能为它指定测试设备，"
+                      f"暂不能运行或提交。要先在桌面网页上执行，去掉这个 scope 的 @device 与 @app 标签。")
             return 2
         try:
             validate_job_definition(j)

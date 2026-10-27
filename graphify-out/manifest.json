@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793064859.6862204,
-    "ast_hash": "bfb36405a7d92ce3d1222335efad4890",
+    "mtime": 1793065473.4364176,
+    "ast_hash": "704bb216c8af26d6764ecdbdcd31eeed",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1910,13 +1910,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793064925.3960977,
-    "ast_hash": "640e2851c6212be2bad0fe9eeddb3f3f",
+    "mtime": 1793065474.0906265,
+    "ast_hash": "cb9c342cf18a3863091aeade0462db25",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793064925.3959162,
-    "ast_hash": "ec4ce24e155aabeed07f59856ae8e905",
+    "mtime": 1793065474.090455,
+    "ast_hash": "953f31da875b97076516e4cd6cc20d34",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
