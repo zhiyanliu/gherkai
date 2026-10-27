@@ -8,10 +8,10 @@
 
 | 段 | 发生在哪 | 做什么 |
 |---|---|---|
-| ① 写 | 使用方项目的 `steps/*.py`（Nova）/ `steps/*.mts`（Midscene） | `@deterministic(正则, description=…, example=…, keywords=…)` / `deterministic(正则, handler, {description, example, keywords})`，`keywords` 可选 |
+| ① 写 | 使用方项目的 `steps/*.py`（Nova）/ `steps/*.mts`（Midscene） | `@deterministic(正则, description=…, example=…, keywords=…)` / `deterministic(正则, handler, {description, example, keywords})`；第二参也可以是按句柄种类分键的字典 / 对象（`playwright` 与 `webdriver` 条目，条目的 `uiKinds` × `devices` 覆盖全部组合、可带 `requires`），注册期校验与 step 级 `targets` 的推出规则归 ADR 0050 决策 1，`keywords` 可选 |
 | ② 装 | worker 进程启动的第一件事 | 内建导航条目先注册（脚手架模块 import 副作用），再按 env `GHERKAI_STEPS_DIR` 排序递归加载使用方的文件，注册进**同一张**表 |
 | ③ 查 | `list-deterministic` / `plan` 标注 / `doctor` / `run`·`submit` 的本机前置 | 这些入口都 spawn 一次瞬时 worker（自述或 match 查询），查询的都是这张表 |
-| ④ 执行 | worker 派发每个 step | 先查这张表（内建导航也是表里的一条），命中即调用 handler；未命中才落到 AI |
+| ④ 执行 | worker 派发每个 step | 先查这张表（内建导航也是表里的一条），命中后按当前目标取句柄（`selectHandler` / `select_handler`）再调用；命中但目标上没有句柄、或未命中，落到 AI |
 
 handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）**不在本文范围**，见使用者向的 [`docs/user-guide/writing-deterministic-steps.md`](../user-guide/writing-deterministic-steps.md)（Python 与 TypeScript 两侧并排）。本文讲的是这四段之间的接缝，例如 handler 抛异常后如何落成判定（见 §1 的映射表）。
 
@@ -25,7 +25,7 @@ handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）
 
 worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发是**两级、短路、无优先级配置**（Nova `run_scope.py` `_run_step`、Midscene `run-scope.mts` `runStep`，同序）：
 
-1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 调用 handler，**不投票**。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，它的 handler 调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中的 step 带 DataTable / DocString → 记 `error`。
+1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 按当前目标取句柄（desktop/web 取 `playwright`，设备目标取覆盖该（设备, 界面类型）组合的 `webdriver` 条目）调用，**不投票**；目标上没有句柄时走 AI、不顺延到别的模式、不记 error（ADR 0050 决策 1）。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，它的 handler 调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中的 step 带 DataTable / DocString → 记 `error`。
 2. **AI catch-all**：`Then` → 断言 + N 票；`When`/`Given` → 动作。
 
 命中之后的判定映射（两引擎逐条对齐）：

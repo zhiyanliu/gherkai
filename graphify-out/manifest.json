@@ -2048,5 +2048,10 @@
     "mtime": 1793080415.5493271,
     "ast_hash": "86ef9838406339d9a98dcb02c3007390",
     "semantic_hash": ""
+  },
+  "engines/fixtures/deterministic-handles.json": {
+    "mtime": 1793083481.7663226,
+    "ast_hash": "dc1ca9675b3b95bca4d2adac5935081f",
+    "semantic_hash": ""
   }
 }

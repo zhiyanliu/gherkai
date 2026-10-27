@@ -74,9 +74,38 @@ deterministic(
 
 `keywords` 可选：声明这条 step 接受哪些 Gherkin 关键字（`Given` / `When` / `Then` 的子集，Nova Act 写 `keywords=("Then",)`，Midscene 写 `keywords: ["Then"]`），不写就三个都接受。step 文本命中了模式而关键字不在声明里时，这一步记 `error`、不交给 AI，`gherkai plan` 会提前用 ⚠ 标出。断言类 step 声明只接受 `Then`，可以挡住 `Given 页面地址匹配 "…"` 这种写法；`And` / `But` 按它承接的那条算。
 
-Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion` 以及 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta` 三个类型。
+Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion`，以及类型 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta`（桌面句柄）与 `DeterministicHandlers` / `WebdriverEntry` / `WebdriverCtx` / `WebdriverHandler` / `WebdriverDevice`（设备句柄，见下一节）。
 
 你的项目不需要 `package.json` 或 `node_modules`，也不必在项目里另装这个包：worker 在加载你的 step 文件之前，把这个包名解析到它自己那一份。反过来，把导入写成指向某个安装位置的文件路径（例如另一处 `node_modules` 里的 `dist/index.mjs`）会加载到第二份副本，注册落进 worker 不读的那张表，worker 会报这个文件一条 step 都没注册并拒绝启动。
+
+## 给设备目标加第二份实现
+
+一条 step 可以按**句柄种类**给多份实现：`playwright` 在桌面浏览器上执行，`webdriver` 在设备会话上执行。第二个参数从单个函数换成一个按种类分键的对象（Midscene）或字典（Nova Act）；传单个函数仍然有效，等价于只有 `playwright`，已有的 `steps/` 不需要改。
+
+```ts
+// steps/url_matches.mts（Midscene）
+deterministic('页面地址匹配 "(?<pattern>[^"]+)"', {
+  playwright: ({ page }, { pattern }) => check(pattern, page.url()),
+  webdriver: [
+    { uiKinds: ["web"], requires: ["web_context"],
+      handler: (ctx, { pattern }) => ctx.withWebContext(async () => check(pattern, await ctx.driver.getUrl())) },
+  ],
+}, { description: "…", example: 'Then 页面地址匹配 "/wiki/OpenAI"', keywords: ["Then"] });
+```
+
+```python
+# steps/url_matches.py（Nova Act）：多份实现用普通函数调用，字段名用下划线
+deterministic(r'页面地址匹配 "(?P<pattern>[^"]+)"',
+              {"playwright": on_desktop,
+               "webdriver": [{"ui_kinds": ["web"], "requires": ["web_context"], "handler": on_device}]},
+              description="…", example='Then 页面地址匹配 "/wiki/OpenAI"', keywords=("Then",))
+```
+
+每个 `webdriver` 条目用两个数组声明适用范围：`uiKinds`（`web` 网页、`app` 应用）与 `devices`（`android`、`ios`）。**两个数组各自独立，条目覆盖它们的全部组合**：`uiKinds: ["web", "app"]` 加 `devices: ["android", "ios"]` 表示同一个 handler 在四个目标上都生效；不写就是全部取值。Android 与 iOS 的选择器不同时写两个条目、各给一个 `devices`，不要在一个 handler 里按平台分支：适用范围要在执行前就能从注册表看出来，`gherkai list-deterministic` 的「目标」列与 `gherkai plan` 的标注才能逐目标告诉用例作者这一步走确定性还是走 AI。要排除某个组合，就拆成两个条目。
+
+`requires` 声明这个条目在设备上执行的前提，目前只有一个取值 `web_context`：条目要在网页上下文里读写页面（例如读地址）。带这个前提的条目 `uiKinds` 只能是 `["web"]`。设备不提供网页上下文时，这一步记 `error`、不交给 AI；详见 [`writing-features.md`](./writing-features.md) 里对设备目标的说明。
+
+以下写法在注册时就被拒绝，worker 不启动并点名文件：不认识的句柄种类；对象里一个句柄都没有；`webdriver` 给了空列表；条目缺 `handler`；`uiKinds` / `devices` / `requires` 出现取值范围之外的值、重复或空列表；带 `web_context` 的条目 `uiKinds` 不是恰好 `["web"]`；两个条目覆盖了同一个（设备, 界面类型）组合——不论它们的 `requires` 是否相同，一个 step 在一个目标上只能有一份实现，没有「带前提的一份加兜底的一份」。
 
 ## handler 拿到什么
 
@@ -92,6 +121,20 @@ Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可�
 handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂在确定性 step 上的 DataTable / DocString 会让这一步记 `error`，不会被静默丢掉。
 
 需要异步判定时只能写在 Midscene 侧。
+
+`webdriver` 句柄的 `ctx` 有七个字段：
+
+| 字段 | 含义 |
+|---|---|
+| `driver` | WebdriverIO 客户端。step 结束后再经它发命令会被拒绝，所以不要把它或它返回的元素存到 step 之外 |
+| `device` | `{ platform, osVersion, scale }`：平台（`android` / `ios`）、设备回报的系统版本、坐标比例 |
+| `uiKind` | `web` 或 `app` |
+| `appId` | 包名或 bundle id，只在应用目标上有值 |
+| `app` | 只在应用目标上有值，唯一方法 `restart()`：重启被测应用并等它起来 |
+| `log(text)` | 写一行进这一步的诊断 |
+| `withWebContext(fn)` | 切进属于被测对象的网页上下文、执行 `fn`，结束（含抛错）后切回原生上下文 |
+
+必须遵守的一条约定：**step 结束时会话要处在原生上下文**。截图与手势都在原生上下文执行，handler 自己切了上下文不切回，下一步的截图坐标就会错位。用 `withWebContext` 切换最稳妥；直接调 `switchContext` 不切回时，worker 会在 step 结束后复原，复原失败这一步记 `error`。
 
 ## 判定与报错
 
@@ -124,11 +167,13 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂
 
 引擎内建的导航与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
 
+匹配只看文本、不看目标。命中之后，worker 再按这个 scope 的目标（桌面网页取 `playwright`，设备目标取覆盖该组合的 `webdriver` 条目）取实现；命中的 step 在当前目标上没有实现时，这一步**改由 AI 执行**，不会去找下一条能匹配的模式、也不记 `error`。`gherkai plan` 对这种情形不标注（走 AI 的 step 一律不标）。
+
 ## 内建的导航与 `steps/` 模板
 
 引擎只内建一条确定性 step：导航。`Given` / `When` 之后整句只是一个地址时直接打开它，写法与注意事项见 [`writing-features.md`](./writing-features.md)。它在 `gherkai list-deterministic` 的清单里、`gherkai plan` 也照常标注，「关键字」列是 `Given / When`。
 
-判定类的 step 一条都不内建：措辞属于项目，由项目在 `steps/` 里注册（1.4 及之前版本内建的 `页面地址匹配 "<正则>"` 已退役）。仓库的 [`features/steps/`](../../features/steps/) 目录放着可直接复制的模板：`url_matches.py` 与 `url_matches.mts` 成对实现 `Then 页面地址匹配 "<正则>"`，复制进项目的 `steps/` 后按需改措辞与判定。
+判定类的 step 一条都不内建：措辞属于项目，由项目在 `steps/` 里注册（1.4 及之前版本内建的 `页面地址匹配 "<正则>"` 已退役）。仓库的 [`features/steps/`](../../features/steps/) 目录放着可直接复制的模板：`url_matches.py` 与 `url_matches.mts` 成对实现 `Then 页面地址匹配 "<正则>"`，复制进项目的 `steps/` 后按需改措辞与判定；Midscene 侧的那份还带设备网页上的第二份实现（声明 `requires: ["web_context"]`，在网页上下文里读地址）。
 
 当前实际有哪些，以 `gherkai list-deterministic --engine <引擎>` 的输出为准。
 
@@ -137,6 +182,8 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：挂
 同一份 `.feature` 要能在两个引擎上运行，所以每条确定性 step 都在两侧各注册一份：正则语义相同、`description` 与 `example` 文字相同，只有语言方言不同。
 
 只写一侧时，另一个引擎上这一步会改由 AI 判定，运行前检查不会提示你（它只检查本次用到的引擎）。核对方法是两个引擎各查一遍清单，再用 `gherkai plan` 看标注。
+
+Nova Act 引擎只在桌面网页上运行：Python 侧也接受 `webdriver` 条目（写法与校验同 Midscene 侧，字段名用下划线），但这些条目在该引擎上永远不会被调用，只会出现在 `gherkai list-deterministic` 的「目标」列里、注明该引擎不支持。
 
 ## 写得稳：等待与判定
 
