@@ -366,7 +366,9 @@
 
 双轨复核第一轮（Codex 第四十五轮加四路窄核对 workflow：11 条成立、0 条驳回，两者重合 5 条）处置（code 一笔、文档一笔）：① 条目字段显式 null / None 两侧同构为拒绝（Python 缺省只认缺键，哨兵 `_MISSING`；两侧消息含同一片段「缺省就不要给这个字段」），fixture 补 null 三例、devices 空列表、ui_kinds / requires 重复共 6 例；② `gherkai plan` 对「命中但该 scope 目标上没有实现」的 step 不标「确定性」、`--json` 为 null、stderr 说明将由 AI 执行（`_probe_deterministic_dispatch` 用自述清单的交集目标核对，契约页此前已写该形态、实现未接；我在用户指南写成「不标注」是写反了，已改）；③ webdriverio 从 devDependencies 改为 dependencies——发布的类型声明引用它，使用方做类型检查时要能解析到（ADR 0050 决策 2 的句子同步，lockfile 同步）；④ 多行参数检查「只对当前目标上有句柄的命中生效」补两侧护栏（只有 webdriver 句柄 + DataTable / DocString → 交给 AI、参数进指令），用户指南 / skill / internals 的相关句加这个条件；⑤ `selectHandler` 对 desktop/app 返回 null 补断言；run-scope 测试的 finally 改为注册表快照还原（新增 `_snapshot` / `_restore` 测试助手），不再清整表；⑥ 导出面补 `WebdriverApp` 与 `UiKind` / `Device` / `Requirement`；⑦ 用户指南：requires 空列表合法、去掉指向 writing-features 的悬空「详见」；Python 模块 docstring 的「靶」错字。**不处置**：Codex 第 6 节「把设备执行写成现行能力」——用户文档描述的是 1.5 这一版本的行为，设备路径在同一版本内落地（B6），与前几批对 @device / 设备目标的文档口径一致，发行前的文档批是审计点。整仓 pytest 2448 绿、3 跳过；Midscene 224 绿、tsc 通过。
 
-双轨复核第二轮（Codex 第四十六轮，三条小发现）处置（code 一笔、文档一笔）：plan 做目标核对时能力自述取不到改为显式降级提示（命中仍标确定性）并补回归测试；internals 派发链判定表的多行参数行补「目标上有句柄」条件；internals 里「每引擎至多启动一次 worker」改为两次（match 查询与能力自述）。**待 Codex 第四十七轮闭合确认。**
+双轨复核第二轮（Codex 第四十六轮，三条小发现）处置（code 一笔、文档一笔）：plan 做目标核对时能力自述取不到改为显式降级提示（命中仍标确定性）并补回归测试；internals 派发链判定表的多行参数行补「目标上有句柄」条件；internals 里「每引擎至多启动一次 worker」改为两次（match 查询与能力自述）。
+
+双轨复核第三轮（Codex 第四十七轮，一条文案）：internals 的启动次数改为「一到数次」并说明自述失败不写缓存、后一步会再问。**待 Codex 第四十八轮闭合确认。**
 
 
 **依赖**

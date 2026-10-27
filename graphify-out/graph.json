@@ -54018,7 +54018,7 @@
       "label": "6. B7-tunnel\uff1a\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362 cookie\uff08\u684c\u9762\u5148\u884c\uff09\u3001\u684c\u9762 worker \u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3\u3001\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L423",
+      "source_location": "L425",
       "_origin": "ast",
       "id": "docs_journey_0015_mobile_devices_implementation_batches_6_b7_tunnel_\u96a7\u9053\u6539\u4e3a\u4ee4\u724c\u6362_cookie_\u684c\u9762\u5148\u884c_\u684c\u9762_worker_\u7684\u9884\u70ed\u5931\u8d25\u51fa\u53e3_\u8131\u654f\u89c4\u5219\u4e09\u6761",
       "community": 201,
@@ -54029,7 +54029,7 @@
       "label": "7. B8-deploy-iac\uff1a\u90e8\u7f72\u4fa7\uff1a\u6743\u9650\u3001Device Farm \u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb\u3001SSM\u3001doctor \u8bbe\u5907\u9879",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L495",
+      "source_location": "L497",
       "_origin": "ast",
       "id": "docs_journey_0015_mobile_devices_implementation_batches_7_b8_deploy_iac_\u90e8\u7f72\u4fa7_\u6743\u9650_device_farm_\u9879\u76ee\u627e\u56de\u6216\u5efa\u7acb_ssm_doctor_\u8bbe\u5907\u9879",
       "community": 201,
@@ -54040,7 +54040,7 @@
       "label": "8. B6-midscene-device\uff1aMidscene worker \u8bbe\u5907\u6a21\u5757\uff08\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L566",
+      "source_location": "L568",
       "_origin": "ast",
       "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
       "community": 201,
@@ -179997,7 +179997,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L423",
+      "source_location": "L425",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -180019,7 +180019,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L495",
+      "source_location": "L497",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -180030,7 +180030,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
-      "source_location": "L566",
+      "source_location": "L568",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -250235,5 +250235,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "635a68bcbe606cc1cdb7d7bd9e6d23918a1b6a87"
+  "built_at_commit": "e67a71c90f7d678902c2f562e16955a5c07f858b"
 }
