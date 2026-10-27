@@ -11,6 +11,7 @@ import re
 from pathlib import Path
 
 from gherkai_core.model import JobResult, RunResult, Status
+from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 
 from gherkai_cli import __main__ as m
 from gherkai_runtime import compose
@@ -198,14 +199,15 @@ def test_plan_shows_target_and_device_session_count(tmp_path, capsys):
     assert "target=desktop/web" in out and "远程访问会话 0" in out
     assert m.main(["plan", str(feat), "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
-    assert doc["device_session_count"] == 0 and "target" not in doc["jobs"][0]  # 桌面 job 省 target 键
+    assert doc["device_session_count"] == 0
+    assert doc["jobs"][0]["target"] == {"device": "desktop", "ui_kind": "web"} and doc["jobs"][0]["device_request"] is None  # 键集固定
     assert doc["jobs"][0]["timeout_s"] == 300.0  # 不给 --default-job-timeout（哨兵「未指定」）：plan 层按目标补桌面缺省 300
 
 
 def test_default_job_timeout_sentinel_explicit_and_non_finite(tmp_path, capsys):
     feat = _write_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "0"]) == 0
-    assert "timeout_s" not in json.loads(capsys.readouterr().out)["jobs"][0]  # 显式非正：桌面 scope 不超时
+    assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] is None  # 显式非正：桌面 scope 不超时（键恒在、值 null）
     assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "120"]) == 0
     assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] == 120.0  # 显式 120 与内建缺省可区分
     for bad in ("nan", "inf", "1e400", "abc"):  # 归一化只接受有限数（nan / inf 会让超时保护静默失效）
@@ -1145,7 +1147,7 @@ def test_run_steps_dir_env_and_flag_precedence(tmp_path, monkeypatch):
 def test_run_default_steps_dir_used_only_when_it_exists(tmp_path, monkeypatch):
     """末级默认 `./steps`（相对**提交时** CWD）：存在才用、不存在则 None（「没这个目录」是多数项目的常态）。
 
-    None 时 definition 省该键（omit-when-None）——worker 只有内建脚手架注册。
+    None 时 definition 该键为 null——worker 只有内建脚手架注册。
     """
     box = _spy_build_engines(monkeypatch)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -1155,7 +1157,7 @@ def test_run_default_steps_dir_used_only_when_it_exists(tmp_path, monkeypatch):
     assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--quiet"]) == 0
     assert box["steps_dir"] is None
     meta = json.loads(next(reports.iterdir()).joinpath("run_meta.json").read_text(encoding="utf-8"))
-    assert "steps_dir" not in meta
+    assert meta["steps_dir"] is None
     (tmp_path / "steps").mkdir()  # 同一 CWD 下建出约定目录 → 下一次 run 自动用上
     assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r2"), "--quiet"]) == 0
     assert box["steps_dir"] == str((tmp_path / "steps").resolve())
@@ -2188,6 +2190,9 @@ def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
 def _explain_cloud_stores(jr, state):
     """假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。"""
     class _RunStore:
+        def peek_definition_header(self, run_id):
+            return (DEFINITION_SCHEMA_VERSION, None)  # 结构版本闸先于运行态读（ADR 0037 决策 7）：本版本、放行
+
         def load_run_state(self, run_id):
             return state
 

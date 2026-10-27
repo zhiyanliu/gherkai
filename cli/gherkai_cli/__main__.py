@@ -21,7 +21,8 @@ from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, TERMINAL_STATUSES, Eve
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
-from gherkai_core.errors import DefinitionContractError
+from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 from gherkai_core.target import validate_job_definition
 from gherkai_core.schedule import ScheduleOpts, schedule
 
@@ -1414,6 +1415,8 @@ def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict |
         extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
         max_concurrency=args.max_concurrency,
         steps_dir=steps_dir,
+        cli_version=_installed_version(),  # 写端版本只记不比（ADR 0037 决策 7）；未装成包为 None
+        session_warmup_url=None,  # 隧道鉴权落地后由 _setup_tunnel 给出（ADR 0051 决策 13）
     )
 
 
@@ -1623,7 +1626,31 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     return 0
 
 
-def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
+def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str:
+    """definition 结构版本不等于本 CLI 支持的那一个时给使用方的整句（ADR 0037 决策 7）：说清谁写的、两边各第几版、怎么办。"""
+    by = f"gherkai {writer}" if writer else "版本未知的 gherkai"
+    if found > DEFINITION_SCHEMA_VERSION:
+        return (f"这个 run 的提交记录由更新版本的 {by} 写出，本机的 gherkai 读不懂它的记录格式"
+                f"（记录是第 {found} 版，本机支持第 {DEFINITION_SCHEMA_VERSION} 版）。请升级本机的 gherkai：uv tool upgrade gherkai")
+    how = (f"：uvx --from 'gherkai=={writer}' gherkai status {run_id} …" if writer else "")
+    return (f"这个 run 的提交记录由更早版本的 {by} 写出，本机的 gherkai 不再读取这种记录格式"
+            f"（记录是第 {found} 版，本机只认第 {DEFINITION_SCHEMA_VERSION} 版）。用写出它的那个版本查看{how}，或用当前版本重新提交。")
+
+
+def _definition_schema_gate(header: "tuple[int, str | None] | None", run_id: str) -> int | None:
+    """status / explain 读任何别的东西之前先核 definition 的结构版本（ADR 0037 决策 7）。`header` 是 RunStore.peek_definition_header
+    的返回：None 表示 run 不存在，放过、由调用方既有的「未找到 run」路径处理；不等于本 CLI 支持的版本即打印整句并以退出码 2 结束。
+    读端只认当前一个版本：高于它本机该升级，低于它用写出它的版本读或重新提交，两边都不留按版本的兼容分支。"""
+    if header is None:
+        return None
+    found, writer = header
+    if found == DEFINITION_SCHEMA_VERSION:
+        return None
+    _progress(_schema_mismatch_message(found, writer, run_id))
+    return 2
+
+
+def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | None, str | None]":
     """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。
     返回 `(退出码 or None, 后端版本戳 or None)`——放行时给 `(None, 戳)`，拦下时给 `(2, …)`。
 
@@ -1641,7 +1668,8 @@ def _cloud_skew_gate(target) -> "tuple[int | None, str | None]":
     """
     try:
         verdict, msg, backend_version = compose.check_backend_skew(
-            prefix=target.prefix, cli_version=_installed_version(), region=target.region, profile=target.profile)
+            prefix=target.prefix, cli_version=_installed_version(), region=target.region, profile=target.profile,
+            requires_stamp=requires_stamp)  # 缺戳例外（决策 7）：带设备目标或会话预热地址的 run 遇无戳后端即拦
     except ImportError as e:
         _progress(f"--backend cloud 需要 boto3：{e}")
         return 2, None
@@ -1731,7 +1759,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     )
 
     # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
-    skew_rc, backend_version = _cloud_skew_gate(target)
+    skew_rc, backend_version = _cloud_skew_gate(target, requires_stamp=compose.run_requires_backend_stamp(run_meta))
     if skew_rc is not None:
         return skew_rc
 
@@ -1876,6 +1904,10 @@ def _cmd_status(args) -> int:
     if run_store.load_run_state(args.run_id) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
+    # definition 的结构版本先于读 definition 与接力（ADR 0037 决策 7）：接力要整读 definition，旧版本或新版本写的都不能按本版本解释
+    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)
+    if bad is not None:
+        return bad
 
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
@@ -1916,6 +1948,18 @@ def _status_cloud(args) -> int:
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     run_store = DynamoDBRunStore(compose._make_ddb_table(
         target.runs_table, region=target.region, profile=target.profile))
+
+    # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
+    try:
+        header = run_store.peek_definition_header(args.run_id)
+    except Exception as e:
+        if compose.is_botocore_error(e):
+            _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
+            return 2
+        raise
+    bad = _definition_schema_gate(header, args.run_id)
+    if bad is not None:
+        return bad
 
     def _read():
         try:
@@ -2133,6 +2177,9 @@ def _cmd_explain(args) -> int:
     if (state := run_store.load_run_state(args.run_id)) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
+    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # ADR 0037 决策 7
+    if bad is not None:
+        return bad
     return _explain_emit(
         args, state, result_store, read_bytes=compose.read_resource,
         # --report-dir 无条件带（即便是默认值），与 submit 提示/status 的 wait_hint 同惯例
@@ -2165,6 +2212,9 @@ def _explain_cloud(args) -> int:
         run_store, result_store, _rp, _mk = compose.build_cloud_stores(
             table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
             region=target.region, profile=target.profile)
+        bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # 先于运行态读（ADR 0037 决策 7）
+        if bad is not None:
+            return bad
         state = run_store.load_run_state(args.run_id)
     except ImportError as e:
         _progress(f"--backend cloud 需要 boto3：{e}")
@@ -2206,8 +2256,12 @@ def _cmd_reconcile(args) -> int:
     if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
         return 2
     report_root = Path(args.report_dir).resolve()
-    detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
-                                   region=args.region, profile=args.profile)
+    try:
+        detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
+                                       region=args.region, profile=args.profile)
+    except UnsupportedDefinitionSchema as e:  # 整读 definition 时结构版本不符（ADR 0037 决策 7）：同一句、退出码 2
+        _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
+        return 2
     return 0
 
 
@@ -2337,7 +2391,7 @@ def _cmd_run(args) -> int:
     #     仍在 Fargate 运行，只是不生成 report。cloud_fargate 置值表示下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
         # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
-        skew_rc, backend_version = _cloud_skew_gate(target)
+        skew_rc, backend_version = _cloud_skew_gate(target, requires_stamp=compose.run_requires_backend_stamp(run_meta))
         if skew_rc is not None:
             return skew_rc
         # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶也必需，job-in 与产物上传执行时

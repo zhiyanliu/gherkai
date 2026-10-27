@@ -17,6 +17,8 @@
 
 ### 变化
 
+- 提交记录（`run_meta.json`、云端 META，以及 `run --json` 与 `plan --json` 里的 `run_meta` / `jobs[]`）带结构版本 `schema_version`（整数，本版本为 1）与写出它的 `cli_version`；键集固定、不适用的值写 `null` 而不再省键：`timeout_s` 不超时为 `null`，`target` 对桌面 job 也写出 `desktop` / `web`，`device_request` 非设备 job 为 `null`，`steps_dir`、`worker_variant`、`worker_task_defs`、`extra_http_headers` 无值为 `null`。`status` / `explain` 与本机接力读到结构版本不等于本机支持的记录以退出码 2 结束，并点名写出它的版本：更新的提示升级 gherkai，更早的提示用那个版本查看或重新提交。**同一报告目录不要混用 1.4 与 1.5 的命令行工具读写**：1.4 的命令行工具读 1.5 的记录会静默误判，1.5 读 1.4 的记录直接拒绝。
+- 带设备目标或 `--expose-local` 的 run 提交到没有版本戳的旧后端（早于本版本部署、从未升级）时以退出码 2 结束、提示先执行 `gherkai deploy` 升级部署；纯桌面无隧道的 run 维持只警告。
 - `.feature` 可以用 `@device:android` / `@device:ios` 与 `@app:<别名>` 声明 scope 的测试目标（声明、继承、冲突的规则与 `@engine` 相同）。当前两个引擎都只支持桌面网页：标了设备目标的 scope 在 `plan` 与执行前预检中被拒绝并给出改法，云端提交在写入运行定义前被拒绝，都不会建立任何会话；`@app` 的别名要在项目配置的 `[apps]` 里绑定，而配置文件的读取尚未接入，这个版本里带 `@app` 的 scope 会因别名查不到而被拒。`plan` 的文本每个 job 行显示测试目标，汇总行显示本次将建立的远程访问会话数；`plan --json` 加 `device_session_count`，非桌面 job 的定义带 `target`。
 - `--default-job-timeout` 不给时按测试目标取缺省：桌面 scope 仍是 300 秒，设备 scope 为获取预算加 900 秒且不接受「不超时」（给 `<=0` 只让桌面 scope 不超时；给正值时设备 scope 不得低于获取预算加 180 秒）；给 `nan` / `inf` 以退出码 2 结束。
 - Midscene worker 的 SDK 从 `@midscene/web` 1.12.8 升到 1.15.1（Playwright 仍为 1.63.0）。对使用者的可见变化只有 Midscene 自己的报告页样式随新版改变；模型请求形态、证据与 `explain` 输出不变。

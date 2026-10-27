@@ -298,24 +298,24 @@ def test_update_job_state_before_create_raises(tmp_path: Path):
 
 
 def test_job_timeout_s_round_trip():
-    # Job.timeout_s（ADR 0034「job timeout」节）：非 None 经 round-trip 不丢；None 落盘省键（旧数据兼容）
+    # Job.timeout_s（ADR 0034「job timeout」节）：键恒在（键集固定，ADR 0037 决策 7）；None 落 null、读回 None；非 None 往返不丢
     from gherkai_core.serialize import job_from_dict, job_to_dict
     j = _job_def("s", "s", "midscene")
-    assert "timeout_s" not in job_to_dict(j)  # omit-when-None（旧读端兼容）
+    assert job_to_dict(j)["timeout_s"] is None
     assert job_from_dict(job_to_dict(j)).timeout_s is None
     jt = Job(scope_id="t", scope_name="t", engine="midscene", scenarios=j.scenarios, timeout_s=90.0)
     assert job_from_dict(job_to_dict(jt)).timeout_s == 90.0
 
 
-def test_job_target_and_device_request_round_trip_and_omission():
-    """Job.target / device_request（ADR 0048 决策 3）：桌面 job 两键都省（旧落盘缺键读回 desktop/web 与 None）；android/web 与 ios/app
-    （带 device_request）往返恒等；plan 形态的应用条目只写 alias 与 app_id。"""
+def test_job_target_and_device_request_round_trip_and_fixed_keys():
+    """Job.target / device_request（ADR 0048 决策 3）：桌面 job 两键恒在——target 写 desktop/web、device_request 写 null（键集固定，
+    ADR 0037 决策 7）；android/web 与 ios/app（带 device_request）往返恒等；plan 形态的应用条目只写 alias 与 app_id。"""
     from gherkai_core.model import AppRef, DeviceFarmRequest, Target
     from gherkai_core.serialize import job_from_dict, job_to_dict
 
     j = _job_def("s", "s", "midscene")
     d = job_to_dict(j)
-    assert "target" not in d and "device_request" not in d
+    assert d["target"] == {"device": "desktop", "ui_kind": "web"} and d["device_request"] is None
     assert job_from_dict(d).target == Target() and job_from_dict(d).device_request is None
     dr = DeviceFarmRequest(project_arn="arn:p", os_version="15")
     aw = Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=j.scenarios, timeout_s=1500.0,
@@ -333,13 +333,15 @@ def test_job_target_and_device_request_round_trip_and_omission():
 
 
 @pytest.mark.parametrize("patch, match", [
-    (lambda d: d.pop("device_request"), "非桌面目标当且仅当带设备请求"),
+    (lambda d: d.update(device_request=None), "非桌面目标当且仅当带设备请求"),
+    (lambda d: d.pop("device_request"), "缺键 device_request"),   # 键集固定：缺键是定义违约、不是「无设备请求」
     (lambda d: d["device_request"].update(device_arn="arn:d"), "恰给一个"),
     (lambda d: d["device_request"].pop("os_version"), "恰给一个"),
     (lambda d: d["device_request"].update(project_arn=""), "缺 project_arn"),
     (lambda d: d["device_request"].update(acquire_timeout_s=0), "有限正数"),
     (lambda d: d["target"].update(ui_kind="app"), "必须带应用条目"),
-    (lambda d: d.pop("timeout_s"), "设备 scope 不存在"),
+    (lambda d: d.update(timeout_s=None), "设备 scope 不存在"),
+    (lambda d: d.pop("timeout_s"), "缺键 timeout_s"),
 ])
 def test_job_from_dict_rejects_malformed_device_definitions(patch, match):
     """推进器读 definition 时的结构校验（ADR 0048 决策 3）：非桌面却缺设备请求、ARN 与版本同给或同缺、project_arn 为空、
@@ -513,11 +515,11 @@ def test_run_meta_extra_http_headers_round_trip():
 
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("h-run").run_meta
-    assert "extra_http_headers" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_to_dict(meta)["extra_http_headers"] is None  # 默认 None → null（键集固定，ADR 0037 决策 7）
     assert run_meta_from_dict(run_meta_to_dict(meta)).extra_http_headers is None
-    # 空 tuple 与 None 语义合一（都是「不注入额外头」）：同样省键、读回 None，不落 {} 也不变形出 ()
+    # 空 tuple 与 None 语义合一（都是「不注入额外头」）：同样写 null、读回 None，不落 {} 也不变形出 ()
     empty = dataclasses.replace(meta, extra_http_headers=())
-    assert "extra_http_headers" not in run_meta_to_dict(empty)
+    assert run_meta_to_dict(empty)["extra_http_headers"] is None
     assert run_meta_from_dict(run_meta_to_dict(empty)).extra_http_headers is None
     meta2 = dataclasses.replace(meta, extra_http_headers=(("ngrok-skip-browser-warning", "1"),))
     got = run_meta_from_dict(run_meta_to_dict(meta2))
@@ -530,7 +532,7 @@ def test_run_meta_max_concurrency_round_trip():
 
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("mc-run").run_meta
-    assert "max_concurrency" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_to_dict(meta)["max_concurrency"] is None  # 默认 None → null
     assert run_meta_from_dict(run_meta_to_dict(meta)).max_concurrency is None
     meta3 = dataclasses.replace(meta, max_concurrency=3)
     assert run_meta_to_dict(meta3)["max_concurrency"] == 3
@@ -540,8 +542,6 @@ def test_run_meta_max_concurrency_round_trip():
     zero = dataclasses.replace(meta, max_concurrency=0)
     assert run_meta_to_dict(zero)["max_concurrency"] == 0
     assert run_meta_from_dict(run_meta_to_dict(zero)).max_concurrency == 0
-    # 旧落盘（无此键）读回 None——推进器据此走各自的兼容回落
-    assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).max_concurrency is None
 
 
 def test_run_meta_steps_dir_round_trip():
@@ -554,7 +554,7 @@ def test_run_meta_steps_dir_round_trip():
 
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("sd-run").run_meta
-    assert "steps_dir" not in run_meta_to_dict(meta)  # 默认 None → omit
+    assert run_meta_to_dict(meta)["steps_dir"] is None  # 默认 None → null
     assert run_meta_from_dict(run_meta_to_dict(meta)).steps_dir is None
     meta2 = dataclasses.replace(meta, steps_dir="/abs/project/steps")
     assert run_meta_to_dict(meta2)["steps_dir"] == "/abs/project/steps"
@@ -563,8 +563,6 @@ def test_run_meta_steps_dir_round_trip():
     blank = dataclasses.replace(meta, steps_dir="")
     assert run_meta_to_dict(blank)["steps_dir"] == ""
     assert run_meta_from_dict(run_meta_to_dict(blank)).steps_dir == ""
-    # 旧落盘（无此键）读回 None——宿主据此不注入 GHERKAI_STEPS_DIR
-    assert run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []}).steps_dir is None
 
 
 def test_run_meta_worker_fields_round_trip():
@@ -579,7 +577,7 @@ def test_run_meta_worker_fields_round_trip():
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     meta = _sample_run("wk-run").run_meta
     d0 = run_meta_to_dict(meta)
-    assert "worker_variant" not in d0 and "worker_task_defs" not in d0  # 默认 None → 双双 omit
+    assert d0["worker_variant"] is None and d0["worker_task_defs"] is None  # 默认 None → 双双 null
     got0 = run_meta_from_dict(d0)
     assert got0.worker_variant is None and got0.worker_task_defs is None
 
@@ -592,14 +590,10 @@ def test_run_meta_worker_fields_round_trip():
     assert got2.worker_variant == "login" and got2.worker_task_defs == arns
     assert got2 == meta2  # 逐字段恒等（往返忠实）
 
-    # 各自独立 omit（序列化层不替语义层做「有 A 必有 B」的把关）
+    # 各自独立（序列化层不替语义层做「有 A 必有 B」的把关）
     only_variant = dataclasses.replace(meta, worker_variant="base")
-    assert run_meta_to_dict(only_variant) .get("worker_variant") == "base"
-    assert "worker_task_defs" not in run_meta_to_dict(only_variant)
-
-    # 旧落盘（引入本 ADR 前提交的 definition，两键皆无）读回 None——宿主据此走默认指针兼容路径
-    legacy = run_meta_from_dict({"run_id": "legacy", "created_at": "", "jobs": []})
-    assert legacy.worker_variant is None and legacy.worker_task_defs is None
+    assert run_meta_to_dict(only_variant)["worker_variant"] == "base"
+    assert run_meta_to_dict(only_variant)["worker_task_defs"] is None
     # `is not None` 判（同 steps_dir）：空 dict 也忠实往返、不被悄悄变形成「缺失」
     empty = dataclasses.replace(meta, worker_task_defs={})
     assert run_meta_to_dict(empty)["worker_task_defs"] == {}
@@ -625,10 +619,111 @@ def test_run_meta_extra_http_headers_multiple_normalize_at_write_side():
     assert got.extra_http_headers == (("ngrok-skip-browser-warning", "1"), ("x-tunnel", "b"))  # 读端保落盘序
     # 规范形上往返逐字恒等（写端规范化，故幂等）
     assert run_meta_from_dict(run_meta_to_dict(got)).extra_http_headers == got.extra_http_headers
-    # 读端忠实还原落盘键序（旧落盘由写端排序前落的、键序未必字典序）——若读端也 sorted，这条即挂
-    legacy = {"run_id": "legacy", "created_at": "", "jobs": [],
-              "extra_http_headers": {"x-tunnel": "b", "ngrok-skip-browser-warning": "1"}}
-    assert run_meta_from_dict(legacy).extra_http_headers == (("x-tunnel", "b"), ("ngrok-skip-browser-warning", "1"))
+    # 读端忠实还原落盘键序（手改落盘、键序非字典序）——若读端也 sorted，这条即挂
+    unsorted = {**run_meta_to_dict(meta), "extra_http_headers": {"x-tunnel": "b", "ngrok-skip-browser-warning": "1"}}
+    assert run_meta_from_dict(unsorted).extra_http_headers == (("x-tunnel", "b"), ("ngrok-skip-browser-warning", "1"))
+
+
+# ---- definition 的结构版本与固定键集（ADR 0037 决策 7）----
+
+def test_definition_schema_version_is_written_and_read_end_accepts_only_its_own():
+    """写端恒写整数 schema_version；读端只认当前这一个：缺键读作 0 拒绝、高于拒绝（带写端 cli_version）、不是整数即定义违约；
+    版本核在最前，版本不符时不再看别的键。"""
+    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+    from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION, run_meta_from_dict, run_meta_to_dict
+
+    d = run_meta_to_dict(_sample_run("v").run_meta)
+    assert d["schema_version"] == DEFINITION_SCHEMA_VERSION == 1 and d["cli_version"] is None
+    assert run_meta_from_dict(d).run_id == "v"
+    with pytest.raises(UnsupportedDefinitionSchema) as ei:
+        run_meta_from_dict({k: v for k, v in d.items() if k != "schema_version"})
+    assert (ei.value.found, ei.value.supported, ei.value.cli_version) == (0, 1, None)
+    with pytest.raises(UnsupportedDefinitionSchema) as ei:
+        run_meta_from_dict({**d, "schema_version": 2, "cli_version": "9.9.0"})
+    assert ei.value.found == 2 and ei.value.cli_version == "9.9.0" and "9.9.0" in str(ei.value)
+    for bad in ("1", 1.0, True, None):
+        with pytest.raises(DefinitionContractError, match="schema_version 须为整数"):
+            run_meta_from_dict({**d, "schema_version": bad})
+    with pytest.raises(UnsupportedDefinitionSchema):
+        run_meta_from_dict({"schema_version": 2})  # 版本不符先于缺键
+
+
+@pytest.mark.parametrize("key", ["cli_version", "run_id", "created_at", "jobs", "extra_http_headers", "max_concurrency", "steps_dir",
+                                 "worker_variant", "worker_task_defs", "session_warmup_url"])
+def test_definition_run_level_keys_are_all_required(key):
+    """键集固定：run 级任一键缺失都是定义违约（不再用缺省值兜），值可为 null。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+
+    d = run_meta_to_dict(_sample_run("k").run_meta)
+    d.pop(key)
+    with pytest.raises(DefinitionContractError, match=f"缺键 {key}"):
+        run_meta_from_dict(d)
+
+
+@pytest.mark.parametrize("key", ["scope_id", "scope_name", "engine", "scenarios", "assertion_votes", "timeout_s", "target", "device_request"])
+def test_definition_job_level_keys_are_all_required(key):
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+
+    d = run_meta_to_dict(_sample_run("jk").run_meta)
+    d["jobs"][0].pop(key)
+    with pytest.raises(DefinitionContractError, match=f"缺键 {key}"):
+        run_meta_from_dict(d)
+
+
+def test_definition_target_must_be_an_object_even_for_desktop():
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+
+    d = run_meta_to_dict(_sample_run("t").run_meta)
+    d["jobs"][0]["target"] = None
+    with pytest.raises(DefinitionContractError, match="target"):
+        run_meta_from_dict(d)
+
+
+def test_run_meta_cli_version_and_session_warmup_url_round_trip():
+    import dataclasses
+
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    meta = _sample_run("cv").run_meta
+    d = run_meta_to_dict(meta)
+    assert d["cli_version"] is None and d["session_warmup_url"] is None
+    meta2 = dataclasses.replace(meta, cli_version="1.5.0",
+                                session_warmup_url="https://h.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T")
+    d2 = run_meta_to_dict(meta2)
+    assert d2["cli_version"] == "1.5.0" and d2["session_warmup_url"].endswith("=T")
+    assert run_meta_from_dict(d2) == meta2
+
+
+def test_report_from_dict_is_gated_by_definition_schema():
+    """RunReport / manifest 经 run_meta_from_dict 读 definition，同受结构版本闸（读端只认当前版本，不分读的是哪种文件）。"""
+    from gherkai_core.errors import UnsupportedDefinitionSchema
+    from gherkai_core.serialize import from_dict, to_dict
+
+    doc = to_dict(_sample_run("rep"))
+    doc["run_meta"]["schema_version"] = 2
+    with pytest.raises(UnsupportedDefinitionSchema):
+        from_dict(doc)
+
+
+def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Path):
+    import dataclasses
+
+    from gherkai_core.errors import UnsupportedDefinitionSchema
+    from gherkai_core.model import run_state_from_result
+    r = _sample_run("pk")
+    store = LocalRunStore(tmp_path)
+    store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
+    assert store.peek_definition_header("pk") == (1, "1.5.0")
+    assert store.peek_definition_header("nope") is None
+    path = tmp_path / "pk" / "run_meta.json"
+    d = json.loads(path.read_text(encoding="utf-8"))
+    d["schema_version"] = 2
+    path.write_text(json.dumps(d), encoding="utf-8")
+    assert store.peek_definition_header("pk") == (2, "1.5.0")  # 只读头、不按本版本解释正文
+    with pytest.raises(UnsupportedDefinitionSchema):
+        store.load_run_meta("pk")
 
 
 def test_job_state_claimed_at_round_trip(tmp_path: Path):

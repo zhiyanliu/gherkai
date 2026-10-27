@@ -1234,7 +1234,13 @@ def _release_cmp(a: str, b: str) -> int | None:
     return (ra > rb) - (ra < rb)
 
 
-def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tuple[str, str]:
+def run_requires_backend_stamp(meta) -> bool:
+    """这次 run 是否要求云端后端带版本戳（ADR 0037 决策 7 的缺戳例外）：带设备目标或会话预热地址即是——无戳的旧后端会丢掉
+    这两类字段，worker 只能把它变成空判定集或在 401 页上执行，旧归约端仍可能判 PASSED（ADR 0051 决策 13）。"""
+    return meta.session_warmup_url is not None or any(not j.target.is_desktop for j in meta.jobs)
+
+
+def check_version_skew(ssm_version: str | None, cli_version: str | None, *, requires_stamp: bool = False) -> tuple[str, str]:
     """比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict 取 ok / warn / block / skip 之一（ADR 0037 决策 7）。
 
     message 是给人看的整句（ok 判定为空串，调用点 `if message:` 即可）；**退出码留给调用点**——`block` 一律以退出码 2 结束
@@ -1255,6 +1261,12 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
     """
     mine = cli_version
     if not ssm_version:
+        if requires_stamp:
+            # 缺戳例外（决策 7）：带设备目标或会话预热地址的 run 不能提交给没有版本戳的旧后端——block 无放行口
+            return SKEW_BLOCK, (
+                f"后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），这个部署早于设备目标与会话预热功能，"
+                "带设备目标或 --expose-local 的 run 不能提交到它。请部署方先升级部署：gherkai deploy"
+            )
         return SKEW_WARN, (
             f"提示：后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），该部署早于版本戳机制，"
             "本次不比对版本、照常执行。请部署方运行一次 gherkai deploy 写入版本戳。"
@@ -1282,7 +1294,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None) -> tupl
 
 
 def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, profile=None,
-                       ssm=None) -> tuple[str, str, str | None]:
+                       ssm=None, requires_stamp: bool = False) -> tuple[str, str, str | None]:
     """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口前端**：CLI / WebUI /
     推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
     **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方运行一次 `gherkai deploy`，那一步
@@ -1292,7 +1304,7 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
     全程只读一次 SSM、不让调用方为了拿戳绕开本函数自己读一遍。
     """
     stamp = read_backend_version(prefix=prefix, region=region, profile=profile, ssm=ssm)
-    verdict, message = check_version_skew(stamp, cli_version)
+    verdict, message = check_version_skew(stamp, cli_version, requires_stamp=requires_stamp)
     return verdict, message, stamp
 
 

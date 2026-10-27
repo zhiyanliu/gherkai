@@ -539,6 +539,14 @@ class RunMeta:
     # 载体是 definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
     # None 表示本机后端或旧 definition（宿主按后端默认指针解析的兼容路径，见 ADR 0038「读侧兼容口径」）。
     worker_task_defs: dict[str, str] | None = None
+    # 写出这份 definition 的命令行工具版本（ADR 0037 决策 7）：**只记不比**——结构兼容靠 serialize 层的整数结构版本号判，这里只为
+    # 让「读不了这份记录」的提示能点名由哪个版本写出。未装成包取不到版本时为 None。core 只搬运。
+    cli_version: str | None = None
+    # 会话预热地址（ADR 0051 决策 13；本机 `--expose-local` 的隧道鉴权）：组合根起隧道时填入，推进器读回经 env
+    # `GHERKAI_SESSION_WARMUP_URL` 注给 worker，worker 在第一个 scenario 之前导航一次换会话 cookie。载体是 definition 的理由
+    # 同 extra_http_headers：起 worker 的宿主与起隧道的 CLI 进程可能不同机器。None 表示不经隧道。core 只搬运、不解释语义；
+    # 带令牌，展示层按 ADR 0035 决策 5 脱敏。字段名与 env 名同词。
+    session_warmup_url: str | None = None
 
 
 @dataclass(frozen=True)

@@ -26,6 +26,7 @@ from pathlib import Path
 from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import JobState, RunMeta, RunState, Status
 from gherkai_core.serialize import (
+    definition_schema_version,
     run_meta_from_dict,
     run_meta_to_dict,
     run_state_from_dict,
@@ -105,6 +106,14 @@ class LocalRunStore:
         if not path.exists():
             return None
         return run_meta_from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
+        """只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。"""
+        path = self._root / run_id / "run_meta.json"
+        if not path.exists():
+            return None
+        d = json.loads(path.read_text(encoding="utf-8"))
+        return definition_schema_version(d), d.get("cli_version")
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（RunState）；不存在返回 None。"""

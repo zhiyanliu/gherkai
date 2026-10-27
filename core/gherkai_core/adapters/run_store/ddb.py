@@ -107,6 +107,10 @@ class DynamoDBRunStore:
         self._table.put_item(Item={
             "run_id": meta.run_id,
             _ITEM_TYPE_ATTR: _META,
+            # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 用投影只取这两个值、不解析 meta_json、
+            # 不触发卸载正文的 S3 取回；值与 meta_json 里的同名键恒同（同一份 meta_dict）。
+            "schema_version": meta_dict["schema_version"],
+            "cli_version": meta_dict["cli_version"],
             "meta_json": json.dumps(meta_dict, ensure_ascii=False),
         })
         self._table.put_item(Item={
@@ -307,6 +311,21 @@ class DynamoDBRunStore:
                 f"run {run_id} 的 step 参数有外置副本，但本进程的 RunStore 读不回来"
                 "（配置缺失：起 RunStore 的地方须注入 arg_offloader）")
         return run_meta_from_dict(meta_dict)
+
+    def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
+        """只取 META item 顶层的结构版本与写端 CLI 版本（ADR 0037 决策 7）；item 不存在返回 None，没有该属性读作 0。
+        ProjectionExpression 只取两个属性：不拖回 meta_json、不碰 S3 卸载正文（status 的权限面与开销不变）。"""
+        resp = self._table.get_item(
+            Key={"run_id": run_id, _ITEM_TYPE_ATTR: _META},
+            ConsistentRead=True,
+            ProjectionExpression="#sv, #cv",
+            ExpressionAttributeNames={"#sv": "schema_version", "#cv": "cli_version"},
+        )
+        item = resp.get("Item")
+        if item is None:
+            return None
+        v = item.get("schema_version")
+        return (int(v) if v is not None else 0), item.get("cli_version")
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。

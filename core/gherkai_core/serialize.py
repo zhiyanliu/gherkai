@@ -81,34 +81,64 @@ def _scenario_def_from_dict(d: dict) -> Scenario:
     return Scenario(id=d["id"], name=d["name"], steps=tuple(_step_from_dict(s) for s in d.get("steps", [])))
 
 
+# definition 的结构版本（ADR 0037 决策 7）：同一结构版本下 definition 的**键集固定、不适用的值写 null**；读端只认当前这一个版本
+# （缺键读作 0，与任何不等于它的值一律按版本不符拒绝），不为旧版本留分支或缺省——结构变化一律靶在这一个整数比较上。
+# 读端据此可以要求每个键都在（缺键是定义违约、不是「用缺省值」）。1.5 写出的第一个版本是 1。
+DEFINITION_SCHEMA_VERSION = 1
+
+
+def definition_schema_version(d: dict) -> int:
+    """从 definition 的 dict 读结构版本：缺键读作 0（早于结构版本号的写端）；不是整数即定义违约。"""
+    v = d.get("schema_version", 0)
+    if isinstance(v, bool) or not isinstance(v, int):
+        from gherkai_core.errors import DefinitionContractError
+        raise DefinitionContractError(f"definition 的 schema_version 须为整数，现为 {v!r}")
+    return v
+
+
+def require_definition_schema(d: dict) -> None:
+    """读 definition 的第一步：结构版本不等于本读端支持的那一个即抛 UnsupportedDefinitionSchema（带写端 CLI 版本供点名）。"""
+    found = definition_schema_version(d)
+    if found != DEFINITION_SCHEMA_VERSION:
+        from gherkai_core.errors import UnsupportedDefinitionSchema
+        raise UnsupportedDefinitionSchema(found, DEFINITION_SCHEMA_VERSION, cli_version=d.get("cli_version"))
+
+
+def _require(d: dict, key: str, what: str):
+    """固定键集的读法：键必须在（值可为 null），缺键按定义违约报——不再用缺省值兜（那是结构版本号之前的兼容手法）。"""
+    if not isinstance(d, dict) or key not in d:
+        from gherkai_core.errors import DefinitionContractError
+        raise DefinitionContractError(f"definition 里的 {what} 缺键 {key}（结构版本 {DEFINITION_SCHEMA_VERSION} 的键集固定，不适用的值写 null）：{d!r}")
+    return d[key]
+
+
 def job_to_dict(job: Job) -> dict:
-    """Job(definition) → dict（双向，RunMeta 落盘）。"""
+    """Job(definition) → dict（双向，RunMeta 落盘）。键集固定（ADR 0037 决策 7）：timeout_s 不超时写 null、target 桌面也写
+    desktop/web、device_request 非设备 job 写 null。"""
     return {
         "scope_id": job.scope_id,
         "scope_name": job.scope_name,
         "engine": job.engine,
         "scenarios": [_scenario_def_to_dict(sc) for sc in job.scenarios],
         "assertion_votes": job.assertion_votes,
-        # timeout_s：omit-when-None（无预算就不写这个键，旧落盘兼容；ADR 0034「job timeout」节）
-        **({"timeout_s": job.timeout_s} if job.timeout_s is not None else {}),
-        # target / device_request（ADR 0048 决策 3）：桌面网页且无设备请求时省键（旧落盘缺键读回 desktop/web 与 None，往返恒等）
-        **({"target": _target_to_dict(job.target)} if job.target != Target() else {}),  # 只有 desktop/web 且无应用条目才省键
-        **({"device_request": _device_request_to_dict(job.device_request)} if job.device_request is not None else {}),
+        "timeout_s": job.timeout_s,  # None 表示不超时（只对桌面 scope；ADR 0034「job timeout」节）
+        "target": _target_to_dict(job.target),  # ADR 0048 决策 3
+        "device_request": _device_request_to_dict(job.device_request) if job.device_request is not None else None,
     }
 
 
 def job_from_dict(d: dict, *, validate: bool = True) -> Job:
-    """dict → Job。validate=True 时按 ADR 0048 决策 3 做推进器读 definition 时的那次结构校验（违约抛 DefinitionContractError）；
-    plan 形态或测试夹具可传 False。"""
+    """dict → Job（键集固定，缺任一键即定义违约）。validate=True 时按 ADR 0048 决策 3 做推进器读 definition 时的那次结构校验
+    （违约抛 DefinitionContractError）；plan 形态或测试夹具可传 False。"""
     job = Job(
-        scope_id=d["scope_id"],
-        scope_name=d["scope_name"],
-        engine=d["engine"],
-        scenarios=tuple(_scenario_def_from_dict(sc) for sc in d.get("scenarios", [])),
-        assertion_votes=d.get("assertion_votes", 1),  # 向后兼容旧落盘（无此键 → 默认 1）
-        timeout_s=d.get("timeout_s"),  # 向后兼容：旧落盘无此键 → None，表示不超时（ADR 0034）
-        target=_target_from_dict(d.get("target")),
-        device_request=_device_request_from_dict(d.get("device_request")),
+        scope_id=_require(d, "scope_id", "job"),
+        scope_name=_require(d, "scope_name", "job"),
+        engine=_require(d, "engine", "job"),
+        scenarios=tuple(_scenario_def_from_dict(sc) for sc in _require(d, "scenarios", "job")),
+        assertion_votes=_require(d, "assertion_votes", "job"),
+        timeout_s=_require(d, "timeout_s", "job"),
+        target=_target_from_dict(_require(d, "target", "job")),
+        device_request=_device_request_from_dict(_require(d, "device_request", "job")),
     )
     if validate:
         from gherkai_core.target import validate_job_definition  # 读时校验（ADR 0048 决策 3）；延迟导入避免 model/serialize 环
@@ -134,11 +164,11 @@ def _target_to_dict(t: Target) -> dict:
     return out
 
 
-def _target_from_dict(d: dict | None) -> Target:
-    """缺键即桌面网页（旧落盘与桌面 job 的正常形态）。形态不对（不是对象、缺 device / ui_kind、应用条目缺别名或包名）按定义违约报，
-    不让 KeyError / TypeError 漏出去——读时校验承诺的是 DefinitionContractError（ADR 0048 决策 3）。"""
-    if d is None:
-        return Target()
+def _target_from_dict(d) -> Target:
+    """target 恒为对象（桌面网页也写 desktop/web，ADR 0048 决策 3 / 0037 决策 7）。形态不对（不是对象、缺 device / ui_kind、
+    应用条目缺别名或包名）按定义违约报，不让 KeyError / TypeError 漏出去——读时校验承诺的是 DefinitionContractError。"""
+    if not isinstance(d, dict):
+        raise _definition_error("target", d, TypeError("target 须为对象（桌面网页也写 desktop/web）"))
     try:
         app = d.get("app")
         app_ref = None
@@ -365,44 +395,42 @@ def from_dict(d: dict) -> RunResult:
 
 
 def run_meta_to_dict(meta: RunMeta) -> dict:
+    """RunMeta → dict（run_meta.json / DDB META 的 meta_json）。键集固定、不适用写 null（ADR 0037 决策 7）：
+    序列化层忠实往返、不替语义层把关（0 的 max_concurrency、空串的 steps_dir、空 dict 的 worker_task_defs 都原样落）。"""
     return {
+        "schema_version": DEFINITION_SCHEMA_VERSION,
+        "cli_version": meta.cli_version,  # 只记不比（ADR 0037 决策 7）
         "run_id": meta.run_id,
         "created_at": meta.created_at,
         "jobs": [job_to_dict(j) for j in meta.jobs],
-        # extra_http_headers（ADR 0035 决策 4）：落盘存 dict 形式（可读）、**键序在写端规范化**（sorted）——
-        # 规范化归写端、读端原样保序，from_dict 才是 to_dict 的忠实逆（读同一份落盘恒得同一个 tuple；
-        # 若改成读端 sorted、写端原样，落盘内容就随内存里的键序漂）。
-        # 判真而非 `is not None`：空表与 None 语义合一（都是「不注入额外头」）——省键即可，别落个 {} 让
-        # 读端再 falsy→None 地把 `()` 悄悄变形（往返不恒等）。omit 亦兼容旧落盘无此键。
-        **({"extra_http_headers": dict(sorted(meta.extra_http_headers))}
-           if meta.extra_http_headers else {}),
-        # max_concurrency（ADR 0034 机制四）omit-when-None：`is not None` 判而非判真——0 这类无意义值也须
-        # 忠实往返（不在序列化层悄悄变形成「缺失」，语义把关归组合根/推进器）。省键同时兼容旧落盘。
-        **({"max_concurrency": meta.max_concurrency} if meta.max_concurrency is not None else {}),
-        # steps_dir（ADR 0037 决策 4）omit-when-None，同 max_concurrency 的判据：`is not None`——空串这类
-        # 无意义值也忠实往返，语义把关归组合根（提交侧解析）。省键同时兼容旧落盘（读端 .get → None）。
-        **({"steps_dir": meta.steps_dir} if meta.steps_dir is not None else {}),
-        # worker_variant / worker_task_defs（ADR 0038）omit-when-None，同 steps_dir 的判据。两者成对出现但
-        # **各自独立 omit**：序列化层不替语义层做「有 A 必有 B」的把关（那是提交侧组合根的事），忠实往返优先。
-        **({"worker_variant": meta.worker_variant} if meta.worker_variant is not None else {}),
-        **({"worker_task_defs": dict(meta.worker_task_defs)}
-           if meta.worker_task_defs is not None else {}),
+        # extra_http_headers（ADR 0035 决策 4）：落盘存 dict 形式（可读）、**键序在写端规范化**（sorted）——规范化归写端、读端原样
+        # 保序，from_dict 才是 to_dict 的忠实逆。判真而非 `is not None`：空表与 None 语义合一（都是「不注入额外头」），一律写 null，
+        # 别落个 {} 让读端再把 `()` 悄悄变形（往返不恒等）。
+        "extra_http_headers": dict(sorted(meta.extra_http_headers)) if meta.extra_http_headers else None,
+        "max_concurrency": meta.max_concurrency,  # ADR 0034 机制四；None 表示提交侧没有给（推进器按各自口径回落）
+        "steps_dir": meta.steps_dir,  # ADR 0037 决策 4；None 表示无使用方 step（云端后端恒 None）
+        "worker_variant": meta.worker_variant,  # ADR 0038；本机后端 None。两者各自独立，序列化层不做「有 A 必有 B」的把关
+        "worker_task_defs": dict(meta.worker_task_defs) if meta.worker_task_defs is not None else None,
+        "session_warmup_url": meta.session_warmup_url,  # ADR 0051 决策 13；不经隧道为 None
     }
 
 
 def run_meta_from_dict(d: dict) -> RunMeta:
-    hdrs = d.get("extra_http_headers")
+    """dict → RunMeta。第一步核结构版本（不等于本读端支持的即抛 UnsupportedDefinitionSchema），其后每个键都必须在（缺键是定义违约）。"""
+    require_definition_schema(d)
+    hdrs = _require(d, "extra_http_headers", "run_meta")
+    wtd = _require(d, "worker_task_defs", "run_meta")
     return RunMeta(
-        run_id=d["run_id"],
-        created_at=d.get("created_at", ""),
-        jobs=tuple(job_from_dict(j) for j in d.get("jobs", [])),
-        # 原样保序（键序已由写端规范化）；键缺失/空 → None（旧落盘兼容 + 空表即无）
-        extra_http_headers=tuple(hdrs.items()) if hdrs else None,
-        max_concurrency=d.get("max_concurrency"),  # 键缺失 → None（旧落盘兼容）
-        steps_dir=d.get("steps_dir"),  # 键缺失 → None（旧落盘 / 云端后端不写此键，ADR 0037 决策 4）
-        worker_variant=d.get("worker_variant"),  # 键缺失 → None（旧落盘 / 本机后端，ADR 0038）
-        # dict 原样复制（键是 engine 名，值是 revision ARN）；键缺失 → None，宿主走默认指针兼容路径
-        worker_task_defs=(dict(wtd) if (wtd := d.get("worker_task_defs")) is not None else None),
+        run_id=_require(d, "run_id", "run_meta"),
+        created_at=_require(d, "created_at", "run_meta"),
+        jobs=tuple(job_from_dict(j) for j in _require(d, "jobs", "run_meta")),
+        extra_http_headers=tuple(hdrs.items()) if hdrs else None,  # 原样保序（键序已由写端规范化）；null 与空表都读回 None
+        max_concurrency=_require(d, "max_concurrency", "run_meta"),
+        steps_dir=_require(d, "steps_dir", "run_meta"),
+        worker_variant=_require(d, "worker_variant", "run_meta"),
+        worker_task_defs=dict(wtd) if wtd is not None else None,  # dict 原样复制（键是 engine 名，值是 revision ARN）
+        cli_version=_require(d, "cli_version", "run_meta"),
+        session_warmup_url=_require(d, "session_warmup_url", "run_meta"),
     )
 
 

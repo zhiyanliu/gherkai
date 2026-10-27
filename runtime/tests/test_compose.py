@@ -1608,3 +1608,25 @@ def test_resolve_cloud_target_config_layer_after_env_before_default(monkeypatch)
     t = compose.resolve_cloud_target(prefix="flag-", runs_table="flag-runs", bucket="flag-bucket",
                                      config_prefix="cfg-", config_runs_table="cfg-runs", config_bucket="cfg-bucket")
     assert (t.prefix, t.runs_table, t.bucket) == ("flag-", "flag-runs", "flag-bucket")
+
+
+# ---- 缺戳例外（ADR 0037 决策 7）：带设备目标或会话预热地址的 run 遇无戳后端即 block ----
+
+def test_skew_missing_stamp_blocks_when_run_requires_it():
+    verdict, msg = compose.check_version_skew(None, "1.5.0", requires_stamp=True)
+    assert verdict == compose.SKEW_BLOCK and "没有版本戳" in msg and "gherkai deploy" in msg
+    verdict, msg = compose.check_version_skew(None, "1.5.0", requires_stamp=False)
+    assert verdict == compose.SKEW_WARN
+    assert compose.check_version_skew("1.5.0", "1.5.0", requires_stamp=True) == (compose.SKEW_OK, "")  # 有戳照常比对
+
+
+def test_run_requires_backend_stamp_predicate():
+    from gherkai_core.model import Job, RunMeta, Scenario, Step, Target
+
+    scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
+    desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=300.0)
+    device = Job(scope_id="a", scope_name="a", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
+    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,))) is False
+    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop, device))) is True
+    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,),
+                                                      session_warmup_url="https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T")) is True

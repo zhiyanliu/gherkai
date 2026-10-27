@@ -30,6 +30,22 @@ class WorkerNetworkError(WorkerExitError):
         super().__init__(exit_code, message)
 
 
+class UnsupportedDefinitionSchema(ValueError):
+    """definition 的结构版本不是本读端认的那一个（ADR 0037 决策 7）。
+
+    读端只认当前一个结构版本：高于它表示写端更新（读端该升级），低于它或缺键表示写端更旧（用写出它的那个版本读，或重新提交）。
+    读端不为任何旧版本留分支或缺省，结构变化一律靶在这一个比较上。`found` / `supported` 供调用点写出两边的版本号，
+    `cli_version` 是写出这份 definition 的命令行工具版本（definition 自记、只记不比），有则用来点名「由哪个版本写出」。
+    """
+
+    def __init__(self, found: int, supported: int, *, cli_version: str | None = None) -> None:
+        by = f"（由 gherkai {cli_version} 写出）" if cli_version else ""
+        super().__init__(f"definition 的结构版本为 {found}，本读端只认 {supported}{by}")
+        self.found = found
+        self.supported = supported
+        self.cli_version = cli_version
+
+
 class DefinitionContractError(ValueError):
     """definition 的结构违约（ADR 0048 决策 3）：非桌面目标没有设备请求、应用条目不完整、设备请求字段不成对等。
     写 definition 之前（组合根）与推进器读 definition 时各核一次；plan 形态的 Job 不走它（那一形态本来就没有设备请求）。"""

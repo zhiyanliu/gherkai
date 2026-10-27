@@ -282,8 +282,8 @@ KEY_TOKEN = re.compile(r"^[a-z][a-z0-9_]*$")  # 形如 JSON 键：天然排除 f
 # 与下面的「非键」表分开，是为了不让人把真键登记成非键——那会把真正的漂移一起放过。
 PROSE_DOCUMENTED_KEYS = frozenset({
     # run_meta 那段散文（契约页「顶层 = RunResult + run_meta + artifacts」之后的 `run_meta`（definition）段）
-    "created_at", "format", "max_concurrency", "steps_dir", "worker_variant", "worker_task_defs", "extra_http_headers",
-    "session_warmup_url",
+    "created_at", "schema_version", "cli_version", "max_concurrency", "steps_dir", "worker_variant", "worker_task_defs",
+    "extra_http_headers", "session_warmup_url",
     # plan / run 的 `steps[].deterministic` 四态那段
     "conflict", "keyword_mismatch",
 })

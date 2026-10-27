@@ -46,6 +46,10 @@ def _fake_schedule_factory():
 
 
 # ---- fake boto3 句柄：记录关键调用，不连真 AWS ----
+# 云端 status / explain 读运行态之前先读 META 顶层的结构版本（ADR 0037 决策 7）：假 table 对 META 键给本版本的头
+_META_HEADER = {"Item": {"run_id": "r1", "item_type": "META", "schema_version": 1, "cli_version": "1.5.0"}}
+
+
 class _FakeTable:
     """假 DDB table 句柄：DynamoDBRunStore 吃它（put_item/update_item/get_item/load/meta.client.exceptions）。
 
@@ -569,6 +573,8 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
 
     class _PendingTable:
         def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
             return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {}}}
 
     class _NoKickerLambda:
@@ -998,6 +1004,8 @@ def test_status_does_not_resolve_variant(monkeypatch, capsys):
 
     class _DoneTable:
         def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
             return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
 
     monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _DoneTable())
@@ -1087,7 +1095,7 @@ def test_local_backend_ignores_worker_variant_with_one_note(tmp_path, monkeypatc
 
 
 def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, capsys):
-    """local run 的 definition 不带这两个字段（omit-when-None，本机后端不写，见 ADR 0038「选择进 definition」条）。"""
+    """local run 的 definition 里这两个字段为 null（键集固定；本机后端不写值，见 ADR 0038「选择进 definition」条）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -1097,7 +1105,7 @@ def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, cap
     meta_files = list(report_dir.glob("*/run_meta.json"))
     assert len(meta_files) == 1
     doc = json.loads(meta_files[0].read_text(encoding="utf-8"))
-    assert "worker_variant" not in doc and "worker_task_defs" not in doc
+    assert doc["worker_variant"] is None and doc["worker_task_defs"] is None
 
 
 def test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(tmp_path, monkeypatch, capsys):
@@ -1120,6 +1128,8 @@ def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
     落点按 --prefix 推理出的桶/表与 --report-dir 前缀拼——用户不用自己拼 S3 路径。"""
     class _PassedTable:
         def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
             return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {},
                              "ended_at": "2026-09-10T04:28:41+00:00"}}
 
@@ -1137,6 +1147,8 @@ def test_status_cloud_json_includes_artifact_locations(monkeypatch, capsys):
     """status --json 附加 artifacts（ADR 0041 决策三）：RunState 部分形状不变，多一个键给报告/判定明细/元信息位置。"""
     class _PassedTable:
         def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
             return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
 
     _patch_skew(monkeypatch)

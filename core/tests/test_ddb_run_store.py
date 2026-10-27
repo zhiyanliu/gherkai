@@ -200,3 +200,22 @@ def test_worker_task_def_arns_on_state_item(aws):
     DynamoDBRunStore(table).create_run(meta, state)
     item = table.get_item(Key={"run_id": "wk-none", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert ATTR not in item
+
+
+# ---- definition 结构版本摊成 META 顶层属性 + 轻量读头（ADR 0037 决策 7）----
+def test_meta_item_carries_schema_header_top_level_and_peek_reads_only_it(ddb_run_store):
+    import dataclasses
+
+    from gherkai_core.errors import UnsupportedDefinitionSchema
+    r = _sample_run("hdr")
+    ddb_run_store.save_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
+    assert ddb_run_store.peek_definition_header("hdr") == (1, "1.5.0")
+    assert ddb_run_store.peek_definition_header("nope") is None
+    raw = ddb_run_store._table.get_item(Key={"run_id": "hdr", "item_type": "META"})["Item"]
+    assert int(raw["schema_version"]) == 1 and raw["cli_version"] == "1.5.0"   # 顶层属性与 meta_json 同值
+    # 没有顶层属性的 META（早于结构版本号的写端）：读头得 (0, None)，整读按版本不符拒绝
+    ddb_run_store._table.put_item(Item={"run_id": "old", "item_type": "META",
+                                        "meta_json": '{"run_id": "old", "created_at": "", "jobs": []}'})
+    assert ddb_run_store.peek_definition_header("old") == (0, None)
+    with pytest.raises(UnsupportedDefinitionSchema):
+        ddb_run_store.load_run_meta("old")
