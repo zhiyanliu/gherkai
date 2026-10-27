@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { JOB_KEYS, JOB_SCHEMA_VERSION, JobSource } from "../lib/job-source.mjs";
+import { JOB_KEYS, PROTOCOL_SCHEMA_VERSION, JobSource } from "../lib/job-source.mjs";
 
 // 用一个 Readable 假冒 process.stdin（for await 可迭代），运行结束后恢复。
 async function withStdin<T>(content: string, fn: () => Promise<T>): Promise<T> {
@@ -37,7 +37,7 @@ test("Python 到 TS 的往返（ADR 0048 决策 3）：golden 三种形态的键
   // 键集固定（ADR 0024）：桌面 job 与设备 job 同一组键，无值为 null；每份 golden 的 schemaVersion 都是本 worker 认的值
   for (const job of Object.values(jobs)) {
     assert.deepEqual(Object.keys(job).sort(), [...JOB_KEYS.top].sort());
-    assert.equal(job.schemaVersion, JOB_SCHEMA_VERSION);
+    assert.equal(job.schemaVersion, PROTOCOL_SCHEMA_VERSION);
   }
   assert.equal(jobs["desktop"].timeoutS, null);
   assert.equal(jobs["desktop"].deviceRequest, null);

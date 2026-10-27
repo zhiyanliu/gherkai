@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from gherkai_worker_novaact import run_scope as rs
-from gherkai_worker_novaact.lib.precheck import JOB_SCHEMA_VERSION, precheck_job, precheck_schema, precheck_target, target_label
+from gherkai_worker_novaact.lib.precheck import PROTOCOL_SCHEMA_VERSION, precheck_job, precheck_schema, precheck_target, target_label
 
 DEVICE_TARGETS = [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000}]
 
@@ -20,15 +20,16 @@ def test_schema_version_is_checked_first_and_pinned_by_golden():
     import json
     from pathlib import Path
 
-    assert precheck_schema({"schemaVersion": JOB_SCHEMA_VERSION}) is None
+    assert precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION}) is None
     assert "缺失" in precheck_schema({}) and "同一版本" in precheck_schema({})
-    assert f"格式版本是 {JOB_SCHEMA_VERSION + 1}" in precheck_schema({"schemaVersion": JOB_SCHEMA_VERSION + 1})
-    bad = {"schemaVersion": JOB_SCHEMA_VERSION + 1, "target": {"device": "ios", "uiKind": "app"}}
+    assert f"格式版本是 {PROTOCOL_SCHEMA_VERSION + 1}" in precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1})
+    bad = {"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1, "target": {"device": "ios", "uiKind": "app"}}
     assert "格式版本" in precheck_job(bad, rs.WORKER_TARGETS)  # 版本先于目标
-    ok = {"schemaVersion": JOB_SCHEMA_VERSION, "target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}
+    ok = {"schemaVersion": PROTOCOL_SCHEMA_VERSION, "target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}
     assert precheck_job(ok, rs.WORKER_TARGETS) is None
     fixture = json.loads((Path(__file__).resolve().parents[3] / "engines" / "fixtures" / "job-lines.json").read_text(encoding="utf-8"))
-    assert {j["schemaVersion"] for j in fixture["jobs"].values()} == {JOB_SCHEMA_VERSION}
+    assert {j["schemaVersion"] for j in fixture["jobs"].values()} == {PROTOCOL_SCHEMA_VERSION}
+    assert rs._capabilities()["schema_version"] == PROTOCOL_SCHEMA_VERSION  # 能力自述写的是同一个协议版本
 
 
 def test_device_job_rejected_by_nova_with_product_message():

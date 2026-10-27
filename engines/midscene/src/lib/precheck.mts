@@ -3,7 +3,7 @@
 // max_session_s，都返回一句产品语言的原因；worker 据此发 scope_done{status: error, errorType: precheck_failed, message}、不发
 // scope_started、零会话费用退出（ADR 0051 决策 4 的执行前失败）。纯函数、不读 env、不建会话。job 行的键集固定（target 恒为对象、
 // 桌面也写 desktop/web），缺键不再当桌面：那是命令行工具与 worker 版本不一致的信号。对称 Nova 的 lib/precheck.py。
-import { JOB_SCHEMA_VERSION, type Job } from "./job-source.mjs";
+import { PROTOCOL_SCHEMA_VERSION, type Job } from "./job-source.mjs";
 
 export interface TargetEntry { device: string; ui_kinds: string[]; max_session_s?: number }
 
@@ -32,9 +32,9 @@ function spaced(label: string): string {
 /** job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；null 表示通过。 */
 export function precheckSchema(job: Partial<Pick<Job, "schemaVersion">>): string | null {
   const found = job.schemaVersion;
-  if (found !== JOB_SCHEMA_VERSION) {
+  if (found !== PROTOCOL_SCHEMA_VERSION) {
     const shown = found === undefined || found === null ? "缺失" : String(found);
-    return `这个 job 的格式版本是 ${shown}，这个 worker 认的是 ${JOB_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，` +
+    return `这个 job 的格式版本是 ${shown}，这个 worker 认的是 ${PROTOCOL_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，` +
       "请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。";
   }
   return null;

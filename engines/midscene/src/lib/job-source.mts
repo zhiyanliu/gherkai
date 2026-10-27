@@ -15,15 +15,16 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 // core 发来的 job 行（ADR 0024 输入形状与「job 行的结构版本与固定键集」；0048 决策 3 的目标与设备请求）。键集固定、无值为 null。
 // 字段清单 JOB_KEYS 由 job-source.test.mts 与 engines/fixtures/job-lines.json（Python 侧 job_to_json 的 golden）对照：任一侧加字段而
 // 另一侧没跟，测试就会变红。
-/** 本 worker 认的 job 行结构版本（与 core 的 wire.JOB_SCHEMA_VERSION 同值；golden 钉住）。 */
-export const JOB_SCHEMA_VERSION = 1;
+/** 本 worker 认的 worker↔core 协议版本（ADR 0024）：一个数、两个方向各带——能力自述写进 schema_version、job 行核 schemaVersion；与 core 的
+ *  wire.PROTOCOL_SCHEMA_VERSION 同值，由 golden 钉住。 */
+export const PROTOCOL_SCHEMA_VERSION = 1;
 export interface JobApp { alias: string; bucket: string | null; key: string | null; sha256: string | null; appId: string }
 export interface JobTargetShape { device: string; uiKind: string; app?: JobApp }
 export interface JobDeviceRequest {
   provider: string; deviceArn?: string; osVersion?: string; billingMethod: string; projectArn: string; acquireTimeoutS: number;
 }
 export interface Job {
-  schemaVersion: number;        // 建会话前先核它（precheck.mts），不等于 JOB_SCHEMA_VERSION 即版本不一致
+  schemaVersion: number;        // 建会话前先核它（precheck.mts），不等于 PROTOCOL_SCHEMA_VERSION 即版本不一致
   scope: { id: string; name: string };
   engine: string;
   scenarios: unknown[];

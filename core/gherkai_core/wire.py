@@ -72,9 +72,10 @@ def _scenario_to_json(sc: Scenario) -> dict:
     }
 
 
-# job 行的结构版本（ADR 0024「job 行的结构版本与固定键集」）：worker 在建会话前核它，不等于自己认的即 precheck_failed「版本不一致」；
-# 同一版本下 job 行的键集固定、无值写 null。与 definition 的 schema_version（serialize）是两份文档、各自编号；1.5 都是 1。
-JOB_SCHEMA_VERSION = 1
+# worker↔core 协议的版本（ADR 0024「协议版本与 job 行的固定键集」）：**一个数、两个方向各带**——能力自述的 `schema_version`（worker 到 core，
+# 由 compose 核）与 job 行的 `schemaVersion`（core 到 worker，由 worker 建会话前核）写的都是它，任一方向出现不兼容变化就一起加 1；
+# 读端不等于自己认的即按版本不一致处置、不留分支。与 definition 的 schema_version（serialize）是另一份文档、各自编号；1.5 都是 1。
+PROTOCOL_SCHEMA_VERSION = 1
 
 
 def job_to_json(job: Job) -> dict:
@@ -85,7 +86,7 @@ def job_to_json(job: Job) -> dict:
     字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
     """
     return {
-        "schemaVersion": JOB_SCHEMA_VERSION,
+        "schemaVersion": PROTOCOL_SCHEMA_VERSION,
         "scope": {"id": job.scope_id, "name": job.scope_name},
         "engine": job.engine,
         "scenarios": [_scenario_to_json(sc) for sc in job.scenarios],

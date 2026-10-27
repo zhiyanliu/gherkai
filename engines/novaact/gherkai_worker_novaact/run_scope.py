@@ -52,7 +52,7 @@ from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GR
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
 from gherkai_worker_novaact.lib.redact import redact_url_userinfo  # 隧道凭据脱敏（ADR 0035 决策 5）：截断前先脱敏
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
-from gherkai_worker_novaact.lib.precheck import precheck_job  # 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
+from gherkai_worker_novaact.lib.precheck import PROTOCOL_SCHEMA_VERSION, precheck_job  # 协议版本与建会话前的自检（ADR 0024、0049 决策 7）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
 # 确定性 step 注册表（ADR 0022）+ 内建的 step 脚手架（同在本包内）。
@@ -783,7 +783,6 @@ def _classify_act_error(e: BaseException) -> str:
     return "engine_error"  # 其余执行故障（含未细分的 ActError 子类）仍归 engine_error
 
 
-CAPABILITIES_SCHEMA_VERSION = 1  # 只在键语义变化时递增（ADR 0036「5.」）
 
 # 本 worker 支持的测试目标（ADR 0049 决策 1、9）：Nova Act SDK 只驱动 Playwright 浏览器，没有设备路径，故只有桌面网页；
 # 不带 max_session_s（浏览器会话不施加会话级上限，ADR 0049 决策 2）。**单一来源**：能力自述整条拷出，建会话前的自检
@@ -809,7 +808,7 @@ def _capabilities() -> dict[str, object]:
     spawn 一次，同一份自述同时给出「steps 加载成功 / 清单 / grace 下限 / 目标 / 模型」（ADR 0036「5.」）。
     """
     return {
-        "schema_version": CAPABILITIES_SCHEMA_VERSION,
+        "schema_version": PROTOCOL_SCHEMA_VERSION,  # 协议版本一个数、两个方向各带（ADR 0024）
         "engine": _evidence.ENGINE,  # 与 evidence 里报的引擎名同源，不另写字面量
         "min_grace_s": ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S,
         "targets": [{**t, "ui_kinds": list(t["ui_kinds"])} for t in WORKER_TARGETS],  # ADR 0049 决策 1（与 Midscene 侧同样整条拷出）

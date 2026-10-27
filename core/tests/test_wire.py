@@ -50,11 +50,11 @@ def test_job_to_json_shape():
 
 def test_job_to_json_key_set_is_fixed_and_carries_schema_version():
     """协议（ADR 0024「job 行的结构版本与固定键集」、0048 决策 3）：键集与 job 形态无关、恒为八键；无值写 null；schemaVersion 恒为 1。"""
-    from gherkai_core.wire import JOB_SCHEMA_VERSION
+    from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION
 
     fixed = {"schemaVersion", "scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
     d = job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=()))
-    assert set(d) == fixed and d["schemaVersion"] == JOB_SCHEMA_VERSION == 1
+    assert set(d) == fixed and d["schemaVersion"] == PROTOCOL_SCHEMA_VERSION == 1
     assert d["timeoutS"] is None and d["target"] == {"device": "desktop", "uiKind": "web"} and d["deviceRequest"] is None
     assert job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0))["timeoutS"] == 300.0
 

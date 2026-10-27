@@ -42,7 +42,7 @@
 
 - **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（设备会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
 - **会话预热支持键**：顶层加一个布尔键，语义为「该 worker 支持隧道会话预热」，键名由实现定；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
-- **为什么不升版**：[0036](./0036-deterministic-capability-discovery.md) 规定 `schema_version` 只在既有键的语义变化时递增。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变；顶层 `targets` 虽为必有键，但 1.5 是第一个带它的版本、1.5 之前的 worker 不在支持范围内，schema 1 的契约就是「必有 `targets`」，升版没有要区分的对象。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读缺 `targets` 的旧 worker 按版本不一致拒绝（决策 2）。
+- **为什么不升版**：`schema_version` 是 worker↔core 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），只在协议出现不兼容变化时递增。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变；顶层 `targets` 虽为必有键，但 1.5 是第一个带它的版本、1.5 之前的 worker 不在支持范围内，schema 1 的契约就是「必有 `targets`」，升版没有要区分的对象。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读缺 `targets` 的旧 worker 按版本不一致拒绝（决策 2）。
 - **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
 
@@ -113,7 +113,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 
 ## 被拒方案（护栏）
 
-- **升到 schema 2**：各键都是新增，1.5 之前的 worker 不在支持范围内，升版没有要区分的对象、只会迫使 CLI 维护两套解析分支；违反 [0036](./0036-deterministic-capability-discovery.md)「只在既有键语义变化时递增」的规则。缺 `targets` 的 worker 由契约校验按版本不一致拒绝，不需要版本号来识别。
+- **升到协议版本 2**：各键都是新增，1.5 之前的 worker 不在支持范围内，升版没有要区分的对象、只会迫使 CLI 维护两套解析分支；不符合「只在协议出现不兼容变化时递增」的规则。缺 `targets` 的 worker 由契约校验按版本不一致拒绝，不需要版本号来识别。
 - **`min_grace_s` 取各目标最大值或立即拆成按设备的对象**：按终结四阶段推导的设备收尾约 64 秒，仍低于 120 秒硬上限，拆分只增加协议面而不改变任何下限的结论；拆分的条件写在决策 5 的重议条件里。
 - **worker 只报交集后的 step 目标**：声明了但不受支持的句柄在所有视图中消失，测试开发得不到「这条句柄永远不会被调用」的信号（决策 3）。
 - **CLI 按引擎名硬编码目标支持表**（如「novaact 只有桌面」）：形成自述之外的第二事实源，worker 增减目标时 CLI 静默漂移；与 [0036](./0036-deterministic-capability-discovery.md) 拒绝外置清单文件同理。

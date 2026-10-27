@@ -51,7 +51,7 @@ from gherkai_runtime import names as _names  # noqa: E402
 # 注入的 NOVA_ACT_TIMEOUT_S 与那个目录的内容都不会变，而调用点按 job / 按引擎逐个问（run 里 N 个 job 同一引擎）。
 _CAPABILITIES_CACHE: dict[tuple[str, str | None], dict] = {}
 # 能力自述（`--capabilities`）的格式版本（ADR 0036「5.」）：两引擎 worker 各自报同一个数；只在键语义变时递增。
-CAPABILITIES_SCHEMA_VERSION = 1
+from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION  # 协议版本一个数、两个方向各带（ADR 0024）：能力自述的 schema_version 核它
 
 
 def engine_min_grace(engine_name: str) -> float:
@@ -526,10 +526,10 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"要问的是引擎 {engine} 的 worker，回答的却自称 {caps.get('engine')!r}"
             "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
         )
-    if caps.get("schema_version") != CAPABILITIES_SCHEMA_VERSION:
+    if caps.get("schema_version") != PROTOCOL_SCHEMA_VERSION:
         raise RuntimeError(
             f"引擎 {engine} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
-            f"{CAPABILITIES_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
+            f"{PROTOCOL_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
     raw = caps.get("min_grace_s")
     # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约意味着 worker 与 CLI 不同版本 / 自述实现错，

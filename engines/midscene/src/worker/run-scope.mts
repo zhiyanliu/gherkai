@@ -32,7 +32,7 @@ import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, modelFamily, getRegion }
 // （中断兜底提前上传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
 import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
-import { JobSource, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
+import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
 import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
@@ -83,9 +83,6 @@ export const BROWSER_CLOSE_BUDGET_MS = 3000;
 // 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改代码），本常量是
 // 编译期值、再标定要改这里重编。
 export const MIN_GRACE_MARGIN_MS = 7500;
-// 自述对象的 schema 版本（ADR 0036「5.」：只在既有键语义变化时递增；加键不递增）。
-const CAPABILITIES_SCHEMA_VERSION = 1;
-
 /** 本 worker 支持的测试目标（ADR 0049 决策 1）。1.5 的设备模块（Appium 经 Device Farm）落地前只声明桌面网页：提前声明
  *  android / ios 会让新 CLI 把设备 job 交给一个还不会驱动设备的 worker；设备条目连同从释放预算常量算出的 max_session_s
  *  随设备模块一起加。**单一来源**：能力自述报它，建会话前的自检（ADR 0049 决策 7）也核它。键是协议面的 snake_case
@@ -418,7 +415,7 @@ export async function main(): Promise<number> {
   // 就同时拿到「steps 加载成功 / 清单 / grace 下限 / 目标 / 模型」；targets 见 WORKER_TARGETS（ADR 0049 决策 1）。
   if (process.argv.includes("--capabilities")) {
     await writeStdoutFlushed(JSON.stringify({
-      schema_version: CAPABILITIES_SCHEMA_VERSION,
+      schema_version: PROTOCOL_SCHEMA_VERSION,  // 协议版本一个数、两个方向各带（ADR 0024）
       engine: ENGINE,  // 与 evidence 报的引擎名同源，不另写字面量
       min_grace_s: minGraceSeconds(),
       targets: WORKER_TARGETS.map((t) => ({ ...t, ui_kinds: [...t.ui_kinds] })),  // ADR 0049 决策 1

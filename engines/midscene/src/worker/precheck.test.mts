@@ -5,7 +5,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { precheckJob, precheckSchema, precheckTarget, targetLabel } from "../lib/precheck.mjs";
-import { JOB_SCHEMA_VERSION } from "../lib/job-source.mjs";
+import { PROTOCOL_SCHEMA_VERSION } from "../lib/job-source.mjs";
 import { WORKER_TARGETS } from "./run-scope.mjs";
 
 const DEVICE_TARGETS = [{ device: "desktop", ui_kinds: ["web"] }, { device: "android", ui_kinds: ["web", "app"], max_session_s: 8000 }];
@@ -18,14 +18,14 @@ test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、
 });
 
 test("job 行的结构版本先于目标核对（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝；本 worker 认的值与跨语言 golden 一致", () => {
-  assert.equal(precheckSchema({ schemaVersion: JOB_SCHEMA_VERSION }), null);
+  assert.equal(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION }), null);
   assert.ok(precheckSchema({})!.includes("缺失"));
-  assert.ok(precheckSchema({ schemaVersion: JOB_SCHEMA_VERSION + 1 })!.includes(`格式版本是 ${JOB_SCHEMA_VERSION + 1}`));
-  assert.ok(precheckJob({ schemaVersion: JOB_SCHEMA_VERSION + 1, target: { device: "ios", uiKind: "app" } }, WORKER_TARGETS)!.includes("格式版本"));
-  assert.equal(precheckJob({ schemaVersion: JOB_SCHEMA_VERSION, target: { device: "desktop", uiKind: "web" }, timeoutS: null }, WORKER_TARGETS), null);
+  assert.ok(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1 })!.includes(`格式版本是 ${PROTOCOL_SCHEMA_VERSION + 1}`));
+  assert.ok(precheckJob({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1, target: { device: "ios", uiKind: "app" } }, WORKER_TARGETS)!.includes("格式版本"));
+  assert.equal(precheckJob({ schemaVersion: PROTOCOL_SCHEMA_VERSION, target: { device: "desktop", uiKind: "web" }, timeoutS: null }, WORKER_TARGETS), null);
   const file = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/job-lines.json");
   const jobs = JSON.parse(fs.readFileSync(file, "utf-8")).jobs as Record<string, any>;
-  for (const job of Object.values(jobs)) assert.equal(job.schemaVersion, JOB_SCHEMA_VERSION);
+  for (const job of Object.values(jobs)) assert.equal(job.schemaVersion, PROTOCOL_SCHEMA_VERSION);
 });
 
 test("设备 job 被当前只声明桌面网页的 worker 拒绝，消息是产品语言", () => {

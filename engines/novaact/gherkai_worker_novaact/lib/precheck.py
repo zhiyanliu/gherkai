@@ -7,8 +7,9 @@
 """
 from __future__ import annotations
 
-# 本 worker 认的 job 行结构版本（与 core 的 wire.JOB_SCHEMA_VERSION 同值；由 engines/fixtures/job-lines.json 的 golden 钉住）
-JOB_SCHEMA_VERSION = 1
+# 本 worker 认的 worker↔core 协议版本（ADR 0024）：一个数、两个方向各带——能力自述写进 schema_version、job 行核 schemaVersion；
+# 与 core 的 wire.PROTOCOL_SCHEMA_VERSION 同值，由 engines/fixtures/job-lines.json 的 golden 钉住。
+PROTOCOL_SCHEMA_VERSION = 1
 
 _DEVICE_LABEL = {"desktop": "桌面", "android": "Android", "ios": "iOS"}
 _UI_KIND_LABEL = {"web": "网页", "app": "应用"}
@@ -41,9 +42,9 @@ def _num(v) -> str:
 def precheck_schema(job: dict) -> str | None:
     """job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；None 表示通过。"""
     found = job.get("schemaVersion")
-    if found != JOB_SCHEMA_VERSION:
+    if found != PROTOCOL_SCHEMA_VERSION:
         shown = "缺失" if found is None else str(found)
-        return (f"这个 job 的格式版本是 {shown}，这个 worker 认的是 {JOB_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，"
+        return (f"这个 job 的格式版本是 {shown}，这个 worker 认的是 {PROTOCOL_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，"
                 f"请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。")
     return None
 
