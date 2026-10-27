@@ -18,7 +18,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 
 **元数据**。`description` 一句话说这一步判什么，是 `gherkai list-deterministic` 清单「说明」列与 `gherkai plan` 命中标注里给用例作者看的那句说明；`example` 是用例作者会照抄进 feature 的完整 step 文本（含关键字）。**`example` 的措辞就是接口**：改它等于改所有用到它的 feature，定下来别轻易动。
 
-**handler**。签名见 `references/engines.md` 第 3 节。一条 step 可按句柄种类给多份实现：第二参从单个函数换成 `{ playwright, webdriver: [...] }`（Nova Act 用字典、字段名下划线）；每个 webdriver 条目用 `uiKinds`（web / app）与 `devices`（android / ios）声明适用范围，两个数组各自独立、覆盖全部组合，缺省为全部；要在网页上下文里读写的条目声明 `requires: ["web_context"]`（此时 `uiKinds` 只能是 `["web"]`）。Android 与 iOS 选择器不同就写两个条目，不在 handler 里按平台分支。两个条目覆盖同一个（设备, 界面类型）组合在注册时就被拒。命中的 step 在当前目标上没有实现时走 AI、不顺延到别的模式。Python 侧必须是同步函数，写成 `async def` 的那一步直接记 error。handler 只拿到上下文与具名组；命中确定性 step 的那一步带了 DataTable 或 DocString 就记 error，多行参数只给 AI 步用。同一 scope 的 scenario 串行共享一个浏览器会话，所以 handler 别假定页面是新鲜的、别在断言步里导航、别留下会改变后续 step 的状态（新开标签页、切换 frame 不复位）。
+**handler**。签名见 `references/engines.md` 第 3 节。一条 step 可按句柄种类给多份实现：第二参从单个函数换成 `{ playwright, webdriver: [...] }`（Nova Act 用字典、字段名下划线）；每个 webdriver 条目用 `uiKinds`（web / app）与 `devices`（android / ios）声明适用范围，两个数组各自独立、覆盖全部组合，缺省为全部；要在网页上下文里读写的条目声明 `requires: ["web_context"]`（此时 `uiKinds` 只能是 `["web"]`）。Android 与 iOS 选择器不同就写两个条目，不在 handler 里按平台分支。两个条目覆盖同一个（设备, 界面类型）组合在注册时就被拒。命中的 step 在当前目标上没有实现时走 AI、不顺延到别的模式。Python 侧必须是同步函数，写成 `async def` 的那一步直接记 error。handler 只拿到上下文与具名组；命中确定性 step、且在当前目标上有实现的那一步带了 DataTable 或 DocString 就记 error，多行参数只给 AI 步用（在当前目标上没有实现、改走 AI 的那一步，参数照常交给 AI）。同一 scope 的 scenario 串行共享一个浏览器会话，所以 handler 别假定页面是新鲜的、别在断言步里导航、别留下会改变后续 step 的状态（新开标签页、切换 frame 不复位）。
 
 **失败消息**。确定性 step 不产截图与模型思考，`gherkai explain` 里这一步只有一行原因。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。没有现场的失败消息在云端只剩「断言未过」四个字，人与 agent 都无从下手。
 

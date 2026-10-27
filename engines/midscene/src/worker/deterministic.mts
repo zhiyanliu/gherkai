@@ -159,8 +159,8 @@ function normalizeKeywords(pattern: string, keywords: readonly Keyword[] | undef
 function closedSet<T extends string>(pattern: string, field: string, values: readonly string[] | undefined,
                                       allowed: readonly T[], allowEmpty: boolean): readonly T[] {
   if (values === undefined) return allowEmpty ? [] : allowed;
-  if (!Array.isArray(values)) {
-    throw new Error(`deterministic(${JSON.stringify(pattern)}) 的 webdriver 条目 ${field} 不是数组`);
+  if (!Array.isArray(values)) {  // null 也走这里：显式空值不是缺省（与 Nova 侧一致，缺省只认缺键）
+    throw new Error(`deterministic(${JSON.stringify(pattern)}) 的 webdriver 条目 ${field} 不是数组（null 也不行：缺省就不要给这个字段）`);
   }
   if (values.length === 0 && !allowEmpty) {
     throw new Error(`deterministic(${JSON.stringify(pattern)}) 的 webdriver 条目 ${field} 不能为空：缺省（不给）即全部取值`);
@@ -411,4 +411,14 @@ export function matchBatch(items: MatchItem[]): MatchProbe[] {
 /** 清空注册表（仅供测试隔离用）。 */
 export function _clear(): void {
   REGISTRY.length = 0;
+}
+
+/** 注册表快照与还原（仅供测试隔离用）：用例临时注册条目后恢复原表，不清掉别的用例还要用的内建条目。 */
+export function _snapshot(): unknown[] {
+  return [...REGISTRY];
+}
+
+export function _restore(saved: unknown[]): void {
+  REGISTRY.length = 0;
+  REGISTRY.push(...(saved as Entry[]));
 }

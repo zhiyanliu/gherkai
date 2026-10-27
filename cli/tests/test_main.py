@@ -2369,3 +2369,32 @@ def test_complete_definition_entry_points_run_the_pre_write_check(capsys):
     assert "设备请求" in capsys.readouterr().err
     assert submission.complete_cloud_definition(args, None, submission.Prepared(jobs=[device], steps_dir=None), [device]) == 2
     assert "设备请求" in capsys.readouterr().err
+
+
+def test_plan_marks_hit_without_handle_on_scope_target_as_ai(tmp_path, monkeypatch, capsys):
+    """命中了确定性 step、但它在该 scope 的目标上没有实现（句柄声明与 worker 支持的交集不含该目标，ADR 0049 决策 3、6；0050 决策 1）：
+    plan 不标「确定性」、--json 里 deterministic 为 null、stderr 说明将由 AI 执行；同引擎里在该目标上有实现的 step 照常标注。"""
+    def fake_match(engine, items, steps_dir=None):
+        return [({"pattern": "设备专用", "description": "只有设备句柄"} if "设备专用" in it["text"]
+                 else {"pattern": "p", "description": "URL 断言"} if "页面地址" in it["text"] else None) for it in items]
+
+    def fake_caps(engine, *, steps_dir=None, **kw):
+        return {"schema_version": 1, "engine": engine, "min_grace_s": 0, "model_id": "m",
+                "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
+                "deterministic_steps": [
+                    {"pattern": "设备专用", "description": "只有设备句柄", "example": "e", "keywords": ["Given", "When", "Then"],
+                     "targets": [{"device": "android", "ui_kinds": ["app"]}]},
+                    {"pattern": "p", "description": "URL 断言", "example": "e", "keywords": ["Given", "When", "Then"],
+                     "targets": [{"device": "desktop", "ui_kinds": ["web"]}]}]}
+
+    monkeypatch.setattr(m.compose, "match_deterministic", fake_match)
+    monkeypatch.setattr(m.compose, "query_capabilities", fake_caps)
+    f = tmp_path / "d.feature"
+    f.write_text('Feature: d\n  Scenario: s\n    When 设备专用 x\n    Then 页面地址匹配 "x"\n', encoding="utf-8")
+    assert m.main(["plan", str(f)]) == 0
+    captured = capsys.readouterr()
+    assert "← 确定性: URL 断言" in captured.out and captured.out.count("← 确定性") == 1
+    assert "设备专用" in captured.err and "没有实现" in captured.err and "由 AI 执行" in captured.err
+    assert m.main(["plan", str(f), "--json"]) == 0
+    steps = json.loads(capsys.readouterr().out)["jobs"][0]["scenarios"][0]["steps"]
+    assert steps[0]["deterministic"] is None and steps[1]["deterministic"] == {"pattern": "p", "description": "URL 断言"}

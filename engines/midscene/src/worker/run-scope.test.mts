@@ -935,9 +935,10 @@ test("模型家族推不出 → worker 启动期即非零退出，连自述入�
   assert.equal(/[{[]/.test(out), false, `stdout 不该有 JSON 载荷：${out}`);
 });
 
-test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用任何 handler、走 AI 分支、不记 error（ADR 0050 决策 1；0049 决策 9）", async () => {
+test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用任何 handler、走 AI 分支、不记 error；带多行参数也照样交给 AI（ADR 0050 决策 1；0049 决策 9）", async () => {
   const { runStep } = await importMod();
-  const { deterministic, _clear, match } = await import("./deterministic.mjs");
+  const { deterministic, _snapshot, _restore, match } = await import("./deterministic.mjs");
+  const saved = _snapshot();  // 只还原本用例注册的条目，不清掉内建导航
   let called = 0;
   deterministic("设备专用 (?<x>.+)", { webdriver: { uiKinds: ["app"], devices: ["android"], handler: () => { called += 1; } } },
     { description: "测试：只有设备句柄", example: "When 设备专用 x" });
@@ -948,8 +949,15 @@ test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用�
     assert.deepEqual(calls, ["aiAct"]);  // 走了 AI
     assert.equal(called, 0);  // 没把 page 喂给 webdriver handler
     assert.equal(events().filter((e) => e.type === "step_done").at(-1).status, "passed");
+    // 多行参数的检查只对「当前目标上有句柄」的命中生效：没有句柄的命中走 AI，参数随指令一起交给 AI、不记「不接受多行参数」
+    const instructions: string[] = [];
+    const capturing = { aiAct: async (instr: string) => { instructions.push(instr); }, aiBoolean: async () => true } as any;
+    const withDoc = { ...step("When", "设备专用 y"), argument: { kind: "docString", content: "多行正文" } };
+    assert.equal(await runStep(capturing, fakePage, "sc:0", withDoc, 1, testSink), "passed");
+    assert.equal(instructions.length, 1);
+    assert.match(instructions[0], /多行正文/);
+    assert.equal(called, 0);
   } finally {
-    _clear();
-    await import("./deterministic.steps.mjs");  // 其它测试还要内建导航条目：清表后重新导入不会再注册（ESM 缓存），故只在本文件末尾放本用例
+    _restore(saved);
   }
 });

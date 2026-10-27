@@ -1,49 +1,514 @@
 {
-  "_comment": "确定性 step 多句柄注册面的跨语言对拍用例（ADR 0050 决策 1）。消费者：engines/midscene/src/worker/deterministic.test.mts 与 engines/novaact/tests/test_deterministic.py，两侧读同一个文件。valid：按 handlers 注册后 listRegistry / list_registry 推出的 targets 须逐字节相同（固定写出顺序：desktop → android → ios，web → app，无 requires 在前）。invalid：两侧都须在注册期失败，消息含 error_contains（取与字段名方言无关的片段）。条目字段用协议面的 snake_case（ui_kinds），TS 侧测试把 ui_kinds 映射成 uiKinds；<fn> 代入一个空函数，<not-a-function> 代入一个数字。",
+  "_comment": "确定性 step 多句柄注册面的跨语言对拍用例（ADR 0050 决策 1）。消费者：engines/midscene/src/worker/deterministic.test.mts 与 engines/novaact/tests/test_deterministic.py，两侧读同一个文件。valid：按 handlers 注册后 listRegistry / list_registry 推出的 targets 须逐字节相同（固定写出顺序：desktop → android → ios，web → app，无 requires 在前）。invalid：两侧都须在注册期失败，消息含 error_contains（取与字段名方言无关的片段）。条目字段用协议面的 snake_case（ui_kinds），TS 侧测试把 ui_kinds 映射成 uiKinds；<fn> 代入一个空函数，<not-a-function> 代入一个数字；JSON null 原样传入（显式空值不是缺省，两侧都拒）。",
   "valid": [
-    {"name": "单个函数等价于只有 playwright", "handlers": "<fn>",
-     "targets": [{"device": "desktop", "ui_kinds": ["web"]}]},
-    {"name": "字典里只有 playwright", "handlers": {"playwright": "<fn>"},
-     "targets": [{"device": "desktop", "ui_kinds": ["web"]}]},
-    {"name": "单个 webdriver 条目、字段全缺省 → 全部设备与界面类型", "handlers": {"webdriver": {"handler": "<fn>"}},
-     "targets": [{"device": "android", "ui_kinds": ["web", "app"]}, {"device": "ios", "ui_kinds": ["web", "app"]}]},
-    {"name": "书写顺序不影响输出（devices 与 ui_kinds 倒着写、webdriver 键在前）",
-     "handlers": {"webdriver": [{"ui_kinds": ["app", "web"], "devices": ["ios", "android"], "handler": "<fn>"}], "playwright": "<fn>"},
-     "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"]}, {"device": "ios", "ui_kinds": ["web", "app"]}]},
-    {"name": "requires 不同的条目拆开列、无前提在前",
-     "handlers": {"playwright": "<fn>", "webdriver": [
-       {"ui_kinds": ["web"], "requires": ["web_context"], "handler": "<fn>"},
-       {"ui_kinds": ["app"], "devices": ["android"], "handler": "<fn>"}]},
-     "targets": [{"device": "desktop", "ui_kinds": ["web"]},
-                 {"device": "android", "ui_kinds": ["app"]},
-                 {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]},
-                 {"device": "ios", "ui_kinds": ["web"], "requires": ["web_context"]}]},
-    {"name": "同一设备的两个条目（各一种界面类型）聚合成一条",
-     "handlers": {"webdriver": [{"ui_kinds": ["web"], "devices": ["android"], "handler": "<fn>"}, {"ui_kinds": ["app"], "devices": ["android"], "handler": "<fn>"}]},
-     "targets": [{"device": "android", "ui_kinds": ["web", "app"]}]},
-    {"name": "requires 空列表与缺省同义", "handlers": {"webdriver": [{"requires": [], "devices": ["ios"], "handler": "<fn>"}]},
-     "targets": [{"device": "ios", "ui_kinds": ["web", "app"]}]}
+    {
+      "name": "单个函数等价于只有 playwright",
+      "handlers": "<fn>",
+      "targets": [
+        {
+          "device": "desktop",
+          "ui_kinds": [
+            "web"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "字典里只有 playwright",
+      "handlers": {
+        "playwright": "<fn>"
+      },
+      "targets": [
+        {
+          "device": "desktop",
+          "ui_kinds": [
+            "web"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "单个 webdriver 条目、字段全缺省 → 全部设备与界面类型",
+      "handlers": {
+        "webdriver": {
+          "handler": "<fn>"
+        }
+      },
+      "targets": [
+        {
+          "device": "android",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        },
+        {
+          "device": "ios",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "书写顺序不影响输出（devices 与 ui_kinds 倒着写、webdriver 键在前）",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "app",
+              "web"
+            ],
+            "devices": [
+              "ios",
+              "android"
+            ],
+            "handler": "<fn>"
+          }
+        ],
+        "playwright": "<fn>"
+      },
+      "targets": [
+        {
+          "device": "desktop",
+          "ui_kinds": [
+            "web"
+          ]
+        },
+        {
+          "device": "android",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        },
+        {
+          "device": "ios",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "requires 不同的条目拆开列、无前提在前",
+      "handlers": {
+        "playwright": "<fn>",
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "requires": [
+              "web_context"
+            ],
+            "handler": "<fn>"
+          },
+          {
+            "ui_kinds": [
+              "app"
+            ],
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "device": "desktop",
+          "ui_kinds": [
+            "web"
+          ]
+        },
+        {
+          "device": "android",
+          "ui_kinds": [
+            "app"
+          ]
+        },
+        {
+          "device": "android",
+          "ui_kinds": [
+            "web"
+          ],
+          "requires": [
+            "web_context"
+          ]
+        },
+        {
+          "device": "ios",
+          "ui_kinds": [
+            "web"
+          ],
+          "requires": [
+            "web_context"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "同一设备的两个条目（各一种界面类型）聚合成一条",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          },
+          {
+            "ui_kinds": [
+              "app"
+            ],
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "device": "android",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "requires 空列表与缺省同义",
+      "handlers": {
+        "webdriver": [
+          {
+            "requires": [],
+            "devices": [
+              "ios"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "targets": [
+        {
+          "device": "ios",
+          "ui_kinds": [
+            "web",
+            "app"
+          ]
+        }
+      ]
+    }
   ],
   "invalid": [
-    {"name": "未知句柄种类", "handlers": {"puppeteer": "<fn>"}, "error_contains": "含未知句柄种类"},
-    {"name": "空 handlers", "handlers": {}, "error_contains": "没有任何句柄"},
-    {"name": "playwright 不是函数", "handlers": {"playwright": "<not-a-function>"}, "error_contains": "playwright 句柄不是函数"},
-    {"name": "webdriver 空列表", "handlers": {"webdriver": []}, "error_contains": "条目列表不能为空"},
-    {"name": "条目含未知字段", "handlers": {"webdriver": [{"platform": "android", "handler": "<fn>"}]}, "error_contains": "含未知字段"},
-    {"name": "条目缺 handler", "handlers": {"webdriver": [{"devices": ["android"]}]}, "error_contains": "缺 handler 或 handler 不是函数"},
-    {"name": "条目 handler 不是函数", "handlers": {"webdriver": [{"handler": "<not-a-function>"}]}, "error_contains": "缺 handler 或 handler 不是函数"},
-    {"name": "ui_kinds 未知取值", "handlers": {"webdriver": [{"ui_kinds": ["desktop"], "handler": "<fn>"}]}, "error_contains": "含未知取值"},
-    {"name": "devices 未知取值", "handlers": {"webdriver": [{"devices": ["desktop"], "handler": "<fn>"}]}, "error_contains": "含未知取值"},
-    {"name": "requires 未知取值", "handlers": {"webdriver": [{"ui_kinds": ["web"], "requires": ["gps"], "handler": "<fn>"}]}, "error_contains": "含未知取值"},
-    {"name": "ui_kinds 空列表", "handlers": {"webdriver": [{"ui_kinds": [], "handler": "<fn>"}]}, "error_contains": "不能为空：缺省"},
-    {"name": "devices 有重复", "handlers": {"webdriver": [{"devices": ["ios", "ios"], "handler": "<fn>"}]}, "error_contains": "有重复"},
-    {"name": "web_context 配 app", "handlers": {"webdriver": [{"ui_kinds": ["app"], "requires": ["web_context"], "handler": "<fn>"}]}, "error_contains": "必须恰为"},
-    {"name": "web_context 配缺省 ui_kinds", "handlers": {"webdriver": [{"requires": ["web_context"], "handler": "<fn>"}]}, "error_contains": "必须恰为"},
-    {"name": "两个条目覆盖同一组合（requires 相同）",
-     "handlers": {"webdriver": [{"ui_kinds": ["web"], "devices": ["android"], "handler": "<fn>"}, {"devices": ["android"], "handler": "<fn>"}]},
-     "error_contains": "覆盖同一个"},
-    {"name": "两个条目覆盖同一组合（requires 不同也拒：不是带前提加兜底）",
-     "handlers": {"webdriver": [{"ui_kinds": ["web"], "devices": ["android"], "requires": ["web_context"], "handler": "<fn>"}, {"ui_kinds": ["web"], "devices": ["android"], "handler": "<fn>"}]},
-     "error_contains": "覆盖同一个"}
+    {
+      "name": "未知句柄种类",
+      "handlers": {
+        "puppeteer": "<fn>"
+      },
+      "error_contains": "含未知句柄种类"
+    },
+    {
+      "name": "空 handlers",
+      "handlers": {},
+      "error_contains": "没有任何句柄"
+    },
+    {
+      "name": "playwright 不是函数",
+      "handlers": {
+        "playwright": "<not-a-function>"
+      },
+      "error_contains": "playwright 句柄不是函数"
+    },
+    {
+      "name": "webdriver 空列表",
+      "handlers": {
+        "webdriver": []
+      },
+      "error_contains": "条目列表不能为空"
+    },
+    {
+      "name": "条目含未知字段",
+      "handlers": {
+        "webdriver": [
+          {
+            "platform": "android",
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "含未知字段"
+    },
+    {
+      "name": "条目缺 handler",
+      "handlers": {
+        "webdriver": [
+          {
+            "devices": [
+              "android"
+            ]
+          }
+        ]
+      },
+      "error_contains": "缺 handler 或 handler 不是函数"
+    },
+    {
+      "name": "条目 handler 不是函数",
+      "handlers": {
+        "webdriver": [
+          {
+            "handler": "<not-a-function>"
+          }
+        ]
+      },
+      "error_contains": "缺 handler 或 handler 不是函数"
+    },
+    {
+      "name": "ui_kinds 未知取值",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "desktop"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "含未知取值"
+    },
+    {
+      "name": "devices 未知取值",
+      "handlers": {
+        "webdriver": [
+          {
+            "devices": [
+              "desktop"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "含未知取值"
+    },
+    {
+      "name": "requires 未知取值",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "requires": [
+              "gps"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "含未知取值"
+    },
+    {
+      "name": "ui_kinds 空列表",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "不能为空：缺省"
+    },
+    {
+      "name": "devices 有重复",
+      "handlers": {
+        "webdriver": [
+          {
+            "devices": [
+              "ios",
+              "ios"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "有重复"
+    },
+    {
+      "name": "web_context 配 app",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "app"
+            ],
+            "requires": [
+              "web_context"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "必须恰为"
+    },
+    {
+      "name": "web_context 配缺省 ui_kinds",
+      "handlers": {
+        "webdriver": [
+          {
+            "requires": [
+              "web_context"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "必须恰为"
+    },
+    {
+      "name": "两个条目覆盖同一组合（requires 相同）",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          },
+          {
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "覆盖同一个"
+    },
+    {
+      "name": "两个条目覆盖同一组合（requires 不同也拒：不是带前提加兜底）",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "devices": [
+              "android"
+            ],
+            "requires": [
+              "web_context"
+            ],
+            "handler": "<fn>"
+          },
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "devices": [
+              "android"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "覆盖同一个"
+    },
+    {
+      "name": "ui_kinds 显式 null 不是缺省",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": null,
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "缺省就不要给这个字段"
+    },
+    {
+      "name": "devices 显式 null 不是缺省",
+      "handlers": {
+        "webdriver": [
+          {
+            "devices": null,
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "缺省就不要给这个字段"
+    },
+    {
+      "name": "requires 显式 null 不是缺省",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "requires": null,
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "缺省就不要给这个字段"
+    },
+    {
+      "name": "devices 空列表",
+      "handlers": {
+        "webdriver": [
+          {
+            "devices": [],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "不能为空：缺省"
+    },
+    {
+      "name": "ui_kinds 有重复",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web",
+              "web"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "有重复"
+    },
+    {
+      "name": "requires 有重复",
+      "handlers": {
+        "webdriver": [
+          {
+            "ui_kinds": [
+              "web"
+            ],
+            "requires": [
+              "web_context",
+              "web_context"
+            ],
+            "handler": "<fn>"
+          }
+        ]
+      },
+      "error_contains": "有重复"
+    }
   ]
 }

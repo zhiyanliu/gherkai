@@ -33,5 +33,7 @@ export type {
   WebdriverCtx,          // webdriver handler 第一参的七个字段（ADR 0050 决策 2）
   WebdriverHandler,      // webdriver handler 签名
   WebdriverDevice,       // ctx.device：{ platform, osVersion, scale }
+  WebdriverApp,          // ctx.app：{ restart() }，只在应用目标上有值
+  UiKind, Device, Requirement,  // 条目字段的取值类型（web / app、android / ios、web_context），给辅助函数写注解时用
   DeterministicMeta,     // { description, example, keywords? }，前两者注册必填（ADR 0036），keywords 见 ADR 0050 决策 1
 } from "./worker/deterministic.mjs";

@@ -1170,26 +1170,49 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     ——那是使用方代码错误，降级成无标注等于静默把定制 step 换成 AI（ADR 0037 决策 4）。
     steps_dir 透传给 worker 自述入口，使标注反映使用方定制 step（ADR 0037 决策 4）。
     """
-    by_engine: dict[str, list[tuple[tuple, str]]] = {}
+    by_engine: dict[str, list[tuple[tuple, dict, object]]] = {}
     for j in jobs:
         for sc in j.scenarios:
             for st in sc.steps:
-                by_engine.setdefault(j.engine, []).append(((j.scope_id, sc.id, st.index), {"keyword": st.keyword, "text": st.text}))
+                by_engine.setdefault(j.engine, []).append(((j.scope_id, sc.id, st.index), {"keyword": st.keyword, "text": st.text}, j.target))
     dispatch: dict = {}
     ok_any = False
     for engine, items in by_engine.items():
         try:
-            probes = compose.match_deterministic(engine, [it for _, it in items], steps_dir=steps_dir)
+            probes = compose.match_deterministic(engine, [it for _, it, _t in items], steps_dir=steps_dir)
         except compose.WorkerSelfDescribeError:
             raise  # 使用方 steps 加载失败：不降级、由 _cmd_plan 以退出码 2 结束（ADR 0037 决策 4「提交侧同样前置」）
         except (ValueError, RuntimeError) as e:
             _progress(f"（标注降级）引擎 {engine} 的确定性命中查询失败，该引擎 step 无派发标注：{e}")
             continue
         ok_any = True
-        for (key, _), probe in zip(items, probes):
-            if probe:  # 只记命中/冲突/关键字不符（AI=None 不进表，渲染端缺失即不标）
-                dispatch[key] = probe
+        available = _available_step_targets(engine, steps_dir)
+        for (key, item, target), probe in zip(items, probes):
+            if not probe:  # AI=None 不进表，渲染端缺失即不标
+                continue
+            # 命中与目标无关（ADR 0050 决策 1），命中之后再看这条 step 在该 scope 的目标上有没有实现（声明与 worker 支持的交集，
+            # ADR 0049 决策 3、6）：没有即走 AI——不进表（--json 里 deterministic 为 null）、stderr 说明原因，不标「确定性」
+            avail = available.get(probe["pattern"]) if "pattern" in probe and available is not None else None
+            if avail is not None and not compose.target_supported(avail, target.device, target.ui_kind):
+                label = render.spaced(render.target_label(target.device, target.ui_kind))
+                _progress(f"提示：scope {key[0]!r} 的 step「{item['text']}」命中确定性 step「{probe.get('description', probe['pattern'])}」，"
+                          f"但这条 step 在{label}上没有实现，将由 AI 执行。")
+                continue
+            dispatch[key] = probe
     return dispatch if ok_any else None
+
+
+def _available_step_targets(engine: str, steps_dir: str | None) -> "dict[str, list] | None":
+    """plan 标注用：该引擎每条确定性 step 实际可用的目标（声明与 worker 支持目标的交集，ADR 0049 决策 3），按模式索引。
+    自述取不到时返回 None（标注退回「命中即标确定性」，目标核对那一步已另行警告）；自述非零退出原样抛、由 `_cmd_plan` 以退出码 2 结束。"""
+    try:
+        caps = compose.query_capabilities(engine, steps_dir=steps_dir)
+    except compose.WorkerSelfDescribeError:
+        raise
+    except (compose.WorkerNotFoundError, ValueError, RuntimeError):
+        return None
+    supported = compose.worker_targets(caps)
+    return {e["pattern"]: compose.available_targets(compose.step_targets(e), supported) for e in caps["deterministic_steps"]}
 
 
 def _setup_tunnel(args, jobs):

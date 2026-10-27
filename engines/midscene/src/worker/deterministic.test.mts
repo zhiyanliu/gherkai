@@ -188,6 +188,7 @@ test("单函数写法保持有效：targets 恰为 desktop/web，selectHandler(d
   assert.deepEqual(listRegistry()[0].targets, [{ device: "desktop", ui_kinds: ["web"] }]);
   const hit = match("单函数")!;
   assert.deepEqual(selectHandler(hit, { device: "desktop", uiKind: "web" }), { kind: "playwright", fn });
+  assert.equal(selectHandler(hit, { device: "desktop", uiKind: "app" }), null);  // 桌面只有网页：别的界面类型取不到 playwright 句柄
   assert.equal(selectHandler(hit, { device: "android", uiKind: "web" }), null);
 });
 

@@ -441,5 +441,11 @@ def test_hit_with_only_webdriver_handler_goes_to_ai_on_desktop(captured):
         assert rs._run_step(nova, "sc:0", _step("When", "设备专用 x"), 1, captured) == "passed"
         assert nova.calls[0][0] == "act" and called == []  # 走了 AI、没把 page 喂给 webdriver handler
         assert _done(captured)["status"] == "passed"
+        # 多行参数的检查只对「当前目标上有句柄」的命中生效：没有句柄的命中走 AI，参数随指令交给 AI、不记「不接受多行参数」
+        nova = _FakeNova(); captured.clear()
+        step = _step("When", "设备专用 y"); step["argument"] = {"kind": "dataTable", "rows": [["列甲", "列乙"]]}
+        assert rs._run_step(nova, "sc:0", step, 1, captured) == "passed"
+        assert nova.calls[0][0] == "act" and "列甲" in nova.calls[0][1] and called == []
+        assert _done(captured)["status"] == "passed"
     finally:
         _d._REGISTRY[:] = saved

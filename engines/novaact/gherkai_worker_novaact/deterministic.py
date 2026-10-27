@@ -17,7 +17,7 @@
 `deterministic(pattern, {"playwright": fn, "webdriver": [{"ui_kinds": [...], "devices": [...], "requires": [...], "handler": fn}]},
 description=..., example=...)`。每个 webdriver 条目用 ui_kinds（web / app）与 devices（android / ios）声明适用范围，两个列表
 各自独立、覆盖它们的全部组合，缺省为全部取值；requires（1.5 只有 web_context）是运行期前提。本引擎没有设备路径
-（ADR 0049 决策 9）：只写了 webdriver 句柄的 step 在本 worker 上永远走 AI，靶 targets 原样自述让测试开发看见。
+（ADR 0049 决策 9）：只写了 webdriver 句柄的 step 在本 worker 上永远走 AI，条目的 targets 原样自述、让测试开发看见。
 
 匹配与派发分两步（ADR 0050 决策 1「跨 step 的命中与目标无关」）：`match()` 只看文本命中哪条模式（多条即冲突），不看
 目标；`select_handler()` 再按当前目标在命中条目的句柄集合里取句柄，取不到即走 AI、**绝不顺延**到下一条能匹配的模式。
@@ -94,13 +94,16 @@ def _normalize_keywords(pattern: str, keywords: Iterable[str] | None) -> tuple[s
     return tuple(k for k in KEYWORDS if k in kws)  # 规范顺序，便于自述与跨语言对拍
 
 
+_MISSING = object()  # 条目字段缺键的哨兵：缺省只认缺键，显式 None 不是缺省（与 Midscene 侧对 null 的处置一致）
+
+
 def _closed_set(pattern: str, field: str, values, allowed: tuple[str, ...], allow_empty: bool) -> tuple[str, ...]:
-    """条目字段的封闭集合校验与归一（与 keywords 同一套规则）：未知取值、重复即抛；缺省展开为全集；按集合顺序排列。
-    allow_empty 只对 requires 为真（空列表与缺省同义：没有前提）。"""
-    if values is None:
+    """条目字段的封闭集合校验与归一（与 keywords 同一套规则）：未知取值、重复即抛；缺键展开为全集；按集合顺序排列。
+    allow_empty 只对 requires 为真（空列表与缺键同义：没有前提）。显式 None 不是缺省、按类型不对拒绝。"""
+    if values is _MISSING:
         return () if allow_empty else allowed
     if not isinstance(values, (list, tuple)):
-        raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目 {field} 不是列表")
+        raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目 {field} 不是列表（None 也不行：缺省就不要给这个字段）")
     vals = tuple(values)
     if not vals and not allow_empty:
         raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目 {field} 不能为空：缺省（不给）即全部取值")
@@ -145,9 +148,9 @@ def _normalize_handlers(pattern: str, handlers) -> Handles:
             raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目含未知字段 {unknown_fields!r}：只能是 {list(_ENTRY_FIELDS)}")
         if not callable(e.get("handler")):
             raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目缺 handler 或 handler 不是函数")
-        ui_kinds = _closed_set(pattern, "ui_kinds", e.get("ui_kinds"), UI_KINDS, False)
-        devices = _closed_set(pattern, "devices", e.get("devices"), DEVICES, False)
-        requires = _closed_set(pattern, "requires", e.get("requires"), REQUIREMENTS, True)
+        ui_kinds = _closed_set(pattern, "ui_kinds", e.get("ui_kinds", _MISSING), UI_KINDS, False)
+        devices = _closed_set(pattern, "devices", e.get("devices", _MISSING), DEVICES, False)
+        requires = _closed_set(pattern, "requires", e.get("requires", _MISSING), REQUIREMENTS, True)
         if "web_context" in requires and ui_kinds != ("web",):
             raise ValueError(f"deterministic({pattern!r}) 的 webdriver 条目声明了 requires web_context，ui_kinds 必须恰为 ['web']"
                              f"（应用目标固定原生上下文，前提没有定义）")
