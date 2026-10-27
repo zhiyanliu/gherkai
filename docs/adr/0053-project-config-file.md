@@ -77,7 +77,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
   > 这个 run 里有在 Android 设备上执行的 scope，但没有指定用哪台设备。请在 gherkai.toml 的 [devices.android] 里给出 arn 或 os-version，或用 --android-device-arn 指定。
 
 - **选项与环境变量**：`--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）、`--device-farm-project-arn`（`GHERKAI_DEVICE_FARM_PROJECT_ARN`）、`--app-bucket`（`GHERKAI_APP_BUCKET`），按决策 2 的顺序覆盖配置文件。按平台分开命名，是因为一个 run 可以同时含 Android 与 iOS 的 scope，单个 `--device-arn` 无法表达。筛选条件只在配置文件里给，命令行只接受 ARN。
-- **ARN 直接使用**：worker 以该 ARN 建立远程访问会话，不事先查可用性、不做静态过滤、不核对形态；该机型全部单元被占用时会话排队等待，与并发排队同处置，受获取预算约束；ARN 被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）。
+- **ARN 直接使用**：CLI 只核对 ARN 的服务与资源类型段（设备 ARN 形如 `arn:aws:devicefarm:<区域>::device:<id>`、项目 ARN 形如 `arn:aws:devicefarm:<区域>:<账号>:project:<id>`，零 AWS 调用；拦的是把项目 ARN 或设备池 ARN 贴进设备 ARN 这类最常见的错，提交前以退出码 2 结束并点名贴错的类型），之后 worker 以该 ARN 建立远程访问会话，不事先查可用性、不做静态过滤；该机型全部单元被占用时会话排队等待，与并发排队同处置，受获取预算约束；ARN 被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）。
 - **筛选条件由 worker 在获取设备时解析**（不是 CLI 在提交时解析）：设备可用性随时间变化，detached 提交可能在数分钟后才真正启动 worker，提交时解析出的 ARN 到那时可能已不可用。本篇只定用户面语义，解析算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3：
   - `os-version` 按点分段的族匹配——配置值按点切段，设备版本的前几段完全相等即命中（`18` 命中 `18.x.y`，`18.6` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`，`18.1` 不命中 `18.10`），写全段即精确匹配；只写前缀时 `plan` 提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」。
   - 只取手机形态与支持远程访问的设备；零候选不进入繁忙等待，记 `precheck_failed`（再列举一次的判据见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3），消息给出条件与最接近的可用版本。

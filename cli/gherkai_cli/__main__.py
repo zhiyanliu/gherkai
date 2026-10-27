@@ -30,6 +30,7 @@ from gherkai_runtime import compose
 from gherkai_runtime import names as _names
 
 from gherkai_cli import config as _config
+from gherkai_cli import device_selection as _devsel
 from gherkai_cli import deploy as _deploy
 from gherkai_cli import render
 from gherkai_cli import skill_install as _skill_install
@@ -180,6 +181,29 @@ def _config_layers(args) -> dict:
     vals = getattr(args, "config_values", {})
     return {**_identity_layers(args), "config_prefix": vals.get("prefix"),
             "config_runs_table": vals.get("ddb_table"), "config_bucket": vals.get("s3_bucket")}
+
+
+def _add_device_flags(p: argparse.ArgumentParser, *, project: bool) -> None:
+    """设备目标的选项（ADR 0053 决策 4）：按平台分开的设备 ARN（一个 run 可同时含 Android 与 iOS 的 scope）；run / submit 另收本机后端用的
+    Device Farm 项目 ARN 与应用桶。plan 只收两个设备 ARN——它们改变 plan 的标注；项目与应用桶对 plan 的输出没有作用、不收
+    （与 `--expose-local` 在 plan 上「仅作标注」同一先例）。按系统版本挑选只能在配置文件里给，命令行与环境变量只接受 ARN。"""
+    for platform in ("android", "ios"):
+        p.add_argument(
+            _devsel.PLATFORM_FLAG[platform], default=None, metavar="ARN",
+            help=f"{_devsel.platform_label(platform)} 的设备 scope 用哪台设备（Device Farm 设备 ARN）；优先于环境变量 "
+                 f"{_devsel.PLATFORM_ENV[platform]} 与配置文件 [devices.{platform}]。按系统版本挑选只能在配置文件里给",
+        )
+    if project:
+        p.add_argument(
+            _devsel.PROJECT_ARN_FLAG, default=None, metavar="ARN",
+            help=f"[本机后端] 远程访问会话所属的 Device Farm 项目 ARN；优先于环境变量 {_devsel.PROJECT_ARN_ENV} 与配置文件 [devices] "
+                 "project-arn。云端后端用部署时建立的项目，本项不生效",
+        )
+        p.add_argument(
+            _devsel.APP_BUCKET_FLAG, default=None, metavar="NAME",
+            help=f"[本机后端] 放安装包的 S3 桶；优先于环境变量 {_devsel.APP_BUCKET_ENV} 与配置文件 [devices] app-bucket。"
+                 "云端后端用产物桶，本项不生效",
+        )
 
 
 def _add_config_flag(p: argparse.ArgumentParser) -> None:
@@ -401,6 +425,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="跳过报告归集（CI 只看退出码/JSON、或调试时不想落盘）",
     )
     run.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
+    _add_device_flags(run, project=True)
     # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local 是文件落盘（默认）；cloud 是 DDB/S3。
     # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
     run.add_argument(
@@ -478,6 +503,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         "--steps-dir", default=None, metavar="DIR",
         help=_STEPS_DIR_HELP + "——用例预检的派发标注据此反映你自己的 step",
     )
+    _add_device_flags(pl, project=False)
     pl.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="仅作标注：plan 显示替换前的原始地址（plan 不起隧道、零副作用；公网 URL 只在实际运行时才有）",
@@ -519,6 +545,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="归集报告落点（默认 reports/）；云端后端须与后端部署的 REPORT_DIR 一致"
                          "（提交前会比对，不一致即以退出码 2 结束）")
     sm.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
+    _add_device_flags(sm, project=True)
     sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
     sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
@@ -1145,14 +1172,14 @@ def _target_rejections(jobs, caps: dict) -> list[str]:
 def _validate_definition(jobs) -> int | None:
     """写 definition 之前的结构校验（ADR 0048 决策 3 的第一处；第二处在推进器读 definition 时）。返回 2 或 None。
 
-    设备目标的 job 在组合根填入设备请求之前不完整，而填入它的途径是项目配置（ADR 0053，尚未接入）——这一种按产品语言单独拒绝
-    （说清为什么不能、怎么改），否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。其余 DefinitionContractError 只会由
-    plan 产出的畸形 job 触发（内部错误、不因使用方输入发生），按契约型异常原样转述（ADR 0039 例外条）。
+    应用目标的安装包位置要由上传那一步补齐（ADR 0051 决策 9，尚未接入）——这一种按产品语言单独拒绝（说清为什么不能、怎么改），
+    否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。其余 DefinitionContractError 只会由 plan 产出的畸形 job 或
+    组合根漏填触发（内部错误、不因使用方输入发生），按契约型异常原样转述（ADR 0039 例外条）。
     """
     for j in jobs:
-        if not j.target.is_desktop and j.device_request is None:
-            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能为它指定测试设备，"
-                      f"暂不能运行或提交。要先在桌面网页上执行，去掉这个 scope 的 @device 与 @app 标签。")
+        if j.target.app is not None and j.target.app.bucket is None:
+            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能上传安装包，"
+                      f"暂不能运行或提交。要先在网页上执行，去掉这个 scope 的 @app 标签。")
             return 2
         try:
             validate_job_definition(j)
@@ -1160,6 +1187,99 @@ def _validate_definition(jobs) -> int | None:
             _progress(f"scope {j.scope_id!r} 的运行定义不符合要求，拒绝写入：{e}")
             return 2
     return None
+
+
+def _device_selections(args, jobs) -> "dict | int":
+    """按 jobs 里出现的平台解析设备选择（选项 > 环境变量 > 配置文件，ADR 0053 决策 4）。ARN 形态不对以退出码 2 结束；
+    未指定的平台值为 None，由调用方按命令处置（run / submit 拒绝、plan 标注并警告）。纯本地、零 AWS。"""
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    out: dict = {}
+    for platform in sorted({j.target.device for j in jobs if not j.target.is_desktop}):
+        try:
+            out[platform] = _devsel.resolve_device_selection(
+                platform, flag_arn=getattr(args, f"{platform}_device_arn", None), env=os.environ, config=cfg)
+        except _devsel.DeviceSelectionError as e:
+            _progress(str(e))
+            return 2
+    return out
+
+
+def _require_device_selections(selections: dict) -> int | None:
+    """run / submit：有设备 scope 的平台没有任何来源指定设备，在提交前以退出码 2 结束（ADR 0053 决策 4「不自动挑设备」）。"""
+    missing = [p for p, sel in selections.items() if sel is None]
+    for platform in missing:
+        _progress(_devsel.unspecified_message(platform))
+    return 2 if missing else None
+
+
+def _local_project_arn(args, selections: dict) -> "str | int | None":
+    """本机后端的 Device Farm 项目 ARN（ADR 0053 决策 3）：没有设备 scope 返回 None；有则按选项 > 环境变量 > 配置文件取，缺失或形态不对
+    以退出码 2 结束。项目所属账号与当前凭证所属账号不一致只警告、不拦（两者都点名）；核对本身失败也只提示一句、继续。"""
+    if not selections:
+        return None
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    try:
+        arn, source = _devsel.resolve_local_project_arn(flag_arn=getattr(args, "device_farm_project_arn", None), env=os.environ, config=cfg)
+    except _devsel.DeviceSelectionError as e:
+        _progress(str(e))
+        return 2
+    region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+    try:
+        ident = compose.probe_aws_identity(region=region, profile=profile)
+    except Exception as e:  # 凭证不可用 / 未装 aws 依赖 / 网络：核对是辅助提示，不因它拦运行
+        _progress(f"未能核对 Device Farm 项目所属的账号（{e}），继续执行")
+        return arn
+    mine = ident.get("account")
+    if mine and mine != _devsel.account_of(arn):
+        _progress(f"注意：Device Farm 项目 {arn}（来自 {source}）属于账号 {_devsel.account_of(arn)}，当前凭证属于账号 {mine}，"
+                  "两者不一致——请确认用的是对的项目或凭证；继续执行")
+    return arn
+
+
+def _fill_device_requests(args, jobs, selections: dict, project_arn: str) -> list:
+    """把设备选择、项目 ARN、计费方式与获取预算合成每个设备 job 的具名设备请求（ADR 0048 决策 3）；桌面 job 原样。"""
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    acquire_s = _devsel.acquire_timeout_for(cfg)
+    out = []
+    for j in jobs:
+        if j.target.is_desktop:
+            out.append(j)
+            continue
+        request = _devsel.build_device_request(selections[j.target.device], project_arn=project_arn,
+                                               billing_method=_devsel.billing_method_for(j.target.device, cfg),
+                                               acquire_timeout_s=acquire_s)
+        out.append(replace(j, device_request=request))
+    return out
+
+
+def _cloud_device_requests(args, target, jobs) -> "list | int":
+    """云端后端的设备请求：项目 ARN 读部署写下的 SSM 参数（ADR 0051 决策 10、0048 决策 3），参数不在即「部署未启用设备支持」以退出码 2
+    结束；选项、环境变量与配置文件给的项目 ARN 在云端不生效、只提示一句（ADR 0053 决策 3）。**调用位置在版本 skew 闸与资源 preflight
+    之后**（读 SSM 是云端读，skew 先行；参数落在已授的 /{prefix}backend/* 内），之后由调用方做写前校验。没有设备 scope 时原样返回。"""
+    selections = getattr(args, "device_selections", {})
+    if not selections:
+        return list(jobs)
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    if getattr(args, "device_farm_project_arn", None) or os.environ.get(_devsel.PROJECT_ARN_ENV) \
+            or (cfg.devices is not None and cfg.devices.project_arn):
+        _progress(f"注：云端后端使用部署时建立的 Device Farm 项目，{_devsel.PROJECT_ARN_FLAG}、环境变量 {_devsel.PROJECT_ARN_ENV} 与"
+                  "配置文件里的 project-arn 不生效")
+    path = _names.ssm_path(target.prefix, _names.DEVICE_FARM_PROJECT_KEY)
+    try:
+        arn = compose.read_device_farm_project(prefix=target.prefix, region=target.region, profile=target.profile)
+    except ImportError as e:
+        _progress(f"--backend cloud 需要 boto3：{e}")
+        return 2
+    except Exception as e:
+        if compose.is_botocore_error(e):
+            _progress(f"--backend cloud 读取 Device Farm 项目参数失败（SSM 参数 {path}），请检查凭证、region 与权限：{e}")
+            return 2
+        raise
+    if arn is None:
+        _progress("部署未启用设备支持：这个后端部署时没有建立 Device Farm 项目（部署版本早于本功能，或部署方没有 Device Farm 权限）。"
+                  "请部署方用有 Device Farm 权限的凭证重新执行 gherkai deploy，再提交设备 scope。")
+        return 2
+    return _fill_device_requests(args, jobs, selections, arn)
 
 
 def _load_and_plan(args) -> "list | int":
@@ -1396,10 +1516,25 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
         miss = _preflight_worker_runtimes(jobs, steps_dir)
         if miss is not None:
             return miss
-    # 写 definition 之前的结构校验（两个后端都做；云端后端没有本机预检，设备目标在这里被拦住）
-    bad = _validate_definition(jobs)
+    # 设备选择（ADR 0053 决策 4）两个后端都在这里解析：纯本地、零 AWS；未指定设备在提交前以退出码 2 结束（不自动挑设备）。
+    selections = _device_selections(args, jobs)
+    if isinstance(selections, int):
+        return selections
+    bad = _require_device_selections(selections)
     if bad is not None:
         return bad
+    args.device_selections = selections
+    if args.backend != "cloud":
+        # 本机后端：项目 ARN 来自选项 / 环境变量 / 配置文件，设备请求在此填入，随后做写 definition 之前的结构校验（ADR 0048 决策 3）
+        project_arn = _local_project_arn(args, selections)
+        if isinstance(project_arn, int):
+            return project_arn
+        if project_arn is not None:
+            jobs = _fill_device_requests(args, jobs, selections, project_arn)
+        bad = _validate_definition(jobs)
+        if bad is not None:
+            return bad
+    # 云端后端：项目 ARN 读 SSM，放在版本 skew 闸与资源 preflight 之后（各云端分支调 _cloud_device_requests），那里再做写前校验
     return jobs, steps_dir
 
 
@@ -1453,6 +1588,14 @@ def _cmd_plan(args) -> int:
         for msg in rejections:
             _progress(msg)
         return 2
+    # 设备选择的标注（ADR 0053 决策 4）：原样展示各平台配置的 ARN 或筛选条件；未指定只标注并警告，退出码仍为 0（缺的是执行环境，
+    # 不是 feature 契约）；ARN 形态不对与其它配置错同样以退出码 2 结束。plan 不调用 Device Farm。
+    devices = _device_selections(args, jobs)
+    if isinstance(devices, int):
+        return devices
+    for platform, sel in devices.items():
+        if sel is None:
+            _progress(_devsel.unspecified_message(platform))
 
     # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
     # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
@@ -1466,9 +1609,9 @@ def _cmd_plan(args) -> int:
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）
     if args.json:
-        print(json.dumps(render.plan_to_dict(jobs, args.default_engine, dispatch), ensure_ascii=False, indent=2))
+        print(json.dumps(render.plan_to_dict(jobs, args.default_engine, dispatch, devices=devices), ensure_ascii=False, indent=2))
     else:
-        print(render.render_plan_text(jobs, args.default_engine, dispatch))
+        print(render.render_plan_text(jobs, args.default_engine, dispatch, devices=devices))
     if dispatch and any(p_ and "conflict" in p_ for p_ in dispatch.values()):
         # 「一条 step 最多命中一条模式」是注册表侧的硬约束（判据见 ADR 0022）；下面这句是产品面文案。
         _progress("⚠ 存在命中多条确定性模式的 step（见上标注）：实际执行时这些 step 将 error——"
@@ -1793,6 +1936,14 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     if isinstance(resolutions, int):
         return resolutions
     run_meta = replace(run_meta, **_worker_meta_fields(resolutions))
+    # 设备请求（项目 ARN 读 SSM）与写 definition 之前的结构校验（ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、落库之前
+    filled = _cloud_device_requests(args, target, run_meta.jobs)
+    if isinstance(filled, int):
+        return filled
+    run_meta = replace(run_meta, jobs=tuple(filled))
+    bad = _validate_definition(run_meta.jobs)
+    if bad is not None:
+        return bad
 
     # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读 SSM 网络、不碰 ECS（ADR 0034）：
     # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
@@ -2419,6 +2570,15 @@ def _cmd_run(args) -> int:
             return resolutions
         worker_meta = _worker_meta_fields(resolutions)
         run_meta = replace(run_meta, **worker_meta)  # 落进 definition（下面 persistence.begin 写它）
+        # 设备请求（项目 ARN 读 SSM）与写 definition 之前的结构校验（ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、begin 之前
+        filled = _cloud_device_requests(args, target, run_meta.jobs)
+        if isinstance(filled, int):
+            return filled
+        jobs = list(filled)
+        run_meta = replace(run_meta, jobs=tuple(filled))
+        bad = _validate_definition(run_meta.jobs)
+        if bad is not None:
+            return bad
         # network 解析（subnet/sg：--xxx 覆盖 or 读 SSM）——需 prefix + region/profile 都已定。
         try:
             network_config = compose.resolve_network(

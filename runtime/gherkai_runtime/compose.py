@@ -1211,6 +1211,17 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
     return _ssm_get(ssm, _names.ssm_path(prefix, _names.BACKEND_VERSION_KEY))  # 「不在 → None、其余照抛、空串视缺失」与 _ssm_get 同一份
 
 
+def read_device_farm_project(*, prefix: str, region=None, profile=None, ssm=None) -> str | None:
+    """读云端 Device Farm 项目 ARN 的 SSM 参数（`ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)`，deploy 找回或建立项目后写，ADR 0051 决策 10）。
+
+    `ParameterNotFound` → None：部署方没有 Device Farm 权限或部署版本早于本功能时参数不在，调用方翻成「部署未启用设备支持」以退出码 2
+    结束（ADR 0048 决策 3）；其余 botocore 异常照抛、由入口前端归到自己的退出码层。ssm client 可注入（测试）。
+    """
+    if ssm is None:
+        ssm = _make_ssm_client(region=region, profile=profile)
+    return _ssm_get(ssm, _names.ssm_path(prefix, _names.DEVICE_FARM_PROJECT_KEY))
+
+
 def _release_key(v: str) -> tuple[int, ...]:
     """PEP 440 版本的 release 段（`1.4.0.post3+sha` → `(1, 4, 0)`）。
 

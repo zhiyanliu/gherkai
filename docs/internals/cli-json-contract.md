@@ -92,6 +92,7 @@
 | `default_engine` | string | 未标 `@engine` 的 scope 使用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
 | `device_session_count` | int | 这次 run 将建立的设备会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
+| `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时 `{arn, source}`，按系统版本挑选时 `{os_version, source}`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
 `steps[].deterministic` 四态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`

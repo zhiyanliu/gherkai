@@ -328,3 +328,144 @@ def test_acquire_timeout_from_config_moves_device_default_and_floor(tmp_path, mo
     assert _plan_json([str(feat)], capsys)["jobs"][0]["timeout_s"] == 1800.0   # 900 + 900
     assert m.main(["plan", str(feat), "--default-job-timeout", "1000"]) == 2
     assert "下限 1080 秒" in capsys.readouterr().err                           # 900 + 180
+
+
+# ---- 设备选择与设备请求（ADR 0053 决策 4、ADR 0048 决策 3、ADR 0051 决策 2）----
+
+DEV_ARN = "arn:aws:devicefarm:us-west-2::device:D1"
+PROJECT_ARN = "arn:aws:devicefarm:us-west-2:111111111111:project:p-1"
+
+
+def _android_env(monkeypatch):
+    monkeypatch.setattr(compose, "query_capabilities", _android_caps)
+    monkeypatch.setattr(compose, "match_deterministic", _no_match)
+    monkeypatch.delenv("GHERKAI_ANDROID_DEVICE_ARN", raising=False)
+    monkeypatch.delenv("GHERKAI_DEVICE_FARM_PROJECT_ARN", raising=False)
+
+
+def test_device_flags_are_on_run_and_submit_and_only_device_arns_on_plan():
+    parser = m._build_parser()
+    for name in ("run", "submit"):
+        assert set(DEVICE) <= {s for a in m._subparser(parser, name)._actions for s in a.option_strings}
+    plan_flags = {s for a in m._subparser(parser, "plan")._actions for s in a.option_strings}
+    assert {"--android-device-arn", "--ios-device-arn"} <= plan_flags
+    assert not ({"--device-farm-project-arn", "--app-bucket"} & plan_flags)   # 对 plan 的输出没有作用、不收
+
+
+def test_device_selection_precedence_flag_env_config(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _toml(tmp_path, "[devices.android]\nos-version = '14'\n")
+    feat = _feature(tmp_path, DEVICE_FEATURE)
+    assert _plan_json([str(feat)], capsys)["devices"] == {"android": {"os_version": "14", "source": "配置文件 [devices.android] os-version"}}
+    monkeypatch.setenv("GHERKAI_ANDROID_DEVICE_ARN", DEV_ARN)
+    assert _plan_json([str(feat)], capsys)["devices"]["android"] == {"arn": DEV_ARN, "source": "环境变量 GHERKAI_ANDROID_DEVICE_ARN"}
+    flag_arn = "arn:aws:devicefarm:us-west-2::device:D2"
+    assert _plan_json([str(feat), "--android-device-arn", flag_arn], capsys)["devices"]["android"] == {"arn": flag_arn, "source": "--android-device-arn"}
+    assert m.main(["plan", str(feat), "--android-device-arn", flag_arn]) == 0
+    assert f"设备 android：{flag_arn}（来自 --android-device-arn）" in capsys.readouterr().out
+    monkeypatch.delenv("GHERKAI_ANDROID_DEVICE_ARN", raising=False)
+    assert m.main(["plan", str(feat)]) == 0
+    assert "按系统版本 14 挑选" in capsys.readouterr().out
+
+
+def test_unspecified_device_plan_warns_but_run_and_submit_exit_2_before_any_cloud_call(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    feat = _feature(tmp_path, DEVICE_FEATURE)
+    assert m.main(["plan", str(feat), "--json"]) == 0
+    cap = capsys.readouterr()
+    assert json.loads(cap.out)["devices"] == {"android": None} and "没有指定用哪台设备" in cap.err
+    assert m.main(["plan", str(feat)]) == 0
+    assert "设备 android：未指定" in capsys.readouterr().out
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--no-report"]) == 2
+    err = capsys.readouterr().err
+    assert "没有指定用哪台设备" in err and "[devices.android]" in err and "--android-device-arn" in err
+
+    def forbidden(*a, **k):
+        raise AssertionError("未指定设备应在提交前被拒，不该走到云端解析")
+
+    monkeypatch.setattr(compose, "resolve_cloud_target", forbidden)
+    assert m.main(["submit", str(feat), "--backend", "cloud"]) == 2
+    assert "没有指定用哪台设备" in capsys.readouterr().err
+
+
+def test_arn_type_segment_is_checked_and_names_the_pasted_kind(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    feat = _feature(tmp_path, DEVICE_FEATURE)
+    assert m.main(["plan", str(feat), "--android-device-arn", PROJECT_ARN]) == 2
+    err = capsys.readouterr().err
+    assert "项目 ARN、不是设备 ARN" in err and "--android-device-arn" in err
+    _toml(tmp_path, f"[devices.android]\narn = '{DEV_ARN}'\n[devices]\nproject-arn = '{DEV_ARN}'\n")
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--no-report"]) == 2
+    err = capsys.readouterr().err
+    assert "项目 ARN 形态不对" in err and "设备 ARN、不是项目 ARN" in err
+    assert m.main(["plan", str(feat), "--android-device-arn", "not-an-arn"]) == 2
+    assert "设备 ARN 形态不对" in capsys.readouterr().err
+
+
+def test_local_run_fills_device_request_and_only_warns_on_account_mismatch(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _toml(tmp_path, (f"[devices]\nproject-arn = '{PROJECT_ARN}'\nacquire-timeout-s = 900\nbilling-method = 'METERED'\n"
+                     f"[devices.android]\narn = '{DEV_ARN}'\nbilling-method = 'UNMETERED'\n"))
+    feat = _feature(tmp_path, DEVICE_FEATURE)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    reports = tmp_path / "r"
+    assert m.main(["run", str(feat), "--report-dir", str(reports)]) == 0
+    assert "不一致" not in capsys.readouterr().err
+    meta = json.loads(next(reports.glob("*/run_meta.json")).read_text(encoding="utf-8"))
+    assert meta["jobs"][0]["device_request"] == {"provider": "aws-device-farm", "billing_method": "UNMETERED", "project_arn": PROJECT_ARN,
+                                                 "acquire_timeout_s": 900.0, "device_arn": DEV_ARN}   # 平台子表的计费覆盖顶层；获取预算来自配置
+    assert meta["jobs"][0]["timeout_s"] == 1800.0   # 设备缺省墙钟是获取预算 900 秒加 900 秒
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "222222222222", "arn": "x", "region": "us-east-1"})
+    assert m.main(["run", str(feat), "--report-dir", str(tmp_path / "r2")]) == 0
+    err = capsys.readouterr().err
+    assert "111111111111" in err and "222222222222" in err and "不一致" in err   # 警告点名两个账号、不拦
+
+    def boom(**kw):
+        raise RuntimeError("no credentials")
+
+    monkeypatch.setattr(compose, "probe_aws_identity", boom)
+    assert m.main(["run", str(feat), "--report-dir", str(tmp_path / "r3")]) == 0
+    assert "未能核对" in capsys.readouterr().err
+
+
+def test_local_device_run_without_project_arn_exits_2(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _toml(tmp_path, f"[devices.android]\narn = '{DEV_ARN}'\n")
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_feature(tmp_path, DEVICE_FEATURE)), "--no-report"]) == 2
+    err = capsys.readouterr().err
+    assert "Device Farm 项目" in err and "project-arn" in err and "--device-farm-project-arn" in err
+
+
+def test_cloud_submit_reads_project_arn_from_ssm_after_preflight_and_rejects_when_absent(tmp_path, monkeypatch, capsys):
+    from test_backend_cloud import _definition, _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _toml(tmp_path, f"[devices]\nproject-arn = '{PROJECT_ARN}'\n[devices.android]\narn = '{DEV_ARN}'\n")
+    record: list = []
+    _, made, _ = _patch_cloud_handles(monkeypatch, record)
+    order: list = []
+    monkeypatch.setattr(compose, "preflight_cloud_resources", lambda **kw: (order.append("preflight"), None)[1])
+    monkeypatch.setattr(compose, "read_device_farm_project",
+                        lambda **kw: (order.append(("ssm", kw["prefix"])), "arn:aws:devicefarm:us-west-2:333333333333:project:cloud")[1])
+    feat = _feature(tmp_path, DEVICE_FEATURE)
+    assert m.main(["submit", str(feat), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-"]) == 0
+    err = capsys.readouterr().err
+    assert "project-arn 不生效" in err   # 配置文件里的项目 ARN 在云端不生效，只提示
+    assert order == ["preflight", ("ssm", "p-")]   # SSM 读在资源 preflight 之后
+    d = _definition(made["ddb_tables"][0])
+    assert d["jobs"][0]["device_request"]["project_arn"].endswith(":project:cloud") and d["jobs"][0]["device_request"]["device_arn"] == DEV_ARN
+    tables_before = len(made["ddb_tables"])
+    monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: None)
+    assert m.main(["submit", str(feat), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-"]) == 2
+    assert "部署未启用设备支持" in capsys.readouterr().err
+    assert len(made["ddb_tables"]) == tables_before   # 没落库

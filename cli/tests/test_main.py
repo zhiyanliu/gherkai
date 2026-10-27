@@ -295,7 +295,7 @@ def test_plan_json_app_entry_is_exactly_alias_and_app_id():
 
 @pytest.mark.parametrize("cmd", ["run", "submit"])
 def test_cloud_run_and_submit_reject_device_job_in_shared_prestep_before_touching_cloud(tmp_path, cmd, monkeypatch, capsys):
-    """写前校验接在 run / submit 的共享前置里：云端后端没有本机预检，设备 job 在这里以退出码 2 被拒、消息是产品语言，
+    """设备选择接在 run / submit 的共享前置里（ADR 0053 决策 4）：没有任何来源指定设备的设备 job 在这里以退出码 2 被拒、消息是产品语言，
     之后的云端解析一步都不走（删掉接线这条用例会撞到被禁的云端调用）。"""
     feat = tmp_path / "dev.feature"
     feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
@@ -307,7 +307,7 @@ def test_cloud_run_and_submit_reject_device_job_in_shared_prestep_before_touchin
     monkeypatch.setattr(m, "_cloud_skew_gate", forbidden)
     assert m.main([cmd, str(feat), "--backend", "cloud", "--prefix", "p-"]) == 2
     err = capsys.readouterr().err
-    assert "还不能为它指定测试设备" in err and "Android 网页" in err and "@device" in err
+    assert "没有指定用哪台设备" in err and "[devices.android]" in err and "--android-device-arn" in err
     assert "当且仅当" not in err and "设备请求" not in err
 
 

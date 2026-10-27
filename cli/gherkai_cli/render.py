@@ -203,21 +203,24 @@ def render_run_state(state: RunState) -> str:
 
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
-def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> str:
+def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None, devices: dict | None = None) -> str:
     """plan 产出的 Job[] → 人读的树形预检视图（job → scenario → step 及派发标注，不实际运行；结构见 plan_tree，ADR 0047）。
 
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
     自述。命中 → 行尾标「← 确定性:」；冲突或关键字不符 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
     """
-    return render_tree(plan_tree(jobs, default_engine, dispatch))
+    return render_tree(plan_tree(jobs, default_engine, dispatch, devices))
 
 
-def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> TreeNode:
-    """plan 视图的树（`render_plan_text` 的结构）。"""
+def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None, devices: dict | None = None) -> TreeNode:
+    """plan 视图的树（`render_plan_text` 的结构）。`devices`：平台 → 设备选择（None 即未指定），每个平台一行标注（ADR 0053 决策 4）。"""
+    from gherkai_cli.device_selection import selection_label
     n_scenarios = sum(len(j.scenarios) for j in jobs)
     # 远程访问会话数（ADR 0048 决策 5）：一个设备 scope 一个会话；plan 不写金额（单价随计费方式与区域变化），会话数是作者能直接控制的量
     root = TreeNode(f"plan（用例预检，未执行）  {len(jobs)} job(scope)  ·  {n_scenarios} scenario  ·  远程访问会话 {device_session_count(jobs)}"
                     f"  ·  default_engine={default_engine}")
+    for platform, sel in (devices or {}).items():
+        root.add(styled(selection_label(sel, platform), "yellow" if sel is None else "green"))
     for j in jobs:
         votes = f"  votes={j.assertion_votes}" if j.assertion_votes != 1 else ""
         # name 只在与 scope_id 不同时显示：named scope 二者同为 @scope 值（重复无信息）；未标 scope 时 id 是 uri:line、name 是标题
@@ -310,13 +313,15 @@ def device_session_count(jobs: list[Job]) -> int:
     return sum(1 for j in jobs if not j.target.is_desktop)
 
 
-def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = None) -> dict:
+def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = None, devices: dict | None = None) -> dict:
     """plan 产出 → 机器可读 dict（--json）。复用 gherkai_core.serialize 的 job 序列化保单一真理源。
 
     dispatch 非 None 时给每个 step dict 注入 "deterministic" 键（plan 视图字段、非 definition——
     值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]} / {"keyword_mismatch","keywords"}，ADR 0036）。
     """
     from gherkai_core.serialize import job_to_dict
+
+    from gherkai_cli.device_selection import selection_to_dict
     job_dicts = []
     for j in jobs:
         d = job_to_dict(j)
@@ -330,6 +335,8 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
         "job_count": len(jobs),
         "scenario_count": sum(len(j.scenarios) for j in jobs),
         "device_session_count": device_session_count(jobs),  # ADR 0048 决策 5
+        # 各平台的设备选择（ADR 0053 决策 4）：只列 jobs 里出现的平台；未指定为 null（run / submit 会拒绝）
+        "devices": {platform: selection_to_dict(sel) for platform, sel in (devices or {}).items()},
         "jobs": job_dicts,
     }
 
