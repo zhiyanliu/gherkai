@@ -272,6 +272,8 @@
 
 规模 L。
 
+**进度（2026-10-27）**：分五个子批提交：①配置模块与取值顺序、②设备请求解析与 plan 标注、③definition 格式版本与缺戳例外、④应用上传、⑤文档。① 已落地（code 一笔）：`cli/gherkai_cli/config.py` 做定位 / 读取 / 形态校验（[devices] 与 [apps] 类型化解析、[apps] 的 file 按配置文件目录绝对化、acquire-timeout-s 上界取 core 的 MAX_ACQUIRE_TIMEOUT_S）；七个命令加 `--config`；会被配置覆盖的六个选项（default-engine / assertion-votes / max-concurrency / report-dir / backend / tunnel）改 None 哨兵、内建默认在配置合成后补；`_apply_project_config` 三类去向——没有环境变量层的填进 args，有环境变量层的（prefix / ddb-table / s3-bucket / region / profile / steps-dir）只校验后存 `args.config_values`、经 compose 三个解析链与 steps-dir 链新加的 config_* 形参插在环境变量之后，[cloud] 整节只在云端后端生效；[common] / [cloud] 的接受键由 argparse 差集推出（按次选择型、云端专用、设备映射三份名单在 `__main__`，护栏 test_project_config 对照显式名单）；本机 submit 的 per-run 进程与 status --wait 接力改收解析后的 region / profile；doctor 多 config.file 行（契约页与 skill 副本同步）；PlanConfig 的 apps 与获取预算改由配置给出。与底稿的出入：events-table / cluster 没有环境变量层，配置值直接当选项值传、不另开 config 形参；设备专用的四个选项与 plan 的设备标注归 ②。pytest 整仓 2334 绿。
+
 
 **依赖**
 

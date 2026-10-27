@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `3321ff3a`
+- Built from commit: `8ee89096`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -405,8 +405,8 @@
   tools/e2e_harness.md → core/gherkai_core/scope.py
 - `render()` --references--> `docs/internals/cli-json-contract.md（机读字段级参考页）`  [EXTRACTED]
   tools/render_skill_contract.py → docs/adr/0045-documentation-layering-and-placement.md
-- `执行与推进模型导览（run/submit × local/cloud）` --references--> `run 执行图`  [AMBIGUOUS]
-  docs/internals/execution-and-reconciliation.md → docs/diagrams/run-execution.svg
+- `scenario 到 job 图` --conceptually_related_to--> `架构总览：五层结构、一次 run 的生命周期、包与发行物`  [AMBIGUOUS]
+  docs/diagrams/writing-features-scenario-to-job.svg → docs/internals/architecture-overview.md
 
 ## Import Cycles
 - None detected.
@@ -1380,14 +1380,14 @@ Nodes (20): _print_artifact_lines(), 产物落点三行（报告 / 运行元信�
 ## Ambiguous Edges - Review These
 - `终止契约（core 请求 worker 优雅停止）` → `step 顺序 = 书写顺序，keyword 只决定派发`  [AMBIGUOUS]
   docs/adr/0025-plan-module-feature-to-jobs.md · relation: references
-- `执行与推进模型导览（run/submit × local/cloud）` → `run 执行图`  [AMBIGUOUS]
-  docs/diagrams/run-execution.svg · relation: references
 - `五层职责切分（用例/产品/执行/浏览器/被测应用）` → `本机应用测试隧道拓扑图`  [AMBIGUOUS]
   docs/diagrams/local-app-testing-tunnel-topology.svg · relation: conceptually_related_to
 - `五层职责切分（用例/产品/执行/浏览器/被测应用）` → `README 运行时拓扑图`  [AMBIGUOUS]
   docs/diagrams/readme-runtime-topology.svg · relation: conceptually_related_to
 - `架构总览：五层结构、一次 run 的生命周期、包与发行物` → `scenario 到 job 图`  [AMBIGUOUS]
   docs/diagrams/writing-features-scenario-to-job.svg · relation: conceptually_related_to
+- `执行与推进模型导览（run/submit × local/cloud）` → `run 执行图`  [AMBIGUOUS]
+  docs/diagrams/run-execution.svg · relation: references
 - `Cloud Backend Upgrade Windows Diagram` → `Cloud Delivery Identity Diagram`  [AMBIGUOUS]
   docs/diagrams/cloud-backend-upgrade-windows.svg · relation: conceptually_related_to
 - `Cloud Delivery Identity Diagram` → `Execution Cloud Cascade Diagram`  [AMBIGUOUS]
@@ -1396,7 +1396,7 @@ Nodes (20): _print_artifact_lines(), 产物落点三行（报告 / 运行元信�
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **637 isolated node(s):** `StepArgument`, `Row`, `Job`, `JobApp`, `JobDeviceRequest` (+632 more)
+- **637 isolated node(s):** `0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）`, `1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）`, `2. B5-core-events-termination：core 侧会话事件、scope 级 error、合成 SKIPPED、终结函数与真值表、计量合计、explain 呈现`, `3. B2-core-target-job：测试目标与 Job 形态（core 侧 tag 归约、target 两形态、按目标的 timeout、plan 标注与目标拒绝、两个 worker 建会话前自检）`, `4. B3-config-submit：项目配置文件、组合根填 device_request、definition 格式版本、CLI 侧应用上传` (+632 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **139 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1405,14 +1405,14 @@ _Questions this graph is uniquely positioned to answer:_
 
 - **What is the exact relationship between `终止契约（core 请求 worker 优雅停止）` and `step 顺序 = 书写顺序，keyword 只决定派发`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
-- **What is the exact relationship between `执行与推进模型导览（run/submit × local/cloud）` and `run 执行图`?**
-  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `五层职责切分（用例/产品/执行/浏览器/被测应用）` and `本机应用测试隧道拓扑图`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `五层职责切分（用例/产品/执行/浏览器/被测应用）` and `README 运行时拓扑图`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `架构总览：五层结构、一次 run 的生命周期、包与发行物` and `scenario 到 job 图`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
+- **What is the exact relationship between `执行与推进模型导览（run/submit × local/cloud）` and `run 执行图`?**
+  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `Cloud Backend Upgrade Windows Diagram` and `Cloud Delivery Identity Diagram`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `Cloud Delivery Identity Diagram` and `Execution Cloud Cascade Diagram`?**
