@@ -50,6 +50,10 @@ from nova_act.types.workflow import set_current_workflow, get_current_workflow
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
 from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GRACE_MARGIN_S  # 共享常量（单一真理源）
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
+from gherkai_worker_novaact.lib import tunnel_warmup as _warmup
+from gherkai_worker_novaact.lib.constants import (
+    EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV,
+)
 from gherkai_worker_novaact.lib.redact import redact_secrets  # 隧道凭据脱敏（ADR 0035 决策 5）：截断前先脱敏
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
 from gherkai_worker_novaact.lib.precheck import PROTOCOL_SCHEMA_VERSION, precheck_job  # 协议版本与建会话前的自检（ADR 0024、0049 决策 7）
@@ -817,6 +821,7 @@ def _capabilities() -> dict[str, object]:
         "targets": [{**t, "ui_kinds": list(t["ui_kinds"])} for t in WORKER_TARGETS],  # ADR 0049 决策 1（与 Midscene 侧同样整条拷出）
         "deterministic_steps": _deterministic.list_registry(),  # 同一张注册表（ADR 0036「2.」真值单一）
         "model_id": MODEL_ID,  # 与下面 Workflow(model_id=...) 同一常量（ADR 0004「模型版本选择策略」）
+        SESSION_WARMUP_KEY: True,  # 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）：本机 --expose-local 的预检据此放行
     }
 
 
@@ -879,8 +884,17 @@ def main() -> int:
         return 0
     scope = job["scope"]
     scenarios = job["scenarios"]
+    # definition 完整性判据（ADR 0035「边界与不变量」；ADR 0051 决策 13）：隧道模式下额外请求头与会话预热地址成对下发——收到请求头却没有
+    # 预热地址，是旧后端丢字段的部署残缺（开发版本混搭），按执行前失败发 scope_done{precheck_failed}、不建会话、零会话费用。
+    warmup_url = os.environ.get(SESSION_WARMUP_URL_ENV) or None
+    if os.environ.get(EXTRA_HTTP_HEADERS_ENV) and not warmup_url:
+        log(f"worker: precheck failed — {INCOMPLETE_DEFINITION_MESSAGE}")
+        sink.emit({"type": "scope_done", "scopeId": scope["id"], "status": "error", "errorType": "precheck_failed",
+                   "message": INCOMPLETE_DEFINITION_MESSAGE})
+        return 0
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
+    warmup_failure: _warmup.WarmupFailure | None = None  # 会话预热的归因（ADR 0051 决策 13）：非 None 即不发 scope_started、经 scope_done 传递
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
@@ -895,7 +909,7 @@ def main() -> int:
         停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → `with NovaAct`/
         `with cdp_session` 正常退出触发 __exit__ 释放会话（ADR 0024 flag-only，不靠异常穿透）。
         """
-        nonlocal session_id, started
+        nonlocal session_id, started, warmup_failure
         if _stop.is_set():
             return  # 建连前已收到停止信号（含建连早期 SIGTERM——Workflow() 构造期到达，见 ADR 0024）→ 干净退、不建连
         provider = AgentCoreBrowserSessionProvider(region=REGION)
@@ -922,6 +936,14 @@ def main() -> int:
                     nova.page.context.set_extra_http_headers(json.loads(extra_headers))
                 # 取真实 AgentCore 会话 id（血缘，进 RunStore，ADR 0016/0024）。
                 session_id = nova.get_session_id()
+                # 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发
+                # scope_started、正常 return 让两层 with 释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
+                # 不进外层的建连重试域、不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。
+                if warmup_url:
+                    warmup_failure = _warmup.warmup_session(nova.page, warmup_url, log=log)
+                    if warmup_failure is not None:
+                        log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
+                        return
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
                 # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
@@ -986,6 +1008,11 @@ def main() -> int:
         log("worker: connect retries exhausted, exiting with network code")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（这条路径多半也传不动，有界即可）
         return EX_WORKER_NETWORK
+    if warmup_failure is not None:
+        # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在 _run_session 的 with 退出时释放；按执行前失败发 scope 级 error、以 0 退出。
+        sink.emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id, "status": "error",
+                   "errorType": warmup_failure.error_type, "message": warmup_failure.message})
+        return 0
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
     # kind=summary（引擎特有富信息载体、非人看报告，经不透明指针给 agent，ADR 0027）。SDK 把它落在

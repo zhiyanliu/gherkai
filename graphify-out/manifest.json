@@ -755,13 +755,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1793084674.8075736,
-    "ast_hash": "ebb420ed4a17b7e1f2812c21330d64a7",
+    "mtime": 1793087424.5494401,
+    "ast_hash": "f37d4aeec6552dba8a79e9f98561da6f",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
-    "mtime": 1793085108.349085,
-    "ast_hash": "b703aa784fa1451e59e229b8f2e4ed49",
+    "mtime": 1793087711.553038,
+    "ast_hash": "eecdf9bc2580598954087e61f128d259",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/user-steps.mts": {
@@ -810,9 +810,9 @@
     "semantic_hash": "66b8c31a3f0da77843b863c829478261"
   },
   "engines/novaact/gherkai_worker_novaact/lib/constants.py": {
-    "mtime": 1789873630.451019,
-    "ast_hash": "6ecde9c06916793f3ecff0c863f40922",
-    "semantic_hash": "6ecde9c06916793f3ecff0c863f40922"
+    "mtime": 1793087349.049376,
+    "ast_hash": "46b45df141cbec2d3b078315d1c2e915",
+    "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/event_sink.py": {
     "mtime": 1793086774.9863303,
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793086774.9857743,
-    "ast_hash": "3acb85f8a10f2b4609c2e5e723162ecd",
+    "mtime": 1793087349.0811877,
+    "ast_hash": "cd3a9ac8d54e572aa6a2d673db29bb56",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1295,8 +1295,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_capabilities.py": {
-    "mtime": 1792994630.4343803,
-    "ast_hash": "3c73d8a1c57ca49862367d24d19fee20",
+    "mtime": 1793087711.5525143,
+    "ast_hash": "5727e4860b292772fb81bc9c37422b07",
     "semantic_hash": ""
   },
   ".vscode/settings.json": {
@@ -2052,6 +2052,36 @@
   "engines/fixtures/deterministic-handles.json": {
     "mtime": 1793085108.349918,
     "ast_hash": "c1c0f90f21ce89810ead08dd046aa2b9",
+    "semantic_hash": ""
+  },
+  "engines/fixtures/redaction-cases.json": {
+    "mtime": 1793086774.987436,
+    "ast_hash": "e54513b26b308d61e527ba5158bfbada",
+    "semantic_hash": ""
+  },
+  "engines/fixtures/tunnel-warmup.json": {
+    "mtime": 1793086774.9875052,
+    "ast_hash": "0ea9f8e0e15ec4565041cfb068a9a444",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/lib/tunnel-warmup.mts": {
+    "mtime": 1793087575.8685765,
+    "ast_hash": "4bd0aa473ef0471e7ed6943c05c13a00",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/lib/tunnel-warmup.test.mts": {
+    "mtime": 1793087734.1461957,
+    "ast_hash": "ac1885f3aec4b9897befb7bab63dc548",
+    "semantic_hash": ""
+  },
+  "engines/novaact/gherkai_worker_novaact/lib/tunnel_warmup.py": {
+    "mtime": 1793087575.868491,
+    "ast_hash": "d232314d5c3c416bab6240f415a113d1",
+    "semantic_hash": ""
+  },
+  "engines/novaact/tests/test_tunnel_warmup.py": {
+    "mtime": 1793087620.4087381,
+    "ast_hash": "46739fe7247d392c77376c23b0fd3d48",
     "semantic_hash": ""
   }
 }

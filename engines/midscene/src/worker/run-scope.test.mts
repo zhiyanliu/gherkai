@@ -757,7 +757,7 @@ test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只�
 // 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该以退出码 0 结束。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
 // （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真实运行层）。
-test("--capabilities: 一个 JSON 对象即以退出码 0 结束；六键含 targets/deterministic_steps/model_id；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
+test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 targets/deterministic_steps/model_id/session_warmup；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
   const {
     INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
   } = await importMod();
@@ -776,11 +776,12 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；六键含 tar
   const raw = Buffer.concat(out).toString("utf-8");
   assert.equal(code, 0, `应以退出码 0 结束，stderr=${Buffer.concat(err).toString("utf-8")}`);
   const got = JSON.parse(raw);
-  // 键集恰为六个（ADR 0036「5.」、0049 决策 1）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
+  // 键集恰为七个（ADR 0036「5.」、0049 决策 1、0051 决策 13）：多一个键就意味着自述契约变了（组合根核 schema_version 的前提），少一个则
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
-    ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "targets"], `键集：${raw}`);
+    ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "session_warmup", "targets"], `键集：${raw}`);
   assert.equal(got.schema_version, 1);
+  assert.equal(got.session_warmup, true);  // 支持隧道会话预热（ADR 0051 决策 13）
   // 测试目标（ADR 0049 决策 1、2）：设备模块落地前只显式声明桌面网页，不带 max_session_s；键是协议面的 snake_case
   // （ui_kinds，不是注册面的 uiKinds），与 Nova 侧逐字相同——CLI 的契约校验对两侧同一道，驼峰会被判不合契约
   assert.deepEqual(got.targets, [{ device: "desktop", ui_kinds: ["web"] }], raw);

@@ -42,6 +42,7 @@ import { buildInstruction } from "./argument.mjs";
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
 import { errorText, oneLineError } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
+import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV, WarmupFailureError, warmupSession } from "../lib/tunnel-warmup.mjs";
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 
 const BROWSER_ID = "aws.browser.v1";
@@ -421,6 +422,7 @@ export async function main(): Promise<number> {
       targets: WORKER_TARGETS.map((t) => ({ ...t, ui_kinds: [...t.ui_kinds] })),  // ADR 0049 决策 1
       deterministic_steps: listRegistry(),
       model_id: MODEL,
+      [SESSION_WARMUP_KEY]: true,  // 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）：本机 --expose-local 的预检据此放行
     }) + "\n");
     return 0;
   }
@@ -450,6 +452,14 @@ export async function main(): Promise<number> {
     return 0;
   }
   const job = raw as Job;
+  // definition 完整性判据（ADR 0035「边界与不变量」；ADR 0051 决策 13）：隧道模式下额外请求头与会话预热地址成对下发——收到请求头却没有
+  // 预热地址，是旧后端丢字段的部署残缺（开发版本混搭），按执行前失败发 scope_done{precheck_failed}、不建会话、零会话费用。
+  const warmupUrl = process.env[SESSION_WARMUP_URL_ENV] || null;
+  if (process.env[EXTRA_HTTP_HEADERS_ENV] && !warmupUrl) {
+    log(`worker: precheck failed — ${INCOMPLETE_DEFINITION_MESSAGE}`);
+    await eventSink.emit({ type: "scope_done", scopeId: job.scope.id, status: "error", errorType: "precheck_failed", message: INCOMPLETE_DEFINITION_MESSAGE });
+    return 0;
+  }
   const scope = job.scope;
 
   const cp = new BedrockAgentCoreClient({ region: getRegion() });
@@ -618,6 +628,17 @@ export async function main(): Promise<number> {
     const { page, agent } = conn!;
     agentRef = agent;  // 上提给 SIGTERM/SIGINT handler（中断兜底提前上传 agent.reportFile，ADR 0029）
 
+    // 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发 scope_started、
+    // 以 WarmupFailureError 穿出本 try（cleanup 释放会话照常），catch 里按归因发 scope_done；预热自己吞掉导航异常、不进建连重试域、
+    // 不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。设备目标的预热随设备模块落在它自己的路径里。
+    if (warmupUrl) {
+      const failure = await warmupSession(page, warmupUrl, { log });
+      if (failure !== null) {
+        log(`worker: tunnel warmup failed — ${failure.errorType}: ${failure.message}`);
+        throw new WarmupFailureError(failure);
+      }
+    }
+
     // sessionId 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时 scope_done 不会 emit，
     // 但血缘已先随首事件落到 core（ADR 0028 观测缺口修复，对称 Nova）。
     await eventSink.emit({ type: "scope_started", scopeId: scope.id, sessionId });  // 三级时长起点（越过此点不再重试建连）
@@ -677,6 +698,12 @@ export async function main(): Promise<number> {
     // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
     // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
     await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false);
+    if (e instanceof WarmupFailureError && !cleanupFailed) {
+      // 会话预热失败（ADR 0051 决策 13、决策 4）：会话已释放；按执行前失败发 scope 级 error、以 0 退出（不是 worker fatal、不是退出码 80）。
+      await eventSink.emit({ type: "scope_done", scopeId: scope.id, sessionId: sessionId ?? null, status: "error",
+        errorType: e.failure.errorType, message: e.failure.message });
+      return 0;
+    }
     // 建连重试耗尽（网络瞬时故障）→ 以网络故障退出码退出（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
     if (networkExhausted && !cleanupFailed) {
       log("worker: connect retries exhausted, exiting with network code");

@@ -43,7 +43,8 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     out = proc.stdout.decode("utf-8")
     assert len(out.strip().splitlines()) == 1, out  # stdout 只此一个 JSON 对象（消费侧整段 json.loads）
     caps = json.loads(out)
-    assert set(caps) == {"schema_version", "engine", "min_grace_s", "targets", "deterministic_steps", "model_id"}, caps
+    assert set(caps) == {"schema_version", "engine", "min_grace_s", "targets", "deterministic_steps", "model_id", "session_warmup"}, caps
+    assert caps["session_warmup"] is True  # 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）
     assert caps["schema_version"] == 1  # 只加键不改既有键语义 → 版本不递增（ADR 0036「5.」；0049 决策 1 增键不升版）
     # 测试目标（ADR 0049 决策 1、2、9）：显式写出、只有桌面网页、不带 max_session_s（浏览器会话不施加会话级上限）；
     # 键是协议面的 snake_case，与 Midscene 侧逐字相同（CLI 的契约校验对两侧同一道）

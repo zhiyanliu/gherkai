@@ -42,3 +42,27 @@ WORKFLOW_DEF = "gherkai-worker"
 # （上传本体在队列线程内执行、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
 # client 超时 ≈10s，实际运行中量过。）env 可覆盖（再标定/调优）。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
+
+# ---- 隧道「令牌换 cookie」的会话预热（ADR 0051 决策 13；ADR 0035「边界与不变量」）----
+# 常量与组合根（runtime/gherkai_runtime/tunnel.py）同值，由 engines/fixtures/tunnel-warmup.json 对拍；worker 只读预热地址、不感知令牌与 cookie 的值。
+SESSION_WARMUP_URL_ENV = "GHERKAI_SESSION_WARMUP_URL"
+EXTRA_HTTP_HEADERS_ENV = "GHERKAI_EXTRA_HTTP_HEADERS"
+SESSION_WARMUP_KEY = "session_warmup"  # 能力自述里的布尔键（ADR 0049 决策 1）
+WARMUP_PATH = "/.well-known/gherkai-tunnel-auth"
+CHECK_PATH = "/.well-known/gherkai-tunnel-check"
+TOKEN_PARAM = "gherkai_tunnel_token"
+COOKIE_NAME = "__Host-gherkai_tunnel"
+# 预热页面的四种可见结果：桌面 worker 读 document.title；正文标记给设备 worker 在控件树里找
+WARMUP_TITLES = {"ready": "gherkai-tunnel-ready", "denied": "gherkai-tunnel-denied", "error": "gherkai-tunnel-error",
+                 "auth_required": "gherkai-tunnel-auth-required"}
+WARMUP_MARKERS = {"ready": "GHERKAI TUNNEL READY", "denied": "GHERKAI TUNNEL DENIED", "error": "GHERKAI TUNNEL ERROR",
+                  "auth_required": "GHERKAI TUNNEL AUTH REQUIRED"}
+# 预热的预算：一次导航的上限、等标记的上限、原地重导航的次数（ERROR 或无标记才重试；拒绝是确定性的、不重试）
+WARMUP_NAV_TIMEOUT_MS = 30_000
+WARMUP_MARKER_WAIT_S = 10.0
+WARMUP_ATTEMPTS = 3
+# 产品语言的三句（两个 worker 逐字相同；ADR 0039）
+INCOMPLETE_DEFINITION_MESSAGE = "后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署后再提交"
+WARMUP_DENIED_MESSAGE = ("隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；"
+                         "请重新提交这次运行")
+WARMUP_ERROR_MESSAGE = "隧道会话预热未能确认就绪（已重试 {attempts} 次）：{reason}——隧道可能已拆除或本机应用不可达；请确认隧道仍在后重新提交"
