@@ -280,6 +280,35 @@ def test_validate_definition_rejects_plan_form_device_job_before_writing():
     assert m._validate_definition([desktop, device]) == 2
 
 
+def test_plan_json_app_entry_is_exactly_alias_and_app_id():
+    """plan 形态的应用条目只有别名与包名两键（位置三项由组合根在提交时填入，ADR 0048 决策 3）。"""
+    from gherkai_core.model import AppRef, Job, Scenario, Step, Target
+
+    scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=1500.0,
+              target=Target(device="android", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.shop")))
+    doc = m.render.plan_to_dict([job], "midscene", None)
+    assert doc["jobs"][0]["target"] == {"device": "android", "ui_kind": "app", "app": {"alias": "shop", "app_id": "com.example.shop"}}
+
+
+@pytest.mark.parametrize("cmd", ["run", "submit"])
+def test_cloud_run_and_submit_reject_device_job_in_shared_prestep_before_touching_cloud(tmp_path, cmd, monkeypatch, capsys):
+    """写前校验接在 run / submit 的共享前置里：云端后端没有本机预检，设备 job 在这里以退出码 2 被拒、消息是产品语言，
+    之后的云端解析一步都不走（删掉接线这条用例会撞到被禁的云端调用）。"""
+    feat = tmp_path / "dev.feature"
+    feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
+
+    def forbidden(*a, **k):
+        raise AssertionError("设备 job 应在写前校验被拒，不该走到云端解析")
+
+    monkeypatch.setattr(compose, "resolve_cloud_target", forbidden)
+    monkeypatch.setattr(m, "_cloud_skew_gate", forbidden)
+    assert m.main([cmd, str(feat), "--backend", "cloud", "--prefix", "p-"]) == 2
+    err = capsys.readouterr().err
+    assert "还不能为它指定测试设备" in err and "Android 网页" in err and "@device" in err
+    assert "当且仅当" not in err and "设备请求" not in err
+
+
 def test_device_target_rejected_by_plan_and_preflight_when_engine_lacks_target(tmp_path, monkeypatch, capsys):
     """ADR 0048 决策 4：假 worker 自述只有桌面网页，标了 @device:android 的 scope 在 plan 与 run 的执行前预检都以退出码 2 结束、消息给出改法；
     不建立任何会话（run 不该走到 schedule）。"""

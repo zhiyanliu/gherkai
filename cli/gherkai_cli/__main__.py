@@ -974,13 +974,22 @@ def _target_rejections(jobs, caps: dict) -> list[str]:
 
 
 def _validate_definition(jobs) -> int | None:
-    """写 definition 之前的结构校验（ADR 0048 决策 3 的第一处；第二处在推进器读 definition 时）。plan 形态的设备 job（组合根尚未填入
-    设备请求）在这里被拒，否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。返回 2 或 None。"""
+    """写 definition 之前的结构校验（ADR 0048 决策 3 的第一处；第二处在推进器读 definition 时）。返回 2 或 None。
+
+    设备目标的 job 在组合根填入设备请求之前不完整，而填入它的途径是项目配置（ADR 0053，尚未接入）——这一种按产品语言单独拒绝
+    （说清为什么不能、怎么改），否则写出的 definition 会到推进器读时才被拒、而提交已经显示成功。其余 DefinitionContractError 只会由
+    plan 产出的畸形 job 触发（内部错误、不因使用方输入发生），按契约型异常原样转述（ADR 0039 例外条）。
+    """
     for j in jobs:
+        if not j.target.is_desktop and j.device_request is None:
+            _progress(f"scope {j.scope_id!r} 要在{render.target_label(j.target.device, j.target.ui_kind)}上执行，但这个版本还不能为它指定测试设备"
+                      f"（设备所在的 Device Farm 项目等信息要由项目配置文件提供，配置文件的读取尚未接入），暂不能运行或提交。"
+                      f"要先在桌面网页上执行，去掉这个 scope 的 @device 与 @app 标签。")
+            return 2
         try:
             validate_job_definition(j)
         except DefinitionContractError as e:
-            _progress(f"scope {j.scope_id!r} 的运行定义不完整，拒绝写入：{e}。设备目标的设备请求要等项目配置接入后才会由本工具填入。")
+            _progress(f"scope {j.scope_id!r} 的运行定义不符合要求，拒绝写入：{e}")
             return 2
     return None
 
@@ -1263,8 +1272,8 @@ def _cmd_plan(args) -> int:
             _progress(f"引擎 {engine} 的 worker 自述失败，plan 拒绝出结果：{e}\n{_SELF_DESCRIBE_CAUSES}")
             return 2
         except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
-            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对——本机后端由执行前预检拒绝，"
-                      f"云端由 worker 在建会话前自检拒绝：{e}")
+            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对——不受支持的目标仍会在执行前被拒绝："
+                      f"本机后端由执行前预检拒绝，云端最迟由 worker 在建会话前自检拒绝：{e}")
             continue
         rejections.extend(_target_rejections([j for j in jobs if j.engine == engine], caps))
     if rejections:

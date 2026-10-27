@@ -243,6 +243,25 @@ def test_device_timeout_below_floor_errors(text, cfg):
     assert "还没开始执行就会被判超时" in str(ei.value)
 
 
+def test_device_timeout_below_floor_advice_follows_the_other_source():
+    """低于下限的改法要按删掉 tag 后真正接替的来源给：--default-job-timeout 也低于下限时不能只说「删 tag 走缺省」（删了仍被它拒）。"""
+    tagged = 'Feature: F\n  @scope:d @device:android @timeout:779\n  Scenario: a\n    When "x"\n'
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=300.0))
+    msg = str(ei.value)
+    assert "来自 @timeout:779" in msg and "--default-job-timeout 调到至少 780 秒" in msg and "300 秒同样低于下限" in msg
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=900.0))
+    assert "改由 --default-job-timeout 900 秒接替" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg())
+    assert "让设备 scope 走缺省（1500 秒）" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(DEVICE_SCOPE, cfg=_cfg(default_job_timeout_s=300.0))
+    msg = str(ei.value)
+    assert "来自 --default-job-timeout 300" in msg and "调到至少 780 秒或不给它" in msg and "@timeout:780" in msg
+
+
 def test_device_default_itself_is_not_checked_against_floor():
     # 目标缺省自身不过下限校验（构造 default_device < min 的 config 验证不抛）
     [job] = _plan(DEVICE_SCOPE, cfg=_cfg(default_device_job_timeout_s=100.0, min_device_job_timeout_s=780.0))
@@ -354,8 +373,9 @@ def test_timeout_invalid_values_error():
     # 非数字 / 非正数都拒（「标了 tag 但想不超时」不成立——删 tag 走缺省）
     with pytest.raises(FeatureContractError, match="不是数字"):
         _plan('Feature: F\n  @scope:x @timeout:abc\n  Scenario: a\n    When "x"\n')
-    with pytest.raises(FeatureContractError, match="正数"):
+    with pytest.raises(FeatureContractError, match="正数") as ei:
         _plan('Feature: F\n  @scope:x @timeout:0\n  Scenario: a\n    When "x"\n')
+    assert "--default-job-timeout（给了的话）" in str(ei.value) and "桌面 300 秒、设备 1500 秒" in str(ei.value)  # 删 tag 后谁接替说全
 
 
 @pytest.mark.parametrize("raw", ["nan", "inf", "1e400"])  # 1e400 溢出成 inf

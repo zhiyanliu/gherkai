@@ -186,8 +186,9 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
             raise FeatureContractError(f"scope {scope_id!r} 的 @timeout:{raw} 不是数字：须为正数秒。") from None
         if not math.isfinite(n) or n <= 0:
             raise FeatureContractError(
-                f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒；要走缺省预算就删掉这个 tag"
-                f"（桌面 scope 可用 --default-job-timeout 0 关闭超时，设备 scope 不能关闭）。"
+                f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒。要走缺省预算就删掉这个 tag：删掉后由 --default-job-timeout（给了的话）"
+                f"或目标缺省接替（桌面 {config.default_desktop_job_timeout_s:g} 秒、设备 {config.default_device_job_timeout_s:g} 秒）；"
+                f"桌面 scope 可用 --default-job-timeout 0 关闭超时，设备 scope 不能关闭。"
             )
         source = f"@timeout:{raw}"
     else:
@@ -201,10 +202,24 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
         n = explicit
         source = f"--default-job-timeout {explicit:g}"
     if is_device and n < config.min_device_job_timeout_s:
+        floor, fallback = config.min_device_job_timeout_s, config.default_device_job_timeout_s
+        if raws:
+            # 改法要看删掉 tag 后真正接替的是谁：显式 --default-job-timeout 也低于下限时「删 tag」走不通，须一并调它
+            explicit = config.default_job_timeout_s
+            if explicit is not None and math.isfinite(explicit) and 0 < explicit < floor:
+                alt = (f"或去掉这个 tag 并把 --default-job-timeout 调到至少 {floor:g} 秒或不给它（设备 scope 走缺省 {fallback:g} 秒；"
+                       f"现在给的 {explicit:g} 秒同样低于下限）")
+            elif explicit is not None and math.isfinite(explicit) and explicit >= floor:
+                alt = f"或去掉这个 tag、改由 --default-job-timeout {explicit:g} 秒接替"
+            else:
+                alt = f"或去掉这个 tag、让设备 scope 走缺省（{fallback:g} 秒）"
+            fix = f"请把 @timeout 调到至少 {floor:g} 秒，{alt}。"
+        else:
+            fix = (f"请把 --default-job-timeout 调到至少 {floor:g} 秒或不给它（设备 scope 走缺省 {fallback:g} 秒）；"
+                   f"只想改这个 scope 就在它的场景上标 @timeout:{floor:g} 或更大。")
         raise FeatureContractError(
-            f"scope {scope_id!r} 的 job 墙钟预算 {n:g} 秒（来自 {source}）低于设备目标的下限 {config.min_device_job_timeout_s:g} 秒："
-            f"获取设备就可能用掉大部分预算，还没开始执行就会被判超时。请把它调到至少 {config.min_device_job_timeout_s:g} 秒，"
-            f"或去掉这个显式预算、让设备 scope 走缺省（{config.default_device_job_timeout_s:g} 秒）。"
+            f"scope {scope_id!r} 的 job 墙钟预算 {n:g} 秒（来自 {source}）低于设备目标的下限 {floor:g} 秒："
+            f"获取设备就可能用掉大部分预算，还没开始执行就会被判超时。{fix}"
         )
     return n
 
