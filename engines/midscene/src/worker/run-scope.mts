@@ -637,6 +637,7 @@ export async function main(): Promise<number> {
         log(`worker: tunnel warmup failed — ${failure.errorType}: ${failure.message}`);
         throw new WarmupFailureError(failure);
       }
+      log("worker: tunnel warmup ready");  // 就绪也留一行：真实执行的核对与排障都要看得见预热发生过
     }
 
     // sessionId 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时 scope_done 不会 emit，

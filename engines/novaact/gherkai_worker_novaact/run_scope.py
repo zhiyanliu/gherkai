@@ -944,6 +944,7 @@ def main() -> int:
                     if warmup_failure is not None:
                         log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
                         return
+                    log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过
                 # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
                 # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
