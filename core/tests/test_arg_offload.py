@@ -211,9 +211,11 @@ def test_restore_translates_argument_and_pointer_shape_errors_into_contract_erro
     bad_arg = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": 1}]}]}]}
     with pytest.raises(DefinitionContractError):
         off.restore(bad_arg, "r")
-    bad_ref = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": {"kind": "docString", "content_ref": True}}]}]}]}
-    with pytest.raises(DefinitionContractError):
-        off.restore(bad_ref, "r")
+    for arg in ({"kind": "docString", "content_ref": True}, {"kind": "docString", "content_ref": ""},
+                {"kind": "dataTable", "rows_ref": 1}, {"kind": "dataTable", "rows_ref": ""}):  # 两种指针、非文本与空串都拦
+        bad_ref = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": arg}]}]}]}
+        with pytest.raises(DefinitionContractError):
+            off.restore(bad_ref, "r")
     # 消费方自己的失败不翻译：句柄装配错（不是 S3 client）原样抛 AttributeError
     good = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}
     with pytest.raises(AttributeError):

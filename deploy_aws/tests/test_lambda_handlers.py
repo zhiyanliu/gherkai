@@ -847,6 +847,10 @@ def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_
     assert "缺键 target" in capsys.readouterr().out
     s_old = _Store(exc=UnsupportedDefinitionSchema(0, 1, cli_version="1.4.9"))
     assert reconciler._load_definition(s_old, "r", "t") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
+    # 写端版本来自提交记录、不受信：损坏成超长文本也不能把 message 撑大（ADR 0037 决策 7「有界」）
+    s_long = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="v" * 5000))
+    reconciler._load_definition(s_long, "r", "t")
+    assert len(s_long.message) < 300 and "v" * 41 not in s_long.message and "v" * 40 in s_long.message
     s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
     assert reconciler._load_definition(s3, "r", "t") is None and s3.finalized == [("r", Status.ERROR)]
     assert "worker 镜像版本" in s3.message
