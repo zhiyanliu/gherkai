@@ -486,6 +486,7 @@ def _caps_json(engine: str = "novaact", min_grace_s=150, steps: str = "[]",
     """一份合契约的自述对象（五个键，ADR 0036「5.」）；模型 id 不给就按引擎取该引擎真实会自报的那个。"""
     model_id = model_id or ("nova-act-v1.0" if engine == "novaact" else "qwen.qwen3-vl-235b-a22b")
     return (f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {min_grace_s}, '
+            f'"targets": [{{"device": "desktop", "ui_kinds": ["web"]}}], '
             f'"deterministic_steps": {steps}, "model_id": "{model_id}"}}').encode()
 
 
@@ -497,7 +498,7 @@ def _fake_caps_proc(payload: bytes, returncode: int = 0, stderr: bytes = b""):
 
 
 def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """整份自述对象原样返回（五个键：schema_version / engine / min_grace_s / deterministic_steps / model_id）——
+    """整份自述对象原样返回（六个键：schema_version / engine / min_grace_s / targets / deterministic_steps / model_id）——
     清单、grace 下限、steps 加载结果、当前模型 id 都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
 
     Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限是这个注入值 + 它自己的 margin，不注入则它按
@@ -515,7 +516,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 先把宿主 shell 弄脏，否则下面「不含该键」的断言空过
     assert compose.query_capabilities("novaact") == {
-        "schema_version": 1, "engine": "novaact", "min_grace_s": 150,
+        "schema_version": 1, "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
         "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}],
         "model_id": "nova-act-v1.0"}
     assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
@@ -584,7 +585,8 @@ def test_query_capabilities_worker_failure_fails_loud_verbatim(monkeypatch, nova
     assert compose._CAPABILITIES_CACHE == {}
 
 
-_OK_HEAD = b'"schema_version": 1, "engine": "novaact"'  # 身份位合法，让每个用例只有一处缺陷
+# 身份位与必有的顶层 targets 合法，让每个用例只有一处缺陷（后面显式给的 targets 会覆盖这里的，JSON 重复键取后者）
+_OK_HEAD = b'"schema_version": 1, "engine": "novaact", "targets": [{"device": "desktop", "ui_kinds": ["web"]}]'
 _OK_STEPS = b', "deterministic_steps": []'
 _OK_MODEL = b', "model_id": "nova-act-v1.0"'
 _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷在下限/身份位」那批用例
@@ -632,7 +634,8 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "requires": ["web_context", "web_context"]}]}]' + _OK_MODEL + b'}',  # requires 重复
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}]}]' + _OK_MODEL + b'}',  # step 级条目不带 max_session_s
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"]}]}]' + _OK_MODEL + b'}',  # 完全重复的 step 级条目
-    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": null' + _OK_TAIL + b'}',  # 顶层 targets 显式 null（只有缺键算旧 worker）
+    b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": null' + _OK_TAIL + b'}',  # 顶层 targets 显式 null（必有且须为数组）
+    b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',  # 顶层缺 targets：版本不一致、不兜缺省
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web", 1]}]' + _OK_TAIL + b'}',  # ui_kinds 元素不是字符串
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}, {"device": "android", "ui_kinds": ["app"], "max_session_s": 20}]' + _OK_TAIL + b'}',  # 同 device 两条都带 max_session_s
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 1' + b"0" * 400 + b'}]' + _OK_TAIL + b'}',  # 超出 float 范围的整数
@@ -694,9 +697,10 @@ def test_query_capabilities_accepts_target_keys_and_keeps_unknown_requires(monke
 
 
 def test_target_defaults_follow_missing_key_semantics():
-    """缺键语义（ADR 0049 决策 2）：顶层缺 targets、step 级缺 targets 都归一为桌面网页——不是「全部目标」、不是「未知放行」；
+    """ADR 0049 决策 2：顶层缺 targets 不兜缺省（版本不一致，fail-loud）；step 级缺 targets 归一为桌面网页——不是「全部目标」、不是「未知放行」；
     缺 max_session_s 即无上限（键不出现）；有键时原样取、返回的是副本。"""
-    assert compose.worker_targets({"deterministic_steps": []}) == [{"device": "desktop", "ui_kinds": ["web"]}]
+    with pytest.raises(RuntimeError, match="缺 targets"):
+        compose.worker_targets({"deterministic_steps": []})
     assert compose.step_targets({"pattern": "p"}) == [{"device": "desktop", "ui_kinds": ["web"]}]
     caps = {"targets": [{"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880}]}
     got = compose.worker_targets(caps)

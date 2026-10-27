@@ -48,12 +48,15 @@ def test_job_to_json_shape():
     assert "argument" not in sc["steps"][1]
 
 
-def test_job_to_json_key_set_unchanged_for_desktop_without_timeout():
-    """协议红线（ADR 0024 可选键、0048 决策 3）：桌面且无 timeout 的 job，job_to_json 的键集合与 1.4 完全相同——旧 worker 零变化。"""
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
-    assert set(job_to_json(job)) == {"scope", "engine", "scenarios", "assertionVotes"}
-    assert set(job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0))) == \
-        {"scope", "engine", "scenarios", "assertionVotes", "timeoutS"}
+def test_job_to_json_key_set_is_fixed_and_carries_schema_version():
+    """协议（ADR 0024「job 行的结构版本与固定键集」、0048 决策 3）：键集与 job 形态无关、恒为八键；无值写 null；schemaVersion 恒为 1。"""
+    from gherkai_core.wire import JOB_SCHEMA_VERSION
+
+    fixed = {"schemaVersion", "scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
+    d = job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=()))
+    assert set(d) == fixed and d["schemaVersion"] == JOB_SCHEMA_VERSION == 1
+    assert d["timeoutS"] is None and d["target"] == {"device": "desktop", "uiKind": "web"} and d["deviceRequest"] is None
+    assert job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0))["timeoutS"] == 300.0
 
 
 def _device_jobs() -> dict[str, Job]:
@@ -82,7 +85,7 @@ def test_job_to_json_device_shapes_and_key_sets():
     deviceRequest.{provider, deviceArn 或 osVersion 二选一, billingMethod, projectArn, acquireTimeoutS}；按键集合差集断言。"""
     jobs = _device_jobs()
     aw = job_to_json(jobs["android_web"])
-    assert set(aw) == {"scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
+    assert set(aw) == {"schemaVersion", "scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
     assert aw["target"] == {"device": "android", "uiKind": "web"}
     assert set(aw["deviceRequest"]) == {"provider", "osVersion", "billingMethod", "projectArn", "acquireTimeoutS"}
     ia = job_to_json(jobs["ios_app"])

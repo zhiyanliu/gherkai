@@ -786,7 +786,7 @@ def _cmd_list_deterministic(args) -> int:
         _progress(f"list-deterministic 失败：{e}\n{_SELF_DESCRIBE_CAUSES}")
         return 2
     entries = caps["deterministic_steps"]
-    # 每条 step 的实际可用目标是声明目标与该引擎支持目标的交集（ADR 0049 决策 3；交集与缺键语义都在 compose 一处实现，
+    # 每条 step 的实际可用目标是声明目标与该引擎支持目标的交集（ADR 0049 决策 3；交集与 step 级缺键语义都在 compose 一处实现，
     # 这里只消费）；声明了但该引擎不支持的部分单独注明——那条句柄永远不会被这个引擎调用，测试开发要看见。
     supported = compose.worker_targets(caps)
     rows = [(e, compose.step_targets(e)) for e in entries]
@@ -897,7 +897,7 @@ def _cmd_doctor(args) -> int:
         if caps is not None:
             add("engines", f"model.{engine}", True, f"模型 {caps['model_id']}（本机 worker 自报）", required=False)
     # 目标行（ADR 0049 决策 6）：该引擎 worker 支持的测试目标，带会话上限的目标附分钟数；纯展示、不展示 requires、
-    # 不支持设备不算失败；与模型行同源于同一次自述，自述失败时同样不出这一行（缺键的旧 worker 按缺键语义显示桌面网页）。
+    # 不支持设备不算失败；与模型行同源于同一次自述，自述失败时同样不出这一行（自述缺 targets 按版本不一致由契约校验拒绝）。
     for engine, caps, _err in described:
         if caps is not None:
             add("engines", f"targets.{engine}", True,

@@ -72,28 +72,30 @@ def _scenario_to_json(sc: Scenario) -> dict:
     }
 
 
+# job 行的结构版本（ADR 0024「job 行的结构版本与固定键集」）：worker 在建会话前核它，不等于自己认的即 precheck_failed「版本不一致」；
+# 同一版本下 job 行的键集固定、无值写 null。与 definition 的 schema_version（serialize）是两份文档、各自编号；1.5 都是 1。
+JOB_SCHEMA_VERSION = 1
+
+
 def job_to_json(job: Job) -> dict:
     """Job → JSON dict（喂 worker stdin，ADR 0024 输入形状）。
 
-    三个可选键（ADR 0024「可选键 timeoutS / deviceRequest / target」、0048 决策 3）只在有值时写：`timeoutS` 供 worker 建会话前与
-    max_session_s 比较作自检；`target` 只在非桌面目标写（桌面 job 的键集合与 1.4 逐字相同，旧 worker 零变化）；`deviceRequest`
-    在组合根填入后才有。字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
+    键集固定（ADR 0024「job 行的结构版本与固定键集」、0048 决策 3）：`schemaVersion` 恒写；`timeoutS` 供 worker 建会话前与
+    max_session_s 比较作自检、不超时写 null；`target` 桌面也写 desktop/web；`deviceRequest` 非设备 job 写 null。
+    字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
     """
-    d = {
+    return {
+        "schemaVersion": JOB_SCHEMA_VERSION,
         "scope": {"id": job.scope_id, "name": job.scope_name},
         "engine": job.engine,
         "scenarios": [_scenario_to_json(sc) for sc in job.scenarios],
         # assertionVotes：AI 断言（Then）投票次数（治判定抖动，ADR 0014/0024）。worker 据此执行 N 次取多数票。
         # camelCase 与协议其余字段一致；前缀 assertion 点明只作用于 AI 断言（动作 step 无投票）。
         "assertionVotes": job.assertion_votes,
+        "timeoutS": job.timeout_s,
+        "target": _target_to_json(job.target),
+        "deviceRequest": _device_request_to_json(job.device_request) if job.device_request is not None else None,
     }
-    if job.timeout_s is not None:
-        d["timeoutS"] = job.timeout_s
-    if not job.target.is_desktop:
-        d["target"] = _target_to_json(job.target)
-    if job.device_request is not None:
-        d["deviceRequest"] = _device_request_to_json(job.device_request)
-    return d
 
 
 def _target_to_json(t: Target) -> dict:

@@ -6,7 +6,7 @@ import { Readable } from "node:stream";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { JOB_KEYS, JobSource } from "../lib/job-source.mjs";
+import { JOB_KEYS, JOB_SCHEMA_VERSION, JobSource } from "../lib/job-source.mjs";
 
 // 用一个 Readable 假冒 process.stdin（for await 可迭代），运行结束后恢复。
 async function withStdin<T>(content: string, fn: () => Promise<T>): Promise<T> {
@@ -34,7 +34,14 @@ test("Python 到 TS 的往返（ADR 0048 决策 3）：golden 三种形态的键
   for (const [section, keys] of Object.entries(JOB_KEYS)) {
     for (const k of keys) assert.ok(seen[section as keyof typeof seen].has(k), `TS 清单里的 ${section}.${k} 没在任何一份 golden 出现（Python 侧没跟上？）`);
   }
-  assert.deepEqual(Object.keys(jobs["desktop"]).sort(), ["assertionVotes", "engine", "scenarios", "scope"]);  // 桌面无预算：键集合与 1.4 相同
+  // 键集固定（ADR 0024）：桌面 job 与设备 job 同一组键，无值为 null；每份 golden 的 schemaVersion 都是本 worker 认的值
+  for (const job of Object.values(jobs)) {
+    assert.deepEqual(Object.keys(job).sort(), [...JOB_KEYS.top].sort());
+    assert.equal(job.schemaVersion, JOB_SCHEMA_VERSION);
+  }
+  assert.equal(jobs["desktop"].timeoutS, null);
+  assert.equal(jobs["desktop"].deviceRequest, null);
+  assert.deepEqual(jobs["desktop"].target, { device: "desktop", uiKind: "web" });
 });
 
 test("read parses first-line JSON from stdin", async () => {

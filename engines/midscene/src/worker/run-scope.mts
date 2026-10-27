@@ -33,7 +33,7 @@ import { sigv4Fetch, signCdpUpgrade, getBaseUrl, MODEL, modelFamily, getRegion }
 import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { JobSource, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
-import { precheckTarget } from "../lib/precheck.mjs";  // 建会话前的目标与预算自检（ADR 0049 决策 7）
+import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
 // 确定性 step 注册表（ADR 0022）+ 测试开发写 step 用的脚手架。
 // import 脚手架即触发其顶层 deterministic(...) 注册副作用（对称 Nova 引擎 import deterministic_steps）。
 import { match as matchDeterministic, DeterministicAssertion, DeterministicConflict, DeterministicKeywordMismatch, listRegistry, matchBatch, type MatchItem } from "./deterministic.mjs";
@@ -307,7 +307,7 @@ async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
 
 interface Step { index: number; keyword: string; text: string; argument?: unknown }
 interface Scenario { id: string; name: string; steps: Step[] }
-// 与 lib/job-source.mts 导出的 Job 同一形状（可选键 timeoutS / target / deviceRequest，ADR 0024 / 0048 决策 3），只把 scenarios 收窄成本文件的 Scenario
+// 与 lib/job-source.mts 导出的 Job 同一形状（键集固定：schemaVersion / timeoutS / target / deviceRequest，ADR 0024 / 0048 决策 3），只把 scenarios 收窄成本文件的 Scenario
 interface Job extends Omit<WireJob, "scenarios"> { scenarios: Scenario[] }
 
 
@@ -440,10 +440,11 @@ export async function main(): Promise<number> {
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
   const scope = job.scope;
 
-  // 建会话前的自检（ADR 0049 决策 7）：用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、
-  // 不自停）。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发
-  // scope_started、不建会话、以 0 退出——零会话费用；core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
-  const rejected = precheckTarget(job, WORKER_TARGETS);
+  // 建会话前的自检（ADR 0049 决策 7；ADR 0024 结构版本）：先核 job 行的 schemaVersion（不等于本 worker 认的即版本不一致），再用与
+  // 能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。不满足即按执行前失败的统一规则
+  // （ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；
+  // core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
+  const rejected = precheckJob(job, WORKER_TARGETS);
   if (rejected !== null) {
     log(`worker: precheck failed — ${rejected}`);
     await eventSink.emit({ type: "scope_done", scopeId: scope.id, status: "error", errorType: "precheck_failed", message: rejected });

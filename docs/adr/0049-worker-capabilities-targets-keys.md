@@ -42,17 +42,17 @@
 
 - **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（设备会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
 - **会话预热支持键**：顶层加一个布尔键，语义为「该 worker 支持隧道会话预热」，键名由实现定；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
-- **为什么不升版**：[0036](./0036-deterministic-capability-discovery.md) 规定 `schema_version` 只在既有键的语义变化时递增。上述各键都是新增，且各自带缺键语义（决策 2），既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读旧 worker 按缺键语义处理。
+- **为什么不升版**：[0036](./0036-deterministic-capability-discovery.md) 规定 `schema_version` 只在既有键的语义变化时递增。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变；顶层 `targets` 虽为必有键，但 1.5 是第一个带它的版本、1.5 之前的 worker 不在支持范围内，schema 1 的契约就是「必有 `targets`」，升版没有要区分的对象。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读缺 `targets` 的旧 worker 按版本不一致拒绝（决策 2）。
 - **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
 
-### 2. 缺键语义：缺 `targets` 即「只有 desktop / web」
+### 2. 顶层 `targets` 必有；step 级缺键即「只在 desktop / web 上有实现」
 
-- 顶层缺 `targets`：该 worker 只支持 `{device: desktop, ui_kinds: [web]}`。step 条目缺 `targets`：该 step 只在 desktop / web 上有实现。这正是 1.5 之前所有 worker 与所有确定性 step 的真实能力，故旧 worker、旧使用方 steps 目录零迁移。
-- 1.5 的两个 worker **都显式写出** `targets`，缺键语义只服务兼容；引擎能力矩阵文档的真值集取的是显式值（决策 8）。
+- 顶层 `targets` 是必有键：CLI 的契约校验对缺键按「worker 与命令行工具版本不一致」fail-loud，不再把缺键兜成「只有 desktop / web」。1.5 的两个 worker 都显式写出 `targets`；1.5 之前的 worker 不在支持范围内，与 definition 的结构版本（[0037](./0037-distribution-and-packaging.md) 决策 7）和 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)）同一取向：读端只认当前契约、不为旧写端留缺省。引擎能力矩阵文档的真值集取的是显式值（决策 8）。
+- step 条目缺 `targets`：该 step 只在 desktop / web 上有实现。这是使用方 step 未声明目标时的缺省（注册面见 [0050](./0050-deterministic-step-handles-and-testing.md)），不是版本兼容路径，故保留。
 - 缺 `max_session_s`：该 worker 对此目标不施加会话级上限，job 只受墙钟预算约束。1.5 的 desktop 条目不带此键（浏览器会话的现有超时行为不在本 ADR 范围内）。
 - 缺 `requires`：该句柄在此目标上没有运行期前提。缺会话预热支持键：该 worker 不支持隧道会话预热，本机后端在 `--expose-local` 下于执行前预检中拒绝（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。
-- **不做**：不把缺键解释为「支持全部目标」或「未知、放行」。前者会让旧镜像接到设备 job，后者把能力判断推迟到会话建立之后，两者都是静默降级。
+- **不做**：不把缺 `targets` 解释为「支持全部目标」、「未知、放行」或「只有桌面」。前两者会让旧镜像接到设备 job 或把能力判断推迟到会话建立之后，后者是为不在支持范围内的旧 worker 留的兼容分支。
 
 ### 3. step 实际可用目标是句柄声明与 worker `targets` 的交集
 
@@ -86,7 +86,7 @@
 - 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），提交机器上的执行前预检无法取得云端镜像的自述，目标判断只能由 worker 侧完成。故 worker 在 job 开始、建立任何会话（浏览器会话或设备会话）之前，用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
 - 传递方式沿用 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 对执行前失败的统一规则：worker 发 `scope_done{status: error, errorType: precheck_failed, message}`，不发 `scope_started`，不发任何 scenario 或 step 事件。错误类别的定义与处置语义（改用例或换测试包）同归 0051。
 - 消息形态（产品语言，不带内部指代）：「这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎，或使用与命令行工具同版本的 worker 镜像。」
-- 防止「旧镜像把设备 job 当桌面执行」靠两层：镜像按 CLI 版本解析（[0038](./0038-worker-image-delivery.md) 的 `<版本>-<variant>` tag），1.5 的 CLI 只会解析到 1.5 的镜像；自检覆盖其余情形，例如 variant 基于不一致的基础镜像构建。1.5 之前的 worker 不认识 Job 里的目标字段，自检对它无效，这一情形只由版本解析保证；缺版本戳的旧后端见 [0037](./0037-distribution-and-packaging.md) 决策 7 的例外。
+- 防止「旧镜像把设备 job 当桌面执行」靠两层：镜像按 CLI 版本解析（[0038](./0038-worker-image-delivery.md) 的 `<版本>-<variant>` tag），1.5 的 CLI 只会解析到 1.5 的镜像；自检覆盖其余情形，例如 variant 基于不一致的基础镜像构建。worker 自检的第一步是核 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)），命令行工具与 worker 版本不一致时在建会话前以 `precheck_failed` 报出；1.5 之前的 worker 不认识这个键、自检对它无效，这一情形只由版本解析保证；缺版本戳的旧后端见 [0037](./0037-distribution-and-packaging.md) 决策 7 的例外。
 
 ### 8. 引擎能力矩阵文档与差集护栏
 
@@ -113,7 +113,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 
 ## 被拒方案（护栏）
 
-- **升到 schema 2**：各键都是新增、各带缺键语义，升版只会迫使 CLI 维护两套解析分支并让版本校验拒绝本可兼容的组合；违反 [0036](./0036-deterministic-capability-discovery.md)「只在既有键语义变化时递增」的规则。
+- **升到 schema 2**：各键都是新增，1.5 之前的 worker 不在支持范围内，升版没有要区分的对象、只会迫使 CLI 维护两套解析分支；违反 [0036](./0036-deterministic-capability-discovery.md)「只在既有键语义变化时递增」的规则。缺 `targets` 的 worker 由契约校验按版本不一致拒绝，不需要版本号来识别。
 - **`min_grace_s` 取各目标最大值或立即拆成按设备的对象**：按终结四阶段推导的设备收尾约 64 秒，仍低于 120 秒硬上限，拆分只增加协议面而不改变任何下限的结论；拆分的条件写在决策 5 的重议条件里。
 - **worker 只报交集后的 step 目标**：声明了但不受支持的句柄在所有视图中消失，测试开发得不到「这条句柄永远不会被调用」的信号（决策 3）。
 - **CLI 按引擎名硬编码目标支持表**（如「novaact 只有桌面」）：形成自述之外的第二事实源，worker 增减目标时 CLI 静默漂移；与 [0036](./0036-deterministic-capability-discovery.md) 拒绝外置清单文件同理。

@@ -1,16 +1,34 @@
-"""建会话前的自检（ADR 0049 决策 7；0048 决策 3、4）：目标不在 targets 里或预算超过会话上限即拒绝；缺 target 即桌面网页；
-消息是产品语言、不带内部指代；与能力自述同一份 WORKER_TARGETS。"""
+"""建会话前的自检（ADR 0049 决策 7；0048 决策 3、4；0024 的结构版本）：job 行的 schemaVersion 不等于本 worker 认的、目标不在 targets 里、
+预算超过会话上限都拒绝；target 必有，缺键即版本不一致；消息是产品语言、不带内部指代；与能力自述同一份 WORKER_TARGETS。"""
 from __future__ import annotations
 
 from gherkai_worker_novaact import run_scope as rs
-from gherkai_worker_novaact.lib.precheck import precheck_target, target_label
+from gherkai_worker_novaact.lib.precheck import JOB_SCHEMA_VERSION, precheck_job, precheck_schema, precheck_target, target_label
 
 DEVICE_TARGETS = [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000}]
 
 
-def test_desktop_job_without_target_key_passes_against_real_worker_targets():
-    assert precheck_target({"scope": {"id": "s"}}, rs.WORKER_TARGETS) is None  # 1.5 之前的 CLI 不写 target：桌面网页
+def test_desktop_job_passes_and_missing_target_is_a_version_mismatch():
     assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": 300}, rs.WORKER_TARGETS) is None
+    assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}, rs.WORKER_TARGETS) is None  # 不超时写 null
+    msg = precheck_target({"scope": {"id": "s"}}, rs.WORKER_TARGETS)  # 键集固定：缺 target 不再当桌面
+    assert msg is not None and "没有带测试目标" in msg and "同一版本" in msg
+
+
+def test_schema_version_is_checked_first_and_pinned_by_golden():
+    """job 行的结构版本（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝、先于目标核对；本 worker 认的值与跨语言 golden 一致。"""
+    import json
+    from pathlib import Path
+
+    assert precheck_schema({"schemaVersion": JOB_SCHEMA_VERSION}) is None
+    assert "缺失" in precheck_schema({}) and "同一版本" in precheck_schema({})
+    assert f"格式版本是 {JOB_SCHEMA_VERSION + 1}" in precheck_schema({"schemaVersion": JOB_SCHEMA_VERSION + 1})
+    bad = {"schemaVersion": JOB_SCHEMA_VERSION + 1, "target": {"device": "ios", "uiKind": "app"}}
+    assert "格式版本" in precheck_job(bad, rs.WORKER_TARGETS)  # 版本先于目标
+    ok = {"schemaVersion": JOB_SCHEMA_VERSION, "target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}
+    assert precheck_job(ok, rs.WORKER_TARGETS) is None
+    fixture = json.loads((Path(__file__).resolve().parents[3] / "engines" / "fixtures" / "job-lines.json").read_text(encoding="utf-8"))
+    assert {j["schemaVersion"] for j in fixture["jobs"].values()} == {JOB_SCHEMA_VERSION}
 
 
 def test_device_job_rejected_by_nova_with_product_message():
@@ -43,8 +61,8 @@ def test_main_entry_rejects_device_job_before_any_session():
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     env = {k: v for k, v in os.environ.items() if k in keep}
     env["AWS_EC2_METADATA_DISABLED"] = "true"
-    job = {"scope": {"id": "dev", "name": "dev"}, "engine": "novaact", "assertionVotes": 1, "timeoutS": 1500,
-           "target": {"device": "android", "uiKind": "web"},
+    job = {"schemaVersion": 1, "scope": {"id": "dev", "name": "dev"}, "engine": "novaact", "assertionVotes": 1, "timeoutS": 1500,
+           "target": {"device": "android", "uiKind": "web"}, "deviceRequest": None,
            "scenarios": [{"id": "d.feature:3", "name": "s", "steps": [{"index": 0, "keyword": "Given", "text": "https://x/"}]}]}
     proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact"], input=(json.dumps(job) + "\n").encode("utf-8"),
                           capture_output=True, timeout=120, env=env)

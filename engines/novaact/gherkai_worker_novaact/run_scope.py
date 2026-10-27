@@ -52,7 +52,7 @@ from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GR
 from gherkai_worker_novaact.lib.event_sink import EventSink  # 事件出口（ADR 0024 I/O 边缘可注入接口；fd 态 / DDB 态两态）
 from gherkai_worker_novaact.lib.redact import redact_url_userinfo  # 隧道凭据脱敏（ADR 0035 决策 5）：截断前先脱敏
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
-from gherkai_worker_novaact.lib.precheck import precheck_target  # 建会话前的目标与预算自检（ADR 0049 决策 7）
+from gherkai_worker_novaact.lib.precheck import precheck_job  # 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
 
 # 确定性 step 注册表（ADR 0022）+ 内建的 step 脚手架（同在本包内）。
@@ -865,10 +865,11 @@ def main() -> int:
     scope = job["scope"]
     scenarios = job["scenarios"]
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
-    # 建会话前的自检（ADR 0049 决策 7）：用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，
-    # 不计时、不自停）。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、
-    # 不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
-    rejected = precheck_target(job, WORKER_TARGETS)
+    # 建会话前的自检（ADR 0049 决策 7；ADR 0024 结构版本）：先核 job 行的 schemaVersion（不等于本 worker 认的即版本不一致），再用与
+    # 能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。不满足即按执行前失败的统一
+    # 规则（ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——
+    # 零会话费用；core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
+    rejected = precheck_job(job, WORKER_TARGETS)
     if rejected is not None:
         log(f"worker: precheck failed — {rejected}")
         sink.emit({"type": "scope_done", "scopeId": scope["id"], "status": "error", "errorType": "precheck_failed", "message": rejected})

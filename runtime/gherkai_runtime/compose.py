@@ -571,10 +571,14 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"引擎 {engine} 自述的模型 id 不是非空字符串：{caps.get('model_id')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
-    # 测试目标相关的键（ADR 0049 决策 1）：顶层 targets、每个清单项的 targets、会话预热支持键。都可缺（缺键语义见
-    # worker_targets / step_targets），有则形态须合契约；交集不在这里算、不改写对象（消费点经下面的纯函数取）。
-    if "targets" in caps:  # 只有缺键算旧 worker；显式 null 不合契约
-        _validate_targets(engine, caps["targets"], where="顶层 targets", top_level=True)
+    # 测试目标相关的键（ADR 0049 决策 1、2）：顶层 targets **必有**（缺键即版本不一致，不再当「只有桌面网页」兜）；每个清单项的
+    # targets 可缺（使用方 step 未声明目标即只在桌面网页上有实现，见 step_targets）；会话预热支持键可缺。有则形态须合契约；
+    # 交集不在这里算、不改写对象（消费点经下面的纯函数取）。
+    if "targets" not in caps:
+        raise RuntimeError(
+            f"引擎 {engine} 的能力自述缺 targets（支持的测试目标）——worker 与命令行工具版本不一致？两者须同版本安装。"
+        )
+    _validate_targets(engine, caps["targets"], where="顶层 targets", top_level=True)
     for entry in caps["deterministic_steps"]:
         if "targets" in entry:
             _validate_targets(engine, entry["targets"], where=f"确定性 step 条目 {entry.get('pattern')!r} 的 targets",
@@ -588,7 +592,7 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     return caps
 
 
-# ---- 测试目标（ADR 0049）：契约校验、缺键语义与交集都只在本模块这一处实现，plan / list-deterministic / doctor 只消费 ----
+# ---- 测试目标（ADR 0049）：契约校验、step 级缺键语义与交集都只在本模块这一处实现，plan / list-deterministic / doctor 只消费 ----
 
 TARGET_DEVICES = ("desktop", "android", "ios")
 UI_KINDS = ("web", "app")
@@ -608,7 +612,7 @@ def _is_finite_number(x) -> bool:
 
 
 def _validate_targets(engine: str, targets, *, where: str, top_level: bool) -> None:
-    """targets 数组的形态校验（ADR 0049 决策 1）：调用方只在键存在时调用（缺键是旧 worker、放行；显式 null 不合契约）；
+    """targets 数组的形态校验（ADR 0049 决策 1）：顶层 targets 必有（缺键由调用方按版本不一致拒绝），step 级只在键存在时调用；显式 null 不合契约；
     每项 device 取 TARGET_DEVICES 之一、ui_kinds 非空不重复且都取 UI_KINDS 之一、desktop 只允许 ["web"]；顶层条目 device
     不重复、可带 max_session_s（正有限数、排除 bool）；step 级条目可带 requires（字符串数组、不重复，取值不核——取值集合归
     worker 注册期校验，CLI 不另立第二事实源），且不出现 device / ui_kinds / requires 三项完全相同的重复条目。
@@ -652,16 +656,16 @@ def _default_targets() -> list[dict]:
 
 
 def worker_targets(caps: dict) -> list[dict]:
-    """worker 支持的测试目标（ADR 0049 决策 2 的缺键语义）：缺 targets 的旧 worker 只支持桌面网页——1.5 之前所有 worker
-    的真实能力；不能解释为「全部目标」或「未知、放行」。返回副本。"""
+    """worker 支持的测试目标（ADR 0049 决策 2）：顶层 targets 必有，缺键不兜缺省——那是 worker 与命令行工具版本不一致，
+    `query_capabilities` 的契约校验已拒绝；绕过它的调用方（测试替身）给了没有 targets 的对象在这里 fail-loud。返回副本。"""
     raw = caps.get("targets")
     if raw is None:
-        return _default_targets()
+        raise RuntimeError("能力自述缺 targets（支持的测试目标）——worker 与命令行工具版本不一致？两者须同版本安装。")
     return [dict(t, ui_kinds=list(t["ui_kinds"])) for t in raw]
 
 
 def step_targets(entry: dict) -> list[dict]:
-    """某条确定性 step 声明的目标（worker 原样报出）；缺键即只在桌面网页上有实现（ADR 0049 决策 2）。返回副本。"""
+    """某条确定性 step 声明的目标（worker 原样报出）；缺键即只在桌面网页上有实现（ADR 0049 决策 2：使用方 step 未声明目标的缺省）。返回副本。"""
     raw = entry.get("targets")
     if raw is None:
         return _default_targets()

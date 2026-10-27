@@ -1,9 +1,9 @@
-// 建会话前的自检（ADR 0049 决策 7）：用与能力自述同一份 targets 核对 Job 携带的测试目标与墙钟预算。
-// 目标不在 targets 里，或墙钟预算超过该目标的 max_session_s，即返回一句产品语言的原因；worker 据此发
-// scope_done{status: error, errorType: precheck_failed, message}、不发 scope_started、零会话费用退出（ADR 0051 决策 4 的执行前失败）。
-// 纯函数、不读 env、不建会话；Job 缺 target 即桌面网页——这是桌面 job 的正常形态（core 只在非桌面才写该键，ADR 0024 可选键），
-// 1.5 之前的 CLI 也不写它。对称 Nova 的 lib/precheck.py。
-import type { Job } from "./job-source.mjs";
+// 建会话前的自检（ADR 0049 决策 7；ADR 0024「job 行的结构版本与固定键集」）：先核 job 行的 schemaVersion，再用与能力自述同一份
+// targets 核对 Job 携带的测试目标与墙钟预算。结构版本不等于本 worker 认的（含缺键）、目标不在 targets 里、墙钟预算超过该目标的
+// max_session_s，都返回一句产品语言的原因；worker 据此发 scope_done{status: error, errorType: precheck_failed, message}、不发
+// scope_started、零会话费用退出（ADR 0051 决策 4 的执行前失败）。纯函数、不读 env、不建会话。job 行的键集固定（target 恒为对象、
+// 桌面也写 desktop/web），缺键不再当桌面：那是命令行工具与 worker 版本不一致的信号。对称 Nova 的 lib/precheck.py。
+import { JOB_SCHEMA_VERSION, type Job } from "./job-source.mjs";
 
 export interface TargetEntry { device: string; ui_kinds: string[]; max_session_s?: number }
 
@@ -29,10 +29,29 @@ function spaced(label: string): string {
   return `${head}${label}${tail}`;
 }
 
-/** 返回拒绝原因（产品语言）；null 表示通过。 */
-export function precheckTarget(job: Pick<Job, "target" | "timeoutS">, targets: ReadonlyArray<TargetEntry>): string | null {
-  const device = job.target?.device ?? "desktop";
-  const uiKind = job.target?.uiKind ?? "web";
+/** job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；null 表示通过。 */
+export function precheckSchema(job: Partial<Pick<Job, "schemaVersion">>): string | null {
+  const found = job.schemaVersion;
+  if (found !== JOB_SCHEMA_VERSION) {
+    const shown = found === undefined || found === null ? "缺失" : String(found);
+    return `这个 job 的格式版本是 ${shown}，这个 worker 认的是 ${JOB_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，` +
+      "请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。";
+  }
+  return null;
+}
+
+/** 建会话前的全部自检：结构版本先于目标与预算。返回拒绝原因；null 表示通过。 */
+export function precheckJob(job: Partial<Pick<Job, "schemaVersion" | "target" | "timeoutS">>, targets: ReadonlyArray<TargetEntry>): string | null {
+  return precheckSchema(job) ?? precheckTarget(job, targets);
+}
+
+/** 返回拒绝原因（产品语言）；null 表示通过。target 须为对象（键集固定、桌面也写 desktop/web）。 */
+export function precheckTarget(job: Partial<Pick<Job, "target" | "timeoutS">>, targets: ReadonlyArray<TargetEntry>): string | null {
+  if (job.target === undefined || job.target === null || typeof job.target !== "object") {
+    return "这个 job 没有带测试目标：命令行工具与 worker 的版本不一致，请把两者装成同一版本。";
+  }
+  const device = job.target.device;
+  const uiKind = job.target.uiKind;
   const entry = targets.find((t) => t.device === device);
   if (!entry || !entry.ui_kinds.includes(uiKind)) {
     return `这个 worker 不支持在${spaced(targetLabel(device, uiKind))}上执行测试（它支持：${supportedLabel(targets)}）。` +

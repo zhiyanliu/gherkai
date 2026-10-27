@@ -818,7 +818,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: calls.append(engine) or
                         {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "qwen.qwen3-vl-235b-a22b",
-                         "deterministic_steps": entries})
+                         "targets": [{"device": "desktop", "ui_kinds": ["web"]}], "deterministic_steps": entries})
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
     assert "断言某事" in out and 'Then p "v"' in out and calls == ["midscene"]
@@ -1211,7 +1211,8 @@ def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypa
                         lambda engine, texts, steps_dir=None: seen.update(match=steps_dir) or [None] * len(texts))
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: seen.update(query=steps_dir) or
-                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "nova-act-v1.0"})
+                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "nova-act-v1.0",
+                         "targets": [{"device": "desktop", "ui_kinds": ["web"]}]})
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     assert m.main(["list-deterministic"]) == 0
     assert seen["match"] == str(steps.resolve()) and seen["query"] == str(steps.resolve())
@@ -1513,6 +1514,7 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     steps = tmp_path / "steps"; steps.mkdir()
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
         "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
+        "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
         "deterministic_steps": [{"pattern": "a"}, {"pattern": "b"}]})  # 计数取自述对象的清单键（ADR 0036「5.」）
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 0
     doc = json.loads(capsys.readouterr().out)

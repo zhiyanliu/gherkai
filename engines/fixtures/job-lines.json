@@ -1,7 +1,8 @@
 {
-  "_comment": "core 发给 worker 的 job 行三种形态的 golden（ADR 0048 决策 3 的 Python 到 TS 往返测试）：core/tests/test_wire.py 核 job_to_json 的产出与此逐字相等，engines/midscene/src/worker/job-source.test.mts 核 TS 的 Job 字段清单与此的键集合一致。改协议形状时同步改这里并让两侧测试跟上。",
+  "_comment": "core 发给 worker 的 job 行三种形态的 golden（ADR 0048 决策 3 的 Python 到 TS 往返测试；ADR 0024 的结构版本与固定键集）：core/tests/test_wire.py 核 job_to_json 的产出与此逐字相等，engines/midscene/src/worker/job-source.test.mts 核 TS 的 Job 字段清单与此的键集合一致，两个 worker 的测试核各自认的 schemaVersion 等于这里的值。改协议形状时同步改这里并让两侧测试跟上。",
   "jobs": {
     "desktop": {
+      "schemaVersion": 1,
       "scope": {
         "id": "web",
         "name": "web"
@@ -25,9 +26,16 @@
           ]
         }
       ],
-      "assertionVotes": 1
+      "assertionVotes": 1,
+      "timeoutS": null,
+      "target": {
+        "device": "desktop",
+        "uiKind": "web"
+      },
+      "deviceRequest": null
     },
     "android_web": {
+      "schemaVersion": 1,
       "scope": {
         "id": "aw",
         "name": "aw"
@@ -66,6 +74,7 @@
       }
     },
     "ios_app": {
+      "schemaVersion": 1,
       "scope": {
         "id": "ia",
         "name": "ia"

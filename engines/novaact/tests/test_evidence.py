@@ -636,7 +636,8 @@ def main_fakes(monkeypatch, logs_dir):
     """把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。"""
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
-        lambda: json.dumps({"scope": {"id": "x"}, "scenarios": []}))})())
+        lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x"}, "scenarios": [],
+                            "target": {"device": "desktop", "uiKind": "web"}}))})())  # 键集固定：结构版本与桌面目标都要带
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
     monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCdp())      # with wf: 用同一个上下文管理器形状
     monkeypatch.setattr(rs, "get_current_workflow", lambda: None)

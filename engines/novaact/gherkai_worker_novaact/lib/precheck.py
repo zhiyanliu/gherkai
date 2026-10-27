@@ -1,11 +1,14 @@
-"""建会话前的自检（ADR 0049 决策 7）：用与能力自述同一份 `targets` 核对 Job 携带的测试目标与墙钟预算。
+"""建会话前的自检（ADR 0049 决策 7；ADR 0024「job 行的结构版本与固定键集」）：先核 job 行的 schemaVersion，再用与能力自述同一份
+`targets` 核对 Job 携带的测试目标与墙钟预算。
 
-目标不在 targets 里，或墙钟预算超过该目标的 max_session_s，即返回一句产品语言的原因；worker 据此发
+结构版本不等于本 worker 认的（含缺键）、目标不在 targets 里、墙钟预算超过该目标的 max_session_s，都返回一句产品语言的原因；worker 据此发
 `scope_done{status: error, errorType: precheck_failed, message}`、不发 scope_started、零会话费用退出（ADR 0051 决策 4 的执行前失败）。
-纯函数、不读 env、不建会话；Job 缺 target 即桌面网页——这是桌面 job 的正常形态（core 只在非桌面才写该键，ADR 0024 可选键），
-1.5 之前的 CLI 也不写它。
+纯函数、不读 env、不建会话。job 行的键集固定（target 恒为对象、桌面也写 desktop/web），缺键不再当桌面：那是命令行工具与 worker 版本不一致的信号。
 """
 from __future__ import annotations
+
+# 本 worker 认的 job 行结构版本（与 core 的 wire.JOB_SCHEMA_VERSION 同值；由 engines/fixtures/job-lines.json 的 golden 钉住）
+JOB_SCHEMA_VERSION = 1
 
 _DEVICE_LABEL = {"desktop": "桌面", "android": "Android", "ios": "iOS"}
 _UI_KIND_LABEL = {"web": "网页", "app": "应用"}
@@ -35,11 +38,28 @@ def _num(v) -> str:
     return str(int(v)) if float(v).is_integer() else str(v)
 
 
+def precheck_schema(job: dict) -> str | None:
+    """job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；None 表示通过。"""
+    found = job.get("schemaVersion")
+    if found != JOB_SCHEMA_VERSION:
+        shown = "缺失" if found is None else str(found)
+        return (f"这个 job 的格式版本是 {shown}，这个 worker 认的是 {JOB_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，"
+                f"请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。")
+    return None
+
+
+def precheck_job(job: dict, targets) -> str | None:
+    """建会话前的全部自检：结构版本先于目标与预算。返回拒绝原因；None 表示通过。"""
+    return precheck_schema(job) or precheck_target(job, targets)
+
+
 def precheck_target(job: dict, targets) -> str | None:
-    """返回拒绝原因（产品语言）；None 表示通过。"""
-    target = job.get("target") or {}
-    device = target.get("device", "desktop")
-    ui_kind = target.get("uiKind", "web")
+    """返回拒绝原因（产品语言）；None 表示通过。target 须为对象（键集固定、桌面也写 desktop/web）。"""
+    target = job.get("target")
+    if not isinstance(target, dict):
+        return "这个 job 没有带测试目标：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+    device = target.get("device")
+    ui_kind = target.get("uiKind")
     entry = next((t for t in targets if t.get("device") == device), None)
     if entry is None or ui_kind not in entry.get("ui_kinds", []):
         return (f"这个 worker 不支持在{_spaced(target_label(device, ui_kind))}上执行测试（它支持：{supported_label(targets)}）。"
