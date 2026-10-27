@@ -632,7 +632,7 @@ _SELF_DESCRIBE_CAUSES = ("（以 worker 自己的报错为准；若它只报了�
                          "文件加载失败，或 worker 与命令行工具版本不一致——两者须同版本安装）")
 
 
-def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
+def _preflight_worker_runtimes(jobs, steps_dir: str | None, *, require_session_warmup: bool = False) -> int | None:
     """本次 plan 用到的各引擎：worker 运行时能否定位 + 能力自述能否完成（ADR 0037 决策 3/4）。
 
     - 定位链四级全 miss → 打安装指引 + **以退出码 2 结束**：「运行时没装」是环境/配置问题，属「没开始执行就被拒」层，
@@ -643,6 +643,8 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
       「提交侧同样前置」）。**不再按「有没有 steps 目录」分支**：这一份自述同时给出「steps 加载成功 + 清单 +
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
       进程内缓存——本机 run 每引擎只 spawn 一次自述。
+    - `require_session_warmup`（本机后端给了 `--expose-local`，ADR 0051 决策 13「能力与拒绝点」）：worker 自述不声明会话预热支持
+      （键缺失或为 false）即以退出码 2 拒绝——在起隧道之前，故不需要拆隧道。
     **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
     云端后端不调用本函数：那个后端的 worker 在 Fargate 容器里运行，本机定位链无关。
     """
@@ -658,6 +660,9 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None) -> int | None:
             # 含 WorkerSelfDescribeError（worker 起来了但非零退出）与超时 / 输出非 JSON / 自述不合契约；
             # 文案中性、点到两种成因（见 _SELF_DESCRIBE_CAUSES）。
             _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}\n{_SELF_DESCRIBE_CAUSES}")
+            return 2
+        if require_session_warmup and caps.get(compose.SESSION_WARMUP_KEY) is not True:
+            _progress(f"引擎 {engine} 的 worker 不支持本机应用测试需要的会话预热（--expose-local）：请把 worker 与命令行工具装成同一个版本后重试。")
             return 2
         # 执行前预检的两项目标检查（ADR 0048 决策 3、4）：目标不在该引擎声明的 targets 里、墙钟预算超过会话上限——都在建立任何会话之前拒绝，
         # 不产生费用；归类为用例契约违约（改法在用例或命令行上），以退出码 2 结束。
@@ -1234,7 +1239,7 @@ def _setup_tunnel(args, jobs):
         _progress(f"--expose-local 隧道未就绪：{e}")
         return 2
     _progress(f"隧道已建立：{args.expose_local} → {setup.info.url}"
-              f"（basic-auth 已启用，凭据每 run 一换、终态即拆）")
+              f"（访问受本次运行专用的会话保护，运行结束即拆除）")
     return setup.jobs, setup.extra_http_headers, setup.info
 
 
@@ -1274,7 +1279,8 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     # 要在 spawn/提交之前以退出码 2 结束，不该变成一批 job 级 engine_error（submit 更坏：「提交成功」后逐 job error、
     # 诊断只落后台日志）。云端后端 worker 在 Fargate，本机没有也正常（那个后端探镜像/task-def，见各自的 cloud 分支）。
     if args.backend != "cloud":
-        miss = _preflight_worker_runtimes(jobs, steps_dir)
+        # --expose-local 下另要求 worker 声明会话预热支持（ADR 0051 决策 13）：在起隧道之前拒绝，不需要拆
+        miss = _preflight_worker_runtimes(jobs, steps_dir, require_session_warmup=bool(getattr(args, "expose_local", None)))
         if miss is not None:
             return miss
     # 设备选择（ADR 0053 决策 4）两个后端都在这里解析：纯本地、零 AWS；未指定设备在提交前以退出码 2 结束（不自动挑设备）。
@@ -1304,12 +1310,13 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     return prepared
 
 
-def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None") -> RunMeta:
+def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None", warmup_url: "str | None") -> RunMeta:
     """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + run 级执行参数。
 
     `run` 与 `submit` 共用（六个字段曾各抄一份）；run_id 在此生成，调用方从 `run_meta.run_id` 取回。
     `steps_dir` 在云端后端恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
-    注入的额外请求头（ADR 0035 决策 4），空表归一成 None。
+    注入的额外请求头（ADR 0035 决策 4），空表归一成 None；`warmup_url` 是隧道的会话预热地址（ADR 0051 决策 13），
+    与额外请求头在隧道模式下恒成对出现、不经隧道都为 None。
     """
     return RunMeta(
         run_id=compose.new_run_id(), created_at=compose.now_iso(), jobs=tuple(jobs),
@@ -1317,7 +1324,7 @@ def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict |
         max_concurrency=args.max_concurrency,
         steps_dir=steps_dir,
         cli_version=_installed_version(),  # 写端版本只记不比（ADR 0037 决策 7）；未装成包为 None
-        session_warmup_url=None,  # 隧道鉴权落地后由 _setup_tunnel 给出（ADR 0051 决策 13）
+        session_warmup_url=warmup_url,
     )
 
 
@@ -1443,7 +1450,8 @@ def _cmd_submit(args) -> int:
         return tunneled
     jobs, tunnel_headers, tunnel_info = tunneled
 
-    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)  # steps_dir 随 definition 到达宿主
+    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers,
+                               tunnel_info.warmup_url if tunnel_info is not None else None)  # steps_dir 与预热地址随 definition 到达宿主
     run_id = run_meta.run_id
     from gherkai_core.model import JobState, RunState
     initial = RunState(
@@ -2285,7 +2293,7 @@ def _cmd_run(args) -> int:
 
     # 3) 组合根：构造 RunMeta（definition 先于执行，ADR 0016/0027；与 submit 同一份，见 _build_run_meta）
     #    + 注入具体引擎 resolver（core 引擎无关）
-    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers)
+    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers, tunnel_info.warmup_url if tunnel_info is not None else None)
     run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
     worker_log_fh = None  # --quiet（本机后端）时打开的 worker 日志句柄，见 build_engines 处
@@ -2428,6 +2436,7 @@ def _cmd_run(args) -> int:
             worker_task_defs=cloud_fargate["worker_task_defs"],
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None 表示不注入）
+            session_warmup_url=run_meta.session_warmup_url,  # 会话预热地址（ADR 0051 决策 13），与写进 definition 的同一个值
         )
     else:
         if args.quiet:
@@ -2443,6 +2452,7 @@ def _cmd_run(args) -> int:
             nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
+            session_warmup_url=run_meta.session_warmup_url,  # 同上（ADR 0051 决策 13）
             steps_dir=steps_dir,  # 使用方确定性 step 目录（ADR 0037 决策 4；与写进 definition 的同一个值）
             worker_log=worker_log_fh,  # --quiet 时的 worker 日志落点；None 表示 stderr 透传（默认）
         )

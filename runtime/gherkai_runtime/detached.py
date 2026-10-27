@@ -263,6 +263,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         region=region, profile=profile,
         # 额外请求头随 definition 持久化（ADR 0035：submit 进程算好落 META，per-run 重建端读回注入）
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
+        session_warmup_url=meta.session_warmup_url,  # 会话预热地址同理随 definition 走（ADR 0051 决策 13）
         # 使用方 step 目录同理随 definition 走（ADR 0037 决策 4）：**读回、绝不在此重解析 `./steps`**——
         # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同（ADR 0034），
         # 重解析必让同一个 run 在三个宿主下用到不同的确定性 step 集，判定不可复现。

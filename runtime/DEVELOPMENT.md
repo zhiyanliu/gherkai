@@ -37,8 +37,9 @@
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
   避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
   **唯一归一化与校验点**，ADR 0038）
-- `tunnel.py` —— 隧道 provider（ADR 0035）：`--expose-local` 启动 / 拆除 ngrok（basic-auth 凭据每个 run 轮换一次、
-  按 pid 跨进程收尾）+ job 文本里的 origin 替换（`map_origin_in_jobs`，worker/core 对隧道无知）
+- `tunnel.py` —— 隧道 provider（ADR 0035；鉴权按 ADR 0051 决策 13）：`--expose-local` 启动 / 拆除 ngrok（每个 run 生成访问令牌与会话 cookie 值、
+  渲染四条规则的流量策略、给出会话预热地址；按 pid 跨进程收尾）+ job 文本里 origin 的带边界替换（`replace_origin` / `map_origin_in_jobs`，
+  替换成干净的隧道地址，worker/core 对隧道无知）；边缘契约常量（路径、参数名、cookie 名、页面标记）与两个 worker 各持一份同值，由 `engines/fixtures/tunnel-warmup.json` 对拍
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 恒注入的额外请求头
   （`TUNNEL_EXTRA_HTTP_HEADERS`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）

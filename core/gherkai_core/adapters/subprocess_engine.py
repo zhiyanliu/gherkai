@@ -22,7 +22,7 @@ from typing import Callable, Iterator
 
 from gherkai_core.model import Event, Job
 from gherkai_core.termcolor import use_color
-from gherkai_core.redact import redact_url_userinfo
+from gherkai_core.redact import redact_secrets
 from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
 
@@ -227,7 +227,7 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None, color: int | None = No
     if sink is not None:
         for line in stream:
             try:
-                sink.write(f"{prefix} {redact_url_userinfo(line)}")  # 隧道凭据不进日志（ADR 0035 决策 5）
+                sink.write(f"{prefix} {redact_secrets(line)}")  # 隧道凭据不进日志（ADR 0035 决策 5）
                 sink.flush()
             except ValueError:
                 return  # 句柄已关表示本进程正在收尾（join 超时后仍有尾巴的残余路径）：静默停转发，别把 traceback 打到 stderr
@@ -237,4 +237,4 @@ def _pump_log(stream, scope_id: str, tag: str, sink=None, color: int | None = No
             color = _scope_color(scope_id)
         prefix = f"\033[{color}m{prefix}\033[0m"
     for line in stream:
-        sys.stderr.write(f"{prefix} {redact_url_userinfo(line)}")
+        sys.stderr.write(f"{prefix} {redact_secrets(line)}")

@@ -292,15 +292,15 @@ def _runtime_version() -> str | None:
 
 
 # 组合根拥有的 worker env（`GHERKAI_STEPS_DIR`、`GHERKAI_NO_ARTIFACTS`——ADR 0037 决策 4/3；
-# `GHERKAI_EXTRA_HTTP_HEADERS`——ADR 0035 决策 4）：**有值显式注、无值显式清**——它们是组合根 → worker 的内部
-# 接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` 的值随
-# definition 持久化（`RunMeta.steps_dir` / `RunMeta.extra_http_headers`），宿主继承值越过它，同一个 run 在三个宿主
-# （同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头、判定不可复现；
+# `GHERKAI_EXTRA_HTTP_HEADERS`——ADR 0035 决策 4；`GHERKAI_SESSION_WARMUP_URL`——ADR 0051 决策 13）：**有值显式注、无值显式清**
+# ——它们是组合根 → worker 的内部接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` /
+# `GHERKAI_SESSION_WARMUP_URL` 的值随 definition 持久化（`RunMeta.steps_dir` / `extra_http_headers` / `session_warmup_url`），宿主继承值
+# 越过它，同一个 run 在三个宿主（同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头/预热地址、判定不可复现；
 # `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该方式什么都不落），清它挡的是另一件事：
 # 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。
 # **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 取值按 `build_engines`
 # docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
-_COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS")
+_COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS", "GHERKAI_SESSION_WARMUP_URL")
 
 
 def scrubbed_environ() -> dict[str, str]:
@@ -320,6 +320,7 @@ def build_engines(
     region: str | None = None,
     profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
+    session_warmup_url: str | None = None,
     steps_dir: str | Path | None = None,
     no_artifacts: bool = False,
     worker_log=None,
@@ -374,9 +375,13 @@ def build_engines(
     # - 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：JSON 经 env 注给
     #   两个 worker，worker 在 browser context 上 setExtraHTTPHeaders（纯 CDP 命令，无回调）。
     # - 使用方确定性 step 目录（ADR 0037 决策 4）：worker 只认这个 env，绝对路径、约定逻辑不进 worker。
+    # - 会话预热地址（ADR 0051 决策 13）：隧道模式下随 definition 下发（`RunMeta.session_warmup_url`），worker 在第一个 scenario 之前
+    #   导航一次换会话 cookie；与额外请求头成对（有请求头必有预热地址，worker 据此判 definition 完整性）。
     common_env: dict[str, str] = {}
     if extra_http_headers:
         common_env["GHERKAI_EXTRA_HTTP_HEADERS"] = json.dumps(extra_http_headers, ensure_ascii=False)
+    if session_warmup_url:
+        common_env["GHERKAI_SESSION_WARMUP_URL"] = session_warmup_url
     if steps_dir is not None:
         common_env["GHERKAI_STEPS_DIR"] = str(steps_dir)
     if no_artifacts:
@@ -1101,6 +1106,7 @@ def build_fargate_engines(
     network_config: dict, worker_task_defs: Mapping[str, str],
     region: str | None = None, profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
+    session_warmup_url: str | None = None,
     ecs=None, s3=None, ddb_events_table=None,
     no_artifacts: bool = False,
 ) -> dict[str, Engine]:
@@ -1156,6 +1162,8 @@ def build_fargate_engines(
         {"GHERKAI_EXTRA_HTTP_HEADERS": json.dumps(extra_http_headers, ensure_ascii=False)}
         if extra_http_headers else {}
     )
+    if session_warmup_url:  # 会话预热地址随 definition 读回、经 RunTask overrides 进容器 env（ADR 0051 决策 13；0035 决策 5 明确不脱敏的一处）
+        headers_env = {**headers_env, "GHERKAI_SESSION_WARMUP_URL": session_warmup_url}
     if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传（ADR 0037 决策 3）
         headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**

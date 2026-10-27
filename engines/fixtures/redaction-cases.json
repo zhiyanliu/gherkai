@@ -1,0 +1,97 @@
+{
+  "_comment": "凭据脱敏三条规则的用例（ADR 0035 决策 5、0051 决策 11）。消费者：core/tests/test_redact.py、engines/novaact/tests/test_redact.py、engines/midscene/src/worker/redact.test.mts，三份实现读同一个文件、逐条相等。每项 [输入, 期望]。",
+  "cases": [
+    [
+      "https://u1:p1@h.example/login",
+      "https://***@h.example/login"
+    ],
+    [
+      "https://token@h.example/",
+      "https://***@h.example/"
+    ],
+    [
+      "https://h.example/login",
+      "https://h.example/login"
+    ],
+    [
+      "https://h.example/users/@alice",
+      "https://h.example/users/@alice"
+    ],
+    [
+      "https://h.example/?email=a@b.example",
+      "https://h.example/?email=a@b.example"
+    ],
+    [
+      "先开 https://u1:p1@a.example/ 再开 http://u2:p2@b.example:8080/x",
+      "先开 https://***@a.example/ 再开 http://***@b.example:8080/x"
+    ],
+    [
+      "u1:p1@h.example/login",
+      "u1:p1@h.example/login"
+    ],
+    [
+      "联系 alice@example.com",
+      "联系 alice@example.com"
+    ],
+    [
+      "打开https://example.com，用admin@corp.com登录",
+      "打开https://example.com，用admin@corp.com登录"
+    ],
+    [
+      "https://a.example,x@b.example",
+      "https://***@b.example"
+    ],
+    [
+      "",
+      ""
+    ],
+    [
+      "https://h.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=abc123",
+      "https://h.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=***"
+    ],
+    [
+      "https://h.example/x?a=1&gherkai_tunnel_token=abc&b=2",
+      "https://h.example/x?a=1&gherkai_tunnel_token=***&b=2"
+    ],
+    [
+      "https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAX%2F20260101%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20260101T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature=deadbeef",
+      "https://b.s3.amazonaws.com/k?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=***&X-Amz-Date=20260101T000000Z&X-Amz-Expires=900&X-Amz-SignedHeaders=host&X-Amz-Signature=***"
+    ],
+    [
+      "https://b.s3.amazonaws.com/k?X-Amz-Security-Token=IQoJb3JpZ2luX2Vj%2F%2Fabc&X-Amz-Date=1",
+      "https://b.s3.amazonaws.com/k?X-Amz-Security-Token=***&X-Amz-Date=1"
+    ],
+    [
+      "?x-amz-signature=ABC",
+      "?x-amz-signature=***"
+    ],
+    [
+      "<node url=\"https://b/k?X-Amz-Date=1&amp;X-Amz-Signature=abc&amp;X-Amz-Expires=9\"/>",
+      "<node url=\"https://b/k?X-Amz-Date=1&amp;X-Amz-Signature=***&amp;X-Amz-Expires=9\"/>"
+    ],
+    [
+      "{\"url\":\"https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=abc\",\"k\":\"v\"}",
+      "{\"url\":\"https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=***\",\"k\":\"v\"}"
+    ],
+    [
+      "令牌 https://h/a?gherkai_tunnel_token=abc 之后",
+      "令牌 https://h/a?gherkai_tunnel_token=*** 之后"
+    ],
+    [
+      "https://h/a?token=abc&signature=def",
+      "https://h/a?token=abc&signature=def"
+    ],
+    [
+      "https://devicefarm-remote.us-west-2.amazonaws.com/remote-endpoint/abcDEF123xyz/wd/hub/session",
+      "https://devicefarm-remote.us-west-2.amazonaws.com/remote-endpoint/***/wd/hub/session"
+    ],
+    [
+      "端点 https://x.amazonaws.com/remote-endpoint/abcDEF123xyz",
+      "端点 https://x.amazonaws.com/remote-endpoint/***"
+    ],
+    [
+      "https://u:p@h/x?gherkai_tunnel_token=t",
+      "https://***@h/x?gherkai_tunnel_token=***"
+    ]
+  ]
+}

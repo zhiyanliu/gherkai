@@ -13,8 +13,9 @@ import gherkai_cli.__main__ as m
 from gherkai_core.model import JobResult, RunResult, Status
 from gherkai_runtime import tunnel as gtunnel
 
-INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
-                          local_origin="http://localhost:3000")
+INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
+                          warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+TOKEN = "a" * 32
 
 
 def _write_feature(tmp_path: Path) -> Path:
@@ -34,7 +35,7 @@ def _patch_tunnel(monkeypatch, calls: list):
 
 
 def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch):
-    """run --expose-local：job 文本中 origin 前缀 → 凭据内嵌隧道 URL；skip 头进 RunMeta（ADR 0035 决策 2/4）。"""
+    """run --expose-local：job 文本中的 origin → 干净的隧道地址；skip 头与会话预热地址一起进 RunMeta（ADR 0035 决策 2/4；0051 决策 13）。"""
     calls, box = [], {}
     _patch_tunnel(monkeypatch, calls)
 
@@ -49,9 +50,10 @@ def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch):
     assert rc == 0
     meta = box["run_meta"]
     step = meta.jobs[0].scenarios[0].steps[0]
-    assert "https://u1:p1@t.ngrok-free.app/login" in step.text  # 前缀替换 + 凭据内嵌
-    assert "localhost:3000" not in step.text
+    assert "https://t.ngrok-free.app/login" in step.text  # 替换成干净的隧道地址，不内嵌凭据、不附令牌
+    assert "localhost:3000" not in step.text and TOKEN not in step.text
     assert dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
+    assert meta.session_warmup_url == INFO.warmup_url  # 预热地址随 definition 走
     assert ("make", "ngrok") in calls and ("start", "http://localhost:3000") in calls
 
 
@@ -69,7 +71,7 @@ def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     assert rc == 0
     assert calls == []
-    assert box["run_meta"].extra_http_headers is None
+    assert box["run_meta"].extra_http_headers is None and box["run_meta"].session_warmup_url is None
 
 
 def test_run_tunnel_failure_exits_2(tmp_path, monkeypatch, capsys):
@@ -102,16 +104,19 @@ def test_submit_local_writes_tunnel_file_for_per_run_cleanup(tmp_path, monkeypat
     assert len(run_dirs) == 1
     tj = json.loads((run_dirs[0] / "tunnel.json").read_text(encoding="utf-8"))
     assert tj["pid"] == 777 and tj["url"] == INFO.url
+    assert TOKEN not in (run_dirs[0] / "tunnel.json").read_text(encoding="utf-8")  # 收尾凭据只有 pid / url / origin，不带令牌
     assert any("_reconcile" in c for c in forked[0])  # per-run 照常 fork（它是收尾宿主）
-    # definition 里的 URL 已替换（per-run/云端读回即隧道地址）
+    # definition 里的 URL 已替换成干净的隧道地址；预热地址（含令牌）只在 run_meta 里（per-run / 接力者读回注入 worker）
     meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
-    assert "u1:p1@t.ngrok-free.app" in json.dumps(meta, ensure_ascii=False)
+    assert "https://t.ngrok-free.app/login" in json.dumps(meta, ensure_ascii=False)
+    assert meta["session_warmup_url"] == INFO.warmup_url
 
 
 def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys):
     """run --json 的输出脱敏、落盘的 run 定义保留明文（ADR 0035 决策 5）。
 
-    stdout 里 step 文本与判定消息的隧道地址都是 `https://***@…`；run_meta.json 要被推进器读回执行，凭据必须原样在。"""
+    stdout 里预热地址的令牌是 `***`、判定消息里的 userinfo 是 `***@`；run_meta.json 要被推进器读回执行，令牌必须原样在；
+    jobs/*.json 只被 status / explain 读、step 文本已不含秘密。"""
     calls = []
     _patch_tunnel(monkeypatch, calls)
 
@@ -132,15 +137,32 @@ def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, mon
     assert rc == 1
     out = capsys.readouterr().out
     doc = json.loads(out)                                   # 脱敏后仍是单一可解析文档
-    assert "u1:p1@" not in out
+    assert "u1:p1@" not in out and TOKEN not in out
     step_text = doc["run_meta"]["jobs"][0]["scenarios"][0]["steps"][0]["text"]
-    assert "https://***@t.ngrok-free.app/login" in step_text
+    assert "https://t.ngrok-free.app/login" in step_text  # step 文本本就不含秘密
+    assert doc["run_meta"]["session_warmup_url"].endswith("gherkai_tunnel_token=***")  # 预热地址的令牌盖住
     assert doc["jobs"][0]["message"] == "页面停在 https://***@t.ngrok-free.app/login 未跳转"
     assert doc["artifacts"]["run_meta"].endswith("run_meta.json")   # 产物落点照常折进同一文档
     run_dirs = [d for d in report_dir.iterdir() if d.is_dir()]
     assert len(run_dirs) == 1
     persisted = (run_dirs[0] / "run_meta.json").read_text(encoding="utf-8")
-    assert "https://u1:p1@t.ngrok-free.app/login" in persisted
+    assert TOKEN in persisted  # 落盘的 definition 保留明文（推进器要读回注入 worker）
+    for jf in (run_dirs[0] / "jobs").glob("*.json"):
+        assert TOKEN not in jf.read_text(encoding="utf-8")
+
+
+def test_expose_local_rejects_worker_without_session_warmup_before_starting_tunnel(tmp_path, monkeypatch, capsys):
+    """本机后端 --expose-local：worker 自述不声明会话预热支持 → 退出码 2，且隧道没有起（拒绝点在起隧道之前，ADR 0051 决策 13）。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    from gherkai_runtime import compose
+
+    real = compose.query_capabilities
+    monkeypatch.setattr(compose, "query_capabilities",
+                        lambda engine, **kw: {k: v for k, v in real(engine, **kw).items() if k != compose.SESSION_WARMUP_KEY})
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", "http://localhost:3000"])
+    assert rc == 2
+    assert "会话预热" in capsys.readouterr().err and calls == []
 
 
 def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsys):

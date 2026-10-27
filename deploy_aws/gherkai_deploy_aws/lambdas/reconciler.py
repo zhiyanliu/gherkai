@@ -374,6 +374,8 @@ def _build(run_id: str):
         network_config=network, worker_task_defs=worker_task_defs, region=region,
         # 额外请求头从 definition 读回（ADR 0035：submit 落 META、此处重建 engine 时注入 RunTask env）
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
+        # 会话预热地址同理从 definition 读回（ADR 0051 决策 13）：丢了它，worker 就会按 definition 完整性判 precheck_failed
+        session_warmup_url=meta.session_warmup_url,
         ecs=boto3.client("ecs", region_name=region), s3=s3, ddb_events_table=events_table,
     )
     # job timeout 到点触发器（ADR 0034「job timeout」节）：env 齐才装配（KICKER_ARN/SCHEDULER_ROLE_ARN 由

@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from gherkai_worker_novaact.lib.redact import redact_url_userinfo
+from gherkai_worker_novaact.lib.redact import redact_secrets
 
 SCHEMA_VERSION = 1          # 消费端据此判「认不认这个版本」（ADR 0042 决策六防线 3）
 ENGINE = "novaact"
@@ -319,5 +319,5 @@ def write_step_evidence(
         shots.append(str(shot))
     path = out / "evidence.json"
     # 隧道凭据不进 evidence（ADR 0035 决策 5）：对整份序列化结果脱敏，url / prompt / thought / message 一并盖住
-    path.write_text(redact_url_userinfo(json.dumps(doc, ensure_ascii=False, indent=2)), encoding="utf-8")
+    path.write_text(redact_secrets(json.dumps(doc, ensure_ascii=False, indent=2)), encoding="utf-8")
     return WrittenEvidence(json_path=str(path), screenshots=shots)

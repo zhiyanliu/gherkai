@@ -602,8 +602,8 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
 
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
-                              local_origin="http://localhost:3000")
+    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
+                              warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
     class _Provider:
         def start(self, origin, **kw):
@@ -643,8 +643,8 @@ def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, 
 
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=777,
-                              local_origin="http://localhost:3000")
+    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
+                              warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
     monkeypatch.setattr(gtunnel, "make_tunnel",
                         lambda name: type("P", (), {"start": lambda self, o, **kw: info})())
     forked = []

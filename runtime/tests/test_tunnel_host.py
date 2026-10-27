@@ -10,8 +10,8 @@ from gherkai_core.model import Job, RunState, Scenario, Status, Step
 from gherkai_runtime import compose, tunnel_host
 from gherkai_runtime import tunnel as gtunnel
 
-INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", auth="u1:p1", pid=4242,
-                          local_origin="http://localhost:3000")
+INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=4242, local_origin="http://localhost:3000",
+                          warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 
 def _job(scope_id: str, timeout_s: float | None) -> Job:
@@ -36,8 +36,9 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
     assert calls == ["ngrok", "http://localhost:3000"]
     assert setup.info is INFO
     assert setup.extra_http_headers == {"ngrok-skip-browser-warning": "1"}
-    # 映射后是新 Job（definition 不可变）：原 jobs 不动
-    assert setup.jobs[0].scenarios[0].steps[0].text == '"https://u1:p1@t.ngrok-free.app/a"'
+    assert setup.warmup_url == INFO.warmup_url  # 预热地址与额外请求头成对给出（ADR 0051 决策 13）
+    # 映射后是新 Job（definition 不可变）：原 jobs 不动；替换进文本的是干净的隧道地址，不内嵌凭据
+    assert setup.jobs[0].scenarios[0].steps[0].text == '"https://t.ngrok-free.app/a"'
     assert jobs[0].scenarios[0].steps[0].text == '"http://localhost:3000/a"'
 
 

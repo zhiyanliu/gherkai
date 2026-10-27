@@ -7,26 +7,60 @@ from __future__ import annotations
 
 import io
 import json
+import re
+from pathlib import Path
 
 import pytest
 
 from gherkai_core.model import Job, Scenario, Step, StepArgument
-from gherkai_runtime.tunnel import NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, stop_tunnel
+from gherkai_runtime import tunnel
+from gherkai_runtime.tunnel import NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, stop_tunnel, warmup_url_for
 
 
-# ---------- TunnelInfo.mapped_base ----------
+# ---------- TunnelInfo 与边缘契约常量 ----------
 
-def test_mapped_base_embeds_credentials():
-    info = TunnelInfo(url="https://abc.ngrok-free.app", auth="u1:p1", pid=1, local_origin="http://localhost:3000")
-    assert info.mapped_base == "https://u1:p1@abc.ngrok-free.app"
+FIXTURE = Path(__file__).resolve().parents[2] / "engines" / "fixtures" / "tunnel-warmup.json"
 
 
-def test_mapped_base_without_auth_is_plain_url():
-    info = TunnelInfo(url="https://abc.ngrok-free.app", auth=None, pid=1, local_origin="http://localhost:3000")
-    assert info.mapped_base == "https://abc.ngrok-free.app"
+def test_tunnel_info_carries_clean_url_and_token_only_in_warmup_url():
+    """隧道事实：url 干净、无凭据；预热地址形态精确；令牌不进 repr（ADR 0051 决策 13）。"""
+    info = TunnelInfo(url="https://abc.ngrok-free.app", pid=1, local_origin="http://localhost:3000",
+                      warmup_url=warmup_url_for("https://abc.ngrok-free.app", "f" * 32))
+    assert "@" not in info.url
+    assert info.warmup_url == "https://abc.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "f" * 32
+    assert "f" * 32 not in repr(info)
 
 
-# ---------- map_origin_in_jobs ----------
+def test_edge_contract_constants_match_the_cross_language_fixture():
+    """路径、参数名、cookie 名、页面标题与正文标记：runtime 与两个 worker 各持一份同值，三方都对同一份 fixture（ADR 0051 决策 13）。"""
+    fx = json.loads(FIXTURE.read_text(encoding="utf-8"))
+    assert (tunnel.WARMUP_PATH, tunnel.CHECK_PATH, tunnel.TOKEN_PARAM, tunnel.COOKIE_NAME) == (
+        fx["warmup_path"], fx["check_path"], fx["token_param"], fx["cookie_name"])
+    assert tunnel.WARMUP_TITLES == fx["titles"] and tunnel.WARMUP_MARKERS == fx["markers"]
+
+
+# ---------- 流量策略（边缘契约的四条规则） ----------
+
+def test_traffic_policy_has_four_rules_cookie_spec_and_markers():
+    """ADR 0051 决策 13「边缘策略」：恰 4 条规则（免费层上限 5）、不含 basic-auth 与 remove-headers、Set-Cookie 精确等于规格、预热响应带
+    no-store 与 no-referrer、四个页面标记与四个标题都在、令牌与 cookie 值各出现在该出现的规则里。"""
+    policy = tunnel.render_traffic_policy("a" * 32, "b" * 32)
+    assert len(re.findall(r"^  - name:", policy, re.M)) == 4 and 4 <= tunnel.POLICY_RULE_LIMIT
+    assert "basic-auth" not in policy and "remove-headers" not in policy
+    assert 'set-cookie: "__Host-gherkai_tunnel=' + "b" * 32 + '; Secure; HttpOnly; Path=/; SameSite=None"' in policy
+    assert "Domain=" not in policy and "Max-Age" not in policy
+    assert policy.count('cache-control: "no-store"') == 4 and 'referrer-policy: "no-referrer"' in policy
+    for marker in tunnel.WARMUP_MARKERS.values():
+        assert marker in policy, marker
+    for title in tunnel.WARMUP_TITLES.values():
+        assert title in policy, title
+    assert "'" + "a" * 32 + "' in req.url.query_params['gherkai_tunnel_token']" in policy  # 令牌只在预热放行规则里比对
+    assert policy.count("b" * 32) == 3  # cookie 值：Set-Cookie、校验路径放行、总闸三处
+    with pytest.raises(ValueError):
+        tunnel.render_traffic_policy("short", "b" * 32)  # 形态不对的秘密不进策略（模板替换无转义面）
+
+
+# ---------- map_origin_in_jobs：带边界的识别（ADR 0035 决策 2） ----------
 
 def _job_with(text: str, argument: StepArgument | None = None) -> Job:
     return Job(
@@ -37,31 +71,48 @@ def _job_with(text: str, argument: StepArgument | None = None) -> Job:
     )
 
 
-BASE = "https://u:p@abc.ngrok-free.app"
+BASE = "https://abc.ngrok-free.app"
+ORIGIN = "http://localhost:3000"
+
+
+@pytest.mark.parametrize("text, expected", [
+    ("http://localhost:3000/x", "https://abc.ngrok-free.app/x"),
+    ("http://localhost:3000", "https://abc.ngrok-free.app"),
+    ("next=http://localhost:3000/x", "next=https://abc.ngrok-free.app/x"),
+    ("去 http://localhost:3000。", "去 https://abc.ngrok-free.app。"),
+    ("Go to http://localhost:3000.", "Go to https://abc.ngrok-free.app."),
+    ("(see http://localhost:3000)", "(see https://abc.ngrok-free.app)"),
+    ("打开http://localhost:3000/a页面", "打开https://abc.ngrok-free.app/a页面"),
+    ("先 http://localhost:3000/a 再 http://localhost:3000/b", "先 https://abc.ngrok-free.app/a 再 https://abc.ngrok-free.app/b"),
+    # 不命中：别的主机或端口、不是 scheme 起点
+    ("http://localhost:3000.evil/", "http://localhost:3000.evil/"),
+    ("http://localhost:30001/x", "http://localhost:30001/x"),
+    ("xhttp://localhost:3000", "xhttp://localhost:3000"),
+    ("http://localhost:3000abc", "http://localhost:3000abc"),
+])
+def test_replace_origin_boundaries(text, expected):
+    assert tunnel.replace_origin(text, ORIGIN, BASE) == expected
 
 
 def test_map_replaces_step_text_prefix():
-    jobs = [_job_with('"http://localhost:3000/login?next=/home"')]
-    out = map_origin_in_jobs(jobs, "http://localhost:3000", BASE)
-    assert out[0].scenarios[0].steps[0].text == f'"{BASE}/login?next=/home"'
-    # 原 definition 不可变（frozen 重建，不是原地改）
-    assert jobs[0].scenarios[0].steps[0].text.startswith('"http://localhost:3000')
+    out = map_origin_in_jobs([_job_with('打开 "http://localhost:3000/login"')], ORIGIN, BASE)
+    assert out[0].scenarios[0].steps[0].text == '打开 "https://abc.ngrok-free.app/login"'
 
 
-def test_map_replaces_docstring_and_datatable():
-    arg_doc = StepArgument(kind="docString", content="POST http://localhost:3000/api/items")
-    arg_tab = StepArgument(kind="dataTable", rows=(("url", "http://localhost:3000/a"), ("x", "y")))
-    jobs = [_job_with("提交", arg_doc), _job_with("表格", arg_tab)]
-    out = map_origin_in_jobs(jobs, "http://localhost:3000", BASE)
-    assert out[0].scenarios[0].steps[0].argument.content == f"POST {BASE}/api/items"
-    assert out[1].scenarios[0].steps[0].argument.rows == (("url", f"{BASE}/a"), ("x", "y"))
+def test_map_replaces_docstring_and_datatable_cells_independently():
+    arg = StepArgument(kind="dataTable", rows=(("http://localhost:3000/a", "x"), ("y", "http://localhost:3000.evil/")))
+    out = map_origin_in_jobs([_job_with("表", arg)], ORIGIN, BASE)
+    assert out[0].scenarios[0].steps[0].argument.rows == (("https://abc.ngrok-free.app/a", "x"), ("y", "http://localhost:3000.evil/"))
+    doc = StepArgument(kind="docString", content="第一行 http://localhost:3000/p\n第二行 http://localhost:3000")
+    out2 = map_origin_in_jobs([_job_with("文", doc)], ORIGIN, BASE)
+    assert out2[0].scenarios[0].steps[0].argument.content == "第一行 https://abc.ngrok-free.app/p\n第二行 https://abc.ngrok-free.app"
 
 
-def test_map_leaves_non_matching_urls_untouched():
-    jobs = [_job_with('"https://wikipedia.org" 再看 "http://127.0.0.1:3000"')]
-    out = map_origin_in_jobs(jobs, "http://localhost:3000", BASE)
-    # 前缀字符串级匹配：localhost 与 127.0.0.1 不互认（ADR 0035 决策 2，文档写明）
-    assert out[0].scenarios[0].steps[0].text == jobs[0].scenarios[0].steps[0].text
+def test_map_leaves_other_jobs_and_original_untouched():
+    job = _job_with('打开 "http://localhost:3000/login"')
+    out = map_origin_in_jobs([job, _job_with("别的")], ORIGIN, BASE)
+    assert job.scenarios[0].steps[0].text == '打开 "http://localhost:3000/login"'  # 原 jobs 不变
+    assert out[1].scenarios[0].steps[0].text == "别的"
 
 
 # ---------- NgrokTunnel（fake spawn/API） ----------
@@ -91,30 +142,30 @@ def _fake_popen_writing_log(url_value: str | None, spawned: dict, alive: bool = 
     return popen
 
 
-def test_ngrok_start_spawns_agent_and_reads_log():
+def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
+    """start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600；预热地址带本次令牌；
+    两次 start 的令牌与 cookie 值都不同、各 128 位；不再有关掉鉴权的开关（ADR 0051 决策 13；0035「边界与不变量」）。"""
+    import os as _os
+
     spawned: dict = {}
-    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned),
-                    sleep=lambda s: None)
+    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None)
     info = t.start("http://localhost:3000")
-    assert info.url == "https://xyz.ngrok-free.app"
-    assert info.pid == 4242
-    assert info.auth and ":" in info.auth  # basic-auth 默认开启（ADR 0035 决策 4）
+    assert info.url == "https://xyz.ngrok-free.app" and info.pid == 4242
     cmd = spawned["cmd"]
     assert cmd[0] == "ngrok" and cmd[1] == "http" and cmd[2] == "http://localhost:3000"
     assert "--log" in cmd and "--log-format" in cmd  # 日志文件通道（v3 无 --web-addr，实际运行暴露）
-    assert "--traffic-policy-file" in cmd  # 凭据经 Traffic Policy 在边缘拦
-    # policy 文件内容真含凭据
-    policy = open(cmd[cmd.index("--traffic-policy-file") + 1], encoding="utf-8").read()
-    assert "basic-auth" in policy and info.auth in policy
-
-
-def test_ngrok_start_without_auth_skips_policy():
-    spawned: dict = {}
-    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned),
-                    sleep=lambda s: None)
-    info = t.start("http://localhost:3000", with_auth=False)
-    assert info.auth is None and info.mapped_base == info.url
-    assert "--traffic-policy-file" not in spawned["cmd"]
+    policy_path = cmd[cmd.index("--traffic-policy-file") + 1]
+    assert _os.stat(policy_path).st_mode & 0o777 == 0o600
+    policy = open(policy_path, encoding="utf-8").read()
+    token = info.warmup_url.rsplit("=", 1)[1]
+    assert info.warmup_url == f"https://xyz.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token={token}"
+    assert re.fullmatch(r"[0-9a-f]{32}", token) and token in policy and "basic-auth" not in policy
+    cookie = re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy).group(1)
+    assert len(cookie) == 32 and cookie != token
+    info2 = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start("http://localhost:3000")
+    assert info2.warmup_url != info.warmup_url
+    with pytest.raises(TypeError):
+        t.start("http://localhost:3000", with_auth=False)  # 曾有的开关已删：隧道模式恒带鉴权
 
 
 def test_ngrok_start_timeout_reports_authtoken_hint():

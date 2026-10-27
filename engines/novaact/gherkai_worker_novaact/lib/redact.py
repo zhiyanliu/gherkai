@@ -1,19 +1,25 @@
-"""隧道凭据脱敏（ADR 0035 决策 5）：把文本里 `scheme://用户:口令@主机` 的 userinfo 段换成 `***`。
-
-与 `gherkai_core/redact.py`、Midscene worker `lib/redact.mts` 三份同文：本包零 core 依赖（ADR 0024 / 0037），
-故复制一份而不 import；改规则三处同改。规则只作用于 `://` 之后、`@` 之前由 RFC 3986 userinfo 字符（字母数字与 `._~%!$&'()*+,;=:-`）组成的一段，
-对已序列化的 JSON 行安全，对中文叙述也安全（不含中文与全角标点）。
+"""工具自产文字里的凭据脱敏（ADR 0035 决策 5；ADR 0051 决策 11）：三条规则，与 `gherkai_core/redact.py`、Midscene worker
+`lib/redact.mts` 三份同文。本包零 core 依赖（ADR 0024 / 0037），故复制一份而不 import；改规则三处同改，用例三份同读
+`engines/fixtures/redaction-cases.json`。规则原文与字符集的理由见 core 那份的模块头。
 """
 from __future__ import annotations
 
 import re
 
 _USERINFO = re.compile(r"(?<=://)[A-Za-z0-9._~%!$&'()*+,;=:-]+@")
+_QUERY_SECRET = re.compile(
+    r"((?:[?&]|&amp;)(?:X-Amz-Signature|X-Amz-Security-Token|X-Amz-Credential|gherkai_tunnel_token)=)[^&\s\"#\\<]*",
+    re.IGNORECASE,
+)
+_ENDPOINT_TOKEN = re.compile(r"(/remote-endpoint/)[^/?#@\s\"\\]+")
 MASK = "***@"
+SECRET_MASK = "***"
 
 
-def redact_url_userinfo(text: str | None) -> str | None:
-    """`https://u:p@host/x` → `https://***@host/x`；None 原样返回。"""
+def redact_secrets(text: str | None) -> str | None:
+    """三条规则依次作用于一段文本；None 原样返回。"""
     if text is None:
         return None
-    return _USERINFO.sub(MASK, text)
+    out = _USERINFO.sub(MASK, text)
+    out = _QUERY_SECRET.sub(lambda m: m.group(1) + SECRET_MASK, out)
+    return _ENDPOINT_TOKEN.sub(lambda m: m.group(1) + SECRET_MASK, out)

@@ -1657,3 +1657,40 @@ def test_step_targets_from_registry_fixture_pass_the_cli_contract_check():
     fx = json.loads((Path(__file__).resolve().parents[2] / "engines" / "fixtures" / "deterministic-handles.json").read_text(encoding="utf-8"))
     for case in fx["valid"]:
         compose._validate_targets("midscene", case["targets"], where=f"确定性 step（{case['name']}）", top_level=False)
+
+
+def test_session_warmup_url_is_owned_env_injected_to_both_engines_and_scrubbed_otherwise(monkeypatch, midscene_env_cmd):
+    """会话预热地址（ADR 0051 决策 13）是组合根拥有的 worker env：有值注给两个引擎、无值时宿主继承的同名值被清掉（随 definition 走，
+    三个宿主下同一个 run 用同一个值）。"""
+    assert "GHERKAI_SESSION_WARMUP_URL" in compose._COMPOSE_OWNED_WORKER_ENV
+    url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
+    engines = compose.build_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url)
+    for name in ("novaact", "midscene"):
+        assert engines[name]._env["GHERKAI_SESSION_WARMUP_URL"] == url, name
+    monkeypatch.setenv("GHERKAI_SESSION_WARMUP_URL", "https://leaked/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=x")
+    engines2 = compose.build_engines()
+    for name in ("novaact", "midscene"):
+        env2 = engines2[name]._env
+        assert env2 is not None and "GHERKAI_SESSION_WARMUP_URL" not in env2, name
+
+
+def test_fargate_engines_carry_session_warmup_url_in_extra_env_only_when_given(monkeypatch):
+    """云端后端：预热地址随额外请求头一起进 RunTask overrides 的 env（容器不继承宿主 env，必须显式注）；无值时不出现该键。"""
+    from gherkai_core.adapters import fargate_engine as fe
+
+    captured: list = []
+
+    class _FakeFargate:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
+    common = dict(run_id="rid-1", prefix="p-", cluster="c", events_table="e", bucket="b", report_dir="runs",
+                  network_config={"subnets": ["subnet-x"]}, worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
+                  region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+    url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
+    compose.build_fargate_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url, **common)
+    assert all(k["extra_env"]["GHERKAI_SESSION_WARMUP_URL"] == url for k in captured)
+    captured.clear()
+    compose.build_fargate_engines(**common)
+    assert all("GHERKAI_SESSION_WARMUP_URL" not in k["extra_env"] for k in captured)

@@ -41,10 +41,13 @@ UNBOUNDED_JOB_BUDGET_S = 3600.0
 
 @dataclass(frozen=True)
 class TunnelSetup:
-    """隧道就绪后的三件产物：映射过的 definition + 隧道模式的额外请求头 + 隧道事实（收尾凭据）。"""
+    """隧道就绪后的四件产物：映射过的 definition + 隧道模式的额外请求头 + 会话预热地址 + 隧道事实（收尾凭据）。
+    额外请求头与预热地址在隧道模式下**恒同时给出**（含只有设备目标的 run），worker 侧的 definition 完整性判据（有请求头必有预热地址，
+    ADR 0035「边界与不变量」）才在任何目标上都成立。"""
 
     jobs: tuple[Job, ...]
     extra_http_headers: dict[str, str]
+    warmup_url: str
     info: _tunnel.TunnelInfo
 
 
@@ -55,8 +58,8 @@ def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -
     映射产出新 Job（definition 不可变，见 `map_origin_in_jobs`）；原 jobs 不动。
     """
     info = _tunnel.make_tunnel(provider).start(local_origin)
-    mapped = _tunnel.map_origin_in_jobs(list(jobs), local_origin, info.mapped_base)
-    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), info=info)
+    mapped = _tunnel.map_origin_in_jobs(list(jobs), local_origin, info.url)  # 干净的隧道地址，不内嵌凭据（ADR 0051 决策 13）
+    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), warmup_url=info.warmup_url, info=info)
 
 
 def compute_watch_ttl_s(

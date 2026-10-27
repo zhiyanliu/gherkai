@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 
 from gherkai_core.errors import WorkerExitError, WorkerNetworkError
-from gherkai_core.redact import redact_url_userinfo
+from gherkai_core.redact import redact_secrets
 from gherkai_core.model import (
     Cost,
     DeviceFarmRequest,
@@ -175,7 +175,7 @@ def event_from_json(d: dict) -> Event:
             votes=_votes_from_json(d.get("votes")),
             cost=_cost_from_json(d.get("cost")),
             error_type=d.get("errorType"),
-            message=redact_url_userinfo(d.get("message")),  # 隧道凭据不进判定记录（ADR 0035 决策 5）：盖住解码后的视图（含第三方 worker），原始事件行不改
+            message=redact_secrets(d.get("message")),  # 隧道凭据不进判定记录（ADR 0035 决策 5）：盖住解码后的视图（含第三方 worker），原始事件行不改
             report_refs=_report_refs_from_json(d.get("reportRefs")),  # step 级产物：两引擎的 kind=evidence + Nova 的 kind=trajectory（ADR 0042 决策一 / 0027 下沉）
         )
     if t == "step_skipped":
@@ -205,7 +205,7 @@ def event_from_json(d: dict) -> Event:
             report_refs=_report_refs_from_json(d.get("reportRefs")),
             status=Status.ERROR if present else None,
             error_type=d.get("errorType") if present else None,
-            message=redact_url_userinfo(d.get("message")) if present else None,  # 预热失败的消息可能带地址（ADR 0035 决策 5）
+            message=redact_secrets(d.get("message")) if present else None,  # 预热失败的消息可能带地址（ADR 0035 决策 5）
         )
     if t == "session_opened":
         # 设备会话打开（ADR 0051 决策 4）：origin 封闭集合（core 按它分支：attempted 不写代表会话、永远在未确认集里）；

@@ -1,0 +1,24 @@
+{
+  "_comment": "隧道「令牌换 cookie」的边缘契约常量（ADR 0051 决策 13）。真源在 runtime/gherkai_runtime/tunnel.py（组合根生成策略与预热地址），两个 worker 各持一份同值（Nova lib/constants.py、Midscene lib/tunnel-warmup.mts），三方测试都读本文件断言相等。titles 是预热页面的 document.title（桌面 worker 读），markers 是正文标记（设备 worker 在控件树里找）。",
+  "warmup_path": "/.well-known/gherkai-tunnel-auth",
+  "check_path": "/.well-known/gherkai-tunnel-check",
+  "token_param": "gherkai_tunnel_token",
+  "cookie_name": "__Host-gherkai_tunnel",
+  "titles": {
+    "ready": "gherkai-tunnel-ready",
+    "denied": "gherkai-tunnel-denied",
+    "error": "gherkai-tunnel-error",
+    "auth_required": "gherkai-tunnel-auth-required"
+  },
+  "markers": {
+    "ready": "GHERKAI TUNNEL READY",
+    "denied": "GHERKAI TUNNEL DENIED",
+    "error": "GHERKAI TUNNEL ERROR",
+    "auth_required": "GHERKAI TUNNEL AUTH REQUIRED"
+  },
+  "env": {
+    "warmup_url": "GHERKAI_SESSION_WARMUP_URL",
+    "extra_http_headers": "GHERKAI_EXTRA_HTTP_HEADERS"
+  },
+  "capability_key": "session_warmup"
+}
