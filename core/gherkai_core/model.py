@@ -517,7 +517,7 @@ class RunMeta:
     extra_http_headers: tuple[tuple[str, str], ...] | None = None
     # 本 run 同时运行的 job 上限（ADR 0034 机制四）：run 级执行参数、载体 definition（推进器与提交进程可能
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
-    # 与部署侧 cap 取 min）。None 表示旧 definition 无此值（推进器按各自兼容口径回落）。
+    # 与部署侧 cap 取 min）。None 表示提交侧没有给出（推进器按各自口径回落）；落盘为 null（键集固定，ADR 0037 决策 7）。
     max_concurrency: int | None = None
     # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按
     # `--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`（存在才用）解析成绝对路径后填这里，
@@ -528,16 +528,16 @@ class RunMeta:
     steps_dir: str | None = None
     # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次用的是哪套确定性
     # step 集」。人读面只有 definition 自身：落库的 META（云端后端下是 runs 表 META item；本机后端此字段恒 None、
-    # 序列化省键）与 `gherkai run --json` 顶层的 `run_meta`；status 输出当前不带它（文本与 `--json` 都只吐
+    # 落盘为 null）与 `gherkai run --json` 顶层的 `run_meta`；status 输出当前不带它（文本与 `--json` 都只吐
     # RunState + artifacts），报告页同样不展示。机器起 task 一律看下面的 worker_task_defs。提交侧 preflight
-    # 解析 `--worker-variant`（缺省取部署级默认指针）后填。None 表示本机后端或引入本 ADR 前提交的旧 definition。
+    # 解析 `--worker-variant`（缺省取部署级默认指针）后填。None 表示本机后端。
     worker_variant: str | None = None
     # 引擎 → worker task-def **revision ARN**（ADR 0038 不变量「运行时只用 definition 里的显式 revision，
     # 永不用 family 取最新」）：提交侧 preflight 把 variant 解析成各引擎的精确 revision，写进 definition；
     # 所有起 task 的宿主（同步 run 的 FargateEngine / kicker / reconciler）原样用它 RunTask，于是一个 run 内
     # 镜像固定，期间别人重推同名 variant 不影响正在运行的 run。core 只搬运不消费（解析逻辑在组合根 compose）。
     # 载体是 definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
-    # None 表示本机后端或旧 definition（宿主按后端默认指针解析的兼容路径，见 ADR 0038「读侧兼容口径」）。
+    # None 表示本机后端；云端 definition 必有值，推进器读到 None 按定义违约标 error、不回落默认指针（ADR 0037 决策 7 不留兼容分支）。
     worker_task_defs: dict[str, str] | None = None
     # 写出这份 definition 的命令行工具版本（ADR 0037 决策 7）：**只记不比**——结构兼容靠 serialize 层的整数结构版本号判，这里只为
     # 让「读不了这份记录」的提示能点名由哪个版本写出。未装成包取不到版本时为 None。core 只搬运。

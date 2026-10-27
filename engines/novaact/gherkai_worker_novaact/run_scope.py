@@ -861,18 +861,21 @@ def main() -> int:
         log(f"worker: signal {_stop_signum} received before job start, cooperative stop")
         return 0  # 读 job 期间已收停（对齐 _run_session 顶的检查）：零事件干净退，core 判 error 不误归因
     sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
-    scope = job["scope"]
-    scenarios = job["scenarios"]
-    votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
-    # 建会话前的自检（ADR 0049 决策 7；ADR 0024 结构版本）：先核 job 行的 schemaVersion（不等于本 worker 认的即版本不一致），再用与
-    # 能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。不满足即按执行前失败的统一
-    # 规则（ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——
-    # 零会话费用；core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
+    # 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
+    # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。别的版本写出的
+    # job 行连 scope / scenarios 的形状都不保证，先取它们会把「版本不一致」变成一个 KeyError。不满足即按执行前失败的统一规则（ADR 0051
+    # 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此
+    # 合成 SKIPPED 明细并按 scope 级 error 判定。scopeId 尽力取（形状未知时记 unknown）。
     rejected = precheck_job(job, WORKER_TARGETS)
     if rejected is not None:
         log(f"worker: precheck failed — {rejected}")
-        sink.emit({"type": "scope_done", "scopeId": scope["id"], "status": "error", "errorType": "precheck_failed", "message": rejected})
+        raw_scope = job.get("scope") if isinstance(job, dict) else None
+        scope_id = raw_scope.get("id") if isinstance(raw_scope, dict) and raw_scope.get("id") else "unknown"
+        sink.emit({"type": "scope_done", "scopeId": scope_id, "status": "error", "errorType": "precheck_failed", "message": rejected})
         return 0
+    scope = job["scope"]
+    scenarios = job["scenarios"]
+    votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
     session_id = None
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 

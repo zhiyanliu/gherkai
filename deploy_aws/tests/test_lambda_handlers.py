@@ -769,9 +769,9 @@ def test_reconciler_writes_timestamps_in_compose_clock_format(cloud_env):
     assert claimed_at == compose.parse_iso(claimed_at).isoformat()
 
 
-# ---------- worker task-def revision：definition 优先，缺则按后端默认指针兼容（ADR 0038）----------
+# ---------- worker task-def revision：只来自 definition，缺即定义违约标 error（ADR 0038、0037 决策 7）----------
 # 不变量「运行时只用 definition 里的显式 revision，永不用 family 取最新」的 handler 侧落点。**正负两面都验**：
-# 只验兼容路径会放过「恒走兼容路径、无视 definition」（等于让运行中的 run 中途换 step 集）。
+# 正面验原样用 definition、不看 SSM 默认指针；反面验缺字段不回落默认指针而是标 error。
 # 真 RunTask 吃这个 ARN 起得来要真账号，是 moto 之外的边界（ADR 0038「实测项」）。
 
 def _seed_worker_ssm(*, version: str = "1.4.0", variant: str = "base", engine: str = "novaact",
@@ -806,23 +806,47 @@ def test_build_uses_definition_worker_task_defs_verbatim(cloud_env):
     assert engines._task_def == _WORKER_REV
 
 
-def test_build_falls_back_to_default_pointer_for_legacy_definition(cloud_env, capsys):
-    """definition 缺 worker_task_defs（旧 CLI / 升级前提交）→ 按后端默认指针解析，并点名兼容路径 + variant。"""
-    compat_rev = _seed_worker_ssm(variant="login", revision_arn="arn:compat-rev:9")
-    _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)
-    engine = reconciler._build("run-1")[3]._resolver("novaact")
-    assert engine._task_def == compat_rev
+def test_build_marks_run_error_when_definition_lacks_worker_task_defs(cloud_env, capsys):
+    """云端 definition 缺 worker_task_defs 是定义违约（ADR 0037 决策 7 不留兼容分支）：不按默认指针解析、不推进，run 标 error 并记诊断。"""
+    _seed_worker_ssm(variant="login", revision_arn="arn:must-not-be-used:9")
+    store = _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)
+    assert reconciler._build("run-1") is None
+    assert store.load_run_state("run-1").status == Status.ERROR
     out = capsys.readouterr().out
-    assert "worker-compat" in out and "login" in out  # 「用的是哪份」必须在日志里可见
+    assert "不推进、标为 error" in out and "worker-compat" not in out
 
 
-def test_build_raises_when_legacy_definition_unresolvable(cloud_env):
-    """缺字段且 SSM 也解析不出 → 抛，**不回落 family 最新 ACTIVE、不回落模板 revision**（ADR 0038 被拒方案）。"""
-    from gherkai_runtime.compose import WorkerVariantError
+def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_good_ones(capsys):
+    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：标 error（try_finalize ERROR）、记诊断、返回 None；正常 definition 原样返回；
+    不存在的 run 忽略、不标。"""
+    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+    from gherkai_core.model import RunMeta
 
-    _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)  # SSM 全空
-    with pytest.raises(WorkerVariantError):
-        reconciler._build("run-1")
+    class _Store:
+        def __init__(self, *, exc=None, meta=None):
+            self.exc, self.meta, self.finalized = exc, meta, []
+
+        def load_run_meta(self, run_id):
+            if self.exc is not None:
+                raise self.exc
+            return self.meta
+
+        def try_finalize(self, run_id, status, ended_at):
+            self.finalized.append((run_id, status))
+            return True
+
+    s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
+    assert reconciler._load_definition(s, "r", "t") is None and s.finalized == [("r", Status.ERROR)]
+    assert "9.9.0" in capsys.readouterr().out
+    s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
+    assert reconciler._load_definition(s2, "r", "t") is None and s2.finalized == [("r", Status.ERROR)]
+    s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
+    assert reconciler._load_definition(s3, "r", "t") is None and s3.finalized == [("r", Status.ERROR)]
+    ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"})
+    s4 = _Store(meta=ok)
+    assert reconciler._load_definition(s4, "r", "t") is ok and s4.finalized == []
+    s5 = _Store(meta=None)
+    assert reconciler._load_definition(s5, "r", "t") is None and s5.finalized == []
 
 
 def test_kicker_uses_definition_worker_task_defs(cloud_env):

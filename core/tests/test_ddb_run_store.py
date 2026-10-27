@@ -219,3 +219,24 @@ def test_meta_item_carries_schema_header_top_level_and_peek_reads_only_it(ddb_ru
     assert ddb_run_store.peek_definition_header("old") == (0, None)
     with pytest.raises(UnsupportedDefinitionSchema):
         ddb_run_store.load_run_meta("old")
+
+
+@pytest.mark.parametrize("bad", ["1", True], ids=["string", "bool"])
+def test_peek_rejects_non_integer_schema_attribute(ddb_run_store, bad):
+    from gherkai_core.errors import DefinitionContractError
+
+    ddb_run_store._table.put_item(Item={"run_id": "weird", "item_type": "META", "schema_version": bad, "meta_json": "{}"})
+    with pytest.raises(DefinitionContractError, match="schema_version 须为整数"):
+        ddb_run_store.peek_definition_header("weird")
+
+
+def test_peek_rejects_fractional_and_accepts_integral_decimal(ddb_run_store):
+    from decimal import Decimal
+
+    from gherkai_core.errors import DefinitionContractError
+
+    ddb_run_store._table.put_item(Item={"run_id": "frac", "item_type": "META", "schema_version": Decimal("1.9"), "meta_json": "{}"})
+    with pytest.raises(DefinitionContractError):
+        ddb_run_store.peek_definition_header("frac")
+    ddb_run_store._table.put_item(Item={"run_id": "whole", "item_type": "META", "schema_version": Decimal("1"), "cli_version": "1.5.0", "meta_json": "{}"})
+    assert ddb_run_store.peek_definition_header("whole") == (1, "1.5.0")

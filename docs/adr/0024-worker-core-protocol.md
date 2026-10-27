@@ -20,10 +20,14 @@
 
 ```jsonc
 {
+  "schemaVersion": 1,                             // worker↔core 协议版本(两个方向同一个数，见下「协议版本与 job 行的固定键集」)
   "scope":  { "id": "login", "name": "login" },   // name=@scope tag 原值(可含不宜做 key 的字符)；
                                                   // id=core 派生的干净 key。未标 scope → core 生成两者。
   "engine": "midscene",                           // core 已完成 @engine 冲突校验(见 0019)
   "assertionVotes": 1,                             // AI 断言(Then)投票次数(治抖动，见 0014)；默认 1=单次判定
+  "timeoutS": null,                                // job 墙钟预算秒；不超时为 null(只对桌面目标)
+  "target": { "device": "desktop", "uiKind": "web" },  // 测试目标，桌面也写出(见 0048 决策 3)
+  "deviceRequest": null,                           // 设备请求；非设备 job 为 null
   "scenarios": [
     {
       "id": "...", "name": "搜索 OpenAI 并进入词条",  // name=Scenario: 标题；id 同理派生/生成

@@ -185,7 +185,7 @@ def _devices_section(raw, path: Path) -> DevicesConfig | None:
     acquire = None
     if "acquire-timeout-s" in table:
         v = table["acquire-timeout-s"]
-        if isinstance(v, bool) or not isinstance(v, (int, float)) or not (0 < v <= MAX_ACQUIRE_TIMEOUT_S):
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not (1 <= v <= MAX_ACQUIRE_TIMEOUT_S):
             raise ConfigError(f"配置文件 {path} 的 [devices] acquire-timeout-s 须为 1 到 {MAX_ACQUIRE_TIMEOUT_S:g} 之间的秒数，现为 {v!r}")
         acquire = float(v)
     platforms: dict[str, DevicePlatformConfig] = {}

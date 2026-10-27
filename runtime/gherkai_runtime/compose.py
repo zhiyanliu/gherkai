@@ -1279,8 +1279,8 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None, *, requ
         if requires_stamp:
             # 缺戳例外（决策 7）：带设备目标或会话预热地址的 run 不能提交给没有版本戳的旧后端——block 无放行口
             return SKEW_BLOCK, (
-                f"后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），这个部署早于设备目标与会话预热功能，"
-                "带设备目标或 --expose-local 的 run 不能提交到它。请部署方先升级部署：gherkai deploy"
+                f"后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），这个部署早于设备目标功能，"
+                "带设备目标的 run 不能提交到它。请部署方先升级部署：gherkai deploy"
             )
         return SKEW_WARN, (
             f"提示：后端没有版本戳（SSM 参数 /<prefix>backend/{_names.BACKEND_VERSION_KEY}），该部署早于版本戳机制，"

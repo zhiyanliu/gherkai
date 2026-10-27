@@ -433,20 +433,24 @@ export async function main(): Promise<number> {
   process.on("SIGINT", earlySignal);
 
   // I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态即读 stdin、写 EVENTS_FD。
-  const job = (await JobSource.fromEnv().read()) as Job;
+  const raw = await JobSource.fromEnv().read();
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
-  const scope = job.scope;
 
-  // 建会话前的自检（ADR 0049 决策 7；ADR 0024 结构版本）：先核 job 行的 schemaVersion（不等于本 worker 认的即版本不一致），再用与
-  // 能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。不满足即按执行前失败的统一规则
-  // （ADR 0051 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；
-  // core 据此合成 SKIPPED 明细并按 scope 级 error 判定。
-  const rejected = precheckJob(job, WORKER_TARGETS);
+  // 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
+  // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。别的版本写出的
+  // job 行连 scope 的形状都不保证，先取它会把「版本不一致」变成一个 TypeError。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发
+  // scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此合成 SKIPPED
+  // 明细并按 scope 级 error 判定。scopeId 尽力取（形状未知时记 unknown）。
+  const rejected = precheckJob(raw as Partial<Pick<Job, "schemaVersion" | "target" | "timeoutS">>, WORKER_TARGETS);
   if (rejected !== null) {
     log(`worker: precheck failed — ${rejected}`);
-    await eventSink.emit({ type: "scope_done", scopeId: scope.id, status: "error", errorType: "precheck_failed", message: rejected });
+    const rawScope = (raw as { scope?: { id?: unknown } } | null)?.scope;
+    const scopeId = rawScope && typeof rawScope === "object" && typeof rawScope.id === "string" && rawScope.id ? rawScope.id : "unknown";
+    await eventSink.emit({ type: "scope_done", scopeId, status: "error", errorType: "precheck_failed", message: rejected });
     return 0;
   }
+  const job = raw as Job;
+  const scope = job.scope;
 
   const cp = new BedrockAgentCoreClient({ region: getRegion() });
   // 待清理会话集（ADR 0028 会话跟踪重构）：每次 StartBrowserSession 成功即把 id 加进来——含被重试丢弃的

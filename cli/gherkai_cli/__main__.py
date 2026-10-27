@@ -139,7 +139,8 @@ def _apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
             args.config_filled.add("backend")
         if "backend" in actions and args.backend is None:
             args.backend = _BUILTIN_DEFAULTS["backend"]
-        use_cloud = getattr(args, "backend", None) == "cloud"
+        # doctor 只给 --prefix 也做云端检查（_cmd_doctor 的判据），[cloud] 节与「report-dir 是键前缀、不绝对化」同样按云端处理
+        use_cloud = getattr(args, "backend", None) == "cloud" or (args.command == "doctor" and getattr(args, "prefix", None) is not None)
         for dest, action in actions.items():
             if dest == "backend" or dest in _PER_CALL_OPTIONS or dest in _DEVICE_OPTIONS:
                 continue
@@ -160,6 +161,23 @@ def _apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
                 value = cfg.resolve_path(value)
             setattr(args, dest, value)
             args.config_filled.add(dest)
+        # 有环境变量层的资源名与身份（prefix / ddb-table / s3-bucket / region / profile）被解析链用到的命令，不一定都有对应选项
+        # （explain 没有 --s3-bucket、doctor 连 --ddb-table 也没有，却照样读 AWS_S3_BUCKET / AWS_DDB_TABLE 并用到桶与表）：
+        # 配置层对它们同样要生效，否则同一份文件让 submit 写进一个桶、explain 去另一个桶读。按节取值、经任一命令的同名选项转换。
+        for dest in sorted(_ENV_LAYER_OPTIONS):
+            if dest in args.config_values or dest == "steps_dir":
+                continue
+            section = "cloud" if dest in _CLOUD_OPTIONS else "common"
+            if section == "cloud" and not use_cloud:
+                continue
+            key = dest.replace("_", "-")
+            source = cfg.cloud if section == "cloud" else cfg.common
+            if key not in source:
+                continue
+            action = _find_option_action(parser, dest)
+            if action is None:
+                continue
+            args.config_values[dest] = _convert_config_value(action, source[key], section=section, key=key, path=cfg.path)
     except _config.ConfigError as e:
         _progress(str(e))
         return 2
@@ -167,6 +185,24 @@ def _apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
         if dest in actions and getattr(args, dest) is None:
             setattr(args, dest, default)
     return None
+
+
+def _find_option_action(parser: argparse.ArgumentParser, dest: str):
+    """在七个读配置的命令里找某个 dest 的选项定义（任一命令的那份即可：同名选项各命令类型一致），供配置值转换。"""
+    for name in _CONFIG_COMMANDS:
+        for action in _subparser(parser, name)._actions:
+            if action.dest == dest and action.option_strings:
+                return action
+    return None
+
+
+def _option_origin(args, dest: str) -> str:
+    """一个选项值的来源说明（产品语言）：配置文件填的点名文件、节与键，否则是命令行选项本身。错误消息按它指路。"""
+    if dest in getattr(args, "config_filled", set()):
+        cfg = getattr(args, "project_config", _config.NO_CONFIG)
+        section = "cloud" if dest in _CLOUD_OPTIONS else "common"
+        return f"配置文件 {cfg.path} 的 [{section}] {dest.replace('_', '-')}"
+    return "--" + dest.replace("_", "-")
 
 
 def _identity_layers(args) -> dict:
@@ -471,7 +507,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--region", default=None, metavar="R",
-        help="AWS region（解析链 --region > AWS_REGION > AWS_DEFAULT_REGION > profile config；喂 store + worker）",
+        help="AWS region（解析链 --region > AWS_REGION > AWS_DEFAULT_REGION > 配置文件 [common] region > profile config；喂 store + worker）",
     )
     run.add_argument(
         "--profile", default=None, metavar="P",
@@ -954,7 +990,7 @@ def _cmd_doctor(args) -> int:
         add("aws", "identity", True, "未查（给 --backend cloud 或 --prefix 才查云端）", required=False)
         add("backend", "reachability", True, "未查（同上）", required=False)
     else:
-        cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）：{e}"
+        cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）：{e}"
         try:
             # region 落实要读 profile config：profile 名不存在在这里就炸，与探针失败共用一句诊断（对 agent 是同一件事）
             target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile,
@@ -987,7 +1023,7 @@ def _cmd_doctor(args) -> int:
 def _doctor_cloud(args, target, add, cred_fail: str) -> None:
     """doctor 的 aws / backend 两段（拆出来只为 `_cmd_doctor` 读得下去）：region → 身份 → 版本 → 资源 → 默认 worker variant。"""
     if target.region is None:
-        add("aws", "region", False, "没解析出 region：给 --region，或设 AWS_REGION / AWS_DEFAULT_REGION，或让 --profile 指的 profile 配置里带 region")
+        add("aws", "region", False, "没解析出 region：给 --region，或设 AWS_REGION / AWS_DEFAULT_REGION，或在配置文件 [common] 里给 region，或让 --profile 指的 profile 配置里带 region")
         add("backend", "reachability", False, "未查：region 还没解析出来", required=False)
         return
     add("aws", "region", True, target.region)
@@ -1207,28 +1243,37 @@ def _require_device_selections(selections: dict) -> int | None:
     return 2 if missing else None
 
 
-def _local_project_arn(args, selections: dict) -> "str | int | None":
-    """本机后端的 Device Farm 项目 ARN（ADR 0053 决策 3）：没有设备 scope 返回 None；有则按选项 > 环境变量 > 配置文件取，缺失或形态不对
-    以退出码 2 结束。项目所属账号与当前凭证所属账号不一致只警告、不拦（两者都点名）；核对本身失败也只提示一句、继续。"""
+def _local_project_arn_value(args, selections: dict) -> "str | int | None":
+    """本机后端的 Device Farm 项目 ARN 取值（ADR 0053 决策 3）：没有设备 scope 返回 None；有则按选项 > 环境变量 > 配置文件取，缺失或形态
+    不对以退出码 2 结束。零 AWS；账号比对在 `_warn_project_account`。"""
     if not selections:
         return None
     cfg = getattr(args, "project_config", _config.NO_CONFIG)
     try:
-        arn, source = _devsel.resolve_local_project_arn(flag_arn=getattr(args, "device_farm_project_arn", None), env=os.environ, config=cfg)
+        arn, _source = _devsel.resolve_local_project_arn(flag_arn=getattr(args, "device_farm_project_arn", None), env=os.environ, config=cfg)
     except _devsel.DeviceSelectionError as e:
         _progress(str(e))
         return 2
+    return arn
+
+
+def _warn_project_account(args, project_arn: str, selections: dict) -> None:
+    """项目所属账号与当前凭证所属账号不一致只警告、不拦（两者都点名，ADR 0053 决策 3）；核对本身失败也只提示一句、继续。STS 一次。"""
+    cfg = getattr(args, "project_config", _config.NO_CONFIG)
+    try:
+        _arn, source = _devsel.resolve_local_project_arn(flag_arn=getattr(args, "device_farm_project_arn", None), env=os.environ, config=cfg)
+    except _devsel.DeviceSelectionError:  # 取值在前一步已过，这里不会再抛；保险
+        source = "配置"
     region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
     try:
         ident = compose.probe_aws_identity(region=region, profile=profile)
     except Exception as e:  # 凭证不可用 / 未装 aws 依赖 / 网络：核对是辅助提示，不因它拦运行
         _progress(f"未能核对 Device Farm 项目所属的账号（{e}），继续执行")
-        return arn
+        return
     mine = ident.get("account")
-    if mine and mine != _devsel.account_of(arn):
-        _progress(f"注意：Device Farm 项目 {arn}（来自 {source}）属于账号 {_devsel.account_of(arn)}，当前凭证属于账号 {mine}，"
+    if mine and mine != _devsel.account_of(project_arn):
+        _progress(f"注意：Device Farm 项目 {project_arn}（来自 {source}）属于账号 {_devsel.account_of(project_arn)}，当前凭证属于账号 {mine}，"
                   "两者不一致——请确认用的是对的项目或凭证；继续执行")
-    return arn
 
 
 def _fill_device_requests(args, jobs, selections: dict, project_arn: str) -> list:
@@ -1373,7 +1418,7 @@ def _load_and_plan(args) -> "list | int":
     # 0) 校验：assertion_votes 必须 ≥1。否则 worker 执行 0 次 AI 断言——votes=0 全判失败（假阴性）、
     #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
     if args.assertion_votes < 1:
-        _progress(f"--assertion-votes 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
+        _progress(f"{_option_origin(args, 'assertion_votes')} 必须 ≥ 1（收到 {args.assertion_votes}）：投票次数 <1 会让 AI 断言不被执行")
         return 2
     # 筛选 flag 的空值拒收（ADR 0041 决策一）：空值静默降级成「不筛、这个 run 全做」是最贵的静默错误（整个 run 实际运行）
     for raw in (getattr(args, "tags", None) or []):
@@ -1475,7 +1520,7 @@ def _validate_max_concurrency(args) -> bool:
     """
     mc = getattr(args, "max_concurrency", None)
     if mc is not None and mc < 1:
-        _progress(f"--max-concurrency={mc} 无效：须 ≥ 1（<=0 会让 run 永不起 job、卡死在 pending）")
+        _progress(f"{_option_origin(args, 'max_concurrency')}={mc} 无效：须 ≥ 1（<=0 会让 run 永不起 job、卡死在 pending）")
         return False
     return True
 
@@ -1563,15 +1608,18 @@ def _setup_tunnel(args, jobs):
 
 def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | int":
     """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → steps 目录解析
-    → 本机后端 worker 运行时 preflight。成功返回 `(jobs, steps_dir)`；任一步失败返回**退出码**（调用方原样返回）。
+    → 本机后端 worker 运行时 preflight → 设备选择与安装包定位（含本机后端的项目 ARN 与应用桶的取值）。
+    成功返回 `(jobs, steps_dir)`；任一步失败返回**退出码**（调用方原样返回）。
 
-    **整块只碰本机、不碰隧道/云端/落库**（末步给了 steps 目录时会起本地瞬时 worker 子进程做自述——非执行 job）——
-    故排在起隧道 / 探云端资源 / 落库之前，让配置错落在
-    「没开始执行就被拒」层（各步自己的判据见 `_validate_max_concurrency` / `_validate_worker_variant` /
-    `_load_and_plan` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes`）。抽出的理由同
-    `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
+    **整块只碰本机、不碰 AWS、不碰隧道/落库**（末步之前给了 steps 目录时会起本地瞬时 worker 子进程做自述——非执行 job）——
+    故排在调用方各自的选项校验、起隧道 / 探云端资源 / 落库之前，让配置错落在「没开始执行就被拒」层（各步自己的判据见
+    `_validate_max_concurrency` / `_validate_worker_variant` / `_load_and_plan` / `_resolve_steps_dir_for_backend` /
+    `_preflight_worker_runtimes` / `_device_selections` / `_app_entries`）。抽出的理由同 `_load_and_plan`：run 与 submit
+    曾各手抄一份、会漂移。
+    本机后端**要碰 AWS 的两步**（项目 ARN 的账号比对、安装包上传）与随后的写前校验不在这里：它们在 `_complete_local_definition`，
+    由调用方在自己的选项校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）之后、起隧道之前调——配置错的 run 不该先上传
+    几百 MB 再被拒。云端后端对应的两步在各云端分支的 skew 闸与资源 preflight 之后。
     `list_jobs`：`run` 在计数行后再逐 job 打一行（scope/engine/scenario 数）；`submit` 只打计数行（进度看 `status`）。
-    调用方各自的选项校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）接在本函数之后、仍在起隧道之前。
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
         return 2
@@ -1610,27 +1658,39 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "tuple[list, str | None] | 
         return entries
     args.app_entries = entries
     if args.backend != "cloud":
-        # 本机后端：项目 ARN 来自选项 / 环境变量 / 配置文件，设备请求在此填入；安装包放进使用方的应用桶、补齐位置；随后做写 definition
-        # 之前的结构校验（ADR 0048 决策 3）。上传是本块唯一的 AWS 调用，排在全部零副作用校验之后、落库之前。
-        project_arn = _local_project_arn(args, selections)
+        # 本机后端：项目 ARN 与应用桶的取值（选项 / 环境变量 / 配置文件，含 ARN 形态核对）在这里，零 AWS、缺失即以退出码 2 结束；
+        # 要碰 AWS 的账号比对与上传、以及随后的写前校验在 _complete_local_definition（调用方在自己的选项校验之后调）。
+        project_arn = _local_project_arn_value(args, selections)
         if isinstance(project_arn, int):
             return project_arn
-        if project_arn is not None:
-            jobs = _fill_device_requests(args, jobs, selections, project_arn)
         bucket = _local_app_bucket(args, entries)
         if isinstance(bucket, int):
             return bucket
-        if bucket is not None:
-            region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
-            jobs = _fill_app_locations(args, jobs, entries, bucket=bucket, managed=False, region=region, profile=profile)
-            if isinstance(jobs, int):
-                return jobs
-        bad = _validate_definition(jobs)
-        if bad is not None:
-            return bad
+        args.local_project_arn, args.local_app_bucket = project_arn, bucket
     # 云端后端：项目 ARN 读 SSM、安装包进产物桶，放在版本 skew 闸与资源 preflight 之后（各云端分支调 _cloud_device_requests /
     # _cloud_app_locations），那里再做写前校验
     return jobs, steps_dir
+
+
+def _complete_local_definition(args, jobs) -> "list | int":
+    """本机后端填完 definition（ADR 0048 决策 3）：项目 ARN 所属账号的比对（STS，只警告）、设备请求填入、安装包上传（S3）并补齐位置，
+    最后做写 definition 之前的结构校验。这是本机路径上**仅有的两次 AWS 调用**，调用方把它排在全部零副作用校验（含 `run` 的
+    `--grace`、`submit` 的 `--tunnel-ttl`）之后、起隧道与落库之前——配置错的 run 不该先上传几百 MB 再被拒。返回填完的 jobs 或退出码 2。"""
+    selections = getattr(args, "device_selections", {})
+    project_arn = getattr(args, "local_project_arn", None)
+    if project_arn is not None:
+        _warn_project_account(args, project_arn, selections)
+        jobs = _fill_device_requests(args, jobs, selections, project_arn)
+    bucket = getattr(args, "local_app_bucket", None)
+    if bucket is not None:
+        region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+        jobs = _fill_app_locations(args, jobs, getattr(args, "app_entries", {}), bucket=bucket, managed=False, region=region, profile=profile)
+        if isinstance(jobs, int):
+            return jobs
+    bad = _validate_definition(jobs)
+    if bad is not None:
+        return bad
+    return jobs
 
 
 def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None") -> RunMeta:
@@ -1775,6 +1835,11 @@ def _cmd_submit(args) -> int:
     if args.tunnel_ttl is not None and (not _math.isfinite(args.tunnel_ttl) or args.tunnel_ttl <= 0):
         _progress(f"--tunnel-ttl={args.tunnel_ttl} 无效：须为有限正数（TTL 到点无条件拆隧道，<=0/nan/inf 均拒）")
         return 2
+    if args.backend != "cloud":
+        # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前
+        jobs = _complete_local_definition(args, jobs)
+        if isinstance(jobs, int):
+            return jobs
 
     # --expose-local：起隧道 + 映射 jobs（ADR 0035）。submit 的隧道生命周期交给后台宿主
     # （本机后端是 per-run 进程、云端后端是隧道守护进程）；分流失败（preflight/落库不过）时在此拆掉防泄漏。
@@ -1868,7 +1933,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
 
 def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str:
     """definition 结构版本不等于本 CLI 支持的那一个时给使用方的整句（ADR 0037 决策 7）：说清谁写的、两边各第几版、怎么办。"""
-    by = f"gherkai {writer}" if writer else "版本未知的 gherkai"
+    by = f"gherkai {writer}" if writer else "gherkai（版本未知）"
     if found > DEFINITION_SCHEMA_VERSION:
         return (f"这个 run 的提交记录由更新版本的 {by} 写出，本机的 gherkai 读不懂它的记录格式"
                 f"（记录是第 {found} 版，本机支持第 {DEFINITION_SCHEMA_VERSION} 版）。请升级本机的 gherkai：uv tool upgrade gherkai")
@@ -2045,10 +2110,11 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     if bad is not None:
         return bad
 
-    # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读 SSM 网络、不碰 ECS（ADR 0034）：
+    # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读网络参数、不碰 ECS（ADR 0034）：
     # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
-    # 只剩「runs 表写 + preflight（探表/桶/cluster 可达）」——无需 RunTask/PassRole/SSM 读，契合「提交完就走、
-    # 只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
+    # 「runs 表写 + preflight（探表/桶/cluster 可达）+ 版本戳与 variant 映射的 SSM 读」，带设备 scope 时另加 Device Farm 项目参数的
+    # SSM 读、带应用 scope 时另加产物桶 apps/ 前缀的读写与打标签（ADR 0051 决策 10，权限表登记在 ADR 0033）——无需 RunTask/PassRole，
+    # 契合「提交完就走、只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
         table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
         region=target.region, profile=target.profile,
@@ -2149,16 +2215,17 @@ def _cmd_status(args) -> int:
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
 
+    # definition 的结构版本先于读任何别的东西（ADR 0037 决策 7）：别的版本写出的 run 目录连运行态的形状都不保证按本版本解释得了，
+    # 先读运行态会把「请升级」变成一个解析异常。run 不存在（读不到头）放过、落到下面的存在性检查。
+    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)
+    if bad is not None:
+        return bad
     # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退出码 2 + 提示」，
     # 别让 build_local_reconcile 的 FileNotFoundError 变成裸 traceback + 退出码 1
     # （退出码契约：查不到 run → 2，见 docs/user-guide/running-and-results.md「退出码」）。
     if run_store.load_run_state(args.run_id) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
-    # definition 的结构版本先于读 definition 与接力（ADR 0037 决策 7）：接力要整读 definition，旧版本或新版本写的都不能按本版本解释
-    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)
-    if bad is not None:
-        return bad
 
     if args.wait:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
@@ -2425,12 +2492,12 @@ def _cmd_explain(args) -> int:
 
     report_root = Path(args.report_dir).resolve()
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # 先于读运行态（ADR 0037 决策 7）
+    if bad is not None:
+        return bad
     if (state := run_store.load_run_state(args.run_id)) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
-    bad = _definition_schema_gate(run_store.peek_definition_header(args.run_id), args.run_id)  # ADR 0037 决策 7
-    if bad is not None:
-        return bad
     return _explain_emit(
         args, state, result_store, read_bytes=compose.read_resource,
         # --report-dir 无条件带（即便是默认值），与 submit 提示/status 的 wait_hint 同惯例
@@ -2584,6 +2651,11 @@ def _cmd_run(args) -> int:
     # --grace 哨兵默认（None）→ 跟随本 run 引擎自报的下限（Nova 自然 ≥ 单 act 上界 + 收尾；midscene-only 回到小值；
     #    云端后端 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
+    if args.backend != "cloud":
+        # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前（见 _complete_local_definition）
+        jobs = _complete_local_definition(args, jobs)
+        if isinstance(jobs, int):
+            return jobs
 
     # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
     #     跟 CLI 进程走——atexit 拆（正常结束/Ctrl-C 都收；SIGTERM 直杀的极端泄漏由 ngrok 进程可见性兜）。

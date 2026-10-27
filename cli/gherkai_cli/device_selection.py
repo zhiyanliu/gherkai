@@ -23,9 +23,9 @@ PROJECT_ARN_ENV = "GHERKAI_DEVICE_FARM_PROJECT_ARN"
 APP_BUCKET_FLAG = "--app-bucket"
 APP_BUCKET_ENV = "GHERKAI_APP_BUCKET"
 _PLATFORM_LABEL = {"android": "Android", "ios": "iOS"}
-# Device Farm 的 ARN 形态（AWS 公开的 ARN 格式）：设备 ARN 的账号段为空；项目 ARN 带 12 位账号。只核服务与资源类型段。
-_DEVICE_ARN_RE = re.compile(r"^arn:aws:devicefarm:[a-z0-9-]+::device:[^:\s]+$")
-_PROJECT_ARN_RE = re.compile(r"^arn:aws:devicefarm:[a-z0-9-]+:\d{12}:project:[^:\s]+$")
+# 只核 ARN 的服务段与资源类型段（ADR 0053 决策 4）：分区、区域、账号与资源 id 的形态不管——拦的是贴错类型，不是替服务商校验 ARN。
+_DEVICE_ARN_RE = re.compile(r"^arn:[^:]+:devicefarm:[^:]*:[^:]*:device:.+$")
+_PROJECT_ARN_RE = re.compile(r"^arn:[^:]+:devicefarm:[^:]*:[^:]*:project:.+$")
 _ARN_KINDS = ((":project:", "项目 ARN"), (":devicepool:", "设备池 ARN"), (":session:", "会话 ARN"), (":device:", "设备 ARN"))
 
 
@@ -60,8 +60,8 @@ def check_device_arn(arn: str, *, source: str) -> None:
         return
     kind = _arn_kind(arn)
     hint = f"这看起来是{kind}、不是设备 ARN；" if kind and kind != "设备 ARN" else ""
-    raise DeviceSelectionError(f"{source}给的设备 ARN 形态不对：{hint}设备 ARN 形如 arn:aws:devicefarm:<区域>::device:<设备 id>"
-                               f"（账号段为空），现在是 {arn!r}")
+    raise DeviceSelectionError(f"{source}给的设备 ARN 形态不对：{hint}设备 ARN 形如 arn:aws:devicefarm:<区域>::device:<设备 id>，"
+                               f"现在是 {arn!r}")
 
 
 def check_project_arn(arn: str, *, source: str) -> None:
@@ -87,7 +87,7 @@ def resolve_device_selection(platform: str, *, flag_arn: str | None, env: Mappin
     sub = config.devices.platforms.get(platform) if config.devices is not None else None
     if sub is None:
         return None
-    where = f"配置文件 [devices.{platform}]"
+    where = f"配置文件 {config.path} 的 [devices.{platform}]"
     if sub.arn is not None:
         check_device_arn(sub.arn, source=f"{where} 的 arn ")
         return DeviceSelection(platform, f"{where} arn", arn=sub.arn)
@@ -149,8 +149,8 @@ def resolve_local_project_arn(*, flag_arn: str | None, env: Mapping[str, str], c
         return env_arn, f"环境变量 {PROJECT_ARN_ENV}"
     cfg_arn = config.devices.project_arn if config.devices is not None else None
     if cfg_arn:
-        check_project_arn(cfg_arn, source="配置文件 [devices] 的 project-arn ")
-        return cfg_arn, "配置文件 [devices] project-arn"
+        check_project_arn(cfg_arn, source=f"配置文件 {config.path} 的 [devices] project-arn ")
+        return cfg_arn, f"配置文件 {config.path} 的 [devices] project-arn"
     raise DeviceSelectionError(
         "本机运行设备 scope 需要一个 Device Farm 项目，但没有指定：请在 gherkai.toml 的 [devices] 里给出 project-arn，"
         f"或用 {PROJECT_ARN_FLAG} / 环境变量 {PROJECT_ARN_ENV} 指定。"

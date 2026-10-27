@@ -1,6 +1,6 @@
 """安装包上传与复用（ADR 0051 决策 9）：键按内容哈希、404 上传（managed 带标签）、年龄在复用窗口内复用、超窗同键刷新、刷新失败重传、
-再失败报错、403 报权限、unmanaged 不打标签不刷新、超大包警告。全部用假 S3 client，不连真 AWS；标签在分段上传路径是否真落到对象上、
-CopyObject 刷新后过期是否重算在真实 S3 上核（ADR 0051 决策 9 的实施期核对项）。"""
+再失败报错、403 报权限、unmanaged 不打标签不刷新、超大包警告。全部用假 S3 client，不连真 AWS；标签在单段与分段上传路径都落到对象上、
+CopyObject 刷新后 LastModified 更新已在真实桶上核过，证据内联在 ADR 0051 决策 9。"""
 from __future__ import annotations
 
 import hashlib
@@ -111,3 +111,11 @@ def test_large_package_warns_but_proceeds(tmp_path):
     s3 = _S3(head_error="404")
     app_upload.ensure_app_object("b", f, managed=True, s3=s3, now=NOW, on_warn=warnings.append, large_bytes=1024)
     assert len(warnings) == 1 and "MB" in warnings[0] and len(s3.uploads) == 1
+
+
+def test_first_upload_failure_is_a_product_error_not_a_raw_exception(tmp_path):
+    """boto3 的 upload_file 把 ClientError 包成自己的 S3UploadFailedError（不是 botocore 异常）：404 分支的首次上传失败也要翻成 AppUploadError。"""
+    f = _file(tmp_path)
+    s3 = _S3(head_error="404", upload_fail=1)
+    with pytest.raises(app_upload.AppUploadError, match="上传安装包.*失败.*upload failed"):
+        app_upload.ensure_app_object("b", f, managed=True, s3=s3, now=NOW)

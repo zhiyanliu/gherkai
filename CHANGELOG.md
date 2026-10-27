@@ -10,7 +10,7 @@
 
 ### 新增
 
-- 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。旧版本 worker 没有这些字段时按「只支持桌面网页」处理，不报错。
+- 引擎 worker 的能力自述带上支持的测试目标：`gherkai doctor` 多一行 `engines.targets.<引擎>`，显示该引擎支持的测试目标（当前两个引擎都只有桌面网页）；`gherkai list-deterministic` 多一列「目标」，显示每条确定性 step 在该引擎上实际可用的目标，声明了该引擎不支持的目标时单独注明；`--json` 每项多 `targets`（worker 原样报出）与 `available_targets`（与引擎支持的目标求交后的结果）。；worker 的能力自述缺「支持的测试目标」时命令行工具按版本不一致拒绝。
 - 用户指南新增引擎能力矩阵一页（`docs/user-guide/engines.md`）：引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式。
 - 设备 scope 用哪台设备要显式指定，不自动挑：按平台用 `--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）给设备 ARN，或在 `gherkai.toml` 的 `[devices.android]` / `[devices.ios]` 里给 `arn` 或 `os-version`（按系统版本族挑选，只能在配置文件里给）；计费方式 `billing-method` 与获取预算 `acquire-timeout-s` 在 `[devices]` 里给、平台子表可覆盖计费方式。有设备 scope 的平台没有任何来源指定设备时 `run` / `submit` 在提交前以退出码 2 结束，`plan` 只标注并警告。设备 ARN 与项目 ARN 只核对服务与资源类型段，贴错类型（如把项目 ARN 贴进设备 ARN）在提交前以退出码 2 结束并点名。本机后端另需 Device Farm 项目：`--device-farm-project-arn`、环境变量 `GHERKAI_DEVICE_FARM_PROJECT_ARN` 或 `[devices] project-arn`，项目所属账号与当前凭证不一致时警告不拦；云端后端用部署时建立的项目，部署没有建立项目时提交以退出码 2 结束、提示「部署未启用设备支持」。`plan --json` 多 `devices` 键，文本视图每个平台一行设备标注。
 - `@app:<别名>` 的 scope 可以运行与提交：`run` / `submit` 把 `gherkai.toml` 的 `[apps.<别名>.<平台>]` 指向的安装包按内容哈希放进 S3 （键 `apps/<sha256>/<文件名>`，同一文件一个 run 只传一次），把位置写进提交记录；云端后端放进部署的产物桶、对象带标签 `gherkai=app`、按 14 天过期、已提交 run 引用的对象至少保留 7 天（复用时按对象年龄刷新）；本机后端放进 `--app-bucket`、环境变量 `GHERKAI_APP_BUCKET` 或 `[devices] app-bucket` 指定的桶，只复用不打标签不刷新。安装包不存在时 `plan` / `run` / `submit` 以退出码 2 结束；超过 500 MB 警告不拦。
@@ -20,9 +20,9 @@
 ### 变化
 
 - 提交记录（`run_meta.json`、云端 META，以及 `run --json` 与 `plan --json` 里的 `run_meta` / `jobs[]`）带结构版本 `schema_version`（整数，本版本为 1）与写出它的 `cli_version`；键集固定、不适用的值写 `null` 而不再省键：`timeout_s` 不超时为 `null`，`target` 对桌面 job 也写出 `desktop` / `web`，`device_request` 非设备 job 为 `null`，`steps_dir`、`worker_variant`、`worker_task_defs`、`extra_http_headers` 无值为 `null`。`status` / `explain` 与本机接力读到结构版本不等于本机支持的记录以退出码 2 结束，并点名写出它的版本：更新的提示升级 gherkai，更早的提示用那个版本查看或重新提交。**同一报告目录不要混用 1.4 与 1.5 的命令行工具读写**：1.4 的命令行工具读 1.5 的记录会静默误判，1.5 读 1.4 的记录直接拒绝。
-- 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号），worker 在建立任何会话之前核对它：版本不一致（含 1.4 的 worker 配 1.5 的命令行工具，或反过来）时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本；两个引擎 worker 的能力自述缺「支持的测试目标」时命令行工具按版本不一致拒绝。
-- 带设备目标或 `--expose-local` 的 run 提交到没有版本戳的旧后端（早于本版本部署、从未升级）时以退出码 2 结束、提示先执行 `gherkai deploy` 升级部署；纯桌面无隧道的 run 维持只警告。
-- `.feature` 可以用 `@device:android` / `@device:ios` 与 `@app:<别名>` 声明 scope 的测试目标（声明、继承、冲突的规则与 `@engine` 相同）。当前两个引擎都只支持桌面网页：标了设备目标的 scope 在 `plan` 与执行前预检中被拒绝并给出改法，云端提交在写入运行定义前被拒绝，都不会建立任何会话；`@app` 的别名要在项目配置的 `[apps]` 里绑定，而配置文件的读取尚未接入，这个版本里带 `@app` 的 scope 会因别名查不到而被拒。`plan` 的文本每个 job 行显示测试目标，汇总行显示本次将建立的远程访问会话数；`plan --json` 加 `device_session_count`，非桌面 job 的定义带 `target`。
+- 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号），worker 在建立任何会话之前核对它：版本不一致时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本；两个引擎 worker 的能力自述缺「支持的测试目标」时命令行工具按版本不一致拒绝。
+- 带设备目标的 run 提交到没有版本戳的旧后端（早于本版本部署、从未升级）时以退出码 2 结束、提示先执行 `gherkai deploy` 升级部署；桌面 run 维持只警告。
+- `.feature` 可以用 `@device:android` / `@device:ios` 与 `@app:<别名>` 声明 scope 的测试目标（声明、继承、冲突的规则与 `@engine` 相同）。当前两个引擎都只支持桌面网页：标了设备目标的 scope 在 `plan` 与执行前预检中被拒绝并给出改法，不会建立任何会话。设备怎么指定、`@app` 的别名怎么绑定安装包见下面「项目配置文件」与「设备 scope 用哪台设备」两条。
 - `--default-job-timeout` 不给时按测试目标取缺省：桌面 scope 仍是 300 秒，设备 scope 为获取预算加 900 秒且不接受「不超时」（给 `<=0` 只让桌面 scope 不超时；给正值时设备 scope 不得低于获取预算加 180 秒）；给 `nan` / `inf` 以退出码 2 结束。
 - Midscene worker 的 SDK 从 `@midscene/web` 1.12.8 升到 1.15.1（Playwright 仍为 1.63.0）。对使用者的可见变化只有 Midscene 自己的报告页样式随新版改变；模型请求形态、证据与 `explain` 输出不变。
 - **导航步的写法改为「`Given` / `When` 之后整句只是一个地址」**，加不加双引号都一样（`Given "https://example.com/"` 与 `Given https://example.com/` 都算）。此前「双引号内以 http(s) 开头就导航」的判法不再使用：`Given 打开 "https://…"` 这类句子里带地址的 step 不再导航，整句交给 AI 执行；升级后请把导航步改成整句地址。导航现在是确定性 step 注册表里的一条，`gherkai plan` 对它的标注、`gherkai list-deterministic` 的清单与其它确定性 step 一致。

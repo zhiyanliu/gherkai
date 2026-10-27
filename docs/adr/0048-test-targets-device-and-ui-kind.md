@@ -58,7 +58,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 
 ### 4. 目标不受支持时的拒绝：由能力自述决定，消息给出改法
 
-- 引擎是否支持某目标，core 不内置任何引擎名到目标的对照，只看能力自述。Nova Act 的 worker 不声明设备目标（缺 `targets` 键即只有 `desktop/web`，[0049](./0049-worker-capabilities-targets-keys.md)），因而「标了 `@device` 却没标 `@engine`」会落到缺省引擎 novaact 并被拒绝。这是 1.5 最常见的写法错误，消息必须直接给出两种改法，示意：
+- 引擎是否支持某目标，core 不内置任何引擎名到目标的对照，只看能力自述。Nova Act 的 worker 不声明设备目标（能力自述的 `targets` 只列 `desktop/web`，[0049](./0049-worker-capabilities-targets-keys.md)），因而「标了 `@device` 却没标 `@engine`」会落到缺省引擎 novaact 并被拒绝。这是 1.5 最常见的写法错误，消息必须直接给出两种改法，示意：
 
   > 场景 `features/checkout.feature:3` 所在的 scope 要求在 Android 设备上执行，但它使用的引擎 novaact 不支持设备。请在这个 scope 的任一场景上加 `@engine:midscene`，或用 `--default-engine midscene` 更改默认引擎。
 

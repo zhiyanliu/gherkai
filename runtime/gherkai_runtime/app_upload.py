@@ -1,6 +1,6 @@
 """安装包上传到 S3 应用前缀（ADR 0051 决策 9）。
 
-键为 `apps/<sha256>/<原文件名>`：按内容哈希放，同一内容只传一次、不同名的同一内容也只传一次。两种桶两种承诺：
+键为 `apps/<sha256>/<原文件名>`：按内容哈希放，同一文件（同内容、同名）只传一次；同内容不同名的文件各占一个键。两种桶两种承诺：
 - **云端产物桶由本工具管理**（`managed=True`）：对象带标签 `gherkai=app`，桶按该标签在 E 天后过期；为兑现「已提交 run 引用的对象自提交起
   至少保留 R 天」，复用前看对象年龄——不超过 E 减 R 天直接复用，超过就同键 CopyObject 刷新（回写元数据与标签，让过期从新时刻重算），
   刷新失败重传，再失败即报错、不复用快过期的对象。E 与 R 的常量与部署侧的生命周期规则同一处（`names`）。
@@ -64,12 +64,17 @@ def _error_code(e: BaseException) -> str | None:
 
 
 def _upload(s3, bucket: str, key: str, file: Path, *, managed: bool) -> None:
-    # upload_file 走 boto3 的分段传输（大包自动分段）；标签随 ExtraArgs 进 PutObject / CreateMultipartUpload（分段路径的标签是否真落到对象上
-    # 在实施期真实执行核对，见 ADR 0051 决策 9）。unmanaged 桶不打标签——那是使用方的桶，不替他们定义清理规则。
-    if managed:
-        s3.upload_file(str(file), bucket, key, ExtraArgs={"Tagging": _names.APP_OBJECT_TAG})
-    else:
-        s3.upload_file(str(file), bucket, key)
+    # upload_file 走 boto3 的分段传输（大包自动分段）；标签随 ExtraArgs 进 PutObject / CreateMultipartUpload——单段与分段两条路径的标签都
+    # 已在真实桶上核过，证据见 ADR 0051 决策 9。unmanaged 桶不打标签——那是使用方的桶，不替他们定义清理规则。
+    # upload_file 把 ClientError 包成 boto3 自己的 S3UploadFailedError（不是 botocore 异常），调用方按 botocore 分流抓不到，
+    # 故在这里一律翻成带原因的产品提示：桶不存在、没有写权限、网络问题都走这一句。
+    try:
+        if managed:
+            s3.upload_file(str(file), bucket, key, ExtraArgs={"Tagging": _names.APP_OBJECT_TAG})
+        else:
+            s3.upload_file(str(file), bucket, key)
+    except Exception as e:
+        raise AppUploadError(f"上传安装包 {file} 到 S3 桶 {bucket} 失败（桶不存在、没有写权限或网络问题）：{e}") from e
 
 
 def ensure_app_object(bucket: str, file: Path, *, managed: bool, s3, now: datetime | None = None,

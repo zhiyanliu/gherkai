@@ -358,7 +358,8 @@ def test_device_selection_precedence_flag_env_config(tmp_path, monkeypatch, caps
     _android_env(monkeypatch)
     _toml(tmp_path, "[devices.android]\nos-version = '14'\n")
     feat = _feature(tmp_path, DEVICE_FEATURE)
-    assert _plan_json([str(feat)], capsys)["devices"] == {"android": {"os_version": "14", "source": "配置文件 [devices.android] os-version"}}
+    cfg_path = (tmp_path / "gherkai.toml").resolve()
+    assert _plan_json([str(feat)], capsys)["devices"] == {"android": {"os_version": "14", "source": f"配置文件 {cfg_path} 的 [devices.android] os-version"}}
     monkeypatch.setenv("GHERKAI_ANDROID_DEVICE_ARN", DEV_ARN)
     assert _plan_json([str(feat)], capsys)["devices"]["android"] == {"arn": DEV_ARN, "source": "环境变量 GHERKAI_ANDROID_DEVICE_ARN"}
     flag_arn = "arn:aws:devicefarm:us-west-2::device:D2"
@@ -479,16 +480,25 @@ APP_FEATURE_TWO_SCOPES = ("Feature: F\n  @scope:a @device:android @app:wiki\n  S
 
 
 class _UploadS3:
-    """假 S3 client：对象不存在（404）→ 记录 upload_file 入参。"""
+    """假 S3 client：对象不存在（404）→ 记录 upload_file 入参；可让首次上传失败。也顶替云端三件套的 client（head_bucket / put_object 空操作）。"""
 
-    def __init__(self):
+    def __init__(self, *, upload_error: Exception | None = None):
         self.uploads: list = []
+        self._upload_error = upload_error
+
+    def head_bucket(self, **kw):
+        return {}
+
+    def put_object(self, **kw):
+        return {}
 
     def head_object(self, **kw):
         from botocore.exceptions import ClientError
         raise ClientError({"Error": {"Code": "404", "Message": "Not Found"}, "ResponseMetadata": {"HTTPStatusCode": 404}}, "HeadObject")
 
     def upload_file(self, Filename, Bucket, Key, ExtraArgs=None):
+        if self._upload_error is not None:
+            raise self._upload_error
         self.uploads.append((Filename, Bucket, Key, ExtraArgs))
 
 
@@ -568,3 +578,171 @@ def test_cloud_submit_puts_installer_in_artifacts_bucket_with_tag(tmp_path, monk
     assert len(s3.uploads) == 1 and s3.uploads[0][1:] == ("p-artifacts", f"apps/{sha}/app.apk", {"Tagging": "gherkai=app"})
     d = _definition(made["ddb_tables"][0])
     assert d["jobs"][0]["target"]["app"]["bucket"] == "p-artifacts" and d["jobs"][0]["target"]["app"]["sha256"] == sha
+
+
+# ---- 复核处置：配置层对没有对应选项的命令同样生效、doctor 只给 --prefix、消息按来源指路、次序 ----
+
+def test_cloud_resource_names_from_config_reach_commands_without_the_flag(tmp_path, monkeypatch):
+    """[cloud] ddb-table / s3-bucket 与 [common] region / profile 对没有对应选项的命令同样生效（explain 没有 --s3-bucket、doctor 两个
+    资源名选项都没有）：同一份文件不能让 submit 写一个桶、explain 去另一个桶读。"""
+    monkeypatch.chdir(tmp_path)
+    _toml(tmp_path, "[common]\nbackend = 'cloud'\nregion = 'eu-west-1'\nprofile = 'team'\n[cloud]\nprefix = 'p-'\nddb-table = 'team-runs'\ns3-bucket = 'team-artifacts'\n")
+    for v in ("AWS_RESOURCE_PREFIX", "AWS_DDB_TABLE", "AWS_S3_BUCKET", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: r or kw.get("config_region"))  # 不摸 profile config
+    seen: list = []
+
+    def gate(target, **kw):
+        seen.append((target.prefix, target.runs_table, target.bucket, target.region, target.profile))
+        return 2, None
+
+    monkeypatch.setattr(m, "_cloud_skew_gate", gate)
+    assert m.main(["status", "r"]) == 2
+    assert m.main(["explain", "r"]) == 2
+    assert seen == [("p-", "team-runs", "team-artifacts", "eu-west-1", "team")] * 2
+    captured: dict = {}
+
+    def spy(**kw):
+        captured.update(kw)
+        raise RuntimeError("stop here")
+
+    monkeypatch.setattr(compose, "resolve_cloud_target", spy)
+    _fake_locator(monkeypatch)
+    _no_provider(monkeypatch)
+    assert m.main(["doctor", "--json", "--prefix", "stage-"]) == 2
+    assert (captured["config_runs_table"], captured["config_bucket"], captured["config_region"], captured["config_profile"]) == \
+        ("team-runs", "team-artifacts", "eu-west-1", "team")
+
+
+def test_doctor_with_prefix_only_treats_report_dir_as_key_prefix_and_applies_cloud_section(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _toml(tmp_path, "[common]\nreport-dir = 'reports'\n[cloud]\nprefix = 'p-'\n")
+    parser = m._build_parser()
+    args = parser.parse_args(["doctor", "--prefix", "stage-"])
+    assert m._apply_project_config(args, parser) is None
+    assert args.report_dir == "reports" and args.config_values.get("prefix") == "p-"   # 云端：键前缀原样；[cloud] 生效（选项 prefix 在解析链里更高）
+    local = parser.parse_args(["doctor"])
+    assert m._apply_project_config(local, parser) is None
+    assert local.report_dir == str((tmp_path / "reports").resolve()) and "prefix" not in local.config_values
+
+
+def test_invalid_values_from_config_are_reported_with_the_config_source(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    feat = _feature(tmp_path)
+    _toml(tmp_path, "[common]\nassertion-votes = 0\n")
+    assert m.main(["plan", str(feat)]) == 2
+    err = capsys.readouterr().err
+    assert "[common] assertion-votes" in err and "gherkai.toml" in err
+    _toml(tmp_path, "[common]\nmax-concurrency = 0\n")
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(feat), "--no-report"]) == 2
+    assert "[common] max-concurrency" in capsys.readouterr().err
+    assert m.main(["plan", str(feat), "--assertion-votes", "0"]) == 2
+    assert "--assertion-votes 必须" in capsys.readouterr().err   # 选项给的仍点名选项
+
+
+def test_config_sourced_arn_errors_name_the_config_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    cfg = _toml(tmp_path, f"[devices.android]\narn = '{PROJECT_ARN}'\n")
+    assert m.main(["plan", str(_feature(tmp_path, DEVICE_FEATURE))]) == 2
+    err = capsys.readouterr().err
+    assert str(cfg.resolve()) in err and "[devices.android]" in err and "项目 ARN、不是设备 ARN" in err
+
+
+def test_arn_check_only_looks_at_service_and_resource_type_segments(tmp_path, monkeypatch, capsys):
+    """只核服务与资源类型段：分区、区域、账号与资源 id 的形态不管（ADR 0053 决策 4）。"""
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    odd = "arn:aws-cn:devicefarm:cn-north-1:123:device:anything-goes"
+    assert _plan_json([str(_feature(tmp_path, DEVICE_FEATURE)), "--android-device-arn", odd], capsys)["devices"]["android"]["arn"] == odd
+
+
+def test_invalid_grace_or_ttl_is_rejected_before_any_aws_call(tmp_path, monkeypatch, capsys):
+    """本机后端的账号比对（STS）与安装包上传排在 run 的 --grace、submit 的 --tunnel-ttl 校验之后：配置错的 run 不该先上传再被拒。"""
+    import subprocess
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)
+    s3 = _UploadS3()
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+
+    def no_sts(**kw):
+        raise AssertionError("选项校验失败时不该调 STS")
+
+    monkeypatch.setattr(compose, "probe_aws_identity", no_sts)
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("不该走到 fork")))
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    feat = _feature(tmp_path, APP_FEATURE_TWO_SCOPES)
+    assert m.main(["run", str(feat), "--no-report", "--grace", "0"]) == 2
+    assert "--grace" in capsys.readouterr().err and s3.uploads == []
+    assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--tunnel-ttl", "0"]) == 2
+    assert "--tunnel-ttl" in capsys.readouterr().err and s3.uploads == []
+
+
+def test_first_upload_failure_exits_2_with_product_message(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: _UploadS3(upload_error=RuntimeError("S3UploadFailedError: NoSuchBucket")))
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--no-report"]) == 2
+    err = capsys.readouterr().err
+    assert "上传安装包" in err and "失败" in err and "NoSuchBucket" in err and "Traceback" not in err
+
+
+def test_cloud_run_uploads_installer_into_artifacts_bucket(tmp_path, monkeypatch, capsys):
+    from test_backend_cloud import _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    s3 = _UploadS3()
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+    monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: "arn:aws:devicefarm:us-west-2:333333333333:project:cloud")
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-",
+                   "--quiet", "--no-report"]) == 0
+    assert len(s3.uploads) == 1 and s3.uploads[0][1] == "p-artifacts" and s3.uploads[0][3] == {"Tagging": "gherkai=app"}
+
+
+def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch):
+    """ADR 0053 决策 6「宿主不读文件」：提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
+    宿主代码结构上也不引用 CLI 的配置模块。"""
+    import inspect
+    import subprocess
+
+    import gherkai_runtime.detached as detached
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)
+    s3 = _UploadS3()
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+
+    class _P:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _P())
+    reports = tmp_path / "r"
+    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0
+    run_id = next(d for d in reports.iterdir() if d.is_dir()).name
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    _toml(other, "[devices]\nproject-arn = 'arn:aws:devicefarm:us-west-2:999999999999:project:other'\n[devices.android]\nos-version = '99'\n")
+    monkeypatch.chdir(other)
+    monkeypatch.setattr(compose, "build_engines", lambda **kw: {})  # 不起 worker
+    meta = detached.build_local_reconcile(str(reports), run_id, 1)[0]
+    for job in meta.jobs:
+        assert job.device_request.project_arn == PROJECT_ARN and job.device_request.device_arn == DEV_ARN
+        assert job.target.app.bucket == "my-apps"
+    assert "gherkai_cli" not in inspect.getsource(detached)

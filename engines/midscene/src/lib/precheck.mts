@@ -32,7 +32,7 @@ function spaced(label: string): string {
 /** job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；null 表示通过。 */
 export function precheckSchema(job: Partial<Pick<Job, "schemaVersion">>): string | null {
   const found = job.schemaVersion;
-  if (found !== PROTOCOL_SCHEMA_VERSION) {
+  if (!Number.isInteger(found) || found !== PROTOCOL_SCHEMA_VERSION) {
     const shown = found === undefined || found === null ? "缺失" : String(found);
     return `这个 job 的格式版本是 ${shown}，这个 worker 认的是 ${PROTOCOL_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，` +
       "请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。";
@@ -47,7 +47,7 @@ export function precheckJob(job: Partial<Pick<Job, "schemaVersion" | "target" | 
 
 /** 返回拒绝原因（产品语言）；null 表示通过。target 须为对象（键集固定、桌面也写 desktop/web）。 */
 export function precheckTarget(job: Partial<Pick<Job, "target" | "timeoutS">>, targets: ReadonlyArray<TargetEntry>): string | null {
-  if (job.target === undefined || job.target === null || typeof job.target !== "object") {
+  if (job.target === undefined || job.target === null || typeof job.target !== "object" || Array.isArray(job.target)) {  // 数组不算对象（与 Python 侧 isinstance dict 对称）
     return "这个 job 没有带测试目标：命令行工具与 worker 的版本不一致，请把两者装成同一版本。";
   }
   const device = job.target.device;

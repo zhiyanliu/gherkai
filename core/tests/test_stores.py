@@ -773,3 +773,22 @@ def test_step_message_survives_round_trip_and_missing_key_is_none():
     assert job_result_from_dict(d).scenarios[0].steps[1].message == "AI 断言未过多数票（0/1）：搜索 OpenAI"
     del d["scenarios"][0]["steps"][1]["message"]
     assert job_result_from_dict(d).scenarios[0].steps[1].message is None
+
+
+@pytest.mark.parametrize("mutate, match", [
+    (lambda d: d["jobs"][0]["scenarios"][0].pop("steps"), "缺键 steps"),
+    (lambda d: d["jobs"][0]["scenarios"][0].pop("name"), "缺键 name"),
+    (lambda d: d["jobs"][0]["scenarios"][0]["steps"][0].pop("text"), "缺键 text"),
+    (lambda d: d["jobs"][0]["scenarios"][0]["steps"][0].update(argument={"kind": "docString"}), "缺键 content"),
+    (lambda d: d["jobs"][0]["scenarios"][0]["steps"][0].update(argument={"kind": "dataTable"}), "缺键 rows"),
+    (lambda d: d["jobs"][0]["scenarios"][0]["steps"][0].update(argument={"kind": "weird", "content": "x"}), "kind 未知"),
+])
+def test_definition_scenario_step_and_argument_keys_are_required(mutate, match):
+    """键集固定下沿到 scenario / step / 多行参数：缺键是定义违约，读端不补空值（step 的 argument 本身可省：无参数的 step 不带它）。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+
+    d = run_meta_to_dict(_sample_run("sc").run_meta)
+    mutate(d)
+    with pytest.raises(DefinitionContractError, match=match):
+        run_meta_from_dict(d)

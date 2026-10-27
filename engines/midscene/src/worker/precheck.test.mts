@@ -20,6 +20,8 @@ test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、
 test("job 行的结构版本先于目标核对（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝；本 worker 认的值与跨语言 golden 一致", () => {
   assert.equal(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION }), null);
   assert.ok(precheckSchema({})!.includes("缺失"));
+  assert.notEqual(precheckSchema({ schemaVersion: 1.5 }), null);  // 非整数不算 1
+  assert.notEqual(precheckTarget({ target: [] as unknown as { device: string; uiKind: string } }, WORKER_TARGETS), null);  // 数组不算对象
   assert.ok(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1 })!.includes(`格式版本是 ${PROTOCOL_SCHEMA_VERSION + 1}`));
   assert.ok(precheckJob({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1, target: { device: "ios", uiKind: "app" } }, WORKER_TARGETS)!.includes("格式版本"));
   assert.equal(precheckJob({ schemaVersion: PROTOCOL_SCHEMA_VERSION, target: { device: "desktop", uiKind: "web" }, timeoutS: null }, WORKER_TARGETS), null);
@@ -77,4 +79,29 @@ test("目标名称与命令行工具同一口径", () => {
   assert.equal(targetLabel("desktop", "web"), "桌面网页");
   assert.equal(targetLabel("android", "app"), "Android 应用");
   assert.equal(targetLabel("ios", "web"), "iOS 网页");
+});
+
+
+test("主入口的版本核对先于读 job 行的任何别的键：缺 schemaVersion 的 job（scenarios 也缺）只得到一条 precheck_failed", async () => {
+  const { spawn } = await import("node:child_process");
+  const path = await import("node:path");
+  const env: Record<string, string> = {};
+  for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+  env["AWS_EC2_METADATA_DISABLED"] = "true";
+  const job = { scope: { id: "old", name: "old" }, engine: "midscene", assertionVotes: 1 };
+  const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
+    const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts")],
+      { env, stdio: ["pipe", "pipe", "pipe"] });
+    let out = ""; let err = "";
+    proc.stdout.on("data", (d) => { out += d.toString(); });
+    proc.stderr.on("data", (d) => { err += d.toString(); });
+    proc.on("close", (code) => resolve({ code, out, err }));
+    proc.stdin.end(JSON.stringify(job) + "\n");
+  });
+  assert.equal(result.code, 0, result.err.slice(-800));
+  const events = result.out.split("\n").filter((l) => l.startsWith("{") && l.includes('"type"')).map((l) => JSON.parse(l));
+  assert.deepEqual(events.map((e) => e.type), ["scope_done"], result.err.slice(-500));
+  assert.equal(events[0].scopeId, "old");
+  assert.equal(events[0].errorType, "precheck_failed");
+  assert.ok(String(events[0].message).includes("格式版本是 缺失"));
 });

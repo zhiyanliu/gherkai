@@ -246,36 +246,29 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
             _handle_timeout(run_id, sid, built)
 
 
-def _resolve_worker_task_defs(meta, *, prefix: str, region: str | None, ssm=None) -> dict[str, str]:
-    """本 run 各引擎的 worker task-def **revision ARN**（ADR 0038「读侧兼容口径」）。
-
-    ① definition 带 `worker_task_defs` → **原样用**（提交侧 preflight 解析的结果，一个 run 内镜像固定：期间
-       别人重推同名 variant 不影响运行中的 run）。
-    ② 缺该字段（引入本机制的升级前提交、升级窗口内仍在运行的 run；或旧 CLI 提交到新后端——ADR 0037 决策 7
-       「CLI 旧于后端 → 警告不拦」允许）→ 按**后端当前默认指针**解析，并**打一行点名兼容路径 + 解析到的
-       variant** 的日志（「用的是哪份」必须可见、可查）。
-
-    只解析**本 run 用到的引擎**（对齐 preflight 的判据「没用到的引擎不该拦」）。解析不出则 `WorkerVariantError`
-    冒泡——本次 invoke 失败、Stream 重投；**不回落 family / 模板 revision**（ADR 0038 被拒方案两条）。
-    """
+def _load_definition(run_store, run_id: str, label: str):
+    """读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
+    **不推进该 run、记一条诊断并把 run 标为 error**——重放投影没有退出码可交给使用方，只「不推进」会让 run 永停 RUNNING（ADR 0034 对
+    无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端
+    默认指针回落（那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。返回 RunMeta；不存在或已标 error 返回 None。"""
+    from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+    from gherkai_core.model import Status
     from gherkai_runtime import compose
 
-    if meta.worker_task_defs:
-        return dict(meta.worker_task_defs)
-    engines = sorted({j.engine for j in meta.jobs})
-    if ssm is None:
-        import boto3
-        ssm = boto3.client("ssm", region_name=region)
-    backend_version = compose.read_backend_version(prefix=prefix, ssm=ssm)
-    # 默认指针在此单独读一次**只为日志点名 variant**（`resolve_default_worker_task_defs` 内部还会读一次）——
-    # 多一次 GetParameter 换「这次运行的是哪份」在 CloudWatch 里可见，值得；且兼容路径是过渡态（所有新
-    # definition 都带字段、直接走 ① 分支），不是热路径。
-    variant = compose.read_worker_default(prefix=prefix, ssm=ssm)
-    task_defs = compose.resolve_default_worker_task_defs(
-        prefix=prefix, engines=engines, backend_version=backend_version, ssm=ssm)
-    print(f"worker-compat: run {meta.run_id} 的任务定义没记 worker 镜像版本（旧版 CLI 或升级前提交）→ 走兼容路径，"
-          f"按后端默认指针解析 variant={variant!r} 版本={backend_version} 引擎={engines}")
-    return task_defs
+    def _mark(reason: str):
+        print(f"{label}: run {run_id} 的提交记录不能由本后端执行，不推进、标为 error：{reason}")
+        run_store.try_finalize(run_id, Status.ERROR, compose.now_iso())
+        return None
+
+    try:
+        meta = run_store.load_run_meta(run_id)
+    except (UnsupportedDefinitionSchema, DefinitionContractError) as exc:
+        return _mark(str(exc))
+    if meta is None:
+        return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
+    if not meta.worker_task_defs:
+        return _mark("云端提交记录没有记 worker 镜像版本（提交侧应在解析 variant 后写入）")
+    return meta
 
 
 def _build(run_id: str):
@@ -291,10 +284,9 @@ def _build(run_id: str):
     SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/Lambda 都复用、
     不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
 
-    **worker task-def revision 两条来源**（ADR 0038）：① definition 的 `meta.worker_task_defs`（正常路径，提交侧
-    preflight 已把 variant 解析成各引擎的显式 revision）；② 缺该字段 → **兼容路径**（`_resolve_worker_task_defs`）
-    按后端当前默认指针解析。解析不出即抛（本次 invoke 失败、Stream 重投），**不回落 family 最新 ACTIVE、不回落
-    模板 revision**——前者等于让运行中的 run 中途换 step 集，后者的 `latest` 占位在全新 prefix 上根本拉不到镜像。
+    **worker task-def revision 只有一条来源**（ADR 0038）：definition 的 `meta.worker_task_defs`（提交侧 preflight 已把 variant
+    解析成各引擎的显式 revision）。缺该字段的云端 definition 是定义违约，由 `_load_definition` 标 error、不推进——不按后端默认指针
+    回落（那会让运行中的 run 中途换 step 集）、不回落 family 最新 ACTIVE、不回落模板 revision（ADR 0037 决策 7 不留兼容分支）。
     """
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
@@ -347,9 +339,9 @@ def _build(run_id: str):
     if state is not None and state.status in TERMINAL_STATUSES:
         print(f"skip: run {run_id} 已结束，不再改写它的结果")
         return None
-    meta = run_store.load_run_meta(run_id)
+    meta = _load_definition(run_store, run_id, "build")  # 结构版本闸与定义违约 → 标 error、不推进（ADR 0037 决策 7）
     if meta is None:
-        return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
+        return None
     scope_ids = [j.scope_id for j in meta.jobs]
     event_log = DdbEventLog(events_table, run_id, scope_ids)
 
@@ -359,7 +351,7 @@ def _build(run_id: str):
         "securityGroups": os.environ["SECURITY_GROUPS"].split(","),
         "assignPublicIp": os.environ.get("ASSIGN_PUBLIC_IP", "ENABLED"),
     }
-    worker_task_defs = _resolve_worker_task_defs(meta, prefix=prefix, region=region)
+    worker_task_defs = dict(meta.worker_task_defs)  # definition 里的显式 revision（ADR 0038 不变量）；缺值已在 _load_definition 标 error
     engines = compose.build_fargate_engines(
         run_id=run_id, prefix=prefix, cluster=os.environ["CLUSTER"],
         events_table=os.environ["EVENTS_TABLE"], bucket=bucket, report_dir=report_dir,
@@ -423,10 +415,9 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
 
     prebuilt = prebuilt or {}
     for run_id in run_ids:
-        # 逐 run 隔离：一个 run 的 worker revision 解析不出（兼容路径：旧 definition 撞上「默认 variant 在某引擎
-        # 无映射」这种合法稳态，ADR 0038 `--set-default` 只警告不拦）不能连坐同批其它 run——events Stream 一个
-        # batch 含多个 run，抛出去就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。该 run 记一行、留给下批。
-        # 「不回落 family/模板」不受影响：拒的是换镜像，不是拒隔离失败。
+        # 逐 run 隔离：一个 run 装配时的 worker revision 相关失败不能连坐同批其它 run——events Stream 一个 batch 含多个 run，
+        # 抛出去就是 ESM 重试后整批丢弃、别的 run 事件永久丢失。该 run 记一行、留给下批。definition 本身的问题（结构版本、
+        # 缺 worker_task_defs）不走这里：_load_definition 已把那个 run 标 error、返回 None。
         try:
             built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         except WorkerVariantError as exc:

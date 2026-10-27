@@ -22,6 +22,7 @@ def test_schema_version_is_checked_first_and_pinned_by_golden():
 
     assert precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION}) is None
     assert "缺失" in precheck_schema({}) and "同一版本" in precheck_schema({})
+    assert precheck_schema({"schemaVersion": True}) is not None and precheck_schema({"schemaVersion": "1"}) is not None  # true 与 "1" 都不是 1
     assert f"格式版本是 {PROTOCOL_SCHEMA_VERSION + 1}" in precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1})
     bad = {"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1, "target": {"device": "ios", "uiKind": "app"}}
     assert "格式版本" in precheck_job(bad, rs.WORKER_TARGETS)  # 版本先于目标
@@ -75,3 +76,22 @@ def test_main_entry_rejects_device_job_before_any_session():
 
 def test_target_label_matches_cli_wording():
     assert target_label("desktop", "web") == "桌面网页" and target_label("android", "app") == "Android 应用" and target_label("ios", "web") == "iOS 网页"
+
+
+def test_main_entry_rejects_job_without_schema_version_before_reading_anything_else():
+    """版本核对先于读 job 行的任何别的键：缺 schemaVersion 的桌面 job（scenarios 也缺）只得到一条 precheck_failed，不是 KeyError 退出。"""
+    import json
+    import os
+    import subprocess
+    import sys
+
+    keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
+    env = {k: v for k, v in os.environ.items() if k in keep}
+    env["AWS_EC2_METADATA_DISABLED"] = "true"
+    job = {"scope": {"id": "old", "name": "old"}, "engine": "novaact", "assertionVotes": 1}
+    proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact"], input=(json.dumps(job) + "\n").encode("utf-8"),
+                          capture_output=True, timeout=120, env=env)
+    assert proc.returncode == 0, proc.stderr.decode()[-800:]
+    events = [json.loads(l) for l in proc.stdout.decode("utf-8").splitlines() if l.startswith("{") and '"type"' in l]
+    assert [e["type"] for e in events] == ["scope_done"], (events, proc.stderr.decode()[-500:])
+    assert events[0]["scopeId"] == "old" and events[0]["errorType"] == "precheck_failed" and "格式版本是 缺失" in events[0]["message"]

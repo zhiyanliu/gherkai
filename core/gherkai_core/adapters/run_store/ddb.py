@@ -47,6 +47,24 @@ _STATE = "STATE"  # item_type 取值：运行态 item
 _WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 
 
+def _schema_version_attr(v) -> int:
+    """META 顶层的 schema_version 属性 → 整数：缺读作 0（早于结构版本号的写端）；DDB 把数值还成 Decimal，须为整数值；
+    bool / 字符串 / 带小数的值都是定义违约——与本机读头（serialize.definition_schema_version）同一口径，不靖默转换。"""
+    from decimal import Decimal
+
+    from gherkai_core.errors import DefinitionContractError
+
+    if v is None:
+        return 0
+    if isinstance(v, bool):
+        raise DefinitionContractError(f"META 的 schema_version 须为整数，现为 {v!r}")
+    if isinstance(v, int):
+        return v
+    if isinstance(v, Decimal) and v == v.to_integral_value():
+        return int(v)
+    raise DefinitionContractError(f"META 的 schema_version 须为整数，现为 {v!r}")
+
+
 def _job_state_to_item(js: JobState) -> dict:
     """JobState → DDB Map entry（字段集同 serialize；session_id/claimed_at 用 omit-when-None，读回 .get 得 None）。"""
     d: dict = {"status": js.status.value}
@@ -324,8 +342,7 @@ class DynamoDBRunStore:
         item = resp.get("Item")
         if item is None:
             return None
-        v = item.get("schema_version")
-        return (int(v) if v is not None else 0), item.get("cli_version")
+        return _schema_version_attr(item.get("schema_version")), item.get("cli_version")
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。

@@ -61,7 +61,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 `status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停了或卡住时，来查的这条命令会把这个 run 推到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
-使用云端后端时 CLI 不能新于后端（正常保持同版本）：后端记一个版本戳，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前拿它比对 CLI 版本，CLI 比后端**新**时拒绝执行并以退出码 2 结束（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常执行。后端还没有版本戳（部署早于本版本、从未升级）时，纯桌面且不经隧道的 run 只提示、照常执行，带设备目标或 `--expose-local` 的 run 以退出码 2 结束、请部署方先升级部署。升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+使用云端后端时 CLI 不能新于后端（正常保持同版本）：后端记一个版本戳，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前拿它比对 CLI 版本，CLI 比后端**新**时拒绝执行并以退出码 2 结束（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常执行。后端还没有版本戳（部署早于本版本、从未升级）时，桌面 run 只提示、照常执行，带设备目标的 run 以退出码 2 结束、请部署方先升级部署。升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
 提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。
 

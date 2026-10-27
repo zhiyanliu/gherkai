@@ -113,7 +113,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
-| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或 --expose-local 的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；纯桌面且不经隧道的 run 不受影响 |
+| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy` |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 

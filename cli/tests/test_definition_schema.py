@@ -123,3 +123,16 @@ def test_missing_stamp_blocks_runs_that_require_it_before_resource_preflight(tmp
 import gherkai_runtime.compose as _compose_mod  # noqa: E402
 
 _real_check_version_skew = _compose_mod.check_version_skew
+
+
+def test_schema_gate_runs_before_the_state_file_is_parsed(tmp_path, monkeypatch, capsys):
+    """别的版本写出的 run 目录连运行态的形状都不保证：先核结构版本，再读运行态——否则「请升级」会变成一个解析异常。"""
+    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
+    _rewrite_schema(reports, run_id, DEFINITION_SCHEMA_VERSION + 1)
+    state = reports / run_id / "run_state.json"
+    d = json.loads(state.read_text(encoding="utf-8"))
+    d["status"] = "teleported"
+    state.write_text(json.dumps(d), encoding="utf-8")
+    for cmd in ("status", "explain"):
+        assert m.main([cmd, run_id, "--report-dir", str(reports)]) == 2
+        assert "更新版本" in capsys.readouterr().err

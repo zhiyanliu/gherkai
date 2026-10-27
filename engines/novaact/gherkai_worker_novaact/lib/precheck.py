@@ -42,7 +42,7 @@ def _num(v) -> str:
 def precheck_schema(job: dict) -> str | None:
     """job 行的结构版本不等于本 worker 认的（含缺键）→ 拒绝原因（产品语言）；None 表示通过。"""
     found = job.get("schemaVersion")
-    if found != PROTOCOL_SCHEMA_VERSION:
+    if isinstance(found, bool) or not isinstance(found, int) or found != PROTOCOL_SCHEMA_VERSION:  # true 不是 1（与 TS 侧的严格相等对称）
         shown = "缺失" if found is None else str(found)
         return (f"这个 job 的格式版本是 {shown}，这个 worker 认的是 {PROTOCOL_SCHEMA_VERSION}：命令行工具与 worker 的版本不一致，"
                 f"请把两者装成同一版本（云端用与命令行工具同版本的 worker 镜像）。")

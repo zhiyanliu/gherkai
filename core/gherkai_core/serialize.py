@@ -53,11 +53,16 @@ def _argument_to_dict(arg: StepArgument | None) -> dict | None:
 
 
 def _argument_from_dict(d: dict | None) -> StepArgument | None:
+    """step 的多行参数（可省：无参数的 step 不带 argument 键，契约页如此登记）；有则 kind 与对应正文键必在，不补空值。"""
     if d is None:
         return None
-    if d["kind"] == "docString":
-        return StepArgument(kind="docString", content=d.get("content"))
-    return StepArgument(kind="dataTable", rows=tuple(tuple(r) for r in d.get("rows", [])))
+    kind = _require(d, "kind", "step 参数")
+    if kind == "docString":
+        return StepArgument(kind="docString", content=_require(d, "content", "docString 参数"))
+    if kind == "dataTable":
+        return StepArgument(kind="dataTable", rows=tuple(tuple(r) for r in _require(d, "rows", "dataTable 参数")))
+    from gherkai_core.errors import DefinitionContractError
+    raise DefinitionContractError(f"definition 里的 step 参数 kind 未知：{kind!r}")
 
 
 def _step_to_dict(s: Step) -> dict:
@@ -69,7 +74,7 @@ def _step_to_dict(s: Step) -> dict:
 
 
 def _step_from_dict(d: dict) -> Step:
-    return Step(index=d["index"], keyword=d["keyword"], text=d["text"],
+    return Step(index=_require(d, "index", "step"), keyword=_require(d, "keyword", "step"), text=_require(d, "text", "step"),
                 argument=_argument_from_dict(d.get("argument")))
 
 
@@ -78,7 +83,8 @@ def _scenario_def_to_dict(sc: Scenario) -> dict:
 
 
 def _scenario_def_from_dict(d: dict) -> Scenario:
-    return Scenario(id=d["id"], name=d["name"], steps=tuple(_step_from_dict(s) for s in d.get("steps", [])))
+    return Scenario(id=_require(d, "id", "scenario"), name=_require(d, "name", "scenario"),
+                    steps=tuple(_step_from_dict(s) for s in _require(d, "steps", "scenario")))
 
 
 # definition 的结构版本（ADR 0037 决策 7）：同一结构版本下 definition 的**键集固定、不适用的值写 null**；读端只认当前这一个版本
