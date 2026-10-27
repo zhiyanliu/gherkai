@@ -77,11 +77,13 @@ _BUILTIN_TYPE_REASONS = {int: "应为整数", float: "应为数字"}
 
 def convert_config_value(action, raw, *, section: str, key: str, path):
     """配置值经与 argparse 同一套类型与取值范围校验（ADR 0053 决策 3）：非法值的报错形态与命令行上给错一致。
-    按 TOML 的原生类型直接校验、不经字符串绕一圈：整数选项只接受 TOML 整数（浮点不截断——命令行上给 4.7 同样被拒）；浮点选项与
-    自定义校验函数接受整数与浮点（拿到数字本身）；没有 type 的选项要求文本；布尔一律拒绝；可重复给的选项接受文本列表，其余只接受
-    单个值。内建 int / float 的失败按产品语言给理由（不把解释器的英文原文带给使用方），自定义校验函数自己写的消息原样保留。"""
+    按 TOML 的原生类型直接校验、不经字符串：整数选项只接受 TOML 整数（浮点不截断——命令行上给 4.7 同样被拒），浮点选项与自定义
+    校验函数接受 TOML 整数或浮点（拿到数字本身），数字选项不接受文本（TOML 里 "4" 是文本、不是数字）；没有 type 的选项要求文本；
+    布尔一律拒绝；可重复给的选项接受文本列表，其余只接受单个值。失败理由是产品语言（不把解释器的英文原文带给使用方），自定义校验
+    函数自己写的消息原样保留；取值回显限长，别让一个超长的值撑爆一行提示。"""
     def fail(reason: str):
-        raise _config.ConfigError(f"配置文件 {path} 的 [{section}] {key} 取值 {raw!r} 无效：{reason}（要求与命令行选项 --{key} 相同）")
+        shown = repr(raw) if len(repr(raw)) <= 80 else repr(raw)[:77] + "…"
+        raise _config.ConfigError(f"配置文件 {path} 的 [{section}] {key} 取值 {shown} 无效：{reason}（要求与命令行选项 --{key} 相同）")
 
     repeat = _is_repeatable(action)
     if isinstance(raw, list) and not repeat:
@@ -91,14 +93,15 @@ def convert_config_value(action, raw, *, section: str, key: str, path):
         if isinstance(item, bool):
             fail("不接受布尔值")
         if callable(action.type):
-            if action.type is int and isinstance(item, float):
-                fail("应为整数")
+            reason = _BUILTIN_TYPE_REASONS.get(action.type, "应为数字")
+            if not isinstance(item, (int, float)) or (action.type is int and isinstance(item, float)):
+                fail(reason)
             try:
                 value = action.type(item)
             except argparse.ArgumentTypeError as e:  # 自定义校验函数自己的消息（已是产品语言）
                 fail(str(e))
-            except (ValueError, TypeError, OverflowError) as e:
-                fail(_BUILTIN_TYPE_REASONS.get(action.type) or str(e) or "类型不对")
+            except (ValueError, TypeError, OverflowError):  # 内建类型或自定义校验吞不下这个数（如超出浮点范围）
+                fail(reason if action.type in _BUILTIN_TYPE_REASONS else "不是可接受的数字")
         else:
             if not isinstance(item, str):
                 fail("应为文本")

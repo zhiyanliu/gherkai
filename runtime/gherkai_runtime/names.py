@@ -118,7 +118,7 @@ def image_tag(version: str, variant: str) -> str:
 
     PEP 440 的 `+`（本地段）与 `!`（epoch）不在 docker/ECR 的 tag 字符集内（`1.4.0.post3.dev0+28c1684` 直接
     `docker tag` 即 `invalid reference format`，实测），故两者归一化为 `.`；返回前按字符集正则校验，不匹配即
-    `ValueError`——推送方与解析方（preflight / 推进器兼容路径）拼的是同一个函数，键不会两边算法不同而对不上。
+    `ValueError`——推送方与解析方（提交侧 preflight）拼的是同一个函数，键不会两边算法不同而对不上。
     """
     if not _VARIANT_RE.match(variant):
         raise ValueError(

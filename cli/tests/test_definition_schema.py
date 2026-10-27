@@ -166,3 +166,22 @@ def test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(tm
     assert m.main([cmd, run_id, *rest, "--report-dir", str(reports)]) == 2
     assert "提交记录不完整" in capsys.readouterr().err
     assert (reports / run_id / "run_state.json").read_text(encoding="utf-8") == before
+
+
+def test_cloud_status_and_explain_report_header_contract_violation_with_exit_2(monkeypatch, capsys):
+    """云端两个读端读 META 头时的形态违约（结构版本字段不是整数）：以退出码 2 结束并说明，不是裸异常；之后不再读运行态。"""
+    reads: list = []
+
+    class _Table:
+        def get_item(self, **kw):
+            reads.append(kw["Key"]["item_type"])
+            if kw["Key"]["item_type"] == "META":
+                return {"Item": {"run_id": "r1", "item_type": "META", "schema_version": True, "cli_version": "1.5.0"}}
+            raise AssertionError("头读不出来时不该再读运行态")
+
+    _patch_cloud_handles(monkeypatch, [])
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    for argv in (["status", "r1", "--backend", "cloud", "--region", "us-east-1"], ["explain", "r1", "--backend", "cloud", "--region", "us-east-1"]):
+        reads.clear()
+        assert m.main(argv) == 2
+        assert "提交记录不完整" in capsys.readouterr().err and reads == ["META"]

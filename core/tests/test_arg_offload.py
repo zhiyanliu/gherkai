@@ -197,3 +197,24 @@ def test_reader_without_offloader_not_fooled_by_content_ref_as_text(aws):
     steps = back.jobs[0].scenarios[0].steps
     assert steps[0].argument.content == "content_ref"
     assert steps[1].argument.rows == (("rows_ref", "content_ref"),)
+
+
+def test_restore_translates_argument_and_pointer_shape_errors_into_contract_errors():
+    """同版本下的形态违约（step 参数不是对象、指针不是文本）由 offloader 翻成 DefinitionContractError（ADR 0037 决策 7），不是 TypeError /
+    AttributeError 裸抛——推进器据此标 error 而不是整批重试。"""
+    import pytest
+
+    from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
+    from gherkai_core.errors import DefinitionContractError
+
+    off = S3StepArgumentOffloader(object(), "b", "p")
+    bad_arg = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": 1}]}]}]}
+    with pytest.raises(DefinitionContractError):
+        off.restore(bad_arg, "r")
+    bad_ref = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": {"kind": "docString", "content_ref": True}}]}]}]}
+    with pytest.raises(DefinitionContractError):
+        off.restore(bad_ref, "r")
+    # 消费方自己的失败不翻译：句柄装配错（不是 S3 client）原样抛 AttributeError
+    good = {"jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": [{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}
+    with pytest.raises(AttributeError):
+        off.restore(good, "r")

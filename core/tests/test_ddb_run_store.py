@@ -255,3 +255,14 @@ def test_load_run_meta_checks_schema_before_restoring_offloaded_arguments(ddb_ru
                                                 "meta_json": '{"schema_version": 1, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
     with pytest.raises(DefinitionContractError):
         ddb_run_store_offload.load_run_meta("malformed")
+
+
+def test_load_run_meta_lets_fetch_failures_through_untranslated(ddb_run_store_offload):
+    """S3 取回失败不是定义违约（ADR 0037 决策 7 的读端边界）：指针指向不存在的桶时原样抛 botocore 异常——可重试的故障不该被读端永久标成 error。"""
+    from botocore.exceptions import ClientError
+
+    ddb_run_store_offload._table.put_item(Item={"run_id": "gone", "item_type": "META", "schema_version": 1,
+                                                "meta_json": '{"schema_version": 1, "jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": '
+                                                             '[{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://no-such-bucket-gherkai-x/k"}}]}]}]}'})
+    with pytest.raises(ClientError):
+        ddb_run_store_offload.load_run_meta("gone")

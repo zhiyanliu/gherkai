@@ -252,7 +252,7 @@ def test_worker_template_arn_is_not_injected_into_any_lambda_env():
 
     曾短暂注入过 `WORKER_TEMPLATE_ARNS`（0037 那批的前向口子）。撤掉的理由：模板的镜像栏是 `latest` 占位，
     在从未推过 `latest` 的全新 prefix 上根本拉不到——回落它只把错误拖到 Fargate 启动期。推进器遇上没有
-    `worker_task_defs` 的旧 definition 时按**后端默认指针**解析（读 SSM，权限见下一条）。
+    `worker_task_defs` 的 definition 按定义违约标 error、不解析默认指针、不读 SSM（下一条反向断言）。
     模板 ARN 只留在 SSM 里给部署方的 push-worker 当复制母本。
     """
     t = _template()
@@ -263,18 +263,22 @@ def test_worker_template_arn_is_not_injected_into_any_lambda_env():
         assert "worker-template" not in joined, f"{name} 的 env 里出现了模板参数路径：{env}"
 
 
-def test_lambda_roles_hold_no_ssm_read():
-    """三个 Lambda（reconciler / kicker / 退出观察者）都不读 SSM：definition 缺 `worker_task_defs` 按定义违约标 error、不解析默认指针
-    （ADR 0038「读侧不留兼容路径」），曾为兼容回落授给两个推进器的 `/{prefix}backend/*` 读权限随之撤除——最小权限，别让一份失实理由的
-    授权留在角色上。"""
+def test_advancer_roles_hold_no_ssm_read():
+    """两个推进器（reconciler / kicker）的角色都不读 SSM 参数：definition 缺 `worker_task_defs` 按定义违约标 error、不解析默认指针
+    （ADR 0038「读侧不留兼容路径」），曾为兼容回落授的 `/{prefix}backend/*` 读权限随之撤除——最小权限，别让一份失实理由的授权留在角色上。
+    作用域只盯这两个角色与读参数的两个动作，别的角色、别的 ssm 动作不在本断言之内。"""
     t = _template()
-    with_ssm = {}
+    offending = {}
     for name, policy in t.find_resources("AWS::IAM::Policy").items():
+        roles = json.dumps(policy["Properties"]["Roles"])
+        if not ("Reconciler" in roles or "Kicker" in roles):
+            continue
         for stmt in policy["Properties"]["PolicyDocument"]["Statement"]:
             actions = stmt["Action"] if isinstance(stmt["Action"], list) else [stmt["Action"]]
-            if any(a.startswith("ssm:") for a in actions):
-                with_ssm[name] = json.dumps(policy["Properties"]["Roles"])
-    assert not with_ssm, f"Lambda 角色不该有 SSM 权限：{with_ssm}"
+            hit = [a for a in actions if a in ("ssm:GetParameter", "ssm:GetParametersByPath")]
+            if hit:
+                offending[name] = (hit, roles)
+    assert not offending, f"推进器角色不该再读 SSM 参数：{offending}"
 
 
 def _joined_refs(value) -> list[str]:

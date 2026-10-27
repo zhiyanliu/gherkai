@@ -278,7 +278,8 @@ def _load_definition(run_store, run_id: str, label: str):
 def _schema_mismatch_message(exc) -> str:
     """后端读到结构版本不等于自己认的提交记录时写进 run 级 message 的整句（ADR 0037 决策 7）：谁写的、两边各第几版、怎么办。
     与 CLI 侧同一事件的句子分开写：那边的出路是升级本机或用写端版本查看，这边的出路是升级后端或用后端版本重新提交。"""
-    by = f"gherkai {exc.cli_version}" if exc.cli_version else "gherkai（版本未知）"
+    # 写端版本来自提交记录、不受信：截断再拼，message 才真的有界（损坏的值不能把运行态条目撑大）
+    by = f"gherkai {str(exc.cli_version)[:40]}" if exc.cli_version else "gherkai（版本未知）"
     if exc.found > exc.supported:
         return (f"提交记录由更新版本的 {by} 写出（记录是第 {exc.found} 版，后端只认第 {exc.supported} 版），后端不能执行它；"
                 "请部署方把后端升级到提交侧的版本，或用后端版本的 gherkai 重新提交")

@@ -35,11 +35,25 @@ def _iter_arguments(meta_dict: dict):
                 scenario_id = sc["id"]
                 for step in sc.get("steps", []):
                     arg = step.get("argument")
-                    if arg is not None:
-                        yield arg, scope_id, scenario_id, step["index"]
+                    if arg is None:
+                        continue
+                    if not isinstance(arg, dict):
+                        raise _shape_error(f"step 参数不是对象而是 {type(arg).__name__}")
+                    yield arg, scope_id, scenario_id, step["index"]
     except (KeyError, TypeError, AttributeError) as e:
-        from gherkai_core.errors import DefinitionContractError
-        raise DefinitionContractError(f"definition 的 job / scenario / step 形态不对，无法定位 step 参数（{type(e).__name__}：{e}）") from e
+        raise _shape_error(f"{type(e).__name__}：{e}") from e
+
+
+def _ref(value, key: str) -> str:
+    """指针必须是文本（s3:// URI）；别的类型是同版本下的定义违约，不让它变成 urlparse 的裸 AttributeError。"""
+    if not isinstance(value, str) or not value:
+        raise _shape_error(f"{key} 不是文本而是 {type(value).__name__}")
+    return value
+
+
+def _shape_error(detail: str):
+    from gherkai_core.errors import DefinitionContractError
+    return DefinitionContractError(f"definition 的 job / scenario / step 形态不对，无法定位 step 参数（{detail}）")
 
 
 def has_pointers(meta_dict: dict) -> bool:
@@ -99,9 +113,9 @@ class S3StepArgumentOffloader:
         """
         for arg, _scope_id, _scenario_id, _step_index in _iter_arguments(meta_dict):
             if "content_ref" in arg:
-                arg["content"] = self._fetch(arg.pop("content_ref"))
+                arg["content"] = self._fetch(_ref(arg.pop("content_ref"), "content_ref"))
             elif "rows_ref" in arg:
-                arg["rows"] = self._fetch(arg.pop("rows_ref"))
+                arg["rows"] = self._fetch(_ref(arg.pop("rows_ref"), "rows_ref"))
         return meta_dict
 
     def _fetch(self, uri: str):

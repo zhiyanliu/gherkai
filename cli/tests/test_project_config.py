@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -117,6 +118,8 @@ def test_explicit_missing_config_exits_2_before_anything_else(tmp_path, monkeypa
     ("[common]\nassertion-votes = 2.0\n", "应为整数"),
     ("[common]\nmax-concurrency = inf\n", "应为整数"),                      # 无穷大不成为裸 OverflowError
     ("[common]\nmax-concurrency = 'abc'\n", "应为整数"),                    # 内建类型的失败给产品语言理由
+    ("[common]\nmax-concurrency = '4'\n", "应为整数"),                      # 数字选项不收文本：TOML 里 "4" 是文本
+    ("[common]\ndefault-job-timeout = 1" + "0" * 400 + "\n", "不是可接受的数字"),  # 自定义校验吞不下的数：不带解释器原文
     ("[common]\ntunnel-ttl = 'x'\n", "应为数字"),
 ])
 def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch, capsys, body, needle):
@@ -136,6 +139,11 @@ def test_config_numbers_keep_native_types_and_reasons_are_product_language():
         return settings.convert_config_value(settings.find_option_action(p, dest), raw, section="common", key=dest.replace("_", "-"), path="x.toml")
 
     assert conv("tunnel_ttl", 30) == 30.0 and conv("default_job_timeout", 600) == 600.0 and conv("max_concurrency", 3) == 3
+    received = []
+    recording = SimpleNamespace(type=lambda v: received.append(type(v)) or v, choices=None, option_strings=["--x"], dest="x", nargs=None)
+    assert settings.convert_config_value(recording, 30, section="common", key="x", path="x.toml") == 30
+    assert settings.convert_config_value(recording, 2.5, section="common", key="x", path="x.toml") == 2.5
+    assert received == [int, float]   # 校验函数拿到的是数字本身、不是字符串化再转回
     with pytest.raises(cfgmod.ConfigError) as e:
         conv("max_concurrency", "abc")
     assert "应为整数" in str(e.value) and "invalid literal" not in str(e.value)
@@ -774,3 +782,24 @@ def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeyp
         assert job.device_request.project_arn == PROJECT_ARN and job.device_request.device_arn == DEV_ARN
         assert job.target.app.bucket == "my-apps"
     assert "gherkai_cli" not in inspect.getsource(detached)
+
+
+def test_account_check_only_swallows_credential_and_network_failures(monkeypatch, capsys):
+    """账号比对是辅助提示（ADR 0053 决策 3）：凭证 / 网络类失败（botocore）只提示一句、继续；别的异常是程序错误，原样上抛、不吞。"""
+    from botocore.exceptions import NoCredentialsError
+
+    from gherkai_cli import submission
+
+    args = SimpleNamespace(region="us-east-1", profile=None, project_config=cfgmod.NO_CONFIG)
+
+    def raise_(exc):
+        def _f(**kw):
+            raise exc
+        return _f
+
+    monkeypatch.setattr(compose, "probe_aws_identity", raise_(NoCredentialsError()))
+    submission.warn_project_account(args, PROJECT_ARN, "x")
+    assert "未能核对" in capsys.readouterr().err
+    monkeypatch.setattr(compose, "probe_aws_identity", raise_(RuntimeError("bug")))
+    with pytest.raises(RuntimeError):
+        submission.warn_project_account(args, PROJECT_ARN, "x")

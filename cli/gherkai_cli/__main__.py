@@ -1517,7 +1517,7 @@ def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str
 
 def _definition_header_gate(run_store, run_id: str) -> int | None:
     """读 definition 的头（结构版本与写端版本）并过版本闸（ADR 0037 决策 7）。头本身读不出来（同版本下的形态违约，如版本字段不是整数）
-    也以退出码 2 结束并说明——不让它变成裸异常；三个本机 / 云端读端（status、explain）都经这里。"""
+    也以退出码 2 结束并说明——不让它变成裸异常；本机与云端的 status / explain 四个读端都经这里（云端的 botocore 异常由调用方接）。"""
     try:
         header = run_store.peek_definition_header(run_id)
     except DefinitionContractError as e:
@@ -1851,16 +1851,12 @@ def _status_cloud(args) -> int:
 
     # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
     try:
-        header = run_store.peek_definition_header(args.run_id)
-    except DefinitionContractError as e:  # 头本身读不出来（版本字段不是整数等形态违约）：同一句、退出码 2
-        _progress(_definition_contract_message(e))
-        return 2
+        bad = _definition_header_gate(run_store, args.run_id)
     except Exception as e:
         if compose.is_botocore_error(e):
             _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
             return 2
         raise
-    bad = _definition_schema_gate(header, args.run_id)
     if bad is not None:
         return bad
 

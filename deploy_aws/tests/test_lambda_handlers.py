@@ -493,7 +493,7 @@ def cloud_env(monkeypatch):
 
 # 提交侧 preflight 解析出的 novaact worker revision ARN（ADR 0038）——**显式 revision、非 family 名**。
 # 绝大多数用例只关心「推进器认不认 definition 里的这一份」，故 _seed_run 默认带上它（即打通后的正常形态）；
-# 兼容路径（definition 缺该字段）由下面专门那组用例显式置 None 来验。
+# 缺该字段的情形（定义违约：标 error、不解析默认指针）由下面专门那组用例显式置 None 来验。
 _WORKER_REV = "arn:aws:ecs:us-east-1:000000000000:task-definition/gherkai-novaact-worker:7"
 _SENTINEL = object()
 
