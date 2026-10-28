@@ -2055,8 +2055,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/redaction-cases.json": {
-    "mtime": 1793151452.8407693,
-    "ast_hash": "",
+    "mtime": 1793160328.0693514,
+    "ast_hash": "2deee3172a13308872d58c27264f0c89",
     "semantic_hash": ""
   },
   "engines/fixtures/tunnel-warmup.json": {

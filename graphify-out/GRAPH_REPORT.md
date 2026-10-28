@@ -5,12 +5,12 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 7056 nodes · 14742 edges · 456 communities (262 shown, 194 thin omitted)
+- 7049 nodes · 14680 edges · 491 communities (270 shown, 221 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 1348 edges (avg confidence: 0.73)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `eec61ba4`
+- Built from commit: `d0539a9b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -19,8 +19,8 @@
 - test_backend_cloud.py
 - test_main.py
 - JobResult
-- model.py
-- test_provider.py
+- Job
+- Provider
 - schedule
 - test_project.py
 - test_workers.py
@@ -29,8 +29,8 @@
 - ADR 0014: AI 优先断言
 - ._run_cdk
 - _run_step
-- report_store/local.py
-- Status
+- RunResult
+- model.py
 - test_stack.py
 - test_evidence.py
 - test_deploy_cmd.py
@@ -51,20 +51,20 @@
 - _RecUploader
 - test_worker_variant.py
 - query_capabilities
-- RunResult
+- RunPersistence
 - test_tunnel_cli.py
 - skill_markdown_files
-- CONTRIBUTING.md: contributor 指南
+- gherkai agent skill 主文
 - render.py
-- run_store/local.py
+- LocalRunStore
 - cli.py
 - redact_secrets
-- ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）
+- ADR 0024: worker–core 协议
 - test_tunnel_warmup.py
 - 云端后端用户文档
 - test_compose.py
 - _render_status
-- AppRef
+- job_from_dict
 - device_selection.py
 - StepResult
 - test_user_docs.py
@@ -73,10 +73,10 @@
 - test_interrupt_model.py
 - ._run_once
 - _FakeNovaActClient
-- BackendStack
+- .__init__
 - test_ddb_run_store.py
-- gherkai_cli/__main__.py
-- ValueError
+- _cmd_run
+- test_job_source.py
 - test_fargate_engine.py
 - build_cloud_stores
 - Video Material Manifest
@@ -85,21 +85,21 @@
 - _doc_rules.py
 - _is_transient_network
 - textui.py
-- plan
-- RunState
-- _ask_worker
+- errors.py
+- test_cloud_integration.py
+- gherkai_cli/__main__.py
 - test_stores.py
 - 06-devicefarm-appium.mts
 - gherkai 变更记录 (CHANGELOG)
 - serialize.py
 - ArtifactUploader
-- JobState
+- test_detached_launcher.py
 - warmupSession
 - redact_secrets
 - subprocess_engine.py
 - user-steps.mts
 - test_user_steps.py
-- _run_with_refs
+- test_s3_report_store.py
 - test_termcolor.py
 - test_cli_json_contract.py
 - 决策
@@ -114,13 +114,13 @@
 - build_engines
 - Video Material Files
 - _explain_run
-- deterministic.py
-- require_boto3
+- deterministic
+- BackendStack
 - skill_install.py
 - 决策
 - Run Store Persistence Ports
 - test_list_workers_reports_unreachable_aws_without_a_traceback
-- evidence.py
+- detached.py
 - 决策
 - 决策
 - test_termination_parity.py
@@ -130,17 +130,17 @@
 - run_scope.py
 - Diagram Build Script
 - ArtifactUploader
-- _cmd_plan
+- test_engines_matrix.py
 - evidence.test.mts
 - e2e_harness.py
-- _Nova
+- deterministic.py
 - test_lifecycle_states.py
-- LocalResultStore
+- _presend_act_siblings
 - Event Wallclock Analysis
 - Release Notes Guards
-- FeatureSource
+- plan
 - test_skill.py
-- Provider
+- .add_arguments
 - run-scope.test.mts
 - Dist Metadata Checks
 - DynamoDBRunStore
@@ -151,14 +151,14 @@
 - ContainerError
 - FargateEngine
 - _FakeSink
-- test_session_events.py
+- .deploy
 - DynamoDB Events Transport ADR
 - constants.py
 - 决策
 - ScopeStarted
 - _cmd_doctor
 - test_skill_deploy_tokens.py
-- test_error_step_also_enqueues_only_after_emit
+- video.py
 - Stateless Run Core Model
 - _Recorder
 - argument.mts
@@ -167,9 +167,9 @@
 - S3StepArgumentOffloader
 - 0050. 确定性 step 多句柄注册与测试分层
 - atomic_write_json
-- test_argument.py
+- _cmd_status
 - artifact-upload.test.mts
-- test_tunnel.py
+- _job_with
 - Worker Signal Interrupt Tests
 - engines-matrix.test.mts
 - ADR 0043: 随 CLI 发行的 agent skill
@@ -177,13 +177,13 @@
 - ECS Task Timing Capture
 - test_definition_schema.py
 - Artifact Uploader Component
-- _patch_skew
+- CONTRIBUTING.md: contributor 指南
 - Graphify Refresh Script
 - reconcile.tick（推进器共享入口）
 - job-source.mts
 - tunnel_host.py
 - Cooperative Stop Design
-- main
+- test_sqlite_event_log.py
 - Doc Rules Check
 - tunnel.py
 - openai
@@ -197,7 +197,7 @@
 - Worker Termination Contract
 - Package URL Links
 - JobResult
-- image_tag
+- gherkai_runtime/names.py
 - RunState
 - @playwright/test
 - test_reconcile.py
@@ -212,12 +212,12 @@
 - files
 - Repository Metadata
 - test_subprocess_engine.py
-- _FakeResult
+- list_registry
 - Commit Gate Script
 - Derived Sync Script
 - Wording Guard Script
 - 移动真机支持（1.5）：实施批次的改动面与先写的护栏测试
-- ._gen
+- minimax_narration.py
 - Architecture Diagrams
 - Slide Frame SSIM Checks
 - artifact_upload.py
@@ -226,7 +226,7 @@
 - RunResult
 - Pre-commit Hook Script
 - _CdkWritingContext
-- event-sink.mts
+- _argv
 - Adapters Package
 - user-steps.test.mts
 - test_tunnel_host.py
@@ -258,7 +258,7 @@
 - Popen
 - job-source.test.mts
 - redact.test.mts
-- .on_event
+- ValueError
 - JobResult
 - .enabled
 - argument.test.mts
@@ -274,11 +274,11 @@
 - Scenario
 - Step
 - StepArgument
-- NgrokTunnel
+- test_tunnel.py
 - Status
-- FakeWorkerHandle
-- run_store/ddb.py
-- ./run-scope.mjs
+- cli 包 contributor 文档
+- _build
+- ADR-0019
 - Scenario
 - Step
 - EventSink
@@ -307,20 +307,20 @@
 - container_name
 - SqliteEventLog
 - plan_next
-- ADR 0023: Nova Act acting 锁 Python
-- _resolve_steps_dir
+- finalize_report
+- Path
 - BaseException
-- Midscene 调 Bedrock 的 SigV4 自签：签什么、不签什么、怎么排障
+- ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock
 - cli/tests/conftest.py
-- ADR 0024: worker–core 协议
-- classify_vpc_state
+- ADR 0016: 执行架构 — 核心库与 run 模型
+- AI step（默认执行路径）
 - exceptions
-- _add_device_flags
+- .feature (Gherkin 用例)
 - WebdriverCtx
 - format_event
 - RFC-3986
 - ._installed_import_source
-- RuntimeError
+- _FakeSchedulerClient
 - reconciler.py
 - @aws-sdk/client-dynamodb
 - Event
@@ -330,10 +330,10 @@
 - _FakeS3
 - projected_run_status
 - .__init__
-- _TrajNova
+- _ensure_ns_package
 - ArgumentParser
 - parametrize
-- gherkai：价值与方法（材料索引）
+- gemini_image.py
 - Job
 - Path
 - fixture
@@ -343,28 +343,28 @@
 - Fargate/ECS RunTask 执行后端
 - severity 数值序（_STATUS_SEVERITY）
 - url_matches.py
-- render_traffic_policy
+- test_warmup_page_script_classifies_only_401_as_denied
 - Exception
-- _AbsentEngine
+- _handle_timeout
 - RunMeta
 - deterministic
 - _cmd_deploy
 - _joined_refs
 - test_finalize_missing_run_fails
-- test_plan_config_defaults_derive_from_builtin_acquire_budget
-- _FakeCdp
+- DeterministicKeywordMismatch
+- TunnelError
 - RuntimeError
 - settings.py
 - ._emit_ts
-- test_ecr_repos_have_no_lifecycle_rules_and_are_retained
+- EventBridgeTimeoutWatch
 - test_star_step_keyword_fails_fast
 - fixture
 - test_leading_and_keyword_fails_fast
 - Job
 - WarmupFailureError
 - unspecified_message
-- runStep
-- stop_tunnel
+- deterministic_steps.py
+- _cmd_list_engines
 - .peek_definition_header
 - list
 - test_tail_events_after_stop_are_still_reduced_and_release_confirmed
@@ -377,7 +377,7 @@
 - datetime
 - JobResult
 - SessionRecord
-- test_worker_template_arn_is_not_injected_into_any_lambda_env
+- _dist_version
 - ValueError
 - CHECK_PATH
 - Target
@@ -449,6 +449,17 @@
 - WarmupFailure
 - run_store
 - parametrize
+- ._pump
+- UserStepsError
+- _isolate
+- ADR-0022
+- ADR-0026
+- ADR-0027
+- ADR-0035
+- ADR-0039
+- ADR-0048
+- AWS_TRANSIENT_NAMES
+- AWS_TRANSIENT_STATUS
 - Requirement
 - REQUIREMENTS
 - SelectedHandler
@@ -460,6 +471,30 @@
 - WebdriverDevice
 - WebdriverEntry
 - WebdriverHandler
+- BROWSER_CLOSE_BUDGET_MS
+- CONNECT_BACKOFF_MS
+- FailureExitDeps
+- INFLIGHT_SETTLE_MS
+- MIN_GRACE_MARGIN_MS
+- ADR-0014
+- ADR-0020
+- ADR-0024
+- ADR-0028
+- ADR-0029
+- ADR-0031
+- ADR-0036
+- ADR-0037
+- ADR-0042
+- ADR-0044
+- ADR-0049
+- ADR-0050
+- ADR-0051
+- QUEUE_DRAIN_EXIT_MS
+- Scenario
+- ShutdownDeps
+- Step
+- STOP_SESSION_BUDGET_MS
+- WORKER_TARGETS
 
 ## God Nodes (most connected - your core abstractions)
 1. `main()` - 272 edges
@@ -536,39 +571,39 @@
 - **Execution runtime behaviour diagram family** — docs_diagrams_execution_cloud_cascade, docs_diagrams_execution_detached_gates, docs_diagrams_execution_timeout_chain [INFERRED 0.70]
 - **agent 驾驭面：机读输出 + 证据 + 教材 + 文案纪律** — docs_adr_0041_agent_facing_cli_affordances_json_contract, docs_adr_0042_step_evidence_and_explain_explain, docs_adr_0043_agent_skill_for_driving_gherkai_derived_copy, docs_adr_0039_user_facing_surfaces_no_internal_references_message_guardrail [INFERRED 0.80]
 
-## Communities (456 total, 194 thin omitted)
+## Communities (491 total, 221 thin omitted)
 
 ### Community 0 - "main"
 Cohesion: 0.04
-Nodes (73): main(), _det_feature(), --version 打印「gherkai <发行版本>」并以退出码 0 结束——版本真源是包元数据（git tag → uv-dynamic-…, plan 的分叉与 run/submit **相反**（ADR 0037 决策 3 明示 + ADR 0036 决策 4）：保持 best-effort…, 两个非 job 入口同样加载 steps 目录（ADR 0037 决策 4）→ plan 标注与 list-deterministic 清单反映定制 step。, 对照：定位链 miss（运行时没装）plan 仍降级并以退出码 0 结束（ADR 0036 决策 4 / 0037 决策 3 的分叉保留）。, 给了目录 / 读不了的路径 → 以退出码 2 结束并报「读 feature 失败」，不是 IsADirectoryError traceback（退出码语义见…, --scenario：id 全等 / 行号（scenario_id 尾部数字段）/ 标题子串三种匹配，可重复且彼此为或。 (+65 more)
+Nodes (59): main(), --version 打印「gherkai <发行版本>」并以退出码 0 结束——版本真源是包元数据（git tag → uv-dynamic-…, 对照：定位链 miss（运行时没装）plan 仍降级并以退出码 0 结束（ADR 0036 决策 4 / 0037 决策 3 的分叉保留）。, 给了目录 / 读不了的路径 → 以退出码 2 结束并报「读 feature 失败」，不是 IsADirectoryError traceback（退出码语义见…, --scenario：id 全等 / 行号（scenario_id 尾部数字段）/ 标题子串三种匹配，可重复且彼此为或。, 云端后端第一道闸是版本 skew（先于任何云端读）：block → 以退出码 2 结束，且根本没去装 store。, `gherkai --help` 不列内部入口：_reconcile / _tunnel_watch 是 submit 在后台启动的子进程入口，不供直接使用。…, 命中了确定性 step、但它在该 scope 的目标上没有实现（句柄声明与 worker 支持的交集不含该目标，ADR 0049 决策 3、6；0050 决策… (+51 more)
 
 ### Community 1 - "test_backend_cloud.py"
-Cohesion: 0.05
-Nodes (101): _definition(), _fake_schedule_factory(), _patch_cloud_handles(), Path, cli --backend cloud 接线层测试（ADR 0016「cli backend 选择」/ 0030 决定七 / 0033 IaC+接线）。…, status 不解析 variant（ADR 0038）：它只读运行态、不起 task，definition 里的 revision 提交时已定死。, 通过则每引擎一行「variant · digest · revision」（ADR 0038「通过则打印各引擎解析到的 variant / digest」）：…, `--quiet` 静音这几行（同它静音逐事件进度的口径）；解析本身照做（拿到映射、写 definition）。 (+93 more)
+Cohesion: 0.04
+Nodes (109): _definition(), _fake_schedule_factory(), _patch_cloud_handles(), _patch_skew(), Path, cli --backend cloud 接线层测试（ADR 0016「cli backend 选择」/ 0030 决定七 / 0033 IaC+接线）。…, status 不解析 variant（ADR 0038）：它只读运行态、不起 task，definition 里的 revision 提交时已定死。, 通过则每引擎一行「variant · digest · revision」（ADR 0038「通过则打印各引擎解析到的 variant / digest」）：… (+101 more)
 
 ### Community 2 - "test_main.py"
-Cohesion: 0.04
-Nodes (103): _capturing_schedule(), _fake_schedule_factory(), _fake_worker_cmd(), _miss(), _plan_names(), cli 入口 _cmd_run 接线测试：monkeypatch schedule（不起子进程、不产生 AWS 费用）， 验证落盘三层产物 + --json…, 定位链全 miss 的结构化异常（带该引擎安装指引），仿 compose.resolve_worker_cmd 的抛出物。, run 的分叉：定位链 miss → 打安装指引 + 以退出码 2 结束，**且在 spawn/落库之前**——不进 job 级 engine_error… (+95 more)
+Cohesion: 0.03
+Nodes (122): _capturing_schedule(), _det_feature(), _fake_schedule_factory(), _fake_worker_cmd(), _miss(), _plan_names(), cli 入口 _cmd_run 接线测试：monkeypatch schedule（不起子进程、不产生 AWS 费用）， 验证落盘三层产物 + --json…, 定位链全 miss 的结构化异常（带该引擎安装指引），仿 compose.resolve_worker_cmd 的抛出物。 (+114 more)
 
 ### Community 3 - "JobResult"
-Cohesion: 0.09
-Nodes (23): _device_keys_for_explain(), 把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。…, S3ResultStore（ADR 0030 决定六 / 0016 三层选型）：ResultStore port 的 S3 实装。 数据面判定真值——每个…, ResultStore 的 S3 实装（组合根注入 boto3 s3 client + bucket + 可选 key 前缀）。行为对拍…, 把单个 JobResult 存成一个 S3 对象（写面，追加语义即同 key 覆盖，幂等）。, 读回单个 JobResult（按键取，无需查询）；不存在返回 None。, 读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。 **必须翻页**：list_objects_v2 单页硬上限 1000…, 探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。 (+15 more)
-
-### Community 4 - "model.py"
 Cohesion: 0.06
-Nodes (72): _explain_job(), 多 scope 下 --scenario 只命中其一：未命中的 scope 不产空壳条目（文本与 JSON 规则一致）；命中的 scope 的…, 两个填完入口（ADR 0048 决策 3）：没有设备请求的设备 job 在本机与云端入口都以退出码 2 被拒，校验在入口内部、调用方不另调。, 写 definition 之前的结构校验（ADR 0048 决策 3 第一处）：组合根尚未填入设备请求的设备 job 以退出码 2 被拒；桌面 job 放行。, plan 形态的应用条目只有别名与包名两键（位置三项由组合根在提交时填入，ADR 0048 决策 3）。, 执行前预检的第二项目标检查（ADR 0048 决策 3）：job 墙钟预算超过该目标的会话上限即拒绝；桌面条目不带上限不检查。, test_complete_definition_entry_points_run_the_pre_write_check(), test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact() (+64 more)
+Nodes (31): 把单个 JobResult 落盘成 <root>/<run_id>/jobs/<encoded_scope_id>.json（追加，写面）。…, 读回单个 JobResult（读回面）；不存在返回 None。, 读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。, S3ResultStore（ADR 0030 决定六 / 0016 三层选型）：ResultStore port 的 S3 实装。 数据面判定真值——每个…, ResultStore 的 S3 实装（组合根注入 boto3 s3 client + bucket + 可选 key 前缀）。行为对拍…, s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC，adapter 假定桶已存在）。 prefix：可选 key 前缀（如…, 把单个 JobResult 存成一个 S3 对象（写面，追加语义即同 key 覆盖，幂等）。, 读回单个 JobResult（按键取，无需查询）；不存在返回 None。 (+23 more)
 
-### Community 5 - "test_provider.py"
+### Community 4 - "Job"
+Cohesion: 0.05
+Nodes (88): 机读文档里 sessions[] 一项的 dict → 具 session_id / device 属性的视图（让 representative_device…, _SessionView, _explain_cloud_stores(), _explain_job(), 假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。, 云端后端：判定明细经 ResultStore 读回，证据经注入的 s3 client `get_object` 读回（s3:// 解引用路径）。, 云端后端「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要能运行成功， 否则落回本机后端、报「未找到…, 多 scope 下 --scenario 只命中其一：未命中的 scope 不产空壳条目（文本与 JSON 规则一致）；命中的 scope 的… (+80 more)
+
+### Community 5 - "Provider"
 Cohesion: 0.06
-Nodes (62): _argv(), _parse(), `Provider` 测试（ADR 0037 决策 6）：flag 面、context 拼装、生成的 cdk.json、cdk 调用、VPC 取值三态。…, bootstrap 走显式 `aws://<account>/<region>`、不带 `--app`——cdk 有显式环境又无 app 时直奔凭证，…, 子动词 subparser **不可 required=True**：deploy 的默认动作是真部署，裸 `gherkai deploy` 必须照样过。, `--prefix` 在子动词**前**给也必须留住——子 parser 在新 namespace 里解析后整体覆盖回父层，…, 留口子：以退出码 2 结束并说清「押后的是回收策略」，而不是让人只看到 argparse 的 invalid choice。, CLI 前端没交版本 → 本包自报 dist 版本（`==` 同版本 pin 成同一个，不引入第二个真源）。 (+54 more)
+Nodes (79): Provider, AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。, 留的口子（ADR 0038「命令族」）：**尚未提供**，以退出码 2 结束并说清为什么与将来怎么落。…, _AbsentEngine, _parse(), parametrize, `Provider` 测试（ADR 0037 决策 6）：flag 面、context 拼装、生成的 cdk.json、cdk 调用、VPC 取值三态。…, flag 面全集锁定（枚举型护栏）：三个 context 配置项 flag + AWS 定位二件套 + 两个「前端的中立版的 AWS 精确化」（见 cli… (+71 more)
 
 ### Community 6 - "schedule"
 Cohesion: 0.12
-Nodes (81): RunMeta, 执行一次 run（RunMeta 即 definition）→ RunResult（ADR 0026）。 run_meta: 一次 run 的…, schedule(), ScheduleOpts, CollectSink, FakeEngine, FakeResolver, 收集所有事件（按到达序）的 sink，供断言。线程安全由 schedule 的 sink_lock 保证。 (+73 more)
+Nodes (82): RunMeta, 执行一次 run（RunMeta 即 definition）→ RunResult（ADR 0026）。 run_meta: 一次 run 的…, schedule(), ScheduleOpts, CollectSink, FakeEngine, FakeResolver, 收集所有事件（按到达序）的 sink，供断言。线程安全由 schedule 的 sink_lock 保证。 (+74 more)
 
 ### Community 7 - "test_project.py"
 Cohesion: 0.06
-Nodes (74): DdbEventLog（ADR 0034 cloud 侧）：cloud 无状态批量运行的 EventLog——从 DDB events 表读全量重放 + 写…, 读某 run 全量 records（逐 scope Query worker 段 events + 取 task_exited）→ 供 project…, SqliteEventLog（ADR 0034）：local 无状态批量运行的持久事件通道。 worker 事件（原始 ADR 0024 JSON 行 +…, 读回全量 records（供 project() 全量重放）：worker 事件（解析回 Event）+ 退出记录。 events 行的原始 JSON 用…, EventRecord, project(), 平台侧退出观察者写入 events 表**独立键空间**的退出记录（ADR 0034 机制一/二）。 **不是 worker 的 wire 事件**（不在…, events 表里一条记录的投影输入（ADR 0034）：reconciler 从表全量重放时，每条 record 携带的信息。 worker… (+66 more)
+Nodes (73): 读某 run 全量 records（逐 scope Query worker 段 events + 取 task_exited）→ 供 project…, SqliteEventLog（ADR 0034）：local 无状态批量运行的持久事件通道。 worker 事件（原始 ADR 0024 JSON 行 +…, 读回全量 records（供 project() 全量重放）：worker 事件（解析回 Event）+ 退出记录。 events 行的原始 JSON 用…, EventRecord, project(), 平台侧退出观察者写入 events 表**独立键空间**的退出记录（ADR 0034 机制一/二）。 **不是 worker 的 wire 事件**（不在…, events 表里一条记录的投影输入（ADR 0034）：reconciler 从表全量重放时，每条 record 携带的信息。 worker…, 从某 run 的**全量 events records** 纯推演出 RunState（ADR 0034 reconciler 核心，无 I/O）。… (+65 more)
 
 ### Community 8 - "test_workers.py"
 Cohesion: 0.06
@@ -583,32 +618,32 @@ Cohesion: 0.04
 Nodes (95): Aws, cleanup_pass(), _connect(), current_version_mappings(), _describe_revision(), _ecr_login(), _error_code(), _find_reusable() (+87 more)
 
 ### Community 11 - "ADR 0014: AI 优先断言"
-Cohesion: 0.06
-Nodes (55): CLAUDE.md（项目约定）, CONTEXT.md（领域概念与术语）, ADR 0001: 范围限于英文 UI, 概念：非英文应用用 @engine:midscene 路由, 概念：Nova Act 中文词语级文本匹配短板, ADR 0002: Midscene 不由 GPT-5.5 驱动, 概念：只认响应 body、不认 HTTP 状态码, 概念：Midscene 仅走 chat-completions 接口 (+47 more)
+Cohesion: 0.07
+Nodes (40): CLAUDE.md（项目约定）, CONTEXT.md（领域概念与术语）, CONTRIBUTING（contributor 入口）, ADR 0001: 范围限于英文 UI, 概念：非英文应用用 @engine:midscene 路由, 概念：Nova Act 中文词语级文本匹配短板, ADR 0007: 程序化登录，HITL 作逃生口, ADR 0010: spike 作为对等基准 (+32 more)
 
 ### Community 12 - "._run_cdk"
-Cohesion: 0.07
-Nodes (21): provider 子动词（`_deploy_verb`，worker 镜像族、会真写账户）与 `--diff/--synth-…, readonly_flag_conflict(), Path, 供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。, 销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。 不过 VPC…, 只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对—— 对本机制之前部署的环境，`deploy` 以退出码 2…, 导出 CloudFormation 模板到 `args.synth_only`（escape valve：不让 0.x 工具改自己生产账号的 reviewer…, `cdk bootstrap`（首次在某 account/region 用 CDK 的前置）——**账户级动作，不合成 app、不需要 `--vpc`**。… (+13 more)
+Cohesion: 0.11
+Nodes (17): provider 子动词（`_deploy_verb`，worker 镜像族、会真写账户）与 `--diff/--synth-…, readonly_flag_conflict(), cdk_command(), check_cdk(), Path, 销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。 不过 VPC…, 只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对—— 对本机制之前部署的环境，`deploy` 以退出码 2…, 导出 CloudFormation 模板到 `args.synth_only`（escape valve：不让 0.x 工具改自己生产账号的 reviewer… (+9 more)
 
 ### Community 13 - "_run_step"
-Cohesion: 0.10
-Nodes (53): _classify_act_error(), 派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory + evidence reportRefs），返回…, scope 内串行执行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。…, 把 act/act_get 中途异常映射到规范化 errorType（ADR 0024/0028）。优先级： 网络瞬时 > Nova SDK…, _run_scenario(), _run_step(), _done(), _FakeNova (+45 more)
+Cohesion: 0.06
+Nodes (60): _classify_act_error(), 派发执行一个 step，吐 step_done 事件（带本 step 的 trajectory + evidence reportRefs），返回…, 把 act/act_get 中途异常映射到规范化 errorType（ADR 0024/0028）。优先级： 网络瞬时 > Nova SDK…, _run_step(), _ActBoom, _done(), _FakeNova, _FakeResult (+52 more)
 
-### Community 14 - "report_store/local.py"
-Cohesion: 0.09
-Nodes (27): device_header_lines(), scope 表头的设备两行（ADR 0051 决策 8）：代表会话的设备描述、会话 ARN 对应的 Device Farm 控制台链接；桌面 job…, test_console_url_only_for_session_arns(), ReportStore adapters（ADR 0027）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…, collect_report_index(), _fmt_ms(), local_path_from_uri(), LocalReportStore（ADR 0027）：把一次 run 的报告产物归集成本地一份自包含目录。 产出… (+19 more)
+### Community 14 - "RunResult"
+Cohesion: 0.07
+Nodes (35): device_header_lines(), scope 表头的设备两行（ADR 0051 决策 8）：代表会话的设备描述、会话 ARN 对应的 Device Farm 控制台链接；桌面 job…, test_console_url_only_for_session_arns(), ReportStore adapters（ADR 0027）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…, collect_report_index(), _fmt_ms(), local_path_from_uri(), LocalReportStore（ADR 0027）：把一次 run 的报告产物归集成本地一份自包含目录。 产出… (+27 more)
 
-### Community 15 - "Status"
+### Community 15 - "model.py"
 Cohesion: 0.05
-Nodes (33): event_log adapters (sqlite / ddb), ResultStore adapters (local / s3), RunStore adapters (local / ddb), 判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。 worker 经 wire…, Status, Engine, EngineResolver, JobSink (+25 more)
+Nodes (47): CloudLauncher（ADR 0034 cloud 侧）：cloud 的 reconcile.Launcher——RunTask 起 Fargate…, event_log adapters (sqlite / ddb), Fargate Engine adapter（ADR 0024「远程传输演进」/ 0026 机制层）：在 ECS Fargate 上运行一个讲 ADR…, ResultStore adapters (local / s3), JobState, 领域模型：worker↔core 协议（ADR 0024）+ plan 产出（ADR 0025）的纯数据结构。 无逻辑、无 I/O——只是 core…, 判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。 worker 经 wire…, 一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。… (+39 more)
 
 ### Community 16 - "test_stack.py"
 Cohesion: 0.04
-Nodes (27): BackendStack 合成断言测试（ADR 0033/0037 决策 6）：纯本地 synth、不碰 AWS。 用 CDK…, runs 表按 `status` 的 GSI（ADR 0038 清理时的运行中 run 引用检查）：**投影必须含…, GSI 只加在 runs 表上（events 表按 pk/seq 读，加索引白花钱）——枚举型护栏，防将来顺手加错表。, SSM 参数**全集**锁定（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读） + 部署戳…, 模板里全部 SSM 参数：Name → Properties。Name 恒是字面量（路径由 prefix 纯推导、无 token）。, 建新时取值记 `new:<所建 vpc-id>`——**带出 id 才可回溯核对**（ADR 0037 决策 6）。 id 是部署期才有值的 CDK…, 每引擎一个 `worker-template/<engine>` 参数，值为 task-def 的 `Ref`（**带 revision** 的 ARN）。…, 两个推进器（reconciler / kicker）的角色都不读 SSM 参数：definition 缺 `worker_task_defs` 按定义违约标… (+19 more)
+Nodes (31): BackendStack 合成断言测试（ADR 0033/0037 决策 6）：纯本地 synth、不碰 AWS。 用 CDK…, runs 表按 `status` 的 GSI（ADR 0038 清理时的运行中 run 引用检查）：**投影必须含…, GSI 只加在 runs 表上（events 表按 pk/seq 读，加索引白花钱）——枚举型护栏，防将来顺手加错表。, ECR **不设任何 lifecycle 规则**（ADR 0038 护栏，被拒方案「ECR 加 untagged 过期 lifecycle」）。 重推同名…, SSM 参数**全集**锁定（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读） + 部署戳…, 模板里全部 SSM 参数：Name → Properties。Name 恒是字面量（路径由 prefix 纯推导、无 token）。, 建新时取值记 `new:<所建 vpc-id>`——**带出 id 才可回溯核对**（ADR 0037 决策 6）。 id 是部署期才有值的 CDK…, 每引擎一个 `worker-template/<engine>` 参数，值为 task-def 的 `Ref`（**带 revision** 的 ARN）。… (+23 more)
 
 ### Community 17 - "test_evidence.py"
-Cohesion: 0.15
-Nodes (23): `<uri>:<行>[:<example 行>]` → 目录名段：转义分隔符 + 尾附 id 短哈希（ADR 0042 决策一）。…, scenario_key(), _picks(), step 级机读证据（evidence，ADR 0042 决策一/二/六）单测：映射 / 截图上界 / 目录键 / best-effort 钩子。 纯…, n 帧的合成 trajectory：thought_at 里的帧带 think call，每帧都有可解的 data URL 图。, 转义会把这两个 id 压成同一串（uri 里的分隔符差异），短哈希把它们分开——撞了就会让 evidence 静默互相覆盖。, 同一份显示名可属不同 scenario（同文件重名 / @scope 跨文件合并）→ 键只由 id 派生。, 隧道凭据不进 evidence（ADR 0035 决策 5）：step 文本、act 指令、frame 地址、thought、消息里的 userinfo… (+15 more)
+Cohesion: 0.07
+Nodes (60): ArtifactUploader, `<uri>:<行>[:<example 行>]` → 目录名段：转义分隔符 + 尾附 id 短哈希（ADR 0042 决策一）。…, scenario_key(), _error_text(), _get_uploader(), 异常 → 一行「类型: 信息」，作 step_done 的 message 与 evidence 的 act.error（ADR 0042 决策三/决策一）。…, _done(), _Nova (+52 more)
 
 ### Community 18 - "test_deploy_cmd.py"
 Cohesion: 0.06
@@ -619,32 +654,32 @@ Cohesion: 0.06
 Nodes (44): digest_for_repo(), ImageInfo, 容器引擎口子（ADR 0038「容器引擎口子」）：worker 镜像交付碰容器引擎的**唯一落点**。 **只五个动词**：`inspect`（存在 +…, 选容器引擎：`--container-engine` > env `GHERKAI_CONTAINER_ENGINE` > `docker`。 未实装的名字…, 要求了本期未实装的容器引擎（ADR 0038：只 docker）。, `inspect` 的结果——**只有三件事**：在不在、什么平台、有哪些 registry digest。 `repo_digests` 是…, `linux/amd64` 形态的人读串（未知段落写 `?`，用于报错文案）。, 是否 linux/amd64（ADR 0038 固定架构）。 (+36 more)
 
 ### Community 20 - "test_cloud_reconcile.py"
-Cohesion: 0.08
-Nodes (41): CloudLauncher, Job, cloud Launcher：按 job.engine 选 FargateEngine（经注入的…, DdbEventLog, cloud EventLog：从 events 表读全量重放（逐 scope Query）+ 写 task_exited（保留高位 SK）。…, events 日志 adapter（ADR 0034）：持久事件通道，reconciler 从此全量重放推演 RunState。…, _FakeStartEngine, _job() (+33 more)
+Cohesion: 0.06
+Nodes (50): 云端 adapter 共享的 boto3 依赖守卫（ADR 0016 窄腰 / 0030 决定六方案 A）。 凡走 `aws` extra 的 adapter…, 缺 boto3 时抛带组件名的友好 ImportError（`pip install 'gherkai-core[aws]'`）；模块 import…, require_boto3(), CloudLauncher, Job, cloud Launcher：按 job.engine 选 FargateEngine（经注入的…, DdbEventLog, DdbEventLog（ADR 0034 cloud 侧）：cloud 无状态批量运行的 EventLog——从 DDB events 表读全量重放 + 写… (+42 more)
 
 ### Community 21 - "materialize.py"
 Cohesion: 0.09
 Nodes (47): assert_no_installed_skill(), assert_prepared(), assert_stage_isolated(), _cli_main_digest(), copy_fixture(), fail(), integrity_check(), main() (+39 more)
 
 ### Community 22 - "_fake_locator"
-Cohesion: 0.06
-Nodes (49): _cloud_backend_ok(), _doctor_cloud_json(), _fake_locator(), _no_provider(), 把定位链换成假的：available 里的引擎命中「同 venv 模块」，其余 miss（带安装指引）。, local 自检：引擎（一缺一在→any ok）、steps 目录加载、云端项标未查、provider 未装标可选；全 required ok → 0；…, 把 cloud doctor 里 worker.grace 之前的每一项摆成 ok，只留停止宽限那行做变量。, 两态一测：本机装了的引擎（midscene）下限 ≤ 云端停止宽限 → ✓；本机没装的（novaact）**跳过**。 跳过而非失败：下限是 worker… (+41 more)
+Cohesion: 0.08
+Nodes (40): _cloud_backend_ok(), _doctor_cloud_json(), _fake_locator(), _no_provider(), 把定位链换成假的：available 里的引擎命中「同 venv 模块」，其余 miss（带安装指引）。, local 自检：引擎（一缺一在→any ok）、steps 目录加载、云端项标未查、provider 未装标可选；全 required ok → 0；…, 把 cloud doctor 里 worker.grace 之前的每一项摆成 ok，只留停止宽限那行做变量。, 两态一测：本机装了的引擎（midscene）下限 ≤ 云端停止宽限 → ✓；本机没装的（novaact）**跳过**。 跳过而非失败：下限是 worker… (+32 more)
 
 ### Community 23 - "_StubEcs"
 Cohesion: 0.14
 Nodes (8): family 里的一个 ACTIVE revision + 它的 tags。, 带血缘 tags 吗？—— **模板 revision 与任何手工注册的 revision 都没有**，故它们永不进清理候选。, RevisionInfo, datetime, 最小 ECS 替身：**返回 `registeredAt`**（moto 不返回）——专供「孤儿满静默期后被回收」那一支。, 真 AWS 的 DescribeTaskDefinition 带 registeredAt（datetime），moto 不带——`--json` 曾因此…, _StubEcs, test_pending_cleanup_is_json_serializable_with_real_registered_at()
 
 ### Community 24 - "test_report_store.py"
-Cohesion: 0.16
-Nodes (36): LocalReportStore, 探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。, ReportStore 的本地文件实现（组合根注入；S3 版只换落点/链接前缀）。, 原生报告产物指针（ADR 0027/0024/0010）。core 永远是**不透明搬运**——不读 kind 值、 不 stat/fetch ref、不按…, ReportRef, _jr(), Path, LocalReportStore 单测（ADR 0027）：归集 manifest + index，纯本地、不连引擎。 (+28 more)
+Cohesion: 0.17
+Nodes (37): LocalReportStore, 探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。, ReportStore 的本地文件实现（组合根注入；S3 版只换落点/链接前缀）。, 原生报告产物指针（ADR 0027/0024/0010）。core 永远是**不透明搬运**——不读 kind 值、 不 stat/fetch ref、不按…, ReportRef, _jr(), Path, LocalReportStore 单测（ADR 0027）：归集 manifest + index，纯本地、不连引擎。 (+29 more)
 
 ### Community 25 - "test_capabilities.py"
 Cohesion: 0.14
 Nodes (19): _clean_env(), `--capabilities` 自述入口单测（ADR 0036「5.」/ ADR 0024「引擎自报下限」，Nova 侧）。…, 不注入任何 env（旧宿主 / 手动直接运行）：下限仍 ≥ 缺省 act 上界 120 + margin，不退化成小值。, 不读 stdin：stdin 是一根**写端一直开着**的管子——真去读就永远阻塞、这里就 timeout 失败。…, steps 加载失败在这个入口也 fail-loud（ADR 0037 决策 4「两个非 job 入口同样加载 steps」）： 非 0 退出、stderr…, `--list-deterministic` 已删、**不留别名**（ADR 0036 被拒方案末条「每个自述项一个独立 flag」）。 只有真 argv…, 子进程 env：保留运行必需项，剥掉 GHERKAI_* / AWS_* / NOVA_*（含本机 region 与凭证落点）。 剥 AWS…, 键集恰六个，且 `min_grace_s` 是注入的 `NOVA_ACT_TIMEOUT_S` 加 worker 侧 margin（组合根查它当 grace… (+11 more)
 
 ### Community 27 - "_fixture"
-Cohesion: 0.07
-Nodes (39): arg_offloader(), aws(), ddb_run_store(), ddb_run_store_offload(), _fake_aws_creds(), fargate(), 云端 adapter 测试基建（ADR 0030 决定六）。 **两类测试、两套 fixture**（见 tests/README.md）： -…, 配好的 S3ReportStore（注入 aws fixture 建好的桶），供 ReportStore 对拍测试。 (+31 more)
+Cohesion: 0.04
+Nodes (68): arg_offloader(), aws(), ddb_run_store(), ddb_run_store_offload(), _fake_aws_creds(), fargate(), 云端 adapter 测试基建（ADR 0030 决定六）。 **两类测试、两套 fixture**（见 tests/README.md）： -…, 配好的 S3ReportStore（注入 aws fixture 建好的桶），供 ReportStore 对拍测试。 (+60 more)
 
 ### Community 28 - "test_conditional_writes.py"
 Cohesion: 0.09
@@ -659,28 +694,28 @@ Cohesion: 0.08
 Nodes (36): progress(), 命令行的进度与诊断输出（ADR 0047）：一个函数，供 `__main__` 与各编排模块共用。, 进度/诊断输出 → stderr（业界惯例：stdout 留给该命令的核心产出/数据，stderr 给所有诊断）。 这样 `gherkai run ……, account_of(), ARN 的账号段（项目 ARN 的第五段）。, config_layers(), identity_layers(), `compose.resolve_aws_identity` 的配置文件层（region / profile 排在环境变量之后，ADR 0053 决策 2）。 (+28 more)
 
 ### Community 31 - "wire.py"
-Cohesion: 0.11
-Nodes (22): _argument_to_json(), _cost_from_json(), _device_request_to_json(), job_to_json(), job_to_line(), Job, StepArgument, wire 协议（ADR 0024）：core↔worker 的 JSON 序列化层 + 退出码约定。 core 把 Job 序列化成 JSON 喂… (+14 more)
+Cohesion: 0.10
+Nodes (24): _argument_to_json(), _cost_from_json(), _device_request_to_json(), job_to_json(), job_to_line(), Job, StepArgument, wire 协议（ADR 0024）：core↔worker 的 JSON 序列化层 + 退出码约定。 core 把 Job 序列化成 JSON 喂… (+16 more)
 
 ### Community 32 - "preflight_cloud_resources"
-Cohesion: 0.12
-Nodes (22): preflight_cloud_resources(), fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句 **点名…, _FakeDdbClient, _FakeEcsClient, _FakeLambdaClient, _FakeS3Client, _preflight_cap(), _preflight_report_dir() (+14 more)
+Cohesion: 0.15
+Nodes (16): preflight_cloud_resources(), fail-fast 探 cloud 资源存在性（ADR 0033 preflight 条）——用已解析 prefix 拼出的名去探，不存在返回一句 **点名…, _FakeDdbClient, _FakeEcsClient, _FakeLambdaClient, _FakeS3Client, _preflight_cap(), 运行一次带 cap 提示的 preflight：推进器 env 给 MAX_CONCURRENCY=cap_env；警告收进 warns。 (+8 more)
 
 ### Community 33 - "_RecUploader"
-Cohesion: 0.11
-Nodes (15): _FakeNovaAct, _install_provider(), 记录 drain / flush 调用的假上传器（顺序与超时参数都是契约）。, 提前退出路径（其后不 flush）：超时提示说链接可能打不开——不承诺任何后续兜底。, scope 末（其后紧跟整目录 flush）：超时不等于丢，提示只说改由收尾统一上传、不吓人。, 正常完成：先有界排空队列（30s）、再整目录 flush（flush 只兜漏网的）。顺序反了就等于没有队列。, 协作停：三层 with 已退出（会话已释放）之后才排空，用退出段预算；不 flush（中断产物留本地）。 会话释放的两个 __exit__ 也进同一条…, 异常退出路径（第三条）：会话已起后才炸 → 先释放会话（两个 __exit__）、再排空一次，异常仍原样冒泡。 (+7 more)
+Cohesion: 0.08
+Nodes (18): _FakeCdp, _FakeNovaAct, _install_provider(), main_fakes(), 记录 drain / flush 调用的假上传器（顺序与超时参数都是契约）。, 提前退出路径（其后不 flush）：超时提示说链接可能打不开——不承诺任何后续兜底。, scope 末（其后紧跟整目录 flush）：超时不等于丢，提示只说改由收尾统一上传、不吓人。, 把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。 (+10 more)
 
 ### Community 34 - "test_worker_variant.py"
-Cohesion: 0.06
-Nodes (56): default_name(), ecr_repo_name(), job_timeout_schedule_prefix(), 资源命名真源（`gherkai-runtime` 产品本体，ADR 0033「两层命名」）：cli / IaC / Lambda 共用的纯字符串推导。…, 镜像 digest 的人读缩写：`sha256:<前 keep 位>`（缺 → `-`）。**单点**：list-workers 表格与 preflight…, （引擎，镜像 tag）→ revision 映射的 SSM 键（相对键，全路径为 `ssm_path(prefix, 本键)`）。 值是…, prefix + 基名（原样拼，prefix 含分隔符由部署方负责）。CDK 与 cli 共用此推导 → 单一事实源。, 引擎的 task-def family 名：`{prefix}{engine}-worker`（按 job.engine 选，对称… (+48 more)
+Cohesion: 0.08
+Nodes (43): （引擎，镜像 tag）→ revision 映射的 SSM 键（相对键，全路径为 `ssm_path(prefix, 本键)`）。 值是…, worker_image_key(), aws(), _fake_aws_creds(), _push_image(), fixture, worker variant 解析（ADR 0038「运行时与 preflight」）：variant 名 → 各引擎的 task-def revision…, 不给 variant → 取部署级默认指针（ADR 0038「默认指针」）；解析结果带 digest 供打印。 (+35 more)
 
 ### Community 35 - "query_capabilities"
-Cohesion: 0.06
-Nodes (45): engine_min_grace(), _is_finite_number(), query_capabilities(), 查某引擎 worker 的能力自述（ADR 0036「5.」）：spawn `worker --capabilities` 收一个 JSON 对象。…, 问该引擎 worker 自报的 grace 下限（ADR 0024「引擎自报下限」，自述契约见 ADR 0036「5.」）。…, 有限的 int / float（bool 单独挡；超出 float 范围的大整数按「不是有限数」处理，不让 math.isfinite 的…, targets 数组的形态校验（ADR 0049 决策 1）：顶层 targets 必有（缺键由调用方按版本不一致拒绝），step 级只在键存在时调用；显式…, _validate_targets() (+37 more)
+Cohesion: 0.05
+Nodes (53): engine_min_grace(), _is_finite_number(), match_deterministic(), query_capabilities(), 查某引擎 worker 的能力自述（ADR 0036「5.」）：spawn `worker --capabilities` 收一个 JSON 对象。…, 问该引擎 worker 自报的 grace 下限（ADR 0024「引擎自报下限」，自述契约见 ADR 0036「5.」）。…, 有限的 int / float（bool 单独挡；超出 float 范围的大整数按「不是有限数」处理，不让 math.isfinite 的…, targets 数组的形态校验（ADR 0049 决策 1）：顶层 targets 必有（缺键由调用方按版本不一致拒绝），step 级只在键存在时调用；显式… (+45 more)
 
-### Community 36 - "RunResult"
-Cohesion: 0.11
-Nodes (32): 设备会话打开（ADR 0051 决策 4 / 0024「会话事件」）：Create 返回 ARN 后立即发（origin=created）；按名找回的孤儿会话…, 一次执行的机器可读汇总判定，即 **definition（run_meta）与判定（jobs）的显式合成**（ADR 0016/0026）。…, RunResult, SessionOpened, RunPersistence（ADR 0030 决定二）：把「一次 run 如何随进度实时落库」收成一处应用服务。 为什么是 core…, run 结束（schedule 返回后）：commit point。 写总 status + ended_at（finalize_run 就是 commit…, 编排 RunStore + ResultStore（+ 可选 ReportStore）随进度实时落库（ADR 0030）。 生命周期：begin（run…, run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。 满足 ADR… (+24 more)
+### Community 36 - "RunPersistence"
+Cohesion: 0.12
+Nodes (29): ResultStore adapters（ADR 0016）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…, LocalResultStore, Path, LocalResultStore（ADR 0016 数据面）：每 job 的判定结果追加落盘成单独 JSON。 数据面（追加为主）：一次 run 的每个…, ResultStore 的本地文件实现（组合根注入；S3 实装见同包 `s3.py`）。, 探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。, 设备会话打开（ADR 0051 决策 4 / 0024「会话事件」）：Create 返回 ARN 后立即发（origin=created）；按名找回的孤儿会话…, SessionOpened (+21 more)
 
 ### Community 37 - "test_tunnel_cli.py"
 Cohesion: 0.07
@@ -690,69 +725,69 @@ Nodes (47): _patch_cloud_commit(), _patch_cloud_gates(), _patch_tunnel(), --expo
 Cohesion: 0.12
 Nodes (18): bare_flags(), clean_flag(), CommandSpan, extract_command_spans(), NamedTuple, skill 目录下全部 markdown（含契约副本——转换后它本就不含内部指代，无例外）。, 一个 `gherkai …` 代码跨的拆解结果。 `words` = `gherkai` 之后、第一个 flag…, 抽出 `gherkai …` 形态的代码跨。行号按跨在原文里的位置算，报错时能直接点到人。 (+10 more)
 
-### Community 39 - "CONTRIBUTING.md: contributor 指南"
-Cohesion: 0.07
-Nodes (43): /code-health-review 入口, /doc-health-review 入口, CLAUDE.md: 项目约定（沟通/文档/代码纪律/工作方式）, doc-diagram 项目级 skill, cli 包 contributor 文档, skill 参考：CLI --json 字段契约, skill 参考：云端后端分工与 variant 交付, skill 参考：确定性 step 的写法 (+35 more)
+### Community 39 - "gherkai agent skill 主文"
+Cohesion: 0.13
+Nodes (20): skill 参考：云端后端分工与 variant 交付, skill 参考：确定性 step 的写法, skill 参考：引擎选择与确定性 step 模板, skill 参考：环境就位与排障, gherkai agent skill 主文, 评测 fixture：隧道地址不匹配场景, AI 断言 (AI assertion), 基础镜像 / variant / 默认指针 (+12 more)
 
 ### Community 40 - "render.py"
-Cohesion: 0.08
-Nodes (47): _add_act(), _add_device_evidence(), _add_step(), _arg_hint(), _cost_bits(), device_session_count(), _dispatch_hint(), _evidence_ref() (+39 more)
-
-### Community 41 - "run_store/local.py"
 Cohesion: 0.07
-Nodes (24): RunStore adapters（ADR 0016）：local（本包 `local.py`）+ DynamoDB（`ddb.py`，ADR 0030…, _atomic_write_json(), JobState, Path, RunMeta, RunState, Status, LocalRunStore（ADR 0016 控制面 / 0027 落点对齐）：落 run 的 definition + 运行态，可读回。 三层切分（ADR… (+16 more)
+Nodes (48): _add_act(), _add_device_evidence(), _add_step(), _arg_hint(), _cost_bits(), _device_keys_for_explain(), device_session_count(), _dispatch_hint() (+40 more)
+
+### Community 41 - "LocalRunStore"
+Cohesion: 0.06
+Nodes (36): test_run_state_shows_running_then_final(), RunStore adapters（ADR 0016）：local（本包 `local.py`）+ DynamoDB（`ddb.py`，ADR 0030…, _atomic_write_json(), LocalRunStore, JobState, Path, RunMeta, RunState (+28 more)
 
 ### Community 42 - "cli.py"
 Cohesion: 0.05
-Nodes (43): main(), CDK app 入口（`gherkai_deploy_aws`，ADR 0033 资源装配 / ADR 0037 决策 6 部署形态）。…, cdk_command(), check_cdk(), check_node(), _error_code(), _make_cfn_client(), _make_hint_clients() (+35 more)
+Nodes (44): check_node(), classify_vpc_state(), _error_code(), _make_cfn_client(), _make_hint_clients(), _make_ssm_client(), _make_sts_client(), _node_major() (+36 more)
 
 ### Community 43 - "redact_secrets"
 Cohesion: 0.17
 Nodes (12): 事件 sink（Nova worker，ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一的事件出口。 对称 Midscene 的…, 工具自产文字里的凭据脱敏（ADR 0035 决策 5；ADR 0051 决策 11）：三条规则，与…, 三条规则依次作用于一段文本；None 原样返回。, redact_secrets(), parametrize, 凭据脱敏三条规则的单测（Nova worker 的那份实现，ADR 0035 决策 5；0051 决策 11）。…, 规则直接作用在已序列化的整行上：结果仍能解析，字段值里的凭据被换掉。, 前一个字段的地址不带 @、后一个字段里有 @：匹配停在引号处，不跨字段吞掉内容。 (+4 more)
 
-### Community 44 - "ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）"
-Cohesion: 0.09
-Nodes (34): ADR 0016: 执行架构与核心库 run 模型, ADR 0019: feature tags、scope 与 engine, ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）, 墙钟时长归约（step/scenario/scope/run duration_ms）, EngineResolver（按 job.engine 解析 Engine）, 失败隔离 / failFast 旋钮, 优雅终止：schedule 只调 handle.stop(grace), _heartbeat_wrap（静默 worker 心跳注入） (+26 more)
+### Community 44 - "ADR 0024: worker–core 协议"
+Cohesion: 0.06
+Nodes (49): assertion_votes 配置（--assertion-votes N，默认 N=1）, ADR 0016: 执行架构与核心库 run 模型, ADR 0019: feature tags、scope 与 engine, URL 形态自动分流（导航不写死动词）, assertionVotes 投票次数, 成本信封：engine 只报原生量、core 只合计, 失败/超时的 step 同样带 cost, 深模块、小接口的协议分层原则 (+41 more)
 
 ### Community 45 - "test_tunnel_warmup.py"
 Cohesion: 0.04
 Nodes (55): _capabilities(), main(), 本 worker 的能力声明（`--capabilities` 的 stdout，ADR 0036「5.」）。 `min_grace_s` 是 grace…, test_sigterm_and_sigint_both_installed_as_flag_only(), _clock(), driven(), _FakeCdp, _FakeNovaAct (+47 more)
 
 ### Community 46 - "云端后端用户文档"
-Cohesion: 0.10
-Nodes (39): gherkai-deploy-aws README (AWS 部署 provider), detached 标记（后台 run 分界线）, 同一条事件流的四条物理通道, events 表的两个键空间（seq 段与退出记录）, exit-observer Lambda（退出观察）, job 超时预算（三路同形态 enforce）, kicker Lambda（冷启动器）, reconciler Lambda（主推进器） (+31 more)
+Cohesion: 0.08
+Nodes (45): gherkai-deploy-aws README (AWS 部署 provider), detached 标记（后台 run 分界线）, 同一条事件流的四条物理通道, events 表的两个键空间（seq 段与退出记录）, exit-observer Lambda（退出观察）, job 超时预算（三路同形态 enforce）, kicker Lambda（冷启动器）, reconciler Lambda（主推进器） (+37 more)
 
 ### Community 47 - "test_compose.py"
 Cohesion: 0.04
-Nodes (77): check_version_skew(), Fargate awsvpcConfiguration（ADR 0033）：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK…, 比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict 取 ok / warn / block / skip 之一（ADR…, 按四级定位链解析某引擎 worker 的拉起命令（ADR 0037 决策 3）。 1. env…, 把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION…, AWS 身份解析链的唯一实现：profile 取 flag，缺则取 `AWS_PROFILE`，再缺取配置文件的 profile（ADR 0053 决策…, 把入口前端已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。…, resolve_aws_identity() (+69 more)
+Nodes (80): check_version_skew(), Fargate awsvpcConfiguration（ADR 0033）：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK…, 比 CLI 版本与后端版本戳 → `(verdict, message)`，verdict 取 ok / warn / block / skip 之一（ADR…, 按四级定位链解析某引擎 worker 的拉起命令（ADR 0037 决策 3）。 1. env…, 把 region 解析成**具体字符串**（ADR 0016 决策 C）：--region > AWS_REGION > AWS_DEFAULT_REGION…, AWS 身份解析链的唯一实现：profile 取 flag，缺则取 `AWS_PROFILE`，再缺取配置文件的 profile（ADR 0053 决策…, 把入口前端已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。…, resolve_aws_identity() (+72 more)
 
 ### Community 48 - "_render_status"
 Cohesion: 0.17
 Nodes (20): 渲染 RunState + pending 诊断提示 + 终态产物位置 + 退出码——**local/cloud 共享一份**（保两路一致，ADR…, _render_status(), _args(), _mk_state(), run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：…, 终态时对标 `run` 结束的三行：报告 / 运行元信息 / 判定明细（S3 或本地路径可直接复制）；未终态不打（产物还没落）。, pending + 非 --wait + 非 json → 打 --wait 接力提示（提示走 stderr）。退出码 0（查询本身成功）。, running → 不提示（在运行、正常）。退出码 0。 (+12 more)
 
-### Community 49 - "AppRef"
-Cohesion: 0.08
-Nodes (32): AppRef, DeviceFarmRequest, 向 AWS Device Farm 要哪台设备（ADR 0048 决策 3）：名字明说服务商、不起中立名；`device_arn` 与…, 应用目标的应用条目（ADR 0048 决策 3）。两个形态：plan 形态只有别名与包名或 bundle id；run / submit 在组合根上传安装包后…, 一个 scope 运行在什么上面（ADR 0048 决策 1）：设备与界面类型；ui_kind 为 app 时带应用条目。缺省即桌面网页。, 机读与 plan 文本共用的紧凑写法（ADR 0048 决策 5 的形态）：`desktop/web`、`android/app:shop`。, Target, _is_positive_number() (+24 more)
+### Community 49 - "job_from_dict"
+Cohesion: 0.07
+Nodes (41): AppRef, DeviceFarmRequest, 向 AWS Device Farm 要哪台设备（ADR 0048 决策 3）：名字明说服务商、不起中立名；`device_arn` 与…, 应用目标的应用条目（ADR 0048 决策 3）。两个形态：plan 形态只有别名与包名或 bundle id；run / submit 在组合根上传安装包后…, 一个 scope 运行在什么上面（ADR 0048 决策 1）：设备与界面类型；ui_kind 为 app 时带应用条目。缺省即桌面网页。, 机读与 plan 文本共用的紧凑写法（ADR 0048 决策 5 的形态）：`desktop/web`、`android/app:shop`。, Target, job_from_dict() (+33 more)
 
 ### Community 50 - "device_selection.py"
 Cohesion: 0.09
 Nodes (30): ProjectConfig, 读出来的项目配置。`path` 为 None 表示没有配置文件（缺省位置不存在不算错，决策 1），四节都为空。 `common` / `cloud` 的值保持…, 路径类值相对配置文件所在目录绝对化（决策 2）；没有配置文件时原样返回（不该被调到，保险起见）。, 给 plan 层的纯数据表：别名 → 平台 → 包名或 bundle id（core 据此核对 @app，不带文件路径）。, acquire_timeout_for(), _arn_kind(), billing_method_for(), build_device_request() (+22 more)
 
 ### Community 51 - "StepResult"
-Cohesion: 0.11
-Nodes (40): explain_to_dict(), RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。…, 把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。 **骨架是…, explain 的人与 agent 可读文本（`explain_to_dict` 的文档渲染为树形摘要，节点文字依 ADR 0042…, render_explain_text(), render_text(), RunResult, render（表层渲染）单测：用 fake RunResult/Event，纯字符串/dict 断言，零费用。 (+32 more)
+Cohesion: 0.10
+Nodes (44): explain_to_dict(), RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。…, 把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。 **骨架是…, explain 的人与 agent 可读文本（`explain_to_dict` 的文档渲染为树形摘要，节点文字依 ADR 0042…, render_explain_text(), render_text(), RunResult, render（表层渲染）单测：用 fake RunResult/Event，纯字符串/dict 断言，零费用。 (+36 more)
 
 ### Community 52 - "test_user_docs.py"
 Cohesion: 0.09
 Nodes (38): changelog_unreleased(), prose_lines(), CHANGELOG 交给退役词表与口头语表扫的部分 = 截到第一个已发行版本节之前。…, markdown 的正文行：剥掉围栏代码块、行内反引号代码，可选剥掉 YAML frontmatter；行号与原文一致。…, _default_model_claims(), _default_model_ids(), parametrize, Path (+30 more)
 
 ### Community 53 - "test_lambda_asset.py"
-Cohesion: 0.12
-Nodes (23): make_stack(), make_template(), Template, **带上命令真会给的 CDK 特性开关**（`cli.CDK_FEATURE_FLAGS`）——特性开关会改变合成出的资源形态，…, asset_dir(), _fake_installed_sources(), _patch_sources(), Path (+15 more)
+Cohesion: 0.13
+Nodes (20): BackendStack._build_lambda_asset, asset_dir(), _fake_installed_sources(), _patch_sources(), Path, Lambda asset 构建测试（ADR 0037 决策 6「Lambda asset 来源」）：纯本地、不联网、不碰 AWS。…, 没有命令给的工作目录（直接运行 cdk synth）→ 自建 mkdtemp，仍不写仓库。, `find_spec` 对两种形态都要给出可复制的路径；editable 安装（contributor 的 workspace）也命中源码目录——… (+12 more)
 
 ### Community 55 - "test_interrupt_model.py"
 Cohesion: 0.06
-Nodes (34): _aggregate(), _backoff_interrupted(), _emit_scenario_done_unless_stopped(), _on_signal(), SIGTERM/SIGINT 的 flag-only handler（ADR 0024 终止契约）：只置停止标志、**绝不 raise**。 绝不…, scenario 运行结束后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。 返回 True 表示中止（调用方应停止本…, 建连重试的退避（ADR 0028 + 0024 flag-only）。返回 True 表示退避中收到停止信号（应停止重连）。 用…, captured() (+26 more)
+Nodes (37): _aggregate(), _backoff_interrupted(), _emit_scenario_done_unless_stopped(), _on_signal(), SIGTERM/SIGINT 的 flag-only handler（ADR 0024 终止契约）：只置停止标志、**绝不 raise**。 绝不…, scope 内串行执行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。…, scenario 运行结束后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。 返回 True 表示中止（调用方应停止本…, 建连重试的退避（ADR 0028 + 0024 flag-only）。返回 True 表示退避中收到停止信号（应停止重连）。 用… (+29 more)
 
 ### Community 56 - "._run_once"
 Cohesion: 0.20
@@ -762,25 +797,25 @@ Nodes (10): _heartbeat_wrap(), Event, 单个 job 的执行体：在线程里运�
 Cohesion: 0.21
 Nodes (14): worker 的 I/O 边缘组件（ADR 0024「I/O 边缘可注入接口」）。 `job_source` / `event_sink` /…, ensure_workflow_definition(), 确保名为 `name` 的 workflow definition 存在；返回 'exists' 或 'created'。 并发情形也幂等（ADR…, _FakeNovaActClient, _patch(), ensure_workflow_definition 单测（ADR 0004 create-if-not-exists）：串行 +…, nova-act client 替身：get 按 `exists` 决定是否 404，create 按 `create_error` 决定抛什么。, 并发赢家已建（409）→ 'exists' 且不抛，使 create-if-not-exists 的幂等在并发下也成立（ADR 0004）。 (+6 more)
 
-### Community 58 - "BackendStack"
-Cohesion: 0.09
-Nodes (20): Cluster, Construct, BackendStack, BackendStack._build_lambda_asset, BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。 一套 stack 建齐（可按 prefix…, 后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。 单一真源是发起这次部署的命令（`gherkai deploy`…, 建/取 VPC，**并把生效的取值记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。…, worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。 三个消费者必须恒等（都喂同一个… (+12 more)
+### Community 58 - ".__init__"
+Cohesion: 0.12
+Nodes (10): Cluster, Construct, 后端版本戳（PEP 440 字符串）：**`-c version=` 必给、无隐式默认**。 单一真源是发起这次部署的命令（`gherkai deploy`…, 建/取 VPC，**并把生效的取值记进 `self._vpc_spec`**（写 SSM 供下次 deploy 三态比对，ADR 0037 决策 6）。…, worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。 三个消费者必须恒等（都喂同一个…, 把「这次部署是什么版本、落在哪个 VPC」写成 **stack 资源**（不是命令事后 `put_parameter`）。 **为何是 stack…, 事件驱动推进链（ADR 0034 端到端 cloud 流程）： - **退出观察者 Lambda**：EventBridge ECS Task STOPPED…, 推进器 Lambda（reconciler / kicker）的同一套装配：Function + 表/桶 grant + 起 task/停 task/超时… (+2 more)
 
 ### Community 59 - "test_ddb_run_store.py"
-Cohesion: 0.10
-Nodes (19): parametrize, DynamoDBRunStore 对拍测试（ADR 0030 决定六）：与 LocalRunStore 同一批行为断言，moto mock、不产生真实 AWS…, detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落（ADR 0034…, create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass…, 版本核对先于参数还原：别的版本写出的 META 不该先在还原遍历里抛 KeyError（那会绕过读端按版本不合的处置）。, S3 取回失败不是定义违约（ADR 0037 决策 7 的读端边界）：指针指向不存在的桶时原样抛 botocore 异常——可重试的故障不该被读端永久标成…, test_detached_flag_on_state_item(), test_load_run_meta_checks_schema_before_restoring_offloaded_arguments() (+11 more)
+Cohesion: 0.11
+Nodes (17): parametrize, DynamoDBRunStore 对拍测试（ADR 0030 决定六）：与 LocalRunStore 同一批行为断言，moto mock、不产生真实 AWS…, detached 组合根的 create_run 在 STATE item 落 detached=true 标记;默认(同步 run)不落（ADR 0034…, create_run 把 definition 的 worker revision ARN 摊平成 STATE 顶层属性（ADR 0038 清理 pass…, 版本核对先于参数还原：别的版本写出的 META 不该先在还原遍历里抛 KeyError（那会绕过读端按版本不合的处置）。, S3 取回失败不是定义违约（ADR 0037 决策 7 的读端边界）：指针指向不存在的桶时原样抛 botocore 异常——可重试的故障不该被读端永久标成…, test_detached_flag_on_state_item(), test_load_run_meta_checks_schema_before_restoring_offloaded_arguments() (+9 more)
 
-### Community 60 - "gherkai_cli/__main__.py"
-Cohesion: 0.04
-Nodes (75): _build_run_meta(), _build_selector(), _cloud_skew_gate(), _cloud_worker_variant_gate(), _cmd_explain(), _cmd_reconcile(), _cmd_run(), _cmd_skill_install() (+67 more)
+### Community 60 - "_cmd_run"
+Cohesion: 0.09
+Nodes (28): _build_run_meta(), _cloud_skew_gate(), _cloud_worker_variant_gate(), _cmd_run(), _cmd_skill_install(), _cmd_submit(), _installed_version(), _plan_and_preflight() (+20 more)
 
-### Community 61 - "ValueError"
-Cohesion: 0.05
-Nodes (51): DefinitionContractError, definition 的结构版本不是本读端认的那一个（ADR 0037 决策 7）。…, definition 的结构违约（ADR 0048 决策 3）：非桌面目标没有设备请求、应用条目不完整、设备请求字段不成对等。 写 definition…, UnsupportedDefinitionSchema, JobSource, job 入口（Nova worker，ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一的 job 读入口。 对称 Midscene 的…, 按注入的 env 读一个 scope 的 job。subprocess 态：json.loads(sys.stdin.readline())；S3…, 从注入的 env 造（唯一读 env 处）。JOB_S3_URI 非空 → S3 态；无/空串 → stdin 态。 `or… (+43 more)
+### Community 61 - "test_job_source.py"
+Cohesion: 0.11
+Nodes (9): JobSource, job 入口（Nova worker，ADR 0024「I/O 边缘可注入接口」）：worker 主流程唯一的 job 读入口。 对称 Midscene 的…, 按注入的 env 读一个 scope 的 job。subprocess 态：json.loads(sys.stdin.readline())；S3…, 从注入的 env 造（唯一读 env 处）。JOB_S3_URI 非空 → S3 态；无/空串 → stdin 态。 `or…, 读并解析一个 job（返回 dict，非流）。subprocess 态：stdin 首行 JSON（同步 readline、不等 EOF）。 S3…, s3://bucket/key → GetObject → json.loads。惰性建 client + 超时（对称…, JobSource 单测（Nova，ADR 0024「I/O 边缘可注入接口」）：subprocess 态读 stdin 首行 JSON。 此前内联在…, s3://bucket(无 key 段)→ fail-loud(对称 midscene;放行会晚一步在 GetObject 报模糊参数错)。 (+1 more)
 
 ### Community 62 - "test_fargate_engine.py"
 Cohesion: 0.05
-Nodes (77): 单个 scope 有没有退出记录（**只读**，退出记录键位确定 → 单 item 点查、不走 records() 重放整 run）。…, 退出观察者 Lambda 调：写 task_exited 到保留高位 SK（独立键空间，机制一）。INSERT 幂等（覆盖同键）。…, events_pk(), events 表分区键为 `run_id#scope_id`（复合，防重复运行撞键）。worker/adapter 各自本地拼、须逐字一致。, _await_engine(), _delayed_stopped_ecs(), _engine(), _engine_with_fake_ecs() (+69 more)
+Nodes (80): _await_engine(), _delayed_stopped_ecs(), _engine(), _engine_with_fake_ecs(), _ev_item(), _gap_engine(), _job(), _MissingThenStoppedEcs (+72 more)
 
 ### Community 63 - "build_cloud_stores"
 Cohesion: 0.08
@@ -803,72 +838,72 @@ Cohesion: 0.12
 Nodes (30): ai_side_docs(), classify(), code_comment_files(), comment_units(), diagram_sources(), long_term_docs(), Path, 人读文本的规则、扫描面与抽取器：护栏三层共用的**单一事实源**（ADR 0046）。 内容三类：①规则——内部指代表 FORBIDDEN、口吻表… (+22 more)
 
 ### Community 68 - "_is_transient_network"
-Cohesion: 0.12
-Nodes (31): BaseException, _is_transient_client_error(), _is_transient_network(), boto ClientError 是否服务端瞬时（按错误码/HTTP 状态码细分，ADR 0028）。非 ClientError 返回 False。, 是否网络/SSL 瞬时故障（可重试，ADR 0028）。 白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与…, _client_error(), _is_transient_network 单测（ADR 0028）：白名单瞬时识别 + 异常链遍历 + gaierror errno 细分。 重点护住…, 按名兜底（playwright 私有路径 import 失败时）也必须在**链内**命中——曾只查最外层 e, 而真实故障链最外层是… (+23 more)
+Cohesion: 0.15
+Nodes (27): _is_transient_network(), 是否网络/SSL 瞬时故障（可重试，ADR 0028）。 白名单匹配**具体**瞬时类型，不用宽 OSError 兜底——ssl.SSLError 与…, _client_error(), _is_transient_network 单测（ADR 0028）：白名单瞬时识别 + 异常链遍历 + gaierror errno 细分。 重点护住…, 按名兜底（playwright 私有路径 import 失败时）也必须在**链内**命中——曾只查最外层 e, 而真实故障链最外层是…, 造一个 botocore ClientError（response 里带 Error.Code /…, _target_closed(), test_agentcore_permanent_wrapping_chain_not_transient() (+19 more)
 
 ### Community 69 - "textui.py"
+Cohesion: 0.10
+Nodes (34): `status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。 local/cloud…, render_run_state(), test_render_run_state_lists_jobs_and_session_lineage(), test_render_run_state_shows_ended_at_when_terminal(), _as_text(), _console(), output_width(), plain() (+26 more)
+
+### Community 70 - "errors.py"
+Cohesion: 0.20
+Nodes (16): FeatureContractError, core 的类型化异常（ADR 0028）。 放 core 而非 adapter：schedule 要 catch 它做 network 重试判定，若定义在…, 用例契约违约（feature 写法或配置违约），拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。…, scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine/target/timeout 校验 → Job[]。…, 解析一个 scope 的测试目标（ADR 0048 决策 2）：@device 与 @app 各按 engine 同样的三条规则归约（任一成员标了即整个…, 解析一个 scope 的 job 墙钟预算（ADR 0019 @timeout；覆盖与校验顺序归 ADR 0034「job timeout」节、0051 决策…, 从 tags 取某前缀的去重值（保序）。如 prefix='@scope:' → ['login']。where 是出错时的定位（scenario id，即…, 解析一个 scenario 的 scope 归属 → (scope_value 或 None, 用于派生的 scenario_id)。 多个不同 @scope… (+8 more)
+
+### Community 71 - "test_cloud_integration.py"
+Cohesion: 0.16
+Nodes (20): RunStore adapters (local / ddb), _ddb_store(), _is_ddb_too_large(), 云端 adapter 集成测试（@pytest.mark.integration）：连**真** DDB/S3，专测 moto 抓不到的真 AWS 语义。…, 真 S3：save/load/load_all round-trip，含 /:中文 scope_id 的 quote 编码在真 S3 不撞名/不造子前缀。, 真 DDB item 超 400KB 的 ValidationException 判定（不硬编字节数/次数，躲阈值/版本漂移的 flaky）。, 真 DDB：STATE item 经反复 `SET jobs.#sid` 增量长大、整个 item 越过 400KB 时 update_item 抛…, 真 DDB（2026）空串行为的回归基线：finalize 写 ended_at=""（顶层标量 SET）、update 写 session_id=""… (+12 more)
+
+### Community 72 - "gherkai_cli/__main__.py"
 Cohesion: 0.09
-Nodes (36): `status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。 local/cloud…, render_run_state(), test_render_run_state_lists_jobs_and_session_lineage(), test_render_run_state_shows_ended_at_when_terminal(), _as_text(), _console(), output_width(), plain() (+28 more)
-
-### Community 70 - "plan"
-Cohesion: 0.17
-Nodes (22): FeatureContractError, core 的类型化异常（ADR 0028）。 放 core 而非 adapter：schedule 要 catch 它做 network 重试判定，若定义在…, 用例契约违约（feature 写法或配置违约），拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。…, plan(), PlanConfig, scope seam（ADR 0025）：解析后的 scenario 按 tag 分组 + engine/target/timeout 校验 → Job[]。…, 解析一个 scope 的测试目标（ADR 0048 决策 2）：@device 与 @app 各按 engine 同样的三条规则归约（任一成员标了即整个…, 解析一个 scope 的 job 墙钟预算（ADR 0019 @timeout；覆盖与校验顺序归 ADR 0034「job timeout」节、0051 决策… (+14 more)
-
-### Community 71 - "RunState"
-Cohesion: 0.09
-Nodes (35): 机读文档里 sessions[] 一项的 dict → 具 session_id / device 属性的视图（让 representative_device…, _SessionView, _explain_cloud_stores(), 假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。, 云端后端：判定明细经 ResultStore 读回，证据经注入的 s3 client `get_object` 读回（s3:// 解引用路径）。, 云端后端「判定明细尚未落地」给的 status 命令必带 --backend cloud --prefix：照抄要能运行成功， 否则落回本机后端、报「未找到…, test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(), test_explain_cloud_reads_evidence_from_s3() (+27 more)
-
-### Community 72 - "_ask_worker"
-Cohesion: 0.08
-Nodes (23): _ask_worker(), build_local_stores(), local_artifact_locations(), match_deterministic(), prune_empty_dirs(), Path, worker **起来了但自述失败**（非零退出）——与「定位不到」（WorkerNotFoundError）是两回事：最常见成因是使用方 `steps/`…, 自底向上删 root 下的空目录（含 root 自身若最终空）——只删空的（ADR 0029 cloud 清理本地空壳）。… (+15 more)
+Nodes (29): _available_step_targets(), _build_selector(), _cmd_explain(), _cmd_plan(), _cmd_tunnel_watch(), _explain_cloud(), _explain_emit(), _explain_empty() (+21 more)
 
 ### Community 73 - "test_stores.py"
-Cohesion: 0.09
-Nodes (50): 从 RunResult 投影出控制面运行态（ADR 0016/0027）。…, run_state_from_result(), from_dict(), RunMeta, RunResult → 朴素 dict（机器可读：CI / WebUI / manifest 消费）。 normalize（ADR 0016…, 朴素 dict → RunResult。与 to_dict 往返一致（round-trip 单测护栏）。 def 唯一真值在…, RunMeta → dict（run_meta.json / DDB META 的 meta_json）。键集固定、不适用写 null（ADR 0037 决策…, dict → RunMeta。第一步核结构版本（不等于本读端支持的即抛… (+42 more)
+Cohesion: 0.08
+Nodes (49): DynamoDBRunStore（ADR 0030 决定六）：RunStore port 的 DynamoDB 实装。 对拍 `LocalRunStore`…, 读回 definition（从 META item 的 meta_json）；不存在返回 None。, LocalRunStore（ADR 0016 控制面 / 0027 落点对齐）：落 run 的 definition + 运行态，可读回。 三层切分（ADR…, from_dict(), RunMeta, RunState, 读 definition 的第一步：结构版本不等于本读端支持的那一个即抛 UnsupportedDefinitionSchema（带写端 CLI 版本供点名）。, RunResult → 朴素 dict（机器可读：CI / WebUI / manifest 消费）。 normalize（ADR 0016… (+41 more)
 
 ### Community 74 - "06-devicefarm-appium.mts"
-Cohesion: 0.06
-Nodes (80): ADR-0010, BASE_URL, main(), makePng(), REGION, ADR-0033, BASE_URL, main() (+72 more)
+Cohesion: 0.05
+Nodes (81): ADR-0010, BASE_URL, main(), makePng(), REGION, ADR-0033, BASE_URL, main() (+73 more)
 
 ### Community 75 - "gherkai 变更记录 (CHANGELOG)"
-Cohesion: 0.09
-Nodes (30): gherkai 变更记录 (CHANGELOG), gherkai destroy, --expose-local 隧道模式, 停止宽限下限由引擎 worker 报告, --max-concurrency 默认值 4, Midscene 默认模型 us.openai.gpt-5.6-terra, Nova Act 固定模型版本 nova-act-v1.0, gherkai deploy push-worker / list-workers (+22 more)
+Cohesion: 0.19
+Nodes (15): gherkai 变更记录 (CHANGELOG), gherkai destroy, --expose-local 隧道模式, 停止宽限下限由引擎 worker 报告, --max-concurrency 默认值 4, Midscene 默认模型 us.openai.gpt-5.6-terra, Nova Act 固定模型版本 nova-act-v1.0, rich 渲染的人读输出 (+7 more)
 
 ### Community 76 - "serialize.py"
-Cohesion: 0.08
-Nodes (41): _argument_from_dict(), _argument_to_dict(), _definition_error(), _device_keys(), _device_request_from_dict(), _device_request_to_dict(), job_from_dict(), job_result_from_dict() (+33 more)
+Cohesion: 0.09
+Nodes (31): 只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。, _argument_from_dict(), _argument_to_dict(), _definition_error(), definition_schema_version(), _device_keys(), _device_request_from_dict(), _device_request_to_dict() (+23 more)
 
 ### Community 77 - "ArtifactUploader"
 Cohesion: 0.13
 Nodes (17): ArtifactUploader, _extra_args(), Path, 产物本地绝对路径 → S3 key（镜像 run 树：prefix + 相对 run_dir 的 POSIX 路径）。, reportRef 指向的文件 → 实时上传（不删、记 _uploaded）、报 s3://；no-op 时报 file://。 失败原样抛（worker 记…, **只算 ref、不上传**：返回该文件将来（scope 末 flush 后）会有的那个 ref，与 `to_report_ref` 逐字一致。 给…, 传一个文件、失败**重试一次**；成功 True（并记进已传集合）、两次都失败 False（不抛）。 队列与 flush 共用（key 规则与…, boto3 传输配置：`use_threads=False` → 传输在调用线程内执行（NonThreadedExecutor）。 默认的线程池是非… (+9 more)
 
-### Community 78 - "JobState"
-Cohesion: 0.05
-Nodes (76): LocalRunStore, 探活 no-op（ADR 0030 决定七）：本地文件后端无「表不存在」问题，目录随写随建。, RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。, Engine port 的子进程实现。cmd 是启 worker 的命令行（如 ['uv','run','python','run_scope.py']）。, SubprocessEngine, JobState, 单个 job 的控制面运行态（执行后才有）。, _big_state() (+68 more)
+### Community 78 - "test_detached_launcher.py"
+Cohesion: 0.07
+Nodes (52): LocalRunStore, now_iso(), **唯一的墙钟读取点**（组合根取时钟、core 不取，ADR 0027）：RunState/RunMeta 的一切时间戳走它。 三个宿主（cli 前台…, build_local_reconcile(), Job, RunMeta, per-run 进程的推进循环：反复 tick 直到全 done（ADR 0034 local 主力触发源）。…, 从本地落点重建 per-run reconcile 所需的全部（meta 从 RunStore 读回、log/store/launcher 重建）。 per-… (+44 more)
 
 ### Community 79 - "warmupSession"
 Cohesion: 0.33
 Nodes (3): waitForMarker(), WarmupPage, warmupSession()
 
 ### Community 80 - "redact_secrets"
-Cohesion: 0.12
-Nodes (20): Any, 工具自产文字里的凭据脱敏（ADR 0035 决策 5；ADR 0051 决策 11）：三条规则、三份同文实现。 三份同文实现（本文件、Nova worker…, 三条规则依次作用于一段文本；None 原样返回。 `https://u:p@host/x` →…, 递归脱敏 dict / list / tuple 里的全部字符串（键不动，只改值）；其它类型原样返回。, redact_deep(), redact_secrets(), parametrize, 凭据脱敏三条规则的单测（ADR 0035 决策 5；0051 决策 11）。 用例表只有一份：`engines/fixtures/redaction-… (+12 more)
+Cohesion: 0.14
+Nodes (18): Any, 工具自产文字里的凭据脱敏（ADR 0035 决策 5；ADR 0051 决策 11）：三条规则、三份同文实现。 三份同文实现（本文件、Nova worker…, 三条规则依次作用于一段文本；None 原样返回。 `https://u:p@host/x` →…, 递归脱敏 dict / list / tuple 里的全部字符串（键不动，只改值）；其它类型原样返回。, redact_deep(), redact_secrets(), parametrize, 凭据脱敏三条规则的单测（ADR 0035 决策 5；0051 决策 11）。 用例表只有一份：`engines/fixtures/redaction-… (+10 more)
 
 ### Community 81 - "subprocess_engine.py"
-Cohesion: 0.11
-Nodes (19): _join_pumps(), _pump_log(), Event, Job, 子进程 Engine adapter（ADR 0026 机制层）：spawn 一个讲 ADR 0024 协议的 worker 子进程。 这是 core…, 有界等 worker 日志 pump 线程结束（进程退了它们读到 EOF 就完）。超时不等——孙进程可能仍持写端。, 逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 以非零退出码（含被信号强杀的负码）结束时抛错（终结函数按退出码判）。 纯阻塞行读、纯…, scope 的前缀色：首次出现时按出现顺序取下一色，之后恒同色（进程内注册表，一次 run 一个进程）。 (+11 more)
+Cohesion: 0.10
+Nodes (21): _join_pumps(), _pump_log(), Event, Job, 子进程 Engine adapter（ADR 0026 机制层）：spawn 一个讲 ADR 0024 协议的 worker 子进程。 这是 core…, 有界等 worker 日志 pump 线程结束（进程退了它们读到 EOF 就完）。超时不等——孙进程可能仍持写端。, 逐行读 fd3（纯 ADR 0024 事件）→ Event。worker 以非零退出码（含被信号强杀的负码）结束时抛错（终结函数按退出码判）。 纯阻塞行读、纯…, scope 的前缀色：首次出现时按出现顺序取下一色，之后恒同色（进程内注册表，一次 run 一个进程）。 (+13 more)
 
 ### Community 82 - "user-steps.mts"
 Cohesion: 0.11
 Nodes (15): 确定性 step 加载失败即拒绝运行, fromSource, hookSpec, ADR-0024, ADR-0028, ADR-0037, ADR-0037, collectStepFiles() (+7 more)
 
 ### Community 83 - "test_user_steps.py"
-Cohesion: 0.06
-Nodes (54): _ensure_ns_package(), _is_step_file(), load_user_steps(), _module_name(), Exception, Path, 加载使用方的确定性 step 目录（ADR 0037 决策 4，Nova 侧实现）。 **约定与解析不在这里**：`--steps-dir` flag >…, 使用方 steps 目录加载失败（目录不存在 / 某文件 import 炸）。 消息自带「哪个文件 +… (+46 more)
+Cohesion: 0.08
+Nodes (40): load_user_steps(), 加载 `root` 下的使用方确定性 step 文件，返回实际加载的文件列表（排序后）。 `root` 是 env `GHERKAI_STEPS_DIR`…, _clean_env(), parametrize, 使用方 steps 目录加载单测（ADR 0037 决策 4，Nova 侧）。 护住四条不变量（各自对应一个真实会静默出错的场景）： - **排序递归加载 +…, `_pages/` 这类辅助目录同样只是不被自动加载，仍可被 step 文件相对 import（排除它的**用途**）。, `_*` 只是不被**自动加载**，仍可被 step 文件相对 import（这正是它被排除的用途）。, 给了目录但不存在就是配置错，不是「没定制」——必须响亮（否则确定性 step 全静默变 AI）。 (+32 more)
 
-### Community 84 - "_run_with_refs"
-Cohesion: 0.21
-Nodes (15): ReportStore 的 S3 实装（组合根注入 boto3 s3 client + bucket + 可选 key 前缀）。行为对拍…, 探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。, S3ReportStore, _run_with_refs(), S3ReportStore 对拍测试（ADR 0030 决定六 / 0027 / 0029）：与 LocalReportStore 同一批行为断言，moto…, 把 write() 返回的 s3:// ResourceUri 取回对象正文（测试侧读内容用）。, _read_manifest(), _read_s3() (+7 more)
+### Community 84 - "test_s3_report_store.py"
+Cohesion: 0.16
+Nodes (15): ReportStore 的 S3 实装（组合根注入 boto3 s3 client + bucket + 可选 key 前缀）。行为对拍…, s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC，adapter 假定桶已存在）。 prefix：可选 key 前缀（如…, 探活（ADR 0030 决定七）：begin 前探桶可达，桶不存在/无权限即抛（cli 接住→以退出码 2 结束）。, S3ReportStore, S3ReportStore 对拍测试（ADR 0030 决定六 / 0027 / 0029）：与 LocalReportStore 同一批行为断言，moto…, 把 write() 返回的 s3:// ResourceUri 取回对象正文（测试侧读内容用）。, _read_manifest(), _read_s3() (+7 more)
 
 ### Community 85 - "test_termcolor.py"
 Cohesion: 0.18
@@ -883,8 +918,8 @@ Cohesion: 0.10
 Nodes (20): 0051. 设备会话生命周期与应用分发, 10. 区域、项目与权限, 11. 安全：端点脱敏与数据保留, 12. 命令的真实上界与结果未知, 13. 隧道鉴权：令牌换 cookie，worker 预热一次，桌面、Android、iOS 一条路, 14. 前提：国内消费级应用的线上包会自行退出, 1. 一个 scope 一个远程访问会话，scenario 之间不复位, 2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034 (+12 more)
 
 ### Community 88 - "event_from_json"
-Cohesion: 0.13
-Nodes (25): event_from_json(), event_from_line(), Event, JSON dict（worker 事件通道一行）→ model.Event，按 "type" 分派（ADR 0024）。 事件通道随形态而异：子进程态下是专用…, worker 事件通道一行（子进程态下取 EVENTS_FD 的 fd，Fargate 态下取 DDB events 表 body）→ model.Event。, _report_refs_from_json(), test_session_opened_parses_all_origins_and_opaque_device(), wire 协议测试（ADR 0024）：Job 序列化 + 事件反序列化的形状契约。 (+17 more)
+Cohesion: 0.10
+Nodes (32): event_from_json(), event_from_line(), Event, JSON dict（worker 事件通道一行）→ model.Event，按 "type" 分派（ADR 0024）。 事件通道随形态而异：子进程态下是专用…, worker 事件通道一行（子进程态下取 EVENTS_FD 的 fd，Fargate 态下取 DDB events 表 body）→ model.Event。, parametrize, 会话事件与 scope 级 error 的协议红线（ADR 0051 决策 4、7；0024「会话事件」与「scope_done 的可选字段」；0034…, 差集护栏：类别集是原六项加设备目标五项（ADR 0024「errorType」条、0051 决策 4 类别表），用显式集合做相等断言。 (+24 more)
 
 ### Community 89 - "README Video Specs"
 Cohesion: 0.08
@@ -907,8 +942,8 @@ Cohesion: 0.11
 Nodes (23): build_cloud_stores（云端三 store 装配）, build_engines（SubprocessEngine 注册表）, build_fargate_engines（云端执行引擎接线点）, build_local_stores（本地三 store 装配）, cli/gherkai_cli（纯皮：argparse + 渲染 + 分派）, compose.py（可复用组合根 / 引擎注册表）, 执行核心库 core/（窄腰，零引擎依赖）, 决策 A：--backend cloud = 存储上云 + Fargate 执行（单一选项） (+15 more)
 
 ### Community 94 - "test_project_config.py"
-Cohesion: 0.08
-Nodes (59): _build_parser(), 建主 parser。`provider`（部署 provider，由 `main` 先窥 argv 解析出来）给了就让它贴自己的 flag。 **为何…, `--steps-dir` 的 help 在 run/submit 两处是同一个常量（曾字节级抄两份）：措辞改一处即两处生效。…, test_run_and_submit_share_one_steps_dir_help_text(), _android_caps(), _android_env(), _app_project(), _feature() (+51 more)
+Cohesion: 0.07
+Nodes (69): ArgumentParser, _add_config_flag(), _add_device_flags(), _add_selection_flags(), _build_parser(), run / plan / submit 共用的筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。, 建主 parser。`provider`（部署 provider，由 `main` 先窥 argv 解析出来）给了就让它贴自己的 flag。 **为何…, 设备目标的选项（ADR 0053 决策 4）：按平台分开的设备 ARN（一个 run 可同时含 Android 与 iOS 的 scope）；run /… (+61 more)
 
 ### Community 95 - "test_adr_hygiene.py"
 Cohesion: 0.19
@@ -926,13 +961,13 @@ Nodes (22): bytes, sha256, files, chapters.md, gherkai-value-method-v12-material
 Cohesion: 0.11
 Nodes (28): _evidence_fixture(), _explain(), _explain_run(), 在 tmp_path/reports 下搭一个 run：run_meta/run_state + 一份 JobResult（+ 真…, 文本形态（ADR 0042 决策四）：原因行、末个带推理的 frame 的 think + 截图、被省略 frame 计数、 短路旁注只在…, --json：stdout 只有一个可严格解析的文档；无记录 step 给 status=null + record_missing； 有记录但没挂…, --step 单给即以退出码 2 结束（步号没有归属）；命中的 scenario 都没有第 N 步 → 同样以退出码 2 结束并列出候选 id 与步数；…, 显式 --step 点名的那一步即展开证据（点名就是想看），不必再给 --all；默认视图对同一 passed 步仍不展开。 (+20 more)
 
-### Community 99 - "deterministic.py"
-Cohesion: 0.04
-Nodes (75): deterministic, clear(), _closed_set(), deterministic(), DeterministicConflict, DeterministicKeywordMismatch, _Entry, Handles (+67 more)
+### Community 99 - "deterministic"
+Cohesion: 0.09
+Nodes (34): deterministic(), Hit, match(), 注册一条确定性 step。两种写法： 装饰器（等价于只有 playwright 句柄）： @deterministic(r'页面地址匹配…, 命中结果：命中条目的句柄集合与具名组。句柄要再经 select_handler 按当前目标取——命中与目标无关（ADR 0050 决策 1）。, 在注册表里找命中 text 的唯一条目。 返回 Hit 或 None（未命中走 AI）。命中多条 → DeterministicConflict； 命中一条但…, 命中之后按当前目标取句柄（ADR 0050 决策 1）：desktop/web 取 playwright；设备目标取覆盖这个（设备, 界面类型）组合的那条…, select_handler() (+26 more)
 
-### Community 100 - "require_boto3"
-Cohesion: 0.14
-Nodes (7): 云端 adapter 共享的 boto3 依赖守卫（ADR 0016 窄腰 / 0030 决定六方案 A）。 凡走 `aws` extra 的 adapter…, 缺 boto3 时抛带组件名的友好 ImportError（`pip install 'gherkai-core[aws]'`）；模块 import…, require_boto3(), s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC，adapter 假定桶已存在）。 prefix：可选 key 前缀（如…, s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC，adapter 假定桶已存在）。 prefix：可选 key 前缀（如…, s3_client：boto3 s3 client（组合根注入；建桶责任在 IaC）。prefix：可选 key 前缀。, table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。 arg_offloader：可选…
+### Community 100 - "BackendStack"
+Cohesion: 0.11
+Nodes (17): main(), CDK app 入口（`gherkai_deploy_aws`，ADR 0033 资源装配 / ADR 0037 决策 6 部署形态）。…, CloudFormation stack 名（即 `app.py` 给 `BackendStack` 的 construct id，CDK 据此定 stack…, stack_name(), BackendStack, BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。 一套 stack 建齐（可按 prefix…, task role 最小权限（ADR 0033 IAM 表，按动作×资源收窄）。两个引擎共享的 + 各引擎特有的。, worker 安全组 id——_ssm_network 建的 sg。存引用供 reconciler Lambda 起 task 用同一 sg。 (+9 more)
 
 ### Community 101 - "skill_install.py"
 Cohesion: 0.18
@@ -946,9 +981,9 @@ Nodes (15): 0048. 测试目标：设备与界面类型两个维度、`@device` �
 Cohesion: 0.14
 Nodes (20): Commit-point Write Order (data plane first), RunStore.create_run(), DDB Single-Table Schema (run_id + item_type), DynamoDBRunStore, Cloud Failure Exit Code Layering, RunStore.finalize_run(), RunState high_water_mark Conditional Write, JobSink Port (+12 more)
 
-### Community 105 - "evidence.py"
-Cohesion: 0.10
-Nodes (26): _actions(), _calls(), _decode_data_url(), _kwargs(), Any, Path, step 级机读证据（evidence，ADR 0042 决策一）：把本 step 各 act 的 Nova trajectory 裁成 gherkai 自有…, `steps[i].program.calls` → call 列表（任一层缺/类型不对 → 空）。 (+18 more)
+### Community 105 - "detached.py"
+Cohesion: 0.11
+Nodes (19): datetime, parse_iso(), detached run 的 run 级墙钟（毫秒），取 RunState `ended_at` 减 `started_at`（提交落库到 finalize…, `now_iso()` 的逆（两宿主共用一份）：解析回 aware datetime，供 claimed_at 超时判定做时间差。 容 `…Z`…, run_duration_ms(), cleanup_tunnel(), drive_local_reconcile(), _paths() (+11 more)
 
 ### Community 106 - "决策"
 Cohesion: 0.13
@@ -959,8 +994,8 @@ Cohesion: 0.13
 Nodes (15): 0052. Appium 界面适配与平台差异处理, 1. 平台差异分三层处理，设备代码不出现系统版本号与机型名, 2. 界面接缝：run-scope 只通过一个接口操作被测对象, 3. 设备模块的划分, 4. 驱动适配器：平台专属命令只在这里出现, 5. 能力探测：每会话一次，能力结论缓存、上下文句柄每次重新定位, 6. 固定规则, 7. Midscene 复用边界 (+7 more)
 
 ### Community 108 - "test_termination_parity.py"
-Cohesion: 0.13
-Nodes (21): 合成明细与判定分开（ADR 0034 机制二）：scope 级 error 合成 SKIPPED 之后 worker 非零退出且已过 deadline /…, test_synthesized_details_survive_sync_path_timeout_and_abort(), _Clock, _closed(), _comparable(), _job(), _opened(), parametrize (+13 more)
+Cohesion: 0.10
+Nodes (24): _Heartbeat, schedule 模块（ADR 0026）：Job[] → 并发运行 → 收流式事件 → RunResult。 job 间并行（maxConcurrency…, 存活心跳哨兵（schedule 私有，ADR 0028）：worker 活着但暂时没吐事件时，_heartbeat_wrap 注入它， 让 _run_once…, 合成明细与判定分开（ADR 0034 机制二）：scope 级 error 合成 SKIPPED 之后 worker 非零退出且已过 deadline /…, test_synthesized_details_survive_sync_path_timeout_and_abort(), _Clock, _closed(), _comparable() (+16 more)
 
 ### Community 109 - "precheck_target"
 Cohesion: 0.10
@@ -971,40 +1006,40 @@ Cohesion: 0.11
 Nodes (18): @aws-crypto/sha256-js, @aws-sdk/client-bedrock-agentcore, @aws-sdk/client-s3, @aws-sdk/credential-providers, @aws-sdk/protocol-http, @aws-sdk/signature-v4, dependencies, @aws-crypto/sha256-js (+10 more)
 
 ### Community 111 - "test_lambda_handlers.py"
-Cohesion: 0.02
-Nodes (124): cloud_env(), _FakeEcs, fixture, Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler…, 同 run 多 scope 的多条 stream record → 去重成一个 run_id（handler 每 run tick 一次）。, events 表 TTL 过期删除同样进 Stream（带 Keys 的 REMOVE 记录）→ 必须不算 run：它不携带新信息，却会让…, 只排除 REMOVE、**不做 INSERT 白名单**：events 虽只 PutItem，同键重写（超时处置直写的退出记录被迟到的…, scope_id 含 : （feature:行号）但不含 #——rsplit('#',1) 正确只切 run_id#scope 的分隔。 (+116 more)
+Cohesion: 0.03
+Nodes (117): cloud_env(), _FakeEcs, fixture, Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler…, 同 run 多 scope 的多条 stream record → 去重成一个 run_id（handler 每 run tick 一次）。, events 表 TTL 过期删除同样进 Stream（带 Keys 的 REMOVE 记录）→ 必须不算 run：它不携带新信息，却会让…, 只排除 REMOVE、**不做 INSERT 白名单**：events 虽只 PutItem，同键重写（超时处置直写的退出记录被迟到的…, scope_id 含 : （feature:行号）但不含 #——rsplit('#',1) 正确只切 run_id#scope 的分隔。 (+109 more)
 
 ### Community 112 - "run_scope.py"
-Cohesion: 0.06
-Nodes (46): ActRecord, ArtifactUploader, gherkai 的 Nova Act 引擎 worker（发行包 `gherkai-worker-novaact`，ADR 0037 决策 3）。 本包即被…, worker 进程入口（`python -m gherkai_worker_novaact`，ADR 0037 决策 3 定位链第二级）。 argv…, _act_record(), _attach_evidence(), _attach_traj_refs(), _collect_traj() (+38 more)
+Cohesion: 0.05
+Nodes (53): ActRecord, BaseException, gherkai 的 Nova Act 引擎 worker（发行包 `gherkai-worker-novaact`，ADR 0037 决策 3）。 本包即被…, worker 进程入口（`python -m gherkai_worker_novaact`，ADR 0037 决策 3 定位链第二级）。 argv…, _act_record(), _argument_text(), _attach_evidence(), _clean_cell() (+45 more)
 
 ### Community 113 - "Diagram Build Script"
 Cohesion: 0.17
 Nodes (15): ADR-0045, args, DEFAULT_DIR, deliver(), dirIdx, exportFrom(), htmlOnly, main() (+7 more)
 
-### Community 115 - "_cmd_plan"
-Cohesion: 0.09
-Nodes (28): _available_step_targets(), _cmd_plan(), _probe_deterministic_dispatch(), plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。 返回 {(scope_id,…, plan 标注用：该引擎每条确定性 step 实际可用的目标（声明与 worker 支持目标的交集，ADR 0049 决策 3），按模式索引。…, 用例预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。 **零…, 把名称嵌进中文句子时，拉丁字母开头或结尾处补一个空格（「在 Android 网页上」而不是「在Android 网页上」）；全中文的名称原样。, (device, ui_kind) → 「桌面网页」「Android 应用」这类名称；未知取值原样拼出（自述形态由组合根校验，这里只呈现）。 (+20 more)
+### Community 115 - "test_engines_matrix.py"
+Cohesion: 0.11
+Nodes (22): 把名称嵌进中文句子时，拉丁字母开头或结尾处补一个空格（「在 Android 网页上」而不是「在Android 网页上」）；全中文的名称原样。, (device, ui_kind) → 「桌面网页」「Android 应用」这类名称；未知取值原样拼出（自述形态由组合根校验，这里只呈现）。, 前提清单 → 「需要网页上下文」；未知取值按「需要 <取值>」原样显示（ADR 0049 决策 1：CLI 不另立取值集合）。, 一组目标条目 → 「桌面网页、Android 网页（需要网页上下文）」；带 max_session_s 的条目按分钟附会话上限（doctor 用）；…, requires_label(), spaced(), target_label(), targets_label() (+14 more)
 
 ### Community 116 - "evidence.test.mts"
 Cohesion: 0.14
 Nodes (12): build(), dumpAgent(), exec(), fileRef(), FIXTURE, fixtureAgent, ADR-0042, spyUploader() (+4 more)
 
 ### Community 117 - "e2e_harness.py"
-Cohesion: 0.20
-Nodes (13): ADR 0025 @scope: tag 分组, ADR 0032 Fargate 中断丢失量级与真容器 grace 校准, build_job(), --interrupt 中断时机矩阵, e2e_harness.py（opt-in 手动端到端验证脚本）, Path, 复用真实 plan 链路生成 job（不手搓 JSON，防 schema 漂移）。 取**匹配 `--engine` 的第一个 job** 作靶子（回退…, worker 拉起命令走 `gherkai_runtime.compose.resolve_worker_cmd` 的定位链（ADR 0037 决策… (+5 more)
+Cohesion: 0.23
+Nodes (11): ADR 0025 @scope: tag 分组, ADR 0032 Fargate 中断丢失量级与真容器 grace 校准, --interrupt 中断时机矩阵, e2e_harness.py（opt-in 手动端到端验证脚本）, Path, worker 拉起命令走 `gherkai_runtime.compose.resolve_worker_cmd` 的定位链（ADR 0037 决策…, harness 报告判读要点（sample_valid 先于 n_lost）, run() (+3 more)
 
-### Community 118 - "_Nova"
-Cohesion: 0.21
-Nodes (19): _done(), _Nova, parametrize, Path, fake nova：act/act_get 回带 trajectory 路径的结果；act_raises 时抛（模拟 act 中途失败）。, evidence.json 的即时上传失败也只丢 ref（to_report_ref 的「失败即抛」契约不动，兜法在调用方）。 只让…, 入队本身抛（不该发生，但 best-effort 不留缺口，ADR 0042 决策二）→ 判定与事件照常、一行日志。, _Sink (+11 more)
+### Community 118 - "deterministic.py"
+Cohesion: 0.14
+Nodes (18): _closed_set(), _Entry, Handles, _hits(), match_batch(), _normalize_handlers(), _normalize_keywords(), 确定性 step 注册表（ADR 0022）——Nova 引擎。 测试开发用 `@deterministic(pattern)` 把「正则模式 →… (+10 more)
 
 ### Community 119 - "test_lifecycle_states.py"
-Cohesion: 0.10
-Nodes (13): 终态的 severity 数值（ADR 0031）。前置态 pending/running 无 severity，调用即编程错误。, severity(), _Heartbeat, schedule 模块（ADR 0026）：Job[] → 并发运行 → 收流式事件 → RunResult。 job 间并行（maxConcurrency…, 存活心跳哨兵（schedule 私有，ADR 0028）：worker 活着但暂时没吐事件时，_heartbeat_wrap 注入它， 让 _run_once…, 内存假 Engine（测试夹具，ADR 0026「接口是测试面」）。 直接在进程内吐预设的 ADR 0024 事件流，不 spawn 子进程、不连…, job 生命周期态 + severity 单测（ADR 0031）：skipped/aborted/pending/running、severity…, test_network_error_during_timeout_is_timeout_not_aborted() (+5 more)
+Cohesion: 0.08
+Nodes (15): 终态的 severity 数值（ADR 0031）。前置态 pending/running 无 severity，调用即编程错误。, severity(), FakeWorkerHandle, Event, Job, 内存假 Engine（测试夹具，ADR 0026「接口是测试面」）。 直接在进程内吐预设的 ADR 0024 事件流，不 spawn 子进程、不连…, _NetRaiseEngine, Event (+7 more)
 
-### Community 120 - "LocalResultStore"
-Cohesion: 0.13
-Nodes (13): ResultStore adapters（ADR 0016）：local（本包 `local.py`）+ S3（`s3.py`，ADR 0030 决定六）。…, LocalResultStore, Path, ResultStore 的本地文件实现（组合根注入；S3 实装见同包 `s3.py`）。, 读回单个 JobResult（读回面）；不存在返回 None。, 读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。, 探活 no-op（ADR 0030 决定七）：本地文件后端无「桶不存在」问题，目录随写随建。, _big_job_result() (+5 more)
+### Community 120 - "_presend_act_siblings"
+Cohesion: 0.18
+Nodes (16): _attach_traj_refs(), _presend_act_siblings(), 本 step 收集的 trajectory 路径 → step 级 reportRefs（kind=trajectory，ADR 0027 下沉）。 一个…, 把本 step 的 trajectory 挂上 step_done 事件：安全点提前上传配套 json（ADR 0029）+ reportRefs（ADR…, act 边界的安全点提前上传（ADR 0029 上传时机第三级，为 Fargate 预演）：在 step_done 安全点，把本 step 各 act 的…, _traj_refs(), _make_act_pair(), act 边界安全点提前上传单测（ADR 0029 上传时机第三级，为 Fargate 预演——subprocess+cloud 先建好并验证）。 验… (+8 more)
 
 ### Community 121 - "Event Wallclock Analysis"
 Cohesion: 0.20
@@ -1014,29 +1049,29 @@ Nodes (15): _acts_from_scope(), analyze(), _emit_epoch(), main(), _percentile(),
 Cohesion: 0.21
 Nodes (14): _check(), _mod(), Path, `.github/scripts/release_notes.py` 的行为护栏：gate 的「本 tag 在 CHANGELOG 里有节」（ADR 0045…, 真 CHANGELOG.md 对照真值集：每个已发行 tag `vX.Y.Z` 都要有非空节；`## [Unreleased]` 要在。, 真 README / user guide 对照真值集：skill 安装命令钉的 tag 等于 CHANGELOG 顶部已发行版本（发版前两处同一次改）。, test_cli_check_exit_codes(), test_render_pins_links_to_the_tag() (+6 more)
 
-### Community 123 - "FeatureSource"
+### Community 123 - "plan"
 Cohesion: 0.15
-Nodes (13): FeatureSource, plan 的输入：feature 文件内容（非路径——core 不碰 FS，ADR 0025）。, select 不变量扩到目标（ADR 0041 决策一经 0025）：筛掉带 tag 的成员后，Job.target 与按目标得出的 timeout_s…, 跨文件同构输入：两种 features 顺序都报错（此前只有「未标在前」那种顺序才打得出 warning）。, 撞名检测在施加 select 之前：收窄到只执行 named 那个 scope 也照样退——撞的是 scope_id 命名空间，不是本次运行哪几条。…, 整组被筛掉的 scope 里的 tag 冲突不拦本次迭代（空组在解析 engine/timeout 之前跳过）； 但「一个 scenario 多个…, test_cross_file_scope_merge_warns(), test_distinct_uri_ok() (+5 more)
+Nodes (22): FeatureSource, plan(), PlanConfig, core 窄腰第一步：一组 .feature → 可调度的 Job 列表（ADR 0025）。 select（ADR 0041 决策一）：scenario…, plan 的输入：feature 文件内容（非路径——core 不碰 FS，ADR 0025）。, PlanConfig 自带的设备缺省与下限按内建获取预算 600 推出（加 900 / 加 180，ADR 0051 决策 2）；桌面缺省 300。, select 不变量扩到目标（ADR 0041 决策一经 0025）：筛掉带 tag 的成员后，Job.target 与按目标得出的 timeout_s…, 跨文件同构输入：两种 features 顺序都报错（此前只有「未标在前」那种顺序才打得出 warning）。 (+14 more)
 
 ### Community 124 - "test_skill.py"
 Cohesion: 0.08
 Nodes (34): _claimed_flags(), _fixture_files(), _frontmatter_and_body(), _is_ignored(), _parser_nodes(), parametrize, Path, agent skill 的护栏（ADR 0043 决策六；fixture 三条见决策七）。 skill 是**产品面**：它随 wheel 发行、由… (+26 more)
 
-### Community 125 - "Provider"
-Cohesion: 0.08
-Nodes (26): Provider, ArgumentParser, AWS provider——`gherkai deploy` 族命令在 AWS 上的实现（接缝契约见模块头）。, 把 provider 特有 flag 挂上 CLI 给的 parser。…, 这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。, 这个 parser 是 **deploy** 的那个吗？ 前端对 deploy 与 destroy **各调一次** `add_arguments`（两者共用…, `push-worker` / `list-workers` / `delete-worker` 三个子动词（ADR 0038）。…, `--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字以退出码 2 结束、不静默回落。 (+18 more)
+### Community 125 - ".add_arguments"
+Cohesion: 0.19
+Nodes (9): ArgumentParser, `--vpc` 的取值校验：`default` / `new` / `vpc-<id>` 三种取值，**无隐式默认**（ADR 0037 决策 6； 三者与…, 把 provider 特有 flag 挂上 CLI 给的 parser。…, 这个 parser 是 **destroy** 的那个吗（`prog` 末段判，同 `_declares_worker_subverbs` 的口径）。, 这个 parser 是 **deploy** 的那个吗？ 前端对 deploy 与 destroy **各调一次** `add_arguments`（两者共用…, `push-worker` / `list-workers` / `delete-worker` 三个子动词（ADR 0038）。…, `--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字以退出码 2 结束、不静默回落。, 子动词也收 `--prefix` / `--region` / `--profile`。 **`default=SUPPRESS`… (+1 more)
 
 ### Community 126 - "run-scope.test.mts"
-Cohesion: 0.06
-Nodes (23): ../lib/agentcore-sigv4.mjs, ../lib/artifact-upload.mjs, ../lib/tunnel-warmup.mjs, ./deterministic.mjs, ./deterministic.steps.mjs, _events, fakePage, gotoCalls (+15 more)
+Cohesion: 0.05
+Nodes (27): cumulativeTokens(), drainArtifactQueue(), isTransientNetwork(), log(), main(), runScenario(), runStep(), shutdownSequence() (+19 more)
 
 ### Community 127 - "Dist Metadata Checks"
 Cohesion: 0.25
 Nodes (14): check_skill_payload(), fail(), main(), member_dist_names(), normalize(), Path, 真值集：源目录的文件系统遍历（**不用 `git ls-files`**——见模块 docstring 断言 4 的理由： 受不受 git 跟踪与进不进…, 断言 4：wheel 内 skill 文件集 == 源目录文件集，且 wheel 里不含评测资产。 (+6 more)
 
 ### Community 128 - "DynamoDBRunStore"
-Cohesion: 0.09
-Nodes (21): DynamoDBRunStore, _job_state_from_item(), _job_state_to_item(), JobState, RunMeta, RunState, Status, run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item。 **写序… (+13 more)
+Cohesion: 0.08
+Nodes (22): DynamoDBRunStore, _job_state_from_item(), _job_state_to_item(), JobState, RunMeta, RunState, Status, table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。 arg_offloader：可选… (+14 more)
 
 ### Community 129 - "Package README Guards"
 Cohesion: 0.15
@@ -1059,16 +1094,16 @@ Cohesion: 0.07
 Nodes (22): ContainerEngine, ContainerError, Exception, 引擎可用吗？可用 → None；不可用 → 给人看的一句（**不抛**，同 `cli.check_node` 的口径）。 两级：PATH…, 本地镜像的存在 + 平台 + registry digest 列表。镜像不存在 → `ImageInfo(exists=False)`（**不抛**：…, 多平台索引的目标平台视图（`inspect --platform linux/amd64`）：返回 (os, architecture)，本机没有该平台的内容…, 登录 registry。**密码经 stdin**（`--password-stdin`）——绝不进 argv（见模块头）。, 推镜像。**输出直通用户终端**（层进度条要能看见——推一个 worker 镜像是分钟级的事）。 (+14 more)
 
 ### Community 134 - "FargateEngine"
-Cohesion: 0.06
-Nodes (33): FargateEngine, FargateWorkerHandle, Event, Job, NamedTuple, Engine port 的 Fargate 实现（组合根注入 boto3 client + run 级配置）。对称 SubprocessEngine。…, fire-and-forget 起一个 Fargate task 执行 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine…, 起一个 Fargate task 执行 job，返回 (句柄, DDB events 事件流迭代器)。对称… (+25 more)
+Cohesion: 0.08
+Nodes (23): FargateEngine, FargateWorkerHandle, Event, Job, NamedTuple, Engine port 的 Fargate 实现（组合根注入 boto3 client + run 级配置）。对称 SubprocessEngine。…, fire-and-forget 起一个 Fargate task 执行 job，返回 task_arn（ADR 0034：无状态批量运行的 Engine…, 起一个 Fargate task 执行 job，返回 (句柄, DDB events 事件流迭代器)。对称… (+15 more)
 
 ### Community 135 - "_FakeSink"
 Cohesion: 0.11
 Nodes (12): _reset_scope_colors(), _color_env_independent(), 本模块的颜色断言不受运行测试的 shell 影响：清掉 NO_COLOR / FORCE_COLOR / TERM=dumb，让「是否终端」成为唯一变量。, aws(), _aws_env(), _presentation_is_environment_independent(), 人读渲染（ADR 0047）不随运行测试的终端变化：固定关色、表格不按终端取宽——否则 `pytest -s` 在真实终端里会因 ANSI 与折行假红。, captured() (+4 more)
 
-### Community 136 - "test_session_events.py"
-Cohesion: 0.18
-Nodes (12): _job(), parametrize, 会话事件与 scope 级 error 的协议红线（ADR 0051 决策 4、7；0024「会话事件」与「scope_done 的可选字段」；0034…, 差集护栏：类别集是原六项加设备目标五项（ADR 0024「errorType」条、0051 决策 4 类别表），用显式集合做相等断言。, core 会按 origin / release 分支、按 name 回退配对，故不认的取值与缺键按协议层 fail-loud（与未知事件类型同一口径）。, test_device_job_round_trips_sessions_and_metering_and_desktop_job_omits_them(), test_error_type_category_set_is_exactly_the_eleven_of_adr_0024(), test_run_result_run_level_metering_keys_follow_the_same_omit_rule() (+4 more)
+### Community 136 - ".deploy"
+Cohesion: 0.14
+Nodes (9): 供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。, `gherkai deploy push-worker <镜像> --engine … --variant …`（八步见…, `gherkai deploy list-workers`——只读（SSM + ECS describe），不碰容器引擎。, 解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点以退出码 2 结束）。…, cdk 成功之后的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。 `engine` 由…, flag → CDK context（app/stack 侧读的那四个配置项 + 版本戳）。 `--vpc` 一个 flag…, prefix / region / profile 走产品本体的**同一条解析链**（`compose.resolve_cloud_target`，ADR…, 解析链的诊断归口：解析得出 → target；失败 → 打一句诊断、返 None（调用点归退出码）。 **每个动作在碰 AWS 之前都要经这一口**：不存在的… (+1 more)
 
 ### Community 137 - "DynamoDB Events Transport ADR"
 Cohesion: 0.18
@@ -1083,28 +1118,28 @@ Cohesion: 0.17
 Nodes (12): 0053. 项目配置文件 gherkai.toml, 1. 文件定位：只有运行侧 CLI 读它，读出的值解析成具体值随 Job 走, 2. 取值顺序：选项、环境变量、配置文件、内建默认依次优先, 3. 节与键, 4. 设备选择要求显式，筛选的挑选规则确定, 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件, 6. 护栏, 决策 (+4 more)
 
 ### Community 140 - "ScopeStarted"
-Cohesion: 0.11
-Nodes (43): test_format_event_single_vote_hides_tally(), test_format_event_step_done_with_votes_and_cost(), Cost, step 级成本：engine 只报**原生量**，平铺、各 optional（ADR 0024）。 原则：core…, AI 断言的投票 tally（ADR 0024）。存在与否即 core 区分「AI 断言 vs 其余」的依据。, scope 内短路事件（ADR 0031 决定六 / 0024）：上游 step error 后，worker 跳过本 step、不调 AI。…, ScenarioDone, ScenarioStarted (+35 more)
+Cohesion: 0.12
+Nodes (40): test_format_event_single_vote_hides_tally(), test_format_event_step_done_with_votes_and_cost(), Cost, step 级成本：engine 只报**原生量**，平铺、各 optional（ADR 0024）。 原则：core…, AI 断言的投票 tally（ADR 0024）。存在与否即 core 区分「AI 断言 vs 其余」的依据。, scope 内短路事件（ADR 0031 决定六 / 0024）：上游 step error 后，worker 跳过本 step、不调 AI。…, ScenarioDone, ScenarioStarted (+32 more)
 
 ### Community 141 - "_cmd_doctor"
-Cohesion: 0.07
-Nodes (31): add_parsers(), _add_provider_flag(), provider_entry_points(), ArgumentParser, `gherkai deploy` / `gherkai destroy` 的命令行前端：provider 发现 + 命令面 flag，**不含任何 IaC…, 把 `deploy` / `destroy` 两个子命令贴到主 parser 上；`provider` 已解析则让它贴自己的 flag。 解析结果经…, `--provider`：只在装了多个 provider 时必给（装一个时省略即用它，ADR 0037 决策 6）。, 已装的 provider entry point（按名排序、**不加载**）——零个/一个/多个的分叉全据此判。 (+23 more)
+Cohesion: 0.11
+Nodes (21): add_parsers(), _add_provider_flag(), provider_entry_points(), ArgumentParser, `gherkai deploy` / `gherkai destroy` 的命令行前端：provider 发现 + 命令面 flag，**不含任何 IaC…, 把 `deploy` / `destroy` 两个子命令贴到主 parser 上；`provider` 已解析则让它贴自己的 flag。 解析结果经…, `--provider`：只在装了多个 provider 时必给（装一个时省略即用它，ADR 0037 决策 6）。, 已装的 provider entry point（按名排序、**不加载**）——零个/一个/多个的分叉全据此判。 (+13 more)
 
 ### Community 142 - "test_skill_deploy_tokens.py"
 Cohesion: 0.12
 Nodes (19): is_placeholder(), `<命令>` / `…` / `[<scope_id>]` 这类占位符不是子命令名，解析路径时跳过、不当拼错。, _allowed_flags(), 只认**同一个反引号代码跨**内的 `gherkai <子命令> … --flag` 组合，逐对对照该 subparser 的真 flag 集。…, 裸词序列 → 子命令路径。第一个词不是已知子命令且不是占位符 → None（拼错的子命令）。, 路径上（含各级祖先）声明的 flag 全集——`deploy --prefix p push-worker …` 这种父层给法是合法的。, _resolve(), test_flags_are_attached_to_the_right_subcommand() (+11 more)
 
-### Community 143 - "test_error_step_also_enqueues_only_after_emit"
-Cohesion: 0.11
-Nodes (10): _NovaRaisesAfterFirstVote, 记 emit 与 enqueue 的**先后**（顺序即契约：判定绝不等截图字节）。, 确定性 step（含内建导航）不产 evidence → 一次入队都不该有（队列里不许有幻影文件）。, 第一票正常回（带 trajectory → 有截图可入队），第二票抛——把 except 出口逼成「有截图的 error step」。, except 出口（step 记 error）同守 emit→enqueue 序：三条出口共用一个收尾出口，不许有一条漏掉这层顺序。, _Result, test_error_step_also_enqueues_only_after_emit(), test_no_enqueue_when_step_wrote_no_screenshot() (+2 more)
+### Community 143 - "video.py"
+Cohesion: 0.32
+Nodes (17): cues(), digest(), link_chapter_title_track(), packets(), probe(), protected_state(), Path, Confirm the first slide at frame zero, hard cuts, and the closing fade. (+9 more)
 
 ### Community 144 - "Stateless Run Core Model"
 Cohesion: 0.21
 Nodes (12): detached.py（local 无状态批量运行宿主）, EventLog port（无状态推进的写模型）, Job（提交给执行面的单元 = Scope）, JobResult（持有 Job 的判定结果）, Launcher port（CAS 抢占后起一个 job）, project.py（events → RunState/JobResult 纯归约投影）, reconcile.py（无状态推进 tick）, RunMeta（definition：前置身份 + Job[]） (+4 more)
 
 ### Community 145 - "_Recorder"
-Cohesion: 0.15
-Nodes (11): cdk(), _FakeEngine, `subprocess.run` 替身：记下 argv/cwd/env，返回给定 returncode。, 容器引擎替身（`probe()` 说「可用」）——deploy 前的容器引擎前置不该在单测里真实运行 docker。, 把 Node 前置、cdk 定位、容器引擎与 worker 镜像四步都打桩掉，只留「拼出的 argv/env」这一层给断言。…, `GHERKAI_CONTAINER_ENGINE=podman` → 以退出码 2 结束且**不调 cdk**：纯参数问题，账户一个字节都不该动…, 有 node、`cdk` 与 `npx` 都定位不到（如装了 nodejs 没装 npm）：`deploy` 在读后端之前以退出码 2 结束。 **不能落到…, _Recorder (+3 more)
+Cohesion: 0.17
+Nodes (10): cdk(), _FakeEngine, `subprocess.run` 替身：记下 argv/cwd/env，返回给定 returncode。, 容器引擎替身（`probe()` 说「可用」）——deploy 前的容器引擎前置不该在单测里真实运行 docker。, 把 Node 前置、cdk 定位、容器引擎与 worker 镜像四步都打桩掉，只留「拼出的 argv/env」这一层给断言。…, `GHERKAI_CONTAINER_ENGINE=podman` → 以退出码 2 结束且**不调 cdk**：纯参数问题，账户一个字节都不该动…, 有 node、`cdk` 与 `npx` 都定位不到（如装了 nodejs 没装 npm）：`deploy` 在读后端之前以退出码 2 结束。 **不能落到…, _Recorder (+2 more)
 
 ### Community 146 - "argument.mts"
 Cohesion: 0.43
@@ -1115,32 +1150,32 @@ Cohesion: 0.27
 Nodes (10): AST, _docstring_node_ids(), 护栏：产品面文案不带内部指代（CLAUDE.md「代码纪律」同名条的机器执行体）。…, 五个生产包的非 docstring 字面量 + Midscene 源的非注释行：一处内部指代都不许有。, module / class / def 的 docstring 常量节点 id——放行面（指针的合法归宿）。, 去掉 `/* */`（保行号：注释体换成等量换行）与行尾 `//` 之后的内容 → [(行号, 剩余代码)]。 切 `//`…, _scan_midscene(), _scan_python() (+2 more)
 
 ### Community 148 - "test_terminal.py"
-Cohesion: 0.09
-Nodes (39): apply_device_metering(), device_metering(), Event, 把单个 worker 事件归约进 JobResult（就地累积，ADR 0024/0026）。 **这是 `schedule._Worker._reduce`…, 设备计量合计（ADR 0051 决策 7）：origin 为 created / discovered 且 observed_s 非 None…, 按会话记录给 JobResult 填两个设备计量键：设备 job 或已有会话记录的 job 才赋值，桌面 job 保持 None（序列化省键）。, 单个 scope 执行过程中各级起始时间戳 + 暂存的 step 结果（core 算墙钟时长用，ADR 0024）。 从 `schedule._Timing`…, 代表会话（JobState / JobResult 的 session_id）的取值规则（ADR 0051 决策 4 / 0024 sessionId… (+31 more)
+Cohesion: 0.08
+Nodes (44): apply_device_metering(), device_metering(), Event, JobResult, 把单个 worker 事件归约进 JobResult（就地累积，ADR 0024/0026）。 **这是 `schedule._Worker._reduce`…, scope 级 error 后的明细补全（ADR 0051 决策 4；0031 决定一、六）：对 definition 中**零事件**的 scenario…, 设备计量合计（ADR 0051 决策 7）：origin 为 created / discovered 且 observed_s 非 None…, 按会话记录给 JobResult 填两个设备计量键：设备 job 或已有会话记录的 job 才赋值，桌面 job 保持 None（序列化省键）。 (+36 more)
 
 ### Community 149 - "S3StepArgumentOffloader"
-Cohesion: 0.13
-Nodes (16): has_pointers(), _iter_arguments(), StepArgument S3 offload（ADR 0030 决定六）：把 RunMeta 深树里的 docString/dataTable 换成 S3…, 就地把 content_ref / rows_ref 取回、消解回内联 content / rows（offload 的逆）。 按「哪个 _ref…, 按 s3:// URI 取回 JSON 值（解析出 bucket/key，不重算——URI 自描述）。, 遍历 run_meta_to_dict 产物里每个带 argument 的 step，yield (arg_dict, scope_id,…, 指针必须是文本（s3:// URI）；别的类型是同版本下的定义违约，不让它变成 urlparse 的裸 AttributeError。, meta_dict 里是否存在 offload 指针（`content_ref`/`rows_ref`）——**按位置查、非整串 sniff**。 与… (+8 more)
+Cohesion: 0.12
+Nodes (17): has_pointers(), _iter_arguments(), StepArgument S3 offload（ADR 0030 决定六）：把 RunMeta 深树里的 docString/dataTable 换成 S3…, 就地把 content_ref / rows_ref 取回、消解回内联 content / rows（offload 的逆）。 按「哪个 _ref…, 按 s3:// URI 取回 JSON 值（解析出 bucket/key，不重算——URI 自描述）。, 遍历 run_meta_to_dict 产物里每个带 argument 的 step，yield (arg_dict, scope_id,…, 指针必须是文本（s3:// URI）；别的类型是同版本下的定义违约，不让它变成 urlparse 的裸 AttributeError。, meta_dict 里是否存在 offload 指针（`content_ref`/`rows_ref`）——**按位置查、非整串 sniff**。 与… (+9 more)
 
 ### Community 150 - "0050. 确定性 step 多句柄注册与测试分层"
 Cohesion: 0.18
 Nodes (11): 0050. 确定性 step 多句柄注册与测试分层, 1. 注册面：handler 位置按句柄种类分键, 2. handler 上下文：七个字段与一条不变量, 3. 测试分层, 4. 写作方法（进 user guide 与 agent skill）, 5. 延后：确定性 step SDK, 决策, 实测依据 (+3 more)
 
 ### Community 151 - "atomic_write_json"
-Cohesion: 0.13
-Nodes (20): atomic_write_json(), atomic_write_text(), Path, 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace`）：读者要么看到旧文件、要么看到新文件，绝不看到半截/空内容。…, 把 text 原子落到 path（UTF-8）：写同目录 tmp → chmod 成 mode → `os.replace` 顶上。失败清理 tmp、异常冒泡。, 同 `atomic_write_text`，内容是 obj 的 JSON（`ensure_ascii=False, indent=2`——全仓落盘口径一致）。, 归集出 <root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 file://…, LocalResultStore（ADR 0016 数据面）：每 job 的判定结果追加落盘成单独 JSON。 数据面（追加为主）：一次 run 的每个… (+12 more)
-
-### Community 152 - "test_argument.py"
 Cohesion: 0.15
-Nodes (19): _argument_text(), _clean_cell(), _instruction(), step 自然语言外层若整体被引号包裹（QA 写 When "搜索 X"），剥掉外引号喂引擎。, 单元格清洗（与 Midscene cleanCell 同一规则）：cell 内 | 与换行会破坏 markdown 表格行结构 → | 转义成…, 把 step 的多行参数（DataTable/DocString，ADR 0024/0025）拼成附加文本，接在 step 指令后喂 AI。 -…, 喂 AI 的完整指令由去引号的 step 自然语言与（可选）多行参数拼成（ADR 0024：text(+argument) 一起喂引擎）。, _unquote() (+11 more)
+Nodes (18): atomic_write_json(), atomic_write_text(), Path, 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace`）：读者要么看到旧文件、要么看到新文件，绝不看到半截/空内容。…, 把 text 原子落到 path（UTF-8）：写同目录 tmp → chmod 成 mode → `os.replace` 顶上。失败清理 tmp、异常冒泡。, 同 `atomic_write_text`，内容是 obj 的 JSON（`ensure_ascii=False, indent=2`——全仓落盘口径一致）。, _page(), 共享原子落盘助手（`gherkai_core.adapters._atomic`）的通用性质：并发读者只看到完整内容、权限按声明、失败不留 tmp。 三个… (+10 more)
+
+### Community 152 - "_cmd_status"
+Cohesion: 0.15
+Nodes (17): _cmd_reconcile(), _cmd_status(), _definition_contract_message(), _definition_header_gate(), _definition_schema_gate(), `--max-concurrency` 入口校验（对齐 `--tunnel-ttl`/`--grace`/`--assertion-votes`…, definition 结构版本不等于本 CLI 支持的那一个时给使用方的整句（ADR 0037 决策 7）：说清谁写的、两边各第几版、怎么办。, 读 definition 的头（结构版本与写端版本）并过版本闸（ADR 0037 决策 7）。头本身读不出来（同版本下的形态违约，如版本字段不是整数）… (+9 more)
 
 ### Community 153 - "artifact-upload.test.mts"
 Cohesion: 0.38
 Nodes (5): mkLogDir(), mkShots(), ADR-0029, ADR-0042, tmproot()
 
-### Community 154 - "test_tunnel.py"
-Cohesion: 0.22
-Nodes (11): Job, map_origin_in_jobs(), Job, 把 job 文本中的 origin 替换成干净的隧道地址 base（ADR 0035 决策 2：job-in 前、worker/AI 无感）。 替换面为…, _job_with(), tunnel 模块单测（ADR 0035）：origin 映射（纯逻辑）+ NgrokTunnel 编排（fake spawn/API，不真起 ngrok）。…, 路径、参数名、cookie 名、页面标题与正文标记：runtime 与两个 worker 各持一份同值，三方都对同一份 fixture（ADR 0051 决策…, test_edge_contract_constants_match_the_cross_language_fixture() (+3 more)
+### Community 154 - "_job_with"
+Cohesion: 0.31
+Nodes (9): Job, map_origin_in_jobs(), Job, 把 job 文本中的 origin 替换成干净的隧道地址 base（ADR 0035 决策 2：job-in 前、worker/AI 无感）。 替换面为…, _job_with(), test_map_leaves_other_jobs_and_original_untouched(), test_map_replaces_docstring_and_datatable_cells_independently(), test_map_replaces_step_text_prefix() (+1 more)
 
 ### Community 155 - "Worker Signal Interrupt Tests"
 Cohesion: 0.24
@@ -1151,8 +1186,8 @@ Cohesion: 0.20
 Nodes (7): DEVICE_LABEL, HANDLE_BY_DEVICE, MATRIX, ADR-0049, ADR-0050, Row, UI_KIND_LABEL
 
 ### Community 157 - "ADR 0043: 随 CLI 发行的 agent skill"
-Cohesion: 0.06
-Nodes (43): gherkai agent skill 包, RunMeta.extra_http_headers（额外请求头注入）, 隧道凭据脱敏（剥 URL userinfo）, URL 映射（job 组装时替换 origin 前缀）, worker --capabilities 自述入口, CLI list-deterministic --engine, 注册面元数据（description / example 必填）, CI 发布链与占名（tag 触发全链） (+35 more)
+Cohesion: 0.07
+Nodes (33): gherkai agent skill 包, 隧道凭据脱敏（剥 URL userinfo）, URL 映射（job 组装时替换 origin 前缀）, worker --capabilities 自述入口, CLI list-deterministic --engine, 注册面元数据（description / example 必填）, CI 发布链与占名（tag 触发全链）, 版本 skew 检查（三态） (+25 more)
 
 ### Community 158 - "tunnel-warmup.test.mts"
 Cohesion: 0.33
@@ -1170,9 +1205,9 @@ Nodes (22): parametrize, Path, definition 结构版本闸门（ADR 0037 决策 7
 Cohesion: 0.09
 Nodes (29): 引擎特有量不进 model（act_count）, JobResult 持有 Job、engine 经 property delegate, href 相对化（local 相对 / cloud 恒等 ref）, manifest.json（薄信封 + 扁平 report_index）, 被拒方案：materialize 式产物拷贝, 不透明搬运铁律（model/wire/schedule 永不解引用 ref）, ReportRef {kind, ref, label}, ReportStore.write（整 run 一次写） (+21 more)
 
-### Community 162 - "_patch_skew"
-Cohesion: 0.25
-Nodes (8): _patch_skew(), cloud status 到终态打出与 `run --backend cloud` 相同的位置行（s3:// 报告与判定明细、ddb:// 元信息）， 落点按…, status --json 附加 artifacts（ADR 0041 决策三）：RunState 部分形状不变，多一个键给报告/判定明细/元信息位置。, --wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 并以退出码 2 结束，不再吞掉死等…, 把版本 skew 闸（ADR 0037 决策 7）patch 成默认放行且静默：读戳不建 ssm client、判定直接给 `skew`。 两处都得…, test_status_cloud_json_includes_artifact_locations(), test_status_cloud_terminal_prints_s3_and_ddb_locations(), test_status_wait_cloud_kicker_missing_fails_fast()
+### Community 162 - "CONTRIBUTING.md: contributor 指南"
+Cohesion: 0.18
+Nodes (16): /code-health-review 入口, /doc-health-review 入口, CLAUDE.md: 项目约定（沟通/文档/代码纪律/工作方式）, doc-diagram 项目级 skill, CONTEXT.md: 领域术语表, 护栏 (guardrail), 版本真源 (single version source), CONTRIBUTING.md: contributor 指南 (+8 more)
 
 ### Community 163 - "Graphify Refresh Script"
 Cohesion: 0.28
@@ -1183,8 +1218,8 @@ Cohesion: 0.20
 Nodes (11): 机制四：CAS(pending→running) 控严格并发, events 表（append-only 真值日志）, 退出观察者（ECS STOPPED → task_exited）, job timeout（两层声明 → definition 载体 → 三路 enforce）, kicker Lambda（冷启动推进器）, plan_next（纯决策：该启哪些 pending、是否 finalize）, project（纯归约：events + baseline → RunState）, status --wait 接力推进 (+3 more)
 
 ### Community 165 - "job-source.mts"
-Cohesion: 0.13
-Nodes (10): Job, JOB_KEYS, JobApp, JobDeviceRequest, JobSource, JobTargetShape, Missing, ADR-0024 (+2 more)
+Cohesion: 0.08
+Nodes (16): ADR-0016, ADR-0032, ADR-0033, ADR-0034, EventSink, resolveEventsFd(), Job, JOB_KEYS (+8 more)
 
 ### Community 166 - "tunnel_host.py"
 Cohesion: 0.25
@@ -1194,17 +1229,17 @@ Nodes (8): 隧道宿主编排（ADR 0035 决策 3）：起隧道 + 映射 defini
 Cohesion: 0.25
 Nodes (8): 建连早期误报 engine_error 根治, handler 内零 I/O（只置标志 + 记信号号）, 安全点按「单元完成度」判定丢弃, Nova worker flag-only 协作式停止, 被拒方案：asyncio 化消除 greenlet, 被拒方案：handler raise _Terminated 穿透 with, 泄漏兜底：AgentCore 原生 session TTL, SIGINT（Ctrl-C）纳入 flag-only handler
 
-### Community 168 - "main"
-Cohesion: 0.18
-Nodes (13): aggregate(), artifactFlushRoot(), drainArtifactQueue(), exitAfterFailure(), interruptSnapshot(), log(), main(), makeGuardedCleanup() (+5 more)
+### Community 168 - "test_sqlite_event_log.py"
+Cohesion: 0.20
+Nodes (14): _log(), SqliteEventLog 测试（ADR 0034）：持久事件通道往返 + 与 project 联通。 存原始 JSON 行→读回解析成…, 退出记录走独立键空间（机制一）：不占 events 的 seq，records() 里 kind='exit'。, has_exit 只看本 scope 的退出记录（对位 DdbEventLog.has_exit）：worker 事件不算、别的 scope 不串扰。, exit_code=None（退出码未知，仅超时处置直写时出现）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034…, 同 (scope,seq) 重写幂等（重放/重试无副作用，镜像 DDB PutItem 幂等）。, reason（平台侧归因串，port 对称 DDB）随退出记录落库、records() 读回；不传则 None。, test_append_and_read_back_events() (+6 more)
 
 ### Community 169 - "Doc Rules Check"
 Cohesion: 0.54
 Nodes (7): _changed_lines(), _git(), main(), Path, 工作区相对 HEAD 新增或改动的行号（unified=0 的 hunk 头直接给出新文件侧的区间）。, _staged_targets(), _working_tree_targets()
 
 ### Community 170 - "tunnel.py"
-Cohesion: 0.17
-Nodes (14): _gen_secret(), make_tunnel(), Exception, 隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器可访问的公网 URL。 TunnelProvider 的形状为…, 按 `--tunnel <provider>` 选实现（ADR 0035 决策 1；当前唯一 ngrok，机制先行）。, 隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退出码 2）。, 一条已建立隧道的事实。url / pid / local_origin 可落盘 tunnel.json 供跨进程收尾；warmup_url 含令牌，只进…, 每 run 一换的随机串：128 位、十六进制——不需要 URL 编码，可原样进 CEL 字符串与 cookie 值。 (+6 more)
+Cohesion: 0.15
+Nodes (15): _gen_secret(), 隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器可访问的公网 URL。 TunnelProvider 的形状为…, 本 run 的 ngrok 流量策略 YAML（ADR 0051 决策 13）：手写模板替换，不为此引 yaml 依赖——结构固定，令牌与 cookie…, 收尾：SIGTERM 隧道 agent 进程。幂等——进程已不在（重复收尾/自然退出）静默返回。, 一条已建立隧道的事实。url / pid / local_origin 可落盘 tunnel.json 供跨进程收尾；warmup_url 含令牌，只进…, 每 run 一换的随机串：128 位、十六进制——不需要 URL 编码，可原样进 CEL 字符串与 cookie 值。, render_traffic_policy(), stop_tunnel() (+7 more)
 
 ### Community 172 - "redact.mts"
 Cohesion: 0.33
@@ -1219,8 +1254,8 @@ Cohesion: 0.29
 Nodes (7): engine 解析（scope 级）, id 派生（scopeId / scenarioId 关联键）, 一个 scenario 多个 @scope 值 → 报错, scope seam（tag 分组 + engine 校验）, scope 全局命名空间（跨文件合并，撞名 warning）, timeout 解析（@timeout:N → Job.timeoutS）, uri 互异契约（重复 uri → 报错）
 
 ### Community 175 - "执行与推进模型导览（run/submit × local/cloud）"
-Cohesion: 0.08
-Nodes (44): Archify Diagram Viewer Preset (classic, showcase quality), 五层全景图, 一次 run 的生命周期图, Artifacts Evidence Chain Diagram, Cloud Backend Carriers Revision Pinning Diagram, Cloud Backend Upgrade Windows Diagram, Cloud Delivery Identity Diagram, Configuration Env Inheritance Diagram (+36 more)
+Cohesion: 0.09
+Nodes (43): Archify Diagram Viewer Preset (classic, showcase quality), 五层全景图, 一次 run 的生命周期图, Artifacts Evidence Chain Diagram, Cloud Backend Carriers Revision Pinning Diagram, Cloud Backend Upgrade Windows Diagram, Cloud Delivery Identity Diagram, Configuration Env Inheritance Diagram (+35 more)
 
 ### Community 176 - "Context Glossary Guards"
 Cohesion: 0.47
@@ -1242,13 +1277,13 @@ Nodes (6): 事件流结束信号 / 存活判定迁移, exitCode 落值延迟与 
 Cohesion: 0.33
 Nodes (6): package_urls, package-core-link, package-deploy-link, package-midscene-link, package-novaact-link, package-runtime-link
 
-### Community 182 - "image_tag"
-Cohesion: 0.17
-Nodes (14): image_tag(), worker 镜像 tag `<归一化版本>-<variant>` —— **命名单一真源，同时是单一校验点**（ADR 0038）。 PEP 440 的…, parametrize, `gherkai_runtime.names` 的 worker 镜像交付命名（ADR 0038「tag 命名」条：单一真源、同时是单一校验点）。…, variant 本身合法但拼出来超 128 字符 → 报 tag 那一层（两类错误分开报，见 names 里两个正则的注释）。, 版本串首字符非法（归一化只管 `+`/`!`）→ tag 层拒，不静默产出 docker 不认的 ref。, `names` 的读端常量与 `DynamoDBRunStore` 的写端字面量必须逐字一致（ADR 0038 清理 pass 的运行中 run…, test_image_tag_normalizes_epoch() (+6 more)
+### Community 182 - "gherkai_runtime/names.py"
+Cohesion: 0.08
+Nodes (32): 引擎 worker task-def **模板 revision ARN** 的 SSM 路径（ADR 0038「SSM 参数与命名真源」第 1 行）。…, ssm_worker_template_path(), default_name(), ecr_repo_name(), image_tag(), job_timeout_schedule_prefix(), 资源命名真源（`gherkai-runtime` 产品本体，ADR 0033「两层命名」）：cli / IaC / Lambda 共用的纯字符串推导。…, worker 镜像 tag `<归一化版本>-<variant>` —— **命名单一真源，同时是单一校验点**（ADR 0038）。 PEP 440 的… (+24 more)
 
 ### Community 185 - "test_reconcile.py"
-Cohesion: 0.08
-Nodes (38): ReportStore adapters (local / s3), finalize_report(), reconciler（ADR 0034）：无状态批量运行的推进编排——被事件唤醒、幂等、并发安全。 `tick(run_id, meta)` 一步推进：读…, done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034 收尾）。宿主在 tick 返回 done 后调。…, 推进一步。返回 run 是否已达终态（全 done 且 finalize 成功/已被别人 finalize）。 幂等：可反复调、并发调。步骤（ADR 0034…, tick(), BoomLauncher, _done_events() (+30 more)
+Cohesion: 0.12
+Nodes (30): 推进一步。返回 run 是否已达终态（全 done 且 finalize 成功/已被别人 finalize）。 幂等：可反复调、并发调。步骤（ADR 0034…, tick(), _done_events(), FakeLauncher, _meta(), reconciler tick 测试（ADR 0034）：推进编排 + 幂等 + CAS 起 job + finalize。 用真…, job 非0退出（机制二）→ 该 job error → run finalize 为 error。, 两个 tick 都见全终态：都返回 done=True（run 确已达终态），但 commit 只一次（机制三，ended_at 仍首次）。 关键：第二个… (+22 more)
 
 ### Community 186 - "Echo Test Worker"
 Cohesion: 0.60
@@ -1267,8 +1302,8 @@ Cohesion: 0.40
 Nodes (4): documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）, 实施期要核的点（ADR 已定、实施时顺手验证）, 现场, 移动真机支持（1.5）：实施进度总纲
 
 ### Community 191 - "stopTimeout=120 / grace 预算校准"
-Cohesion: 0.18
-Nodes (12): ACT_TIMEOUT_S=120 不压（否决解法 B）, 孤儿产物扫盘 reaper（经分析否决）, 关 SDK 重试 + 单次墙钟封顶（不拖爆 grace）, stopTimeout=120 / grace 预算校准, IAM 最小权限（task role 动作×资源两维收窄）, job-in S3 对象按 tag 的 7 天 lifecycle, preflight fail-fast（探资源存在性、错误点名 prefix）, 产物前缀一致性探针（--report-dir vs Lambda REPORT_DIR） (+4 more)
+Cohesion: 0.15
+Nodes (14): ACT_TIMEOUT_S=120 不压（否决解法 B）, 中断产物丢失风险（容器盘停即销毁）, 孤儿产物扫盘 reaper（经分析否决）, 安全点（step_done/act 边界）提前上传 + SIGTERM handler 兜底, 关 SDK 重试 + 单次墙钟封顶（不拖爆 grace）, stopTimeout=120 / grace 预算校准, IAM 最小权限（task role 动作×资源两维收窄）, job-in S3 对象按 tag 的 7 天 lifecycle (+6 more)
 
 ### Community 192 - "test_current_version_mappings_filters_one_engine_and_version_out_of_a_shared_enumeration"
 Cohesion: 0.50
@@ -1287,16 +1322,20 @@ Cohesion: 0.50
 Nodes (4): repository, directory, type, url
 
 ### Community 196 - "test_subprocess_engine.py"
-Cohesion: 0.11
-Nodes (39): 每个 job 完成（主线程 as_completed 串行 fire）：commit-point 写序——数据面先、控制面 job 态后。 skipped 的…, _assert_process_gone(), _engine(), _job(), _kill_quietly(), _mode_job(), 子进程 Engine adapter 集成测试（ADR 0026 机制层）。 用 tests/fixtures/echo_worker.py 当真子进程…, fail-fast 对多个仍在运行的真子进程：先全部落定再并行发停止请求。关掉心跳，victim 的线程阻塞在管道读上、看不到 abort_flag，… (+31 more)
+Cohesion: 0.12
+Nodes (38): _assert_process_gone(), _engine(), _job(), _kill_quietly(), _mode_job(), 子进程 Engine adapter 集成测试（ADR 0026 机制层）。 用 tests/fixtures/echo_worker.py 当真子进程…, fail-fast 对多个仍在运行的真子进程：先全部落定再并行发停止请求。关掉心跳，victim 的线程阻塞在管道读上、看不到 abort_flag，…, 等 pid 文件里出现至少 n 行（孙进程由它自己登记，可能比父进程晚一点）；到时返回当前已有的。 (+30 more)
 
-### Community 197 - "_FakeResult"
-Cohesion: 0.13
-Nodes (7): _ActBoom, _FakeResult, _Meta, _NavErrorNova, 模拟 nova.act_get 返回：带 matches_schema/parsed_response（投票布尔依据）+…, go_to_url 抛异常（模拟导航 SSL 失败 → step error）；act/act_get 记调用（验证短路后不再被调）。, 模拟 Nova SDK 的 act 异常：与成功结果一样带 metadata（time_worked_s 已真实计费、trajectory 已写盘）。
+### Community 197 - "list_registry"
+Cohesion: 0.15
+Nodes (14): clear(), list_registry(), 注册表自述（ADR 0036「2.」）：作自述入口 `--capabilities` 的 `deterministic_steps` 键给 CLI 转述。, _handles_fixture(), _isolate(), fixture, 注册表语义的跨语言对拍（ADR 0050 决策 1、0022 冲突规则）：同一组注册输入，两侧清单的 keywords 与 match_batch…, fixture 的 handlers 是协议面方言（snake_case 与 Python 同词；<fn> 占位）：换成 Python 注册面的形态。 (+6 more)
 
 ### Community 201 - "移动真机支持（1.5）：实施批次的改动面与先写的护栏测试"
 Cohesion: 0.18
 Nodes (10): 0. B0-navigation：导航规则与注册面关键字声明（1.4 行为的不兼容变更，自己发）, 1. B1-capabilities：能力自述增键（两个 worker 只声明桌面网页；CLI 唯一校验处与交集；doctor、list-deterministic 呈现）, 2. B5-core-events-termination：core 侧会话事件、scope 级 error、合成 SKIPPED、终结函数与真值表、计量合计、explain 呈现, 3. B2-core-target-job：测试目标与 Job 形态（core 侧 tag 归约、target 两形态、按目标的 timeout、plan 标注与目标拒绝、两个 worker 建会话前自检）, 4. B3-config-submit：项目配置文件、组合根填 device_request、definition 格式版本、CLI 侧应用上传, 5. B4-steps-registry：确定性 step 多句柄注册（targets、requires、driver 代理的注册面）, 6. B7-tunnel：隧道改为令牌换 cookie（桌面先行）、桌面 worker 的预热失败出口、脱敏规则三条, 7. B8-deploy-iac：部署侧：权限、Device Farm 项目找回或建立、SSM、doctor 设备项 (+2 more)
+
+### Community 202 - "minimax_narration.py"
+Cohesion: 0.26
+Nodes (10): APIError, download_subtitles(), main(), NoRedirect, page_numbers(), post(), Exception, Path (+2 more)
 
 ### Community 203 - "Architecture Diagrams"
 Cohesion: 0.67
@@ -1315,12 +1354,12 @@ Cohesion: 0.50
 Nodes (3): _Calls, list, upload_file 调用记录：list 元素是 (local, bucket, key)，`extra_by_key` 另记 ExtraArgs。
 
 ### Community 210 - "_CdkWritingContext"
-Cohesion: 0.16
-Nodes (15): context_cache_path(), CDK 环境查询缓存（`cdk.context.json`）的持久化位置：`$XDG_CACHE_HOME`（缺省…, _cache_env(), _CdkWritingContext, Path, 用户给**相对** DIR：必须钉成绝对路径再交 cdk——cdk 子进程 cwd 是随后被删的临时工作目录，相对路径…, `subprocess.run` 替身：像真 cdk 做过 from_lookup 那样，在 cwd 写下 `cdk.context.json`；并记下进…, 工作目录一次性 → 若每次空着进去，cdk 会对缺失的 lookup 值先用占位 VPC 预合成一遍（触发模板校验 warning、 多一轮查询）。缓存按… (+7 more)
+Cohesion: 0.24
+Nodes (11): context_cache_path(), CDK 环境查询缓存（`cdk.context.json`）的持久化位置：`$XDG_CACHE_HOME`（缺省…, _cache_env(), _CdkWritingContext, `subprocess.run` 替身：像真 cdk 做过 from_lookup 那样，在 cwd 写下 `cdk.context.json`；并记下进…, 工作目录一次性 → 若每次空着进去，cdk 会对缺失的 lookup 值先用占位 VPC 预合成一遍（触发模板校验 warning、 多一轮查询）。缓存按…, cdk 退非零也存回：查到的 lookup 值本身是对的，deploy 因别的原因失败不该让下次重查一遍。, test_context_cache_is_per_prefix() (+3 more)
 
-### Community 211 - "event-sink.mts"
-Cohesion: 0.22
-Nodes (6): ADR-0016, ADR-0032, ADR-0033, ADR-0034, EventSink, resolveEventsFd()
+### Community 211 - "_argv"
+Cohesion: 0.18
+Nodes (11): _argv(), _parse_destroy(), Path, bootstrap 走显式 `aws://<account>/<region>`、不带 `--app`——cdk 有显式环境又无 app 时直奔凭证，…, 用户给**相对** DIR：必须钉成绝对路径再交 cdk——cdk 子进程 cwd 是随后被删的临时工作目录，相对路径…, cdk destroy 在非 TTY 下拒绝无确认的销毁（实际运行撞到）；`--yes` 等同于 `--force`，不给则让 cdk 自己问。, test_bootstrap_needs_no_vpc_and_never_loads_the_app(), test_destroy_yes_passes_force_to_cdk_and_is_off_by_default() (+3 more)
 
 ### Community 213 - "user-steps.test.mts"
 Cohesion: 0.29
@@ -1338,6 +1377,10 @@ Nodes (12): DEVICE_LABEL, ADR-0024, ADR-0049, ADR-0051, precheckJob(), precheckS
 Cohesion: 0.67
 Nodes (3): errorText(), ADR-0042, oneLineError()
 
+### Community 245 - "ValueError"
+Cohesion: 0.27
+Nodes (10): DefinitionContractError, definition 的结构违约（ADR 0048 决策 3）：非桌面目标没有设备请求、应用条目不完整、设备请求字段不成对等。 写 definition…, test_value_error_not_transient(), main(), `## [version]` 到下一个 `## ` 之间的正文（不含标题行），两端空行去掉。找不到节 → ValueError。, 文档里 skill 安装命令钉的版本逐处对照 version；required 时一处都没有也算问题。返回带行号的问题描述，空列表即通过。, render(), section() (+2 more)
+
 ### Community 249 - "deterministic.test.mts"
 Cohesion: 0.33
 Nodes (4): HANDLES_FIXTURE, META, ADR-0022, ADR-0050
@@ -1347,28 +1390,28 @@ Cohesion: 0.32
 Nodes (8): 真表上本次运行专属的 run_id，并登记自清理（多次执行不撞名、不留垃圾）。, 真 DDB 的机制四 CAS：两个推进器抢同一个 pending job，**恰一个**成功（另一个见条件失败）。 两个 store…, 真 DDB 的机制三②：终态 job 不被 stale 投影刷回 running——两道闸各验一遍。 - 同 HWM（task_exited 无数值…, _real_run_id(), _real_store(), test_claim_is_exclusive_on_real_ddb(), test_stale_projection_never_regresses_terminal_job_on_real_ddb(), integration
 
 ### Community 255 - "WorkerNetworkError"
-Cohesion: 0.16
-Nodes (12): RuntimeError, worker 进程以非零退出码结束（ADR 0024「退出码约定」/ 0034 机制二「退出信息」）。…, worker 以「网络/SSL 瞬时故障」专用退出码退出（建连失败、重试耗尽，ADR 0028）。 `wire.raise_for_worker_exit`…, WorkerExitError, WorkerNetworkError, raise_for_worker_exit(), worker 退出码 → 异常（协议翻译，各 Engine adapter 共用的单一事实源）。 80 →…, test_worker_exit_error_carries_exit_code_and_network_is_a_subclass() (+4 more)
+Cohesion: 0.12
+Nodes (16): RuntimeError, worker 进程以非零退出码结束（ADR 0024「退出码约定」/ 0034 机制二「退出信息」）。…, worker 以「网络/SSL 瞬时故障」专用退出码退出（建连失败、重试耗尽，ADR 0028）。 `wire.raise_for_worker_exit`…, definition 的结构版本不是本读端认的那一个（ADR 0037 决策 7）。…, UnsupportedDefinitionSchema, WorkerExitError, WorkerNetworkError, raise_for_worker_exit() (+8 more)
 
 ### Community 256 - "项目约定"
 Cohesion: 0.29
 Nodes (6): graphify, 代码纪律, 工作方式, 文档纪律, 沟通, 项目约定
 
 ### Community 257 - "compose.py"
-Cohesion: 0.04
-Nodes (55): datetime, available_targets(), CloudTarget, _default_targets(), _find_worker_spec(), is_pure_release(), _make_lambda_client(), new_run_id() (+47 more)
+Cohesion: 0.03
+Nodes (69): _ask_worker(), available_targets(), build_local_stores(), CloudTarget, _default_targets(), _find_worker_spec(), is_pure_release(), local_artifact_locations() (+61 more)
 
-### Community 261 - "NgrokTunnel"
-Cohesion: 0.22
-Nodes (9): NgrokTunnel, ngrok 实现（ADR 0035 决策 1，当前唯一 provider）。 spawn `ngrok http <origin> --log <file>…, _fake_popen_writing_log(), fake agent：spawn 时往 --log 指定的文件写 started tunnel 行（None 表示不写，覆盖超时路径）。, start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600；预热地址带本次令牌；…, 日志里一直没有 started tunnel（agent 挂着不就绪）→ 超时 TunnelError，点名 authtoken 引导排错。, test_ngrok_binary_missing_reports_install_hint(), test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets() (+1 more)
+### Community 261 - "test_tunnel.py"
+Cohesion: 0.13
+Nodes (16): NgrokTunnel, ngrok 实现（ADR 0035 决策 1，当前唯一 provider）。 spawn `ngrok http <origin> --log <file>…, _fake_popen_writing_log(), tunnel 模块单测（ADR 0035）：origin 映射（纯逻辑）+ NgrokTunnel 编排（fake spawn/API，不真起 ngrok）。…, fake agent：spawn 时往 --log 指定的文件写 started tunnel 行（None 表示不写，覆盖超时路径）。, start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600；预热地址带本次令牌；…, 日志里一直没有 started tunnel（agent 挂着不就绪）→ 超时 TunnelError，点名 authtoken 引导排错。, **真 spawn**（不 fake popen）：agent 必须落在自己的会话/进程组里（ADR 0035 决策 3）。 这条不能用 fake popen… (+8 more)
 
-### Community 264 - "run_store/ddb.py"
+### Community 263 - "cli 包 contributor 文档"
+Cohesion: 0.24
+Nodes (10): cli 包 contributor 文档, skill 参考：CLI --json 字段契约, gherkai 命令行发行包入口页, agent skill (gherkai skill), 执行核心库窄腰 (core-library narrow waist), 派生视图 (derived view), 机读输出契约 (machine-readable output contract), Run 数据模型 (run data model) (+2 more)
+
+### Community 264 - "_build"
 Cohesion: 0.20
-Nodes (7): DynamoDBRunStore（ADR 0030 决定六）：RunStore port 的 DynamoDB 实装。 对拍 `LocalRunStore`…, 读回 definition（从 META item 的 meta_json）；不存在返回 None。, 只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。, definition_schema_version(), 读 definition 的第一步：结构版本不等于本读端支持的那一个即抛 UnsupportedDefinitionSchema（带写端 CLI 版本供点名）。, 从 definition 的 dict 读结构版本：缺键读作 0（早于结构版本号的写端）；不是整数即定义违约。, require_definition_schema()
-
-### Community 265 - "./run-scope.mjs"
-Cohesion: 0.06
-Nodes (36): ADR-0019, ADR-0022, ADR-0026, ADR-0027, ADR-0035, ADR-0039, ADR-0048, ./run-scope.mjs (+28 more)
+Nodes (10): _build(), kicker_handler(), _load_definition(), 读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺…, 后端读到结构版本不等于自己认的提交记录时写进 run 级 message 的整句（ADR 0037 决策 7）：谁写的、两边各第几版、怎么办。 与 CLI…, cloud 组合根：读 env 造 boto3 + 装配（RunStore/EventLog/CloudLauncher +…, 提取 kicker 要 tick 的 run_id 集。两种 event 源（kicker 同时服务两者）： ① runs 表…, kicker（踢启器）入口——两个触发源：runs 表 Stream 的 **INSERT**（冷启动：submit create_run 写… (+2 more)
 
 ### Community 268 - "EventSink"
 Cohesion: 0.22
@@ -1379,8 +1422,8 @@ Cohesion: 0.31
 Nodes (9): _one_line(), Exception, 隧道会话预热（ADR 0051 决策 13）：worker 在第一个 scenario 之前对预热地址导航一次换到会话 cookie，并按页面的可见结果归因。…, 预热期间收到停止信号（ADR 0024 flag-only 协作停）：调用方按停止路径收尾，不算失败、不发 scope_done。, 对 `page` 导航预热地址、等页面标题落成四个标记之一；返回 None 表示就绪，否则返回归因与产品语言的消息。 `page` 是 Playwright…, _wait_for_marker(), warmup_session(), WarmupFailure (+1 more)
 
 ### Community 270 - "ssm_path"
-Cohesion: 0.05
-Nodes (44): _FakeTable, 假 DDB table 句柄：DynamoDBRunStore…, subnet ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SUBNETS_KEY)…, sg ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SECURITY_GROUPS_KEY)…, 后端版本戳的 SSM 路径（ADR 0037 决策 6「版本戳」/ 决策 7 skew 比对读侧）。, 引擎 worker task-def **模板 revision ARN** 的 SSM 路径（ADR 0038「SSM 参数与命名真源」第 1 行）。…, ssm_security_groups_path(), ssm_subnets_path() (+36 more)
+Cohesion: 0.06
+Nodes (33): _FakeTable, 假 DDB table 句柄：DynamoDBRunStore…, is_botocore_error(), _make_ecr_client(), _make_ssm_client(), _no_default_pointer_error(), BaseException, Exception (+25 more)
 
 ### Community 271 - "index.mts"
 Cohesion: 0.40
@@ -1395,52 +1438,52 @@ Cohesion: 0.10
 Nodes (32): app_object_key(), AppLocation, AppUploadError, ensure_app_object(), _error_code(), BaseException, datetime, Exception (+24 more)
 
 ### Community 282 - "ADR 0037: 分发与打包"
-Cohesion: 0.14
-Nodes (29): ADR 0005: 单一共享 feature 文件, ADR 0011: AgentCore 浏览器 system default vs custom, 系统默认浏览器 aws.browser.v1, 自建 custom browser（create-browser）, ADR 0015: v1 定位——柔性冒烟而非回归, 确定性 step（测试开发按需自建）, tunnel.py（--expose-local 隧道 provider）, tunnel_host.py（隧道宿主编排 + 守护 TTL） (+21 more)
+Cohesion: 0.09
+Nodes (54): gherkai-deploy-aws contributor 手册, NOVA_MODEL_ID opt-in 环境变量旋钮, Nova 模型版本钉死 GA（nova-act-v1.0）策略, ADR 0004: Nova Act 经 Workflow 的 IAM 鉴权, ADR 0009: 最大化使用 AWS（硬约束）, ADR 0011: AgentCore 浏览器 system default vs custom, 系统默认浏览器 aws.browser.v1, 自建 custom browser（create-browser） (+46 more)
 
 ### Community 292 - "container_name"
 Cohesion: 0.27
 Nodes (8): 读某 task-def revision 上 worker container 的 `stopTimeout`（秒），它就是**云端后端真实的停止宽限**。…, read_task_def_stop_timeout(), container_name(), task-def 里的 container 名（RunTask overrides 指定往哪个 container 注 env）。不带…, _StopTimeoutEcs, test_read_task_def_stop_timeout_none_when_unset_or_container_absent(), test_read_task_def_stop_timeout_reads_worker_container(), test_task_def_and_container_name()
 
 ### Community 293 - "SqliteEventLog"
-Cohesion: 0.09
-Nodes (24): Connection, Path, 某 scope 当前 events 的 max seq（per-run 进程读 fd3 时续号用；空 → 0）。, 本机 SQLite 事件日志（组合根注入路径；per-run 进程写、reconciler 读）。, 追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。, 写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。…, 单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧结构相同。, SqliteEventLog (+16 more)
+Cohesion: 0.16
+Nodes (10): Connection, Path, 某 scope 当前 events 的 max seq（per-run 进程读 fd3 时续号用；空 → 0）。, 本机 SQLite 事件日志（组合根注入路径；per-run 进程写、reconciler 读）。, 追加一条 worker 事件（原始 JSON 行）。INSERT OR REPLACE：同 (scope,seq) 幂等（重放/重试无副作用）。, 写平台侧退出记录（per-run 进程 proc.wait() 拿到 exitcode 后调，机制二）。INSERT OR REPLACE 幂等。…, 单个 scope 有没有退出记录（**只读**，exits 主键点查）——对位 `DdbEventLog.has_exit`，两侧结构相同。, SqliteEventLog (+2 more)
 
 ### Community 294 - "plan_next"
 Cohesion: 0.29
 Nodes (7): Action, plan_next(), RunState, reconciler 的建议动作（ADR 0034）——纯数据，adapter 侧据此做副作用（CAS/RunTask/finalize）。…, 据当前 RunState 提议下一步动作（ADR 0034 机制四，纯函数、无副作用）。 - 若所有 job 达终态（无 pending/running）→…, 全 pending、max_concurrency=2 → 提议 start 前 2 个。, test_plan_next_starts_up_to_concurrency()
 
-### Community 295 - "ADR 0023: Nova Act acting 锁 Python"
-Cohesion: 0.32
-Nodes (8): 双语言裂缝（物理约束）, ADR 0006: 形态 A——两个子工程、无编排器, 薄 worker 子进程（一次调用=一个 scope=一个 job）, 两个引擎都作为子进程 worker、核心语言自由选 Python, Nova Act REST API = 客户端驱动的工具调用循环, ADR 0023: Nova Act acting 锁 Python, Python nova-act SDK 的 Playwright/CDP 客户端循环, 全 TS 核心路径（被证伪关闭）
+### Community 295 - "finalize_report"
+Cohesion: 0.22
+Nodes (9): ReportStore adapters (local / s3), finalize_report(), done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034 收尾）。宿主在 tick 返回 done 后调。…, handler(), 从 DDB Stream records 提取涉及的 run_id 集（PK=run_id#scope_id，取 # 前段）。去重——一个 batch…, 对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。…, events 表 Stream 入口（reconciler 主推进）：worker PutItem / task_exited 触发 → 对涉及 run…, _run_ids_from_stream() (+1 more)
 
-### Community 296 - "_resolve_steps_dir"
-Cohesion: 0.25
-Nodes (8): _cmd_list_deterministic(), `_resolve_steps_dir` 的**不打印**内核：返回 (绝对路径 | None, 错误串 | None)。doctor 把错误串放进机读…, 解析使用方确定性 step 目录（ADR 0037 决策 4）：`--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认…, `_resolve_steps_dir` + 云端后端清零（ADR 0037 决策 4）：云端后端 steps…, 按引擎列出确定性 step 清单（ADR 0036）：spawn worker 自述、CLI 只转述——core/CLI 不持有 pattern 语义（ADR…, _resolve_steps_dir(), _resolve_steps_dir_for_backend(), _steps_dir_or_error()
+### Community 296 - "Path"
+Cohesion: 0.14
+Nodes (13): _cmd_list_deterministic(), local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。…, `_resolve_steps_dir` 的**不打印**内核：返回 (绝对路径 | None, 错误串 | None)。doctor 把错误串放进机读…, 解析使用方确定性 step 目录（ADR 0037 决策 4）：`--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认…, `_resolve_steps_dir` + 云端后端清零（ADR 0037 决策 4）：云端后端 steps…, 按引擎列出确定性 step 清单（ADR 0036）：spawn worker 自述、CLI 只转述——core/CLI 不持有 pattern 语义（ADR…, _resolve_steps_dir(), _resolve_steps_dir_for_backend() (+5 more)
 
-### Community 298 - "Midscene 调 Bedrock 的 SigV4 自签：签什么、不签什么、怎么排障"
-Cohesion: 0.33
-Nodes (6): 1. 链路一句话, 2. 签名契约：五条决定成败的细节, 3. 失败模式表, 4. 依赖与自检, Midscene 调 Bedrock 的 SigV4 自签：签什么、不签什么、怎么排障, 延伸阅读
+### Community 298 - "ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock"
+Cohesion: 0.12
+Nodes (19): ADR 0002: Midscene 不由 GPT-5.5 驱动, 概念：只认响应 body、不认 HTTP 状态码, 概念：Midscene 仅走 chat-completions 接口, ADR 0003: VL 模型选型, ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock, Model qwen.qwen3-vl-235b-a22b (Bedrock ON_DEMAND), Region 解析顺序（--region > AWS_REGION > AWS_DEFAULT_REGION > profile）, createOpenAIClient 逃生舱 + sigv4Fetch (+11 more)
 
 ### Community 299 - "cli/tests/conftest.py"
 Cohesion: 0.40
 Nodes (5): _presentation_is_environment_independent(), fixture, cli 测试的公共夹具。 **默认不 spawn 真 worker 问能力自述**：`run`/`submit` 的运行前检查、`list-…, 人读渲染（ADR 0047）不随运行测试的终端变化：固定关色、表格不按终端取宽——否则 `pytest -s` 在真实终端里会因 ANSI 与折行假红。, _stub_engine_capabilities()
 
-### Community 300 - "ADR 0024: worker–core 协议"
-Cohesion: 0.06
-Nodes (64): cli/DEVELOPMENT.md, CONTRIBUTING（contributor 入口）, core 包 contributor 文档, core 测试说明（单测 + 集成测试）, gherkai-deploy-aws contributor 手册, ADR 0016: 执行架构 — 核心库与 run 模型, AgentCore Evaluations（去优先级的相邻选项）, ADR 0017: 云端执行选 Fargate (+56 more)
+### Community 300 - "ADR 0016: 执行架构 — 核心库与 run 模型"
+Cohesion: 0.09
+Nodes (38): cli/DEVELOPMENT.md, core 包 contributor 文档, core 测试说明（单测 + 集成测试）, ADR 0005: 单一共享 feature 文件, 双语言裂缝（物理约束）, ADR 0006: 形态 A——两个子工程、无编排器, 公共设施落在核心库层（报告归集/会话生命周期/跑批入口）, ADR 0013: 跨引擎共享边界 (+30 more)
 
-### Community 301 - "classify_vpc_state"
-Cohesion: 0.25
-Nodes (8): classify_vpc_state(), SSM 里记的生效取值 `stored` 是否与本次 `--vpc requested` 一致。 三种取值形态见…, 三态判定（ADR 0037 决策 6）。返回上面四个 `VPC_*` 之一。 判序里 **stack…, vpc_spec_matches(), parametrize, test_classify_four_states(), test_classify_stack_absent_is_first_deploy_even_without_param(), test_vpc_spec_matches()
+### Community 301 - "AI step（默认执行路径）"
+Cohesion: 0.29
+Nodes (8): AI step（默认执行路径）, gherkai 命令行工具发行包, gherkai deploy, gherkai-deploy-aws, Midscene 引擎, Nova Act 引擎, @gherkai/worker-midscene, gherkai-worker-novaact
 
 ### Community 302 - "exceptions"
 Cohesion: 0.50
 Nodes (4): ConflictException, exceptions, Exception, ResourceNotFoundException
 
-### Community 303 - "_add_device_flags"
+### Community 303 - ".feature (Gherkin 用例)"
 Cohesion: 0.29
-Nodes (7): ArgumentParser, _add_config_flag(), _add_device_flags(), _add_selection_flags(), run / plan / submit 共用的筛选 flag（ADR 0041 决策一）。语义写在 help 里，解析在 `_build_selector`。, 设备目标的选项（ADR 0053 决策 4）：按平台分开的设备 ARN（一个 run 可同时含 Android 与 iOS 的 scope）；run /…, 七个读项目配置文件的子命令共用（ADR 0053 决策 1）。
+Nodes (7): gherkai deploy push-worker / list-workers, 确定性 step, .feature (Gherkin 用例), 导航 step, gherkai plan（用例预检）, @scope 浏览器会话分组, 确定性 step 参考（agent skill）
 
 ### Community 305 - "format_event"
 Cohesion: 0.40
@@ -1450,17 +1493,17 @@ Nodes (5): format_event(), 单个 ADR 0024 事件 → 一行进度文本（不�
 Cohesion: 0.33
 Nodes (4): 把 Lambda 代码摊到一个目录，返回其路径（`Code.from_asset` 用）。 内容是本包 `lambdas/` 的 handler…, 当前 venv 里某个 import 名的源路径（`find_spec`）——Lambda asset 的复制源，见…, 漏一项 → fail-fast 点名它。静默漏了的后果是 Lambda 运行期 ImportError，要到真起 run 才暴露。, test_missing_dependency_fails_loud_naming_it()
 
-### Community 308 - "RuntimeError"
-Cohesion: 0.33
-Nodes (7): _error_text(), 异常 → 一行「类型: 信息」，作 step_done 的 message 与 evidence 的 act.error（ADR 0042 决策三/决策一）。…, SDK 异常的 str() 是多行 repr（实际运行暴露：ActTimeoutError 把「原因」撑成十几行）——取 .message…, 隧道地址落在 300 字边界上时先脱敏再截断（ADR 0035 决策 5）：截在 userinfo 中间会丢掉 `@`、出口处的规则就抓不到。, test_error_text_prefers_sdk_message_and_is_single_line(), test_error_text_redacts_before_truncation(), RuntimeError
+### Community 308 - "_FakeSchedulerClient"
+Cohesion: 0.29
+Nodes (5): _FakeSchedulerClient, create_schedule 记录器（含 exceptions.ConflictException 形状，兼容 boto3 client 异常访问路径）。, 同名已在（同 run+scope 重复 arm）→ ConflictException 吞掉视作已武装（幂等）。, test_timeout_watch_conflict_is_idempotent(), test_timeout_watch_creates_one_time_schedule()
 
 ### Community 309 - "reconciler.py"
-Cohesion: 0.07
-Nodes (37): _event_log(), _extract(), handler(), _is_detached(), 退出观察者 Lambda（ADR 0034，机制二 cloud 落地）：ECS Task STOPPED 事件 → 写 task_exited。…, 从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason)。…, 本 run 是否由云端推进器管（ADR 0034 端到端 cloud 1b：`detached` 标记在 runs 表 STATE item 上）。…, 构造 DdbEventLog（Lambda 组合根：读 env 造 boto3 表资源注入 core adapter）。 (+29 more)
+Cohesion: 0.19
+Nodes (13): _event_log(), _extract(), handler(), _is_detached(), 退出观察者 Lambda（ADR 0034，机制二 cloud 落地）：ECS Task STOPPED 事件 → 写 task_exited。…, 从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason)。…, 本 run 是否由云端推进器管（ADR 0034 端到端 cloud 1b：`detached` 标记在 runs 表 STATE item 上）。…, 构造 DdbEventLog（Lambda 组合根：读 env 造 boto3 表资源注入 core adapter）。 (+5 more)
 
 ### Community 314 - "project.py"
 Cohesion: 0.09
-Nodes (37): _aggregate(), finalize_job(), _find_session(), is_device_job(), _job_status(), _lifecycle_rank(), NonTerminalSnapshot, project_full() (+29 more)
+Nodes (36): _aggregate(), finalize_job(), _find_session(), is_device_job(), _job_status(), _lifecycle_rank(), NonTerminalSnapshot, project_full() (+28 more)
 
 ### Community 316 - "projected_run_status"
 Cohesion: 0.29
@@ -1470,29 +1513,33 @@ Nodes (7): projected_run_status(), 投影写该落库的 run 级 status（ADR 00
 Cohesion: 0.40
 Nodes (4): Job, EngineResolver, Lock, Sink
 
-### Community 318 - "_TrajNova"
-Cohesion: 0.33
-Nodes (3): 带 trajectory_file_path 的 fake result（.html 不存在 → _collect_traj 回退用 json 路径本身）。, _TrajNova, _TrajResult
+### Community 318 - "_ensure_ns_package"
+Cohesion: 0.29
+Nodes (7): _ensure_ns_package(), _is_step_file(), _module_name(), Path, 文件路径 → 合成模块名：相对 steps 根的路径，`/` 换 `.`、去 `.py`。 用相对路径（而非仅…, 在 `sys.modules` 里备好一个合成命名空间壳，`__path__` 指向对应真实目录。 `__path__` 让 step 文件里的相对…, 自动加载的筛选（ADR 0037 决策 4）：排除 `_` 开头的**文件或目录**（辅助模块，供其它 step 文件 import） 与 `test_*`…
 
-### Community 321 - "gherkai：价值与方法（材料索引）"
-Cohesion: 0.60
-Nodes (5): 演示材料索引, 价值与方法 视频章节, 价值与方法 纯口播稿, gherkai：价值与方法（材料索引）, 价值与方法 讲者备注
+### Community 321 - "gemini_image.py"
+Cohesion: 0.33
+Nodes (4): HTTPRedirectHandler, NoRedirect, 演示制作规范, 演示制作与媒体工具说明
 
 ### Community 329 - "Fargate/ECS RunTask 执行后端"
 Cohesion: 0.50
 Nodes (4): AgentCore Runtime（被否的执行面选项）, 批处理 workload shape 判据, Fargate/ECS RunTask 执行后端, 翻盘条件：workload 变长驻服务
 
 ### Community 330 - "severity 数值序（_STATUS_SEVERITY）"
-Cohesion: 0.38
-Nodes (7): 退出码基于 run 级 severity, _NON_VERDICT 与 _aggregate 入口过滤, severity 数值序（_STATUS_SEVERITY）, Status.ABORTED（core 派生态）, Status.PENDING / RUNNING（生命周期前置态）, Status.SKIPPED（core 派生态）, TERMINAL_STATUSES（终态真源，取补定义）
+Cohesion: 0.32
+Nodes (8): 退出码基于 run 级 severity, _NON_VERDICT 与 _aggregate 入口过滤, severity 数值序（_STATUS_SEVERITY）, Status.ABORTED（core 派生态）, Status.PENDING / RUNNING（生命周期前置态）, Status.SKIPPED（core 派生态）, step 级短路：step_skipped 事件 + shortcircuited 布尔, TERMINAL_STATUSES（终态真源，取补定义）
 
 ### Community 331 - "url_matches.py"
 Cohesion: 0.50
 Nodes (3): deterministic, 示范用确定性 step（Nova Act 侧）：断言当前页面地址匹配给定正则。 这是 `steps/` 目录的模板：复制进你的项目后按需改措辞与判定。与…, url_matches()
 
-### Community 332 - "render_traffic_policy"
-Cohesion: 0.17
-Nodes (12): 本 run 的 ngrok 流量策略 YAML（ADR 0051 决策 13）：手写模板替换，不为此引 yaml 依赖——结构固定，令牌与 cookie…, 把文本里每个「作为一个地址出现」的 origin 换成 base：origin 之后的 URL 字符段 R 为空、以 / ? #…, render_traffic_policy(), replace_origin(), parametrize, ADR 0051 决策 13「边缘策略」：恰 4 条规则（免费层上限 5）、不含 basic-auth 与 remove-headers、Set-Cookie…, ngrok 读的是解析后的结构、不是字面量，所以按 YAML 解析后核：四条规则按序 warmup-ok / warmup-reject / check-ok…, 预热页脚本的分类（ADR 0051 决策 13）：校验响应 200 → READY；只有 401 → DENIED（确定性拒绝、worker 归… (+4 more)
+### Community 332 - "test_warmup_page_script_classifies_only_401_as_denied"
+Cohesion: 0.33
+Nodes (6): 把文本里每个「作为一个地址出现」的 origin 换成 base：origin 之后的 URL 字符段 R 为空、以 / ? #…, replace_origin(), parametrize, 预热页脚本的分类（ADR 0051 决策 13）：校验响应 200 → READY；只有 401 → DENIED（确定性拒绝、worker 归…, test_replace_origin_boundaries(), test_warmup_page_script_classifies_only_401_as_denied()
+
+### Community 334 - "_handle_timeout"
+Cohesion: 0.33
+Nodes (6): _handle_timeout(), 超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 才动手——ListTasks(startedBy=run_id)…, 防御性超时扫（ADR 0034「job timeout」节 claimed_at ②，Scheduler 的双保险）：任何 tick 顺带对 RUNNING…, RunTask 注入的 env SCOPE_ID 原样在…, _scan_overdue_timeouts(), _task_scope_id()
 
 ### Community 337 - "_cmd_deploy"
 Cohesion: 0.33
@@ -1502,9 +1549,13 @@ Nodes (6): _cmd_deploy(), _cmd_destroy(), _deploy_provider(), 取已解析的 pr
 Cohesion: 0.50
 Nodes (4): _joined_refs(), 从模板值（Fn::Join）取出被拼接的资源 Ref 序列。SSM StringList 与 Lambda env 的 Join 形态不同 （分隔符一个在…, subnet 选取（公有优先、无则回落私有）只有一处落点 `_worker_subnet_ids`：写给 cli 读的 SSM 与…, test_worker_subnets_single_source_across_ssm_and_lambda_env()
 
-### Community 341 - "_FakeCdp"
+### Community 340 - "DeterministicKeywordMismatch"
 Cohesion: 0.33
-Nodes (3): _FakeCdp, main_fakes(), 把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。
+Nodes (5): DeterministicConflict, DeterministicKeywordMismatch, 一个 step 文本命中多条确定性模式（ADR 0022：最多命中一条，多条是配置错误）。 冲突清单只经 message 传（派发侧把异常文本并入…, step 文本命中了一条确定性模式，但当前关键字不在该条目声明的 `keywords` 里（ADR 0050 决策 1）。 派发侧据此记 error、不转…, Exception
+
+### Community 341 - "TunnelError"
+Cohesion: 0.33
+Nodes (6): make_tunnel(), Exception, 按 `--tunnel <provider>` 选实现（ADR 0035 决策 1；当前唯一 ngrok，机制先行）。, 隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退出码 2）。, TunnelError, test_make_tunnel_unknown_provider()
 
 ### Community 343 - "settings.py"
 Cohesion: 0.17
@@ -1514,13 +1565,13 @@ Nodes (19): apply_project_config(), configurable_keys(), convert_config_value(),
 Cohesion: 0.40
 Nodes (5): platform_label(), ADR 0053 决策 4 的用户可见消息：有该平台的设备 scope，却没有任何来源指定设备。, unspecified_message(), run / submit：有设备 scope 的平台没有任何来源指定设备，在提交前以退出码 2 结束（ADR 0053 决策 4「不自动挑设备」）。, require_device_selections()
 
-### Community 352 - "runStep"
-Cohesion: 0.50
-Nodes (5): appendReportRef(), cumulativeTokens(), isTransientNetwork(), runStep(), stepCost()
-
-### Community 353 - "stop_tunnel"
+### Community 352 - "deterministic_steps.py"
 Cohesion: 0.40
-Nodes (5): 收尾：SIGTERM 隧道 agent 进程。幂等——进程已不在（重复收尾/自然退出）静默返回。, stop_tunnel(), **真 spawn**（不 fake popen）：agent 必须落在自己的会话/进程组里（ADR 0035 决策 3）。 这条不能用 fake popen…, test_ngrok_agent_detaches_from_cli_process_group(), test_stop_tunnel_idempotent_on_dead_pid()
+Nodes (4): deterministic, navigate(), 确定性 step 脚手架（ADR 0020/0022）—— 本包随 worker 发行的注册表内容：**只有内建导航一条**。 机制（ADR…, 内建导航（ADR 0020 第 3 条）：整句为地址的 Given / When step，直接打开，不走 AI。
+
+### Community 353 - "_cmd_list_engines"
+Cohesion: 0.50
+Nodes (4): _cmd_list_engines(), _probe_engines(), 两引擎各走一遍定位链（ADR 0037 决策 3）→ 机读行：{engine, available, cmd, cwd, source,…, 列出各引擎 worker 的拉起命令 + 命中的定位链级别（ADR 0037 决策 3 的自省口）；miss 则打安装指引。 **恒以退出码 0…
 
 ### Community 354 - ".peek_definition_header"
 Cohesion: 0.50
@@ -1534,6 +1585,10 @@ Nodes (4): 设备会话处置结束（ADR 0051 决策 4、7）：每个会话恰
 Cohesion: 0.50
 Nodes (3): 一个 job 开过或尝试过的一个远程访问会话（ADR 0051 决策 4、7）：由 session_opened / session_closed 按配对键…, 是否已确认停止；attempted 的尝试永远不会被确认（ADR 0034 机制二未确认集 U 的成员判据）。, SessionRecord
 
+### Community 366 - "_dist_version"
+Cohesion: 0.50
+Nodes (4): _dist_version(), `--worker-variant` 入口校验 + 本机后端提示（对齐 `--max-concurrency` 的入口校验惯例，ADR 0038）。…, 发行版本字符串（唯一真源是 git tag，经 uv-dynamic-versioning 写进包元数据，ADR 0037 决策 2b；…, _validate_worker_variant()
+
 ### Community 375 - "_DeterministicCtx"
 Cohesion: 0.33
 Nodes (3): _DeterministicCtx, 传给确定性 handler 的上下文：暴露 Playwright `page`（精确 DOM/URL 查，不走 AI）与导航原语…, 引擎的导航原语（内建导航条目用它打开地址，ADR 0020 第 3 条）：Nova 用 SDK 的 `go_to_url`。
@@ -1541,6 +1596,18 @@ Nodes (3): _DeterministicCtx, 传给确定性 handler 的上下文：暴露 Play
 ### Community 440 - "run_store"
 Cohesion: 0.67
 Nodes (3): fixture, 两个 adapter 各来一遍（对拍）。local 用 tmp_path；ddb 用 moto aws fixture。, run_store()
+
+### Community 442 - "._pump"
+Cohesion: 0.50
+Nodes (3): Event, 驱动一个 worker 的 fd3 事件流直到结束（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写…, Timer
+
+### Community 443 - "UserStepsError"
+Cohesion: 0.67
+Nodes (3): Exception, 使用方 steps 目录加载失败（目录不存在 / 某文件 import 炸）。 消息自带「哪个文件 +…, UserStepsError
+
+### Community 444 - "_isolate"
+Cohesion: 0.67
+Nodes (3): _isolate(), fixture, 注册表 snapshot/restore + 清掉本测试塞进 sys.modules 的合成模块（跨文件顺序性假绿/假红的防线）。
 
 ## Ambiguous Edges - Review These
 - `五层职责切分（用例/产品/执行/浏览器/被测应用）` → `本机应用测试隧道拓扑图`  [AMBIGUOUS]
@@ -1561,9 +1628,9 @@ Nodes (3): fixture, 两个 adapter 各来一遍（对拍）。local 用 tmp_path
   docs/adr/0025-plan-module-feature-to-jobs.md · relation: references
 
 ## Knowledge Gaps
-- **696 isolated node(s):** `CONNECT_BACKOFF_MS`, `STOP_SESSION_BUDGET_MS`, `INFLIGHT_SETTLE_MS`, `QUEUE_DRAIN_EXIT_MS`, `BROWSER_CLOSE_BUDGET_MS` (+691 more)
+- **693 isolated node(s):** `背景与问题`, `1. 一个 scope 一个远程访问会话，scenario 之间不复位`, `2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034`, `3. 设备解析、创建与孤儿防护`, `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` (+688 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **194 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **221 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
