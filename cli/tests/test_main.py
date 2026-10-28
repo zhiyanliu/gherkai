@@ -483,7 +483,7 @@ def test_run_grace_mixed_engines_takes_max_of_self_reported(tmp_path, monkeypatc
         "Feature: mixed\n"
         "  @engine:midscene\n  Scenario: a\n    When \"做点啥\"\n"
         "  @engine:novaact\n  Scenario: b\n    When \"做点啥\"\n", encoding="utf-8")
-    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两个引擎都得「装了」才问得到（dev 机常缺 midscene）
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两个引擎都得「装了」才能取得（dev 机常缺 midscene）
     asked: list[str] = []
     stubbed = compose.query_capabilities  # conftest autouse 装的确定性假替身（不是真 spawn），此处只在它外面加计数
     monkeypatch.setattr(m.compose, "query_capabilities",
@@ -516,7 +516,7 @@ def test_local_run_asks_each_engine_for_capabilities_once(tmp_path, monkeypatch,
 
 
 def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, capsys):
-    """问不到引擎自报的下限（版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约）→ **以退出码 2 结束、绝不回落猜的下限**
+    """取不到引擎自报的下限（版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约）→ **以退出码 2 结束、绝不回落猜的下限**
     （ADR 0024「引擎自报下限」fail-loud；回落就是 grace 默默不够、收尾被强杀）。文案与自述失败同一口径。"""
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
@@ -1670,7 +1670,7 @@ def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, c
 
 
 def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, capsys):
-    """问不到本机 worker 的下限（版本不一致的 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
+    """取不到本机 worker 的下限（版本不一致的 worker 不认该入口 / 起不来）→ 转述诊断、不静默按「够用」放过；
     doctor 是只读自检，一行报到底，不像 run 那样以退出码 2 结束。"""
     _fake_locator(monkeypatch, available=("midscene",))
     _cloud_backend_ok(monkeypatch)
@@ -1679,7 +1679,7 @@ def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, ca
     monkeypatch.setattr(m.compose, "read_task_def_stop_timeout",
                         lambda *a, **kw: (_ for _ in ()).throw(AssertionError("下限都没问到，不该去 describe")))
     row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
-    assert row["ok"] is False and "问不到本机 worker 需要的收尾宽限" in row["detail"]
+    assert row["ok"] is False and "未能从本机 worker 取得收尾宽限" in row["detail"]
 
 
 def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys):

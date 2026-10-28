@@ -41,7 +41,7 @@ FORBIDDEN = re.compile(
 # ADR 0045 决策六形态②：自造二字复合词与「码」缩略——歧义不是效率，AI 侧文档也不用（排版学义的「同形字符」与「协同调度」放行）。
 _COINAGES = r"同形(?!字)|同款|同律|(?<!协)同调|同口径|归码|退码|网络码|专用码|非零码|此码"
 COINAGES = re.compile(_COINAGES)
-COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|跑(?!」)"
+COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|(?<!访)问(?:不|得)到|跑(?!」)"
                         r"|(?<![文归存])档(?![案期])"
                         r"|" + _COINAGES)
 

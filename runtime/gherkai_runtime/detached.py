@@ -77,7 +77,7 @@ class SubprocessLauncher:
             seq_box[0] += 1
             self._event_log.append_event(scope_id, seq_box[0], line, time.time())
 
-        # grace 下限要 spawn 一次 worker 自述才问得到（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
+        # grace 下限要 spawn 一次 worker 自述才能取得（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
         # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
         # tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）前提是「进程没起、平台观察者无从观察」，那时留下的是
         # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件通道 fd。

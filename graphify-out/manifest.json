@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793085707.473281,
-    "ast_hash": "8a26b68b1a0c1845ff36631459cbb86c",
+    "mtime": 1793169197.7983048,
+    "ast_hash": "3afed0cc50a2d5840301e025adfdd6ca",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793090050.793248,
-    "ast_hash": "4546292297c16093a555ae864155b91a",
+    "mtime": 1793169157.9706473,
+    "ast_hash": "301b684b013dc9a9cf78ed7530a05544",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -625,8 +625,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
-    "mtime": 1793089574.669529,
-    "ast_hash": "4a4c4af360273a505ed52aa3f733b571",
+    "mtime": 1793169197.7986543,
+    "ast_hash": "bef8763bdb16f4f2c89bbf3aac033a50",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/names.py": {
@@ -650,13 +650,13 @@
     "semantic_hash": "6e9cfc5c2c320e755ab52bf93596c2de"
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1793086979.4578059,
-    "ast_hash": "9a0c9608cdbecaca4a6e184f0048cfc6",
+    "mtime": 1793169157.9720197,
+    "ast_hash": "94f87c1dff6421f096d4b4db45bd6600",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
-    "mtime": 1793090760.6064417,
-    "ast_hash": "2f8423a9a70c9a429aeb12c7a4815578",
+    "mtime": 1793169197.7987726,
+    "ast_hash": "d0b873258d96bdc391297f925c7a4366",
     "semantic_hash": ""
   },
   "runtime/tests/test_tunnel.py": {
@@ -1040,9 +1040,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
-    "mtime": 1789845553.8200269,
-    "ast_hash": "bd0612b16bd846c30d361d7f4dd6ac63",
-    "semantic_hash": "bd0612b16bd846c30d361d7f4dd6ac63"
+    "mtime": 1793169197.7977464,
+    "ast_hash": "258eb58e890b6835dc91f3f4b8d201e4",
+    "semantic_hash": ""
   },
   "cli/tests/test_package_readmes.py": {
     "mtime": 1789857042.5046668,
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1793168255.6049697,
-    "ast_hash": "0e80cf7a26063e168ab109cc85497c1c",
+    "mtime": 1793169197.7979407,
+    "ast_hash": "8cb843745316672083696c48690086fa",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {

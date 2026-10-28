@@ -116,7 +116,7 @@ def test_relay_recovers_foreign_timed_out_claim(tmp_path):
 
 
 def test_grace_query_failure_never_spawns_a_worker(tmp_path):
-    """grace 下限现在要 spawn 一次 worker 自述才问得到、**会抛**（ADR 0024「引擎自报下限」：旧 worker 不认入口 /
+    """grace 下限现在要 spawn 一次 worker 自述才能取得、**会抛**（ADR 0024「引擎自报下限」：旧 worker 不认入口 /
     定位不到 / 答非契约）——launch 必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
     tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）以「进程没起」为前提，那时留下的是没人读 fd3、没人 wait、
     没人 stop 的孤儿 worker（真会话真计费）。这里钉：min_grace_fn 抛 → run_scope 零调用、job 经补偿收敛 ERROR。"""
@@ -137,7 +137,7 @@ def test_grace_query_failure_never_spawns_a_worker(tmp_path):
     launcher = SubprocessLauncher(lambda _name: _Spy(), log, min_grace_fn=_old_worker)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, now_iso_fn=_now)
-    assert spawned == []  # 下限问不到 → 一个 worker 都没起（无孤儿）
+    assert spawned == []  # 下限取不到 → 一个 worker 都没起（无孤儿）
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]

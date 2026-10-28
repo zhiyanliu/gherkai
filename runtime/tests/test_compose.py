@@ -824,7 +824,7 @@ def test_engine_min_grace_reuses_capabilities_asked_with_steps_dir(
 
 
 def test_engine_min_grace_worker_failure_fails_loud(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """问不到就抛（异常原样冒上去、调用点以退出码 2 结束）——**绝不回落猜的常量**：那等于 grace 默默不够、收尾被强杀。"""
+    """取不到就抛（异常原样冒上去、调用点以退出码 2 结束）——**绝不回落猜的常量**：那等于 grace 默默不够、收尾被强杀。"""
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(b"", returncode=2))

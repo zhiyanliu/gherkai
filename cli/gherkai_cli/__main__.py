@@ -951,11 +951,11 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
         try:
             need = compose.engine_min_grace(eng)
         except compose.WorkerNotFoundError:
-            skipped.append(eng)  # 本机没装该引擎 worker：问不到它要多长收尾，跳过（不是故障）
+            skipped.append(eng)  # 本机没装该引擎 worker：取不到它需要的收尾宽限，跳过（不是故障）
             continue
         except Exception as e:
             ok_all = False
-            details.append(f"{eng}: 问不到本机 worker 需要的收尾宽限（{e}）")
+            details.append(f"{eng}: 未能从本机 worker 取得收尾宽限（{e}）")
             continue
         try:
             stop_timeout = compose.read_task_def_stop_timeout(
