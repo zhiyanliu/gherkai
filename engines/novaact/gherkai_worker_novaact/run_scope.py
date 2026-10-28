@@ -15,7 +15,7 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
 一生（ADR 0024）：
   读 job → 开 AgentCore 会话 → 按 scope 串行执行 scenarios（每 step 派发）→ 逐事件吐事件通道
   → scope_done → 退出。SIGTERM/SIGINT（ADR 0024 flag-only）：handler 只置 _stop 标志、绝不 raise；
-  主流程在 act 边界安全点检测 → 正常 return 退出 _run_session、其 finally 显式释放会话（正常退出与异常退出同样释放，
+  主流程在 act 边界安全点检测 → 正常 return 退出 _run_session、_BrowserSession 的退出释放会话（正常退出与异常退出同样释放，
   不靠异常穿透——避免异步 raise 撞 playwright greenlet 切换区致死循环卡死；sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
   单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
@@ -80,7 +80,7 @@ REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
 # 落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。主流程在 act 边界安全点检测、
-# 正常 return 退出 _run_session、其 finally 显式释放会话（不靠异常穿透）。模块级单例（对称 _uploader）。
+# 正常 return 退出 _run_session、_BrowserSession 的退出释放会话（不靠异常穿透）。模块级单例（对称 _uploader）。
 _stop = threading.Event()
 _stop_signum: int | None = None  # 触发协作停的信号号（handler 只记录；日志由安全点补打，见 _on_signal）
 
@@ -144,7 +144,7 @@ def _on_signal(signum, frame):
     """SIGTERM/SIGINT 的 flag-only handler（ADR 0024 终止契约）：只置停止标志、**绝不 raise**。
 
     绝不 raise——避免异步异常落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
-    主流程在 act 边界安全点检测 `_stop`、正常 return 退出 _run_session、其 finally 显式释放会话（正常退出与异常退出同样释放，
+    主流程在 act 边界安全点检测 `_stop`、正常 return 退出 _run_session、_BrowserSession 的退出释放会话（正常退出与异常退出同样释放，
     不靠异常穿透）。SIGTERM/SIGINT 共用（Ctrl-C 亦协作停）。
     **handler 内不做任何 I/O（含 stderr 日志）**：信号可能落在主线程正在 `sys.stderr.write` 的瞬间，handler 里再写
     stderr 会撞 Python BufferedWriter 的非重入锁——`RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>`
@@ -345,7 +345,7 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
     调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——AgentCore 会话已释放：NovaAct /
-    NovaAct 连接与 AgentCore 会话已在 _run_session 的 finally 里释放；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
+    NovaAct 连接与 AgentCore 会话已随 _BrowserSession 退出释放；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
     （`_presend_act_siblings`）同属 best-effort 的产物保全层（那层在 act 边界提前传、本函数在收尾排空）。
     Nova 没有中断 handler 内的兜底上传（greenlet 使然，见 ADR 0032）；② scope 末排在 `flush_and_cleanup`
     **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故 scope 末这一段超时不等于丢：紧随的整目录
@@ -632,6 +632,83 @@ class _WorkflowGuard:
         except Exception as e:  # noqa: BLE001
             log(f"worker: workflow run status update failed (verdict and exit code unaffected): {type(e).__name__}: {e}")
             return False
+
+
+def _nova_logs_dir() -> str | None:
+    """trajectory 落点（ADR 0027）：cli 经环境变量 NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
+    （会被系统清理）；`--no-report` 方式不落产物。Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。"""
+    logs_dir = None if _no_artifacts() else (os.environ.get("NOVA_LOGS_DIR") or None)
+    if logs_dir:
+        os.makedirs(logs_dir, exist_ok=True)
+    return logs_dir
+
+
+class _BrowserSession:
+    """worker 自持的一次 AgentCore 浏览器会话（ADR 0028「Nova 会话由 worker 自己持有」；ADR 0024 终止契约「Nova worker」条）。
+
+    进入：Start（与 SDK 的 cdp_session 同一组调用——同一 profile 配置、默认浏览器标识）→ 会话 id 立刻在手 → 绑定给 SDK 的会话提供者
+    （它据此在 NovaAct 退出时保存 profile）→ 取 CDP 连接头 → 进 NovaAct。Start 之前失败就是建连失败、没有会话要释放；Start 之后任何
+    一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。
+    退出：先关 NovaAct 连接（它的 __exit__ 收到真实的 exc_info，对称 with 语义；本 worker 自己持有 Workflow，SDK 不据它标记结局）、
+    再 Stop 会话（套 SESSION_STOP_BUDGET_S 的预算），两步都执行、失败只记进 release_errors——绝不抛，也绝不抑制 body 的异常，外层建连
+    循环因此只会看到建连与 body 的异常，释放失败只体现为退出码 1（ADR 0051 决策 5）。仅捕获 Exception：KeyboardInterrupt / SystemExit
+    照常传播，内层传播时外层的 Stop 仍执行。
+    曾依赖 SDK 的 cdp_session 上下文管理器：Stop 藏在它的 __enter__ / finally 里，无法套预算、__enter__ 内 Stop 失败不可观测、body 异常
+    被包装改头换面——都在真 SDK 上核过，理由与证据在 ADR 0028。"""
+
+    def __init__(self, *, region: str, logs_dir: str | None) -> None:
+        self._region, self._logs_dir = region, logs_dir
+        self.session_id: str | None = None       # AgentCore 浏览器会话 id（血缘，进 scope_started / scope_done）
+        self.nova_session_id: str | None = None  # Nova Act 服务侧的会话 id（SDK 把 trajectory 目录按它命名）
+        self.nova = None
+        self.release_errors: list[BaseException] = []
+        self._client = None
+        self._nova_cm = None
+        self._nova_entered = False
+
+    def __enter__(self):
+        provider = AgentCoreBrowserSessionProvider(region=self._region)
+        self._client = BrowserClient(region=self._region)
+        self._client.start(profile_configuration=ProfileConfiguration(profile_identifier=provider.profile_id))
+        try:
+            self.session_id = str(self._client.session_id)
+            log(f"worker: AgentCore browser session started: {self.session_id}")
+            provider.bind_session(browser_identifier=str(self._client.identifier), session_id=self.session_id)
+            ws_url, headers = self._client.generate_ws_headers()  # 要取凭证，可能撞网络错——会话已建起，失败也走释放
+            self._nova_cm = NovaAct(
+                cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
+                starting_page="about:blank", logs_directory=self._logs_dir,
+                # tty=False：worker 是 cli spawn 的子进程，stdout/stderr 是管道而非交互终端。SDK 默认 tty=True 会喷逐帧刷新的思考
+                # 动画（💭 . / 💭 .. / 🎬 …），在管道里成了刷屏噪声；关掉后输出干净的逐行日志。SDK 文档亦推荐非 tty 场景置 False。
+                tty=False,
+            )
+            self.nova = self._nova_cm.__enter__()
+            self._nova_entered = True
+            self.nova_session_id = self.nova.get_session_id()
+            # 两种 id 写在同一行：排障时从 job 记录的 AgentCore 会话 id 找到按 Nova Act 会话 id 命名的轨迹目录（ADR 0028 卡死现场一条）
+            log(f"worker: AgentCore session {self.session_id} uses Nova Act session {self.nova_session_id} (trajectory directory name)")
+        except BaseException:
+            self._release(sys.exc_info())  # with 语义下 __enter__ 失败不会调 __exit__：Start 之后失败由这里释放
+            raise
+        return self.nova
+
+    def __exit__(self, *exc_info) -> bool:
+        self._release(exc_info)
+        return False
+
+    def _release(self, exc_info) -> None:
+        try:
+            if self._nova_entered:
+                self._step("浏览器会话", lambda: self._nova_cm.__exit__(*exc_info))
+        finally:
+            self._step("AgentCore 会话", lambda: stop_session_within_budget(self._client, SESSION_STOP_BUDGET_S))
+
+    def _step(self, label: str, fn) -> None:
+        try:
+            fn()
+        except Exception as e:  # noqa: BLE001
+            self.release_errors.append(e)
+            log(f"worker: {label}释放出错（退出码将为 1）：{type(e).__name__}: {e}")
 
 
 def stop_session_within_budget(client, budget_s: float) -> None:
@@ -948,119 +1025,68 @@ def main() -> int:
     # 任何后续异常都不再当「可重试建连失败」——act 已可能执行、有副作用，绝不重试。
     started = False
 
-    def _release(label: str, fn) -> None:
-        """执行一步释放动作。释放阶段抛出的异常只记录、不冒泡：它不是建连失败、不进重试判定，也不能顶替 body 的异常；退出码据
-        release_error 变 1（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5 以退出码 1 表示有会话未确认停止）。
-        仅捕获 Exception：KeyboardInterrupt / SystemExit 照常传播，由调用处的 finally 保证外层仍被释放。"""
-        nonlocal release_error
-        try:
-            fn()
-        except Exception as e:  # noqa: BLE001
-            release_error = e
-            log(f"worker: {label}释放出错（退出码将为 1）：{type(e).__name__}: {e}")
-
     def _run_session() -> None:
         """建连 + 执行完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。
 
-        停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → 下方 finally 释放会话（ADR 0024 flag-only，
-        不靠异常穿透）。AgentCore 会话由 worker 自己持有：Start 之后会话 id 立刻在手（血缘不再等 NovaAct 进入成功）、Stop 在
-        finally 里自己调且套预算，每一次 Stop 的结果都可观测（ADR 0028「会话泄漏防护」；曾依赖 SDK 的 cdp_session 上下文管理器，
-        Stop 藏在它的 __enter__ / finally 里：无法套预算、__enter__ 内 Stop 失败不可观测、body 异常被包装改头换面——都已在真 SDK 上核过）。
-        NovaAct 的 __exit__ 也显式调用：with 会把释放异常原样冒泡、顶替 body 的异常，外层建连循环就会把「释放失败」当成「建连失败」重试。
+        停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → with 退出释放会话（ADR 0024 flag-only，不靠异常
+        穿透）。会话的建立与释放全在 _BrowserSession 里（Start → 绑定 → 取连接头 → 进 NovaAct；关 NovaAct → Stop 套预算），释放失败只
+        记进它的 release_errors、不冒泡、不进建连重试判定；本函数只管 scope 的执行次序。
         """
-        nonlocal session_id, nova_session_id, started, warmup_failure
+        nonlocal session_id, nova_session_id, started, warmup_failure, release_error
         session_id = None  # 只算本次 attempt 建起的会话（血缘进 scope_started / scope_done）
         if _stop.is_set():
             return  # 建连前已收到停止信号（含建连早期 SIGTERM——Workflow() 构造期到达，见 ADR 0024）→ 正常退出、不建连
-        provider = AgentCoreBrowserSessionProvider(region=REGION)
-        client = BrowserClient(region=REGION)
-        # StartBrowserSession（与 SDK 的 cdp_session 同一组调用：同一 profile 配置、默认浏览器标识）：抛出 → 建连域异常、可重试，此时没有会话。
-        client.start(profile_configuration=ProfileConfiguration(profile_identifier=provider.profile_id))
-        nova_cm = None
-        nova_entered = False
-        body_exc: BaseException | None = None
-        try:  # Start 成功之后的每一步都在释放保护区内：连写日志的那一行也可能抛（stderr 管道已关），不能让会话因此漏 Stop
-            session_id = str(client.session_id)
-            log(f"worker: AgentCore browser session started: {session_id}")
-            provider.bind_session(browser_identifier=str(client.identifier), session_id=session_id)  # SDK 据此在 NovaAct 退出时保存 profile
-            ws_url, headers = client.generate_ws_headers()  # 取 CDP 连接头（要取凭证，可能撞网络错）：会话已建起，失败也要走下面的释放
-            # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
-            # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
-            # （会被系统清理）。Nova 的 validate_path 要求该目录**已存在**，故先 mkdir。
-            logs_dir = None if _no_artifacts() else (os.environ.get("NOVA_LOGS_DIR") or None)
-            if logs_dir:
-                os.makedirs(logs_dir, exist_ok=True)
-            nova_cm = NovaAct(
-                cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
-                starting_page="about:blank", logs_directory=logs_dir,
-                # tty=False：worker 是 cli spawn 的子进程，stdout/stderr 是管道而非交互终端。
-                # SDK 默认 tty=True 会喷逐帧刷新的思考动画（💭 . / 💭 .. / 🎬 …），在管道里成了刷屏噪声；
-                # 关掉后输出干净的逐行日志（think/return/Approx. Time Worked 等有用行保留）。SDK 文档亦推荐非 tty 场景置 False。
-                tty=False,
-            )
-            nova = nova_cm.__enter__()  # 建连（失败 → 建连域异常、可重试；AgentCore 会话由下方 finally 释放）
-            nova_entered = True
-            nova_session_id = nova.get_session_id()  # Nova Act 服务侧的会话 id（不是 AgentCore 的）：SDK 产物目录按它命名
-            # 两种 id 写在同一行：排障时从 job 记录的 AgentCore 会话 id 找到按 Nova Act 会话 id 命名的轨迹目录（ADR 0028 卡死现场一条）
-            log(f"worker: AgentCore session {session_id} uses Nova Act session {nova_session_id} (trajectory directory name)")
-            # 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级
-            # 对所有请求（含 SDK 之后新开的 page）生效。纯 CDP 命令、无回调——不触碰 SDK 的
-            # route/greenlet 面（nova.page 是 SDK 公开属性，_DeterministicCtx 同源用法）。
-            extra_headers = os.environ.get("GHERKAI_EXTRA_HTTP_HEADERS")
-            if extra_headers:
-                nova.page.context.set_extra_http_headers(json.loads(extra_headers))
-            # 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发
-            # scope_started、正常 return 让 finally 释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
-            # 不进外层的建连重试域、不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。
-            if warmup_url:
-                try:
-                    warmup_failure = _warmup.warmup_session(nova.page, warmup_url, log=log, sleep=_stop.wait, stop=_stop.is_set)
-                except _warmup.WarmupStopped:
-                    return  # 停止信号（ADR 0024 flag-only）：正常 return 释放会话，main 尾按 _stop 走停止路径
-                if warmup_failure is not None:
-                    log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
-                    return
-                log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过（离开预热页在 warmup_session 内）
-            # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
-            # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
-            sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
-            started = True  # 越过此点表示会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
-            # scope 内串行执行 scenarios，共享同一会话（ADR 0019/0024）
-            for sc in scenarios:
-                if _stop.is_set():
-                    return  # 停止信号（ADR 0024 flag-only）：正常 return 出本函数 → 下方 finally 释放会话
-                sid = sc["id"]
-                sink.emit({"type": "scenario_started", "scenarioId": sid})
-                # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
-                # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
-                # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
-                # scope_id 透传到 step：evidence 的头里带它（文件自包含，ADR 0042 决策一）
-                statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink, scope_id=scope["id"])
-                # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：
-                # 中途中止时不 emit（部分 statuses 会算出假 passed），返 True → 停本 session。
-                if _emit_scenario_done_unless_stopped(sink, sid, statuses):
-                    return
-        except BaseException as e:
-            body_exc = e  # 建连（NovaAct 构造 / __enter__）或 body 的异常：释放完再原样抛给建连循环判定
+        browser = _BrowserSession(region=REGION, logs_dir=_nova_logs_dir())
+        try:
+            with browser as nova:  # Start 之前失败 → 建连域异常、可重试；Start 之后失败 → 先释放再抛
+                session_id, nova_session_id = browser.session_id, browser.nova_session_id
+                # 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级
+                # 对所有请求（含 SDK 之后新开的 page）生效。纯 CDP 命令、无回调——不触碰 SDK 的
+                # route/greenlet 面（nova.page 是 SDK 公开属性，_DeterministicCtx 同源用法）。
+                extra_headers = os.environ.get("GHERKAI_EXTRA_HTTP_HEADERS")
+                if extra_headers:
+                    nova.page.context.set_extra_http_headers(json.loads(extra_headers))
+                # 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发
+                # scope_started、正常 return 让 with 退出释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
+                # 不进外层的建连重试域、不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。
+                if warmup_url:
+                    try:
+                        warmup_failure = _warmup.warmup_session(nova.page, warmup_url, log=log, sleep=_stop.wait, stop=_stop.is_set)
+                    except _warmup.WarmupStopped:
+                        return  # 停止信号（ADR 0024 flag-only）：正常 return 释放会话，main 尾按 _stop 走停止路径
+                    if warmup_failure is not None:
+                        log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
+                        return
+                    log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过（离开预热页在 warmup_session 内）
+                # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
+                # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
+                sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
+                started = True  # 越过此点表示会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
+                # scope 内串行执行 scenarios，共享同一会话（ADR 0019/0024）
+                for sc in scenarios:
+                    if _stop.is_set():
+                        return  # 停止信号（ADR 0024 flag-only）：正常 return 出本函数 → with 退出释放会话
+                    sid = sc["id"]
+                    sink.emit({"type": "scenario_started", "scenarioId": sid})
+                    # trajectory 现由每个 _run_step 挂进各自 step_done 的 step 级 reportRefs（ADR 0027 下沉）——
+                    # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
+                    # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
+                    # scope_id 透传到 step：evidence 的头里带它（文件自包含，ADR 0042 决策一）
+                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink, scope_id=scope["id"])
+                    # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：
+                    # 中途中止时不 emit（部分 statuses 会算出假 passed），返 True → 停本 session。
+                    if _emit_scenario_done_unless_stopped(sink, sid, statuses):
+                        return
         finally:
-            # 释放阶段：先关 NovaAct（浏览器连接）、再 Stop AgentCore 会话，两步都执行、失败只记录（_release），不让任一步的释放异常
-            # 顶替 body 的异常或进入建连重试判定。NovaAct 的 __exit__ 照常收到真实的 exc_type（对称 with 语义；本 worker 自管 Workflow，
-            # SDK 不据它标记结局）。内层抛 BaseException 也不跳过外层的 Stop。
-            exc_info = (type(body_exc), body_exc, body_exc.__traceback__) if body_exc is not None else (None, None, None)
-            try:
-                if nova_entered:
-                    _release("浏览器会话", lambda: nova_cm.__exit__(*exc_info))
-            finally:
-                _release("AgentCore 会话", lambda: stop_session_within_budget(client, SESSION_STOP_BUDGET_S))
-        if body_exc is not None:
-            raise body_exc
+            if browser.release_errors and release_error is None:
+                release_error = browser.release_errors[0]  # 释放失败只让退出码为 1，不清零（ADR 0051 决策 5）
 
     with _WorkflowGuard(wf):
         outer = get_current_workflow()
         set_current_workflow(wf)
         try:
             # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
-            # 每次 attempt 用全新 provider / BrowserClient / NovaAct，_run_session 的 finally 清掉本次部分建起的会话。
+            # 每次 attempt 用全新的 _BrowserSession（provider / BrowserClient / NovaAct），它的退出清掉本次部分建起的会话。
             for attempt in range(_CONNECT_ATTEMPTS):
                 if _stop.is_set():
                     break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 走下方的停止路径（退出码按释放结果取 0 或 1）
@@ -1082,14 +1108,14 @@ def main() -> int:
                         break  # 退避中收到停止信号 → 不再重连
         except BaseException:
             # 异常退出路径（ADR 0042 决策一第三条）：AgentCore 会话已在 _run_session 内的两层
-            # finally 里释放（NovaAct 连接与 AgentCore 会话；最外层 with wf 仍在栈上、与会话无关），此处
+            # _BrowserSession 退出时释放（NovaAct 连接与 AgentCore 会话；最外层 with wf 仍在栈上、与会话无关），此处
             # 只给在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
             _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise
         finally:
             set_current_workflow(outer)
 
-    # 停止信号（ADR 0024 flag-only）：_run_session 已退出（finally 释放了会话）。协作式退出：不发送 scope_done、不 flush，退出码按释放结果取 0 或 1。
+    # 停止信号（ADR 0024 flag-only）：_run_session 已退出（_BrowserSession 释放了会话）。协作式退出：不发送 scope_done、不 flush，退出码按释放结果取 0 或 1。
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
@@ -1104,7 +1130,7 @@ def main() -> int:
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（这条路径多半也传不动，有界即可）
         return 1 if release_error is not None else EX_WORKER_NETWORK
     if warmup_failure is not None:
-        # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在 _run_session 的 finally 里释放；按执行前失败发 scope 级 error、以 0 退出。
+        # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已随 _BrowserSession 退出释放；按执行前失败发 scope 级 error、以 0 退出。
         sink.emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id, "status": "error",
                    "errorType": warmup_failure.error_type, "message": warmup_failure.message})
         return 1 if release_error is not None else 0  # 释放失败让退出码为 1（桌面靠它让泄漏可观测）

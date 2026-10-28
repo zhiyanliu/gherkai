@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793168214.7594576,
-    "ast_hash": "d0d78107188333cbe0ceb2c3f1642996",
+    "mtime": 1793170218.421193,
+    "ast_hash": "aa6744f73d500c3d36c0db1c2ba983e6",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793168214.7597358,
-    "ast_hash": "0c0f92ba4d105176bb95bd2315db13b6",
+    "mtime": 1793170218.421581,
+    "ast_hash": "396043b3b7ecdc44f1fbbcf5bd8b34b6",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -395,8 +395,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
-    "mtime": 1793166805.1318233,
-    "ast_hash": "332fdcd489657da513727cfe6c69b1ec",
+    "mtime": 1793170218.4213295,
+    "ast_hash": "b7f7b9fac937424e92a5388632868547",
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
@@ -810,8 +810,8 @@
     "semantic_hash": "66b8c31a3f0da77843b863c829478261"
   },
   "engines/novaact/gherkai_worker_novaact/lib/constants.py": {
-    "mtime": 1793166805.130989,
-    "ast_hash": "0e2a961fe4cf9ef24c795e1433ea5936",
+    "mtime": 1793170218.4210117,
+    "ast_hash": "328074d5474f0b24b9243a45d9612693",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/event_sink.py": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793166805.1308198,
-    "ast_hash": "895142bdcc6ab0e0c232904d142ccf68",
+    "mtime": 1793170218.420863,
+    "ast_hash": "8ed09de3c6a5a9a0fed87f38d9ed1d34",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1160,8 +1160,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_evidence.py": {
-    "mtime": 1793166600.5360038,
-    "ast_hash": "a643a72f3ee7ff066f32f76a283063c5",
+    "mtime": 1793170337.1011305,
+    "ast_hash": "096af5b3c7ef33fc4377e48eae60b309",
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {

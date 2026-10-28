@@ -706,7 +706,7 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
 
 
 def test_stop_signal_path_drains_after_session_release(main_fakes):
-    """协作停：_run_session 的 finally 释放完会话之后才排空，用退出段预算；不 flush（中断产物留本地）。
+    """协作停：会话上下文退出、释放完会话之后才排空，用退出段预算；不 flush（中断产物留本地）。
     两步释放（关 NovaAct 连接、Stop 会话）也进同一条 trace——把 drain 挪到释放之前这里立刻变红。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
