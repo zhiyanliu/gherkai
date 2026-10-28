@@ -27,7 +27,7 @@
 两个引擎各自语言锁死（Midscene 锁 TS、Nova Act acting 锁 Python，[0023](./0023-novaact-acting-python-locked-no-ts-core.md) 证伪了「全 TS 核心」），故**无论核心用哪个语言，必有一个引擎跨进程**——这是「双语言裂缝」（[0006](./0006-form-a-two-subprojects-no-orchestrator.md)）的必然。
 
 **决定：两个引擎都作为子进程 worker，核心不 import 任何引擎；核心语言选 Python。**
-- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（现 `engines/novaact/gherkai_worker_novaact/run_scope.py` 三层 `with NovaAct/cdp_session/workflow` / `engines/midscene/src/worker/run-scope.mts`；早期在 BDD 的 `generic.steps.ts` Before/After、`nova_ctx` fixture 验证过，BDD 直跑层已由 0022 退役）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
+- **两个引擎都子进程**（而非一个引擎进程内）：两个 `Engine` adapter 形状**完全一致**（spawn worker + 讲同一套 JSON 协议），核心不碰任一引擎 API，AgentCore 会话生命周期留在各自 worker（现 `engines/novaact/gherkai_worker_novaact/run_scope.py` 的 `_run_session`（显式持有 NovaAct 与 `cdp_session` 两层会话上下文，外层 `with` Workflow）/ `engines/midscene/src/worker/run-scope.mts`；早期在 BDD 的 `generic.steps.ts` Before/After、`nova_ctx` fixture 验证过，BDD 直跑层已由 0022 退役）。这才是对称 `Engine` port 最干净的形态；一个引擎进程内会让 adapter 出现两种形状、核心 venv 被引擎依赖树绑死。
 - **核心语言 = Python**：两个引擎都子进程后，核心是无重型引擎依赖的薄编排层，语言成为低风险自由选择；选 Python 因 boto3 生态成熟（便于未来云 adapter）+ 官方 `gherkin-official` 解析。
 - **核心自解析 Gherkin + 薄 worker（B1）**：核心拥有解析（单一事实源），worker 只派发 step → act/assert，**退役 cucumber 补丁与 pytest-bdd 路由 hack**。详见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)。
 
