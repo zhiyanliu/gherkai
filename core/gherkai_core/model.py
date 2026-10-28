@@ -100,7 +100,7 @@ class Target:
 @dataclass(frozen=True)
 class DeviceFarmRequest:
     """向 AWS Device Farm 要哪台设备（ADR 0048 决策 3）：名字明说服务商、不起中立名；`device_arn` 与 `os_version` 二选一。
-    取值域（billing_method 的枚举、os_version 的点分形态、ARN 前缀）由 CLI 校验，core 只校验形态。"""
+    取值域（billing_method 的枚举、os_version 的点分形态、ARN 的服务与资源类型段）由 CLI 校验，core 只校验形态。"""
 
     project_arn: str
     device_arn: str | None = None
@@ -171,7 +171,7 @@ class Status(str, Enum):
     SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
     ABORTED = "aborted"  # core 派生终态：fail-fast 下执行到一半被掐。有副作用/有现场可查（ADR 0031）
     PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
-    RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 后刷（ADR 0030/0031）
+    RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 或非 attempted 的 session_opened 后刷（ADR 0030/0031/0051）
 
 
 # severity 数值序（ADR 0031 决定二）：**仅用于终态**的比较/排序/单调聚合。
@@ -339,7 +339,7 @@ class ScopeDone:
 
 @dataclass(frozen=True)
 class SessionOpened:
-    """设备会话打开（ADR 0051 决策 4 / 0024「会话事件」）：Create 返回 ARN 后立即发（origin=created）；按名找回的孤儿会话
+    """远程访问会话打开（ADR 0051 决策 4 / 0024「会话事件」）：Create 返回 ARN 后立即发（origin=created）；按名找回的孤儿会话
     （discovered，device 可缺）；结果未知且终结时仍未排除的创建尝试（attempted，session_id 为 None、只带会话名）。
     只出现在 scope_started 之前或 scope 的收尾段；桌面 worker 不发。device 对 core 不透明、原样搬运。"""
 
@@ -353,7 +353,7 @@ class SessionOpened:
 
 @dataclass(frozen=True)
 class SessionClosed:
-    """设备会话处置结束（ADR 0051 决策 4、7）：每个会话恰一条；release 是否确认停止；observed_s 是 worker 观察到的占用秒数
+    """远程访问会话处置结束（ADR 0051 决策 4、7）：每个会话恰一条；release 是否确认停止；observed_s 是 worker 观察到的占用秒数
     （缺则 None，None 不等于 0）；provider_minutes 是服务商回报的 {total, metered, unmetered} 快照，不透明、可缺。"""
 
     scope_id: str
@@ -448,7 +448,7 @@ class JobResult:
     report_refs: tuple[ReportRef, ...] = ()  # scope 级原生报告产物指针（来自 scope_done，进 RunReport，ADR 0024）
     error_type: str | None = None  # job 级失败（worker 崩/超时）时有
     message: str | None = None
-    # 设备会话（ADR 0051 决策 4、7）：本 job 开过或尝试过的每个远程访问会话一项（桌面 job 为空）；设备计量两键成对、
+    # 远程访问会话（ADR 0051 决策 4、7）：本 job 开过或尝试过的每个远程访问会话一项（桌面 job 为空）；设备计量两键成对、
     # 只在设备 job 上有值（None 表示非设备 job，序列化时省键）：device_observed_s 是 origin 为 created / discovered 且
     # observed_s 非 None 的各项之和，device_observed_missing 是同类 origin 里 observed_s 为 None 的项数；attempted 两键都不计。
     sessions: list[SessionRecord] = field(default_factory=list)

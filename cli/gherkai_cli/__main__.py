@@ -594,8 +594,9 @@ def _steps_dir_or_error(args) -> "tuple[str | None, str | None]":
 
 
 def _resolve_steps_dir(args) -> "str | int | None":
-    """解析使用方确定性 step 目录（ADR 0037 决策 4）：`--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`
-    （相对**本进程** CWD、存在才用）→ 绝对路径，或 None（无使用方 step，worker 只有内建脚手架）。
+    """解析使用方确定性 step 目录（ADR 0037 决策 4）：`--steps-dir` > env `GHERKAI_STEPS_DIR` > 配置文件 `steps-dir`
+    （ADR 0053 决策 2）> 默认 `./steps`（相对**本进程** CWD、存在才用）→ 绝对路径，或 None（无使用方 step，
+    worker 只有内建脚手架）。
 
     解析只在提交侧做一次（值随 definition 走给起 worker 的宿主，见 `RunMeta.steps_dir`）；**绝对化是硬要求**
     ——worker 是 cwd 与 CLI 不同的子进程（定位链后多为继承调用者 CWD，ADR 0037 决策 3），相对路径两侧解析不同。
@@ -614,7 +615,7 @@ def _resolve_steps_dir(args) -> "str | int | None":
 
 def _resolve_steps_dir_for_backend(args) -> str | int | None:
     """`_resolve_steps_dir` + 云端后端清零（ADR 0037 决策 4）：云端后端 steps 构建在定制镜像里（0038），definition
-    里的本机路径对云端 worker 无意义 → 不写该字段；提交者显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
+    里的本机路径对云端 worker 无意义 → 该字段写 null；提交者显式给了则警告不拦（no-op，不改产物落点）。run/submit 共用。"""
     steps_dir = _resolve_steps_dir(args)
     if isinstance(steps_dir, int) or args.backend != "cloud":
         return steps_dir

@@ -102,7 +102,7 @@ def _sample_run_result() -> M.RunResult:
 def test_run_json_keys_are_documented():
     doc = render.to_dict(_sample_run_result())
     doc["artifacts"] = {**compose.local_artifact_locations("/tmp/x", "r"), "worker_log": "file:///tmp/w.log"}
-    # 正向断言：样例里确实有设备会话与计量键（_mk 会悄悄丢掉 model 里还没有的字段，没有这条护栏会在空集上直接变绿）
+    # 正向断言：样例里确实有远程访问会话与计量键（_mk 会悄悄丢掉 model 里还没有的字段，没有这条护栏会在空集上直接变绿）
     dev = next(j for j in doc["jobs"] if j["scope_id"] == "d.feature:3")
     assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3
     assert {"device_observed_s", "device_observed_missing"} <= set(doc)

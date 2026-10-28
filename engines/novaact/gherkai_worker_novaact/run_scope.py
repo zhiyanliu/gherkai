@@ -73,9 +73,10 @@ from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, loa
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前用错 region。**正常路径由组合根落实**——
 # compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
-# 尤其 AgentCore 那条路径（下方 AgentCoreBrowserSessionProvider）的 validate_region **不吃 profile config、要显式字符串**，
-# region=None 起会话直接失败（实测报 BrowserAuthError: 'You must specify a region.'——文案/异常类随 SDK 版本可变、
-# 别按类名断言）——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默用错 region）。
+# 尤其 AgentCore 那条路径（下方 _BrowserSession 里 bedrock-agentcore 的 BrowserClient）构造时的 validate_region
+# **不读 profile config、要显式字符串**，region=None 起会话直接失败（bedrock-agentcore 1.22.0 抛 InvalidRegionError，
+# 属 ValueError 子类；早先经 SDK 的 cdp_session 起会话时实测报 BrowserAuthError: 'You must specify a region.'——文案与
+# 异常类随 SDK 版本变化，别按类名断言）——这正是组合根须在注入前把 profile-region 落实成字符串的原因（别静默用错 region）。
 REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常

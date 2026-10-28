@@ -13,7 +13,7 @@
 启动时按 env `GHERKAI_STEPS_DIR` 加载进**本模块这张同一张表**（`user_steps.py` / ADR 0037 决策 4）。
 
 句柄按种类分键（ADR 0050 决策 1，与 Midscene 侧同构、字段名取 Python 惯例的 snake_case）：`playwright`（桌面浏览器）
-与 `webdriver`（设备会话）。装饰器写法等价于只有 playwright；多句柄形态是普通函数调用
+与 `webdriver`（远程访问会话）。装饰器写法等价于只有 playwright；多句柄形态是普通函数调用
 `deterministic(pattern, {"playwright": fn, "webdriver": [{"ui_kinds": [...], "devices": [...], "requires": [...], "handler": fn}]},
 description=..., example=...)`。每个 webdriver 条目用 ui_kinds（web / app）与 devices（android / ios）声明适用范围，两个列表
 各自独立、覆盖它们的全部组合，缺省为全部取值；requires（1.5 只有 web_context）是运行期前提。本引擎没有设备路径

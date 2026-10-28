@@ -395,7 +395,7 @@ class Termination:
     message: str | None
 
 
-RELEASE_FAILED_HINT = "设备会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
+RELEASE_FAILED_HINT = "远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
 
 
 def unconfirmed_sessions(sessions: list[SessionRecord]) -> list[SessionRecord]:
@@ -477,7 +477,7 @@ def finalize_job(
         elif exit_code == PLATFORM_FAILED_EXIT:
             # 平台侧哨兵（无状态路径观察者缺退出码时落它）；本机 worker 真以 255 退出也走这行，措辞对两种来源都成立
             why = f"：{exit_reason}" if exit_reason else "——详见 worker 日志或部署侧日志"
-            error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记此码）{why}"
+            error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记为 255）{why}"
         elif exit_code is None:
             error_type = "engine_error"
             # exit_reason 由调用方带上下文写好（同步路径：「worker 异常：…」/「起 worker 失败：…」；平台侧：观察者的归因）

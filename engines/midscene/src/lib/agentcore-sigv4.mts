@@ -2,7 +2,7 @@
 // 被 spike（tsx 直接运行）和 worker（run-scope）共用。
 // 用 .mts 扩展名：模块体系不依赖 package.json#type（ADR 0037 决策 3，全包统一 .mts → .mjs）。
 //
-// 两套签名 service code 不同（CONTEXT「AgentCore 浏览器会话」已警示别混）：
+// 两套签名 service code 不同（ADR 0008 决定第一条已写明两套场景独立、不可互用）：
 //   - 模型连接 → service "bedrock"           （Bedrock /openai/v1 chat-completions）
 //   - 浏览器连接（CDP）→ service "bedrock-agentcore"  （AgentCore CDP WebSocket upgrade）
 // 签名契约与失败模式的机理解读见 repo 里的 docs/internals/midscene-bedrock-sigv4-signing.md（不随包发行），决策见 docs/adr/0008。

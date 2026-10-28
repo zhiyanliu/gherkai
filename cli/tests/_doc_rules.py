@@ -5,8 +5,8 @@ RETIRED_TERMS（注释层用去掉「批」义三词的 RETIRED_TERMS_IN_CODE）
 NUMERIC_SHORTHAND / ARROW、悬空指针形态 DANGLING_JOURNEY / BARE_WP / MACHINE_COORDINATE（本机坐标：全仓 markdown 与 code 注释都拦）、
 相对链接 RELATIVE_LINK、已知机器根 MACHINE_ROOTS；
 ②扫描面——user_docs / technical_docs / ai_side_docs / code_comment_files / diagram_sources / skill_markdown_files /
-long_term_docs，与 classify(path)；③抽取器——prose_lines（markdown 正文，剥代码块与行内代码）、comment_units（注释与
-docstring）、skill 的命令 token 抽取。scan(kind, path, only_lines) 按面套规则束。
+long_term_docs / all_markdown（本机坐标规则适用的全仓已跟踪 markdown），与 classify(path)；③抽取器——prose_lines（markdown
+正文，剥代码块与行内代码）、comment_units（注释与 docstring）、skill 的命令 token 抽取。scan(kind, path, only_lines) 按面套规则束。
 
 消费方三处，同源才不会各自漂：`cli/tests/test_*.py` 各面的护栏（CI 兜底）、`tools/doc_rules_check.py`（Claude Code 的
 写完即查 hook 与提交闸门，人类 contributor 的可选 git pre-commit）、`tools/render_skill_contract.py`（契约副本转换器的自查）；
@@ -233,8 +233,7 @@ def user_docs() -> list[Path]:
 
 def technical_docs() -> list[Path]:
     docs = [REPO / "CONTRIBUTING.md", REPO / ".github" / "workflows" / "README.md", REPO / "docs" / "README.md",
-            REPO / "core" / "tests" / "README.md", REPO / "skills" / "README.md",
-            REPO / "engines" / "midscene" / "spikes" / "SIGV4-FETCH-RECIPE.md"]
+            REPO / "core" / "tests" / "README.md", REPO / "skills" / "README.md"]
     docs += sorted((REPO / "docs" / "internals").glob("*.md"))
     docs += sorted(REPO.glob("*/DEVELOPMENT.md")) + sorted(REPO.glob("engines/*/DEVELOPMENT.md"))
     docs += sorted((REPO / "tools").glob("*.md"))

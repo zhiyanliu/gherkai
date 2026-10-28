@@ -1,7 +1,7 @@
 """测试目标的定义层结构校验（ADR 0048 决策 3）。
 
 两个时点各核一次：组合根写 definition 之前（run / submit 的共享前置）、推进器读 definition 时（`serialize.job_from_dict`）。只核结构
-（字段成对、非空、类型、合法组合），取值域（`billing_method` 的枚举、`os_version` 的点分形态、ARN 前缀）归 CLI；core 不读、不比较任何服务商状态。
+（字段成对、非空、类型、合法组合），取值域（`billing_method` 的枚举、`os_version` 的点分形态、ARN 的服务与资源类型段）归 CLI；core 不读、不比较任何服务商状态。
 plan 形态的 Job（`device_request` 为 None、应用条目只有别名与包名）不走这里。
 """
 from __future__ import annotations

@@ -5,6 +5,7 @@
 - `docs/` 下文件名全是英文 kebab-case，`docs/adr/` 与 `docs/journey/` 带四位编号且各自不复用；
 - `docs/journey/` 每份首行声明 `> 类型:`；
 - 长期文档与 AI 侧文档不指向具体的 journey 文件、不写裸 WP 编号（悬空指针红线）；AI 侧文档也不用决策六形态②的自造复合词。
+- 全仓已跟踪的 markdown（含 journey 与工具说明，扫原文含行内代码）不写本机坐标，即个人目录下的绝对路径与本地 clone 目录名；规则形态另有正反例单测，TS / JS 注释里反引号包着的路径另有一条单测。
 规则与扫描面在 `_doc_rules`；同一束由 hook 在写完即查（ADR 0046）。
 """
 from __future__ import annotations

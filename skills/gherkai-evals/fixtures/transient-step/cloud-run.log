@@ -1,7 +1,7 @@
 plan: 2 job(s)  (default_engine=novaact)
   - scope='features/todo.feature:4' engine=midscene scenarios=1
   - scope='features/todo.feature:9' engine=novaact scenarios=1
-隧道已建立：http://localhost:8080 → https://<隧道域名>（basic-auth 已启用，凭据每 run 一换、终态即拆）
+隧道已建立：http://localhost:8080 → https://<隧道域名>（访问受本次运行专用的会话保护，运行结束即拆除）
 
 运行结果  总状态: failed
 ├── 总墙钟时长: 96.4s

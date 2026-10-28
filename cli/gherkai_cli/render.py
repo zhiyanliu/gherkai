@@ -102,7 +102,7 @@ class _SessionView:
 
 
 def session_lines(jr: JobResult) -> list[str]:
-    """job 的设备会话摘要行（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数；未确认停止的会话按名列出，
+    """job 的远程访问会话摘要行（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数；未确认停止的会话按名列出，
     结果未知的创建尝试单独标出。桌面 job 返回空列表。run 文本树与 explain 文本共用。"""
     lines: list[str] = []
     if jr.device_observed_s is not None or jr.device_observed_missing is not None:
@@ -179,7 +179,7 @@ def run_tree(result: RunResult) -> TreeNode:
             jn.add(styled(f"session id: {jr.session_id}", DIM))
         for line in device_header_lines(jr.sessions, jr.session_id):  # 设备描述与控制台链接（ADR 0051 决策 8）
             jn.add(line)
-        for line in session_lines(jr):  # 设备会话摘要（ADR 0051 决策 7）
+        for line in session_lines(jr):  # 远程访问会话摘要（ADR 0051 决策 7）
             jn.add(line)
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
@@ -455,7 +455,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         }
-        # 设备会话与计量（ADR 0051 决策 7）：仅设备目标，形状同 run --json 的 jobs[]；桌面 job 省键
+        # 远程访问会话与计量（ADR 0051 决策 7）：仅设备目标，形状同 run --json 的 jobs[]；桌面 job 省键
         scope_doc.update(_device_keys_for_explain(jr))
         url = console_url(jr.session_id)  # 代表会话是 Device Farm 会话 ARN 时给控制台链接（ADR 0051 决策 8）；桌面省键
         if url:

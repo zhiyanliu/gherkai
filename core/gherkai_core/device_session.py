@@ -1,4 +1,4 @@
-"""设备会话的呈现辅助（ADR 0051 决策 8「scope 表头由 session_opened.device 与 scope_started.sessionId 派生」「explain 给出控制台链接」）。
+"""远程访问会话的呈现辅助（ADR 0051 决策 8「scope 表头由 session_opened.device 与 scope_started.sessionId 派生」「explain 给出控制台链接」）。
 
 core 的报告入口页（adapters/report_store/local.py）与 cli 的 render 都要用同一份：设备描述一行、会话 ARN 对应的控制台链接。
 纯函数、不发请求。device 字典对 core 不透明（worker 原样报出的 platform / model / osVersion / unit），这里只按固定顺序拼人读文本。

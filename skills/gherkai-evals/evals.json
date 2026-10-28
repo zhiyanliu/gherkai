@@ -164,7 +164,7 @@
       "slug": "expose-local-app",
       "fixture": "wiki-search",
       "prompt": "我们的被测应用跑在我这台电脑的 http://localhost:3000，云端浏览器根本访问不到。想用 gherkai 测它，feature 里地址该怎么写、命令怎么下、还要准备什么？先别真跑，给我完整方案。",
-      "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成带每 run 一换凭据的公网 URL；前置：本机装好 ngrok 且在 PATH、配好 authtoken（ngrok config add-authtoken 或 NGROK_AUTHTOKEN 任一）；submit 后隧道由本机进程持有、本机须开机联网到终态；--tunnel-ttl 调小会提前拆隧道；可先用 plan --expose-local 看标注。",
+      "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成干净的隧道公网地址（访问受本次运行专用的会话保护）；前置：本机装好 ngrok 且在 PATH、配好 authtoken（ngrok config add-authtoken 或 NGROK_AUTHTOKEN 任一）；submit 后隧道由本机进程持有、本机须开机联网到终态；--tunnel-ttl 调小会提前拆隧道；可先用 plan --expose-local 看标注。",
       "expectations": [
         "feature 里照写原始地址 http://localhost:3000，不是让用户改成公网地址",
         "命令加 --expose-local http://localhost:3000（值是 feature 里书写的原始 origin），并说明 plan 也收这个 flag",
@@ -381,9 +381,9 @@
       "slug": "tunnel-origin-mismatch-and-host-block",
       "fixture": "tunnel-mismatch",
       "prompt": "features/local_app.feature 测的是我本机开发中的待办应用（Vite 开发服务器，3000 端口）。第一次我执行 gherkai run features/local_app.feature --expose-local http://localhost:3000，「隧道已建立」打出来了，可两条 scenario 第一步导航就失败，应用日志里一条请求都没有；本机 curl http://localhost:3000 正常。我猜着把选项改成 --expose-local http://127.0.0.1:3000 再跑，这回请求到了但页面白屏、导航步还是判失败，根目录的 vite-dev.log 是这一次运行时开发服务器的日志。两次到底各是什么问题、怎么改？先别真跑。",
-      "expected_output": "第一次：选项值与 feature 书写地址不一致（feature 是 http://127.0.0.1:3000/，选项给 http://localhost:3000），替换是前缀字符串匹配、两者互不匹配，地址没被替换，云端浏览器照原地址导航才失败，应用日志自然没有请求；不是隧道故障也不是应用没起。核对方法：gherkai plan features/local_app.feature --expose-local <值> 的回显与 step 文本逐字对照，plan 不会因不匹配报错。第二次：Vite 拒绝了隧道域名的 Host（日志 Blocked request… not allowed），改 vite.config.js 的 server.allowedHosts 放行隧道域名，用通配 .ngrok-free.app 免得每 run 换名再改；不是改 feature、不是关隧道鉴权、不是应用 bug。feature 保持原始地址。提醒 run 期间本机保持开机联网。不真跑。",
+      "expected_output": "第一次：选项值与 feature 书写地址不一致（feature 是 http://127.0.0.1:3000/，选项给 http://localhost:3000），替换只认与选项值逐字一致、且作为一个地址出现的部分，两者互不匹配，地址没被替换，云端浏览器照原地址导航才失败，应用日志自然没有请求；不是隧道故障也不是应用没起。核对方法：gherkai plan features/local_app.feature --expose-local <值> 的回显与 step 文本逐字对照，plan 不会因不匹配报错。第二次：Vite 拒绝了隧道域名的 Host（日志 Blocked request… not allowed），改 vite.config.js 的 server.allowedHosts 放行隧道域名，用通配 .ngrok-free.app 免得每 run 换名再改；不是改 feature、不是关隧道鉴权、不是应用 bug。feature 保持原始地址。提醒 run 期间本机保持开机联网。不真跑。",
       "expectations": [
-        "第一次失败的根因判定正确：选项值 http://localhost:3000 与 feature 里书写的 http://127.0.0.1:3000 不一致，替换是前缀字符串匹配、两者互不匹配，所以地址没被替换、云端浏览器照原地址导航才失败；并解释了为什么应用日志里没有请求（请求根本没经过隧道）",
+        "第一次失败的根因判定正确：选项值 http://localhost:3000 与 feature 里书写的 http://127.0.0.1:3000 不一致，替换只认与选项值逐字一致、且作为一个地址出现的部分，两者互不匹配，所以地址没被替换、云端浏览器照原地址导航才失败；并解释了为什么应用日志里没有请求（请求根本没经过隧道）",
         "第一次的改法正确：把 --expose-local 的值改成与 feature 书写逐字一致的 http://127.0.0.1:3000（或反过来统一 feature 的写法），并给出核对方法——用 gherkai plan features/local_app.feature --expose-local <值> 的回显与 step 文本逐字对照",
         "说明了 plan 不会因为地址不匹配而报错（它只回显你给的值、以退出码 0 结束），所以对照只能靠眼睛，不能把「plan 通过」当成地址已匹配",
         "第二次失败的根因判定正确：引用 vite-dev.log 里的 Blocked request / host not allowed，指出 Vite 校验 Host、拒绝了隧道分配的 ngrok 域名；不是应用 bug、不是隧道故障、不是 gherkai 的问题",

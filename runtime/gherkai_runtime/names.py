@@ -74,7 +74,7 @@ def job_timeout_schedule_prefix(prefix: str) -> str:
 
 def ssm_path(prefix: str, key: str) -> str:
     """`/{prefix}backend/<key>`：本部署**全部** SSM 参数的路径构造单点（网络 subnets/security-groups、
-    version/vpc、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
+    version/vpc、device-farm-project、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
     cli 已知 prefix 直接拼路径读、无循环依赖（ADR 0033）；参数族清单见 ADR 0038「SSM 参数与命名真源」。"""
     return f"/{prefix}backend/{key}"
 

@@ -4,7 +4,7 @@ job 间并行（maxConcurrency 上限）、失败隔离（默认）/ fail-fast�
 schedule 只下逻辑「停」（handle.stop(grace)），不懂信号/进程——机制藏在 Engine adapter（ADR 0026）。
 
 并发模型：每个 worker 一个线程，ThreadPoolExecutor(max_workers=maxConcurrency) 自然限制
-同时运行的 worker 数（也就是同时活的 AgentCore 会话数，保护真实成本）。worker 线程内迭代 ADR 0024 事件流、
+同时运行的 worker 数（也就是同时活的 AgentCore 会话数，保护 AWS 配额与峰值消耗）。worker 线程内迭代 ADR 0024 事件流、
 转 sink、归约成 JobResult。
 
 超时/fail-fast 用**事件间检查**：每收一个事件（或 _heartbeat_wrap 的存活心跳）后查 (clock.now()-start >
@@ -113,14 +113,14 @@ def _heartbeat_wrap(events, poll_interval_s):
 
 
 # 停止后继续消费事件流的排空上界余量（秒，ADR 0034「停止后继续有界消费」）：发出停止请求后最多再等 grace 加这段余量
-# （从请求时刻起算，不含 stop() 自身等待 worker 退出的阻塞），让 worker 收 SIGTERM 后走完收尾（设备会话的 session_closed 要在
+# （从请求时刻起算，不含 stop() 自身等待 worker 退出的阻塞），让 worker 收 SIGTERM 后走完收尾（远程访问会话的 session_closed 要在
 # 这段里到达才能算进未确认集），之后不再等。
 DRAIN_MARGIN_S = 5.0
 
 
 @dataclass
 class ScheduleOpts:
-    max_concurrency: int = 4  # 同时运行的 worker 上限（保护真实 AWS 成本/配额）
+    max_concurrency: int = 4  # 同时运行的 worker 上限（保护 AWS 配额与峰值消耗）
     fail_fast: bool = False  # 任一 job 崩是否中止整批
     grace_period_s: float = 5.0  # 停止请求后等 worker 优雅退出的宽限秒
     # grace 下限（引擎无关的纯数，ADR 0024 grace 硬约束）：调用方（组合根）声明「本 run 的 grace 至少要这么大」，
@@ -224,7 +224,7 @@ class _Worker:
                 result, is_network, saw_step = self._run_once(deadline, previous=last)
                 last = result
                 # 可重试的条件是 network_error + 会话未起（零 step_done）+ 未被 fail-fast 中止 + 还有重试额度
-                # + job 目标不是设备（ADR 0051 决策 2：设备会话的建连失败不做 job 级重试）
+                # + job 目标不是设备（ADR 0051 决策 2：远程访问会话的建连失败不做 job 级重试）
                 retriable = (
                     is_network
                     and not saw_step

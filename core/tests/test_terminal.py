@@ -87,7 +87,7 @@ def _fin(**kw):
     (dict(exit_code=-9), Status.ERROR, "engine_error", "exit -9"),
     (dict(exit_code=None), Status.ERROR, "engine_error", "退出码未知"),
     (dict(exit_code=None, exit_reason="worker 异常：解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),  # 消息由调用方带上下文
-    (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记此码）：TaskFailedToStart"),
+    (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记为 255）：TaskFailedToStart"),
     # 行 4：退出码 0、无 scope_done（U 非空也不改判 release_failed，只追加提示）
     (dict(scope_done=None), Status.ERROR, "engine_error", "没有报完这次运行的结果"),
     (dict(scope_done=None, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", RELEASE_FAILED_HINT),
@@ -96,8 +96,8 @@ def _fin(**kw):
      Status.ERROR, "acquire_timeout", "没拿到设备"),
     (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="m"), sessions=[_attempted()]),
      Status.ERROR, "release_failed", "结果未知的创建尝试：n3"),
-    (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="设备会话中途丢失"), sessions=[_attempted()]),
-     Status.ERROR, "release_failed", "设备会话中途丢失"),
+    (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="session_lost", message="远程访问会话中途丢失"), sessions=[_attempted()]),
+     Status.ERROR, "release_failed", "远程访问会话中途丢失"),
     # 行 6：零 scenario → ERROR（曾被 _aggregate([]) 判成 PASSED）；U 非空同样只追加提示
     (dict(scenario_status={}), Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"),
     (dict(scenario_status={}, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", "worker 未报告任何 scenario 判定"),

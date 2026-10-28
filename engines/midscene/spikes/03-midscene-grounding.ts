@@ -5,7 +5,7 @@
 //   打开 wikipedia.org → 搜 "OpenAI" → 断言进入 OpenAI 词条页。
 // 断言：
 //   A 确定性：page.url() 含 /wiki/OpenAI（Playwright，可复现）
-//   B AI 断言：agent.aiAssert("当前在 OpenAI 的维基词条页")，执行 N=10 次测抖动
+//   B AI 断言：agent.aiAssert("the page is the Wikipedia article about OpenAI")，执行 N=10 次测抖动
 // 度量：动作成功率、A/B 是否一致、B 的 10 次抖动率、各步耗时。
 //
 // 运行：cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/03-midscene-grounding.ts

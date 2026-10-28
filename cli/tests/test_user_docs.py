@@ -120,7 +120,7 @@ def test_user_guide_index_matches_directory():
 
 
 def test_diagram_sources_and_exports_come_in_pairs():
-    """docs/diagrams/<name>.json（图源）与 <name>.svg（导出）成对：缺任一半即漂（HTML 不入库，由 JSON 现场构建）。"""
+    """docs/diagrams/<name>.json（图源）与 <name>.svg（导出）成对：缺任一半即视为不同步（HTML 默认不入库，只有发布到 Pages 的交互图入库，见 test_published_interactive_html_is_tracked_and_indexed）。"""
     jsons = {p.stem for p in DIAGRAMS.glob("*.json")}
     svgs = {p.stem for p in DIAGRAMS.glob("*.svg")}
     assert jsons == svgs, f"有图源没导出：{sorted(jsons - svgs)}；有导出没图源：{sorted(svgs - jsons)}"

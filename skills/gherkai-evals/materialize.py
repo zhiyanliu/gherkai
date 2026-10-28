@@ -8,9 +8,9 @@
    并装 gherkai / core / runtime / novaact worker 四个 wheel → **删掉装进去的 `gherkai_cli/skills`**（wheel 一定带
    skill，留着等于把 with-skill 臂的自变量搬进 baseline 的发现面）→（skill 副本**不放这里**：run_evals.py 每次运行拷进随机命名的临时目录、只出现在 with-skill 臂的提示里）→ 把已构建的 midscene（`dist/` + `package.json` + `node_modules/`）拷到 `<dir>/midscene/`
    （包自引用与 tsx loader 都要它，缺一个 `.mts` step 就加载不了）→ 写 `<dir>/PREPARED.json`。
-   **为什么整套搬出仓库**：舞台里任何指向仓库的路径都是一条教材泄漏渠道——首轮 baseline 顺着 shim 里的
+   **为什么整套搬出仓库**：舞台里任何指向仓库的路径都是一条教材泄漏渠道——第二轮评测的 baseline 顺着 shim 里的
    `exec <repo>/.venv/bin/gherkai` 读到了 CLI 源码、根 README、退出码表，甚至 skill 自己的 references，148 次工具
-   调用里 53 次触到仓库，两臂 delta 因此只是下界。
+   调用里 54 次触到仓库，两臂 delta 因此只是下界。
 1. 把 `fixtures/<case>/` 拷到仓库外的一次性目录（缺省 `$TMPDIR/gherkai-eval-<case>-<随机>/`）；
 2. 把文本文件里的占位符 `{{FIXTURE_ROOT}}` 替换成舞台的绝对路径——fixture 入库时不得含产出机器的绝对路径，
    `run_meta.json` 的 steps_dir、`jobs/*.json` 的 report_refs[].ref、evidence.json 的截图地址都以占位符存；

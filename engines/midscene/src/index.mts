@@ -5,7 +5,7 @@
 //     deterministic('页面地址匹配 "(?<pattern>[^"]+)"', ({ page }, { pattern }) => { … },
 //                   { description: "…", example: 'Then 页面地址匹配 "/wiki/OpenAI"', keywords: ["Then"] });
 //
-// 多句柄写法（ADR 0050 决策 1）：第二参按句柄种类分键，playwright 给桌面浏览器、webdriver 给设备会话；每个 webdriver 条目
+// 多句柄写法（ADR 0050 决策 1）：第二参按句柄种类分键，playwright 给桌面浏览器、webdriver 给远程访问会话；每个 webdriver 条目
 // 用 uiKinds（web / app）与 devices（android / ios）声明适用范围、两者各自独立覆盖全部组合，缺省为全部取值；要只在
 // 设备网页上下文里核对的条目声明 requires: ["web_context"]（此时 uiKinds 只能是 ["web"]）：
 //

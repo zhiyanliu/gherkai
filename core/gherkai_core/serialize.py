@@ -351,7 +351,7 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
         report_refs=tuple(_ref_from_dict(r) for r in d.get("report_refs", [])),
         error_type=d.get("error_type"),
         message=d.get("message"),
-        # 设备会话与计量（ADR 0051 决策 7）：旧落盘 / 桌面 job 无这些键 → 空列表与 None
+        # 远程访问会话与计量（ADR 0051 决策 7）：旧落盘 / 桌面 job 无这些键 → 空列表与 None
         sessions=[_session_from_dict(s) for s in d.get("sessions", [])],
         device_observed_s=d.get("device_observed_s"),
         device_observed_missing=d.get("device_observed_missing"),

@@ -4,7 +4,7 @@
 文档归 `test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`，注释层的退役旧名、口头语与 ADR 式缩写只能靠
 定期复盘用人眼找（code-health 第 5 轮一次抓出约 50 处退役名、约 600 处缩写）。规则束、扫描面与抽取器都在
 `_doc_rules`（`scan("code", …)`）：口吻表（含决策六形态②的自造复合词）、退役名（去掉与 Stream 事件批同形的「批」义三词）、
-决策六形态①③的启发式、指向 journey 文件的链接与裸 WP 编号。同一束规则由 hook 在写完即查（`.claude/hooks/wording-guard.sh`）
+决策六形态①③的启发式、指向 journey 文件的链接、裸 WP 编号与本机坐标（个人目录下的绝对路径、本地 clone 目录名）。同一束规则由 hook 在写完即查（`.claude/hooks/wording-guard.sh`）
 与提交前再查（`commit-gate.sh`），本文件是 CI 兜底。箭头不在此禁：注释里表顺序与因果合法。
 """
 from __future__ import annotations

@@ -68,7 +68,7 @@ const results: Record<string, unknown> = {
 };
 const log = (m: string) => console.log(`[06 ${new Date().toISOString().slice(11, 19)}] ${m}`);
 // webdriver 10.0.2 的 newSession 在客户端超时后会留下一个未处理的 rejected promise（实测：进程因 unhandledRejection 直接退出、
-// finally 没有机会执行、设备会话泄漏）。探针记录它并继续运行；worker 实现同样需要这一层兜底。
+// finally 没有机会执行、远程访问会话泄漏）。探针记录它并继续运行；worker 实现同样需要这一层兜底。
 process.on("unhandledRejection", (reason) => {
   ((results.unhandled_rejections ??= []) as string[]).push(errText(reason).slice(0, 300));
   log(`unhandledRejection（已记录、继续）：${errText(reason).slice(0, 200)}`);

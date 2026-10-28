@@ -5,14 +5,14 @@
 // AI catch-all（ADR 0020/0024）。内建导航也是这张表里的一条（ADR 0020 第 3 条：Given / When 后整句是一个地址），
 // 不再是派发里的独立分支。
 //
-// 为什么匹配放 worker 不放 core（ADR 0022）：确定性 handler 引擎特定（碰 Playwright page 或设备会话），匹配表
+// 为什么匹配放 worker 不放 core（ADR 0022）：确定性 handler 引擎特定（碰 Playwright page 或远程访问会话），匹配表
 // 跟着 handler 走最内聚；core 只解析结构 + 调度，对 step 语义无知。
 //
 // 角色边界（ADR 0020）：QA 永远只写自然语言（默认走 AI）；确定性 step 由测试开发注册（QA 不碰）——
 // 脚手架 deterministic.steps.mts 只承载内建导航条目，项目专属的写在使用方 `steps/` 目录（ADR 0037 决策 4，
 // 经本模块的公开导出面 index.mts 注册进**同一张**表）。
 //
-// 句柄按种类分键（ADR 0050 决策 1）：`playwright`（桌面浏览器）与 `webdriver`（设备会话）。`handlers` 传单个函数等价于
+// 句柄按种类分键（ADR 0050 决策 1）：`playwright`（桌面浏览器）与 `webdriver`（远程访问会话）。`handlers` 传单个函数等价于
 // 只有 playwright（已有项目的 steps/ 不需要改）。每个 webdriver 条目用 uiKinds（web / app）与 devices（android / ios）
 // 声明适用范围，两个数组各自独立、覆盖它们的全部组合，缺省为全部取值；Android 与 iOS 的选择器不同就写两个条目，不在
 // 一个 handler 里按设备分支——适用范围必须在执行前对注册表可见，才能推出 step 的 targets、让 plan 逐目标标注。
