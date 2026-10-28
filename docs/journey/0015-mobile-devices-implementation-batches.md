@@ -571,6 +571,8 @@
 
 规模 L。
 
+**顺带闭合的桌面项（第 6 批复核留下、ADR 0028 记为「目前未做」）**：两个桌面 worker 在 StartBrowserSession 返回后发 `session_opened`（core 侧归约该事件的能力 B5 已落），把建连耗尽时 core 侧血缘为空的窗口关掉；设备会话本就在这一批发同一事件，桌面与设备在此汇合。Nova 退出 NovaAct 那段无预算的边界（看门狗 Stop）owner 暂不做，仍留在 ADR 0028 已知边界里。
+
 
 **依赖**
 
