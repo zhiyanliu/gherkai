@@ -722,3 +722,20 @@ def test_workflow_guard_passes_the_real_exception_to_the_sdk(driven, monkeypatch
         rs.main()
     assert seen["exc_info"][0] is RuntimeError
 
+
+def test_log_failure_right_after_start_still_stops_the_session(driven, monkeypatch):
+    """Start 成功后写「session started」那一行日志就抛（stderr 管道已关）：会话仍被 Stop 一次——这一行曾在释放保护区之外。"""
+    trace, sink, box = driven
+    real_log = rs.log
+
+    def flaky_log(msg):
+        if "browser session started" in msg:
+            raise BrokenPipeError("stderr closed")
+        real_log(msg)
+
+    monkeypatch.setattr(rs, "log", flaky_log)
+    monkeypatch.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
+    with pytest.raises(BrokenPipeError):
+        rs.main()
+    assert trace.count(("session_start",)) == 1 and trace.count(("session_stop",)) == 1
+

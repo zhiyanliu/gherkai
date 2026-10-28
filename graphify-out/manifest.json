@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793166805.1313715,
-    "ast_hash": "dcd0b4f7e288a9ac29629f38a0dfa620",
+    "mtime": 1793168214.7594576,
+    "ast_hash": "d0d78107188333cbe0ceb2c3f1642996",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793166600.536376,
-    "ast_hash": "f4d3bc75c6e305d458dceb5b1dfe977f",
+    "mtime": 1793168214.7597358,
+    "ast_hash": "0c0f92ba4d105176bb95bd2315db13b6",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1793166239.2826653,
-    "ast_hash": "a3095583a294c8211d4ef4cd2b14c019",
+    "mtime": 1793168255.6049697,
+    "ast_hash": "0e80cf7a26063e168ab109cc85497c1c",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
@@ -1700,8 +1700,8 @@
     "semantic_hash": "68252ee02a81952e2bf1b49cc1361338"
   },
   "cli/tests/test_adr_hygiene.py": {
-    "mtime": 1793166183.2630882,
-    "ast_hash": "d3e844021a47252c0230cb6c3cf7a5f3",
+    "mtime": 1793168255.6051276,
+    "ast_hash": "994888fd71d806e1aa532098193a1aa6",
     "semantic_hash": ""
   },
   "cli/tests/test_context_glossary.py": {
@@ -2080,8 +2080,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_tunnel_warmup.py": {
-    "mtime": 1793166805.1312,
-    "ast_hash": "3f941a9e426a983f5f5dfc0fa1c8347c",
+    "mtime": 1793168214.7592807,
+    "ast_hash": "0adcd5f35eadd20612d8789f7e4b8403",
     "semantic_hash": ""
   },
   "AGENTS.md": {

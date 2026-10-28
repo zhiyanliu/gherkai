@@ -198,8 +198,11 @@ BARE_WP = re.compile(r"\bWP-?\d+[A-Za-z]?(?:-\d+)?\b")
 # 个人目录与 clone 名——容器布局（`/tmp/gherkai-run/<run_id>`、`/app`）是设计事实、允许写进文档。全仓 markdown（含 journey
 # 与工具说明，扫原文含行内代码——路径多半就写在反引号里）与 code 注释都拦；journey 虽是暂存区、也在公开仓库里被人读。
 CLONE_DIR_NAMES = ("yaozhou",)  # 仓库名是 gherkai；曾用的本地 clone 目录名不进任何文件
+# 形态：POSIX 个人目录 `/Users/<名>/`、`/home/<名>/`（名字可含非 ASCII；前面不能是字母数字或 `/`，否则 `https://x.com/home/alice/`
+# 这类 URL 路径会误报）、Windows `C:\Users\<名>\`（盘符与 users 不分大小写、反斜杠可写成转义的两个）、clone 目录名。
 MACHINE_COORDINATE = re.compile(
-    r"(?:file://)?(?:/Users|/home)/[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\"
+    r"(?<![A-Za-z0-9/])(?:file://)?(?:/Users|/home)/[^/\\\s`\"']+/"
+    r"|(?i:[A-Za-z]:\\{1,2}Users\\{1,2}[^\\\s`\"']+\\{1,2})"
     r"|(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(n) for n in CLONE_DIR_NAMES) + r")(?![A-Za-z0-9_-])"
 )
 
@@ -319,14 +322,39 @@ def classify(path: Path) -> str | None:
     return None
 
 
+def _js_comment_raw_lines(text: str) -> list[tuple[int, str]]:
+    """TS / JS 注释的原文（不遮蔽字符串）：`//` 之后的部分，以及 `/* … */` 块内的行。只给本机坐标这类不受字符串干扰的规则用。"""
+    out: list[tuple[int, str]] = []
+    in_block = False
+    for i, line in enumerate(text.splitlines(), 1):
+        if in_block:
+            end = line.find("*/")
+            out.append((i, line if end < 0 else line[:end]))
+            if end >= 0:
+                in_block = False
+            continue
+        start = line.find("/*")
+        if start >= 0:
+            end = line.find("*/", start + 2)
+            out.append((i, line[start:] if end < 0 else line[start:end]))
+            in_block = end < 0
+            continue
+        pos = line.find("//")
+        if pos >= 0 and not re.search(r"[A-Za-z]:$", line[:pos]):  # 排除 `https://` 这类 URL 里的 `//`
+            out.append((i, line[pos + 2:]))
+    return out
+
+
 def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tuple[int, str, str]]:
     """按人读面的规则束扫一个文件，返回 (行号, 类别, 原文)。only_lines 给了就只报这些行（hook 的「只报本次改动的行」）。"""
     p = path if path.is_absolute() else REPO / path
     text = p.read_text(encoding="utf-8", errors="replace")
     hits: list[tuple[int, str, str]] = []
+    seen: set[tuple[int, str]] = set()  # 同一行同一类别只报一次（两条抽取路径可能都覆盖到同一行）
 
     def add(line_no: int, label: str, line: str) -> None:
-        if only_lines is None or line_no in only_lines:
+        if (only_lines is None or line_no in only_lines) and (line_no, label) not in seen:
+            seen.add((line_no, label))
             hits.append((line_no, label, line.strip()[:110]))
 
     def apply(units, rules):
@@ -344,6 +372,9 @@ def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tupl
         apply(raw_lines, coords)  # markdown 扫原文含行内代码与代码块：路径多半就写在反引号里
     if kind == "code":
         apply(comment_units(p), wording + (("退役旧名", RETIRED_TERMS_IN_CODE),) + pointers + coords)
+        if p.suffix in {".mts", ".ts", ".mjs", ".js"}:
+            # comment_units 先遮蔽字符串再找注释，注释里反引号包着的路径会被一并遮掉——本机坐标另按注释原文扫一遍
+            apply(_js_comment_raw_lines(text), coords)
     elif kind == "technical-doc":
         apply(prose_lines(text), wording + (("退役旧名", RETIRED_TERMS),) + pointers)
     elif kind in {"user-doc", "skill"}:

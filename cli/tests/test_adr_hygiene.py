@@ -133,3 +133,31 @@ def test_ai_side_docs_avoid_coined_compounds(doc: Path):
     """AI 侧文档口吻放开，但决策六形态②的自造复合词全仓不用（歧义不是效率）；讨论这些词本身的文档除外。"""
     hits = [f"{_rel(doc)}:{line_no}: {label} · {text}" for line_no, label, text in scan("ai-doc", doc)]
     assert not hits, "\n".join(hits)
+
+
+@pytest.mark.parametrize("text, hit", [
+    ("见 /Users/alice/repo/x.py", True),
+    ("见 /home/ubuntu/gherkai/x.py", True),
+    ("见 /Users/王伟/repo/x.py", True),                 # 名字可含非 ASCII
+    ("file:///Users/alice/repo/", True),
+    ("C:\\Users\\Alice\\repo", True),                  # Windows
+    ("c:\\users\\alice\\repo", True),                  # 不分大小写
+    ("C:\\\\Users\\\\Alice\\\\repo", True),            # 转义成两个反斜杠
+    ("`yaozhou/` 指仓库根", True),                       # clone 目录名
+    ("https://example.com/home/alice/profile", False),  # URL 路径不是个人目录
+    ("容器内 /tmp/gherkai-run/<run_id>/ 与 /app", False),  # 容器布局是设计事实
+    ("~/.cache/gherkai/cdk-context", False),           # 约定路径
+    ("runtime/gherkai_runtime/compose.py", False),      # repo 相对路径
+])
+def test_machine_coordinate_rule_shape(text: str, hit: bool):
+    """本机坐标规则的正反例：个人目录（含非 ASCII 名字、Windows 两种反斜杠写法）与 clone 目录名命中；URL 路径、容器布局、约定路径、repo 相对路径不命中。"""
+    assert bool(MACHINE_COORDINATE.search(text)) is hit, text
+
+
+def test_machine_coordinate_is_caught_inside_js_comments(tmp_path):
+    """TS / JS 注释里反引号包着的路径也要拦（注释抽取会先遮蔽字符串，本机坐标另按注释原文扫）。"""
+    f = tmp_path / "x.mts"
+    f.write_text("const a = 1;\n// 参见 `/Users/alice/repo/file.ts`\n/* 块注释 /home/bob/x */\nconst u = \"https://h/home/alice/\";\n", encoding="utf-8")
+    hits = [(line_no, label) for line_no, label, _ in scan("code", f)]
+    assert sorted(ln for ln, label in hits if label.startswith("本机坐标")) == [2, 3]
+
