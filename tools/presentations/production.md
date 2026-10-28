@@ -64,6 +64,6 @@
 
 产品能力的依据来自 gherkai 项目文档与实现，以及示例仓库的需求、用例、确定性步骤和真实运行记录。实测代码版本与运行 ID 见 [证据说明](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/internal/presentations/demo/evidence.md)。第 12 页的包职责和链接已保存在最终 PPT 及交付 manifest。
 
-最终 PPT 的资料备注中仍有定稿时的本机路径与历史素材名称，用于原始溯源，不作为今后的文件依赖：`yaozhou/` 指 gherkai 仓库；`reports/presentation-evidence/` 对应现在的证据包；旧 `value-method/assets/` 对应素材包 `artwork/` 和最终 PPT 内嵌图片。外部讲者备注已整理成可直接阅读的最终稿，口播与演示提示保持原文。
+最终 PPT 的资料备注中仍有定稿时的本机路径与历史素材名称，用于原始溯源，不作为今后的文件依赖：以当时本地 clone 目录名开头的路径指 gherkai 仓库根；`reports/presentation-evidence/` 对应现在的证据包；旧 `value-method/assets/` 对应素材包 `artwork/` 和最终 PPT 内嵌图片。外部讲者备注已整理成可直接阅读的最终稿，口播与演示提示保持原文。
 
 只将定稿、必要素材、维护规范与复用工具纳入 Git。新制作的临时数据放 `tools/presentations/work/`；交付文件使用确认的版本号，当前为 `v12`；仓库只保留当前版本，历史由 Git 记录。API 密钥、账号凭证、带签名下载地址和机器连接配置不得入库。

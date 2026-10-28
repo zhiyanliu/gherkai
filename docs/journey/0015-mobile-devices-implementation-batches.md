@@ -111,7 +111,7 @@
 
 五、按决策 9，Nova 只有桌面这件事只能由自述表达，CLI 不得按引擎名分支。
 
-涉及的主要文件：/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/compose.py、/Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py、/Users/lzy/workspace/yaozhou/engines/novaact/gherkai_worker_novaact/run_scope.py、/Users/lzy/workspace/yaozhou/engines/midscene/src/worker/run-scope.mts。
+涉及的主要文件：runtime/gherkai_runtime/compose.py、cli/gherkai_cli/__main__.py、engines/novaact/gherkai_worker_novaact/run_scope.py、engines/midscene/src/worker/run-scope.mts。
 
 
 ## 2. B5-core-events-termination：core 侧会话事件、scope 级 error、合成 SKIPPED、终结函数与真值表、计量合计、explain 呈现
@@ -265,7 +265,7 @@
 
 另外，target 必须和 engine、timeout 一样按全量成员解析（0041 不变量），不能在 select 之后解析。显式写 @device:desktop 按 0048 的字面规定是错误，测试要钉住，免得实现者顺手放行。
 
-涉及文件：/Users/lzy/workspace/yaozhou/core/gherkai_core/scope.py、model.py、wire.py、serialize.py，/Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py（约 208、306、341、951 行），/Users/lzy/workspace/yaozhou/tools/e2e_harness.py（约 64 行）。
+涉及文件：core/gherkai_core/scope.py、model.py、wire.py、serialize.py，cli/gherkai_cli/__main__.py（约 208、306、341、951 行），tools/e2e_harness.py（约 64 行）。
 
 
 ## 4. B3-config-submit：项目配置文件、组合根填 device_request、definition 格式版本、CLI 侧应用上传
@@ -340,7 +340,7 @@
 
 **易错点**
 
-本批规划依据的代码在 /Users/lzy/workspace/yaozhou/cli/gherkai_cli/__main__.py、/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/compose.py、/Users/lzy/workspace/yaozhou/core/gherkai_core/serialize.py，以及 /Users/lzy/workspace/yaozhou/core/gherkai_core/adapters/run_store/ 下的 local.py 和 ddb.py。
+本批规划依据的代码在 cli/gherkai_cli/__main__.py、runtime/gherkai_runtime/compose.py、core/gherkai_core/serialize.py，以及 core/gherkai_core/adapters/run_store/ 下的 local.py 和 ddb.py。
 
 最容易做错的两件事：
 
@@ -413,7 +413,7 @@
 
 **易错点**
 
-相关文件都在 /Users/lzy/workspace/yaozhou/engines/midscene/src/worker/ 与 /Users/lzy/workspace/yaozhou/engines/novaact/gherkai_worker_novaact/ 下。
+相关文件都在 engines/midscene/src/worker/ 与 engines/novaact/gherkai_worker_novaact/ 下。
 
 最容易做错的两件事：
 (1) 派发时把「目标上没有句柄」做成顺延或报错。现有 match() 命中即返回 handler，两侧 run_scope 都无条件调用 handler({page})。改造后命中的 pattern 若在当前目标上没有句柄，必须走 AI，不能去找下一个能匹配的 pattern，也不能记 error。scan/_hits 与 matchBatch/match_batch 必须保持与目标无关，否则 plan 标注会和实际派发对不上。这一条要先用测试钉住，尤其是 Nova 侧：只写了 webdriver 句柄的 Python step 在桌面上要走 AI。
@@ -493,7 +493,7 @@
 
 **易错点**
 
-最容易做错的有两件。（1）预热放进现有的建连重试域。两个 worker 在 scope_started 之前的整段都被 0028 的瞬时网络判定包着（Nova 的 _run_session 外层循环、Midscene 的 connect 循环 catch）。直接把 goto(warmup) 插在 scope_started 前面，预热的网络失败就会被重建会话重试，最后以退出码 80 落成 network_error，正好踩到 0051 决策 13 与 0028 的分类红线；单测用 mock 异常很容易测绿，必须用真实拆隧道的方式核对。（2）漏掉某个宿主或出口。预热地址要走完 RunMeta、serialize、三个宿主（sync run、detached.py、reconciler.py）和 build_engines / build_fargate_engines 两个装配点，还要进 _COMPOSE_OWNED_WORKER_ENV 的抹除清单；漏掉任何一处，worker 就会在对应宿主下触发完整性不变量的 precheck_failed，或者被宿主 shell 里的同名值污染。脱敏规则②要三份逐字同步，靠差集护栏而不是靠人读。另外，隧道模式下即使只有设备目标，definition 也要恒带额外请求头：0035 决策 4 说请求头「仅桌面浏览器」注入，指的是 worker 的注入动作，不是 definition 可以省掉它，否则完整性判据在设备上失效。现有测试里的 auth=\"u1:p1\" 固定数据与「u1:p1@」断言，需要整组改写为令牌形态。主要文件：/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/tunnel.py、/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/tunnel_host.py、/Users/lzy/workspace/yaozhou/runtime/gherkai_runtime/compose.py、/Users/lzy/workspace/yaozhou/engines/novaact/gherkai_worker_novaact/run_scope.py、/Users/lzy/workspace/yaozhou/engines/midscene/src/worker/run-scope.mts、三份 redact 实现。
+最容易做错的有两件。（1）预热放进现有的建连重试域。两个 worker 在 scope_started 之前的整段都被 0028 的瞬时网络判定包着（Nova 的 _run_session 外层循环、Midscene 的 connect 循环 catch）。直接把 goto(warmup) 插在 scope_started 前面，预热的网络失败就会被重建会话重试，最后以退出码 80 落成 network_error，正好踩到 0051 决策 13 与 0028 的分类红线；单测用 mock 异常很容易测绿，必须用真实拆隧道的方式核对。（2）漏掉某个宿主或出口。预热地址要走完 RunMeta、serialize、三个宿主（sync run、detached.py、reconciler.py）和 build_engines / build_fargate_engines 两个装配点，还要进 _COMPOSE_OWNED_WORKER_ENV 的抹除清单；漏掉任何一处，worker 就会在对应宿主下触发完整性不变量的 precheck_failed，或者被宿主 shell 里的同名值污染。脱敏规则②要三份逐字同步，靠差集护栏而不是靠人读。另外，隧道模式下即使只有设备目标，definition 也要恒带额外请求头：0035 决策 4 说请求头「仅桌面浏览器」注入，指的是 worker 的注入动作，不是 definition 可以省掉它，否则完整性判据在设备上失效。现有测试里的 auth=\"u1:p1\" 固定数据与「u1:p1@」断言，需要整组改写为令牌形态。主要文件：runtime/gherkai_runtime/tunnel.py、runtime/gherkai_runtime/tunnel_host.py、runtime/gherkai_runtime/compose.py、engines/novaact/gherkai_worker_novaact/run_scope.py、engines/midscene/src/worker/run-scope.mts、三份 redact 实现。
 
 
 ## 7. B8-deploy-iac：部署侧：权限、Device Farm 项目找回或建立、SSM、doctor 设备项

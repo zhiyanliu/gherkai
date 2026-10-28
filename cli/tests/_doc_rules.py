@@ -2,7 +2,8 @@
 
 内容三类：①规则——内部指代表 FORBIDDEN、口吻表 COLLOQUIAL（含 ADR 0045 决策六形态②的自造复合词 COINAGES）、词表退役名
 RETIRED_TERMS（注释层用去掉「批」义三词的 RETIRED_TERMS_IN_CODE）、决策六形态①③的启发式 SYMBOL_PREDICATE /
-NUMERIC_SHORTHAND / ARROW、悬空指针形态 DANGLING_JOURNEY / BARE_WP、相对链接 RELATIVE_LINK、已知机器根 MACHINE_ROOTS；
+NUMERIC_SHORTHAND / ARROW、悬空指针形态 DANGLING_JOURNEY / BARE_WP / MACHINE_COORDINATE（本机坐标：全仓 markdown 与 code 注释都拦）、
+相对链接 RELATIVE_LINK、已知机器根 MACHINE_ROOTS；
 ②扫描面——user_docs / technical_docs / ai_side_docs / code_comment_files / diagram_sources / skill_markdown_files /
 long_term_docs，与 classify(path)；③抽取器——prose_lines（markdown 正文，剥代码块与行内代码）、comment_units（注释与
 docstring）、skill 的命令 token 抽取。scan(kind, path, only_lines) 按面套规则束。
@@ -192,6 +193,15 @@ MACHINE_ROOT = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/")
 # 的形态（`docs/journey/NNNN-…`），提到目录本身（「过程产物放 docs/journey/」）是合法的分层描述。
 DANGLING_JOURNEY = re.compile(r"docs/journey/\d{4}-")
 BARE_WP = re.compile(r"\bWP-?\d+[A-Za-z]?(?:-\d+)?\b")
+# 本机坐标：产出机器个人目录下的绝对路径与本地 clone 目录名——只在那台机器上成立，对别的 contributor 是悬空的，文件一律写
+# repo 相对路径。与 MACHINE_ROOTS 分开：那组根服务于「录制机产物里的任何绝对路径」（含 /tmp、/app 这类容器内路径），这里只认
+# 个人目录与 clone 名——容器布局（`/tmp/gherkai-run/<run_id>`、`/app`）是设计事实、允许写进文档。全仓 markdown（含 journey
+# 与工具说明，扫原文含行内代码——路径多半就写在反引号里）与 code 注释都拦；journey 虽是暂存区、也在公开仓库里被人读。
+CLONE_DIR_NAMES = ("yaozhou",)  # 仓库名是 gherkai；曾用的本地 clone 目录名不进任何文件
+MACHINE_COORDINATE = re.compile(
+    r"(?:file://)?(?:/Users|/home)/[A-Za-z0-9_.-]+/|[A-Za-z]:\\Users\\"
+    r"|(?<![A-Za-z0-9_-])(?:" + "|".join(re.escape(n) for n in CLONE_DIR_NAMES) + r")(?![A-Za-z0-9_-])"
+)
 
 # ── 扫描面与规则束（测试与 tools/doc_rules_check.py 的单一事实源）────────────────
 # 每个人读面一束规则；hook 与提交闸门按 classify() 把改动文件映射到同一束，写完即查、提交前再查（ADR 0046）。
@@ -239,6 +249,18 @@ def long_term_docs() -> list[Path]:
     docs += sorted((REPO / "docs" / "user-guide").glob("*.md")) + sorted((REPO / "docs" / "ai-eng").glob("*.md"))
     docs += sorted(REPO.glob("*/DEVELOPMENT.md")) + sorted(REPO.glob("engines/*/DEVELOPMENT.md"))
     return sorted({p for p in docs if p.exists()})
+
+
+def all_markdown() -> list[Path]:
+    """全仓**已跟踪**的 markdown（本机坐标护栏的适用面：含 docs/journey/ 与 tools/ 下的说明）。按 git 清单取，忽略规则里的
+    产物目录（评测工作区、依赖、构建产物）自然不在内；拿不到 git 时退回文件系统遍历加目录排除。"""
+    import subprocess
+    try:
+        out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--", "*.md"], capture_output=True, check=True)
+        files = [REPO / f for f in out.stdout.decode("utf-8").split("\0") if f]
+    except (OSError, subprocess.CalledProcessError):
+        files = [p for p in REPO.rglob("*.md") if not (_SKIP_DIRS & set(p.parts)) and ".git" not in p.parts]
+    return sorted(p for p in files if p.exists() and not (_SKIP_DIRS & set(p.parts)))
 
 
 def ai_side_docs() -> list[Path]:
@@ -292,6 +314,8 @@ def classify(path: Path) -> str | None:
     if (p.suffix in CODE_SUFFIXES or p.name == "Dockerfile") and not (_SKIP_DIRS & set(p.parts)):
         if any(_rel(p).startswith(root + "/") for root in PY_ROOTS_FOR_COMMENTS):
             return "code"
+    if p.suffix == ".md" and not (_SKIP_DIRS & set(p.parts)):
+        return "other-md"  # journey 与各处说明：不套口吻规则，只拦本机坐标
     return None
 
 
@@ -314,8 +338,12 @@ def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tupl
     wording = (("口头语或自造复合词", COLLOQUIAL), ("符号当谓语", SYMBOL_PREDICATE),
                ("省略中心词的「退 N」", NUMERIC_SHORTHAND))
     pointers = (("指向 journey 文件的悬空指针", DANGLING_JOURNEY), ("裸 WP 编号", BARE_WP))
+    coords = (("本机坐标（个人目录下的绝对路径或 clone 目录名）", MACHINE_COORDINATE),)
+    raw_lines = [(i, line) for i, line in enumerate(text.splitlines(), 1)]
+    if kind != "code":
+        apply(raw_lines, coords)  # markdown 扫原文含行内代码与代码块：路径多半就写在反引号里
     if kind == "code":
-        apply(comment_units(p), wording + (("退役旧名", RETIRED_TERMS_IN_CODE),) + pointers)
+        apply(comment_units(p), wording + (("退役旧名", RETIRED_TERMS_IN_CODE),) + pointers + coords)
     elif kind == "technical-doc":
         apply(prose_lines(text), wording + (("退役旧名", RETIRED_TERMS),) + pointers)
     elif kind in {"user-doc", "skill"}:
@@ -339,6 +367,7 @@ def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tupl
         apply([(i, line) for i, line in enumerate(text.splitlines(), 1)],
               (("内部指代", FORBIDDEN), ("口头语或自造复合词", COLLOQUIAL), ("退役旧名", RETIRED_TERMS),
                ("符号当谓语", SYMBOL_PREDICATE), ("省略中心词的「退 N」", NUMERIC_SHORTHAND)))
+    # kind == "other-md"：只有上面的本机坐标一束
     return hits
 
 

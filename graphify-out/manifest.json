@@ -250,8 +250,8 @@
     "semantic_hash": "8f9a36c73ebaa2bb26b0907c02ab6383"
   },
   "CLAUDE.md": {
-    "mtime": 1793157529.8013778,
-    "ast_hash": "735f01b33f333dc41b3e5c6ea2944263",
+    "mtime": 1793166183.264887,
+    "ast_hash": "fb6ae5b7c64b6214c02faad2c9c026df",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1792985596.1675427,
-    "ast_hash": "f7373d3801f9fcdc6959da247b27515f",
+    "mtime": 1793166239.2826653,
+    "ast_hash": "a3095583a294c8211d4ef4cd2b14c019",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
@@ -1700,9 +1700,9 @@
     "semantic_hash": "68252ee02a81952e2bf1b49cc1361338"
   },
   "cli/tests/test_adr_hygiene.py": {
-    "mtime": 1791515428.9983058,
-    "ast_hash": "2c9eae538e1ee7a13c5cc2761fb0bc91",
-    "semantic_hash": "2c9eae538e1ee7a13c5cc2761fb0bc91"
+    "mtime": 1793166183.2630882,
+    "ast_hash": "d3e844021a47252c0230cb6c3cf7a5f3",
+    "semantic_hash": ""
   },
   "cli/tests/test_context_glossary.py": {
     "mtime": 1789875066.6334743,
@@ -1720,8 +1720,8 @@
     "semantic_hash": "b1bbb3523f9fad35bd362d690d9385b5"
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1792054611.2349772,
-    "ast_hash": "a01c16c0355c575af4c5399c9c04d809",
+    "mtime": 1793166183.2647004,
+    "ast_hash": "47235cca2d4c09ce0d6a9078c9354e4a",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
@@ -1865,9 +1865,9 @@
     "semantic_hash": "7cfedb045800643c382a031522e04994"
   },
   "tools/presentations/production.md": {
-    "mtime": 1791516157.990722,
-    "ast_hash": "0044f170604f2387ee9241018f3d56f3",
-    "semantic_hash": "0044f170604f2387ee9241018f3d56f3"
+    "mtime": 1793166183.264382,
+    "ast_hash": "36062b90b7f1ef613fefc4099c5637f3",
+    "semantic_hash": ""
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
     "mtime": 1792988346.0536828,
@@ -1915,8 +1915,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793114193.2272406,
-    "ast_hash": "c64a264303f77ea9e9e496d6612bfcd0",
+    "mtime": 1793166183.2639275,
+    "ast_hash": "9e9e22201750a395975157d02509987d",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2085,8 +2085,8 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1793157529.8013778,
-    "ast_hash": "735f01b33f333dc41b3e5c6ea2944263",
+    "mtime": 1793166183.264887,
+    "ast_hash": "fb6ae5b7c64b6214c02faad2c9c026df",
     "semantic_hash": ""
   }
 }

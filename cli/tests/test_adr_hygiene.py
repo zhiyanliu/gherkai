@@ -14,7 +14,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _doc_rules import REPO, ai_side_docs, long_term_docs, prose_lines, scan, BARE_WP, DANGLING_JOURNEY
+from _doc_rules import REPO, ai_side_docs, all_markdown, long_term_docs, prose_lines, scan, BARE_WP, DANGLING_JOURNEY, MACHINE_COORDINATE
 
 ADR_DIR = REPO / "docs" / "adr"
 JOURNEY_DIR = REPO / "docs" / "journey"
@@ -117,6 +117,15 @@ def test_long_term_docs_have_no_dangling_pointers(doc: Path):
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:110]}" for i, line in prose_lines(doc.read_text(encoding="utf-8"))
             if DANGLING_JOURNEY.search(line) or BARE_WP.search(line)]
     assert not hits, "长期文档里的悬空指针（吸收后即断）——把证据内联、血缘写成自明的事件描述：\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize("doc", all_markdown(), ids=_rel)
+def test_markdown_has_no_machine_coordinates(doc: Path):
+    """全仓 markdown（含 journey 与工具说明，原文含行内代码）不写本机坐标：个人目录下的绝对路径、本地 clone 目录名只在产出机器上
+    成立，对别的 contributor 是悬空的——文件写 repo 相对路径。"""
+    hits = [f"{_rel(doc)}:{i}: {line.strip()[:110]}" for i, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1)
+            if MACHINE_COORDINATE.search(line)]
+    assert not hits, "本机坐标（只在产出机器上成立）——改成 repo 相对路径：\n" + "\n".join(hits)
 
 
 @pytest.mark.parametrize("doc", ai_side_docs(), ids=_rel)
