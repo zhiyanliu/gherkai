@@ -250,9 +250,9 @@
     "semantic_hash": "8f9a36c73ebaa2bb26b0907c02ab6383"
   },
   "CLAUDE.md": {
-    "mtime": 1789875977.6430051,
-    "ast_hash": "c65a25d5f14b3a5772ddfb3c55abbfeb",
-    "semantic_hash": "c65a25d5f14b3a5772ddfb3c55abbfeb"
+    "mtime": 1793157529.8013778,
+    "ast_hash": "735f01b33f333dc41b3e5c6ea2944263",
+    "semantic_hash": ""
   },
   "CONTEXT.md": {
     "mtime": 1793075546.8572814,
@@ -1345,9 +1345,9 @@
     "semantic_hash": "06ee708c034ff94fc4618c5b14c5c4f9"
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1790730553.544807,
-    "ast_hash": "0036b8621ed7e6784005ab87e1d5fed6",
-    "semantic_hash": "0036b8621ed7e6784005ab87e1d5fed6"
+    "mtime": 1793157529.801537,
+    "ast_hash": "8897da1278b31fd6ce87515ec1cafe09",
+    "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
     "mtime": 1789875977.6432579,
@@ -1770,7 +1770,7 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/redact.mts": {
-    "mtime": 1793114193.228261,
+    "mtime": 1793152416.6968324,
     "ast_hash": "c88e8839d15ad7be4ff8794d2bc61665",
     "semantic_hash": ""
   },
@@ -2055,8 +2055,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/redaction-cases.json": {
-    "mtime": 1793114193.2280354,
-    "ast_hash": "",
+    "mtime": 1793151452.8407693,
+    "ast_hash": "a9285f11f81f69ed8c6364008e6639ca",
     "semantic_hash": ""
   },
   "engines/fixtures/tunnel-warmup.json": {
@@ -2082,6 +2082,11 @@
   "engines/novaact/tests/test_tunnel_warmup.py": {
     "mtime": 1793151580.4633985,
     "ast_hash": "8389d5b5af838500235fbd64684f9b0e",
+    "semantic_hash": ""
+  },
+  "AGENTS.md": {
+    "mtime": 1793157529.8013778,
+    "ast_hash": "735f01b33f333dc41b3e5c6ea2944263",
     "semantic_hash": ""
   }
 }
