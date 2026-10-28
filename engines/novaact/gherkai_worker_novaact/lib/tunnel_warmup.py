@@ -69,6 +69,7 @@ def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sle
             return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
         title = _wait_for_marker(page, sleep=sleep, monotonic=monotonic, stop=stop)
         if title == WARMUP_TITLES["ready"]:
+            _leave_warmup_page(page, log)
             return None
         if title in (WARMUP_TITLES["denied"], WARMUP_TITLES["auth_required"]):
             return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
@@ -76,6 +77,15 @@ def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sle
                 else f"预热页面在 {WARMUP_MARKER_WAIT_S:g} 秒内没有给出任何标记（响应状态 {status if status is not None else '未知'}，页面标题 {title or '空'}）")
         log(f"worker: tunnel warmup not ready (attempt {attempt + 1}): {last}")
     return WarmupFailure("engine_error", WARMUP_ERROR_MESSAGE.format(attempts=WARMUP_ATTEMPTS, reason=last))
+
+
+def _leave_warmup_page(page, log: Callable[[str], None]) -> None:
+    """就绪后离开预热页到 about:blank：令牌不留在当前文档地址（Nova Act 每步规划请求带当前地址、确定性 step 能读 page.url）。
+    离开失败只记日志、不影响判定：会话已换到 cookie，代价只是令牌可能留在当前地址（ADR 0051 决策 13）。"""
+    try:
+        page.goto("about:blank")
+    except Exception as e:  # noqa: BLE001
+        log(f"worker: tunnel warmup page could not be left: {_one_line(e)}")
 
 
 def _wait_for_marker(page, *, sleep, monotonic, stop) -> str | None:

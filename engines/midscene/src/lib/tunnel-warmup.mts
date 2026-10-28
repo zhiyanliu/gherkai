@@ -95,7 +95,10 @@ export async function warmupSession(page: WarmupPage, url: string, deps: WarmupD
     }
     if (status === 401) return { errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE };  // 令牌错：预热路径直接 401 页
     const title = await waitForMarker(page, sleep, now);
-    if (title === WARMUP_TITLES.ready) return null;
+    if (title === WARMUP_TITLES.ready) {
+      await leaveWarmupPage(page, deps.log);
+      return null;
+    }
     if (title === WARMUP_TITLES.denied || title === WARMUP_TITLES.auth_required) {
       return { errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE };
     }
@@ -104,6 +107,16 @@ export async function warmupSession(page: WarmupPage, url: string, deps: WarmupD
     deps.log(`worker: tunnel warmup not ready (attempt ${attempt + 1}): ${last}`);
   }
   return { errorType: "engine_error", message: warmupErrorMessage(WARMUP_ATTEMPTS, last) };
+}
+
+/** 就绪后离开预热页到 about:blank：令牌不留在当前文档地址（确定性 step 能读 page.url()）。离开失败只记日志、不影响判定：会话已换到
+ *  cookie，代价只是令牌可能留在当前地址（ADR 0051 决策 13）。 */
+async function leaveWarmupPage(page: WarmupPage, log: (line: string) => void): Promise<void> {
+  try {
+    await page.goto("about:blank", { waitUntil: "domcontentloaded", timeout: WARMUP_NAV_TIMEOUT_MS });
+  } catch (e) {
+    log(`worker: tunnel warmup page could not be left: ${oneLine(e)}`);
+  }
 }
 
 async function waitForMarker(page: WarmupPage, sleep: (ms: number) => Promise<void>, now: () => number): Promise<string | null> {

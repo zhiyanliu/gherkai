@@ -15,7 +15,7 @@ I/O 契约两态（判据一律是「注入了哪个 env」、非「是否 Farga
 一生（ADR 0024）：
   读 job → 开 AgentCore 会话 → 按 scope 串行执行 scenarios（每 step 派发）→ 逐事件吐事件通道
   → scope_done → 退出。SIGTERM/SIGINT（ADR 0024 flag-only）：handler 只置 _stop 标志、绝不 raise；
-  主流程在 act 边界安全点检测 → 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
+  主流程在 act 边界安全点检测 → 正常 return 退出 _run_session、其 finally 显式释放会话（正常退出与异常退出同样释放，
   不靠异常穿透——避免异步 raise 撞 playwright greenlet 切换区致死循环卡死；sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
   单 act 套 timeout=ACT_TIMEOUT_S 使 in-flight act 有界返回，标志位总能在有限时间被检测。
 
@@ -78,7 +78,7 @@ REGION = os.environ.get("AWS_REGION")
 
 # 停止标志（ADR 0024 flag-only 中断模型）：SIGTERM/SIGINT handler 只 set 它、绝不 raise——避免异步异常
 # 落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。主流程在 act 边界安全点检测、
-# 正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，不靠异常穿透）。模块级单例（对称 _uploader）。
+# 正常 return 退出 _run_session、其 finally 显式释放会话（不靠异常穿透）。模块级单例（对称 _uploader）。
 _stop = threading.Event()
 _stop_signum: int | None = None  # 触发协作停的信号号（handler 只记录；日志由安全点补打，见 _on_signal）
 
@@ -142,7 +142,7 @@ def _on_signal(signum, frame):
     """SIGTERM/SIGINT 的 flag-only handler（ADR 0024 终止契约）：只置停止标志、**绝不 raise**。
 
     绝不 raise——避免异步异常落进 playwright greenlet 切换关键区致死循环卡死（sync-over-greenlet + signal-raise 反模式，见 ADR 0024 被拒方案）。
-    主流程在 act 边界安全点检测 `_stop`、正常 return 退出三层 with 释放会话（with 正常退出即触发 __exit__，
+    主流程在 act 边界安全点检测 `_stop`、正常 return 退出 _run_session、其 finally 显式释放会话（正常退出与异常退出同样释放，
     不靠异常穿透）。SIGTERM/SIGINT 共用（Ctrl-C 亦协作停）。
     **handler 内不做任何 I/O（含 stderr 日志）**：信号可能落在主线程正在 `sys.stderr.write` 的瞬间，handler 里再写
     stderr 会撞 Python BufferedWriter 的非重入锁——`RuntimeError: reentrant call inside <_io.BufferedWriter name='<stderr>'>`
@@ -343,7 +343,7 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
     调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——AgentCore 会话已释放：NovaAct /
-    cdp_session 两层 with 已退出；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
+    cdp_session 两层会话上下文已在 _run_session 的 finally 里释放；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
     （`_presend_act_siblings`）同属 best-effort 的产物保全层（那层在 act 边界提前传、本函数在收尾排空）。
     Nova 没有中断 handler 内的兜底上传（greenlet 使然，见 ADR 0032）；② scope 末排在 `flush_and_cleanup`
     **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故 scope 末这一段超时不等于丢：紧随的整目录
@@ -803,7 +803,7 @@ def _capabilities() -> dict[str, object]:
     `min_grace_s` 是 grace 硬约束的下限（ADR 0024），取单 act 上界 `ACT_TIMEOUT_S`（组合根注入的
     `NOVA_ACT_TIMEOUT_S`，缺省 120）+ 收尾余量 `NOVA_GRACE_MARGIN_S`（见 `lib/constants.py` 那个常量的
     注释：会话释放 + 截图队列排空，已真容器标定）。**worker 自己算、组合根只查询**（ADR 0024「引擎自报
-    下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退三层 with 释放会话，
+    下限」）：SIGTERM 落长 act 中途时，协作停要等这一次 in-flight act 有界返回才退出 _run_session 释放会话，
     这两段预算都只有 worker 知道；组合根持任何引擎特定的下限常量都会漂移。
     `deterministic_steps` 是此刻注册表的清单（ADR 0036「2.」）：内建脚手架（模块顶 import 的副作用）+
     `main()` 顶部加载的使用方 step——与实际运行派发用的是同一张表，故复用 `list_registry()`、不另拼一份。
@@ -904,17 +904,16 @@ def main() -> int:
     # 任何后续异常都不再当「可重试建连失败」——act 已可能执行、有副作用，绝不重试。
     started = False
 
-    def _release(label: str, cm, exc_info) -> bool:
-        """显式调用上下文管理器的 __exit__（对称 with 语义）。释放阶段抛出的异常只记录、不冒泡：它不是建连失败、不进重试判定，
-        也不能顶替 body 的异常；退出码据 release_error 变 1（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5 以退出码 1 表示有会话
-        未确认停止）。返回 __exit__ 是否抑制了 body 的异常。"""
+    def _release(label: str, cm, exc_info) -> None:
+        """显式调用上下文管理器的 __exit__。释放阶段抛出的异常只记录、不冒泡：它不是建连失败、不进重试判定，也不能顶替 body 的
+        异常；退出码据 release_error 变 1（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5 以退出码 1 表示有会话未确认停止）。
+        只接 Exception：KeyboardInterrupt / SystemExit 照常传播，由调用处的 finally 保证外层仍被释放。"""
         nonlocal release_error
         try:
-            return bool(cm.__exit__(*exc_info))
+            cm.__exit__(*exc_info)
         except Exception as e:  # noqa: BLE001
             release_error = e
             log(f"worker: {label}释放出错（退出码将为 1）：{type(e).__name__}: {e}")
-            return False
 
     def _run_session() -> None:
         """建连 + 执行完所有 scenarios。建连段异常可被外层重试；scope_started emit 后不可。
@@ -960,7 +959,7 @@ def main() -> int:
             # 取真实 AgentCore 会话 id（血缘，进 RunStore，ADR 0016/0024）。
             session_id = nova.get_session_id()
             # 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发
-            # scope_started、正常 return 让两层 with 释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
+            # scope_started、正常 return 让 finally 释放会话，归因经 scope_done 传递（见 main 尾）；预热自己吞掉导航异常、
             # 不进外层的建连重试域、不退 EX_WORKER_NETWORK（ADR 0028 分类红线）。
             if warmup_url:
                 try:
@@ -970,11 +969,7 @@ def main() -> int:
                 if warmup_failure is not None:
                     log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
                     return
-                log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过
-                try:
-                    nova.page.goto("about:blank")  # 离开预热页：令牌不留在当前文档地址（Nova Act 每步规划请求带当前地址、确定性 step 能读 page.url）
-                except Exception as e:  # noqa: BLE001  离开失败不致命：只影响令牌是否留在地址栏，不影响会话已换到 cookie
-                    log(f"worker: tunnel warmup page could not be left: {type(e).__name__}: {e}")
+                log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过（离开预热页在 warmup_session 内）
             # session_id 随 scope_started 即回传（不只等 scope_done）——超时/SIGTERM 中途打断时
             # scope_done 不会 emit，但血缘已先随首事件落到 core（ADR 0028 观测缺口修复）。
             sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
@@ -998,12 +993,16 @@ def main() -> int:
             body_exc = e  # 建连（NovaAct 构造 / __enter__）或 body 的异常：释放完再原样抛给建连循环判定
         finally:
             # 释放阶段：两层 __exit__ 都执行、失败只记录（_release），不让任一层的释放异常顶替 body 的异常或进入建连重试判定。
+            # NovaAct 的 __exit__ 收到真实的 exc_type（SDK 据它标记工作流运行的结局）。AgentCore 会话的 cdp_session 是生成器式
+            # 上下文管理器：收到 body 异常时会把它包装成 BrowserAuthError 再抛出——哪怕 Stop 已成功——所以对它按正常退出调用
+            # （None, None, None）：生成器照常走到 finally 里的 Stop，此时抛出的才是真释放失败。内层抛 BaseException 也不跳过外层释放。
             exc_info = (type(body_exc), body_exc, body_exc.__traceback__) if body_exc is not None else (None, None, None)
-            suppressed = False
-            if nova_entered:
-                suppressed = _release("浏览器会话", nova_cm, exc_info)
-            suppressed = _release("AgentCore 会话", cdp_cm, exc_info) or suppressed
-        if body_exc is not None and not suppressed:
+            try:
+                if nova_entered:
+                    _release("浏览器会话", nova_cm, exc_info)
+            finally:
+                _release("AgentCore 会话", cdp_cm, (None, None, None))
+        if body_exc is not None:
             raise body_exc
 
     with wf:
@@ -1011,7 +1010,7 @@ def main() -> int:
         set_current_workflow(wf)
         try:
             # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
-            # 每次 attempt 用全新 provider/cdp_session/NovaAct，with __exit__ 清掉本次部分建起的会话。
+            # 每次 attempt 用全新 provider/cdp_session/NovaAct，_run_session 的 finally 清掉本次部分建起的会话。
             for attempt in range(_CONNECT_ATTEMPTS):
                 if _stop.is_set():
                     break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 干净退（下方按 _stop 返回 0）
@@ -1033,25 +1032,26 @@ def main() -> int:
                         break  # 退避中收到停止信号 → 不再重连
         except BaseException:
             # 异常退出路径（ADR 0042 决策一第三条）：AgentCore 会话已在 _run_session 内的两层
-            # with（NovaAct / cdp_session）退出时释放（第三层 with wf 仍在栈上、与会话无关），此处
+            # 会话上下文（NovaAct / cdp_session）的 finally 里释放（最外层 with wf 仍在栈上、与会话无关），此处
             # 只给在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
             _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise
         finally:
             set_current_workflow(outer)
 
-    # 停止信号（ADR 0024 flag-only）：三层 with 已正常退出（__exit__ 释放了会话）。干净退、不吐 scope_done、不 flush。
+    # 停止信号（ADR 0024 flag-only）：_run_session 已正常退出（finally 释放了会话）。干净退、不吐 scope_done、不 flush。
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
         return 1 if release_error is not None else 0  # 停止路径同样让释放失败可观测（ADR 0051 决策 5：退出码 1 表示有会话未确认停止）
     if network_exhausted:
-        # 建连重试耗尽（ADR 0028）：with __exit__ 已清理。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
+        # 建连重试耗尽（ADR 0028）：会话已释放。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
+        # 某次 attempt 的释放失败优先于网络分类（ADR 0028：泄漏可观测性压过网络分类）——退出码 1，core 记 error、不按网络重试。
         log("worker: connect retries exhausted, exiting with network code")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（这条路径多半也传不动，有界即可）
-        return EX_WORKER_NETWORK
+        return 1 if release_error is not None else EX_WORKER_NETWORK
     if warmup_failure is not None:
-        # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在 _run_session 的 with 退出时释放；按执行前失败发 scope 级 error、以 0 退出。
+        # 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在 _run_session 的 finally 里释放；按执行前失败发 scope 级 error、以 0 退出。
         sink.emit({"type": "scope_done", "scopeId": scope["id"], "sessionId": session_id, "status": "error",
                    "errorType": warmup_failure.error_type, "message": warmup_failure.message})
         return 1 if release_error is not None else 0  # 释放失败让退出码为 1（桌面靠它让泄漏可观测）

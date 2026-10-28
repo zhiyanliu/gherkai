@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -71,9 +72,25 @@ def _warm(page):
     return W.warmup_session(page, WARMUP_URL, log=lambda s: None, sleep=lambda s: None, monotonic=_clock())
 
 
-def test_ready_marker_is_success_after_one_navigation():
+def test_ready_marker_is_success_after_one_navigation_then_leaves_the_page():
     page = _FakePage([200], ["gherkai-tunnel-warmup", C.WARMUP_TITLES["ready"]])
-    assert _warm(page) is None and page.gotos == [WARMUP_URL]
+    assert _warm(page) is None and page.gotos == [WARMUP_URL, "about:blank"]  # 就绪后离开预热页：令牌不留在当前地址
+
+
+def test_failing_to_leave_the_warmup_page_only_logs():
+    """离开预热页失败只记日志：会话已换到 cookie，判定不受影响（ADR 0051 决策 13）。"""
+    lines: list[str] = []
+
+    class _StuckPage(_FakePage):
+        def goto(self, url, **kw):
+            if url == "about:blank":
+                self.gotos.append(url)
+                raise ConnectionError("reset")
+            return super().goto(url, **kw)
+
+    page = _StuckPage([200], ["gherkai-tunnel-warmup", C.WARMUP_TITLES["ready"]])
+    assert W.warmup_session(page, WARMUP_URL, log=lines.append, sleep=lambda s: None, monotonic=_clock()) is None
+    assert page.gotos == [WARMUP_URL, "about:blank"] and any("could not be left" in ln for ln in lines)
 
 
 @pytest.mark.parametrize("statuses, titles", [
@@ -90,7 +107,7 @@ def test_denied_and_auth_required_are_deterministic_rejections_without_retry(sta
 
 def test_error_marker_retries_then_ready():
     page = _FakePage([200, 200], [C.WARMUP_TITLES["error"], C.WARMUP_TITLES["ready"]])
-    assert _warm(page) is None and len(page.gotos) == 2
+    assert _warm(page) is None and page.gotos == [WARMUP_URL, WARMUP_URL, "about:blank"]
 
 
 def test_navigation_exceptions_are_swallowed_into_engine_error_not_raised():
@@ -471,6 +488,117 @@ def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 0
     assert sink.events == [] and trace.count(("cdp_exit",)) == 1
+
+
+def _sdk_like_provider(monkeypatch, trace, *, stop_excs=()):
+    """按 SDK 真实形态造的 cdp_session：生成器式上下文管理器，body 的异常被包装成另一个异常再抛（SDK 的 cdp_session 对 Exception
+    一律 `raise BrowserAuthError(...) from exc`），Stop 在 finally 里。`stop_excs` 按 attempt 给 Stop 的异常（None 表示成功）。"""
+    state = {"n": 0}
+
+    class _P:
+        def __init__(self, region=None):
+            pass
+
+        @contextmanager
+        def cdp_session(self):
+            state["n"] += 1
+            stop_exc = stop_excs[state["n"] - 1] if state["n"] <= len(stop_excs) else None
+            try:
+                try:
+                    yield ("ws://fake", {})
+                finally:
+                    trace.append(("cdp_exit",))
+                    if stop_exc is not None:
+                        raise stop_exc
+            except Exception as exc:
+                raise RuntimeError(f"wrapped: {exc}") from exc
+
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+    return state
+
+
+def test_sdk_style_exception_wrapping_on_exit_is_not_a_release_failure(driven, monkeypatch):
+    """SDK 的 cdp_session 收到 body 异常会把它包装成新异常再抛，即使 Stop 成功——这不是释放失败。建连失败一次、重试成功后，
+    退出码必须是 0；把包装异常误记成释放失败会让每一次成功的重试都以 1 退出、被 core 判成 error。"""
+    trace, sink, box = driven
+    state = _sdk_like_provider(monkeypatch, trace, stop_excs=(None, None))
+    calls = {"n": 0}
+
+    def nova_factory(**k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("reset")
+        return _FakeNovaAct(box["page"], trace, **k)
+
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 0
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"] and state["n"] == 2
+
+
+def test_sdk_style_stop_failure_is_a_release_failure(driven, monkeypatch):
+    """同一形态下 Stop 真失败（finally 里抛、再被包装）：记为释放失败，重试成功后判定照发、退出码 1。"""
+    trace, sink, box = driven
+    _sdk_like_provider(monkeypatch, trace, stop_excs=(RuntimeError("stop failed"), None))
+    calls = {"n": 0}
+
+    def nova_factory(**k):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ConnectionError("reset")
+        return _FakeNovaAct(box["page"], trace, **k)
+
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+
+
+def test_release_failure_outranks_network_exhaustion(driven, monkeypatch):
+    """首个会话释放失败、随后建连重试耗尽：退出码 1 而不是 80——泄漏可观测性压过网络分类（ADR 0028），core 不按网络故障重试。"""
+    trace, sink, box = driven
+    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: (_ for _ in ()).throw(ConnectionError("reset")))
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: False)
+    assert rs.main() == 1
+    assert sink.events == []
+
+
+@pytest.mark.parametrize("statuses, titles, expect_events", [
+    ([401], ["gherkai-tunnel-auth-required"], ["scope_done"]),  # 预热被拒
+    ([200], ["gherkai-tunnel-warmup"], []),                     # 预热被停止信号打断（下面的页面桩置停止）
+])
+def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_both_layers_released(driven, monkeypatch, statuses, titles, expect_events):
+    trace, sink, box = driven
+    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+
+    class _Page(_FakePage):
+        def goto(self, url, **kw):
+            if not expect_events:
+                rs._stop.set()
+            return super().goto(url, **kw)
+
+    box["page"] = _Page(statuses, titles)
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == expect_events
+    assert trace.count(("nova_exit",)) == 1 and trace.count(("cdp_exit",)) == 1  # 两层都走到释放
+
+
+def test_base_exception_from_the_inner_release_still_releases_the_agentcore_session(driven, monkeypatch):
+    """NovaAct 的 __exit__ 抛 KeyboardInterrupt：异常照常传播（不记为释放失败），但外层 AgentCore 会话仍被释放。"""
+    trace, sink, box = driven
+
+    class _InterruptingNovaAct(_FakeNovaAct):
+        def __exit__(self, *a):
+            super().__exit__(*a)
+            raise KeyboardInterrupt()
+
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: _InterruptingNovaAct(box["page"], trace, **k))
+    with pytest.raises(KeyboardInterrupt):
+        rs.main()
+    assert trace.count(("cdp_exit",)) == 1
 
 
 def test_release_failure_on_the_normal_path_keeps_the_verdict_and_exits_1(driven, monkeypatch):

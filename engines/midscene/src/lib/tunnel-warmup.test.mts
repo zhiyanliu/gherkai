@@ -46,10 +46,18 @@ function deps() {
   return { log: () => {}, sleep: async () => {}, now: () => (t += 5000) };  // 假时钟每读一次前进 5 秒：等标记的 10 秒预算两次就到
 }
 
-test("READY 标记即就绪：恰一次导航", async () => {
+test("READY 标记即就绪：预热恰一次导航，随即离开预热页（令牌不留在当前地址）", async () => {
   const { page, gotos } = fakePage([200], ["gherkai-tunnel-warmup", W.WARMUP_TITLES.ready]);
   assert.equal(await W.warmupSession(page, WARMUP_URL, deps()), null);
-  assert.deepEqual(gotos, [WARMUP_URL]);
+  assert.deepEqual(gotos, [WARMUP_URL, "about:blank"]);
+});
+
+test("离开预热页失败只记日志：会话已换到 cookie，判定不受影响", async () => {
+  const { page, gotos } = fakePage([200, new Error("reset")], ["gherkai-tunnel-warmup", W.WARMUP_TITLES.ready]);
+  const lines: string[] = [];
+  assert.equal(await W.warmupSession(page, WARMUP_URL, { ...deps(), log: (l) => lines.push(l) }), null);
+  assert.deepEqual(gotos, [WARMUP_URL, "about:blank"]);
+  assert.ok(lines.some((l) => l.includes("could not be left")));
 });
 
 test("401（令牌错）、DENIED、AUTH REQUIRED 都是确定性拒绝：precheck_failed、不重试", async () => {
@@ -64,7 +72,7 @@ test("401（令牌错）、DENIED、AUTH REQUIRED 都是确定性拒绝：preche
 test("ERROR 标记原地重导航，之后 READY 即就绪", async () => {
   const { page, gotos } = fakePage([200, 200], [W.WARMUP_TITLES.error, W.WARMUP_TITLES.ready]);
   assert.equal(await W.warmupSession(page, WARMUP_URL, deps()), null);
-  assert.equal(gotos.length, 2);
+  assert.deepEqual(gotos, [WARMUP_URL, WARMUP_URL, "about:blank"]);
 });
 
 test("导航抛网络类异常：吞在有界重试里、不向上抛，耗尽后 engine_error（不进建连重试域、不退 80）", async () => {
