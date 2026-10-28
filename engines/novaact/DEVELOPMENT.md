@@ -73,7 +73,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 
 - `model_id=MODEL_ID`（`lib/constants.py` 里锁定的 GA 版本 `nova-act-v1.0`，env `NOVA_MODEL_ID` 可覆盖，[ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」），`boto_session_kwargs={"region_name": <AWS_REGION>}`（region 不硬编码：由组合根落实后经 `AWS_REGION` 注入，见 `gherkai_worker_novaact/run_scope.py` 的 `REGION`；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 决策 C / [ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
 - workflow definition：**代码自动 create-if-not-exists**（`gherkai_worker_novaact/lib/workflow_setup.py` 的 `ensure_workflow_definition()`，worker 与 spike 已接入），无需手动执行 CLI。boto3 调用与 `aws nova-act create-workflow-definition` 等价。
-- **实测约束**：`provider.cdp_session()` 依赖 contextvar 识别 workflow，因此须使用 `@workflow` 装饰器或手动调用 `set_current_workflow(wf)`；worker 使用 `with Workflow`，故须手动调用（见 `gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。
+- **实测约束**：`NovaAct` 依赖 contextvar 识别 workflow（`get_current_workflow()`），因此须使用 `@workflow` 装饰器或手动调用 `set_current_workflow(wf)`；worker 使用 `with Workflow`，故须手动调用（见 `gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。AgentCore 会话的 Start / Stop 由 worker 直接经 bedrock-agentcore 的 `BrowserClient` 持有、不经 SDK 的 `cdp_session`（ADR 0028「会话泄漏防护」）。
 
 ## 确定性 step：内建脚手架 vs 使用方的 `steps/`
 
@@ -143,7 +143,7 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 - **经典 builder（无 buildx）会连未选中的 stage 一并执行**，故两个 stage 都对「本 stage 的参数未给」保持容忍（`if [ -n … ]`）；把关点在 final stage 的冒烟（`--capabilities`，不需要 AWS）：未给 build-arg 时在此处 fail-loud，不延后到 Fargate 启动期。
 - wheel 必须以**原文件名**安装：pip 从文件名解析发行名 / 版本 / tag，改名后 pip 以「Invalid wheel filename」拒绝安装。
 
-**不装 chromium 二进制**：worker 连接的是 AgentCore 云浏览器（`cdp_session` → `connectOverCDP`），playwright 只作 CDP 客户端库、不 launch 本地 chromium；镜像因此省下几百 MB，已实际运行验证。
+**不装 chromium 二进制**：worker 连接的是 AgentCore 云浏览器（`BrowserClient` 取 CDP 连接头 → NovaAct `connectOverCDP`），playwright 只作 CDP 客户端库、不 launch 本地 chromium；镜像因此省下几百 MB，已实际运行验证。
 
 ## 相关 ADR
 
