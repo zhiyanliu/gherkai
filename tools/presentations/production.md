@@ -39,7 +39,7 @@
 - 中文字体 Hiragino Sans GB，英文字体 Helvetica Neue，地址与代码 Menlo。字体由编辑环境提供，不随仓库分发。
 - 图标沿用 Lucide，许可与 SVG 在 [图标源文件](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/assets/icons/)；原色参考保存在图标文件中。
 
-图片由 Gemini 生成并编辑，代表方法概念，不是产品截图或精确技术架构。最终采用的主视觉及相关提示词、模型记录集中在素材包的 `artwork/` 中；无需重新生图即可继续编辑。缺陷证据来自 [真实运行证据包](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/internal/presentations/demo/evidence.zip)，不能用生成图替代。
+图片由 Gemini 生成并编辑，代表方法概念，不是产品截图或精确技术架构。最终采用的主视觉及相关提示词、模型记录集中在素材包的 `artwork/` 中；无需重新生图即可继续编辑。缺陷证据来自示例仓库[素材包](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/docs/presentations/demo/internal/media.zip)中的 `reference/evidence.zip`，不能用生成图替代。
 
 ## 口播、字幕与视频
 
@@ -62,7 +62,7 @@
 
 ## 溯源与保存规则
 
-产品能力的依据来自 gherkai 项目文档与实现，以及示例仓库的需求、用例、确定性步骤和真实运行记录。实测代码版本与运行 ID 见 [证据说明](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/internal/presentations/demo/evidence.md)。第 12 页的包职责和链接已保存在最终 PPT 及交付 manifest。
+产品能力的依据来自 gherkai 项目文档与实现，以及示例仓库的需求、用例、确定性步骤和真实运行记录。实测代码版本与运行 ID 记录在上述证据包中；该包的来源与使用边界见示例仓库的[证据说明](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/docs/presentations/demo/internal/README.md)。第 12 页的包职责和链接已保存在最终 PPT 及交付 manifest。
 
 最终 PPT 的资料备注中仍有定稿时的本机路径与历史素材名称，用于原始溯源，不作为今后的文件依赖：以当时本地 clone 目录名开头的路径指 gherkai 仓库根；`reports/presentation-evidence/` 对应现在的证据包；旧 `value-method/assets/` 对应素材包 `artwork/` 和最终 PPT 内嵌图片。外部讲者备注已整理成可直接阅读的最终稿，口播与演示提示保持原文。
 

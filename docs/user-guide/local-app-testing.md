@@ -6,7 +6,7 @@
 
 ## 工作方式
 
-`--expose-local <ORIGIN>` 让 gherkai 在本机起一条出站隧道，并在组装任务时把 feature 文本里的 `ORIGIN` 替换成隧道分配的公网地址。feature、引擎与 AI 都不感知隧道。
+`--expose-local <ORIGIN>` 让 gherkai 在本机起一条出站隧道，并在组装任务时把 feature 文本里的 `ORIGIN` 替换成隧道分配的公网地址。feature 与 AI 都不感知隧道；引擎只在第一个场景之前多访问一次会话预热地址（见本节末段）。
 
 ![云端浏览器经隧道服务商边缘回到本机的隧道进程，再由它转发给被测应用；第三方域资源由浏览器直连、不经隧道，公网上不带凭据的访问者被拦在边缘](../diagrams/local-app-testing-tunnel-topology.svg)
 
@@ -77,7 +77,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 只有 `submit --backend cloud` 配 `--expose-local` 时用得上，作用是防止 run 卡住时隧道长期留在公网。
 
-- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（云端排队、拉镜像与收尾的时间）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（默认 300 秒）；把 `--default-job-timeout` 设成 0 或负数（不超时）时，算这个上限仍要给每个 job 记一个预算，按 3600 秒计。
+- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（云端排队、拉镜像与收尾的时间）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
 - `submit` 会把生效的秒数打印出来，不用自己算。
 - 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续运行，以导航失败告终。
 - 值须为有限正数，否则退出码 2。

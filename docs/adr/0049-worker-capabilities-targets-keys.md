@@ -26,7 +26,7 @@
     {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880},
     {"device": "ios",     "ui_kinds": ["web", "app"], "max_session_s": 8880}
   ],
-  // 会话预热支持键：键名由实现定，取值为布尔
+  "session_warmup": true,  // 会话预热支持键，取值为布尔
   "deterministic_steps": [
     {"pattern": "...", "description": "...", "example": "...",
      "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"]}]},
@@ -40,8 +40,8 @@
 
 （`max_session_s` 的数值仅作示意，真值见决策 4。）
 
-- **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（设备会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
-- **会话预热支持键**：顶层加一个布尔键，语义为「该 worker 支持隧道会话预热」，键名由实现定；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
+- **step 级 `requires`**：`deterministic_steps[*].targets` 的条目可带可选的 `requires`（字符串数组），声明该句柄在这个目标上执行的运行期前提。1.5 只有一个取值 `web_context`（远程访问会话提供可用的网页上下文，探测规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）。worker 在注册期按封闭集合校验取值；CLI 只核形态（字符串数组），未知取值不拒绝、在各视图中原样显示，以免 CLI 与 worker 的取值集合形成第二事实源。`requires` 不同的条目拆开列出、不聚合进同一条目，因为聚合后无法表达「同一 step 在桌面无前提、在设备上需要网页上下文」。
+- **会话预热支持键**：顶层加布尔键 `session_warmup`，语义为「该 worker 支持隧道会话预热」（两个 worker 的键名常量由 engines/fixtures/tunnel-warmup.json 的 `capability_key` 对照钉住）；预热的流程与拒绝点归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13。
 - **为什么不升版**：`schema_version` 是 worker↔core 协议版本（与 job 行的 `schemaVersion` 同一个数，[0024](./0024-worker-core-protocol.md)），只在协议出现不兼容变化时递增。上述各键都是新增，既有键 `min_grace_s`、`deterministic_steps` 的条目字段、`model_id` 的含义一律不变；顶层 `targets` 虽为必有键，但 1.5 是第一个带它的版本、1.5 之前的 worker 不在支持范围内，schema 1 的契约就是「必有 `targets`」，升版没有要区分的对象。现行契约校验只核已知键、容忍多余键，故旧 CLI 读新 worker 不受影响；新 CLI 读缺 `targets` 的旧 worker 按版本不一致拒绝（决策 2）。
 - **校验位置不变**：新键与旧键一样，在 CLI 侧唯一的自述契约校验处核形态（device 取值属于 desktop / android / ios，`ui_kinds` 非空且属于 web / app，desktop 只允许 web，`max_session_s` 为正有限数，`requires` 为字符串数组，预热键为布尔；唯一性：顶层 `targets` 的 device 不重复（`max_session_s` 按 device 只能有一个值，取最小或取第一条之类的容忍规则会让 CLI 预检与 worker 自检各写一套消歧逻辑），任何位置的 `ui_kinds` 与 `requires` 元素不重复，step 级条目不出现 device、`ui_kinds`、`requires` 三项完全相同的重复），不合契约照旧 fail-loud、不写缓存，不散到 plan、doctor、`list-deterministic` 各自校验。
 - **不做**：不新增自述入口，不为目标另开 flag；不把「目标到句柄种类」的映射放进协议（desktop 对应 playwright 句柄、设备对应 webdriver 句柄是 [0050](./0050-deterministic-step-handles-and-testing.md) 的注册规则，消费方不需要据此做判断）。
@@ -66,7 +66,7 @@
 - 语义：worker 在该目标上能持有一次会话的最长秒数，计时起点为会话创建时刻（Device Farm 为 CreateRemoteAccessSession 的时刻；计费口径以账单为准，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
 - 取值：Device Farm 的 150 分钟上限减去 worker 收尾所需的余量（deleteSession 与 StopRemoteAccessSession 等释放步骤排在 `scope_done` 之前，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5），由 worker 内的预算常量算出、不在 CLI 或文档里另写字面量；与 `min_grace_s` 由收尾预算常量算出是同一做法（[0036](./0036-deterministic-capability-discovery.md) 决策 5）。
 - 消费：job 墙钟预算（自推进器 claim 这个 job 起算，[0034](./0034-detached-batch-reconciler.md)）超过该目标的 `max_session_s` 时，本机后端在执行前预检里拒绝（[0048](./0048-test-targets-device-and-ui-kind.md)），云端后端由 worker 在建会话前读取 Job 输入携带的 `timeoutS`、与该目标的 `max_session_s` 比较作自检拒绝（决策 7）。设备 scope 的缺省墙钟由 core 的 plan 层给出（[0034](./0034-detached-batch-reconciler.md)「job timeout」节），显式值与 tag 的下限校验也在 core；获取预算与会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。会话在 job 启动之后才创建，故墙钟不超过 `max_session_s` 即保证会话寿命不超过上限，不必为设备另立起算点。取设备的开销（创建到 Appium 可用，约 1 到 2.5 分钟）计入墙钟；停止到 COMPLETED 的时间发生在 job 结束之后，只计设备分钟、不占墙钟。
-- **按目标给值，不做顶层单值**：同一 worker 的桌面与设备会话上限来源不同，顶层单值只能取最小值，会把桌面 job 也限制在设备的上限之内。
+- **按目标给值，不做顶层单值**：同一 worker 的桌面与远程访问会话上限来源不同，顶层单值只能取最小值，会把桌面 job 也限制在设备的上限之内。
 
 ### 5. `min_grace_s` 保持顶层单值
 
@@ -83,7 +83,7 @@
 
 ### 7. 云端 worker 在建会话前按自己的 `targets` 自检
 
-- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），提交机器上的执行前预检无法取得云端镜像的自述，目标判断只能由 worker 侧完成。故 worker 在 job 开始、建立任何会话（浏览器会话或设备会话）之前，用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
+- 云端后端的提交机器不必装 worker（[0037](./0037-distribution-and-packaging.md) 决策 3），提交机器上的执行前预检无法取得云端镜像的自述，目标判断只能由 worker 侧完成。故 worker 在 job 开始、建立任何会话（浏览器会话或远程访问会话）之前，用与自述同一份 `targets` 核对 Job 携带的目标与墙钟预算（`timeoutS`）：目标不在 `targets` 里，或墙钟预算超过该目标的 `max_session_s`，即记 `precheck_failed`、零会话费用退出。本机后端也执行同一自检，作为执行前预检之外的第二道防线。
 - 传递方式沿用 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 对执行前失败的统一规则：worker 发 `scope_done{status: error, errorType: precheck_failed, message}`，不发 `scope_started`，不发任何 scenario 或 step 事件。错误类别的定义与处置语义（改用例或换测试包）同归 0051。
 - 消息形态（产品语言，不带内部指代）：「这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎，或使用与命令行工具同版本的 worker 镜像。」
 - 防止「旧镜像把设备 job 当桌面执行」靠两层：镜像按 CLI 版本解析（[0038](./0038-worker-image-delivery.md) 的 `<版本>-<variant>` tag），1.5 的 CLI 只会解析到 1.5 的镜像；自检覆盖其余情形，例如 variant 基于不一致的基础镜像构建。worker 自检的第一步是核 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)），命令行工具与 worker 版本不一致时在建会话前以 `precheck_failed` 报出；1.5 之前的 worker 不认识这个键、自检对它无效，这一情形只由版本解析保证；缺版本戳的旧后端见 [0037](./0037-distribution-and-packaging.md) 决策 7 的例外。
@@ -122,7 +122,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 
 ## 边界与互链
 
-- 目标的声明（`@device`、`@app`）、冲突规则、FeatureContractError 的拒绝与 plan 的设备会话数：[0048](./0048-test-targets-device-and-ui-kind.md)。
+- 目标的声明（`@device`、`@app`）、冲突规则、FeatureContractError 的拒绝与 plan 的远程访问会话数：[0048](./0048-test-targets-device-and-ui-kind.md)。
 - 句柄种类、`uiKinds` 与 `devices` 过滤、step 级 `targets` 如何从注册推出、命中条目在目标上无句柄时的处理：[0050](./0050-deterministic-step-handles-and-testing.md)。
 - 会话的获取预算、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed` 等错误类别、执行前失败经 `scope_done` 的传递规则、终结四阶段与收尾次序、会话预热：[0051](./0051-device-session-lifecycle-and-app-distribution.md)；设备 scope 的缺省墙钟与下限校验：[0034](./0034-detached-batch-reconciler.md)「job timeout」节。
 - 运行期的能力探测（网页上下文可用性、输入路线等随会话变化的事实）不进自述：自述是不建会话、零费用的静态声明，探测结果写进 scope 诊断，归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。

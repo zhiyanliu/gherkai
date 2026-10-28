@@ -5,14 +5,14 @@
 | 页 | 回答什么问题 | 这一篇负责的主题（其余页只给链接、不展开） |
 |---|---|---|
 | [`getting-started.md`](./getting-started.md) | 装什么、要哪些 AWS 前置、第一次怎么完整运行 | 安装形态（CLI、两个引擎 worker、部署 extra）、AWS 凭证与 region、需开通的服务、`doctor` 自检、用 AI agent 上手、手敲 CLI 的最小四步 |
-| [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才能稳定运行 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、整句地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票 |
+| [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才能稳定运行 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、整句地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票、敏感信息 |
 | [`engines.md`](./engines.md) | 两个引擎各能在什么目标上运行、默认用哪个模型、费用按什么公式计 | 引擎能力矩阵（引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式）、用 `doctor` 与 `list-deterministic` 核对本机 worker 的目标与模型 |
-| [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) | 精确判定的步骤怎么自己写 | `steps/` 目录约定、Python 与 TypeScript 两侧并排的注册 API、`description` / `example` 的作用、写得稳（等待与判定）、失败消息带现场、判定逻辑与注册分离并本地单测、加载失败怎么表现、如何核对与带到云端 |
+| [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) | 精确判定的步骤怎么自己写 | `steps/` 目录约定、Python 与 TypeScript 两侧并排的注册 API、给设备目标加第二份实现（`playwright` 与 `webdriver` 两种句柄）、`description` / `example` 的作用、写得稳（等待与判定）、失败消息带现场、判定逻辑与注册分离并本地单测、加载失败怎么表现、如何核对与带到云端 |
 | [`running-and-results.md`](./running-and-results.md) | 四种组合（执行方式 × 执行后端）怎么选、结果在哪、退出码什么意思 | `plan` / `run` / `submit` / `status` / `explain` 的用法与差别、`list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、本机与云端两个后端、`run` / `submit` 的常用选项、退出码（部署方命令的退出码归云端后端页）、报告与证据在哪、费用量级、机读输出的入口 |
-| [`local-app-testing.md`](./local-app-testing.md) | 被测应用只在本机或内网时怎么测 | `--expose-local` 的前置、行为、限制与存活时间 |
-| [`cloud-backend.md`](./cloud-backend.md) | 团队怎么部署与维护云端后端 | `gherkai deploy` / `destroy`、VPC 的三种取值、版本与升级、worker 镜像 variant 与默认指针、清理、部署机权限、`deploy` / `destroy` 的退出码、常见错误 |
+| [`local-app-testing.md`](./local-app-testing.md) | 被测应用只在本机或内网时怎么测 | `--expose-local` 的前置、行为、限制、存活时间、安全与常见故障 |
+| [`cloud-backend.md`](./cloud-backend.md) | 团队怎么部署与维护云端后端 | `gherkai deploy` / `destroy`、VPC 的三种取值、版本与升级、worker 镜像 variant 与默认指针、清理、部署机权限、团队成员需要的最小云端权限、`deploy` / `destroy` 的退出码、常见错误 |
 | [`configuration.md`](./configuration.md) | 有哪些配置项、各自在哪里生效 | 项目配置文件 `gherkai.toml`、环境变量与选项总表：模型选择、region、超时与停止宽限、报告与 steps 目录、worker 拉起、云端资源名与网络的单项覆盖、由 gherkai 注入的变量 |
-| [`troubleshooting.md`](./troubleshooting.md) | 报错了先看哪 | `doctor` 的读法、按症状分表的处置（安装与版本 / 凭证与 region / 模型 / 引擎与判定 / 云端 / 提交后进度停住 / 其它退出码 2）；确定性 step 加载失败的表现归 writing-deterministic-steps，这里只留指针与 worker 自述失败两行 |
+| [`troubleshooting.md`](./troubleshooting.md) | 报错了先看哪 | `doctor` 的读法、按症状分表的处置（安装与版本 / 凭证与 region / 模型 / 引擎与判定 / 云端 / 提交后进度停住 / 隧道 / 项目配置文件与设备目标 / 其它退出码 2）；确定性 step 加载失败的表现归 writing-deterministic-steps，这里只留指针与 worker 自述失败两行 |
 | [`faq.md`](./faq.md) | 决策前的疑问：必须先部署云端后端吗、AI 判定能不能当门禁、和别的测试框架什么关系 | 跨页问题的一句话结论加去哪读；就地拥有的选型类问题：与 Playwright / Cucumber 的关系与迁移、浏览器与视口、无 JUnit XML 等第三方报告格式的输出 |
 
 ## 约定

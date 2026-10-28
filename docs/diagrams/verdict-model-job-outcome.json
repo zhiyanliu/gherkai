@@ -307,7 +307,7 @@
       "dot": "rose",
       "title": "例外与边界",
       "items": [
-        "设备会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因都改为 release_failed，原因消息保留",
+        "远程访问会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因都改为 release_failed，原因消息保留",
         "scope 级 error 先于空判定集检查：worker 在执行前报的失败保留它自己的归因",
         "建连失败的 job 已建立会话并已计费，因此不记 skipped，照常进入整个 run 的聚合",
         "skipped 与 aborted 不带归因，未产出判定的原因只写在 message 里"

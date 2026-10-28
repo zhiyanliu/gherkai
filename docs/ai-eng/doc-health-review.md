@@ -33,7 +33,7 @@ ADR / CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠�
      - ③ **code 偏离了 ADR 已定的设计、且没有任何 ADR 记录这次偏离** → **不落文档改、不算客观类**：报人裁定是「实现没对齐设计 → 改 code」还是「设计该变 → 人拍板后显式改 ADR」，并移交姊妹任务 [`code-health-review.md`](./code-health-review.md) 的 VIOLATES_ADR 条接收。**报裁定时必附复盘方的倾向**（实现更合理还是设计更合理）**与理由**（两边各能核到的真值、代价、与其它 ADR 的牵连）——人只做拍板、不从零判；只报「不一致」不给倾向 = 未完成，把判断成本原样推回给人。
    - **本任务最该防的误伤**：复盘顺手把 ADR 改成 code 的样子 = 把漂移合法化。
 3. **DEADLINK**：指向不存在的 ADR / 文件 / 锚点，或引用已删除的字段 / 函数名。对 REFERENCES.md 与技术笔记这类「外部来源 + 源码内点」文档额外查：① 文中指向的源码路径 / 内部符号是否随重构失效——对照 code 核实；② 外部 URL 是否明显过期（不强求逐个 fetch，但结构性失效 / 改版要标）。
-   - **引用方向违规**（悬空指针的一类，判据见 CLAUDE.md 文档纪律「悬空指针红线」条）：长期文档里指向 `docs/journey/` 的链接、裸 WP 编号、只在某次会话成立的指代（「#1 修复」「本轮那个 bug」）一律报。**修法不是删信息**：把被引的证据 / 结论**内联**进 ADR 使其自包含，血缘用**对未来读者自明的事件描述**替代。Draft ADR 可暂留 journey 引用、Accepted 必清——这条例外绑死 Status 头，审计点见下「Status 头」节。
+   - **引用方向违规**（悬空指针的一类，判据见 CLAUDE.md 文档纪律「悬空指针红线」条）：长期文档里指向 `docs/journey/` 的链接、裸 WP 编号、只在某次会话成立的指代（「#1 修复」「本轮那个 bug」）一律报；本机坐标（个人目录下的绝对路径、本地 clone 目录名）在全部 markdown 里都报、journey 也不例外，修法是改写成 repo 相对路径。**修法不是删信息**：把被引的证据 / 结论**内联**进 ADR 使其自包含，血缘用**对未来读者自明的事件描述**替代。Draft ADR 可暂留 journey 引用、Accepted 必清——这条例外绑死 Status 头，审计点见下「Status 头」节。
 4. **REDUNDANCY**：同一事实多处完整重述且漂移 / 可合并段落 / 可精化冗长句 / 单 ADR 内可重组以提升 AI 检索的段落顺序。
 5. **SEDIMENT（施工叙事沉积）**：迭代过程叙事在长期文档里的残留——「先做 X 后发现 Y 改成 Z」的施工节奏、「P3b / 步骤几」这类过程编号、被后续迭代覆盖却没删的旧描述层、**现场流水**（坐标型数字——run_id / revision 号 / 时刻 / 单次耗时——与逐条命令过程；判据型数字不算，粒度判据见 CLAUDE.md 文档纪律「内联粒度判据」条）。**处置：归主观类待批**。
    - **检测**：它是构建的累积函数，快照式读当前文照不出——检测法见第一层【强制】提纯审计。
@@ -43,7 +43,7 @@ ADR / CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠�
    - **使用者向文档**（`docs/user-guide/**`、根 README、各包 README、`CHANGELOG.md`、Release 正文 footer、agent skill）：产品说明口吻之外的写法都报——隐喻与俏皮话、同事口头语、施工叙事（「我们这次 / 本轮」）、无动词的标签句、面向同事而非使用者的措辞、术语未定义就用、晦涩内部术语、决策六列的三种 AI 侧缩写形态（符号当谓语、自造二字复合词、省略中心词的数字缩写，用户文档与 skill 正文另加箭头）。**处置：主观类待批**，报法 = 引原句 + 给改写句。
    - **技术文档**（CONTRIBUTING / 各包 DEVELOPMENT / `.github/workflows/README.md` / internals / `tools/*.md`）：报俏皮话、口头语与决策六列的三种缩写形态（符号当谓语、自造二字复合词、省略中心词的数字缩写；箭头表顺序与因果不算），不报密度（允许术语）。
    - **术语面**：人读文档（含 internals 与图源）里出现 CONTEXT.md `_Avoid_` 登记的旧名或非规范名即报。**分流判据**：先查该词在护栏属哪张表——`COLLOQUIAL` 只约束人读层与产品文案、`RETIRED_TERMS` 管用词版本；量词「档」是唯一横跨两类的一项（在 `COLLOQUIAL` 里，但按 ADR 0045 决策六全仓禁用、含 AI 侧文档，护栏只扫得到人读面那一半）；`_Avoid_` 登记的是完整术语名时不推及其前缀或子串；同一退役名跨多篇时**必须一次做完并附全量落点**。发现规范术语本身不合书面标准时**不就地改文档**，报为「词表项」交 owner，改名走 ADR 0045 决策八的顺序（先词表、再传播）。
-   - **护栏分工**：正则能抓的（禁词、退役旧名、口头语表）已由 `cli/tests/test_user_docs.py` / `test_package_readmes.py` / `test_skill.py` 机械挡住用户文档、图源、skill、包 README 四面；本类抓正则外的语义与可读性，并补技术文档与 internals 那半的术语面。contributor 侧 AI agent 文档不在本类射程。
+   - **护栏分工**：正则能抓的（禁词、退役旧名、口头语表）已由 `cli/tests/test_user_docs.py` / `test_package_readmes.py` / `test_skill.py` / `test_technical_docs.py` 机械挡住用户文档、图源、skill、包 README 与技术文档（含 internals）五面；本类抓正则外的语义与可读性，以及各面里 `_Avoid_` 登记却未进退役表的旧名。contributor 侧 AI agent 文档不在本类射程。
 
 ## 按文档类型的复盘侧重（用对判据）
 
@@ -56,7 +56,7 @@ ADR / CONTEXT 是随构建**逐步长起来**的：每次在前人文档上叠�
 - **其余 README / 目录索引页**（`core/tests`、`skills`、`docs`、`docs/ai-eng`、`docs/internals`）：不进发行包、按 contributor 向 / 索引页判，**ADR 指针与相对链接在它们里合法**；`skills/README.md` 只是指路——源文件在 `cli/`，本目录只有评测资产。
 - **docs/internals/**（给人的阅读理解层，派生视图）：按 README 同侧判据（保叙事）；主查 STALE（对照 code 与权威 ADR）、**越界复述 why**（决策理由出现在正文 = 双源苗头，修法 = 压回指针；写作判据在 CLAUDE.md 文档纪律 internals 条）、**篇间归属与重叠**（同一机制只一篇作 owner、其余给指针；修法 = 定归属 + 留指针，不是压句子；新增 internals 篇时既有篇的延伸阅读要指过来；归属表 = `docs/internals/README.md` 索引）。**图源 `docs/diagrams/*.json` 同属派生视图**：节点 / 边 / 顺序对照 code 与正文，图上出现会漂的字面量或与正文双写规则报 REDUNDANCY；改动后跑 `tools/build_diagrams.mjs` 重出 SVG，JSON 与 SVG 同 commit（ADR 0045 决策七）。`cli-json-contract.md` 的字段清单已由 `cli/tests/test_cli_json_contract.py` 与 `deploy_aws/tests/test_workers.py` 对真渲染器逐键断言，本任务只查字段**释义**与出现条件，不手工对字段表。
 - **agent skill**（`cli/gherkai_cli/skills/gherkai/**`，随 CLI wheel 发行）：按各包 README 同侧判据（零内部指代、只用绝对 URL、跨文件指针写反引号裸路径），去向见 ADR 0039 面二 + [0043](../adr/0043-agent-skill-for-driving-gherkai.md)。护栏 `cli/tests/test_skill.py`（禁词 / 相对链接 / URL 钉 HEAD·tag / flag 归属 / JSON 键名 / 契约副本等值）与 `deploy_aws/tests/test_skill_deploy_tokens.py`；本任务只查语义越界与「安装态的 agent 照它做还对不对」。**`references/cli-json-contract.md` 是 `docs/internals/cli-json-contract.md` 的确定性转换产物、一律不手改**（改源页后跑 `tools/render_skill_contract.py`），本任务查的是那份手写源与 code 是否一致。
-- **REFERENCES / 技术笔记 / 配方 / 工具手册**（`docs/ai-eng/REFERENCES.md`、`engines/midscene/spikes/SIGV4-FETCH-RECIPE.md`、`tools/e2e_harness.md` 这类）：没有「决策矛盾」维度，重在「配方 / 引用还灵不灵」——代码片段是否还与当前 SDK / 实现对得上、踩坑点是否还成立、指向的源码路径 / 外链是否有效。
+- **REFERENCES / 技术笔记 / 配方 / 工具手册**（`docs/ai-eng/REFERENCES.md`、`tools/e2e_harness.md` 这类）：没有「决策矛盾」维度，重在「配方 / 引用还灵不灵」——代码片段是否还与当前 SDK / 实现对得上、踩坑点是否还成立、指向的源码路径 / 外链是否有效。
 - **方法文档与入口**（`docs/ai-eng/{doc,code}-health-review.md`、`diagram-authoring.md`、`.claude/commands/*.md`、`.claude/skills/doc-diagram/SKILL.md`）：只查 DEADLINK / STALE / 内部矛盾 / SEDIMENT，入口是否仍只含指令与指针、没长出要点复制（入口不复述方法，免同步漂移）；**规则内容本身是决策、不在复盘里改**（改规则的唯一入口见「产出与提交」的方法复盘），SEDIMENT 只动措辞不动规则（亲历数字、轮次坐标、同一规则的第二遍重述），按主观类出提案待批；不进提纯审计集的 git 层读。
 - **CLAUDE.md**：只查 DEADLINK / STALE（点名的护栏测试文件、ADR 编号、目录名、节名是否仍存在、与所指 ADR 是否一致）；规则内容不在复盘里改。
 - **`docs/journey/`**（staging 区，可为空）：只做生命周期审计——非空时逐个判「该吸收进 ADR / code 后删」还是「任务仍在推进、留」，不做密度 / 提纯（判据在 CLAUDE.md 文档纪律 journey 条）。

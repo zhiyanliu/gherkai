@@ -8,7 +8,7 @@
 
 | 载体 | 内容 | 更新者 | 生效时机 | 名称 / 真源 |
 |---|---|---|---|---|
-| **CloudFormation stack** | 全部资源与其形态：runs 表（另带 `status-index` 稀疏 GSI）与 events 表（另带 TTL），两表都开 Stream；artifacts 桶（含 job-in 的按 tag 过期规则）；ECS cluster；每引擎一个 **task-def 模板 revision** 与一个 ECR repo；三个 Lambda + EventBridge rule + 两条 Stream 事件源；IAM 角色；VPC/子网/安全组；以及随事务写的几族 SSM 参数 | `gherkai deploy`（组装 context → 由 cdk CLI 启动 `gherkai_deploy_aws.app` 合成 → `cdk deploy`） | 变更集应用完即生效；**回滚时随事务一起回滚**（版本戳与模板不留错值） | stack 名取 `names.stack_name(prefix)`（provider 专有，与 `LAMBDA_ASSET_DIR_ENV` 同在 `deploy_aws/gherkai_deploy_aws/names.py`）；云资源名全经 `gherkai_runtime.names` 由 `--prefix` 推导 |
+| **CloudFormation stack** | 全部资源与其形态：runs 表（另带 `status-index` 稀疏 GSI）与 events 表（另带 TTL），两表都开 Stream；artifacts 桶（含 job-in 的按 tag 过期规则）；ECS cluster；每引擎一个 **task-def 模板 revision** 与一个 ECR repo；三个 Lambda + EventBridge rule + 两条 Stream 事件源；IAM 角色；VPC/子网/安全组；以及随事务写的几族 SSM 参数 | `gherkai deploy`（组装 context → 由 cdk CLI 启动 `gherkai_deploy_aws.app` 合成 → `cdk deploy`） | 变更集应用完即生效；**回滚时随事务一起回滚**（版本戳与模板不留错值） | stack 名取 `names.stack_name(prefix)`（provider 专有，与 `LAMBDA_ASSET_DIR_ENV` 同在 `deploy_aws/gherkai_deploy_aws/names.py`）；云资源名都由 `--prefix` 推导：cli 与 IaC 两侧都要用的名字经 `gherkai_runtime.names`；只有 stack 自己用的日志组 `/{prefix}worker/{engine}`、EventBridge rule `{prefix}ecs-stopped` 与 Scheduler 执行角色 `{prefix}timeout-scheduler` 直接写在 `stack.py` 里 |
 | **三个 Lambda 的部署 asset** | `lambdas/` 的 handler 源（`reconciler.py` 一份两个入口 + `exit_observer.py`）+ `BackendStack.LAMBDA_ASSET_PACKAGES` 逐项**从当前 venv 已安装位置复制**的 import 包（含 `gherkai_core` / `gherkai_runtime`）。boto3 由 Lambda runtime 自带 | 同一条 `gherkai deploy`（asset 由 `stack._build_lambda_asset()` 在本次部署时复制到临时目录） | asset 内容变 → CDK 算出的 asset hash 变 → 本次 deploy 的变更集包含三个函数的代码更新 | `stack.BackendStack.LAMBDA_ASSET_PACKAGES`；落点经 env `names.LAMBDA_ASSET_DIR_ENV` 从命令进程传给 cdk 启动的 app 进程 |
 | **官方基础镜像** | 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**（`engines/*/Dockerfile`） | 发布方的 CI 按 tag 发到 GHCR（`workers.GHCR_BASE_IMAGE`） | 在 GHCR 就位**之后**，仍需 `gherkai deploy` 第 2 步 pull→push 进本账户的 ECR 才在云端可用；**运行时不直连 GHCR** | `ghcr.io/…/gherkai-worker-<engine>:<版本>` |
 | **使用方的 variant 镜像** | 基础镜像 + 使用方 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）；**云端执行哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 使用方自行 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在运行的 run 不切换（见 §5） | ECR tag 取 `names.image_tag(CLI 版本, variant)`；repo 名取 `names.ecr_repo_name` |
@@ -65,6 +65,7 @@
 | 症状 | 缺的那一步 | 判据位置 |
 |---|---|---|
 | 任何 cloud 命令直接以退出码 2 结束，提示「本机 CLI 新于后端」 | ② 未执行（stack 未重新部署 → 版本戳仍是旧值） | `compose.SKEW_BLOCK` 分支 |
+| 退出码 2，提示后端没有版本戳、部署早于设备目标功能 | ② 未执行（旧部署没有版本戳，带隧道或设备目标的 run 要求后端先升级） | `compose.check_version_skew` 的缺戳分支 |
 | 云端 `submit` 的判定明细缺新字段（如 step 级 `message`），同版本本机 `run` 却有 | ② 未执行（**Lambda asset** 未重新上传；云端 `jobs/*.json` 由 asset 里那份 `gherkai_core` 投影产出） | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「交付链」条 |
 | 云端执行完没有证据 / step 行为仍是旧的 | ③ 未执行（**worker 镜像**未重新推送；发行版经 ② 的基础镜像同步，dev 树经 `push-worker`） | 同上 |
 | 退出码 2，提示「默认 variant `X` 在新版本尚无镜像」 | ③ 未执行。**默认指针不随升级重置**（它记录的是团队意图，`init_default_pointer` 在参数已存在时不改动）：指针仍指向 `X`，而 `<新版本>-X` 尚未推送 | `workers.init_default_pointer`；提示语在 `compose._variant_miss_hint` |
@@ -74,7 +75,7 @@
 | `deploy` 以退出码 1 结束并提示「stack 已生效，但同步基础镜像要 pull/push——deploy 的机器需要容器引擎」 | ② 的第 2 步未执行：纯发行版要求部署机具备容器引擎，探活失败即**硬失败**，第 3/4 步与清理 pass 均未执行——安装后重新运行 `gherkai deploy`（幂等收敛）。非纯发行版不探测容器引擎，第 2 步整步跳过并输出一条警告，第 3/4 步照常执行 | `workers.run_deploy_steps`（探活分支退出码 1）/ `workers.sync_base`（非纯发行版跳过；判据 `compose.is_pure_release`）；cdk 前那句预告在 `cli.Provider.deploy` |
 | `list-workers` 里 revision 比 variant 多 | 正常现象：已退休 / 孤儿 revision 正等待清理 pass（见 §5），`_pending_cleanup` 逐条列出原因 | `workers.list_workers` |
 
-`gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），以及部署工具链（Node / cdk / 容器引擎）。
+`gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），云端 task-def 的停止宽限与本机 worker 自报的最短收尾宽限之间的比对（可选项；本机没有该引擎 worker 时跳过该引擎），以及部署工具链（Node / cdk / 容器引擎）。
 
 > 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)（四步、preflight、`--set-default` 只警告不拦）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 的 provider 段）。
 
@@ -85,7 +86,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 1. preflight 把 `--worker-variant`（缺省即默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 中仍存在（三相时序见下图）；任一环缺失即以退出码 2 结束，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
 2. 解析结果写进 definition：`RunMeta.worker_variant`（人读）+ `RunMeta.worker_task_defs`（引擎到 revision ARN 的映射），同一批 ARN 另以扁平形式写入 runs 表 STATE item 的顶层属性 `worker_task_def_arns`。
 3. 云端推进器（kicker / reconciler）与前台 `run` 的 `FargateEngine` 一律**照 definition 起 task**，用显式 revision、永不用 family 取最新；revision 的镜像栏是 `repo@sha256:<digest>`。
-4. definition 里没有 `worker_task_defs` 的提交记录（旧 CLI 写出的）**不被执行**：推进器把该 run 标为 `error`、原因写进 run 级 `message`（`status` 可见），不按默认指针解析；同批别的 run 不受影响（events Stream 一批含多个 run，向外抛异常才会让该批次重投后丢弃）。
+4. 结构版本不是后端所认那一版的提交记录（由更早或更新版本的 CLI 写出），以及 definition 里没有 `worker_task_defs` 的提交记录，都**不被执行**：推进器把该 run 标为 `error`、原因写进 run 级 `message`（`status` 可见），不按默认指针解析；同批别的 run 不受影响（events Stream 一批含多个 run，向外抛异常才会让该批次重投后丢弃）。
 
 ![提交时刻把 variant 解析为本 run 每个引擎的显式 revision 并写入 run 记录；之后重推同名 variant 只产生新 digest、新 revision 与新映射，起 task 仍照定义使用提交时固定的那一个](../diagrams/cloud-backend-carriers-revision-pinning.svg)
 
@@ -94,7 +95,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 第 3 条的正确性有两道配套护栏，都在回收侧：
 
 - **ECR 仓库不设任何 lifecycle 规则**：正在运行的 run 的旧 revision 按 digest 指向被重推后转为 untagged 的那一层，因此这两个 repo 上**不得添加 untagged 过期规则**；随之而来的 untagged 层增长是已知的存储成本（该决策的理由与代价记录见本节末权威行的 ADR 0038）。
-- **删 revision 要满足清理的两个前置条件**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）**且**无未到终态的 run 引用它。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、运行中 run 引用检查静默失效。任一条不满足则留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对运行中 run 引用检查不可见。
+- **删 revision 要满足清理的三个前置条件**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）、无未到终态的 run 引用它，**且**不再被任何版本的 `worker-image/*` 映射引用（已退休但仍被某个映射引用的 revision 留着，删了会让那条映射悬空；孤儿按定义不在任何映射里，不受这一条影响）。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、运行中 run 引用检查静默失效。任一条不满足则留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对运行中 run 引用检查不可见。
 
 > 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」「运行时与 preflight」（含被拒方案：RunTask 传 family、缺字段回落模板、ECR untagged 过期规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（definition 随 run 走、宿主只读回）；code：`compose.resolve_worker_variant`、`workers.cleanup_pass`、`core/gherkai_core/adapters/run_store/ddb.py` 的 `create_run`。
 
@@ -104,7 +105,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 
 两条配套事实：
 
-- **两侧 prefix 必须一致**：部署侧与提交侧走的是**同一条解析链** `compose.resolve_cloud_target`（flag > `AWS_RESOURCE_PREFIX` > `names.DEFAULT_PREFIX`），CDK 建出的名就是提交侧推导的默认名；不一致时 preflight 报出 prefix 并以退出码 2 结束。
+- **两侧 prefix 必须一致**：部署侧与提交侧共用同一个解析函数 `compose.resolve_cloud_target`。部署侧的取值顺序是 flag > `AWS_RESOURCE_PREFIX` > `names.DEFAULT_PREFIX`；提交侧在环境变量之后、默认名之前，还有项目配置文件 `gherkai.toml` 的 `prefix` 一层，部署命令不读这个文件。项目在配置文件里写了 prefix 时，部署方要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一个值，CDK 建出的名才与提交侧推导的一致；不一致时 preflight 报出 prefix 并以退出码 2 结束。
 - **variant 按版本隔离，不等于「多版本同时运行」**：SSM 键含版本（`worker-image/<engine>/<版本>-<variant>`），旧版本的映射保留为历史、不参与当前版本解析（`workers.current_version_mappings` 接收一次枚举好的参数序列，只取当前版本前缀的条目）。
 
 前台 `run --backend cloud` 与 detached `submit --backend cloud` **共用同一套表、桶、cluster、task-def 与三个 Lambda**，分流依据是 STATE 上的 `detached` 标记（kicker 在 Stream filter 层过滤，reconciler / exit-observer 在 handler 内判定），故一套 prefix 可同时服务两种执行方式而互不干扰；两道拦截的细节见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §7。

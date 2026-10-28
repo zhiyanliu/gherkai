@@ -1,6 +1,6 @@
 # schedule 模块：job 间并发调度 + 失败隔离 + 优雅终止
 
-> **Status:** Partially-superseded-by 0034 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3）、同步 `run` 路径的 schedule 驱动循环不变；仅「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下「优雅终止」段与「现在做 / 留口子」段的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。
+> **Status:** Partially-superseded-by 0034, 0051 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3），同步 `run` 路径仍用 schedule 的驱动循环；「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下「优雅终止」段与「现在做 / 留口子」段的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写本篇复述的三处，均已原位改写：未见 `scope_done` 时的判定收进两条归约路径共用的终结函数（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」，首次仲裁时 deadline 已过即取 timeout；「job 级乐观归约的内容完整前置」条的内容完整前置与拒绝假绿不变）；事件集加 `session_opened` / `session_closed`；job 级网络重试门槛由双条件改为三条件（加「job 目标不是设备」，见 [0028](./0028-transient-network-ssl-resilience.md)）。其余条文不变。
 
 核心库把 plan 产出的 **job 列表**（[0025](./0025-plan-module-feature-to-jobs.md)）实际跑起来的模块：决定哪些 job 并行、控并发、起 worker、收流式事件、隔离失败、超时兜底。它兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)/[0019](./0019-feature-tags-scope-and-engine.md) 留给核心库的「scope 串/并行调度、会话共享」。它是 v1.0 核心三模块的最后一块（协议 [0024](./0024-worker-core-protocol.md) → plan [0025](./0025-plan-module-feature-to-jobs.md) → schedule 本 ADR）。
 
@@ -40,9 +40,9 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 - **job = scope = 会话边界**（[0016](./0016-execution-architecture-core-lib-run-model.md)）。「scope 内串行」由 worker 自己完成（一个 worker 顺序跑完该 scope 全部 scenario、共享一个会话，[0024](./0024-worker-core-protocol.md)）。
 - 故 schedule 层面 = **job 之间并行**：每个 job 经 `engines(job.engine)` 解析出 Engine、起一个 worker，彼此独立。
 
-### 并发上限（保护真实 AWS 成本/配额）
+### 并发上限（保护 AWS 配额与峰值消耗）
 
-- `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用，**产生真实费用**（[0024](./0024-worker-core-protocol.md) cost）。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
+- `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用；并发越高，同时在线的会话和并行的模型调用越多，占用配额、抬高单位时间的消耗。总费用由 job 数与各 job 的原生用量决定，不随并发变化（见本节「CLI 默认值须与此对齐」条的实测；[0024](./0024-worker-core-protocol.md) cost）；例外是 fail-fast 早停时，并发越高，被中止前已产生的费用越多。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
 - 是**注入参数 + 保守默认**，不写死——本地全量可调高、配额紧可调低。
 - **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。2026-09-29 对齐回 4（`run` / `submit`，以及 `status --wait` 与 reconcile 缺值时的回落）。
 
@@ -61,23 +61,23 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ### 网络瞬时故障的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md)）
 
 - worker 建连失败、重试耗尽 → 以专用退出码退出 → adapter 抛 `WorkerNetworkError` → schedule 记 `error_type="network_error"`。
-- schedule 对这类 job **选择性整体重试**（重新 spawn worker），门槛双条件 AND：① `network_error` ② 「会话未起」= 本次零 `step_done`（证明 act 没跑、无副作用——绝不重试可能已点击的 act）。**fail_fast/timeout 优先级更高**（已主动中止的不重跑）。
-- `ScheduleOpts` 加 `network_retry: int = 0`（默认关,本地 smoke 不需要;CI/抖动环境可开,同「注入参数+保守默认」原则）+ `retry_sleep`（注入,单测传 no-op 保 fake-clock 纯净）。`job_timeout` deadline 跨 attempt 不重置。
+- schedule 对这类 job **选择性整体重试**（重新 spawn worker），门槛三条件 AND：① `network_error` ② 「会话未起」= 本次零 `step_done`（证明 act 没跑、无副作用——绝不重试可能已点击的 act）③ job 目标不是设备（设备会话的建连失败不做 job 级重试，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。**fail_fast/timeout 优先级更高**（已主动中止的不重跑）。
+- `ScheduleOpts` 加 `network_retry: int = 0`（默认关,本地 smoke 不需要;CI/抖动环境可开,同「注入参数+保守默认」原则）+ `retry_sleep`（注入,单测传 no-op 保 fake-clock 纯净）。job 墙钟预算（`Job.timeout_s`）的 deadline 跨 attempt 不重置。
 
 ### 优雅终止（schedule 只下逻辑「停」指令，机制归 adapter）
 
 「怎么停」的具体机制**不在 schedule**——本模块只负责下逻辑指令，机制/会话清理归 adapter 与 worker（三层完整机制见 [0024](./0024-worker-core-protocol.md) 终止契约节，此处只钉本模块边界，不复述以免漂移）：
 - **schedule → WorkerHandle**（本模块职责）：只调逻辑指令 `handle.stop(gracePeriod)`（「请停这个 worker」）。`handle` 由 `engine.run_scope(job)` 返回、schedule 持有；`Engine` port **只有 `run_scope`、不挂 stop**（句柄自己知道怎么停）。schedule **不懂** SIGTERM/进程/StopTask——只知道「下停止指令、等归约」。
-- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / 未来 Fargate `StopTask`）、会话清理（`StopBrowserSession`）归 worker——**故「停止机制上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。（**⚠️ 此处「一行不改」限于「停止机制」这一层**——驱动循环整体的演进是另一回事、非「换 adapter」能覆盖，见下「留口子」段 ⚠️ 注。）（SIGKILL 硬杀致会话释放落空的低频泄漏由 AgentCore session TTL 兜底、**不引入 core reaper**，见 [0024](./0024-worker-core-protocol.md) 终止契约「已接受代价」——schedule/core 纯度不变。）
+- **机制层与会话清理**（转指针）：adapter 把逻辑「停」翻成具体机制（子进程 SIGTERM+宽限+SIGKILL / Fargate `StopTask`，即 `FargateWorkerHandle.stop`）、会话清理（`StopBrowserSession`）归 worker——**故「停止机制上云只换 adapter」成立**（见下「留口子」），schedule 一行不改。机制细节 + 两引擎会话释放见 [0024](./0024-worker-core-protocol.md) 终止契约 + [0028](./0028-transient-network-ssl-resilience.md) Midscene 会话集清理。（**⚠️ 此处「一行不改」限于「停止机制」这一层**——驱动循环整体的演进是另一回事、非「换 adapter」能覆盖，见下「留口子」段 ⚠️ 注。）（SIGKILL 硬杀致会话释放落空的低频泄漏由 AgentCore session TTL 兜底、**不引入 core reaper**，见 [0024](./0024-worker-core-protocol.md) 终止契约「已接受代价」——schedule/core 纯度不变。）
 
 > **进程拓扑（澄清「几个地方」）**：实际是 **2 进程 + 1 远程 + 1 seam**——①core/schedule 进程；②`Engine` adapter（在 core 进程内，但它是通向「进程/云」世界的 seam，「怎么停」知识归这里）；③worker 子进程（engine SDK 是**进程内的库**、非独立进程）；④远程 AgentCore 浏览器会话（云端、worker 经 CDP 连）。engine SDK 拆除 + 会话停止都在 worker 进程内完成。
 
 ### 事件归集（status + 原生量成本 + 墙钟时长 三级归约）
 
-- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，七类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成 `RunResult`。
+- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，九类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`/`session_opened`/`session_closed`（后两类是设备 job 的会话事件，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成 `RunResult`。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
 - **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed）→ run（同规则跨 job，但**入口先滤掉非终态判定** skipped/aborted/pending/running，即 `_NON_VERDICT`，run 级只看真正出了判定的 job，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三）。job 级除 worker 三态外，core 在 fail-fast 时还会派生 `skipped`（排队没起）/`aborted`（跑一半被掐）终态（[0031](./0031-job-lifecycle-states-and-severity.md)）。
-- **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--default-job-timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时按来源分流**（对齐 `core.project._job_status` 的「干净退出无 scope_done → ERROR」口径、消同步/无状态两路判定分叉）：`abort_flag` 已置位 → ABORTED（fail-fast 掐停，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；已超 deadline → error+timeout；其余 → error+engine_error（进程说成功、内容没发完=矛盾）。
+- **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--default-job-timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时不落乐观终态**：判定由同步与无状态两路共用的终结函数 `core.project.finalize_job` 给出（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」），依据首次仲裁落定的 `stop_reason`：作出停止决定那一刻 deadline 已过取 error+timeout（即使 fail-fast 标志也已置位），否则 fail-fast 中止取 ABORTED（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；没被主动停止、干净退出却没有 scope_done 的取 error+engine_error（进程报告成功而内容没发完，两者矛盾）。（本篇曾在 EOF 分支先判 `abort_flag` 再判 deadline，与事件分支的次序相反，已由 0034 机制二的首次仲裁规则统一。）
 - **`step_skipped` 归约（scope 内短路，不臆断因果的守法方式，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：worker 上游 step `error` 后短路后续 step、为每个发 `step_skipped`；core 归约成 `StepResult(status=skipped, shortcircuited=True)` 记进 step 明细，**但绝不把它写进 scenario 判定累加器**——scenario/job/run 判定只由那个上游 `error` step 决定，与"后面短路了几步"无关（step 级 skipped 零污染 scenario 归约/severity）。因果（"谁因谁短路"）只存在于 worker 的串行循环，core 作为纯 reducer 物理上看不到、也不臆断——它只忠实归约 worker 发来的 `step_skipped`，把"某步没跑"如实记进 `StepResult`。
 - **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
 - **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。

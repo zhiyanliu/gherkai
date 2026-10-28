@@ -34,7 +34,7 @@ Midscene 的 `createOpenAIClient` 回调把一个带自定义 `fetch` 的 OpenAI
 
 ## 4. 依赖与自检
 
-签名链用到 `@aws-sdk/signature-v4`、`@aws-sdk/protocol-http`、`@aws-crypto/sha256-js`、`@aws-sdk/credential-providers` 与 `openai`，版本以 `engines/midscene/package.json` 为准（这几个包有意不钉精确版本，只两个引擎 SDK 钉精确版本，见 ADR 0042 决策六）。从零接线或换环境时，先用 `engines/midscene/spikes/01-model-sigv4.ts` 单独核模型连接，再用 `03-midscene-grounding.ts` 核 Midscene 整条链（运行方式见 `engines/midscene/DEVELOPMENT.md`）。
+签名链用到 `@aws-sdk/signature-v4`、`@aws-sdk/protocol-http`、`@aws-crypto/sha256-js`、`@aws-sdk/credential-providers` 与 `openai`，版本以 `engines/midscene/package.json` 为准（这几个包有意不钉精确版本；钉精确版本的只有引擎 SDK `@midscene/web` 及其配套的 `playwright` / `@playwright/test`，见 ADR 0042 决策六）。从零接线或换环境时，先用 `engines/midscene/spikes/01-model-sigv4.ts` 单独核模型连接，再用 `03-midscene-grounding.ts` 核 Midscene 整条链（运行方式见 `engines/midscene/DEVELOPMENT.md`）。
 
 ## 延伸阅读
 

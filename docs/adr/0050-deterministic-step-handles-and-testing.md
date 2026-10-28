@@ -1,13 +1,13 @@
 # 0050. 确定性 step 多句柄注册与测试分层
 
-> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。决策 1、2、4 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写：条目可声明前提 `requires`，`ctx.driver` 是受命令守卫的代理，已有运行的 evidence 只在失败步含控件信息。
+> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。决策 1、2、4 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写：条目可声明前提 `requires`，`ctx.driver` 是受命令守卫的代理，已有运行的 evidence 只在失败步含控件信息。决策 1、2 于 2026-10-26 随导航规则修订（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2、3 条，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）就地改写：条目可声明适用关键字 `keywords`；内建的「页面地址匹配」step 退役，注册表唯一的内建条目改为导航；`ctx` 增 `app` 字段，曾计划内置的「重新启动应用」step 改由使用方 step 调用 `app.restart()` 实现。
 
 ## 背景与问题
 
 确定性 step 至今只有一种执行对象：桌面浏览器里的 Playwright `page`。注册面是 `deterministic(pattern, handler, meta)`，handler 拿 `ctx.page` 操作页面（Python 侧是同构的装饰器）。测试目标扩到真机之后（目标模型见 [0048](./0048-test-targets-device-and-ui-kind.md)），同一句 step 文本面对的可能是 Android Chrome 里的网页、iOS Safari 里的网页、Android 或 iOS 上的原生应用，执行对象变成 Appium 会话（WebdriverIO 客户端）。由此有四个问题要定：
 
 - **一条 step 怎样在多个目标上各有实现**，且「这条 step 在哪些目标上有实现」能在执行前被 CLI 知道（plan 标注、能力自述的 `targets`，见 [0049](./0049-worker-capabilities-targets-keys.md)），而不是到运行期才在 handler 里发现「这个平台我不会」。
-- **handler 拿到什么**：设备会话有原生与网页两种上下文，截图与手势只在原生上下文可靠（[0052](./0052-appium-interface-adapter-and-platform-differences.md)），handler 若切到网页上下文后不切回，下一个 AI 步会在错误的上下文里截图与点击。
+- **handler 拿到什么**：远程访问会话有原生与网页两种上下文，截图与手势只在原生上下文可靠（[0052](./0052-appium-interface-adapter-and-platform-differences.md)），handler 若切到网页上下文后不切回，下一个 AI 步会在错误的上下文里截图与点击。
 - **设备上的确定性 step 怎样测**：桌面上作者可以在本机打开浏览器调试，真机只能经 Device Farm 远程访问会话获得，每次都有取设备的等待与设备分钟费用。
 - **作者怎样写出可靠的设备 step**：原生应用上能否定位到控件取决于被测应用的实现，作者需要可执行的判据，而不是「先让 AI 执行一遍再把它固化」这类会把观察到的行为当成期望的流程。
 
@@ -28,7 +28,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 }, { description: "…", example: "…" });
 ```
 
-- **两种句柄**：`playwright`（桌面浏览器，含义与现状相同）与 `webdriver`（设备会话，WebdriverIO 客户端）。`webdriver` 可写成单个条目或条目数组，每个条目用 `uiKinds`（取值 `web` / `app`）与 `devices`（取值 `android` / `ios`，与测试目标的 device 维度同名同值）声明适用范围、缺省为全部取值。
+- **两种句柄**：`playwright`（桌面浏览器，含义与现状相同）与 `webdriver`（远程访问会话，WebdriverIO 客户端）。`webdriver` 可写成单个条目或条目数组，每个条目用 `uiKinds`（取值 `web` / `app`）与 `devices`（取值 `android` / `ios`，与测试目标的 device 维度同名同值）声明适用范围、缺省为全部取值。
 - **声明式过滤，不在 handler 里分支**：Android 与 iOS 的选择器不同时写两个条目，不在一个 handler 里按设备 `switch`。理由：适用范围必须在执行前可知，worker 才能从注册表推出每条 step 的 `targets` 写进能力自述，plan 才能逐目标标注「确定性」或「走 AI」；藏在 handler 里的分支对注册表不可见，未覆盖的平台只会在运行期以 error 暴露。
 - **单函数写法保持有效**：`handlers` 传单个函数等价于只有 `playwright`，已有项目的 `steps/` 目录不需要任何改动。
 - **注册期校验**（违反即加载失败，按 [0037](./0037-distribution-and-packaging.md) 决策 4 的加载失败处理）：未知句柄种类、`uiKinds` 或 `devices` 的未知取值、同一条 step 的两个 `webdriver` 条目覆盖同一个（设备，界面类型）组合。最后一条防止「两个实现谁生效」的歧义，与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 对模式冲突的处理同理。
@@ -77,18 +77,18 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 - **handler 保持薄**：读值与操作留在 handler，判定抽成纯函数，第一层就能覆盖大部分逻辑。
 - **离线执行要固定缓存目录**：WebdriverIO 在未配 Selenium 服务时自行下载 Chrome for Testing 与驱动，缓存缺省位于系统临时目录、系统重启后丢失；脚手架与文档要求显式指定缓存目录（`cacheDir` 或 `WEBDRIVER_CACHE_DIR`）。
-- **真机验收是验收，不是单元测试**：缺省由人或 CI 触发；agent 能否自行开设备会话由项目约定决定（见决策 4）。
+- **真机验收是验收，不是单元测试**：缺省由人或 CI 触发；agent 能否自行开远程访问会话由项目约定决定（见决策 4）。
 - **已接受代价与重议条件**：真机验收这一层每次都要经过取设备的等待（约 1 到 2.5 分钟）并按设备分钟计费，1.5 不为它提供加速路径，靠前两层离线测试把大部分迭代挡在真机之外。出现以下任一信号时重新讨论内循环加速：使用方反馈真机验收占了设备 step 写作耗时的主要部分；离线层覆盖不了的原生应用 step 成为设备 step 的多数。候选方案须守 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1 的会话归属单一与收尾责任单一（不跨 scope 或跨 job 复用会话），例如本机模拟器层，或由作者在 gherkai 之外自行持有的调试会话。
 - 本 ADR 的分层只针对使用方写的确定性 step；worker 自身的驱动适配器与设备模块的护栏归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 
 ### 4. 写作方法（进 user guide 与 agent skill）
 
-两种 step 作者（人与 agent）走同一条路；以下规则写进 `writing-deterministic-steps.md` 与 skill 的确定性 step 参考，gherkai 不为写作期另造工具。
+测试开发无论亲手写还是由使用者侧 AI agent 代劳，都走同一条路；以下规则写进 `writing-deterministic-steps.md` 与 skill 的确定性 step 参考，gherkai 不为写作期另造工具。
 
 - **期望只来自需求**：step 断言什么由需求文档、验收标准、用例本身决定。
 - **材料只定位置，不定期望**：页面源、控件树、截图、已有运行的 evidence 用来找到元素在哪、叫什么，不用来决定「应该显示什么」。
 - **动态材料的来源平铺列出、不排先后**：应用仓库的源码与测试标识；桌面上的开发者工具或 Playwright；Appium Inspector 或 WebDriver 客户端连上一个 Device Farm 远程访问会话；已有运行留下的 evidence（设备目标上判为 failed 或 error 的 step 含控件摘要与原始控件树，字段归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）。
-- **agent 自行开设备会话须项目约定放行**，且无论成败都必须收尾（停止会话），因为设备会话按分钟计费、有并发上限。
+- **agent 自行开远程访问会话须项目约定放行**，且无论成败都必须收尾（停止会话），因为远程访问会话按分钟计费、有并发上限。
 - **原生应用上先看控件有没有稳定标识**，再决定写不写确定性 step；没有标识就写 AI 步，不用坐标或层级位置拼凑定位。
 - **一条动作步只表达一屏之内的意图**：跨多屏的长流程拆成多步。这条同时约束 AI 步——实测中跨五页引导或十页分页的单条动作步需要 5 到 12 轮规划，token 与失败面都随之放大。
 
@@ -98,7 +98,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 
 ## 实测依据
 
-据 Device Farm 上 Android（Redmi Note 13 / Android 15，Chrome 与维基百科客户端）与 iOS（iOS 15.8 与 iOS 26.3 两台 iPhone，Safari 与 AWS 示例应用）的逐条路线实测；只列与 step 作者相关的判据。
+据 Device Farm 上 Android（Redmi Note 13 / Android 15，Chrome 与维基百科客户端）与 iOS（iOS 15.8 与 iOS 26.3 两台 iPhone，Safari 与 AWS 示例应用）的逐条路线实测；只列与测试开发相关的判据。
 
 **输入路线**：
 
@@ -132,14 +132,14 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 - **界面快照抓取功能**（gherkai 提供命令抓取设备界面或控件树供写作参考）——现成工具（Appium Inspector、开发者工具、已有运行的 evidence）已覆盖；自造抓取工具要承担会话开销与凭证处理，还会把作者引向「照着当前界面写期望」。
 - **任何「先 AI 后硬化」类流程暗示**（先用 AI 步执行一遍，再把 AI 观察到的结果固化为确定性 step）——会把被测应用当前的行为当成期望，缺陷随之被固化为通过条件；与「期望只来自需求」直接冲突。文档与 skill 里不出现这类建议。
 - **在一个 handler 里按设备或版本分支**——见决策 1：适用范围对注册表不可见，plan 与能力自述无从标注；系统版本号也会散进使用方代码。
-- **step 作者在 handler 里自选输入原语**（`mobile: type`、`/wda/keys`）——平台差异会漏进使用方代码；对已定位元素的 W3C 输入已够用。
+- **测试开发在 handler 里自选输入原语**（`mobile: type`、`/wda/keys`）——平台差异会漏进使用方代码；对已定位元素的 W3C 输入已够用。
 - **录制回放**——录下的是坐标与时序，对机型、系统版本、界面改版都脆弱，与确定性 step「按稳定标识定位」的立足点相反。
 
 ## 边界与互链
 
 - **目标模型、`@device` 与 `@app` tag、plan 标注规则、网页上下文不可用时记 error**：[0048](./0048-test-targets-device-and-ui-kind.md)。
 - **能力自述的 `targets` 键、step 级 `targets` 的交集规则与 `list-deterministic` / doctor 呈现**：[0049](./0049-worker-capabilities-targets-keys.md)。本 ADR 只规定 step 的目标如何从句柄推出。
-- **设备会话的创建与收尾、事件契约、evidence 的设备字段、应用分发**：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+- **远程访问会话的创建与收尾、事件契约、evidence 的设备字段、应用分发**：[0051](./0051-device-session-lifecycle-and-app-distribution.md)。
 - **驱动适配器、能力探测（含输入路线选择）、网页上下文的重新定位、命令守卫与结果未知的处置、适配器侧护栏**：[0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 - **项目配置文件里的设备与应用别名**：[0053](./0053-project-config-file.md)。
 - 匹配语义（worker 侧、core 对 step 语义无知）、元数据必填、使用方 `steps/` 目录的加载与失败处理不变：[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)、[0036](./0036-deterministic-capability-discovery.md)、[0037](./0037-distribution-and-packaging.md)。确定性 step 与 AI 断言的分工不变：[0014](./0014-ai-first-assertions.md)、[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)。

@@ -10,14 +10,14 @@
 
 ## 模块
 
-包内六个模块（`__init__.py` 只有包说明、无逻辑）：
+包内七个模块（`__init__.py` 只有包说明、无逻辑）：
 
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
     midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 后端）/
     `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本
-    模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`：有值显式注入、无值显式清除）。
+    模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL`：有值显式注入、无值显式清除）。
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
     steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
     目录」缓存；`engine_min_grace` 从中取下限，Nova 查询时注入 `NOVA_ACT_TIMEOUT_S` 使两端同源）与 `match_deterministic`
@@ -27,7 +27,7 @@
     （提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/
     `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）。
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
-    `SKEW_SKIP`；六种比对结果如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `resolve_worker_variant`
+    `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run 判为 `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `resolve_worker_variant`
     （提交侧解析 variant → 各引擎 revision）/
     `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`run_duration_ms`（run_id 与时钟）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。

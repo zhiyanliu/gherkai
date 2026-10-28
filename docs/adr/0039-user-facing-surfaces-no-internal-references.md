@@ -30,18 +30,20 @@
 
 | 文件 | 去向 | 链接 |
 |---|---|---|
-| 根 `README.md` | 仓库首页（GitHub）：门面 + 30 秒上手（agent 路径优先），末尾「文档」一节以表格指向 user guide 各页，并指 `docs/README.md` 地图（[0045](./0045-documentation-layering-and-placement.md) 决策四） | 相对链接可（GitHub 渲染） |
+| 根 `README.md` | 仓库首页（GitHub）：门面 + 30 秒上手（agent 路径优先），「文档」一节以表格指向 user guide 各页，并指 `docs/README.md` 地图（[0045](./0045-documentation-layering-and-placement.md) 决策四） | 相对链接可（GitHub 渲染） |
 | 各包 `README.md`（`cli/` `core/` `runtime/` `deploy_aws/` `engines/novaact/` `engines/midscene/`） | **逐字上 PyPI / npm 页面**（pyproject `readme` / npm `files`）；改动随**下一个 tag** 才生效——PyPI 已发版本的长描述不可改 | **只用绝对 URL**（页面上相对链接全是死链；仓库内文件用 `https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>`，`HEAD` 跟默认分支、不绑分支名）；末尾链 user guide 与 `CHANGELOG.md` 的绝对 URL（[0045](./0045-documentation-layering-and-placement.md) 决策三起：包页只留一句定位 / 装法 / 最小用法 / 这些链接，不再写「设计文档见 docs/adr」） |
 | 根 `CONTRIBUTING.md` | contributor 入口：版本线叙事、目录结构、从 checkout 运行、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针 | 相对链接 |
 | 各包 `DEVELOPMENT.md` | 该包 contributor 文档：模块布局、从 checkout 运行、测试、contributor 踩坑（真踩过的坑一条不丢）；**不进发行包**（wheel 本就不含，sdist 按 hatch 白名单 `include` 只收源码目录与 README / LICENSE / pyproject） | 相对链接 |
 | agent skill（`cli/gherkai_cli/skills/gherkai/**`：`SKILL.md` + `references/`） | 随 CLI wheel 发行、由 `gherkai skill install` 拷进使用方项目或用户级 agent 目录（[0043](./0043-agent-skill-for-driving-gherkai.md)）——**使用者面**，读者是 agent，安装态没有仓库上下文 | **只用绝对 URL**（相对链接在安装态必死）；跨文件指针写反引号裸路径（如 `references/engines.md`）；零 ADR / 决策号 / 内部机制名 |
-| GitHub Release 正文（由 `.github/scripts/release_notes.py` 从 `CHANGELOG.md` 本版节 + `.github/release_body_footer.md` 渲染） | Releases 页面——**使用者面**，没有仓库上下文；各包 pyproject `[project.urls] Changelog` 改指根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五反转了 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的「Release 正文作 changelog 锚点」） | 只用绝对 URL（同包 README），footer 里指向仓库文档的链接钉 `blob/vX.Y.Z/`；升级/用法细节指 user guide，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已发 Release 需在 GitHub 上手工改） |
+| GitHub Release 正文（由 `.github/scripts/release_notes.py` 从 `CHANGELOG.md` 本版节 + `.github/release_body_footer.md` 渲染） | Releases 页面——**使用者面**，没有仓库上下文；各包 pyproject `[project.urls] Changelog` 改指根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五反转了 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的「Release 正文作 changelog 锚点」） | 只用绝对 URL（同包 README），footer 里指向仓库文档的链接钉 `blob/vX.Y.Z/`；升级/用法细节指 user guide，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已在 GitHub 上手工修正） |
 
 页顶 Summary（pyproject / package.json 的 `description`）同属包页面，同一规则。搬家不是删：从使用者向文件移出的每条事实与踩坑，必须在对应 DEVELOPMENT.md 里找得到。
 
 ### 护栏
 
-- `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表 = ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下两条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
+markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即查的 hook 与提交闸门，见 [0046](./0046-guardrail-layers-tests-hooks-and-lean-claude-md.md)；code 字面量那张表仍独立住在 `cli/tests/test_user_facing_messages.py`（见下第一条）。
+
+- `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表含 ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名与 construct 名 / 施工与失败语义行话，另收口头语、量词「档」与退役旧名（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八；真值集是该文件的 `FORBIDDEN`，见面一）；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下两条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
 - `cli/tests/test_package_readmes.py`：根 README 与进包的六份 README 零禁词——禁词之外另扫口头语与退役旧名两张表（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八），包 README 零相对链接（正则 `](../` `](./` `](x.md`），pyproject / package.json `description` 零禁词，根有 `CONTRIBUTING.md`、每包有 `DEVELOPMENT.md`，Release 正文的固定块 `.github/release_body_footer.md` 渲染后零禁词、零相对链接、链接不带 `blob/HEAD/`（钉 tag），且 `release.yml` 必须仍调 `release_notes.py check`/`render`、不得有内联 `body: |`；扫描面路径缺失即失败（包搬家 / workflow 改形态不许让护栏变绿）。
 - `cli/tests/test_skill.py`：随 wheel 发行的 agent skill 的 markdown 扫描器——同一禁词表与相对链接正则（从 `test_package_readmes.py` 抽成共享常量 `cli/tests/_doc_rules.py`），另对照 CLI argparse 真值与契约页键名（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策六）。
 - **护栏管不到的**：正则抓不住的行话（皮 / 装配 / 唯一真源 / 产品本体层）与「使用者读得懂吗」的判断，靠 review——两轮对抗核验都在这一类抓到过遗漏（runtime 页面整篇行话、`--grace` 漏标「仅 run」、定位链顺序写反）。**review 抓到的行话只要能正则化就入表、不留在这一类**：上传与收尾的失败语义那族（best-effort / 抢传 / flush 兜底 / 不带 ref）曾在两引擎 worker 日志各留过几行、全靠人眼 review 才发现，此后已入表；留在这一类的是词形不固定、只能靠读的那些。

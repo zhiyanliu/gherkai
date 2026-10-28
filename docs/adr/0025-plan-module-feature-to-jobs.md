@@ -19,7 +19,7 @@ Job = {
   scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
   timeoutS,                                     // job 墙钟预算秒（null=不超时，仅非设备 scope；设备 scope 恒为有限正数）；tag 语义权威在 ADR 0019、
                                                 // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
-                                                // 属 definition 层；1.5 起作为可选键进 worker 的 job line，只供建会话前与 max_session_s 比较作自检（ADR 0051）
+                                                // 属 definition 层；1.5 起作为恒在的键进 worker 的 job line（不超时写 null，键集见 ADR 0024），只供建会话前与 max_session_s 比较作自检（ADR 0051）
   target,                                       // {device, ui_kind, app?}；scope 级，规则与校验见 ADR 0048 决策 2、3。本模块按 config.apps 核对别名
                                                 // 与平台、违约抛 FeatureContractError；产出的 app 只有 {alias, app_id}（plan 形态），安装包位置由
                                                 // 组合根在 run / submit 上传后补入，device_request 同样由组合根填
@@ -30,7 +30,7 @@ Job = {
 ```
 
 - **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
-- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 以可选键上线，只供 worker 自检，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
+- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 恒在、不超时写 null，只供 worker 自检，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
 - **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/target/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、测试目标、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/target/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
 - **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
 
@@ -48,9 +48,9 @@ Job = {
 - **`argument`**：承载展开后的 dataTable/docString（有则有、无则缺省）；其内部形状（重映射成自有 `{kind, content/rows}`、不透传 pickle 子 dict）见下「第三方库 seam」节。
 - **行号来源（id 派生依赖）**：pickle **不带 `location`/行号**，只有顶层 `astNodeIds`。parse seam **内部同时持有 AST**，用 pickle 的 `astNodeIds` → AST 节点 `location.line` 回查行号（供下「id 派生」用）；Outline 展开的 example 行号取 `astNodeIds` 中的 Examples 行节点。行号属 seam 内部细节，不外泄。
 
-### `scope`（tag 分组 + engine 校验）
+### `scope`（tag 分组 + engine/target/timeout 解析与校验）
 
-- 读每个 scenario 的 tag → 按 `@scope:<name>` 分组 → 每组解析 `@engine` → 产出 Job。
+- 读每个 scenario 的 tag → 按 `@scope:<name>` 分组 → 每组解析 `@engine`、测试目标（`@device`/`@app`，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）与 `@timeout` → 产出 Job。
 - 语义见下。
 
 ## 已定语义
@@ -109,7 +109,7 @@ Job = {
 - core 只认我们的领域模型 `{id,name,steps[{index,keyword,text,argument?}]}`；**gherkin 的 pickle dict 形状不外泄**到 core 其余部分。
 - **`argument` 是 parse 重映射成的自有形状、不透传 pickle 子 dict**：实测 pickle 的 argument 是 `{docString:{content}}` / `{dataTable:{rows:[{cells:[{value}]}]}}` 这类 gherkin 内部结构；parse 把它归一成我们自有的简洁形状（如 `{kind:"docString", content}` / `{kind:"dataTable", rows:[[cell…]…]}`），避免 pickle 形状经 argument 漏进领域模型。
 - 这是个 seam，但**性质 = 单实现（gherkin-official）+ 防御性封装**，**非** [0024](./0024-worker-core-protocol.md) `Engine` port 那种「两个真 adapter」的 seam（那里 engines/midscene/novaact 是两个真实现）。立得住靠两个理由：① [0024](./0024-worker-core-protocol.md) 的 step 领域模型 ≠ pickle 形状，本就要转换层；② 本项目有被第三方解析库行为坑过的教训（cucumber 补丁 [0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) → 已退役、core 自解析 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），把库行为收在一个接口后，升级/适配/替换只动 `parse` 内部。（下条「升级 ≥31.0.0 回归比对」是**同库版本迁移**，非引入第二个解析器实现。）
-- 版本（依赖声明）：**core 子工程依赖 `gherkin-official>=31.0.0`，直接用顶层导出 `from gherkin import Parser, Compiler`**（下限 31.0.0 = 该顶层导出的最低版；**不钉具体小版**，实解析版本以 `uv.lock` 为准）。导入名 `gherkin`。（novaact 子工程**不依赖 gherkin-official**——worker **不 import gherkin**、不解析 `.feature`（解析是 core 的事，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），故 core 用哪版 gherkin 与 worker 无版本耦合。）**不依赖 pytest-bdd 的内部解析符号**（既要退役、又是非公开 API）。Parser→dict、Compiler→pickles 这套核心契约跨大版本稳定；升级前跑 `core/tests/test_plan.py`（含解析用例），升级后用同一 feature 回归比对一次。
+- 版本（依赖声明）：**core 子工程依赖 `gherkin-official>=31.0.0`，直接用顶层导出 `from gherkin import Parser, Compiler`**（下限 31.0.0 = 该顶层导出的最低版；**不钉具体小版**，实解析版本以 `uv.lock` 为准）。导入名 `gherkin`。（novaact 子工程**不依赖 gherkin-official**——worker **不 import gherkin**、不解析 `.feature`（解析是 core 的事，[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)），故 core 用哪版 gherkin 与 worker 无版本耦合。）**不依赖 pytest-bdd 的内部解析符号**（已随 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 退役，且是非公开 API）。Parser→dict、Compiler→pickles 这套核心契约跨大版本稳定；升级前跑 `core/tests/test_plan.py`（含解析用例），升级后用同一 feature 回归比对一次。
 
 ## test cases（护栏，本模块强制）
 
@@ -136,7 +136,7 @@ Job = {
 ## 现在做 / 留口子
 
 - **现在做（v1.0）**：上文已描述的全部；边界由下条「留口子不实现」界定。
-- **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现仅 `@scope`/`@engine`/`@timeout`）。
+- **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现有 `@scope`/`@engine`/`@timeout`/`@device`/`@app`，后两者见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）。
 
 ## 重议
 

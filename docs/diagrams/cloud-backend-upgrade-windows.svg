@@ -523,7 +523,7 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="588.8666666666668" y="558" width="53.6" height="16" rx="3" class="c-mask"/>
           <text x="615.6666666666667" y="568" class="t-backend" font-size="9" text-anchor="middle">提交放行</text>
         </g>
-        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签含提交者本机的 CLI 版本，该成员仍解析到旧版本镜像</text>
+        <text x="405.33333333333337" y="596" class="t-dim" font-size="7">镜像标签含提交者本机的 CLI 版本，该成员仍解析到旧版本镜像（提交记录格式与后端相同时）</text>
         </g>
 
         <g data-edge-from="member" data-edge-to="backend" data-edge-label="升级后同样被拒" data-edge-key="7">
@@ -648,4 +648,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=7b11ec17bf0fa29a6b70ff2a6e5febc9dc80dd9d10591e25f51d655211116d9c -->
+<!-- gherkai:source-sha256=86693c99f9da88f74f398deec4e540f32893b3c15ef9c74a1bc2966f3ee6bbc2 -->

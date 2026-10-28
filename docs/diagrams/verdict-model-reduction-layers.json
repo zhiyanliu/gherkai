@@ -116,7 +116,7 @@
       "title": "上层只归约",
       "items": [
         "core 不重算票、不重判 step，worker 上报的结论原样进入上一层归约",
-        "worker 只上报 step 与 scenario 两级；job 与 run 的判定在 core",
+        "worker 上报 step 与 scenario 两级的判定，另可经 scope_done 上报 scope 级 error；job 与 run 的判定在 core",
         "同步 run 与后台批量运行共用同一份归约代码，两条路径收敛到同一终值"
       ]
     },
@@ -125,7 +125,7 @@
       "title": "直链之外的三处旁路",
       "items": [
         "上游 step 报 error 后被跳过的 step 不进入 scenario 归约",
-        "job 未启动或运行中被终止时，按中止来源直接定态，不做 scenario 归约",
+        "job 命中任一收场判据（启动前被 fail-fast 中止、被主动中止、非零退出或内容不全、worker 自报 scope 级 error）时直接定态，不做 scenario 归约",
         "run 层在归约入口先滤掉不构成结论的状态"
       ]
     }

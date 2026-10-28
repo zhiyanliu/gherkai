@@ -10,12 +10,12 @@
 
 **中断只是它的能力之一**（`--interrupt`）：`--interrupt none` 的 baseline 同样可运行，用于验证「事件流端到端正常 + 三通道分离 + 零行为变化」（如 worker I/O 重构后的回归）。纯逻辑回归仍由各引擎单测覆盖（Nova `engines/novaact/tests/test_*.py`、Midscene `engines/midscene/src/worker/*.test.mts`、`core/tests/test_subprocess_engine.py`）。
 
-**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 安全点提前上传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立；另可验**使用方确定性 step 目录在真 worker 下被加载**（`--steps-dir`，ADR 0037 决策 4——加载失败 worker 会降级成 AI step，单测照不出）。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
+**适用场景**：改动 worker 的中断路径 / 会话清理 / grace / 安全点提前上传 / 上传超时 / **job 入口·事件出口（I/O 边缘）**后，实际运行确认承重假设仍成立；另可验**使用方确定性 step 目录在真 worker 下被加载**（`--steps-dir`，ADR 0037 决策 4——steps 目录若没有注入到真 worker，使用方 step 不会报错，会全部交给 AI 执行，单测发现不了；目录已注入但加载失败时，worker 以非零退出码报错）。日常逻辑改动先运行单测；只有涉及上述「只能真实运行验证」的真实边界才动 harness。
 
 ## 前置条件
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
-- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS`）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` 表示已清空），据此确认注入生效。
+- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL`，清单以 `gherkai_runtime.compose` 的 `_COMPOSE_OWNED_WORKER_ENV` 为准）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` 表示已清空），据此确认注入生效。预热地址不会注回，因此 harness 运行不包含会话预热。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。运行结束后自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
 - 用**仓库根的 workspace venv** 运行（`uv run python …`，等价 `.venv/bin/python`）：harness 复用真实 `gherkai_core.scope.plan` 生成 job（避免手写 JSON 造成漂移），并复用 `gherkai_runtime.compose` 的 worker 定位链；根 `uv sync` 已把 `gherkai_core` 与 `gherkai_runtime` 都装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**，这由 editable 安装保证：harness 不改 `sys.path`，只由 `__file__` 派生仓库根推导 `features/` 路径。worker 路径不由它推导，见下条四级定位链。
 - **worker 经四级定位链启动**（与 CLI 同一真源，ADR 0037 决策 3），harness 不按仓库布局拼接路径：novaact 随仓库根 `uv sync` 装进同一 workspace venv，即命中「同 venv `-m` 入口」，无需独立 venv；midscene 需先在 `engines/midscene/` 执行 `npm install && npm run build` 生成 `dist/bin.mjs`，再用 `GHERKAI_WORKER_MIDSCENE_CMD="node <仓库根绝对路径>/engines/midscene/dist/bin.mjs"` 显式覆写（第一级）。四级全 miss 抛 `WorkerNotFoundError`，并附安装指引。
@@ -78,7 +78,7 @@ harness 结尾打印 `=== HARNESS_REPORT_JSON ===` + 一段 JSON。关键字段�
 
 - **判读顺序：`sample_valid` 先于 `n_lost`**。`sample_valid=false` 时 `n_lost=0` 不具含义。此前已发生过误判：Midscene `act` 时机中断过早、盘上为空、`n_lost=0` 被读成「提前上传生效」，实为无效样本。
 - **`n_lost=0` 不等于「零残余」**。harness 的 lost 判据是**文件名**层面的「盘有 S3 无」。若某文件名已在 S3（已被提前上传过），而盘上是更大的版本（其后又有 append），`n_lost` 记 0，但存在**字节级增量残余**。要量化提前上传实际已上传的数据量，需**逐文件对比 disk 与 S3 的 size**。scenario 提前上传的验证即以此坐实：scenario1 的 log 已进 S3，scenario2 的增量为 disk>S3。
-- **验证「提前上传的因果」须交叉核对时序**：`kill_phase` 非空 + `scope_done_emitted=false` + worker stderr 出现 `signal received`/`session shutdown`，三者同时成立即表明确实走了中断退出路径；而 scope 末的整目录 flush 只在正常完成路径执行，中断路径在它之前已 return。据此才能证明 S3 里的产物只可能来自**边界提前上传**，而非退出路径一并上传。**「flush 日志」不构成判据**：两个 worker 的 scope 末 flush 成功时不输出任何日志（只有失败与补救提示中出现 flush 字样），因此「未见 flush 日志」对正常路径同样成立。
+- **验证「提前上传的因果」须交叉核对时序**：`kill_phase` 非空 + `scope_done_emitted=false` + worker stderr 出现 `signal received`/`session shutdown`，三者同时成立即表明确实走了中断退出路径；而 scope 末的整目录 flush 只在正常完成路径执行，中断路径在它之前已 return。据此才能证明 S3 里的产物只可能来自**边界提前上传**，而非退出路径一并上传。**「flush 日志」不构成判据**：两个 worker 的 scope 末 flush 成功时不输出任何日志（flush 失败同样不输出日志，只表现为本地产物目录被保留；收尾排空超时的提示写作「剩余的改由收尾统一上传」，不含 flush 字样），因此「未见 flush 日志」对正常路径同样成立。
 
 ## 实际运行陷阱（实践中已遇到，需避开）
 

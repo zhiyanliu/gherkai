@@ -1,6 +1,6 @@
 # 0045. 文档分层与归位：按读者三分类、目录归位、包页面降为入口页、每版 changelog、按类别定口吻
 
-> **Status:** Accepted（2026-09-17）—— 本 ADR 是 CLAUDE.md 文档纪律「文档分层与归位」条的决策与理由所在；反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」（0039 Status 头已同步）；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变；另反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的 changelog 锚点（范围限该子句，0037 Status 头已同步）。
+> **Status:** Accepted（2026-09-17）—— 本 ADR 是 CLAUDE.md 文档纪律「文档按读者三分类归位，口吻随类别变」条的决策与理由所在；反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」（0039 Status 头已同步）；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变；另反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的 changelog 锚点（范围限该子句，0037 Status 头已同步）。
 
 ## 背景与问题
 
@@ -59,12 +59,12 @@
 - **技术文档**（CONTRIBUTING / DEVELOPMENT / internals）：技术说明口吻——允许术语与密度，不允许俏皮与口头语；internals 保叙事。
 - **contributor 侧 AI agent 文档**（ADR / CONTEXT / 方法文档）：维持既有高密度、单一事实源、精确指针的约定。
 - doc-health 方法对使用者向文档加一个**口吻 / 可读性**维度（属主观类，出报告待批），防回潮。
-- **「术语统一」那半句由护栏执行，出处是词表**：`CONTEXT.md` 已给出规范名的旧名进 `cli/tests/_doc_rules.py` 的 `RETIRED_TERMS`，与口吻表**分两张**——口吻表禁的是永远不该出现的口头语 / 隐喻，退役表禁的是「有了新名的旧词」、随词表增删；两张表在用户文档、图源、skill 正文、包 README 四处同位扫。另一条测试断言退役表每个词都出现在词表某条 `_Avoid_` 行里：护栏若能自造禁词，它与词表就各自演化、「那该说什么」无处可查（单向差集——`_Avoid_` 比护栏宽，有些旧名只在 AI 侧文档里留着）。**CHANGELOG 已发行节豁免退役表与口吻表**：那是发行当时的原话，改词表不回溯改写它；内部指代那张表仍扫全篇（那是发行时就不该写的，不因过了一版免责），口吻表同享豁免是因为它还兼管一条事后新立的用词规则（下条）——回溯扫已发行节只会拦出按规矩改不了的历史。
+- **「术语统一」那半句由护栏执行，出处是词表**：`CONTEXT.md` 已给出规范名的旧名进 `cli/tests/_doc_rules.py` 的 `RETIRED_TERMS`，与口吻表**分两张**——口吻表禁的是永远不该出现的口头语 / 隐喻，退役表禁的是「有了新名的旧词」、随词表增删；两张表在用户文档、图源、skill 正文、包 README、技术文档、code 注释与 docstring 六处同位扫（注释层的退役表去掉「批」义三词；扫描面清单与执行层见 [0046](./0046-guardrail-layers-tests-hooks-and-lean-claude-md.md)）。另一条测试断言退役表每个词都出现在词表某条 `_Avoid_` 行里：护栏若能自造禁词，它与词表就各自演化、「那该说什么」无处可查（单向差集——`_Avoid_` 比护栏宽，有些旧名只在 AI 侧文档里留着）。**CHANGELOG 已发行节豁免退役表与口吻表**：那是发行当时的原话，改词表不回溯改写它；内部指代那张表仍扫全篇（那是发行时就不该写的，不因过了一版免责），口吻表同享豁免是因为它还兼管一条事后新立的用词规则（下条）——回溯扫已发行节只会拦出按规矩改不了的历史。
 - **三种漏进人读层的 AI 侧缩写，人读层一律不用**（口吻规则，2026-09-20 code-health 复盘从注释、internals 与 skill 里抓出约 700 处后立此条）：
   ①**符号当谓语**——「job = scope」「判据 = …」「None = 不筛」这类把 `=`（含全角 `＝`）、`≠`、`⊆`、`∈`、`∧` / `∨`、`⇒`、`«` 当「是 / 即 / 表示 / 且 / 则 / 远小于」用的写法，改成完整句（数值比较的 `≥` / `≤` 不算）：「即 / 是 / 指 / 为 / 等于 / 表示」，映射关系写成「本机后端下是 X，云端后端下是 Y」。箭头 `→` 在技术文档与注释里只许表顺序与因果（「A → B」读作「然后 / 得到」）、不许当「等于 / 是」用；用户文档与 skill 正文里不用箭头。代码块、命令示例里的符号不算；表格单元格是人读的、照扫。
   ②**自造二字复合词代替短语**——「同形 / 同款 / 同律 / 同调 / 同口径」写成「写法相同 / 措辞一致 / 规则一致 / 都调用 / 判法一致」；「归码 / 退码 / 网络码 / 专用码 / 非零码」写成「决定退出码 / 退出码 / 网络故障退出码 / 专用退出码 / 非零退出码」。理由：这些词在通行中文里另有义或无义（「同形」是排版学的 homoglyph，「码」与「代码」相混），读者要靠上下文反推——这是歧义不是效率，故 AI 侧文档也不用；只有排版学义的「同形字符」保留。
   ③**省略中心词的数字缩写**——「退 2」「exit≠0」写成「退出码为 2」「以退出码 2 结束」「退出码非零」。
-  三种形态都是 ADR 写作的省字习惯漏进了注释、internals 与 skill：AI 侧文档保留 ① 与 ③（那里效率优先），② 全仓不用。护栏：② 的固定词进口吻表 `COLLOQUIAL`（四面同位扫）；① 与 ③ 在用户文档、skill、技术文档、code 注释与 docstring 各有一条剥掉代码块与行内代码后的启发式扫描（`cli/tests/test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py`）：中文字紧邻 `=` 号、「退 <数字>」即红；用户文档与 skill 另禁正文箭头。
+  三种形态都是 ADR 写作的省字习惯漏进了注释、internals 与 skill：AI 侧文档保留 ① 与 ③（那里效率优先），② 全仓不用。护栏：② 的固定词进口吻表 `COLLOQUIAL`（与退役表同位扫，见上条），AI 侧文档另单扫这组自造词（`cli/tests/test_adr_hygiene.py`）；① 与 ③ 在用户文档、skill、技术文档、code 注释与 docstring 各有一条剥掉代码块与行内代码后的启发式扫描（`cli/tests/test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py`）：中文字紧邻 `=` 号、「退 <数字>」即红；用户文档与 skill 另禁正文箭头。
 - **量词「档」一律不用**：作取值 / 级别 / 类别 / 情形 / 后端义时按句意写「取值 / 级别 / 判定 / 情形 / 后端」，只留「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。理由：同一个量词在本仓库曾同时指执行后端、权限级别、选项取值、判定类别、上传时机与派发路径，读者每次都得从上下文反推它指哪一层。它不是术语退役（没有「档」这个词条），故规则本身不进词表 `_Avoid_`，而是作一条带前后文排除的正则进口吻表 `COLLOQUIAL`；同一条正则另进 `cli/tests/test_user_facing_messages.py` 的禁词表，把用户可见字符串那一面也覆盖（那半边的判据在 ADR 0039）。
 - **用户文档与演示材料两条补充（2026-09-29 演示项目 runbook 复审立此条）**：①**只陈述事实与数值，不带验证过程的痕迹**——「实测 223 秒」「我们真跑过一遍」「经跳板机核对」这类话是 contributor 的证据链，读者要的只是「约 4 分钟」；过程证据的家是 ADR 验证节与 journey。②**段落开头直接陈述，不写「本页 / 本文档 / 下表 说明…」式的自述**——「仓库中的每一部分属于三类之一：…」优于「下表按目录说明每部分…」，前者读者立刻得到信息，后者先读到一句关于文档自身的话。表格或列表前的一句引导（「下表列出各选项的默认值」）不在此列，主流云服务文档同样这样写；internals 页面头部按定位要求写的「本文是入口页」类声明也不在此列。两条都是「参照主流云服务文档写法」这一总则的具体形态；用户指南九个页面的开头句已于 2026-09-30 按此改写。
 
@@ -107,4 +107,4 @@ skill 正文与 references 是为使用者侧 AI agent **新写**的内容、不
 - 路径改动：`docs/guides → docs/internals`；`docs/{doc,code}-health-review.md`、`docs/REFERENCES.md` → `docs/ai-eng/`；根 `DEVELOPMENT.md → CONTRIBUTING.md`。指针同步点：`CLAUDE.md`（文档纪律三条 + kebab-case 例外清单）、`.claude/commands/*`、`tools/render_skill_contract.py` 的源路径、`cli/tests/test_skill.py` 与 `cli/tests/test_cli_json_contract.py`、`deploy_aws/tests/test_workers.py` 的契约页路径、各 DEVELOPMENT / README 里的相对链接、ADR 内指向 guides / REFERENCES 的指针。
 - 新增：`docs/README.md`、`docs/user-guide/**`（含 `faq.md`：只收跨页与选型类问题、一到三句 + 指针，答案完整存在于某页某节的不收）、`docs/ai-eng/README.md`、`docs/internals/architecture-overview.md`、`docs/diagrams/`（JSON 图源 + 导出 SVG + `index.html`）、`.github/workflows/pages.yml`、`tools/build_diagrams.mjs`、`CHANGELOG.md`、`.github/scripts/release_notes.py` + `.github/release_body_footer.md`（gate 的 changelog 校验、Release 正文渲染）、护栏 `cli/tests/test_user_docs.py` / `cli/tests/test_release_notes.py`；doc-health 方法加 TONE 类（第六类）并按新分类改写覆盖范围与侧重。
 - 反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④：changelog 锚点从 GitHub Release 正文移到根 `CHANGELOG.md`（各包 `[project.urls] Changelog` 改指它），发布链另加一道「本 tag 在 CHANGELOG 里有非空节」gate；0037 其余决策不变，其 Status 头已改 Partially-superseded-by 0045（范围限该子句）。
-- 0039 Status 头改 Partially-superseded-by 0045（面二「完整操作手册」被反转；面一与护栏不变）；CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」条改写为「文档分层与归位」并指本 ADR。
+- 0039 Status 头改 Partially-superseded-by 0045（面二「完整操作手册」被反转；面一与护栏不变）；CLAUDE.md 文档纪律「README / DEVELOPMENT 分层」条改写为「文档分层与归位」并指本 ADR（现名「文档按读者三分类归位，口吻随类别变」）。

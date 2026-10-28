@@ -34,7 +34,7 @@ src/
 ├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
 ├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
 ├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 会话 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）、`error-text.mts`（失败原因压缩为一行有界文本，与 Nova 的 `_error_text` 规则一致）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
-└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（隧道凭据脱敏）· `precheck.mts`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）
+└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（隧道凭据脱敏）· `precheck.mts`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `tunnel-warmup.mts`（隧道会话预热：与组合根、Nova 侧同值的常量，导航预热地址并按页面结果归因）
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
 spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、合体、规划探针、否定断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
@@ -51,7 +51,7 @@ spikes/                ← 分段自检脚本（不进包、不编译）：01 �
 echo '<job json>' | AWS_REGION=us-east-1 node dist/bin.mjs
 
 # 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
-node dist/bin.mjs --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, deterministic_steps, model_id}（清单 = 注册表 pattern + description + example）
+node dist/bin.mjs --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, targets, deterministic_steps, model_id, session_warmup}（清单每项 pattern、description、example、keywords、targets）
 echo '[{"keyword":"Given","text":"\"https://example.com/\""}]' | node dist/bin.mjs --match-steps   # 批量查询这些 step 各自命中的确定性 pattern（内建导航在表里）
 ```
 
@@ -66,6 +66,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `MIDSCENE_RUN_DIR` | 无（SDK 写入进程 cwd 下的 `midscene_run`） | Midscene SDK 的 run 根目录（report / dump / log 全在其下），组合根注入绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`） |
 | `AWS_REGION` | 无（惰性读，未设即 fail-loud） | SigV4 签名与 base URL 的 region |
 | `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
+| `GHERKAI_SESSION_WARMUP_URL` | 无（未设即不预热） | 隧道会话预热地址；组合根在 `--expose-local` 方式下与 `GHERKAI_EXTRA_HTTP_HEADERS` 一并注入，worker 在第一个 scenario 之前对网页目标导航一次以换取会话 cookie；只有额外请求头而没有预热地址时记 `precheck_failed`、不建会话（[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；常量与预热逻辑在 `lib/tunnel-warmup.mts` |
 
 ## 从本 checkout 运行
 
@@ -75,7 +76,7 @@ npm run build       # tsc → dist/*.mjs
 npm test            # node --import tsx --test "src/**/*.test.mts"
 ```
 
-改依赖后更新 `package-lock.json` 要用与 CI 相同的 npm 大版本（Node 22 自带的 npm 10，CI 与 worker 镜像都按 `.github/workflows/ci.yml` 的 `NODE_VERSION` 取）：本机 npm 更新时执行 `npx npm@10 install --package-lock-only`。更新的 npm 写出的锁，npm 10 可能读不出完整依赖树（出现过嵌套包的依赖列表缺项），CI 的 `npm ci` 会以「package.json 与锁不同步」失败。
+改依赖后更新 `package-lock.json` 要用与 CI 相同的 npm 大版本（Node 22 自带的 npm 10；CI 的 Node 版本由 `.github/workflows/ci.yml` 的 `NODE_VERSION` 指定，worker 镜像的由本目录 `Dockerfile` 的 `FROM node:22-slim` 指定，两处同为 22）：本机 npm 更新时执行 `npx npm@10 install --package-lock-only`。更新的 npm 写出的锁，npm 10 可能读不出完整依赖树（出现过嵌套包的依赖列表缺项），CI 的 `npm ci` 会以「package.json 与锁不同步」失败。
 
 让 CLI 指向本 checkout（dev 态没有已安装的 npm 包，走 worker 定位链**第一级** env 覆写，ADR 0037 决策 3）：
 
@@ -109,7 +110,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 组合根经 `MIDSCENE_RUN_DIR` 注入 run 专属目录（`reports/<run_id>/midscene-run`，**必须绝对路径**：SDK 用 `path.resolve(process.cwd(), …)`），`report.html` 与 log/dump 全在其下；产物经 uploader 上传至 S3（[ADR 0029](../../docs/adr/0029-engine-artifacts-to-s3.md)），含 act 边界与中断时的 report 安全点提前上传（best-effort：失败不抛出、只记日志，不影响退出码）。`--no-report` 方式由组合根经 env `GHERKAI_NO_ARTIFACTS=1` 告知：关闭 agent 的 `generateReport`、不提前上传、不带 report ref；SDK 仍可能往 `./midscene_run` 写 log/dump，故该方式下若无 `MIDSCENE_RUN_DIR`，即把它导向一次性临时目录，不写入用户 CWD。一次 run 的全部产物落点（两引擎横向、local 与 cloud 两个后端）见 [`docs/internals/artifacts-and-evidence.md`](../../docs/internals/artifacts-and-evidence.md)。
 
-## 运行 spike（五段式自检，可独立运行）
+## 运行 spike（分段自检，可独立运行）
 
 ```bash
 AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/01-model-sigv4.ts        # 模型连接（SigV4）
@@ -119,10 +120,12 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/04-planning-probe.ts     # pla
 AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/05-negative-assertions.ts # 负向断言探针：构造必假断言，验证失败可被判为失败（防止永远绿）
 ```
 
+`spikes/06-devicefarm-appium.mts` 是移动真机方向的探针，需要 Device Farm 项目与真机，设备按分钟计费；运行命令与可选环境变量写在该文件开头的注释里。
+
 ## 依赖分类（实测约束）
 
-- **运行时依赖全在 `dependencies`**（`@midscene/web`、`@playwright/test`、`playwright`、各 `@aws-sdk/*`、`@aws-crypto/sha256-js`（SigV4 签名所用的 sha256 实现，缺失则签名不可用）、`openai`、`tsx`）：npm 包的消费者只会装 `dependencies`，留在 `devDependencies` 里的运行时依赖必然在使用方环境失败（ADR 0033 记录的「不能 `--production`」陷阱在包化后成为必然）。`devDependencies` 只剩 build 与类型（`typescript`、`@types/node`）。
-- **SDK 与浏览器驱动锁定精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.15.1`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基础镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧同一口径：`nova-act==3.4.187.0`）。升级的步骤是改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`）仍用 `^`。
+- **运行时依赖全在 `dependencies`**（`@midscene/web`、`@playwright/test`、`playwright`、各 `@aws-sdk/*`、`@aws-crypto/sha256-js`（SigV4 签名所用的 sha256 实现，缺失则签名不可用）、`openai`、`tsx`、`webdriverio`（注册面发布的类型声明引用它，ADR 0050 决策 2））：npm 包的消费者只会装 `dependencies`，留在 `devDependencies` 里的运行时依赖必然在使用方环境失败（ADR 0033 记录的「不能 `--production`」陷阱在包化后成为必然）。`devDependencies` 只有 build、类型与 spike 专用的包（`typescript`、`@types/node`、`@aws-sdk/client-device-farm`，最后一项目前只有 `spikes/06` 使用）。
+- **SDK 与浏览器驱动锁定精确版本**（`package.json` 里无 `^`）：`@midscene/web` `1.15.1`、`playwright` 与 `@playwright/test` 同为 `1.63.0`。发行的 npm 包与云端基础镜像都是装包时解析依赖、没有 lock，范围版本会使使用者运行的版本与验证过的版本不同（Nova 侧规则相同：`nova-act==3.4.187.0`、`bedrock-agentcore==1.22.0`）。升级的步骤是改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六。其余依赖（各 `@aws-sdk/*`、`@aws-crypto/sha256-js`、`openai`、`tsx`、`webdriverio`）仍用 `^`。
 - `@playwright/test` 是 `@midscene/web` 声明为 optional peer、但 `@midscene/web/playwright` 子入口**无条件 import** 的包，因此它也是运行时依赖（打包安装后实际运行才暴露）。
 
 ## 容器镜像（面向发布方）

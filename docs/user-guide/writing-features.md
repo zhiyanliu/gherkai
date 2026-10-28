@@ -1,6 +1,6 @@
 # 编写 .feature
 
-`.feature` 文件的写法包括：最小骨架的形态，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 三个 tag 的语义，Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
+`.feature` 文件的写法包括：最小骨架的形态，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 等有语义的 tag（含为设备目标预留的 `@device` 与 `@app`），Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
 
 引用的片段出自仓库的 [`features/`](../../features/) 目录。
 
@@ -82,7 +82,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 收窄范围的选项见 [`running-and-results.md`](./running-and-results.md)。
 
-## 三个有语义的 tag
+## 有语义的 tag
 
 | tag | 作用 |
 |---|---|
@@ -109,7 +109,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。并发上限就是 `--max-concurrency`：上限内的 job 同时运行，超出上限的排队等空位、有位子空出来再运行，它的取值与写法见 [`running-and-results.md`](./running-and-results.md)。
 
-**scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是一个 job，即默认全部 job 依次运行；分好 scope 之后还要显式调高 `--max-concurrency` 才真的并发。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
+**scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是 4 个 job：分好 scope 之后，最多 4 个 job 同时运行，超出的 job 排队等空位；要改变同时运行的数量，用 `--max-concurrency` 或项目配置文件的 `max-concurrency` 调整（见 [`configuration.md`](./configuration.md)）。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
 
 下面这段出自 [`features/concurrency_and_scope.feature`](../../features/concurrency_and_scope.feature)，第二条不重新导航，直接接着第一条的页面继续：
 

@@ -8,7 +8,7 @@ Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续
 
 最初设想：planning 不需要视觉，可挑一个 Bedrock 上推理强的纯文本模型（性价比更高）。**实测证伪**（2026-06-23，本账号）：
 
-1. **Midscene 的 planning 调用无条件附带截图**（`image_url`），且**没有任何 env/config 能关闭**。逐行核实源码确认（2026-06 首验 `@midscene/core` 1.9.8，装机版 1.12.8 复核仍成立；1.15.1 的 chat-completion 与 responses 两条协议实现都仍在消息里附 `image_url`）：planning 工作流（`ai-model/workflows/planning/standard-planning.mjs`）在两个消息分支都无条件附 `{type:'image_url'}`，`includeLocateInPlanning=false` 不去图、只改 system prompt 与定位解析；无纯文本 planning 代码路径；官方文档亦明示 planner 需 multimodal 模型。
+1. **Midscene 的 planning 调用无条件附带截图**（`image_url`），且**没有任何 env/config 能关闭**。逐行核实源码确认（2026-06 首验 `@midscene/core` 1.9.8，1.12.8 复核仍成立；现装机版 1.15.1 复核：planning 工作流（`ai-model/workflows/planning/standard-planning.mjs`）在两个消息分支都无条件附中立的 `{type:'image'}`，再由协议层转换，chat-completion 协议转成 `{type:'image_url'}`，responses 协议转成带 `image_url` 字段的 `{type:'input_image'}`），`includeLocateInPlanning=false` 不去图、只改 system prompt 与定位解析；无纯文本 planning 代码路径；官方文档亦明示 planner 需 multimodal 模型。
 2. **Bedrock 上所有走 chat-completions 的强推理纯文本模型都拒图像**。实测：`deepseek.v3.2` / `openai.gpt-oss-120b` / `qwen.qwen3-32b` / `qwen.qwen3-next-80b-a3b` 收到 `image_url` 均返回 `400 "Model does not support image modality"`（纯文本调用则 200）。Claude 系（claude-sonnet-4-6 等）干脆不在 `/openai/v1` chat-completions 面上（404）。
 
 **两个集合不相交**：能被 Midscene 调用（chat-completions + 收图像）的 Bedrock 模型 = 只有 VL 模型（2026-06 的真值；2026-09 起 Bedrock 上的多模态推理模型如 GPT-5.6 / GPT-6 也能经同一接线收发图文，见 [0044](./0044-engine-model-selection-and-override.md) 背景 2）。强推理纯文本模型全部出局。
@@ -16,7 +16,7 @@ Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续
 ## 决定
 
 - planning **复用同一个引擎模型**（本 ADR 成文时为 `qwen.qwen3-vl-235b-a22b`，现值见 [0044](./0044-engine-model-selection-and-override.md)），即不设 `MIDSCENE_PLANNING_MODEL_*`，让 default/grounding 模型兼任 planning。这是 AWS 约束 + Midscene 约束下唯一"既可达又收图"的务实解。
-- 不引入独立 planner：纯文本模型会被拒图像；另找一个 Bedrock VL 模型做 planner 无实际增益（见 ADR 0003 的 VL 选型，Bedrock 上可用的 chat-completions VL 选项很窄）。
+- 不引入独立 planner：纯文本模型会被拒图像；另找一个 Bedrock VL 模型做 planner 无实际增益（见 ADR 0003 的 VL 选型；成文时 Bedrock 上可用的 chat-completions VL 选项很窄，这是 2026-06 的真值，2026-09 起已增多，见 [0044](./0044-engine-model-selection-and-override.md) 背景 2；现行不拆的理由见下「不拆的理由」）。
 
 ## 何时重议
 

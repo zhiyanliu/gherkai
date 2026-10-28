@@ -61,7 +61,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 `status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停了或卡住时，来查的这条命令会把这个 run 推到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
-使用云端后端时 CLI 不能新于后端（正常保持同版本）：后端记一个版本戳，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前拿它比对 CLI 版本，CLI 比后端**新**时拒绝执行并以退出码 2 结束（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常执行。后端还没有版本戳（部署早于本版本、从未升级）时，桌面 run 只提示、照常执行，带设备目标的 run 以退出码 2 结束、请部署方先升级部署。升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+使用云端后端时 CLI 不能新于后端（正常保持同版本）：后端记一个版本戳，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前拿它比对 CLI 版本，CLI 比后端**新**时拒绝执行并以退出码 2 结束（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常执行。后端还没有版本戳（部署早于本版本、从未升级）时，带设备目标或用了 `--expose-local` 的 run 以退出码 2 结束、请部署方先升级部署，其余 run 只提示、照常执行。升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
 提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；只有这类在派发前就不能执行的 run 才有这一行，job 自身的失败原因看 `explain`。
 
@@ -83,8 +83,8 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 |---|---|---|
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
 | `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
-| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个浏览器会话，不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过部署方为单个 run 设的上限，命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
-| `--default-job-timeout S` | `300` | 单个 job 的墙钟预算秒（`<=0` 表示不超时）；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
+| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个浏览器会话，不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
+| `--default-job-timeout S` | 按目标 | 单个 job 的墙钟预算秒。不给时桌面 scope 为 300 秒，设备 scope 为获取设备的预算加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取设备的预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按这个 run 用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前以退出码 2 结束。`--backend cloud` 不接受这个选项（给了直接以退出码 2 结束），云端的停止宽限在部署时定 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
 
@@ -129,7 +129,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 reports/<run_id>/
 ├─ index.html          可点开的报告入口：判定明细树 + 每条产物一行链接
 ├─ manifest.json       机读的产物清单
-├─ jobs/               每个 job 一份判定明细，文件名由 scope 名派生 —— 判定的权威在这里
+├─ jobs/               每个 job 一份判定明细，文件名由 `scope_id` 编码而来（未标 `@scope` 的用例，`scope_id` 就是 `<文件>:<行号>`） —— 判定的权威在这里
 ├─ run_meta.json       这个 run 提交了什么（run_id、并发、每个 job 的用例原文与预算）
 ├─ run_state.json      运行到哪了
 ├─ nova-trajectories/  Nova Act 引擎的轨迹与会话汇总，以及每步的 AI 证据与截图
@@ -163,12 +163,12 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - 默认展开状态为失败、出错、被跳过的步；通过的步只列一行。
 - `--step N` 点名的那一步连通过也展开，须与 `--scenario` 同给；`--all` 让通过的步也展开。
 - 文本形态是摘要：每次 AI 调用只显示最后一段推理与它的截图地址，`--full` 逐帧全文，`--json` 内嵌完整证据。
-- `explain` 从不表判定，用例失败它照样以退出码 0 结束。run 还没到终态时判定明细还没落地，它会提示先用 `status --wait`。
+- `explain` 从不表判定，用例失败它照样以退出码 0 结束。`submit` 提交的 run 还没到终态时判定明细还没落地，它会提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分。
 - 哪一步没有 AI 证据（确定性 step 本就不产，或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 
 ## 费用量级
 
-`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话）。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 有墙钟预算（默认 300 秒），超预算即被停掉，防止任务卡住时持续计费。
+`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话）。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 有墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超预算即被停掉，防止任务卡住时持续计费。
 
 ## 机读输出
 

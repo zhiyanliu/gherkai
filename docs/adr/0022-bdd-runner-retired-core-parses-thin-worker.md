@@ -1,6 +1,6 @@
 # BDD runner 退役：核心库自解析 Gherkin + 两个引擎薄 worker（确定性 step = worker 注册表）
 
-> **Status:** Accepted —— 与 [0016](./0016-execution-architecture-core-lib-run-model.md) 一并**部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)**（反转其「两套 runner 各自加载 / 不设统一编排入口」操作立场：BDD runner 退役、核心库自解析 + 组合根统一入口；0006「两子工程并列 + 双语言裂缝」核心结论仍成立）。（确定性 step 的**定制面**已由 [0037](./0037-distribution-and-packaging.md) 决策 4 从「改 worker 包内脚手架」移到「使用方项目 `steps/` 目录」；本 ADR 的注册表机制与角色边界不变。）
+> **Status:** Accepted —— 与 [0016](./0016-execution-architecture-core-lib-run-model.md) 一并**部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)**（反转其「两套 runner 各自加载 / 不设统一编排入口」操作立场：BDD runner 退役、核心库自解析 + 组合根统一入口；0006「两子工程并列 + 双语言裂缝」核心结论仍成立）。（确定性 step 的**定制面**已由 [0037](./0037-distribution-and-packaging.md) 决策 4 从「改 worker 包内脚手架」移到「使用方项目 `steps/` 目录」；注册表条目由 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1 扩展为按句柄种类分键、可声明适用关键字与前提 `requires`；本 ADR 的注册表机制、「匹配放 worker」与角色边界不变。）
 
 核心库（v1.0）落地执行形态时的关键转向：**不再让每个引擎跑整个 BDD runner（cucumber-js / pytest-bdd），而是核心库自己解析 `.feature`、把每个 step 派发给一个薄 worker 子进程。** 本 ADR 记录这个转向（代号 B1）、它退役了哪些 hack、确定性 step 怎么扩展、以及对 [0019](./0019-feature-tags-scope-and-engine.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0021](./0021-local-cucumber-patch-step-keyword-disambiguation.md) 的影响。执行架构总成见 [0016](./0016-execution-architecture-core-lib-run-model.md)。
 
@@ -26,22 +26,22 @@
 
 核心**对一个 scope** spawn 一个 worker 子进程。worker 的一生：
 
-1. **启动**：从 stdin/临时文件接收输入——这个 scope 的 scenario 列表（每个含有序 steps：关键字+文本）、引擎配置。
+1. **启动**：从 stdin 首行接收一个 job（云端后端改由 env `JOB_S3_URI` 指向的 S3 对象提供，见 [0024](./0024-worker-core-protocol.md)「远程传输演进」节）——这个 scope 的 scenario 列表（每个含有序 steps：关键字+文本）、引擎配置。
 2. **开会话**：建一个 AgentCore 浏览器会话。
 3. **按 scope 串行跑 scenarios**：对每个 step——
    - 先查 worker 的**确定性 step 注册表** → 命中走 handler（精确 assert、不投票）；
-   - 未命中 → 落到 catch-all → 走 AI（When→`act`/`aiAct`；Then→`assert`+多次投票）。
+   - 未命中 → 落到 catch-all → 走 AI（Then→`aiBoolean`/`act_get` + 多次投票；其余关键字（When / Given）→`aiAct`/`act`）。
    - 会话在 scope 内 scenario 间**共享**（scope=串行共享会话，[0019](./0019-feature-tags-scope-and-engine.md)）。
 4. **收结果**：每 scenario 产出 pass/fail、投票抖动数据、原生报告引用（Midscene html / Nova trajectory 路径）。
-5. **回传 + 退出**：结构化结果（JSON）写回 stdout/结果文件，关会话，进程退出。
+5. **回传 + 退出**：事件全程逐条写入事件通道（本机为 `EVENTS_FD` 指定的管道，云端后端为 DDB events 表；stdout 只留给引擎 SDK 的进度输出，见 [0024](./0024-worker-core-protocol.md)「输出」节的三通道分离段），释放会话后以 `scope_done` 收尾，进程退出。
 
 核心**永不 import 引擎**：只 spawn、喂 JSON、读 JSON。这就是 [0016](./0016-execution-architecture-core-lib-run-model.md) `Engine` port 两个 adapter「形状一致」的含义。
 
 ## 确定性 step 怎么扩展（测试开发的扩展点）
 
-> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 AI catch-all（内建导航自 2026-10-26 起是注册表里唯一的内建条目，不再是独立的派发分支，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条）。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）曾各注册一条演示用的 `页面地址匹配 "<正则>"`，已退役（0020 第 2 条），脚手架现只承载内建导航条目与教测试开发怎么写的说明注释。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（见下『冲突规则自定』条）。各有注册表单测背书。
+> **实现状态（v1.0 当前）**：下述 `@deterministic` 注册表**已落地**——Nova `engines/novaact/gherkai_worker_novaact/deterministic.py`（`@deterministic` 装饰器 + `match()`）、Midscene `engines/midscene/src/worker/deterministic.mts`（`deterministic()` + `match()`）。worker 派发每个 step 时**先查注册表**（命中走精确 handler、不投票、可复现），未命中才落 AI catch-all（内建导航自 2026-10-26 起是注册表里唯一的内建条目，不再是独立的派发分支，[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条）。脚手架（`engines/midscene/src/worker/deterministic.steps.mts` / `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`，迁移史见下「迁移」条）曾各注册一条演示用的 `页面地址匹配 "<正则>"`，已退役（0020 第 2 条），脚手架现只承载内建导航条目与教测试开发怎么写的说明注释。命中后：成功→`passed`（无 votes）；handler 抛 `AssertionError`→`failed`/`assertion_failed`；抛其它→`error`；命中多条→`DeterministicConflict`（见下『冲突规则自定』条）；命中但关键字不在条目声明里→`DeterministicKeywordMismatch`，记 error、不转 AI；命中的条目在当前目标上没有句柄→走 AI、不顺延到别的模式（两条均见 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1）。各有注册表单测背书。
 
-**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → handler + 人话元数据 description/example)`；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）。**使用方（测试开发）的确定性 step 不写进 worker 包内的脚手架**——写进使用方项目的 `steps/` 目录，worker 启动时加载进**同一张表**（`@deterministic` 注册机制同一条），包内脚手架只承载内建导航这一条（曾内置的示范 step 已退役，示范进 `features/steps/` 模板），见 [0037](./0037-distribution-and-packaging.md) 决策 4；下文「几乎零写法变化」描述的写法在 `steps/` 里逐字成立：
+**扩展点 = 对应 worker 里的一张 step 注册表**（`(模式 → 按句柄种类分键的 handler + 可选关键字声明 + 人话元数据 description/example)`，句柄与关键字的扩展见 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1；元数据必填的理由见 [0036](./0036-deterministic-capability-discovery.md)）。延续 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的脚手架定位与角色边界（QA 永远只写自然语言、不碰确定性 step）。**使用方（测试开发）的确定性 step 不写进 worker 包内的脚手架**——写进使用方项目的 `steps/` 目录，worker 启动时加载进**同一张表**（`@deterministic` 注册机制同一条），包内脚手架只承载内建导航这一条（曾内置的示范 step 已退役，示范进 `features/steps/` 模板），见 [0037](./0037-distribution-and-packaging.md) 决策 4；下文「几乎零写法变化」描述的写法在 `steps/` 里逐字成立：
 
 ```python
 # 使用方项目 steps/*.py 内（midscene 侧对称、写进 steps/*.mts）
@@ -55,7 +55,7 @@ def url_matches(ctx, pattern):
                description="断言选择器命中的元素颜色等于给定十六进制值",
                example='Then 元素 "#price" 的颜色是 "#00FF7F"')
 def color_is(ctx, sel, hex):
-    got = ctx.page.eval(f'getComputedStyle(document.querySelector({sel!r})).color')
+    got = ctx.page.evaluate(f'getComputedStyle(document.querySelector({sel!r})).color')
     assert to_hex(got) == hex
 ```
 

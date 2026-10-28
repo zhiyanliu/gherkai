@@ -586,7 +586,7 @@
 
 **改动面**
 
-- `engines/midscene/package.json（及 package-lock.json）` · dependencies / devDependencies：webdriverio 与 @aws-sdk/client-device-farm 从 devDependencies 移到 dependencies（现状两者只在 devDependencies，供 spike 用）；新增 @midscene/core 显式依赖，版本锁定为 1.15.1，与 @midscene/web 同版本。锁文件按 DEVELOPMENT 的规定用 npm 10 重算（npx npm@10 install --package-lock-only）（0052 决策 7（依赖）、决策 3（动态加载的前提））
+- `engines/midscene/package.json（及 package-lock.json）` · dependencies / devDependencies：@aws-sdk/client-device-farm 从 devDependencies 移到 dependencies（现状只在 devDependencies，供 spike 用；webdriverio 已在 B4 移入 dependencies）；新增 @midscene/core 显式依赖，版本锁定为 1.15.1，与 @midscene/web 同版本。锁文件按 DEVELOPMENT 的规定用 npm 10 重算（npx npm@10 install --package-lock-only）（0052 决策 7（依赖）、决策 3（动态加载的前提））
 - `engines/midscene/src/device/limits.mts（新，轻量、不 import 任何 SDK）` · 设备预算常量：放终结四阶段常量（等在途 Create 10s、终结核对 5s、释放 25s、Stop 3s、终结期 Get 5s）、Device Farm 单次调用超时（Create/Get/List 10s）、获取预算缺省 600s、上界 3600s、换台下限 150s、会话上限 150min 与由它推出的 max_session_s、newSession 下限（4min+65s）、pageLoad 150s、执行期请求超时、探测短预算 5s。--capabilities 与 minGraceSeconds 只 import 这个文件，保证不加载 webdriverio 与 Device Farm SDK（0052 决策 6 分层表、0051 决策 2、5，0049 决策 4、5）
 - `engines/midscene/src/worker/run-scope.mts` · main()：把建连、Agent、清理收成界面接缝（新的 TargetSurface 接口）：现有 connect()、stopSession()、cleanupRun()、makeGuardedCleanup 包装、BedrockAgentCoreClient 和 chromium.connectOverCDP 原样搬进桌面实现（如 worker/surface-desktop.mts），行为不变。接缝提供五个操作（取 agent、取确定性句柄、导航或启动应用、释放、预热）和三项 step 边界义务（step 前核对、step 后复原并核对、采集界面快照）。scope 开头按 job.target.device 选一次实现；设备实现用 `await import("../device/surface.mjs")` 动态加载。主流程里不写任何按设备的条件分支（0052 决策 2、3）
 - `engines/midscene/src/worker/run-scope.mts` · interface Job（同步 lib/job-source.mts 的 Job）：加 target{device, ui_kind, app?{alias,bucket,key,sha256,app_id}}、device_request{provider, device_arn|os_version, billing_method, project_arn, acquire_timeout_s}、可选 timeoutS。两处重复的 Job 类型合成一份（也可以从共享类型文件 import）（0048 决策（Job 携带目标）、0051 决策 2）
@@ -661,7 +661,7 @@
 最容易做错的四件事：
 （1）桌面接缝必须是现有代码的原样搬移。makeGuardedCleanup 的重入语义、建连重试与退出码 80、cleanup 先于提前上传、排空的顺序，都要用现有 run-scope 测试与真跑回归钉住。设备差异只能落在接缝实现里，不能在 runStep 或 scenario 循环里写 `if (device)`。桌面唯一的新行为是预热，以及「有额外请求头却没有预热地址」时记 precheck_failed，它会走新的 scope_done{status:error} 出口，不再走 throw 退出码 1。
 （2）spike 06 的原语可以借，但其中三处正是 ADR 的被拒方案，照抄就会违背决策：usableWebCtx 用 Promise.race 放弃挂住的命令；typingRoutes 和 iosSendKeys 在运行期多路线试错回落；scroll 在 mobile: swipe 失败后回落到 W3C 指针拖动。此外 PLATFORM 与 SCENARIO 全局分支、logLevel 'warn'、缺省的传输层重试也都要去掉。命令守卫必须是 Midscene 界面、导航与 handler 拿到的唯一句柄；令牌在 step 结束或进入终结的那一刻撤销，不能等到下一个 step。
-（3）动态加载与常量分层：--capabilities 要输出由设备常量推出的 max_session_s 与 min_grace_s，所以这些常量必须放在不 import 任何 SDK 的 limits 模块里，否则「能力自述零依赖」会被悄悄打破。webdriverio 与 Device Farm SDK 现在仍在 devDependencies，要移到 dependencies，并用 npm 10 重算锁文件。
+（3）动态加载与常量分层：--capabilities 要输出由设备常量推出的 max_session_s 与 min_grace_s，所以这些常量必须放在不 import 任何 SDK 的 limits 模块里，否则「能力自述零依赖」会被悄悄打破。Device Farm SDK 现在仍在 devDependencies，要移到 dependencies（webdriverio 已在 B4 移入），并用 npm 10 重算锁文件。
 （4）log() 现在不脱敏，而 WebdriverIO 会把整条带签名的端点地址写进错误文本。stderr、bin 的 fatal 行、device-session.json、page_source 都要经同一个脱敏出口。参数名集合待定（见 open_questions），三份实现要同步改。
 
 另外两点：

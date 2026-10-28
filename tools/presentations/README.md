@@ -10,7 +10,7 @@
 | 定位、视觉、口播与交付约定 | [制作规范](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/production.md) |
 | 共用图标及许可 | [图标源文件](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/assets/icons/) |
 | 配套示例的需求、用例与实际操作 | [示例仓库](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/README.md) |
-| 真实运行材料与使用边界 | [演示证据](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/internal/presentations/demo/evidence.md) |
+| 真实运行材料与使用边界 | [演示证据](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/docs/presentations/demo/internal/README.md) |
 
 最终 PPT 是页面编辑源，素材包保留逐页画面、配音和主视觉。v12 的字幕经人工修订，文件整理与媒体更新不得改写其文字或时间轴；仅更新画面时复用现有成片音轨。
 

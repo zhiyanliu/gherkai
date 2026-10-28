@@ -22,7 +22,7 @@
 头等约束。保证机制：
 
 - **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
-  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ `evidence`（gherkai 自有 schema 的 step 级机读证据，[0042](./0042-step-evidence-and-explain.md)）/ `device_session`（设备会话开头能力探测结论的文件，scope 级、只作链接不解析，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
+  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ `evidence`（gherkai 自有 schema 的 step 级机读证据，[0042](./0042-step-evidence-and-explain.md)）/ `device_session`（远程访问会话开头能力探测结论的文件，scope 级、只作链接不解析，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
   - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。**皮层侧按层收窄**（[0042](./0042-step-evidence-and-explain.md)）：`model / wire / schedule / ReportStore` 永不解引用不变；CLI `explain` 与 `compose.read_resource` **只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）仍只当链接、永不解析——解引用许可绑在「内容是不是我们自己定义的 schema」上。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
 - **铁律**：`core/gherkai_core/model.py`、`core/gherkai_core/wire.py`、`core/gherkai_core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
@@ -68,7 +68,7 @@ class ReportStore(Protocol):
 
 > **`ref` 由 worker 定，`href` 由 core 算——铁律圈的是 `ref`，不是 `href`（关键边界，别混）**：
 > - `ReportRef.ref` 指向**哪**是 **worker** 决定的——`--backend local`(subprocess) worker 产物落本地、报 `file://`；`--backend cloud`(Fargate) worker（或 subprocess+注入落点的内部预演路径，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）**自己上传 S3**、报 `s3://`（[0029](./0029-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、注入即上传）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker 产物持久化 ⊥ store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
-> - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<s>/act_0.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
+> - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<Nova Act 会话 id>/act_<序号>_<指令片段>.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
 > - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。（无状态批量运行路径同守此序：RunReport 由推进器在 `try_finalize` CAS **之后**经 `reconcile.finalize_report` 写、同一失败隔离，见 [0030](./0030-realtime-persistence-seam.md) 决定三与 [0034](./0034-detached-batch-reconciler.md)）
@@ -97,7 +97,7 @@ class ReportStore(Protocol):
 
 ## manifest.json 形态
 
-**纯派生导航视图：薄信封 + 扁平 report_index，不内嵌 result 真值副本**。判定真值由 `ResultStore` 持有（数据面，每 job 落 `jobs/<scope_id>.json` / 未来对象存储），运行态/身份由 `RunStore` 持有（`run_meta.json` + `run_state.json` / 未来 DDB，[0016](./0016-execution-architecture-core-lib-run-model.md)）；manifest 靠 **`run_id` 软引用**那次 run——CI 要判定就拿 run_id 找 `ResultStore`。这样 report 是真·派生品（可删可重建、永不作判定源），无真值冗余、无一致性风险。
+**纯派生导航视图：薄信封 + 扁平 report_index，不内嵌 result 真值副本**。判定真值由 `ResultStore` 持有（数据面，每 job 落 `jobs/<quote(scope_id)>.json`：本机文件，或 S3 上 `<prefix>/<run_id>/` 下同一相对路径的对象，[0030](./0030-realtime-persistence-seam.md) 决定六），运行态/身份由 `RunStore` 持有（`run_meta.json` + `run_state.json`，或 DynamoDB runs 表里同一 `run_id` 下的 `META` / `STATE` 两个 item，[0016](./0016-execution-architecture-core-lib-run-model.md)、[0030](./0030-realtime-persistence-seam.md) 决定六）；manifest 靠 **`run_id` 软引用**那次 run——CI 要判定就拿 run_id 找 `ResultStore`。这样 report 是真·派生品（可删可重建、永不作判定源），无真值冗余、无一致性风险。
 
 ```jsonc
 {

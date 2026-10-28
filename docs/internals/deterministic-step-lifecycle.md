@@ -1,6 +1,6 @@
 # 一条确定性 step 的生命周期：从写下正则到云端命中
 
-> 本文讲**机制如何运转**，不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。确定性 step 的机制被切在五个 ADR 里（注册表在 0022、可发现性在 0036、定制面在 0037、镜像交付在 0038、产物缺口在 0027），而实际要回答的是一条纵向问题：一个正则从写下到在云端命中，要经过什么。本文即这条纵切面。
+> 本文讲**机制如何运转**，不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。确定性 step 的机制被切在七个 ADR 里（注册表在 0022、可发现性在 0036、目标自述在 0049、句柄与关键字声明在 0050、定制面在 0037、镜像交付在 0038、产物缺口在 0027），而实际要回答的是一条纵向问题：一个正则从写下到在云端命中，要经过什么。本文即这条纵切面。
 
 ## 0. 全景：四段路径，一张注册表
 
@@ -35,7 +35,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | 正常返回 | `passed` | — |
 | 抛 `AssertionError`（Nova）/ `DeterministicAssertion` 或 `name === "AssertionError"`（Midscene） | `failed` | `assertion_failed` |
 | 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | `engine_error`；两侧都先经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b） |
-| 一条 step 命中多条模式 → `DeterministicConflict` | `error` | 同上，冲突模式清单在 `message` 里 |
+| 一条 step 命中多条模式 → `DeterministicConflict` | `error` | `engine_error`，在派发处直接记、不经瞬时网络白名单；冲突模式清单在 `message` 里 |
 | 命中一条模式但关键字不在其 `keywords` 里 → `DeterministicKeywordMismatch` | `error` | `engine_error`，消息给出该条目接受的关键字 |
 | 命中、且在当前目标上有句柄的 step 带 DataTable / DocString | `error` | `engine_error`，确定性 step 不接收多行参数（目标上没有句柄、走 AI 的 step 把参数照常交给 AI） |
 
@@ -51,7 +51,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 | 入口 | 调用者 | worker 做什么 |
 |---|---|---|
-| `--capabilities`（自述） | `gherkai list-deterministic`、`doctor` 的 `steps.load.<engine>` 与 `engines.model.<engine>` 两项（同一次自述）、`run` / `submit` 的本机前置（共用 `_plan_and_preflight`；`run` 侧同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example` / `keywords`）+ `min_grace_s` + `model_id`（该 worker 起 job 时真会用的模型 id，`doctor` 的 `engines.model.<engine>` 行取它）+ `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
+| `--capabilities`（自述） | `gherkai list-deterministic`、`gherkai plan` 的目标核对（`_cmd_plan`，不受支持的目标以退出码 2 结束）与派发标注里按 scope 目标核对命中的 step（`_available_step_targets`）、`doctor` 的 `steps.load.<engine>`、`engines.model.<engine>` 与 `engines.targets.<engine>` 三项（同一次自述）、`run` / `submit` 的本机前置（共用 `_plan_and_preflight`；`run` 侧同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example` / `keywords` / `targets`）+ `targets`（该 worker 支持的测试目标）+ `session_warmup`（是否支持隧道会话预热，本机后端在 `--expose-local` 下的执行前预检据此放行）+ `min_grace_s` + `model_id`（该 worker 起 job 时真会用的模型 id，`doctor` 的 `engines.model.<engine>` 行取它）+ `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
 | `--match-steps`（查询） | `gherkai plan` 的派发标注 | 自 stdin 读入 `{keyword, text}` 数组 → `match_batch` / `matchBatch` → 输出一行 JSON 即退出 |
 | job 模式（无 flag） | `run` / `submit` 实际执行 | 建立会话、按 §1 派发 |
 
@@ -64,7 +64,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 文本视图只标注少数派：命中标 `← 确定性: <description>`、冲突与关键字不符标 `← ⚠`，走 AI 的**不标**（噪声控制，`render.py` `_dispatch_hint`）。`--json` 的 `deterministic` 键是四态（`null` / 命中 / `conflict` / `keyword_mismatch`），在每个 step 上一律省略也有含义；字段级语义见 [`cli-json-contract.md`](./cli-json-contract.md)，本文不重复。冲突与关键字不符在 `plan` 只产生 ⚠ 与 stderr 警告，**退出码仍 0**：feature 作者手上能做的只有改 step 措辞，修注册表不是他能做的动作。
 
-> 权威：[ADR 0036](../adr/0036-deterministic-capability-discovery.md)（决策 1-5：元数据必填、清单是自述对象的一个键、CLI 子命令、plan 标注与降级、`--capabilities` 契约）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（自述入口与 job 模式同样先加载 steps 目录）。
+> 权威：[ADR 0036](../adr/0036-deterministic-capability-discovery.md)（决策 1-5：元数据必填、清单是自述对象的一个键、CLI 子命令、plan 标注与降级、`--capabilities` 契约）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4（自述入口与 job 模式同样先加载 steps 目录）、[ADR 0049](../adr/0049-worker-capabilities-targets-keys.md) 决策 1（自述对象的目标键与会话预热支持键）。
 
 ## 3. 两个真值源、一个岔口：为什么「改了 steps，云端没变」是设计
 
@@ -72,7 +72,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 | 后端 | 真值源 | 解析规则与落点字段 |
 |---|---|---|
-| local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | `--steps-dir` > env `GHERKAI_STEPS_DIR` > `./steps`（相对**提交时** CWD、存在时才采用），写入 `RunMeta.steps_dir` |
+| local（`--backend local`，含 `submit` 的后台推进） | 本机目录 | `--steps-dir` > env `GHERKAI_STEPS_DIR` > 项目配置文件 `[common]` 的 `steps-dir`（相对配置文件所在目录）> `./steps`（相对**提交时** CWD、存在时才采用），写入 `RunMeta.steps_dir` |
 | cloud（`--backend cloud`） | **variant 镜像里构建进去的 `/app/steps`** | 解析出各引擎的 task-def revision；`RunMeta.steps_dir` 不写入 |
 
 ![local 后端提交时解析一次目录、路径随 definition 持久化；cloud 后端把 steps 构建进 variant 镜像，提交侧只解析镜像名](../diagrams/deterministic-steps-truth-sources.svg)
@@ -85,7 +85,7 @@ cloud 侧的关键是**镜像是唯一载体**：使用方的 `steps/` 靠三行
 
 由此得出两条对使用者最重要的推论：
 
-- **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只输出一句提示，definition 里也不写这个字段，因为本机路径无法进入容器；但**路径不是目录仍以退出码 2 结束**（那道校验排在清零之前，两个后端共用，见下 §4 表）。
+- **`--backend cloud` 下 `--steps-dir` 不生效**（`_resolve_steps_dir_for_backend`）：路径存在时只输出一句提示（配置文件里的 `steps-dir` 同样只提示），definition 里也不写这个字段，因为本机路径无法进入容器；但**路径不是目录仍以退出码 2 结束**（那道校验排在清零之前，两个后端共用，见下 §4 表）。
 - **「改了 `steps/`，云端结果不变」是设计而非 bug**（新写的 step 会静默落到 AI，改过的 step 仍按镜像里的旧版本运行）：提交侧不比对镜像里 steps 的新旧（比对等于替使用方判断），改完必须重新 build + `push-worker`。要确认云端实际加载的是哪一套，唯一可靠的方式是向镜像里的 worker 查询，而非向本机查询。
 
 variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR tag、退休与清理）见 [`cloud-backend-carriers.md`](./cloud-backend-carriers.md) 与 [`docs/user-guide/cloud-backend.md`](../user-guide/cloud-backend.md)。
@@ -100,8 +100,8 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 |---|---|---|
 | 注册时报「缺 description/example」 | 注册即暴露：元数据必填，缺失则这条 step 不进能力清单、feature 作者无法发现它 | 补一句说明 + 一条可直接复制的 step 文本 |
 | worker 启动即非零退出、stderr 指出某个文件 | 目录里**任一**文件 import 失败（语法/依赖错） | 修复该文件；Nova 用 `EX_STEPS_LOAD`（即 2）、Midscene 由 `bin.mts` 统一返回非零退出码（有意不用 `80`，那是网络故障退出码） |
-| `--steps-dir` / `GHERKAI_STEPS_DIR` 指向的目录不存在 → 退出码 2 | 显式指定了一个位置，而该位置不存在或不是目录，即配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
-| `plan` 直接以退出码 2 结束，提示「引擎 worker 的 match 查询失败，plan 拒绝出结果」并给出成因提示（使用方 steps 加载失败，或 worker 与 CLI 版本不一致） | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
+| `--steps-dir` / `GHERKAI_STEPS_DIR` / 配置文件的 `steps-dir` 指向的目录不存在 → 退出码 2 | 显式指定了一个位置，而该位置不存在或不是目录，即配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
+| `plan` 直接以退出码 2 结束，提示「向引擎 worker 查询确定性 step 失败，plan 拒绝出结果」并给出成因提示（使用方 steps 加载失败，或 worker 与 CLI 版本不一致）；有非桌面 scope 时，目标核对那一步的自述失败另提示「引擎 X 的 worker 自述失败，plan 拒绝出结果」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
 | `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 以退出码 2 结束，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
@@ -135,6 +135,8 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | 注册表即扩展点、匹配为何在 worker、冲突规则 | [ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md) |
 | 默认 AI / 少数派显式、QA 与测试开发的角色边界 | [ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md)、[ADR 0040](../adr/0040-consumer-role-model-and-terminology.md) |
 | 能力自述、`list-deterministic`、`plan` 标注与降级 | [ADR 0036](../adr/0036-deterministic-capability-discovery.md) |
+| 按句柄种类分键的注册面、关键字声明、测试分层 | [ADR 0050](../adr/0050-deterministic-step-handles-and-testing.md) |
+| 能力自述里的测试目标、step 级目标与交集 | [ADR 0049](../adr/0049-worker-capabilities-targets-keys.md) |
 | `steps/` 定制面、加载机制、fail-loud、裸 specifier 解析 | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 4 |
 | variant 镜像、推送注册、preflight 解析 | [ADR 0038](../adr/0038-worker-image-delivery.md)、[`cloud-backend-carriers.md`](./cloud-backend-carriers.md) |
 | `--json` 里 `deterministic` / `list-deterministic` / `doctor` 的字段 | [`cli-json-contract.md`](./cli-json-contract.md) |

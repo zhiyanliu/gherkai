@@ -1,6 +1,6 @@
 # 实时写存储接缝：per-job 完成回调 + RunPersistence 应用服务 + RunStore 增量 port
 
-> **Status:** Accepted —— 本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态批量运行，reconciler 直写 RunState）落地：`RunState` 投影带 `high_water_mark` 条件写、finalize 单独条件写（见下「重议」条反向链）。本 ADR 描述的**单编排进程内 `RunPersistence._lock` 串行写序**仍是同步 `run` 路径的机制、不变。
+> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 以加法扩展改写决定二、三里 `on_event` 的触发事件与血缘规则：收到 origin 不是 `attempted` 的 `session_opened` 即把 job 刷成 RUNNING 并带 session_id，`scope_started` 到达时改写为执行会话的 id，任何写入（含终态写）都不以 None 覆盖已有的 session_id；接缝形态、commit-point 写序、单一 store 锁不变。本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态批量运行，reconciler 直写 RunState）落地：`RunState` 投影带 `high_water_mark` 条件写、finalize 单独条件写（见下「重议」条反向链）。本 ADR 描述的**单编排进程内 `RunPersistence._lock` 串行写序**仍是同步 `run` 路径的机制、不变。
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/gherkai_core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
@@ -60,7 +60,7 @@ def schedule(run_meta, engines, sink, opts=None,
 class RunPersistence:
     def __init__(self, run_id, run_store, result_store, report_store=None): ...
     def begin(self, run_meta, *, started_at): ...        # create_run(meta, 初始全 PENDING 的 RunState)
-    def on_event(self, event): ...                        # 注入 schedule.on_event：收 ScopeStarted→刷 RUNNING+血缘（sink_lock 外）
+    def on_event(self, event): ...                        # 注入 schedule.on_event：收 ScopeStarted / SessionOpened→刷 RUNNING+血缘（sink_lock 外）
     def on_job_complete(self, jr): ...                    # 每 job：先 save_job_result，后 update_job_state（按 scope_id 刷该 job 终态）
     def finalize(self, result, *, ended_at): ...          # commit point：finalize_run → ReportStore.write
 ```
@@ -72,7 +72,7 @@ persistence = RunPersistence(run_id, run_store, result_store, report_store)   # 
 persistence.begin(run_meta, started_at=now)
 result = schedule(run_meta, resolver, progress_sink, opts,
                   on_job_complete=persistence.on_job_complete,   # job 完成落终态（主线程）
-                  on_event=persistence.on_event)                 # 收 ScopeStarted 刷 RUNNING（旁路观察者，sink_lock 外）
+                  on_event=persistence.on_event)                 # 收 ScopeStarted / SessionOpened 刷 RUNNING（旁路观察者，sink_lock 外）
 persistence.finalize(result, ended_at=now)
 ```
 
@@ -95,8 +95,8 @@ run 开始（schedule 之前）:
   ① ResultStore.save_job_result(run_id, jr)             ← 数据面判定真值【先】写
   ② RunStore.update_job_state(run_id, job_state)         ← 控制面 job 态【后】刷（单写者一次写定该 job 终态，[0031](./0031-job-lifecycle-states-and-severity.md)）
 
-job 进行中（on_event 收 ScopeStarted，worker 线程、**sink_lock 之外**）:
-  RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id))  ← RUNNING 中间态 + 血缘随首事件即落
+job 进行中（on_event 收 ScopeStarted，或 origin 不是 attempted 的 SessionOpened（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的加法扩展）；worker 线程、**sink_lock 之外**）:
+  RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id))  ← RUNNING 中间态 + 血缘随首事件即落（session_id 按代表会话规则：scope_started 的值一经取到即锁定，此前取最近一条非 attempted 的 session_opened；任何写入都不以 None 覆盖已有值，终态写也守此规则）
 
 run 结束（schedule 返回后）:
   RunStore.finalize_run(run_id, result.status, ended_at)  ← commit point：它一落=判定已就绪
@@ -163,7 +163,7 @@ class RunStore(Protocol):
     def load_run_meta(...); def load_run_state(...)                                 # 不变
 ```
 
-**接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）与条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）。
+**接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）、条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)），以及只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7）。
 
 - **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）、一次性写场景也仍用。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
@@ -180,7 +180,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
   - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`（[0034](./0034-detached-batch-reconciler.md) 后每条另带 omit-when-None 的 `claimed_at`）、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
   - `run_state_from_result`：投影出 dict 而非 tuple。
   - **`core/tests/test_stores.py`**：**护栏**——RunState 的消费方按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`），**不用整数下标**（dict 不支持，会 TypeError）。
-  - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、不是 RunState 消费点；本决策期 cli 也只**写**（经 `run_state_from_result` 投影，该函数现只剩测试在用）、从不**读** `RunState.jobs`——故改造期真正会被打破的是上面的 serialize 迭代与 test_stores 下标。**此后 cli 已成为 `RunState.jobs` 的读者**（[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`）——两处都按 key 遍历/取值，Map 形状原生支持。）
+  - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、不是 RunState 消费点；本决策期 cli 也只**写**（经 `run_state_from_result` 投影，该函数现只剩测试在用）、从不**读** `RunState.jobs`——故改造期真正会被打破的是上面的 serialize 迭代与 test_stores 下标。**此后 cli 已成为 `RunState.jobs` 的读者**（[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`cli/gherkai_cli/__main__.py` 的 `_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`）——两处都按 key 遍历/取值，Map 形状原生支持。）
 - skipped 的 job 也要进 Map（它是 definition 的一部分，缺了会让 RunState 的 job 集与 RunMeta.jobs 对不齐）。各新态的 `session_id` 取值规则见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一；aborted 留 `session_id`（有现场可查）正是 Map 形状的受益场景。
 
 ## 决定六：云端 adapter 的落库形态（DDB/S3）
@@ -218,7 +218,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 **为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
-- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：缺 table/bucket（入口显式校验非空——否则 `None` 流进 adapter 到运行时才 botocore 报错）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
+- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：（曾有「缺 table/bucket：入口显式校验非空」一项；[0033](./0033-iac-aws-backend-and-composition-wiring.md) 两层命名后表/桶恒有 `--prefix` 推导的默认名、不会为空，此项不再出现）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
 - **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
 
 ## 现在做 / 留口子

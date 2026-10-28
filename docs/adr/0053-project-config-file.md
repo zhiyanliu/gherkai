@@ -31,7 +31,7 @@
 - 对每个可配置项，按上述顺序取第一个给出的值。没有对应环境变量的项，跳过该层。
 - 配置文件排在环境变量之后，是因为环境变量是「本次调用的临时覆盖」的惯用载体（CI 矩阵、单次排障），文件是项目的稳定基线；反过来排会让 CI 里的环境变量被入库文件静默覆盖。
 - region 因此依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件的 `region`、AWS profile 配置里的 region，前者优先；gherkai 仍不自行补默认 region。
-- **`default-job-timeout` 的最后一层不是固定值**：选项、环境变量或配置文件任一来源给出的值都算「显式给出」；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
+- **`default-job-timeout` 的最后一层不是固定值**：选项或配置文件给出的值都算「显式给出」（本项没有环境变量层）；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
 - **路径类值相对配置文件所在目录解析**（`steps-dir`、`[apps]` 里的 `file`，以及本机后端下的 `report-dir`）。`steps-dir` 解析成绝对路径后写进 definition；`file` 解析成绝对路径后用于上传，definition 里记的是上传后的 S3 位置（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）；本机后端的 `report-dir` 决定报告与判定明细的落点，不进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。**云端后端下 `report-dir` 不是路径**：它是产物桶内的键前缀，原样使用、不做绝对化，并与推进器 Lambda 的 `REPORT_DIR` 核对一致（[0033](./0033-iac-aws-backend-and-composition-wiring.md)、[0034](./0034-detached-batch-reconciler.md)），与选项、环境变量给出时同一形态。
 
 ### 3. 节与键
@@ -105,8 +105,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 | 观察 | 数据 | 支撑的决策 |
 |---|---|---|
 | 同一账号远程访问并发 | 同机型连发 6 个会话请求，前 5 个进入 RUNNING，第 6 个进入 `PENDING_CONCURRENCY` 排队而不是报错；排队实测最长约 6 分钟；排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段，是否计费以账单为准 | 获取预算必须可配，且要覆盖排队时间 |
-| 取设备开销 | 创建到 RUNNING：Android 51 到 72 秒、iOS 61 到 72 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟，并计入服务商回报的设备分钟 | `acquire-timeout-s` 的默认值不能低于分钟级 |
-| 停止到 COMPLETED | Android 60 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计入服务商回报的设备分钟、不占 job 墙钟 | 费用口径以账单为准、估算时不能漏掉收尾一段；与获取预算无关 |
+| 取设备开销 | 创建到 RUNNING：Android 51 到 92 秒、iOS 61 到 82 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟，并计入服务商回报的设备分钟 | `acquire-timeout-s` 的默认值不能低于分钟级 |
+| 停止到 COMPLETED | Android 52 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计入服务商回报的设备分钟、不占 job 墙钟 | 费用口径以账单为准、估算时不能漏掉收尾一段；与获取预算无关 |
 | 计费方式的拐点 | 不计量槽位 250 美元每月除以计量单价 0.17 美元每分钟，约 1470 分钟每月每平台 | `billing-method` 必须可选，而不是内建固定 |
 | 系统版本决定能力 | iOS 15.8 的 Safari 网页上下文完整可用，iOS 26.3 的网页上下文整体不可用 | 筛选条件以系统版本为必给项，而不是只按平台挑 |
 | 设备忙 | 历次实测中未遇到机型被占满（BUSY）的情形；指定 ARN 而设备被占用时的会话状态在 API 状态枚举里是 `PENDING_DEVICE`（排队等设备），同机型 5 台并发都分到了不同单元 | 筛选时排除繁忙设备是保守选择（算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）；指定 ARN 时的等待由获取预算处理 |

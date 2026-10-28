@@ -1,6 +1,6 @@
 # 0042. step 级机读证据（evidence）与 `gherkai explain`
 
-> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。设备目标的例外由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8 引入并已在本篇原位登记：决策一（失败的确定性与导航 step 也产 evidence、schema 1 加设备键）、决策二（失败步的界面快照采集计入 job 墙钟）、决策四（scope 级 error 后合成的 SKIPPED 与 `step_kind`）、决策五（`device_session` 只作链接）。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
+> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 引入的加法已在本篇原位登记：决策四的 scope 级 error 后合成的 SKIPPED（0051 决策 4，桌面隧道预热失败同样产生）已实装；设备目标的例外（0051 决策 8）——决策一（失败的确定性与导航 step 也产 evidence、schema 1 加设备键）、决策二（失败步的界面快照采集计入 job 墙钟）、决策四（`step_kind`）、决策五（`device_session` 只作链接）——`explain` 侧的渲染已实装，worker 侧的产出随 1.5 的 Midscene 设备模块实施。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
 
 ## 背景
 
@@ -113,7 +113,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 **未终态 run 分两种情形**：同步 `run` 中途可见已完成 job（逐 job 落 ResultStore），文本形态经 stderr 提示「run 仍在运行，以下为已完成部分」（stdout 只放核心产出，与 `status` 的提示规则一致）；`submit` 的 detached run（本地 per-run 进程与云端 reconciler 同一份 tick）在全 job 终态 finalize 时才一次性落 ResultStore，未终态时零文件——explain 退 0、只打一行「判定明细尚未落地，可先用各后端对应的 `status … --wait` 等到终态」，**提示里给出可原样跑通的整条命令**（local 带 `--report-dir`、cloud 带 `--backend cloud --prefix <已解析的 prefix>`）：只写 `status <run_id> --wait` 的简写在云端后端会落回本机后端、报「未找到 run」并把人引去查 `--report-dir`。让 detached run 中途可见需从事件流逐 scope 归约，属另一个决策。`--json` 下不打任何提示行（0041 决策三：stdout 只有一个 JSON 文档），机读侧靠顶层 `status` 自明。
 
-**文本形态**（skipped 只由上游 `status == error` 短路产生，判据是 `StepResult.shortcircuited`、不按 status 顺序猜，作用域是同一 scenario；断言 `failed` **不**短路后续 step，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六与 [0028](./0028-transient-network-ssl-resilience.md)）：
+**文本形态**（被短路的 skipped 只由上游 `status == error` 产生，判据是 `StepResult.shortcircuited`、不按 status 顺序猜，作用域是同一 scenario；scope 级 error 后由 core 合成的 skipped（`shortcircuited=False`）打「未执行（scope 级错误，原因见 job 判定）」，见上「记录缺口的两种情形」条；断言 `failed` **不**短路后续 step，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六与 [0028](./0028-transient-network-ssl-resilience.md)）：
 
 ```
 run 20260910T080630Z-9fa261  status=failed
@@ -144,7 +144,7 @@ run 20260910T080630Z-9fa261  status=failed
 
 **文本预算**：文本形态是给 agent 一次读进上下文的摘要，不是 evidence 全文转写。每个 act 默认只渲染**最后一个带 thought 的 frame**（判否理由通常落在末次观察）及其截图 uri；单段 thought 超过 800 字截断并接一行「…（已截断；完整内容见 --json 或 evidence.json：<ref>）」；被省略的 frame 打一行「其余 M 个 frame 已省略」。`--full` 关闭预算、逐 frame 全文。理由：一个 3 票断言最坏 90 段 thought，文本形态若无预算会一次撑爆 agent 上下文，而它恰是 agent 的首选读法。evidence 缺失的 step 下打一行该 step / 该 scope 的其它原生产物 ref 作兜底指针。
 
-**JSON 形态**（筛选生效时无一命中的 scope 不产出空壳条目）：`{run_id, status, scopes: [{scope_id, engine, status, error_type, message, session_id, report_refs, aborted_hint, has_step_records, scenarios: [{scenario_id, name, status, steps: [{index, keyword, text, status, votes, error_type, message, shortcircuited, duration_ms, report_refs, record_missing, evidence: <evidence.json 全文> | null, evidence_missing}]}]}]}`。`report_refs` 原样搬既有字段、不解析（含 evidence 之外的 trajectory / report / summary）：explain 已从 ResultStore 读到整个 JobResult、这些 ref 就在手上，云端 `status --json` 只投影 RunState 没有它们，不搬等于让 agent 自己去 S3 抠 `jobs/*.json`。evidence 全文内嵌可以：它不含 base64、只有 uri。**契约页与护栏**：evidence 的固定键单列一节；`frames[].actions[].args` 与 `acts[].result` 是引擎原样透传的对象，内部键随 SDK、不属于本契约，护栏在这两个节点**停止递归**（不是塞 `ignore` 名单——那会连真契约键一起放过），`_leaf_keys` 需支持「指定键处停止下钻」；explain 的护栏样例由手搭的 evidence 夹具喂进渲染器生成（形状与两引擎映射测试共用的真产物裁剪版一致），否则 evidence 那批键根本不进比对。
+**JSON 形态**（筛选生效时无一命中的 scope 不产出空壳条目）：`{run_id, status, scopes: [{scope_id, engine, status, error_type, message, session_id, report_refs, aborted_hint, has_step_records, scenarios: [{scenario_id, name, status, steps: [{index, keyword, text, status, votes, error_type, message, shortcircuited, duration_ms, report_refs, record_missing, evidence: <evidence.json 全文> | null, evidence_missing}]}]}]}`。设备目标的 scope 另带 `sessions`、`device_observed_s` 与 `device_observed_missing`（形状同 `run --json`），`session_id` 是 Device Farm 远程访问会话 ARN 时另带 `console_url`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、7、8）；桌面 scope 不带这几个键。`report_refs` 原样搬既有字段、不解析（含 evidence 之外的 trajectory / report / summary）：explain 已从 ResultStore 读到整个 JobResult、这些 ref 就在手上，云端 `status --json` 只投影 RunState 没有它们，不搬等于让 agent 自己去 S3 抠 `jobs/*.json`。evidence 全文内嵌可以：它不含 base64、只有 uri。**契约页与护栏**：evidence 的固定键单列一节；`frames[].actions[].args` 与 `acts[].result` 是引擎原样透传的对象，内部键随 SDK、不属于本契约，护栏在这两个节点**停止递归**（不是塞 `ignore` 名单——那会连真契约键一起放过），`_leaf_keys` 需支持「指定键处停止下钻」；explain 的护栏样例由手搭的 evidence 夹具喂进渲染器生成（形状与两引擎映射测试共用的真产物裁剪版一致），否则 evidence 那批键根本不进比对。
 
 **退出码：只用 0 / 2，不用 1**。explain 是证据渲染器、不重复表判定（判定看 `run` / `status --wait` 的退出码），run 判 failed / error 时 explain 仍退 0；同类先例是 [0041](./0041-agent-facing-cli-affordances.md) 决策四的 `doctor`。0 = 渲染成功（哪怕全部 step 无 evidence、判定明细尚未落地）；2 = 参数错（含 `--step` 未同给 `--scenario`、命中的 scenario 都无第 N 步）/ run 或 scope 不存在 / 云端后端 skew block 或凭证·region·权限不可用。
 
@@ -153,12 +153,12 @@ run 20260910T080630Z-9fa261  status=failed
 ### 五、与 [0027](./0027-runreport-aggregation-index.md) 的关系：铁律不破，一条消费端规则按层收窄，一个留口子用对的方式填上
 
 - 铁律（`model / wire / schedule` 对 `ReportRef` 永久不透明搬运、永不解析产物内容、永不按 kind 分支）不变。新增的 `StepResult.message` 是搬事件里既有的字符串，不是解析产物。
-- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）与设备会话的探测结论文件（`kind == "device_session"`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
+- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）与远程访问会话的探测结论文件（`kind == "device_session"`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
 - 0027 留口子「trajectory 内部结构化提取」由本 ADR 落地，位置是 **worker**（引擎知识的唯一住处）。0027 的 kind 例举补 `evidence`、「Midscene 保持 scope 级」改为「Midscene 的 report 仍 scope 级，evidence 下沉 step 级」、留口子条目标已落地。
 
 ### 六、SDK 版本钉死 + 格式漂移的防线
 
-两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0`；Midscene `@midscene/web 1.15.1`（2026-10-12 自 1.12.8 升，见下「历次升级」）、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基础镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（两引擎各自的 wikipedia 用例与失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
+两引擎的 SDK 依赖**钉精确版本**（Nova `nova-act==3.4.187.0` 与 worker 直接用来启动、停止浏览器会话的 `bedrock-agentcore==1.22.0`（nova-act 对它只声明版本范围）；Midscene `@midscene/web 1.15.1`（2026-10-12 自 1.12.8 升，见下「历次升级」）、`playwright` / `@playwright/test` 1.63.0），升级是有评估的显式发布动作——与 [0004](./0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」同一逻辑：用户拿到的就是我们测过的。**曾用范围版本（`>=` / `^`）的教训**：发行版 npm worker 与云端基础镜像都是装包时解析依赖、无 lock，2026-09 实查用户实际跑的是 `@midscene/web` 1.12.8，而仓库锁文件与全部测试停在 1.9.8——测试保护的不是用户跑的版本，本机 worker 与云端镜像还可能各装到不同版本。升级流程：改 pin → 全套测试 + 评测集真跑（`features/` 下两引擎各自适用的全部用例，加两引擎 `spikes/` 目录里的失败探针）→ 随发版并在 Release 正文点明。升级时的回归护栏四道：
 
 1. 映射函数只读表中列出的少数字段、每个字段当可选，读不到就 null、不抛；判别按值不按 SDK 标志（`is_tool` / `is_return` 之训）；Nova 的 `prompt` 被 SDK 改写、同属「不能照抄 SDK 字段」。
 2. 每引擎一份**由真产物裁成的 fixture**（Nova：真 `_trajectory.json` 去掉 base64；Midscene：真 execution 的 JSON），测试断言映射结果——格式漂移在升版跑测试时变红。
@@ -192,13 +192,13 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 已知缺口与重议闸门
 
-三处缺口都是有意接受的取舍，不是遗漏；这里把「什么情况下该回来改」写成可对表的信号。
+前两处是仍开放、有意接受的取舍，不是遗漏；第三处已关闭、留作记录（含被拒做法）；末条是设备目标的指针。这里把「什么情况下该回来改」写成可对表的信号。
 
 - **截图字节的残余风险**（只在云端后端；本机后端不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
 - **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**预案**：core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝，一并立项。
 - **已关闭：job 判 error 且有 step 记录时 `explain` 文本不打判定行**（v1.4.3 发版验证观察到，云端 timeout 是首例）：设备目标让全部 scenario 都是合成记录的 job 成为常态，缺口由决策四「带 error_type 的 error / aborted 总打判定行」关闭。被拒的另一做法是不把合成记录计入 `has_step_records`：它补不了「执行中途会话丢失、真实记录与合成记录混在一起」的情形，还会让字段语义与 JSON 的 steps 数组对不上。
 
-- **设备目标的证据字段与平台旁证**：evidence 增加设备专有字段（锚点表、失败步控件树、机型与系统版本）并把「承载平台的产物只留链接、不进 run 产物」写成两条路共用的规则，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
+- **设备目标的证据字段与平台旁证**：设备目标的 evidence 在 schema 1 上加键（`step_kind`、顶层 `url` / `url_missing`、失败步的 `controls` 与 `page_source`，见决策一的设备例外）；机型与系统版本放在 scope 表头（由 `session_opened.device` 派生），不进 evidence；Device Farm 的录像与日志只记会话 ARN、`explain` 给出控制台链接，不下载进 run 产物，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8。
 
 ## 影响面
 
@@ -218,7 +218,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - [0027](./0027-runreport-aggregation-index.md)：kind 例举补 `evidence`；「Midscene 保持 scope 级」句改写；「消费端不 stat / open」条按层收窄并反向链；留口子「trajectory 内部结构化提取」标已落地；index.html 形态 ② 条与空态条措辞同步。
 - [0029](./0029-engine-artifacts-to-s3.md)「reportRef 指向的文件」条、[0032](./0032-fargate-execution-environment.md)「上传失败处理」条：各加一行「step 级产物已有一个具名例外：evidence，见 0042」。
 - [0037](./0037-distribution-and-packaging.md) 决策 7 接线句：cloud 入口由 run / submit / status 三个改为四个、补 `explain`。
-- [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头**保持 Accepted**、按 0030 / 0034 的既有写法追加一句反向链——0041 无决策被反转，不写 Partially-superseded。
+- [0041](./0041-agent-facing-cli-affordances.md)：决策三查询类命令清单补 `explain --json`；「重议闸门」失败证据机读化一条标已由本 ADR 落地并反向链；Status 头不因本 ADR 改为 Partially-superseded（本 ADR 没有反转 0041 的任何决策），只按 0030 / 0034 的既有写法追加一句反向链；0041 后来因 [0043](./0043-agent-skill-for-driving-gherkai.md) 改为 Partially-superseded，与本 ADR 无关。
 - 其余文档面已落地：使用者面在 `docs/user-guide/running-and-results.md`，机读字段在 `docs/internals/cli-json-contract.md`，术语在 `CONTEXT.md`。
 
 **交付链（不改 IaC 资源，但不重部署云端看不到——云端后端跑不出 message / evidence，易误判成 bug）**

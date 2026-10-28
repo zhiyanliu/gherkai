@@ -13,7 +13,7 @@
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
 | 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认锁定，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认锁定，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
-两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置，四级全空才响亮失败、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
+两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 配置文件的 `region` > profile 配置，五处都没有就报错、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
 
 **诊断规则**：Nova Act 引擎下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
 
@@ -29,7 +29,7 @@
 
 ## 3 确定性 step 最小模板
 
-自然语言步默认交给 AI；「必须精确、不容抖动」的判定写成确定性 step，命中即走你的函数，不问 AI、不投票、可复现。写在**项目自己**的 `steps/` 目录里（不改引擎包）。目录按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > `./steps` 解析。
+自然语言步默认交给 AI；「必须精确、不容抖动」的判定写成确定性 step，命中即走你的函数，不问 AI、不投票、可复现。写在**项目自己**的 `steps/` 目录里（不改引擎包）。目录按 `--steps-dir` > 环境变量 `GHERKAI_STEPS_DIR` > 配置文件的 `steps-dir`（相对配置文件所在目录）> `./steps` 解析。
 
 Nova Act（`steps/login.py`）：
 
@@ -84,11 +84,11 @@ deterministic(
 | 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern | 补齐元数据 |
 | `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 以退出码 2 结束，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
 | Midscene 某个 step 文件一条都没注册 | 非 0 退出并点名 | 多半 import 到了第二份 `@gherkai/worker-midscene`，检查项目里有没有另一份 |
-| `--steps-dir`（或 `GHERKAI_STEPS_DIR`）指的目录不存在 | 直接以退出码 2 结束：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
+| `--steps-dir`（或 `GHERKAI_STEPS_DIR`、配置文件的 `steps-dir`）指的目录不存在 | 直接以退出码 2 结束：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
 | 一个 step 文本命中多条 pattern | 该步记 error 并列出同时命中的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到、或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对；`list-deterministic --steps-dir …` 看清单里有没有你那条；对照 `example` 改 step 文本 |
 | `engine_error` 说起 worker 失败 | worker 没装或版本与 CLI 不一致 | 见 `references/setup-and-diagnosis.md` |
 
 ## 6 把 steps 带到云端
 
-`--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir` 只警告不生效。步骤要构建进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。
+`--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir`（配置文件给的 `steps-dir` 同样）只警告不生效。步骤要构建进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。

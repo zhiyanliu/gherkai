@@ -18,9 +18,10 @@ CLI 按以下顺序确定目录，命中即用：
 |---|---|---|
 | 1 | `--steps-dir DIR` | `run` / `plan` / `submit` / `doctor` / `list-deterministic` 五个子命令都有此选项 |
 | 2 | 环境变量 `GHERKAI_STEPS_DIR` | 与上一条同义，适合固定在 shell 或 CI 环境里 |
-| 3 | `./steps` | 相对当前工作目录，存在即用 |
+| 3 | 项目配置文件（默认 `gherkai.toml`）的 `steps-dir` | 相对配置文件所在目录解析，见 [`configuration.md`](./configuration.md) |
+| 4 | `./steps` | 相对当前工作目录，存在即用 |
 
-选项或环境变量显式指定的目录不存在（或不是目录）时，命令以退出码 2 结束并说明原因：明确指了一个位置而那里没有内容属于配置错误，其中的确定性 step 一条都加载不了。默认的 `./steps` 不存在**不算错**——多数项目没有确定性 step。目录会被解析成绝对路径，并记进这个 run 的元信息：`run` 与 `submit` 起的后台进程、以及后续用 `gherkai status` 把这个 run 推到终态的进程，读到的都是同一个目录，不会因为工作目录不同而换一套 step。
+选项、环境变量或配置文件显式指定的目录不存在（或不是目录）时，命令以退出码 2 结束并说明原因：明确指了一个位置而那里没有内容属于配置错误，其中的确定性 step 一条都加载不了。默认的 `./steps` 不存在**不算错**——多数项目没有确定性 step。目录会被解析成绝对路径，并记进这个 run 的元信息：`run` 与 `submit` 起的后台进程、以及后续用 `gherkai status` 把这个 run 推到终态的进程，读到的都是同一个目录，不会因为工作目录不同而换一套 step。
 
 worker 启动时排序递归遍历该目录，两个引擎各取自己的扩展名：
 
@@ -74,13 +75,13 @@ deterministic(
 
 `keywords` 可选：声明这条 step 接受哪些 Gherkin 关键字（`Given` / `When` / `Then` 的子集，Nova Act 写 `keywords=("Then",)`，Midscene 写 `keywords: ["Then"]`），不写就三个都接受。step 文本命中了模式而关键字不在声明里时，这一步记 `error`、不交给 AI，`gherkai plan` 会提前用 ⚠ 标出。断言类 step 声明只接受 `Then`，可以挡住 `Given 页面地址匹配 "…"` 这种写法；`And` / `But` 按它承接的那条算。
 
-Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion`，以及类型 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta`（桌面句柄）与 `DeterministicHandlers` / `WebdriverEntry` / `WebdriverCtx` / `WebdriverHandler` / `WebdriverDevice`（设备句柄，见下一节）。
+Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion`，以及类型 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta`（桌面句柄）与 `DeterministicHandlers` / `WebdriverEntry` / `WebdriverCtx` / `WebdriverHandler` / `WebdriverDevice` / `WebdriverApp`（设备句柄，见下一节），以及条目字段取值的类型 `UiKind` / `Device` / `Requirement`（给辅助函数写类型注解时用）。
 
 你的项目不需要 `package.json` 或 `node_modules`，也不必在项目里另装这个包：worker 在加载你的 step 文件之前，把这个包名解析到它自己那一份。反过来，把导入写成指向某个安装位置的文件路径（例如另一处 `node_modules` 里的 `dist/index.mjs`）会加载到第二份副本，注册落进 worker 不读的那张表，worker 会报这个文件一条 step 都没注册并拒绝启动。
 
 ## 给设备目标加第二份实现
 
-一条 step 可以按**句柄种类**给多份实现：`playwright` 在桌面浏览器上执行，`webdriver` 在设备会话上执行。第二个参数从单个函数换成一个按种类分键的对象（Midscene）或字典（Nova Act）；传单个函数仍然有效，等价于只有 `playwright`，已有的 `steps/` 不需要改。
+一条 step 可以按**句柄种类**给多份实现：`playwright` 在桌面浏览器上执行，`webdriver` 在远程访问会话上执行。第二个参数从单个函数换成一个按种类分键的对象（Midscene）或字典（Nova Act）；传单个函数仍然有效，等价于只有 `playwright`，已有的 `steps/` 不需要改。
 
 ```ts
 // steps/url_matches.mts（Midscene）
@@ -105,7 +106,7 @@ deterministic(r'页面地址匹配 "(?P<pattern>[^"]+)"',
 
 `requires` 声明这个条目在设备上执行的前提，目前只有一个取值 `web_context`：条目要在网页上下文里读写页面（例如读地址）。带这个前提的条目 `uiKinds` 只能是 `["web"]`。设备不提供网页上下文时，这一步记 `error`、不交给 AI。
 
-以下写法在注册时就被拒绝，worker 不启动并点名文件：不认识的句柄种类；对象里一个句柄都没有；`webdriver` 给了空列表；条目缺 `handler`；`uiKinds` / `devices` / `requires` 出现取值范围之外的值或重复，`uiKinds` / `devices` 给了空列表（`requires` 给空列表等于不写），或三者之一显式写成 `null`（缺省就不要给这个字段）；带 `web_context` 的条目 `uiKinds` 不是恰好 `["web"]`；两个条目覆盖了同一个（设备, 界面类型）组合——不论它们的 `requires` 是否相同，一个 step 在一个目标上只能有一份实现，没有「带前提的一份加兜底的一份」。
+以下写法在注册时就被拒绝，worker 不启动并点名文件：不认识的句柄种类；对象里一个句柄都没有；`webdriver` 给了空列表；条目缺 `handler`；条目含不认识的字段（Midscene 侧只认 `uiKinds` / `devices` / `requires` / `handler`，Nova Act 侧只认 `ui_kinds` / `devices` / `requires` / `handler`）；`uiKinds` / `devices` / `requires` 出现取值范围之外的值或重复，`uiKinds` / `devices` 给了空列表（`requires` 给空列表等于不写），或三者之一显式写成 `null`（缺省就不要给这个字段）；带 `web_context` 的条目 `uiKinds` 不是恰好 `["web"]`；两个条目覆盖了同一个（设备, 界面类型）组合——不论它们的 `requires` 是否相同，一个 step 在一个目标上只能有一份实现，没有「带前提的一份加兜底的一份」。
 
 ## handler 拿到什么
 
@@ -376,7 +377,7 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 | 启动即报错并点名某条模式 | 注册时缺 `description` 或 `example` | 补齐两个字段 |
 | 启动即报错并点名某条模式，消息提到 `keywords` | `keywords` 声明为空、有重复，或取值不在 `Given` / `When` / `Then` 之内 | 改成这三个关键字的非空子集，或去掉声明 |
 | Midscene 报某个文件一条确定性 step 都没注册 | 该文件没在顶层调用 `deterministic(...)`，或按文件路径导入了另一处安装的同名包 | 确认顶层有注册调用，且导入写的是包名 `@gherkai/worker-midscene` |
-| 命令以退出码 2 结束，说 `--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
+| 命令以退出码 2 结束，说 `--steps-dir`、`GHERKAI_STEPS_DIR` 或配置文件的 `steps-dir` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
 | `list-deterministic`、`plan` 或运行前检查以退出码 2 结束，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
 | 写了 `steps/` 却全部走 AI，或少了几条 | 目录没被读到；Midscene 侧文件用了 `.mts` / `.mjs` 以外的扩展名（被跳过，不报错）；或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对，扩展名改成 `.mts` 或 `.mjs`，再用 `list-deterministic` 核对清单条数，对照 `example` 改 step 文本 |
 
@@ -394,7 +395,7 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 
 ## 带到云端
 
-`--backend cloud` 时 worker 运行在云端容器里，读不到本机的 `steps/`：显式给了 `--steps-dir` 会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基础镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
+`--backend cloud` 时 worker 运行在云端容器里，读不到本机的 `steps/`：用 `--steps-dir` 或配置文件的 `steps-dir` 指定目录时会打一句提示，用 `GHERKAI_STEPS_DIR` 或默认 `./steps` 时没有提示，本机目录一律不生效。云端要用的确定性 step 需要构建成一个 worker 镜像 variant（在基础镜像上复制 `steps/`），由部署方推送后用 `--worker-variant` 选用。构建、推送与默认指针见 [`cloud-backend.md`](./cloud-backend.md)。
 
 因此改完 `steps/` 之后必须重新构建并推送镜像，云端才会用上新版本：提交时不比对镜像里 step 的新旧，新写的 step 在云端会改由 AI 判定，改过的 step 仍按镜像里的旧版本执行。
 

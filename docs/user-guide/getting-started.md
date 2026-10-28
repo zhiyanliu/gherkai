@@ -50,7 +50,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile` 或 `AWS_PROFILE` 指定 profile。
-- **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置里的 region。四处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
+- **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 项目配置文件 `gherkai.toml` 里 `[common]` 的 `region` > profile 配置里的 region。五处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
 - 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表三项服务与你要用的模型在该 region 都可用：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
 - 该 region 下的账号需要能用以下服务与模型：
 
@@ -82,6 +82,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 │ 结果 │ 检查项                    │ 说明                                                                                            │
 ├──────┼───────────────────────────┼─────────────────────────────────────────────────────────────────────────────────────────────────┤
 │ ✓    │ cli.version               │ gherkai <版本>，Python 3.13.14                                                                  │
+│ ✓    │ config.file               │ 未使用配置文件（按 --config、环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml 查找）            │
 │ -    │ engines.midscene          │ 引擎 midscene 的 worker 运行时未找到。装法：npm i -g @gherkai/worker-midscene（需 Node ≥ 22）…… │
 │ ✓    │ engines.novaact           │ /path/to/python3 -m gherkai_worker_novaact（同 venv 模块 gherkai_worker_novaact）               │
 │ ✓    │ engines.any               │ 至少一个引擎的 worker 可用                                                                      │
@@ -162,8 +163,8 @@ gherkai explain <run_id>
 `plan` 的输出形如：
 
 ```text
-plan（用例预检，未执行）  1 job(scope)  ·  1 scenario  ·  default_engine=novaact
-└── job scope='features/smoke.feature:3' (name='打开示例站点') engine=novaact
+plan（用例预检，未执行）  1 job(scope)  ·  1 scenario  ·  远程访问会话 0  ·  default_engine=novaact
+└── job scope='features/smoke.feature:3' (name='打开示例站点') engine=novaact target=desktop/web
     └── scenario 'features/smoke.feature:3'  (2 step)
         ├── [0] Given "https://example.com"  ← 确定性: 内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址）
         └── [1] Then "页面说明这个域名用于文档示例"

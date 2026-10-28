@@ -4,7 +4,7 @@
 > 与 `cli/gherkai_cli/render.py`（渲染器）、`runtime/gherkai_runtime/compose.py`（`artifacts` 四键的落点拼装：`local_artifact_locations` / `cloud_artifact_locations`）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`，另注入 `artifacts.worker_log`）、
 > `deploy_aws/gherkai_deploy_aws/workers.py`（`list-workers`）；worker 侧两组：`engines/novaact/gherkai_worker_novaact/evidence.py`
 > 与 `engines/midscene/src/worker/evidence.mts`（`evidence` 的固定键，两引擎结构相同）、`engines/novaact/gherkai_worker_novaact/deterministic.py`
-> 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 每项的键，worker 自述、CLI 只转述）。
+> 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 每项的键，worker 自述、CLI 转述；唯一例外 `available_targets` 由 CLI 调用 `runtime/gherkai_runtime/compose.py` 的 `available_targets()` 求交集后附加）。
 > 本页与 code 的一致性由护栏保证：`cli/tests/test_cli_json_contract.py` 与 `deploy_aws/tests/test_workers.py` 用真渲染器生成样例
 > （`explain` 的 `evidence` 用一份与两引擎映射测试结构相同的手写夹具）、递归收集全部键名（`actions[].args` 与 `acts[].result` 两个引擎透传节点不向下递归）、
 > 逐个断言出现在本页，漏键即测试失败。本页只说明有哪些字段、各自的含义与出现条件，不说明理由——理由在 ADR。
@@ -39,14 +39,14 @@
 |---|---|---|
 | `scope_id` | string | scope 键：`@scope:` 的值，或未标 scope 时的 scenario id（形态见下文 `scenario_id`） |
 | `status` | `passed` / `failed` / `error` / `skipped` / `aborted` | job 判定；后两态只在同步 `run` 的 `--fail-fast` 路径出现（`skipped` 表示未启动，`aborted` 表示执行中被中止） |
-| `duration_ms` | number \| null | scope 墙钟（会话起止） |
+| `duration_ms` | number \| null | scope 墙钟：从 `scope_started` 到 `scope_done`，不含建立会话的时间（设备目标也不含获取设备的时间）；未收到 `scope_started` 或 `scope_done` 时为 null（执行前失败、超时、worker 异常退出、未启动、被中止） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 云端浏览器会话 id（血缘；两个引擎都是 AgentCore 浏览器会话 id，可与 worker 日志对应；Nova Act 的轨迹目录按另一种会话 id 命名，worker 日志里有两者的对应行）；设备目标为 Device Farm 远程访问会话的 ARN |
 | `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
 | `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止，`message` 列出会话名 |
 | `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
-| `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`）、`ref`（`file://` 或 `s3://` URI）、`label` |
+| `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`；设备目标另有 `device_session`，见 `explain` 一节）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
 
 `scenarios[]` 每项：`scenario_id`（`<uri>:<行>[:<example 行>]`——Scenario Outline 展开的每行 example 各成一条，以 example 行号消歧）、`status`（`passed` / `failed` / `error`，或 `skipped`——worker 报告 scope 级 error（scope 未能就绪，或执行中途无法继续，如会话丢失、设备失去响应）后，该 scenario 从未执行、由本工具补记）、`duration_ms`、`report_refs[]`（形状同上；**当前两引擎都不填 scenario 级产物，恒为空数组**——产物在 step 级与 job 级）、`steps[]`：
@@ -91,7 +91,7 @@
 |---|---|---|
 | `default_engine` | string | 未标 `@engine` 的 scope 使用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
-| `device_session_count` | int | 这次 run 将建立的设备会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
+| `device_session_count` | int | 这次 run 将建立的远程访问会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
 | `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时 `{arn, source}`，按系统版本挑选时 `{os_version, source}`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
@@ -211,7 +211,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | 键 | 含义 |
 |---|---|
 | `section` | `cli` / `config` / `engines` / `steps` / `aws` / `backend` / `provider` |
-| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限 vs 云端 `stopTimeout`，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）/ `devices.project`（设备支持是否已部署：Device Farm 项目 ARN 是否在 SSM 中，未部署 ok=false/required=false）/ `devices.sessions`（该项目里未到 COMPLETED 的远程访问会话数与控制台链接，有残留 ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装时 ok=true/required=false，已安装但加载失败时 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检、或自检抛错时以它作项名） |
+| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限 vs 云端 `stopTimeout`，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）/ `devices.project`（设备支持是否已部署：Device Farm 项目 ARN 是否在 SSM 中，未部署 ok=false/required=false）/ `devices.sessions`（该项目里未到 COMPLETED 的远程访问会话数与控制台链接，有残留 ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装，或装了多个部署 provider、本项不查时 ok=true/required=false；已安装但加载失败时 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检、或自检抛错时以它作项名） |
 | `ok` | 该项通过 |
 | `required` | false 表示可选能力缺失（另一个引擎未安装、未安装 deploy-aws extra、部署工具链缺项），不影响退出码；退出码取决于全部 required 项是否 ok |
 | `detail` | 一句说明：通过时给事实（命令、版本、ARN），失败时给处置办法 |

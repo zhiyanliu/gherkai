@@ -28,7 +28,8 @@
 | 段 | 查什么 | 何时查 |
 |---|---|---|
 | `cli.*` | CLI 版本与 Python | 总是 |
-| `engines.*` | 每个引擎的 worker 能否定位、至少一个可用、本机 worker 各自自报的模型 | 总是 |
+| `config.*` | 本次加载的项目配置文件；没有使用时列出查找顺序 | 总是 |
+| `engines.*` | 每个引擎的 worker 能否定位、至少一个可用、本机 worker 各自自报的模型与支持的测试目标 | 总是 |
 | `steps.*` | steps 目录是否存在、每个引擎加载 steps 是否成功、几条 | 总是（`--steps-dir` 可改目录） |
 | `aws.*` | region、凭证身份 | 给了 `--backend cloud` 或 `--prefix` |
 | `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限 vs 云端为它设的停止宽限（差距只标 `-`、不影响退出码） | 同上 |
@@ -39,7 +40,7 @@
 ## 4 凭证与 region
 
 - 走本机 AWS 默认凭证链：profile / 环境变量 / 实例角色皆可，`--profile` 或 `AWS_PROFILE` 选 profile。**不需要任何 API key**。
-- **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `--profile`（或 `AWS_PROFILE`）指的那个 profile 配置里的 region。四处都没有才报错；缺了不会替你兜一个 region。
+- **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `gherkai.toml` 里 `[common]` 的 `region` > `--profile`（或 `AWS_PROFILE`、或配置文件 `[common]` 里设的 profile）指的那个 profile 配置里的 region。五处都没有才报错；缺了不会替你兜一个 region。
 - 该 region 下账号要能用这些服务：Nova Act 引擎需要 Nova Act 服务与模型 nova-act-v1.0（默认锁定；环境变量 NOVA_MODEL_ID 可换，`doctor` 会显示实际模型）；Midscene 引擎需要 Bedrock 模型 us.openai.gpt-5.6-terra（默认；环境变量 MIDSCENE_MODEL_ID 可换，`doctor` 会显示实际模型）；两者都要 AgentCore Browser。`AccessDenied` / 模型不可用多半是 region 未开通模型或凭证缺这些权限。
 - 本机 `run` / `submit` 也要 AWS 凭证（浏览器与模型在云端）；只有 `plan` / `list-engines` / `list-deterministic` / `doctor`（不带 cloud 参数）纯本地。
 
@@ -65,7 +66,7 @@
 
 **隧道的持有与拆除**：`run` 由前台 CLI 进程持有，命令结束或 Ctrl-C 即拆；`submit` 由本机后台进程持有，run 到终态即拆；`submit --backend cloud` 由本机守护进程持有，到终态或 `--tunnel-ttl` 到点即拆。三种都要求**本机保持开机联网到 run 终态**。用 kill 命令结束 CLI 不会拆隧道，要到进程列表里结束 ngrok。隧道断了不自动重连，受影响的 scenario 以导航失败告终，修好后重新运行。
 
-**排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；`submit` 的隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`；起隧道的完整日志在系统临时目录的 `gherkai-tunnel-*.log`，按修改时间取最新；`submit` 若打出「隧道已拆除」，这个 run 已经不可用，别再等它的结果，修好报错后重新提交。
+**排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；本机后端 `submit` 的隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`；`submit --backend cloud` 的隧道守护进程日志在系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`（提交时「隧道由守护进程持有」那一行给出完整路径）；起隧道的完整日志（ngrok 自己的日志）在系统临时目录里以 `gherkai-tunnel-` 开头、文件名不含 watch 的 `.log` 文件，按修改时间取最新；`submit` 若打出「隧道已拆除」，这个 run 已经不可用，别再等它的结果，修好报错后重新提交。
 
 **安全一句要替人说出来**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`，引擎原生产物不脱敏，报告按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
 
@@ -85,12 +86,13 @@
 |---|---|---|
 | 以退出码 2 结束，说某引擎 worker 未找到 | 没装或不在 PATH | 照打印的装法装；或设 `GHERKAI_WORKER_<ENGINE>_CMD` |
 | `engine_error`，起 worker 失败 | worker 版本与 CLI 不一致 | 重装到同版本（第 1 节） |
-| 启动即抱怨 region 未设 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / profile 配置四处都没 region | 任选一处设上（第 4 节）；缺了不会自动兜一个 region |
+| 启动即抱怨 region 未设 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / 配置文件的 `region` / profile 配置五处都没有 region | 任选一处设上（第 4 节）；缺了不会自动兜一个 region |
 | `AccessDenied` / 模型不可用 | region 未开通模型，或凭证缺 Bedrock / AgentCore 权限 | 换 region 或补权限（第 4 节） |
 | Midscene 侧某个 step 文件里的 step 全走了 AI、`list-deterministic` 清单里也没有它，且没有任何报错 | 扩展名用了 `.ts` / `.js`（收集阶段按扩展名过滤，静默跳过、不 import） | 改成 `.mts` / `.mjs` |
 | `plan` / `run` 以退出码 2 结束并点名某个 steps 文件 | 该文件加载失败 | 修那个文件，不是 feature |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到或正则不匹配 | `list-deterministic --steps-dir …` 核对；对照 `example` 改 step 文本 |
 | `status` / `explain` 以退出码 2 结束、说找不到 run（提示只提 `submit`） | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致 | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix` |
+| `status` / `explain` 以退出码 2 结束、说提交记录由更新或更早版本写出 | 记录格式与本机 CLI 不一致 | 更新版本写出的就升级本机 CLI；更早版本写出的就按消息换用那个版本查看，或用当前版本重新提交 |
 | `--expose-local` 起隧道失败 | 没装 ngrok、或 authtoken 没配（配置文件与环境变量都没有）、或填的是 API key、或本机没外网 | 第 5 节 |
 | 隧道已建立，每条 scenario 第一步导航就失败，应用日志里没有请求 | 选项值与 feature 书写的地址不一致（localhost 对 `127.0.0.1`、端口、大小写），地址没被替换 | 第 5 节：`plan --expose-local` 回显与 step 文本逐字对照，改成一致 |
 | 请求到了应用，页面返回 400 或「host not allowed」，本机直连正常 | 开发服务器校验 Host，拒绝了隧道域名 | 第 5 节：放行隧道域名（通配写法） |

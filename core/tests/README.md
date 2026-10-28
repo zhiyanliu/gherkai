@@ -26,7 +26,7 @@ uv run pytest -q           # 安静模式
 
 ## 集成测试（连真 DDB/S3，验证 moto 抓不到的真语义）
 
-moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 中文·斜杠 key 编码 / `load_all` 全量；offload 真往返）。集成测试连真后端钉这些差异（`test_cloud_integration.py`）。
+moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 中文·斜杠 key 编码 / `load_all` 全量；offload 真往返）。集成测试连真后端钉这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 文件末的两条集成测试复验：两个推进器抢同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。
 
 **最高价值的两条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测写到近 1.5MB 仍全部 ACCEPT），故只有真 DDB 能证：
 

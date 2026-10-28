@@ -43,9 +43,10 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 四、`doctor`：一个入口、按组件分组
 
-- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未查的云端项标 ok + `required=false`）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
+- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--config FILE] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未查的云端项标 ok + `required=false`）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
 - 组件与归属（**按 extra 实施、单入口汇总**——自检能力跟着它检查的组件走，入口只做编排）：
   - `cli`：版本、Python。
+  - `config`：本次加载的项目配置文件路径，或「未使用配置文件」；只作展示、可选（[0053](./0053-project-config-file.md) 决策 1）。
   - `engines`：两引擎的定位链结果（同 `list-engines`），各自 `required=false`（缺一个不算故障）；聚合项「至少一个可用」为 required 闸门——两个都定位不到时本机后端一个 job 也起不来；`--backend cloud` 时该聚合项降为可选（只提交、不在本机跑的人不需要 worker）。
   - `steps`：解析到的 `steps/` 目录（显式给的目录不存在 = 必修失败，原因进 detail）；对每个可用引擎跑一次 worker 自述（`--capabilities`，清单取其 `deterministic_steps`）——有 steps 目录时是使用方 step 能否加载（必修，加载失败会静默降级成 AI），没有时只验 worker 起得来（可选，单引擎不连坐）。
   - `aws`（给了 `--backend cloud` 或 `--prefix` 才查）：region 解析（解析不出即必修失败、云端其余项标未查）、凭证身份（STS；profile 名不存在等解析期错误与探针失败同一句诊断）。
@@ -62,7 +63,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ## 影响
 
-- README（根 / cli）：新增 flag、`--quiet` 语义、`doctor`、`--json` 覆盖表；deploy_aws README：`list-workers --json`。
+- 用户文档（[0045](./0045-documentation-layering-and-placement.md) 决策一 / 二 归位后）：筛选 flag 与 `--quiet` 语义在 `docs/user-guide/running-and-results.md`「常用选项」节，各选项出现在哪些命令（含 `--json` 覆盖）在 `configuration.md`「跨命令通用选项」表，`doctor` 在 `getting-started.md`「用 doctor 自检」节，`deploy list-workers --json` 在 `cloud-backend.md`；根 README 与 cli README 只保留入口与「查询类命令都有 `--json`」一句。
 - 与 [0039](./0039-user-facing-surfaces-no-internal-references.md)：`doctor` 与筛选提示的文案同受产品面约束。
 - agent skill：以本命令面为教学对象，内容（工作循环、旋钮分组、退出码分流、失败汇报）全在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五。
 

@@ -6,16 +6,16 @@
 
 经核实 nova-act 3.4.187.0 源码，IAM 可同时覆盖两个鉴权关注点，但有一个反直觉的前提：
 
-- **AgentCore 浏览器会话**：本就走纯 IAM SigV4（`AgentCoreBrowserSessionProvider`），不需要 key。
+- **AgentCore 浏览器会话**：本就走纯 IAM SigV4（`AgentCoreBrowserSessionProvider`），不需要 key。worker 不用该 provider 的 `cdp_session`，而是用 bedrock-agentcore 的 `BrowserClient` 自己 Start / Stop 会话，provider 负责绑定会话 id（`bind_session`）并作 NovaAct 的 `browser_auth`，同样走 IAM，见 [0028](./0028-transient-network-ssl-resilience.md)「Nova 会话由 worker 自己持有」条。
 - **模型推理**：`NOVA_ACT_API_KEY` 未设时，**必须把调用包进 Nova Act 的 `Workflow` 构造**（带 `workflow_definition_name`），SDK 才会选 `StarburstBackend`（IAM 签名的 `nova-act` boto client）；否则报 `ValueError` 要求改用 Workflow。**裸用 AgentCore provider 不包 Workflow 仍会要 API key。**
 
 **决定**：代码形态固定为 `NOVA_ACT_API_KEY` 不设 + `AgentCoreBrowserSessionProvider` + `Workflow(workflow_definition_name=..., model_id=...)`，让浏览器与模型都跑在 IAM 上。
 
-**代码形态的两个强制细节**（漏了直接崩、非可选风格）：① `Workflow(...)` 必须被 `with` 进入才建出 `workflow_run`，只构造不进入会在 `NovaAct` 初始化时报 `ValidationFailed: Workflow does not have workflow run set. Please use Workflow as a context manager`；② `NovaAct` 未显式收到 workflow 时经 contextvar 找它，故用 `@workflow` 装饰器（它内部即 `with Workflow` + 设 contextvar）或自己 `with Workflow` 时手工 `set_current_workflow(wf)`、退出时还原——worker 走后者（见 `engines/novaact/gherkai_worker_novaact/run_scope.py` 的 `with wf` + `set_current_workflow`）。
+**代码形态的两个强制细节**（漏了直接崩、非可选风格）：① `Workflow(...)` 必须被 `with` 进入才建出 `workflow_run`，只构造不进入会在 `NovaAct` 初始化时报 `ValidationFailed: Workflow does not have workflow run set. Please use Workflow as a context manager`；② `NovaAct` 未显式收到 workflow 时经 contextvar 找它，故用 `@workflow` 装饰器（它内部即 `with Workflow` + 设 contextvar）或自己 `with Workflow` 时手工 `set_current_workflow(wf)`、退出时还原——worker 走后者（见 `engines/novaact/gherkai_worker_novaact/run_scope.py` 的 `with _WorkflowGuard(wf)`（其 `__enter__` 即 `wf.__enter__()`）+ `set_current_workflow`）。
 
 ## ✅ 已实测全通（2026-06-23，`engines/novaact/spikes/wikipedia_benchmark.py`）
 
-纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、模型访问授予（当时经别名 `nova-act-latest` 拿到的 GA 模型 = 今天钉死的 `nova-act-v1.0`；别名已按下方「模型版本选择策略」弃用）。
+纯 IAM 经 `@workflow` 端到端跑通：维基用例动作成功、AgentCore 云端浏览器连上、workflow run 状态 `SUCCEEDED`、模型访问授予（当时经别名 `nova-act-latest` 拿到的 GA 模型即 `nova-act-v1.0`；别名已按下方「模型版本选择策略」弃用、改为钉 GA 版本 id）。
 
 **关键前提**：`@workflow` 走 IAM 路径时，`workflow_definition_name` **必须指向一个 AWS 侧已注册存在的 workflow definition**，不能随便起名——否则 `CreateWorkflowRun` 报 `ResourceNotFoundException: Workflow definition not found` (404)。注意：IAM 鉴权本身此时已通过（不是 AccessDenied），仅仅是 definition 不存在。
 

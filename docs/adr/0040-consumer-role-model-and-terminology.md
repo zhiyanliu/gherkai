@@ -1,6 +1,6 @@
 # 0040. 使用方角色模型与术语
 
-> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表与 `CONTEXT.md`「角色与权限」节词条组，改这里再改那里。
+> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
 
 ## 背景与问题
 
@@ -43,9 +43,11 @@
 | 组合（执行方式 × 执行后端） | 需要什么（登记处 = 0033「资源清单」末段） | 费用记到 |
 |---|---|---|
 | `plan` | 无凭证；装了 worker 才有确定性 step 标注（[0036](./0036-deterministic-capability-discovery.md) 决策 4 的 best-effort） | 无 |
-| `run` / `submit` `--backend local` | 本机 AWS 凭证（Bedrock 模型 / AgentCore Browser / Nova Act 服务）+ 两个 worker | 自己 |
+| `run` / `submit` `--backend local` | 本机 AWS 凭证（Bedrock 模型 / AgentCore Browser / Nova Act 服务）+ 要用到的引擎 worker | 自己 |
 | `submit` / `status --wait` `--backend cloud` | 最小云端权限：runs 表读写 + 只读探活 + `lambda:GetFunction` / `InvokeFunction` + variant 解析只读（0038）+ 报告桶 `s3:PutObject`（feature 含 DataTable / DocString 时，提交即把正文搬 S3，[0030](./0030-realtime-persistence-seam.md) 决定六）；**无任何 ECS 写**——起 task 全走 Lambda 执行角色 | 部署方 |
 | `run --backend cloud`（同步） | 另一套云端权限（**不含**上一级的 `lambda:GetFunction` / `InvokeFunction`）：`ecs:RunTask` / `StopTask` / `DescribeTasks` + `iam:PassRole` + `dynamodb:Query` / `PutItem` + 报告桶 `s3:PutObject`（此级恒需：进程内起 task、自己上传 job、自己推进）+ 同一套只读探活 + variant 解析只读（0038） | 部署方 |
+
+设备目标（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）在各级上的权限增量登记在 0033「设备目标增量」段与 task role 权限表的设备目标各行：提交侧多应用前缀 `apps/` 的读、写、分段上传中止与带前缀条件的 `s3:ListBucket`（云端后端写进产物桶并另需 `s3:PutObjectTagging`，本机后端写进使用方配置的应用桶），`doctor` 多一项列举远程访问会话的只读权限；本机后端驱动真机时 worker 在本机执行，本机凭证另需 task role 权限表里设备目标各行的全部权限。四级划分与「权限挂在执行轴上、不挂在帽子上」不变。
 
 两条推论：**detached 提交不需要任何 ECS 写权限**（起 task 全走 Lambda 执行角色），CI 与低权限机器应走 `submit`——这是 [0034](./0034-detached-batch-reconciler.md)「最小权限」的角色化表述；**CI 不是帽子**，是「无帽子、持有一级执行权限的机器身份」。feature 作者的写作本身不需要任何凭证，「QA 零代码」因此更纯：零代码、零凭证即可写与 `plan`。
 
@@ -55,7 +57,7 @@
 |---|---|---|---|---|
 | feature 作者 | `.feature` | `gherkai`；本机跑还要 `gherkai[local]` + `@gherkai/worker-midscene` | 写本身不需要凭证；执行按决策 3 的执行权限梯级取一级 | 不碰 `steps/`；不学任何关键词措辞 |
 | 测试开发 | `steps/*.py` + `steps/*.mts`、定制 worker 镜像 | 同上 + 容器引擎（docker / podman） | 同 feature 作者；**不需要云端写权限**——镜像交给部署方推 | 不改 worker 包内脚手架（改它等于 fork，0037 决策 4） |
-| 部署方 | 后端（CDK）、worker 镜像的推送与注册 | `gherkai[deploy-aws]` + Node ≥22 + 容器引擎 | 独有：CDK 部署本身 + VPC 三态比对读 + ECR 推送域 + ECS task-def 注册 / 退休 + `iam:PassRole` + SSM `/{prefix}backend/*` 读写 + runs 表 Query（含 `status-index`）；执行用例同样按决策 3 的执行权限梯级取一级 | 不拥有镜像构建（那是测试开发的容器工作）；不替提交侧决定并发，只留 cap（[0034](./0034-detached-batch-reconciler.md) 机制四） |
+| 部署方 | 后端（CDK）、worker 镜像的推送与注册 | `gherkai[deploy-aws]` + Node ≥22 + 容器引擎 | 独有：CDK 部署本身 + VPC 三态比对读 + ECR 推送域 + ECS task-def 注册 / 退休 + `iam:PassRole` + SSM `/{prefix}backend/*` 读写 + runs 表 Query（含 `status-index`） + Device Farm 项目的列举、查询与建立（0033「设备目标增量」）；执行用例同样按决策 3 的执行权限梯级取一级 | 不拥有镜像构建（那是测试开发的容器工作）；不替提交侧决定并发，只留 cap（[0034](./0034-detached-batch-reconciler.md) 机制四） |
 | contributor | 工具自身的代码、ADR、发布链 | clone + `uv sync` + `npm ci` | 发布走 CI trusted publishing，个人无需长期发布凭证（0037 决策 8） | 不把 contributor 内容写进使用者面（0039） |
 
 ## 决策 5：术语单一真源与立新角色的门槛

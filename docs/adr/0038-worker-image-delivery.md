@@ -1,6 +1,6 @@
 # 0038. worker 镜像交付：基础镜像、variant 与推送注册
 
-> **Status:** Accepted（2026-09-09）—— 命令族（`push-worker` / `list-workers`；`delete-worker` 退 2 占位、留重议闸门）、`gherkai deploy` 四步、运行时显式 revision（`RunMeta.worker_task_defs` + STATE 顶层 `worker_task_def_arns`）、preflight variant 解析、runs 表 status GSI、`tools/build_push_workers.py` 退役全部实装；**实测项 1-7 清零**（真账户：两引擎 base/自定义 variant 跑通、幂等/孤儿复用/并发 push、静默期回收与运行中 run 拦截、重推期间运行中 run 仍用旧 revision、兼容路径、升级演练；多平台镜像缺口定为已知边界、不补校验）。基础镜像随 [0037](./0037-distribution-and-packaging.md) 的 v1.4.0 首发进 GHCR，`gherkai deploy` 基础镜像同步在真账户走通。[0033](./0033-iac-aws-backend-and-composition-wiring.md) 的镜像/task-def/ECR/权限表述已加历史注与权限登记。
+> **Status:** Accepted（2026-09-09）—— 命令族（`push-worker` / `list-workers`；`delete-worker` 以退出码 2 结束的占位、留重议闸门）、`gherkai deploy` 四步、运行时显式 revision（`RunMeta.worker_task_defs` + STATE 顶层 `worker_task_def_arns`）、preflight variant 解析、runs 表 status GSI、`tools/build_push_workers.py` 退役全部实装；**实测项 1-7 清零**（真账户：两引擎 base/自定义 variant 跑通、幂等/孤儿复用/并发 push、静默期回收与运行中 run 拦截、重推期间运行中 run 仍用旧 revision、升级演练；曾有的默认指针兼容路径真账户验过后已随 [0037](./0037-distribution-and-packaging.md) 决策 7 撤除；多平台本地镜像按镜像存储形态校验：containerd 存储下的多平台索引改问目标平台视图，overlay2 存储恒为单平台视图）。基础镜像随 [0037](./0037-distribution-and-packaging.md) 的 v1.4.0 首发进 GHCR，`gherkai deploy` 基础镜像同步在真账户走通。[0033](./0033-iac-aws-backend-and-composition-wiring.md) 的镜像/task-def/ECR/权限表述已加历史注与权限登记。
 
 ## 背景与问题
 
@@ -101,9 +101,9 @@ docker build --platform linux/amd64 -t acme-novaact:login .
 | `worker-image/<engine>/<版本>-<variant>` | JSON：模板 revision ARN、revision ARN、digest、推送时间 | `push-worker`（含 deploy 的基础镜像同步与重派生） |
 | `worker-default` | 默认 variant 名（部署级一个） | deploy 初始化、`push-worker --set-default` |
 
-键名常量与路径构造**单点在 `gherkai_runtime.names`**（`ssm_path` / `worker_template_key` / `worker_image_key` / `WORKER_DEFAULT_KEY` / `WORKER_IMAGE_ROOT_KEY` / `BACKEND_VERSION_KEY` / `SUBNETS_KEY` / `SECURITY_GROUPS_KEY` / `VPC_KEY`）——推送方、解析方、IaC、Lambda 拼同一个函数/常量，调用点不写裸字面量（曾在组合根、IaC 命名层、deploy 皮三个模块各写裸 `"version"`）。
+键名常量与路径构造**单点在 `gherkai_runtime.names`**（`ssm_path` / `worker_template_key` / `worker_image_key` / `WORKER_DEFAULT_KEY` / `WORKER_IMAGE_ROOT_KEY` / `BACKEND_VERSION_KEY` / `SUBNETS_KEY` / `SECURITY_GROUPS_KEY` / `VPC_KEY` / `DEVICE_FARM_PROJECT_KEY`）——推送方、解析方、IaC、Lambda 拼同一个函数/常量，调用点不写裸字面量（曾在组合根、IaC 命名层、deploy 皮三个模块各写裸 `"version"`）。
 
-退休时刻与血缘**不进 SSM**、以 task-def 的 tags 承载（`gherkai:variant` / `version` / `digest` / `template` / `retired-at`）——与 revision 同生死、不撑 SSM 标准参数 4KB 上限、清理对账只看一处。`version`、`vpc` 两个参数归 [0037](./0037-distribution-and-packaging.md)。全部落在 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 已授的 `/{prefix}backend/*` 通配内。枚举用 `GetParametersByPath`（`Recursive=true`，单页最多 10 条须翻页）。variant **按版本隔离**：键含版本，旧版本的 variant 留在 ECR 与 SSM 作历史、不参与当前版本解析，`delete-worker` 落地后可清。
+退休时刻与血缘**不进 SSM**、以 task-def 的 tags 承载（`gherkai:variant` / `version` / `digest` / `template` / `retired-at`）——与 revision 同生死、不撑 SSM 标准参数 4KB 上限、清理对账只看一处。`version`、`vpc` 两个参数归 [0037](./0037-distribution-and-packaging.md)，`device-farm-project`（云端 Device Farm 项目 ARN）归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10。全部落在 [0033](./0033-iac-aws-backend-and-composition-wiring.md) 已授的 `/{prefix}backend/*` 通配内。枚举用 `GetParametersByPath`（`Recursive=true`，单页最多 10 条须翻页）。variant **按版本隔离**：键含版本，旧版本的 variant 留在 ECR 与 SSM 作历史、不参与当前版本解析，`delete-worker` 落地后可清。
 
 ## 权限面增量
 

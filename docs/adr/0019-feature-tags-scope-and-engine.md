@@ -20,7 +20,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 - scope 是**执行单元 = Job**（[0016](./0016-execution-architecture-core-lib-run-model.md)）。
 
 ### `@engine:<midscene|novaact>`（G2 — 引擎选择）
-- engine 在语义上是 **scope 级属性**：一个 scope 统一一个引擎。根因——engine = 浏览器会话归属，scope = 会话边界，二者物理绑定（两引擎是两个不共享的 AgentCore 会话，[0006](./0006-form-a-two-subprojects-no-orchestrator.md)/[0011](./0011-agentcore-browser-system-default-vs-custom.md)）。
+- engine 在语义上是 **scope 级属性**：一个 scope 统一一个引擎。根因——engine = 会话归属，scope = 会话边界，二者物理绑定（两引擎各自建立会话、互不共享：桌面目标是 AgentCore 浏览器会话，[0006](./0006-form-a-two-subprojects-no-orchestrator.md)/[0011](./0011-agentcore-browser-system-default-vs-custom.md)；设备目标是 Device Farm 远程访问会话、只由 Midscene 建立，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 1、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1）。
 - **声明方式（容错缺省）**：QA 只需在该 scope 的**任意一个** scenario 上标 `@engine:`，其余 scenario 继承本 scope 的 engine（不必每条都标）。
 - **冲突即报错**：同一 scope 出现**多个不同** engine 值 → 配置错误，拒绝运行（不静默取某个——违背可信红绿）。**原因**：同一 scope 跨引擎 = "既共享会话又是两个不共享的会话"，物理自相矛盾。
 - **缺省**：整个 scope 未标 engine → 用默认引擎（单引擎默认，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
@@ -28,7 +28,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 
 ### `@timeout:<N>`（job 墙钟预算——tag 体系的第三个成员，随 [0034](./0034-detached-batch-reconciler.md)「job timeout」节加入）
 - 语义同为 **scope 级属性**：本 scope（=job）最多允许跑 N 秒（墙钟，从推进器 claim 起算、含启动开销）。N 须 >0（声明预算，0/负值无意义 → FeatureContractError）。
-- 声明/冲突**完全复刻 `@engine:` 的两条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → FeatureContractError（不静默取某个）。**缺省按目标**：未标 → 显式给出的 `--default-job-timeout`（选项、环境变量或配置文件任一来源）；都没给 → 目标缺省（桌面 scope 300 秒；设备 scope 为获取预算加 900 秒）。`--default-job-timeout` 的非正值只表示非设备 scope 不超时；设备 scope 不存在「不超时」，tag 或显式正值低于获取预算加 180 秒 → FeatureContractError（可能还没拿到设备就被判超时）。覆盖与校验的顺序、两层、命名、载体=definition、三路 enforce 见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，此处只定 tag 语义。
+- 声明/冲突**完全复刻 `@engine:` 的两条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → FeatureContractError（不静默取某个）。**缺省按目标**：未标 → 显式给出的 `--default-job-timeout`（命令行选项或配置文件 `[common]` 的 `default-job-timeout`；本项没有环境变量层）；都没给 → 目标缺省（桌面 scope 300 秒；设备 scope 为获取预算加 900 秒）。`--default-job-timeout` 的非正值只表示非设备 scope 不超时；设备 scope 不存在「不超时」，tag 或显式正值低于获取预算加 180 秒 → FeatureContractError（可能还没拿到设备就被判超时）。覆盖与校验的顺序、两层、命名、载体=definition、三路 enforce 见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，此处只定 tag 语义。
 
 ## 示例
 
@@ -60,7 +60,7 @@ Scenario: 在登录态下修改昵称
 
 ## 双引擎的真实价值：是「可选择/不锁定」，不是「每次交叉」
 
-**双引擎交叉验证（同一用例两个引擎都跑、都过才过）v1.0 不做**。分析（[0010](./0010-spike-as-apples-to-apples-benchmark.md) 把交叉当卖点的调子据此降级）：
+**双引擎交叉验证（同一用例两个引擎都跑、都过才过）v1.0 不做**。分析（[0016](./0016-execution-architecture-core-lib-run-model.md) 原定的「用例也可配双引擎交叉验证」据此降级）：
 - **治不了主要不可靠源**：单引擎不可靠主要来自措辞歧义（交叉治不了，两个引擎同被歧义断言喂）与判定抖动（投票已治，比换引擎直接）。
 - **不一致时无法定责**：两个引擎判定不同时，分不清是被测系统 bug 还是两引擎对模糊断言理解不同（[0018](./0018-generic-steps-capability.md) 已证后者真实存在）。高噪声、低价值信号。
 - **成本翻倍 + 复杂度**：2× 时间/token/会话；还要定义结果合并、不一致呈现（RunResult 数据模型本身已定，见 [0016](./0016-execution-architecture-core-lib-run-model.md)，但"同一用例两个引擎判定如何合并/呈现差异"是其上的新语义层，仍需另设计）。

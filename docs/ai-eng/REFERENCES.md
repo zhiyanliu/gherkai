@@ -10,10 +10,10 @@
 - https://midscenejs.com/model-common-config.md — family 列表 + 配置块
 - https://midscenejs.com/integrate-with-playwright.md
 - https://midscenejs.com/bridge-mode.md — 连桌面 Chrome（CDP 接法参考）
-- 安装的源码（本机 ground truth，现为 1.12.8）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
-  - `createOpenAIClient` 注入点：`@midscene/core .../ai-model/service-caller/openai-client`（`createAndWrapClient` 里 `await createOpenAIClient(baseOpenAI, openAIOptions)`，经同文件 `createChatClient` 调用；`service-caller/index` 只再导出 `createChatClient` 等符号、不含此回调；见 ADR 0008）
-  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 `modelConfig` 即切隔离——我们的接线同时传 createOpenAIClient 与 modelConfig；1.12.8 起只传 createOpenAIClient 则是 agent 作用域包装、仍读全局 env，1.15.1 不变；1.14 起多了 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）、1.15 起多了 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 不传它们、即落默认，见 `engines/midscene/spikes/SIGV4-FETCH-RECIPE.md` §7）
-  - planning 无条件附图：`@midscene/core .../ai-model/workflows/planning/standard-planning.js`（`standardPlan()` 两个消息分支都附 `image_url`，`includeLocateInPlanning` 不去图、只改 system prompt 与定位解析；1.9.8 时此逻辑在 `ai-model/llm-planning.js`，见 ADR 0012）
+- 安装的源码（本机 ground truth，现为 1.15.1）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
+  - `createOpenAIClient` 注入点：`@midscene/core .../ai-model/service-caller/openai/openai-client`（`createAndWrapClient` 里 `await createOpenAIClient(baseOpenAI, openAIOptions)`，经同文件导出的 `createClient` 调用，调用方是同目录的 `call-openai`；`service-caller/index` 只再导出 `callAI` 等符号、不含此回调；1.12.8 时该文件在 `service-caller/openai-client`、外层函数名为 `createChatClient`；见 ADR 0008）
+  - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 `modelConfig` 即切隔离——我们的接线同时传 createOpenAIClient 与 modelConfig；1.12.8 起只传 createOpenAIClient 则是 agent 作用域包装、仍读全局 env，1.15.1 不变；1.14 起多了 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）、1.15 起多了 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 不传它们、即落默认，见 ADR 0042 决策六「历次升级」的 1.12.8 → 1.15.1 条）
+  - planning 无条件附图：`@midscene/core .../ai-model/workflows/planning/standard-planning.js`（`standardPlan()` 两个消息分支都附 `{type:'image'}` 内容块，chat-completion 协议实现（`service-caller/openai/chat-completion/utils`）再把它转成线上的 `image_url`，`includeLocateInPlanning` 不去图、只改 system prompt 与定位解析；1.9.8 时此逻辑在 `ai-model/llm-planning.js`，见 ADR 0012）
   - 取结构化 API：`aiBoolean/aiNumber/aiString/aiQuery/aiAsk`（`.../agent/agent.d.ts`，见 ADR 0010/0014）
 
 ## Nova Act

@@ -1,6 +1,6 @@
 # 排错
 
-报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道；定位参数不一致、筛选筛成空集、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
+报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道、项目配置文件与设备目标；定位参数不一致、筛选筛成空集、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
 
 ## 先运行 gherkai doctor
 
@@ -25,13 +25,14 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 行 | 何时出现 | 内容与判据 |
 |---|---|---|
 | `cli.version` | 总是 | CLI 版本与 Python 版本。展示项 |
+| `config.file` | 总是 | 本次加载的项目配置文件路径；没有加载时注明按 `--config`、环境变量 `GHERKAI_CONFIG`、当前目录的 `gherkai.toml` 依次查找。展示项 |
 | `engines.novaact`、`engines.midscene` | 总是 | 该引擎 worker 的拉起命令与来源；找不到时这一行就是该引擎的安装指引。单个引擎缺失只标 `-` |
 | `engines.any` | 总是 | 至少一个引擎的 worker 可用（本机运行的前提）。必修；`--backend cloud` 下降为可选，因为云端 worker 在容器里运行 |
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
 | `engines.targets.<引擎>` | 该引擎 worker 自述成功时 | 该引擎 worker 支持的测试目标（桌面网页、Android 网页这类名称），带会话上限的目标附分钟数；由 worker 自报，不支持设备不算失败。展示项；两引擎的能力矩阵见 [`engines.md`](./engines.md) |
-| `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir` 或 `GHERKAI_STEPS_DIR` 指的路径不是目录时是必修失败 |
+| `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir`、`GHERKAI_STEPS_DIR` 或配置文件的 `steps-dir` 指的路径不是目录时是必修失败 |
 | `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>`、`engines.targets.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
-| `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。四处都没有 region 时必修失败 |
+| `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。五处都没有 region 时必修失败 |
 | `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
 | `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
 | `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
@@ -62,8 +63,8 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、`--profile` / `AWS_PROFILE` 指的 profile 配置，四处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
-| `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / --profile / AWS_PROFILE）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
+| `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件 `[common]` 的 `region`、`--profile` / `AWS_PROFILE`（或配置文件的 `profile`）指的 profile 配置，五处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
+| `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
 | 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 会接着推进这个 run，那时需要凭证 |
 
 ## 模型
@@ -78,7 +79,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| job 判 `error`，归因是 `timeout`，说明是 `job 超时（>…s）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，默认 300 秒） | 给慢的 scope 标 `@timeout:600`，或调高 `--default-job-timeout`；也可以把长流程拆成多个 scope |
+| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒） | 给慢的 scope 标 `@timeout:600`，或调高 `--default-job-timeout`；也可以把长流程拆成多个 scope |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
@@ -113,7 +114,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
-| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；桌面 run 不受影响 |
+| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy` |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 
@@ -144,7 +145,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `本机运行设备 scope 需要一个 Device Farm 项目，但没有指定` / `需要一个放安装包的 S3 桶，但没有指定` | 本机后端驱动真机要自己给项目与应用桶 | 在 `[devices]` 给 `project-arn` / `app-bucket`，或用 `--device-farm-project-arn` / `--app-bucket`、环境变量 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` |
 | `注意：Device Farm 项目 … 属于账号 X，当前凭证属于账号 Y` | 项目 ARN 与当前凭证不在同一账号，多半是复制了别的环境的 ARN | 换对的项目或凭证；这条只警告不拦 |
 | `安装包不存在：…（配置文件 [apps.<别名>.<平台>] 的 file）` | `file` 指向的文件不在 | 路径相对配置文件所在目录，核对路径与构建产物 |
-| 云端 run 的 `status` 为 `error`、状态行下有一行 `message=…` 说提交记录由更新或更早版本写出、不完整、或没有记 worker 镜像版本，没有任何 job 开始过 | 后端读到了它不能执行的提交记录：提交记录的格式版本与后端不一致、记录不完整，或没有记 worker 镜像版本 | 按 `message` 里的原因处置：版本不一致的请部署方把后端升级到与提交侧同一版本（或用后端版本的 CLI 重新提交）；其它情况重新提交 |
+| 云端 run 的 `status` 为 `error`、状态行下有一行 `message=…` 说提交记录由更新或更早版本写出、不完整、或没有记 worker 镜像版本，没有任何 job 开始过 | 后端读到了它不能执行的提交记录：提交记录的格式版本与后端不一致、记录不完整，或没有记 worker 镜像版本 | 按 `message` 里的原因处置：提交记录由更新版本写出的，请部署方把后端升级到提交侧的版本，或用后端版本的 CLI 重新提交；由更早版本写出的，把提交侧的 CLI 升级到后端的版本后重新提交；其它情况重新提交 |
 | `status` / `explain` 以退出码 2 结束，`这个 run 的提交记录由更新版本的 gherkai … 写出` 或 `由更早版本的 … 写出` | 提交记录的格式与本机 CLI 不一致 | 更新的：`uv tool upgrade gherkai`；更早的：用写出它的那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或重新提交。同一个报告目录不要混用 1.4 与 1.5 的 CLI |
 | job 判 `error`、类别 `precheck_failed`，消息「这个 job 的格式版本是 …：命令行工具与 worker 的版本不一致」或「这个 job 没有带测试目标」 | 起 job 的命令行工具与 worker 不是同一版本 | 把两者装成同一版本；云端用与命令行工具同版本的 worker 镜像（部署方运行 `gherkai deploy`） |
 

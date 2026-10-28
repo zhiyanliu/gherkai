@@ -18,7 +18,7 @@ cli/gherkai_cli/
 ├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**别改用 `argparse.SUPPRESS`**——会以「==SUPPRESS==」漏进 `--help`，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── config.py     ← 项目配置文件 gherkai.toml 的定位、读取与形态校验（ADR 0053）；不知道命令与 argparse
 ├── settings.py   ← 配置文件合成进命令行选项（选项 > 环境变量 > 配置文件 > 内建默认，ADR 0053 决策 2、3、6）；argparse 的私有访问集中于此
-├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：账号比对 → 设备请求 → 安装包上传 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）
+├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：本机为账号比对 → 设备请求 → 安装包上传 → 写前校验，云端为读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）
 ├── console.py    ← 进度与诊断输出到 stderr（`__main__` 与编排模块共用）
 ├── device_selection.py ← 设备选择与设备请求的解析（选项 > 环境变量 > 配置文件；ARN 只核服务与资源类型段；ADR 0053 决策 4、0048 决策 3），纯函数、不连 AWS
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
@@ -29,7 +29,7 @@ cli/gherkai_cli/
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich。
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich；安装包上传到 S3 应用前缀也在 runtime（`gherkai_runtime.app_upload`，ADR 0051 决策 9），由 `submission.py` 调用。
 
 已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并以退出码 `2` 结束。
 
@@ -55,7 +55,7 @@ uv run gherkai run features/wikipedia_generic.feature --backend cloud --prefix d
 
 `--backend cloud` 的表 / 桶 / cluster / task-def / SSM 里的子网·安全组与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
 手工建一张表和一个桶不足以支撑运行：启动 worker 前依次通过版本 skew 闸、资源 preflight（events 表 + cluster + 本 run 每个引擎的
-task-def + 桶，落库时另加 runs 表）、variant 解析、子网/安全组解析，任一项缺失即以退出码 `2` 结束。资源名一律由 `--prefix` 拼接，
+task-def + 桶，落库时另加 runs 表）、variant 解析、填完 definition（读 SSM 的 Device Farm 项目填设备请求、安装包放进产物桶、写前校验，见 `submission.complete_cloud_definition`）、子网/安全组解析，任一项失败即以退出码 `2` 结束。资源名一律由 `--prefix` 拼接，
 因此 `--prefix` 须与部署时一致；单独覆盖某个资源名或网络参数时才用 `run` 的六个单项覆盖 flag
 （`--ddb-table`/`--s3-bucket`/`--events-table`/`--cluster`/`--subnet`/`--security-group`；`submit` 只收前两个，其余取部署侧写进
 后端的值，三个 Lambda 无 flag、恒按 prefix 推导），逐项默认值与对应 SSM 参数见
@@ -72,7 +72,7 @@ uv run pytest              # 仓库根：全部 workspace 成员
 cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 ```
 
-本包 `tests/` 下有六份文档与文案护栏：`test_package_readmes.py`、`test_user_docs.py`、`test_release_notes.py`、`test_user_facing_messages.py`、`test_skill.py`、`test_cli_json_contract.py`；各自的覆盖范围见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)「测试」节的护栏表。
+本包 `tests/` 下有十一份文档与文案护栏：`test_cli_json_contract.py`、`test_engines_matrix.py`、`test_package_readmes.py`、`test_user_docs.py`、`test_release_notes.py`、`test_user_facing_messages.py`、`test_skill.py`（覆盖范围见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)「测试」节的护栏表），以及 `test_technical_docs.py`、`test_code_comments.py`、`test_adr_hygiene.py`、`test_context_glossary.py`（分工见同页「护栏三层」段）；共用规则源 `_doc_rules.py`。
 
 修改 `docs/internals/cli-json-contract.md` 后执行 `uv run python tools/render_skill_contract.py` 重新生成 skill 副本，否则 `test_skill.py` 的相等性断言会失败。
 
@@ -117,14 +117,14 @@ cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行�
 注入 reconciler/kicker Lambda 的 env；在 `submit` 上声明这两个 flag 恒不生效。
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，
-由 IaC 设定、当前为 8；task 计入部署方账单，故设一道上限）；声明值超上限时 preflight 提示「本 run 将按上限并行」、不拦截提交。
-local 无此上限（worker 运行在提交者自己的机器、以自己的凭证计费）。
+由 IaC 设定（`deploy_aws/gherkai_deploy_aws/stack.py` 的 `BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY`），当前为 20；task 计入部署方账单，故设一道上限）；声明值超上限时 preflight 提示「本 run 将按上限并行」、不拦截提交。
+local 无此上限（worker 运行在发起 run 的本机、以本机凭证计费）。
 
 ## 退出码分层的切分线
 
 cloud 失败分层的切分线是 run 是否已真正开始执行：启动 worker 前的配置或可达性问题以退出码 `2` 结束，已开始执行之后的云端故障以退出码 `1` 结束。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
-「提交 + 判定」由此被拆开（ADR 0034）。决定退出码的只有一处 helper，`_cmd_plan` 与 `_cmd_run` 共用：各写一份必然漂移。
+「提交 + 判定」由此被拆开（ADR 0034）。执行前的配置错（投票次数、筛选值、读 feature、plan）以退出码 `2` 结束，这一判定只在 `_load_and_plan` 一处：`_cmd_plan` 直接调用，`_cmd_run` 与 `_cmd_submit` 经共享前置 `_plan_and_preflight` 调用；各写一份必然漂移。
 
 **preflight 次序是有意如此：版本 skew → 资源存在性 → variant 解析。** skew 的修复动作（`gherkai deploy`）同时补齐
 资源，也是重推镜像的前置；反过来先报「表不存在」或「variant 未推送」，只会导致一轮无效的 `--prefix` 排查或一轮无效的镜像推送。
@@ -138,7 +138,7 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/
 | 同版本 | 放行，不提示 |
 | **CLI 新于后端** | 退出码 `2`，**无放行 flag** |
 | CLI 旧于后端 | 警告不拦截（以 `uv tool upgrade gherkai` 升级即可） |
-| 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入 |
+| 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入；例外：`run` / `submit` 的 run 带设备目标或会话预热地址时以退出码 `2` 结束，**无放行 flag**（判据见 `compose.run_requires_backend_stamp`） |
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对，输出一条警告（dev 版逐提交前进，逐字比对会把每次都判成 skew） |
 | 取不到本机 CLI 版本（未以包形式安装、从源码直接运行） | 跳过比对，输出一条警告 |
 
@@ -170,3 +170,7 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
 - [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）
 - [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内源文件随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）
+- [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（经 `gherkai_runtime.textui` 渲染）
+- [0048](../docs/adr/0048-test-targets-device-and-ui-kind.md) 测试目标与执行前预检（目标拒绝、设备请求）
+- [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话生命周期与应用分发（安装包上传、会话预热地址）
+- [0053](../docs/adr/0053-project-config-file.md) 项目配置文件 gherkai.toml（`config.py` / `settings.py` / `device_selection.py`）
