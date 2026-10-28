@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793161845.441714,
-    "ast_hash": "b807eeb9e755e70e42787fbbc7e96bef",
+    "mtime": 1793163548.4814155,
+    "ast_hash": "2b946d90765a30910f7127aa3d9b75ab",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -345,8 +345,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1792027607.6458073,
-    "ast_hash": "3afcb17790c2026514833c6dcabc61f2",
+    "mtime": 1793163548.4817576,
+    "ast_hash": "78db0353c2075563f9dbf9f3bc4b7286",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793161845.441434,
-    "ast_hash": "559c52ae502b3f88a57140f62556d8fb",
+    "mtime": 1793163548.4812365,
+    "ast_hash": "c56007fa4fe6d9bbd8083f415103cb71",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1792054629.9178984,
-    "ast_hash": "e00b02177a199936ee2b4bfe1d099e88",
+    "mtime": 1793163548.4819098,
+    "ast_hash": "0552dac141ae24229e927dbfc6f94f91",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -810,8 +810,8 @@
     "semantic_hash": "66b8c31a3f0da77843b863c829478261"
   },
   "engines/novaact/gherkai_worker_novaact/lib/constants.py": {
-    "mtime": 1793114193.2293682,
-    "ast_hash": "a1cf11332451655a24d0f146eb745cd7",
+    "mtime": 1793163548.480998,
+    "ast_hash": "82b81a4f11d246f32e2331d408afcad3",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/event_sink.py": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793161845.440183,
-    "ast_hash": "2425a1cf643df8f2109fbe4505c1dfa4",
+    "mtime": 1793163548.4806464,
+    "ast_hash": "ebc22445d93ece895d70b01e9ac25fc7",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {

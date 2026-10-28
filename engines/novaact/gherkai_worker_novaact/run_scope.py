@@ -907,7 +907,7 @@ def main() -> int:
     def _release(label: str, cm, exc_info) -> None:
         """显式调用上下文管理器的 __exit__。释放阶段抛出的异常只记录、不冒泡：它不是建连失败、不进重试判定，也不能顶替 body 的
         异常；退出码据 release_error 变 1（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5 以退出码 1 表示有会话未确认停止）。
-        只接 Exception：KeyboardInterrupt / SystemExit 照常传播，由调用处的 finally 保证外层仍被释放。"""
+        仅捕获 Exception：KeyboardInterrupt / SystemExit 照常传播，由调用处的 finally 保证外层仍被释放。"""
         nonlocal release_error
         try:
             cm.__exit__(*exc_info)
@@ -926,10 +926,13 @@ def main() -> int:
         nonlocal session_id, started, warmup_failure
         session_id = None  # 只算本次 attempt 建起的会话（血缘进 scope_started / scope_done）
         if _stop.is_set():
-            return  # 建连前已收到停止信号（含建连早期 SIGTERM——Workflow() 构造期到达，见 ADR 0024）→ 干净退、不建连
+            return  # 建连前已收到停止信号（含建连早期 SIGTERM——Workflow() 构造期到达，见 ADR 0024）→ 正常退出、不建连
         provider = AgentCoreBrowserSessionProvider(region=REGION)
         cdp_cm = provider.cdp_session()
-        ws_url, headers = cdp_cm.__enter__()  # AgentCore 会话在此建起（失败 → 建连域异常、可重试，此时没有会话要释放）
+        # AgentCore 会话在 __enter__ 内建起。__enter__ 抛出 → 建连域异常、可重试；SDK 已在自己的 finally 里 Stop 过本次会话。残余窗口（ADR 0028
+        # 「Nova 引擎不对称」条）：SDK 在 __enter__ 内 Stop 失败时，抛出的异常链上带着原来的网络错，worker 分不出它、仍按建连失败重试，这一次泄漏
+        # 不可观测——要堵只能 worker 自己持有 Stop（直接用 browser_session），那是对 ADR 0028 既定立场的改动，交 owner 拍板。
+        ws_url, headers = cdp_cm.__enter__()
         nova_cm = None
         nova_entered = False
         body_exc: BaseException | None = None
@@ -993,7 +996,7 @@ def main() -> int:
             body_exc = e  # 建连（NovaAct 构造 / __enter__）或 body 的异常：释放完再原样抛给建连循环判定
         finally:
             # 释放阶段：两层 __exit__ 都执行、失败只记录（_release），不让任一层的释放异常顶替 body 的异常或进入建连重试判定。
-            # NovaAct 的 __exit__ 收到真实的 exc_type（SDK 据它标记工作流运行的结局）。AgentCore 会话的 cdp_session 是生成器式
+            # NovaAct 的 __exit__ 照常收到真实的 exc_type（对称 with 语义；本 worker 自管 Workflow，SDK 不据它标记结局）。AgentCore 会话的 cdp_session 是生成器式
             # 上下文管理器：收到 body 异常时会把它包装成 BrowserAuthError 再抛出——哪怕 Stop 已成功——所以对它按正常退出调用
             # （None, None, None）：生成器照常走到 finally 里的 Stop，此时抛出的才是真释放失败。内层抛 BaseException 也不跳过外层释放。
             exc_info = (type(body_exc), body_exc, body_exc.__traceback__) if body_exc is not None else (None, None, None)
@@ -1013,7 +1016,7 @@ def main() -> int:
             # 每次 attempt 用全新 provider/cdp_session/NovaAct，_run_session 的 finally 清掉本次部分建起的会话。
             for attempt in range(_CONNECT_ATTEMPTS):
                 if _stop.is_set():
-                    break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 干净退（下方按 _stop 返回 0）
+                    break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 正常退出（下方按 _stop 返回 0）
                 try:
                     _run_session()
                     break  # 成功（运行结束，或 _run_session 内因 _stop 协作式 return）
@@ -1039,15 +1042,18 @@ def main() -> int:
         finally:
             set_current_workflow(outer)
 
-    # 停止信号（ADR 0024 flag-only）：_run_session 已正常退出（finally 释放了会话）。干净退、不吐 scope_done、不 flush。
+    # 停止信号（ADR 0024 flag-only）：_run_session 已正常退出（finally 释放了会话）。正常退出、不发送 scope_done、不 flush。
     if _stop.is_set():
         log(f"worker: signal {_stop_signum} received, cooperative stop — session shutdown complete")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 会话已释放，再给在途截图一小段有界预算（ADR 0042 决策一）
         return 1 if release_error is not None else 0  # 停止路径同样让释放失败可观测（ADR 0051 决策 5：退出码 1 表示有会话未确认停止）
     if network_exhausted:
-        # 建连重试耗尽（ADR 0028）：会话已释放。以网络专用退出码退出，core 据此记 network_error。不吐 scope_done。
+        # 建连重试耗尽（ADR 0028）：会话已释放。以网络专用退出码退出，core 据此记 network_error。不发送 scope_done。
         # 某次 attempt 的释放失败优先于网络分类（ADR 0028：泄漏可观测性压过网络分类）——退出码 1，core 记 error、不按网络重试。
-        log("worker: connect retries exhausted, exiting with network code")
+        if release_error is not None:
+            log("worker: connect retries exhausted, but a session release failed earlier — exiting with code 1")
+        else:
+            log("worker: connect retries exhausted, exiting with network code")
         _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)  # 同上（这条路径多半也传不动，有界即可）
         return 1 if release_error is not None else EX_WORKER_NETWORK
     if warmup_failure is not None:
