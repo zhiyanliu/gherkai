@@ -962,3 +962,52 @@ test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用�
     _restore(saved);
   }
 });
+
+
+// ---- exitAfterFailure：主流程 try 块抛出后的统一出口（ADR 0051 决策 13 / 5、ADR 0028、ADR 0024 释放优先）----
+
+function exitDeps(overrides: Partial<import("./run-scope.mjs").FailureExitDeps> & { trace: string[]; failed?: boolean }) {
+  const { trace, failed = false, ...rest } = overrides;
+  return {
+    cleanup: async () => { trace.push("cleanup"); },
+    drain: async () => { trace.push("drain"); },
+    cleanupFailed: () => failed,
+    networkExhausted: false,
+    scopeId: "s",
+    sessionId: "sess-1",
+    emit: async (ev: Record<string, unknown>) => { trace.push(`emit:${String(ev.type)}`); (overrides as any).events?.push(ev); },
+    logFn: () => {},
+    ...rest,
+  };
+}
+
+test("exitAfterFailure：预热失败 → 先释放会话、再排空队列、再发 scope_done{error, 归因, sessionId}，退出码 0", async () => {
+  const { exitAfterFailure } = await importMod();
+  const { WarmupFailureError, WARMUP_DENIED_MESSAGE } = await import("../lib/tunnel-warmup.mjs");
+  const trace: string[] = []; const events: Record<string, unknown>[] = [];
+  const rc = await exitAfterFailure(new WarmupFailureError({ errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE }), exitDeps({ trace, events } as any));
+  assert.equal(rc, 0);
+  assert.deepEqual(trace, ["cleanup", "drain", "emit:scope_done"]);  // 释放先于事件（ADR 0051 决策 5）
+  assert.deepEqual(events, [{ type: "scope_done", scopeId: "s", sessionId: "sess-1", status: "error", errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE }]);
+});
+
+test("exitAfterFailure：预热失败且释放会话失败 → scope_done 照发（归因不被吞）、退出码 1；不是 fatal、不是 80", async () => {
+  const { exitAfterFailure } = await importMod();
+  const { WarmupFailureError } = await import("../lib/tunnel-warmup.mjs");
+  const trace: string[] = []; const events: Record<string, unknown>[] = [];
+  const rc = await exitAfterFailure(new WarmupFailureError({ errorType: "engine_error", message: "m" }), exitDeps({ trace, events, failed: true, networkExhausted: true } as any));
+  assert.equal(rc, 1);
+  assert.deepEqual(trace, ["cleanup", "drain", "emit:scope_done"]);
+  assert.equal(events[0].errorType, "engine_error");
+});
+
+test("exitAfterFailure：建连重试耗尽且会话已释放 → 80 不发事件；释放失败时改为重抛（泄漏优先）；其它异常原样重抛", async () => {
+  const { exitAfterFailure } = await importMod();
+  const trace: string[] = [];
+  assert.equal(await exitAfterFailure(new Error("ECONNRESET"), exitDeps({ trace, networkExhausted: true } as any)), 80);
+  assert.deepEqual(trace, ["cleanup", "drain"]);
+  const boom = new Error("ECONNRESET");
+  await assert.rejects(exitAfterFailure(boom, exitDeps({ trace: [], networkExhausted: true, failed: true } as any)), (e) => e === boom);
+  const other = new TypeError("x");
+  await assert.rejects(exitAfterFailure(other, exitDeps({ trace: [] } as any)), (e) => e === other);
+});

@@ -128,6 +128,18 @@
     [
       "https://h/a?gherkai_tunnel_toKen=abc",
       "https://h/a?gherkai_tunnel_toKen=abc"
+    ],
+    [
+      "https://x.amazonaws.com/remote-endpoint/tokrest",
+      "https://x.amazonaws.com/remote-endpoint/***"
+    ],
+    [
+      "https://x.amazonaws.com/remote-endpoint/tok﻿rest",
+      "https://x.amazonaws.com/remote-endpoint/***"
+    ],
+    [
+      "https://h/?X-Amz-Signature=abcd&X-Amz-Date=20260101",
+      "https://h/?X-Amz-Signature=***&X-Amz-Date=20260101"
     ]
   ]
 }

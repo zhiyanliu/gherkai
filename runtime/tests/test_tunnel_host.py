@@ -37,6 +37,8 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
     assert setup.info is INFO
     assert setup.extra_http_headers == {"ngrok-skip-browser-warning": "1"}
     assert setup.warmup_url == INFO.warmup_url  # 预热地址与额外请求头成对给出（ADR 0051 决策 13）
+    token = INFO.warmup_url.rsplit("=", 1)[1]
+    assert token not in repr(setup) and token not in str(setup)  # 令牌不进 repr（日志与异常里打印对象时不带出来）
     # 映射后是新 Job（definition 不可变）：原 jobs 不动；替换进文本的是干净的隧道地址，不内嵌凭据
     assert setup.jobs[0].scenarios[0].steps[0].text == '"https://t.ngrok-free.app/a"'
     assert jobs[0].scenarios[0].steps[0].text == '"http://localhost:3000/a"'

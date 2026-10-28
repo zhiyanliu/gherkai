@@ -130,6 +130,20 @@ def test_stop_signal_interrupts_warmup_before_navigation_and_during_marker_wait(
     assert page2.gotos == [WARMUP_URL]  # 等标记的预算远没到（假时钟不动），是停止信号让它退出
 
 
+def test_stop_signal_during_backoff_is_honored_before_the_next_navigation():
+    """退避期间（sleep 即 _stop.wait）收到停止信号：下一次导航之前就抛 WarmupStopped——否则还要再等一次最长 30 秒的导航，
+    而且那次若恰好 READY 就会照发 scope_started、直到 scenario 边界才停。"""
+    flag = {"stop": False}
+
+    def sleep_then_stop(seconds):
+        flag["stop"] = True  # 退避中信号到达（真实里是 _stop.wait 被唤醒后返回）
+
+    page = _FakePage([200, 200], [C.WARMUP_TITLES["error"]])
+    with pytest.raises(W.WarmupStopped):
+        W.warmup_session(page, WARMUP_URL, log=lambda s: None, sleep=sleep_then_stop, monotonic=_clock(), stop=lambda: flag["stop"])
+    assert len(page.gotos) == 1
+
+
 # ---- main 级：假会话驱动（对称 test_evidence 的 main_fakes）----
 
 class _Sink:
@@ -201,9 +215,12 @@ def driven(monkeypatch, tmp_path):
     monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
     monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
     real_warmup = W.warmup_session  # 先取真函数再打桩：桩里不能再经模块属性引用（那已是桩自己）
-    monkeypatch.setattr(W, "warmup_session",
-                        lambda page, url, *, log, sleep=None, stop=lambda: False:
-                        real_warmup(page, url, log=log, sleep=lambda s: None, monotonic=_clock(), stop=stop))
+
+    def stub(page, url, *, log, sleep=None, stop=lambda: False):
+        assert sleep == rs._stop.wait  # 生产接线（绑定方法每次取都是新对象，比较相等而不是同一）：退避与等标记都用 _stop.wait，停止信号才能唤醒它（ADR 0024 flag-only）
+        return real_warmup(page, url, log=log, sleep=lambda s: None, monotonic=_clock(), stop=stop)
+
+    monkeypatch.setattr(W, "warmup_session", stub)
     monkeypatch.setenv("NOVA_LOGS_DIR", str(tmp_path))
     monkeypatch.delenv("ARTIFACT_S3_BUCKET", raising=False)
     monkeypatch.delenv(C.EXTRA_HTTP_HEADERS_ENV, raising=False)
@@ -317,6 +334,52 @@ def test_stop_during_warmup_releases_session_quietly_with_exit_0(driven, monkeyp
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
     assert sink.events == [] and ("nova_exit",) in trace
+
+
+def test_release_failure_with_stop_after_warmup_rejection_still_exits_1(driven, monkeypatch):
+    """预热被拒、释放会话出错、同时停止信号已置位：停止路径不发事件，但退出码仍是 1——释放失败不能被停止分支的 return 0 吞掉
+    （ADR 0051 决策 5：退出码 1 表示有会话未确认停止，桌面只靠它让泄漏可观测）。"""
+    trace, sink, box = driven
+
+    class _StopPage(_FakePage):
+        def goto(self, url, **kw):
+            rs._stop.set()  # 导航期间收到信号；响应 401 → 预热判拒
+            return super().goto(url, **kw)
+
+    class _LeakyNovaAct(_FakeNovaAct):
+        def __exit__(self, *a):
+            super().__exit__(*a)
+            raise RuntimeError("stop session failed")
+
+    box["page"] = _StopPage([401], ["gherkai-tunnel-auth-required"])
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: _LeakyNovaAct(box["page"], trace, **k))
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 1
+    assert sink.events == [] and trace.count(("nova_init",)) == 1
+
+
+def test_release_failure_after_stopped_warmup_exits_1_without_reconnecting(driven, monkeypatch):
+    """预热被停止信号打断后释放会话抛网络类异常：不是建连失败——不进建连重试域（不重建会话）、不发事件、退出码 1。
+    此前这条路径会被当成瞬时网络错进退避、再被循环顶的停止检查放过，以 0 退出把释放失败吞掉。"""
+    trace, sink, box = driven
+
+    class _StopPage(_FakePage):
+        def goto(self, url, **kw):
+            rs._stop.set()  # 导航期间收到信号；页面无标记 → WarmupStopped
+            return super().goto(url, **kw)
+
+    class _LeakyNovaAct(_FakeNovaAct):
+        def __exit__(self, *a):
+            super().__exit__(*a)
+            raise ConnectionError("reset")
+
+    box["page"] = _StopPage([200], ["gherkai-tunnel-warmup"])
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: _LeakyNovaAct(box["page"], trace, **k))
+    monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+    monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 1
+    assert sink.events == [] and trace.count(("nova_init",)) == 1
 
 
 def test_no_tunnel_env_is_zero_change(driven):

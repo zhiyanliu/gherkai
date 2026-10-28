@@ -695,23 +695,16 @@ export async function main(): Promise<number> {
       }
     }
   } catch (e) {
-    await cleanup();
-    // 会话已释放，再排空截图后台队列（会话释放优先，ADR 0024；对齐 onSignal 里的③）——网络耗尽与异常
-    // 这两条提前退出路径都**不 flush**（中断产物留本地），队列里没传完的字节就此丢，故给有界预算兜一把。
-    await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false);
-    if (e instanceof WarmupFailureError) {
-      // 会话预热失败（ADR 0051 决策 13、决策 4）：会话已在上面 cleanup 里释放；归因与 sessionId 恒经 scope_done 传递，释放失败只让退出码为 1
-      // （不是 worker fatal、不是退出码 80）。
-      const { event, exitCode } = warmupFailureOutcome(e.failure, scope.id, sessionId ?? null, cleanupFailed);
-      await eventSink.emit(event as any);
-      return exitCode;
-    }
-    // 建连重试耗尽（网络瞬时故障）→ 以网络故障退出码退出（ADR 0028）；但 cleanupFailed（会话泄漏）优先级更高。
-    if (networkExhausted && !cleanupFailed) {
-      log("worker: connect retries exhausted, exiting with network code");
-      return EX_WORKER_NETWORK;
-    }
-    throw e; // 非网络耗尽 → 原样冒泡到 bin.mts 的统一 catch（打 `worker fatal:` + exit 1，core 记 engine_error）
+    // 统一出口（exitAfterFailure，deps 注入、单测锁次序）：先释放会话、再排空截图队列，然后按异常种类定事件与退出码。
+    return await exitAfterFailure(e, {
+      cleanup: () => cleanup(),
+      drain: () => drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false),
+      cleanupFailed: () => cleanupFailed,
+      networkExhausted,
+      scopeId: scope.id,
+      sessionId: sessionId ?? null,
+      emit: (ev) => eventSink.emit(ev as any),
+    });
   } finally {
     await cleanup();
   }
@@ -730,6 +723,37 @@ export async function main(): Promise<number> {
   // 正常路径若会话释放失败 → 非 0 退出，让 schedule 记 error、泄漏可观测
   // （ADR 0024「会话释放失败可观测」，对照 Nova）
   return cleanupFailed ? 1 : 0;
+}
+
+export interface FailureExitDeps {
+  cleanup: () => Promise<void>;
+  drain: () => Promise<void>;
+  cleanupFailed: () => boolean;  // 取值要在 cleanup 之后，故给访问器而不是布尔
+  networkExhausted: boolean;
+  scopeId: string;
+  sessionId: string | null;
+  emit: (ev: Record<string, unknown>) => Promise<void>;
+  logFn?: (line: string) => void;
+}
+
+/** 主流程 try 块抛出后的统一出口（deps 全注入，对称 shutdownSequence；单测据此锁住次序与四种组合）：
+ *  ① 释放会话优先（ADR 0024）；② 再排空截图后台队列——网络耗尽与异常这两条提前退出路径都不 flush（中断产物留本地），队列里没传完的
+ *  字节就此丢，故给有界预算兜一把；③ 预热失败（ADR 0051 决策 13、决策 4）：归因与 sessionId 恒经 scope_done 传递、释放失败只让退出码为 1
+ *  （不是 worker fatal、不是退出码 80）；④ 建连重试耗尽且会话已释放 → EX_WORKER_NETWORK（ADR 0028），释放失败（会话泄漏）优先级更高；
+ *  ⑤ 其余原样重抛到 bin.mts 的统一 catch（打 `worker fatal:` + exit 1，core 记 engine_error）。 */
+export async function exitAfterFailure(e: unknown, deps: FailureExitDeps): Promise<number> {
+  await deps.cleanup();
+  await deps.drain();
+  if (e instanceof WarmupFailureError) {
+    const { event, exitCode } = warmupFailureOutcome(e.failure, deps.scopeId, deps.sessionId, deps.cleanupFailed());
+    await deps.emit(event);
+    return exitCode;
+  }
+  if (deps.networkExhausted && !deps.cleanupFailed()) {
+    (deps.logFn ?? log)("worker: connect retries exhausted, exiting with network code");
+    return EX_WORKER_NETWORK;
+  }
+  throw e;
 }
 
 // scope 内串行运行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028，对称 Nova）。

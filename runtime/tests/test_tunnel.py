@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import io
 import json
+import os
 import re
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -84,7 +87,41 @@ def test_traffic_policy_parses_as_yaml_with_rule_order_statuses_and_gate_semanti
     assert token not in gate["expressions"][0]
 
 
+_NODE = shutil.which("node")
+
+
+@pytest.mark.skipif(_NODE is None, reason="需要 node 执行预热页脚本（CI 的 pytest 作业装了 Node 22）")
+@pytest.mark.parametrize("status, kind, marker_suffix", [
+    (200, "ready", ""), (401, "denied", ""), (429, "error", " 429"), (500, "error", " 500"), ("reject", "error", ""),
+])
+def test_warmup_page_script_classifies_only_401_as_denied(status, kind, marker_suffix):
+    """预热页脚本的分类（ADR 0051 决策 13）：校验响应 200 → READY；只有 401 → DENIED（确定性拒绝、worker 归 precheck_failed）；
+    429、5xx 与请求失败 → ERROR（拿不准，worker 有界重试）。把生成的 <script> 交给 node 执行、注入桩 fetch 与桩 document，
+    断言标题、正文标记与校验请求的形态——只核字面量守不住这段分支逻辑。"""
+    rules = yaml.safe_load(tunnel.render_traffic_policy("a" * 32, "b" * 32))["on_http_request"]
+    script = re.search(r"<script>(.*?)</script>", rules[0]["actions"][0]["config"]["content"], re.S).group(1)
+    harness = (
+        "const STATUS = process.env.S; const el = { textContent: '' }; const doc = { title: '', getElementById: () => el };\n"
+        "globalThis.document = doc;\n"
+        "globalThis.fetch = (u, o) => { globalThis.__req = { u, o }; return STATUS === 'reject' ? Promise.reject(new Error('net')) : Promise.resolve({ status: Number(STATUS) }); };\n"
+        + script + "\n"
+        "setTimeout(() => process.stdout.write(JSON.stringify({ title: doc.title, marker: el.textContent, req: globalThis.__req })), 0);\n"
+    )
+    out = subprocess.run([_NODE, "-e", harness], env={**os.environ, "S": str(status)}, capture_output=True, text=True, timeout=30)
+    assert out.returncode == 0, out.stderr
+    got = json.loads(out.stdout)
+    assert got["title"] == tunnel.WARMUP_TITLES[kind]
+    assert got["marker"] == tunnel.WARMUP_MARKERS[kind] + marker_suffix
+    assert got["req"] == {"u": tunnel.CHECK_PATH, "o": {"credentials": "same-origin", "cache": "no-store"}}
+
+
 # ---------- map_origin_in_jobs：带边界的识别（ADR 0035 决策 2） ----------
+
+ADR_TRAILING_PUNCT = ".,;:!)]'"  # ADR 0035 决策 2 原文的收尾标点，独立于实现写死：实现少一个字符时样本不会跟着消失
+
+
+def test_trailing_punct_set_matches_adr():
+    assert tunnel._TRAILING_PUNCT == set(ADR_TRAILING_PUNCT)
 
 def _job_with(text: str, argument: StepArgument | None = None) -> Job:
     return Job(
@@ -121,7 +158,8 @@ ORIGIN = "http://localhost:3000"
     # 嵌套与相邻：地址出现在另一个地址的查询值里、或只隔一个逗号，逐处识别
     ("http://localhost:3000/go?next=http://localhost:3000/x", "https://abc.ngrok-free.app/go?next=https://abc.ngrok-free.app/x"),
     ("http://localhost:3000/a,http://localhost:3000/b", "https://abc.ngrok-free.app/a,https://abc.ngrok-free.app/b"),
-] + [(f"见 {ORIGIN}{ch} 处", f"见 {BASE}{ch} 处") for ch in sorted(tunnel._TRAILING_PUNCT)]  # 每个收尾标点单独核，不只核组合
+    ("http://localhost:3000.evil/?next=http://localhost:3000/x", "http://localhost:3000.evil/?next=https://abc.ngrok-free.app/x"),  # 外层不命中也不影响内层
+] + [(f"见 {ORIGIN}{ch} 处", f"见 {BASE}{ch} 处") for ch in ADR_TRAILING_PUNCT]  # 每个收尾标点单独核，不只核组合
   + [(f"（{ORIGIN}）。", f"（{BASE}）。")])
 def test_replace_origin_boundaries(text, expected):
     assert tunnel.replace_origin(text, ORIGIN, BASE) == expected
