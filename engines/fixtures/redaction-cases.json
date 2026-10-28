@@ -140,6 +140,10 @@
     [
       "https://h/?X-Amz-Signature=abcd&X-Amz-Date=20260101",
       "https://h/?X-Amz-Signature=***&X-Amz-Date=20260101"
+    ],
+    [
+      "https://h/?X-Amz-Signature=ab﻿cd&X-Amz-Date=20260101",
+      "https://h/?X-Amz-Signature=***&X-Amz-Date=20260101"
     ]
   ]
 }

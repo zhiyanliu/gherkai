@@ -45,7 +45,7 @@ class _FakePage:
 
     def goto(self, url, **kw):
         self.gotos.append(url)
-        s = self._statuses.pop(0)
+        s = self._statuses.pop(0) if self._statuses else None  # 预热后离开到 about:blank 的那次导航不消耗预设状态
         if isinstance(s, BaseException):
             raise s
         return None if s is None else _Resp(s)
@@ -246,7 +246,7 @@ def test_warmup_ready_navigates_once_before_scope_started(driven, monkeypatch):
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
     assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
-    assert box["page"].gotos == [WARMUP_URL]  # 恰一次，且在 scope_started 之前（scenarios 为空、不会再导航）
+    assert box["page"].gotos == [WARMUP_URL, "about:blank"]  # 预热恰一次、随即离开预热页（令牌不留在当前地址），都在 scope_started 之前
     assert "status" not in sink.events[1]
 
 
@@ -294,7 +294,7 @@ def test_warmup_precedes_scope_started_and_scenarios(driven, monkeypatch):
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
     assert [t for t in trace if t[0] in ("goto", "emit", "run_scenario")] == [
-        ("goto", WARMUP_URL), ("emit", "scope_started"),
+        ("goto", WARMUP_URL), ("goto", "about:blank"), ("emit", "scope_started"),
         ("emit", "scenario_started"), ("run_scenario", "x:1"), ("emit", "scenario_done"),
         ("emit", "scenario_started"), ("run_scenario", "x:2"), ("emit", "scenario_done"),
         ("emit", "scope_done")]
@@ -386,6 +386,99 @@ def test_no_tunnel_env_is_zero_change(driven):
     trace, sink, box = driven
     assert rs.main() == 0
     assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"] and box["page"].gotos == []
+
+
+class _LeakyCdp(_FakeCdp):
+    """AgentCore 会话释放失败的替身：第一次 __exit__ 抛（SDK 的 cdp_session 在 finally 里 stop，stop 抛出就是这形态）。"""
+
+    def __init__(self, trace, exc):
+        super().__init__(trace)
+        self._exc = exc
+
+    def __exit__(self, *a):
+        super().__exit__(*a)
+        if self._exc is not None:
+            exc, self._exc = self._exc, None
+            raise exc
+
+
+def _leaky_provider(monkeypatch, trace, *, first_exit_exc):
+    """只有第一个 cdp 会话的释放会抛；后续 attempt 的会话正常释放（可观察重试是否发生）。"""
+    state = {"n": 0}
+
+    class _P:
+        def __init__(self, region=None):
+            pass
+
+        def cdp_session(self):
+            state["n"] += 1
+            return _LeakyCdp(trace, first_exit_exc if state["n"] == 1 else None)
+
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+    return state
+
+
+def test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a_connect_failure(driven, monkeypatch):
+    """AgentCore 会话已建起、NovaAct 进入时抛网络错、随后释放会话又抛：释放异常不冒泡、不进建连重试判定；建连失败照常重试，
+    重试成功后判定照发，但退出码为 1 让第一个会话的泄漏可观测（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5）。
+    此前释放异常顶替建连异常冒泡、又带着原来的网络错当 __context__ 被判成瞬时错——重试成功后整次以 0 退出，泄漏没有任何信号。"""
+    trace, sink, box = driven
+    state = _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    real_factory = {"n": 0}
+
+    def nova_factory(**k):
+        real_factory["n"] += 1
+        if real_factory["n"] == 1:
+            raise ConnectionError("reset")  # 第一次建连失败
+        return _FakeNovaAct(box["page"], trace, **k)
+
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert state["n"] == 2 and trace.count(("cdp_exit",)) == 2  # 重试建了第二个会话、两个都走到释放
+
+
+def _stop_is_set():
+    return rs._stop.is_set()
+
+
+def test_release_failure_of_the_agentcore_session_with_stop_exits_1_without_retry(driven, monkeypatch):
+    """同一窗口里停止信号已置位：不再重试、不发事件，退出码 1——释放失败不能被停止分支吞成 0。"""
+    trace, sink, box = driven
+    state = _leaky_provider(monkeypatch, trace, first_exit_exc=ConnectionError("stop reset"))
+
+    def nova_factory(**k):
+        rs._stop.set()
+        raise ConnectionError("reset")
+
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 1
+    assert sink.events == [] and state["n"] == 1
+
+
+def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
+    """建连期间收到停止信号且建连抛网络错、会话正常释放：这是建连失败不是释放失败——按停止路径以 0 退出、零事件。
+    守住「只有释放阶段抛出才记 release_error」：把建连异常也记成释放失败会向桌面误报有会话未确认停止。"""
+    trace, sink, box = driven
+
+    def nova_factory(**k):
+        rs._stop.set()
+        raise ConnectionError("reset")
+
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 0
+    assert sink.events == [] and trace.count(("cdp_exit",)) == 1
+
+
+def test_release_failure_on_the_normal_path_keeps_the_verdict_and_exits_1(driven, monkeypatch):
+    """正常路径（无隧道）释放 AgentCore 会话失败：判定照发（scope_started、scope_done），退出码 1——对称 Midscene 的 cleanupFailed。"""
+    trace, sink, box = driven
+    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
 
 
 def test_capabilities_declare_session_warmup():

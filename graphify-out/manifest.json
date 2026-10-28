@@ -420,8 +420,8 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1793151452.8401556,
-    "ast_hash": "dc54f73dda24b7a871bcc3d961358c62",
+    "mtime": 1793160328.0700521,
+    "ast_hash": "599c4c7de85e3aa2f820266fedf639c6",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -755,13 +755,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1793151452.839731,
-    "ast_hash": "4bfa896ed618b169934b4a2c941ddc2d",
+    "mtime": 1793160328.0686357,
+    "ast_hash": "e5f2cf9d333ab42acba83e3049936457",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
-    "mtime": 1793151452.8400085,
-    "ast_hash": "7e57647e2684f577c6be43112359450c",
+    "mtime": 1793160328.0689893,
+    "ast_hash": "4d44a5db41d1ebad5924965e0629076f",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/user-steps.mts": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793151474.644522,
-    "ast_hash": "fd122d0cdfef2678267af0458892a12d",
+    "mtime": 1793160437.0146372,
+    "ast_hash": "4483dc6323e0847882d3a9a987d0b1b0",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1760,8 +1760,8 @@
     "semantic_hash": "761eb097880295481d4f7f77226aea01"
   },
   "core/gherkai_core/redact.py": {
-    "mtime": 1793151452.840233,
-    "ast_hash": "f3be7a0845ad4163b32d14780c6456f2",
+    "mtime": 1793160328.0702276,
+    "ast_hash": "c6426ebbb4fd3b1c3ced51e42b9b29d0",
     "semantic_hash": ""
   },
   "core/tests/test_redact.py": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793114193.2266004,
-    "ast_hash": "f22fe8589b72f2497337b43aab6e928e",
+    "mtime": 1793160328.0698056,
+    "ast_hash": "fd1d7e3c99af26da865e106048cea5df",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -2056,7 +2056,7 @@
   },
   "engines/fixtures/redaction-cases.json": {
     "mtime": 1793151452.8407693,
-    "ast_hash": "a9285f11f81f69ed8c6364008e6639ca",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/fixtures/tunnel-warmup.json": {
@@ -2080,8 +2080,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_tunnel_warmup.py": {
-    "mtime": 1793151580.4633985,
-    "ast_hash": "8389d5b5af838500235fbd64684f9b0e",
+    "mtime": 1793160328.0683067,
+    "ast_hash": "9b9318711cd5f70123bb081a8bd863f0",
     "semantic_hash": ""
   },
   "AGENTS.md": {

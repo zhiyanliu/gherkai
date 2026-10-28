@@ -966,16 +966,17 @@ test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用�
 
 // ---- exitAfterFailure：主流程 try 块抛出后的统一出口（ADR 0051 决策 13 / 5、ADR 0028、ADR 0024 释放优先）----
 
-function exitDeps(overrides: Partial<import("./run-scope.mjs").FailureExitDeps> & { trace: string[]; failed?: boolean }) {
-  const { trace, failed = false, ...rest } = overrides;
+function exitDeps(overrides: Partial<import("./run-scope.mjs").FailureExitDeps> & { trace: string[]; failed?: boolean; events?: Record<string, unknown>[] }) {
+  const { trace, failed = false, events, ...rest } = overrides;
+  let f = false;  // cleanupFailed 只在 cleanup 之后才有值：桩模拟这一副作用，提前取值的实现会读到 false 而测红
   return {
-    cleanup: async () => { trace.push("cleanup"); },
+    cleanup: async () => { trace.push("cleanup"); f = failed; },
     drain: async () => { trace.push("drain"); },
-    cleanupFailed: () => failed,
+    cleanupFailed: () => f,
     networkExhausted: false,
     scopeId: "s",
     sessionId: "sess-1",
-    emit: async (ev: Record<string, unknown>) => { trace.push(`emit:${String(ev.type)}`); (overrides as any).events?.push(ev); },
+    emit: async (ev: Record<string, unknown>) => { trace.push(`emit:${String(ev.type)}`); events?.push(ev); },
     logFn: () => {},
     ...rest,
   };
@@ -1001,13 +1002,15 @@ test("exitAfterFailure：预热失败且释放会话失败 → scope_done 照发
   assert.equal(events[0].errorType, "engine_error");
 });
 
-test("exitAfterFailure：建连重试耗尽且会话已释放 → 80 不发事件；释放失败时改为重抛（泄漏优先）；其它异常原样重抛", async () => {
+test("exitAfterFailure：建连重试耗尽且会话已释放 → 80 不发事件；释放失败时改为重抛（泄漏优先）；其它异常原样重抛——重抛前同样先释放、再排空", async () => {
   const { exitAfterFailure } = await importMod();
   const trace: string[] = [];
   assert.equal(await exitAfterFailure(new Error("ECONNRESET"), exitDeps({ trace, networkExhausted: true } as any)), 80);
   assert.deepEqual(trace, ["cleanup", "drain"]);
-  const boom = new Error("ECONNRESET");
-  await assert.rejects(exitAfterFailure(boom, exitDeps({ trace: [], networkExhausted: true, failed: true } as any)), (e) => e === boom);
-  const other = new TypeError("x");
-  await assert.rejects(exitAfterFailure(other, exitDeps({ trace: [] } as any)), (e) => e === other);
+  const boom = new Error("ECONNRESET"); const trace2: string[] = [];
+  await assert.rejects(exitAfterFailure(boom, exitDeps({ trace: trace2, networkExhausted: true, failed: true } as any)), (e) => e === boom);
+  assert.deepEqual(trace2, ["cleanup", "drain"]);
+  const other = new TypeError("x"); const trace3: string[] = [];
+  await assert.rejects(exitAfterFailure(other, exitDeps({ trace: trace3 } as any)), (e) => e === other);
+  assert.deepEqual(trace3, ["cleanup", "drain"]);
 });

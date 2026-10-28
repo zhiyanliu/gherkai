@@ -8,7 +8,7 @@ Midscene 是另一种语言，故不能共用一份；改规则要三处同改�
   （不含中文与全角标点，「地址，用户邮箱@」不会被误吞）。不含 `://` 的 `用户:口令@主机` 形态不处理（已知残余，见 ADR）。
 - 规则 ②：封闭名单里的查询参数（`X-Amz-Signature`、`X-Amz-Security-Token`、`X-Amz-Credential`、`gherkai_tunnel_token`，参数名不区分
   大小写）的值换成 `***`：参数名前是 `?`、`&` 或 XML 实体转义形态的 `&amp;`，值到下一个 `&` 或遇到空白、`"`、`#`、`\\`、`<` 为止
-  （不含引号与反斜杠，所以同样能作用在已序列化的 JSON 行上）。`X-Amz-Date` / `Expires` / `Algorithm` / `SignedHeaders` 不是凭证，
+  （不含双引号与反斜杠，所以同样能作用在已序列化的 JSON 行上）。`X-Amz-Date` / `Expires` / `Algorithm` / `SignedHeaders` 不是凭证，
   保留明文以便诊断预签名地址过期一类问题。不按「名字含 token 或 signature 就盖」的宽泛形态——会误伤被测应用的普通参数。
 - 规则 ③：Device Farm Appium 端点的路径令牌——`/remote-endpoint/` 之后的那一段（到下一个 `/`、`?`、`#`、`@`、空白、`"`、`\\` 为止）
   换成 `***`。该端点没有查询参数，凭据就是这一段。
