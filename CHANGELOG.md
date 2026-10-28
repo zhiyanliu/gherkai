@@ -22,7 +22,7 @@
 
 ### 变化
 
-- Nova Act 引擎的 worker 自己管理云端浏览器会话的启动与停止：停止有超时预算，停止失败或超时以退出码 1 暴露（判定照常发出）；此前停止藏在 SDK 内部，个别失败看不见。 Nova Act 的 job 记录的会话 id 随之改为 AgentCore 浏览器会话 id（与 Midscene 同一种 id；此前是 Nova Act 服务侧的会话 id）。
+- Nova Act 引擎的 worker 自己管理云端浏览器会话的启动与停止：停止有超时预算，停止失败或超时时 job 记为 error（scenario 明细保留，退出码 1）；此前停止由 SDK 内部执行，部分失败不会反映在退出状态里。Nova Act 的 job 记录的会话 id 随之改为 AgentCore 浏览器会话 id（与 Midscene 同一种 id；此前是 Nova Act 服务侧的会话 id）；`nova-trajectories/` 下的子目录仍按 Nova Act 侧的会话 id 命名，不再等于 job 记录里的会话 id，worker 日志里有两者的对应行。
 - `gherkai deploy push-worker` 的平台校验认得 containerd 镜像存储（Docker 29 起新装的缺省）下的多平台索引：本机有 linux/amd64 内容的镜像照常通过，没有时提示只构建 linux/amd64 一个平台；此前这类镜像被报成「平台是 ?/?」。
 - 提交记录（`run_meta.json`、云端 META，以及 `run --json` 与 `plan --json` 里的 `run_meta` / `jobs[]`）带结构版本 `schema_version`（整数，本版本为 1）与写出它的 `cli_version`；键集固定、不适用的值写 `null` 而不再省键：`timeout_s` 不超时为 `null`，`target` 对桌面 job 也写出 `desktop` / `web`，`device_request` 非设备 job 为 `null`，`steps_dir`、`worker_variant`、`worker_task_defs`、`extra_http_headers` 无值为 `null`。`status` / `explain` 与本机接力读到结构版本不等于本机支持的记录以退出码 2 结束，并点名写出它的版本：更新的提示升级 gherkai，更早的提示用那个版本查看或重新提交。**同一报告目录不要混用 1.4 与 1.5 的命令行工具读写**：1.4 的命令行工具读 1.5 的记录会静默误判，1.5 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录（结构版本与后端不一致、记录不完整、没有记 worker 镜像版本）时不执行、把 run 置为 `error`，原因写进运行状态：`status` 在状态行下多一行 `message`，`status --json` 多一个 `message` 键；正常收尾的 run 没有这一行与这个键。本机 `status` / `explain` / `status --wait` 接力读到不完整的提交记录以退出码 2 结束并说明。云端推进器不再读 SSM，部署时不再给它 SSM 读权限（已有部署重新 `gherkai deploy` 后生效）。配置文件给整数选项写浮点（如 `max-concurrency = 4.7`）与命令行同拒，不再静默截断。
 - 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号），worker 在建立任何会话之前核对它：版本不一致时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本；两个引擎 worker 的能力自述缺「支持的测试目标」时命令行工具按版本不一致拒绝。

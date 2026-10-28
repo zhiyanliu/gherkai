@@ -32,7 +32,7 @@ gherkai_worker_novaact/
 uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker 一并装为 editable
 ```
 
-依赖与版本锁定（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **锁定精确版本** `nova-act==3.4.187.0`
+依赖与版本锁定（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **锁定精确版本** `nova-act==3.4.187.0`，直接使用的 `bedrock-agentcore==1.22.0` 同样钉精确版本（worker 直接调它的 `BrowserClient`，nova-act 对它只给范围）
 （升级的步骤是改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
 `boto3>=1.34` 直接声明，不经 nova-act 传递依赖（ADR 0037 决策 2c）；包版本由 git tag 经 uv-dynamic-versioning 算出，不写入文件（ADR 0037 决策 2b）。
 
@@ -60,6 +60,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 |---|---|---|
 | `NOVA_MODEL_ID` | `nova-act-v1.0`（`lib/constants.py` 的 `MODEL_ID`） | 传给 `Workflow(model_id=...)` 的模型 id，同时是 `--capabilities` 的 `model_id`。默认锁定 GA 版本、不用 `nova-act-latest` 别名，更换默认值须随发版评估（[ADR 0044](../../docs/adr/0044-engine-model-selection-and-override.md) 决策 1/2 两引擎规则一致，现值登记在该 ADR）；Nova 侧的选型证据见 [ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」 |
 | `NOVA_ACT_TIMEOUT_S` | `120`（`run_scope.ACT_TIMEOUT_S`） | 单个 `act` / `act_get` 的超时上界（SDK 允许 [2,1800]）；真值在组合根，由它注入 worker（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md) act 有界返回） |
+| `NOVA_SESSION_STOP_BUDGET_S` | `8`（`lib/constants.py`） | worker 自己调 StopBrowserSession 的预算：超过即记为释放失败、以退出码 1 退出，线程留给进程退出回收；须小于 `NOVA_GRACE_MARGIN_S` 减去截图排空的 6 秒（[ADR 0028](../../docs/adr/0028-transient-network-ssl-resilience.md) 会话泄漏防护） |
 | `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出段排空 6 秒，留约两倍余量；推导写在该常量旁注） |
 | `NOVA_LOGS_DIR` | 无（不设即回落 SDK `mkdtemp` 出的临时目录） | Nova SDK 的 trajectory 落点，组合根注入 `<report_dir>/<run_id>/nova-trajectories` 绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`）；worker 主流程与 uploader 都读它 |
 | `AWS_REGION` | 无（模块级读一次，未设则 `Workflow` 构造失败） | Workflow / AgentCore 会话 / 三条 I/O 边共用的 region，由组合根落实后注入（见 `run_scope.REGION`） |

@@ -22,7 +22,8 @@
 - https://docs.aws.amazon.com/nova-act/latest/userguide/ — 官方用户指南（HITL 实现、workflow definition 与 IAM 路径、SDK 行为的一手权威；README 只给上手面）
 - https://nova.amazon.com/act — API key 生成、Playground
 - 安装的源码：`.venv/lib/python3.13/site-packages/nova_act/`（仓库根 workspace venv）
-  - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`cdp_session()` yield `(ws_url, headers)`）
+  - AgentCore provider：`browser_auth/agentcore_session_provider.py`（`bind_session` 与 profile 保存；worker 不再用它的 `cdp_session()`）
+  - 会话 Start / Stop 与 CDP 连接头：bedrock-agentcore 的 `tools/browser_client.py`（`BrowserClient.start / stop / generate_ws_headers`，worker 直接调用）
   - workflow contextvar：`types/workflow.py`（`@workflow` 设 `set_current_workflow`；`with Workflow` 不设——worker 走 `with Workflow`，故须手动补 `set_current_workflow`，见 `engines/novaact/gherkai_worker_novaact/run_scope.py` / ADR 0004）
 - 多语言 SDK（形态 B 探路，**已证伪**：是客户端驱动的 REST 循环、非 `nova.act()` acting 等价物，acting 锁 Python，见 ADR 0006/0023）：npm `@aws-sdk/client-nova-act`、Go `aws-sdk-go-v2/service/novaact`
 

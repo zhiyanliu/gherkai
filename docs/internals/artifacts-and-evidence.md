@@ -35,7 +35,7 @@
 | `jobs/<enc>.json`                                            | ★判定真值                                                               | 路径与文件名相同                                                              |
 | `manifest.json`                                              | 派生导航                                                                | 路径与文件名相同                                                              |
 | `index.html`                                                 | 派生导航（人的入口）                                                      | 路径与文件名相同                                                              |
-| `nova-trajectories/<session_id>/`                            | 现场证据：Nova 原生（per-act 页 + 配套 trajectory json + 会话汇总）        | key 镜像相对路径                                                              |
+| `nova-trajectories/<Nova Act 会话 id>/`                       | 现场证据：Nova 原生（per-act 页 + 配套 trajectory json + 会话汇总）        | key 镜像相对路径                                                              |
 | `nova-trajectories/evidence/<scenario 键>/step-<n>/`         | 现场证据：gherkai 自有（`evidence.json` + 帧截图 `act-<i>-frame-<j>.jpg`） | key 镜像相对路径                                                              |
 | `midscene-run/report/`                                       | 现场证据：Midscene 原生（SDK 报告 HTML + `screenshots/`）                  | key 镜像相对路径                                                              |
 | `midscene-run/log/`                                          | 现场证据：Midscene SDK 日志                                              | key 镜像相对路径                                                              |
@@ -52,7 +52,7 @@
 
 几处需要注意的不对称：
 
-- **Nova 的 per-act 文件与 session 汇总同在 `nova-trajectories/<session_id>/`**（这一层由 SDK 以会话 id 创建，`session_id` 记在 `jobs/*.json` 的 job 层，排障时可直接 `ls` 该目录）：每次 act 一组 `act_<序号>_<指令片段>.html` + 配套 `_trajectory.json`（act 抛错时配套 json 通常未写出、只剩 `.html`），另有 SDK 自身的 trace/log 文件；`session_summary.json`（`kind=summary`）只在该 scope 实际调用过 AI 时才写。Midscene 侧 `report/` 除 `*.html` 与 `screenshots/` 外，还有每个 execution 一份的 `<n>.execution.json`（截图落成独立文件的连带产物，同样只在实际调用过 AI 时才有），随整目录 flush 一并上传。**确切文件名不可推测**：名字里嵌指令片段、且随 SDK 版本漂移，应以判定真值里的那条 `ref` 为准。
+- **Nova 的 per-act 文件与 session 汇总同在 `nova-trajectories/<Nova Act 会话 id>/`**（这一层由 SDK 以 Nova Act 服务侧的会话 id 创建；job 记录的 `session_id` 是 AgentCore 浏览器会话 id、不是目录名，排障时按 worker 日志里「AgentCore session X uses Nova Act session Y」那一行找到目录）：每次 act 一组 `act_<序号>_<指令片段>.html` + 配套 `_trajectory.json`（act 抛错时配套 json 通常未写出、只剩 `.html`），另有 SDK 自身的 trace/log 文件；`session_summary.json`（`kind=summary`）只在该 scope 实际调用过 AI 时才写。Midscene 侧 `report/` 除 `*.html` 与 `screenshots/` 外，还有每个 execution 一份的 `<n>.execution.json`（截图落成独立文件的连带产物，同样只在实际调用过 AI 时才有），随整目录 flush 一并上传。**确切文件名不可推测**：名字里嵌指令片段、且随 SDK 版本漂移，应以判定真值里的那条 `ref` 为准。
 - **`jobs/` 与 `jobs-in/` 只差三个字母，语义相反**：`jobs/` 是判定输出（由 ResultStore 枚举），`jobs-in/` 是 cloud 起 task 时写入的 job 输入。两个前缀有意分开，以免 key 冲突、以免 job 输入被当作判定读取。
 - **cloud 的 `run_meta` / `run_state` 不在桶里**，`--json` 的 `artifacts` 给的是 `ddb://<表>/<run_id>#META` 形式的**诊断指针**（纯展示、不被任何代码解析）。
 - **cloud 后端本机通常没有这棵本地树**：产物写在容器内 `/tmp/gherkai-run/<run_id>/` 下的同名子目录里，上传成功即删本地、随容器盘销毁。run 收尾时组合根仍对本机 `<report-dir>/<run_id>/` 做一次「只删空目录」的清理（目录不存在则 no-op；上传失败而保留了产物的目录非空，因此不会被删除）。
