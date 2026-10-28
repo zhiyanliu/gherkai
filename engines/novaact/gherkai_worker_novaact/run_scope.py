@@ -939,7 +939,7 @@ def main() -> int:
     session_id = None  # AgentCore 浏览器会话 id（血缘，进 scope_started / scope_done；ADR 0051 决策 5 对 sessionId 的定义）
     nova_session_id = None  # Nova Act 服务侧的会话 id：只用于定位 SDK 落盘的 session_summary.json（路径按它拼）
     warmup_failure: _warmup.WarmupFailure | None = None  # 会话预热的归因（ADR 0051 决策 13）：非 None 即不发 scope_started、经 scope_done 传递
-    release_error: BaseException | None = None  # 释放阶段（两层上下文的 __exit__）抛出的异常：只记录、不冒泡、不清零，让退出码为 1
+    release_error: BaseException | None = None  # 释放阶段（关 NovaAct 连接、Stop AgentCore 会话）抛出的异常：只记录、不冒泡、不清零，让退出码为 1
     network_exhausted = False  # 建连重试耗尽（ADR 0028）：置位 + 正常退出 with → return EX_WORKER_NETWORK
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
@@ -976,13 +976,13 @@ def main() -> int:
         client = BrowserClient(region=REGION)
         # StartBrowserSession（与 SDK 的 cdp_session 同一组调用：同一 profile 配置、默认浏览器标识）：抛出 → 建连域异常、可重试，此时没有会话。
         client.start(profile_configuration=ProfileConfiguration(profile_identifier=provider.profile_id))
-        session_id = str(client.session_id)
-        log(f"worker: AgentCore browser session started: {session_id}")
-        provider.bind_session(browser_identifier=str(client.identifier), session_id=session_id)  # SDK 据此在 NovaAct 退出时保存 profile
         nova_cm = None
         nova_entered = False
         body_exc: BaseException | None = None
-        try:
+        try:  # Start 成功之后的每一步都在释放保护区内：连写日志的那一行也可能抛（stderr 管道已关），不能让会话因此漏 Stop
+            session_id = str(client.session_id)
+            log(f"worker: AgentCore browser session started: {session_id}")
+            provider.bind_session(browser_identifier=str(client.identifier), session_id=session_id)  # SDK 据此在 NovaAct 退出时保存 profile
             ws_url, headers = client.generate_ws_headers()  # 取 CDP 连接头（要取凭证，可能撞网络错）：会话已建起，失败也要走下面的释放
             # logs_directory：trajectory 落到 run 专属持久目录（ADR 0027）。cli 经环境变量
             # NOVA_LOGS_DIR 传入 reports/<run_id>/nova-trajectories；无则用 SDK 默认临时目录
@@ -1001,6 +1001,8 @@ def main() -> int:
             nova = nova_cm.__enter__()  # 建连（失败 → 建连域异常、可重试；AgentCore 会话由下方 finally 释放）
             nova_entered = True
             nova_session_id = nova.get_session_id()  # Nova Act 服务侧的会话 id（不是 AgentCore 的）：SDK 产物目录按它命名
+            # 两种 id 写在同一行：排障时从 job 记录的 AgentCore 会话 id 找到按 Nova Act 会话 id 命名的轨迹目录（ADR 0028 卡死现场一条）
+            log(f"worker: AgentCore session {session_id} uses Nova Act session {nova_session_id} (trajectory directory name)")
             # 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级
             # 对所有请求（含 SDK 之后新开的 page）生效。纯 CDP 命令、无回调——不触碰 SDK 的
             # route/greenlet 面（nova.page 是 SDK 公开属性，_DeterministicCtx 同源用法）。
@@ -1109,7 +1111,7 @@ def main() -> int:
 
     # scope 级 reportRef：Nova SDK 落的 session_summary.json（session_id/time_worked_s/act_count 等）作
     # kind=summary（引擎特有富信息载体、非人看报告，经不透明指针给 agent，ADR 0027）。SDK 把它落在
-    # NOVA_LOGS_DIR/<session_id>/session_summary.json（多拼一层 session_id 子目录），且仅 act_count>0 时写——
+    # NOVA_LOGS_DIR/<Nova Act 会话 id>/session_summary.json（多拼一层以 Nova Act 会话 id 命名的子目录，不是血缘用的 AgentCore id），且仅 act_count>0 时写——
     # 故文件存在才带（纯确定性/零耗时 scope 不写）。用 os.environ 重取 base（logs_dir 是 _run_session 局部）。
     scope_refs: list[dict] = []
     base = None if _no_artifacts() else os.environ.get("NOVA_LOGS_DIR")

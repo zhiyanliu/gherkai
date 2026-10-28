@@ -25,7 +25,7 @@ ENV PYTHONUNBUFFERED=1 \
 # /app 留给定制层放 steps/（基础镜像不预置 GHERKAI_STEPS_DIR、不猜路径，ADR 0037 决策 4/5）
 WORKDIR /app
 RUN pip install --upgrade pip
-# **不装 chromium 二进制**：worker 连的是 AgentCore 云浏览器（cdp_session→connectOverCDP，浏览器运行在云端），
+# **不装 chromium 二进制**：worker 连的是 AgentCore 云浏览器（BrowserClient 取 CDP 连接头，NovaAct connectOverCDP，浏览器运行在云端），
 # playwright 只作 CDP 客户端库、不 launch 本地 chromium——故只需 playwright 库（nova-act 依赖拉入），
 # 不需 `playwright install chromium` 的二进制 + 系统库（省几百 MB）。实际运行验证：connectOverCDP 连云浏览器不依赖本地二进制。
 

@@ -45,7 +45,9 @@ NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # AgentCore 会话 Stop 的预算（ADR 0028「会话泄漏防护」，对称 Midscene 的 STOP_SESSION_BUDGET_MS）：worker 自己持有 StopBrowserSession，
 # 退化网络下它可能挂很久，等满会撞 SIGKILL；超过预算即记为释放失败（退出码 1、会话可能泄漏），线程留给进程退出回收。真容器标定的
-# 会话释放整段 ≤9 s（含 NovaAct 关连接），单次 Stop 给 8 s，仍在上面 30 s 余量之内（释放 + 截图排空 6 s）。env 可覆盖。
+# 会话释放整段 ≤9 s（正常网络；含 NovaAct 关连接），单次 Stop 给 8 s，仍在上面 30 s 余量之内（释放 + 截图排空 6 s）。env 可覆盖。
+# 已知边界（ADR 0028）：Stop 之前的 NovaAct 退出（经 CDP 取 storage_state、保存 profile 的 SaveBrowserSessionProfile）没有预算、
+# 且与 Playwright 同线程、不能搬进线程——退化网络下它先于 Stop 挂住，整段释放仍可能撞 SIGKILL。
 SESSION_STOP_BUDGET_S = float(os.environ.get("NOVA_SESSION_STOP_BUDGET_S", "8"))
 
 # ---- 隧道「令牌换 cookie」的会话预热（ADR 0051 决策 13；ADR 0035「边界与不变量」）----

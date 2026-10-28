@@ -29,7 +29,7 @@
 | `status` | `passed` / `failed` / `error` / `skipped` / `aborted` | job 判定；后两态只在同步 `run` 的 `--fail-fast` 路径出现（`skipped` 表示未启动，`aborted` 表示执行中被中止） |
 | `duration_ms` | number \| null | scope 墙钟（会话起止） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
-| `session_id` | string \| null | 引擎会话 id（血缘；可与 worker 日志 / 轨迹目录对应）；设备目标为 Device Farm 远程访问会话的 ARN |
+| `session_id` | string \| null | 云端浏览器会话 id（血缘；两个引擎都是 AgentCore 浏览器会话 id，可与 worker 日志对应；Nova Act 的轨迹目录按另一种会话 id 命名，worker 日志里有两者的对应行）；设备目标为 Device Farm 远程访问会话的 ARN |
 | `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
 | `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止，`message` 列出会话名 |

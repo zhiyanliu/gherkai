@@ -196,6 +196,8 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
+        # 与 SDK 的 cdp_session 同一组参数：只给 profile 配置、且是 provider 解析出的那个 profile（别的参数名或漏传都在这里红）
+        assert set(kw) == {"profile_configuration"} and getattr(kw["profile_configuration"], "profile_identifier", None) == "prof-fake", kw
         hook = self._box.get("start_hook")
         if hook is not None:
             hook()
@@ -653,4 +655,70 @@ def test_lineage_is_the_agentcore_session_id_not_the_nova_act_one(driven, monkey
     trace, sink, box = driven
     assert rs.main() == 0
     assert {e["sessionId"] for e in sink.events} == {"sess-fake"}
+
+
+def test_session_summary_is_located_by_the_nova_act_session_id(driven, monkeypatch, tmp_path):
+    """SDK 把 session_summary.json 落在以 Nova Act 服务侧会话 id 命名的目录下；血缘 id 是 AgentCore 的，两种 id 不同，定位目录要用前者。"""
+    trace, sink, box = driven
+    (tmp_path / "nova-sess-fake").mkdir()
+    (tmp_path / "nova-sess-fake" / "session_summary.json").write_text("{}", encoding="utf-8")
+    assert rs.main() == 0
+    done = sink.events[-1]
+    assert done["type"] == "scope_done" and done["sessionId"] == "sess-fake"
+    assert any(r["kind"] == "summary" and "nova-sess-fake" in r["ref"] for r in done.get("reportRefs", [])), done
+
+
+def test_failure_right_after_start_still_stops_the_session(driven, monkeypatch):
+    """Start 成功之后、NovaAct 之前的任何一步抛出（这里让绑定抛）：会话仍被 Stop 一次，异常照常按建连域处理。"""
+    trace, sink, box = driven
+
+    class _Provider(_FakeProvider):
+        def bind_session(self, browser_identifier, session_id):
+            raise RuntimeError("bind failed")
+
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _Provider)
+    with pytest.raises(RuntimeError, match="bind failed"):
+        rs.main()
+    assert trace.count(("session_start",)) == 1 and trace.count(("session_stop",)) == 1
+
+
+def test_hanging_stop_does_not_hold_the_process_open(tmp_path):
+    """Stop 挂住时进程要按预算退出：靠守护线程（非守护线程会在解释器退出时被 join，主线程按时返回 1 之后进程照样卡到 Stop 返回）。
+    这是进程退出的真实行为，进程内的单测看不到，所以起真子进程量它的墙钟。"""
+    import subprocess, sys, time
+
+    code = (
+        "import threading\n"
+        "from gherkai_worker_novaact.run_scope import stop_session_within_budget\n"
+        "class C:\n"
+        "    session_id = 's'\n"
+        "    def stop(self):\n"
+        "        threading.Event().wait(30)\n"
+        "try:\n"
+        "    stop_session_within_budget(C(), 0.1)\n"
+        "except TimeoutError:\n"
+        "    raise SystemExit(1)\n"
+    )
+    t0 = time.monotonic()
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=20)
+    assert proc.returncode == 1, proc.stderr
+    assert time.monotonic() - t0 < 10  # 远小于 30 秒的 Stop：进程没有等它
+
+
+def test_workflow_guard_passes_the_real_exception_to_the_sdk(driven, monkeypatch):
+    """Workflow 的 __exit__ 照常收到真实异常信息（SDK 的 Workflow 据 exc_type 标记运行结局）：守住外壳只兜异常、不吞 exc_info。"""
+    trace, sink, box = driven
+    seen = {}
+
+    class _Recording(_FakeCm):
+        def __exit__(self, *exc_info):
+            seen["exc_info"] = exc_info
+            return False
+
+    monkeypatch.setattr(rs, "Workflow", lambda **k: _Recording())
+    monkeypatch.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
+    monkeypatch.setattr(rs, "NovaAct", lambda **k: (_ for _ in ()).throw(RuntimeError("boom")))
+    with pytest.raises(RuntimeError, match="boom"):
+        rs.main()
+    assert seen["exc_info"][0] is RuntimeError
 

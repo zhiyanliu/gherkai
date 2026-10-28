@@ -615,6 +615,8 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
+        # 与 SDK 的 cdp_session 同一组参数：只给 profile 配置、且是 provider 解析出的那个 profile（别的参数名或漏传都在这里红）
+        assert set(kw) == {"profile_configuration"} and getattr(kw["profile_configuration"], "profile_identifier", None) == "prof-fake", kw
         if self._raises is not None:
             raise self._raises
         if self._on_start:
