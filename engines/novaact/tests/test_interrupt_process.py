@@ -15,7 +15,7 @@ raise 未捕获异常 → 进程非 0 退出 / 行为改变 → 本测试 rc==0 
 手抄副本、改真 handler 测试也不红、是假哨兵；改装真 `rs._on_signal` 才有护栏效力）。**边界诚实说明**：fixture 运行的是无 greenlet 的 fake act
 循环，故它验的是「handler 语义 + 协作退范式」，**不复现真 greenlet 卡死本身**（signal-raise 撞
 greenlet 切换区致死循环那条路概率性触发、不宜断言，机制见 ADR 0024 被拒方案）；真 greenlet 环境的
-干净退（flag-only 改造）已由真 spawn worker + 真 chromium/greenlet 的一次性实际运行验证（见 ADR 0024
+协作式退出（flag-only 改造）已由真 spawn worker + 真 chromium/greenlet 的一次性实际运行验证（见 ADR 0024
 终止契约）。scenario/投票循环的
 _stop 检查回归由 test_interrupt_model.py 的单测覆盖，不靠本进程测试。
 """

@@ -1,4 +1,4 @@
-// Midscene 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 运行一个 scope → 吐 ADR 0024 事件到事件通道。
+// Midscene 薄 worker（ADR 0022/0024）：读 stdin 的 job JSON → 运行一个 scope → 发出 ADR 0024 事件到事件通道。
 //
 // 不含 BDD runner 装饰器：会话/aiAct/aiBoolean 投票/派发逻辑直接在本进程运行（ADR 0022 薄 worker）。
 // core 经子进程 adapter 起本 worker（ADR 0026 机制层），讲 ADR 0024 协议——与 Nova Act 引擎对称。
@@ -492,7 +492,7 @@ export async function main(): Promise<number> {
     }
   }
 
-  // 会话清理（ADR 0024 终止契约，对照 Nova 的 with __exit__）：
+  // 会话清理（ADR 0024 终止契约，对照 Nova 在 _run_session 的 finally 里的释放）：
   //   顺序——**先发 StopBrowserSession 释放会话（最重要、优先）**，再关 browser；
   //   理由——不让易挂起的 browser.close 挟持会话释放。close 套超时预算，避免耗尽 grace。
   //   重入：在途 promise 记忆（makeGuardedCleanup）——信号 handler 与 finally 先后双调时，后来者等在途那次

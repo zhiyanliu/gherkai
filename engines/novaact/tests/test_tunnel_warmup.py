@@ -176,16 +176,58 @@ class _Sink:
         pass
 
 
-class _FakeCdp:
-    def __init__(self, trace):
-        self._trace = trace
+class _FakeCm:
+    """结构相同的上下文管理器替身（给 with wf 用）。"""
 
     def __enter__(self):
-        return ("ws://fake", {})
+        return self
 
     def __exit__(self, *a):
-        self._trace.append(("cdp_exit",))
         return False
+
+
+class _FakeBrowserClient:
+    """BrowserClient 的替身：start 记 ("session_start",) 并给出会话 id，stop 记 ("session_stop",)。box["stop_excs"] / box["ws_headers_excs"]
+    按调用次序给异常（None 表示成功）；box["start_hook"] 在 start 时调用（置停止信号或抛建连失败）。"""
+
+    def __init__(self, trace, box):
+        self._trace, self._box = trace, box
+        self.session_id = None
+        self.identifier = None
+
+    def start(self, **kw):
+        hook = self._box.get("start_hook")
+        if hook is not None:
+            hook()
+        self._trace.append(("session_start",))
+        self.identifier, self.session_id = "aws.browser.v1", "sess-fake"
+        return self.session_id
+
+    def generate_ws_headers(self):
+        excs = self._box.setdefault("ws_headers_excs", [])
+        exc = excs.pop(0) if excs else None
+        if exc is not None:
+            raise exc
+        return ("ws://fake", {})
+
+    def stop(self):
+        self._trace.append(("session_stop",))
+        excs = self._box.setdefault("stop_excs", [])
+        exc = excs.pop(0) if excs else None
+        if exc is not None:
+            raise exc
+        self.session_id = self.identifier = None
+        return True
+
+
+class _FakeProvider:
+    profile_id = "prof-fake"
+
+    def __init__(self, region=None):
+        self.bound = None
+
+    def bind_session(self, browser_identifier, session_id):
+        self.bound = (browser_identifier, session_id)
 
 
 class _FakeNovaAct:
@@ -202,7 +244,7 @@ class _FakeNovaAct:
         return False
 
     def get_session_id(self):
-        return "sess-fake"
+        return "nova-sess-fake"  # Nova Act 服务侧的 id，只给 SDK 产物目录；血缘用的是 BrowserClient 给的 "sess-fake"
 
 
 @pytest.fixture
@@ -217,19 +259,14 @@ def driven(monkeypatch, tmp_path):
                             "target": {"device": "desktop", "uiKind": "web"}, "engine": "novaact", "assertionVotes": 1,
                             "timeoutS": None, "deviceRequest": None}))})())
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
-    monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCdp([]))
+    monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCm())
     monkeypatch.setattr(rs, "get_current_workflow", lambda: None)
     monkeypatch.setattr(rs, "set_current_workflow", lambda w: None)
     monkeypatch.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(box["page"], trace, **k))
 
-    class _P:
-        def __init__(self, region=None):
-            pass
-
-        def cdp_session(self):
-            return _FakeCdp(trace)
-
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+    box["stop_excs"] = []  # 按次给 Stop 的异常（None 表示成功）；用例按需设置
+    monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _FakeBrowserClient(trace, box))
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _FakeProvider)
     monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
     real_warmup = W.warmup_session  # 先取真函数再打桩：桩里不能再经模块属性引用（那已是桩自己）
 
@@ -405,34 +442,13 @@ def test_no_tunnel_env_is_zero_change(driven):
     assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"] and box["page"].gotos == []
 
 
-class _LeakyCdp(_FakeCdp):
-    """AgentCore 会话释放失败的替身：第一次 __exit__ 抛（SDK 的 cdp_session 在 finally 里 stop，stop 抛出就是这形态）。"""
-
-    def __init__(self, trace, exc):
-        super().__init__(trace)
-        self._exc = exc
-
-    def __exit__(self, *a):
-        super().__exit__(*a)
-        if self._exc is not None:
-            exc, self._exc = self._exc, None
-            raise exc
+def _stop_fails(box, *excs):
+    """按次给 Stop 的异常：第 n 次 Stop 抛 excs[n-1]（None 表示成功），之后都成功。"""
+    box["stop_excs"] = list(excs)
 
 
-def _leaky_provider(monkeypatch, trace, *, first_exit_exc):
-    """只有第一个 cdp 会话的释放会抛；后续 attempt 的会话正常释放（可观察重试是否发生）。"""
-    state = {"n": 0}
-
-    class _P:
-        def __init__(self, region=None):
-            pass
-
-        def cdp_session(self):
-            state["n"] += 1
-            return _LeakyCdp(trace, first_exit_exc if state["n"] == 1 else None)
-
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
-    return state
+def _stop_is_set():
+    return rs._stop.is_set()
 
 
 def test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a_connect_failure(driven, monkeypatch):
@@ -440,7 +456,7 @@ def test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a
     重试成功后判定照发，但退出码为 1 让第一个会话的泄漏可观测（ADR 0024 释放优先、失败可观测；ADR 0051 决策 5）。
     此前释放异常顶替建连异常冒泡、又带着原来的网络错当 __context__ 被判成瞬时错——重试成功后整次以 0 退出，泄漏没有任何信号。"""
     trace, sink, box = driven
-    state = _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    _stop_fails(box, RuntimeError("stop failed"))
     real_factory = {"n": 0}
 
     def nova_factory(**k):
@@ -453,17 +469,13 @@ def test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 1
     assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
-    assert state["n"] == 2 and trace.count(("cdp_exit",)) == 2  # 重试建了第二个会话、两个都走到释放
-
-
-def _stop_is_set():
-    return rs._stop.is_set()
+    assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2  # 重试建了第二个会话、两个都走到释放
 
 
 def test_release_failure_of_the_agentcore_session_with_stop_exits_1_without_retry(driven, monkeypatch):
     """同一窗口里停止信号已置位：不再重试、不发事件，退出码 1——释放失败不能被停止分支吞成 0。"""
     trace, sink, box = driven
-    state = _leaky_provider(monkeypatch, trace, first_exit_exc=ConnectionError("stop reset"))
+    _stop_fails(box, ConnectionError("stop reset"))
 
     def nova_factory(**k):
         rs._stop.set()
@@ -472,7 +484,7 @@ def test_release_failure_of_the_agentcore_session_with_stop_exits_1_without_retr
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 1
-    assert sink.events == [] and state["n"] == 1
+    assert sink.events == [] and trace.count(("session_start",)) == 1
 
 
 def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
@@ -487,77 +499,13 @@ def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 0
-    assert sink.events == [] and trace.count(("cdp_exit",)) == 1
-
-
-def _sdk_like_provider(monkeypatch, trace, *, stop_excs=()):
-    """按 SDK 真实形态造的 cdp_session：生成器式上下文管理器，body 的异常被包装成另一个异常再抛（SDK 的 cdp_session 对 Exception
-    一律 `raise BrowserAuthError(...) from exc`），Stop 在 finally 里。`stop_excs` 按 attempt 给 Stop 的异常（None 表示成功）。"""
-    state = {"n": 0}
-
-    class _P:
-        def __init__(self, region=None):
-            pass
-
-        @contextmanager
-        def cdp_session(self):
-            state["n"] += 1
-            stop_exc = stop_excs[state["n"] - 1] if state["n"] <= len(stop_excs) else None
-            try:
-                try:
-                    yield ("ws://fake", {})
-                finally:
-                    trace.append(("cdp_exit",))
-                    if stop_exc is not None:
-                        raise stop_exc
-            except Exception as exc:
-                raise RuntimeError(f"wrapped: {exc}") from exc
-
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
-    return state
-
-
-def test_sdk_style_exception_wrapping_on_exit_is_not_a_release_failure(driven, monkeypatch):
-    """SDK 的 cdp_session 收到 body 异常会把它包装成新异常再抛，即使 Stop 成功——这不是释放失败。建连失败一次、重试成功后，
-    退出码必须是 0；把包装异常误记成释放失败会让每一次成功的重试都以 1 退出、被 core 判成 error。"""
-    trace, sink, box = driven
-    state = _sdk_like_provider(monkeypatch, trace, stop_excs=(None, None))
-    calls = {"n": 0}
-
-    def nova_factory(**k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise ConnectionError("reset")
-        return _FakeNovaAct(box["page"], trace, **k)
-
-    monkeypatch.setattr(rs, "NovaAct", nova_factory)
-    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
-    assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"] and state["n"] == 2
-
-
-def test_sdk_style_stop_failure_is_a_release_failure(driven, monkeypatch):
-    """同一形态下 Stop 真失败（finally 里抛、再被包装）：记为释放失败，重试成功后判定照发、退出码 1。"""
-    trace, sink, box = driven
-    _sdk_like_provider(monkeypatch, trace, stop_excs=(RuntimeError("stop failed"), None))
-    calls = {"n": 0}
-
-    def nova_factory(**k):
-        calls["n"] += 1
-        if calls["n"] == 1:
-            raise ConnectionError("reset")
-        return _FakeNovaAct(box["page"], trace, **k)
-
-    monkeypatch.setattr(rs, "NovaAct", nova_factory)
-    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
-    assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert sink.events == [] and trace.count(("session_stop",)) == 1
 
 
 def test_release_failure_outranks_network_exhaustion(driven, monkeypatch):
     """首个会话释放失败、随后建连重试耗尽：退出码 1 而不是 80——泄漏可观测性压过网络分类（ADR 0028），core 不按网络故障重试。"""
     trace, sink, box = driven
-    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    _stop_fails(box, RuntimeError("stop failed"))
     monkeypatch.setattr(rs, "NovaAct", lambda **k: (_ for _ in ()).throw(ConnectionError("reset")))
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: False)
     assert rs.main() == 1
@@ -570,7 +518,7 @@ def test_release_failure_outranks_network_exhaustion(driven, monkeypatch):
 ])
 def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_both_layers_released(driven, monkeypatch, statuses, titles, expect_events):
     trace, sink, box = driven
-    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    _stop_fails(box, RuntimeError("stop failed"))
 
     class _Page(_FakePage):
         def goto(self, url, **kw):
@@ -583,7 +531,7 @@ def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_b
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 1
     assert [e["type"] for e in sink.events] == expect_events
-    assert trace.count(("nova_exit",)) == 1 and trace.count(("cdp_exit",)) == 1  # 两层都走到释放
+    assert trace.count(("nova_exit",)) == 1 and trace.count(("session_stop",)) == 1  # 两层都走到释放
 
 
 def test_base_exception_from_the_inner_release_still_releases_the_agentcore_session(driven, monkeypatch):
@@ -598,16 +546,111 @@ def test_base_exception_from_the_inner_release_still_releases_the_agentcore_sess
     monkeypatch.setattr(rs, "NovaAct", lambda **k: _InterruptingNovaAct(box["page"], trace, **k))
     with pytest.raises(KeyboardInterrupt):
         rs.main()
-    assert trace.count(("cdp_exit",)) == 1
+    assert trace.count(("session_stop",)) == 1
 
 
 def test_release_failure_on_the_normal_path_keeps_the_verdict_and_exits_1(driven, monkeypatch):
     """正常路径（无隧道）释放 AgentCore 会话失败：判定照发（scope_started、scope_done），退出码 1——对称 Midscene 的 cleanupFailed。"""
     trace, sink, box = driven
-    _leaky_provider(monkeypatch, trace, first_exit_exc=RuntimeError("stop failed"))
+    _stop_fails(box, RuntimeError("stop failed"))
     assert rs.main() == 1
     assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
 
 
 def test_capabilities_declare_session_warmup():
     assert rs._capabilities()[C.SESSION_WARMUP_KEY] is True
+
+
+def test_ws_headers_failure_after_start_then_stop_failure_is_observable(driven, monkeypatch):
+    """会话已 Start、取 CDP 连接头撞网络错、Stop 又失败：此前这段藏在 SDK 的上下文管理器 __enter__ 里，Stop 失败被当成建连失败重试、
+    泄漏没有任何信号；worker 自己持有 Stop 后它进 release_error——重试成功后判定照发、退出码 1。"""
+    trace, sink, box = driven
+    box["ws_headers_excs"] = [ConnectionError("credentials endpoint timed out")]
+    _stop_fails(box, RuntimeError("stop failed"))
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2
+
+
+def test_ws_headers_failure_with_successful_stop_is_a_plain_connect_failure(driven, monkeypatch):
+    """同一窗口里 Stop 成功：就是普通的建连失败——重试成功后以 0 退出，不多记释放失败。"""
+    trace, sink, box = driven
+    box["ws_headers_excs"] = [ConnectionError("credentials endpoint timed out")]
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
+    assert rs.main() == 0
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2
+
+
+def test_session_is_bound_to_the_provider_before_novaact_starts(driven, monkeypatch):
+    """SDK 在 NovaAct 退出时按绑定的会话保存 profile：Start 之后、NovaAct 构造之前必须 bind_session（与 SDK 自己的 cdp_session 同序）。"""
+    trace, sink, box = driven
+    seen = {}
+
+    class _Provider(_FakeProvider):
+        def bind_session(self, browser_identifier, session_id):
+            seen["bound"] = (browser_identifier, session_id, trace.count(("nova_init",)))
+
+    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _Provider)
+    assert rs.main() == 0
+    assert seen["bound"] == ("aws.browser.v1", "sess-fake", 0)  # 绑定时 NovaAct 还没构造
+
+
+def test_stop_timeout_is_a_release_failure():
+    """Stop 超过预算：按释放失败抛出（消息点名会话可能泄漏），不等满——退化网络下等满会撞 SIGKILL。"""
+    import threading as _t
+
+    class _Hanging:
+        session_id = "sess-hang"
+
+        def stop(self):
+            _t.Event().wait(0.5)
+
+    with pytest.raises(TimeoutError, match="可能泄漏"):
+        rs.stop_session_within_budget(_Hanging(), 0.05)
+
+    class _Failing:
+        session_id = "sess-x"
+
+        def stop(self):
+            raise RuntimeError("AccessDenied")
+
+    with pytest.raises(RuntimeError, match="AccessDenied"):
+        rs.stop_session_within_budget(_Failing(), 1.0)
+
+
+def test_stop_timeout_in_main_exits_1_with_the_verdict_kept(driven, monkeypatch):
+    trace, sink, box = driven
+    import threading as _t
+
+    class _HangingClient(_FakeBrowserClient):
+        def stop(self):
+            self._trace.append(("session_stop",))
+            _t.Event().wait(0.3)
+
+    monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _HangingClient(trace, box))
+    monkeypatch.setattr(rs, "SESSION_STOP_BUDGET_S", 0.05)
+    assert rs.main() == 1
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+
+
+def test_workflow_status_update_failure_on_exit_does_not_change_the_exit_code(driven, monkeypatch):
+    """Workflow 退出时 SDK 向 Nova Act 服务更新运行状态，这次 RPC 失败只记日志：判定照发、退出码不变（结局只是 SDK 的记账）。"""
+    trace, sink, box = driven
+
+    class _ExitRaises(_FakeCm):
+        def __exit__(self, *a):
+            raise ConnectionError("nova act endpoint unreachable")
+
+    monkeypatch.setattr(rs, "Workflow", lambda **k: _ExitRaises())
+    assert rs.main() == 0
+    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+
+
+def test_lineage_is_the_agentcore_session_id_not_the_nova_act_one(driven, monkeypatch):
+    """scope_started / scope_done 带的 sessionId 是 AgentCore 浏览器会话 id（ADR 0051 决策 5），不是 Nova Act 服务侧的会话 id。"""
+    trace, sink, box = driven
+    assert rs.main() == 0
+    assert {e["sessionId"] for e in sink.events} == {"sess-fake"}
+

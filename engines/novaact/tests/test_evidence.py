@@ -596,26 +596,48 @@ def test_drain_timeout_before_flush_promises_flush_not_broken_links(monkeypatch,
 
 
 # ---- main() 三条收尾路径的接线（fake 掉 SDK：不建会话、零费用）----
-class _FakeCdp:
-    def __init__(self, on_enter=None, trace=None):
-        self._on_enter = on_enter
-        self._trace = trace   # 传了才记 ("cdp_exit",)：Workflow 那个结构相同的 fake 不传，免得多记一条
+class _FakeCm:
+    """结构相同的上下文管理器替身（给 with wf 用）。"""
 
     def __enter__(self):
-        if self._on_enter:
-            self._on_enter()
-        return ("ws://fake", {})
+        return self
 
     def __exit__(self, *a):
-        if self._trace is not None:
-            self._trace.append(("cdp_exit",))
         return False
 
 
+class _FakeBrowserClient:
+    """BrowserClient 的替身：start 时调 on_start（置停止信号）或抛 raises（建连失败、无会话）；stop 记 ("session_stop",)。"""
+
+    def __init__(self, on_start=None, raises=None, trace=None):
+        self._on_start, self._raises, self._trace = on_start, raises, trace
+        self.session_id = None
+        self.identifier = None
+
+    def start(self, **kw):
+        if self._raises is not None:
+            raise self._raises
+        if self._on_start:
+            self._on_start()
+        self.identifier, self.session_id = "aws.browser.v1", "sess-fake"
+        return self.session_id
+
+    def generate_ws_headers(self):
+        return ("ws://fake", {})
+
+    def stop(self):
+        if self._trace is not None:
+            self._trace.append(("session_stop",))
+        self.session_id = self.identifier = None
+        return True
+
+
 class _FakeNovaAct:
-    def __init__(self, trace=None, raise_in_session=None, **kw):
+    def __init__(self, trace=None, **kw):
         self._trace = trace
-        self._raise = raise_in_session   # 非空 → 会话已起（__enter__ 之后）才抛，覆盖「先释放会话再排空」
+
+    def get_session_id(self):
+        return "nova-sess-fake"
 
     def __enter__(self):
         return self
@@ -625,10 +647,19 @@ class _FakeNovaAct:
             self._trace.append(("nova_exit",))
         return False
 
-    def get_session_id(self):
-        if self._raise is not None:
-            raise self._raise
-        return "sess-fake"
+
+class _RaisingSink:
+    """scope_started 时抛：模拟会话已起、NovaAct 已进入之后 body 才炸（覆盖「先释放会话再排空」）。"""
+
+    def __init__(self, exc):
+        self._exc = exc
+
+    def emit(self, ev):
+        if ev.get("type") == "scope_started":
+            raise self._exc
+
+    def flush(self):
+        pass
 
 
 @pytest.fixture
@@ -639,7 +670,7 @@ def main_fakes(monkeypatch, logs_dir):
         lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x"}, "scenarios": [],
                             "target": {"device": "desktop", "uiKind": "web"}}))})())  # 键集固定：结构版本与桌面目标都要带
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
-    monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCdp())      # with wf: 用同一个上下文管理器形状
+    monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCm())      # with wf: 用同一个上下文管理器形状
     monkeypatch.setattr(rs, "get_current_workflow", lambda: None)
     monkeypatch.setattr(rs, "set_current_workflow", lambda w: None)
     monkeypatch.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct())
@@ -649,16 +680,18 @@ def main_fakes(monkeypatch, logs_dir):
 
 
 def _install_provider(monkeypatch, on_enter=None, raises=None, trace=None):
+    """装 AgentCore 会话面的替身：provider（profile 与绑定）加 BrowserClient（Start / Stop）。"""
     class _P:
+        profile_id = "prof-fake"
+
         def __init__(self, region=None):
             pass
 
-        def cdp_session(self):
-            if raises is not None:
-                raise raises
-            return _FakeCdp(on_enter, trace=trace)
+        def bind_session(self, browser_identifier, session_id):
+            pass
 
     monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+    monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _FakeBrowserClient(on_enter, raises=raises, trace=trace))
 
 
 def test_scope_end_drains_before_flush(main_fakes, logs_dir):
@@ -671,14 +704,14 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
 
 
 def test_stop_signal_path_drains_after_session_release(main_fakes):
-    """协作停：三层 with 已退出（会话已释放）之后才排空，用退出段预算；不 flush（中断产物留本地）。
-    会话释放的两个 __exit__ 也进同一条 trace——把 drain 挪进 with 之内（会话未释放先排空）这里立刻变红。"""
+    """协作停：_run_session 的 finally 释放完会话之后才排空，用退出段预算；不 flush（中断产物留本地）。
+    两步释放（关 NovaAct 连接、Stop 会话）也进同一条 trace——把 drain 挪到释放之前这里立刻变红。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
     _install_provider(main_fakes, on_enter=lambda: rs._stop.set(), trace=trace)
     assert rs.main() == 0
-    assert trace == [("nova_exit",), ("cdp_exit",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+    assert trace == [("nova_exit",), ("session_stop",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 
 
 def test_network_exhausted_path_drains(main_fakes):
@@ -696,11 +729,12 @@ def test_exception_path_drains_and_still_raises(main_fakes):
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
-    main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace, raise_in_session=RuntimeError("会话炸了")))
+    main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
+    main_fakes.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: _RaisingSink(RuntimeError("会话炸了")))}))
     _install_provider(main_fakes, trace=trace)
     with pytest.raises(RuntimeError, match="会话炸了"):
         rs.main()
-    assert trace == [("nova_exit",), ("cdp_exit",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
+    assert trace == [("nova_exit",), ("session_stop",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 
 
 def test_error_text_redacts_before_truncation():

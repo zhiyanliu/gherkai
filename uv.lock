@@ -818,12 +818,14 @@ provides-extras = ["aws"]
 name = "gherkai-worker-novaact"
 source = { editable = "engines/novaact" }
 dependencies = [
+    { name = "bedrock-agentcore" },
     { name = "boto3" },
     { name = "nova-act" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "bedrock-agentcore", specifier = ">=1.22" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "nova-act", specifier = "==3.4.187.0" },
 ]

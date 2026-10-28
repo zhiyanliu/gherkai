@@ -175,9 +175,9 @@
     "semantic_hash": "fd254427d41da4d0345639c1c1adb44d"
   },
   "engines/novaact/pyproject.toml": {
-    "mtime": 1789868545.8184059,
-    "ast_hash": "98cd0f300c96524811d95db837edf1b9",
-    "semantic_hash": "98cd0f300c96524811d95db837edf1b9"
+    "mtime": 1793164211.1918592,
+    "ast_hash": "86a7d1c503a2d448c55cee6b8947838a",
+    "semantic_hash": ""
   },
   "engines/novaact/spikes/negative_assertions.py": {
     "mtime": 1789780373.6095338,
@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793163548.4814155,
-    "ast_hash": "2b946d90765a30910f7127aa3d9b75ab",
+    "mtime": 1793164981.7699604,
+    "ast_hash": "e6591f8e3f30060eae9959f4eb5a8fa2",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -330,9 +330,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0013-cross-engine-sharing-boundary.md": {
-    "mtime": 1789830884.570549,
-    "ast_hash": "d8590af6a65430538cc06b68505d65b7",
-    "semantic_hash": "d8590af6a65430538cc06b68505d65b7"
+    "mtime": 1793164692.7419255,
+    "ast_hash": "bf73c0b6d19cc6b4c744dcd74480924a",
+    "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
     "mtime": 1789827102.7639556,
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793163548.4812365,
-    "ast_hash": "c56007fa4fe6d9bbd8083f415103cb71",
+    "mtime": 1793164981.7701771,
+    "ast_hash": "75d1ed77f34249583a4d53f227095b7d",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -380,8 +380,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
-    "mtime": 1793163548.4819098,
-    "ast_hash": "0552dac141ae24229e927dbfc6f94f91",
+    "mtime": 1793164981.7707381,
+    "ast_hash": "2d9410ecddd2a19a0573e31adeac278f",
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
@@ -755,8 +755,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.mts": {
-    "mtime": 1793161845.4408755,
-    "ast_hash": "918974438a229ae09819a7d470cf0fa2",
+    "mtime": 1793165024.1274252,
+    "ast_hash": "b04fb3e4f16b8c73de187d74313caf16",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
@@ -810,8 +810,8 @@
     "semantic_hash": "66b8c31a3f0da77843b863c829478261"
   },
   "engines/novaact/gherkai_worker_novaact/lib/constants.py": {
-    "mtime": 1793163548.480998,
-    "ast_hash": "82b81a4f11d246f32e2331d408afcad3",
+    "mtime": 1793164211.1909485,
+    "ast_hash": "9c30a05ddd1c0bfe1c32b227ac3e812b",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/lib/event_sink.py": {
@@ -830,8 +830,8 @@
     "semantic_hash": "af42daf4af68fc11996d8c223310eb1e"
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793163548.4806464,
-    "ast_hash": "ebc22445d93ece895d70b01e9ac25fc7",
+    "mtime": 1793164981.7688344,
+    "ast_hash": "aac613a70a3f4ceb5f1aaba00996cfb4",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -870,9 +870,9 @@
     "semantic_hash": "71953869561fd5d73fb6377bf859d506"
   },
   "engines/novaact/tests/test_interrupt_process.py": {
-    "mtime": 1789873630.4504423,
-    "ast_hash": "821edacb7bf6c2a99dff6490453dc897",
-    "semantic_hash": "821edacb7bf6c2a99dff6490453dc897"
+    "mtime": 1793165024.1277885,
+    "ast_hash": "91ba5d2a7ad2e22337349f8180c77722",
+    "semantic_hash": ""
   },
   "engines/novaact/tests/test_job_source.py": {
     "mtime": 1789872429.8121622,
@@ -885,9 +885,9 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_transient_network.py": {
-    "mtime": 1789873630.4525027,
-    "ast_hash": "ac52f105ef903574727e66d1b941dc2a",
-    "semantic_hash": "ac52f105ef903574727e66d1b941dc2a"
+    "mtime": 1793164981.7695885,
+    "ast_hash": "26fc05d5b78e0db38dacffdf461994dd",
+    "semantic_hash": ""
   },
   "engines/novaact/tests/test_user_steps.py": {
     "mtime": 1793083573.9092424,
@@ -1065,8 +1065,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
-    "mtime": 1793011922.575116,
-    "ast_hash": "dd9f4b442b4be9aee971a97a2fe0c76d",
+    "mtime": 1793164692.7422476,
+    "ast_hash": "20a1e49724f4e101eba065901293ce55",
     "semantic_hash": ""
   },
   "core/DEVELOPMENT.md": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1792989152.8442588,
-    "ast_hash": "55d71a8164b35e2b6ba0d9bde9d118d1",
+    "mtime": 1793164981.770529,
+    "ast_hash": "a912d4c8e02fb88418492aad5d75e27f",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1160,8 +1160,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_evidence.py": {
-    "mtime": 1793072343.6295264,
-    "ast_hash": "f41ac55052210d9f4461f8e5ff9c20f4",
+    "mtime": 1793164981.7692838,
+    "ast_hash": "e9bb65958b45d37f0b489a9f35fdeb6a",
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": "886fd70dadbb69e1ee36307f08b3148a"
   },
   "CHANGELOG.md": {
-    "mtime": 1793115397.8195734,
-    "ast_hash": "011e738d5d898ef5a72532f481ea0aca",
+    "mtime": 1793164981.7708974,
+    "ast_hash": "01931274b3be0205f175d4d43cae220b",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -2080,8 +2080,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_tunnel_warmup.py": {
-    "mtime": 1793161845.4403276,
-    "ast_hash": "bf45f729d4661596b14a9cb56f1d1d7f",
+    "mtime": 1793164981.7691422,
+    "ast_hash": "92720b6e62105d341adaff5e502c0643",
     "semantic_hash": ""
   },
   "AGENTS.md": {
