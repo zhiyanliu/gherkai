@@ -1601,12 +1601,12 @@
   },
   "docs/diagrams/cloud-backend-upgrade-windows.json": {
     "mtime": 1793200342.8403025,
-    "ast_hash": "",
+    "ast_hash": "cfb125636273d1eee09eb38747b349fa",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
     "mtime": 1793201309.451534,
-    "ast_hash": "",
+    "ast_hash": "4847196381d4f3785156cc21a032b209",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
@@ -1616,7 +1616,7 @@
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
     "mtime": 1793200342.8405855,
-    "ast_hash": "",
+    "ast_hash": "7b9c05f1c30b240e1420aba4923e0767",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
@@ -1646,7 +1646,7 @@
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
     "mtime": 1793201226.151436,
-    "ast_hash": "",
+    "ast_hash": "10791e844ddb4b6d814956b823aba1b0",
     "semantic_hash": ""
   },
   "docs/diagrams/readme-runtime-topology.json": {
@@ -1661,17 +1661,17 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793201303.9674888,
-    "ast_hash": "",
+    "ast_hash": "3956953d295b37eee191dd306e90b561",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1793200342.8407927,
-    "ast_hash": "",
+    "ast_hash": "2c64b4cc60ce974c0e3c45feaf80fded",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
     "mtime": 1793201300.4749427,
-    "ast_hash": "",
+    "ast_hash": "23da2bc928955b94bd363c5acf4ac9c2",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
@@ -2090,8 +2090,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0016-doc-health-round8-pending-approval.md": {
-    "mtime": 1793202123.0773091,
-    "ast_hash": "7b2608cdfa26b7fcbca587573ff6327e",
+    "mtime": 1793235013.3413155,
+    "ast_hash": "449256ad897a73e1c1d98a45987367ea",
     "semantic_hash": ""
   }
 }
