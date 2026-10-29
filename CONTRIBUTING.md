@@ -60,7 +60,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/              ← npm 包 @gherkai/worker-midscene（ESM）：薄 worker + 使用方 steps 文件唯一应 import 的公开 API
 │   ├── novaact/               ← 发行包 gherkai-worker-novaact：薄 worker，`python -m` 入口
-│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、隧道预热常量
+│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、会话预热常量
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack + 随部署打成 asset 的三个 Lambda handler 源 + worker 镜像交付命令，ADR 0033/0034/0037/0038）
 ├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，contributor 与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
 ├── graphify-out/              ← 代码 + 文档知识图（供 AI agent 先查图再读源码；刷新见下文「知识图刷新」）
@@ -136,12 +136,12 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 | `cli/tests/test_engines_matrix.py`             | 引擎能力矩阵 `docs/user-guide/engines.md` 的差集：表格结构与 Nova 行对照真起的 worker 自述（targets / model_id，句柄按目标推出）；Midscene 行由 `engines/midscene/src/worker/engines-matrix.test.mts` 在 npm 测试里同法核                                              |
 | `deploy_aws/tests/test_workers.py`             | 同一份契约页的 `list-workers` 字段（样例需要 moto，故断言留在 provider 包侧）                                                                                                                                                                                                                                       |
 | `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，注释与 docstring 放行                                                                                                                                                                                                            |
-| `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与各包 Summary：零内部指代 + 零相对链接；根 `README.md`：只查零内部指代（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 GitHub Release 正文的固定块     |
-| `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
+| `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与 GitHub Release 正文的固定块：按用户文档的整套规则扫（`_doc_rules.scan("package-page", …)`）再加零相对链接，固定块另要求仓库链接锁定 tag；各包 Summary：零内部指代；根 `README.md`：只查内部指代、口头语与退役旧名（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 `release.yml` 仍经 `release_notes.py` 渲染 Release 正文 |
+| `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料 `docs/presentations/**`；定稿口播稿的 SHA-256 与同目录 `manifest.json` 所记一致时免扫口吻表与决策六形态①③）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
 | `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 三件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」与「根 README 的 `npx skills add` 命令钉本版 tag」两道 gate，以及 Release 正文渲染；另对照真 CHANGELOG / README                                                                                                                  |
 | `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
 | `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
-| `cli/tests/test_technical_docs.py`             | 技术文档（本文、各包 `DEVELOPMENT.md`、`docs/internals/`、工具手册）：口头语、退役旧名、决策六三种缩写形态、指向 journey 的链接与裸 WP 编号 |
+| `cli/tests/test_technical_docs.py`             | 技术文档（本文、各包 `DEVELOPMENT.md`、`docs/README.md`、`.github/workflows/README.md`、`core/tests/README.md`、`skills/README.md`、`docs/internals/`、工具手册与 `tools/<name>/` 下的说明）：口头语、退役旧名、决策六三种缩写形态、指向 journey 的链接与裸 WP 编号 |
 | `cli/tests/test_code_comments.py`              | repo 内 code 注释与 docstring：口吻表、退役旧名（不含「批」义三词）、决策六形态①③、悬空指针 |
 | `cli/tests/test_adr_hygiene.py`                | ADR Status 头形态与「被取代」链双向、`docs/` 文件名 kebab-case 与编号不复用、journey 首行类型头、长期文档与 AI 侧文档不指向 journey 文件与裸 WP 编号、AI 侧文档不用自造复合词、全仓 markdown 与 code 注释不写本机坐标 |
 | `cli/tests/test_context_glossary.py`           | `CONTEXT.md` 词条形态：术语行、至多两句、至多一个 ADR 指针、`_Avoid_` 只列词、六个固定节 |
@@ -212,7 +212,7 @@ CI（任意分支的 push、PR、手动触发）运行三项检查：全成员 `
 |------|-------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|
 | 决策 | [`docs/adr/`](./docs/adr/)                                                                                                                | 稳定决策的 what / why / trade-off，每篇带 Status 头、Accepted 的自包含。与其它文档冲突时以 ADR 与 code 为准 |
 | 机理 | [`docs/internals/`](./docs/internals/README.md)                                                                                           | 给想懂机理的技术读者的横切解读：只讲 how、不复述 why，正文带 ADR 指针                                       |
-| 使用 | [`docs/user-guide/`](./docs/user-guide/README.md)、根 [`README.md`](./README.md)、各包 `README.md`、`CHANGELOG.md`、随 CLI 发行的 agent skill | 使用者与替使用者操作的 AI agent 读：产品说明口吻、零内部指代、包页面只作入口                                |
+| 使用 | [`docs/user-guide/`](./docs/user-guide/README.md)、根 [`README.md`](./README.md)、各包 `README.md`、`CHANGELOG.md`、随 CLI 发行的 agent skill、演示材料 [`docs/presentations/`](./docs/presentations/README.md) | 使用者与替使用者操作的 AI agent 读：产品说明口吻、零内部指代、包页面只作入口                                |
 | 参与 | 本文、各包 `DEVELOPMENT.md`、[`.github/workflows/README.md`](./.github/workflows/README.md)                                                 | 在本仓库中的工作方式：布局、环境、测试、发布链                                                               |
 
 另外两处：术语在 [`CONTEXT.md`](./CONTEXT.md)；contributor 侧 AI agent 的工作文档在 [`docs/ai-eng/`](./docs/ai-eng/README.md)，含外部一手来源 [`REFERENCES.md`](./docs/ai-eng/REFERENCES.md) 与两条复盘方法。

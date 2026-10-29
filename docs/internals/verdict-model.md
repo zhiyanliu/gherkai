@@ -40,7 +40,7 @@
 | `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（fail-fast 下 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（但整个 run 里必然伴随另一个 job 的 `error`，根因在别处）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
 | `aborted` | **core 本地赋值**（终结函数：停止原因为 fail-fast 中止、且内容不完整） | job | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 尚未启动 | 等待；提交较久而**所有** job 仍为 pending 时，`status` 会提示用 `--wait` 接力推进 |
-| `running` | 收到 `session_opened`（取设备期间）或 `scope_started` 后写入 / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
+| `running` | 收到 `scope_started` 或 `origin` 不是 `attempted` 的 `session_opened`（取设备期间）后写入，只有 `attempted` 的 `session_opened` 时仍为 `pending` / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
 
 两条边界容易读错：
 
@@ -81,7 +81,7 @@
 | `network_error` | `error` | 两侧 worker：act 执行中的瞬时网络故障（**仅分类、不触发重试**，因为 act 不幂等）；core：worker 以网络专用退出码退出（判据见 §3c 图） |
 | `engine_error` | `error` | 默认类别：worker 其余未细分的异常；core 侧各条收场判据见 §3c 图 |
 | `navigation_error` | （`error`） | **协议中已声明、当前无生产者**：两引擎的导航失败按异常性质归入 `network_error` 或 `engine_error` |
-| `precheck_failed` | `error` | worker（scope 级，经 `scope_done{status: error}`）：执行前判定这次执行无法开始、重试不会变（建会话前的自检不过：job 行结构版本不符、目标不受支持、墙钟预算超过会话上限；隧道预热被拒，或后端未传递会话预热地址；设备目标另有零候选、应用缺失或启动即自退等情形，完整清单见 ADR 0051 决策 4） |
+| `precheck_failed` | `error` | worker（scope 级，经 `scope_done{status: error}`）：执行前判定这次执行无法开始、重试不会变（建会话前的自检不过：job 行结构版本不符、目标不受支持、墙钟预算超过会话上限；会话预热被拒，或后端未传递会话预热地址；设备目标另有零候选、应用缺失或启动即自退等情形，完整清单见 ADR 0051 决策 4） |
 | `acquire_timeout` | `error` | worker（scope 级）：获取设备超过预算 |
 | `session_lost` | `error` | worker：会话在执行中途被外部停止或到期（当前 step 的 `step_done` 与随后的 `scope_done` 都带它） |
 | `capability_unavailable` | `error` | worker（step 级）：这一步需要的能力当前目标不提供、重试不会变 |
@@ -173,4 +173,4 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | 网络瞬时故障的两层重试与分类白名单 | [ADR 0028](../adr/0028-transient-network-ssl-resilience.md) |
 | 脱离式批量运行的推进模型、两条路径共用的终结函数与真值表、投影写、job timeout 归因链 | [ADR 0034](../adr/0034-detached-batch-reconciler.md) |
 | step 级证据与 `explain` | [ADR 0042](../adr/0042-step-evidence-and-explain.md) ·[artifacts-and-evidence](./artifacts-and-evidence.md) |
-| 设备会话的事件契约、scope 级 error 与新增归因类别 | [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) |
+| 远程访问会话的事件契约、scope 级 error 与新增归因类别 | [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) |

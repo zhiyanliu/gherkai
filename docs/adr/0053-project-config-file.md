@@ -37,7 +37,7 @@
 ### 3. 节与键
 
 ```toml
-[common]                       # 两个后端都有意义的跨命令选项，键名为选项长名去掉 "--"
+[common]                       # 跨命令选项（个别只对本机后端起作用，见下），键名为选项长名去掉 "--"
 default-engine = "midscene"
 steps-dir = "steps"
 assertion-votes = 3
@@ -66,6 +66,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型与取值范围校验，按 TOML 的原生类型直接校验、不经字符串：整数选项只接受 TOML 整数（浮点不截断、与命令行上给 4.7 同拒），浮点选项与自定义校验接受 TOML 整数或浮点，数字选项不接受文本（TOML 里 `"4"` 是文本），布尔一律拒绝；非法值的报错形态与在命令行上给错一致，内建类型的失败给产品语言的理由。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。`[devices]` 的键不受同词规则约束：命令行上设备选项平铺、要带平台或服务前缀，配置文件里有节层级、不需要前缀，对应关系见决策 4 与决策 6 的映射表。
 - **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
 - **未知键以退出码 2 结束**，点名文件、节与键名。拼错的键若被静默忽略，表现是「配置没生效」，比直接报错更难发现（与 [0036](./0036-deterministic-capability-discovery.md) 对自述契约 fail-loud 同一取向）。
+- **只对本机后端起作用的 `[common]` 键（如 `grace`）在 `--backend cloud` 下不生效、只提示一句**，与 `project-arn` / `app-bucket` 同一形态；命令行上显式给出仍按 [0024](./0024-worker-core-protocol.md) 拒绝。
 - **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本的族匹配，必须写成 TOML 字符串——写成数字会被解析成浮点，以退出码 2 结束并提示加引号），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`，可在平台子表里覆盖（不计量槽位按平台购买）；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值与上界见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。
 - **`project-arn` 与 `app-bucket` 只供本机后端**：云端后端的 Device Farm 项目由 `gherkai deploy` 建立、ARN 存 SSM，安装包放进现有产物桶（项目与 SSM 见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10，产物桶见决策 9）。`--backend cloud` 下文件里给了这两项，提示一句「云端后端使用部署时建立的项目与产物桶，本项不生效」、不拦截，与 [0037](./0037-distribution-and-packaging.md) 决策 4 对云端 `--steps-dir` 的处理同一形态。两项是与账号、区域绑定的资源名，不是凭据：团队共用同一个账号时可以入库共享；项目要在多个账号或环境中执行时，改用 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` 按环境给出，入库值会被环境变量覆盖（决策 2）。本机后端下 `project-arn` 里的账号与当前凭证所属账号不一致时，CLI 在提交前警告并点名两个账号，不拦截。
 - **`[apps]`**：每个别名一张子表，按平台各给一个条目：`file`（本地安装包，相对配置文件目录）加 `package`（Android）或 `bundle-id`（iOS），两者都必须显式给出（不靠 Appium 推断启动活动，理由见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)）。`@app` 引用的别名不在 `[apps]` 里、或该别名缺少 scope 所在平台的条目，按 [0048](./0048-test-targets-device-and-ui-kind.md) 报 FeatureContractError；`plan` 同样报错，因为它只读本地文件、不违背零 AWS。安装包的上传（按内容哈希放进桶）发生在 `run` / `submit`，`plan` 只核对文件存在。
@@ -79,7 +80,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **选项与环境变量**：`--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）、`--device-farm-project-arn`（`GHERKAI_DEVICE_FARM_PROJECT_ARN`）、`--app-bucket`（`GHERKAI_APP_BUCKET`），按决策 2 的顺序覆盖配置文件。按平台分开命名，是因为一个 run 可以同时含 Android 与 iOS 的 scope，单个 `--device-arn` 无法表达。筛选条件只在配置文件里给，命令行只接受 ARN。
 - **ARN 直接使用**：CLI 只核对 ARN 的服务与资源类型段（设备 ARN 形如 `arn:aws:devicefarm:<区域>::device:<id>`、项目 ARN 形如 `arn:aws:devicefarm:<区域>:<账号>:project:<id>`，零 AWS 调用；拦的是把项目 ARN 或设备池 ARN 贴进设备 ARN 这类最常见的错，提交前以退出码 2 结束并点名贴错的类型），之后 worker 以该 ARN 建立远程访问会话，不事先查可用性、不做静态过滤；该机型全部单元被占用时会话排队等待，与并发排队同处置，受获取预算约束；ARN 被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）。
 - **筛选条件由 worker 在获取设备时解析**（不是 CLI 在提交时解析）：设备可用性随时间变化，detached 提交可能在数分钟后才真正启动 worker，提交时解析出的 ARN 到那时可能已不可用。本篇只定用户面语义，解析算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3：
-  - `os-version` 按点分段的族匹配——配置值按点切段，设备版本的前几段完全相等即命中（`18` 命中 `18.x.y`，`18.6` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`，`18.1` 不命中 `18.10`），写全段即精确匹配；只写前缀时 `plan` 提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」。
+  - `os-version` 按点分段的族匹配——配置值按点切段，设备版本的前几段完全相等即命中（`18` 命中 `18.x.y`，`18.6` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`，`18.1` 不命中 `18.10`），写全段即精确匹配；`plan` 对按系统版本挑选的平台一律注明命中范围，并提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」（`plan` 不调用 Device Farm，无从判断某个值是否已写全）。
   - 只取手机形态与支持远程访问的设备；零候选不进入繁忙等待，记 `precheck_failed`（再列举一次的判据见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3），消息给出条件与最接近的可用版本。
   - 匹配候选中先排除繁忙与暂不可用的设备，再按版本号高、可用性高、ARN 字典序取第一台；全部繁忙才在获取预算内等待，预算用尽记 `acquire_timeout`，消息说明「符合条件的设备当前都忙」与所用的筛选条件。
 - 排序确定，是为了同一份配置在设备池不变时总选中同一台设备、判定可复现；实际分到的机型与系统版本由 evidence 的 scope 表头记录（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），设备池变化导致的换机因此可追溯。`plan` 不调用 Device Farm，只原样展示配置的 ARN 或筛选条件。

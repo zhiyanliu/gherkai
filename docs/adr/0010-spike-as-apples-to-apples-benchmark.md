@@ -2,7 +2,7 @@
 
 > **Status:** Accepted
 
-两个 spike（Midscene 引擎、Nova Act 引擎）刻意用**同一用例、同一断言策略、同一度量**，使其不只是各自「证活着」，而是产出一份双引擎**对比基准**。
+两个 spike（Midscene 引擎的 `engines/midscene/spikes/03-midscene-grounding.ts`、Nova Act 引擎的 `engines/novaact/spikes/wikipedia_benchmark.py`）刻意用**同一用例、同一断言策略、同一度量**，使其不只是各自「证活着」，而是产出一份双引擎**对比基准**。
 
 **决定（三者必须对齐才能比）**：
 - **同一用例**：都用维基百科搜索场景（打开 wikipedia.org → 搜一个词 → 断言进入该词条页）——即 CONTEXT.md「探针用例」。

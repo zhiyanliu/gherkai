@@ -61,7 +61,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ### 网络瞬时故障的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md)）
 
 - worker 建连失败、重试耗尽 → 以专用退出码退出 → adapter 抛 `WorkerNetworkError` → schedule 记 `error_type="network_error"`。
-- schedule 对这类 job **选择性整体重试**（重新 spawn worker），门槛三条件 AND：① `network_error` ② 「会话未起」= 本次零 `step_done`（证明 act 没跑、无副作用——绝不重试可能已点击的 act）③ job 目标不是设备（设备会话的建连失败不做 job 级重试，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。**fail_fast/timeout 优先级更高**（已主动中止的不重跑）。
+- schedule 对这类 job **选择性整体重试**（重新 spawn worker），门槛三条件 AND：① `network_error` ② 「会话未起」= 本次零 `step_done`（证明 act 没跑、无副作用——绝不重试可能已点击的 act）③ job 目标不是设备（远程访问会话的建连失败不做 job 级重试，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。**fail_fast/timeout 优先级更高**（已主动中止的不重跑）。
 - `ScheduleOpts` 加 `network_retry: int = 0`（默认关,本地 smoke 不需要;CI/抖动环境可开,同「注入参数+保守默认」原则）+ `retry_sleep`（注入,单测传 no-op 保 fake-clock 纯净）。job 墙钟预算（`Job.timeout_s`）的 deadline 跨 attempt 不重置。
 
 ### 优雅终止（schedule 只下逻辑「停」指令，机制归 adapter）

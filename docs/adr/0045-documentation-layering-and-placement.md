@@ -18,9 +18,9 @@
 
 | 类 | 读者 | 内容 | 位置 |
 |---|---|---|---|
-| **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`（根目录的 `AGENTS.md` 是它的符号链接，供读 AGENTS.md 的 agent 如 Codex 取用，不是第二份文档）、`.claude/commands/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 可复用方法文档；清单与 owner 见 `docs/ai-eng/README.md`）、`docs/journey/`、skill 评测资产 `skills/gherkai-evals/`（评测集 / fixture / 评分提示词，归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策七；`skills/README.md` 只是指路） | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
-| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md` + 工具手册 `tools/<name>.md`（篇幅超过脚本头注释的工具才立，如 `e2e_harness.md`；`CONTRIBUTING.md` 的 tools 表是索引）；机理：`docs/internals/`（原 `docs/guides/`）；`docs/internals/cli-json-contract.md` 是本层唯一的机读字段级参考页，读者含拿 `--json` 写脚本或 skill 的使用者；它是 skill 转换副本的手写源（[0041](./0041-agent-facing-cli-affordances.md) 决策五、[0043](./0043-agent-skill-for-driving-gherkai.md) 决策四），不按机制解读的立文门槛判 | DEVELOPMENT 与工具手册留在代码旁（见被拒方案） |
-| **用户文档** | 使用者，以及**使用者侧 AI agent** | `docs/user-guide/`（叙事主页）、根 `README.md`（门面）、各包 `README.md`（入口页，逐字上 PyPI / npm）、GitHub Release 正文、agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)） | 新建 `docs/user-guide/`，其余原位改写 |
+| **contributor 侧 AI agent** | 在本仓库里干活的 AI agent（约 80% 读者，[CLAUDE.md](../../CLAUDE.md) 文档纪律「读者比例决定优化方向」条） | ADR、`CONTEXT.md`、`CLAUDE.md`（根目录的 `AGENTS.md` 是它的符号链接，供读 AGENTS.md 的 agent 如 Codex 取用，不是第二份文档）、`.claude/commands/`、`.claude/skills/`、`docs/ai-eng/`（REFERENCES 外部一手来源 + 可复用方法文档；清单与 owner 见 `docs/ai-eng/README.md`）、`docs/journey/`、skill 评测资产 `skills/gherkai-evals/`（评测集 / fixture / 评分提示词，归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策七；`skills/README.md` 只是指路） | ADR / CONTEXT / CLAUDE.md 位置固定（工具有位置依赖）；方法文档与 REFERENCES 归 `docs/ai-eng/` |
+| **技术文档** | contributor；想懂机理的技术人员 | contributor：根 `CONTRIBUTING.md` + 各包 `DEVELOPMENT.md` + `.github/workflows/README.md` + 工具手册 `tools/<name>.md` 与 `tools/<name>/` 下的说明（篇幅超过脚本头注释的工具才立，如 `e2e_harness.md`、`tools/presentations/`；`CONTRIBUTING.md` 的 tools 表是索引）；机理：`docs/internals/`（原 `docs/guides/`）；`docs/internals/cli-json-contract.md` 是本层唯一的机读字段级参考页，读者含拿 `--json` 写脚本或 skill 的使用者；它是 skill 转换副本的手写源（[0041](./0041-agent-facing-cli-affordances.md) 决策五、[0043](./0043-agent-skill-for-driving-gherkai.md) 决策四），不按机制解读的立文门槛判 | DEVELOPMENT 与工具手册留在代码旁（见被拒方案） |
+| **用户文档** | 使用者，以及**使用者侧 AI agent** | `docs/user-guide/`（叙事主页）、根 `README.md`（门面）、各包 `README.md`（入口页，逐字上 PyPI / npm）、GitHub Release 正文、agent skill（[0043](./0043-agent-skill-for-driving-gherkai.md)）、演示材料 `docs/presentations/`（演示文稿、讲解视频、字幕与配套资料；口吻按决策六「用户文档与演示材料两条补充」条，定稿口播稿的豁免见决策六「演示材料的定稿口播稿」条） | 新建 `docs/user-guide/`，其余原位改写 |
 
 使用者侧 AI agent 读的是产品说明（skill），它是用户文档的一种形态，不与 contributor 侧 AI agent 混类——两者的写法相反：前者产品语言、零内部指代（[0039](./0039-user-facing-surfaces-no-internal-references.md)），后者高密度、精确指针。
 
@@ -31,17 +31,18 @@
 - 新建 **`docs/user-guide/`**：从根 README 与各包 README 拆出的叙事与流程，一个主题一篇 owner（云端后端那页含原 `deploy_aws/README.md` 的操作部分）；页与 owner 归属见 `docs/user-guide/README.md`。
 - 根 `DEVELOPMENT.md` → **`CONTRIBUTING.md`**（GitHub 在 PR / issue 界面自动链接该名；内容 = 如何参与：环境、测试、发布链、文档地图）。**各包 `DEVELOPMENT.md` 留原位**（见被拒方案）。
 - **`docs/README.md` = 全部文档的地图**（按读者分类、每类去哪、权威在哪）；`docs/internals/README.md`、`docs/user-guide/README.md`、`docs/ai-eng/README.md` 各是本子类的索引兼 **owner 表**（一个主题只有一篇是 owner，其余只链不讲）。
+- `docs/presentations/` 存演示材料，每份材料一个子目录。
 - ADR、CONTEXT.md、CLAUDE.md、`docs/journey/` 不动。
 
 ### 三、包页面降为入口页（反转 0039 面二的「完整操作手册」）
 
 各包 `README.md`（逐字上 PyPI / npm）只留四样：**一句定位、装法、最小用法、绝对 URL 指向 GitHub 上的 user guide 与本包相关页**。叙事、流程、选项细节全部归 `docs/user-guide/`。两引擎的「怎么写确定性 step」合成 user-guide 里**一篇双引擎并排**的页面（Python 与 TypeScript 逐项对照，这正是「两腿对称」原则的文档形状），包页只留 import 路径、一行示例与链接。
 
-理由：重复从「靠 owner 表约束」变成「结构上不存在」——包页没有可与 user guide 重复的内容。代价：从 PyPI / npm 页读到细节要跳转一次；接受，仓库开源、链接即到。护栏：`cli/tests/test_package_readmes.py` 仍守零内部指代、零相对链接、每包一份 DEVELOPMENT（根改为 CONTRIBUTING）；新增 `cli/tests/test_user_docs.py` 守 user-guide / 根 README / CHANGELOG 的零内部指代、相对链接可达、不链 contributor 侧 AI agent 文档、owner 表与目录两向差集；`cli/tests/test_release_notes.py` 守「每个已发行 tag 在 CHANGELOG 有非空节」与 Release 正文钉 tag。
+理由：重复从「靠 owner 表约束」变成「结构上不存在」——包页没有可与 user guide 重复的内容。代价：从 PyPI / npm 页读到细节要跳转一次；接受，仓库开源、链接即到。护栏：`cli/tests/test_package_readmes.py` 仍守零内部指代、零相对链接、每包一份 DEVELOPMENT（根改为 CONTRIBUTING）；新增 `cli/tests/test_user_docs.py` 守 user-guide / 根 README / CHANGELOG / 演示材料的零内部指代、相对链接可达、不链 contributor 侧 AI agent 文档、owner 表与目录两向差集；`cli/tests/test_release_notes.py` 守「每个已发行 tag 在 CHANGELOG 有非空节」与 Release 正文钉 tag。
 
 ### 四、根 README = 门面 + 30 秒上手，agent 路径优先
 
-顺序：一段定位（这是什么、给谁、跑在哪） → 安装 → **上手两条路，agent 先**（`gherkai skill install` + 「告诉 agent 你要测什么」；然后才是手敲 CLI 的最小命令序列：用例预检 → 运行 → 读失败证据） → 精简架构图（什么跑在哪、费用从哪来） → 「判定由谁做出」披露节（[0044](./0044-engine-model-selection-and-override.md)）→ 文档去哪读（指 `docs/README.md`）→ 注意 → 许可证。完整架构图、四种组合（执行方式 × 执行后端）的细节、写法、CI 集成全部链到 user guide 或 internals；注意事项只留费用与首次验证两条，其余链走。
+顺序：一段定位（这是什么、给谁、跑在哪） → 价值与方法（内嵌讲解视频，加一条指向演示文稿与配套资料的链接） → 安装 → **上手两条路，agent 先**（`gherkai skill install` + 「告诉 agent 你要测什么」；然后才是手敲 CLI 的最小命令序列：用例预检 → 运行 → 读失败证据） → 精简架构图（什么跑在哪、费用从哪来） → 「判定由谁做出」披露节（[0044](./0044-engine-model-selection-and-override.md)）→ 文档去哪读（指 `docs/README.md`）→ 注意 → 许可证。完整架构图、四种组合（执行方式 × 执行后端）的细节、写法、CI 集成全部链到 user guide 或 internals；注意事项只留费用与首次验证两条，其余链走。价值与方法节排在安装之前：讲解视频回答「为什么值得用」，对首次来访的人比文档表里的一行链接更直接（被拒：删掉这一节、只在文档表里留链接，换来的只是与一份漏列演示材料的顺序对齐，丢掉门面上最直观的价值说明）。
 
 ### 五、每版 changelog，Release 正文与链接钉 tag
 
@@ -55,7 +56,7 @@
 
 判据是读者是谁：给 AI / 工具读的文本以效率为先，口语、缩写不限；给人读的（对外的用户文档、对内的技术文档，也包括 code 注释与 docstring、能到用户终端的字符串——后者的家在 ADR 0039）一律书面。
 
-- **用户文档**（user-guide、根 README、包页、Release 正文、skill）：产品说明口吻——陈述句、任务导向、术语统一、每句有动词；不用隐喻、同事口头语、内部俏皮话（「角色是帽子不是人」「版本要自己钉」「跑一遍」属此类）；参照主流云服务文档的写法。
+- **用户文档**（user-guide、根 README、CHANGELOG、包页、Release 正文、skill、演示材料）：产品说明口吻——陈述句、任务导向、术语统一、每句有动词；不用隐喻、同事口头语、内部俏皮话（「角色是帽子不是人」「版本要自己钉」「跑一遍」属此类）；参照主流云服务文档的写法。
 - **技术文档**（CONTRIBUTING / DEVELOPMENT / internals）：技术说明口吻——允许术语与密度，不允许俏皮与口头语；internals 保叙事。
 - **contributor 侧 AI agent 文档**（ADR / CONTEXT / 方法文档）：维持既有高密度、单一事实源、精确指针的约定。
 - doc-health 方法对使用者向文档加一个**口吻 / 可读性**维度（属主观类，出报告待批），防回潮。
@@ -67,6 +68,7 @@
   三种形态都是 ADR 写作的省字习惯漏进了注释、internals 与 skill：AI 侧文档保留 ① 与 ③（那里效率优先），② 全仓不用。护栏：② 的固定词进口吻表 `COLLOQUIAL`（与退役表同位扫，见上条），AI 侧文档另单扫这组自造词（`cli/tests/test_adr_hygiene.py`）；① 与 ③ 在用户文档、skill、技术文档、code 注释与 docstring 各有一条剥掉代码块与行内代码后的启发式扫描（`cli/tests/test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py`）：中文字紧邻 `=` 号、「退 <数字>」即红；用户文档与 skill 另禁正文箭头。
 - **量词「档」一律不用**：作取值 / 级别 / 类别 / 情形 / 后端义时按句意写「取值 / 级别 / 判定 / 情形 / 后端」，只留「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。理由：同一个量词在本仓库曾同时指执行后端、权限级别、选项取值、判定类别、上传时机与派发路径，读者每次都得从上下文反推它指哪一层。它不是术语退役（没有「档」这个词条），故规则本身不进词表 `_Avoid_`，而是作一条带前后文排除的正则进口吻表 `COLLOQUIAL`；同一条正则另进 `cli/tests/test_user_facing_messages.py` 的禁词表，把用户可见字符串那一面也覆盖（那半边的判据在 ADR 0039）。
 - **用户文档与演示材料两条补充（2026-09-29 演示项目 runbook 复审立此条）**：①**只陈述事实与数值，不带验证过程的痕迹**——「实测 223 秒」「我们真跑过一遍」「经跳板机核对」这类话是 contributor 的证据链，读者要的只是「约 4 分钟」；过程证据的家是 ADR 验证节与 journey。②**段落开头直接陈述，不写「本页 / 本文档 / 下表 说明…」式的自述**——「仓库中的每一部分属于三类之一：…」优于「下表按目录说明每部分…」，前者读者立刻得到信息，后者先读到一句关于文档自身的话。表格或列表前的一句引导（「下表列出各选项的默认值」）不在此列，主流云服务文档同样这样写；internals 页面头部按定位要求写的「本文是入口页」类声明也不在此列。两条都是「参照主流云服务文档写法」这一总则的具体形态；用户指南九个页面的开头句已于 2026-09-30 按此改写。
+- **演示材料的定稿口播稿：豁免只覆盖已定稿版本的原文**。`docs/presentations/<材料>/` 下的 `narration.md`（纯口播稿）与 `speaker-notes.md`（讲者备注）是已配音、已出字幕的原文，改一个字就要重新配音、重对章节与字幕（`tools/presentations/production.md`「修改与验收」节）；例如开场句「测试自动跑起来之后」命中口吻表的「跑」。判定定稿靠内容指纹：同目录 `manifest.json`（成片的校验清单，`files` 段逐文件记了 SHA-256）在顶层另记护栏专用的 `narration_sha256` 与 `speaker_notes_sha256`，文件当前 SHA-256 等于所记值即为定稿原文，免扫口吻表与形态①③启发式，退役表、内部指代、悬空指针、相对链接、本机坐标照扫；哈希不等（口播已改写、尚未重新配音并更新 manifest）则整份照扫。同目录的 `README.md` 与 `chapters.md` 按普通用户文档扫。理由同 CHANGELOG 已发行节：当时的原话不回溯改写；但豁免绑在那一版文字上，不给以后新写的文字开永久口子。被拒：整份口播稿永久豁免口吻表——口播一经改写，新文字也一并免扫，口子不随定稿关闭。规则在 `cli/tests/_doc_rules.py`（`final_transcript` / `wording_scope`），`cli/tests/test_user_docs.py` 与 hook 共用。
 
 ### 七、图统一用 archify：JSON 图源 + 导出 SVG 入库，只有发布到 Pages 的交互版才入库 HTML
 

@@ -285,6 +285,8 @@
   "project_url": "https://github.com/zhiyanliu/gherkai",
   "caption_source": "gherkai-value-method-v12.srt",
   "caption_sha256": "52246cac52d7056feca454e6cb8af409bb7f8632284eebcf317c295453556f84",
+  "narration_sha256": "a5dddc83dc7d3349123201d370e9dcff2e6fff2f632164d059f6e7c26cdfae67",
+  "speaker_notes_sha256": "1039d6bceca35737e24c8dd6f708612f8a0bed6833434541552eff1ac97c798e",
   "integrated_loudness_lufs": -13.15,
   "true_peak_dbfs": -0.84,
   "package_urls": {

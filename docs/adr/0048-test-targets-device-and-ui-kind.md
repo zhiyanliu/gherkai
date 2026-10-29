@@ -1,6 +1,6 @@
 # 0048. 测试目标：设备与界面类型两个维度、`@device` 与 `@app` 标签、core 的执行前预检
 
-> **Status:** Accepted（2026-10-15）——1.5 移动真机支持的入口篇：定义测试目标模型与 core 一侧的全部改动，部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）；worker 能力自述、确定性 step 句柄、远程访问会话、Appium 适配、项目配置文件分别见 0049 到 0053。决策 2、3、6、7、8 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（scenario 间不复位；Job 的 `target` 与具名 `device_request`；网页上下文前提由 `requires` 声明、类别 `capability_unavailable`；超时上界与隧道预热）。
+> **Status:** Accepted（2026-10-15）——1.5 移动真机支持的入口篇：定义测试目标模型与 core 一侧的全部改动，部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）；worker 能力自述、确定性 step 句柄、远程访问会话、Appium 适配、项目配置文件分别见 0049 到 0053。决策 2、3、6、7、8 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（scenario 间不复位；Job 的 `target` 与具名 `device_request`；网页上下文前提由 `requires` 声明、类别 `capability_unavailable`；超时上界与会话预热）。
 
 ## 背景与问题
 

@@ -12,7 +12,7 @@
 | 配套示例的需求、用例与实际操作 | [示例仓库](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/README.md) |
 | 真实运行材料与使用边界 | [演示证据](https://github.com/zhiyanliu/gherkai-webapp-demo/blob/HEAD/docs/presentations/demo/internal/README.md) |
 
-最终 PPT 是页面编辑源，素材包保留逐页画面、配音和主视觉。v12 的字幕经人工修订，文件整理与媒体更新不得改写其文字或时间轴；仅更新画面时复用现有成片音轨。
+最终 PPT 是页面编辑源，素材包保留逐页画面、配音和主视觉。v12 的字幕经人工修订，文件整理与媒体更新不得改写其文字或时间轴；仅更新画面时复用现有成片音轨。交付时 manifest 还要记口播稿与讲者备注的 SHA-256（`narration_sha256` 与 `speaker_notes_sha256`），文档护栏据此识别定稿原文。
 
 已确认材料按版本号维护，仓库只保留当前交付，历史由 Git 记录。示例仓库维护后续 demo 的准备计划和运行证据。此目录随公开仓库分发，不保存密钥、凭证或机器连接配置。
 

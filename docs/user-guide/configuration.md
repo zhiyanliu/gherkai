@@ -29,7 +29,7 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 **取值顺序**：命令行选项、环境变量、配置文件、内建默认依次优先。配置文件排在环境变量之后，是因为环境变量通常是本次调用的临时覆盖（CI 矩阵、单次排障），文件是项目的稳定基线。
 
 ```toml
-[common]                       # 两个后端都有意义的选项，键名是选项长名去掉 "--"
+[common]                       # 跨命令选项（个别只对本机后端起作用，如 grace），键名是选项长名去掉 "--"
 default-engine = "midscene"
 steps-dir = "steps"
 assertion-votes = 3
@@ -201,7 +201,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
-| `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束 |
+| `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束；写在 gherkai.toml 里的 `grace` 在云端只提示一句、不生效 |
 | `--json` | `run`、`plan`、`status`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
 | `--quiet` | `run` | 只影响进度输出与本机 worker 日志的落点 |
 | `--region R`、`--profile P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 优先于同义的环境变量（解析链见上）。云端 worker 只收 region，凭证用它自己的任务角色 |

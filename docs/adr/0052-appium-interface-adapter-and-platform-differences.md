@@ -1,6 +1,6 @@
 # 0052. Appium 界面适配与平台差异处理
 
-> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、隧道预热的执行；桌面路径行为不变。决策 2、3、4、5、6、7 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（接缝的 step 顺序与失败契约、能力结论与上下文句柄分开、分层表取代单条 `newCommandTimeout` 规则、evidence 只在失败步采集）。
+> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；桌面路径行为不变。决策 2、3、4、5、6、7 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（接缝的 step 顺序与失败契约、能力结论与上下文句柄分开、分层表取代单条 `newCommandTimeout` 规则、evidence 只在失败步采集）。
 
 ## 背景与问题
 
@@ -36,7 +36,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
   5. **复原并核对**：确认会话回到原生上下文；失败则最终判定改为 `error`、原判定写进 message（「原判定为 passed/failed；之后未能切回原生界面，后续 step 的截图坐标会错位」），类别 `engine_error`；命令失败先查会话状态，会话丢失则归 `session_lost`；
   6. **在原生上下文采集控件摘要**（只在 failed / error 时，加原始控件树）：best-effort、不改判定，唯一例外是采集中发现会话丢失（按 0051 决策 4 处置）；
   7. 产 evidence、发 `step_done`；截图与原始树进入后台上传队列。
-  失败归级：执行前失败（会话、安装、首次启动、启动采样、能力探测出错以外的部分、隧道预热）归 scope 级，走 `scope_done{status: error, errorType}`（0051 决策 4）；能力探测的单项失败不算执行前失败，记为「探测出错」（决策 5）；scenario 级没有准备动作，用例自己写的 Background step 按普通 step 归因；step 级是上面第 2、3、5 步的失败与第 6 步发现的会话丢失。
+  失败归级：执行前失败（会话、安装、首次启动、启动采样、能力探测出错以外的部分、会话预热）归 scope 级，走 `scope_done{status: error, errorType}`（0051 决策 4）；能力探测的单项失败不算执行前失败，记为「探测出错」（决策 5）；scenario 级没有准备动作，用例自己写的 Background step 按普通 step 归因；step 级是上面第 2、3、5 步的失败与第 6 步发现的会话丢失。
 - 远程访问会话的建立、排队、丢失判定与收尾归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)，本接口的设备实现只调用它；预热的执行见决策 6。
 - 不做：在 run-scope 主流程里按设备写条件分支。两套被测对象的差异一旦漏进主流程，scope 内的 step 循环、短路与 evidence 时序就有两份逻辑；顺序写进接缝契约后，桌面与设备的 step 循环只有一份。
 
@@ -53,7 +53,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 驱动适配器 | UiAutomator2 与 XCUITest 各一，按会话回报的 `automationName` 选一次 |
 | 界面实现 | 继承 `AbstractInterface`：截图、尺寸、动作原语，原语经驱动适配器下发 |
 | 应用启停 | 安装后启动一次、启动后状态采样；向句柄上下文暴露 `app.restart()`（只在应用目标上有值：terminate 加 activate 加启动采样，采样到自退抛错、step 记 error、类别 `engine_error`；[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2），供使用方自写的重启 step 调用——产品不内置有措辞的 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条） |
-| 隧道预热 | 按探测结论选路线导航预热地址一次，在原生控件树里确认标记（决策 6） |
+| 会话预热 | 按探测结论选路线导航预热地址一次，在原生控件树里确认标记（决策 6） |
 
 设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。
 
@@ -102,7 +102,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
   |---|---|---|---|---|---|
   | ① job 墙钟 `Job.timeout_s` | 推进器 claim | 推进器 | 拉镜像、获取、执行、收尾 | `timeout` | 设备 job 不参与 core 的 `network_retry` |
   | ② 会话上限 `max_session_s` | 发出 Create | 由「① 不超过 ②」的预检或自检保证；worker 另按会话年龄做后备 | 单会话寿命 | 年龄到点：当前 step error、余下 skipped、发 Stop、归 `session_lost` | 不重试、不重建 |
-  | ③ 获取预算（缺省 600 秒，可配，上界 3600 秒） | 进入设备解析 | worker | 筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、隧道预热；止于被测对象就绪 | `acquire_timeout`；判据型失败归 `precheck_failed` | worker 内手写退避，跨重建不重置；剩余不足 150 秒不再换台 |
+  | ③ 获取预算（缺省 600 秒，可配，上界 3600 秒） | 进入设备解析 | worker | 筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、会话预热；止于被测对象就绪 | `acquire_timeout`；判据型失败归 `precheck_failed` | worker 内手写退避，跨重建不重置；剩余不足 150 秒不再换台 |
   | ④ Device Farm 单次调用 | 每次调用 | worker | Create、Get、List、Stop | 获取期计入 ③ | `maxAttempts = 1`，请求超时 10 秒（Stop 3 秒，终结期 Get 5 秒），手写退避，停止信号可穿透 |
   | ⑤ newSession 单请求超时 | 发出 newSession | WebDriver 客户端（建连实例） | 建会话加 `appium:app` 安装 | 计入 ③ | 不小于 4 分钟加 65 秒，以剩余 ③ 封顶；传输层 0 次 |
   | ⑥ 执行期单请求超时 | 每个请求 | WebDriver 客户端（执行实例） | 单条命令，**它是单条命令的真实上界** | 结果未知（见下） | 0 次；只读原语白名单重试 1 次 |
@@ -115,13 +115,13 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 - **执行期关闭传输层自动重试**：执行实例 `connectionRetryCount = 0`（webdriver 10.0.2 在客户端超时与多数服务端错误上以原请求体重发，点击与输入会被重复执行）。只读原语白名单——截图、取上下文列表、page source、已确认网页上下文中的读取地址（不含导航）、前台应用查询（`getCurrentPackage` / `mobile: activeAppInfo`）、`/status`、`deviceScreenInfo`——由设备模块重试 1 次，只对网络错误码与 502、503、504，按原语列、不按 HTTP 方法判。
 - **命令守卫**：会话级的 driver 代理，交给 Midscene 适配器、内建导航与确定性 handler（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2 的 `ctx.driver`）的都是它。守卫维护两件状态：**当前执行令牌**（step 开始时发出，**在 step 结束、取消或进入终结的那一刻立即撤销**，不等下一 step；带旧令牌或无令牌的调用一律拒绝，覆盖 handler 在 `await` 之后恢复执行、step 结束后保留的引用、以及 SIGTERM 收尾与主执行并存的窗口；收尾自身的调用由生命周期管理方经自己的通道执行）与**结果未知标志**（置位后本 step 内一切有副作用的命令被拒绝，只读白名单放行）。实测 Midscene 1.15.1 在适配器抛错并置 `abortSignal` 后立即结束 act、不再发任何动作，所以守卫的必要性来自 handler 与晚到引用，保留为纵深防御。
 - **结果未知的命令**（客户端超时或连接中断，且不在白名单）：守卫置结果未知标志并中止当前 act 的 `abortSignal`；worker 查一次会话状态，非 RUNNING 按 `session_lost`，RUNNING 则当前 step 记 error、类别 `engine_error`、消息「设备在等待时间内没有回应，这一步可能已执行也可能未执行」，本 scenario 短路；下一条 scenario 前做一次只读存活探测（截图，即决策 2 的 scenario 前核对），失败先查会话状态，非 RUNNING 发 `scope_done{status: error, errorType: session_lost}`、否则发 `scope_done{status: error, errorType: engine_error}`，由 core 合成余下 SKIPPED。任何层都不补发。
-- **隧道预热由设备模块的「隧道预热」块执行一次（决策 3），不感知令牌与 cookie 的值**：在能力探测之后、`scope_started` 之前，按探测结论选路线（可用网页上下文走 `url`，否则 `mobile: deepLink`）导航 worker 收到的预热地址，在原生控件树里查找页面标记（READY / DENIED / ERROR / AUTH REQUIRED），归因规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13；预热不处理 iOS Safari 的系统鉴权表单。预热地址与设备端点写进诊断与错误文本时同样经 0051 决策 11 的脱敏出口。
+- **会话预热由设备模块的「会话预热」块执行一次（决策 3），不感知令牌与 cookie 的值**：在能力探测之后、`scope_started` 之前，按探测结论选路线（可用网页上下文走 `url`，否则 `mobile: deepLink`）导航 worker 收到的预热地址，在原生控件树里查找页面标记（READY / DENIED / ERROR / AUTH REQUIRED），归因规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13；预热不处理 iOS Safari 的系统鉴权表单。预热地址与设备端点写进诊断与错误文本时同样经 0051 决策 11 的脱敏出口。
 
 ### 7. Midscene 复用边界
 
 - **复用**：`Agent`、`AbstractInterface`、`createDefaultMobileActions` 与 `defineActionsFromInputPrimitives`（动作集定义）、收键盘的决定；规划、报告、dump、token 统计照用 SDK 的。evidence 的 dump 映射函数不改即可用；evidence 模块的输入改为接收一份已采集好的界面快照（地址、控件摘要、原始树路径与各自的缺失原因），模块保持纯映射、不发 WebDriver 命令（[0042](./0042-step-evidence-and-explain.md)、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）。
-- **自写**：决策 3 列出的八块设备模块全部自写（Device Farm 会话、Appium 建连与上下文切换、命令守卫、能力探测、驱动适配器、界面实现（在复用的 `AbstractInterface` 之上）、应用启停、隧道预热），划分以决策 3 为准。
-- **依赖**：`@midscene/core` 升为显式依赖，与 `@midscene/web` 锁定同一版本（沿用 [0042](./0042-step-evidence-and-explain.md) 决策六的 SDK 版本锁定）。
+- **自写**：决策 3 列出的八块设备模块全部自写（Device Farm 会话、Appium 建连与上下文切换、命令守卫、能力探测、驱动适配器、界面实现（在复用的 `AbstractInterface` 之上）、应用启停、会话预热），划分以决策 3 为准。
+- **依赖**：`@midscene/core` 升为显式依赖，与 `@midscene/web` 锁定同一版本（沿用 [0042](./0042-step-evidence-and-explain.md) 决策六的 SDK 版本锁定）。`webdriverio` 目前只供类型声明、暂用范围版本；设备模块落地时改为精确锁定，理由同 0042 决策六，升级即触发决策 8 的真机验收。
 - **不接 `@midscene/ios`**：它对 Appium 端点有三处硬阻断（见实测依据）。
 - **借规则、不借代码**：DPR 回退规则（截图长边除以窗口长边取整）作为比例探测失败时的回退依据，按其逻辑自写；`@midscene/ios` 的传输层不引入。
 

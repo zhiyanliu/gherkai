@@ -147,7 +147,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 - **`task_exited` 且 exit≠0（崩溃/网络故障退出码 80/SIGKILL）→ ERROR 终态，不等 `scope_done`**：worker 崩了根本没机会发 `scope_done`，此时**进程非干净终止本身就是终态信号**。若仍死等 `scope_done`，crash job 永远 RUNNING、reconciler 死循环（真跑 crash worker 复现，回归护栏 `core/tests/test_project.py::test_crash_no_scope_done_nonzero_exit_is_error`）。这一分支也覆盖「发完 scope_done 又非 0 退出」的误报 PASSED（exit≠0 一律 error，不看内容；唯推进器已主动中止的 job 按下「终结函数与真值表」先判 timeout 或 aborted）。
 - **`task_exited` 且 exit==0 → 要求 `scope_done`**：干净退出才谈「内容完整」。有 `scope_done` → 先看 `scope_done.status`（为 error 即 ERROR，归因按下表：未确认集非空为 `release_failed`、否则取其 `errorType`；它承载 worker 报告的执行前失败与执行中途的会话丢失，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），再看 scenario 判定集（为空即 ERROR，消息「worker 未报告任何 scenario 判定」——否则 `_aggregate([])` 把零 scenario 的 `scope_done` 判成 PASSED），再 scenario 归约终态（passed/failed/error）；干净退出却没 `scope_done`（矛盾：进程说成功、内容没发完）→ ERROR（judged error 比死循环安全）。完整的判定顺序见下「终结函数与真值表」。
 - **`task_exited` 且退出码未知（观察者没能取到 exitCode）→ ERROR 终态**：STOPPED 事件是观察者的**唯一一次机会**（ECS 不会为补齐退出码再发一次事件），「等观察者补」在事件驱动模型里结构上不存在；退出码未知即不可判定为通过，判 error 比无界等待安全（观察者侧落哨兵退出码，见下「退出码缺失」条）。
-- **无 `task_exited`（进程还没终止）→ RUNNING（见了 `session_opened` 或 `scope_started`）/ PENDING（还没起）**：设备 scope 在 `scope_started` 之前先发 `session_opened`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），取设备期间 job 即算 RUNNING。
+- **无 `task_exited`（进程还没终止）→ RUNNING（见了非 `attempted` 的 `session_opened` 或 `scope_started`）/ PENDING（还没起）**：设备 scope 在 `scope_started` 之前先发 `session_opened`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），取设备期间 job 即算 RUNNING；只有 `attempted` 的 `session_opened` 不算 RUNNING。
 
 即：**进程终止（exit≠0）优先于内容完整判终态**；只有干净退出（exit==0）才回到「scope_done ∧ exit」的两件都要（实现见终结函数 `core.project.finalize_job`；`_job_status` 是它只取 status 的薄委托）。推进器的主动停止判定（超时、fail-fast 中止）又优先于两者，完整顺序见下「终结函数与真值表」。
 
@@ -174,14 +174,14 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 | 退出码 0，`scope_done.status = error` | ERROR | U 非空为 `release_failed`，否则取 `scope_done.errorType` |
 | 退出码 0，`scope_done` 无 status，scenario 判定集为空 | ERROR | `engine_error`，消息「worker 未报告任何 scenario 判定」 |
 | 退出码 0，`scope_done` 无 status，判定集非空 | `_aggregate`（原规则） | U 非空（worker 违约）时改判 ERROR、`release_failed` |
-| 未退出 | 见过 `session_opened` 或 `scope_started` 为 RUNNING，否则 PENDING | |
+| 未退出 | 见过非 `attempted` 的 `session_opened` 或 `scope_started` 为 RUNNING，否则 PENDING（只有 `attempted` 的 `session_opened` 不算 RUNNING） | |
 
 「内容完整」= 退出码 0 且收到 `scope_done`（见上「内容完整后不再仲裁」）。
 
 - **明细补全与判定分开**：明细只依据已收到的完成事实。收到 `scope_done.status = error` 即对 definition 中无事件的 scenario 合成 scenario 级 SKIPPED 及其全部 step 的 `SKIPPED(shortcircuited=False)`；在途 scenario 整条不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一、三、六）；之后到达的 timeout、abort 或非零退出只改变判定与归因，不撤销已合成的明细。没有收到 `scope_done` 时不合成；在途明细（有 `step_started` 无 `step_done` 的 step、有 `scenario_started` 无 `scenario_done` 的 scenario）不合成任何记录，保持缺记录状态，由 `explain` 表示「有现场可查」。
 - **U 非空时无论判定为何**，job message 追加产品语言提示「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」（归因改为 `release_failed` 的行保留原因消息，提示追加在后），并列出 U 中各项的会话名，`attempted` 的尝试标为「结果未知的创建尝试」、与「已创建但未确认停止」的会话分开列（尝试只有名字可列，这正是使用方到控制台核对时需要的）。
 - **停止后继续有界消费完整事件流**：推进器作出停止决定后，仍把触发该决定的当前事件与后续事件全部归约，直到 EOF 或排空上界（宽限加余量）。同步路径曾先从迭代器取事件、再查 deadline、再归约，触发超时检查的那条事件本身没有被归约，停止后到达的 `session_closed` 也会丢失，使 U 算错；无状态路径重放全部已写事件，天然满足。
-- **双路径对拍是实施护栏**：同一组事件矩阵（前置 scope 级 error 加退出 0、scope 级 error 后超时（内容完整：判定按 scope 级 error、合成明细不撤销）、停止后到达的 `session_opened`、未确认的 `session_closed`、零 scenario 的 `scope_done`、接力者直接落 `timed_out`、cloud tick 对无踪 task 直写 `timed_out`、无 ARN 的未知 Create 加取消、已记真实 ARN 后到达的 `attempted` `session_opened`（job 的 session_id 不变、`sessions[]` 多出一项 null、两个计量键都不计它））输入两条路径，判定、归因与明细逐项相等；含 abort 的行（timeout 与 abort 同时成立、先判 abort 而收尾期间 deadline 才到仍为 abort）只输入同步路径，fail-fast 宿主到无状态路径后再加入共同矩阵。
+- **双路径对拍是实施护栏**：同一组事件矩阵（前置 scope 级 error 加退出 0、scope 级 error 后超时（内容完整：判定按 scope 级 error、合成明细不撤销）、停止后到达的 `session_opened`、未确认的 `session_closed`、零 scenario 的 `scope_done`、接力者直接落 `timed_out`、cloud tick 对无踪 task 直写 `timed_out`、无 ARN 的未知 Create 加取消、已记真实 ARN 后到达的 `attempted` `session_opened`（job 的 session_id 不变、`sessions[]` 多出一项 null、两个计量键都不计它）、只有 `attempted` 的 `session_opened`（未退出时两条路径都为 PENDING））输入两条路径，判定、归因与明细逐项相等；含 abort 的行（timeout 与 abort 同时成立、先判 abort 而收尾期间 deadline 才到仍为 abort）只输入同步路径，fail-fast 宿主到无状态路径后再加入共同矩阵。
 
 ### 机制三：`RunState` 投影写带 HWM 条件写（防并发 lost-update）
 

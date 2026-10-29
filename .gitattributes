@@ -2,3 +2,7 @@ graphify-out/graph.json merge=graphify
 
 # Preserve approved subtitle bytes, including the final SRT cue separator.
 docs/presentations/**/*.srt -text whitespace=-blank-at-eof
+
+# Preserve final transcript bytes: the doc guard compares their SHA-256 with the value recorded in manifest.json.
+docs/presentations/**/narration.md -text
+docs/presentations/**/speaker-notes.md -text
