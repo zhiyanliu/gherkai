@@ -54163,7 +54163,7 @@
       "label": "documenting \u6e05\u5355\uff08ADR 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b\uff0c\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L42",
+      "source_location": "L40",
       "_origin": "ast",
       "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
       "community": 190,
@@ -54174,7 +54174,7 @@
       "label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9\uff08ADR \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L69",
+      "source_location": "L67",
       "_origin": "ast",
       "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
       "community": 190,
@@ -201923,7 +201923,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L42",
+      "source_location": "L40",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
@@ -201934,7 +201934,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L69",
+      "source_location": "L67",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
@@ -269669,5 +269669,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "ad47bcf1843e08547d215bca87e903dc0a2810e4"
+  "built_at_commit": "3b4bc0aa417c2cd2221c83cb35dfd00f243fb6ab"
 }

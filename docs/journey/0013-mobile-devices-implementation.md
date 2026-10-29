@@ -34,8 +34,6 @@
 - 待真跑核实：Midscene 桌面 worker 在 AgentCore 浏览器上预热后，被测应用用 history.pushState 不再抛 SecurityError；故意给错令牌时，run 的最终退出码与 explain 的呈现符合预期（READY、cookie 到达上游、错令牌归 precheck_failed、worker 退出码 0 已核）。
 - 待真跑核实：同步 run 宿主下预热地址端到端到达 worker，且宿主 shell 里 export 的同名值不会越过 definition（本机 submit 的 per-run 进程与 status --wait 接力者、云端 submit 的推进链已核）。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。
-- **IAM 收窄的云端验证**：Nova 会话改为干净起步后，两个 task role 去掉了 browser profile 四个动作与 `browser-profile/*` 资源（ADR 0033 IAM 表），尚未经真部署验证。B8 部署后两引擎各真跑一条云端 run，确认无 AccessDenied；通过后把 0033「上表动作集由真跑逐个暴露」条里「尚未经真部署后的 task role 端到端验证」改为已验证的表述。
-- **历史 browser profile 残留**：此前用过 Nova 的账户与 region 各有一个名为 default 的服务端 browser profile 存着历史状态；worker 已不再读写，task role 收窄后也无权删除。是否手动清理由 owner 决定；开发机上的本地缓存 `~/.nova-act/agentcore-profiles/default.json` 可直接删。
 - **webdriverio 精确锁定**：第 8 批 B6 设备模块落地时把 `engines/midscene/package.json` 的 `webdriverio` 从范围版本改为精确版本、重算锁文件、改 `engines/midscene/DEVELOPMENT.md` 的锁定清单（ADR 0052 决策 7 已记此待办）。
 - **可选的用户文档补句**：`docs/user-guide/running-and-results.md`、`docs/user-guide/cloud-backend.md`、skill 正文里「`--backend cloud` 给 `--grace` 以退出码 2 结束」仍成立，可各补一句「写在 gherkai.toml 里的 grace 在云端只提示、不生效」（配置页已写）。
 
