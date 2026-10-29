@@ -160,8 +160,8 @@
     "semantic_hash": "3e59aadb32e086b52156b879ab6c60a7"
   },
   "engines/midscene/spikes/03-midscene-grounding.ts": {
-    "mtime": 1793200494.9140098,
-    "ast_hash": "a36830349d17abcad434c13126f12b21",
+    "mtime": 1793248546.9833314,
+    "ast_hash": "7230f529f46191f323945ef63e9f16c0",
     "semantic_hash": ""
   },
   "engines/midscene/spikes/04-planning-probe.ts": {
@@ -185,8 +185,8 @@
     "semantic_hash": "72cb2526e4761f413eda7231f898f733"
   },
   "engines/novaact/spikes/wikipedia_benchmark.py": {
-    "mtime": 1793200379.0335536,
-    "ast_hash": "949242a2dcdf5d508f5cda59ce697f36",
+    "mtime": 1793248567.9997134,
+    "ast_hash": "ba94639f2962ba34d9ef9f9c718438a7",
     "semantic_hash": ""
   },
   "tools/e2e_harness.py": {
@@ -280,8 +280,8 @@
     "semantic_hash": "708a5cd51f8060189f2fe68dd33c465d"
   },
   "docs/adr/0003-midscene-grounding-qwen3vl-bedrock.md": {
-    "mtime": 1793243615.7816112,
-    "ast_hash": "444c6338c28d3f5b75e3d8d83a27e849",
+    "mtime": 1793249438.1878743,
+    "ast_hash": "37767d96e451c3f94daf907877f58de7",
     "semantic_hash": ""
   },
   "docs/adr/0004-novaact-iam-auth-via-workflow.md": {
@@ -315,8 +315,8 @@
     "semantic_hash": "718e327f30313cb7a16d0c5511b78942"
   },
   "docs/adr/0010-spike-as-apples-to-apples-benchmark.md": {
-    "mtime": 1793243615.7819922,
-    "ast_hash": "ff50dd1c00c4cdf2fe5bebe16c9f632c",
+    "mtime": 1793249322.6398995,
+    "ast_hash": "377a359b538d3bb41f2d9eaf07dbb0e7",
     "semantic_hash": ""
   },
   "docs/adr/0011-agentcore-browser-system-default-vs-custom.md": {
@@ -335,8 +335,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0014-ai-first-assertions.md": {
-    "mtime": 1793201067.4253979,
-    "ast_hash": "578ccc2b2f5fe4c4fd2f684ad9c5df40",
+    "mtime": 1793249322.6399808,
+    "ast_hash": "4a6288a08d63d5f7f740a6c65d0d5921",
     "semantic_hash": ""
   },
   "docs/adr/0015-v1-positioning-smoke-not-regression.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793243496.1380603,
-    "ast_hash": "936956321ccb0bb6bec6732e02283796",
+    "mtime": 1793249322.640341,
+    "ast_hash": "72f46c99c7af04f5184cc080b3b00478",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1365,8 +1365,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/doc-health-review.md": {
-    "mtime": 1793200378.88381,
-    "ast_hash": "3593d264ae5916fb9682fd37e1a5efb7",
+    "mtime": 1793249333.7995996,
+    "ast_hash": "df435af6ebd09dac3ef40089b32fe4ce",
     "semantic_hash": ""
   },
   "docs/internals/README.md": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793247938.1473577,
-    "ast_hash": "747d5b3d5e6aabbeeee19e7546106506",
+    "mtime": 1793249438.1880546,
+    "ast_hash": "864f43abe04053310b8efd7851af2f0c",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
