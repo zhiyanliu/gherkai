@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793243498.0470989,
-    "ast_hash": "968e952128fb07cd9f6790374ccfb0d7",
+    "mtime": 1793247938.1469676,
+    "ast_hash": "52d33f35db6f1f616991f67845e3ea8a",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -1600,8 +1600,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-upgrade-windows.json": {
-    "mtime": 1793200342.8403025,
-    "ast_hash": "",
+    "mtime": 1793243618.4076197,
+    "ast_hash": "14c8eeb90861450fafcb309e59cc588d",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
@@ -1615,8 +1615,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
-    "mtime": 1793200342.8405855,
-    "ast_hash": "",
+    "mtime": 1793244527.4585943,
+    "ast_hash": "29b1c99552f9ede8e11c6c6ad0772e0d",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
@@ -1655,8 +1655,8 @@
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
-    "mtime": 1789828517.9593103,
-    "ast_hash": "",
+    "mtime": 1793243618.4080994,
+    "ast_hash": "1433373440c9c145ef02efe646d272eb",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793245167.9875793,
-    "ast_hash": "e31f4c5e7830e8f7bc9911c1bf97ed33",
+    "mtime": 1793247938.1473577,
+    "ast_hash": "747d5b3d5e6aabbeeee19e7546106506",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {

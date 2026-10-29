@@ -36,7 +36,6 @@
 - **ADR 0010 基准重测**：两个 spike 的动作指令措辞与计时边界不同、token 用量从未采集（owner 裁定补齐后重测，不冻结为历史快照）。做法：对齐 `engines/midscene/spikes/03-midscene-grounding.ts` 与 `engines/novaact/spikes/wikipedia_benchmark.py` 的提示词与计时范围、给两侧 metrics 补用量采集、在跳板机重测、替换 0010 的对比表并补成本行。时机：第 7 批 B8 闭合后、1.5 收尾（code-health 复盘）前；约一到两小时，不依赖部署。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。
 - **评测 fixture 重录**：`skills/gherkai-evals/fixtures/` 下 wiki-search / job-failure / nova-zh 三个录制型 fixture 的 run_meta.json 缺 schema_version，当前 CLI 只认第 1 版；按 ADR 0043 决策七的流程用当前 CLI 重录并完整物化，不手工补键。
-- **Nova 会话干净起步的真跑**：worker 已改为不带 profile、不传 browser_auth 起会话（ADR 0028），单测与 SDK 源码核过，但尚未在跳板机真跑一条 Nova run 核实只给 CDP 地址与连接头也能建连并干净释放（跳板机当时拒绝 ssh，未能执行）；连上后用一条桌面冒烟核实，再看 READY 会话为零。
 - **IAM 收窄的云端验证**：Nova 会话改为干净起步后，两个 task role 去掉了 browser profile 四个动作与 `browser-profile/*` 资源（ADR 0033 IAM 表），尚未经真部署验证。B8 部署后两引擎各真跑一条云端 run，确认无 AccessDenied；通过后把 0033「上表动作集由真跑逐个暴露」条里「尚未经真部署后的 task role 端到端验证」改为已验证的表述。
 - **历史 browser profile 残留**：此前用过 Nova 的账户与 region 各有一个名为 default 的服务端 browser profile 存着历史状态；worker 已不再读写，task role 收窄后也无权删除。是否手动清理由 owner 决定；开发机上的本地缓存 `~/.nova-act/agentcore-profiles/default.json` 可直接删。
 - **webdriverio 精确锁定**：第 8 批 B6 设备模块落地时把 `engines/midscene/package.json` 的 `webdriverio` 从范围版本改为精确版本、重算锁文件、改 `engines/midscene/DEVELOPMENT.md` 的锁定清单（ADR 0052 决策 7 已记此待办）。
