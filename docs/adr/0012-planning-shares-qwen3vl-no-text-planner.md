@@ -23,7 +23,7 @@ Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续
 - 若 Bedrock 将来开放强推理模型的 chat-completions + 图像输入（如某个推理模型加视觉），可重新评估"独立 planner 提升规划质量"。
 - 若放弃 AWS 约束（ADR 0009），AWS 外的多模态推理模型（如 OpenAI 原生 gpt-5.x，多模态 + chat-completions）可作 planner——但这是对 [0009](./0009-maximize-aws-hard-constraint.md) 的破例，需另立 ADR。
 
-**这两条的前提已在 2026-09 变化**（见 [0044](./0044-engine-model-selection-and-override.md) 背景 2）：Bedrock 上的多模态推理模型（GPT-5.6 / GPT-6）已可经现有接线收发图文——第一条的条件由此满足，默认模型本身即多模态推理模型，是否拆独立 planner 经此重新评估、结论仍是不拆（见上 Status 头）；第二条举的那类模型（2026-06 的例子是「OpenAI 原生 gpt-5.x」）也不再需要离开 AWS，本条只剩「AWS 外独有的模型」这一射程。
+**这两条的前提已在 2026-09 变化**（见 [0044](./0044-engine-model-selection-and-override.md) 背景 2）：Bedrock 上的多模态推理模型（GPT-5.6 / GPT-6）已可经现有接线收发图文——第一条的条件由此满足，默认模型本身即多模态推理模型，是否拆独立 planner 经此重新评估、结论仍是不拆（理由见下）；第二条举的那类模型（2026-06 的例子是「OpenAI 原生 gpt-5.x」）也不再需要离开 AWS，本条只剩「AWS 外独有的模型」这一射程。
 
 **不拆的理由**：独立 planner 会多一个模型槽与一处可漂的配置面，与 [0044](./0044-engine-model-selection-and-override.md) 决策 2「覆盖项 = worker 侧 env，两引擎对称」的对称性冲突；当前默认模型在评测集 A/B 里逐遍稳定、无可观测的规划质量缺口作驱动。
 

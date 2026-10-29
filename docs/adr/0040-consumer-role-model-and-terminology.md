@@ -10,7 +10,7 @@
 - **权限**按主体登记：[0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段分编排进程 / detached 提交 / 部署方 / 提交者；[0038](./0038-worker-image-delivery.md)「权限面增量」分部署方 / 提交者 / 云端推进器。
 - **所有权**按角色分：镜像构建归写 step 的人、推送与注册归部署方（0038）；`steps/` 归使用方项目（0037 决策 4）；QA 永不碰 steps（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。
 - **文档分层**按读者分：[0039](./0039-user-facing-surfaces-no-internal-references.md) 的「使用者向 / contributor 向」二分，已被 [0045](./0045-documentation-layering-and-placement.md) 决策一的读者三分类取代（contributor 侧 AI agent / 技术文档 / 用户文档）。
-- **执行**按执行方式分级：0033 登记的权限随执行方式与执行后端而异——detached `submit` / `status` 只要 runs 表读写 + 只读探活 + `lambda:GetFunction` / `InvokeFunction`；同步 `run --backend cloud` 是另一套（ECS 起停 task + `iam:PassRole` + runs 表写，不含那两个 lambda 动作）；local 用本机凭证；`plan` 不需要凭证。
+- **执行**按执行方式分级：0033 登记的权限随执行方式（`run` / `submit`）与执行后端而异，`plan` 不需要凭证（分级细目见决策 3）。
 
 漂移已经发生：同一顶「会写代码的测试角色」在文档与注释里有三个名字（test engineer 28 处 / developer / 测试开发 3 处）；写 `.feature` 的角色也有两个（QA 57 处 / feature 作者 15 处）。README 三处按角色说话（首段、安装块注释、feature 写法节）却从未定义角色，读者要先猜自己是谁才知道装哪行、哪些命令是自己的。
 

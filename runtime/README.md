@@ -32,7 +32,7 @@ resolver = compose.make_resolver(engines)
 | `gherkai_runtime.detached` / `tunnel` | 提交后在本机后台把一个 run 推到完成；把本机可达的被测应用暴露给云端浏览器 |
 | `gherkai_runtime.textui` | 人读输出的表格、树与状态颜色：表格按终端宽度排版，输出到非终端或设置了 `NO_COLOR` 时不带颜色 |
 
-引擎名是 `novaact` 与 `midscene`。运行时会启动 worker 子进程、读取环境变量、访问 AWS 服务，请在配好 AWS 凭证与 region 的环境里使用。云端资源需先由部署方执行 `gherkai deploy` 建好；调用方的版本不能新于已部署的后端（新于即拒绝执行），旧于时只提示、不拦——建议两侧保持同版本。
+引擎名是 `novaact` 与 `midscene`。运行时会启动 worker 子进程、读取环境变量、访问 AWS 服务，请在配好 AWS 凭证与 region 的环境里使用。云端资源需先由部署方执行 `gherkai deploy` 建好；调用方与已部署的后端应保持同一版本，规则见：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 。
 
 ## 文档
 

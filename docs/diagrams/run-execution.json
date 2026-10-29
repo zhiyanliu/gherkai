@@ -48,7 +48,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "提交即返回；本机后台进程反复推一步，事件旁路落库、退出由该进程自行观察。本机须保持运行。"
+        "note": "提交即返回；本机后台进程反复推进一步，事件旁路落库、退出由该进程自行观察。本机须保持运行。"
       },
       {
         "id": "submit-cloud",
@@ -105,7 +105,7 @@
     },
     {
       "id": "laneStep",
-      "label": "无状态推一步"
+      "label": "无状态单步推进"
     },
     {
       "id": "laneCloud",
@@ -244,7 +244,7 @@
       "lane": "laneStep",
       "col": 1,
       "type": "backend",
-      "label": "无状态推一步",
+      "label": "无状态单步推进",
       "sublabel": "重放 · 条件写抢占 job",
       "width": 144
     },
@@ -309,7 +309,7 @@
       "id": "e-bg-step",
       "from": "bgProc",
       "to": "stepOnce",
-      "label": "反复推至收敛",
+      "label": "反复推进到收敛",
       "variant": "default",
       "role": "branch"
     },
@@ -317,7 +317,7 @@
       "id": "e-cloudfn-step",
       "from": "cloudFn",
       "to": "stepOnce",
-      "label": "每批事件推一步",
+      "label": "每批事件推进一步",
       "variant": "default",
       "role": "branch"
     },

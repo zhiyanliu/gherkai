@@ -62,7 +62,7 @@ ENV GHERKAI_STEPS_DIR=/app/steps
 docker build --platform linux/amd64 -t acme-novaact:login .        # 必须带 --platform，Fargate 是 X86_64
 gherkai deploy push-worker acme-novaact:login --engine novaact --variant login --prefix gherkai-
 gherkai deploy push-worker acme-midscene:login --engine midscene --variant login --prefix gherkai-   # 两引擎各推一次
-gherkai deploy push-worker acme-novaact:common --engine novaact --variant common --set-default        # 顺手改默认指针
+gherkai deploy push-worker acme-novaact:common --engine novaact --variant common --set-default        # 同时改默认指针
 gherkai deploy list-workers --prefix gherkai-                      # 看有哪些 variant、默认指针；--json 机读
 gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-variant login
 ```

@@ -60,7 +60,7 @@ task-def + 桶，落库时另加 runs 表）、variant 解析、填完 definitio
 （`--ddb-table`/`--s3-bucket`/`--events-table`/`--cluster`/`--subnet`/`--security-group`；`submit` 只收前两个，其余取部署侧写进
 后端的值，三个 Lambda 无 flag、恒按 prefix 推导），逐项默认值与对应 SSM 参数见
 [`docs/user-guide/configuration.md`](../docs/user-guide/configuration.md) 的「云端资源名与网络的单项覆盖」表。
-使用者侧的部署与排错步骤见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)。
+部署方的部署与排错步骤见 [`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)。
 
 > `core/tests/README.md` 的「一次性：建真表 + 真桶」只服务 core 集成测试（同一套表/桶 schema，但不足以支撑
 > `--backend cloud`）。
@@ -131,7 +131,7 @@ cloud 失败分层的切分线是 run 是否已真正开始执行：启动 worke
 
 ## 版本 skew 六态（ADR 0037 决策 7）
 
-deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/`submit`/`status`/`explain`）**先于资源预检与任何云端读**与它比对（`doctor --backend cloud` 另把它作为一个自检项读取）：
+deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/`submit`/`status`/`explain`）**先于执行前预检与任何云端读**与它比对（`doctor --backend cloud` 另把它作为一个自检项读取）：
 
 | 比对结果 | 行为 |
 |---|---|

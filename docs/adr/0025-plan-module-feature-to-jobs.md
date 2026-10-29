@@ -9,7 +9,7 @@
 ```
 plan(features: [{uri, text}], config: {defaultEngine, defaultAssertionVotes,
                                       defaultJobTimeout,        // 显式给出的 --default-job-timeout；未指定为 null
-                                      defaultDesktopJobTimeout, // 桌面 scope 的缺省墙钟（300 秒），CLI 传入
+                                      defaultDesktopJobTimeout, // 桌面 scope 的缺省墙钟，CLI 传入
                                       defaultDeviceJobTimeout,  // 设备 scope 的缺省墙钟，CLI 按获取预算算出传入
                                       minDeviceJobTimeout,      // 设备 scope 的墙钟下限，同上
                                       apps},                    // {别名: {平台: 包名或 bundle id}}，CLI 从 [apps] 读出传入；纯数据，不带文件路径

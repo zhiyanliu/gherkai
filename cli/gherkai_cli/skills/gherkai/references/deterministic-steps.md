@@ -26,7 +26,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 
 1. **用带等待的判定，不用瞬时值、不用固定等待**。`isVisible()` / `is_visible()` 取的是当下那一瞬间，页面还在加载就判否，这是确定性 step 假失败的头号来源。Python 侧用 Playwright 的 `expect(locator).to_be_visible(timeout=…)` 一族（自动重试到超时，超时抛 AssertionError，这一步记 failed）；Midscene 侧用 `locator.waitFor({ state, timeout })` 与 `page.waitForURL(...)`。固定 sleep 既慢又照样抖。
 2. **等待超时不是断言**。`locator.wait_for(...)` / `locator.waitFor(...)` 超时抛的是 Playwright 的 TimeoutError，这一步会记 error 而不是 failed，判定统计与汇报模板都会把它当执行错误。要让它记 failed，就捕获后转成 AssertionError（Python）或 DeterministicAssertion（Midscene），并在转换时补上现场。
-3. **给等待一个几秒的上限**。Playwright 默认 30 秒，一条 step 等满 30 秒会吃掉这个 scope 的墙钟预算（`@timeout`），且拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
+3. **给等待一个几秒的上限**。Playwright 默认 30 秒，一条 step 等满 30 秒，这 30 秒都计入这个 scope 的 job 墙钟预算（`@timeout`），也会拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
 4. **瞬态窗口内的多个动作合成一次页面内调用**。只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用往返几百毫秒，「点击、再点击、读数」分三次调用就落到了窗口之后，本机单测却能过。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，host 侧只做断言。传字符串时注意 Node 版 Playwright 不会自动调用函数表达式（Python 版会），要拼成立即调用的表达式。
 
 ## 4 组织：判定逻辑与注册分离
@@ -68,7 +68,7 @@ gherkai plan features/<x>.feature --steps-dir steps               # 该命中的
 | 判定不成立却记 error 而不是 failed | 抛的是 TimeoutError 或别的异常 | 捕获后转成 AssertionError / DeterministicAssertion，补现场 |
 | Nova Act 上这一步记 error，Midscene 上正常 | Python handler 写成了 `async def` | 改成同步函数 |
 | Midscene 上 `plan` 没有确定性标注，Nova Act 上有 | Midscene 侧文件扩展名是 `.ts` / `.js`（收集时静默跳过），或只写了 Python 一侧 | 改成 `.mts`，或补另一侧 |
-| worker 起不来，说某文件一条 step 都没注册 | 辅助模块没加 `_` 前缀被当成 step 文件；或按文件路径 import 到了另一份包 | 加前缀或搬进 `_pages/`；import 只写包名 |
+| worker 无法启动，说某文件一条 step 都没注册 | 辅助模块没加 `_` 前缀被当成 step 文件；或按文件路径 import 到了另一份包 | 加前缀或搬进 `_pages/`；import 只写包名 |
 | 一步记 error 说命中多条模式 | 模式太宽或与内建重叠 | 收窄，带引号与特征词 |
 | 本机单测能过，云端判否，这一步里有多次连续操作 | 页面状态只停留一两秒，远程往返把动作拆散了 | 合成一次页面内调用（第 3 节规则 4） |
 | 云端失败只剩一句「断言未过」 | 失败消息没带现场 | 消息里带页面地址、选择器、期望与实际 |

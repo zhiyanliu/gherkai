@@ -17,7 +17,7 @@
 ## 2 CLI 怎么找 worker
 
 - **Nova Act**：① 环境变量 `GHERKAI_WORKER_NOVAACT_CMD`（+ 可选 `GHERKAI_WORKER_NOVAACT_CWD`）显式指定；② 与 CLI 同一个 Python 环境；③ PATH 上的 `gherkai-worker-novaact`；④ 三级都没有、CLI 是正式发行版、机器上有 uvx 时临时拉起同版本 worker。四级都没命中：local 后端的 `run` / `submit` 与 `list-deterministic` 以退出码 2 结束并打印装法（`submit` 也在提交前就拒）；`--backend cloud` 的 `run` / `submit` 不看本机 worker（它运行在云端容器里）；`plan` 不拦，只少了那个引擎的派发标注。
-- **Midscene**：PATH 上的 `gherkai-worker-midscene`（`npm i -g` 的结果），或环境变量 `GHERKAI_WORKER_MIDSCENE_CMD`（+ 可选 `GHERKAI_WORKER_MIDSCENE_CWD`）显式覆写。**必须真装**，没有临时拉起的兜底。
+- **Midscene**：PATH 上的 `gherkai-worker-midscene`（`npm i -g` 的结果），或环境变量 `GHERKAI_WORKER_MIDSCENE_CMD`（+ 可选 `GHERKAI_WORKER_MIDSCENE_CWD`）显式覆写。**必须实际安装**，没有临时拉起的兜底。
 
 `gherkai list-engines` 打出每个引擎的探测结果与来源，缺的那个原地给安装命令；`--json` 机读（`engine` / `available` / `cmd` / `cwd` / `source` / `hint`）。
 
@@ -32,7 +32,7 @@
 | `engines.*` | 每个引擎的 worker 能否定位、至少一个可用、本机 worker 各自自报的模型与支持的测试目标 | 总是 |
 | `steps.*` | steps 目录是否存在、每个引擎加载 steps 是否成功、几条 | 总是（`--steps-dir` 可改目录） |
 | `aws.*` | region、凭证身份 | 给了 `--backend cloud` 或 `--prefix` |
-| `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限 vs 云端为它设的停止宽限（差距只标 `-`、不影响退出码） | 同上 |
+| `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限与云端为它设的停止宽限的对比（差距只标 `-`、不影响退出码） | 同上 |
 | `provider.*` | Node、cdk、容器引擎（部署方工具链） | 装了部署 extra 时 |
 
 退出码：全部通过为 0；有**必修项**失败为 2（非必修项失败只标出不影响退出码）。`--json` 每项给 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 找阻塞项。
@@ -40,7 +40,7 @@
 ## 4 凭证与 region
 
 - 走本机 AWS 默认凭证链：profile / 环境变量 / 实例角色皆可，`--profile` 或 `AWS_PROFILE` 选 profile。**不需要任何 API key**。
-- **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `gherkai.toml` 里 `[common]` 的 `region` > `--profile`（或 `AWS_PROFILE`、或配置文件 `[common]` 里设的 profile）指的那个 profile 配置里的 region。五处都没有才报错；缺了不会替你兜一个 region。
+- **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `gherkai.toml` 里 `[common]` 的 `region` > `--profile`（或 `AWS_PROFILE`、或配置文件 `[common]` 里设的 profile）指的那个 profile 配置里的 region。五处都没有才报错；缺失时不会改用任何默认 region。
 - 该 region 下账号要能用这些服务：Nova Act 引擎需要 Nova Act 服务与模型 nova-act-v1.0（默认锁定；环境变量 NOVA_MODEL_ID 可换，`doctor` 会显示实际模型）；Midscene 引擎需要 Bedrock 模型 us.openai.gpt-5.6-terra（默认；环境变量 MIDSCENE_MODEL_ID 可换，`doctor` 会显示实际模型）；两者都要 AgentCore Browser。`AccessDenied` / 模型不可用多半是 region 未开通模型或凭证缺这些权限。
 - 本机 `run` / `submit` 也要 AWS 凭证（浏览器与模型在云端）；只有 `plan` / `list-engines` / `list-deterministic` / `doctor`（不带 cloud 参数）纯本地。
 
@@ -68,7 +68,7 @@
 
 **排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；本机后端 `submit` 的隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`；`submit --backend cloud` 的隧道守护进程日志在系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`（提交时「隧道由守护进程持有」那一行给出完整路径）；起隧道的完整日志（ngrok 自己的日志）在系统临时目录里以 `gherkai-tunnel-` 开头、文件名不含 watch 的 `.log` 文件，按修改时间取最新；`submit` 若打出「隧道已拆除」，这个 run 已经不可用，别再等它的结果，修好报错后重新提交。
 
-**安全一句要替人说出来**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`，引擎原生产物不脱敏，报告按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
+**向用户说明隧道的安全边界**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`，引擎原生产物不脱敏，报告按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
 
 **预热失败的四种消息**（都在 `status` 的 job 消息里，scope 没执行任何 step）：「隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受…」是令牌被拒（隧道已重建，或两侧隧道配置不一致），重新提交这次运行，仍出现时核对命令行工具与后端是否同版本；「隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie…」是会话 cookie 未通过校验（浏览器没有保存或没有带上会话 cookie，或隧道在预热期间重建），确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交；「隧道会话预热未能确认就绪（已尝试 3 次）…」是隧道已拆或浏览器到隧道入口的网络不通（预热的两个地址都由边缘直接响应，与本机应用是否在运行无关），确认隧道仍在后重新提交；「后端未传递会话预热地址，部署版本可能低于命令行工具…」是云端后端旧于命令行工具，请部署方 `gherkai deploy` 后重新提交。
 
@@ -86,7 +86,7 @@
 |---|---|---|
 | 以退出码 2 结束，说某引擎 worker 未找到 | 没装或不在 PATH | 照打印的装法装；或设 `GHERKAI_WORKER_<ENGINE>_CMD` |
 | `engine_error`，起 worker 失败 | worker 版本与 CLI 不一致 | 重装到同版本（第 1 节） |
-| 启动即抱怨 region 未设 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / 配置文件的 `region` / profile 配置五处都没有 region | 任选一处设上（第 4 节）；缺了不会自动兜一个 region |
+| 启动时报告未设置 region 的错误 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / 配置文件的 `region` / profile 配置五处都没有 region | 任选一处设上（第 4 节）；缺失时不会改用任何默认 region |
 | `AccessDenied` / 模型不可用 | region 未开通模型，或凭证缺 Bedrock / AgentCore 权限 | 换 region 或补权限（第 4 节） |
 | Midscene 侧某个 step 文件里的 step 全走了 AI、`list-deterministic` 清单里也没有它，且没有任何报错 | 扩展名用了 `.ts` / `.js`（收集阶段按扩展名过滤，静默跳过、不 import） | 改成 `.mts` / `.mjs` |
 | `plan` / `run` 以退出码 2 结束并点名某个 steps 文件 | 该文件加载失败 | 修那个文件，不是 feature |

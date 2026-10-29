@@ -44,7 +44,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个 AgentCore 会话 + 持续模型调用；并发越高，同时在线的会话和并行的模型调用越多，占用配额、抬高单位时间的消耗。总费用由 job 数与各 job 的原生用量决定，不随并发变化（见本节「CLI 默认值须与此对齐」条的实测；[0024](./0024-worker-core-protocol.md) cost）；例外是 fail-fast 早停时，并发越高，被中止前已产生的费用越多。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
 - 是**注入参数 + 保守默认**，不写死——本地全量可调高、配额紧可调低。
-- **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。2026-09-29 对齐回 4（`run` / `submit`，以及 `status --wait` 与 reconcile 缺值时的回落）。
+- **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。现 `run` / `submit` 的缺省，以及 `status --wait` 与 reconcile 缺值时的回落，都取 4。
 
 ### 失败隔离（默认隔离，可配 fail-fast）
 
@@ -80,7 +80,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 - **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--default-job-timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时不落乐观终态**：判定由同步与无状态两路共用的终结函数 `core.project.finalize_job` 给出（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」），依据首次仲裁落定的 `stop_reason`：作出停止决定那一刻 deadline 已过取 error+timeout（即使 fail-fast 标志也已置位），否则 fail-fast 中止取 ABORTED（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；没被主动停止、干净退出却没有 scope_done 的取 error+engine_error（进程报告成功而内容没发完，两者矛盾）。（本篇曾在 EOF 分支先判 `abort_flag` 再判 deadline，与事件分支的次序相反，已由 0034 机制二的首次仲裁规则统一。）
 - **`step_skipped` 归约（scope 内短路，不臆断因果的守法方式，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：worker 上游 step `error` 后短路后续 step、为每个发 `step_skipped`；core 归约成 `StepResult(status=skipped, shortcircuited=True)` 记进 step 明细，**但绝不把它写进 scenario 判定累加器**——scenario/job/run 判定只由那个上游 `error` step 决定，与"后面短路了几步"无关（step 级 skipped 零污染 scenario 归约/severity）。因果（"谁因谁短路"）只存在于 worker 的串行循环，core 作为纯 reducer 物理上看不到、也不臆断——它只忠实归约 worker 发来的 `step_skipped`，把"某步没跑"如实记进 `StepResult`。
 - **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。
-- **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。core 首次保留 step 级粒度（`StepResult` 层）。
+- **墙钟时长归约**（性能指标，与成本正交）：core 用注入的 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。
 
 ## 治理旋钮 = 注入参数 + 保守默认（贯穿原则）
 

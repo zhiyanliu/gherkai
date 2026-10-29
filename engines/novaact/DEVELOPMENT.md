@@ -40,7 +40,7 @@ uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker �
 
 执行入口是包入口 `python -m gherkai_worker_novaact`（即 `gherkai_worker_novaact/run_scope.py` 的 `main()`），它是被组合根 spawn 的薄 worker：core 自解析 `.feature`，把每个 step 经 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 协议派发给 worker（[ADR 0022](../../docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md)）。**pytest-bdd 入口（`bdd/` 层）已随 v0.x BDD 层退役删除**。
 
-`python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间任何包装层都会使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道）。
+`python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（worker 定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间任何包装层都会使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道）。
 
 常规路径是经 `gherkai` CLI 运行；调试时也可手动直接运行 worker（下列命令从 repo 根执行；`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
 
@@ -67,7 +67,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 | `GHERKAI_SESSION_WARMUP_URL` | 无（未设即不预热） | 隧道会话预热地址；组合根在 `--expose-local` 方式下与 `GHERKAI_EXTRA_HTTP_HEADERS` 一并注入，worker 在第一个 scenario 之前对网页目标导航一次以换取会话 cookie；只有额外请求头而没有预热地址时记 `precheck_failed`、不建会话（[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；常量在 `lib/constants.py`，预热逻辑在 `lib/tunnel_warmup.py` |
 
-使 CLI 指向本 checkout（dev 覆写，定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`；workspace 已装 editable 时通常**不需要**（第二级同 venv 即命中）。本引擎还有**第四级**：CLI 版本是纯发行版、且 `uvx` 在 PATH 时，回落到 `uvx gherkai-worker-novaact==<CLI 版本>` 拉起（uvx 虽是包装进程，实测不丢弃 fd3，也转发 SIGTERM）；midscene 没有这一级（`npx` 实测会替换 fd，事件全部丢失）。
+使 CLI 指向本 checkout（dev 覆写，worker 定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`；workspace 已装 editable 时通常**不需要**（第二级同 venv 即命中）。本引擎还有**第四级**：CLI 版本是纯发行版、且 `uvx` 在 PATH 时，回落到 `uvx gherkai-worker-novaact==<CLI 版本>` 拉起（uvx 虽是包装进程，实测不丢弃 fd3，也转发 SIGTERM）；midscene 没有这一级（`npx` 实测会替换 fd，事件全部丢失）。
 
 ## 鉴权（纯 IAM，不用 NOVA_ACT_API_KEY）
 
@@ -141,7 +141,7 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 
 真 build 已验证的三条约束：
 
-- **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；在 arm Mac 上不加该参数会 build 出 arm64 镜像，容器启动期报 `exec format error` 挂死（ADR 0033/0038）。
+- **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；在 arm Mac 上不加该参数会 build 出 arm64 镜像，容器启动期报 `exec format error`、无法启动（ADR 0033/0038）。
 - **经典 builder（无 buildx）会连未选中的 stage 一并执行**，故两个 stage 都对「本 stage 的参数未给」保持容忍（`if [ -n … ]`）；把关点在 final stage 的冒烟（`--capabilities`，不需要 AWS）：未给 build-arg 时在此处 fail-loud，不延后到 Fargate 启动期。
 - wheel 必须以**原文件名**安装：pip 从文件名解析发行名 / 版本 / tag，改名后 pip 以「Invalid wheel filename」拒绝安装。
 

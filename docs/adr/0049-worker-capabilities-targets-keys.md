@@ -48,7 +48,7 @@
 
 ### 2. 顶层 `targets` 必有；step 级缺键即「只在 desktop / web 上有实现」
 
-- 顶层 `targets` 是必有键：CLI 的契约校验对缺键按「worker 与命令行工具版本不一致」fail-loud，不再把缺键兜成「只有 desktop / web」。1.5 的两个 worker 都显式写出 `targets`；1.5 之前的 worker 不在支持范围内，与 definition 的结构版本（[0037](./0037-distribution-and-packaging.md) 决策 7）和 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)）同一取向：读端只认当前契约、不为旧写端留缺省。引擎能力矩阵文档的真值集取的是显式值（决策 8）。
+- 顶层 `targets` 是必有键：CLI 的契约校验对缺键按「worker 与命令行工具版本不一致」fail-loud，不再把缺键兜成「只有 desktop / web」。1.5 的两个 worker 都显式写出 `targets`；1.5 之前的 worker 不在支持范围内，与 definition 的结构版本（[0037](./0037-distribution-and-packaging.md) 决策 7）和 job 行的 `schemaVersion`（[0024](./0024-worker-core-protocol.md)）同一取向：读端只认当前契约、不为旧写端留缺省。
 - step 条目缺 `targets`：该 step 只在 desktop / web 上有实现。这是使用方 step 未声明目标时的缺省（注册面见 [0050](./0050-deterministic-step-handles-and-testing.md)），不是版本兼容路径，故保留。
 - 缺 `max_session_s`：该 worker 对此目标不施加会话级上限，job 只受墙钟预算约束。1.5 的 desktop 条目不带此键（浏览器会话的现有超时行为不在本 ADR 范围内）。
 - 缺 `requires`：该句柄在此目标上没有运行期前提。缺会话预热支持键：该 worker 不支持隧道会话预热，本机后端在 `--expose-local` 下于执行前预检中拒绝（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。

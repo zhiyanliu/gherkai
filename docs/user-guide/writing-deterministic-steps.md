@@ -8,7 +8,7 @@
 
 - 确定性 step 命中后走你自己的函数：不调模型、不投票、不产生模型费用，同一个页面状态永远给同一个判定。代价是它**不产生 AI 证据**——这一步的判定与耗时照常记进报告和退出码，但没有轨迹页或回放页可看（证据形态见 [`../internals/artifacts-and-evidence.md`](../internals/artifacts-and-evidence.md)）。
 - 分工是固定的：feature 作者（QA）只在 `.feature` 里写自然语言；确定性 step 由测试开发写在**你自己项目**的 `steps/` 目录里，不改引擎包的文件。
-- 成本与速度也是判据。AI step 每次判定都调用一次模型，投票再乘票数，一步要几秒到几十秒（模型往返与截图）；确定性 step 零模型费用、毫秒级完成，整套用例的墙钟与云端浏览器会话时长都跟着降。出现频次高的检查优先写成确定性：`Background` 里每条 scenario 都要重做的前置检查、`Scenario Outline` 每行数据都要过的断言、被要求投票的断言。费用量级见仓库首页的模型披露表。
+- 成本与速度也是判据。AI step 每次判定都调用一次模型，投票再乘票数，一步要几秒到几十秒（模型往返与截图）；确定性 step 零模型费用、毫秒级完成，整套用例的总耗时与云端浏览器会话时长随之缩短。出现频次高的检查优先写成确定性：`Background` 里每条 scenario 都要重做的前置检查、`Scenario Outline` 每行数据都要过的断言、被要求投票的断言。费用量级见仓库首页的模型披露表。
 
 ## `steps/` 目录与查找顺序
 
@@ -152,7 +152,7 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：命
 
 ## `description` 与 `example` 的作用
 
-两个字段都**必填**，缺一个则注册时报错、点名那条模式，worker 起不来。它们是 feature 作者唯一能看到的接口：
+两个字段都**必填**，缺一个则注册时报错、点名那条模式，worker 无法启动。它们是 feature 作者唯一能看到的接口：
 
 - `description`：一句话说明这一步做什么。`gherkai list-deterministic` 的「说明」列就是它，`gherkai plan` 的命中标注 `← 确定性: <说明>` 也用它。
 - `example`：一条可以直接抄进 `.feature` 的 step 文本，出现在 `gherkai list-deterministic` 的「示例」列。
@@ -164,9 +164,9 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：命
 
 被匹配的是关键字之后的 step 原文，`Given` / `Then` 本身不参与匹配：正则里不要写关键字（`example` 里带关键字是给 feature 作者照抄用的）。step 文本外层的双引号如果有，也算在被匹配的文本里。
 
-模式按**子串**匹配 step 文本（不要求整句吻合），并且一条 step 文本**最多只能命中一条**模式。命中多条时这一步记 `error` 并列出撞上的模式；`gherkai plan` 会提前把冲突标成 `← ⚠`，此时 plan 自己的退出码仍是 0。
+模式按**子串**匹配 step 文本（不要求整句吻合），并且一条 step 文本**最多只能命中一条**模式。命中多条时这一步记 `error` 并列出命中的全部模式；`gherkai plan` 会提前把冲突标成 `← ⚠`，此时 plan 自己的退出码仍是 0。
 
-引擎内建的导航与你注册的 step 进同一张表，**没有覆盖优先级**：模式撞上就是冲突，得收紧其中一条或改 step 措辞。
+引擎内建的导航与你注册的 step 进同一张表，**没有覆盖优先级**：两条模式同时命中一句 step 文本即为冲突，需收紧其中一条或修改 step 措辞。
 
 匹配只看文本、不看目标。命中之后，worker 再按这个 scope 的目标（桌面网页取 `playwright`，设备目标取覆盖该组合的 `webdriver` 条目）取实现；命中的 step 在当前目标上没有实现时，这一步**改由 AI 执行**，不会去找下一条能匹配的模式、也不记 `error`。`gherkai plan` 对这种 step 不标「确定性」，并在提示里说明它在该目标上没有实现、将由 AI 执行；`--json` 里它的 `deterministic` 为 `null`。
 
@@ -192,7 +192,7 @@ Nova Act 引擎只在桌面网页上运行：Python 侧也接受 `webdriver` 条
 
 1. **用带等待的判定，不用瞬时值，也不用固定等待。** Python 侧用 Playwright 的 `expect(...)` 一族（`expect(page.locator(sel)).to_be_visible(timeout=...)`、`to_have_text(...)`、`to_have_url(...)`），它自动重试到超时，超时抛 `AssertionError`，这一步记 `failed`。Midscene 侧用 `locator.waitFor({ state, timeout })` 与 `page.waitForURL(...)`。固定 `sleep` 既慢又照样抖。
 2. **等待超时不是断言。** `locator.wait_for(...)` / `locator.waitFor(...)` 超时抛的是 Playwright 的 `TimeoutError`，不是断言异常，这一步会记 `error` 而不是 `failed`，退出码与报告都会把它当执行错误。要让它记 `failed`，捕获后转成 `AssertionError`（Python）或 `DeterministicAssertion`（Midscene），转换时把现场补进消息。
-3. **给等待一个几秒的上限。** Playwright 默认 30 秒，一条 step 等满 30 秒会吃掉这个 scope 的墙钟预算（`@timeout`），也拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
+3. **给等待一个几秒的上限。** Playwright 默认 30 秒，一条 step 等满 30 秒，这 30 秒都计入这个 scope 的 job 墙钟预算（`@timeout`），也会拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
 4. **瞬态窗口内的多个动作合成一次页面内调用。** 页面只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用要往返几百毫秒，「点击、再点击、读数」分三次调用就落到了窗口之后，而本机单测因为浏览器就在旁边照样能过。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，step 代码只做断言。传字符串时注意 Node 版 Playwright 不会自动调用字符串里的函数表达式（Python 版会），要把参数拼成 JSON 字面量、写成立即调用的表达式。
 
 Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环境自带 Playwright。Midscene 侧**运行期不要 import `playwright`**：step 文件所在目录没有 `node_modules`，worker 只把 `@gherkai/worker-midscene` 这一个包名解析到自己那份，别的包名解析不到；`import type { Page } from "playwright"` 只当类型用、编译期擦除，可以写。

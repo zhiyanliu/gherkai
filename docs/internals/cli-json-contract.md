@@ -196,12 +196,12 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `engine` | `novaact` / `midscene` |
 | `available` | 本机能否启动该引擎的 worker |
 | `cmd` / `cwd` | 启动命令（数组）与工作目录（多为 null）；不可用时为 null |
-| `source` | 命中定位链的哪一级（`env …` / `同 venv 模块 …` / `PATH 可执行 …` / `uvx 兜底拉起 …`） |
+| `source` | 命中 worker 定位链的哪一级（`env …` / `同 venv 模块 …` / `PATH 可执行 …` / `uvx 兜底拉起 …`） |
 | `hint` | 不可用时的安装指引；可用时 null |
 
 ## `gherkai list-deterministic --engine <名> --json`
 
-顶层 `engine` + `deterministic_steps[]`，每项 `pattern`（正则，命中即按确定性 step 执行）、`description` / `example`（step 作者登记的说明与示例；
+顶层 `engine` + `deterministic_steps[]`，每项 `pattern`（正则，命中即按确定性 step 执行）、`description` / `example`（测试开发登记的说明与示例；
 写 `.feature` 时以 `example` 的表述为准）、`keywords[]`（这条 step 接受的 Gherkin 关键字，缺省为 Given、When、Then 全部）、`targets[]`（worker 原样报出的该 step 有实现的目标：每项 `device`、`ui_kinds[]`，可带 `requires[]`）与 `available_targets[]`（由本工具与该引擎支持的目标求交后的结果，形状相同；声明了但该引擎不支持的目标不在其中）。
 
 ## `gherkai doctor --json`
@@ -211,7 +211,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | 键 | 含义 |
 |---|---|
 | `section` | `cli` / `config` / `engines` / `steps` / `aws` / `backend` / `provider` |
-| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限 vs 云端 `stopTimeout`，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）/ `devices.project`（设备支持是否已部署：Device Farm 项目 ARN 是否在 SSM 中，未部署 ok=false/required=false）/ `devices.sessions`（该项目里未到 COMPLETED 的远程访问会话数与控制台链接，有残留 ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装，或装了多个部署 provider、本项不查时 ok=true/required=false；已安装但加载失败时 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检、或自检抛错时以它作项名） |
+| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限与云端 `stopTimeout` 的对比，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）/ `devices.project`（设备支持是否已部署：Device Farm 项目 ARN 是否在 SSM 中，未部署 ok=false/required=false）/ `devices.sessions`（该项目里未到 COMPLETED 的远程访问会话数与控制台链接，有残留 ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装，或装了多个部署 provider、本项不查时 ok=true/required=false；已安装但加载失败时 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检、或自检抛错时以它作项名） |
 | `ok` | 该项通过 |
 | `required` | false 表示可选能力缺失（另一个引擎未安装、未安装 deploy-aws extra、部署工具链缺项），不影响退出码；退出码取决于全部 required 项是否 ok |
 | `detail` | 一句说明：通过时给事实（命令、版本、ARN），失败时给处置办法 |

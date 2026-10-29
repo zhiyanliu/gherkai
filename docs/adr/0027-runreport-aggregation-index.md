@@ -89,7 +89,7 @@ class ReportStore(Protocol):
 ### href 相对化（local 相对 / cloud 恒等 ref）
 
 `collect_report_index` 经 `make_href(rr)` 回调算每条 `href`（`ref` 永远原样保留、不改写）：
-- **local**：`ref` 是本地文件（`file://` 或裸本地路径）且解析出的路径落在 run 目录树内 → `href` = 相对 run 目录的路径（`resolve()` 后再 `relative_to`，防 macOS `/tmp`↔`/private/tmp` symlink 造假 `ValueError`）；否则（远端 scheme `s3`/`http` / 落在树外，如 worker 没吃到落点环境变量而落 SDK 临时目录）→ `href` 回落 = `ref`（绝对，该条不可移植，有测试覆盖 + 文档注明「非所有 local href 都相对」）。
+- **local**：`ref` 是本地文件（`file://` 或裸本地路径）且解析出的路径落在 run 目录树内 → `href` = 相对 run 目录的路径（`resolve()` 后再 `relative_to`，防 macOS `/tmp`↔`/private/tmp` symlink 造假 `ValueError`）；否则（远端 scheme `s3`/`http` / 落在树外，如 worker 没吃到落点环境变量而落 SDK 临时目录）→ `href` 回落 = `ref`（绝对、该条不可移植——并非所有 local href 都相对）。
 - **cloud（S3）**：`href` 恒 = `ref`（`s3://` 全局可寻址、无相对必要）。
 - **只按 scheme 分支（`file://` 相对、其余 identity），绝不按 `kind` 分支**——后者才是铁律点名禁止的。为算相对 href 而 `urlparse` 解析 `ref` 字符串**不越铁律**：铁律「禁止解析」的宾语是产物**内容**（HTML/trajectory 字节），非 `ref` 指针串；「算一个链接」本就要读 `ref`。
 
@@ -115,8 +115,6 @@ class ReportStore(Protocol):
 - **每条只含 `href`（导航链接），不含 `ref`**（曾有 `ref` 字段，随 materialize 一并移除）。理由：① manifest 是**纯派生导航视图**，`href` 承担全部导航语义、无人读 `ref`（index.html 渲染只用 `href`；全仓无生产代码回读 manifest.json）；② 若保留 `ref`，`href` 相对化后 `ref` 因铁律必须留绝对（不能相对化它）→ 变成一条**无人读却泄漏机器路径的绝对 `file://`**。删 `ref` 既消冗余又消泄漏。**原始不透明指针 `ref` 的权威落盘处收敛到 `jobs/*.json`（ResultStore 判定真值）+ 内存 `RunResult`**——未来 WebUI/CI 要原始指针应去 ResultStore 取（判定真值），不向派生 report 视图要，这反而强化了三层分层。（这是 manifest schema 契约变更，本仓无 in-repo 消费者故低风险，仍记为契约变更防漂移。）
 - index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
-- `to_dict` 含 `job.engine`、`scenario.report_refs`（序列化补齐项）。
-- manifest **不冗余 status 当判定源**——`result` 里已有，CI 读 `result.status`，不读信封。
 
 ## index.html 形态
 

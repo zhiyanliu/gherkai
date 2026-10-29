@@ -54,7 +54,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 以退出码 2 结束，`worker 自述失败，拒绝运行`，末尾提到「worker 与命令行工具版本不一致——两者须同版本安装」 | worker 与 CLI 不是同一个版本 | 把两侧装成同版本：`uv tool upgrade gherkai`；Midscene 侧运行 `npm i -g @gherkai/worker-midscene@<gherkai --version 显示的版本>` |
 | `能力自述格式版本是 … 命令行工具认的是 …`、`自述的最短停止宽限不是非负有限数` | 同上，版本不一致的另一种形态 | 同上 |
 | `要问的是引擎 X 的 worker，回答的却自称 Y` | `GHERKAI_WORKER_*_CMD` 指到了另一个引擎的 worker | 改正该环境变量，或取消设置改用已安装的 worker |
-| Midscene worker 起不来，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
+| Midscene worker 无法启动，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
 | `plan` 打出「标注降级」 | 某个引擎的 worker 不可用，只影响命中标注 | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
 
 只提交云端 run 的人不必装任何 worker：`--backend cloud` 的 `run` / `submit` 不查本机 worker。
@@ -88,9 +88,9 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 归因 | 含义与处置 |
 |---|---|
-| `timeout` | 墙钟预算到点，或 Nova Act 的单次 AI 操作到点。见上表前两行 |
+| `timeout` | job 墙钟预算到点，或 Nova Act 的单次 AI 操作到点。见上表前两行 |
 | `network_error` | 网络瞬时故障（建连失败，或中途断网）。原样重新运行通常就能过 |
-| `engine_error` | worker 起不来、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
+| `engine_error` | worker 无法启动、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
 
 本机运行时的 worker 日志：前台 `run` 直接打在终端里，每行带 `[worker <scope_id>:out]` 或 `[worker <scope_id>:err]` 前缀，前缀的颜色只用来区分来源 scope（按 job 启动顺序分配，不用红绿），不表示严重程度；加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端运行时的日志位置见下面「云端后端」。
@@ -102,7 +102,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `引擎 X 的 worker 自述失败，拒绝运行：…`，后面附「常见成因是 steps/ 目录里的文件加载失败，或 worker 与命令行工具版本不一致」 | 这一句同时覆盖两种成因，真因在 worker 自己的报错里 | 先读 worker 那句报错：报错点名了具体文件就修该文件；只有一句解析错误、没有具体原因时，按上面「安装与版本」的版本不一致处理 |
-| 写了 `steps/` 却全部走 AI | 目录没被读到，或正则匹配不上 step 文本 | 用 `gherkai list-deterministic --engine <引擎> --steps-dir <目录>` 核对清单，再对照每条的 `example` 改 step 文本 |
+| 写了 `steps/` 却全部走 AI | 目录没被读到；Midscene 侧文件用了 `.mts` / `.mjs` 以外的扩展名（被跳过，不报错）；或正则匹配不上 step 文本 | 确认 `--steps-dir` 指对、扩展名改成 `.mts` 或 `.mjs`，再用 `gherkai list-deterministic --engine <引擎> --steps-dir <目录>` 核对清单，再对照每条的 `example` 改 step 文本 |
 
 ## 云端后端
 
@@ -120,7 +120,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 ## 提交后进度停住
 
-`submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进停了：本机后端下是那个后台进程已退出，云端后端下是事件链没有继续。用与 `submit` 相同的定位参数运行 `gherkai status <run_id> --wait`，这条命令既查询也接力，会把这个 run 推到终态。
+`submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进停了：本机后端下是那个后台进程已退出，云端后端下是事件链没有继续。用与 `submit` 相同的定位参数运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态。
 
 ## 隧道（`--expose-local`）
 
@@ -147,7 +147,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `安装包不存在：…（配置文件 [apps.<别名>.<平台>] 的 file）` | `file` 指向的文件不在 | 路径相对配置文件所在目录，核对路径与构建产物 |
 | 云端 run 的 `status` 为 `error`、状态行下有一行 `message=…` 说提交记录由更新或更早版本写出、不完整、或没有记 worker 镜像版本，没有任何 job 开始过 | 后端读到了它不能执行的提交记录：提交记录的格式版本与后端不一致、记录不完整，或没有记 worker 镜像版本 | 按 `message` 里的原因处置：提交记录由更新版本写出的，请部署方把后端升级到提交侧的版本，或用后端版本的 CLI 重新提交；由更早版本写出的，把提交侧的 CLI 升级到后端的版本后重新提交；其它情况重新提交 |
 | `status` / `explain` 以退出码 2 结束，`这个 run 的提交记录由更新版本的 gherkai … 写出` 或 `由更早版本的 … 写出` | 提交记录的格式与本机 CLI 不一致 | 更新的：`uv tool upgrade gherkai`；更早的：用写出它的那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或重新提交。同一个报告目录不要混用 1.4 与 1.5 的 CLI |
-| job 判 `error`、类别 `precheck_failed`，消息「这个 job 的格式版本是 …：命令行工具与 worker 的版本不一致」或「这个 job 没有带测试目标」 | 起 job 的命令行工具与 worker 不是同一版本 | 把两者装成同一版本；云端用与命令行工具同版本的 worker 镜像（部署方运行 `gherkai deploy`） |
+| job 判 `error`、归因为 `precheck_failed`，消息「这个 job 的格式版本是 …：命令行工具与 worker 的版本不一致」或「这个 job 没有带测试目标」 | 起 job 的命令行工具与 worker 不是同一版本 | 把两者装成同一版本；云端用与命令行工具同版本的 worker 镜像（部署方运行 `gherkai deploy`） |
 
 ## 其它以退出码 2 结束的错误
 

@@ -1,6 +1,6 @@
 # 0052. Appium 界面适配与平台差异处理
 
-> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；桌面路径行为不变。决策 2、3、4、5、6、7 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的事件契约与收尾顺序同日改写（接缝的 step 顺序与失败契约、能力结论与上下文句柄分开、分层表取代单条 `newCommandTimeout` 规则、evidence 只在失败步采集）。
+> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；桌面路径行为不变。
 
 ## 背景与问题
 
@@ -68,7 +68,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 输入 | `mobile: type` | W3C 活动元素 sendKeys（`element/active` 加 `element/value`），所在上下文由探测结果定 |
 | 按键 / 主屏 | `mobile: pressKey` | `mobile: pressButton` |
 | 坐标单位 | 截图像素 | 点，等于截图像素除以探测得到的比例 |
-| 导航 | 网页目标：探测结论为「提供」时在网页上下文调 `url`，「不提供」与「探测出错」都走 `mobile: deepLink` 交给系统浏览器。应用目标：`mobile: deepLink` 带 package 交给被测应用，发命令前按 RFC 3986 校验地址字符（驱动经 `adb shell am start -d` 传地址，`; ' ( )` 与非 URI 字符会让命令出错或截断，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；命令成功后核对前台包名 | 网页目标同左，路线由探测而非系统版本决定——实测 iOS 15.8 不支持 `mobile: deepLink`、iOS 26.3 只能 deepLink、iOS 18.6 先 deepLink 再用网页上下文会让网页命令全部挂住。应用目标：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台 |
+| 导航 | 网页目标：探测结论为「提供」时在网页上下文调 `url`，「不提供」与「探测出错」都走 `mobile: deepLink` 交给系统浏览器。应用目标：`mobile: deepLink` 带 package 交给被测应用，发命令前按 RFC 3986 校验地址字符（驱动经 `adb shell am start -d` 传地址，`; ' ( )` 与非 URI 字符会让命令出错或截断，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；命令成功后核对前台包名 | 网页目标同左，路线由探测而非系统版本决定（实测见「导航路线」）。应用目标：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台 |
 
 - **Android 输入用 `mobile: type`**：W3C 路线在 Android Chrome 上不可靠（见实测依据），而 `mobile: type` 快且 AI 步靠它全部通过。
 - **iOS 输入走 W3C 标准路线**：网页上下文可用时对网页活动元素 sendKeys，不可用时对原生活动元素 sendKeys；原生应用里同样走 W3C 路线。不用 Appium 旧版 `POST /keys`（转发到 WebDriverAgent 的 `/wda/keys`）。
@@ -183,7 +183,9 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 
 **重规划上限**：不设上限时失败的动作步无限重试；五页引导页的「跳过引导」用了 5 轮规划，上限 4 不够；iOS 示例应用翻十页找文本框需要到 12。
 
-**newCommandTimeout**：缺省 60 秒会在模型思考期间被服务端回收；它只计命令之间的空闲（见上「超时语义」）。从美国出网的公共真机上，国内网站页面加载实测 31 到 119 秒。
+**newCommandTimeout**：缺省 60 秒会在模型思考期间被服务端回收；它只计命令之间的空闲（见上「超时语义」）。
+
+**页面加载**：从美国出网的公共真机上，国内网站页面加载实测 31 到 119 秒（对照决策 6 分层表的 W3C `pageLoad`）。
 
 **`@midscene/ios` 对 Appium 端点的三处阻断**（对照 appium 2.11.5 与 xcuitest-driver 7.35.1 的路由表）：连接前要求 `GET /status` 响应带 `sessionId`，而 Appium 的 `/status` 只有 ready、message、build；建会话的 caps 不带 `appium:` 前缀，Appium 直接拒；手势、按键、启动应用走 `/wda/*` 直连路由，Appium 一律 404、只经 `mobile:` 命令暴露。
 

@@ -58,7 +58,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 不可能分叉的两道结构保证：
 
 - **同一张表**：内建脚手架（Nova `deterministic_steps.py` / Midscene `deterministic.steps.mts`）靠模块顶层 import 的副作用注册，使用方的 `steps/` 靠 `load_user_steps` / `loadUserSteps` 注册，两者写进的是同一个 `_REGISTRY` / `REGISTRY`；三个入口都在加载之后才分流。所以清单列出的、`plan` 标注的、实际执行时派发的，是同一份真值，**没有第二事实源可漂移**（这也是「外置清单文件」被拒的理由，见 ADR 0036 被拒方案）。
-- **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数与关键字如何处置」上分叉（实际执行时抛 `DeterministicConflict` / `DeterministicKeywordMismatch`，预检返回结构化 `{"conflict": [...]}` / `{"keyword_mismatch": …, "keywords": […]}`），匹配语义本身只有一份实现。
+- **同一个扫描面**：`match()` 与 `match_batch()` 共用 `_hits()`（Nova）、`match()` 与 `matchBatch()` 共用 `scan()`（Midscene）。两个消费者只在「命中数与关键字如何处置」上分叉（实际执行时抛 `DeterministicConflict` / `DeterministicKeywordMismatch`，用例预检的 match 查询返回结构化 `{"conflict": [...]}` / `{"keyword_mismatch": …, "keywords": […]}`），匹配语义本身只有一份实现。
 
 `plan` 因此仍然是**零 AWS、零花费、零副作用**，但它确实会启动进程：CLI 按引擎分组 step 文本，每个引擎会 spawn 一到数次瞬时本地 worker：match 查询一次（`compose.match_deterministic` → `compose._ask_worker`，带 `timeout_s` 预算，默认值见 code）；能力自述（`compose.query_capabilities`）成功后按引擎与 steps 目录缓存、目标核对与命中的目标核对共用一份，自述失败（超时、输出不合契约）不写缓存，后一步再问一次。自述入口不建立浏览器会话、不访问 AWS、秒级返回，因此「plan 不花钱」这一承诺仍然成立；不再成立的只是早期的「plan 不起 worker」。
 
@@ -102,7 +102,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | worker 启动即非零退出、stderr 指出某个文件 | 目录里**任一**文件 import 失败（语法/依赖错） | 修复该文件；Nova 用 `EX_STEPS_LOAD`（即 2）、Midscene 由 `bin.mts` 统一返回非零退出码（有意不用 `80`，那是网络故障退出码） |
 | `--steps-dir` / `GHERKAI_STEPS_DIR` / 配置文件的 `steps-dir` 指向的目录不存在 → 退出码 2 | 显式指定了一个位置，而该位置不存在或不是目录，即配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
 | `plan` 直接以退出码 2 结束，提示「向引擎 worker 查询确定性 step 失败，plan 拒绝出结果」并给出成因提示（使用方 steps 加载失败，或 worker 与 CLI 版本不一致）；有非桌面 scope 时，目标核对那一步的自述失败另提示「引擎 X 的 worker 自述失败，plan 拒绝出结果」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
-| `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎运行时未定位到（四级定位链全 miss），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
+| `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎的 worker 未能定位（worker 定位链逐级都未命中，Midscene 没有第四级），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 以退出码 2 结束，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
 | Midscene 报「某文件一条确定性 step 都没注册」 | 双实例守卫：裸 specifier 若解析到第二份包副本，注册会写进 worker 永不读取的表 | 确认文件 import 的是 `@gherkai/worker-midscene`，且在顶层调用了 `deterministic(...)` |

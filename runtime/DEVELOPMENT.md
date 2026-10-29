@@ -13,7 +13,7 @@
 包内七个模块（`__init__.py` 只有包说明、无逻辑）：
 
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
-  - **worker 拉起**：`resolve_worker_cmd`（四级定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
+  - **worker 拉起**：`resolve_worker_cmd`（四级 worker 定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
     midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 后端）/
     `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本

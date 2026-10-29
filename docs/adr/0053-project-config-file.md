@@ -1,6 +1,6 @@
 # 0053. 项目配置文件 gherkai.toml
 
-> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的用户面规则。决策 1、2、3、4、6 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写：设备解析的算法移入 0051 决策 3（本篇只留用户面语义）、`default-job-timeout` 的最后一层改为按目标补缺省、`os-version` 按点分段族匹配、`billing-method` 可按平台覆盖、资源名的入库指引，护栏补 `[devices]` 键集对照与设备段形态的测试（含账号不一致告警）。
+> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的用户面规则。
 
 ## 背景与问题
 
@@ -126,7 +126,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ## 边界与互链
 
-- [0048](./0048-test-targets-device-and-ui-kind.md)：`@device` 与 `@app` tag 的语义、Job 里 target 与设备选择字段的形态、别名缺失时的 FeatureContractError；本 ADR 只定这些值从哪里来。
+- [0048](./0048-test-targets-device-and-ui-kind.md)：`@device` 与 `@app` tag 的语义、Job 里 target 与设备请求的形态、别名缺失时的 FeatureContractError；本 ADR 只定这些值从哪里来。
 - [0049](./0049-worker-capabilities-targets-keys.md)：worker 能力自述的 `targets` 与 `max_session_s`；worker 自检据它记 `precheck_failed`，与配置文件无关。
 - [0050](./0050-deterministic-step-handles-and-testing.md)：确定性 step 的多句柄注册；`steps-dir` 只是其目录的又一个取值来源。
 - [0051](./0051-device-session-lifecycle-and-app-distribution.md)：设备解析的算法（列举、静态过滤、选择、零候选与繁忙等待）、获取预算的默认值与上界、超时类别、安装包的键布局、保留承诺与预签名、Device Farm 项目的建立与 SSM、权限（登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）、`billingMethod` 的费用模型。

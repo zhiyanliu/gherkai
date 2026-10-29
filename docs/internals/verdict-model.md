@@ -2,7 +2,7 @@
 
 > 本文讲**判定如何被计算**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。一个 run 的「结论」要经过四层归约、两根正交的轴、七个状态，以及各命令语义不同的退出码。单个 ADR 各只覆盖其中一片（0014 投票、0031 状态与 severity、0034 脱离后的退出码等），本文是这些切片合成的全景视图。
 
-姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、四种组合的推进链 → [执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件** → [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法 → [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发 → [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶 → [cloud-backend-carriers](./cloud-backend-carriers.md)。
+姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、四种组合的推进链见[执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件**见 [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法见 [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发见 [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶见 [cloud-backend-carriers](./cloud-backend-carriers.md)。
 
 ## 1. 四层归约：票 → step → scenario → job → run
 
@@ -99,7 +99,7 @@
 
 几处判据的由来与边界：
 
-- **两条中止路径分开归因的原因**：超时与 fail-fast **两条路径都会主动停 worker**（被停的 worker 随后可能以网络故障退出码退出），因此图上那道分叉的判据取首次仲裁落定的停止原因（`stop_reason`：作出停止决定那一刻 deadline 已过记超时、否则记 fail-fast 中止；`abort_flag` 只决定排队中的 job 记 `skipped` 与触发 `_stop_all`）、不看「是否被自己停过」这类笼统标志；无状态路径口径相同——`TaskExited.timed_out` 即 `stop_reason = timeout`，终结函数判 `ERROR` 并归因 `timeout`，因为该次 stop 本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
+- **判据不看「是否被自己停过」**：超时与 fail-fast 两条路径都会主动停 worker，被停的 worker 随后可能以网络故障退出码退出，所以那道分叉只取图注所说的首次仲裁结果（`stop_reason`），不看笼统的「被停过」标志。`abort_flag` 只负责传播 fail-fast 请求，排队中的 job 起 worker 前看到它即记 `skipped`，它不作归因依据。无状态路径的 `TaskExited.timed_out` 对应 `stop_reason = timeout`，因为该次停止本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
 - **`skipped` 不覆盖建连失败的原因**：建连失败的 job 已经建立过会话、已经计费，`saw_step == False` 只表示「可安全重试（无 act 副作用）」、不表示「未产生费用」，因此它照常进入 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。现状补充：`ScheduleOpts.network_retry` 默认 0 且 CLI 未暴露该参数，所以当前 `run` **不做**整个 job 的重新运行；生效的只有 worker 自身的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只包裹幂等的建连段），重试耗尽即以网络专用退出码退出。
 - 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 安全点提前上传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
 
@@ -134,22 +134,9 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 ## 5. 退出码：各命令的语义不同
 
-| 命令 | 退出码的语义 | `0` | `1` | `2` |
-|---|---|---|---|---|
-| `run` | **判定** | run 级 `passed` | 其余终态（`failed`/`error`，含伴随 error 的 skipped/aborted 批次）；另有一种情形：cloud 后端运行中落库不可达 | 开始执行前的配置或可达性问题 |
-| `status`（不带 `--wait`） | 查询是否成功（读到终态时才同时表达判定） | 已查到，**含未达终态**（查询本身成功） | 读到的终态非 `passed` | run 不存在 / 云端不可达 / 版本不匹配 |
-| `status --wait` | **判定** | 轮询到终态且为 `passed` | 轮询到终态但非 `passed` | 同上，另加「接力 Lambda 不存在（`--prefix` 配错或后端未部署）」 |
-| `submit` | 提交是否成功（不等于判定） | 已提交、`run_id` 已打印 | — | 配置或可达性问题 |
-| `plan` | 该批次能否运行（零 AWS、零副作用） | 可运行 | — | 配置错、写法错、使用方 steps 加载失败 |
-| `explain` | 证据是否读出（**从不表达判定**） | 已渲染——**run 判定为 failed 同样是退出码 0**；判定明细尚未落地也是 0 | — | 参数写错（如 `--step` 没同时给 `--scenario`）、run/scope 查不到、提交记录的结构版本本机不支持、云端读不到或 CLI 与后端版本不匹配 |
-| `doctor` | 必修项是否全部通过 | 全部通过 | — | 任一 `required` 项 fail（可选能力缺失只标 `-`，不影响退出码） |
-| `list-deterministic` | 该引擎有哪些确定性 step（纯本地、零 AWS） | 已列出 | — | `--steps-dir`（或 env、配置文件的 `steps-dir`）不是目录 / worker 定位不到 / 使用方 steps 加载失败 / 该引擎自述失败 |
-| `list-engines` | 本机的引擎环境状况 | **恒 0**（某引擎未安装正是要展示的信息，不算命令失败；判断某引擎是否已安装需看对应那一行，或用 `run`/`list-deterministic` 的退出码 2） | — | — |
-| `skill install` | agent skill 是否安装成功 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录 / 目标目录里已有非本命令安装的内容（无安装标记且非空，或同名路径是文件） / 包内 agent skill 缺失 / 写入失败（含指令文件那一行） |
+各命令每个退出码的含义见 [`running-and-results.md`](../user-guide/running-and-results.md)「退出码」，部署方命令 `deploy` / `destroy` 见 [`cloud-backend.md`](../user-guide/cloud-backend.md)「退出码与常见错误」；本节只讲判定从哪里来、CI 应接哪一条。
 
-归纳：**表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（理由见表）。
-
-部署方命令 `deploy`/`destroy` 不在本表口径内，但 `2` 与本表同源。`0` 为成功；`2` 是它们自身的前置或校验失败：缺 Node 或找不到 cdk、`--vpc` 缺值或取值不符、容器引擎名不被识别、`push-worker` 的架构与 skew 拦截，都在变更账户资源之前拦下；唯一例外是 `push-worker` 推送途中的 AWS 调用失败，也归 `2`，但那时镜像与 revision 可能已写入账户。`1` 有两种来源：cdk 自身失败（cdk CLI 报错多为 1，原样透传），或 cdk 已成功而其后的 worker 镜像步骤失败；两者都意味账户可能已被改动，重新运行 `gherkai deploy` 幂等收敛。其余退出码同样是 cdk CLI 返回值的原样透传，均不按判定退出码解读。给使用者的口径见 `docs/user-guide/cloud-backend.md`「退出码与常见错误」。
+归纳：**表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
 
 `run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读可能停在 pending 的落库态）；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 

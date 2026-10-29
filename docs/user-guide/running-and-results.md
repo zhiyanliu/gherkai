@@ -54,14 +54,14 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `gherkai submit <feature...>` | 提交这个 run 并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |
 | `gherkai explain <run_id> [<scope_id>]` | 看每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判。用例没过时先运行这个命令 | `--scenario`、`--step`、`--all`、`--full`、`--json` |
-| `gherkai list-engines` | 列出本机两个引擎 worker 的拉起命令与来源，没装的那个原地给安装提示 | `--json` |
+| `gherkai list-engines` | 列出本机两个引擎 worker 的拉起命令与来源，没装的那个在同一行给出安装提示 | `--json` |
 | `gherkai list-deterministic` | 列出某个引擎支持的确定性 step（含项目 `steps/` 里的），写 feature 时据此复用 | `--engine {midscene,novaact}`（默认 `novaact`）、`--steps-dir`、`--json` |
 | `gherkai doctor` | 只读自检：CLI 版本、引擎 worker、实际使用的模型、`steps/` 加载结果；装了部署工具链（Node、cdk、容器引擎）时连带自检它；给了 `--backend cloud` 或 `--prefix` 时再查凭证、后端资源与后端版本 | `--backend cloud`、`--prefix`、`--report-dir`、`--steps-dir`、`--json` |
 | `gherkai --version` | 打印 CLI 版本 | — |
 
-`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停了或卡住时，来查的这条命令会把这个 run 推到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
-使用云端后端时 CLI 不能新于后端（正常保持同版本）：后端记一个版本戳，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前拿它比对 CLI 版本，CLI 比后端**新**时拒绝执行并以退出码 2 结束（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常执行。后端还没有版本戳（部署早于本版本、从未升级）时，带设备目标或用了 `--expose-local` 的 run 以退出码 2 结束、请部署方先升级部署，其余 run 只提示、照常执行。升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
 提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；只有这类在派发前就不能执行的 run 才有这一行，job 自身的失败原因看 `explain`。
 
@@ -105,7 +105,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 ## 退出码
 
-每条命令的退出码回答的是不同的问题。本页这几条命令里，表判定的只有 `run` 与 `status`，也只有它们的退出码会是 1；部署方命令的退出码见 [`cloud-backend.md`](./cloud-backend.md)。
+每条命令的退出码回答的是不同的问题。本页这几条命令里，退出码表示判定结果的只有 `run` 与 `status`，也只有它们的退出码会是 1；部署方命令的退出码见 [`cloud-backend.md`](./cloud-backend.md)。
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
@@ -114,10 +114,11 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但有用例失败或出错 | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
 | `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
-| `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细还没落地同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致 |
+| `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细尚未写出同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一必修项失败（可选能力缺失只标 `-`，不影响退出码） |
 | `list-deterministic` | 这个引擎有哪些确定性 step | 列出来了 | — | `--steps-dir` 指的不是目录、worker 定位不到、`steps/` 加载失败、该引擎的 worker 自述失败（多为 worker 与 CLI 版本不一致，处置见 [`troubleshooting.md`](./troubleshooting.md)） |
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
+| `skill install` | agent skill 装上了吗 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录、目标目录里已有不是本命令装的内容、包内 agent skill 缺失、写入失败 |
 
 分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，开始执行之后的结论是退出码 0 或 1。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
@@ -163,12 +164,12 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - 默认展开状态为失败、出错、被跳过的步；通过的步只列一行。
 - `--step N` 点名的那一步连通过也展开，须与 `--scenario` 同给；`--all` 让通过的步也展开。
 - 文本形态是摘要：每次 AI 调用只显示最后一段推理与它的截图地址，`--full` 逐帧全文，`--json` 内嵌完整证据。
-- `explain` 从不表判定，用例失败它照样以退出码 0 结束。`submit` 提交的 run 还没到终态时判定明细还没落地，它会提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分。
+- `explain` 的退出码从不表示判定结果，用例失败它照样以退出码 0 结束。`submit` 提交的 run 还没到终态时判定明细尚未写出，它会提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分。
 - 哪一步没有 AI 证据（确定性 step 本就不产，或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 
 ## 费用量级
 
-`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话）。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 有墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超预算即被停掉，防止任务卡住时持续计费。
+`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话）。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
 
 ## 机读输出
 
@@ -176,13 +177,13 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 
 ## 在 CI 里运行
 
-前台一条命令即拿表判定的退出码：
+前台运行时，一条命令的退出码就表示判定结果：
 
 ```bash
 gherkai run features/*.feature --quiet --max-concurrency 2
 ```
 
-后台运行把提交与收结果拆开，表判定的退出码来自 `status --wait`：
+后台运行把提交与收结果拆开，表示判定结果的退出码来自 `status --wait`：
 
 ```bash
 RUN_ID=$(gherkai submit features/*.feature --backend cloud --prefix gherkai-)

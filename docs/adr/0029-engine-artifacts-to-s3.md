@@ -13,7 +13,7 @@
 
 ## 决策核心：上传由注入的 S3 落点驱动，不由"worker 在哪跑"决定
 
-产物落点该由**组合根注入的 S3 落点配置**决定（有 → 传 S3 报 `s3://`，无 → 报 `file://`），而**不是**由执行环境（subprocess/fargate）决定（[0016](./0016-execution-architecture-core-lib-run-model.md)「注入、非 env-sniff」= 决策 C）。落点由**注入驱动**。落到使用方可选的后端与内部预演三态：
+产物落点该由**组合根注入的 S3 落点配置**决定（有 → 传 S3 报 `s3://`，无 → 报 `file://`），而**不是**由执行环境（subprocess/fargate）决定（[0016](./0016-execution-architecture-core-lib-run-model.md)「注入、非 env-sniff」= 决策 C）。落到使用方可选的后端与内部预演三态：
 
 - **`--backend cloud`（= Fargate worker，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）**：容器盘停即销毁、core 读不到 → **组合根强制注入 S3 落点**，worker 上传 S3、报 `s3://`（否则产物必丢，故 cloud 下注入不是可选）。这是用户侧云端后端的实态。
 - **`--backend local`（= subprocess worker）**：worker 与 core 同机、共享盘，core 直接读得到 → 报 `file://`、不传（不注入 S3 落点）。

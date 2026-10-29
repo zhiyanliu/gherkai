@@ -7,7 +7,7 @@
 
 ## 三条工作流
 
-| 文件 | 触发 | 干什么 |
+| 文件 | 触发 | 作用 |
 |---|---|---|
 | `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
 | `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 根 README 的 skill 安装命令钉本版 tag + 算出的版本与 tag 一致）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
@@ -34,11 +34,11 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 - **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
   且**重新运行旧版本不会动 `latest`**——`latest` 只在「本 tag 是全仓库版本序最大的**正式发行** tag」时才推。
 - **`pypi` 可重新运行**：`uv publish --check-url` 跳过已存在且逐字节相同的文件（内容不同则报错，不静默覆盖）。
-- **`npm` 可重新运行**：publish 前先 `npm view` 探一次，已发行就跳过（npm 不允许重发同版本）。
+- **`npm` 可重新运行**：publish 前先用 `npm view` 查询一次，已发行就跳过（npm 不允许重发同版本）。
 - **fork 不会误发**：`pypi` / `npm` 两个 job 带 `if: github.repository == 'zhiyanliu/gherkai'`。
 - **只认正式发行 tag `vX.Y.Z`**：`v1.4.0rc1` 这类预发行在 gate 第一步就被拦——它是合法 PEP 440
   但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440 到 semver 的转换件；
-  放进来就会「PyPI 发成功、npm 挂在 `npm version` 上」。演练 tag 因此**别 push 到本仓库**（下节）。
+  放行就会出现「PyPI 发布成功、npm 在 `npm version` 一步失败」的半发布状态。演练 tag 因此**别 push 到本仓库**（下节）。
 
 ## 一次性人工前置（可一遍做完）
 
@@ -86,7 +86,7 @@ npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名�
 两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 完成后核对一次
 （`docker manifest inspect ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本>` 匿名能读即可）；若为 private 才需进
 *Packages → 该 package → Package settings → Change visibility → Public*。基础镜像必须可匿名 pull——`gherkai deploy`
-的「同步基础镜像」一步靶的就是它（ADR 0038）。
+的「同步基础镜像」一步拉取的正是这些基础镜像（ADR 0038）。
 
 ### 5. 仓库本身必须是 public
 
@@ -119,9 +119,9 @@ uv publish --index testpypi          # 本地执行要 TestPyPI token（UV_PUBLI
   这就是 `release.yml` 的 `pypi` job 明明只上传产物、却仍带一步 checkout 的原因。
 - **TestPyPI 是独立账号体系**，占名与 trusted publisher 都要在 test.pypi.org 上另配一遍。
 - **本地构建出的版本是非纯净的**（形如 `1.3.0.post16.dev0+<sha>`，ADR 0037 决策 2b 把
-  `dirty`/`metadata` 显式打开了），**PyPI 与 TestPyPI 都拒收带 `+` 本地段的版本**——真要演练上传，
-  得站在一个干净的 tag commit 上。演练用的 tag **只打本地、不 push**（`git push` 上来就触发
-  `release.yml` 往真 PyPI 发；即便被 gate 的形态检查拦下，也是一次没必要的失败构建）。
+  `dirty`/`metadata` 显式打开了），**PyPI 与 TestPyPI 都拒收带 `+` 本地段的版本**——确需演练上传时，
+  须在一个干净的 tag commit 上构建。演练用的 tag **只打本地、不 push**（推送 `v*` tag 会触发
+  `release.yml`，通过 gate 后即向正式 PyPI 发布；即便被 gate 的形态检查拦下，也是一次没必要的失败构建）。
   不打 tag 时用 `uv publish --dry-run` 走完除上传外的全部流程。
 
 ## 本地静态校验（不推 tag 也能查大部分）
@@ -135,17 +135,17 @@ actionlint .github/workflows/*.yml
 uv build --all-packages --out-dir dist
 uv run --no-project python .github/scripts/check_dist_metadata.py --dist dist
 
-# 3) 等索引脚本（拿任意已发行的包版本试；退 0 = 可见）
+# 3) 等索引脚本（用任意已发行的包版本验证；退出码为 0 表示索引上已可见）
 WAIT_ATTEMPTS=1 bash .github/scripts/wait_for_index.sh pypi packaging 24.2
 WAIT_ATTEMPTS=1 bash .github/scripts/wait_for_index.sh npm @midscene/web 1.9.8
 ```
 
-**只有推真 tag 才能验的**：trusted publishing 的 OIDC 交换、attestation 真的落到 PyPI 上、
+**只有向本仓库推送正式 tag 才能验证的**：trusted publishing 的 OIDC 交换、attestation 真的落到 PyPI 上、
 npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真实传播窗口下的表现。
 
 ## 两态基础镜像 Dockerfile 的本地态 build（不发行也能验镜像）
 
-CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验镜像内容，用 local 态喂本地产物——命令与 build-arg
+CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验证镜像内容，用 local 态装入本地构建的产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
 `--build-arg WORKER_SOURCE=local`，context 即放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
 `… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。

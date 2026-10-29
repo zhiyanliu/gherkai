@@ -8,7 +8,7 @@ CLI 的人读输出里有一类内容是「多行同结构」的清单：`deploy
 
 ## 决策
 
-- **凡是「多行同结构」的清单，人读输出用表格渲染；库选 `rich`。** 归入的输出：`deploy list-workers` 的 variant 表、`list-engines`、`list-deterministic`、`status` 的 job 清单、`doctor` 的检查项（结果 / 检查项 / 说明三列；说明列长文本由表格折行，此前以「长文本不适合表格」排除它是判断失误，同日修正）。判据：一行一个同类对象、各行字段相同，才是表。
+- **凡是「多行同结构」的清单，人读输出用表格渲染；库选 `rich`。** 归入的输出：`deploy list-workers` 的 variant 表、`list-engines`、`list-deterministic`、`status` 的 job 清单、`doctor` 的检查项（结果 / 检查项 / 说明三列；说明列长文本由表格折行，此前以「长文本不适合表格」排除它是判断失误）。判据：一行一个同类对象、各行字段相同，才是表。
 - **层级结构用树渲染。** `run` 的判定汇总（job → scenario → step，下挂原因与产物地址）、`plan`（job → scenario → step 与派发标注）、`explain`（scope → scenario → step → AI 调用 → 推理与截图）三处此前靠两格缩进承载层级，改为 `rich` 的 `Tree`：引导线代替缩进，每一行属于哪个上级一眼可见。节点文字与此前相同，只有一处例外：`plan` 的标题行与统计行合并为根节点一行，`run` 汇总的标题行与总状态合并为根节点一行、总墙钟时长与成本合计作为根节点的子节点（不再有 `=====` 装饰）；其余节点的文字与字段名（`votes N/M`、`message:`、`thought:`、`screenshot:`、`error:`、`act N vote=`、`← 确定性:`）逐字不变，多行推理的续行仍对齐到 `thought: ` 之后，skill 与文档据此读取。**树不折行**：长的地址、原因、推理文本保持一行、由终端自行软换行，与此前纯文本一致，agent 复制产物地址不会被截断；实现上给树一个远超终端的名义宽度，表格才按终端宽度在单元格内折行。
 - **不改形态的**：进度事件流（逐行追加、边执行边打印，没有整体结构可排）。
 - **worker 日志前缀的颜色只标来源 scope，按 job 启动顺序分配，调色板不含红绿。** 本机 `run` 把 worker 的 stdout / stderr 逐行透传到 stderr，前缀 `[worker <scope_id>:out|err]` 上色是为了在并发交错的日志里分辨来源，与 out / err、与严重程度无关。此前按 scope_id 的 Python 哈希对 12 色取模：4 个 scope 约四成的运行会撞色，且字符串哈希按进程随机化，同一 feature 每次运行颜色不同；调色板含红绿，与本 ADR 的判定色冲突（红色前缀会被读成该 scope 出错）。改为按 job 启动顺序依次取色（同一次运行内前 8 个 scope 互不撞色、同一 plan 下颜色稳定），调色板为黄、紫红、蓝、青及其亮色共 8 种，红绿留给判定语义、白与默认色留给 core 自身的行。颜色开关与其它人读输出共用一份策略（`gherkai_core.termcolor`：`NO_COLOR` / `FORCE_COLOR` / `TERM=dumb` / 目标流是否终端），此前 worker 前缀只看 stderr 是否终端、不理会 `NO_COLOR`。
@@ -16,7 +16,7 @@ CLI 的人读输出里有一类内容是「多行同结构」的清单：`deploy
 - **选 `rich` 的理由**：自带东亚宽字符的宽度表，中文表头与 ASCII 数据对齐正确；表格、树、样式都是现成组件；非终端输出自动无色。被拒：`tabulate`——全角宽度要另装 `wcwidth` 才对，只有表格、没有树，不随终端宽度调整；继续手写对齐与缩进——每个渲染点各一份宽度逻辑，已经出过撑歪的事故；只给 `list-workers` 加框线——同一个 CLI 一处带框线、其它清单缩进文本，观感割裂；颜色一律不用——观感是这一层的目的，`rich` 的自适应把副作用压到了可接受。
 - **渲染面单点**：`gherkai_runtime.textui`（`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain` / `Text`）。`cli` 与 `deploy` provider 两个前端包都依赖 `gherkai-runtime`，把呈现件放在两者共同的依赖层，避免 provider 反向依赖 `cli`（包级循环）或各复制一份；`rich` 因此成为 runtime 的依赖，`cli` 与 provider 不直接 import rich、只经 textui（包括 `Text`）。core 不涉及。样式与宽度规则固定在 textui：圆角框线（`box.ROUNDED`）；表格宽度在终端取实际列数（窄终端也按实际列数，让 rich 自行收窄），非终端时不折行（管道、日志、CI 里每行保持一行，便于 grep）；**表格里标识列永不折断**（scope_id、session、示例、模式、tag、地址是逐字复制的对象），只有各渲染点显式声明的说明类列（`doctor` 的说明、`list-deterministic` 的说明与目标、`list-engines` 的拉起命令与安装指引）在终端宽度不够时在格内折行。
 - **`--json` 不变**：机读形态仍是原来的 JSON 文档（ADR 0041 决策三），表格与树只是文本视图。
-- **测试只断言内容与归属，不断言排版，且与运行测试的终端无关**：树的构造与渲染分开（`run_tree` / `plan_tree` / `explain_tree` 返回 `TreeNode`），归属测试按节点断言「原因挂在所属 step 下」；文本测试只断言节点或单元格文本出现、不出现（表格里同一行的多个单元格可按同行匹配），不断言空格数、框线或引导线字符；涉及渲染的测试包用 autouse fixture 固定关色、表格不按终端取宽，`pytest -s` 在真实终端里也不假红；排版与颜色开关在 runtime 有独立单测（宽度对齐、标识列不折断、无 ANSI 序列、上色时去色后文字完整、标记不解析、树不折行、`NO_COLOR` 非空才生效、`FORCE_COLOR`）。此前按整行断言的测试改为按内容断言。
+- **测试只断言内容与归属，不断言排版，且与运行测试的终端无关**：树的构造与渲染分开（`run_tree` / `plan_tree` / `explain_tree` 返回 `TreeNode`），归属测试按节点断言「原因挂在所属 step 下」；文本测试只断言节点或单元格文本出现、不出现（表格里同一行的多个单元格可按同行匹配），不断言空格数、框线或引导线字符；涉及渲染的测试包用 autouse fixture 固定关色、表格不按终端取宽，`pytest -s` 在真实终端里也不假红；排版与颜色开关在 runtime 有独立单测（宽度对齐、标识列不折断、无 ANSI 序列、上色时去色后文字完整、标记不解析、树不折行、`NO_COLOR` 非空才生效、`FORCE_COLOR`）。
 
 ## 影响面
 

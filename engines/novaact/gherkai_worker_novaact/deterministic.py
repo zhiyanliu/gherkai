@@ -70,7 +70,7 @@ class Handles:
 class _Entry:
     pattern: re.Pattern
     raw: str  # 原始模式串（报错/调试/自述用）
-    description: str  # 人话元数据（ADR 0036）：这步做什么（给 feature 作者读）
+    description: str  # 供 feature 作者阅读的元数据（ADR 0036）：这步做什么
     example: str  # feature 里怎么写（可直接抄的 step 文本）
     keywords: tuple[str, ...]  # 适用的关键字（ADR 0050 决策 1），缺省全部三个
     handles: Handles

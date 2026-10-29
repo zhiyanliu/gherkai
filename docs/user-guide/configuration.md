@@ -40,7 +40,7 @@ worker-variant = "with-steps"
 
 [devices]
 billing-method = "METERED"     # METERED / UNMETERED，平台子表可覆盖
-acquire-timeout-s = 900        # 获取设备的预算秒，不给为 600，最大 3600
+acquire-timeout-s = 900        # 获取预算（秒）：到被测对象就绪为止，不给时为 600，最大 3600
 project-arn = "arn:aws:devicefarm:us-west-2:123456789012:project:…"   # 只供本机后端
 app-bucket = "my-team-gherkai-apps"                                   # 只供本机后端
 
@@ -55,7 +55,7 @@ android = { file = "build/app-release.apk", package = "org.wikipedia" }
 ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" }
 ```
 
-**`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前面的 `--`，取值经与命令行同一套校验，写错的值报错与在命令行上给错一样。对当前命令不存在的键忽略（配置文件是项目级的，各命令只取自己有的）。
+**`[common]` 与 `[cloud]` 的键名与命令行选项名相同**：键名是选项长名去掉前面的 `--`；取值按对应命令行选项的同一套类型与取值范围校验，写错的值以退出码 2 结束，并点名配置文件、节与键。对当前命令不存在的键忽略（配置文件是项目级的，各命令只取自己有的）。
 
 | 节 | 键 | 对应选项出现在 |
 |---|---|---|
@@ -72,9 +72,9 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 **只影响本次调用的选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--all`、`--full`、`--fail-fast`、`--no-report`、`list-deterministic` 的 `--engine`、`--config` 本身与位置参数。写进文件会让某次调用的范围、输出或中止方式在不显眼处改变。不认识的节或键以退出码 2 结束并点名文件、节与键，不静默忽略。
 
-**`[devices]`**：`billing-method`（`METERED` / `UNMETERED`，不给为 `METERED`）、`acquire-timeout-s`（获取设备的预算秒，不给为 600，不得超过 3600）、`project-arn` 与 `app-bucket`（只供本机后端：远程访问会话所属的 Device Farm 项目，与放安装包的 S3 桶；云端后端用部署时建立的项目与产物桶，这两项在云端不生效、只提示一句）。每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给 `arn`（指定一台设备）或 `os-version`（按系统版本挑选：`"18"` 命中 `18.x.y`，`"18.6"` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`；要写成字符串，写成数字会被当成浮点数读、以退出码 2 结束），两者都给以退出码 2 结束；子表里的 `billing-method` 覆盖 `[devices]` 顶层的值。有某平台设备 scope 的 run，该平台没有任何来源指定设备时，`run` / `submit` 在提交前以退出码 2 结束，`plan` 标注并警告。设备 ARN 与项目 ARN 只核对形态的服务与资源类型段：把项目 ARN 贴进设备 ARN 这类错在提交前以退出码 2 结束并点名贴错的类型；设备不存在、已下架等到 worker 建会话时才会报出。本机后端下 `project-arn` 所属账号与当前凭证所属账号不一致时提交前警告并点名两个账号，不拦截。
+**`[devices]`**：`billing-method`（`METERED` / `UNMETERED`，不给为 `METERED`）、`acquire-timeout-s`（获取预算：从开始查找设备到被测对象就绪的时间上限（含应用安装与预热），单位秒；不给时为 600，不得超过 3600）、`project-arn` 与 `app-bucket`（只供本机后端：远程访问会话所属的 Device Farm 项目，与放安装包的 S3 桶；云端后端用部署时建立的项目与产物桶，这两项在云端不生效、只提示一句）。每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给 `arn`（指定一台设备）或 `os-version`（按系统版本挑选：`"18"` 命中 `18.x.y`，`"18.6"` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`；要写成字符串，写成数字会被当成浮点数读、以退出码 2 结束），两者都给以退出码 2 结束；子表里的 `billing-method` 覆盖 `[devices]` 顶层的值。有某平台设备 scope 的 run，该平台没有任何来源指定设备时，`run` / `submit` 在提交前以退出码 2 结束，`plan` 标注并警告。CLI 只核对设备 ARN 与项目 ARN 的服务段与资源类型段：把项目 ARN 贴进设备 ARN 这类错在提交前以退出码 2 结束并点名贴错的类型；设备不存在、已下架等到 worker 建会话时才会报出。本机后端下 `project-arn` 所属账号与当前凭证所属账号不一致时提交前警告并点名两个账号，不拦截。
 
-**`[apps]`**：每个别名一张子表，按平台各给一个条目：`file`（本地安装包，相对配置文件所在目录）加 `package`（Android 包名）或 `bundle-id`（iOS），两项都要显式给出。用例里只写 `@app:<别名>`。`plan` 只核对安装包存在；`run` / `submit` 把安装包按内容哈希放进 S3（键 `apps/<sha256>/<文件名>`，同一文件一个 run 只传一次）并把位置写进提交记录。云端后端放进部署的产物桶：对象带标签 `gherkai=app`、14 天后过期，已提交 run 引用的对象自提交起至少保留 7 天（复用时按对象年龄刷新）；本机后端放进 `app-bucket` 指定的桶，只复用、不打标签、不清理。安装包超过 500 MB 警告不拦。
+**`[apps]`**：每个别名一张子表，按平台各给一个条目：`file`（本地安装包，相对配置文件所在目录）加 `package`（Android 包名）或 `bundle-id`（iOS），两项都要显式给出。用例里只写 `@app:<别名>`。`plan` 只核对安装包存在；`run` / `submit` 把安装包按内容哈希放进 S3（键 `apps/<sha256>/<文件名>`，同一文件一个 run 只传一次）并把位置写进提交记录。云端后端放进部署的产物桶：对象带标签 `gherkai=app`、14 天后过期，已提交 run 引用的对象自提交起至少保留 7 天（复用时按对象年龄刷新）；本机后端放进 `app-bucket` 指定的桶，只复用、不打标签、不清理。安装包超过 500 MB 时给出警告，但不阻止提交。
 
 **路径类值相对配置文件所在目录**：`steps-dir`、本机后端下的 `report-dir`、`[apps]` 里的 `file`。选项与环境变量里的路径仍相对运行命令的当前目录。云端后端下的 `report-dir` 不是路径，是产物桶内的键前缀，原样使用。
 
@@ -195,7 +195,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
 | `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
-| `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让预检算出的分组与实际运行一致 |
+| `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让用例预检列出的每个 job 的票数与实际运行一致 |
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
 | `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 接力本机后端时用得上。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |

@@ -8,12 +8,12 @@
 
 | | Nova Act（`novaact`，默认引擎） | Midscene（`midscene`） |
 |---|---|---|
-| 被测 UI 语言 | **英文 UI**。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），投票治不了 | 不限。中文 UI 上动作与 AI 断言实测与英文同级可靠 |
-| 本机安装 | `uv tool install 'gherkai[local]'` 与 CLI 同环境；正式发行版还能临时拉起 | `npm i -g @gherkai/worker-midscene`（Node ≥ 22），必须真装 |
+| 被测 UI 语言 | **英文 UI**。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），增加投票也无法纠正 | 不限。中文 UI 上的动作与 AI 断言和在英文 UI 上同样可靠 |
+| 本机安装 | `uv tool install 'gherkai[local]'` 与 CLI 同环境；正式发行版还能临时拉起 | `npm i -g @gherkai/worker-midscene`（Node ≥ 22），必须实际安装 |
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
 | 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认锁定，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认锁定，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
-两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 配置文件的 `region` > profile 配置，五处都没有就报错、不猜默认，见 `references/setup-and-diagnosis.md` 第 4 节）；浏览器运行在云端、本机不装 Chromium。
+两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（解析顺序见 `references/setup-and-diagnosis.md` 第 4 节；哪一处都没有就报错，不采用默认值）；浏览器运行在云端、本机不装 Chromium。
 
 **诊断规则**：Nova Act 引擎下非英文页面的断言判否，先排查语言面，再怀疑被测应用。三条出路：scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`）；断言改写成页面级语义陈述（「当前是 X 的词条页」「页面没有报错」）；文本与结构检查改成确定性 step。
 

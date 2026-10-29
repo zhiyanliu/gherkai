@@ -115,7 +115,7 @@
       "col": 3,
       "type": "database",
       "label": "同一张注册表",
-      "sublabel": "模式 → handler",
+      "sublabel": "模式对应 handler",
       "width": 152
     },
     {

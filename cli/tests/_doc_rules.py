@@ -59,7 +59,7 @@ RETIRED_TERMS_WORDS = (
     "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
     "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent", "维护者",
     "本批", "这一批", "整批",
-    "深层链接", "深链", "隧道预热", "设备会话",
+    "深层链接", "深链", "隧道预热", "设备会话", "真机会话",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
 # 注释与 docstring 用的退役表去掉「批」义三词：Lambda 与 Stream 侧的注释里「本批 / 整批」指 DynamoDB Stream 一次投递的

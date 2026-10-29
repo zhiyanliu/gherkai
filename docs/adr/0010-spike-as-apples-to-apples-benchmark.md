@@ -36,7 +36,7 @@
 - Nova Act → **每次 `act`/`act_get` 各一个 trajectory HTML**（本用例 11 个：1 动作 + 10 断言），默认落 **系统临时目录** `$TMPDIR/..._nova_act_logs/<sessionId>/`。
 - → 「报告统一」要面对三处差异：单文件 vs 多文件、项目内 vs 临时目录、截图+坐标 vs 逐 act trajectory。**v1.0 已由 [0027](./0027-runreport-aggregation-index.md) 兑现，且结论是「不融合原生产物内容」**——只做跨引擎归集索引（产物形态见该 ADR），链接各自原生产物、不解析融合其内容，故这三处差异不必在报告层抹平。
 
-**② Nova Act 报告默认落临时目录、会被系统清理**——留不住、不可追溯。`NovaAct(logs_directory=...)` 可固定到项目内（类比 Midscene 的 `midscene_run/`）。spike 阶段尚未固定（用例已验证通过即可），后续接入生产链路时应设 `logs_directory` 并 gitignore。
+**② Nova Act 报告默认落临时目录、会被系统清理**——留不住、不可追溯。`NovaAct(logs_directory=...)` 可固定到项目内（类比 Midscene 的 `midscene_run/`）。spike 阶段尚未固定（用例已验证通过即可），后续接入生产链路时应设 `logs_directory` 并 gitignore（已兑现，见下「spike→生产差异」）。
 
 **③ 两个引擎的 AI「断言」机制**：spike 里用了不对称写法（Midscene `aiAssert` 抛错式 / Nova Act `act_get(BOOL_SCHEMA)` 取布尔再判定）。**但实际可对称**（2026-06 查证安装源码）：Midscene 有 `aiBoolean(prompt) -> Promise<boolean>`，与 Nova Act `act_get(..., BOOL_SCHEMA)` 形态完全一致（问是非、拿布尔、不抛错）。Midscene 取结构化的全家族：`aiBoolean / aiNumber / aiString / aiQuery<T> / aiAsk`（对标 act_get 的标量与通用版）；`aiAssert` 则是 Nova Act 无对应的抛错式断言。→ 抖动治理（ADR 0014）应统一走 `aiBoolean` ↔ `act_get(BOOL_SCHEMA)` 的对称布尔路径，便于两个引擎都在布尔值上做投票（对称有边界：命题措辞含歧义时两引擎判定可能分叉，见 [0018](./0018-generic-steps-capability.md)「两个引擎对称（精确化）」条的负向验证）。
 

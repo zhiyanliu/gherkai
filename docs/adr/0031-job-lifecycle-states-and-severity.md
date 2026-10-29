@@ -38,7 +38,7 @@ class Status(str, Enum):
 > **aborted 只认 fail-fast，不认 timeout**（实装关键，别踩）：超时与 fail-fast **两条路径都会主动停 worker**，被停的 worker
 > 随后可能以网络故障退出码退出。本 ADR 的 aborted **仅对应 fail-fast 中止**（`abort_flag` 触发、且按 [0034](./0034-detached-batch-reconciler.md) 机制二首次仲裁落定为 `stop_reason = abort`）；**超时杀的 job 维持 `error` + `errorType=timeout`**
 > （[0026](./0026-schedule-module.md)/[0028](./0028-transient-network-ssl-resilience.md)），**不归 aborted**。判定条件要按来源拆开——
-> 看停止决定那一刻落定的 `stop_reason`、不看「是否被自己停过」这类笼统标志，否则会把超时和 fail-fast 两类语义不同的中止混成一类、丢掉 timeout 分类。
+> 看停止决定那一刻落定的 `stop_reason`（超时与 fail-fast 同时成立取 timeout），不看终结时刻的 `abort_flag`、也不看「是否被自己停过」这类笼统标志：后者会把超时和 fail-fast 两类语义不同的中止混成一类、丢掉 timeout 分类；前者在先判 timeout、收尾期间别的 job 才触发 fail-fast 时已置位，按它判定会改写已落定的原因。
 >
 > **network 重试耗尽的 job 也不是 skipped**：[0028](./0028-transient-network-ssl-resilience.md) 的 core 层 network 重试门槛是
 > 「network_error 且 `saw_step=False`」，耗尽后该 job 记 `error`。它同样 `saw_step=False`，但**已经开过会话/建连尝试（已计费）**——
@@ -186,10 +186,10 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 ## touch points（落点指针）
 
 - `core/gherkai_core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
-- `core/gherkai_core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 作出停止决定 → 首次仲裁落定 `stop_reason = abort`，再调 `project.finalize_job` 按真值表在内容不完整时判 ABORTED（不论退出形态）；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（判定看的是该 job 在停止决定那一刻落定的 `stop_reason`（[0034](./0034-detached-batch-reconciler.md) 机制二首次仲裁；两者同时成立取 timeout），不看终结时刻的 `abort_flag`、也不看「是否被自己停过」这类笼统标志——超时与 fail-fast 两条路径都会主动停 worker，而先判 timeout、收尾期间别的 job 才触发 fail-fast 时 `abort_flag` 已置位，按它判定会改写已落定的原因）。
+- `core/gherkai_core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 作出停止决定 → 首次仲裁落定 `stop_reason = abort`，再调 `project.finalize_job` 按真值表在内容不完整时判 ABORTED（不论退出形态）；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（判定看该 job 停止决定那一刻落定的 `stop_reason`，判据与理由见决定一「aborted 只认 fail-fast，不认 timeout」注）。
 - `core/gherkai_core/project.py`：`finalize_job`（终结函数：`stop_reason = abort` 且内容不完整 → ABORTED，[0034](./0034-detached-batch-reconciler.md) 机制二）；`_aggregate`（入口过滤 `_NON_VERDICT`；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；收到 `scope_done.status = error` 后合成 scenario 级 SKIPPED 与 `shortcircuited=False` 的 step 级 SKIPPED（决定一、决定六，合成态不进 `_aggregate`）。
 - `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）；`scope_done` 的可选 `status` / `errorType` / `message`（决定四，`status` 只接受 `error`）。
-- `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值（单测覆盖 skipped/aborted）；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
+- `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) touch points，非本 enum 的落点。）
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
 - `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。
 - `cli/gherkai_cli/__main__.py`：同步 `run` 的退出码读内存 `RunResult.status`（决定五数据源）；`status`/`--wait` 与 `explain` 的终态判定引 `TERMINAL_STATUSES`。

@@ -504,8 +504,8 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="334" y="379" class="t-muted" font-size="8" text-anchor="middle">排序递归 · 失败退出</text>
         </g>
 
-        <g id="node-registry" data-node-id="registry" data-node-label="同一张注册表" tabindex="0" role="button" aria-label="聚焦同一张注册表，模式 → handler, worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成" aria-pressed="false" data-node-kind="database" data-node-sublabel="模式 → handler" data-node-context="worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成">
-          <title>同一张注册表 · 模式 → handler · worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成</title>
+        <g id="node-registry" data-node-id="registry" data-node-label="同一张注册表" tabindex="0" role="button" aria-label="聚焦同一张注册表，模式对应 handler, worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成" aria-pressed="false" data-node-kind="database" data-node-sublabel="模式对应 handler" data-node-context="worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成">
+          <title>同一张注册表 · 模式对应 handler · worker 进程内：注册 · 查询 · 派发 › ① 写 · ② 装：注册表的构成</title>
           <rect x="466.4" y="341" width="152" height="52" rx="6" class="c-mask"/>
           <rect x="466.4" y="341" width="152" height="52" rx="6" class="c-database" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(472.4 347) scale(0.6875)">
@@ -513,7 +513,7 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
           <text data-node-label="" x="542.4" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">同一张注册表</text>
-          <text x="542.4" y="379" class="t-muted" font-size="8" text-anchor="middle">模式 → handler</text>
+          <text x="542.4" y="379" class="t-muted" font-size="8" text-anchor="middle">模式对应 handler</text>
         </g>
 
         <g id="node-ask" data-node-id="ask" data-node-label="③ 查询该表" tabindex="0" role="button" aria-label="聚焦③ 查询该表，清单 · 诊断 · 用例预检标注, worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游" aria-pressed="false" data-node-kind="external" data-node-sublabel="清单 · 诊断 · 用例预检标注" data-node-context="worker 进程内：注册 · 查询 · 派发 › ③ 查 · ④ 执行：注册表的下游">
@@ -589,4 +589,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=58f456f3ab9cf8669432c6c4081e5619b6d27ebd6bef41b7c7ad792b964fe8a1 -->
+<!-- gherkai:source-sha256=70988d1c78b0710a314741600fbbde1acfda9e6fa4628054cf4220fd31171f30 -->

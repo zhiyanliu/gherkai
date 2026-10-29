@@ -107,7 +107,7 @@ export interface DeterministicHandlers {
   webdriver?: WebdriverEntry | readonly WebdriverEntry[];
 }
 
-/** 人话元数据（ADR 0036）：注册即暴露——缺元数据的能力不可被 feature 作者发现，故必填、fail-loud。 */
+/** 供 feature 作者阅读的元数据（ADR 0036）：注册即暴露——缺元数据的能力不可被 feature 作者发现，故必填、fail-loud。 */
 export interface DeterministicMeta {
   description: string; // 这步做什么（一句话，给 feature 作者读）
   example: string; // feature 里怎么写（可直接抄的 step 文本）
@@ -236,7 +236,7 @@ function normalizeHandlers(pattern: string, handlers: DeterministicHandler | Det
 
 /** 注册：把句柄集合按正则 pattern 登记进注册表。pattern 用具名组 (?<name>...) 提取参数。
  * handlers 传单个函数等价于只有 playwright（ADR 0050 决策 1）。
- * meta 必填（ADR 0036：注册契约含人话元数据——description/example 缺失即 fail-loud）。 */
+ * meta 必填（ADR 0036：注册契约含供 feature 作者阅读的元数据——description/example 缺失即 fail-loud）。 */
 export function deterministic(pattern: string, handlers: DeterministicHandler | DeterministicHandlers, meta: DeterministicMeta): void {
   if (!meta?.description || !meta?.example) {
     throw new Error(`deterministic(${JSON.stringify(pattern)}) 注册缺 description/example：`

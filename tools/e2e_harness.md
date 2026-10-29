@@ -41,7 +41,7 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `--feature`   | `wikipedia_assertions` | `features/<名>.feature`，**不含后缀**                                                 |
 | `--votes`     | `1`                    | AI 断言投票次数（ADR 0014）                                                            |
 | `--interrupt` | `none`                 | 中断时机，见下表                                                                      |
-| `--run-id`    | **必填**               | 本次唯一 id → S3 `harness/<run-id>/` + 本地 `/tmp/harness-runs/<run-id>/` |
+| `--run-id`    | **必填**               | 本次运行的唯一 id，用作 S3 前缀 `harness/<run-id>/` 与本地目录 `/tmp/harness-runs/<run-id>/` 的名字 |
 | `--grace-cap` | `30.0`                 | SIGTERM 后超过该墙钟 worker 仍未退出 → 判 `hung=true` 并发 SIGKILL 强制终止          |
 | `--steps-dir` | `HARNESS_STEPS_DIR` / 空 | 使用方确定性 step 目录（ADR 0037 决策 4），注给 worker 的绝对路径；不给则 worker 一侧无使用方 step；目录不存在直接报错退出 |
 

@@ -22,7 +22,7 @@
 - **产物上传失败的日志不承诺「收尾会再传」**（文案不变量，两引擎措辞一致）：只说「什么没能上传 + 不影响什么」。「稍后/收尾会重试」在提前退出的三条路径（停止信号 / 网络耗尽 / 异常）上是假的——那些路径只对上传队列做有界排空、不跑整目录 flush（机制见 [0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」与 [0042](./0042-step-evidence-and-explain.md) 决策一）。同类保证若只活在某一个引擎的上传器注释里，另一个引擎迟早写反——曾有收尾日志承诺「scope 末 flush 兜底」而它所在的那条路径根本不跑 flush，故判据落在本 ADR、两引擎文案长期一致。**唯一例外（两引擎一致）**：收尾排空超时的那句可以说「剩余的改由收尾统一上传」，但只许出现在调用点已声明**其后紧跟整目录 flush** 的那条路径上（scope 正常结束的那一处；Nova `_drain_evidence_uploads(flush_follows=True)`、Midscene `drainArtifactQueue(…, flushFollows=true)`，参数必传、新调用点必须显式声明）；停止信号 / 网络耗尽 / 异常三条提前退出路径仍只说「已放弃 + 不影响什么」。判据：在那条路径上承诺为真——排空超时置的放弃标志只约束队列线程，整目录 flush 不受它约束，且 evidence 落在 flush 根内；含糊成统一的「链接可能打不开」反倒在会 flush 的路径上是假的悲观警告，违「只说发生了什么」。
 - 搬家规则：被删掉的指针若对 contributor 有价值，进紧邻注释或 docstring；docstring/注释**不在**本约束范围、鼓励保留 ADR 指针。
 - 例外：只在内部 API 被误用时才触发的契约型异常（`ValueError`/`RuntimeError`，永不因用户输入触发）可留一句点名内部符号的短诊断，但同样不写 ADR/决策字样。
-- 实装时顺带的原则性修正：Nova worker 的信号 handler 曾在 handler 内 `log()`——它不只是文案问题，还撞出 stderr `BufferedWriter` 重入崩溃；文案归安全点补打（细节在 [0024](./0024-worker-core-protocol.md) 终止契约）。
+- Nova worker 的信号 handler 内不写日志，「收到信号」的文案改由安全点补打：该 handler 曾直接 `log()`，这不只是文案问题，还引发了 stderr `BufferedWriter` 重入崩溃（细节在 [0024](./0024-worker-core-protocol.md) 终止契约）。
 
 ### 面二：文档分层（README / DEVELOPMENT 成对）
 
@@ -45,7 +45,7 @@ markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即�
 
 - `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表含 ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名与 construct 名 / 施工与失败语义行话，另收口头语、量词「档」与退役旧名（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八；真值集是该文件的 `FORBIDDEN`，见面一）；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下两条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
 - `cli/tests/test_package_readmes.py`：根 README 零禁词，禁词之外另扫口头语与退役旧名两张表（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八）；进包的六份 README 与 Release 正文的固定块 `.github/release_body_footer.md` 同属包页面，走 `_doc_rules.scan("package-page", …)`，规则束是用户文档的整套规则（内部指代、口头语、退役旧名、符号当谓语、「退 N」、正文箭头、悬空指针）再加零相对链接（正则 `](../` `](./` `](x.md`），固定块先代入占位符样例值再扫、另要求仓库链接锁定 tag（不带 `blob/HEAD/`）；pyproject / package.json `description` 零禁词，根有 `CONTRIBUTING.md`、每包有 `DEVELOPMENT.md`，且 `release.yml` 必须仍调 `release_notes.py check`/`render`、不得有内联 `body: |`；扫描面路径缺失即失败（包搬家 / workflow 改形态不许让护栏变绿）。
-- `cli/tests/test_skill.py`：随 wheel 发行的 agent skill 的 markdown 扫描器——同一禁词表与相对链接正则（从 `test_package_readmes.py` 抽成共享常量 `cli/tests/_doc_rules.py`），另对照 CLI argparse 真值与契约页键名（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策六）。
+- `cli/tests/test_skill.py`：随 wheel 发行的 agent skill 的 markdown 扫描器——同一禁词表与相对链接正则（共享常量 `cli/tests/_doc_rules.py`），另对照 CLI argparse 真值与契约页键名（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策六）。
 - **护栏管不到的**：正则抓不住的行话（皮 / 装配 / 唯一真源 / 产品本体层）与「使用者读得懂吗」的判断，靠 review——两轮对抗核验都在这一类抓到过遗漏（runtime 页面整篇行话、`--grace` 漏标「仅 run」、定位链顺序写反）。**review 抓到的行话只要能正则化就入表、不留在这一类**：上传与收尾的失败语义那族（best-effort / 抢传 / flush 兜底 / 不带 ref）曾在两引擎 worker 日志各留过几行、全靠人眼 review 才发现，此后已入表；留在这一类的是词形不固定、只能靠读的那些。
 
 ## 代价与权衡

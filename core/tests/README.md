@@ -35,7 +35,7 @@ moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串
 
 ### 一次性：建真表 + 真桶
 
-集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。在会话里给下面各条加 `!` 前缀可直接执行：
+集成测试**假定表/桶已存在**（建表建桶归 IaC，adapter 不自建——ADR 0016/0030 决定六）。用你自己的测试账号建一次（us-east-1、default profile；名字自取，下面用示例名）。
 
 ```bash
 # DDB 表：分区键 run_id (HASH, S) + 排序键 item_type (RANGE, S)，按量计费（省钱）
@@ -73,6 +73,6 @@ uv run pytest                           # 仍只运行单测（集成默认 dese
 
 ## 三重保险：`uv run pytest` 永远不连真 AWS
 
-1. **根** `pyproject.toml` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是挂死安全网——FargateEngine 等-STOPPED 轮询若测试忘换假 ecs 会无限轮询，60s 后 pytest-timeout 报错而非 CI 无限挂）。
+1. **根** `pyproject.toml` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是防挂死的安全网：FargateEngine 会一直轮询到任务进入 STOPPED 状态，测试替身若始终不返回 STOPPED，轮询就不会结束；60 秒后由 pytest-timeout 报错，CI 不会一直挂起）。
 2. `real_aws` fixture：没设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量就 `skip`。
 3. `_fake_aws_creds`（autouse）：对**非** integration 标记的测试盖假凭证——单测即便误发网络请求也连不上真 AWS。

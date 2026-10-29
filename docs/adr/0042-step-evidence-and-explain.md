@@ -80,7 +80,7 @@
 
 **上传时机分两类**。`evidence.json` 的 ref 必须随 `step_done` 走 → emit 前经 `to_report_ref` 即时上传拿 ref。**截图不在判定临界路径上传，但也不等到 scope 末**：URI 用上传器同一 key 规则确定性算出（`ref_for`）写进 evidence.json；`step_done` **发出之后**把截图路径交给上传器的**后台队列**（单线程 FIFO、顺序上传、同一 key 规则、成功记入已传集合让 flush 跳过、失败重试一次后记一行日志放弃），主流程立即进下一 step。scope 末与三条提前退出路径（停止信号 / 网络耗尽 / 异常）都对队列做**有界排空**（scope 末 30 s、退出路径 6 s，见下），flush 只兜漏网。**有界的是队列排空、不是 flush**：排空超时后转静默的只有队列线程，scope 末的整目录 flush **不受**该放弃标志约束——排空超时正是「只兜漏网」最该生效的一种情形，若 flush 也被它 gate 掉，整目录一个字节都不再传、也不删（产物随容器盘销毁即永久丢）。被接受的代价：退化网络下 scope 末的墙钟只由「per-file 超时 × 剩余文件数」定界，不再由排空预算定界（[0029](./0029-engine-artifacts-to-s3.md)「上传必须套超时」的有界性论证按此校准）。理由：把 K × 票数次 PutObject 压在判定临界路径上会把已成的判定拖在网络上（[0029](./0029-engine-artifacts-to-s3.md)「上传套超时、退出时间有界」同向），而只靠 scope 末 flush 又有两面风险——中断路径不 flush、正常路径的 flush 是单次无重试的 best-effort，一次 S3 抖动就是一个永久 404 的 URI。后台队列让字节在下个 step 跑完前多半已到 S3，中断时只剩最后一个 step 的一两张在途；残余风险收窄到「进程被硬杀的那几秒」。**排空的位置守「会话释放优先」**（[0024](./0024-worker-core-protocol.md)）：Nova 在 `_run_session` 释放会话之后、Midscene 在 `shutdownSequence` 的 cleanup 之后，与既有的中断兜底提前上传并列，best-effort、不抛。退出路径的排空预算计入 grace：Nova 落在 worker 侧 margin 内，Midscene 自报的下限相应上调（收尾加数多一项；[0032](./0032-fargate-execution-environment.md) 的 grace 组成随之多一项）。本机后端的 `file://` 上传器是 no-op，队列与排空都直接返回。
 
-**怎么挂**。evidence.json 的 ref 作为 `{kind: "evidence", ref, label: "evidence"}` **追加**进该 step 的 `step_done.reportRefs`（Nova 现有的 trajectory 挂载是整体赋值，两者不能各自赋值互相覆盖；Midscene 的 step 级 reportRefs 此前为空，evidence 是首条，`runStep` 需拿到 uploader 与 page）。截图 URI **只写在 evidence.json 内**，不进 reportRefs。协议不变：`ReportRef.kind` 本就是引擎自报的开放字符串（[0027](./0027-runreport-aggregation-index.md)）。**接受的连带影响**：evidence ref 经既有 `collect_report_index` 自动进 manifest 与 index.html 的产物导航节（每个 AI step 多一行 `[evidence]` 链接、计数上升），以及 `run` 文本输出的 step 行下——这正是人/agent 找到证据的入口；该节措辞从「引擎原生产物」放宽为「报告产物（引擎原生产物 + gherkai evidence）」，富渲染（缩略图 / thought 折叠）仍延后。
+**怎么挂**。evidence.json 的 ref 作为 `{kind: "evidence", ref, label: "evidence"}` **追加**进该 step 的 `step_done.reportRefs`（Nova 现有的 trajectory 挂载是整体赋值，两者不能各自赋值互相覆盖）。截图 URI **只写在 evidence.json 内**，不进 reportRefs。协议不变：`ReportRef.kind` 本就是引擎自报的开放字符串（[0027](./0027-runreport-aggregation-index.md)）。**接受的连带影响**：evidence ref 经既有 `collect_report_index` 自动进 manifest 与 index.html 的产物导航节（每个 AI step 多一行 `[evidence]` 链接、计数上升），以及 `run` 文本输出的 step 行下——这正是人/agent 找到证据的入口。
 
 ### 二、evidence 是 best-effort，对判定零影响——这是对既有规则开的一个具名例外
 
@@ -136,7 +136,7 @@ run 20260910T080630Z-9fa261  status=failed
         └── step 1  Then 页面提示「账户已锁定」  skipped  ⚠ 因前置 step error 被跳过（未执行）
 ```
 
-层级自 2026-09-30 起由 rich 的树渲染：引导线代替两格缩进，见 [0047](./0047-cli-human-readable-tables-with-rich.md)；节点文字、字段名与多行推理的续行对齐（对齐到 `thought: ` 之后）不变。
+层级由 rich 的树渲染，见 [0047](./0047-cli-human-readable-tables-with-rich.md)；多行推理的续行对齐到 `thought: ` 之后。
 
 **文本 key = JSON 字段名**：`message:` / `thought:` / `screenshot:` / `error:` 与 `vote=` / `url=` / `status=` 同一规则，文本与 `--json` 一一对应、agent 零翻译；中文只用于整句提示（「无 AI 证据」「无记录（未执行或未上报）」「其余 N 个 frame 已省略」「因前置 step error 被跳过」）与 run 的人读文本。
 
@@ -153,8 +153,8 @@ run 20260910T080630Z-9fa261  status=failed
 ### 五、与 [0027](./0027-runreport-aggregation-index.md) 的关系：铁律不破，一条消费端规则按层收窄，一个留口子用对的方式填上
 
 - 铁律（`model / wire / schedule` 对 `ReportRef` 永久不透明搬运、永不解析产物内容、永不按 kind 分支）不变。新增的 `StepResult.message` 是搬事件里既有的字符串，不是解析产物。
-- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）与远程访问会话的探测结论文件（`kind == "device_session"`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。0027 该条原地改写并反向链本 ADR。
-- 0027 留口子「trajectory 内部结构化提取」由本 ADR 落地，位置是 **worker**（引擎知识的唯一住处）。0027 的 kind 例举补 `evidence`、「Midscene 保持 scope 级」改为「Midscene 的 report 仍 scope 级，evidence 下沉 step 级」、留口子条目标已落地。
+- 0027「消费端只当 URI 用、不 stat / open」写在皮层只打链接的年代，本 ADR 把它**按层收窄**：`model / wire / schedule / ReportStore` 永不 open / fetch / 改写 ref 不变；皮层侧（`compose.read_resource` 与 `explain`）**只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）与远程访问会话的探测结论文件（`kind == "device_session"`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）仍只当链接、永不解析。解引用许可绑在「内容是不是我们自己定义的 schema」上，不是「皮层就能随便打开产物」。
+- 0027 留口子「trajectory 内部结构化提取」由本 ADR 落地，位置是 **worker**（引擎知识的唯一住处）。
 
 ### 六、SDK 版本钉死 + 格式漂移的防线
 
@@ -169,7 +169,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 **历次升级**（每次按上面的流程走、结论留此）：
 
-- **Midscene 1.12.8 → 1.15.1（2026-10-12）**。动机是在探索移动设备方向之前先与上游拉平，少背一次跨大版本迁移；移动方向本身用不用 Midscene 的哪些能力尚未定。差距 8 个版本，逐项对照我们的接缝：模型调用链重构两次并加入 Responses API——新键 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）与 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 只传模型名 / 地址 / key / 家族四项、不传新键即落默认，线上请求形态不变；[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 依赖的「给 `modelConfig` 即隔离管理器且采纳 `createOpenAIClient`」分支原样成立，legacy 家族推导仍在。dump 的类型声明只增不删（57 行差异全是 `rawAssistantOutput` 一类新增字段），`persistExecutionDump` 与截图目录 `dirname(reportPath)/screenshots` 逻辑未变，`metrics.totalTokens` 未变；`PlaywrightAgent` 多两个可选构造项（页面 html 就位检查超时默认 5 秒、Puppeteer 专用网络空闲等待）。报告页重设计属使用者可见变化、worker 不解析它。本地 tsc 与 196 条单测通过；真跑见「验证」节。1.12.9 起上游暴露了设备适配器的 schema 与类型，是移动方向探索时可能用到的面，是否采用待 spike 后定。
+- **Midscene 1.12.8 → 1.15.1（2026-10-12）**。动机是在探索移动设备方向之前先与上游拉平，少背一次跨大版本迁移。差距 8 个版本，逐项对照我们的接缝：模型调用链重构两次并加入 Responses API——新键 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）与 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 只传模型名 / 地址 / key / 家族四项、不传新键即落默认，线上请求形态不变；[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 依赖的「给 `modelConfig` 即隔离管理器且采纳 `createOpenAIClient`」分支原样成立，legacy 家族推导仍在。dump 的类型声明只增不删（57 行差异全是 `rawAssistantOutput` 一类新增字段），`persistExecutionDump` 与截图目录 `dirname(reportPath)/screenshots` 逻辑未变，`metrics.totalTokens` 未变；`PlaywrightAgent` 多两个可选构造项（页面 html 就位检查超时默认 5 秒、Puppeteer 专用网络空闲等待）。报告页重设计属使用者可见变化、worker 不解析它。真跑见「验证」节。1.12.9 起上游暴露了设备适配器的 schema 与类型（设备目标上的复用边界见 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 7）。
 
 ## 被拒方案
 
@@ -243,4 +243,5 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 **对抗审查真跑核出并已吸收**：Nova 侧 boto3 的 `upload_file` 默认把传输交给 s3transfer 的非 daemon 线程池，解释器退出时被 atexit join——黑洞端点下 `drain(1.0)` 返回后进程 11.2 s 才退（多拖一次 client 超时），「daemon 队列线程 + 有界 drain」的退出账目失真；改为 `TransferConfig(use_threads=False)` 让传输落在队列线程内后 1.15 s 退出，drain 预算即退出成本。同批：drain 超时后队列线程静默（不再上传、不写 stderr，避开 finalization 期写 buffered stderr 的致命错窗口）；Midscene 链尾结构性 `.catch`。
 
 **单测护栏**：两引擎映射函数对真产物 fixture（含 Midscene 的 error task、Nova 的 N 票）；best-effort 路径（抽取 / 上传抛异常 → `step_done` 照发、无 evidence ref、status 不变）；serialize round-trip 带非默认 step message；`explain` 本机 / 云端两个后端读取、`record_missing` 与三种 `evidence_missing`、多命中 `--scenario` + `--step`、退出码；云端后端 skew 三态；契约护栏含 evidence 夹具。
-- **Midscene 1.12.8 → 1.15.1 升级真跑（2026-10-12，跳板机、dev 树 worker 经 `GHERKAI_WORKER_MIDSCENE_CMD` 接入、本机后端、默认模型 GPT-5.6 Terra）**：wikipedia 三条 feature 全 passed，AI 步 evidence 齐（两个 run 合计 7 步带 evidence、19 帧、7 张截图文件全部存在非空），导航步与确定性步照旧 `no_ref`；产物目录形态不变（`evidence/`、`log/ai-config.log` 仍写模型名、`report/` 下 `<n>.execution.json` + report.html + `screenshots/`）。失败探针（刻意为假的页面断言）判否并带 1 act / 1 帧 / 有 thought 的 evidence；使用方 `.mts` 步经 `page.evaluate` 进页面照常（tsx keepNames 的 `__name` 垫片与新版 agent 共存）。单测 196 条与 CLI / core 测试全绿只作前置、不作证据。
+
+**Midscene 1.12.8 → 1.15.1 升级真跑（2026-10-12，跳板机、dev 树 worker 经 `GHERKAI_WORKER_MIDSCENE_CMD` 接入、本机后端、默认模型 GPT-5.6 Terra）**：wikipedia 三条 feature 全 passed，AI 步 evidence 齐（两个 run 合计 7 步带 evidence、19 帧、7 张截图文件全部存在非空），导航步与确定性步照旧 `no_ref`；产物目录形态不变（`evidence/`、`log/ai-config.log` 仍写模型名、`report/` 下 `<n>.execution.json` + report.html + `screenshots/`）。失败探针（刻意为假的页面断言）判否并带 1 act / 1 帧 / 有 thought 的 evidence；使用方 `.mts` 步经 `page.evaluate` 进页面照常（tsx keepNames 的 `__name` 垫片与新版 agent 共存）。单测与 CLI / core 测试全绿只作前置、不作证据。

@@ -1,6 +1,6 @@
 # 引擎能力矩阵
 
-两个引擎各能在什么测试目标上运行、确定性 step 在那个目标上用哪种句柄、默认用哪个模型、费用按什么公式计，一张表看全。表里的目标与默认模型取自每个引擎 worker 自己的能力自述，`gherkai doctor` 的 `engines.targets.<引擎>` 与 `engines.model.<引擎>` 两行显示的就是这台机器上实际装的 worker 自报的值；两者不一致时以 `doctor` 为准，多半是本机 worker 与本文描述的发行版不同，或用环境变量换了模型。确定性 step 怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)，模型怎么换见 [`configuration.md`](./configuration.md)。
+两个引擎各能在什么测试目标上运行、确定性 step 在那个目标上用哪种句柄、默认用哪个模型、费用按什么公式计，汇总在一张表里。表里的目标与默认模型取自每个引擎 worker 自己的能力自述，`gherkai doctor` 的 `engines.targets.<引擎>` 与 `engines.model.<引擎>` 两行显示的就是这台机器上实际装的 worker 自报的值；两者不一致时以 `doctor` 为准，多半是本机 worker 与本文描述的发行版不同，或用环境变量换了模型。确定性 step 怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)，模型怎么换见 [`configuration.md`](./configuration.md)。
 
 ## 矩阵
 

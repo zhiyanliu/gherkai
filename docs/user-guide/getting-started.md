@@ -26,7 +26,7 @@ pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时的�
 
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
 
-Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。`npm i -g` 写入 npm 的全局目录：该目录属于系统时（如发行版自带的 Node 把全局包放在 `/usr/lib/node_modules`），安装与升级都要加 `sudo`，否则报 `EACCES`；不想用 `sudo` 就先把全局目录改到用户目录（`npm config set prefix ~/.npm-global`，并把其下的 `bin` 加进 PATH）。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个原地给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
+Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。`npm i -g` 写入 npm 的全局目录：该目录属于系统时（如发行版自带的 Node 把全局包放在 `/usr/lib/node_modules`），安装与升级都要加 `sudo`，否则报 `EACCES`；不想用 `sudo` 就先把全局目录改到用户目录（`npm config set prefix ~/.npm-global`，并把其下的 `bin` 加进 PATH）。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个在同一行给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
 
 升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
@@ -124,7 +124,7 @@ gherkai skill install --print           # 只把正文打到标准输出，不�
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai -a claude-code -a codex   # 每个 -a 一个 agent，只装一处就只写一个
 ```
 
-这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；带斜杠的分支名不行，安装器在第一个斜杠处切断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
+这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；不能用带斜杠的分支名，安装器会在第一个斜杠处截断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
 
 装完直接告诉 agent 要测什么，例如：
 
@@ -134,7 +134,7 @@ agent 会自己做用例预检、实际运行前把本次运行的规模报给�
 
 ## 上手路径二：自己敲命令
 
-分四步完整运行第一条用例。装包上手时手上还没有 `.feature`，先在项目里存一条最小用例，存成 `features/smoke.feature`：
+分四步完整运行第一条用例。刚安装时项目里还没有 `.feature`，先把下面这条最小用例保存为 `features/smoke.feature`：
 
 ```gherkin
 Feature: 冒烟

@@ -67,7 +67,7 @@
   ③**省略中心词的数字缩写**——「退 2」「exit≠0」写成「退出码为 2」「以退出码 2 结束」「退出码非零」。
   三种形态都是 ADR 写作的省字习惯漏进了注释、internals 与 skill：AI 侧文档保留 ① 与 ③（那里效率优先），② 全仓不用。护栏：② 的固定词进口吻表 `COLLOQUIAL`（与退役表同位扫，见上条），AI 侧文档另单扫这组自造词（`cli/tests/test_adr_hygiene.py`）；① 与 ③ 在用户文档、skill、技术文档、code 注释与 docstring 各有一条剥掉代码块与行内代码后的启发式扫描（`cli/tests/test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py`）：中文字紧邻 `=` 号、「退 <数字>」即红；用户文档与 skill 另禁正文箭头。
 - **量词「档」一律不用**：作取值 / 级别 / 类别 / 情形 / 后端义时按句意写「取值 / 级别 / 判定 / 情形 / 后端」，只留「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。理由：同一个量词在本仓库曾同时指执行后端、权限级别、选项取值、判定类别、上传时机与派发路径，读者每次都得从上下文反推它指哪一层。它不是术语退役（没有「档」这个词条），故规则本身不进词表 `_Avoid_`，而是作一条带前后文排除的正则进口吻表 `COLLOQUIAL`；同一条正则另进 `cli/tests/test_user_facing_messages.py` 的禁词表，把用户可见字符串那一面也覆盖（那半边的判据在 ADR 0039）。
-- **用户文档与演示材料两条补充（2026-09-29 演示项目 runbook 复审立此条）**：①**只陈述事实与数值，不带验证过程的痕迹**——「实测 223 秒」「我们真跑过一遍」「经跳板机核对」这类话是 contributor 的证据链，读者要的只是「约 4 分钟」；过程证据的家是 ADR 验证节与 journey。②**段落开头直接陈述，不写「本页 / 本文档 / 下表 说明…」式的自述**——「仓库中的每一部分属于三类之一：…」优于「下表按目录说明每部分…」，前者读者立刻得到信息，后者先读到一句关于文档自身的话。表格或列表前的一句引导（「下表列出各选项的默认值」）不在此列，主流云服务文档同样这样写；internals 页面头部按定位要求写的「本文是入口页」类声明也不在此列。两条都是「参照主流云服务文档写法」这一总则的具体形态；用户指南九个页面的开头句已于 2026-09-30 按此改写。
+- **用户文档与演示材料两条补充（2026-09-29 演示项目 runbook 复审立此条）**：①**只陈述事实与数值，不带验证过程的痕迹**——「实测 223 秒」「我们真跑过一遍」「经跳板机核对」这类话是 contributor 的证据链，读者要的只是「约 4 分钟」；过程证据的家是 ADR 验证节与 journey。②**段落开头直接陈述，不写「本页 / 本文档 / 下表 说明…」式的自述**——「仓库中的每一部分属于三类之一：…」优于「下表按目录说明每部分…」，前者读者立刻得到信息，后者先读到一句关于文档自身的话。表格或列表前的一句引导（「下表列出各选项的默认值」）不在此列，主流云服务文档同样这样写；internals 页面头部按定位要求写的「本文是入口页」类声明也不在此列。两条都是「参照主流云服务文档写法」这一总则的具体形态。
 - **演示材料的定稿口播稿：豁免只覆盖已定稿版本的原文**。`docs/presentations/<材料>/` 下的 `narration.md`（纯口播稿）与 `speaker-notes.md`（讲者备注）是已配音、已出字幕的原文，改一个字就要重新配音、重对章节与字幕（`tools/presentations/production.md`「修改与验收」节）；例如开场句「测试自动跑起来之后」命中口吻表的「跑」。判定定稿靠内容指纹：同目录 `manifest.json`（成片的校验清单，`files` 段逐文件记了 SHA-256）在顶层另记护栏专用的 `narration_sha256` 与 `speaker_notes_sha256`，文件当前 SHA-256 等于所记值即为定稿原文，免扫口吻表与形态①③启发式，退役表、内部指代、悬空指针、相对链接、本机坐标照扫；哈希不等（口播已改写、尚未重新配音并更新 manifest）则整份照扫。同目录的 `README.md` 与 `chapters.md` 按普通用户文档扫。理由同 CHANGELOG 已发行节：当时的原话不回溯改写；但豁免绑在那一版文字上，不给以后新写的文字开永久口子。被拒：整份口播稿永久豁免口吻表——口播一经改写，新文字也一并免扫，口子不随定稿关闭。规则在 `cli/tests/_doc_rules.py`（`final_transcript` / `wording_scope`），`cli/tests/test_user_docs.py` 与 hook 共用。
 
 ### 七、图统一用 archify：JSON 图源 + 导出 SVG 入库，只有发布到 Pages 的交互版才入库 HTML
@@ -91,7 +91,7 @@
 
 ## 与 agent skill 的关系（0043 不变）
 
-skill 正文与 references 是为使用者侧 AI agent **新写**的内容、不是任何用户文档的复制；只有 `references/cli-json-contract.md` 由 `docs/internals/cli-json-contract.md` 经 `tools/render_skill_contract.py` 确定性渲染（源路径随决策二的 `docs/guides → docs/internals` 改名同步；三条转换规则与「为什么不能 link」见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）。「原始维护的文档」与「skill 引用的知识」的一致性由三层保：手写源唯一、渲染器只做登记过的替换、`cli/tests/test_skill.py` 断言副本等于渲染结果；其余 references 由同一测试对着 argparse 与真值集核（护栏口径见 0043 决策六）。文档重组因此不影响 skill 的有效性。
+skill 正文与 references 是为使用者侧 AI agent **新写**的内容、不是任何用户文档的复制；只有 `references/cli-json-contract.md` 由 `docs/internals/cli-json-contract.md` 经 `tools/render_skill_contract.py` 确定性渲染（三条转换规则与「为什么不能 link」见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）。「原始维护的文档」与「skill 引用的知识」的一致性由三层保：手写源唯一、渲染器只做登记过的替换、`cli/tests/test_skill.py` 断言副本等于渲染结果；其余 references 由同一测试对着 argparse 与真值集核（护栏口径见 0043 决策六）。文档重组因此不影响 skill 的有效性。
 
 ## 被拒方案（护栏）
 

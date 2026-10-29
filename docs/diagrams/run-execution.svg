@@ -447,7 +447,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态推一步</text>
+        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态单步推进</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="446" class="t-dim" font-size="10" font-weight="600">04 / 云端后端（cloud）</text>
@@ -467,10 +467,10 @@ rect.c-bg-rect { fill: var(--bg); }
 
 
         <!-- Edge paths -->
-        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推至收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 32 119 L 32 420 L 289 420 L 289 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推进到收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 32 119 L 32 420 L 289 420 L 289 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit" data-composition-points="614.4,465;614.4,243;738.8,243" d="M 614.4 465 L 614.4 243 L 738.8 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table" data-composition-points="682.4,491;738.8,491" d="M 682.4 491 L 738.8 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-points="188,491;303,491;303,393" d="M 188 491 L 303 491 L 303 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推进一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-points="188,491;303,491;303,393" d="M 188 491 L 303 491 L 303 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-composition-points="501.4,269;501.4,491;546.4,491" d="M 501.4 269 L 501.4 491 L 546.4 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-composition-points="494.4,217;494.4,119;546.4,119" d="M 494.4 217 L 494.4 119 L 546.4 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle" data-composition-points="878.8,243;973.5999999999999,243" d="M 878.8 243 L 973.5999999999999 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
@@ -597,14 +597,14 @@ rect.c-bg-rect { fill: var(--bg); }
           <text x="1043.6" y="255" class="t-muted" font-size="8" text-anchor="middle">一次落定终态</text>
         </g>
 
-        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态推一步" tabindex="0" role="button" aria-label="聚焦无状态推一步，重放 · 条件写抢占 job, 无状态推一步 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写抢占 job" data-node-context="无状态推一步 › 驱动循环：每批事件推进一步">
-          <title>无状态推一步 · 重放 · 条件写抢占 job · 无状态推一步 › 驱动循环：每批事件推进一步</title>
+        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态单步推进" tabindex="0" role="button" aria-label="聚焦无状态单步推进，重放 · 条件写抢占 job, 无状态单步推进 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写抢占 job" data-node-context="无状态单步推进 › 驱动循环：每批事件推进一步">
+          <title>无状态单步推进 · 重放 · 条件写抢占 job · 无状态单步推进 › 驱动循环：每批事件推进一步</title>
           <rect x="224" y="341" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="224" y="341" width="144" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(230 347) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="296" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">无状态推一步</text>
+          <text data-node-label="" x="296" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">无状态单步推进</text>
           <text x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写抢占 job</text>
         </g>
 
@@ -656,9 +656,9 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
         <!-- Edge labels -->
-        <g data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推至收敛" data-edge-key="0" data-edge-id="e-bg-step">
-          <rect x="126.7" y="400" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="160.5" y="410" class="t-muted" font-size="8" text-anchor="middle">反复推至收敛</text>
+        <g data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推进到收敛" data-edge-key="0" data-edge-id="e-bg-step">
+          <rect x="121.9" y="400" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="160.5" y="410" class="t-muted" font-size="8" text-anchor="middle">反复推进到收敛</text>
         </g>
         <g data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit">
           <rect x="637.9999999999999" y="223" width="77.2" height="14" rx="3" class="c-mask"/>
@@ -668,9 +668,9 @@ rect.c-bg-rect { fill: var(--bg); }
           <rect x="686.3999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="710.5999999999999" y="481" class="t-database" font-size="8" text-anchor="middle">逐条事件</text>
         </g>
-        <g data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推一步" data-edge-key="3" data-edge-id="e-cloudfn-step">
-          <rect x="206.9" y="471" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="245.5" y="481" class="t-muted" font-size="8" text-anchor="middle">每批事件推一步</text>
+        <g data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推进一步" data-edge-key="3" data-edge-id="e-cloudfn-step">
+          <rect x="202.1" y="471" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="245.5" y="481" class="t-muted" font-size="8" text-anchor="middle">每批事件推进一步</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud">
           <rect x="516" y="360" width="86.8" height="14" rx="3" class="c-mask"/>
@@ -766,4 +766,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=26aabe141bc001fb308233ab250949ef2517c1fce94d7aadc5ab603c98c1c6ea -->
+<!-- gherkai:source-sha256=12e2bc66d12f822014681a9f41a33ab2b4e3feee866fdd8e02185b035a2d6acc -->

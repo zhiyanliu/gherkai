@@ -861,7 +861,7 @@ def test_list_workers_is_blocked_by_skew(aws):
 
 
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
-    """读戳失败（无凭证/无权限）→ 退出码 2 + 一句人话。
+    """读戳失败（无凭证/无权限）→ 退出码 2 + 一句可读的说明。
 
     `compose.read_backend_version` 有意把这类异常抛给入口前端决定退出码，**本模块就是那个前端**——实际运行踩过：
     没有凭证时 `gherkai deploy list-workers` 直接吐 botocore 的 `NoCredentialsError` 堆栈。
@@ -881,7 +881,7 @@ def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
 
 
 def test_list_workers_reports_unreachable_aws_without_a_traceback():
-    """建不出 client（这里用不存在的 profile 名）→ 退出码 2 + 一句人话，不吐 botocore 堆栈。
+    """建不出 client（这里用不存在的 profile 名）→ 退出码 2 + 一句可读的说明，不吐 botocore 堆栈。
 
     `boto3.session.Session(profile_name=...)` 对不存在的 profile 在**构造期**就抛 `ProfileNotFound`，配不出
     region 则要等到 `session.client(...)` 解析 endpoint 才抛——两者都发生在本模块自身的 `try` 之前，故建句柄

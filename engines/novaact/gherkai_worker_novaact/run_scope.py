@@ -871,7 +871,7 @@ def _error_text(e: BaseException) -> str:
 
     Nova SDK 异常的 str() 是多行 repr（`ActTimeoutError(\n message = …\n metadata = ActMetadata(…)\n)` 再拖一段
     反馈链接），整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑成十几行——实际运行暴露。SDK 异常带
-    `.message`（人话那一句），优先取它；没有则取 str() 的首个非空行。折叠空白、封顶 300 字：message 是一句原因、
+    `.message`（一句可读的错误说明），优先取它；没有则取 str() 的首个非空行。折叠空白、封顶 300 字：message 是一句原因、
     不是堆栈，完整对象在 worker 日志里。
     """
     msg = getattr(e, "message", None)

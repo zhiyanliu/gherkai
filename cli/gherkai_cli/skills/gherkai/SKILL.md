@@ -22,12 +22,12 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 
 - **一步两条执行路径**。先查确定性 step 注册表：命中项目 `steps/` 里注册的正则、且该 step 在当前测试目标上有实现，则走确定性代码：不问 AI、不投票、可复现。注册表里引擎只内建一条，导航：`Given` / `When` 之后**整句只是一个地址**（`Given "https://…"`，不加引号也算；本机应用照写的 `http://localhost:3000` 同样命中）时直接打开、不耗 AI，地址前后再有别的字就不是导航、整句交给 AI。没命中注册表、或命中的 step 在当前测试目标上没有实现的走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。注册的 step 可声明接受的关键字（内建导航只接受 `Given` / `When`）：命中了模式而关键字不符的步记 error、不转 AI，`gherkai plan` 提前用 ⚠ 标出；`Then` 后只写一个地址就是这种情况。
 - **边界**：精确检查（URL、DOM、数值、必须可复现、要快）交给确定性 step，出现频次高的检查（`Background` 前置、`Scenario Outline` 每行、要投票的断言）也优先写成确定性——它零模型费用、毫秒级完成（AI 步一步要几秒到几十秒），整套用例的墙钟与会话时长跟着降；模糊、一次性、页面变化多、靠语义理解的交给 AI。
-- **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），同名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 的形状——与某条未标 scope 的 scenario 编号相等时整个 run 以退出码 2 拒绝运行。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 的墙钟预算；`@device:<平台>` 与 `@app:<别名>` 为设备目标预留，当前两个引擎都只支持桌面网页，标了它们的 scope 在 `plan` 与执行前就会被拒绝；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
+- **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），同名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 的形状——与某条未标 scope 的 scenario 编号相等时整个 run 以退出码 2 拒绝运行。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 设 job 墙钟预算；`@device:<平台>` 与 `@app:<别名>` 为设备目标预留，当前两个引擎都只支持桌面网页，标了它们的 scope 在 `plan` 与执行前就会被拒绝；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
 - **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时外层引号去掉）；确定性 step 的正则匹配的是关键字之后、没去引号的原文，写用例时照它的 `example` 写。匹配是子串搜索、不锚定：宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步记 error，宽窄靠 `gherkai plan` 的标注验（模式怎么写窄见 `references/deterministic-steps.md` 第 2 节）。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
 
 ## 2 引擎怎么选
 
-Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：在非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），投票治不了。诊断规则：Nova Act 引擎下非英文页面的断言判否，先排查引擎语言面，别先当被测应用的 bug。三条出路：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）、把断言改写成页面级语义陈述、把文本与结构检查改成确定性 step。默认引擎是 novaact；`gherkai list-engines` 看本机装了哪个。证据的 schema 两引擎结构相同，但填充有系统性差异（某些字段只有一侧给值），是引擎事实不是抽取失败，细表见 `references/engines.md`。
+Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：在非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），增加投票也无法纠正。诊断规则：Nova Act 引擎下非英文页面的断言判否，先排查引擎语言面，别先当被测应用的 bug。三条出路：给 scenario 标 `@engine:midscene`（或 `--default-engine midscene`）、把断言改写成页面级语义陈述、把文本与结构检查改成确定性 step。默认引擎是 novaact；`gherkai list-engines` 看本机装了哪个。证据的 schema 两引擎结构相同，但填充有系统性差异（某些字段只有一侧给值），是引擎事实不是抽取失败，细表见 `references/engines.md`。
 
 ## 3 本机还是云端，run 还是 submit
 
@@ -56,13 +56,13 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数就是这个 run 要开几个云端浏览器会话**，费用随 job 数与步数走，`--max-concurrency` 只改同时运行几个、不减总账。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
 3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。
 4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（即使能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型所见与截图位置拼成一份可复现的证据，手翻 JSON 容易漏）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成：每次 AI 调用的票值与错误、它看见与想了什么、截图在哪；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起，与文本步号一致，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`，别解析 HTML 报告、别自己拼产物位置，顺 `ref` 走。
-5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先复投**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，复投只增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
+5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先重新投票复核**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，重新投票只会增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。****四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
 6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 的值就是判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；给 `Scenario Outline` 声明行的行号表示选中它展开的全部数据行）；`--tags TAG[,TAG]`（一个值内的逗号表示任一命中，重复给表示都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给时都要命中；不同类同给时都要满足。筛成空集时以退出码 2 结束并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整个 run 拒绝运行并以退出码 2 结束，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样以退出码 2 结束；缺省 `./steps` 不存在不算错。
 
 ## 6 机读读法
 
-字段表与每个字段的读法在 `references/cli-json-contract.md`。三条最容易踩的：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；判一步「有没有记录」只看 `record_missing`（`evidence_missing` 的 `no_ref` 分不开「本就不产证据」「抽取失败」「没有记录」三种；`unreadable` 是指针在但读不到，`unsupported_schema` 是格式版本不认）；终态只看同层 `status`，`aborted_hint` 与 `status --json` 里 `artifacts` 路径的存在都不是终态判据。
+字段表与每个字段的读法在 `references/cli-json-contract.md`。三条容易误读的规则：`message` 恒为「为何不是 passed」，job 级与 step 级同义，通过时为 null；判一步「有没有记录」只看 `record_missing`（`evidence_missing` 的 `no_ref` 分不开「本就不产证据」「抽取失败」「没有记录」三种；`unreadable` 是指针在但读不到，`unsupported_schema` 是格式版本不认）；终态只看同层 `status`，`aborted_hint` 与 `status --json` 里 `artifacts` 路径的存在都不是终态判据。
 
 ## 7 选项按「谁有这个 flag」分组
 
@@ -71,7 +71,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 只改同时开几个会话、不改总账，scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 见第 10 节 |
 | 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
-| cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不吃） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即以退出码 2 结束、说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
+| cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不接受） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致，不一致即以退出码 2 结束、说找不到这个 run；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
 | 查询类各自有 | `status --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
 
 ## 8 退出码分流
@@ -91,7 +91,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 用例：<feature 文件> / <scenario 标题>  第 <n> 步  <step 原文>
 判定：<failed|error>  原因：<message 原文>
 模型看见：<thought 最后一句>  截图：<screenshot 地址>
-建议：<改断言写法 | 改成确定性 step | 换引擎（语言面） | 被测应用的问题（复投仍一致判否）：<一句>>
+建议：<改断言写法 | 改成确定性 step | 换引擎（语言面） | 被测应用的问题（重新投票后仍一致判否）：<一句>>
 重新运行：gherkai run <feature> --scope <scope_id>
 ```
 

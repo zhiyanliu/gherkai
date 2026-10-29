@@ -57,7 +57,7 @@ POINTER_REWRITES: dict[str, str] = {
 # `FORBIDDEN` 正则只收得住成形的内部指代（ADR 编号 / 决策号 / 那几个固定机制名），源页里的其它
 # 内部用词（推进器 / 投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
 FORBIDDEN_REWRITES: dict[str, str] = {
-    "命中定位链的哪一级": "命中 worker 查找顺序的哪一级",
+    "命中 worker 定位链的哪一级": "命中 worker 查找顺序的哪一级",
     "顶层由三部分组成：RunResult（判定）、": "顶层由三部分组成：这次运行的判定、",
     "RunState（控制面运行态）": "这个 run 的运行态",
     "| `report_index` | RunReport `index.html`": "| `report_index` | 报告首页 `index.html`",

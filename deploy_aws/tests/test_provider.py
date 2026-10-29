@@ -448,7 +448,7 @@ def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
 
 
 def test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(capsys):
-    """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退出码 2 + 一句人话，不抛 botocore 堆栈。
+    """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退出码 2 + 一句可读的说明，不抛 botocore 堆栈。
 
     **这条有意不打桩**、走真实解析链：region 前三级都 miss 时解析会回落读 profile config，不存在的 profile 名
     在 `boto3.session.Session(...)` 构造期就抛 `ProfileNotFound`——抛点排在 `workers._connect` 之前，
