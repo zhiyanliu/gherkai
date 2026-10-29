@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "zh-midscene",
+  "scenario_id": "features/zh_terms.feature:10",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前是关于人工智能的维基百科词条页\""
+  },
+  "status": "passed",
+  "message": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前是关于人工智能的维基百科词条页",
+      "vote": true,
+      "url": "https://zh.wikipedia.org/wiki/%E4%BA%BA%E5%B7%A5%E6%99%BA%E8%83%BD",
+      "frames": [
+        {
+          "url": null,
+          "thought": "The screenshot shows the Chinese Wikipedia article titled “人工智能” (Artificial Intelligence), with article content and an AI-related infobox image.",
+          "actions": [
+            {
+              "name": "Insight/Boolean",
+              "args": {
+                "domIncluded": false,
+                "dataDemand": "当前是关于人工智能的维基百科词条页"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20261029T050655Z-9a539e/midscene-run/report/screenshots/beb4fd39-26a8-41e5-80be-5b120346ce84.jpeg"
+        }
+      ],
+      "result": true,
+      "error": null,
+      "time_worked_s": null
+    }
+  ]
+}

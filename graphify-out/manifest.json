@@ -1365,8 +1365,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/doc-health-review.md": {
-    "mtime": 1793249333.7995996,
-    "ast_hash": "df435af6ebd09dac3ef40089b32fe4ce",
+    "mtime": 1793249679.7800152,
+    "ast_hash": "7fdd43d13f85451daa0ae5083431230f",
     "semantic_hash": ""
   },
   "docs/internals/README.md": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793249438.1880546,
-    "ast_hash": "864f43abe04053310b8efd7851af2f0c",
+    "mtime": 1793250626.9260879,
+    "ast_hash": "b463fccbe9a70b954ae742467a9f70ea",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {

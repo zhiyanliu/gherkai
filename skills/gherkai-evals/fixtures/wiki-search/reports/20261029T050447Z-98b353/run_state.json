@@ -1,0 +1,18 @@
+{
+  "run_id": "20261029T050447Z-98b353",
+  "status": "failed",
+  "started_at": "2026-10-29T05:04:47.132844+00:00",
+  "ended_at": "2026-10-29T05:05:55.491918+00:00",
+  "jobs": [
+    {
+      "scope_id": "search",
+      "status": "failed",
+      "session_id": "01M630QWHYQXPABX31MPEWRX59"
+    },
+    {
+      "scope_id": "features/wiki_search.feature:13",
+      "status": "passed",
+      "session_id": "01M630QWH4JHVBQBV7T3BBEDQW"
+    }
+  ]
+}

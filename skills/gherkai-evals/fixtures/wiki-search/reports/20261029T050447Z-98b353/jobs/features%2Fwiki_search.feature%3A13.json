@@ -1,0 +1,105 @@
+{
+  "job": {
+    "scope_id": "features/wiki_search.feature:13",
+    "scope_name": "词条标题的精确检查",
+    "engine": "novaact",
+    "scenarios": [
+      {
+        "id": "features/wiki_search.feature:13",
+        "name": "词条标题的精确检查",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "\"https://en.wikipedia.org/wiki/Python_(programming_language)\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "页面标题包含 \"Python\""
+          },
+          {
+            "index": 2,
+            "keyword": "Then",
+            "text": "\"页面右侧的信息框里列出了最新稳定版本号\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 300.0,
+    "target": {
+      "device": "desktop",
+      "ui_kind": "web"
+    },
+    "device_request": null
+  },
+  "status": "passed",
+  "duration_ms": 19069.076200015843,
+  "total_tokens": null,
+  "total_time_worked_s": 10.123817205429077,
+  "session_id": "01M630QWH4JHVBQBV7T3BBEDQW",
+  "error_type": null,
+  "message": null,
+  "report_refs": [
+    {
+      "kind": "summary",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20261029T050447Z-98b353/nova-trajectories/01a1860b-fa1f-7799-9180-79bb56b3a651/session_summary.json",
+      "label": "Nova session summary"
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/wiki_search.feature:13",
+      "status": "passed",
+      "duration_ms": 18489.047438837588,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 7583.138546906412,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 222.2484080120921,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "passed",
+          "duration_ms": 10683.467996306717,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "trajectory",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261029T050447Z-98b353/nova-trajectories/01a1860b-fa1f-7799-9180-79bb56b3a651/act_01a1860c-2b05-71e1-b6b9-8d62f0f7b9e4_页面右侧的信息框里列出了最新稳定版本号,_format_ou.html",
+              "label": "trajectory"
+            },
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261029T050447Z-98b353/nova-trajectories/evidence/features-wiki_search.feature-13-93f62c2a/step-2/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}
