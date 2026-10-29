@@ -100,21 +100,21 @@ def test_connect_read_timeout_are_transient():
 
 
 def test_agentcore_startfailed_wrapping_chain_is_transient():
-    # 真实场景（ADR 0028）：AgentCore 起会话失败，底层 boto ClientError(节流) 被 Nova SDK 包成
-    # BrowserAuthError ← StartFailed（每层 from）。遍历异常链必须穿透两层包装命中底层 ClientError。
+    # 真实场景（ADR 0028）：NovaAct 进入阶段 nova-act 调用节流，底层 boto ClientError 先被 SDK 翻成自有错误类
+    # （在 except 里抛出，经 __context__ 相连），再被包成 StartFailed（from）。遍历异常链必须穿透两层包装命中底层 ClientError。
     boto_err = _client_error(code="ThrottlingException", status=429)
-    browser_auth = RuntimeError("Failed to manage AgentCore browser session")  # 模拟 BrowserAuthError
-    browser_auth.__cause__ = boto_err
+    translated = RuntimeError("Throttled")  # 模拟 SDK 翻译后的自有错误类
+    translated.__context__ = boto_err
     start_failed = RuntimeError("Failed to start")  # 模拟 StartFailed
-    start_failed.__cause__ = browser_auth
+    start_failed.__cause__ = translated
     assert rs._is_transient_network(start_failed) is True
 
 
 def test_agentcore_permanent_wrapping_chain_not_transient():
     # 反向护栏：底层是永久错（ValidationException），包两层后仍判永久（不误重试而多计费）
     boto_err = _client_error(code="ValidationException", status=400)
-    browser_auth = RuntimeError("browser auth"); browser_auth.__cause__ = boto_err
-    start_failed = RuntimeError("start failed"); start_failed.__cause__ = browser_auth
+    translated = RuntimeError("validation"); translated.__context__ = boto_err
+    start_failed = RuntimeError("start failed"); start_failed.__cause__ = translated
     assert rs._is_transient_network(start_failed) is False
 
 
@@ -139,13 +139,14 @@ def test_target_closed_not_transient_by_default():
 
 
 def test_target_closed_wrapped_chain_transient_when_connecting():
-    # 真实包装链：TargetClosedError ← StartFailed ← BrowserAuthError（每层 from），建连阶段遍历链命中
+    # 真实包装链：TargetClosedError 先被 Playwright 侧包成 StartFailed、再被 NovaAct 包一层 StartFailed（每层 from），
+    # 建连阶段遍历链命中
     inner = _target_closed()
-    start_failed = RuntimeError("Failed to start and initialize Playwright"); start_failed.__cause__ = inner
-    browser_auth = RuntimeError("Failed to manage AgentCore browser session"); browser_auth.__cause__ = start_failed
-    assert rs._is_transient_network(browser_auth, connecting=True) is True
+    start_failed = RuntimeError("Failed to start and initialize Playwright for NovaAct"); start_failed.__cause__ = inner
+    outer = RuntimeError("Failed to start and initialize Playwright for NovaAct"); outer.__cause__ = start_failed  # NovaAct.start 以 str(e) 再包一层，文案与内层相同
+    assert rs._is_transient_network(outer, connecting=True) is True
     # 反向：同一条链在非建连阶段不认（TargetClosedError 语义模糊，只建连期安全）
-    assert rs._is_transient_network(browser_auth, connecting=False) is False
+    assert rs._is_transient_network(outer, connecting=False) is False
 
 
 def test_connecting_flag_does_not_widen_permanent_errors():
@@ -158,7 +159,7 @@ def test_connecting_flag_does_not_widen_permanent_errors():
 
 def test_target_closed_by_name_fallback_hits_inside_chain(monkeypatch):
     """按名兜底（playwright 私有路径 import 失败时）也必须在**链内**命中——曾只查最外层 e,
-    而真实故障链最外层是 BrowserAuthError,兜底形同虚设(私有路径挪位即误判 engine_error 不重试)。"""
+    而真实故障链最外层是 NovaAct 的 StartFailed,兜底形同虚设(私有路径挪位即误判 engine_error 不重试)。"""
     import builtins
 
     real_import = builtins.__import__
@@ -175,6 +176,6 @@ def test_target_closed_by_name_fallback_hits_inside_chain(monkeypatch):
 
     inner = TargetClosedError("closed")
     start_failed = RuntimeError("StartFailed"); start_failed.__cause__ = inner
-    outer = RuntimeError("BrowserAuthError"); outer.__cause__ = start_failed
+    outer = RuntimeError("StartFailed"); outer.__cause__ = start_failed
     assert rs._is_transient_network(outer, connecting=True) is True  # 链内按名命中
     assert rs._is_transient_network(outer, connecting=False) is False  # 非建连期不认(铁律不变)

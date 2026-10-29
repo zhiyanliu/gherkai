@@ -107,7 +107,7 @@ def selection_label(sel: DeviceSelection | None, platform: str) -> str:
     if sel.arn is not None:
         return f"设备 {platform}：{sel.arn}（来自 {sel.source}）"
     return (f"设备 {platform}：按系统版本 {sel.os_version} 挑选（来自 {sel.source}；命中 {sel.os_version} 与 {sel.os_version}.x，"
-            f"写得越全、实际分到的设备越固定）")
+            f"设备池新增版本时实际分到的版本可能改变，写全版本号可以固定）")
 
 
 def selection_to_dict(sel: DeviceSelection | None) -> dict | None:

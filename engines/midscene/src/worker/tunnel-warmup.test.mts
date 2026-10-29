@@ -7,7 +7,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import * as W from "./tunnel-warmup.mjs";
+import * as W from "../lib/tunnel-warmup.mjs";
 
 const FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/tunnel-warmup.json");
 const WARMUP_URL = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a".repeat(32);
@@ -18,8 +18,10 @@ test("边缘契约常量与跨语言 fixture 一致（runtime、Nova、Midscene 
   assert.deepEqual({ ...W.WARMUP_TITLES }, fx.titles);
   assert.deepEqual({ ...W.WARMUP_MARKERS }, fx.markers);
   assert.deepEqual([W.SESSION_WARMUP_URL_ENV, W.EXTRA_HTTP_HEADERS_ENV, W.SESSION_WARMUP_KEY], [fx.env.warmup_url, fx.env.extra_http_headers, fx.capability_key]);
-  // 三条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
+  // 四条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
+  assert.equal(Object.keys(fx.messages).length, 4);  // fixture 多出一句而 worker 没跟上时在这里红
   assert.equal(W.INCOMPLETE_DEFINITION_MESSAGE, fx.messages.incomplete_definition);
+  assert.equal(W.WARMUP_AUTH_REQUIRED_MESSAGE, fx.messages.auth_required);
   assert.equal(W.WARMUP_DENIED_MESSAGE, fx.messages.denied);
   assert.equal(W.warmupErrorMessage(3, "原因"), fx.messages.error_template.replace("{attempts}", "3").replace("{reason}", "原因"));
 });
@@ -60,11 +62,16 @@ test("离开预热页失败只记日志：会话已换到 cookie，判定不受�
   assert.ok(lines.some((l) => l.includes("could not be left")));
 });
 
-test("401（令牌错）、DENIED、AUTH REQUIRED 都是确定性拒绝：precheck_failed、不重试", async () => {
-  for (const [statuses, titles] of [[[401], ["gherkai-tunnel-auth-required"]], [[200], [W.WARMUP_TITLES.denied]], [[200], [W.WARMUP_TITLES.auth_required]]] as const) {
+test("401（令牌错）、AUTH REQUIRED、DENIED 都是确定性拒绝：precheck_failed、不重试，令牌被拒与 cookie 未通过校验各给自己的一句", async () => {
+  const cases = [
+    [[401], ["gherkai-tunnel-auth-required"], W.WARMUP_AUTH_REQUIRED_MESSAGE],  // 令牌错：预热路径直接 401 页
+    [[200], [W.WARMUP_TITLES.auth_required], W.WARMUP_AUTH_REQUIRED_MESSAGE],
+    [[200], [W.WARMUP_TITLES.denied], W.WARMUP_DENIED_MESSAGE],  // 会话 cookie 未通过校验：脚本对校验路径得到 401
+  ] as const;
+  for (const [statuses, titles, message] of cases) {
     const { page, gotos } = fakePage([...statuses], [...titles]);
     const f = await W.warmupSession(page, WARMUP_URL, deps());
-    assert.deepEqual(f, { errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE });
+    assert.deepEqual(f, { errorType: "precheck_failed", message });
     assert.equal(gotos.length, 1);
   }
 });

@@ -283,7 +283,7 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
     2. 终结判定（机制二「终结函数与真值表」，单一真源是 `finalize_job`，`_job_status` 是它的薄委托，别在两处各写一份）：
        有退出记录时进程终止本身即终态信号（stop_reason 为 timeout / abort 且内容不完整 → 对应终态；退出码非零或未知 → ERROR；
        exit==0 且见 scope_done → scope 级 error 或 scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR）；无退出记录时
-       见 session_opened 或 scope_started → RUNNING、否则 PENDING。
+       见 scope_started 或非 attempted 的 session_opened → RUNNING、否则 PENDING（只有 attempted 的 session_opened 仍为 PENDING）。
     3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
@@ -355,8 +355,8 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
             continue
         if isinstance(ev, ScopeStarted):
             saw_scope_started = True
-        if isinstance(ev, SessionOpened):
-            saw_session_opened = True
+        if isinstance(ev, SessionOpened) and ev.origin != "attempted":
+            saw_session_opened = True  # 只有 attempted 的 session_opened 不算 RUNNING（ADR 0051 决策 4），与同步路径的实时落库一致
         if isinstance(ev, ScopeDone):
             scope_done = ev
         reduce_event(ev, result, scenario_status, timing, r.emit_ts or 0.0)
@@ -452,7 +452,8 @@ def finalize_job(
 
     输入：stop_reason 取 none、timeout、abort 之一（推进器首次仲裁落定的主动处置）；退出信息（exited 为 False 即未退出；exited
     且 exit_code 为 None 即退出码未知）；是否见到 scope_done 及其 status / errorType / message；scenario 判定集；会话记录
-    （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。
+    （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。saw_session_opened 只计 origin 不是 attempted 的
+    session_opened：只有结果未知的创建尝试时未退出行判 PENDING（ADR 0051 决策 4）。
     内容完整（干净退出且发了 scope_done）后停止原因不再改写判定：判定已成，收尾拖过预算只改变推进器是否催停，不改结论——
     同步路径收到 scope_done 后不再落定停止原因，无状态路径的 timed_out 记录遇到它同样不改判，两条路径由这里同一条件保证；
     非零退出或退出码未知不算内容完整，照常受前两行约束。
@@ -598,7 +599,8 @@ def _job_status(
         · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
         · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功，两者矛盾，
           judged as error 比 running 死循环安全）。
-    - 无 task_exited（进程还没终止）：见过 session_opened 或 scope_started → RUNNING；否则 PENDING（还没起/还没写事件）。
+    - 无 task_exited（进程还没终止）：见过 scope_started 或非 attempted 的 session_opened → RUNNING；否则 PENDING（还没起/还没写事件，
+      或只有结果未知的创建尝试）。
     """
     probe_job = Job(scope_id="_", scope_name="_", engine="_", scenarios=())
     scope_done = ScopeDone(scope_id="_", status=scope_done_status,

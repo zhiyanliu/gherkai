@@ -334,31 +334,25 @@ class BackendStack(Stack):
             actions=["s3:GetObject", "s3:PutObject", "s3:AbortMultipartUpload"],
             resources=[f"arn:aws:s3:::{bucket}/*"],
         ))
-        # 两个引擎共享：AgentCore 浏览器会话（Start/Stop）+ browser profile。资源 ARN 已按 SAR resource_types
-        # 收窄（ADR 0033；SAR + IAM 策略模拟器对本账户实证）——拆两条 statement：
+        # 两个引擎共享：AgentCore 浏览器会话（Start/Stop），只对系统 browser。两个引擎起会话都不带 profile 配置、退出时
+        # 不存回浏览器状态（ADR 0028「Nova 会话由 worker 自己持有」），故不授任何 browser profile 动作、也不授 browser-profile 资源。
+        # 资源 ARN 已按 SAR resource_types 收窄（ADR 0033；SAR + IAM 策略模拟器对本账户实证）——拆两条 statement：
         # 系统默认 browser（aws.browser.v1，非自建 custom，ADR 0011）的 ARN **account 段是字面量 `aws`**（非客户账户！
         # 官方人读文档误写成 <account_id>，实测 get-browser 返回 aws、模拟器验证填客户账户会 implicitDeny——copy-account 陷阱）。
-        # browser-profile 是客户自建资源（account 是客户账户，profileId 运行期生成 → * 通配）。
         _sys_browser = f"arn:aws:bedrock-agentcore:{region}:aws:browser/aws.browser.v1"
-        _browser_profiles = f"arn:aws:bedrock-agentcore:{region}:{acct}:browser-profile/*"
         role.add_to_policy(iam.PolicyStatement(
             actions=[
-                "bedrock-agentcore:StartBrowserSession",  # 触及 browser + profile
-                "bedrock-agentcore:StopBrowserSession",   # 只触及 browser（SAR 无 profile 资源类型）
-                "bedrock-agentcore:GetBrowserProfile",    # 只触及 profile
+                "bedrock-agentcore:StartBrowserSession",
+                "bedrock-agentcore:StopBrowserSession",
             ],
-            resources=[_sys_browser, _browser_profiles],
+            resources=[_sys_browser],
         ))
-        # 以下 4 个动作 SAR resource_types 为空、不支持 resource-level（模拟器实证：scope 到任何具体 ARN 均 implicitDeny，
+        # 以下 2 个动作 SAR resource_types 为空、不支持 resource-level（模拟器实证：scope 到任何具体 ARN 均 implicitDeny，
         # 只在 Resource:"*" 下才授权），诚实保留 *（非"待标定"，是**结构上只能** *）：
-        # - List/CreateBrowserProfile：控制面 List 枚举 / Write create（资源尚不存在，无 ARN 可 scope）。
-        #   List 实际运行暴露（缺它误走 Create→已存在则 ConflictException）；Create 实际运行暴露（SDK _resolve_or_create_profile）。
-        # - Connect{Automation,LiveView}Stream：数据面 CDP/live-view 流连接（无资源实体、无 data-event CloudTrail）。
-        #   实际运行暴露（connect_over_cdp 到 browser-streams WebSocket 403 Forbidden 定位）。
+        # Connect{Automation,LiveView}Stream：数据面 CDP/live-view 流连接（无资源实体、无 data-event CloudTrail）。
+        # 实际运行暴露（connect_over_cdp 到 browser-streams WebSocket 403 Forbidden 定位）。
         role.add_to_policy(iam.PolicyStatement(
             actions=[
-                "bedrock-agentcore:ListBrowserProfiles",
-                "bedrock-agentcore:CreateBrowserProfile",
                 "bedrock-agentcore:ConnectBrowserAutomationStream",
                 "bedrock-agentcore:ConnectBrowserLiveViewStream",
             ],
@@ -385,12 +379,6 @@ class BackendStack(Stack):
                     "nova-act:CreateAct", "nova-act:UpdateAct", "nova-act:InvokeActStep",
                 ],
                 resources=[f"{_wf}/*", f"{_wf}/*/workflow-run/*"],
-            ))
-            # AgentCore 保存会话 profile（实际运行暴露：Nova 会话结束想存 profile 优化下次；缺它只 WARNING、非致命，
-            # 但最小权限该有）。SAR resource_types 取 browser + browser-profile：触及来源系统 browser（account=aws）+ 目标 profile。
-            role.add_to_policy(iam.PolicyStatement(
-                actions=["bedrock-agentcore:SaveBrowserSessionProfile"],
-                resources=[_sys_browser, _browser_profiles],
             ))
         elif engine == "midscene":
             # Midscene：Bedrock InvokeModel。**模型是运行期选择、不是部署期常量**（ADR 0044 决策 2：使用方只改定制镜像的

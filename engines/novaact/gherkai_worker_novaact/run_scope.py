@@ -44,9 +44,8 @@ import signal
 import sys
 import threading
 
-from nova_act import NovaAct, AgentCoreBrowserSessionProvider, BOOL_SCHEMA, Workflow
+from nova_act import NovaAct, BOOL_SCHEMA, Workflow
 from bedrock_agentcore.tools.browser_client import BrowserClient  # 会话的 Start / Stop 由 worker 自己持有（ADR 0028「会话泄漏防护」）
-from bedrock_agentcore.tools.config import ProfileConfiguration
 from nova_act.types.workflow import set_current_workflow, get_current_workflow
 
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
@@ -647,15 +646,16 @@ def _nova_logs_dir() -> str | None:
 class _BrowserSession:
     """worker 自持的一次 AgentCore 浏览器会话（ADR 0028「Nova 会话由 worker 自己持有」；ADR 0024 终止契约「Nova worker」条）。
 
-    进入：Start（与 SDK 的 cdp_session 同一组调用——同一 profile 配置、默认浏览器标识）→ 会话 id 立刻在手 → 绑定给 SDK 的会话提供者
-    （它据此在 NovaAct 退出时保存 profile）→ 取 CDP 连接头 → 进 NovaAct。Start 之前失败就是建连失败、没有会话要释放；Start 之后任何
-    一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。
+    进入：Start（不带 profile 配置、默认浏览器标识）→ 会话 id 立刻在手 → 取 CDP 连接头 → 进 NovaAct（只给 CDP 地址与连接头、不传
+    browser_auth：会话从干净状态起步，退出时不存回浏览器状态，与 Midscene 对称）。Start 之前失败就是建连失败、没有会话要释放；
+    Start 之后任何一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。
     退出：先关 NovaAct 连接（它的 __exit__ 收到真实的 exc_info，对称 with 语义；本 worker 自己持有 Workflow，SDK 不据它标记结局）、
     再 Stop 会话（套 SESSION_STOP_BUDGET_S 的预算），两步都执行、失败只记进 release_errors——绝不抛，也绝不抑制 body 的异常，外层建连
     循环因此只会看到建连与 body 的异常，释放失败只体现为退出码 1（ADR 0051 决策 5）。仅捕获 Exception：KeyboardInterrupt / SystemExit
     照常传播，内层传播时外层的 Stop 仍执行。
     曾依赖 SDK 的 cdp_session 上下文管理器：Stop 藏在它的 __enter__ / finally 里，无法套预算、__enter__ 内 Stop 失败不可观测、body 异常
-    被包装改头换面——都在真 SDK 上核过，理由与证据在 ADR 0028。"""
+    被包装改头换面——都在真 SDK 上核过，理由与证据在 ADR 0028。也曾起会话带 SDK 缺省的 default profile、把会话提供者作 browser_auth，
+    退出时存回服务端，状态跨 scope、跨 run 延续——被拒理由同在 ADR 0028 该条。"""
 
     def __init__(self, *, region: str, logs_dir: str | None) -> None:
         self._region, self._logs_dir = region, logs_dir
@@ -668,16 +668,14 @@ class _BrowserSession:
         self._nova_entered = False
 
     def __enter__(self):
-        provider = AgentCoreBrowserSessionProvider(region=self._region)
         self._client = BrowserClient(region=self._region)
-        self._client.start(profile_configuration=ProfileConfiguration(profile_identifier=provider.profile_id))
+        self._client.start()
         try:
             self.session_id = str(self._client.session_id)
             log(f"worker: AgentCore browser session started: {self.session_id}")
-            provider.bind_session(browser_identifier=str(self._client.identifier), session_id=self.session_id)
             ws_url, headers = self._client.generate_ws_headers()  # 要取凭证，可能撞网络错——会话已建起，失败也走释放
             self._nova_cm = NovaAct(
-                cdp_endpoint_url=ws_url, cdp_headers=headers, browser_auth=provider,
+                cdp_endpoint_url=ws_url, cdp_headers=headers,
                 starting_page="about:blank", logs_directory=self._logs_dir,
                 # tty=False：worker 是 cli spawn 的子进程，stdout/stderr 是管道而非交互终端。SDK 默认 tty=True 会喷逐帧刷新的思考
                 # 动画（💭 . / 💭 .. / 🎬 …），在管道里成了刷屏噪声；关掉后输出干净的逐行日志。SDK 文档亦推荐非 tty 场景置 False。
@@ -814,9 +812,9 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
     （对齐 Midscene 的 EAI_AGAIN 白名单，保两个引擎对 DNS 临时抖动恢复力对称，ADR 0028）。
     boto `ClientError` 按错误码/HTTP 状态码细分（节流/5xx 瞬时、4xx/ValidationException 永久，见 _is_transient_client_error）。
 
-    **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层瞬时错包成自有异常
-    （AgentCore 会话建立失败 → BrowserAuthError ← ClientError，每层带 from），只看最外层会漏判——
-    任一层命中白名单即判瞬时（用 id 集防环）。
+    **遍历异常链**（__cause__/__context__）：Nova/boto SDK 常把底层瞬时错包成自有异常（如 NovaAct 进入阶段：
+    nova-act 的 ClientError 先被 SDK 翻成自有错误类、再被包成 StartFailed；Playwright 侧的失败先后被包成两层 StartFailed），
+    只看最外层会漏判——任一层命中白名单即判瞬时（用 id 集防环）。
 
     **connecting=True（仅建连阶段传，ADR 0028）**：额外把 Playwright `TargetClosedError`
     （`CDPSession.send: Target ... has been closed`）判瞬时。它是 CDP/websocket 连接被网络断掉后的
@@ -861,7 +859,7 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
         if isinstance(cur, transient):
             return True
         if _pw_closed_by_name and type(cur).__name__ == "TargetClosedError":
-            # 按名兜底也须在**链内**判（真实包装链 TargetClosedError ← StartFailed ← BrowserAuthError，
+            # 按名兜底也须在**链内**判（真实包装链里 TargetClosedError 外面还包着两层 StartFailed，
             # 最外层不是它——曾只查最外层 e，兜底形同虚设：私有路径一挪位建连 CDP 断连即误判 engine_error 不重试）。
             return True
         cur = cur.__cause__ or cur.__context__
@@ -1087,7 +1085,7 @@ def main() -> int:
         set_current_workflow(wf)
         try:
             # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
-            # 每次 attempt 用全新的 _BrowserSession（provider / BrowserClient / NovaAct），它的退出清掉本次部分建起的会话。
+            # 每次 attempt 用全新的 _BrowserSession（BrowserClient / NovaAct），它的退出清掉本次部分建起的会话。
             for attempt in range(_CONNECT_ATTEMPTS):
                 if _stop.is_set():
                     break  # 停止信号（ADR 0024 flag-only）：不再重试建连 → 走下方的停止路径（退出码按释放结果取 0 或 1）

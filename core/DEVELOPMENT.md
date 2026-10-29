@@ -16,7 +16,7 @@
 - [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝 / [0031](../docs/adr/0031-job-lifecycle-states-and-severity.md) job 生命周期态 + severity
 - [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行 core 侧拆分（project 纯归约投影 + reconcile 推进编排 + event_log 持久事件通道）
 - [0048](../docs/adr/0048-test-targets-device-and-ui-kind.md) 测试目标模型（Target / `@device` / `@app`、定义层校验）
-- [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 设备会话生命周期（会话事件、终结四阶段、设备计量与 evidence）
+- [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话生命周期（会话事件、终结四阶段、设备计量与 evidence）
 
 ## 模块
 
@@ -36,7 +36,7 @@ core/gherkai_core/
 ├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）
 ├── redact.py     ← 凭据脱敏三条规则（URL userinfo、封闭名单的签名类查询参数与隧道令牌、Device Farm 端点的路径令牌；worker 日志转发、事件解码、CLI 出口共用，ADR 0035 决策 5）；用例与两个 worker 的同文实现共用 `engines/fixtures/redaction-cases.json`
 ├── termcolor.py  ← 终端颜色开关的统一策略（`NO_COLOR` / `FORCE_COLOR` / `TERM=dumb` / 目标流是否终端）；worker 日志前缀与 runtime 的 textui 共用，ADR 0047
-├── device_session.py ← 设备会话的呈现辅助：一行设备描述、会话 ARN 对应的 Device Farm 控制台链接；纯函数，报告入口页与 cli 的 render 共用（ADR 0051 决策 8）
+├── device_session.py ← 远程访问会话的呈现辅助：一行设备描述、会话 ARN 对应的 Device Farm 控制台链接；纯函数，报告入口页与 cli 的 render 共用（ADR 0051 决策 8）
 └── adapters/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
     ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 启动 Fargate 容器（task-def 恒为组合根注入的**显式 revision ARN**、绝不 family 名，ADR 0038）+ job-in 经 S3 / events-out 经 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）

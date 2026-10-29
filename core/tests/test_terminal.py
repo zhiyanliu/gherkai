@@ -118,7 +118,7 @@ def test_truth_table_rows(kw, status, error_type, in_message):
 def test_not_exited_is_running_or_pending():
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}).status == Status.RUNNING
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False,
-                saw_session_opened=True).status == Status.RUNNING  # 只见过 session_opened（取设备期间）也算 RUNNING
+                saw_session_opened=True).status == Status.RUNNING  # 只见过非 attempted 的 session_opened（取设备期间）也算 RUNNING
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False).status == Status.PENDING
 
 

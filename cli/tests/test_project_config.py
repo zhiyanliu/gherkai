@@ -229,6 +229,61 @@ def test_cloud_section_is_silent_under_local_backend(tmp_path, monkeypatch, caps
     assert "不生效" not in capsys.readouterr().err
 
 
+_GRACE_NOTICE = "[common] grace 本次未生效"
+
+
+@pytest.mark.parametrize("argv, body, applied, notice", [
+    (["run", "F"], "[common]\ngrace = 300\n", 300.0, False),                                     # 本机后端照常生效
+    (["run", "F", "--backend", "cloud"], "[common]\ngrace = 300\n", None, True),                 # 云端：跳过、只提示
+    (["run", "F"], "[common]\nbackend = 'cloud'\ngrace = 300\n", None, True),                    # 后端由配置给出同样按云端处理
+    (["run", "F", "--backend", "cloud"], "[common]\ngrace = 'abc'\n", None, True),               # 用不到的值不做校验、不拦
+    (["submit", "F", "--backend", "cloud"], "[common]\ngrace = 300\n", None, True),              # submit 没有 --grace，云端照样提示
+    (["submit", "F"], "[common]\ngrace = 300\n", None, False),                                    # 本机提交：对当前命令不适用，静默忽略
+    (["status", "r", "--backend", "cloud"], "[common]\ngrace = 300\n", None, False),             # 只在运行与提交两个命令上提示
+])
+def test_config_grace_only_applies_to_local_backend(tmp_path, monkeypatch, capsys, argv, body, applied, notice):
+    """[common] grace 只对本机后端起作用（ADR 0053 决策 3）：--backend cloud 下配置层跳过、不写进 args，run / submit 上提示一句，
+    不以退出码 2 结束；本机后端照常取文件里的值。"""
+    monkeypatch.chdir(tmp_path)
+    _toml(tmp_path, body)
+    parser = m._build_parser()
+    args = parser.parse_args([str(_feature(tmp_path)) if a == "F" else a for a in argv])
+    assert settings.apply_project_config(args, parser) is None
+    assert getattr(args, "grace", None) == applied
+    assert ("grace" in args.config_filled) is (applied is not None)
+    err = capsys.readouterr().err
+    assert (_GRACE_NOTICE in err) is notice
+    if notice:
+        assert "只对本机运行起作用" in err and "gherkai deploy --stop-timeout" in err and str(tmp_path / "gherkai.toml") in err
+
+
+def test_config_grace_does_not_block_cloud_run_or_submit(tmp_path, monkeypatch, capsys):
+    """配置了 [common] grace 又给 --backend cloud：run 与 submit 都照常完成（退出码不是 2），开始前各打一行提示；run 的停止宽限
+    回落内建默认，文件里的值不进入 grace 校验。命令行上显式给 --grace 仍以退出码 2 结束，见 test_backend_cloud。"""
+    from test_backend_cloud import _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    for var in ("AWS_DDB_TABLE", "AWS_S3_BUCKET", "AWS_RESOURCE_PREFIX"):
+        monkeypatch.delenv(var, raising=False)
+    _toml(tmp_path, "[common]\ngrace = 300\n")
+    _patch_cloud_handles(monkeypatch, [])
+    box, inner = {}, _fake_schedule_factory()
+
+    def capturing(run_meta, engines, sink, opts=None, **kw):
+        box["opts"] = opts
+        return inner(run_meta, engines, sink, opts=opts, **kw)
+
+    monkeypatch.setattr(m, "schedule", capturing)
+    feat = str(_feature(tmp_path))
+    assert m.main(["run", feat, "--backend", "cloud", "--region", "us-east-1", "--quiet"]) == 0
+    err = capsys.readouterr().err
+    assert _GRACE_NOTICE in err and "gherkai deploy --stop-timeout" in err
+    assert "--grace 在云端不生效" not in err   # 不是对命令行选项的拒绝
+    assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s and box["opts"].min_grace_s == 0.0
+    assert m.main(["submit", feat, "--backend", "cloud", "--region", "us-east-1"]) == 0
+    assert _GRACE_NOTICE in capsys.readouterr().err
+
+
 def test_report_dir_relative_to_config_dir_only_for_local_backend(tmp_path, monkeypatch):
     cfg_dir = tmp_path / "proj"; cfg_dir.mkdir()
     _toml(cfg_dir, "[common]\nreport-dir = 'out'\n")
@@ -401,6 +456,15 @@ def test_device_selection_precedence_flag_env_config(tmp_path, monkeypatch, caps
     monkeypatch.delenv("GHERKAI_ANDROID_DEVICE_ARN", raising=False)
     assert m.main(["plan", str(feat)]) == 0
     assert "按系统版本 14 挑选" in capsys.readouterr().out
+
+
+def test_os_version_selection_label_always_carries_match_range_and_pinning_hint():
+    """plan 不调用 Device Farm、无从判断某个值是否已写全，所以按系统版本挑选的平台一律注明命中范围并提示写全版本号可以固定。"""
+    hint = "设备池新增版本时实际分到的版本可能改变，写全版本号可以固定"
+    for version in ("18", "18.6.2"):
+        label = devsel.selection_label(devsel.DeviceSelection("ios", "配置文件", os_version=version), "ios")
+        assert f"命中 {version} 与 {version}.x" in label and hint in label
+    assert hint not in devsel.selection_label(devsel.DeviceSelection("ios", "配置文件", arn=DEV_ARN), "ios")
 
 
 def test_unspecified_device_plan_warns_but_run_and_submit_exit_2_before_any_cloud_call(tmp_path, monkeypatch, capsys):

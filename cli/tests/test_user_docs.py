@@ -1,9 +1,13 @@
-"""仓库内用户文档的护栏：`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`（ADR 0045 决策一 / 六；产品面口径同 ADR 0039）。
+"""仓库内用户文档的护栏：`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料 `docs/presentations/**`
+（ADR 0045 决策一 / 六；产品面口径同 ADR 0039）。扫描面取 `_doc_rules.user_docs()`，与 hook 同源。
 
 这些页面在 GitHub 上渲染、有仓库上下文，所以**允许相对链接**——但每个相对链接必须指向真实存在的文件；
 读者是使用者与替使用者操作的 agent，所以**零内部指代**（禁词表与包 README 共用同一张 `_doc_rules.FORBIDDEN`），
 且不把读者引到 contributor 侧 AI agent 的文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）——那些不是给他们读的。
 用词还要跟上词表：`CONTEXT.md` 已给出规范名的旧名（`_doc_rules.RETIRED_TERMS`）一个不留，两份清单逐词同源。
+口吻表与形态①③启发式的适用范围由 `_doc_rules.wording_scope` 截取：CHANGELOG 已发行节与定稿口播稿（文件 SHA-256
+等于同目录 manifest 所记，`_doc_rules.final_transcript`）是当时的原话、不回溯改写；退役表只豁免 CHANGELOG 已发行节，
+内部指代与相对链接扫全篇。
 另外 owner 表与页面文件一一对应：表里列的页必须存在、目录里的页必须登记，差集法两向都查。
 图统一用 archify（ADR 0045 决策七）：`docs/diagrams/` 里 JSON 图源与导出 SVG 成对入库、图源零内部指代；
 正文不再有 ```mermaid 块（两套图形态并存即漂移的开始）。
@@ -16,13 +20,14 @@ import re
 from pathlib import Path
 
 import pytest
-from _doc_rules import (ARROW, COLLOQUIAL, FORBIDDEN, NUMERIC_SHORTHAND, REPO, RETIRED_TERMS, RETIRED_TERMS_WORDS,
-                        SYMBOL_PREDICATE, changelog_unreleased, prose_lines, skill_markdown_files)
+from _doc_rules import (ARROW, COLLOQUIAL, FORBIDDEN, NUMERIC_SHORTHAND, PRESENTATIONS, REPO, RETIRED_TERMS,
+                        RETIRED_TERMS_WORDS, SYMBOL_PREDICATE, TRANSCRIPT_MANIFEST_KEYS, changelog_unreleased,
+                        final_transcript, prose_lines, scan, skill_markdown_files, user_docs, wording_scope)
 
 USER_GUIDE = REPO / "docs" / "user-guide"
 DIAGRAMS = REPO / "docs" / "diagrams"
 ALL_DOCS = [REPO / "README.md", REPO / "CONTRIBUTING.md"] + sorted((REPO / "docs").rglob("*.md"))
-USER_DOCS = sorted(USER_GUIDE.glob("*.md")) + [REPO / "README.md", REPO / "CHANGELOG.md"]
+USER_DOCS = user_docs()
 
 LINK = re.compile(r"\]\(([^)\s]+)\)")
 BUILDER_ONLY = re.compile(r"(^|/)(docs/adr|docs/journey|docs/ai-eng)(/|$)|(^|/)(CONTEXT\.md|CLAUDE\.md)$")
@@ -34,12 +39,12 @@ def _rel(p: Path) -> str:
 
 @pytest.mark.parametrize("doc", USER_DOCS, ids=_rel)
 def test_user_doc_has_no_internal_references(doc: Path):
-    """内部指代扫全篇；口头语 / 用词表（含量词「档」）在 CHANGELOG 上只扫未发布段。
+    """内部指代扫全篇；口头语 / 用词表（含量词「档」）在 CHANGELOG 上只扫未发布段，定稿口播稿不扫。
 
-    豁免理由见 `_doc_rules.changelog_unreleased`：已发行节是发行当时的原话，不回溯改写。
+    豁免理由见 `_doc_rules.changelog_unreleased` 与 `_doc_rules.final_transcript`：那是当时的原话，不回溯改写。
     """
     text = doc.read_text(encoding="utf-8")
-    scanned = changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text
+    scanned = wording_scope(doc, text)
     cutoff = len(scanned.splitlines())  # 口头语表扫到这一行为止（截断保前缀，故行号与原文一致）
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:120]}" for i, line in enumerate(text.splitlines(), 1)
             if FORBIDDEN.search(line) or (i <= cutoff and COLLOQUIAL.search(line))]
@@ -50,7 +55,8 @@ def test_user_doc_has_no_internal_references(doc: Path):
 def test_user_doc_uses_current_terminology(doc: Path):
     """退役旧名一个不留：词表给了规范名的旧词若留在使用者面，同一概念在文档里就有两个名字。
 
-    CHANGELOG 只查「未发布」段（见 `_doc_rules.changelog_unreleased`）——已发行节是发行当时的原话。
+    CHANGELOG 只查「未发布」段（见 `_doc_rules.changelog_unreleased`）——已发行节是当时的原话。定稿口播稿照查：
+    它的豁免只覆盖口吻表与形态①③。
     """
     text = doc.read_text(encoding="utf-8")
     scanned = changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text
@@ -63,10 +69,11 @@ def test_user_doc_uses_current_terminology(doc: Path):
 def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
     """正文不把 = 当谓语、不写「退 N」、不用箭头（ADR 0045 决策六形态①③）；代码块与行内代码不算。
 
-    读者含非技术的使用者：「job = scope」「命令退 2」「A → B」是程序式写法，改成完整句。CHANGELOG 只查未发布段。
+    读者含非技术的使用者：「job = scope」「命令退 2」「A → B」是程序式写法，改成完整句。CHANGELOG 只查未发布段，
+    定稿口播稿不查（见 `_doc_rules.wording_scope`）。
     """
     text = doc.read_text(encoding="utf-8")
-    scanned = changelog_unreleased(text) if doc.name == "CHANGELOG.md" else text
+    scanned = wording_scope(doc, text)
     hits = []
     for line_no, line in prose_lines(scanned):
         if SYMBOL_PREDICATE.search(line):
@@ -79,7 +86,7 @@ def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
 
 
 def test_retired_terms_are_all_in_the_glossary():
-    """护栏的退役词表 ⊆ 词表各条的 `_Avoid_`：两份清单同源，禁词才有「规范名是什么」的出处。
+    """护栏的退役词表是词表各条 `_Avoid_` 的子集：两份清单同源，禁词才有「规范名是什么」的出处。
 
     差集单向即够：`_Avoid_` 比护栏宽（不少旧名只在 AI 侧文档里留着、未列入使用者面禁词），
     反向差集会把那批正常项报成红。
@@ -129,7 +136,7 @@ def test_diagram_sources_and_exports_come_in_pairs():
 
 def test_published_interactive_html_is_tracked_and_indexed():
     """交互 HTML 只对发布到 Pages 的图入库：git 跟踪的每个 <name>.html 必须有同名图源，且在 index.html 里有链接
-    （发布 = .gitignore 白名单 + index 链接 + HTML 入库，三者同 commit）。"""
+    （发布由 .gitignore 白名单、index 链接与 HTML 入库三件事组成，三者同 commit）。"""
     import subprocess
     tracked = subprocess.run(["git", "-C", str(REPO), "ls-files", "docs/diagrams/*.html"], capture_output=True, text=True, check=True).stdout.split()
     published = {Path(t).stem for t in tracked if Path(t).name != "index.html"}
@@ -173,7 +180,7 @@ def test_diagram_exports_match_their_sources(spec: Path):
 
 
 def test_diagram_skill_points_at_the_method():
-    """作图入口 = 项目级 skill `.claude/skills/doc-diagram/SKILL.md`，它只指向方法文档 docs/ai-eng/diagram-authoring.md 与
+    """作图入口是项目级 skill `.claude/skills/doc-diagram/SKILL.md`，它只指向方法文档 docs/ai-eng/diagram-authoring.md 与
     构建脚本，不复述规则（规则单一真源在方法文档；ADR 0045 决策七）。"""
     skill = REPO / ".claude" / "skills" / "doc-diagram" / "SKILL.md"
     method = REPO / "docs" / "ai-eng" / "diagram-authoring.md"
@@ -216,7 +223,7 @@ def _default_model_claims(line: str, shape: re.Pattern[str]) -> list[str]:
         if NON_DEFAULT_MARKERS.search(near):
             framed = True
         elif not _LIST_SEP_ONLY.fullmatch(gap):
-            framed = False       # 隔着实义文字 = 新的一句，框定不延续
+            framed = False       # 隔着实义文字即为新的一句，框定不延续
         if not framed:
             out.append(m.group(0).rstrip(".-"))
         pos = m.end()
@@ -224,7 +231,7 @@ def _default_model_claims(line: str, shape: re.Pattern[str]) -> list[str]:
 
 
 def _default_model_ids() -> dict[str, str]:
-    """两引擎的默认模型 id = 各自 code 常量的缺省值（env 覆盖的那一半与文档无关）。"""
+    """两引擎的默认模型 id 即各自 code 常量的缺省值（env 覆盖的那一半与文档无关）。"""
     nova = re.search(r"""MODEL_ID\s*=\s*os\.environ\.get\(\s*["']NOVA_MODEL_ID["']\s*,\s*["']([^"']+)["']""",
                      NOVA_CONSTANTS.read_text(encoding="utf-8"))
     midscene = re.search(r"""export const DEFAULT_MODEL\s*=\s*["']([^"']+)["']""",
@@ -237,7 +244,7 @@ def _default_model_ids() -> dict[str, str]:
 def test_default_model_ids_match_the_engine_constants():
     """换默认模型时漏改某份用户面文档即红：默认模型 id 的真值是引擎常量，披露面有十来处、靠人一次改齐。
 
-    扫描面 = 用户文档（CHANGELOG 只扫未发布段，已发行节是发行当时的原话）+ 随包 agent skill；
+    扫描面是用户文档（CHANGELOG 只扫未发布段，已发行节是发行当时的原话）与随包 agent skill；
     新增披露面（新页面、skill 新 reference）自动进面，不必维护清单。历史值与替代值由框定词放行，
     见 `_default_model_claims`。code 侧另有两引擎各自的单测把默认常量钉在字面量上作升级闸门
     （midscene 的 `DEFAULT_MODEL` 断言、nova 的 `--capabilities` 自报断言，换默认得连它们一起改），
@@ -270,3 +277,52 @@ def test_default_model_ids_match_the_engine_constants():
              for where, group in (("用户文档", set(USER_DOCS)), ("随包 skill", set(skills)))
              if not (stated[engine] & group)]
     assert not blind, "护栏空转（默认模型 id 的披露面消失了？先确认是有意删除，再改扫描面）：\n" + "\n".join(blind)
+
+
+def test_scan_checks_internal_references_across_the_whole_changelog(tmp_path):
+    """hook 与提交闸门用的 `scan("user-doc", …)` 与本文件口径一致：内部指代扫 CHANGELOG 全篇（已发行节也不豁免），
+    口头语与退役旧名只扫未发布段（见 `_doc_rules.changelog_unreleased`）。"""
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("# 变更记录\n\n## [Unreleased]\n\n- 新增一项。\n\n## [1.0.0]\n\n- 见 ADR 0039。\n- 跑一遍即可。\n",
+                         encoding="utf-8")
+    hits = {(line_no, label) for line_no, label, _ in scan("user-doc", changelog)}
+    assert hits == {(9, "内部指代")}
+
+
+# ── 演示材料的定稿口播稿（ADR 0045 决策六「演示材料的定稿口播稿」条）──────────────────────────────
+
+def test_presentation_manifests_record_their_transcripts():
+    """每份演示材料的 manifest 记着同目录口播稿的 SHA-256：键缺了，定稿口播稿的豁免就悄悄失效、整份按普通用户文档扫。
+
+    只断言键在、形态对，不断言哈希相等：口播改写后尚未重新配音时哈希本就不等，那时整份照扫是设计内的状态。
+    """
+    manifests = sorted(PRESENTATIONS.glob("*/manifest.json"))
+    assert manifests, "docs/presentations/ 下找不到 manifest.json——目录结构变了？先修扫描面，别让护栏空转"
+    import json
+    missing = []
+    for manifest in manifests:
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        for name, key in TRANSCRIPT_MANIFEST_KEYS.items():
+            if (manifest.parent / name).is_file() and not re.fullmatch(r"[0-9a-f]{64}", str(data.get(key, ""))):
+                missing.append(f"{_rel(manifest)}: 缺 {key}（{name} 的 SHA-256）")
+    assert not missing, "演示材料的 manifest 要记口播稿的 SHA-256（交付时按定稿文件计算）：\n" + "\n".join(missing)
+
+
+def test_final_transcript_exemption_follows_the_manifest_hash(tmp_path):
+    """定稿口播稿免扫口吻表与形态①③，退役表、内部指代与悬空指针照扫；文件一改、哈希不等，整份照扫。"""
+    import hashlib
+    import json
+    narration = tmp_path / "narration.md"
+    manifest = tmp_path / "manifest.json"
+    narration.write_text("# 口播\n\n测试自动跑起来之后，A → B。\n\n见 ADR 0039。\n\n进度见 WP3。\n\n打开深链。\n",
+                         encoding="utf-8")
+    manifest.write_text(json.dumps({"narration_sha256": hashlib.sha256(narration.read_bytes()).hexdigest()}),
+                        encoding="utf-8")
+    assert final_transcript(narration) and wording_scope(narration, narration.read_text(encoding="utf-8")) == ""
+    hits = {(line_no, label) for line_no, label, _ in scan("user-doc", narration)}
+    assert hits == {(5, "内部指代"), (7, "裸 WP 编号"), (9, "退役旧名")}
+
+    narration.write_text(narration.read_text(encoding="utf-8") + "\n新写的一句。\n", encoding="utf-8")
+    assert not final_transcript(narration)
+    labels = {label for _, label, _ in scan("user-doc", narration)}
+    assert {"口头语或自造复合词", "正文箭头", "内部指代", "裸 WP 编号", "退役旧名"} <= labels

@@ -615,8 +615,8 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
-        # 与 SDK 的 cdp_session 同一组参数：只给 profile 配置、且是 provider 解析出的那个 profile（别的参数名或漏传都在这里红）
-        assert set(kw) == {"profile_configuration"} and getattr(kw["profile_configuration"], "profile_identifier", None) == "prof-fake", kw
+        # 起会话不带任何参数：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）
+        assert kw == {}, kw
         if self._raises is not None:
             raise self._raises
         if self._on_start:
@@ -681,18 +681,8 @@ def main_fakes(monkeypatch, logs_dir):
     rs._stop.clear()
 
 
-def _install_provider(monkeypatch, on_enter=None, raises=None, trace=None):
-    """装 AgentCore 会话面的替身：provider（profile 与绑定）加 BrowserClient（Start / Stop）。"""
-    class _P:
-        profile_id = "prof-fake"
-
-        def __init__(self, region=None):
-            pass
-
-        def bind_session(self, browser_identifier, session_id):
-            pass
-
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _P)
+def _install_browser_client(monkeypatch, on_enter=None, raises=None, trace=None):
+    """装 AgentCore 会话面的替身：BrowserClient（Start / 取 CDP 连接头 / Stop）。"""
     monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _FakeBrowserClient(on_enter, raises=raises, trace=trace))
 
 
@@ -700,7 +690,7 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
     """正常完成：先有界排空队列（30s）、再整目录 flush（flush 只兜漏网的）。顺序反了就等于没有队列。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
-    _install_provider(main_fakes)
+    _install_browser_client(main_fakes)
     assert rs.main() == 0
     assert trace == [("drain", rs.EVIDENCE_DRAIN_SCOPE_END_S), ("flush", str(logs_dir))]
 
@@ -711,7 +701,7 @@ def test_stop_signal_path_drains_after_session_release(main_fakes):
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
-    _install_provider(main_fakes, on_enter=lambda: rs._stop.set(), trace=trace)
+    _install_browser_client(main_fakes, on_enter=lambda: rs._stop.set(), trace=trace)
     assert rs.main() == 0
     assert trace == [("nova_exit",), ("session_stop",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 
@@ -721,7 +711,7 @@ def test_network_exhausted_path_drains(main_fakes):
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: True)
     main_fakes.setattr(rs, "_backoff_interrupted", lambda attempt: False)
-    _install_provider(main_fakes, raises=OSError("dns 抖了"))
+    _install_browser_client(main_fakes, raises=OSError("dns 抖了"))
     assert rs.main() == rs.EX_WORKER_NETWORK
     assert trace == [("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 
@@ -733,7 +723,7 @@ def test_exception_path_drains_and_still_raises(main_fakes):
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)
     main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
     main_fakes.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: _RaisingSink(RuntimeError("会话炸了")))}))
-    _install_provider(main_fakes, trace=trace)
+    _install_browser_client(main_fakes, trace=trace)
     with pytest.raises(RuntimeError, match="会话炸了"):
         rs.main()
     assert trace == [("nova_exit",), ("session_stop",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]

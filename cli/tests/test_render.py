@@ -233,6 +233,27 @@ def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_rec
     assert "sessions" not in desktop["scopes"][0]  # 桌面 job 省键
 
 
+def test_explain_lists_job_report_refs_under_scope_line_even_with_step_records():
+    """ADR 0042 决策四：job 级 report_refs 恒列在 scope 行下。有 step 记录、不打判定行的 job 也列，不只在零记录的判定块里出现；
+    位置紧随 scope 行、在 scenario 之前。"""
+    from gherkai_core.model import Scenario, Step
+
+    sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"),))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    ref = ReportRef(kind="report", ref=ResourceUri("file:///x/report.html"), label="Midscene report")
+    for status in (Status.FAILED, Status.PASSED):
+        jr = JobResult(job=job, status=status, report_refs=(ref,),
+                       scenarios=[ScenarioResult(scenario_id="d:0", status=status, steps=[StepResult(index=0, status=status)])])
+        doc = render.explain_to_dict(run_id="r", status=status.value, results=[jr], evidence_reader=lambda refs: (None, "no_ref"))
+        scope = doc["scopes"][0]
+        assert scope["has_step_records"] is True
+        assert scope["report_refs"] == [{"kind": "report", "ref": "file:///x/report.html", "label": "Midscene report"}]
+        lines = render.render_explain_text(doc, expand_passed=True).splitlines()
+        at = next(i for i, line in enumerate(lines) if "scope d  engine=midscene" in line)
+        assert "report（Midscene report）: file:///x/report.html" in lines[at + 1], lines
+        assert "scenario d:0" in lines[at + 2] and not any("判定：" in line for line in lines), lines
+
+
 def test_device_header_lines_show_device_and_console_link():
     """scope 表头（ADR 0051 决策 8）：代表会话的设备描述一行、会话 ARN 对应的 Device Farm 控制台链接一行，run 文本、explain 文本与报告页三处
     同一口径；桌面 job 没有这两行。"""

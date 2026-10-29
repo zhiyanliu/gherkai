@@ -1,4 +1,4 @@
-"""agent skill 的护栏（ADR 0043 决策六；fixture 三条见决策七）。
+"""agent skill 的护栏（ADR 0043 决策六；评测资产位置与 fixture 三条见决策七）。
 
 skill 是**产品面**：它随 wheel 发行、由 `skill install` 整目录拷进使用方项目，读者是没有本仓库的 AI agent。
 故同受 ADR 0039 约束（零内部指代、链接只用绝对 URL），且它写出的每个子命令 / flag / JSON 键都要对得上
@@ -8,10 +8,10 @@ skill 文案是 markdown，`test_user_facing_messages.py` 只扫 Python 字面�
 **静默空扫**），故另立本文件；`skill install` 自身的提示 / 错误是 Python 字面量，由那只扫描器自动覆盖。
 
 真值集三处，一处都不靠人读：
-- 命令面 = `_build_parser()` 的 `_actions` / `_SubParsersAction.choices` 递归展开（走 argparse 私有 API，
-  先例 = `deploy_aws/tests/test_provider.py` 的全集护栏）；
-- JSON 键 = `docs/internals/cli-json-contract.md` 的字段记载（表 + 那几段散文，见 `_documented_keys`）；
-- 转换副本 = `tools/render_skill_contract.py` 的纯函数 `transform`。
+- 命令面取自 `_build_parser()` 的 `_actions` / `_SubParsersAction.choices` 递归展开（走 argparse 私有 API，
+  先例是 `deploy_aws/tests/test_provider.py` 的全集护栏）；
+- JSON 键取自 `docs/internals/cli-json-contract.md` 的字段记载（表与那几段散文，见 `_documented_keys`）；
+- 转换副本由 `tools/render_skill_contract.py` 的纯函数 `transform` 生成。
 
 `deploy` / `destroy` 那批 token 不在这里比：provider 住 `[deploy-aws]` optional extra、只有部署方装，
 前端的测试不该强依赖它——对照面在 `deploy_aws/tests/test_skill_deploy_tokens.py`。
@@ -54,7 +54,7 @@ FIXTURES = REPO / "skills" / "gherkai-evals" / "fixtures"
 
 
 def _parser_nodes() -> dict[tuple[str, ...], set[str]]:
-    """子命令路径 → 该 parser 节点上声明的 `--flag` 集。`()` = 主 parser。"""
+    """子命令路径 → 该 parser 节点上声明的 `--flag` 集。`()` 表示主 parser。"""
     nodes: dict[tuple[str, ...], set[str]] = {}
 
     def walk(parser: argparse.ArgumentParser, path: tuple[str, ...]) -> None:
@@ -228,7 +228,7 @@ def test_bare_flags_exist_somewhere():
 # 这条才挡「把 run 独有的选项写成两边都有」。
 #
 # **书写约定**（skill 里的排他声明按这三种形态之一写，护栏按同序解析）：
-#   ① 散文/列头：「仅 `run` = `--fail-fast` / `--quiet`」——标记之后到最近的 `；` / `）` / `|` / 行尾之间的 flag；
+#   ① 散文/列头：「仅 `run` 可用 `--fail-fast` / `--quiet`」——标记之后到最近的 `；` / `）` / `|` / 行尾之间的 flag；
 #   ② 括注在 flag 之后：「`--worker-variant`（仅 `run` / `submit`）」——标记前**紧邻的那一个** flag；
 #   ③ 表格行：「| 仅 `submit` | `--tunnel-ttl` | 说明… |」——标记所在单元格的**下一格**里的 flag
 #      （「说明」格不算，否则 `只在 cloud + --expose-local 时有意义` 这种举例会被误当成排他声明）。
@@ -281,7 +281,7 @@ KEY_TOKEN = re.compile(r"^[a-z][a-z0-9_]*$")  # 形如 JSON 键：天然排除 f
 # 契约页以**散文**记载、不在任何字段表里的真键（页里的位置在注释里点明；进了表也不必删这里）。
 # 与下面的「非键」表分开，是为了不让人把真键登记成非键——那会把真正的漂移一起放过。
 PROSE_DOCUMENTED_KEYS = frozenset({
-    # run_meta 那段散文（契约页「顶层 = RunResult + run_meta + artifacts」之后的 `run_meta`（definition）段）
+    # run_meta 那段散文（契约页 `gherkai run … --json` 节里的 `run_meta`（definition）段）
     "created_at", "schema_version", "cli_version", "max_concurrency", "steps_dir", "worker_variant", "worker_task_defs",
     "extra_http_headers", "session_warmup_url",
     # plan / run 的 `steps[].deterministic` 四态那段
@@ -436,7 +436,7 @@ def test_skill_form_limits():
     assert len(body) <= 12000, f"SKILL.md 正文 {len(body)} 字符 > 12000——往 references/ 挪"
 
 
-# ── (g)(h)(i) 评测 fixture：ignore 行为、git 跟踪、可搬迁 ────────────────────
+# ── (g)(h)(i)(j) 评测资产：ignore 行为、git 跟踪、位置、可搬迁 ─────────────────
 
 # `.gitignore` 的派生品段会静默吞掉 fixture 里实际运行产出的文件，且是**部分**吞（Nova 的 evidence 截图不在规则内）
 # ——比全缺更难发现。反白名单 + 其后重列的密钥规则由这两组探针**行为式**核：两向都测才同时挡住
@@ -479,15 +479,34 @@ def test_every_fixture_file_is_tracked():
         pytest.skip("还没有 fixture")
     tracked = set(subprocess.run(["git", "ls-files", "-z", "skills/gherkai-evals/fixtures"],
                                  cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\0")) - {""}
-    # 两种成因分开报：被忽略 = 真缺陷（改 .gitignore）；只是还没 add = 提交前的正常提醒。
+    # 两种成因分开报：被忽略是真缺陷（改 .gitignore）；只是还没 add 则是提交前的正常提醒。
     missing = [f"{rel}（{'被 .gitignore 忽略' if _is_ignored(rel) else '还没 git add'}）"
                for p in files if (rel := str(p.relative_to(REPO))) not in tracked]
     assert not missing, "这些 fixture 文件不在 git 里（被忽略的先修 .gitignore，`git add -f` 救不回打包）：\n" + "\n".join(sorted(missing))
 
 
+def test_eval_assets_exist_only_under_repo_root_skills():
+    """评测资产只放在仓库根 `skills/gherkai-evals/`（ADR 0043 决策七「资产位置」）。别处出现的同名目录多半是在子目录里
+    按相对路径写出的残缺副本：不进发行物、没有读取方，内容却会与正本悄悄分叉，还让文档里的目录树与实际不符。
+    检查面取 git 跟踪的文件与未被忽略的未跟踪文件，再与磁盘取交集（已从磁盘删除、尚未提交的不算），提交前即可发现；
+    被 .gitignore 忽略的残留不在 git 视野内，不在本条范围内。"""
+    listed = subprocess.run(["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
+                            cwd=REPO, capture_output=True, text=True, check=True).stdout.split("\0")
+    stray = []
+    for rel in listed:
+        if not rel or not (REPO / rel).is_file():
+            continue
+        dirs = Path(rel).parts[:-1]
+        at = [i for i, part in enumerate(dirs) if part == "gherkai-evals"]
+        if at and (at != [1] or dirs[0] != "skills"):
+            stray.append(rel)
+    assert not stray, ("gherkai-evals 目录只允许出现在仓库根 skills/ 下；别处的副本请删除，内容以 skills/gherkai-evals/ 为准：\n"
+                       + "\n".join(sorted(stray)))
+
+
 # fixture 可搬迁契约的兜底：逐文件枚举字段总会漏新字段，这条按不变量兜——文本里出现的绝对路径必须是
 # 占位符形态 `{{FIXTURE_ROOT}}/…`（评测前由 materialize 换成舞台目录）。
-# 判据 = 已知机器根，根集与理由见 `_doc_rules.MACHINE_ROOTS`（快照物化的漏扫认同一组根）。曾试过「JSON 里
+# 判据是已知机器根，根集与理由见 `_doc_rules.MACHINE_ROOTS`（快照物化的漏扫认同一组根）。曾试过「JSON 里
 # 以 `/` 打头的字符串值一律算路径」：假红——step 原文 `Then 页面地址匹配 "/wiki/OpenAI"` 会以转义字串嵌进运行
 # 元信息与判定明细，URL 路径与机器路径在形态上分不开。这里在根之后多收一段路径尾巴，报错时能打出整条路径。
 ABSOLUTE_PATH = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/[^\s\"'\\]*")

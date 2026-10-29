@@ -25,9 +25,11 @@ def test_edge_contract_constants_match_the_cross_language_fixture():
     assert (C.WARMUP_PATH, C.CHECK_PATH, C.TOKEN_PARAM, C.COOKIE_NAME) == (fx["warmup_path"], fx["check_path"], fx["token_param"], fx["cookie_name"])
     assert C.WARMUP_TITLES == fx["titles"] and C.WARMUP_MARKERS == fx["markers"]
     assert (C.SESSION_WARMUP_URL_ENV, C.EXTRA_HTTP_HEADERS_ENV, C.SESSION_WARMUP_KEY) == (fx["env"]["warmup_url"], fx["env"]["extra_http_headers"], fx["capability_key"])
-    # 三条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
-    assert (C.INCOMPLETE_DEFINITION_MESSAGE, C.WARMUP_DENIED_MESSAGE, C.WARMUP_ERROR_MESSAGE) == (
-        fx["messages"]["incomplete_definition"], fx["messages"]["denied"], fx["messages"]["error_template"])
+    # 四条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
+    assert (C.INCOMPLETE_DEFINITION_MESSAGE, C.WARMUP_AUTH_REQUIRED_MESSAGE, C.WARMUP_DENIED_MESSAGE, C.WARMUP_ERROR_MESSAGE) == (
+        fx["messages"]["incomplete_definition"], fx["messages"]["auth_required"], fx["messages"]["denied"],
+        fx["messages"]["error_template"])
+    assert len(fx["messages"]) == 4  # fixture 多出一句而 worker 没跟上时在这里红
 
 
 class _Resp:
@@ -93,15 +95,16 @@ def test_failing_to_leave_the_warmup_page_only_logs():
     assert page.gotos == [WARMUP_URL, "about:blank"] and any("could not be left" in ln for ln in lines)
 
 
-@pytest.mark.parametrize("statuses, titles", [
-    ([401], ["gherkai-tunnel-auth-required"]),            # 令牌错：预热路径直接 401 页
-    ([200], [C.WARMUP_TITLES["denied"]]),                 # 边缘不接受 cookie：脚本对校验路径得到 401
-    ([200], [C.WARMUP_TITLES["auth_required"]]),
+@pytest.mark.parametrize("statuses, titles, message", [
+    ([401], ["gherkai-tunnel-auth-required"], C.WARMUP_AUTH_REQUIRED_MESSAGE),  # 令牌错：预热路径直接 401 页
+    ([200], [C.WARMUP_TITLES["auth_required"]], C.WARMUP_AUTH_REQUIRED_MESSAGE),
+    ([200], [C.WARMUP_TITLES["denied"]], C.WARMUP_DENIED_MESSAGE),               # 会话 cookie 未通过校验：脚本对校验路径得到 401
 ])
-def test_denied_and_auth_required_are_deterministic_rejections_without_retry(statuses, titles):
+def test_denied_and_auth_required_are_deterministic_rejections_without_retry(statuses, titles, message):
+    """两种拒绝都是 precheck_failed、不重试，但各给自己的一句：令牌被拒与会话 cookie 未通过校验的处置不同。"""
     page = _FakePage(statuses, titles)
     f = _warm(page)
-    assert f is not None and f.error_type == "precheck_failed" and f.message == C.WARMUP_DENIED_MESSAGE
+    assert f is not None and f.error_type == "precheck_failed" and f.message == message
     assert len(page.gotos) == 1
 
 
@@ -196,8 +199,8 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
-        # 与 SDK 的 cdp_session 同一组参数：只给 profile 配置、且是 provider 解析出的那个 profile（别的参数名或漏传都在这里红）
-        assert set(kw) == {"profile_configuration"} and getattr(kw["profile_configuration"], "profile_identifier", None) == "prof-fake", kw
+        # 起会话不带任何参数：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）
+        assert kw == {}, kw
         hook = self._box.get("start_hook")
         if hook is not None:
             hook()
@@ -220,16 +223,6 @@ class _FakeBrowserClient:
             raise exc
         self.session_id = self.identifier = None
         return True
-
-
-class _FakeProvider:
-    profile_id = "prof-fake"
-
-    def __init__(self, region=None):
-        self.bound = None
-
-    def bind_session(self, browser_identifier, session_id):
-        self.bound = (browser_identifier, session_id)
 
 
 class _FakeNovaAct:
@@ -268,7 +261,6 @@ def driven(monkeypatch, tmp_path):
 
     box["stop_excs"] = []  # 按次给 Stop 的异常（None 表示成功）；用例按需设置
     monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _FakeBrowserClient(trace, box))
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _FakeProvider)
     monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
     real_warmup = W.warmup_session  # 先取真函数再打桩：桩里不能再经模块属性引用（那已是桩自己）
 
@@ -585,18 +577,20 @@ def test_ws_headers_failure_with_successful_stop_is_a_plain_connect_failure(driv
     assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2
 
 
-def test_session_is_bound_to_the_provider_before_novaact_starts(driven, monkeypatch):
-    """SDK 在 NovaAct 退出时按绑定的会话保存 profile：Start 之后、NovaAct 构造之前必须 bind_session（与 SDK 自己的 cdp_session 同序）。"""
+def test_novaact_gets_only_the_cdp_endpoint_and_headers_without_browser_auth(driven, monkeypatch):
+    """会话从干净状态起步：NovaAct 只拿 Start 之后取到的 CDP 地址与连接头，不传 browser_auth——SDK 因此既不在进入时加载、
+    也不在退出时存回浏览器状态，cookie 与 localStorage 不跨 scope、不跨 run 延续（与 Midscene 对称）。"""
     trace, sink, box = driven
     seen = {}
 
-    class _Provider(_FakeProvider):
-        def bind_session(self, browser_identifier, session_id):
-            seen["bound"] = (browser_identifier, session_id, trace.count(("nova_init",)))
+    def nova_factory(**k):
+        seen.update(k)
+        return _FakeNovaAct(box["page"], trace, **k)
 
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _Provider)
+    monkeypatch.setattr(rs, "NovaAct", nova_factory)
     assert rs.main() == 0
-    assert seen["bound"] == ("aws.browser.v1", "sess-fake", 0)  # 绑定时 NovaAct 还没构造
+    assert "browser_auth" not in seen, seen
+    assert seen["cdp_endpoint_url"] == "ws://fake" and seen["cdp_headers"] == {}
 
 
 def test_stop_timeout_is_a_release_failure():
@@ -669,15 +663,10 @@ def test_session_summary_is_located_by_the_nova_act_session_id(driven, monkeypat
 
 
 def test_failure_right_after_start_still_stops_the_session(driven, monkeypatch):
-    """Start 成功之后、NovaAct 之前的任何一步抛出（这里让绑定抛）：会话仍被 Stop 一次，异常照常按建连域处理。"""
+    """Start 成功之后、NovaAct 之前的任何一步抛出（这里让取 CDP 连接头抛一个非网络错）：会话仍被 Stop 一次，异常照常按建连域处理。"""
     trace, sink, box = driven
-
-    class _Provider(_FakeProvider):
-        def bind_session(self, browser_identifier, session_id):
-            raise RuntimeError("bind failed")
-
-    monkeypatch.setattr(rs, "AgentCoreBrowserSessionProvider", _Provider)
-    with pytest.raises(RuntimeError, match="bind failed"):
+    box["ws_headers_excs"] = [RuntimeError("headers failed")]
+    with pytest.raises(RuntimeError, match="headers failed"):
         rs.main()
     assert trace.count(("session_start",)) == 1 and trace.count(("session_stop",)) == 1
 

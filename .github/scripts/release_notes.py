@@ -9,7 +9,7 @@ ADR 0043 决策三：根 README 里 `npx skills add …/tree/vX.Y.Z/cli/gherkai_
 复制），gate 断言它等于本版、README 里没有这条命令也算失败；user guide 里这条 URL 若带具体版本号也须等于本版（占位符
 `v<版本>` 不算）——tag 从「记得改」变成「不改发不出」。
 护栏：`cli/tests/test_release_notes.py`（本脚本的行为，另对照真 CHANGELOG / README）与 `cli/tests/test_package_readmes.py`
-（footer 的使用者面规则：零内部指代、零相对链接）。
+（footer 按包页面规则束扫：用户文档的整套规则加零相对链接，仓库链接锁定 tag）。
 
 用法：
     python3 .github/scripts/release_notes.py check  --version 1.4.4 [--changelog CHANGELOG.md] [--readme README.md] \

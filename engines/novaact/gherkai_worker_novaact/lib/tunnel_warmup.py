@@ -3,6 +3,7 @@
 三种可见结果、三端同一条判据（桌面读响应状态与 document.title，设备在控件树里找正文标记）：
 - READY：就绪；
 - DENIED（预热页面脚本向校验路径请求得到 401）或 AUTH REQUIRED（令牌错，预热路径直接 401 页）：确定性拒绝，`precheck_failed`，不重试；
+  两种拒绝成因不同、各给一句消息（令牌被拒提示核对隧道配置，会话 cookie 未通过校验提示检查隧道与浏览器的 cookie 支持）；
 - ERROR（脚本请求失败）或预算内没有任何标记、导航本身抛出：原地重导航有界重试，耗尽后 `engine_error`。
 两者都不归 `network_error`（ADR 0028 的分类红线：鉴权失败与拿不准的失败不得归瞬时网络故障），一律经 scope_done{status, errorType}
 传递（ADR 0051 决策 4）——所以本模块把导航异常吞在自己的重试里、绝不向上抛，外层的建连重试域看不到它。
@@ -15,6 +16,7 @@ from typing import Callable
 
 from gherkai_worker_novaact.lib.constants import (
     WARMUP_ATTEMPTS,
+    WARMUP_AUTH_REQUIRED_MESSAGE,
     WARMUP_DENIED_MESSAGE,
     WARMUP_ERROR_MESSAGE,
     WARMUP_MARKER_WAIT_S,
@@ -66,12 +68,14 @@ def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sle
         except Exception:  # noqa: BLE001
             status = None
         if status == 401:  # 令牌错：预热路径直接 401 页（AUTH REQUIRED）
-            return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
+            return WarmupFailure("precheck_failed", WARMUP_AUTH_REQUIRED_MESSAGE)
         title = _wait_for_marker(page, sleep=sleep, monotonic=monotonic, stop=stop)
         if title == WARMUP_TITLES["ready"]:
             _leave_warmup_page(page, log)
             return None
-        if title in (WARMUP_TITLES["denied"], WARMUP_TITLES["auth_required"]):
+        if title == WARMUP_TITLES["auth_required"]:
+            return WarmupFailure("precheck_failed", WARMUP_AUTH_REQUIRED_MESSAGE)
+        if title == WARMUP_TITLES["denied"]:  # 预热页已下发 cookie、校验请求仍被拒：浏览器没有保存或没有带上它，或隧道在预热期间重建
             return WarmupFailure("precheck_failed", WARMUP_DENIED_MESSAGE)
         last = (f"预热页面标记为 {title}" if title == WARMUP_TITLES["error"]
                 else f"预热页面在 {WARMUP_MARKER_WAIT_S:g} 秒内没有给出任何标记（响应状态 {status if status is not None else '未知'}，页面标题 {title or '空'}）")

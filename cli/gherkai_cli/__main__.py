@@ -2241,7 +2241,8 @@ def _cmd_run(args) -> int:
     #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「云端后端不查本机
     #     定位链」，见 _preflight_worker_runtimes）——在此查会把只用云端后端的提交者按本机环境无理由挡住。
     #     **云端后端还要拒绝显式 `--grace`**（同条 ADR）：那个后端没有它的作用面，配了无效值就在入口拒，别让提交者
-    #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。
+    #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。配置文件里的 grace 在云端由配置层
+    #     跳过、只提示（settings.LOCAL_ONLY_OPTIONS，ADR 0053 决策 3），故到这里的非 None 值只会来自命令行。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退出码 2「没开始执行就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到提交者面前。
     #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（云端后端连 worker 都不问），

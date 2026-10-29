@@ -46,7 +46,7 @@ NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 # AgentCore 会话 Stop 的预算（ADR 0028「会话泄漏防护」，对称 Midscene 的 STOP_SESSION_BUDGET_MS）：worker 自己持有 StopBrowserSession，
 # 退化网络下它可能挂很久，等满会撞 SIGKILL；超过预算即记为释放失败（退出码 1、会话可能泄漏），线程留给进程退出回收。真容器标定的
 # 会话释放整段 ≤9 s（正常网络；含 NovaAct 关连接），单次 Stop 给 8 s，仍在上面 30 s 余量之内（释放 + 截图排空 6 s）。env 可覆盖。
-# 已知边界（ADR 0028）：Stop 之前的 NovaAct 退出（经 CDP 取 storage_state、保存 profile 的 SaveBrowserSessionProfile）没有预算、
+# 已知边界（ADR 0028）：Stop 之前的 NovaAct 退出（关 CDP 连接；会话不带 profile、不存回浏览器状态）没有预算、
 # 且与 Playwright 同线程、不能搬进线程——退化网络下它先于 Stop 挂住，整段释放仍可能撞 SIGKILL。
 SESSION_STOP_BUDGET_S = float(os.environ.get("NOVA_SESSION_STOP_BUDGET_S", "8"))
 
@@ -68,8 +68,10 @@ WARMUP_MARKERS = {"ready": "GHERKAI TUNNEL READY", "denied": "GHERKAI TUNNEL DEN
 WARMUP_NAV_TIMEOUT_MS = 30_000
 WARMUP_MARKER_WAIT_S = 10.0
 WARMUP_ATTEMPTS = 3
-# 产品语言的三句（两个 worker 逐字相同；ADR 0039）
+# 产品语言的四句（两个 worker 逐字相同；ADR 0039）；两种拒绝各给一句：令牌被拒（预热路径 401 或 AUTH REQUIRED）、会话 cookie 未通过校验（DENIED）
 INCOMPLETE_DEFINITION_MESSAGE = "后端未传递会话预热地址，部署版本可能低于命令行工具，请重新部署后再提交"
-WARMUP_DENIED_MESSAGE = ("隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；"
-                         "请重新提交这次运行")
+WARMUP_AUTH_REQUIRED_MESSAGE = ("隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受——后端与命令行工具的隧道配置不一致，或隧道已重建；"
+                                "请重新提交这次运行；仍出现时核对命令行工具与后端是否同版本")
+WARMUP_DENIED_MESSAGE = ("隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie——浏览器可能没有保存或没有带上它，或隧道在预热期间重建；"
+                         "请确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交")
 WARMUP_ERROR_MESSAGE = "隧道会话预热未能确认就绪（已尝试 {attempts} 次）：{reason}——隧道可能已拆除，或浏览器到隧道入口的网络不通；请确认隧道仍在后重新提交"

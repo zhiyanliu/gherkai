@@ -374,23 +374,29 @@ def test_task_role_resource_arns_narrowed():
     all_nova_actions = {a for acts, _ in stmts for a in acts if a.startswith("nova-act:")}
     assert "nova-act:GetAct" not in all_nova_actions, "GetAct 非真实 IAM action，应已删除"
 
-    # ③ bedrock-agentcore Start/Stop/Get/Save → 具体 ARN（含系统 browser 的 account=aws 陷阱段）。
+    # ③ bedrock-agentcore Start/Stop → 只对系统 browser 的具体 ARN（含 account=aws 陷阱段）。
     #    系统 browser ARN 的 account 段必须是字面量 aws（非客户账户——模拟器实证填客户账户会 implicitDeny）。
     sys_browser_seen = any("browser/aws.browser.v1" in res for _, res in stmts)
     assert sys_browser_seen, "缺系统 browser ARN"
-    for acts, res in stmts:
-        if any(a in ("bedrock-agentcore:StartBrowserSession", "bedrock-agentcore:StopBrowserSession",
-                     "bedrock-agentcore:GetBrowserProfile", "bedrock-agentcore:SaveBrowserSessionProfile") for a in acts):
-            assert res != '"*"', f"agentcore 可收窄动作不应是裸 *：{acts}"
-            if "browser/aws.browser.v1" in res:
-                # 系统 browser 段的 account 必须是 aws、绝不是客户账户（copy-account 陷阱护栏）
-                assert ":aws:browser/aws.browser.v1" in res, f"系统 browser account 段应为字面量 aws：{res}"
-                assert "000000000000:browser/aws.browser.v1" not in res, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"  # 000…0 是本测试 synth env 的账号（第 21 行）——断言必须用它才抓得到陷阱（曾误用真实账号字面量、synth 产物里不可能出现、断言永真失效）
-    # ④ List/Create/Connect×2 结构上不支持 resource-level，诚实保留 *（不因收窄而误删这条 * statement）
-    for action in ("bedrock-agentcore:ListBrowserProfiles", "bedrock-agentcore:CreateBrowserProfile",
-                   "bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
+    for action in ("bedrock-agentcore:StartBrowserSession", "bedrock-agentcore:StopBrowserSession"):
+        rs = res_for(action)
+        assert rs, f"缺 {action} 权限"
+        for r in rs:
+            assert r != '"*"', f"{action} 不应是裸 *"
+            # 系统 browser 段的 account 必须是 aws、绝不是客户账户（copy-account 陷阱护栏）
+            assert ":aws:browser/aws.browser.v1" in r, f"系统 browser account 段应为字面量 aws：{r}"
+            assert "000000000000:browser/aws.browser.v1" not in r, "踩了 copy-account 陷阱（系统 browser 用了客户账户）"  # 000…0 是本测试 synth env 的账号（第 21 行）——断言必须用它才抓得到陷阱（曾误用真实账号字面量、synth 产物里不可能出现、断言永真失效）
+    # ④ Connect×2 结构上不支持 resource-level，诚实保留 *（不因收窄而误删这条 * statement）
+    for action in ("bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"):
         rs = res_for(action)
         assert rs and all(r == '"*"' for r in rs), f"{action} 应保留 *（SAR 不支持 resource-level）：{rs}"
+    # ⑤ 两个引擎起会话都不带 profile、退出时不存回（ADR 0028「Nova 会话由 worker 自己持有」）：任何 task role 都不授
+    #    browser profile 动作，也不出现 browser-profile 资源——防将来顺手加回（最小权限的另一半是「不多给」）。
+    all_agentcore_actions = {a for acts, _ in stmts for a in acts if a.startswith("bedrock-agentcore:")}
+    for action in ("bedrock-agentcore:GetBrowserProfile", "bedrock-agentcore:ListBrowserProfiles",
+                   "bedrock-agentcore:CreateBrowserProfile", "bedrock-agentcore:SaveBrowserSessionProfile"):
+        assert action not in all_agentcore_actions, f"{action} 不应再授（会话不带 profile）"
+    assert not any("browser-profile" in res for _, res in stmts), "不应再授 browser-profile 资源（会话不带 profile）"
 
 
 

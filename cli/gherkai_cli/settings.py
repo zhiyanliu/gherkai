@@ -33,6 +33,12 @@ ENV_LAYER_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "region", "pr
 # （GHERKAI_*），解析在设备请求解析那一步、不经本节的同词规则
 DEVICE_OPTIONS = {"android_device_arn": ("devices.android", "arn"), "ios_device_arn": ("devices.ios", "arn"),
                    "device_farm_project_arn": ("devices", "project-arn"), "app_bucket": ("devices", "app-bucket")}
+# 只对本机后端起作用的 [common] 键 → --backend cloud 下不写进 args、不做校验，只在 run / submit 上提示一句（ADR 0053 决策 3，
+# 与 project-arn / app-bucket 同一形态：同一份项目文件要同时服务本机与云端，用不到的值不拦）。命令行上显式给出的值不受影响、
+# 仍由入口拒绝（ADR 0024「引擎自报下限」条）。值是提示里的理由（产品语言）。steps-dir 同属本机专用，但有环境变量层，
+# 它的提示在 steps 目录解析那一步。
+LOCAL_ONLY_OPTIONS = {"grace": "grace 只对本机运行起作用，云端 worker 的停止宽限由部署时的 gherkai deploy --stop-timeout 决定"}
+LOCAL_ONLY_NOTICE_COMMANDS = ("run", "submit")
 # 内建默认：argparse 侧这些选项改成 None 哨兵（分得出「使用方没给」），配置合成之后在这里补
 BUILTIN_DEFAULTS = {"default_engine": "novaact", "assertion_votes": 1, "max_concurrency": DEFAULT_MAX_CONCURRENCY,
                      "report_dir": "reports", "backend": "local", "tunnel": "ngrok"}
@@ -119,7 +125,8 @@ def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
     argv 传入）、`deploy` / `destroy` / `skill` / `list-engines` 不读。
     三类选项三种去向：①没有环境变量层的 → 配置值填进仍为 None 的 args 字段（选项已给则不动），最后补内建默认；
     ②有环境变量层的（ENV_LAYER_OPTIONS）→ 只做类型校验、存进 `args.config_values`，由各解析链经 config_* 形参放在环境变量
-    之后；③ [cloud] 整节只在 --backend cloud 下生效，backend 自身先按「选项 > [common] > 内建」定下来。
+    之后；③ [cloud] 整节只在 --backend cloud 下生效，backend 自身先按「选项 > [common] > 内建」定下来；只对本机后端起作用的
+    [common] 键（LOCAL_ONLY_OPTIONS）在 --backend cloud 下跳过、不写进 args，run / submit 上各提示一句。
     [common] 里对当前命令不存在的键忽略（配置文件是项目级的，各命令只取自己有的那几项）。
     路径类值相对配置文件所在目录（决策 2）：steps-dir 恒绝对化；report-dir 只在本机后端下绝对化（云端是桶内键前缀、原样）。
     """
@@ -149,7 +156,7 @@ def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
             if dest == "backend" or dest in PER_CALL_OPTIONS or dest in DEVICE_OPTIONS:
                 continue
             section = "cloud" if dest in CLOUD_OPTIONS else "common"
-            if section == "cloud" and not use_cloud:
+            if (section == "cloud" and not use_cloud) or (use_cloud and dest in LOCAL_ONLY_OPTIONS):
                 continue
             key = dest.replace("_", "-")
             source = cfg.cloud if section == "cloud" else cfg.common
@@ -185,6 +192,12 @@ def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
     except _config.ConfigError as e:
         progress(str(e))
         return 2
+    # 提示按命令而不按选项面：submit 没有 --grace，云端提交照样要说清文件里那一项为什么没用上
+    if use_cloud and args.command in LOCAL_ONLY_NOTICE_COMMANDS:
+        for dest, reason in LOCAL_ONLY_OPTIONS.items():
+            key = dest.replace("_", "-")
+            if key in cfg.common:
+                progress(f"注：配置文件 {cfg.path} 的 [common] {key} 本次未生效：{reason}")
     for dest, default in BUILTIN_DEFAULTS.items():
         if dest in actions and getattr(args, dest) is None:
             setattr(args, dest, default)

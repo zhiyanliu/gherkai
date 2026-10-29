@@ -1,5 +1,7 @@
 """双路径对拍（ADR 0034 机制二「双路径对拍是实施护栏」）：同一组事件矩阵分别输入同步 schedule（FakeEngine）与无状态
-project_full（EventRecord 加 TaskExited），逐项比较判定、归因、消息、明细、sessions[] 与计量键。含 abort 的行只经同步路径。
+project_full（EventRecord 加 TaskExited），逐项比较判定、归因、消息、明细、sessions[] 与计量键，以及两条路径交给终结函数的
+见过 scope_started / session_opened 两个布尔。含 abort 的行只经同步路径。
+未退出时的 job 态另有一组对拍：同步路径的实时落库（RunPersistence）与无状态路径的 project() 投影逐项比较 status 与 session_id。
 """
 from __future__ import annotations
 
@@ -21,7 +23,7 @@ from gherkai_core.model import (
     Step,
     StepDone,
 )
-from gherkai_core.project import EventRecord, TaskExited, project_full
+from gherkai_core.project import EventRecord, TaskExited, project, project_full
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
@@ -150,6 +152,61 @@ def _comparable(jr) -> dict:
 def test_sync_and_stateless_paths_agree(row: Row):
     a, b = _comparable(_sync(row)), _comparable(_stateless(row))
     assert a == b, f"\n同步：{a}\n无状态：{b}"
+
+
+@pytest.mark.parametrize("row", MATRIX, ids=[r.name for r in MATRIX])
+def test_sync_and_stateless_paths_feed_finalize_the_same_flags(monkeypatch, row: Row):
+    """两条路径只准备输入、判定只由终结函数给出：同一事件流交给终结函数的 saw_scope_started / saw_session_opened 也一致。
+    只有 attempted 的 session_opened 两条路径都不计（ADR 0051 决策 4）；同步路径到终结时恒已退出、这两个布尔不改变判定，
+    判定对拍照不出它们的分歧，故单独比较输入。"""
+    import gherkai_core.project as project_mod
+    import gherkai_core.schedule as schedule_mod
+
+    seen: dict[str, list[tuple[bool, bool]]] = {"sync": [], "stateless": []}
+
+    def spy(path: str, real):
+        def wrapped(**kw):
+            seen[path].append((kw["saw_scope_started"], kw["saw_session_opened"]))
+            return real(**kw)
+        return wrapped
+
+    monkeypatch.setattr(schedule_mod, "finalize_job", spy("sync", schedule_mod.finalize_job))
+    monkeypatch.setattr(project_mod, "finalize_job", spy("stateless", project_mod.finalize_job))
+    _sync(row)
+    _stateless(row)
+    assert seen["sync"] and seen["stateless"]
+    assert seen["sync"][-1] == seen["stateless"][-1], f"\n同步：{seen['sync']}\n无状态：{seen['stateless']}"
+
+
+# 未退出时的 job 态（ADR 0034 机制二真值表「未退出」行、ADR 0051 决策 4）：同步路径由实时落库（schedule 把每条事件原样转给
+# RunPersistence.on_event）写进 RunStore，无状态路径由 project() 从同一事件段投影（无退出记录、无基线）。只有 attempted 的
+# session_opened 两条路径都为 PENDING；见过非 attempted 的 session_opened 或 scope_started 才是 RUNNING。
+IN_FLIGHT = [
+    ("只有 attempted 的 session_opened", [_opened("t", origin="attempted", sid=None)], (Status.PENDING, None)),
+    ("attempted 的尝试加未确认的 session_closed", [_opened("t", origin="attempted", sid=None),
+                                               _closed("t", release="unconfirmed", observed_s=None, sid=None)], (Status.PENDING, None)),
+    ("attempted 之后换台建成", [_opened("t", origin="attempted", sid=None), _opened("a")], (Status.RUNNING, "arn:a")),
+    ("已记真实 ARN 后到达的 attempted", [_opened("a"), _opened("t", origin="attempted", sid=None)], (Status.RUNNING, "arn:a")),
+    ("attempted 之后 scope_started", [_opened("t", origin="attempted", sid=None), ScopeStarted(scope_id=SCOPE)], (Status.RUNNING, None)),
+]
+
+
+@pytest.mark.parametrize("events,expected", [r[1:] for r in IN_FLIGHT], ids=[r[0] for r in IN_FLIGHT])
+def test_in_flight_job_state_agrees(tmp_path, events, expected):
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.persist import RunPersistence
+
+    meta = RunMeta(run_id="r", created_at="", jobs=(_job(),))
+    run_store = LocalRunStore(tmp_path)
+    persistence = RunPersistence("r", run_store, LocalResultStore(tmp_path))
+    persistence.begin(meta, started_at="t0")
+    for ev in events:
+        persistence.on_event(ev)
+    synced = run_store.load_run_state("r").jobs[SCOPE]
+    records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
+    projected = project(meta, records).jobs[SCOPE]
+    assert (synced.status, synced.session_id) == (projected.status, projected.session_id) == expected
 
 
 def test_crash_row_sync_side_really_exits_with_unknown_code():

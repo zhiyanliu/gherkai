@@ -328,7 +328,7 @@ class ScopeDone:
     session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
     report_refs: tuple[ReportRef, ...] = ()
     # scope 级 error 的载体（ADR 0051 决策 4 / 0024「scope_done 的可选 status / errorType / message」）：被测对象未能就绪
-    # （自检不通过、获取超时、隧道预热被拒）或执行中途会话丢失时，worker 以 status=error 结束整个 scope。三者**同进同出**：
+    # （自检不通过、获取超时、会话预热被拒）或执行中途会话丢失时，worker 以 status=error 结束整个 scope。三者**同进同出**：
     # 正常路径三个都是 None、形态不变；status 只允许 ERROR（判定仍只由 status 承载，error_type 只回答原因）。
     # core 据此对 definition 中无事件的 scenario 合成 SKIPPED（ADR 0031 决定一），终结判定归 0034 机制二的真值表。
     status: Status | None = None

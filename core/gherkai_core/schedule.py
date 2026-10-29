@@ -342,7 +342,9 @@ class _Worker:
                     saw_step = True  # 会话已起、有 act 执行 → 封掉 job 级重试（防重复副作用）
                 if isinstance(event, ScopeStarted):
                     saw_scope_started = True
-                if isinstance(event, SessionOpened):
+                if isinstance(event, SessionOpened) and event.origin != "attempted":
+                    # 与无状态投影同一口径：只有结果未知的创建尝试不算已取到设备（ADR 0051 决策 4）。本路径到终结时恒已退出，
+                    # 这个布尔不改变判定，只保证两条路径给终结函数的输入一致
                     saw_session_opened = True
                 if isinstance(event, ScopeDone):
                     scope_done = event  # 内容完整信号（ADR 0024/0026）；带 status=error 即 scope 级判定（ADR 0051 决策 4）
