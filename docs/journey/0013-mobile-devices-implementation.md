@@ -33,7 +33,6 @@
 - 策略文件不删除的前提仍需真实核实：ngrok agent 在隧道存活期是否会重读策略文件（`runtime/gherkai_runtime/tunnel.py` 的 `NgrokTunnel.start` 注释已点明，只靠单测证明不了）。
 - 待真跑核实：Midscene 桌面 worker 在 AgentCore 浏览器上预热后，被测应用用 history.pushState 不再抛 SecurityError；故意给错令牌时，run 的最终退出码与 explain 的呈现符合预期（READY、cookie 到达上游、错令牌归 precheck_failed、worker 退出码 0 已核）。
 - 待真跑核实：同步 run 宿主下预热地址端到端到达 worker，且宿主 shell 里 export 的同名值不会越过 definition（本机 submit 的 per-run 进程与 status --wait 接力者、云端 submit 的推进链已核）。
-- **ADR 0010 基准重测**：两个 spike 的动作指令措辞与计时边界不同、token 用量从未采集（owner 裁定补齐后重测，不冻结为历史快照）。做法：对齐 `engines/midscene/spikes/03-midscene-grounding.ts` 与 `engines/novaact/spikes/wikipedia_benchmark.py` 的提示词与计时范围、给两侧 metrics 补用量采集、在跳板机重测、替换 0010 的对比表并补成本行。时机：第 7 批 B8 闭合后、1.5 收尾（code-health 复盘）前；约一到两小时，不依赖部署。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。
 - **评测 fixture 重录**：`skills/gherkai-evals/fixtures/` 下 wiki-search / job-failure / nova-zh 三个录制型 fixture 的 run_meta.json 缺 schema_version，当前 CLI 只认第 1 版；按 ADR 0043 决策七的流程用当前 CLI 重录并完整物化，不手工补键。
 - **IAM 收窄的云端验证**：Nova 会话改为干净起步后，两个 task role 去掉了 browser profile 四个动作与 `browser-profile/*` 资源（ADR 0033 IAM 表），尚未经真部署验证。B8 部署后两引擎各真跑一条云端 run，确认无 AccessDenied；通过后把 0033「上表动作集由真跑逐个暴露」条里「尚未经真部署后的 task role 端到端验证」改为已验证的表述。

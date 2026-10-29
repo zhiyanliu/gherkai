@@ -3918,10 +3918,10 @@
       "_callable": true,
       "_callable_class": true,
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_tokenusage",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "tokenusage"
+      "norm_label": "tokenusage",
+      "id": "engines_midscene_spikes_03_midscene_grounding_tokenusage"
     },
     {
       "label": "Check",
@@ -22718,10 +22718,10 @@
       "source_location": "L64",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "_fmt_seconds()"
+      "norm_label": "_fmt_seconds()",
+      "id": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds"
     },
     {
       "label": "run()",
@@ -22730,10 +22730,10 @@
       "source_location": "L73",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark_run",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "run()"
+      "norm_label": "run()",
+      "id": "engines_novaact_spikes_wikipedia_benchmark_run"
     },
     {
       "label": "_time_worked_s()",
@@ -22742,10 +22742,10 @@
       "source_location": "L55",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "_time_worked_s()"
+      "norm_label": "_time_worked_s()",
+      "id": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s"
     },
     {
       "label": ".delete_worker()",
@@ -36938,10 +36938,10 @@
       "source_location": "L71",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_main",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "main()"
+      "norm_label": "main()",
+      "id": "engines_midscene_spikes_03_midscene_grounding_main"
     },
     {
       "label": "mean()",
@@ -36950,10 +36950,10 @@
       "source_location": "L57",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_mean",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "mean()"
+      "norm_label": "mean()",
+      "id": "engines_midscene_spikes_03_midscene_grounding_mean"
     },
     {
       "label": "tokenDelta()",
@@ -36962,10 +36962,10 @@
       "source_location": "L53",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_tokendelta",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "tokendelta()"
+      "norm_label": "tokendelta()",
+      "id": "engines_midscene_spikes_03_midscene_grounding_tokendelta"
     },
     {
       "label": "tokenTotals()",
@@ -36974,10 +36974,10 @@
       "source_location": "L48",
       "_callable": true,
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_tokentotals",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "tokentotals()"
+      "norm_label": "tokentotals()",
+      "id": "engines_midscene_spikes_03_midscene_grounding_tokentotals"
     },
     {
       "label": "main()",
@@ -54154,32 +54154,32 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "0013-mobile-devices-implementation.md",
-      "id": "docs_journey_0013_mobile_devices_implementation"
+      "norm_label": "0013-mobile-devices-implementation.md"
     },
     {
       "label": "documenting \u6e05\u5355\uff08ADR 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b\uff0c\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L44",
+      "source_location": "L43",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)",
-      "id": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
+      "norm_label": "documenting \u6e05\u5355(adr 0048 \u5230 0053 \u7b2c 7 \u7c7b\u5185\u5bb9\u7684\u6c47\u603b,\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210)"
     },
     {
       "label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9\uff08ADR \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L71",
+      "source_location": "L70",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
+      "norm_label": "\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9(adr \u5df2\u5b9a\u3001\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1)"
     },
     {
       "label": "\u6062\u590d\u73b0\u573a",
@@ -54187,10 +54187,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L7",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u6062\u590d\u73b0\u573a",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u6062\u590d\u73b0\u573a",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u6062\u590d\u73b0\u573a"
+      "norm_label": "\u6062\u590d\u73b0\u573a"
     },
     {
       "label": "\u73b0\u573a",
@@ -54198,10 +54198,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L15",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u73b0\u573a",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
+      "norm_label": "\u73b0\u573a"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
@@ -54209,10 +54209,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L3",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
     },
     {
       "label": "\u9057\u7559\u9879",
@@ -54220,10 +54220,10 @@
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
       "source_location": "L28",
       "_origin": "ast",
+      "id": "docs_journey_0013_mobile_devices_implementation_\u9057\u7559\u9879",
       "community": 190,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "norm_label": "\u9057\u7559\u9879",
-      "id": "docs_journey_0013_mobile_devices_implementation_\u9057\u7559\u9879"
+      "norm_label": "\u9057\u7559\u9879"
     },
     {
       "label": "`_iter_image_params` \u90a3\u79cd `(engine, tag, value)` \u4e09\u5143\u7ec4\uff08\u4e0d\u8fc7 SSM\uff0c\u76f4\u63a5\u5582\u7b5b\u9009\u51fd\u6570\uff09\u3002",
@@ -59910,10 +59910,10 @@
       "source_file": "engines/novaact/spikes/wikipedia_benchmark.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "wikipedia_benchmark.py"
+      "norm_label": "wikipedia_benchmark.py",
+      "id": "engines_novaact_spikes_wikipedia_benchmark"
     },
     {
       "label": "workflow",
@@ -59921,10 +59921,10 @@
       "source_file": "",
       "source_location": "",
       "_origin": "ast",
-      "id": "workflow",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "workflow"
+      "norm_label": "workflow",
+      "id": "workflow"
     },
     {
       "label": "\u7b2c\u4e8c\u4e2a spike \u00b7 Nova Act \u5f15\u64ce \u2014\u2014 \u5bf9\u6807 Midscene \u5f15\u64ce\uff08ADR 0010 \u82f9\u679c\u5bf9\u82f9\u679c\uff09\u3002 \u7528\u4f8b\uff08\u4e0e Midscene \u540c\uff09\uff1a\u6253\u5f00\u2026",
@@ -59932,10 +59932,10 @@
       "source_file": "engines/novaact/spikes/wikipedia_benchmark.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark_rationale_1",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "\u7b2c\u4e8c\u4e2a spike \u00b7 nova act \u5f15\u64ce \u2014\u2014 \u5bf9\u6807 midscene \u5f15\u64ce(adr 0010 \u82f9\u679c\u5bf9\u82f9\u679c)\u3002 \u7528\u4f8b(\u4e0e midscene \u540c):\u6253\u5f00..."
+      "norm_label": "\u7b2c\u4e8c\u4e2a spike \u00b7 nova act \u5f15\u64ce \u2014\u2014 \u5bf9\u6807 midscene \u5f15\u64ce(adr 0010 \u82f9\u679c\u5bf9\u82f9\u679c)\u3002 \u7528\u4f8b(\u4e0e midscene \u540c):\u6253\u5f00...",
+      "id": "engines_novaact_spikes_wikipedia_benchmark_rationale_1"
     },
     {
       "label": "\u53d6 act / act_get \u7684\u8fd4\u56de\u503c\u6216\u5176\u629b\u51fa\u7684\u5f02\u5e38\u4e0a metadata.time_worked_s\uff1b\u6ca1\u6709\u5219\u8fd4\u56de None\u3002 \u5931\u8d25\u7684 act\u2026",
@@ -59943,10 +59943,10 @@
       "source_file": "engines/novaact/spikes/wikipedia_benchmark.py",
       "source_location": "L56",
       "_origin": "ast",
-      "id": "engines_novaact_spikes_wikipedia_benchmark_rationale_56",
       "community": 293,
       "community_name": "wikipedia_benchmark.py",
-      "norm_label": "\u53d6 act / act_get \u7684\u8fd4\u56de\u503c\u6216\u5176\u629b\u51fa\u7684\u5f02\u5e38\u4e0a metadata.time_worked_s;\u6ca1\u6709\u5219\u8fd4\u56de none\u3002 \u5931\u8d25\u7684 act..."
+      "norm_label": "\u53d6 act / act_get \u7684\u8fd4\u56de\u503c\u6216\u5176\u629b\u51fa\u7684\u5f02\u5e38\u4e0a metadata.time_worked_s;\u6ca1\u6709\u5219\u8fd4\u56de none\u3002 \u5931\u8d25\u7684 act...",
+      "id": "engines_novaact_spikes_wikipedia_benchmark_rationale_56"
     },
     {
       "label": "\u7559\u7684\u53e3\u5b50\uff08ADR 0038\u300c\u547d\u4ee4\u65cf\u300d\uff09\uff1a**\u5c1a\u672a\u63d0\u4f9b**\uff0c\u4ee5\u9000\u51fa\u7801 2 \u7ed3\u675f\u5e76\u8bf4\u6e05\u4e3a\u4ec0\u4e48\u4e0e\u5c06\u6765\u600e\u4e48\u843d\u3002\u2026",
@@ -70745,10 +70745,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "03-midscene-grounding.ts"
+      "norm_label": "03-midscene-grounding.ts",
+      "id": "engines_midscene_spikes_03_midscene_grounding"
     },
     {
       "label": "BASE_URL",
@@ -70756,10 +70756,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L36",
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_base_url",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "base_url"
+      "norm_label": "base_url",
+      "id": "engines_midscene_spikes_03_midscene_grounding_base_url"
     },
     {
       "label": "MODEL_CONFIG",
@@ -70767,10 +70767,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L64",
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_model_config",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "model_config"
+      "norm_label": "model_config",
+      "id": "engines_midscene_spikes_03_midscene_grounding_model_config"
     },
     {
       "label": "REGION",
@@ -70778,10 +70778,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L36",
       "_origin": "ast",
-      "id": "engines_midscene_spikes_03_midscene_grounding_region",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "region"
+      "norm_label": "region",
+      "id": "engines_midscene_spikes_03_midscene_grounding_region"
     },
     {
       "label": "04-planning-probe.ts",
@@ -70943,10 +70943,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L2",
       "_origin": "ast",
-      "id": "docref_adr_0010",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "adr-0010"
+      "norm_label": "adr-0010",
+      "id": "docref_adr_0010"
     },
     {
       "label": "ADR-0014",
@@ -70954,10 +70954,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L9",
       "_origin": "ast",
-      "id": "docref_adr_0014",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "adr-0014"
+      "norm_label": "adr-0014",
+      "id": "docref_adr_0014"
     },
     {
       "label": "ADR-0033",
@@ -70965,10 +70965,10 @@
       "source_file": "engines/midscene/spikes/03-midscene-grounding.ts",
       "source_location": "L35",
       "_origin": "ast",
-      "id": "docref_adr_0033",
       "community": 74,
       "community_name": "06-devicefarm-appium.mts",
-      "norm_label": "adr-0033"
+      "norm_label": "adr-0033",
+      "id": "docref_adr_0033"
     },
     {
       "label": "ADR-0033",
@@ -138472,9 +138472,9 @@
       "source_location": "L103",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding_main",
-      "target": "engines_midscene_spikes_03_midscene_grounding_tokendelta",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_tokendelta"
     },
     {
       "relation": "calls",
@@ -138484,9 +138484,9 @@
       "source_location": "L139",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding_main",
-      "target": "engines_midscene_spikes_03_midscene_grounding_mean",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_mean"
     },
     {
       "relation": "calls",
@@ -138496,9 +138496,9 @@
       "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding_main",
-      "target": "engines_midscene_spikes_03_midscene_grounding_tokentotals",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_tokentotals"
     },
     {
       "relation": "calls",
@@ -143200,9 +143200,9 @@
       "source_location": "L161",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark_run",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds"
     },
     {
       "relation": "calls",
@@ -143212,9 +143212,9 @@
       "source_location": "L96",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark_run",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s"
     },
     {
       "relation": "calls",
@@ -159208,9 +159208,9 @@
       "weight": 1.0,
       "context": "decorator",
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark_run",
-      "target": "workflow",
-      "confidence_score": 1.0
+      "target": "workflow"
     },
     {
       "relation": "references",
@@ -179354,9 +179354,9 @@
       "source_location": "L2",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "docref_adr_0010",
-      "confidence_score": 1.0
+      "target": "docref_adr_0010"
     },
     {
       "relation": "cites",
@@ -179365,9 +179365,9 @@
       "source_location": "L35",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "docref_adr_0033",
-      "confidence_score": 1.0
+      "target": "docref_adr_0033"
     },
     {
       "relation": "cites",
@@ -179376,9 +179376,9 @@
       "source_location": "L9",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "docref_adr_0014",
-      "confidence_score": 1.0
+      "target": "docref_adr_0014"
     },
     {
       "relation": "cites",
@@ -201893,9 +201893,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -201904,9 +201904,9 @@
       "source_location": "L15",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u73b0\u573a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -201915,20 +201915,20 @@
       "source_location": "L28",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u9057\u7559\u9879"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u9057\u7559\u9879",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L44",
+      "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210"
+      "target": "docs_journey_0013_mobile_devices_implementation_documenting_\u6e05\u5355_adr_0048_\u5230_0053_\u7b2c_7_\u7c7b\u5185\u5bb9\u7684\u6c47\u603b_\u5b9e\u65bd\u671f\u9010\u9879\u5b8c\u6210",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -201937,20 +201937,20 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u6062\u590d\u73b0\u573a"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u6062\u590d\u73b0\u573a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0013-mobile-devices-implementation.md",
-      "source_location": "L71",
+      "source_location": "L70",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0013_mobile_devices_implementation_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u8fdb\u5ea6\u603b\u7eb2",
-      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1"
+      "target": "docs_journey_0013_mobile_devices_implementation_\u5b9e\u65bd\u671f\u8981\u6838\u7684\u70b9_adr_\u5df2\u5b9a_\u5b9e\u65bd\u65f6\u987a\u624b\u9a8c\u8bc1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -203664,9 +203664,9 @@
       "source_location": "L36",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_base_url",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_base_url"
     },
     {
       "relation": "contains",
@@ -203675,9 +203675,9 @@
       "source_location": "L36",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_region",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_region"
     },
     {
       "relation": "contains",
@@ -203686,9 +203686,9 @@
       "source_location": "L45",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_tokenusage",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_tokenusage"
     },
     {
       "relation": "contains",
@@ -203697,9 +203697,9 @@
       "source_location": "L48",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_tokentotals",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_tokentotals"
     },
     {
       "relation": "contains",
@@ -203708,9 +203708,9 @@
       "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_tokendelta",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_tokendelta"
     },
     {
       "relation": "contains",
@@ -203719,9 +203719,9 @@
       "source_location": "L57",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_mean",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_mean"
     },
     {
       "relation": "contains",
@@ -203730,9 +203730,9 @@
       "source_location": "L64",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_model_config",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_model_config"
     },
     {
       "relation": "contains",
@@ -203741,9 +203741,9 @@
       "source_location": "L71",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_midscene_spikes_03_midscene_grounding",
-      "target": "engines_midscene_spikes_03_midscene_grounding_main",
-      "confidence_score": 1.0
+      "target": "engines_midscene_spikes_03_midscene_grounding_main"
     },
     {
       "relation": "contains",
@@ -207855,9 +207855,9 @@
       "source_location": "L55",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s"
     },
     {
       "relation": "contains",
@@ -207866,9 +207866,9 @@
       "source_location": "L64",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_fmt_seconds"
     },
     {
       "relation": "contains",
@@ -207877,9 +207877,9 @@
       "source_location": "L73",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_run",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_run"
     },
     {
       "relation": "contains",
@@ -239797,9 +239797,9 @@
       "source_location": "L1",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark_rationale_1",
-      "target": "engines_novaact_spikes_wikipedia_benchmark",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark"
     },
     {
       "relation": "rationale_for",
@@ -239808,9 +239808,9 @@
       "source_location": "L56",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "engines_novaact_spikes_wikipedia_benchmark_rationale_56",
-      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s",
-      "confidence_score": 1.0
+      "target": "engines_novaact_spikes_wikipedia_benchmark_time_worked_s"
     },
     {
       "relation": "rationale_for",
@@ -269669,5 +269669,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "09b136b7beddf5060b5629cfe36590b6158109cb"
+  "built_at_commit": "ee586e1534fdb6db82b55477a88c4916a71d51f8"
 }

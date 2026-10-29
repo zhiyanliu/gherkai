@@ -162,7 +162,7 @@ worker **边跑边流式上报**（每行一个事件），core 实时收。选�
 - **Midscene**：`aiAct()→string|undefined`、`aiBoolean()→bare boolean`，**失败抛异常**（status 由 worker 捕获算出）；token 在 `agent.metrics.totalTokens`（`MidsceneUsageMetrics` 累计快照，@midscene/web 1.12 起公开；step 前后取差）；报告路径 `agent.reportFile`（destroy 后），1 个 html/worker。
 - **Nova Act**：`act()→ActResult`、`act_get()→ActGetResult(matches_schema/parsed_response)`，**失败抛异常树**（guardrail/timeout/agentFailed/限流…）；**token/cost 任何 SDK 路径都拿不到**（`ActResult`/`ActMetadata`/trajectory/wire 全无 token 字段；`InvokeActStepResponse` 只有 `calls`+`step_id`；pydantic 默认 ignore，即便服务端回 usage 也被静默丢弃）。
 - **Nova 原生量 `time_worked_s`**：SDK 原生给（= 工作时长扣除等人时间，自标 "Approx. Time Worked"）。它与 Nova 计费口径一致（Nova 按 **$4.75/agent-hour**、扣除等人时间，`aws.amazon.com/nova/pricing` 逐字核实）——故消费者可用 `time_worked_s/3600 × 费率` 高保真折美元。**但折算由消费者做、不由 worker/core 做**（工具只报原生量，不内置 $4.75）。
-- **两个 UNKNOWN（记为 SDK 外、v1.0 不依赖，非可用路径）**：① 线上 invoke-step 响应是否藏了被 SDK 丢弃的 usage——需真实抓包才能定；② CloudWatch/Cost Explorer 是否暴露可读的 per-act 成本指标——需 AWS Nova Act 用户指南（JS SPA，未能 fetch）。若未来追求精确 token 成本再探。
+- **两个 UNKNOWN（记为 SDK 外、v1.0 不依赖，非可用路径）**：① 线上 invoke-step 响应是否藏了被 SDK 丢弃的 usage——2026-10 复核 SDK（nova-act 3.4.187.0）的 `ActMetadata` 与 botocore 服务模型（nova-act 2025-08-22）里 `InvokeActStep` 的输出（只定义 `calls` 与 `stepId`），均无 token 字段，经 SDK 拿不到用量；剩下的只是线上响应是否带了服务模型之外的字段，需真实抓包才能定；② CloudWatch/Cost Explorer 是否暴露可读的 per-act 成本指标——需 AWS Nova Act 用户指南（JS SPA，未能 fetch）。若未来追求精确 token 成本再探。
 
 ## 协议是测试面（skill：interface is the test surface）
 
