@@ -80,7 +80,14 @@
 
 ## 8. B6-midscene-device：Midscene worker 设备模块（接缝、命令守卫、能力探测、适配器、终结四阶段、evidence）
 
-规模 L。**状态**：开工前理解阶段完成（对照了现状代码、B1–B8 已落接口、ADR 0051 与 0052、spike 06）；owner 拍板八条（下文 E1–E8）；对实施有直接影响的澄清（下文各条里的 D 编号）按既有决策推导，两组结论均已写回 ADR（0024、0028、0037、0042、0044、0049、0050、0051、0052），实施以 ADR 条文为准，本节只记它们落到哪个模块。本节已按代码现状校准，先读「已落地、勿重做」段。
+规模 L。**状态**：实施完成、待真跑（2026-10-30 第二轮施工之后的现状，未提交，以工作树为准）：设备模块的全部块与缺省装配已落地，设备路径可执行，文档与真机重新探测工具已随之校准；剩下独立复核、提交与真跑（见下文「真跑或对抗核查才算数的结论」段）。开工前的理解阶段对照了现状代码、B1–B8 已落接口、ADR 0051 与 0052、spike 06；owner 拍板八条（下文 E1–E8）；对实施有直接影响的澄清（下文各条里的 D 编号）按既有决策推导，两组结论均已写回 ADR（0024、0028、0037、0042、0044、0049、0050、0051、0052），实施以 ADR 条文为准，本节只记它们落到哪个模块。下文「改动面」与「先写的护栏测试」两段仍是施工底稿，先读「已落地、勿重做」段与紧接的「施工现状」段。
+
+**施工现状（未提交，工作树里）**
+
+- 第一轮已落地：`device/limits.mts`（max_session_s 8880、deviceGraceSeconds 63.5，`--capabilities` 实报 `min_grace_s: 63.5`）与 `worker/no-device-deps.test.mts`；package.json 的依赖（client-device-farm 进 dependencies、@midscene/core 1.15.1、webdriverio 精确 10.0.2）与锁文件、Dockerfile 冒烟；`device/session-name.mts`；脱敏出口与 `device/wdio-log.mts`；注册表的导航标记、内建导航的 webdriver 句柄与新 description、`features/steps/restart_app.mts`、`WORKER_TARGETS` 加 android / ios；core 的计量与释放提示按目标判、compose 的 `RUN_ID` 键；Nova 与 Midscene 的桌面会话事件（E1、D33）；`worker/surface.mts`、`worker/surface-desktop.mts` 与 run-scope 改走接缝；evidence 的快照输入；`device/app.mts`、`device/surface.mts` 与 `device/device-session.mts`。
+- 第二轮已落地：`device/session.mts`、`finalize.mts`、`guard.mts`、`adapters/`（两个适配器、命令契约快照与控件树样例）、`interface.mts`、`appium.mts`、`web-context.mts`、`probe.mts`、`warmup.mts` 与缺省装配 `parts.mts`（接缝模块静态 import 它，Dockerfile 的设备冒烟因此带到 WebdriverIO 与 Device Farm SDK，`device/surface.test.mts` 守这条静态闭包），以及 read-points、adapters.contract、guard、probe、appium、web-context、warmup、session、finalize 九组护栏测试；`limits.replanningCycleLimit` 与 run-scope 的启动期校验；`@wdio/logger` 10.0.0 显式锁定；本机两处 `build_engines` 调用点与 `tools/e2e_harness.py` 注入 `RUN_ID`；serialize 只在计量键有值时写出两键；两引擎上传器加 `.xml` 的 Content-Type；实施中浮出的实施级决定已回写 ADR 0028、0034、0035、0042、0044、0049、0051、0052。
+- 两个阻断项已解除：本机后端的 run 带上 `RUN_ID`；`docs/user-guide/engines.md` 补了 Midscene 的四行设备目标，`engines-matrix.test.mts` 转绿。
+- 文档与工具已校准：用户指南（engines、writing-features、writing-deterministic-steps 的重启应用模板、configuration 的重规划上限、running-and-results 的设备证据与 `device-session.json`、troubleshooting 的设备错误类别与两句释放提示）、CHANGELOG、skill（SKILL.md 与 references 的设备目标一节与错误处置）、internals（确定性 step 生命周期、产物与证据、契约页）、engines/midscene/DEVELOPMENT.md 的布局与设备模块节、CONTRIBUTING 的工具表；真机重新探测工具 `tools/device_reprobe.mts` 与手册 `tools/device_reprobe.md`（`--offline` 自检零差异，真机方式只核到获取前的接线）。journey 0013 documenting 清单里标「设备路径真能运行后再写」的几项（设备主题页、internals 设备会话与 Appium 适配一篇、writing-deterministic-steps 的测试分层与写作方法、包入口页与门面、faq、cloud-backend 与 local-app-testing 的设备内容、评测集设备用例）尚未写。
 
 **已落地、勿重做（底稿与现状的差）**
 

@@ -6,9 +6,9 @@
 
 ## 恢复现场
 
-第 0 到 6 批已闭合。下一步：第 7 批（B8 部署侧，底稿在 0015 第 7 节）。
+第 0 到 7 批已闭合（第 7 批剩 task role 的端到端使用，随第 8 批核）。第 8 批（B6 设备模块）实施完成、待独立复核、提交与真跑：两个阻断项已解除，现状与已校准的文档在 0015 第 8 节「施工现状」段，先读它；真跑清单在同节「真跑或对抗核查才算数的结论」段。
 
-云端验证已做（owner 部署了 dev 版本后端、两引擎 dev 镜像以 variant base 推上）：`doctor --backend cloud` 全绿、两引擎直连 cloud run passed（definition 结构版本 1、带 cli_version、无 run 级消息、会话 id 为 AgentCore 格式）、两引擎 `submit --backend cloud --expose-local` passed（推进器读回预热地址进 RunTask、Fargate worker 预热就绪、上游收到带 cookie 的请求、隧道终态即拆、无会话残留）；证据已内联进 ADR 0051 实测依据。应用上传的云端路径要等第 7 批（B8 部署侧的 Device Farm 项目与权限）才能在真云上走通，设备目标的执行还要等第 8 批（B6 设备模块）。
+云端验证已做（owner 部署了 dev 版本后端、两引擎 dev 镜像以 variant base 推上）：`doctor --backend cloud` 全绿、两引擎直连 cloud run passed（definition 结构版本 1、带 cli_version、无 run 级消息、会话 id 为 AgentCore 格式）、两引擎 `submit --backend cloud --expose-local` passed（推进器读回预热地址进 RunTask、Fargate worker 预热就绪、上游收到带 cookie 的请求、隧道终态即拆、无会话残留）；证据已内联进 ADR 0051 实测依据。应用上传的云端路径与设备目标的执行都待第 8 批的真跑核对（第 7 批的部署侧已真部署核过）。
 
 跳板机要点：源码树已同步到本分支工作树（rsync）；`GHERKAI_WORKER_MIDSCENE_CMD` 要指向 dev 树的 `dist/bin.mjs`（全局装的是 1.4.9 的旧 worker）。
 
@@ -23,6 +23,7 @@
   - 第 4 批（B3：项目配置文件与提交侧）已落地、真跑核过、双轨复核闭合。
   - 第 5 批（B4：确定性 step 多句柄注册）已落地、真 worker 读 `features/steps` 核过自述、双轨复核闭合。
   - 第 6 批（B7：隧道改令牌换 cookie）已落地、真跑核过、双轨复核闭合。
+  - 第 7 批（B8：部署侧的 Device Farm 项目、权限、SSM 与 doctor 设备项）已落地、真部署核过、双轨复核闭合；task role 的端到端使用待第 8 批。
 - 次序（各批的依赖、红线测试与易错点在 journey 0015）：⓪ 导航规则与注册面关键字声明（两个 worker 的派发与注册表、删内建 step、plan 标注、契约页、skill 与用户指南、CHANGELOG；桌面直接受影响，自己发）→ ① 能力自述增键（两个 worker 只声明桌面网页）→ ② core 的会话事件、scope 级 error 与终结函数（对桌面是修复：负退出码、零 scenario、超时与中止同时成立的仲裁三处判定改变，写进 CHANGELOG）→ ③ core 的目标与 Job 形态，与两个 worker 建会话前自检同批发布（第一个能产出非桌面 Job 的批次；设备模块完成前，非桌面目标由本机预检与云端 worker 自检拦住）→ ④ 配置文件与提交侧（前移定义 SSM 键名、保留期常量与预热字段）→ ⑤ 确定性 step 注册面 → ⑥ 隧道令牌换 cookie（桌面先行）→ ⑦ 部署侧 → ⑧ Midscene 设备模块 → 文档与 skill。⑦ 可与 ⑧ 的准备并行。
 
 ## 遗留项
@@ -34,7 +35,6 @@
 - 待真跑核实：Midscene 桌面 worker 在 AgentCore 浏览器上预热后，被测应用用 history.pushState 不再抛 SecurityError；故意给错令牌时，run 的最终退出码与 explain 的呈现符合预期（READY、cookie 到达上游、错令牌归 precheck_failed、worker 退出码 0 已核）。
 - 待真跑核实：同步 run 宿主下预热地址端到端到达 worker，且宿主 shell 里 export 的同名值不会越过 definition（本机 submit 的 per-run 进程与 status --wait 接力者、云端 submit 的推进链已核）。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。
-- **webdriverio 精确锁定**：第 8 批 B6 设备模块落地时把 `engines/midscene/package.json` 的 `webdriverio` 从范围版本改为精确版本、重算锁文件、改 `engines/midscene/DEVELOPMENT.md` 的锁定清单（ADR 0052 决策 7 已记此待办）。
 - **可选的用户文档补句**：`docs/user-guide/running-and-results.md`、`docs/user-guide/cloud-backend.md`、skill 正文里「`--backend cloud` 给 `--grace` 以退出码 2 结束」仍成立，可各补一句「写在 gherkai.toml 里的 grace 在云端只提示、不生效」（配置页已写）。
 - **CHANGELOG 链接与 Release 正文分类规则**：CHANGELOG 内的文档链接沿用相对路径（文件既有惯例，Release 正文由 `.github/scripts/release_notes.py` 直取本版节、不改写链接），与「Release 正文只用绝对 URL」的分类规则有张力；B8 同僚复核提出，待发版前统一决定是改链接还是在渲染侧改写。
 

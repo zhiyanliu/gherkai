@@ -110,7 +110,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 | Appium 建连 | Android 13 到 26 秒；新 iPhone 5 到 17 秒、老 iPhone 65 秒（老机型上 WebDriverAgent 启动慢） | 同上 |
 | deleteSession | 约 0.9 秒；跳过 deleteSession 只 Stop 的会话同样产出录像与日志（Android 两会话） | 决策 5：SIGTERM 路径不调 deleteSession 不损失产物 |
 | StopRemoteAccessSession | 调用即时返回；到 COMPLETED 另需 Android 52 到 85 秒、iOS 超过 2 分钟（最长约 150 秒），只计设备分钟、不占墙钟，worker 不必等待 | 决策 4、决策 5 |
-| Midscene 现有 `min_grace_s` | 约 31 秒，对比 Fargate `stopTimeout` 硬顶 120 秒 | 决策 5：现有下限的基线；设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 推导后升到约 64 秒，仍低于硬顶 |
+| Midscene 只有桌面收尾路径时的 `min_grace_s` | 约 31 秒，对比 Fargate `stopTimeout` 硬顶 120 秒 | 决策 5：桌面路径的基线；设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 推导后取两条路径的较大者，升到 63.5 秒（真起 worker 的 `--capabilities` 报 `min_grace_s: 63.5`，Android 与 iOS 两项目标带 `max_session_s: 8880`），仍低于硬顶 |
 
 ## 被拒方案（护栏）
 

@@ -85,7 +85,7 @@
 | `acquire_timeout` | `error` | worker（scope 级）：获取设备超过预算 |
 | `session_lost` | `error` | worker：会话在执行中途被外部停止或到期（当前 step 的 `step_done` 与随后的 `scope_done` 都带它） |
 | `capability_unavailable` | `error` | worker（step 级）：这一步需要的能力当前目标不提供、重试不会变 |
-| `release_failed` | `error` | core：终结函数从会话事件配对推出有会话未确认停止时改写归因（worker 不直接报）；原归因的消息保留，追加「请到设备控制台核对」的提示 |
+| `release_failed` | `error` | core：终结函数从会话事件配对推出有会话未确认停止时改写归因（worker 不直接报）；原归因的消息保留，其后追加按目标给出的提示（桌面目标指向 Amazon Bedrock AgentCore 控制台，设备目标指向设备控制台）与未确认停止的会话名 |
 
 `skipped`/`aborted` 的 `error_type` 恒为 `None`——这两种状态下未产出判定的原因只写在 `message` 里，因此人读渲染在无分类时仍显示 `message`，否则输出只剩一个状态值。
 

@@ -45,7 +45,7 @@ uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker �
 常规路径是经 `gherkai` CLI 运行；调试时也可手动直接运行 worker（下列命令从 repo 根执行；`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
 
 ```bash
-echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
+echo '<job json>' | AWS_REGION=us-east-1 RUN_ID=<本次运行的编号> uv run python -m gherkai_worker_novaact
 
 # 两个非 job 入口（不建会话、不执行 job、零 AWS，[ADR 0036](../../docs/adr/0036-deterministic-capability-discovery.md)）；cli 的 `list-deterministic` / `doctor` / run 前置 / plan 标注即转述它们：
 uv run gherkai-worker-novaact --capabilities                          # 能力自述：{schema_version, engine, min_grace_s, targets, deterministic_steps, model_id, session_warmup}（清单每项 pattern、description、example、keywords、targets）
@@ -63,6 +63,7 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `NOVA_SESSION_STOP_BUDGET_S` | `8`（`lib/constants.py` 的 `SESSION_STOP_BUDGET_S`） | worker 自己调 StopBrowserSession 的预算：超过即记为释放失败、以退出码 1 退出，线程留给进程退出回收；须小于 `NOVA_GRACE_MARGIN_S` 减去截图排空的 6 秒（[ADR 0028](../../docs/adr/0028-transient-network-ssl-resilience.md) 会话泄漏防护） |
 | `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出段排空 6 秒，留约两倍余量；推导写在该常量旁注） |
 | `NOVA_LOGS_DIR` | 无（不设即回落 SDK `mkdtemp` 出的临时目录） | Nova SDK 的 trajectory 落点，组合根注入 `<report_dir>/<run_id>/nova-trajectories` 绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`）；worker 主流程与 uploader 都读它 |
+| `RUN_ID` | 无（缺失时 worker 在执行前自检之后、建会话之前以 1 退出，不发事件） | 本次运行的编号，编码 StartBrowserSession 请求名的 run 段（见下文「浏览器会话与会话事件」节，[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 3、4）；本机由组合根注入，云端由 RunTask overrides 注入（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「run_id + scope_id 注入 worker」条）；有 `EVENTS_DDB_TABLE` 时事件出口也读它（`lib/event_sink.py`） |
 | `AWS_REGION` | 无（模块级读一次，未设则 `Workflow` 构造失败） | Workflow / AgentCore 会话 / 三条 I/O 边共用的 region，由组合根落实后注入（见 `run_scope.REGION`） |
 | `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 | `GHERKAI_SESSION_WARMUP_URL` | 无（未设即不预热） | 隧道会话预热地址；组合根在 `--expose-local` 方式下与 `GHERKAI_EXTRA_HTTP_HEADERS` 一并注入，worker 在第一个 scenario 之前对网页目标导航一次以换取会话 cookie；只有额外请求头而没有预热地址时记 `precheck_failed`、不建会话（[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；常量在 `lib/constants.py`，预热逻辑在 `lib/tunnel_warmup.py` |
@@ -76,6 +77,15 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 - `model_id=MODEL_ID`（`lib/constants.py` 里锁定的 GA 版本 `nova-act-v1.0`，env `NOVA_MODEL_ID` 可覆盖，[ADR 0004](../../docs/adr/0004-novaact-iam-auth-via-workflow.md)「模型版本选择策略」），`boto_session_kwargs={"region_name": <AWS_REGION>}`（region 不硬编码：由组合根落实后经 `AWS_REGION` 注入，见 `gherkai_worker_novaact/run_scope.py` 的 `REGION`；[ADR 0016](../../docs/adr/0016-execution-architecture-core-lib-run-model.md) 决策 C / [ADR 0033](../../docs/adr/0033-iac-aws-backend-and-composition-wiring.md)）
 - workflow definition：**代码自动 create-if-not-exists**（`gherkai_worker_novaact/lib/workflow_setup.py` 的 `ensure_workflow_definition()`，worker 与 spike 已接入），无需手动执行 CLI。boto3 调用与 `aws nova-act create-workflow-definition` 等价。
 - **实测约束**：`NovaAct` 依赖 contextvar 识别 workflow（`get_current_workflow()`），因此须使用 `@workflow` 装饰器或手动调用 `set_current_workflow(wf)`；worker 使用 `with Workflow`，故须手动调用（见 `gherkai_worker_novaact/run_scope.py` 的 `with _WorkflowGuard(wf)` 与 `set_current_workflow`；`_WorkflowGuard` 使退出时更新工作流运行状态的那次调用失败只记日志、不改变退出码）。AgentCore 会话的 Start / Stop 由 worker 直接经 bedrock-agentcore 的 `BrowserClient` 持有、不经 SDK 的 `cdp_session`（ADR 0028「会话泄漏防护」）。
+
+## 浏览器会话与会话事件
+
+worker 为自己持有的每个 AgentCore 浏览器会话向 core 成对发出 `session_opened` / `session_closed`，与 Midscene worker 是同一套事件、同一条配对与释放判定（[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 4）。实现集中在 `run_scope.py` 的 `_BrowserSession`：
+
+- **发出时机**：`StartBrowserSession` 返回后、取连接头与建立 NovaAct 连接之前发 `session_opened`（`origin: created`，`sessionId` 与 `name` 都取 AgentCore 会话 id，不带 `device`）；正常收尾、停止信号、会话预热失败、建连重试丢弃的 attempt 这几条收尾路径都为每个会话发恰一条 `session_closed`。`StopBrowserSession` 在 `NOVA_SESSION_STOP_BUDGET_S` 内成功返回记 `release: confirmed`，否则记 `unconfirmed` 并以退出码 1 退出。桌面会话的 `session_closed` 不带 `observedS` 与 `providerMinutes`，job 也因此没有设备计量两键（决策 7）。
+- **请求名**：每次 `StartBrowserSession` 都带会话名，格式与 Midscene 的 `src/device/session-name.mts` 相同：`gherkai:<run_id>:<scope 哈希>:<尝试序号>:<scope_id 百分号编码>`，长度上限按 AgentCore 的约束取 100，超长只截最后一段。尝试序号从 1 起，建连重试每发一次 Start 加一。规则在本 worker 里另有一份 Python 实现（`run_scope.session_request_name`），改规则时两处同改，单测用同一组期望值。
+- **停止时仍在途的 Start**：停止信号到达时 Start 尚未返回，worker 再等 `run_scope.START_SETTLE_S`（1.5 秒）；仍未返回即发一对 `origin: attempted` 的事件（`sessionId` 为 null，`name` 取请求名）并记为释放失败，以退出码 1 退出。这段等待只在没有 act 在途时出现，已含在 `NOVA_GRACE_MARGIN_S` 的余量之内。
+- **依赖 `RUN_ID`**：请求名的 run 段取 env `RUN_ID`（见上文 env 表）。经 CLI 运行时由组合根注入，手动直接运行 worker 时须自行设置（见上文命令）。
 
 ## 确定性 step：内建脚手架 vs 使用方的 `steps/`
 

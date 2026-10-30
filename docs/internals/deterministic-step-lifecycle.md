@@ -25,7 +25,7 @@ handler 怎么写（签名、`ctx` 提供什么、正则具名组如何传参）
 
 worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发是**两级、短路、无优先级配置**（Nova `run_scope.py` `_run_step`、Midscene `run-scope.mts` `runStep`，同序）：
 
-1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 按当前目标取句柄（desktop/web 取 `playwright`，设备目标取覆盖该（设备, 界面类型）组合的 `webdriver` 条目）调用，**不投票**；目标上没有句柄时走 AI、不顺延到别的模式、不记 error（ADR 0050 决策 1）。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，它的 handler 调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中且目标上有句柄的 step 带 DataTable / DocString → 记 `error`（没有句柄、走 AI 的照常把参数交给 AI）。plan 侧对「命中但该 scope 目标上没有实现」的 step 不标「确定性」、`deterministic` 为 null、stderr 说明走 AI（`__main__._probe_deterministic_dispatch` 用自述清单的交集目标核对，ADR 0049 决策 3、6）。
+1. **确定性注册表**：`match(text, keyword)`（Midscene 侧以 `matchDeterministic` 之名导入），以**裸 step 文本**扫描全表（不 unquote、不拼接多行参数）；关键字不进匹配，只在命中后核对条目声明的 `keywords`。命中一条且关键字相符 → 按当前目标取句柄（desktop/web 取 `playwright`，设备目标取覆盖该（设备, 界面类型）组合的 `webdriver` 条目）调用，**不投票**；目标上没有句柄时走 AI、不顺延到别的模式、不记 error（ADR 0050 决策 1）。内建导航（`Given` / `When` 后整句是一个地址）就是表里的一条，带内建标记（Midscene `registerBuiltin("navigation", …)`，run-scope 据此把它的 `step_kind` 记为 `navigation`）。它有两种句柄：`playwright` 句柄调 `ctx.navigate(url)`（Nova `go_to_url` / Midscene `page.goto`）；Midscene 另有两条 `webdriver` 条目（设备网页、设备应用各一条），它们不从七字段的 ctx 取导航原语，而经设备接缝在 acquire 就绪时注入脚手架模块的私有通道（`injectDeviceNavigate`）调接缝的 `navigate`：网页目标按能力探测结论在网页上下文调 url、或交给系统浏览器，应用目标经 DeepLink 交给被测应用（ADR 0050 决策 1、ADR 0052 决策 4 与 6）。命中但关键字不符 → `DeterministicKeywordMismatch` → 记 `error`、不转 AI、不顺延到别的模式；命中且目标上有句柄的 step 带 DataTable / DocString → 记 `error`（没有句柄、走 AI 的照常把参数交给 AI）。plan 侧对「命中但该 scope 目标上没有实现」的 step 不标「确定性」、`deterministic` 为 null、stderr 说明走 AI（`__main__._probe_deterministic_dispatch` 用自述清单的交集目标核对，ADR 0049 决策 3、6）。
 2. **AI catch-all**：`Then` → 断言 + N 票；`When`/`Given` → 动作。
 
 命中之后的判定映射（两引擎逐条对齐）：
@@ -34,7 +34,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 |---|---|---|
 | 正常返回 | `passed` | — |
 | 抛 `AssertionError`（Nova）/ `DeterministicAssertion` 或 `name === "AssertionError"`（Midscene） | `failed` | `assertion_failed` |
-| 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | `engine_error`；两侧都先经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b） |
+| 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | Midscene 先认异常上的归类标记（命令守卫与设备接缝挂上的 `session_lost` / `engine_error` / `capability_unavailable`，`readClassification`），认到即按它归类，设备路径因此没有 `network_error`；读不到标记时（桌面路径的异常）两侧都经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b），否则 `engine_error` |
 | 一条 step 命中多条模式 → `DeterministicConflict` | `error` | `engine_error`，在派发处直接记、不经瞬时网络白名单；冲突模式清单在 `message` 里 |
 | 命中一条模式但关键字不在其 `keywords` 里 → `DeterministicKeywordMismatch` | `error` | `engine_error`，消息给出该条目接受的关键字 |
 | 命中、且在当前目标上有句柄的 step 带 DataTable / DocString | `error` | `engine_error`，确定性 step 不接收多行参数（目标上没有句柄、走 AI 的 step 把参数照常交给 AI） |
@@ -117,7 +117,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 
 **对称是要求，不是巧合**：同一份 `.feature` 要能在两个引擎上表现出同样的行为，故注册表 API（`deterministic` + 必填 `description`/`example` + 可选 `keywords`）、加载规则（排序递归、fail-loud）、派发顺序、判定映射、两个非 job 入口（`--capabilities` / `--match-steps`）的 flag 与输出形状，两侧逐条对齐；各自语言的实现细节（`re` vs `RegExp`、`**groups` vs groups 对象、同步 vs 可 `await`）随语言。跨引擎**不共享 code**：两个 worker 的实现代码分属各引擎，共享面只有 `.feature` 与使用方项目里的 `steps/` 目录约定（两引擎扫描同一目录、各取自己的扩展名、正则成对）。
 
-**缺口（已知、非缺陷）**：确定性 step **不产任何产物**。它不调用 AI，因此没有 trajectory、没有引擎原生报告页，也不产 `kind=evidence` 的机读证据（Nova `_attach_evidence` 在 `acts` 为空时直接返回；Midscene `stepEvidenceRef` 在「无新 execution 且 prompt 为 null」时返回 null）。后果链：
+**缺口（已知、非缺陷）**：桌面目标上确定性 step **不产任何产物**。它不调用 AI，因此没有 trajectory、没有引擎原生报告页，也不产 `kind=evidence` 的机读证据（Nova `_attach_evidence` 在 `acts` 为空时直接返回；Midscene `stepEvidenceRef` 在「无新 execution 且 prompt 为 null」时返回 null）。设备目标是例外：判为 failed / error 的确定性与导航 step 产一份 `acts` 为空的 evidence，带 `step_kind`、`url` / `url_missing`、控件摘要与原始控件树（`stepEvidenceRef` 按快照上的 `step_kind` 判别），passed 的仍不产，下面的后果链因此只对桌面目标与设备上 passed 的确定性 step 成立（ADR 0051 决策 8、ADR 0042 决策一的设备例外；落点见 [`artifacts-and-evidence.md`](./artifacts-and-evidence.md) §2）。后果链：
 
 - 判定**不丢失**：RunReport 的判定树、`jobs/*.json`、退出码里，这一步的 `passed`/`failed`/`error` 与时长都在；
 - 但「它当时检查了哪个 URL、断言了什么」**不留痕迹**，只含确定性 step 的用例，其报告的人读部分是空的；

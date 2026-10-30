@@ -22,7 +22,7 @@
 
 ```
 core/gherkai_core/
-├── model.py      ← 领域模型：Job / Scenario / Step / 9 类事件（含 step_skipped 短路与设备 job 的 session_opened / session_closed，ADR 0051）/ 四层结果 RunResult / RunMeta（definition，含 worker_variant·worker_task_defs，ADR 0038）/ Status 七态 / ResourceUri（纯数据）
+├── model.py      ← 领域模型：Job / Scenario / Step / 9 类事件（含 step_skipped 短路与 session_opened / session_closed：桌面与设备 job 的 worker 都为每个会话成对发出，ADR 0051 决策 4）/ 四层结果 RunResult / RunMeta（definition，含 worker_variant·worker_task_defs，ADR 0038）/ Status 七态 / ResourceUri（纯数据）
 ├── parse.py      ← .feature → 领域模型（基于 gherkin-official Compiler；该库封装在此 seam 之后）
 ├── scope.py      ← tag 分组 + engine / 测试目标 / timeout 校验 → Job[]；对外 plan(features, config, *, select=None) -> Job[]（select 是 `--scope/--tags/--scenario` 的筛选谓词，筛选只缩小要运行的范围、不增不改，ADR 0041 决策一）
 ├── target.py     ← 测试目标的定义层结构校验 validate_job_definition：字段成对、非空、类型与合法组合；组合根写 definition 之前与推进器读 definition 时各校验一次，违约时抛 DefinitionContractError（ADR 0048 决策 3）

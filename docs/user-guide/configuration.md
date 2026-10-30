@@ -139,12 +139,14 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `NOVA_GRACE_MARGIN_S` | Nova worker 收尾预算的余量（秒） | `30` | 本机 shell（见下方说明） |
 | `MIDSCENE_MODEL_ID` | Midscene 用哪个模型 | `us.openai.gpt-5.6-terra` | 本机 shell、variant 镜像 `ENV` |
 | `MIDSCENE_MODEL_FAMILY` | 显式指定模型家族，优先于自动推断 | 无（按模型 id 推断） | 本机 shell、variant 镜像 `ENV` |
+| `MIDSCENE_REPLANNING_CYCLE_LIMIT` | Midscene 在一条 AI step 里重新规划的次数上限 | 设备目标为 12；桌面目标用 Midscene 自己的缺省值 | 本机 shell、variant 镜像 `ENV` |
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 | `NO_COLOR` | 设为非空值即关闭人读输出里的颜色，包括本机 worker 日志行的来源前缀（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
 
 - `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
-- `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是固定的 31 秒），调大前者会同时抬高本机运行所允许的最小 `--grace`。
+- `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是由它的收尾超时算出的 63.5 秒，不随环境变量变化），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
+- `MIDSCENE_REPLANNING_CYCLE_LIMIT` 的取值须为正整数，不是正整数（含空值）时 Midscene worker 在建立任何会话之前报错退出并点名这个变量，桌面与设备目标都核对。设备上原生应用的翻页类动作每翻一页消耗一次规划，缺省值因此取 12；一条 AI step 在设备上因规划次数用尽而失败时，可以调大它或把这一步拆细。
 - 云端 worker 读自己镜像里 `ENV GHERKAI_STEPS_DIR` 指的目录，确定性 step 随镜像一起构建进去（见 [`cloud-backend.md`](./cloud-backend.md)）；本机 shell 里的 `GHERKAI_STEPS_DIR` 与默认 `./steps` 在云端后端下静默不生效；用 `--steps-dir` 或配置文件的 `steps-dir` 指定目录时会提示一句、不拦截。step 的写法与目录约定见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 ### 项目配置文件与设备目标

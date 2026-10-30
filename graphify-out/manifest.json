@@ -2298,5 +2298,15 @@
     "mtime": 1793370998.9373183,
     "ast_hash": "b02b405995c2295fcac52029f8fbd75a",
     "semantic_hash": ""
+  },
+  "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {
+    "mtime": 1793361716.173322,
+    "ast_hash": "e391cfc574413132edd5857f009a0227",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/device/adapters/fixtures/xcuitest.commands.json": {
+    "mtime": 1793362360.4855788,
+    "ast_hash": "9975eb4d17590696b1fae107680e2ad5",
+    "semantic_hash": ""
   }
 }

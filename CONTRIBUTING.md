@@ -74,6 +74,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 | 工具                                            | 用途                                                                                                                                                                                                         |
 |-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `e2e_harness.py`（用法与判读见 `e2e_harness.md`） | worker 端到端真实运行：真 spawn worker、真事件流、真会话，可注入中断时机；opt-in、不进 pytest、产生真实 AWS 费用                                                                                                        |
+| `device_reprobe.mts`（用法与判读见 `device_reprobe.md`） | Midscene 设备模块的真机重新探测：经设备侧接缝在一台真机上建远程访问会话，逐项记下能力探测结果、逐个执行驱动适配器快照里的原语，与命令契约快照和控件树样例做差集、写成能力矩阵；产生设备分钟费用，`--offline` 方式不连设备、只核对工具自身 |
 | `ecs_task_timing.py`                            | 采集 ECS task 生命周期的时间字段，标定 SIGTERM 到退出的真实墙钟耗时（用于校准 grace / stopTimeout）                                                                                                             |
 | `events_wallclock.py`                           | 从 events 表还原 worker emit 时刻，计算单 act 墙钟分布（用于校准 grace margin）                                                                                                                                 |
 | `build_diagrams.mjs`                            | 文档图两段式构建：`docs/diagrams/*.json` 经 `archify deliver` 生成可交互 HTML（确定性渲染）→ 无头 Chrome 从 HTML 导出 SVG（`--png` 另外导出 PNG 供目视检查）；依赖 `engines/midscene` 的 Playwright 与本机 Chrome（见下文「图」） |
@@ -201,6 +202,8 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 
 发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知），并把根 `README.md` 里 `npx skills add …/tree/vX.Y.Z/…` 命令的 tag 改成本版；发布 gate 校验本 tag 在 changelog 里有非空节、README 的这条命令钉的是本版，任一不满足则发版失败（ADR 0043 决策三）；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
 
 发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端后端这一侧是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。
+
+另一项是 Midscene 的真机验收矩阵，按条件触发而不是每版必做：升级 Midscene SDK 或 WebdriverIO，或 Device Farm 的 Appium 服务端版本变化时，由人在真机上执行一轮——Android 加两代 iOS、网页目标加应用目标、故障演练，iOS 26 的整条链路单列一行。执行矩阵之前先用 `tools/device_reprobe.mts` 在每个平台上重新探测一次，差集不为空时先修适配器与快照。矩阵、每一行的判据与结论回写到哪条 ADR，见 [`engines/midscene/DEVELOPMENT.md`](./engines/midscene/DEVELOPMENT.md)「真机验收矩阵」节；它需要远程访问会话与模型费用、失败要人判断是平台变化还是用例问题，所以不进 CI（ADR 0052 决策 8）。
 
 CI（任意分支的 push、PR、手动触发）运行三项检查：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练，以及**不推 tag 也可做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 

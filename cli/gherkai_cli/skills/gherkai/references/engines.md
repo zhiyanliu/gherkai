@@ -11,6 +11,7 @@
 | 被测 UI 语言 | **英文 UI**。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类文本包含断言会系统性判否（同一页面上的英文词仍可靠），增加投票也无法纠正 | 不限。中文 UI 上的动作与 AI 断言和在英文 UI 上同样可靠 |
 | 本机安装 | `uv tool install 'gherkai[local]'` 与 CLI 同环境；正式发行版还能临时拉起 | `npm i -g @gherkai/worker-midscene`（Node ≥ 22），必须实际安装 |
 | 确定性 step 语言 | Python，`steps/*.py` | TypeScript / JS，`steps/*.mts` 或 `*.mjs` |
+| 测试目标 | 桌面网页 | 桌面网页，Android 与 iOS 真机上的网页与原生应用（第 7 节） |
 | 云端依赖 | Nova Act 服务与模型 nova-act-v1.0（默认锁定，环境变量 NOVA_MODEL_ID 可换）、AgentCore Browser | Bedrock 模型 us.openai.gpt-5.6-terra（默认锁定，环境变量 MIDSCENE_MODEL_ID 可换，家族识别不了时再给 MIDSCENE_MODEL_FAMILY）、AgentCore Browser |
 
 两者都纯 IAM 鉴权、不要 API key；region 要能解析出来（解析顺序见 `references/setup-and-diagnosis.md` 第 4 节；哪一处都没有就报错，不采用默认值）；浏览器运行在云端、本机不装 Chromium。
@@ -71,7 +72,7 @@ deterministic(
 - 判定映射：Nova 抛 `AssertionError`、Midscene 抛 `DeterministicAssertion`（或 node:assert 的 AssertionError）时该步判 **failed**；抛其它异常时判 **error**。
 - 遍历：目录排序递归。两引擎都跳过**以 `_` 开头的文件或目录**（`_selectors.py` / `_pages/` 都算，整棵目录都不加载）——不注册 step 的辅助模块（页面对象、选择器常量、共享 helper）放那里，step 文件相对 import 它照样可用。Nova 只认 `*.py`、另跳过 `test_*.py`；Midscene 只认 `.mts` / `.mjs`（恒为 ESM，与项目 package.json 无关；`.ts` / `.js` 在收集阶段就被跳过——不 import、不报错、清单里没有）、另跳过 `*.test.*`。
 - 可选 `keywords` 声明这条 step 接受的关键字（Nova `keywords=("Then",)`、Midscene `keywords: ["Then"]`，缺省三个都接受）；命中了模式而关键字不符的步记 error、不转 AI。断言类 step 声明只接受 `Then`。
-- 引擎只内建一条确定性 step：导航（`Given` / `When` 后整句是一个地址），它在清单与 `plan` 标注里与其它条目一样出现、只接受 `Given` / `When`。判定类 step 一律由项目注册，注册了同一个模式不做覆盖，按冲突处理。地址核对的现成模板（两侧成对的 `Then 页面地址匹配 "<正则>"`）在 https://github.com/zhiyanliu/gherkai/tree/HEAD/features/steps ，复制进项目 `steps/` 即可。
+- 引擎只内建一条确定性 step：导航（`Given` / `When` 后整句是一个地址），它在清单与 `plan` 标注里与其它条目一样出现、只接受 `Given` / `When`。判定类 step 一律由项目注册，注册了同一个模式不做覆盖，按冲突处理。地址核对的现成模板（两侧成对的 `Then 页面地址匹配 "<正则>"`）与 Midscene 侧重启被测应用的模板（`Given 重新启动应用`，只有应用目标上的实现）在 https://github.com/zhiyanliu/gherkai/tree/HEAD/features/steps ，复制进项目 `steps/` 即可。
 
 ## 4 两侧成对
 
@@ -92,3 +93,14 @@ deterministic(
 ## 6 把 steps 带到云端
 
 `--backend cloud` 时 worker 运行在云端容器里、读不到本机 `steps/`，`--steps-dir`（配置文件给的 `steps-dir` 同样）只警告不生效。步骤要构建进一个定制 worker 镜像并 `gherkai deploy push-worker` 推上去，提交时用 `--worker-variant` 选。流程在 `references/cloud-backend.md`。
+
+## 7 设备目标（Android / iOS 真机）
+
+只有 Midscene 支持设备目标，落到 Nova Act 的设备 scope 在 `plan` 与执行前被拒；本机 worker 实际支持什么，以 `gherkai doctor` 的 `engines.targets.<引擎>` 行为准（设备目标后附会话上限的分钟数）。
+
+- **声明**：scope 标 `@device:android` 或 `@device:ios` 并标 `@engine:midscene`，测设备上的浏览器（Android 的 Chrome、iOS 的 Safari）；再标 `@app:<别名>` 测原生应用，别名在 `gherkai.toml` 的 `[apps.<别名>.<平台>]` 绑定安装包与包名或 bundle id。
+- **设备选择**：不自动挑设备。按平台用 `--android-device-arn` / `--ios-device-arn`，或 `gherkai.toml` 的 `[devices.android]` / `[devices.ios]` 给设备 ARN（键 arn）或系统版本（键 `os-version`）；没有任何来源时 `run` / `submit` 以退出码 2 结束、`plan` 只警告。本机后端另要 Device Farm 项目（`--device-farm-project-arn` 或 `[devices]` 的 `project-arn`），应用目标还要放安装包的桶（`--app-bucket` 或 `[devices]` 的 `app-bucket`）；云端后端用部署时建立的项目。
+- **费用**：一个设备 scope 一个远程访问会话，按设备分钟计费，设备的准备时间（创建到可用，约 1 到 2.5 分钟）与停止后的收尾都计入。`plan --json` 的 `device_session_count` 就是这次要开的会话数，首次运行前把它与设备选择一起报给人。
+- **写法差异**：同一 scope 的 scenario 之间不重启应用，需要干净起点时在 `Background` 写一条重启应用的确定性 step（第 3 节末的模板）。导航步在网页目标上打开地址，在应用目标上把地址经 DeepLink 交给被测应用（Android 上地址里的 `;`、`'`、`(`、`)` 或空格、非 ASCII 字符要先百分号编码），后面照样紧跟一条落点核对。确定性 step 在设备上调用的是 webdriver 实现（第 3 节的七个字段）；只有 playwright 实现的 step 在设备上交给 AI，`gherkai plan` 会注明。
+- **证据**：设备上判为 failed / error 的确定性与导航 step 也有证据（`acts` 为空），另带 `step_kind`、`url` / `url_missing`，失败 step 还有 `controls` 与 `page_source`，字段读法见 `references/cli-json-contract.md`；设备 job 的 `device_session` 链接指向能力探测结论的诊断文件，只给链接、不解析。
+- **错误类别**：`precheck_failed`、`acquire_timeout`、`session_lost`、`capability_unavailable` 的处置见 `references/setup-and-diagnosis.md` 第 7 节的表。

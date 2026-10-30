@@ -176,6 +176,17 @@ handler 只拿到上下文与具名组。多行参数只对 AI step 有效：命
 
 判定类的 step 一条都不内建：措辞属于项目，由项目在 `steps/` 里注册（1.4 及之前版本内建的 `页面地址匹配 "<正则>"` 已退役）。仓库的 [`features/steps/`](../../features/steps/) 目录放着可直接复制的模板：`url_matches.py` 与 `url_matches.mts` 成对实现 `Then 页面地址匹配 "<正则>"`，复制进项目的 `steps/` 后按需改措辞与判定；Midscene 侧的那份还带设备网页上的第二份实现（声明 `requires: ["web_context"]`，在网页上下文里读地址）。
 
+`restart_app.mts` 只有 Midscene 侧一份（Nova Act 没有设备目标），实现 `Given 重新启动应用`：在应用目标上调用 `ctx.app.restart()`，关闭被测应用、再启动它，并确认它启动后没有自行退出（自行退出时这一步记 `error`）。设备 scope 里的 scenario 共用一个远程访问会话，scenario 之间不重启应用；需要从应用刚启动时的界面开始的用例，把这一步写进 `Background`：
+
+```ts
+// steps/restart_app.mts（Midscene）：只有一个 webdriver 条目，只覆盖应用目标
+deterministic("^重新启动应用$", {
+  webdriver: { uiKinds: ["app"], handler: async ({ app }) => { await app!.restart(); } },
+}, { description: "重新启动被测应用，后面的步骤从应用刚启动时的界面开始", example: "Given 重新启动应用", keywords: ["Given", "When"] });
+```
+
+它在桌面与设备网页上没有实现，写在那些目标上的同一句交给 AI 执行，`gherkai plan` 里可以看到。
+
 当前实际有哪些，以 `gherkai list-deterministic --engine <引擎>` 的输出为准。
 
 ## 两侧对称地写
@@ -199,7 +210,7 @@ Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环
 
 ## 写得能诊断：失败消息带现场
 
-确定性 step 不产生截图与模型思考，失败时 `gherkai explain` 里这一步只有一行原因，云端更是只剩这一行。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。「断言未过」「元素不可见」这种消息在云端等于没有信息。下面 Python 与 TypeScript 两侧的判定函数都这么做。
+确定性 step 不产生截图与模型思考，失败时 `gherkai explain` 里这一步只有一行原因，云端更是只剩这一行（设备目标上判为 failed / error 的确定性 step 另有页面地址、控件摘要与原始控件树，见 [`running-and-results.md`](./running-and-results.md)「看失败原因」）。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。「断言未过」「元素不可见」这种消息在云端等于没有信息。下面 Python 与 TypeScript 两侧的判定函数都这么做。
 
 ## 组织与单测：判定逻辑与注册分离
 

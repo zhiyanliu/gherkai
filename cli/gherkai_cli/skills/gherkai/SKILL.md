@@ -12,7 +12,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 | 你在做的事 | 去读 |
 |---|---|
 | 写用例、运行、判定、读证据、收窄后重新运行（最高频） | 本文正文全部 |
-| 选引擎、被测 UI 不是英文、确定性 step 的最小模板与契约、证据字段两引擎为何填得不一样 | `references/engines.md` |
+| 选引擎、被测 UI 不是英文、确定性 step 的最小模板与契约、证据字段两引擎为何填得不一样、设备目标（Android / iOS 真机） | `references/engines.md` |
 | 写好确定性 step 的代码：该不该写、等待与判定、失败消息、判定逻辑与注册分离、本地单测、改一条在用的 step | `references/deterministic-steps.md` |
 | 装不上、`doctor` 有红、凭证 / region、ngrok、版本不一致导致退出码 2 | `references/setup-and-diagnosis.md` |
 | 云端后端：部署交人、variant 镜像、`push-worker`、升级顺序、多环境、清理 | `references/cloud-backend.md` |
@@ -22,7 +22,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 
 - **一步两条执行路径**。先查确定性 step 注册表：命中项目 `steps/` 里注册的正则、且该 step 在当前测试目标上有实现，则走确定性代码：不问 AI、不投票、可复现。注册表里引擎只内建一条，导航：`Given` / `When` 之后**整句只是一个地址**（`Given "https://…"`，不加引号也算；本机应用照写的 `http://localhost:3000` 同样命中）时直接打开、不耗 AI，地址前后再有别的字就不是导航、整句交给 AI。没命中注册表、或命中的 step 在当前测试目标上没有实现的走 AI：`Given` / `When` 的文本是动作，`Then` 的文本是布尔断言（可投票）。注册的 step 可声明接受的关键字（内建导航只接受 `Given` / `When`）：命中了模式而关键字不符的步记 error、不转 AI，`gherkai plan` 提前用 ⚠ 标出；`Then` 后只写一个地址就是这种情况。
 - **边界**：精确检查（URL、DOM、数值、必须可复现、要快）交给确定性 step，出现频次高的检查（`Background` 前置、`Scenario Outline` 每行、要投票的断言）也优先写成确定性——它零模型费用、毫秒级完成（AI 步一步要几秒到几十秒），整套用例的墙钟与会话时长跟着降；模糊、一次性、页面变化多、靠语义理解的交给 AI。
-- **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），同名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 的形状——与某条未标 scope 的 scenario 编号相等时整个 run 以退出码 2 拒绝运行。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 设 job 墙钟预算；`@device:<平台>` 与 `@app:<别名>` 为设备目标预留，当前两个引擎都只支持桌面网页，标了它们的 scope 在 `plan` 与执行前就会被拒绝；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
+- **scope 与 tag**：`@scope:<名>` 把多条 scenario 编进同一个 job，共享一个浏览器会话、串行执行（后一条接着前一条留下的页面状态）；未标 scope 的 scenario 各成一个 job，`scope_id` 就是这条 scenario 的 id：`<文件>:<行号>`，`Scenario Outline` 展开出的每条再多一段 Examples 数据行的行号——别自己拼，从判定明细 / `plan --json` / 筛空时打出的候选清单里逐字复制。**scope 名在整个 run 里是全局的**：两个 feature 文件写了同一个名字就合并成一个 job（并发变串行、互不相干的用例锁进同一会话，`@engine` / `@timeout` 按合并后的全体解析、两边标了不同值整个 run 拒绝运行），同名只在 stderr 提示一行，所以名字带来源前缀（`checkout-happy-path`），别用 `login` / `smoke` 这种通名；也别把 scope 名写成 `<文件>:<行号>` 的形状——与某条未标 scope 的 scenario 编号相等时整个 run 以退出码 2 拒绝运行。`@engine:novaact|midscene` 选引擎，`@timeout:<秒>` 给该 scope 设 job 墙钟预算；`@device:android|ios` 让 scope 在真机上执行（只有 Midscene 支持），再加 `@app:<别名>` 测原生应用，写法与费用见 `references/engines.md` 第 7 节；其它 tag 只是普通标签，靠 `--tags` 筛。feature 行的 tag 会传给其下每条 scenario——`@scope` 标在 feature 行就是把整个文件塞进一个串行 job，要的是这个再标。
 - **引号只是书写习惯**：AI 步把关键字之后那段文本交给模型（整段被双引号包起来时外层引号去掉）；确定性 step 的正则匹配的是关键字之后、没去引号的原文，写用例时照它的 `example` 写。匹配是子串搜索、不锚定：宽模式会顺带命中本该走 AI 的步、悄悄换掉它的判法，两条模式同时命中一个 step 则该步记 error，宽窄靠 `gherkai plan` 的标注验（模式怎么写窄见 `references/deterministic-steps.md` 第 2 节）。`And` / `But` 承前一步的关键字；`*` 或开头就是 `And` 会被拒（判不出动作还是断言）。
 
 ## 2 引擎怎么选

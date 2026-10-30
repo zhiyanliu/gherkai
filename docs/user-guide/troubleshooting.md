@@ -86,7 +86,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
 
-判 `error` 的 job 与 step 带一个归因标记：`gherkai status` 与 `run` 的文本输出把它显示成 `(<归因>: <说明>)`，`--json` 输出里它是 `error_type` 字段（机读字段全表见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)）。常见的四种：
+判 `error` 的 job 与 step 带一个归因标记：`gherkai status` 与 `run` 的文本输出把它显示成 `(<归因>: <说明>)`，`--json` 输出里它是 `error_type` 字段（机读字段全表见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)）。常见的几种：
 
 | 归因 | 含义与处置 |
 |---|---|
@@ -94,6 +94,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `network_error` | 网络瞬时故障（建连失败，或中途断网）。原样重新运行通常就能过 |
 | `engine_error` | worker 无法启动、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
+| `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者收到停止信号时会话的建立请求还没有返回（说明里记为「结果未知的创建尝试」）。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
+| `precheck_failed` | 没有开始测、重新运行也不会变，scope 里一条 step 都没执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
+| `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s` |
+| `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话 |
+| `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或空格、中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
 
 本机运行时的 worker 日志：前台 `run` 直接打在终端里，每行带 `[worker <scope_id>:out]` 或 `[worker <scope_id>:err]` 前缀，前缀的颜色只用来区分来源 scope（按 job 启动顺序分配，不用红绿），不表示严重程度；加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端运行时的日志位置见下面「云端后端」。
 

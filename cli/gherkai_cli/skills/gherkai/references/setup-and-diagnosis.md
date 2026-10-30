@@ -86,6 +86,12 @@
 |---|---|---|
 | 以退出码 2 结束，说某引擎 worker 未找到 | 没装或不在 PATH | 照打印的装法装；或设 `GHERKAI_WORKER_<ENGINE>_CMD` |
 | `engine_error`，起 worker 失败 | worker 版本与 CLI 不一致 | 重装到同版本（第 1 节） |
+| `release_failed`，说明里说会话未能确认停止并列出会话名 | worker 停止会话时失败或超时，或收到停止信号时建立会话的请求还没有返回；会话可能仍在计费 | 把会话名与说明里的核对位置原样转告用户：桌面目标的浏览器会话在 Amazon Bedrock AgentCore 控制台，设备目标的远程访问会话在 Device Farm 控制台（云端后端也可看 `doctor --backend cloud` 的 `devices.sessions` 行）；停止前须确认没有 run 在使用它。已报出的 scenario 结果照常可读，别靠重新运行掩盖残留会话 |
+| `precheck_failed`，设备 scope 一条 step 都没执行 | 没有符合条件的设备、指定的设备 ARN 被拒、安装包不在或不可读、应用启动后立即自行退出、设备拒绝安装驱动辅助程序；重新运行不会变 | 按消息改设备选择、换测试包或换设备；应用启动即自退多半是应用带运行环境检测，要人提供关闭检测的测试包 |
+| `acquire_timeout` | 在获取设备的等待时间内没拿到可用设备 | 稍后重新运行，或请人在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s`；等待期间可能已产生设备分钟，别连续重试 |
+| `session_lost` | 远程访问会话在执行中途结束（被人手动停止，或到达会话上限），本 scope 余下的 scenario 未执行 | 判定不完整，别当用例失败汇报；缩短 scope 后重新运行，或请人核对是否有人停止了会话 |
+| step 记 `capability_unavailable` | 这台设备不提供这一步需要的能力（需要网页上下文的确定性 step、设备不支持经系统打开地址、Android 地址含没编码的 `;` `'` `(` `)` 或空格、非 ASCII 字符） | 改写为 AI 步、改地址或换设备；重新运行不会变 |
+| 设备上 step 记 `engine_error`，消息说「这一步可能已执行也可能未执行」 | 设备命令在等待时间内没有回应，本 scenario 余下的 step 未执行 | 先用 `explain` 看这一步的证据核对设备状态（AI step 看截图，确定性与导航 step 看控件摘要与原始控件树），再收窄重新运行这一条 |
 | 启动时报告未设置 region 的错误 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / 配置文件的 `region` / profile 配置五处都没有 region | 任选一处设上（第 4 节）；缺失时不会改用任何默认 region |
 | `AccessDenied` / 模型不可用 | region 未开通模型，或凭证缺 Bedrock / AgentCore 权限 | 换 region 或补权限（第 4 节） |
 | Midscene 侧某个 step 文件里的 step 全走了 AI、`list-deterministic` 清单里也没有它，且没有任何报错 | 扩展名用了 `.ts` / `.js`（收集阶段按扩展名过滤，静默跳过、不 import） | 改成 `.mts` / `.mjs` |
