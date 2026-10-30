@@ -56,7 +56,7 @@ deterministic("^页面显示「(?<text>[^」]+)」$", {
 | `log` | 写进本 step 诊断的日志函数 |
 | `withWebContext(fn)` | 每次重新定位属于被测对象的网页上下文（不缓存句柄，[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5），切入后执行 `fn`，结束（含抛错）后切回原生上下文；多个候选或零候选时抛错、不猜 |
 
-- `WebdriverCtx` 的类型随注册面一起发布（`driver` 以类型引用 WebdriverIO 客户端；发布的类型声明引用它，使用方做类型检查时要能解析到，故 webdriverio 随注册面列为 Midscene 包的依赖——设备模块落地后它本来就是运行期依赖），实现随设备模块落地；在那之前桌面 worker 对设备目标上的 webdriver 句柄不会派发（设备 job 在建会话前自检被拒，[0049](./0049-worker-capabilities-targets-keys.md) 决策 7）。
+- `WebdriverCtx` 的类型随注册面一起发布（`driver` 以类型引用 WebdriverIO 客户端；发布的类型声明引用它，使用方做类型检查时要能解析到，故 webdriverio 随注册面列为 Midscene 包的依赖，它同时是设备模块的运行期依赖），实现在 Midscene 的设备模块（`engines/midscene/src/device/`），webdriver 句柄由设备接缝在就绪后构造并派发（[0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 2、3）。
 - **不变量：step 结束时会话处在原生上下文。** 截图与手势都在原生上下文执行，AI 步开始前也会回到原生上下文（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）；handler 若自行 `switchContext` 不切回，后果是下一步截图坐标错位、点击全部落空。`withWebContext` 是切换上下文的推荐方式；handler 直接调用 `switchContext` 时，worker 在 step 结束后核对并复原，复原失败记 error。
 - **网页上下文只认属于被测对象的那个**（判定规则归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）。会话开头的能力探测确认设备不提供网页上下文时，声明了 `requires: ["web_context"]` 的条目不被调用、step 记 error（类别 `capability_unavailable`），消息说明当前设备不提供网页上下文、建议改用 AI 步或换设备；探测出错（无法确认设备是否提供）时同样不调用，类别记 `engine_error`（规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 6）。没有声明却调用 `withWebContext` 的 handler 由它按同一规则抛出。两种情况都不转 AI。
 - **七个字段对内建条目同样成立**：内建导航取导航原语走决策 1 的模块私有通道，`ctx` 不为它加 `navigate` 或 `page` 一类字段。

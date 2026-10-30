@@ -5,87 +5,15 @@
 由实施规划 workflow 在 2026-10-16 产出：每个批次一个规划者，读点名的 ADR 与代码，给出改动面、先写的测试、依赖、真跑核对与易错点；规划者提出的设计缺口经逐条对抗复核，成立的已补进 ADR（见 journey 0013 现场）。次序与进度在 journey 0013；本文是各批的施工底稿，实施时按代码现状校准，批次完成后删去对应一节，全部完成后删除本文。行号与符号以产出当时的代码为准。
 
 
-## 7. B8-deploy-iac：部署侧：权限、Device Farm 项目找回或建立、SSM、doctor 设备项
-
-规模 M。**状态**：实施与独立复核完成；四处设计边角已由 owner 拍板并写进 ADR 0051 决策 10（diff 核对被拒与 deploy 同一降级、deploy 读 SSM 失败退出码 2、记录的项目已失效且无法重建视同无记录、本机 doctor 不列会话）；已提交九笔（实施两笔 + 四轮同僚复核修正，Codex 第 66 轮闭合确认）；真部署核实完成并内联 ADR 0051 实测依据（项目建立与再部署复用、diff 零差异、doctor 两行、真会话列举与停止、受限凭证降级、两引擎桌面云端 run）；剩余只有 task role 的端到端使用，待第 8 批 B6。
-
-
-**依赖**
-
-- B3-config-submit：提交侧从 SSM（names.DEVICE_FARM_PROJECT_KEY）读项目 ARN，写进 device_request.project_arn，缺值时以退出码 2 结束并提示「部署未启用设备支持」；方向上是 B3 消费 B8 的命名常量。doctor 只在带云端参数时读 SSM 记录并列未结束的会话，本机后端即使配置了项目 ARN 也不列（0051 决策 10）
-- B1-capabilities：doctor 目标清单这一行要用 query_capabilities 返回的 targets / max_session_s（已校验形态）
-- B6-midscene-device：不是接口依赖，而是端到端验收依赖。task role 授权是否够，要等 worker 的设备模块（列举、建会话、查询、停止、按名列举，以及应用存在性检查）真跑过才能确认
-
-**改动面**
-
-- `runtime/gherkai_runtime/names.py` · 模块级常量（与 SUBNETS_KEY / VPC_KEY 并列）：补齐 Device Farm 命名单点（SSM 相对键 DEVICE_FARM_PROJECT_KEY="device-farm-project" 已存在，全路径经 ssm_path）：新增项目基名 BASE_DEVICE_FARM_PROJECT="devices"（项目名 default_name(prefix, 它) 即 `{prefix}devices`）、固定区域常量 DEVICE_FARM_REGION="us-west-2"、「待建立」占位值常量，以及纯函数 device_farm_project_id(arn) 和 device_farm_session_arn_prefix(project_arn)（得到 arn:aws:devicefarm:us-west-2:<账户>:session:<项目 id>/*）。stack、provider、doctor、提交侧都只引用这些常量，调用点不写裸字面量（与 0038「SSM 参数与命名真源」同一纪律）（0051 决策 10「项目」；0033 资源清单 11.；0038 SSM 命名真源）
-- `deploy_aws/gherkai_deploy_aws/names.py` · re-export 列表 + ssm_* 便捷函数：re-export 上面新增的常量与函数；加 ssm_device_farm_project_path(prefix)，形状与 ssm_vpc_path 相同，供 stack 写、provider 读（0051 决策 10；0033 资源清单 11.）
-- `runtime/gherkai_runtime/devicefarm.py（新模块）` · 部署与诊断用的 Device Farm 客户端模块（`gherkai-runtime[aws]`，boto3 函数内延迟导入）：Python 侧唯一构造 devicefarm 客户端的地方，客户端恒用 region_name=DEVICE_FARM_REGION，凭证沿用调用方的 profile。提供以下函数：read_project_arn(ssm, prefix)，从后端区域的 SSM 读，ParameterNotFound 时返回 None；resolve_or_create_project(prefix, profile, stored_arn, warn)，SSM 有值时先用 GetProject 核对，核对出项目已不存在时立即经 warn 回调警告，再按名翻页 ListProjects，命中多个抛专用异常，零个则 CreateProject；list_open_sessions(project_arn, profile)，翻页 ListRemoteAccessSessions，过滤掉状态为 COMPLETED 的会话，返回 arn、name、status、created，用于 doctor 拼控制台链接和停止命令；verify_project(arn, profile)，GetProject 只读核对，供 diff 核对 SSM 记录；is_access_denied(e)，判定错误是否属于无权限，供读 SSM 记录失败时按类别给处置提示。不创建也不停止会话。权限错误单独分类成 DeviceFarmAccessDenied（带「记录的项目已失效」标记），同名多个抛 AmbiguousProject，供 deploy 降级（0051 决策 10「调用归属」「项目」；0051 决策 6（doctor 列未完成会话）；0033 部署方 ListProjects/CreateProject 于 *、GetProject 于项目 ARN）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.build_context：context 闭集加 device_farm_project。build_context 保持纯推导：ARN 由调用方先解析好再传入（新增一个关键字参数，或者让 _run_cdk 把解析结果放在 args 的私有属性上），不在 build_context 里做 IO。值为 None 时这个键不进 context，或者给占位常量，两者在 stack 里等价（0037 决策 6 context 闭集加 device_farm_project；0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.deploy（_guard_vpc_spec 之后、_run_cdk 之前新加一步 _resolve_device_farm_project_for_deploy）：放在工具链闸、容器引擎、--vpc、VPC 三态之后，cdk 之前。先读 SSM，再调 runtime.devicefarm.resolve_or_create_project：同名项目命中多个时以退出码 2 结束；遇到 AccessDenied 时：SSM 有 ARN 且核对被拒，就沿用并警告；没有记录，或记录的项目已核对为不存在、随后找回或建立又被拒，就警告并跳过（context 给「待建立」占位 names.DEVICE_FARM_PROJECT_PENDING）；其余错误（限流、网络等）以退出码 1 结束、不猜测（ADR 0051 决策 10）；读 SSM 本身失败以退出码 2 结束（已定，ADR 0051 决策 10）。文案按 0039 只说发生了什么、为什么、怎么办，不出现 ADR 编号。解析结果交给 _run_cdk 和 build_context（0051 决策 10「项目」与无权限降级；0033「设备目标增量」部署方行）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.diff / synth_only / destroy（经 _run_cdk）：这三个动作不建立项目：只读 SSM 现值，没有值时传占位值。读 SSM 失败以退出码 2 结束，diff 的 GetProject 核对被拒与 deploy 同一降级、其他失败退出码 2（已定，ADR 0051 决策 10）。diff 的 docstring 要写明「待建立」时变更集里看不到 Device Farm 授权（0037 决策 6（diff 不建立、synth-only 与 destroy 取 SSM 现值或占位）；0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · 模块头 docstring「Provider 负责」「退出码」两段：职责清单加「deploy 在 cdk 之前找回或建立 Device Farm 项目」；退出码 2 的情形加「同名项目命中多个」（0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/stack.py` · BackendStack.__init__ 新增 _resolve_device_farm_project()：读 try_get_context("device_farm_project")。缺失或等于占位值时 self.device_farm_project_arn=None，不报错（这一点与 _resolve_version 相反，app 不 fail-fast）。非占位的值要过 ARN 形态校验，必须是 arn:aws:devicefarm:us-west-2:<12 位>:project:<id>，不合法即在 synth 期报错，因为拼出错的 session 前缀只会表现为运行期 AccessDenied（0037 决策 6（缺少或占位不 fail-fast）；0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/stack.py` · 新增 _ssm_device_farm()（与 _ssm_deployment_stamp 并列）：ARN 不为 None 时写 StringParameter，路径为 ssm_device_farm_project_path(prefix)，作为 stack 资源，随部署事务同生死、随 destroy 删除（项目本身由 SDK 建立、不归 stack 管，所以 destroy 不删项目）；ARN 为 None 时不建这个参数（0033 资源清单 11.；0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/stack.py` · _grant_task_role 的 elif engine == "midscene" 分支：只在 ARN 不为 None 时，给 Midscene task role 加以下几条 statement，区域段一律写字面量 us-west-2，不用 self.region。① devicefarm:ListDevices，资源 *，单独一条 statement。② GetDevice，资源 arn:aws:devicefarm:us-west-2::device:*。③ CreateRemoteAccessSession，同一条 statement 里列项目 ARN 和 device:*。④ Get/StopRemoteAccessSession，同一条里列 session:<项目 id>/* 和项目 ARN，两种都要。⑤ ListRemoteAccessSessions，资源为项目 ARN。⑥ s3:ListBucket，资源为桶 ARN，条件按 spike 实测形态写 StringLike s3:prefix ["apps/*"]。现有两个引擎共享的 GetObject（资源 {bucket}/*）已经覆盖 apps/*，不必重复授。Nova 的 role 不加任何 devicefarm 动作，也不加 ListBucket（0033 task role 表 devicefarm / apps 行；0051 决策 9（ListBucket 把 403 变 404）、决策 10）
-- `deploy_aws/gherkai_deploy_aws/stack.py` · _storage 的 ArtifactsBucket lifecycle_rules：加规则 expire-apps：tag_filters {"gherkai": "app"}，expiration 14 天（E=14）。与现有 expire-job-in 并列，规则 id 用常量（0051 决策 9 保留承诺（E=14 天））
-- `deploy_aws/gherkai_deploy_aws/stack.py / app.py` · 模块头 docstring（资源清单、context 配置项）：stack 头的 SSM 部署戳清单加 device-farm-project；app 头的 context 清单加 device_farm_project（由命令派生，可缺省）（0037 决策 6）
-- `cli/gherkai_cli/__main__.py` · _doctor_cloud 末尾，新增 _doctor_devices(target, add)：读 SSM 的项目 ARN：没有值时加一行「部署未启用设备支持」，required=False。有值时调 runtime.devicefarm.list_open_sessions，列出未到 COMPLETED 的会话（含排队中），每条附控制台链接和 `aws devicefarm stop-remote-access-session --region us-west-2 --arn …` 停止命令；没有权限时单独一行说明。runtime.devicefarm 在函数内导入，CLI --help 不拉 boto3（0051 决策 6 泄漏护栏（doctor 列出）；0033 CLI 的 ListRemoteAccessSessions）
-- `cli/gherkai_cli/deploy.py` · destroy 子命令的 description（约第 169 行）：保留清单加 Device Farm 项目（含会话记录与录像），并给出手动删除命令（0033 RETAIN 段；0051 决策 10）
-- `docs/user-guide/cloud-backend.md + docs/adr/0038（SSM 命名真源常量清单）` · 「拆除与清理」节；0038「键名常量」枚举：拆除手册加 `aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>`；0038 常量清单补上 DEVICE_FARM_PROJECT_KEY（按差集对照 names.py），SSM 参数族表加一行，写者为 stack 资源（0033 RETAIN 段；0038 SSM 命名真源；CLAUDE.md 文档校准）
-
-**先写的护栏测试**
-
-- `deploy_aws/tests/test_stack.py`：SSM 参数全集按 context 分两种情形锁定：不带 device_farm_project 或带占位值时，仍是现有 6 条（改写 test_ssm_parameter_set_is_exactly_six）；带合法 ARN 时恰为 7 条，多出的那条值等于传入的 ARN（0033 资源清单 11.；0037 决策 6）
-- `deploy_aws/tests/test_stack.py`：带 ARN 合成时 Midscene task role 的权限：ListDevices 只出现在资源为 "*" 的 statement；Get/StopRemoteAccessSession 所在 statement 的 Resource 同时含 session:<id>/* 和项目 ARN（缺一种即失败，这是模拟器假阳性留下的护栏）；CreateRemoteAccessSession 同时含项目 ARN 和 device:*；GetDevice 的设备 ARN 账户段为空；所有 devicefarm ARN 的区域段都是 us-west-2，夹具的 REGION=us-east-1 正好用来反证没有误用 self.region；ListBucket 带 StringLike s3:prefix apps/*（0033 task role 表 devicefarm / apps 行；0051 决策 10）
-- `deploy_aws/tests/test_stack.py`：两个引擎的 role 分开：Nova task role 的策略里没有任何 devicefarm: 动作，也没有 s3:ListBucket；不带 ARN 合成时整个模板没有任何 devicefarm: 动作。在 test_task_role_resource_arns_narrowed 里补一条：只能用 * 的动作恰好是 AgentCore 的两个 Connect 加 ListDevices，对应 0033 写的「这 3 个」（0033「两个引擎 task role 分立」「风险收在两道」）
-- `deploy_aws/tests/test_stack.py`：非占位但形态不合法的 device_farm_project（区域不对、不是 project 资源）在 synth 期抛 ValueError；缺失或占位不抛（0037 决策 6（缺少或占位不 fail-fast））
-- `deploy_aws/tests/test_stack.py`：产物桶 lifecycle 规则恰为 expire-job-in 和 expire-apps 两条，后者 TagFilters 为 gherkai=app、过期 14 天（0051 决策 9）
-- `deploy_aws/tests/test_provider.py`：context 闭集差集护栏：build_context 可能产出的键集合，等于 stack.py/app.py 源码里所有 try_get_context("…") 字面量的集合，即 {prefix, version, vpc_id, use_default_vpc, stop_timeout, device_farm_project}，并断言 device_farm_project 不是任何 argparse flag（0037 决策 6 flag 面与 context 对齐、闭集）
-- `deploy_aws/tests/test_provider.py`：deploy 编排顺序与分支（用 stub 掉的 devicefarm 模块）：VPC 三态拦下时零次 devicefarm 调用；同名项目命中多个时以退出码 2 结束且不调 cdk；AccessDenied 且 SSM 有值时 cdk argv 带该 ARN 并打警告；AccessDenied 且 SSM 无值时 argv 不带 device_farm_project（或带占位）且打警告；diff、synth、destroy 永不调用 CreateProject。现有 cdk 夹具要同时把 devicefarm 和 SSM 读 stub 掉，否则现有测试会直连真 AWS（0051 决策 10「项目」与降级）
-- `runtime/tests（或 cli/tests）新增 test_devicefarm_client_placement.py`：差集护栏：Python 源码里 client("devicefarm" 只出现在 runtime/gherkai_runtime/devicefarm.py；core/ 零引用；推进器 Lambda 源零引用；构造客户端时的 region 引用 names.DEVICE_FARM_REGION（0051 决策 10「调用归属」护栏测试）
-- `runtime/tests 新增 test_devicefarm.py（botocore Stubber 或 moto）`：resolve_or_create_project 的情形：SSM 有值且 GetProject 成功时直接用，不 List；按名翻页（带 nextToken）时零个就 Create、一个就复用、多个抛异常；list_open_sessions 过滤掉 COMPLETED、保留 PENDING 等排队态；构造的客户端区域恒为 us-west-2，与传入的后端区域无关（0051 决策 10；0051 决策 6）
-- `cli/tests/test_doctor*.py`：SSM 无项目 ARN 时出一行「未启用设备支持」，required=False，退出码不变；有未完成会话时 detail 含会话 ARN、us-west-2 停止命令和控制台链接；文本过 test_user_facing_messages 的内部指代护栏（0051 决策 6；ADR 0039）
-
-**完整性审查补认领**
-
-- 红线测试补：SSM 参数缺失与无凭证、拒绝、网络、限流分开处置；只有完全无凭证的 --synth-only 可占位并警告；旧 ARN NotFound 后零、一、多个命中三种结果；无凭证且无 region 时仍能离线导出。
-- 护栏测试：Device Farm 客户端在 Python 侧只在 runtime 的设备模块构造，core 不引用它（TS 侧的同类断言归 B6）。0051 决策 10。
-- SSM 值失效时 deploy 的 GetProject 核对、diff / --synth-only / destroy 的读失败处置（本轮补进 0051 决策 10 与 0037 决策 6）。
-
-**真跑或对抗核查才算数的结论**
-
-- 真部署后，用 Midscene task role 的真实凭证（在容器内，或按同一份 CDK 产出的策略 assume）把 worker 的全部设备动作正反面走一遍。0033 明写「尚未经真部署后的 task role 端到端验证」；CDK 会合并或改写 statement、拼 Fn::Join，合成出的策略不等于 spike 手写的 JSON，单测只能比对形态
-- 会话 Get/Stop 的两种资源同授要在真 task 上再确认一次（ECS task role 的调用者身份由 ECS 签发，不经探针的 AssumeRole）：同授放行、只授一种被拒。探针验证时 assume 之后先核对调用者身份，会话名至少两个字符
-- CDK 生成的 ListBucket 条件（StringLike s3:prefix apps/*）下，缺失键的 HeadObject 回 404、无权限回 403，在部署后的真实桶上复核
-- deploy 的项目生命周期跑一整轮真账户：首次部署建立项目，再次部署经 SSM 复用，destroy 后项目还在、SSM 参数被删，同 prefix 重新部署时按名找回同一个项目；后端在 us-east-1 时，Device Farm 调用落在 us-west-2、SSM 落在后端区域
-- 部署方没有 Device Farm 权限时，真实报错码的形态（AccessDeniedException 还是别的），决定降级分类写得对不对；mock 给不出真实错误码
-- doctor 对真实排队中或运行中的会话：ListRemoteAccessSessions 返回的状态取值，以及控制台链接格式（会话 ARN 到控制台 URL 的拼法）实际能打开
-- 只授本项目时，访问别的项目的会话被拒，在部署后的 role 上反证
-- 版本错位：新 CLI 写入带 target/device_request 的 RunMeta，若被旧版 cloud Lambda 推进器读（旧 job_from_dict 忽略未知键），设备 job 会被当作桌面 job 静默起桌面 worker。要在真部署上确认 CLI 与后端版本不一致时有拦截（版本一致性检查覆盖这条路径），或者确认这一路不可达。单测证明不了
-- Fargate 路径：带 target/deviceRequest/timeoutS 的 job 行经 S3 PutObject 后，由真实 Midscene 与 Nova 镜像的 JobSource 读回，旧字段行为不变（Nova 遇到多出的 timeoutS 键不出错）。至少用 tools/e2e_harness.py 真跑一次桌面 job，确认加了 timeoutS 后两引擎行为与之前一致
-- 开发版本混搭的完整性不变量：用不传预热地址的旧 reconciler 与新 worker 组合，确认 worker 发出 precheck_failed，而不是在 401 页上把导航和地址断言判成通过
-- 0035 决策 5 待实施期核实的一项：云端 RunTask 的 containerOverrides 带着预热地址，CloudTrail 的 RunTask 事件是否记录 overrides 里的 env 值；task 停止后约 1 小时内经 ecs:DescribeTasks 读到它的实际窗口
-
-**易错点**
-
-最容易做错的有三件。
-
-① Get/StopRemoteAccessSession 必须在同一条 statement 里同时列会话前缀和项目 ARN，所有 devicefarm ARN 的区域段都要写死 us-west-2，不能沿用 _grant_task_role 现有的 `region = self.region` 习惯。测试夹具 REGION=us-east-1，护栏测试正好用它反证；资源少一种、或区域跟着 self.region 走，模拟器会判允许，真实角色却被拒。
-
-② build_context 要保持纯推导，项目的找回或建立放在 deploy 里 VPC 三态之后、cdk 之前，而且只有 deploy 走这一步，diff、synth、destroy 绝不能调 CreateProject。现有 test_provider 的 cdk 夹具只 stub 了 subprocess 和四步，加入 Device Farm 和 SSM 读之后必须一并 stub，否则现有测试会直连真 AWS，这条在仓库里踩过一次。runtime.devicefarm 必须在函数内导入，否则会破坏「--help 不拉 boto3/aws_cdk」的护栏测试。
-
-另外，无权限降级只针对 AccessDenied，限流、网络等其他错误不能悄悄跳过，否则一次偶发错误就会让 stack 删掉 Midscene 的 Device Farm 授权，而且只有设备 run 运行时才会暴露。
-
-
 ## 8. B6-midscene-device：Midscene worker 设备模块（接缝、命令守卫、能力探测、适配器、终结四阶段、evidence）
 
-规模 L。**状态**：实施完成、待真跑（2026-10-30 第二轮施工之后的现状，未提交，以工作树为准）：设备模块的全部块与缺省装配已落地，设备路径可执行，文档与真机重新探测工具已随之校准；剩下独立复核、提交与真跑（见下文「真跑或对抗核查才算数的结论」段）。开工前的理解阶段对照了现状代码、B1–B8 已落接口、ADR 0051 与 0052、spike 06；owner 拍板八条（下文 E1–E8）；对实施有直接影响的澄清（下文各条里的 D 编号）按既有决策推导，两组结论均已写回 ADR（0024、0028、0037、0042、0044、0049、0050、0051、0052），实施以 ADR 条文为准，本节只记它们落到哪个模块。下文「改动面」与「先写的护栏测试」两段仍是施工底稿，先读「已落地、勿重做」段与紧接的「施工现状」段。
+规模 L。**状态**：实施完成，已提交两笔（code 一笔、docs 一笔）；提交后叠加的复核修正、遗留收口与拍板项落地都在工作树里、未提交，现状为待提交、Codex 闭合确认与真机验收。设备模块的全部块与缺省装配已落地，设备路径可执行，文档与真机重新探测工具已随之校准。两路独立复核（Codex 第 67 轮同僚复核、Workflow 九维度复核）的修正与遗留收口已落地，其中 Codex 第 9 条（按名列举扫完整页再消除待核）按 ADR 0051 决策 3「待核只能由正面证据消除」保留为命中即消除。复核里待 owner 拍板的五项与 E6 spike 的取舍已全部拍板：F1 Android DeepLink 地址里的 `{ }` 不放行，校验以 RFC 3986 字符集为准、不以实测能否送达为准（ADR 0048 决策 7 消歧）；F2 加收键盘原语，Input 动作带来的 `autoDismissKeyboard` 恰为 true 时输入完成后收起一次，失败只记一行日志、不传出异常、不重试（ADR 0052 决策 4 / 7 / 8）；F3 待核尝试的消除时机维持命中即消除、code 不变（按名命中就是正面证据；改为整页扫完再消除只推迟消除，还要先定同名会话 discovered 与 attempted 并存时的处理，没有换来新的保证）；F4 获取期按名找回的孤儿会话随即按与换台相同的 Stop 规则停止、不等到终结，session_closed 仍归终结、每个会话恰一条（ADR 0051 决策 3 / 5）；F5 Swipe 取舍的真机 spike 不单独做，并入真机验收矩阵（见下文 E6 条）；F6 Nova worker 自己写 stderr 的三处出口在写出时脱敏（ADR 0035 决策 5）。可选整理项已做：执行前会话丢失的消息常量 `SESSION_LOST_BEFORE_START_MESSAGE` 从 `device/appium.mts` 移到 `device/surface.mts`、与 `SESSION_LOST_MESSAGE` 并列。剩下的真机验收见下文「真跑或对抗核查才算数的结论」段。开工前的理解阶段对照了现状代码、B1–B8 已落接口、ADR 0051 与 0052、spike 06；owner 拍板八条（下文 E1–E8）；对实施有直接影响的澄清（下文各条里的 D 编号）按既有决策推导，两组结论均已写回 ADR（0024、0028、0037、0042、0044、0049、0050、0051、0052），实施以 ADR 条文为准，本节只记它们落到哪个模块。下文「改动面」与「先写的护栏测试」两段仍是施工底稿，先读「已落地、勿重做」段与紧接的「施工现状」段。
 
-**施工现状（未提交，工作树里）**
+**施工现状（前两轮已提交，提交后叠加的改动在工作树里）**
 
 - 第一轮已落地：`device/limits.mts`（max_session_s 8880、deviceGraceSeconds 63.5，`--capabilities` 实报 `min_grace_s: 63.5`）与 `worker/no-device-deps.test.mts`；package.json 的依赖（client-device-farm 进 dependencies、@midscene/core 1.15.1、webdriverio 精确 10.0.2）与锁文件、Dockerfile 冒烟；`device/session-name.mts`；脱敏出口与 `device/wdio-log.mts`；注册表的导航标记、内建导航的 webdriver 句柄与新 description、`features/steps/restart_app.mts`、`WORKER_TARGETS` 加 android / ios；core 的计量与释放提示按目标判、compose 的 `RUN_ID` 键；Nova 与 Midscene 的桌面会话事件（E1、D33）；`worker/surface.mts`、`worker/surface-desktop.mts` 与 run-scope 改走接缝；evidence 的快照输入；`device/app.mts`、`device/surface.mts` 与 `device/device-session.mts`。
 - 第二轮已落地：`device/session.mts`、`finalize.mts`、`guard.mts`、`adapters/`（两个适配器、命令契约快照与控件树样例）、`interface.mts`、`appium.mts`、`web-context.mts`、`probe.mts`、`warmup.mts` 与缺省装配 `parts.mts`（接缝模块静态 import 它，Dockerfile 的设备冒烟因此带到 WebdriverIO 与 Device Farm SDK，`device/surface.test.mts` 守这条静态闭包），以及 read-points、adapters.contract、guard、probe、appium、web-context、warmup、session、finalize 九组护栏测试；`limits.replanningCycleLimit` 与 run-scope 的启动期校验；`@wdio/logger` 10.0.0 显式锁定；本机两处 `build_engines` 调用点与 `tools/e2e_harness.py` 注入 `RUN_ID`；serialize 只在计量键有值时写出两键；两引擎上传器加 `.xml` 的 Content-Type；实施中浮出的实施级决定已回写 ADR 0028、0034、0035、0042、0044、0049、0051、0052。
+- 提交后叠加（工作树里、未提交）：两路复核的修正与遗留收口，以及拍板项的落点。F2 在 `device/interface.mts`（`DeviceAdapter.hideKeyboard`；`AppiumInterface.typeText` 里 `autoDismissKeyboard` 恰为 true 时调一次，失败只经 log 记「worker: 输入完成后未能收起软键盘（不影响这一步的判定）：…」；`createDeviceAgentFactory({ log })` 的 log 必填，缺省装配 `parts.mts` 传 `env.log`），两个适配器都发 WebdriverIO 的 `hideKeyboard`（Appium 跨平台端点，不是 `mobile:` 命令，不带参数；iOS 固定在原生上下文发出），两份 `adapters/fixtures/*.commands.json` 有对应用例，`tools/device_reprobe.mts` 随之认这个原语，Midscene 的 `keyboardDismissStrategy` 不转交；F4 在 `device/session.mts` 的私有方法 `stopUnused`（换台与获取期孤儿共用同一条 Stop 规则；`SessionRegistry.closed` 为真或 outer 已中止即终结接手，获取侧不再发新的调用，接手前已发出的 Stop 不撤回）与 `finalize.mts`（`releaseOne` 开头跳过获取期已确认的会话，observedS 止点含获取期那次处理），用例在 session.test 与 finalize.test；F6 在 `engines/novaact/gherkai_worker_novaact/run_scope.py`（`log()`；main() 第一步装上的 `sys.excepthook` 经 `sys.__excepthook__` 把 traceback 写进内存缓冲、整段脱敏后写 stderr）与 `lib/artifact_upload.py` 的 `_log()`，护栏 `engines/novaact/tests/test_stderr_redaction.py`（含 ast 静态差集：写 stderr 的函数恰为这三处且都调 `redact_secrets`）；F1 只把 `adapters/uiautomator2.mts` 与契约测试里 `{ }` 的注释改为陈述规则。
 - 两个阻断项已解除：本机后端的 run 带上 `RUN_ID`；`docs/user-guide/engines.md` 补了 Midscene 的四行设备目标，`engines-matrix.test.mts` 转绿。
 - 文档与工具已校准：用户指南（engines、writing-features、writing-deterministic-steps 的重启应用模板、configuration 的重规划上限、running-and-results 的设备证据与 `device-session.json`、troubleshooting 的设备错误类别与两句释放提示）、CHANGELOG、skill（SKILL.md 与 references 的设备目标一节与错误处置）、internals（确定性 step 生命周期、产物与证据、契约页）、engines/midscene/DEVELOPMENT.md 的布局与设备模块节、CONTRIBUTING 的工具表；真机重新探测工具 `tools/device_reprobe.mts` 与手册 `tools/device_reprobe.md`（`--offline` 自检零差异，真机方式只核到获取前的接线）。journey 0013 documenting 清单里标「设备路径真能运行后再写」的几项（设备主题页、internals 设备会话与 Appium 适配一篇、writing-deterministic-steps 的测试分层与写作方法、包入口页与门面、faq、cloud-backend 与 local-app-testing 的设备内容、评测集设备用例）尚未写。
 
@@ -93,7 +21,7 @@
 
 - 脱敏规则已齐：lib/redact.mts 的 `redactSecrets` 含三条规则（userinfo；签名类查询参数与 gherkai_tunnel_token，覆盖 `?`、`&`、`&amp;`；`/remote-endpoint/<令牌>`），参数名集合已定于 ADR 0035 决策 5，跨语言用例在 engines/fixtures/redaction-cases.json。event-sink.emit、evidence 写盘、error-text.oneLineError、预热失败消息已经调用它。B6 不改规则，只补出口（见 log() 条，D30）。
 - Job 类型已合一：run-scope.mts 的 Job 由 lib/job-source.mts 的 WireJob 派生，字段已全。线上字段是 camelCase：`target{device, uiKind, app?{alias,bucket,key,sha256,appId}}`、`deviceRequest{provider, deviceArn?|osVersion?, billingMethod, projectArn, acquireTimeoutS}`、`timeoutS`、`schemaVersion`。snake_case 只出现在 core 的 dataclass 与能力自述（ui_kinds、max_session_s）里；TS 侧一律按 JOB_KEYS 取，不新写 snake 键。
-- 桌面预热与完整性出口已落地：桌面预热、「有额外请求头却没有预热地址」记 precheck_failed、预热失败经 WarmupFailureError 走 exitAfterFailure，均在 run-scope.mts 与 lib/tunnel-warmup.mts；precheck（schemaVersion、targets、timeoutS ≤ max_session_s）在 lib/precheck.mts，已走 scope_done 出口。B6 只把预热搬进桌面接缝的「预热」操作，行为逐字节不变。
+- 桌面预热与完整性出口已落地：桌面预热、「有额外请求头却没有预热地址」记 precheck_failed、预热失败经 ScopeTerminationError 走 exitAfterFailure，均在 run-scope.mts 与 lib/tunnel-warmup.mts；precheck（schemaVersion、targets、timeoutS ≤ max_session_s）在 lib/precheck.mts，已走 scope_done 出口。B6 只把预热搬进桌面接缝的「预热」操作，行为逐字节不变。
 - `URL_IN_QUOTES` 不存在：内建导航是 deterministic.steps.mts 的注册表条目（`ADDRESS_PATTERN`），runStep 以 `selected.fn({ page, navigate })` 调用，navigate 闭包里有 60s 字面量，`selectHandler(hit, { device: "desktop", uiKind: "web" })` 写死桌面目标。B6 要改的是这一处的 navigate 闭包与写死的目标。
 - 匹配 API 分两步：`match(text, keyword)` 与目标无关，`selectHandler(hit, {device, uiKind})` 按目标取句柄并返回 requires。
 - 接缝义务为四项：step 前核对、step 后复原并核对、采集界面快照、scenario 前核对（ADR 0052 决策 2）。底稿原写「三项」、「scenario 前钩子见 open_questions」，均已过时。
@@ -106,7 +34,7 @@
 - E3（A）`min_grace_s` = 63.5：取两条收尾路径各自之和的较大者，max(桌面 1.5 + 3 + 3 + 10 + 6 + 7.5 = 31，设备 10 + 5 + 25 + 10 + 6 + 7.5 = 63.5)；能力自述与 run-scope 的 minGraceSeconds 都按此推导，不取整为 64，文档写「约 64」时以常量算出的 63.5 为准。阶段 3 内的 Stop 3s、终结期 Get 5s 是子预算，不是加数。
 - E4（A）`max_session_s` = 8880：会话上限 9000 秒减 Fargate 停止宽限硬顶 120 秒，由 limits 常量算出；同时是自检阈值与会话年龄后备的触发点。
 - E5（A）iOS 键盘键：iOS 的 Enter、Backspace、清空归「输入」行，经活动元素 sendKeys 发控制字符（`\n`、`\b`，清空发若干 `\b`）；`mobile: pressButton` 只用于 Home；iOS 不向模型注册返回键。Android 的清空用 `mobile: pressKey` 67 若干次。已补进 ADR 0052 决策 4 的表与命令契约快照。
-- E6（A，owner 要求 spike 确认副作用）Midscene 动作集：只用 `defineActionsFromInputPrimitives`，`includeSwipe: false`，显式 `systemActions`（Android 注册 Back 与 Home，iOS 只注册 Home）；`createDefaultMobileActions` 移出 ADR 0052 决策 7 的复用清单（它要求必填的 `touch.swipe`，本质是把 includeSwipe 留开的薄包装）。开工首项是一次 spike 核对，核对不过回 owner：①两种写法注册出的动作清单差集只有 swipe；②`systemActions` 给出后 Back / Home 确实进入模型的动作空间（spike 06 只传了 `{ size, includeSwipe: false }`，当时 back / home 实际没有注册）；③去掉 swipe 后，模型的滑动类意图由 scroll 承接，规划不因缺动作而失败。
+- E6（A；owner 原要求以 spike 确认副作用，F5 改为下文的分流）Midscene 动作集：只用 `defineActionsFromInputPrimitives`，`includeSwipe: false`，显式 `systemActions`（Android 注册 Back 与 Home，iOS 只注册 Home）；`createDefaultMobileActions` 移出 ADR 0052 决策 7 的复用清单（它要求必填的 `touch.swipe`，本质是把 includeSwipe 留开的薄包装）。副作用核对按 F5 分流：①两种写法注册出的动作清单差集只有 Swipe——依据是上句对 SDK 1.15.1 源码的核对（不转传 `includeSwipe`，已记入 ADR 0052 决策 7），离线护栏 `engines/midscene/src/device/adapters/adapters.contract.test.mts` 的「动作集」用例锁住两平台实际注册出的清单（不含 Swipe 与 DoubleClick / DragAndDrop / Pinch / Hover / RightClick，含 Tap / LongPress / Input / ClearInput / KeyboardPress / Scroll），用例本身不与 `createDefaultMobileActions` 比对；②`systemActions` 给出后系统键进入动作空间（spike 06 只传了 `{ size, includeSwipe: false }`，当时 back / home 实际没有注册）——同一用例断言 Android 有 AndroidBackButton 与 AndroidHomeButton、iOS 有 IOSHomeButton 且没有任何返回键，「设备 Agent 可以构造」用例经真实 Midscene Agent 的 `getActionSpace` 核对 Android 返回键在、Swipe 不在，「系统动作经适配器下发」用例核对返回键 4、主屏键 3 与 iOS 主屏的 `mobile: pressButton`；③去掉 Swipe 后模型能否用 Scroll 承接横向翻页只能在真机上确认，不再单独做 spike（单独 spike 要起一个真会话，覆盖的问题与矩阵那一行相同），并入 engines/midscene/DEVELOPMENT.md「真机验收矩阵」节「没有 Swipe 动作时模型能否用 Scroll 完成横向翻页」那一行。
 - E7（A）RUN_ID 注入：本机子进程路径经 compose.py 既有的 worker env 注入链加 `RUN_ID`（`_COMPOSE_OWNED_WORKER_ENV` 一族，有值显式注、无值显式清），与云端 RunTask overrides 同名。回答 owner 的提问：这条链不是为此新开的机制，GHERKAI_STEPS_DIR、GHERKAI_NO_ARTIFACTS、GHERKAI_EXTRA_HTTP_HEADERS、GHERKAI_SESSION_WARMUP_URL 已经这样接到本机 worker（B7 的预热地址即一例），RUN_ID 只是该族加一键。worker 用它编码会话名的 run_id 段；event-sink 的 DDB 态只在 EVENTS_DDB_TABLE 存在时生效，读法不变。ADR 0024 的 env 接线表已补一行。
 - E8（A）WebdriverIO 日志：日志级别保持 error，另给 webdriver 的 logger 配脱敏掩码（`@wdio/logger` 的 maskingPatterns，经 `setMaskingPatterns` 按 logger 名设置），掩码与 `redactSecrets` 共用 redaction-cases.json 这份夹具。owner 备注：「实现简单」不是取 A 的理由（那是降低工作量的折中，不是 KISS 意义上的简洁），ADR 写理由时不以实现量立论。ADR 0051 决策 11 已补。
 
@@ -141,7 +69,7 @@
 - `engines/midscene/src/device/adapters/uiautomator2.mts 与 xcuitest.mts（新）` · 驱动适配器：按会话回报的 automationName 选一次。原语映射照 0052 决策 4 的表：点击、长按、滚动用 mobile 手势命令（scrollGesture 等），不用 W3C 指针拖动；输入在 Android 用 mobile: type，iOS 对活动元素 sendKeys，所在上下文由探测定，不用 POST /keys。键盘键按 E5：iOS 的 Enter、Backspace、清空经活动元素 sendKeys 发 `\n`、`\b`（清空发若干 `\b`），`mobile: pressButton` 只用于 Home，iOS 不注册返回键；Android 的清空用 pressKey 67 若干次。iOS 坐标按点（像素除以比例）；导航按探测结论走 url 或 mobile: deepLink。适配器导出原语函数与「只读 mobile 命令名集合」（deviceScreenInfo、activeAppInfo、getDeviceTime 等），守卫、探测、预热只调这些导出，`mobile:` 字面量只在 adapters/ 下（D19）。从控件树抽取控件摘要 items[{type,id,text,a11y_id}]、total、truncated（截断 200 条），只在 failed 或 error 时调用。spike 里 typingRoutes 的多路线试错与 swipe 回落都不保留（0052 决策 1、4、6）
 - `engines/midscene/src/device/interface.mts（新）` · 界面实现：AppiumInterface extends AbstractInterface：实现截图（原生上下文）、尺寸、动作集；动作集按 E6 只用 `defineActionsFromInputPrimitives`，`includeSwipe: false`，显式 `systemActions`（Android 注册 Back 与 Home，iOS 只注册 Home），不用 createDefaultMobileActions。原语全部经适配器与守卫下发。比例由 probe 一次定下后注入，不在 size() 里算。系统版本与机型只经唯一的会话能力读取点进入诊断。spike 的 class AppiumInterface 是原型，要去掉其中的 PLATFORM、SCENARIO 全局分支（0052 决策 3、7）
 - `engines/midscene/src/device/app.mts（新）` · 应用启停：建会话前对应用键做存在性检查，404 与 403 都记 precheck_failed，消息不同；对键预签名（有效期 3600s）。建好后 activateApp 并采样应用状态（3 次、间隔 1s），回到「未运行」即 precheck_failed。为句柄上下文的 `app.restart()` 提供 terminate、activate、采样三个原语，采样到自退记 engine_error（0052 决策 3，0051 决策 9、14）
-- `engines/midscene/src/device/warmup.mts（新）` · 设备预热：按探测结论选 url 或 deepLink，导航 GHERKAI_SESSION_WARMUP_URL，在原生 page source 里找标记（import lib/tunnel-warmup.mts 的 `WARMUP_MARKERS`、`WARMUP_ATTEMPTS` 与消息常量）：READY 即就绪；DENIED 或 AUTH REQUIRED 归 precheck_failed；ERROR 或无任何标记时原地重导航、有界重试，耗尽归 engine_error，永不归 network_error。导航预算用执行实例的单请求超时 ⑥ 作上界，不套桌面的 30s；超时计一次 ERROR 尝试后原地重导航，次数与桌面同一常量；预热在 scope_started 之前、没有令牌，不走守卫（D7）。就绪后：url 路线导航 about:blank（与桌面同）；deepLink 路线不离开，令牌留在设备浏览器当前地址，已作为已知边界记入 ADR 0051 决策 13 的残留面清单（D8）。预热地址只经脱敏出口进入诊断。失败返回值复用 WarmupFailure、抛 WarmupFailureError，可借 spike 的 navigateTo、waitMarkers、nativeMarkers 结构（预算用 tunnel-warmup.mts 的常量，不用 spike 的 25s / 20s）（0052 决策 6，0051 决策 13）
+- `engines/midscene/src/device/warmup.mts（新）` · 设备预热：按探测结论选 url 或 deepLink，导航 GHERKAI_SESSION_WARMUP_URL，在原生 page source 里找标记（import lib/tunnel-warmup.mts 的 `WARMUP_MARKERS`、`WARMUP_ATTEMPTS` 与消息常量）：READY 即就绪；DENIED 或 AUTH REQUIRED 归 precheck_failed；ERROR 或无任何标记时原地重导航、有界重试，耗尽归 engine_error，永不归 network_error。导航预算用执行实例的单请求超时 ⑥ 作上界，不套桌面的 30s；超时计一次 ERROR 尝试后原地重导航，次数与桌面同一常量；预热在 scope_started 之前、没有令牌，不走守卫（D7）。就绪后：url 路线导航 about:blank（与桌面同）；deepLink 路线不离开，令牌留在设备浏览器当前地址，已作为已知边界记入 ADR 0051 决策 13 的残留面清单（D8）。预热地址只经脱敏出口进入诊断。失败以 ScopeTermination 返回（与 lib/tunnel-warmup.mts 的 WarmupFailure 同形），runScope 以 ScopeTerminationError 抛出、经 exitAfterFailure 收尾，可借 spike 的 navigateTo、waitMarkers、nativeMarkers 结构（预算用 tunnel-warmup.mts 的常量，不用 spike 的 25s / 20s）（0052 决策 6，0051 决策 13）
 - `engines/midscene/src/device/surface.mts（新）` · 设备侧接缝实现：串起解析 → Create → 等 RUNNING（status 为 RUNNING 且 endpoints.remoteDriverEndpoint 存在）→ 存在性检查与预签名 → newSession → activateApp 与采样 → 探测 → 预热，全程受获取预算约束，到期归 acquire_timeout；完成后 run-scope 才发 scope_started，sessionId 填会话 ARN（core 的代表会话由它锁定）。实现四项边界义务（命令失败先查会话状态），全部走生命周期通道（D2）；快照按 D1 的条件读地址，在原生上下文取控件与 page_source（独立短预算 10s，page_source 截断 1 MiB）。取确定性句柄 ctx{driver, device{platform,osVersion,scale}, uiKind, appId, app{restart}, log, withWebContext}。执行前失败与 scope 级终止的出口顺序按 D16、D17（0052 决策 2，0051 决策 4、5，0050 决策 2）
 - `engines/midscene/src/worker/deterministic.mts 与 deterministic.steps.mts` · 内建导航：注册表的 Match 加内建标记（如 `builtin: "navigation"`），run-scope 据此定 step_kind=navigation（D20）；内建导航条目加 webdriver 句柄：应用目标经 DeepLink（0048 决策 7），网页目标按能力探测择路（0052 决策 4）；条目 description 补应用目标经 DeepLink 一句，只改 Midscene，Nova 不变（D26）；docs/user-guide/getting-started.md 的 plan 示例逐字引用了这条 description，示例是 Nova Act 的输出（engine=novaact），原文保持 Nova 的说明，示例下方补一句 Midscene 的说明多出应用目标一句，两引擎按各自原文分别引用（D26）。不注册「重新启动应用」与「页面地址匹配」（0020 第 2 条）。注意 run-scope.test.mts 里断言每条 step 的 targets 只有 desktop/web 的用例会随之变红，要按新 targets 改（0050 决策 1、2）
 - `features/steps/（steps 模板）与 docs/user-guide/writing-deterministic-steps.md` · 补「重新启动应用」示范（调用 ctx.app.restart()，只给 Midscene 的 app 条目），ADR 0050 决策 1 要求、仓库尚缺（D32）
@@ -183,18 +111,28 @@
 
 **真跑或对抗核查才算数的结论**
 
-- E6 的动作集 spike（开工首项）：三项核对见 E6 条，核对不过回 owner
+- E6 动作集的第三项（没有 Swipe 时模型能否用 Scroll 完成横向翻页）：不单独做 spike，随 engines/midscene/DEVELOPMENT.md「真机验收矩阵」节那一行核对；前两项已核过：①依据 SDK 1.15.1 源码核对，离线护栏锁住两平台实际注册出的清单；②由离线护栏核过（见 E6 条）
+- 获取期孤儿即停（F4）的证据边界：获取侧与终结交叠（换台或获取侧的 Get 在途、换台侧的 Stop 在途时进入终结）的结论只在虚拟时钟与假 Device Farm API 下验证过；真实 SDK 遇到已中止的信号是否在发出请求之前就拒绝，没有真跑核对（获取期孤儿的 Get / Stop 接获取预算的信号，进入终结时预算随即中止，在途的 Stop 可能没到服务端，所以释放阶段不假定它已生效、照常先 Get 再决定）。这种情形难以自然复现，真机验收时可用一次结果未知的 Create 制造孤儿，核对获取期即发 Stop、终结时这个会话的 session_closed 为 confirmed
+- 输入后收起键盘（F2）的真机观测项：见 engines/midscene/DEVELOPMENT.md「真机验收矩阵」节（输入后收起键盘一行）；离线测试只锁住命令形态、调用时机与失败处置
 - 全新会话、尚未导航时的探测时机（D9）：iOS 15.8、18.6 Safari 与 Android Chrome 刚建好会话时是否已有 WEBVIEW_<pid> 或 CHROMIUM 候选，作为真机验收矩阵的一行。若首次导航前候选为零，探测会把 iOS 15.8 判成「不提供」，转去走它不支持的 deepLink，导致预热失败；届时改探测为「先经探测实例导航预热地址再列上下文」并回写 ADR 0052 决策 5。这一点 mock 证明不了
 - Appium 服务端串行（D10）：iOS 26 行加观测项「探测实例的网页命令挂住后，执行实例的原生命令延迟多少」，结论回写 ADR 0052 决策 5
 - iOS 26 整条链路：探测超时 → 恢复原生上下文 → deepLink → READY，在真机验收矩阵里单列一行
 - 预热三个失败分支各真实触发一次：边缘拒收 cookie、校验 401、请求失败
 - 执行实例 connectionRetryCount=0 时，真实点击或输入在客户端超时后不被重复执行；结果未知处置后的截图存活探测；多个客户端实例共享 undici Agent 时执行实例先发命令、超时按其值生效（D11）
+- iOS Safari 上 remote() 返回前建连实例会读一次当前上下文：真机上核对这条请求确已改用执行实例的单请求超时，执行实例的长命令不被建连实例的封顶超时切断（ADR 0052 决策 6）
+- iOS 26 探测的重试：首次只读命令挂到探测实例超时之后，重试时列上下文与切入各自是否成功；重试的切入失败会判成「探测出错」而不是「不提供」，需回写 ADR 0052 决策 5 的判据（device_reprobe 记下每次尝试失败在哪一环）
+- 网关状态码与解析、路由失败的真实形态：Device Farm 网关是否真会回 502 / 503 / 504，域名解析与路由失败在生产上的错误形态（只读重试与状态码读回只在本机假 WebDriver 服务端加真实 webdriverio 10.0.2 上核过）
+- iOS 网页上下文的命名形态：用 tools/device_reprobe.mts 的 contexts 列表记下真机上出现的是 WEBVIEW_<pid> 还是 WEBVIEW_<pid>.<页号>，结论回写 ADR 0052 决策 5
 - Midscene 1.15.1 用真实的 Agent 加自写 AppiumInterface 时，适配器抛错并置 abortSignal 后，act 立即结束、零后续动作（spike 只用假界面验过）
 - SIGTERM 落在各阶段的表现：Create 在途、PENDING_CONCURRENCY 排队（E2 下也发 Stop）、释放中网络退化；终结四阶段在 Fargate stopTimeout 下能否收完，63.5s 是否够用，要在网络退化条件下校准
+- 正常收尾进行中收到 SIGTERM（终结升级为中断）：在 deleteSession 发出之前与在途时各发一次，核对退出时间在宽限内、每个会话恰一条 session_closed、尚未发出的 deleteSession 不再发出、device-session.json 由退出前的队列排空带上（ADR 0051 决策 5）
+- 释放阶段的网络退化：Get / Stop 的 2xx 响应体读到一半失败的形态（只在本机网络层模拟核过）；云端事件出口在退化网络下单条写入的耗时（attempted 一对与释放并行写出的前提）
+- 获取期的中止：activateApp 在途时收到 SIGTERM，在途命令返回后不再发应用状态查询（单测只锁住次序）
 - 进程级兜底：newSession 客户端超时触发 unhandledRejection 后能进入终结，会话不泄漏
 - 脱敏：故意建连失败一次、外部 Stop 一次（制造 UND_ERR_CLOSED），核对 stderr（含 webdriver logger 输出，E8）、事件、evidence、device-session.json 中的签名都已盖住
 - session_lost 的两条路径：外部停止会话；会话年龄后备（可在测试构建里注入较小的年龄上限），以及 150 分钟边界上端点拒绝命令而 API 仍报 RUNNING 的情形
 - 应用分发：预签名 S3 地址配 appium:app 加 autoLaunch:false 与 noReset:true，再 activateApp、采样，以及换台重建；task role 下 HeadObject 缺失键返回 404
+- task role 的端到端使用（第 7 批遗留）：云端设备 run 里 Midscene task role 实际发出的 Device Farm 动作与应用桶读取都被放行、没有 AccessDenied（ADR 0033 的设备权限表）
 - 获取预算（deviceRequest.acquireTimeoutS）在并发排队与换台重建下是否够用，D13 各常量实施期校准
 - --capabilities 在容器镜像里不加载设备依赖、启动耗时不回退；Dockerfile 冒烟能拦住设备依赖缺失（D28）
 - 本机设备 run 的会话名带正确的 run_id（E7）
@@ -210,5 +148,5 @@
 （4）脱敏规则已齐，缺的是出口：log()、bin 的 fatal 行、uploader 与 user-steps 的 logFn、device-session.json、page_source 都要经 `redactSecrets`（D30），WebdriverIO 自身 logger 经掩码（E8）。不要再改规则或另起参数名集合。
 
 另外两点：
-- 「真实 IAM 角色闭环」在 B8 已按表建角色逐项核过，真部署后 task role 的六个 devicefarm 动作与 ListBucket 形态也已核对。本批真跑还剩一项：经 worker 代码路径走一遍 HeadObject 缺失键返回 404 与预签名。
+- 「真实 IAM 角色闭环」在 B8 已按表建角色逐项核过，真部署后 task role 的六个 devicefarm 动作与 ListBucket 形态也已核对。本批真跑还剩两项：云端设备 run 里 task role 的端到端使用（task role 实际发出这些设备动作，即原第 7 批 B8 唯一的剩余项，ADR 0051 实测依据与 ADR 0033 记为待真机验收时核对）；经 worker 代码路径走一遍 HeadObject 缺失键返回 404 与预签名。
 - 建议先写 guard、session-name、probe、step 顺序这四组测试，再动 run-scope；接缝形状（五个操作、四项义务）已在 ADR 0052 决策 2 定下。

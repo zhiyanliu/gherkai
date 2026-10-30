@@ -34,8 +34,8 @@ src/
 ├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
 ├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
 ├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 按目标选一次界面接缝 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`surface.mts`（界面接缝的类型契约：五个操作、四项边界义务与执行异常的归类标记，只有 `import type`，[ADR 0052](../../docs/adr/0052-appium-interface-adapter-and-platform-differences.md) 决策 2）、`surface-desktop.mts`（界面接缝的桌面实现：AgentCore 浏览器会话、Playwright 的 CDP 建连、会话预热与会话事件）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）、`error-text.mts`（失败原因压缩为一行有界文本，与 Nova 的 `_error_text` 规则一致）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
-├── device/            ← 设备模块（Android、iOS 经 Device Farm 与 Appium，按 ADR 0052 决策 3 的职责划分）：`surface.mts`（界面接缝的设备实现：只做编排，各块经端口类型 `DeviceParts` 注入）、`parts.mts`（部件的缺省装配 `defaultDeviceParts`，接缝模块静态 import 它）、`limits.mts`（设备目标的预算常量：超时、次数上限与截断阈值的单一来源，另有重规划上限覆盖键的读取与校验；零 SDK 依赖，能力自述与收尾下限只 import 它）、`session-name.mts`（会话名编码，零 SDK，桌面路径的 StartBrowserSession 请求名同样用它）、`session.mts`（Device Farm 会话：设备解析、Create、等到 RUNNING、查状态、换台；执行期唯一构造 Device Farm 客户端的地方）、`finalize.mts`（终结：两种释放模式与终结四阶段的前三段，与会话块共享同一份会话登记）、`appium.mts`（Appium 建连与上下文切换：建连、执行、探测三个客户端实例）、`web-context.mts`（网页上下文的重新定位）、`probe.mts`（能力探测）、`guard.mts`（命令守卫：执行令牌与结果未知标志）、`interface.mts`（界面实现 `AppiumInterface`、设备 Agent 的构造、驱动适配器的公共面与 `adapterRegistry`）、`adapters/`（驱动适配器 `uiautomator2.mts` 与 `xcuitest.mts`，`mobile:` 命令只出现在这里；`fixtures/` 放两个适配器的命令契约快照与控件树样例）、`warmup.mts`（设备上的会话预热）、`app.mts`（应用启停：安装包存在性检查与预签名、启动采样、`app.restart()`）、`device-session.mts`（会话事件的线上形状与 scope 诊断文件 `device-session.json`）、`wdio-log.mts`（WebdriverIO 自身日志的凭据掩码）；本目录下另有各模块的 `*.test.mts`，以及两条差集护栏 `read-points.test.mts`（读取点与依赖位置）与 `adapters/adapters.contract.test.mts`（命令契约快照）。划分与加载约定见下文「设备模块」节
-└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（隧道凭据脱敏）· `precheck.mts`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `tunnel-warmup.mts`（隧道会话预热：与组合根、Nova 侧同值的常量，导航预热地址并按页面结果归因）
+├── device/            ← 设备模块（Android、iOS 经 Device Farm 与 Appium，按 ADR 0052 决策 3 的职责划分）：`surface.mts`（界面接缝的设备实现：只做编排，各块经端口类型 `DeviceParts` 注入）、`parts.mts`（部件的缺省装配 `defaultDeviceParts`，接缝模块静态 import 它）、`limits.mts`（设备目标的预算常量：超时、次数上限与截断阈值的单一来源，另有重规划上限覆盖键的读取与校验；零 SDK 依赖，能力自述与收尾下限只 import 它）、`session-name.mts`（会话名编码，零 SDK，桌面路径的 StartBrowserSession 请求名同样用它）、`session.mts`（Device Farm 会话：设备解析、Create、等到 RUNNING、查状态、换台、按 Stop 规则停止不再使用的会话（换台时被替换的、获取期按名找回的）；执行期唯一构造 Device Farm 客户端的地方）、`finalize.mts`（终结：两种释放模式与终结四阶段的前三段，与会话块共享同一份会话登记）、`appium.mts`（Appium 建连与上下文切换：建连、执行、探测三个客户端实例）、`web-context.mts`（网页上下文的重新定位）、`probe.mts`（能力探测）、`guard.mts`（命令守卫：执行令牌与结果未知标志）、`interface.mts`（界面实现 `AppiumInterface`、设备 Agent 的构造、驱动适配器的公共面与 `adapterRegistry`）、`adapters/`（驱动适配器 `uiautomator2.mts` 与 `xcuitest.mts`，`mobile:` 命令只出现在这里；`fixtures/` 放两个适配器的命令契约快照与控件树样例）、`warmup.mts`（设备上的会话预热）、`app.mts`（应用启停：安装包存在性检查与预签名、启动采样、`app.restart()`）、`device-session.mts`（会话事件的线上形状与 scope 诊断文件 `device-session.json`）、`wdio-log.mts`（WebdriverIO 自身日志的凭据掩码）；本目录下另有各模块的 `*.test.mts`，以及两条差集护栏 `read-points.test.mts`（读取点与依赖位置）与 `adapters/adapters.contract.test.mts`（命令契约快照）。划分与加载约定见下文「设备模块」节
+└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（凭据脱敏，三条规则：URL 中的 userinfo、签名类查询参数与隧道令牌、设备端点路径令牌；后两条的正则对象另供 `device/wdio-log.mts` 生成 WebdriverIO 日志掩码）· `precheck.mts`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `tunnel-warmup.mts`（隧道会话预热：与组合根、Nova 侧同值的常量，导航预热地址并按页面结果归因）
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
 spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、模型与浏览器联合、规划探针、负向断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
@@ -125,7 +125,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 能力探测 | `probe` | `probe.mts` | ADR 0052 决策 5 |
 | 驱动适配器（UiAutomator2、XCUITest） | `adapters` | `adapters/uiautomator2.mts`、`adapters/xcuitest.mts`，经 `interface.mts` 的 `adapterRegistry` 按会话回报的 automationName 选 | ADR 0052 决策 4 |
 | 命令守卫：执行令牌与结果未知标志 | `guards` | `guard.mts` | ADR 0052 决策 6 |
-| 界面实现与设备 Agent（`AbstractInterface`） | `agents` | `interface.mts` | ADR 0052 决策 7 |
+| 界面实现与设备 Agent（`AbstractInterface`）；Input 动作带 `autoDismissKeyboard` 为 true 时输入后收起键盘一次，失败只记一行日志 | `agents` | `interface.mts`（Agent 工厂的日志出口必填，缺省装配接部件环境的日志出口） | ADR 0052 决策 7 |
 | 会话预热 | `warmup` | `warmup.mts` | ADR 0052 决策 6、ADR 0051 决策 13 |
 | 应用启停：存在性检查、预签名、启动采样、`app.restart()` | `appStore`（安装包存储）加 `device/app.mts` 的原语 | `app.mts` | ADR 0051 决策 9、14 |
 
@@ -134,13 +134,13 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 加载与读取约定（ADR 0052 决策 3、4、8）：
 
 1. run-scope 按 `job.target.device` 选一次接缝实现（`worker/run-scope.mts` 的 `createSurface`）：桌面实现静态加载，设备实现经 `await import("../device/surface.mjs")` 动态加载。run-scope 对 `device/` 的静态导入只有 `limits.mts`（能力自述与收尾下限），桌面实现另可静态导入 `session-name.mts`；这两个文件都不 import 任何 SDK。
-2. WebdriverIO 与 `@aws-sdk/client-device-farm` 的值导入只出现在 `src/device/` 下。`import type` 不受限：它在编译期擦除、运行期不加载，注册面 `worker/deterministic.mts` 的 `import type { Browser } from "webdriverio"` 即属此类。
+2. WebdriverIO（含 webdriver 与 `@wdio/` 下的包）与 `@aws-sdk/client-device-farm` 的值导入只出现在 `src/device/` 下。`import type` 不受限：它在编译期擦除、运行期不加载，注册面 `worker/deterministic.mts` 的 `import type { Browser } from "webdriverio"` 即属此类。
 3. `new DeviceFarmClient` 只出现在 Device Farm 会话块，它是执行期唯一调用 Device Farm SDK 的地方。
 4. `mobile:` 命令字面量只出现在 `src/device/adapters/` 下；命令守卫、能力探测与会话预热只调用适配器导出的原语与只读命令名集合。
-5. 系统版本与机型只从会话能力对象读取，读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的类型声明是三类显式豁免。
+5. 系统版本与机型只从会话能力对象读取，读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的透传是三类显式豁免。豁免按声明逐处列出（`device/read-points.test.mts` 的 `VERSION_MODEL_ALLOWED`），除设备选择的输入外，豁免里读出的值只原样透传：调方法、与非空值比较、按它 switch 或用作 case 标签、交给函数处理都报红。另有一条结构差集：会话能力对象只在 Appium 块（`device/appium.mts`）读取。
 6. run-scope 的主流程不写按设备的条件分支：差异落在接缝实现里，或由实现返回的数据表达。执行异常的 step 级归类由命令守卫与设备实现挂到异常对象上（`worker/surface.mts` 的 `attachClassification`），runStep 先认这个标记，设备路径因此不会归成 `network_error`；桌面路径只有派发出错的防御分支（句柄不适用于桌面浏览器）带标记，其余异常不带标记、沿用瞬时网络判定。
 
-第 1 条与第 2 条的运行期效果由 `worker/no-device-deps.test.mts` 守：它在真实子进程里执行 `--capabilities` 与一条桌面 job，记录被解析的模块，断言 WebdriverIO、Device Farm SDK 与 `limits.mts`、`session-name.mts` 之外的设备模块都没有被加载。第 2 到 5 条由 `device/read-points.test.mts` 用语法树扫 `src/` 的非测试源文件做差集（每条带正向对照，检测失效时不会空过）。两个驱动适配器每个原语发出的命令由 `device/adapters/adapters.contract.test.mts` 对照 `adapters/fixtures/<适配器>.commands.json` 的快照核对，改命令须显式改快照（ADR 0052 决策 8）；同一份快照也是真机重新探测工具的对照基准，见下节。
+第 1 条与第 2 条的运行期效果由 `worker/no-device-deps.test.mts` 守：它在真实子进程里执行 `--capabilities` 与一条桌面 job，记录被解析的模块，断言 WebdriverIO（含 webdriver 与 `@wdio/` 下的包）、Device Farm SDK 与 `limits.mts`、`session-name.mts` 之外的设备模块都没有被加载。第 2 到 5 条由 `device/read-points.test.mts` 用语法树扫 `src/` 的非测试源文件做差集（每条带正向对照，检测失效时不会空过）。两个驱动适配器每个原语发出的命令由 `device/adapters/adapters.contract.test.mts` 对照 `adapters/fixtures/<适配器>.commands.json` 的快照核对，改命令须显式改快照（ADR 0052 决策 8）；同一份快照也是真机重新探测工具的对照基准，见下节。
 
 ## 真机验收矩阵（人工触发，发版后验证项）
 
@@ -152,17 +152,18 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 | 单列行 | 做法 | 判据与回写 |
 |---|---|---|
-| iOS 26 网页目标的整条链路 | 网页上下文探测超时 → 恢复原生上下文 → 经 DeepLink 打开 → 预热标记 READY；同时记录探测实例的网页命令挂住期间，执行实例的原生命令延迟多少 | 整条链路走通；延迟说明 Appium 服务端是否对同一会话串行执行，回写 ADR 0052 决策 5 |
+| iOS 26 网页目标的整条链路 | 网页上下文探测超时 → 恢复原生上下文 → 经 DeepLink 打开 → 预热标记 READY；同时记录探测实例的网页命令挂住期间，执行实例的原生命令延迟多少；用真机重新探测工具记下首次只读命令超时之后，重试时列上下文与切入各自是否成功 | 整条链路走通；延迟说明 Appium 服务端是否对同一会话串行执行，回写 ADR 0052 决策 5；重试的切入失败时探测判成「探测出错」而不是「不提供」，回写 ADR 0052 决策 5 的判据 |
 | 刚建好、尚未导航的 Safari / Chrome 会话是否已有网页上下文候选 | iOS 两代与 Android 各建一次网页目标会话，看探测时的候选数 | 网页上下文本可用的设备被判成「不提供」时，探测改为先经探测实例导航预热地址、再列上下文，回写 ADR 0052 决策 5 |
-| 没有 Swipe 动作时模型能否用 Scroll 完成横向翻页 | 应用目标上写一条横向翻页（引导页、轮播）的 AI step | 不能完成时改为注册 Swipe、原语由驱动适配器的滑动命令实现，回写 ADR 0052 决策 7 |
+| 没有 Swipe 动作时模型能否用 Scroll 完成横向翻页 | 应用目标上写一条横向翻页（引导页、轮播）的 AI step | 这一项只在本行确认，不另做单独的真机 spike；不能完成时改为注册 Swipe、原语由驱动适配器的滑动命令实现，回写 ADR 0052 决策 7 |
 | Android 应用目标的能力集是否还需要 `appium:appActivity` | Android 应用目标建连并启动被测应用 | 回写 ADR 0052 决策 3 |
+| 输入后收起键盘 | 两平台的应用目标与网页目标各写一条要求输入后收起键盘的 AI step；另在键盘未显示时触发一次收起 | 键盘已显示时两平台都能收起，iOS 网页目标在原生上下文发出的命令同样能收起 Safari 的键盘；Android 上 ESC 无效时驱动补发的返回键没有把 Chrome 或被测应用带回上一页；iOS 键盘上没有标识或标签恰为 `done` 的键时能否收起；键盘未显示时记下驱动是否报错与耗时，报错时 worker 日志恰记一行、判定不变；结论回写 ADR 0052 决策 4、7 |
 | 会话预热的三个失败分支 | 设备网页目标经本机应用隧道，分别让边缘节点拒收 cookie、让校验返回 401、让预热请求失败 | 前两种归 `precheck_failed`，请求失败在重试耗尽后归 `engine_error`，都不归 `network_error`（ADR 0051 决策 13） |
 
 **故障演练**：
 
 | 场景 | 做法 | 判据与回写 |
 |---|---|---|
-| 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5 |
+| 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run；另在正常收尾的 `deleteSession` 发出之前与在途时各停止一次 | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5；正常收尾中途停止的两次，尚未发出的 `deleteSession` 不再发出、`device-session.json` 由退出前的队列排空带上 |
 | 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
 | 命令结果未知 | 让一条点击或输入命令在客户端超时 | 命令不被重复执行；下一条 scenario 开始前的截图存活探测按会话状态分流（ADR 0052 决策 6、ADR 0051 决策 12） |
 | 进程级兜底 | 让 newSession 的客户端超时以未处理的 Promise 拒绝形式出现 | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |

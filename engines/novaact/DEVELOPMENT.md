@@ -19,7 +19,7 @@ gherkai_worker_novaact/
 ├── deterministic_steps.py  ← 包内建脚手架：只有内建导航一条（Given / When 后整句是一个地址；判定类示范进 features/steps/ 模板）
 ├── user_steps.py           ← 使用方 `steps/` 目录的加载（fail-loud，退出码 `EX_STEPS_LOAD = 2`）
 ├── evidence.py             ← step 级机读证据：Nova trajectory 裁成自有 schema 的 `evidence.json`（[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）
-└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `redact.py`（隧道凭据脱敏）· `precheck.py`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `tunnel_warmup.py`（隧道会话预热：第一个 scenario 之前对预热地址导航一次，并按页面的可见结果归因，ADR 0051 决策 13）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S` / `SESSION_STOP_BUDGET_S`，以及隧道会话预热的常量，与组合根同值）；`__init__.py` 说明这组为何单独成子包
+└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `redact.py`（凭据脱敏，事件、evidence 与 stderr 出口共用）· `precheck.py`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `tunnel_warmup.py`（隧道会话预热：第一个 scenario 之前对预热地址导航一次，并按页面的可见结果归因，ADR 0051 决策 13）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S` / `SESSION_STOP_BUDGET_S`，以及隧道会话预热的常量，与组合根同值）；`__init__.py` 说明这组为何单独成子包
 ```
 
 `tests/` 是 pytest 用例（`fixtures/` 中是真产物裁出的 trajectory 与一个中断用 worker），`spikes/` 是可独立运行的对标脚本。
@@ -84,7 +84,7 @@ worker 为自己持有的每个 AgentCore 浏览器会话向 core 成对发出 `
 
 - **发出时机**：`StartBrowserSession` 返回后、取连接头与建立 NovaAct 连接之前发 `session_opened`（`origin: created`，`sessionId` 与 `name` 都取 AgentCore 会话 id，不带 `device`）；正常收尾、停止信号、会话预热失败、建连重试丢弃的 attempt 这几条收尾路径都为每个会话发恰一条 `session_closed`。`StopBrowserSession` 在 `NOVA_SESSION_STOP_BUDGET_S` 内成功返回记 `release: confirmed`，否则记 `unconfirmed` 并以退出码 1 退出。桌面会话的 `session_closed` 不带 `observedS` 与 `providerMinutes`，job 也因此没有设备计量两键（决策 7）。
 - **请求名**：每次 `StartBrowserSession` 都带会话名，格式与 Midscene 的 `src/device/session-name.mts` 相同：`gherkai:<run_id>:<scope 哈希>:<尝试序号>:<scope_id 百分号编码>`，长度上限按 AgentCore 的约束取 100，超长只截最后一段。尝试序号从 1 起，建连重试每发一次 Start 加一。规则在本 worker 里另有一份 Python 实现（`run_scope.session_request_name`），改规则时两处同改，单测用同一组期望值。
-- **停止时仍在途的 Start**：停止信号到达时 Start 尚未返回，worker 再等 `run_scope.START_SETTLE_S`（1.5 秒）；仍未返回即发一对 `origin: attempted` 的事件（`sessionId` 为 null，`name` 取请求名）并记为释放失败，以退出码 1 退出。这段等待只在没有 act 在途时出现，已含在 `NOVA_GRACE_MARGIN_S` 的余量之内。
+- **停止时仍在途的 Start**：停止信号到达时 Start 尚未返回，worker 再等 `run_scope.START_SETTLE_S`（1.5 秒）；仍未返回即发一对 `origin: attempted` 的事件（`sessionId` 为 null，`name` 取请求名）并记为释放失败，以退出码 1 退出。这段等待只在没有 act 在途时出现，已含在 `NOVA_GRACE_MARGIN_S` 的余量之内。Start 在等待窗口内返回、或停止信号落在 Start 返回之后与 `scope_started` 之前时，会话已建起：发出 `session_opened` 后直接释放并发 `session_closed`，不取连接头、不建 NovaAct 连接（Start 返回时已停止的情形）、不发 `scope_started`，退出码按释放结果取 0 或 1。
 - **依赖 `RUN_ID`**：请求名的 run 段取 env `RUN_ID`（见上文 env 表）。经 CLI 运行时由组合根注入，手动直接运行 worker 时须自行设置（见上文命令）。
 
 ## 确定性 step：内建脚手架 vs 使用方的 `steps/`

@@ -86,7 +86,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 ## 安全
 
 - 隧道存活期间，被测应用可从公网访问。gherkai 为每次运行生成专用的访问令牌与会话 cookie 值，由 ngrok 在边缘节点校验：只有带着本次会话 cookie 的请求才会被转发到你的机器，不带或不对的请求在边缘就被拒（隧道拓扑图上被拦在边缘的那条支路）；引擎的浏览器凭访问令牌在预热地址上换到这枚 cookie。令牌与 cookie 随隧道拆除即失效。
-- step 文本里只有干净的隧道地址，不带凭据，所以发给模型的提示里不会出现令牌。令牌只出现在预热地址里，它记在提交记录 `run_meta.json` 的 `session_warmup_url`（运行要读回它，明文）；引擎的浏览器访问过预热地址，所以引擎原生产物里可能记下它。gherkai 自己产出的文字里令牌与 S3 预签名地址的签名类参数显示为 `***`：失败消息、`explain` 输出、`run --json`、AI 证据的 JSON、本机转发的 worker 日志都是如此。仍是明文的：`run_meta.json`、引擎自己的原生产物（Nova Act 的轨迹文件、Midscene 的报告页）、云端 worker 直接写到 CloudWatch 的日志；报告与日志仍应按内部资料对待。
+- step 文本里只有干净的隧道地址，不带凭据，所以发给模型的提示里不会出现令牌。令牌只出现在预热地址里，它记在提交记录 `run_meta.json` 的 `session_warmup_url`（运行要读回它，明文）；引擎的浏览器访问过预热地址，所以引擎原生产物里可能记下它。gherkai 自己产出的文字里令牌与 S3 预签名地址的签名类参数显示为 `***`：失败消息、`explain` 输出、`run --json`、AI 证据的 JSON、本机转发的 worker 日志与云端 worker 自己写进 CloudWatch 的诊断行都是如此。仍是明文的：`run_meta.json`、引擎自己的原生产物（Nova Act 的轨迹文件、Midscene 的报告页）、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容；报告与日志仍应按内部资料对待。
 - 已知边界：会话 cookie 会随每个请求到达被测应用，出现在它的访问日志里（在边缘剥掉它是服务商的付费功能）；被测应用若用 `Clear-Site-Data` 清掉 cookie，之后的请求会被边缘拒绝；确定性 step 里自己发起的 HTTP 请求要经浏览器上下文发出才带这枚 cookie。
 - 只把测试环境的实例接上隧道，不要暴露带生产数据或生产凭证的服务。
 - 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；用 `kill` 结束 CLI 进程不会拆（SIGTERM 与 `kill -9` 都不会），此时在进程列表里找到 `ngrok` 结束它即可。

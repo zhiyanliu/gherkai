@@ -97,7 +97,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者收到停止信号时会话的建立请求还没有返回（说明里记为「结果未知的创建尝试」）。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
 | `precheck_failed` | 没有开始测、重新运行也不会变，scope 里一条 step 都没执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
 | `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s` |
-| `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话 |
+| `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话。会话也可能在准备设备时就已结束（获取设备、启动应用或会话预热期间），这时本 scope 的 step 都没有执行；核对是否有人在控制台停止了会话，然后重新运行 |
 | `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或空格、中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
 
 本机运行时的 worker 日志：前台 `run` 直接打在终端里，每行带 `[worker <scope_id>:out]` 或 `[worker <scope_id>:err]` 前缀，前缀的颜色只用来区分来源 scope（按 job 启动顺序分配，不用红绿），不表示严重程度；加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端运行时的日志位置见下面「云端后端」。

@@ -57,7 +57,7 @@ AWS_REGION=<桶的区域> node_modules/.bin/tsx ../../tools/device_reprobe.mts \
 | `--device-arn` / `--os-version` | 二选一 | 指定设备，或按系统版本族挑选（与 `gherkai.toml` 的 `[devices.<平台>]` 同一规则） |
 | `--app-bucket` / `--app-key` / `--app-id` | 应用目标必填 | 安装包在 S3 的位置与包名或 bundle id |
 | `--url` | 不打开 | 原语执行前经接缝的导航打开的地址：网页目标按探测结论在网页上下文打开、或交给系统浏览器，应用目标经 DeepLink 交给被测应用 |
-| `--focus <x>,<y>` | 不执行输入类原语 | 截图像素坐标；每条输入类用例（输入、按键、清空）之前点一次这里，让输入框获得焦点 |
+| `--focus <x>,<y>` | 不执行输入类原语 | 截图像素坐标；每条输入类用例（输入、按键、清空、收起键盘）之前点一次这里，让输入框获得焦点 |
 | `--deep-link` | 不执行 DeepLink 用例 | 替换快照里 DeepLink 用例的地址；应用标识换成本次目标的值，只执行与本次界面类型相符的那条用例 |
 | `--billing-method` | `METERED` | `METERED` / `UNMETERED` |
 | `--acquire-timeout-s` | `600` | 获取设备的等待上限（与 `gherkai.toml` 的 `acquire-timeout-s` 缺省值相同） |
