@@ -8,16 +8,18 @@
 //     本模块，没有循环依赖。
 //   - adapterRegistry：按会话回报的 automationName 选一次适配器（决策 3）；适配器清单由装配方传入，每次选择得到一个新实例，
 //     适配器里按会话缓存的结论（如设备不支持打开地址）因此只属于一个会话。
-//   - AppiumInterface 与 deviceAgentFactory：继承 Midscene 的 AbstractInterface（决策 7）。截图在原生上下文（决策 6：step 前核对与
+//   - AppiumInterface 与设备 Agent 工厂：继承 Midscene 的 AbstractInterface（决策 7）。截图在原生上下文（决策 6：step 前核对与
 //     复原核对保证 AI 步开始与结束时会话都在原生上下文，所以截图前不再读当前上下文），尺寸取截图的像素尺寸；动作集只经
 //     defineActionsFromInputPrimitives 定义，includeSwipe 关、系统动作显式给出（Android 返回与主屏、iOS 只有主屏）；原语全部经
-//     适配器下发，命令经构造时传入的 driver（命令守卫代理）发出。设备 Agent 在这里构造。
+//     适配器下发，命令经构造时传入的 driver（命令守卫代理）发出。收不收键盘沿用 Midscene 的决定（决策 7）：Input 动作带来的
+//     autoDismissKeyboard 为 true 时，输入完成后经适配器收起键盘一次；收键盘是尽力动作，失败只记一行日志、不传出异常，判定不变。
+//     设备 Agent 在这里构造。
 //
 // 不做：按系统版本或机型分支（决策 1）——本模块与适配器都不读系统版本与机型，坐标比例与 iOS 的输入上下文是能力探测的结论，
 // 由构造方传入（决策 5）；不在运行期试错换路线，每个原语只有一条路线（决策 4，被拒方案「运行期试错、失败再回落」）。
 // 命令失败时的会话状态核对不在这里：经守卫代理发出的命令失败时，守卫已先查会话状态并在异常上挂好归类（ADR 0051 决策 4
-// 「会话丢失的判定靠查状态」）。会话丢失与结果未知的标记原样传出；守卫确认会话仍在运行、结果已知的 engine_error 可按驱动
-// 文本再归类（判定见 driverTextMatchAllowed）。
+// 「会话丢失的判定靠查状态」）。会话丢失与结果未知的标记原样传出；只有标记带着「守卫查到会话仍为 RUNNING」这项事实、结果已知的
+// engine_error 才可按驱动文本再归类（判定见 driverTextMatchAllowed）。
 import { Agent } from "@midscene/core/agent";
 import {
   AbstractInterface, defineActionsFromInputPrimitives,
@@ -26,6 +28,7 @@ import {
 } from "@midscene/core/device";
 import type { AgentOpt } from "@midscene/core";
 import type { Browser } from "webdriverio";
+import { errorText } from "../worker/error-text.mjs";
 import { attachClassification, readClassification, type ControlItem, type Controls } from "../worker/surface.mjs";
 import type { Device } from "../worker/deterministic.mjs";
 import { RESULT_UNKNOWN_MESSAGE } from "./guard.mjs";
@@ -89,6 +92,8 @@ export interface DeviceAdapter extends DriverAdapter {
   keyboardPress(ctx: PrimitiveContext, keyName: string): Promise<void>;
   /** 清空当前获得焦点的输入框。 */
   clearInput(ctx: PrimitiveContext): Promise<void>;
+  /** 收起软键盘。命令失败原样抛出，失败的处置（收键盘是尽力动作）由界面实现决定。 */
+  hideKeyboard(ctx: PrimitiveContext): Promise<void>;
 }
 
 // ---- 适配器共用的小工具 ----
@@ -113,12 +118,15 @@ export function engineFailure(message: string): Error {
   return attachClassification(new Error(message), { errorType: "engine_error", message });
 }
 
-/** 能否按实测过的驱动错误文本再归类：异常没有标记，或命令守卫已核对会话仍在运行、命令结果已知（engine_error 且不是结果未知）。
- *  会话丢失与结果未知的标记原样传出（ADR 0051 决策 4：仍为 RUNNING 时才允许匹配两条实测过的驱动错误文本）。守卫查询会话状态
- *  本身失败时不据此判会话丢失、同样挂结果已知的 engine_error（ADR 0052 决策 6），这里与守卫一致。 */
+/** 能否按实测过的驱动错误文本再归类（并缓存由此得出的能力否定）：只有命令守卫在命令失败后查到会话仍为 RUNNING（标记带
+ *  sessionRunningConfirmed）、命令结果已知（engine_error 且不是结果未知）时可以（ADR 0051 决策 4「仍为 RUNNING 时才允许匹配两条
+ *  实测过的驱动错误文本」）。会话丢失与结果未知的标记原样传出。会话状态没有确认的一律不再归类：守卫查询会话状态本身失败时只挂
+ *  结果已知的 engine_error、不带这项事实（ADR 0052 决策 6）；窗口已关闭的晚到失败守卫不查状态；没经过守卫的异常（生命周期通道
+ *  上的命令）没有查过会话状态。 */
 export function driverTextMatchAllowed(e: unknown): boolean {
   const mark = readClassification(e);
-  return mark === null || (mark.errorType === "engine_error" && mark.message !== RESULT_UNKNOWN_MESSAGE);
+  return mark !== null && mark.errorType === "engine_error" && mark.sessionRunningConfirmed === true
+    && mark.message !== RESULT_UNKNOWN_MESSAGE;
 }
 
 // cause 链的查找上限，与 worker/surface.mts 读归类标记时的上限相同，同时防环。
@@ -270,6 +278,13 @@ export interface AppiumInterfaceConfig {
   inputContext: InputContext | null;
   /** AppiumSession.withWebContext（只用到它）。 */
   session: Pick<AppiumSession, "withWebContext">;
+  /** 诊断日志的出口（尽力动作的失败写在这里）。 */
+  log: (line: string) => void;
+}
+
+/** 输入完成后没能收起键盘时的日志行。 */
+function keyboardNotHiddenLogLine(e: unknown): string {
+  return `worker: 输入完成后未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
 }
 
 /** Midscene 的界面实现：截图、尺寸与动作集（ADR 0052 决策 7）。 */
@@ -288,6 +303,7 @@ export class AppiumInterface extends AbstractInterface {
 
   private readonly adapter: DeviceAdapter;
   private readonly ctx: PrimitiveContext;
+  private readonly log: (line: string) => void;
   /** 最近一张截图的像素尺寸。Midscene 每轮规划先取尺寸再截图，尺寸取上一轮的截图即可，不为它另截一张。 */
   private lastSize: { width: number; height: number } | null = null;
   private actions: DeviceAction[] | null = null;
@@ -295,6 +311,7 @@ export class AppiumInterface extends AbstractInterface {
   constructor(cfg: AppiumInterfaceConfig) {
     super();
     this.adapter = cfg.adapter;
+    this.log = cfg.log;
     const { driver, scale, inputContext, session } = cfg;
     this.ctx = { driver, scale, inputContext, withWebContext: (fn) => session.withWebContext(driver, fn) };
   }
@@ -357,14 +374,25 @@ export class AppiumInterface extends AbstractInterface {
   }
 
   /** Input 动作：有目标元素时先点它取得焦点（设备上没有焦点的输入框收不到输入），替换语义下再清空，然后输入；只要求取得焦点时
-   *  不输入。清空与否的语义与 Midscene 的网页实现一致：只在有目标元素时清空。Midscene 传来的 autoDismissKeyboard 目前不处理：
-   *  驱动适配器没有收起键盘的原语。 */
+   *  不输入。清空与否的语义与 Midscene 的网页实现一致：只在有目标元素时清空。Midscene 传来的 autoDismissKeyboard 恰为 true 时，
+   *  输入完成后收起键盘一次；为 false 或没有给时不收。 */
   private async typeText(value: string, opts: TypeTextOptions): Promise<void> {
     const target = locatePoint(opts?.target);
     if (target !== null) await this.adapter.tap(this.ctx, target);
     if (opts?.focusOnly) return;
     if (target !== null && opts?.replace !== false) await this.adapter.clearInput(this.ctx);
     if (value !== "") await this.adapter.typeText(this.ctx, value);
+    if (opts?.autoDismissKeyboard === true) await this.hideKeyboard();
+  }
+
+  /** 收起键盘是尽力动作：失败只记一行日志、不传出异常，也不重试。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
+   *  执行窗口的判定上（并中止当前 act），这里不传出异常不会掩盖它；其余失败（如驱动报无法收起；按驱动源码，键盘未显示时两平台都直接返回成功，由真机验收核对）不进判定。 */
+  private async hideKeyboard(): Promise<void> {
+    try {
+      await this.adapter.hideKeyboard(this.ctx);
+    } catch (e) {
+      this.log(keyboardNotHiddenLogLine(e));
+    }
   }
 
   /** Scroll 动作：单次滚动按方向与距离；滚到边缘时连发若干次最大幅度（距离取整屏）的滚动。 */
@@ -385,10 +413,11 @@ export class AppiumInterface extends AbstractInterface {
   }
 }
 
-/** 构造界面实现前的核对（都是装配错误，正常执行不会触发）：平台与驱动一致、比例为正数、iOS 带输入上下文。 */
+/** 构造界面实现前的核对（都是装配错误，正常执行不会触发）：平台与驱动一致、比例为正数、iOS 带输入上下文。没有给日志出口时
+ *  不记日志。 */
 export function createAppiumInterface(args: {
   driver: Browser; adapter: DeviceAdapter; session: Pick<AppiumSession, "withWebContext">; device: Device; scale: number;
-  inputContext: InputContext | null;
+  inputContext: InputContext | null; log?: (line: string) => void;
 }): AppiumInterface {
   const { adapter, device, scale, inputContext } = args;
   if (adapter.device !== device) {
@@ -398,7 +427,7 @@ export function createAppiumInterface(args: {
   if (device === "ios" && inputContext !== "web" && inputContext !== "native") {
     throw new Error("iOS 设备的界面实现需要能力探测给出的输入上下文");
   }
-  return new AppiumInterface({ driver: args.driver, adapter, scale, inputContext, session: args.session });
+  return new AppiumInterface({ driver: args.driver, adapter, scale, inputContext, session: args.session, log: args.log ?? (() => {}) });
 }
 
 /** 设备 Agent 的构造参数：设备侧接缝 AgentFactory 端口的参数，适配器取完整面，另加能力探测给出的 iOS 输入上下文。 */
@@ -417,13 +446,17 @@ export interface DeviceAgentArgs {
 }
 
 /** 设备 Agent 的构造处（设备侧接缝的 AgentFactory 端口）：new Agent(界面实现, 构造项)。重规划上限只在接缝读一次、经构造项传入，
- *  这里不再读 env；设备上它必须有限（ADR 0052 决策 6 的 ⑨），缺失或非正整数是装配错误。 */
-export const deviceAgentFactory = {
-  create(args: DeviceAgentArgs): Agent {
-    const limit = args.opts.replanningCycleLimit;
-    if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0) {
-      throw new Error(`设备 Agent 的构造项缺少有限的重规划上限（replanningCycleLimit 为 ${String(limit)}）`);
-    }
-    return new Agent(createAppiumInterface(args), args.opts);
-  },
-};
+ *  这里不再读 env；设备上它必须有限（ADR 0052 决策 6 的 ⑨），缺失或非正整数是装配错误。log 是交给界面实现的诊断日志出口，必须
+ *  由装配方给出：收起键盘这类尽力动作的失败只写在这里，漏接时它们既不传出异常、也不留下记录。 */
+export function createDeviceAgentFactory(options: { log: (line: string) => void }): { create(args: DeviceAgentArgs): Agent } {
+  const { log } = options;
+  return {
+    create(args: DeviceAgentArgs): Agent {
+      const limit = args.opts.replanningCycleLimit;
+      if (typeof limit !== "number" || !Number.isSafeInteger(limit) || limit <= 0) {
+        throw new Error(`设备 Agent 的构造项缺少有限的重规划上限（replanningCycleLimit 为 ${String(limit)}）`);
+      }
+      return new Agent(createAppiumInterface({ ...args, log }), args.opts);
+    },
+  };
+}

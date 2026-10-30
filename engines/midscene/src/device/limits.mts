@@ -28,7 +28,7 @@ export const MAX_SESSION_S = SESSION_CAP_S - FARGATE_STOP_TIMEOUT_CAP_S;
 
 /** Create、Get、List 的单次请求超时。 */
 export const DEVICE_FARM_CALL_TIMEOUT_MS = 10_000;
-/** StopRemoteAccessSession 的单次请求超时（换台时先停被替换的会话、终结的释放阶段都用它；在释放阶段内是子预算，不是收尾下限的加数）。 */
+/** StopRemoteAccessSession 的单次请求超时（换台时停被替换的会话、获取期停按名找回的会话、终结的释放阶段都用它；在释放阶段内是子预算，不是收尾下限的加数）。 */
 export const STOP_CALL_TIMEOUT_MS = 3_000;
 /** 终结期（释放阶段内）GetRemoteAccessSession 的单次请求超时（同为释放阶段内的子预算）。 */
 export const FINALIZE_GET_TIMEOUT_MS = 5_000;
@@ -115,7 +115,8 @@ export const CONTROLS_MAX_ITEMS = 200;
 export const PAGE_SOURCE_MAX_BYTES = 1024 * 1024;
 
 // ---- 收尾（ADR 0051 决策 5；超时分层表 ⑩）----
-// 终结四阶段的截止线相对进入终结的时刻计。各段上限以网络退化实测校准后定数（ADR 0049 决策 5）。
+// 终结的前三个阶段依次接续，各段截止线在本段开始时取定；中断路径上三段之和不超过进入终结后的 10 + 5 + 25 秒，事件写出不占
+// 这三段。各段上限以网络退化实测校准后定数（ADR 0049 决策 5）。
 
 /** 正常收尾、Appium 会话建成后的执行前失败与 scope 级终止（会话丢失、scenario 前核对终止）里 deleteSession 的预算：不重试，不阻塞 Stop；远程访问会话已是 STOPPING 或 COMPLETED 时不调。SIGTERM 与进程级异常路径不调。 */
 export const DELETE_SESSION_TIMEOUT_MS = 5_000;

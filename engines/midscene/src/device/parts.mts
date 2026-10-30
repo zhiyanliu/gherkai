@@ -16,7 +16,7 @@ import { s3AppObjectStore } from "./app.mjs";
 import { createAppiumConnector } from "./appium.mjs";
 import { createDeviceFinalizer } from "./finalize.mjs";
 import { commandGuardFactory } from "./guard.mjs";
-import { adapterRegistry, deviceAgentFactory, type DeviceAdapter } from "./interface.mjs";
+import { adapterRegistry, createDeviceAgentFactory, type DeviceAdapter } from "./interface.mjs";
 import { DEEP_LINK_FOREGROUND_POLL_ATTEMPTS, DEEP_LINK_FOREGROUND_POLL_INTERVAL_MS } from "./limits.mjs";
 import { createCapabilityProbe } from "./probe.mjs";
 import { createDeviceFarmSessions } from "./session.mjs";
@@ -40,7 +40,7 @@ export function defaultDeviceParts(env: DevicePartsEnv): DeviceParts<DeviceAdapt
       }),
     ]),
     guards: commandGuardFactory,
-    agents: deviceAgentFactory,
+    agents: createDeviceAgentFactory({ log: env.log }),
     warmup: createDeviceWarmup({ log: env.log, now: env.now }),
     appStore: s3AppObjectStore(),
   };

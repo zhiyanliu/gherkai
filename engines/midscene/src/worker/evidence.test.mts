@@ -936,6 +936,27 @@ test("stepEvidenceRef（设备）：AI step 各状态都产并带 step_kind", as
   }
 });
 
+test("stepEvidenceRef（设备）：AI step 在 step 前核对失败、没调 AI 时同样产（acts 为空数组），已写盘的原始控件树被引用并回传", async () => {
+  const runDir = tmpRun();
+  const { uploader, uploaded, refs } = spyUploader();
+  const pageSource = path.join(runDir, "device", "page-source-1.xml");
+  const produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader, logFn: () => {} }, {
+    scenarioId: "s:1", step: { index: 4, keyword: "When", text: "点一下" }, status: "error", message: "未能切回原生界面",
+    agent: fixtureAgent, execFrom: FIXTURE.executions.length,
+    snapshot: failedDeviceSnap({ page_source_path: pageSource }), prompt: null, votes: [], error: null,
+  });
+  assert.notEqual(produced, null, "设备上 AI step 一律产（ADR 0052 决策 2 第 4 步）");
+  assert.equal(uploaded.length, 1);
+  assert.deepEqual(produced?.screenshots, [pageSource], "没有截图，只有原始控件树随 evidence 回传入队");
+  assert.deepEqual(refs, [pageSource]);
+  const doc = JSON.parse(fs.readFileSync(evidenceFile(runDir, "s:1", 4), "utf-8")) as EvidenceDoc;
+  assert.equal(doc.step_kind, "ai");
+  assert.equal(doc.status, "error");
+  assert.equal(doc.message, "未能切回原生界面");
+  assert.deepEqual(doc.acts, [], "本 step 没调 AI、也没有抛出的异常，不补只带 error 的 act");
+  assert.equal(doc.page_source, fileRef(pageSource));
+});
+
 test("stepEvidenceRef（设备）：原始控件树的文件随截图一起回传给调用方入队，本模块自己不入队", async () => {
   const runDir = tmpRun();
   const { uploader, refs, queued } = spyUploader();

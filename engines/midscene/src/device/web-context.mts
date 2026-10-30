@@ -4,7 +4,8 @@
 //
 // 类别筛选只认属于被测对象的网页上下文：Android Chrome 的 CHROMIUM，iOS Safari 的 WEBVIEW_<数字>。原生应用会话里出现的
 // WEBVIEW_chrome 与 Android 应用自身的 WEBVIEW_<包名> 都不算（应用内 WebView，拿不到被测内容的 DOM，ADR 0052 被拒方案）。
-// iOS 的上下文名在数字之后可能还带一段「.页号」：XCUITest 驱动的不同版本给出的形态不同，两种都只指 Safari 里的页面，一并接受。
+// iOS 的上下文名在数字之后可能还带一段「.页号」：XCUITest 驱动可能给出两种形态（真机上实际出现哪种由真机验收记下），两种都只指
+// Safari 里的页面，一并接受。
 //
 // 1.5 的过渡规则：只有一个候选才采用；多个候选拒绝歧义，不猜；零候选等 WEB_CONTEXT_RELIST_DELAY_MS 后再列一次，仍为零即零候选。
 // 定位失败对调用方的含义各不相同（withWebContext 与设备上的导航记 step 级 engine_error；为 evidence 读地址只把 url 置空；能力探测按

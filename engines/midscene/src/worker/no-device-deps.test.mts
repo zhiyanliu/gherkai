@@ -29,8 +29,10 @@ const BIN = path.join(PKG_DIR, "src", "bin.mts");
 const LIMITS = path.join(PKG_DIR, "src", "device", "limits.mts");
 const SESSION_NAME = path.join(PKG_DIR, "src", "device", "session-name.mts");
 const DEVICE_DIRS = [path.join(PKG_DIR, "src", "device"), path.join(PKG_DIR, "dist", "device")];
-// 设备专属的两个包：webdriverio（Appium 客户端）与 Device Farm SDK。各自的子路径与 node_modules 下的实体文件都算加载。
-const DEVICE_PACKAGES = ["webdriverio", "@aws-sdk/client-device-farm"];
+// 设备专属的包：WebdriverIO（含它的 webdriver 与 @wdio/ 下的包，与 src/device/read-points.test.mts 的 isDeviceSdk 同一口径）与
+// Device Farm SDK。各自的子路径与 node_modules 下的实体文件都算加载。@wdio/ 按前缀认，WebdriverIO 以后新增的子包也在其中。
+const DEVICE_PACKAGES = ["webdriverio", "webdriver", "@aws-sdk/client-device-farm"];
+const DEVICE_SCOPES = ["@wdio/"];
 // 零 SDK、桌面路径也用的设备模块：限值常量与会话名编码（ADR 0051 决策 4 要求桌面请求带同格式会话名）
 const SHARED_DEVICE_MODULES = /^(limits|session-name)\.m[tj]s$/;
 
@@ -107,13 +109,16 @@ function filePath(url: string): string | null {
   return url.startsWith("file:") ? fileURLToPath(url) : null;
 }
 
-/** 记录里属于设备专属依赖的条目：两个设备包，以及 src/device 与 dist/device 下 limits 与 session-name 之外的模块。 */
+/** 记录里属于设备专属依赖的条目：设备包与 @wdio/ 下的包，以及 src/device 与 dist/device 下 limits 与 session-name 之外的模块。 */
 function deviceLoads(records: Resolved[]): string[] {
   const hits = new Set<string>();
   for (const r of records) {
     for (const pkg of DEVICE_PACKAGES) {
       const bySpecifier = r.specifier === pkg || (r.specifier?.startsWith(`${pkg}/`) ?? false);
       if (bySpecifier || r.url.includes(`/node_modules/${pkg}/`)) hits.add(`${pkg}: ${r.url}`);
+    }
+    for (const scope of DEVICE_SCOPES) {
+      if ((r.specifier?.startsWith(scope) ?? false) || r.url.includes(`/node_modules/${scope}`)) hits.add(`${scope}: ${r.url}`);
     }
     const file = filePath(r.url);
     if (file === null) continue;
@@ -128,6 +133,30 @@ function loaded(records: Resolved[], predicate: (url: string) => boolean): boole
   return records.some((r) => predicate(r.url));
 }
 
+test("deviceLoads 的正向对照：认得设备包、@wdio/ 下的包与设备模块，不把名字相近的包与共用的两个设备模块算进去", () => {
+  const nm = (rel: string) => pathToFileURL(path.join(PKG_DIR, "node_modules", rel)).href;
+  const records: Resolved[] = [
+    { parent: null, specifier: "webdriverio", url: nm("webdriverio/build/node.js") },
+    { parent: null, specifier: null, url: nm("webdriver/build/node.js") },
+    { parent: null, specifier: "@wdio/logger", url: nm("@wdio/logger/build/node.js") },
+    { parent: null, specifier: null, url: nm("@wdio/repl/build/index.js") },
+    { parent: null, specifier: "@aws-sdk/client-device-farm", url: nm("@aws-sdk/client-device-farm/dist-cjs/index.js") },
+    { parent: null, specifier: null, url: pathToFileURL(path.join(PKG_DIR, "src", "device", "guard.mts")).href },
+    // 不算：名字相近的包、别的 AWS SDK 客户端、零 SDK 的共用设备模块
+    { parent: null, specifier: "webdriver-like", url: nm("webdriver-like/index.js") },
+    { parent: null, specifier: "@aws-sdk/client-s3", url: nm("@aws-sdk/client-s3/dist-cjs/index.js") },
+    { parent: null, specifier: null, url: pathToFileURL(LIMITS).href },
+    { parent: null, specifier: null, url: pathToFileURL(SESSION_NAME).href },
+  ];
+  const hits = deviceLoads(records);
+  for (const expected of ["webdriverio/", "/webdriver/", "@wdio/logger", "@wdio/repl", "client-device-farm", "device/guard.mts"]) {
+    assert.ok(hits.some((h) => h.includes(expected)), `应认出 ${expected}：${hits.join("\n")}`);
+  }
+  for (const unexpected of ["webdriver-like", "client-s3", "limits.mts", "session-name.mts"]) {
+    assert.ok(!hits.some((h) => h.includes(unexpected)), `不应算进 ${unexpected}：${hits.join("\n")}`);
+  }
+});
+
 const isRunScope = (url: string) => filePath(url) === path.join(PKG_DIR, "src", "worker", "run-scope.mts");
 const isMidsceneWeb = (url: string) => url.includes("/node_modules/@midscene/web/");
 
@@ -139,7 +168,7 @@ async function closedPort(): Promise<number> {
   return port;
 }
 
-test("--capabilities 不加载 webdriverio、Device Farm SDK，以及 limits 与 session-name 之外的设备模块（ADR 0052 决策 3）", async () => {
+test("--capabilities 不加载 WebdriverIO（含 webdriver 与 @wdio/ 下的包）、Device Farm SDK，以及 limits 与 session-name 之外的设备模块（ADR 0052 决策 3）", async () => {
   const { code, out, err, records } = await runRecorded([BIN, "--capabilities"]);
   assert.equal(code, 0, err.slice(-800));
   const caps = JSON.parse(out);
@@ -211,7 +240,7 @@ test("限值常量推出的值：max_session_s 为 9000 减 120 即 8880；设�
   const device = deviceGraceSeconds({ uploadMs: UPLOAD_TIMEOUT_MS, queueDrainExitMs: QUEUE_DRAIN_EXIT_MS, marginMs: MIN_GRACE_MARGIN_MS });
   assert.equal(device, 63.5);
   // 桌面路径之和是 31；能力自述取两条路径的较大者、不相加（ADR 0051 决策 5）
-  assert.equal(Math.max(minGraceSeconds(), device), 63.5);
+  assert.equal(minGraceSeconds(), 63.5, "能力自述的下限取两条收尾路径之和的较大者，当前为设备路径的 63.5 秒");
   assert.ok(device < FARGATE_STOP_TIMEOUT_CAP_S, "设备收尾之和必须低于 Fargate 停止宽限的硬上限");
   for (const t of WORKER_TARGETS) if (t.device !== "desktop") assert.equal(t.max_session_s, MAX_SESSION_S);
 });

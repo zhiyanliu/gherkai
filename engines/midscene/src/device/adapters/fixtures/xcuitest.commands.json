@@ -149,6 +149,22 @@
       ]
     },
     {
+      "name": "收起键盘：WebdriverIO 的 hideKeyboard，不带参数，在原生上下文发出",
+      "call": "hideKeyboard",
+      "context": {"scale": 3, "inputContext": "native"},
+      "commands": [
+        {"method": "hideKeyboard", "args": []}
+      ]
+    },
+    {
+      "name": "收起键盘：输入上下文为网页时同样在原生上下文发出，不切入网页上下文",
+      "call": "hideKeyboard",
+      "context": {"scale": 3, "inputContext": "web"},
+      "commands": [
+        {"method": "hideKeyboard", "args": []}
+      ]
+    },
+    {
       "name": "主屏键：mobile: pressButton 只用于这里",
       "call": "home",
       "context": {"scale": 3},

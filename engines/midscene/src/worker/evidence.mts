@@ -25,9 +25,10 @@
 // 设备目标的例外（ADR 0051 决策 8；ADR 0042 决策一）：界面接缝在 step 末把界面快照（地址、控件摘要、原始控件树
 // 的本地文件及各自的缺失原因，类型见 worker/surface.mts 的 Snapshot）采好交进来，本模块仍是纯映射、不发 WebDriver
 // 命令（ADR 0052 决策 7）。快照带 step_kind 即设备目标：文档加 step_kind、顶层 url / url_missing，以及快照里出现了的
-// controls / controls_missing、page_source / page_source_truncated；确定性与导航 step 在 failed / error 时也产一份
-// （acts 为空数组），passed 的不产。原始控件树的 URI 与截图走同一条路：refFor 算出写进 json，文件随截图一起回传、
-// 由调用方在 step_done 之后入队。桌面快照只有地址两键，桌面 evidence 与引入快照之前逐字节一致。
+// controls / controls_missing、page_source / page_source_truncated；AI step 各状态都产（step 前核对失败、没调 AI 的
+// 同样产，acts 为空数组），确定性与导航 step 在 failed / error 时也产一份（acts 为空数组），passed 的不产。
+// 原始控件树的 URI 与截图走同一条路：refFor 算出写进 json，文件随截图一起回传、由调用方在 step_done 之后入队。
+// 桌面快照只有地址两键，桌面 evidence 与引入快照之前逐字节一致。
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -461,7 +462,7 @@ export type StepEvidenceInput = StepEvidenceFacts & { snapshot: Snapshot };
  *  跳过的情形：① 无 hook（`--no-report` 方式 / 没给产物落点）；② 桌面上本 step 没调过 AI（确定性 step，含内建
  *  导航——既无新 execution 也无指令），这类 step 在桌面上不产 evidence；③ 设备上 passed 的确定性与导航 step。
  *  设备例外（ADR 0051 决策 8）：快照的 step_kind 为 deterministic / navigation 且判定为 failed / error 时照产，acts 为空数组；
- *  AI step（设备上 step_kind 为 ai）各状态都产。
+ *  AI step（设备上 step_kind 为 ai）各状态都产，含 step 前核对失败、本 step 没调 AI 的情形（acts 为空数组）。
  *  失败 → 一行日志 + 返 null（本 step 不带 evidence ref、也不入队），判定与其余事件字段照发。 */
 export async function stepEvidenceRef(
   hook: EvidenceHook | undefined, input: StepEvidenceInput,
@@ -473,7 +474,8 @@ export async function stepEvidenceRef(
     const executions = (Array.isArray(all) ? all : []).slice(input.execFrom);
     if (isNonAiStep(snapshot)) {
       if (input.status !== "failed" && input.status !== "error") return null;
-    } else if (executions.length === 0 && input.prompt === null) {
+    } else if (snapshot.step_kind === undefined && executions.length === 0 && input.prompt === null) {
+      // 只在桌面：本 step 没调过 AI 即不产。设备上 AI step 一律产，含 step 前核对失败、没调 AI 的（ADR 0052 决策 2 第 4 步）
       return null;
     }
     // 被引用的本地文件：**在算 URI 的同一处记**（refFor 只对真写进 json 的那几张截图调，截图预算/去重

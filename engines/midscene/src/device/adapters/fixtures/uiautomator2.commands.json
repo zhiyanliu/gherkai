@@ -184,6 +184,13 @@
       ]
     },
     {
+      "name": "收起键盘：WebdriverIO 的 hideKeyboard，不带参数",
+      "call": "hideKeyboard",
+      "commands": [
+        {"method": "hideKeyboard", "args": []}
+      ]
+    },
+    {
       "name": "主屏键",
       "call": "home",
       "commands": [

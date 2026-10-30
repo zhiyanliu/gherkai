@@ -15,13 +15,16 @@
 //
 // 网页上下文的判据是在短预算内成功执行一条只读命令，列得出、切得进都不算。列上下文、切入与只读命令（读当前地址）都由探测实例发出：
 // 它自带 PROBE_TIMEOUT_MS 的客户端超时，一条挂住的网页命令到点由客户端中止，不靠放弃式等待（被拒方案「探测用 Promise.race」）。
-// 有界重试一次（重新定位后再切入、再读），以区分瞬时故障与确认不提供；零候选的重试就是定位规则里的「等一会儿再列一次」。按证据性质
-// 归类：
+// 有界重试一次（重新定位后再切入、再读），以区分瞬时故障与确认不提供；零候选的重试就是定位规则里的「等一会儿再列一次」。每次尝试
+// 记下失败在哪一环（列上下文、切入、只读命令），按证据性质归类：
 //   - 重试后候选仍为零：不提供；
-//   - 有候选、只读命令（含切入）重试后仍超时或被服务端报错，而原生上下文的只读命令正常（iOS 26.3 的两种形态）：不提供；
-//   - 列上下文的调用本身失败、最后一次失败是传输层错误（连接层错误码、HTTP 502 / 503 / 504）：探测出错；
+//   - 两次尝试都切入成功、只读命令都失败，最后一次是超时或服务端报错（不是传输层错误），而原生上下文的只读命令正常（iOS 26.3 的
+//     两种形态）：不提供。只读命令只失败过一次（另一次失败在列上下文或切入）不够这条证据；
+//   - 切入本身失败（重试之后仍切不进，从未执行只读命令）、列上下文的调用本身失败、最后一次失败是传输层错误（连接层错误码、
+//     HTTP 502 / 503 / 504，或没有错误码与状态码的失败）：探测出错；
 //   - 原生只读命令也失败（会话异常）：先查会话状态，丢失归 session_lost，否则探测出错；
 //   - 多个候选：定位规则拒绝歧义、无法确定被测页面，同样是无法区分设备能力的情形，记探测出错，不按第一个去猜。
+// 会话丢失发生在 scope_started 之前，消息用执行前的那句（surface.mts 的 SESSION_LOST_BEFORE_START_MESSAGE）。
 // 原生一侧的核对（切回原生上下文与原生截图）经生命周期通道的执行实例发出：它的超时是单条命令的真实上界，探测实例的网页命令挂住时
 // 不会因为短超时把原生命令误判为失败（Appium 服务端是否对同一会话串行执行列入真机验收）。两种否定结论下导航都不走 url（接缝据此
 // 选 deepLink 路线）。
@@ -35,9 +38,11 @@ import type { Browser } from "webdriverio";
 import type { Device, UiKind } from "../worker/deterministic.mjs";
 import { errorText } from "../worker/error-text.mjs";
 import type { ScaleSource } from "./device-session.mjs";
-import { commandFailureKind, defaultSleep, probeClientOf, withDeadline, type CommandFailureKind, type Sleep } from "./appium.mjs";
 import {
-  ACQUIRE_TIMEOUT_MESSAGE, SESSION_LOST_MESSAGE,
+  commandFailureKind, defaultSleep, probeClientOf, withDeadline, type CommandFailureKind, type Sleep,
+} from "./appium.mjs";
+import {
+  ACQUIRE_TIMEOUT_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE,
   type AcquireBudget, type AppiumSession, type CapabilityProbe, type Outcome, type ProbeConclusion, type WebContextVerdict,
 } from "./surface.mjs";
 import { NATIVE_CONTEXT, locateWebContext } from "./web-context.mjs";
@@ -92,7 +97,7 @@ const stoppedOutcome = (): Outcome<ProbeConclusion> => ({
   ok: false, termination: { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE },
 });
 const lostOutcome = (): Outcome<ProbeConclusion> => ({
-  ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_MESSAGE },
+  ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE },
 });
 const RUNNING = "RUNNING";
 
@@ -242,8 +247,17 @@ type WebAttempt =
   | { kind: "available" }
   | { kind: "none" }
   | { kind: "many"; candidates: number }
-  | { kind: "read_failed"; candidates: number | null; last: CommandFailureKind }
-  | { kind: "list_failed"; candidates: number | null };
+  /** 两次尝试都没有成功读到地址。confirmsUnavailable：两次都切入成功、只读命令都失败、最后一次不是传输层错误。 */
+  | { kind: "failed"; candidates: number | null; confirmsUnavailable: boolean };
+
+/** 一次尝试失败在哪一环，以及失败种类。 */
+interface AttemptFailure {
+  stage: "list" | "switch" | "read";
+  kind: CommandFailureKind;
+}
+
+/** 网页上下文的尝试次数：首次加有界重试一次（ADR 0052 决策 5）。 */
+const WEB_READ_ATTEMPTS = 2;
 
 type WebResult =
   | { kind: "stopped" }
@@ -270,13 +284,11 @@ async function probeWebContext(r: ProbeRun, nativeOk: boolean): Promise<WebResul
       if (back === "stopped" || back === "lost") return { kind: back };
       return verdict(back === "ok" ? "available" : "probe_error", 1);
     }
-    case "read_failed":
-    case "list_failed": {
+    case "failed": {
       const native = await nativeCheck(r, true);
       if (native === "stopped" || native === "lost") return { kind: native };
       if (native === "failed") return verdict("probe_error", attempt.candidates);
-      const confirmed = attempt.kind === "read_failed" && !TRANSPORT_FAILURES.includes(attempt.last);
-      return verdict(confirmed ? "unavailable" : "probe_error", attempt.candidates);
+      return verdict(attempt.confirmsUnavailable ? "unavailable" : "probe_error", attempt.candidates);
     }
   }
 }
@@ -285,40 +297,48 @@ function verdict(v: WebContextVerdict, candidates: number | null): WebResult {
   return { kind: "verdict", verdict: v, candidates };
 }
 
-/** 经探测实例定位、切入、读一次当前地址，有界重试一次。 */
+/** 经探测实例定位、切入、读一次当前地址，有界重试一次；每次失败记下失败在哪一环。 */
 async function tryWebRead(r: ProbeRun): Promise<WebAttempt> {
   const signal = r.budget.signal;
   let candidates: number | null = null;
-  let last: CommandFailureKind = "other";
-  let listFailed = false;
-  for (let attempt = 1; attempt <= 2; attempt++) {
+  const failures: AttemptFailure[] = [];
+  for (let attempt = 1; attempt <= WEB_READ_ATTEMPTS; attempt++) {
     if (signal.aborted) return { kind: "stopped" };
     let location;
     try {
       location = await locateWebContext(() => r.probe.getContexts(), r.target.device, { sleep: (ms) => r.sleep(ms, signal) });
     } catch (e) {
       if (signal.aborted) return { kind: "stopped" };
-      listFailed = true;
-      last = commandFailureKind(e);
+      failures.push({ stage: "list", kind: commandFailureKind(e) });
       log(r, `列出上下文失败（第 ${attempt} 次）：${errorText(e)}`);
       continue;
     }
     if (signal.aborted) return { kind: "stopped" };
-    listFailed = false;
     candidates = location.count;
     if (location.kind === "none") return { kind: "none" };
     if (location.kind === "many") return { kind: "many", candidates: location.count };
     try {
       await r.probe.switchContext(location.name);
+    } catch (e) {
+      if (signal.aborted) return { kind: "stopped" };
+      failures.push({ stage: "switch", kind: commandFailureKind(e) });
+      log(r, `切入网页上下文失败（第 ${attempt} 次）：${errorText(e)}`);
+      continue;
+    }
+    if (signal.aborted) return { kind: "stopped" };
+    try {
       await r.probe.getUrl();
       return { kind: "available" };
     } catch (e) {
       if (signal.aborted) return { kind: "stopped" };
-      last = commandFailureKind(e);
+      failures.push({ stage: "read", kind: commandFailureKind(e) });
       log(r, `网页上下文里的只读命令失败（第 ${attempt} 次）：${errorText(e)}`);
     }
   }
-  return listFailed ? { kind: "list_failed", candidates } : { kind: "read_failed", candidates, last };
+  const last = failures.at(-1);
+  const confirmsUnavailable = last !== undefined && failures.every((f) => f.stage === "read")
+    && !TRANSPORT_FAILURES.includes(last.kind);
+  return { kind: "failed", candidates, confirmsUnavailable };
 }
 
 /** 经生命周期通道回到原生上下文；withScreenshot 时再在原生上下文截图一次，作「原生只读命令正常」的证据。失败先查会话状态。 */

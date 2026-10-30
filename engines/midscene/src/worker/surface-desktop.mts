@@ -289,7 +289,7 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
     request.reported = true;
     attemptedReported = true;
     log(`worker: 收到停止信号时浏览器会话的创建请求仍未返回，无法确认会话是否已建立（会话名 ${request.name}），可能仍在计费；`
-      + "请在 AgentCore 控制台按会话名核对，退出码将为 1");
+      + "请在 Amazon Bedrock AgentCore 控制台按会话名核对，退出码将为 1");
     await emitSessionEvent({ type: "session_opened", scopeId, sessionId: null, name: request.name, origin: "attempted" });
     await emitSessionEvent({ type: "session_closed", scopeId, sessionId: null, name: request.name, release: "unconfirmed" });
   }

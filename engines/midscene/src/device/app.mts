@@ -7,7 +7,7 @@
 //      newSession 期间的下载。预签名地址是凭证（签名在查询串里），只进能力集，不进事件、日志与诊断；经 WebdriverIO 错误文本外泄的
 //      那条路由 wdio-log 的掩码与 redactSecrets 盖住（ADR 0051 决策 11）。
 //   3. newSession 之后：显式 activateApp 并采样应用状态（launchApp），任一次回到「未运行」即判启动即自退，记 precheck_failed
-//      （ADR 0051 决策 14：不做任何规避）。
+//      （ADR 0051 决策 14：不做任何规避）。启动与采样接收获取预算的中止信号，预算到期或进入终结之后不再发命令。
 // 句柄上下文（ADR 0050 决策 2）的 app.restart() 由 appHandle 给出：terminate、activate、启动采样三个原语依次执行，采样到自退抛出
 // 带 engine_error 归类标记的异常（这时是 step 级失败，不是 precheck_failed）。
 //
@@ -190,19 +190,39 @@ const _browserIsAppControl: _BrowserIsAppControl = true;
 void _browserIsAppControl;
 
 export interface AppTimingDeps {
-  /** 采样间隔的等待，只供测试注入。 */
-  sleep?: (ms: number) => Promise<void>;
+  /** 采样间隔的等待，只供测试注入。第二个参数是调用方的中止信号（可能没有）；缺省实现在信号中止时提前结束。 */
+  sleep?: (ms: number, abortSignal?: AbortSignal) => Promise<void>;
 }
 
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+/** 缺省的等待：到时或信号中止即结束（中止时不抛，由调用方在等待之后核对）；结束时摘掉挂在信号上的监听。 */
+function defaultSleep(ms: number, abortSignal?: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (abortSignal?.aborted) {
+      resolve();
+      return;
+    }
+    const done = (): void => {
+      clearTimeout(timer);
+      abortSignal?.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    abortSignal?.addEventListener("abort", done, { once: true });
+  });
+}
 
 /** 启动后的状态采样：每隔 LAUNCH_SAMPLE_INTERVAL_MS 采一次、共 LAUNCH_SAMPLE_COUNT 次（第一次也在间隔之后，覆盖启动后的头几秒），
  *  任一次不在运行即返回 "exited" 并停止采样。「不在运行」取 NOT_RUNNING 与 NOT_INSTALLED：两者都表示应用进程不存在；后台运行
- *  （2、3）不算自退。采样命令报错原样抛出。 */
-export async function sampleLaunch(control: AppControl, appId: string, deps: AppTimingDeps = {}): Promise<"running" | "exited"> {
+ *  （2、3）不算自退。采样命令报错原样抛出。
+ *  abortSignal 是获取期的截止信号（获取预算到期或进入终结时中止）：每次等待之后、发采样命令之前核对，已中止即抛出信号的原因、
+ *  不再发命令。app.restart() 的采样不传：它的命令经命令守卫发出，进入终结时执行令牌即撤销（ADR 0052 决策 6）。 */
+export async function sampleLaunch(
+  control: AppControl, appId: string, deps: AppTimingDeps = {}, abortSignal?: AbortSignal,
+): Promise<"running" | "exited"> {
   const sleep = deps.sleep ?? defaultSleep;
   for (let i = 0; i < LAUNCH_SAMPLE_COUNT; i++) {
-    await sleep(LAUNCH_SAMPLE_INTERVAL_MS);
+    await sleep(LAUNCH_SAMPLE_INTERVAL_MS, abortSignal);
+    abortSignal?.throwIfAborted();
     const state = await control.queryAppState(appId);
     if (state <= APP_STATE.NOT_RUNNING) return "exited";
   }
@@ -210,10 +230,16 @@ export async function sampleLaunch(control: AppControl, appId: string, deps: App
 }
 
 /** 获取期的启动：newSession 之后显式 activateApp，再做启动采样。正常返回 null；自退返回 precheck_failed 的 scope 级终止。
- *  命令失败原样抛出。调用方经生命周期通道传执行实例（获取期还没有执行令牌）。 */
-export async function launchApp(control: AppControl, appId: string, deps: AppTimingDeps = {}): Promise<ScopeTermination | null> {
+ *  命令失败原样抛出。调用方经生命周期通道传执行实例（获取期还没有执行令牌），并传获取预算的中止信号：发 activateApp 之前、
+ *  它返回之后与每次采样等待之后各核对一次，已中止即抛出信号的原因、不再发命令。在途的那条命令不被打断（WebDriver 命令不接收
+ *  中止信号，它的上界是执行实例的单请求超时）。 */
+export async function launchApp(
+  control: AppControl, appId: string, deps: AppTimingDeps = {}, abortSignal?: AbortSignal,
+): Promise<ScopeTermination | null> {
+  abortSignal?.throwIfAborted();
   await control.activateApp(appId);
-  if (await sampleLaunch(control, appId, deps) === "exited") {
+  abortSignal?.throwIfAborted();
+  if (await sampleLaunch(control, appId, deps, abortSignal) === "exited") {
     return { errorType: "precheck_failed", message: APP_LAUNCH_SELF_EXIT_MESSAGE };
   }
   return null;

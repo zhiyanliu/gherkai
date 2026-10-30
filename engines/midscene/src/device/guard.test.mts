@@ -5,10 +5,10 @@
 //   - 假客户端组：执行实例换成记录发出命令的假对象，逐条验 ADR 列出的拒绝情形（旧令牌、step 结束后保留的引用、解构或先取后调的
 //     方法、缓存的元素句柄、晚到的异步回调、进入终结之后、结果未知之后的有副作用命令）、只读白名单的放行与重试规则、按会话状态的
 //     归类与异常上的归类标记；
-//   - 真实 WebdriverIO 组：同一进程里起一个只实现少量路由的 WebDriver 服务端，用真实的 webdriverio 客户端验膜对真实对象成立
-//     （链式查询、元素的 parent、元素列表的回调参数、动作构造器）、状态码经 transformResponse 钩子读回、连接被重置与客户端超时的
-//     真实错误形态被正确分流。它证明的是 webdriverio 10.0.2 的对象形态与错误形态，不证明 Appium 服务端与真机的行为（那些由真机
-//     验收负责）。
+//   - 真实 WebdriverIO 组：同一进程里起一个只实现少量路由的 WebDriver 服务端，执行实例由 Appium 块的生产建连（appium.mts 的
+//     createAppiumConnector）建出，与生产同一套客户端选项与状态码钩子；用它验膜对真实对象成立（链式查询、元素的 parent、元素列表的
+//     回调参数、动作构造器）、状态码经生产的 transformResponse 钩子读回（浏览器级命令与元素命令）、连接被重置与客户端超时的真实错误
+//     形态被正确分流。它证明的是 webdriverio 10.0.2 的对象形态与错误形态，不证明 Appium 服务端与真机的行为（那些由真机验收负责）。
 // 另有一条子进程用例验循环引用下本模块照常加载（装配设备部件的模块被 surface.mts 静态导入的形态）。
 //
 // 用例里的 step 窗口按设备侧接缝的执行方式开关：先 openWindow，再在同一段同步执行里调用执行函数，结束后 closeWindow。
@@ -21,10 +21,12 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { pathToFileURL } from "node:url";
-import { remote, type Browser } from "webdriverio";
+import type { Browser } from "webdriverio";
+import { createAppiumConnector } from "./appium.mjs";
 import {
-  AFTER_RESULT_UNKNOWN_MESSAGE, FINALIZING_COMMAND_MESSAGE, READ_ONLY_TIMEOUT_MESSAGE, RESULT_UNKNOWN_MESSAGE, STALE_COMMAND_MESSAGE,
-  commandFailedMessage, commandGuardFactory, createCommandGuard, httpStatusOf, recordHttpStatus,
+  AFTER_RESULT_UNKNOWN_MESSAGE, CONNECTION_ERROR_CODES, FINALIZING_COMMAND_MESSAGE, GATEWAY_STATUS_CODES, READ_ONLY_TIMEOUT_MESSAGE,
+  RESULT_UNKNOWN_MESSAGE, STALE_COMMAND_MESSAGE, TIMEOUT_ERROR_CODES,
+  commandFailedMessage, commandGuardFactory, createCommandGuard, httpStatusOf, isRetryable, recordHttpStatus, retryReadOnce,
 } from "./guard.mjs";
 import { SESSION_LOST_MESSAGE, type CommandGuard, type DriverAdapter, type WindowOutcome } from "./surface.mjs";
 import { attachClassification, readClassification, type StepFailure } from "../worker/surface.mjs";
@@ -98,6 +100,7 @@ class FakeExec {
   keys(text: string) { return this.run(`keys:${text}`, null); }
   url(address: string) { return this.run(`url:${address}`, null); }
   terminateApp(appId: string) { return this.run(`terminateApp:${appId}`, true); }
+  activateApp(appId: string) { return this.run(`activateApp:${appId}`, null); }
   execute(script: string, ..._args: unknown[]) { return this.run(`execute:${script}`, { scale: 3 }); }
   async $(selector: string) {
     this.sent.push(`$:${selector}`);
@@ -321,6 +324,14 @@ test("结果未知后只读白名单放行：截图、上下文列表、page sou
     assert.deepEqual(await h.driver.execute("mobile: activeAppInfo"), { scale: 3 });
     // 不在白名单里的读取命令同样按有副作用处理
     await rejectsWith(h.driver.getContext(), unknownFailure, AFTER_RESULT_UNKNOWN_MESSAGE);
+    // 导航与应用的启动、停止都有副作用，不在只读白名单里（ADR 0052 决策 6：读取地址不含导航），经 execute 发出的非只读 mobile 命令同理
+    await rejectsWith(h.driver.url("https://example.test/next"), unknownFailure, AFTER_RESULT_UNKNOWN_MESSAGE);
+    await rejectsWith(h.driver.terminateApp("com.example"), unknownFailure, AFTER_RESULT_UNKNOWN_MESSAGE);
+    await rejectsWith(h.driver.activateApp("com.example"), unknownFailure, AFTER_RESULT_UNKNOWN_MESSAGE);
+    await rejectsWith(h.driver.execute("mobile: activateApp", { bundleId: "com.example" }), unknownFailure,
+      AFTER_RESULT_UNKNOWN_MESSAGE);
+    await rejectsWith(h.driver.execute("mobile: terminateApp", { bundleId: "com.example" }), unknownFailure,
+      AFTER_RESULT_UNKNOWN_MESSAGE);
   });
   assert.deepEqual(r.outcome, { failure: unknownFailure, resultUnknown: true });
   assert.deepEqual(h.exec.sent, [
@@ -342,6 +353,8 @@ test("读地址只在经守卫切入的网页上下文里属于只读白名单�
     await h.driver.switchContext("WEBVIEW_1");
     await h.driver.keys("y").catch(() => undefined);
     assert.equal(await h.driver.getUrl(), "https://example.test/");  // 白名单：放行，且连接层错误重试一次
+    // 网页上下文里放行的只是读地址，导航不在白名单里
+    await rejectsWith(h.driver.url("https://example.test/next"), unknownFailure, AFTER_RESULT_UNKNOWN_MESSAGE);
   });
   assert.deepEqual(web.outcome, { failure: unknownFailure, resultUnknown: true });
   // 下一个 step 开始时会话已由 step 前核对切回原生上下文：读地址回到按有副作用处理
@@ -376,13 +389,27 @@ test("查会话状态本身失败时不据此判会话丢失，按结果未知�
   assert.deepEqual(r.outcome, { failure: unknownFailure, resultUnknown: true });
 });
 
+test("查会话状态本身失败时，结果已知的命令失败归 engine_error，标记不带会话仍在运行的事实", async () => {
+  const h = harness({ status: null });
+  const serverError = Object.assign(new Error("An element could not be located on the page"), { name: "no such element" });
+  h.exec.failNext("keys:x", serverError);
+  const r = await inStep(h.guard, async () => {
+    const e = await rejectsWith(h.driver.keys("x"), {
+      errorType: "engine_error", message: commandFailedMessage("no such element: An element could not be located on the page"),
+    });
+    assert.ok(!("sessionRunningConfirmed" in readClassification(e)!));
+  });
+  assert.equal(r.outcome, null);
+  assert.equal(h.status.calls, 1);
+});
+
 test("有副作用的命令遇到任何传输层故障都不补发，一律记结果未知", async () => {
+  // 连接层错误码、超时码与网关类状态码逐个取自守卫导出的集合（Appium 块的建连与探测归类用的也是这三份），两边不会各自分叉
   const faults: Array<[string, () => unknown]> = [
-    ["ECONNRESET", () => codeError("ECONNRESET")], ["ECONNREFUSED", () => codeError("ECONNREFUSED")],
-    ["EPIPE", () => codeError("EPIPE")], ["UND_ERR_SOCKET", () => codeError("UND_ERR_SOCKET")],
-    ["UND_ERR_CLOSED", () => codeError("UND_ERR_CLOSED")], ["ETIMEDOUT", timeoutError],
-    ["UND_ERR_HEADERS_TIMEOUT", () => codeError("UND_ERR_HEADERS_TIMEOUT")],
-    ["502", () => httpError(502)], ["503", () => httpError(503)], ["504", () => httpError(504)],
+    ...[...CONNECTION_ERROR_CODES].map((code): [string, () => unknown] => [code, () => codeError(code)]),
+    ...[...TIMEOUT_ERROR_CODES].map((code): [string, () => unknown] => [code, () => codeError(code)]),
+    ["ETIMEDOUT（webdriver 的客户端超时）", timeoutError],
+    ...[...GATEWAY_STATUS_CODES].map((status): [string, () => unknown] => [String(status), () => httpError(status)]),
     ["cause 链里的错误码", () => new Error("fetch failed", { cause: codeError("ECONNRESET") })],
   ];
   for (const [label, fault] of faults) {
@@ -400,10 +427,8 @@ test("有副作用的命令遇到任何传输层故障都不补发，一律记�
 
 test("只读白名单只对连接层错误码与 HTTP 502 / 503 / 504 重试一次", async () => {
   const retryable: Array<[string, () => unknown]> = [
-    ["ECONNRESET", () => codeError("ECONNRESET")], ["ECONNREFUSED", () => codeError("ECONNREFUSED")],
-    ["EPIPE", () => codeError("EPIPE")], ["UND_ERR_SOCKET", () => codeError("UND_ERR_SOCKET")],
-    ["UND_ERR_CLOSED", () => codeError("UND_ERR_CLOSED")],
-    ["502", () => httpError(502)], ["503", () => httpError(503)], ["504", () => httpError(504)],
+    ...[...CONNECTION_ERROR_CODES].map((code): [string, () => unknown] => [code, () => codeError(code)]),
+    ...[...GATEWAY_STATUS_CODES].map((status): [string, () => unknown] => [String(status), () => httpError(status)]),
   ];
   for (const [label, fault] of retryable) {
     const h = harness();
@@ -456,8 +481,11 @@ test("第一次失败期间 step 已结束：只读命令不再重试", async ()
   let call: Promise<unknown> | null = null;
   await inStep(h.guard, async () => { call = Promise.resolve(h.driver.getPageSource()); });
   reject(codeError("ECONNRESET"));
-  await rejectsWith(call!, { errorType: "engine_error" });
+  const e = await rejectsWith(call!, { errorType: "engine_error" });
   assert.deepEqual(h.exec.sent, ["getPageSource"]);
+  // 晚到的失败不查会话状态，标记不带会话仍在运行的事实
+  assert.equal(h.status.calls, 0);
+  assert.ok(!("sessionRunningConfirmed" in readClassification(e)!));
 });
 
 test("适配器没有给出只读命令集合时，mobile 命令一律按有副作用处理", async () => {
@@ -481,6 +509,7 @@ test("服务端已报错的命令（结果已知）：先查会话状态，仍�
       errorType: "engine_error", message: commandFailedMessage("no such element: An element could not be located on the page"),
     });
     assert.strictEqual(e, serverError);  // 标记挂在原异常上，适配器仍可按原消息再归类
+    assert.equal(readClassification(e)?.sessionRunningConfirmed, true);  // 查到会话仍为 RUNNING，标记带这项事实
     await h.driver.keys("y");
   });
   assert.equal(r.outcome, null);
@@ -534,6 +563,49 @@ test("HTTP 状态码的读取约定：错误自身的 statusCode、经 transform
   assert.equal(httpStatusOf("not an error"), null);
   const response = { statusCode: 200, body: { value: null } };
   assert.strictEqual(recordHttpStatus(response, {}), response);
+});
+
+test("传输故障的错误码只有一份：连接层含 ADR 0052 决策 6 列出的五个与解析、路由失败，不含任何超时码；网关类状态码为 502 / 503 / 504", () => {
+  for (const code of ["ECONNRESET", "ECONNREFUSED", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CLOSED"]) {
+    assert.ok(CONNECTION_ERROR_CODES.has(code), code);
+  }
+  for (const code of ["EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN"]) assert.ok(CONNECTION_ERROR_CODES.has(code), code);
+  for (const code of TIMEOUT_ERROR_CODES) assert.ok(!CONNECTION_ERROR_CODES.has(code), `${code} 是超时，不是连接层错误`);
+  assert.deepEqual([...TIMEOUT_ERROR_CODES], ["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"]);
+  assert.deepEqual([...GATEWAY_STATUS_CODES], [502, 503, 504]);
+});
+
+test("只读原语的一次重试由守卫与生命周期通道共用：连接层错误码与 502 / 503 / 504 再发一次，超时与 500 不重试，不许再发时不重试", async () => {
+  const sendSeq = (...results: unknown[]) => {
+    let calls = 0;
+    const send = async (): Promise<string> => {
+      const next = results[calls++];
+      if (next instanceof Error) throw next;
+      return String(next);
+    };
+    return { send, calls: () => calls };
+  };
+  for (const fault of [codeError("ENOTFOUND"), httpError(503), new Error("fetch failed", { cause: codeError("UND_ERR_SOCKET") })]) {
+    assert.equal(isRetryable(fault), true, String(fault));
+    const s = sendSeq(fault, "ok");
+    assert.equal(await retryReadOnce(s.send), "ok");
+    assert.equal(s.calls(), 2);
+  }
+  for (const fault of [timeoutError(), codeError("UND_ERR_HEADERS_TIMEOUT"), httpError(500), new Error("no such element")]) {
+    assert.equal(isRetryable(fault), false, String(fault));
+    const s = sendSeq(fault, "ok");
+    await assert.rejects(retryReadOnce(s.send), (e) => e === fault);
+    assert.equal(s.calls(), 1);
+  }
+  // 重试之后仍失败：抛出第二次的失败，不再发第三次
+  const again = httpError(502);
+  const twice = sendSeq(codeError("ECONNRESET"), again, "ok");
+  await assert.rejects(retryReadOnce(twice.send), (e) => e === again);
+  assert.equal(twice.calls(), 2);
+  // 调用方不许再发（截止信号已中止、窗口已关闭）：不重试
+  const held = sendSeq(codeError("ECONNRESET"), "ok");
+  await assert.rejects(retryReadOnce(held.send, () => false));
+  assert.equal(held.calls(), 1);
 });
 
 // ---- 真实 WebdriverIO：膜对真实对象成立、真实错误形态的分流 ----
@@ -601,14 +673,18 @@ async function fakeWebDriver(): Promise<FakeServer> {
   };
 }
 
+/** 执行实例经 Appium 块的生产建连建出：客户端选项（含 transformResponse 状态码钩子与 0 次传输层重试）与生产相同，只把单请求超时
+ *  缩到 0.4 秒，让客户端超时的用例几百毫秒内结束。 */
 async function realHarness(): Promise<{ server: FakeServer; exec: Browser; guard: CommandGuard; status: { calls: number } }> {
   const server = await fakeWebDriver();
-  const exec = await remote({
-    protocol: "http", hostname: server.url.hostname, port: Number(server.url.port), path: "/",
-    capabilities: { platformName: "iOS", "appium:automationName": "XCUITest" },
-    logLevel: "silent", connectionRetryCount: 0, connectionRetryTimeout: 400,
-    transformResponse: recordHttpStatus,
-  });
+  const outcome = await createAppiumConnector({ timeouts: { newSessionFloorMs: 10_000, execRequestMs: 400, probeRequestMs: 400 } })
+    .connect(
+      { endpoint: server.url.href, device: "ios", uiKind: "app", appId: "com.example.Shop", appUrl: "https://apps.example.test/shop.ipa" },
+      { signal: new AbortController().signal, remainingMs: () => 600_000 },
+    );
+  assert.equal(outcome.kind, "connected");
+  if (outcome.kind !== "connected") throw new Error("未能建立测试用的 Appium 会话");
+  const exec = outcome.session.exec;
   const status = { calls: 0 };
   const guard = createCommandGuard({
     exec, adapter: adapterWith(READ_ONLY_SCRIPTS), sessionStatus: async () => { status.calls++; return "RUNNING"; },
@@ -739,6 +815,21 @@ test("真实 WebdriverIO：503 经 transformResponse 记下状态码、只读命
     assert.equal(server.hits.filter((k) => k === "GET /source").length, 2);
     assert.equal(server.hits.filter((k) => k === "GET /screenshot").length, 1);
     assert.equal(status.calls, 1);
+  } finally {
+    await server.close();
+  }
+});
+
+test("真实 WebdriverIO：元素命令的 503 同样经生产的状态码钩子读回，有副作用的元素命令记结果未知且只发出一次", async () => {
+  const { server, guard } = await realHarness();
+  try {
+    server.plan.set("POST /element/el-1/click", [503]);
+    const r = await inStep(guard, async () => {
+      const el = await guard.driver.$("~login");
+      await rejectsWith(el.click(), unknownFailure);
+    });
+    assert.deepEqual(r.outcome, { failure: unknownFailure, resultUnknown: true });
+    assert.equal(server.hits.filter((k) => k === "POST /element/el-1/click").length, 1);
   } finally {
     await server.close();
   }

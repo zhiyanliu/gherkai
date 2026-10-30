@@ -4,7 +4,8 @@ Nova worker 对每个建起的 AgentCore 浏览器会话成对发 session_opened
 session_opened（origin 为 created，sessionId 与 name 都取会话 id，不带 device）；每条收尾路径（正常收尾、停止信号、会话预热失败、
 建连重试丢弃的 attempt）都为每个会话发恰一条 session_closed，Stop 成功即 confirmed、失败或超过预算即 unconfirmed，桌面不带
 observedS 与 providerMinutes。停止信号到达时 Start 仍在途、等待窗口内没有返回，发一对 attempted 事件（sessionId 为 null，name 取
-请求名）并以退出码 1 结束。每次 Start 都带请求名，规则与 Midscene worker 的会话名模块相同、上限 100。
+请求名）并以退出码 1 结束；在窗口内返回、或停止信号落在 Start 返回之后与 scope_started 之前，会话照样成对、不发 scope_started
+（它表示被测对象已就绪，ADR 0051 决策 4）。每次 Start 都带请求名，规则与 Midscene worker 的会话名模块相同、上限 100。
 
 事件形状以 core/gherkai_core/wire.py 的校验为准：worker 包零 core 依赖，这里逐条重述那几条校验（下面的 _check_wire_shape），
 不 import core。下面的假 SDK 只覆盖 worker 自己的次序与配对逻辑；Start 与 Stop 在真实 AgentCore 上的返回时机不在 mock 之内，
@@ -479,6 +480,8 @@ def test_stop_signal_while_start_is_unanswered_emits_one_attempted_pair_and_exit
 
 
 def test_stop_signal_while_start_answers_within_the_window_pairs_a_created_session(world, monkeypatch):
+    """停止信号到达时 Start 在途、在等待窗口内返回：会话已建起，发 session_opened（血缘）后直接按停止释放——不取连接头、不建
+    NovaAct 连接、不发 scope_started（它表示被测对象已就绪、下一事件是首个 scenario_started，ADR 0051 决策 4），以 0 退出。"""
     monkeypatch.setattr(rs, "START_SETTLE_S", 2.0)
 
     def late():
@@ -487,8 +490,40 @@ def test_stop_signal_while_start_answers_within_the_window_pairs_a_created_sessi
 
     world.start_plan = [late]
     assert rs.main() == 0
-    assert _session_events(world.sink.events) == [_opened("sess-1"), _closed("sess-1")]
+    assert world.sink.events == [_opened("sess-1"), _closed("sess-1")]
+    assert "scope_started" not in _types(world)
     assert not any(e.get("origin") == "attempted" for e in world.sink.events)
+    assert not any(t[0] in ("ws_headers", "nova_init") for t in world.trace)
+    assert ("stop", "sess-1") in world.trace
+
+
+@pytest.mark.parametrize("arrival", ["novaact_connect", "extra_headers", "warmup_leave"])
+def test_stop_signal_after_start_but_before_scope_started_pairs_the_session_without_scope_started(world, monkeypatch, arrival):
+    """停止信号落在会话建立之后、scope_started 之前的任一处（建 NovaAct 连接、设置额外请求头、预热就绪后离开预热页）：
+    不发 scope_started、不进 scenario，关掉 NovaAct 连接并释放会话，会话照样成对，以 0 退出。"""
+    if arrival == "novaact_connect":
+        def nova_factory(**k):
+            rs._stop.set()
+            return _Nova(world)
+
+        monkeypatch.setattr(rs, "NovaAct", nova_factory)
+    elif arrival == "extra_headers":
+        world.page.context = type("Ctx", (), {"set_extra_http_headers": staticmethod(lambda h: rs._stop.set())})()
+        monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
+        monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)  # 带额外请求头的 job 总有预热地址
+    else:
+        class _StopOnLeavePage(_Page):
+            def goto(self, url, **kw):
+                if url == "about:blank":  # 预热已读到就绪标记，正在离开预热页
+                    rs._stop.set()
+                return super().goto(url, **kw)
+
+        world.page = _StopOnLeavePage([200], [C.WARMUP_TITLES["ready"]])
+        monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
+    assert rs.main() == 0
+    assert world.sink.events == [_opened("sess-1"), _closed("sess-1")]
+    assert ("nova_exit",) in world.trace and ("stop", "sess-1") in world.trace
+    assert not any(t[0] == "run_scenario" for t in world.trace)
 
 
 def test_start_raising_after_the_stop_signal_is_a_plain_connect_failure(world, monkeypatch):

@@ -16,10 +16,11 @@
 //          此后的同步执行与由此派生的异步延续，设备侧接缝的 execute 正是在开窗口之后紧接着调用执行函数。
 //     不满足的调用不发出，返回一个被拒绝的结果：被 await 时抛出带归类标记的异常，没人 await 时不产生未处理的拒绝。
 //   - 结果未知标志：有副作用的命令遇到客户端超时或传输层故障即置位、中止当前 act，本窗口内此后有副作用的命令一律不发出，
-//     只读白名单照常放行。传输层故障指连接层错误码（ECONNRESET、ECONNREFUSED、EPIPE、UND_ERR_SOCKET、UND_ERR_CLOSED）与
-//     HTTP 502、503、504：ADR 0052 决策 6 把它们与「服务端已处理并报错」的 500 区分为传输故障，网关一侧的这三种状态码同样说明
-//     请求可能已到达设备而回应丢失，所以对有副作用的命令一并按结果未知处理（宁可短路本 scenario，也不让 handler 在同一 step 里
-//     重发一次点击或输入）。
+//     只读白名单照常放行。传输层故障指连接层错误码（下方 CONNECTION_ERROR_CODES：ADR 0052 决策 6 列出的 ECONNRESET、
+//     ECONNREFUSED、EPIPE、UND_ERR_SOCKET、UND_ERR_CLOSED，另含域名解析与路由失败）与 HTTP 502、503、504：ADR 0052 决策 6 把它们
+//     与「服务端已处理并报错」的 500 区分为传输故障，网关一侧的这三种状态码同样说明请求可能已到达设备而回应丢失，所以对有副作用的
+//     命令一并按结果未知处理（宁可短路本 scenario，也不让 handler 在同一 step 里重发一次点击或输入）。解析与路由失败时请求多半尚未
+//     发出，与 ECONNREFUSED 一样按保守处理。
 //
 // 只读白名单按原语列、不按 HTTP 方法判（ADR 0052 决策 6）：截图、取上下文列表、page source、网页上下文中的读地址、Android 的
 // 前台应用查询、/status，以及驱动适配器导出的只读 mobile 命令集合（含 iOS 的前台应用查询与屏幕信息；集合的元素是 execute 的
@@ -31,22 +32,29 @@
 //
 // 失败的分流（ADR 0052 决策 6；ADR 0051 决策 4）：
 //   - 只读命令遇到连接层错误码或 502 / 503 / 504 由守卫重试一次（执行实例的传输层重试为 0，有副作用的命令任何情况都不补发）；
-//     一切超时（含 webdriver 自身的 ETIMEDOUT 客户端超时）与 500 不重试。
+//     一切超时（含 webdriver 自身的 ETIMEDOUT 客户端超时）与 500 不重试。这条规则写成 retryReadOnce，生命周期通道上的同类只读
+//     原语（appium.mts 的存活截图、控件树与为 evidence 读地址）用的是同一个函数。
 //   - 经守卫的命令失败（重试之后仍失败、或不重试）一律先查一次会话状态：不是 RUNNING 即会话丢失，锁存，中止当前 act，本窗口与之后
 //     的窗口里经代理的命令都按会话丢失拒绝；查询本身失败不据此判会话丢失。仍在运行时：有副作用的命令遇到传输层故障为结果未知，
 //     消息用 ADR 原文；只读命令超时为执行出错；其余（服务端已报错、结果已知）为执行出错并保留原因。
 //   - 守卫抛出的每个异常都带归类标记（worker/surface.mts 的 attachClassification），runStep 先认标记，设备路径因此没有
-//     network_error 出口；标记挂在原异常对象上，驱动适配器仍可按原消息再归类（已有标记的异常守卫原样透传）。
-// HTTP 状态码的读取约定见 recordHttpStatus：webdriver 10.0.2 对服务端非 2xx 抛出的错误只带错误名与消息，执行实例的
-// transformResponse 钩子用它把状态码记到请求选项上，守卫经错误对象的 opts 读回。
+//     network_error 出口；标记挂在原异常对象上，驱动适配器仍可按原消息再归类（已有标记的异常守卫原样透传）。查到会话仍为 RUNNING
+//     的结果已知失败，标记另带 sessionRunningConfirmed 这项事实，适配器只在它成立时按实测过的驱动错误文本再归类；晚到的失败、
+//     查询本身失败、会话丢失与结果未知都不带。
+// 传输故障的判定是设备模块的单一事实源，放在本模块（不 import 任何 SDK 的值）：HTTP 状态码的读写（recordHttpStatus 与
+// httpStatusOf）、连接层错误码、超时码与网关类状态码三个集合，以及只读原语的一次重试。webdriver 10.0.2 对服务端非 2xx 抛出的错误
+// 只带错误名与消息，appium.mts 给三个客户端实例设的 transformResponse 钩子调 recordHttpStatus 把状态码记到请求选项上，错误对象的
+// opts 就是那个请求选项，经 httpStatusOf 读回；appium.mts 的 newSession 归因与失败种类（能力探测按它归类）用的也是这里的集合与
+// 判定。
 //
-// 生命周期通道（step 前核对、复原与核对、界面快照、scenario 前核对、预热、终结）经执行实例直接执行，不经本模块（ADR 0052 决策 2）。
-// 守卫不改动执行实例，它的状态只约束经 driver 代理发出的命令。
+// 生命周期通道（step 前核对、复原与核对、界面快照、scenario 前核对、预热、终结）经执行实例直接执行，不经守卫代理、不受令牌与结果
+// 未知标志约束（ADR 0052 决策 2），只借用上面的传输故障判定与只读原语的重试。守卫不改动执行实例，它的状态只约束经 driver 代理发出
+// 的命令。
 import { AsyncLocalStorage } from "node:async_hooks";
 import { types } from "node:util";
 import type { Browser } from "webdriverio";
 import { errorText } from "../worker/error-text.mjs";
-import { attachClassification, readClassification, type StepFailure } from "../worker/surface.mjs";
+import { attachClassification, readClassification, type StepClassification, type StepFailure } from "../worker/surface.mjs";
 // 循环引用说明：装配设备部件的模块可能被 surface.mts 静态导入，而本模块又从 surface.mts 取会话丢失的消息。这时本模块先于
 // surface.mts 求值，所以这个值只在函数体内读取，模块顶层不读取 surface.mts 的任何绑定。
 import {
@@ -80,9 +88,9 @@ const HTTP_STATUS_KEY = Symbol.for("gherkai.worker-midscene.http-status");
 // cause 链的查找上限，与 worker/surface.mts 读归类标记的上限相同，同时防环。
 const MAX_CAUSE_DEPTH = 8;
 
-/** 执行实例的 transformResponse 钩子（ADR 0052 决策 6）：把这次响应的 HTTP 状态码记到同一次请求的选项对象上，原样返回响应。
- *  webdriver 10.0.2 调这个钩子时传入的选项对象，正是随后抛出的 WebDriverResponseError 挂在 opts 上的那一个，守卫经
- *  httpStatusOf 读回。用法：建执行实例时传 `transformResponse: recordHttpStatus`。 */
+/** 客户端实例的 transformResponse 钩子要做的记录（ADR 0052 决策 6）：把这次响应的 HTTP 状态码记到同一次请求的选项对象上，原样
+ *  返回响应。webdriver 10.0.2 调这个钩子时传入的选项对象，正是随后抛出的 WebDriverResponseError 挂在 opts 上的那一个，经
+ *  httpStatusOf 读回。appium.mts 的 clientOptions 是唯一的生产调用点。 */
 export function recordHttpStatus<R extends { statusCode?: number }>(response: R, requestOptions: object): R {
   const status = response?.statusCode;
   if (typeof status === "number" && requestOptions !== null && typeof requestOptions === "object"
@@ -112,10 +120,15 @@ export function httpStatusOf(error: unknown): number | null {
 
 // ---- 错误形态 ----
 
-const CONNECTION_ERROR_CODES: ReadonlySet<string> = new Set(["ECONNRESET", "ECONNREFUSED", "EPIPE", "UND_ERR_SOCKET", "UND_ERR_CLOSED"]);
-const GATEWAY_STATUSES: ReadonlySet<number> = new Set([502, 503, 504]);
-// 超时的错误码：webdriver 的客户端超时为 ETIMEDOUT，undici 的连接、响应头与响应体超时各有一个码。
-const TIMEOUT_ERROR_CODES: ReadonlySet<string> = new Set([
+/** 连接层错误的错误码（ADR 0052 决策 6 列出的五个，另含域名解析与路由失败）。不含任何超时码：一切超时都不重试。 */
+export const CONNECTION_ERROR_CODES: ReadonlySet<string> = new Set([
+  "ECONNRESET", "ECONNREFUSED", "EPIPE", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CLOSED",
+]);
+/** 网关类状态码：与连接层错误一样属于传输故障（ADR 0052 决策 6）。 */
+export const GATEWAY_STATUS_CODES: ReadonlySet<number> = new Set([502, 503, 504]);
+/** 超时的错误码：webdriver 的 ETIMEDOUT（客户端超时与底层网络超时同码）与 undici 的连接、响应头、响应体超时（连接池的超时取第一个
+ *  对会话发命令的实例的值，见 appium.mts 的模块头）。一切超时都不重试（ADR 0052 决策 6）。 */
+export const TIMEOUT_ERROR_CODES: ReadonlySet<string> = new Set([
   "ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT",
 ]);
 
@@ -130,22 +143,36 @@ function someLayer(error: unknown, test: (layer: { code?: unknown; name?: unknow
   return false;
 }
 
-function isTimeout(error: unknown): boolean {
+/** 超时：沿 cause 链有一层带超时码，或是中止信号的 TimeoutError。 */
+export function isTimeout(error: unknown): boolean {
   return someLayer(error, (l) => (typeof l.code === "string" && TIMEOUT_ERROR_CODES.has(l.code)) || l.name === "TimeoutError");
 }
 
-function hasConnectionCode(error: unknown): boolean {
+/** 沿 cause 链有一层带连接层错误码。 */
+export function hasConnectionCode(error: unknown): boolean {
   return someLayer(error, (l) => typeof l.code === "string" && CONNECTION_ERROR_CODES.has(l.code));
 }
 
 function isGatewayStatus(error: unknown): boolean {
   const status = httpStatusOf(error);
-  return status !== null && GATEWAY_STATUSES.has(status);
+  return status !== null && GATEWAY_STATUS_CODES.has(status);
 }
 
 /** 只读命令可重试：连接层错误码或 502 / 503 / 504，且不是超时。 */
-function isRetryable(error: unknown): boolean {
+export function isRetryable(error: unknown): boolean {
   return !isTimeout(error) && (hasConnectionCode(error) || isGatewayStatus(error));
+}
+
+/** 只读原语的一次重试（ADR 0052 决策 6 的只读白名单「由设备模块重试 1 次」）：第一次失败可重试（isRetryable）且 mayRetry() 仍为真
+ *  时再发一次，否则抛出第一次的失败；重试之后的失败原样抛出。守卫的只读白名单与生命周期通道上的只读原语共用这一条规则，调用方用
+ *  mayRetry 表达「此时已不该再向设备发命令」（窗口已关闭、截止信号已中止）。只用于没有副作用的命令。 */
+export async function retryReadOnce<T>(send: () => T | Promise<T>, mayRetry: () => boolean = () => true): Promise<T> {
+  try {
+    return await send();
+  } catch (e) {
+    if (!isRetryable(e) || !mayRetry()) throw e;
+  }
+  return await send();
 }
 
 /** 传输层故障：超时、连接层错误码、502 / 503 / 504。有副作用的命令遇到它即结果未知。 */
@@ -384,22 +411,16 @@ class Guard implements CommandGuard {
     return readOnly ? this.readOnlyCall(send, win) : this.sideEffectCall(send, command, rawArgs, win);
   }
 
-  /** 只读命令：连接层错误码与 502 / 503 / 504 重试一次（第一次失败期间窗口已关闭或进入终结则不重试）。 */
+  /** 只读命令：经 retryReadOnce 对连接层错误码与 502 / 503 / 504 重试一次（第一次失败期间窗口已关闭、进入终结或会话已丢失则不
+   *  重试）；最终的失败按只读命令归类。 */
   private async readOnlyCall(send: () => unknown, win: ExecutionWindow): Promise<unknown> {
-    let first: unknown;
+    let value: unknown;
     try {
-      return this.toUser(await send(), win);
+      value = await retryReadOnce(send, () => this.isLive(win) && !this.lost);
     } catch (e) {
-      first = e;
+      throw await this.classify(e, win, true);
     }
-    if (isRetryable(first) && this.isLive(win) && !this.lost) {
-      try {
-        return this.toUser(await send(), win);
-      } catch (e) {
-        throw await this.classify(e, win, true);
-      }
-    }
-    throw await this.classify(first, win, true);
+    return this.toUser(value, win);
   }
 
   /** 有副作用的命令：不重试。结果是 thenable 时立即挂上失败处理（结果未知要在失败的那一刻置位，不等使用方 await），交回的
@@ -446,7 +467,8 @@ class Guard implements CommandGuard {
   }
 
   /** 失败的归类（ADR 0052 决策 6；ADR 0051 决策 4）：先置结果未知（有副作用的命令遇到传输层故障，同步完成），再查一次会话状态，
-   *  按结论挂标记。窗口已关闭（晚到的失败）时不查状态、不改任何窗口的判定。返回带标记的异常，本身不拒绝。 */
+   *  按结论挂标记；结果已知且查到仍为 RUNNING 时标记带 sessionRunningConfirmed。窗口已关闭（晚到的失败）时不查状态、不改任何
+   *  窗口的判定。返回带标记的异常，本身不拒绝。 */
   private async classify(error: unknown, win: ExecutionWindow, readOnly: boolean): Promise<Error> {
     const existing = readClassification(error);
     if (existing !== null) return error instanceof Error ? error : attachClassification(error, existing);
@@ -459,7 +481,9 @@ class Guard implements CommandGuard {
     if (status !== null && status !== RUNNING) this.recordLost(win);
     if (this.lost) return attachClassification(error, lostFailure());
     if (unknown) return attachClassification(error, failure("engine_error", RESULT_UNKNOWN_MESSAGE));
-    return attachClassification(error, this.knownFailure(error, readOnly));
+    const known: StepClassification = this.knownFailure(error, readOnly);
+    // 查到会话仍为 RUNNING 才带这项事实：驱动适配器只在它成立时按实测过的驱动错误文本再归类（ADR 0051 决策 4）
+    return attachClassification(error, status === RUNNING ? { ...known, sessionRunningConfirmed: true } : known);
   }
 
   private knownFailure(error: unknown, readOnly: boolean): StepFailure {

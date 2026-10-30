@@ -3,23 +3,29 @@
 // 两层：
 //   - 编排层：WebdriverIO 的 remote / attach 换成记录调用的假入口，核对能力集按目标的字段清单、三个实例各自的超时与重试、执行实例先于
 //     探测实例发出第一条会话命令、newSession 的封顶与重试归因、拒装驱动辅助包与非瞬时失败的归类，以及会话能力的唯一读取点；
+//   - 生命周期通道的只读原语：存活截图、控件树与为 evidence 读地址，对连接层错误与 502 / 503 / 504 重试一次、超时与 500 不重试
+//     （与命令守卫的只读白名单同一条规则）；
 //   - 真实运行层：真 webdriverio 对本机的假 WebDriver 服务建会话，核对 SDK 的真实行为——iOS Safari 会话上 remote() 返回前由建连实例
 //     发出的那条请求确实会把连接池的超时定成建连实例的值（本模块据此修正）、修正之后执行实例的长命令不被建连实例与探测实例的短超时
-//     切断、探测实例的短超时自己生效、截止信号中止在途请求、状态码挂到错误对象上、执行期传输层 0 次重试、newSession 失败消息不带端点
-//     令牌与签名。Device Farm 端点与真机上的表现（directConnect、服务端是否串行执行）不在这里证明，列入真机验收。
+//     切断、探测实例的短超时自己生效、截止信号中止在途请求、状态码经 transformResponse 钩子记下并能从错误对象读回、执行期传输层 0 次
+//     重试、生命周期通道的只读原语在真实错误形态上重试一次、newSession 失败消息不带端点令牌与签名。Device Farm 端点与真机上的表现
+//     （directConnect、服务端是否串行执行）不在这里证明，列入真机验收。
 import { test } from "node:test";
 import assert from "node:assert";
 import * as http from "node:http";
 import { attach as wdioAttach, remote as wdioRemote, type Browser } from "webdriverio";
 import {
-  CLIENT_TIMEOUTS, CONNECTION_ERROR_CODES, TIMEOUT_ERROR_CODES, commandFailureKind, createAppiumConnector, httpStatusOf,
+  CLIENT_TIMEOUTS, commandFailureKind, createAppiumConnector, createAppiumSession,
   newSessionCapabilities, newSessionRejectedMessage, readSessionCapabilities, withDeadline, type AppiumConnectorOptions,
   type ClientTimeouts, type WdioEntry,
 } from "./appium.mjs";
+import { CONNECTION_ERROR_CODES, GATEWAY_STATUS_CODES, TIMEOUT_ERROR_CODES, httpStatusOf } from "./guard.mjs";
 import {
   EXEC_REQUEST_TIMEOUT_MS, NEW_COMMAND_TIMEOUT_S, NEW_SESSION_TIMEOUT_FLOOR_MS, PAGE_LOAD_TIMEOUT_MS, PROBE_TIMEOUT_MS,
 } from "./limits.mjs";
-import { ACQUIRE_TIMEOUT_MESSAGE, type AcquireBudget, type ConnectOutcome, type ConnectRequest } from "./surface.mjs";
+import {
+  ACQUIRE_TIMEOUT_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE, type AcquireBudget, type ConnectOutcome, type ConnectRequest,
+} from "./surface.mjs";
 import { WDIO_LOG_LEVEL, wdioLogMaskingInstalled } from "./wdio-log.mjs";
 
 const TOKEN = "SECRETTOKEN0123456789abcdef";
@@ -176,6 +182,22 @@ test("三个实例的超时与重试各自显式设定：建连取下限与剩�
   assert.equal(f.calls[0], "installLogMasking", "建第一个实例之前装好日志掩码");
 });
 
+test("状态码钩子只有一份：三个实例的 transformResponse 都经守卫的 recordHttpStatus 记到请求选项上，错误对象经 httpStatusOf 读回", async () => {
+  const f = fakeWdio();
+  await connector(f).connector.connect(webReq(), budgetOf({ ms: 600_000 }));
+  const hooks = [f.remotes[0]!.options, ...f.attaches.map((a) => a.options)]
+    .map((o) => o.transformResponse as (r: { statusCode: number }, o: object) => unknown);
+  assert.equal(hooks.length, 3);
+  for (const [i, hook] of hooks.entries()) {
+    const requestOptions = { method: "GET" };
+    const response = { statusCode: 502 + i, body: {} };
+    assert.strictEqual(hook(response, requestOptions), response, "钩子原样返回响应");
+    // webdriver 10.0.2 抛出的错误把同一个请求选项对象挂在 opts 上
+    assert.equal(httpStatusOf(Object.assign(new Error("Bad Gateway"), { opts: requestOptions })), 502 + i);
+    assert.equal(commandFailureKind(Object.assign(new Error("Bad Gateway"), { opts: requestOptions })), "gateway");
+  }
+});
+
 test("建会话之后、探测实例建立之前，第一条会话命令由执行实例发出；网页目标另由执行实例设页面加载超时", async () => {
   const web = fakeWdio();
   await connector(web).connector.connect(webReq(), budgetOf({ ms: 600_000 }));
@@ -268,6 +290,20 @@ test("传输层失败（连接层错误、连接被拒、HTTP 502 / 503 / 504）
   }
 });
 
+test("newSession 的瞬时失败按守卫导出的同一份连接层错误码与网关类状态码判定：每个码都只重试一次", async () => {
+  const failures: Error[] = [
+    ...[...CONNECTION_ERROR_CODES].map((code) => new Error(
+      `WebDriverError: Request failed with error code ${code} when running "${ENDPOINT}/session" with method "POST"`,
+    )),
+    ...[...GATEWAY_STATUS_CODES].map((status) => Object.assign(new Error("WebDriverError: Gateway"), { status })),
+  ];
+  for (const failure of failures) {
+    const { outcome, remotes } = await connectWith({ newSession: [failure, "ok"] }, { ms: 900_000 });
+    assert.equal(outcome.kind, "connected", failure.message);
+    assert.equal(remotes.length, 2, failure.message);
+  }
+});
+
 test("设备单元拒装驱动辅助包：返回 replace_device（换不换台由接缝决定），原因已脱敏、去掉端点与能力集，不重试", async () => {
   const refusal = new Error(
     "WebDriverError: An unknown server-side error occurred while processing the command. Original error: Failure " +
@@ -328,6 +364,97 @@ test("newSession 之后的准备失败：先尽力删掉刚建好的 Appium 会�
   assert.ok(!g.calls.includes("connect.deleteSession"));
 });
 
+// ---- 生命周期通道的只读原语：重试一次（ADR 0052 决策 6 的只读白名单）----
+
+const codeError = (code: string): Error => Object.assign(new Error(`WebDriverError: Request failed with error code ${code}`), { code });
+const statusError = (status: number): Error => Object.assign(new Error(`WebDriverError: server answered ${status}`), { statusCode: status });
+const execTimeout = (): Error => Object.assign(
+  new Error('WebDriverError: Request timed out! Consider increasing the "connectionRetryTimeout" option.'), { code: "ETIMEDOUT" },
+);
+
+/** 假的执行实例与探测实例：按命令名排好的失败依次抛出，之后照常返回；calls 记下每条发出的命令。 */
+function scriptedSession(failures: Record<string, Error[]> = {}, device: "android" | "ios" = "ios") {
+  const calls: string[] = [];
+  const queues = new Map(Object.entries(failures).map(([k, v]) => [k, [...v]]));
+  const run = <T>(name: string, value: T) => async (...args: unknown[]): Promise<T> => {
+    calls.push(args.length > 0 ? `${name}:${String(args[0])}` : name);
+    const next = queues.get(name)?.shift();
+    if (next !== undefined) throw next;
+    return value;
+  };
+  const exec = {
+    getPageSource: run("exec.getPageSource", "<hierarchy/>"),
+    getContexts: run("exec.getContexts", ["NATIVE_APP", device === "ios" ? "WEBVIEW_1" : "CHROMIUM"]),
+    switchContext: run("exec.switchContext", null),
+    getUrl: run("exec.getUrl", "https://shop.example/"),
+    getContext: run("exec.getContext", "NATIVE_APP"),
+  } as unknown as Browser;
+  const probe = { takeScreenshot: run("probe.takeScreenshot", "iVBORw0KGgo=") } as unknown as Browser;
+  const session = createAppiumSession({
+    clients: { exec, probe }, device, capabilities: { "appium:automationName": "XCUITest" }, sleep: async () => {},
+  });
+  return { session, calls };
+}
+
+test("存活截图：连接层错误与 502 / 503 / 504 经探测实例重试一次；超时、500 与重试后仍失败照原样抛出（由接缝先查会话状态）", async () => {
+  for (const fault of [codeError("ECONNRESET"), codeError("ENOTFOUND"), statusError(503)]) {
+    const h = scriptedSession({ "probe.takeScreenshot": [fault] });
+    await h.session.probeScreenshot();
+    assert.deepEqual(h.calls, ["probe.takeScreenshot", "probe.takeScreenshot"], fault.message);
+  }
+  for (const fault of [execTimeout(), codeError("UND_ERR_HEADERS_TIMEOUT"), statusError(500)]) {
+    const h = scriptedSession({ "probe.takeScreenshot": [fault] });
+    await assert.rejects(h.session.probeScreenshot(), (e) => e === fault);
+    assert.deepEqual(h.calls, ["probe.takeScreenshot"], fault.message);
+  }
+  const second = statusError(502);
+  const twice = scriptedSession({ "probe.takeScreenshot": [codeError("EPIPE"), second] });
+  await assert.rejects(twice.session.probeScreenshot(), (e) => e === second);
+  assert.equal(twice.calls.length, 2, "只重试一次");
+});
+
+test("控件树：连接层错误与网关类状态码重试一次；截止信号已中止时不重试，超时不重试", async () => {
+  const ok = scriptedSession({ "exec.getPageSource": [codeError("UND_ERR_SOCKET")] });
+  assert.equal(await ok.session.pageSource(AbortSignal.timeout(5_000)), "<hierarchy/>");
+  assert.deepEqual(ok.calls, ["exec.getPageSource", "exec.getPageSource"]);
+
+  const timeout = scriptedSession({ "exec.getPageSource": [execTimeout()] });
+  await assert.rejects(timeout.session.pageSource(AbortSignal.timeout(5_000)));
+  assert.deepEqual(timeout.calls, ["exec.getPageSource"]);
+
+  // 第一次失败期间截止信号已中止（evidence 的采集预算到点）：不再发第二次
+  const controller = new AbortController();
+  const late = scriptedSession({ "exec.getPageSource": [codeError("ECONNRESET")] });
+  const exec = late.session.exec as unknown as { getPageSource: () => Promise<string> };
+  const original = exec.getPageSource;
+  exec.getPageSource = async () => { controller.abort(new Error("evidence 预算到点")); return original(); };
+  await assert.rejects(late.session.pageSource(controller.signal));
+  assert.deepEqual(late.calls, ["exec.getPageSource"]);
+});
+
+test("为 evidence 读地址：列上下文与读地址各自对连接层错误与网关类状态码重试一次；切入不重试；超时只记读不到", async () => {
+  const ok = scriptedSession({ "exec.getContexts": [codeError("ECONNRESET")], "exec.getUrl": [statusError(504)] });
+  assert.deepEqual(await ok.session.readWebAddress(AbortSignal.timeout(5_000)), { url: "https://shop.example/" });
+  assert.deepEqual(ok.calls, [
+    "exec.getContexts", "exec.getContexts", "exec.switchContext:WEBVIEW_1", "exec.getUrl", "exec.getUrl", "exec.switchContext:NATIVE_APP",
+  ]);
+
+  const switchFails = scriptedSession({ "exec.switchContext": [codeError("ECONNRESET")] });
+  assert.deepEqual(await switchFails.session.readWebAddress(AbortSignal.timeout(5_000)), { missing: "error" });
+  assert.equal(switchFails.calls.filter((c) => c === "exec.switchContext:WEBVIEW_1").length, 1, "切换上下文不在只读白名单里");
+
+  const timeout = scriptedSession({ "exec.getUrl": [execTimeout()] });
+  assert.deepEqual(await timeout.session.readWebAddress(AbortSignal.timeout(5_000)), { missing: "error" });
+  assert.equal(timeout.calls.filter((c) => c === "exec.getUrl").length, 1);
+  assert.equal(timeout.calls.at(-1), "exec.switchContext:NATIVE_APP", "读完尽力切回原生上下文");
+});
+
+test("执行前的会话丢失消息：说的是准备设备期间会话已结束、step 都没有执行，与执行中途的那句不同", () => {
+  assert.notEqual(SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE);
+  assert.ok(SESSION_LOST_BEFORE_START_MESSAGE.includes("准备设备"));
+  assert.ok(!SESSION_LOST_BEFORE_START_MESSAGE.includes("中途") && !SESSION_LOST_BEFORE_START_MESSAGE.includes("余下"));
+});
+
 // ---- 失败种类与状态码（纯函数）----
 
 test("失败种类：一切超时（含真实网络的 ETIMEDOUT 与 undici 的三种超时码）归 client_timeout；连接层错误码、网关类状态码与其它服务端错误各自归类", () => {
@@ -340,6 +467,10 @@ test("失败种类：一切超时（含真实网络的 ETIMEDOUT 与 undici 的�
   for (const status of [502, 503, 504]) assert.equal(commandFailureKind(Object.assign(new Error("x"), { statusCode: status })), "gateway");
   assert.equal(commandFailureKind(Object.assign(new Error("x"), { statusCode: 500 })), "server");
   assert.equal(commandFailureKind(new Error("aborted")), "other");
+  // 判定与守卫是同一份：沿 cause 链取错误码，超时优先于连接层错误
+  assert.equal(commandFailureKind(new Error("fetch failed", { cause: Object.assign(new Error("x"), { code: "ECONNRESET" }) })), "connection");
+  assert.equal(commandFailureKind(Object.assign(new Error("x"), { code: "UND_ERR_BODY_TIMEOUT", cause: { code: "ECONNRESET" } })),
+    "client_timeout");
   assert.equal(httpStatusOf("not an error"), null);
 });
 
@@ -347,8 +478,8 @@ test("失败种类：一切超时（含真实网络的 ETIMEDOUT 与 undici 的�
 
 interface ServerScript {
   sessionCapabilities: Record<string, unknown>;
-  /** 按「方法 路径尾」覆盖响应：延时、状态码与响应体，或直接断开连接。 */
-  routes?: Record<string, { delayMs?: number; status?: number; body?: unknown; destroy?: boolean }>;
+  /** 按「方法 路径尾」覆盖响应：延时、状态码与响应体，或直接断开连接；带 times 时只覆盖该路由的前 times 次请求，之后照缺省回应。 */
+  routes?: Record<string, { delayMs?: number; status?: number; body?: unknown; destroy?: boolean; times?: number }>;
 }
 
 let sessionSeq = 0;
@@ -366,7 +497,8 @@ async function fakeWebDriver(script: ServerScript) {
       const key = `${req.method} ${tail === "" ? "/" : tail}`;
       seen.push(key);
       bodies[key] = body;
-      const route = script.routes?.[key];
+      const planned = script.routes?.[key];
+      const route = planned?.times === undefined || seen.filter((k) => k === key).length <= planned.times ? planned : undefined;
       const reply = (status: number, value: unknown) => {
         res.writeHead(status, { "content-type": "application/json" });
         res.end(JSON.stringify({ value }));
@@ -379,6 +511,7 @@ async function fakeWebDriver(script: ServerScript) {
         if (key === "GET /contexts") return reply(200, ["NATIVE_APP", "WEBVIEW_1"]);
         if (key === "GET /source") return reply(200, "<hierarchy/>");
         if (key === "GET /screenshot") return reply(200, "iVBORw0KGgo=");
+        if (key === "GET /url") return reply(200, "https://shop.example/");
         if (key === "GET /status") return reply(200, { ready: true, build: { version: "2.11.5" } });
         return reply(200, null);
       }, route?.delayMs ?? 0);
@@ -469,7 +602,7 @@ test("真实运行：截止信号中止在途请求本身（不是放弃等待�
   }
 });
 
-test("真实运行：服务端非 2xx 的状态码挂到错误对象上；连接被断开时没有状态码；执行实例对每条失败命令只发一次请求", async () => {
+test("真实运行：服务端非 2xx 的状态码经生产钩子记下、能从错误对象读回；连接被断开时没有状态码；执行实例对每条失败命令只发一次请求", async () => {
   const fake = await fakeWebDriver({
     sessionCapabilities: ANDROID_APP,
     routes: {
@@ -486,7 +619,6 @@ test("真实运行：服务端非 2xx 的状态码挂到错误对象上；连接
     if (outcome.kind !== "connected") return;
     const { exec } = outcome.session;
     await assert.rejects(exec.getPageSource(), (e) => {
-      assert.equal((e as { statusCode?: number }).statusCode, 503);
       assert.equal(httpStatusOf(e), 503);
       assert.equal(commandFailureKind(e), "gateway");
       return true;
@@ -498,6 +630,43 @@ test("真实运行：服务端非 2xx 的状态码挂到错误对象上；连接
     }
   } finally {
     await fake.close();
+  }
+});
+
+test("真实运行：生命周期通道的只读原语遇到真实的 503、502 与连接断开各重试一次；探测实例的超时不重试", async () => {
+  const fake = await fakeWebDriver({
+    sessionCapabilities: IOS_SAFARI,
+    routes: {
+      "GET /screenshot": { status: 503, body: { error: "unknown error", message: "Service Unavailable", stacktrace: "" }, times: 1 },
+      "GET /source": { destroy: true, times: 1 },
+      "GET /contexts": { status: 502, body: { error: "unknown error", message: "Bad Gateway", stacktrace: "" }, times: 1 },
+      "GET /url": { destroy: true, times: 1 },
+    },
+  });
+  try {
+    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(webReq("ios", fake.endpoint), budgetOf({ ms: 600_000 }));
+    assert.equal(outcome.kind, "connected");
+    if (outcome.kind !== "connected") return;
+    const { session } = outcome;
+    await session.probeScreenshot();
+    assert.equal(await session.pageSource(AbortSignal.timeout(5_000)), "<hierarchy/>");
+    assert.deepEqual(await session.readWebAddress(AbortSignal.timeout(5_000)), { url: "https://shop.example/" });
+    for (const key of ["GET /screenshot", "GET /source", "GET /contexts", "GET /url"]) {
+      assert.equal(fake.seen.filter((k) => k === key).length, 2, `${key} 重试一次`);
+    }
+  } finally {
+    await fake.close();
+  }
+
+  const slow = await fakeWebDriver({ sessionCapabilities: IOS_SAFARI, routes: { "GET /screenshot": { delayMs: 1_000 } } });
+  try {
+    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(webReq("ios", slow.endpoint), budgetOf({ ms: 600_000 }));
+    assert.equal(outcome.kind, "connected");
+    if (outcome.kind !== "connected") return;
+    await assert.rejects(outcome.session.probeScreenshot(), (e) => commandFailureKind(e) === "client_timeout");
+    assert.equal(slow.seen.filter((k) => k === "GET /screenshot").length, 1, "超时不重试");
+  } finally {
+    await slow.close();
   }
 });
 

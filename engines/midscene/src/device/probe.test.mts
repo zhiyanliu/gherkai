@@ -1,7 +1,7 @@
 // 能力探测的单测（ADR 0052 决策 5；决策 2 的失败归级）。运行：npx tsx --test src/device/probe.test.mts。
 //
-// 假客户端按脚本回结果，覆盖：网页上下文三类结论的归类真值表（重试后零候选、有候选而只读命令失败、列上下文失败、传输层错误、
-// 原生只读命令也失败时先查会话状态）、只认属于被测对象的候选、应用目标不探测网页上下文、探测命令只经探测实例发出且不自设放弃式
+// 假客户端按脚本回结果，覆盖：网页上下文三类结论的归类真值表（重试后零候选、切入成功后只读命令持续失败、切入本身失败、列上下文
+// 失败、传输层错误、原生只读命令也失败时先查会话状态）、只认属于被测对象的候选、应用目标不探测网页上下文、探测命令只经探测实例发出且不自设放弃式
 // 计时、坐标比例的两级来源与都失败时的执行前失败、/status 的 Appium 版本，以及获取预算中止即停。WebdriverIO 与真机的真实行为
 // （客户端超时是否真的生效、iOS 26 的挂起形态）不在这里证明：前者由 appium.test.mts 的真实运行层负责，后者列入真机验收。
 import { test } from "node:test";
@@ -10,13 +10,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser } from "webdriverio";
+import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
 import { SCALE_UNKNOWN_MESSAGE, createCapabilityProbe, type ProbeDeps } from "./probe.mjs";
-import { ACQUIRE_TIMEOUT_MESSAGE, SESSION_LOST_MESSAGE, type AcquireBudget, type AppiumSession } from "./surface.mjs";
+import { ACQUIRE_TIMEOUT_MESSAGE, type AcquireBudget, type AppiumSession } from "./surface.mjs";
 import { PROBE_TIMEOUT_MS, WEB_CONTEXT_RELIST_DELAY_MS } from "./limits.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
-// ---- 失败形态（与 webdriver 10.0.2 抛出的错误形态相同，状态码按 appium.mts 的约定挂在 statusCode 上）----
+// ---- 失败形态（与 webdriver 10.0.2 抛出的错误形态相同；状态码写成错误自身的 statusCode，httpStatusOf 同样认这种形态）----
 
 const clientTimeout = (): Error => Object.assign(
   new Error('WebDriverError: Request timed out! Consider increasing the "connectionRetryTimeout" option. when running "url" with method "GET"'),
@@ -58,6 +59,8 @@ interface Script {
   contexts?: Array<unknown[] | Error>;
   /** 探测实例上只读命令（getUrl）依次的结果。 */
   reads?: Step[];
+  /** 探测实例上切入网页上下文（switchContext）依次的结果。 */
+  switches?: Step[];
   /** 会话建好时的当前上下文。 */
   initialContext?: string;
   currentContextFails?: boolean;
@@ -75,6 +78,7 @@ function fakeSession(s: Script) {
   const calls: string[] = [];
   const contexts = [...(s.contexts ?? [])];
   const reads = [...(s.reads ?? [])];
+  const switches = [...(s.switches ?? [])];
   let current = s.initialContext ?? "NATIVE_APP";
   const exec = {
     async takeScreenshot() {
@@ -94,7 +98,12 @@ function fakeSession(s: Script) {
       if (next instanceof Error) throw next;
       return next;
     },
-    async switchContext(name: string) { calls.push(`probe.switchContext:${name}`); current = name; },
+    async switchContext(name: string) {
+      calls.push(`probe.switchContext:${name}`);
+      const next = switches.shift() ?? "ok";
+      if (next instanceof Error) throw next;
+      current = name;
+    },
     async getUrl() {
       calls.push("probe.getUrl");
       if (s.readGate) await s.readGate;
@@ -273,6 +282,63 @@ test("传输层错误（连接层错误码、HTTP 502 / 503 / 504）：「探测
   }
 });
 
+test("真值表：只有两次尝试都切入成功、只读命令都失败、最后一次不是传输层错误、且原生只读命令正常，才确认「不提供」", async () => {
+  const one = ["NATIVE_APP", "WEBVIEW_8152"];
+  const rows: Array<{ label: string; contexts: Script["contexts"]; switches?: Step[]; reads?: Step[]; verdict: string; urlReads: number }> = [
+    { label: "切入两次都被服务端报错，从未读地址", contexts: [one, one], switches: [runtimeDomainMissing(), runtimeDomainMissing()],
+      verdict: "probe_error", urlReads: 0 },
+    { label: "切入两次都超时", contexts: [one, one], switches: [clientTimeout(), clientTimeout()], verdict: "probe_error", urlReads: 0 },
+    { label: "切入两次都遇到连接层错误", contexts: [one, one], switches: [connectionReset(), connectionReset()],
+      verdict: "probe_error", urlReads: 0 },
+    { label: "第一次切入失败、重试切入并读成功", contexts: [one, one], switches: [runtimeDomainMissing(), "ok"], reads: ["ok"],
+      verdict: "available", urlReads: 1 },
+    { label: "第一次切入失败、重试切入成功但读失败：只读命令只有一次失败的证据", contexts: [one, one],
+      switches: [runtimeDomainMissing(), "ok"], reads: [runtimeDomainMissing()], verdict: "probe_error", urlReads: 1 },
+    { label: "第一次读失败、重试时切入失败", contexts: [one, one], switches: ["ok", runtimeDomainMissing()],
+      reads: [runtimeDomainMissing()], verdict: "probe_error", urlReads: 1 },
+    { label: "第一次列上下文失败、重试时切入成功但读失败", contexts: [connectionReset(), one], reads: [runtimeDomainMissing()],
+      verdict: "probe_error", urlReads: 1 },
+    { label: "两次读都被服务端报错", contexts: [one, one], reads: [runtimeDomainMissing(), runtimeDomainMissing()],
+      verdict: "unavailable", urlReads: 2 },
+    { label: "两次读都超时", contexts: [one, one], reads: [clientTimeout(), clientTimeout()], verdict: "unavailable", urlReads: 2 },
+    { label: "第一次读遇到连接层错误、重试读被服务端报错：重试区分出了瞬时故障", contexts: [one, one],
+      reads: [connectionReset(), runtimeDomainMissing()], verdict: "unavailable", urlReads: 2 },
+    { label: "第一次读被服务端报错、重试读遇到网关错误：最后一次是传输层错误", contexts: [one, one],
+      reads: [runtimeDomainMissing(), gateway()], verdict: "probe_error", urlReads: 2 },
+  ];
+  for (const row of rows) {
+    const s: Script = { device: "ios", uiKind: "web", contexts: row.contexts, switches: row.switches, reads: row.reads };
+    const h = probeWith(s);
+    const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+    assert.ok(r.ok, row.label);
+    assert.equal(r.value.webContext, row.verdict, row.label);
+    assert.equal(h.calls.filter((c) => c === "probe.getUrl").length, row.urlReads, row.label);
+    assert.equal(r.value.inputContext, row.verdict === "available" ? "web" : "native", row.label);
+    if (row.verdict !== "available") {
+      // 失败之后都经生命周期通道核对回到原生上下文、在原生上下文截图核对一次
+      assert.equal(h.calls.at(-1), "exec.takeScreenshot", row.label);
+      assert.ok(h.calls.slice(h.calls.lastIndexOf("session.currentContext")).length <= 3, row.label);
+      assert.equal(h.current(), "NATIVE_APP", row.label);
+    }
+    assert.ok(h.logs.some((l) => l.includes("切入网页上下文失败")) === (row.switches?.some((x) => x instanceof Error) ?? false),
+      `${row.label}：切入失败单独记日志`);
+  }
+});
+
+test("切入网页上下文两次都失败、原生只读命令也失败：先查会话状态，丢失归 session_lost，仍在运行为「探测出错」", async () => {
+  const script = (): Script => ({
+    device: "ios", uiKind: "web", contexts: [["NATIVE_APP", "WEBVIEW_1"], ["NATIVE_APP", "WEBVIEW_1"]],
+    switches: [runtimeDomainMissing(), runtimeDomainMissing()], screenshot: connectionReset(),
+  });
+  const lost = probeWith(script());
+  const r1 = await lost.capability.run(lost.session, { device: "ios", uiKind: "web" }, budget(), async () => "COMPLETED");
+  assert.deepEqual(r1, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
+  const running = probeWith(script());
+  const r2 = await running.capability.run(running.session, { device: "ios", uiKind: "web" }, budget(), async () => "RUNNING");
+  assert.ok(r2.ok);
+  assert.equal(r2.value.webContext, "probe_error");
+});
+
 test("原生只读命令也失败：先查会话状态，不是 RUNNING 归 session_lost，仍在运行为「探测出错」", async () => {
   const script = (): Script => ({
     device: "android", uiKind: "web",
@@ -282,7 +348,7 @@ test("原生只读命令也失败：先查会话状态，不是 RUNNING 归 sess
   });
   const lost = probeWith(script());
   const r1 = await lost.capability.run(lost.session, { device: "android", uiKind: "web" }, budget(), async () => "STOPPING");
-  assert.deepEqual(r1, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_MESSAGE } });
+  assert.deepEqual(r1, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
 
   const running = probeWith(script());
   const r2 = await running.capability.run(running.session, { device: "android", uiKind: "web" }, budget(), async () => "RUNNING");
@@ -304,7 +370,7 @@ test("会话建好后连原生上下文都切不回：先查会话状态，丢�
   const s: Script = { device: "android", uiKind: "web", initialContext: "CHROMIUM", switchToNativeFails: true };
   const h = probeWith(s);
   const r = await h.capability.run(h.session, target(s), budget(), async () => "COMPLETED");
-  assert.deepEqual(r, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_MESSAGE } });
+  assert.deepEqual(r, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
   assert.ok(!h.calls.includes("probe.getContexts"), "会话已丢失，不再探测网页上下文");
 });
 
@@ -409,7 +475,7 @@ test("坐标比例回退也失败：执行前失败 engine_error「无法确定�
 
   const lost = probeWith(script());
   const r2 = await lost.capability.run(lost.session, { device: "ios", uiKind: "web" }, budget(), async () => "STOPPING");
-  assert.deepEqual(r2, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_MESSAGE } });
+  assert.deepEqual(r2, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
 
   const badShot = probeWith({ ...script(), pageSource: IOS_SOURCE(390, 844), screenshot: "bm90IGEgcG5n" });
   const r3 = await badShot.capability.run(badShot.session, { device: "ios", uiKind: "web" }, budget(), async () => "RUNNING");

@@ -208,8 +208,8 @@ def event_from_json(d: dict) -> Event:
             message=redact_secrets(d.get("message")) if present else None,  # 预热失败的消息可能带地址（ADR 0035 决策 5）
         )
     if t == "session_opened":
-        # 远程访问会话打开（ADR 0051 决策 4）：origin 封闭集合（core 按它分支：attempted 不写代表会话、永远在未确认集里）；
-        # sessionId 为 null 时 name 必须有值（配对键回退）。device 不透明原样搬运。
+        # 会话打开（ADR 0051 决策 4；设备与桌面 worker 都发）：origin 封闭集合（core 按它分支：attempted 不写代表会话、
+        # 永远在未确认集里）；sessionId 为 null 时 name 必须有值（配对键回退）。device 不透明原样搬运。
         origin = d.get("origin")
         if origin not in ("created", "discovered", "attempted"):
             raise ValueError(f"session_opened 的 origin 取值未知：{origin!r}（不符合 worker↔core 协议）")

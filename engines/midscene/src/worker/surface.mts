@@ -185,8 +185,9 @@ export interface SurfaceDeps {
   /** 两种 Agent 共用的构造项（报告与执行记录的开关、模型配置等，generateReport 与 persistExecutionDump 同真同假，ADR 0052 决策 7）。
    *  各实现在其上只加自己的项：桌面加 forceChromeSelectRendering，设备加重规划上限（ADR 0044 决策 2）。 */
   agentOpts: AgentOpt;
-  /** 产物上传器：设备实现经 toReportRef 上传 device-session.json 并得到链接。 */
-  uploader: Pick<ArtifactUploader, "toReportRef" | "refFor">;
+  /** 产物上传器：设备实现正常释放时经 toReportRef 上传 device-session.json 并得到链接；中断释放时经 enqueue 交后台队列，
+   *  由停止路径的队列排空带上。 */
+  uploader: Pick<ArtifactUploader, "toReportRef" | "refFor" | "enqueue">;
   /** 产物落点根（与 evidence 落点同一判据）；undefined 表示本 run 不产产物（`--no-report` 方式），实现不写诊断文件与原始控件树。 */
   artifactRoot: string | undefined;
   /** 请求进入终结，与收到停止信号走同一条路径（run-scope 的信号处理：释放、兜底上传、排空、退出）。设备实现在会话建立后注册的
@@ -266,7 +267,8 @@ export interface TargetSurface {
    *  - 设备：进入时发出执行令牌并新建本次 act 的中止控制；run 结束（返回或抛出）的那一刻撤销令牌；结果未知时命令守卫中止这个
    *    signal；进入终结（release 的 interrupt 模式）时立即撤销令牌并中止它（ADR 0052 决策 6；ADR 0051 决策 5 阶段 1）。
    *    窗口内命令守卫判定过结果未知或会话丢失时，execute 以带该归类标记的异常拒绝——即便 run 正常返回（handler 吞掉了守卫的
-   *    异常），或 run 抛出的是 Midscene 包装后的另一个异常；其余异常原样抛出，是否带标记取决于抛出方。 */
+   *    异常），或 run 抛出的是 Midscene 包装后的另一个异常；已带归类的与断言异常原样抛出，其余挂 engine_error（设备路径没有
+   *    network_error 出口）。 */
   execute<T>(run: (abortSignal: AbortSignal | undefined) => Promise<T>): Promise<T>;
 
   /** 导航或启动应用：内建导航 step 的执行面，打开 address（ADR 0020 第 3 条；ADR 0048 决策 7）。
@@ -315,7 +317,10 @@ export interface TargetSurface {
    *  - interrupt：调用的那一刻即进入终结——桌面唤醒建连重试的退避，设备中止当前 act 的 signal 并撤销执行令牌；之后等在途的
    *    建会话请求一段窗口（桌面为 INFLIGHT_SETTLE_MS，设备为终结阶段 1 的 10 秒），窗口内没有返回的发一对 attempted 事件，再
    *    执行释放（设备即终结四阶段的前三段，不调 deleteSession）。阶段 4 的兜底上传与排空归 run-scope 的收尾序列；进入终结后
-   *    run-scope 不再为在途的 step 发 step_done，也不发 scope_done（ADR 0051 决策 5 阶段 1），所以这一模式返回的 reportRefs 不被使用。
+   *    run-scope 不再为在途的 step 发 step_done，也不发 scope_done（ADR 0051 决策 5 阶段 1），所以这一模式返回的 reportRefs 不被使用；
+   *    设备的 device-session.json 只写盘并交给截图后台队列，由阶段 4 的排空带上。
+   *  - 升级（设备）：正常释放进行中到达的 interrupt 不重新进入终结，而是让同一次终结升级——尚未开始的 deleteSession 不再发出、
+   *    不做 normal 模式的诊断上传，device-session.json 按 interrupt 模式交给后台队列；已在途的 deleteSession 不打断，由它自己的 5 秒上限封顶。
    *  重入安全：信号处理与主流程的出口可能先后或同时调用。同一会话不重复释放、session_closed 不重复发；设备的终结只进入一次，
    *  后到的调用等在途那一次结束并返回同一结果；桌面保留现有清理守卫的重入语义（仍有未确认的会话时以最终语义再清一次）。 */
   release(mode: ReleaseMode): Promise<ReleaseOutcome>;
@@ -329,13 +334,23 @@ const CLASSIFICATION_KEY = Symbol.for("gherkai.worker-midscene.step-classificati
 // cause 链的查找上限，与 run-scope 瞬时网络判定遍历 cause 链的上限相同，同时防环。
 const MAX_CAUSE_DEPTH = 8;
 
+/** 挂在执行异常上的归类标记：step 级归类，另可带一项命令守卫查到的会话事实。runStep 只用其中的类别与消息；那项事实只给
+ *  驱动适配器用。 */
+export interface StepClassification extends StepFailure {
+  /** 命令守卫在这条命令失败之后查过一次会话状态、查到仍为 RUNNING 时为 true。没查（窗口已关闭的晚到失败）、查询本身失败、
+   *  会话已不在运行，或标记不是命令守卫挂的，都不带这个键。驱动适配器只在它为 true、类别为结果已知的 engine_error 时，才按实测过的
+   *  驱动错误文本再归类并缓存能力否定（ADR 0051 决策 4「仍为 RUNNING 时才允许匹配两条实测过的驱动错误文本」）。 */
+  sessionRunningConfirmed?: true;
+}
+
 /** 把 step 级归类挂到异常上（写）。命令守卫在抛出前、execute 在重新抛出 Midscene 包装后的异常前调用（ADR 0052 决策 6）。
  *  error 是可扩展的 Error 时挂在它自己身上并返回同一个对象；否则（字符串、裸对象、冻结的异常）包成一个以 failure.message 为消息、
- *  原抛出物为 cause 的新 Error 再挂。已有标记的异常再挂一次即覆盖。用法：`throw attachClassification(e, failure)`。 */
-export function attachClassification(error: unknown, failure: StepFailure): Error {
+ *  原抛出物为 cause 的新 Error 再挂。已有标记的异常再挂一次即覆盖，新标记不带的会话事实随之清除。会话事实只在取值为 true 时记下。
+ *  用法：`throw attachClassification(e, failure)`。 */
+export function attachClassification(error: unknown, failure: StepClassification): Error {
   const target = error instanceof Error && Object.isExtensible(error) ? error : new Error(failure.message, { cause: error });
   Object.defineProperty(target, CLASSIFICATION_KEY, {
-    value: { errorType: failure.errorType, message: failure.message },
+    value: toClassification(failure.errorType, failure.message, failure.sessionRunningConfirmed),
     enumerable: false,
     configurable: true,
     writable: true,
@@ -345,20 +360,27 @@ export function attachClassification(error: unknown, failure: StepFailure): Erro
 
 /** 读异常上的 step 级归类（读）：runStep 的通用异常分类先调它，读到即按它归类，读不到返回 null、交瞬时网络判定。
  *  从最外层沿 cause 链向内找，取第一个（最外层的）标记；只认封闭集合 STEP_ERROR_TYPES 里的类别且消息为字符串，其余视为没有标记。
- *  返回副本，改写它不影响异常上的标记。 */
-export function readClassification(error: unknown): StepFailure | null {
+ *  会话事实只认 true，没有时返回的对象不带这个键。返回副本，改写它不影响异常上的标记。 */
+export function readClassification(error: unknown): StepClassification | null {
   let current: unknown = error;
   for (let depth = 0; depth < MAX_CAUSE_DEPTH; depth++) {
     if (current === null || typeof current !== "object") return null;
     const mark = (current as { [CLASSIFICATION_KEY]?: unknown })[CLASSIFICATION_KEY];
     if (mark !== undefined) {
-      const { errorType, message } = mark as Partial<StepFailure>;
+      const { errorType, message, sessionRunningConfirmed } = mark as { [K in keyof StepClassification]?: unknown };
       const known = (STEP_ERROR_TYPES as readonly unknown[]).includes(errorType);
-      return known && typeof message === "string" ? { errorType: errorType as StepErrorType, message } : null;
+      return known && typeof message === "string"
+        ? toClassification(errorType as StepErrorType, message, sessionRunningConfirmed)
+        : null;
     }
     current = (current as { cause?: unknown }).cause;
   }
   return null;
+}
+
+/** 标记的规范形状：会话事实只在取值恰为 true 时出现。 */
+function toClassification(errorType: StepErrorType, message: string, sessionRunningConfirmed: unknown): StepClassification {
+  return sessionRunningConfirmed === true ? { errorType, message, sessionRunningConfirmed: true } : { errorType, message };
 }
 
 // 编译期核对：桌面预热的失败返回值可以直接当 scope 级终止用（ScopeTermination 的文档承诺了这一点）。

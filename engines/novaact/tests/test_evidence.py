@@ -698,12 +698,17 @@ def test_scope_end_drains_before_flush(main_fakes, logs_dir):
 
 
 def test_stop_signal_path_drains_after_session_release(main_fakes):
-    """协作停：会话上下文退出、释放完会话之后才排空，用退出段预算；不 flush（中断产物留本地）。
-    两步释放（关 NovaAct 连接、Stop 会话）也进同一条 trace——把 drain 挪到释放之前这里立刻变红。"""
+    """协作停：会话上下文退出、释放完会话之后才排空，用退出段预算；不 flush（中断产物留本地）。停止信号在 NovaAct 连接建立时到达，
+    两步释放（关 NovaAct 连接、Stop 会话）因此都进同一条 trace——把 drain 挪到释放之前这里立刻变红。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
-    main_fakes.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct(trace=trace))
-    _install_browser_client(main_fakes, on_enter=lambda: rs._stop.set(), trace=trace)
+
+    def _nova_then_stop(**k):
+        rs._stop.set()  # 停止信号在 NovaAct 连接建立时到达（Start 返回时就到达的情形不建 NovaAct 连接，见 test_session_events.py）
+        return _FakeNovaAct(trace=trace)
+
+    main_fakes.setattr(rs, "NovaAct", _nova_then_stop)
+    _install_browser_client(main_fakes, trace=trace)
     assert rs.main() == 0
     assert trace == [("nova_exit",), ("session_stop",), ("drain", rs.EVIDENCE_DRAIN_EXIT_S)]
 

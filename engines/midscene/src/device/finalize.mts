@@ -7,15 +7,20 @@
 //     又不是 STOPPING / COMPLETED 时先 deleteSession（至多 5 秒、不重试、不阻塞 Stop），再终结核对、释放、发 session_closed；
 //     返回之后调用方发 scope_done、排空上传队列。deleteSession 能缩短停止到 COMPLETED 的时间、少计设备分钟（实测 52 秒对 73 秒）。
 //   - interrupt（停止信号与进程级异常）：不调 deleteSession（Stop 决定计费，deleteSession 只是 Appium 侧的收尾）。
-// 两种模式都按同一组阶段执行，各阶段的截止线相对本阶段开始的时刻计（三段之和不超过进入终结后的 10 + 5 + 25 秒）：
-//   1. 等在途的 Create（10 秒）：返回即已登记 ARN 并发出 session_opened(created)；到线仍未返回的记为待核，终结核对结束之后才
-//      返回的只记日志、不再登记（它已按 attempted 上报）。正常模式下不会有在途的 Create（获取已经返回），这一段为空。
+// 两种模式都按同一组阶段执行，前三个阶段依次接续，各阶段的截止线在本阶段开始时取定、之后不再延后；中断路径上阶段之间没有别的
+// 等待，三段之和不超过进入终结后的 10 + 5 + 25 秒（ADR 0051 决策 5 的各阶段截止线）。attempted 事件与释放并行写出，
+// 不占这三段：
+//   1. 等在途的 Create（10 秒）：返回即已登记 ARN（session_opened(created) 的写出可能仍在进行，本阶段不等它；已登记的不再记为
+//      待核）；到线仍未返回的记为待核，终结核对结束之后才返回的只记日志、不再登记（它已按 attempted 上报）。正常模式下不会有
+//      在途的 Create（获取已经返回），这一段为空。
 //   2. 终结核对（5 秒）：按名列举（含分页）处理全部待核尝试，命中的登记进待清理集并发 session_opened(discovered)；阶段结束仍待核的
-//      各发 session_opened(attempted) 与 session_closed(unconfirmed)。列举为空不构成排除。
+//      各发 session_opened(attempted) 与 session_closed(unconfirmed)，与阶段 3 并行写出。列举为空不构成排除。
 //   3. 释放（25 秒，全部会话并行、共享截止线）：每个会话先 Get；状态不是 STOPPING / COMPLETED（含排队中的 PENDING_CONCURRENCY、
 //      准备中的 PREPARING 与 RUNNING）或 Get 失败时发 Stop；Stop 报错或返回体不是这两个状态时补查一次 Get；仍未确认则退避后再
 //      Stop 一次、再补查。确认只认 STOPPING / COMPLETED，到线仍未确认记 unconfirmed。被拒方案是「仍为 RUNNING 才发 Stop」：排队或
-//      准备中的会话不 Stop 就不会撤回，之后照常进入 RUNNING 并计费到 150 分钟上限。
+//      准备中的会话不 Stop 就不会撤回，之后照常进入 RUNNING 并计费到 150 分钟上限。换台时被替换的会话与获取期按名找回的会话，
+//      获取侧已按同一规则处理过一次：已确认的不再查，没确认的在这里照常处理（获取侧在终结接手前已发出的 Stop 不撤回，这里照常
+//      先 Get 再决定；observedS 的止点仍按 observedSeconds 取第一次发出 Stop 或确认已停止的时刻中较早者，含获取侧的那次处理）。
 // 阶段 4 的中断兜底上传与截图队列排空归调用方（worker/run-scope.mts 的收尾序列），在本块返回之后执行。
 //
 // 只进入一次：重复调用（信号重复、超时与信号交叠、两种模式先后到达）返回同一个结果，四阶段不重新进入。每个真实会话按 ARN 只发
@@ -56,12 +61,12 @@ export function createDeviceFinalizer(sessions: DeviceFarmSessionBlock): DeviceF
 
 async function finalizeOnce(s: DeviceFarmSessionBlock, mode: ReleaseMode, hooks: FinalizeHooks): Promise<{ releaseFailed: boolean }> {
   const reg = s.registry;
-  reg.closed = true;  // 同步置位：此后获取侧不再发新的 Create
+  reg.closed = true;  // 同步置位：此后获取侧不再发新的 Create，也不再对不再使用的会话发新的 Get / Stop
 
   // 阶段 1：等在途的 Create。
   const inflight = [...reg.inflight];
   if (inflight.length > 0) {
-    await settleBy(s, Promise.allSettled(inflight.map((e) => e.done)), s.now() + FINALIZE_AWAIT_CREATE_MS);
+    await settleBy(s, Promise.allSettled(inflight.map((e) => e.recorded)), s.now() + FINALIZE_AWAIT_CREATE_MS);
     for (const e of inflight) {
       if (e.settled) continue;
       reg.pending.set(e.name, e.attempt);
@@ -79,14 +84,16 @@ async function finalizeOnce(s: DeviceFarmSessionBlock, mode: ReleaseMode, hooks:
   reg.attemptedFrozen = true;  // 此后晚到的 Create 结果只记日志：它已在下面按结果未知上报，再登记会多出不成对的 session_opened
   const attempted = [...reg.pending.keys()];
   reg.pending.clear();
-  for (const name of attempted) await emitAttempted(s, name);
 
-  // 阶段 3：释放。截止线一到即取下各会话的结论，之后返回的调用不再改它。
+  // 阶段 3：释放。截止线在写 attempted 事件之前取定，各会话的 Get / Stop 先发出，attempted 事件随后与释放并行写出：事件出口的写入
+  // 可能要数秒一条，不能推迟 Stop、也不占释放截止线。截止线一到即取下各会话的结论，之后返回的调用不再改它。
   const targets = [...reg.sessions.values()];
   const frozen = { value: false };
   const deadline = s.now() + FINALIZE_RELEASE_MS;
-  await settleBy(s, Promise.all(targets.map((t) => releaseOne(s, t, deadline, frozen))), deadline);
-  frozen.value = true;
+  const releasing = settleBy(s, Promise.all(targets.map((t) => releaseOne(s, t, deadline, frozen))), deadline)
+    .then(() => { frozen.value = true; });
+  for (const name of attempted) await emitAttempted(s, name);
+  await releasing;
   const facts: SessionClosedFact[] = targets.map((t) => ({
     sessionId: t.arn,
     name: t.name,
@@ -139,7 +146,7 @@ async function deleteAppiumSession(s: DeviceFarmSessionBlock, del: () => Promise
 
 /** 释放一个会话（Stop 规则见文件头）。frozen 置位之后不再发调用、不再改结论。 */
 async function releaseOne(s: DeviceFarmSessionBlock, t: TrackedSession, deadline: number, frozen: { value: boolean }): Promise<void> {
-  if (t.confirmedAt !== null) return;  // 换台时 Stop 的返回体已确认
+  if (t.confirmedAt !== null) return;  // 换台或获取期按名找回时已确认停止（Get 或 Stop 的返回体为 STOPPING / COMPLETED）
   const bound = { deadline, outer: null };
   const confirm = (info: Awaited<ReturnType<DeviceFarmSessionBlock["getWithin"]>>): boolean => {
     if (frozen.value || !isStopped(info?.status)) return false;

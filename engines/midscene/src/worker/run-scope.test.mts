@@ -1166,20 +1166,19 @@ function exitDeps(overrides: Partial<import("./run-scope.mjs").FailureExitDeps> 
 }
 
 test("exitAfterFailure：预热失败 → 先释放会话、再排空队列、再发 scope_done{error, 归因, sessionId}，退出码 0", async () => {
-  const { exitAfterFailure } = await importMod();
-  const { WarmupFailureError, WARMUP_DENIED_MESSAGE } = await import("../lib/tunnel-warmup.mjs");
+  const { exitAfterFailure, ScopeTerminationError } = await importMod();
+  const { WARMUP_DENIED_MESSAGE } = await import("../lib/tunnel-warmup.mjs");
   const trace: string[] = []; const events: Record<string, unknown>[] = [];
-  const rc = await exitAfterFailure(new WarmupFailureError({ errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE }), exitDeps({ trace, events } as any));
+  const rc = await exitAfterFailure(new ScopeTerminationError({ errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE }), exitDeps({ trace, events } as any));
   assert.equal(rc, 0);
   assert.deepEqual(trace, ["cleanup", "drain", "emit:scope_done"]);  // 释放先于事件（ADR 0051 决策 5）
   assert.deepEqual(events, [{ type: "scope_done", scopeId: "s", sessionId: "sess-1", status: "error", errorType: "precheck_failed", message: WARMUP_DENIED_MESSAGE }]);
 });
 
 test("exitAfterFailure：预热失败且释放会话失败 → scope_done 照发（归因不被吞）、退出码 1；不是 fatal、不是 80", async () => {
-  const { exitAfterFailure } = await importMod();
-  const { WarmupFailureError } = await import("../lib/tunnel-warmup.mjs");
+  const { exitAfterFailure, ScopeTerminationError } = await importMod();
   const trace: string[] = []; const events: Record<string, unknown>[] = [];
-  const rc = await exitAfterFailure(new WarmupFailureError({ errorType: "engine_error", message: "m" }), exitDeps({ trace, events, failed: true, networkExhausted: true } as any));
+  const rc = await exitAfterFailure(new ScopeTerminationError({ errorType: "engine_error", message: "m" }), exitDeps({ trace, events, failed: true, networkExhausted: true } as any));
   assert.equal(rc, 1);
   assert.deepEqual(trace, ["cleanup", "drain", "emit:scope_done"]);
   assert.equal(events[0].errorType, "engine_error");
@@ -1325,17 +1324,51 @@ test("step 顺序：没有 evidence 落点时不读地址、不采快照（只�
   assert.deepEqual(trace, ["emit:step_started", "preStep", "execute", "aiAct", "execute:end", "restore:passed", "emit:step_done"]);
 });
 
-test("step 前核对失败 → 本 step 记 error（类别与消息取返回值），handler 与 AI 都不调；复原与快照照常执行", async () => {
+test("step 前核对失败（AI step）→ 本 step 记 error（类别与消息取返回值），不调 AI；复原与快照照常执行，evidence 照产并引用已写盘的原始控件树", async () => {
   const { runStep } = await importMod();
   const trace: string[] = [];
+  const pageSource = path.join(os.tmpdir(), "page-source-0.xml");
   const { seam, sink, events } = deviceSeam(trace, {
     preStep: async () => { trace.push("preStep"); return { errorType: "engine_error", message: "未能切回原生界面" }; },
+    snapshot: async (f: any) => {
+      trace.push(`snapshot:${f.kind}:${f.status}`);
+      return { snapshot: { url: null, url_missing: "no_web_context", step_kind: f.kind, controls: null, controls_missing: "error",
+        page_source_path: pageSource, page_source_truncated: false }, failure: null };
+    },
   });
   assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, evidenceHook(trace)), "error");
-  assert.ok(!trace.includes("execute") && !trace.includes("aiAct") && !trace.includes("handler"), trace.join(" "));
-  assert.deepEqual(trace.slice(0, 5), ["emit:step_started", "preStep", "readAddress:ai:error", "restore:error", "snapshot:ai:error"]);
+  assert.ok(!trace.includes("execute") && !trace.includes("aiAct"), trace.join(" "));
+  assert.deepEqual(trace, ["emit:step_started", "preStep", "readAddress:ai:error", "restore:error", "snapshot:ai:error",
+    "emit:step_done", "enqueue:page-source-0.xml"]);
   const done = events.find((e) => e.type === "step_done");
   assert.equal(done.errorType, "engine_error"); assert.equal(done.message, "未能切回原生界面");
+  // 设备上 AI step 一律产 evidence（ADR 0052 决策 2 第 4 步），没调 AI 时 acts 为空数组
+  assert.equal(done.reportRefs?.[0]?.kind, "evidence", "设备 AI step 在 step 前核对失败时同样产 evidence");
+  const doc = JSON.parse(fs.readFileSync(new URL(done.reportRefs[0].ref), "utf-8"));
+  assert.equal(doc.step_kind, "ai"); assert.equal(doc.status, "error"); assert.deepEqual(doc.acts, []);
+  assert.equal(doc.page_source, `file://${pageSource}`, "已写盘的原始控件树被 evidence 引用");
+});
+
+test("step 前核对失败（确定性 step）→ 不取句柄、不调 handler，记 error / engine_error", async () => {
+  const { runStep } = await importMod();
+  const { deterministic, _snapshot, _restore } = await import("./deterministic.mjs");
+  const saved = _snapshot();
+  let called = 0;
+  deterministic("点确定", { webdriver: { uiKinds: ["web"], handler: () => { called += 1; } } },
+    { description: "测试：step 前核对失败", example: "When 点确定" });
+  try {
+    const trace: string[] = [];
+    const { seam, sink, events } = deviceSeam(trace, {
+      preStep: async () => { trace.push("preStep"); return { errorType: "engine_error", message: "未能切回原生界面" }; },
+    });
+    assert.equal(await runStep(seam, "sc:0", step("When", "点确定"), 1, sink), "error");
+    assert.ok(!trace.includes("bindHandler") && !trace.includes("execute") && !trace.includes("handler"), trace.join(" "));
+    assert.equal(called, 0);
+    const done = events.find((e) => e.type === "step_done");
+    assert.deepEqual([done.status, done.errorType, done.message], ["error", "engine_error", "未能切回原生界面"]);
+  } finally {
+    _restore(saved);
+  }
 });
 
 test("复原失败 → 最终判定改 error、类别与消息取返回值；快照收到的是最终判定、读地址收到的是暂定判定", async () => {
@@ -1614,8 +1647,8 @@ test("停止信号：进入终结后在途 step 不再发 step_done、也不发 
 
 function econnreset(): Error { return Object.assign(new Error("connect ECONNRESET 10.0.0.1:443"), { code: "ECONNRESET" }); }
 
-/** 桌面实现的工厂：connectOverCDP 依 failures 次序决定第几次失败（true 即抛 ECONNRESET）。 */
-function desktopFactory(agent: any, opts: { core?: ReturnType<typeof fakeAgentCore>; failures?: boolean[]; page?: any } = {}) {
+/** 桌面实现的工厂：connectOverCDP 依 failures 次序决定第几次失败（true 即抛 ECONNRESET）；hooks 覆盖其余测试注入项（如退避序列）。 */
+function desktopFactory(agent: any, opts: { core?: ReturnType<typeof fakeAgentCore>; failures?: boolean[]; page?: any; hooks?: Record<string, unknown> } = {}) {
   const core = opts.core ?? fakeAgentCore();
   let attempt = 0;
   const createSurface = async (deps: any) => {
@@ -1623,6 +1656,7 @@ function desktopFactory(agent: any, opts: { core?: ReturnType<typeof fakeAgentCo
     return createDesktopSurface({ ...deps, agentOpts: {} }, desktopHooks(agent, opts.page ?? fakePage, {
       client: core.client,
       connectOverCDP: async () => { const fail = opts.failures?.[attempt++] ?? false; if (fail) throw econnreset(); return fakeBrowser(opts.page ?? fakePage); },
+      ...opts.hooks,
     }));
   };
   return { core, createSurface };
@@ -1743,6 +1777,26 @@ test("桌面停止信号落在 Start 在途：等待窗口内没有返回 → �
   assert.deepEqual(types(events), ["session_opened", "session_closed"]);
   assert.deepEqual([events[0].origin, events[0].sessionId, events[1].release, events[1].sessionId], ["attempted", null, "unconfirmed", null]);
   assert.equal(events[0].name, events[1].name);
+});
+
+test("桌面停止信号落在建连退避期间：退避立即结束、不再发第二次 Start", async () => {
+  const { runScope } = await importMod();
+  const { core, createSurface } = desktopFactory(scopeAgent(), {
+    failures: [true, true, true, true], hooks: { backoffMs: [60_000, 60_000, 60_000] },
+  });
+  const { io, events, signal, exited } = scopeIo(createSurface);
+  // 这条路径上 runScope 最终以建连异常拒绝（收到停止信号即不再重试，异常原样穿出）；接住它，只看它何时结束
+  let settled = false;
+  void runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io).then(() => { settled = true; }, () => { settled = true; });
+  while (!events.some((e) => e.type === "session_closed")) await new Promise((r) => setTimeout(r, 1));
+  signal();
+  while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(core.names.length, 1, "退避被打断后不再发 StartBrowserSession");
+  // 只看 exited() 抓不住「退避没被唤醒」：收尾不等建连循环，退出照样很快发生，只是建连循环要等满退避时长才结束
+  const deadline = Date.now() + 2_000;
+  while (!settled && Date.now() < deadline) await new Promise((r) => setTimeout(r, 1));
+  assert.ok(settled, "停止信号唤醒退避，建连循环不等满退避时长");
+  assert.deepEqual(types(events), ["session_opened", "session_closed"]);
 });
 
 test("桌面缺本次运行的编号（RUN_ID）→ 构造期报错、点名该变量，不建会话、不发任何事件", async () => {

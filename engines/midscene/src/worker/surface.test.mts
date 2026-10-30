@@ -3,10 +3,13 @@
 //
 // 锁住的是 runStep 依赖的几条读法：标记挂上后原样读回、不改异常对外的文本与可枚举键；沿 cause 链向内找，最外层的标记优先
 // （执行窗口把守卫记下的归类重新挂到 Midscene 包装后的异常上时，读到的必须是这一层）；不认封闭集合之外的类别；
-// 抛出物不是可扩展的 Error 时包成一个新的 Error 再挂，原抛出物留在 cause 里。
+// 抛出物不是可扩展的 Error 时包成一个新的 Error 再挂，原抛出物留在 cause 里。另外锁住标记上「会话已确认仍为 RUNNING」这项
+// 事实的读写：只认 true、没有时读回的对象不带这个键，再挂一次不带它的标记即清除（驱动适配器据它决定能否按驱动文本再归类）。
 import { test } from "node:test";
 import assert from "node:assert";
-import { STEP_ERROR_TYPES, attachClassification, readClassification, type StepFailure } from "./surface.mjs";
+import {
+  STEP_ERROR_TYPES, attachClassification, readClassification, type StepClassification, type StepFailure,
+} from "./surface.mjs";
 
 const lost: StepFailure = { errorType: "session_lost", message: "远程访问会话在执行中途结束" };
 const unknownResult: StepFailure = { errorType: "engine_error", message: "设备在等待时间内没有回应，这一步可能已执行也可能未执行" };
@@ -96,4 +99,43 @@ test("抛出物不是可扩展的 Error（字符串、冻结的异常、裸对�
   assert.ok(fromPlain instanceof Error);
   assert.equal((fromPlain as Error & { cause?: unknown }).cause, plain);
   assert.deepEqual(readClassification(fromPlain), unknownResult);
+});
+
+// ---- 会话已确认仍为 RUNNING 的事实（ADR 0051 决策 4「仍为 RUNNING 时才允许匹配两条实测过的驱动错误文本」）----
+
+const knownFailure: StepFailure = { errorType: "engine_error", message: "设备命令执行失败：unknown error" };
+
+test("会话已确认仍为 RUNNING 的事实随标记原样读回", () => {
+  const confirmed: StepClassification = { ...knownFailure, sessionRunningConfirmed: true };
+  const e = attachClassification(new Error("unknown error"), confirmed);
+  assert.deepEqual(readClassification(e), confirmed);
+});
+
+test("没有这项事实的标记读回的对象不带这个键（会话状态没查过或查询失败的结果已知失败）", () => {
+  const e = attachClassification(new Error("unknown error"), knownFailure);
+  const mark = readClassification(e)!;
+  assert.deepEqual(mark, knownFailure);
+  assert.ok(!("sessionRunningConfirmed" in mark));
+});
+
+test("这项事实只认 true：其它取值一律视为没有，类别与消息照常读回", () => {
+  for (const forged of [false, "true", 1, null]) {
+    const e = attachClassification(new Error("x"), { ...knownFailure, sessionRunningConfirmed: forged } as unknown as StepClassification);
+    const mark = readClassification(e)!;
+    assert.deepEqual(mark, knownFailure, JSON.stringify(forged));
+    assert.ok(!("sessionRunningConfirmed" in mark), JSON.stringify(forged));
+  }
+});
+
+test("再挂一次不带这项事实的标记即清除它（驱动适配器改归类后的标记不再带着它）", () => {
+  const e = attachClassification(new Error("unable to resolve Intent"), { ...knownFailure, sessionRunningConfirmed: true });
+  attachClassification(e, { errorType: "capability_unavailable", message: "被测应用未处理该地址" });
+  assert.deepEqual(readClassification(e), { errorType: "capability_unavailable", message: "被测应用未处理该地址" });
+});
+
+test("读回的事实是副本的一部分：改写读回的对象不影响异常上的标记", () => {
+  const e = attachClassification(new Error("x"), { ...knownFailure, sessionRunningConfirmed: true });
+  const first = readClassification(e)! as { sessionRunningConfirmed?: unknown };
+  delete first.sessionRunningConfirmed;
+  assert.equal(readClassification(e)?.sessionRunningConfirmed, true);
 });

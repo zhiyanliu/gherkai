@@ -36,6 +36,8 @@ import time
 from pathlib import Path
 from typing import Iterable
 
+from gherkai_worker_novaact.lib.redact import redact_secrets
+
 # 按后缀显式打 Content-Type（与 Midscene uploader 同一规则，ADR 0024 两引擎语义对称）：boto3/s3transfer
 # **不猜** content type，默认落成 binary/octet-stream → presigned/控制台直开 trajectory .html（ADR 0027 选
 # .html 就是为「人能看」）会被当附件下载而非渲染。未列后缀不设（走 S3 默认）。
@@ -59,8 +61,9 @@ def _log(msg: str) -> None:
     安全（BufferedWriter 自带锁；「非重入」那个坑只在信号 handler 里写才撞，见 run_scope._on_signal）。
     **解释器 finalization 期除外**：daemon 线程在主线程退出后再写 buffered stderr 可能撞 `_enter_buffered_busy` 致命错——
     故 `drain` 超时放弃后队列线程转入静默（不再上传、不再写日志，见 `_abandoned`），主线程返回后它不再碰 stderr。
+    写出前经 redact_secrets：与 run_scope 的 `log` 同属 worker 写 stderr 的出口（ADR 0035 决策 5 的出口清单），云端原样进 CloudWatch。
     """
-    sys.stderr.write(f"{msg}\n")
+    sys.stderr.write(f"{redact_secrets(msg)}\n")
     sys.stderr.flush()
 
 

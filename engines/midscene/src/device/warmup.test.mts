@@ -13,7 +13,9 @@ import { fileURLToPath } from "node:url";
 import type { Browser } from "webdriverio";
 import { createDeviceWarmup, findWarmupMarker, type DeviceWarmupArgs } from "./warmup.mjs";
 import { DEVICE_WARMUP_ATTEMPTS } from "./limits.mjs";
-import { SESSION_LOST_MESSAGE, type AcquireBudget, type AppiumSession, type DriverAdapter } from "./surface.mjs";
+import {
+  SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE, type AcquireBudget, type AppiumSession, type DriverAdapter,
+} from "./surface.mjs";
 import {
   WARMUP_ATTEMPTS, WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, warmupErrorMessage,
 } from "../lib/tunnel-warmup.mjs";
@@ -64,6 +66,8 @@ interface HarnessOptions {
   nav?: (n: number) => Error | Promise<void> | void;
   /** 离开预热页的导航失败。 */
   leaveFails?: Error;
+  /** 离开预热页的导航返回之前调用（测试在这里中止获取预算）。 */
+  onLeave?: () => void;
   /** 读控件树一直挂着，直到传入的截止信号中止。 */
   blockSource?: boolean;
   /** 第 n 次（从 0 起）读控件树、给出结果之前调用。 */
@@ -88,6 +92,7 @@ function harness(opts: HarnessOptions = {}) {
   const navigate = async (label: string, address: string): Promise<void> => {
     if (address === "about:blank") {
       calls.push(`${label}:about:blank`);
+      opts.onLeave?.();
       if (opts.leaveFails) throw opts.leaveFails;
       return;
     }
@@ -320,6 +325,12 @@ test("url 路线就绪后导航到 about:blank 并切回原生上下文", async 
   assert.deepEqual(h.calls.slice(-2), ["openUrl:exec:about:blank", "native"]);
 });
 
+test("离开预热页的导航返回时获取预算已中止：不再切回原生上下文（进入终结即停）", async () => {
+  const h: ReturnType<typeof harness> = harness({ route: "url", onLeave: () => h.controller.abort(new Error("进入终结")) });
+  assert.equal(await h.run(), null, "就绪的判定不变，归因由设备侧接缝按预算改写");
+  assert.equal(h.calls.at(-1), "openUrl:exec:about:blank");
+});
+
 test("deep_link 路线就绪后不离开预热页：读到 READY 之后不再发任何导航", async () => {
   const h = harness({ route: "deep_link" });
   assert.equal(await h.run(), null);
@@ -348,7 +359,7 @@ test("拒绝与无法确认时不离开：DENIED 与重试耗尽都不导航 abo
 test("导航失败先查会话状态：非 RUNNING 归 session_lost，不再重导航", async () => {
   for (const status of ["STOPPING", "COMPLETED"]) {
     const h = harness({ nav: () => new Error("connection closed"), sessionStatus: async () => status });
-    assert.deepEqual(await h.run(), { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
+    assert.deepEqual(await h.run(), { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE });
     assert.equal(h.navCalls().length, 1, status);
     assert.equal(h.statusCalls.length, 1);
   }
@@ -390,10 +401,10 @@ test("归类标记的消息同样先脱敏再截断：标记消息里带着预�
   assert.ok(got!.message.includes("***"));
 });
 
-test("异常已带 session_lost 归类标记时直接归 session_lost，不必再查状态", async () => {
+test("异常已带 session_lost 归类标记时直接归 session_lost，不必再查状态；消息用执行前的那句（预热时 step 都还没有执行）", async () => {
   const lost = attachClassification(new Error("session ended"), { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
   const h = harness({ omitStatus: true, nav: () => lost });
-  assert.deepEqual(await h.run(), { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
+  assert.deepEqual(await h.run(), { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE });
   assert.equal(h.navCalls().length, 1);
 });
 
@@ -403,7 +414,7 @@ test("读控件树失败：先查会话状态，仍在运行则计一次尝试�
   assert.deepEqual(running.navCalls(), ["openUrl:exec", "openUrl:exec", "openUrl:exec:about:blank"]);
   assert.equal(running.statusCalls.length, 1);
   const lost = harness({ sources: [new Error("getPageSource failed")], sessionStatus: async () => "COMPLETED" });
-  assert.equal((await lost.run())?.errorType, "session_lost");
+  assert.deepEqual(await lost.run(), { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE });
   assert.equal(lost.navCalls().length, 1);
 });
 

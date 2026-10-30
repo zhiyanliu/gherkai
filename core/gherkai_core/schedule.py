@@ -113,8 +113,8 @@ def _heartbeat_wrap(events, poll_interval_s):
 
 
 # 停止后继续消费事件流的排空上界余量（秒，ADR 0034「停止后继续有界消费」）：发出停止请求后最多再等 grace 加这段余量
-# （从请求时刻起算，不含 stop() 自身等待 worker 退出的阻塞），让 worker 收 SIGTERM 后走完收尾（远程访问会话的 session_closed 要在
-# 这段里到达才能算进未确认集），之后不再等。
+# （从请求时刻起算，不含 stop() 自身等待 worker 退出的阻塞），让 worker 收 SIGTERM 后走完收尾（桌面与设备的会话都发 session_closed，
+# 要在这段里到达才能算进未确认集），之后不再等。
 DRAIN_MARGIN_S = 5.0
 
 

@@ -8,6 +8,8 @@
 //   - 输入：W3C 活动元素 sendKeys（element/active 加 element/value），在哪个上下文取活动元素由能力探测定（网页上下文可用即网页，
 //     否则原生）。回车、退格与清空也走这一条路：经活动元素发控制字符（回车 `\n`、退格 `\b`，清空为若干个 `\b`）。不用旧版
 //     `POST /keys`，也不在多条输入路线之间试错（被拒方案）；
+//   - 收起键盘：WebdriverIO 的 hideKeyboard（Appium 的跨平台端点，不是 `mobile:` 命令），不带参数，在原生上下文发出，不论输入
+//     上下文是网页还是原生；
 //   - 系统键：`mobile: pressButton` 只用于主屏（它只接受物理按键名）；iOS 没有系统返回键，不向模型注册返回动作；
 //   - 导航：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台。
 //
@@ -16,7 +18,8 @@
 //
 // 归类：没有映射的键名（Tab、Escape 等）记 capability_unavailable、不发命令；首次 DeepLink 遇到 WebDriverAgent「不支持打开地址」
 // 记 capability_unavailable 并把这个能力否定缓存到本适配器实例，即本会话（决策 5）。只缓存能力否定：会话丢失与结果未知的标记
-// 原样传出；守卫确认会话仍在运行、结果已知的 engine_error 可按驱动文本再归类（ADR 0051 决策 4）。其它失败原样传出、不进缓存。
+// 原样传出；只有标记带着守卫查到会话仍为 RUNNING 的事实、结果已知的 engine_error 可按驱动文本再归类并缓存（ADR 0051 决策 4；
+// 判定见 interface.mts 的 driverTextMatchAllowed）。其它失败，包括会话状态没有确认的，原样传出、不进缓存。
 import type { Browser } from "webdriverio";
 import { attachClassification, type ControlItem, type Controls } from "../../worker/surface.mjs";
 import {
@@ -165,6 +168,10 @@ export function createXcuitestAdapter(): DeviceAdapter {
 
     async clearInput(ctx: PrimitiveContext): Promise<void> {
       await sendKeysToActive(ctx, "\b".repeat(CLEAR_INPUT_BACKSPACES));
+    },
+
+    async hideKeyboard(ctx: PrimitiveContext): Promise<void> {
+      await ctx.driver.hideKeyboard();
     },
 
     async deepLink(driver: Browser, address: string, appId: string | null): Promise<void> {

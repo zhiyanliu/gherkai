@@ -59,9 +59,9 @@ const SCOPE_ID = "device-reprobe";
 const DEFAULT_ACQUIRE_TIMEOUT_S = 600;
 const W3C_ELEMENT_KEYS = ["element-6066-11e4-a52f-4f735466cecf", "ELEMENT"];
 const SCRIPT_METHODS = new Set(["execute", "executeScript"]);
-const INPUT_CALLS = new Set(["typeText", "keyboardPress", "clearInput"]);
+const INPUT_CALLS = new Set(["typeText", "keyboardPress", "clearInput", "hideKeyboard"]);
 // 用例的执行次序：输入类紧跟聚焦，手势之后才是会离开当前页面的 DeepLink 与系统键，主屏键最后。
-const CALL_ORDER = ["typeText", "clearInput", "keyboardPress", "tap", "longPress", "scroll", "deepLink", "back", "home"];
+const CALL_ORDER = ["typeText", "clearInput", "keyboardPress", "hideKeyboard", "tap", "longPress", "scroll", "deepLink", "back", "home"];
 const PAGE_SOURCE_FIXTURE: Record<Device, string> = { android: "android-page-source.xml", ios: "ios-page-source.xml" };
 
 // ---- 快照的格式 ----
@@ -277,6 +277,7 @@ async function runPrimitive(adapter: DeviceAdapter, ctx: PrimitiveContext, call:
     case "typeText": return adapter.typeText(ctx, i.text);
     case "keyboardPress": return adapter.keyboardPress(ctx, i.keyName);
     case "clearInput": return adapter.clearInput(ctx);
+    case "hideKeyboard": return adapter.hideKeyboard(ctx);
     case "home": return adapter.systemButtons.home.press(ctx);
     case "back": {
       const back = adapter.systemButtons.back;
@@ -644,7 +645,12 @@ async function runOnDevice(opts: Options): Promise<number> {
     },
     log,
     agentOpts: { generateReport: false, persistExecutionDump: false },
-    uploader: { refFor: (p) => pathToFileURL(p).href, toReportRef: async (p) => pathToFileURL(p).href },
+    // 本工具的产物只落本地目录、没有上传队列：停止信号路径入队的诊断文件只记一行，文件留在原处。
+    uploader: {
+      refFor: (p) => pathToFileURL(p).href,
+      toReportRef: async (p) => pathToFileURL(p).href,
+      enqueue: (paths) => log(`诊断文件留在本地：${paths.join(", ")}`),
+    },
     artifactRoot: opts.out,
     requestFinalization: () => interrupt(1, "进程级异常"),
   };

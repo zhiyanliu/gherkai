@@ -25,19 +25,30 @@
 //
 // 获取预算（ADR 0052 决策 6 超时分层表 ③）：从 acquire 开始计，覆盖到 warmup 返回为止，跨换台重建不重置；预算只读
 // job.deviceRequest.acquireTimeoutS（ADR 0051 决策 2）。各块经 AcquireBudget 的 signal 感知到期与进入终结，本模块在每一步之后
-// 核对一次：到期的失败归 acquire_timeout（判据型的 precheck_failed 保持原归因），进入终结即停、不再向设备发命令。
+// 核对一次（预热返回之后也核对，预热成功也不例外）：到期的失败归 acquire_timeout（判据型的 precheck_failed 保持原归因），进入
+// 终结即停、不再向设备发命令。Appium 会话建成之后抛出的未归类异常先查一次会话状态：不是 RUNNING 归 session_lost（准备阶段的
+// 消息），RUNNING 或查不到归 engine_error。
+//
+// 执行窗口的出口（ADR 0052 决策 6「执行异常的归类由守卫带给 runStep」）：设备路径没有 network_error 出口，handler 与 AI 自己抛出、
+// 没有带归类的异常在 execute 出口挂 engine_error；断言异常不挂，交 run-scope 判 failed。
+//
+// 释放只进入一次（ADR 0051 决策 5「终结只执行一次」）：正常释放进行中又收到中断，同一次终结升级为中断——尚未开始的 deleteSession
+// 不再发出、不做正常模式的诊断上传，使停止信号到退出仍落在中断路径的宽限推导之内；已在途的 deleteSession 不打断，它的上限由终结块
+// 封顶。
 //
 // 设备产物（原始控件树、device-session.json）落在 `<产物根>/device/<scope 键>/` 下：产物根按 run 共享，各 scope 分目录才不互相覆盖。
 //
 // 本模块静态 import 缺省装配，WebdriverIO 与 Device Farm SDK 因此在本模块的静态加载闭包里：镜像的设备依赖冒烟只 import 本模块
 // （engines/midscene/Dockerfile），这条闭包断了冒烟就照不出依赖缺失（护栏见 surface.test.mts）。各块与本模块互相 import，
-// 各块只在函数体内读本模块导出的消息常量，模块顶层不读。
+// 各块只在函数体内读本模块导出的消息常量，本模块也只在函数体内读 Appium 块导出的准备阶段会话丢失消息，两侧模块顶层都不读。
 import path from "node:path";
 import fs from "node:fs";
 import type { Agent, AgentOpt } from "@midscene/core";
 import type { Browser } from "webdriverio";
 import { injectDeviceNavigate } from "../worker/deterministic.steps.mjs";
-import { DEVICES, UI_KINDS, type Device, type SelectedHandler, type UiKind, type WebdriverCtx } from "../worker/deterministic.mjs";
+import {
+  DEVICES, DeterministicAssertion, UI_KINDS, type Device, type SelectedHandler, type UiKind, type WebdriverCtx,
+} from "../worker/deterministic.mjs";
 import { errorText, oneLineError } from "../worker/error-text.mjs";
 import { scenarioKey } from "../worker/evidence.mjs";
 import { redactSecrets } from "../lib/redact.mjs";
@@ -68,6 +79,10 @@ export const ACQUIRE_TIMEOUT_MESSAGE = "在等待时间内没有拿到可用设�
 /** 会话丢失与会话到期（ADR 0051 决策 4 的原文）。 */
 export const SESSION_LOST_MESSAGE =
   "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话";
+/** 执行前发现会话丢失（获取期的准备、能力探测、会话预热，scope_started 之前）：此时一个 step 都还没有开始，不用执行中途的那句
+ *  （ADR 0051 决策 4 的消息要求：发生了什么、为什么、怎么办）。 */
+export const SESSION_LOST_BEFORE_START_MESSAGE =
+  "远程访问会话在准备设备时已结束，本 scope 的 step 都没有执行；请确认是否有人手动停止了会话，然后重新运行";
 /** 能力探测出错时需要网页上下文的 step（ADR 0052 决策 5 的原文）。 */
 export const WEB_CONTEXT_PROBE_ERROR_MESSAGE = "未能确认设备是否提供网页上下文";
 /** 能力探测确认不提供网页上下文时需要它的 step（处置按 ADR 0051 决策 4 的类别表：改写为 AI 断言或换设备）。 */
@@ -172,14 +187,16 @@ export interface DeviceFarmSessions {
   /** 设备解析（ADR 0051 决策 3）：零候选重列一次仍为零、指定 ARN 被同步拒绝时返回 precheck_failed；全部繁忙时在预算内等待。
    *  replacing 非 null 表示为换台重新解析，传被替换的会话。 */
   resolve(budget: AcquireBudget, replacing: RemoteSession | null): Promise<Outcome<DeviceChoice>>;
-  /** Create：限流与机型繁忙在预算内重试，每次请求一个新尝试序号，结果未知的请求登记为待核；Create 返回 ARN 后、本调用返回
-   *  之前经会话事件出口发 session_opened(created)。 */
+  /** Create：限流与机型繁忙在预算内重试，每次请求一个新尝试序号，结果未知的请求登记为待核；重试前按名找回的会话随即按 Stop
+   *  规则停止（接预算的信号）；Create 返回 ARN 后、本调用返回之前经会话事件出口发 session_opened(created)。 */
   create(choice: DeviceChoice, budget: AcquireBudget): Promise<Outcome<RemoteSession>>;
   /** 等到状态为 RUNNING 且端点可用。 */
   waitRunning(session: RemoteSession, budget: AcquireBudget): Promise<Outcome<RunningSession>>;
   /** 查一次会话状态（GetRemoteAccessSession 的状态值）；查询本身失败返回 null，调用方此时不据此判会话丢失。 */
   status(arn: string): Promise<string | null>;
-  /** 换台：对被替换的会话发一次 Stop，不等确认；它的确认与 session_closed 归终结，每个会话恰一条。 */
+  /** 换台：被替换的会话按终结释放阶段的 Stop 规则处理（ADR 0051 决策 5）：先 Get，STOPPING / COMPLETED 即确认；其余状态或 Get
+   *  失败时发一次 Stop，Stop 报错或返回体不是这两个状态时补查一次 Get。不重试、不等到确认：仍未确认的由终结再处理，它的
+   *  session_closed 也归终结，每个会话恰一条。 */
   retire(arn: string): Promise<void>;
 }
 
@@ -221,11 +238,13 @@ export interface AppiumSession {
   currentContext(): Promise<string>;
   /** 生命周期通道：切回原生上下文。 */
   switchToNative(): Promise<void>;
-  /** 生命周期通道：经探测实例在原生上下文截图一次，受探测客户端的短超时约束（scenario 前的存活探测）。 */
+  /** 生命周期通道：经探测实例在原生上下文截图，受探测客户端的短超时约束（scenario 前的存活探测）；连接层错误与 502 / 503 / 504
+   *  重试一次，超时与 500 不重试。 */
   probeScreenshot(): Promise<void>;
-  /** 生命周期通道：原生上下文的 page source，受传入的截止信号约束。 */
+  /** 生命周期通道：原生上下文的 page source，受传入的截止信号约束；连接层错误与 502 / 503 / 504 在信号未中止时重试一次。 */
   pageSource(signal: AbortSignal): Promise<string>;
-  /** 生命周期通道：重新定位网页上下文（只有一个候选才采用）、读地址、切回原生上下文；只在能力结论为「提供」时调用。 */
+  /** 生命周期通道：重新定位网页上下文（只有一个候选才采用）、读地址、切回原生上下文；只在能力结论为「提供」时调用。列上下文与
+   *  读地址各按只读原语重试一次，切入不重试。 */
   readWebAddress(signal: AbortSignal): Promise<AddressAttempt>;
   /** ctx.withWebContext：重新定位、切入执行 fn、结束后切回原生；多候选或零候选抛出带 engine_error 标记的异常。 */
   withWebContext<T>(driver: Browser, fn: () => Promise<T> | T): Promise<T>;
@@ -313,7 +332,9 @@ export interface AgentFactory<A extends DriverAdapter = DriverAdapter> {
 }
 
 /** 会话预热块：按路线导航预热地址一次并在原生控件树里确认标记（ADR 0051 决策 13）。命令失败时经 sessionStatus 查一次当前远程
- *  访问会话的状态，不是 RUNNING 即 session_lost（与能力探测的同名参数同义）。 */
+ *  访问会话的状态，不是 RUNNING 即 session_lost（与能力探测的同名参数同义）。url 路线就绪后离开到 about:blank：离开导航返回之后
+ *  先核 budget.signal，已中止（预算到期或进入终结）即不再切换上下文。返回 null 之后本模块仍核一次获取预算：预热期间预算用尽的，
+ *  即使标记已就绪也归 acquire_timeout。 */
 export interface DeviceWarmup {
   run(args: {
     session: AppiumSession; adapter: DriverAdapter; route: "url" | "deep_link"; url: string; budget: AcquireBudget;
@@ -322,14 +343,15 @@ export interface DeviceWarmup {
 }
 
 /** 终结块的钩子：Appium 会话已建成时给出 deleteSession，正常模式下远程访问会话不是 STOPPING /
- *  COMPLETED 时先调它；中断模式不给。 */
+ *  COMPLETED 时先调它；中断模式不给。正常模式的终结进行中升级为中断时，钩子在被调用的那一刻核对，已升级即直接返回、不发命令。 */
 export interface FinalizeHooks {
   deleteAppiumSession: (() => Promise<void>) | null;
 }
 
 /** 终结块：normal 为正常收尾、执行前失败与 scope 级终止的出口（deleteSession、终结核对、释放），interrupt 为停止信号与进程级
  *  异常（等在途 Create、终结核对、释放）。为每个会话经会话事件出口发恰一条 session_closed，待核尝试发一对 attempted；
- *  releaseFailed 为真表示有会话未能确认停止或有 attempted 尝试（ADR 0051 决策 5）。只进入一次。 */
+ *  releaseFailed 为真表示有会话未能确认停止或有 attempted 尝试（ADR 0051 决策 5）。只进入一次：正常模式进行中收到中断时不重新进入，
+ *  由钩子跳过尚未开始的 deleteSession（见 FinalizeHooks）。 */
 export interface DeviceFinalizer {
   finalize(mode: ReleaseMode, hooks: FinalizeHooks): Promise<{ releaseFailed: boolean }>;
 }
@@ -476,6 +498,20 @@ function reasonOf(e: unknown): string {
   return oneLineError(e instanceof Error ? e.message : e);
 }
 
+/** 断言异常：与 run-scope 判 failed 的条件逐项相同（DeterministicAssertion，或 name 为 AssertionError 的抛出物，ADR 0022）。 */
+function isAssertion(e: unknown): boolean {
+  if (e instanceof DeterministicAssertion) return true;
+  return typeof e === "object" && e !== null && (e as { name?: unknown }).name === "AssertionError";
+}
+
+/** 执行窗口出口上 handler 与 AI 自己抛出的异常：已带归类的与断言异常原样返回，其余挂 engine_error，消息即异常文本（与不带标记时
+ *  run-scope 写进 step_done 的那句相同）。设备路径没有 network_error 出口：连接层错误在设备上意味着结果未知或会话丢失，那两种归类
+ *  由守卫给出，这里不交给瞬时网络判定（ADR 0052 决策 6）。 */
+function executionFailure(e: unknown): unknown {
+  if (readClassification(e) !== null || isAssertion(e)) return e;
+  return attachClassification(e, { errorType: "engine_error", message: errorText(e) });
+}
+
 /** 原始控件树按 UTF-8 字节截断，不切断多字节字符。 */
 function truncateUtf8(text: string, maxBytes: number): { bytes: Buffer; truncated: boolean } {
   const all = Buffer.from(text, "utf-8");
@@ -514,6 +550,8 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   private pageSourceSeq = 0;
   private releasing: Promise<ReleaseOutcome> | null = null;
   private finalizing = false;
+  /** 收到过中断模式的释放（含正常释放进行中到达的那次）：已升级即跳过尚未开始的 deleteSession 与正常模式的诊断上传。 */
+  private interruptRequested = false;
   private undoNavigate: (() => void) | null = null;
   private processHooked = false;
   private readonly onProcessFault = (reason: unknown): void => {
@@ -544,7 +582,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     try {
       result = await this.acquireSteps(budget);
     } catch (e) {
-      result = { ok: false, termination: this.unclassifiedAcquireFailure(e, budget) };
+      result = { ok: false, termination: await this.unclassifiedPreparationFailure(e, budget, acquireErrorMessage) };
     }
     if (!result.ok) {
       budget.stop();
@@ -615,12 +653,13 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     }
     this.record.timings.appium_connected_at = this.isoNow();
     this.record.automation_name = appium.automationName;
-    // 3. 应用目标：显式启动并采样，回到「未运行」即启动即自退（ADR 0051 决策 9、14）。获取期还没有执行令牌，经执行实例。
-    //    启动原语不接收预算信号，发命令之前先核对一次。
+    // 3. 应用目标：显式启动并采样，回到「未运行」即启动即自退（ADR 0051 决策 9、14）。获取期还没有执行令牌，经执行实例；
+    //    启动原语收到预算信号，到期或进入终结之后不再发命令。命令失败抛出，由 acquire 的兜底先查会话状态再归类；因信号中止而抛出的
+    //    （预算到期或进入终结）不查会话状态，分别归 acquire_timeout 与不被使用的 engine_error。
     if (this.appId !== null) {
       const beforeLaunch = this.expiredOutcome(budget);
       if (beforeLaunch) return this.connectedFailure(appium, beforeLaunch.termination);
-      const selfExit = await launchApp(appium.exec, this.appId, this.cfg.appTiming);
+      const selfExit = await launchApp(appium.exec, this.appId, this.cfg.appTiming, budget.signal);
       if (selfExit) return this.connectedFailure(appium, selfExit);
     }
     const afterLaunch = this.expiredOutcome(budget);
@@ -679,14 +718,21 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return termination;
   }
 
-  private unclassifiedAcquireFailure(e: unknown, budget: Budget): ScopeTermination {
+  /** 获取期（含会话预热）抛出而未归类的失败（ADR 0052 决策 6：不进 network_error）。Appium 会话建成之后的（应用启动与启动采样经
+   *  执行实例发出的命令、各块没有归类就抛出的异常）先查一次会话状态：不是 RUNNING 归 session_lost，RUNNING 或查不到归 engine_error，
+   *  消息由 describe 按所在阶段给出（ADR 0051 决策 4「会话丢失的判定靠查状态」）。获取期的会话丢失一律用准备阶段的消息，异常上
+   *  带来的消息是执行中途的口径、不沿用。 */
+  private async unclassifiedPreparationFailure(
+    e: unknown, budget: Budget, describe: (reason: string) => string,
+  ): Promise<ScopeTermination> {
     if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
-    const mark = readClassification(e);
-    if (mark?.errorType === "session_lost") return { errorType: "session_lost", message: mark.message };
-    // 进入终结时预算被中止、在途调用随之失败：这个结果不会被使用（终结路径不发 scope_done），不另记日志。
+    const lostBeforeStart: ScopeTermination = { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE };
+    if (readClassification(e)?.errorType === "session_lost") return lostBeforeStart;
+    // 进入终结时预算被中止、在途调用随之失败：这个结果不会被使用（终结路径不发 scope_done），不另记日志、不再查状态。
     if (this.finalizing) return { errorType: "engine_error", message: acquireErrorMessage("") };
-    this.deps.log(`worker: 准备设备时出错：${errorText(e)}`);
-    return { errorType: "engine_error", message: acquireErrorMessage(reasonOf(e)) };
+    if (this.connectedAppium !== null && await this.sessionEnded(e)) return lostBeforeStart;
+    this.deps.log(`worker: ${describe("")}：${errorText(e)}`);
+    return { errorType: "engine_error", message: describe(reasonOf(e)) };
   }
 
   private readyLogLine(appium: AppiumSession, c: ProbeConclusion): string {
@@ -717,11 +763,11 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
           session: ready.appium, adapter: ready.adapter, route, url, budget, sessionStatus: () => this.parts.sessions.status(arn),
         });
       } catch (e) {
-        this.deps.log(`worker: 会话预热时出错：${errorText(e)}`);
-        termination = { errorType: "engine_error", message: warmupErrorMessage(reasonOf(e)) };
+        termination = await this.unclassifiedPreparationFailure(e, budget, warmupErrorMessage);
       }
+      // 预热返回之后统一核获取预算：预算覆盖到预热返回为止，标记已就绪而离开预热页期间预算用尽的同样归 acquire_timeout。
+      termination = termination === null ? (this.expiredOutcome(budget)?.termination ?? null) : this.budgetAware(termination, budget);
       if (termination !== null) {
-        termination = this.budgetAware(termination, budget);
         this.record.acquire_failure = { error_type: termination.errorType, message: termination.message };
       }
       return termination;
@@ -818,7 +864,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     if (outcome?.resultUnknown) this.resultUnknownInScenario = true;
     if (ageExpired || failure?.errorType === "session_lost") failure = this.markLost();
     if (failure !== null) throw attachClassification(threw ? thrown : new Error(failure.message), failure);
-    if (threw) throw thrown;
+    if (threw) throw executionFailure(thrown);
     return value as T;
   }
 
@@ -937,6 +983,8 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   // ---- 释放 ----
 
   release(mode: ReleaseMode): Promise<ReleaseOutcome> {
+    // 先置位再取在途的那次：正常释放进行中到达的中断不重新进入终结，而是让同一次终结升级（见模块头「释放只进入一次」）。
+    if (mode === "interrupt") this.interruptRequested = true;
     this.releasing ??= this.doRelease(mode);
     return this.releasing;
   }
@@ -947,7 +995,11 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     this.ready?.guard.shutdown();
     this.currentAct?.abort(new Error("finalizing"));
     const appium = this.ready?.appium ?? this.connectedAppium;
-    const hooks: FinalizeHooks = { deleteAppiumSession: mode === "normal" && appium ? () => appium.deleteSession() : null };
+    // 钩子在终结块调用它的那一刻核对升级：之前到达的中断让 deleteSession 不再发出（中断路径不调它，ADR 0051 决策 5）。
+    const deleteAppiumSession = mode === "normal" && appium
+      ? async (): Promise<void> => { if (!this.interruptRequested) await appium.deleteSession(); }
+      : null;
+    const hooks: FinalizeHooks = { deleteAppiumSession };
     let releaseFailed: boolean;
     try {
       ({ releaseFailed } = await this.parts.finalizer.finalize(mode, hooks));
@@ -960,10 +1012,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     this.unhookProcessFaults();
     this.record.timings.released_at = this.isoNow();
     this.record.release_failed = releaseFailed;
-    return { releaseFailed, reportRefs: await this.deviceSessionRefs(mode) };
+    return { releaseFailed, reportRefs: await this.deviceSessionRefs(this.interruptRequested ? "interrupt" : mode) };
   }
 
-  /** 写 device-session.json；正常模式下经上传器得到链接挂到 scope_done（ADR 0051 决策 8）。best-effort，失败只记日志。 */
+  /** 写 device-session.json；正常模式下经上传器得到链接挂到 scope_done（ADR 0051 决策 8）。best-effort，失败只记日志。
+   *  中断模式（含升级）不实时上传，只交给截图的后台队列，由停止路径阶段 4 的队列排空带上（ADR 0051 决策 5）：实时上传会在会话
+   *  释放之后、阶段 4 之前再占一段上传超时，超出中断路径的宽限推导；这一模式返回的链接也不被使用（进入终结后不发 scope_done）。 */
   private async deviceSessionRefs(mode: ReleaseMode): Promise<ReportRef[]> {
     const root = this.deps.artifactRoot;
     if (root === undefined) return [];
@@ -974,7 +1028,10 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
       this.deps.log(`worker: 设备诊断文件没能写盘（不影响判定）：${errorText(e)}`);
       return [];
     }
-    if (mode !== "normal") return [];
+    if (mode !== "normal") {
+      this.deps.uploader.enqueue([file]);
+      return [];
+    }
     try {
       return [{ kind: DEVICE_SESSION_REPORT_KIND, ref: await this.deps.uploader.toReportRef(file) }];
     } catch (e) {

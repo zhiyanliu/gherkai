@@ -2,9 +2,10 @@
 //
 // 各设备模块换成记录调用序列的假部件（会话、终结、Appium、探测、适配器、守卫、界面实现、预热、安装包存储），只验本模块的编排：
 // 获取期的次序（存在性检查先于 Create；404 / 403 时 Create 零调用）、获取预算到期归 acquire_timeout、进入终结后获取停下、换台的
-// 条件、各项义务的失败归类（先查会话状态再分会话丢失与执行出错）、交给探测与预热的会话状态查询、交给界面实现的输入上下文、句柄
-// 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式、device-session.json 的内容、按 scope 分目录的产物落点与
-// reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机
+// 条件、获取期与预热抛出的异常先查会话状态再归类、预热返回之后的预算核对、各项义务的失败归类（先查会话状态再分会话丢失与执行
+// 出错）、执行窗口出口的归类（未标记的非断言异常挂 engine_error）、交给探测与预热的会话状态查询、交给界面实现的输入上下文、句柄
+// 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式与正常释放进行中升级为中断、device-session.json 的内容、按 scope
+// 分目录的产物落点与 reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机
 // 验收负责。文件末尾另验缺省装配（device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
 import { afterEach, test } from "node:test";
 import assert from "node:assert";
@@ -15,14 +16,14 @@ import ts from "typescript";
 import type { Browser } from "webdriverio";
 import {
   ACQUIRE_TIMEOUT_MESSAGE, HELPER_REJECTED_AGAIN_MESSAGE, HELPER_REJECTED_NO_TIME_MESSAGE,
-  LIVENESS_FAILED_MESSAGE, PRE_STEP_FAILED_MESSAGE, SESSION_LOST_MESSAGE, WEB_CONTEXT_PROBE_ERROR_MESSAGE,
-  WEB_CONTEXT_UNAVAILABLE_MESSAGE, createDeviceSurface, deviceAgentOpts, restoreFailedMessage,
+  LIVENESS_FAILED_MESSAGE, PRE_STEP_FAILED_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE,
+  WEB_CONTEXT_PROBE_ERROR_MESSAGE, WEB_CONTEXT_UNAVAILABLE_MESSAGE, acquireErrorMessage, createDeviceSurface, deviceAgentOpts,
+  restoreFailedMessage, warmupErrorMessage,
   type AddressAttempt, type AppiumSession, type CommandGuard, type ConnectOutcome, type DeviceParts, type DevicePartsEnv,
   type DriverAdapter, type FinalizeHooks, type ProbeConclusion, type ProcessEvents, type WindowOutcome,
 } from "./surface.mjs";
 import { defaultDeviceParts } from "./parts.mjs";
 import { commandGuardFactory } from "./guard.mjs";
-import { deviceAgentFactory } from "./interface.mjs";
 import { RUN_ID_ENV } from "./session-name.mjs";
 import {
   DEVICE_SESSION_FILE, DEVICE_SESSION_REPORT_KIND, sessionClosedEvent, sessionEventSink, sessionOpenedEvent,
@@ -31,9 +32,11 @@ import { APP_LAUNCH_SELF_EXIT_MESSAGE, APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_
 import {
   DEVICE_REPLANNING_CYCLE_LIMIT, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES, REPLACE_DEVICE_MIN_REMAINING_MS, REPLANNING_LIMIT_ENV,
 } from "./limits.mjs";
-import { readClassification, type SurfaceDeps, type TargetSurface } from "../worker/surface.mjs";
+import {
+  attachClassification, readClassification, type ScopeTermination, type SurfaceDeps, type TargetSurface,
+} from "../worker/surface.mjs";
 import { scenarioKey } from "../worker/evidence.mjs";
-import { match, selectHandler, type SelectedHandler, type WebdriverCtx } from "../worker/deterministic.mjs";
+import { DeterministicAssertion, match, selectHandler, type SelectedHandler, type WebdriverCtx } from "../worker/deterministic.mjs";
 import "../worker/deterministic.steps.mjs";
 import type { Job } from "../lib/job-source.mjs";
 
@@ -69,6 +72,18 @@ interface HarnessOptions {
   scopeId?: string;
   /** 能力探测执行时调用（可抛出、可挂起到预算信号中止）。 */
   probeRun?: (signal: AbortSignal) => Promise<void>;
+  /** 会话预热执行时调用，返回值即预热的结论（测试在这里推进时钟，模拟预热期间预算用尽）。 */
+  warmupRun?: () => Promise<ScopeTermination | null>;
+  /** 获取期经执行实例发出的 activateApp 与启动采样抛出的异常。 */
+  launchError?: Error;
+  /** activateApp 在途时调用（可挂起，模拟启动命令在途时进入终结或预算到期）。 */
+  onActivate?: () => Promise<void>;
+  sampleError?: Error;
+  /** 假终结块在调用 deleteSession 钩子之前等它落定（模拟正常释放进行到一半）。 */
+  finalizeGate?: Promise<void>;
+  /** Appium 会话的 deleteSession 与上传器的 toReportRef 的替身（可挂住）。 */
+  deleteSession?: () => Promise<void>;
+  toReportRef?: (p: string) => Promise<string>;
 }
 
 function makeJob(target: Target, acquireTimeoutS: number, scopeId: string = SCOPE_ID): Omit<Job, "scenarios"> {
@@ -104,9 +119,16 @@ function harness(opts: HarnessOptions = {}) {
   let guardOutcome: WindowOutcome | null = null;
   const guardDriver = { guarded: true } as unknown as Browser;
   const execDriver = {
-    activateApp: async (id: string) => { calls.push(`exec.activateApp:${id}`); },
+    activateApp: async (id: string) => {
+      calls.push(`exec.activateApp:${id}`);
+      if (opts.onActivate) await opts.onActivate();
+      if (opts.launchError) throw opts.launchError;
+    },
     terminateApp: async (id: string) => { calls.push(`exec.terminateApp:${id}`); },
-    queryAppState: async () => appStates.shift() ?? APP_STATE.FOREGROUND,
+    queryAppState: async () => {
+      if (opts.sampleError) throw opts.sampleError;
+      return appStates.shift() ?? APP_STATE.FOREGROUND;
+    },
   } as unknown as Browser;
   const appiumSession = {
     exec: execDriver,
@@ -138,7 +160,7 @@ function harness(opts: HarnessOptions = {}) {
       return fn();
     },
     async openUrl(driver: Browser, address: string) { calls.push(`appium.openUrl:${driver === guardDriver}:${address}`); },
-    async deleteSession() { calls.push("appium.deleteSession"); },
+    async deleteSession() { calls.push("appium.deleteSession"); if (opts.deleteSession) await opts.deleteSession(); },
   };
   const adapter: DriverAdapter & { deepLinkError: Error | null; controlsItems: number | null } = {
     deepLinkError: null,
@@ -204,6 +226,7 @@ function harness(opts: HarnessOptions = {}) {
         async finalize(mode, hooks) {
           calls.push(`finalizer.finalize:${mode}`);
           finalizations.push({ mode, hooks });
+          if (opts.finalizeGate) await opts.finalizeGate;
           if (hooks.deleteAppiumSession) await hooks.deleteAppiumSession();
           for (const c of created) {
             await e.events.closed({ sessionId: c.arn, name: c.name, release: "confirmed", observedS: 12.5 });
@@ -243,7 +266,7 @@ function harness(opts: HarnessOptions = {}) {
         async run(args) {
           calls.push(`warmup.run:${args.route}`);
           statusQueries.warmup = args.sessionStatus;
-          return null;
+          return opts.warmupRun ? opts.warmupRun() : null;
         },
       },
       appStore: {
@@ -258,6 +281,7 @@ function harness(opts: HarnessOptions = {}) {
   };
   let finalizationRequests = 0;
   const reportRefCalls: string[] = [];
+  const enqueueCalls: string[][] = [];
   const artifactRoot = "artifactRoot" in opts ? opts.artifactRoot : fs.mkdtempSync(path.join(os.tmpdir(), "device-surface-"));
   const deps: SurfaceDeps = {
     job: makeJob(target, opts.acquireTimeoutS ?? 600, opts.scopeId),
@@ -266,7 +290,11 @@ function harness(opts: HarnessOptions = {}) {
     agentOpts: { generateReport: false, persistExecutionDump: false } as never,
     uploader: {
       refFor: (p: string) => `s3://bucket/${path.basename(p)}`,
-      toReportRef: async (p: string) => { reportRefCalls.push(p); return `s3://bucket/${path.basename(p)}`; },
+      toReportRef: async (p: string) => {
+        reportRefCalls.push(p);
+        return opts.toReportRef ? opts.toReportRef(p) : `s3://bucket/${path.basename(p)}`;
+      },
+      enqueue: (paths: string[]) => { enqueueCalls.push([...paths]); },
     } as never,
     artifactRoot,
     requestFinalization: () => { finalizationRequests++; },
@@ -278,7 +306,7 @@ function harness(opts: HarnessOptions = {}) {
   // 设备产物按 scope 分目录：同一 run 的各 scope 共用产物根（MIDSCENE_RUN_DIR），文件名不能撞。
   const deviceDir = artifactRoot === undefined ? undefined : path.join(artifactRoot, "device", scenarioKey(opts.scopeId ?? SCOPE_ID));
   return {
-    surface, calls, emitted, logs, clock, guard, adapter, appiumSession, finalizations, reportRefCalls, artifactRoot, deviceDir,
+    surface, calls, emitted, logs, clock, guard, adapter, appiumSession, finalizations, reportRefCalls, enqueueCalls, artifactRoot, deviceDir,
     processListeners, guardDriver, execDriver, statusQueries, agentArgs,
     get env() { return env!; },
     get finalizationRequests() { return finalizationRequests; },
@@ -296,6 +324,24 @@ async function ready(h: ReturnType<typeof harness>): Promise<void> {
 function webdriverSelected(fn: (ctx: WebdriverCtx, groups: Record<string, string>) => void | Promise<void>,
                            requires: readonly "web_context"[] = []): SelectedHandler {
   return { kind: "webdriver", fn, requires };
+}
+
+/** p 在 ms 毫秒（真实时间）内落定，否则以 what 为消息拒绝：用来把「挂住」变成可断言的失败，而不是让用例一直等下去。 */
+function within<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${what}：${ms} 毫秒内没有落定`)), ms);
+    p.then((v) => { clearTimeout(timer); resolve(v); }, (e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
+/** 一个让出事件循环若干轮的等待：让已发起的异步调用走到它的下一个等待点。 */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++) await new Promise((r) => setImmediate(r));
+}
+
+/** 带 code 的连接层错误：桌面路径的瞬时网络判定会把它归 network_error。 */
+function connectionReset(): Error {
+  return Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
 }
 
 // ---- 获取期的编排 ----
@@ -328,7 +374,12 @@ test("scope_started 之前接缝只经会话事件出口发出 session_opened，
 test("应用目标：存在性检查先于 Create，预签名在 newSession 之前，建好后经执行实例显式启动并采样", async () => {
   const h = harness({ target: { device: "android", uiKind: "app" } });
   await ready(h);
-  const order = (prefix: string) => h.calls.findIndex((c) => c.startsWith(prefix));
+  // 两侧都必须真实出现：findIndex 找不到时为 -1，缺失的前项会让 a < b 恒成立。
+  const order = (prefix: string) => {
+    const i = h.calls.findIndex((c) => c.startsWith(prefix));
+    assert.ok(i >= 0, `缺少调用 ${prefix}：${h.calls.join(" ")}`);
+    return i;
+  };
   assert.ok(order("appStore.head") < order("sessions.resolve"));
   assert.ok(order("sessions.waitRunning") < order("appStore.presign:3600"));
   assert.ok(order("appStore.presign") < order("appium.connect:app:presigned"));
@@ -447,6 +498,78 @@ test("启动即自退记 precheck_failed；Appium 会话已建成，正常收尾
   assert.ok(h.calls.includes("appium.deleteSession"));
 });
 
+test("获取期的启动与启动采样经执行实例失败：先查会话状态，不是 RUNNING 归 session_lost（准备阶段的消息），正常收尾仍先 deleteSession", async () => {
+  for (const which of ["launchError", "sampleError"] as const) {
+    const failing = which === "launchError" ? { launchError: new Error("UND_ERR_CLOSED") } : { sampleError: new Error("UND_ERR_CLOSED") };
+    const h = harness({ target: { device: "android", uiKind: "app" }, ...failing, status: "STOPPING" });
+    assert.deepEqual(await h.surface.acquire(),
+      { ready: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } }, which);
+    assert.ok(h.calls.includes(`sessions.status:${ARN1}`), `${which}: ${h.calls.join(", ")}`);
+    assert.ok(!h.calls.some((c) => c.startsWith("probe.run")), which);
+    await h.surface.release("normal");
+    assert.notEqual(h.finalizations[0].hooks.deleteAppiumSession, null, which);
+  }
+});
+
+test("获取期抛出的异常已带会话丢失归类：同样归 session_lost，消息换成准备阶段的口径", async () => {
+  const h = harness({
+    probeRun: async () => { throw attachClassification(new Error("x"), { errorType: "session_lost", message: SESSION_LOST_MESSAGE }); },
+  });
+  assert.deepEqual(await h.surface.acquire(),
+    { ready: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
+});
+
+test("获取期的启动失败而会话仍在运行或查不到状态：保留 engine_error，消息带失败原因", async () => {
+  for (const status of ["RUNNING", null] as const) {
+    const h = harness({ target: { device: "ios", uiKind: "app" }, launchError: new Error("activate failed"), status });
+    assert.deepEqual(await h.surface.acquire(),
+      { ready: false, termination: { errorType: "engine_error", message: acquireErrorMessage("activate failed") } }, String(status));
+    assert.ok(h.calls.includes(`sessions.status:${ARN1}`), String(status));
+    await h.surface.release("normal");
+  }
+});
+
+test("获取期的启动命令在途时进入终结或预算到期：命令返回后启动原语因信号中止而抛出，不再查会话状态", async () => {
+  let entered!: () => void;
+  const inLaunch = new Promise<void>((resolve) => { entered = resolve; });
+  let finish!: () => void;
+  const interrupted = harness({
+    target: { device: "android", uiKind: "app" },
+    onActivate: () => { entered(); return new Promise<void>((resolve) => { finish = resolve; }); },
+  });
+  const acquiring = interrupted.surface.acquire();
+  await inLaunch;
+  const releasing = interrupted.surface.release("interrupt");
+  finish();
+  const r = await acquiring;
+  await releasing;
+  assert.equal(r.ready, false);
+  assert.ok(!interrupted.calls.some((c) => c.startsWith("sessions.status")), interrupted.calls.join(", "));
+  assert.ok(!interrupted.calls.some((c) => c.startsWith("probe.run")), interrupted.calls.join(", "));
+
+  const ref: { h?: ReturnType<typeof harness> } = {};
+  let budgetSignal: AbortSignal | null = null;
+  const expired = harness({
+    target: { device: "android", uiKind: "app" },
+    acquireTimeoutS: 0.2,
+    // 预算的计时器触发时同步推进时钟（与真实时钟下「中止即到期」一致）；启动命令等到中止之后才返回。
+    waitRunning: async (signal) => {
+      budgetSignal = signal;
+      signal.addEventListener("abort", () => { ref.h!.clock.t += 60_000; }, { once: true });
+    },
+    onActivate: () => new Promise<void>((resolve) => {
+      if (budgetSignal!.aborted) resolve();
+      else budgetSignal!.addEventListener("abort", () => resolve(), { once: true });
+    }),
+  });
+  ref.h = expired;
+  assert.deepEqual(await expired.surface.acquire(),
+    { ready: false, termination: { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE } });
+  assert.ok(expired.calls.includes("exec.activateApp:com.example.shop"), expired.calls.join(", "));
+  assert.ok(!expired.calls.some((c) => c.startsWith("sessions.status")), expired.calls.join(", "));
+  await expired.surface.release("normal");
+});
+
 test("Appium 会话建成后探测抛出未归类异常：记 engine_error，正常收尾仍先 deleteSession", async () => {
   const h = harness({ probeRun: async () => { throw new Error("x"); } });
   const r = await h.surface.acquire();
@@ -478,6 +601,43 @@ test("预热：网页目标按探测结论选路线（提供走 url，不提供�
   await ready(app);
   assert.equal(await app.surface.warmup("https://tunnel.example/w"), null);
   assert.ok(!app.calls.some((c) => c.startsWith("warmup.run")));
+});
+
+test("预热返回之后统一核获取预算：预热成功但预算已用尽归 acquire_timeout，判据型的 precheck_failed 保持原归因", async () => {
+  const ref: { h?: ReturnType<typeof harness> } = {};
+  const h = harness({ warmupRun: async () => { ref.h!.clock.t += 601_000; return null; } });
+  ref.h = h;
+  await ready(h);
+  assert.deepEqual(await h.surface.warmup("https://tunnel.example/w"),
+    { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE });
+  await h.surface.release("normal");
+  const doc = JSON.parse(fs.readFileSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE), "utf-8"));
+  assert.deepEqual(doc.acquire_failure, { error_type: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE });
+
+  const denied = { errorType: "precheck_failed" as const, message: "预热被拒绝" };
+  const ref2: { h?: ReturnType<typeof harness> } = {};
+  const h2 = harness({ warmupRun: async () => { ref2.h!.clock.t += 601_000; return denied; } });
+  ref2.h = h2;
+  await ready(h2);
+  assert.deepEqual(await h2.surface.warmup("https://tunnel.example/w"), denied);
+  await h2.surface.release("normal");  // 内建导航的私有通道同一时刻只属于一个接缝
+
+  const ok = harness({ warmupRun: async () => null });
+  await ready(ok);
+  assert.equal(await ok.surface.warmup("https://tunnel.example/w"), null);
+});
+
+test("预热抛出未归类的异常：会话已不在运行归 session_lost（准备阶段的消息），仍在运行归 engine_error", async () => {
+  for (const [status, expected] of [
+    ["STOPPING", { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE }],
+    ["RUNNING", { errorType: "engine_error", message: warmupErrorMessage("socket hang up") }],
+  ] as const) {
+    const h = harness({ warmupRun: async () => { throw new Error("socket hang up"); } });
+    await ready(h);
+    h.setStatus(status);
+    assert.deepEqual(await h.surface.warmup("https://tunnel.example/w"), expected, status);
+    await h.surface.release("normal");
+  }
 });
 
 test("能力探测与预热拿到的会话状态查询绑定当前会话 ARN：两处的命令失败据此先查会话状态再归类（ADR 0051 决策 4、ADR 0052 决策 5）", async () => {
@@ -693,6 +853,48 @@ test("守卫判会话丢失时锁存：后续执行直接拒绝、不再发令�
   assert.equal(h.guard.opened, opened);
 });
 
+test("执行出口：handler 与 AI 自己抛出的未标记异常挂 engine_error（连接层错误也不留给瞬时网络判定），消息与异常文本一致", async () => {
+  const h = harness();
+  await ready(h);
+  // handler 路径：bindHandler 绑好的调用在执行窗口内抛出
+  const handlerError = connectionReset();
+  await assert.rejects(
+    h.surface.execute(() => h.surface.bindHandler(webdriverSelected(() => { throw handlerError; }))({})),
+    (e) => {
+      assert.strictEqual(e, handlerError);
+      assert.deepEqual(readClassification(e), { errorType: "engine_error", message: "Error: read ECONNRESET" });
+      return true;
+    },
+  );
+  // AI 路径：act 自己抛出（Midscene 的规划或模型调用失败），没有经过守卫
+  await assert.rejects(
+    h.surface.execute(async (signal) => { assert.ok(signal instanceof AbortSignal); throw connectionReset(); }),
+    (e) => readClassification(e)?.errorType === "engine_error",
+  );
+  // 不是 Error 的抛出物也带上标记
+  await assert.rejects(h.surface.execute(async () => { throw "socket hang up"; }),
+    (e) => readClassification(e)?.errorType === "engine_error");
+});
+
+test("执行出口：断言异常保持不带标记（由 run-scope 判 failed），已带归类的保持原归类", async () => {
+  const h = harness();
+  await ready(h);
+  for (const assertion of [new DeterministicAssertion("购物车里应有 2 件商品"), new assert.AssertionError({ message: "数量不符" })]) {
+    await assert.rejects(
+      h.surface.execute(() => h.surface.bindHandler(webdriverSelected(() => { throw assertion; }))({})),
+      (e) => { assert.strictEqual(e, assertion); assert.equal(readClassification(e), null); return true; },
+    );
+  }
+  const marked = attachClassification(new Error("x"), { errorType: "capability_unavailable", message: "设备不支持打开地址" });
+  await assert.rejects(h.surface.execute(async () => { throw marked; }),
+    (e) => { assert.deepEqual(readClassification(e), { errorType: "capability_unavailable", message: "设备不支持打开地址" }); return true; });
+  // 守卫在窗口内判过结果未知：即便 handler 抛的是断言，也按守卫的归类
+  const unknown = { errorType: "engine_error" as const, message: "设备在等待时间内没有回应，这一步可能已执行也可能未执行" };
+  h.setGuardOutcome({ failure: unknown, resultUnknown: true });
+  await assert.rejects(h.surface.execute(async () => { throw new DeterministicAssertion("不成立"); }),
+    (e) => { assert.deepEqual(readClassification(e), unknown); return true; });
+});
+
 test("会话年龄到 max_session_s：scenario 前核对与 step 前核对都归 session_lost，执行窗口不再打开", async () => {
   const h = harness();
   await ready(h);
@@ -899,6 +1101,72 @@ test("中断释放：撤销令牌并中止当前 act，不给 deleteSession 钩�
   assert.deepEqual(h.reportRefCalls, []);
 });
 
+test("正常释放进行中收到停止信号：同一次终结升级为中断，尚未开始的 deleteSession 不发、正常诊断上传不做，两者挂住也按时返回", async () => {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  const hang = () => new Promise<never>(() => {});
+  const h = harness({ finalizeGate: gate, deleteSession: hang, toReportRef: hang });
+  await ready(h);
+  const normal = h.surface.release("normal");
+  await settle();
+  assert.equal(h.finalizations.length, 1);  // 终结已在途、还没走到 deleteSession
+  const interrupt = h.surface.release("interrupt");
+  assert.strictEqual(interrupt, normal);  // 同一个终结任务，不重新进入
+  open();
+  const out = await within(interrupt, 2000, "升级为中断后的释放");
+  assert.deepEqual(out, { releaseFailed: false, reportRefs: [] });
+  assert.equal(h.finalizations.length, 1);
+  assert.ok(!h.calls.includes("appium.deleteSession"), h.calls.join(", "));
+  assert.deepEqual(h.reportRefCalls, []);
+  assert.ok(fs.existsSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE)));  // 诊断文件照常写盘
+});
+
+test("中断释放与升级为中断的释放：device-session.json 交后台队列恰一次，由停止路径的排空带上，不实时上传", async () => {
+  const direct = harness();
+  await ready(direct);
+  await direct.surface.release("interrupt");
+  assert.deepEqual(direct.enqueueCalls, [[path.join(direct.deviceDir!, DEVICE_SESSION_FILE)]]);
+  assert.deepEqual(direct.reportRefCalls, []);
+
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => { open = resolve; });
+  const upgraded = harness({ finalizeGate: gate });
+  await ready(upgraded);
+  const normal = upgraded.surface.release("normal");
+  await settle();
+  void upgraded.surface.release("interrupt");
+  open();
+  await within(normal, 2000, "升级为中断后的释放");
+  assert.deepEqual(upgraded.enqueueCalls, [[path.join(upgraded.deviceDir!, DEVICE_SESSION_FILE)]]);
+  assert.deepEqual(upgraded.reportRefCalls, []);
+
+  const plain = harness();
+  await ready(plain);
+  await plain.surface.release("normal");
+  assert.deepEqual(plain.enqueueCalls, []);  // 正常模式实时上传、得到链接，不进队列
+  assert.equal(plain.reportRefCalls.length, 1);
+});
+
+test("deleteSession 已在途时收到停止信号：不打断它（由终结块的 5 秒上限封顶），仍跳过正常诊断上传", async () => {
+  let finishDelete!: () => void;
+  const deleting = new Promise<void>((resolve) => { finishDelete = resolve; });
+  const h = harness({ deleteSession: () => deleting });
+  await ready(h);
+  const normal = h.surface.release("normal");
+  await settle();
+  assert.ok(h.calls.includes("appium.deleteSession"));
+  void h.surface.release("interrupt");
+  let settled = false;
+  void normal.then(() => { settled = true; });
+  await settle();
+  assert.equal(settled, false, "在途的 deleteSession 落定之前释放不应返回");
+  finishDelete();
+  const out = await within(normal, 2000, "deleteSession 在途时升级的释放");
+  assert.deepEqual(out.reportRefs, []);
+  assert.deepEqual(h.reportRefCalls, []);
+  assert.equal(h.calls.filter((c) => c === "appium.deleteSession").length, 1);
+});
+
 test("执行前失败在 Appium 会话建成之前：正常释放不给 deleteSession 钩子；释放未确认如实返回", async () => {
   const h = harness({ connectOutcomes: [{ kind: "terminated", termination: { errorType: "precheck_failed", message: "x" } }] });
   const r = await h.surface.acquire();
@@ -1018,11 +1286,32 @@ test("缺省装配：适配器按会话回报的 automationName 选出两种驱�
   assert.notEqual(parts.adapters.select("XCUITest"), parts.adapters.select("XCUITest"));
 });
 
-test("缺省装配：守卫与 Agent 工厂是命令守卫与设备 Agent 的构造处；缺本次运行编号时构造即抛出", () => {
+test("缺省装配：守卫是命令守卫的构造处；缺本次运行编号时构造即抛出", () => {
   const parts = defaultDeviceParts(partsEnv({ [RUN_ID_ENV]: "run-1" }));
   assert.equal(parts.guards, commandGuardFactory);
-  assert.equal(parts.agents, deviceAgentFactory);
   assert.throws(() => defaultDeviceParts(partsEnv({})), new RegExp(RUN_ID_ENV));
+});
+
+// 收起键盘是尽力动作，失败只记一行日志：缺省装配的 Agent 工厂没接上部件环境的日志出口时，生产环境里这类失败既不传出异常、也不
+// 留下任何记录。这里按行为核对，不按工厂对象的身份核对。
+test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实现，输入后收起键盘失败时恰记一行", async () => {
+  const lines: string[] = [];
+  const parts = defaultDeviceParts({ ...partsEnv({ [RUN_ID_ENV]: "run-1" }), log: (line) => lines.push(line) });
+  const adapter = parts.adapters.select("UiAutomator2");
+  assert.ok(adapter);
+  const driver = {
+    execute: async () => null,
+    hideKeyboard: async () => { throw new Error("The software keyboard cannot be hidden"); },
+  } as unknown as Browser;
+  const agent = parts.agents.create({
+    driver, adapter, device: "android", scale: 1, inputContext: null,
+    session: { withWebContext: async (_d: Browser, fn: () => unknown) => fn() } as unknown as AppiumSession,
+    opts: deviceAgentOpts({} as never, {}),
+  });
+  const input = agent.interface.actionSpace().find((a) => a.name === "Input");
+  assert.ok(input, "动作集里应有 Input");
+  await input.call({ value: "x", autoDismissKeyboard: true }, {} as never);
+  assert.equal(lines.filter((line) => /未能收起软键盘/.test(line)).length, 1, lines.join("\n"));
 });
 
 // 镜像里的设备依赖冒烟（engines/midscene/Dockerfile）只 import dist/device/surface.mjs、不调用任何导出：它能拦住依赖没装进镜像，

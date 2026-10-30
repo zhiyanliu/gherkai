@@ -10,14 +10,15 @@
 //   - ERROR、标记等待期内没有任何标记、导航本身失败（含执行实例的客户端超时）、切回原生上下文或读取控件树失败：原地重导航，
 //     共 DEVICE_WARMUP_ATTEMPTS 次，耗尽归 engine_error。
 // 永不归 network_error（ADR 0028 的分类红线；设备路径没有 network_error 出口）。命令失败时先查一次会话状态，不是 RUNNING 即
-// session_lost（ADR 0051 决策 4「会话丢失的判定靠查状态」）。
+// session_lost（ADR 0051 决策 4「会话丢失的判定靠查状态」）；预热在 scope_started 之前，消息用执行前的那句（surface.mts 的
+// SESSION_LOST_BEFORE_START_MESSAGE）。
 //
 // 预算（ADR 0052 决策 6）：导航以执行实例的单请求超时（limits 的 EXEC_REQUEST_TIMEOUT_MS，由 Appium 块设在执行实例上）为上界，
 // 本模块不另设导航超时、不做放弃式等待，也不套用桌面预热的 30 秒导航超时——单条命令的上界只能由客户端实例的请求超时给出
 // （被拒方案「探测用 Promise.race」同理）。标记等待期与尝试次数与桌面预热共用同一常量。整个预热计入获取预算：预算的中止信号
 // 穿进控件树的读取；导航不接受中止信号，只能等它返回。预算到期或进入终结后不再向设备发命令（device/surface.mts 的「进入终结
-// 即停」）：不发起新的尝试，导航返回后不再切回原生上下文，url 路线读到 READY 后也不离开预热页；此时返回的 engine_error 由接缝
-// 按预算改写为 acquire_timeout。
+// 即停」）：不发起新的尝试，导航返回后不再切回原生上下文，url 路线读到 READY 后也不离开预热页、离开的导航返回时已中止则不再切回
+// 原生上下文；此时返回的 engine_error 由接缝按预算改写为 acquire_timeout。
 //
 // 通道（ADR 0052 决策 2、6）：预热发生在 scope_started 之前、尚无执行令牌，经生命周期通道执行，导航命令由执行实例 session.exec
 // 发出，不经命令守卫。
@@ -37,8 +38,9 @@ import { readClassification, type ScopeTermination } from "../worker/surface.mjs
 import {
   WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, warmupErrorMessage,
 } from "../lib/tunnel-warmup.mjs";
+import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
 import { DEVICE_WARMUP_ATTEMPTS } from "./limits.mjs";
-import { SESSION_LOST_MESSAGE, type AppiumSession, type DeviceWarmup } from "./surface.mjs";
+import type { AppiumSession, DeviceWarmup } from "./surface.mjs";
 
 export type WarmupMarker = keyof typeof WARMUP_MARKERS;
 
@@ -98,11 +100,11 @@ async function warmup(args: DeviceWarmupArgs, log: (line: string) => void, now: 
   while (attempts < DEVICE_WARMUP_ATTEMPTS && !args.budget.signal.aborted) {
     attempts += 1;
     const result = await attempt(args, attempts, log, now);
-    if (result.kind === "lost") return { errorType: "session_lost", message: SESSION_LOST_MESSAGE };
+    if (result.kind === "lost") return { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE };
     if (result.kind === "rejected") return result.termination;
     if (result.kind === "ready") {
       log(`worker: 会话预热已确认就绪（${args.route === "url" ? "在网页上下文中打开" : "交给系统浏览器打开"}，第 ${attempts} 次尝试）`);
-      if (args.route === "url" && !args.budget.signal.aborted) await leaveWarmupPage(args.session, log);
+      if (args.route === "url" && !args.budget.signal.aborted) await leaveWarmupPage(args.session, args.budget.signal, log);
       return null;
     }
     last = result.reason;
@@ -159,10 +161,12 @@ async function waitForMarker(args: DeviceWarmupArgs, n: number, log: (line: stri
   };
 }
 
-/** url 路线就绪后离开预热页：令牌不留在网页上下文的当前地址；之后切回原生上下文。失败只记日志（ADR 0051 决策 13）。 */
-async function leaveWarmupPage(session: AppiumSession, log: (line: string) => void): Promise<void> {
+/** url 路线就绪后离开预热页：令牌不留在网页上下文的当前地址；之后切回原生上下文，离开的导航返回时获取预算已中止则不再切。失败只记
+ *  日志（ADR 0051 决策 13）。 */
+async function leaveWarmupPage(session: AppiumSession, signal: AbortSignal, log: (line: string) => void): Promise<void> {
   try {
     await session.openUrl(session.exec, LEAVE_ADDRESS);
+    if (signal.aborted) return;
     await session.switchToNative();
   } catch (e) {
     log(`worker: 未能离开预热页，预热地址可能留在设备浏览器的当前地址（不影响判定）：${errorText(e)}`);

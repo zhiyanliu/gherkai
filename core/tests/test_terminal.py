@@ -164,7 +164,14 @@ def test_release_failed_hint_lists_sessions_and_attempts_separately_even_on_time
 
 def test_release_failed_hint_follows_the_job_target():
     """释放提示按 job 目标给、不按有没有会话事件给（ADR 0051 决策 4、7）：设备 job 指向设备控制台；桌面 job 说 AgentCore 浏览器会话
-    未能确认停止、不提设备控制台与远程访问会话。会话名与结果未知的创建尝试照样分开列。"""
+    未能确认停止、不提设备控制台与远程访问会话。会话名与结果未知的创建尝试照样分开列。
+
+    两句提示逐字取自 ADR 0051 决策 4「用户可见消息」条（ADR 0034 机制二同文），这里锁字面量、不只比常量：改动须同步 ADR、
+    用户指南 troubleshooting 与 CHANGELOG。"""
+    assert DESKTOP_RELEASE_FAILED_HINT == (
+        "AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止"
+    )
+    assert DEVICE_RELEASE_FAILED_HINT == "远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
     sessions = [_agentcore("s-1", "unconfirmed"), _attempted("gherkai:r:ab12:2:s")]
     desk = _fin(job=_job(), sessions=sessions)
     assert (desk.status, desk.error_type) == (Status.ERROR, "release_failed")

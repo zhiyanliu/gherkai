@@ -29,7 +29,7 @@
 // handler 约定：
 //   - playwright 句柄签名 (ctx, groups)：ctx.page 是 Playwright Page，ctx.navigate(url) 是引擎的导航原语；
 //     groups 是正则具名组 (?<name>...) 的对象。
-//   - webdriver 句柄签名 (ctx, groups)：ctx 是 WebdriverCtx 的七个字段（ADR 0050 决策 2），实现随设备模块落地。
+//   - webdriver 句柄签名 (ctx, groups)：ctx 是 WebdriverCtx 的七个字段（ADR 0050 决策 2），由 device/ 的设备接缝构造（ADR 0052 决策 2、3）。
 //   - 判定失败抛 DeterministicAssertion（或 node:assert 的 AssertionError）→ step 记 failed；抛其它 → step 记 error。
 //   - 不投票（确定性即无抖动，与 AI 断言的 votes 区分）。
 //   - meta.keywords 可声明这条 step 接受的 Gherkin 关键字（ADR 0050 决策 1）：缺省 Given / When / Then 全部；
@@ -77,7 +77,7 @@ export interface WebdriverApp {
 }
 
 /** webdriver 句柄的 ctx（ADR 0050 决策 2）：七个字段、一条不变量——step 结束时会话处在原生上下文。
- *  driver 以类型引用 WebdriverIO 客户端（只在编译期）；实现随设备模块落地，桌面路径不会构造它。 */
+ *  driver 以类型引用 WebdriverIO 客户端（只在编译期）；由 device/ 的设备接缝构造，桌面路径不会构造它。 */
 export interface WebdriverCtx {
   /** 受命令守卫的 WebdriverIO 客户端代理（守卫归 ADR 0052 决策 6）。 */
   driver: Browser;

@@ -10,20 +10,23 @@
 //
 // 连接池与第一条会话命令（ADR 0052 决策 6 的不变量段）：webdriver 按会话 id 共享一个 undici 连接池，池的超时取第一个对该会话发命令的
 // 实例的值，之后其它实例的有效超时是自身与它的较小值。所以 connect 返回之前先由执行实例发出第一条会话命令（读一次当前上下文），
-// 之后才建探测实例。ADR 原文的前提是「建连实例只发 newSession」，WebdriverIO 的 remote() 在 iOS Safari 会话上并不满足：它在返回
-// 之前由建连实例自己读一次当前上下文（它的上下文管理器初始化），这条请求先于执行实例建起连接池；建连实例被预算封顶时超时可能远小于
-// 执行实例，池的超时随之变小，整个会话里执行实例的长命令都会被提前切断。为此 newSession 返回之后、remote() 返回之前，经 remote() 的
-// 修饰函数把建连实例此后的单请求超时改成执行实例的值：池无论由谁建起，超时都与执行实例相同。appium.test.mts 在真实的 webdriver 上
-// 锁定这一点。
+// 之后才建探测实例。建连实例的 newSession 不进连接池，但 WebdriverIO 的 remote() 在 iOS Safari 会话上返回之前由建连实例自己读一次
+// 当前上下文（它的上下文管理器初始化），这条请求先于执行实例建起连接池；建连实例被预算封顶时超时可能远小于执行实例，池的超时随之
+// 变小，整个会话里执行实例的长命令都会被提前切断。为此 newSession 返回之后、remote() 返回之前，经 remote() 的修饰函数把建连实例
+// 此后的单请求超时改成执行实例的值：池无论由谁建起，超时都与执行实例相同。appium.test.mts 在真实的 webdriver 上锁定这一点。
 //
 // 截止信号（端口 pageSource、readWebAddress 的参数与获取预算的 signal）：WebdriverIO 的命令不接收中止信号。本模块经客户端的
 // transformRequest 钩子，把调用方用 withDeadline 声明的截止信号并进每个请求自己的中止信号：到期即中止 HTTP 请求本身，与客户端超时
 // 是同一种机制，不是放弃式等待（被拒方案「探测用 Promise.race」）。信号经 AsyncLocalStorage 沿调用链传到钩子里，同一实例上其它调用链
 // 的请求不受影响。进入终结时获取预算的 signal 中止，在途的 newSession 与探测命令随之中止，停止信号由此穿透到 Appium 一侧。
 //
-// 状态码（ADR 0052 决策 6）：服务端回非 2xx 时 webdriver 抛出的错误只带错误名与消息。transformResponse 钩子按请求记下状态码，命令失败
-// 时再经客户端的 result 事件挂到错误对象的 statusCode 上（与 webdriver 自己的 WebDriverRequestError 同名字段一致）；读取一律经
-// httpStatusOf，传输层失败的种类经 commandFailureKind。
+// 状态码与传输故障（ADR 0052 决策 6）：服务端回非 2xx 时 webdriver 抛出的错误只带错误名与消息。三个实例的 transformResponse 钩子经
+// device/guard.mts 的 recordHttpStatus 把状态码记到请求选项上（错误对象的 opts 就是它），读取一律经守卫的 httpStatusOf；连接层错误码、
+// 超时码与网关类状态码也只取守卫导出的那一份，newSession 的瞬时失败与 commandFailureKind 的失败种类都据此判定。
+//
+// 生命周期通道上的只读原语（scenario 前的存活截图、控件树、为 evidence 读地址时的列上下文与读地址）对连接层错误与 502 / 503 / 504
+// 重试一次，超时与 500 不重试：与守卫的只读白名单是同一条规则、同一个函数（守卫的 retryReadOnce，ADR 0052 决策 6 的只读白名单
+// 「由设备模块重试 1 次」）。切换上下文不在白名单里，不重试。
 //
 // 能力集（ADR 0052 决策 3）由 newSessionCapabilities 单点组装。会话回报的 automationName 与系统版本只在 readSessionCapabilities 读一次
 // （ADR 0052 决策 1 的唯一读取点），系统版本只进诊断与句柄上下文。
@@ -51,6 +54,10 @@ import {
   ACQUIRE_TIMEOUT_MESSAGE,
   type AcquireBudget, type AddressAttempt, type AppiumConnector, type AppiumSession, type ConnectOutcome, type ConnectRequest,
 } from "./surface.mjs";
+import {
+  CONNECTION_ERROR_CODES, GATEWAY_STATUS_CODES, TIMEOUT_ERROR_CODES, hasConnectionCode, httpStatusOf, isTimeout, recordHttpStatus,
+  retryReadOnce,
+} from "./guard.mjs";
 import { NATIVE_CONTEXT, locateError, locateWebContext } from "./web-context.mjs";
 import { WDIO_LOG_LEVEL, installWdioLogMasking } from "./wdio-log.mjs";
 
@@ -102,7 +109,7 @@ export function readSessionCapabilities(capabilities: unknown): SessionFacts {
   };
 }
 
-// ---- 截止信号、状态码与失败种类 ----
+// ---- 截止信号与失败种类 ----
 
 const deadlines = new AsyncLocalStorage<AbortSignal>();
 
@@ -122,41 +129,6 @@ function joinDeadline(requestOptions: RequestInit): RequestInit {
   return requestOptions;
 }
 
-// 按请求记下的状态码：键是 webdriver 的请求选项对象，它在请求失败时就是错误对象的 opts。
-const statusByRequest = new WeakMap<object, number>();
-
-/** 命令失败时服务端回的 HTTP 状态码；没有响应（连接层错误、超时、中止）或不是 WebDriver 错误时为 null。 */
-export function httpStatusOf(error: unknown): number | null {
-  if (error === null || typeof error !== "object") return null;
-  const own = (error as { statusCode?: unknown }).statusCode;
-  if (typeof own === "number") return own;
-  const opts = (error as { opts?: unknown }).opts;
-  return opts !== null && typeof opts === "object" ? statusByRequest.get(opts) ?? null : null;
-}
-
-/** 把记下的状态码挂到失败命令的错误对象上（命令的 result 事件在错误抛给调用方之前发出）。 */
-function attachStatusCodes(client: Browser): void {
-  const emitter = client as unknown as { on(event: "result", listener: (event: { result?: { error?: unknown } }) => void): unknown };
-  emitter.on("result", (event) => {
-    const error = event?.result?.error;
-    if (error === null || typeof error !== "object" || !Object.isExtensible(error)) return;
-    if (typeof (error as { statusCode?: unknown }).statusCode === "number") return;
-    const status = httpStatusOf(error);
-    if (status !== null) {
-      Object.defineProperty(error, "statusCode", { value: status, enumerable: false, configurable: true, writable: true });
-    }
-  });
-}
-
-/** 连接层错误的错误码（ADR 0052 决策 6 列出的一类，另含解析与路由失败）。不含任何超时码：一切超时都不重试。 */
-export const CONNECTION_ERROR_CODES: readonly string[] = [
-  "ECONNRESET", "ECONNREFUSED", "EPIPE", "EHOSTUNREACH", "ENETUNREACH", "ENOTFOUND", "EAI_AGAIN", "UND_ERR_SOCKET", "UND_ERR_CLOSED",
-];
-/** 网关类状态码：与连接层错误一样属于传输故障（ADR 0052 决策 6）。 */
-export const GATEWAY_STATUS_CODES: readonly number[] = [502, 503, 504];
-/** 超时的错误码：webdriver 的 ETIMEDOUT（客户端超时与底层网络超时同码）与 undici 的连接、响应头、响应体超时（连接池的超时取第一个
- *  对会话发命令的实例的值，见模块头）。一切超时都不重试（ADR 0052 决策 6）。 */
-export const TIMEOUT_ERROR_CODES: readonly string[] = ["ETIMEDOUT", "UND_ERR_CONNECT_TIMEOUT", "UND_ERR_HEADERS_TIMEOUT", "UND_ERR_BODY_TIMEOUT"];
 // webdriver 10.0.2 客户端超时的消息（WebDriverRequestError）。
 const CLIENT_TIMEOUT_TEXT = "Request timed out!";
 // webdriver 对 newSession 的 ECONNREFUSED 改写出的消息开头（getSessionError），原错误码随改写丢失。
@@ -166,12 +138,12 @@ const FAILED_WITH_CODE = /Request failed with error code ([A-Z_]+)/;
 /** 一次命令失败的种类：客户端超时、连接层错误、网关类状态码、服务端的其它错误响应，或都不是（如被截止信号中止）。 */
 export type CommandFailureKind = "client_timeout" | "connection" | "gateway" | "server" | "other";
 
+/** 失败种类，判定与命令守卫是同一份（沿 cause 链取错误码，超时优先）。 */
 export function commandFailureKind(error: unknown): CommandFailureKind {
-  const code = errorCode(error);
-  if (code !== null && TIMEOUT_ERROR_CODES.includes(code)) return "client_timeout";
-  if (code !== null && CONNECTION_ERROR_CODES.includes(code)) return "connection";
+  if (isTimeout(error)) return "client_timeout";
+  if (hasConnectionCode(error)) return "connection";
   const status = httpStatusOf(error);
-  if (status !== null) return GATEWAY_STATUS_CODES.includes(status) ? "gateway" : "server";
+  if (status !== null) return GATEWAY_STATUS_CODES.has(status) ? "gateway" : "server";
   return "other";
 }
 
@@ -198,10 +170,10 @@ function newSessionFailureKind(error: unknown, status: number | null): NewSessio
   if (HELPER_INSTALL_REFUSED_MARKERS.some((m) => text.includes(m))) return "helper_refused";
   if (text.includes(CLIENT_TIMEOUT_TEXT)) return "client_timeout";
   const code = errorCode(error) ?? FAILED_WITH_CODE.exec(text)?.[1] ?? null;
-  if (code !== null && code !== "ETIMEDOUT" && TIMEOUT_ERROR_CODES.includes(code)) return "client_timeout";
-  if (code === "ETIMEDOUT" || (code !== null && CONNECTION_ERROR_CODES.includes(code))) return "transient";
+  if (code !== null && code !== "ETIMEDOUT" && TIMEOUT_ERROR_CODES.has(code)) return "client_timeout";
+  if (code === "ETIMEDOUT" || (code !== null && CONNECTION_ERROR_CODES.has(code))) return "transient";
   if (text.startsWith(UNABLE_TO_CONNECT_TEXT)) return "transient";
-  if (status !== null && GATEWAY_STATUS_CODES.includes(status)) return "transient";
+  if (status !== null && GATEWAY_STATUS_CODES.has(status)) return "transient";
   return "rejected";
 }
 
@@ -278,7 +250,7 @@ function clientOptions(endpoint: EndpointParts, timeoutMs: number, onStatus?: (s
     enableDirectConnect: false,
     transformRequest: joinDeadline,
     transformResponse: (response: { statusCode: number }, requestOptions: RequestInit) => {
-      statusByRequest.set(requestOptions, response.statusCode);
+      recordHttpStatus(response, requestOptions);
       onStatus?.(response.statusCode);
       return response;
     },
@@ -322,7 +294,6 @@ export function createAppiumConnector(options: AppiumConnectorOptions = {}): App
     try {
       return await withDeadline(budget.signal, async () => {
         const exec = await wdio.attach({ sessionId, capabilities, ...clientOptions(endpoint, timeouts.execRequestMs) });
-        attachStatusCodes(exec);
         // 执行实例的第一条会话命令，之后才建探测实例（见模块头「连接池与第一条会话命令」）。
         await exec.getContext();
         if (req.uiKind === "web") {
@@ -334,7 +305,6 @@ export function createAppiumConnector(options: AppiumConnectorOptions = {}): App
           }
         }
         const probe = await wdio.attach({ sessionId, capabilities, ...clientOptions(endpoint, timeouts.probeRequestMs) });
-        attachStatusCodes(probe);
         return createAppiumSession({ clients: { exec, probe }, device: req.device, capabilities, sleep });
       });
     } catch (e) {
@@ -442,27 +412,30 @@ class WdioAppiumSession implements ProbeableAppiumSession {
     await this.exec.switchContext(NATIVE_CONTEXT);
   }
 
+  /** 存活截图：经探测实例发出，受它的短超时约束；连接层错误与 502 / 503 / 504 重试一次（见模块头）。 */
   async probeScreenshot(): Promise<void> {
-    await this.probe.takeScreenshot();
+    await retryReadOnce(() => this.probe.takeScreenshot());
   }
 
+  /** 原生上下文的控件树：受 signal 约束；连接层错误与 502 / 503 / 504 在 signal 未中止时重试一次。 */
   pageSource(signal: AbortSignal): Promise<string> {
-    return withDeadline(signal, () => this.exec.getPageSource());
+    return withDeadline(signal, () => retryReadOnce(() => this.exec.getPageSource(), () => !signal.aborted));
   }
 
-  /** 为 evidence 读地址：多候选与零候选、命令出错都只给出读不到的原因，不抛出；signal 已中止的记 timeout。读完尽力切回原生上下文，
-   *  切不回由随后的复原核对处置。 */
+  /** 为 evidence 读地址：多候选与零候选、命令出错都只给出读不到的原因，不抛出；signal 已中止的记 timeout。列上下文与读地址各自按
+   *  只读原语重试一次，切入不重试。读完尽力切回原生上下文，切不回由随后的复原核对处置。 */
   async readWebAddress(signal: AbortSignal): Promise<AddressAttempt> {
     if (signal.aborted) return { missing: "timeout" };
+    const live = (): boolean => !signal.aborted;
     try {
       return await withDeadline(signal, async () => {
-        const location = await locateWebContext(() => this.exec.getContexts(), this.device, {
+        const location = await locateWebContext(() => retryReadOnce(() => this.exec.getContexts(), live), this.device, {
           sleep: (ms) => this.sleep(ms, signal),
         });
         if (location.kind !== "one") return { missing: signal.aborted ? "timeout" : "error" } as const;
         await this.exec.switchContext(location.name);
         try {
-          return { url: await this.exec.getUrl() };
+          return { url: await retryReadOnce(() => this.exec.getUrl(), live) };
         } finally {
           await this.exec.switchContext(NATIVE_CONTEXT).catch(() => {});
         }

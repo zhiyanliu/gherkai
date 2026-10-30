@@ -1,12 +1,13 @@
 // Device Farm 会话块的单测（ADR 0051 决策 2、3、4、7、10；ADR 0052 决策 3）。运行：npx tsx --test src/device/session.test.mts。
 //
 // Device Farm 换成假的 API（不连 AWS），时钟与计时器换成虚拟时钟：设备解析的版本族、静态过滤、排序与完整分页，零候选重列与
-// 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除，等到 RUNNING，查状态，换台时的 Stop。另有一组用
-// 真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试与每次调用都带中止信号。会话年龄的后备由接缝按
-// createRequestedAt 计算（device/surface.mts），这里只核对这个起点是发出 Create 的时刻。
+// 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除，获取期按名找回的会话随即按 Stop 规则停止，等到
+// RUNNING，查状态，换台时按同一 Stop 规则处理被替换的会话。另有一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试、每次调用都带中止信号，以及响应体
+// 没读完的失败归结果未知。会话年龄的后备由接缝按 createRequestedAt 计算（device/surface.mts），这里只核对这个起点是发出 Create
+// 的时刻。
 import { test } from "node:test";
 import assert from "node:assert";
-import { Readable } from "node:stream";
+import { PassThrough, Readable } from "node:stream";
 import type { Device as FarmDevice, RemoteAccessSession } from "@aws-sdk/client-device-farm";
 import {
   DEVICE_FARM_REGION, RUNNING_POLL_INTERVAL_MS, classifyCallFailure, compareVersions, createDeviceFarmSessions, deviceArnRejectedMessage,
@@ -468,6 +469,191 @@ test("Create：按名列举的分页没扫完视为未核对，待核保留（�
   assert.deepEqual([...h.block.registry.pending.keys()], [encode(RUN_ID, SCOPE_ID, 1)]);
 });
 
+test("Create：按名核对以进入时的待核名字为准扫页——首页命中一个名字后仍翻页找其余名字，后页出错时命中的已登记并消除、没命中的保留待核", async () => {
+  const h = setup();
+  const [name1, name2] = [1, 2].map((a) => encode(RUN_ID, SCOPE_ID, a));
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n <= 2) throw connectionReset();
+    return { arn: "arn:session:3", name: input.name, status: "PENDING" };
+  };
+  let lists = 0;
+  h.farm.listSessionsImpl = async ({ nextToken }) => {
+    lists += 1;
+    if (lists === 1) throw sdkError("InternalServiceException", 500);   // 第二次 Create 之前的核对没有完成：两个名字都待核
+    if (nextToken === undefined) return { remoteAccessSessions: [{ arn: "arn:orphan1", name: name1, status: "RUNNING" }], nextToken: "page-1" };
+    throw sdkError("InternalServiceException", 500);
+  };
+  const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.equal(got.ok, true);
+  assert.deepEqual(h.farm.ops("listSessions").map((c) => (c.arg as { nextToken?: string }).nextToken), [undefined, undefined, "page-1"]);
+  assert.deepEqual([...h.block.registry.pending.keys()], [name2]);
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:orphan1", "arn:session:3"]);
+  assert.deepEqual(h.emitted.map((e) => [e.origin, e.sessionId]), [["discovered", "arn:orphan1"], ["created", "arn:session:3"]]);
+});
+
+test("Create：按名核对命中即是正面证据——全部待核名字都已命中就不再翻页（一次尝试至多建立一个会话）", async () => {
+  const h = setup();
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n === 1) throw connectionReset();
+    return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  h.farm.sessionPages = [[{ arn: "arn:orphan", name: name1, status: "RUNNING" }], [{ arn: "arn:old", name: "gherkai:other", status: "COMPLETED" }]];
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.deepEqual(h.farm.ops("listSessions").map((c) => (c.arg as { nextToken?: string }).nextToken), [undefined]);
+  assert.deepEqual([...h.block.registry.pending.keys()], []);
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:orphan", "arn:session:2"]);
+});
+
+test("Create：按名核对逐 ARN 登记——同一页里同名的两个会话都进待清理集、各发一条 session_opened(discovered)", async () => {
+  const h = setup();
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n === 1) throw connectionReset();
+    return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  h.farm.sessionPages = [[{ arn: "arn:dupA", name: name1, status: "RUNNING" }, { arn: "arn:dupB", name: name1, status: "PENDING" }]];
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:dupA", "arn:dupB", "arn:session:2"]);
+  assert.deepEqual(h.emitted.map((e) => [e.origin, e.sessionId]), [
+    ["discovered", "arn:dupA"], ["discovered", "arn:dupB"], ["created", "arn:session:2"],
+  ]);
+  // 两个找回的会话都随即按 Stop 规则处理
+  assert.deepEqual(h.farm.ops("stop").map((c) => c.arg).sort(), ["arn:dupA", "arn:dupB"]);
+});
+
+// ---- 获取期按名找回的孤儿会话：找回即按 Stop 规则停止，不等到终结 ----
+
+/** 第一次 Create 连接中断、之后的 Create 成功；重试前的按名核对在首页找回第一次尝试建立的会话 arn:orphan。 */
+function orphanSetup() {
+  const h = setup();
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n === 1) throw connectionReset();
+    return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  h.farm.sessionPages = [[{ arn: "arn:orphan", name: name1, status: "PENDING" }]];
+  return { ...h, name1 };
+}
+
+/** 调用序列：op 与 Get / Stop 的对象（其余调用的参数不看）。 */
+function sequence(h: { farm: FakeFarm }): [string, unknown][] {
+  return h.farm.calls.map((c) => [c.op, c.op === "get" || c.op === "stop" ? c.arg : undefined]);
+}
+
+test("获取期找回的孤儿会话：session_opened(discovered) 写出之后即按 Stop 规则先 Get，仍在排队即发一次 Stop，返回体为 STOPPING 即确认，然后才发下一次 Create", async () => {
+  const h = orphanSetup();
+  h.farm.getImpl = async (arn) => ({ arn, status: arn === "arn:orphan" ? "PENDING_CONCURRENCY" : "RUNNING" });
+  let emittedAtStop = -1;
+  h.farm.stopImpl = async (arn) => {
+    emittedAtStop = h.emitted.length;
+    return { arn, status: "STOPPING", deviceMinutes: { total: 0.2, metered: 0.2, unmetered: 0 } };
+  };
+  const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.equal(got.ok && got.value.arn, "arn:session:2");
+  assert.deepEqual(sequence(h), [
+    ["create", undefined], ["listSessions", undefined], ["get", "arn:orphan"], ["stop", "arn:orphan"], ["create", undefined],
+  ]);
+  assert.equal(emittedAtStop, 1);                                     // Stop 发出时 session_opened(discovered) 已写出
+  const orphan = h.block.registry.sessions.get("arn:orphan")!;
+  assert.equal(orphan.stopSentAt, h.farm.ops("stop")[0].at);
+  assert.notEqual(orphan.confirmedAt, null);
+  assert.deepEqual(orphan.providerMinutes, { total: 0.2, metered: 0.2, unmetered: 0 });
+  // 孤儿仍在待清理集（session_closed 归终结），执行所用的是新建的会话；获取期不发 session_closed
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:orphan", "arn:session:2"]);
+  assert.equal(h.block.registry.current?.arn, "arn:session:2");
+  assert.deepEqual(h.emitted.map((e) => [e.type, e.origin, e.sessionId]), [
+    ["session_opened", "discovered", "arn:orphan"], ["session_opened", "created", "arn:session:2"],
+  ]);
+  // Get 与 Stop 接获取预算的信号：预算中止即随之中止
+  h.budget.abort();
+  for (const op of ["get", "stop"]) assert.equal(h.farm.ops(op)[0].signal.aborted, true, op);
+});
+
+test("获取期找回的孤儿会话：Get 已是 STOPPING / COMPLETED 即确认，不发 Stop", async () => {
+  for (const status of ["STOPPING", "COMPLETED"]) {
+    const h = orphanSetup();
+    h.farm.getImpl = async (arn) => ({ arn, status, deviceMinutes: { total: 1 } });
+    await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.deepEqual(sequence(h), [["create", undefined], ["listSessions", undefined], ["get", "arn:orphan"], ["create", undefined]], status);
+    const orphan = h.block.registry.sessions.get("arn:orphan")!;
+    assert.notEqual(orphan.confirmedAt, null, status);
+    assert.equal(orphan.stopSentAt, null, status);
+    assert.deepEqual(orphan.providerMinutes, { total: 1 }, status);
+  }
+});
+
+test("获取期找回的孤儿会话：Stop 报错或返回体不是 STOPPING / COMPLETED 时补查一次 Get；补查仍未停止即留给收尾，不重试 Stop", async () => {
+  const stops: Array<() => Promise<RemoteAccessSession>> = [
+    async () => { throw sdkError("InternalServiceException", 500); },
+    async () => ({ status: "RUNNING" }),
+  ];
+  for (const stop of stops) {
+    const h = orphanSetup();
+    h.farm.stopImpl = stop;
+    const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.equal(got.ok, true);
+    assert.deepEqual(sequence(h), [
+      ["create", undefined], ["listSessions", undefined], ["get", "arn:orphan"], ["stop", "arn:orphan"], ["get", "arn:orphan"],
+      ["create", undefined],
+    ]);
+    const orphan = h.block.registry.sessions.get("arn:orphan")!;
+    assert.notEqual(orphan.stopSentAt, null);
+    assert.equal(orphan.confirmedAt, null);
+    assert.ok(h.logs.some((l) => l.includes("arn:orphan") && l.includes("收尾")), h.logs.join("\n"));
+  }
+});
+
+test("获取期找回的孤儿会话：不重复 Stop——之后的重试再按名核对时，已找回的会话即使又被列出也不再 Get / Stop、不再发 session_opened", async () => {
+  const h = setup();
+  const [name1, name2] = [1, 2].map((a) => encode(RUN_ID, SCOPE_ID, a));
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n <= 2) throw connectionReset();
+    return { arn: "arn:session:3", name: input.name, status: "PENDING" };
+  };
+  h.farm.sessionPages = [[{ arn: "arn:orphan1", name: name1, status: "RUNNING" }]];    // 两次核对都列出它
+  const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.equal(got.ok, true);
+  assert.equal(h.farm.ops("listSessions").length, 2);
+  assert.deepEqual(h.farm.ops("stop").map((c) => c.arg), ["arn:orphan1"]);
+  assert.deepEqual(h.farm.ops("get").map((c) => c.arg), ["arn:orphan1"]);
+  assert.deepEqual([...h.block.registry.pending.keys()], [name2]);
+  assert.deepEqual(h.emitted.map((e) => [e.origin, e.sessionId]), [["discovered", "arn:orphan1"], ["created", "arn:session:3"]]);
+});
+
+test("获取期找回的孤儿会话：处理中获取预算中止（到期或进入终结）即停——在途的 Get 随之中止，不再发 Stop，会话留在待清理集交给终结", async () => {
+  const h = orphanSetup();
+  h.farm.getImpl = (_arn, signal) => { h.budget.abort(); return hang(signal); };
+  await assert.rejects(h.clock.run(h.block.create(CHOICE, h.budget)));
+  assert.deepEqual(sequence(h), [["create", undefined], ["listSessions", undefined], ["get", "arn:orphan"]]);
+  const orphan = h.block.registry.sessions.get("arn:orphan")!;
+  assert.equal(orphan.stopSentAt, null);
+  assert.equal(orphan.confirmedAt, null);
+});
+
+test("Create：返回了却没带会话 ARN 时记为待核，并写一行日志说明原因与会话名", async () => {
+  const h = setup();
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    return n === 1 ? { status: "PENDING" } : { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.deepEqual([...h.block.registry.pending.keys()], [name1]);
+  assert.ok(h.logs.some((l) => l.includes("没有带会话 ARN") && l.includes(name1)), h.logs.join("\n"));
+});
+
 test("Create：指定 ARN 被同步拒绝（非限流的 4xx）记 precheck_failed；按条件选出的设备被拒则报错交接缝归类", async () => {
   const fixed = setup({ deviceArn: "arn:aws:devicefarm:us-west-2::device:GONE" });
   fixed.farm.createImpl = async () => { throw sdkError("ArgumentException", 400, "Invalid device"); };
@@ -581,7 +767,7 @@ test("status：返回 Get 的状态值，请求带 10 秒超时；查询失败�
   assert.equal(h.clock.t - started, DEVICE_FARM_CALL_TIMEOUT_MS);
 });
 
-test("换台：被替换的会话先发一次 Stop（3 秒超时、不等确认、不查状态），再按同一规则重新解析与 Create；两个会话都留在待清理集", async () => {
+test("换台：被替换的会话按 Stop 规则先 Get，仍在运行即发一次 Stop（3 秒超时）、出错补查一次 Get，不重试、不等到确认；再按同一规则重新解析与 Create，两个会话都留在待清理集", async () => {
   const h = setup();
   h.farm.devicePages = [[dev("A", "18.6", "AVAILABLE")]];
   const choice1 = await h.clock.run(h.block.resolve(h.budget, null));
@@ -601,8 +787,8 @@ test("换台：被替换的会话先发一次 Stop（3 秒超时、不等确认�
   assert.ok(second.ok);
   if (!second.ok) return;
   const ops = h.farm.calls.map((c) => c.op);
-  assert.deepEqual(ops, ["listDevices", "create", "stop", "listDevices", "create"]);
-  assert.equal(h.farm.ops("stop")[0].arg, first.value.arn);
+  assert.deepEqual(ops, ["listDevices", "create", "get", "stop", "get", "listDevices", "create"]);
+  for (const op of ["get", "stop"]) assert.equal(h.farm.ops(op)[0].arg, first.value.arn);
   assert.equal(second.value.name, encode(RUN_ID, SCOPE_ID, 2));
   assert.deepEqual([...h.block.registry.sessions.keys()], [first.value.arn, second.value.arn]);
   assert.equal(h.block.registry.sessions.get(first.value.arn)!.stopSentAt, retireAt);
@@ -611,14 +797,67 @@ test("换台：被替换的会话先发一次 Stop（3 秒超时、不等确认�
   assert.ok(h.logs.some((l) => l.includes(first.value.arn)));
 });
 
-test("换台：Stop 的返回体已是 STOPPING 时记为确认（确认只认状态）", async () => {
+test("换台：Get 读到 STOPPING / COMPLETED 即确认，不发 Stop", async () => {
+  for (const status of ["STOPPING", "COMPLETED"]) {
+    const h = setup();
+    const first = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.ok(first.ok);
+    if (!first.ok) return;
+    h.farm.getImpl = async (arn) => ({ arn, status, deviceMinutes: { total: 1.5 } });
+    await h.clock.run(h.block.retire(first.value.arn));
+    assert.equal(h.farm.ops("stop").length, 0, status);
+    assert.equal(h.farm.ops("get").length, 1, status);
+    const tracked = h.block.registry.sessions.get(first.value.arn)!;
+    assert.notEqual(tracked.confirmedAt, null, status);
+    assert.equal(tracked.stopSentAt, null, status);
+    assert.deepEqual(tracked.providerMinutes, { total: 1.5 }, status);
+  }
+});
+
+test("换台：Get 失败时照常发 Stop，Stop 的返回体已是 STOPPING 即确认、不再补查（确认只认状态）", async () => {
+  const h = setup();
+  const first = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.ok(first.ok);
+  if (!first.ok) return;
+  h.farm.getImpl = (_arn, signal) => hang(signal);
+  h.farm.stopImpl = async (arn) => ({ arn, status: "STOPPING" });
+  const t0 = h.clock.t;
+  await h.clock.run(h.block.retire(first.value.arn));
+  assert.deepEqual(h.farm.calls.slice(1).map((c) => [c.op, c.at - t0]), [["get", 0], ["stop", DEVICE_FARM_CALL_TIMEOUT_MS]]);
+  assert.notEqual(h.block.registry.sessions.get(first.value.arn)!.confirmedAt, null);
+});
+
+test("换台：Get 读到运行中的状态即发 Stop，返回体为 STOPPING 时确认", async () => {
   const h = setup();
   const first = await h.clock.run(h.block.create(CHOICE, h.budget));
   assert.ok(first.ok);
   if (!first.ok) return;
   h.farm.stopImpl = async (arn) => ({ arn, status: "STOPPING" });
   await h.clock.run(h.block.retire(first.value.arn));
+  assert.deepEqual(h.farm.calls.slice(1).map((c) => c.op), ["get", "stop"]);
   assert.notEqual(h.block.registry.sessions.get(first.value.arn)!.confirmedAt, null);
+});
+
+test("换台：Stop 报错或返回体不是 STOPPING / COMPLETED 时补查一次 Get，读到 COMPLETED 即确认；补查仍在运行则留给收尾，不再发 Stop", async () => {
+  const stops: Array<() => Promise<RemoteAccessSession>> = [
+    async () => { throw sdkError("InternalServiceException", 500); },
+    async () => ({ status: "RUNNING" }),
+  ];
+  for (const stop of stops) {
+    for (const [after, confirmed] of [["COMPLETED", true], ["RUNNING", false]] as const) {
+      const h = setup();
+      const first = await h.clock.run(h.block.create(CHOICE, h.budget));
+      assert.ok(first.ok);
+      if (!first.ok) return;
+      const statuses = ["RUNNING", after];
+      h.farm.getImpl = async (arn) => ({ arn, status: statuses.shift() });
+      h.farm.stopImpl = stop;
+      await h.clock.run(h.block.retire(first.value.arn));
+      assert.deepEqual(h.farm.calls.slice(1).map((c) => c.op), ["get", "stop", "get"], after);
+      assert.equal(h.block.registry.sessions.get(first.value.arn)!.confirmedAt !== null, confirmed, after);
+      if (!confirmed) assert.ok(h.logs.some((l) => l.includes(first.value.arn) && l.includes("收尾")), h.logs.join("\n"));
+    }
+  }
 });
 
 // ---- 构造 ----
@@ -640,9 +879,12 @@ test("构造：缺 RUN_ID 时同步报错（会话名不能缺本次运行的编
 
 // ---- 错误归类 ----
 
-test("调用失败的归类：没有 HTTP 响应为结果未知，限流与服务端错误可重试，其余 4xx 为明确拒绝", () => {
+test("调用失败的归类：没有 HTTP 响应或响应体没读完为结果未知，限流与服务端错误可重试，其余 4xx 为明确拒绝", () => {
   assert.equal(classifyCallFailure(timeoutReason()), "unknown");
   assert.equal(classifyCallFailure(connectionReset()), "unknown");
+  // 响应头已到（SDK 把 200 写进 $metadata）而响应体没读完：服务端可能已经建好了会话
+  assert.equal(classifyCallFailure(Object.assign(new Error("aborted"), { name: "AbortError", $metadata: { httpStatusCode: 200 } })), "unknown");
+  assert.equal(classifyCallFailure(Object.assign(connectionReset(), { $metadata: { httpStatusCode: 200 } })), "unknown");
   assert.equal(classifyCallFailure(sdkError("ThrottlingException", 400)), "retryable");
   assert.equal(classifyCallFailure(sdkError("LimitExceededException", 400)), "retryable");
   assert.equal(classifyCallFailure(sdkError("TooManyRequestsException", 429)), "retryable");
@@ -730,4 +972,49 @@ test("Device Farm 客户端：只尝试一次（服务端 500 不在 SDK 内重�
   assert.equal((err2 as { name?: string }).name, "ArgumentException");
   assert.equal(classifyCallFailure(err2), "definitive");
   assert.equal(rejected.length, 1);
+});
+
+/** 响应头为 200、响应体写到一半连接即被重置的网络层。 */
+function truncatedBodyHandler(seen: string[]) {
+  return {
+    handle: async (req: { headers: Record<string, string> }) => {
+      seen.push(req.headers["x-amz-target"] ?? req.headers["X-Amz-Target"] ?? "");
+      const body = new PassThrough();
+      body.write('{"remoteAccessSession":{"arn":"arn:aws:devicefarm:us-west-2:123456789012:session:p/r/0');
+      setImmediate(() => body.destroy(connectionReset()));
+      return { response: { statusCode: 200, headers: { "content-type": "application/x-amz-json-1.1" }, body } };
+    },
+  };
+}
+
+/** 按真实时间轮询，直到条件成立（真的 SDK 走真实 I/O，虚拟时钟推不动它）。 */
+async function waitUntil(cond: () => boolean, limitMs = 5_000): Promise<void> {
+  const end = Date.now() + limitMs;
+  while (!cond()) {
+    if (Date.now() > end) throw new Error("等待条件超时");
+    await new Promise((r) => setTimeout(r, 5));
+  }
+}
+
+test("Device Farm 客户端：Create 收到 200 响应头后读响应体时连接中断，错误带 200 状态码、归结果未知，这次尝试记为待核", async () => {
+  const seen: string[] = [];
+  const api = deviceFarmApi({ requestHandler: truncatedBodyHandler(seen) as never, credentials: FAKE_CREDS });
+  const input = { projectArn: PROJECT, deviceArn: "arn:d", name: "gherkai:r:h:1:s", billingMethod: "METERED" };
+  const err = await api.createRemoteAccessSession(input, AbortSignal.timeout(60_000)).then(() => null, (e: unknown) => e);
+  assert.ok(err);
+  assert.equal((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode, 200);
+  assert.equal(classifyCallFailure(err), "unknown");
+  assert.equal(seen.length, 1);
+
+  const h = setup();
+  const block = createDeviceFarmSessions(h.env, {
+    api: deviceFarmApi({ requestHandler: truncatedBodyHandler([]) as never, credentials: FAKE_CREDS }), timers: h.clock.timers, runId: RUN_ID,
+  });
+  const creating = block.create(CHOICE, h.budget).then(() => null, (e: unknown) => e);
+  await waitUntil(() => block.registry.pending.size > 0);
+  h.budget.abort();
+  assert.ok((await h.clock.run(creating)) instanceof Error);
+  assert.deepEqual([...block.registry.pending.keys()], [encode(RUN_ID, SCOPE_ID, 1)]);
+  assert.equal(block.registry.sessions.size, 0);
+  assert.equal(h.emitted.length, 0);
 });

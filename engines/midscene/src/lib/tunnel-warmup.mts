@@ -47,15 +47,6 @@ export interface WarmupFailure {
   message: string;
 }
 
-/** 预热失败的异常形态：run-scope 的失败出口 exitAfterFailure 把它与 ScopeTerminationError 同样处理（释放会话、排空队列、发
- *  scope_done{status: error}，释放失败才以 1 退出）。主流程以 ScopeTerminationError 抛出预热失败，本类没有抛出方；
- *  exitAfterFailure 去掉对它的识别时连同本类一起删除。 */
-export class WarmupFailureError extends Error {
-  constructor(public readonly failure: WarmupFailure) {
-    super(failure.message);
-  }
-}
-
 /** 预热要用到的 Page 面：导航与读标题（Playwright Page 的子集，便于单测注 fake）。 */
 export interface WarmupPage {
   goto(url: string, opts: { waitUntil: "domcontentloaded"; timeout: number }): Promise<{ status(): number } | null>;

@@ -48,7 +48,7 @@ import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type Evidence
 import { errorText, oneLineError } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import { redactSecrets } from "../lib/redact.mjs";  // stderr 诊断行的脱敏出口（见下 log）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
-import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV, WarmupFailureError } from "../lib/tunnel-warmup.mjs";
+import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV } from "../lib/tunnel-warmup.mjs";
 import { loadUserSteps } from "./user-steps.mjs";  // 使用方 steps/ 目录的加载（ADR 0037 决策 4）
 // 界面接缝的契约（只有类型与归类标记的读写）与桌面实现；桌面收尾各段的预算常量随桌面实现住在那里，此处引用来算 grace 下限。
 import {
@@ -654,8 +654,8 @@ export interface FailureExitDeps {
 
 /** 主流程 try 块抛出后的统一出口（deps 全注入，对称 shutdownSequence；单测据此锁住次序与四种组合）：
  *  ① 释放会话优先（ADR 0024）；② 再排空截图后台队列——网络耗尽与异常这两条提前退出路径都不 flush（中断产物留本地），队列里没传完的
- *  字节就此丢，故给有界预算兜一把；③ 会话预热失败（ScopeTerminationError；lib 的 WarmupFailureError 同样按它处理，ADR 0051
- *  决策 13、决策 4）：归因与 sessionId 恒经 scope_done 传递、释放失败只让退出码为 1（不是 worker fatal、不是退出码 80）；
+ *  字节就此丢，故给有界预算兜一把；③ 会话预热失败（ScopeTerminationError，ADR 0051 决策 13、决策 4）：归因与 sessionId 恒经
+ *  scope_done 传递、释放失败只让退出码为 1（不是 worker fatal、不是退出码 80）；
  *  ④ 建连重试耗尽且会话已释放 → EX_WORKER_NETWORK（ADR 0028），释放失败（会话泄漏）优先级更高；
  *  ⑤ 其余原样重抛到 bin.mts 的统一 catch（打 `worker fatal:` + exit 1，core 记 engine_error）。
  *  ③ 的次序是桌面原有的「释放 → 排空 → scope_done」（ADR 0051 决策 5 桌面执行前失败出口）。设备的预热失败走同一出口：ADR 给设备
@@ -664,7 +664,7 @@ export interface FailureExitDeps {
 export async function exitAfterFailure(e: unknown, deps: FailureExitDeps): Promise<number> {
   await deps.cleanup();
   await deps.drain();
-  const termination = e instanceof ScopeTerminationError ? e.termination : e instanceof WarmupFailureError ? e.failure : null;
+  const termination = e instanceof ScopeTerminationError ? e.termination : null;
   if (termination !== null) {
     const refs = deps.reportRefs?.() ?? [];
     await deps.emit(scopeErrorEvent(deps.scopeId, deps.sessionId, termination, refs.length > 0 ? refs : undefined));

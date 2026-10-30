@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert";
 import { createHash, createHmac } from "node:crypto";
+import { getEventListeners } from "node:events";
 import { Readable } from "node:stream";
 import { S3Client } from "@aws-sdk/client-s3";
 import {
@@ -230,6 +231,66 @@ test("启动：activateApp 或采样命令本身失败不归类，原样抛给�
     const { control, sleep } = fakeControl([APP_STATE.FOREGROUND], { failOn });
     await assert.rejects(launchApp(control, APP_ID, { sleep }), new RegExp(`${failOn} 命令失败`));
   }
+});
+
+// 获取预算的中止信号（获取期到期或进入终结时中止）：每次等待之后、发命令之前核对，中止即以信号的原因拒绝、不再发命令。
+// 在途的那条命令不被打断（WebDriver 命令不接收中止信号），它返回之后的命令不再发出。
+
+test("启动：信号已中止时连 activateApp 也不发，以信号的原因拒绝", async () => {
+  const { control, calls, sleep } = fakeControl([APP_STATE.FOREGROUND]);
+  const reason = new Error("finalizing");
+  await assert.rejects(launchApp(control, APP_ID, { sleep }, AbortSignal.abort(reason)), (e) => e === reason);
+  assert.deepEqual(calls, []);
+});
+
+test("启动：activateApp 在途时中止 → 它返回之后不再等待、不发采样命令，以信号的原因拒绝", async () => {
+  const { control, calls, sleep } = fakeControl([APP_STATE.FOREGROUND]);
+  const ac = new AbortController();
+  let finishActivate!: () => void;
+  const inFlight: AppControl = {
+    ...control,
+    activateApp: async (appId: string) => {
+      calls.push(`activate:${appId}`);
+      await new Promise<void>((r) => { finishActivate = r; });
+    },
+  };
+  const launching = launchApp(inFlight, APP_ID, { sleep }, ac.signal);
+  await new Promise((r) => setImmediate(r));
+  const reason = new Error("finalizing");
+  ac.abort(reason);
+  finishActivate();
+  await assert.rejects(launching, (e) => e === reason);
+  assert.deepEqual(calls, [`activate:${APP_ID}`]);
+});
+
+test("启动：采样间隔中中止 → 这次等待之后不再发采样命令，以信号的原因拒绝", async () => {
+  const { control, calls } = fakeControl([APP_STATE.FOREGROUND]);
+  const ac = new AbortController();
+  const reason = new Error("获取预算已用尽");
+  let waits = 0;
+  const sleep = async (ms: number) => {
+    calls.push(`sleep:${ms}`);
+    waits += 1;
+    if (waits === 2) ac.abort(reason);  // 第二次等待期间到期
+  };
+  await assert.rejects(launchApp(control, APP_ID, { sleep }, ac.signal), (e) => e === reason);
+  assert.deepEqual(calls, [`activate:${APP_ID}`, ...SAMPLED.slice(0, 3)], "第一次采样照发，第二次等待之后停");
+});
+
+test("启动：缺省等待在中止时立即结束，不等满采样间隔；正常结束后不在信号上留下监听", async () => {
+  const { control, calls } = fakeControl([APP_STATE.FOREGROUND]);
+  const ac = new AbortController();
+  const startedAt = Date.now();
+  const launching = launchApp(control, APP_ID, {}, ac.signal);
+  setTimeout(() => ac.abort(new Error("finalizing")), 20);
+  await assert.rejects(launching, /finalizing/);
+  assert.ok(Date.now() - startedAt < LAUNCH_SAMPLE_INTERVAL_MS / 2, "中止唤醒等待");
+  assert.deepEqual(calls, [`activate:${APP_ID}`]);
+
+  const exited = fakeControl([APP_STATE.NOT_RUNNING]);
+  const live = new AbortController();
+  assert.equal((await launchApp(exited.control, APP_ID, {}, live.signal))?.errorType, "precheck_failed");
+  assert.equal(getEventListeners(live.signal, "abort").length, 0, "等待结束即摘掉信号上的监听");
 });
 
 // ---- ctx.app.restart()（ADR 0052 决策 3；ADR 0050 决策 2）----

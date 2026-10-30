@@ -12,11 +12,11 @@ import path from "node:path";
 import type { Browser } from "webdriverio";
 import type { AgentOpt } from "@midscene/core";
 import type { DeviceAction } from "@midscene/core/device";
-import { attachClassification, readClassification } from "../../worker/surface.mjs";
-import { RESULT_UNKNOWN_MESSAGE, createCommandGuard } from "../guard.mjs";
+import { attachClassification, readClassification, type StepClassification } from "../../worker/surface.mjs";
+import { RESULT_UNKNOWN_MESSAGE, commandFailedMessage, createCommandGuard } from "../guard.mjs";
 import { CONTROLS_MAX_ITEMS } from "../limits.mjs";
 import {
-  AppiumInterface, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry, createAppiumInterface, deviceAgentFactory,
+  AppiumInterface, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry, createAppiumInterface, createDeviceAgentFactory,
   driverTextMatchAllowed, unmappedKeyMessage, type DeviceAdapter, type InputContext, type PrimitiveContext,
 } from "../interface.mjs";
 import {
@@ -91,6 +91,13 @@ function flatten(commands: Recorded[]): Array<{ method: string; args: unknown[] 
   return commands.flatMap((c) => ("withWebContext" in c ? flatten(c.withWebContext) : [c]));
 }
 
+/** 命令守卫给结果已知的命令失败挂的标记：engine_error，消息保留一行原因。sessionRunningConfirmed 表示守卫在失败后查到会话仍为
+ *  RUNNING；查询本身失败、或窗口已关闭没查时守卫不带这项事实。假 driver 直接抛出带这个标记的异常，模拟经守卫发出的命令。 */
+function guardMarked(error: Error, sessionRunningConfirmed: boolean): Error {
+  const failure: StepClassification = { errorType: "engine_error", message: commandFailedMessage(error.message) };
+  return attachClassification(error, sessionRunningConfirmed ? { ...failure, sessionRunningConfirmed: true } : failure);
+}
+
 // ---- 快照用例 ----
 
 interface ContractCase {
@@ -111,7 +118,9 @@ function loadFixture(name: string): ContractFixture {
   return JSON.parse(fs.readFileSync(path.join(FIXTURES, `${name}.commands.json`), "utf-8")) as ContractFixture;
 }
 
-const PRIMITIVES = ["tap", "longPress", "scroll", "typeText", "keyboardPress", "clearInput", "home", "back", "deepLink"] as const;
+const PRIMITIVES = [
+  "tap", "longPress", "scroll", "typeText", "keyboardPress", "clearInput", "hideKeyboard", "home", "back", "deepLink",
+] as const;
 
 async function runCase(make: (rec: Recorder) => DeviceAdapter, c: ContractCase): Promise<Recorded[]> {
   const rec = recorder(c.responses);
@@ -125,6 +134,7 @@ async function runCase(make: (rec: Recorder) => DeviceAdapter, c: ContractCase):
     case "typeText": await adapter.typeText(ctx, i.text); break;
     case "keyboardPress": await adapter.keyboardPress(ctx, i.keyName); break;
     case "clearInput": await adapter.clearInput(ctx); break;
+    case "hideKeyboard": await adapter.hideKeyboard(ctx); break;
     case "home": await adapter.systemButtons.home.press(ctx); break;
     case "back": {
       const back = adapter.systemButtons.back;
@@ -172,7 +182,7 @@ test("Android：输入只发 mobile: type，全程不用 W3C 指针或键盘动�
     assert.deepEqual(flatten(c.commands).map((x) => x.args[0]), ["mobile: type"], c.name);
   }
   const all = flatten(doc.cases.flatMap((c) => c.commands));
-  assert.deepEqual([...new Set(all.map((x) => x.method))].sort(), ["execute", "getCurrentPackage"]);
+  assert.deepEqual([...new Set(all.map((x) => x.method))].sort(), ["execute", "getCurrentPackage", "hideKeyboard"]);
   const clear = doc.cases.find((c) => c.call === "clearInput")!;
   assert.ok(flatten(clear.commands).every((x) => JSON.stringify(x.args) === JSON.stringify(["mobile: pressKey", { keycode: 67 }])));
 });
@@ -207,6 +217,18 @@ test("iOS：坐标为截图像素除以探测得到的比例", async () => {
   ]);
 });
 
+// ---- 收起键盘 ----
+
+test("收起键盘：两个适配器都只发一条不带参数的 hideKeyboard，iOS 不论输入上下文都在原生上下文发出", async () => {
+  for (const doc of [loadFixture("uiautomator2"), loadFixture("xcuitest")]) {
+    const cases = doc.cases.filter((c) => c.call === "hideKeyboard");
+    assert.ok(cases.length > 0, doc.automationName);
+    for (const c of cases) assert.deepEqual(c.commands, [{ method: "hideKeyboard", args: [] }], c.name);
+  }
+  const contexts = loadFixture("xcuitest").cases.filter((c) => c.call === "hideKeyboard").map((c) => c.context?.inputContext);
+  assert.deepEqual(contexts.sort(), ["native", "web"], "iOS 两种输入上下文各有一条用例");
+});
+
 // ---- 未映射的键 ----
 
 test("未映射的键名记 capability_unavailable，不发任何命令", async () => {
@@ -237,7 +259,7 @@ test("iOS 的输入原语需要能力探测给出的输入上下文", async () =
 // ---- DeepLink：Android ----
 
 test("Android：地址按 RFC 3986 字符集校验，; ' ( ) 与非 URI 字符在发命令前拒绝", async () => {
-  // { } 实测逐字送达，但不在 RFC 3986 字符集内，目前按字符集拒收（是否放行待 ADR 0048 决策 7 定，定了须同步改这里与适配器）。
+  // { } 实测逐字送达，但不在 RFC 3986 字符集内，按字符集拒收（ADR 0048 决策 7 规定发命令前按 RFC 3986 字符集校验）。
   for (const bad of [";", "'", "(", ")", " ", "|", "<", ">", "\"", "{", "}", "\\", "^", "`", "é", "中"]) {
     const address = `myshop://cart?x=a${bad}b`;
     assert.deepEqual(undeliverableAddressChars(address), [bad], JSON.stringify(bad));
@@ -270,8 +292,8 @@ test("Android：实测逐字送达的字符与已百分号编码的字符放行"
 });
 
 test("Android：应用未处理该地址记 capability_unavailable，不核对前台包名", async () => {
-  const driverError = Object.assign(new Error("An unknown server-side error occurred: Unable to resolve Intent { act=VIEW dat=myshop://x }"),
-    { name: "unknown error" });
+  const driverError = guardMarked(Object.assign(
+    new Error("An unknown server-side error occurred: Unable to resolve Intent { act=VIEW dat=myshop://x }"), { name: "unknown error" }), true);
   const rec = recorder({ execute: [driverError] });
   await assert.rejects(
     createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL, sleep: rec.sleep }).deepLink(rec.driver, "myshop://x", "com.example.shop"),
@@ -284,11 +306,12 @@ test("Android：应用未处理该地址记 capability_unavailable，不核对�
 });
 
 test("Android：网页目标上的同一报错不归应用未处理，原样抛出", async () => {
-  const driverError = new Error("Unable to resolve Intent");
+  const driverError = guardMarked(new Error("Unable to resolve Intent"), true);
+  const before = readClassification(driverError);
   const rec = recorder({ execute: [driverError] });
   await assert.rejects(createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL }).deepLink(rec.driver, "https://a.example/", null), (e) => {
     assert.equal(e, driverError);
-    assert.equal(readClassification(e), null);
+    assert.deepEqual(readClassification(e), before, "守卫挂的标记原样传出");
     return true;
   });
 });
@@ -323,7 +346,8 @@ test("Android：前台轮询参数必须是正整数次与非负间隔", () => {
 const XCODE_SDK_ERROR = "The current Xcode SDK does not support opening of URLs with given application";
 
 test("iOS：首次遇到不支持打开地址记 capability_unavailable 并缓存到本会话", async () => {
-  const driverError = new Error(`An unknown server-side error occurred while processing the command. Original error: ${XCODE_SDK_ERROR}`);
+  const driverError = guardMarked(
+    new Error(`An unknown server-side error occurred while processing the command. Original error: ${XCODE_SDK_ERROR}`), true);
   const rec = recorder({ execute: [driverError] });
   const adapter = createXcuitestAdapter();
   await assert.rejects(adapter.deepLink(rec.driver, "myapp://a", "com.example.app"), (e) => {
@@ -370,13 +394,48 @@ test("会话丢失与结果未知的标记原样传出：不改归类，也不�
     (e) => e === unknownAndroid && readClassification(e)?.message === RESULT_UNKNOWN_MESSAGE);
 });
 
-test("能否按驱动文本再归类：没有标记，或守卫确认会话仍在运行、结果已知的 engine_error", () => {
-  const plain = new Error("x");
-  assert.equal(driverTextMatchAllowed(plain), true);
-  assert.equal(driverTextMatchAllowed(attachClassification(new Error("x"), { errorType: "engine_error", message: "设备命令执行失败：x" })), true);
-  assert.equal(driverTextMatchAllowed(attachClassification(new Error("x"), { errorType: "engine_error", message: RESULT_UNKNOWN_MESSAGE })), false);
-  assert.equal(driverTextMatchAllowed(attachClassification(new Error("x"), { errorType: "session_lost", message: "会话丢失" })), false);
-  assert.equal(driverTextMatchAllowed(attachClassification(new Error("x"), { errorType: "capability_unavailable", message: "y" })), false);
+test("能否按驱动文本再归类：只有守卫查到会话仍为 RUNNING、结果已知的 engine_error（ADR 0051 决策 4）", () => {
+  const mark = (failure: StepClassification): Error => attachClassification(new Error("x"), failure);
+  const known: StepClassification = { errorType: "engine_error", message: "设备命令执行失败：x" };
+  assert.equal(driverTextMatchAllowed(mark({ ...known, sessionRunningConfirmed: true })), true);
+  // 会话状态没有确认：查询本身失败、窗口已关闭没查，或异常根本没经过命令守卫
+  assert.equal(driverTextMatchAllowed(mark(known)), false);
+  assert.equal(driverTextMatchAllowed(new Error("x")), false);
+  assert.equal(driverTextMatchAllowed("x"), false);
+  // 结果未知与会话丢失原样传出；已经归过类的不再改
+  assert.equal(driverTextMatchAllowed(mark({ errorType: "engine_error", message: RESULT_UNKNOWN_MESSAGE, sessionRunningConfirmed: true })), false);
+  assert.equal(driverTextMatchAllowed(mark({ errorType: "session_lost", message: "会话丢失" })), false);
+  assert.equal(driverTextMatchAllowed(mark({ errorType: "capability_unavailable", message: "y", sessionRunningConfirmed: true })), false);
+});
+
+test("会话状态没有确认时不按驱动文本再归类：两条驱动报错原样传出，iOS 不缓存能力否定", async () => {
+  const iosText = `An unknown server-side error occurred while processing the command. Original error: ${XCODE_SDK_ERROR}`;
+  const androidText = "An unknown server-side error occurred: Unable to resolve Intent { act=VIEW dat=myshop://x }";
+  // 守卫查询会话状态失败时挂的结果已知 engine_error，以及没经过守卫、不带任何标记的驱动报错
+  for (const make of [(m: string) => guardMarked(new Error(m), false), (m: string) => new Error(m)]) {
+    const iosError = make(iosText);
+    const iosBefore = readClassification(iosError);
+    const rec = recorder({ execute: [iosError] });
+    const ios = createXcuitestAdapter();
+    await assert.rejects(ios.deepLink(rec.driver, "myapp://a", "com.example.app"), (e) => {
+      assert.equal(e, iosError);
+      assert.deepEqual(readClassification(e), iosBefore);
+      return true;
+    });
+    await ios.deepLink(rec.driver, "myapp://b", "com.example.app");
+    assert.equal(flatten(rec.commands).length, 2, "没有缓存能力否定，下一次照常发命令");
+
+    const androidError = make(androidText);
+    const androidBefore = readClassification(androidError);
+    const recAndroid = recorder({ execute: [androidError] });
+    await assert.rejects(
+      createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL, sleep: recAndroid.sleep }).deepLink(recAndroid.driver, "myshop://x", "com.example.shop"),
+      (e) => {
+        assert.equal(e, androidError);
+        assert.deepEqual(readClassification(e), androidBefore);
+        return true;
+      });
+  }
 });
 
 // 经真实命令守卫发出 DeepLink：守卫给每个失败都挂标记，适配器在会话仍在运行时仍须按实测过的驱动错误文本归类。
@@ -385,10 +444,14 @@ const IOS_DRIVER_ERROR = (): Error => Object.assign(
 const ANDROID_DRIVER_ERROR = (): Error => Object.assign(
   new Error("An unknown server-side error occurred: Unable to resolve Intent { act=VIEW dat=myshop://x }"), { name: "unknown error" });
 
-/** 一个打开了执行窗口的命令守卫：执行实例是记录命令的假 driver，会话状态查询恒返回 status。 */
-function guarded(adapter: DeviceAdapter, responses: Record<string, unknown[]>, status: string) {
+/** 一个打开了执行窗口的命令守卫：执行实例是记录命令的假 driver，会话状态查询恒返回 status；status 为 Error 时查询抛出它。 */
+function guarded(adapter: DeviceAdapter, responses: Record<string, unknown[]>, status: string | Error) {
   const rec = recorder(responses);
-  const guard = createCommandGuard({ exec: rec.driver, adapter, sessionStatus: async () => status });
+  const sessionStatus = async (): Promise<string> => {
+    if (status instanceof Error) throw status;
+    return status;
+  };
+  const guard = createCommandGuard({ exec: rec.driver, adapter, sessionStatus });
   guard.openWindow(new AbortController());
   return { rec, driver: guard.driver };
 }
@@ -411,6 +474,26 @@ test("经命令守卫：会话仍在运行时 DeepLink 的两条驱动报错照�
     return true;
   });
   assert.deepEqual(flatten(ga.rec.commands).map((x) => x.method), ["execute"], "不核对前台包名");
+});
+
+test("经命令守卫：查询会话状态失败时同样的驱动报错保留结果已知的 engine_error，不改归类，iOS 不缓存", async () => {
+  const queryFailed = Object.assign(new Error("GetRemoteAccessSession timed out"), { name: "TimeoutError" });
+  const ios = createXcuitestAdapter();
+  const g = guarded(ios, { execute: [IOS_DRIVER_ERROR(), undefined] }, queryFailed);
+  await assert.rejects(ios.deepLink(g.driver, "myapp://a", "com.example.app"), (e) => {
+    const mark = readClassification(e);
+    assert.equal(mark?.errorType, "engine_error");
+    assert.notEqual(mark?.message, RESULT_UNKNOWN_MESSAGE);
+    assert.ok(mark?.sessionRunningConfirmed !== true);
+    return true;
+  });
+  await ios.deepLink(g.driver, "myapp://b", "com.example.app");
+  assert.equal(flatten(g.rec.commands).length, 2, "没有缓存能力否定，下一次照常发命令");
+
+  const android = createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL });
+  const ga = guarded(android, { execute: [ANDROID_DRIVER_ERROR()] }, queryFailed);
+  await assert.rejects(android.deepLink(ga.driver, "myshop://x", "com.example.shop"),
+    (e) => readClassification(e)?.errorType === "engine_error");
 });
 
 test("经命令守卫：会话已不在运行时同样的驱动报错归 session_lost，iOS 不缓存", async () => {
@@ -518,11 +601,13 @@ test("按会话回报的 automationName 选适配器：不分大小写，每次�
 // 只有 PNG 签名与 IHDR 块的截图：宽 1080、高 2400（尺寸只从 IHDR 读）
 const PNG_1080x2400 = Buffer.from("89504e470d0a1a0a0000000d49484452000004380000096008060000000000000000", "hex").toString("base64");
 
-function iface(adapter: DeviceAdapter, opts: { scale?: number; inputContext?: InputContext | null } = {}) {
-  const rec = recorder({ takeScreenshot: Array(10).fill(PNG_1080x2400) });
+function iface(adapter: DeviceAdapter, opts: {
+  scale?: number; inputContext?: InputContext | null; responses?: Record<string, unknown[]>; log?: (line: string) => void;
+} = {}) {
+  const rec = recorder({ takeScreenshot: Array(10).fill(PNG_1080x2400), ...opts.responses });
   const ui = createAppiumInterface({
     driver: rec.driver, adapter, session: { withWebContext: (_d, fn) => rec.ctx(1, null).withWebContext(fn) },
-    device: adapter.device, scale: opts.scale ?? 1, inputContext: opts.inputContext ?? null,
+    device: adapter.device, scale: opts.scale ?? 1, inputContext: opts.inputContext ?? null, log: opts.log,
   });
   return { rec, ui };
 }
@@ -570,6 +655,82 @@ test("Input 动作：先点目标、按替换语义清空，再输入", async ()
     { method: "execute", args: ["mobile: clickGesture", { x: 10, y: 20 }] },
     { method: "execute", args: ["mobile: type", { text: "x" }] },
   ]);
+});
+
+const KEYBOARD_INTERFACES: Array<{ label: string; make: (opts?: Parameters<typeof iface>[1]) => ReturnType<typeof iface> }> = [
+  { label: "Android", make: (opts = {}) => iface(createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL }), opts) },
+  { label: "iOS", make: (opts = {}) => iface(createXcuitestAdapter(), { scale: 2, inputContext: "native", ...opts }) },
+];
+const HIDE_KEYBOARD = { method: "hideKeyboard", args: [] };
+
+test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键盘一次；为 false 或没有给时不收", async () => {
+  const params = [
+    { value: "abc", locate: { center: [200, 400], description: "邮箱" } },
+    { value: "x", mode: "typeOnly", locate: { center: [10, 20], description: "框" } },
+    { value: "无目标" },
+  ];
+  for (const { label, make } of KEYBOARD_INTERFACES) {
+    for (const param of params) {
+      const run = async (extra: Record<string, unknown>) => {
+        const { rec, ui } = make();
+        await action(ui, "Input").call({ ...param, ...extra }, {} as never);
+        return flatten(rec.commands);
+      };
+      const without = await run({});
+      const name = `${label} ${JSON.stringify(param)}`;
+      assert.ok(without.length > 0 && !without.some((c) => c.method === "hideKeyboard"), name);
+      assert.deepEqual(await run({ autoDismissKeyboard: false }), without, `${name}：false 与没有给相同，不发收键盘命令`);
+      assert.deepEqual(await run({ autoDismissKeyboard: true }), [...without, HIDE_KEYBOARD],
+        `${name}：先完成点击、清空与输入，最后发一次收键盘命令`);
+    }
+  }
+});
+
+test("Input 动作：收起键盘失败不改判定，动作照常完成，失败只记一行日志、不重试", async () => {
+  for (const { label, make } of KEYBOARD_INTERFACES) {
+    const lines: string[] = [];
+    const driverError = Object.assign(new Error("The software keyboard cannot be hidden\n    at hideKeyboard"), { name: "unknown error" });
+    const { rec, ui } = make({ responses: { hideKeyboard: [driverError] }, log: (line) => lines.push(line) });
+    await action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+    assert.equal(flatten(rec.commands).filter((c) => c.method === "hideKeyboard").length, 1, label);
+    assert.equal(lines.length, 1, label);
+    assert.match(lines[0], /键盘/, label);
+    assert.ok(lines[0].includes("unknown error: The software keyboard cannot be hidden") && !lines[0].includes("\n"), lines[0]);
+  }
+  // 没有注入日志出口时同样不传出异常
+  const quiet = KEYBOARD_INTERFACES[0].make({ responses: { hideKeyboard: [new Error("x")] } });
+  await action(quiet.ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+});
+
+test("经命令守卫：收起键盘遇到服务端报错时窗口没有判定；会话丢失仍由守卫记在窗口上，不因这里不传出异常而被掩盖", async () => {
+  for (const [status, expected] of [["RUNNING", null], ["COMPLETED", "session_lost"]] as const) {
+    const adapter = createXcuitestAdapter();
+    const rec = recorder({ hideKeyboard: [Object.assign(new Error("Did not know how to dismiss the keyboard"), { name: "unknown error" })] });
+    const guard = createCommandGuard({ exec: rec.driver, adapter, sessionStatus: async () => status });
+    guard.openWindow(new AbortController());
+    const lines: string[] = [];
+    const ui = createAppiumInterface({
+      driver: guard.driver, adapter, session: { withWebContext: async (_d, fn) => fn() }, device: "ios", scale: 2,
+      inputContext: "native", log: (line) => lines.push(line),
+    });
+    await action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+    assert.equal(lines.length, 1, status);
+    assert.equal(guard.closeWindow()?.failure.errorType ?? null, expected, status);
+  }
+});
+
+test("设备 Agent 工厂把注入的日志出口交给界面实现", async () => {
+  const lines: string[] = [];
+  const rec = recorder({ hideKeyboard: [new Error("cannot hide")] });
+  const agent = createDeviceAgentFactory({ log: (line) => lines.push(line) }).create({
+    driver: rec.driver, adapter: createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL }),
+    session: { withWebContext: async <T,>(_d: Browser, fn: () => Promise<T> | T) => fn() },
+    device: "android", scale: 1, inputContext: null, opts: { replanningCycleLimit: 12 } as AgentOpt,
+  });
+  assert.ok(agent.interface instanceof AppiumInterface);
+  await action(agent.interface, "Input").call({ value: "x", autoDismissKeyboard: true }, {} as never);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /cannot hide/);
 });
 
 test("LongPress 动作没有给时长时取缺省值", async () => {
@@ -634,13 +795,14 @@ test("设备 Agent 的构造项必须带有限的重规划上限", () => {
     session: { withWebContext: async <T,>(_d: Browser, fn: () => Promise<T> | T) => fn() },
     device: "android" as const, scale: 1, inputContext: null,
   };
+  const factory = createDeviceAgentFactory({ log: () => {} });
   for (const opts of [{}, { replanningCycleLimit: 0 }, { replanningCycleLimit: Infinity }, { replanningCycleLimit: 2.5 }] as AgentOpt[]) {
-    assert.throws(() => deviceAgentFactory.create({ ...args, opts }), /replanningCycleLimit/, JSON.stringify(opts));
+    assert.throws(() => factory.create({ ...args, opts }), /replanningCycleLimit/, JSON.stringify(opts));
   }
 });
 
 test("设备 Agent 可以构造，动作集来自界面实现", async () => {
-  const agent = deviceAgentFactory.create({
+  const agent = createDeviceAgentFactory({ log: () => {} }).create({
     driver: recorder().driver, adapter: createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL }),
     session: { withWebContext: async <T,>(_d: Browser, fn: () => Promise<T> | T) => fn() },
     device: "android", scale: 1, inputContext: null, opts: { replanningCycleLimit: 12 } as AgentOpt,

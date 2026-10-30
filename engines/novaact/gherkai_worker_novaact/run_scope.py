@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import hashlib
 import inspect
+import io
 import json
 import os
 import signal
@@ -57,7 +58,7 @@ from gherkai_worker_novaact.lib import tunnel_warmup as _warmup
 from gherkai_worker_novaact.lib.constants import (
     EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV,
 )
-from gherkai_worker_novaact.lib.redact import redact_secrets  # 隧道凭据脱敏（ADR 0035 决策 5）：截断前先脱敏
+from gherkai_worker_novaact.lib.redact import redact_secrets  # 凭据脱敏（ADR 0035 决策 5）：截断前先脱敏；本模块的两个 stderr 出口（log 与未捕获异常的钩子）写出前经它，上传器的出口在 lib/artifact_upload
 from gherkai_worker_novaact.lib.job_source import JobSource  # job 入口（同上）
 from gherkai_worker_novaact.lib.precheck import PROTOCOL_SCHEMA_VERSION, precheck_job  # 协议版本与建会话前的自检（ADR 0024、0049 决策 7）
 from gherkai_worker_novaact.lib.artifact_upload import ArtifactUploader  # 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）
@@ -137,9 +138,30 @@ class _DeterministicCtx:
 # （对称 _uploader、可注入、可测；subprocess 态写 EVENTS_FD fd、无则回落 stdout 调试）。emit 作参数注入
 # _run_step/_run_scenario（两个引擎统一打桩机制），不再是模块级函数——三通道分离/保序/中文由 EventSink 保。
 # log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
+# 本模块写 stderr 的出口只有 log 与下面的 _redacting_excepthook，两处写出前都经 redact_secrets（ADR 0035 决策 5 的出口清单）：
+# 云端 worker 的 stderr 不经 core 的转发层、原样进 CloudWatch，日志里拼进的异常文本、地址与路径可能带隧道令牌、预签名参数或
+# userinfo。上传器的 _log 是第三处（它不 import 本模块），同样经脱敏；`tests/test_stderr_redaction.py` 的静态差集守住这三处。
 def log(msg: str) -> None:
-    sys.stderr.write(f"{msg}\n")
+    sys.stderr.write(f"{redact_secrets(msg)}\n")
     sys.stderr.flush()
+
+
+def _redacting_excepthook(exc_type, exc, tb) -> None:
+    """未捕获异常的 fatal 出口：traceback（含被链接的上游异常）由解释器缺省的 `sys.__excepthook__` 写进内存缓冲，整段经
+    redact_secrets 后写 stderr。文字与缺省输出逐字相同（除被盖住的凭据），进程的退出方式也与缺省相同：普通异常以 1 退出、core 据退出码
+    记 engine_error；未捕获的 KeyboardInterrupt 仍按 SIGINT 结束。后一条是选这种写法的原因——在钩子里自行用 traceback 模块格式化，
+    实测会让未捕获的 KeyboardInterrupt 改成以 1 退出（Python 3.13）。
+    main() 第一步装上它（见那里的注释）；在那之前的失败只来自模块 import 期（依赖缺失、环境变量取值不合法），文本里没有运行期才拿到的
+    地址与令牌，交给解释器的缺省输出。"""
+    real = sys.stderr
+    buf = io.StringIO()
+    sys.stderr = buf
+    try:
+        sys.__excepthook__(exc_type, exc, tb)
+    finally:
+        sys.stderr = real
+    real.write(redact_secrets(buf.getvalue()))
+    real.flush()
 
 
 def _on_signal(signum, frame):
@@ -705,12 +727,19 @@ class _StartUnresolved(Exception):
     `_run_session` 捕获它、按停止路径正常返回，不进建连重试判定。"""
 
 
+class _StoppedAfterStart(Exception):
+    """Start 返回后、取连接头之前停止信号已置位（通常是停止时 Start 在途、在等待窗口内返回）：会话已建起、session_opened 已发，
+    不再取连接头、不建 NovaAct 连接，`_BrowserSession.__enter__` 释放会话并发 session_closed 后抛出它。`_run_session` 捕获它、
+    按停止路径正常返回，不进建连重试判定。"""
+
+
 class _BrowserSession:
     """worker 自持的一次 AgentCore 浏览器会话（ADR 0028「Nova 会话由 worker 自己持有」；ADR 0024 终止契约「Nova worker」条）。
 
     进入：Start（只带请求名：不带 profile 配置、默认浏览器标识）→ 会话 id 立刻在手、发 session_opened → 取 CDP 连接头 → 进 NovaAct（只给
     CDP 地址与连接头、不传 browser_auth：会话从干净状态起步，退出时不存回浏览器状态，与 Midscene 对称）。Start 之前失败就是建连失败、
-    没有会话要释放；Start 之后任何一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。
+    没有会话要释放；Start 之后任何一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。发出 session_opened 之后、取连接头
+    之前是一个安全点（ADR 0024 flag-only）：停止信号已置位即释放会话、抛 _StoppedAfterStart，不建没有预算上限的 NovaAct 连接。
     退出：先关 NovaAct 连接（它的 __exit__ 收到真实的 exc_info，对称 with 语义；本 worker 自己持有 Workflow，SDK 不据它标记结局）、
     再 Stop 会话（套 SESSION_STOP_BUDGET_S 的预算），两步都执行、失败只记进 release_errors——绝不抛，也绝不抑制 body 的异常，外层建连
     循环因此只会看到建连与 body 的异常，释放失败只体现为退出码 1（ADR 0051 决策 5）。仅捕获 Exception：KeyboardInterrupt / SystemExit
@@ -750,6 +779,8 @@ class _BrowserSession:
                              "name": self.session_id, "origin": "created"})
             self._opened = True
             log(f"worker: AgentCore browser session started: {self.session_id}")
+            if _stop.is_set():  # 停止已置位（通常是 Start 在等待窗口内返回）：不取连接头、不建 NovaAct 连接，下面的 except 释放会话
+                raise _StoppedAfterStart()
             ws_url, headers = self._client.generate_ws_headers()  # 要取凭证，可能撞网络错——会话已建起，失败也走释放
             self._nova_cm = NovaAct(
                 cdp_endpoint_url=ws_url, cdp_headers=headers,
@@ -801,7 +832,7 @@ class _BrowserSession:
         窗口条）。发一对 attempted 事件，core 据此判 release_failed、给出会话名；记为释放失败让退出码为 1。会话若已建立，由 AgentCore
         会话超时回收。"""
         log(f"worker: 收到停止信号时浏览器会话的创建请求仍未返回，无法确认会话是否已建立（会话名 {self.request_name}），可能仍在计费；"
-            "请在 AgentCore 控制台按会话名核对，退出码将为 1")
+            "请在 Amazon Bedrock AgentCore 控制台按会话名核对，退出码将为 1")
         self.release_errors.append(TimeoutError(f"StartBrowserSession 在停止时仍未返回（会话名 {self.request_name}）"))
         self._emit({"type": "session_opened", "scopeId": self._scope_id, "sessionId": None, "name": self.request_name,
                     "origin": "attempted"})
@@ -1072,6 +1103,9 @@ def _capabilities() -> dict[str, object]:
 
 
 def main() -> int:
+    # fatal 出口先于一切（ADR 0035 决策 5 的出口清单）：之后任何未捕获异常的 traceback 都经脱敏再写 stderr。装在这里而不是包入口，
+    # 是因为 python -m、console script 与直接运行本模块三条入口都经 main()；与下面装信号处理一样，是本进程级的设置。
+    sys.excepthook = _redacting_excepthook
     # 使用方确定性 step 目录（ADR 0037 决策 4）：内建脚手架已在模块顶 import 期注册完，这里把使用方的叠上去。
     # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 两个非 job 入口 --capabilities 自述 /
     # --match-steps 查询），故自述报的注册表与实际运行派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
@@ -1160,9 +1194,10 @@ def main() -> int:
     def _run_session(attempt: int) -> None:
         """建连 + 执行完所有 scenarios（`attempt` 是建连重试循环的序号，从 0 起）。建连段异常可被外层重试；scope_started emit 后不可。
 
-        停止（_stop）在此协作式生效：scenario 循环顶检测 → 正常 return 出本函数 → with 退出释放会话（ADR 0024 flag-only，不靠异常
-        穿透）。会话的建立与释放全在 _BrowserSession 里（Start → 发 session_opened → 取连接头 → 进 NovaAct；关 NovaAct → Stop 套预算 →
-        发 session_closed），释放失败只记进它的 release_errors、不冒泡、不进建连重试判定；本函数只管 scope 的执行次序。
+        停止（_stop）在此协作式生效：scope_started 之前与 scenario 循环顶检测 → 正常 return 出本函数 → with 退出释放会话（ADR 0024
+        flag-only，不靠异常穿透）。会话的建立与释放全在 _BrowserSession 里（Start → 发 session_opened → 取连接头 → 进 NovaAct；
+        关 NovaAct → Stop 套预算 → 发 session_closed），释放失败只记进它的 release_errors、不冒泡、不进建连重试判定；本函数只管
+        scope 的执行次序。
         """
         nonlocal session_id, nova_session_id, started, warmup_failure, release_error
         session_id = None  # 只算本次 attempt 建起的会话（血缘进 scope_started / scope_done）
@@ -1192,6 +1227,10 @@ def main() -> int:
                         log(f"worker: tunnel warmup failed — {warmup_failure.error_type}: {warmup_failure.message}")
                         return
                     log("worker: tunnel warmup ready")  # 就绪也留一行：真实执行的核对与排障都要看得见预热发生过（离开预热页在 warmup_session 内）
+                # 停止信号在建 NovaAct 连接、设置请求头或预热期间到达：不发 scope_started（它表示被测对象已就绪、下一事件是首个
+                # scenario_started，ADR 0051 决策 4），正常 return 让 with 退出释放会话并发 session_closed
+                if _stop.is_set():
+                    return
                 # 血缘已在 Start 返回时随 session_opened 先行回传；scope_started 带执行所用的会话 id（ADR 0051 决策 4、ADR 0024
                 # sessionId 条）——超时/SIGTERM 中途打断时 scope_done 不会 emit，core 仍从这两条事件取到血缘。
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
@@ -1213,6 +1252,8 @@ def main() -> int:
                         return
         except _StartUnresolved:
             return  # 停止信号到达时 Start 仍未返回：attempted 事件已发、已记为释放失败；main 尾按 _stop 走停止路径（退出码 1）
+        except _StoppedAfterStart:
+            return  # Start 返回后停止已置位：会话已释放、session_closed 已发；main 尾按 _stop 走停止路径（退出码按释放结果取 0 或 1）
         finally:
             if browser.release_errors and release_error is None:
                 release_error = browser.release_errors[0]  # 释放失败只让退出码为 1，不清零（ADR 0051 决策 5）

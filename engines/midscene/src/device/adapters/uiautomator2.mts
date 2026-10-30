@@ -5,6 +5,7 @@
 //   - 滚动：`mobile: scrollGesture`，不用 W3C 指针拖动（决策 6）；
 //   - 输入：`mobile: type`，不探测、不走 W3C 路线（Android Chrome 上网页活动元素读回为空，原生活动元素指向 WebView 容器）；
 //     清空为连发若干次 `mobile: pressKey` 退格键；
+//   - 收起键盘：WebdriverIO 的 hideKeyboard（Appium 的跨平台端点，不是 `mobile:` 命令），不带参数；
 //   - 按键与系统键：`mobile: pressKey`（回车 66、退格 67、返回 4、主屏 3 等键码），没有映射的键名记 capability_unavailable；
 //   - 导航：`mobile: deepLink` 带 package。驱动经 `adb shell am start -d` 传地址，所以发命令前按 RFC 3986 校验地址字符（拦下
 //     `; ' ( )` 与一切非 URI 字符，它们会让命令出错或被截断后部分执行），网页目标经同一条驱动路径传地址、同样校验。应用目标
@@ -12,8 +13,9 @@
 //
 // 归类（ADR 0051 决策 4 的类别表）：字符校验不过与「unable to resolve Intent」（只在应用目标上，即被测应用未处理该地址）记
 // capability_unavailable；命令成功而前台不是被测应用记 engine_error。命令失败时会话状态由命令守卫先核对：会话丢失与结果未知的
-// 标记原样传出；守卫确认会话仍在运行、结果已知的 engine_error 可按驱动文本再归类（ADR 0051 决策 4「仍为 RUNNING 时才允许匹配
-// 两条实测过的驱动错误文本」）。其余失败原样抛出。
+// 标记原样传出；只有标记带着守卫查到会话仍为 RUNNING 的事实、结果已知的 engine_error 可按驱动文本再归类（ADR 0051 决策 4「仍为
+// RUNNING 时才允许匹配两条实测过的驱动错误文本」；判定见 interface.mts 的 driverTextMatchAllowed）。会话状态没有确认的
+// （查询失败、没经过守卫）与其余失败都原样抛出。
 import type { Browser } from "webdriverio";
 import { attachClassification, type ControlItem, type Controls } from "../../worker/surface.mjs";
 import {
@@ -72,7 +74,7 @@ export function undeliverableAddressMessage(chars: readonly string[]): string {
 
 // RFC 3986 允许出现在 URI 里的字符：unreserved、gen-delims、sub-delims 与百分号编码用的 `%`。其中 `; ' ( )` 四个 sub-delims
 // 经 adb shell 传递时出错，一并拦下（ADR 0048 决策 7 的实测）；其余字符（含 `+ % [ ] & = # ! * $ , ~`）实测逐字送达。
-// `{ }` 实测同样逐字送达，但不在 RFC 3986 字符集内，这里按字符集拒收（是否放行待 ADR 0048 决策 7 定）。
+// `{ }` 实测同样逐字送达，但不在 RFC 3986 字符集内，按字符集拒收（ADR 0048 决策 7 规定发命令前按 RFC 3986 字符集校验）。
 const DELIVERABLE = /^[A-Za-z0-9\-._~:/?#[\]@!$&*+,=%]$/;
 
 /** 地址里驱动无法原样传递的字符，按出现顺序、各列一次；全部可传时为空数组。 */
@@ -181,6 +183,10 @@ export function createUiAutomator2Adapter(options: UiAutomator2Options): DeviceA
 
     async clearInput(ctx: PrimitiveContext): Promise<void> {
       for (let i = 0; i < CLEAR_INPUT_KEY_PRESSES; i++) await pressKey(ctx, KEYCODE_DEL);
+    },
+
+    async hideKeyboard(ctx: PrimitiveContext): Promise<void> {
+      await ctx.driver.hideKeyboard();
     },
 
     async deepLink(driver: Browser, address: string, appId: string | null): Promise<void> {
