@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `971fe4e2`
+- Built from commit: `901ed54b`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1496,17 +1496,17 @@ Nodes (42): cli/DEVELOPMENT.md, CONTRIBUTING（contributor 入口）, core 包 c
   docs/diagrams/writing-features-scenario-to-job.svg · relation: conceptually_related_to
 - `执行与推进模型导览（run/submit × local/cloud）` → `run 执行图`  [AMBIGUOUS]
   docs/diagrams/run-execution.svg · relation: references
-- `终止契约（core 请求 worker 优雅停止）` → `step 顺序 = 书写顺序，keyword 只决定派发`  [AMBIGUOUS]
-  docs/adr/0025-plan-module-feature-to-jobs.md · relation: references
 - `Cloud Backend Upgrade Windows Diagram` → `Cloud Delivery Identity Diagram`  [AMBIGUOUS]
   docs/diagrams/cloud-backend-upgrade-windows.svg · relation: conceptually_related_to
 - `Cloud Delivery Identity Diagram` → `Execution Cloud Cascade Diagram`  [AMBIGUOUS]
   docs/diagrams/execution-cloud-cascade.svg · relation: conceptually_related_to
 - `Configuration Env Inheritance Diagram` → `Getting Started Component Ownership Diagram`  [AMBIGUOUS]
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
+- `终止契约（core 请求 worker 优雅停止）` → `step 顺序 = 书写顺序，keyword 只决定派发`  [AMBIGUOUS]
+  docs/adr/0025-plan-module-feature-to-jobs.md · relation: references
 
 ## Knowledge Gaps
-- **699 isolated node(s):** `StepArgument`, `Row`, `match`, `Job`, `JobApp` (+694 more)
+- **699 isolated node(s):** `背景与问题`, `1. 一个 scope 一个远程访问会话，scenario 之间不复位`, `2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034`, `3. 设备解析、创建与孤儿防护`, `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` (+694 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **184 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
@@ -1521,9 +1521,9 @@ _Questions this graph is uniquely positioned to answer:_
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `执行与推进模型导览（run/submit × local/cloud）` and `run 执行图`?**
   _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
-- **What is the exact relationship between `终止契约（core 请求 worker 优雅停止）` and `step 顺序 = 书写顺序，keyword 只决定派发`?**
-  _Edge tagged AMBIGUOUS (relation: references) - confidence is low._
 - **What is the exact relationship between `Cloud Backend Upgrade Windows Diagram` and `Cloud Delivery Identity Diagram`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
 - **What is the exact relationship between `Cloud Delivery Identity Diagram` and `Execution Cloud Cascade Diagram`?**
+  _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
+- **What is the exact relationship between `Configuration Env Inheritance Diagram` and `Getting Started Component Ownership Diagram`?**
   _Edge tagged AMBIGUOUS (relation: conceptually_related_to) - confidence is low._
