@@ -50,7 +50,7 @@ definition 里 `target` 与 `device_request` 两键恒在：桌面 job 的 `targ
 **本机后端的执行前预检增加两项目标检查。** 依据是 worker 的能力自述（增键规则归 [0049](./0049-worker-capabilities-targets-keys.md)）：
 
 - 目标不在该引擎 worker 声明的 `targets` 里，拒绝执行；
-- job 墙钟预算超过该目标的 `max_session_s`，拒绝执行。`max_session_s` 不等于 Device Farm 远程访问会话的 150 分钟上限，而是由 worker 用 150 分钟减去收尾余量算出（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）；桌面条目不带此键，表示不施加会话级上限。设备 scope 的缺省墙钟与下限由 core 的 plan 层按目标给出（获取预算加 900 秒，下限获取预算加 180 秒，设备 scope 不存在「不超时」），覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md)。
+- job 墙钟预算超过该目标的 `max_session_s`，拒绝执行。`max_session_s` 不等于 Device Farm 远程访问会话的 150 分钟上限，而是由 worker 用 150 分钟（9000 秒）减去 Fargate 停止宽限的硬顶 120 秒算出，即 8880 秒（[0049](./0049-worker-capabilities-targets-keys.md) 决策 4）；桌面条目不带此键，表示不施加会话级上限。设备 scope 的缺省墙钟与下限由 core 的 plan 层按目标给出（获取预算加 900 秒，下限获取预算加 180 秒，设备 scope 不存在「不超时」），覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md)。
 
 两项都在建立任何远程访问会话之前完成，故不产生费用。cloud 后端在提交前只有 plan 标注，执行时由 worker 在建会话前自检同样两项，不满足即记 `precheck_failed`（[0049](./0049-worker-capabilities-targets-keys.md) 决策 7、[0051](./0051-device-session-lifecycle-and-app-distribution.md)），同样不产生会话费用。
 
@@ -85,7 +85,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
   - **应用未处理该地址**（Android 可检测）：命令报「unable to resolve Intent」类错误即记 `capability_unavailable`，消息「被测应用未处理该地址」并给出改法（改地址，或确认应用声明了该链接）。归此类别是因为处置相同：改写 step，重试不会变。命令成功后核对前台包名是被测应用（允许短暂轮询），不是即记 error、类别 `engine_error`。
   - **地址含驱动传不过的字符**（Android）：`mobile: deepLink` 经 `adb shell am start -d` 传地址，驱动的转义不完整——`; ' ( )` 四个 URI 子分隔符与任何非 URI 字符会让命令出错，`|` 与 `;` 还会让命令被截断后部分执行（实测报错的同时打开了截断的地址）。worker 发命令前按 RFC 3986 字符集校验，命中即记 error、类别 `capability_unavailable`，消息给出百分号编码的改法；不做静默改写，`%28` 与 `(` 对应用的链接匹配未必等价。`+ % [ ] { } & = # ! * $ , ~` 与已百分号编码的字符实测逐字送达。
   - **iOS 的成功契约是「地址已送达、应用在前台」**：地址不经 shell、原样送达；系统只负责送达，应用是否跳转从外部不可观测——未注册的 scheme 与无关的 https 地址，命令照样成功、应用照样到前台（实测）。应用忽略链接时本步 passed，由紧跟的落点核对判 failed（不短路，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）；用户文档写明这个限制，下面「导航后紧跟落点核对」的规则在 iOS 应用目标上是网址 step 的必备后继。Universal Links（https 进第三方应用）依赖关联域名配置且未实测，不承诺。
-  - 结果未知（客户端超时）按 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6 的结果未知规则，不重发。plan 把它当确定性 step 标注（内建导航条目，说明文字「内建导航：经 DeepLink 交给被测应用」），与其它确定性 step 一致；识别仍在 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」），core 不复写这条规则。
+  - 结果未知（客户端超时）按 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6 的结果未知规则，不重发。plan 把它当确定性 step 标注（内建导航条目；说明文字只有一条、按引擎定，Midscene 的说明在应用目标上多一句经 DeepLink 交给被测应用，见 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条），与其它确定性 step 一致；识别仍在 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)「匹配放 worker」），core 不复写这条规则。
 - skill 与用户指南的「导航后紧跟一条确定性落点核对」规则按目标分写：`@device:android` 的网页目标需要精确核对地址时自写确定性 step（模板给出），否则用 AI 断言核对落点；`@device:ios` 的网页目标在 1.5 推荐用 AI 断言核对落点（[0031](./0031-job-lifecycle-states-and-severity.md) 的短路锁定在 `status == error`，网页上下文不可用的 iOS 驱动上一次地址核对失败会废掉整条 scenario）；应用目标没有页面地址（evidence 的 `url` 为 null），改为一条 AI 断言核对落点；iOS 应用目标上网址 step 只保证送达（见上），这条核对是它的必备后继。device 是作者显式声明的维度，按它分写作规则不违反 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 1。
 
 ### 8. 被测环境可达性

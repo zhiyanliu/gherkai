@@ -27,16 +27,17 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 ```
 
 - 桌面实现是现有 Playwright 与 AgentCore 浏览器代码的搬移，行为不变，现有测试照常覆盖；四项边界义务在桌面上都是空操作（scenario 前核对恒返回「继续」），只有「采集界面快照」在 AI step 上取 `page.url()`。原先单列的「读当前地址」并入快照采集。
-- **scenario 前核对**：从第二条 scenario 起，每条发 `scenario_started` 之前调用一次，只返回「继续」或「scope 终止」（带 errorType 与 message）。第一条之前不调用：被测对象刚就绪，结果未知标志不可能已置位，获取预算的上界也远低于 `max_session_s`，`scope_started` 之后紧跟第一个 `scenario_started` 的保证（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）因此不变。返回终止时 run-scope 发 `scope_done{status: error, errorType, message}`，这条与后续 scenario 不再发事件，由 core 合成 SKIPPED（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；放在 `scenario_started` 之前，是因为在途 scenario 不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）。设备实现做两件事：上一条 scenario 里命令守卫置过结果未知标志时做一次截图探测（受决策 6 探测客户端的超时约束），失败先查会话状态，非 RUNNING 归 `session_lost`、否则归 `engine_error`；会话年龄已达 `max_session_s` 时直接返回终止、归 `session_lost`，不为让第一个 step 报错而开一条 scenario。step 中途发现的会话丢失与年龄到点仍走下面的 step 级失败契约。run-scope 只多一个无条件调用与一个通用的「scope 终止」出口，这个出口 step 级会话丢失收尾时同样要用，主流程仍无设备分支。
+- **scenario 前核对**：从第二条 scenario 起，每条发 `scenario_started` 之前调用一次，只返回「继续」或「scope 终止」（带 errorType 与 message）。第一条之前不调用：被测对象刚就绪，结果未知标志不可能已置位，获取预算的上界也远低于 `max_session_s`，`scope_started` 之后紧跟第一个 `scenario_started` 的保证（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）因此不变。返回终止时 run-scope 发 `scope_done{status: error, errorType, message}`，这条与后续 scenario 不再发事件，由 core 合成 SKIPPED（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；放在 `scenario_started` 之前，是因为在途 scenario 不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）。设备实现做两件事：上一条 scenario 里发生过结果未知（命令守卫置过结果未知标志；标志只在 step 内有效，所以设备实现另记一个 scenario 级的「发生过结果未知」记录）时，经生命周期通道在原生上下文截图一次作存活探测（受决策 6 探测客户端的超时约束），探测失败不直接定类别，先查一次会话状态再分流：非 RUNNING 归 `session_lost`，RUNNING 归 `engine_error`；会话年龄已达 `max_session_s` 时直接返回终止、归 `session_lost`，不为让第一个 step 报错而开一条 scenario。step 中途发现的会话丢失与年龄到点仍走下面的 step 级失败契约。run-scope 只多一个无条件调用与一个通用的「scope 终止」出口，这个出口 step 级会话丢失收尾时同样要用，主流程仍无设备分支。
 - **单个 step 的固定顺序与失败契约**（接缝契约的一部分，不预先指定方法名）：
   1. 发 `step_started`；
   2. **step 前核对**：确认会话处在原生上下文（一次读取），不在就切回；切回失败时本 step 记 error、类别 `engine_error`，不执行 handler 或 AI。它防止上一条 scenario 的残留上下文被带进来——scope 内短路只作用于本 scenario，scenario 之间又没有自动复位（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1）；
   3. **执行**确定性 handler、导航或 AI，得到暂定判定；
-  4. **在网页上下文读地址**：仅当本 step 要产 evidence、目标是网页、能力结论为「提供」时才读，按决策 5 重新定位、受短预算约束，读取失败（含多候选、零候选）只把 `url` 置 null、`url_missing` 记原因。放在复原之前，使整个 step 末只有一次「回到原生上下文」；
-  5. **复原并核对**：确认会话回到原生上下文；失败则最终判定改为 `error`、原判定写进 message（「原判定为 passed/failed；之后未能切回原生界面，后续 step 的截图坐标会错位」），类别 `engine_error`；命令失败先查会话状态，会话丢失则归 `session_lost`；
+  4. **在网页上下文读地址**：仅当本 step 要产 evidence、目标是网页、能力结论为「提供」时才读，按决策 5 重新定位、受 evidence 采集的 10 秒独立短预算约束（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），读取失败（含多候选、零候选）只把 `url` 置 null、`url_missing` 记原因。「是否产 evidence」按第 3 步的暂定判定决定：AI step 一律产，确定性 step 与导航 step 只在暂定判定为 failed 或 error 时产。第 5 步复原失败把判定改成 error 的 step，若此前因暂定判定为 passed 没有读地址，evidence 写 `url` 为 null、`url_missing` 为 `error`，不补读。为什么按暂定判定：最终判定要到第 5 步之后才知道，而为每个确定性 step 预先读一次地址等于每步多切一次上下文。放在复原之前，使整个 step 末只有一次「回到原生上下文」；
+  5. **复原并核对**：确认会话回到原生上下文；失败则最终判定改为 `error`、原判定写进 message（「原判定为 passed/failed；之后未能切回原生界面，后续 step 的截图坐标会错位」），类别 `engine_error`；命令失败先查会话状态，会话丢失则归 `session_lost`。本 step 发生过结果未知（决策 6）时，暂定判定已是 error，message 以结果未知的整句（「设备在等待时间内没有回应，这一步可能已执行也可能未执行」）开头，复原失败的信息追加在其后；
   6. **在原生上下文采集控件摘要**（只在 failed / error 时，加原始控件树）：best-effort、不改判定，唯一例外是采集中发现会话丢失（按 0051 决策 4 处置）；
-  7. 产 evidence、发 `step_done`；截图与原始树进入后台上传队列。
-  失败归级：执行前失败（会话、安装、首次启动、启动采样、能力探测出错以外的部分、会话预热）归 scope 级，走 `scope_done{status: error, errorType}`（0051 决策 4）；能力探测的单项失败不算执行前失败，记为「探测出错」（决策 5）；scenario 级没有准备动作，用例自己写的 Background step 按普通 step 归因；step 级是上面第 2、3、5 步的失败与第 6 步发现的会话丢失。
+  7. 产 evidence、发 `step_done`；截图与原始树进入后台上传队列。evidence 的 `step_kind`（`ai` / `deterministic` / `navigation`）由命中的注册表条目上的标记判别：内建导航条目带导航标记，run-scope 据此记 `navigation`；使用方 handler 在内部自己调用导航不算导航 step，仍记 `deterministic`。判别靠条目数据而不靠匹配句式，主流程不因此多出按 step 种类或按设备的分支。
+  失败归级：执行前失败（会话、安装、首次启动、启动采样、能力探测出错以外的部分、会话预热）归 scope 级，走 `scope_done{status: error, errorType}`（0051 决策 4）；能力探测的单项失败不算执行前失败，记为「探测出错」（决策 5）；坐标比例在回退之后仍无法确定不属于单项失败，是执行前失败（决策 5）；scenario 级没有准备动作，用例自己写的 Background step 按普通 step 归因；step 级是上面第 2、3、5 步的失败与第 6 步发现的会话丢失。
+- **生命周期通道**：step 前核对、step 后复原与核对、界面快照的采集（含读当前上下文、切回 `NATIVE_APP`、截图、page source 与第 4 步的读地址）、scenario 前核对、会话预热与终结四阶段，都是接缝的设备实现以生命周期管理方的身份经自己的通道执行，不经执行令牌与结果未知标志（决策 6）。为什么：这些动作的时机由本条的顺序契约固定，不会出现晚到引用；而它们恰好发生在令牌已撤销或结果未知标志已置位之后（如结果未知后的复原需要切换上下文，切换不在只读白名单里），经守卫执行就会被自己拒绝。
 - 远程访问会话的建立、排队、丢失判定与收尾归 [0051](./0051-device-session-lifecycle-and-app-distribution.md)，本接口的设备实现只调用它；预热的执行见决策 6。
 - 不做：在 run-scope 主流程里按设备写条件分支。两套被测对象的差异一旦漏进主流程，scope 内的 step 循环、短路与 evidence 时序就有两份逻辑；顺序写进接缝契约后，桌面与设备的 step 循环只有一份。
 
@@ -55,6 +56,8 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 应用启停 | 安装后启动一次、启动后状态采样；向句柄上下文暴露 `app.restart()`（只在应用目标上有值：terminate 加 activate 加启动采样，采样到自退抛错、step 记 error、类别 `engine_error`；[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2），供使用方自写的重启 step 调用——产品不内置有措辞的 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条） |
 | 会话预热 | 按探测结论选路线导航预热地址一次，在原生控件树里确认标记（决策 6） |
 
+newSession 的能力集由「Appium 建连与上下文切换」块单点组装：网页目标带 `browserName`（Android 为 Chrome，iOS 为 Safari）；应用目标带 `appium:app`（安装包的预签名地址，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）、`appium:autoLaunch: false` 与 `appium:noReset: true`，Android 应用目标另带 `appium:appPackage`（取目标的应用标识，让驱动识别被测应用；是否还需 `appActivity` 由真机验收核对，决策 8）；两种目标都带 `appium:newCommandTimeout`（决策 6 的 ⑧）。应用目标关掉自动启动与重置，是因为启动由 worker 显式 `activateApp` 并做启动采样（0051 决策 9），不让 Appium 在建会话时按自己的缺省启动或重置被测应用。
+
 设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。
 
 ### 4. 驱动适配器：平台专属命令只在这里出现
@@ -65,24 +68,25 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 |---|---|---|
 | 点击 / 长按 | `mobile: clickGesture` / `mobile: longClickGesture` | `mobile: tap` / `mobile: touchAndHold` |
 | 滚动 | `mobile: scrollGesture` | `mobile: swipe` |
-| 输入 | `mobile: type` | W3C 活动元素 sendKeys（`element/active` 加 `element/value`），所在上下文由探测结果定 |
-| 按键 / 主屏 | `mobile: pressKey` | `mobile: pressButton` |
+| 输入 | `mobile: type`；清空输入框为连发若干次 `mobile: pressKey` 退格键（keycode 67） | W3C 活动元素 sendKeys（`element/active` 加 `element/value`），所在上下文由探测结果定；回车、退格与清空也归这一行，经活动元素 sendKeys 发控制字符（回车 `\n`、退格 `\b`，清空为若干个 `\b`） |
+| 按键 / 系统键 | `mobile: pressKey`（含回车 66、退格 67、返回 4、主屏 3）；向模型注册返回与主屏两个系统动作 | `mobile: pressButton` 只用于主屏（`home`）；iOS 没有系统返回键，不向模型注册返回动作 |
 | 坐标单位 | 截图像素 | 点，等于截图像素除以探测得到的比例 |
 | 导航 | 网页目标：探测结论为「提供」时在网页上下文调 `url`，「不提供」与「探测出错」都走 `mobile: deepLink` 交给系统浏览器。应用目标：`mobile: deepLink` 带 package 交给被测应用，发命令前按 RFC 3986 校验地址字符（驱动经 `adb shell am start -d` 传地址，`; ' ( )` 与非 URI 字符会让命令出错或截断，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；命令成功后核对前台包名 | 网页目标同左，路线由探测而非系统版本决定（实测见「导航路线」）。应用目标：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台 |
 
 - **Android 输入用 `mobile: type`**：W3C 路线在 Android Chrome 上不可靠（见实测依据），而 `mobile: type` 快且 AI 步靠它全部通过。
-- **iOS 输入走 W3C 标准路线**：网页上下文可用时对网页活动元素 sendKeys，不可用时对原生活动元素 sendKeys；原生应用里同样走 W3C 路线。不用 Appium 旧版 `POST /keys`（转发到 WebDriverAgent 的 `/wda/keys`）。
+- **iOS 输入走 W3C 标准路线**：网页上下文可用时对网页活动元素 sendKeys，不可用时对原生活动元素 sendKeys；原生应用里同样走 W3C 路线。不用 Appium 旧版 `POST /keys`（转发到 WebDriverAgent 的 `/wda/keys`）。回车与退格是键盘输入而不是物理按键，`mobile: pressButton` 只接受物理按键名，所以它们与清空一起走活动元素 sendKeys 的控制字符，和文本输入共用同一条已探测的路线。iOS 上没有映射的键名（Tab、Escape 等）记 `capability_unavailable`，不猜测替代路线。
+- **适配器导出原语函数与只读 `mobile:` 命令名集合**（如 `deviceScreenInfo`、`activeAppInfo`）。命令守卫的只读白名单中 `mobile:` 形态的条目、能力探测与会话预热都只调用适配器导出的函数与集合，不自己拼 `mobile:` 命令；`mobile:` 字面量只出现在设备模块的 `adapters/` 目录下（护栏见决策 8）。
 - 适配器同时负责从控件树抽取 evidence 的控件摘要表（类型、id、文本、无障碍标识），只在判为 failed / error 的 step 上抽取（原始控件树同时留存），字段定义与留存规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8；两个平台的控件树形态不同，抽取放在适配器里，explain 只渲染。
 
 ### 5. 能力探测：每会话一次，能力结论缓存、上下文句柄每次重新定位
 
 建连后、第一个 step 前执行一次，耗时几秒；**只缓存能力结论**（提供 / 不提供 / 探测出错）与输入路线、坐标比例，**不缓存上下文句柄**；结论写进 scope 诊断文件 `device-session.json`（以普通产物链接挂 `scope_done`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）与 worker 日志。探测项：
 
-- **网页上下文可用性**（仅网页目标）：只认属于被测对象的网页上下文，即 iOS Safari 的 `WEBVIEW_<pid>` 与 Android Chrome 的 `CHROMIUM`；原生应用会话里出现的 `WEBVIEW_chrome` 不算（那是应用内 WebView，不可调试，拿不到被测内容的 DOM）。**「可用」的判据是能在短预算（5 秒）内成功执行一条只读命令**，列得出、切得进都不算：iOS 26.3 实测列得出 WEBVIEW、切换成功，但任何网页命令都挂到客户端超时。探测用的只读命令由**自带短超时的独立客户端实例**发出——一条挂住的网页命令会阻塞同一客户端上的后续命令，`Promise.race` 式的放弃解除不了阻塞。探测在短预算内做一次有界重试以区分瞬时故障与确认不提供。归类按证据性质：重试后候选仍为零，或有候选、切得进但只读命令在有界重试后仍失败或超时而原生上下文的只读命令正常（iOS 26.3 属于这种），都算确认「不提供」；只有无法区分设备能力的情形——列上下文的调用本身失败、传输层错误、原生只读命令也失败的会话异常——才算「探测出错」（其中会话丢失归 `session_lost`）。两种结论下导航都不走 `url`。
-- **当前上下文的身份是动态事实，每次进入网页上下文都重新定位**（`withWebContext` 入口、设备上的导航、地址读取）：列出上下文、按类别筛选，再确定被测页面。1.5 的过渡规则：只有一个候选且可用才采用；多个候选时拒绝歧义，本 step 记 error、类别 `engine_error`，消息「设备上有多个网页页面，无法确定被测页面」；零候选短等待后再列一次，仍为零记 `engine_error`，能力结论不因此翻转；`fn` 执行中句柄失效直接记 error、不在 `fn` 内重试（`fn` 可能已有副作用）。为 evidence 读地址（决策 2 第 4 步）时，多候选与零候选都不改 step 判定，只把 `url` 置 null、`url_missing` 记 `error`（超时记 `timeout`），能力结论不翻转；记 step error 的只有 `withWebContext` 入口与设备上的导航。跨站导航后上下文名可能改变，每次重新定位已覆盖。实测 iOS 15.8 与 18.6 上 `mobile: getContexts` 返回每个 WEBVIEW 的标题与地址，是将来放宽多候选规则时的身份依据；实测中 `target=_blank` 的脚本点击后仍只有一个 WEBVIEW（Android 始终只有一个 `CHROMIUM`），多候选形态未复现，候选数写进诊断以积累样本。重议条件：多候选在 iOS Safari 或 Android Chrome 上成为常态，或找到可靠的前台页判据。同一路线内有界地重新定位同一目标不算「失败后换路线」。
+- **网页上下文可用性**（仅网页目标）：只认属于被测对象的网页上下文，即 iOS Safari 的 `WEBVIEW_<pid>` 与 Android Chrome 的 `CHROMIUM`；原生应用会话里出现的 `WEBVIEW_chrome` 不算（那是应用内 WebView，不可调试，拿不到被测内容的 DOM）。**「可用」的判据是能在短预算（5 秒）内成功执行一条只读命令**，列得出、切得进都不算：iOS 26.3 实测列得出 WEBVIEW、切换成功，但任何网页命令都挂到客户端超时。探测用的只读命令由**自带短超时的独立客户端实例**发出——一条挂住的网页命令会阻塞同一客户端上的后续命令，`Promise.race` 式的放弃解除不了阻塞。探测在短预算内做一次有界重试以区分瞬时故障与确认不提供。归类按证据性质：重试后候选仍为零，或有候选、切得进但只读命令在有界重试后仍失败或超时而原生上下文的只读命令正常（iOS 26.3 属于这种），都算确认「不提供」；只有无法区分设备能力的情形——列上下文的调用本身失败、传输层错误、原生只读命令也失败的会话异常——才算「探测出错」（其中会话丢失归 `session_lost`）。两种结论下导航都不走 `url`。「重试后零候选即不提供」有一处未经实测的前提：刚建好、尚未导航的 Safari / Chrome 会话已经列得出网页上下文候选。这一项列入真机验收矩阵（决策 8）；若验收发现网页上下文本可用的设备（如 iOS 15.8）因此被判成「不提供」，探测改为先经探测实例导航预热地址、再列上下文，并回写本条。独立实例只解除客户端一侧的阻塞；Appium 服务端是否对同一会话的命令串行执行（探测实例的网页命令挂住时，执行实例的原生命令是否随之延迟）尚未实测，由真机验收矩阵的 iOS 26 一行观测，结论回写本条。
+- **当前上下文的身份是动态事实，每次进入网页上下文都重新定位**（`withWebContext` 入口、设备上的导航、地址读取）：列出上下文、按类别筛选，再确定被测页面。1.5 的过渡规则：只有一个候选且可用才采用；多个候选时拒绝歧义，本 step 记 error、类别 `engine_error`，消息「设备上有多个网页页面，无法确定被测页面」；零候选等待 2 秒（实施期校准、真机验收后可调）后再列一次，仍为零记 `engine_error`，能力结论不因此翻转；`fn` 执行中句柄失效直接记 error、不在 `fn` 内重试（`fn` 可能已有副作用）。为 evidence 读地址（决策 2 第 4 步）时，多候选与零候选都不改 step 判定，只把 `url` 置 null、`url_missing` 记 `error`（超时记 `timeout`），能力结论不翻转；记 step error 的只有 `withWebContext` 入口与设备上的导航。跨站导航后上下文名可能改变，每次重新定位已覆盖。实测 iOS 15.8 与 18.6 上 `mobile: getContexts` 返回每个 WEBVIEW 的标题与地址，是将来放宽多候选规则时的身份依据；实测中 `target=_blank` 的脚本点击后仍只有一个 WEBVIEW（Android 始终只有一个 `CHROMIUM`），多候选形态未复现，候选数写进诊断以积累样本。重议条件：多候选在 iOS Safari 或 Android Chrome 上成为常态，或找到可靠的前台页判据。同一路线内有界地重新定位同一目标不算「失败后换路线」。
 - **应用目标固定原生上下文**，不探测网页上下文。
 - **输入路线**（iOS）：由网页上下文是否可用决定在哪个上下文取活动元素；Android 固定为 `mobile: type`、不探测。
-- **坐标比例**：iOS 取 `mobile: deviceScreenInfo` 的 `scale`；Android 为 1。
+- **坐标比例**：iOS 取 `mobile: deviceScreenInfo` 的 `scale`；它失败时回退为截图长边除以窗口长边、取整，窗口长边取原生 page source 根节点（`XCUIElementTypeApplication`）宽与高中的较大者；回退也失败时按执行前失败归 `engine_error`，消息「无法确定坐标比例」。不调 `getWindowRect`（iOS 26.3 上两种上下文都报错，见被拒方案）。Android 恒为 1。比例没有可用的缺省值：猜错的比例会让每个 iOS 手势都落空，所以确定不了就不进入执行。
 - **Appium 版本**：取自 `/status`，只记入诊断。
 - **DeepLink 支持**（仅应用目标）：不预先探测，首次 `mobile: deepLink` 遇到 WebDriverAgent「不支持打开地址」类报错即记为「不提供」并缓存到会话（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；只缓存能力否定，地址被拒与结果未知不进缓存。这是「一次定下」的惰性例外：预先探测要么多开一次应用，要么没有可用的只读命令。
 
@@ -104,33 +108,36 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
   | ② 会话上限 `max_session_s` | 发出 Create | 由「① 不超过 ②」的预检或自检保证；worker 另按会话年龄做后备 | 单会话寿命 | 年龄到点：当前 step error、余下 skipped、发 Stop、归 `session_lost` | 不重试、不重建 |
   | ③ 获取预算（缺省 600 秒，可配，上界 3600 秒） | 进入设备解析 | worker | 筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、会话预热；止于被测对象就绪 | `acquire_timeout`；判据型失败归 `precheck_failed` | worker 内手写退避，跨重建不重置；剩余不足 150 秒不再换台 |
   | ④ Device Farm 单次调用 | 每次调用 | worker | Create、Get、List、Stop | 获取期计入 ③ | `maxAttempts = 1`，请求超时 10 秒（Stop 3 秒，终结期 Get 5 秒），手写退避，停止信号可穿透 |
-  | ⑤ newSession 单请求超时 | 发出 newSession | WebDriver 客户端（建连实例） | 建会话加 `appium:app` 安装 | 计入 ③ | 不小于 4 分钟加 65 秒，以剩余 ③ 封顶；传输层 0 次 |
-  | ⑥ 执行期单请求超时 | 每个请求 | WebDriver 客户端（执行实例） | 单条命令，**它是单条命令的真实上界** | 结果未知（见下） | 0 次；只读原语白名单重试 1 次 |
+  | ⑤ newSession 单请求超时（不小于 4 分钟加 65 秒，封顶优先） | 发出 newSession | WebDriver 客户端（建连实例） | 建会话加 `appium:app` 安装 | 计入 ③；被剩余 ③ 封顶后到期归 `acquire_timeout`；未被封顶的超时视为瞬时失败，预算允许时只重试 newSession 一次，否则 `acquire_timeout`（0051 决策 3） | 传输层 0 次 |
+  | ⑥ 执行期单请求超时（180 秒，实施期校准、真机验收后可调） | 每个请求 | WebDriver 客户端（执行实例） | 单条命令，**它是单条命令的真实上界** | 结果未知（见下） | 0 次；只读原语白名单重试 1 次 |
   | ⑦ W3C `pageLoad`（设备模块常量，暂定 150 秒） | 每条导航 | 服务端驱动 | 页面加载，**只是尽力而为** | 服务端回 `timeout` 时结果已知 | 不重试；单次加载超过它的站点在 1.5 不受支持，调大 `@timeout` 只解决多次加载累积的墙钟不足 |
-  | ⑧ `appium:newCommandTimeout` | 上一条命令返回后 | Appium 服务端 | 命令之间的空闲（两平台实测长命令执行期间不计时） | 会话被回收，查状态后按 0051 决策 4 归因 | 不适用 |
+  | ⑧ `appium:newCommandTimeout`（900 秒，实施期校准、真机验收后可调） | 上一条命令返回后 | Appium 服务端 | 命令之间的空闲（两平台实测长命令执行期间不计时） | 会话被回收，查状态后按 0051 决策 4 归因 | 不适用 |
   | ⑨ Midscene 重规划 12 轮、每个 act 累计 5 次动作错误 | 每个 act | Midscene | 次数上限，不是时间上限 | 现有规则 | 不适用 |
   | ⑩ 终结四阶段 | 进入终结 | worker | 0051 决策 5 的四个阶段与各自截止线 | 释放未确认即 `release_failed` | 见 0051 决策 5 |
 
-  不变量：① 不超过 ②；设备 scope 的 ① 不小于 ③ 加最短余量；⑥ 大于 ⑦ 加余量，只是为了给服务端先报的机会——实测 Android Chrome 上 `pageLoad` 设 3 秒、10 秒慢页在 14.6 秒后才报 timeout，iOS Safari 上设置不被反映、`url` 在 3.2 秒返回而页面未加载完，所以 ⑦ 不能当上界；⑧ 不小于最长命令间空闲（含单次模型规划）加余量；⑤ 到 ⑧ 由「Appium 建连与上下文切换」块显式设定（决策 3），不依赖 SDK 缺省；同一会话上建连、执行、探测用不同的客户端实例设不同超时（实测两个实例各自的 `connectionRetryTimeout` 各自生效）。重规划上限缺省 12（原生应用的翻页类动作每翻一页消耗一轮规划，实测需要到 12；必须有限），桌面目标行为不变，覆盖走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的 worker 侧 env 覆盖形态。不存在「step 预算」：Midscene 没有可控的单 act 时间上限，`abortSignal` 只在规划轮之间生效。
-- **执行期关闭传输层自动重试**：执行实例 `connectionRetryCount = 0`（webdriver 10.0.2 在客户端超时与多数服务端错误上以原请求体重发，点击与输入会被重复执行）。只读原语白名单——截图、取上下文列表、page source、已确认网页上下文中的读取地址（不含导航）、前台应用查询（`getCurrentPackage` / `mobile: activeAppInfo`）、`/status`、`deviceScreenInfo`——由设备模块重试 1 次，只对网络错误码与 502、503、504，按原语列、不按 HTTP 方法判。
-- **命令守卫**：会话级的 driver 代理，交给 Midscene 适配器、内建导航与确定性 handler（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2 的 `ctx.driver`）的都是它。守卫维护两件状态：**当前执行令牌**（step 开始时发出，**在 step 结束、取消或进入终结的那一刻立即撤销**，不等下一 step；带旧令牌或无令牌的调用一律拒绝，覆盖 handler 在 `await` 之后恢复执行、step 结束后保留的引用、以及 SIGTERM 收尾与主执行并存的窗口；收尾自身的调用由生命周期管理方经自己的通道执行）与**结果未知标志**（置位后本 step 内一切有副作用的命令被拒绝，只读白名单放行）。实测 Midscene 1.15.1 在适配器抛错并置 `abortSignal` 后立即结束 act、不再发任何动作，所以守卫的必要性来自 handler 与晚到引用，保留为纵深防御。
-- **结果未知的命令**（客户端超时或连接中断，且不在白名单）：守卫置结果未知标志并中止当前 act 的 `abortSignal`；worker 查一次会话状态，非 RUNNING 按 `session_lost`，RUNNING 则当前 step 记 error、类别 `engine_error`、消息「设备在等待时间内没有回应，这一步可能已执行也可能未执行」，本 scenario 短路；下一条 scenario 前做一次只读存活探测（截图，即决策 2 的 scenario 前核对），失败先查会话状态，非 RUNNING 发 `scope_done{status: error, errorType: session_lost}`、否则发 `scope_done{status: error, errorType: engine_error}`，由 core 合成余下 SKIPPED。任何层都不补发。
-- **会话预热由设备模块的「会话预热」块执行一次（决策 3），不感知令牌与 cookie 的值**：在能力探测之后、`scope_started` 之前，按探测结论选路线（可用网页上下文走 `url`，否则 `mobile: deepLink`）导航 worker 收到的预热地址，在原生控件树里查找页面标记（READY / DENIED / ERROR / AUTH REQUIRED），归因规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13；预热不处理 iOS Safari 的系统鉴权表单。预热地址与设备端点写进诊断与错误文本时同样经 0051 决策 11 的脱敏出口。
+  不变量：① 不超过 ②；设备 scope 的 ① 不小于 ③ 加最短余量；⑤ 封顶优先——剩余 ③ 小于 4 分钟加 65 秒时 newSession 以剩余 ③ 为超时，此时安装未完成归 `acquire_timeout`，换台条件仍是剩余 ③ 不少于 150 秒（0051 决策 3）；⑥ 大于 ⑦ 加余量（180 秒对 150 秒），只是为了给服务端先报的机会——实测 Android Chrome 上 `pageLoad` 设 3 秒、10 秒慢页在 14.6 秒后才报 timeout，iOS Safari 上设置不被反映、`url` 在 3.2 秒返回而页面未加载完，所以 ⑦ 不能当上界；⑧ 不小于最长命令间空闲（含单次模型规划）加余量；⑤ 到 ⑧ 由「Appium 建连与上下文切换」块显式设定（决策 3），不依赖 SDK 缺省；同一会话上建连、执行、探测用不同的客户端实例设不同超时。实例的超时并非完全独立：据 webdriver 10.0.2 源码，它按会话 id 共享一个 undici 连接池，连接池的超时取第一个对该会话发命令的实例的值，之后其它实例的有效超时是自身与它的较小值；实测「两个实例的 `connectionRetryTimeout` 各自生效」是在长超时实例先发命令的顺序下得到的。所以建会话之后、能力探测之前，第一条会话命令必须由执行实例发出（它在会发会话命令的实例中超时最长；建连实例只发 newSession，newSession 不带会话 id、不进连接池），这一顺序由测试锁定。收尾顺序：`deleteSession` 之后同一会话上的命令都只会失败，而据 webdriver 10.0.2 源码，DELETE 返回时该会话共享的连接池被关闭，关闭会等在途请求完成，不中止它们；所以正常收尾先结束 Midscene 侧（`destroy`），确认执行实例已没有在途命令，再 `deleteSession`。重规划上限缺省 12（原生应用的翻页类动作每翻一页消耗一轮规划，实测需要到 12；必须有限），桌面目标行为不变，覆盖走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的 worker 侧 env 覆盖形态。不存在「step 预算」：Midscene 没有可控的单 act 时间上限，`abortSignal` 只在规划轮之间生效。
+- **执行期关闭传输层自动重试**：执行实例 `connectionRetryCount = 0`（webdriver 10.0.2 在客户端超时与多数服务端错误上以原请求体重发，点击与输入会被重复执行）。只读原语白名单——截图、取上下文列表、page source、已确认网页上下文中的读取地址（不含导航）、前台应用查询（`getCurrentPackage` / `mobile: activeAppInfo`）、`/status`、`deviceScreenInfo`——由设备模块重试 1 次，按原语列、不按 HTTP 方法判。可重试的只有两类：连接层错误（`ECONNRESET`、`ECONNREFUSED`、`EPIPE`、`UND_ERR_SOCKET`、`UND_ERR_CLOSED` 这类错误码）与 HTTP 502、503、504；一切超时（含 webdriver 自身的 `ETIMEDOUT` 客户端超时）与 500 都不重试——超时重发会把等待再延长一个 ⑥，挂住的命令重发通常仍挂住；500 是服务端已处理并报错，不是传输故障。状态码经 webdriver 客户端的 `transformResponse` 钩子记到错误对象上（据 webdriver 10.0.2 源码，服务端非 2xx 时抛出的错误只带错误名与消息，不带状态码）。白名单命令超时或重试后仍失败时先查一次会话状态：非 RUNNING 归 `session_lost`，RUNNING 归 `engine_error`；只读命令没有副作用，不置结果未知标志。
+- **命令守卫**：会话级的 driver 代理，交给 Midscene 适配器、内建导航与确定性 handler（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2 的 `ctx.driver`）的都是它。守卫维护两件状态：**当前执行令牌**（step 开始时发出，**在 step 结束、取消或进入终结的那一刻立即撤销**，不等下一 step；带旧令牌或无令牌的调用一律拒绝，覆盖 handler 在 `await` 之后恢复执行、step 结束后保留的引用、以及 SIGTERM 收尾与主执行并存的窗口）与**结果未知标志**（置位后本 step 内一切有副作用的命令被拒绝，只读白名单放行）。两件状态只约束 handler、内建导航与 AI（经 Midscene 适配器）发出的命令；决策 2 列出的生命周期通道（step 前核对、复原与核对、界面快照、scenario 前核对、会话预热、终结四阶段）由生命周期管理方经自己的通道执行，不经令牌与标志。实测 Midscene 1.15.1 在适配器抛错并置 `abortSignal` 后立即结束 act、不再发任何动作，所以守卫的必要性来自 handler 与晚到引用，保留为纵深防御。
+- **执行异常的归类由守卫带给 runStep**：守卫在抛出前把归类（`session_lost`、`engine_error`、`capability_unavailable`）连同类型标记挂到异常对象上，runStep 的通用异常分类先认这个标记，认到即按它归类。设备路径的执行异常因此不会被瞬时网络判定归成 `network_error`（WebdriverIO 的 `ECONNRESET`、`UND_ERR_CLOSED` 在设备上意味着结果未知或会话丢失，设备路径没有 `network_error` 出口，[0028](./0028-transient-network-ssl-resilience.md)）；不带标记的异常（桌面路径的全部异常）沿用现有的 `isTransientNetwork` 判定，桌面行为不变。接缝形状不变：标记是异常对象上的数据，主流程只多认一个通用标记，不按设备分支。
+- **结果未知的命令**（客户端超时或连接中断，且不在白名单）：守卫置结果未知标志并中止当前 act 的 `abortSignal`；worker 查一次会话状态，非 RUNNING 按 `session_lost`，RUNNING 则当前 step 记 error、类别 `engine_error`、消息「设备在等待时间内没有回应，这一步可能已执行也可能未执行」（复原失败等后续信息追加在这句之后，决策 2 第 5 步），本 scenario 短路；下一条 scenario 前经生命周期通道在原生上下文做一次只读存活探测（截图，即决策 2 的 scenario 前核对），失败先查会话状态，非 RUNNING 发 `scope_done{status: error, errorType: session_lost}`、否则发 `scope_done{status: error, errorType: engine_error}`，由 core 合成余下 SKIPPED。任何层都不补发。
+- **会话预热由设备模块的「会话预热」块执行一次（决策 3），不感知令牌与 cookie 的值**：在能力探测之后、`scope_started` 之前，按探测结论选路线（可用网页上下文走 `url`，否则 `mobile: deepLink`）导航 worker 收到的预热地址，在原生控件树里查找页面标记（READY / DENIED / ERROR / AUTH REQUIRED），归因规则归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13；预热不处理 iOS Safari 的系统鉴权表单。预热导航以执行实例的单请求超时 ⑥ 为上界，不套用桌面预热的 30 秒导航超时：单条命令的上界只能由客户端实例的请求超时给出，另设 30 秒要么为预热再开一个实例，要么用放弃式等待（被拒方案「探测用 `Promise.race`」同理）。导航超时计一次 ERROR 尝试，之后原地重导航，尝试次数与桌面预热共用同一常量（3 次，实施期校准、真机验收后可调）。预热发生在 `scope_started` 之前、尚无执行令牌，经生命周期通道执行，不经命令守卫。预热地址与设备端点写进诊断与错误文本时同样经 0051 决策 11 的脱敏出口。
 
 ### 7. Midscene 复用边界
 
-- **复用**：`Agent`、`AbstractInterface`、`createDefaultMobileActions` 与 `defineActionsFromInputPrimitives`（动作集定义）、收键盘的决定；规划、报告、dump、token 统计照用 SDK 的。evidence 的 dump 映射函数不改即可用；evidence 模块的输入改为接收一份已采集好的界面快照（地址、控件摘要、原始树路径与各自的缺失原因），模块保持纯映射、不发 WebDriver 命令（[0042](./0042-step-evidence-and-explain.md)、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）。
+- **复用**：`Agent`、`AbstractInterface`、`defineActionsFromInputPrimitives`（动作集定义）、收键盘的决定；规划、报告、dump、token 统计照用 SDK 的。evidence 的 dump 映射函数不改即可用；evidence 模块的输入改为接收一份已采集好的界面快照（地址、控件摘要、原始树路径与各自的缺失原因），模块保持纯映射、不发 WebDriver 命令（[0042](./0042-step-evidence-and-explain.md)、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）。
+- **动作集只经 `defineActionsFromInputPrimitives` 定义**：传 `includeSwipe: false`，系统动作经 `systemActions` 显式给出——Android 注册返回与主屏，iOS 只注册主屏（决策 4）。不用 `createDefaultMobileActions`：在 1.15.1 里它只是前者的薄包装，固定转传尺寸、休眠与 `systemActions`，不转传 `includeSwipe`，因而 Swipe 动作总会注册；类型上它还要求完整的移动端原语集（双击、拖放与 `touch.swipe` 都是必填）。除 Swipe 之外，它不提供前者没有的东西，两者注册出的其余动作相同。关掉 Swipe，是让滚动与翻页类意图只有一条路线、统一经 Scroll 动作走决策 6 的滚动规则：Swipe 动作需要一条按起止坐标拖动的原语，而实测验证过的翻页路线只有决策 6 的两条滚动命令（W3C 指针拖动在 iOS 26 分页视图上不翻页）。SDK 只在 `systemActions` 给了配置时才把系统键注册成动作，不给则返回与主屏都对模型不可见，所以必须显式给出。模型在没有 Swipe 动作时能否用 Scroll 完成横向翻页（引导页、轮播），列入真机验收矩阵确认（决策 8）。这一项在设备模块落地前先由一次真机 spike 确认；若模型不能用 Scroll 完成横向翻页，改为注册 Swipe，原语由驱动适配器的滑动命令实现，并回写本条。
 - **自写**：决策 3 列出的八块设备模块全部自写（Device Farm 会话、Appium 建连与上下文切换、命令守卫、能力探测、驱动适配器、界面实现（在复用的 `AbstractInterface` 之上）、应用启停、会话预热），划分以决策 3 为准。
-- **依赖**：`@midscene/core` 升为显式依赖，与 `@midscene/web` 锁定同一版本（沿用 [0042](./0042-step-evidence-and-explain.md) 决策六的 SDK 版本锁定）。`webdriverio` 目前只供类型声明、暂用范围版本；设备模块落地时改为精确锁定，理由同 0042 决策六，升级即触发决策 8 的真机验收。
+- **依赖**：`@midscene/core` 升为显式依赖，与 `@midscene/web` 锁定同一版本（沿用 [0042](./0042-step-evidence-and-explain.md) 决策六的 SDK 版本锁定）。`webdriverio` 精确锁定为 10.0.2：此前它只供类型声明、用范围版本，随设备模块落地改为精确版本，理由同 0042 决策六（本 ADR 的超时、重试与连接池共享结论都依赖这一版本的源码行为），升级即触发决策 8 的真机验收。
 - **不接 `@midscene/ios`**：它对 Appium 端点有三处硬阻断（见实测依据）。
-- **借规则、不借代码**：DPR 回退规则（截图长边除以窗口长边取整）作为比例探测失败时的回退依据，按其逻辑自写；`@midscene/ios` 的传输层不引入。
+- **借规则、不借代码**：DPR 回退规则（截图长边除以窗口长边取整）作为比例探测失败时的回退依据，按其逻辑自写；窗口长边的来源是原生 page source 根节点的宽高，不是 `getWindowRect`（决策 5）；`@midscene/ios` 的传输层不引入。
 
 ### 8. 护栏
 
-- **读取点测试**：系统版本与机型只允许从会话能力对象读取，读取点由测试守住。不扫数字字面量：坐标、超时、比例里的数字与版本号无法区分，扫描只会产生误报、照不出用变量拼出的版本分支。
-- **命令契约快照**：两个驱动适配器对每个原语发出的命令（命令名与参数形态）存快照，改动须显式更新快照。
+- **读取点测试**：系统版本与机型只允许从会话能力对象读取，读取点由测试守住。不扫数字字面量：坐标、超时、比例里的数字与版本号无法区分，扫描只会产生误报、照不出用变量拼出的版本分支。护栏只约束设备模块里决定适配行为的代码（驱动适配器、能力探测、界面实现、命令守卫）；三类读取不构成按版本或机型的适配分支，显式豁免：设备选择的输入（Device Farm 会话块按设备列举结果的系统版本与机型筛选设备）、协议载荷（`session_opened` 的 `device` 字段、Job 设备请求里的 `osVersion`）、句柄上下文的类型透传（确定性 step 注册面对 webdriver 句柄的类型声明）。测试文件不在扫描范围内。
+- **动态加载的护栏**：WebdriverIO 与 Device Farm SDK 的值 import 只出现在设备模块内；`import type` 一律豁免，因为它在编译期擦除、运行期不加载，桌面路径与 `--capabilities` 的零加载不受影响。
+- **命令契约快照**：两个驱动适配器对每个原语发出的命令（命令名与参数形态，含 iOS 回车、退格与清空经 sendKeys 发出的控制字符、Android 清空的退格键序列）存快照，改动须显式更新快照。另由测试守住 `mobile:` 字面量只出现在设备模块的 `adapters/` 目录下（决策 4）。
 - **命令守卫的护栏测试**：带旧令牌的调用、结果未知后的有副作用调用、缓存的元素句柄、从代理提取出的方法引用（解构或先取后调）与晚到的异步回调都必须被拒绝；只读白名单放行。
-- **预热与探测的验收**：预热验收的三个失败分支（边缘拒收 cookie、校验 401、请求失败）各实际触发一次；iOS 26 上「探测超时 → 恢复原生上下文 → deepLink → READY」整链路在真机验收矩阵里单列一行。
+- **预热与探测的验收**：预热验收的三个失败分支（边缘拒收 cookie、校验 401、请求失败）各实际触发一次；iOS 26 上「探测超时 → 恢复原生上下文 → deepLink → READY」整链路在真机验收矩阵里单列一行，这一行同时观测探测实例的网页命令挂住期间执行实例的原生命令延迟多少（服务端是否串行，决策 5）。矩阵另列两行：刚建好、尚未导航的 Safari / Chrome 会话是否已有网页上下文候选（决策 5 的零候选前提）；没有 Swipe 动作时模型能否用 Scroll 完成横向翻页（决策 7）。
 - **真机重新探测工具**：`tools/` 下放一个真机重新探测工具，在真实会话里逐项执行探测与原语，生成能力矩阵并与测试 fixture 做差集。
 - **人工触发的真机验收矩阵**：升级 Midscene、WebdriverIO，或 Device Farm 的 Appium 服务端版本变化时，由人触发一轮真机验收：Android 加两代 iOS、网页加应用、故障演练；列入 CONTRIBUTING 的发版后验证项。不进 CI：需要远程访问会话与模型费用，且失败须人判是平台变化还是用例问题。
 
@@ -161,7 +168,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 
 **DeepLink**（应用目标；Android 15 维基百科客户端与 Chrome，iOS 15.8、18.6、26.3 用注册了自定义 scheme 的未签名示例包与 Safari）：Android 指定 package 时能处理的链接 1 秒内打开目标页，后台与冷启动同样；应用不处理的主机或路径时命令报「unable to resolve Intent」、不离开被测应用；不指定 package 时系统交给 Chrome。驱动经 `adb shell am start -d` 传地址：含 `; ' ( ) | < >` 的地址命令出错，`|` 与 `;` 让命令截断后部分执行（报错的同时打开了截断的地址），`+ % [ ] { } & = # ! * $ , ~` 与已百分号编码的字符逐字送达（以 Chrome 回显页的 `location.href` 对比标准化原值），`mobile: startActivity` 同样经 shell、同样出错，单引号包裹地址会把驱动加的反斜杠留在地址里。iOS 18.6 与 26.3 指定 bundleId 时已注册 scheme 的链接 0.3 秒到前台，后台与冷启动同样，地址不经 shell、含括号引号与 `;` 的地址原样送达（Safari 回显核对）；Device Farm 重签后 Info.plist 注册的 scheme 保留；未注册的 scheme 与无关的 https 地址命令照样成功、应用照样到前台，应用是否跳转外部不可观测。iOS 15.8 带 bundleId 时 2.4 秒报 WebDriverAgent「The current Xcode SDK does not support opening of URLs with given application」，不带时命令挂住（4 次 120 秒客户端超时，481 秒）。Device Farm 公共设备上系统「地图」被禁止启动，不能当被测对象。
 
-**超时语义**（Android Chrome 与 iOS 18.6 Safari）：同一会话上两个 webdriver 10.0.2 客户端实例各自的 `connectionRetryTimeout` 各自生效（3 秒实例 3.0 秒超时，缺省实例完成同一慢导航）；Android `pageLoad` 设 3 秒、10 秒慢页 14.6 秒后才报 timeout，会话仍可用；iOS `pageLoad` 设置不被反映，`url` 在 3.2 秒返回而页面未加载完；`newCommandTimeout` 15 秒下 25 秒长命令在两平台都正常完成、空闲 20 秒后 `invalid session id`，远程访问会话仍 RUNNING，重新 newSession 5.6 到 17 秒成功；newSession 客户端 2 秒超时后立即与 75 秒后服务端都无残留会话（两个时点）。
+**超时语义**（Android Chrome 与 iOS 18.6 Safari）：同一会话上两个 webdriver 10.0.2 客户端实例各自的 `connectionRetryTimeout` 各自生效（缺省实例先发命令、3 秒实例后发；3 秒实例 3.0 秒超时，缺省实例完成同一慢导航）；Android `pageLoad` 设 3 秒、10 秒慢页 14.6 秒后才报 timeout，会话仍可用；iOS `pageLoad` 设置不被反映，`url` 在 3.2 秒返回而页面未加载完；`newCommandTimeout` 15 秒下 25 秒长命令在两平台都正常完成、空闲 20 秒后 `invalid session id`，远程访问会话仍 RUNNING，重新 newSession 5.6 到 17 秒成功；newSession 客户端 2 秒超时后立即与 75 秒后服务端都无残留会话（两个时点）。
 
 **Midscene 1.15.1 对中止的行为**：假界面在首个动作抛「结果未知」并置 `abortSignal` 后，`aiAct` 15 毫秒内以「task runner is in error state」拒绝，之后零动作、零截图（放行与拒绝两种模式各一次）。
 
@@ -198,7 +205,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 - **Android 走 W3C 输入路线**：网页活动元素读回为空，原生活动元素指向 WebView 容器。
 - **iOS 用旧版 `POST /keys`**：iOS 15.8 Safari 上空等 51 秒且读回为空；标准路线已覆盖全部情形。
 - **用 W3C 指针拖动实现 iOS 滚动**：iOS 26 分页视图不翻页。
-- **用 `getWindowRect` 反推坐标比例**：iOS 26.3 上报错。
+- **用 `getWindowRect` 反推坐标比例，包括把它作为比例回退的窗口尺寸来源**：iOS 26.3 上两种上下文都报错；回退所需的窗口长边改取原生 page source 根节点的宽高（决策 5）。
 - **把原生应用会话里的 `WEBVIEW_chrome` 当网页上下文**：它不属于被测对象，拿不到被测内容的 DOM。
 - **`newCommandTimeout` 随 job 墙钟预算联动**：两者语义不同，联动会让小的 `@timeout` 导致会话在模型思考中途被回收。
 - **`newCommandTimeout` 取 max(单请求超时, 最长命令间空闲) 的保守公式**：两平台实测它只计命令之间的空闲，长命令执行期间不计时，保守项没有依据。

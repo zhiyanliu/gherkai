@@ -230,8 +230,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0020-step-phrasing-default-ai-deterministic-scaffold.md": {
-    "mtime": 1793243625.9867907,
-    "ast_hash": "95e65f7a71a6a3d0b284668358577174",
+    "mtime": 1793346224.0008178,
+    "ast_hash": "ab4f139ac90ef28d4950bcb7d539d567",
     "semantic_hash": ""
   },
   "docs/adr/0025-plan-module-feature-to-jobs.md": {
@@ -240,8 +240,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0028-transient-network-ssl-resilience.md": {
-    "mtime": 1793247938.1469676,
-    "ast_hash": "52d33f35db6f1f616991f67845e3ea8a",
+    "mtime": 1793346520.126029,
+    "ast_hash": "8f8c25791216c4cee2bed0af9da3da93",
     "semantic_hash": ""
   },
   "tools/e2e_harness.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793249322.640341,
-    "ast_hash": "72f46c99c7af04f5184cc080b3b00478",
+    "mtime": 1793346995.0298073,
+    "ast_hash": "1185496e6666ea959093171d7a697824",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1793243487.1575189,
-    "ast_hash": "5a69d8b5beef542aabedfca8b588838a",
+    "mtime": 1793345968.9731672,
+    "ast_hash": "480185a716094a70f44c3c524c921edd",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793243504.44316,
-    "ast_hash": "19f27dce0fdddcfdcacc554988aeee25",
+    "mtime": 1793346224.0010388,
+    "ast_hash": "25e85994d7265c08a88e4e10535f034c",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1305,8 +1305,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
-    "mtime": 1793200140.1126707,
-    "ast_hash": "2087e7174a5bac0bee3ac0e6530afad3",
+    "mtime": 1793345669.0037513,
+    "ast_hash": "93831ce351212924773be1532edd1ee6",
     "semantic_hash": ""
   },
   ".github/scripts/release_notes.py": {
@@ -1870,28 +1870,28 @@
     "semantic_hash": ""
   },
   "docs/adr/0048-test-targets-device-and-ui-kind.md": {
-    "mtime": 1793243610.40382,
-    "ast_hash": "41367050d0d8cb2d227dbb5d9512dddd",
+    "mtime": 1793346995.0289073,
+    "ast_hash": "d1eba75c5a9a3a9f7d69eb8cbd9cafd6",
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
-    "mtime": 1793243610.4040713,
-    "ast_hash": "e236cb86aef788505789d86a09416d14",
+    "mtime": 1793346995.0295382,
+    "ast_hash": "5bf4d4da3c914c3a35d0b6205e8df235",
     "semantic_hash": ""
   },
   "docs/adr/0050-deterministic-step-handles-and-testing.md": {
-    "mtime": 1793243604.6719651,
-    "ast_hash": "969491e0a7356948096cc4443ecbe2be",
+    "mtime": 1793346224.000704,
+    "ast_hash": "1818e7dee304f52752193c6c8fab24d4",
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793341055.9826615,
-    "ast_hash": "be9bda9f5d6186e7f3f42aef2ea4c856",
+    "mtime": 1793347152.4236495,
+    "ast_hash": "7c4d2b71687bf6b72a0d8d66e53b2143",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793243561.4675658,
-    "ast_hash": "0de554d592a31d42e54722d21b24609d",
+    "mtime": 1793346995.02941,
+    "ast_hash": "547ed822df7449077bbe3a57cc342e18",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793341055.9837208,
-    "ast_hash": "6351138e5d893a1032613d644f6e89c9",
+    "mtime": 1793346995.030016,
+    "ast_hash": "6153a2c1ada8dfde8ed1f24b5d1b49d2",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
