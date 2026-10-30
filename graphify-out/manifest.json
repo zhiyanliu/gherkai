@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793390160.3932152,
-    "ast_hash": "c4c235e3416f1b49136a744f4f4c79b7",
+    "mtime": 1793392273.3198023,
+    "ast_hash": "1b9813fed39578754a5b37872c8f0855",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793391163.222181,
-    "ast_hash": "685be89608752c731b439247dd533fab",
+    "mtime": 1793392609.4246695,
+    "ast_hash": "03d506e6cf2503a449e78070eda4e4ee",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793391163.2224839,
-    "ast_hash": "a08f7af2ff755809297ef292465b970c",
+    "mtime": 1793392323.4855256,
+    "ast_hash": "54bff54fd19723315e61fffbe7b81eb0",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2315,8 +2315,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/stderr-outlets.test.mts": {
-    "mtime": 1793391001.6916902,
-    "ast_hash": "55e241d5b278af32342c7382b8bd1fda",
+    "mtime": 1793392473.05744,
+    "ast_hash": "5c0fa23071855e0c6e7781a3d84d0ddf",
     "semantic_hash": ""
   }
 }

@@ -23,7 +23,9 @@
 //     （const w = fs.writeSync），变量之间相互赋值时逐层取到原名；整体导入与缺省导入（import * as f、import f from）后取的是成员名，
 //     改名不影响。初值、所赋值与被调函数可能取到的值都认：条件表达式取两个分支，?? / || / && 与逻辑赋值取两侧，赋值与逗号表达式取
 //     右侧（如 const w = c ? f.writeSync : x、(0, w)(2, m)）。改名表按整个文件收集、不分作用域，一个名字可以对应多个原名，名字本身
-//     或原名之一在名单里即计入：与改名同名的其他变量可能因此多报，不会因同名而漏掉。
+//     或原名之一在名单里即计入：与改名同名的其他变量可能因此多报，不会因同名而漏掉。被调函数先汇总它可能取到的全部值及各自的原名，
+//     其中任一是建流构造器时这处调用按下面的「以文件描述符 2 建流」报出、不计入写入；同时可能取到写函数时同样以拒绝为准，因为只按
+//     写函数核对实参会漏掉建流那一侧写出的内容（如 const w = c ? f.writeSync : tty.WriteStream; w(2, redactSecrets(m)).write(m)）。
 // 实参经过脱敏，指它是 redactSecrets(...) 的调用，或由这样的调用与字符串字面量以 + 或不带标签的模板拼成、且至少含一处这样的
 // 调用。redactSecrets 这个名字须从 lib/redact.mts 导入：静态 import（含改名导入与整体导入）与 await import(...) 的解构都算。
 //
@@ -34,8 +36,8 @@
 //   - 把 console 对象或 console.error 一类方法当作值使用、以计算出的名字取 process 或 console 的成员、从 node:console 按名导入、
 //     新建 Console 实例（new console.Console(...) 等）；
 //   - 以 import() 或 require 动态加载 process 与 console 模块；
-//   - 以文件描述符 2 建流：对象字面量里的 fd: 2（如 fs.createWriteStream(null, { fd: 2 })），以及第一个参数为 2 的 WriteStream、
-//     SyncWriteStream 与 Socket（名字经改名得到时同样取原名）；
+//   - 以文件描述符 2 建流：对象字面量里的 fd: 2（如 fs.createWriteStream(null, { fd: 2 })），以及第一个参数为 2、被调函数可能取到
+//     的值里有 WriteStream、SyncWriteStream 或 Socket 的调用与 new（名字经改名得到时同样取原名，同时可能取到写函数时也报）；
 //   - 字符串字面量 /dev/stderr、/dev/fd/2 与 /proc/self/fd/2；
 //   - 取出 util.debuglog（NODE_DEBUG 打开时写 stderr）：成员访问（含 util["debuglog"]）、从 node:util 按名导入（含改名）、TS 的
 //     import 等号导入（import d = util.debuglog），以及属性名或简写名为 debuglog 的对象解构（声明、参数与解构赋值都算，含 import()
@@ -339,12 +341,6 @@ function isFd2(e: ts.Expression | undefined): boolean {
   return ts.isNumericLiteral(x) && Number(x.text) === 2;
 }
 
-function calleeName(callee: ts.Expression): string | null {
-  const x = strip(callee);
-  if (ts.isIdentifier(x)) return x.text;
-  return isMember(x) ? memberName(x) : null;
-}
-
 /** 按名字认的写函数与建流构造器。 */
 const FD_NAMES: ReadonlySet<string> = new Set([...FD_WRITERS, ...FD_STREAMS]);
 
@@ -375,17 +371,30 @@ function valueChoices(e: ts.Expression): ts.Expression[] {
   return [x];
 }
 
+/** 表达式的一个可能取值按名字指的写函数或建流构造器：这个值在源码里的名字与它对应的原名（在 FD_NAMES 里）。 */
+interface FdCandidate {
+  local: string;
+  original: string;
+}
+
 /**
- * 表达式按名字可能指的写函数或建流构造器的原名，按 valueChoices 逐个取值：标识符取它自己与改名表里的原名，成员取成员名，
- * 都限于 FD_NAMES。
+ * 汇总表达式按 valueChoices 可能取到的全部值，给出每个值按名字可能指的写函数或建流构造器：标识符取它自己与改名表里的原名，
+ * 成员取成员名，都限于 FD_NAMES。skip 判为真的值不计入。
  */
-function fdOriginals(e: ts.Expression, aliases: FdAliases): string[] {
-  const out: string[] = [];
+function fdCandidates(e: ts.Expression, aliases: FdAliases, skip: (x: ts.Expression) => boolean = () => false): FdCandidate[] {
+  const out: FdCandidate[] = [];
   for (const x of valueChoices(e)) {
-    const names = ts.isIdentifier(x) ? [x.text, ...(aliases.get(x.text) ?? [])] : isMember(x) ? [memberName(x)] : [];
-    for (const name of names) if (name !== null && FD_NAMES.has(name) && !out.includes(name)) out.push(name);
+    const local = skip(x) ? null : ts.isIdentifier(x) ? x.text : isMember(x) ? memberName(x) : null;
+    if (local === null) continue;
+    const names = ts.isIdentifier(x) ? [local, ...(aliases.get(local) ?? [])] : [local];
+    for (const original of names) if (FD_NAMES.has(original)) out.push({ local, original });
   }
   return out;
+}
+
+/** 表达式按名字可能指的写函数或建流构造器的原名：fdCandidates 的全部原名，去重后按首次出现的先后排列。 */
+function fdOriginals(e: ts.Expression, aliases: FdAliases): string[] {
+  return [...new Set(fdCandidates(e, aliases).map((c) => c.original))];
 }
 
 /**
@@ -539,22 +548,18 @@ function scanFile(rel: string, text: string): FileScan {
       }
     }
     if (!isFd2(args[0])) return;
-    // 被调函数是条件表达式、?? / || / && 或逗号表达式时逐个看它可能取到的值，第一个能识别为写函数或建流构造器的值决定这一处调用的归类
-    for (const callee of valueChoices(n.expression)) {
-      const local = calleeName(callee);
-      if (local === null || (isMember(callee) && isStderr(callee.expression))) continue;
-      const originals = fdOriginals(callee, aliases);
-      const writer = originals.find((name) => FD_WRITERS.has(name));
-      const stream = originals.find((name) => FD_STREAMS.has(name));
-      const via = (original: string): string => (original === local ? "" : `以 ${local} 调用`);
-      if (ts.isCallExpression(n) && writer !== undefined) {
-        write(n, `${writer}(2, ...)${via(writer) === "" ? "" : `（${via(writer)}）`}`, args.slice(1, 2));
-        return;
-      }
-      if (stream !== undefined) {
-        reject(n, `以文件描述符 2 建流（${stream}${via(stream) === "" ? "" : `，${via(stream)}`}）`);
-        return;
-      }
+    // 先汇总被调函数可能取到的全部值及各自的原名（process.stderr 的成员由 stderrReference 处理，不在其中），任一是建流构造器即报为
+    // 无法登记；同时可能取到写函数时同样以拒绝为准，因为只按写函数核对实参会漏掉建流那一侧写出的内容
+    const candidates = fdCandidates(n.expression, aliases, (x) => isMember(x) && isStderr(x.expression));
+    const via = (c: FdCandidate): string => (c.original === c.local ? "" : `以 ${c.local} 调用`);
+    const stream = candidates.find((c) => FD_STREAMS.has(c.original));
+    if (stream !== undefined) {
+      reject(n, `以文件描述符 2 建流（${stream.original}${via(stream) === "" ? "" : `，${via(stream)}`}）`);
+      return;
+    }
+    const writer = candidates.find((c) => FD_WRITERS.has(c.original));
+    if (ts.isCallExpression(n) && writer !== undefined) {
+      write(n, `${writer.original}(2, ...)${via(writer) === "" ? "" : `（${via(writer)}）`}`, args.slice(1, 2));
     }
   };
 
@@ -807,6 +812,29 @@ test("检测函数在构造的片段上把写函数与建流构造器的改名�
   ]);
 });
 
+test("检测函数在构造的片段上汇总被调函数可能取到的全部值，任一是建流构造器即判为无法登记，同时可能取到写函数时以拒绝为准", () => {
+  const scanned = fragment([
+    "import { redactSecrets } from \"../lib/redact.mjs\";",
+    "import fs from \"node:fs\";",
+    "import tty from \"node:tty\";",
+    "import net from \"node:net\";",
+    "function a(m: string, c: boolean) { const w: any = c ? fs.writeSync : tty.WriteStream; w(2, redactSecrets(m)).write(m); }",
+    "function b(m: string, c: boolean) { const s: any = c ? tty.SyncWriteStream : fs.writeSync; s(2, redactSecrets(m)); }",
+    "function d(m: string, c: boolean) { (c ? fs.writeSync : tty.WriteStream)(2, redactSecrets(m)); }",
+    "function e(m: string, x: any) { (fs.writeSync ?? tty.WriteStream)(2, redactSecrets(m)); (x || fs.appendFileSync || net.Socket)(2, m); }",
+    "function g(m: string) { let n: any = fs.writeSync; n ||= net.Socket; n(2, redactSecrets(m)); }",
+    "function h(m: string, c: boolean) { (c ? fs.writeSync : fs.appendFileSync)(2, redactSecrets(m)); }",
+  ]);
+  // 前五个函数里的被调函数都可能取到建流构造器：只按写函数登记会漏掉建流写出的未脱敏文字，所以不计入写入
+  assert.deepEqual(scanned.unregistrable.map((u) => [u.line, u.scope, u.form]), [
+    [5, "a", "以文件描述符 2 建流（WriteStream，以 w 调用）"], [6, "b", "以文件描述符 2 建流（SyncWriteStream，以 s 调用）"],
+    [7, "d", "以文件描述符 2 建流（WriteStream）"], [8, "e", "以文件描述符 2 建流（WriteStream）"],
+    [8, "e", "以文件描述符 2 建流（Socket）"], [9, "g", "以文件描述符 2 建流（Socket，以 n 调用）"],
+  ]);
+  // 候选里只有写函数时照常登记为写入，取第一个写函数
+  assert.deepEqual(scanned.writes.map((x) => [x.line, x.scope, x.form, x.redacted]), [[10, "h", "writeSync(2, ...)", true]]);
+});
+
 test("检测函数在构造的片段上不把 stdout、变量文件描述符、类型位置与子进程的 stderr 计入", () => {
   const scanned = fragment([
     "import fs from \"node:fs\";",
@@ -995,6 +1023,26 @@ test("拒绝：新加一处经 fs 写函数对文件描述符 2 的写入（含�
     const vs = violations(withSource("lib/job-source.mts", null, added));
     assert.ok(has(vs, UNREGISTERED, "lib/job-source.mts", "warn"), `${label}：\n${describe(vs)}`);
     assert.ok(has(vs, UNREDACTED, "lib/job-source.mts", "warn"), `${label}：\n${describe(vs)}`);
+  }
+});
+
+/**
+ * 被调函数可能取到写函数也可能取到建流构造器的三种写法：变量初值为条件表达式、直接以条件表达式调用、?? 与 || 两侧混合。写在登记
+ * 出口所在的函数里，写函数一侧的实参也经过脱敏：只按写函数登记时差集为空，建流那一侧写出的文字却未经脱敏。
+ */
+const MIXED_CALLEE_VARIANTS: ReadonlyArray<readonly [string, string, readonly string[]]> = [
+  ["变量初值为条件表达式", "const w: any = c ? fs.writeSync : tty.WriteStream; w(2, redactSecrets(msg)).write(msg);",
+    ["以文件描述符 2 建流（WriteStream，以 w 调用）"]],
+  ["直接以条件表达式调用", "(c ? fs.writeSync : tty.WriteStream)(2, redactSecrets(msg));", ["以文件描述符 2 建流（WriteStream）"]],
+  ["?? 与 || 两侧混合", "(fs.writeSync ?? tty.WriteStream)(2, redactSecrets(msg)); (fs.appendFileSync || net.Socket)(2, redactSecrets(msg));",
+    ["以文件描述符 2 建流（WriteStream）", "以文件描述符 2 建流（Socket）"]],
+];
+
+test("拒绝：登记出口里被调函数同时可能取到写函数与建流构造器，以拒绝为准、判为无法登记的写法", () => {
+  for (const [label, added, forms] of MIXED_CALLEE_VARIANTS) {
+    const vs = violations(withSource("worker/run-scope.mts", "function log(msg: string): void {", `function log(msg: string): void {\n  ${added}`));
+    assert.deepEqual(vs.filter((v) => v.rel === "worker/run-scope.mts").map((v) => [v.kind, v.scope, v.detail.replace(/^\d+ 行 /, "")]),
+      forms.map((form) => [UNREGISTRABLE, "log", form]), `${label}：\n${describe(vs)}`);
   }
 });
 
