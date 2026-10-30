@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<XCUIElementTypeApplication type="XCUIElementTypeApplication" name="示例商店" label="示例商店" enabled="true" visible="true" accessible="false" x="0" y="0" width="390" height="844" index="0">
+  <XCUIElementTypeWindow type="XCUIElementTypeWindow" enabled="true" visible="true" accessible="false" x="0" y="0" width="390" height="844" index="0">
+    <XCUIElementTypeOther type="XCUIElementTypeOther" enabled="true" visible="true" accessible="false" x="0" y="0" width="390" height="844" index="0">
+      <XCUIElementTypeButton type="XCUIElementTypeButton" name="login_button" label="登录" enabled="true" visible="true" accessible="true" x="20" y="700" width="350" height="44" index="0"/>
+      <XCUIElementTypeTextField type="XCUIElementTypeTextField" name="email_field" label="" value="a@b.com" enabled="true" visible="true" accessible="true" x="20" y="300" width="350" height="44" index="1"/>
+      <XCUIElementTypeStaticText type="XCUIElementTypeStaticText" value="欢迎 &lt;新用户&gt; &apos;回来&apos;" enabled="true" visible="true" accessible="true" x="20" y="200" width="350" height="20" index="2"/>
+      <XCUIElementTypeCell type="XCUIElementTypeCell" name="offscreen_cell" label="屏幕外" enabled="true" visible="false" accessible="true" x="0" y="2000" width="390" height="44" index="3"/>
+    </XCUIElementTypeOther>
+  </XCUIElementTypeWindow>
+</XCUIElementTypeApplication>

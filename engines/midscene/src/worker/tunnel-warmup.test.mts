@@ -101,17 +101,6 @@ test("预算内没有任何标记 → engine_error，消息说明", async () => 
   assert.doesNotMatch(f2!.message, /null|undefined|""/);
 });
 
-test("warmupFailureOutcome：按归因发 scope_done{error}，退出码只随 cleanupFailed（预热失败本身 0、释放失败才 1）", () => {
-  const failure: W.WarmupFailure = { errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE };
-  const ok = W.warmupFailureOutcome(failure, "s", "sess-1", false);
-  assert.deepEqual(ok.event, { type: "scope_done", scopeId: "s", sessionId: "sess-1", status: "error", errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE });
-  assert.equal(ok.exitCode, 0);
-  const leaked = W.warmupFailureOutcome({ errorType: "engine_error", message: "m" }, "s", null, true);
-  assert.equal(leaked.exitCode, 1);
-  assert.equal(leaked.event.sessionId, null);
-  assert.equal(leaked.event.errorType, "engine_error");
-});
-
 test("主入口的完整性判据：有额外请求头、没有预热地址 → 唯一事件 scope_done{precheck_failed}，不建会话、退出码 0（真子进程）", async () => {
   const env: Record<string, string> = {};
   for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;

@@ -1,6 +1,8 @@
-// run-scope worker 单测（ADR 0024/0014/0028）——派发分支 + 投票多数票数学 + 网络瞬时分类。
+// run-scope worker 单测（ADR 0024/0014/0028）——派发分支 + 投票多数票数学 + 网络瞬时分类；界面接缝之上的主流程（ADR 0052 决策 2）：
+// step 的固定七步、scope 级出口的事件序列与退出码、桌面会话事件的配对与收尾次序（ADR 0051 决策 4、5）。
 // 运行：npm test（node --import tsx --test "src/**/*.test.mts"）。
-// 与 Nova 引擎 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。
+// 与 Nova 引擎 test_argument.py / test_transient_network.py 对称：纯逻辑、注 fake agent、不连 AWS。runStep / runScenario 按接缝对象
+// 调用：桌面用例经真实的桌面实现（只换掉 AgentCore 控制面与 CDP 建连），设备形态的用例用记录调用序列的假接缝。
 //
 // 事件经注入的 fake sink 收集（ADR 0024 I/O 边缘可注入接口：emit 从模块级 fd 写改为参数注入的 EventSink，
 // 使测试可注 fake、无需真写 fd 再读回——顺带补上 emit 此前"模块级、无法打桩"的缺口）。testSink 作 sink 参数
@@ -11,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";  // 自述入口的 stdout 完整性只能真实运行子进程验（见文件末那条）
+import { StartBrowserSessionCommand, StopBrowserSessionCommand } from "@aws-sdk/client-bedrock-agentcore";  // 假控制面按命令类型应答
 
 const _events: any[] = [];
 const testSink = { emit: async (e: unknown) => { _events.push(e); } };  // 注入进 runStep/runScenario
@@ -44,6 +47,76 @@ async function importMod() {
 
 function step(keyword: string, text: string, index = 0): any {
   return { index, keyword, text };
+}
+
+// ---- 界面接缝的测试替身（ADR 0052 决策 2）----
+// runStep / runScenario 按接缝对象调用。桌面用例用的是**真实的桌面实现**（worker/surface-desktop.mts），只把它的两个外部边界换成假的：
+// AgentCore 控制面（Start / Stop）与 CDP 建连（DesktopSurfaceHooks）——事件流与 evidence 与改动前逐字节一致，靠的就是这条路径。
+const DESKTOP = { device: "desktop", uiKind: "web" };
+const SCOPE = { id: "features/a.feature", name: "a" };
+
+/** 假的 AgentCore 控制面：Start 依次给 sess-1、sess-2……，记下每次请求名；Stop 按 stopFails 决定成败。trace 记 start / stop 次序。 */
+function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean; startHangs?: (nth: number) => boolean; trace?: string[] } = {}) {
+  const names: string[] = [];
+  const stops: string[] = [];
+  const stopCount = new Map<string, number>();
+  let starts = 0;
+  const client = {
+    send: async (cmd: any) => {
+      if (cmd instanceof StartBrowserSessionCommand) {
+        starts += 1;
+        const n = starts;
+        names.push(cmd.input.name!);
+        opts.trace?.push(`start:${cmd.input.name}`);
+        if (opts.startHangs?.(n)) return await new Promise(() => {});  // 永不返回：Start 在途
+        return { sessionId: `sess-${n}`, streams: { automationStream: { streamEndpoint: `wss://agentcore.test/${n}` } } };
+      }
+      if (cmd instanceof StopBrowserSessionCommand) {
+        const sid = cmd.input.sessionId!;
+        const nth = (stopCount.get(sid) ?? 0) + 1;
+        stopCount.set(sid, nth);
+        stops.push(sid);
+        opts.trace?.push(`stop:${sid}`);
+        if (opts.stopFails?.(sid, nth)) throw new Error(`stop failed: ${sid}`);
+        return {};
+      }
+      throw new Error(`unexpected command ${cmd?.constructor?.name}`);
+    },
+  };
+  return { client: client as any, names, stops };
+}
+
+/** 假的 Playwright 浏览器：只有一个 context、一个 page（在 page 上补 connect() 要调的 evaluate）。 */
+function fakeBrowser(page: any, trace?: string[]): any {
+  const p = { evaluate: async () => undefined, title: async () => "", url: () => "about:blank", ...page };
+  const ctx = { pages: () => [p], newPage: async () => p, addInitScript: async () => {}, setExtraHTTPHeaders: async () => {} };
+  return { contexts: () => [ctx], newContext: async () => ctx, close: async () => { trace?.push("browser.close"); } };
+}
+
+/** 接缝构造参数：事件出口默认丢弃（runStep 的用例只看 step 事件），job 只给接缝要读的键。 */
+function surfaceDeps(over: Record<string, unknown> = {}): any {
+  return {
+    job: { schemaVersion: 1, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target: DESKTOP, deviceRequest: null },
+    emit: async () => {}, log: () => {}, agentOpts: {}, uploader: {} as any, artifactRoot: undefined, requestFinalization: () => {},
+    ...over,
+  };
+}
+
+/** 桌面接缝的测试注入：给定 agent 与 page，Start 与建连都成功。 */
+function desktopHooks(agent: any, page: any, over: Record<string, unknown> = {}): any {
+  return {
+    client: fakeAgentCore().client, signCdpUpgrade: async () => ({}), connectOverCDP: async () => fakeBrowser(page),
+    createAgent: () => agent, runId: "20260629T141207Z-a3f9c1", backoffMs: [1, 1, 1], settleMs: 20, ...over,
+  };
+}
+
+/** 一个已就绪的桌面接缝对象（runStep / runScenario 的第一个参数）。 */
+async function desktopSeam(agent: any, page: any = fakePage): Promise<any> {
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const surface = createDesktopSurface(surfaceDeps(), desktopHooks(agent, page));
+  const acquired = await surface.acquire();
+  assert.ok(acquired.ready, "桌面接缝应就绪");
+  return { surface, agent: acquired.agent, target: DESKTOP, sessionLost: null };
 }
 
 // ---- isTransientNetwork：白名单 + cause 链 + ENOTFOUND/EAI_AGAIN（对称 Nova test_transient_network）----
@@ -140,7 +213,7 @@ test("runStep: Given / When 后整句是一个地址 → 走 page.goto、passed�
   for (const text of ['"https://example.com"', "https://example.com", '  "https://example.com/a?b=1&c=2"  ']) {
     const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
-    const r = await runStep(agent, fakePage, "sc:0", step("Given", text), 1, testSink);
+    const r = await runStep(await desktopSeam(agent), "sc:0", step("Given", text), 1, testSink);
     assert.equal(r, "passed", text);
     assert.deepEqual(calls, []);  // 不浪费 AI
     assert.deepEqual(gotoCalls, [text.trim().replace(/^"|"$/g, "")], text);
@@ -150,7 +223,7 @@ test("runStep: Given / When 后整句是一个地址 → 走 page.goto、passed�
   }
   const { agent } = fakeAgent();
   gotoCalls.length = 0;
-  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", "http://localhost:3000/login"), 1, testSink), "passed");
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("When", "http://localhost:3000/login"), 1, testSink), "passed");
   assert.deepEqual(gotoCalls, ["http://localhost:3000/login"]);
 });
 
@@ -159,7 +232,7 @@ test("runStep: 句子里还有别的内容、末尾带标点、没有 :// → �
   for (const text of ['在输入框输入 "https://example.com"', '"https://example.com"。', "https://example.com/。", "https://example.com/)", "tel:123"]) {
     const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
-    await runStep(agent, fakePage, "sc:0", step("When", text), 1, testSink);
+    await runStep(await desktopSeam(agent), "sc:0", step("When", text), 1, testSink);
     assert.deepEqual(calls, ["aiAct"], text);
     assert.deepEqual(gotoCalls, [], text);
   }
@@ -169,7 +242,7 @@ test("runStep: Then 后只有一个地址 → 命中内建导航但关键字不�
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
   gotoCalls.length = 0;
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"https://example.com"'), 1, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("Then", '"https://example.com"'), 1, testSink);
   assert.equal(r, "error");
   assert.deepEqual(calls, []); assert.deepEqual(gotoCalls, []);
   const ev = events().find((e) => e.type === "step_done");
@@ -183,7 +256,7 @@ test("runStep: 网页目标上非 http(s) 地址、引号不配对 → error；�
                             ['https://example.com"', /引号不配对/], ['"shop://timeout"', /只能打开 http\(s\) 地址/]] as const) {
     const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
-    assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", text), 1, testSink), "error", text);
+    assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("Given", text), 1, testSink), "error", text);
     assert.deepEqual(gotoCalls, []); assert.deepEqual(calls, [], text);  // 不导航、不转 AI
     const ev = events().filter((e) => e.type === "step_done").at(-1);  // 循环内取本轮的 step_done
     assert.match(ev.message, re);
@@ -193,7 +266,7 @@ test("runStep: 网页目标上非 http(s) 地址、引号不配对 → error；�
     const { agent, calls } = fakeAgent();
     gotoCalls.length = 0;
     const withArg = { ...step("Given", '"https://example.com"'), argument };
-    assert.equal(await runStep(agent, fakePage, "sc:0", withArg, 1, testSink), "error");
+    assert.equal(await runStep(await desktopSeam(agent), "sc:0", withArg, 1, testSink), "error");
     assert.deepEqual(gotoCalls, []); assert.deepEqual(calls, []);
     const ev = events().filter((e) => e.type === "step_done").at(-1);
     assert.match(ev.message, /不接受多行参数/); assert.equal(ev.errorType, "engine_error");
@@ -208,10 +281,10 @@ test("runStep: 确定性 handler 抛的错按异常形态分类——消息文�
   deterministic("抛出网络断线", () => { throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }); },
     { description: "测试：handler 抛带 code 的网络错", example: "When 抛出网络断线" });
   for (const text of ['抛出消息 "等待 https://ssl.example 超时 timeout"', '抛出消息 "handshake 字样也不算"']) {
-    assert.equal(await runStep(fakeAgent().agent, fakePage, "sc:0", step("When", text), 1, testSink), "error", text);
+    assert.equal(await runStep(await desktopSeam(fakeAgent().agent), "sc:0", step("When", text), 1, testSink), "error", text);
     assert.equal(events().filter((e) => e.type === "step_done").at(-1).errorType, "engine_error", text);
   }
-  assert.equal(await runStep(fakeAgent().agent, fakePage, "sc:0", step("When", "抛出网络断线"), 1, testSink), "error");
+  assert.equal(await runStep(await desktopSeam(fakeAgent().agent), "sc:0", step("When", "抛出网络断线"), 1, testSink), "error");
   assert.equal(events().filter((e) => e.type === "step_done").at(-1).errorType, "network_error");
 });
 
@@ -222,13 +295,13 @@ test("runStep: 命中多条模式（使用方宽模式与内建导航同时命�
     { description: "测试：与内建导航撞车的宽模式", example: "Given https://ssl.example/" });
   const { agent, calls } = fakeAgent();
   gotoCalls.length = 0;
-  assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", "https://ssl.example/a"), 1, testSink), "error");
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("Given", "https://ssl.example/a"), 1, testSink), "error");
   assert.deepEqual(calls, []); assert.deepEqual(gotoCalls, []);
   const ev = events().filter((e) => e.type === "step_done").at(-1);
   assert.equal(ev.errorType, "engine_error");
   assert.match(ev.message, /命中多条确定性模式/);
   // 消息有界且不带异常类型名（与其它失败同一条归一化，ADR 0042 / 0039）：超长地址撞车时也只留一行、封顶 300 码点
-  assert.equal(await runStep(agent, fakePage, "sc:0", step("Given", "https://ssl.example/" + "a".repeat(1000)), 1, testSink), "error");
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("Given", "https://ssl.example/" + "a".repeat(1000)), 1, testSink), "error");
   const long = events().filter((e) => e.type === "step_done").at(-1).message as string;
   assert.ok([...long].length <= 300, `${[...long].length} 码点`); assert.doesNotMatch(long, /^Deterministic/);
 });
@@ -236,7 +309,7 @@ test("runStep: 命中多条模式（使用方宽模式与内建导航同时命�
 test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent();
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"搜索 OpenAI"'), 1, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("When", '"搜索 OpenAI"'), 1, testSink);
   assert.equal(r, "passed");
   assert.deepEqual(calls, ["aiAct"]);
   const ev = events().find((e) => e.type === "step_done");
@@ -248,7 +321,7 @@ test("runStep: When 自然语言 → 走 aiAct、passed、无 votes", async () =
 test("runStep: Then votesN=1 单票 yes → passed，带 votes{1,1}", async () => {
   const { runStep } = await importMod();
   const { agent, calls } = fakeAgent([true]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 1, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("Then", '"对吗"'), 1, testSink);
   assert.equal(r, "passed");
   assert.equal(calls.length, 1);
   const ev = events().find((e) => e.type === "step_done");
@@ -258,7 +331,7 @@ test("runStep: Then votesN=1 单票 yes → passed，带 votes{1,1}", async () =
 test("runStep: Then votesN=3 取 2/3 多数 → passed", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false, true]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("Then", '"对吗"'), 3, testSink);
   assert.equal(r, "passed");  // yes=2 > 3/2=1.5
   assert.deepEqual(events().find((e) => e.type === "step_done").votes, { yes: 2, total: 3 });
 });
@@ -266,7 +339,7 @@ test("runStep: Then votesN=3 取 2/3 多数 → passed", async () => {
 test("runStep: Then votesN=3 仅 1/3 → failed/assertion_failed", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false, false]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("Then", '"对吗"'), 3, testSink);
   assert.equal(r, "failed");  // yes=1 不 > 1.5
   const ev = events().find((e) => e.type === "step_done");
   assert.equal(ev.status, "failed");
@@ -276,7 +349,7 @@ test("runStep: Then votesN=3 仅 1/3 → failed/assertion_failed", async () => {
 test("runStep: Then votesN=2 平票 1/2 → failed（yes>1 不成立，平票算失败）", async () => {
   const { runStep } = await importMod();
   const { agent } = fakeAgent([true, false]);
-  const r = await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 2, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("Then", '"对吗"'), 2, testSink);
   assert.equal(r, "failed");  // yes=1 不 > 2/2=1 —— 偶数平票算失败（ADR 0028 已记的有意设计）
 });
 
@@ -284,7 +357,7 @@ test("runStep: Then votesN=2 平票 1/2 → failed（yes>1 不成立，平票算
 test("runStep: aiAct 抛网络瞬时异常 → error/network_error（仅分类、不重试）", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { const e: any = new Error("reset"); e.code = "ECONNRESET"; throw e; } } as any;
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事"'), 1, testSink);
   assert.equal(r, "error");
   const ev = events().find((e) => e.type === "step_done");
   assert.equal(ev.status, "error");
@@ -294,7 +367,7 @@ test("runStep: aiAct 抛网络瞬时异常 → error/network_error（仅分类�
 test("runStep: aiAct 抛非网络异常 → error/engine_error", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { throw new Error("AI boom"); } } as any;
-  const r = await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
+  const r = await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事"'), 1, testSink);
   assert.equal(r, "error");
   assert.equal(events().find((e) => e.type === "step_done").errorType, "engine_error");
 });
@@ -308,7 +381,7 @@ test("runStep: 多行超长异常 → message 只留首个非空行、折叠空�
   const err: any = new Error(`\n  ${firstLine}  \n=========== logs ===========\n  navigating to "https://x"\n`);
   err.name = "TimeoutError";
   const agent = { aiAct: async () => { throw err; } } as any;
-  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink), "error");
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事"'), 1, testSink), "error");
   const msg = events().find((e) => e.type === "step_done").message as string;
   assert.equal(msg.includes("\n"), false, "原因须是一行");
   assert.equal(msg.includes("logs"), false, "首个非空行之后的 call log 不进 message");
@@ -319,7 +392,7 @@ test("runStep: 多行超长异常 → message 只留首个非空行、折叠空�
 test("runStep: 异常 message 的内部空白折叠成单空格", async () => {
   const { runStep } = await importMod();
   const agent = { aiAct: async () => { throw new Error("locator   resolved \t to  2 elements"); } } as any;
-  await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink);
+  await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事"'), 1, testSink);
   assert.equal(events().find((e) => e.type === "step_done").message, "Error: locator resolved to 2 elements");
 });
 
@@ -343,7 +416,7 @@ test("runScenario: 上游 step error 后短路后续、发 step_skipped、不再
     step("When", '"再操作"', 1),          // 应被短路（不调 aiAct）
     step("Then", '"页面有预期内容"', 2),   // 应被短路（不调 aiBoolean）
   ];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+  const statuses = await runScenario(await desktopSeam(agent), "sc:0", steps, 1,
     { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 提前上传 no-op（这些 fake agent 无 reportFile、提前上传跳过）
   // 上游 error 后：只调了 1 次 aiAct（那个失败的），后续 AI 一次没调
   assert.equal(counts().aiActCalls, 1);
@@ -360,7 +433,7 @@ test("runScenario: 全 passed 时不短路、无 step_skipped", async () => {
   const { runScenario } = await importMod();
   const { agent } = fakeAgent([true]);  // Then 单票 yes
   const steps = [step("When", '"做事"', 0), step("Then", '"对吗"', 1)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+  const statuses = await runScenario(await desktopSeam(agent), "sc:0", steps, 1,
     { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 提前上传 no-op（这些 fake agent 无 reportFile、提前上传跳过）
   assert.deepEqual(statuses, ["passed", "passed"]);
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
@@ -371,7 +444,7 @@ test("runScenario: failed 不触发短路（判据锁 error，非 failed）", as
   const { runScenario } = await importMod();
   const { agent } = fakeAgent([false, true]);  // 第一个 Then failed，第二个 Then passed
   const steps = [step("Then", '"对吗A"', 0), step("Then", '"对吗B"', 1)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1,
+  const statuses = await runScenario(await desktopSeam(agent), "sc:0", steps, 1,
     { snapshotReport: async () => {} } as any, { mtime: -1 }, testSink);  // 提前上传 no-op（这些 fake agent 无 reportFile、提前上传跳过）
   assert.deepEqual(statuses, ["failed", "passed"]);  // failed 不短路，第二步照常执行
   assert.equal(events().filter((e) => e.type === "step_skipped").length, 0);
@@ -392,7 +465,7 @@ function costAgent(perCallTokens: number[]) {
 test("runStep: Then votesN=3 的 token 成本是三票之和（不是只算最后一票）", async () => {
   const { runStep } = await importMod();
   const agent = costAgent([100, 200, 300]);  // 三票各 100/200/300
-  await runStep(agent, fakePage, "sc:0", step("Then", '"对吗"'), 3, testSink);
+  await runStep(await desktopSeam(agent), "sc:0", step("Then", '"对吗"'), 3, testSink);
   const ev = events().find((e) => e.type === "step_done");
   assert.deepEqual(ev.cost, { tokens: 600 });  // 100+200+300，非旧逻辑的 300
 });
@@ -400,10 +473,10 @@ test("runStep: Then votesN=3 的 token 成本是三票之和（不是只算最�
 test("runStep: 连续两 step token 各算各的增量（不双计前一 step）", async () => {
   const { runStep } = await importMod();
   const agent = costAgent([100, 200]);  // step1 用 100，step2 用 200（metrics 累计不清零）
-  await runStep(agent, fakePage, "sc:0", step("When", '"做事1"', 0), 1, testSink);
+  await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事1"', 0), 1, testSink);
   const ev1 = events().find((e) => e.type === "step_done");
   assert.deepEqual(ev1.cost, { tokens: 100 });
-  await runStep(agent, fakePage, "sc:0", step("When", '"做事2"', 1), 1, testSink);
+  await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事2"', 1), 1, testSink);
   // 第二 step 只算增量 200，不把 step1 的 100 双计进来
   const ev2 = events().reverse().find((e) => e.type === "step_done" && e.stepIndex === 1);
   assert.deepEqual(ev2.cost, { tokens: 200 });
@@ -413,12 +486,24 @@ test("runStep: 连续两 step token 各算各的增量（不双计前一 step）
 // ---- PlaywrightAgent 构造项：forceChromeSelectRendering 必须显式关 ----
 // SDK 1.10.0 起这项默认开，注入样式那步在 CDP 远连的 AgentCore 云端浏览器上会 "Execution context was
 // destroyed"、每 run 往 stderr 打一段报错栈；功能面我们用不到 → 固定为显式 false（默认值回来了这条会红）。
+// 这一项只属于桌面：共用构造项里没有它，由桌面实现在构造 PlaywrightAgent 时加上（ADR 0052 决策 7）。
 test("agentOpts: forceChromeSelectRendering 显式 false（CDP 远连浏览器上它只是噪声）", async () => {
   const saved = process.env.AWS_REGION;
-  process.env.AWS_REGION = "us-east-1";  // agentOpts 里的 modelConfig() 会求 region（缺则 fail-loud）
+  process.env.AWS_REGION = "us-east-1";  // sharedAgentOpts 里的 modelConfig() 会求 region（缺则 fail-loud）
   try {
-    const { agentOpts } = await importMod();
-    assert.equal(agentOpts().forceChromeSelectRendering, false);
+    const { sharedAgentOpts } = await importMod();
+    const { createDesktopSurface } = await import("./surface-desktop.mjs");
+    const shared = sharedAgentOpts();
+    assert.equal("forceChromeSelectRendering" in shared, false, "共用构造项不带桌面专属的这一项");
+    assert.equal("replanningCycleLimit" in shared, false, "桌面不传重规划上限（由 SDK 按同名 env 自行处理）");
+    let got: any;
+    const surface = createDesktopSurface(surfaceDeps({ agentOpts: shared }),
+      desktopHooks({}, fakePage, { createAgent: (_page: unknown, opts: unknown) => { got = opts; return {}; } }));
+    assert.ok((await surface.acquire()).ready);
+    assert.equal(got.forceChromeSelectRendering, false);
+    assert.equal(got.generateReport, shared.generateReport, "共用项原样带上");
+    assert.equal(got.persistExecutionDump, shared.persistExecutionDump);
+    assert.equal("replanningCycleLimit" in got, false);
   } finally {
     if (saved === undefined) delete process.env.AWS_REGION; else process.env.AWS_REGION = saved;
   }
@@ -450,7 +535,7 @@ test("runScenario: 每变化 step 后提前上传 report（snapshot overwrite）
   } as any;
   const { snaps, uploader } = spyUploader();
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
-  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
+  await runScenario(await desktopSeam(agent), "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 2, "两个 AI step 各提前上传一次（report 每步都变）");
   assert.ok(snaps.every((p) => p === rf), "提前上传的都是同一 reportFile（overwrite 同 key）");
 });
@@ -468,7 +553,7 @@ test("runScenario: 提前上传失败（snapshotReport 抛）被吞、不打断 
   } as any;
   const { snaps, uploader } = spyUploader(true);  // snapshotReport 每次抛
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1), step("When", '"c"', 2)];
-  const statuses = await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
+  const statuses = await runScenario(await desktopSeam(agent), "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   // 提前上传每步都抛，但被吞：三步全部运行完、全 passed（statuses 完整），提前上传也每步都试过（snaps 三次）
   assert.deepEqual(statuses, ["passed", "passed", "passed"], "提前上传失败不影响 step 执行结果");
   assert.equal(snaps.length, 3, "每步都试了提前上传（虽都抛，被吞后继续）");
@@ -481,7 +566,7 @@ test("runScenario: reportFile 空窗（首步未置）→ 跳过提前上传", a
     aiAct: async () => {},
   } as any;
   const { snaps, uploader } = spyUploader();
-  await runScenario(agent, fakePage, "sc:0", [step("When", '"a"', 0)], 1, uploader, { mtime: -1 }, testSink);
+  await runScenario(await desktopSeam(agent), "sc:0", [step("When", '"a"', 0)], 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 0, "reportFile 空 → 不提前上传");
 });
 
@@ -494,7 +579,7 @@ test("runScenario: report mtime 不变（确定性步不写 report）→ 不重�
   const agent = { reportFile: rf, aiAct: async () => {} } as any;  // aiAct 不改 report（mtime 不变）
   const { snaps, uploader } = spyUploader();
   const steps = [step("When", '"a"', 0), step("When", '"b"', 1)];
-  await runScenario(agent, fakePage, "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
+  await runScenario(await desktopSeam(agent), "sc:0", steps, 1, uploader, { mtime: -1 }, testSink);
   assert.equal(snaps.length, 1, "首步提前上传一次；第二步 mtime 未变 → 去重跳过");
 });
 
@@ -532,7 +617,7 @@ test("interruptSnapshot: 提前上传失败 → 吞掉、不抛（best-effort，
 // 造带 order 记录的 spy deps；断言 cleanup 排在 snapshotReport 与截图队列排空之前（会话释放优先，那两件
 // best-effort、不延迟它）。drained=false 模拟「预算内没排空」→ 该记一行。
 function shutdownSpy(opts: {
-  cleanupFailed?: boolean; reportFile?: string | null; inflight?: boolean; drained?: boolean;
+  cleanupFailed?: boolean; reportFile?: string | null; drained?: boolean;
 } = {}) {
   const order: string[] = [];
   const logs: string[] = [];
@@ -540,9 +625,6 @@ function shutdownSpy(opts: {
   // 用 "reportFile" in opts 区分「未传→默认有 report」vs「显式传 null→空窗」（?? 对 null 也回退、会吞掉空窗意图）
   const rf = "reportFile" in opts ? opts.reportFile : "/tmp/run/report.html";
   const deps = {
-    inflightPending: () => opts.inflight ?? false,
-    settleMs: 1,
-    sleep: async (_ms: number) => { order.push("sleep"); },
     cleanup: async () => { order.push("cleanup"); },
     uploader: {
       snapshotReport: async (_p: string) => { order.push("snapshot"); },
@@ -565,12 +647,50 @@ test("shutdownSequence: cleanup 先于中断提前上传（会话释放优先铁
   assert.equal(code, 0, "cleanup 未失败 → 退出码 0");
 });
 
-test("shutdownSequence: 在途窗口兜底 → sleep 在 cleanup 之前", async () => {
-  const { shutdownSequence } = await importMod();
-  const { order, deps } = shutdownSpy({ inflight: true });
-  await shutdownSequence(deps);
-  assert.deepEqual(order, ["sleep", "cleanup", "snapshot", "drain"],
-    "inflight → 先等在途 settle，再 cleanup，再提前上传，再排空截图队列");
+// 在途窗口兜底（ADR 0028；ADR 0051 决策 5 桌面收尾的「等在途 Start」一段）住在桌面接缝的 interrupt 释放里：shutdownSequence 的
+// cleanup 就是它。Start 在途时先等一小段、让会话 id 落进待清理集再 Stop；到点仍未返回即发一对 attempted 事件、退出码为 1。
+test("桌面 interrupt 释放：Start 在途、等待窗口内返回 → 先等再 Stop，这个会话成对 confirmed（不等就会漏掉它）", async () => {
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const trace: string[] = []; const sessionEvents: any[] = [];
+  let releaseStart: (() => void) | undefined;
+  const core = fakeAgentCore({ trace });
+  const lateClient = { send: async (cmd: any) => {
+    if (cmd instanceof StartBrowserSessionCommand) await new Promise<void>((r) => { releaseStart = r; });
+    return await core.client.send(cmd);
+  } };
+  const surface = createDesktopSurface(surfaceDeps({ emit: async (e: any) => { sessionEvents.push(e); trace.push(`emit:${e.type}`); } }),
+    desktopHooks({}, fakePage, { client: lateClient, settleMs: 200 }));
+  const acquiring = surface.acquire().catch(() => undefined);
+  await new Promise((r) => setTimeout(r, 5));
+  const released = surface.release("interrupt");
+  setTimeout(() => releaseStart!(), 20);  // 在等待窗口（200ms）内返回
+  const outcome = await released;
+  await acquiring;
+  assert.deepEqual(trace.slice(0, 4), [`start:${core.names[0]}`, "emit:session_opened", "stop:sess-1", "emit:session_closed"]);
+  assert.equal(sessionEvents.find((e) => e.type === "session_closed").release, "confirmed");
+  assert.equal(outcome.releaseFailed, false);
+});
+
+test("桌面 interrupt 释放：Start 在途、等待窗口内仍未返回 → 一对 attempted（sessionId 为 null、name 是请求名），释放失败（退出码 1）", async () => {
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const sessionEvents: any[] = [];
+  const core = fakeAgentCore({ startHangs: () => true });
+  const surface = createDesktopSurface(surfaceDeps({ emit: async (e: any) => { sessionEvents.push(e); } }),
+    desktopHooks({}, fakePage, { client: core.client, settleMs: 20 }));
+  void surface.acquire();
+  await new Promise((r) => setTimeout(r, 5));
+  const outcome = await surface.release("interrupt");
+  const name = core.names[0];
+  assert.match(name, /^gherkai:20260629T141207Z-a3f9c1:[0-9a-f]{16}:1:features%2Fa\.feature$/);
+  assert.deepEqual(sessionEvents, [
+    { type: "session_opened", scopeId: SCOPE.id, sessionId: null, name, origin: "attempted" },
+    { type: "session_closed", scopeId: SCOPE.id, sessionId: null, name, release: "unconfirmed" },
+  ]);
+  assert.equal(outcome.releaseFailed, true, "发过 attempted 事件即退出码 1（ADR 0051 决策 5）");
+  assert.deepEqual(core.stops, [], "没有拿到会话 id，无从 Stop");
+  // 重入（信号与主流程的出口先后调用）不再发第二对
+  await surface.release("interrupt");
+  assert.equal(sessionEvents.length, 2);
 });
 
 test("shutdownSequence: cleanupFailed → 退出码 1（泄漏可观测）", async () => {
@@ -641,11 +761,11 @@ test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ �
 });
 
 
-// ---- makeGuardedCleanup（cleanup 的重入守卫，ADR 0024 终止契约）----
+// ---- makeGuardedCleanup（cleanup 的重入守卫，ADR 0024 终止契约；随桌面实现住在 surface-desktop.mts）----
 // 守卫记的是「在途 promise」而非一个布尔：重入者要等在途那次执行完（不可提前返回到「会话其实还没释放」），
 // 且丢弃语义那次结束后若仍有未确认释放的会话，final 语义的重入者须再清一次（否则泄漏永不被记账）。
 test("makeGuardedCleanup: 在途时重入 → 等在途那次执行完才 resolve，且只清理一次", async () => {
-  const { makeGuardedCleanup } = await importMod();
+  const { makeGuardedCleanup } = await import("./surface-desktop.mjs");
   let runs = 0;
   let finished = false;
   let release: (() => void) | undefined;
@@ -667,7 +787,7 @@ test("makeGuardedCleanup: 在途时重入 → 等在途那次执行完才 resolv
 });
 
 test("makeGuardedCleanup: 在途是丢弃语义、结束后仍有未释放会话 → final 重入者再清一次", async () => {
-  const { makeGuardedCleanup } = await importMod();
+  const { makeGuardedCleanup } = await import("./surface-desktop.mjs");
   const seen: boolean[] = [];
   let leftovers = true;                       // 丢弃那次没把会话收干净
   let release: (() => void) | undefined;
@@ -686,7 +806,7 @@ test("makeGuardedCleanup: 在途是丢弃语义、结束后仍有未释放会话
 });
 
 test("makeGuardedCleanup: 在途已把会话全部释放 → final 重入者不再清一次", async () => {
-  const { makeGuardedCleanup } = await importMod();
+  const { makeGuardedCleanup } = await import("./surface-desktop.mjs");
   let runs = 0;
   const guard = makeGuardedCleanup(async () => { runs++; }, () => false);
   await guard.cleanup(true);
@@ -695,7 +815,7 @@ test("makeGuardedCleanup: 在途已把会话全部释放 → final 重入者不�
 });
 
 test("makeGuardedCleanup: reset() 忘掉在途记忆 → 可再清一次（建连重试分支）", async () => {
-  const { makeGuardedCleanup } = await importMod();
+  const { makeGuardedCleanup } = await import("./surface-desktop.mjs");
   const seen: boolean[] = [];
   const guard = makeGuardedCleanup(async (discardAttempt: boolean) => { seen.push(discardAttempt); }, () => false);
   await guard.cleanup(true);
@@ -757,10 +877,10 @@ test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只�
 // 且「不建会话、不读 stdin、零费用」只有真实运行才看得见——本测试不喂 stdin、不给 AWS 凭证，照样该以退出码 0 结束。
 // 起源码形态的 bin 要有 TS 转译能力：`--import tsx` 传绝对 URL（与 cwd 无关），不靠 Node 原生 type stripping
 // （那要 Node ≥22.18，而包只声明 >=22——同 user-steps.test.mts 的真实运行层）。
-test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 targets/deterministic_steps/model_id/session_warmup；min_grace_s 是收尾各段预算之和加余量、当前为 31s", async () => {
-  const {
-    INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS, QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS,
-  } = await importMod();
+test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 targets/deterministic_steps/model_id/session_warmup；min_grace_s 是两条收尾路径各自之和的较大者、当前为 63.5s", async () => {
+  const { QUEUE_DRAIN_EXIT_MS, MIN_GRACE_MARGIN_MS } = await importMod();
+  const { INFLIGHT_SETTLE_MS, STOP_SESSION_BUDGET_MS, BROWSER_CLOSE_BUDGET_MS } = await import("./surface-desktop.mjs");
+  const { MAX_SESSION_S, FINALIZE_AWAIT_CREATE_MS, FINALIZE_RECONCILE_MS, FINALIZE_RELEASE_MS } = await import("../device/limits.mjs");
   const { UPLOAD_TIMEOUT_MS } = await import("../lib/artifact-upload.mjs");
   // 自报的 model_id 得与实际运行中喂给 SDK 的模型名同源（modelConfig() 的 MIDSCENE_MODEL_NAME），故从那个模块取真值比对、
   // 不在测试里写第二份字面量——写死了就只能证明「自述没变」，证不了「自述就是实际用的模型」。
@@ -782,9 +902,16 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 tar
     ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "session_warmup", "targets"], `键集：${raw}`);
   assert.equal(got.schema_version, 1);
   assert.equal(got.session_warmup, true);  // 支持隧道会话预热（ADR 0051 决策 13）
-  // 测试目标（ADR 0049 决策 1、2）：设备模块落地前只显式声明桌面网页，不带 max_session_s；键是协议面的 snake_case
-  // （ui_kinds，不是注册面的 uiKinds），与 Nova 侧逐字相同——CLI 的契约校验对两侧同一道，驼峰会被判不合契约
-  assert.deepEqual(got.targets, [{ device: "desktop", ui_kinds: ["web"] }], raw);
+  // 测试目标（ADR 0049 决策 1、2）：桌面网页，加 Android 与 iOS 的网页与应用；设备条目带由设备常量算出的 max_session_s，桌面
+  // 条目不带。键是协议面的 snake_case（ui_kinds / max_session_s，不是注册面的 uiKinds），与 Nova 侧形状相同——CLI 的契约校验
+  // 对两侧同一道，驼峰会被判不合契约
+  const targets = [
+    { device: "desktop", ui_kinds: ["web"] },
+    { device: "android", ui_kinds: ["web", "app"], max_session_s: MAX_SESSION_S },
+    { device: "ios", ui_kinds: ["web", "app"], max_session_s: MAX_SESSION_S },
+  ];
+  assert.deepEqual(got.targets, targets, raw);
+  assert.equal(MAX_SESSION_S, 8880, "设备会话上限是 9000 减 120（ADR 0049 决策 4）");
   assert.equal(got.engine, "midscene");
   // model_id 是起 job 时交给 Midscene SDK 的那个模型名（ADR 0036「5.」：doctor 据此显示当前模型）。
   assert.equal(typeof got.model_id, "string", `model_id 该是串：${raw}`);
@@ -796,8 +923,9 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 tar
     `清单该非空（内建脚手架至少一条）：${raw}`);
   for (const e of got.deterministic_steps) {
     assert.deepEqual(Object.keys(e).sort(), ["description", "example", "keywords", "pattern", "targets"], `清单项形状：${JSON.stringify(e)}`);
-    // 条目的目标由句柄推出（ADR 0050 决策 1）：只有 playwright 句柄 → 桌面网页；原样报出、不与顶层求交（ADR 0049 决策 3）
-    assert.deepEqual(e.targets, [{ device: "desktop", ui_kinds: ["web"] }], JSON.stringify(e));
+    // 条目的目标由句柄推出（ADR 0050 决策 1）：内建导航有 playwright 句柄与两个 webdriver 条目（网页、应用）→ 桌面网页加两种设备
+    // 的网页与应用；原样报出、不与顶层求交（ADR 0049 决策 3）
+    assert.deepEqual(e.targets, targets.map(({ device, ui_kinds }) => ({ device, ui_kinds })), JSON.stringify(e));
     for (const k of ["pattern", "description", "example"]) {
       assert.equal(typeof e[k], "string", `${k} 该是串：${JSON.stringify(e)}`);
       assert.ok(e[k].length > 0, `${k} 不该空：${JSON.stringify(e)}`);
@@ -807,14 +935,19 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 tar
   assert.deepEqual(got.deterministic_steps.map((e: any) => e.keywords), [["Given", "When"]], raw);
   assert.ok(got.deterministic_steps.every((e: any) => !e.pattern.includes("页面地址")), raw);
   // 自报值必须**由收尾预算常量算出**（改某段预算、下限自动跟着走；见 run-scope.mts minGraceSeconds 注释）——
-  // 故这里复算而不是照抄一个数。**它挡的是漂移、不是写法**：某段预算改了而出口没跟着走即红；改成与今值相等的
-  // 字面量 31 仍然绿（那一格靠下面的绝对值断言 + code review 挡）。
-  const expected = (INFLIGHT_SETTLE_MS + STOP_SESSION_BUDGET_MS + BROWSER_CLOSE_BUDGET_MS
+  // 故这里复算而不是照抄一个数：两条收尾路径各自求和、取较大者（ADR 0049 决策 5、ADR 0051 决策 5：一个 job 只走其中一条，
+  // 不相加）。**它挡的是漂移、不是写法**：某段预算改了而出口没跟着走即红；改成与今值相等的字面量仍然绿（那一格靠下面的
+  // 绝对值断言 + code review 挡）。
+  const desktop = (INFLIGHT_SETTLE_MS + STOP_SESSION_BUDGET_MS + BROWSER_CLOSE_BUDGET_MS
     + UPLOAD_TIMEOUT_MS + QUEUE_DRAIN_EXIT_MS + MIN_GRACE_MARGIN_MS) / 1000;
-  assert.equal(got.min_grace_s, expected, "自报的下限得是那些预算常量的和，不是另写的字面量");
-  // 再固定一次绝对值：当前各段预算下就是 31s。它变了意味着 grace 下限变了（ADR 0024 grace 硬约束的红线，
-  // 且组合根/task-def stopTimeout 侧的比对结论随之变），要有意识地改、不该被某段预算的顺手调整带偏。
-  assert.equal(got.min_grace_s, 31, `当前行为是 31s，实际 ${got.min_grace_s}s`);
+  const device = (FINALIZE_AWAIT_CREATE_MS + FINALIZE_RECONCILE_MS + FINALIZE_RELEASE_MS
+    + UPLOAD_TIMEOUT_MS + QUEUE_DRAIN_EXIT_MS + MIN_GRACE_MARGIN_MS) / 1000;
+  assert.equal(got.min_grace_s, Math.max(desktop, device), "自报的下限得是两条收尾路径各自之和的较大者，不是另写的字面量");
+  // 再固定一次绝对值：桌面路径 31s、设备路径 63.5s，取 63.5s（不取整）。它变了意味着 grace 下限变了（ADR 0024 grace 硬约束的
+  // 红线，且组合根/task-def stopTimeout 侧的比对结论随之变），要有意识地改、不该被某段预算的顺手调整带偏。
+  assert.equal(desktop, 31, `桌面收尾之和当前是 31s，实际 ${desktop}s`);
+  assert.equal(got.min_grace_s, 63.5, `当前行为是 63.5s，实际 ${got.min_grace_s}s`);
+  assert.ok(got.min_grace_s < 120, "低于 Fargate 停止宽限的硬上限 120 秒（ADR 0049 决策 5）");
 });
 
 
@@ -863,7 +996,7 @@ test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 
     aiBoolean: async () => true,
     get metrics() { return { totalTokens }; },
   } as any;
-  assert.equal(await runStep(agent, fakePage, "sc:0", step("When", '"做事"'), 1, testSink), "error");
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("When", '"做事"'), 1, testSink), "error");
   const ev = events().find((e) => e.type === "step_done");
   assert.equal(ev.status, "error");
   assert.deepEqual(ev.cost, { tokens: 150 });  // 曾整块丢掉 → total_tokens 低报
@@ -871,16 +1004,16 @@ test("runStep: aiAct 抛异常 → error 的 step_done 仍带本 step 的 token 
 
 
 // ---- 模型选择（ADR 0044 决策 2/3）：喂 SDK 的家族键 + MIDSCENE_MODEL_ID 覆盖 + 坏配置在启动期就被挡下 ----
-// 家族键这条是纯逻辑（agentOpts 不碰 page/browser），env 那两条**必须真实运行子进程**：MODEL 在模块 import 时定值
+// 家族键这条是纯逻辑（sharedAgentOpts 不碰 page/browser），env 那两条**必须真实运行子进程**：MODEL 在模块 import 时定值
 // （模块级读 env），同进程里改 process.env 再 import 拿不到新值——「env 真的贯通到自述与 SDK 配置」只有另起
 // 一个带 env 的进程才照得出。
-test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一家族硬开关不留）", async () => {
+test("sharedAgentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一家族硬开关不留）", async () => {
   const savedRegion = process.env.AWS_REGION;
   process.env.AWS_REGION = "us-east-1";  // modelConfig() 会求 region（缺则 fail-loud）
   try {
-    const { agentOpts } = await importMod();
+    const { sharedAgentOpts } = await importMod();
     const { modelFamily, MODEL } = await import("../lib/agentcore-sigv4.mjs");
-    const cfg = agentOpts().modelConfig as Record<string, string>;
+    const cfg = sharedAgentOpts().modelConfig as Record<string, string>;
     // 家族与模型名同源于 lib/agentcore-sigv4（不在这里写第二份字面量，否则测的只是「没变」而非「同源」）
     assert.equal(cfg.MIDSCENE_MODEL_FAMILY, modelFamily(), "家族得由推断/显式 env 决定");
     assert.equal(cfg.MIDSCENE_MODEL_NAME, MODEL);
@@ -888,7 +1021,7 @@ test("agentOpts: modelConfig 喂 SDK 的是 MIDSCENE_MODEL_FAMILY（旧的单一
     const savedFamily = process.env.MIDSCENE_MODEL_FAMILY;
     process.env.MIDSCENE_MODEL_FAMILY = "gpt-6";
     try {
-      assert.equal((agentOpts().modelConfig as Record<string, string>).MIDSCENE_MODEL_FAMILY, "gpt-6",
+      assert.equal((sharedAgentOpts().modelConfig as Record<string, string>).MIDSCENE_MODEL_FAMILY, "gpt-6",
                    "写死家族字面量会让换了模型仍按旧家族驱动（静默劣化）");
     } finally {
       if (savedFamily === undefined) delete process.env.MIDSCENE_MODEL_FAMILY;
@@ -936,6 +1069,56 @@ test("模型家族推不出 → worker 启动期即非零退出，连自述入�
   assert.equal(/[{[]/.test(out), false, `stdout 不该有 JSON 载荷：${out}`);
 });
 
+// 重规划上限覆盖键的启动期校验（ADR 0044 决策 2）：非法值在读 job 之后、建界面接缝之前即报错，桌面 job 同样校验（只有设备把
+// 取值经构造项传给 SDK）。子进程与宿主隔离：不继承宿主的 AWS 凭证与配置，凭证给假值、AWS 端点指向本机一个已关闭的端口——
+// 校验若排到了建会话之后，请求也只会在本机被拒绝（按建连重试耗尽以退出码 80 结束），不产生任何 AWS 调用。
+test("MIDSCENE_REPLANNING_CYCLE_LIMIT 非法 → 读 job 之后、建会话之前即以退出码 1 结束并点名该键，不发任何事件（桌面 job 同样校验）", { timeout: 120_000 }, async () => {
+  const net = await import("node:net");
+  const server = net.createServer();
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const { port } = server.address() as import("node:net").AddressInfo;
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  const fixture = path.resolve(import.meta.dirname, "..", "..", "..", "fixtures", "job-lines.json");
+  const job = { ...JSON.parse(fs.readFileSync(fixture, "utf-8")).jobs.desktop, engine: "midscene" };
+  assert.equal(job.target.device, "desktop");
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-replanning-limit-"));
+  try {
+    const env: Record<string, string> = {};
+    for (const k of ["PATH", "TMPDIR", "LANG", "LC_ALL"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+    Object.assign(env, {
+      HOME: dir,
+      AWS_CONFIG_FILE: path.join(dir, "aws-config-absent"),
+      AWS_SHARED_CREDENTIALS_FILE: path.join(dir, "aws-credentials-absent"),
+      AWS_EC2_METADATA_DISABLED: "true",
+      AWS_REGION: "us-east-1",
+      AWS_ACCESS_KEY_ID: "test-access-key",
+      AWS_SECRET_ACCESS_KEY: "test-secret-key",
+      AWS_ENDPOINT_URL: `http://127.0.0.1:${port}`,
+      MIDSCENE_RUN_DIR: path.join(dir, "midscene-run"),
+      RUN_ID: "20260629T141207Z-a3f9c1",  // 缺了它桌面接缝在构造期就会报错，这条断言就分不清是哪一项挡下的
+      MIDSCENE_REPLANNING_CYCLE_LIMIT: "0",
+    });
+    const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts")],
+      { env, cwd: dir, stdio: ["pipe", "pipe", "pipe"] });
+    const out: Buffer[] = []; const err: Buffer[] = [];
+    proc.stdout.on("data", (c) => out.push(c));
+    proc.stderr.on("data", (c) => err.push(c));
+    const code: number = await new Promise((resolve) => {
+      proc.on("close", resolve);
+      proc.stdin.end(JSON.stringify(job) + "\n");
+    });
+    const stdout = Buffer.concat(out).toString("utf-8");
+    const stderr = Buffer.concat(err).toString("utf-8");
+    // 1 是启动失败的退出码；校验没有生效时 job 会走进桌面建连，在本机被拒后以 80 结束
+    assert.equal(code, 1, stderr.slice(-1500));
+    assert.match(stderr, /MIDSCENE_REPLANNING_CYCLE_LIMIT/, `诊断得点名该键：${stderr}`);
+    // 没有 EVENTS_FD 时事件写 stdout：一条事件都没有，说明 scope_started 与会话事件都还没发生
+    assert.equal(/"type"\s*:/.test(stdout), false, `不该发出任何协议事件：${stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用任何 handler、走 AI 分支、不记 error；带多行参数也照样交给 AI（ADR 0050 决策 1；0049 决策 9）", async () => {
   const { runStep } = await importMod();
   const { deterministic, _snapshot, _restore, match } = await import("./deterministic.mjs");
@@ -946,7 +1129,7 @@ test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用�
   try {
     assert.ok(match("设备专用 x"), "文本确实命中这条模式");
     const { agent, calls } = fakeAgent();
-    assert.equal(await runStep(agent, fakePage, "sc:0", step("When", "设备专用 x"), 1, testSink), "passed");
+    assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("When", "设备专用 x"), 1, testSink), "passed");
     assert.deepEqual(calls, ["aiAct"]);  // 走了 AI
     assert.equal(called, 0);  // 没把 page 喂给 webdriver handler
     assert.equal(events().filter((e) => e.type === "step_done").at(-1).status, "passed");
@@ -954,7 +1137,7 @@ test("runStep: 命中只有 webdriver 句柄的 step → 桌面路径不调用�
     const instructions: string[] = [];
     const capturing = { aiAct: async (instr: string) => { instructions.push(instr); }, aiBoolean: async () => true } as any;
     const withDoc = { ...step("When", "设备专用 y"), argument: { kind: "docString", content: "多行正文" } };
-    assert.equal(await runStep(capturing, fakePage, "sc:0", withDoc, 1, testSink), "passed");
+    assert.equal(await runStep(await desktopSeam(capturing), "sc:0", withDoc, 1, testSink), "passed");
     assert.equal(instructions.length, 1);
     assert.match(instructions[0], /多行正文/);
     assert.equal(called, 0);
@@ -1013,4 +1196,606 @@ test("exitAfterFailure：建连重试耗尽且会话已释放 → 80 不发事�
   const other = new TypeError("x"); const trace3: string[] = [];
   await assert.rejects(exitAfterFailure(other, exitDeps({ trace: trace3 } as any)), (e) => e === other);
   assert.deepEqual(trace3, ["cleanup", "drain"]);
+});
+
+
+// ======== 界面接缝之上的主流程（ADR 0052 决策 2；ADR 0051 决策 4、5）========
+// 以下几组锁住 runStep 的固定七步、scope 级出口的事件序列与退出码、桌面会话事件的配对，以及原先只靠真实执行才看得见的 main 级
+// 次序（建连重试与网络专用退出码、释放先于中断兜底提前上传、释放先于 scope_done、scope_done 先于排空）。runScope 是 main 去掉
+// 进程 I/O 的那一层：事件出口、上传器、接缝工厂、信号挂载与退出都经 ScopeIo 注入。
+
+/** 记录调用序列的假上传器：只实现 runScope 与 evidence 用到的方法。 */
+function fakeUploader(trace: string[]): any {
+  return {
+    snapshotReport: async () => { trace.push("snapshotReport"); },
+    drain: async (ms: number) => { trace.push(`drain:${ms}`); return true; },
+    flushAndCleanup: async () => { trace.push("flush"); },
+    toReportRef: async (p: string) => `file://${p}`,
+    refFor: (p: string) => `file://${p}`,
+    enqueue: (paths: string[]) => { trace.push(`enqueue:${paths.map((p) => path.basename(p)).join(",")}`); },
+    snapshotLogs: async () => {},
+  };
+}
+
+/** runScope 的注入面。events 收全部事件（含接缝经 io.emit 发的会话事件），trace 同时记事件类型与上传器调用的先后。 */
+function scopeIo(createSurface: (deps: any) => Promise<any>, over: Record<string, unknown> = {}) {
+  const trace: string[] = [];
+  const events: any[] = [];
+  let handler: (() => void) | undefined;
+  let exited: number | undefined;
+  const io = {
+    emit: async (e: any) => { events.push(e); trace.push(`emit:${e.type}`); },
+    uploader: fakeUploader(trace),
+    warmupUrl: null as string | null,
+    createSurface,
+    installSignalHandler: (h: () => void) => { handler = h; },
+    exit: (code: number) => { exited = code; trace.push(`exit:${code}`); },
+    ...over,
+  };
+  return { io, trace, events, signal: () => handler!(), exited: () => exited };
+}
+
+function aJob(scenarios: Array<{ id: string; steps: any[] }>, target: { device: string; uiKind: string } = DESKTOP): any {
+  return {
+    schemaVersion: 1, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target, deviceRequest: null,
+    scenarios: scenarios.map((sc) => ({ name: sc.id, ...sc })),
+  };
+}
+
+/** 可选阻塞的假 agent：aiAct 走 gate（给了就等它放行），destroy 记一笔。 */
+function scopeAgent(opts: { gate?: Promise<void>; reportFile?: string; trace?: string[] } = {}): any {
+  return {
+    reportFile: opts.reportFile,
+    aiAct: async () => { opts.trace?.push("aiAct"); if (opts.gate) await opts.gate; },
+    aiBoolean: async () => true,
+    destroy: async () => { opts.trace?.push("destroy"); },
+  };
+}
+
+const types = (events: any[]) => events.map((e) => e.type);
+
+// ---- step 顺序契约（ADR 0052 决策 2 的七步；记录调用序列的假接缝）----
+
+/** 记录调用序列的假接缝（设备形态：快照带 step_kind）。over 覆盖个别成员以制造失败。 */
+function recordingSurface(trace: string[], over: Record<string, unknown> = {}): any {
+  return {
+    acquire: async () => ({ ready: true, agent: scopeAgent({ trace }), sessionId: "arn:s1" }),
+    warmup: async () => null,
+    sessionId: () => "arn:s1",
+    preScenarioCheck: async () => { trace.push("preScenarioCheck"); return null; },
+    preStep: async () => { trace.push("preStep"); return null; },
+    bindHandler: (selected: any) => {
+      trace.push("bindHandler");
+      return async (groups: Record<string, string>) => { trace.push("handler"); await selected.fn({}, groups); };
+    },
+    execute: async (run: (s: AbortSignal | undefined) => Promise<unknown>) => {
+      trace.push("execute");
+      try { return await run(new AbortController().signal); } finally { trace.push("execute:end"); }
+    },
+    navigate: async () => { trace.push("navigate"); },
+    readAddress: async (f: any) => { trace.push(`readAddress:${f.kind}:${f.status}`); return { url: null, url_missing: "no_web_context" }; },
+    restore: async (t: any) => { trace.push(`restore:${t.status}`); return null; },
+    snapshot: async (f: any, address: any) => {
+      trace.push(`snapshot:${f.kind}:${f.status}`);
+      return { snapshot: { url: address?.url ?? null, url_missing: address?.url_missing ?? "error", step_kind: f.kind }, failure: null };
+    },
+    release: async (mode: string) => { trace.push(`release:${mode}`); return { releaseFailed: false, reportRefs: [] }; },
+    ...over,
+  };
+}
+
+const ANDROID_WEB = { device: "android", uiKind: "web" };
+
+function evidenceHook(trace: string[]): any {
+  return { runDir: fs.mkdtempSync(path.join(os.tmpdir(), "seam-ev-")), scopeId: SCOPE.id, uploader: fakeUploader(trace), logFn: () => {} };
+}
+
+/** 设备形态的接缝对象与收集 step 事件的出口；事件也进 trace，便于断言与接缝调用的先后。 */
+function deviceSeam(trace: string[], over: Record<string, unknown> = {}, agent: any = scopeAgent({ trace })) {
+  const events: any[] = [];
+  const sink = { emit: async (e: any) => { events.push(e); trace.push(`emit:${e.type}`); } };
+  return { seam: { surface: recordingSurface(trace, over), agent, target: ANDROID_WEB, sessionLost: null } as any, sink, events };
+}
+
+test("step 顺序：step_started → step 前核对 → 执行窗口 → 读地址（暂定判定）→ 复原 → 快照（最终判定）→ evidence → step_done → 入队", async () => {
+  const { runStep } = await importMod();
+  const trace: string[] = [];
+  const { seam, sink, events } = deviceSeam(trace, {
+    snapshot: async (f: any) => {
+      trace.push(`snapshot:${f.kind}:${f.status}`);
+      const p = path.join(os.tmpdir(), "page-source-0.xml");
+      return { snapshot: { url: null, url_missing: "no_web_context", step_kind: f.kind, controls: null, controls_missing: "error",
+        page_source_path: p, page_source_truncated: false }, failure: null };
+    },
+  }, { ...scopeAgent(), aiAct: async () => { trace.push("aiAct"); throw new Error("AI boom"); } });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, evidenceHook(trace)), "error");
+  assert.deepEqual(trace, [
+    "emit:step_started", "preStep", "execute", "aiAct", "execute:end",
+    "readAddress:ai:error", "restore:error", "snapshot:ai:error", "emit:step_done", "enqueue:page-source-0.xml",
+  ]);
+  const done = events.find((e) => e.type === "step_done");
+  assert.equal(done.reportRefs[0].kind, "evidence", "设备 AI step 的 evidence 随 step_done 走");
+});
+
+test("step 顺序：没有 evidence 落点时不读地址、不采快照（只有核对、执行与复原）", async () => {
+  const { runStep } = await importMod();
+  const trace: string[] = [];
+  const { seam, sink } = deviceSeam(trace);
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink), "passed");
+  assert.deepEqual(trace, ["emit:step_started", "preStep", "execute", "aiAct", "execute:end", "restore:passed", "emit:step_done"]);
+});
+
+test("step 前核对失败 → 本 step 记 error（类别与消息取返回值），handler 与 AI 都不调；复原与快照照常执行", async () => {
+  const { runStep } = await importMod();
+  const trace: string[] = [];
+  const { seam, sink, events } = deviceSeam(trace, {
+    preStep: async () => { trace.push("preStep"); return { errorType: "engine_error", message: "未能切回原生界面" }; },
+  });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, evidenceHook(trace)), "error");
+  assert.ok(!trace.includes("execute") && !trace.includes("aiAct") && !trace.includes("handler"), trace.join(" "));
+  assert.deepEqual(trace.slice(0, 5), ["emit:step_started", "preStep", "readAddress:ai:error", "restore:error", "snapshot:ai:error"]);
+  const done = events.find((e) => e.type === "step_done");
+  assert.equal(done.errorType, "engine_error"); assert.equal(done.message, "未能切回原生界面");
+});
+
+test("复原失败 → 最终判定改 error、类别与消息取返回值；快照收到的是最终判定、读地址收到的是暂定判定", async () => {
+  const { runStep } = await importMod();
+  const trace: string[] = [];
+  const restoreMessage = "原判定为 passed；之后未能切回原生界面，后续 step 的截图坐标会错位";
+  const { seam, sink, events } = deviceSeam(trace, {
+    restore: async (t: any) => { trace.push(`restore:${t.status}`); return { errorType: "engine_error", message: restoreMessage }; },
+  });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, evidenceHook(trace)), "error");
+  assert.ok(trace.includes("readAddress:ai:passed") && trace.includes("restore:passed") && trace.includes("snapshot:ai:error"), trace.join(" "));
+  const done = events.find((e) => e.type === "step_done");
+  assert.equal(done.status, "error"); assert.equal(done.errorType, "engine_error"); assert.equal(done.message, restoreMessage);
+});
+
+test("结果未知（执行窗口以带标记的异常拒绝）→ engine_error、消息是标记里的整句，不进瞬时网络判定；复原收到这句作暂定消息", async () => {
+  const { runStep } = await importMod();
+  const { attachClassification } = await import("./surface.mjs");
+  const trace: string[] = [];
+  const unknown = "设备在等待时间内没有回应，这一步可能已执行也可能未执行";
+  let tentative: any;
+  const { seam, sink, events } = deviceSeam(trace, {
+    execute: async () => { throw attachClassification(Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }), { errorType: "engine_error", message: unknown }); },
+    restore: async (t: any) => { tentative = t; return null; },
+  });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink), "error");
+  const done = events.find((e) => e.type === "step_done");
+  assert.equal(done.errorType, "engine_error", "带标记的 ECONNRESET 不归 network_error（ADR 0052 决策 6）");
+  assert.equal(done.message, unknown);
+  assert.deepEqual(tentative, { status: "error", message: unknown });
+});
+
+test("会话丢失（标记 session_lost）→ step error、session_lost，接缝对象记下 scope 级终止状态", async () => {
+  const { runStep } = await importMod();
+  const { attachClassification } = await import("./surface.mjs");
+  const trace: string[] = [];
+  const lost = "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话";
+  const { seam, sink, events } = deviceSeam(trace, {
+    execute: async () => { throw attachClassification(new Error("UND_ERR_CLOSED"), { errorType: "session_lost", message: lost }); },
+  });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink), "error");
+  assert.equal(events.find((e) => e.type === "step_done").errorType, "session_lost");
+  assert.deepEqual(seam.sessionLost, { errorType: "session_lost", message: lost });
+});
+
+test("快照中发现会话丢失 → 判定改为 error / session_lost；其余采集失败不改判定", async () => {
+  const { runStep } = await importMod();
+  const trace: string[] = [];
+  const { seam, sink, events } = deviceSeam(trace, {
+    snapshot: async (f: any) => ({ snapshot: { url: null, url_missing: "error", step_kind: f.kind }, failure: { errorType: "session_lost", message: "会话没了" } }),
+  });
+  assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, evidenceHook(trace)), "error");
+  const done = events.find((e) => e.type === "step_done");
+  assert.equal(done.errorType, "session_lost"); assert.equal(done.message, "会话没了");
+  assert.equal(seam.sessionLost.errorType, "session_lost");
+});
+
+test("requires web_context 不满足：取句柄时同步抛出带标记的异常 → 记 capability_unavailable / engine_error，handler 与 AI 都不调", async () => {
+  const { runStep } = await importMod();
+  const { attachClassification } = await import("./surface.mjs");
+  const { deterministic, _snapshot, _restore } = await import("./deterministic.mjs");
+  const saved = _snapshot();
+  let called = 0;
+  deterministic("页面标题是 (?<t>.+)", { webdriver: { uiKinds: ["web"], requires: ["web_context"], handler: () => { called += 1; } } },
+    { description: "测试：需要网页上下文", example: "Then 页面标题是 x" });
+  try {
+    for (const failure of [
+      { errorType: "capability_unavailable", message: "这台设备不提供网页上下文" },
+      { errorType: "engine_error", message: "未能确认设备是否提供网页上下文" },
+    ] as const) {
+      const trace: string[] = [];
+      const { seam, sink, events } = deviceSeam(trace, {
+        bindHandler: (selected: any) => { trace.push(`bindHandler:${selected.requires.join(",")}`); throw attachClassification(new Error(failure.message), failure); },
+      });
+      assert.equal(await runStep(seam, "sc:0", step("Then", "页面标题是 x"), 1, sink), "error");
+      assert.ok(trace.includes("bindHandler:web_context"));
+      assert.ok(!trace.includes("execute") && !trace.includes("aiAct"), `不调 handler、不转 AI：${trace.join(" ")}`);
+      const done = events.find((e) => e.type === "step_done");
+      assert.deepEqual([done.errorType, done.message], [failure.errorType, failure.message]);
+    }
+    assert.equal(called, 0);
+  } finally {
+    _restore(saved);
+  }
+});
+
+test("step_kind：内建导航条目记 navigation（经注入的导航原语执行）；使用方 handler 里自己调导航仍记 deterministic；未命中记 ai", async () => {
+  const { runStep } = await importMod();
+  const { deterministic, _snapshot, _restore } = await import("./deterministic.mjs");
+  const { injectDeviceNavigate } = await import("./deterministic.steps.mjs");
+  const saved = _snapshot();
+  const navigated: string[] = [];
+  const revoke = injectDeviceNavigate(async (url) => { navigated.push(url); });
+  deterministic("打开首页", { webdriver: { uiKinds: ["web"], handler: async () => { navigated.push("handler"); } } },
+    { description: "测试：handler 自己导航", example: "Given 打开首页" });
+  try {
+    // 快照收到的 step_kind（复原失败让最终判定为 error，确定性与导航 step 才会采快照、产 evidence）
+    const kinds = async (text: string, keyword = "Given") => {
+      const trace: string[] = [];
+      const { seam, sink } = deviceSeam(trace, {
+        restore: async (t: any) => { trace.push(`restore:${t.status}`); return { errorType: "engine_error", message: "x" }; },
+      });
+      await runStep(seam, "sc:0", step(keyword, text), 1, sink, evidenceHook(trace));
+      return trace.filter((t) => t.startsWith("snapshot:")).map((t) => t.split(":")[1]);
+    };
+    assert.deepEqual(await kinds('"https://shop.example/"'), ["navigation"]);
+    assert.deepEqual(navigated, ["https://shop.example/"]);
+    assert.deepEqual(await kinds("打开首页"), ["deterministic"]);
+    assert.deepEqual(await kinds('"随便看看"', "When"), ["ai"]);
+  } finally {
+    revoke();
+    _restore(saved);
+  }
+});
+
+test("设备上确定性 step 的 failed / error 产 evidence（acts 为空数组、带 step_kind），passed 不产", async () => {
+  const { runStep } = await importMod();
+  const { deterministic, _snapshot, _restore, DeterministicAssertion } = await import("./deterministic.mjs");
+  const saved = _snapshot();
+  deterministic("断言 (?<ok>.+)", { webdriver: { uiKinds: ["web"], handler: (_c: unknown, { ok }: Record<string, string>) => {
+    if (ok !== "是") throw new DeterministicAssertion(`不是：${ok}`);
+  } } }, { description: "测试：设备断言", example: "Then 断言 是" });
+  try {
+    for (const [text, status, produced] of [["断言 是", "passed", false], ["断言 否", "failed", true]] as const) {
+      const trace: string[] = [];
+      const { seam, sink, events } = deviceSeam(trace);
+      const hook = evidenceHook(trace);
+      assert.equal(await runStep(seam, "sc:0", step("Then", text), 1, sink, hook), status);
+      const done = events.find((e) => e.type === "step_done");
+      assert.equal(done.reportRefs !== undefined, produced, text);
+      if (produced) {
+        const doc = JSON.parse(fs.readFileSync(new URL(done.reportRefs[0].ref), "utf-8"));
+        assert.equal(doc.step_kind, "deterministic"); assert.deepEqual(doc.acts, []); assert.equal(doc.status, "failed");
+      }
+    }
+  } finally {
+    _restore(saved);
+  }
+});
+
+// ---- scope 级出口：事件序列与退出码（假的设备形态接缝；ADR 0051 决策 4、5）----
+
+/** 设备形态的假接缝：acquire 先发 session_opened；release 只在第一次调用时发 session_closed（终结只进入一次，后到的调用返回同一
+ *  结果，ADR 0051 决策 5），并带 device_session 的产物链接。 */
+function fakeDeviceSurface(deps: any, trace: string[], over: Record<string, unknown> = {}, agent: any = scopeAgent()): any {
+  let releasing: Promise<any> | undefined;
+  const base = recordingSurface(trace, {
+    acquire: async () => {
+      await deps.emit({ type: "session_opened", scopeId: SCOPE.id, sessionId: "arn:s1", name: "gherkai:run:h:1:s", origin: "created" });
+      return { ready: true, agent, sessionId: "arn:s1" };
+    },
+    release: (mode: string) => {
+      trace.push(`release:${mode}`);
+      releasing ??= (async () => {
+        await deps.emit({ type: "session_closed", scopeId: SCOPE.id, sessionId: "arn:s1", name: "gherkai:run:h:1:s", release: "confirmed" });
+        return { releaseFailed: false, reportRefs: [{ kind: "device_session", ref: "file:///tmp/device-session.json" }] };
+      })();
+      return releasing;
+    },
+  });
+  return { ...base, ...over };
+}
+
+test("执行前失败（acquire 返回终止）：scope_started 之前只有会话事件，然后释放 → session_closed → scope_done{error} → 排空，退出码 0", async () => {
+  const { runScope } = await importMod();
+  let closedOnce = false;
+  const { io, trace, events } = scopeIo(async (deps) => fakeDeviceSurface(deps, [], {
+    acquire: async () => {
+      await deps.emit({ type: "session_opened", scopeId: SCOPE.id, sessionId: "arn:s1", name: "n", origin: "created" });
+      return { ready: false, termination: { errorType: "acquire_timeout", message: "在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间" } };
+    },
+    release: async () => {
+      if (!closedOnce) { closedOnce = true; await deps.emit({ type: "session_closed", scopeId: SCOPE.id, sessionId: "arn:s1", name: "n", release: "confirmed" }); }
+      return { releaseFailed: false, reportRefs: [{ kind: "device_session", ref: "file:///tmp/device-session.json" }] };
+    },
+  }));
+  const rc = await runScope(aJob([{ id: "f:1", steps: [step("When", '"点一下"')] }], ANDROID_WEB), io);
+  assert.equal(rc, 0);
+  assert.deepEqual(types(events), ["session_opened", "session_closed", "scope_done"]);
+  assert.deepEqual(events[2], {
+    type: "scope_done", scopeId: SCOPE.id, sessionId: "arn:s1", status: "error", errorType: "acquire_timeout",
+    message: "在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间",
+    reportRefs: [{ kind: "device_session", ref: "file:///tmp/device-session.json" }],
+  });
+  const at = (x: string) => trace.indexOf(x);
+  assert.ok(at("emit:session_closed") < at("emit:scope_done") && at("emit:scope_done") < trace.findIndex((t) => t.startsWith("drain:")), trace.join(" "));
+});
+
+test("会话丢失：当前 step error、余下 step_skipped、scenario_done error，后续 scenario 零事件，释放之后 scope_done{error, session_lost}，退出码 0", async () => {
+  const { runScope } = await importMod();
+  const { attachClassification } = await import("./surface.mjs");
+  const lost = "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话";
+  const surfaceTrace: string[] = [];
+  const { io, events } = scopeIo(async (deps) => fakeDeviceSurface(deps, surfaceTrace, {
+    execute: async () => { throw attachClassification(new Error("UND_ERR_CLOSED"), { errorType: "session_lost", message: lost }); },
+  }));
+  const rc = await runScope(aJob([
+    { id: "f:1", steps: [step("When", '"一"', 0), step("When", '"二"', 1), step("Then", '"三"', 2)] },
+    { id: "f:9", steps: [step("When", '"四"', 0)] },
+  ], ANDROID_WEB), io);
+  assert.equal(rc, 0);
+  assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "step_done",
+    "step_skipped", "step_skipped", "scenario_done", "session_closed", "scope_done"]);
+  assert.equal(events[4].errorType, "session_lost");
+  assert.equal(events[7].status, "error");
+  assert.ok(!events.some((e) => e.scenarioId === "f:9"), "后续 scenario 零事件（core 合成 SKIPPED）");
+  assert.ok(!surfaceTrace.includes("preScenarioCheck"), "会话丢失后不再开始下一条 scenario，也不做 scenario 前核对");
+  assert.deepEqual([events[9].status, events[9].errorType, events[9].message], ["error", "session_lost", lost]);
+  assert.deepEqual(events[9].reportRefs, [{ kind: "device_session", ref: "file:///tmp/device-session.json" }]);
+});
+
+test("scenario 前核对：第一条之前不调用；返回终止 → 下一条不发 scenario_started，scope_done{error, 返回的类别}", async () => {
+  const { runScope } = await importMod();
+  for (const errorType of ["session_lost", "engine_error"] as const) {
+    const surfaceTrace: string[] = [];
+    let checks = 0;
+    const { io, events } = scopeIo(async (deps) => fakeDeviceSurface(deps, surfaceTrace, {
+      preScenarioCheck: async () => { checks += 1; return checks === 2 ? { errorType, message: `核对失败：${errorType}` } : null; },
+    }));
+    const rc = await runScope(aJob([
+      { id: "f:1", steps: [step("When", '"一"')] }, { id: "f:2", steps: [step("When", '"二"')] }, { id: "f:3", steps: [step("When", '"三"')] },
+    ], ANDROID_WEB), io);
+    assert.equal(rc, 0);
+    assert.equal(checks, 2, "第一条之前不调；第二条、第三条之前各一次（第三条被终止拦下）");
+    assert.deepEqual(events.filter((e) => e.type === "scenario_started").map((e) => e.scenarioId), ["f:1", "f:2"]);
+    const done = events.at(-1);
+    assert.deepEqual([done.type, done.status, done.errorType], ["scope_done", "error", errorType]);
+  }
+});
+
+test("设备路径的退出码只会是 0 或 1：有会话未确认停止（或发过 attempted）即 1；acquire 抛出的连接层错误也不会变成 80", async () => {
+  const { runScope } = await importMod();
+  const { io } = scopeIo(async (deps) => fakeDeviceSurface(deps, [], {
+    release: async () => ({ releaseFailed: true, reportRefs: [] }),
+  }));
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"一"')] }], ANDROID_WEB), io), 1);
+  const boom = Object.assign(new Error("connect ECONNRESET"), { code: "ECONNRESET" });
+  const { io: io2, events } = scopeIo(async (deps) => fakeDeviceSurface(deps, [], { acquire: async () => { throw boom; } }));
+  await assert.rejects(runScope(aJob([{ id: "f:1", steps: [] }], ANDROID_WEB), io2), (e) => e === boom,
+    "只有桌面实现标记的「建连重试耗尽」才走网络专用退出码；其余异常原样交给 bin（退出码 1）");
+  assert.deepEqual(types(events), ["session_closed"]);
+});
+
+test("预热失败（设备）：释放 → 排空 → scope_done{error, 归因}，带 device_session 链接，不发 scope_started", async () => {
+  const { runScope } = await importMod();
+  const { io, trace, events } = scopeIo(async (deps) => fakeDeviceSurface(deps, [], {
+    warmup: async () => ({ errorType: "precheck_failed", message: "预热被拒" }),
+  }), { warmupUrl: "https://tunnel.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=t" });
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"一"')] }], ANDROID_WEB), io), 0);
+  assert.deepEqual(types(events), ["session_opened", "session_closed", "scope_done"]);
+  assert.deepEqual(events[2], { type: "scope_done", scopeId: SCOPE.id, sessionId: "arn:s1", status: "error", errorType: "precheck_failed",
+    message: "预热被拒", reportRefs: [{ kind: "device_session", ref: "file:///tmp/device-session.json" }] });
+  assert.ok(trace.indexOf("drain:6000") < trace.indexOf("emit:scope_done"));
+});
+
+test("停止信号：进入终结后在途 step 不再发 step_done、也不发 scope_done；interrupt 释放 → 中断兜底提前上传 → 排空 → 退出", async () => {
+  const { runScope } = await importMod();
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const surfaceTrace: string[] = [];
+  const { io, trace, events, signal, exited } = scopeIo(async (deps) => fakeDeviceSurface(deps, surfaceTrace, {}, scopeAgent({ gate, reportFile: "/tmp/run/report.html" })));
+  const running = runScope(aJob([{ id: "f:1", steps: [step("When", '"一"'), step("When", '"二"', 1)] }], ANDROID_WEB), io);
+  while (!events.some((e) => e.type === "step_started")) await new Promise((r) => setTimeout(r, 1));
+  signal();
+  while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
+  open();
+  await running;
+  const tail = trace.slice(trace.indexOf("emit:step_started") + 1, trace.indexOf("exit:0") + 1);
+  assert.deepEqual(tail, ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0"]);
+  assert.ok(surfaceTrace.includes("release:interrupt"));
+  assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "session_closed"],
+    "终结之后只剩会话事件：在途 step 的 step_done、scenario_done 与 scope_done 都不发");
+});
+
+// ---- 桌面：每个 AgentCore 会话恰一对会话事件，与 main 级次序（真实桌面实现 + 假控制面与假 CDP；ADR 0051 决策 4、0028）----
+
+function econnreset(): Error { return Object.assign(new Error("connect ECONNRESET 10.0.0.1:443"), { code: "ECONNRESET" }); }
+
+/** 桌面实现的工厂：connectOverCDP 依 failures 次序决定第几次失败（true 即抛 ECONNRESET）。 */
+function desktopFactory(agent: any, opts: { core?: ReturnType<typeof fakeAgentCore>; failures?: boolean[]; page?: any } = {}) {
+  const core = opts.core ?? fakeAgentCore();
+  let attempt = 0;
+  const createSurface = async (deps: any) => {
+    const { createDesktopSurface } = await import("./surface-desktop.mjs");
+    return createDesktopSurface({ ...deps, agentOpts: {} }, desktopHooks(agent, opts.page ?? fakePage, {
+      client: core.client,
+      connectOverCDP: async () => { const fail = opts.failures?.[attempt++] ?? false; if (fail) throw econnreset(); return fakeBrowser(opts.page ?? fakePage); },
+    }));
+  };
+  return { core, createSurface };
+}
+
+const opened = (sid: string) => ({ type: "session_opened", scopeId: SCOPE.id, sessionId: sid, name: sid, origin: "created" });
+const closed = (sid: string, release = "confirmed") => ({ type: "session_closed", scopeId: SCOPE.id, sessionId: sid, name: sid, release });
+
+test("桌面正常收尾：Start 返回即 session_opened，释放后 session_closed{confirmed}，然后 scope_done → 排空 → flush，退出码 0；不注册进程级兜底", async () => {
+  const { runScope } = await importMod();
+  const prevRunDir = process.env.MIDSCENE_RUN_DIR;
+  process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "seam-run-"));
+  const listeners = () => [process.listenerCount("unhandledRejection"), process.listenerCount("uncaughtException")];
+  const before = listeners();
+  try {
+    const { core, createSurface } = desktopFactory(scopeAgent());
+    const { io, trace, events } = scopeIo(createSurface);
+    assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 0);
+    assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "step_done", "scenario_done",
+      "session_closed", "scope_done"]);
+    assert.deepEqual(events[0], opened("sess-1"));
+    assert.deepEqual(events[1], { type: "scope_started", scopeId: SCOPE.id, sessionId: "sess-1" });
+    assert.deepEqual(events[6], closed("sess-1"));
+    assert.deepEqual(events[7], { type: "scope_done", scopeId: SCOPE.id, sessionId: "sess-1", reportRefs: [] });
+    assert.match(core.names[0], /^gherkai:20260629T141207Z-a3f9c1:[0-9a-f]{16}:1:/, "请求带会话名，不再是固定名");
+    assert.ok(core.names[0].length <= 100);
+    const at = (x: string) => trace.indexOf(x);
+    assert.ok(at("emit:session_closed") < at("emit:scope_done") && at("emit:scope_done") < at("drain:30000") && at("drain:30000") < at("flush"),
+      trace.join(" "));
+    assert.deepEqual(listeners(), before, "桌面路径不注册 unhandledRejection / uncaughtException（ADR 0051 决策 5）");
+  } finally {
+    if (prevRunDir === undefined) delete process.env.MIDSCENE_RUN_DIR; else process.env.MIDSCENE_RUN_DIR = prevRunDir;
+  }
+});
+
+test("桌面建连重试：丢弃的 attempt 确认停止即发 confirmed，下一次 attempt 的请求名换尝试序号；scope_started 与 scope_done 带成功的那个会话", async () => {
+  const { runScope } = await importMod();
+  const { core, createSurface } = desktopFactory(scopeAgent(), { failures: [true, false] });
+  const { io, events } = scopeIo(createSurface);
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 0);
+  assert.deepEqual(events.slice(0, 4), [opened("sess-1"), closed("sess-1"), opened("sess-2"), { type: "scope_started", scopeId: SCOPE.id, sessionId: "sess-2" }]);
+  assert.deepEqual(events.at(-2), closed("sess-2"));
+  assert.equal(events.at(-1).sessionId, "sess-2");
+  assert.deepEqual(core.names.map((n) => n.split(":")[3]), ["1", "2"]);
+});
+
+test("桌面建连重试：丢弃那次的 Stop 没成功 → 先不发，留到最后一次清理按最终处置发（每个会话恰一条）", async () => {
+  const { runScope } = await importMod();
+  const core = fakeAgentCore({ stopFails: (sid, nth) => sid === "sess-1" && nth === 1 });
+  const { createSurface } = desktopFactory(scopeAgent(), { core, failures: [true, false] });
+  const { io, events } = scopeIo(createSurface);
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 0);
+  assert.deepEqual(events.slice(0, 3), [opened("sess-1"), opened("sess-2"), { type: "scope_started", scopeId: SCOPE.id, sessionId: "sess-2" }]);
+  const closings = events.filter((e) => e.type === "session_closed");
+  assert.deepEqual(closings.map((e) => [e.sessionId, e.release]).sort(), [["sess-1", "confirmed"], ["sess-2", "confirmed"]]);
+  assert.ok(events.indexOf(closings[0]) > events.findIndex((e) => e.type === "scenario_done"));
+});
+
+test("桌面建连重试耗尽：每个 attempt 成对 confirmed、不发 scope_started，释放之后排空、以 80 退出；最终仍有会话没停住则改为重抛（释放优先）", async () => {
+  const { runScope } = await importMod();
+  const { core, createSurface } = desktopFactory(scopeAgent(), { failures: [true, true, true, true] });
+  const { io, trace, events } = scopeIo(createSurface);
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 80);
+  assert.deepEqual(events, [opened("sess-1"), closed("sess-1"), opened("sess-2"), closed("sess-2"),
+    opened("sess-3"), closed("sess-3"), opened("sess-4"), closed("sess-4")]);
+  assert.deepEqual(core.names.map((n) => n.split(":")[3]), ["1", "2", "3", "4"]);
+  assert.ok(trace.lastIndexOf("emit:session_closed") < trace.indexOf("drain:6000"), trace.join(" "));
+
+  const leaking = fakeAgentCore({ stopFails: () => true });
+  const { createSurface: leakingSurface } = desktopFactory(scopeAgent(), { core: leaking, failures: [true, true, true, true] });
+  const { io: io2, events: events2 } = scopeIo(leakingSurface);
+  await assert.rejects(runScope(aJob([{ id: "f:1", steps: [] }]), io2), /ECONNRESET/);
+  assert.deepEqual(events2.filter((e) => e.type === "session_closed").map((e) => e.release), ["unconfirmed", "unconfirmed", "unconfirmed", "unconfirmed"],
+    "丢弃的会话没能确认停止 → 最终清理按 unconfirmed 发，core 改判 release_failed");
+});
+
+test("桌面预热失败：释放（session_closed）→ 排空 → scope_done{error, 归因, sessionId}，没有 scope_started，退出码 0", async () => {
+  const { runScope } = await importMod();
+  const W = await import("../lib/tunnel-warmup.mjs");
+  const page = { goto: async () => ({ status: () => 200 }), title: async () => W.WARMUP_TITLES.denied, url: () => "about:blank" };
+  const { createSurface } = desktopFactory(scopeAgent(), { page });
+  const { io, trace, events } = scopeIo(createSurface, { warmupUrl: "https://tunnel.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=t" });
+  assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 0);
+  assert.deepEqual(events, [opened("sess-1"), closed("sess-1"),
+    { type: "scope_done", scopeId: SCOPE.id, sessionId: "sess-1", status: "error", errorType: "precheck_failed", message: W.WARMUP_DENIED_MESSAGE }]);
+  const at = (x: string) => trace.indexOf(x);
+  assert.ok(at("emit:session_closed") < at("drain:6000") && at("drain:6000") < at("emit:scope_done"), "桌面执行前失败出口的次序不变（ADR 0051 决策 5）");
+});
+
+test("桌面停止信号：在途 step 期间收到信号 → Stop（session_closed）先于中断兜底提前上传与排空，退出码 0，之后不再发 step 事件", async () => {
+  const { runScope } = await importMod();
+  let open!: () => void;
+  const gate = new Promise<void>((r) => { open = r; });
+  const { createSurface } = desktopFactory(scopeAgent({ gate, reportFile: "/tmp/run/report.html" }));
+  const { io, trace, events, signal, exited } = scopeIo(createSurface);
+  const running = runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io);
+  while (!events.some((e) => e.type === "step_started")) await new Promise((r) => setTimeout(r, 1));
+  signal();
+  signal();  // 信号重复到达：收尾只进入一次
+  while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
+  open();
+  await running;
+  const tail = trace.slice(trace.indexOf("emit:step_started") + 1, trace.indexOf("exit:0") + 1);
+  assert.deepEqual(tail, ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0"]);
+  assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "session_closed"]);
+  assert.equal(trace.filter((t) => t.startsWith("exit:")).length, 1);
+});
+
+test("桌面停止信号落在 Start 在途：等待窗口内没有返回 → 一对 attempted 事件，退出码 1", async () => {
+  const { runScope } = await importMod();
+  const { createSurface } = desktopFactory(scopeAgent(), { core: fakeAgentCore({ startHangs: () => true }) });
+  const { io, events, signal, exited } = scopeIo(createSurface);
+  void runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io);
+  await new Promise((r) => setTimeout(r, 5));
+  signal();
+  while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
+  assert.equal(exited(), 1);
+  assert.deepEqual(types(events), ["session_opened", "session_closed"]);
+  assert.deepEqual([events[0].origin, events[0].sessionId, events[1].release, events[1].sessionId], ["attempted", null, "unconfirmed", null]);
+  assert.equal(events[0].name, events[1].name);
+});
+
+test("桌面缺本次运行的编号（RUN_ID）→ 构造期报错、点名该变量，不建会话、不发任何事件", async () => {
+  const { runScope } = await importMod();
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const saved = process.env.RUN_ID;
+  delete process.env.RUN_ID;
+  try {
+    const core = fakeAgentCore();
+    const { io, events } = scopeIo(async (deps) => createDesktopSurface({ ...deps, agentOpts: {} }, { client: core.client }));
+    await assert.rejects(runScope(aJob([{ id: "f:1", steps: [] }]), io), /RUN_ID/);
+    assert.deepEqual(events, []);
+    assert.deepEqual(core.names, []);
+  } finally {
+    if (saved !== undefined) process.env.RUN_ID = saved;
+  }
+});
+
+test("exitAfterFailure：ScopeTerminationError（会话预热失败）同样先释放、再排空、再发 scope_done；接缝给了产物链接才带 reportRefs", async () => {
+  const { exitAfterFailure, ScopeTerminationError } = await importMod();
+  const trace: string[] = []; const events: Record<string, unknown>[] = [];
+  const failure = { errorType: "engine_error" as const, message: "预热无法确认" };
+  assert.equal(await exitAfterFailure(new ScopeTerminationError(failure), exitDeps({ trace, events } as any)), 0);
+  assert.deepEqual(trace, ["cleanup", "drain", "emit:scope_done"]);
+  assert.deepEqual(events[0], { type: "scope_done", scopeId: "s", sessionId: "sess-1", status: "error", errorType: "engine_error", message: "预热无法确认" });
+  const refs = [{ kind: "device_session", ref: "file:///tmp/device-session.json" }];
+  const events2: Record<string, unknown>[] = [];
+  await exitAfterFailure(new ScopeTerminationError(failure), exitDeps({ trace: [], events: events2, reportRefs: () => refs } as any));
+  assert.deepEqual(events2[0].reportRefs, refs);
+  const events3: Record<string, unknown>[] = [];
+  await exitAfterFailure(new ScopeTerminationError(failure), exitDeps({ trace: [], events: events3, reportRefs: () => [] } as any));
+  assert.equal("reportRefs" in events3[0], false, "空链接不带这个键（桌面的这条事件逐字节不变）");
+});
+
+test("主入口的完整性判据对设备 job 同样成立：有额外请求头、没有预热地址 → 唯一事件 scope_done{precheck_failed}，退出码 0，不加载设备模块之外也不建会话（真子进程）", async () => {
+  const W = await import("../lib/tunnel-warmup.mjs");
+  const fixture = path.resolve(import.meta.dirname, "..", "..", "..", "fixtures", "job-lines.json");
+  const job = { ...JSON.parse(fs.readFileSync(fixture, "utf-8")).jobs.android_web, engine: "midscene" };
+  assert.equal(job.target.device, "android");
+  const env: Record<string, string> = {};
+  for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+  env["AWS_EC2_METADATA_DISABLED"] = "true";
+  env[W.EXTRA_HTTP_HEADERS_ENV] = '{"ngrok-skip-browser-warning": "1"}';
+  const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
+    const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts")],
+      { env, stdio: ["pipe", "pipe", "pipe"] });
+    let out = ""; let err = "";
+    proc.stdout.on("data", (d) => { out += d.toString(); });
+    proc.stderr.on("data", (d) => { err += d.toString(); });
+    proc.on("close", (code) => resolve({ code, out, err }));
+    proc.stdin.end(JSON.stringify(job) + "\n");
+  });
+  assert.equal(result.code, 0, result.err.slice(-800));
+  const events = result.out.split("\n").filter((l) => l.startsWith("{") && l.includes('"type"')).map((l) => JSON.parse(l));
+  assert.deepEqual(events, [{ type: "scope_done", scopeId: job.scope.id, status: "error", errorType: "precheck_failed", message: W.INCOMPLETE_DEFINITION_MESSAGE }]);
 });

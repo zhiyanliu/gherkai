@@ -9,6 +9,8 @@ import { PROTOCOL_SCHEMA_VERSION } from "../lib/job-source.mjs";
 import { WORKER_TARGETS } from "./run-scope.mjs";
 
 const DEVICE_TARGETS = [{ device: "desktop", ui_kinds: ["web"] }, { device: "android", ui_kinds: ["web", "app"], max_session_s: 8000 }];
+// 只声明桌面网页的 worker（如 Nova Act，或不带设备目标的旧版本）：拒绝分支的消息形态与具体 worker 无关，用注入的 targets 测。
+const DESKTOP_ONLY_TARGETS = [{ device: "desktop", ui_kinds: ["web"] }];
 
 test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、按版本不一致拒绝", () => {
   assert.equal(precheckTarget({ target: { device: "desktop", uiKind: "web" }, timeoutS: 300 }, WORKER_TARGETS), null);
@@ -30,10 +32,12 @@ test("job 行的结构版本先于目标核对（ADR 0024）：不等于本 work
   for (const job of Object.values(jobs)) assert.equal(job.schemaVersion, PROTOCOL_SCHEMA_VERSION);
 });
 
-test("设备 job 被当前只声明桌面网页的 worker 拒绝，消息是产品语言", () => {
-  const msg = precheckTarget({ target: { device: "ios", uiKind: "app" }, timeoutS: 1500 }, WORKER_TARGETS);
+test("设备 job 被只声明桌面网页的 worker 拒绝，消息是产品语言；本 worker 的真实 targets 接受同一个 job", () => {
+  const job = { target: { device: "ios", uiKind: "app" }, timeoutS: 1500 };
+  const msg = precheckTarget(job, DESKTOP_ONLY_TARGETS);
   assert.equal(msg, "这个 worker 不支持在 iOS 应用上执行测试（它支持：桌面网页）。请改用支持该目标的引擎，或使用与命令行工具同版本的 worker 镜像。");
   assert.ok(!msg!.includes("ADR") && !msg!.includes("precheck"));
+  assert.equal(precheckTarget(job, WORKER_TARGETS), null);
 });
 
 test("墙钟预算超过会话上限被拒绝；等于上限、没带预算、桌面无上限都通过", () => {
@@ -49,13 +53,14 @@ test("设备受支持但界面类型不受支持也被拒绝（与 Nova 侧对�
   assert.ok(msg !== null && msg.includes("不支持在 Android 应用上"));
 });
 
-test("主入口在建会话之前自检：真子进程喂 android/web 的 job，唯一事件是 scope_done{error, precheck_failed}，退出码 0", async () => {
+test("主入口在建会话之前自检：真子进程喂墙钟预算超过会话上限的 android/web job，唯一事件是 scope_done{error, precheck_failed}，退出码 0", async () => {
   const { spawn } = await import("node:child_process");
   const path = await import("node:path");
   const env: Record<string, string> = {};
   for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env["AWS_EC2_METADATA_DISABLED"] = "true";
-  const job = { schemaVersion: 1, scope: { id: "dev", name: "dev" }, engine: "midscene", assertionVotes: 1, timeoutS: 1500,
+  // 9000 秒（服务商的会话硬上限）大于本 worker 自述的 max_session_s 8880：自检在建会话之前拒绝，不发 scope_started、零会话费用
+  const job = { schemaVersion: 1, scope: { id: "dev", name: "dev" }, engine: "midscene", assertionVotes: 1, timeoutS: 9000,
     target: { device: "android", uiKind: "web" }, deviceRequest: null,
     scenarios: [{ id: "d.feature:3", name: "s", steps: [{ index: 0, keyword: "Given", text: "https://x/" }] }] };
   const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {
@@ -72,7 +77,7 @@ test("主入口在建会话之前自检：真子进程喂 android/web 的 job，
   assert.deepEqual(events.map((e) => e.type), ["scope_done"], result.err.slice(-500));
   assert.equal(events[0].status, "error");
   assert.equal(events[0].errorType, "precheck_failed");
-  assert.ok(String(events[0].message).includes("不支持在 Android 网页上"));
+  assert.ok(String(events[0].message).includes("超过了 Android 网页的会话上限 8880 秒"), String(events[0].message));
 });
 
 test("目标名称与命令行工具同一口径", () => {

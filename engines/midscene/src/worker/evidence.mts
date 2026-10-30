@@ -4,8 +4,9 @@
 //
 // 四条硬约束，全部来自 ADR 0042：
 // ① **SDK 耦合只住这一个模块**（决策六）：本模块自写「只含所读字段」的结构类型，**不从 @midscene/core
-//    import 类型**——它不是本包声明依赖（只声明 @midscene/web）。逐字段容缺（读不到 → null / 空数组、
-//    不抛），判别一律按**值**不按 SDK 的布尔标志。格式漂移在 fixture 测试里变红。
+//    import 类型**：格式漂移由真产物裁成的 fixture 守（升版时测试变红），读取逐字段容缺（读不到 → null / 空数组、
+//    不抛），不靠 SDK 的类型声明；@midscene/core 成为与 @midscene/web 同版本锁定的声明依赖之后这一点不变
+//    （ADR 0052 决策 7）。判别一律按**值**不按 SDK 的布尔标志。
 // ② **绝不读截图的 `.base64`**（决策一映射表）：SDK 每个 task 更新后即 flush 报告、把 base64 置空，之后
 //    读它会对多 MB 的 report.html 做同步全文扫描且找不到即抛。改为引用 SDK 自己落盘的截图文件——agent
 //    建时传 `persistExecutionDump: true`，SDK 把每张截图写成 `<run 目录>/report/screenshots/<id>.<扩展名>`，
@@ -20,11 +21,19 @@
 //    失败 → 一行日志、本 step 不带 evidence ref，step_done 的 status / votes / cost / message 照发。故对外
 //    只暴露一个「绝不抛」的 `stepEvidenceRef`，调用方无需自己兜：裸放进 runStep 的 try 里，一次上传抖动
 //    就会被 catch 分类成 network_error / engine_error，把已成的 passed 判定翻掉。
+//
+// 设备目标的例外（ADR 0051 决策 8；ADR 0042 决策一）：界面接缝在 step 末把界面快照（地址、控件摘要、原始控件树
+// 的本地文件及各自的缺失原因，类型见 worker/surface.mts 的 Snapshot）采好交进来，本模块仍是纯映射、不发 WebDriver
+// 命令（ADR 0052 决策 7）。快照带 step_kind 即设备目标：文档加 step_kind、顶层 url / url_missing，以及快照里出现了的
+// controls / controls_missing、page_source / page_source_truncated；确定性与导航 step 在 failed / error 时也产一份
+// （acts 为空数组），passed 的不产。原始控件树的 URI 与截图走同一条路：refFor 算出写进 json，文件随截图一起回传、
+// 由调用方在 step_done 之后入队。桌面快照只有地址两键，桌面 evidence 与引入快照之前逐字节一致。
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.message 同一条压行规则
-import { redactSecrets } from "../lib/redact.mjs";  // 隧道凭据不进 evidence（ADR 0035 决策 5）
+import { redactSecrets } from "../lib/redact.mjs";  // 隧道凭据、签名与端点令牌不进 evidence（ADR 0035 决策 5；ADR 0051 决策 11）
+import type { ControlItem, Controls, ControlsMissing, Snapshot, StepKind, UrlMissing } from "./surface.mjs";
 
 /** evidence schema 版本（ADR 0042 决策六第 3 道防线：消费端据此判「不认识的版本」）。 */
 export const EVIDENCE_SCHEMA_VERSION = 1;
@@ -102,6 +111,22 @@ export interface EvidenceDoc {
   /** 与本 step 的 step_done 一致（冗余是为了文件自包含）。 */
   status: string;
   message: string | null;
+  // 以下七个是设备目标的加键（schema 1 上加键，ADR 0051 决策 8），桌面 evidence 一个都没有。
+  /** step 的执行方式。 */
+  step_kind?: StepKind;
+  /** step 末在网页上下文读到的地址；应用目标、没有可用网页上下文或读取失败时为 null。 */
+  url?: string | null;
+  /** url 为 null 的原因；url 有值时为 null。 */
+  url_missing?: UrlMissing | null;
+  // 以下四个只在采集了控件的设备 step（最终判定为 failed / error）上出现。
+  /** 控件摘要；采集失败为 null。 */
+  controls?: Controls | null;
+  /** controls 为 null 的原因；采集成功时为 null。 */
+  controls_missing?: ControlsMissing | null;
+  /** 原始控件树独立文件的 URI（refFor 算出、字节走后台队列）；没取到为 null。 */
+  page_source?: string | null;
+  /** 原始控件树是否因超过上限被截断。 */
+  page_source_truncated?: boolean;
   acts: EvidenceAct[];
 }
 
@@ -224,8 +249,9 @@ export interface BuildEvidenceInput {
   prompt: string | null;
   /** 逐 act 的票；缺位 → null（非投票调用 / 该票没运行成功）。 */
   votes: Array<boolean | null>;
-  /** step 末取的 `page.url()`（worker 只取一次；同 step 各票之间页面通常不变）。 */
-  url: string | null;
+  /** 界面接缝在 step 末采好的快照（见文件头「设备目标的例外」）。snapshot.url 写进每个 act 的 url：桌面是 AI step 末取一次的
+   *  `page.url()`（同 step 各票之间页面通常不变），设备是网页上下文里读到的地址。 */
+  snapshot: Snapshot;
   /** 本 step 抛出的异常文本（`<name>: <message>`）；没有 → null。 */
   error: string | null;
   /** 产物落点根（即 MIDSCENE_RUN_DIR），用于拼 SDK 已落盘的截图路径。 */
@@ -234,14 +260,58 @@ export interface BuildEvidenceInput {
   refFor: (localPath: string) => string;
 }
 
+/** 快照里的 step_kind 是不是不调 AI 的那两种（确定性 handler、内建导航）。桌面快照不带 step_kind，按引入快照之前的规则处理。 */
+function isNonAiStep(snapshot: Snapshot): boolean {
+  return snapshot.step_kind === "deterministic" || snapshot.step_kind === "navigation";
+}
+
+/** 控件摘要的一项按 schema 的四个键重建：只写这四个键（适配器多带的字段不进契约），缺的记 null。 */
+function controlItemOf(item: ControlItem): ControlItem {
+  const field = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return { type: field(item?.type), id: field(item?.id), text: field(item?.text), a11y_id: field(item?.a11y_id) };
+}
+
+/** 设备目标的加键（ADR 0051 决策 8）。快照不带 step_kind（桌面）→ 一个键都不加。控件与原始控件树两组键各自「快照里
+ *  出现了才写」：只有 failed / error step 采集它们（采集失败时值为 null、另给原因），passed step 的快照里没有。 */
+function deviceKeysOf(snapshot: Snapshot, refFor: (localPath: string) => string): Partial<EvidenceDoc> {
+  if (snapshot.step_kind === undefined) return {};
+  const keys: Partial<EvidenceDoc> = {
+    step_kind: snapshot.step_kind,
+    url: snapshot.url ?? null,
+    url_missing: snapshot.url_missing ?? null,
+  };
+  if (snapshot.controls !== undefined || snapshot.controls_missing !== undefined) {
+    const c = snapshot.controls;
+    const items = c == null || !Array.isArray(c.items) ? [] : c.items.map(controlItemOf);
+    keys.controls = c == null ? null : {
+      items,
+      total: typeof c.total === "number" ? c.total : items.length,
+      truncated: c.truncated === true,
+    };
+    keys.controls_missing = snapshot.controls_missing ?? null;
+  }
+  if (snapshot.page_source_path !== undefined || snapshot.page_source_truncated !== undefined) {
+    // 与截图同一个 refFor：URI 先算、字节随后入队；不计入截图的每 step 上限（那是截图的上界，原始控件树另有截断阈值）
+    const p = snapshot.page_source_path;
+    keys.page_source = typeof p === "string" && p !== "" ? refFor(p) : null;
+    keys.page_source_truncated = snapshot.page_source_truncated === true;
+  }
+  return keys;
+}
+
 /** executions → evidence 文档（纯函数、无 IO；SDK 耦合的全部住此）。 */
 export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
   const shotsDir = screenshotsDir(input.runDir);
   // 截图预算：按截图 id 去重后计（同一张跨 task 共享 → 复引用不再占额度），整 step 封 M 张。
   const seen = new Map<string, string>();
   const acts: EvidenceAct[] = [];
+  const url = input.snapshot.url ?? null;
+  // 确定性与导航 step 不调 AI，act 恒为空（ADR 0051 决策 8 的 acts: []）：不映射切片里的 execution（step 起点标记读失败时
+  // 切片可能带进前面 step 的），抛出的异常也只在 message 里，不补一条只带 error 的 act。
+  const nonAi = isNonAiStep(input.snapshot);
+  const executions = nonAi ? [] : input.executions;
 
-  input.executions.forEach((raw, i) => {
+  executions.forEach((raw, i) => {
     const exec = (raw ?? {}) as ExecutionLike;
     const tasks = Array.isArray(exec.tasks) ? exec.tasks.map((t) => (t ?? {}) as TaskLike) : [];
     const frames: EvidenceFrame[] = tasks.map((t) => ({
@@ -264,12 +334,12 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
       // 预算耗尽 → 该 frame 的 screenshot 留 null（thought / actions 照留，文本不受限）
     }
     const lastTask = tasks[tasks.length - 1];
-    const isLast = i === input.executions.length - 1;
+    const isLast = i === executions.length - 1;
     acts.push({
       index: i,
       prompt: input.prompt,
       vote: input.votes[i] ?? null,
-      url: input.url,
+      url,
       frames,
       result: lastTask?.output ?? null,
       // 首个非空 errorMessage；都没有则末个 act 兜住本 step 抛出的异常（抛的那一刻正在运行的就是它）
@@ -278,15 +348,18 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
     });
   });
 
-  if (acts.length === 0 && input.error !== null) {
+  if (!nonAi && acts.length === 0 && input.error !== null) {
     // 抛错早于 SDK 记下任何 execution（如指令刚发出就断连）：仍留一条只带 error 的 act，否则「本 step
     // 调了 AI 且失败了」这一事实在证据里彻底不可见。frames 为空是 SDK 事实、不是抽取失败。
     acts.push({
-      index: 0, prompt: input.prompt, vote: input.votes[0] ?? null, url: input.url,
+      index: 0, prompt: input.prompt, vote: input.votes[0] ?? null, url,
       frames: [], result: null, error: input.error, time_worked_s: null,
     });
   }
 
+  // 键序即写盘的字节顺序：桌面没有设备键，与引入快照之前逐字节一致；设备键排在 message 与 acts 之间。
+  // 设备键在截图之后算：原始控件树的 refFor 调用排在截图之后，回传给调用方入队的列表也是这个顺序。
+  const device = deviceKeysOf(input.snapshot, input.refFor);
   return {
     schema_version: EVIDENCE_SCHEMA_VERSION,
     engine: ENGINE,
@@ -296,6 +369,7 @@ export function buildEvidence(input: BuildEvidenceInput): EvidenceDoc {
     step: { keyword: input.step.keyword, text: input.step.text },
     status: input.status,
     message: input.message,
+    ...device,
     acts,
   };
 }
@@ -352,53 +426,58 @@ export function executionsLength(agent: unknown): number {
 
 /** `stepEvidenceRef` 的产出。
  *
- *  `screenshots` 是本 step 的 evidence **真正引用到**的截图本地路径（URI 已算好写进 json、字节还没传）：
- *  调用方在 step_done emit 之后把它交给 `uploader.enqueue`（ADR 0042 决策一）。**在算 URI 的同一处收集**
- *  （见 `stepEvidenceRef` 里包装的 refFor），故「json 里引用了」与「入了队」不会因两处各挑一次而漂移。 */
+ *  `screenshots` 是本 step 的 evidence **真正引用到**的本地文件（URI 已算好写进 json、字节还没传）：截图，以及设备
+ *  目标上的原始控件树文件（排在截图之后）。调用方在 step_done emit 之后把它交给 `uploader.enqueue`（ADR 0042 决策一；
+ *  ADR 0051 决策 8「走截图的后台上传队列」）。**在算 URI 的同一处收集**（见 `stepEvidenceRef` 里包装的 refFor），故
+ *  「json 里引用了」与「入了队」不会因两处各挑一次而漂移。 */
 export interface StepEvidence {
   ref: string;
   screenshots: string[];
 }
 
-export interface StepEvidenceInput {
+/** `stepEvidenceRef` 的输入里与界面无关的部分。 */
+interface StepEvidenceFacts {
   scenarioId: string;
   step: { index: number; keyword: string; text: string };
-  /** 本 step 已判定的 status（与 step_done 一致）。 */
+  /** 本 step 已判定的 status（与 step_done 一致；接缝复原失败改判之后的最终判定）。 */
   status: string;
   message: string | null;
   /** 只读 `dump.executions`（结构类型，见文件头①）。 */
   agent: unknown;
   /** step 起点的 executions 长度（`executionsLength` 记的那个）。 */
   execFrom: number;
-  /** 取调用结束时的页面 URL；取不到按 null 处理（页面可能已随异常关闭）。 */
-  page: { url(): string } | undefined;
   prompt: string | null;
   votes: Array<boolean | null>;
   error: string | null;
 }
 
-/** step 判定已成之后产本 step 的 evidence，返回 ref（挂进 step_done）+ 引用到的截图路径（emit 后入队）；
+/** `stepEvidenceRef` 的输入：界面信息以界面接缝在 step 末采好的快照给出（ADR 0052 决策 7：本模块保持纯映射，不向被测对象
+ *  发命令；地址取不到时由接缝记为 null）。 */
+export type StepEvidenceInput = StepEvidenceFacts & { snapshot: Snapshot };
+
+/** step 判定已成之后产本 step 的 evidence，返回 ref（挂进 step_done）+ 引用到的本地文件（emit 后入队）；
  *  **绝不抛**（ADR 0042 决策二）。
  *
- *  跳过的两种情形：① 无 hook（`--no-report` 方式 / 没给产物落点）；② 本 step 没调过 AI（确定性 step，含内建
- *  导航——既无新 execution 也无指令），这类 step 本就不产 evidence。
+ *  跳过的情形：① 无 hook（`--no-report` 方式 / 没给产物落点）；② 桌面上本 step 没调过 AI（确定性 step，含内建
+ *  导航——既无新 execution 也无指令），这类 step 在桌面上不产 evidence；③ 设备上 passed 的确定性与导航 step。
+ *  设备例外（ADR 0051 决策 8）：快照的 step_kind 为 deterministic / navigation 且判定为 failed / error 时照产，acts 为空数组；
+ *  AI step（设备上 step_kind 为 ai）各状态都产。
  *  失败 → 一行日志 + 返 null（本 step 不带 evidence ref、也不入队），判定与其余事件字段照发。 */
 export async function stepEvidenceRef(
   hook: EvidenceHook | undefined, input: StepEvidenceInput,
 ): Promise<StepEvidence | null> {
   if (hook === undefined) return null;
   try {
+    const { snapshot } = input;
     const all = (input.agent as { dump?: { executions?: unknown[] } } | undefined)?.dump?.executions;
     const executions = (Array.isArray(all) ? all : []).slice(input.execFrom);
-    if (executions.length === 0 && input.prompt === null) return null;
-    let url: string | null = null;
-    try {
-      url = input.page?.url() ?? null;
-    } catch {
-      url = null;  // 页面已关/CDP 断连：URL 缺了不影响其余证据
+    if (isNonAiStep(snapshot)) {
+      if (input.status !== "failed" && input.status !== "error") return null;
+    } else if (executions.length === 0 && input.prompt === null) {
+      return null;
     }
-    // 被引用的截图本地路径：**在算 URI 的同一处记**（refFor 只对真写进 json 的那几张调，截图预算/去重
-    // 都已生效）——「引用了就入了队」由此成立，不必在外面照着策略再挑一遍。
+    // 被引用的本地文件：**在算 URI 的同一处记**（refFor 只对真写进 json 的那几张截图调，截图预算/去重
+    // 都已生效；原始控件树也经它）——「引用了就入了队」由此成立，不必在外面照着策略再挑一遍。
     const screenshots: string[] = [];
     const doc = buildEvidence({
       scopeId: hook.scopeId,
@@ -409,7 +488,7 @@ export async function stepEvidenceRef(
       executions,
       prompt: input.prompt,
       votes: input.votes,
-      url,
+      snapshot,
       error: input.error,
       runDir: hook.runDir,
       refFor: (p) => { screenshots.push(p); return hook.uploader.refFor(p); },

@@ -11,7 +11,8 @@
 //   ② 注册裸 specifier 的 resolve hook（见 resolve-hook.mts 头注释：为什么 Node 默认解析够不到）；
 //      **须在 ① 之后**——hook 链后注册者先执行，我们要抢在 tsx 的 resolve 之前截住那个裸 specifier；
 //   ③ 动态 import run-scope 的 main 并执行（argv 原样透传：两个非 job 入口 --capabilities / --match-steps
-//      与 job 模式的判定都在 main 里读 process.argv，本文件不解析、不过滤任何 flag）。
+//      与 job 模式的判定都在 main 里读 process.argv，本文件不解析、不过滤任何 flag）；在它之前先动态 import
+//      脱敏函数，fatal 行写出前经它。
 import { register as registerLoaderHook } from "node:module";
 import { register as registerTsx } from "tsx/esm/api";
 
@@ -35,6 +36,11 @@ const target = fromSource
 const hookSpec = new URL(fromSource ? "./resolve-hook.mts" : "./resolve-hook.mjs", import.meta.url);
 registerLoaderHook(hookSpec, { parentURL: import.meta.url, data: { target } });
 
+// fatal 行的脱敏（ADR 0051 决策 11、0035 决策 5）：异常文本可能带着设备端点、预签名地址或隧道令牌，写出前经 redactSecrets。
+// 与 run-scope 一样在 ① 之后动态加载（源码形态下 .mjs 到 .mts 的映射靠 tsx）；放在下面的 try 之外：脱敏模块本身加载失败
+// 属于安装损坏，交给 Node 对未捕获异常的缺省输出（同样非零退出），不写一条未经脱敏的 fatal 行。
+const { redactSecrets } = await import("./lib/redact.mjs");
+
 // ③ 执行 worker 主流程。退出码统一由这里落地（run-scope.main 只返回码、不自己退——便于单测）。
 try {
   const { main } = await import("./worker/run-scope.mjs");
@@ -42,6 +48,6 @@ try {
 } catch (e) {
   // 「没开始执行就被拒」类启动失败（steps 加载失败等）与运行期 fatal 都走这里：一行 stderr + 非零退出。
   // 退出码用 1（**不能是 80**——80 是 ADR 0028 的网络故障退出码，core 会翻成可重试的 WorkerNetworkError）。
-  process.stderr.write(`worker fatal: ${e}\n`);
+  process.stderr.write(redactSecrets(`worker fatal: ${e}`) + "\n");
   process.exit(1);
 }

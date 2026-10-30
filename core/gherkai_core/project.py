@@ -395,7 +395,10 @@ class Termination:
     message: str | None
 
 
-RELEASE_FAILED_HINT = "远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
+# U 非空时追加到 job message 的释放提示，按 job 目标给（ADR 0051 决策 4、7；0034 机制二）：设备 job 的那句逐字取自 ADR 0034；
+# 桌面会话是 worker 自持的 AgentCore 浏览器会话，提示不提设备控制台。
+DEVICE_RELEASE_FAILED_HINT = "远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止"
+DESKTOP_RELEASE_FAILED_HINT = "AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止"
 
 
 def unconfirmed_sessions(sessions: list[SessionRecord]) -> list[SessionRecord]:
@@ -403,11 +406,11 @@ def unconfirmed_sessions(sessions: list[SessionRecord]) -> list[SessionRecord]:
     return [s for s in sessions if not s.confirmed]
 
 
-def _release_failed_message(unconfirmed: list[SessionRecord]) -> str:
-    """U 非空时追加到 job message 的产品语言提示：列出会话名；attempted 的尝试另列为「结果未知的创建尝试」。"""
+def _release_failed_message(unconfirmed: list[SessionRecord], *, device: bool) -> str:
+    """U 非空时追加到 job message 的产品语言提示：先按目标给释放提示，再列出会话名；attempted 的尝试另列为「结果未知的创建尝试」。"""
     created = [s.name for s in unconfirmed if s.origin != "attempted"]
     attempted = [s.name for s in unconfirmed if s.origin == "attempted"]
-    parts = [RELEASE_FAILED_HINT]
+    parts = [DEVICE_RELEASE_FAILED_HINT if device else DESKTOP_RELEASE_FAILED_HINT]
     if created:
         parts.append("未确认停止的会话：" + "、".join(created))
     if attempted:
@@ -424,14 +427,17 @@ def device_metering(sessions: list[SessionRecord]) -> tuple[float, int]:
 
 
 def is_device_job(job: Job) -> bool:
-    """job 的测试目标是否为设备（判据取 Job 上的目标字段；目标字段落地前所有 job 都是桌面网页，恒 False）。"""
+    """job 的测试目标是否为设备（判据只取 Job 上的目标字段，ADR 0048）。计量两键、释放提示与 job 级重试门槛都按它分，
+    不按有没有会话事件分：桌面与设备 job 都可能带会话记录（ADR 0051 决策 4）。"""
     target = getattr(job, "target", None)
     return target is not None and getattr(target, "device", "desktop") != "desktop"
 
 
 def apply_device_metering(result: JobResult) -> None:
-    """按会话记录给 JobResult 填两个设备计量键：设备 job 或已有会话记录的 job 才赋值，桌面 job 保持 None（序列化省键）。"""
-    if result.sessions or is_device_job(result.job):
+    """给设备 job 的 JobResult 填两个设备计量键（ADR 0051 决策 7）：只按 job 目标判，不按有没有会话记录判——桌面 worker 也发会话事件
+    （决策 4），AgentCore 浏览器会话不是设备分钟，按会话记录判会让每个桌面 job 多出这两键。设备 job 没有会话记录时两键也成对给出（合计 0、
+    缺计量 0）；桌面 job 两键保持 None（序列化省键）。"""
+    if is_device_job(result.job):
         result.device_observed_s, result.device_observed_missing = device_metering(result.sessions)
 
 
@@ -457,7 +463,8 @@ def finalize_job(
     内容完整（干净退出且发了 scope_done）后停止原因不再改写判定：判定已成，收尾拖过预算只改变推进器是否催停，不改结论——
     同步路径收到 scope_done 后不再落定停止原因，无状态路径的 timed_out 记录遇到它同样不改判，两条路径由这里同一条件保证；
     非零退出或退出码未知不算内容完整，照常受前两行约束。
-    U 非空时不论判定为何，归因改 release_failed 的行保留原因消息，message 都追加产品语言提示并列出会话名。
+    U 非空时不论判定为何，归因改 release_failed 的行保留原因消息，message 都追加产品语言提示并列出会话名；这条规则对桌面与设备
+    job 相同，只有提示那一句按目标给（ADR 0051 决策 4）。
     两条归约路径只负责准备输入，判定逻辑不写第二份。"""
     unconfirmed = unconfirmed_sessions(sessions)
     budget = f"（预算 {job.timeout_s:g}s，已中止）" if job.timeout_s else "（已中止）"
@@ -507,7 +514,7 @@ def finalize_job(
         if unconfirmed:  # worker 违约：判定完整却有会话未确认停止 → 改判 ERROR、release_failed
             status, error_type = Status.ERROR, "release_failed"
     if unconfirmed:
-        hint = _release_failed_message(unconfirmed)
+        hint = _release_failed_message(unconfirmed, device=is_device_job(job))
         message = f"{message}；{hint}" if message else hint
     return Termination(status=status, error_type=error_type, message=message)
 

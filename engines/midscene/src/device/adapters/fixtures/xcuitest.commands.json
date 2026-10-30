@@ -1,0 +1,178 @@
+{
+  "automationName": "XCUITest",
+  "cases": [
+    {
+      "name": "点击：坐标为点，即截图像素除以比例（保留两位小数）",
+      "call": "tap",
+      "context": {"scale": 3},
+      "input": {"point": {"x": 301, "y": 600}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: tap", {"x": 100.33, "y": 200}]}
+      ]
+    },
+    {
+      "name": "点击：比例为 2",
+      "call": "tap",
+      "context": {"scale": 2},
+      "input": {"point": {"x": 101, "y": 51}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: tap", {"x": 50.5, "y": 25.5}]}
+      ]
+    },
+    {
+      "name": "长按：坐标为点，时长以秒传给驱动",
+      "call": "longPress",
+      "context": {"scale": 3},
+      "input": {"point": {"x": 300, "y": 450}, "durationMs": 800},
+      "commands": [
+        {"method": "execute", "args": ["mobile: touchAndHold", {"x": 100, "y": 150, "duration": 0.8}]}
+      ]
+    },
+    {
+      "name": "长按：1500 毫秒",
+      "call": "longPress",
+      "context": {"scale": 2},
+      "input": {"point": {"x": 10, "y": 20}, "durationMs": 1500},
+      "commands": [
+        {"method": "execute", "args": ["mobile: touchAndHold", {"x": 5, "y": 10, "duration": 1.5}]}
+      ]
+    },
+    {
+      "name": "向下滚动：手指方向与内容方向相反",
+      "call": "scroll",
+      "context": {"scale": 3},
+      "input": {"direction": "down", "distance": 600, "screen": {"width": 1170, "height": 2532}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: swipe", {"direction": "up"}]}
+      ]
+    },
+    {
+      "name": "向上滚动：手指方向与内容方向相反",
+      "call": "scroll",
+      "context": {"scale": 3},
+      "input": {"direction": "up", "distance": 600, "screen": {"width": 1170, "height": 2532}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: swipe", {"direction": "down"}]}
+      ]
+    },
+    {
+      "name": "向左滚动：手指方向与内容方向相反",
+      "call": "scroll",
+      "context": {"scale": 3},
+      "input": {"direction": "left", "distance": 600, "screen": {"width": 1170, "height": 2532}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: swipe", {"direction": "right"}]}
+      ]
+    },
+    {
+      "name": "向右滚动：手指方向与内容方向相反",
+      "call": "scroll",
+      "context": {"scale": 3},
+      "input": {"direction": "right", "distance": 600, "screen": {"width": 1170, "height": 2532}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: swipe", {"direction": "left"}]}
+      ]
+    },
+    {
+      "name": "输入：网页上下文里的活动元素",
+      "call": "typeText",
+      "context": {"scale": 3, "inputContext": "web"},
+      "input": {"text": "hello 世界"},
+      "commands": [
+        {"withWebContext": [{"method": "getActiveElement", "args": []}, {"method": "elementSendKeys", "args": ["active-1", "hello 世界"]}]}
+      ]
+    },
+    {
+      "name": "输入：原生上下文里的活动元素",
+      "call": "typeText",
+      "context": {"scale": 3, "inputContext": "native"},
+      "input": {"text": "hello 世界"},
+      "commands": [
+        {"method": "getActiveElement", "args": []},
+        {"method": "elementSendKeys", "args": ["active-1", "hello 世界"]}
+      ]
+    },
+    {
+      "name": "回车：网页上下文里经活动元素发换行符",
+      "call": "keyboardPress",
+      "context": {"scale": 3, "inputContext": "web"},
+      "input": {"keyName": "Enter"},
+      "commands": [
+        {"withWebContext": [{"method": "getActiveElement", "args": []}, {"method": "elementSendKeys", "args": ["active-1", "\n"]}]}
+      ]
+    },
+    {
+      "name": "回车（Return）：原生上下文",
+      "call": "keyboardPress",
+      "context": {"scale": 3, "inputContext": "native"},
+      "input": {"keyName": "Return"},
+      "commands": [
+        {"method": "getActiveElement", "args": []},
+        {"method": "elementSendKeys", "args": ["active-1", "\n"]}
+      ]
+    },
+    {
+      "name": "退格：经活动元素发退格符",
+      "call": "keyboardPress",
+      "context": {"scale": 3, "inputContext": "native"},
+      "input": {"keyName": "Backspace"},
+      "commands": [
+        {"method": "getActiveElement", "args": []},
+        {"method": "elementSendKeys", "args": ["active-1", "\b"]}
+      ]
+    },
+    {
+      "name": "键名不分大小写",
+      "call": "keyboardPress",
+      "context": {"scale": 3, "inputContext": "native"},
+      "input": {"keyName": "enter"},
+      "commands": [
+        {"method": "getActiveElement", "args": []},
+        {"method": "elementSendKeys", "args": ["active-1", "\n"]}
+      ]
+    },
+    {
+      "name": "清空：原生上下文里一次发若干个退格符",
+      "call": "clearInput",
+      "context": {"scale": 3, "inputContext": "native"},
+      "commands": [
+        {"method": "getActiveElement", "args": []},
+        {"method": "elementSendKeys", "args": ["active-1", "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b"]}
+      ]
+    },
+    {
+      "name": "清空：网页上下文",
+      "call": "clearInput",
+      "context": {"scale": 3, "inputContext": "web"},
+      "commands": [
+        {"withWebContext": [{"method": "getActiveElement", "args": []}, {"method": "elementSendKeys", "args": ["active-1", "\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b\b"]}]}
+      ]
+    },
+    {
+      "name": "主屏键：mobile: pressButton 只用于这里",
+      "call": "home",
+      "context": {"scale": 3},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressButton", {"name": "home"}]}
+      ]
+    },
+    {
+      "name": "应用目标的 DeepLink：带 bundleId，地址原样送达",
+      "call": "deepLink",
+      "context": {"scale": 3},
+      "input": {"address": "myapp://item/1?ref=a(b)'c;d", "appId": "com.example.app"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: deepLink", {"url": "myapp://item/1?ref=a(b)'c;d", "bundleId": "com.example.app"}]}
+      ]
+    },
+    {
+      "name": "网页目标的 DeepLink：交给系统浏览器",
+      "call": "deepLink",
+      "context": {"scale": 3},
+      "input": {"address": "https://shop.example/list?q=a+b#top", "appId": null},
+      "commands": [
+        {"method": "execute", "args": ["mobile: deepLink", {"url": "https://shop.example/list?q=a+b#top", "bundleId": "com.apple.mobilesafari"}]}
+      ]
+    }
+  ]
+}

@@ -292,15 +292,19 @@ def _runtime_version() -> str | None:
 
 
 # 组合根拥有的 worker env（`GHERKAI_STEPS_DIR`、`GHERKAI_NO_ARTIFACTS`——ADR 0037 决策 4/3；
-# `GHERKAI_EXTRA_HTTP_HEADERS`——ADR 0035 决策 4；`GHERKAI_SESSION_WARMUP_URL`——ADR 0051 决策 13）：**有值显式注、无值显式清**
+# `GHERKAI_EXTRA_HTTP_HEADERS`——ADR 0035 决策 4；`GHERKAI_SESSION_WARMUP_URL`——ADR 0051 决策 13；`RUN_ID`——ADR 0024
+# 「run_id + scope_id 注入 worker」条）：**有值显式注、无值显式清**
 # ——它们是组合根 → worker 的内部接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` /
 # `GHERKAI_SESSION_WARMUP_URL` 的值随 definition 持久化（`RunMeta.steps_dir` / `extra_http_headers` / `session_warmup_url`），宿主继承值
 # 越过它，同一个 run 在三个宿主（同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头/预热地址、判定不可复现；
 # `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该方式什么都不落），清它挡的是另一件事：
-# 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。
+# 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。`RUN_ID` 是本 run 的 id（三个宿主都持有，与云端 RunTask overrides
+# 同名）：worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），宿主 shell 里残留的值越过组合根会把会话记到别的 run 名下。
+# 本机只注它、不注 `SCOPE_ID` 与 `EVENTS_DDB_TABLE`，worker 的事件出口仍是 fd 态（ADR 0024）。
 # **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 取值按 `build_engines`
 # docstring 的契约回落「SDK 默认」（SDK 默认本身就含读自己那个 env），清掉即改契约，故不在此列。
-_COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS", "GHERKAI_SESSION_WARMUP_URL")
+_COMPOSE_OWNED_WORKER_ENV = ("GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS", "GHERKAI_SESSION_WARMUP_URL",
+                             "RUN_ID")
 
 
 def scrubbed_environ() -> dict[str, str]:
@@ -308,7 +312,8 @@ def scrubbed_environ() -> dict[str, str]:
 
     只做加法的注入会让宿主 shell 的 `GHERKAI_STEPS_DIR` 直达 worker（definition 说「无使用方 step」也拦不住）。
     `build_fargate_engines` 侧不需要对称处理：RunTask overrides 是逐条显式枚举、容器不继承宿主 env，没有继承面。
-    **公开接缝**：`tools/e2e_harness` 复用它，保证 harness 的 spawn 环境与 adapter 同一起手式。
+    **公开接缝**：`tools/e2e_harness` 复用它，保证 harness 的 spawn 环境与 adapter 同一起手式；清掉之后要用的键（如 `RUN_ID`）
+    由调用方按自己的参数显式注回，与 `build_engines` 的两步写法相同。
     """
     return {k: v for k, v in os.environ.items() if k not in _COMPOSE_OWNED_WORKER_ENV}
 
@@ -323,6 +328,7 @@ def build_engines(
     session_warmup_url: str | None = None,
     steps_dir: str | Path | None = None,
     no_artifacts: bool = False,
+    run_id: str | None = None,
     worker_log=None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
@@ -355,6 +361,10 @@ def build_engines(
     （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None 表示无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
+    run_id（ADR 0024「run_id + scope_id 注入 worker」条）：本 run 的 id，经 env `RUN_ID` 注给**两个** worker（与云端 RunTask overrides
+    同名），worker 用它编码会话名的 run 段（ADR 0051 决策 3、4）。起 worker 的本机宿主（同步 `run`、local per-run 进程、`status --wait`
+    接力者）都持有它，都应传入；None 表示不注入，宿主 shell 里继承来的同名值同样被清掉。本机不注 `SCOPE_ID`，事件出口仍是 fd 态。
+
     **不注入产物 S3 上传落点**（`ARTIFACT_S3_BUCKET`/`PREFIX`）：本函数是本机后端，worker 恒报 `file://`。
     上传落点由 `build_fargate_engines` 注入（云端后端，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
     内部预演由 `tools/e2e_harness.py` 自拼 env 承载（ADR 0016 决策 B），不经本函数。
@@ -377,6 +387,7 @@ def build_engines(
     # - 使用方确定性 step 目录（ADR 0037 决策 4）：worker 只认这个 env，绝对路径、约定逻辑不进 worker。
     # - 会话预热地址（ADR 0051 决策 13）：隧道模式下随 definition 下发（`RunMeta.session_warmup_url`），worker 在第一个 scenario 之前
     #   导航一次换会话 cookie；与额外请求头成对（有请求头必有预热地址，worker 据此判 definition 完整性）。
+    # - 本 run 的 id（ADR 0024）：与云端同名的 `RUN_ID`，worker 编码会话名的 run 段用。
     common_env: dict[str, str] = {}
     if extra_http_headers:
         common_env["GHERKAI_EXTRA_HTTP_HEADERS"] = json.dumps(extra_http_headers, ensure_ascii=False)
@@ -386,6 +397,8 @@ def build_engines(
         common_env["GHERKAI_STEPS_DIR"] = str(steps_dir)
     if no_artifacts:
         common_env["GHERKAI_NO_ARTIFACTS"] = "1"
+    if run_id:
+        common_env["RUN_ID"] = run_id
 
     def _inject_aws(env: dict) -> None:
         # --region/--profile 解析值覆盖继承的 AWS_REGION/AWS_PROFILE（None 表示不写，留 boto 默认链/profile config

@@ -47,6 +47,11 @@ FROM worker-${WORKER_SOURCE} AS final
 # 两态共同的诚实校验 + 冒烟：worker 必须真装上、bin 必须真能启动（`--capabilities` 自述不需要 AWS）。
 # 漏 build-arg（选了 index 却没给版本 / 选了 local 却没给 tarball）在此 fail-loud，不拖到 Fargate 启动期。
 RUN gherkai-worker-midscene --capabilities > /dev/null
+# 设备依赖的冒烟：`--capabilities` 按设计不加载设备模块（ADR 0052 决策 3「设备模块动态加载」），照不出 WebdriverIO 或
+# Device Farm SDK 没装进镜像——那要等到云端第一个设备 job 动态 import 时才失败。这里只 import 设备接缝模块
+# （连带解析它的全部静态依赖），不调用任何导出、不建会话，零 AWS 调用。接缝模块静态 import 设备部件的缺省装配，
+# 两项设备依赖都在这条静态闭包里（src/device/surface.test.mts 守这一点），闭包断了这条冒烟就会在缺依赖时照样通过。
+RUN node --input-type=module -e "await import('$(npm root -g)/@gherkai/worker-midscene/dist/device/surface.mjs')"
 # region 不焊镜像：AWS_REGION 经 RunTask overrides 注入（agentcore-sigv4 的 getRegion 读它、全可配，ADR 0033/0016 决策 C）；
 # 凭证走 task role（fromNodeProviderChain 解析 AWS_CONTAINER_CREDENTIALS_RELATIVE_URI）。
 CMD ["gherkai-worker-midscene"]

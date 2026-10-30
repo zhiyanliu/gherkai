@@ -615,8 +615,9 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
-        # 起会话不带任何参数：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）
-        assert kw == {}, kw
+        # 起会话只带请求名：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）；
+        # 请求名的规则见 test_session_events.py
+        assert set(kw) == {"name"}, kw
         if self._raises is not None:
             raise self._raises
         if self._on_start:
@@ -676,6 +677,7 @@ def main_fakes(monkeypatch, logs_dir):
     monkeypatch.setattr(rs, "get_current_workflow", lambda: None)
     monkeypatch.setattr(rs, "set_current_workflow", lambda w: None)
     monkeypatch.setattr(rs, "NovaAct", lambda **k: _FakeNovaAct())
+    monkeypatch.setenv("RUN_ID", "20260629T141207Z-a3f9c1")  # 起 worker 的一方总会注入它（浏览器会话的请求名要用）
     rs._stop.clear()
     yield monkeypatch
     rs._stop.clear()

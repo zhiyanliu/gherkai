@@ -697,6 +697,9 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
     assert str(nova).endswith("/nova-trajectories") and str(mid).endswith("/midscene-run")
     assert Path(nova).parent == Path(mid).parent          # 同一 <report_dir>/<run_id> 下
     assert Path(mid).parent.parent == report_dir.resolve()  # 绝对化的 report_dir（避 worker cwd 歧义）
+    # 本 run 的 id 一并交给 build_engines（经 env RUN_ID 注给 worker，编码会话名的 run 段，ADR 0024「run_id + scope_id 注入
+    # worker」条）：与落点目录名同一个值。缺了它两个 worker 都在建会话前以 1 退出，本机后端的每个 run 都失败。
+    assert box["kwargs"]["run_id"] == Path(mid).parent.name
 
 
 def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
@@ -714,6 +717,7 @@ def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
     m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
     assert box["nova_logs_dir"] is None and box["midscene_run_dir"] is None
     assert box["no_artifacts"] is True
+    assert box["run_id"]  # 不落库也照传 run id：会话名的 run 段与是否生成报告无关
 
 
 def test_report_run_passes_absolute_artifact_dirs_and_no_flag(tmp_path, monkeypatch):
@@ -1098,11 +1102,15 @@ def test_plan_degrades_when_worker_runtime_missing(tmp_path, monkeypatch, capsys
 # ---- steps/ 定制面（ADR 0037 决策 4）：解析在组合根、随 definition 持久化、worker 只认 env ----
 
 def _spy_build_engines(monkeypatch):
-    """记录 build_engines 收到的 kwargs（仍调真实实现，保 cmd/env 接线真实）。"""
+    """记录 build_engines 收到的 kwargs（仍调真实实现，保 cmd/env 接线真实）。
+
+    每次调用都断言带了 run id：同步 run 不传它，worker 拿不到 RUN_ID、在建会话前以 1 退出（ADR 0024「run_id + scope_id 注入
+    worker」条）；放在共用的 spy 里，经它的每条用例都兜住这一条。"""
     box = {}
     real = m.compose.build_engines
 
     def spy(**kwargs):
+        assert kwargs.get("run_id"), "同步 run 须把本 run 的 id 传给 build_engines"
         box.update(kwargs)
         return real(**kwargs)
 

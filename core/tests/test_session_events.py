@@ -118,7 +118,7 @@ def test_worker_exit_error_carries_exit_code_and_network_is_a_subclass():
     assert WorkerNetworkError("x").exit_code == 80
 
 
-# ---- serialize：设备 job 带 sessions[] 与两个计量键、桌面 job 省键、往返一致、旧落盘可读 ----
+# ---- serialize：设备 job 带 sessions[] 与两个计量键、没有会话记录的桌面 job 省键、带会话记录的桌面 job 只有 sessions[]、往返一致、旧落盘可读 ----
 
 def _job(scope_id: str = "s") -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene",
@@ -146,9 +146,32 @@ def test_device_job_round_trips_sessions_and_metering_and_desktop_job_omits_them
         ("arn:d", "n-d", "created", "unconfirmed", None, None),  # 读回即 unconfirmed（写端已规范化）
     ]
     desktop = job_result_to_dict(JobResult(job=_job("desk"), status=Status.PASSED))
-    assert not {"sessions", "device_observed_s", "device_observed_missing"} & set(desktop)  # 桌面 job 三键都不出现
-    old = job_result_from_dict(desktop)  # 旧落盘 / 桌面：读出空列表与 None，不报错
+    assert not {"sessions", "device_observed_s", "device_observed_missing"} & set(desktop)  # 没有会话记录的桌面 job 三键都不出现
+    old = job_result_from_dict(desktop)  # 旧落盘 / 没有会话记录的桌面 job：读出空列表与 None，不报错
     assert old.sessions == [] and old.device_observed_s is None and old.device_observed_missing is None
+
+
+def test_desktop_job_with_sessions_writes_sessions_without_metering_keys():
+    """桌面 worker 也发会话事件（ADR 0051 决策 4）：桌面 job 带会话记录时写出 sessions[]，两个计量键仍省略——它们只按目标是否含设备
+    出现（决策 7），AgentCore 浏览器会话不是设备分钟；写成两个 null 也不行，读者会把「有键」当成设备 job。"""
+    desk = JobResult(job=_job("desk"), status=Status.ERROR, sessions=[
+        SessionRecord(session_id="bs-1", name="bs-1", origin="created", release="confirmed"),
+        SessionRecord(session_id=None, name="gherkai:r:ab:2:desk", origin="attempted", release="unconfirmed"),
+    ])  # 两个计量键保持 None：apply_device_metering 只给设备 job 填
+    d = job_result_to_dict(desk)
+    assert [s["name"] for s in d["sessions"]] == ["bs-1", "gherkai:r:ab:2:desk"]
+    assert not {"device_observed_s", "device_observed_missing"} & set(d)
+    back = job_result_from_dict(json.loads(json.dumps(d)))
+    assert [s.origin for s in back.sessions] == ["created", "attempted"]
+    assert back.device_observed_s is None and back.device_observed_missing is None
+
+
+def test_device_job_without_sessions_still_writes_both_metering_keys_and_empty_sessions():
+    """设备 job 没有会话记录时两键也成对给出（合计 0、缺计量 0，ADR 0051 决策 7），sessions[] 随之写成空数组：出现与否只看目标。"""
+    d = job_result_to_dict(JobResult(job=_job("dev"), status=Status.ERROR, device_observed_s=0.0, device_observed_missing=0))
+    assert d["sessions"] == [] and d["device_observed_s"] == 0.0 and d["device_observed_missing"] == 0
+    back = job_result_from_dict(d)
+    assert back.sessions == [] and (back.device_observed_s, back.device_observed_missing) == (0.0, 0)
 
 
 def test_run_result_run_level_metering_keys_follow_the_same_omit_rule():

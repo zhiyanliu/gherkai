@@ -189,6 +189,21 @@ def test_evidence_screenshot_and_json_content_types(tmp_path):
     assert calls.extra_by_key[base + "evidence.json"] == {"ContentType": "application/json"}
 
 
+def test_xml_gets_application_xml_content_type(tmp_path):
+    """`.xml` → application/xml（ADR 0042 决策一，两引擎同规则同步改）：设备目标的原始控件树是 .xml（ADR 0051 决策 8），Midscene 上传器
+    已按它打类型；本引擎当前不产 .xml，同步加上是为了两份映射不漂移。"""
+    run_dir = tmp_path / "reports" / "rid"
+    art = run_dir / "nova-trajectories" / "evidence" / "sc" / "step-0"
+    art.mkdir(parents=True)
+    (art / "page-source.xml").write_text("<hierarchy/>")
+    (art / "PAGE.XML").write_text("<hierarchy/>")
+    u, calls = _uploader_with_mock("bkt", "reports/rid/", run_dir)
+    u.flush_and_cleanup(run_dir / "nova-trajectories")
+    base = "reports/rid/nova-trajectories/evidence/sc/step-0/"
+    assert calls.extra_by_key[base + "page-source.xml"] == {"ContentType": "application/xml"}
+    assert calls.extra_by_key[base + "PAGE.XML"] == {"ContentType": "application/xml"}  # 后缀比对大小写无关
+
+
 # ---- ref_for：只算 ref、不上传（ADR 0042 决策一「上传时机分两类」；截图字节随 scope 末 flush 走）----
 def test_ref_for_equals_report_ref_without_uploading(tmp_path):
     run_dir = tmp_path / "reports" / "rid"

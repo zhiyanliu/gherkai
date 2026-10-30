@@ -27,6 +27,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { registrySize } from "./deterministic.mjs";
+import { redactSecrets } from "../lib/redact.mjs";
 
 const STEP_EXTS = [".mts", ".mjs"];
 
@@ -56,7 +57,7 @@ export interface LoadUserStepsDeps {
   stepsDir?: string | undefined;                       // 默认取 env GHERKAI_STEPS_DIR
   importer?: (url: string) => Promise<unknown>;        // 默认真 dynamic import（测试可注入）
   size?: () => number;                                 // 默认真注册表条数（测试可注入）
-  logFn?: (m: string) => void;                         // 默认 stderr
+  logFn?: (m: string) => void;                         // 默认 stderr（写出前经 redactSecrets）
 }
 
 /** 加载使用方 steps 目录。env 未设 / 空串 → no-op（使用方没定制，正常路径）；env 已设但目录不存在 / 不是目录 → 抛
@@ -67,7 +68,8 @@ export async function loadUserSteps(deps: LoadUserStepsDeps = {}): Promise<strin
   if (!stepsDir) return [];
   const size = deps.size ?? registrySize;
   const importer = deps.importer ?? ((url: string) => import(url));
-  const logFn = deps.logFn ?? ((m: string) => process.stderr.write(m + "\n"));
+  // 缺省诊断出口写出前经 redactSecrets：目录路径由使用方给出，原样拼进诊断行（ADR 0051 决策 11）
+  const logFn = deps.logFn ?? ((m: string) => process.stderr.write(redactSecrets(m) + "\n"));
   if (!fs.existsSync(stepsDir) || !fs.statSync(stepsDir).isDirectory()) {
     // 目录不存在不是静默降级面：组合根解析时已确认存在才注入，走到这里说明提交后目录被移走/写错，
     // 属「没开始执行就被拒」——报错退出，不装作没有确定性 step。

@@ -246,11 +246,20 @@ def _session_from_dict(d: dict) -> SessionRecord:
 
 
 def _device_keys(sessions: list[SessionRecord], observed_s: float | None, missing: int | None) -> dict:
-    """设备 job 才有的三个键（ADR 0051 决策 7）：有会话记录或计量键有值即写出；桌面 job 三者皆空 → 省键。"""
-    if not sessions and observed_s is None and missing is None:
-        return {}
-    return {"sessions": [_session_to_dict(s) for s in sessions],
-            "device_observed_s": observed_s, "device_observed_missing": missing}
+    """会话记录与两个设备计量键（ADR 0051 决策 4、7），出现条件各自独立：
+
+    - `sessions`：有会话记录或计量键有值即写出。桌面 worker 也发会话事件，桌面 job 因此也可带它；设备 job 没有会话记录时随计量键写成空数组。
+    - `device_observed_s` / `device_observed_missing`：两键同层成对，只在有值时写出。有值与否由 `project.apply_device_metering` 按目标
+      决定（只给设备 job 填），本函数不按会话记录推断——桌面 job 带会话记录时也不出现两个 null 计量键。
+    """
+    metered = observed_s is not None or missing is not None
+    d: dict = {}
+    if sessions or metered:
+        d["sessions"] = [_session_to_dict(s) for s in sessions]
+    if metered:
+        d["device_observed_s"] = observed_s
+        d["device_observed_missing"] = missing
+    return d
 
 
 def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
@@ -351,7 +360,7 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
         report_refs=tuple(_ref_from_dict(r) for r in d.get("report_refs", [])),
         error_type=d.get("error_type"),
         message=d.get("message"),
-        # 远程访问会话与计量（ADR 0051 决策 7）：旧落盘 / 桌面 job 无这些键 → 空列表与 None
+        # 会话记录与计量（ADR 0051 决策 4、7）：缺键（旧落盘、没有会话记录的桌面 job）→ 空列表与 None；带会话记录的桌面 job 只有 sessions
         sessions=[_session_from_dict(s) for s in d.get("sessions", [])],
         device_observed_s=d.get("device_observed_s"),
         device_observed_missing=d.get("device_observed_missing"),

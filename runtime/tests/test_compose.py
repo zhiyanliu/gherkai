@@ -226,8 +226,8 @@ def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, monkeypat
 
 
 def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd):
-    """组合根拥有的三个 env「有值注、无值清」（ADR 0037 决策 4/3 + ADR 0035 决策 4）：definition 说没有时，
-    宿主 shell 里的同名值**不得**越过 definition 直达 worker。
+    """组合根拥有的 worker env「有值注、无值清」（ADR 0037 决策 4/3 + ADR 0035 决策 4 + ADR 0051 决策 13 + ADR 0024「run_id + scope_id
+    注入 worker」条）：入参说没有时，宿主 shell 里的同名值**不得**越过组合根直达 worker。
 
     真实触发形态：提交时既无 `--steps-dir`、也无 `./steps`，于是 definition 里 steps_dir 为 None；之后在 export 了
     GHERKAI_STEPS_DIR 的 shell 里 `status <run> --wait` 接力推进——只做加法的注入会让 worker 加载接力者那台机器的
@@ -238,14 +238,18 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
     monkeypatch.setenv("GHERKAI_NO_ARTIFACTS", "1")
     monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
-    engines = compose.build_engines()  # 三样都不传（即 definition 里都没有）
+    monkeypatch.setenv("GHERKAI_SESSION_WARMUP_URL", "https://leaked/")
+    monkeypatch.setenv("RUN_ID", "host-run")
+    assert {"GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS", "GHERKAI_SESSION_WARMUP_URL",
+            "RUN_ID"} == set(compose._COMPOSE_OWNED_WORKER_ENV)  # 宿主值全部预置，下面的逐键断言才覆盖整族
+    engines = compose.build_engines()  # 全都不传（即 definition 里都没有，也没有 run id）
     for name in ("novaact", "midscene"):
         env = engines[name]._env
         # 宿主带 owned 键则必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
         assert env is not None, name
         for key in compose._COMPOSE_OWNED_WORKER_ENV:
             assert key not in env, (name, key)
-        assert env.get("PATH") == os.environ.get("PATH"), name  # 只清这三键，其余（PATH/AWS 凭证等）照常继承
+        assert env.get("PATH") == os.environ.get("PATH"), name  # 只清组合根拥有的键，其余（PATH/AWS 凭证等）照常继承
 
 
 def test_resolver_known_and_unknown(midscene_env_cmd):
@@ -1672,6 +1676,43 @@ def test_session_warmup_url_is_owned_env_injected_to_both_engines_and_scrubbed_o
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
         assert env2 is not None and "GHERKAI_SESSION_WARMUP_URL" not in env2, name
+
+
+def test_run_id_is_owned_env_injected_to_both_engines_and_scrubbed_otherwise(monkeypatch, midscene_env_cmd):
+    """本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条、ADR 0037 决策 4）是组合根拥有的 worker env：有值以 RUN_ID 注给
+    两个引擎，与云端 RunTask overrides 同名（worker 用它编码会话名的 run 段）；不传则不注入、且清掉宿主继承的同名值——会话名里的
+    run 段只认组合根给的值。本机不注 SCOPE_ID，也不注 EVENTS_DDB_TABLE：worker 的事件出口仍是 fd 态。"""
+    assert "RUN_ID" in compose._COMPOSE_OWNED_WORKER_ENV
+    engines = compose.build_engines(run_id="20261030T000000Z-abc123")
+    for name in ("novaact", "midscene"):
+        env = engines[name]._env
+        assert env is not None and env["RUN_ID"] == "20261030T000000Z-abc123", name
+        assert "SCOPE_ID" not in env and "EVENTS_DDB_TABLE" not in env, name
+    monkeypatch.setenv("RUN_ID", "host-run")
+    engines2 = compose.build_engines()
+    for name in ("novaact", "midscene"):
+        env2 = engines2[name]._env
+        assert env2 is not None and "RUN_ID" not in env2, name
+
+
+def test_fargate_engines_leave_run_id_to_the_engine_adapter(monkeypatch):
+    """云端后端的 RUN_ID 由执行 adapter（core 的 FargateEngine）随 SCOPE_ID 一起写进 RunTask overrides：组合根只经 run_id 参数交给它，
+    附加 env 里不再出现同名键，否则 overrides 里同一个键会有两项。"""
+    from gherkai_core.adapters import fargate_engine as fe
+
+    captured: list = []
+
+    class _FakeFargate:
+        def __init__(self, **kwargs):
+            captured.append(kwargs)
+
+    monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
+    compose.build_fargate_engines(run_id="rid-1", prefix="p-", cluster="c", events_table="e", bucket="b", report_dir="runs",
+                                  network_config={"subnets": ["subnet-x"]},
+                                  worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
+                                  region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+    assert len(captured) == 2
+    assert all(k["run_id"] == "rid-1" and "RUN_ID" not in k["extra_env"] for k in captured)
 
 
 def test_fargate_engines_carry_session_warmup_url_in_extra_env_only_when_given(monkeypatch):

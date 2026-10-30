@@ -199,8 +199,9 @@ class _FakeBrowserClient:
         self.identifier = None
 
     def start(self, **kw):
-        # 起会话不带任何参数：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）
-        assert kw == {}, kw
+        # 起会话只带请求名：没有 profile 配置、用默认浏览器标识，会话从干净状态起步（ADR 0028「Nova 会话由 worker 自己持有」）；
+        # 请求名的规则与会话事件见 test_session_events.py
+        assert set(kw) == {"name"}, kw
         hook = self._box.get("start_hook")
         if hook is not None:
             hook()
@@ -270,12 +271,18 @@ def driven(monkeypatch, tmp_path):
 
     monkeypatch.setattr(W, "warmup_session", stub)
     monkeypatch.setenv("NOVA_LOGS_DIR", str(tmp_path))
+    monkeypatch.setenv("RUN_ID", "20260629T141207Z-a3f9c1")  # 起 worker 的一方总会注入它（浏览器会话的请求名要用）
     monkeypatch.delenv("ARTIFACT_S3_BUCKET", raising=False)
     monkeypatch.delenv(C.EXTRA_HTTP_HEADERS_ENV, raising=False)
     monkeypatch.delenv(C.SESSION_WARMUP_URL_ENV, raising=False)
     rs._stop.clear()
     yield trace, sink, box
     rs._stop.clear()
+
+
+# 每个建起的会话都有一对会话事件（Start 返回后发 session_opened、释放后发 session_closed，ADR 0051 决策 4）；它们的字段与配对规则见
+# test_session_events.py，这里只把它们写进事件次序。
+PAIR = ["session_opened", "session_closed"]
 
 
 def test_headers_without_warmup_url_is_precheck_failed_before_any_session(driven, monkeypatch):
@@ -293,9 +300,9 @@ def test_warmup_ready_navigates_once_before_scope_started(driven, monkeypatch):
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == ["session_opened", "scope_started", "session_closed", "scope_done"]
     assert box["page"].gotos == [WARMUP_URL, "about:blank"]  # 预热恰一次、随即离开预热页（令牌不留在当前地址），都在 scope_started 之前
-    assert "status" not in sink.events[1]
+    assert "status" not in sink.events[-1]
 
 
 def test_warmup_rejected_releases_session_then_reports_scope_level_error(driven, monkeypatch):
@@ -304,10 +311,10 @@ def test_warmup_rejected_releases_session_then_reports_scope_level_error(driven,
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0  # 不是 EX_WORKER_NETWORK、不是 worker fatal
-    assert [e["type"] for e in sink.events] == ["scope_done"]
-    ev = sink.events[0]
+    assert [e["type"] for e in sink.events] == PAIR + ["scope_done"]
+    ev = sink.events[-1]
     assert ev["status"] == "error" and ev["errorType"] == "precheck_failed" and ev["sessionId"] == "sess-fake"
-    assert trace.index(("nova_exit",)) < trace.index(("emit", "scope_done"))  # 先释放会话再发事件（ADR 0051 决策 5）
+    assert trace.index(("nova_exit",)) < trace.index(("emit", "session_closed")) < trace.index(("emit", "scope_done"))  # 先释放会话再发事件（ADR 0051 决策 5）
 
 
 def test_warmup_navigation_failures_end_as_engine_error_with_exit_0(driven, monkeypatch):
@@ -316,7 +323,7 @@ def test_warmup_navigation_failures_end_as_engine_error_with_exit_0(driven, monk
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_done"] and sink.events[0]["errorType"] == "engine_error"
+    assert [e["type"] for e in sink.events] == PAIR + ["scope_done"] and sink.events[-1]["errorType"] == "engine_error"
     assert trace.count(("nova_init",)) == 1  # 预热的导航失败不进建连重试域：没有重建会话
 
 
@@ -342,10 +349,10 @@ def test_warmup_precedes_scope_started_and_scenarios(driven, monkeypatch):
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
     assert [t for t in trace if t[0] in ("goto", "emit", "run_scenario")] == [
-        ("goto", WARMUP_URL), ("goto", "about:blank"), ("emit", "scope_started"),
+        ("emit", "session_opened"), ("goto", WARMUP_URL), ("goto", "about:blank"), ("emit", "scope_started"),
         ("emit", "scenario_started"), ("run_scenario", "x:1"), ("emit", "scenario_done"),
         ("emit", "scenario_started"), ("run_scenario", "x:2"), ("emit", "scenario_done"),
-        ("emit", "scope_done")]
+        ("emit", "session_closed"), ("emit", "scope_done")]
 
 
 def test_release_failure_after_warmup_rejection_exits_1_without_reconnecting(driven, monkeypatch):
@@ -363,13 +370,15 @@ def test_release_failure_after_warmup_rejection_exits_1_without_reconnecting(dri
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_done"]
-    assert sink.events[0]["status"] == "error" and sink.events[0]["errorType"] == "precheck_failed"
+    assert [e["type"] for e in sink.events] == PAIR + ["scope_done"]
+    assert sink.events[-1]["status"] == "error" and sink.events[-1]["errorType"] == "precheck_failed"
+    assert sink.events[1]["release"] == "confirmed"  # 出错的是关 NovaAct 连接；Stop 成功，会话本身确认已停
     assert trace.count(("nova_init",)) == 1  # 释放失败不是建连失败：没有重建会话
 
 
 def test_stop_during_warmup_releases_session_quietly_with_exit_0(driven, monkeypatch):
-    """预热途中收到停止信号：正常 return 释放会话、不发任何事件、退出码 0——与 scenario 边界的协作停走同一条路径（ADR 0024 flag-only）。"""
+    """预热途中收到停止信号：正常 return 释放会话、除这个会话的一对会话事件外不发任何事件、退出码 0——与 scenario 边界的协作停走同一
+    条路径（ADR 0024 flag-only）。"""
     trace, sink, box = driven
 
     class _StopPage(_FakePage):
@@ -381,11 +390,11 @@ def test_stop_during_warmup_releases_session_quietly_with_exit_0(driven, monkeyp
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
-    assert sink.events == [] and ("nova_exit",) in trace
+    assert [e["type"] for e in sink.events] == PAIR and ("nova_exit",) in trace
 
 
 def test_release_failure_with_stop_after_warmup_rejection_still_exits_1(driven, monkeypatch):
-    """预热被拒、释放会话出错、同时停止信号已置位：停止路径不发事件，但退出码仍是 1——释放失败不能被停止分支的 return 0 吞掉
+    """预热被拒、释放会话出错、同时停止信号已置位：停止路径不发判定事件，但退出码仍是 1——释放失败不能被停止分支的 return 0 吞掉
     （ADR 0051 决策 5：退出码 1 表示有会话未确认停止，桌面只靠它让泄漏可观测）。"""
     trace, sink, box = driven
 
@@ -404,11 +413,11 @@ def test_release_failure_with_stop_after_warmup_rejection_still_exits_1(driven, 
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 1
-    assert sink.events == [] and trace.count(("nova_init",)) == 1
+    assert [e["type"] for e in sink.events] == PAIR and trace.count(("nova_init",)) == 1
 
 
 def test_release_failure_after_stopped_warmup_exits_1_without_reconnecting(driven, monkeypatch):
-    """预热被停止信号打断后释放会话抛网络类异常：不是建连失败——不进建连重试域（不重建会话）、不发事件、退出码 1。
+    """预热被停止信号打断后释放会话抛网络类异常：不是建连失败——不进建连重试域（不重建会话）、不发判定事件、退出码 1。
     此前这条路径会被当成瞬时网络错进退避、再被循环顶的停止检查放过，以 0 退出把释放失败吞掉。"""
     trace, sink, box = driven
 
@@ -427,13 +436,14 @@ def test_release_failure_after_stopped_warmup_exits_1_without_reconnecting(drive
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 1
-    assert sink.events == [] and trace.count(("nova_init",)) == 1
+    assert [e["type"] for e in sink.events] == PAIR and trace.count(("nova_init",)) == 1
 
 
 def test_no_tunnel_env_is_zero_change(driven):
     trace, sink, box = driven
     assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"] and box["page"].gotos == []
+    assert [e["type"] for e in sink.events] == ["session_opened", "scope_started", "session_closed", "scope_done"]
+    assert box["page"].gotos == []
 
 
 def _stop_fails(box, *excs):
@@ -462,12 +472,13 @@ def test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == PAIR + ["session_opened", "scope_started", "session_closed", "scope_done"]
+    assert [e["release"] for e in sink.events if e["type"] == "session_closed"] == ["unconfirmed", "confirmed"]
     assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2  # 重试建了第二个会话、两个都走到释放
 
 
 def test_release_failure_of_the_agentcore_session_with_stop_exits_1_without_retry(driven, monkeypatch):
-    """同一窗口里停止信号已置位：不再重试、不发事件，退出码 1——释放失败不能被停止分支吞成 0。"""
+    """同一窗口里停止信号已置位：不再重试、不发判定事件，退出码 1——释放失败不能被停止分支吞成 0。"""
     trace, sink, box = driven
     _stop_fails(box, ConnectionError("stop reset"))
 
@@ -478,11 +489,12 @@ def test_release_failure_of_the_agentcore_session_with_stop_exits_1_without_retr
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 1
-    assert sink.events == [] and trace.count(("session_start",)) == 1
+    assert [e["type"] for e in sink.events] == PAIR and sink.events[1]["release"] == "unconfirmed"
+    assert trace.count(("session_start",)) == 1
 
 
 def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
-    """建连期间收到停止信号且建连抛网络错、会话正常释放：这是建连失败不是释放失败——按停止路径以 0 退出、零事件。
+    """建连期间收到停止信号且建连抛网络错、会话正常释放：这是建连失败不是释放失败——按停止路径以 0 退出、只有这个会话的一对会话事件。
     守住「只有释放阶段抛出才记 release_error」：把建连异常也记成释放失败会向桌面误报有会话未确认停止。"""
     trace, sink, box = driven
 
@@ -493,7 +505,8 @@ def test_connect_failure_with_stop_and_no_session_exits_0(driven, monkeypatch):
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 0
-    assert sink.events == [] and trace.count(("session_stop",)) == 1
+    assert [e["type"] for e in sink.events] == PAIR and sink.events[1]["release"] == "confirmed"
+    assert trace.count(("session_stop",)) == 1
 
 
 def test_release_failure_outranks_network_exhaustion(driven, monkeypatch):
@@ -503,12 +516,12 @@ def test_release_failure_outranks_network_exhaustion(driven, monkeypatch):
     monkeypatch.setattr(rs, "NovaAct", lambda **k: (_ for _ in ()).throw(ConnectionError("reset")))
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: False)
     assert rs.main() == 1
-    assert sink.events == []
+    assert [e["type"] for e in sink.events] == PAIR * rs._CONNECT_ATTEMPTS  # 每次 attempt 建起的会话各一对，没有判定事件
 
 
 @pytest.mark.parametrize("statuses, titles, expect_events", [
-    ([401], ["gherkai-tunnel-auth-required"], ["scope_done"]),  # 预热被拒
-    ([200], ["gherkai-tunnel-warmup"], []),                     # 预热被停止信号打断（下面的页面桩置停止）
+    ([401], ["gherkai-tunnel-auth-required"], PAIR + ["scope_done"]),  # 预热被拒
+    ([200], ["gherkai-tunnel-warmup"], PAIR),                          # 预热被停止信号打断（下面的页面桩置停止）
 ])
 def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_both_layers_released(driven, monkeypatch, statuses, titles, expect_events):
     trace, sink, box = driven
@@ -516,7 +529,7 @@ def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_b
 
     class _Page(_FakePage):
         def goto(self, url, **kw):
-            if not expect_events:
+            if "scope_done" not in expect_events:
                 rs._stop.set()
             return super().goto(url, **kw)
 
@@ -525,6 +538,7 @@ def test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_b
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 1
     assert [e["type"] for e in sink.events] == expect_events
+    assert sink.events[1]["release"] == "unconfirmed"  # Stop 失败：会话未确认停止
     assert trace.count(("nova_exit",)) == 1 and trace.count(("session_stop",)) == 1  # 两层都走到释放
 
 
@@ -548,7 +562,7 @@ def test_release_failure_on_the_normal_path_keeps_the_verdict_and_exits_1(driven
     trace, sink, box = driven
     _stop_fails(box, RuntimeError("stop failed"))
     assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == ["session_opened", "scope_started", "session_closed", "scope_done"]
 
 
 def test_capabilities_declare_session_warmup():
@@ -563,7 +577,7 @@ def test_ws_headers_failure_after_start_then_stop_failure_is_observable(driven, 
     _stop_fails(box, RuntimeError("stop failed"))
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == PAIR + ["session_opened", "scope_started", "session_closed", "scope_done"]
     assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2
 
 
@@ -573,7 +587,7 @@ def test_ws_headers_failure_with_successful_stop_is_a_plain_connect_failure(driv
     box["ws_headers_excs"] = [ConnectionError("credentials endpoint timed out")]
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: _stop_is_set())
     assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == PAIR + ["session_opened", "scope_started", "session_closed", "scope_done"]
     assert trace.count(("session_start",)) == 2 and trace.count(("session_stop",)) == 2
 
 
@@ -628,7 +642,8 @@ def test_stop_timeout_in_main_exits_1_with_the_verdict_kept(driven, monkeypatch)
     monkeypatch.setattr(rs, "BrowserClient", lambda region=None: _HangingClient(trace, box))
     monkeypatch.setattr(rs, "SESSION_STOP_BUDGET_S", 0.05)
     assert rs.main() == 1
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == ["session_opened", "scope_started", "session_closed", "scope_done"]
+    assert sink.events[2]["release"] == "unconfirmed"  # Stop 超过预算：会话未确认停止
 
 
 def test_workflow_status_update_failure_on_exit_does_not_change_the_exit_code(driven, monkeypatch):
@@ -641,11 +656,11 @@ def test_workflow_status_update_failure_on_exit_does_not_change_the_exit_code(dr
 
     monkeypatch.setattr(rs, "Workflow", lambda **k: _ExitRaises())
     assert rs.main() == 0
-    assert [e["type"] for e in sink.events] == ["scope_started", "scope_done"]
+    assert [e["type"] for e in sink.events] == ["session_opened", "scope_started", "session_closed", "scope_done"]
 
 
 def test_lineage_is_the_agentcore_session_id_not_the_nova_act_one(driven, monkeypatch):
-    """scope_started / scope_done 带的 sessionId 是 AgentCore 浏览器会话 id（ADR 0051 决策 5），不是 Nova Act 服务侧的会话 id。"""
+    """会话事件、scope_started 与 scope_done 带的 sessionId 都是 AgentCore 浏览器会话 id（ADR 0051 决策 4），不是 Nova Act 服务侧的会话 id。"""
     trace, sink, box = driven
     assert rs.main() == 0
     assert {e["sessionId"] for e in sink.events} == {"sess-fake"}

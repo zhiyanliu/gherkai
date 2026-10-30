@@ -40,13 +40,15 @@ from typing import Iterable
 # **不猜** content type，默认落成 binary/octet-stream → presigned/控制台直开 trajectory .html（ADR 0027 选
 # .html 就是为「人能看」）会被当附件下载而非渲染。未列后缀不设（走 S3 默认）。
 # 图片/json 同理（ADR 0042 决策一）：evidence 的截图与 evidence.json 都要能直开渲染（截图被当附件下载、
-# json 被当二进制，agent 与人取证都得先另存），两引擎同规则同步改。
+# json 被当二进制，agent 与人取证都得先另存），两引擎同规则同步改。`.xml` 是设备目标的原始控件树（ADR 0051 决策 8，只有 Midscene
+# 产出）：本引擎当前不产 .xml，照样列出，两份映射才不漂移。
 _CONTENT_TYPE_BY_SUFFIX = {
     ".html": "text/html; charset=utf-8",
     ".jpg": "image/jpeg",
     ".jpeg": "image/jpeg",
     ".png": "image/png",
     ".json": "application/json",
+    ".xml": "application/xml",
 }
 
 

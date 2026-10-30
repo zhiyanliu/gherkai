@@ -102,8 +102,9 @@ class _SessionView:
 
 
 def session_lines(jr: JobResult) -> list[str]:
-    """job 的远程访问会话摘要行（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数；未确认停止的会话按名列出，
-    结果未知的创建尝试单独标出。桌面 job 返回空列表。run 文本树与 explain 文本共用。"""
+    """job 的会话摘要行（ADR 0051 决策 4、7；0034 机制二 U 集）：设备 job 给设备占用时长与缺计量会话数；未确认停止的会话按名列出，
+    结果未知的创建尝试单独标出。桌面 worker 也发会话事件，桌面 job 同样可有后两类行，只是没有占用时长一行；没有会话记录的桌面 job
+    返回空列表。run 文本树与 explain 文本共用。"""
     lines: list[str] = []
     if jr.device_observed_s is not None or jr.device_observed_missing is not None:
         missing = jr.device_observed_missing or 0
@@ -179,7 +180,7 @@ def run_tree(result: RunResult) -> TreeNode:
             jn.add(styled(f"session id: {jr.session_id}", DIM))
         for line in device_header_lines(jr.sessions, jr.session_id):  # 设备描述与控制台链接（ADR 0051 决策 8）
             jn.add(line)
-        for line in session_lines(jr):  # 远程访问会话摘要（ADR 0051 决策 7）
+        for line in session_lines(jr):  # 会话摘要（ADR 0051 决策 4、7）：桌面与设备 job 都可能有
             jn.add(line)
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
@@ -455,7 +456,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         }
-        # 远程访问会话与计量（ADR 0051 决策 7）：仅设备目标，形状同 run --json 的 jobs[]；桌面 job 省键
+        # 会话记录与计量（ADR 0051 决策 4、7），形状同 run --json 的 jobs[]：sessions[] 桌面 job 有会话记录时也有，计量两键仅设备目标
         scope_doc.update(_device_keys_for_explain(jr))
         url = console_url(jr.session_id)  # 代表会话是 Device Farm 会话 ARN 时给控制台链接（ADR 0051 决策 8）；桌面省键
         if url:
@@ -645,7 +646,8 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
         for rr in sc["report_refs"]:
             scn.add(styled(_ref_line(rr), DIM))
-        device = "sessions" in sc or "device_observed_s" in sc  # 设备 job 的机读键只在设备目标出现（ADR 0051 决策 7）
+        # 设备 job 按计量两键判：它们只按目标是否含设备出现（ADR 0051 决策 7）；sessions[] 不能作判据，桌面 job 也可带会话记录（决策 4）
+        device = "device_observed_s" in sc or "device_observed_missing" in sc
         for line in _explain_session_lines(sc):  # 设备表头与会话摘要（ADR 0051 决策 7、8），文本 key 用 JSON 字段名
             scn.add(line)
         # 判定行（ADR 0042 决策四）：job 判 error / aborted 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无

@@ -2531,6 +2531,9 @@ def _cmd_run(args) -> int:
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）
             session_warmup_url=run_meta.session_warmup_url,  # 同上（ADR 0051 决策 13）
             steps_dir=steps_dir,  # 使用方确定性 step 目录（ADR 0037 决策 4；与写进 definition 的同一个值）
+            # 本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条）：经 env RUN_ID 注给 worker，编码会话名的 run 段；
+            # 与是否生成报告无关，--no-report 下照传
+            run_id=run_id,
             worker_log=worker_log_fh,  # --quiet 时的 worker 日志落点；None 表示 stderr 透传（默认）
         )
     resolver = compose.make_resolver(engines)

@@ -10,8 +10,8 @@
 零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
 
 忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env + S3 上传 env；
-组合根拥有的 worker env——GHERKAI_STEPS_DIR / GHERKAI_NO_ARTIFACTS / GHERKAI_EXTRA_HTTP_HEADERS——先显式清除、再按
-参数显式注回，与 adapter 两步写法相同），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
+组合根拥有的 worker env——GHERKAI_STEPS_DIR / GHERKAI_NO_ARTIFACTS / GHERKAI_EXTRA_HTTP_HEADERS / GHERKAI_SESSION_WARMUP_URL /
+RUN_ID——先经 scrubbed_environ 显式清除，其中 GHERKAI_STEPS_DIR 按 --steps-dir、RUN_ID 按 --run-id 显式注回（与 adapter 两步写法相同），其余三键保持清空），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
   - 盘上有什么（NOVA_LOGS_DIR / MIDSCENE_RUN_DIR 递归）
   - S3 有什么（list prefix）
   - 差集（盘有 S3 无）即 **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
@@ -132,6 +132,9 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
         if not resolved_steps.is_dir():
             sys.exit(f"错误：--steps-dir 指向的目录不存在：{resolved_steps}")
         env["GHERKAI_STEPS_DIR"] = str(resolved_steps)
+    # 本 run 的 id 同样两步：`scrubbed_environ` 清掉宿主值，这里按 --run-id 注回（ADR 0024「run_id + scope_id 注入 worker」条）。
+    # 两个 worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），缺了它在建会话前即以 1 退出。
+    env["RUN_ID"] = run_id
 
     # 回显注入后的 steps 目录（未给时打 None，表示已显式清空）：操作者一眼看出宿主 export 没有越过参数。
     print(f"[harness] engine={engine} feature={feature} interrupt={interrupt} run_id={run_id} "

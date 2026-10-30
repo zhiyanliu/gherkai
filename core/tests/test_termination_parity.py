@@ -1,6 +1,7 @@
 """双路径对拍（ADR 0034 机制二「双路径对拍是实施护栏」）：同一组事件矩阵分别输入同步 schedule（FakeEngine）与无状态
 project_full（EventRecord 加 TaskExited），逐项比较判定、归因、消息、明细、sessions[] 与计量键，以及两条路径交给终结函数的
-见过 scope_started / session_opened 两个布尔。含 abort 的行只经同步路径。
+见过 scope_started / session_opened 两个布尔。含 abort 的行只经同步路径。矩阵以设备 job 为主，另有几行桌面 job：桌面 worker 也成对
+发会话事件，配对与释放判定与设备同一条，计量两键与释放提示按目标给（ADR 0051 决策 4、7）。
 未退出时的 job 态另有一组对拍：同步路径的实时落库（RunPersistence）与无状态路径的 project() 投影逐项比较 status 与 session_id。
 """
 from __future__ import annotations
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 import pytest
 
 from gherkai_core.model import (
+    DeviceFarmRequest,
     Job,
     RunMeta,
     Scenario,
@@ -22,8 +24,9 @@ from gherkai_core.model import (
     Status,
     Step,
     StepDone,
+    Target,
 )
-from gherkai_core.project import EventRecord, TaskExited, project, project_full
+from gherkai_core.project import DESKTOP_RELEASE_FAILED_HINT, DEVICE_RELEASE_FAILED_HINT, EventRecord, TaskExited, project, project_full
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
@@ -31,9 +34,13 @@ from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
 SCOPE = "dev"
 
 
-def _job(timeout_s: float | None = None) -> Job:
+_DEVICE = dict(target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+
+
+def _job(timeout_s: float | None = None, device: str = "android") -> Job:
     scs = tuple(Scenario(id=f"{SCOPE}:{i}", name=f"sc{i}", steps=(Step(0, "Given", "a"),)) for i in range(2))
-    return Job(scope_id=SCOPE, scope_name=SCOPE, engine="midscene", scenarios=scs, timeout_s=timeout_s)
+    target = {} if device == "desktop" else _DEVICE
+    return Job(scope_id=SCOPE, scope_name=SCOPE, engine="midscene", scenarios=scs, timeout_s=timeout_s, **target)
 
 
 def _opened(name: str, origin: str = "created", sid: str | None = "auto") -> SessionOpened:
@@ -60,6 +67,7 @@ class Row:
     timed_out: bool = False  # 推进器超时处置（同步路径靠 fake clock 过 deadline；无状态路径 TaskExited.timed_out）
     timeout_s: float | None = None
     crash: bool = False     # 事件发完后 worker 以非退出码异常终止（同步路径 FakeEngine 抛 RuntimeError；无状态路径退出码 None）
+    device: str = "android"  # job 的目标：desktop 的行是 AgentCore 浏览器会话（name 与 sessionId 都是会话 id，不带计量）
 
 
 MATRIX = [
@@ -91,6 +99,17 @@ MATRIX = [
         timed_out=True, timeout_s=5.0, crash=True),
     Row("无 ARN 的未知 Create 加取消", [_opened("t", origin="attempted", sid=None), _closed("t", release="unconfirmed", observed_s=None, sid=None),
                                      ScopeDone(scope_id=SCOPE, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")], [], 1),
+    # 桌面 job（ADR 0051 决策 4）：会话事件成对、确认即 StopBrowserSession 成功；session_closed 不带 observedS
+    Row("桌面会话成对且确认停止", [_opened("s-1", sid="s-1"), ScopeStarted(scope_id=SCOPE, session_id="s-1"), *_passed_scenario(0),
+                                *_passed_scenario(1), _closed("s-1", observed_s=None, sid="s-1"), ScopeDone(scope_id=SCOPE)], [], 0,
+        device="desktop"),
+    Row("桌面会话未能确认停止", [_opened("s-1", sid="s-1"), ScopeStarted(scope_id=SCOPE, session_id="s-1"), *_passed_scenario(0),
+                              *_passed_scenario(1), _closed("s-1", release="unconfirmed", observed_s=None, sid="s-1"), ScopeDone(scope_id=SCOPE)],
+        [], 1, device="desktop"),
+    Row("桌面建连重试耗尽且丢弃的会话均已确认", [_opened("s-1", sid="s-1"), _closed("s-1", observed_s=None, sid="s-1"),
+                                           _opened("s-2", sid="s-2"), _closed("s-2", observed_s=None, sid="s-2")], [], 80, device="desktop"),
+    Row("桌面建连重试耗尽且有会话未确认", [_opened("s-1", sid="s-1"), _closed("s-1", observed_s=None, sid="s-1"), _opened("s-2", sid="s-2")],
+        [], 80, device="desktop"),
 ]
 
 
@@ -112,7 +131,7 @@ class _Clock:
 
 
 def _sync(row: Row):
-    job = _job(row.timeout_s)
+    job = _job(row.timeout_s, row.device)
     engine = FakeEngine({SCOPE: list(row.events)}, tail_after_stop={SCOPE: list(row.tail)} if row.tail else {},
                         exit_code={SCOPE: row.exit_code} if row.exit_code else {})
     # 超时：让时钟在处理完全部主流事件后越过 deadline（下一次事件间检查即判超时，之后排空 tail）
@@ -128,7 +147,7 @@ def _sync(row: Row):
 
 
 def _stateless(row: Row):
-    job = _job(row.timeout_s)
+    job = _job(row.timeout_s, row.device)
     events = list(row.events) + ([ScenarioStarted(scenario_id=f"{SCOPE}:1")] if row.timed_out else []) + list(row.tail)
     records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
     records.append(EventRecord(scope_id=SCOPE, kind="exit",
@@ -214,17 +233,18 @@ def test_crash_row_sync_side_really_exits_with_unknown_code():
     归因改为 release_failed）且消息是 worker 异常（若 FakeEngine 没在事件发完后崩溃，同步侧会以退出码 0 结束、消息变成
     「没有报完这次运行的结果」，对拍只是碰巧相等）。"""
     row = next(r for r in MATRIX if r.name == "接力者直接落 timed_out（退出码未知）")
-    plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=None, crash=True)
+    plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=None, crash=True, device=row.device)
     jr = _sync(plain)
     assert (jr.status, jr.error_type) == (Status.ERROR, "release_failed") and "worker 异常：" in jr.message  # a 未确认 → 归因改 release_failed，原因保留
 
 
 def test_stateless_run_level_device_metering():
-    """无状态路径的 run 级设备计量合计（ADR 0051 决策 7）：多 job 求和、缺计量数相加，与各 job 级一致；桌面 job 不计入。"""
+    """无状态路径的 run 级设备计量合计（ADR 0051 决策 7）：多 job 求和、缺计量数相加，与各 job 级一致；桌面 job 不计入，
+    带成对会话事件的桌面 job 也不计入、自身不出现两键。"""
     row = next(r for r in MATRIX if r.name == "完整成功的设备 job")
     job = _job(row.timeout_s)
     other = Job(scope_id="dev2", scope_name="dev2", engine="midscene",
-                scenarios=(Scenario(id="dev2:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
+                scenarios=(Scenario(id="dev2:0", name="sc0", steps=(Step(0, "Given", "a"),)),), **_DEVICE)
     desktop = Job(scope_id="web", scope_name="web", engine="novaact",
                   scenarios=(Scenario(id="web:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
     other_events = [SessionOpened(scope_id="dev2", name="b", origin="created", session_id="arn:b"),
@@ -235,9 +255,10 @@ def test_stateless_run_level_device_metering():
                     SessionClosed(scope_id="dev2", name="b", release="confirmed", session_id="arn:b", observed_s=2.5),
                     SessionClosed(scope_id="dev2", name="c", release="confirmed", session_id="arn:c", observed_s=None),
                     ScopeDone(scope_id="dev2")]
-    web_events = [ScopeStarted(scope_id="web"), ScenarioStarted(scenario_id="web:0"),
+    web_events = [SessionOpened(scope_id="web", name="s-w", origin="created", session_id="s-w"),
+                  ScopeStarted(scope_id="web", session_id="s-w"), ScenarioStarted(scenario_id="web:0"),
                   StepDone(scenario_id="web:0", step_index=0, status=Status.PASSED), ScenarioDone(scenario_id="web:0", status=Status.PASSED),
-                  ScopeDone(scope_id="web")]
+                  SessionClosed(scope_id="web", name="s-w", release="confirmed", session_id="s-w"), ScopeDone(scope_id="web")]
     records = []
     for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
         records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
@@ -247,6 +268,7 @@ def test_stateless_run_level_device_metering():
     assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
     assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)
     assert (by["web"].device_observed_s, by["web"].device_observed_missing) == (None, None)
+    assert by["web"].status == Status.PASSED and [s.release for s in by["web"].sessions] == ["confirmed"]
     assert (res.device_observed_s, res.device_observed_missing) == (15.0, 1)
 
 
@@ -281,3 +303,18 @@ def test_matrix_covers_expected_verdicts():
     unknown = by["无 ARN 的未知 Create 加取消"]
     assert unknown.error_type == "release_failed" and "没拿到设备" in unknown.message and "结果未知的创建尝试：t" in unknown.message
     assert (unknown.device_observed_s, unknown.device_observed_missing) == (0.0, 0) and unknown.session_id is None
+    assert DEVICE_RELEASE_FAILED_HINT in unknown.message
+    # 桌面行：判定与设备同一条，计量两键只按目标给、释放提示不提设备控制台（ADR 0051 决策 4、7）
+    desk = by["桌面会话成对且确认停止"]
+    assert (desk.status, desk.error_type, desk.message, desk.session_id) == (Status.PASSED, None, None, "s-1")
+    assert [(s.name, s.origin, s.release) for s in desk.sessions] == [("s-1", "created", "confirmed")]
+    assert (desk.device_observed_s, desk.device_observed_missing) == (None, None)
+    lost = by["桌面会话未能确认停止"]
+    assert (lost.status, lost.error_type) == (Status.ERROR, "release_failed") and (lost.device_observed_s, lost.device_observed_missing) == (None, None)
+    assert DESKTOP_RELEASE_FAILED_HINT in lost.message and "设备控制台" not in lost.message and "未确认停止的会话：s-1" in lost.message
+    net = by["桌面建连重试耗尽且丢弃的会话均已确认"]
+    assert (net.status, net.error_type) == (Status.ERROR, "network_error") and "未能确认停止" not in net.message
+    assert [s.release for s in net.sessions] == ["confirmed", "confirmed"] and net.device_observed_s is None
+    net_lost = by["桌面建连重试耗尽且有会话未确认"]
+    assert (net_lost.status, net_lost.error_type) == (Status.ERROR, "release_failed") and "退出码 80" in net_lost.message
+    assert DESKTOP_RELEASE_FAILED_HINT in net_lost.message and "未确认停止的会话：s-2" in net_lost.message

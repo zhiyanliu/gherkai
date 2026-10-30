@@ -289,6 +289,25 @@ def test_build_local_reconcile_falls_back_to_flag_when_meta_missing(tmp_path):
     assert mc == 2
 
 
+def test_build_local_reconcile_injects_run_id_to_both_engines(tmp_path, monkeypatch):
+    """本 run 的 id 经 env RUN_ID 注给两个 worker（ADR 0024「run_id + scope_id 注入 worker」条）：per-run 进程与 `status --wait`
+    接力者都经这里起 worker，worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），缺了它两个 worker 都在建会话前以 1 退出。
+    取值是被推进的这个 run，宿主 shell 里残留的同名值不得越过它；本机只注 RUN_ID，不注 SCOPE_ID，事件出口仍是 fd 态。"""
+    from gherkai_runtime.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-id-x", max_concurrency=1)
+    monkeypatch.setenv("RUN_ID", "host-run")
+    # Midscene worker 经定位链第一级指到占位命令：本例只看 spawn env，不起进程，也不依赖本机有没有构建过 Midscene worker
+    monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node /fake/midscene-worker.mjs")
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
+    _m, _l, _s, launcher, _mc, _rs, _rp = build_local_reconcile(
+        str(tmp_path), "run-id-x", max_concurrency=1, region="us-east-1")
+    for engine in ("novaact", "midscene"):
+        env = launcher._resolver(engine)._env
+        assert env is not None and env["RUN_ID"] == "run-id-x", engine
+        assert "SCOPE_ID" not in env, engine
+
+
 def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeypatch):
     """使用方 step 目录随 definition 走（ADR 0037 决策 4）：宿主从 RunStore 读回 meta.steps_dir、
     经 env 注给 worker，**绝不重解析 `./steps`**——per-run 进程与 `status --wait` 接力者的 CWD 与提交进程

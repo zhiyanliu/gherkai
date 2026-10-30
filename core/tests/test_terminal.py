@@ -1,12 +1,16 @@
 """终结函数与真值表（ADR 0034 机制二）、代表会话规则、scope 级 error 的合成 SKIPPED、设备计量合计（ADR 0051 决策 4、7）。
 
-纯函数直测：按真值表逐行参数化，并验证按行序取第一个命中的行。两条归约路径的对拍在 test_termination_parity。
+纯函数直测：按真值表逐行参数化，并验证按行序取第一个命中的行；真值表对桌面与设备目标各验证一遍（两者共用一套配对与释放判定，
+只有追加的释放提示按目标给）。两条归约路径的对拍在 test_termination_parity。
 """
 from __future__ import annotations
+
+from dataclasses import replace
 
 import pytest
 
 from gherkai_core.model import (
+    DeviceFarmRequest,
     Job,
     JobResult,
     Scenario,
@@ -21,9 +25,11 @@ from gherkai_core.model import (
     Step,
     StepDone,
     StepStarted,
+    Target,
 )
 from gherkai_core.project import (
-    RELEASE_FAILED_HINT,
+    DESKTOP_RELEASE_FAILED_HINT,
+    DEVICE_RELEASE_FAILED_HINT,
     Timing,
     apply_device_metering,
     device_metering,
@@ -38,6 +44,19 @@ from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 def _job(n_scenarios: int = 3, timeout_s: float | None = 60.0) -> Job:
     scs = tuple(Scenario(id=f"s:{i}", name=f"sc{i}", steps=(Step(0, "Given", "a"), Step(1, "Then", "b"))) for i in range(n_scenarios))
     return Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=timeout_s)
+
+
+def _on(job: Job, device: str) -> Job:
+    """同一个 job 换到给定目标上；设备目标带完整的设备请求（与 definition 的结构校验一致）。"""
+    if device == "desktop":
+        return replace(job, target=Target(), device_request=None)
+    return replace(job, target=Target(device=device, ui_kind="web"),
+                   device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+
+
+def _agentcore(sid: str, release: str | None) -> SessionRecord:
+    """桌面会话记录（ADR 0051 决策 4）：name 与 session_id 都是 AgentCore 会话 id，不带计量与设备描述。"""
+    return SessionRecord(session_id=sid, name=sid, origin="created", release=release)
 
 
 def _confirmed(name: str = "n1") -> SessionRecord:
@@ -62,6 +81,10 @@ def _fin(**kw):
 
 # ---- 真值表逐行 ----
 
+_HINT = "〈按目标给出的释放提示〉"  # 占位：期望消息里含该 job 目标对应的那句释放提示
+
+
+@pytest.mark.parametrize("device", ["android", "desktop"])
 @pytest.mark.parametrize("kw, status, error_type, in_message", [
     # 行 1：timeout 优先于一切（含 U 非空与非零退出）
     (dict(stop_reason="timeout", exit_code=137, sessions=[_unconfirmed()]), Status.ERROR, "timeout", "job 超时（预算 60s，已中止）"),
@@ -69,15 +92,15 @@ def _fin(**kw):
     (dict(stop_reason="timeout", exit_code=1), Status.ERROR, "timeout", "job 超时"),  # scope_done 已到但非零退出：不算内容完整
     # 行 2：abort → ABORTED、归因为空（优先于非零退出）；U 非空不改判定、只追加提示
     (dict(stop_reason="abort", exit_code=1), Status.ABORTED, None, "fail-fast"),
-    (dict(stop_reason="abort", exit_code=1, sessions=[_unconfirmed()]), Status.ABORTED, None, RELEASE_FAILED_HINT),
+    (dict(stop_reason="abort", exit_code=1, sessions=[_unconfirmed()]), Status.ABORTED, None, _HINT),
     # 内容完整（干净退出且有 scope_done）后停止原因不再改写判定：判定按内容给出
     (dict(stop_reason="timeout"), Status.PASSED, None, None),
     (dict(stop_reason="abort", scenario_status={"s:0": Status.FAILED}), Status.FAILED, None, None),
-    (dict(stop_reason="timeout", sessions=[_unconfirmed()]), Status.ERROR, "release_failed", RELEASE_FAILED_HINT),
+    (dict(stop_reason="timeout", sessions=[_unconfirmed()]), Status.ERROR, "release_failed", _HINT),
     (dict(stop_reason="timeout", scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
      Status.ERROR, "acquire_timeout", "没拿到设备"),
     # 行 3：退出码非零 / 未知；U 非空只改归因、退出原因的消息保留
-    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", RELEASE_FAILED_HINT),
+    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", _HINT),
     (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", "worker 非正常退出（exit 1"),
     (dict(exit_code=-9, sessions=[_unconfirmed(), _attempted()]), Status.ERROR, "release_failed", "exit -9"),
     (dict(exit_code=80), Status.ERROR, "network_error", "建连失败"),
@@ -90,7 +113,7 @@ def _fin(**kw):
     (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记为 255）：TaskFailedToStart"),
     # 行 4：退出码 0、无 scope_done（U 非空也不改判 release_failed，只追加提示）
     (dict(scope_done=None), Status.ERROR, "engine_error", "没有报完这次运行的结果"),
-    (dict(scope_done=None, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", RELEASE_FAILED_HINT),
+    (dict(scope_done=None, sessions=[_unconfirmed()]), Status.ERROR, "engine_error", _HINT),
     # 行 5：scope_done.status = error → 取其归因；U 非空改 release_failed、worker 报的消息保留
     (dict(scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
      Status.ERROR, "acquire_timeout", "没拿到设备"),
@@ -106,9 +129,12 @@ def _fin(**kw):
     (dict(scenario_status={"s:0": Status.PASSED}, sessions=[_confirmed()]), Status.PASSED, None, None),
     (dict(scenario_status={"s:0": Status.PASSED}, sessions=[_confirmed(), _unconfirmed("x")]), Status.ERROR, "release_failed", "未确认停止的会话：x"),
 ])
-def test_truth_table_rows(kw, status, error_type, in_message):
-    term = _fin(**kw)
+def test_truth_table_rows(kw, status, error_type, in_message, device):
+    """同一张真值表对桌面与设备目标都成立（ADR 0051 决策 4：未确认会话判 release_failed 的规则对桌面同样成立）。"""
+    term = _fin(**{**kw, "job": _on(kw.get("job", _job()), device)})
     assert (term.status, term.error_type) == (status, error_type), term
+    if in_message == _HINT:
+        in_message = DESKTOP_RELEASE_FAILED_HINT if device == "desktop" else DEVICE_RELEASE_FAILED_HINT
     if in_message is None:
         assert term.message is None
     else:
@@ -134,6 +160,39 @@ def test_release_failed_hint_lists_sessions_and_attempts_separately_even_on_time
     assert term.error_type == "timeout"
     assert "未确认停止的会话：a" in term.message and "结果未知的创建尝试：b" in term.message and "c" not in term.message.split("会话：")[1].split("；")[0]
     assert unconfirmed_sessions([_unconfirmed("a"), _attempted("b"), _confirmed("c")]) == [_unconfirmed("a"), _attempted("b")]
+
+
+def test_release_failed_hint_follows_the_job_target():
+    """释放提示按 job 目标给、不按有没有会话事件给（ADR 0051 决策 4、7）：设备 job 指向设备控制台；桌面 job 说 AgentCore 浏览器会话
+    未能确认停止、不提设备控制台与远程访问会话。会话名与结果未知的创建尝试照样分开列。"""
+    sessions = [_agentcore("s-1", "unconfirmed"), _attempted("gherkai:r:ab12:2:s")]
+    desk = _fin(job=_job(), sessions=sessions)
+    assert (desk.status, desk.error_type) == (Status.ERROR, "release_failed")
+    assert desk.message.startswith(DESKTOP_RELEASE_FAILED_HINT)
+    assert "设备控制台" not in desk.message and "远程访问会话" not in desk.message
+    assert "未确认停止的会话：s-1" in desk.message and "结果未知的创建尝试：gherkai:r:ab12:2:s" in desk.message
+    dev = _fin(job=_on(_job(), "ios"), sessions=[_unconfirmed("a")])
+    assert dev.message.startswith(DEVICE_RELEASE_FAILED_HINT) and "未确认停止的会话：a" in dev.message
+
+
+def test_desktop_session_pairs_confirmed_leave_the_verdict_unchanged():
+    """桌面 worker 成对发会话事件且确认停止（ADR 0051 决策 4）：判定与没有会话事件时相同，不追加任何提示。"""
+    for scenario_status, status in (({"s:0": Status.PASSED}, Status.PASSED), ({"s:0": Status.FAILED}, Status.FAILED)):
+        term = _fin(scenario_status=scenario_status, sessions=[_agentcore("s-1", "confirmed")])
+        assert term == _fin(scenario_status=scenario_status) and term.status == status and term.message is None
+
+
+def test_desktop_network_exit_keeps_network_error_when_discarded_sessions_are_confirmed():
+    """桌面建连重试耗尽（退出码 80）：被丢弃的 attempt 建起的会话都确认停止时仍判 network_error、消息不带释放提示，job 级重试的
+    门槛随之照旧（ADR 0028）；其中一个没能确认停止即按释放优先改判 release_failed，退出原因保留（ADR 0051 决策 4）。"""
+    base = dict(exit_code=80, scope_done=None, saw_scope_started=False, saw_session_opened=True, scenario_status={})
+    ok = _fin(**base, sessions=[_agentcore("s-1", "confirmed"), _agentcore("s-2", "confirmed")])
+    assert (ok.status, ok.error_type) == (Status.ERROR, "network_error")
+    assert ok.message == "worker 建连失败（网络/SSL 瞬时故障），退出码 80"
+    bad = _fin(**base, sessions=[_agentcore("s-1", "confirmed"), _agentcore("s-2", None)])  # s-2 没收到 session_closed
+    assert (bad.status, bad.error_type) == (Status.ERROR, "release_failed")
+    assert bad.message.startswith("worker 建连失败（网络/SSL 瞬时故障），退出码 80；" + DESKTOP_RELEASE_FAILED_HINT)
+    assert "未确认停止的会话：s-2" in bad.message
 
 
 # ---- 代表会话（ADR 0051 决策 4 / 0024 sessionId 取值优先级）----
@@ -297,9 +356,21 @@ def test_device_metering_counts_created_and_discovered_only():
         SessionRecord(session_id="e", name="e", origin="created", release="confirmed", observed_s=0.0),  # 0 计入合计、不算缺失
     ]
     assert device_metering(sessions) == (10.0, 2)
-    jr = JobResult(job=_job(), status=Status.ERROR, sessions=sessions)
+    jr = JobResult(job=_on(_job(), "android"), status=Status.ERROR, sessions=sessions)
     apply_device_metering(jr)
     assert (jr.device_observed_s, jr.device_observed_missing) == (10.0, 2)
+    bare = JobResult(job=_on(_job(), "android"), status=Status.ERROR)  # 设备 job 没有会话记录（建会话前即结束）：两键照样成对给出
+    apply_device_metering(bare)
+    assert (bare.device_observed_s, bare.device_observed_missing) == (0.0, 0)
     desktop = JobResult(job=_job(), status=Status.PASSED)
     apply_device_metering(desktop)
     assert (desktop.device_observed_s, desktop.device_observed_missing) == (None, None)  # 桌面 job 两键都 None（序列化省键）
+
+
+def test_metering_keys_follow_the_target_not_the_session_records():
+    """计量两键只按 job 目标判、不按有没有会话记录判（ADR 0051 决策 7）：桌面 worker 也发会话事件，AgentCore 浏览器会话不是
+    设备分钟，桌面 job 带已确认、未确认或结果未知的会话记录时两键都保持 None。"""
+    desktop = JobResult(job=_job(), status=Status.ERROR, sessions=[
+        _agentcore("s-1", "confirmed"), _agentcore("s-2", "unconfirmed"), _attempted("gherkai:r:ab12:3:s")])
+    apply_device_metering(desktop)
+    assert (desktop.device_observed_s, desktop.device_observed_missing) == (None, None)

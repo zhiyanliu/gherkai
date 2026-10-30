@@ -230,7 +230,7 @@ def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_rec
     assert "判定：error  (timeout: job 超时)" in zero and "诊断细节见 worker 日志" in zero
     assert "判定：" not in text(JobResult(job=job, status=Status.PASSED, scenarios=recorded))
     desktop = render.explain_to_dict(run_id="r", status="passed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
-    assert "sessions" not in desktop["scopes"][0]  # 桌面 job 省键
+    assert "sessions" not in desktop["scopes"][0]  # 没有会话记录的桌面 job 省键
 
 
 def test_explain_lists_job_report_refs_under_scope_line_even_with_step_records():
@@ -338,6 +338,39 @@ def test_explain_renders_device_evidence_fields_and_extraction_failure():
     desktop_doc = render.explain_to_dict(run_id="r", status="failed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
     desktop = render.render_explain_text(desktop_doc)
     assert "step_kind" not in desktop and render._DEVICE_EVIDENCE_LOST not in desktop
+
+
+def test_desktop_job_with_sessions_lists_sessions_without_device_hints():
+    """桌面 worker 也发会话事件（ADR 0051 决策 4）：桌面 job 带会话记录时，未确认停止的会话与结果未知的创建尝试照常列出（run 文本、
+    explain 文本与报告页三处），设备侧的内容一律不出现——没有设备占用时长与计量两键、没有设备与控制台两行，failed 的 step 缺证据指针时
+    给桌面的「无 AI 证据」，不给设备的抽取失败提示。设备与否按目标判（决策 7），不按有没有会话记录判。"""
+    import html as html_mod
+
+    from gherkai_core.adapters.report_store.local import render_index_html
+    from gherkai_core.model import Scenario, SessionRecord, Step
+
+    sc = Scenario(id="w:0", name="n", steps=(Step(0, "Then", "a"),))
+    job = Job(scope_id="w", scope_name="w", engine="novaact", scenarios=(sc,))
+    sessions = [SessionRecord(session_id="bs-ok", name="bs-ok", origin="created", release="confirmed"),
+                SessionRecord(session_id="bs-left", name="bs-left", origin="created", release="unconfirmed"),
+                SessionRecord(session_id=None, name="gherkai:r:ab12:2:w", origin="attempted", release="unconfirmed")]
+    jr = JobResult(job=job, status=Status.ERROR, error_type="release_failed", message="m", session_id="bs-left", sessions=sessions,
+                   scenarios=[ScenarioResult(scenario_id="w:0", status=Status.FAILED,
+                                             steps=[StepResult(index=0, status=Status.FAILED)])])  # 缺证据指针
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr])
+    txt = render.render_text(run)
+    assert "未确认停止的会话: bs-left" in txt and f"{render._ATTEMPTED_LABEL}: gherkai:r:ab12:2:w" in txt
+    assert "设备占用时长" not in txt and "设备:" not in txt and "设备控制台" not in txt
+    doc = render.explain_to_dict(run_id="r", status="error", results=[jr], evidence_reader=lambda refs: (None, "no_ref"))
+    scope = doc["scopes"][0]
+    assert [s["name"] for s in scope["sessions"]] == ["bs-ok", "bs-left", "gherkai:r:ab12:2:w"]
+    assert not {"device_observed_s", "device_observed_missing", "console_url"} & set(scope)
+    etxt = render.render_explain_text(doc)
+    assert "sessions: bs-ok (origin=created, release=confirmed, observed_s=null)" in etxt and "device_observed_s" not in etxt
+    assert render._EVIDENCE_MISSING_TEXT["no_ref"] in etxt and render._DEVICE_EVIDENCE_LOST not in etxt
+    page = html_mod.unescape(render_index_html({"run_id": "r", "created_at": "", "report_index": []}, run))
+    assert "未确认停止的会话 <code>bs-left</code>" in page and "结果未知的创建尝试 <code>gherkai:r:ab12:2:w</code>" in page
+    assert "设备占用" not in page and "设备控制台" not in page
 
 
 def test_format_event_renders_session_events_without_endpoints():

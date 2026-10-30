@@ -106,7 +106,7 @@ def test_run_json_keys_are_documented():
     dev = next(j for j in doc["jobs"] if j["scope_id"] == "d.feature:3")
     assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3
     assert {"device_observed_s", "device_observed_missing"} <= set(doc)
-    assert "sessions" not in next(j for j in doc["jobs"] if j["scope_id"] == "f.feature:3")  # 桌面 job 省键
+    assert "sessions" not in next(j for j in doc["jobs"] if j["scope_id"] == "f.feature:3")  # 没有会话记录的桌面 job 省键
     # extra_http_headers / worker_task_defs 的**值**是用户自定键（请求头名 / 引擎名），不是契约键；provider_minutes 是服务商原形快照、
     # 对 core 不透明（ADR 0051 决策 7），到它为止不下钻
     _assert_documented(doc, section="run --json", ignore={"X-Test", "novaact"}, opaque={"provider_minutes", "device"})

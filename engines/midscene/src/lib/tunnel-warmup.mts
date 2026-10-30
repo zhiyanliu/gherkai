@@ -47,17 +47,9 @@ export interface WarmupFailure {
   message: string;
 }
 
-/** 预热失败时主流程的出口（ADR 0051 决策 13、决策 5）：会话已释放之后调用；归因与 sessionId 恒经 scope_done 传递，释放失败只体现在退出码 1
- *  （桌面靠退出码让泄漏可观测），不吞掉归因、不变成 worker fatal。 */
-export function warmupFailureOutcome(failure: WarmupFailure, scopeId: string, sessionId: string | null, cleanupFailed: boolean):
-    { event: Record<string, unknown>; exitCode: number } {
-  return {
-    event: { type: "scope_done", scopeId, sessionId, status: "error", errorType: failure.errorType, message: failure.message },
-    exitCode: cleanupFailed ? 1 : 0,
-  };
-}
-
-/** 预热失败在 run-scope 主流程里以异常形态穿出 try（好让既有的 cleanup / 排空路径照常执行），catch 里按它发 scope_done。 */
+/** 预热失败的异常形态：run-scope 的失败出口 exitAfterFailure 把它与 ScopeTerminationError 同样处理（释放会话、排空队列、发
+ *  scope_done{status: error}，释放失败才以 1 退出）。主流程以 ScopeTerminationError 抛出预热失败，本类没有抛出方；
+ *  exitAfterFailure 去掉对它的识别时连同本类一起删除。 */
 export class WarmupFailureError extends Error {
   constructor(public readonly failure: WarmupFailure) {
     super(failure.message);

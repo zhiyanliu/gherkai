@@ -1,0 +1,219 @@
+{
+  "automationName": "UiAutomator2",
+  "cases": [
+    {
+      "name": "点击：坐标为截图像素，取整",
+      "call": "tap",
+      "input": {"point": {"x": 100.4, "y": 200.6}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: clickGesture", {"x": 100, "y": 201}]}
+      ]
+    },
+    {
+      "name": "长按：时长以毫秒传给驱动",
+      "call": "longPress",
+      "input": {"point": {"x": 50, "y": 60.5}, "durationMs": 800},
+      "commands": [
+        {"method": "execute", "args": ["mobile: longClickGesture", {"x": 50, "y": 61, "duration": 800}]}
+      ]
+    },
+    {
+      "name": "向下滚动：区域为屏高的 20% 到 80%，幅度为距离除以区域高度",
+      "call": "scroll",
+      "input": {"direction": "down", "distance": 720, "screen": {"width": 1080, "height": 2400}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: scrollGesture", {"left": 0, "top": 480, "width": 1080, "height": 1440, "direction": "down", "percent": 0.5}]}
+      ]
+    },
+    {
+      "name": "向上滚动：没有距离时取缺省幅度",
+      "call": "scroll",
+      "input": {"direction": "up", "distance": null, "screen": {"width": 1080, "height": 2400}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: scrollGesture", {"left": 0, "top": 480, "width": 1080, "height": 1440, "direction": "up", "percent": 0.5}]}
+      ]
+    },
+    {
+      "name": "向左滚动：幅度按区域宽度换算",
+      "call": "scroll",
+      "input": {"direction": "left", "distance": 270, "screen": {"width": 1080, "height": 2400}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: scrollGesture", {"left": 0, "top": 480, "width": 1080, "height": 1440, "direction": "left", "percent": 0.25}]}
+      ]
+    },
+    {
+      "name": "向右滚动：幅度不超过 1",
+      "call": "scroll",
+      "input": {"direction": "right", "distance": 5000, "screen": {"width": 1080, "height": 2400}},
+      "commands": [
+        {"method": "execute", "args": ["mobile: scrollGesture", {"left": 0, "top": 480, "width": 1080, "height": 1440, "direction": "right", "percent": 1}]}
+      ]
+    },
+    {
+      "name": "输入：只发 mobile: type",
+      "call": "typeText",
+      "input": {"text": "hello 世界"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: type", {"text": "hello 世界"}]}
+      ]
+    },
+    {
+      "name": "按键 Enter",
+      "call": "keyboardPress",
+      "input": {"keyName": "Enter"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 66}]}
+      ]
+    },
+    {
+      "name": "按键 Return",
+      "call": "keyboardPress",
+      "input": {"keyName": "Return"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 66}]}
+      ]
+    },
+    {
+      "name": "按键 Backspace",
+      "call": "keyboardPress",
+      "input": {"keyName": "Backspace"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]}
+      ]
+    },
+    {
+      "name": "按键 Tab",
+      "call": "keyboardPress",
+      "input": {"keyName": "Tab"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 61}]}
+      ]
+    },
+    {
+      "name": "按键 Escape",
+      "call": "keyboardPress",
+      "input": {"keyName": "Escape"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 111}]}
+      ]
+    },
+    {
+      "name": "按键 ArrowUp",
+      "call": "keyboardPress",
+      "input": {"keyName": "ArrowUp"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 19}]}
+      ]
+    },
+    {
+      "name": "按键 ArrowDown",
+      "call": "keyboardPress",
+      "input": {"keyName": "ArrowDown"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 20}]}
+      ]
+    },
+    {
+      "name": "按键 ArrowLeft",
+      "call": "keyboardPress",
+      "input": {"keyName": "ArrowLeft"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 21}]}
+      ]
+    },
+    {
+      "name": "按键 ArrowRight",
+      "call": "keyboardPress",
+      "input": {"keyName": "ArrowRight"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 22}]}
+      ]
+    },
+    {
+      "name": "键名不分大小写",
+      "call": "keyboardPress",
+      "input": {"keyName": "enter"},
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 66}]}
+      ]
+    },
+    {
+      "name": "清空：连发退格键",
+      "call": "clearInput",
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]},
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 67}]}
+      ]
+    },
+    {
+      "name": "主屏键",
+      "call": "home",
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 3}]}
+      ]
+    },
+    {
+      "name": "返回键",
+      "call": "back",
+      "commands": [
+        {"method": "execute", "args": ["mobile: pressKey", {"keycode": 4}]}
+      ]
+    },
+    {
+      "name": "应用目标的 DeepLink：带包名，成功后核对前台包名",
+      "call": "deepLink",
+      "input": {"address": "myshop://cart?id=42&from=push", "appId": "com.example.shop"},
+      "responses": {"getCurrentPackage": ["com.example.shop"]},
+      "commands": [
+        {"method": "execute", "args": ["mobile: deepLink", {"url": "myshop://cart?id=42&from=push", "package": "com.example.shop"}]},
+        {"method": "getCurrentPackage", "args": []}
+      ]
+    },
+    {
+      "name": "网页目标的 DeepLink：交给系统浏览器，不核对前台包名",
+      "call": "deepLink",
+      "input": {"address": "https://shop.example/list?q=a+b&page=2#top", "appId": null},
+      "commands": [
+        {"method": "execute", "args": ["mobile: deepLink", {"url": "https://shop.example/list?q=a+b&page=2#top", "package": "com.android.chrome"}]}
+      ]
+    }
+  ]
+}

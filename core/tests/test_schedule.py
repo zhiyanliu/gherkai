@@ -11,6 +11,7 @@ import pytest
 from gherkai_core.model import (
     RunMeta,
     Cost,
+    DeviceFarmRequest,
     Job,
     ReportRef,
     ResourceUri,
@@ -23,6 +24,7 @@ from gherkai_core.model import (
     Step,
     StepDone,
     StepStarted,
+    Target,
     Votes,
 )
 from gherkai_core.schedule import ScheduleOpts, schedule
@@ -41,12 +43,16 @@ class _IncClock:
         return self.t
 
 
-def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float | None = None) -> Job:
+def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float | None = None,
+         device: str = "desktop") -> Job:
     scenarios = tuple(
         Scenario(id=f"{scope_id}:{i}", name=f"sc{i}", steps=(Step(0, "When", "做事"),))
         for i in range(n_scenarios)
     )
-    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=scenarios, timeout_s=timeout_s)
+    # 设备目标带完整的设备请求（与 definition 的结构校验一致）；缺省是桌面网页
+    target = {} if device == "desktop" else dict(target=Target(device=device, ui_kind="web"),
+                                                 device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=scenarios, timeout_s=timeout_s, **target)
 
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
@@ -779,7 +785,7 @@ def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
         def __call__(self):
             self.n += 1; self.t += 1000.0 if self.n == 7 else 0.001; return self.t
 
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
+    res = schedule(_rm([_job(scope, timeout_s=5.0, device="android")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
@@ -1283,21 +1289,46 @@ def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
     assert elapsed < 3.0, elapsed
 
 
-def test_device_job_network_error_is_not_retried(monkeypatch):
+def test_device_job_network_error_is_not_retried():
     """设备 job 的建连失败不做 job 级重试（ADR 0051 决策 2）：同样的零 step_done network_error，桌面 job 重试、设备 job 不重试。"""
-    import gherkai_core.schedule as sch
-
-    def run():
+    def run(device: str):
         engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
+        res = schedule(_rm([_job("a", device=device)]), FakeResolver(engine), CollectSink(),
+                       opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: None))
+        return engine.run_count["a"], res.jobs[0]
+
+    n, jr = run("desktop")
+    assert n == 2 and jr.status == Status.PASSED
+    n, jr = run("android")
+    assert n == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
+
+
+def test_desktop_network_error_retry_follows_session_release():
+    """桌面 worker 也成对发会话事件（ADR 0051 决策 4）：建连重试耗尽前被丢弃的 attempt 建起的会话都确认停止时，退出码 80 仍判
+    network_error、job 级重试照旧（ADR 0028）；有会话没能确认停止即按释放优先改判 release_failed，不再重试。"""
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    def discarded(sid: str, release: str) -> list:
+        return [SessionOpened(scope_id="a", name=sid, origin="created", session_id=sid),
+                SessionClosed(scope_id="a", name=sid, release=release, session_id=sid)]
+
+    def run(release: str):
+        attempts = iter([discarded("s-1", release), [SessionOpened(scope_id="a", name="s-2", origin="created", session_id="s-2"),
+                                                       ScopeStarted(scope_id="a", session_id="s-2"),
+                                                       *_passing_events("a", "a:0")[:-1],
+                                                       SessionClosed(scope_id="a", name="s-2", release="confirmed", session_id="s-2"),
+                                                       ScopeDone(scope_id="a")]])
+        engine = FakeEngine({"a": lambda job: iter(next(attempts))}, network_crash_after={"a": [2]})
         res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
                        opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: None))
         return engine.run_count["a"], res.jobs[0]
 
-    n, jr = run()
-    assert n == 2 and jr.status == Status.PASSED
-    monkeypatch.setattr(sch, "is_device_job", lambda job: True)  # 目标字段落地前恒 False，这里钉住门槛本身
-    n, jr = run()
-    assert n == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
+    n, jr = run("confirmed")
+    assert n == 2 and (jr.status, jr.error_type) == (Status.PASSED, None) and jr.session_id == "s-2"
+    assert (jr.device_observed_s, jr.device_observed_missing) == (None, None)
+    n, jr = run("unconfirmed")
+    assert n == 1 and (jr.status, jr.error_type) == (Status.ERROR, "release_failed")
+    assert "退出码 80" in jr.message and "未确认停止的会话：s-1" in jr.message and "设备控制台" not in jr.message
 
 
 def test_sigkill_negative_exit_code_is_error_not_clean():
@@ -1326,11 +1357,14 @@ def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs()
                 ScopeStarted(scope_id=scope, session_id=f"arn:{scope}"), *_passing_events(scope, f"{scope}:0")[:-1],
                 SessionClosed(scope_id=scope, name=scope, release="confirmed", session_id=f"arn:{scope}", observed_s=observed),
                 ScopeDone(scope_id=scope)]
-    engine = FakeEngine({"d1": dev("d1", 10.0), "d2": dev("d2", None), "desk": _passing_events("desk", "desk:0")})
-    res = schedule(_rm([_job("d1"), _job("d2"), _job("desk")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=3))
+    # 桌面 job 也带一对已确认的 AgentCore 会话事件（ADR 0051 决策 4）：计量两键只按目标给，它不进合计、自身也是 None
+    engine = FakeEngine({"d1": dev("d1", 10.0), "d2": dev("d2", None), "desk": dev("desk", None)})
+    res = schedule(_rm([_job("d1", device="android"), _job("d2", device="ios"), _job("desk")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=3))
     assert (res.device_observed_s, res.device_observed_missing) == (10.0, 1)
     desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
     assert (desk.device_observed_s, desk.device_observed_missing) == (None, None)
+    assert desk.status == Status.PASSED and [s.release for s in desk.sessions] == ["confirmed"]
     only_desk = schedule(_rm([_job("desk")]), FakeResolver(FakeEngine({"desk": _passing_events("desk", "desk:0")})), CollectSink(),
                          opts=ScheduleOpts(max_concurrency=1))
     assert (only_desk.device_observed_s, only_desk.device_observed_missing) == (None, None)

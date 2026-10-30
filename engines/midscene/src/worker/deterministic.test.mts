@@ -5,19 +5,25 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ADDRESS_PATTERN } from "./deterministic.steps.mjs";  // 内建导航条目的模式（import 副作用注册的条目被 beforeEach 清掉）
+import { ADDRESS_PATTERN, injectDeviceNavigate } from "./deterministic.steps.mjs";  // 内建导航条目的模式（import 副作用注册的条目被 beforeEach 清掉）
 import type { Keyword } from "./deterministic.mjs";
 import {
   deterministic,
+  registerBuiltin,
   match,
   matchBatch,
   selectHandler,
   _clear,
+  _snapshot,
+  _restore,
   DeterministicConflict,
   DeterministicAssertion,
   DeterministicKeywordMismatch,
   listRegistry,
 } from "./deterministic.mjs";
+
+// import 副作用注册的内建条目：模块求值时（第一个 beforeEach 清表之前）取快照，内建条目的用例按需还原。
+const BUILTIN = _snapshot();
 
 beforeEach(() => _clear());
 
@@ -234,4 +240,122 @@ test("地址核对的 webdriver 写法：requires web_context 的条目推出 de
   assert.deepEqual(entered, ["in", "out"]);
   await assert.rejects(() => (sel as any).fn(ctx("https://x.example/other"), hit.groups), DeterministicAssertion);
   assert.deepEqual(entered, ["in", "out", "in", "out"]);  // 抛错也切回
+});
+
+// ---- 内建条目的标记与内建导航的设备句柄（ADR 0050 决策 1；0048 决策 7；0020 第 3 条）----
+
+// ADR 0020 第 3 条给出的 Midscene 说明原文（Nova Act 的说明没有分号后的应用目标一句）。
+const NAV_DESCRIPTION = "内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址；应用目标上经 DeepLink 交给被测应用）";
+
+test("内建导航条目带导航标记、使用方条目不带；标记只在命中结果里，不进自述清单与 matchBatch 的形态（ADR 0050 决策 1）", async () => {
+  _restore(BUILTIN);
+  deterministic("^使用方条目$", () => {}, META);
+  assert.equal(match('"https://x.example/"', "Given")!.builtin, "navigation");
+  assert.equal(match("https://x.example/", "When")!.builtin, "navigation");
+  assert.equal(match("使用方条目")!.builtin, null);  // 使用方 handler 里自己调导航，这条 step 仍不是导航 step
+  for (const e of listRegistry()) {
+    assert.deepEqual(Object.keys(e).sort(), ["description", "example", "keywords", "pattern", "targets"], JSON.stringify(e));
+  }
+  assert.deepEqual(matchBatch([{ keyword: "Given", text: '"https://x.example/"' }]), [{ pattern: ADDRESS_PATTERN, description: NAV_DESCRIPTION }]);
+  // 标记取值是封闭集合；内建条目的注册入口与注入通道都不在使用方 import 的公开导出面上
+  assert.throws(() => registerBuiltin("assertion" as any, "^x$", () => {}, META), /内建标记/);
+  const pub = await import("../index.mjs");
+  assert.ok(!("registerBuiltin" in pub) && !("injectDeviceNavigate" in pub), Object.keys(pub).join(","));
+});
+
+test("内建导航的目标：桌面网页加 Android、iOS 的网页与应用；说明文字逐字取 ADR 0020 第 3 条的 Midscene 版本；目标都在 worker 自述的 targets 里", async () => {
+  _restore(BUILTIN);
+  const [nav, ...rest] = listRegistry();
+  assert.equal(rest.length, 0, "脚手架只有内建导航一条");
+  assert.equal(nav.pattern, ADDRESS_PATTERN);
+  assert.deepEqual(nav.targets, [
+    { device: "desktop", ui_kinds: ["web"] },
+    { device: "android", ui_kinds: ["web", "app"] },
+    { device: "ios", ui_kinds: ["web", "app"] },
+  ]);
+  assert.equal(nav.description, NAV_DESCRIPTION);
+  assert.deepEqual(nav.keywords, ["Given", "When"]);
+  const { WORKER_TARGETS } = await import("./run-scope.mjs");
+  for (const t of nav.targets) {
+    const top = WORKER_TARGETS.find((w) => w.device === t.device);
+    assert.ok(top && t.ui_kinds.every((k) => top.ui_kinds.includes(k)), `${JSON.stringify(t)} 不在 ${JSON.stringify(WORKER_TARGETS)} 里`);
+  }
+});
+
+test("WORKER_TARGETS：桌面网页加 Android、iOS 的网页与应用；设备条目的 max_session_s 取自设备常量模块，桌面不带（ADR 0049 决策 1、2、4）", async () => {
+  const { WORKER_TARGETS } = await import("./run-scope.mjs");
+  const { MAX_SESSION_S } = await import("../device/limits.mjs");
+  assert.deepEqual(WORKER_TARGETS, [
+    { device: "desktop", ui_kinds: ["web"] },
+    { device: "android", ui_kinds: ["web", "app"], max_session_s: MAX_SESSION_S },
+    { device: "ios", ui_kinds: ["web", "app"], max_session_s: MAX_SESSION_S },
+  ]);
+});
+
+/** 任何属性读取都抛错的 ctx：证明内建导航的 webdriver 句柄不经 ctx 取导航原语（ADR 0050 决策 2：ctx 只有七字段）。 */
+const UNTOUCHABLE_CTX = new Proxy({}, { get: (_t, k) => { throw new Error(`内建导航不该读 ctx.${String(k)}`); } }) as any;
+
+async function runDeviceNavigation(text: string, device: string, uiKind: string): Promise<void> {
+  const hit = match(text, "Given")!;
+  const sel = selectHandler(hit, { device, uiKind });
+  assert.equal(sel?.kind, "webdriver", `${device}/${uiKind}`);
+  assert.deepEqual((sel as any).requires, []);  // 导航不声明前提：网页目标的择路由接缝按探测结论定
+  await (sel as any).fn(UNTOUCHABLE_CTX, hit.groups);
+}
+
+test("设备上的内建导航经注入通道把地址交给接缝的导航原语、不读 ctx：应用目标任意 scheme 原样交出，网页目标只交 http(s)（ADR 0050 决策 1、0048 决策 7、0020 第 3 条）", async () => {
+  _restore(BUILTIN);
+  const calls: string[] = [];
+  const dispose = injectDeviceNavigate(async (address) => { calls.push(address); });
+  try {
+    await runDeviceNavigation('"myapp://item/42"', "android", "app");
+    await runDeviceNavigation("https://x.example/a", "ios", "app");  // 应用目标上 http(s) 同样经 DeepLink 交给被测应用
+    await runDeviceNavigation('"https://x.example/b"', "android", "web");
+    await runDeviceNavigation("http://x.example/c", "ios", "web");
+    assert.deepEqual(calls, ["myapp://item/42", "https://x.example/a", "https://x.example/b", "http://x.example/c"]);
+    await assert.rejects(() => runDeviceNavigation("myapp://item/42", "ios", "web"), /网页目标只能打开 http\(s\) 地址/);
+    await assert.rejects(() => runDeviceNavigation('"myapp://item/42', "android", "app"), /引号不配对/);
+    assert.equal(calls.length, 4, "被拒的两步都不该交给接缝");
+  } finally {
+    dispose();
+  }
+});
+
+test("桌面句柄不经注入通道：内建导航在桌面网页上仍调 ctx.navigate，非 http(s) 地址照旧拒绝", async () => {
+  _restore(BUILTIN);
+  const device: string[] = [];
+  const dispose = injectDeviceNavigate(async (address) => { device.push(address); });
+  try {
+    const opened: string[] = [];
+    const hit = match('"https://x.example/"', "Given")!;
+    const sel = selectHandler(hit, { device: "desktop", uiKind: "web" });
+    assert.equal(sel?.kind, "playwright");
+    const ctx = { page: {} as any, navigate: async (url: string) => { opened.push(url); } };
+    await (sel as any).fn(ctx, hit.groups);
+    assert.deepEqual(opened, ["https://x.example/"]);
+    const bad = match("myapp://item/42", "Given")!;
+    await assert.rejects(async () => (selectHandler(bad, { device: "desktop", uiKind: "web" }) as any).fn(ctx, bad.groups), /网页目标只能打开 http\(s\) 地址/);
+    assert.deepEqual(device, []);
+  } finally {
+    dispose();
+  }
+});
+
+test("注入通道：未注入时设备上的导航记 error、消息是产品语言；同一时刻只认一个接缝；撤销可重复、撤销后回到未注入", async () => {
+  _restore(BUILTIN);
+  const notReady = (e: Error) => e.message.includes("远程访问会话") && !/ADR|inject|接缝|通道|undefined|null/.test(e.message);
+  await assert.rejects(() => runDeviceNavigation('"myapp://x/"', "android", "app"), notReady);
+  const dispose = injectDeviceNavigate(async () => {});
+  assert.throws(() => injectDeviceNavigate(async () => {}), (e: Error) => !/ADR|inject|接缝|通道/.test(e.message));
+  dispose();
+  dispose();  // 重复撤销无害
+  await assert.rejects(() => runDeviceNavigation('"myapp://x/"', "ios", "app"), notReady);
+  const stale = injectDeviceNavigate(async () => {});
+  stale();
+  const calls: string[] = [];
+  const current = injectDeviceNavigate(async (address) => { calls.push(address); });
+  stale();  // 旧接缝的撤销函数不撤销后来者
+  await runDeviceNavigation('"myapp://y/"', "android", "app");
+  assert.deepEqual(calls, ["myapp://y/"]);
+  current();
 });

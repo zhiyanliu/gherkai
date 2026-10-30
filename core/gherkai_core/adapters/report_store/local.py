@@ -283,7 +283,8 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
         url = console_url(jr.session_id)
         if url:
             meta_bits.append(f'<a href="{esc(url)}">设备控制台</a>')
-        # 远程访问会话摘要（ADR 0051 决策 7）：占用时长与缺计量会话数；未确认停止的会话按名列出，结果未知的创建尝试单独标
+        # 会话摘要（ADR 0051 决策 4、7）：设备 job 给占用时长与缺计量会话数；未确认停止的会话按名列出，结果未知的创建尝试单独标出——
+        # 后两类桌面 job 也可能有（桌面 worker 同样发会话事件），占用时长只按计量键是否有值给出
         if jr.device_observed_s is not None or jr.device_observed_missing is not None:
             missing = jr.device_observed_missing or 0
             meta_bits.append(f"设备占用 {_fmt_ms((jr.device_observed_s or 0.0) * 1000.0)}"

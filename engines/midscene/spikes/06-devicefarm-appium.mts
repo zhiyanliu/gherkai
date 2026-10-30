@@ -1360,7 +1360,7 @@ async function main(): Promise<number> {
             scopeId: "spike06", scenarioId: `spike06-${PLATFORM}-${SCENARIO}`,
             step: { index: ai.length, keyword: kind === "act" ? "When" : "Then", text: prompt },
             status, message: null, executions: execs, prompt, votes: [kind === "bool" ? out === true : null],
-            url: null, error: err ?? null, runDir: RUN_DIR, refFor: (local) => "file://" + local,
+            snapshot: { url: null, url_missing: null }, error: err ?? null, runDir: RUN_DIR, refFor: (local) => "file://" + local,
           });
           const frames = doc.acts.flatMap((a) => a.frames);
           const shots = frames.map((f) => f.screenshot).filter((u): u is string => typeof u === "string");

@@ -41,6 +41,8 @@ WORKFLOW_DEF = "gherkai-worker"
 # 加截图排空 6s，合计 15s，故 60→30（Nova grace 下限 180→150），30 仍留 ~2x 余量。
 # （上传本体在队列线程内执行、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
 # client 超时 ≈10s，实际运行中量过。）env 可覆盖（再标定/调优）。
+# 停止信号到达时 Start 仍在途的 1.5 秒等待窗口（`run_scope.START_SETTLE_S`，ADR 0051 决策 5 桌面收尾）已在本余量内：它只在没有 act
+# 在途时出现、不与单 act 上界叠加，加上 Stop 预算（SESSION_STOP_BUDGET_S）与截图排空仍在缺省的 30 秒之内，不必为它加大余量。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # AgentCore 会话 Stop 的预算（ADR 0028「会话泄漏防护」，对称 Midscene 的 STOP_SESSION_BUDGET_MS）：worker 自己持有 StopBrowserSession，

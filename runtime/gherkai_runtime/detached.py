@@ -268,6 +268,9 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同（ADR 0034），
         # 重解析必让同一个 run 在三个宿主下用到不同的确定性 step 集，判定不可复现。
         steps_dir=meta.steps_dir,
+        # 本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条）：经 env RUN_ID 注给 worker，编码会话名的 run 段
+        # （ADR 0051 决策 3、4）；取被推进的这个 run，宿主 shell 里的同名值由 build_engines 清掉
+        run_id=meta.run_id,
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace)

@@ -427,6 +427,22 @@ test("ContentType: .json / .jpeg / .jpg / .png / .html 各按其类型，未知�
   assert.deepEqual(inputs.map((i) => i.ContentType), cases.map(([, ct]) => ct));
 });
 
+// 设备目标的原始控件树文件（ADR 0051 决策 8，evidence 的 page_source 指向它）是 .xml：不带类型时浏览器直开同样变下载。
+test("ContentType: 原始控件树 .xml 为 application/xml（与 Nova 上传器同规则），大小写不敏感", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const dir = path.join(runDir, "midscene-run", "evidence", "sc", "step-0");
+  fs.mkdirSync(dir, { recursive: true });
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  withMockClient(u);
+  for (const name of ["page-source.xml", "PAGE.XML"]) {
+    fs.writeFileSync(path.join(dir, name), "<hierarchy/>");
+    await u.snapshotReport(path.join(dir, name));
+  }
+  const inputs = (u as any).client.inputs as any[];
+  assert.deepEqual(inputs.map((i) => i.ContentType), ["application/xml", "application/xml"]);
+});
+
 // ---- 后台上传队列（enqueue / drain，ADR 0042 决策一「上传时机分两类」）----
 // 重点护：key 与 refFor 逐字一致（evidence 里写的 URI 与真上去的对象同一个 key，否则永久 404）、
 // FIFO 顺序不重叠、成功记账让 flush 跳过（不双传）、失败重试一次后记一行放弃、排空有界、no-op 即返。
@@ -588,4 +604,60 @@ test("enqueue: 绝不抛（调用点在已成的判定之后的主流程上）",
   // 文件不存在（SDK 没落盘 / 已被清）→ 上传时 readFileSync 抛，仍只是队列内部失败，不冒到调用方
   assert.doesNotThrow(() => u.enqueue([path.join(runDir, "midscene-run", "report", "screenshots", "nope.jpeg")]));
   assert.equal(await u.drain(5000), true);
+});
+
+// ---- 设备目标的两类新产物（ADR 0051 决策 8）：复用既有的两种上传时机，不新增上传时机 ----
+// device-session.json 是 scope 级诊断，作普通产物链接挂 scope_done：经 toReportRef 即时上传拿 ref（与报告页同一时机）；
+// 原始控件树是 evidence 引用的独立文件：URI 经 refFor 算出写进 evidence.json，字节在 step_done 之后交后台队列。
+// 两者都落在产物落点根（MIDSCENE_RUN_DIR）之下，scope 末的整目录 flush 照样覆盖到，已传过的跳过。
+
+test("device-session.json：toReportRef 即时上传、key 镜像 run 树、按 JSON 类型上传，scope 末 flush 不重传", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const msDir = path.join(runDir, "midscene-run");
+  fs.mkdirSync(msDir, { recursive: true });
+  const diag = path.join(msDir, "device-session.json");
+  fs.writeFileSync(diag, JSON.stringify({ web_context: "provided", candidates: 1 }));
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  const ref = await u.toReportRef(diag);
+  const key = "reports/rid/midscene-run/device-session.json";
+  assert.equal(ref, `s3://bkt/${key}`, "scope_done 的 reportRefs 带的就是这条 ref");
+  assert.deepEqual(keys, [key], "即时上传（链接随 scope_done 发出时对象已在）");
+  assert.equal((u as any).client.inputs[0].ContentType, "application/json");
+  await u.flushAndCleanup(msDir);
+  assert.equal(keys.filter((k) => k === key).length, 1, "flush 按已传集合跳过");
+  assert.ok(!fs.existsSync(msDir), "全成功 → 整目录删");
+});
+
+test("device-session.json：本机后端（未注入落点）报 file://、不上传", async () => {
+  const root = tmproot();
+  const diag = path.join(root, "midscene-run", "device-session.json");
+  fs.mkdirSync(path.dirname(diag), { recursive: true });
+  fs.writeFileSync(diag, "{}");
+  delete process.env.ARTIFACT_S3_BUCKET;
+  const u = ArtifactUploader.fromEnv();
+  assert.equal(await u.toReportRef(diag), `file://${diag}`);
+  assert.ok(fs.existsSync(diag));
+});
+
+test("原始控件树：refFor 先算 URI，enqueue 后台传到同一 key，在整目录 flush 的根下、flush 不重传", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const msDir = path.join(runDir, "midscene-run");
+  const pageSource = path.join(msDir, "device", "page-source-0.xml");
+  fs.mkdirSync(path.dirname(pageSource), { recursive: true });
+  fs.writeFileSync(pageSource, "<hierarchy/>");
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const keys = withMockClient(u);
+  const ref = u.refFor(pageSource);                     // 写进 evidence.json 的 page_source
+  assert.deepEqual(keys, [], "refFor 只算 URI、不上传");
+  u.enqueue([pageSource]);                              // step_done emit 之后与截图一起入队
+  assert.equal(await u.drain(5000), true);
+  const key = "reports/rid/midscene-run/device/page-source-0.xml";
+  assert.deepEqual(keys, [key]);
+  assert.equal(ref, `s3://bkt/${key}`, "evidence 里的 URI 与真上去的 key 逐字一致");
+  await u.flushAndCleanup(msDir);
+  assert.equal(keys.filter((k) => k === key).length, 1, "队列已传的 flush 不重传");
+  assert.ok(!fs.existsSync(msDir));
 });

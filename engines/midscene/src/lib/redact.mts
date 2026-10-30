@@ -13,3 +13,7 @@ export const SECRET_MASK = "***";
 export function redactSecrets(text: string): string {
   return text.replace(USERINFO, MASK).replace(QUERY_SECRET, `$1${SECRET_MASK}`).replace(ENDPOINT_TOKEN, `$1${SECRET_MASK}`);
 }
+
+// 规则二、三的正则对象另行导出，供 WebdriverIO 日志掩码复用（device/wdio-log.mts，ADR 0051 决策 11）：那边由同一正则对象换算出
+// 掩码串，不另写一份。它们带 g 标志，消费方只读 source 与 flags 或经 replace / matchAll 使用，不调 test / exec（会改 lastIndex）。
+export { QUERY_SECRET, ENDPOINT_TOKEN };

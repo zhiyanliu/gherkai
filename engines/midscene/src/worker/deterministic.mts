@@ -12,6 +12,10 @@
 // 脚手架 deterministic.steps.mts 只承载内建导航条目，项目专属的写在使用方 `steps/` 目录（ADR 0037 决策 4，
 // 经本模块的公开导出面 index.mts 注册进**同一张**表）。
 //
+// 内建条目带内建标记（ADR 0050 决策 1）：脚手架经 registerBuiltin 注册（不在公开导出面上，使用方注册的条目一律不带标记），
+// match() 的结果带出命中条目的标记，run-scope 据此把 step_kind 定为 navigation。判别只看命中的是哪个条目、不比对 pattern
+// 原文：使用方 handler 自己调导航，这条 step 仍是 deterministic。标记不进自述清单与 matchBatch 的形态。
+//
 // 句柄按种类分键（ADR 0050 决策 1）：`playwright`（桌面浏览器）与 `webdriver`（远程访问会话）。`handlers` 传单个函数等价于
 // 只有 playwright（已有项目的 steps/ 不需要改）。每个 webdriver 条目用 uiKinds（web / app）与 devices（android / ios）
 // 声明适用范围，两个数组各自独立、覆盖它们的全部组合，缺省为全部取值；Android 与 iOS 的选择器不同就写两个条目，不在
@@ -59,7 +63,8 @@ export type Requirement = (typeof REQUIREMENTS)[number];
 /** 自述里 targets 的固定写出顺序（ADR 0050 决策 1）：只管输出，不参与匹配与派发。 */
 const TARGET_DEVICE_ORDER: readonly string[] = ["desktop", ...DEVICES];
 
-/** webdriver 句柄拿到的设备描述（ADR 0050 决策 2）：字段不叫 target，避免与 Job 携带的测试目标同名。 */
+/** webdriver 句柄拿到的设备描述（ADR 0050 决策 2）：字段不叫 target，避免与 Job 携带的测试目标同名。
+ *  这是句柄上下文的类型透传：设备模块读取点护栏对系统版本字段的显式豁免之一（ADR 0052 决策 8）。 */
 export interface WebdriverDevice {
   platform: Device;
   osVersion: string;
@@ -128,12 +133,18 @@ export interface EntryHandles {
   webdriver: readonly NormalizedWebdriverEntry[];
 }
 
+/** 内建条目的标记（ADR 0050 决策 1「内建条目带内建标记」）：封闭集合，1.5 只有导航。 */
+export const BUILTIN_KINDS = ["navigation"] as const;
+export type BuiltinKind = (typeof BUILTIN_KINDS)[number];
+
 interface Entry {
   pattern: RegExp;
   raw: string;
   meta: DeterministicMeta;
   keywords: readonly Keyword[];
   handles: EntryHandles;
+  /** 内建条目的标记；使用方条目为 null。 */
+  builtin: BuiltinKind | null;
 }
 
 const REGISTRY: Entry[] = [];
@@ -238,13 +249,28 @@ function normalizeHandlers(pattern: string, handlers: DeterministicHandler | Det
  * handlers 传单个函数等价于只有 playwright（ADR 0050 决策 1）。
  * meta 必填（ADR 0036：注册契约含供 feature 作者阅读的元数据——description/example 缺失即 fail-loud）。 */
 export function deterministic(pattern: string, handlers: DeterministicHandler | DeterministicHandlers, meta: DeterministicMeta): void {
+  register(pattern, handlers, meta, null);
+}
+
+/** 内建条目的注册入口：只有随包发布的脚手架（deterministic.steps.mts）调用，不经 index.mts 再导出——内建标记不是使用方
+ *  可声明的元数据。校验与 deterministic() 同一套，只多记一个标记（ADR 0050 决策 1）。 */
+export function registerBuiltin(builtin: BuiltinKind, pattern: string, handlers: DeterministicHandler | DeterministicHandlers,
+                                meta: DeterministicMeta): void {
+  if (!(BUILTIN_KINDS as readonly string[]).includes(builtin)) {
+    throw new Error(`内建条目的内建标记 ${JSON.stringify(builtin)} 不是已知取值：只能是 ${JSON.stringify(BUILTIN_KINDS)}`);
+  }
+  register(pattern, handlers, meta, builtin);
+}
+
+function register(pattern: string, handlers: DeterministicHandler | DeterministicHandlers, meta: DeterministicMeta,
+                  builtin: BuiltinKind | null): void {
   if (!meta?.description || !meta?.example) {
     throw new Error(`deterministic(${JSON.stringify(pattern)}) 注册缺 description/example：`
       + `两者必填——缺了这条 step 不会出现在能力清单里，feature 作者发现不了它`);
   }
   const keywords = normalizeKeywords(pattern, meta.keywords);
   const handles = normalizeHandlers(pattern, handlers);
-  REGISTRY.push({ pattern: new RegExp(pattern), raw: pattern, meta, keywords, handles });
+  REGISTRY.push({ pattern: new RegExp(pattern), raw: pattern, meta, keywords, handles, builtin });
 }
 
 /** 注册表当前条数。用于 `worker/user-steps.mts` 的零注册检查（ADR 0037 决策 4 的双实例守卫）：
@@ -324,10 +350,12 @@ export class DeterministicKeywordMismatch extends Error {
   }
 }
 
-/** 命中结果：命中条目的句柄集合与具名组。句柄要再经 selectHandler 按当前目标取——命中与目标无关（ADR 0050 决策 1）。 */
+/** 命中结果：命中条目的句柄集合、具名组与内建标记。句柄要再经 selectHandler 按当前目标取——命中与目标无关（ADR 0050 决策 1）。 */
 export interface Match {
   handles: EntryHandles;
   groups: Record<string, string>;
+  /** 命中条目的内建标记（使用方条目为 null）：run-scope 据此定 step_kind，navigation 只来自这里（ADR 0050 决策 1）。 */
+  builtin: BuiltinKind | null;
 }
 
 /** 扫注册表收**全部**命中——match（实际运行中派发）与 matchBatch（用例预检）唯一的扫描实现面。
@@ -357,7 +385,7 @@ export function match(text: string, keyword?: string): Match | null {
   if (keyword !== undefined && !(entry.keywords as readonly string[]).includes(keyword)) {
     throw new DeterministicKeywordMismatch(text, keyword, entry.raw, entry.keywords, entry.meta.description);
   }
-  return { handles: entry.handles, groups: m.groups ?? {} };
+  return { handles: entry.handles, groups: m.groups ?? {}, builtin: entry.builtin };
 }
 
 /** 当前目标（ADR 0048 决策 1 的 device 与 ui_kind）。 */

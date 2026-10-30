@@ -42,9 +42,9 @@
 | `duration_ms` | number \| null | scope 墙钟：从 `scope_started` 到 `scope_done`，不含建立会话的时间（设备目标也不含获取设备的时间）；未收到 `scope_started` 或 `scope_done` 时为 null（执行前失败、超时、worker 异常退出、未启动、被中止） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 云端浏览器会话 id（血缘；两个引擎都是 AgentCore 浏览器会话 id，可与 worker 日志对应；Nova Act 的轨迹目录按另一种会话 id 命名，worker 日志里有两者的对应行）；设备目标为 Device Farm 远程访问会话的 ARN |
-| `sessions[]` | array \| 省略 | 仅设备目标：本 job 开过或尝试过的每个远程访问会话一项——`session_id`（结果未知的创建尝试为 null）、`name`（会话名）、`origin`（`created` / `discovered` / `attempted`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
-| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
-| `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止，`message` 列出会话名 |
+| `sessions[]` | array \| 省略 | 本 job 开过或尝试过的每个会话一项：设备目标是 Device Farm 远程访问会话，桌面目标是 AgentCore 浏览器会话（两个引擎的桌面 worker 都报出会话的建立与停止）；没有会话记录的桌面 job 省略此键。每项含 `session_id`（结果未知的创建尝试为 null）、`name`（会话名；桌面目标与 `session_id` 相同，结果未知的创建尝试为这次请求携带的会话名）、`origin`（`created` / `discovered` / `attempted`；桌面目标没有 `discovered`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null；桌面目标恒为 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null；桌面目标恒为 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；桌面目标恒为 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
+| `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标（桌面 job 带会话记录时同样省略）：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
+| `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止（设备目标与桌面目标都可能出现），`message` 列出会话名，并按目标说明到哪里核对 |
 | `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`；设备目标另有 `device_session`，见 `explain` 一节）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
@@ -126,8 +126,8 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` | run 级运行态；未到终态时文档只含已落地的 job |
 | `scopes[]` | array | 每个 job 一项，见下；指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可少于该 run 的 job 数 |
 
-`scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]` 与 `device_observed_s` / `device_observed_missing`（仅设备目标，形状同 `run --json`）、`console_url`（仅当 `session_id` 是 Device Farm 远程访问会话的 ARN 时出现：控制台里该会话页面的链接，录像与日志在那里看）、`report_refs[]`（形状同 `run --json`，
-原样取自判定明细中的指针，不做解析；设备目标另有 `kind=device_session`，指向会话开头能力探测结论的文件，只给链接、不解析）、`scenarios[]`，另加：
+`scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]`（出现条件与形状同 `run --json`）与 `device_observed_s` / `device_observed_missing`（仅设备目标，形状同 `run --json`）、`console_url`（仅当 `session_id` 是 Device Farm 远程访问会话的 ARN 时出现：控制台里该会话页面的链接，录像与日志在那里看）、`report_refs[]`（形状同 `run --json`，
+原样取自判定明细中的指针，不做解析；设备目标另有 `kind=device_session`，指向这个 scope 的设备诊断文件 `device-session.json`（能力探测结论、所用会话与设备、换台记录与各阶段时刻），只给链接、不解析）、`scenarios[]`，另加：
 
 | 键 | 类型 | 含义 |
 |---|---|---|
@@ -161,7 +161,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `step_kind` | `ai` / `deterministic` / `navigation` \| 省略 | 仅设备目标：这一步的执行方式；据它区分「没有 act 是正常的」与「证据抽取失败」 |
 | `url` / `url_missing` | string \| null / string \| null | 仅设备目标：step 结束时的页面地址；取不到时 `url` 为 null 并由 `url_missing` 说明原因（`no_web_context` 设备不提供网页上下文、`not_applicable` 应用目标、`timeout`、`error`） |
 | `controls` / `controls_missing` | object \| null / string \| null | 仅设备目标且仅 failed / error 步：`controls` 是一个对象，含 `items[]`（每项 `type` / `id` / `text` / `a11y_id`，空数组表示采集成功但这一屏没有可识别控件）、`total`（采到的控件总数）与 `truncated`（`items[]` 是否因上限被截断）；采集失败时 `controls` 为 null、`controls_missing` 为 `timeout` 或 `error`；passed 步与桌面目标省略 |
-| `page_source` / `page_source_truncated` | string \| null / bool | 仅设备目标且仅 failed / error 步：原始控件树文件的地址（`file://` 或 `s3://`，只给地址不内嵌）与它是否因超过大小上限被截断 |
+| `page_source` / `page_source_truncated` | string \| null / bool | 仅设备目标且仅 failed / error 步：原始控件树文件的地址（`file://` 或 `s3://`，只给地址不内嵌；采集或写盘失败时为 null）与它是否因超过大小上限被截断 |
 
 `acts[]` 每项：
 

@@ -11,17 +11,21 @@
 //
 // 上传/删除策略（ADR 0029 混合两级 + 整目录，抗 SDK 升级）：
 // - toReportRef(path)：reportRef 文件 → 实时上传（不删、记 uploaded）、报 s3://。失败抛（worker 可观测、
-//   engine_error）——报告链接强保证。
-// - refFor(path)：只算 ref、不上传、不记 uploaded（ADR 0042 决策一）——供 evidence 里引用的截图先拿确定性
-//   URI，字节随后交 enqueue 的后台队列；ref 与 toReportRef 逐字一致（后者的 ref 也经它算）。
-// - enqueue(paths) / drain(ms)：截图字节的后台队列（ADR 0042 决策一「上传时机分两类」）——step_done emit 之后
-//   入队、单条链 FIFO 顺序传（既不占判定临界路径、也不等到 scope 末），收尾对队列做有界排空。
+//   engine_error）——报告链接强保证。报告页、evidence.json 与设备目标挂在 scope_done 上的 device-session.json
+//   （ADR 0051 决策 8）都走它。
+// - refFor(path)：只算 ref、不上传、不记 uploaded（ADR 0042 决策一）——供 evidence 里引用的截图与设备目标的原始
+//   控件树文件（ADR 0051 决策 8）先拿确定性 URI，字节随后交 enqueue 的后台队列；ref 与 toReportRef 逐字一致（后者的
+//   ref 也经它算）。
+// - enqueue(paths) / drain(ms)：截图与原始控件树字节的后台队列（ADR 0042 决策一「上传时机分两类」）——step_done
+//   emit 之后入队、单条链 FIFO 顺序传（既不占判定临界路径、也不等到 scope 末），收尾对队列做有界排空。
 // - flushAndCleanup(dir)：scope 末调。递归 walk 整个产物目录上传剩余文件（已成功传过的跳过）——不按文件类型/名字挑
 //   （整目录一股脑传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+队列+剩余）才
 //   rmSync 整目录（本地零残留）；任一失败则整目录保留不删（产物不丢）。
+// 设备目标没有新增上传时机：device-session.json 与原始控件树都须落在产物落点目录（MIDSCENE_RUN_DIR）之下，scope 末的整目录 flush 才能覆盖到它们。
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { redactSecrets } from "./redact.mjs";
 
 // 单次 S3 上传超时（ADR 0029「上传必须套超时」）：远大于正常同区上传（亚秒~秒级）、且明显 < grace（worker
 // 优雅停宽限，ADR 0024）——退化网络下上传挂到此即 abort、best-effort 放弃，不拖住退出。**grace 是 run 级、随
@@ -40,13 +44,15 @@ const UPLOAD_ATTEMPTS = 2;
 
 // 后缀 → Content-Type（ADR 0042 决策一「不是零改动」①，与 Nova 上传器同规则同步改）：不带 ContentType 的
 // 对象在 S3 落成 binary/octet-stream，浏览器直开变**下载**而非渲染——`.html` 早有映射，evidence 带来的
-// `.json` 与截图 `.jpeg`/`.png` 若漏，报告里点开截图只会下文件。无映射的后缀仍不带 ContentType（保旧行为）。
+// `.json` 与截图 `.jpeg`/`.png` 若漏，报告里点开截图只会下文件。设备目标的原始控件树文件（ADR 0051 决策 8）是 `.xml`，同理映射到
+// application/xml。无映射的后缀仍不带 ContentType（保旧行为）。
 const CONTENT_TYPES: Record<string, string> = {
   ".html": "text/html; charset=utf-8",
   ".json": "application/json",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".png": "image/png",
+  ".xml": "application/xml",
 };
 
 function contentTypeFor(localAbs: string): string | undefined {
@@ -73,8 +79,8 @@ export class ArtifactUploader {
 
   // 诊断输出（stderr）。**后台队列的失败无人可 catch**——enqueue 同步返回、上传在链上执行，主流程早走了，
   // 故只有上传器自己能记那一行（其余方法仍是「抛给 worker 记」，本类不替它们记）。可替换：单测断言那一行、
-  // 将来 worker 想换诊断出口也从这里注。
-  logFn: (msg: string) => void = (m) => process.stderr.write(m + "\n");
+  // 将来 worker 想换诊断出口也从这里注。缺省出口写出前经 redactSecrets：失败原因里可能带着签名地址（ADR 0051 决策 11）。
+  logFn: (msg: string) => void = (m) => process.stderr.write(redactSecrets(m) + "\n");
 
   // 从组合根注入的 env 造。无 ARTIFACT_S3_BUCKET → no-op uploader（报 file://）。
   static fromEnv(): ArtifactUploader {
