@@ -31,7 +31,7 @@ ProjectSource = Literal["ssm", "found", "created"]
 
 # 授权失败的错误码。Device Farm 服务模型自己不声明授权错误（IAM 拒绝由 AWS 的公共层返回），这里收 AWS 公共错误表里的
 # AccessDeniedException / NotAuthorized，加其他协议服务的写法 AccessDenied（S3、STS 等）与 UnauthorizedOperation（EC2）；部署方没有
-# Device Farm 权限时真实账户回的是哪一个，要在真账户上核对。provider 读 SSM 记录失败时也用这份集合判定「是否为无权限」（`is_access_denied`）。
+# Device Farm 权限时真实账户回 AccessDeniedException（受限角色实测，ADR 0051 实测依据）。provider 读 SSM 记录失败时也用这份集合判定「是否为无权限」（`is_access_denied`）。
 _ACCESS_DENIED_CODES = frozenset({"AccessDeniedException", "AccessDenied", "NotAuthorized", "UnauthorizedOperation"})
 _NOT_FOUND_CODE = "NotFoundException"
 _COMPLETED = "COMPLETED"   # 远程访问会话的终态；其余状态（排队、准备、执行、停止中）都可能还在占用设备

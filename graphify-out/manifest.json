@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1793335490.4566274,
-    "ast_hash": "641e15e8c444756f60acfce2713eca81",
+    "mtime": 1793341055.983258,
+    "ast_hash": "d322184ac0b58e6fbf00c66d85d59d38",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793336399.59103,
-    "ast_hash": "26b4f459b9ce2d84d357ee8d0e4c7fbd",
+    "mtime": 1793341055.9826615,
+    "ast_hash": "be9bda9f5d6186e7f3f42aef2ea4c856",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793335490.45682,
-    "ast_hash": "9c68022a5506d01ead28b15448b21c4c",
+    "mtime": 1793341055.9837208,
+    "ast_hash": "6351138e5d893a1032613d644f6e89c9",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2085,13 +2085,13 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/devicefarm.py": {
-    "mtime": 1793335490.4530015,
-    "ast_hash": "c635d744db6d31f86c27c4a50f114380",
+    "mtime": 1793341055.9833908,
+    "ast_hash": "4537e9e71f0780cae466ae5edd220b9a",
     "semantic_hash": ""
   },
   "runtime/tests/test_devicefarm.py": {
-    "mtime": 1793335490.4543753,
-    "ast_hash": "ee1fb69daeb88c79dfb22343073b9cdf",
+    "mtime": 1793341055.9835372,
+    "ast_hash": "a4a2f5ff632611353f02fb17eabaf1be",
     "semantic_hash": ""
   },
   "runtime/tests/test_devicefarm_client_placement.py": {

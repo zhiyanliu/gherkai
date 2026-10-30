@@ -9,7 +9,7 @@
 - diff 用的只读核对只调 GetProject：成功为 True、NotFound 为 False，不列举、不建立；无权限与其他错误的分类同上；
 - 客户端区域恒为 Device Farm 唯一的区域，与后端区域（环境变量或 profile 给的）无关；
 - 列会话过滤掉 COMPLETED、保留排队中的各状态，且本模块不创建、不停止会话。
-真实错误码（部署方无权限时 Device Farm 回的到底是哪个码）与真实会话状态取值要在真账户上核对，Stubber 只能核形态。
+真实错误码经受限角色实测为 AccessDeniedException、真实会话状态取值（PREPARING 等）经真会话核过（ADR 0051 实测依据），Stubber 只能核形态。
 """
 from __future__ import annotations
 
