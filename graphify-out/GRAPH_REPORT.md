@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a60b12ac`
+- Built from commit: `89868429`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -437,8 +437,8 @@
 3. `RunMeta` - 140 edges
 4. `RunState` - 132 edges
 5. `Status` - 114 edges
-6. `Provider` - 106 edges
-7. `JobState` - 106 edges
+6. `JobState` - 106 edges
+7. `Provider` - 106 edges
 8. `JobResult` - 105 edges
 9. `Scenario` - 98 edges
 10. `Step` - 97 edges
@@ -1491,7 +1491,7 @@ Nodes (9): parametrize, Popen, 进程级真信号回归哨兵（ADR 0024 flag-on
   docs/adr/0025-plan-module-feature-to-jobs.md · relation: references
 
 ## Knowledge Gaps
-- **699 isolated node(s):** `StepArgument`, `Row`, `match`, `Job`, `JobApp` (+694 more)
+- **699 isolated node(s):** `背景与问题`, `1. 一个 scope 一个远程访问会话，scenario 之间不复位`, `2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034`, `3. 设备解析、创建与孤儿防护`, `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` (+694 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **174 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

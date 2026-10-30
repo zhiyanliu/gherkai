@@ -21,7 +21,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 | AWS 凭证与 region | 凭证走 `--profile` / `AWS_PROFILE`；region 取 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置 |
 | 每个 account + region 初始化一次 | `gherkai deploy --bootstrap`（账户级动作，不需要 `--vpc`）。未初始化就部署会报错并指回这个选项 |
 
-部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、注册与注销任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
+部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、注册与注销任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：之前建立过项目就沿用它，否则这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
 
 ## 后端包含什么
 
@@ -32,7 +32,9 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
 - **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
-- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，供 `run` / `submit` 读取。
+- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，以及 Device Farm 项目 ARN（启用设备支持时才有），供 `run` / `submit` 读取。
+
+stack 之外，`gherkai deploy` 还会在部署 stack 之前找到已有的或新建一个 Device Farm 项目 `<prefix>devices`，带设备目标的 run 在这个项目里建远程访问会话。项目固定在 us-west-2（Device Farm 只在这个区域提供），不属于 stack，destroy 时保留，见[拆除与清理](#拆除与清理)。
 
 前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。
 
@@ -153,6 +155,8 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 - **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 - **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
+无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
+
 ## 拆除与清理
 
 ```bash
@@ -174,13 +178,22 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy 删除：同前缀重建后它们还记着上一套环境里的 variant。ECR 仓库还在的话，重新 `gherkai deploy` 会把这些 variant 按原镜像重新登记、照样可用；ECR 仓库也删了的话，这些 variant 变成有记录、没镜像，提交时以退出码 2 结束并提示找不到镜像，重推同名 variant 即恢复。想彻底清空，用 `aws ssm get-parameters-by-path --path /gherkai-backend/worker-image --recursive --query 'Parameters[].Name' --output text` 列出后逐条 `aws ssm delete-parameter --name …`，再删 `/gherkai-backend/worker-default`。
 
+部署时建立的 Device Farm 项目 `gherkai-devices` 也不随 destroy 删除：它由 `gherkai deploy` 在部署 stack 之前建立、不属于 stack，项目连同其中的远程访问会话记录与录像一起保留，SSM 里记着项目 ARN 的 `/gherkai-backend/device-farm-project` 参数则随 stack 删除。项目留着时，同一前缀重新部署会按名称找回并沿用它，不会冲突。不再需要时手动删除：
+
+```bash
+aws devicefarm list-projects --region us-west-2 --query "projects[?name=='gherkai-devices'].arn" --output text   # 查出项目 ARN
+aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>
+```
+
+Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区域无关。删除项目会一并删掉其中的会话记录与录像，之前 run 报告里指向这些会话的控制台链接随之失效。
+
 ## 费用
 
 后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时——Fargate 任务按运行时长计费，加上 AI step 调用模型的费用。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
 
 ## 退出码与常见错误
 
-`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下；`1` 账户可能已被改动，有两种来源：CDK 自身失败（它自己的退出码多为 `1`，原样透传，原因看上方 cdk 输出），或 CDK 已成功而随后的 worker 镜像步骤失败（带同一组选项重新运行 `gherkai deploy` 幂等收敛）；`gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。其余退出码是 cdk 命令自己的返回值，原样透传。`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但那时镜像与 revision 可能已写入账户。
+`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下，读不到后端里的 Device Farm 项目记录（凭证不可用、网络、缺 `ssm:GetParameter`）也在动账户之前拦下；`1` 账户可能已被改动，有三种来源：CDK 自身失败（它自己的退出码多为 `1`，原样透传，原因看上方 cdk 输出），CDK 已成功而随后的 worker 镜像步骤失败（带同一组选项重新运行 `gherkai deploy` 幂等收敛），或部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；这时 stack 没有改动，项目可能已经建立，重新运行 `gherkai deploy` 会按名称找回它、不会重复建立）；`gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。其余退出码是 cdk 命令自己的返回值，原样透传。`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但那时镜像与 revision 可能已写入账户。
 
 | 现象 | 处置 |
 |---|---|
@@ -193,5 +206,7 @@ worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy
 | 找不到容器引擎或连不上其守护进程 | 装好 docker 并让守护进程运行。stack 仍会照常部署，随后的基础镜像同步以退出码 1 结束，带同一组选项重新运行 `gherkai deploy` 幂等收敛 |
 | `push-worker` 说架构不对 | 带 `--platform linux/amd64` 重新构建 |
 | 提交时说后端没有默认 variant 指针 | 部署方运行一次 `gherkai deploy` 完成初始化，或提交时用 `--worker-variant` 显式指定 |
+| `deploy` 以退出码 2 结束，提示 Device Farm 里有多个名为 `<prefix>devices` 的项目 | 部署不替你选用其中哪一个，消息里列出了命中的全部项目 ARN，本次没有改动后端。用 `aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>` 删掉多余的、只留一个（删除会一并删掉其中的会话记录与录像），再重新运行 `gherkai deploy` |
+| `deploy` 或 `deploy --diff` 警告当前凭证没有 Device Farm 权限 | 命令照常完成：之前的部署记录过项目就沿用它，设备支持保持不变（`--diff` 按记录的项目计算变更集，项目若恰好已被手动删除，变更集会与下一次部署不同）；记录的项目已被手动删除而又无法找回或新建时，本次按未启用设备支持部署、撤掉设备授权；没有记录就跳过设备支持。后两种情形下带设备目标的云端 run 在提交时以退出码 2 结束并提示「部署未启用设备支持」。要启用，给部署用的凭证加上 us-west-2 的 `devicefarm:ListProjects`、`GetProject` 与 `CreateProject`（见[前置要求](#前置要求)），再重新运行 `gherkai deploy`；不测设备的团队可以忽略这条警告 |
 
 提交侧遇到的症状（CLI 与后端版本不一致、variant 解析不到、读不到后端版本戳、云端 job 判 `error`）以及更多按症状分类的处置见 [`troubleshooting.md`](./troubleshooting.md)。`gherkai deploy --help` 与 `gherkai deploy push-worker --help` 列出全部选项。

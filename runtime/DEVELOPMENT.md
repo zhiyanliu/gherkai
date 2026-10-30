@@ -10,7 +10,7 @@
 
 ## 模块
 
-包内七个模块（`__init__.py` 只有包说明、无逻辑）：
+包内八个模块（`__init__.py` 只有包说明、无逻辑）：
 
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级 worker 定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
@@ -33,6 +33,7 @@
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
+- `devicefarm.py` —— 部署与诊断用的 Device Farm 客户端（ADR 0051 决策 10「调用归属」、决策 6）：`read_project_arn`（从后端区域的 SSM 读项目 ARN，ssm client 由调用方注入）/ `resolve_or_create_project`（供 `deploy` 在 cdk 之前找回或建立项目 `{prefix}devices`）/ `list_open_sessions`（供 `doctor` 列出未到 COMPLETED 的会话）；无权限归为 `DeviceFarmAccessDenied`、同名项目多于一个归为 `AmbiguousProject`，其余 botocore 异常原样抛出。Python 侧唯一构造 devicefarm 客户端的地方，区域恒为 `names.DEVICE_FARM_REGION`；不创建、不停止会话（护栏 `tests/test_devicefarm_client_placement.py`）
 - `app_upload.py` —— 安装包上传到 S3 应用前缀（ADR 0051 决策 9）：按内容哈希定键、managed 桶打标签与按保留承诺同键刷新、本机应用桶只做存在性复用；s3 client 由调用方注入
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
   避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
@@ -55,7 +56,7 @@ uv run pytest -q runtime/tests   # 仓库根：只运行本包单测（`uv run p
 ```
 
 `build_cloud_stores` / `build_fargate_engines` 的 boto3 import 惰性收敛在 `_make_*` 钩子内：**纯 local 路径绝不
-触发该 import**（ADR 0016 窄腰 / 0030）。修改这些函数时须保持 `import boto3` 不上移到模块顶层。
+触发该 import**（ADR 0016 窄腰 / 0030）。修改这些函数时须保持 `import boto3` 不上移到模块顶层。`devicefarm.py` 同理：boto3 只在 `_make_devicefarm_client` 内 import，CLI 与 deploy 的 `--help` 不为它拉起 AWS SDK。
 
 worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行得出的约束：`uvx` 穿透 fd3，`npx -y` 会替换 fd
 并导致事件全部丢失（因此 midscene 无第四级）。细节与实测证据见 `resolve_worker_cmd` 的 docstring 与 ADR 0037 决策 3。
@@ -72,6 +73,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离、worker 定位链、版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 revision、镜像 tag 归一化）
 - [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（`textui`）
+- [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话的生命周期与应用分发（`app_upload` 的应用前缀与保留承诺、`devicefarm` 的项目找回与会话列举）
 
 参与开发的总入口（环境、测试、发布链、文档地图）见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)；执行与推进的机理解读见
 [`docs/internals/`](../docs/internals/README.md)。

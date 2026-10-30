@@ -37,10 +37,12 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
 | `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
 | `backend.resources` | 云端 | 两张表、产物桶、cluster、两个引擎的 task 定义、三个 Lambda 是否都在，报告前缀与 `--report-dir` 是否一致。必修 |
-| `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，云端这一段自检到此为止：下面三行 `backend.worker.*` 都不出现 |
+| `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，下面三行 `backend.worker.*` 都不出现；设备支持的两行照常检查 |
 | `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
 | `backend.worker.any` | 云端，且 `backend.worker.default` 通过后 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
 | `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码，这一行会说明云端宽限是否还能调高 |
+| `backend.devices.project` | 云端 | 这套后端是否启用了设备支持，即部署时建立的 Device Farm 项目 ARN 是否记在 SSM 里。没有时标 `-` 并提示「部署未启用设备支持」：不测设备的团队可以忽略；要测设备时，请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`。读这个参数本身失败时同样只标 `-`，行内给出原因。不影响退出码 |
+| `backend.devices.sessions` | 云端，且 `backend.devices.project` 读到项目后 | 项目里还没结束的远程访问会话（含排队中的），每条带控制台链接与停止命令 `aws devicefarm stop-remote-access-session --region us-west-2 --arn <会话 ARN>`。没有时标 `✓`；有时标 `-`：正在执行的 run 也有会话，停止前先确认没有 run 在使用它，没有 run 使用的会话会继续计费并占用设备，最长到 Device Farm 的 150 分钟上限。列举需要 us-west-2 上对这个项目的 `devicefarm:ListRemoteAccessSessions` 权限，缺这项权限时这一行说明缺什么；停止需要 `devicefarm:StopRemoteAccessSession`，只提交 run 的成员的最小权限里没有这一项，请有该权限的人停止。表格在窄终端里会把长链接与命令折成多行，`doctor --json` 的 `detail` 里是完整的一行。不影响退出码 |
 | `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种只是说明（部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
 | `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机运行 |
 
@@ -115,7 +117,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
 | `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
-| 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy` |
+| 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`；之后 `doctor --backend cloud` 的 `backend.devices.project` 行应显示项目 ARN |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 
 ## 提交后进度停住

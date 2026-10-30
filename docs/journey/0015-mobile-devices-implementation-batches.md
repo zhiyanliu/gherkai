@@ -7,7 +7,7 @@
 
 ## 7. B8-deploy-iac：部署侧：权限、Device Farm 项目找回或建立、SSM、doctor 设备项
 
-规模 M。
+规模 M。**状态**：实施与独立复核完成；四处设计边角已由 owner 拍板并写进 ADR 0051 决策 10（diff 核对被拒与 deploy 同一降级、deploy 读 SSM 失败退出码 2、记录的项目已失效且无法重建视同无记录、本机 doctor 不列会话）；待提交、同僚复核与真部署核实。
 
 
 **依赖**
@@ -22,8 +22,8 @@
 - `deploy_aws/gherkai_deploy_aws/names.py` · re-export 列表 + ssm_* 便捷函数：re-export 上面新增的常量与函数；加 ssm_device_farm_project_path(prefix)，形状与 ssm_vpc_path 相同，供 stack 写、provider 读（0051 决策 10；0033 资源清单 11.）
 - `runtime/gherkai_runtime/devicefarm.py（新模块）` · 部署与诊断用的 Device Farm 客户端模块（`gherkai-runtime[aws]`，boto3 函数内延迟导入）：Python 侧唯一构造 devicefarm 客户端的地方，客户端恒用 region_name=DEVICE_FARM_REGION，凭证沿用调用方的 profile。提供以下函数：read_project_arn(ssm, prefix)，从后端区域的 SSM 读，ParameterNotFound 时返回 None；resolve_or_create_project(prefix, profile, stored_arn)，SSM 有值时先用 GetProject 核对，再按名翻页 ListProjects，命中多个抛专用异常，零个则 CreateProject；list_open_sessions(project_arn, profile)，翻页 ListRemoteAccessSessions，过滤掉状态为 COMPLETED 的会话，返回 arn、name、status、created，用于 doctor 拼控制台链接和停止命令。不创建也不停止会话。权限错误单独分类成一种异常（AccessDenied），供 deploy 降级（0051 决策 10「调用归属」「项目」；0051 决策 6（doctor 列未完成会话）；0033 部署方 ListProjects/CreateProject 于 *、GetProject 于项目 ARN）
 - `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.build_context：context 闭集加 device_farm_project。build_context 保持纯推导：ARN 由调用方先解析好再传入（新增一个关键字参数，或者让 _run_cdk 把解析结果放在 args 的私有属性上），不在 build_context 里做 IO。值为 None 时这个键不进 context，或者给占位常量，两者在 stack 里等价（0037 决策 6 context 闭集加 device_farm_project；0051 决策 10）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.deploy（_guard_vpc_spec 之后、_run_cdk 之前新加一步 _resolve_device_farm_project_for_deploy）：放在工具链闸、容器引擎、--vpc、VPC 三态之后，cdk 之前。先读 SSM，再调 runtime.devicefarm.resolve_or_create_project：同名项目命中多个时以退出码 2 结束；遇到 AccessDenied 时，SSM 有 ARN 就沿用并打一条警告，没有就警告后跳过（context 不带 ARN）；其余错误按前置失败处理，以退出码 2 结束。文案按 0039 只说发生了什么、为什么、怎么办，不出现 ADR 编号。解析结果交给 _run_cdk 和 build_context（0051 决策 10「项目」与无权限降级；0033「设备目标增量」部署方行）
-- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.diff / synth_only / destroy（经 _run_cdk）：这三个动作不建立项目：只读 SSM 现值，没有值时传占位值。读 SSM 失败时怎么处理见 open_questions。diff 的 docstring 要写明「待建立」时变更集里看不到 Device Farm 授权（0037 决策 6（diff 不建立、synth-only 与 destroy 取 SSM 现值或占位）；0051 决策 10）
+- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.deploy（_guard_vpc_spec 之后、_run_cdk 之前新加一步 _resolve_device_farm_project_for_deploy）：放在工具链闸、容器引擎、--vpc、VPC 三态之后，cdk 之前。先读 SSM，再调 runtime.devicefarm.resolve_or_create_project：同名项目命中多个时以退出码 2 结束；遇到 AccessDenied 时，SSM 有 ARN 就沿用并打一条警告，没有就警告后跳过（context 不带 ARN）；其余错误（限流、网络等）以退出码 1 结束、不猜测（ADR 0051 决策 10）；读 SSM 本身失败以退出码 2 结束（已定，ADR 0051 决策 10）。文案按 0039 只说发生了什么、为什么、怎么办，不出现 ADR 编号。解析结果交给 _run_cdk 和 build_context（0051 决策 10「项目」与无权限降级；0033「设备目标增量」部署方行）
+- `deploy_aws/gherkai_deploy_aws/cli.py` · Provider.diff / synth_only / destroy（经 _run_cdk）：这三个动作不建立项目：只读 SSM 现值，没有值时传占位值。读 SSM 失败以退出码 2 结束，diff 的 GetProject 核对被拒与 deploy 同一降级、其他失败退出码 2（已定，ADR 0051 决策 10）。diff 的 docstring 要写明「待建立」时变更集里看不到 Device Farm 授权（0037 决策 6（diff 不建立、synth-only 与 destroy 取 SSM 现值或占位）；0051 决策 10）
 - `deploy_aws/gherkai_deploy_aws/cli.py` · 模块头 docstring「Provider 负责」「退出码」两段：职责清单加「deploy 在 cdk 之前找回或建立 Device Farm 项目」；退出码 2 的情形加「同名项目命中多个」（0051 决策 10）
 - `deploy_aws/gherkai_deploy_aws/stack.py` · BackendStack.__init__ 新增 _resolve_device_farm_project()：读 try_get_context("device_farm_project")。缺失或等于占位值时 self.device_farm_project_arn=None，不报错（这一点与 _resolve_version 相反，app 不 fail-fast）。非占位的值要过 ARN 形态校验，必须是 arn:aws:devicefarm:us-west-2:<12 位>:project:<id>，不合法即在 synth 期报错，因为拼出错的 session 前缀只会表现为运行期 AccessDenied（0037 决策 6（缺少或占位不 fail-fast）；0051 决策 10）
 - `deploy_aws/gherkai_deploy_aws/stack.py` · 新增 _ssm_device_farm()（与 _ssm_deployment_stamp 并列）：ARN 不为 None 时写 StringParameter，路径为 ssm_device_farm_project_path(prefix)，作为 stack 资源，随部署事务同生死、随 destroy 删除（项目本身由 SDK 建立、不归 stack 管，所以 destroy 不删项目）；ARN 为 None 时不建这个参数（0033 资源清单 11.；0051 决策 10）
@@ -38,7 +38,7 @@
 
 - `deploy_aws/tests/test_stack.py`：SSM 参数全集按 context 分两种情形锁定：不带 device_farm_project 或带占位值时，仍是现有 6 条（改写 test_ssm_parameter_set_is_exactly_six）；带合法 ARN 时恰为 7 条，多出的那条值等于传入的 ARN（0033 资源清单 11.；0037 决策 6）
 - `deploy_aws/tests/test_stack.py`：带 ARN 合成时 Midscene task role 的权限：ListDevices 只出现在资源为 "*" 的 statement；Get/StopRemoteAccessSession 所在 statement 的 Resource 同时含 session:<id>/* 和项目 ARN（缺一种即失败，这是模拟器假阳性留下的护栏）；CreateRemoteAccessSession 同时含项目 ARN 和 device:*；GetDevice 的设备 ARN 账户段为空；所有 devicefarm ARN 的区域段都是 us-west-2，夹具的 REGION=us-east-1 正好用来反证没有误用 self.region；ListBucket 带 StringLike s3:prefix apps/*（0033 task role 表 devicefarm / apps 行；0051 决策 10）
-- `deploy_aws/tests/test_stack.py`：两个引擎的 role 分开：Nova task role 的策略里没有任何 devicefarm: 动作，也没有 s3:ListBucket；不带 ARN 合成时整个模板没有任何 devicefarm: 动作。在 test_task_role_resource_arns_narrowed 里补一条：只能用 * 的动作恰好是 AgentCore 4 个加 ListDevices，对应 0033 写的「这 5 个」（0033「两个引擎 task role 分立」「风险收在两道」）
+- `deploy_aws/tests/test_stack.py`：两个引擎的 role 分开：Nova task role 的策略里没有任何 devicefarm: 动作，也没有 s3:ListBucket；不带 ARN 合成时整个模板没有任何 devicefarm: 动作。在 test_task_role_resource_arns_narrowed 里补一条：只能用 * 的动作恰好是 AgentCore 的两个 Connect 加 ListDevices，对应 0033 写的「这 3 个」（0033「两个引擎 task role 分立」「风险收在两道」）
 - `deploy_aws/tests/test_stack.py`：非占位但形态不合法的 device_farm_project（区域不对、不是 project 资源）在 synth 期抛 ValueError；缺失或占位不抛（0037 决策 6（缺少或占位不 fail-fast））
 - `deploy_aws/tests/test_stack.py`：产物桶 lifecycle 规则恰为 expire-job-in 和 expire-apps 两条，后者 TagFilters 为 gherkai=app、过期 14 天（0051 决策 9）
 - `deploy_aws/tests/test_provider.py`：context 闭集差集护栏：build_context 可能产出的键集合，等于 stack.py/app.py 源码里所有 try_get_context("…") 字面量的集合，即 {prefix, version, vpc_id, use_default_vpc, stop_timeout, device_farm_project}，并断言 device_farm_project 不是任何 argparse flag（0037 决策 6 flag 面与 context 对齐、闭集）
