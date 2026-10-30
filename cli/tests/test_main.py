@@ -1510,6 +1510,35 @@ def _no_provider(monkeypatch):
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "没有可用的部署 provider：装 `gherkai[deploy-aws]`"))
 
 
+def _stub_device_farm(monkeypatch, *, arn=None, sessions=(), list_error=None, read_error=None):
+    """doctor 云端段末尾的设备支持两行（`backend.devices.project` / `backend.devices.sessions`）的替身：项目 ARN 的 SSM 读与会话列举都不连真 AWS。
+
+    缺省摆成「部署未启用设备支持」（SSM 没有项目 ARN）、且断言此时不去列举会话；返回记录调用的字典，供用例核对读 SSM 用的
+    prefix / 后端区域与列举用的项目 ARN / profile。凡走到 `aws.identity` 通过的 doctor 云端用例都要摆它，否则会去读真 SSM。
+    """
+    from gherkai_runtime import devicefarm
+
+    calls: dict = {"read": [], "list": []}
+
+    def read(**kw):
+        calls["read"].append(kw)
+        if read_error is not None:
+            raise read_error
+        return arn
+
+    def list_open(project_arn, *, profile):
+        calls["list"].append((project_arn, profile))
+        if arn is None:
+            raise AssertionError("SSM 里没有项目 ARN 时不该列举会话")
+        if list_error is not None:
+            raise list_error
+        return list(sessions)
+
+    monkeypatch.setattr(m.compose, "read_device_farm_project", read)
+    monkeypatch.setattr(devicefarm, "list_open_sessions", list_open)
+    return calls
+
+
 def test_list_engines_json_shape(monkeypatch, capsys):
     _fake_locator(monkeypatch)
     assert m.main(["list-engines", "--json"]) == 0
@@ -1562,6 +1591,7 @@ def test_doctor_no_engine_at_all_fails_locally_but_not_for_cloud(monkeypatch, ca
     monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
     monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: {
         e: compose.WorkerResolution(engine=e, variant=kw["variant"], revision_arn=f"arn:{e}:7", digest="sha256:0") for e in kw["engines"]})
+    _stub_device_farm(monkeypatch)
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
@@ -1582,6 +1612,7 @@ def test_doctor_cloud_reports_backend_failures_and_exits_2(monkeypatch, capsys):
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: "events 表 vfy-events 不存在——prefix 配错或后端未部署")
     monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
     monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: (_ for _ in ()).throw(compose.WorkerVariantError("没有映射", engine=kw["engines"][0])))
+    _stub_device_farm(monkeypatch)
     assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2  # 给了 --prefix 即查云端
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
@@ -1606,6 +1637,7 @@ def _cloud_backend_ok(monkeypatch):
     monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: {
         e: compose.WorkerResolution(engine=e, variant=kw["variant"], revision_arn=f"arn:{e}:7", digest="sha256:0")
         for e in kw["engines"]})
+    _stub_device_farm(monkeypatch)
 
 
 def _stub_stop_timeout(monkeypatch, value, asked=None):
@@ -1746,10 +1778,127 @@ def test_doctor_cloud_missing_default_pointer_is_required_failure(monkeypatch, c
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
     monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: None)
+    _stub_device_farm(monkeypatch)
     assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("backend", "worker.default")]["ok"] and "gherkai deploy" in by[("backend", "worker.default")]["detail"]
     assert ("backend", "worker.any") not in by  # 指针都没有，不再逐引擎
+    # 设备支持与 worker 镜像无关：默认指针缺失时设备两行照查（这里 SSM 没有项目 ARN，只出 devices.project 一行）
+    assert ("backend", "devices.project") in by
+
+
+# ---- doctor --backend cloud 的设备支持两行（ADR 0051 决策 6 泄漏护栏、决策 10；项名见 docs/internals/cli-json-contract.md）----
+
+_DF_PROJECT = "arn:aws:devicefarm:us-west-2:123456789012:project:proj-1"
+_DF_SESSION_QUEUED = "arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-1/00000"
+_DF_SESSION_RUNNING = "arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-2/00000"
+
+
+def _doctor_devices_cloud(monkeypatch, capsys, **stub):
+    """云端 doctor 其余各项摆成 ok（本机不装 worker：停止宽限整行跳过、不去 describe），只留设备两行做变量；退出码恒为 0——
+    设备行全是可选项，任何结果都不改退出码。返回（按 (section, name) 索引的检查项, 替身的调用记录）。"""
+    _fake_locator(monkeypatch, available=())
+    _cloud_backend_ok(monkeypatch)
+    calls = _stub_device_farm(monkeypatch, **stub)
+    return _doctor_cloud_json(capsys, expect_rc=0), calls
+
+
+def test_doctor_cloud_devices_not_enabled_is_one_optional_row(monkeypatch, capsys):
+    """SSM 没有项目 ARN → 只出 `backend.devices.project` 一行「部署未启用设备支持」，可选（`-`）、退出码不变，不去列举会话。
+    SSM 读用后端的区域与 prefix（Device Farm 的固定区域只用于 Device Farm 客户端，SSM 仍在后端区域）。"""
+    by, calls = _doctor_devices_cloud(monkeypatch, capsys)
+    row = by[("backend", "devices.project")]
+    assert row["ok"] is False and row["required"] is False
+    assert "部署未启用设备支持" in row["detail"] and "gherkai deploy" in row["detail"]
+    assert ("backend", "devices.sessions") not in by
+    assert calls["list"] == []
+    assert [(kw["prefix"], kw["region"]) for kw in calls["read"]] == [("vfy-", "us-east-1")]
+    # 人读形态：结果列 - 与检查项同行；整体仍是「自检通过」
+    _stub_device_farm(monkeypatch)
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
+    out = capsys.readouterr().out
+    assert re.search(r"-\s*│\s*backend\.devices\.project", out) and "自检通过" in out
+
+
+def test_doctor_cloud_devices_lists_open_sessions_with_console_link_and_stop_command(monkeypatch, capsys):
+    """有未到 COMPLETED 的会话（含排队中）→ `backend.devices.sessions` 逐条给会话 ARN、状态、控制台链接与 us-west-2 的停止命令；
+    有残留只标 `-`（正在执行的 run 也有会话，doctor 判断不了是否仍在使用），退出码不变。控制台链接与 explain 同一份拼法。"""
+    from datetime import datetime, timezone
+
+    from gherkai_core.device_session import console_url
+    from gherkai_runtime.devicefarm import OpenSession
+
+    sessions = [OpenSession(arn=_DF_SESSION_QUEUED, name="gherkai-r1-s1", status="PENDING",
+                            created=datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc)),
+                OpenSession(arn=_DF_SESSION_RUNNING, name=None, status="RUNNING", created=None)]
+    by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, sessions=sessions)
+    project = by[("backend", "devices.project")]
+    assert project["ok"] is True and project["required"] is False and _DF_PROJECT in project["detail"]
+    row = by[("backend", "devices.sessions")]
+    assert row["ok"] is False and row["required"] is False
+    detail = row["detail"]
+    assert "2 个" in detail and "PENDING" in detail and "RUNNING" in detail and "gherkai-r1-s1" in detail
+    for arn in (_DF_SESSION_QUEUED, _DF_SESSION_RUNNING):
+        assert f"aws devicefarm stop-remote-access-session --region us-west-2 --arn {arn}" in detail
+        url = console_url(arn)
+        assert url is not None and url in detail
+    assert "https://us-west-2.console.aws.amazon.com/devicefarm/" in detail
+    assert calls["list"] == [(_DF_PROJECT, None)]  # 列举用 SSM 读到的项目 ARN，凭证沿用 doctor 的 profile
+
+
+def test_doctor_cloud_devices_without_open_sessions_passes(monkeypatch, capsys):
+    by, _calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, sessions=[])
+    row = by[("backend", "devices.sessions")]
+    assert row["ok"] is True and row["required"] is False and "没有未结束的远程访问会话" in row["detail"]
+
+
+def test_doctor_cloud_devices_access_denied_is_its_own_row(monkeypatch, capsys):
+    """当前凭证没有列举会话的权限 → `backend.devices.sessions` 单独一行说明缺哪项权限，可选、退出码不变；项目行照常通过。"""
+    from gherkai_runtime.devicefarm import DeviceFarmAccessDenied
+
+    by, _calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT,
+                                       list_error=DeviceFarmAccessDenied("ListRemoteAccessSessions", "AccessDeniedException"))
+    assert by[("backend", "devices.project")]["ok"] is True
+    row = by[("backend", "devices.sessions")]
+    assert row["ok"] is False and row["required"] is False
+    assert "权限" in row["detail"] and "devicefarm:ListRemoteAccessSessions" in row["detail"] and "us-west-2" in row["detail"]
+
+
+def test_doctor_cloud_devices_other_failures_land_in_detail(monkeypatch, capsys):
+    """其余失败（限流、网络、服务端故障）原样转述进对应那行，不当成「没有会话」或「未启用」：列举失败报在会话行；
+    读 SSM 失败报在项目行、点名读的参数路径，且不再列举。两种都只标 `-`，与停止宽限一行的读失败同一处置。"""
+    by, _calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, list_error=RuntimeError("Rate exceeded"))
+    row = by[("backend", "devices.sessions")]
+    assert row["ok"] is False and row["required"] is False and "Rate exceeded" in row["detail"]
+    assert "没有未结束" not in row["detail"]
+
+    by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, read_error=RuntimeError("Could not connect to the endpoint URL"))
+    row = by[("backend", "devices.project")]
+    assert row["ok"] is False and row["required"] is False
+    assert "Could not connect" in row["detail"] and "/vfy-backend/device-farm-project" in row["detail"]
+    assert "部署未启用设备支持" not in row["detail"]  # 读不到不等于没有
+    assert ("backend", "devices.sessions") not in by and calls["list"] == []
+
+
+def test_cli_help_does_not_load_device_farm_module_or_aws_sdk():
+    """Device Farm 模块在 doctor 的设备两行里才导入：加载 CLI 与 `--help` 不为它拉起 AWS SDK。
+
+    在子进程里往 `sys.modules` 塞毒（值为 None 时 import 立即失败），而不是事后断言「不在 sys.modules 里」——本会话的其他用例早已
+    import 过它们。"""
+    import subprocess
+    import sys
+
+    code = ("import sys\n"
+            "for name in ('boto3', 'botocore'):\n"
+            "    sys.modules[name] = None\n"
+            "from gherkai_cli import __main__ as m\n"
+            "try:\n"
+            "    m.main(['--help'])\n"
+            "except SystemExit as e:\n"
+            "    assert e.code == 0, e.code\n"
+            "assert 'gherkai_runtime.devicefarm' not in sys.modules\n")
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
+    assert proc.returncode == 0, proc.stderr
 
 
 def test_doctor_provider_installed_but_broken_is_required_failure(monkeypatch, capsys):

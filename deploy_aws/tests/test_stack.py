@@ -2,7 +2,8 @@
 
 用 CDK assertions.Template 断言关键契约——尤其**与 cli 侧命名/schema 的单一事实源对齐点**（ADR 0033 护栏）：
 表/桶/task-def 名、events TTL 属性、container 名不带 prefix、SSM 路径（含 version / vpc 取值 / worker-template
-三族部署戳）。防未来改 stack 时漂移。
+三族部署戳，以及带合法项目 ARN 时的 device-farm-project）、Device Farm 授权按 context 有无与形态（ADR 0051 决策 10）。
+防未来改 stack 时漂移。
 运行：uv run pytest（根或 deploy_aws/ 下皆可）。
 """
 from __future__ import annotations
@@ -14,13 +15,59 @@ import aws_cdk as cdk
 from aws_cdk.assertions import Template, Match
 import pytest
 
+from gherkai_deploy_aws import names
 from gherkai_deploy_aws.stack import BackendStack
-from synth_fixture import ACCOUNT, REGION, STAMP_VERSION, make_template as _template
+from synth_fixture import ACCOUNT, REGION, STAMP_VERSION, make_stack as _make_stack, make_template as _template
+
+# Device Farm 夹具（ADR 0051 决策 10、ADR 0033 task role 权限表）：期望值一律写字面量、不经 names 推导——推导函数本身也在被测之列。
+# 区域段是 us-west-2，而夹具的后端区域 REGION 是 us-east-1：二者不同，才能反证 stack 没有拿 self.region 拼 Device Farm ARN。
+DF_PROJECT_ID = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0"
+DF_PROJECT_ARN = f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:project:{DF_PROJECT_ID}"
+DF_SESSION_PREFIX = f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:session:{DF_PROJECT_ID}/*"
+DF_DEVICE_ANY = "arn:aws:devicefarm:us-west-2::device:*"
+DF_CONTEXT = {"device_farm_project": DF_PROJECT_ARN}
+# 「不启用设备支持」的两种 context：键缺省，或命令给的「待建立」占位（ADR 0037 决策 6：两者在 stack 里等价）
+NO_DF_CONTEXTS = [
+    pytest.param(None, id="absent"),
+    pytest.param({"device_farm_project": names.DEVICE_FARM_PROJECT_PENDING}, id="pending"),
+]
 
 
 def _ssm_params(t: Template) -> dict[str, dict]:
     """模板里全部 SSM 参数：Name → Properties。Name 恒是字面量（路径由 prefix 纯推导、无 token）。"""
     return {p["Properties"]["Name"]: p["Properties"] for p in t.find_resources("AWS::SSM::Parameter").values()}
+
+
+def _as_list(value) -> list:
+    return value if isinstance(value, list) else [value]
+
+
+def _role_statements(t: Template, role_hint: str) -> list[dict]:
+    """某角色全部 policy 语句的原样列表；按 policy 的 Roles 引用里的逻辑 id 片段认角色（如 `TaskRoleMidscene`）。"""
+    out, hit = [], False
+    for p in t.find_resources("AWS::IAM::Policy").values():
+        if role_hint not in json.dumps(p["Properties"].get("Roles", [])):
+            continue
+        hit = True
+        out.extend(p["Properties"]["PolicyDocument"]["Statement"])
+    assert hit, f"找不到 Roles 含 {role_hint!r} 的 policy（角色改名别让护栏静默变绿）"
+    return out
+
+
+def _statements_with(stmts: list[dict], action: str) -> list[dict]:
+    return [st for st in stmts if action in _as_list(st.get("Action"))]
+
+
+def _all_actions(t: Template) -> set[str]:
+    return {a for p in t.find_resources("AWS::IAM::Policy").values()
+            for st in p["Properties"]["PolicyDocument"]["Statement"] for a in _as_list(st.get("Action"))}
+
+
+def _task_role_wildcard_actions(t: Template) -> set[str]:
+    """两个引擎 task role 上资源维度为裸 `*` 的全部动作。"""
+    return {a for hint in ("TaskRoleNovaact", "TaskRoleMidscene")
+            for st in _role_statements(t, hint) if "*" in _as_list(st.get("Resource"))
+            for a in _as_list(st.get("Action"))}
 
 
 def test_two_dynamodb_tables_with_correct_schema():
@@ -88,6 +135,33 @@ def test_artifacts_bucket_job_in_lifecycle():
         for rule in bkt["Properties"].get("LifecycleConfiguration", {}).get("Rules", []):
             if rule.get("Id") == "expire-job-in":
                 assert "Prefix" not in rule, f"job-in 过期规则不应用 Prefix（会误删 jobs/reports）：{rule}"
+
+
+def _bucket_lifecycle_rules(t: Template) -> dict[str, dict]:
+    buckets = list(t.find_resources("AWS::S3::Bucket").values())
+    assert len(buckets) == 1
+    return {r["Id"]: r for r in buckets[0]["Properties"]["LifecycleConfiguration"]["Rules"]}
+
+
+@pytest.mark.parametrize("context", [None, DF_CONTEXT], ids=["no-device-farm", "device-farm"])
+def test_artifacts_bucket_lifecycle_rules_are_exactly_job_in_and_apps(context):
+    """产物桶的生命周期规则**全集**恰为 expire-job-in 与 expire-apps 两条（ADR 0033、ADR 0051 决策 9），与 Device Farm 项目有无无关。
+
+    expire-apps 兑现安装包的保留承诺：按对象标签 gherkai=app 过期、E = 14 天。上传侧的复用窗口 E − R 是按这条规则推出来的，
+    规则的标签与天数必须和上传侧引用的是同一组常量，否则上传侧以为还能复用的对象可能已被过期删除。
+    按标签而非 `apps/` 前缀：`--report-dir` 取 `apps` 时 run 的判定真值与报告也会落在 `apps/` 下，前缀规则会把它们一起删掉。
+    """
+    rules = _bucket_lifecycle_rules(_template(context=context))
+    assert set(rules) == {"expire-job-in", "expire-apps"}, sorted(rules)
+    assert (BackendStack.LIFECYCLE_EXPIRE_JOB_IN, BackendStack.LIFECYCLE_EXPIRE_APPS) == ("expire-job-in", "expire-apps")
+    apps = rules["expire-apps"]
+    assert apps["Status"] == "Enabled"
+    assert apps["ExpirationInDays"] == 14
+    assert apps["TagFilters"] == [{"Key": "gherkai", "Value": "app"}]
+    assert "Prefix" not in apps, f"安装包过期规则不应用 Prefix：{apps}"
+    # 与上传侧同源：上传与刷新打的标签、保留承诺的 E 都取 names 的同一组常量
+    assert f"{apps['TagFilters'][0]['Key']}={apps['TagFilters'][0]['Value']}" == names.APP_OBJECT_TAG
+    assert apps["ExpirationInDays"] == names.APP_OBJECT_EXPIRE_DAYS
 
 
 def test_two_task_defs_container_name_without_prefix():
@@ -167,22 +241,40 @@ def test_ssm_params_with_prefix_path():
     })
 
 
-def test_ssm_parameter_set_is_exactly_six():
+_BASE_SSM_PARAMS = {
+    "/gherkai-backend/subnets",
+    "/gherkai-backend/security-groups",
+    "/gherkai-backend/version",
+    "/gherkai-backend/vpc",
+    "/gherkai-backend/worker-template/novaact",
+    "/gherkai-backend/worker-template/midscene",
+}
+
+
+@pytest.mark.parametrize("context", NO_DF_CONTEXTS)
+def test_ssm_parameter_set_without_device_farm_project_is_exactly_six(context):
     """SSM 参数**全集**锁定（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读）
     + 部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，ADR 0038 四步第 1 步）。
+    context 不带 Device Farm 项目或带「待建立」占位时，不建项目 ARN 参数（ADR 0037 决策 6：两者等价、都不报错）。
 
     逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
     都有一个读侧消费者：漏了只在实际运行中才炸（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
     """
-    t = _template()
-    assert set(_ssm_params(t)) == {
-        "/gherkai-backend/subnets",
-        "/gherkai-backend/security-groups",
-        "/gherkai-backend/version",
-        "/gherkai-backend/vpc",
-        "/gherkai-backend/worker-template/novaact",
-        "/gherkai-backend/worker-template/midscene",
-    }
+    assert set(_ssm_params(_template(context=context))) == _BASE_SSM_PARAMS
+
+
+@pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
+def test_ssm_parameter_set_with_device_farm_project_is_exactly_seven(prefix):
+    """带合法项目 ARN 时恰多出一条 `device-farm-project`，值逐字等于传入的 ARN（ADR 0033 资源清单第 11 条、ADR 0051 决策 10）。
+
+    提交侧读它填设备请求、doctor 读它列未结束的会话、下次 deploy 读它核对已有项目，三者读的都是这一条；值被改写或路径没随
+    prefix 走，读侧拿到的就是别的项目或拿不到值。
+    """
+    params = _ssm_params(_template(prefix=prefix, context=DF_CONTEXT))
+    expected_base = {path.replace("/gherkai-backend/", f"/{prefix}backend/") for path in _BASE_SSM_PARAMS}
+    df_path = f"/{prefix}backend/device-farm-project"
+    assert set(params) == expected_base | {df_path}
+    assert params[df_path] == {"Name": df_path, "Type": "String", "Value": DF_PROJECT_ARN}
 
 
 # ---- 部署戳：版本（ADR 0037 决策 6「版本戳」/ 决策 7 skew 写侧）----
@@ -335,7 +427,8 @@ def test_task_role_has_events_putitem_not_runs():
 def test_task_role_resource_arns_narrowed():
     """IAM 资源 ARN 已收窄（ADR 0033）——回归护栏：防将来改回 * 或踩 account=aws 陷阱。
 
-    收窄依据是 AWS SAR resource_types + IAM 策略模拟器实证。此测试锁定 CDK 生成的 ARN 形态。
+    收窄依据是 AWS SAR resource_types + IAM 策略模拟器实证。此测试锁定 CDK 生成的 ARN 形态，末段锁定 task role 上
+    只能用 `*` 的动作全集（ADR 0033「风险收在两道」：AgentCore 2 个，拿到 Device Farm 项目时再加 `devicefarm:ListDevices`）。
     """
 
     t = _template()
@@ -397,6 +490,126 @@ def test_task_role_resource_arns_narrowed():
                    "bedrock-agentcore:CreateBrowserProfile", "bedrock-agentcore:SaveBrowserSessionProfile"):
         assert action not in all_agentcore_actions, f"{action} 不应再授（会话不带 profile）"
     assert not any("browser-profile" in res for _, res in stmts), "不应再授 browser-profile 资源（会话不带 profile）"
+
+    # ⑥ 只能用 `*` 的动作恰是 SAR 无资源类型的那几个（ADR 0033「风险收在两道」）：AgentCore Connect×2，拿到 Device Farm
+    #    项目时加 ListDevices，共 3 个。比全集而不是查「含」——任何可收窄的动作被写成 `*`，集合就多出一项。
+    connect = {"bedrock-agentcore:ConnectBrowserAutomationStream", "bedrock-agentcore:ConnectBrowserLiveViewStream"}
+    assert _task_role_wildcard_actions(t) == connect
+    with_df = _task_role_wildcard_actions(_template(context=DF_CONTEXT))
+    assert with_df == connect | {"devicefarm:ListDevices"}, sorted(with_df)
+    assert len(with_df) == 3
+
+
+# ---- Device Farm 授权（ADR 0033 task role 权限表 devicefarm / 应用前缀各行、ADR 0051 决策 9 与 10）----
+_MIDSCENE_DF_ACTIONS = {
+    "devicefarm:ListDevices", "devicefarm:GetDevice", "devicefarm:CreateRemoteAccessSession",
+    "devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession", "devicefarm:ListRemoteAccessSessions",
+}
+
+
+def test_midscene_device_farm_grants_follow_the_permission_table():
+    """带项目 ARN 合成时 Midscene task role 的设备权限逐条对照 ADR 0033 的权限表。
+
+    最要紧的两处都是「模拟器判允许、真实角色被拒」的形态：会话查询与停止必须在**同一条** statement 里同时列本项目会话前缀与
+    项目 ARN（只授其一，真实角色拒绝并点名另一种）；全部 Device Farm ARN 的区域段必须是 us-west-2、不跟后端区域走。
+    """
+    assert REGION != "us-west-2", "夹具的后端区域须不是 us-west-2，区域段断言才能反证 stack 没用 self.region"
+    stmts = _role_statements(_template(context=DF_CONTEXT), "TaskRoleMidscene")
+
+    granted = {a for st in stmts for a in _as_list(st["Action"]) if a.startswith("devicefarm:")}
+    assert granted == _MIDSCENE_DF_ACTIONS, f"设备动作应恰为权限表的 6 个：{sorted(granted)}"
+
+    def resources_of(action: str) -> list[set[str]]:
+        found = _statements_with(stmts, action)
+        assert found, f"缺 {action}"
+        return [set(_as_list(st["Resource"])) for st in found]
+
+    # ListDevices：SAR 无资源类型，只出现在资源为 * 的 statement
+    assert all(res == {"*"} for res in resources_of("devicefarm:ListDevices"))
+    # GetDevice：设备 ARN，账户段为空（设备是 AWS 公有资源）
+    for res in resources_of("devicefarm:GetDevice"):
+        assert res == {DF_DEVICE_ANY}, res
+        assert all(r.split(":")[4] == "" for r in res), f"设备 ARN 的账户段应为空：{res}"
+    # 建会话：同一条列项目 ARN 与 device:*（SAR 要求 project 与 device 同时授权）
+    for res in resources_of("devicefarm:CreateRemoteAccessSession"):
+        assert res == {DF_PROJECT_ARN, DF_DEVICE_ANY}, res
+    # 会话查询与停止：同一条列会话前缀与项目 ARN，缺一种即失败
+    for action in ("devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession"):
+        for res in resources_of(action):
+            assert res == {DF_SESSION_PREFIX, DF_PROJECT_ARN}, f"{action} 须同时授会话前缀与项目 ARN：{res}"
+    # 按名列举会话：项目 ARN
+    for res in resources_of("devicefarm:ListRemoteAccessSessions"):
+        assert res == {DF_PROJECT_ARN}, res
+
+    # 全部 Device Farm ARN：分区 aws、服务 devicefarm、区域段 us-west-2
+    df_arns = {r for st in stmts if any(a.startswith("devicefarm:") for a in _as_list(st["Action"]))
+               for r in _as_list(st["Resource"]) if r != "*"}
+    assert df_arns, "没找到任何 Device Farm 资源 ARN"
+    for r in df_arns:
+        assert isinstance(r, str), f"Device Farm ARN 应是字面量：{r}"
+        assert r.split(":")[:4] == ["arn", "aws", "devicefarm", "us-west-2"], f"区域段应为 us-west-2：{r}"
+        assert REGION not in r, f"Device Farm ARN 不应带后端区域：{r}"
+
+
+def test_midscene_list_bucket_is_limited_to_the_app_prefix():
+    """应用存在性检查的 `s3:ListBucket`：资源是产物桶本身，条件 `StringLike` `s3:prefix` 为 `apps/*`（ADR 0051 决策 9）。
+
+    有它，缺失键的 HeadObject 才返回 404 而不是 403，worker 才能把「安装包已不在桶里」与权限错误分开报。条件按真实角色实测的
+    形态写；缺条件等于放开整桶列举。GetObject 已由两引擎共享的整桶对象授权覆盖，这里不重复授。
+    """
+    stmts = _statements_with(_role_statements(_template(context=DF_CONTEXT), "TaskRoleMidscene"), "s3:ListBucket")
+    assert len(stmts) == 1, stmts
+    st = stmts[0]
+    assert _as_list(st["Action"]) == ["s3:ListBucket"]
+    assert _as_list(st["Resource"]) == ["arn:aws:s3:::gherkai-artifacts"]
+    assert set(st["Condition"]) == {"StringLike"}
+    assert set(st["Condition"]["StringLike"]) == {"s3:prefix"}
+    assert _as_list(st["Condition"]["StringLike"]["s3:prefix"]) == ["apps/*"]
+
+
+def test_nova_task_role_gets_no_device_farm_or_list_bucket():
+    """两个引擎 task role 分立（ADR 0033）：设备目标只由 Midscene 执行，Nova 的 role 带项目 ARN 合成时也零 Device Farm 动作、零 ListBucket。"""
+    stmts = _role_statements(_template(context=DF_CONTEXT), "TaskRoleNovaact")
+    actions = {a for st in stmts for a in _as_list(st["Action"])}
+    assert not {a for a in actions if a.startswith("devicefarm:")}, sorted(actions)
+    assert "s3:ListBucket" not in actions, sorted(actions)
+
+
+@pytest.mark.parametrize("context", NO_DF_CONTEXTS)
+def test_without_device_farm_project_no_device_grants_anywhere(context):
+    """不带项目 ARN 或带「待建立」占位合成时，整个模板零 Device Farm 动作，两个 task role 都没有 ListBucket（ADR 0037 决策 6）。
+
+    没有项目就建不了会话，授了也用不上；占位值若被当成 ARN 拼进策略，部署期才会失败。
+    """
+    t = _template(context=context)
+    assert not {a for a in _all_actions(t) if a.startswith("devicefarm:")}
+    for hint in ("TaskRoleNovaact", "TaskRoleMidscene"):
+        assert not _statements_with(_role_statements(t, hint), "s3:ListBucket"), hint
+
+
+@pytest.mark.parametrize("bad", [
+    f"arn:aws:devicefarm:us-east-1:{ACCOUNT}:project:{DF_PROJECT_ID}",             # 区域不是 Device Farm 的区域
+    f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:session:{DF_PROJECT_ID}/s/00000",     # 不是 project 资源
+    "arn:aws:devicefarm:us-west-2::device:ABCDEF0123456789",
+    f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:project:*",                           # 通配会让会话授权扩到全部项目
+    f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:project:{DF_PROJECT_ID}\n",
+    "",                                                                              # 空串不等于缺省
+])
+def test_invalid_device_farm_project_fails_at_synth(bad):
+    """非占位但形态不合法的项目 ARN 在合成期抛 ValueError（ADR 0037 决策 6）：拼错的会话前缀只会在运行期表现为 AccessDenied。"""
+    with pytest.raises(ValueError, match="Device Farm 项目 ARN"):
+        _template(context={"device_farm_project": bad})
+
+
+@pytest.mark.parametrize("context", NO_DF_CONTEXTS)
+def test_missing_or_pending_device_farm_project_does_not_fail(context):
+    """缺省或「待建立」占位不 fail-fast（与 version 相反，ADR 0037 决策 6）：部署方没有 Device Farm 权限时照常部署、只是不启用设备支持。"""
+    stack = _make_stack(context=context)
+    assert stack.device_farm_project_arn is None
+
+
+def test_valid_device_farm_project_is_kept_verbatim():
+    assert _make_stack(context=DF_CONTEXT).device_farm_project_arn == DF_PROJECT_ARN
 
 
 

@@ -148,7 +148,8 @@ def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch, ca
     _assert_documented(json.loads(capsys.readouterr().out), section="list-deterministic --json")
 
 
-def test_doctor_json_keys_are_documented(monkeypatch, capsys):
+def _stub_local_doctor(monkeypatch):
+    """doctor 本机各段的替身：两个引擎都定位得到、自述带全部键，没有部署 provider。"""
     monkeypatch.setattr(m.compose, "resolve_worker_cmd",
                         lambda name, *, version=None: compose.WorkerCmd(cmd=["x"], cwd=None, source="s"))
     monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [])
@@ -157,14 +158,60 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
         "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [],
         "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}],
         "model_id": "nova-act-v1.0"})  # 自述六键齐（doctor 的模型行取 model_id、目标行取 targets，ADR 0036「5.」、0049 决策 6）
-    assert m.main(["doctor", "--json"]) == 0
-    doc = json.loads(capsys.readouterr().out)
-    _assert_documented(doc, section="doctor --json")
-    # 项名是 `name` 的**值**，键名护栏照不出它：把按引擎后缀的项名归一成 `<engine>` 形态后逐个核对契约页里写了
+
+
+def _assert_check_names_documented(doc, *, section: str) -> None:
+    """项名是 `name` 的**值**，键名护栏照不出它：把按引擎后缀的项名归一成 `<engine>` 形态后逐个核对契约页里写了。"""
     page = DOC.read_text(encoding="utf-8")
     for name in {c["name"] for c in doc["checks"]}:
         generic = re.sub(r"\.(novaact|midscene)$", ".<engine>", name)
-        assert f"`{generic}`" in page, f"[doctor --json] 项名 {name}（{generic}）没写进 docs/internals/cli-json-contract.md"
+        assert f"`{generic}`" in page, f"[{section}] 项名 {name}（{generic}）没写进 docs/internals/cli-json-contract.md"
+
+
+def test_doctor_json_keys_are_documented(monkeypatch, capsys):
+    _stub_local_doctor(monkeypatch)
+    assert m.main(["doctor", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    _assert_documented(doc, section="doctor --json")
+    _assert_check_names_documented(doc, section="doctor --json")
+
+
+_DF_PROJECT = "arn:aws:devicefarm:us-west-2:123456789012:project:p"
+
+
+def test_doctor_cloud_json_keys_are_documented(monkeypatch, capsys):
+    """云端变体：AWS 调用全部打桩（身份、版本戳、资源、默认 variant 与解析、停止宽限、Device Farm 项目参数与会话列举），
+    让 `_doctor_cloud` 一路走到设备支持两行：项目已部署、有一个未结束的会话，`backend.devices.sessions` 才会出现。
+    本机变体只走到云端未查的占位，aws / backend 两段的真实项名要靠这一条进差集。"""
+    from datetime import datetime, timezone
+
+    from gherkai_runtime import devicefarm
+
+    _stub_local_doctor(monkeypatch)
+    monkeypatch.setattr(m.compose, "probe_aws_identity", lambda *, region, profile: {
+        "account": "123456789012", "arn": "arn:aws:sts::123456789012:assumed-role/r/s", "region": region})
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.5.0"))
+    monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: None)
+    monkeypatch.setattr(m.compose, "read_worker_default", lambda **kw: "base")
+    monkeypatch.setattr(m.compose, "resolve_worker_variant", lambda **kw: {
+        e: compose.WorkerResolution(engine=e, variant=kw["variant"], revision_arn=f"arn:{e}:7", digest="sha256:0")
+        for e in kw["engines"]})
+    monkeypatch.setattr(m.compose, "read_task_def_stop_timeout",
+                        lambda revision_arn, *, engine, region=None, profile=None, ecs=None: 120)
+    monkeypatch.setattr(m.compose, "read_device_farm_project", lambda **kw: _DF_PROJECT)
+    monkeypatch.setattr(devicefarm, "list_open_sessions", lambda project_arn, *, profile: [
+        devicefarm.OpenSession(arn=_DF_ARN, name="gherkai-r-s", status="RUNNING",
+                               created=datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc))])
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    by = {(c["section"], c["name"]): c for c in doc["checks"]}
+    # 正向断言：打桩确实让 doctor 走到了云端各项与设备两行（少一个替身就会提前结束，差集在缺项上直接变绿）
+    assert {("aws", "region"), ("aws", "identity"), ("backend", "version"), ("backend", "resources"),
+            ("backend", "worker.default"), ("backend", "worker.any"), ("backend", "worker.grace"),
+            ("backend", "devices.project"), ("backend", "devices.sessions")} <= set(by)
+    assert _DF_ARN in by[("backend", "devices.sessions")]["detail"]
+    _assert_documented(doc, section="doctor --backend cloud --json")
+    _assert_check_names_documented(doc, section="doctor --backend cloud --json")
 
 
 def _sample_evidence() -> dict:

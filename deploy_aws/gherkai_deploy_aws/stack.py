@@ -3,21 +3,25 @@
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
 - DynamoDB：{prefix}runs（控制面/RunStore，带按 status 的稀疏 GSI status-index 供 worker revision 清理时的引用检查，
   ADR 0038）+ {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
-- S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片）+ lifecycle
-  规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）
+- S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片；设备目标的安装包在桶根下
+  apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
+  14 天过期，ADR 0051 决策 9）
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
 - ECR：2 repo（承各 variant 的 worker 镜像；由 `gherkai deploy push-worker` 推，synth 不触发 docker build；
   **无 lifecycle 规则**，见 _one_task_def）
 - Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
   （kicker 那条带 INSERT 且 detached 的 filter）
-- IAM：每引擎一个 task role（最小权限）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点
-  触发器的 Scheduler 执行角色 {prefix}timeout-scheduler
+- IAM：每引擎一个 task role（最小权限；拿到 Device Farm 项目 ARN 时 Midscene 的另加设备与应用前缀权限，见
+  _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点触发器的 Scheduler 执行角色
+  {prefix}timeout-scheduler
 - VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
 - SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
   /{prefix}backend/version（版本真源，供 preflight skew 比对，ADR 0037 决策 7）、
   /{prefix}backend/vpc（生效 VPC 取值，供下次 deploy 三态比对）、
-  /{prefix}backend/worker-template/<engine>（task-def 模板 revision ARN，ADR 0038 四步第 1 步）
+  /{prefix}backend/worker-template/<engine>（task-def 模板 revision ARN，ADR 0038 四步第 1 步）、
+  /{prefix}backend/device-farm-project（云端 Device Farm 项目 ARN，只在 context 带合法 ARN 时建，ADR 0051 决策 10；
+  项目本身由 `gherkai deploy` 在 cdk 之前找回或建立、不归本 stack 管理）
 
 命名走 `names`（re-export 产品本体 `gherkai_runtime.names`，与 cli compose 真同源，ADR 0033 护栏）。
 context 配置项由 `gherkai deploy` 拼给（见 app.py 头 / ADR 0037 决策 6），本文件只读不定 flag 面。
@@ -63,12 +67,16 @@ class BackendStack(Stack):
     # 天花板是模型服务的速率限制（并发高了 5xx/限流更常见），那是 worker 重试面的事、不由 cap 兜。
     DEPLOY_SIDE_MAX_CONCURRENCY = 20
     DEFAULT_STOP_TIMEOUT_S = 120  # 默认贴 Fargate 上限：尽量给 worker 会话释放+安全点提前上传的预算（grace 真容器校准见 ADR 0032），可 -c stop_timeout= 覆盖
+    # 产物桶的生命周期规则 id（规则本身见 _storage）
+    LIFECYCLE_EXPIRE_JOB_IN = "expire-job-in"
+    LIFECYCLE_EXPIRE_APPS = "expire-apps"
 
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         self.prefix = prefix
         self.stop_timeout_s = self._resolve_stop_timeout()
         self.version = self._resolve_version()
+        self.device_farm_project_arn = self._resolve_device_farm_project()  # None 即不启用设备支持
 
         vpc = self._network()    # 同时定 self._vpc_spec（生效 VPC 取值，写进 SSM 供下次 deploy 三态比对）
         self._storage()          # DDB ×2 + S3 ×1
@@ -76,6 +84,7 @@ class BackendStack(Stack):
         self._task_definitions()  # 2 引擎：ECR + task-def + task role + 模板 revision ARN 写 SSM
         self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
         self._ssm_deployment_stamp()  # 写 version / vpc 取值（ADR 0037 决策 6，随事务同生死）
+        self._ssm_device_farm()  # 有项目 ARN 时写进 SSM（ADR 0051 决策 10，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
@@ -131,6 +140,22 @@ class BackendStack(Stack):
             ) from exc
         return version
 
+    # ---- 云端 Device Farm 项目 ARN（ADR 0051 决策 10、ADR 0037 决策 6）----
+    def _resolve_device_farm_project(self) -> str | None:
+        """`-c device_farm_project=` 给的项目 ARN；缺省或等于「待建立」占位时返回 None。
+
+        值由命令派生、不给 flag：`gherkai deploy` 在 cdk 之前找回或建立项目后传 ARN，`diff` / `--synth-only` / `destroy`
+        传 SSM 现值或占位（哪种情形用占位见 ADR 0051 决策 10）。**缺省或占位不报错**（与 `_resolve_version` 相反）：部署方
+        没有 Device Farm 权限、SSM 里也没有值时照常部署，只是不启用设备支持——None 使本 stack 不写项目 ARN 参数、不给
+        Midscene task role 授设备权限。
+        **其余任何值（含空串）都过形态校验**，不合格在合成期抛 ValueError：形态不对的 ARN 拼出的会话前缀只会在运行期表现为
+        AccessDenied；把它静默当作缺省则更糟，一次接线错误就会让已部署的设备授权在这次部署里被撤掉。
+        """
+        raw = self.node.try_get_context("device_farm_project")
+        if raw is None or raw == names.DEVICE_FARM_PROJECT_PENDING:
+            return None
+        return names.validate_device_farm_project_arn(str(raw))
+
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 权威源在此，core/tests/conftest.py 的 moto fixture 只按各测试需要局部复刻键 schema）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
@@ -174,6 +199,7 @@ class BackendStack(Stack):
             stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：触发 reconciler Lambda
             removal_policy=RemovalPolicy.RETAIN,
         )
+        app_tag_key, app_tag_value = names.APP_OBJECT_TAG.split("=", 1)  # 上传侧用的是查询串写法 k=v
         # artifacts 桶：Result(jobs/) + Report(index/manifest) + offload(args/) + job-in + artifact-upload，
         # 全按 key 前缀 <report_dir>/<run_id>/ 分片。
         self._bucket = s3.Bucket(
@@ -189,10 +215,20 @@ class BackendStack(Stack):
             # 报告(reports/)不打此 tag、不受影响（长期保留，误删代价高，同 RETAIN 精神）。
             lifecycle_rules=[
                 s3.LifecycleRule(
-                    id="expire-job-in",
+                    id=self.LIFECYCLE_EXPIRE_JOB_IN,
                     enabled=True,
                     tag_filters={"gherkai": "job-in"},
                     expiration=Duration.days(7),
+                ),
+                # 设备目标的安装包（ADR 0051 决策 9 保留承诺）：CLI 上传与同键刷新时打 tag gherkai=app，按 tag 过期 E 天。
+                # 标签与天数取 names 的常量，与上传侧同源：上传侧的复用窗口 E − R 是按这条规则推出来的，两侧各写一份就可能
+                # 出现上传侧还在复用、对象却已过期的情形。按 tag 而非 `apps/` 前缀，与 expire-job-in 同一取向：`--report-dir`
+                # 取 `apps` 时，run 的判定真值与报告也落在 `apps/` 下，前缀规则会把它们一并删掉。
+                s3.LifecycleRule(
+                    id=self.LIFECYCLE_EXPIRE_APPS,
+                    enabled=True,
+                    tag_filters={app_tag_key: app_tag_value},
+                    expiration=Duration.days(names.APP_OBJECT_EXPIRE_DAYS),
                 ),
             ],
         )
@@ -399,6 +435,46 @@ class BackendStack(Stack):
                     f"arn:aws:bedrock:*:{self.account}:project/default",
                 ],
             ))
+            # 设备目标只由 Midscene 执行（Nova 的 role 不授任何设备权限）；没有项目 ARN 就建不了会话，授了也用不上。
+            if self.device_farm_project_arn is not None:
+                self._grant_midscene_devices(role, self.device_farm_project_arn, bucket)
+
+    def _grant_midscene_devices(self, role: iam.Role, project_arn: str, bucket: str) -> None:
+        """Midscene task role 的设备目标权限，逐条对应 ADR 0033 task role 权限表的 devicefarm 与应用前缀各行（ADR 0051 决策 9、10）。
+
+        **Device Farm ARN 的区域段一律 `names.DEVICE_FARM_REGION`，不用 `self.region`**：Device Farm 只在这一个区域，是
+        ADR 0033「region 全可配」的唯一例外；后端部署在别的区域时，跟着 `self.region` 拼出的 ARN 永远匹配不上真实资源。
+        改动这几条以真实角色实测为准、不以策略模拟器为准：模拟器对会话查询与停止给出过假阳性（ADR 0033、ADR 0051 决策 10）。
+        """
+        df_region = names.DEVICE_FARM_REGION
+        any_device = f"arn:aws:devicefarm:{df_region}::device:*"  # 设备是 AWS 公有资源，ARN 的账户段为空
+        # ListDevices：SAR 无资源类型，结构上只能 `*`（与 AgentCore 的 Connect×2 同性质）。单独写一条、不与可收窄的动作混写；
+        # 合成时 CDK 的策略合并会把它并进同为 `*` 的 Connect 那一条，合并后那条里仍只有只能用 `*` 的动作。
+        role.add_to_policy(iam.PolicyStatement(actions=["devicefarm:ListDevices"], resources=["*"]))
+        role.add_to_policy(iam.PolicyStatement(actions=["devicefarm:GetDevice"], resources=[any_device]))
+        # 建会话：SAR 要求 project 与 device 两种资源同时授权；筛选设备时无法预知选中哪台，故设备用通配。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["devicefarm:CreateRemoteAccessSession"],
+            resources=[project_arn, any_device],
+        ))
+        # 会话查询与停止：同一条里列本项目的会话前缀与项目 ARN，两种都要。真实角色实测只授其中一种即被拒（拒绝消息点名另一种）；
+        # 策略模拟器只按给定的会话 ARN 求值，对只授会话前缀判允许，是假阳性，别据模拟器删掉任何一种。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession"],
+            resources=[names.device_farm_session_arn_prefix(project_arn), project_arn],
+        ))
+        # 按会话名列举（worker 核对孤儿会话用）：资源为项目 ARN。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["devicefarm:ListRemoteAccessSessions"],
+            resources=[project_arn],
+        ))
+        # 安装包存在性检查：限定应用前缀的 ListBucket 使缺失键的 HeadObject 返回 404 而不是 403，缺失与权限错误才分得开
+        # （ADR 0051 决策 9）。条件按真实角色实测的形态写；GetObject 已由上面两引擎共享的整桶对象授权覆盖，不重复授。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["s3:ListBucket"],
+            resources=[f"arn:aws:s3:::{bucket}"],
+            conditions={"StringLike": {"s3:prefix": [f"{names.APP_OBJECT_PREFIX}*"]}},
+        ))
 
     # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----
     def _ssm_network(self, vpc: ec2.IVpc) -> None:
@@ -446,6 +522,23 @@ class BackendStack(Stack):
             self, "SsmVpcSpec",
             parameter_name=names.ssm_vpc_path(self.prefix),
             string_value=self._vpc_spec,  # 生效取值，见 _network（new 取值含所建 vpc-id、可回溯核对）
+        )
+
+    # ---- SSM：云端 Device Farm 项目 ARN（ADR 0033 资源清单第 11 条、ADR 0051 决策 10）----
+    def _ssm_device_farm(self) -> None:
+        """有项目 ARN 时把它写成 **stack 资源**；没有时不建这个参数。
+
+        与部署戳同理：随部署事务提交或回滚、随 `gherkai destroy` 删除。项目本身由 `gherkai deploy` 用 SDK 找回或建立、
+        不归 stack 管理，`destroy` 保留项目（连同会话记录与录像）。读者有三个：提交侧填设备请求的项目 ARN，`doctor` 列未结束
+        的会话，下一次 `deploy` 核对已有项目。参数不存在即部署未启用设备支持，提交侧据此拦下带设备目标的云端 run。
+        落在 ADR 0033 已授的 `/{prefix}backend/*` 通配内，CLI 侧不新增 SSM 授权。
+        """
+        if self.device_farm_project_arn is None:
+            return
+        ssm.StringParameter(
+            self, "SsmDeviceFarmProject",
+            parameter_name=names.ssm_device_farm_project_path(self.prefix),
+            string_value=self.device_farm_project_arn,
         )
 
     # ---- 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----

@@ -163,11 +163,17 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
              "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
     )
 
+    # 说明按原样分行输出（RawDescriptionHelpFormatter）：默认的自动折行会在连字符处断开，把里面的删除命令拆成
+    # `us-` 与 `west-2` 两行，照抄即失败。手工分行按 80 列终端排。
     dsp = sub.add_parser(
         "destroy", conflict_handler="resolve", epilog=epilog,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
         help="[部署方] 拆掉云端后端（数据类资源保留、不随之删）",
-        description="拆掉云端后端 stack。数据类资源（runs 表 / 事件表 / 产物桶 / ECR 仓库）按 IaC 的 RETAIN 标记保留、"
-                    "不随 stack 删除；版本戳等 stack 自己的参数随删。",
+        description="拆掉云端后端 stack。数据类资源（runs 表 / 事件表 / 产物桶 / ECR 仓库）\n"
+                    "按 IaC 的 RETAIN 标记保留、不随 stack 删除；版本戳等 stack 自己的参数随删。\n"
+                    "部署时建立的 Device Farm 项目不归 stack 管理，连同其中的远程访问会话记录\n"
+                    "与录像一起保留，不再需要时手动删除：\n"
+                    "  aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>",
     )
     _add_provider_flag(dsp)
 

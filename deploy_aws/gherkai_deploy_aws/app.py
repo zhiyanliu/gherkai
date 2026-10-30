@@ -8,7 +8,10 @@ contributor 想手工合成也走 `gherkai deploy --synth-only DIR`，别直接�
 context 配置项全由命令拼给（ADR 0037 决策 6 的 flag 面与 context 对齐条）：
 `prefix`（默认 `gherkai-`，**须与 cli `--prefix` 一致**，ADR 0033 护栏：CDK 建的名与 cli 推导名相同）、
 `vpc_id` / `use_default_vpc`（VPC 三种取值，见 `stack._network`）、`stop_timeout`（grace 标定，ADR 0032）、
-`version`（**必给**、无隐式默认，见 `stack._resolve_version`——直接运行时缺它即 fail-fast，这是有意的）。
+`version`（**必给**、无隐式默认，见 `stack._resolve_version`——直接运行时缺它即 fail-fast，这是有意的）、
+`device_farm_project`（云端 Device Farm 项目 ARN，**由命令派生、可缺省**：`gherkai deploy` 在 cdk 之前找回或建立项目后传入，
+`diff` / `--synth-only` / `destroy` 传 SSM 现值或「待建立」占位；缺省或占位时 stack 不启用设备支持、不报错，见
+`stack._resolve_device_farm_project`，ADR 0051 决策 10）。`version` 与 `device_farm_project` 都由命令派生、不给 flag。
 多环境（prod-/stage-）就是不同 prefix 各部署一套，stack 名随 prefix（`names.stack_name`）。
 
 account/region 从 env 取（CDK 标准 `CDK_DEFAULT_ACCOUNT`/`CDK_DEFAULT_REGION`——cdk CLI 起 app 时按解析到的

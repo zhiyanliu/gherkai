@@ -2,7 +2,7 @@
 
 **本模块是 CLI 前端与 CDK 之间的唯一接缝**，形状由一条硬约束定死：**CLI 绝不 import `aws_cdk`**——它是 jsii 绑定，
 import 即起 node 子进程（ADR 0037 决策 6）。故本模块自身**模块级**只 import 标准库 + 本包 `names`，其余
-（`boto3`、`gherkai_runtime.compose`、本包 `container` / `workers`）一律函数内惰性 import——一律零 `aws_cdk`；
+（`boto3`、`gherkai_runtime.compose`、`gherkai_runtime.devicefarm`、本包 `container` / `workers`）一律函数内惰性 import——一律零 `aws_cdk`；
 stack/app 只经 **cdk CLI 起的子进程** 触达（`app.py`）。CLI 侧 `--help` 因此不付 node 代价。
 
 ## 接缝契约（CLI 前端 ↔ Provider）
@@ -21,7 +21,10 @@ CLI 前端负责：
 
 Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 配置项 + AWS 概念的
 `--region`/`--profile`（CLI 前端不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、
-cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`）。
+cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 与 cdk CLI 可定位，见 `_toolchain_gate`），以及云端 Device Farm
+项目 `{prefix}devices`：deploy 在 VPC 取值三态之后、cdk 之前找回或建立它（经 `gherkai_runtime.devicefarm`），ARN 作为命令
+派生的 context `device_farm_project` 交给 stack；diff / --synth-only / destroy 不建立项目，只读 SSM 现值，diff 另用 GetProject
+核对记录的项目是否还在（ADR 0051 决策 10，见 `_resolve_device_farm_project_for_deploy` 与 `_stored_device_farm_project`）。
 
 **`--require-approval` / `--allow-vpc-change` 是有意的两层声明**：前端给中立版（provider 缺席时帮助不残缺），
 本类**再声明一次**带 AWS 语义的版本（`--require-approval` 的取值是 cdk 的三个审批级别，能 `choices` 校验；
@@ -41,9 +44,11 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 ## 退出码
 
 `0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
-（`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败、容器引擎名不认、push-worker 的架构/skew
-拦截——部署方可修，对齐 CLI 既有 preflight 退出码 2 的口径）；**`1`** 表示 cdk 已成功而 worker 镜像四步失败
-（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，ADR 0038）；其余是 cdk CLI 自己的返回码（原样透传，
+（`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败（含读不到 SSM 里的 Device Farm 项目记录、diff 核对记录里的项目时
+遇到权限以外的错误）、同名 Device Farm 项目不止一个、容器引擎名不认、push-worker 的架构/skew 拦截——部署方可修，对齐 CLI 既有
+preflight 退出码 2 的口径）；**`1`** 表示 cdk 已成功而 worker 镜像四步失败（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，
+ADR 0038），或 deploy 在 cdk 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；不猜测，
+stack 未改动，重新运行会沿用已建立的同名项目，ADR 0051 决策 10）；其余是 cdk CLI 自己的返回码（原样透传，
 别把 cdk 的失败压成自己的码）。
 """
 from __future__ import annotations
@@ -64,14 +69,19 @@ from gherkai_deploy_aws import names
 PROVIDER_NAME = "aws"
 
 EXIT_OK = 0
+EXIT_FAILED = 1        # 执行失败、可重新运行收敛（与 `workers.EXIT_FAILED` 同值，见模块头「退出码」）
 EXIT_PRECONDITION = 2  # 前置/校验失败（与 CLI preflight 同一类，见模块头「退出码」）
+
+# `_run_cdk` 的 `device_farm_project` 缺省值：调用方没有找回或建立项目，由 `_run_cdk` 只读 SSM 现值（diff / --synth-only /
+# destroy）。用哨兵而不是 None：None 是「已解析、本次没有可用的 ARN」（deploy 无权限且无记录时），两者处置不同。
+_READ_STORED_PROJECT = object()
 
 # Node 下限：与 worker 的 `engines.node` 同一下限（ADR 0037 决策 6「Node 前置是硬事实」，README 一处说清）。
 NODE_MIN_MAJOR = 22
 
 # `cdk.json` 的 `context`：CDK **特性开关**（feature flags）。**逐字沿用收编前 `iac_aws_backend/cdk.json` 的那一组**——
 # 特性开关会改变合成出的资源形态，换一组就等于给已部署 stack 造出无意义的变更集。加/删任何一项前先 `--diff` 核对。
-# （设计参数不在这里：prefix/vpc/stop_timeout/version 一律经 `-c k=v` 显式传，不进生成的 cdk.json——见 `build_context`。）
+# （设计参数不在这里：prefix/vpc/stop_timeout/version/device_farm_project 一律经 `-c k=v` 显式传，不进生成的 cdk.json——见 `build_context`。）
 CDK_FEATURE_FLAGS: dict[str, object] = {
     "@aws-cdk/aws-lambda:recognizeLayerVersion": True,
     "@aws-cdk/core:checkSecretUsage": True,
@@ -157,6 +167,15 @@ def _make_ssm_client(*, region, profile):
     return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
 
 
+def _has_aws_credentials(*, profile) -> bool:
+    """凭证链能否解析出任何凭证（`--synth-only` 判断「完全没有凭证」用，ADR 0051 决策 10 的唯一例外）。
+
+    只解析、不发请求，也不要 region；凭证过期或无效不在这里判断，那归之后真去读时的报错。
+    """
+    import boto3
+    return boto3.session.Session(profile_name=profile).get_credentials() is not None
+
+
 def _make_hint_clients(*, region, profile):
     """「缺 --vpc」提示专用的短超时句柄：纯参数错误不该被网络拖住（连不上即放弃、不重试）。
 
@@ -219,7 +238,8 @@ class Provider:
 
         `prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 配置项映射为**三个** flag：`--vpc`
         一个吞掉 `vpc_id` + `use_default_vpc` 两个配置项（ADR 0037 决策 6）。`version` 这一项不给 flag——
-        版本按版本真源来、由安装本身决定（决策 7），不让部署方手填。
+        版本按版本真源来、由安装本身决定（决策 7），不让部署方手填。`device_farm_project` 同样不给 flag：ARN 由命令
+        找回或建立、或读 SSM 现值得到（ADR 0051 决策 10），手填只会多出写错的机会。
         """
         parser.add_argument(
             "--prefix", default=None, metavar="P",
@@ -363,7 +383,8 @@ class Provider:
 
     # ---- 命令面（CLI 前端据它自己的 flag 选调；每个方法自成一次完整调用）----
     def deploy(self, args) -> int:
-        """供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），过了才调 `cdk deploy`。"""
+        """供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），再找回或建立 Device Farm 项目（ADR 0051 决策 10），
+        过了才调 `cdk deploy`。项目排在三态之后：被三态拦下的部署不该先在账户里建出项目。"""
         # 工具链前置（Node + cdk CLI）先于 VPC 取值比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一关**：
         # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才以退出码 2 结束，而那条路径上 cdk 一行输出都没有——
         # 底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
@@ -394,8 +415,11 @@ class Provider:
         blocked = self._guard_vpc_spec(args)
         if blocked is not None:
             return blocked
+        blocked, project = self._resolve_device_farm_project_for_deploy(args)
+        if blocked is not None:
+            return blocked
         extra = ["--require-approval", args.require_approval] if getattr(args, "require_approval", None) else []
-        rc = self._run_cdk("deploy", args, extra=extra)
+        rc = self._run_cdk("deploy", args, extra=extra, device_farm_project=project)
         if rc != EXIT_OK:
             # cdk 自己的报错已在上面原样打出；只补一条**中性**提示、不改写也不猜它的诊断（失败原因很多：
             # 权限、变更集被拒、模板错……）。未 bootstrap 是首次部署最常见的一种（ADR 0037 决策 6）。
@@ -411,6 +435,8 @@ class Provider:
 
         不过 VPC 取值三态：destroy 不改 VPC 形态，比对只会拦住「取值记错了但想删干净」的人。
         但 `--vpc` 仍必给：destroy 也要合成 app（stack 的网络分支按取值走），缺了它合成不出同一个 stack。
+        Device Farm 项目只读 SSM 现值（见 `_stored_device_farm_project`）；项目本身不归 stack 管理，destroy 保留它
+        （含会话记录与录像，ADR 0051 决策 10），stack 写的那个 SSM 参数随 stack 删除。
         """
         missing = self._require_vpc(args)
         if missing is not None:
@@ -420,7 +446,12 @@ class Provider:
 
     def diff(self, args) -> int:
         """只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对——
-        对本机制之前部署的环境，`deploy` 以退出码 2 结束时让人运行的就是它，若它也被拦就无路可走。"""
+        对本机制之前部署的环境，`deploy` 以退出码 2 结束时让人运行的就是它，若它也被拦就无路可走。
+
+        **diff 不建立 Device Farm 项目**（ADR 0051 决策 10）：SSM 有记录且 GetProject 核对成功就用记录里的 ARN，没有记录或
+        项目已不存在就以「待建立」占位。占位时变更集里看不到 Device Farm 授权与项目 ARN 参数——真 deploy 会先找回或建立项目、
+        再带着 ARN 合成，所以首次启用设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分。读不到记录或核对
+        失败则以退出码 2 结束（见 `_stored_device_farm_project`）。"""
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -428,7 +459,10 @@ class Provider:
 
     def synth_only(self, args) -> int:
         """导出 CloudFormation 模板到 `args.synth_only`（escape valve：不让 0.x 工具改自己生产账号的
-        reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 前端的 `--synth-only DIR` 提供（接缝契约）。"""
+        reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 前端的 `--synth-only DIR` 提供（接缝契约）。
+
+        Device Farm 项目与 diff 同样只读 SSM 现值、不建立；唯一不同是完全没有凭证时回落「待建立」占位并警告，
+        保住无凭证离线导出这项既有能力（ADR 0051 决策 10，见 `_stored_device_farm_project`）。"""
         out = getattr(args, "synth_only", None)
         if not out:
             raise ValueError("synth_only 需要 args.synth_only（--synth-only DIR）")
@@ -627,12 +661,18 @@ class Provider:
         return "这个环境已存在但后端没有网络取值记录，请给当初部署用的那个取值。"
 
     # ---- context / cdk.json（纯推导，单测直打）----
-    def build_context(self, args) -> dict[str, str]:
-        """flag → CDK context（app/stack 侧读的那四个配置项 + 版本戳）。
+    def build_context(self, args, *, device_farm_project: str | None) -> dict[str, str]:
+        """flag → CDK context（app/stack 侧读的那四个配置项 + 命令派生的版本戳与 Device Farm 项目 ARN）。
 
         `--vpc` 一个 flag 摊成两个配置项：`default` → `use_default_vpc=true`；`vpc-<id>` → `vpc_id=<id>`；
         `new` → **两个都不给**（stack 的建新分支，见 `stack._network`）。
         `--stop-timeout` 不给则不进 context（让 stack 的默认值说话，不在两处各写一个默认）。
+
+        `device_farm_project` 是调用方已解析好的项目 ARN（deploy 找回或建立，其余动作读 SSM 现值；本方法不做 IO，
+        ADR 0037 决策 6）。None 表示本次没有可用的 ARN，此时给「待建立」占位 `names.DEVICE_FARM_PROJECT_PENDING`
+        而不省略这个键：stack 对占位与缺省同样处理（不写项目 ARN 参数、不授设备权限），恒给出这个键是为了让 cdk 的
+        命令行写明本次的取值，也免得其它来源的同名 context（如用户级 cdk 配置）补进来。ARN 形态由 stack 在合成期校验。
+        **关键字必给、没有默认值**：漏传若静默成占位，deploy 就会撤掉已部署的设备授权。
         """
         target = self._resolve_target(args)
         ctx: dict[str, str] = {"prefix": target.prefix, "version": self._resolve_version(args)}
@@ -645,6 +685,7 @@ class Provider:
             ctx["vpc_id"] = vpc
         if getattr(args, "stop_timeout", None) is not None:
             ctx["stop_timeout"] = str(args.stop_timeout)
+        ctx["device_farm_project"] = device_farm_project or names.DEVICE_FARM_PROJECT_PENDING
         return ctx
 
     def app_command(self) -> str:
@@ -679,7 +720,14 @@ class Provider:
         finally:
             shutil.rmtree(path, ignore_errors=True)
 
-    def _run_cdk(self, verb: str, args, *, extra=(), output: Path | None = None) -> int:
+    def _run_cdk(self, verb: str, args, *, extra=(), output: Path | None = None,
+                 device_farm_project=_READ_STORED_PROJECT) -> int:
+        """拼 context 与 argv、在一次性工作目录里调 cdk CLI，返回它的退出码。
+
+        `device_farm_project`：只有 deploy 传（已在 cdk 之前找回或建立，None 即本次不启用设备支持）；其余动作不传，
+        由本方法在工具链前置与目标解析之后只读 SSM 现值（diff 另用 GetProject 核对，见 `_stored_device_farm_project`），
+        读不到或核对失败即以退出码 2 结束。
+        """
         blocked = self._toolchain_gate()
         if blocked is not None:
             return blocked
@@ -688,6 +736,10 @@ class Provider:
         target = self._resolve_target_or_report(args)
         if target is None:
             return EXIT_PRECONDITION
+        if device_farm_project is _READ_STORED_PROJECT:
+            blocked, device_farm_project = self._stored_device_farm_project(verb, target)
+            if blocked is not None:
+                return blocked
         ctx_cache = context_cache_path(target.prefix)
         with self._work_dir() as work_dir:
             self.write_cdk_json(work_dir)
@@ -707,7 +759,7 @@ class Provider:
             # 原样传会让导出物落进那里、随目录消失而命令以退出码 0 结束（实际运行踩过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
             argv = [*cdk_argv, verb, "--app", self.app_command(), "--output", str(out_dir)]
-            for key, value in self.build_context(args).items():
+            for key, value in self.build_context(args, device_farm_project=device_farm_project).items():
                 argv += ["-c", f"{key}={value}"]
             if target.profile:
                 argv += ["--profile", target.profile]  # cdk 原生 flag（凭证解析归它）
@@ -778,6 +830,135 @@ class Provider:
         print(f"{message}\n出路：① 先 `gherkai deploy --diff`（带同一组 flag）核对变更集；"
               f"② 确认无误后带 `--allow-vpc-change` 放行这一次。", file=sys.stderr)
         return EXIT_PRECONDITION
+
+    # ---- 内部：Device Farm 项目（ADR 0051 决策 10「项目」与无权限降级；ADR 0037 决策 6 的 context 闭集）----
+    def _resolve_device_farm_project_for_deploy(self, args) -> tuple[int | None, str | None]:
+        """deploy 在 cdk 之前找回或建立项目 `{prefix}devices`。返回 (退出码, ARN)：退出码不为 None 即就此结束、不调 cdk；
+        否则把 ARN 交给 cdk（None 表示本次不启用设备支持，context 里是「待建立」占位）。
+
+        先读 SSM 现值，再交 `devicefarm.resolve_or_create_project` 核对、按名称找回或建立。分支：
+        - 读不到 SSM 记录（无权限、网络、限流）→ 退出码 2：不知道记录在不在，就分不清该沿用还是该建立；当作「没有记录」继续，
+          遇上无权限降级会撤掉已部署的设备授权。与 VPC 取值比对读后端失败同一处置（见 `_guard_vpc_spec`）。
+        - 同名项目不止一个 → 退出码 2，点名命中的 ARN，不替部署方挑选。
+        - 部署方没有 Device Farm 权限 → 降级：SSM 有 ARN 且核对被拒就沿用并警告；没有记录，或记录的项目已核对为不存在而找回或新建
+          又被拒，就警告并按未启用设备支持部署（不把已不存在的 ARN 写回 SSM、不给不存在的项目授权）。
+        - 其余错误（限流、网络、服务端故障）→ 退出码 1，不猜测：当成「没有项目」会多建一个，当成无权限会撤掉设备授权，
+          而这只有到设备 run 执行时才会暴露。stack 未改动；CreateProject 若已在服务端生效，重新运行会按名称找回它。
+        runtime.devicefarm 在函数内导入：`--help` 不为它拉起 AWS SDK。
+        """
+        from gherkai_runtime import devicefarm
+
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION, None
+        path = names.ssm_device_farm_project_path(target.prefix)
+        try:
+            stored = devicefarm.read_project_arn(
+                _make_ssm_client(region=target.region, profile=target.profile), target.prefix)
+        except Exception as exc:
+            print(f"读不到 Device Farm 项目记录（SSM 参数 {path}）：{exc}\n"
+                  f"需要该参数的 ssm:GetParameter 权限与可用的凭证；本次没有改动后端。", file=sys.stderr)
+            return EXIT_PRECONDITION, None
+
+        name = devicefarm.project_name(target.prefix)
+        try:
+            resolution = devicefarm.resolve_or_create_project(target.prefix, profile=target.profile, stored_arn=stored)
+        except devicefarm.AmbiguousProject as exc:
+            print(f"{exc}\n本次没有改动后端。", file=sys.stderr)
+            return EXIT_PRECONDITION, None
+        except devicefarm.DeviceFarmAccessDenied as exc:
+            print(self._device_farm_denied_warning(exc, stored), file=sys.stderr)
+            return None, None if exc.stored_project_missing else stored
+        except Exception as exc:
+            print(f"没能在 Device Farm 找回或建立项目 {name}：{exc}\n"
+                  f"这类错误不按权限不足处理（多为限流、网络或服务端故障），为免误改设备授权，本次没有部署 stack。"
+                  f"稍后重新运行 `gherkai deploy` 即可；项目若已建立，会按名称找回、不会重复建立。", file=sys.stderr)
+            return EXIT_FAILED, None
+        if resolution.warning:
+            print(f"警告：{resolution.warning}", file=sys.stderr)
+        if resolution.source == "created":
+            print(f"已在 Device Farm（{names.DEVICE_FARM_REGION}）建立项目 {name}：{resolution.arn}", file=sys.stderr)
+        elif resolution.source == "found":
+            print(f"沿用 Device Farm 里已有的同名项目 {name}：{resolution.arn}", file=sys.stderr)
+        return None, resolution.arn
+
+    @staticmethod
+    def _device_farm_denied_warning(exc, stored: str | None) -> str:
+        """部署方没有 Device Farm 权限时的警告，按「有没有记录、记录的项目还在不在」分三种说法（ADR 0051 决策 10 的无权限降级）。
+
+        记录的项目已不存在而又无法找回或新建时（`exc.stored_project_missing`），本次按未启用设备支持部署：沿用一个已不存在的
+        ARN 只是不撤授权，带设备目标的 run 仍会失败、且推迟到执行时才暴露，警告要照实说明项目没了、授权撤了、怎么恢复。
+        """
+        perms = "devicefarm:GetProject、devicefarm:ListProjects 与 devicefarm:CreateProject"
+        if stored is None:
+            return (f"警告：{exc}，无法找回或建立 Device Farm 项目。本次部署不启用设备支持，提交带设备目标的云端 run 会被拒绝。\n"
+                    f"     要启用，请给部署用的凭证加上 {perms} 权限，再重新运行 `gherkai deploy`。")
+        if exc.stored_project_missing:
+            return (f"警告：部署记录的 Device Farm 项目 {stored} 已不存在（可能已被手动删除），而{exc}，无法按名称找回或新建。"
+                    f"本次按未启用设备支持部署：后端不再记录这个项目、Midscene worker 的设备授权随之撤掉，提交带设备目标的云端 run 会被拒绝。\n"
+                    f"     要恢复，请给部署用的凭证加上 {perms} 权限，再重新运行 `gherkai deploy`。")
+        return (f"警告：{exc}，无法核对部署记录的 Device Farm 项目。本次沿用记录里的项目 {stored}，设备支持保持不变。\n"
+                f"     要让部署能核对、找回或建立项目，请给部署用的凭证加上 {perms} 权限。")
+
+    def _stored_device_farm_project(self, verb: str, target) -> tuple[int | None, str | None]:
+        """diff / --synth-only / destroy 用的项目 ARN：只读 SSM 现值，不找回、不建立（ADR 0051 决策 10、ADR 0037 决策 6）。
+
+        返回 (退出码, ARN)，含义同 `_resolve_device_farm_project_for_deploy`。参数不存在（含 stack 不存在）返回 None，经
+        `build_context` 成为「待建立」占位。SSM 有值时，diff 按 deploy 的同一规则用 GetProject 只读核对（`devicefarm.verify_project`）：
+        成功即沿用；项目已不存在（被手动删除）时警告并以占位显示，因为下一次 deploy 会按名称找回或新建、换成别的 ARN。
+        --synth-only 与 destroy 不核对、直接沿用 SSM 现值。
+
+        读 SSM 失败（无凭证、无权限、网络、限流、取不到 region）以退出码 2 结束、不回落占位：回落会让 diff 把已部署的设备授权
+        显示成删除，误导依据它核对变更的人。唯一例外是 --synth-only 在完全没有凭证时回落占位并警告，因为无凭证离线导出是既有
+        能力；此时也不建 SSM 句柄（没有 region 时建句柄本身就会失败）。
+
+        GetProject 核对被拒（所用凭证没有 Device Farm 权限）时与 deploy 同一降级：按记录里的项目计算变更集并警告没能核对——允许
+        无权限的部署方降级部署，就不能反过来让他不能预览变更集。GetProject 的其他失败（限流、网络、服务端故障）以退出码 2 结束，
+        既不回落占位、也不沿用未核对的记录，消息点名 SSM 路径与原异常、不说成缺权限（ADR 0051 决策 10）。
+        """
+        from gherkai_runtime import devicefarm
+
+        if verb == "synth":
+            try:
+                has_credentials = _has_aws_credentials(profile=target.profile)
+            except Exception:  # profile 名不存在等配置错误不算「没有凭证」，交给下面真去读时报错
+                has_credentials = True
+            if not has_credentials:
+                print("警告：没有可用的 AWS 凭证，读不到已部署后端的 Device Farm 项目记录。导出的模板按未启用设备支持生成，"
+                      "不含远程访问会话的授权，可能与已部署的 stack 不一致；需要与已部署一致的模板时，配好凭证后重新导出。",
+                      file=sys.stderr)
+                return None, None
+        path = names.ssm_device_farm_project_path(target.prefix)
+        try:
+            stored = devicefarm.read_project_arn(
+                _make_ssm_client(region=target.region, profile=target.profile), target.prefix)
+        except Exception as exc:
+            print(f"读不到 Device Farm 项目记录（SSM 参数 {path}）：{exc}\n"
+                  f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及该参数的 ssm:GetParameter 权限。"
+                  f"读不到时不按「未启用设备支持」继续，以免结果与已部署的后端不一致。", file=sys.stderr)
+            return EXIT_PRECONDITION, None
+        if verb != "diff" or stored is None:
+            return None, stored
+
+        try:
+            exists = devicefarm.verify_project(stored, profile=target.profile)
+        except devicefarm.DeviceFarmAccessDenied as exc:
+            print(f"警告：{exc}，无法核对部署记录的 Device Farm 项目是否还在。变更集按记录里的项目 {stored} 计算，设备支持保持不变；"
+                  f"项目若已被手动删除，下一次 `gherkai deploy` 会按名称找回或新建，变更集会与这里显示的不同。\n"
+                  f"     要让 diff 能核对，请给所用凭证加上该项目的 devicefarm:GetProject 权限（Device Farm 位于 "
+                  f"{names.DEVICE_FARM_REGION}）。", file=sys.stderr)
+            return None, stored
+        except Exception as exc:
+            print(f"无法核对 Device Farm 项目记录（SSM 参数 {path} 记的是 {stored}），GetProject 调用出错：{exc}\n"
+                  f"这类错误多为限流、网络或服务端故障，稍后重试即可。核对不了就无法判断变更集应按记录里的项目还是按尚未建立"
+                  f"项目来显示，所以本次不输出变更集。", file=sys.stderr)
+            return EXIT_PRECONDITION, None
+        if exists:
+            return None, stored
+        print(f"警告：部署记录的 Device Farm 项目 {stored} 已不存在（可能已被手动删除），变更集按尚未建立项目显示，"
+              f"其中看不到 Device Farm 授权；下一次 `gherkai deploy` 会按名称 {devicefarm.project_name(target.prefix)} "
+              f"找回或新建项目。", file=sys.stderr)
+        return None, None
 
     # ---- 内部：prefix/region/profile 与版本 ----
     @staticmethod

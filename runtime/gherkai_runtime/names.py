@@ -41,6 +41,22 @@ SECURITY_GROUPS_KEY = "security-groups"  # worker 安全组 ID
 VPC_KEY = "vpc"                       # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）
 WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
 
+# 云端 Device Farm 项目（ADR 0051 决策 10、ADR 0033 资源清单第 11 条）：deploy 按项目名找回或建立，stack 校验 context 里的 ARN 并
+# 按它给 Midscene task role 授权，提交侧与 doctor 读 DEVICE_FARM_PROJECT_KEY。几处都引这里的常量与函数，调用点不写裸字面量。
+BASE_DEVICE_FARM_PROJECT = "devices"   # 项目名 default_name(prefix, 本基名)，即 `{prefix}devices`
+# Device Farm 只在这一个区域提供：Python 侧的 Device Farm 客户端与 task role 里全部 devicefarm ARN 的区域段都用它、不跟后端区域走
+# （ADR 0033「region 全可配」的唯一例外）。
+DEVICE_FARM_REGION = "us-west-2"
+# 「待建立」占位值：命令手里没有可用的项目 ARN 时经 context 传它（哪些情形用占位见 ADR 0051 决策 10），stack 对它与缺省同样处理：
+# 不写 SSM 参数、不授 Device Farm 权限，也不报错（ADR 0037 决策 6）。值必须过不了 validate_device_farm_project_arn。
+DEVICE_FARM_PROJECT_PENDING = "pending"
+# 项目 ARN 的完整形态：分区 aws、区域 DEVICE_FARM_REGION、12 位账户、资源类型 project。项目 id 只含字母、数字与连字符：含 `/` `:`
+# 会让会话前缀错位，含 `*` `?` 会让授权扩到别的项目。只有部署侧这样严格校验；提交侧对使用方给的 ARN 只核服务与资源类型段
+# （ADR 0053 决策 4）。
+_DEVICE_FARM_PROJECT_ARN_RE = re.compile(
+    rf"arn:aws:devicefarm:{re.escape(DEVICE_FARM_REGION)}:(?P<account>[0-9]{{12}}):project:"
+    r"(?P<project_id>[A-Za-z0-9-]+)")
+
 # 引擎原生产物在 run 树下的子目录名（ADR 0029「S3 key 镜像本地 run 树」的前提）：同步 run / local per-run / cloud 容器内
 # 三宿主拼的必须是同一个名字，故单点；键为引擎名（ENGINES）。改名即改 S3 key 布局，须同时考虑已落产物的可读性。
 ARTIFACT_SUBDIR = {"novaact": "nova-trajectories", "midscene": "midscene-run"}
@@ -77,6 +93,41 @@ def ssm_path(prefix: str, key: str) -> str:
     version/vpc、device-farm-project、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
     cli 已知 prefix 直接拼路径读、无循环依赖（ADR 0033）；参数族清单见 ADR 0038「SSM 参数与命名真源」。"""
     return f"/{prefix}backend/{key}"
+
+
+def validate_device_farm_project_arn(arn: str) -> str:
+    """项目 ARN 形态校验：须是 `arn:aws:devicefarm:us-west-2:<12 位账户>:project:<项目 id>`，合格原样返回，否则抛 `ValueError`。
+
+    stack 在合成期用它拦经 context 传入的值（ADR 0037 决策 6）：形态不对的 ARN 拼出的会话前缀只会在运行期表现为 AccessDenied。
+    消息给使用方看（cdk 合成失败时打到终端），只说收到了什么、应是什么形态。
+    """
+    _match_device_farm_project_arn(arn)
+    return arn
+
+
+def _match_device_farm_project_arn(arn: str) -> re.Match[str]:
+    m = _DEVICE_FARM_PROJECT_ARN_RE.fullmatch(arn)   # fullmatch：`$` 会放过末尾换行
+    if m is None:
+        raise ValueError(
+            f"Device Farm 项目 ARN 形态不对：须形如 arn:aws:devicefarm:{DEVICE_FARM_REGION}:<12 位账号>:project:<项目 id>，"
+            f"现在是 {arn!r}"
+        )
+    return m
+
+
+def device_farm_project_id(project_arn: str) -> str:
+    """项目 ARN 里 `project:` 之后的项目 id（会话 ARN 以它为前缀段）。形态不对抛 `ValueError`。"""
+    return _match_device_farm_project_arn(project_arn).group("project_id")
+
+
+def device_farm_session_arn_prefix(project_arn: str) -> str:
+    """本项目全部远程访问会话的 ARN 通配：`arn:aws:devicefarm:us-west-2:<账户>:session:<项目 id>/*`。形态不对抛 `ValueError`。
+
+    会话 ARN 形如 `…:session:<项目 id>/<会话 id>/<序号>`，账户段与项目 id 段都取自项目 ARN 本身，区域段恒为 DEVICE_FARM_REGION。
+    task role 的会话查询与停止要把它与项目 ARN 列在同一条 statement 里，只授其一即被真实角色拒绝（ADR 0033 task role 权限表）。
+    """
+    m = _match_device_farm_project_arn(project_arn)
+    return f"arn:aws:devicefarm:{DEVICE_FARM_REGION}:{m.group('account')}:session:{m.group('project_id')}/*"
 
 
 def ecr_repo_name(prefix: str, engine: str) -> str:

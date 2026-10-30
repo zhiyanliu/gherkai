@@ -7,12 +7,14 @@
 """
 from __future__ import annotations
 
+import argparse
 import sys
 
 import pytest
 
 from gherkai_cli import __main__ as m
 from gherkai_cli import deploy as dp
+from gherkai_runtime import names
 
 
 class _StubProvider:
@@ -226,6 +228,23 @@ def test_help_works_without_provider_and_explains_why(monkeypatch, capsys):
     assert e.value.code == 0
     out = capsys.readouterr().out
     assert "--diff" in out and "gherkai[deploy-aws]" in out
+
+
+def test_destroy_description_lists_what_survives_and_how_to_remove_the_device_farm_project():
+    """`destroy` 的说明列齐不随 stack 删除的东西：数据类资源，以及部署时建立的 Device Farm 项目（含会话记录与录像）和它的手动删除命令。
+
+    项目由 deploy 在 cdk 之前建立、不归 stack 管理（ADR 0033 RETAIN 段、ADR 0051 决策 10）；说明里漏了它，拆完以为已清干净的部署方
+    会留下一个仍保存录像的项目。删除命令的区域是 Device Farm 唯一的区域，与后端所在区域无关。
+    """
+    sub = argparse.ArgumentParser(prog="gherkai").add_subparsers(dest="cmd")
+    dp.add_parsers(sub)
+    desc = sub.choices["destroy"].description
+    flat = desc.replace("\n", "")   # 说明是手工分行的，按词核对时去掉换行
+    for item in ("runs 表", "事件表", "产物桶", "ECR 仓库", "Device Farm 项目", "会话记录", "录像"):
+        assert item in flat, item
+    # 命令独占一行：照抄即可执行
+    command = f"aws devicefarm delete-project --region {names.DEVICE_FARM_REGION} --arn <项目 ARN>"
+    assert command in [line.strip() for line in desc.splitlines()]
 
 
 def test_cli_does_not_import_aws_cdk(monkeypatch):

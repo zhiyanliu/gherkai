@@ -11,15 +11,23 @@ from __future__ import annotations
 
 # 共享命名真源（re-export 保 stack.py/tests 既有引用不动）
 from gherkai_runtime.names import (  # noqa: F401
+    APP_OBJECT_EXPIRE_DAYS,
+    APP_OBJECT_PREFIX,
+    APP_OBJECT_RETAIN_DAYS,
+    APP_OBJECT_TAG,
     BACKEND_VERSION_KEY,
     BASE_CLUSTER,
     BASE_BUCKET,
+    BASE_DEVICE_FARM_PROJECT,
     BASE_EVENTS_TABLE,
     BASE_EXIT_OBSERVER_LAMBDA,
     BASE_KICKER_LAMBDA,
     BASE_RECONCILER_LAMBDA,
     BASE_RUNS_TABLE,
     DEFAULT_PREFIX,
+    DEVICE_FARM_PROJECT_KEY,
+    DEVICE_FARM_PROJECT_PENDING,
+    DEVICE_FARM_REGION,
     ENGINES,
     RUNS_STATUS_GSI,
     STATE_WORKER_TASK_DEF_ARNS_ATTR,
@@ -35,12 +43,15 @@ from gherkai_runtime.names import (  # noqa: F401
     WORKER_IMAGE_ROOT_KEY,
     container_name,
     default_name,
+    device_farm_project_id,
+    device_farm_session_arn_prefix,
     ecr_repo_name,
     image_tag,
     short_digest,
     job_timeout_schedule_prefix,
     ssm_path,
     task_def_name,
+    validate_device_farm_project_arn,
     worker_image_key,
     worker_template_key,
 )
@@ -87,6 +98,15 @@ def ssm_vpc_path(prefix: str) -> str:
     比对逻辑（含 `new:` 前缀匹配）在 `cli.vpc_spec_matches`，与本路径同一批语义、别在别处重写。
     """
     return ssm_path(prefix, VPC_KEY)
+
+
+def ssm_device_farm_project_path(prefix: str) -> str:
+    """云端 Device Farm 项目 ARN 的 SSM 路径（ADR 0051 决策 10、ADR 0033 资源清单第 11 条）。
+
+    写者是 stack 资源：值由 `deploy` 在 cdk 之前找回或建立项目后经 context 传入，随部署事务同生死、随 `destroy` 删除；项目本身不归
+    stack 管理，`destroy` 保留。provider 读它核对已有项目，提交侧与 doctor 经 `ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)` 读同一个键。
+    """
+    return ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)
 
 
 def ssm_worker_template_path(prefix: str, engine: str) -> str:

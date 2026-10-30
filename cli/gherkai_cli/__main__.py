@@ -863,7 +863,10 @@ def _cmd_doctor(args) -> int:
 
 
 def _doctor_cloud(args, target, add, cred_fail: str) -> None:
-    """doctor 的 aws / backend 两段（拆出来只为 `_cmd_doctor` 读得下去）：region → 身份 → 版本 → 资源 → 默认 worker variant。"""
+    """doctor 的 aws / backend 两段（拆出来只为 `_cmd_doctor` 读得下去）：region → 身份 → 版本 → 资源 → 默认 worker variant → 设备支持。
+
+    region 与身份是后面各项的前提，任一失败即结束；身份通过之后，前一组失败不拦后一组，后一组照常检查（worker 解析会用到版本一组读到的后端版本，读不到时按未知处理）。
+    """
     if target.region is None:
         add("aws", "region", False, "没解析出 region：给 --region，或设 AWS_REGION / AWS_DEFAULT_REGION，或在配置文件 [common] 里给 region，或让 --profile 指的 profile 配置里带 region")
         add("backend", "reachability", False, "未查：region 还没解析出来", required=False)
@@ -895,6 +898,12 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
             err or "runs/events 表、桶、cluster、两引擎 task-def、三个 Lambda 都在；报告前缀与 --report-dir 一致")
     except Exception as e:
         add("backend", "resources", False, f"探资源失败：{e}")
+    _doctor_worker_variants(target, add, backend_version)
+    _doctor_devices(target, add)
+
+
+def _doctor_worker_variants(target, add, backend_version) -> None:
+    """doctor 的 `backend.worker.*` 各行：默认 variant 指针 → 逐引擎解析 → 聚合项 → 停止宽限比对。指针缺失或读不到即止于本组。"""
     # 默认 worker variant：先读指针，再**逐引擎**解析（单引擎团队不必为另一个引擎推镜像，同 submit 只按用到的引擎判），
     # 至少一个引擎解析得开即算过（聚合项 worker.any，对称 engines.any）
     try:
@@ -923,6 +932,64 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
         "至少一个引擎解析到 worker 镜像" if resolved_any
         else "两个引擎都解析不到默认 variant 的镜像：云端后端一个 job 也起不来（见上各引擎那行的指引）")
     _doctor_worker_grace(target, add, revisions)
+
+
+def _doctor_devices(target, add) -> None:
+    """doctor 的 `backend.devices.project` / `backend.devices.sessions` 两行：设备支持是否已部署，以及项目里未结束的远程访问会话。
+
+    项目 ARN 读部署写下的 SSM 参数（后端区域、doctor 的凭证与 profile，与提交侧同一个读函数，ADR 0051 决策 10）；没有即「部署未启用
+    设备支持」，只出项目一行。有项目就列举其中未到 COMPLETED 的会话（含排队中），逐条给控制台链接与手动停止命令——这是 ADR 0051
+    决策 6 的泄漏护栏：SIGKILL 一类补发不到 Stop 的退出由 Device Farm 的 150 分钟上限封顶，doctor 让它看得见。doctor 只列举、
+    不停止（会话归 worker 独自持有，列举结果判断不了会话是否仍在被某个 run 使用；CLI 也不持有 Stop 权限）。
+    两行全是可选项：设备支持本身可选，未启用、无权限、有残留、读失败都只标 `-`，与停止宽限一行同一口径；读失败原样转述，
+    不回落成「未启用」或「没有会话」。控制台链接与 explain 同源（`gherkai_core.device_session.console_url`）。
+    Device Farm 模块在函数内导入：它属 `gherkai-runtime[aws]` 的部署与诊断面，`--help` 不为它加载。
+    """
+    from gherkai_core.device_session import console_url
+    from gherkai_runtime import devicefarm
+
+    path = _names.ssm_path(target.prefix, _names.DEVICE_FARM_PROJECT_KEY)
+    try:
+        project_arn = compose.read_device_farm_project(prefix=target.prefix, region=target.region, profile=target.profile)
+    except Exception as e:
+        add("backend", "devices.project", False, f"读不到 Device Farm 项目参数（SSM 参数 {path}），设备支持是否启用未知：{e}",
+            required=False)
+        return
+    if project_arn is None:
+        add("backend", "devices.project", False,
+            "部署未启用设备支持：这个后端部署时没有建立 Device Farm 项目（部署版本早于本功能，或部署方没有 Device Farm 权限），"
+            "带设备目标的云端 run 会在提交前被拒。需要时请部署方用有 Device Farm 权限的凭证重新执行 gherkai deploy",
+            required=False)
+        return
+    add("backend", "devices.project", True, f"Device Farm 项目 {project_arn}（{_names.DEVICE_FARM_REGION}）", required=False)
+    try:
+        sessions = devicefarm.list_open_sessions(project_arn, profile=target.profile)
+    except devicefarm.DeviceFarmAccessDenied as e:
+        add("backend", "devices.sessions", False,
+            f"当前凭证没有列举远程访问会话的权限（{_names.DEVICE_FARM_REGION} 上对这个项目的 devicefarm:{e.operation}，{e.code}），"
+            "无法检查是否有未结束的会话；补上这项权限后重新运行 doctor", required=False)
+        return
+    except Exception as e:
+        add("backend", "devices.sessions", False, f"列举远程访问会话失败：{e}", required=False)
+        return
+    if not sessions:
+        add("backend", "devices.sessions", True, "没有未结束的远程访问会话", required=False)
+        return
+    items = []
+    for s in sessions:
+        facts = [f"状态 {s.status or '未知'}"]
+        if s.name:
+            facts.append(f"名称 {s.name}")
+        if s.created is not None:
+            facts.append(f"创建于 {s.created.isoformat(timespec='seconds')}")
+        url = console_url(s.arn)
+        items.append(f"{s.arn}（{'，'.join(facts)}）"
+                     + (f"，控制台 {url}" if url else "")
+                     + f"，停止命令 aws devicefarm stop-remote-access-session --region {_names.DEVICE_FARM_REGION} --arn {s.arn}")
+    add("backend", "devices.sessions", False,
+        f"{len(sessions)} 个远程访问会话未结束（排队中的也计在内）。正在执行的 run 也有会话，停止前请确认没有 run 在使用它；没有 run 使用的会话"
+        "会继续计费并占用设备，最长到 Device Farm 的 150 分钟上限。可在控制台查看，或用各条的停止命令停止（需要 "
+        "devicefarm:StopRemoteAccessSession 权限）：" + "；".join(items), required=False)
 
 
 def _doctor_worker_grace(target, add, revisions: dict) -> None:
