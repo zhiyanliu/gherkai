@@ -19,6 +19,7 @@ boto3 在函数内延迟导入（`gherkai-runtime[aws]`）：CLI 与 deploy 的 
 """
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, NoReturn
@@ -28,9 +29,10 @@ from gherkai_runtime import names as _names
 
 ProjectSource = Literal["ssm", "found", "created"]
 
-# 授权失败的错误码。Device Farm 服务模型自己不声明授权错误（IAM 拒绝由 AWS 的公共层返回），这里收 AWS 各服务常见的几种写法；
-# 部署方没有 Device Farm 权限时真实账户回的是哪一个，要在真账户上核对。
-_ACCESS_DENIED_CODES = frozenset({"AccessDeniedException", "AccessDenied", "UnauthorizedOperation"})
+# 授权失败的错误码。Device Farm 服务模型自己不声明授权错误（IAM 拒绝由 AWS 的公共层返回），这里收 AWS 公共错误表里的几种写法
+# （AccessDeniedException / AccessDenied / NotAuthorized）加 EC2 式的 UnauthorizedOperation；部署方没有 Device Farm 权限时真实账户
+# 回的是哪一个，要在真账户上核对。provider 读 SSM 记录失败时也用这份集合判定「是否为无权限」（`is_access_denied`）。
+_ACCESS_DENIED_CODES = frozenset({"AccessDeniedException", "AccessDenied", "NotAuthorized", "UnauthorizedOperation"})
 _NOT_FOUND_CODE = "NotFoundException"
 _COMPLETED = "COMPLETED"   # 远程访问会话的终态；其余状态（排队、准备、执行、停止中）都可能还在占用设备
 
@@ -65,14 +67,10 @@ class AmbiguousProject(Exception):
 
 @dataclass(frozen=True)
 class ProjectResolution:
-    """`resolve_or_create_project` 的结果。`source` 说明 ARN 从哪来：`ssm` 沿用 SSM 里核对过的值，`found` 按名称找回，`created` 新建。
-
-    `warning` 只在 SSM 记录的项目已不存在、转入按名称查找时给出，是给使用方看的整句。
-    """
+    """`resolve_or_create_project` 的结果。`source` 说明 ARN 从哪来：`ssm` 沿用 SSM 里核对过的值，`found` 按名称找回，`created` 新建。"""
 
     arn: str
     source: ProjectSource
-    warning: str | None = None
 
 
 @dataclass(frozen=True)
@@ -99,24 +97,26 @@ def read_project_arn(ssm_client, prefix: str) -> str | None:
     return _compose.read_device_farm_project(prefix=prefix, ssm=ssm_client)
 
 
-def resolve_or_create_project(prefix: str, *, profile: str | None, stored_arn: str | None) -> ProjectResolution:
+def resolve_or_create_project(prefix: str, *, profile: str | None, stored_arn: str | None,
+                              warn: Callable[[str], None] | None = None) -> ProjectResolution:
     """找回或建立项目 `{prefix}devices`（只供 `deploy` 在 cdk 之前调用，ADR 0051 决策 10「项目」）。
 
-    `stored_arn` 是 SSM 里的现值：有值时先 GetProject 核对，成功即沿用；NotFound（项目被手动删除）时带一句警告转入按名称查找。
+    `stored_arn` 是 SSM 里的现值：有值时先 GetProject 核对，成功即沿用；NotFound（项目被手动删除）时先经 `warn` 发出一句给使用方看的
+    警告、再转入按名称查找——警告在核对出这一事实时立即发出，之后无论列举被限流、建立失败还是同名歧义，这个事实都不会丢。
     按名称翻页列举 ListProjects：命中一个用它，零个就 CreateProject，多个抛 `AmbiguousProject`。任一调用无权限抛
     `DeviceFarmAccessDenied`，记录的项目已核对为不存在、随后列举或建立被拒时异常带 `stored_project_missing=True`；
     其余 botocore 异常原样抛出（GetProject 的非 NotFound 错误也不转入列举，限流不等于项目不存在）。
     """
     client = _make_devicefarm_client(profile=profile)
     name = project_name(prefix)
-    warning: str | None = None
     stored_missing = False
     if stored_arn is not None:
         if _project_exists(client, stored_arn):
             return ProjectResolution(arn=stored_arn, source="ssm")
         stored_missing = True
-        warning = (f"部署记录的 Device Farm 项目 {stored_arn} 已不存在（可能已被手动删除），改为按名称 {name} 查找，找不到就新建；"
-                   f"旧项目的会话记录与录像已随项目删除，指向旧会话的控制台链接不再可用。")
+        if warn is not None:
+            warn(f"部署记录的 Device Farm 项目 {stored_arn} 已不存在（可能已被手动删除），改为按名称 {name} 查找，找不到就新建；"
+                 f"旧项目的会话记录与录像已随项目删除，指向旧会话的控制台链接不再可用。")
 
     try:
         matches = [p["arn"] for page in client.get_paginator("list_projects").paginate()
@@ -126,13 +126,13 @@ def resolve_or_create_project(prefix: str, *, profile: str | None, stored_arn: s
     if len(matches) > 1:
         raise AmbiguousProject(name, matches)
     if matches:
-        return ProjectResolution(arn=matches[0], source="found", warning=warning)
+        return ProjectResolution(arn=matches[0], source="found")
 
     try:
         created = client.create_project(name=name)["project"]["arn"]
     except Exception as e:
         _raise_classified(e, stored_project_missing=stored_missing)
-    return ProjectResolution(arn=created, source="created", warning=warning)
+    return ProjectResolution(arn=created, source="created")
 
 
 def verify_project(arn: str, *, profile: str | None) -> bool:
@@ -156,6 +156,12 @@ def list_open_sessions(project_arn: str, *, profile: str | None) -> list[OpenSes
                 for s in page.get("remoteAccessSessions", []) if s.get("status") != _COMPLETED]
     except Exception as e:
         _raise_classified(e)
+
+
+def is_access_denied(e: BaseException) -> bool:
+    """botocore 异常是否为授权失败（错误码在 `_ACCESS_DENIED_CODES` 里）。provider 读 SSM 记录失败时据此决定失败消息是否列权限
+    （ADR 0051 决策 10「失败消息的形态」），与本模块对 Device Farm 调用的分类用同一份错误码集合。"""
+    return _error_code(e) in _ACCESS_DENIED_CODES
 
 
 def _make_devicefarm_client(*, profile: str | None):

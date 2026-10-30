@@ -58,6 +58,7 @@ class _DeviceFarmStub:
         self.read_error: Exception | None = None
         self.resolution = devicefarm.ProjectResolution(arn=CREATED_ARN, source="created")
         self.resolve_error: Exception | None = None
+        self.warn_text: str | None = None     # 给了就在找回或建立前经 warn 回调发出（模拟 SSM 记录的项目已不存在）
         self.project_exists = True
         self.verify_error: Exception | None = None
         self.has_credentials = True
@@ -78,10 +79,12 @@ class _DeviceFarmStub:
             raise self.verify_error
         return self.project_exists
 
-    def resolve_or_create_project(self, prefix, *, profile, stored_arn):
+    def resolve_or_create_project(self, prefix, *, profile, stored_arn, warn=None):
         self.resolves.append({"prefix": prefix, "profile": profile, "stored_arn": stored_arn})
         if self.events is not None:
             self.events.append("devicefarm")
+        if self.warn_text is not None and warn is not None:
+            warn(self.warn_text)
         if self.resolve_error is not None:
             raise self.resolve_error
         return self.resolution
@@ -100,7 +103,7 @@ def df(monkeypatch) -> _DeviceFarmStub:
     monkeypatch.setattr(devicefarm, "resolve_or_create_project", stub.resolve_or_create_project)
 
     def _no_client(**kw):
-        raise AssertionError("单测不该构造 Device Farm 客户端")
+        pytest.fail("单测不该构造 Device Farm 客户端")  # pytest.fail 抛的是 BaseException，provider 的宽 except 接不住
 
     monkeypatch.setattr(devicefarm, "_make_devicefarm_client", _no_client)
     monkeypatch.setattr(provider_cli, "_has_aws_credentials", lambda **kw: stub.has_credentials)
@@ -531,6 +534,31 @@ class _ClientError(Exception):
         self.response = {"Error": {"Code": code, "Message": message}}
 
 
+class _NoCredentials(Exception):
+    """替身：类名改成与 botocore 的 NoCredentialsError 相同（provider 按异常类名识别「没有凭证」）。"""
+
+
+_NoCredentials.__name__ = "NoCredentialsError"
+_RECORD_READ_ERRORS = [
+    _ClientError("AccessDeniedException", "not authorized to perform ssm:GetParameter"),
+    _NoCredentials("Unable to locate credentials"),
+    _ClientError("ThrottlingException", "Rate exceeded"),
+    ConnectionError("Could not connect to the endpoint URL"),
+]
+_RECORD_READ_ERROR_IDS = ["access-denied", "no-credentials", "throttling", "network"]
+
+
+def _assert_record_read_hint(err: str, error: Exception) -> None:
+    """读 SSM 记录失败消息的处置半句按错误类别（ADR 0051 决策 10「失败消息的形态」）：无权限列权限、无凭证提示配凭证与 region、
+    其余不提权限。"""
+    if isinstance(error, _ClientError) and error.response["Error"]["Code"] == "AccessDeniedException":
+        assert "ssm:GetParameter" in err
+    elif type(error).__name__ == "NoCredentialsError":
+        assert "凭证" in err and "region" in err and "ssm:GetParameter" not in err
+    else:
+        assert "权限" not in err and "ssm:GetParameter" not in err and "稍后重试" in err
+
+
 class _Cfn:
     def __init__(self, exists: bool) -> None:
         self._exists = exists
@@ -848,15 +876,38 @@ def test_deploy_resolves_the_project_after_the_vpc_guard_and_before_cdk(cdk, df,
 
 
 def test_deploy_reports_a_created_project_and_relays_the_resolution_warning(cdk, df, monkeypatch, capsys):
-    """新建了项目要说一声（账户里多了一个资源）；部署记录的项目已被删除、转按名称查找时的那句警告原样打到 stderr。"""
+    """新建了项目要说一声（账户里多了一个资源）；部署记录的项目已被删除、转按名称查找时的那句警告经回调原样打到 stderr。"""
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     df.stored = STORED_ARN
-    df.resolution = devicefarm.ProjectResolution(arn=CREATED_ARN, source="created", warning="部署记录的项目已不存在")
+    df.resolution = devicefarm.ProjectResolution(arn=CREATED_ARN, source="created")
+    df.warn_text = "部署记录的项目已不存在"
     assert _deploy() == 0
     err = capsys.readouterr().err
     assert "警告：部署记录的项目已不存在" in err
     assert CREATED_ARN in err and "建立" in err
     assert _context_pairs(_argv(cdk))["device_farm_project"] == CREATED_ARN
+
+
+def test_deploy_reports_a_found_same_named_project(cdk, df, monkeypatch, capsys):
+    """SSM 没有记录、Device Farm 里已有同名项目 → 按名称找回并说明沿用的是哪一个，ARN 经 context 交给 stack。"""
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)
+    df.resolution = devicefarm.ProjectResolution(arn=CREATED_ARN, source="found")
+    assert _deploy() == 0
+    err = capsys.readouterr().err
+    assert "沿用 Device Farm 里已有的同名项目" in err and CREATED_ARN in err
+    assert _context_pairs(_argv(cdk))["device_farm_project"] == CREATED_ARN
+
+
+def test_deploy_relays_the_not_found_warning_even_when_resolution_then_fails(cdk, df, monkeypatch, capsys):
+    """记录的项目已不存在、随后列举被限流：那句警告仍到达 stderr（事实在核对出来时已发出），命令以退出码 1 结束、不调 cdk。"""
+    _stub_backend(monkeypatch, stack_exists=True, stored="default")
+    df.stored = STORED_ARN
+    df.warn_text = "部署记录的项目已不存在"
+    df.resolve_error = _ClientError("ThrottlingException", "Rate exceeded")
+    assert _deploy() == EXIT_FAILED
+    err = capsys.readouterr().err
+    assert "警告：部署记录的项目已不存在" in err and "Rate exceeded" in err
+    assert cdk.calls == []
 
 
 def test_deploy_with_several_same_named_projects_exits_2_without_cdk(cdk, df, monkeypatch, capsys):
@@ -877,6 +928,7 @@ def test_deploy_without_device_farm_permission_keeps_the_recorded_project_and_wa
     assert _deploy() == 0
     err = capsys.readouterr().err
     assert "警告" in err and STORED_ARN in err and "devicefarm:GetProject" in err
+    assert "保持不变" in err and "未启用设备支持" not in err and "devicefarm:CreateProject" in err and "us-west-2" in err
     assert _context_pairs(_argv(cdk))["device_farm_project"] == STORED_ARN
     assert len(cdk.worker_steps) == 1  # 降级不影响 cdk 之后的镜像步骤
 
@@ -924,15 +976,35 @@ def test_deploy_other_device_farm_errors_exit_1_without_guessing(cdk, df, monkey
     assert cdk.calls == [] and cdk.worker_steps == []
 
 
-def test_deploy_unreadable_project_record_exits_2_without_resolving(cdk, df, monkeypatch, capsys):
-    """读不到 SSM 里的项目记录（无权限、网络）→ 以退出码 2 结束，不找回不建立、不调 cdk：不知道记录在不在，就无从判断该沿用
-    还是该建立；当作「没有记录」继续，无权限降级会撤掉已部署的设备授权。"""
+@pytest.mark.parametrize("error", _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
+def test_deploy_unreadable_project_record_exits_2_without_resolving(cdk, df, monkeypatch, capsys, error):
+    """读不到 SSM 里的项目记录（无权限、无凭证、网络、限流）→ 以退出码 2 结束，不找回不建立、不调 cdk：不知道记录在不在，就无从
+    判断该沿用还是该建立；当作「没有记录」继续，无权限降级会撤掉已部署的设备授权。处置半句按错误类别：只有无权限才列权限。"""
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
-    df.read_error = _ClientError("AccessDeniedException", "not authorized to perform ssm:GetParameter")
+    df.read_error = error
     assert _deploy() == EXIT_PRECONDITION
     err = capsys.readouterr().err
-    assert names.ssm_device_farm_project_path("vfy-") in err and "ssm:GetParameter" in err
+    assert names.ssm_device_farm_project_path("vfy-") in err and str(error) in err and "Traceback" not in err
+    _assert_record_read_hint(err, error)
     assert df.resolves == [] and cdk.calls == []
+
+
+@pytest.mark.parametrize("verb", ["deploy", "diff", "destroy"])
+def test_malformed_project_record_exits_2_and_names_the_parameter(cdk, df, verb, tmp_path, monkeypatch, capsys):
+    """SSM 记录不是合法的项目 ARN（只会因手工改动出现）→ deploy 与只读路径都以退出码 2 结束、不调 cdk、不找回不核对，消息点名
+    SSM 路径并给出查项目 ARN 的命令；不当作「没有记录」继续（无权限降级会撤掉已部署的授权），也不建议删参数。"""
+    monkeypatch.chdir(tmp_path)
+    _stub_backend(monkeypatch, stack_exists=True, stored="default")
+    df.stored = "arn:aws:devicefarm:us-east-1:111122223333:project:wrong-region"
+    if verb == "deploy":
+        rc = _deploy()
+    else:
+        method, args = _verb_call(verb, "--vpc", "default", "--region", "us-east-1", "--prefix", "vfy-")
+        rc = method(args)
+    assert rc == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert names.ssm_device_farm_project_path("vfy-") in err and "list-projects" in err and "Traceback" not in err
+    assert cdk.calls == [] and df.resolves == [] and df.verifies == []
 
 
 # ---------------------------------------------------------------- Device Farm 项目：diff / --synth-only / destroy 只读
@@ -967,30 +1039,34 @@ def test_read_only_verbs_use_the_recorded_project_and_never_create_one(cdk, df, 
 
 
 @pytest.mark.parametrize("verb", READ_ONLY_VERBS)
-def test_read_only_verbs_use_pending_when_nothing_is_recorded(cdk, df, verb, tmp_path, monkeypatch):
-    """参数不存在（含 stack 还不存在）→「待建立」占位，仍不建立项目；没有记录也就没有可核对的项目。"""
+def test_read_only_verbs_use_pending_when_nothing_is_recorded(cdk, df, verb, tmp_path, monkeypatch, capsys):
+    """参数不存在（含 stack 还不存在）→「待建立」占位，仍不建立项目；没有记录也就没有可核对的项目。diff 另提示变更集不含
+    设备授权、实际部署会多出项目参数与授权（首次启用设备支持的那次 deploy 会比 diff 多出这两部分）；synth 与 destroy 不提示。"""
     monkeypatch.chdir(tmp_path)
     method, args = _verb_call(verb, "--vpc", "new", "--region", "us-east-1")
     assert method(args) == 0
     assert _context_pairs(_argv(cdk))["device_farm_project"] == PENDING
     assert df.resolves == [] and df.verifies == []
+    err = capsys.readouterr().err
+    if verb == "diff":
+        assert "提示" in err and "gherkai deploy" in err and devicefarm.project_name("gherkai-") in err
+    else:
+        assert "提示" not in err and "警告" not in err
 
 
 @pytest.mark.parametrize("verb", READ_ONLY_VERBS)
-@pytest.mark.parametrize("error", [
-    _ClientError("AccessDeniedException", "not authorized to perform ssm:GetParameter"),
-    _ClientError("ThrottlingException", "Rate exceeded"),
-    ConnectionError("Could not connect to the endpoint URL"),
-], ids=["access-denied", "throttling", "network"])
+@pytest.mark.parametrize("error", _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
 def test_read_only_verbs_exit_2_when_the_record_is_unreadable(cdk, df, verb, error, tmp_path, monkeypatch, capsys):
-    """读不到项目记录 → 以退出码 2 结束、不调 cdk，消息写明读的是哪个 SSM 路径、要什么权限。不回落占位：那会让 diff 把
-    已部署的设备授权显示成删除，误导依据它核对变更的人。"""
+    """读不到项目记录 → 以退出码 2 结束、不调 cdk，消息写明读的是哪个 SSM 路径与原异常；处置半句按错误类别：只有无权限才列权限，
+    无凭证提示配凭证与 region，限流与网络不说成权限问题。不回落占位：那会让 diff 把已部署的设备授权显示成删除，误导依据它
+    核对变更的人。"""
     monkeypatch.chdir(tmp_path)
     df.read_error = error
     method, args = _verb_call(verb, "--vpc", "new", "--region", "us-east-1", "--prefix", "vfy-")
     assert method(args) == EXIT_PRECONDITION
     err = capsys.readouterr().err
-    assert names.ssm_device_farm_project_path("vfy-") in err and "ssm:GetParameter" in err
+    assert names.ssm_device_farm_project_path("vfy-") in err and str(error) in err and "Traceback" not in err
+    _assert_record_read_hint(err, error)
     assert cdk.calls == [] and df.resolves == [] and df.verifies == []
 
 
@@ -1076,6 +1152,20 @@ def test_synth_only_without_any_credentials_exports_offline_with_pending_and_war
     err = capsys.readouterr().err
     assert "警告" in err and "远程访问会话" in err and "不一致" in err
     assert df.reads == [] and df.resolves == []
+
+
+def test_synth_only_treats_a_credential_lookup_error_as_having_credentials(cdk, df, tmp_path, monkeypatch, capsys):
+    """解析凭证链本身出错（如 profile 名不存在）不算「完全没有凭证」：不回落占位，照常去读 SSM，读失败按退出码 2 结束。"""
+    monkeypatch.chdir(tmp_path)
+
+    def _lookup_fails(**kw):
+        raise RuntimeError("The config profile (nope) could not be found")
+
+    monkeypatch.setattr(provider_cli, "_has_aws_credentials", _lookup_fails)
+    df.read_error = RuntimeError("The config profile (nope) could not be found")
+    method, args = _verb_call("synth", "--vpc", "new", "--region", "us-east-1", "--prefix", "vfy-")
+    assert method(args) == EXIT_PRECONDITION
+    assert df.reads == ["vfy-"] and cdk.calls == []
 
 
 def test_has_aws_credentials_follows_the_credential_chain(monkeypatch, tmp_path):

@@ -44,7 +44,7 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 ## 退出码
 
 `0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
-（`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败（含读不到 SSM 里的 Device Farm 项目记录、diff 核对记录里的项目时
+（`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败（含读不到 SSM 里的 Device Farm 项目记录、记录不是合法的项目 ARN、diff 核对记录里的项目时
 遇到权限以外的错误）、同名 Device Farm 项目不止一个、容器引擎名不认、push-worker 的架构/skew 拦截——部署方可修，对齐 CLI 既有
 preflight 退出码 2 的口径）；**`1`** 表示 cdk 已成功而 worker 镜像四步失败（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，
 ADR 0038），或 deploy 在 cdk 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；不猜测，
@@ -170,7 +170,8 @@ def _make_ssm_client(*, region, profile):
 def _has_aws_credentials(*, profile) -> bool:
     """凭证链能否解析出任何凭证（`--synth-only` 判断「完全没有凭证」用，ADR 0051 决策 10 的唯一例外）。
 
-    只解析、不发请求，也不要 region；凭证过期或无效不在这里判断，那归之后真去读时的报错。
+    不调用 AWS 服务的 API，也不需要 region。凭证链前面各项都为空时，boto3 会向实例元数据端点发两次请求（取令牌、取凭证，各有
+    1 秒连接超时），所以在 EC2 之外完全没有凭证时离线导出会多等约 2 秒。凭证过期或无效不在这里判断，由之后实际读取时的报错处理。
     """
     import boto3
     return boto3.session.Session(profile_name=profile).get_credentials() is not None
@@ -188,6 +189,24 @@ def _make_hint_clients(*, region, profile):
     # （给 1 就是共两次尝试、超时预算翻倍），这里要的是「只试一次」。
     config = boto3.session.Config(connect_timeout=2, read_timeout=3, retries={"total_max_attempts": 1})
     return session.client("cloudformation", config=config), session.client("ssm", config=config)
+
+
+# 凭证或 region 缺失一类的 botocore 异常类名与错误码：读 SSM 记录失败时提示去配凭证与 region，而不是列权限。
+_CREDENTIAL_ERROR_NAMES = frozenset({"NoCredentialsError", "PartialCredentialsError", "NoRegionError", "ProfileNotFound",
+                                     "TokenRetrievalError", "SSOTokenLoadError", "UnauthorizedSSOTokenError"})
+_CREDENTIAL_ERROR_CODES = frozenset({"ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "UnrecognizedClientException"})
+
+
+def _ssm_read_failure_hint(exc: BaseException) -> str:
+    """读 SSM 里的 Device Farm 项目记录失败时的「怎么办」半句：只有无权限才列权限，凭证或 region 缺失提示去配，其余（限流、网络、
+    服务端故障）不说成权限问题（ADR 0051 决策 10「失败消息的形态」）。无权限的判定与 Device Farm 侧共用同一份错误码集合。"""
+    from gherkai_runtime import devicefarm
+
+    if devicefarm.is_access_denied(exc):
+        return "需要该参数的 ssm:GetParameter 权限。"
+    if type(exc).__name__ in _CREDENTIAL_ERROR_NAMES or _error_code(exc) in _CREDENTIAL_ERROR_CODES:
+        return "需要可用的凭证与 region（--profile / AWS_PROFILE，--region / AWS_REGION）。"
+    return "这类错误多为限流、网络或服务端故障，稍后重试即可。"
 
 
 def _error_code(exc: Exception) -> str | None:
@@ -448,10 +467,11 @@ class Provider:
         """只呈变更集（不改任何东西）。**它是 VPC 取值三态的指定核对手段**，故自身不做三态比对——
         对本机制之前部署的环境，`deploy` 以退出码 2 结束时让人运行的就是它，若它也被拦就无路可走。
 
-        **diff 不建立 Device Farm 项目**（ADR 0051 决策 10）：SSM 有记录且 GetProject 核对成功就用记录里的 ARN，没有记录或
-        项目已不存在就以「待建立」占位。占位时变更集里看不到 Device Farm 授权与项目 ARN 参数——真 deploy 会先找回或建立项目、
-        再带着 ARN 合成，所以首次启用设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分。读不到记录或核对
-        失败则以退出码 2 结束（见 `_stored_device_farm_project`）。"""
+        **diff 不建立 Device Farm 项目**（ADR 0051 决策 10）：SSM 有记录且 GetProject 核对成功就用记录里的 ARN，没有记录（提示）
+        或项目已不存在（警告）就以「待建立」占位。占位时变更集里看不到 Device Farm 授权与项目 ARN 参数——真 deploy 会先找回或
+        建立项目、再带着 ARN 合成，所以首次启用设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分，提示与
+        警告都把这一点说给使用方。读不到记录、记录不是合法的项目 ARN、核对遇到权限以外的失败则以退出码 2 结束；核对被拒则沿用
+        记录并警告（见 `_stored_device_farm_project`）。"""
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -837,8 +857,9 @@ class Provider:
         否则把 ARN 交给 cdk（None 表示本次不启用设备支持，context 里是「待建立」占位）。
 
         先读 SSM 现值，再交 `devicefarm.resolve_or_create_project` 核对、按名称找回或建立。分支：
-        - 读不到 SSM 记录（无权限、网络、限流）→ 退出码 2：不知道记录在不在，就分不清该沿用还是该建立；当作「没有记录」继续，
-          遇上无权限降级会撤掉已部署的设备授权。与 VPC 取值比对读后端失败同一处置（见 `_guard_vpc_spec`）。
+        - 读不到 SSM 记录（无权限、无凭证、网络、限流）→ 退出码 2：不知道记录在不在，就分不清该沿用还是该建立；当作「没有记录」
+          继续，遇上无权限降级会撤掉已部署的设备授权。与 VPC 取值比对读后端失败同一处置（见 `_guard_vpc_spec`）；处置半句按错误
+          类别给（`_ssm_read_failure_hint`）。记录存在但不是合法的项目 ARN（只会因手工改动出现）同样退出码 2，不当作没有记录。
         - 同名项目不止一个 → 退出码 2，点名命中的 ARN，不替部署方挑选。
         - 部署方没有 Device Farm 权限 → 降级：SSM 有 ARN 且核对被拒就沿用并警告；没有记录，或记录的项目已核对为不存在而找回或新建
           又被拒，就警告并按未启用设备支持部署（不把已不存在的 ARN 写回 SSM、不给不存在的项目授权）。
@@ -857,12 +878,18 @@ class Provider:
                 _make_ssm_client(region=target.region, profile=target.profile), target.prefix)
         except Exception as exc:
             print(f"读不到 Device Farm 项目记录（SSM 参数 {path}）：{exc}\n"
-                  f"需要该参数的 ssm:GetParameter 权限与可用的凭证；本次没有改动后端。", file=sys.stderr)
+                  f"{_ssm_read_failure_hint(exc)}本次没有改动后端。", file=sys.stderr)
             return EXIT_PRECONDITION, None
+        if stored is not None:
+            blocked = self._report_malformed_device_farm_record(path, stored)
+            if blocked is not None:
+                return blocked, None
 
         name = devicefarm.project_name(target.prefix)
         try:
-            resolution = devicefarm.resolve_or_create_project(target.prefix, profile=target.profile, stored_arn=stored)
+            resolution = devicefarm.resolve_or_create_project(
+                target.prefix, profile=target.profile, stored_arn=stored,
+                warn=lambda text: print(f"警告：{text}", file=sys.stderr))
         except devicefarm.AmbiguousProject as exc:
             print(f"{exc}\n本次没有改动后端。", file=sys.stderr)
             return EXIT_PRECONDITION, None
@@ -874,8 +901,6 @@ class Provider:
                   f"这类错误不按权限不足处理（多为限流、网络或服务端故障），为免误改设备授权，本次没有部署 stack。"
                   f"稍后重新运行 `gherkai deploy` 即可；项目若已建立，会按名称找回、不会重复建立。", file=sys.stderr)
             return EXIT_FAILED, None
-        if resolution.warning:
-            print(f"警告：{resolution.warning}", file=sys.stderr)
         if resolution.source == "created":
             print(f"已在 Device Farm（{names.DEVICE_FARM_REGION}）建立项目 {name}：{resolution.arn}", file=sys.stderr)
         elif resolution.source == "found":
@@ -889,7 +914,7 @@ class Provider:
         记录的项目已不存在而又无法找回或新建时（`exc.stored_project_missing`），本次按未启用设备支持部署：沿用一个已不存在的
         ARN 只是不撤授权，带设备目标的 run 仍会失败、且推迟到执行时才暴露，警告要照实说明项目没了、授权撤了、怎么恢复。
         """
-        perms = "devicefarm:GetProject、devicefarm:ListProjects 与 devicefarm:CreateProject"
+        perms = f"{names.DEVICE_FARM_REGION} 上的 devicefarm:GetProject、devicefarm:ListProjects 与 devicefarm:CreateProject"
         if stored is None:
             return (f"警告：{exc}，无法找回或建立 Device Farm 项目。本次部署不启用设备支持，提交带设备目标的云端 run 会被拒绝。\n"
                     f"     要启用，请给部署用的凭证加上 {perms} 权限，再重新运行 `gherkai deploy`。")
@@ -904,13 +929,15 @@ class Provider:
         """diff / --synth-only / destroy 用的项目 ARN：只读 SSM 现值，不找回、不建立（ADR 0051 决策 10、ADR 0037 决策 6）。
 
         返回 (退出码, ARN)，含义同 `_resolve_device_farm_project_for_deploy`。参数不存在（含 stack 不存在）返回 None，经
-        `build_context` 成为「待建立」占位。SSM 有值时，diff 按 deploy 的同一规则用 GetProject 只读核对（`devicefarm.verify_project`）：
+        `build_context` 成为「待建立」占位，diff 此时提示变更集不含设备授权与项目 ARN 参数、实际部署会多出这两部分。记录存在但
+        不是合法的项目 ARN（只会因手工改动出现）以退出码 2 结束并点名 SSM 路径（`_report_malformed_device_farm_record`）。SSM 有
+        合法值时，diff 按 deploy 的同一规则用 GetProject 只读核对（`devicefarm.verify_project`）：
         成功即沿用；项目已不存在（被手动删除）时警告并以占位显示，因为下一次 deploy 会按名称找回或新建、换成别的 ARN。
         --synth-only 与 destroy 不核对、直接沿用 SSM 现值。
 
         读 SSM 失败（无凭证、无权限、网络、限流、取不到 region）以退出码 2 结束、不回落占位：回落会让 diff 把已部署的设备授权
-        显示成删除，误导依据它核对变更的人。唯一例外是 --synth-only 在完全没有凭证时回落占位并警告，因为无凭证离线导出是既有
-        能力；此时也不建 SSM 句柄（没有 region 时建句柄本身就会失败）。
+        显示成删除，误导依据它核对变更的人；处置半句按错误类别给（`_ssm_read_failure_hint`）。唯一例外是 --synth-only 在完全没有
+        凭证时回落占位并警告，因为无凭证离线导出是既有能力；此时也不建 SSM 句柄（没有 region 时建句柄本身就会失败）。
 
         GetProject 核对被拒（所用凭证没有 Device Farm 权限）时与 deploy 同一降级：按记录里的项目计算变更集并警告没能核对——允许
         无权限的部署方降级部署，就不能反过来让他不能预览变更集。GetProject 的其他失败（限流、网络、服务端故障）以退出码 2 结束，
@@ -934,18 +961,27 @@ class Provider:
                 _make_ssm_client(region=target.region, profile=target.profile), target.prefix)
         except Exception as exc:
             print(f"读不到 Device Farm 项目记录（SSM 参数 {path}）：{exc}\n"
-                  f"需要可用的凭证与 region（--region / AWS_REGION / --profile），以及该参数的 ssm:GetParameter 权限。"
-                  f"读不到时不按「未启用设备支持」继续，以免结果与已部署的后端不一致。", file=sys.stderr)
+                  f"{_ssm_read_failure_hint(exc)}读不到时不按「未启用设备支持」继续，以免结果与已部署的后端不一致。",
+                  file=sys.stderr)
             return EXIT_PRECONDITION, None
-        if verb != "diff" or stored is None:
+        if stored is not None:
+            blocked = self._report_malformed_device_farm_record(path, stored)
+            if blocked is not None:
+                return blocked, None
+        if verb != "diff":
             return None, stored
+        if stored is None:
+            print(f"提示：后端没有 Device Farm 项目记录（SSM 参数 {path}），变更集按未启用设备支持计算、不含 Device Farm 授权与"
+                  f"项目 ARN 参数；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会先按名称 "
+                  f"{devicefarm.project_name(target.prefix)} 找回或建立项目，实际变更会比这里多出这两部分。", file=sys.stderr)
+            return None, None
 
         try:
             exists = devicefarm.verify_project(stored, profile=target.profile)
         except devicefarm.DeviceFarmAccessDenied as exc:
             print(f"警告：{exc}，无法核对部署记录的 Device Farm 项目是否还在。变更集按记录里的项目 {stored} 计算，设备支持保持不变；"
-                  f"项目若已被手动删除，下一次 `gherkai deploy` 会按名称找回或新建，变更集会与这里显示的不同。\n"
-                  f"     要让 diff 能核对，请给所用凭证加上该项目的 devicefarm:GetProject 权限（Device Farm 位于 "
+                  f"项目若已被手动删除，用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会按名称找回或新建，变更集会与这里显示的不同。\n"
+                  f"     要让 `gherkai deploy --diff` 能核对，请给所用凭证加上该项目的 devicefarm:GetProject 权限（Device Farm 位于 "
                   f"{names.DEVICE_FARM_REGION}）。", file=sys.stderr)
             return None, stored
         except Exception as exc:
@@ -959,6 +995,24 @@ class Provider:
               f"其中看不到 Device Farm 授权；下一次 `gherkai deploy` 会按名称 {devicefarm.project_name(target.prefix)} "
               f"找回或新建项目。", file=sys.stderr)
         return None, None
+
+    @staticmethod
+    def _report_malformed_device_farm_record(path: str, stored: str) -> int | None:
+        """SSM 记录不是合法的项目 ARN 时报错并返回退出码 2，合法返回 None。
+
+        这种值只会因手工改动出现（stack 只写校验过的值）。不当作「没有记录」继续：那会在无权限降级时撤掉已部署的授权；也不建议
+        删除参数：它归 stack 管理，删掉后只要找回的 ARN 与上次相同，CloudFormation 不会重建它。stack 合成期的形态校验保留，
+        作接线错误的兜底（ADR 0037 决策 6）。
+        """
+        try:
+            names.validate_device_farm_project_arn(stored)
+        except ValueError as exc:
+            print(f"后端记录的 Device Farm 项目 ARN 不合法（SSM 参数 {path}）：{exc}\n"
+                  f"这个参数由 `gherkai deploy` 写入，通常是被手工改过。请把它改回正确的项目 ARN（用 "
+                  f"aws devicefarm list-projects --region {names.DEVICE_FARM_REGION} 查看），再重新运行；本次没有改动后端。",
+                  file=sys.stderr)
+            return EXIT_PRECONDITION
+        return None
 
     # ---- 内部：prefix/region/profile 与版本 ----
     @staticmethod

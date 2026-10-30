@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shlex
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -952,7 +953,8 @@ def _doctor_devices(target, add) -> None:
     try:
         project_arn = compose.read_device_farm_project(prefix=target.prefix, region=target.region, profile=target.profile)
     except Exception as e:
-        add("backend", "devices.project", False, f"读不到 Device Farm 项目参数（SSM 参数 {path}），设备支持是否启用未知：{e}",
+        add("backend", "devices.project", False,
+            f"读不到 Device Farm 项目参数（SSM 参数 {path}），设备支持是否启用未知：{e}。请排除凭证、region 与网络问题后重新运行 doctor",
             required=False)
         return
     if project_arn is None:
@@ -970,7 +972,9 @@ def _doctor_devices(target, add) -> None:
             "无法检查是否有未结束的会话；补上这项权限后重新运行 doctor", required=False)
         return
     except Exception as e:
-        add("backend", "devices.sessions", False, f"列举远程访问会话失败：{e}", required=False)
+        add("backend", "devices.sessions", False,
+            f"列举远程访问会话失败，无法检查是否有未结束的会话：{e}。请排除凭证与网络问题后重新运行 doctor；错误为项目不存在时，"
+            "部署记录的 Device Farm 项目已被删除，请部署方重新执行 gherkai deploy", required=False)
         return
     if not sessions:
         add("backend", "devices.sessions", True, "没有未结束的远程访问会话", required=False)
@@ -985,7 +989,8 @@ def _doctor_devices(target, add) -> None:
         url = console_url(s.arn)
         items.append(f"{s.arn}（{'，'.join(facts)}）"
                      + (f"，控制台 {url}" if url else "")
-                     + f"，停止命令 aws devicefarm stop-remote-access-session --region {_names.DEVICE_FARM_REGION} --arn {s.arn}")
+                     + f"，停止命令 aws devicefarm stop-remote-access-session --region {_names.DEVICE_FARM_REGION} --arn {s.arn}"
+                     + (f" --profile {shlex.quote(target.profile)}" if target.profile else ""))
     add("backend", "devices.sessions", False,
         f"{len(sessions)} 个远程访问会话未结束（排队中的也计在内）。正在执行的 run 也有会话，停止前请确认没有 run 在使用它；没有 run 使用的会话"
         "会继续计费并占用设备，最长到 Device Farm 的 150 分钟上限。可在控制台查看，或用各条的停止命令停止（需要 "

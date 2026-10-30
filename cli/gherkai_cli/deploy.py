@@ -172,7 +172,10 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
         description="拆掉云端后端 stack。数据类资源（runs 表 / 事件表 / 产物桶 / ECR 仓库）\n"
                     "按 IaC 的 RETAIN 标记保留、不随 stack 删除；版本戳等 stack 自己的参数随删。\n"
                     "部署时建立的 Device Farm 项目不归 stack 管理，连同其中的远程访问会话记录\n"
-                    "与录像一起保留，不再需要时手动删除：\n"
+                    "与录像一起保留，不再需要时手动删除。项目 ARN 记在 stack 的 SSM 参数里、\n"
+                    "随 stack 删除，拆除后先列出项目查到 ARN（项目名为部署前缀加 devices）：\n"
+                    "  aws devicefarm list-projects --region us-west-2 \\\n"
+                    "    --query 'projects[].[name,arn]' --output text\n"
                     "  aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>",
     )
     _add_provider_flag(dsp)

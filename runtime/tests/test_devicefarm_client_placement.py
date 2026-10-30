@@ -1,6 +1,6 @@
 """差集护栏：Python 侧的 Device Farm 客户端只在 `gherkai_runtime.devicefarm` 构造（ADR 0051 决策 10「调用归属」）。
 
-执行期调用 Device Farm 的只有 worker 的设备模块（TS 侧，断言在 Midscene 包里）；Python 侧只有部署与诊断这一个模块承担 deploy 找回或
+执行期调用 Device Farm 的只有 worker 的设备模块（TS 侧；那一侧的构造点护栏随 worker 设备模块一同加入 Midscene 包，本文件只检查 Python 侧）；Python 侧只有部署与诊断这一个模块承担 deploy 找回或
 建立项目、doctor 列会话。core 不认识 Device Farm，推进器（云端 Lambda）不调它。客户端区域写死为 `names.DEVICE_FARM_REGION`：跟着
 后端区域走的客户端在 us-east-1 等区域找不到服务端点，部署与 doctor 会把「服务不在这个区域」误报成别的故障。
 

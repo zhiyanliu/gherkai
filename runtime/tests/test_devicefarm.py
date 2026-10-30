@@ -2,7 +2,8 @@
 
 用 botocore Stubber 包住真 devicefarm / ssm 客户端，按服务模型核对请求参数与响应形态，不连真 AWS。断言落在 ADR 定下的分支上：
 - SSM 有值且 GetProject 成功时直接沿用，不按名列举；
-- 没有 SSM 值、或 SSM 值指向的项目已被删除（NotFound）时按名称 `{prefix}devices` 翻页列举：零个就建立、一个就复用、多个抛专用异常；
+- 没有 SSM 值、或 SSM 值指向的项目已被删除（NotFound，先经回调发出警告、之后无论列举或建立怎样失败都不丢）时按名称
+  `{prefix}devices` 翻页列举：零个就建立、一个就复用、多个抛专用异常；
 - 无权限单独分类成一种异常（deploy 据此降级），记录的项目已不存在、随后列举或建立又被拒时异常带 `stored_project_missing` 标记；
   限流、网络等其他错误原样抛出，不被当成「项目不存在」去新建；
 - diff 用的只读核对只调 GetProject：成功为 True、NotFound 为 False，不列举、不建立；无权限与其他错误的分类同上；
@@ -90,7 +91,7 @@ def test_stored_arn_verified_by_get_project_is_reused_without_listing(df):
     stubber, profiles = df
     stubber.add_response("get_project", {"project": _project(STORED, NAME)}, {"arn": STORED})
     res = devicefarm.resolve_or_create_project(PREFIX, profile="backend", stored_arn=STORED)
-    assert res == devicefarm.ProjectResolution(arn=STORED, source="ssm", warning=None)
+    assert res == devicefarm.ProjectResolution(arn=STORED, source="ssm")
     assert profiles == ["backend"]   # 凭证沿用调用方的 profile
 
 
@@ -105,11 +106,12 @@ def _enter(stubber: Stubber, entry: str) -> str | None:
     return None
 
 
-def _assert_warning(res, entry: str) -> None:
+def _assert_warning(warnings: list[str], entry: str) -> None:
+    """SSM 值已失效时恰发出一句警告（点名旧 ARN 与要找的名称）；没有 SSM 值时一句都不发。"""
     if entry == "stored-arn-not-found":
-        assert res.warning is not None and STORED in res.warning and NAME in res.warning
+        assert len(warnings) == 1 and STORED in warnings[0] and NAME in warnings[0]
     else:
-        assert res.warning is None
+        assert warnings == []
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
@@ -118,9 +120,10 @@ def test_single_name_match_across_pages_is_reused(df, entry):
     stored = _enter(stubber, entry)
     _stub_list_pages(stubber, [[_project(OTHER, "someone-else")], [_project(OTHER, "gherkai-devices-old"),
                                                                     _project(FOUND, NAME)]])
-    res = devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored)
+    warnings: list[str] = []
+    res = devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored, warn=warnings.append)
     assert (res.arn, res.source) == (FOUND, "found")
-    _assert_warning(res, entry)
+    _assert_warning(warnings, entry)
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
@@ -129,9 +132,10 @@ def test_no_name_match_across_pages_creates_project_with_prefixed_name(df, entry
     stored = _enter(stubber, entry)
     _stub_list_pages(stubber, [[_project(OTHER, "someone-else")], [], [_project(OTHER, "prod-devices")]])
     stubber.add_response("create_project", {"project": _project(CREATED, NAME)}, {"name": NAME})
-    res = devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored)
+    warnings: list[str] = []
+    res = devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored, warn=warnings.append)
     assert (res.arn, res.source) == (CREATED, "created")
-    _assert_warning(res, entry)
+    _assert_warning(warnings, entry)
 
 
 @pytest.mark.parametrize("entry", ENTRIES)
@@ -139,8 +143,10 @@ def test_several_name_matches_across_pages_raise_ambiguous_without_creating(df, 
     stubber, _ = df
     stored = _enter(stubber, entry)
     _stub_list_pages(stubber, [[_project(FOUND, NAME)], [_project(OTHER, "someone-else"), _project(FOUND_2, NAME)]])
+    warnings: list[str] = []
     with pytest.raises(devicefarm.AmbiguousProject) as ei:
-        devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored)
+        devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=stored, warn=warnings.append)
+    _assert_warning(warnings, entry)   # 「记录的项目已不存在」这一事实在同名歧义之前就已发出
     assert ei.value.name == NAME
     assert ei.value.arns == [FOUND, FOUND_2]
     assert FOUND in str(ei.value) and FOUND_2 in str(ei.value)   # 消息即给使用方看的整句：点名每个同名项目
@@ -155,8 +161,20 @@ def test_project_name_follows_prefix(df):
     assert devicefarm.project_name("prod-") == names.default_name("prod-", names.BASE_DEVICE_FARM_PROJECT)
 
 
+def test_not_found_warning_is_emitted_before_listing_fails(df):
+    """SSM 值已失效、随后列举被限流：警告在核对出 NotFound 时已经发出，异常照常抛出——事实不随后续失败丢失。"""
+    stubber, _ = df
+    _stub_get_not_found(stubber, STORED)
+    stubber.add_client_error("list_projects", service_error_code="ThrottlingException", http_status_code=400,
+                             expected_params={})
+    warnings: list[str] = []
+    with pytest.raises(ClientError):
+        devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=STORED, warn=warnings.append)
+    assert len(warnings) == 1 and STORED in warnings[0]
+
+
 # ---- 项目：无权限单独分类；其他错误原样抛出、不猜测 ----
-DENIED_CODES = ["AccessDeniedException", "AccessDenied", "UnauthorizedOperation"]
+DENIED_CODES = ["AccessDeniedException", "AccessDenied", "NotAuthorized", "UnauthorizedOperation"]
 
 
 @pytest.mark.parametrize("code", DENIED_CODES)
@@ -213,7 +231,8 @@ def test_throttling_on_list_or_create_propagates(df, stage):
     stubber, _ = df
     if stage == "create_project":
         _stub_list_pages(stubber, [[]])
-    stubber.add_client_error(stage, service_error_code="ThrottlingException", http_status_code=400)
+    stubber.add_client_error(stage, service_error_code="ThrottlingException", http_status_code=400,
+                             expected_params={"list_projects": {}, "create_project": {"name": NAME}}[stage])
     with pytest.raises(ClientError) as ei:
         devicefarm.resolve_or_create_project(PREFIX, profile=None, stored_arn=None)
     assert ei.value.response["Error"]["Code"] == "ThrottlingException"
@@ -322,7 +341,8 @@ def test_list_open_sessions_empty_project(df):
 @pytest.mark.parametrize("code", DENIED_CODES)
 def test_list_open_sessions_access_denied_is_classified(df, code):
     stubber, _ = df
-    stubber.add_client_error("list_remote_access_sessions", service_error_code=code, http_status_code=403)
+    stubber.add_client_error("list_remote_access_sessions", service_error_code=code, http_status_code=403,
+                             expected_params={"arn": FOUND})
     with pytest.raises(devicefarm.DeviceFarmAccessDenied) as ei:
         devicefarm.list_open_sessions(FOUND, profile=None)
     assert ei.value.code == code
@@ -331,7 +351,8 @@ def test_list_open_sessions_access_denied_is_classified(df, code):
 
 def test_list_open_sessions_other_errors_propagate(df):
     stubber, _ = df
-    stubber.add_client_error("list_remote_access_sessions", service_error_code="ThrottlingException", http_status_code=400)
+    stubber.add_client_error("list_remote_access_sessions", service_error_code="ThrottlingException", http_status_code=400,
+                             expected_params={"arn": FOUND})
     with pytest.raises(ClientError) as ei:
         devicefarm.list_open_sessions(FOUND, profile=None)
     assert not isinstance(ei.value, devicefarm.DeviceFarmAccessDenied)
@@ -340,8 +361,13 @@ def test_list_open_sessions_other_errors_propagate(df):
 def test_module_never_creates_or_stops_sessions():
     """会话的生命周期只归 worker：本模块只列举，不出现建立或停止会话的调用（ADR 0051 决策 6「不做回收器」）。"""
     tree = ast.parse(Path(devicefarm.__file__).read_text(encoding="utf-8"))
+    forbidden = {"create_remote_access_session", "stop_remote_access_session", "delete_remote_access_session",
+                 "CreateRemoteAccessSession", "StopRemoteAccessSession", "DeleteRemoteAccessSession"}
     called = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
-    assert not called & {"create_remote_access_session", "stop_remote_access_session", "delete_remote_access_session"}
+    # 字符串常量也查：getattr(client, "...") 与 _make_api_call("...") 这类间接调用不带属性调用的形态
+    literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+    assert not called & forbidden
+    assert not {lit for lit in literals if any(f in lit for f in forbidden)}
 
 
 # ---- 从后端区域的 SSM 读项目 ARN ----

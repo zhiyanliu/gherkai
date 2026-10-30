@@ -245,6 +245,8 @@ def test_destroy_description_lists_what_survives_and_how_to_remove_the_device_fa
     # 命令独占一行：照抄即可执行
     command = f"aws devicefarm delete-project --region {names.DEVICE_FARM_REGION} --arn <项目 ARN>"
     assert command in [line.strip() for line in desc.splitlines()]
+    # 拆除后 SSM 里的 ARN 已随 stack 删除，说明要先给出查 ARN 的命令
+    assert f"aws devicefarm list-projects --region {names.DEVICE_FARM_REGION}" in flat
 
 
 def test_cli_does_not_import_aws_cdk(monkeypatch):

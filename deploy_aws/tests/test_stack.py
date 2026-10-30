@@ -522,6 +522,7 @@ def test_midscene_device_farm_grants_follow_the_permission_table():
     def resources_of(action: str) -> list[set[str]]:
         found = _statements_with(stmts, action)
         assert found, f"缺 {action}"
+        assert all(st["Effect"] == "Allow" for st in found), f"{action} 的 statement 应为 Allow"
         return [set(_as_list(st["Resource"])) for st in found]
 
     # ListDevices：SAR 无资源类型，只出现在资源为 * 的 statement
@@ -560,6 +561,7 @@ def test_midscene_list_bucket_is_limited_to_the_app_prefix():
     stmts = _statements_with(_role_statements(_template(context=DF_CONTEXT), "TaskRoleMidscene"), "s3:ListBucket")
     assert len(stmts) == 1, stmts
     st = stmts[0]
+    assert st["Effect"] == "Allow"
     assert _as_list(st["Action"]) == ["s3:ListBucket"]
     assert _as_list(st["Resource"]) == ["arn:aws:s3:::gherkai-artifacts"]
     assert set(st["Condition"]) == {"StringLike"}
@@ -608,8 +610,16 @@ def test_missing_or_pending_device_farm_project_does_not_fail(context):
     assert stack.device_farm_project_arn is None
 
 
-def test_valid_device_farm_project_is_kept_verbatim():
-    assert _make_stack(context=DF_CONTEXT).device_farm_project_arn == DF_PROJECT_ARN
+@pytest.mark.parametrize("arn", [DF_PROJECT_ARN, DF_PROJECT_ARN.replace(ACCOUNT, "999999999999")], ids=["same-account", "other-account"])
+def test_valid_device_farm_project_is_kept_verbatim(arn):
+    """合法 ARN 原样保留、原样写 SSM；不比对账户段与部署账户（ADR 0051 决策 10 的被拒方案：ARN 由 provider 在同一账户里解析得到），
+    会话前缀的账户段取自项目 ARN 本身。"""
+    assert _make_stack(context={"device_farm_project": arn}).device_farm_project_arn == arn
+    t = _template(context={"device_farm_project": arn})
+    assert _ssm_params(t)["/gherkai-backend/device-farm-project"]["Value"] == arn
+    account = arn.split(":")[4]
+    for st in _statements_with(_role_statements(t, "TaskRoleMidscene"), "devicefarm:StopRemoteAccessSession"):
+        assert f"arn:aws:devicefarm:us-west-2:{account}:session:{DF_PROJECT_ID}/*" in _as_list(st["Resource"])
 
 
 

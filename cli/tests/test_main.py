@@ -1559,10 +1559,24 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
         "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
         "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
         "deterministic_steps": [{"pattern": "a"}, {"pattern": "b"}]})  # 计数取自述对象的清单键（ADR 0036「5.」）
+    # 被拒方案的护栏（ADR 0051 决策 10）：本机后端即使配置了项目 ARN，doctor 也不读 SSM、不列会话——不带云端参数的 doctor 不做 AWS 调用。
+    # 两个替身抛的异常会被设备两行的 except 吞成可选行，所以真正的断言是「设备两行不存在」。
+    from gherkai_runtime import devicefarm
+    monkeypatch.setenv("GHERKAI_DEVICE_FARM_PROJECT_ARN", _DF_PROJECT)
+
+    def _no_ssm_read(**kw):
+        raise AssertionError("本机 doctor 不该读 SSM")
+
+    def _no_list(*a, **kw):
+        raise AssertionError("本机 doctor 不该列举会话")
+
+    monkeypatch.setattr(m.compose, "read_device_farm_project", _no_ssm_read)
+    monkeypatch.setattr(devicefarm, "list_open_sessions", _no_list)
     assert m.main(["doctor", "--json", "--steps-dir", str(steps)]) == 0
     doc = json.loads(capsys.readouterr().out)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
     assert doc["ok"] is True
+    assert not any(c["name"].startswith("devices.") for c in doc["checks"])
     assert by[("engines", "novaact")]["ok"] and not by[("engines", "midscene")]["ok"] and by[("engines", "midscene")]["required"] is False
     assert by[("engines", "any")]["ok"] and by[("engines", "any")]["required"] is True
     assert by[("steps", "load.novaact")]["ok"] and "2 条" in by[("steps", "load.novaact")]["detail"]
@@ -1831,6 +1845,9 @@ def test_doctor_cloud_devices_lists_open_sessions_with_console_link_and_stop_com
     sessions = [OpenSession(arn=_DF_SESSION_QUEUED, name="gherkai-r1-s1", status="PENDING",
                             created=datetime(2026, 10, 29, 8, 0, tzinfo=timezone.utc)),
                 OpenSession(arn=_DF_SESSION_RUNNING, name=None, status="RUNNING", created=None)]
+    from dataclasses import replace
+    real_resolve = m.compose.resolve_cloud_target
+    monkeypatch.setattr(m.compose, "resolve_cloud_target", lambda **kw: replace(real_resolve(**kw), profile="team"))
     by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, sessions=sessions)
     project = by[("backend", "devices.project")]
     assert project["ok"] is True and project["required"] is False and _DF_PROJECT in project["detail"]
@@ -1839,11 +1856,13 @@ def test_doctor_cloud_devices_lists_open_sessions_with_console_link_and_stop_com
     detail = row["detail"]
     assert "2 个" in detail and "PENDING" in detail and "RUNNING" in detail and "gherkai-r1-s1" in detail
     for arn in (_DF_SESSION_QUEUED, _DF_SESSION_RUNNING):
-        assert f"aws devicefarm stop-remote-access-session --region us-west-2 --arn {arn}" in detail
+        # 停止命令带上 doctor 用的 profile：照抄执行时不落到另一套默认凭证
+        assert f"aws devicefarm stop-remote-access-session --region us-west-2 --arn {arn} --profile team" in detail
         url = console_url(arn)
         assert url is not None and url in detail
     assert "https://us-west-2.console.aws.amazon.com/devicefarm/" in detail
-    assert calls["list"] == [(_DF_PROJECT, None)]  # 列举用 SSM 读到的项目 ARN，凭证沿用 doctor 的 profile
+    assert calls["list"] == [(_DF_PROJECT, "team")]  # 列举用 SSM 读到的项目 ARN，凭证沿用 doctor 的 profile
+    assert [kw["profile"] for kw in calls["read"]] == ["team"]  # 读 SSM 记录同样沿用 doctor 的 profile
 
 
 def test_doctor_cloud_devices_without_open_sessions_passes(monkeypatch, capsys):
