@@ -33,7 +33,7 @@
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
-- `devicefarm.py` —— 部署与诊断用的 Device Farm 客户端（ADR 0051 决策 10「调用归属」、决策 6）：`read_project_arn`（从后端区域的 SSM 读项目 ARN，ssm client 由调用方注入）/ `resolve_or_create_project`（供 `deploy` 在 cdk 之前找回或建立项目 `{prefix}devices`）/ `list_open_sessions`（供 `doctor` 列出未到 COMPLETED 的会话）；无权限归为 `DeviceFarmAccessDenied`、同名项目多于一个归为 `AmbiguousProject`，其余 botocore 异常原样抛出。Python 侧唯一构造 devicefarm 客户端的地方，区域恒为 `names.DEVICE_FARM_REGION`；不创建、不停止会话（护栏 `tests/test_devicefarm_client_placement.py`）
+- `devicefarm.py` —— 部署与诊断用的 Device Farm 客户端（ADR 0051 决策 10「调用归属」「项目」、决策 6）：`project_name`（项目名 `{prefix}devices`）/ `read_project_arn`（从后端区域的 SSM 读项目 ARN，ssm client 由调用方注入）/ `resolve_or_create_project`（供 `deploy` 在 cdk 之前找回或建立项目；记录的项目已不存在时经 `warn` 回调立即发出警告）/ `verify_project`（供 `diff` 用 GetProject 只读核对 SSM 记录的项目：存在为 True，NotFound 为 False，不按名称列举、不建立）/ `list_open_sessions`（供 `doctor` 列出未到 COMPLETED 的会话）/ `is_access_denied`（provider 判定读 SSM 失败是否为无权限，与本模块共用一份错误码集合）；无权限归为 `DeviceFarmAccessDenied`（记录的项目已不存在而找回或新建又被拒时带 `stored_project_missing`）、同名项目多于一个归为 `AmbiguousProject`，其余 botocore 异常原样抛出。Python 侧唯一构造 devicefarm 客户端的地方，区域恒为 `names.DEVICE_FARM_REGION`（构造点、区域与延迟导入的护栏在 `tests/test_devicefarm_client_placement.py`）；不创建、不停止会话（护栏在 `tests/test_devicefarm.py`）
 - `app_upload.py` —— 安装包上传到 S3 应用前缀（ADR 0051 决策 9）：按内容哈希定键、managed 桶打标签与按保留承诺同键刷新、本机应用桶只做存在性复用；s3 client 由调用方注入
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
   避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的

@@ -33,7 +33,7 @@ gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶
 ## 3 使用方一条线
 
 ```bash
-gherkai doctor --backend cloud --prefix gherkai-                    # 凭证、后端版本、资源、variant 能否解析
+gherkai doctor --backend cloud --prefix gherkai-                    # 凭证、后端版本、资源、variant 能否解析、设备支持
 gherkai plan features/x.feature                                     # 本机用例预检；确定性标注只代表本机 steps
 RUN_ID=$(gherkai submit features/x.feature --backend cloud --prefix gherkai-)
 gherkai status "$RUN_ID" --backend cloud --prefix gherkai- --wait   # 退出码即判定

@@ -32,7 +32,7 @@
 | `engines.*` | 每个引擎的 worker 能否定位、至少一个可用、本机 worker 各自自报的模型与支持的测试目标 | 总是 |
 | `steps.*` | steps 目录是否存在、每个引擎加载 steps 是否成功、几条 | 总是（`--steps-dir` 可改目录） |
 | `aws.*` | region、凭证身份 | 给了 `--backend cloud` 或 `--prefix` |
-| `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限与云端为它设的停止宽限的对比（差距只标 `-`、不影响退出码） | 同上 |
+| `backend.*` | 后端版本与 CLI 比对、资源齐全、报告前缀一致、默认 variant 与逐引擎镜像能否解析、本机 worker 自报的收尾宽限与云端为它设的停止宽限的对比、设备支持是否已部署（`devices.project`）与项目里未结束的远程访问会话（`devices.sessions`，有残留时逐条给控制台链接与停止命令，停止前须确认没有 run 在使用它）（这三项只标 `-`、不影响退出码） | 同上 |
 | `provider.*` | Node、cdk、容器引擎（部署方工具链） | 装了部署 extra 时 |
 
 退出码：全部通过为 0；有**必修项**失败为 2（非必修项失败只标出不影响退出码）。`--json` 每项给 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 找阻塞项。
