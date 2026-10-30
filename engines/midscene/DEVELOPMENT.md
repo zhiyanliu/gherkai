@@ -137,7 +137,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 2. WebdriverIO（含 webdriver 与 `@wdio/` 下的包）与 `@aws-sdk/client-device-farm` 的值导入只出现在 `src/device/` 下。`import type` 不受限：它在编译期擦除、运行期不加载，注册面 `worker/deterministic.mts` 的 `import type { Browser } from "webdriverio"` 即属此类。
 3. `new DeviceFarmClient` 只出现在 Device Farm 会话块，它是执行期唯一调用 Device Farm SDK 的地方。
 4. `mobile:` 命令字面量只出现在 `src/device/adapters/` 下；命令守卫、能力探测与会话预热只调用适配器导出的原语与只读命令名集合。
-5. 系统版本与机型只从会话能力对象读取，读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的透传是三类显式豁免。豁免按声明逐处列出（`device/read-points.test.mts` 的 `VERSION_MODEL_ALLOWED`），除设备选择的输入外，豁免里读出的值只原样透传（按白名单判：填进字段、数组或模板插值，作初值、单独成句的赋值、返回值，用 `??` 与 `||` 给缺省值，以及存在性判断；括号、类型断言、非空断言与赋值表达式穿过后沿外层再判），参与运算、用作下标、调方法、与非空值比较、按它 switch 或用作 case 标签、交给函数处理等其余写法都报红。另有一条结构差集：会话能力对象只在 Appium 块（`device/appium.mts`）读取。
+5. 系统版本与机型只从会话能力对象读取，读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的透传是三类显式豁免。豁免按声明逐处列出（`device/read-points.test.mts` 的 `VERSION_MODEL_ALLOWED`），除设备选择的输入外，豁免里读出的值只原样透传（按白名单判：填进字段、数组或模板插值，作初值、单独成句的赋值（外面带括号、类型断言或非空断言也算）、返回值，用 `??` 与 `||` 给缺省值，以及存在性判断（只有与 null / undefined 作相等或不等比较算，大小比较、`in`、`instanceof` 照样报红）；括号、类型断言、非空断言与赋值表达式穿过后沿外层再判），参与运算、用作下标、调方法、与非空值比较、按它 switch 或用作 case 标签、交给函数处理等其余写法都报红。另有一条结构差集：会话能力对象只在 Appium 块（`device/appium.mts`）读取。
 6. run-scope 的主流程不写按设备的条件分支：差异落在接缝实现里，或由实现返回的数据表达。执行异常的 step 级归类由命令守卫与设备实现挂到异常对象上（`worker/surface.mts` 的 `attachClassification`），runStep 先认这个标记，设备路径因此不会归成 `network_error`；桌面路径只有派发出错的防御分支（句柄不适用于桌面浏览器）带标记，其余异常不带标记、沿用瞬时网络判定。
 
 第 1 条与第 2 条的运行期效果由 `worker/no-device-deps.test.mts` 守：它在真实子进程里执行 `--capabilities` 与一条桌面 job，记录被解析的模块，断言 WebdriverIO（含 webdriver 与 `@wdio/` 下的包）、Device Farm SDK 与 `limits.mts`、`session-name.mts` 之外的设备模块都没有被加载。第 2 到 5 条由 `device/read-points.test.mts` 用语法树扫 `src/` 的非测试源文件做差集（每条带正向对照，检测失效时不会空过）。两个驱动适配器每个原语发出的命令由 `device/adapters/adapters.contract.test.mts` 对照 `adapters/fixtures/<适配器>.commands.json` 的快照核对，改命令须显式改快照（ADR 0052 决策 8）；同一份快照也是真机重新探测工具的对照基准，见下节。
@@ -163,7 +163,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 
 | 场景 | 做法 | 判据与回写 |
 |---|---|---|
-| 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run；另在正常收尾的 `deleteSession` 发出之前与在途时各停止一次 | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5；正常收尾中途停止的两次，尚未发出的 `deleteSession` 不再发出、`device-session.json` 由退出前的队列排空带上 |
+| 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run；另在正常收尾的 `deleteSession` 发出之前与在途时各停止一次 | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5；正常收尾中途停止的两次，尚未发出的 `deleteSession` 不再发出、`device-session.json` 交给退出前的队列排空、在预算内尽力上传（预算内没传完时，本机后端留在本地产物目录） |
 | 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
 | 命令结果未知 | 让一条点击或输入命令在客户端超时 | 命令不被重复执行；下一条 scenario 开始前的截图存活探测按会话状态分流（ADR 0052 决策 6、ADR 0051 决策 12） |
 | 进程级兜底 | 让 newSession 的客户端超时以未处理的 Promise 拒绝形式出现 | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |
