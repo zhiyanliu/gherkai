@@ -397,7 +397,8 @@ export interface EvidenceHook {
   runDir: string;
   scopeId: string;
   uploader: EvidenceUploader;
-  /** worker 诊断输出（stderr）；缺省直接写 stderr。 */
+  /** worker 诊断输出（stderr）；缺省写 stderr，写出前经 redactSecrets 脱敏（ADR 0035 决策 5）：缺省出口也脱敏，调用方不传
+   *  logFn 时同样不会泄露凭据。 */
   logFn?: (msg: string) => void;
 }
 
@@ -497,7 +498,8 @@ export async function stepEvidenceRef(
     });
     return { ref: await writeEvidence(doc, hook.runDir, hook.uploader), screenshots };
   } catch (e) {
-    const logFn = hook.logFn ?? ((m: string) => process.stderr.write(m + "\n"));
+    // 失败日志带着异常文本，上传出错时可能含预签名地址或设备端点令牌：缺省出口与 run-scope 的 log() 一样写出前脱敏
+    const logFn = hook.logFn ?? ((m: string) => process.stderr.write(redactSecrets(m) + "\n"));
     // 产品面一行：说清发生了什么 + 不影响什么 + 人能怎么办（原生报告还在）。设计判据留在本文件注释里。
     logFn(`worker: 本步证据没能产出（已忽略，不影响本步判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
     return null;

@@ -4,9 +4,11 @@
 // 获取期的次序（存在性检查先于 Create；404 / 403 时 Create 零调用）、获取预算到期归 acquire_timeout、进入终结后获取停下、换台的
 // 条件、获取期与预热抛出的异常先查会话状态再归类、预热返回之后的预算核对、各项义务的失败归类（先查会话状态再分会话丢失与执行
 // 出错）、执行窗口出口的归类（未标记的非断言异常挂 engine_error）、交给探测与预热的会话状态查询、交给界面实现的输入上下文、句柄
-// 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式与正常释放进行中升级为中断、device-session.json 的内容、按 scope
-// 分目录的产物落点与 reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机
-// 验收负责。文件末尾另验缺省装配（device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
+// 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式与正常释放进行中升级为中断（含诊断文件上传在途时升级）、
+// device-session.json 的内容、按 scope 分目录的产物落点与 reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、
+// WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机验收负责；唯一的例外是「等到 RUNNING 期间会话已结束」的释放用例，它把
+// 会话块与终结块换成真实实现（Device Farm 仍是假的 API），核对接缝透传执行前失败之后释放阶段照常处理这个会话。文件末尾另验缺省装配
+// （device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
 import { afterEach, test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs";
@@ -24,6 +26,8 @@ import {
 } from "./surface.mjs";
 import { defaultDeviceParts } from "./parts.mjs";
 import { commandGuardFactory } from "./guard.mjs";
+import { createDeviceFarmSessions, type DeviceFarmApi } from "./session.mjs";
+import { createDeviceFinalizer } from "./finalize.mjs";
 import { RUN_ID_ENV } from "./session-name.mjs";
 import {
   DEVICE_SESSION_FILE, DEVICE_SESSION_REPORT_KIND, sessionClosedEvent, sessionEventSink, sessionOpenedEvent,
@@ -65,6 +69,10 @@ interface HarnessOptions {
   status?: string | null;
   artifactRoot?: string | undefined;
   waitRunning?: (signal: AbortSignal) => Promise<void>;
+  /** 会话块的 waitRunning 给出的执行前失败（缺省为到达 RUNNING）。 */
+  waitRunningFailure?: ScopeTermination;
+  /** 换成真实实现的会话块与终结块（缺省为记录调用序列的假部件）。 */
+  sessionParts?: (e: DevicePartsEnv) => Pick<DeviceParts, "sessions" | "finalizer">;
   /** newSession 发出时调用（测试在这里推进时钟，模拟建连期间预算用尽）。 */
   beforeConnect?: () => void;
   automationName?: string;
@@ -198,7 +206,7 @@ function harness(opts: HarnessOptions = {}) {
   const agentArgs: { inputContext: "web" | "native" | null; scale: number }[] = [];
   const parts = (e: DevicePartsEnv): DeviceParts => {
     env = e;
-    return {
+    const fakeParts: DeviceParts = {
       sessions: {
         async resolve(_budget, replacing) {
           calls.push(`sessions.resolve:${replacing?.arn ?? "-"}`);
@@ -217,6 +225,7 @@ function harness(opts: HarnessOptions = {}) {
         async waitRunning(session, budget) {
           calls.push(`sessions.waitRunning:${session.arn}`);
           if (opts.waitRunning) await opts.waitRunning(budget.signal);
+          if (opts.waitRunningFailure) return { ok: false, termination: opts.waitRunningFailure };
           return { ok: true, value: { endpoint: ENDPOINT, unit: "arn:aws:devicefarm:us-west-2::deviceinstance:U1" } };
         },
         async status(arn) { calls.push(`sessions.status:${arn}`); return status; },
@@ -274,6 +283,7 @@ function harness(opts: HarnessOptions = {}) {
         async presign(loc, expiresS) { calls.push(`appStore.presign:${expiresS}`); return `https://s3.example/${loc.key}?X-Amz-Signature=abc`; },
       },
     };
+    return opts.sessionParts ? { ...fakeParts, ...opts.sessionParts(e) } : fakeParts;
   };
   const processEvents: ProcessEvents = {
     on(event, listener) { processListeners.set(event, listener); },
@@ -517,6 +527,66 @@ test("获取期抛出的异常已带会话丢失归类：同样归 session_lost�
   });
   assert.deepEqual(await h.surface.acquire(),
     { ready: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
+});
+
+const LOST_BEFORE_START: ScopeTermination = { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE };
+
+test("等到 RUNNING 期间会话已结束（会话块给出准备阶段的 session_lost）：原样作为 scope 级终止，不再查状态、不建连，正常释放从终结核对开始", async () => {
+  for (const target of [{ device: "android", uiKind: "web" }, { device: "ios", uiKind: "app" }] as const) {
+    const what = `${target.device}/${target.uiKind}`;
+    const h = harness({ target, waitRunningFailure: LOST_BEFORE_START });
+    assert.deepEqual(await h.surface.acquire(), { ready: false, termination: LOST_BEFORE_START }, what);
+    assert.equal(h.calls.at(-1), `sessions.waitRunning:${ARN1}`, `${what}: ${h.calls.join(", ")}`);
+    for (const prefix of ["sessions.status", "appStore.presign", "appium.connect", "probe.run"]) {
+      assert.ok(!h.calls.some((c) => c.startsWith(prefix)), `${what} ${prefix}: ${h.calls.join(", ")}`);
+    }
+    assert.equal(h.surface.sessionId(), ARN1, what);  // 已建的会话照常由释放收尾
+    await h.surface.release("normal");
+    assert.deepEqual(h.finalizations.map((f) => f.mode), ["normal"], what);
+    assert.equal(h.finalizations[0].hooks.deleteAppiumSession, null, what);  // Appium 会话没有建成，不调 deleteSession
+    const doc = JSON.parse(fs.readFileSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE), "utf-8"));
+    assert.deepEqual(doc.acquire_failure, { error_type: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE }, what);
+    assert.equal(doc.timings.session_running_at, null, what);
+  }
+});
+
+test("等到 RUNNING 期间会话已结束：会话仍在待清理集里，正常释放对它先 Get，读到 STOPPING / COMPLETED 即确认、不发 Stop", async () => {
+  // waiting 为 stubbed 时只把等到 RUNNING 换成给出准备阶段 session_lost 的结论（只验接缝与终结块），为 real 时整条会话块都是真实实现。
+  for (const [stopped, waiting] of [["STOPPING", "stubbed"], ["COMPLETED", "stubbed"], ["STOPPING", "real"], ["COMPLETED", "real"]] as const) {
+    const what = `${stopped}/${waiting}`;
+    const farm: string[] = [];
+    const api: DeviceFarmApi = {
+      async listDevices() {
+        farm.push("listDevices");
+        return { devices: [{
+          arn: "arn:aws:devicefarm:us-west-2::device:PIXEL", os: "14.0", platform: "ANDROID", formFactor: "PHONE",
+          remoteAccessEnabled: true, fleetType: "PUBLIC", availability: "HIGHLY_AVAILABLE", model: "Pixel 8",
+        }] };
+      },
+      async createRemoteAccessSession(input) { farm.push("create"); return { arn: ARN1, name: input.name, status: "PENDING" }; },
+      async getRemoteAccessSession(arn) { farm.push(`get:${arn}`); return { arn, status: stopped }; },
+      async stopRemoteAccessSession(arn) { farm.push(`stop:${arn}`); return { arn, status: "STOPPING" }; },
+      async listRemoteAccessSessions() { farm.push("listSessions"); return { remoteAccessSessions: [] }; },
+    };
+    const h = harness({
+      sessionParts: (e) => {
+        const sessions = createDeviceFarmSessions(e, { api, runId: "run-1" });
+        if (waiting === "stubbed") {
+          sessions.waitRunning = async () => { farm.push("waitRunning"); return { ok: false, termination: LOST_BEFORE_START }; };
+        }
+        return { sessions, finalizer: createDeviceFinalizer(sessions) };
+      },
+    });
+    assert.deepEqual(await h.surface.acquire(), { ready: false, termination: LOST_BEFORE_START }, what);
+    // 接缝在等待给出结论之后不再查状态：获取期的 Device Farm 调用到等待为止
+    assert.deepEqual(farm, ["listDevices", "create", waiting === "stubbed" ? "waitRunning" : `get:${ARN1}`], what);
+    assert.ok(!h.calls.some((c) => c.startsWith("appium.connect")), `${what}: ${h.calls.join(", ")}`);
+    const out = await within(h.surface.release("normal"), 2000, `${what} 的正常释放`);
+    assert.deepEqual(farm.slice(3), [`get:${ARN1}`], what);
+    assert.equal(out.releaseFailed, false, what);
+    const closed = h.emitted.filter((e) => e.type === "session_closed");
+    assert.deepEqual(closed.map((e) => [e.sessionId, e.release]), [[ARN1, "confirmed"]], what);
+  }
 });
 
 test("获取期的启动失败而会话仍在运行或查不到状态：保留 engine_error，消息带失败原因", async () => {
@@ -1165,6 +1235,52 @@ test("deleteSession 已在途时收到停止信号：不打断它（由终结块
   assert.deepEqual(out.reportRefs, []);
   assert.deepEqual(h.reportRefCalls, []);
   assert.equal(h.calls.filter((c) => c === "appium.deleteSession").length, 1);
+});
+
+test("正常诊断上传在途时收到停止信号：不打断上传；上传失败即把 device-session.json 交后台队列恰一次、不返回链接，上传成功则不入队", async () => {
+  for (const upload of ["fails", "succeeds"] as const) {
+    let entered!: () => void;
+    const inUpload = new Promise<void>((resolve) => { entered = resolve; });
+    let finish!: (outcome: { ref: string } | { error: Error }) => void;
+    const h = harness({
+      toReportRef: () => {
+        entered();
+        return new Promise<string>((resolve, reject) => {
+          finish = (o) => ("ref" in o ? resolve(o.ref) : reject(o.error));
+        });
+      },
+    });
+    await ready(h);
+    const file = path.join(h.deviceDir!, DEVICE_SESSION_FILE);
+    const normal = h.surface.release("normal");
+    await inUpload;
+    assert.strictEqual(h.surface.release("interrupt"), normal, upload);  // 同一个终结任务
+    await settle();
+    assert.deepEqual(h.enqueueCalls, [], `${upload}：上传落定之前不入队`);
+    const ref = `s3://bucket/${DEVICE_SESSION_FILE}`;
+    finish(upload === "fails" ? { error: new Error("socket hang up") } : { ref });
+    const out = await within(normal, 2000, `诊断上传在途时升级的释放（${upload}）`);
+    assert.equal(h.reportRefCalls.length, 1, upload);
+    if (upload === "fails") {
+      assert.deepEqual(out.reportRefs, [], upload);
+      assert.deepEqual(h.enqueueCalls, [[file]], upload);
+      assert.equal(h.logs.filter((l) => l.includes("设备诊断文件")).length, 1, h.logs.join("\n"));
+    } else {
+      assert.deepEqual(h.enqueueCalls, [], upload);
+      assert.deepEqual(out.reportRefs, [{ kind: DEVICE_SESSION_REPORT_KIND, ref }], upload);
+    }
+    await h.surface.release("interrupt");  // 重复调用返回同一结果，不再入队
+    assert.equal(h.enqueueCalls.length, upload === "fails" ? 1 : 0, upload);
+  }
+});
+
+test("正常诊断上传失败而没有收到停止信号：只记一行日志、不入队，不返回链接", async () => {
+  const h = harness({ toReportRef: async () => { throw new Error("socket hang up"); } });
+  await ready(h);
+  const out = await h.surface.release("normal");
+  assert.deepEqual(out.reportRefs, []);
+  assert.deepEqual(h.enqueueCalls, []);
+  assert.equal(h.logs.filter((l) => l.includes("设备诊断文件")).length, 1, h.logs.join("\n"));
 });
 
 test("执行前失败在 Appium 会话建成之前：正常释放不给 deleteSession 钩子；释放未确认如实返回", async () => {

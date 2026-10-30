@@ -1,10 +1,11 @@
 // Device Farm 会话块的单测（ADR 0051 决策 2、3、4、7、10；ADR 0052 决策 3）。运行：npx tsx --test src/device/session.test.mts。
 //
 // Device Farm 换成假的 API（不连 AWS），时钟与计时器换成虚拟时钟：设备解析的版本族、静态过滤、排序与完整分页，零候选重列与
-// 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除，获取期按名找回的会话随即按 Stop 规则停止，等到
-// RUNNING，查状态，换台时按同一 Stop 规则处理被替换的会话。另有一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试、每次调用都带中止信号，以及响应体
-// 没读完的失败归结果未知。会话年龄的后备由接缝按 createRequestedAt 计算（device/surface.mts），这里只核对这个起点是发出 Create
-// 的时刻。
+// 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除（扫到分页结束、同名的每个 ARN 都登记），获取期
+// 按名找回的会话在 session_opened 写出后随即按 Stop 规则停止（逐会话，不等同页其余会话的事件写完；与剩余分页并行，下一次
+// Create 等它处理完），等到 RUNNING（就绪之前已结束即按会话丢失终止），查状态，换台时按同一 Stop 规则处理被替换的会话。另有
+// 一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试、每次调用都带中止信号，以及响应体没读完的失败归结果
+// 未知。会话年龄的后备由接缝按 createRequestedAt 计算（device/surface.mts），这里只核对这个起点是发出 Create 的时刻。
 import { test } from "node:test";
 import assert from "node:assert";
 import { PassThrough, Readable } from "node:stream";
@@ -16,7 +17,7 @@ import {
 import { encode, RUN_ID_ENV } from "./session-name.mjs";
 import { sessionEventSink } from "./device-session.mjs";
 import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_MS, busyBackoffMs } from "./limits.mjs";
-import type { AcquireBudget, DevicePartsEnv } from "./surface.mjs";
+import { SESSION_LOST_BEFORE_START_MESSAGE, type AcquireBudget, type DevicePartsEnv } from "./surface.mjs";
 import type { Job } from "../lib/job-source.mjs";
 
 // ---- 虚拟时钟 ----
@@ -170,7 +171,11 @@ function makeJob(request: { osVersion?: string; deviceArn?: string }, device: "a
   };
 }
 
-function setup(request: { osVersion?: string; deviceArn?: string } = { osVersion: "18" }, device: "android" | "ios" = "ios") {
+/** emitDelayMs 给出每条会话事件写出所需的虚拟时间（模拟写入变慢的事件出口），缺省为即时；at 记的是写完的时刻。 */
+function setup(
+  request: { osVersion?: string; deviceArn?: string } = { osVersion: "18" }, device: "android" | "ios" = "ios",
+  opts: { emitDelayMs?: (e: Record<string, unknown>) => number } = {},
+) {
   const clock = new FakeClock();
   const farm = new FakeFarm(clock);
   const emitted: Record<string, unknown>[] = [];
@@ -178,7 +183,11 @@ function setup(request: { osVersion?: string; deviceArn?: string } = { osVersion
   const env: DevicePartsEnv = {
     job: makeJob(request, device),
     log: (line) => logs.push(line),
-    events: sessionEventSink(SCOPE_ID, async (e) => { emitted.push({ ...e, at: clock.t }); }),
+    events: sessionEventSink(SCOPE_ID, async (e) => {
+      const delay = opts.emitDelayMs?.(e) ?? 0;
+      if (delay > 0) await clock.timers.sleep(delay);
+      emitted.push({ ...e, at: clock.t });
+    }),
     processEnv: {},
     now: clock.now,
   };
@@ -493,7 +502,7 @@ test("Create：按名核对以进入时的待核名字为准扫页——首页�
   assert.deepEqual(h.emitted.map((e) => [e.origin, e.sessionId]), [["discovered", "arn:orphan1"], ["created", "arn:session:3"]]);
 });
 
-test("Create：按名核对命中即是正面证据——全部待核名字都已命中就不再翻页（一次尝试至多建立一个会话）", async () => {
+test("Create：按名核对扫到分页结束——首页已命中全部待核名字，后页同名的 ARN 也登记、各发一条 session_opened(discovered)，获取期都按 Stop 规则停止", async () => {
   const h = setup();
   const name1 = encode(RUN_ID, SCOPE_ID, 1);
   let n = 0;
@@ -502,11 +511,22 @@ test("Create：按名核对命中即是正面证据——全部待核名字都�
     if (n === 1) throw connectionReset();
     return { arn: "arn:session:2", name: input.name, status: "PENDING" };
   };
-  h.farm.sessionPages = [[{ arn: "arn:orphan", name: name1, status: "RUNNING" }], [{ arn: "arn:old", name: "gherkai:other", status: "COMPLETED" }]];
-  await h.clock.run(h.block.create(CHOICE, h.budget));
-  assert.deepEqual(h.farm.ops("listSessions").map((c) => (c.arg as { nextToken?: string }).nextToken), [undefined]);
+  h.farm.sessionPages = [
+    [{ arn: "arn:dupA", name: name1, status: "RUNNING" }],
+    [{ arn: "arn:old", name: "gherkai:other", status: "COMPLETED" }],
+    [{ arn: "arn:dupB", name: name1, status: "PENDING" }],
+  ];
+  const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.equal(got.ok, true);
+  assert.deepEqual(h.farm.ops("listSessions").map((c) => (c.arg as { nextToken?: string }).nextToken), [undefined, "page-1", "page-2"]);
   assert.deepEqual([...h.block.registry.pending.keys()], []);
-  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:orphan", "arn:session:2"]);
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:dupA", "arn:dupB", "arn:session:2"]);
+  assert.deepEqual(h.emitted.map((e) => [e.origin, e.sessionId]), [
+    ["discovered", "arn:dupA"], ["discovered", "arn:dupB"], ["created", "arn:session:2"],
+  ]);
+  assert.deepEqual(h.farm.ops("stop").map((c) => c.arg).sort(), ["arn:dupA", "arn:dupB"]);
+  const secondCreateAt = h.farm.ops("create")[1].at;
+  for (const c of h.farm.ops("stop")) assert.ok(c.at <= secondCreateAt, `Stop ${String(c.arg)} 晚于下一次 Create`);
 });
 
 test("Create：按名核对逐 ARN 登记——同一页里同名的两个会话都进待清理集、各发一条 session_opened(discovered)", async () => {
@@ -531,8 +551,8 @@ test("Create：按名核对逐 ARN 登记——同一页里同名的两个会话
 // ---- 获取期按名找回的孤儿会话：找回即按 Stop 规则停止，不等到终结 ----
 
 /** 第一次 Create 连接中断、之后的 Create 成功；重试前的按名核对在首页找回第一次尝试建立的会话 arn:orphan。 */
-function orphanSetup() {
-  const h = setup();
+function orphanSetup(opts: Parameters<typeof setup>[2] = {}) {
+  const h = setup(undefined, undefined, opts);
   const name1 = encode(RUN_ID, SCOPE_ID, 1);
   let n = 0;
   h.farm.createImpl = async (input) => {
@@ -576,6 +596,74 @@ test("获取期找回的孤儿会话：session_opened(discovered) 写出之后�
   // Get 与 Stop 接获取预算的信号：预算中止即随之中止
   h.budget.abort();
   for (const op of ["get", "stop"]) assert.equal(h.farm.ops(op)[0].signal.aborted, true, op);
+});
+
+test("获取期找回的孤儿会话：session_opened 写出后即开始按 Stop 规则处理，与剩余分页并行——下一页延迟返回时，对首页会话的 Get / Stop 在它返回之前已发出，下一次 Create 等分页扫完才发出", async () => {
+  const h = setup();
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n === 1) throw connectionReset();
+    return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  const nextPageDelayMs = 9_000;                                        // 在单次列举的 10 秒上界之内
+  h.farm.listSessionsImpl = ({ nextToken }, signal) => nextToken === undefined
+    ? Promise.resolve({ remoteAccessSessions: [{ arn: "arn:orphan", name: name1, status: "RUNNING" }], nextToken: "page-1" })
+    : h.clock.timers.sleep(nextPageDelayMs, signal).then(() => ({ remoteAccessSessions: [] }));
+  const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+  assert.equal(got.ok && got.value.arn, "arn:session:2");
+  const [firstPage, nextPage] = h.farm.ops("listSessions");
+  const nextPageReturnedAt = nextPage.at + nextPageDelayMs;
+  const [get] = h.farm.ops("get");
+  const [stop] = h.farm.ops("stop");
+  assert.deepEqual([get.arg, stop.arg], ["arn:orphan", "arn:orphan"]);
+  assert.equal(get.at, firstPage.at);                                   // 首页的 session_opened 写出即发 Get，不等下一页
+  assert.ok(stop.at < nextPageReturnedAt, `Stop 在 ${stop.at - firstPage.at} 毫秒时才发出`);
+  assert.notEqual(h.block.registry.sessions.get("arn:orphan")!.confirmedAt, null);
+  assert.equal(h.farm.ops("create")[1].at, nextPageReturnedAt);         // 分页扫完才发下一次 Create
+});
+
+test("获取期找回的孤儿会话：事件出口写入变慢时，Get 在这个会话的 session_opened 写完之后才发出", async () => {
+  const h = orphanSetup({ emitDelayMs: (e) => (e.origin === "discovered" ? 1_500 : 0) });
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  const opened = h.emitted.find((e) => e.origin === "discovered")!;
+  const [get] = h.farm.ops("get");
+  assert.equal(get.arg, "arn:orphan");
+  assert.equal(h.farm.ops("listSessions")[0].at + 1_500, opened.at);
+  assert.equal(get.at, opened.at);
+});
+
+test("获取期找回的孤儿会话：同一页找回两个会话时各自在自己的 session_opened 写出后即开始处理，不等同页其余会话的事件写完", async () => {
+  const h = setup(undefined, undefined, { emitDelayMs: (e) => (e.sessionId === "arn:slow" ? 3_000 : 0) });
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  let n = 0;
+  h.farm.createImpl = async (input) => {
+    n += 1;
+    if (n === 1) throw connectionReset();
+    return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+  };
+  h.farm.sessionPages = [[{ arn: "arn:fast", name: name1, status: "RUNNING" }, { arn: "arn:slow", name: name1, status: "RUNNING" }]];
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  const listedAt = h.farm.ops("listSessions")[0].at;
+  const slowOpenedAt = h.emitted.find((e) => e.sessionId === "arn:slow")!.at as number;
+  assert.equal(slowOpenedAt, listedAt + 3_000);
+  assert.equal(h.farm.ops("get").find((c) => c.arg === "arn:fast")!.at, listedAt);
+  assert.equal(h.farm.ops("get").find((c) => c.arg === "arn:slow")!.at, slowOpenedAt);
+});
+
+test("获取期找回的孤儿会话：分页扫完时停止还没处理完，下一次 Create 等它处理完才发出", async () => {
+  const h = orphanSetup();
+  const getDelayMs = 5_000;
+  h.farm.getImpl = (arn, signal) => arn === "arn:orphan"
+    ? h.clock.timers.sleep(getDelayMs, signal).then(() => ({ arn, status: "RUNNING" }))
+    : Promise.resolve({ arn, status: "RUNNING" });
+  await h.clock.run(h.block.create(CHOICE, h.budget));
+  const [get] = h.farm.ops("get");
+  const [stop] = h.farm.ops("stop");
+  assert.equal(stop.at, get.at + getDelayMs);
+  assert.equal(h.farm.ops("create")[1].at, stop.at);
+  assert.ok(h.farm.ops("listSessions")[0].at <= get.at);
 });
 
 test("获取期找回的孤儿会话：Get 已是 STOPPING / COMPLETED 即确认，不发 Stop", async () => {
@@ -735,13 +823,20 @@ test("waitRunning：排队与准备中继续等，RUNNING 且端点可用才返�
   assert.deepEqual(gets.slice(1).map((c, i) => c.at - gets[i].at), Array(4).fill(RUNNING_POLL_INTERVAL_MS));
 });
 
-test("waitRunning：会话在就绪之前就停止或结束，报错交接缝归类", async () => {
-  const h = setup();
-  const created = await h.clock.run(h.block.create(CHOICE, h.budget));
-  assert.ok(created.ok);
-  if (!created.ok) return;
-  h.farm.getImpl = async () => ({ status: "COMPLETED", result: "ERRORED", message: "device setup failed" });
-  await assert.rejects(h.clock.run(h.block.waitRunning(created.value, h.budget)), /COMPLETED/);
+test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失终止——消息用准备阶段那句，状态与 Device Farm 的说明只进 worker 日志，不再查询、不发 Stop", async () => {
+  for (const status of ["STOPPING", "COMPLETED"]) {
+    const h = setup();
+    const created = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.ok(created.ok);
+    if (!created.ok) return;
+    h.farm.getImpl = async () => ({ status, result: "ERRORED", message: "device setup failed" });
+    const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
+    assert.deepEqual(got, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } }, status);
+    assert.equal(h.farm.ops("get").length, 1, status);
+    assert.equal(h.farm.ops("stop").length, 0, status);                 // 释放归终结
+    const line = h.logs.find((l) => l.includes(created.value.arn) && l.includes(status));
+    assert.ok(line && line.includes("device setup failed") && line.includes("ERRORED"), h.logs.join("\n"));
+  }
 });
 
 test("waitRunning：预算中止即停（停止信号穿透查询之间的等待）", async () => {

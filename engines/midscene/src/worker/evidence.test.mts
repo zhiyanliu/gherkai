@@ -3,7 +3,8 @@
 //    ——格式漂移在升 @midscene/web 后运行测试时变红（决策六第 2 道防线）；
 // ② 截图：路径由 id + 扩展名拼、`after-calling` 优先、按 id 去重、上界 K/M；
 // ③ scenario 键派生（确定性 + 不二次撞名）；
-// ④ best-effort（决策二）：落盘/上传抛 → step_done 照发、无 evidence ref、status 不变；
+// ④ best-effort（决策二）：落盘/上传抛 → step_done 照发、无 evidence ref、status 不变；不传 logFn 时失败日志的缺省出口
+//    写出前脱敏（ADR 0035 决策 5）；
 // ⑤ 截图字节的时机（决策一「上传时机分两类」）：引用到的截图路径随 ref 一起回传，runStep 在 step_done
 //    **emit 之后**才交给上传器的后台队列（顺序反了就等于把字节压回判定前面）；
 // ⑥ 设备目标的例外（ADR 0051 决策 8；ADR 0042 决策一）：界面快照的键落到 evidence 顶层，确定性与导航 step 在
@@ -435,6 +436,50 @@ test("stepEvidenceRef：上传失败 → 同样吞成 null（toReportRef 的失�
   assert.equal(produced, null);
   assert.equal(logs.length, 1);
   assert.ok(fs.existsSync(evidenceFile(runDir, "s:1", 2)), "json 已落盘（本地仍留证据，scope 末整目录 flush 兜）");
+});
+
+// 缺省日志出口（不传 logFn）写出前脱敏（ADR 0035 决策 5）：失败日志带着异常文本，上传出错时它可能含预签名地址或设备端点令牌。
+// 样本取跨语言用例表里输入与期望不同的条目，写出的文字要含期望的脱敏结果、不含原始输入。
+const REDACTION_CASES = (JSON.parse(
+  fs.readFileSync(new URL("../../../fixtures/redaction-cases.json", import.meta.url), "utf-8"),
+) as { cases: Array<[string, string]> }).cases.filter(([input, expected]) => input !== expected);
+
+async function captureStderr(fn: () => Promise<unknown>): Promise<string> {
+  const chunks: string[] = [];
+  const original = process.stderr.write;
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    chunks.push(typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf-8"));
+    return true;
+  }) as typeof process.stderr.write;
+  try {
+    await fn();
+  } finally {
+    process.stderr.write = original;
+  }
+  return chunks.join("");
+}
+
+test("stepEvidenceRef：不传 logFn 时缺省写 stderr，失败日志里的凭据在写出前脱敏", async () => {
+  assert.ok(REDACTION_CASES.length > 5, "用例表里带凭据的样本不该被筛空");
+  for (const [secret, masked] of REDACTION_CASES) {
+    const runDir = tmpRun();
+    const uploader: EvidenceUploader = {
+      toReportRef: async () => { throw new Error(`上传 ${secret} 失败`); },
+      refFor: fileRef,
+      enqueue: () => {},
+    };
+    let produced: unknown = undefined;
+    const out = await captureStderr(async () => {
+      produced = await stepEvidenceRef({ runDir, scopeId: "sc", uploader }, {
+        scenarioId: "s:1", step: STEP, status: "failed", message: null, agent: fixtureAgent,
+        execFrom: 1, snapshot: DESKTOP_SNAP, prompt: STEP.text, votes: [false], error: null,
+      });
+    });
+    assert.equal(produced, null);
+    assert.equal(out.split("\n").filter((l) => l !== "").length, 1, "失败只一行日志");
+    assert.ok(out.includes("证据") && out.includes(masked), `应写出脱敏后的 ${JSON.stringify(masked)}，实际 ${JSON.stringify(out)}`);
+    assert.ok(!out.includes(secret), `不应写出原始输入 ${JSON.stringify(secret)}，实际 ${JSON.stringify(out)}`);
+  }
 });
 
 // ---- ④ runStep 里的 best-effort 不变量（ADR 0042 决策二）----

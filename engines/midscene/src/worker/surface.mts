@@ -320,7 +320,8 @@ export interface TargetSurface {
    *    run-scope 不再为在途的 step 发 step_done，也不发 scope_done（ADR 0051 决策 5 阶段 1），所以这一模式返回的 reportRefs 不被使用；
    *    设备的 device-session.json 只写盘并交给截图后台队列，由阶段 4 的排空带上。
    *  - 升级（设备）：正常释放进行中到达的 interrupt 不重新进入终结，而是让同一次终结升级——尚未开始的 deleteSession 不再发出、
-   *    不做 normal 模式的诊断上传，device-session.json 按 interrupt 模式交给后台队列；已在途的 deleteSession 不打断，由它自己的 5 秒上限封顶。
+   *    尚未开始的 normal 模式诊断上传不再进行，device-session.json 按 interrupt 模式交给后台队列；已在途的 deleteSession 不打断，由它自己的
+   *    5 秒上限封顶；已在途的诊断上传同样不打断（上传器的单次超时封顶），落定之后上传失败才把 device-session.json 交给后台队列。
    *  重入安全：信号处理与主流程的出口可能先后或同时调用。同一会话不重复释放、session_closed 不重复发；设备的终结只进入一次，
    *  后到的调用等在途那一次结束并返回同一结果；桌面保留现有清理守卫的重入语义（仍有未确认的会话时以最终语义再清一次）。 */
   release(mode: ReleaseMode): Promise<ReleaseOutcome>;

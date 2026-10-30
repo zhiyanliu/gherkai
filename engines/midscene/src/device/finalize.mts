@@ -13,8 +13,10 @@
 //   1. 等在途的 Create（10 秒）：返回即已登记 ARN（session_opened(created) 的写出可能仍在进行，本阶段不等它；已登记的不再记为
 //      待核）；到线仍未返回的记为待核，终结核对结束之后才返回的只记日志、不再登记（它已按 attempted 上报）。正常模式下不会有
 //      在途的 Create（获取已经返回），这一段为空。
-//   2. 终结核对（5 秒）：按名列举（含分页）处理全部待核尝试，命中的登记进待清理集并发 session_opened(discovered)；阶段结束仍待核的
-//      各发 session_opened(attempted) 与 session_closed(unconfirmed)，与阶段 3 并行写出。列举为空不构成排除。
+//   2. 终结核对（5 秒）：按名列举处理全部待核尝试，扫到分页结束（全部名字都已命中也继续翻页，列举出错或到截止线即停），同名的
+//      每个 ARN 都登记进待清理集并发 session_opened(discovered)；阶段结束仍待核的各发 session_opened(attempted) 与
+//      session_closed(unconfirmed)，与阶段 3 并行写出。列举为空不构成排除。按名找回之后，原 Create 晚到的失败或没带 ARN 的返回
+//      不再记为待核；本阶段结束之后晚到的结果也不再记（会话块的 markPending）。
 //   3. 释放（25 秒，全部会话并行、共享截止线）：每个会话先 Get；状态不是 STOPPING / COMPLETED（含排队中的 PENDING_CONCURRENCY、
 //      准备中的 PREPARING 与 RUNNING）或 Get 失败时发 Stop；Stop 报错或返回体不是这两个状态时补查一次 Get；仍未确认则退避后再
 //      Stop 一次、再补查。确认只认 STOPPING / COMPLETED，到线仍未确认记 unconfirmed。被拒方案是「仍为 RUNNING 才发 Stop」：排队或
@@ -68,9 +70,7 @@ async function finalizeOnce(s: DeviceFarmSessionBlock, mode: ReleaseMode, hooks:
   if (inflight.length > 0) {
     await settleBy(s, Promise.allSettled(inflight.map((e) => e.recorded)), s.now() + FINALIZE_AWAIT_CREATE_MS);
     for (const e of inflight) {
-      if (e.settled) continue;
-      reg.pending.set(e.name, e.attempt);
-      s.log(`worker: 建立远程访问会话的请求在等待时间内没有返回（会话名 ${e.name}），会话是否已建立未知`);
+      if (!e.settled) s.markPending(e.name, e.attempt, "建立远程访问会话的请求在等待时间内没有返回", "");
     }
   }
 

@@ -49,8 +49,9 @@ test("redactSecrets：匹配停在引号处，不跨字段吞掉内容", () => {
 
 
 // ---- 出口级用例（ADR 0051 决策 11、0035 决策 5）----
-// worker 自己写 stderr 的四处出口：run-scope 的 log()、bin 的 worker fatal 行、ArtifactUploader 的缺省 logFn、loadUserSteps 的
-// 缺省 logFn；设备目标另有两处写盘出口：原始控件树（page source）与 device-session.json。样本取用例表里输入与期望不同的那些条目
+// worker 自己写 stderr 的五处出口：run-scope 的 log()、bin 的 worker fatal 行、ArtifactUploader 的缺省 logFn、loadUserSteps 的
+// 缺省 logFn、evidence 的缺省 logFn（运行期用例在 evidence.test.mts）；出口集合恰为这五处由 stderr-outlets.test.mts 的静态差集守。
+// 设备目标另有两处写盘出口：原始控件树（page source）与 device-session.json。样本取用例表里输入与期望不同的那些条目
 // （即带凭据的输入）：出口写出的文字要含期望的脱敏结果、不含原始输入。事件行与 evidence 写盘两处出口由 event-sink 与 evidence
 // 各自的测试守。
 const SECRET_CASES = CASES.filter(([input, expected]) => input !== expected);

@@ -33,8 +33,9 @@
 // 没有带归类的异常在 execute 出口挂 engine_error；断言异常不挂，交 run-scope 判 failed。
 //
 // 释放只进入一次（ADR 0051 决策 5「终结只执行一次」）：正常释放进行中又收到中断，同一次终结升级为中断——尚未开始的 deleteSession
-// 不再发出、不做正常模式的诊断上传，使停止信号到退出仍落在中断路径的宽限推导之内；已在途的 deleteSession 不打断，它的上限由终结块
-// 封顶。
+// 不再发出，尚未开始的正常模式诊断上传不再进行、诊断文件交给后台队列，使停止信号到退出仍落在中断路径的宽限推导之内；已在途的
+// deleteSession 不打断，它的上限由终结块封顶；已在途的诊断上传同样不打断（上传器的单次超时封顶），落定之后上传失败才把诊断文件
+// 交给后台队列，由停止路径的排空带上。
 //
 // 设备产物（原始控件树、device-session.json）落在 `<产物根>/device/<scope 键>/` 下：产物根按 run 共享，各 scope 分目录才不互相覆盖。
 //
@@ -187,10 +188,11 @@ export interface DeviceFarmSessions {
   /** 设备解析（ADR 0051 决策 3）：零候选重列一次仍为零、指定 ARN 被同步拒绝时返回 precheck_failed；全部繁忙时在预算内等待。
    *  replacing 非 null 表示为换台重新解析，传被替换的会话。 */
   resolve(budget: AcquireBudget, replacing: RemoteSession | null): Promise<Outcome<DeviceChoice>>;
-  /** Create：限流与机型繁忙在预算内重试，每次请求一个新尝试序号，结果未知的请求登记为待核；重试前按名找回的会话随即按 Stop
-   *  规则停止（接预算的信号）；Create 返回 ARN 后、本调用返回之前经会话事件出口发 session_opened(created)。 */
+  /** Create：限流与机型繁忙在预算内重试，每次请求一个新尝试序号，结果未知的请求登记为待核；重试前按名找回的会话逐会话、与剩余
+   *  分页并行按 Stop 规则停止（接预算的信号），这次核对返回、这些处理都结束才发下一次 Create；Create 返回 ARN 后、本调用返回之前
+   *  经会话事件出口发 session_opened(created)。 */
   create(choice: DeviceChoice, budget: AcquireBudget): Promise<Outcome<RemoteSession>>;
-  /** 等到状态为 RUNNING 且端点可用。 */
+  /** 等到状态为 RUNNING 且端点可用；就绪之前已是 STOPPING / COMPLETED 即返回 session_lost 的终止（准备阶段那句消息），状态细节只进日志。 */
   waitRunning(session: RemoteSession, budget: AcquireBudget): Promise<Outcome<RunningSession>>;
   /** 查一次会话状态（GetRemoteAccessSession 的状态值）；查询本身失败返回 null，调用方此时不据此判会话丢失。 */
   status(arn: string): Promise<string | null>;
@@ -1015,9 +1017,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return { releaseFailed, reportRefs: await this.deviceSessionRefs(this.interruptRequested ? "interrupt" : mode) };
   }
 
-  /** 写 device-session.json；正常模式下经上传器得到链接挂到 scope_done（ADR 0051 决策 8）。best-effort，失败只记日志。
-   *  中断模式（含升级）不实时上传，只交给截图的后台队列，由停止路径阶段 4 的队列排空带上（ADR 0051 决策 5）：实时上传会在会话
-   *  释放之后、阶段 4 之前再占一段上传超时，超出中断路径的宽限推导；这一模式返回的链接也不被使用（进入终结后不发 scope_done）。 */
+  /** 写 device-session.json；正常模式下经上传器得到链接挂到 scope_done（ADR 0051 决策 8）。best-effort：写盘或上传失败记一行
+   *  日志，不影响判定。中断模式（含升级）不实时上传，只交给截图的后台队列，由停止路径阶段 4 的队列排空带上（ADR 0051 决策 5）：
+   *  实时上传会在会话释放之后、阶段 4 之前再占一段上传超时，超出中断路径的宽限推导；这一模式返回的链接也不被使用（进入终结后不发
+   *  scope_done）。正常模式的实时上传在途时收到中断：上传不打断，落定之后再核对一次是否已升级。上传失败且已升级即交给后台队列——
+   *  停止路径的排空在本次释放返回之后才开始，此前入队的文件都会被它带上；上传成功则文件已经传到 S3，不再入队（链接照常返回，同样
+   *  不被使用）。本方法每次释放只执行一次，入队因此至多一次。 */
   private async deviceSessionRefs(mode: ReleaseMode): Promise<ReportRef[]> {
     const root = this.deps.artifactRoot;
     if (root === undefined) return [];
@@ -1035,7 +1040,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     try {
       return [{ kind: DEVICE_SESSION_REPORT_KIND, ref: await this.deps.uploader.toReportRef(file) }];
     } catch (e) {
-      this.deps.log(`worker: 设备诊断文件没能上传（不影响判定）：${errorText(e)}`);
+      if (this.interruptRequested) {
+        this.deps.log(`worker: 设备诊断文件没能上传，退出前会再尝试上传（不影响判定）：${errorText(e)}`);
+        this.deps.uploader.enqueue([file]);
+      } else {
+        this.deps.log(`worker: 设备诊断文件没能上传（不影响判定）：${errorText(e)}`);
+      }
       return [];
     }
   }

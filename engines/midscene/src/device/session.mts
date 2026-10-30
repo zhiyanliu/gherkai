@@ -14,13 +14,20 @@
 //     仍为零即 precheck_failed；全部繁忙才在预算内按 busyBackoffMs 退避重列，等待期间候选变空不改判。直接给 ARN 时不列举（获取
 //     预算从首次 Create 起算）。设备选择读 Device Farm 设备描述的 os 与 model，是系统版本读取点护栏的显式豁免（ADR 0052 决策 8）。
 //   - Create 的结果未知（决策 3）：请求超时或连接中断记为待核——没有 HTTP 响应，或响应头已到而响应体没读完（SDK 这时也在错误上
-//     带状态码 200，不能据状态码判为被拒）。待核只能由按名列举命中消除：以进入核对时的待核名字为准逐页比较，同名的每个 ARN 都
-//     登记进待清理集并发 session_opened(discovered)，命中的名字随之消除；没命中的名字不论列举为空还是分页没扫完都保留待核。
-//     每次重试前与每条终结路径各核对一次。
-//   - 获取期（重试前的核对）找回的会话不会被本次执行使用，随即按与换台相同的 Stop 规则停止，不等到终结：拖到终结，它最长会
-//     计费到 Device Farm 150 分钟的会话上限。它仍留在待清理集，session_closed 归终结（每个会话恰一条）；终结核对找回的由释放
-//     阶段停止。终结接手之后（获取预算中止或已进入终结）获取侧即停，不再发新的调用；接手前已发出的 Stop 不撤回，释放阶段照常
-//     先 Get 再决定，必要时再发一次幂等 Stop。
+//     带状态码 200，不能据状态码判为被拒）。待核只能由按名列举命中消除：以进入核对时的待核名字为准逐页比较、扫到分页结束，
+//     同名的每个 ARN 都登记进待清理集并发 session_opened(discovered)，命中的名字随之消除；没命中的名字不论列举为空还是分页没扫完
+//     都保留待核。全部名字都已命中也继续翻页：「一次尝试至多建立一个会话」没有幂等令牌担保，后页漏掉的同名会话会一路计费、没有
+//     session_closed。每次重试前与每条终结路径各核对一次。
+//   - 记待核只有一个入口（markPending）：同名的会话已按名找回时不记（命中是正面证据，原请求晚到的失败或没带 ARN 的返回推翻
+//     不了它，再记会让同一个名字既有 discovered 又有 attempted、误判释放失败）；终结核对结束之后也不记（那时仍待核的名字已按
+//     attempted 上报）。
+//   - 获取期（重试前的核对）找回的会话不会被本次执行使用，它的 session_opened 一写出即按与换台相同的 Stop 规则停止，与剩余
+//     分页并行，不等到终结：拖到终结，它最长会计费到 Device Farm 150 分钟的会话上限。下一次 Create 等分页扫完、这些停止都处理完
+//     才发出。它仍留在待清理集，session_closed 归终结（每个会话恰一条）；终结核对找回的由释放阶段停止。终结接手之后（获取预算
+//     中止或已进入终结）获取侧即停，不再发新的调用；接手前已发出的 Stop 不撤回，释放阶段照常先 Get 再决定，必要时再发一次
+//     幂等 Stop。
+//   - 等到 RUNNING 期间读到 STOPPING / COMPLETED 即按会话丢失终止（决策 4 归因表的会话丢失行：发生在 scope_started 之前，消息
+//     用准备阶段那句），状态与 Device Farm 给出的说明只进 worker 日志。
 //   - Create 返回即登记（ARN 进待清理集，或记为待核），在途记录随之落定；session_opened(created) 的写出在登记之后。终结阶段 1
 //     等的是登记：写出慢时已登记的会话不会被重新记为待核（决策 5）。
 //   - 在途的 Create 不接获取预算的信号：进入终结时预算被中止，若 Create 也随之中止，它就只能记为结果未知；终结阶段 1 要等它
@@ -41,6 +48,8 @@ import { errorText, oneLineError } from "../worker/error-text.mjs";
 import type {
   AcquireBudget, DeviceChoice, DeviceFarmSessions, DevicePartsEnv, Outcome, RemoteSession, RunningSession,
 } from "./surface.mjs";
+// 接缝模块与本块互相 import：消息常量只在函数体内读，模块顶层不读（见 device/parts.mts 的装配约定）。
+import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
 import type { ProviderMinutes, SessionDeviceInfo, SessionEventSink, SessionOpenedFact } from "./device-session.mjs";
 import { encode, runIdFromEnv } from "./session-name.mjs";
 import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_MS, busyBackoffMs } from "./limits.mjs";
@@ -284,7 +293,7 @@ export interface InflightCreate {
   readonly attempt: number;
   /** Create 返回或失败、结果已登记时落定（不含 session_opened(created) 的写出）。 */
   readonly recorded: Promise<unknown>;
-  /** 结果已登记之后为真：ARN 进了待清理集、这次尝试记为待核，或请求被明确拒绝。与登记在同一个同步段里置位。 */
+  /** 结果已登记之后为真：ARN 进了待清理集、这次尝试按结果未知交给 markPending，或请求被明确拒绝。与登记在同一个同步段里置位。 */
   settled: boolean;
 }
 
@@ -411,9 +420,13 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
     for (let waits = 0; ; waits++) {
       this.throwIfStopped(budget.signal);
       if (waits > 0 && this.registry.pending.size > 0) {
-        const found = await this.reconcile({ deadline: null, outer: budget.signal });
-        // 找回的会话不会被本次执行使用：随即停止，接预算的信号（预算中止即交给终结）
-        await Promise.all(found.map((t) => this.stopUnused(t.arn, t, "按名找回的", budget.signal)));
+        // 找回的会话不会被本次执行使用：session_opened 一写出即开始停止，与剩余分页并行，接预算的信号（预算中止即交给终结）。
+        // 列举因预算中止而抛出时不等已开始的停止：它们在终结接手后各自不再发新的调用。
+        const stopping: Promise<void>[] = [];
+        await this.reconcile({ deadline: null, outer: budget.signal }, (t) => {
+          stopping.push(this.stopUnused(t.arn, t, "按名找回的", budget.signal));
+        });
+        await Promise.all(stopping);
         this.throwIfStopped(budget.signal);
       }
       const result = await this.sendCreate(choice);
@@ -447,8 +460,11 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
       const endpoint = info?.endpoints?.remoteDriverEndpoint ?? null;
       if (status === RUNNING && endpoint) return { ok: true, value: { endpoint, unit: info?.instanceArn ?? null } };
       if (isStopped(status)) {
+        // 还没有 step 开始：按会话丢失终止，用准备阶段那句；Device Farm 的结果与说明只进日志，不进事件消息
+        const result = info?.result ? `，结果 ${info.result}` : "";
         const detail = info?.message ? `：${oneLineError(info.message)}` : "";
-        throw new Error(`远程访问会话在就绪之前就结束了（状态 ${status}${detail}）`);
+        this.log(`worker: 远程访问会话 ${session.arn} 在就绪之前就结束了（状态 ${status}${result}${detail}）`);
+        return { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } };
       }
       await this.timers.sleep(RUNNING_POLL_INTERVAL_MS, budget.signal);
     }
@@ -471,47 +487,44 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
 
   // ---- 终结块也用的调用 ----
 
-  /** 按名核对待核尝试（ADR 0051 决策 3）。以进入时的待核名字为准逐页列举项目里的会话：会话名与其中某个名字整名相等即登记进
-   *  待清理集并发 session_opened(discovered)，同名的每个 ARN 都登记，这个名字的待核随之消除——命中是正面证据，不论之后的页是否
-   *  扫完。没命中的名字没有任何结论：列举为空不构成排除，列举出错或到截止线即停在这里，没扫完的页视为未核对，待核保留。
-   *  全部名字都已命中即停止翻页：尝试序号是名字的一部分，一次尝试至多建立一个会话，再翻页只会推迟终结的释放。
+  /** 按名核对待核尝试（ADR 0051 决策 3）。以进入时的待核名字为准逐页列举项目里的会话，扫到分页结束：会话名与其中某个名字整名
+   *  相等即登记进待清理集并发 session_opened(discovered)，同名的每个 ARN 都登记，这个名字的待核随之消除——命中是正面证据，不论
+   *  之后的页是否扫完。全部名字都已命中也继续翻页，后页同名的 ARN 同样登记：一次尝试至多建立一个会话没有幂等令牌担保，漏掉的
+   *  同名会话没人停止、没有 session_closed，却会报释放成功。没命中的名字没有任何结论：列举为空不构成排除，列举出错或到截止线即停
+   *  在这里，没扫完的页视为未核对，待核保留。
    *  每一页的命中在同一个同步段里登记；终结核对结束之后才返回的页不再登记（仍待核的名字已按 attempted 上报，此时登记会多出一个
-   *  不释放、不发 session_closed 的会话）。返回这次新登记的会话（它们的 session_opened 都已写出）：获取期的调用方随即按 Stop 规则
-   *  停止它们，终结核对找回的由释放阶段停止。获取期的外层信号中止时抛出（已登记的会话由终结释放）。 */
-  async reconcile(bound: CallBound): Promise<TrackedSession[]> {
+   *  不释放、不发 session_closed 的会话）。onOpened 逐会话调用：每个新登记会话自己的 session_opened 写出后即调用，不等同页其余
+   *  会话的事件写完，都在翻下一页之前；获取期的调用方据此随即按 Stop 规则停止它，与剩余分页并行；终结核对不传，找回的由释放阶段
+   *  停止。获取期的外层信号中止时抛出（已登记的会话由终结释放）。 */
+  async reconcile(bound: CallBound, onOpened: ((tracked: TrackedSession) => void) | null = null): Promise<void> {
     const wanted: ReadonlySet<string> = new Set(this.registry.pending.keys());
-    const hit = new Set<string>();
-    const found: TrackedSession[] = [];
     let nextToken: string | undefined;
-    while (hit.size < wanted.size) {
+    for (;;) {
       const signal = this.boundedSignal(DEVICE_FARM_CALL_TIMEOUT_MS, bound);
-      if (signal === null) return found;
+      if (signal === null) return;
       let page: { remoteAccessSessions?: RemoteAccessSession[]; nextToken?: string };
       try {
         page = await this.api.listRemoteAccessSessions(this.request.projectArn, nextToken, signal);
       } catch (e) {
         if (bound.outer?.aborted) throw bound.outer.reason;
         this.log(`worker: 按会话名核对结果未知的建会话请求时出错，这次核对没有完成：${errorText(e)}`);
-        return found;
+        return;
       }
-      if (this.registry.attemptedFrozen) return found;
+      if (this.registry.attemptedFrozen) return;
       const opened: Promise<void>[] = [];
       for (const s of page.remoteAccessSessions ?? []) {
         if (typeof s.arn !== "string" || typeof s.name !== "string" || !wanted.has(s.name)) continue;
-        hit.add(s.name);
         this.registry.pending.delete(s.name);
         if (this.registry.sessions.has(s.arn)) continue;
         const tracked = this.registry.track({ arn: s.arn, name: s.name, origin: "discovered", observedFrom: this.now() });
         this.log(`worker: 按会话名找到了一个结果未知的建会话请求所建立的远程访问会话 ${s.arn}，这个会话不会用于执行，随即停止它`);
         tracked.opened = this.emitOpened({ sessionId: s.arn, name: s.name, origin: "discovered", device: this.deviceInfo(s, null) });
-        opened.push(tracked.opened);
-        found.push(tracked);
+        opened.push(onOpened === null ? tracked.opened : tracked.opened.then(() => onOpened(tracked)));
       }
       await Promise.all(opened);
       nextToken = page.nextToken || undefined;
-      if (nextToken === undefined) return found;
+      if (nextToken === undefined) return;
     }
-    return found;
   }
 
   /** 查一次状态，失败或到截止线返回 undefined。 */
@@ -605,13 +618,19 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
     session: RemoteAccessSession | undefined, choice: DeviceChoice, name: string, attempt: number, requestedAt: number,
   ): RecordedCreate {
     if (typeof session?.arn !== "string" || session.arn === "") {
-      this.registry.pending.set(name, attempt);
-      this.log(`worker: 建立远程访问会话的请求返回了，但没有带会话 ARN（会话名 ${name}），会话是否已建立未知，之后按会话名核对`);
+      this.markPending(name, attempt, "建立远程访问会话的请求返回了，但没有带会话 ARN", "");
       return { result: { kind: "unknown", error: new Error("建立远程访问会话的请求返回了，但没有带会话 ARN") }, opened: null };
     }
     if (this.registry.attemptedFrozen) {
-      this.log(`worker: 建立远程访问会话的请求在等待时间之后才返回（会话名 ${name}，会话 ${session.arn}），已按结果未知上报，` +
-        "请在设备控制台按这个会话名核对并手动停止");
+      // 终结核对结束之后才返回：不再登记、不发 session_opened。终结核对已按名找回同一个会话时，它已在待清理集里、由释放阶段停止，
+      // 不需要人手动处理；没找回时这次尝试已按结果未知上报，要人按会话名核对。
+      if (this.registry.sessions.has(session.arn)) {
+        this.log(`worker: 建立远程访问会话的请求在等待时间之后才返回（会话名 ${name}，会话 ${session.arn}），这个会话已按会话名找到，` +
+          "随其余会话一并释放");
+      } else {
+        this.log(`worker: 建立远程访问会话的请求在等待时间之后才返回（会话名 ${name}，会话 ${session.arn}），已按结果未知上报，` +
+          "请在设备控制台按这个会话名核对并手动停止");
+      }
       return { result: { kind: "unknown", error: new Error("建立远程访问会话的请求在等待时间之后才返回") }, opened: null };
     }
     const device = this.deviceInfo(session, choice);
@@ -624,13 +643,30 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
     return { result: { kind: "created", remote: { arn: session.arn, name, createRequestedAt: requestedAt, device } }, opened: tracked.opened };
   }
 
-  /** Create 失败之后的登记：结果未知的记为待核，有响应的拒绝按是否可重试交给调用方。 */
+  /** Create 失败之后的登记：结果未知的记为待核（经 markPending），有响应的拒绝按是否可重试交给调用方。 */
   private recordFailed(e: unknown, name: string, attempt: number): CreateResult {
     const failure = classifyCallFailure(e);
     if (failure !== "unknown") return { kind: "rejected", retryable: failure === "retryable", error: e };
-    this.registry.pending.set(name, attempt);
-    this.log(`worker: 建立远程访问会话的请求没有得到完整的回应（会话名 ${name}），会话是否已建立未知，之后按会话名核对：${errorText(e)}`);
+    this.markPending(name, attempt, "建立远程访问会话的请求没有得到完整的回应", `：${errorText(e)}`);
     return { kind: "unknown", error: e };
+  }
+
+  /** 把结果未知的一次尝试记为待核（ADR 0051 决策 3），唯一的入口：Create 的两条结果未知分支与终结阶段 1 到线仍在途的 Create
+   *  都经这里。同名的会话已按名找回时不记（命中是正面证据，原请求晚到的失败或没带 ARN 的返回推翻不了它；再记会让同一个名字既有
+   *  discovered 又有 attempted，误判释放失败）；终结核对结束之后也不记（那时仍待核的名字已按 attempted 上报，晚到的结果不改变
+   *  这个结论）。两种情形都只记一行日志。what 是这次结果的说明，detail 接在日志末尾。 */
+  markPending(name: string, attempt: number, what: string, detail: string): void {
+    const found = [...this.registry.sessions.values()].filter((t) => t.name === name).map((t) => t.arn);
+    if (found.length > 0) {
+      this.log(`worker: ${what}（会话名 ${name}），已按会话名找到同名的远程访问会话 ${found.join("、")}，不再记为待核${detail}`);
+      return;
+    }
+    if (this.registry.attemptedFrozen) {
+      this.log(`worker: ${what}（会话名 ${name}），这次尝试在收尾时已按结果未知上报，请在设备控制台按这个会话名核对并手动停止${detail}`);
+      return;
+    }
+    this.registry.pending.set(name, attempt);
+    this.log(`worker: ${what}（会话名 ${name}），会话是否已建立未知，之后按会话名核对${detail}`);
   }
 
   /** 返回体是 STOPPING / COMPLETED 即记为确认（时刻与设备分钟），返回是否已确认。 */

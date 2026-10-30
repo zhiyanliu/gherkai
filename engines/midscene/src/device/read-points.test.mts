@@ -9,10 +9,12 @@
 //   4. 系统版本与机型字段只出现在读取点与显式豁免的声明里（决策 1、8）。读取点是 Appium 块的会话能力对象；豁免是不构成按版本或
 //      机型适配分支的三类：设备选择的输入、协议载荷、句柄上下文的透传。豁免按声明逐处列出（文件里最近一层带名字的函数、方法、
 //      类型或模块级常量），不按整个文件：同一文件里别的函数（例如设备接缝里选导航路线的那个）一处出现即红。豁免的声明里，除设备
-//      选择的输入之外，读出的值只能原样透传（填进对象字段、数组、模板，或用 ?? 给缺省值），在它上面调方法、拿它与非空值比较、
-//      按它 switch、把它交给函数处理都按适配分支报红；先存进变量再判断照不出来，与不扫数字字面量同一个边界。决定适配行为的
-//      四块（驱动适配器、能力探测、界面实现、命令守卫）不在豁免里。不扫数字字面量：坐标、超时与比例里的数字与版本号无法区分
-//      （被拒方案）。
+//      选择的输入之外，读出的值只能原样透传，按白名单判：填进对象字段、数组或模板插值，作变量或字段的初值，以单独成句的赋值写进
+//      变量或字段，作为返回值，或用 ?? 与 || 给缺省值；作条件判断真假、与 null / undefined 比较是存在性判断，也允许。括号、类型
+//      断言、非空断言与赋值表达式不改变取值，穿过它们沿外层再判。其余写法都按适配分支报红，包括在它上面调方法、让它参与运算
+//      （一元运算、算术、拼接、位运算、typeof）、与非空值比较、按它 switch 或用作 case 标签、用作下标、把它交给函数处理；先存进
+//      变量、数组、对象或模板再判断照不出来，与不扫数字字面量同一个边界。决定适配行为的四块（驱动适配器、能力探测、界面实现、
+//      命令守卫）不在豁免里。不扫数字字面量：坐标、超时与比例里的数字与版本号无法区分（被拒方案）。
 //   另有一条结构差集：会话能力对象（`.capabilities`）只在 device/appium.mts 读取，读取点因此只有那一处（决策 1）。
 // 每条都带正向对照：检测函数先在构造的源码片段上命中，真实文件里已知的出现也必须被检测到，每条豁免都必须仍有命中，防止检测
 // 失效或豁免过期时差集空过。
@@ -232,33 +234,74 @@ function isNullish(n: ts.Expression): boolean {
   return e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === "undefined");
 }
 
-/** 读出的值是否被拿来做判断（返回用法的说明），还是原样透传（null）。沿着保持取值不变的外层（括号、类型断言、非空断言、
- *  ?? 与 || 的缺省值、条件表达式的两个分支）向上找：在值上取属性或调方法、把值交给函数（含 new）、拿它与 null / undefined 之外的
- *  值比较、拿它做 switch 的判别式或 case 的标签，都是用法；流进对象字段、数组、模板、赋值、变量或返回值即止，是透传。
- *  存在性判断（真假、与 null 比较）不算用法。 */
+/** 结果就是某个操作数本身的二元运算：?? 与 || 给缺省值，&& 在左侧为真时取右侧。读出的值经它们原样流出，沿外层继续判。 */
+const SELECTING_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken,
+]);
+
+/** 赋值：赋值表达式的值就是写入的值，沿外层继续判；单独成句时是透传。`=` 的左侧是写入目标，不是读取。 */
+const ASSIGNMENT_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.EqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken, ts.SyntaxKind.BarBarEqualsToken,
+  ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+]);
+
+/** 读出的值是否被拿来做判断（返回用法的说明），还是原样透传（null）。按白名单判。沿着保持取值不变的外层向上找：括号、类型
+ *  断言、非空断言、条件表达式的两个分支，??、|| 与 &&（结果就是某个操作数本身），以及赋值表达式（它的值就是写入的值）；
+ *  `=` 左侧的出现是写入目标，不是读取。到达这些去处才算透传：对象字段的值、数组元素、不带标签的模板插值、变量或类字段的初值、
+ *  返回值、箭头函数的表达式体、单独成句的赋值；作 if / while / for / 条件表达式的条件判断真假、与 null / undefined 比较是
+ *  存在性判断，同样不算用法。其余去处都是用法：取属性或调方法、交给函数（含 new 与带标签的模板）、用作下标、参与运算（一元
+ *  运算含 !、算术、拼接、位运算、算术与位运算的复合赋值、typeof）、与非空值比较、用作 switch 的判别式或 case 的标签，以及
+ *  白名单之外的任何写法。 */
 function valueUse(read: ts.Node): string | null {
   let node = read;
   for (;;) {
     const p = node.parent;
-    if ((ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === node) return "在读出的值上取属性或调用方法";
-    if ((ts.isCallExpression(p) || ts.isNewExpression(p)) && p.expression !== node) return "把读出的值交给函数处理";
     if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isNonNullExpression(p) || ts.isTypeAssertionExpression(p)
       || ts.isSatisfiesExpression(p) || (ts.isConditionalExpression(p) && p.condition !== node)) {
       node = p;
       continue;
     }
-    if (ts.isSwitchStatement(p) && p.expression === node) return "按读出的值分支";
-    if (ts.isCaseClause(p) && p.expression === node) return "与其他值比较";
     if (ts.isBinaryExpression(p)) {
       const op = p.operatorToken.kind;
-      if (op === ts.SyntaxKind.QuestionQuestionToken || op === ts.SyntaxKind.BarBarToken) {
+      if (SELECTING_OPERATORS.has(op)) {
+        node = p;
+        continue;
+      }
+      if (ASSIGNMENT_OPERATORS.has(op)) {
+        // `=` 的左侧是写入目标；其余情况下赋值表达式的值就是读出的值，沿外层继续判
+        if (op === ts.SyntaxKind.EqualsToken && p.left === node) return null;
         node = p;
         continue;
       }
       if (COMPARISON_OPERATORS.has(op)) return isNullish(p.left === node ? p.right : p.left) ? null : "与其他值比较";
+      return "读出的值参与运算";
     }
-    return null;
+    if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p) || ts.isTypeOfExpression(p)) return "读出的值参与运算";
+    if ((ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p) || ts.isCallExpression(p) || ts.isNewExpression(p))
+      && p.expression === node) return "在读出的值上取属性或调用方法";
+    if (ts.isElementAccessExpression(p)) return "把读出的值用作下标";
+    if (ts.isCallExpression(p) || ts.isNewExpression(p)) return "把读出的值交给函数处理";
+    if (ts.isTemplateSpan(p)) return ts.isTaggedTemplateExpression(p.parent.parent) ? "把读出的值交给函数处理" : null;
+    if (ts.isSwitchStatement(p)) return "按读出的值分支";
+    if (ts.isCaseClause(p)) return "与其他值比较";
+    if (isConditionOf(p, node) || isPassThroughSink(p, node)) return null;
+    return "读出的值未原样透传";
   }
+}
+
+/** 作条件判断真假的位置：if、while、do、for 的条件与条件表达式的条件。 */
+function isConditionOf(p: ts.Node, node: ts.Node): boolean {
+  if (ts.isIfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) return p.expression === node;
+  if (ts.isForStatement(p) || ts.isConditionalExpression(p)) return p.condition === node;
+  return false;
+}
+
+/** 原样透传的去处：对象字段的值、数组元素、变量或类字段的初值、返回值、箭头函数的表达式体、单独成句的赋值。 */
+function isPassThroughSink(p: ts.Node, node: ts.Node): boolean {
+  if (ts.isExpressionStatement(p)) return ts.isBinaryExpression(node) && ASSIGNMENT_OPERATORS.has(node.operatorToken.kind);
+  if (ts.isPropertyAssignment(p) || ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p)) return p.initializer === node;
+  if (ts.isArrowFunction(p)) return p.body === node;
+  return ts.isArrayLiteralExpression(p) || ts.isReturnStatement(p);
 }
 
 /** ADR 0052 决策 8 的读取点与三类豁免。 */
@@ -447,6 +490,108 @@ test("检测函数在构造的片段上区分透传与用法：调方法、交�
     [6, "在读出的值上取属性或调用方法"], [7, "把读出的值交给函数处理"], [8, "与其他值比较"], [9, "在读出的值上取属性或调用方法"],
     [11, "与其他值比较"], [12, "按读出的值分支"], [13, "与其他值比较"],
   ]);
+});
+
+test("检测函数在构造的片段上识别运算：一元运算、算术、拼接、位运算与 typeof 是用法，模板里直接插值是透传、插值里有运算是用法", () => {
+  const sf = parse("x.mts", [
+    "switch (+s.platformVersion!) { case 26: break; }",
+    "switch (k) { case s.platformVersion + \"\": break; }",
+    "const a = -(s.osVersion as any);",
+    "const b = ~s.osVersion!;",
+    "const c = !s.osVersion;",
+    "const d = s.platformVersion * 1 + s.osVersion / 2;",
+    "const e = s.platformVersion % 2 - s.osVersion ** 1;",
+    "const f = (s.platformVersion | 0) << 1;",
+    "const g = typeof s.platformVersion;",
+    "v += s.osVersion;",
+    "const h = `iOS ${s.platformVersion!} ${(s.model)}`;",
+    "const i = `${s.platformVersion + 1}`;",
+    "const j = s.osVersion as string;",
+  ].join("\n"));
+  const reads = versionModelMentions(sf).filter((h) => h.use !== null);
+  assert.deepEqual(reads.map((h) => [h.line, h.what, h.use]), [
+    [1, "platformVersion", "读出的值参与运算"], [2, "platformVersion", "读出的值参与运算"], [3, "osVersion", "读出的值参与运算"],
+    [4, "osVersion", "读出的值参与运算"], [5, "osVersion", "读出的值参与运算"], [6, "platformVersion", "读出的值参与运算"],
+    [6, "osVersion", "读出的值参与运算"], [7, "platformVersion", "读出的值参与运算"], [7, "osVersion", "读出的值参与运算"],
+    [8, "platformVersion", "读出的值参与运算"], [9, "platformVersion", "读出的值参与运算"], [10, "osVersion", "读出的值参与运算"],
+    [12, "platformVersion", "读出的值参与运算"],
+  ]);
+});
+
+test("检测函数在构造的片段上按白名单判透传：用作下标、带标签的模板、遍历与白名单之外的写法是用法，&& 与赋值表达式的结果沿外层继续判", () => {
+  const sf = parse("x.mts", [
+    "const a = TABLE[s.platformVersion];",
+    "const b = tag`${s.osVersion}`;",
+    "for (const ch of s.osVersion) {}",
+    "const c = (s.osVersion && s.model)?.length;",
+    "const d = s.osVersion && s.model;",
+    "const e = [s.platformVersion, s.model];",
+    "function f() { return s.osVersion; }",
+    "const g = () => s.platformVersion;",
+    "class C { readonly v = s.platformVersion; }",
+    "this.platformVersion ??= s.platformVersion;",
+    "while (s.osVersion) {}",
+    "const h = s.osVersion === undefined ? null : s.osVersion;",
+    "switch (v = s.platformVersion) {}",
+    "if ((v = s.platformVersion) === \"26\") {}",
+    "(this.osVersion ??= s.osVersion).startsWith(\"1\");",
+    "v = w = s.osVersion;",
+    "const i = (v = s.model);",
+    "this.model ||= s.model;",
+    "(this.osVersion = s.osVersion).startsWith(\"1\");",
+    "s.osVersion;",
+  ].join("\n"));
+  const reads = versionModelMentions(sf).filter((h) => h.use !== null);
+  assert.deepEqual(reads.map((h) => [h.line, h.what, h.use]), [
+    [1, "platformVersion", "把读出的值用作下标"], [2, "osVersion", "把读出的值交给函数处理"], [3, "osVersion", "读出的值未原样透传"],
+    [4, "osVersion", "在读出的值上取属性或调用方法"], [4, "model", "在读出的值上取属性或调用方法"],
+    [13, "platformVersion", "按读出的值分支"], [14, "platformVersion", "与其他值比较"],
+    [15, "osVersion", "在读出的值上取属性或调用方法"], [15, "osVersion", "在读出的值上取属性或调用方法"],
+    [19, "osVersion", "在读出的值上取属性或调用方法"], [20, "osVersion", "读出的值未原样透传"],
+  ]);
+});
+
+/** 一个文件里按 scopeOf 的写法（以点连接的各层名字）找到的声明。 */
+function declarationNamed(sf: ts.SourceFile, scope: string): ts.Node | undefined {
+  let found: ts.Node | undefined;
+  visit(sf, (n) => {
+    const name = scopeName(n);
+    if (found !== undefined || name === null) return;
+    const outer = scopeOf(n);
+    if ((outer === "(module)" ? name : `${outer}.${name}`) === scope) found = n;
+  });
+  return found;
+}
+
+/** 注入真实声明的非透传写法与期望的用法说明。 */
+const INJECTED_MISUSES: ReadonlyArray<readonly [string, string]> = [
+  ["switch (+s.platformVersion!) { case 26: break; }", "读出的值参与运算"],
+  ["switch (k) { case s.platformVersion + \"\": break; }", "读出的值参与运算"],
+  ["switch (v = s.platformVersion) {}", "按读出的值分支"],
+  ["if ((v = s.platformVersion) === \"26\") {}", "与其他值比较"],
+];
+
+test("真实文件里透传类豁免的声明注入非透传写法后报红：一元数值转换用作 switch 判别式、拼接结果用作 case 标签、赋值表达式的值用作 switch 判别式或与非空值比较", () => {
+  const injected: string[] = [];
+  for (const [rel, scopes] of VERSION_MODEL_ALLOWED) {
+    const text = fs.readFileSync(path.join(SRC, rel), "utf-8");
+    for (const [scope, exemption] of scopes) {
+      if (exemption.kind === "设备选择的输入") continue;
+      const decl = declarationNamed(parse(rel, text), scope);
+      const body = decl !== undefined && ts.isFunctionLike(decl) ? (decl as ts.FunctionLikeDeclaration).body : undefined;
+      if (body === undefined || !ts.isBlock(body)) continue;
+      const at = body.getStart() + 1;
+      for (const [mutation, use] of INJECTED_MISUSES) {
+        const bad = disallowed(rel, versionModelMentions(parse(rel, `${text.slice(0, at)}\n${mutation}\n${text.slice(at)}`)));
+        assert.deepEqual(bad.map((h) => [h.scope, h.use]), [[scope, use]], `${rel} 的 ${scope} 里注入 ${mutation} 应报红`);
+      }
+      injected.push(`${rel} ${scope}`);
+    }
+  }
+  // 正向对照：注入面不能为空，句柄上下文的透传与就绪日志都在其中
+  for (const known of ["device/surface.mts DeviceSurface.handlerCtx", "device/surface.mts DeviceSurface.readyLogLine"]) {
+    assert.ok(injected.includes(known), `注入面缺少 ${known}`);
+  }
 });
 
 test("检测函数在构造的片段上命中：读会话能力对象", () => {
