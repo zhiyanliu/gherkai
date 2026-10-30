@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/cli.py": {
-    "mtime": 1793336399.590532,
-    "ast_hash": "06a5761c2d254f456289895f5851241e",
+    "mtime": 1793336797.0523114,
+    "ast_hash": "97f66be512019c95e1fe569407058b63",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
@@ -980,8 +980,8 @@
     "semantic_hash": "813532a0d7b00c40aa1d4e413626c484"
   },
   "deploy_aws/tests/test_provider.py": {
-    "mtime": 1793336399.5907485,
-    "ast_hash": "4e6057946bde3b76245a8c80c84608ef",
+    "mtime": 1793336797.0525959,
+    "ast_hash": "df5980c6804f1f66713a3e0dba546165",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {

@@ -1076,8 +1076,8 @@ def test_read_only_verbs_use_the_recorded_project_and_never_create_one(cdk, df, 
 
 @pytest.mark.parametrize("verb", READ_ONLY_VERBS)
 def test_read_only_verbs_use_pending_when_nothing_is_recorded(cdk, df, verb, tmp_path, monkeypatch, capsys):
-    """参数不存在（含 stack 还不存在）→「待建立」占位，仍不建立项目；没有记录也就没有可核对的项目。diff 另提示变更集不含
-    设备授权、实际部署会多出项目参数与授权（首次启用设备支持的那次 deploy 会比 diff 多出这两部分）；synth 与 destroy 不提示。"""
+    """参数不存在（含 stack 还不存在）→「待建立」占位，仍不建立项目；没有记录也就没有可核对的项目。diff 另提示用于计算变更集的模板不含
+    设备支持相关授权与项目 ARN 参数、实际部署会多出这两部分（首次启用设备支持的那次 deploy 会比 diff 多出这两部分）；synth 与 destroy 不提示。"""
     monkeypatch.chdir(tmp_path)
     method, args = _verb_call(verb, "--vpc", "new", "--region", "us-east-1")
     assert method(args) == 0

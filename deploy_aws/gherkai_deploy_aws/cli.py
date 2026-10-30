@@ -945,7 +945,7 @@ class Provider:
         """diff / --synth-only / destroy 用的项目 ARN：只读 SSM 现值，不找回、不建立（ADR 0051 决策 10、ADR 0037 决策 6）。
 
         返回 (退出码, ARN)，含义同 `_resolve_device_farm_project_for_deploy`。参数不存在（含 stack 不存在）返回 None，经
-        `build_context` 成为「待建立」占位，diff 此时提示变更集不含设备授权与项目 ARN 参数、实际部署会多出这两部分。记录存在但
+        `build_context` 成为「待建立」占位，diff 此时提示用于计算变更集的模板不含设备支持相关授权与项目 ARN 参数、实际部署会多出这两部分。记录存在但
         不是合法的项目 ARN（只会因手工改动出现）以退出码 2 结束并点名 SSM 路径（`_report_malformed_device_farm_record`）。SSM 有
         合法值时，diff 按 deploy 的同一规则用 GetProject 只读核对（`devicefarm.verify_project`）：
         成功即沿用；项目已不存在（被手动删除）时警告并以占位显示，因为用有 Device Farm 权限的凭证 deploy 时会按名称找回或新建、
