@@ -36,8 +36,7 @@
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。
 - **webdriverio 精确锁定**：第 8 批 B6 设备模块落地时把 `engines/midscene/package.json` 的 `webdriverio` 从范围版本改为精确版本、重算锁文件、改 `engines/midscene/DEVELOPMENT.md` 的锁定清单（ADR 0052 决策 7 已记此待办）。
 - **可选的用户文档补句**：`docs/user-guide/running-and-results.md`、`docs/user-guide/cloud-backend.md`、skill 正文里「`--backend cloud` 给 `--grace` 以退出码 2 结束」仍成立，可各补一句「写在 gherkai.toml 里的 grace 在云端只提示、不生效」（配置页已写）。
-
-- CHANGELOG 内的文档链接沿用相对路径（文件既有惯例，Release 正文由 `.github/scripts/release_notes.py` 直取本版节、不改写链接），与「Release 正文只用绝对 URL」的分类规则有张力；B8 同僚复核提出，待发版前统一决定是改链接还是在渲染侧改写。
+- **CHANGELOG 链接与 Release 正文分类规则**：CHANGELOG 内的文档链接沿用相对路径（文件既有惯例，Release 正文由 `.github/scripts/release_notes.py` 直取本版节、不改写链接），与「Release 正文只用绝对 URL」的分类规则有张力；B8 同僚复核提出，待发版前统一决定是改链接还是在渲染侧改写。
 
 ## documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总，实施期逐项完成）
 

@@ -21,7 +21,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 | AWS 凭证与 region | 凭证走 `--profile` / `AWS_PROFILE`；region 取 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置 |
 | 每个 account + region 初始化一次 | `gherkai deploy --bootstrap`（账户级动作，不需要 `--vpc`）。未初始化就部署会报错并指回这个选项 |
 
-部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、注册与注销任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：之前建立过项目就沿用它，否则这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
+部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、注册与注销任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 时沿用该记录，否则这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
 
 ## 后端包含什么
 
@@ -52,7 +52,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 增量部署就是重复第三条命令：同一组选项重新运行即幂等收敛。中断后再次运行会接着收敛，中断留下的多余任务定义 revision 由后续部署或 `push-worker` 顺带回收。每次部署前建议先执行一次 `--diff`。
 
-`--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两个取值也需要可用凭证。有可用凭证时，`--diff` 与 `--synth-only` 导出前还会在后端所在区域读取 SSM 里记录的 Device Farm 项目 ARN，使变更集或模板与已部署的 stack 一致；读不到（缺 region、缺 `ssm:GetParameter` 权限、网络错误）就以退出码 2 结束。后端还没有项目记录时，`--diff` 提示变更集不含设备授权与项目 ARN 参数，用有 Device Farm 权限的凭证实际部署会多出这两部分。完全没有凭证时 `--synth-only` 照常离线导出，但模板按未启用设备支持生成、不含远程访问会话的授权，可能与已部署的 stack 不一致，命令会给出警告；需要与已部署一致的模板时，配好凭证后重新导出。
+`--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两个取值也需要可用凭证。有可用凭证时，`--diff` 与 `--synth-only` 执行前还会在后端所在区域读取 SSM 里记录的 Device Farm 项目 ARN，使变更集或模板与已部署的 stack 一致；读不到（凭证或 region 不可用、缺 `ssm:GetParameter` 权限、网络、限流）就以退出码 2 结束。后端还没有项目记录时，`--diff` 提示变更集不含设备授权与项目 ARN 参数，用有 Device Farm 权限的凭证实际部署会多出这两部分。记录的项目已被手动删除时，`--diff` 给出警告并按尚未建立项目显示变更集，其中看不到设备授权；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会按名称找回或新建项目。完全没有凭证时 `--synth-only` 照常离线导出，但模板按未启用设备支持生成、不含远程访问会话的授权，可能与已部署的 stack 不一致，命令会给出警告；需要与已部署一致的模板时，配好凭证后重新导出。
 
 `--vpc default` 与 `--vpc vpc-<id>` 要向账户查 VPC、子网与可用区。结果按前缀缓存在 `$XDG_CACHE_HOME`（缺省 `~/.cache`）下的 `gherkai/cdk-context/`。首次查询某个前缀时会出现一条含 `Template validation found issues` 的告警，这是 CDK 在查询值就位前先用占位网络合成一遍所致，之后走缓存即不再出现。默认 VPC 的子网确实变了、或除这条警告之外真出现「新建或替换子网」的变更时，先 `--refresh-context` 再 `--diff`。
 
@@ -193,7 +193,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 
 ## 退出码与常见错误
 
-`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下，读不到后端里的 Device Farm 项目记录（凭证不可用、网络、缺 `ssm:GetParameter`）或记录不是合法的项目 ARN（被手工改过）也在动账户之前拦下，`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障同样以 `2` 结束、不输出变更集，稍后重试即可；`1` 账户可能已被改动，有三种来源：CDK 自身失败（它自己的退出码多为 `1`，原样透传，原因看上方 cdk 输出），CDK 已成功而随后的 worker 镜像步骤失败（带同一组选项重新运行 `gherkai deploy` 幂等收敛），或部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；这时 stack 没有改动，项目可能已经建立，重新运行 `gherkai deploy` 会按名称找回它、不会重复建立）；`gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。其余退出码是 cdk 命令自己的返回值，原样透传。`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但那时镜像与 revision 可能已写入账户。
+`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下，读不到后端里的 Device Farm 项目记录（凭证或 region 不可用、缺 `ssm:GetParameter`、网络、限流）或记录不是合法的项目 ARN（被手工改过）也在动账户之前拦下，`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障同样以 `2` 结束、不输出变更集，稍后重试即可；`1` 账户可能已被改动，有三种来源：CDK 自身失败（它自己的退出码多为 `1`，原样透传，原因看上方 cdk 输出），CDK 已成功而随后的 worker 镜像步骤失败（带同一组选项重新运行 `gherkai deploy` 幂等收敛），或部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；这时 stack 没有改动，项目可能已经建立，重新运行 `gherkai deploy` 会按名称找回它、不会重复建立）；`gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。其余退出码是 cdk 命令自己的返回值，原样透传。`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但那时镜像与 revision 可能已写入账户。
 
 | 现象 | 处置 |
 |---|---|
