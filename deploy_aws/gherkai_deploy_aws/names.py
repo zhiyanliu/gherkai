@@ -104,7 +104,7 @@ def ssm_device_farm_project_path(prefix: str) -> str:
     """云端 Device Farm 项目 ARN 的 SSM 路径（ADR 0051 决策 10、ADR 0033 资源清单第 11 条）。
 
     写者是 stack 资源：值由 `deploy` 在 cdk 之前找回或建立项目后经 context 传入，随部署事务同生死、随 `destroy` 删除；项目本身不归
-    stack 管理，`destroy` 保留。provider 读它核对已有项目，提交侧与 doctor 经 `ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)` 读同一个键。
+    stack 管理，`destroy` 保留。provider 的 deploy 读它核对已有项目，diff / --synth-only / destroy 读它的现值作为 context；提交侧与 doctor 经 `ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)` 读同一个键。
     """
     return ssm_path(prefix, DEVICE_FARM_PROJECT_KEY)
 

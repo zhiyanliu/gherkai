@@ -527,36 +527,53 @@ def test_classify_four_states():
 # ---------------------------------------------------------------- VPC 取值三态（打桩 boto3）
 
 class _ClientError(Exception):
-    """botocore ClientError 的形状替身（`response["Error"]["Code"]` + 文案）——本包按鸭子类型读它。"""
+    """botocore ClientError 的形状替身（`response["Error"]["Code"]` + 文案 + `operation_name`）——本包按鸭子类型读它。"""
 
-    def __init__(self, code: str, message: str) -> None:
+    def __init__(self, code: str, message: str, *, operation: str | None = None) -> None:
         super().__init__(f"An error occurred ({code}): {message}")
         self.response = {"Error": {"Code": code, "Message": message}}
+        self.operation_name = operation
 
 
-class _NoCredentials(Exception):
-    """替身：类名改成与 botocore 的 NoCredentialsError 相同（provider 按异常类名识别「没有凭证」）。"""
+def _botocore_like(name: str, message: str, *, base: str | None = None) -> Exception:
+    """替身：类名（与可选的基类名）与 botocore.exceptions 里的同名异常相同——provider 按异常类的 MRO 类名识别凭证与 region 一类的
+    问题，不 import botocore。名字是否仍在 botocore 里，由 `test_credential_error_names_exist_in_botocore` 守。"""
+    bases = (type(base, (Exception,), {}),) if base else (Exception,)
+    return type(name, bases, {})(message)
 
 
-_NoCredentials.__name__ = "NoCredentialsError"
+# 读 SSM 记录失败的错误样本与处置半句的期望类别：permission 列 ssm:GetParameter，credentials 提示配凭证与 region，other 不猜原因
 _RECORD_READ_ERRORS = [
-    _ClientError("AccessDeniedException", "not authorized to perform ssm:GetParameter"),
-    _NoCredentials("Unable to locate credentials"),
-    _ClientError("ThrottlingException", "Rate exceeded"),
-    ConnectionError("Could not connect to the endpoint URL"),
+    (_ClientError("AccessDeniedException", "not authorized to perform ssm:GetParameter", operation="GetParameter"), "permission"),
+    (_ClientError("AccessDenied", "not authorized to perform sts:AssumeRole", operation="AssumeRole"), "credentials"),
+    (_botocore_like("NoCredentialsError", "Unable to locate credentials"), "credentials"),
+    (_botocore_like("CredentialRetrievalError", "Error when retrieving credentials from custom-process"), "credentials"),
+    (_botocore_like("UnauthorizedSSOTokenError", "The SSO session has expired", base="SSOError"), "credentials"),
+    (_botocore_like("InvalidRegionError", "Provided region_name is invalid"), "credentials"),
+    (_ClientError("ExpiredTokenException", "The security token included in the request is expired", operation="GetParameter"),
+     "credentials"),
+    (_ClientError("ThrottlingException", "Rate exceeded", operation="GetParameter"), "other"),
+    (ConnectionError("Could not connect to the endpoint URL"), "other"),
 ]
-_RECORD_READ_ERROR_IDS = ["access-denied", "no-credentials", "throttling", "network"]
+_RECORD_READ_ERROR_IDS = ["ssm-denied", "assume-role-denied", "no-credentials", "credential-retrieval", "sso-subclass",
+                          "invalid-region", "expired-token", "throttling", "network"]
 
 
-def _assert_record_read_hint(err: str, error: Exception) -> None:
-    """读 SSM 记录失败消息的处置半句按错误类别（ADR 0051 决策 10「失败消息的形态」）：无权限列权限、无凭证提示配凭证与 region、
-    其余不提权限。"""
-    if isinstance(error, _ClientError) and error.response["Error"]["Code"] == "AccessDeniedException":
-        assert "ssm:GetParameter" in err
-    elif type(error).__name__ == "NoCredentialsError":
+def _assert_record_read_hint(err: str, kind: str) -> None:
+    """读 SSM 记录失败消息的处置半句按错误类别（ADR 0051 决策 10「失败消息的形态」），三个分支互斥。"""
+    if kind == "permission":
+        assert "ssm:GetParameter" in err and "凭证" not in err
+    elif kind == "credentials":
         assert "凭证" in err and "region" in err and "ssm:GetParameter" not in err
     else:
-        assert "权限" not in err and "ssm:GetParameter" not in err and "稍后重试" in err
+        assert "权限" not in err and "ssm:GetParameter" not in err and "凭证" not in err and "稍后重试" in err
+
+
+def test_credential_error_names_exist_in_botocore():
+    """读 SSM 记录失败时按 MRO 类名识别凭证类错误：名单里每个名字都必须是 botocore 真实存在的异常类，防 botocore 改名后静默失效。"""
+    import botocore.exceptions as be
+
+    assert {n for n in provider_cli._CREDENTIAL_ERROR_NAMES if not hasattr(be, n)} == set()
 
 
 class _Cfn:
@@ -939,10 +956,12 @@ def test_deploy_without_permission_after_the_recorded_project_vanished_skips_dev
     不说「设备支持保持不变」。沿用已不存在的 ARN 会让设备 run 到执行时才失败。"""
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
     df.stored = STORED_ARN
+    df.warn_text = f"部署记录的 Device Farm 项目 {STORED_ARN} 已不存在"   # 真实路径上找回或建立时先发出的那条警告
     df.resolve_error = devicefarm.DeviceFarmAccessDenied("ListProjects", "AccessDeniedException", stored_project_missing=True)
     assert _deploy() == 0
     err = capsys.readouterr().err
-    assert "已不存在" in err and STORED_ARN in err and "未启用设备支持" in err and "保持不变" not in err
+    assert err.count("已不存在") == 1  # 同一事实只说一遍：前一条警告已说明项目没了，无权限那条只说授权撤了、怎么恢复
+    assert STORED_ARN in err and "未启用设备支持" in err and "保持不变" not in err
     assert "devicefarm:ListProjects" in err and "devicefarm:CreateProject" in err and "gherkai deploy" in err
     assert _context_pairs(_argv(cdk))["device_farm_project"] == PENDING
     assert len(cdk.worker_steps) == 1  # 降级不影响 cdk 之后的镜像步骤
@@ -976,8 +995,8 @@ def test_deploy_other_device_farm_errors_exit_1_without_guessing(cdk, df, monkey
     assert cdk.calls == [] and cdk.worker_steps == []
 
 
-@pytest.mark.parametrize("error", _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
-def test_deploy_unreadable_project_record_exits_2_without_resolving(cdk, df, monkeypatch, capsys, error):
+@pytest.mark.parametrize(("error", "kind"), _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
+def test_deploy_unreadable_project_record_exits_2_without_resolving(cdk, df, monkeypatch, capsys, error, kind):
     """读不到 SSM 里的项目记录（无权限、无凭证、网络、限流）→ 以退出码 2 结束，不找回不建立、不调 cdk：不知道记录在不在，就无从
     判断该沿用还是该建立；当作「没有记录」继续，无权限降级会撤掉已部署的设备授权。处置半句按错误类别：只有无权限才列权限。"""
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
@@ -985,14 +1004,15 @@ def test_deploy_unreadable_project_record_exits_2_without_resolving(cdk, df, mon
     assert _deploy() == EXIT_PRECONDITION
     err = capsys.readouterr().err
     assert names.ssm_device_farm_project_path("vfy-") in err and str(error) in err and "Traceback" not in err
-    _assert_record_read_hint(err, error)
+    _assert_record_read_hint(err, kind)
     assert df.resolves == [] and cdk.calls == []
 
 
-@pytest.mark.parametrize("verb", ["deploy", "diff", "destroy"])
+@pytest.mark.parametrize("verb", ["deploy", "diff", "synth", "destroy"])
 def test_malformed_project_record_exits_2_and_names_the_parameter(cdk, df, verb, tmp_path, monkeypatch, capsys):
-    """SSM 记录不是合法的项目 ARN（只会因手工改动出现）→ deploy 与只读路径都以退出码 2 结束、不调 cdk、不找回不核对，消息点名
-    SSM 路径并给出查项目 ARN 的命令；不当作「没有记录」继续（无权限降级会撤掉已部署的授权），也不建议删参数。"""
+    """SSM 记录不是合法的项目 ARN（只会因手工改动出现）→ deploy、diff、--synth-only、destroy 都以退出码 2 结束、不调 cdk、不找回
+    不核对，消息点名 SSM 路径并给出查项目 ARN 的命令；不当作「没有记录」继续（无权限降级会撤掉已部署的授权），也不建议删参数、
+    不给写回参数的命令；没用 profile 时命令不带 --profile。"""
     monkeypatch.chdir(tmp_path)
     _stub_backend(monkeypatch, stack_exists=True, stored="default")
     df.stored = "arn:aws:devicefarm:us-east-1:111122223333:project:wrong-region"
@@ -1004,7 +1024,18 @@ def test_malformed_project_record_exits_2_and_names_the_parameter(cdk, df, verb,
     assert rc == EXIT_PRECONDITION
     err = capsys.readouterr().err
     assert names.ssm_device_farm_project_path("vfy-") in err and "list-projects" in err and "Traceback" not in err
+    assert "删除" not in err and "delete-parameter" not in err and "put-parameter" not in err and "--profile" not in err
     assert cdk.calls == [] and df.resolves == [] and df.verifies == []
+
+
+def test_malformed_project_record_command_carries_the_profile(cdk, df, monkeypatch, capsys):
+    """用了 --profile 时，查项目 ARN 的命令带同一个 --profile（与 doctor 的停止命令同一做法），照抄不会落到另一套凭证。"""
+    _stub_backend(monkeypatch, stack_exists=True, stored="default")
+    df.stored = "not-an-arn"
+    assert Provider().diff(_parse("--vpc", "new", "--region", "us-east-1", "--prefix", "vfy-", "--profile", "acme")) == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert f"aws devicefarm list-projects --region {names.DEVICE_FARM_REGION} --profile acme" in err
+    assert cdk.calls == []
 
 
 # ---------------------------------------------------------------- Device Farm 项目：diff / --synth-only / destroy 只读
@@ -1055,8 +1086,8 @@ def test_read_only_verbs_use_pending_when_nothing_is_recorded(cdk, df, verb, tmp
 
 
 @pytest.mark.parametrize("verb", READ_ONLY_VERBS)
-@pytest.mark.parametrize("error", _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
-def test_read_only_verbs_exit_2_when_the_record_is_unreadable(cdk, df, verb, error, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize(("error", "kind"), _RECORD_READ_ERRORS, ids=_RECORD_READ_ERROR_IDS)
+def test_read_only_verbs_exit_2_when_the_record_is_unreadable(cdk, df, verb, error, kind, tmp_path, monkeypatch, capsys):
     """读不到项目记录 → 以退出码 2 结束、不调 cdk，消息写明读的是哪个 SSM 路径与原异常；处置半句按错误类别：只有无权限才列权限，
     无凭证提示配凭证与 region，限流与网络不说成权限问题。不回落占位：那会让 diff 把已部署的设备授权显示成删除，误导依据它
     核对变更的人。"""
@@ -1066,12 +1097,12 @@ def test_read_only_verbs_exit_2_when_the_record_is_unreadable(cdk, df, verb, err
     assert method(args) == EXIT_PRECONDITION
     err = capsys.readouterr().err
     assert names.ssm_device_farm_project_path("vfy-") in err and str(error) in err and "Traceback" not in err
-    _assert_record_read_hint(err, error)
+    _assert_record_read_hint(err, kind)
     assert cdk.calls == [] and df.resolves == [] and df.verifies == []
 
 
 def test_diff_shows_pending_and_warns_when_the_recorded_project_is_gone(cdk, df, capsys):
-    """SSM 有记录、GetProject 回 NotFound（项目被手动删除）→ diff 以「待建立」占位并警告：下一次 deploy 会按名称找回或新建、
+    """SSM 有记录、GetProject 回 NotFound（项目被手动删除）→ diff 以「待建立」占位并警告：用有权限的凭证 deploy 时会按名称找回或新建、
     换成别的 ARN，沿用旧 ARN 的变更集会与真实部署不一致。仍不找回、不建立：CreateProject 只经找回或建立这一入口，
     它一次都没被调用（Device Farm 客户端的构造点也已换成直接失败）。"""
     df.stored = STORED_ARN
@@ -1155,21 +1186,25 @@ def test_synth_only_without_any_credentials_exports_offline_with_pending_and_war
 
 
 def test_synth_only_treats_a_credential_lookup_error_as_having_credentials(cdk, df, tmp_path, monkeypatch, capsys):
-    """解析凭证链本身出错（如 profile 名不存在）不算「完全没有凭证」：不回落占位，照常去读 SSM，读失败按退出码 2 结束。"""
+    """解析凭证链本身出错（如 profile 名不存在）不算「完全没有凭证」：不回落占位，照常去读 SSM，读失败按退出码 2 结束，处置半句
+    提示配凭证与 region、不说成限流或网络问题。真实的 boto3 在两处都于 Session 构造期抛 ProfileNotFound。"""
     monkeypatch.chdir(tmp_path)
+    profile_not_found = _botocore_like("ProfileNotFound", "The config profile (nope) could not be found")
 
     def _lookup_fails(**kw):
-        raise RuntimeError("The config profile (nope) could not be found")
+        raise profile_not_found
 
     monkeypatch.setattr(provider_cli, "_has_aws_credentials", _lookup_fails)
-    df.read_error = RuntimeError("The config profile (nope) could not be found")
+    df.read_error = profile_not_found
     method, args = _verb_call("synth", "--vpc", "new", "--region", "us-east-1", "--prefix", "vfy-")
     assert method(args) == EXIT_PRECONDITION
     assert df.reads == ["vfy-"] and cdk.calls == []
+    err = capsys.readouterr().err
+    assert "凭证" in err and "region" in err and "稍后重试" not in err and "ssm:GetParameter" not in err
 
 
 def test_has_aws_credentials_follows_the_credential_chain(monkeypatch, tmp_path):
-    """「完全没有凭证」的判据走 boto3 真实的凭证链（只解析、不发请求）：链上什么都没有时为 False，给了环境变量凭证即 True。
+    """「完全没有凭证」的判据走 boto3 真实的凭证链（不调用 AWS 服务的 API；实例元数据端点的请求由 AWS_EC2_METADATA_DISABLED 关闭）：链上什么都没有时为 False，给了环境变量凭证即 True。
     把共享配置、boto 旧配置与实例元数据都指向空处，开发机上已有的凭证才不会让断言飘。"""
     for var in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_SECURITY_TOKEN",
                 "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI", "AWS_CONTAINER_CREDENTIALS_FULL_URI",

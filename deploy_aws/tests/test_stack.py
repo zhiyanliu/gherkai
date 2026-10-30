@@ -267,7 +267,8 @@ def test_ssm_parameter_set_without_device_farm_project_is_exactly_six(context):
 def test_ssm_parameter_set_with_device_farm_project_is_exactly_seven(prefix):
     """带合法项目 ARN 时恰多出一条 `device-farm-project`，值逐字等于传入的 ARN（ADR 0033 资源清单第 11 条、ADR 0051 决策 10）。
 
-    提交侧读它填设备请求、doctor 读它列未结束的会话、下次 deploy 读它核对已有项目，三者读的都是这一条；值被改写或路径没随
+    提交侧读它填设备请求、doctor 读它列未结束的会话、下次 deploy 读它核对已有项目、diff / --synth-only / destroy 取它的现值作为
+    context，这几处读的都是这一条；值被改写或路径没随
     prefix 走，读侧拿到的就是别的项目或拿不到值。
     """
     params = _ssm_params(_template(prefix=prefix, context=DF_CONTEXT))
@@ -618,7 +619,9 @@ def test_valid_device_farm_project_is_kept_verbatim(arn):
     t = _template(context={"device_farm_project": arn})
     assert _ssm_params(t)["/gherkai-backend/device-farm-project"]["Value"] == arn
     account = arn.split(":")[4]
-    for st in _statements_with(_role_statements(t, "TaskRoleMidscene"), "devicefarm:StopRemoteAccessSession"):
+    stops = _statements_with(_role_statements(t, "TaskRoleMidscene"), "devicefarm:StopRemoteAccessSession")
+    assert stops, "带 ARN 时 Midscene role 必须有会话停止授权"
+    for st in stops:
         assert f"arn:aws:devicefarm:us-west-2:{account}:session:{DF_PROJECT_ID}/*" in _as_list(st["Resource"])
 
 

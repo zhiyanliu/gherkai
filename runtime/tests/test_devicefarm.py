@@ -363,10 +363,17 @@ def test_module_never_creates_or_stops_sessions():
     tree = ast.parse(Path(devicefarm.__file__).read_text(encoding="utf-8"))
     forbidden = {"create_remote_access_session", "stop_remote_access_session", "delete_remote_access_session",
                  "CreateRemoteAccessSession", "StopRemoteAccessSession", "DeleteRemoteAccessSession"}
-    called = {n.func.attr for n in ast.walk(tree) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
-    # 字符串常量也查：getattr(client, "...") 与 _make_api_call("...") 这类间接调用不带属性调用的形态
-    literals = {n.value for n in ast.walk(tree) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
-    assert not called & forbidden
+    # 属性访问全查（不限于直接调用）：先取属性再经别名调用的写法同样拦住
+    attrs = {n.attr for n in ast.walk(tree) if isinstance(n, ast.Attribute)}
+    # 字符串常量也查：getattr(client, "...") 与 _make_api_call("...") 这类间接调用不带属性调用的形态；docstring 除外，说明性文字
+    # 提到这些动作名不算调用
+    docstrings = {id(node.body[0].value) for node in ast.walk(tree)
+                  if isinstance(node, (ast.Module, ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+                  and node.body and isinstance(node.body[0], ast.Expr)
+                  and isinstance(node.body[0].value, ast.Constant) and isinstance(node.body[0].value.value, str)}
+    literals = {n.value for n in ast.walk(tree)
+                if isinstance(n, ast.Constant) and isinstance(n.value, str) and id(n) not in docstrings}
+    assert not attrs & forbidden
     assert not {lit for lit in literals if any(f in lit for f in forbidden)}
 
 

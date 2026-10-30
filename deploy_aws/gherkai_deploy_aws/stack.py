@@ -529,8 +529,9 @@ class BackendStack(Stack):
         """有项目 ARN 时把它写成 **stack 资源**；没有时不建这个参数。
 
         与部署戳同理：随部署事务提交或回滚、随 `gherkai destroy` 删除。项目本身由 `gherkai deploy` 用 SDK 找回或建立、
-        不归 stack 管理，`destroy` 保留项目（连同会话记录与录像）。读者有三个：提交侧填设备请求的项目 ARN，`doctor` 列未结束
-        的会话，下一次 `deploy` 核对已有项目。参数不存在即部署未启用设备支持，提交侧据此拦下带设备目标的云端 run。
+        不归 stack 管理，`destroy` 保留项目（连同会话记录与录像）。读者：提交侧填设备请求的项目 ARN，`doctor` 列未结束
+        的会话，下一次 `deploy` 核对已有项目，`diff` / `--synth-only` / `destroy` 取它的现值作为 context 重新合成模板（`diff` 另用
+        GetProject 只读核对）。参数不存在即部署未启用设备支持，提交侧据此拦下带设备目标的云端 run。
         落在 ADR 0033 已授的 `/{prefix}backend/*` 通配内，CLI 侧不新增 SSM 授权。
         """
         if self.device_farm_project_arn is None:

@@ -1890,12 +1890,28 @@ def test_doctor_cloud_devices_other_failures_land_in_detail(monkeypatch, capsys)
     row = by[("backend", "devices.sessions")]
     assert row["ok"] is False and row["required"] is False and "Rate exceeded" in row["detail"]
     assert "没有未结束" not in row["detail"]
+    assert "重新运行 doctor" in row["detail"] and "请部署方重新执行 gherkai deploy" in row["detail"]  # 怎么办
 
     by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, read_error=RuntimeError("Could not connect to the endpoint URL"))
     row = by[("backend", "devices.project")]
     assert row["ok"] is False and row["required"] is False
     assert "Could not connect" in row["detail"] and "/vfy-backend/device-farm-project" in row["detail"]
+    assert "重新运行 doctor" in row["detail"] and "权限" not in row["detail"]  # 网络问题不说成权限问题
     assert "部署未启用设备支持" not in row["detail"]  # 读不到不等于没有
+    assert ("backend", "devices.sessions") not in by and calls["list"] == []
+
+
+def test_doctor_cloud_devices_project_read_access_denied_names_permission(monkeypatch, capsys):
+    """读 SSM 项目记录遇无权限（自定义的窄 SSM 策略没覆盖新参数）：项目行点名 ssm:GetParameter 与参数路径，不把它说成凭证或网络
+    问题，仍只标 `-`、不再列举。"""
+    class _Denied(Exception):
+        response = {"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform ssm:GetParameter"}}
+
+    by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, read_error=_Denied("denied"))
+    row = by[("backend", "devices.project")]
+    assert row["ok"] is False and row["required"] is False
+    assert "ssm:GetParameter" in row["detail"] and "/vfy-backend/device-farm-project" in row["detail"]
+    assert "网络" not in row["detail"]
     assert ("backend", "devices.sessions") not in by and calls["list"] == []
 
 
