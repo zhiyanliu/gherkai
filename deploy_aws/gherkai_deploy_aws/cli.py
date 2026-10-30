@@ -192,7 +192,8 @@ def _make_hint_clients(*, region, profile):
 
 
 # 凭证、region 或配置不可用一类的 botocore 异常：按异常类的 MRO 类名匹配（基类名覆盖子类，如 SSOError 覆盖 SSOTokenLoadError），
-# 不 import botocore；另加签名与令牌类的错误码。读 SSM 记录失败时据此提示去配凭证与 region，而不是列权限。
+# 不 import botocore；另加令牌类的错误码。签名错误（InvalidSignatureException 等）不在此列：代理改写已签名请求也会产生它，断不了
+# 是凭证问题，留给兜底提示。读 SSM 记录失败时据此提示去配凭证与 region，而不是列权限。
 _CREDENTIAL_ERROR_NAMES = frozenset({
     "NoCredentialsError", "PartialCredentialsError", "CredentialRetrievalError", "TokenRetrievalError", "NoAuthTokenError",
     "RefreshWithMFAUnsupportedError", "SSOError", "LoginError",
@@ -200,8 +201,7 @@ _CREDENTIAL_ERROR_NAMES = frozenset({
 })
 _CREDENTIAL_ERROR_CODES = frozenset({
     "ExpiredToken", "ExpiredTokenException", "InvalidClientTokenId", "UnrecognizedClientException",
-    "InvalidSignatureException", "SignatureDoesNotMatch", "IncompleteSignature", "MissingAuthenticationToken",
-    "MissingAuthenticationTokenException",
+    "MissingAuthenticationToken", "MissingAuthenticationTokenException",
 })
 
 
@@ -483,9 +483,9 @@ class Provider:
         对本机制之前部署的环境，`deploy` 以退出码 2 结束时让人运行的就是它，若它也被拦就无路可走。
 
         **diff 不建立 Device Farm 项目**（ADR 0051 决策 10）：SSM 有记录且 GetProject 核对成功就用记录里的 ARN，没有记录（提示）
-        或项目已不存在（警告）就以「待建立」占位。占位时变更集里看不到设备支持相关的授权与项目 ARN 参数——真 deploy 会先找回或
-        建立项目、再带着 ARN 合成，所以首次启用设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分，提示与
-        警告都把这一点说给使用方。读不到记录、记录不是合法的项目 ARN、核对遇到权限以外的失败则以退出码 2 结束；核对被拒则沿用
+        或项目已不存在（警告）就以「待建立」占位。占位时用于计算变更集的模板不含设备支持相关的授权与项目 ARN 参数：已部署的
+        模板含它们时（记录的项目已被删除），变更集会显示移除它们；真 deploy 会先找回或建立项目、再带着 ARN 合成，所以首次启用
+        设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分，提示与警告都把这一点说给使用方。读不到记录、记录不是合法的项目 ARN、核对遇到权限以外的失败则以退出码 2 结束；核对被拒则沿用
         记录并警告（见 `_stored_device_farm_project`）。"""
         missing = self._require_vpc(args)
         if missing is not None:
@@ -988,8 +988,8 @@ class Provider:
         if verb != "diff":
             return None, stored
         if stored is None:
-            print(f"提示：后端没有 Device Farm 项目记录（SSM 参数 {path}），变更集按未启用设备支持计算、不含设备支持相关的授权与"
-                  f"项目 ARN 参数；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会先按名称 "
+            print(f"提示：后端没有 Device Farm 项目记录（SSM 参数 {path}），用于计算变更集的模板按未启用设备支持生成、不含设备支持"
+                  f"相关的授权与项目 ARN 参数；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会先按名称 "
                   f"{devicefarm.project_name(target.prefix)} 找回或建立项目，实际变更会比这里多出这两部分。", file=sys.stderr)
             return None, None
 
@@ -1008,9 +1008,9 @@ class Provider:
             return EXIT_PRECONDITION, None
         if exists:
             return None, stored
-        print(f"警告：部署记录的 Device Farm 项目 {stored} 已不存在（可能已被手动删除），变更集按尚未建立项目显示，"
-              f"其中看不到设备支持相关的授权；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会按名称 "
-              f"{devicefarm.project_name(target.prefix)} 找回或新建项目。", file=sys.stderr)
+        print(f"警告：部署记录的 Device Farm 项目 {stored} 已不存在（可能已被手动删除），用不含设备支持相关授权与项目 ARN 参数的"
+              f"模板计算变更集，已部署的模板含这些授权与参数时变更集会显示移除它们；用有 Device Farm 权限的凭证执行 "
+              f"`gherkai deploy` 时会按名称 {devicefarm.project_name(target.prefix)} 找回或新建项目。", file=sys.stderr)
         return None, None
 
     @staticmethod

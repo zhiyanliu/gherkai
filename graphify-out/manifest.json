@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793335490.4552164,
-    "ast_hash": "1b542ed0b7e5da1442bd7f19778e5d9a",
+    "mtime": 1793336399.5901742,
+    "ast_hash": "6e547a8d2be8b48bd27fb84a25f0bcb7",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793335490.4548824,
-    "ast_hash": "d74f6180f33676653fd6dee8490a3ac2",
+    "mtime": 1793336399.5897255,
+    "ast_hash": "d02f8f7e3ea26cc06de036823766f458",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/cli.py": {
-    "mtime": 1793335490.4528828,
-    "ast_hash": "2830282369ad1bfc10990df18f66b1fa",
+    "mtime": 1793336399.590532,
+    "ast_hash": "06a5761c2d254f456289895f5851241e",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
@@ -980,8 +980,8 @@
     "semantic_hash": "813532a0d7b00c40aa1d4e413626c484"
   },
   "deploy_aws/tests/test_provider.py": {
-    "mtime": 1793335576.1486578,
-    "ast_hash": "c84425a734b29a2529906951a22a322d",
+    "mtime": 1793336399.5907485,
+    "ast_hash": "4e6057946bde3b76245a8c80c84608ef",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {
@@ -1415,8 +1415,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1793335490.4560318,
-    "ast_hash": "a357be0d2d5afdc57c94368abe30cbcb",
+    "mtime": 1793336399.5911853,
+    "ast_hash": "36339e58ece576019e13cddff6ff847f",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793335490.4564366,
-    "ast_hash": "4077e211401f5a491ebf6cda7f235ef2",
+    "mtime": 1793336399.59103,
+    "ast_hash": "26b4f459b9ce2d84d357ee8d0e4c7fbd",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {

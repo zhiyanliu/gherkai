@@ -1906,6 +1906,7 @@ def test_doctor_cloud_devices_project_read_access_denied_names_permission(monkey
     问题，仍只标 `-`、不再列举。"""
     class _Denied(Exception):
         response = {"Error": {"Code": "AccessDeniedException", "Message": "not authorized to perform ssm:GetParameter"}}
+        operation_name = "GetParameter"
 
     by, calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, read_error=_Denied("denied"))
     row = by[("backend", "devices.project")]
@@ -1913,6 +1914,15 @@ def test_doctor_cloud_devices_project_read_access_denied_names_permission(monkey
     assert "ssm:GetParameter" in row["detail"] and "/vfy-backend/device-farm-project" in row["detail"]
     assert "网络" not in row["detail"]
     assert ("backend", "devices.sessions") not in by and calls["list"] == []
+
+    # 凭证链里 AssumeRole 被拒（profile 配置的角色）不是这个参数的权限问题：不列 ssm:GetParameter，按凭证与网络提示
+    class _AssumeDenied(Exception):
+        response = {"Error": {"Code": "AccessDenied", "Message": "not authorized to perform sts:AssumeRole"}}
+        operation_name = "AssumeRole"
+
+    by, _calls = _doctor_devices_cloud(monkeypatch, capsys, arn=_DF_PROJECT, read_error=_AssumeDenied("denied"))
+    row = by[("backend", "devices.project")]
+    assert row["ok"] is False and "ssm:GetParameter" not in row["detail"] and "凭证" in row["detail"]
 
 
 def test_cli_help_does_not_load_device_farm_module_or_aws_sdk():

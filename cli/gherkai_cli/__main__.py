@@ -955,7 +955,8 @@ def _doctor_devices(target, add) -> None:
     except Exception as e:
         # 无权限才列权限，其余（凭证、region、限流、网络）不说成权限问题；判定与 deploy 读同一记录共用一份错误码集合（ADR 0051 决策 10）
         hint = ("当前凭证没有读取这个参数的权限，需要该参数的 ssm:GetParameter 权限；补上后重新运行 doctor"
-                if devicefarm.is_access_denied(e) else "请排除凭证、region 与网络问题后重新运行 doctor")
+                if devicefarm.is_access_denied(e) and getattr(e, "operation_name", None) == "GetParameter"
+                else "请排除凭证、region 与网络问题后重新运行 doctor")
         add("backend", "devices.project", False,
             f"读不到 Device Farm 项目参数（SSM 参数 {path}），设备支持是否启用未知：{e}。{hint}", required=False)
         return

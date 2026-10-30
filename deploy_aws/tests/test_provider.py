@@ -554,9 +554,14 @@ _RECORD_READ_ERRORS = [
      "credentials"),
     (_ClientError("ThrottlingException", "Rate exceeded", operation="GetParameter"), "other"),
     (ConnectionError("Could not connect to the endpoint URL"), "other"),
+    # 签名错误断不了是凭证问题（代理改写已签名请求也会产生），不猜原因
+    (_ClientError("InvalidSignatureException", "The request signature we calculated does not match", operation="GetParameter"), "other"),
+    (_ClientError("SignatureDoesNotMatch", "signature mismatch", operation="GetParameter"), "other"),
+    (_ClientError("IncompleteSignature", "incomplete signature", operation="GetParameter"), "other"),
 ]
 _RECORD_READ_ERROR_IDS = ["ssm-denied", "assume-role-denied", "no-credentials", "credential-retrieval", "sso-subclass",
-                          "invalid-region", "expired-token", "throttling", "network"]
+                          "invalid-region", "expired-token", "throttling", "network", "invalid-signature", "signature-mismatch",
+                          "incomplete-signature"]
 
 
 def _assert_record_read_hint(err: str, kind: str) -> None:
