@@ -1018,11 +1018,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   }
 
   /** 写 device-session.json；正常模式下经上传器得到链接挂到 scope_done（ADR 0051 决策 8）。best-effort：写盘或上传失败记一行
-   *  日志，不影响判定。中断模式（含升级）不实时上传，只交给截图的后台队列，由停止路径阶段 4 的队列排空带上（ADR 0051 决策 5）：
-   *  实时上传会在会话释放之后、阶段 4 之前再占一段上传超时，超出中断路径的宽限推导；这一模式返回的链接也不被使用（进入终结后不发
-   *  scope_done）。正常模式的实时上传在途时收到中断：上传不打断，落定之后再核对一次是否已升级。上传失败且已升级即交给后台队列——
-   *  停止路径的排空在本次释放返回之后才开始，此前入队的文件都会被它带上；上传成功则文件已经传到 S3，不再入队（链接照常返回，同样
-   *  不被使用）。本方法每次释放只执行一次，入队因此至多一次。 */
+   *  日志，不影响判定。中断模式（含升级）不实时上传，只交给截图的后台队列，由停止路径阶段 4 的队列排空在预算内尽力上传（ADR 0051
+   *  决策 5）：实时上传会在会话释放之后、阶段 4 之前再占一段上传超时，超出中断路径的宽限推导；这一模式返回的链接也不被使用（进入
+   *  终结后不发 scope_done）。正常模式的实时上传在途时收到中断：上传不打断，落定之后再核对一次是否已升级。上传失败且已升级即交后台
+   *  队列、由排空在预算内尽力上传——停止路径的排空在本次释放返回之后才开始，入队排在排空之前；排空的预算可能被队列前方上传较慢的文件
+   *  耗尽，这份文件不保证能上传，所以失败时的日志只说明上传失败、不承诺退出前再次上传。上传成功则文件已经传到 S3，不再入队（链接照常
+   *  返回，同样不被使用）。本方法每次释放只执行一次，入队因此至多一次。 */
   private async deviceSessionRefs(mode: ReleaseMode): Promise<ReportRef[]> {
     const root = this.deps.artifactRoot;
     if (root === undefined) return [];
@@ -1040,12 +1041,8 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     try {
       return [{ kind: DEVICE_SESSION_REPORT_KIND, ref: await this.deps.uploader.toReportRef(file) }];
     } catch (e) {
-      if (this.interruptRequested) {
-        this.deps.log(`worker: 设备诊断文件没能上传，退出前会再尝试上传（不影响判定）：${errorText(e)}`);
-        this.deps.uploader.enqueue([file]);
-      } else {
-        this.deps.log(`worker: 设备诊断文件没能上传（不影响判定）：${errorText(e)}`);
-      }
+      this.deps.log(`worker: 设备诊断文件没能上传（不影响判定）：${errorText(e)}`);
+      if (this.interruptRequested) this.deps.uploader.enqueue([file]);
       return [];
     }
   }

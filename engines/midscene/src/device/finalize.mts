@@ -21,8 +21,9 @@
 //      准备中的 PREPARING 与 RUNNING）或 Get 失败时发 Stop；Stop 报错或返回体不是这两个状态时补查一次 Get；仍未确认则退避后再
 //      Stop 一次、再补查。确认只认 STOPPING / COMPLETED，到线仍未确认记 unconfirmed。被拒方案是「仍为 RUNNING 才发 Stop」：排队或
 //      准备中的会话不 Stop 就不会撤回，之后照常进入 RUNNING 并计费到 150 分钟上限。换台时被替换的会话与获取期按名找回的会话，
-//      获取侧已按同一规则处理过一次：已确认的不再查，没确认的在这里照常处理（获取侧在终结接手前已发出的 Stop 不撤回，这里照常
-//      先 Get 再决定；observedS 的止点仍按 observedSeconds 取第一次发出 Stop 或确认已停止的时刻中较早者，含获取侧的那次处理）。
+//      获取侧已按同一规则处理过一次；等到 RUNNING 期间读到 STOPPING / COMPLETED 的会话，获取侧在读到时即记为确认。已确认的不再查，
+//      没确认的在这里照常处理（获取侧在终结接手前已发出的 Stop 不撤回，这里照常先 Get 再决定；observedS 的止点仍按 observedSeconds
+//      取第一次发出 Stop 或确认已停止的时刻中较早者，含获取侧的那次处理）。
 // 阶段 4 的中断兜底上传与截图队列排空归调用方（worker/run-scope.mts 的收尾序列），在本块返回之后执行。
 //
 // 只进入一次：重复调用（信号重复、超时与信号交叠、两种模式先后到达）返回同一个结果，四阶段不重新进入。每个真实会话按 ARN 只发
@@ -146,7 +147,8 @@ async function deleteAppiumSession(s: DeviceFarmSessionBlock, del: () => Promise
 
 /** 释放一个会话（Stop 规则见文件头）。frozen 置位之后不再发调用、不再改结论。 */
 async function releaseOne(s: DeviceFarmSessionBlock, t: TrackedSession, deadline: number, frozen: { value: boolean }): Promise<void> {
-  if (t.confirmedAt !== null) return;  // 换台或获取期按名找回时已确认停止（Get 或 Stop 的返回体为 STOPPING / COMPLETED）
+  // 获取侧已确认停止：换台或按名找回时 Get 或 Stop 的返回体为 STOPPING / COMPLETED，或等到 RUNNING 期间读到这两个状态
+  if (t.confirmedAt !== null) return;
   const bound = { deadline, outer: null };
   const confirm = (info: Awaited<ReturnType<DeviceFarmSessionBlock["getWithin"]>>): boolean => {
     if (frozen.value || !isStopped(info?.status)) return false;

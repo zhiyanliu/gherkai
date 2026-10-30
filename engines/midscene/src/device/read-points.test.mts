@@ -10,11 +10,12 @@
 //      机型适配分支的三类：设备选择的输入、协议载荷、句柄上下文的透传。豁免按声明逐处列出（文件里最近一层带名字的函数、方法、
 //      类型或模块级常量），不按整个文件：同一文件里别的函数（例如设备接缝里选导航路线的那个）一处出现即红。豁免的声明里，除设备
 //      选择的输入之外，读出的值只能原样透传，按白名单判：填进对象字段、数组或模板插值，作变量或字段的初值，以单独成句的赋值写进
-//      变量或字段，作为返回值，或用 ?? 与 || 给缺省值；作条件判断真假、与 null / undefined 比较是存在性判断，也允许。括号、类型
-//      断言、非空断言与赋值表达式不改变取值，穿过它们沿外层再判。其余写法都按适配分支报红，包括在它上面调方法、让它参与运算
-//      （一元运算、算术、拼接、位运算、typeof）、与非空值比较、按它 switch 或用作 case 标签、用作下标、把它交给函数处理；先存进
-//      变量、数组、对象或模板再判断照不出来，与不扫数字字面量同一个边界。决定适配行为的四块（驱动适配器、能力探测、界面实现、
-//      命令守卫）不在豁免里。不扫数字字面量：坐标、超时与比例里的数字与版本号无法区分（被拒方案）。
+//      变量或字段（外面带括号、类型断言或非空断言也算），作为返回值，或用 ?? 与 || 给缺省值；作条件判断真假、与 null / undefined
+//      作相等或不等比较（==、!=、===、!==）是存在性判断，也允许。括号、类型断言、非空断言与赋值表达式不改变取值，穿过它们沿外层
+//      再判。其余写法都按适配分支报红，包括在它上面调方法、让它参与运算（一元运算、算术、拼接、位运算、typeof）、与非空值比较、
+//      与 null / undefined 作相等或不等之外的比较（大小比较、in、instanceof）、按它 switch 或用作 case 标签、用作下标、把它交给
+//      函数处理；先存进变量、数组、对象或模板再判断照不出来，与不扫数字字面量同一个边界。决定适配行为的四块（驱动适配器、能力
+//      探测、界面实现、命令守卫）不在豁免里。不扫数字字面量：坐标、超时与比例里的数字与版本号无法区分（被拒方案）。
 //   另有一条结构差集：会话能力对象（`.capabilities`）只在 device/appium.mts 读取，读取点因此只有那一处（决策 1）。
 // 每条都带正向对照：检测函数先在构造的源码片段上命中，真实文件里已知的出现也必须被检测到，每条豁免都必须仍有命中，防止检测
 // 失效或豁免过期时差集空过。
@@ -222,15 +223,36 @@ function scopeName(p: ts.Node): string | null {
   return null;
 }
 
-const COMPARISON_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
+/** 相等与不等：与 null / undefined 作这四种比较是存在性判断，不算用法。 */
+const EQUALITY_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
   ts.SyntaxKind.EqualsEqualsEqualsToken, ts.SyntaxKind.ExclamationEqualsEqualsToken, ts.SyntaxKind.EqualsEqualsToken,
-  ts.SyntaxKind.ExclamationEqualsToken, ts.SyntaxKind.LessThanToken, ts.SyntaxKind.LessThanEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+]);
+
+/** 比较：相等与不等之外的大小比较、in 与 instanceof，对方是 null / undefined 也是用法（大小比较把两侧转成数值，`x > null`
+ *  等同于拿版本号与 0 比较）。 */
+const COMPARISON_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ...EQUALITY_OPERATORS, ts.SyntaxKind.LessThanToken, ts.SyntaxKind.LessThanEqualsToken,
   ts.SyntaxKind.GreaterThanToken, ts.SyntaxKind.GreaterThanEqualsToken, ts.SyntaxKind.InKeyword, ts.SyntaxKind.InstanceOfKeyword,
 ]);
 
-function isNullish(n: ts.Expression): boolean {
+/** 不改变取值的包装：括号、类型断言（as、尖括号写法与 satisfies）与非空断言。 */
+type TransparentWrapper = ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion | ts.SatisfiesExpression | ts.NonNullExpression;
+
+function isTransparentWrapper(n: ts.Node): n is TransparentWrapper {
+  return ts.isParenthesizedExpression(n) || ts.isAsExpression(n) || ts.isTypeAssertionExpression(n) || ts.isSatisfiesExpression(n)
+    || ts.isNonNullExpression(n);
+}
+
+/** 剥掉外面各层透明包装后的表达式。 */
+function unwrapped(n: ts.Expression): ts.Expression {
   let e = n;
-  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  while (isTransparentWrapper(e)) e = e.expression;
+  return e;
+}
+
+function isNullish(n: ts.Expression): boolean {
+  const e = unwrapped(n);
   return e.kind === ts.SyntaxKind.NullKeyword || (ts.isIdentifier(e) && e.text === "undefined");
 }
 
@@ -245,19 +267,23 @@ const ASSIGNMENT_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
   ts.SyntaxKind.AmpersandAmpersandEqualsToken,
 ]);
 
-/** 读出的值是否被拿来做判断（返回用法的说明），还是原样透传（null）。按白名单判。沿着保持取值不变的外层向上找：括号、类型
- *  断言、非空断言、条件表达式的两个分支，??、|| 与 &&（结果就是某个操作数本身），以及赋值表达式（它的值就是写入的值）；
- *  `=` 左侧的出现是写入目标，不是读取。到达这些去处才算透传：对象字段的值、数组元素、不带标签的模板插值、变量或类字段的初值、
- *  返回值、箭头函数的表达式体、单独成句的赋值；作 if / while / for / 条件表达式的条件判断真假、与 null / undefined 比较是
- *  存在性判断，同样不算用法。其余去处都是用法：取属性或调方法、交给函数（含 new 与带标签的模板）、用作下标、参与运算（一元
- *  运算含 !、算术、拼接、位运算、算术与位运算的复合赋值、typeof）、与非空值比较、用作 switch 的判别式或 case 的标签，以及
- *  白名单之外的任何写法。 */
+function isAssignment(n: ts.Expression): boolean {
+  return ts.isBinaryExpression(n) && ASSIGNMENT_OPERATORS.has(n.operatorToken.kind);
+}
+
+/** 读出的值是否被拿来做判断（返回用法的说明），还是原样透传（null）。按白名单判。沿着保持取值不变的外层向上找：透明包装
+ *  （括号、类型断言、非空断言）、条件表达式的两个分支，??、|| 与 &&（结果就是某个操作数本身），以及赋值表达式（它的值就是
+ *  写入的值）；`=` 左侧的出现是写入目标，不是读取。到达这些去处才算透传：对象字段的值、数组元素、不带标签的模板插值、变量或
+ *  类字段的初值、返回值、箭头函数的表达式体、单独成句的赋值（外面带透明包装也算）；作 if / while / for / 条件表达式的条件判断
+ *  真假、与 null / undefined 作相等或不等比较（==、!=、===、!==）是存在性判断，同样不算用法。其余去处都是用法：取属性或调方法、
+ *  交给函数（含 new 与带标签的模板）、用作下标、参与运算（一元运算含 !、算术、拼接、位运算、算术与位运算的复合赋值、typeof）、
+ *  与非空值比较、与 null / undefined 作相等或不等之外的比较（大小比较、in、instanceof）、用作 switch 的判别式或 case 的标签，
+ *  以及白名单之外的任何写法。 */
 function valueUse(read: ts.Node): string | null {
   let node = read;
   for (;;) {
     const p = node.parent;
-    if (ts.isParenthesizedExpression(p) || ts.isAsExpression(p) || ts.isNonNullExpression(p) || ts.isTypeAssertionExpression(p)
-      || ts.isSatisfiesExpression(p) || (ts.isConditionalExpression(p) && p.condition !== node)) {
+    if (isTransparentWrapper(p) || (ts.isConditionalExpression(p) && p.condition !== node)) {
       node = p;
       continue;
     }
@@ -273,7 +299,9 @@ function valueUse(read: ts.Node): string | null {
         node = p;
         continue;
       }
-      if (COMPARISON_OPERATORS.has(op)) return isNullish(p.left === node ? p.right : p.left) ? null : "与其他值比较";
+      if (COMPARISON_OPERATORS.has(op)) {
+        return EQUALITY_OPERATORS.has(op) && isNullish(p.left === node ? p.right : p.left) ? null : "与其他值比较";
+      }
       return "读出的值参与运算";
     }
     if (ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p) || ts.isTypeOfExpression(p)) return "读出的值参与运算";
@@ -296,9 +324,10 @@ function isConditionOf(p: ts.Node, node: ts.Node): boolean {
   return false;
 }
 
-/** 原样透传的去处：对象字段的值、数组元素、变量或类字段的初值、返回值、箭头函数的表达式体、单独成句的赋值。 */
+/** 原样透传的去处：对象字段的值、数组元素、变量或类字段的初值、返回值、箭头函数的表达式体、单独成句的赋值。判断一句是不是
+ *  单独成句的赋值时先剥掉外面的透明包装，`(v = x);` 与 `(v ??= x)!;` 都算。 */
 function isPassThroughSink(p: ts.Node, node: ts.Node): boolean {
-  if (ts.isExpressionStatement(p)) return ts.isBinaryExpression(node) && ASSIGNMENT_OPERATORS.has(node.operatorToken.kind);
+  if (ts.isExpressionStatement(p)) return isAssignment(unwrapped(p.expression));
   if (ts.isPropertyAssignment(p) || ts.isVariableDeclaration(p) || ts.isPropertyDeclaration(p)) return p.initializer === node;
   if (ts.isArrowFunction(p)) return p.body === node;
   return ts.isArrayLiteralExpression(p) || ts.isReturnStatement(p);
@@ -551,6 +580,39 @@ test("检测函数在构造的片段上按白名单判透传：用作下标、�
   ]);
 });
 
+test("检测函数在构造的片段上区分存在性判断：与 null / undefined 只有相等或不等比较是存在性判断，大小比较、in 与 instanceof 是用法", () => {
+  const sf = parse("x.mts", [
+    "if ((s.platformVersion as any) > null) {}",
+    "const a = null <= s.osVersion;",
+    "const b = s.platformVersion >= (undefined);",
+    "const c = s.model in null;",
+    "const d = s.osVersion instanceof (null as any);",
+    "if (s.osVersion == null || s.model != undefined) {}",
+    "const e = undefined === s.platformVersion;",
+    "const f = s.osVersion !== (null as any);",
+  ].join("\n"));
+  assert.deepEqual(versionModelMentions(sf).map((h) => [h.line, h.what, h.use]), [
+    [1, "platformVersion", "与其他值比较"], [2, "osVersion", "与其他值比较"], [3, "platformVersion", "与其他值比较"],
+    [4, "model", "与其他值比较"], [5, "osVersion", "与其他值比较"],
+    [6, "osVersion", null], [6, "model", null], [7, "platformVersion", null], [8, "osVersion", null],
+  ]);
+});
+
+test("检测函数在构造的片段上识别单独成句的赋值：外面带括号、类型断言或非空断言的赋值仍是透传，单独成句的读取带上这些包装仍是用法", () => {
+  const sf = parse("x.mts", [
+    "(v = s.platformVersion);",
+    "(v ??= s.platformVersion);",
+    "((this.osVersion = s.osVersion) as string)!;",
+    "(v ||= s.model satisfies string);",
+    "(s.osVersion);",
+    "(s.platformVersion as string)!;",
+  ].join("\n"));
+  assert.deepEqual(versionModelMentions(sf).map((h) => [h.line, h.what, h.use]), [
+    [1, "platformVersion", null], [2, "platformVersion", null], [3, "osVersion", null], [3, "osVersion", null], [4, "model", null],
+    [5, "osVersion", "读出的值未原样透传"], [6, "platformVersion", "读出的值未原样透传"],
+  ]);
+});
+
 /** 一个文件里按 scopeOf 的写法（以点连接的各层名字）找到的声明。 */
 function declarationNamed(sf: ts.SourceFile, scope: string): ts.Node | undefined {
   let found: ts.Node | undefined;
@@ -569,9 +631,10 @@ const INJECTED_MISUSES: ReadonlyArray<readonly [string, string]> = [
   ["switch (k) { case s.platformVersion + \"\": break; }", "读出的值参与运算"],
   ["switch (v = s.platformVersion) {}", "按读出的值分支"],
   ["if ((v = s.platformVersion) === \"26\") {}", "与其他值比较"],
+  ["if ((appium.platformVersion as any) > null) {}", "与其他值比较"],
 ];
 
-test("真实文件里透传类豁免的声明注入非透传写法后报红：一元数值转换用作 switch 判别式、拼接结果用作 case 标签、赋值表达式的值用作 switch 判别式或与非空值比较", () => {
+test("真实文件里透传类豁免的声明注入非透传写法后报红：一元数值转换用作 switch 判别式、拼接结果用作 case 标签、赋值表达式的值用作 switch 判别式或与非空值比较、与 null 作大小比较", () => {
   const injected: string[] = [];
   for (const [rel, scopes] of VERSION_MODEL_ALLOWED) {
     const text = fs.readFileSync(path.join(SRC, rel), "utf-8");

@@ -271,8 +271,11 @@ MACHINE_ROOT = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/")
 
 # ── 悬空指针（CLAUDE.md 文档纪律「悬空指针红线」）──────────────────────────────
 # 长期文档与 code 注释只指稳定物：指向某份 journey 文件的链接、裸 WP 编号在被吸收后都会悬空。只认「指向具体文件」
-# 的形态（`docs/journey/NNNN-…`），提到目录本身（「过程产物放 docs/journey/」）是合法的分层描述。
-DANGLING_JOURNEY = re.compile(r"docs/journey/\d{4}-")
+# 的形态（`journey/NNNN-…`），提到目录本身（「过程产物放 docs/journey/」）是合法的分层描述。仓库路径与相对路径都认：
+# `docs/journey/NNNN-`、从 docs/ 下的文件出发的 `../journey/NNNN-` 与 `./journey/NNNN-`，以及行首或标点之后的
+# `journey/NNNN-`；前面紧挨字母、数字、`_` 或 `-` 的不认，那是别的目录名（`my-journey/`、`user_journey/`）。
+# journey 文件之间的互链不受影响：journey 不在长期文档的扫描面里，归类为只拦本机坐标的 other-md。
+DANGLING_JOURNEY = re.compile(r"(?<![A-Za-z0-9_-])journey/\d{4}-")
 BARE_WP = re.compile(r"\bWP-?\d+[A-Za-z]?(?:-\d+)?\b")
 # 本机坐标：产出机器个人目录下的绝对路径与本地 clone 目录名——只在那台机器上成立，对别的 contributor 是悬空的，文件一律写
 # repo 相对路径。与 MACHINE_ROOTS 分开：那组根服务于「录制机产物里的任何绝对路径」（含 /tmp、/app 这类容器内路径），这里只认

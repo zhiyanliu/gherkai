@@ -7,8 +7,8 @@
 // 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式与正常释放进行中升级为中断（含诊断文件上传在途时升级）、
 // device-session.json 的内容、按 scope 分目录的产物落点与 reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、
 // WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机验收负责；唯一的例外是「等到 RUNNING 期间会话已结束」的释放用例，它把
-// 会话块与终结块换成真实实现（Device Farm 仍是假的 API），核对接缝透传执行前失败之后释放阶段照常处理这个会话。文件末尾另验缺省装配
-// （device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
+// 会话块与终结块换成真实实现（Device Farm 仍是假的 API），核对接缝透传执行前失败之后，释放阶段以会话块在等待时记下的确认收尾、
+// 不再查询这个会话。文件末尾另验缺省装配（device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
 import { afterEach, test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs";
@@ -550,7 +550,7 @@ test("等到 RUNNING 期间会话已结束（会话块给出准备阶段的 sess
   }
 });
 
-test("等到 RUNNING 期间会话已结束：会话仍在待清理集里，正常释放对它先 Get，读到 STOPPING / COMPLETED 即确认、不发 Stop", async () => {
+test("等到 RUNNING 期间会话已结束：会话仍在待清理集里、恰一条 session_closed(confirmed)，不发 Stop——真实会话块在等待时读到 STOPPING / COMPLETED 即记确认，释放阶段不再查询；只换掉等待的结论时释放阶段先 Get、读到停止状态即确认", async () => {
   // waiting 为 stubbed 时只把等到 RUNNING 换成给出准备阶段 session_lost 的结论（只验接缝与终结块），为 real 时整条会话块都是真实实现。
   for (const [stopped, waiting] of [["STOPPING", "stubbed"], ["COMPLETED", "stubbed"], ["STOPPING", "real"], ["COMPLETED", "real"]] as const) {
     const what = `${stopped}/${waiting}`;
@@ -582,7 +582,8 @@ test("等到 RUNNING 期间会话已结束：会话仍在待清理集里，正�
     assert.deepEqual(farm, ["listDevices", "create", waiting === "stubbed" ? "waitRunning" : `get:${ARN1}`], what);
     assert.ok(!h.calls.some((c) => c.startsWith("appium.connect")), `${what}: ${h.calls.join(", ")}`);
     const out = await within(h.surface.release("normal"), 2000, `${what} 的正常释放`);
-    assert.deepEqual(farm.slice(3), [`get:${ARN1}`], what);
+    // 真实会话块已在等待时记下确认：释放阶段零次 Get、零次 Stop
+    assert.deepEqual(farm.slice(3), waiting === "stubbed" ? [`get:${ARN1}`] : [], what);
     assert.equal(out.releaseFailed, false, what);
     const closed = h.emitted.filter((e) => e.type === "session_closed");
     assert.deepEqual(closed.map((e) => [e.sessionId, e.release]), [[ARN1, "confirmed"]], what);
@@ -1264,7 +1265,8 @@ test("正常诊断上传在途时收到停止信号：不打断上传；上传�
     if (upload === "fails") {
       assert.deepEqual(out.reportRefs, [], upload);
       assert.deepEqual(h.enqueueCalls, [[file]], upload);
-      assert.equal(h.logs.filter((l) => l.includes("设备诊断文件")).length, 1, h.logs.join("\n"));
+      assert.deepEqual(h.logs.filter((l) => l.includes("设备诊断文件")), ["worker: 设备诊断文件没能上传（不影响判定）：Error: socket hang up"],
+        h.logs.join("\n"));
     } else {
       assert.deepEqual(h.enqueueCalls, [], upload);
       assert.deepEqual(out.reportRefs, [{ kind: DEVICE_SESSION_REPORT_KIND, ref }], upload);
@@ -1280,7 +1282,8 @@ test("正常诊断上传失败而没有收到停止信号：只记一行日志�
   const out = await h.surface.release("normal");
   assert.deepEqual(out.reportRefs, []);
   assert.deepEqual(h.enqueueCalls, []);
-  assert.equal(h.logs.filter((l) => l.includes("设备诊断文件")).length, 1, h.logs.join("\n"));
+  assert.deepEqual(h.logs.filter((l) => l.includes("设备诊断文件")), ["worker: 设备诊断文件没能上传（不影响判定）：Error: socket hang up"],
+    h.logs.join("\n"));
 });
 
 test("执行前失败在 Appium 会话建成之前：正常释放不给 deleteSession 钩子；释放未确认如实返回", async () => {

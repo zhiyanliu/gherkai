@@ -7,9 +7,11 @@
 // 待核尝试只发一对 attempted、按名核对扫到分页结束（获取期与终结核对都是，同名的每个 ARN 各恰一条 session_closed；终结核对不越过
 // 截止线）、按名找回之后原 Create 晚到的失败或没带 ARN 的返回不再记为待核、终结核对结束之后晚到的失败也不再记、
 // 终结核对结束之后原 Create 才带已按名找回的 ARN 返回时不发第二条 session_opened、日志不要人手动停止、
-// 获取期按名找回的会话已由获取侧按 Stop 规则处理过（确认的不再查、没确认的再按规则处理）、换台或
-// 获取侧的 Get 在途时进入终结（获取侧不再发 Stop、由释放阶段发唯一一条）、换台侧的 Stop 在途时进入终结（已发出的不撤回，释放
-// 阶段照常先 Get 再决定：读到 STOPPING 不再发 Stop，仍为 RUNNING 再发一次）、observedS 的起止点与缺失记 null、只进入一次。
+// 获取期按名找回的会话已由获取侧按 Stop 规则处理过（确认的不再查、没确认的再按规则处理）、获取期按名核对的 session_opened 写出
+// 期间进入终结即不再列举下一页、等到 RUNNING 期间读到 STOPPING / COMPLETED 时获取侧即记确认（释放阶段零次 Get 与 Stop；终结接手
+// 之后才返回的那次查询不记）、换台或获取侧的 Get 在途时进入终结（获取侧不再发 Stop、由释放阶段发唯一一条）、换台侧的 Stop 在途时
+// 进入终结（已发出的不撤回，释放阶段照常先 Get 再决定：读到 STOPPING 不再发 Stop，仍为 RUNNING 再发一次）、observedS 的起止点与
+// 缺失记 null、只进入一次。
 // 进入终结时撤销执行令牌与中止当前 act 由设备侧接缝负责（device/surface.test.mts 覆盖），这里不重复。
 import { test } from "node:test";
 import assert from "node:assert";
@@ -261,7 +263,7 @@ test("正常路径：destroy、上传之后，deleteSession 先于终结核对�
 });
 
 test("正常路径：远程访问会话已是 STOPPING / COMPLETED 时不调 deleteSession、不发 Stop，直接确认", async () => {
-  for (const status of ["STOPPING", "COMPLETED"]) {
+  for (const status of ["STOPPING", "COMPLETED"] as const) {
     const h = setup();
     await h.open();
     h.farm.getImpl = async () => ({ status });
@@ -323,7 +325,7 @@ test("中断路径：不调 deleteSession（即使给了钩子），也不为它
 // ---- Stop 规则（ADR 0051 决策 5）----
 
 test("Stop 规则：先 Get；排队、准备与 RUNNING 等一切不是 STOPPING / COMPLETED 的状态都发一次 Stop，这两个状态不发", async () => {
-  const cases: Array<[string, number]> = [
+  const cases: Array<[NonNullable<RemoteAccessSession["status"]>, number]> = [
     ["PENDING", 1], ["PENDING_CONCURRENCY", 1], ["PENDING_DEVICE", 1], ["PROCESSING", 1], ["SCHEDULING", 1],
     ["PREPARING", 1], ["RUNNING", 1], ["STOPPING", 0], ["COMPLETED", 0],
   ];
@@ -351,7 +353,7 @@ test("Stop 规则：Get 失败时照常发 Stop，Stop 返回体为 STOPPING 即
 test("Stop 规则：Stop 报错补查一次 Get，读到 COMPLETED 即确认，不再发 Stop", async () => {
   const h = setup();
   await h.open();
-  const statuses = ["RUNNING", "COMPLETED"];
+  const statuses: RemoteAccessSession["status"][] = ["RUNNING", "COMPLETED"];
   h.farm.getImpl = async () => ({ status: statuses.shift() });
   h.farm.stopImpl = async () => { throw sdkError("ArgumentException", 400, "Invalid parameter RemoteAccessSession"); };
   const out = await h.clock.run(h.finalizer.finalize("interrupt", NO_HOOKS));
@@ -547,7 +549,12 @@ test("终结核对按名找回之后，原 Create 晚到的结果未知（连接
     ], label);
     assert.equal(out.releaseFailed, false, label);
     assert.deepEqual([...h.sessions.registry.pending.keys()], [], label);
-    assert.ok(h.logs.some((l) => l.includes(name) && l.includes("arn:same") && l.includes("不再记为待核")), h.logs.join("\n"));
+    // 日志给出失败原因、会话名与找回的会话 ARN，不写内部的登记状态，也不要人手动停止（这个会话由释放阶段停止）
+    const line = h.logs.find((l) => l.includes(name) && l.includes("arn:same"));
+    assert.ok(line, h.logs.join("\n"));
+    assert.ok(line.includes(label === "连接中断" ? "socket hang up" : "没有带会话 ARN"), line);
+    assert.match(line, /随其余会话一并释放$/, label);
+    assert.doesNotMatch(line, /待核|手动停止/, label);
   }
 });
 
@@ -799,7 +806,7 @@ test("不重复 Stop：换台侧对被替换会话的 Get 在途时进入终结�
 });
 
 test("Stop 在途时进入终结：换台侧已发出的 Stop 不撤回，释放阶段照常先 Get——读到 STOPPING 即确认、不再发 Stop，仍为 RUNNING 则再发一次 Stop", async () => {
-  for (const released of ["STOPPING", "RUNNING"]) {
+  for (const released of ["STOPPING", "RUNNING"] as const) {
     const h = setup();
     const first = await h.open();
     await h.clock.advance(10_000);
@@ -930,6 +937,38 @@ test("获取期按名核对扫到分页结束：后页同名的会话同样随�
   assert.equal(out.releaseFailed, false);
 });
 
+test("获取期按名核对的 session_opened 写出期间进入终结：写完之后不再列举下一页，找回的会话由释放阶段停止，恰一对 discovered / confirmed", async () => {
+  // 第一种是接缝的次序（同一个同步段里中止获取预算、进入终结块）；第二种只进入终结、获取预算没有中止，核对的是终结核对已结束这一条
+  for (const abortBudget of [true, false]) {
+    const what = abortBudget ? "进入终结并中止获取预算" : "只进入终结";
+    let markWriting: () => void = () => {};
+    const writing = new Promise<void>((resolve) => { markWriting = resolve; });
+    const h = setup({ emitDelayMs: (e) => { if (e.origin !== "discovered") return 0; markWriting(); return 3_000; } });
+    const orphanName = encode(RUN_ID, SCOPE_ID, 1);
+    h.farm.createImpl = async () => { throw connectionReset(); };
+    h.farm.listSessionsImpl = async (token) => token === undefined
+      ? { remoteAccessSessions: [{ arn: "arn:orphan", name: orphanName, status: "RUNNING" }], nextToken: "p2" }
+      : { remoteAccessSessions: [] };
+    const b = h.budget();
+    const creating = h.sessions.create(CHOICE, b).then(() => null, (e: unknown) => e);
+    await h.clock.run(writing);
+    const finalizing = h.finalizer.finalize("interrupt", NO_HOOKS);
+    if (abortBudget) b.abort();
+    // 没有在途的 Create，命中的名字也已消除：终结核对不列举、随即结束
+    assert.equal(h.sessions.registry.attemptedFrozen, true, what);
+    const out = await h.clock.run(finalizing);
+    assert.ok((await h.clock.run(creating)) instanceof Error, what);
+    await h.clock.advance(60_000);
+    assert.deepEqual(h.farm.ops("listSessions").map((c) => c.arg), [undefined], what);
+    assert.equal(h.farm.ops("create").length, 1, what);
+    assert.deepEqual(h.farm.ops("stop").map((c) => c.arg), ["arn:orphan"], what);
+    assert.deepEqual(h.emitted.map((e) => [e.type, e.sessionId, e.origin ?? e.release]), [
+      ["session_opened", "arn:orphan", "discovered"], ["session_closed", "arn:orphan", "confirmed"],
+    ], what);
+    assert.equal(out.releaseFailed, false, what);
+  }
+});
+
 test("不重复 Stop：获取侧对孤儿会话的 Get 在途时进入终结，这次 Get 随预算中止、获取侧不再发 Stop，由释放阶段发唯一一条", async () => {
   const h = setup();
   const orphanName = encode(RUN_ID, SCOPE_ID, 1);
@@ -953,6 +992,69 @@ test("不重复 Stop：获取侧对孤儿会话的 Get 在途时进入终结，�
     ["session_opened", "arn:orphan", "discovered"], ["session_closed", "arn:orphan", "confirmed"],
   ]);
   assert.equal(out.releaseFailed, false);
+});
+
+// ---- 等到 RUNNING 期间会话已结束（ADR 0051 决策 4 的会话丢失行与决策 5 的 Stop 规则）----
+
+test("等到 RUNNING 期间读到 STOPPING / COMPLETED：获取侧即记确认与设备分钟，释放阶段零次 Get、零次 Stop，恰一条 session_closed(confirmed)，observedS 止点为读到停止状态的时刻；之后 Device Farm 的查询与 Stop 都失败也不改判", async () => {
+  for (const status of ["STOPPING", "COMPLETED"] as const) {
+    for (const later of ["照常", "失败"] as const) {
+      const what = `${status}/${later}`;
+      const h = setup();
+      const b = h.budget();
+      const created = await h.clock.run(h.sessions.create(CHOICE, b));
+      assert.ok(created.ok, what);
+      if (!created.ok) return;
+      await h.clock.advance(1_000);                                   // Create 返回到读到停止状态的这段计入 observedS
+      const minutes = { total: 0.3, metered: 0.3, unmetered: 0 };
+      h.farm.getImpl = async () => ({ status, deviceMinutes: minutes });
+      const lost = await h.clock.run(h.sessions.waitRunning(created.value, b));
+      assert.equal(!lost.ok && lost.termination.errorType, "session_lost", what);
+      if (later === "失败") {
+        // 获取侧不记确认时，释放阶段的 Get 失败即发 Stop，Stop 与补查也失败，到线记 unconfirmed、误判释放失败
+        h.farm.getImpl = async () => { throw sdkError("InternalServiceException", 500); };
+        h.farm.stopImpl = async () => { throw sdkError("InternalServiceException", 500); };
+      }
+      await h.clock.advance(3_000);                                   // 读到停止状态之后的这段不计入 observedS
+      const callsBefore = h.farm.calls.length;
+      const out = await h.clock.run(h.finalizer.finalize("normal", NO_HOOKS));
+      assert.deepEqual(h.farm.calls.slice(callsBefore).map((c) => c.op), [], what);
+      assert.deepEqual(closedOf(h).map((e) => [e.sessionId, e.release, e.observedS, e.providerMinutes]), [
+        [created.value.arn, "confirmed", 1, minutes],
+      ], what);
+      assert.equal(out.releaseFailed, false, what);
+    }
+  }
+});
+
+test("等到 RUNNING 的查询在进入终结之后才返回停止状态：获取侧不再据它记确认，释放阶段照常先 Get 再决定", async () => {
+  const h = setup();
+  await h.pendingAttempt();                                           // 有待核的名字：终结核对占到 5 秒截止线（列举不返回）
+  const b = h.budget();
+  const created = await h.clock.run(h.sessions.create(CHOICE, b));
+  assert.ok(created.ok);
+  if (!created.ok) return;
+  let readLate: (v: RemoteAccessSession) => void = () => {};
+  h.farm.getImpl = () => new Promise<RemoteAccessSession>((resolve) => { readLate = resolve; });   // 不响应中止，由测试决定何时返回
+  const waiting = h.sessions.waitRunning(created.value, b);
+  await settle();
+  h.farm.getImpl = async () => ({ status: "COMPLETED" });
+  h.farm.listSessionsImpl = (_token, signal) => hang(signal);
+  const enteredAt = h.clock.t;
+  const finalizing = h.finalizer.finalize("interrupt", NO_HOOKS);
+  b.abort();
+  await h.clock.advance(1_000);
+  readLate({ status: "STOPPING" });                                   // 终结核对期间才返回
+  const lost = await h.clock.run(waiting);
+  assert.equal(!lost.ok && lost.termination.errorType, "session_lost");
+  assert.equal(h.sessions.registry.sessions.get(created.value.arn)!.confirmedAt, null);
+  await h.clock.run(finalizing);
+  const releaseGets = h.farm.ops("get").slice(1);
+  assert.deepEqual(releaseGets.map((c) => [c.arg, c.at - enteredAt]), [[created.value.arn, FINALIZE_RECONCILE_MS]]);
+  assert.equal(h.farm.ops("stop").length, 0);
+  const closed = closedOf(h).find((e) => e.sessionId === created.value.arn)!;
+  assert.equal(closed.release, "confirmed");
+  assert.equal(closed.observedS, FINALIZE_RECONCILE_MS / 1000);       // 止点是释放阶段确认的时刻，不是那次晚到的查询
 });
 
 test("只进入一次：信号重复到达、超时与信号交叠时返回同一个结果，Get / Stop 与事件都只有一份", async () => {

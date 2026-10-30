@@ -4,7 +4,8 @@
 - 「被取代」链双向：Status 头点名 NNNN，NNNN 那篇必须回指本篇编号（doc-health 第 7 轮曾一轮三处同犯反向链缺口）；
 - `docs/` 下文件名全是英文 kebab-case，`docs/adr/` 与 `docs/journey/` 带四位编号且各自不复用；
 - `docs/journey/` 每份首行声明 `> 类型:`；
-- 长期文档与 AI 侧文档不指向具体的 journey 文件、不写裸 WP 编号（悬空指针红线）；AI 侧文档也不用决策六形态②的自造复合词。
+- 长期文档与 AI 侧文档不指向具体的 journey 文件（仓库路径与相对路径两种写法，规则形态另有正反例单测）、不写裸 WP 编号（悬空指针红线）；
+  AI 侧文档也不用决策六形态②的自造复合词。
 - 全仓已跟踪的 markdown（含 journey 与工具说明，扫原文含行内代码）不写本机坐标，即个人目录下的绝对路径与本地 clone 目录名；规则形态另有正反例单测，TS / JS 注释里反引号包着的路径另有一条单测。
 规则与扫描面在 `_doc_rules`；同一束由 hook 在写完即查（ADR 0046）。
 """
@@ -15,7 +16,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from _doc_rules import REPO, ai_side_docs, all_markdown, long_term_docs, prose_lines, scan, BARE_WP, DANGLING_JOURNEY, MACHINE_COORDINATE
+from _doc_rules import REPO, ai_side_docs, all_markdown, classify, long_term_docs, prose_lines, scan, BARE_WP, DANGLING_JOURNEY, MACHINE_COORDINATE
 
 ADR_DIR = REPO / "docs" / "adr"
 JOURNEY_DIR = REPO / "docs" / "journey"
@@ -118,6 +119,33 @@ def test_long_term_docs_have_no_dangling_pointers(doc: Path):
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:110]}" for i, line in prose_lines(doc.read_text(encoding="utf-8"))
             if DANGLING_JOURNEY.search(line) or BARE_WP.search(line)]
     assert not hits, "长期文档里的悬空指针（吸收后即断）——把证据内联、血缘写成自明的事件描述：\n" + "\n".join(hits)
+
+
+@pytest.mark.parametrize("text, hit", [
+    ("docs/journey/0015-a.md", True),
+    ("../journey/0015-a.md", True),                     # 从 docs/ 下的子目录（如 docs/adr/）出发的相对链接
+    ("./journey/0015-a.md", True),                      # 从 docs/ 出发的相对链接
+    ("(journey/0015-a.md)", True),                      # 标点之后
+    ("[进度](../journey/0015-a.md)", True),
+    ("journey/0015-a.md 记了进度", True),               # 行首
+    ("docs/journey/", False),                           # 提到目录本身是分层描述
+    ("过程产物放 docs/journey/", False),
+    ("journeys/0015", False),
+    ("my-journey/0015-a.md", False),                    # 别的目录名以 journey 结尾
+    ("user_journey/0015-a.md", False),
+])
+def test_dangling_journey_rule_shape(text: str, hit: bool):
+    """指向 journey 文件的规则正反例：仓库路径与相对路径（`../`、`./`、行首或标点之后）都命中；目录名本身、别的以 journey
+    结尾或打头的目录名不命中。"""
+    assert bool(DANGLING_JOURNEY.search(text)) is hit, text
+
+
+def test_journey_files_are_outside_the_pointer_scan_surface():
+    """journey 是暂存区、彼此引用合法：不在长期文档的扫描面里，归类为只拦本机坐标的 other-md。"""
+    journeys = sorted(JOURNEY_DIR.glob("*.md"))
+    assert journeys, "docs/journey/ 下没有文件，这条断言无从核对"
+    assert not set(journeys) & set(long_term_docs())
+    assert {classify(p) for p in journeys} == {"other-md"}
 
 
 @pytest.mark.parametrize("doc", all_markdown(), ids=_rel)

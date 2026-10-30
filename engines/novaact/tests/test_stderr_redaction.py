@@ -6,7 +6,8 @@ worker 的 stderr 原样进 CloudWatch，所以脱敏要在 worker 写出的那�
 
 样本取用例表里输入与期望不同的条目（即带凭据的输入）：出口写出的文字要含期望的脱敏结果、不含原始输入。另有一条静态差集：
 包内能写到 stderr 的出口只能是上面三处，且每处自己调用 `redact_secrets`；新加的出口只要用的是静态差集一节开头注释所列的写法
-就会被判出，那里也列出了已知无法识别的写法。出口按模块路径加类名与函数名标识，类里同名的方法不并入模块级的函数。
+就会被判出。静态检查只核对能直接解析到的引用，已知无法识别的写法列在那段注释里，不穷尽。出口按模块路径加类名与函数名标识，
+类里同名的方法不并入模块级的函数。
 """
 from __future__ import annotations
 
@@ -171,10 +172,16 @@ def test_uploader_log_redacts_before_writing_stderr(raw, expected, capsys):
 # 一律计入）；对文件描述符 2 的 os.write、os.writev、os.fdopen、io.FileIO 与 open（含 io.open）；调用 sys.excepthook 或
 # sys.__excepthook__。logging、traceback.print_*、warnings.warn 绕过这些出口直接写 stderr；星号导入、把 sys 模块当作值使用、
 # 动态导入（__import__、importlib.import_module 与 importlib.__import__，不论导入什么都算）、以常量键 "sys" 从 sys.modules 取 sys、
-# 读取 sys.__dict__，这几种静态分析无法追踪。以上两类无法登记为出口，出现即报。拒绝用例在真实源码的内存副本上做一处改动，再交给
-# 同一套检查。已知无法识别的写法：文件描述符来自变量（含 os.dup(2) 的结果）、print 以外经 stream= 一类参数传入的流、在模块里重新
-# 绑定 redact_secrets 这个名字、子进程继承的 stderr；检查的是出口自己调用了 redact_secrets，不核对脱敏后的值是否流到写出处，
-# 写出结果由上面的运行期用例逐处核对。
+# 读取 sys.__dict__、同一个名字在文件内由 import 绑定到不同对象（本检查解析 import 时不区分作用域、整个文件共用一张表；与 print、
+# open、getattr、__import__ 同名而所指不是该内建函数也算）、类体内的 import（名字成为类属性，经 self 一类的实例访问时追踪不到，
+# 不论导入什么都算）、把上面计入出口的写函数（print、os.write 一类的文件描述符写函数、sys.excepthook 与 sys.__excepthook__）当作值
+# 使用（赋给变量、作为参数或返回值、放进容器、取它的属性，凡不是直接调用都算，此后经别的名字调用时核对不了实参），这几种静态分析
+# 无法追踪。以上两类无法登记为出口，出现即报。拒绝用例在真实源码的内存副本上做一处改动，再交给同一套检查。已知无法识别的写法
+# （不穷尽）：文件描述符来自变量（含 os.dup(2) 的结果）、print 以外经 stream= 一类参数传入的流、在模块里以赋值或 def 重新绑定
+# redact_secrets 这个名字、子进程继承的 stderr、经 getattr 以 stderr 与 __stderr__ 之外的常量名取成员、把 sys 之外的模块或上面
+# 写函数以外的库函数当作值使用这类间接取法（如 `getattr(sys, "__excepthook__")`、`getattr(os, "write")`、`m = os`、
+# `f = __import__`、`p = traceback.print_exc`、`w = warnings.warn`）；检查的是出口自己调用了 redact_secrets，不核对脱敏后的值
+# 是否流到写出处，写出结果由上面的运行期用例逐处核对。
 
 _STDERR_OUTLETS = {
     ("run_scope.py", "log"),
@@ -216,24 +223,43 @@ class _Outlet:
     redacts: bool           # 它自己的函数体（不含嵌套定义）里调用了 redact_secrets
 
 
-def _import_bindings(rel: str, tree: ast.Module) -> dict[str, str]:
+def _import_bindings(rel: str, tree: ast.Module) -> tuple[dict[str, str], list[str]]:
     """import 绑定的名字到所指对象的完整路径：`import sys as s` 得 s 指 sys，`from sys import stderr as e` 得 e 指
-    sys.stderr，相对导入按文件所在的包展开。整个文件共用一张表，函数里的 import 也算进来：与别名同名的局部变量可能被误认，
-    误认只会多报，不会漏掉出口。"""
+    sys.stderr，相对导入按文件所在的包展开。整个文件共用一张表、不区分作用域，函数里的 import 也算进来。
+
+    同一个名字在文件内绑定到不同对象时（两处 import 所指不同，或与 print、open、getattr、__import__ 同名而所指不是该内建函数），
+    表里的一项无法代表各处的引用，取哪一项都可能把写 stderr 的那一处认成别的对象而漏掉：这个名字不进表，另作为无法登记的写法
+    返回（第二项，每条带最早那处 import 的行号）。进表的名字在文件内所指唯一；与它同名的局部变量会被当作它所指的对象，这种误认
+    本身只会多报：局部变量的值由赋值处的表达式取得，那个表达式照常检查。"""
     package = ".".join([_PKG_NAME, *rel.split("/")[:-1]])
-    names: dict[str, str] = {}
+    bound: dict[str, dict[str, int]] = {}  # 每个名字所指的各个对象，以及各自最早那处 import 的行号
+
+    def bind(name: str, target: str, lineno: int) -> None:
+        lines = bound.setdefault(name, {})
+        lines[target] = min(lineno, lines.get(target, lineno))
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for a in node.names:
                 root = a.name.partition(".")[0]
-                names[a.asname or root] = a.name if a.asname else root
+                bind(a.asname or root, a.name if a.asname else root, node.lineno)
         elif isinstance(node, ast.ImportFrom):
             base = node.module or ""
             if node.level:
                 parts = package.split(".")
                 base = ".".join([*parts[:len(parts) - node.level + 1], *([node.module] if node.module else [])])
-            names.update({a.asname or a.name: f"{base}.{a.name}" for a in node.names if a.name != "*"})
-    return names
+            for a in node.names:
+                if a.name != "*":
+                    bind(a.asname or a.name, f"{base}.{a.name}", node.lineno)
+    names: dict[str, str] = {}
+    conflicts: list[str] = []
+    for name, lines in sorted(bound.items(), key=lambda item: min(item[1].values())):
+        targets = set(lines) | ({f"builtins.{name}"} if name in _BUILTINS else set())
+        if len(targets) == 1:
+            names[name] = targets.pop()
+        else:
+            conflicts.append(f"{min(lines.values())} 名字 {name} 在文件内可能指向不同对象：{'、'.join(sorted(targets))}")
+    return names, conflicts
 
 
 def _qualified(node: ast.AST, names: dict[str, str]) -> str | None:
@@ -256,6 +282,11 @@ def _sys_member(q: str | None) -> str | None:
 
 def _is_sys_module(q: str | None) -> bool:
     return q is not None and (q == "sys" or q.endswith(".sys"))
+
+
+def _is_writer(q: str | None) -> bool:
+    """计入出口的写函数（直接调用时由 visit_Call 核对实参）：print、_FD_WRITERS 里的函数、sys.excepthook 与 sys.__excepthook__。"""
+    return q == "builtins.print" or q in _FD_WRITERS or _sys_member(q) in _EXCEPTHOOKS
 
 
 def _writes_fd2(call: ast.Call) -> bool:
@@ -281,11 +312,11 @@ class _StderrScan(ast.NodeVisitor):
 
     def __init__(self, rel: str, tree: ast.Module):
         self.rel = rel
-        self.names = _import_bindings(rel, tree)
+        self.names, conflicts = _import_bindings(rel, tree)
         self.parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
         self.stack: list[tuple[ast.AST, str]] = [(tree, "<module>")]
         self.hits: dict[ast.AST, tuple[str, list[str]]] = {}
-        self.bypasses: list[str] = []
+        self.bypasses: list[str] = conflicts
         self.visit(tree)
 
     def outlets(self) -> list[_Outlet]:
@@ -338,6 +369,11 @@ class _StderrScan(ast.NodeVisitor):
             as_base = isinstance(parent, ast.Attribute) and parent.value is node
             if not as_base and not (self._getattr_on_sys(parent) is not None and parent.args[0] is node):
                 self.bypasses.append(f"{node.lineno} 把 sys 模块当作值使用")
+        elif _is_writer(q) and isinstance(node.ctx, ast.Load):
+            # 不是被直接调用（赋给变量、作为参数或返回值、放进容器、取它的属性）：此后经别的名字调用时核对不了实参
+            parent = self.parents.get(node)
+            if not (isinstance(parent, ast.Call) and parent.func is node):
+                self.bypasses.append(f"{node.lineno} 把 {q} 当作值使用")
 
     def visit_Name(self, node: ast.Name) -> None:
         self._reference(node)
@@ -362,11 +398,19 @@ class _StderrScan(ast.NodeVisitor):
             self.bypasses.append(f"{node.lineno} {q}")
         self.generic_visit(node)
 
+    def _class_body_import(self, node: ast.Import | ast.ImportFrom) -> None:
+        """类体内的 import 把名字绑定成类属性，经 self 一类的实例访问时链根不是 import 绑定的名字、追踪不到；不论导入什么都报。
+        所在作用域是类即算，包括类体里 if、try 之下的 import；方法体里的 import 不算。"""
+        if isinstance(self.stack[-1][0], ast.ClassDef):
+            self.bypasses.append(f"{node.lineno} 类体内的 {ast.unparse(node)}")
+
     def visit_Import(self, node: ast.Import) -> None:
+        self._class_body_import(node)
         self.bypasses += [f"{node.lineno} import {a.name}" for a in node.names
                           if a.name.partition(".")[0] in _BYPASS_MODULES]
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self._class_body_import(node)
         if node.level == 0 and (node.module or "").partition(".")[0] in _BYPASS_MODULES:
             self.bypasses.append(f"{node.lineno} from {node.module} import ...")
         if any(a.name == "*" for a in node.names):
@@ -524,3 +568,70 @@ def test_unregistrable_stderr_writer_is_rejected(snippet):
     """绕过出口直接写 stderr 的库调用与静态分析无法追踪的 sys 引用，出现即判出。"""
     violations = _stderr_violations(_with("run_scope.py", None, snippet))
     assert any(kind == _UNREGISTRABLE and rel == "run_scope.py" for kind, rel, _ in violations), violations
+
+
+_INDIRECT_WRITERS = [
+    pytest.param("class _Probe:\n    import sys as _m\n\n    def warn(self, msg):\n        self._m.stderr.write(msg)\n",
+                 "类体内的 import sys as _m", id="import-in-class-body"),
+    pytest.param("class _Probe:\n    from sys import stderr as _e\n\n    def warn(self, msg):\n        self._e.write(msg)\n",
+                 "类体内的 from sys import stderr as _e", id="from-import-in-class-body"),
+    pytest.param("class _Probe:\n    if True:\n        import sys as _m\n\n    def warn(self, msg):\n"
+                 "        self._m.stderr.write(msg)\n", "类体内的 import sys as _m", id="import-in-class-body-under-if"),
+    pytest.param("def _warn(msg):\n    w = os.write\n    w(2, msg.encode())\n", "把 os.write 当作值使用",
+                 id="os-write-assigned"),
+    pytest.param("def _warn(msg, out):\n    p = print\n    p(msg, file=out)\n", "把 builtins.print 当作值使用",
+                 id="print-assigned"),
+    pytest.param("def _warn(msg):\n    h = sys.__excepthook__\n    h(RuntimeError, RuntimeError(msg), None)\n",
+                 "把 sys.__excepthook__ 当作值使用", id="excepthook-assigned"),
+    pytest.param("def _opener():\n    return open\n", "把 builtins.open 当作值使用", id="open-returned"),
+    pytest.param("import functools\n\ndef _warn(msgs, out):\n    list(map(functools.partial(print, file=out), msgs))\n",
+                 "把 builtins.print 当作值使用", id="print-passed-as-argument"),
+    pytest.param("def _warn(msg):\n    _writers = [os.write]\n    _writers[0](2, msg.encode())\n",
+                 "把 os.write 当作值使用", id="os-write-in-container"),
+    pytest.param("def _warn(msg, out):\n    print.__call__(msg, file=out)\n", "把 builtins.print 当作值使用",
+                 id="print-attribute"),
+]
+
+
+@pytest.mark.parametrize(("snippet", "reason"), _INDIRECT_WRITERS)
+def test_indirect_writer_is_rejected(snippet, reason):
+    """写 stderr 的对象经类属性或变量间接取用时，静态分析核对不了写出的实参，出现即判出：类体内的 import 绑定成类属性、
+    经实例访问；写函数赋给变量、作为参数或返回值、放进容器或取它的属性。"""
+    violations = _stderr_violations(_with("run_scope.py", None, snippet))
+    assert any(kind == _UNREGISTRABLE and rel == "run_scope.py" and what.endswith(reason)
+               for kind, rel, what in violations), violations
+
+
+def test_direct_writer_calls_and_method_imports_are_accepted():
+    """直接调用写函数且目标不是 stderr、给 sys.excepthook 赋值、方法体里的 import，都不算间接取用。"""
+    snippet = ("class _Probe:\n    def buffer(self):\n        import io\n        return io.StringIO()\n\n"
+               "def _a(path, hook):\n    print(path)\n    open(path).close()\n    sys.excepthook = hook\n")
+    assert _stderr_violations(_with("run_scope.py", None, snippet)) == []
+
+
+_CONFLICTING_IMPORTS = [
+    pytest.param("def _warn(msg):\n    import sys as _m\n    _m.stderr.write(msg)\n\n"
+                 "def _buffer():\n    import io as _m\n    return _m.StringIO()\n", "_m", id="sys-then-io-as-same-alias"),
+    pytest.param("def _buffer():\n    import io as _m\n    return _m.StringIO()\n\n"
+                 "def _warn(msg):\n    import sys as _m\n    _m.stderr.write(msg)\n", "_m", id="io-then-sys-as-same-alias"),
+    pytest.param("def _read(path):\n    from codecs import open\n    return open(path).read()\n\n"
+                 "def _warn(msg):\n    with open(2, 'w', closefd=False) as f:\n        f.write(msg)\n",
+                 "open", id="import-named-like-builtin-open"),
+]
+
+
+@pytest.mark.parametrize(("snippet", "name"), _CONFLICTING_IMPORTS)
+def test_import_name_bound_to_different_objects_is_rejected(snippet, name):
+    """同一个名字在文件内由 import 绑定到不同对象（含与 open 一类内建函数同名而所指不同）：各处引用指哪一个无法静态确定，
+    出现即判出。前两条里写 stderr 且未脱敏的是 sys 那一处，第三条是经内建 open 写文件描述符 2 的那一处。"""
+    violations = _stderr_violations(_with("run_scope.py", None, snippet))
+    assert any(kind == _UNREGISTRABLE and rel == "run_scope.py" and f"名字 {name} 在文件内可能指向不同对象" in what
+               for kind, rel, what in violations), violations
+
+
+def test_import_name_bound_to_the_same_object_twice_is_accepted():
+    """同一个名字在不同函数里重复绑定到同一个对象不算冲突；相对导入按所在的包展开后与绝对导入比较。"""
+    snippet = ("def _a():\n    import io as _m\n    return _m.StringIO()\n\n"
+               "def _b():\n    import io as _m\n    return _m.BytesIO()\n\n"
+               "def _c(msg):\n    from .lib.redact import redact_secrets\n    return redact_secrets(msg)\n")
+    assert _stderr_violations(_with("run_scope.py", None, snippet)) == []

@@ -27,7 +27,8 @@
 //     中止或已进入终结）获取侧即停，不再发新的调用；接手前已发出的 Stop 不撤回，释放阶段照常先 Get 再决定，必要时再发一次
 //     幂等 Stop。
 //   - 等到 RUNNING 期间读到 STOPPING / COMPLETED 即按会话丢失终止（决策 4 归因表的会话丢失行：发生在 scope_started 之前，消息
-//     用准备阶段那句），状态与 Device Farm 给出的说明只进 worker 日志。
+//     用准备阶段那句），状态与 Device Farm 给出的说明只进 worker 日志。这次读到的停止状态按 Stop 规则即为确认（决策 5）：确认的
+//     时刻与设备分钟记进登记，释放阶段不再查它、不发 Stop，observedS 的止点是读到的那一刻（决策 7）；终结已接手时不记。
 //   - Create 返回即登记（ARN 进待清理集，或记为待核），在途记录随之落定；session_opened(created) 的写出在登记之后。终结阶段 1
 //     等的是登记：写出慢时已登记的会话不会被重新记为待核（决策 5）。
 //   - 在途的 Create 不接获取预算的信号：进入终结时预算被中止，若 Create 也随之中止，它就只能记为结果未知；终结阶段 1 要等它
@@ -460,6 +461,9 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
       const endpoint = info?.endpoints?.remoteDriverEndpoint ?? null;
       if (status === RUNNING && endpoint) return { ok: true, value: { endpoint, unit: info?.instanceArn ?? null } };
       if (isStopped(status)) {
+        // 已是 STOPPING / COMPLETED：按 Stop 规则即确认、不发 Stop，确认的时刻与设备分钟记进登记，释放阶段据此不再查询（observedS 的
+        // 止点因此是读到停止状态的这一刻）。终结已接手时不记：那时这个会话由释放阶段按自己的截止线下结论（ADR 0051 决策 5）。
+        if (!this.registry.closed) this.confirmStopped(this.registry.sessions.get(session.arn) ?? null, info);
         // 还没有 step 开始：按会话丢失终止，用准备阶段那句；Device Farm 的结果与说明只进日志，不进事件消息
         const result = info?.result ? `，结果 ${info.result}` : "";
         const detail = info?.message ? `：${oneLineError(info.message)}` : "";
@@ -493,13 +497,18 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
    *  同名会话没人停止、没有 session_closed，却会报释放成功。没命中的名字没有任何结论：列举为空不构成排除，列举出错或到截止线即停
    *  在这里，没扫完的页视为未核对，待核保留。
    *  每一页的命中在同一个同步段里登记；终结核对结束之后才返回的页不再登记（仍待核的名字已按 attempted 上报，此时登记会多出一个
-   *  不释放、不发 session_closed 的会话）。onOpened 逐会话调用：每个新登记会话自己的 session_opened 写出后即调用，不等同页其余
-   *  会话的事件写完，都在翻下一页之前；获取期的调用方据此随即按 Stop 规则停止它，与剩余分页并行；终结核对不传，找回的由释放阶段
-   *  停止。获取期的外层信号中止时抛出（已登记的会话由终结释放）。 */
+   *  不释放、不发 session_closed 的会话），终结核对结束之后也不再发下一次列举（本页的 session_opened 写出期间可能已进入终结）。
+   *  onOpened 逐会话调用：每个新登记会话自己的 session_opened 写出后即调用，不等同页其余会话的事件写完，都在翻下一页之前；获取期的
+   *  调用方据此随即按 Stop 规则停止它，与剩余分页并行；终结核对不传，找回的由释放阶段停止。获取期的外层信号中止时抛出中止原因，
+   *  不论列举在途还是在下一次列举之前（已登记的会话由终结释放）。 */
   async reconcile(bound: CallBound, onOpened: ((tracked: TrackedSession) => void) | null = null): Promise<void> {
     const wanted: ReadonlySet<string> = new Set(this.registry.pending.keys());
     let nextToken: string | undefined;
     for (;;) {
+      // 每次列举之前先核对：终结核对已结束即返回（之后的页不再登记），获取期的外层信号已中止即抛出它的中止原因（与列举中途被中止
+      // 时相同），两种情形都不再发这一次列举——上一页的 session_opened 写出期间可能已进入终结。
+      if (this.registry.attemptedFrozen) return;
+      if (bound.outer?.aborted) throw bound.outer.reason;
       const signal = this.boundedSignal(DEVICE_FARM_CALL_TIMEOUT_MS, bound);
       if (signal === null) return;
       let page: { remoteAccessSessions?: RemoteAccessSession[]; nextToken?: string };
@@ -654,11 +663,13 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
   /** 把结果未知的一次尝试记为待核（ADR 0051 决策 3），唯一的入口：Create 的两条结果未知分支与终结阶段 1 到线仍在途的 Create
    *  都经这里。同名的会话已按名找回时不记（命中是正面证据，原请求晚到的失败或没带 ARN 的返回推翻不了它；再记会让同一个名字既有
    *  discovered 又有 attempted，误判释放失败）；终结核对结束之后也不记（那时仍待核的名字已按 attempted 上报，晚到的结果不改变
-   *  这个结论）。两种情形都只记一行日志。what 是这次结果的说明，detail 接在日志末尾。 */
+   *  这个结论）。两种情形都只记一行日志。what 是这次结果的说明，detail 是失败原因（可为空）：同名会话已找回时紧接在 what 之后，
+   *  以免读成找回的会话出了错；其余两种情形接在日志末尾。 */
   markPending(name: string, attempt: number, what: string, detail: string): void {
     const found = [...this.registry.sessions.values()].filter((t) => t.name === name).map((t) => t.arn);
     if (found.length > 0) {
-      this.log(`worker: ${what}（会话名 ${name}），已按会话名找到同名的远程访问会话 ${found.join("、")}，不再记为待核${detail}`);
+      // 失败原因紧接在结果说明之后，以免读成找回的会话出了错；找回的会话由释放阶段停止，不需要人手动处理
+      this.log(`worker: ${what}${detail}（会话名 ${name}）；已按会话名找到同名的远程访问会话 ${found.join("、")}，随其余会话一并释放`);
       return;
     }
     if (this.registry.attemptedFrozen) {

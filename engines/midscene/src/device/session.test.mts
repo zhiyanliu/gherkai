@@ -3,9 +3,10 @@
 // Device Farm 换成假的 API（不连 AWS），时钟与计时器换成虚拟时钟：设备解析的版本族、静态过滤、排序与完整分页，零候选重列与
 // 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除（扫到分页结束、同名的每个 ARN 都登记），获取期
 // 按名找回的会话在 session_opened 写出后随即按 Stop 规则停止（逐会话，不等同页其余会话的事件写完；与剩余分页并行，下一次
-// Create 等它处理完），等到 RUNNING（就绪之前已结束即按会话丢失终止），查状态，换台时按同一 Stop 规则处理被替换的会话。另有
-// 一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试、每次调用都带中止信号，以及响应体没读完的失败归结果
-// 未知。会话年龄的后备由接缝按 createRequestedAt 计算（device/surface.mts），这里只核对这个起点是发出 Create 的时刻。
+// Create 等它处理完；本页事件写出期间预算中止即不再列举下一页），等到 RUNNING（就绪之前已结束即按会话丢失终止，并在登记里记下
+// 确认），查状态，换台时按同一 Stop 规则处理被替换的会话。另有一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、
+// 单次尝试、每次调用都带中止信号，以及响应体没读完的失败归结果未知。会话年龄的后备由接缝按 createRequestedAt 计算
+// （device/surface.mts），这里只核对这个起点是发出 Create 的时刻。
 import { test } from "node:test";
 import assert from "node:assert";
 import { PassThrough, Readable } from "node:stream";
@@ -667,7 +668,7 @@ test("获取期找回的孤儿会话：分页扫完时停止还没处理完，�
 });
 
 test("获取期找回的孤儿会话：Get 已是 STOPPING / COMPLETED 即确认，不发 Stop", async () => {
-  for (const status of ["STOPPING", "COMPLETED"]) {
+  for (const status of ["STOPPING", "COMPLETED"] as const) {
     const h = orphanSetup();
     h.farm.getImpl = async (arn) => ({ arn, status, deviceMinutes: { total: 1 } });
     await h.clock.run(h.block.create(CHOICE, h.budget));
@@ -727,6 +728,25 @@ test("获取期找回的孤儿会话：处理中获取预算中止（到期或�
   const orphan = h.block.registry.sessions.get("arn:orphan")!;
   assert.equal(orphan.stopSentAt, null);
   assert.equal(orphan.confirmedAt, null);
+});
+
+test("获取期按名核对：本页 session_opened 写出期间获取预算中止，写完之后不再列举下一页，中止原因原样抛给调用方，找回的会话不再 Get / Stop、留在待清理集交给终结", async () => {
+  let markWriting: () => void = () => {};
+  const writing = new Promise<void>((resolve) => { markWriting = resolve; });
+  const h = setup(undefined, undefined, {
+    emitDelayMs: (e) => { if (e.origin !== "discovered") return 0; markWriting(); return 3_000; },
+  });
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  h.farm.createImpl = async () => { throw connectionReset(); };
+  h.farm.sessionPages = [[{ arn: "arn:orphan", name: name1, status: "RUNNING" }], []];
+  const creating = h.block.create(CHOICE, h.budget);
+  await h.clock.run(writing);
+  const reason = new Error("在等待时间内没有拿到可用设备");
+  h.budget.abort(reason);
+  await assert.rejects(h.clock.run(creating), (e: unknown) => e === reason);
+  assert.deepEqual(sequence(h), [["create", undefined], ["listSessions", undefined]]);
+  assert.deepEqual([...h.block.registry.sessions.keys()], ["arn:orphan"]);
+  assert.deepEqual(h.emitted.map((e) => [e.type, e.origin, e.sessionId]), [["session_opened", "discovered", "arn:orphan"]]);
 });
 
 test("Create：返回了却没带会话 ARN 时记为待核，并写一行日志说明原因与会话名", async () => {
@@ -823,17 +843,25 @@ test("waitRunning：排队与准备中继续等，RUNNING 且端点可用才返�
   assert.deepEqual(gets.slice(1).map((c, i) => c.at - gets[i].at), Array(4).fill(RUNNING_POLL_INTERVAL_MS));
 });
 
-test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失终止——消息用准备阶段那句，状态与 Device Farm 的说明只进 worker 日志，不再查询、不发 Stop", async () => {
-  for (const status of ["STOPPING", "COMPLETED"]) {
+test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失终止——消息用准备阶段那句，状态与 Device Farm 的说明只进 worker 日志，不再查询、不发 Stop，在会话登记里记下确认的时刻与设备分钟", async () => {
+  for (const status of ["STOPPING", "COMPLETED"] as const) {
     const h = setup();
     const created = await h.clock.run(h.block.create(CHOICE, h.budget));
     assert.ok(created.ok);
     if (!created.ok) return;
-    h.farm.getImpl = async () => ({ status, result: "ERRORED", message: "device setup failed" });
+    const minutes = { total: 0.4, metered: 0.4, unmetered: 0 };
+    h.farm.getImpl = (_arn, signal) => h.clock.timers.sleep(700, signal)
+      .then(() => ({ status, result: "ERRORED", message: "device setup failed", deviceMinutes: minutes }));
     const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
     assert.deepEqual(got, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } }, status);
     assert.equal(h.farm.ops("get").length, 1, status);
-    assert.equal(h.farm.ops("stop").length, 0, status);                 // 释放归终结
+    assert.equal(h.farm.ops("stop").length, 0, status);                 // 已是停止状态，Stop 规则不发 Stop
+    // 确认与设备分钟记在登记里，释放阶段据此不再查询（session_closed 仍归终结）
+    const tracked = h.block.registry.sessions.get(created.value.arn)!;
+    assert.equal(tracked.confirmedAt, h.farm.ops("get")[0].at + 700, status);
+    assert.equal(tracked.stopSentAt, null, status);
+    assert.deepEqual(tracked.providerMinutes, minutes, status);
+    assert.equal(h.emitted.filter((e) => e.type === "session_closed").length, 0, status);
     const line = h.logs.find((l) => l.includes(created.value.arn) && l.includes(status));
     assert.ok(line && line.includes("device setup failed") && line.includes("ERRORED"), h.logs.join("\n"));
   }
@@ -893,7 +921,7 @@ test("换台：被替换的会话按 Stop 规则先 Get，仍在运行即发一�
 });
 
 test("换台：Get 读到 STOPPING / COMPLETED 即确认，不发 Stop", async () => {
-  for (const status of ["STOPPING", "COMPLETED"]) {
+  for (const status of ["STOPPING", "COMPLETED"] as const) {
     const h = setup();
     const first = await h.clock.run(h.block.create(CHOICE, h.budget));
     assert.ok(first.ok);
@@ -944,7 +972,7 @@ test("换台：Stop 报错或返回体不是 STOPPING / COMPLETED 时补查一�
       const first = await h.clock.run(h.block.create(CHOICE, h.budget));
       assert.ok(first.ok);
       if (!first.ok) return;
-      const statuses = ["RUNNING", after];
+      const statuses: RemoteAccessSession["status"][] = ["RUNNING", after];
       h.farm.getImpl = async (arn) => ({ arn, status: statuses.shift() });
       h.farm.stopImpl = stop;
       await h.clock.run(h.block.retire(first.value.arn));

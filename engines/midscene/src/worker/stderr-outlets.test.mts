@@ -16,7 +16,14 @@
 //   - console.error / warn / trace / assert(...)，含 console["error"]、globalThis.console，以及从 node:console 缺省导入或整体导入的
 //     名字（assert 只核对第一个参数之后的实参）；console.log / info / debug 写 stdout，不计入；
 //   - 第一个参数为整数字面量 2 的 write / writeSync / writev / writevSync / writeFile / writeFileSync / appendFile / appendFileSync
-//     调用，按被调函数的名字认、不核对它是否来自 fs，核对第二个参数。
+//     调用，按被调函数的名字认、不核对它来自 node:fs、node:fs/promises 还是别的模块，核对第二个参数。名字经改名得到时取原名：按名
+//     导入改名（import { writeSync as w } from "node:fs"）、TS 的 import 等号导入（import w = f.writeSync）、解构改名
+//     （const { writeSync: w } = await import("node:fs")、const { writeSync: w } = fs 与解构赋值，都含带缺省值与嵌套的写法），以及
+//     初值、缺省值（参数与解构的缺省值）或所赋值（含逻辑赋值 ||=、&&=、??=）取到写函数或已改名的名字的变量与参数
+//     （const w = fs.writeSync），变量之间相互赋值时逐层取到原名；整体导入与缺省导入（import * as f、import f from）后取的是成员名，
+//     改名不影响。初值、所赋值与被调函数可能取到的值都认：条件表达式取两个分支，?? / || / && 与逻辑赋值取两侧，赋值与逗号表达式取
+//     右侧（如 const w = c ? f.writeSync : x、(0, w)(2, m)）。改名表按整个文件收集、不分作用域，一个名字可以对应多个原名，名字本身
+//     或原名之一在名单里即计入：与改名同名的其他变量可能因此多报，不会因同名而漏掉。
 // 实参经过脱敏，指它是 redactSecrets(...) 的调用，或由这样的调用与字符串字面量以 + 或不带标签的模板拼成、且至少含一处这样的
 // 调用。redactSecrets 这个名字须从 lib/redact.mts 导入：静态 import（含改名导入与整体导入）与 await import(...) 的解构都算。
 //
@@ -28,16 +35,24 @@
 //     新建 Console 实例（new console.Console(...) 等）；
 //   - 以 import() 或 require 动态加载 process 与 console 模块；
 //   - 以文件描述符 2 建流：对象字面量里的 fd: 2（如 fs.createWriteStream(null, { fd: 2 })），以及第一个参数为 2 的 WriteStream、
-//     SyncWriteStream 与 Socket；
+//     SyncWriteStream 与 Socket（名字经改名得到时同样取原名）；
 //   - 字符串字面量 /dev/stderr、/dev/fd/2 与 /proc/self/fd/2；
-//   - util.debuglog（NODE_DEBUG 打开时写 stderr）；
+//   - 取出 util.debuglog（NODE_DEBUG 打开时写 stderr）：成员访问（含 util["debuglog"]）、从 node:util 按名导入（含改名）、TS 的
+//     import 等号导入（import d = util.debuglog），以及属性名或简写名为 debuglog 的对象解构（声明、参数与解构赋值都算，含 import()
+//     与 require 的结果、带缺省值、嵌套与以字符串字面量计算出的属性名，如 const { debuglog } = util、
+//     const { debuglog: d } = await import("node:util")、({ debuglog } = util)）；成员访问、解构与 import 等号导入按名字认，不核对
+//     取出它的对象是不是 node:util；
 //   - 在文件里另行绑定 redactSecrets 这个名字。
 //
-// 已知无法识别的写法：文件描述符来自变量或表达式（如 lib/event-sink.mts 按 EVENTS_FD 写出的 fs.writeSync(this.fd, ...)）；process
-// 对象经变量、参数或返回值传出后再取 stderr（device/surface.mts 把 process 作为事件源交给进程级兜底，这类传递不报）；以拼接出的
-// 属性名取 stderr（如 process["std" + "err"]）；经 createRequire 或计算出的模块名加载 process 与 console 模块；eval 与 new Function；
-// 子进程继承的 stderr；Node 运行时自己写出的内容（未捕获异常的缺省输出、进程警告）；第三方库自己写的 stderr：WebdriverIO 的
-// @wdio/logger 由 device/wdio-log.mts 装上的掩码覆盖、不在本差集内，Midscene SDK 与 Playwright 自己写出的内容同样不经这些出口。
+// 已知无法识别的写法：文件描述符来自变量或表达式（如 lib/event-sink.mts 按 EVENTS_FD 写出的 fs.writeSync(this.fd, ...)）；写函数经
+// 变量以外的途径传递后再调用（存进对象属性、类字段或数组后再取出，含 const [w] = [f.writeSync] 这样的数组解构；作为实参传给别的
+// 函数或作为返回值；以 bind / call / apply 调用；以计算出的名字取出）；在别的文件里以改名重新导出（export { writeSync as w } from
+// "node:fs"）后再导入调用；process 对象经变量、参数或返回值传出后再取 stderr（device/surface.mts 把 process 作为事件源交给进程级
+// 兜底，这类传递不报）；以计算出的名字从 globalThis 取 process 或 console（如 globalThis["pro" + "cess"].stderr）；经 createRequire
+// 或计算出的模块名加载 process 与 console 模块；以计算出的名字取出 debuglog（如 util[name]、const { [name]: d } = util），以及在
+// 别的文件里重新导出 node:util 的 debuglog（export { debuglog } from "node:util"）后再导入；eval 与 new Function；子进程继承的
+// stderr；Node 运行时自己写出的内容（未捕获异常的缺省输出、进程警告）；第三方库自己写的 stderr：WebdriverIO 的 @wdio/logger 由
+// device/wdio-log.mts 装上的掩码覆盖、不在本差集内，Midscene SDK 与 Playwright 自己写出的内容同样不经这些出口。
 // 检查的是写入实参的形状，不核对脱敏后的值是否就是要写出的全部内容，写出结果由上面所列的运行期用例核对。
 //
 // 拒绝用例对构造的源码片段，或把真实源码的内存副本改一处，再交给同一套检查；正向对照是真实 src 的差集为空。
@@ -226,6 +241,15 @@ function bindingsOf(rel: string, sf: ts.SourceFile): Bindings {
   return b;
 }
 
+/** 解构里的属性名：在 propertyNameText 之外再认以字符串字面量计算出的名字（{ ["debuglog"]: d }），其余计算出的名字为 null。 */
+function destructuredKey(name: ts.PropertyName | ts.BindingName | undefined): string | null {
+  if (name !== undefined && ts.isComputedPropertyName(name)) {
+    const x = strip(name.expression);
+    return ts.isStringLiteralLike(x) ? x.text : null;
+  }
+  return propertyNameText(name);
+}
+
 function isGlobalObject(e: ts.Expression): boolean {
   const x = strip(e);
   return ts.isIdentifier(x) && (x.text === "globalThis" || x.text === "global");
@@ -306,6 +330,8 @@ const FD_WRITERS: ReadonlySet<string> = new Set([
 /** 第一个参数是文件描述符时建出一条流的构造器与函数名。 */
 const FD_STREAMS: ReadonlySet<string> = new Set(["WriteStream", "SyncWriteStream", "Socket"]);
 const STDERR_PATHS = /^(?:\/dev\/stderr|\/dev\/fd\/2|\/proc\/self\/fd\/2)$/;
+/** util 的这个函数在 NODE_DEBUG 打开时写 stderr。 */
+const DEBUGLOG = "debuglog";
 
 function isFd2(e: ts.Expression | undefined): boolean {
   if (e === undefined) return false;
@@ -317,6 +343,113 @@ function calleeName(callee: ts.Expression): string | null {
   const x = strip(callee);
   if (ts.isIdentifier(x)) return x.text;
   return isMember(x) ? memberName(x) : null;
+}
+
+/** 按名字认的写函数与建流构造器。 */
+const FD_NAMES: ReadonlySet<string> = new Set([...FD_WRITERS, ...FD_STREAMS]);
+
+/** 改名表：文件里改名后指写函数或建流构造器的名字，到它可能对应的原名（都在 FD_NAMES 里）。 */
+type FdAliases = ReadonlyMap<string, ReadonlySet<string>>;
+
+/** 赋值与逻辑赋值（||=、&&=、??=）：左侧是标识符时它取到右侧的值，左侧是对象或数组时为解构赋值。 */
+const ALIAS_ASSIGNMENTS: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.EqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken,
+  ts.SyntaxKind.QuestionQuestionEqualsToken,
+]);
+
+/** 结果是左右两侧之一的运算：?? / || / && 与三种逻辑赋值。 */
+const EITHER_SIDE: ReadonlySet<ts.SyntaxKind> = new Set([
+  ts.SyntaxKind.QuestionQuestionToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.AmpersandAmpersandToken,
+  ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken,
+]);
+
+/** 表达式可能取到的各个值：条件表达式取两个分支，?? / || / && 与逻辑赋值取两侧，赋值与逗号表达式取右侧，其余取它自己。 */
+function valueChoices(e: ts.Expression): ts.Expression[] {
+  const x = strip(e);
+  if (ts.isConditionalExpression(x)) return [...valueChoices(x.whenTrue), ...valueChoices(x.whenFalse)];
+  if (ts.isBinaryExpression(x)) {
+    const op = x.operatorToken.kind;
+    if (EITHER_SIDE.has(op)) return [...valueChoices(x.left), ...valueChoices(x.right)];
+    if (op === ts.SyntaxKind.EqualsToken || op === ts.SyntaxKind.CommaToken) return valueChoices(x.right);
+  }
+  return [x];
+}
+
+/**
+ * 表达式按名字可能指的写函数或建流构造器的原名，按 valueChoices 逐个取值：标识符取它自己与改名表里的原名，成员取成员名，
+ * 都限于 FD_NAMES。
+ */
+function fdOriginals(e: ts.Expression, aliases: FdAliases): string[] {
+  const out: string[] = [];
+  for (const x of valueChoices(e)) {
+    const names = ts.isIdentifier(x) ? [x.text, ...(aliases.get(x.text) ?? [])] : isMember(x) ? [memberName(x)] : [];
+    for (const name of names) if (name !== null && FD_NAMES.has(name) && !out.includes(name)) out.push(name);
+  }
+  return out;
+}
+
+/**
+ * 逐层展开解构赋值的左侧，对每个目标调用 fn，给出取出它的属性名节点与去掉缺省值后的目标。嵌套的对象与数组本身也是目标；简写属性的
+ * 目标是它的名字；数组元素、剩余元素与最外层的左侧没有属性名，给出 undefined。
+ */
+function eachAssignmentTarget(target: ts.Expression, key: ts.PropertyName | undefined,
+  fn: (key: ts.PropertyName | undefined, target: ts.Expression) => void): void {
+  let t = strip(target);
+  if (ts.isBinaryExpression(t) && t.operatorToken.kind === ts.SyntaxKind.EqualsToken) t = strip(t.left);
+  fn(key, t);
+  if (ts.isObjectLiteralExpression(t)) {
+    for (const prop of t.properties) {
+      if (ts.isPropertyAssignment(prop)) eachAssignmentTarget(prop.initializer, prop.name, fn);
+      else if (ts.isShorthandPropertyAssignment(prop)) fn(prop.name, prop.name);
+      else if (ts.isSpreadAssignment(prop)) eachAssignmentTarget(prop.expression, undefined, fn);
+    }
+  } else if (ts.isArrayLiteralExpression(t)) {
+    for (const el of t.elements) eachAssignmentTarget(ts.isSpreadElement(el) ? el.expression : el, undefined, fn);
+  }
+}
+
+/**
+ * 收集文件的改名表：按名导入改名、TS 的 import 等号导入、解构改名（声明、参数与解构赋值，含带缺省值与嵌套的写法），以及初值、
+ * 缺省值或所赋值（含逻辑赋值）取到写函数或已改名的名字的变量与参数。变量之间可以相互赋值且先后不定，按不动点逐层展开。
+ * 表按整个文件收集、不分作用域，一个名字可以对应多个原名。
+ */
+function fdAliasesOf(sf: ts.SourceFile): FdAliases {
+  const aliases = new Map<string, Set<string>>();
+  const add = (local: string, originals: readonly string[]): boolean => {
+    let grown = false;
+    for (const original of originals) {
+      if (original === local) continue;
+      const set = aliases.get(local) ?? new Set<string>();
+      if (set.has(original)) continue;
+      set.add(original);
+      aliases.set(local, set);
+      grown = true;
+    }
+    return grown;
+  };
+  const named = (key: string | null): string[] => (key !== null && FD_NAMES.has(key) ? [key] : []);
+  const links: Array<readonly [string, ts.Expression]> = [];
+  visit(sf, (n) => {
+    if (ts.isImportSpecifier(n) && n.propertyName !== undefined) add(n.name.text, named(n.propertyName.text));
+    else if (ts.isImportEqualsDeclaration(n)) {
+      if (ts.isQualifiedName(n.moduleReference)) add(n.name.text, named(n.moduleReference.right.text));
+      else if (ts.isIdentifier(n.moduleReference)) links.push([n.name.text, n.moduleReference]);
+    } else if ((ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isBindingElement(n)) && ts.isIdentifier(n.name)) {
+      if (ts.isBindingElement(n) && n.propertyName !== undefined) add(n.name.text, named(propertyNameText(n.propertyName)));
+      if (n.initializer !== undefined) links.push([n.name.text, n.initializer]);
+    } else if (ts.isShorthandPropertyAssignment(n) && n.objectAssignmentInitializer !== undefined) {
+      links.push([n.name.text, n.objectAssignmentInitializer]);
+    } else if (ts.isBinaryExpression(n) && ALIAS_ASSIGNMENTS.has(n.operatorToken.kind)) {
+      const left = strip(n.left);
+      if (ts.isIdentifier(left)) links.push([left.text, n.right]);
+      else eachAssignmentTarget(left, undefined, (key, t) => { if (ts.isIdentifier(t)) add(t.text, named(propertyNameText(key))); });
+    }
+  });
+  for (let grown = true; grown;) {
+    grown = false;
+    for (const [local, value] of links) if (add(local, fdOriginals(value, aliases))) grown = true;
+  }
+  return aliases;
 }
 
 interface Write {
@@ -346,6 +479,7 @@ function scanFile(rel: string, text: string): FileScan {
   if (cached !== undefined) return cached;
   const sf = parse(rel, text);
   const b = bindingsOf(rel, sf);
+  const aliases = fdAliasesOf(sf);
   const result: FileScan = { writes: [], unregistrable: [] };
   const write = (n: ts.Node, form: string, args: readonly ts.Expression[]): void => {
     const { scope, decl } = scopeOf(n);
@@ -388,7 +522,7 @@ function scanFile(rel: string, text: string): FileScan {
         if (ts.isCallExpression(call) && call.expression === n) write(n, `console.${name}`, name === "assert" ? call.arguments.slice(1) : call.arguments);
         else reject(n, `把 console.${name} 当作值使用`);
       } else if (name === "Console") reject(n, "新建 Console 实例");
-    } else if (name === "debuglog") {
+    } else if (name === DEBUGLOG) {
       reject(n, "util.debuglog");
     } else if (name === "console" && isGlobalObject(n.expression) && !isBaseOfMember(n)) {
       reject(n, "把 console 对象当作值使用");
@@ -404,13 +538,23 @@ function scanFile(rel: string, text: string): FileScan {
         return;
       }
     }
-    const name = calleeName(n.expression);
-    if (name === null || !isFd2(args[0])) return;
-    const callee = strip(n.expression);
-    if (ts.isCallExpression(n) && FD_WRITERS.has(name) && !(isMember(callee) && isStderr(callee.expression))) {
-      write(n, `${name}(2, ...)`, args.slice(1, 2));
-    } else if (FD_STREAMS.has(name)) {
-      reject(n, `以文件描述符 2 建流（${name}）`);
+    if (!isFd2(args[0])) return;
+    // 被调函数是条件表达式、?? / || / && 或逗号表达式时逐个看它可能取到的值，第一个能识别为写函数或建流构造器的值决定这一处调用的归类
+    for (const callee of valueChoices(n.expression)) {
+      const local = calleeName(callee);
+      if (local === null || (isMember(callee) && isStderr(callee.expression))) continue;
+      const originals = fdOriginals(callee, aliases);
+      const writer = originals.find((name) => FD_WRITERS.has(name));
+      const stream = originals.find((name) => FD_STREAMS.has(name));
+      const via = (original: string): string => (original === local ? "" : `以 ${local} 调用`);
+      if (ts.isCallExpression(n) && writer !== undefined) {
+        write(n, `${writer}(2, ...)${via(writer) === "" ? "" : `（${via(writer)}）`}`, args.slice(1, 2));
+        return;
+      }
+      if (stream !== undefined) {
+        reject(n, `以文件描述符 2 建流（${stream}${via(stream) === "" ? "" : `，${via(stream)}`}）`);
+        return;
+      }
     }
   };
 
@@ -424,7 +568,24 @@ function scanFile(rel: string, text: string): FileScan {
       if (el.isTypeOnly) continue;
       const imported = (el.propertyName ?? el.name).text;
       if ((isBuiltin(spec, "process") && PROCESS_DIRECT.has(imported)) || isBuiltin(spec, "console")
-        || (isBuiltin(spec, "util") && imported === "debuglog")) reject(el, `从 ${spec} 导入 ${imported}`);
+        || (isBuiltin(spec, "util") && imported === DEBUGLOG)) reject(el, `从 ${spec} 导入 ${imported}`);
+    }
+  };
+
+  /**
+   * 以解构或 TS 的 import 等号导入取出 debuglog：对象解构的属性名或简写名为 debuglog（声明、参数与解构赋值都算，剩余元素与数组元素
+   * 没有属性名、不算），以及 import d = util.debuglog。取出之后的调用无法逐处核对，出现即报；成员访问与按名导入由 memberRule 与
+   * importRule 报出。与成员访问一样按名字认，不核对取出它的对象是不是 node:util。
+   */
+  const debuglogRule = (n: ts.Node): void => {
+    if (ts.isBindingElement(n) && ts.isObjectBindingPattern(n.parent) && n.dotDotDotToken === undefined) {
+      if (destructuredKey(n.propertyName ?? n.name) === DEBUGLOG) reject(n, "解构取出 util.debuglog");
+    } else if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      eachAssignmentTarget(n.left, undefined, (key) => {
+        if (key !== undefined && destructuredKey(key) === DEBUGLOG) reject(key, "解构取出 util.debuglog");
+      });
+    } else if (ts.isImportEqualsDeclaration(n) && ts.isQualifiedName(n.moduleReference) && n.moduleReference.right.text === DEBUGLOG) {
+      reject(n, "util.debuglog");
     }
   };
 
@@ -438,6 +599,7 @@ function scanFile(rel: string, text: string): FileScan {
   };
 
   visit(sf, (n) => {
+    debuglogRule(n);
     if (isMember(n)) memberRule(n);
     else if (ts.isIdentifier(n)) {
       if (b.console.has(n.text) && isValueReference(n) && !isBaseOfMember(n)) reject(n, "把 console 对象当作值使用");
@@ -582,6 +744,69 @@ test("检测函数在构造的片段上认出计入写入的写法，并逐处�
   assert.deepEqual(scanned.unregistrable, []);
 });
 
+test("检测函数在构造的片段上把写函数与建流构造器的改名解析回原名，再按第一个参数为 2 判断", () => {
+  const scanned = fragment([
+    "import { redactSecrets } from \"../lib/redact.mjs\";",
+    "import { writeSync as w } from \"node:fs\";",
+    "import { appendFile as af } from \"node:fs/promises\";",
+    "import { writeFileSync as wf, readSync as rd } from \"fs\";",
+    "import * as f from \"node:fs\";",
+    "import nodeFs from \"node:fs\";",
+    "import { WriteStream as WS } from \"node:tty\";",
+    "function a(m: string) { w(2, m); }",
+    "function b(m: string) { af(2, redactSecrets(m)); }",
+    "function c(m: string) { wf(2, m); }",
+    "function d(m: string) { f.writeSync(2, m); }",
+    "function e(m: string) { nodeFs.promises.appendFile(2, m); }",
+    "async function g(m: string) { const { writeSync: dw } = await import(\"node:fs\"); dw(2, m); }",
+    "function h(m: string) { const { writev: rv } = require(\"node:fs\"); rv(2, [m]); }",
+    "function i(m: string) { const { write: sw } = f; sw(2, m); }",
+    "function j(m: string) { const vw = f.writeSync; vw(2, m); }",
+    "function k(m: string) { let lw; lw = later; lw(2, m); }",
+    "function l(m: string) { w(1, m); rd(2, m); }",
+    "function n() { return new WS(2); }",
+    "const later = w;",
+    "function o(m: string) { let aw; ({ writeSync: aw } = f); aw(2, m); }",
+    "function p() { const WriteStream = f.writeSync; return WriteStream; }",
+    "function q() { return new WriteStream(2); }",
+    "function r(m: string) { let dv; ({ writeSync: dv = noop } = f); dv(2, m); }",
+    "function s(m: string) { let qw; qw ??= f.writeSync; qw(2, m); }",
+    "import ew = f.writeSync;",
+    "function t(m: string) { ew(2, m); }",
+    "function u(m: string, c: boolean) { const cw = c ? f.writeSync : f.writeFileSync; cw(2, m); }",
+    "function v(m: string, x: unknown) { const nw = f.writeSync ?? x; nw(2, m); }",
+    "function x(m: string) { let ow, nd; ow ||= f.appendFileSync; nd &&= f.writev; ow(2, m); nd(2, [m]); }",
+    "function y(m: string) { let pa, pd; ({ promises: { appendFile: pa }, other: [{ write: pd }] } = f); pa(2, m); pd(2, m); }",
+    "function z(m: string, c: boolean) { (0, w)(2, m); (c ? f.readSync : f.writeSync)(2, m); }",
+    "function ca(m: string) { let c1, c2; c2 = c1 = f.writeSync; c2(2, m); const cm = (0, f.writevSync); cm(2, [m]); }",
+    "function cb(m: string, pw = f.writeSync) { pw(2, m); }",
+    "function cc(m: string) { let sh; ({ sh = f.writeSync } = {}); sh(2, m); const { other: bw = f.writeFile } = {}; bw(2, m); }",
+    "import ei = w;",
+    "function cd(m: string) { ei(2, m); }",
+  ]);
+  assert.deepEqual(scanned.writes.map((x) => [x.line, x.scope, x.form, x.redacted]), [
+    [8, "a", "writeSync(2, ...)（以 w 调用）", false], [9, "b", "appendFile(2, ...)（以 af 调用）", true],
+    [10, "c", "writeFileSync(2, ...)（以 wf 调用）", false], [11, "d", "writeSync(2, ...)", false], [12, "e", "appendFile(2, ...)", false],
+    [13, "g", "writeSync(2, ...)（以 dw 调用）", false], [14, "h", "writev(2, ...)（以 rv 调用）", false],
+    [15, "i", "write(2, ...)（以 sw 调用）", false], [16, "j", "writeSync(2, ...)（以 vw 调用）", false],
+    [17, "k", "writeSync(2, ...)（以 lw 调用）", false], [21, "o", "writeSync(2, ...)（以 aw 调用）", false],
+    [24, "r", "writeSync(2, ...)（以 dv 调用）", false], [25, "s", "writeSync(2, ...)（以 qw 调用）", false],
+    [27, "t", "writeSync(2, ...)（以 ew 调用）", false], [28, "u", "writeSync(2, ...)（以 cw 调用）", false],
+    [29, "v", "writeSync(2, ...)（以 nw 调用）", false],
+    [30, "x", "appendFileSync(2, ...)（以 ow 调用）", false], [30, "x", "writev(2, ...)（以 nd 调用）", false],
+    [31, "y", "appendFile(2, ...)（以 pa 调用）", false], [31, "y", "write(2, ...)（以 pd 调用）", false],
+    [32, "z", "writeSync(2, ...)（以 w 调用）", false], [32, "z", "writeSync(2, ...)", false],
+    [33, "ca", "writeSync(2, ...)（以 c2 调用）", false], [33, "ca", "writevSync(2, ...)（以 cm 调用）", false],
+    [34, "cb", "writeSync(2, ...)（以 pw 调用）", false],
+    [35, "cc", "writeSync(2, ...)（以 sh 调用）", false], [35, "cc", "writeFile(2, ...)（以 bw 调用）", false],
+    [37, "cd", "writeSync(2, ...)（以 ei 调用）", false],
+  ]);
+  // q 里的 WriteStream 在 p 里被另行赋为写函数：改名表不分作用域，名字本身仍按原样认，不因同名而漏掉建流
+  assert.deepEqual(scanned.unregistrable.map((u) => [u.line, u.scope, u.form]), [
+    [19, "n", "以文件描述符 2 建流（WriteStream，以 WS 调用）"], [23, "q", "以文件描述符 2 建流（WriteStream）"],
+  ]);
+});
+
 test("检测函数在构造的片段上不把 stdout、变量文件描述符、类型位置与子进程的 stderr 计入", () => {
   const scanned = fragment([
     "import fs from \"node:fs\";",
@@ -686,6 +911,31 @@ test("检测函数在构造的片段上把无法登记的写法逐一报出", ()
   }
 });
 
+test("检测函数在构造的片段上把以解构或 import 等号取出 debuglog 的写法判为无法登记，属性名不是 debuglog 的解构不报", () => {
+  const scanned = fragment([
+    "import util from \"node:util\";",
+    "const { debuglog } = util;",
+    "async function a() { const { debuglog: d } = await import(\"node:util\"); return d; }",
+    "function b() { const { debuglog } = require(\"node:util\"); return debuglog; }",
+    "function c() { let debuglog; ({ debuglog } = util); return debuglog; }",
+    "function e() { let d; ({ debuglog: d = noop } = util); return d; }",
+    "function f({ debuglog } = util) { return debuglog; }",
+    "function g() { const { nested: { \"debuglog\": d = noop } } = { nested: util }; return d; }",
+    "function h() { let d; [{ debuglog: d }] = [util]; return d; }",
+    "function i() { let d; ({ [\"debuglog\"]: d } = util); const { [\"debuglog\"]: x } = util; return [d, x]; }",
+    "import k = util.debuglog;",
+    "function m() { const { debuglogger, inspect } = util; const { ...debuglog } = util; return [debuglogger, inspect, debuglog]; }",
+    "function n(list: unknown[]) { const [debuglog] = list; return debuglog; }",
+  ]);
+  assert.deepEqual(scanned.unregistrable.map((u) => [u.line, u.scope, u.form]), [
+    [2, "(module)", "解构取出 util.debuglog"], [3, "a", "解构取出 util.debuglog"], [4, "b", "解构取出 util.debuglog"],
+    [5, "c", "解构取出 util.debuglog"], [6, "e", "解构取出 util.debuglog"], [7, "f", "解构取出 util.debuglog"],
+    [8, "g", "解构取出 util.debuglog"], [9, "h", "解构取出 util.debuglog"], [10, "i", "解构取出 util.debuglog"],
+    [10, "i", "解构取出 util.debuglog"], [11, "(module)", "util.debuglog"],
+  ]);
+  assert.deepEqual(scanned.writes, []);
+});
+
 // ---- 真实 src ----
 
 test("扫描面：src/ 下的源文件都被扫到，测试文件不在其中", () => {
@@ -724,6 +974,35 @@ test("拒绝：新加一处 console.error，未登记与未脱敏都判出", () 
   const vs = violations(withSource("lib/job-source.mts", null, "export function warn(m: string): void { console.error(m); }"));
   assert.ok(has(vs, UNREGISTERED, "lib/job-source.mts", "warn"), describe(vs));
   assert.ok(has(vs, UNREDACTED, "lib/job-source.mts", "warn"), describe(vs));
+});
+
+/**
+ * 经 fs 写函数对文件描述符 2 写出的几种导入写法：按名导入改名、整体导入改名、缺省导入改名、fs/promises 的按名导入改名与 TS 的
+ * import 等号导入。
+ */
+const FD2_IMPORT_VARIANTS: ReadonlyArray<readonly [string, string]> = [
+  ["按名导入改名", "import { writeSync as w } from \"node:fs\";\nexport function warn(msg: string): void { w(2, msg); }"],
+  ["整体导入改名", "import * as nodeFs from \"node:fs\";\nexport function warn(msg: string): void { nodeFs.writeSync(2, msg); }"],
+  ["缺省导入改名", "import nodeFs from \"fs\";\nexport function warn(msg: string): void { nodeFs.appendFileSync(2, msg); }"],
+  ["fs/promises 按名导入改名",
+    "import { appendFile as af } from \"node:fs/promises\";\nexport async function warn(msg: string): Promise<void> { await af(2, msg); }"],
+  ["TS 的 import 等号导入",
+    "import * as nodeFs from \"node:fs\";\nimport w = nodeFs.writeSync;\nexport function warn(msg: string): void { w(2, msg); }"],
+];
+
+test("拒绝：新加一处经 fs 写函数对文件描述符 2 的写入（含导入改名），未登记与未脱敏都判出", () => {
+  for (const [label, added] of FD2_IMPORT_VARIANTS) {
+    const vs = violations(withSource("lib/job-source.mts", null, added));
+    assert.ok(has(vs, UNREGISTERED, "lib/job-source.mts", "warn"), `${label}：\n${describe(vs)}`);
+    assert.ok(has(vs, UNREDACTED, "lib/job-source.mts", "warn"), `${label}：\n${describe(vs)}`);
+  }
+});
+
+test("拒绝：新加一处以解构取出的 debuglog，判为无法登记的写法", () => {
+  const vs = violations(withSource("lib/job-source.mts", null,
+    "import util from \"node:util\";\nexport function trace(m: string): void { const { debuglog } = util; debuglog(\"gherkai\")(m); }"));
+  assert.deepEqual(vs.filter((v) => v.rel === "lib/job-source.mts").map((v) => [v.kind, v.scope, v.detail.replace(/^\d+ 行 /, "")]),
+    [[UNREGISTRABLE, "trace", "解构取出 util.debuglog"]], describe(vs));
 });
 
 test("拒绝：新加的出口即使经过脱敏也要先登记，类里与登记出口同名的方法不并入模块级函数", () => {
