@@ -3,7 +3,7 @@
 // 两层：存在性检查与预签名用真的 S3Client，只把网络层换成本地的请求处理器（离线、不连 AWS），这样 HeadObject 的错误形态（含
 // 跨区域的 301 与响应头）与预签名地址的形态都是 SDK 的真实行为，不是 fake 自己说了算；预签名的签名值另按 SigV4 规范在测试里
 // 独立复算一遍。启动与重启用记录调用序列的假 driver。
-import { test } from "node:test";
+import { after, test } from "node:test";
 import assert from "node:assert";
 import { createHash, createHmac } from "node:crypto";
 import { getEventListeners } from "node:events";
@@ -17,6 +17,14 @@ import {
 import { APP_PRESIGN_EXPIRES_S, LAUNCH_SAMPLE_COUNT, LAUNCH_SAMPLE_INTERVAL_MS } from "./limits.mjs";
 import { attachClassification, readClassification } from "../worker/surface.mjs";
 import { redactSecrets } from "../lib/redact.mjs";
+
+// 缺省存储的首个客户端按 AWS_REGION 构造：跨区域用例假定 worker 运行在 us-west-2，所以在本文件内固定它，结束时恢复宿主的值。
+const savedAwsRegion = process.env.AWS_REGION;
+process.env.AWS_REGION = "us-west-2";
+after(() => {
+  if (savedAwsRegion === undefined) delete process.env.AWS_REGION;
+  else process.env.AWS_REGION = savedAwsRegion;
+});
 
 const LOC = { bucket: "gherkai-artifacts-123456789012-us-west-2", key: "apps/9f2c/shop-debug (1).apk" };
 const FAKE_CREDS = { accessKeyId: "AKIDEXAMPLE", secretAccessKey: "wJalrXUtnFEMI/K7MDENG+bPxRfiCYEXAMPLEKEY" };
@@ -93,13 +101,18 @@ test("存在性检查：桶在别的区域时 S3 回 301，按响应头给出的
   assert.deepEqual(await checkAppObject(crossRegionStore([], 404), LOC, AbortSignal.timeout(5_000)), {
     ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_MISSING_MESSAGE },
   });
+  assert.deepEqual(await checkAppObject(crossRegionStore([], 403), LOC, AbortSignal.timeout(5_000)), {
+    ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_FORBIDDEN_MESSAGE },
+  });
 });
 
-test("存在性检查：301 却没有区域头，或跟随一次之后仍被重定向，原样抛出、不再跟随（接缝按未归类的准备失败处置）", async () => {
+test("存在性检查：301 却没有区域头，或跟随一次之后仍被重定向，抛出区域无法确定的错误、不再跟随（接缝按未归类的准备失败处置）", async () => {
   const noHeader = s3AppObjectStore({ client: offlineClient(301) });
   await assert.rejects(checkAppObject(noHeader, LOC, AbortSignal.timeout(5_000)), new RegExp(BUCKET_REGION_UNKNOWN_MESSAGE));
-  const twice = crossRegionStore([], 301, { "x-amz-bucket-region": "eu-west-1" });
+  const twiceSeen: SeenRequest[] = [];
+  const twice = crossRegionStore(twiceSeen, 301, { "x-amz-bucket-region": "eu-west-1" });
   await assert.rejects(checkAppObject(twice, LOC, AbortSignal.timeout(5_000)), new RegExp(BUCKET_REGION_UNKNOWN_MESSAGE));
+  assert.equal(twiceSeen.length, 2, "至多两次 HEAD：首次与跟随一次重定向之后的那次");
 });
 
 test("存在性检查：404 与 403 之外的失败不归类，原样抛给调用方（不当作缺失或无权）", async () => {

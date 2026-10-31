@@ -9,6 +9,8 @@ from pathlib import Path
 
 import pytest
 
+from botocore.hooks import HierarchicalEmitter
+
 from gherkai_runtime import app_upload, names
 
 NOW = datetime(2026, 10, 27, tzinfo=timezone.utc)
@@ -52,62 +54,62 @@ def _file(tmp_path: Path, content: bytes = b"apk-bytes", name: str = "app.apk") 
     return p
 
 
-class _Http:
-    def __init__(self, status: int, headers: dict):
-        self.status_code, self.headers = status, headers
+class _Request:
+    """request-created 事件里的请求对象的结构子集：签名上下文与地址。"""
 
-
-class _Events:
-    """假的 boto3 事件系统：只记注册与注销。"""
-
-    def __init__(self):
-        self.handlers: dict = {}
-
-    def register(self, name, handler, unique_id=None):
-        self.handlers[name] = handler
-
-    def unregister(self, name, handler=None, unique_id=None):
-        self.handlers.pop(name, None)
+    def __init__(self, region: str, host: str):
+        self.context = {"signing": {"region": region}}
+        self.url = f"https://{host}/k"
 
 
 class _S3Redirecting(_S3):
-    """带事件系统的假 client：head 时先让观察者看到一次 301（带桶区域头）再看到 200，模拟 boto3 自动跟随区域重定向。"""
+    """带真实事件系统（botocore 的 HierarchicalEmitter）的假 client：head 时按 boto3 跟随区域重定向的样子发 request-created 事件——
+    先按客户端区域签一次，桶在别的区域时再按桶区域签一次。用真实事件系统是为了让「按 unique_id 注销」真的被核对。"""
 
-    def __init__(self, region: str = "eu-west-1", **kw):
+    def __init__(self, *, client_region: str = "us-east-1", bucket_region: str = "eu-west-1", **kw):
         super().__init__(**kw)
-        self.meta = type("Meta", (), {"events": _Events()})()
-        self._region = region
+        self.meta = type("Meta", (), {"events": HierarchicalEmitter(), "region_name": client_region})()
+        self._regions = [client_region] + ([bucket_region] if bucket_region != client_region else [])
 
     def head_object(self, *, Bucket, Key):
-        handler = self.meta.events.handlers.get("needs-retry.s3.HeadObject")
-        if handler is not None:
-            handler(response=(_Http(301, {"x-amz-bucket-region": self._region}), {"Error": {"Code": "301"}}), request_dict={})
-            handler(response=(_Http(200, {}), {}), request_dict={})
+        for region in self._regions:
+            self.meta.events.emit("request-created.s3.HeadObject", request=_Request(region, f"{Bucket}.s3.{region}.amazonaws.com"),
+                                  operation_name="HeadObject")
         return super().head_object(Bucket=Bucket, Key=Key)
 
 
-def test_bucket_region_observer_reads_region_only_from_301_responses():
+def _observer_gone(s3) -> bool:
+    """事件系统上已没有任何 request-created.s3.HeadObject 的处理器（emit 返回空列表）。"""
+    return s3.meta.events.emit("request-created.s3.HeadObject", request=_Request("x", "h")) == []
+
+
+def test_bucket_region_observer_records_the_signing_region_of_the_last_request():
     obs = app_upload._BucketRegionObserver()
-    assert obs(response=None) is None and obs.region is None
-    obs(response=(_Http(200, {}), {}))
-    assert obs.region is None
-    obs(response=(_Http(301, {}), {}))
-    assert obs.region is None
-    obs(response=(_Http(301, {"x-amz-bucket-region": "us-east-1"}), {"Error": {"Code": "301"}}))
+    assert obs(request=None) is None and obs.region is None
+    obs(request=_Request("us-east-1", "b.s3.amazonaws.com"))
     assert obs.region == "us-east-1"
+    obs(request=_Request("eu-west-1", "b.s3.eu-west-1.amazonaws.com"))   # 跟随重定向后重发的请求：最后一次为准
+    assert obs.region == "eu-west-1"
+    obs(request=type("R", (), {"context": {}})())   # 没有签名上下文的请求不改已记下的区域
+    assert obs.region == "eu-west-1"
 
 
-def test_ensure_app_object_records_bucket_region_only_when_redirected_and_unregisters_the_observer(tmp_path):
-    s3 = _S3Redirecting(head={})
-    loc = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=s3, now=NOW)
-    assert loc.bucket_region == "eu-west-1"
-    assert "needs-retry.s3.HeadObject" not in s3.meta.events.handlers   # 观察者用完即注销，不在共享 client 上累积
-    same_region = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=_S3(head={}), now=NOW)
-    assert same_region.bucket_region is None   # 没有事件系统的 client（测试的假 client）照常工作，区域记为未知
-    redirected_404 = _S3Redirecting(head_error="404")
-    uploaded = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=redirected_404, now=NOW)
-    assert uploaded.uploaded and uploaded.bucket_region == "eu-west-1"   # 上传路径同样带回区域
-
+def test_ensure_app_object_returns_the_last_signing_region_and_unregisters_on_every_path(tmp_path):
+    redirected = _S3Redirecting(head={})
+    loc = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=redirected, now=NOW)
+    assert loc.bucket_region == "eu-west-1" and _observer_gone(redirected)
+    same_region = _S3Redirecting(head={}, bucket_region="us-east-1")
+    assert app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=same_region, now=NOW).bucket_region == "us-east-1"
+    assert _observer_gone(same_region)
+    no_events = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=_S3(head={}), now=NOW)
+    assert no_events.bucket_region is None   # 没有事件系统的 client（测试的假 client）照常工作，区域记为未知
+    uploaded_after_redirect = _S3Redirecting(head_error="404")
+    uploaded = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=uploaded_after_redirect, now=NOW)
+    assert uploaded.uploaded and uploaded.bucket_region == "eu-west-1" and _observer_gone(uploaded_after_redirect)   # 上传路径同样带回区域
+    denied = _S3Redirecting(head_error="403")
+    with pytest.raises(app_upload.AppUploadError, match="没有权限"):
+        app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=denied, now=NOW)
+    assert _observer_gone(denied)   # 异常路径同样注销
 
 def test_key_is_content_hash_plus_original_name_and_404_uploads_with_tag_when_managed(tmp_path):
     f = _file(tmp_path)

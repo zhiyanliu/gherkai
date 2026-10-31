@@ -643,16 +643,27 @@ def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, mon
     _android_env(monkeypatch)
     monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
     _app_project(tmp_path)
+    # 第二个别名指向另一个文件：两个文件都走上传分支、落在同一个桶，提示只能出现一次
+    (tmp_path / "build" / "app2.apk").write_bytes(b"apk2-bytes")
+    _toml(tmp_path, (tmp_path / "gherkai.toml").read_text(encoding="utf-8")
+          + "\n[apps.wiki2]\nandroid = { file = 'build/app2.apk', package = 'org.wikipedia' }\n")
     monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: _UploadS3())
     monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    sha = hashlib.sha256(b"apk-bytes").hexdigest()
-    monkeypatch.setattr(app_upload, "ensure_app_object", lambda bucket, file, **kw: app_upload.AppLocation(
-        bucket, f"apps/{sha}/app.apk", sha, uploaded=False, refreshed=False, bucket_region="eu-west-1"))
-    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(tmp_path / "r")]) == 0
+    calls: list = []
+
+    def ensure(bucket, file, **kw):
+        calls.append(file.name)
+        digest = hashlib.sha256(file.read_bytes()).hexdigest()
+        return app_upload.AppLocation(bucket, f"apps/{digest}/{file.name}", digest, uploaded=False, refreshed=False, bucket_region="eu-west-1")
+
+    monkeypatch.setattr(app_upload, "ensure_app_object", ensure)
+    feature = APP_FEATURE_TWO_SCOPES.replace("@scope:b @device:android @app:wiki", "@scope:b @device:android @app:wiki2")
+    assert m.main(["run", str(_feature(tmp_path, feature)), "--report-dir", str(tmp_path / "r")]) == 0
+    assert calls == ["app.apk", "app2.apk"]
     err = capsys.readouterr().err
     assert "注意：应用桶 my-apps 在 eu-west-1，当前区域配置为 " in err
-    assert err.count("注意：应用桶") == 1   # 两个 scope 同一个桶：只提示一次
+    assert err.count("注意：应用桶") == 1   # 两个文件同一个桶：只提示一次
 
 
 def test_missing_installer_exits_2_in_plan_and_run(tmp_path, monkeypatch, capsys):

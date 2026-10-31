@@ -255,8 +255,8 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1793456415.5614393,
-    "ast_hash": "0b2d78573d62c8f864aab03f757a15a3",
+    "mtime": 1793458269.7838056,
+    "ast_hash": "638115c1d68e13c50ec14778d0f7fff4",
     "semantic_hash": ""
   },
   "README.md": {
@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793456415.8257155,
-    "ast_hash": "2c1ee2ed82796b6d225b72ac77d27086",
+    "mtime": 1793457662.0733395,
+    "ast_hash": "ad5bb5759e734d6704d9caa90b3f7bc3",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1420,8 +1420,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1793456415.06341,
-    "ast_hash": "fda55e19ae38968ea951b60a0f28d15b",
+    "mtime": 1793458270.6745489,
+    "ast_hash": "35c8de73aba8016fdd6e486f903d562c",
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
@@ -1440,8 +1440,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1793456540.3168426,
-    "ast_hash": "c3e4f9cae643ad36c9d73c8e583b3dba",
+    "mtime": 1793458270.3542578,
+    "ast_hash": "030fb8cadf9c69ad25cafbeac9118eab",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793456133.413801,
-    "ast_hash": "2839b2d9b8f3baa43391dcd8fbcff7b7",
+    "mtime": 1793458366.1193066,
+    "ast_hash": "ef0b7054555fb69d65ff8037ff91dbf1",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1793456184.168032,
-    "ast_hash": "a07200ca30341e9634fadb388da7a8a0",
+    "mtime": 1793458270.97176,
+    "ast_hash": "5a701bcf5e6c8ef55a6bae34274fba2d",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
@@ -2000,8 +2000,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_project_config.py": {
-    "mtime": 1793456677.0569487,
-    "ast_hash": "2698731d4cfa4fbc291321fe7d2a3ec1",
+    "mtime": 1793457661.0894399,
+    "ast_hash": "e30fbea872a851af366bc9e3dcaf42fb",
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
@@ -2015,13 +2015,13 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/app_upload.py": {
-    "mtime": 1793456675.941905,
-    "ast_hash": "2ec1bbf4bfef8ee76d771f293b4fd69a",
+    "mtime": 1793458365.3523772,
+    "ast_hash": "5bf038b6a0140ae6f9114aa3b6e6bd9b",
     "semantic_hash": ""
   },
   "runtime/tests/test_app_upload.py": {
-    "mtime": 1793456676.6804733,
-    "ast_hash": "d9fe048cf77db8fd27fca03d0dd81e15",
+    "mtime": 1793458365.7512171,
+    "ast_hash": "686a2c531f023ddf58f795a14791e2be",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/console.py": {
@@ -2120,13 +2120,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.mts": {
-    "mtime": 1793456414.3804653,
-    "ast_hash": "d55bd1adb907724345313e6f16070f63",
+    "mtime": 1793458270.0672705,
+    "ast_hash": "c0d77c28808746fbdc92c477a1612399",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.test.mts": {
-    "mtime": 1793456539.692763,
-    "ast_hash": "212068b3e195e70670591a004dfb131e",
+    "mtime": 1793457659.668639,
+    "ast_hash": "1c00915c94d8f510de434a0210dcd9de",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {

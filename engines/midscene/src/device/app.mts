@@ -64,8 +64,8 @@ export interface AppObjectHead {
 
 /** 安装包存储的 I/O 面：设备侧接缝与测试各自注入，缺省实现是 s3AppObjectStore。 */
 export interface AppObjectStore {
-  /** 对安装包做一次 HeadObject，同时确定桶所在的区域。404 与 403 之外的失败原样抛出。abortSignal 是调用方的截止信号（获取预算），
-   *  必传：SDK 缺省没有请求超时，不带信号的调用在退化网络下会一直挂着。 */
+  /** 检查安装包是否存在并确定桶所在的区域，区域重定向至多跟随一次。404 与 403 返回判定，无法确定区域时抛出区域错误，其余失败原样
+   *  抛出。abortSignal 是调用方的截止信号（获取预算），必传：SDK 缺省没有请求超时，不带信号的调用在退化网络下会一直挂着。 */
   head(loc: AppObjectLocation, abortSignal: AbortSignal): Promise<AppObjectHead>;
   /** 对安装包的 GetObject 按给定区域预签名，返回带签名的 https 地址；本地计算、不发请求（凭证解析除外）。 */
   presign(loc: AppObjectLocation, expiresS: number, region: string): Promise<string>;
@@ -93,12 +93,12 @@ export function presignAppObject(store: AppObjectStore, loc: AppObjectLocation, 
 
 /** 桶在别的区域时 S3 回 301 并以这个响应头给出真实区域（实测；同区域的 200 响应不带它）。 */
 const BUCKET_REGION_HEADER = "x-amz-bucket-region";
-/** 301 却没有区域头，或跟随一次之后仍被重定向：不再跟随，原样抛出（接缝按未归类的准备失败处置）。 */
-export const BUCKET_REGION_UNKNOWN_MESSAGE = "应用桶所在的区域无法确定：存储服务返回了重定向却没有给出可用的区域";
+/** 301 却没有区域头，或跟随一次之后仍被重定向：不再跟随，抛出区域无法确定的错误（接缝按未归类的准备失败处置）。 */
+export const BUCKET_REGION_UNKNOWN_MESSAGE = "应用桶所在的区域无法确定：存储服务返回了重定向却没有给出可用的区域；请确认应用桶名正确、桶仍然存在后重试";
 
 /** 缺省的安装包存储：S3。按区域各持一个客户端：首个取 AWS_REGION（按 artifact-upload 的写法惰性构造），桶在别的区域时按 301 给出的
  *  区域再建一个。client / clientFactory 只供测试注入（真实的 S3Client，网络层换成本地处理器）：client 供全部区域共用，clientFactory 按区域
- *  各造一个以核对主机名的切换。 */
+ *  分别构造客户端以核对主机名的切换。 */
 export function s3AppObjectStore(opts: { client?: S3Client; clientFactory?: (region: string | undefined) => S3Client } = {}): AppObjectStore {
   const clients = new Map<string, S3Client>();
   const factory = opts.clientFactory ?? (opts.client ? () => opts.client! : (region) => new S3Client({ region, maxAttempts: 1 }));

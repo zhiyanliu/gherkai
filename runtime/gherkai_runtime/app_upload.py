@@ -6,8 +6,9 @@
   刷新失败重传，再失败即报错、不复用快过期的对象。E 与 R 的常量与部署侧的生命周期规则同一处（`names`）。
 - **本机后端的应用桶归使用方所有**（`managed=False`）：只做存在性复用，不打标签、不刷新、不承诺保留。
 HeadObject 的 404 走上传、403 报权限（存在性检查靠前缀 ListBucket 把缺失键的 403 变成 404，权限表登记在 ADR 0033）。
-桶不在客户端区域时 boto3 自动跟随 S3 的区域重定向；本模块只观察这个过程（公开的重试事件里 301 响应头 x-amz-bucket-region 给出桶的区域），
-把桶所在区域随位置返回，调用方据此提示使用方（ADR 0051 决策 9）；同区域的 200 响应不带该头，这时区域记为未知、即与客户端相同。
+桶不在客户端区域时 boto3 自动跟随 S3 的区域重定向；本模块只观察这个过程：公开的 request-created 事件给出每次发出的 HeadObject 的签名区域，
+最后一次就是桶所在的区域（没有重定向时即客户端区域），随位置返回，调用方据此提示使用方（ADR 0051 决策 9）。不读响应头：区域端点回带区域头
+的 301、us-east-1 的全局端点回带区域头的 307（实测），客户端缓存过桶区域之后则不再出现重定向——签名区域在这几种情形下都正确。
 boto3 由调用方注入 s3 client（`[aws]` extra，本模块不 import）。所有 `AppUploadError` 的消息都是给使用方看的整句。
 """
 from __future__ import annotations
@@ -34,28 +35,25 @@ class AppLocation:
     sha256: str
     uploaded: bool    # 本次真上传了（否则复用既有对象）
     refreshed: bool   # 本次做了同键刷新（只在 managed 桶）
-    bucket_region: str | None = None   # 桶所在区域，只在 S3 把 HeadObject 重定向到别的区域时已知；None 即与客户端区域相同
+    bucket_region: str | None = None   # 桶所在区域（本次最后一次 HeadObject 的签名区域）；None 只在客户端没有事件系统时出现
 
 
-BUCKET_REGION_HEADER = "x-amz-bucket-region"
-_REDIRECT_EVENT = "needs-retry.s3.HeadObject"
+_REQUEST_EVENT = "request-created.s3.HeadObject"
 _OBSERVER_ID = "gherkai-app-bucket-region"
 
 
 class _BucketRegionObserver:
-    """挂在 boto3 公开的重试事件上，只读不改：301 响应头给出桶的真实区域；其它响应与没有响应的调用都忽略。"""
+    """通过 boto3 公开的 request-created 事件读取桶所在区域，只读不改：记下每次发出的 HeadObject 的签名区域。boto3 跟随区域重定向之后
+    重发的请求按桶所在区域签名，所以最后一次的签名区域就是桶的区域；没有重定向时它就是客户端自己的区域。"""
 
     def __init__(self) -> None:
         self.region: str | None = None
 
-    def __call__(self, response=None, **_kwargs):
-        if response is None:
-            return None
-        http, _parsed = response
-        if getattr(http, "status_code", None) == 301:
-            region = (getattr(http, "headers", None) or {}).get(BUCKET_REGION_HEADER)
-            if region:
-                self.region = region
+    def __call__(self, request=None, **_kwargs):
+        context = getattr(request, "context", None) or {}
+        region = (context.get("signing") or {}).get("region")
+        if region:
+            self.region = region
         return None
 
 
@@ -119,7 +117,7 @@ def ensure_app_object(bucket: str, file: Path, *, managed: bool, s3, now: dateti
     observer = _BucketRegionObserver()
     events = _events(s3)
     if events is not None:
-        events.register(_REDIRECT_EVENT, observer, unique_id=_OBSERVER_ID)
+        events.register(_REQUEST_EVENT, observer, unique_id=_OBSERVER_ID)
     try:
         head = s3.head_object(Bucket=bucket, Key=key)
     except Exception as e:
@@ -133,7 +131,7 @@ def ensure_app_object(bucket: str, file: Path, *, managed: bool, s3, now: dateti
         raise
     finally:
         if events is not None:
-            events.unregister(_REDIRECT_EVENT, unique_id=_OBSERVER_ID)
+            events.unregister(_REQUEST_EVENT, unique_id=_OBSERVER_ID)
     region = observer.region
     if not managed:
         return AppLocation(bucket, key, sha, uploaded=False, refreshed=False, bucket_region=region)
