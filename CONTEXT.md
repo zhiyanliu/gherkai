@@ -111,6 +111,9 @@ _Avoid_: config 文件、toml 配置
 **应用别名 (app alias)**:
 项目配置文件里给被测应用起的名字，绑定安装包与包名或 bundle id；用例只写别名，不写包的位置（见 ADR 0053）。
 _Avoid_: app 名、包别名
+**应用桶 (app bucket)**:
+放安装包的 S3 桶：云端后端用部署建立的产物桶，本机后端用使用方自己配置的桶，键都按内容哈希分前缀（见 ADR 0051）。
+_Avoid_: 安装包桶、apps 桶
 
 **确定性 step SDK (deterministic step SDK)**:
 设想中为设备 step 提供常用定位与等待的一组辅助函数，如按无障碍标识查找、等待可见（见 ADR 0050）。

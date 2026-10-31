@@ -23,7 +23,7 @@
 - 在 `engines/midscene/` 下执行过 `npm ci`（工具经 `tsx` 直接加载设备模块的源码，不需要 `npm run build`）。
 - AWS 凭证，在 us-west-2 上对目标 Device Farm 项目有 worker 所需的六个动作：`ListDevices`、`GetDevice`、`CreateRemoteAccessSession`、`GetRemoteAccessSession`、`StopRemoteAccessSession`、`ListRemoteAccessSessions`（资源形态见 ADR 0033 的权限表）。Device Farm 的区域固定为 us-west-2，与 `AWS_REGION` 无关。
 - 一个 Device Farm 项目的 ARN：`gherkai deploy` 建立的那个（`gherkai doctor --backend cloud` 的 `backend.devices.project` 行），或本机后端用的项目。
-- 应用目标另需：安装包已在 S3 里（例如由一次 `gherkai run` 上传到 `apps/<sha256>/` 下），凭证对它有读取与所在前缀的列举权限；`AWS_REGION` 设为桶所在的区域（S3 客户端按 SDK 惯例读它）。
+- 应用目标另需：安装包已在 S3 里（例如由一次 `gherkai run` 上传到 `apps/<sha256>/` 下），凭证对它有读取与所在前缀的列举权限；`AWS_REGION` 可以不是桶所在的区域（存在性检查会解析桶的区域并按它预签名，与 worker 相同）。
 - 不需要模型权限：工具不执行 AI 动作。
 
 ## 费用

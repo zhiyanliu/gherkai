@@ -56,7 +56,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 | 应用启停 | 安装后启动一次、启动后状态采样；向句柄上下文暴露 `app.restart()`（只在应用目标上有值：terminate 加 activate 加启动采样，采样到自退抛错、step 记 error、类别 `engine_error`；[0050](./0050-deterministic-step-handles-and-testing.md) 决策 2），供使用方自写的重启 step 调用——产品不内置有措辞的 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条） |
 | 会话预热 | 按探测结论选路线导航预热地址一次，在原生控件树里确认标记（决策 6） |
 
-newSession 的能力集由「Appium 建连与上下文切换」块单点组装：网页目标带 `browserName`（Android 为 Chrome，iOS 为 Safari）；应用目标带 `appium:app`（安装包的预签名地址，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）、`appium:autoLaunch: false` 与 `appium:noReset: true`，两个平台都**不带**应用标识能力（`appium:appPackage` / `appium:appActivity` / `appium:bundleId`）；两种目标都带 `appium:newCommandTimeout`（决策 6 的 ⑧）。应用目标关掉自动启动与重置，是因为启动由 worker 显式 `activateApp` 并做启动采样（0051 决策 9），不让 Appium 在建会话时按自己的缺省启动或重置被测应用。不带应用标识能力有两层原因：Android 实测中，Device Farm 的交互端点把 `appium:appPackage` 当作「用已安装应用」路线的信号，与 `appium:app` 同发时跳过安装包下载、却仍把 `appium:app` 改写成主机本地路径，驱动随即报文件不存在（带 `appium:appPackage` 时预签名、公网与 S3 URI 三种地址、Appium 2 与 3 全部失败，移除后安装成功；iOS 的能力集本就不带 bundleId、不受影响，0051 决策 9）；两平台均不提供应用标识能力，遵循官方区分的「安装包」与「已安装应用」两条路线，iOS 携带 `appium:bundleId` 时是否发生同一下载故障未做同类对照；驱动能从安装包读出包名或 bundle id，worker 启停与采样应用用的标识走 `activateApp` / `terminateApp` / `queryAppState` 的命令参数（0051 决策 9）。关掉自动启动后也不需要 `appActivity`：自动启动按启动器 intent 找活动，维基百科客户端的启动器 intent 匹配多个活动会让它失败，而 `activateApp` 不经这条路。被拒方案「Android 另带 `appium:appPackage` 让驱动识别被测应用」正因上述端点行为而弃。
+newSession 的能力集由「Appium 建连与上下文切换」块单点组装：网页目标带 `browserName`（Android 为 Chrome，iOS 为 Safari）；应用目标带 `appium:app`（安装包的预签名地址，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）、`appium:autoLaunch: false` 与 `appium:noReset: true`，两个平台都**不带**应用标识能力（`appium:appPackage` / `appium:appActivity` / `appium:bundleId`）；两种目标都带 `appium:newCommandTimeout`（决策 6 的 ⑧）。Appium 服务端的大版本不在能力集里选：它是 Device Farm 建会话的会话参数 `appium:version`（0051 决策 3）。应用目标关掉自动启动与重置，是因为启动由 worker 显式 `activateApp` 并做启动采样（0051 决策 9），不让 Appium 在建会话时按自己的缺省启动或重置被测应用。不带应用标识能力有两层原因：Android 实测中，Device Farm 的交互端点把 `appium:appPackage` 当作「用已安装应用」路线的信号，与 `appium:app` 同发时跳过安装包下载、却仍把 `appium:app` 改写成主机本地路径，驱动随即报文件不存在（带 `appium:appPackage` 时预签名、公网与 S3 URI 三种地址、Appium 2 与 3 全部失败，移除后安装成功；iOS 的能力集本就不带 bundleId、不受影响，0051 决策 9）；两平台均不提供应用标识能力，遵循官方区分的「安装包」与「已安装应用」两条路线，iOS 携带 `appium:bundleId` 时是否发生同一下载故障未做同类对照；驱动能从安装包读出包名或 bundle id，worker 启停与采样应用用的标识走 `activateApp` / `terminateApp` / `queryAppState` 的命令参数（0051 决策 9）。关掉自动启动后也不需要 `appActivity`：自动启动按启动器 intent 找活动，维基百科客户端的启动器 intent 匹配多个活动会让它失败，而 `activateApp` 不经这条路。被拒方案「Android 另带 `appium:appPackage` 让驱动识别被测应用」正因上述端点行为而弃。
 
 设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。
 
@@ -89,7 +89,7 @@ newSession 的能力集由「Appium 建连与上下文切换」块单点组装�
 - **应用目标固定原生上下文**，不探测网页上下文；应用目标上的 handler 调用 `withWebContext` 记 error、类别 `capability_unavailable`（应用目标没有网页上下文，重试不会变，处置是改用原生界面上的操作或改写为 AI 步）。声明 `requires: ["web_context"]` 的条目在注册期只能落在网页目标上（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），这条归类兜住没有声明前提却调用它的 handler。
 - **输入路线**（iOS）：由网页上下文是否可用决定在哪个上下文取活动元素；Android 固定为 `mobile: type`、不探测。
 - **坐标比例**：iOS 取 `mobile: deviceScreenInfo` 的 `scale`；它失败时回退为截图长边除以窗口长边、取整，窗口长边取原生 page source 里 `XCUIElementTypeApplication` 节点宽与高中的较大者（真机的根节点是不带属性的 `AppiumAUT`，Application 是它的第一个子节点，按标签名找、不取根节点）；回退也失败时按执行前失败归 `engine_error`，消息「无法确定坐标比例」。不调 `getWindowRect`（iOS 26.3 上两种上下文都报错，见被拒方案）。Android 恒为 1。比例没有可用的缺省值：猜错的比例会让每个 iOS 手势都落空，所以确定不了就不进入执行。
-- **Appium 版本**：取自 `/status`，只记入诊断。
+- **Appium 版本**：建会话时请求的大版本为 2（0051 决策 3）；实际版本取自 `/status`，只记入诊断。
 - **DeepLink 支持**（仅应用目标）：不预先探测，首次 `mobile: deepLink` 遇到 WebDriverAgent「不支持打开地址」类报错即记为「不提供」并缓存到会话（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）；只缓存能力否定，地址被拒与结果未知不进缓存。这是「一次定下」的惰性例外：预先探测要么多开一次应用，要么没有可用的只读命令。
 
 为什么一次定下、不在运行期试错回落：失败的路线有的不抛错，只是空等 50 秒左右；路线失败时模型还会反复重试到重规划上限，额外消耗数万 token。择路必须在交给 AI 之前确定。
@@ -145,7 +145,7 @@ newSession 的能力集由「Appium 建连与上下文切换」块单点组装�
 - **命令守卫的护栏测试**：带旧令牌的调用、结果未知后的有副作用调用、缓存的元素句柄、从代理提取出的方法引用（解构或先取后调）与晚到的异步回调都必须被拒绝；只读白名单放行。
 - **预热与探测的验收**：预热验收的三个失败分支（边缘拒收 cookie、校验 401、请求失败）各实际触发一次；iOS 26 上「探测超时 → 恢复原生上下文 → deepLink → READY」整链路在真机验收矩阵里单列一行，这一行同时观测探测实例的网页命令挂住期间执行实例的原生命令延迟多少（服务端是否串行，决策 5），以及每次尝试失败在哪一环（列上下文、切入或只读命令，真机重新探测工具逐次记下；失败的一环决定归「探测出错」还是「不提供」，决策 5）。矩阵另列四行：刚建好、尚未导航的 Safari / Chrome 会话是否已有网页上下文候选（决策 5 的零候选前提）；没有 Swipe 动作时模型能否用 Scroll 完成横向翻页（决策 7）；Android 应用目标不带应用标识能力能否完成安装、显式启动与状态采样（决策 3、0051 决策 9）；输入后收起键盘（决策 4、7）：键盘已显示时两平台能否收起，含 iOS 网页输入上下文下在原生上下文发出的命令能否收起 Safari 的键盘；键盘未显示时驱动是否报错与耗时，报错时 worker 日志恰为一行、判定不变；Android 上 ESC 无效时驱动补发的返回键是否把 Chrome 或被测应用带回上一页；iOS 键盘上没有标识或标签恰为 `done` 的键时能否收起。
 - **真机重新探测工具**：`tools/` 下放一个真机重新探测工具，在真实会话里逐项执行探测与原语，生成能力矩阵并与测试 fixture 做差集。工具是 `tools/device_reprobe.mts`，用法与判读见同目录的 `device_reprobe.md`。
-- **人工触发的真机验收矩阵**：升级 Midscene、WebdriverIO，或 Device Farm 的 Appium 服务端版本变化时，由人触发一轮真机验收：Android 加两代 iOS、网页加应用、故障演练；列入 CONTRIBUTING 的发版后验证项。不进 CI：需要远程访问会话与模型费用，且失败须人判是平台变化还是用例问题。
+- **人工触发的真机验收矩阵**：升级 Midscene、WebdriverIO，或 Device Farm 的 Appium 服务端版本变化（大版本 2 之内的次版本变化，或主动把会话参数切到 3，后者先审计 worker 用到的端点清单，0051 决策 3）时，由人触发一轮真机验收：Android 加两代 iOS、网页加应用、故障演练；列入 CONTRIBUTING 的发版后验证项。不进 CI：需要远程访问会话与模型费用，且失败须人判是平台变化还是用例问题。
 
 ### 9. 未来方向（不在 1.5 范围）
 
