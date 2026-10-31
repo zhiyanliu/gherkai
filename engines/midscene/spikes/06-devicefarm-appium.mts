@@ -15,9 +15,9 @@
 //   DF_APP_URL（app 场景：APK 的 https 地址）      DF_APP_ARN（已上传过的 Device Farm 应用 ARN，给了就不再上传）
 //   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium|mobile（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
 //                                                 appium：用 appium:app 让 Device Farm 交互端点下载后交给 Appium 安装——公网 https、S3 预签名地址与
-//                                                 s3:// 加项目执行角色实测都能装；能力集不带 appPackage：带了端点按「已安装应用」处理、跳过下载
-//                                                 却照样把 appium:app 改写成主机本地路径，Appium 报文件不存在（真机实测）；配 appium:autoLaunch false，
-//                                                 不关时按启动器 intent 自动启动，维基百科客户端的 intent 匹配多个活动会失败，启动交给后面的 activateApp；
+//                                                 s3:// 加项目执行角色实测都能装；能力集不带 appPackage：提供该能力时，端点按「已安装应用」处理、跳过下载
+//                                                 但仍将 appium:app 改写成主机本地路径，Appium 报文件不存在（真机实测）；配 appium:autoLaunch false，
+//                                                 未关闭自动启动时按启动器 intent 自动启动，维基百科客户端的 intent 匹配多个活动会失败，启动交给后面的 activateApp；
 //                                                 mobile：能力集与 devicefarm 相同（不带 appium:app），会话建好后经 mobile: installApp 让 Appium 服务端
 //                                                 按 DF_APP_URL 自己下载安装；实测被端点拒绝「This command is not supported by AWS Device Farm」，
 //                                                 留作对照；参数是 Android UiAutomator2 的写法（appPath / timeout），结果记在 app_install_mobile）
@@ -188,7 +188,7 @@ async function untilAppPresent(driver: Driver): Promise<void> {
 }
 // ---- 应用安装（会话内经 Appium 安装的对照路径，DF_APP_INSTALL=mobile）----
 // newSession 里带 appium:app 时，交互端点在 Appium 之前截获地址、自行下载并把能力改写成主机本地路径；同发 appium:appPackage 会让它
-// 跳过下载而路径照改（见文件头 appium 模式的说明）。这条路径在会话建好之后才把地址交给 Appium：UiAutomator2 的 mobile: installApp
+// 跳过下载，但仍改写路径（见文件头 appium 模式的说明）。这条路径在会话建好之后才把地址交给 Appium：UiAutomator2 的 mobile: installApp
 // 接受 https 地址，由服务端下载并安装，看它是否绕开端点的截获。实测端点直接拒绝这条命令（官方不支持命令清单里也列有 installApp）。
 // 失败时记下错误原文（预签名地址的查询串略去）并中止，后续启动与采样都依赖安装成功。
 const INSTALL_MOBILE_TIMEOUT_MS = 240_000;

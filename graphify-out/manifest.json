@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793445332.1222491,
-    "ast_hash": "3b827c487bc80953fb78a84f1d26f942",
+    "mtime": 1793446074.9630287,
+    "ast_hash": "8a66d79ca5be35aa00657387508b64ca",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1860,8 +1860,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1793445332.7889717,
-    "ast_hash": "62c6c7587f6bd339ef7274fb0127f71f",
+    "mtime": 1793446075.5581613,
+    "ast_hash": "7ba0f27b458d17cc6a577cd3cdf9b83a",
     "semantic_hash": ""
   },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793445281.7128758,
-    "ast_hash": "819727478f6537b75e753ef7c54e1ef4",
+    "mtime": 1793446074.652188,
+    "ast_hash": "ac20261ab6ef7333af72b9445bc43564",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793445216.5426977,
-    "ast_hash": "4128cb45cad11b46f6cf6e2f78918ea5",
+    "mtime": 1793446091.049815,
+    "ast_hash": "a132847491404429ff3d6dc06c998258",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2130,8 +2130,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {
-    "mtime": 1793445025.038559,
-    "ast_hash": "229d333654afc8ed7dcbe2698c5bdaef",
+    "mtime": 1793446075.1556582,
+    "ast_hash": "b8aeefa82ac47d93d8c617ad1f543e41",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.test.mts": {
