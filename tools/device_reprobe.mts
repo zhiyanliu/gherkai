@@ -22,7 +22,8 @@
 // 计时：记下的每条命令带从发出到落定的毫秒数（cases[].flat[].ms）；能力探测的逐项事实、打开测试页与随后的复原、截图、读地址、
 // 界面快照与本工具自己取的控件树各记一步（matrix.lifecycle，并逐步写到标准输出），用于校准超时分层与证据采集预算（ADR 0052
 // 决策 6、ADR 0051 决策 8）。截图与本工具自己取的控件树另写到输出目录（SCREENSHOT_FILE、PAGE_SOURCE_FILE），挑 --focus 坐标时
-// 对照输入框的位置；接缝的界面快照超出预算时不留控件树，这两个文件不受它影响。
+// 对照输入框的位置；每次执行开始时先删除上一次留下的这两个文件。控件树写盘前经 redactSecrets，截图按原始 PNG 写盘：redactSecrets
+// 只处理文字，不提供像素内容的脱敏。接缝的界面快照超出预算时不留控件树，不影响这两个文件的采集。
 //
 // --offline：不连设备，用按快照应答的假 driver 重放两份快照的全部用例，再拿两份控件树样例各自与自身比较，核对本工具的记录、归一与
 // 差集逻辑（结果应为零差异），并用构造的结果核对能力缺失用例的归类。改了本工具或快照格式之后先执行它。
@@ -465,8 +466,9 @@ function offlineAdapter(automationName: string): DeviceAdapter {
 }
 
 /** 能力缺失用例的归类：取一条发出命令的快照用例（优先 DeepLink），构造「末条命令被拒、异常带 capability_unavailable 标记」的结果，
- *  差集应把它记进 failed_cases、rejected 为空，not_exercised 的原因写明能力缺失。只核对本工具的差集逻辑：哪些驱动文本算能力缺失
- *  由适配器判定，由适配器的契约测试守。 */
+ *  差集应把它记进 failed_cases、rejected 为空，被拒命令的形态记进 not_exercised、原因写明能力缺失。按被拒形态查找那一项并要求它
+ *  存在：只对 not_exercised 的全部项判断原因时，空列表恒为真，被拒形态漏记也会通过。只核对本工具的差集逻辑：哪些驱动文本算能力
+ *  缺失由适配器判定，由适配器的契约测试守。 */
 function unavailableCaseCheck(file: string, fixture: ContractFixture): { ok: boolean; diff: Diff | null } {
   const withCommands = fixture.cases.filter((x) => flatten(x.commands).length > 0);
   const c = withCommands.find((x) => x.call === "deepLink") ?? withCommands[0];
@@ -477,8 +479,11 @@ function unavailableCaseCheck(file: string, fixture: ContractFixture): { ok: boo
     name: c.name, call: c.call, status: "failed", error: "被驱动拒绝", error_type: "capability_unavailable",
     commands: c.commands, expected: c.commands, matches_fixture: null, flat,
   }]);
+  const rejectedForm = formOf(cmds.at(-1)!);
+  const entry = diff.not_exercised.find((n) => n.form === rejectedForm);
   const ok = diff.rejected.length === 0 && diff.failed_cases.length === 1
     && diff.failed_cases[0].error_type === "capability_unavailable"
+    && entry !== undefined && entry.reasons.length > 0 && entry.reasons.every((r) => r.includes("capability_unavailable"))
     && diff.not_exercised.every((n) => n.reasons.every((r) => r.includes("capability_unavailable")));
   return { ok, diff };
 }
@@ -700,6 +705,9 @@ function skipReason(c: ContractCase, opts: Options, conclusion: ProbeConclusion)
 
 async function runOnDevice(opts: Options): Promise<number> {
   fs.mkdirSync(opts.out, { recursive: true });
+  // 复用 --out 时先删除上一次留下的测量材料：本次截图或控件树没能采集、写盘时，目录里不会留下与本次能力矩阵不对应的旧文件。
+  // force 只忽略文件不存在，其余错误照常抛出（此时尚未获取设备）。
+  for (const name of [SCREENSHOT_FILE, PAGE_SOURCE_FILE]) fs.rmSync(path.join(opts.out, name), { force: true });
   // run 段取时间戳加 6 位随机十六进制：同一秒内并行启动的两次工具运行各自有不同的会话名（会话名的其余段对本工具都相同，
   // 只靠 run 段区分；按名核对若撞名会把另一次运行的会话当作孤儿停掉）。
   const runId = `device-reprobe-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${randomBytes(3).toString("hex")}`;
@@ -829,7 +837,7 @@ async function exerciseSession(
   }
 
   // 测量材料：打开测试页之后（没给 --url 时即就绪之后）经执行实例截一张屏写到输出目录，挑 --focus 坐标时与 page-source.xml 里
-  // 输入框的位置对照。不经命令守卫；截图或写盘失败只记下，不影响后续。
+  // 输入框的位置对照。不经命令守卫；截图或写盘失败只记下，不影响后续。截图按原始 PNG 写盘，不经脱敏（见模块头「计时」段）。
   const shot = await lifecycle.attempt("screenshot", () => session.exec.takeScreenshot());
   if ("value" in shot) saveMaterial(opts.out, SCREENSHOT_FILE, Buffer.from(shot.value, "base64"));
 

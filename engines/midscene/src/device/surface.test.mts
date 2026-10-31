@@ -1142,6 +1142,23 @@ test("控件树的预算是 30 秒：超过即记 timeout，30 秒内失败记 e
   }
 });
 
+test("控件树的 30 秒从读控件树时起算，不从读地址时起算：读地址耗时 14 秒之后，控件树在 29 999 毫秒时失败仍记 error", async () => {
+  const h = harness();
+  await ready(h);
+  await h.surface.preStep();
+  h.appiumSession.addressDelayMs = 14_000;
+  const address = await h.surface.readAddress({ kind: "ai", status: "failed" });
+  assert.deepEqual(address, { url: "https://shop.example/cart", url_missing: null });
+  h.appiumSession.pageSourceFails = true;
+  h.appiumSession.pageSourceDelayMs = 29_999;
+  const { snapshot, failure } = await h.surface.snapshot({ kind: "ai", status: "failed" }, address);
+  // 两段合计 43 999 毫秒：若控件树的预算从读地址时起算，这里会记成 timeout。
+  assert.equal(snapshot.controls_missing, "error");
+  assert.equal(failure, null);
+  assert.equal(snapshot.controls, null);
+  assert.equal(snapshot.url_missing, null);
+});
+
 test("没有产物落点时不写原始控件树，也不写 device-session.json", async () => {
   const h = harness({ artifactRoot: undefined });
   await ready(h);

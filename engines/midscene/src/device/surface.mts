@@ -742,7 +742,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
       : c.webContext === "available" ? "提供" : c.webContext === "unavailable" ? "不提供" : "探测出错";
     const candidates = c.webContextCandidates === null ? "" : `，候选 ${c.webContextCandidates} 个`;
     const scaleFrom = c.scaleSource === "device_screen_info" ? "取自设备屏幕信息"
-      : c.scaleSource === "page_source" ? "由截图与原生控件树根节点的尺寸换算" : "固定值";
+      : c.scaleSource === "page_source" ? "由截图与应用窗口的尺寸换算" : "固定值";
     return `worker: 设备已就绪：${deviceText}；自动化驱动 ${appium.automationName}；网页上下文 ${web}${candidates}；` +
       `坐标比例 ${c.scale}（${scaleFrom}）；Appium ${c.appiumVersion ?? "版本未知"}`;
   }

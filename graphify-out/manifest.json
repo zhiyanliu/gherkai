@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793437963.5836282,
-    "ast_hash": "b7c27220b1e63d86b2b5cf6cc47538fe",
+    "mtime": 1793440435.9251194,
+    "ast_hash": "d250746bc2544b2e72888d4b7c059e5b",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2140,8 +2140,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/device-session.mts": {
-    "mtime": 1793353491.7536623,
-    "ast_hash": "f52733169dcc4be112d88bffad5ced59",
+    "mtime": 1793440910.5417333,
+    "ast_hash": "dd8c0b58a387798db0c7f9352d706c62",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/finalize.mts": {
@@ -2170,8 +2170,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
-    "mtime": 1793438098.3376904,
-    "ast_hash": "0019880e7f387d408fad93101aa01df5",
+    "mtime": 1793440722.0148723,
+    "ast_hash": "77ed0e6e5d60bc036464c4a46f66cfe8",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.test.mts": {
@@ -2185,13 +2185,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.mts": {
-    "mtime": 1793436042.6699166,
-    "ast_hash": "0d9269a58d9407165330193434eded48",
+    "mtime": 1793440743.0493162,
+    "ast_hash": "9ce55aa1a19d3a96336d895163054a18",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.test.mts": {
-    "mtime": 1793378512.831104,
-    "ast_hash": "c5a26caa689bf8f0c398527ee6beae85",
+    "mtime": 1793440910.5468636,
+    "ast_hash": "43d5505c744dab4f503107929bf8b11a",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/read-points.test.mts": {
@@ -2220,13 +2220,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793437752.191683,
-    "ast_hash": "d5cee0671c7bbafaf0b38be1be157ecc",
+    "mtime": 1793440910.5445254,
+    "ast_hash": "496d0ba8a755de9d35ffd90ff14a6164",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793437696.8146222,
-    "ast_hash": "fa1259e65dd7755e99bb9ecf2aeafb8c",
+    "mtime": 1793440755.6025279,
+    "ast_hash": "56c81cc274045b5755dc5f01bf6c3d89",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2250,8 +2250,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/web-context.mts": {
-    "mtime": 1793374755.2358687,
-    "ast_hash": "e06b3d9294c86209d90d2c55b7945c9f",
+    "mtime": 1793440722.0395174,
+    "ast_hash": "63ed4cff71e147d4b1786d3586b3c1bb",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/web-context.test.mts": {
@@ -2290,13 +2290,13 @@
     "semantic_hash": ""
   },
   "tools/device_reprobe.mts": {
-    "mtime": 1793437770.3776844,
-    "ast_hash": "272c99d615eb1e2f1e827b804ab24d6e",
+    "mtime": 1793440814.1632879,
+    "ast_hash": "459e0621987348cbb8c5b4970e77fdee",
     "semantic_hash": ""
   },
   "tools/device_reprobe.md": {
-    "mtime": 1793438003.7289557,
-    "ast_hash": "f4b67061ce6e352b20389d2b8747393b",
+    "mtime": 1793440667.5752475,
+    "ast_hash": "e4eb5aebf12b63752efcbe30163a7616",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {

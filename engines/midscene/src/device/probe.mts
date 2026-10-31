@@ -19,16 +19,18 @@
 // 有界重试一次（重新定位后再切入、再读），以区分瞬时故障与确认不提供；零候选的重试就是定位规则里的「等一会儿再列一次」。每次尝试
 // 记下失败在哪一环（列上下文、切入、只读命令），按证据性质归类：
 //   - 重试后候选仍为零：不提供；
-//   - 两次尝试都切入成功、只读命令都失败，最后一次是超时或服务端报错（不是传输层错误），而原生上下文的只读命令正常（iOS 26.3 的
-//     两种形态）：不提供。只读命令只失败过一次（另一次失败在列上下文或切入）不够这条证据；
+//   - 两次尝试都切入成功、只读命令都失败，最后一次是超时或服务端报错（不是传输层错误），而原生上下文的只读命令正常（逐条路线实测中
+//     iOS 26.3 切入成功、网页命令立即返回检查器错误的样本属于这种）：不提供。只读命令只失败过一次（另一次失败在列上下文或切入）
+//     不够这条证据；
 //   - 切入本身失败（重试之后仍切不进，从未执行只读命令）、列上下文的调用本身失败、最后一次失败是传输层错误（连接层错误码、
-//     HTTP 502 / 503 / 504，或没有错误码与状态码的失败）：探测出错；
+//     HTTP 502 / 503 / 504，或没有错误码与状态码的失败）：探测出错。真机验收中 iOS 26.3 属于这种：切入本身在服务端挂住约 150 秒
+//     才返回，PROBE_TIMEOUT_MS（当前 15 秒）先于它到期，失败落在切入一环；
 //   - 原生只读命令也失败（会话异常）：先查会话状态，丢失归 session_lost，否则探测出错；
 //   - 多个候选：定位规则拒绝歧义、无法确定被测页面，同样是无法区分设备能力的情形，记探测出错，不按第一个去猜。
 // 会话丢失发生在 scope_started 之前，消息用执行前的那句（surface.mts 的 SESSION_LOST_BEFORE_START_MESSAGE）。
 // 原生一侧的核对（切回原生上下文与原生截图）经生命周期通道的执行实例发出：它的超时是单条命令的真实上界，探测实例的网页命令挂住时
-// 不会因为短超时把原生命令误判为失败（Appium 服务端是否对同一会话串行执行列入真机验收）。两种否定结论下导航都不走 url（接缝据此
-// 选 deepLink 路线）。
+// 不会因为短超时把原生命令误判为失败：Appium 服务端对同一会话的命令串行执行，真机验收中 iOS 26.3 上探测实例的切入挂住期间，执行
+// 实例发出的原生只读命令曾被延迟约 105 秒。两种否定结论下导航都不走 url（接缝据此选 deepLink 路线）。
 //
 // 获取预算：整个探测在 Appium 块的 withDeadline 之下执行，预算到期或进入终结时在途命令随之中止；每一步之后核对一次，中止即停、归
 // acquire_timeout（进入终结时这个结果不会被使用）。
@@ -183,10 +185,10 @@ async function probeScale(r: ProbeRun, nativeOk: boolean): Promise<{ value: numb
   try {
     const scale = scaleFromScreenInfo(await r.deps.deviceScreenInfo(r.probe));
     if (scale !== null) return { value: scale, source: "device_screen_info" };
-    log(r, "设备屏幕信息里没有坐标比例，改由截图与原生控件树根节点的尺寸换算");
+    log(r, "设备屏幕信息里没有坐标比例，改由截图与应用窗口的尺寸换算");
   } catch (e) {
     if (r.budget.signal.aborted) return null;
-    log(r, `读取设备屏幕信息失败，改由截图与原生控件树根节点的尺寸换算：${errorText(e)}`);
+    log(r, `读取设备屏幕信息失败，改由截图与应用窗口的尺寸换算：${errorText(e)}`);
   }
   if (!nativeOk) return null;
   try {
@@ -194,7 +196,7 @@ async function probeScale(r: ProbeRun, nativeOk: boolean): Promise<{ value: numb
     const screenshot = await r.session.exec.takeScreenshot();
     const scale = scaleFromSizes(pngLongEdge(screenshot), applicationLongEdge(source));
     if (scale !== null) return { value: scale, source: "page_source" };
-    log(r, "截图或原生控件树根节点里没有可用的尺寸，坐标比例无法换算");
+    log(r, "截图或应用窗口没有可用的尺寸，坐标比例无法换算");
   } catch (e) {
     if (!r.budget.signal.aborted) log(r, `换算坐标比例所需的截图或原生控件树读取失败：${errorText(e)}`);
   }

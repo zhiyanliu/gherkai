@@ -443,7 +443,7 @@ test("坐标比例：iOS 取设备屏幕信息的 scale（经探测实例）；A
   assert.deepEqual(h.screenInfoCalls, [h.probe]);
 });
 
-test("坐标比例回退：屏幕信息失败或不带 scale 时，截图长边除以原生控件树根节点的长边、取整；不调 getWindowRect", async () => {
+test("坐标比例回退：屏幕信息失败或不带 scale 时，截图长边除以应用窗口的长边、取整；不调 getWindowRect", async () => {
   for (const [info, shot, root, expected] of [
     [new Error("unknown command"), [1170, 2532], [390, 844], 3],
     [{ screenSize: { width: 375 } }, [750, 1334], [375, 667], 2],

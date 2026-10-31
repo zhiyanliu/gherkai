@@ -117,7 +117,7 @@ export const DEVICE_SESSION_REPORT_KIND = "device_session";
 
 /** 网页上下文的探测结论（ADR 0052 决策 5）：提供、不提供、探测出错；应用目标不探测，记 not_applicable。 */
 export type WebContextRecord = "available" | "unavailable" | "probe_error" | "not_applicable";
-/** 坐标比例的来源：deviceScreenInfo 的 scale、原生 page source 根节点的回退、Android 恒为 1。 */
+/** 坐标比例的来源：deviceScreenInfo 的 scale、原生 page source 里应用窗口节点的回退、Android 恒为 1。 */
 export type ScaleSource = "device_screen_info" | "page_source" | "fixed";
 
 export interface DeviceSessionRecord {
