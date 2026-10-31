@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793440435.9251194,
-    "ast_hash": "d250746bc2544b2e72888d4b7c059e5b",
+    "mtime": 1793441224.8492515,
+    "ast_hash": "64dd86576b0edf122055a72091be65cb",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
