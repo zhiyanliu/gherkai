@@ -2,10 +2,13 @@
 //
 // 获取期按固定次序调用（编排归设备侧接缝实现，本模块只给原语与判定）：
 //   1. 建会话之前：对安装包的 S3 键做存在性检查（checkAppObject）。404 与 403 都记 precheck_failed、消息不同（404 提示重新提交，
-//      403 说明是权限问题）。它排在 CreateRemoteAccessSession 之前，缺包或无权时零会话费用退出。
-//   2. newSession 之前：对同一个键预签名（presignAppObject），交给 `appium:app`；有效期取 limits 的 APP_PRESIGN_EXPIRES_S，只需覆盖
-//      newSession 期间的下载。预签名地址是凭证（签名在查询串里），只进能力集，不进事件、日志与诊断；经 WebdriverIO 错误文本外泄的
-//      那条路由 wdio-log 的掩码与 redactSecrets 盖住（ADR 0051 决策 11）。
+//      403 说明是权限问题）。它排在 CreateRemoteAccessSession 之前，缺包或无权时零会话费用退出。检查同时确定应用桶所在的区域：
+//      HeadObject 先按 worker 运行区域的客户端发出，桶在别的区域时 S3 回 301、响应头 x-amz-bucket-region 给出真实区域（实测，同区域
+//      的 200 响应不带这个头），换到该区域的客户端重做一次再判 404 / 403；只跟随一次重定向。
+//   2. newSession 之前：对同一个键按桶所在区域预签名（presignAppObject），交给 `appium:app`；有效期取 limits 的 APP_PRESIGN_EXPIRES_S，
+//      只需覆盖 newSession 期间的下载。预签名地址绑定区域（按错区域签的地址 S3 回 301，Device Farm 只报文件不存在）。预签名地址是
+//      凭证（签名在查询串里），只进能力集，不进事件、日志与诊断；经 WebdriverIO 错误文本外泄的那条路由 wdio-log 的掩码与 redactSecrets
+//      盖住（ADR 0051 决策 11）。
 //   3. newSession 之后：显式 activateApp 并采样应用状态（launchApp），任一次回到「未运行」即判启动即自退，记 precheck_failed
 //      （ADR 0051 决策 14：不做任何规避）。启动与采样接收获取预算的中止信号，预算到期或进入终结之后不再发命令。
 // 句柄上下文（ADR 0050 决策 2）的 app.restart() 由 appHandle 给出：terminate、activate、启动采样三个原语依次执行，采样到自退抛出
@@ -15,8 +18,8 @@
 // 本身报错——原样抛给调用方，由它按会话状态与所在阶段归类（ADR 0051 决策 4「会话丢失的判定靠查状态」）；本模块不查会话状态。
 // restart() 的命令由调用方传入的 driver 发出：设备侧接缝传命令守卫代理，命令受执行令牌约束，守卫挂在异常上的归类原样传出。
 //
-// 依赖：S3 客户端沿用 lib/artifact-upload.mts 的构造（region 取 AWS_REGION，即后端所在区域，不是 Device Farm 的 us-west-2，
-// ADR 0051 决策 10；maxAttempts 为 1，单次调用的上界由调用方的截止信号给出）。应用状态的三条命令是 Appium 的跨平台端点
+// 依赖：S3 客户端沿用 lib/artifact-upload.mts 的构造（首个客户端的 region 取 AWS_REGION，即后端所在区域，不是 Device Farm 的
+// us-west-2，ADR 0051 决策 10；桶在别的区域时按 301 给出的区域再建一个；maxAttempts 为 1，单次调用的上界由调用方的截止信号给出）。应用状态的三条命令是 Appium 的跨平台端点
 // （activate_app、terminate_app、app_state），不是 `mobile:` 扩展命令，两个平台写法相同，不需要经驱动适配器。
 import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { SignatureV4 } from "@aws-sdk/signature-v4";
@@ -51,49 +54,92 @@ export interface AppObjectLocation {
 /** HeadObject 的三种可判定结果：存在、缺失（404）、无权（403）。 */
 export type AppObjectPresence = "present" | "missing" | "forbidden";
 
+/** 一次存在性检查的结果：对象的判定，以及应用桶所在的区域（预签名按它签）。redirected 为真表示桶不在 worker 的运行区域、
+ *  区域由 S3 的 301 响应头给出（ADR 0051 决策 9）。 */
+export interface AppObjectHead {
+  presence: AppObjectPresence;
+  region: string;
+  redirected: boolean;
+}
+
 /** 安装包存储的 I/O 面：设备侧接缝与测试各自注入，缺省实现是 s3AppObjectStore。 */
 export interface AppObjectStore {
-  /** 对安装包做一次 HeadObject。404 与 403 之外的失败原样抛出。abortSignal 是调用方的截止信号（获取预算），必传：
-   *  SDK 缺省没有请求超时，不带信号的调用在退化网络下会一直挂着。 */
-  head(loc: AppObjectLocation, abortSignal: AbortSignal): Promise<AppObjectPresence>;
-  /** 对安装包的 GetObject 预签名，返回带签名的 https 地址；本地计算、不发请求（凭证解析除外）。 */
-  presign(loc: AppObjectLocation, expiresS: number): Promise<string>;
+  /** 对安装包做一次 HeadObject，同时确定桶所在的区域。404 与 403 之外的失败原样抛出。abortSignal 是调用方的截止信号（获取预算），
+   *  必传：SDK 缺省没有请求超时，不带信号的调用在退化网络下会一直挂着。 */
+  head(loc: AppObjectLocation, abortSignal: AbortSignal): Promise<AppObjectHead>;
+  /** 对安装包的 GetObject 按给定区域预签名，返回带签名的 https 地址；本地计算、不发请求（凭证解析除外）。 */
+  presign(loc: AppObjectLocation, expiresS: number, region: string): Promise<string>;
 }
 
-/** 建会话前的存在性检查：对象存在时返回 null；404 与 403 返回 precheck_failed 的 scope 级终止（消息不同）；其余失败原样抛出。 */
+/** 存在性检查的结论：放行（带桶所在区域与是否经过重定向），或 precheck_failed 的 scope 级终止。 */
+export type AppObjectCheck =
+  | { ok: true; region: string; redirected: boolean }
+  | { ok: false; termination: ScopeTermination };
+
+/** 建会话前的存在性检查：对象存在时放行并给出桶所在区域；404 与 403 返回 precheck_failed 的 scope 级终止（消息不同）；其余失败原样抛出。 */
 export async function checkAppObject(
   store: AppObjectStore, loc: AppObjectLocation, abortSignal: AbortSignal,
-): Promise<ScopeTermination | null> {
-  const presence = await store.head(loc, abortSignal);
-  if (presence === "missing") return { errorType: "precheck_failed", message: APP_OBJECT_MISSING_MESSAGE };
-  if (presence === "forbidden") return { errorType: "precheck_failed", message: APP_OBJECT_FORBIDDEN_MESSAGE };
-  return null;
+): Promise<AppObjectCheck> {
+  const head = await store.head(loc, abortSignal);
+  if (head.presence === "missing") return { ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_MISSING_MESSAGE } };
+  if (head.presence === "forbidden") return { ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_FORBIDDEN_MESSAGE } };
+  return { ok: true, region: head.region, redirected: head.redirected };
 }
 
-/** newSession 前对安装包预签名，有效期取 limits 的 APP_PRESIGN_EXPIRES_S（实施期校准值，只改那里）。 */
-export function presignAppObject(store: AppObjectStore, loc: AppObjectLocation): Promise<string> {
-  return store.presign(loc, APP_PRESIGN_EXPIRES_S);
+/** newSession 前对安装包按桶所在区域预签名，有效期取 limits 的 APP_PRESIGN_EXPIRES_S（实施期校准值，只改那里）。 */
+export function presignAppObject(store: AppObjectStore, loc: AppObjectLocation, region: string): Promise<string> {
+  return store.presign(loc, APP_PRESIGN_EXPIRES_S, region);
 }
 
-/** 缺省的安装包存储：S3。client 只供测试注入（真实的 S3Client，网络层换成本地处理器）；缺省按 artifact-upload 的写法惰性构造。 */
-export function s3AppObjectStore(opts: { client?: S3Client } = {}): AppObjectStore {
-  let client = opts.client;
-  const client_ = (): S3Client => (client ??= new S3Client({ region: process.env.AWS_REGION, maxAttempts: 1 }));
+/** 桶在别的区域时 S3 回 301 并以这个响应头给出真实区域（实测；同区域的 200 响应不带它）。 */
+const BUCKET_REGION_HEADER = "x-amz-bucket-region";
+/** 301 却没有区域头，或跟随一次之后仍被重定向：不再跟随，原样抛出（接缝按未归类的准备失败处置）。 */
+export const BUCKET_REGION_UNKNOWN_MESSAGE = "应用桶所在的区域无法确定：存储服务返回了重定向却没有给出可用的区域";
+
+/** 缺省的安装包存储：S3。按区域各持一个客户端：首个取 AWS_REGION（按 artifact-upload 的写法惰性构造），桶在别的区域时按 301 给出的
+ *  区域再建一个。client / clientFactory 只供测试注入（真实的 S3Client，网络层换成本地处理器）：client 供全部区域共用，clientFactory 按区域
+ *  各造一个以核对主机名的切换。 */
+export function s3AppObjectStore(opts: { client?: S3Client; clientFactory?: (region: string | undefined) => S3Client } = {}): AppObjectStore {
+  const clients = new Map<string, S3Client>();
+  const factory = opts.clientFactory ?? (opts.client ? () => opts.client! : (region) => new S3Client({ region, maxAttempts: 1 }));
+  const client_ = (region: string | undefined): S3Client => {
+    const key = region ?? "";
+    let c = clients.get(key);
+    if (!c) { c = factory(region); clients.set(key, c); }
+    return c;
+  };
+  // HEAD 的错误响应没有正文，错误名随 SDK 版本可能是 NotFound / Forbidden 或状态码字样；判据只取响应状态码。
+  // 中止与网络错误没有响应，状态码为空，落到原样抛出。301 的区域头在错误对象所带的原始响应上。
+  const headOnce = async (
+    client: S3Client, loc: AppObjectLocation, abortSignal: AbortSignal,
+  ): Promise<{ presence: AppObjectPresence } | { redirectTo: string | null }> => {
+    try {
+      await client.send(new HeadObjectCommand({ Bucket: loc.bucket, Key: loc.key }), { abortSignal });
+      return { presence: "present" };
+    } catch (e) {
+      const err = e as { $metadata?: { httpStatusCode?: number }; $response?: { headers?: Record<string, string> } };
+      const status = err?.$metadata?.httpStatusCode;
+      if (status === 404) return { presence: "missing" };
+      if (status === 403) return { presence: "forbidden" };
+      if (status === 301) return { redirectTo: err.$response?.headers?.[BUCKET_REGION_HEADER] ?? null };
+      throw e;
+    }
+  };
   return {
     async head(loc, abortSignal) {
-      try {
-        await client_().send(new HeadObjectCommand({ Bucket: loc.bucket, Key: loc.key }), { abortSignal });
-        return "present";
-      } catch (e) {
-        // HEAD 的错误响应没有正文，错误名随 SDK 版本可能是 NotFound / Forbidden 或状态码字样；判据只取响应状态码。
-        // 中止与网络错误没有响应，状态码为空，落到原样抛出。
-        const status = (e as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode;
-        if (status === 404) return "missing";
-        if (status === 403) return "forbidden";
-        throw e;
+      const first = client_(process.env.AWS_REGION);
+      const r1 = await headOnce(first, loc, abortSignal);
+      if ("presence" in r1) {
+        const region = await first.config.region();
+        if (!clients.has(region)) clients.set(region, first);
+        return { presence: r1.presence, region, redirected: false };
       }
+      if (r1.redirectTo === null) throw new Error(BUCKET_REGION_UNKNOWN_MESSAGE);
+      const r2 = await headOnce(client_(r1.redirectTo), loc, abortSignal);
+      if (!("presence" in r2)) throw new Error(BUCKET_REGION_UNKNOWN_MESSAGE);
+      return { presence: r2.presence, region: r1.redirectTo, redirected: true };
     },
-    presign: (loc, expiresS) => presignGetObject(client_(), loc, expiresS),
+    presign: (loc, expiresS, region) => presignGetObject(client_(region), loc, expiresS),
   };
 }
 

@@ -52,6 +52,63 @@ def _file(tmp_path: Path, content: bytes = b"apk-bytes", name: str = "app.apk") 
     return p
 
 
+class _Http:
+    def __init__(self, status: int, headers: dict):
+        self.status_code, self.headers = status, headers
+
+
+class _Events:
+    """假的 boto3 事件系统：只记注册与注销。"""
+
+    def __init__(self):
+        self.handlers: dict = {}
+
+    def register(self, name, handler, unique_id=None):
+        self.handlers[name] = handler
+
+    def unregister(self, name, handler=None, unique_id=None):
+        self.handlers.pop(name, None)
+
+
+class _S3Redirecting(_S3):
+    """带事件系统的假 client：head 时先让观察者看到一次 301（带桶区域头）再看到 200，模拟 boto3 自动跟随区域重定向。"""
+
+    def __init__(self, region: str = "eu-west-1", **kw):
+        super().__init__(**kw)
+        self.meta = type("Meta", (), {"events": _Events()})()
+        self._region = region
+
+    def head_object(self, *, Bucket, Key):
+        handler = self.meta.events.handlers.get("needs-retry.s3.HeadObject")
+        if handler is not None:
+            handler(response=(_Http(301, {"x-amz-bucket-region": self._region}), {"Error": {"Code": "301"}}), request_dict={})
+            handler(response=(_Http(200, {}), {}), request_dict={})
+        return super().head_object(Bucket=Bucket, Key=Key)
+
+
+def test_bucket_region_observer_reads_region_only_from_301_responses():
+    obs = app_upload._BucketRegionObserver()
+    assert obs(response=None) is None and obs.region is None
+    obs(response=(_Http(200, {}), {}))
+    assert obs.region is None
+    obs(response=(_Http(301, {}), {}))
+    assert obs.region is None
+    obs(response=(_Http(301, {"x-amz-bucket-region": "us-east-1"}), {"Error": {"Code": "301"}}))
+    assert obs.region == "us-east-1"
+
+
+def test_ensure_app_object_records_bucket_region_only_when_redirected_and_unregisters_the_observer(tmp_path):
+    s3 = _S3Redirecting(head={})
+    loc = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=s3, now=NOW)
+    assert loc.bucket_region == "eu-west-1"
+    assert "needs-retry.s3.HeadObject" not in s3.meta.events.handlers   # 观察者用完即注销，不在共享 client 上累积
+    same_region = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=_S3(head={}), now=NOW)
+    assert same_region.bucket_region is None   # 没有事件系统的 client（测试的假 client）照常工作，区域记为未知
+    redirected_404 = _S3Redirecting(head_error="404")
+    uploaded = app_upload.ensure_app_object("b", _file(tmp_path), managed=False, s3=redirected_404, now=NOW)
+    assert uploaded.uploaded and uploaded.bucket_region == "eu-west-1"   # 上传路径同样带回区域
+
+
 def test_key_is_content_hash_plus_original_name_and_404_uploads_with_tag_when_managed(tmp_path):
     f = _file(tmp_path)
     s3 = _S3(head_error="404")

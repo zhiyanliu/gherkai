@@ -598,14 +598,18 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     const target = { device: this.cfg.device, uiKind: this.cfg.uiKind };
     // 1. 应用目标：建会话之前做安装包的存在性检查，缺包或无权时 Create 零调用（ADR 0051 决策 9）。
     let appLocation: AppObjectLocation | null = null;
+    let appRegion: string | null = null;
     if (this.cfg.uiKind === "app") {
       const app = this.deps.job.target.app;
       if (!app || !app.bucket || !app.key || !app.appId) {
         return { ok: false, termination: { errorType: "precheck_failed", message: APP_LOCATION_MISSING_MESSAGE } };
       }
       appLocation = { bucket: app.bucket, key: app.key };
-      const missing = await checkAppObject(this.parts.appStore, appLocation, budget.signal);
-      if (missing) return { ok: false, termination: missing };
+      const checked = await checkAppObject(this.parts.appStore, appLocation, budget.signal);
+      if (!checked.ok) return { ok: false, termination: checked.termination };
+      appRegion = checked.region;
+      // 桶不在运行区域：预签名按桶所在区域签即可，只提示一句（本机后端的 AWS_REGION 多随模型所在区域，ADR 0051 决策 9）
+      if (checked.redirected) this.deps.log(`worker: 应用桶 ${app.bucket} 在 ${checked.region}，与运行区域不同；安装包地址按桶所在区域签发`);
     }
     // 2. 解析、Create、等到 RUNNING、newSession；设备单元拒装驱动辅助包时至多换台一次（ADR 0051 决策 3）。
     let replacing: RemoteSession | null = null;
@@ -628,7 +632,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
       if (running.value.unit !== null && this.record.session) this.record.session.device.unit = running.value.unit;
       const afterRunning = this.expiredOutcome(budget);
       if (afterRunning) return afterRunning;
-      const appUrl = appLocation ? await presignAppObject(this.parts.appStore, appLocation) : null;
+      const appUrl = appLocation && appRegion ? await presignAppObject(this.parts.appStore, appLocation, appRegion) : null;
       const connected = await this.parts.appium.connect(
         { endpoint: running.value.endpoint, device: this.cfg.device, uiKind: this.cfg.uiKind, appId: this.appId, appUrl },
         budget,

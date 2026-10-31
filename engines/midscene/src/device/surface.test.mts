@@ -63,6 +63,8 @@ interface HarnessOptions {
   target?: Target;
   acquireTimeoutS?: number;
   headPresence?: "present" | "missing" | "forbidden";
+  /** 给出即模拟应用桶在别的区域：存在性检查经重定向解析出这个区域（缺省同区域 us-west-2、未经重定向）。 */
+  bucketRegion?: string;
   connectOutcomes?: Array<"connected" | "replace_device" | ConnectOutcome>;
   conclusion?: Partial<ProbeConclusion>;
   appStates?: number[];
@@ -290,8 +292,14 @@ function harness(opts: HarnessOptions = {}) {
         },
       },
       appStore: {
-        async head(loc) { calls.push(`appStore.head:${loc.key}`); return opts.headPresence ?? "present"; },
-        async presign(loc, expiresS) { calls.push(`appStore.presign:${expiresS}`); return `https://s3.example/${loc.key}?X-Amz-Signature=abc`; },
+        async head(loc) {
+          calls.push(`appStore.head:${loc.key}`);
+          return { presence: opts.headPresence ?? "present", region: opts.bucketRegion ?? "us-west-2", redirected: opts.bucketRegion !== undefined };
+        },
+        async presign(loc, expiresS, region) {
+          calls.push(`appStore.presign:${expiresS}:${region}`);
+          return `https://s3.example/${loc.key}?X-Amz-Signature=abc`;
+        },
       },
     };
     return opts.sessionParts ? { ...fakeParts, ...opts.sessionParts(e) } : fakeParts;
@@ -406,6 +414,17 @@ test("应用目标：存在性检查先于 Create，预签名在 newSession 之�
   assert.ok(order("appStore.presign") < order("appium.connect:app:presigned"));
   assert.ok(order("appium.connect") < order("exec.activateApp:com.example.shop"));
   assert.ok(order("exec.activateApp") < order("probe.run:app"));
+  // 同区域：预签名按存在性检查给出的区域签，不记区域提示
+  assert.ok(h.calls.includes("appStore.presign:3600:us-west-2"), h.calls.join(" "));
+  assert.equal(h.logs.some((l) => l.includes("应用桶")), false, h.logs.join("\n"));
+});
+
+test("应用目标：应用桶在别的区域时按存在性检查解析出的区域预签名，并恰记一行区域不同的提示（ADR 0051 决策 9）", async () => {
+  const h = harness({ target: { device: "android", uiKind: "app" }, bucketRegion: "eu-west-1" });
+  await ready(h);
+  assert.ok(h.calls.includes("appStore.presign:3600:eu-west-1"), h.calls.join(" "));
+  assert.deepEqual(h.logs.filter((l) => l.includes("应用桶")),
+    ["worker: 应用桶 gherkai-apps 在 eu-west-1，与运行区域不同；安装包地址按桶所在区域签发"]);
 });
 
 for (const [presence, message] of [["missing", APP_OBJECT_MISSING_MESSAGE], ["forbidden", APP_OBJECT_FORBIDDEN_MESSAGE]] as const) {

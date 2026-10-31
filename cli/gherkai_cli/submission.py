@@ -217,6 +217,9 @@ def fill_app_locations(args, jobs, entries: dict, *, bucket: str, managed: bool,
                 raise
             done[(str(file), bucket)] = loc
             progress(f"安装包 {file.name}：{'已上传到' if loc.uploaded else '复用'} s3://{bucket}/{loc.key}" + ("（已刷新保留期）" if loc.refreshed else ""))
+            # 桶不在当前区域配置所指的区域：worker 按桶所在区域签发安装包地址，这里只提示（ADR 0051 决策 9；同一个桶只提示一次）
+            if loc.bucket_region and region and loc.bucket_region != region and not any(k[1] == bucket for k in done if k != (str(file), bucket)):
+                progress(f"注意：应用桶 {bucket} 在 {loc.bucket_region}，当前区域配置为 {region}；安装包按桶所在区域处理，不需要改配置")
         loc = done[(str(file), bucket)]
         out.append(replace(j, target=replace(j.target, app=replace(app, bucket=loc.bucket, key=loc.key, sha256=loc.sha256))))
     return out

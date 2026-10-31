@@ -634,6 +634,27 @@ def test_local_run_uploads_each_installer_once_and_fills_app_location(tmp_path, 
     assert "已上传到 s3://my-apps/" in capsys.readouterr().err
 
 
+def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, monkeypatch, capsys):
+    import hashlib
+
+    from gherkai_runtime import app_upload
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
+    _app_project(tmp_path)
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: _UploadS3())
+    monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    sha = hashlib.sha256(b"apk-bytes").hexdigest()
+    monkeypatch.setattr(app_upload, "ensure_app_object", lambda bucket, file, **kw: app_upload.AppLocation(
+        bucket, f"apps/{sha}/app.apk", sha, uploaded=False, refreshed=False, bucket_region="eu-west-1"))
+    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(tmp_path / "r")]) == 0
+    err = capsys.readouterr().err
+    assert "注意：应用桶 my-apps 在 eu-west-1，当前区域配置为 " in err
+    assert err.count("注意：应用桶") == 1   # 两个 scope 同一个桶：只提示一次
+
+
 def test_missing_installer_exits_2_in_plan_and_run(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     _android_env(monkeypatch)

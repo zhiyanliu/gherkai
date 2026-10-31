@@ -247,7 +247,7 @@ function surfaceWith(webContext: ProbeConclusion["webContext"], execScript: Driv
     guards: { create() { return { driver: exec.driver, openWindow() {}, closeWindow() { return null; }, shutdown() {} }; } },
     agents: { create() { return { fakeAgent: true } as never; } },
     warmup: { async run() { return null; } },
-    appStore: { async head() { return "present"; }, async presign() { return "https://s3.example/app"; } },
+    appStore: { async head() { return { presence: "present", region: "us-west-2", redirected: false }; }, async presign() { return "https://s3.example/app"; } },
   });
   const deps: SurfaceDeps = {
     job: {

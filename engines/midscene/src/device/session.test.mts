@@ -12,8 +12,8 @@ import assert from "node:assert";
 import { PassThrough, Readable } from "node:stream";
 import type { Device as FarmDevice, RemoteAccessSession } from "@aws-sdk/client-device-farm";
 import {
-  DEVICE_FARM_REGION, RUNNING_POLL_INTERVAL_MS, classifyCallFailure, compareVersions, createDeviceFarmSessions, deviceArnRejectedMessage,
-  deviceFarmApi, matchesVersionFamily, type DeviceFarmApi, type Timers,
+  APPIUM_SERVER_MAJOR_VERSION, DEVICE_FARM_REGION, RUNNING_POLL_INTERVAL_MS, classifyCallFailure, compareVersions, createDeviceFarmSessions,
+  deviceArnRejectedMessage, deviceFarmApi, matchesVersionFamily, type DeviceFarmApi, type Timers,
 } from "./session.mjs";
 import { encode, RUN_ID_ENV } from "./session-name.mjs";
 import { sessionEventSink } from "./device-session.mjs";
@@ -1082,7 +1082,12 @@ test("Device Farm 客户端：区域固定 us-west-2，五种调用的命令与�
     assert.ok(s.abortSignal, "每次调用都带中止信号");
   }
   assert.deepEqual(seen[0].body, { nextToken: "n1" });
-  assert.deepEqual(seen[1].body, { projectArn: PROJECT, deviceArn: "arn:d", name: "gherkai:r:h:1:s", configuration: { billingMethod: "UNMETERED" } });
+  // 会话参数 appium:version 固定为 2（ADR 0051 决策 3）：两种目标都传，由 SDK 边界加上，调用方的入参里没有它
+  assert.equal(APPIUM_SERVER_MAJOR_VERSION, "2");
+  assert.deepEqual(seen[1].body, {
+    projectArn: PROJECT, deviceArn: "arn:d", name: "gherkai:r:h:1:s",
+    configuration: { billingMethod: "UNMETERED", parameters: { "appium:version": "2" } },
+  });
   assert.deepEqual(seen[2].body, { arn: "arn:s" });
   assert.deepEqual(seen[3].body, { arn: "arn:s" });
   assert.deepEqual(seen[4].body, { arn: PROJECT, nextToken: "t1" });

@@ -1,8 +1,8 @@
 // 应用启停的单测（ADR 0051 决策 9、14；ADR 0052 决策 3「应用启停」块）。运行：npx tsx --test src/device/app.test.mts。
 //
-// 两层：存在性检查与预签名用真的 S3Client，只把网络层换成本地的请求处理器（离线、不连 AWS），这样 HeadObject 的错误形态与
-// 预签名地址的形态都是 SDK 的真实行为，不是 fake 自己说了算；预签名的签名值另按 SigV4 规范在测试里独立复算一遍。启动与重启
-// 用记录调用序列的假 driver。
+// 两层：存在性检查与预签名用真的 S3Client，只把网络层换成本地的请求处理器（离线、不连 AWS），这样 HeadObject 的错误形态（含
+// 跨区域的 301 与响应头）与预签名地址的形态都是 SDK 的真实行为，不是 fake 自己说了算；预签名的签名值另按 SigV4 规范在测试里
+// 独立复算一遍。启动与重启用记录调用序列的假 driver。
 import { test } from "node:test";
 import assert from "node:assert";
 import { createHash, createHmac } from "node:crypto";
@@ -11,7 +11,8 @@ import { Readable } from "node:stream";
 import { S3Client } from "@aws-sdk/client-s3";
 import {
   APP_LAUNCH_SELF_EXIT_MESSAGE, APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_MISSING_MESSAGE, APP_RESTART_SELF_EXIT_MESSAGE, APP_STATE,
-  appHandle, checkAppObject, launchApp, presignAppObject, s3AppObjectStore, type AppControl, type AppObjectStore,
+  BUCKET_REGION_UNKNOWN_MESSAGE, appHandle, checkAppObject, launchApp, presignAppObject, s3AppObjectStore,
+  type AppControl, type AppObjectStore,
 } from "./app.mjs";
 import { APP_PRESIGN_EXPIRES_S, LAUNCH_SAMPLE_COUNT, LAUNCH_SAMPLE_INTERVAL_MS } from "./limits.mjs";
 import { attachClassification, readClassification } from "../worker/surface.mjs";
@@ -24,25 +25,42 @@ interface SeenRequest { method: string; hostname: string; path: string; abortSig
 
 /** 真的 S3Client，网络层换成本地处理器：返回给定状态码的空响应，并记下发出的请求。 */
 function offlineClient(statusCode: number, seen: SeenRequest[] = []): S3Client {
+  return regionalClient("us-west-2", () => ({ statusCode, headers: {} }), seen);
+}
+
+/** 按区域构造的离线客户端：响应由主机名决定（跨区域的 301 带 x-amz-bucket-region 头，与 S3 的真实行为一致）。 */
+function regionalClient(
+  region: string, respond: (hostname: string) => { statusCode: number; headers: Record<string, string> }, seen: SeenRequest[] = [],
+): S3Client {
   return new S3Client({
-    region: "us-west-2",
+    region,
     maxAttempts: 1,
     credentials: FAKE_CREDS,
     requestHandler: {
       handle: async (req: { method: string; hostname: string; path: string }, opts?: { abortSignal?: unknown }) => {
         seen.push({ method: req.method, hostname: req.hostname, path: req.path, abortSignal: opts?.abortSignal });
-        return { response: { statusCode, headers: {}, body: Readable.from([]) } };
+        const { statusCode, headers } = respond(req.hostname);
+        return { response: { statusCode, headers, body: Readable.from([]) } };
       },
     } as never,
   });
 }
 
+/** 桶在 us-east-1、worker 运行在 us-west-2 的 S3 行为：按 us-west-2 主机名发的请求回 301 并给出区域头，按 us-east-1 发的回给定状态码。 */
+function crossRegionStore(seen: SeenRequest[], eastStatus = 200, eastHeaders: Record<string, string> = {}) {
+  return s3AppObjectStore({
+    clientFactory: (region) => regionalClient(region ?? "us-west-2", (hostname) =>
+      hostname.includes(".s3.us-west-2.") ? { statusCode: 301, headers: { "x-amz-bucket-region": "us-east-1" } } : { statusCode: eastStatus, headers: eastHeaders },
+    seen),
+  });
+}
+
 // ---- 存在性检查（建会话前，ADR 0051 决策 9）----
 
-test("存在性检查：对象存在时放行（返回 null），发出的是对应用键的 HEAD", async () => {
+test("存在性检查：对象存在时放行并给出桶所在区域（同区域：客户端自己的区域、未经重定向），发出的是对应用键的 HEAD", async () => {
   const seen: SeenRequest[] = [];
   const store = s3AppObjectStore({ client: offlineClient(200, seen) });
-  assert.equal(await checkAppObject(store, LOC, AbortSignal.timeout(5_000)), null);
+  assert.deepEqual(await checkAppObject(store, LOC, AbortSignal.timeout(5_000)), { ok: true, region: "us-west-2", redirected: false });
   assert.equal(seen.length, 1);
   assert.equal(seen[0].method, "HEAD");
   assert.equal(decodeURIComponent(seen[0].path), `/${LOC.key}`);
@@ -51,7 +69,7 @@ test("存在性检查：对象存在时放行（返回 null），发出的是对
 test("存在性检查：404 记 precheck_failed，消息是 ADR 原文「安装包已不在存储桶里，请重新提交」", async () => {
   const store = s3AppObjectStore({ client: offlineClient(404) });
   assert.deepEqual(await checkAppObject(store, LOC, AbortSignal.timeout(5_000)), {
-    errorType: "precheck_failed", message: "安装包已不在存储桶里，请重新提交",
+    ok: false, termination: { errorType: "precheck_failed", message: "安装包已不在存储桶里，请重新提交" },
   });
   assert.equal(APP_OBJECT_MISSING_MESSAGE, "安装包已不在存储桶里，请重新提交");
 });
@@ -59,9 +77,29 @@ test("存在性检查：404 记 precheck_failed，消息是 ADR 原文「安装�
 test("存在性检查：403 同样记 precheck_failed，消息与 404 不同、说明是权限问题", async () => {
   const store = s3AppObjectStore({ client: offlineClient(403) });
   const got = await checkAppObject(store, LOC, AbortSignal.timeout(5_000));
-  assert.deepEqual(got, { errorType: "precheck_failed", message: APP_OBJECT_FORBIDDEN_MESSAGE });
+  assert.deepEqual(got, { ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_FORBIDDEN_MESSAGE } });
   assert.notEqual(APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_MISSING_MESSAGE);
   assert.match(APP_OBJECT_FORBIDDEN_MESSAGE, /权限/);
+});
+
+test("存在性检查：桶在别的区域时 S3 回 301，按响应头给出的区域重做一次 HEAD，判定照常、放行结果带该区域并标记经过重定向", async () => {
+  const seen: SeenRequest[] = [];
+  const store = crossRegionStore(seen);
+  assert.deepEqual(await checkAppObject(store, LOC, AbortSignal.timeout(5_000)), { ok: true, region: "us-east-1", redirected: true });
+  assert.deepEqual(seen.map((s) => [s.method, s.hostname]), [
+    ["HEAD", `${LOC.bucket}.s3.us-west-2.amazonaws.com`], ["HEAD", `${LOC.bucket}.s3.us-east-1.amazonaws.com`],
+  ]);
+  // 重定向之后的 404 / 403 照常判定
+  assert.deepEqual(await checkAppObject(crossRegionStore([], 404), LOC, AbortSignal.timeout(5_000)), {
+    ok: false, termination: { errorType: "precheck_failed", message: APP_OBJECT_MISSING_MESSAGE },
+  });
+});
+
+test("存在性检查：301 却没有区域头，或跟随一次之后仍被重定向，原样抛出、不再跟随（接缝按未归类的准备失败处置）", async () => {
+  const noHeader = s3AppObjectStore({ client: offlineClient(301) });
+  await assert.rejects(checkAppObject(noHeader, LOC, AbortSignal.timeout(5_000)), new RegExp(BUCKET_REGION_UNKNOWN_MESSAGE));
+  const twice = crossRegionStore([], 301, { "x-amz-bucket-region": "eu-west-1" });
+  await assert.rejects(checkAppObject(twice, LOC, AbortSignal.timeout(5_000)), new RegExp(BUCKET_REGION_UNKNOWN_MESSAGE));
 });
 
 test("存在性检查：404 与 403 之外的失败不归类，原样抛给调用方（不当作缺失或无权）", async () => {
@@ -119,7 +157,7 @@ function recomputeSignature(url: URL, secretAccessKey: string): string {
 test("预签名：GET 应用键，有效期取 limits 的 3600 秒，只签 host，不发任何请求", async () => {
   const seen: SeenRequest[] = [];
   const store = s3AppObjectStore({ client: offlineClient(200, seen) });
-  const url = new URL(await presignAppObject(store, LOC));
+  const url = new URL(await presignAppObject(store, LOC, "us-west-2"));
   assert.equal(seen.length, 0, "预签名是本地计算，不发请求");
   assert.equal(url.protocol, "https:");
   assert.equal(url.hostname, `${LOC.bucket}.s3.us-west-2.amazonaws.com`);
@@ -134,7 +172,20 @@ test("预签名：GET 应用键，有效期取 limits 的 3600 秒，只签 host
 
 test("预签名：签名值与按 SigV4 规范独立复算的结果一致（载荷记 UNSIGNED-PAYLOAD，下载方不必带任何额外请求头）", async () => {
   const store = s3AppObjectStore({ client: offlineClient(200) });
-  const url = new URL(await presignAppObject(store, LOC));
+  const url = new URL(await presignAppObject(store, LOC, "us-west-2"));
+  assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
+});
+
+test("预签名：按存在性检查给出的桶区域签——桶在 us-east-1 时主机名与签名范围都是 us-east-1，签名可独立复算，不发请求", async () => {
+  const seen: SeenRequest[] = [];
+  const store = crossRegionStore(seen);
+  const checked = await checkAppObject(store, LOC, AbortSignal.timeout(5_000));
+  assert.ok(checked.ok);
+  const before = seen.length;
+  const url = new URL(await presignAppObject(store, LOC, checked.region));
+  assert.equal(seen.length, before, "预签名是本地计算，不发请求");
+  assert.equal(url.hostname, `${LOC.bucket}.s3.us-east-1.amazonaws.com`);
+  assert.match(url.searchParams.get("X-Amz-Credential")!, /^AKIDEXAMPLE\/\d{8}\/us-east-1\/s3\/aws4_request$/);
   assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
 });
 
@@ -143,7 +194,7 @@ test("预签名：带会话令牌的凭证把令牌放进查询串（同样参�
     region: "us-west-2", maxAttempts: 1, credentials: { ...FAKE_CREDS, sessionToken: "IQoJb3JpZ2luX2VjEXAMPLE" },
     requestHandler: { handle: async () => { throw new Error("预签名不应发请求"); } } as never,
   });
-  const url = new URL(await presignAppObject(s3AppObjectStore({ client }), LOC));
+  const url = new URL(await presignAppObject(s3AppObjectStore({ client }), LOC, "us-west-2"));
   assert.equal(url.searchParams.get("X-Amz-Security-Token"), "IQoJb3JpZ2luX2VjEXAMPLE");
   assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
 });
@@ -153,7 +204,7 @@ test("预签名地址是凭证：经脱敏出口后不剩签名、访问密钥�
     region: "us-west-2", maxAttempts: 1, credentials: { ...FAKE_CREDS, sessionToken: "IQoJb3JpZ2luX2VjEXAMPLE" },
     requestHandler: { handle: async () => { throw new Error("预签名不应发请求"); } } as never,
   });
-  const presigned = await presignAppObject(s3AppObjectStore({ client }), LOC);
+  const presigned = await presignAppObject(s3AppObjectStore({ client }), LOC, "us-west-2");
   const url = new URL(presigned);
   const masked = redactSecrets(`Request failed: unable to download "${presigned}"`);
   for (const secret of [url.searchParams.get("X-Amz-Signature")!, "IQoJb3JpZ2luX2VjEXAMPLE", FAKE_CREDS.accessKeyId]) {
@@ -163,14 +214,14 @@ test("预签名地址是凭证：经脱敏出口后不剩签名、访问密钥�
   assert.ok(masked.includes("X-Amz-Signature=***"));
 });
 
-test("预签名：有效期由 presignAppObject 统一取 limits 常量，交给存储面的就是 3600", async () => {
-  const calls: number[] = [];
+test("预签名：有效期由 presignAppObject 统一取 limits 常量，交给存储面的就是 3600 与调用方给的区域", async () => {
+  const calls: Array<[number, string]> = [];
   const store: AppObjectStore = {
-    head: async () => "present",
-    presign: async (_loc, expiresS) => { calls.push(expiresS); return "https://example.invalid/app"; },
+    head: async () => ({ presence: "present", region: "us-west-2", redirected: false }),
+    presign: async (_loc, expiresS, region) => { calls.push([expiresS, region]); return "https://example.invalid/app"; },
   };
-  assert.equal(await presignAppObject(store, LOC), "https://example.invalid/app");
-  assert.deepEqual(calls, [3600]);
+  assert.equal(await presignAppObject(store, LOC, "eu-west-1"), "https://example.invalid/app");
+  assert.deepEqual(calls, [[3600, "eu-west-1"]]);
 });
 
 // ---- 启动与启动采样（ADR 0051 决策 9、14）----

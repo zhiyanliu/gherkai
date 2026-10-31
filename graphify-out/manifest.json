@@ -255,8 +255,8 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1793243613.4154758,
-    "ast_hash": "909536a5fc095edaa4cd5c55ff5eede0",
+    "mtime": 1793456415.5614393,
+    "ast_hash": "0b2d78573d62c8f864aab03f757a15a3",
     "semantic_hash": ""
   },
   "README.md": {
@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793446074.9630287,
-    "ast_hash": "8a66d79ca5be35aa00657387508b64ca",
+    "mtime": 1793456415.8257155,
+    "ast_hash": "2c1ee2ed82796b6d225b72ac77d27086",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1420,8 +1420,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1793368060.4852881,
-    "ast_hash": "4deb3f1a2991175326afa65dc4e7d297",
+    "mtime": 1793456415.06341,
+    "ast_hash": "fda55e19ae38968ea951b60a0f28d15b",
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
@@ -1440,8 +1440,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1793377455.2215366,
-    "ast_hash": "70220f2a414c9e3f38711c5db85dd3c2",
+    "mtime": 1793456540.3168426,
+    "ast_hash": "c3e4f9cae643ad36c9d73c8e583b3dba",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1885,18 +1885,18 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793446074.652188,
-    "ast_hash": "ac20261ab6ef7333af72b9445bc43564",
+    "mtime": 1793456133.413801,
+    "ast_hash": "2839b2d9b8f3baa43391dcd8fbcff7b7",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793446568.3538537,
-    "ast_hash": "4738948ec45a40d61c668934f18bff3f",
+    "mtime": 1793456183.8088393,
+    "ast_hash": "1e1ee5adaf35f8e1285e85b7f245165f",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1793243604.6723325,
-    "ast_hash": "9cdb0bbfb0cf5e4a9ff9e006d3cf6706",
+    "mtime": 1793456184.168032,
+    "ast_hash": "a07200ca30341e9634fadb388da7a8a0",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793447469.5559912,
-    "ast_hash": "417ff69108e47c40f0bb23b702e7e0f1",
+    "mtime": 1793456886.9156172,
+    "ast_hash": "8fb1c637a5c29621fa8878d725a8cee4",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2000,8 +2000,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_project_config.py": {
-    "mtime": 1793239333.1736767,
-    "ast_hash": "4dfc6dc870672b6af06558f55477c50f",
+    "mtime": 1793456677.0569487,
+    "ast_hash": "2698731d4cfa4fbc291321fe7d2a3ec1",
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
@@ -2015,13 +2015,13 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/app_upload.py": {
-    "mtime": 1793075589.1192188,
-    "ast_hash": "d1f94e2abab223d833225ca4a6ec560a",
+    "mtime": 1793456675.941905,
+    "ast_hash": "2ec1bbf4bfef8ee76d771f293b4fd69a",
     "semantic_hash": ""
   },
   "runtime/tests/test_app_upload.py": {
-    "mtime": 1793075945.7590313,
-    "ast_hash": "1cbae6ceb2643bdce93cfa65ba21b2be",
+    "mtime": 1793456676.6804733,
+    "ast_hash": "d9fe048cf77db8fd27fca03d0dd81e15",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/console.py": {
@@ -2035,8 +2035,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/submission.py": {
-    "mtime": 1793080415.5493271,
-    "ast_hash": "86ef9838406339d9a98dcb02c3007390",
+    "mtime": 1793456676.300101,
+    "ast_hash": "238899a013b7f51e2e2edaeef6f8bd32",
     "semantic_hash": ""
   },
   "engines/fixtures/deterministic-handles.json": {
@@ -2120,13 +2120,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.mts": {
-    "mtime": 1793374040.2489672,
-    "ast_hash": "56ec51186fc940b7c497b932c2eef22c",
+    "mtime": 1793456414.3804653,
+    "ast_hash": "d55bd1adb907724345313e6f16070f63",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.test.mts": {
-    "mtime": 1793373983.7514777,
-    "ast_hash": "965d0f86dfde1f8e13857f301cd25f2c",
+    "mtime": 1793456539.692763,
+    "ast_hash": "212068b3e195e70670591a004dfb131e",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {
@@ -2210,23 +2210,23 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.mts": {
-    "mtime": 1793434192.9538085,
-    "ast_hash": "88862ef64d002299fd65cca53a4fb92c",
+    "mtime": 1793456413.5558836,
+    "ast_hash": "39b9bc01108bbaa2e371f45adaf1b276",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.test.mts": {
-    "mtime": 1793434175.8536046,
-    "ast_hash": "58613b86177f93d082cd5c797616cd00",
+    "mtime": 1793456783.972078,
+    "ast_hash": "fde159964a978771f1e386461c79611d",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793440910.5445254,
-    "ast_hash": "496d0ba8a755de9d35ffd90ff14a6164",
+    "mtime": 1793456414.828267,
+    "ast_hash": "010f883874157c6819bc6987ee833edd",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793440755.6025279,
-    "ast_hash": "56c81cc274045b5755dc5f01bf6c3d89",
+    "mtime": 1793456674.782072,
+    "ast_hash": "d3d2c78f47b9884f3bae642e4b91f493",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2255,8 +2255,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/web-context.test.mts": {
-    "mtime": 1793362463.308222,
-    "ast_hash": "67dbb5fdc7faa4b6f42c50b9187e594f",
+    "mtime": 1793456540.0021622,
+    "ast_hash": "27cbdd454e20e2d90b8f0a10f189c60f",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/no-device-deps.test.mts": {
@@ -2295,8 +2295,8 @@
     "semantic_hash": ""
   },
   "tools/device_reprobe.md": {
-    "mtime": 1793440667.5752475,
-    "ast_hash": "e4eb5aebf12b63752efcbe30163a7616",
+    "mtime": 1793456415.3048713,
+    "ast_hash": "033c9a410b80440e7d7a39e6fd2ab28e",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {
@@ -2317,11 +2317,6 @@
   "engines/midscene/src/worker/stderr-outlets.test.mts": {
     "mtime": 1793392473.05744,
     "ast_hash": "5c0fa23071855e0c6e7781a3d84d0ddf",
-    "semantic_hash": ""
-  },
-  "docs/journey/0016-s3-uri-app-distribution-route-change.md": {
-    "mtime": 1793447469.386006,
-    "ast_hash": "f7403b09ecdbfe6ee82fbfc4d9fe04d2",
     "semantic_hash": ""
   }
 }

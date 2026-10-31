@@ -60,6 +60,10 @@ import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_
 /** Device Farm 只在这个区域（ADR 0051 决策 10）。 */
 export const DEVICE_FARM_REGION = "us-west-2";
 
+/** 建会话时请求的 Appium 服务端大版本（ADR 0051 决策 3）：网页与应用目标一律传、固定为 2，使服务端版本成为确定量（官方规定 iOS 27 起
+ *  必须指定，不指定时缺省值可能随时间变化）。升到 3 是独立的后续工作：先审计 worker 用到的端点清单，再做一轮真机验收。 */
+export const APPIUM_SERVER_MAJOR_VERSION = "2";
+
 /** 本块用到的五种调用。abortSignal 必传：客户端没有缺省的请求超时，单次上界只由调用方的信号给出。 */
 export interface DeviceFarmApi {
   listDevices(nextToken: string | undefined, abortSignal: AbortSignal): Promise<{ devices?: FarmDevice[]; nextToken?: string }>;
@@ -89,7 +93,7 @@ export function deviceFarmApi(overrides: DeviceFarmClientOverrides = {}): Device
     async createRemoteAccessSession(input, abortSignal) {
       const out = await c().send(new CreateRemoteAccessSessionCommand({
         projectArn: input.projectArn, deviceArn: input.deviceArn, name: input.name,
-        configuration: { billingMethod: input.billingMethod as BillingMethod },
+        configuration: { billingMethod: input.billingMethod as BillingMethod, parameters: { "appium:version": APPIUM_SERVER_MAJOR_VERSION } },
       }), { abortSignal });
       return out.remoteAccessSession;
     },

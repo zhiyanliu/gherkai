@@ -6,6 +6,8 @@
   刷新失败重传，再失败即报错、不复用快过期的对象。E 与 R 的常量与部署侧的生命周期规则同一处（`names`）。
 - **本机后端的应用桶归使用方所有**（`managed=False`）：只做存在性复用，不打标签、不刷新、不承诺保留。
 HeadObject 的 404 走上传、403 报权限（存在性检查靠前缀 ListBucket 把缺失键的 403 变成 404，权限表登记在 ADR 0033）。
+桶不在客户端区域时 boto3 自动跟随 S3 的区域重定向；本模块只观察这个过程（公开的重试事件里 301 响应头 x-amz-bucket-region 给出桶的区域），
+把桶所在区域随位置返回，调用方据此提示使用方（ADR 0051 决策 9）；同区域的 200 响应不带该头，这时区域记为未知、即与客户端相同。
 boto3 由调用方注入 s3 client（`[aws]` extra，本模块不 import）。所有 `AppUploadError` 的消息都是给使用方看的整句。
 """
 from __future__ import annotations
@@ -32,6 +34,34 @@ class AppLocation:
     sha256: str
     uploaded: bool    # 本次真上传了（否则复用既有对象）
     refreshed: bool   # 本次做了同键刷新（只在 managed 桶）
+    bucket_region: str | None = None   # 桶所在区域，只在 S3 把 HeadObject 重定向到别的区域时已知；None 即与客户端区域相同
+
+
+BUCKET_REGION_HEADER = "x-amz-bucket-region"
+_REDIRECT_EVENT = "needs-retry.s3.HeadObject"
+_OBSERVER_ID = "gherkai-app-bucket-region"
+
+
+class _BucketRegionObserver:
+    """挂在 boto3 公开的重试事件上，只读不改：301 响应头给出桶的真实区域；其它响应与没有响应的调用都忽略。"""
+
+    def __init__(self) -> None:
+        self.region: str | None = None
+
+    def __call__(self, response=None, **_kwargs):
+        if response is None:
+            return None
+        http, _parsed = response
+        if getattr(http, "status_code", None) == 301:
+            region = (getattr(http, "headers", None) or {}).get(BUCKET_REGION_HEADER)
+            if region:
+                self.region = region
+        return None
+
+
+def _events(s3):
+    """boto3 client 的事件系统；假 client 没有时返回 None（观察随之跳过）。"""
+    return getattr(getattr(s3, "meta", None), "events", None)
 
 
 def sha256_of_file(path: Path) -> str:
@@ -86,30 +116,38 @@ def ensure_app_object(bucket: str, file: Path, *, managed: bool, s3, now: dateti
         on_warn(f"安装包 {file} 有 {size / (1024 * 1024):.0f} MB：设备上安装前要从 S3 下载，太大可能超过单条安装命令的时间上限，建议精简包体")
     sha = sha256_of_file(file)
     key = app_object_key(sha, file.name)
+    observer = _BucketRegionObserver()
+    events = _events(s3)
+    if events is not None:
+        events.register(_REDIRECT_EVENT, observer, unique_id=_OBSERVER_ID)
     try:
         head = s3.head_object(Bucket=bucket, Key=key)
     except Exception as e:
         code = _error_code(e)
         if code in ("404", "NoSuchKey", "NotFound"):
             _upload(s3, bucket, key, file, managed=managed)
-            return AppLocation(bucket, key, sha, uploaded=True, refreshed=False)
+            return AppLocation(bucket, key, sha, uploaded=True, refreshed=False, bucket_region=observer.region)
         if code in ("403", "AccessDenied", "Forbidden"):
             raise AppUploadError(f"没有权限读取 S3 桶 {bucket} 里 {key} 的对象信息（403）：请给当前凭证加上该桶 "
                                  f"{_names.APP_OBJECT_PREFIX} 前缀的读取、列举与写入权限后重试") from e
         raise
+    finally:
+        if events is not None:
+            events.unregister(_REDIRECT_EVENT, unique_id=_OBSERVER_ID)
+    region = observer.region
     if not managed:
-        return AppLocation(bucket, key, sha, uploaded=False, refreshed=False)
+        return AppLocation(bucket, key, sha, uploaded=False, refreshed=False, bucket_region=region)
     last_modified = head.get("LastModified")
     if last_modified is not None and now - last_modified <= reuse_window():
-        return AppLocation(bucket, key, sha, uploaded=False, refreshed=False)
+        return AppLocation(bucket, key, sha, uploaded=False, refreshed=False, bucket_region=region)
     try:
         s3.copy_object(Bucket=bucket, Key=key, CopySource={"Bucket": bucket, "Key": key},
                        MetadataDirective="REPLACE", TaggingDirective="REPLACE", Tagging=_names.APP_OBJECT_TAG)
-        return AppLocation(bucket, key, sha, uploaded=False, refreshed=True)
+        return AppLocation(bucket, key, sha, uploaded=False, refreshed=True, bucket_region=region)
     except Exception as refresh_error:
         try:
             _upload(s3, bucket, key, file, managed=True)
-            return AppLocation(bucket, key, sha, uploaded=True, refreshed=False)
+            return AppLocation(bucket, key, sha, uploaded=True, refreshed=False, bucket_region=region)
         except Exception as upload_error:
             raise AppUploadError(f"安装包 {file} 在 S3 桶 {bucket} 里的副本即将到保留期，刷新（{refresh_error}）与重传（{upload_error}）都失败，"
                                  "不能复用快过期的对象：请检查权限与网络后重试") from upload_error
