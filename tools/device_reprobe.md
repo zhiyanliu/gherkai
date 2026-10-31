@@ -13,7 +13,8 @@
 - 能力探测的结论与逐项事实（上下文列表与网页上下文候选、坐标比例的两种来源、Appium 版本、前台应用）；
 - 向模型注册的动作清单（设备 Agent 实际注册的动作名，核对返回键与主屏键是否按平台注册、没有 Swipe）；
 - 每条快照用例在真机上的结果与发出的命令，以及与快照的差集；
-- 真机控件树与控件树样例的属性差集。
+- 真机控件树与控件树样例的属性差集；
+- 能力探测各项、打开测试页、读地址、界面快照等生命周期步骤与每条原语命令的耗时。
 
 **何时执行**：升级 `@midscene/core` / `@midscene/web` 或 `webdriverio`，或 Device Farm 的 Appium 服务端版本变化（`device-session.json` 记录的 Appium 版本与上一次不同）时，在真机验收矩阵之前，每个平台各执行一次（矩阵见 `engines/midscene/DEVELOPMENT.md`「真机验收矩阵」节）。改了本工具或快照的格式之后，先执行一次 `--offline`。
 
@@ -27,7 +28,7 @@
 
 ## 费用
 
-一次执行建立一个远程访问会话，按设备分钟计费：取设备的等待（约 1 到 2.5 分钟）、原语执行、停止到 COMPLETED 的收尾（Android 约 1 分钟，iOS 最长约 2.5 分钟）都计入。工具在正常结束、获取失败、出错与收到 SIGINT / SIGTERM 时都会停止它建立的会话；会话名以 `gherkai:device-reprobe-` 开头，释放没能确认时到 Device Farm 控制台按这个名字核对，或用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出。
+一次执行建立一个远程访问会话，按设备分钟计费：取设备的等待（约 1 到 2.5 分钟）、原语执行、停止到 COMPLETED 的收尾（Android 约 1 分钟，iOS 最长约 2.5 分钟）都计入。工具在正常结束、获取失败、出错与收到 SIGINT / SIGTERM 时都会停止它建立的会话；会话名以 `gherkai:device-reprobe-` 开头（run 段为启动时刻加随机后缀，同一秒内并行启动的两次运行不会同名），释放没能确认时到 Device Farm 控制台按这个名字核对，或用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出。
 
 ## 调用
 
@@ -57,7 +58,7 @@ AWS_REGION=<桶的区域> node_modules/.bin/tsx ../../tools/device_reprobe.mts \
 | `--device-arn` / `--os-version` | 二选一 | 指定设备，或按系统版本族挑选（与 `gherkai.toml` 的 `[devices.<平台>]` 同一规则） |
 | `--app-bucket` / `--app-key` / `--app-id` | 应用目标必填 | 安装包在 S3 的位置与包名或 bundle id |
 | `--url` | 不打开 | 原语执行前经接缝的导航打开的地址：网页目标按探测结论在网页上下文打开、或交给系统浏览器，应用目标经 DeepLink 交给被测应用 |
-| `--focus <x>,<y>` | 不执行输入类原语 | 截图像素坐标；每条输入类用例（输入、按键、清空、收起键盘）之前点一次这里，让输入框获得焦点 |
+| `--focus <x>,<y>` | 不执行输入类原语 | 截图像素坐标；每条输入类用例（输入、按键、清空、收起键盘）之前点一次这里，让输入框获得焦点。坐标可从一次不带 `--focus` 的执行写出的 `screenshot.png` 与 `page-source.xml` 里取 |
 | `--deep-link` | 不执行 DeepLink 用例 | 替换快照里 DeepLink 用例的地址；应用标识换成本次目标的值，只执行与本次界面类型相符的那条用例 |
 | `--billing-method` | `METERED` | `METERED` / `UNMETERED` |
 | `--acquire-timeout-s` | `600` | 获取设备的等待上限（与 `gherkai.toml` 的 `acquire-timeout-s` 缺省值相同） |
@@ -73,7 +74,11 @@ AWS_REGION=<桶的区域> node_modules/.bin/tsx ../../tools/device_reprobe.mts \
 capability-matrix.json                         能力矩阵（整份写盘前经脱敏）
 device/device-reprobe-<哈希>/device-session.json 接缝写的 scope 诊断文件，与 worker 产出的同一份格式
 device/device-reprobe-<哈希>/page-source/       接缝界面快照写下的原始控件树（脱敏、超过上限截断）
+screenshot.png                                 打开测试页之后（没给 --url 时即就绪之后）经执行实例截的一张屏
+page-source.xml                                本工具自己取的那次原始控件树（写盘前经脱敏，不截断）
 ```
+
+`screenshot.png` 与 `page-source.xml` 是测量材料，挑 `--focus` 坐标时对照截图与控件树里输入框的 bounds。它们只在对应步骤成功时写出（见 `lifecycle` 的 `screenshot` 与 `pageSource`），不受接缝预算的约束：接缝的界面快照超出预算时 `page-source/` 下没有文件，这两份照样有。
 
 `capability-matrix.json` 的主要键：
 
@@ -84,11 +89,13 @@ device/device-reprobe-<哈希>/page-source/       接缝界面快照写下的原
 | `automation_name`、`platform_version` | 会话回报的驱动名与系统版本 |
 | `action_space` | 设备 Agent 向模型注册的动作名 |
 | `probe.conclusion` | 能力探测的结论，与 `device-session.json` 的 `probe` 同源 |
-| `probe.items` | 逐项事实，经生命周期通道读取（不经命令守卫）：`current_context`、`contexts`、`web_context_candidates`、`switch_to_native`；iOS 另有 `device_screen_info_scale`、`screenshot_long_edge`、`window_long_edge`、`page_source_scale`、`active_app_bundle_id`，Android 另有 `current_package`。`web_context_candidates` 与 `page_source_scale` 是由其它几项推出的值，其余每项是 `{value}` 或 `{error}` |
+| `probe.items` | 逐项事实，经生命周期通道读取（不经命令守卫）：`current_context`、`contexts`、`web_context_candidates`、`switch_to_native`；有网页上下文候选时另有 `switch_to_web`（切入第一个候选，值为候选名）与 `switch_back`（切回原生），两项经执行实例直接发出，测量上下文切换一次的耗时（耗时见 `lifecycle`）；iOS 另有 `device_screen_info_scale`、`screenshot_long_edge`、`window_long_edge`、`page_source_scale`、`active_app_bundle_id`，Android 另有 `current_package`。`web_context_candidates` 与 `page_source_scale` 是由其它几项推出的值，其余每项是 `{value}` 或 `{error}` |
 | `page` | `--url` 的打开结果与路线（`url` / `deep_link`） |
 | `snapshot` | 接缝的界面快照（与失败 step 的证据同一条采集路径）：`url` / `url_missing`、`controls`、`page_source_path` 与 `page_source_truncated` |
 | `page_source` | 真机控件树的控件数与它和控件树样例的属性差集 `diff` |
-| `cases` | 每条快照用例：`status`（`ok` / `failed` / `skipped`）、跳过原因、失败原因与归类、发出的命令（`commands` 为与快照格式相同的树，`flat` 带每条命令的成败）、快照的命令（`expected`）、`matches_fixture` |
+| `cases` | 每条快照用例：`status`（`ok` / `failed` / `skipped`）、跳过原因、失败原因与归类、发出的命令（`commands` 为与快照格式相同的树，`flat` 带每条命令的成败 `error` 与耗时 `ms`）、快照的命令（`expected`）、`matches_fixture` |
+| `cases[].flat[].ms` | 这条命令从发出到落定（返回或抛出）的毫秒数，取整；用例记录结束时尚未落定的命令为 null |
+| `lifecycle` | 生命周期步骤的计时，按发生次序每步一项 `{step, ms, ok, error?}`：`ms` 为这一步从开始到结束的毫秒数（取整），`error` 只在 `ok` 为 false 时出现。小写下划线的步骤名与 `probe.items` 里同名的逐项事实一一对应；其余是 `navigate` 与紧随其后的 `restore`（只在给了 `--url` 时）、`screenshot`（写出 `screenshot.png` 的那次截图）、`readAddress`、`snapshot`、`pageSource`（本工具自己取的控件树，与 `page_source` 同一次读取）。`readAddress` 的缺失原因为 `timeout` / `error`、`snapshot` 有改判或控件摘要缺失、`restore` 有改判时也记为失败。执行中每步另写一行到标准输出：`device_reprobe: 步骤 <名> <ms> 毫秒 ok` 或 `device_reprobe: 步骤 <名> <ms> 毫秒 失败: <原因>` |
 | `diff` | 与命令契约快照的差集，见下节 |
 | `release`、`session_events` | 释放结果与本次发出的会话事件（每个会话恰一对，`release_failed` 为 true 表示有会话没能确认停止） |
 
@@ -98,11 +105,11 @@ device/device-reprobe-<哈希>/page-source/       接缝界面快照写下的原
 
 | 字段 | 含义 | 处置 |
 |---|---|---|
-| `rejected` | 快照里的命令形态被真机拒绝（附用例与真机给的原因） | 先排除用例环境的原因（输入框没有获得焦点、`--deep-link` 的地址应用处理不了）；排除后即平台行为变了：按真机接受的写法改适配器、同步改快照，并回写 ADR 0052 决策 4 的映射表与实测依据 |
-| `not_exercised` | 快照里的形态这次没有执行到（附原因：跳过、执行中途失败、执行成功但没有发出这一形态） | 补齐选项后再执行一次；全部执行到之前不算完成重新探测 |
+| `rejected` | 快照里的命令形态被真机拒绝（附用例与真机给的原因）；适配器归为 `capability_unavailable` 的用例不计入，见 `failed_cases` | 先排除用例环境的原因（输入框没有获得焦点、`--deep-link` 的地址应用处理不了）；排除后即平台行为变了：按真机接受的写法改适配器、同步改快照，并回写 ADR 0052 决策 4 的映射表与实测依据 |
+| `not_exercised` | 快照里的形态这次没有执行到（附原因：跳过、执行中途失败、这台设备不提供这项能力、执行成功但没有发出这一形态） | 补齐选项后再执行一次；原因为设备不提供这项能力时，换一台提供它的设备核对这一形态；全部执行到之前不算完成重新探测 |
 | `unexpected` | 执行中发出了快照里没有的形态 | 适配器在真机应答下走了快照没覆盖的分支；补快照用例，或修适配器 |
 | `mismatched_cases` | 执行成功、但归一后的命令序列与快照不同的用例 | 同上，逐条对照 `cases[].commands` 与 `expected` |
-| `failed_cases` | 执行失败、却不是某条命令被拒的用例（命令守卫拒绝、适配器在发命令之前判定不提供） | 看 `error_type` 与 `error`；`capability_unavailable` 多半是这台设备本就不提供（例如 iOS 老版本不支持经系统打开地址），记进矩阵即可 |
+| `failed_cases` | 执行失败、却不是某条命令被拒的用例（命令守卫拒绝、适配器在发命令之前判定不提供），以及命令被驱动以已知的能力缺失拒绝、适配器归为 `capability_unavailable` 的用例 | 看 `error_type` 与 `error`；`capability_unavailable` 多半是这台设备本就不提供，记进矩阵即可。例如 iOS 15.8 上 DeepLink 用例被 WebDriverAgent 以「The current Xcode SDK does not support opening of URLs with given application」拒绝：这是已记录的能力缺失（ADR 0048 决策 7、ADR 0052 决策 5），worker 同样归为 `capability_unavailable`，不是平台行为变化。归类由适配器按驱动文本判定，本工具只读适配器挂在异常上的标记；会话状态没能确认时适配器不归类，这样的用例仍记进 `rejected` |
 
 再看两处探测相关的事实：
 
@@ -111,15 +118,30 @@ device/device-reprobe-<哈希>/page-source/       接缝界面快照写下的原
 
 结论与证据回写 ADR 0052 对应的决策与「实测依据」节，快照与样例的改动和适配器的改动同一次提交。
 
+### 耗时判读
+
+`lifecycle` 给出各步骤在真机上的实际耗时，`cases[].flat[].ms` 给出每条原语命令的耗时，用来校准超时分层与证据采集预算。拿下表的步骤与 `engines/midscene/src/device/limits.mts` 的常量对照：
+
+| 步骤 | 对照的常量 | 说明 |
+|---|---|---|
+| `switch_to_web`、`switch_back` | `PROBE_TIMEOUT_MS`（15 秒） | 能力探测经探测实例切换上下文，单个请求受这个时限约束；这两项经执行实例发出，测得的是切换本身的耗时，不被 15 秒截断 |
+| `readAddress` | `ADDRESS_CAPTURE_BUDGET_MS`（15 秒） | 读地址的证据采集预算，包含重新定位网页上下文、切入、读地址与切回原生 |
+| `snapshot` | `CONTROLS_CAPTURE_BUDGET_MS`（30 秒） | 控件树的证据采集预算，与读地址的预算各自计时；这一步的耗时主要是读原始控件树 |
+| `pageSource` | `CONTROLS_CAPTURE_BUDGET_MS`（30 秒） | 本工具自己取控件树时用 60 秒的测量时限（工具内的 `MEASURE_PAGE_SOURCE_MS`，不是 worker 的预算），在 worker 预算下会超时的控件树也能测出实际耗时 |
+
+某一步接近或超过对照的常量，就是要校准的点。例如 `readAddress` 接近 15 秒时地址记为 `timeout`，随后的 `snapshot` 不受影响（两段预算各自计时）；`pageSource` 接近 30 秒时，接缝的 `snapshot` 会超时、控件摘要记为 `timeout`；`switch_to_web` 超过 15 秒时，能力探测里经探测实例的同一次切换会超时，`switch_back` 与随后各项的耗时与失败原因可以佐证服务端是否仍在处理前一个请求。
+
+取值的原则按超时的后果分：探测超时在判定路径上，到点即换路线（探测出错，导航改走 DeepLink），取实测最慢值的数倍；证据采集预算只影响证据的完整程度，到点只置空字段并记 `timeout`，取实测最慢值的 1.5 到 3 倍。测得的耗时随执行工具的机器到 us-west-2 的往返时延变化，校准时按最慢的环境取值，并在结论里注明测量环境。结论回写 ADR 0052 决策 6（超时分层）与 ADR 0051 决策 8（证据采集预算）。
+
 ## 离线自检（`--offline`）
 
-不连设备、零 AWS 调用：用按快照应答的假 driver 重放两份快照的全部用例，经与真机执行相同的记录、归一与差集逻辑比对，再拿两份控件树样例各自与自身比较。结果打在标准输出（每份快照一段差集），全部为零差异时退出码为 0。它核对的是本工具，不是适配器：适配器与快照是否一致由 `adapters.contract.test.mts` 守。
+不连设备、零 AWS 调用：用按快照应答的假 driver 重放两份快照的全部用例，经与真机执行相同的记录、归一与差集逻辑比对，再拿两份控件树样例各自与自身比较，并用构造的结果核对能力缺失用例的归类（进 `failed_cases`、不进 `rejected`，结果在每份快照一段的 `capability_unavailable_check`）。结果打在标准输出（每份快照一段差集），全部为零差异且归类核对通过时退出码为 0。离线自检不经过生命周期步骤，不产出 `lifecycle`，也不写步骤计时行与测量材料；假 driver 下各条命令的 `ms` 接近 0，没有测量意义。它核对的是本工具，不是适配器：适配器与快照是否一致由 `adapters.contract.test.mts` 守。
 
 ## 退出码
 
 | 退出码 | 含义 |
 |---|---|
-| 0 | 会话就绪，`diff` 的 `rejected`、`unexpected`、`mismatched_cases`、`failed_cases` 均为空，控件树属性无缺失，会话确认停止（`--offline`：零差异，含 `not_exercised` 为空）。真机方式的 `not_exercised` 不影响退出码，须另看 |
+| 0 | 会话就绪，`diff` 的 `rejected`、`unexpected`、`mismatched_cases`、`failed_cases` 均为空，控件树属性无缺失，会话确认停止（`--offline`：零差异，含 `not_exercised` 为空，且能力缺失归类核对通过）。真机方式的 `not_exercised` 不影响退出码，须另看 |
 | 1 | 会话未就绪、差集不为空、会话中途丢失或释放未确认；矩阵照常写出 |
 | 2 | 选项不合法 |
 | 130 / 143 | 收到 SIGINT / SIGTERM，已按终结路径停止会话并写出已有的矩阵 |

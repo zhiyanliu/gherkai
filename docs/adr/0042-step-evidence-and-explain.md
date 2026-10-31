@@ -90,7 +90,7 @@ evidence 的抽取、落盘、上传任一环失败 → worker 日志一行、�
 
 **实现约束（否则「零影响」不成立）**：evidence 的抽取 / 落盘 / `to_report_ref` / 挂 ref 必须整体裹在自己的 try 里，且位于 step 的 act 异常分类路径**之外**——Nova `_run_step` 的外层 `except Exception` 会把 try 体内任何异常经 `_classify_act_error` 转成 `status="error"`，evidence 若裸放进去，一次上传抖动就把已成的 passed 判定翻成 network_error / engine_error。`to_report_ref` 自身的「失败即抛」契约不动，best-effort 由调用方 try + 日志实现，写法对齐两 worker 现有 scope 级 report 的兜法。**承诺边界**：best-effort 只覆盖 evidence 自身失败；S3 整体不可用时同 step 的 trajectory 上传按 0029 原规则仍报错 → 该 step 仍会变 error，本条不承诺那种场景下 step 保持 passed。
 
-代价：evidence.json 在 emit `step_done` 之前落盘并上传一次（小文件）；Nova 侧 passed step 多解一张 base64 图落盘，failed / error step 最多解 min(M, K × 票数) 张；Midscene 侧零解码（引用 SDK 已落盘文件）。每 step 增加的临界路径耗时为一次小文件 PutObject 加本地 IO；截图字节由后台队列在下个 step 期间上传，不占临界路径。**设备目标的例外**：failed / error step 在 `step_done` 之前多一次有界的界面快照采集（地址读取与控件摘要共用一个短预算，原始控件树只在此时取），这段时间按步累加计入 job 墙钟，用户文档写明；采集失败照本决策的 best-effort 处理，唯一例外是采集中发现会话丢失（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）。
+代价：evidence.json 在 emit `step_done` 之前落盘并上传一次（小文件）；Nova 侧 passed step 多解一张 base64 图落盘，failed / error step 最多解 min(M, K × 票数) 张；Midscene 侧零解码（引用 SDK 已落盘文件）。每 step 增加的临界路径耗时为一次小文件 PutObject 加本地 IO；截图字节由后台队列在下个 step 期间上传，不占临界路径。**设备目标的例外**：failed / error step 在 `step_done` 之前多一次有界的界面快照采集（地址读取与控件树各有一段有界的采集预算、各自计时，原始控件树只在此时取），这段时间按步累加计入 job 墙钟，用户文档写明；采集失败照本决策的 best-effort 处理，唯一例外是采集中发现会话丢失（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）。
 
 ### 三、`StepResult` 补 `message`，进 `jobs/*.json`
 
