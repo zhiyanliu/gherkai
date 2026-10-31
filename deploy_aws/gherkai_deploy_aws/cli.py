@@ -268,7 +268,7 @@ class Provider:
 
     # ---- flag 面（ADR 0037 决策 6：三 flag 对齐 stack 与 app 的全部 context 配置项）----
     def add_arguments(self, parser: argparse.ArgumentParser) -> None:
-        """把 provider 特有 flag 挂上 CLI 给的 parser。
+        """把 provider 特有 flag 注册到 CLI 提供的 parser。
 
         `prefix`/`vpc_id`/`use_default_vpc`/`stop_timeout` 四个 context 配置项映射为**三个** flag：`--vpc`
         一个吞掉 `vpc_id` + `use_default_vpc` 两个配置项（ADR 0037 决策 6）。`version` 这一项不给 flag——

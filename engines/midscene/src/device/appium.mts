@@ -71,8 +71,8 @@ const BROWSER_NAMES: Record<Device, string> = { android: "Chrome", ios: "Safari"
  *  browserName（iOS 不带它就没有网页上下文）；应用目标带预签名的安装包地址，关掉自动启动与重置（启动由 worker 显式 activateApp
  *  并采样，ADR 0051 决策 9）。应用标识不进能力集：Device Farm 的交互端点在 Android 实测中把 appium:appPackage 当作「用已安装
  *  应用」路线的信号，与 appium:app 同发时跳过安装包的下载、却仍把 appium:app 改写成主机本地路径，驱动随即报文件不存在
- *  （ADR 0051 决策 9）；两平台一律不带应用标识能力，遵循官方区分的「安装包」与「已安装应用」两条路线。驱动从安装包本身读包名
- *  或 bundle id，worker 启停应用所用的标识通过 app 模块的命令参数传入。
+ *  （ADR 0051 决策 9）；两平台一律不带应用标识能力，遵循官方区分的「安装包」与「已安装应用」两条路线；iOS 携带 appium:bundleId
+ *  时是否发生同一下载故障，未做同类对照。驱动从安装包本身读包名或 bundle id，worker 启停应用所用的标识通过 app 模块的命令参数传入。
  *  应用目标缺地址或应用标识时抛出（接缝保证给齐；标识虽不进能力集，但建会话之后的启动采样立刻要用）。 */
 export function newSessionCapabilities(
   req: Pick<ConnectRequest, "device" | "uiKind" | "appId" | "appUrl">,
@@ -378,7 +378,7 @@ export interface AppiumSessionArgs {
   sleep?: Sleep;
 }
 
-/** 由已建好的执行实例与探测实例组成会话（connect 内部用；测试经它把假客户端装成会话）。 */
+/** 由已建好的执行实例与探测实例组成会话（connect 内部用；测试通过该函数将模拟客户端封装为会话）。 */
 export function createAppiumSession(args: AppiumSessionArgs): ProbeableAppiumSession {
   return new WdioAppiumSession(args);
 }

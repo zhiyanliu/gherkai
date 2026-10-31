@@ -239,7 +239,7 @@ def _traj_refs(step_traj: list[str]) -> list[dict]:
 
 
 def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) -> None:
-    """把本 step 的 trajectory 挂上 step_done 事件：安全点提前上传配套 json（ADR 0029）+ reportRefs（ADR 0027 下沉）。
+    """把本 step 的 trajectory 添加到 step_done 事件：安全点提前上传配套 json（ADR 0029）+ reportRefs（ADR 0027 下沉）。
 
     三个 emit 点（Then 投票/When 动作/except 失败）共用一份（曾三处重复、各自漂移风险）。
     protect_emit=True（失败路径）：上传若是本次失败源，_traj_refs 重建会再抛——吞掉、只丢 reportRefs 链接，

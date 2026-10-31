@@ -141,7 +141,7 @@ def test_fatal_from_real_entry_is_redacted():
 
 
 def test_fatal_hook_keeps_the_keyboard_interrupt_exit():
-    """未捕获的 KeyboardInterrupt 经钩子后仍按 SIGINT 结束（与解释器缺省一致），被链接的上游异常里的凭据照样被盖住。
+    """未捕获的 KeyboardInterrupt 经钩子后仍按 SIGINT 结束（与解释器缺省一致），被链接的上游异常里的凭据仍被脱敏处理。
     退出方式是解释器的真实行为，进程内单测看不到，所以起真子进程。"""
     raw, expected = _sample(lambda i: "@" in i)
     code = ("import os, sys\n"

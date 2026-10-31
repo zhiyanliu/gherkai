@@ -830,8 +830,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793381363.460218,
-    "ast_hash": "990e3e02ae396a11008d2b3824c5fdb9",
+    "mtime": 1793446593.7926764,
+    "ast_hash": "cd296ee04b84f1c113b65eb3d7f2dfbd",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/cli.py": {
-    "mtime": 1793336797.0523114,
-    "ast_hash": "97f66be512019c95e1fe569407058b63",
+    "mtime": 1793446594.0247278,
+    "ast_hash": "787406eae0d24c453c48251ecb84d46b",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793446091.049815,
-    "ast_hash": "a132847491404429ff3d6dc06c998258",
+    "mtime": 1793446568.3538537,
+    "ast_hash": "4738948ec45a40d61c668934f18bff3f",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2130,8 +2130,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {
-    "mtime": 1793446075.1556582,
-    "ast_hash": "b8aeefa82ac47d93d8c617ad1f543e41",
+    "mtime": 1793446568.0330212,
+    "ast_hash": "a36f31e92c738db2cad79f3562b4d66b",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.test.mts": {
@@ -2310,8 +2310,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_stderr_redaction.py": {
-    "mtime": 1793390889.485606,
-    "ast_hash": "3eafc2eff08f6f7d1eff765857b84ec0",
+    "mtime": 1793446594.262383,
+    "ast_hash": "595953da54043b45d024febc6c0a310b",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/stderr-outlets.test.mts": {
