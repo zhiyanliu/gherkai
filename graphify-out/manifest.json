@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793360586.4865475,
-    "ast_hash": "d34d51b927b431b917f91f57c5f0d3f1",
+    "mtime": 1793461462.7823339,
+    "ast_hash": "41031be61479fabdc83ecc8e4720328c",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793458366.1193066,
-    "ast_hash": "ef0b7054555fb69d65ff8037ff91dbf1",
+    "mtime": 1793461742.3931262,
+    "ast_hash": "2c4c0f7ba5e2e8b373cf8c444051c567",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793456183.8088393,
-    "ast_hash": "1e1ee5adaf35f8e1285e85b7f245165f",
+    "mtime": 1793461677.3255577,
+    "ast_hash": "d4806126a9290926604ef7371b12b02f",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793459093.669133,
-    "ast_hash": "eb36803ff821b686f7d7f9edcad943c3",
+    "mtime": 1793461742.7355905,
+    "ast_hash": "61dc26a97b2fa36f2c7b24759ab17200",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2000,8 +2000,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_project_config.py": {
-    "mtime": 1793458883.4402316,
-    "ast_hash": "7050bc607ff716cea34d78e1a7650c9a",
+    "mtime": 1793461463.012883,
+    "ast_hash": "0f27d68baa0a3c3886ebc01d84e6d7a5",
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {

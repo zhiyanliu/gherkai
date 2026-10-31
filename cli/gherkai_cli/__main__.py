@@ -2558,8 +2558,17 @@ def _cmd_run(args) -> int:
     on_job_complete = persistence.on_job_complete if persistence else None
 
     # 这里起的是 schedule 的进程内驱动，非 reconcile.tick 那条推进路径（ADR 0034）。
+    # 开场提示按目标说明会建立哪种会话：桌面 scope 是 AgentCore 云端浏览器会话，设备 scope 是 Device Farm 远程访问会话（设备按分钟计费）。
+    has_desktop = any(j.target.is_desktop for j in jobs)
+    has_device = any(not j.target.is_desktop for j in jobs)
+    if has_desktop and has_device:
+        sessions = "AgentCore 云端浏览器会话与 Device Farm 远程访问会话（将产生 AWS 费用，设备按分钟计费）"
+    elif has_device:
+        sessions = "Device Farm 远程访问会话（将产生 AWS 费用，设备按分钟计费）"
+    else:
+        sessions = "AgentCore 云端浏览器会话（将产生 AWS 费用）"
     _progress(
-        f"run_id={run_id}  开始运行：启动 worker 建立 AgentCore 云端浏览器会话（将产生 AWS 费用）  "
+        f"run_id={run_id}  开始运行：启动 worker 建立{sessions}  "
         f"max_concurrency={args.max_concurrency} "
         f"default_job_timeout={'按目标缺省' if args.default_job_timeout is None else f'{args.default_job_timeout:g}s'} ..."
     )

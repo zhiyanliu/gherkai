@@ -631,7 +631,11 @@ def test_local_run_uploads_each_installer_once_and_fills_app_location(tmp_path, 
     meta = json.loads(next(reports.glob("*/run_meta.json")).read_text(encoding="utf-8"))
     for job in meta["jobs"]:
         assert job["target"]["app"] == {"alias": "wiki", "app_id": "org.wikipedia", "bucket": "my-apps", "key": f"apps/{sha}/app.apk", "sha256": sha}
-    assert "已上传到 s3://my-apps/" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "已上传到 s3://my-apps/" in err
+    # 开场提示按目标说明会建立哪种会话：只有设备 scope 时说远程访问会话、不提云端浏览器
+    assert "开始运行：启动 worker 建立Device Farm 远程访问会话（将产生 AWS 费用，设备按分钟计费）" in err
+    assert "AgentCore 云端浏览器会话" not in err
 
 
 def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, monkeypatch, capsys):
