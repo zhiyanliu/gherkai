@@ -549,6 +549,19 @@ test("Create：按名核对逐 ARN 登记——同一页里同名的两个会话
   assert.deepEqual(h.farm.ops("stop").map((c) => c.arg).sort(), ["arn:dupA", "arn:dupB"]);
 });
 
+test("按名核对：待核集为空时不列举即返回，不依赖调用方先判断待核集（获取期与终结两种调用形态都如此）；有待核名字时照常列举", async () => {
+  const h = setup();
+  await h.clock.run(h.block.reconcile({ deadline: null, outer: h.budget.signal }));
+  await h.clock.run(h.block.reconcile({ deadline: h.clock.t + 5_000, outer: null }));
+  assert.equal(h.farm.ops("listSessions").length, 0);
+  // 对照：记下一个待核名字之后照常列举，首页即分页结束；没命中的名字保留待核
+  const name1 = encode(RUN_ID, SCOPE_ID, 1);
+  h.block.markPending(name1, 1, "建立远程访问会话的请求没有得到完整的回应", "");
+  await h.clock.run(h.block.reconcile({ deadline: null, outer: h.budget.signal }));
+  assert.deepEqual(h.farm.ops("listSessions").map((c) => c.arg), [{ projectArn: PROJECT, nextToken: undefined }]);
+  assert.deepEqual([...h.block.registry.pending.keys()], [name1]);
+});
+
 // ---- 获取期按名找回的孤儿会话：找回即按 Stop 规则停止，不等到终结 ----
 
 /** 第一次 Create 连接中断、之后的 Create 成功；重试前的按名核对在首页找回第一次尝试建立的会话 arn:orphan。 */

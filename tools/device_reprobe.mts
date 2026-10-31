@@ -14,14 +14,22 @@
 //   - 用例级比对：归一后的命令序列与快照逐条相同。归一有两处：元素句柄按出现次序换成 active-1、active-2……（快照的假 driver 就是这样
 //     命名的）；连续重复的同一条命令按一条比较（轮询次数随真机应答变化，例如 DeepLink 之后核对前台包名）；
 //   - 快照用例的输入照原样执行（坐标、文本与上下文取快照里的值），只有 DeepLink 的地址与应用标识换成 --deep-link 与本次目标的值；
-//     真机的坐标比例与输入上下文另记在 probe 段，不改用例的输入，否则命令序列无法与快照逐条比对。
+//     真机的坐标比例与输入上下文另记在 probe 段，不改用例的输入，否则命令序列无法与快照逐条比对；
+//   - 已知的能力缺失不算平台行为变化：用例的异常上带着适配器挂的 capability_unavailable 标记（例如 WebDriverAgent 拒绝打开地址）
+//     时，它被拒的命令不进 rejected，用例进 failed_cases，被拒命令的形态记进 not_exercised（在这台设备上无法核对）。
 // 快照用例的解读（原语名到适配器方法的映射）与 adapters/adapters.contract.test.mts 的 runCase 相同，加原语时两处一起改。
 //
+// 计时：记下的每条命令带从发出到落定的毫秒数（cases[].flat[].ms）；能力探测的逐项事实、打开测试页与随后的复原、截图、读地址、
+// 界面快照与本工具自己取的控件树各记一步（matrix.lifecycle，并逐步写到标准输出），用于校准超时分层与证据采集预算（ADR 0052
+// 决策 6、ADR 0051 决策 8）。截图与本工具自己取的控件树另写到输出目录（SCREENSHOT_FILE、PAGE_SOURCE_FILE），挑 --focus 坐标时
+// 对照输入框的位置；接缝的界面快照超出预算时不留控件树，这两个文件不受它影响。
+//
 // --offline：不连设备，用按快照应答的假 driver 重放两份快照的全部用例，再拿两份控件树样例各自与自身比较，核对本工具的记录、归一与
-// 差集逻辑（结果应为零差异）。改了本工具或快照格式之后先执行它。
+// 差集逻辑（结果应为零差异），并用构造的结果核对能力缺失用例的归类。改了本工具或快照格式之后先执行它。
 //
 // 本文件不写 `mobile:` 命令字面量、不构造 Device Farm 客户端、不直接 import WebdriverIO 与 Device Farm SDK：这些都只经设备模块的
-// 导出（ADR 0052 决策 4、8，ADR 0051 决策 10）。常量取 device/limits.mts。
+// 导出（ADR 0052 决策 4、8，ADR 0051 决策 10）。常量取 device/limits.mts，本工具自己的测量时限（MEASURE_PAGE_SOURCE_MS）除外。
+import { randomBytes } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -39,9 +47,9 @@ import { createUiAutomator2Adapter } from "../engines/midscene/src/device/adapte
 import { activeAppInfo, createXcuitestAdapter, deviceScreenInfo } from "../engines/midscene/src/device/adapters/xcuitest.mjs";
 import { applicationLongEdge, pngLongEdge, scaleFromSizes } from "../engines/midscene/src/device/probe.mjs";
 import { probeClientOf } from "../engines/midscene/src/device/appium.mjs";
-import { contextNames, webContextCandidates } from "../engines/midscene/src/device/web-context.mjs";
+import { NATIVE_CONTEXT, contextNames, webContextCandidates } from "../engines/midscene/src/device/web-context.mjs";
 import {
-  DEEP_LINK_FOREGROUND_POLL_ATTEMPTS, DEEP_LINK_FOREGROUND_POLL_INTERVAL_MS, SNAPSHOT_CAPTURE_BUDGET_MS,
+  CONTROLS_CAPTURE_BUDGET_MS, DEEP_LINK_FOREGROUND_POLL_ATTEMPTS, DEEP_LINK_FOREGROUND_POLL_INTERVAL_MS,
 } from "../engines/midscene/src/device/limits.mjs";
 import { DEVICES, UI_KINDS, type Device, type UiKind } from "../engines/midscene/src/worker/deterministic.mjs";
 import { readClassification, type SurfaceDeps, type TargetSurface } from "../engines/midscene/src/worker/surface.mjs";
@@ -53,6 +61,8 @@ type Browser = AppiumSession["exec"];
 
 const FIXTURE_DIR = path.resolve(import.meta.dirname, "../engines/midscene/src/device/adapters/fixtures");
 const MATRIX_FILE = "capability-matrix.json";
+const SCREENSHOT_FILE = "screenshot.png";
+const PAGE_SOURCE_FILE = "page-source.xml";
 const MATRIX_SCHEMA = "gherkai-device-reprobe/1";
 const SCOPE_ID = "device-reprobe";
 // 与命令行工具的 acquire-timeout-s 缺省值相同（core/gherkai_core/model.py 的 DEFAULT_ACQUIRE_TIMEOUT_S）。
@@ -63,6 +73,10 @@ const INPUT_CALLS = new Set(["typeText", "keyboardPress", "clearInput", "hideKey
 // 用例的执行次序：输入类紧跟聚焦，手势之后才是会离开当前页面的 DeepLink 与系统键，主屏键最后。
 const CALL_ORDER = ["typeText", "clearInput", "keyboardPress", "hideKeyboard", "tap", "longPress", "scroll", "deepLink", "back", "home"];
 const PAGE_SOURCE_FIXTURE: Record<Device, string> = { android: "android-page-source.xml", ios: "ios-page-source.xml" };
+// 本工具自己取控件树（与样例做属性差集）时的截止时限，只用于测量，不是 worker 的预算。它比 worker 的证据采集预算
+// （控件树的 CONTROLS_CAPTURE_BUDGET_MS）宽得多：在 worker 预算下会超时的控件树也能读完，lifecycle 里 pageSource 一步的耗时因此是真实耗时。
+// 接缝的界面快照（surface.snapshot）仍按 worker 的预算执行。
+const MEASURE_PAGE_SOURCE_MS = 60_000;
 
 // ---- 快照的格式 ----
 
@@ -106,9 +120,11 @@ interface FlatCommand {
   args: unknown[];
   /** 这条命令失败时的一行原因（已脱敏）；成功为 null。 */
   error: string | null;
+  /** 从发出到落定（返回或抛出）的毫秒数，取整；记录结束时尚未落定的命令为 null，落定后补上。 */
+  ms: number | null;
 }
 
-/** 命令记录：记录开启期间，经 wrap 出的 driver 发出的每条命令按发出次序记下（方法名、归一后的参数、成败），再原样交给被包的对象。
+/** 命令记录：记录开启期间，经 wrap 出的 driver 发出的每条命令按发出次序记下（方法名、归一后的参数、成败、耗时），再原样交给被包的对象。
  *  记录关闭时只转发、不记。withWebContext 的形态与快照相同：网页上下文里发出的命令收在一个 withWebContext 节点下，进出网页上下文的
  *  定位与切换命令不记，它们不属于原语。 */
 class CommandRecorder {
@@ -172,21 +188,25 @@ class CommandRecorder {
     if (!this.recording) return run();
     const entry = { method, args: this.normalize(args) };
     this.current.push(entry);
-    const flat: FlatCommand = { ...entry, error: null };
+    const flat: FlatCommand = { ...entry, error: null, ms: null };
     this.flat.push(flat);
+    const started = performance.now();
+    const settle = (): void => { flat.ms = Math.round(performance.now() - started); };
     let result: unknown;
     try {
       result = run();
     } catch (e) {
+      settle();
       flat.error = errorText(e);
       throw e;
     }
     if (isThenable(result)) {
       return Promise.resolve(result).then(
-        (value) => { this.learnElement(value); return value; },
-        (e: unknown) => { flat.error = errorText(e); throw e; },
+        (value) => { settle(); this.learnElement(value); return value; },
+        (e: unknown) => { settle(); flat.error = errorText(e); throw e; },
       );
     }
+    settle();
     this.learnElement(result);
     return result;
   }
@@ -311,7 +331,7 @@ function finishCase(
 
 interface Diff {
   fixture: string;
-  /** 快照里的形态被真机拒绝：形态、出现在哪些用例、真机给的原因。 */
+  /** 快照里的形态被真机拒绝：形态、出现在哪些用例、真机给的原因。适配器归为 capability_unavailable 的用例不计入（见 failed_cases）。 */
   rejected: Array<{ form: string; cases: string[]; error: string }>;
   /** 快照里的形态这一次没有执行到，附没有执行到的原因。 */
   not_exercised: Array<{ form: string; reasons: string[] }>;
@@ -319,8 +339,15 @@ interface Diff {
   unexpected: Array<{ form: string; cases: string[] }>;
   /** 执行成功但归一后的命令序列与快照不同的用例。 */
   mismatched_cases: string[];
-  /** 执行失败、却不是某条命令被拒的用例（例如被命令守卫拒绝、适配器在发命令前判定不提供）。 */
+  /** 执行失败、却不是某条命令被拒的用例（例如被命令守卫拒绝、适配器在发命令前判定不提供），以及命令被驱动以已知的能力缺失拒绝、
+   *  适配器归为 capability_unavailable 的用例。 */
   failed_cases: Array<{ name: string; error_type: string | null; error: string }>;
+}
+
+/** 用例失败在异常上带着 capability_unavailable 标记：适配器判定这台设备不提供这项能力（例如 WebDriverAgent 拒绝打开地址）。标记由
+ *  适配器按它自己的驱动文本判定挂上，与 worker 的 step 归类同源；本工具只读标记、不另做文本匹配。 */
+function isCapabilityUnavailable(r: CaseResult): boolean {
+  return r.status === "failed" && r.error_type === "capability_unavailable";
 }
 
 function diffAgainstFixture(file: string, results: CaseResult[]): Diff {
@@ -338,12 +365,14 @@ function diffAgainstFixture(file: string, results: CaseResult[]): Diff {
   const failed: Diff["failed_cases"] = [];
   for (const r of results) {
     if (r.status === "skipped") continue;
+    const unavailable = isCapabilityUnavailable(r);
     let commandRejected = false;
     for (const cmd of r.flat ?? []) {
       const form = formOf(cmd);
       if (!seen.has(form)) seen.set(form, new Set());
       seen.get(form)!.add(r.name);
       if (cmd.error === null) { accepted.add(form); continue; }
+      if (unavailable) continue;
       commandRejected = true;
       const hit = rejected.get(form) ?? { cases: new Set<string>(), error: cmd.error };
       hit.cases.add(r.name);
@@ -358,6 +387,7 @@ function diffAgainstFixture(file: string, results: CaseResult[]): Diff {
     for (const r of results) {
       if (!cases.has(r.name)) continue;
       reasons.add(r.status === "skipped" ? `${r.name}：${r.reason ?? ""}`
+        : isCapabilityUnavailable(r) ? `${r.name}：这台设备不提供这项能力（capability_unavailable），这一形态在本设备上无法核对`
         : r.status === "failed" ? `${r.name}：执行中途失败，没有发到这条命令`
         : `${r.name}：执行成功，但发出的命令里没有这一形态（见 mismatched_cases）`);
     }
@@ -434,6 +464,25 @@ function offlineAdapter(automationName: string): DeviceAdapter {
   throw new Error(`快照的 automationName ${JSON.stringify(automationName)} 没有对应的适配器`);
 }
 
+/** 能力缺失用例的归类：取一条发出命令的快照用例（优先 DeepLink），构造「末条命令被拒、异常带 capability_unavailable 标记」的结果，
+ *  差集应把它记进 failed_cases、rejected 为空，not_exercised 的原因写明能力缺失。只核对本工具的差集逻辑：哪些驱动文本算能力缺失
+ *  由适配器判定，由适配器的契约测试守。 */
+function unavailableCaseCheck(file: string, fixture: ContractFixture): { ok: boolean; diff: Diff | null } {
+  const withCommands = fixture.cases.filter((x) => flatten(x.commands).length > 0);
+  const c = withCommands.find((x) => x.call === "deepLink") ?? withCommands[0];
+  if (c === undefined) return { ok: false, diff: null };
+  const cmds = flatten(c.commands);
+  const flat = cmds.map((cmd, i): FlatCommand => ({ ...cmd, error: i === cmds.length - 1 ? "被驱动拒绝" : null, ms: 0 }));
+  const diff = diffAgainstFixture(file, [{
+    name: c.name, call: c.call, status: "failed", error: "被驱动拒绝", error_type: "capability_unavailable",
+    commands: c.commands, expected: c.commands, matches_fixture: null, flat,
+  }]);
+  const ok = diff.rejected.length === 0 && diff.failed_cases.length === 1
+    && diff.failed_cases[0].error_type === "capability_unavailable"
+    && diff.not_exercised.every((n) => n.reasons.every((r) => r.includes("capability_unavailable")));
+  return { ok, diff };
+}
+
 async function offlineSelfCheck(): Promise<number> {
   let clean = true;
   const report: Record<string, unknown> = {};
@@ -455,8 +504,9 @@ async function offlineSelfCheck(): Promise<number> {
       results.push(finishCase(c, c.commands, recorder.end(), error));
     }
     const diff = diffAgainstFixture(file, results);
-    report[file] = { cases: results.length, ...diff };
-    if (!diffIsClean(diff) || diff.not_exercised.length > 0) clean = false;
+    const unavailable = unavailableCaseCheck(file, fixture);
+    report[file] = { cases: results.length, ...diff, capability_unavailable_check: unavailable };
+    if (!diffIsClean(diff) || diff.not_exercised.length > 0 || !unavailable.ok) clean = false;
   }
   for (const file of Object.values(PAGE_SOURCE_FIXTURE)) {
     const xml = fs.readFileSync(path.join(FIXTURE_DIR, file), "utf-8");
@@ -465,7 +515,7 @@ async function offlineSelfCheck(): Promise<number> {
     if (!pageSourceIsClean(d)) clean = false;
   }
   process.stdout.write(JSON.stringify(report, null, 2) + "\n");
-  log(clean ? "离线自检通过：两份快照与两份控件树样例都是零差异" : "离线自检有差异，见标准输出");
+  log(clean ? "离线自检通过：两份快照与两份控件树样例都是零差异，能力缺失用例的归类符合预期" : "离线自检有差异，见标准输出");
   return clean ? 0 : 1;
 }
 
@@ -543,26 +593,83 @@ async function attempt<T>(fn: () => Promise<T>): Promise<Attempt<T>> {
 
 const valueOf = <T,>(a: Attempt<T>): T | null => ("value" in a ? a.value : null);
 
-/** 能力探测的逐项事实，经生命周期通道（执行实例与探测实例直接发出，不经命令守卫）读取。 */
-async function probeFacts(session: AppiumSession, device: Device): Promise<Record<string, unknown>> {
+/** matrix.lifecycle 的一项：步骤名、从开始到结束的毫秒数（取整）、成败与失败的一行原因。 */
+interface LifecycleStep {
+  step: string;
+  ms: number;
+  ok: boolean;
+  /** 只在失败时出现。 */
+  error?: string;
+}
+
+/** 生命周期步骤的计时记录：按发生次序每步记一项，并写一行到标准输出（进度日志在标准错误，计时行与它分开，便于单独收集）。 */
+class Lifecycle {
+  readonly steps: LifecycleStep[] = [];
+
+  /** 执行 fn 并记一步，返回值与异常原样交回。fn 抛出记为失败；failureOf 对返回值给出原因时也记为失败（接缝里不抛出、
+   *  把失败放在返回值里的成员，例如读地址的缺失原因、复原核对的改判）。 */
+  async time<T>(step: string, fn: () => Promise<T>, failureOf: (value: T) => string | null = () => null): Promise<T> {
+    const started = performance.now();
+    const elapsed = (): number => Math.round(performance.now() - started);
+    let value: T;
+    try {
+      value = await fn();
+    } catch (e) {
+      this.record({ step, ms: elapsed(), ok: false, error: errorText(e) });
+      throw e;
+    }
+    const ms = elapsed();
+    const error = failureOf(value);
+    this.record(error === null ? { step, ms, ok: true } : { step, ms, ok: false, error });
+    return value;
+  }
+
+  /** time 与 attempt 合用：失败不抛出、交回 {error}，后续步骤照常执行。 */
+  attempt<T>(step: string, fn: () => Promise<T>): Promise<Attempt<T>> {
+    return attempt(() => this.time(step, fn));
+  }
+
+  private record(entry: LifecycleStep): void {
+    this.steps.push(entry);
+    const outcome = entry.ok ? "ok" : `失败: ${entry.error ?? ""}`;
+    process.stdout.write(redactSecrets(`device_reprobe: 步骤 ${entry.step} ${entry.ms} 毫秒 ${outcome}`) + "\n");
+  }
+}
+
+/** 复原核对与界面快照的改判写成一行原因；没有改判为 null。 */
+function failureLine(failure: { errorType: string; message: string } | null): string | null {
+  return failure === null ? null : `${failure.errorType}: ${failure.message}`;
+}
+
+/** 能力探测的逐项事实，经生命周期通道（执行实例与探测实例直接发出，不经命令守卫）读取；每项各记一步计时。 */
+async function probeFacts(session: AppiumSession, device: Device, lifecycle: Lifecycle): Promise<Record<string, unknown>> {
   const facts: Record<string, unknown> = {};
-  facts.current_context = await attempt(() => session.currentContext());
-  const names = await attempt(async () => contextNames(await session.exec.getContexts()));
+  facts.current_context = await lifecycle.attempt("current_context", () => session.currentContext());
+  const names = await lifecycle.attempt("contexts", async () => contextNames(await session.exec.getContexts()));
   facts.contexts = names;
   const list = valueOf(names);
-  facts.web_context_candidates = list === null ? null : webContextCandidates(list, device);
-  facts.switch_to_native = await attempt(() => session.switchToNative());
+  const candidates = list === null ? null : webContextCandidates(list, device);
+  facts.web_context_candidates = candidates;
+  facts.switch_to_native = await lifecycle.attempt("switch_to_native", () => session.switchToNative());
+  // 上下文切换一次的耗时：切入第一个网页上下文候选、再切回原生，都经执行实例直接发出（不经命令守卫，也不经接缝的重新定位）。
+  // 有多个候选时也只切第一个：这两项测量的是切换本身，不判定哪个是被测页面。切入失败也照常切回；两项的失败都不影响后续各项。
+  if (candidates !== null && candidates.length > 0) {
+    const name = candidates[0];
+    facts.switch_to_web = await lifecycle.attempt("switch_to_web", async () => { await session.exec.switchContext(name); return name; });
+    facts.switch_back = await lifecycle.attempt("switch_back", async () => { await session.exec.switchContext(NATIVE_CONTEXT); });
+  }
   if (device === "ios") {
     const probe = probeClientOf(session);
-    facts.device_screen_info_scale = await attempt(async () => (await deviceScreenInfo(probe)).scale);
-    const shot = await attempt(async () => pngLongEdge(await session.exec.takeScreenshot()));
-    const win = await attempt(async () => applicationLongEdge(await session.pageSource(AbortSignal.timeout(SNAPSHOT_CAPTURE_BUDGET_MS))));
+    facts.device_screen_info_scale = await lifecycle.attempt("device_screen_info_scale", async () => (await deviceScreenInfo(probe)).scale);
+    const shot = await lifecycle.attempt("screenshot_long_edge", async () => pngLongEdge(await session.exec.takeScreenshot()));
+    const win = await lifecycle.attempt("window_long_edge", async () =>
+      applicationLongEdge(await session.pageSource(AbortSignal.timeout(CONTROLS_CAPTURE_BUDGET_MS))));
     facts.screenshot_long_edge = shot;
     facts.window_long_edge = win;
     facts.page_source_scale = scaleFromSizes(valueOf(shot), valueOf(win));
-    facts.active_app_bundle_id = await attempt(async () => (await activeAppInfo(probe)).bundleId);
+    facts.active_app_bundle_id = await lifecycle.attempt("active_app_bundle_id", async () => (await activeAppInfo(probe)).bundleId);
   } else {
-    facts.current_package = await attempt(() => session.exec.getCurrentPackage());
+    facts.current_package = await lifecycle.attempt("current_package", () => session.exec.getCurrentPackage());
   }
   return facts;
 }
@@ -593,7 +700,10 @@ function skipReason(c: ContractCase, opts: Options, conclusion: ProbeConclusion)
 
 async function runOnDevice(opts: Options): Promise<number> {
   fs.mkdirSync(opts.out, { recursive: true });
-  const runId = `device-reprobe-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}`;
+  // run 段取时间戳加 6 位随机十六进制：同一秒内并行启动的两次工具运行各自有不同的会话名（会话名的其余段对本工具都相同，
+  // 只靠 run 段区分；按名核对若撞名会把另一次运行的会话当作孤儿停掉）。
+  const runId = `device-reprobe-${new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z")}-${randomBytes(3).toString("hex")}`;
+  const lifecycle = new Lifecycle();
   const matrix: Record<string, unknown> = {
     schema: MATRIX_SCHEMA,
     generated_at: new Date().toISOString(),
@@ -603,6 +713,8 @@ async function runOnDevice(opts: Options): Promise<number> {
       device_arn: opts.deviceArn, os_version: opts.osVersion, billing_method: opts.billingMethod, project_arn: opts.projectArn,
       acquire_timeout_s: opts.acquireTimeoutS,
     },
+    // 与 lifecycle.steps 是同一个数组：中途中断时写出的矩阵也带上已经记下的步骤。
+    lifecycle: lifecycle.steps,
   };
   const events: Array<Record<string, unknown>> = [];
   const captured: Captured = { adapter: null, probe: null, agent: null, actionSpace: null };
@@ -665,7 +777,7 @@ async function runOnDevice(opts: Options): Promise<number> {
       log(`没有就绪：${acquired.termination.errorType}：${acquired.termination.message}`);
     } else {
       matrix.acquire = { ready: true, session_arn: acquired.sessionId };
-      clean = await exerciseSession(surface, captured, recorder, opts, matrix);
+      clean = await exerciseSession(surface, captured, recorder, lifecycle, opts, matrix);
       await attempt(() => acquired.agent.destroy());
     }
   } catch (e) {
@@ -689,7 +801,8 @@ async function runOnDevice(opts: Options): Promise<number> {
 }
 
 async function exerciseSession(
-  surface: TargetSurface, captured: Captured, recorder: CommandRecorder, opts: Options, matrix: Record<string, unknown>,
+  surface: TargetSurface, captured: Captured, recorder: CommandRecorder, lifecycle: Lifecycle, opts: Options,
+  matrix: Record<string, unknown>,
 ): Promise<boolean> {
   const { adapter, agent, probe } = captured;
   if (adapter === null || agent === null || probe === null || !probe.ok) throw new Error("接缝就绪了，却没有记下适配器、探测结论或界面实现的参数");
@@ -698,12 +811,16 @@ async function exerciseSession(
   matrix.automation_name = adapter.automationName;
   matrix.platform_version = session.platformVersion;
   matrix.action_space = captured.actionSpace;
-  matrix.probe = { conclusion, items: await probeFacts(session, opts.platform) };
+  matrix.probe = { conclusion, items: await probeFacts(session, opts.platform, lifecycle) };
 
   // 1. 打开测试页（可选）：经接缝的导航，路线按探测结论定，与内建导航 step 相同。
   if (opts.url !== null) {
-    const opened = await attempt(() => surface.execute(() => surface.navigate(opts.url!)));
-    await surface.restore({ status: "error" in opened ? "error" : "passed", message: "error" in opened ? opened.error : null });
+    const opened = await lifecycle.attempt("navigate", () => surface.execute(() => surface.navigate(opts.url!)));
+    await lifecycle.time(
+      "restore",
+      () => surface.restore({ status: "error" in opened ? "error" : "passed", message: "error" in opened ? opened.error : null }),
+      failureLine,
+    );
     matrix.page = {
       url: opts.url,
       route: opts.uiKind === "app" || conclusion.webContext !== "available" ? "deep_link" : "url",
@@ -711,15 +828,25 @@ async function exerciseSession(
     };
   }
 
-  // 2. 控件树：接缝的界面快照（与失败 step 的证据同一条采集路径）与样例的属性差集。
+  // 测量材料：打开测试页之后（没给 --url 时即就绪之后）经执行实例截一张屏写到输出目录，挑 --focus 坐标时与 page-source.xml 里
+  // 输入框的位置对照。不经命令守卫；截图或写盘失败只记下，不影响后续。
+  const shot = await lifecycle.attempt("screenshot", () => session.exec.takeScreenshot());
+  if ("value" in shot) saveMaterial(opts.out, SCREENSHOT_FILE, Buffer.from(shot.value, "base64"));
+
+  // 2. 控件树：接缝的界面快照（与失败 step 的证据同一条采集路径）与样例的属性差集。读地址的缺失原因只有 timeout 与 error 记为失败，
+  //    not_applicable（应用目标）与 no_web_context（结论为不提供）是按设计不读。界面快照的改判与控件摘要的缺失原因记为失败。
   const facts = { kind: "deterministic", status: "failed" } as const;
-  const address = await surface.readAddress(facts);
-  const snap = await surface.snapshot(facts, address);
+  const address = await lifecycle.time("readAddress", () => surface.readAddress(facts), (a) =>
+    a !== null && (a.url_missing === "timeout" || a.url_missing === "error") ? `url_missing: ${a.url_missing}` : null);
+  const snap = await lifecycle.time("snapshot", () => surface.snapshot(facts, address), (s) =>
+    failureLine(s.failure) ?? (s.snapshot.controls_missing ? `controls_missing: ${s.snapshot.controls_missing}` : null));
   matrix.snapshot = { ...snap.snapshot, failure: snap.failure };
   let psDiff: PageSourceDiff | null = null;
   const fixtureXmlFile = PAGE_SOURCE_FIXTURE[opts.platform];
-  const deviceXml = await attempt(() => session.pageSource(AbortSignal.timeout(SNAPSHOT_CAPTURE_BUDGET_MS)));
+  const deviceXml = await lifecycle.attempt("pageSource", () => session.pageSource(AbortSignal.timeout(MEASURE_PAGE_SOURCE_MS)));
   if ("value" in deviceXml) {
+    // 原始控件树写盘前经脱敏，与接缝写控件树的出口相同；不截断，挑坐标时要看完整的控件树。
+    saveMaterial(opts.out, PAGE_SOURCE_FILE, redactSecrets(deviceXml.value));
     psDiff = pageSourceDiff(fixtureXmlFile, fs.readFileSync(path.join(FIXTURE_DIR, fixtureXmlFile), "utf-8"), deviceXml.value);
     matrix.page_source = { controls_total: adapter.extractControls(deviceXml.value).total, diff: psDiff };
   } else {
@@ -779,6 +906,17 @@ async function exerciseSession(
   matrix.cases = results;
   matrix.diff = diff;
   return diffIsClean(diff) && pageSourceIsClean(psDiff) && !lost;
+}
+
+/** 测量材料写到输出目录；写盘失败只记一行日志，不中断重新探测。 */
+function saveMaterial(dir: string, name: string, data: Buffer | string): void {
+  const file = path.join(dir, name);
+  try {
+    fs.writeFileSync(file, data);
+    log(`测量材料：${file}`);
+  } catch (e) {
+    log(`测量材料 ${name} 没能写盘：${errorText(e)}`);
+  }
 }
 
 function writeMatrix(dir: string, matrix: Record<string, unknown>): void {

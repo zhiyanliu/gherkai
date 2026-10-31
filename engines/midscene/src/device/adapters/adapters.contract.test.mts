@@ -28,6 +28,7 @@ import {
   deviceScreenInfo, extractIosControls, xcuitestEntry,
 } from "./xcuitest.mjs";
 import { READ_ONLY_MOBILE_COMMANDS as ANDROID_READ_ONLY } from "./uiautomator2.mjs";
+import { applicationLongEdge } from "../probe.mjs";
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");
 const W3C_ELEMENT_KEY = "element-6066-11e4-a52f-4f735466cecf";
@@ -560,6 +561,19 @@ test("iOS 控件摘要：类型取 type、文本取 label 其次 value、无障�
   });
 });
 
+test("iOS 控件树的根为 AppiumAUT（真机形态）：根不计为控件，第一个控件是 XCUIElementTypeApplication，窗口长边取它的宽与高", () => {
+  const xml = fs.readFileSync(path.join(FIXTURES, "ios-page-source.xml"), "utf-8");
+  assert.match(xml, /^<\?xml[^>]*>\s*<AppiumAUT>\s*<XCUIElementTypeApplication\b/, "样例保持真机控件树的根节点形态");
+  const { items } = extractIosControls(xml);
+  assert.equal(items[0].type, "XCUIElementTypeApplication");
+  assert.ok(items.every((c) => c.type !== "AppiumAUT"), "AppiumAUT 不是控件");
+  assert.equal(applicationLongEdge(xml), 844);
+  // 只改 XCUIElementTypeApplication 的尺寸（横屏、宽大于高），子节点 XCUIElementTypeWindow 仍为 390 × 844：长边取自前者，且计入宽。
+  const resized = xml.replace(/(<XCUIElementTypeApplication\b[^>]*?) width="390" height="844"/, '$1 width="874" height="402"');
+  assert.notEqual(resized, xml);
+  assert.equal(applicationLongEdge(resized), 874);
+});
+
 test("控件摘要按上限截断，total 是截断前的总数", () => {
   const n = CONTROLS_MAX_ITEMS + 50;
   const buttons = Array.from({ length: n }, (_, i) => `<android.widget.Button class="android.widget.Button" text="b${i}" />`).join("");
@@ -568,8 +582,8 @@ test("控件摘要按上限截断，total 是截断前的总数", () => {
   assert.equal(got.total, n);
   assert.equal(got.truncated, true);
   assert.equal(got.items[0].text, "b0");
-  assert.deepEqual(extractIosControls("<XCUIElementTypeApplication type=\"XCUIElementTypeApplication\" visible=\"true\"/>"),
-    { items: [], total: 0, truncated: false }, "采集成功但没有可识别的控件");
+  const emptyIos = `<AppiumAUT><XCUIElementTypeApplication type="XCUIElementTypeApplication" visible="true"/></AppiumAUT>`;
+  assert.deepEqual(extractIosControls(emptyIos), { items: [], total: 0, truncated: false }, "采集成功但没有可识别的控件");
 });
 
 test("控件树不是 XML 时抽取抛出（由接缝记为采集出错）", () => {

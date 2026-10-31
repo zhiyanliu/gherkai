@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793365224.0097294,
-    "ast_hash": "7ea5b70e18e0f06c2838be54d19e4710",
+    "mtime": 1793438003.7287917,
+    "ast_hash": "b90d5a12aac54c7332550bb7d07fb6af",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1860,8 +1860,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1793351138.8664973,
-    "ast_hash": "1ead23150357bc5746bb486c432efe78",
+    "mtime": 1793437944.3203607,
+    "ast_hash": "5bab4650eca6c2795102ca811082c196",
     "semantic_hash": ""
   },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793392609.4246695,
-    "ast_hash": "03d506e6cf2503a449e78070eda4e4ee",
+    "mtime": 1793438293.8611646,
+    "ast_hash": "41310c1131119d1cf765937a4dc0d86d",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793389276.8364804,
-    "ast_hash": "e732cb5f061ea26a5d2b28b82efd1465",
+    "mtime": 1793437963.5836282,
+    "ast_hash": "b7c27220b1e63d86b2b5cf6cc47538fe",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793392853.345209,
-    "ast_hash": "b49412182d841fde51e4789426104f13",
+    "mtime": 1793439588.5627446,
+    "ast_hash": "a9de09974f4824645cddfdab36610138",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2105,8 +2105,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/adapters.contract.test.mts": {
-    "mtime": 1793378971.1444197,
-    "ast_hash": "07641807c143237b9055ab677d06d50e",
+    "mtime": 1793436066.0826566,
+    "ast_hash": "78e8ef36aa470ad30c565b1cd2f12ed8",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/uiautomator2.mts": {
@@ -2115,8 +2115,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/xcuitest.mts": {
-    "mtime": 1793377929.385683,
-    "ast_hash": "ce4f8d06fd18ae82b7b0e91e68156476",
+    "mtime": 1793436025.5547793,
+    "ast_hash": "2174be9954d3e880b3f113d4dadad5f6",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.mts": {
@@ -2130,13 +2130,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {
-    "mtime": 1793378512.8303006,
-    "ast_hash": "f822e9d15bfdf43947ffe50cb5d960ad",
+    "mtime": 1793437974.6801775,
+    "ast_hash": "d3ffda00926d7f4470a3c143f2984211",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.test.mts": {
-    "mtime": 1793378533.0066366,
-    "ast_hash": "088cadefc72ffcc97fbcdb63cda6db59",
+    "mtime": 1793437696.8148208,
+    "ast_hash": "c87ff3c97d163e3da60cd5d7d0233913",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/device-session.mts": {
@@ -2170,8 +2170,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
-    "mtime": 1793379768.7331364,
-    "ast_hash": "b491d41599d5c9955115158f32336ef2",
+    "mtime": 1793438098.3376904,
+    "ast_hash": "0019880e7f387d408fad93101aa01df5",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.test.mts": {
@@ -2185,8 +2185,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.mts": {
-    "mtime": 1793378512.830721,
-    "ast_hash": "ebc9e0307c37fb991ab22138a2f83097",
+    "mtime": 1793436042.6699166,
+    "ast_hash": "0d9269a58d9407165330193434eded48",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.test.mts": {
@@ -2210,23 +2210,23 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.mts": {
-    "mtime": 1793388713.3497987,
-    "ast_hash": "f7ef3e749385ce50aa5401972af5b8bc",
+    "mtime": 1793434192.9538085,
+    "ast_hash": "88862ef64d002299fd65cca53a4fb92c",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.test.mts": {
-    "mtime": 1793388203.5676332,
-    "ast_hash": "aec6926618cfcb1e41a1c9acc639a968",
+    "mtime": 1793434175.8536046,
+    "ast_hash": "58613b86177f93d082cd5c797616cd00",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793387804.0266688,
-    "ast_hash": "a1b3e7ab8b8803aee388d9a44f8e87a6",
+    "mtime": 1793437752.191683,
+    "ast_hash": "d5cee0671c7bbafaf0b38be1be157ecc",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793390910.1818104,
-    "ast_hash": "a20dbfba75aca32ace27f72f5dbb746a",
+    "mtime": 1793437696.8146222,
+    "ast_hash": "fa1259e65dd7755e99bb9ecf2aeafb8c",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2270,8 +2270,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface.mts": {
-    "mtime": 1793385602.3110583,
-    "ast_hash": "96f052393fc579ca0119ce95edb1f7fd",
+    "mtime": 1793437809.1483855,
+    "ast_hash": "4cdf49e02b24d0cac1fe6410c1134cb7",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface.test.mts": {
@@ -2290,13 +2290,13 @@
     "semantic_hash": ""
   },
   "tools/device_reprobe.mts": {
-    "mtime": 1793379768.733283,
-    "ast_hash": "109753191b15f1b47a50d58131f46a33",
+    "mtime": 1793437770.3776844,
+    "ast_hash": "272c99d615eb1e2f1e827b804ab24d6e",
     "semantic_hash": ""
   },
   "tools/device_reprobe.md": {
-    "mtime": 1793377975.4200308,
-    "ast_hash": "005a95c2374c525c485557c913e700df",
+    "mtime": 1793438003.7289557,
+    "ast_hash": "f4b67061ce6e352b20389d2b8747393b",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {

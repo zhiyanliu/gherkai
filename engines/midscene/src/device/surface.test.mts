@@ -148,6 +148,11 @@ function harness(opts: HarnessOptions = {}) {
     screenshotFails: false,
     pageSourceText: "<hierarchy><node text=\"ok\"/></hierarchy>",
     pageSourceFails: false,
+    // 读地址与读控件树的耗时：按 harness 的时钟推进。真实实现到截止线由中止信号切断请求、调用随之抛出，这里以推进时钟后
+    // 抛出（pageSourceFails / addressFails）模拟。
+    pageSourceDelayMs: 0,
+    addressDelayMs: 0,
+    addressFails: false,
     address: { url: "https://shop.example/cart" } as AddressAttempt,
     async currentContext() { calls.push("appium.currentContext"); return this.context; },
     async switchToNative() {
@@ -159,10 +164,16 @@ function harness(opts: HarnessOptions = {}) {
     async pageSource(signal: AbortSignal) {
       calls.push("appium.pageSource");
       if (signal.aborted) throw new Error("aborted");
+      clock.t += this.pageSourceDelayMs;
       if (this.pageSourceFails) throw new Error("socket hang up");
       return this.pageSourceText;
     },
-    async readWebAddress() { calls.push("appium.readWebAddress"); return this.address; },
+    async readWebAddress() {
+      calls.push("appium.readWebAddress");
+      clock.t += this.addressDelayMs;
+      if (this.addressFails) throw new Error("socket hang up");
+      return this.address;
+    },
     async withWebContext<T>(driver: Browser, fn: () => Promise<T> | T) {
       calls.push(`appium.withWebContext:${driver === guardDriver}`);
       return fn();
@@ -1081,19 +1092,54 @@ test("快照采集失败只标原因、不改判定；采集中发现会话丢�
   assert.deepEqual(r2.failure, { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
 });
 
-test("evidence 采集预算用尽时不再发命令，记 timeout", async () => {
+test("读地址与控件树各有独立的采集预算：读地址用尽它的 15 秒之后，控件树照常采集、不记 timeout（ADR 0051 决策 8）", async () => {
   const h = harness();
   await ready(h);
   await h.surface.preStep();
-  await h.surface.readAddress({ kind: "ai", status: "failed" });
-  h.clock.t += 10_001;
+  h.appiumSession.addressDelayMs = 15_001;
+  h.appiumSession.address = { missing: "timeout" };
+  const address = await h.surface.readAddress({ kind: "ai", status: "failed" });
+  assert.deepEqual(address, { url: null, url_missing: "timeout" });
   h.calls.length = 0;
-  const { snapshot } = await h.surface.snapshot({ kind: "ai", status: "failed" }, { url: "https://a/", url_missing: null });
-  assert.equal(snapshot.controls_missing, "timeout");
-  assert.deepEqual(h.calls, []);
-  await h.surface.preStep();  // 下一个 step 重新起算
-  const next = await h.surface.snapshot({ kind: "ai", status: "failed" }, { url: "https://a/", url_missing: null });
-  assert.equal(next.snapshot.controls_missing, null);
+  const { snapshot, failure } = await h.surface.snapshot({ kind: "ai", status: "failed" }, address);
+  assert.equal(failure, null);
+  assert.deepEqual(h.calls, ["appium.pageSource", "adapter.extractControls"]);
+  assert.equal(snapshot.controls_missing, null);
+  assert.equal(snapshot.controls!.items.length, 1);
+  assert.notEqual(snapshot.page_source_path, null);
+  assert.equal(snapshot.url_missing, "timeout");
+});
+
+test("读地址的预算是 15 秒：超过即记 timeout，15 秒内失败记 error", async () => {
+  const h = harness();
+  await ready(h);
+  h.appiumSession.addressFails = true;
+  for (const [delayMs, missing] of [[14_999, "error"], [15_001, "timeout"]] as const) {
+    await h.surface.preStep();
+    h.appiumSession.addressDelayMs = delayMs;
+    assert.deepEqual(
+      await h.surface.readAddress({ kind: "ai", status: "failed" }), { url: null, url_missing: missing }, `读地址耗时 ${delayMs} 毫秒`,
+    );
+  }
+});
+
+test("控件树的预算是 30 秒：超过即记 timeout，30 秒内失败记 error，读地址的结果都不受影响", async () => {
+  const h = harness();
+  await ready(h);
+  h.appiumSession.pageSourceFails = true;
+  for (const [delayMs, missing] of [[29_999, "error"], [30_001, "timeout"]] as const) {
+    await h.surface.preStep();
+    h.appiumSession.pageSourceDelayMs = 0;
+    const address = await h.surface.readAddress({ kind: "ai", status: "failed" });
+    h.appiumSession.pageSourceDelayMs = delayMs;
+    const { snapshot, failure } = await h.surface.snapshot({ kind: "ai", status: "failed" }, address);
+    assert.equal(failure, null);
+    assert.equal(snapshot.controls, null);
+    assert.equal(snapshot.controls_missing, missing, `控件树耗时 ${delayMs} 毫秒`);
+    assert.equal(snapshot.page_source_path, null);
+    assert.equal(snapshot.url, "https://shop.example/cart");
+    assert.equal(snapshot.url_missing, null);
+  }
 });
 
 test("没有产物落点时不写原始控件树，也不写 device-session.json", async () => {

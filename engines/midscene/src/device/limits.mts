@@ -56,8 +56,11 @@ export const APP_PRESIGN_EXPIRES_S = 3600;
 export const LAUNCH_SAMPLE_COUNT = 3;
 export const LAUNCH_SAMPLE_INTERVAL_MS = 1_000;
 /** 能力探测的短预算：探测实例的单请求超时，网页上下文「可用」须在这段时间内成功执行一条只读命令（ADR 0052 决策 5）。
- *  scenario 前核对的存活探测同样受它约束（ADR 0052 决策 2）。 */
-export const PROBE_TIMEOUT_MS = 5_000;
+ *  scenario 前核对的存活探测同样受它约束（ADR 0052 决策 2）。它在判定路径上，到点即换路线（探测出错，导航改走 DeepLink），
+ *  所以按实测最慢值的数倍取值：真机实测最慢的单条上下文命令是 Android Chrome 切入网页上下文的 3.6 秒（列举上下文与切回原生
+ *  各 3.5 秒），15 秒约为它的四倍；iOS 15.8 与 18.6 的上下文命令都在 1 秒内。iOS 26.3 的切入网页上下文在服务端挂住约 150 秒才返回，
+ *  任何客户端超时都等不到它，到点后按探测出错处理（ADR 0052 决策 6 超时分层表 ⑪）。真机验收后可调。 */
+export const PROBE_TIMEOUT_MS = 15_000;
 /** 设备目标上会话预热的导航尝试次数，与桌面预热共用同一常量（3 次，实施期校准、真机验收后可调；ADR 0052 决策 6）。
  *  设备预热的导航上界是执行期单请求超时，不套用桌面预热的 30 秒导航超时。 */
 export const DEVICE_WARMUP_ATTEMPTS = WARMUP_ATTEMPTS;
@@ -106,9 +109,15 @@ export const DEEP_LINK_FOREGROUND_POLL_ATTEMPTS = LAUNCH_SAMPLE_COUNT;
 export const DEEP_LINK_FOREGROUND_POLL_INTERVAL_MS = LAUNCH_SAMPLE_INTERVAL_MS;
 
 // ---- evidence 采集（ADR 0051 决策 8）----
-// 读地址、控件摘要与原始控件树共用一段独立短预算，不占 step 的执行预算。实施期校准、真机验收后可调。
+// 读地址与控件树各有一段独立的采集预算，各自计时、互不挤占，都不占 step 的执行预算，按步累加计入 job 墙钟。采集只影响证据的
+// 完整程度、不改判定，到点只把对应字段置空并记 timeout，所以取实测最慢值的 1.5 到 3 倍。真机验收后可调。
 
-export const SNAPSHOT_CAPTURE_BUDGET_MS = 10_000;
+/** 读地址的预算：重新定位网页上下文、切入、读地址与切回原生共用这一段。Android Chrome 上一次读地址要三次上下文往返，实测超过
+ *  10 秒（单次切换 3.5 到 3.6 秒）；iOS 15.8 为 1.1 秒，iOS 18.6 在 1 秒内。 */
+export const ADDRESS_CAPTURE_BUDGET_MS = 15_000;
+/** 控件树的预算：读原始控件树（控件摘要由它抽取，写盘的也是这一份）。实测最慢的是 iPhone 7（iOS 15.8）的 19 秒，30 秒约为它的
+ *  1.5 倍；iOS 26.3 为 3.6 秒，Android 14 为 0.8 秒。 */
+export const CONTROLS_CAPTURE_BUDGET_MS = 30_000;
 /** 控件摘要截断条数；截断时 controls.truncated 为 true。 */
 export const CONTROLS_MAX_ITEMS = 200;
 /** 原始控件树截断字节数（1 MiB）；截断时 page_source_truncated 为 true。 */

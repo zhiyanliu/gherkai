@@ -85,7 +85,8 @@ export async function activeAppInfo(driver: Browser): Promise<{ bundleId: string
 // ---- 控件摘要 ----
 
 /** 从 XCUITest 的原始控件树抽取控件摘要：类型取 type（没有时取标签名）、文本取 label（为空时取 value）、无障碍标识取 name；
- *  XCUITest 的控件树没有独立的 id 属性，id 恒为 null。不在屏幕上（visible 为 false）的元素与没有文本、无障碍标识的容器不计入。 */
+ *  XCUITest 的控件树没有独立的 id 属性，id 恒为 null。不在屏幕上（visible 为 false）的元素与没有文本、无障碍标识的容器不计入。
+ *  真机控件树的根是 AppiumAUT，它不带属性，按上一条不计入；XCUIElementTypeApplication 是它的第一个子节点，也是第一个控件。 */
 export function extractIosControls(pageSource: string): Controls {
   const items: ControlItem[] = [];
   for (const el of scanXmlElements(pageSource)) {

@@ -64,8 +64,8 @@ import {
   type AppObjectLocation, type AppObjectStore, type AppTimingDeps,
 } from "./app.mjs";
 import {
-  CONTROLS_MAX_ITEMS, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES, REPLACE_DEVICE_MIN_REMAINING_MS, SNAPSHOT_CAPTURE_BUDGET_MS,
-  replanningCycleLimit,
+  ADDRESS_CAPTURE_BUDGET_MS, CONTROLS_CAPTURE_BUDGET_MS, CONTROLS_MAX_ITEMS, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES,
+  REPLACE_DEVICE_MIN_REMAINING_MS, replanningCycleLimit,
 } from "./limits.mjs";
 import {
   DEVICE_SESSION_REPORT_KIND, sessionEventSink, writeDeviceSessionFile,
@@ -547,8 +547,6 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   /** 本 scenario 发生过结果未知（守卫的标志只在 step 内有效，这里另记一份 scenario 级的，ADR 0052 决策 2）。 */
   private resultUnknownInScenario = false;
   private currentAct: AbortController | null = null;
-  /** 本 step evidence 采集的截止时刻：读地址、控件摘要与原始控件树共用一段独立短预算（ADR 0051 决策 8）。 */
-  private captureDeadline: number | null = null;
   private pageSourceSeq = 0;
   private releasing: Promise<ReleaseOutcome> | null = null;
   private finalizing = false;
@@ -801,7 +799,6 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
 
   async preStep(): Promise<StepFailure | null> {
     this.budget?.stop();
-    this.captureDeadline = null;
     if (this.lost) return { ...this.lost };
     if (this.ageReached()) return { ...this.markLost() };
     if (this.ready === null) return { errorType: "engine_error", message: PRE_STEP_FAILED_MESSAGE };
@@ -901,13 +898,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     if (!(step.kind === "ai" || step.status === "failed" || step.status === "error")) return null;
     const fixed = this.addressWithoutReading();
     if (fixed !== null) return fixed;
-    const signal = this.captureSignal();
-    if (signal.aborted) return { url: null, url_missing: "timeout" };
+    const budget = this.captureBudget(ADDRESS_CAPTURE_BUDGET_MS);
     try {
-      const got = await this.ready!.appium.readWebAddress(signal);
+      const got = await this.ready!.appium.readWebAddress(budget.signal);
       return "url" in got ? { url: got.url, url_missing: null } : { url: null, url_missing: got.missing };
     } catch {
-      return { url: null, url_missing: signal.aborted ? "timeout" : "error" };
+      return { url: null, url_missing: budget.expired() ? "timeout" : "error" };
     }
   }
 
@@ -921,17 +917,13 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     snapshot.page_source_truncated = false;
     const ready = this.ready;
     if (this.lost || ready === null) return { snapshot, failure: null };
-    const signal = this.captureSignal();
-    if (signal.aborted) {
-      snapshot.controls_missing = "timeout";
-      return { snapshot, failure: null };
-    }
+    const budget = this.captureBudget(CONTROLS_CAPTURE_BUDGET_MS);
     const { appium, adapter } = ready;
     let source: string;
     try {
-      source = await appium.pageSource(signal);
+      source = await appium.pageSource(budget.signal);
     } catch (e) {
-      snapshot.controls_missing = signal.aborted ? "timeout" : "error";
+      snapshot.controls_missing = budget.expired() ? "timeout" : "error";
       return { snapshot, failure: (await this.sessionEnded(e)) ? { ...this.markLost() } : null };
     }
     try {
@@ -956,10 +948,13 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return null;
   }
 
-  private captureSignal(): AbortSignal {
-    if (this.captureDeadline === null) this.captureDeadline = this.cfg.now() + SNAPSHOT_CAPTURE_BUDGET_MS;
-    const left = this.captureDeadline - this.cfg.now();
-    return left <= 0 ? AbortSignal.abort() : AbortSignal.timeout(left);
+  /** evidence 的一段采集预算（ADR 0051 决策 8）：读地址与控件树各取一段、各自从调用时起算，一方用尽不挤占另一方。signal 到点
+   *  中止在途的请求；采集失败时以 expired 判原因：预算已到点记 timeout，否则记 error。截止时刻按接缝的时钟（cfg.now）计，与
+   *  会话年龄同一个时间来源。 */
+  private captureBudget(budgetMs: number): { signal: AbortSignal; expired(): boolean } {
+    const deadline = this.cfg.now() + budgetMs;
+    const signal = AbortSignal.timeout(budgetMs);
+    return { signal, expired: () => signal.aborted || this.cfg.now() >= deadline };
   }
 
   private capControls(controls: Controls): Controls {

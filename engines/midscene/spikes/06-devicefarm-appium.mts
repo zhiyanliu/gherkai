@@ -13,9 +13,12 @@
 //     cap：150 分钟会话上限——每分钟发一条命令并查会话状态，记录命令开始失败的时刻与最终状态（SPIKE_CAP_MAX_MIN 缺省 165）
 //     deeplink：应用目标上 mobile: deepLink 能否把被测应用带到某一页（Android 维基百科客户端需 DF_APP_ARN；iOS 用系统「地图」）
 //   DF_APP_URL（app 场景：APK 的 https 地址）      DF_APP_ARN（已上传过的 Device Farm 应用 ARN，给了就不再上传）
-//   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
+//   DF_APP_PACKAGE（缺省 org.wikipedia）          DF_APP_INSTALL=devicefarm|appium|mobile（缺省 devicefarm：上传后 InstallToRemoteAccessSession；
 //                                                 appium：用 appium:app 让 Appium 主机自己下载安装——公网 https 与 S3 预签名地址实测都能装；
-//                                                 不带 appPackage / appActivity 时会卡在启动，要配 appium:autoLaunch false 或给齐包名与活动名）
+//                                                 不带 appPackage / appActivity 时会卡在启动，要配 appium:autoLaunch false 或给齐包名与活动名；
+//                                                 mobile：能力集与 devicefarm 相同（不带 appium:app），会话建好后经 mobile: installApp 让 Appium 服务端
+//                                                 按 DF_APP_URL 自己下载安装，对照交互端点对 newSession 里 appium:app 的截获与改写；参数是 Android
+//                                                 UiAutomator2 的写法（appPath / timeout），结果记在 app_install_mobile）
 //   SPIKE_SKIP_AI=1（只量会话与命令往返，不调模型）
 // 结果落 $MIDSCENE_RUN_DIR/spike06-results.json；无论成败最后都停会话（设备按分钟计费）。
 import * as fs from "node:fs";
@@ -168,6 +171,10 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
     const r = await df.send(new InstallToRemoteAccessSessionCommand({ remoteAccessSessionArn: sessionArn, appArn }));
     results.app_install_response = { status: r.appUpload?.status, message: r.appUpload?.message };
   });
+  await untilAppPresent(driver);
+}
+// 安装调用返回后确认被测应用确实落到设备上：每 5 秒查一次 isAppInstalled，至多 5 分钟
+async function untilAppPresent(driver: Driver): Promise<void> {
   await timed("app_install_until_present", async () => {
     const t0 = performance.now();
     for (;;) {
@@ -176,6 +183,24 @@ async function installApp(driver: Driver, sessionArn: string, appArn: string): P
       await sleep(5_000);
     }
   });
+}
+// ---- 应用安装（会话内经 Appium 安装的对照路径，DF_APP_INSTALL=mobile）----
+// newSession 里带 appium:app 时，交互端点在 Appium 之前截获地址、自行下载并把能力改写成主机本地路径，Appium 随即报该文件不存在。
+// 这条路径在会话建好之后才把地址交给 Appium：UiAutomator2 的 mobile: installApp 接受 https 地址，由服务端下载并安装，
+// 看它是否绕开端点的改写。失败时记下错误原文（预签名地址的查询串略去）并中止，后续启动与采样都依赖安装成功。
+const INSTALL_MOBILE_TIMEOUT_MS = 240_000;
+async function installAppViaAppium(driver: Driver): Promise<void> {
+  const t0 = performance.now();
+  try {
+    await timed("app_install_mobile_call", () => driver.execute("mobile: installApp", { appPath: APP_URL, timeout: INSTALL_MOBILE_TIMEOUT_MS }));
+    results.app_install_mobile = { ok: true, ms: ms(t0) };
+    log(`mobile: installApp 成功，用时 ${ms(t0)} ms`);
+  } catch (e) {
+    const error = errText(e).replace(/\?X-Amz[^ ]*/g, "?<签名已略>");
+    results.app_install_mobile = { ok: false, ms: ms(t0), error };
+    throw new Error(`mobile: installApp 失败（${ms(t0)} ms）：${error}`);
+  }
+  await untilAppPresent(driver);
 }
 
 // ---- WebDriver 连接与命令往返 ----
@@ -195,7 +220,8 @@ function caps(): Record<string, unknown> {
   }
   if (SCENARIO === "web" || SCENARIO === "egress" || SCENARIO === "cap") return { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common };
   if (SCENARIO === "faults") return { platformName: "Android", "appium:automationName": "UiAutomator2", "appium:noReset": true, ...common };
-  // app 场景：Device Farm 路径先连会话（不带应用能力）、再装再启；appium 路径由 Appium 主机按 appium:app 下载安装
+  // app 场景：Device Farm 路径先连会话（不带应用能力）、再装再启；appium 路径由 Appium 主机按 appium:app 下载安装；
+  // mobile 路径的能力集与 Device Farm 路径相同，会话建好后再经 mobile: installApp 安装
   return {
     platformName: "Android", "appium:automationName": "UiAutomator2", "appium:noReset": true,
     ...(APP_INSTALL === "appium" && APP_URL ? { "appium:app": APP_URL, "appium:appPackage": APP_PACKAGE } : {}),
@@ -208,6 +234,9 @@ async function connect(endpoint: string): Promise<Driver> {
     protocol: u.protocol.replace(":", ""), hostname: u.hostname,
     port: u.port ? Number(u.port) : 443, path: u.pathname + u.search,
     logLevel: "warn",
+    // mobile 路径的 installApp 是一条长命令（服务端超时 240 秒），客户端缺省 120 秒就会超时；缺省的 3 次重试又会把安装命令重发，
+    // 混淆耗时与错误原文。客户端超时须在建会话时给定（会话的请求分发器按它设定超时），因此只在这条路径上放宽超时并关掉重试
+    ...(SCENARIO === "app" && APP_INSTALL === "mobile" ? { connectionRetryTimeout: INSTALL_MOBILE_TIMEOUT_MS + 60_000, connectionRetryCount: 0 } : {}),
     capabilities: caps(),
   });
 }
@@ -1233,6 +1262,7 @@ async function main(): Promise<number> {
   }
   log(`项目 ${project.slice(-20)}，平台 ${PLATFORM}，场景 ${SCENARIO}，设备 ${DEVICE_ARN.slice(-12)}，模型 ${MODEL}（${modelFamily()}），Bedrock ${getBaseUrl()}`);
   const appArn = (SCENARIO === "app" && APP_INSTALL === "devicefarm") || SCENARIO === "faults" || (SCENARIO === "deeplink" && !["3", "4"].includes(process.env.DF_DL_ROUND ?? "") && (PLATFORM === "android" || process.env.DF_DL_ROUND === "2")) ? await ensureAppUpload(project) : undefined;
+  if (SCENARIO === "app" && APP_INSTALL === "mobile" && !APP_URL) throw new Error("DF_APP_INSTALL=mobile 需要 DF_APP_URL（APK 的 https 地址）");
   const session = await startSession(project);
   let driver: Driver | undefined;
   let rc = 0;
@@ -1256,6 +1286,7 @@ async function main(): Promise<number> {
 
     if (SCENARIO === "app") {
       if (appArn) await installApp(driver, session.arn, appArn);
+      else if (APP_INSTALL === "mobile") await installAppViaAppium(driver);
       await timed("app_activate", () => driver!.activateApp(APP_PACKAGE));
       await sleep(3000);
       if (PLATFORM === "android") {

@@ -491,7 +491,8 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
 
   // ---- 终结块也用的调用 ----
 
-  /** 按名核对待核尝试（ADR 0051 决策 3）。以进入时的待核名字为准逐页列举项目里的会话，扫到分页结束：会话名与其中某个名字整名
+  /** 按名核对待核尝试（ADR 0051 决策 3）。进入时没有待核名字即返回、不列举（没有名字可以命中，列举只多花调用与时间），
+   *  不依赖调用方先判断待核集。以进入时的待核名字为准逐页列举项目里的会话，扫到分页结束：会话名与其中某个名字整名
    *  相等即登记进待清理集并发 session_opened(discovered)，同名的每个 ARN 都登记，这个名字的待核随之消除——命中是正面证据，不论
    *  之后的页是否扫完。全部名字都已命中也继续翻页，后页同名的 ARN 同样登记：一次尝试至多建立一个会话没有幂等令牌担保，漏掉的
    *  同名会话没人停止、没有 session_closed，却会报释放成功。没命中的名字没有任何结论：列举为空不构成排除，列举出错或到截止线即停
@@ -503,6 +504,7 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
    *  不论列举在途还是在下一次列举之前（已登记的会话由终结释放）。 */
   async reconcile(bound: CallBound, onOpened: ((tracked: TrackedSession) => void) | null = null): Promise<void> {
     const wanted: ReadonlySet<string> = new Set(this.registry.pending.keys());
+    if (wanted.size === 0) return;
     let nextToken: string | undefined;
     for (;;) {
       // 每次列举之前先核对：终结核对已结束即返回（之后的页不再登记），获取期的外层信号已中止即抛出它的中止原因（与列举中途被中止

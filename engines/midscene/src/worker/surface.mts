@@ -285,9 +285,9 @@ export interface TargetSurface {
    *  按暂定判定不产 evidence、没有读；否则返回读到的地址或缺失原因。读取失败只置 url 为 null、记原因，不改判定，不抛出。
    *  - 桌面：AI step 取 page.url()（取不到为 null），其余 step 返回 null；
    *  - 设备：AI step 一律读，确定性与导航 step 只在暂定判定为 failed / error 时读；应用目标直接给 not_applicable、能力结论为
-   *    「不提供」直接给 no_web_context，都不发命令，绝不调 url；结论为「提供」时按决策 5 重新定位网页上下文后读，受 evidence
-   *    采集的 10 秒独立短预算约束（ADR 0051 决策 8），多候选、零候选与读取出错记 error，超时记 timeout，能力结论不翻转。
-   *    经生命周期通道执行。
+   *    「不提供」直接给 no_web_context，都不发命令，绝不调 url；结论为「提供」时按决策 5 重新定位网页上下文后读，受读地址的
+   *    15 秒采集预算约束（与控件树的预算各自计时，ADR 0051 决策 8），多候选、零候选与读取出错记 error，超时记 timeout，能力结论
+   *    不翻转。经生命周期通道执行。
    *  调用：只在本 run 产 evidence 时调用。 */
   readAddress(step: StepFacts): Promise<AddressReading | null>;
 
@@ -303,9 +303,10 @@ export interface TargetSurface {
    *  返回交给 evidence 的快照（字段约定见 Snapshot）；best-effort，采集失败置空并标原因、不改判定，唯一例外是采集中发现会话丢失，
    *  此时 failure 为 session_lost，run-scope 按会话丢失序列收尾（ADR 0051 决策 4、5）。不抛出。
    *  - 桌面：只把 address 的 url 放进快照，不采集、failure 恒为 null；
-   *  - 设备：快照带 step_kind；最终判定为 failed / error 时在原生上下文采控件摘要与原始控件树（与读地址共用 10 秒独立短预算，
-   *    控件摘要截断到 200 条、原始控件树截断到 1 MiB，写盘经脱敏出口，ADR 0051 决策 8、11）；address 为 null（第 4 步没读）而
-   *    本 step 要产 evidence 时，url 为 null、url_missing 为 error，不补读（第 5 步把判定改成 error 的情形）。经生命周期通道执行。
+   *  - 设备：快照带 step_kind；最终判定为 failed / error 时在原生上下文采控件摘要与原始控件树（受控件树的 30 秒采集预算约束，
+   *    与读地址的预算各自计时，读地址用尽它的预算不影响这里；控件摘要截断到 200 条、原始控件树截断到 1 MiB，写盘经脱敏出口，
+   *    ADR 0051 决策 8、11）；address 为 null（第 4 步没读）而本 step 要产 evidence 时，url 为 null、url_missing 为 error，
+   *    不补读（第 5 步把判定改成 error 的情形）。经生命周期通道执行。
    *  调用：只在本 run 产 evidence 时调用。 */
   snapshot(step: StepFacts, address: AddressReading | null): Promise<SnapshotResult>;
 

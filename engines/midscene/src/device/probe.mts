@@ -7,7 +7,8 @@
 //   1. 回到原生上下文（网页目标的会话建好时处在网页上下文，后面的控件树读取要在原生上下文）；失败先查会话状态，丢失即 session_lost；
 //   2. Appium 版本：探测实例读 /status，只记诊断，读不到为 null；
 //   3. 坐标比例（只 iOS；Android 恒为 1）：经探测实例读设备屏幕信息的 scale。读不到时回退为截图长边除以窗口长边、取整，窗口长边取
-//      原生控件树根节点 XCUIElementTypeApplication 的宽与高中的较大者；不取 getWindowRect（iOS 26.3 上两种上下文都报错，被拒方案）。
+//      原生控件树里 XCUIElementTypeApplication 节点的宽与高中的较大者（真机控件树的根是不带属性的 AppiumAUT，这个节点是它的第一个
+//      子节点）；不取 getWindowRect（iOS 26.3 上两种上下文都报错，被拒方案）。
 //      回退也失败是执行前失败：先查会话状态，丢失归 session_lost，否则 engine_error「无法确定坐标比例」——猜错的比例会让每个手势
 //      都落空，所以没有缺省值；
 //   4. 网页上下文（只网页目标）：见下；
@@ -225,7 +226,8 @@ export function pngLongEdge(base64: unknown): number | null {
 
 const APPLICATION_TAG = /<XCUIElementTypeApplication\b[^>]*>/;
 
-/** 原生控件树根节点（XCUIElementTypeApplication）的宽与高中的较大者（单位为点）；找不到根节点或尺寸时为 null。 */
+/** 原生控件树里第一个 XCUIElementTypeApplication 节点的宽与高中的较大者（单位为点）；找不到这个节点或尺寸时为 null。真机控件树的根
+ *  是不带属性的 AppiumAUT，这个节点是它的第一个子节点，所以按标签名找节点，不取根节点。 */
 export function applicationLongEdge(pageSource: unknown): number | null {
   if (typeof pageSource !== "string") return null;
   const tag = APPLICATION_TAG.exec(pageSource)?.[0];

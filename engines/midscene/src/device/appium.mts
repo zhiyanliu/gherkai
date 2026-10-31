@@ -1,7 +1,7 @@
 // Appium 建连与上下文切换（ADR 0052 决策 3 的「Appium 建连与上下文切换」块、决策 5、决策 6；ADR 0051 决策 3、9、11）：实现
 // device/surface.mts 的 AppiumConnector 与 AppiumSession 端口。
 //
-// 三个 WebdriverIO 实例，超时与重试各自显式设定，不依赖 SDK 缺省（ADR 0052 决策 6 超时分层表 ⑤ ⑥ 与探测短超时）：
+// 三个 WebdriverIO 实例，超时与重试各自显式设定，不依赖 SDK 缺省（ADR 0052 决策 6 超时分层表 ⑤ ⑥ ⑪）：
 //   - 建连实例：只为 newSession 而建。单请求超时取 NEW_SESSION_TIMEOUT_FLOOR_MS 与剩余获取预算的较小者（封顶优先），传输层 0 次重试；
 //   - 执行实例：connectionRetryCount 0、单请求超时 EXEC_REQUEST_TIMEOUT_MS，交给命令守卫、获取期的应用启动与生命周期通道；
 //   - 探测实例：单请求超时 PROBE_TIMEOUT_MS、0 次重试，只交给能力探测与 scenario 前的存活截图。
