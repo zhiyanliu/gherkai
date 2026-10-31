@@ -634,7 +634,7 @@ def test_local_run_uploads_each_installer_once_and_fills_app_location(tmp_path, 
     err = capsys.readouterr().err
     assert "已上传到 s3://my-apps/" in err
     # 开场提示按目标说明会建立哪种会话：只有设备 scope 时说远程访问会话、不提云端浏览器
-    assert "开始运行：启动 worker 建立Device Farm 远程访问会话（将产生 AWS 费用，设备按分钟计费）" in err
+    assert "开始运行：启动 worker 建立Device Farm 远程访问会话（将产生 AWS 费用）" in err
     assert "AgentCore 云端浏览器会话" not in err
 
 

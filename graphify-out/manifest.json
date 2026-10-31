@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793461462.7823339,
-    "ast_hash": "41031be61479fabdc83ecc8e4720328c",
+    "mtime": 1793462168.7627661,
+    "ast_hash": "94ceab4829d1f8ca90c4778d7cc43512",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793461742.3931262,
-    "ast_hash": "2c4c0f7ba5e2e8b373cf8c444051c567",
+    "mtime": 1793462210.1663623,
+    "ast_hash": "fbbdd0abdf2e49964c274742e9ad74d5",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793461677.3255577,
-    "ast_hash": "d4806126a9290926604ef7371b12b02f",
+    "mtime": 1793462169.692215,
+    "ast_hash": "490da56c51972632c0e0565bb9fd5272",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2000,8 +2000,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_project_config.py": {
-    "mtime": 1793461463.012883,
-    "ast_hash": "0f27d68baa0a3c3886ebc01d84e6d7a5",
+    "mtime": 1793462168.9612913,
+    "ast_hash": "813ff8dcbda85c945d526cddf3cae15a",
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
