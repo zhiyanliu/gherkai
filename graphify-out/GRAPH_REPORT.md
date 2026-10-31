@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-10-31)
 
 ## Corpus Check
-- 439 files · ~762,067 words
+- 439 files · ~762,073 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `cbdce85d`
+- Built from commit: `fb87140c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1924,7 +1924,7 @@ Nodes (3): evidenceHook(), fakeUploader(), scopeIo()
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1212 isolated node(s):** `APP_OBJECT_MISSING_MESSAGE`, `APP_OBJECT_FORBIDDEN_MESSAGE`, `APP_LAUNCH_SELF_EXIT_MESSAGE`, `APP_RESTART_SELF_EXIT_MESSAGE`, `AppObjectLocation` (+1207 more)
+- **1212 isolated node(s):** `CommandGuardArgs`, `Derivation`, `ReadOnlyMobileCommands`, `AppiumInterfaceConfig`, `DeviceAgentArgs` (+1207 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **262 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

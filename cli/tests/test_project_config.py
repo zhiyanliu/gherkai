@@ -659,10 +659,11 @@ def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, mon
 
     monkeypatch.setattr(app_upload, "ensure_app_object", ensure)
     feature = APP_FEATURE_TWO_SCOPES.replace("@scope:b @device:android @app:wiki", "@scope:b @device:android @app:wiki2")
-    assert m.main(["run", str(_feature(tmp_path, feature)), "--report-dir", str(tmp_path / "r")]) == 0
+    # 区域显式给出：提示比较的是解析出的区域配置，不让宿主的 AWS_REGION 决定用例结果
+    assert m.main(["run", str(_feature(tmp_path, feature)), "--region", "us-east-1", "--report-dir", str(tmp_path / "r")]) == 0
     assert calls == ["app.apk", "app2.apk"]
     err = capsys.readouterr().err
-    assert "注意：应用桶 my-apps 在 eu-west-1，当前区域配置为 " in err
+    assert "注意：应用桶 my-apps 在 eu-west-1，当前区域配置为 us-east-1" in err
     assert err.count("注意：应用桶") == 1   # 两个文件同一个桶：只提示一次
 
 

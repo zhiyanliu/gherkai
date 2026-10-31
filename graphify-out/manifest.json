@@ -2000,8 +2000,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_project_config.py": {
-    "mtime": 1793457661.0894399,
-    "ast_hash": "e30fbea872a851af366bc9e3dcaf42fb",
+    "mtime": 1793458883.4402316,
+    "ast_hash": "7050bc607ff716cea34d78e1a7650c9a",
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
@@ -2015,8 +2015,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/app_upload.py": {
-    "mtime": 1793458365.3523772,
-    "ast_hash": "5bf038b6a0140ae6f9114aa3b6e6bd9b",
+    "mtime": 1793458883.290145,
+    "ast_hash": "230b1009dcaec037fa98ba0f12f8ac9e",
     "semantic_hash": ""
   },
   "runtime/tests/test_app_upload.py": {
