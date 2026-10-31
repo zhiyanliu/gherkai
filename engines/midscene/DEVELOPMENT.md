@@ -156,7 +156,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 刚建好、尚未导航的 Safari / Chrome 会话是否已有网页上下文候选 | iOS 两代与 Android 各建一次网页目标会话，看探测时的候选数 | 网页上下文本可用的设备被判成「不提供」时，探测改为先经探测实例导航预热地址、再列上下文，回写 ADR 0052 决策 5 |
 | 没有 Swipe 动作时模型能否用 Scroll 完成横向翻页 | 应用目标上写一条横向翻页（引导页、轮播）的 AI step | 这一项只在本行确认，不另做单独的真机 spike；不能完成时改为注册 Swipe、原语由驱动适配器的滑动命令实现，回写 ADR 0052 决策 7 |
 | Android 应用目标不带应用标识能力能否成功安装并由 worker 启动 | Android 应用目标建连（能力集包含 `appium:app`、`appium:autoLaunch: false` 与 `appium:noReset: true`，不带 `appium:appPackage` / `appium:appActivity`）、安装、`activateApp` 并采样 | 带 `appium:appPackage` 时 Device Farm 的端点跳过安装包下载，移除后安装成功且不需要 `appActivity`；再有变化回写 ADR 0052 决策 3 与 ADR 0051 决策 9 |
-| 应用桶与 worker 的运行区域不同 | 把 `AWS_REGION` 设为与应用桶不同的区域，执行一次应用目标 | 存在性检查解析出桶的区域、预签名按它签、安装成功；worker 日志恰一行提示区域不同（ADR 0051 决策 9） |
+| 应用桶与 worker 的运行区域不同 | 把 `AWS_REGION` 设为与应用桶不同的区域，执行一次应用目标 | 存在性检查解析出桶的区域、按桶所在区域生成预签名地址、安装成功；worker 日志恰一行提示区域不同（ADR 0051 决策 9） |
 | 输入后收起键盘 | 两平台的应用目标与网页目标各写一条要求输入后收起键盘的 AI step；另在键盘未显示时触发一次收起 | 键盘已显示时两平台都能收起，iOS 网页目标在原生上下文发出的命令同样能收起 Safari 的键盘；Android 上 ESC 无效时驱动补发的返回键没有把 Chrome 或被测应用带回上一页；iOS 键盘上没有标识或标签恰为 `done` 的键时能否收起；键盘未显示时记下驱动是否报错与耗时，报错时 worker 日志恰记一行、判定不变；结论回写 ADR 0052 决策 4、7 |
 | 会话预热的三个失败分支 | 设备网页目标经本机应用隧道，分别让边缘节点拒收 cookie、让校验返回 401、让预热请求失败 | 前两种归 `precheck_failed`，请求失败在重试耗尽后归 `engine_error`，都不归 `network_error`（ADR 0051 决策 13） |
 
