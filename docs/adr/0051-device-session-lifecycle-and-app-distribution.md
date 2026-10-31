@@ -175,9 +175,9 @@
 
 | 项 | 数据 | 支撑的决策 |
 |---|---|---|
-| 创建到 RUNNING | Android 51 到 92 秒；iOS 61 到 82 秒 | 1、2 |
+| 创建到 RUNNING | Android 51 到 92 秒；iOS 61 到 114 秒 | 1、2 |
 | Appium 建连 | Android 13 到 26 秒；新 iPhone 5 到 17 秒，老 iPhone 65 秒 | 1、2 |
-| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；主动停止时服务商回报的设备分钟算到 COMPLETED | 1、5、7 |
+| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；主动停止时服务商回报的设备分钟算到 COMPLETED。会话的 `deviceMinutes` 分 total 与 metered：计费看 metered，与 worker 记的占用时长相符（三次 CLI 真跑分别 2.55 / 2.83 / 3.29 分钟对 158 / 177 / 202 秒）；total 含服务端拆除的未计费时段，一次 iOS 会话 total 10.45 分钟而 metered 2.55 | 1、5、7 |
 | 上限 | 创建后约 150.4 分钟端点开始拒绝命令、此时 API 仍报 RUNNING，约一分钟后端点报预签名地址失效，再约一分钟到 COMPLETED；计费 150.29 分钟 | 2、4 |
 | 并发 | 同机型连发 6 个请求，前 5 个到 RUNNING，第 6 个进 `PENDING_CONCURRENCY` 排队、Stop 可撤回；一次排队约 6 分钟，STOPPING 中的会话占着槽位 | 2、3、5 |
 | 机型不支持远程访问 | 创建时同步抛错，零设备分钟 | 4 |
@@ -188,6 +188,7 @@
 | Stop 与 Get | 并行 Stop 各约 0.2 秒返回、返回体带 `status: STOPPING`；Get 约 0.2 秒；重复 Stop 报 ArgumentException | 4、5 |
 | 有无 deleteSession 的收尾 | 先 deleteSession 再 Stop 的会话 52 秒到 COMPLETED、计 2.16 分钟；只 Stop 的会话 73 秒到 COMPLETED、计 2.48 分钟；两者都产出录像、Appium 服务端日志、Logcat 与 TCP dump（Android 两会话） | 5、8 |
 | 应用中途被杀 | 模型从截图判出回到桌面，后续断言照常判否，evidence 完整 | 4、8 |
+| 本机后端端到端 | `gherkai run` 在 Pixel 8a（Android 14）与 iPhone 14（iOS 18.6）上各执行一个网页目标与一个应用目标 scope（内建导航、AI 动作与断言、一条故意失败的断言）：四个会话各恰一对 `session_opened(created)` / `session_closed(confirmed)`，无 `release_failed`；AI step 的 evidence 都带地址（应用目标为 null），failed step 另带控件摘要（24 到 106 条）、原始控件树与截图，截图为 jpeg；设备占用 158 到 202 秒，获取期从开始到就绪 74 到 126 秒（创建到 RUNNING 占 50 到 114 秒，Android 网页目标的能力探测 15 秒、iOS 2 到 6 秒）；AI 断言失败归 `assertion_failed`，模型定位坐标越界被 Midscene 拒绝归 `engine_error` | 2、4、8 |
 | 国内应用 | 两款国内消费级应用在同一台公共真机上启动即自退，两款海外应用正常 | 4、14 |
 | S3 安装（预签名地址） | 88 MB APK 经预签名地址在建会话时装上；未签名与 ad-hoc 签名 IPA 都装上并到前台 | 9 |
 | 预签名与区域 | 桶在 us-east-1：按 us-west-2 签的地址 S3 回 301，Device Farm 下载失败、Appium 报「文件不存在」；按 us-east-1 签的地址由 us-west-2 的 Device Farm 主机跨区域下载并装成（Android 与 iOS）。HeadObject 跨区域：Node SDK 收到 301，错误对象的响应头 `x-amz-bucket-region` 给出桶区域，同区域的 200 响应不带这个头；boto3 自动跟随重定向后返回 200：区域端点的客户端收到带区域头的 301，us-east-1 的客户端经全局端点收到带区域头的 307，两种情形下重发的请求都按桶所在区域签名，可由公开的 request-created 事件读出签名区域 | 9 |
