@@ -46,7 +46,7 @@ const appReq = (device: "android" | "ios" = "android"): ConnectRequest =>
 
 // ---- 能力集与会话能力 ----
 
-test("能力集按目标的字段清单：网页目标带 browserName，应用目标带预签名地址、关自动启动与重置，Android 应用另带 appPackage", () => {
+test("能力集按目标的字段清单：网页目标带 browserName，应用目标带预签名地址、关自动启动与重置，两个平台都不带应用标识（appPackage 会让端点跳过下载）", () => {
   const common = { "appium:newCommandTimeout": NEW_COMMAND_TIMEOUT_S };
   assert.deepEqual(newSessionCapabilities(webReq("android")),
     { platformName: "Android", "appium:automationName": "UiAutomator2", browserName: "Chrome", ...common });
@@ -54,7 +54,7 @@ test("能力集按目标的字段清单：网页目标带 browserName，应用�
     { platformName: "iOS", "appium:automationName": "XCUITest", browserName: "Safari", ...common });
   assert.deepEqual(newSessionCapabilities(appReq("android")), {
     platformName: "Android", "appium:automationName": "UiAutomator2", ...common,
-    "appium:app": PRESIGNED, "appium:autoLaunch": false, "appium:noReset": true, "appium:appPackage": "com.example.shop",
+    "appium:app": PRESIGNED, "appium:autoLaunch": false, "appium:noReset": true,
   });
   assert.deepEqual(newSessionCapabilities(appReq("ios")), {
     platformName: "iOS", "appium:automationName": "XCUITest", ...common,

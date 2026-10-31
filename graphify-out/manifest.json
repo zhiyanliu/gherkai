@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793392273.3198023,
-    "ast_hash": "1b9813fed39578754a5b37872c8f0855",
+    "mtime": 1793445332.1222491,
+    "ast_hash": "3b827c487bc80953fb78a84f1d26f942",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1860,8 +1860,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/spikes/06-devicefarm-appium.mts": {
-    "mtime": 1793437944.3203607,
-    "ast_hash": "5bab4650eca6c2795102ca811082c196",
+    "mtime": 1793445332.7889717,
+    "ast_hash": "62c6c7587f6bd339ef7274fb0127f71f",
     "semantic_hash": ""
   },
   "docs/internals/midscene-bedrock-sigv4-signing.md": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793438293.8611646,
-    "ast_hash": "41310c1131119d1cf765937a4dc0d86d",
+    "mtime": 1793445281.7128758,
+    "ast_hash": "819727478f6537b75e753ef7c54e1ef4",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793441224.8492515,
-    "ast_hash": "64dd86576b0edf122055a72091be65cb",
+    "mtime": 1793445216.5426977,
+    "ast_hash": "4128cb45cad11b46f6cf6e2f78918ea5",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793439588.5627446,
-    "ast_hash": "a9de09974f4824645cddfdab36610138",
+    "mtime": 1793445404.9501882,
+    "ast_hash": "4f705fffcc55afb84b1a6dbbe4e1ff59",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2130,13 +2130,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.mts": {
-    "mtime": 1793437974.6801775,
-    "ast_hash": "d3ffda00926d7f4470a3c143f2984211",
+    "mtime": 1793445025.038559,
+    "ast_hash": "229d333654afc8ed7dcbe2698c5bdaef",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.test.mts": {
-    "mtime": 1793437696.8148208,
-    "ast_hash": "c87ff3c97d163e3da60cd5d7d0233913",
+    "mtime": 1793445025.2412024,
+    "ast_hash": "83e2b9afa4081ad2002422adb20b7f1f",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/device-session.mts": {

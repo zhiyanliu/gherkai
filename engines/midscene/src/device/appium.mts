@@ -69,7 +69,10 @@ const BROWSER_NAMES: Record<Device, string> = { android: "Chrome", ios: "Safari"
 
 /** newSession 的能力集（ADR 0052 决策 3）。两种目标都带平台名、自动化驱动名与 appium:newCommandTimeout（超时分层表 ⑧）；网页目标带
  *  browserName（iOS 不带它就没有网页上下文）；应用目标带预签名的安装包地址，关掉自动启动与重置（启动由 worker 显式 activateApp
- *  并采样，ADR 0051 决策 9），Android 另带 appium:appPackage 让驱动识别被测应用。应用目标缺地址或应用标识时抛出（接缝保证给齐）。 */
+ *  并采样，ADR 0051 决策 9）。应用标识不进能力集：Device Farm 的交互端点把 appium:appPackage / appium:bundleId 当作「用已安装
+ *  应用」路线的信号，与 appium:app 同发时跳过安装包的下载、却仍把 appium:app 改写成主机本地路径，驱动随即报文件不存在
+ *  （Android 真机实测，ADR 0051 决策 9）；驱动从安装包本身读包名或 bundle id，worker 启停应用用的标识另走 app 模块的命令参数。
+ *  应用目标缺地址或应用标识时抛出（接缝保证给齐；标识虽不进能力集，但建会话之后的启动采样立刻要用）。 */
 export function newSessionCapabilities(
   req: Pick<ConnectRequest, "device" | "uiKind" | "appId" | "appUrl">,
 ): Record<string, unknown> {
@@ -86,7 +89,6 @@ export function newSessionCapabilities(
   caps["appium:app"] = req.appUrl;
   caps["appium:autoLaunch"] = false;
   caps["appium:noReset"] = true;
-  if (req.device === "android") caps["appium:appPackage"] = req.appId;
   return caps;
 }
 
