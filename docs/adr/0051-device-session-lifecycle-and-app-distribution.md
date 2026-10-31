@@ -114,7 +114,7 @@
 
 ### 9. 应用分发：S3 单一通路
 
-- **做什么**：CLI 把 `[apps]` 里的本地文件按内容哈希放进应用前缀 `apps/<sha256>/<原文件名>`（云端后端放现有产物桶，本机后端放配置的应用桶，[0053](./0053-project-config-file.md)）；Job 的应用条目带完整 S3 位置（桶、键、内容哈希）与包名或 bundle id（[0048](./0048-test-targets-device-and-ui-kind.md)）。worker 在建会话前做存在性检查（task role 对应用前缀有限定 `s3:prefix` 的 `s3:ListBucket`，使缺失返回 404）：404 记 `precheck_failed`「安装包已不在存储桶里，请重新提交」，403 记 `precheck_failed` 并说明是权限问题；再在 newSession 前对该键预签名（短有效期，只需覆盖下载，取 3600 秒），交给 `appium:app`，配 `appium:autoLaunch: false`，建好后显式 `activateApp` 并采样应用状态（采样 3 次、间隔 1 秒，任一次回到「未运行」即判启动即自退）。预签名有效期与采样次数、间隔是实施期校准值，真机验收后可调。包名或 bundle id 必须显式给出，不让 Appium 猜启动活动。
+- **做什么**：CLI 把 `[apps]` 里的本地文件按内容哈希放进应用前缀 `apps/<sha256>/<原文件名>`（云端后端放现有产物桶，本机后端放配置的应用桶，[0053](./0053-project-config-file.md)）；Job 的应用条目带完整 S3 位置（桶、键、内容哈希）与包名或 bundle id（[0048](./0048-test-targets-device-and-ui-kind.md)）。worker 在建会话前做存在性检查（task role 对应用前缀有限定 `s3:prefix` 的 `s3:ListBucket`，使缺失返回 404）：404 记 `precheck_failed`「安装包已不在存储桶里，请重新提交」，403 记 `precheck_failed` 并说明是权限问题；再在 newSession 前对该键预签名（短有效期，只需覆盖下载，取 3600 秒），交给 `appium:app`，配 `appium:autoLaunch: false`，**不带** `appium:appPackage` / `appium:appActivity` / `appium:bundleId`，建好后显式 `activateApp` 并采样应用状态（采样 3 次、间隔 1 秒，任一次回到「未运行」即判启动即自退）。预签名有效期与采样次数、间隔是实施期校准值，真机验收后可调。包名或 bundle id 必须显式给出，但只作 worker 启停与采样命令的参数、不进能力集：Device Farm 的交互端点把这些能力当作「用已安装应用」路线的信号，与 `appium:app` 同发时跳过安装包下载、却仍把 `appium:app` 改写成主机本地路径，驱动随即报文件不存在（Android 真机实测，见实测依据「应用标识能力与下载」行；驱动从安装包本身读出包名或 bundle id）。
 - **签名**：iOS 签名由 Device Farm 在这条安装路径上重做；未签名、ad-hoc 签名、profile 已过期的 IPA 都能装并启动到前台。iOS 应用须是使用方自带的开发版 IPA。
 - **保留承诺（云端后端）**：对象带标签 `gherkai=app`，产物桶按该标签过期 E = 14 天；已提交 run 引用的对象自提交起至少保留 R = 7 天。CLI 复用时按内容哈希 HeadObject：不存在就上传（大包分段上传、带标签）；存在且年龄不超过 E − R 直接复用；超过就同键 CopyObject 刷新（`MetadataDirective=REPLACE` 回写元数据、`TaggingDirective=REPLACE` 回写标签），刷新失败重传，再失败提交失败、不复用快过期的对象。实施期在真实产物桶上核过标签与同键刷新（见实测依据「应用对象的标签与刷新」行）：S3 生命周期的过期按对象的创建时刻（即 `LastModified`）计算，同键覆盖即新对象，复用窗口 E 减 R 的推导因此成立。本机后端的应用桶归使用方所有，gherkai 不打标签、不刷新、不承诺；SSE-KMS 桶需对应 KMS 权限，写进支持边界。
 - **约束**：单条 Appium 命令 4 分钟上限，S3 到 Appium 主机一次实测约 6 MB 每秒，由此推出的下载理论上界约 1.4 GB 只是有前提的估算（安装、iOS 重签与建连可能共用同一条命令的时限，跨区域吞吐未测，实测过的最大包 88 MB）；CLI 对超过 500 MB 的包警告不拦截。
@@ -189,6 +189,8 @@
 | 应用中途被杀 | 模型从截图判出回到桌面，后续断言照常判否，evidence 完整 | 4、8 |
 | 国内应用 | 两款国内消费级应用在同一台公共真机上启动即自退，两款海外应用正常 | 4、14 |
 | S3 安装 | 88 MB APK 经预签名地址在建会话时装上；未签名与 ad-hoc 签名 IPA 都装上并到前台 | 9 |
+| 应用标识能力与下载 | Android 上 `appium:app` 与 `appium:appPackage` 同发时，交互端点把 `appium:app` 改写成主机本地路径却不下载，驱动报该文件不存在；预签名、公网与 S3 URI 三种地址、Appium 服务端 2 与 3 表现一致；去掉 `appium:appPackage` 后三种地址都装成（88 MB APK 的 newSession 17 到 19 秒），驱动从 APK 读出包名；iOS 的 `appium:app` 本就不带 bundleId，不受影响。不带应用标识又不关自动启动时，维基百科客户端的启动器 intent 匹配多个活动、自动启动失败 | 9、0052 决策 3 |
+| S3 URI 加执行角色 | 项目挂上信任 `devicefarm.amazonaws.com`、最长会话 9000 秒、对应用前缀有 `s3:GetObject` 的执行角色后，`appium:app` 给 `s3://` 在 Android 与 iOS、Appium 2 与 3 下都装成；桶在 us-east-1、Device Farm 在 us-west-2，跨区域无碍；没有执行角色时 Android 报「Cannot access an S3 URI without an IAM role」。官方文档列出的远程地址形态是公网可访问的 HTTPS 地址与 `s3://` 两种，本机路径与 `mobile: installApp` 不支持（后者实测被端点拒绝） | 9 |
 | 应用对象的标签与刷新 | `upload_file` 带 `Tagging` 的单段（1 KB）与分段（9 MB，超过 boto3 默认 8 MB 分段阈值）上传，对象上都读到 `gherkai=app`；同键 `CopyObject` 以 REPLACE 回写后 `LastModified` 更新且标签保留 | 9 |
 | 安装吞吐 | S3 到 Appium 主机约 6 MB 每秒；单条命令上限 4 分钟 | 9 |
 | 部署侧项目生命周期 | 首次 deploy 在 us-west-2 建立 `{prefix}devices` 并把 ARN 写进 SSM，与按名列举到的唯一同名项目一致；再次 deploy 经 SSM 核对复用、项目数仍为 1、SSM 值不变；`--diff` 零差异、stderr 无提示无警告；两引擎桌面云端 run 在新的 task-def revision 上均 passed | 10 |
