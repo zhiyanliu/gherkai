@@ -74,11 +74,13 @@ AWS_REGION=<桶的区域> node_modules/.bin/tsx ../../tools/device_reprobe.mts \
 capability-matrix.json                         能力矩阵（整份写盘前经脱敏）
 device/device-reprobe-<哈希>/device-session.json 接缝写的 scope 诊断文件，与 worker 产出的同一份格式
 device/device-reprobe-<哈希>/page-source/       接缝界面快照写下的原始控件树（脱敏、超过上限截断）
-screenshot.png                                 打开测试页之后（没给 --url 时即就绪之后）经执行实例截的一张屏
+screenshot.png                                 打开测试页之后（没给 --url 时即就绪之后）经执行实例截的一张屏（原始 PNG，不脱敏）
 page-source.xml                                本工具自己取的那次原始控件树（写盘前经脱敏，不截断）
 ```
 
-`screenshot.png` 与 `page-source.xml` 是测量材料，挑 `--focus` 坐标时对照截图与控件树里输入框的 bounds。它们只在对应步骤成功时写出（见 `lifecycle` 的 `screenshot` 与 `pageSource`），不受接缝预算的约束：接缝的界面快照超出预算时 `page-source/` 下没有文件，这两份照样有。
+`screenshot.png` 与 `page-source.xml` 是测量材料，挑 `--focus` 坐标时对照截图与控件树里输入框的 bounds。两份材料独立采集，各自在采集和写盘成功后生成；写盘失败只记入标准错误，`lifecycle` 里 `screenshot` 与 `pageSource` 两步的 `ok` 只表示采集成功，不代表写盘成功。每次执行开始时先删除输出目录里上一次留下的这两个文件，复用 `--out` 时目录里的测量材料只会来自本次执行。它们不受接缝预算的约束：接缝的界面快照超出预算时 `page-source/` 下没有文件，不影响这两份材料的采集。
+
+脱敏的范围：能力矩阵、控件树材料与本工具在执行中写到标准输出、标准错误的步骤行和日志行经 `redactSecrets` 脱敏；截图保存原始 PNG，不提供像素内容的脱敏（`redactSecrets` 只处理文字），被测页面上显示的内容会原样留在 `screenshot.png` 里。
 
 `capability-matrix.json` 的主要键：
 
