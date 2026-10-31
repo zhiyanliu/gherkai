@@ -171,13 +171,13 @@
 
 ## 实测依据
 
-据 Android（Redmi Note 13 / Android 15）与多代 iPhone（iOS 15.8、iOS 18.6、iOS 26.3）上的会话生命周期、故障演练、应用安装、隧道鉴权、超时语义与会话释放实测；真机均为从美国出网的公共真机；边缘契约在 ngrok 免费层账号上用 curl 与桌面 Chromium（Playwright）核过：
+据 Android（Redmi Note 13 / Android 15、Pixel 8a / Android 14）与多代 iPhone（iOS 15.8、iOS 18.6、iOS 26.3）上的会话生命周期、故障演练、应用安装、隧道鉴权、超时语义与会话释放实测；真机均为从美国出网的公共真机；边缘契约在 ngrok 免费层账号上用 curl 与桌面 Chromium（Playwright）核过：
 
 | 项 | 数据 | 支撑的决策 |
 |---|---|---|
-| 创建到 RUNNING | Android 51 到 92 秒；iOS 61 到 114 秒 | 1、2 |
+| 创建到 RUNNING | Android 50 到 92 秒；iOS 61 到 114 秒 | 1、2 |
 | Appium 建连 | Android 13 到 26 秒；新 iPhone 5 到 17 秒，老 iPhone 65 秒 | 1、2 |
-| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；主动停止时服务商回报的设备分钟算到 COMPLETED。会话的 `deviceMinutes` 分 total 与 metered：计费看 metered，与 worker 记的占用时长相符（三次 CLI 真跑分别 2.55 / 2.83 / 3.29 分钟对 158 / 177 / 202 秒）；total 含服务端拆除的未计费时段，一次 iOS 会话 total 10.45 分钟而 metered 2.55 | 1、5、7 |
+| 停止到 COMPLETED | Android 52 到 85 秒；iOS 超过 2 分钟、最长约 150 秒；`deviceMinutes` 包含 `total`、`metered`、`unmetered` 三个字段。三次可核对的 CLI 会话中，`metered` 分别为 2.55 / 2.83 / 3.29 分钟，与 worker 记录的 158 / 177 / 202 秒占用时长大致相符。一次 iOS 网页会话的 `total` 为 10.45 分钟、`metered` 为 2.55 分钟，观察到未计费的服务端拆除时段；这一样本不能确立拆除阶段的通用计费规则，也不能把 `total` 直接当作按量计费分钟 | 1、5、7 |
 | 上限 | 创建后约 150.4 分钟端点开始拒绝命令、此时 API 仍报 RUNNING，约一分钟后端点报预签名地址失效，再约一分钟到 COMPLETED；计费 150.29 分钟 | 2、4 |
 | 并发 | 同机型连发 6 个请求，前 5 个到 RUNNING，第 6 个进 `PENDING_CONCURRENCY` 排队、Stop 可撤回；一次排队约 6 分钟，STOPPING 中的会话占着槽位 | 2、3、5 |
 | 机型不支持远程访问 | 创建时同步抛错，零设备分钟 | 4 |
@@ -219,7 +219,7 @@
 
 ## 被拒方案（护栏）
 
-- **按 scenario 开会话**：每条 scenario 都付两段固定开销且计费，设备费用成倍上升。
+- **按 scenario 开会话**：每条 scenario 都重复获取与拆除开销，增加准备时间与设备用量；不能据此断言两段开销均按量计费。
 - **scenario 之间隐式复位（网页重新导航、应用 terminate 再 activate）**：反转 [0019](./0019-feature-tags-scope-and-engine.md) 的共享状态契约，同一份 feature 加上 `@device` 后语义静默改变；半隔离（不清持久数据）；准备动作失败没有 step 可挂（决策 1）。
 - **拿到会话 ARN 即发 `scope_started`**：排队、建连、换台都发生在 ARN 之后，[0028](./0028-transient-network-ssl-resilience.md) 的重试边界失效，执行前失败还要再发一次；血缘由 `session_opened` 承载后不再需要它（决策 4）。
 - **把 0028 的重试域拆成「core 以 `scope_started` 为界、worker 以首个 step 为界」两层**：改写红线、引入第二条边界，core 的重试判据悬空。
