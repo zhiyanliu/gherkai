@@ -130,6 +130,18 @@ def device_farm_session_arn_prefix(project_arn: str) -> str:
     return f"arn:aws:devicefarm:{DEVICE_FARM_REGION}:{m.group('account')}:session:{m.group('project_id')}/*"
 
 
+def device_farm_interactive_endpoint_resource(project_arn: str) -> str:
+    """Device Farm 交互端点（远程访问会话的 Appium 入口）做授权检查时用的资源 ARN：`arn:aws:devicefarm:us-west-2:<账户>:project:session`。
+
+    这是服务端固定的字面量，不是哪个项目或会话的 ARN，所以收窄不到项目：真实 task role 经该端点建 Appium 会话时被拒，拒绝消息点名
+    `devicefarm:GetRemoteAccessSession on resource: …:project:session`（2026-11-01 部署后实测）；策略模拟器对这个字面量判 implicitDeny、
+    对真实会话 ARN 判允许，与实测一致。控制面的 Get / Stop 仍按会话前缀与项目 ARN 授权，这一条只给 Get（ADR 0033 task role 权限表）。
+    账户段取自项目 ARN，形态不对抛 `ValueError`。
+    """
+    m = _match_device_farm_project_arn(project_arn)
+    return f"arn:aws:devicefarm:{DEVICE_FARM_REGION}:{m.group('account')}:project:session"
+
+
 def ecr_repo_name(prefix: str, engine: str) -> str:
     """引擎 worker 镜像的 ECR 仓库名 —— **恒等于 `task_def_name(prefix, engine)`**（ADR 0038「tag 命名」节）。
 

@@ -463,6 +463,13 @@ class BackendStack(Stack):
             actions=["devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession"],
             resources=[names.device_farm_session_arn_prefix(project_arn), project_arn],
         ))
+        # 交互端点（Appium 入口）建会话与发命令时按 GetRemoteAccessSession 对固定字面量 `…:project:session` 做授权检查：这是服务端的
+        # 资源形态、收窄不到项目，只授 Get、单独一条（2026-11-01 部署后实测：只授上面两种资源时 newSession 被该端点以 AccessDenied 拒绝，
+        # 拒绝消息点名这个字面量；控制面 API 不受影响）。
+        role.add_to_policy(iam.PolicyStatement(
+            actions=["devicefarm:GetRemoteAccessSession"],
+            resources=[names.device_farm_interactive_endpoint_resource(project_arn)],
+        ))
         # 按会话名列举（worker 核对孤儿会话用）：资源为项目 ARN。
         role.add_to_policy(iam.PolicyStatement(
             actions=["devicefarm:ListRemoteAccessSessions"],

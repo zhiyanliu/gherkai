@@ -21,6 +21,7 @@ from gherkai_deploy_aws import names
     "validate_device_farm_project_arn",
     "device_farm_project_id",
     "device_farm_session_arn_prefix",
+    "device_farm_interactive_endpoint_resource",
     "APP_OBJECT_PREFIX",
     "APP_OBJECT_TAG",
     "APP_OBJECT_EXPIRE_DAYS",

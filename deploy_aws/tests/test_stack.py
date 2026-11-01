@@ -24,6 +24,7 @@ from synth_fixture import ACCOUNT, REGION, STAMP_VERSION, make_stack as _make_st
 DF_PROJECT_ID = "0f1e2d3c-4b5a-4978-8796-a5b4c3d2e1f0"
 DF_PROJECT_ARN = f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:project:{DF_PROJECT_ID}"
 DF_SESSION_PREFIX = f"arn:aws:devicefarm:us-west-2:{ACCOUNT}:session:{DF_PROJECT_ID}/*"
+DF_INTERACTIVE_RESOURCE = names.device_farm_interactive_endpoint_resource(DF_PROJECT_ARN)
 DF_DEVICE_ANY = "arn:aws:devicefarm:us-west-2::device:*"
 DF_CONTEXT = {"device_farm_project": DF_PROJECT_ARN}
 # 「不启用设备支持」的两种 context：键缺省，或命令给的「待建立」占位（ADR 0037 决策 6：两者在 stack 里等价）
@@ -536,9 +537,12 @@ def test_midscene_device_farm_grants_follow_the_permission_table():
     for res in resources_of("devicefarm:CreateRemoteAccessSession"):
         assert res == {DF_PROJECT_ARN, DF_DEVICE_ANY}, res
     # 会话查询与停止：同一条列会话前缀与项目 ARN，缺一种即失败
-    for action in ("devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession"):
-        for res in resources_of(action):
-            assert res == {DF_SESSION_PREFIX, DF_PROJECT_ARN}, f"{action} 须同时授会话前缀与项目 ARN：{res}"
+    for res in resources_of("devicefarm:StopRemoteAccessSession"):
+        assert res == {DF_SESSION_PREFIX, DF_PROJECT_ARN}, f"Stop 须同时授会话前缀与项目 ARN：{res}"
+    # Get 另有一条只授交互端点（Appium 入口）授权检查用的固定字面量 `…:project:session`（部署后实测被拒的那个资源）；Stop 不授它
+    get_res = resources_of("devicefarm:GetRemoteAccessSession")
+    assert sorted(map(sorted, get_res)) == sorted(map(sorted, [{DF_SESSION_PREFIX, DF_PROJECT_ARN}, {DF_INTERACTIVE_RESOURCE}])), get_res
+    assert all(DF_INTERACTIVE_RESOURCE not in res for res in resources_of("devicefarm:StopRemoteAccessSession"))
     # 按名列举会话：项目 ARN
     for res in resources_of("devicefarm:ListRemoteAccessSessions"):
         assert res == {DF_PROJECT_ARN}, res

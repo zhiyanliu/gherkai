@@ -43,6 +43,7 @@ from gherkai_runtime.names import (  # noqa: F401
     WORKER_IMAGE_ROOT_KEY,
     container_name,
     default_name,
+    device_farm_interactive_endpoint_resource,
     device_farm_project_id,
     device_farm_session_arn_prefix,
     ecr_repo_name,

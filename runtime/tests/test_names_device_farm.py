@@ -103,7 +103,7 @@ def test_session_prefix_covers_own_sessions_only():
     assert not fnmatchcase(other_account, pattern)
 
 
-@pytest.mark.parametrize("fn", [names.device_farm_project_id, names.device_farm_session_arn_prefix])
+@pytest.mark.parametrize("fn", [names.device_farm_project_id, names.device_farm_session_arn_prefix, names.device_farm_interactive_endpoint_resource])
 @pytest.mark.parametrize("bad", [
     f"arn:aws:devicefarm:us-east-1:111122223333:project:{PROJECT_ID}",
     "arn:aws:devicefarm:us-west-2:111122223333:project:a/b",
@@ -114,3 +114,11 @@ def test_derivations_refuse_malformed_arn(fn, bad):
     """形态不对时抛 ValueError、不拼出半对的结果：错的会话前缀只会在运行期表现为 AccessDenied。"""
     with pytest.raises(ValueError):
         fn(bad)
+
+
+def test_interactive_endpoint_resource_is_the_fixed_literal_in_the_project_account():
+    """交互端点（Appium 入口）授权检查用的资源是服务端固定字面量 `…:project:session`：账户段取自项目 ARN，项目 id 不进去（收窄不到项目）。"""
+    assert names.device_farm_interactive_endpoint_resource(ARN) == f"arn:aws:devicefarm:us-west-2:{ARN.split(':')[4]}:project:session"
+    other = ARN.replace(ARN.split(":")[4], "444455556666")
+    assert names.device_farm_interactive_endpoint_resource(other) == "arn:aws:devicefarm:us-west-2:444455556666:project:session"
+    assert names.device_farm_interactive_endpoint_resource(ARN) != names.device_farm_session_arn_prefix(ARN)
