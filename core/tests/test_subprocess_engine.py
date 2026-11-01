@@ -534,12 +534,20 @@ def _wait_dead(pid: int, timeout_s: float = 5.0) -> bool:
     return False
 
 
-def _wrapper_engine(mode: str, shell: str, pid_file: str) -> SubprocessEngine:
-    """经 sh 包装起假 worker：真正的 worker 是孙进程（模拟定位链里 uvx / npx 这类包装进程）。`<&0` 把 stdin 明确交给后台的孙进程
-    （POSIX 对非交互 shell 的异步命令缺省把 stdin 指向 /dev/null）。"""
+# 包装进程（模拟定位链里 uvx / npx 这类进程）：用 Python 而不是 sh 起孙进程——POSIX 规定非交互 shell 的异步命令在任何显式重定向之前就把
+# stdin 指向 /dev/null，dash（Linux 的 sh）照此执行，`"$0" "$1" <&0 &` 里的 `<&0` 复制到的已是 /dev/null，孙进程读不到 job（CI 实遇；
+# macOS 的 sh 不这样做，本机测试过了）。Python 的 Popen 缺省继承 stdin、stdout、stderr，事件管道按 EVENTS_FD 显式继承。
+_WRAPPER_WAIT = ("import os, subprocess, sys; p = subprocess.Popen(sys.argv[1:], pass_fds=[int(os.environ['EVENTS_FD'])]); "
+                 "sys.exit(p.wait())")  # 组长等孙进程结束（uvx / npx 的常态）
+_WRAPPER_EXIT = ("import os, subprocess, sys; subprocess.Popen(sys.argv[1:], pass_fds=[int(os.environ['EVENTS_FD'])]); "
+                 "sys.exit(0)")  # 组长起完孙进程立即退出（组长先于 worker 消失的形态）
+
+
+def _wrapper_engine(mode: str, wrapper: str, pid_file: str) -> SubprocessEngine:
+    """经包装进程起假 worker：真正的 worker 是孙进程。wrapper 取 _WRAPPER_WAIT 或 _WRAPPER_EXIT。"""
     import os
     env = {**os.environ, "WORKER_MODE": mode, "WORKER_PID_FILE": pid_file}
-    return SubprocessEngine(cmd=["sh", "-c", shell, sys.executable, _WORKER], env=env)
+    return SubprocessEngine(cmd=[sys.executable, "-c", wrapper, sys.executable, _WORKER], env=env)
 
 
 def _grandchild_pid(pid_file: str) -> int:
@@ -562,7 +570,7 @@ def test_force_stop_kills_whole_group_behind_wrapper(tmp_path):
     """零宽限的停止对整个进程组发 SIGKILL：包装进程是组长、worker 是孙进程时，孙进程同样被结束（否则它仍持有事件管道）。"""
     import os
     pid_file = str(tmp_path / "pids")
-    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & wait $!', pid_file)
+    engine = _wrapper_engine("deaf", _WRAPPER_WAIT, pid_file)
     handle, events = engine.run_scope(_job("s"))
     assert next(events).type == "scope_started"  # worker 已起、pid 文件已写
     worker_pid = _grandchild_pid(pid_file)
@@ -580,7 +588,7 @@ def test_force_stop_kills_whole_group_behind_wrapper(tmp_path):
 def test_force_stop_kills_grandchild_after_leader_exited(tmp_path):
     """组长（包装进程）已退出、孙进程仍在：零宽限停止不以组长是否退出为条件，仍对整组发 SIGKILL。"""
     pid_file = str(tmp_path / "pids")
-    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & exit 0', pid_file)
+    engine = _wrapper_engine("deaf", _WRAPPER_EXIT, pid_file)
     handle, events = engine.run_scope(_job("s"))
     assert next(events).type == "scope_started"
     handle._proc.wait(timeout=5)  # 组长已退出
@@ -593,7 +601,7 @@ def test_force_stop_kills_grandchild_after_leader_exited(tmp_path):
 def test_cooperative_stop_signals_whole_group_behind_wrapper(tmp_path):
     """协作停止的 SIGTERM 也发给整组：worker 不靠包装进程转发信号就能收到并走协作退出。"""
     pid_file = str(tmp_path / "pids")
-    engine = _wrapper_engine("hang", '"$0" "$1" <&0 & wait $!', pid_file)
+    engine = _wrapper_engine("hang", _WRAPPER_WAIT, pid_file)
     handle, events = engine.run_scope(_job("s"))
     assert next(events).type == "scope_started"
     worker_pid = _grandchild_pid(pid_file)
@@ -606,7 +614,7 @@ def test_cooperative_stop_signals_whole_group_behind_wrapper(tmp_path):
 def test_positive_grace_stop_kills_deaf_grandchild_after_grace_behind_wrapper(tmp_path):
     """正宽限的停止等的是整组消失：组长（包装进程）被 SIGTERM 结束后，无视 SIGTERM 的孙进程在宽限到期时被整组 SIGKILL。"""
     pid_file = str(tmp_path / "pids")
-    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & wait $!', pid_file)
+    engine = _wrapper_engine("deaf", _WRAPPER_WAIT, pid_file)
     handle, events = engine.run_scope(_job("s"))
     assert next(events).type == "scope_started"
     worker_pid = _grandchild_pid(pid_file)
@@ -620,7 +628,7 @@ def test_positive_grace_stop_kills_deaf_grandchild_after_grace_behind_wrapper(tm
 def test_positive_grace_stop_kills_deaf_grandchild_when_leader_already_exited(tmp_path):
     """组长已退出、无视 SIGTERM 的孙进程仍在：正宽限的停止不因组长已退出而跳过，宽限到期整组 SIGKILL。"""
     pid_file = str(tmp_path / "pids")
-    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & exit 0', pid_file)
+    engine = _wrapper_engine("deaf", _WRAPPER_EXIT, pid_file)
     handle, events = engine.run_scope(_job("s"))
     assert next(events).type == "scope_started"
     handle._proc.wait(timeout=5)  # 组长已退出
