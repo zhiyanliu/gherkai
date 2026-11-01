@@ -22,7 +22,7 @@
 // engine_error 才可按驱动文本再归类（判定见 driverTextMatchAllowed）。
 import { Agent } from "@midscene/core/agent";
 import {
-  AbstractInterface, defineActionsFromInputPrimitives,
+  AbstractInterface, defineAction, defineActionsFromInputPrimitives,
   type DeviceAction, type InputPrimitives, type KeyboardInputPrimitives, type ScrollInputPrimitives, type SystemInputActionConfig,
   type SystemInputActionOptions,
 } from "@midscene/core/device";
@@ -282,10 +282,19 @@ export interface AppiumInterfaceConfig {
   log: (line: string) => void;
 }
 
-/** 输入完成后没能收起键盘时的日志行。 */
-function keyboardNotHiddenLogLine(e: unknown): string {
-  return `worker: 输入完成后未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
+/** 没能收起键盘时的日志行：输入完成后顺带收起，或模型显式调用「收起键盘」动作。 */
+function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): string {
+  const where = when === "after_input" ? "输入完成后" : "「收起键盘」动作";
+  return `worker: ${where}未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
 }
+
+/** 「收起键盘」动作的名字与给模型看的说明（ADR 0052 决策 7）。说明写明用途与边界：用例要求收起、或键盘遮住下一步要操作的元素时用；
+ *  它不是返回键，不会离开当前界面。 */
+export const DISMISS_KEYBOARD_ACTION = "DismissKeyboard";
+export const DISMISS_KEYBOARD_DESCRIPTION =
+  "Dismiss (hide) the on-screen soft keyboard and stay on the current screen. Use it when the test step asks to dismiss, hide or " +
+  "collapse the keyboard, or when the keyboard covers the element you need to interact with next. It does not press Back or Home and " +
+  "never leaves the current screen.";
 
 /** Midscene 的界面实现：截图、尺寸与动作集（ADR 0052 决策 7）。 */
 export class AppiumInterface extends AbstractInterface {
@@ -359,7 +368,16 @@ export class AppiumInterface extends AbstractInterface {
     const systemActions: SystemInputActionOptions = back === null
       ? { homeButton: home.action }
       : { homeButton: home.action, backButton: back.action };
-    this.actions = defineActionsFromInputPrimitives(inputs, { size: () => this.size(), includeSwipe: false, systemActions });
+    this.actions = [
+      ...defineActionsFromInputPrimitives(inputs, { size: () => this.size(), includeSwipe: false, systemActions }),
+      // 「收起键盘」动作（ADR 0052 决策 7）：两平台同一条原语。真机上模型把用例里的「收起键盘」另规划成一步时，没有它只能借返回键或点
+      // 键盘上的按钮去凑（Android 有退出当前界面的风险，iOS 原生应用上收不起）；有了它这一步就有正确的工具。失败同样是尽力动作。
+      defineAction({
+        name: DISMISS_KEYBOARD_ACTION,
+        description: DISMISS_KEYBOARD_DESCRIPTION,
+        call: async () => { await this.hideKeyboard("action"); },
+      }),
+    ];
     return this.actions;
   }
 
@@ -382,16 +400,16 @@ export class AppiumInterface extends AbstractInterface {
     if (opts?.focusOnly) return;
     if (target !== null && opts?.replace !== false) await this.adapter.clearInput(this.ctx);
     if (value !== "") await this.adapter.typeText(this.ctx, value);
-    if (opts?.autoDismissKeyboard === true) await this.hideKeyboard();
+    if (opts?.autoDismissKeyboard === true) await this.hideKeyboard("after_input");
   }
 
   /** 收起键盘是尽力动作：失败只记一行日志、不传出异常，也不重试。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
    *  执行窗口的判定上（并中止当前 act），这里不传出异常不会掩盖它；其余失败（如驱动报无法收起；按驱动源码，键盘未显示时两平台都直接返回成功，由真机验收核对）不进判定。 */
-  private async hideKeyboard(): Promise<void> {
+  private async hideKeyboard(when: "after_input" | "action"): Promise<void> {
     try {
       await this.adapter.hideKeyboard(this.ctx);
     } catch (e) {
-      this.log(keyboardNotHiddenLogLine(e));
+      this.log(keyboardNotHiddenLogLine(e, when));
     }
   }
 
