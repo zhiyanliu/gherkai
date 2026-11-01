@@ -186,7 +186,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 - **断言时向模型要理由**（Nova `BOOL_SCHEMA` → `{result, reason}`、Midscene `aiBoolean` → 带 reason 的 `aiQuery`）：一行就知道为什么判否，但改了断言提问方式、影响判定质量与两引擎对标口径（[0010](./0010-spike-as-apples-to-apples-benchmark.md)、[0014](./0014-ai-first-assertions.md)），需单独 ADR + 真跑对比。先看 thought 文本够不够用。
 - **Nova error act 的现场截图**（失败点直接 `nova.page.screenshot()` + `page.url`）：可补上 Nova 侧 error step 的空 frames，但 CDP 断连类失败下该路径自身也不可用，仍是 best-effort；不混进映射表当既有来源，等 explain 用起来看是否真缺。
-- **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要新的 core 接缝，各自另议（触发信号见下「重议闸门」）。
+- **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要同一条新的 core 接缝（事件流读取）。前者已立项进 1.5、排在设备验收之后（见下「重议闸门」末条），后者另议。
 - 桌面确定性 step 的 evidence（当时 URL / 截图）：0027 另一留口子，本 ADR 不动；设备目标上判为 failed / error 的确定性与导航 step 产一份只含界面快照的 evidence，见决策一的设备例外。
 - 报告 index.html 内嵌渲染 evidence（截图缩略、thought 折叠）：皮层富渲染，等 explain 用起来再定形态。
 

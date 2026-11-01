@@ -85,7 +85,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
-| iOS 设备上要求收起键盘的那一步判 `error`，说明是 `键盘仍然显示：收起键盘的动作只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done……` | 「收起键盘」只点纯粹用来收起的控件（键盘上的 Done / 完成键、键盘上方工具栏里的 Done），这个输入框没有这样的控件 | 输入框靠 Return 键或点空白处收起的，在用例里写明「按下 Return」或「点击输入框外的空白处」；下一步的目标没有被键盘遮住就删掉「收起键盘」；两者都不是则是被测应用自身的可用性问题，按失败处理；写法见[编写 .feature](./writing-features.md)的「设备上的软键盘」 |
+| 设备上要求收起键盘的那一步判 `error`，说明以 `键盘仍然显示：` 开头 | 说明的后半句写明原因：iOS 上「收起键盘」只点纯粹用来收起的控件（键盘上的 Done / 完成键、键盘上方工具栏里的 Done），这个输入框没有这样的控件；或点了控件键盘仍在；Android 上是系统的收起命令没有收起 | 输入框靠 Return 键或点空白处收起的，在用例里写明「按下 Return」或「点击输入框外的空白处」；下一步的目标没有被键盘遮住就删掉「收起键盘」；两者都不是则是被测应用自身的可用性问题，按失败处理；写法见[编写 .feature](./writing-features.md)的「设备上的软键盘」 |
 
 判 `error` 的 job 与 step 带一个归因标记：`gherkai status` 与 `run` 的文本输出把它显示成 `(<归因>: <说明>)`，`--json` 输出里它是 `error_type` 字段（机读字段全表见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)）。常见的几种：
 
