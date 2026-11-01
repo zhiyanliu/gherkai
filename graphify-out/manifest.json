@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1793378327.0105734,
-    "ast_hash": "e7b323eefc9473308117724d56ffe993",
+    "mtime": 1793547378.2214408,
+    "ast_hash": "8d1131d4cc22d5a6f7afeea9cb2e7f82",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793507821.531065,
-    "ast_hash": "454609abcab0ccc650f46650ed1ad8b7",
+    "mtime": 1793547378.2212837,
+    "ast_hash": "7bbfbf963341a27b318dd2a83a2e166e",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793546917.964253,
-    "ast_hash": "85e2891e39c834856716a15f323f0666",
+    "mtime": 1793547359.5655663,
+    "ast_hash": "b52a5fb642d24f67fe286bf8d2328b59",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {

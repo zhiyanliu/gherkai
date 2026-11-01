@@ -33,6 +33,26 @@
 
 完整的权限清单见 [`cloud-backend.md`](./cloud-backend.md)「团队成员需要的最小云端权限」。
 
+### 本机后端的凭证需要什么权限
+
+本机后端下命令进程与引擎 worker 都用你本机的 AWS 凭证，而浏览器会话、模型与设备都在云端，所以凭证要能做下面这些事。资源写成 IAM 策略里的形态：`<区域>` 是运行用的 region，`<账号>` 是你自己的 AWS 账号；Device Farm 只在 us-west-2 提供，设备相关的资源区域固定。只测桌面网页的凭证不需要设备与安装包两组。
+
+| 用到的场合 | 动作 | 资源 |
+|---|---|---|
+| 桌面目标，两个引擎 | `bedrock-agentcore:StartBrowserSession`、`bedrock-agentcore:StopBrowserSession` | `arn:aws:bedrock-agentcore:<区域>:aws:browser/aws.browser.v1`（账号段是固定的 `aws`） |
+| 桌面目标，两个引擎 | `bedrock-agentcore:ConnectBrowserAutomationStream`、`bedrock-agentcore:ConnectBrowserLiveViewStream` | `*`（这两个动作不支持按资源限定） |
+| Midscene 引擎调用模型 | `bedrock:InvokeModel` | `arn:aws:bedrock:*::foundation-model/*`、`arn:aws:bedrock:*:<账号>:inference-profile/*`、`arn:aws:bedrock:*:<账号>:project/default` |
+| Nova Act 引擎 | `nova-act:GetWorkflowDefinition`、`nova-act:CreateWorkflowDefinition`、`nova-act:CreateWorkflowRun`、`nova-act:UpdateWorkflowRun`、`nova-act:CreateSession`、`nova-act:CreateAct`、`nova-act:UpdateAct`、`nova-act:InvokeActStep` | `arn:aws:nova-act:<区域>:<账号>:workflow-definition/*` 与 `arn:aws:nova-act:<区域>:<账号>:workflow-definition/*/workflow-run/*` |
+| 设备目标：找设备 | `devicefarm:ListDevices` | `*`（不支持按资源限定） |
+| 设备目标：找设备 | `devicefarm:GetDevice` | `arn:aws:devicefarm:us-west-2::device:*`（设备 ARN 的账号段为空） |
+| 设备目标：建立远程访问会话 | `devicefarm:CreateRemoteAccessSession` | 同一条语句里列两种：你的 Device Farm 项目 ARN，与 `arn:aws:devicefarm:us-west-2::device:*` |
+| 设备目标：查询与停止会话 | `devicefarm:GetRemoteAccessSession`、`devicefarm:StopRemoteAccessSession` | 同一条语句里列两种：`arn:aws:devicefarm:us-west-2:<账号>:session:<项目 id>/*` 与项目 ARN |
+| 设备目标：连接设备上的 Appium | `devicefarm:GetRemoteAccessSession` | `arn:aws:devicefarm:us-west-2:<账号>:project:session`。这是 Device Farm 为这条连接做授权检查时用的固定资源名，不是某个项目或会话的 ARN；缺它时远程访问会话能建立、Appium 会话却被拒，这个 job 记为执行前失败 |
+| 设备目标：核对遗留会话 | `devicefarm:ListRemoteAccessSessions` | 项目 ARN |
+| 应用目标：安装包 | `s3:PutObject`、`s3:AbortMultipartUpload`、`s3:GetObject` | `arn:aws:s3:::<应用桶>/apps/*`；另加 `s3:ListBucket` 于 `arn:aws:s3:::<应用桶>`（条件 `s3:prefix` 为 `apps/*`），`<应用桶>` 是 `[devices] app-bucket` 指定的桶 |
+
+云端后端下这些事由部署建立的 worker 任务角色去做，你的凭证只需要上表之前那一节的云端权限。
+
 ## 命令
 
 一个 job 即一个 scope 里的全部 scenario，它们共享一个浏览器会话、按书写顺序串行执行。scope 由 `.feature` 里的 `@scope` 标签划分；未标 `@scope` 的 scenario 各自成为一个 job，编号是 `<文件>:<行号>`（见 [`writing-features.md`](./writing-features.md)）。
