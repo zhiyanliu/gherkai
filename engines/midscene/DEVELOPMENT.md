@@ -125,7 +125,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 能力探测 | `probe` | `probe.mts` | ADR 0052 决策 5 |
 | 驱动适配器（UiAutomator2、XCUITest） | `adapters` | `adapters/uiautomator2.mts`、`adapters/xcuitest.mts`，经 `interface.mts` 的 `adapterRegistry` 按会话回报的 automationName 选 | ADR 0052 决策 4 |
 | 命令守卫：执行令牌与结果未知标志 | `guards` | `guard.mts` | ADR 0052 决策 6 |
-| 界面实现与设备 Agent（`AbstractInterface`）；Input 动作带 `autoDismissKeyboard` 为 true 时输入后收起键盘一次，失败只记一行日志 | `agents` | `interface.mts`（Agent 工厂的日志出口必填，缺省装配接部件环境的日志出口） | ADR 0052 决策 7 |
+| 界面实现与设备 Agent（`AbstractInterface`）；Input 动作带 `autoDismissKeyboard` 为 true 时输入后收起键盘一次并核键盘是否仍在（参数说明已替换为「用例要求时才给」），仍在即失败；另注册「收起键盘」动作 | `agents` | `interface.mts`（Agent 工厂的日志出口必填，缺省装配接部件环境的日志出口） | ADR 0052 决策 7 |
 | 会话预热 | `warmup` | `warmup.mts` | ADR 0052 决策 6、ADR 0051 决策 13 |
 | 应用启停：存在性检查、预签名、启动采样、`app.restart()` | `appStore`（安装包存储）加 `device/app.mts` 的原语 | `app.mts` | ADR 0051 决策 9、14 |
 
