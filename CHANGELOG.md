@@ -25,6 +25,9 @@
 - 项目配置文件 `gherkai.toml`：把每个项目基本固定的选项写进文件、随 `.feature` 一起入库共享。`run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-deterministic` 读它，按 `--config`、环境变量 `GHERKAI_CONFIG`、当前目录的 `gherkai.toml` 依次查找，不向上级目录查找；取值顺序是命令行选项、环境变量、配置文件、内建默认依次优先。`[common]` 与 `[cloud]` 的键与选项长名同词（`default-engine`、`steps-dir`、`prefix` 等；`[cloud]` 只在 `--backend cloud` 下生效），只影响本次调用的选项（`--scope`、`--tags`、`--json`、`--fail-fast` 等）不进文件；`[devices]` 给设备选择与计费方式，`[apps]` 给 `@app:<别名>` 对应的安装包与包名或 bundle id。路径类值（`steps-dir`、本机后端的 `report-dir`、`[apps]` 的 `file`）相对配置文件所在目录。不认识的节或键、取值不合法、`os-version` 写成数字都以退出码 2 结束并点名文件与位置。`gherkai doctor` 多一行 `config.file` 显示本次加载的配置文件。
 - 判定记录带远程访问会话的字段：`run --json` 与 `explain --json` 的 job 可带 `sessions[]`（每个远程访问会话的名称、来源、是否确认停止、占用秒数）与 `device_observed_s` / `device_observed_missing` 两个计量键，run 级同样合计；两个计量键只出现在设备用例上，桌面用例的 `sessions[]` 见「变化」里浏览器会话的建立与停止一条。文本输出与报告页对设备 job 显示设备描述、Device Farm 控制台链接、设备占用时长，并列出未能确认停止的会话名；`explain` 对设备目标的证据显示这一步的执行方式、页面地址、控件摘要与控件树文件地址，设备上判为 failed / error 的 step 缺证据时按抽取失败提示。worker 在被测对象未就绪时报出的 scope 级错误会把未执行的 scenario 标为 `skipped`、旁注「未执行（scope 级错误，原因见 job 判定）」。
 
+- 前台 `run` 支持使用方中断：按一次 Ctrl-C（或向命令进程发 SIGTERM）后，命令请求全部 worker 停止并等它们释放会话，再照常输出汇总与产物位置；有 job 被中止或跳过时 run 级判定记 `aborted`，被中止的 job 的判定消息写明「收到中断信号」，退出码为 130（Ctrl-C）或 143（SIGTERM）。再按一次会立即结束 worker，会话可能来不及释放，命令会提示到控制台核对。说明见[运行测试与查看结果](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md)。
+- 设备目标上多一个供 AI 使用的「收起键盘」动作：用例写「输入 … 后收起键盘」时，Android 由系统收起键盘，iOS 只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done（Safari 给网页输入框配的那一条、应用自己加的工具栏），不按 Return 键、不点空白处；收不起时这一步以「键盘仍然显示」为由判出错并说明原因与改法，不再反复重试。写法与边界见[编写 .feature](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md)「设备上的软键盘」一条。
+
 ### 变化
 
 - Nova Act 引擎的 worker 自己管理云端浏览器会话的启动与停止：停止有超时预算，停止失败或超时时 job 记为 error（scenario 明细保留，退出码 1）；此前停止由 SDK 内部执行，部分失败不会反映在退出状态里。Nova Act 的 job 记录的会话 id 随之改为 AgentCore 浏览器会话 id（与 Midscene 同一种 id；此前是 Nova Act 服务侧的会话 id）；`nova-trajectories/` 下的子目录仍按 Nova Act 侧的会话 id 命名，不再等于 job 记录里的会话 id，worker 日志里有两者的对应行。
@@ -48,6 +51,9 @@
 - **本机后端上 Midscene 的最小停止宽限由 31 秒变为 63.5 秒**（worker 按它的收尾超时算出）：只用 Midscene 的 run 不给 `--grace` 时，默认宽限随之变为 63.5 秒；显式给的 `--grace`（或 `gherkai.toml` 的 `grace`）小于 63.5 秒、且用到 Midscene 的 run 在开始执行前以退出码 2 结束，升级后请调大或删掉这个值。宽限只是中止时等待 worker 收尾的上限，worker 收尾完即退出，正常结束的 run 耗时不变。
 - Midscene worker 的 npm 包新增三项运行时依赖：`@midscene/core` 1.15.1（与 `@midscene/web` 同版本、精确锁定）、`@aws-sdk/client-device-farm`，以及 WebdriverIO 的日志模块 `@wdio/logger` 10.0.0（与 WebdriverIO 同步精确锁定）；`webdriverio` 由范围版本改为精确锁定 10.0.2。WebdriverIO 与 Device Farm SDK 只在设备目标上加载，桌面 run 与能力自述不加载它们。
 - agent skill 的云端参考：分工表恢复为 worker 镜像的推送与注册归部署方，一人兼任两个角色时可自己推送。
+- 引擎 worker 在另一个进程组里运行，并自行监视命令进程是否还在：命令进程被强制结束（如 `kill -9`）后，worker 在几秒内察觉、释放会话并退出，不再留下继续计费的会话。
+- 两个桌面引擎建立 AgentCore 浏览器会话时，按 job 的墙钟预算加 120 秒设定会话的服务端存活上限（限定在 60 到 28800 秒之间，预算为「不超时」时保持服务默认的 1 小时）：worker 被强制结束而没来得及释放时，会话最晚到这个时限由服务端回收。
+- 设备 scope 在获取设备期间会话丢失与墙钟预算到期同时成立时，判定记会话丢失这个更具体的原因，而不是获取超时。
 
 ## [1.4.9] - 2026-10-12
 
