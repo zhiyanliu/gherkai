@@ -1,7 +1,7 @@
-# Graph Report - yaozhou  (2026-11-01)
+# Graph Report - yaozhou  (2026-11-02)
 
 ## Corpus Check
-- 445 files · ~773,201 words
+- 445 files · ~773,517 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `b13a8121`
+- Built from commit: `b415632e`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1866,7 +1866,7 @@ Nodes (24): cleanup_pass(), CleanupOutcome, _hours(), _iter_image_params(), list
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1247 isolated node(s):** `CommandGuardArgs`, `Derivation`, `ReadOnlyMobileCommands`, `AppiumInterfaceConfig`, `DeviceAgentArgs` (+1242 more)
+- **1247 isolated node(s):** `背景与问题`, `1. 一个 scope 一个远程访问会话，scenario 之间不复位`, `2. 时间预算：会话预算从创建起算，获取预算从进入设备解析起算，job 墙钟沿用 0034`, `3. 设备解析、创建与孤儿防护`, `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` (+1242 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **289 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
