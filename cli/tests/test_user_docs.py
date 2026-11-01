@@ -99,6 +99,7 @@ def _link_targets(markdown: str) -> list[str]:
                 targets.append(token.attrGet("href") or "")
             elif token.type == "image":
                 targets.append(token.attrGet("src") or "")
+                continue  # 图片的子节点是替代文本，里面的链接写法不渲染
             if token.children:
                 walk(token.children)
 
@@ -126,9 +127,11 @@ def test_link_target_extraction_covers_relative_forms():
         "正文一行\n[错误]: 无法连接浏览器，请确认浏览器已启动。\n\n"      # 紧跟正文的定义形态是段落续行
         "> 连接失败时显示具体原因：\n> [错误]: 说明\n\n"
         "~~~text\n\n[x]: docs/in-fence.md\n~~~\n\n    [y]: docs/indented.md\n\n"  # 代码块
-        "[unused]: docs/never-referenced.md\n"                               # 没被引用的定义不渲染
+        "[unused]: docs/never-referenced.md\n\n"                             # 没被引用的定义不渲染
+        "![[替代文本里的链接](docs/alt.md)](https://e.com/a.png)\n"           # 图片替代文本里的链接写法不渲染（图片本身是绝对地址）
     )
-    assert _link_targets(not_links) == []
+    assert _link_targets("![[替代文本里的链接](docs/alt.md)](https://e.com/a.png)\n") == ["https://e.com/a.png"]
+    assert [t for t in _link_targets(not_links) if not _absolute(t)] == []
     assert [t for t in _link_targets(rendered) if not _absolute(t)] == [
         "engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md", "docs/z.md", "docs/user-guide/README.md",
         "docs/quoted.md", "docs/after-heading.md", "docs/in-list.md", "docs/multiline.md", "docs/pic.png",

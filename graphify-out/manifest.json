@@ -1320,8 +1320,8 @@
     "semantic_hash": "af72dd144e3a8b565b8e8e7a499de384"
   },
   "cli/tests/test_user_docs.py": {
-    "mtime": 1793536039.3046021,
-    "ast_hash": "6aff991683fd98f6becb43cc361c1814",
+    "mtime": 1793536352.652799,
+    "ast_hash": "7b2a3bdd823946f21f37f08ba6d0569a",
     "semantic_hash": ""
   },
   ".github/release_body_footer.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793535120.7079191,
-    "ast_hash": "cb2d59510bc7e0976a1a0e09cfef0827",
+    "mtime": 1793536352.6531084,
+    "ast_hash": "3d1e472516b1613ad90b5b32d4349a4f",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
