@@ -340,7 +340,8 @@ export function isNoDismissControlError(e: unknown): boolean {
 }
 
 /** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：按平台与失败形态分写——iOS 的动作只点纯收起语义的
- *  控件，没有这样的控件时说清并指出用例可以怎么改（iOS 上收起键盘只能走应用或系统浏览器提供的途径，一条都没有的输入框谁都收不起）；
+ *  控件，没有这样的控件时说清并指出用例可以怎么改（iOS 上收起键盘只能走应用或系统浏览器提供的途径，一条都没有的输入框谁都收不起），
+ *  改法写成「改写用例后重新运行、本次不再换别的方式」：真机上模型会把改法当成当场可试的替代路线（自己按 Return、点空白）再多花一轮；
  *  点了控件键盘仍在、或 Android 的系统命令没收起，就只说发生了什么。都以同一前缀开头，让这一步快速、明确地失败，免得模型反复重规划。 */
 export const KEYBOARD_NOT_DISMISSED_PREFIX = "键盘仍然显示：";
 const REMOVE_STEP_ADVICE = "这一步无法按用例的写法完成；若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可";
@@ -348,7 +349,7 @@ export function keyboardNotDismissedMessage(device: Device, cause: "no_control" 
   if (device === "android") return `${KEYBOARD_NOT_DISMISSED_PREFIX}系统的收起键盘命令没有收起这台设备上的键盘，${REMOVE_STEP_ADVICE}`;
   if (cause === "no_control") {
     return `${KEYBOARD_NOT_DISMISSED_PREFIX}收起键盘的动作只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，这台设备上当前的输入框没有这样的控件，`
-      + `${REMOVE_STEP_ADVICE}；若这个输入框靠 Return 键或点击空白处收起，在用例里写明「按下 Return」或「点击空白处」`;
+      + `${REMOVE_STEP_ADVICE}；若这个输入框靠 Return 键或点击空白处收起，把用例改写成「按下 Return」或「点击空白处」后重新运行，本次不再换别的方式尝试`;
   }
   return `${KEYBOARD_NOT_DISMISSED_PREFIX}已点击键盘的收起控件（Done / 完成）但键盘没有收起（或点击没有成功），${REMOVE_STEP_ADVICE}`;
 }
