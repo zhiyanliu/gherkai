@@ -27,13 +27,13 @@ fail-fast（[0026](./0026-schedule-module.md)：任一 job error → 中止整�
 class Status(str, Enum):
     PASSED = "passed"; FAILED = "failed"; ERROR = "error"
     SKIPPED = "skipped"    # core 派生。job 级：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn，没执行/没花钱/可无脑重跑，session_id 必 None；step 级与 scenario 级见决定六、决定一
-    ABORTED = "aborted"    # core 派生：主动中止（fail-fast 或使用方中断）时跑一半被掐。有副作用/有现场可查。session_id 保留不清；被使用方中断的 run 的 run 级 status 也取它（决定三）
+    ABORTED = "aborted"    # core 派生：主动中止（fail-fast 或使用方中断）时跑一半被掐。有副作用/有现场可查。session_id 保留不清；使用方中断已被处理且有 job 记 aborted 或 skipped 时，run 级 status 也取它（决定三）
 ```
 
 | 态 | 含义 | 对使用者 | 产生处（schedule） |
 |---|---|---|---|
 | `skipped` | **worker 从未 spawn**（`abort_flag` 已 set 时排队中的 job） | 没花钱，可无脑重跑 | 起 worker 前的 `abort_flag` 已 set 分支 |
-| `aborted` | 已 spawn、跑一半被**主动中止**掐断：fail-fast，或使用方中断本机 run（SIGINT / SIGTERM，[0024](./0024-worker-core-protocol.md) 终止契约） | 动过、有副作用、先看现场再重跑 | 因 `abort_flag` 作出停止决定时首次仲裁落定 `stop_reason = abort`，内容不完整时由终结函数判出（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」）；两种来源同一条路、同一个 `abort_flag` |
+| `aborted` | 已 spawn、跑一半被**主动中止**掐断：fail-fast，或使用方中断同步 run（SIGINT / SIGTERM，[0024](./0024-worker-core-protocol.md) 终止契约） | 动过、有副作用、先看现场再重跑 | 因 `abort_flag` 作出停止决定时首次仲裁落定 `stop_reason = abort`，内容不完整时由终结函数判出（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」）；两种来源同一条路、同一个 `abort_flag` |
 
 > **aborted 只认主动中止（fail-fast 与使用方中断），不认 timeout**（实装关键，别踩）：超时与主动中止**两条路径都会主动停 worker**，被停的 worker
 > 随后可能以网络故障退出码退出。本 ADR 的 aborted **仅对应主动中止**（`abort_flag` 触发、且按 [0034](./0034-detached-batch-reconciler.md) 机制二首次仲裁落定为 `stop_reason = abort`）；**超时杀的 job 维持 `error` + `errorType=timeout`**
@@ -116,7 +116,7 @@ def _aggregate(statuses):
 - 过滤名单**含 pending/running**（决定一·补）：在 [0034](./0034-detached-batch-reconciler.md) 的无状态投影路径上**已承重**（曾是「为未来增量聚合预留」的前向口子，
   该未来已到）——`project` 每轮 tick 全量重放推演 `RunState`，`jobs_state` 真实含未起（`pending`）/ 在跑（`running`）
   的 job 并原样喂进 `_aggregate`；缺这条过滤，前置态会直接污染 run 级 status。
-- 不改也「碰巧正确」（有 skipped/aborted 必有 error 同批短路），但 `else: return PASSED` 是脆弱兜底——
+- 不改也「碰巧正确」（仅 fail-fast 来源的 skipped/aborted 必伴随同批 error），但 `else: return PASSED` 是脆弱兜底——
   一旦未来引入**非-fail-fast 的 skip**（如主动 `--skip`），「全 skipped 无 error」的 run 会被误判 `passed`。
   入口过滤把正确性钉死在 `_aggregate` 内、不依赖「skipped 必伴随 error」这个外部假设。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted）。
@@ -140,7 +140,7 @@ skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker
 cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 severity**（`run.status == PASSED → 0，否则 1`）。
 
 - **数据源**：退出码读 **schedule 返回的 `RunResult.status`（内存终值，必是终态）**，不回读 RunStore 落库态（后者实时写下可能停在 pending/running，且 `--no-report` 时根本没落库）。**⚠️ 此「读内存终值」限同步 `run` 路径**：[0034](./0034-detached-batch-reconciler.md) 无状态批量运行下 CLI 脱离、不再有「schedule 返回的内存 RunResult」——`submit` 退出码=**提交成功与否**（0=已提交、run_id 已返回），判定退出码由 `status --wait` **读回 `RunState`** 给出。这不违背本条「不回读实时落库态」的初衷：`status --wait` 读的是**轮询到终态后**的 `RunState`（reconciler 已 finalize、必是终态），非本条所拒的「实时写下可能停在 pending/running 的落库态」。退出码语义分层详见 [0034](./0034-detached-batch-reconciler.md)「命令形态」。
-- 当前结果不变：fail-fast 下含 aborted/skipped 的 run 必伴随 error → run=error → 退 1（CI 红）。aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，退非 0 正确。使用方中断的 run 例外：退出码按信号取 130（SIGINT）或 143（SIGTERM），不按 severity；run 级 status 记 aborted（决定三的例外）。
+- 当前结果不变：fail-fast 下含 aborted/skipped 的 run 必伴随 error → run=error → 退 1（CI 红）。aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，退非 0 正确。使用方中断已被处理的 run 例外：退出码按信号取 130（SIGINT）或 143（SIGTERM），不按 severity；有 job 记 aborted 或 skipped 时 run 级 status 记 aborted（决定三的例外）。
 - 改成基于 severity 而非字符串相等，**对未来新态更稳健、可读性更好**（判断点收敛到一处）。
 
 ## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔

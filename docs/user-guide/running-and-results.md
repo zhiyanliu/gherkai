@@ -120,7 +120,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
 | `skill install` | agent skill 装上了吗 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录、目标目录里已有不是本命令装的内容、包内 agent skill 缺失、写入失败 |
 
-前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；有 job 记为 aborted 或 skipped 时 run 级判定记 `aborted`，退出码为 130（Ctrl-C）或 143（SIGTERM）。本机后端等待的时间以 `--grace` 的秒数为限，再按一次 Ctrl-C 会强制结束 worker；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，它们在几秒内发现 CLI 已退出并开始释放会话，释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
+前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；有 job 记为 aborted 或 skipped 时 run 级判定记 `aborted`，退出码为 130（Ctrl-C）或 143（SIGTERM）。本机后端给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
 
 分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 

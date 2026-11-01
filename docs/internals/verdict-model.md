@@ -38,7 +38,7 @@
 | `failed` | worker 上报（未过多数票 / 确定性 `AssertionError`） | step·scenario·job·run | **测试发现了问题** | 先看现场、不要直接重新运行：`gherkai explain <run_id>` 逐步查看向 AI 提出的断言与 AI 的观察；报告中有引擎原生 report / trajectory |
 | `error` | worker 上报（act 抛异常）/ core 派生（各条收场判据见 §3c 图） | step·scenario·job·run | **测试未能执行完成** | 先按 `error_type` + `message` 归因（§3b）：`timeout`/`network_error` 多数可原样重新运行；`engine_error`/`guardrail` 先查 worker 日志 |
 | `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（这个 run 已被中止——fail-fast 或使用方中断——时 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（fail-fast 时伴随触发中止的 error job、根因在别处；使用方中断时不要求存在 error job，看 `message` 即知）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
-| `aborted` | **core 本地赋值**（终结函数：停止原因为主动中止——fail-fast，或使用方中断本机 `run`——且内容不完整；run 级由 `schedule` 在被使用方中断且有 job 记 aborted 或 skipped 时直接赋） | job·run（run 级只在使用方中断时） | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
+| `aborted` | **core 本地赋值**（终结函数：停止原因为主动中止——fail-fast，或使用方中断同步 `run`——且内容不完整；run 级由 `schedule` 在被使用方中断且有 job 记 aborted 或 skipped 时直接赋） | job·run（run 级只在使用方中断时） | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 尚未启动 | 等待；提交较久而**所有** job 仍为 pending 时，`status` 会提示用 `--wait` 接力推进 |
 | `running` | 收到 `scope_started` 或 `origin` 不是 `attempted` 的 `session_opened`（取设备期间）后写入，只有 `attempted` 的 `session_opened` 时仍为 `pending` / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
 
@@ -59,13 +59,13 @@
 
 **该事件绝不污染上层。** `reduce_event` 的 `StepSkipped` 分支只把 `StepResult` 暂存、待挂载到所属 scenario，**不写 `scenario_status`**，因此完全不参与 scenario 归约（`_aggregate` 的 `_NON_VERDICT` 过滤是第二层保险）。scenario 与 job 的判定由上游那个 `error` step 决定，与其后短路了几步无关。渲染层的连锁失败旁注读 `shortcircuited` 这个布尔（`render.py`：`⚠ 因前置 step error 被跳过（未执行）`），不依赖按 `status` 顺序推测。
 
-短路判据是 `status == error`（不看 `error_type`），两引擎对称；短路只作用于**本 scenario**，跨 job 的中止由 fail-fast 负责，两者正交。
+短路判据是 `status == error`（不看 `error_type`），两引擎对称；短路只作用于**本 scenario**，跨 job 的中止由 fail-fast 或使用方中断触发，两者正交。
 
 **三级 `skipped` 判据不同，不可混同**：
 
 | | 被 skip 的对象 | 是否有 `StepResult` | 是否已计费 |
 |---|---|---|---|
-| **job 级**（fail-fast） | 整个 job 从未 spawn | 无（`JobResult.scenarios=[]`） | 否，`session_id` 必为 `None` |
+| **job 级**（fail-fast 或使用方中断） | 整个 job 从未 spawn | 无（`JobResult.scenarios=[]`） | 否，`session_id` 必为 `None` |
 | **scenario 级**（scope 级 error 后合成） | definition 里没有任何事件的 scenario 及其全部 step | 有（scenario 记 `skipped`，各 step `shortcircuited=False`、文本旁注「未执行（scope 级错误，原因见 job 判定）」） | 视情形：执行前失败未建会话则否；执行中途会话丢失则是 |
 | **step 级**（scope 内短路） | job 已启动，上游 error 之后的各 step | 有（`shortcircuited=True`） | 是，会话已建立、前面的 step 已计费 |
 
@@ -99,7 +99,7 @@
 
 几处判据的由来与边界：
 
-- **判据不看「是否被自己停过」**：超时与主动中止（fail-fast 或使用方中断）两条路径都会主动停 worker，被停的 worker 随后可能以网络故障退出码退出，所以那道分叉只取图注所说的首次仲裁结果（`stop_reason`），不看笼统的「被停过」标志。`abort_flag` 只负责传播中止请求（fail-fast 或使用方中断），排队中的 job 起 worker 前看到它即记 `skipped`，它不作归因依据。无状态路径的 `TaskExited.timed_out` 对应 `stop_reason = timeout`，因为该次停止本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
+- **判据不看「是否被自己停过」**：超时与主动中止（fail-fast 或使用方中断）两条路径都会主动停 worker，被停的 worker 随后可能以网络故障退出码退出，所以那道分叉只取图注所说的首次仲裁结果（`stop_reason`），不看笼统的「被停过」标志。`abort_flag` 只负责传播中止请求（fail-fast 或使用方中断），排队中的 job 起 worker 前看到它即记 `skipped`，它不作归因依据。无状态路径的 `TaskExited.timed_out` 对应 `stop_reason = timeout`，因为该次停止本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认主动中止（fail-fast 与使用方中断），不认 timeout」）。
 - **`skipped` 不覆盖建连失败的原因**：建连失败的 job 已经建立过会话、已经计费，`saw_step == False` 只表示「可安全重试（无 act 副作用）」、不表示「未产生费用」，因此它照常进入 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。现状补充：`ScheduleOpts.network_retry` 默认 0 且 CLI 未暴露该参数，所以当前 `run` **不做**整个 job 的重新运行；生效的只有 worker 自身的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只包裹幂等的建连段），重试耗尽即以网络专用退出码退出。
 - 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 安全点提前上传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
 
