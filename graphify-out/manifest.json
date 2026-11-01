@@ -1320,8 +1320,8 @@
     "semantic_hash": "af72dd144e3a8b565b8e8e7a499de384"
   },
   "cli/tests/test_user_docs.py": {
-    "mtime": 1793534876.8495686,
-    "ast_hash": "d02565bbe933bcee1a55cb63d1c19990",
+    "mtime": 1793535465.4998662,
+    "ast_hash": "cb1322407b726eac5dc44d89f7a12dfd",
     "semantic_hash": ""
   },
   ".github/release_body_footer.md": {

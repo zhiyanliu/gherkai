@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-11-01)
 
 ## Corpus Check
-- 445 files · ~772,406 words
+- 445 files · ~772,412 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `79402156`
+- Built from commit: `22b01f48`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1904,7 +1904,7 @@ Nodes (3): fixtureFiles(), fixtureFor(), loadFixture()
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1249 isolated node(s):** `InputContext`, `Point`, `ScrollDirection`, `ScrollGesture`, `NAMED_ENTITIES` (+1244 more)
+- **1249 isolated node(s):** `CommandGuardArgs`, `Derivation`, `ReadOnlyMobileCommands`, `AppiumInterfaceConfig`, `DeviceAgentArgs` (+1244 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **277 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

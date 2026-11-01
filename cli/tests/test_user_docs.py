@@ -86,7 +86,7 @@ def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
 
 
 _INLINE_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")           # [文字](目标 "标题") 与 [文字](<目标>)
-_REFERENCE_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*<?(\S+?)>?\s*(?:\s[\"'(].*)?$", re.M)  # [标签]: 目标 "标题"
+_REFERENCE_DEF = re.compile(r"^\s*(?:>\s*)*\[[^\]]+\]:\s*<?(\S+?)>?\s*(?:\s[\"'(].*)?$", re.M)  # [标签]: 目标 "标题"，含引用块里的
 
 
 def _link_targets(markdown: str) -> list[str]:
@@ -96,14 +96,14 @@ def _link_targets(markdown: str) -> list[str]:
 
 
 def test_link_target_extraction_covers_relative_forms():
-    """提取器本身的护栏：Codex 复核列出的三种漏网写法都要被提出来、都要被判为相对。"""
+    """提取器本身的护栏：同僚复核列出的漏网写法（不带 ./ 的目录路径、括号内带空格、引用式定义、引用块里的引用式定义）都要被提出来、都要被判为相对。"""
     sample = "[引擎](engines/midscene/README.md) [指南]( docs/user-guide/README.md ) [a](./x.md) [b](../y.md) [c](https://e.com/p) [d](<docs/z.md>)\n" \
-        "[指南][g]\n[g]: docs/user-guide/README.md\n[h]: https://e.com/q \"标题\"\n"
+        "[指南][g]\n[g]: docs/user-guide/README.md\n[h]: https://e.com/q \"标题\"\n> [引用块][q]\n>\n> [q]: docs/quoted.md\n"
     targets = _link_targets(sample)
     assert targets == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md", "https://e.com/p", "docs/z.md",
-                       "docs/user-guide/README.md", "https://e.com/q"], targets
+                       "docs/user-guide/README.md", "https://e.com/q", "docs/quoted.md"], targets
     assert [t for t in targets if not _absolute(t)] == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md",
-                                                        "docs/z.md", "docs/user-guide/README.md"]
+                                                        "docs/z.md", "docs/user-guide/README.md", "docs/quoted.md"]
 
 
 def _absolute(target: str) -> bool:
