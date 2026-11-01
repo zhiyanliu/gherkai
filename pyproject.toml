@@ -25,6 +25,7 @@ dev = [
     "pytest-timeout>=2.3",
     "boto3>=1.34",
     "moto[dynamodb,s3]>=5.0",
+    "markdown-it-py>=3",  # 文档护栏测试按 CommonMark 解析链接目标（cli/tests/test_user_docs.py）；不靠 rich 的传递依赖
 ]
 
 [tool.pytest.ini_options]

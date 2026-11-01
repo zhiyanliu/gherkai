@@ -610,9 +610,9 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1793114193.24189,
-    "ast_hash": "3d37414fa80d1460d0e68da0fdc2912e",
-    "semantic_hash": "3d37414fa80d1460d0e68da0fdc2912e"
+    "mtime": 1793536080.5501966,
+    "ast_hash": "554494f081fe82c91e6e35640a4f0c70",
+    "semantic_hash": ""
   },
   "runtime/gherkai_runtime/__init__.py": {
     "mtime": 1789871807.4679637,
@@ -1320,8 +1320,8 @@
     "semantic_hash": "af72dd144e3a8b565b8e8e7a499de384"
   },
   "cli/tests/test_user_docs.py": {
-    "mtime": 1793535747.315063,
-    "ast_hash": "9522a0141562f3f2b87b7d413068f84e",
+    "mtime": 1793536039.3046021,
+    "ast_hash": "6aff991683fd98f6becb43cc361c1814",
     "semantic_hash": ""
   },
   ".github/release_body_footer.md": {
