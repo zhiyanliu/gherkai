@@ -289,3 +289,64 @@ def test_on_signal_does_no_io_even_if_stderr_is_locked(monkeypatch):
     rs._on_signal(signal.SIGTERM, None)  # 不抛
     assert rs._stop.is_set() and rs._stop_signum == signal.SIGTERM
     rs._stop.clear()
+
+
+# ---- 父进程消失视同 SIGTERM；诊断流写错误不致命（ADR 0024 终止契约）----
+
+def test_parent_watchdog_treats_ppid_change_as_sigterm():
+    """父进程号变了：记 SIGTERM、置停止标志、核对结束（之后不再读父进程号）。"""
+    import threading
+    rs._stop_signum = None
+    seen = []
+
+    def getppid():
+        seen.append(None)
+        return 100 if len(seen) <= 2 else 1
+
+    rs._watch_parent(100, getppid=getppid, interval_s=0.001)
+    assert rs._stop.is_set()
+    assert rs._stop_signum == signal.SIGTERM
+    assert len(seen) == 3
+    assert threading.current_thread() is threading.main_thread()  # 本用例直接调函数体，不起线程
+
+
+def test_parent_watchdog_stops_polling_once_stop_is_set():
+    """停止标志已置位（信号先到）：核对线程结束、不再读父进程号、不改信号号。"""
+    rs._stop_signum = signal.SIGINT
+    rs._stop.set()
+    rs._watch_parent(100, getppid=lambda: pytest.fail("停止已置位后不该再核对父进程"), interval_s=0.001)
+    assert rs._stop_signum == signal.SIGINT
+
+
+def test_parent_watchdog_not_started_when_not_a_child(monkeypatch):
+    """父进程号不大于 1（容器主进程 / 已被过继）：不起核对线程。"""
+    import threading
+    monkeypatch.setattr(rs.os, "getppid", lambda: 1)
+    rs._start_parent_watchdog()
+    assert "parent-watchdog" not in {t.name for t in threading.enumerate()}
+
+
+def test_parent_watchdog_started_as_daemon_when_child(monkeypatch):
+    """作为子进程启动：核对线程是守护线程（不拖住退出），停止标志置位后它自行结束。"""
+    import threading
+    monkeypatch.setattr(rs.os, "getppid", lambda: 4242)
+    monkeypatch.setattr(rs, "PARENT_POLL_S", 0.01)
+    rs._start_parent_watchdog()
+    t = next(t for t in threading.enumerate() if t.name == "parent-watchdog")
+    assert t.daemon
+    rs._stop.set()
+    t.join(timeout=2.0)
+    assert not t.is_alive()
+
+
+def test_log_swallows_broken_pipe(monkeypatch):
+    """诊断流写失败（父进程死亡后管道断开）只丢弃这一行、不抛：否则会把正在释放会话的收尾打断。"""
+    class _Broken:
+        def write(self, _s):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            pass
+
+    monkeypatch.setattr(rs.sys, "stderr", _Broken())
+    rs.log("worker: 诊断")  # 不抛即通过

@@ -554,7 +554,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   private interruptRequested = false;
   private undoNavigate: (() => void) | null = null;
   private processHooked = false;
+  // 只触发一次（ADR 0051 决策 5）：第一次已请求终结，后续同类异常忽略——终结期间的日志写出若因父进程死亡而失败，会再以未捕获
+  // 异常的形式到达这里，再记日志就是死循环（真机验收实测的孤儿 worker 空转）。
+  private processFaulted = false;
   private readonly onProcessFault = (reason: unknown): void => {
+    if (this.processFaulted) return;
+    this.processFaulted = true;
     this.deps.log(`worker: 出现未处理的异常，开始释放远程访问会话：${errorText(reason)}`);
     this.deps.requestFinalization();
   };

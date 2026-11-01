@@ -101,6 +101,10 @@ class SubprocessEngine:
                 encoding="utf-8",
                 bufsize=1,  # 行缓冲：worker 每吐一行即可读到（流式，ADR 0024）
                 pass_fds=(events_w,),  # 让子进程继承写端
+                # worker 自成一个进程组（ADR 0024 终止契约「使用方中断」条）：终端的 Ctrl-C 只送到前台进程组，于是只有 CLI 收到，
+                # 由 schedule 先落定停止决定再经 stop() 发 SIGTERM；同组时 worker 会同时收到 SIGINT、自行收尾，若它先于 schedule 的
+                # 停止决定退出，这个 job 会被判 error 而不是 aborted。CLI 死亡后的孤儿由 worker 自己的父进程核对收尾。
+                process_group=0,
             )
         except BaseException:
             # 起 worker 失败（cmd 不存在 / cwd 无效 / 其他 OSError）：管道两端是**裸 fd、没有 GC 兜底**，不显式

@@ -1368,3 +1368,103 @@ def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs()
     only_desk = schedule(_rm([_job("desk")]), FakeResolver(FakeEngine({"desk": _passing_events("desk", "desk:0")})), CollectSink(),
                          opts=ScheduleOpts(max_concurrency=1))
     assert (only_desk.device_observed_s, only_desk.device_observed_missing) == (None, None)
+
+
+# ---- 使用方中断（ADR 0024 终止契约「使用方中断」条；ADR 0031 决定三的例外）----
+
+def _interrupt_sequence(levels):
+    """按轮询次数给出中断级别：第 i 次轮询返回 levels[min(i, len(levels) - 1)]。返回 (回调, 轮询计数列表)。"""
+    polls: list[None] = []
+
+    def interrupt() -> int:
+        polls.append(None)
+        return levels[min(len(polls) - 1, len(levels) - 1)]
+
+    return interrupt, polls
+
+
+_RUNNING_HALF = [  # 执行到一半、仍在等待停止请求的 worker（配 tail_after_stop 键）
+    ScenarioStarted(scenario_id="a:0"),
+    StepDone(scenario_id="a:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+]
+_WHOLE_PASS = [
+    ScenarioStarted(scenario_id="b:0"),
+    StepDone(scenario_id="b:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+    ScenarioDone(scenario_id="b:0", status=Status.PASSED),
+    ScopeDone(scope_id="b"),
+]
+
+
+def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
+    """首次中断（级别 1）走与 fail-fast 同一条路：运行中 worker 被协作停止、按 abort 判 ABORTED；排队中的 job 记 SKIPPED；
+    run 级 status 记 aborted（判定不完整，不按仅有的判定聚合）；on_interrupt(1) 恰被调一次。"""
+    engine = FakeEngine({"a": _RUNNING_HALF, "b": _WHOLE_PASS}, tail_after_stop={"a": []})
+    interrupt, polls = _interrupt_sequence([0, 1])  # 第一次轮询还没中断，之后一直是 1
+    levels: list[int] = []
+    result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
+                                        interrupt_poll_s=0.05))
+    a = next(jr for jr in result.jobs if jr.scope_id == "a")
+    b = next(jr for jr in result.jobs if jr.scope_id == "b")
+    assert a.status == Status.ABORTED  # 有现场、被掐断
+    assert b.status == Status.SKIPPED  # worker 从未起
+    # 判定消息按来源区分（真机演练实测：此前两处都写成 fail-fast 的文案）
+    assert a.message == "收到中断信号：本 job 被中止" and a.error_type is None
+    assert b.message == "收到中断信号：本次运行已中止，未启动（worker 未 spawn）"
+    assert result.status == Status.ABORTED
+    assert levels == [1]
+    assert len(polls) >= 2
+    h = engine.handles["a"]
+    # 协作停止：每次停止请求都带宽限（worker 线程在排空后会再确认一次停止请求，故可能不止一次），没有零宽限的强制
+    assert h.stopped and h.stop_graces and all(g > 0 for g in h.stop_graces)
+
+
+def test_user_interrupt_level2_forces_running_worker_with_zero_grace():
+    """再次中断（级别 2）：在协作停止之外对运行中 worker 再发一次零宽限的 stop（子进程 adapter 即 SIGKILL）；
+    on_interrupt 依次收到 1、2；判定仍按首次仲裁的 abort 落 ABORTED。"""
+    import time as _t
+    # on_stop 拖住每次 stop 0.2 秒：worker 在第一次 stop 返回前不会结束，保证 _force_all 看到的是仍在运行的 worker
+    engine = FakeEngine({"a": _RUNNING_HALF}, tail_after_stop={"a": []}, on_stop=lambda _sid: _t.sleep(0.2))
+    interrupt, _ = _interrupt_sequence([2])
+    levels: list[int] = []
+    result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
+                                        interrupt_poll_s=0.05))
+    assert levels == [1, 2]
+    h = engine.handles["a"]
+    assert 0.0 in h.stop_graces and any(g > 0 for g in h.stop_graces)  # 协作停止的宽限之外多了一次零宽限的强制
+    assert result.jobs[0].status == Status.ABORTED
+    assert result.status == Status.ABORTED
+
+
+def test_user_interrupt_level_only_rises_once_per_level():
+    """级别回调只在首次升高时触发：轮询多次仍为 1 不重复 on_interrupt，也不会升到强制。"""
+    engine = FakeEngine({"a": _RUNNING_HALF}, tail_after_stop={"a": []}, tail_delay_s=0.3)  # 收尾拖 0.3 秒，期间会多轮询几次
+    interrupt, polls = _interrupt_sequence([1])
+    levels: list[int] = []
+    schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+             opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append, interrupt_poll_s=0.05))
+    assert len(polls) >= 3
+    assert levels == [1]
+    assert 0.0 not in engine.handles["a"].stop_graces  # 级别没升到 2，没有零宽限的强制
+
+
+def test_interrupt_arriving_after_all_jobs_done_is_not_acted_on():
+    """全部 job 完成后才到的中断不处置：on_interrupt 不被调、判定照常 PASSED（组合根据此按判定给退出码）。
+    轮询间隔放长，使 job 在第一次轮询前就完成。"""
+    engine = FakeEngine({"b": _WHOLE_PASS})
+    interrupt, polls = _interrupt_sequence([1])
+    levels: list[int] = []
+    result = schedule(_rm([_job("b")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
+                                        interrupt_poll_s=5.0))
+    assert result.status == Status.PASSED
+    assert levels == []
+    assert polls == []  # pending 已空，不再轮询
+
+
+def test_no_interrupt_callback_keeps_passed_run_passed():
+    """不注入 interrupt：等待循环与此前相同，正常 run 仍 PASSED（回归护栏）。"""
+    engine = FakeEngine({"b": _WHOLE_PASS})
+    result = schedule(_rm([_job("b")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    assert result.status == Status.PASSED

@@ -1392,6 +1392,17 @@ test("进程级兜底只在 acquire 开始后注册，触发时请求进入终�
   assert.equal(h.processListeners.size, 0);
 });
 
+test("进程级兜底只触发一次：第二个未处理异常不再记日志、不再请求终结（父进程死亡后日志写失败会再抛未捕获异常）", async () => {
+  const h = harness();
+  await ready(h);
+  h.processListeners.get("uncaughtException")!(new Error("write EPIPE"));
+  h.processListeners.get("uncaughtException")!(new Error("write EPIPE"));
+  h.processListeners.get("unhandledRejection")!(new Error("newSession 超时"));
+  assert.equal(h.finalizationRequests, 1);
+  assert.equal(h.logs.filter((l) => l.includes("出现未处理的异常")).length, 1, h.logs.join("\n"));
+  await h.surface.release("interrupt");
+});
+
 test("释放后内建导航的私有通道被撤销，下一个接缝可以重新注入", async () => {
   const first = harness();
   await ready(first);

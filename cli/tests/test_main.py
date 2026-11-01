@@ -2615,3 +2615,71 @@ def test_plan_degrades_target_check_with_a_note_when_capabilities_unavailable(tm
     captured = capsys.readouterr()
     assert "← 确定性: URL 断言" in captured.out
     assert "标注降级" in captured.err and "不按 scope 目标核对" in captured.err
+
+
+# ---- 使用方中断（ADR 0024 终止契约「使用方中断」条；退出码见 ADR 0031 决定五）----
+
+def _interrupting_schedule_factory(signum, acted: bool = True):
+    """假 schedule：在等待 job 的位置模拟使用方中断——向本进程发 signum（CLI 装的只置标志的处理器把它记下来），
+    断言 opts.interrupt() 轮询到级别 1；acted 时像真 schedule 一样回调 on_interrupt(1) 并把 job 判 aborted。"""
+    import signal as _signal
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        _signal.raise_signal(signum)
+        assert opts.interrupt() == 1, "CLI 装的处理器应把一次信号记成级别 1"
+        status = Status.ABORTED if acted else Status.PASSED
+        if acted:
+            opts.on_interrupt(1)
+        results = []
+        for j in run_meta.jobs:
+            jr = JobResult(job=j, status=status)
+            results.append(jr)
+            if on_job_complete is not None:
+                on_job_complete(jr)
+        return RunResult(run_meta=run_meta, status=status, jobs=results)
+
+    return fake_schedule
+
+
+@pytest.mark.parametrize(("signum", "rc"), [(__import__("signal").SIGINT, 130), (__import__("signal").SIGTERM, 143)])
+def test_run_interrupted_exits_by_signal_prints_hint_and_restores_handlers(tmp_path, monkeypatch, capsys, signum, rc):
+    import signal as _signal
+
+    monkeypatch.setattr(m, "schedule", _interrupting_schedule_factory(signum))
+    before = (_signal.getsignal(_signal.SIGINT), _signal.getsignal(_signal.SIGTERM))
+    code = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
+    assert code == rc  # 128 + 信号号，不按判定
+    err = capsys.readouterr().err
+    assert "正在停止 worker 并释放会话" in err
+    assert "再按一次 Ctrl-C" in err and "继续计费" in err  # 首次中断提示：可以再按、但会话可能释放不掉
+    assert (_signal.getsignal(_signal.SIGINT), _signal.getsignal(_signal.SIGTERM)) == before  # 处理器已还原
+
+
+def test_run_interrupt_not_acted_on_exits_by_verdict(tmp_path, monkeypatch, capsys):
+    """中断到达时 schedule 已没有可处置的 job（on_interrupt 未被调）：退出码按判定给、不打中断提示。"""
+    import signal as _signal
+
+    monkeypatch.setattr(m, "schedule", _interrupting_schedule_factory(_signal.SIGINT, acted=False))
+    code = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
+    assert code == 0
+    assert "收到中断信号" not in capsys.readouterr().err
+
+
+def test_run_second_interrupt_prints_release_warning(tmp_path, monkeypatch, capsys):
+    """再次中断（级别 2）：提示会话可能未释放、用 doctor 核对。"""
+    import signal as _signal
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        _signal.raise_signal(_signal.SIGINT)
+        _signal.raise_signal(_signal.SIGINT)
+        assert opts.interrupt() == 2
+        opts.on_interrupt(1)
+        opts.on_interrupt(2)
+        jobs = [JobResult(job=j, status=Status.ABORTED) for j in run_meta.jobs]
+        return RunResult(run_meta=run_meta, status=Status.ABORTED, jobs=jobs)
+
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    code = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
+    assert code == 130
+    err = capsys.readouterr().err
+    assert "会话可能未释放" in err and "Device Farm" in err and "AgentCore" in err

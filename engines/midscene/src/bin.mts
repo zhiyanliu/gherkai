@@ -16,6 +16,12 @@
 import { register as registerLoaderHook } from "node:module";
 import { register as registerTsx } from "tsx/esm/api";
 
+// 诊断流的写错误不致命（ADR 0024 终止契约「诊断流写错误不致命」条）：父进程（CLI）死亡后 stdout / stderr 管道断开，
+// 写失败若没有 error 监听会变成 uncaughtException，与进程级兜底处理器里的日志写出形成死循环（真机验收实测：孤儿 worker
+// 100% CPU 空转、会话一直占用）。挂上监听后写失败只丢弃这一行；协议通道是 EVENTS_FD，不经这两条流。
+process.stdout.on("error", () => {});
+process.stderr.on("error", () => {});
+
 // ① tsx loader 进程内注册（使用方 step 文件的 .mts 靠它转译）。
 registerTsx();
 

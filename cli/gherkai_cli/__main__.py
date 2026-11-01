@@ -12,6 +12,7 @@ import argparse
 import json
 import os
 import shlex
+import signal
 import sys
 from dataclasses import replace
 from pathlib import Path
@@ -2578,6 +2579,19 @@ def _cmd_run(args) -> int:
     #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开始执行，落库回调（on_event/on_job_complete）中途抛 botocore
     #    异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退出码 1（error 级）。
     #    单一 schedule 调用点 + 条件 try（不复制两份，避免回调/opts 透传漂移）。
+    # 使用方中断（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只置标志（零 I/O），schedule 轮询它；
+    # 首次中断协作停止全部 worker（释放会话），再次中断强制结束。提示语在主线程由 on_interrupt 打出，退出码按信号取 128 加信号号。
+    interrupt = _InterruptState()
+
+    def _on_interrupt(level: int) -> None:
+        interrupt.acted = True
+        if level == 1:
+            _progress(f"收到中断信号，正在停止 worker 并释放会话，最多等待 {grace:g} 秒；"
+                      "再发一次中断（如再按一次 Ctrl-C）会立即结束，会话可能来不及释放、继续计费")
+        else:
+            _progress("再次收到中断信号，立即结束 worker；会话可能未释放，请到 AWS 控制台核对并手动停止"
+                      "（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）")
+
     def _run_schedule():
         return schedule(
             run_meta, resolver, progress_sink,
@@ -2586,11 +2600,14 @@ def _cmd_run(args) -> int:
                 fail_fast=args.fail_fast,
                 grace_period_s=grace,
                 min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
+                interrupt=interrupt.level,
+                on_interrupt=_on_interrupt,
             ),
             on_job_complete=on_job_complete,
             on_event=on_event,
         )
 
+    previous_handlers = interrupt.install()
     try:
         if need_cloud:
             try:
@@ -2603,6 +2620,7 @@ def _cmd_run(args) -> int:
         else:
             result = _run_schedule()
     finally:
+        interrupt.restore(previous_handlers)
         if worker_log_fh is not None:
             worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
 
@@ -2638,9 +2656,51 @@ def _cmd_run(args) -> int:
     if worker_log_fh is not None:
         _progress(f"worker 日志: {artifacts['worker_log']}")
 
+    # 使用方中断的 run：退出码按信号取（SIGINT 130、SIGTERM 143，ADR 0031 决定五的例外），汇总与产物指针照常已输出。
+    # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何判定，按判定给退出码。
+    if interrupt.acted and interrupt.signum is not None:
+        return 128 + interrupt.signum
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
     return 0 if result.status == Status.PASSED else 1
+
+
+class _InterruptState:
+    """本机 run 的中断标志（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只记次数与首个信号号、零 I/O；
+    schedule 经 level() 轮询（0 无 / 1 协作停止 / 2 强制），提示语由 schedule 在主线程回调 on_interrupt 时打出。"""
+
+    SIGNALS = (signal.SIGINT, signal.SIGTERM)
+
+    def __init__(self) -> None:
+        self.count = 0
+        self.signum: int | None = None
+        self.acted = False  # schedule 是否处置过（on_interrupt 被调过）：决定退出码按信号还是按判定
+
+    def handler(self, signum, frame) -> None:  # noqa: ARG002 - 信号处理器的固定签名
+        self.count += 1
+        if self.signum is None:
+            self.signum = signum
+
+    def level(self) -> int:
+        return min(self.count, 2)
+
+    def install(self) -> dict:
+        """装处理器，返回原处理器供 restore；非主线程（不能装信号处理器）或平台没有该信号时跳过那一个。"""
+        previous = {}
+        for sig in self.SIGNALS:
+            try:
+                previous[sig] = signal.signal(sig, self.handler)
+            except (ValueError, OSError):  # 非主线程、或该信号不可用：这个信号就维持缺省处置
+                continue
+        return previous
+
+    @staticmethod
+    def restore(previous: dict) -> None:
+        for sig, old in previous.items():
+            try:
+                signal.signal(sig, old)
+            except (ValueError, OSError):
+                continue
 
 
 def _deploy_provider(args) -> "object | None":

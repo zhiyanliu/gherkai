@@ -453,13 +453,15 @@ def finalize_job(
     scope_done: ScopeDone | None,
     scenario_status: dict[str, Status],
     sessions: list[SessionRecord],
+    abort_cause: str = "fail-fast",
 ) -> Termination:
     """终结函数（ADR 0034 机制二「终结函数与真值表」）：按行序取第一个命中的行给出 (status, error_type, message)。
 
     输入：stop_reason 取 none、timeout、abort 之一（推进器首次仲裁落定的主动处置）；退出信息（exited 为 False 即未退出；exited
     且 exit_code 为 None 即退出码未知）；是否见到 scope_done 及其 status / errorType / message；scenario 判定集；会话记录
     （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。saw_session_opened 只计 origin 不是 attempted 的
-    session_opened：只有结果未知的创建尝试时未退出行判 PENDING（ADR 0051 决策 4）。
+    session_opened：只有结果未知的创建尝试时未退出行判 PENDING（ADR 0051 决策 4）。abort_cause 是作出 abort 决定的来源——
+    "fail-fast"（某 job 已 error）或 "interrupt"（使用方中断，ADR 0024 终止契约）——只进消息、不进判定；无状态路径不作 abort 决定，用缺省值。
     内容完整（干净退出且发了 scope_done）后停止原因不再改写判定：判定已成，收尾拖过预算只改变推进器是否催停，不改结论——
     同步路径收到 scope_done 后不再落定停止原因，无状态路径的 timed_out 记录遇到它同样不改判，两条路径由这里同一条件保证；
     非零退出或退出码未知不算内容完整，照常受前两行约束。
@@ -472,7 +474,8 @@ def finalize_job(
     if stop_reason == "timeout" and not content_complete:
         status, error_type, message = Status.ERROR, "timeout", f"job 超时{budget}"
     elif stop_reason == "abort" and not content_complete:
-        status, error_type, message = Status.ABORTED, None, "fail-fast：其他 job 失败，本 job 被中止"
+        why = "收到中断信号：本 job 被中止" if abort_cause == "interrupt" else "fail-fast：其他 job 失败，本 job 被中止"
+        status, error_type, message = Status.ABORTED, None, why
     elif not exited:
         status = Status.RUNNING if (saw_session_opened or saw_scope_started) else Status.PENDING
         error_type, message = None, None

@@ -142,8 +142,13 @@ class _DeterministicCtx:
 # 云端 worker 的 stderr 不经 core 的转发层、原样进 CloudWatch，日志里拼进的异常文本、地址与路径可能带隧道令牌、预签名参数或
 # userinfo。上传器的 _log 是第三处（它不 import 本模块），同样经脱敏；`tests/test_stderr_redaction.py` 的静态差集守住这三处。
 def log(msg: str) -> None:
-    sys.stderr.write(f"{redact_secrets(msg)}\n")
-    sys.stderr.flush()
+    # 诊断流写错误不致命（ADR 0024 终止契约「诊断流写错误不致命」条）：父进程（CLI）死亡后 stderr 管道断开，写出抛 BrokenPipeError；
+    # 这条诊断丢弃即可，不能让它把正在释放会话的收尾打断。协议通道是 EVENTS_FD，不经这里。
+    try:
+        sys.stderr.write(f"{redact_secrets(msg)}\n")
+        sys.stderr.flush()
+    except OSError:
+        pass
 
 
 def _redacting_excepthook(exc_type, exc, tb) -> None:
@@ -160,8 +165,11 @@ def _redacting_excepthook(exc_type, exc, tb) -> None:
         sys.__excepthook__(exc_type, exc, tb)
     finally:
         sys.stderr = real
-    real.write(redact_secrets(buf.getvalue()))
-    real.flush()
+    try:
+        real.write(redact_secrets(buf.getvalue()))
+        real.flush()
+    except OSError:
+        pass  # 诊断流已断开（父进程死亡）：fatal 行丢弃，进程仍以缺省方式结束
 
 
 def _on_signal(signum, frame):
@@ -180,6 +188,30 @@ def _on_signal(signum, frame):
     global _stop_signum
     _stop_signum = signum
     _stop.set()
+
+
+PARENT_POLL_S = 5.0  # 父进程核对间隔（ADR 0024 终止契约「父进程消失」条）
+
+
+def _watch_parent(initial_ppid: int, getppid=os.getppid, interval_s: float = PARENT_POLL_S) -> None:
+    """父进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：每 interval_s 秒核对一次父进程号，变了（CLI 被杀死或崩溃、
+    本进程被过继）即记 SIGTERM、置停止标志，主流程在安全点协作停止并释放会话。停止标志已置位时结束（收尾已在进行）。
+    在守护线程里运行（见 _start_parent_watchdog）；不是信号处理器，这里写一行诊断是安全的，写失败由 log 吞掉。"""
+    global _stop_signum
+    while not _stop.wait(interval_s):
+        if getppid() != initial_ppid:
+            _stop_signum = signal.SIGTERM
+            _stop.set()
+            log("worker: parent process exited, cooperative stop")
+            return
+
+
+def _start_parent_watchdog() -> None:
+    """只在作为子进程启动时启用：父进程号不大于 1 表示本进程是容器主进程或已被过继，没有可核对的父进程。"""
+    ppid = os.getppid()
+    if ppid <= 1:
+        return
+    threading.Thread(target=_watch_parent, args=(ppid,), name="parent-watchdog", daemon=True).start()
 
 
 def _cost_from_result(r) -> dict | None:
@@ -1142,6 +1174,7 @@ def main() -> int:
     # （上面的 steps 加载在此之前、仍走默认处置：那段是纯本机文件 import、无会话无网络，被杀不泄漏也不误归因。）
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
+    _start_parent_watchdog()  # 父进程消失视同 SIGTERM（ADR 0024）：与信号处理器同一时点装上，读 job 期间的窗口同样覆盖
 
     # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态即读 stdin、写 EVENTS_FD。
     job = JobSource.from_env().read()

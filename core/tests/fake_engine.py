@@ -15,13 +15,15 @@ from gherkai_core.model import Event, Job
 class FakeWorkerHandle:
     def __init__(self, on_stop: Callable[[], None] | None = None) -> None:
         self.stopped = False
-        self.stop_grace: float | None = None
+        self.stop_grace: float | None = None  # 最后一次 stop 的宽限
+        self.stop_graces: list[float] = []  # 每次 stop 的宽限（使用方再次中断时会再调一次、宽限 0）
         self._stop_event = threading.Event()  # 配了收尾事件的假 worker 在事件发完后等它（模拟 worker 活着、等被停）
         self._on_stop = on_stop  # 测试钩子：模拟真 stop() 阻塞消耗的时间（如推进假时钟）
 
     def stop(self, grace_period_s: float) -> None:
         self.stopped = True
         self.stop_grace = grace_period_s
+        self.stop_graces.append(grace_period_s)
         if self._on_stop is not None:
             self._on_stop()
         self._stop_event.set()

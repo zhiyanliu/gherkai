@@ -31,7 +31,8 @@
 //
 // 无法登记为出口的写法，出现即报，因为无法核对它写出的实参：
 //   - process.stderr 不以 .write(...) 或 .end(...) 直接写出的用法：赋给变量（别名）、解构、作为参数传出、把 .write 当作值取出、
-//     读取它的其他属性；
+//     读取它的其他属性；例外是 `.on("error", …)` 与 `.once("error", …)`——只挂写错误的监听、不写出任何内容（ADR 0024 终止契约
+//     「诊断流写错误不致命」条），不计入也不报；
 //   - 从 node:process 导入或解构出 stderr、emitWarning、_rawDebug，调用 process.emitWarning 与 process._rawDebug（两者直接写 stderr）；
 //   - 把 console 对象或 console.error 一类方法当作值使用、以计算出的名字取 process 或 console 的成员、从 node:console 按名导入、
 //     新建 Console 实例（new console.Console(...) 等）；
@@ -514,6 +515,9 @@ function scanFile(rel: string, text: string): FileScan {
         write(ref, `process.stderr.${method}`, call.arguments.slice(0, 1));
         return;
       }
+      // 只挂写错误的监听、不写出：不是出口，也不是无法登记的用法
+      if ((method === "on" || method === "once") && ts.isCallExpression(call) && call.expression === m
+        && call.arguments.length > 0 && ts.isStringLiteral(call.arguments[0]) && call.arguments[0].text === "error") return;
     }
     reject(ref, "process.stderr 不以 .write(...) 或 .end(...) 直接写出（别名、解构、传参、把方法当作值或读取其他属性）");
   };

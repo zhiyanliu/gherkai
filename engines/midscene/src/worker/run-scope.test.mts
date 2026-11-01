@@ -1853,3 +1853,47 @@ test("主入口的完整性判据对设备 job 同样成立：有额外请求头
   const events = result.out.split("\n").filter((l) => l.startsWith("{") && l.includes('"type"')).map((l) => JSON.parse(l));
   assert.deepEqual(events, [{ type: "scope_done", scopeId: job.scope.id, status: "error", errorType: "precheck_failed", message: W.INCOMPLETE_DEFINITION_MESSAGE }]);
 });
+
+// 诊断流写错误不致命（ADR 0024 终止契约「诊断流写错误不致命」条）：父进程这端先关掉 stderr 的读端再喂 job，worker 的第一行诊断
+// （预检失败那行）就撞上 EPIPE。没有错误监听时它变成 uncaughtException、worker 以非零退出且发不出 scope_done；有监听时丢弃这一行、
+// 事件照常写到 EVENTS_FD、以 0 退出。job 用版本号不一致触发预检失败：不建会话、不需要凭证；凭证与端点仍按上一条测试的方式隔离。
+test("stderr 管道断开后诊断写失败只丢弃这一行：预检失败的 job 仍发 scope_done 并以 0 退出", { timeout: 120_000 }, async () => {
+  const fixture = path.resolve(import.meta.dirname, "..", "..", "..", "fixtures", "job-lines.json");
+  const job = { ...JSON.parse(fs.readFileSync(fixture, "utf-8")).jobs.desktop, engine: "midscene", schemaVersion: "0" };
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-stderr-epipe-"));
+  const eventsPath = path.join(dir, "events.jsonl");
+  const eventsFd = fs.openSync(eventsPath, "w");
+  try {
+    const env: Record<string, string> = {};
+    for (const k of ["PATH", "TMPDIR", "LANG", "LC_ALL"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
+    Object.assign(env, {
+      HOME: dir,
+      AWS_CONFIG_FILE: path.join(dir, "aws-config-absent"),
+      AWS_SHARED_CREDENTIALS_FILE: path.join(dir, "aws-credentials-absent"),
+      AWS_EC2_METADATA_DISABLED: "true",
+      AWS_REGION: "us-east-1",
+      AWS_ACCESS_KEY_ID: "test-access-key",
+      AWS_SECRET_ACCESS_KEY: "test-secret-key",
+      AWS_ENDPOINT_URL: "http://127.0.0.1:9",
+      RUN_ID: "20260629T141207Z-a3f9c1",
+      EVENTS_FD: "3",
+    });
+    const proc = spawn(process.execPath, ["--import", import.meta.resolve("tsx"), path.join(import.meta.dirname, "..", "bin.mts")],
+      { env, cwd: dir, stdio: ["pipe", "pipe", "pipe", eventsFd] });
+    const out: Buffer[] = [];
+    proc.stdout.on("data", (c) => out.push(c));
+    proc.stderr.destroy();  // 父进程这端关掉读端：worker 之后每次写 stderr 都是 EPIPE
+    const code: number = await new Promise((resolve) => {
+      proc.on("close", resolve);
+      proc.stdin.end(JSON.stringify(job) + "\n");
+    });
+    const events = fs.readFileSync(eventsPath, "utf-8").split("\n").filter(Boolean).map((l) => JSON.parse(l));
+    assert.equal(code, 0, `应以 0 结束，stdout=${Buffer.concat(out).toString("utf-8")}`);
+    assert.deepEqual(events.map((e) => e.type), ["scope_done"]);
+    assert.equal(events[0].status, "error");
+    assert.equal(events[0].errorType, "precheck_failed");
+  } finally {
+    fs.closeSync(eventsFd);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

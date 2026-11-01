@@ -523,7 +523,7 @@ _STRIPPED = [
     pytest.param("lib/artifact_upload.py", 'sys.stderr.write(f"{redact_secrets(msg)}\\n")',
                  'sys.stderr.write(f"{msg}\\n")', "_log", id="uploader-log"),
     pytest.param("run_scope.py", 'sys.stderr.write(f"{redact_secrets(msg)}\\n")',
-                 '_unused = lambda: redact_secrets(msg)\n    sys.stderr.write(f"{msg}\\n")', "log",
+                 '_unused = lambda: redact_secrets(msg)\n        sys.stderr.write(f"{msg}\\n")', "log",  # 写出语句在 try 块内（缩进 8）
                  id="log-redacts-only-inside-a-lambda"),
 ]
 
