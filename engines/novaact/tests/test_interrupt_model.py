@@ -291,45 +291,57 @@ def test_on_signal_does_no_io_even_if_stderr_is_locked(monkeypatch):
     rs._stop.clear()
 
 
-# ---- 父进程消失视同 SIGTERM；诊断流写错误不致命（ADR 0024 终止契约）----
+# ---- 所属进程消失视同 SIGTERM；诊断流写错误不致命（ADR 0024 终止契约）----
 
-def test_parent_watchdog_treats_ppid_change_as_sigterm():
-    """父进程号变了：记 SIGTERM、置停止标志、核对结束（之后不再读父进程号）。"""
-    import threading
+def test_parent_watchdog_treats_owner_exit_as_sigterm():
+    """所属进程退出：记 SIGTERM、置停止标志、核验结束（之后不再核验）。"""
     rs._stop_signum = None
     seen = []
 
-    def getppid():
+    def alive(_pid):
         seen.append(None)
-        return 100 if len(seen) <= 2 else 1
+        return len(seen) <= 2
 
-    rs._watch_parent(100, getppid=getppid, interval_s=0.001)
+    rs._watch_parent(4242, alive=alive, interval_s=0.001)
     assert rs._stop.is_set()
     assert rs._stop_signum == signal.SIGTERM
-    assert len(seen) == 3
-    assert threading.current_thread() is threading.main_thread()  # 本用例直接调函数体，不起线程
+    assert len(seen) == 3  # 启动时一次、存活一次、第三次发现已退出
+
+
+def test_parent_watchdog_fires_immediately_when_owner_already_gone():
+    """装上之前所属进程已退出：首次核验即触发，不等一个间隔。"""
+    rs._stop_signum = None
+    rs._watch_parent(4242, alive=lambda _pid: False, interval_s=60.0)
+    assert rs._stop.is_set() and rs._stop_signum == signal.SIGTERM
 
 
 def test_parent_watchdog_stops_polling_once_stop_is_set():
-    """停止标志已置位（信号先到）：核对线程结束、不再读父进程号、不改信号号。"""
+    """停止标志已置位（信号先到）：首次核验后线程结束、不改信号号。"""
     rs._stop_signum = signal.SIGINT
     rs._stop.set()
-    rs._watch_parent(100, getppid=lambda: pytest.fail("停止已置位后不该再核对父进程"), interval_s=0.001)
+    polls = []
+    rs._watch_parent(4242, alive=lambda _pid: polls.append(None) or True, interval_s=0.001)
+    assert polls == [None]  # 只核验了启动时那一次
     assert rs._stop_signum == signal.SIGINT
 
 
-def test_parent_watchdog_not_started_when_not_a_child(monkeypatch):
-    """父进程号不大于 1（容器主进程 / 已被过继）：不起核对线程。"""
+def test_parent_watchdog_not_started_without_owner_pid(monkeypatch):
+    """未传入所属进程号（容器主进程）或取值非法：不起核验线程。"""
     import threading
-    monkeypatch.setattr(rs.os, "getppid", lambda: 1)
-    rs._start_parent_watchdog()
+    for raw in (None, "", "abc", "0"):
+        if raw is None:
+            monkeypatch.delenv(rs.PARENT_PID_ENV, raising=False)
+        else:
+            monkeypatch.setenv(rs.PARENT_PID_ENV, raw)
+        rs._start_parent_watchdog()
     assert "parent-watchdog" not in {t.name for t in threading.enumerate()}
 
 
-def test_parent_watchdog_started_as_daemon_when_child(monkeypatch):
-    """作为子进程启动：核对线程是守护线程（不拖住退出），停止标志置位后它自行结束。"""
+def test_parent_watchdog_started_as_daemon_when_owner_given(monkeypatch):
+    """传入所属进程号（本进程自身，必存活）：核验线程是守护线程，停止标志置位后自行结束。"""
+    import os as _os
     import threading
-    monkeypatch.setattr(rs.os, "getppid", lambda: 4242)
+    monkeypatch.setenv(rs.PARENT_PID_ENV, str(_os.getpid()))
     monkeypatch.setattr(rs, "PARENT_POLL_S", 0.01)
     rs._start_parent_watchdog()
     t = next(t for t in threading.enumerate() if t.name == "parent-watchdog")
@@ -339,8 +351,17 @@ def test_parent_watchdog_started_as_daemon_when_child(monkeypatch):
     assert not t.is_alive()
 
 
+def test_pid_alive_distinguishes_live_and_exited_process():
+    import os as _os
+    import subprocess
+    assert rs._pid_alive(_os.getpid())
+    p = subprocess.Popen([rs.sys.executable, "-c", "0"])
+    p.wait()
+    assert not rs._pid_alive(p.pid)  # 已回收：ProcessLookupError
+
+
 def test_log_swallows_broken_pipe(monkeypatch):
-    """诊断流写失败（父进程死亡后管道断开）只丢弃这一行、不抛：否则会把正在释放会话的收尾打断。"""
+    """诊断流写失败（所属进程死亡后管道断开）只丢弃这一行、不抛：否则会把正在释放会话的收尾打断。"""
     class _Broken:
         def write(self, _s):
             raise BrokenPipeError(32, "Broken pipe")

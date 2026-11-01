@@ -517,3 +517,87 @@ def test_pump_log_colors_prefix_only_when_policy_says_so(monkeypatch, capsys):
     monkeypatch.setenv("NO_COLOR", "1")
     se._pump_log(iter(["d\n"]), "s2", "err")
     assert capsys.readouterr().err == "[worker s2:err] d\n"
+
+
+# ---- 进程组与所属进程号（ADR 0024 终止契约「使用方中断」「父进程消失」条）----
+
+def _wait_dead(pid: int, timeout_s: float = 5.0) -> bool:
+    """等到 pid 不再存在（已被回收）。"""
+    import os
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.05)
+    return False
+
+
+def _wrapper_engine(mode: str, shell: str, pid_file: str) -> SubprocessEngine:
+    """经 sh 包装起假 worker：真正的 worker 是孙进程（模拟定位链里 uvx / npx 这类包装进程）。`<&0` 把 stdin 明确交给后台的孙进程
+    （POSIX 对非交互 shell 的异步命令缺省把 stdin 指向 /dev/null）。"""
+    import os
+    env = {**os.environ, "WORKER_MODE": mode, "WORKER_PID_FILE": pid_file}
+    return SubprocessEngine(cmd=["sh", "-c", shell, sys.executable, _WORKER], env=env)
+
+
+def _grandchild_pid(pid_file: str) -> int:
+    return int(Path(pid_file).read_text(encoding="utf-8").split()[0])
+
+
+def test_worker_env_carries_owner_pid():
+    """起 worker 时传入所属进程号 GHERKAI_PARENT_PID（取值为本进程 pid）：worker 据此核验所属进程是否存活。"""
+    import os
+    script = ("import os,sys,json; sys.stdin.readline(); fd=int(os.environ['EVENTS_FD']); "
+              "os.write(fd, (json.dumps({'type':'scope_started','scopeId':'s','sessionId':os.environ['GHERKAI_PARENT_PID']})+'\\n').encode())")
+    engine = SubprocessEngine(cmd=[sys.executable, "-c", script])
+    _handle, events = engine.run_scope(_job("s"))
+    evs = list(events)
+    assert evs and evs[0].type == "scope_started"
+    assert evs[0].session_id == str(os.getpid())
+
+
+def test_force_stop_kills_whole_group_behind_wrapper(tmp_path):
+    """零宽限的停止对整个进程组发 SIGKILL：包装进程是组长、worker 是孙进程时，孙进程同样被结束（否则它仍持有事件管道）。"""
+    import os
+    pid_file = str(tmp_path / "pids")
+    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & wait $!', pid_file)
+    handle, events = engine.run_scope(_job("s"))
+    assert next(events).type == "scope_started"  # worker 已起、pid 文件已写
+    worker_pid = _grandchild_pid(pid_file)
+    assert worker_pid != handle._proc.pid  # 确是孙进程
+    handle.stop(0.0)
+    assert _wait_dead(worker_pid), "孙进程（真正的 worker）应被整组 SIGKILL 结束"
+    handle._proc.wait(timeout=5)
+    try:
+        os.killpg(handle._proc.pid, 0)
+        assert False, "进程组应已不存在"
+    except ProcessLookupError:
+        pass
+
+
+def test_force_stop_kills_grandchild_after_leader_exited(tmp_path):
+    """组长（包装进程）已退出、孙进程仍在：零宽限停止不以组长是否退出为条件，仍对整组发 SIGKILL。"""
+    pid_file = str(tmp_path / "pids")
+    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & exit 0', pid_file)
+    handle, events = engine.run_scope(_job("s"))
+    assert next(events).type == "scope_started"
+    handle._proc.wait(timeout=5)  # 组长已退出
+    worker_pid = _grandchild_pid(pid_file)
+    assert not _wait_dead(worker_pid, 0.3)  # 孙进程还活着（无视 SIGTERM 的形态，只有 SIGKILL 能结束它）
+    handle.stop(0.0)
+    assert _wait_dead(worker_pid), "组长退出后孙进程仍应被整组 SIGKILL 结束"
+
+
+def test_cooperative_stop_signals_whole_group_behind_wrapper(tmp_path):
+    """协作停止的 SIGTERM 也发给整组：worker 不靠包装进程转发信号就能收到并走协作退出。"""
+    pid_file = str(tmp_path / "pids")
+    engine = _wrapper_engine("hang", '"$0" "$1" <&0 & wait $!', pid_file)
+    handle, events = engine.run_scope(_job("s"))
+    assert next(events).type == "scope_started"
+    worker_pid = _grandchild_pid(pid_file)
+    t0 = time.monotonic()
+    handle.stop(5.0)
+    assert _wait_dead(worker_pid), "孙进程应因收到 SIGTERM 协作退出"
+    assert time.monotonic() - t0 < 4.0  # 没有等到宽限耗尽才 SIGKILL

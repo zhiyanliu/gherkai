@@ -160,7 +160,8 @@ class Status(str, Enum):
     """判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
 
     worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
-    - skipped/aborted：fail-fast 派生的 job 级**终态**（ADR 0031 决定一）。
+    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；aborted 还作为被使用方中断的 run 的
+      run 级 status（ADR 0031 决定三的例外）。
     - pending/running：实时写的 job 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
       不进 JobResult.status（终态判定只会是 passed/failed/error/skipped/aborted）、不参与 severity 比较。
     """
@@ -168,8 +169,8 @@ class Status(str, Enum):
     PASSED = "passed"  # 测试通过
     FAILED = "failed"  # 断言投票没过，即测试发现了问题
     ERROR = "error"  # 引擎抛异常，即测试未能运行完成
-    SKIPPED = "skipped"  # core 派生终态：fail-fast 下 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
-    ABORTED = "aborted"  # core 派生终态：fail-fast 下执行到一半被掐。有副作用/有现场可查（ADR 0031）
+    SKIPPED = "skipped"  # core 派生终态：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
+    ABORTED = "aborted"  # core 派生终态：主动中止（fail-fast 或使用方中断）时执行到一半被停止。有副作用/有现场可查（ADR 0031）
     PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
     RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 或非 attempted 的 session_opened 后刷（ADR 0030/0031/0051）
 
@@ -186,7 +187,8 @@ _STATUS_SEVERITY: dict[Status, int] = {
 }
 
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
-# 含 skipped/aborted（派生终态、单写者、必伴随 error 同批，见 ADR 0031）+ pending/running（前置态）。
+# 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断的 run 在聚合之外另记 run 级 aborted，见 ADR 0031 决定三）
+# + pending/running（前置态）。
 # 两路共用（ADR 0031 决定三 / 0034）：schedule 沿事件流实时聚合，喂的都是终态、过滤是 no-op；
 # project 的无状态投影真实喂入 pending/running（未起/正在运行的 job），此处过滤**承重**——否则前置态会污染
 # run 级 status。

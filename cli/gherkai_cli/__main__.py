@@ -2585,12 +2585,7 @@ def _cmd_run(args) -> int:
 
     def _on_interrupt(level: int) -> None:
         interrupt.acted = True
-        if level == 1:
-            _progress(f"收到中断信号，正在停止 worker 并释放会话，最多等待 {grace:g} 秒；"
-                      "再发一次中断（如再按一次 Ctrl-C）会立即结束，会话可能来不及释放、继续计费")
-        else:
-            _progress("再次收到中断信号，立即结束 worker；会话可能未释放，请到 AWS 控制台核对并手动停止"
-                      "（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）")
+        _progress(_interrupt_prompt(level, cloud=(args.backend == "cloud"), grace=grace))
 
     def _run_schedule():
         return schedule(
@@ -2663,6 +2658,21 @@ def _cmd_run(args) -> int:
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
     return 0 if result.status == Status.PASSED else 1
+
+
+def _interrupt_prompt(level: int, *, cloud: bool, grace: float) -> str:
+    """使用方中断的两级提示（ADR 0024 终止契约「使用方中断」条）。本机后端：首次协作停止、再次整组强杀；云端后端：worker 是 Fargate 任务，
+    停止宽限由部署配置决定、运行期的宽限参数不生效，再次中断只是重发停止请求，不能缩短等待。两种后端的第二级都提醒到控制台核对会话。"""
+    console = "会话可能未释放，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）"
+    if level == 1:
+        if cloud:
+            return ("收到中断信号，正在请求停止云端 worker 并释放会话，停止宽限由部署配置决定；"
+                    "再发一次中断（如再按一次 Ctrl-C）只会重发停止请求、不能缩短等待，会话仍可能来不及释放、继续计费")
+        return (f"收到中断信号，正在停止 worker 并释放会话，最多等约 {grace:g} 秒；"
+                "再发一次中断（如再按一次 Ctrl-C）会立即结束 worker，会话可能来不及释放、继续计费")
+    if cloud:
+        return f"再次收到中断信号，已重发云端停止请求，停止宽限不变；{console}"
+    return f"再次收到中断信号，立即结束 worker；{console}"
 
 
 class _InterruptState:

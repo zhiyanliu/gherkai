@@ -190,28 +190,43 @@ def _on_signal(signum, frame):
     _stop.set()
 
 
-PARENT_POLL_S = 5.0  # 父进程核对间隔（ADR 0024 终止契约「父进程消失」条）
+PARENT_POLL_S = 5.0  # 所属进程核验间隔（ADR 0024 终止契约「父进程消失」条）
+PARENT_PID_ENV = "GHERKAI_PARENT_PID"  # 本机启动方（core 的子进程 adapter）传入的所属进程号；未传入（容器主进程）即不启用
 
 
-def _watch_parent(initial_ppid: int, getppid=os.getppid, interval_s: float = PARENT_POLL_S) -> None:
-    """父进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：每 interval_s 秒核对一次父进程号，变了（CLI 被杀死或崩溃、
-    本进程被过继）即记 SIGTERM、置停止标志，主流程在安全点协作停止并释放会话。停止标志已置位时结束（收尾已在进行）。
+def _pid_alive(pid: int) -> bool:
+    """所属进程是否存活：空信号送达即存活；没有权限也算存活（进程在、不属于我们）；找不到即已退出。"""
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _watch_parent(owner_pid: int, alive=_pid_alive, interval_s: float = PARENT_POLL_S) -> None:
+    """所属进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：先立即核验一次，之后每 interval_s 秒核验所属进程是否存活；
+    已退出（CLI 被杀死或崩溃）即记 SIGTERM、置停止标志，主流程在安全点协作停止并释放会话。按显式传入的进程号核验而不是比较父进程号：
+    核验对象不随包装进程（uvx）改变，所属进程在装上之前就退出的情形首次核验即能发现。停止标志已置位时结束（收尾已在进行）。
     在守护线程里运行（见 _start_parent_watchdog）；不是信号处理器，这里写一行诊断是安全的，写失败由 log 吞掉。"""
     global _stop_signum
-    while not _stop.wait(interval_s):
-        if getppid() != initial_ppid:
+    while True:
+        if not alive(owner_pid):
             _stop_signum = signal.SIGTERM
             _stop.set()
             log("worker: parent process exited, cooperative stop")
             return
+        if _stop.wait(interval_s):
+            return
 
 
 def _start_parent_watchdog() -> None:
-    """只在作为子进程启动时启用：父进程号不大于 1 表示本进程是容器主进程或已被过继，没有可核对的父进程。"""
-    ppid = os.getppid()
-    if ppid <= 1:
+    """只在本机启动方传入所属进程号时启用：容器主进程没有这个变量，也没有可核验的所属进程。"""
+    raw = os.environ.get(PARENT_PID_ENV, "")
+    if not raw.isdigit() or int(raw) <= 0:
         return
-    threading.Thread(target=_watch_parent, args=(ppid,), name="parent-watchdog", daemon=True).start()
+    threading.Thread(target=_watch_parent, args=(int(raw),), name="parent-watchdog", daemon=True).start()
 
 
 def _cost_from_result(r) -> dict | None:
@@ -1174,7 +1189,7 @@ def main() -> int:
     # （上面的 steps 加载在此之前、仍走默认处置：那段是纯本机文件 import、无会话无网络，被杀不泄漏也不误归因。）
     signal.signal(signal.SIGTERM, _on_signal)
     signal.signal(signal.SIGINT, _on_signal)  # Ctrl-C 也走 flag-only（原走默认 KeyboardInterrupt 同样撞 greenlet）
-    _start_parent_watchdog()  # 父进程消失视同 SIGTERM（ADR 0024）：与信号处理器同一时点装上，读 job 期间的窗口同样覆盖
+    _start_parent_watchdog()  # 所属进程消失视同 SIGTERM（ADR 0024）：与信号处理器同一时点装上，读 job 期间的窗口同样覆盖
 
     # I/O 边缘可注入接口（ADR 0024）：job 入口 / 事件出口从内联收进 lib 组件，subprocess 态即读 stdin、写 EVENTS_FD。
     job = JobSource.from_env().read()

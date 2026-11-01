@@ -1468,3 +1468,86 @@ def test_no_interrupt_callback_keeps_passed_run_passed():
     engine = FakeEngine({"b": _WHOLE_PASS})
     result = schedule(_rm([_job("b")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
     assert result.status == Status.PASSED
+
+
+_WHOLE_PASS_A = [
+    ScenarioStarted(scenario_id="a:0"),
+    StepDone(scenario_id="a:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3)),
+    ScenarioDone(scenario_id="a:0", status=Status.PASSED),
+    ScopeDone(scope_id="a"),
+]
+
+
+def test_on_job_complete_timeout_error_propagates_and_stops_running_workers():
+    """落库回调抛 TimeoutError 必须冒泡（Python 3.11 起 concurrent.futures.TimeoutError 就是内建 TimeoutError 的别名，等待循环
+    不得为了醒来轮询而把它吞掉），且冒泡前停掉仍在运行的 worker；注入了 interrupt 也一样。"""
+    engine = FakeEngine({"b": _WHOLE_PASS, "a": _RUNNING_HALF}, tail_after_stop={"a": []})
+
+    def on_job_complete(_jr):
+        raise TimeoutError("persistence timed out")
+
+    with pytest.raises(TimeoutError):
+        schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: 0, interrupt_poll_s=0.05),
+                 on_job_complete=on_job_complete)
+    assert engine.handles["a"].stopped  # 止血：冒泡前停掉仍在运行的 worker
+
+
+def test_force_requested_before_handle_returns_is_honored():
+    """起 worker 期间（句柄尚未返回）到达的第二次中断不丢：句柄返回后的首次停止即用零宽限。"""
+    import threading as _th
+
+    class SlowStart(FakeEngine):
+        def __init__(self, *a, **k):
+            super().__init__(*a, **k)
+            self.started = _th.Event()
+            self.release = _th.Event()
+
+        def run_scope(self, job):
+            self.started.set()
+            self.release.wait(5.0)
+            return super().run_scope(job)
+
+    engine = SlowStart({"a": _RUNNING_HALF}, tail_after_stop={"a": []})
+    levels: list[int] = []
+
+    def on_interrupt(level: int) -> None:
+        levels.append(level)
+        if level == 2:
+            engine.release.set()  # 两级都处置完才让句柄返回
+
+    result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=1, interrupt=lambda: 2 if engine.started.is_set() else 0,
+                                        on_interrupt=on_interrupt, interrupt_poll_s=0.05))
+    assert levels == [1, 2]
+    h = engine.handles["a"]
+    assert h.stop_graces and all(g == 0.0 for g in h.stop_graces)  # 句柄返回后的停止全部零宽限
+    assert result.jobs[0].status == Status.ABORTED
+    assert result.status == Status.ABORTED
+
+
+def test_interrupt_after_all_jobs_done_but_unconsumed_is_not_acted_on():
+    """慢落库回调期间其他 job 已全部完成（future 已完成、尚未消费），随后才到的中断不处置：没有可停的 worker、判定已完整。"""
+    import threading as _th
+    import time as _t
+
+    a_persist_started = _th.Event()
+
+    def b_gen(_job):
+        a_persist_started.wait(5.0)  # 等 a 的落库回调开始后再完成：此时 a 正被消费、b 完成后留在 pending
+        yield from _WHOLE_PASS
+
+    engine = FakeEngine({"a": _WHOLE_PASS_A, "b": b_gen})
+
+    def on_job_complete(jr):
+        if jr.scope_id == "a":
+            a_persist_started.set()
+            _t.sleep(0.4)
+
+    levels: list[int] = []
+    result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: 1, on_interrupt=levels.append,
+                                        interrupt_poll_s=0.05),
+                      on_job_complete=on_job_complete)
+    assert result.status == Status.PASSED
+    assert levels == []

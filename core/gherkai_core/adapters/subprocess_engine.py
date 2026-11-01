@@ -14,6 +14,7 @@ schedule 只下逻辑指令（run_scope / handle.stop），对信号/进程无�
 """
 from __future__ import annotations
 
+import signal
 import subprocess
 import os
 import sys
@@ -27,24 +28,46 @@ from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exi
 
 
 class SubprocessWorkerHandle:
-    """一个正在运行的 worker 子进程的句柄。stop() 翻成 SIGTERM→宽限→SIGKILL（ADR 0026 机制层）。"""
+    """一个正在运行的 worker 子进程的句柄。stop() 翻成 SIGTERM→宽限→SIGKILL（ADR 0026 机制层），信号都发给 worker 的进程组。"""
 
     def __init__(self, proc: subprocess.Popen, pumps: tuple = ()) -> None:
         self._proc = proc
         self._pumps = pumps  # 透传 worker stdout/stderr 的两条 daemon 线程：stop 后有界 join，让日志尾部落完（ADR 0041 决策二）
 
+    def _signal_group(self, sig: int) -> None:
+        # worker 以自己为组长另开进程组启动（见 run_scope 的 process_group=0），信号发给整组：定位链里 uvx / npx 这类包装进程是组长、
+        # 真正的 worker 是孙进程，只发给组长时 SIGTERM 要靠包装进程转发、SIGKILL 则会留下仍持有事件管道的孙进程（schedule 只能等到
+        # 排空上界）。整组已不存在时忽略。
+        try:
+            os.killpg(self._proc.pid, sig)
+        except ProcessLookupError:
+            pass
+        except PermissionError:
+            # macOS 对组长已被回收的进程组回 EPERM 而不是 ESRCH（并发的两次 stop 里后到的那次会撞上）；组长若仍在就退回只发给它
+            if self._proc.poll() is None:
+                try:
+                    self._proc.send_signal(sig)
+                except ProcessLookupError:
+                    pass
+
     def stop(self, grace_period_s: float) -> None:
         proc = self._proc
+        if grace_period_s <= 0:
+            # 使用方再次中断（ADR 0024 终止契约）：不等宽限、整组立即 SIGKILL。组长可能已因上一次 SIGTERM 退出而孙进程仍在，
+            # 所以不以组长是否退出为条件。
+            self._signal_group(signal.SIGKILL)
+            _join_pumps(self._pumps, 0.5)
+            return
         if proc.poll() is not None:
             return  # 已退出
         # SIGTERM —— worker 侧**协作式**响应（ADR 0024 终止契约）：Nova 的 handler 只置停止标志（flag-only、绝不
         # raise），主流程在 act 边界安全点正常退 with 释放 AgentCore 会话；Midscene 的 handler 执行显式 cleanup 序列
         # （会话释放优先）后 process.exit。两侧都不靠异常穿透解栈（raise 模型是 ADR 0024 被拒方案）。
-        proc.terminate()
+        self._signal_group(signal.SIGTERM)
         try:
             proc.wait(timeout=grace_period_s)
         except subprocess.TimeoutExpired:
-            proc.kill()  # SIGKILL 兜底（会话清理可能落空，已知代价，ADR 0026）
+            self._signal_group(signal.SIGKILL)  # SIGKILL 兜底（会话清理可能落空，已知代价，ADR 0026）
         # 进程已退 → 管道写端关、pump 读到 EOF 即结束；有界 join 让最后几行（多半是失败原因）先落到 sink，再由调用方关句柄。
         # 必须带超时：定位链第 4 级 uvx 是包装进程，孙进程可能仍持有 stdout 写端。
         _join_pumps(self._pumps, 0.5)
@@ -89,6 +112,10 @@ class SubprocessEngine:
         # 比硬编码 fd3 更稳、可移植（worker 不假设具体号）。
         child_env = dict(self._env if self._env is not None else os.environ)
         child_env["EVENTS_FD"] = str(events_w)
+        # 所属进程号（ADR 0024 终止契约「父进程消失」条）：worker 据此核验本进程是否仍存活，没了就按收到 SIGTERM 收尾。显式传进程号
+        # 而不让 worker 看父进程号：包装进程（uvx / npx）在中间时 worker 的父进程不是本进程，本进程先于 worker 装上核验就退出时
+        # 父进程号也早已变过。
+        child_env["GHERKAI_PARENT_PID"] = str(os.getpid())
         try:
             proc = subprocess.Popen(
                 self._cmd,

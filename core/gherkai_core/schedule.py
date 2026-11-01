@@ -18,8 +18,7 @@ from __future__ import annotations
 
 import threading
 import time as _time
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from concurrent.futures import TimeoutError as _FuturesTimeout
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as _wait_futures
 from dataclasses import dataclass
 from typing import Callable
 
@@ -184,6 +183,8 @@ class _Worker:
         self.sink = sink
         self.sink_lock = sink_lock
         self.opts = opts
+        # 使用方再次中断已到（ADR 0024 终止契约）：之后对本 worker 的任何停止请求都用零宽限——句柄尚未返回时到达的强制请求由此不丢
+        self._force_requested = threading.Event()
         self.abort_flag = abort_flag
         # on_event：每个事件的旁路观察者（实时落库用），在 sink_lock **之外**调（故不把磁盘 RMW 串进进度显示临界区，
         # ADR 0030 决定三并发不变量；落库自身的线程安全由观察者自持锁保证，如 RunPersistence._lock）。
@@ -428,13 +429,15 @@ class _Worker:
     def _stop(self) -> None:
         if self.handle is not None:
             try:
-                self.handle.stop(self.opts.grace_period_s)
+                self.handle.stop(0.0 if self._force_requested.is_set() else self.opts.grace_period_s)
             except Exception:
                 pass  # stop 兜底失败不应掩盖原始结果
 
     def _force(self) -> None:
-        """使用方再次中断（ADR 0024 终止契约）：零宽限的停止请求——子进程 adapter 即立刻 SIGKILL，Fargate adapter 再发一次 StopTask。
-        停止原因此前已由 _stop_all 落定为 abort，这里不改判定。"""
+        """使用方再次中断（ADR 0024 终止契约）：零宽限的停止请求——子进程 adapter 即对 worker 的进程组发 SIGKILL，Fargate adapter 再发一次
+        StopTask。先记下请求：句柄尚未返回（起 worker 中）的 worker 在句柄返回后的首次停止即用零宽限。停止原因此前已由 _stop_all 落定为
+        abort，这里不改判定。"""
+        self._force_requested.set()
         if self.handle is not None:
             try:
                 self.handle.stop(0.0)
@@ -501,9 +504,10 @@ def schedule(
             threading.Thread(target=w._stop, name=f"gherkai-stop-{w.job.scope_id}", daemon=True).start()
 
     def _force_all() -> None:
-        # 使用方再次中断（ADR 0024 终止契约）：对仍在运行的 worker 发零宽限的停止请求，各起一个线程、不等。
+        # 使用方再次中断（ADR 0024 终止契约）：对每个未结束的 worker 记下强制请求并发零宽限的停止请求，各起一个线程、不等。
+        # 句柄尚未返回的 worker 也要记（起 worker 中到达的第二次中断不能丢）：它的句柄返回后首次停止即用零宽限。
         for w in workers:
-            if w.handle is not None and not w._finished:
+            if not w._finished:
                 threading.Thread(target=w._force, name=f"gherkai-force-{w.job.scope_id}", daemon=True).start()
 
     batch_aborted = False  # fail-fast 的整批中止只做一次
@@ -511,33 +515,32 @@ def schedule(
     with ThreadPoolExecutor(max_workers=max(1, opts.max_concurrency)) as pool:
         future_to_worker = {pool.submit(w.run): w for w in workers}
         pending = set(future_to_worker)
-        # 注入了 interrupt 时按短间隔醒来轮询它（as_completed 的 timeout 只是醒来的手段，到点抛 TimeoutError、不丢未完成的 future）；
-        # 没注入时 timeout 为 None，循环与此前完全相同。
+        # 注入了 interrupt 时按短间隔醒来轮询它：wait 到点返回空集、不抛（as_completed 的超时是 TimeoutError，而它在 Python 3.11 起就是
+        # 内建 TimeoutError 的别名，捕获它会把落库回调或 worker 线程抛出的 TimeoutError 一并吞掉）；没注入时 timeout 为 None，循环与此前相同。
         poll = opts.interrupt_poll_s if opts.interrupt is not None else None
         while pending:
-            try:
-                for future in as_completed(pending, timeout=poll):
-                    pending.discard(future)
-                    jr = future.result()
-                    job_results.append(jr)
-                    # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
-                    # 主线程串行 fire。默认 None 表示 no-op。回调异常仍冒泡（落库失败是真问题），但**冒泡前先 stop 所有正在运行的
-                    # worker**——否则异常跳出 with、shutdown(wait=True) 会等正在运行的 worker 自然结束（真 AgentCore 会话持续计费）。
-                    if on_job_complete is not None:
-                        try:
-                            on_job_complete(jr)
-                        except BaseException:
-                            _stop_all()  # 止血：掐掉正在运行的会话，别空转计费
-                            raise
-                    # fail-fast：一个 job 崩（error）→ 中止整批：对所有正在运行的 worker 当场落定并发停止请求（ADR 0026）。
-                    # 不以 abort_flag 为条件——标志多半已由该 worker 线程先置（排队 job 据此 SKIPPED），这里负责的是运行中的 worker。
-                    if opts.fail_fast and jr.status == Status.ERROR and not batch_aborted:
-                        batch_aborted = True
-                        _stop_all()
-            except _FuturesTimeout:
-                pass  # 只是醒来查中断
-            # 全部 job 已完成后到达的中断不处置（没有可停的 worker、判定已完整），组合根据 on_interrupt 是否被调过决定退出码。
-            if pending and opts.interrupt is not None:
+            completed, _ = _wait_futures(pending, timeout=poll, return_when=FIRST_COMPLETED)
+            for future in completed:
+                pending.discard(future)
+                jr = future.result()
+                job_results.append(jr)
+                # 实时写接缝（ADR 0030）：job 一完成即回调它已归约好的 JobResult，供组合根落库（schedule 不碰 store）。
+                # 主线程串行 fire。默认 None 表示 no-op。回调异常仍冒泡（落库失败是真问题），但**冒泡前先 stop 所有正在运行的
+                # worker**——否则异常跳出 with、shutdown(wait=True) 会等正在运行的 worker 自然结束（真 AgentCore 会话持续计费）。
+                if on_job_complete is not None:
+                    try:
+                        on_job_complete(jr)
+                    except BaseException:
+                        _stop_all()  # 止血：掐掉正在运行的会话，别空转计费
+                        raise
+                # fail-fast：一个 job 崩（error）→ 中止整批：对所有正在运行的 worker 当场落定并发停止请求（ADR 0026）。
+                # 不以 abort_flag 为条件——标志多半已由该 worker 线程先置（排队 job 据此 SKIPPED），这里负责的是运行中的 worker。
+                if opts.fail_fast and jr.status == Status.ERROR and not batch_aborted:
+                    batch_aborted = True
+                    _stop_all()
+            # 只在仍有**未完成**的 job 时处置中断：全部 job 已完成（含已完成、尚未消费的）后到达的中断没有可停的 worker、判定已完整，
+            # 不处置，组合根据 on_interrupt 是否被调过决定退出码。
+            if opts.interrupt is not None and any(not f.done() for f in pending):
                 level = opts.interrupt()
                 if level >= 1 and interrupt_level < 1:
                     interrupt_level = 1

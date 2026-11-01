@@ -31,7 +31,7 @@ import { sigv4Fetch, getBaseUrl, MODEL, modelFamily } from "../lib/agentcore-sig
 // （中断兜底提前上传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
 import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
-import { startParentWatchdog } from "../lib/parent-watchdog.mjs";  // 父进程消失视同 SIGTERM（ADR 0024 终止契约）
+import { startParentWatchdog } from "../lib/parent-watchdog.mjs";  // 所属进程消失视同 SIGTERM（ADR 0024 终止契约）
 import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
 import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
 // 设备目标的会话上限与设备收尾之和（ADR 0049 决策 4、5），以及重规划上限覆盖键的启动期校验（ADR 0044 决策 2）：设备模块里
@@ -389,9 +389,9 @@ export async function main(): Promise<number> {
   const earlySignal = () => process.exit(0);
   process.on("SIGTERM", earlySignal);
   process.on("SIGINT", earlySignal);
-  // 父进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：CLI 被杀死后 worker 不等下一次写事件撞 EPIPE、也不等建会话期的长等待
-  // 结束，一个核对间隔内进入与收到信号相同的收尾——建会话前是 earlySignal 的干净退出，之后是 onSignal 的释放会话（交接处同步换目标）。
-  // 只在作为子进程启动时启用（判定在 lib 内）。
+  // 所属进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：CLI 被杀死后 worker 不等下一次写事件撞 EPIPE、也不等建会话期的长等待
+  // 结束，一个核验间隔内进入与收到信号相同的收尾——建会话前是 earlySignal 的干净退出，之后是 onSignal 的释放会话（交接处同步换目标）。
+  // 只在启动方传入所属进程号时启用（判定在 lib 内）；启动时所属进程已不在则这里立即走 earlySignal。
   let onParentGone: () => void = earlySignal;
   startParentWatchdog(() => {
     log("worker: parent process exited, stopping");
