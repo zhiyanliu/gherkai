@@ -53,7 +53,7 @@ for (const [label, adapter, hideCommand] of [
     const dismiss = iface(adapter, driver, logs).actionSpace().find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
     await dismiss.call(undefined as never);
     assert.equal(logs.length, 1);
-    assert.match(logs[0], /^worker: 「收起键盘」动作未能收起软键盘（不影响这一步的判定）：/);
+    assert.match(logs[0], /^worker: 「收起键盘」动作的收起命令报错：/);
     const stays = iface(adapter, fakeDriver({ keyboardStays: true }), []).actionSpace().find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
     await assert.rejects(stays.call(undefined as never), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE);
   });

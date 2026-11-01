@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793529239.5324814,
-    "ast_hash": "437ace16d94a55d3a5b62b118ff7fe34",
+    "mtime": 1793530099.3715496,
+    "ast_hash": "22ae9a485bccb28ac7ee796e888989a0",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793526998.9321713,
-    "ast_hash": "b5ebd1e3a284908169cf59f61622bb9e",
+    "mtime": 1793530099.3718367,
+    "ast_hash": "d99d456dfd55af9c0ff6054080763bd8",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2165,8 +2165,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.mts": {
-    "mtime": 1793528890.1217954,
-    "ast_hash": "b3507f6da103247f3c23c66266b3fd8d",
+    "mtime": 1793530034.859685,
+    "ast_hash": "6e59dd7f0724a3b3a87971bd1ab494b4",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
@@ -2340,8 +2340,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.test.mts": {
-    "mtime": 1793529020.8278828,
-    "ast_hash": "7ca31adc9b714556df221649765b1107",
+    "mtime": 1793530034.8598247,
+    "ast_hash": "cef3ef74adfb19928a03eb59fb180135",
     "semantic_hash": ""
   }
 }

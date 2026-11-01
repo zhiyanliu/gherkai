@@ -284,10 +284,11 @@ export interface AppiumInterfaceConfig {
   log: (line: string) => void;
 }
 
-/** 没能收起键盘时的日志行：输入完成后顺带收起，或模型显式调用「收起键盘」动作。 */
+/** 收起键盘的命令报错时的日志行。输入完成后顺带收起是尽力动作，写明不影响判定；模型显式调用的「收起键盘」动作随后还要核键盘是否仍在、
+ *  仍在就让这一步失败，所以这里只记命令报错，不预先断言对判定的影响。 */
 function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): string {
-  const where = when === "after_input" ? "输入完成后" : "「收起键盘」动作";
-  return `worker: ${where}未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
+  if (when === "after_input") return `worker: 输入完成后未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
+  return `worker: 「收起键盘」动作的收起命令报错：${errorText(e)}`;
 }
 
 /** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：iOS 上收起键盘只能走应用或系统浏览器提供的途径，
