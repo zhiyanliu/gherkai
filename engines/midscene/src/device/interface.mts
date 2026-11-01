@@ -316,7 +316,7 @@ export interface AppiumInterfaceConfig {
   inputContext: InputContext | null;
   /** AppiumSession.withWebContext（只用到它）。 */
   session: Pick<AppiumSession, "withWebContext">;
-  /** 诊断日志的出口（尽力动作的失败写在这里）。 */
+  /** 诊断日志的出口（收起键盘的原语报错这类不直接定判定的失败写在这里）。 */
   log: (line: string) => void;
 }
 
@@ -577,7 +577,7 @@ export interface DeviceAgentArgs {
 
 /** 设备 Agent 的构造处（设备侧接缝的 AgentFactory 端口）：new Agent(界面实现, 构造项)。重规划上限只在接缝读一次、经构造项传入，
  *  这里不再读 env；设备上它必须有限（ADR 0052 决策 6 的 ⑨），缺失或非正整数是装配错误。log 是交给界面实现的诊断日志出口，必须
- *  由装配方给出：收起键盘这类尽力动作的失败只写在这里，漏接时它们既不传出异常、也不留下记录。 */
+ *  由装配方给出：收起键盘的原语报错只写在这里（判定由随后核键盘是否仍在决定），漏接时这类报错不留下任何记录。 */
 export function createDeviceAgentFactory(options: { log: (line: string) => void }): { create(args: DeviceAgentArgs): Agent } {
   const { log } = options;
   return {
