@@ -59,6 +59,10 @@ for (const [label, adapter, hideCalls] of [
     assert.equal(/never presses Return/.test(dismiss.description), label === "iOS", dismiss.description);
     assert.equal(/Done/.test(dismiss.description), label === "iOS", dismiss.description);
     assert.ok(!dismiss.paramSchema, "无参数");
+    const input = actions.find((a) => a.name === "Input")!;
+    const autoDismiss = (input.paramSchema as { shape: Record<string, { description?: string }> }).shape.autoDismissKeyboard.description ?? "";
+    assert.match(autoDismiss, /only when the test step asks/);
+    assert.equal(/never presses Return/.test(autoDismiss), label === "iOS", autoDismiss);
     await dismiss.call(undefined as never);
     assert.deepEqual(driver.calls, [...hideCalls, "isKeyboardShown"]);
     assert.deepEqual(logs, []);

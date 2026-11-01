@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793533313.6429715,
-    "ast_hash": "906e543f009821c756df054e581cfff3",
+    "mtime": 1793543487.684191,
+    "ast_hash": "2342e4be3a4fc96e62e39b84fd7e561d",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793535644.7867289,
-    "ast_hash": "7f4cd06b640399b18ab9759cd7326b5b",
+    "mtime": 1793543487.6837351,
+    "ast_hash": "76d3267ce59956711e690cb708986b5b",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2105,8 +2105,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/adapters.contract.test.mts": {
-    "mtime": 1793534876.4752638,
-    "ast_hash": "b5bc5a1349ebc98c347fede4e4c67f1d",
+    "mtime": 1793543718.664422,
+    "ast_hash": "d813ee3484088fe57b582ff648427339",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/uiautomator2.mts": {
@@ -2165,8 +2165,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.mts": {
-    "mtime": 1793535119.881781,
-    "ast_hash": "cfcc8e6a593c1099f5ef7d39adf3a981",
+    "mtime": 1793543485.7588286,
+    "ast_hash": "da1b7e342e9590e63ab304cc80759992",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
@@ -2225,8 +2225,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793534911.9373517,
-    "ast_hash": "6f2d574541b84da677dc36c0c4282321",
+    "mtime": 1793543487.3516653,
+    "ast_hash": "3b4137b21885fd6c9ec76121ba7bfd72",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2340,8 +2340,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.test.mts": {
-    "mtime": 1793534876.475403,
-    "ast_hash": "1ca64af5de42e04dc7c99fe900584b88",
+    "mtime": 1793543487.3518229,
+    "ast_hash": "284935d64023b8d68d947288e127e2e9",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/xcuitest.test.mts": {

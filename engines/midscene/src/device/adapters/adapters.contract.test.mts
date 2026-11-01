@@ -16,7 +16,7 @@ import { attachClassification, readClassification, type StepClassification } fro
 import { RESULT_UNKNOWN_MESSAGE, commandFailedMessage, createCommandGuard } from "../guard.mjs";
 import { CONTROLS_MAX_ITEMS } from "../limits.mjs";
 import {
-  AppiumInterface, DISMISS_KEYBOARD_ACTION, keyboardNotDismissedMessage, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry,
+  AppiumInterface, DISMISS_KEYBOARD_ACTION, KEYBOARD_NOT_DISMISSED_PREFIX, autoDismissKeyboardDescription, keyboardNotDismissedMessage, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry,
   createAppiumInterface, createDeviceAgentFactory,
   driverTextMatchAllowed, unmappedKeyMessage, type DeviceAdapter, type InputContext, type PrimitiveContext,
 } from "../interface.mjs";
@@ -743,20 +743,40 @@ test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键
   }
 });
 
-test("Input 动作：收起键盘失败不改判定，动作照常完成，失败只记一行日志、不重试", async () => {
+test("Input 动作：autoDismissKeyboard 为 true 是用例的要求——收起命令报错但键盘已不在只记一行日志、动作照常完成；键盘仍在则以同一原因失败，不重试", async () => {
   for (const { label, make, hideKey } of KEYBOARD_INTERFACES) {
+    const device = label === "iOS" ? "ios" : "android";
     const lines: string[] = [];
     const driverError = Object.assign(new Error("The software keyboard cannot be hidden\n    at hideKeyboard"), { name: "unknown error" });
     const { rec, ui } = make({ responses: { [hideKey]: [driverError] }, log: (line) => lines.push(line) });
     await action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
     assert.equal(flatten(rec.commands).filter((c) => c.method === hideKey).length, 1, label);
     assert.equal(lines.length, 1, label);
-    assert.match(lines[0], /键盘/, label);
+    assert.match(lines[0], /^worker: 输入后收起键盘的收起命令报错：/, label);
     assert.ok(lines[0].includes("unknown error: The software keyboard cannot be hidden") && !lines[0].includes("\n"), lines[0]);
+    // 键盘仍在：与「收起键盘」动作同一原因，输入已完成（命令序列到收起为止都发出了）
+    const stays = make({ responses: { isKeyboardShown: [true] } });
+    await assert.rejects(action(stays.ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never),
+      (e: Error) => e.message === keyboardNotDismissedMessage(device, "not_dismissed"), label);
+    assert.ok(flatten(stays.rec.commands).some((c) => c.method === "isKeyboardShown"), label);
   }
-  // 没有注入日志出口时同样不传出异常
+  // 没有注入日志出口时同样只记日志（键盘已不在）
   const quiet = KEYBOARD_INTERFACES[0].make({ responses: { hideKeyboard: [new Error("x")] } });
   await action(quiet.ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+});
+
+test("Input 动作：autoDismissKeyboard 的参数说明换成「用例要求输入后收起键盘时才给」并按平台写明行为与失败后果，其余参数与说明原样", async () => {
+  for (const { label, make } of KEYBOARD_INTERFACES) {
+    const input = action(make().ui, "Input");
+    const shape = (input.paramSchema as { shape: Record<string, { description?: string }> }).shape;
+    const described = shape.autoDismissKeyboard.description ?? "";
+    assert.equal(described, autoDismissKeyboardDescription(label === "iOS" ? "ios" : "android"), label);
+    assert.match(described, /only when the test step asks/, label);
+    assert.ok(!/Do not set it unless the user asks/.test(described), `${label}：SDK 原说明应被替换`);
+    assert.equal(/Done/.test(described), label === "iOS", label);
+    for (const key of ["value", "locate", "mode", "keyboardTypeDelay", "inputStrategy"]) assert.ok(key in shape, `${label}：${key}`);
+    assert.match(shape.mode.description ?? "", /replace/, `${label}：其余参数说明原样`);
+  }
 });
 
 test("「收起键盘」动作：命令之后核一次键盘是否仍显示——仍显示即抛出产品语言的原因让这一步快速失败；已收起则无事；核不出来按未知不抛", async () => {
@@ -790,7 +810,7 @@ test("「收起键盘」动作：命令之后核一次键盘是否仍显示—�
   }
 });
 
-test("经命令守卫：收起键盘遇到服务端报错时窗口没有判定；会话丢失仍由守卫记在窗口上，不因这里不传出异常而被掩盖", async () => {
+test("经命令守卫：收起键盘遇到服务端报错、会话仍在运行时窗口没有判定、键盘已不在则动作照常完成；会话丢失由守卫记在窗口上，核键盘的只读命令也被拒、动作随之失败", async () => {
   for (const [status, expected] of [["RUNNING", null], ["COMPLETED", "session_lost"]] as const) {
     const adapter = createXcuitestAdapter();
     const rec = recorder({
@@ -804,7 +824,9 @@ test("经命令守卫：收起键盘遇到服务端报错时窗口没有判定�
       driver: guard.driver, adapter, session: { withWebContext: async (_d, fn) => fn() }, device: "ios", scale: 2,
       inputContext: "native", log: (line) => lines.push(line),
     });
-    await action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+    const run = action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+    if (expected === null) await run;  // 点击报错但核到键盘已不在：动作照常完成
+    else await assert.rejects(run, (e: Error) => e.message.startsWith(KEYBOARD_NOT_DISMISSED_PREFIX), status);  // 会话丢失：核键盘被守卫拒绝、按未知处理，原语又失败，动作失败
     assert.equal(lines.length, 1, status);
     assert.equal(guard.closeWindow()?.failure.errorType ?? null, expected, status);
   }

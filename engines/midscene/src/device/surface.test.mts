@@ -1547,9 +1547,9 @@ test("缺省装配：守卫是命令守卫的构造处；缺本次运行编号�
   assert.throws(() => defaultDeviceParts(partsEnv({})), new RegExp(RUN_ID_ENV));
 });
 
-// 收起键盘是尽力动作，失败只记一行日志：缺省装配的 Agent 工厂没接上部件环境的日志出口时，生产环境里这类失败既不传出异常、也不
-// 留下任何记录。这里按行为核对，不按工厂对象的身份核对。
-test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实现，输入后收起键盘失败时恰记一行", async () => {
+// 收起键盘的命令报错而键盘已不在时只记一行日志：缺省装配的 Agent 工厂没接上部件环境的日志出口时，生产环境里这类失败既不传出异常、
+// 也不留下任何记录。这里按行为核对，不按工厂对象的身份核对。
+test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实现，输入后收起键盘的命令报错时恰记一行", async () => {
   const lines: string[] = [];
   const parts = defaultDeviceParts({ ...partsEnv({ [RUN_ID_ENV]: "run-1" }), log: (line) => lines.push(line) });
   const adapter = parts.adapters.select("UiAutomator2");
@@ -1557,6 +1557,7 @@ test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实�
   const driver = {
     execute: async () => null,
     hideKeyboard: async () => { throw new Error("The software keyboard cannot be hidden"); },
+    isKeyboardShown: async () => false,  // 命令报错但键盘已不在：只记日志、动作照常完成
   } as unknown as Browser;
   const agent = parts.agents.create({
     driver, adapter, device: "android", scale: 1, inputContext: null,
@@ -1566,7 +1567,7 @@ test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实�
   const input = agent.interface.actionSpace().find((a) => a.name === "Input");
   assert.ok(input, "动作集里应有 Input");
   await input.call({ value: "x", autoDismissKeyboard: true }, {} as never);
-  assert.equal(lines.filter((line) => /未能收起软键盘/.test(line)).length, 1, lines.join("\n"));
+  assert.equal(lines.filter((line) => /输入后收起键盘的收起命令报错/.test(line)).length, 1, lines.join("\n"));
 });
 
 // 镜像里的设备依赖冒烟（engines/midscene/Dockerfile）只 import dist/device/surface.mjs、不调用任何导出：它能拦住依赖没装进镜像，

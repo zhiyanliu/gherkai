@@ -12,7 +12,8 @@
 //     复原核对保证 AI 步开始与结束时会话都在原生上下文，所以截图前不再读当前上下文），尺寸取截图的像素尺寸；动作集只经
 //     defineActionsFromInputPrimitives 定义，includeSwipe 关、系统动作显式给出（Android 返回与主屏、iOS 只有主屏）；原语全部经
 //     适配器下发，命令经构造时传入的 driver（命令守卫代理）发出。收不收键盘沿用 Midscene 的决定（决策 7）：Input 动作带来的
-//     autoDismissKeyboard 为 true 时，输入完成后经适配器收起键盘一次；收键盘是尽力动作，失败只记一行日志、不传出异常，判定不变。
+//     autoDismissKeyboard 为 true 时，输入完成后经适配器收起键盘一次并核键盘是否仍在（这个参数的说明由本模块替换为「只在用例要求输入后
+//     收起键盘时给」，给了即视为用例的要求），仍在即让动作失败；「收起键盘」动作同一口径（ADR 0052 决策 7）。
 //     设备 Agent 在这里构造。
 //
 // 不做：按系统版本或机型分支（决策 1）——本模块与适配器都不读系统版本与机型，坐标比例与 iOS 的输入上下文是能力探测的结论，
@@ -26,7 +27,7 @@ import {
   type DeviceAction, type InputPrimitives, type KeyboardInputPrimitives, type ScrollInputPrimitives, type SystemInputActionConfig,
   type SystemInputActionOptions,
 } from "@midscene/core/device";
-import type { AgentOpt } from "@midscene/core";
+import { z, type AgentOpt } from "@midscene/core";
 import type { Browser } from "webdriverio";
 import { errorText } from "../worker/error-text.mjs";
 import { attachClassification, readClassification, type ControlItem, type Controls } from "../worker/surface.mjs";
@@ -319,11 +320,10 @@ export interface AppiumInterfaceConfig {
   log: (line: string) => void;
 }
 
-/** 收起键盘的命令报错时的日志行。输入完成后顺带收起是尽力动作，写明不影响判定；模型显式调用的「收起键盘」动作随后还要核键盘是否仍在、
- *  仍在就让这一步失败，所以这里只记命令报错，不预先断言对判定的影响。 */
-function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): string {
-  if (when === "after_input") return `worker: 输入完成后未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
-  return `worker: 「收起键盘」动作的收起命令报错：${errorText(e)}`;
+/** 收起键盘的原语报错时的日志行（按路线措辞）。随后还要核键盘是否仍在、仍在才让这一步失败，所以这里只记报错，不预先断言对判定的影响。 */
+function keyboardNotHiddenLogLine(e: unknown, origin: "input" | "action"): string {
+  const where = origin === "input" ? "输入后收起键盘" : "「收起键盘」动作";
+  return `worker: ${where}的收起命令报错：${errorText(e)}`;
 }
 
 // 适配器的收起键盘原语在「界面上没有收起控件」时抛出的异常带这个标记（iOS 走自己定位控件的路线，ADR 0052 决策 4），界面实现据它把
@@ -358,6 +358,29 @@ export function keyboardNotDismissedMessage(device: Device, cause: "no_control" 
  *  它不是返回键，不会离开当前界面。iOS 补一句它只点纯收起语义的控件、不按 Return、不点空白处（决策 4），要那样做时模型用 KeyboardPress
  *  或 Tap；Android 走系统的收起命令，不涉及 Done 这类控件。 */
 export const DISMISS_KEYBOARD_ACTION = "DismissKeyboard";
+const INPUT_ACTION = "Input";
+
+/** Input 动作 autoDismissKeyboard 参数给模型的说明（ADR 0052 决策 7 路线 ①，替换 SDK 的「用户要求时才给」——真机上模型从不因那句给出
+ *  这个参数，而是把收键盘另规划成一步）：只在用例要求输入后收起键盘时给 true，并说明平台行为与失败后果，让模型把「输入 … 后收起键盘」
+ *  规划成一个动作。 */
+export function autoDismissKeyboardDescription(device: Device): string {
+  const when = "Set it to true only when the test step asks to dismiss, hide or collapse the keyboard right after typing; leave it unset " +
+    "when the step does not mention the keyboard. ";
+  if (device === "android") return `${when}On Android the system hides the keyboard; if it is still shown afterwards the action fails with the reason.`;
+  return `${when}On iOS this taps the keyboard's Done key or the Done button in the toolbar above the keyboard; if the device offers no such ` +
+    "control, or the keyboard is still shown afterwards, the action fails with the reason. It never presses Return and never taps a blank area.";
+}
+
+/** 把 SDK 定义的 Input 动作的 autoDismissKeyboard 参数说明换成上面那句，其余（名字、call、样例）原样保留。SDK 的参数形态变了（没有这个
+ *  参数、或参数不再是对象）就抛出：说明没替换上，模型会按 SDK 原说明从不给这个参数，不能静默放过。 */
+function withAutoDismissDescription(action: DeviceAction, device: Device): DeviceAction {
+  const schema = action.paramSchema;
+  if (!(schema instanceof z.ZodObject) || !("autoDismissKeyboard" in schema.shape)) {
+    throw new Error("Midscene 的 Input 动作参数里没有 autoDismissKeyboard，收起键盘的参数说明无处替换：先核对 SDK 的动作定义再调整");
+  }
+  return { ...action, paramSchema: schema.extend({ autoDismissKeyboard: z.boolean().optional().describe(autoDismissKeyboardDescription(device)) }) };
+}
+
 export function dismissKeyboardDescription(device: Device): string {
   const common =
     "Dismiss (hide) the on-screen soft keyboard and stay on the current screen. Use it when the test step asks to dismiss, hide or " +
@@ -442,9 +465,11 @@ export class AppiumInterface extends AbstractInterface {
       ? { homeButton: home.action }
       : { homeButton: home.action, backButton: back.action };
     this.actions = [
-      ...defineActionsFromInputPrimitives(inputs, { size: () => this.size(), includeSwipe: false, systemActions }),
-      // 「收起键盘」动作（ADR 0052 决策 7）：两平台同一条原语。真机上模型把用例里的「收起键盘」另规划成一步时，没有它只能借返回键或点
-      // 键盘上的按钮去凑（Android 有退出当前界面的风险，iOS 原生应用上收不起）；有了它这一步就有正确的工具。失败同样是尽力动作。
+      // Input 动作的 autoDismissKeyboard 参数说明换成「用例要求输入后收起键盘时给」（ADR 0052 决策 7 路线 ①）
+      ...defineActionsFromInputPrimitives(inputs, { size: () => this.size(), includeSwipe: false, systemActions })
+        .map((action) => action.name === INPUT_ACTION ? withAutoDismissDescription(action, this.adapter.device) : action),
+      // 「收起键盘」动作（ADR 0052 决策 7 路线 ②）：两平台同一条原语。用例把「收起键盘」写成单独一步、或键盘遮住下一步目标而用例没写时，
+      // 模型用它；没有它只能借返回键或点键盘上的按钮去凑（Android 有退出当前界面的风险，iOS 原生应用上收不起）。
       defineAction({
         name: DISMISS_KEYBOARD_ACTION,
         description: dismissKeyboardDescription(this.adapter.device),
@@ -466,27 +491,28 @@ export class AppiumInterface extends AbstractInterface {
 
   /** Input 动作：有目标元素时先点它取得焦点（设备上没有焦点的输入框收不到输入），替换语义下再清空，然后输入；只要求取得焦点时
    *  不输入。清空与否的语义与 Midscene 的网页实现一致：只在有目标元素时清空。Midscene 传来的 autoDismissKeyboard 恰为 true 时，
-   *  输入完成后收起键盘一次；为 false 或没有给时不收。 */
+   *  输入完成后收起键盘一次并核键盘是否仍在（参数说明已改为「用例要求时才给」，给了即是用例的要求）；为 false 或没有给时不收。 */
   private async typeText(value: string, opts: TypeTextOptions): Promise<void> {
     const target = locatePoint(opts?.target);
     if (target !== null) await this.adapter.tap(this.ctx, target);
     if (opts?.focusOnly) return;
     if (target !== null && opts?.replace !== false) await this.adapter.clearInput(this.ctx);
     if (value !== "") await this.adapter.typeText(this.ctx, value);
-    if (opts?.autoDismissKeyboard === true) await this.hideKeyboard("after_input");
+    if (opts?.autoDismissKeyboard === true) await this.hideKeyboard("input");
   }
 
-  /** 收起键盘（ADR 0052 决策 7）。输入完成后顺带收起是尽力动作：失败只记一行日志、不传出异常，也不重试。模型显式调用的「收起键盘」动作
-   *  则要快速明确地失败：原语之后核一次键盘是否仍显示（点了收起控件但没收起，或驱动报成功而键盘仍在），仍在即抛出产品语言的原因，让 Midscene
-   *  结束这一步而不是反复重规划；核不出来（只读命令失败）按未知、不抛。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
-   *  执行窗口的判定上（并中止当前 act），这里的处置不会掩盖它。 */
-  private async hideKeyboard(when: "after_input" | "action"): Promise<void> {
+  /** 收起键盘（ADR 0052 决策 7）：两条路线同一口径——Input 动作带 autoDismissKeyboard 为 true（参数说明只让模型在用例要求时给）与模型显式
+   *  调用的「收起键盘」动作，都要快速明确地失败：原语之后核一次键盘是否仍显示（点了收起控件但没收起，或驱动报成功而键盘仍在），仍在即抛出
+   *  产品语言的原因，让 Midscene 结束这一步而不是反复重规划；核不出来（只读命令失败）按未知：原语失败则抛，原语成功不抛。原语报错先记一行
+   *  日志（措辞按路线）。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次执行窗口的判定上（并中止当前 act），这里的处置不会
+   *  掩盖它。 */
+  private async hideKeyboard(origin: "input" | "action"): Promise<void> {
     let failure: unknown = null;
     try {
       await this.adapter.hideKeyboard(this.ctx);
     } catch (e) {
       failure = e;
-      this.log(keyboardNotHiddenLogLine(e, when));
+      this.log(keyboardNotHiddenLogLine(e, origin));
     }
     let shown: boolean | null = null;
     try {
@@ -494,11 +520,8 @@ export class AppiumInterface extends AbstractInterface {
     } catch {
       shown = null;  // 核不出来：按未知处理
     }
-    if (when === "action" && (shown === true || (shown === null && failure !== null))) {
+    if (shown === true || (shown === null && failure !== null)) {
       throw new Error(keyboardNotDismissedMessage(this.adapter.device, isNoDismissControlError(failure) ? "no_control" : "not_dismissed"));
-    }
-    if (when === "after_input" && shown === true && failure === null) {
-      this.log("worker: 输入完成后收起键盘的命令已返回，但键盘仍然显示（不影响这一步的判定）");
     }
   }
 
