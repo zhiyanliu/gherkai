@@ -6,13 +6,14 @@ import { AppiumInterface, DISMISS_KEYBOARD_ACTION } from "./interface.mjs";
 import { createUiAutomator2Adapter } from "./adapters/uiautomator2.mjs";
 import { createXcuitestAdapter } from "./adapters/xcuitest.mjs";
 
-/** 只记录调用的假驱动：hideKeyboard 可按需抛出。 */
+/** 只记录调用的假驱动：收起键盘的命令（Android 的 hideKeyboard、iOS 的 mobile: hideKeyboard）可按需抛出。 */
 function fakeDriver(opts: { hideFails?: boolean } = {}) {
   const calls: string[] = [];
+  const fail = () => { if (opts.hideFails) throw new Error("WebDriverError: cannot hide keyboard"); };
   return {
     calls,
-    hideKeyboard: async () => { calls.push("hideKeyboard"); if (opts.hideFails) throw new Error("WebDriverError: cannot hide keyboard"); },
-    execute: async (cmd: string) => { calls.push(`execute:${cmd}`); },
+    hideKeyboard: async () => { calls.push("hideKeyboard"); fail(); },
+    execute: async (cmd: string) => { calls.push(`execute:${cmd}`); if (cmd === "mobile: hideKeyboard") fail(); },
     takeScreenshot: async () => "",
   };
 }
@@ -25,11 +26,11 @@ function iface(adapter: any, driver: any, logs: string[]) {
   });
 }
 
-for (const [label, adapter] of [
-  ["Android", createUiAutomator2Adapter({ foregroundPoll: { attempts: 1, intervalMs: 0 } })],
-  ["iOS", createXcuitestAdapter()],
+for (const [label, adapter, hideCommand] of [
+  ["Android", createUiAutomator2Adapter({ foregroundPoll: { attempts: 1, intervalMs: 0 } }), "hideKeyboard"],
+  ["iOS", createXcuitestAdapter(), "execute:mobile: hideKeyboard"],
 ] as const) {
-  test(`${label}：动作集含「收起键盘」动作，调用即发一条 hideKeyboard，系统按键动作照常在`, async () => {
+  test(`${label}：动作集含「收起键盘」动作，调用即发一条收起键盘命令，系统按键动作照常在`, async () => {
     const driver = fakeDriver();
     const logs: string[] = [];
     const actions = iface(adapter, driver, logs).actionSpace();
@@ -41,7 +42,7 @@ for (const [label, adapter] of [
     assert.match(dismiss.description, /keyboard/i);
     assert.ok(!dismiss.paramSchema, "无参数");
     await dismiss.call(undefined as never);
-    assert.deepEqual(driver.calls, ["hideKeyboard"]);
+    assert.deepEqual(driver.calls, [hideCommand]);
     assert.deepEqual(logs, []);
   });
 

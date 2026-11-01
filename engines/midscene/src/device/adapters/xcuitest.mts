@@ -40,6 +40,12 @@ const PRESS_BUTTON = "mobile: pressButton";
 const DEEP_LINK = "mobile: deepLink";
 const DEVICE_SCREEN_INFO = "mobile: deviceScreenInfo";
 const ACTIVE_APP_INFO = "mobile: activeAppInfo";
+const HIDE_KEYBOARD = "mobile: hideKeyboard";
+
+/** 收起键盘时交给 WebDriverAgent 的候选键名（ADR 0052 决策 4）：驱动在一条命令内按顺序找到第一个存在的键并点按。只列「收起」语义的键，
+ *  不列 Search、Go、Next 这类会提交或移动焦点的键；return 放在末尾，单行输入框上它只收起键盘。真机实测：不带键名时 iOS 18.6 报
+ *  「Did not know how to dismiss the keyboard」、iOS 26.3.1 返回成功但键盘仍在。 */
+export const IOS_DISMISS_KEYBOARD_KEYS: readonly string[] = ["Done", "done", "完成", "Hide keyboard", "收起键盘", "return", "Return"];
 
 /** 只读的 `mobile:` 命令（命令守卫只读白名单里 `mobile:` 形态的条目）。 */
 export const READ_ONLY_MOBILE_COMMANDS: ReadonlySet<string> = new Set([DEVICE_SCREEN_INFO, ACTIVE_APP_INFO]);
@@ -172,7 +178,7 @@ export function createXcuitestAdapter(): DeviceAdapter {
     },
 
     async hideKeyboard(ctx: PrimitiveContext): Promise<void> {
-      await ctx.driver.hideKeyboard();
+      await ctx.driver.execute(HIDE_KEYBOARD, { keys: [...IOS_DISMISS_KEYBOARD_KEYS] });
     },
 
     async deepLink(driver: Browser, address: string, appId: string | null): Promise<void> {

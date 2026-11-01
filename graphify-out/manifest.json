@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793526998.9316368,
-    "ast_hash": "f1f0c89f41aff7db1ff60f370c04696a",
+    "mtime": 1793527312.4040465,
+    "ast_hash": "f1b21764e73a801795a5e5e7c04fc6d4",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2105,8 +2105,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/adapters.contract.test.mts": {
-    "mtime": 1793436066.0826566,
-    "ast_hash": "78e8ef36aa470ad30c565b1cd2f12ed8",
+    "mtime": 1793527432.7750688,
+    "ast_hash": "5da9863c43382ba66726b99fd1e38aab",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/uiautomator2.mts": {
@@ -2115,8 +2115,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/xcuitest.mts": {
-    "mtime": 1793436025.5547793,
-    "ast_hash": "2174be9954d3e880b3f113d4dadad5f6",
+    "mtime": 1793527312.4032245,
+    "ast_hash": "46b080f94af4d983babb8042aba300ca",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/app.mts": {
@@ -2306,7 +2306,7 @@
   },
   "engines/midscene/src/device/adapters/fixtures/xcuitest.commands.json": {
     "mtime": 1793377796.6369095,
-    "ast_hash": "97fe6a6964b97072821b30a066e32d87",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_stderr_redaction.py": {
@@ -2340,8 +2340,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.test.mts": {
-    "mtime": 1793526096.000027,
-    "ast_hash": "4bc5f97fd044ce0e60afcbb9ea0a0f52",
+    "mtime": 1793527348.0748246,
+    "ast_hash": "cebe34d7d7f5820d92ce556572222fef",
     "semantic_hash": ""
   }
 }
