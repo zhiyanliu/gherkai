@@ -2333,5 +2333,10 @@
     "mtime": 1793524741.301453,
     "ast_hash": "f670413e89c8d7258ce1f884e1f35d35",
     "semantic_hash": ""
+  },
+  "engines/fixtures/browser-session-timeout.json": {
+    "mtime": 1793524593.8546755,
+    "ast_hash": "b987ba77c54be4e1c5742991e1753ee3",
+    "semantic_hash": ""
   }
 }

@@ -2,7 +2,7 @@
 
 本文件按发行版记录 gherkai 对使用者可见的变化：新增的命令与选项、行为与默认值的调整、修复的问题，以及升级时需要执行的动作。每个发行版在这里都有一节，GitHub Release 的正文取自对应的一节。每个版本的 Release 页（1.4.0 起）见 [GitHub Releases](https://github.com/zhiyanliu/gherkai/releases)。
 
-全部发行包同号发布：命令行工具、两个引擎 worker 与云端后端须装同一个版本。命令与选项的完整说明见[用户指南](./docs/user-guide/README.md)，环境变量总表见[配置](./docs/user-guide/configuration.md)。
+全部发行包同号发布：命令行工具、两个引擎 worker 与云端后端须装同一个版本。命令与选项的完整说明见[用户指南](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/README.md)，环境变量总表见[配置](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md)。
 
 格式沿用 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)。
 
@@ -32,7 +32,7 @@
 - 提交记录（`run_meta.json`、云端 META，以及 `run --json` 与 `plan --json` 里的 `run_meta` / `jobs[]`）带结构版本 `schema_version`（整数，本版本为 1）与写出它的 `cli_version`；键集固定、不适用的值写 `null` 而不再省键：`timeout_s` 不超时为 `null`，`target` 对桌面 job 也写出 `desktop` / `web`，`device_request` 非设备 job 为 `null`，`steps_dir`、`worker_variant`、`worker_task_defs`、`extra_http_headers` 无值为 `null`。`status` / `explain` 与本机接力读到结构版本不等于本机支持的记录以退出码 2 结束，并点名写出它的版本：更新的提示升级 gherkai，更早的提示用那个版本查看或重新提交。**同一报告目录不要混用 1.4 与 1.5 的命令行工具读写**：1.4 的命令行工具读 1.5 的记录会静默误判，1.5 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录（结构版本与后端不一致、记录不完整、没有记 worker 镜像版本）时不执行、把 run 置为 `error`，原因写进运行状态：`status` 在状态行下多一行 `message`，`status --json` 多一个 `message` 键；正常收尾的 run 没有这一行与这个键。本机 `status` / `explain` / `status --wait` 接力读到不完整的提交记录以退出码 2 结束并说明。云端推进器不再读 SSM，部署时不再给它 SSM 读权限（已有部署重新 `gherkai deploy` 后生效）。配置文件给整数选项写浮点（如 `max-concurrency = 4.7`）与命令行同拒，不再静默截断。
 - 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号），worker 在建立任何会话之前核对它：版本不一致时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本。
 - 带设备目标或使用 `--expose-local` 的 run 提交到没有版本戳的旧后端（早于本版本部署、从未升级）时以退出码 2 结束、提示先执行 `gherkai deploy` 升级部署；不使用 `--expose-local` 的桌面 run 维持只警告。
-- `gherkai destroy` 保留部署建立的 Device Farm 项目，连同其中的远程访问会话记录与录像；记着项目 ARN 的后端参数随 stack 删除，同一前缀重新部署会按名称找回并沿用这个项目。不再需要时按[云端后端](./docs/user-guide/cloud-backend.md)「拆除与清理」一节手动删除。
+- `gherkai destroy` 保留部署建立的 Device Farm 项目，连同其中的远程访问会话记录与录像；记着项目 ARN 的后端参数随 stack 删除，同一前缀重新部署会按名称找回并沿用这个项目。不再需要时按[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)「拆除与清理」一节手动删除。
 - 产物桶多一条按标签过期的规则：带 `gherkai=app` 标签的安装包对象 14 天后过期，不带这个标签的对象不受影响；已有部署重新运行 `gherkai deploy` 后生效。
 - `.feature` 可以用 `@device:android` / `@device:ios` 与 `@app:<别名>` 声明 scope 的测试目标（声明、继承、冲突的规则与 `@engine` 相同）。设备目标只有 Midscene 支持（见上方「新增」里真机执行一条）：落到 Nova Act 的设备 scope 在 `plan` 与执行前预检中被拒绝并给出改法，不会建立任何会话。设备怎么指定、`@app` 的别名怎么绑定安装包见上方「新增」里「设备 scope 用哪台设备」与「项目配置文件」两条。
 - `--default-job-timeout` 不给时按测试目标取缺省：桌面 scope 仍是 300 秒，设备 scope 为获取预算加 900 秒且不接受「不超时」（给 `<=0` 只让桌面 scope 不超时；给正值时设备 scope 不得低于获取预算加 180 秒）；给 `nan` / `inf` 以退出码 2 结束。
@@ -101,7 +101,7 @@
 
 ### 变化
 
-- Midscene 引擎的默认模型改为 `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra，经 Amazon Bedrock 调用）。在同一批用例上重复运行，它的判定稳定不抖动，并且比原默认模型 `qwen.qwen3-vl-235b-a22b` 快约三成、少用约四分之一 token；调用请求已按 Bedrock 对 GPT 系模型的要求调整。费用相应上升：一条 5 步左右的 scenario 约 5 美分，原默认模型约 2 美分（以你账户的 AWS 账单为准），量级与口径见[运行测试与查看结果](./docs/user-guide/running-and-results.md)。该模型经 Bedrock 跨区推理调用，Midscene 的 AI step 模型调用在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理；浏览器会话与产物仍在你选的 region，Nova Act 引擎不变。
+- Midscene 引擎的默认模型改为 `us.openai.gpt-5.6-terra`（OpenAI GPT-5.6 Terra，经 Amazon Bedrock 调用）。在同一批用例上重复运行，它的判定稳定不抖动，并且比原默认模型 `qwen.qwen3-vl-235b-a22b` 快约三成、少用约四分之一 token；调用请求已按 Bedrock 对 GPT 系模型的要求调整。费用相应上升：一条 5 步左右的 scenario 约 5 美分，原默认模型约 2 美分（以你账户的 AWS 账单为准），量级与口径见[运行测试与查看结果](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md)。该模型经 Bedrock 跨区推理调用，Midscene 的 AI step 模型调用在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理；浏览器会话与产物仍在你选的 region，Nova Act 引擎不变。
 - Nova Act 引擎的默认模型改为固定的 `nova-act-v1.0`，不再使用跟随最新 GA 版本的别名。同一条断言在不同模型版本上可能翻转，固定版本让结果可复现；换模型只随 gherkai 发版，并在本文件里点明。
 - 两个引擎的模型都可用环境变量覆盖：Nova Act 侧 `NOVA_MODEL_ID`；Midscene 侧 `MIDSCENE_MODEL_ID`，模型家族一般由模型 id 自动识别，识别不出时 worker 启动即报错并要求补 `MIDSCENE_MODEL_FAMILY`。本机 local 后端在 shell 里设置即生效；云端 cloud 后端把变量写进定制 worker 镜像。
 - `gherkai doctor` 新增一行，显示本机各引擎 worker 实际会用的模型（`--json` 里是 `engines` 段的 `model.<engine>`），在 shell 里设过覆盖变量的机器可以直接核对；云端 worker 的模型写在定制镜像里，不在这一行显示。
@@ -110,7 +110,7 @@
 - Midscene 引擎的 token 用量改用引擎 SDK 公开的累计计数，元素定位时的区域搜索调用也计入。同一条用例的报告用量会比此前略高，是统计范围更全，不是模型消耗变多。
 - `gherkai deploy` 结束时改为逐行说明默认 worker 镜像 variant 与 worker 运行配置的更新结果，例如「已保留默认 worker 镜像 variant `base`」「各 variant 的 worker 运行配置已是最新」。
 - 仓库首页新增「判定由谁做出」一节，列出两个引擎各自使用的模型与服务、版本策略、查看与更换方式，以及费用来源。
-- 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](./docs/user-guide/README.md)，新增[常见问题](./docs/user-guide/faq.md)页；文档里的图改为统一风格的架构 / 流程 / 时序图，执行与推进全景、云端交付与 worker 身份两张大图另有可交互版本（https://zhiyanliu.github.io/gherkai/ ）；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
+- 文档重组：面向使用者的完整说明集中到 [`docs/user-guide/`](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/README.md)，新增[常见问题](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/faq.md)页；文档里的图改为统一风格的架构 / 流程 / 时序图，执行与推进全景、云端交付与 worker 身份两张大图另有可交互版本（https://zhiyanliu.github.io/gherkai/ ）；各发行包在 PyPI / npm 上的页面改为入口页，只留定位、装法、最小用法与指向用户指南的链接；本文件是新增的变更记录。
 - 命令行的帮助、提示、警告、错误与 `gherkai deploy` 的步骤行统一了用词：口语的「跑」改为「运行」或「执行」；`--default-job-timeout` 的帮助改称「job 墙钟预算秒」；`gherkai skill` 各命令的帮助改称「agent skill」；`deploy` 里同步官方 worker 镜像的那一步改称「基础镜像同步」；`plan` 的输出表头改称「用例预检」。用户文档与随包发行的 agent skill 同批对齐了同一套用词：`plan` 一律称「用例预检」，前台与后台之别称「执行方式」、本机与云端之别称「执行后端」，两者的四种组合称「四种组合」；指一次运行时不再称「批」，统一称 `run` 或「本次运行」。`--vpc` 在帮助与用法行里的取值占位符改为 `取值`，`--require-approval` 的帮助改称「审批级别」，`gherkai deploy` 关于 VPC 的提示与报错统一说「VPC 取值」，与用户指南里的选项表用词一致。命令、选项、输出结构与退出码都没有变化。
 - `gherkai --help` 不再列出 `_reconcile` 与 `_tunnel_watch`：它们是 `submit` 在后台启动的子进程入口，不供直接使用；此前二者以「==SUPPRESS==」出现在命令列表里。
 
@@ -129,8 +129,8 @@
 
 ### 升级须知
 
-- 在本机 local 后端运行用例的机器上，把命令行工具与你的用例用到的引擎 worker 升到同一版本（`uv tool upgrade gherkai`；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`），新的默认模型随 worker 一起升级；版本不一致会在运行前检查时以退出码 2 结束。安装形态见[开始使用](./docs/user-guide/getting-started.md)。
-- 部署方须重新执行 `gherkai deploy`：新的默认模型在新版本的 worker 基础镜像里，放宽后的模型调用权限也随部署更新。有自定义 worker 镜像 variant 的团队，从新版本的基础镜像重新构建后用 `gherkai deploy push-worker` 推送一次。升级步骤见[云端后端](./docs/user-guide/cloud-backend.md)。
+- 在本机 local 后端运行用例的机器上，把命令行工具与你的用例用到的引擎 worker 升到同一版本（`uv tool upgrade gherkai`；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`），新的默认模型随 worker 一起升级；版本不一致会在运行前检查时以退出码 2 结束。安装形态见[开始使用](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md)。
+- 部署方须重新执行 `gherkai deploy`：新的默认模型在新版本的 worker 基础镜像里，放宽后的模型调用权限也随部署更新。有自定义 worker 镜像 variant 的团队，从新版本的基础镜像重新构建后用 `gherkai deploy push-worker` 推送一次。升级步骤见[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)。
 - 想继续用原来的 Midscene 模型：把 `MIDSCENE_MODEL_ID` 设为 `qwen.qwen3-vl-235b-a22b`（本机 local 后端设在 shell 里，云端 cloud 后端写进定制镜像的环境变量）。
 
 ## [1.4.3] - 2026-09-16

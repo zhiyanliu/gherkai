@@ -195,7 +195,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 前两处是仍开放、有意接受的取舍，不是遗漏；第三处已关闭、留作记录（含被拒做法）；末条是设备目标的指针。这里把「什么情况下该回来改」写成可对表的信号。
 
 - **截图字节的残余风险**（只在云端后端；本机后端不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
-- **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**预案**：core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝，一并立项。
+- **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**已立项（2026-11-01）**：做进 1.5、排在设备验收之后——core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝。
 - **已关闭：job 判 error 且有 step 记录时 `explain` 文本不打判定行**（v1.4.3 发版验证观察到，云端 timeout 是首例）：设备目标让全部 scenario 都是合成记录的 job 成为常态，缺口由决策四「带 error_type 的 error / aborted 总打判定行」关闭。被拒的另一做法是不把合成记录计入 `has_step_records`：它补不了「执行中途会话丢失、真实记录与合成记录混在一起」的情形，还会让字段语义与 JSON 的 steps 数组对不上。
 
 - **设备目标的证据字段与平台旁证**：设备目标的 evidence 在 schema 1 上加键（`step_kind`、顶层 `url` / `url_missing`、失败步的 `controls` 与 `page_source`，见决策一的设备例外）；机型与系统版本放在 scope 表头（由 `session_opened.device` 派生），不进 evidence；Device Farm 的录像与日志只记会话 ARN、`explain` 给出控制台链接，不下载进 run 产物，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8。
