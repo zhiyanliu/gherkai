@@ -2668,7 +2668,7 @@ def _interrupt_prompt(level: int, *, cloud: bool, grace: float) -> str:
         if cloud:
             return ("收到中断信号，正在请求停止云端 worker 并释放会话，停止宽限由部署配置决定；"
                     "再发一次中断（如再按一次 Ctrl-C）只会重发停止请求、不能缩短等待，会话仍可能来不及释放、继续计费")
-        return (f"收到中断信号，正在停止 worker 并释放会话，最多等约 {grace:g} 秒；"
+        return (f"收到中断信号，正在停止 worker 并释放会话，给 worker 的释放宽限为 {grace:g} 秒、到期强制结束后再收集结果；"
                 "再发一次中断（如再按一次 Ctrl-C）会立即结束 worker，会话可能来不及释放、继续计费")
     if cloud:
         return f"再次收到中断信号，已重发云端停止请求，停止宽限不变；{console}"

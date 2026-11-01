@@ -258,7 +258,7 @@ class _Worker:
                 if retriable:
                     continue
                 if self.opts.fail_fast and result.status == Status.ERROR:
-                    # fail-fast 的中止标志在 worker 线程里、终局判定一出就置（不等主线程的 as_completed 轮到它）：排队中的下一个 job
+                    # fail-fast 的中止标志在 worker 线程里、终局判定一出就置（不等主线程消费该 job 的完成结果）：排队中的下一个 job
                     # 在起 worker 前就能看到它 → SKIPPED（没花钱），而不是刚起来就被中止成 ABORTED。只在不再重试时置——可重试的
                     # 瞬时网络故障先重试、不触发整批中止。主线程随后经 _stop_all 对仍在运行的 worker 落定 stop_reason 并发停止请求。
                     self.abort_flag.set("fail-fast")
@@ -464,7 +464,7 @@ def schedule(
     on_job_complete: 每个 job 完成时回调它**已归约好的 JobResult**（ADR 0030 实时写接缝）。schedule 自己
               不碰任何 store——落库/写序由组合根注入的回调编排（默认 None 表示 no-op，即零落盘路径：测试/--no-report/
               纯内存都不传，保 schedule 纯 reducer 与 fake-clock 可测）。**正常路径（产品）总会接 persistence**，
-              None 不是常态。在 as_completed 主线程**串行** fire（非 worker 线程）。
+              None 不是常态。在等待循环所在的主线程中**串行**调用（非 worker 线程）。
     on_event: 每个事件的**旁路观察者**（实时落库 RUNNING 中间态用，ADR 0030）。与 sink 区别：on_event 在
               **sink_lock 之外**调——故落库的磁盘 RMW 不阻塞别的 worker 的进度显示（决定三并发不变量）。
               它仍在 worker 线程被调、多 worker 并发，故观察者须自持锁（如 RunPersistence._lock）。默认 None。
@@ -554,7 +554,7 @@ def schedule(
                         opts.on_interrupt(2)
     run_duration_ms = (opts.clock() - run_start) * 1000.0
 
-    # 还原成 jobs 输入顺序（as_completed 是完成序），稳定输出
+    # 按 jobs 输入顺序排列结果，避免并发完成顺序影响输出
     order = {job.scope_id: i for i, job in enumerate(jobs)}
     job_results.sort(key=lambda jr: order.get(jr.scope_id, 0))
 

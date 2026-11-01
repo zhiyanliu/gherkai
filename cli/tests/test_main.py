@@ -2651,7 +2651,7 @@ def test_run_interrupted_exits_by_signal_prints_hint_and_restores_handlers(tmp_p
     assert code == rc  # 128 + 信号号，不按判定
     err = capsys.readouterr().err
     assert "正在停止 worker 并释放会话" in err
-    assert "再按一次 Ctrl-C" in err and "继续计费" in err and "最多等约" in err  # 首次中断提示：可以再按、但会话可能释放不掉
+    assert "再按一次 Ctrl-C" in err and "继续计费" in err and "释放宽限为" in err  # 首次中断提示：可以再按、但会话可能释放不掉
     assert (_signal.getsignal(_signal.SIGINT), _signal.getsignal(_signal.SIGTERM)) == before  # 处理器已还原
 
 
@@ -2688,7 +2688,7 @@ def test_run_second_interrupt_prints_release_warning(tmp_path, monkeypatch, caps
 def test_interrupt_prompts_by_backend_and_level():
     """两级提示按后端措辞：本机说宽限秒数与「立即结束 worker」；云端说宽限由部署配置决定、再次中断只重发停止请求；第二级都指向控制台。"""
     local1 = m._interrupt_prompt(1, cloud=False, grace=63.5)
-    assert "最多等约 63.5 秒" in local1 and "再按一次 Ctrl-C" in local1 and "继续计费" in local1
+    assert "释放宽限为 63.5 秒" in local1 and "再按一次 Ctrl-C" in local1 and "继续计费" in local1
     cloud1 = m._interrupt_prompt(1, cloud=True, grace=63.5)
     assert "部署配置" in cloud1 and "63.5" not in cloud1 and "重发停止请求" in cloud1 and "继续计费" in cloud1
     local2 = m._interrupt_prompt(2, cloud=False, grace=63.5)

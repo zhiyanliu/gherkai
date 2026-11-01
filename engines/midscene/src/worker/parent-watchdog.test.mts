@@ -37,6 +37,31 @@ test("未传入所属进程号（容器主进程）则不启动", async () => {
   assert.equal(polls, 0);
 });
 
+test("直接子进程：所属进程退出后尚未被回收（空信号仍报存在）也靠父进程号变化触发", async () => {
+  const ppids = [4242, 4242, 1, 1];
+  let polls = 0;
+  let gone = 0;
+  const stop = startParentWatchdog(() => { gone += 1; }, {
+    ownerPid: 4242, isAlive: () => true, getPpid: () => ppids[Math.min(polls++, ppids.length - 1)], intervalMs: 2,
+  });
+  await tick(60);
+  stop();
+  assert.equal(gone, 1);
+});
+
+test("经包装进程启动（父进程不是所属进程）：父进程号变化不作依据，只看所属进程是否存活", async () => {
+  const alive = [true, true, true, false];
+  let polls = 0;
+  let gone = 0;
+  const stop = startParentWatchdog(() => { gone += 1; }, {
+    ownerPid: 4242, isAlive: () => alive[Math.min(polls++, alive.length - 1)], getPpid: () => 9999, intervalMs: 2,
+  });
+  await tick(60);
+  stop();
+  assert.equal(gone, 1);
+  assert.equal(polls, 4);
+});
+
 test("环境变量解析：正整数取用，缺失或非法为 null", () => {
   assert.equal(ownerPidFromEnv({ GHERKAI_PARENT_PID: "123" }), 123);
   assert.equal(ownerPidFromEnv({}), null);

@@ -205,14 +205,17 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
-def _watch_parent(owner_pid: int, alive=_pid_alive, interval_s: float = PARENT_POLL_S) -> None:
+def _watch_parent(owner_pid: int, alive=_pid_alive, getppid=os.getppid, interval_s: float = PARENT_POLL_S) -> None:
     """所属进程消失视同 SIGTERM（ADR 0024 终止契约「父进程消失」条）：先立即核验一次，之后每 interval_s 秒核验所属进程是否存活；
-    已退出（CLI 被杀死或崩溃）即记 SIGTERM、置停止标志，主流程在安全点协作停止并释放会话。按显式传入的进程号核验而不是比较父进程号：
-    核验对象不随包装进程（uvx）改变，所属进程在装上之前就退出的情形首次核验即能发现。停止标志已置位时结束（收尾已在进行）。
+    已退出（CLI 被杀死或崩溃）即记 SIGTERM、置停止标志，主流程在安全点协作停止并释放会话。按显式传入的进程号核验而不是只比较父进程号：
+    核验对象不随包装进程（uvx）改变，所属进程在装上之前已退出且已被回收的情形首次核验即能发现；本进程直接是所属进程的子进程时另看
+    父进程号是否变化——所属进程一退出父进程号就变、不等回收。边界：经包装进程启动时，所属进程退出后尚未被其父进程回收的窗口内空信号
+    仍报告存在，要等回收后才触发，一直不被回收则不触发。停止标志已置位时结束（收尾已在进行）。
     在守护线程里运行（见 _start_parent_watchdog）；不是信号处理器，这里写一行诊断是安全的，写失败由 log 吞掉。"""
     global _stop_signum
+    direct = getppid() == owner_pid
     while True:
-        if not alive(owner_pid):
+        if not alive(owner_pid) or (direct and getppid() != owner_pid):
             _stop_signum = signal.SIGTERM
             _stop.set()
             log("worker: parent process exited, cooperative stop")

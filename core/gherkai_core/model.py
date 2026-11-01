@@ -160,9 +160,9 @@ class Status(str, Enum):
     """判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
 
     worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
-    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；aborted 还作为被使用方中断的 run 的
+    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；aborted 还作为使用方中断已被处理且有 job 记为 aborted 或 skipped 的 run 的
       run 级 status（ADR 0031 决定三的例外）。
-    - pending/running：实时写的 job 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
+    - pending/running：实时写的 job 与 run 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
       不进 JobResult.status（终态判定只会是 passed/failed/error/skipped/aborted）、不参与 severity 比较。
     """
 
@@ -187,7 +187,7 @@ _STATUS_SEVERITY: dict[Status, int] = {
 }
 
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
-# 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断的 run 在聚合之外另记 run 级 aborted，见 ADR 0031 决定三）
+# 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断已被处理且有 job 记为 aborted 或 skipped 时在聚合之外另记 run 级 aborted，见 ADR 0031 决定三）
 # + pending/running（前置态）。
 # 两路共用（ADR 0031 决定三 / 0034）：schedule 沿事件流实时聚合，喂的都是终态、过滤是 no-op；
 # project 的无状态投影真实喂入 pending/running（未起/正在运行的 job），此处过滤**承重**——否则前置态会污染

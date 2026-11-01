@@ -308,6 +308,27 @@ def test_parent_watchdog_treats_owner_exit_as_sigterm():
     assert len(seen) == 3  # 启动时一次、存活一次、第三次发现已退出
 
 
+def test_parent_watchdog_direct_child_uses_ppid_change_during_zombie_window():
+    """直接子进程：所属进程退出后尚未被回收（空信号仍报存在）也靠父进程号变化触发。"""
+    rs._stop_signum = None
+    ppids = iter([4242, 4242, 1, 1])
+    rs._watch_parent(4242, alive=lambda _pid: True, getppid=lambda: next(ppids), interval_s=0.001)
+    assert rs._stop.is_set() and rs._stop_signum == signal.SIGTERM
+
+
+def test_parent_watchdog_behind_wrapper_ignores_ppid():
+    """经包装进程启动（父进程不是所属进程）：父进程号不作依据，只看所属进程是否存活。"""
+    rs._stop_signum = None
+    seen = []
+
+    def alive(_pid):
+        seen.append(None)
+        return len(seen) <= 3
+
+    rs._watch_parent(4242, alive=alive, getppid=lambda: 9999, interval_s=0.001)
+    assert rs._stop.is_set() and len(seen) == 4
+
+
 def test_parent_watchdog_fires_immediately_when_owner_already_gone():
     """装上之前所属进程已退出：首次核验即触发，不等一个间隔。"""
     rs._stop_signum = None

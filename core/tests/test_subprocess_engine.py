@@ -601,3 +601,29 @@ def test_cooperative_stop_signals_whole_group_behind_wrapper(tmp_path):
     handle.stop(5.0)
     assert _wait_dead(worker_pid), "孙进程应因收到 SIGTERM 协作退出"
     assert time.monotonic() - t0 < 4.0  # 没有等到宽限耗尽才 SIGKILL
+
+
+def test_positive_grace_stop_kills_deaf_grandchild_after_grace_behind_wrapper(tmp_path):
+    """正宽限的停止等的是整组消失：组长（包装进程）被 SIGTERM 结束后，无视 SIGTERM 的孙进程在宽限到期时被整组 SIGKILL。"""
+    pid_file = str(tmp_path / "pids")
+    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & wait $!', pid_file)
+    handle, events = engine.run_scope(_job("s"))
+    assert next(events).type == "scope_started"
+    worker_pid = _grandchild_pid(pid_file)
+    t0 = time.monotonic()
+    handle.stop(1.0)
+    assert _wait_dead(worker_pid), "孙进程应在宽限到期后被整组 SIGKILL 结束"
+    elapsed = time.monotonic() - t0
+    assert 1.0 <= elapsed < 4.0, elapsed  # 等满宽限才强杀，之后不再多等
+
+
+def test_positive_grace_stop_kills_deaf_grandchild_when_leader_already_exited(tmp_path):
+    """组长已退出、无视 SIGTERM 的孙进程仍在：正宽限的停止不因组长已退出而跳过，宽限到期整组 SIGKILL。"""
+    pid_file = str(tmp_path / "pids")
+    engine = _wrapper_engine("deaf", '"$0" "$1" <&0 & exit 0', pid_file)
+    handle, events = engine.run_scope(_job("s"))
+    assert next(events).type == "scope_started"
+    handle._proc.wait(timeout=5)  # 组长已退出
+    worker_pid = _grandchild_pid(pid_file)
+    handle.stop(1.0)
+    assert _wait_dead(worker_pid), "组长退出后孙进程仍应在宽限到期后被结束"
