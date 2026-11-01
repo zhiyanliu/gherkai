@@ -85,6 +85,14 @@ def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
     assert not hits, "用户文档正文写完整句（即 / 是 / 表示；退出码 N；然后 / 得到），符号留给代码块：\n" + "\n".join(hits)
 
 
+def test_changelog_uses_absolute_links_only():
+    """CHANGELOG 全文只写绝对 URL（ADR 0039）：Release 正文由发布脚本直接截取本版那一节、不改写链接，相对链接到了 Releases 页面就是死链。"""
+    import re as _re
+    text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
+    relative = [m.group(0) for m in _re.finditer(r"\]\((?:\./|\.\./|docs/|[A-Za-z0-9_-]+\.md)[^)]*\)", text)]
+    assert relative == [], f"CHANGELOG 里有相对链接（改成 https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>）：{relative}"
+
+
 def test_retired_terms_are_all_in_the_glossary():
     """护栏的退役词表是词表各条 `_Avoid_` 的子集：两份清单同源，禁词才有「规范名是什么」的出处。
 

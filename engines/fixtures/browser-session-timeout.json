@@ -1,0 +1,15 @@
+{
+  "comment": "AgentCore 浏览器会话的 sessionTimeoutSeconds 取值规则（ADR 0024 终止契约「泄漏兜底」条）：job 的 timeoutS 加 margin_s，夹在 min_s 与 max_s 之间；timeoutS 为空时不传、保持服务默认。两个桌面 worker 的常量与此对拍。",
+  "margin_s": 120,
+  "min_s": 60,
+  "max_s": 28800,
+  "cases": [
+    { "timeout_s": null, "expected": null },
+    { "timeout_s": 300, "expected": 420 },
+    { "timeout_s": 0, "expected": 120 },
+    { "timeout_s": 10, "expected": 130 },
+    { "timeout_s": 28700, "expected": 28800 },
+    { "timeout_s": 90000, "expected": 28800 },
+    { "timeout_s": 1500.4, "expected": 1621 }
+  ]
+}

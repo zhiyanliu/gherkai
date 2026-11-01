@@ -42,6 +42,7 @@ import hashlib
 import inspect
 import io
 import json
+import math
 import os
 import signal
 import sys
@@ -784,6 +785,21 @@ class _StoppedAfterStart(Exception):
     按停止路径正常返回，不进建连重试判定。"""
 
 
+# AgentCore 浏览器会话的 sessionTimeoutSeconds（ADR 0024 终止契约「泄漏兜底」条）：按 job 的墙钟预算加余量设定，收紧泄漏会话的计费上界；
+# 余量盖住超时催停后的收尾。三个数与 Midscene 桌面 worker 同值，由 engines/fixtures/browser-session-timeout.json 对拍。
+BROWSER_SESSION_TIMEOUT_MARGIN_S = 120
+BROWSER_SESSION_TIMEOUT_MIN_S = 60
+BROWSER_SESSION_TIMEOUT_MAX_S = 28800
+
+
+def browser_session_timeout_s(timeout_s) -> int | None:
+    """job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 None（不传、保持服务默认）。"""
+    if timeout_s is None:
+        return None
+    value = math.ceil(float(timeout_s)) + BROWSER_SESSION_TIMEOUT_MARGIN_S
+    return max(BROWSER_SESSION_TIMEOUT_MIN_S, min(BROWSER_SESSION_TIMEOUT_MAX_S, value))
+
+
 class _BrowserSession:
     """worker 自持的一次 AgentCore 浏览器会话（ADR 0028「Nova 会话由 worker 自己持有」；ADR 0024 终止契约「Nova worker」条）。
 
@@ -805,8 +821,10 @@ class _BrowserSession:
     被包装改头换面——都在真 SDK 上核过，理由与证据在 ADR 0028。也曾起会话带 SDK 缺省的 default profile、把会话提供者作 browser_auth，
     退出时存回服务端，状态跨 scope、跨 run 延续——被拒理由同在 ADR 0028 该条。"""
 
-    def __init__(self, *, region: str, logs_dir: str | None, sink: EventSink, scope_id: str, request_name: str) -> None:
+    def __init__(self, *, region: str, logs_dir: str | None, sink: EventSink, scope_id: str, request_name: str,
+                 session_timeout_s: int | None = None) -> None:
         self._region, self._logs_dir = region, logs_dir
+        self._session_timeout_s = session_timeout_s  # None 即不传、保持服务默认（见 browser_session_timeout_s）
         self._sink, self._scope_id = sink, scope_id
         self.request_name = request_name          # 这次 Start 携带的会话名（attempted 事件的 name）
         self.session_id: str | None = None       # AgentCore 浏览器会话 id（血缘，进会话事件、scope_started / scope_done）
@@ -862,7 +880,8 @@ class _BrowserSession:
 
         def _run() -> None:
             try:
-                self._client.start(name=self.request_name)
+                kwargs = {"session_timeout_seconds": self._session_timeout_s} if self._session_timeout_s is not None else {}
+                self._client.start(name=self.request_name, **kwargs)
             except BaseException as e:  # noqa: BLE001  线程里只收集，由主线程抛出
                 outcome["exc"] = e
             finally:
@@ -1257,7 +1276,8 @@ def main() -> int:
             return  # 建连前已收到停止信号（含建连早期 SIGTERM——Workflow() 构造期到达，见 ADR 0024）→ 正常退出、不建连
         # 每次 Start 一个新的尝试序号（从 1 起，与日志里的 attempt 编号一致）：同名会话可以并行存在，序号是名字的一部分（ADR 0051 决策 3）
         browser = _BrowserSession(region=REGION, logs_dir=_nova_logs_dir(), sink=sink, scope_id=scope["id"],
-                                  request_name=session_request_name(run_id, scope["id"], attempt + 1))
+                                  request_name=session_request_name(run_id, scope["id"], attempt + 1),
+                                  session_timeout_s=browser_session_timeout_s(job.get("timeoutS")))
         try:
             with browser as nova:  # Start 之前失败 → 建连域异常、可重试；Start 之后失败 → 先释放再抛
                 session_id, nova_session_id = browser.session_id, browser.nova_session_id

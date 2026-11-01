@@ -332,6 +332,22 @@ def test_every_start_carries_the_request_name_and_nothing_else(world):
     assert name.startswith(f"gherkai:{RUN}:") and ":1:features%2F" in name and len(name) <= 100
 
 
+def test_start_sets_session_timeout_from_job_budget(world):
+    """job 有墙钟预算时 Start 带 session_timeout_seconds（预算加余量，ADR 0024 终止契约「泄漏兜底」条）；预算为空时不传（上一例）。"""
+    world.job = json.dumps({**json.loads(_job()), "timeoutS": 300})
+    assert rs.main() == 0
+    assert world.start_kwargs == [{"name": rs.session_request_name(RUN, SCOPE_ID, 1), "session_timeout_seconds": 420}]
+
+
+def test_browser_session_timeout_matches_shared_fixture():
+    """取值规则与 Midscene 桌面 worker 对拍（engines/fixtures/browser-session-timeout.json）：余量、区间与各用例一致。"""
+    import pathlib
+    fx = json.loads((pathlib.Path(__file__).resolve().parents[2] / "fixtures" / "browser-session-timeout.json").read_text(encoding="utf-8"))
+    assert (rs.BROWSER_SESSION_TIMEOUT_MARGIN_S, rs.BROWSER_SESSION_TIMEOUT_MIN_S, rs.BROWSER_SESSION_TIMEOUT_MAX_S) == (fx["margin_s"], fx["min_s"], fx["max_s"])
+    for case in fx["cases"]:
+        assert rs.browser_session_timeout_s(case["timeout_s"]) == case["expected"], case
+
+
 def test_long_scope_id_still_fits_the_agentcore_name_limit(world):
     world.job = _job(scope_id="features/" + "很长的场景目录/" * 30 + "x.feature")
     assert rs.main() == 0

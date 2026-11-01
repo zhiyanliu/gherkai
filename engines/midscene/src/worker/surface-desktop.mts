@@ -169,6 +169,17 @@ export interface DesktopSurfaceHooks {
 /** 桌面实现的构造函数（导出名由 worker/surface.mts 的 SurfaceFactory 约定）。只组装、不做 I/O；本次运行的编号缺失（env RUN_ID）
  *  或 AWS_REGION 未设时同步报错——前者是起 worker 一方的装配错误，在建会话之前报出、不发任何事件、以 1 退出（与 Nova Act worker
  *  对称）。PlaywrightAgent 的构造项是 deps.agentOpts（两种 Agent 共用的项）加 forceChromeSelectRendering。 */
+// AgentCore 浏览器会话的 sessionTimeoutSeconds（ADR 0024 终止契约「泄漏兜底」条）：按 job 的墙钟预算加余量设定，收紧泄漏会话的计费上界；
+// 余量盖住超时催停后的收尾。三个数与 Nova 桌面 worker 同值，由 engines/fixtures/browser-session-timeout.json 对拍。
+export const BROWSER_SESSION_TIMEOUT = { marginS: 120, minS: 60, maxS: 28800 } as const;
+
+/** job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 null（不传、保持服务默认）。 */
+export function browserSessionTimeoutS(timeoutS: number | null | undefined): number | null {
+  if (timeoutS === null || timeoutS === undefined) return null;
+  const value = Math.ceil(timeoutS) + BROWSER_SESSION_TIMEOUT.marginS;
+  return Math.max(BROWSER_SESSION_TIMEOUT.minS, Math.min(BROWSER_SESSION_TIMEOUT.maxS, value));
+}
+
 export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHooks = {}): TargetSurface {
   const { emit, log } = deps;
   const agentOpts = {
@@ -303,7 +314,10 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
     startInFlight = request;  // Start RPC 在途（SIGTERM 兜底信号）；返回/抛错后清
     let started;
     try {
-      started = await client.send(new StartBrowserSessionCommand({ browserIdentifier: BROWSER_ID, name }));
+      const sessionTimeoutSeconds = browserSessionTimeoutS(deps.job.timeoutS);
+      started = await client.send(new StartBrowserSessionCommand({
+        browserIdentifier: BROWSER_ID, name, ...(sessionTimeoutSeconds === null ? {} : { sessionTimeoutSeconds }),
+      }));
     } finally {
       if (startInFlight === request) startInFlight = null;
     }

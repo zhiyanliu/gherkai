@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793509600.157853,
-    "ast_hash": "f2756ae8bdf3f479722db89420ec3a73",
+    "mtime": 1793524514.5174048,
+    "ast_hash": "d342c6e3adca98d3393cb80ae89c0881",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1793377275.1581652,
-    "ast_hash": "eaeef5ad4b582a155293a7ed13532b59",
+    "mtime": 1793524443.7097397,
+    "ast_hash": "8965ebd6223ba203d2ee66cd2c3ca4fd",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -760,8 +760,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/run-scope.test.mts": {
-    "mtime": 1793502927.419226,
-    "ast_hash": "5e5f29c2f4e69f5842c092788d68dd7c",
+    "mtime": 1793524885.457889,
+    "ast_hash": "ef3c0e28ee11ab8ac5775a9926370e2e",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/user-steps.mts": {
@@ -830,8 +830,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793509600.1582534,
-    "ast_hash": "dec61e27ec29dc4b80f9e4ad87a294a8",
+    "mtime": 1793524686.7940328,
+    "ast_hash": "fb9bfd4edd9018a90ae5ae6272d5f2c9",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -1080,8 +1080,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0039-user-facing-surfaces-no-internal-references.md": {
-    "mtime": 1793243610.4029217,
-    "ast_hash": "081e3bd34d88666b1cca295beaa7167d",
+    "mtime": 1793524443.709203,
+    "ast_hash": "9e43cd85d71d261cedd24a471c14b0c5",
     "semantic_hash": ""
   },
   "tools/graphify_refresh.sh": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793438003.7287917,
-    "ast_hash": "b90d5a12aac54c7332550bb7d07fb6af",
+    "mtime": 1793524443.7099178,
+    "ast_hash": "45e28de23c259496ac74bfdfdb45fa48",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1320,8 +1320,8 @@
     "semantic_hash": "af72dd144e3a8b565b8e8e7a499de384"
   },
   "cli/tests/test_user_docs.py": {
-    "mtime": 1793242696.3613126,
-    "ast_hash": "2e4a92c556c16c58a58ed1c28fc7a334",
+    "mtime": 1793524989.3529456,
+    "ast_hash": "9e2434992c5222bed1aea641a59cb8ab",
     "semantic_hash": ""
   },
   ".github/release_body_footer.md": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1793381559.641725,
-    "ast_hash": "4531e39c4749b4dbddff59a2e38402ee",
+    "mtime": 1793524443.7094693,
+    "ast_hash": "2bfd24792c72f9e6834e91f6d2abad95",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793523521.8350582,
-    "ast_hash": "6edaeb3db753c38917f421127aff7e3b",
+    "mtime": 1793524592.1171737,
+    "ast_hash": "23c431edeb78cade996c4f9fd7eeb54f",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793523521.8354402,
-    "ast_hash": "5d835f1df4504f82e08ceaaac3b6a0cd",
+    "mtime": 1793524514.517685,
+    "ast_hash": "bbb191b6ee67d02135aab898d952f628",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2220,13 +2220,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793521838.8965225,
-    "ast_hash": "f933814557f7aae13062c2fff8b560e0",
+    "mtime": 1793524592.1166396,
+    "ast_hash": "3c9de02c77153d8c9153e03ddf1e7946",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793521873.2233188,
-    "ast_hash": "a1efafcb4b2d30d2b614bc7121a6a02c",
+    "mtime": 1793524592.1169171,
+    "ast_hash": "71d7bbae02f8e33b28cbf24007781cdb",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2265,8 +2265,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface-desktop.mts": {
-    "mtime": 1793374291.0752323,
-    "ast_hash": "39e6124331b1259fc4f8aea432781f44",
+    "mtime": 1793524686.7942202,
+    "ast_hash": "6648953c9a45f53e83297c2643aea52a",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface.mts": {
@@ -2280,8 +2280,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_session_events.py": {
-    "mtime": 1793374189.510861,
-    "ast_hash": "6ec18ad7948d1fc581b2aadb52e7db76",
+    "mtime": 1793524852.7454965,
+    "ast_hash": "faff6f0896aa8f813b8f9b29f405a027",
     "semantic_hash": ""
   },
   "features/steps/restart_app.mts": {
@@ -2327,6 +2327,11 @@
   "engines/midscene/src/worker/parent-watchdog.test.mts": {
     "mtime": 1793507818.4892647,
     "ast_hash": "6ac39de79757ee2665de2c94d5d151bc",
+    "semantic_hash": ""
+  },
+  "engines/midscene/src/worker/browser-session-timeout.test.mts": {
+    "mtime": 1793524741.301453,
+    "ast_hash": "f670413e89c8d7258ce1f884e1f35d35",
     "semantic_hash": ""
   }
 }

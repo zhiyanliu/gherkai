@@ -58,6 +58,7 @@ const SCOPE = { id: "features/a.feature", name: "a" };
 /** 假的 AgentCore 控制面：Start 依次给 sess-1、sess-2……，记下每次请求名；Stop 按 stopFails 决定成败。trace 记 start / stop 次序。 */
 function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean; startHangs?: (nth: number) => boolean; trace?: string[] } = {}) {
   const names: string[] = [];
+  const timeouts: Array<number | undefined> = [];  // 每次 Start 带的 sessionTimeoutSeconds（未传为 undefined）
   const stops: string[] = [];
   const stopCount = new Map<string, number>();
   let starts = 0;
@@ -67,6 +68,7 @@ function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean
         starts += 1;
         const n = starts;
         names.push(cmd.input.name!);
+        timeouts.push(cmd.input.sessionTimeoutSeconds);
         opts.trace?.push(`start:${cmd.input.name}`);
         if (opts.startHangs?.(n)) return await new Promise(() => {});  // 永不返回：Start 在途
         return { sessionId: `sess-${n}`, streams: { automationStream: { streamEndpoint: `wss://agentcore.test/${n}` } } };
@@ -83,7 +85,7 @@ function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean
       throw new Error(`unexpected command ${cmd?.constructor?.name}`);
     },
   };
-  return { client: client as any, names, stops };
+  return { client: client as any, names, timeouts, stops };
 }
 
 /** 假的 Playwright 浏览器：只有一个 context、一个 page（在 page 上补 connect() 要调的 evaluate）。 */
@@ -1683,6 +1685,7 @@ test("桌面正常收尾：Start 返回即 session_opened，释放后 session_cl
     assert.deepEqual(events[7], { type: "scope_done", scopeId: SCOPE.id, sessionId: "sess-1", reportRefs: [] });
     assert.match(core.names[0], /^gherkai:20260629T141207Z-a3f9c1:[0-9a-f]{16}:1:/, "请求带会话名，不再是固定名");
     assert.ok(core.names[0].length <= 100);
+    assert.equal(core.timeouts[0], undefined, "job 没有墙钟预算时不传 sessionTimeoutSeconds、保持服务默认");
     const at = (x: string) => trace.indexOf(x);
     assert.ok(at("emit:session_closed") < at("emit:scope_done") && at("emit:scope_done") < at("drain:30000") && at("drain:30000") < at("flush"),
       trace.join(" "));
@@ -1895,5 +1898,21 @@ test("stderr 管道断开后诊断写失败只丢弃这一行：预检失败的 
   } finally {
     fs.closeSync(eventsFd);
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// AgentCore 浏览器会话超时按 job 的墙钟预算设定（ADR 0024 终止契约「泄漏兜底」条）：有预算时 Start 带 sessionTimeoutSeconds，取预算加 120 秒余量。
+test("job 有墙钟预算时 StartBrowserSession 带 sessionTimeoutSeconds（预算加余量）", async () => {
+  const { runScope } = await importMod();
+  const prevRunDir = process.env.MIDSCENE_RUN_DIR;
+  process.env.MIDSCENE_RUN_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "seam-run-"));
+  try {
+    const { core, createSurface } = desktopFactory(scopeAgent());
+    const { io, events } = scopeIo(createSurface);
+    assert.equal(await runScope({ ...aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), timeoutS: 300 }, io), 0);
+    assert.deepEqual(core.timeouts, [420]);
+    assert.equal(types(events).at(-1), "scope_done");
+  } finally {
+    if (prevRunDir === undefined) delete process.env.MIDSCENE_RUN_DIR; else process.env.MIDSCENE_RUN_DIR = prevRunDir;
   }
 });

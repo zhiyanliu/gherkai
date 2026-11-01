@@ -450,6 +450,29 @@ test("获取预算到期：在途的等待被预算信号中止，归 acquire_ti
   assert.equal(h.surface.sessionId(), ARN1);  // 已建的会话照常由释放收尾
 });
 
+test("会话丢失与预算到期同时成立：会话丢失优先——部件给出或异常已归类的 session_lost 不被改写成 acquire_timeout", async () => {
+  // 等到 RUNNING 期间预算用尽，会话块给出的是准备阶段的 session_lost：保持 session_lost（ADR 0051 决策 2）
+  const lostRef: { h?: ReturnType<typeof harness> } = {};
+  const lost = harness({
+    waitRunning: async () => { lostRef.h!.clock.t += 601_000; },
+    waitRunningFailure: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE },
+  });
+  lostRef.h = lost;
+  assert.deepEqual(await lost.surface.acquire(),
+    { ready: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
+  // 能力探测抛出的异常已带会话丢失归类、此时预算也已用尽：仍记 session_lost
+  const ref: { h?: ReturnType<typeof harness> } = {};
+  const classified = harness({
+    probeRun: async () => {
+      ref.h!.clock.t += 601_000;
+      throw attachClassification(new Error("x"), { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
+    },
+  });
+  ref.h = classified;
+  assert.deepEqual(await classified.surface.acquire(),
+    { ready: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } });
+});
+
 test("预算到期后部件给出的非判据型失败也归 acquire_timeout，precheck_failed 保持原归因", async () => {
   const clockRef: { h?: ReturnType<typeof harness> } = {};
   const h = harness({
