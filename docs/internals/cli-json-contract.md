@@ -25,7 +25,7 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | 本次 run 的 id（可排序时间戳前缀 + 随机后缀） |
-| `status` | `passed` / `failed` / `error` | run 级判定：任一 job 为 error 则 error；任一为 failed 则 failed；否则 passed。job 级的 `skipped` / `aborted` 不参与 run 级聚合，故 run 级不出现这两个值 |
+| `status` | `passed` / `failed` / `error` / `aborted` | run 级判定：任一 job 为 error 则 error；任一为 failed 则 failed；否则 passed。job 级的 `skipped` / `aborted` 不参与 run 级聚合；唯一例外是同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `skipped` 或 `aborted` 时，run 级直接记 `aborted`（判定不完整，不按仅有的判定聚合） |
 | `duration_ms` | number \| null | run 级墙钟（含并发，不等于各 job 之和） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 上报 tokens、Nova 上报 agent 工作秒）；无引擎上报时为 null，**不折算为美元** |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅当 run 含设备目标 job 时出现：各设备 job 的 `device_observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话总数（不计入合计；`attempted` 的尝试两键都不计） |
@@ -38,14 +38,14 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `scope_id` | string | scope 键：`@scope:` 的值，或未标 scope 时的 scenario id（形态见下文 `scenario_id`） |
-| `status` | `passed` / `failed` / `error` / `skipped` / `aborted` | job 判定；后两态只在同步 `run` 的 `--fail-fast` 路径出现（`skipped` 表示未启动，`aborted` 表示执行中被中止） |
+| `status` | `passed` / `failed` / `error` / `skipped` / `aborted` | job 判定；后两态只在同步 `run` 出现——`--fail-fast` 中止这个 run，或使用方中断（Ctrl-C / SIGTERM）（`skipped` 表示未启动，`aborted` 表示执行中被中止） |
 | `duration_ms` | number \| null | scope 墙钟：从 `scope_started` 到 `scope_done`，不含建立会话的时间（设备目标也不含获取设备的时间）；未收到 `scope_started` 或 `scope_done` 时为 null（执行前失败、超时、worker 异常退出、未启动、被中止） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 本 job 的原生量合计（失败的 act 也计入） |
 | `session_id` | string \| null | 云端浏览器会话 id（血缘；两个引擎都是 AgentCore 浏览器会话 id，可与 worker 日志对应；Nova Act 的轨迹目录按另一种会话 id 命名，worker 日志里有两者的对应行）；设备目标为 Device Farm 远程访问会话的 ARN |
 | `sessions[]` | array \| 省略 | 本 job 开过或尝试过的每个会话一项：设备目标是 Device Farm 远程访问会话，桌面目标是 AgentCore 浏览器会话（两个引擎的桌面 worker 都报出会话的建立与停止）；没有会话记录的桌面 job 省略此键。每项含 `session_id`（结果未知的创建尝试为 null）、`name`（会话名；桌面目标与 `session_id` 相同，结果未知的创建尝试为这次请求携带的会话名）、`origin`（`created` / `discovered` / `attempted`；桌面目标没有 `discovered`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null；桌面目标恒为 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null；桌面目标恒为 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；桌面目标恒为 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标（桌面 job 带会话记录时同样省略）：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
 | `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止（设备目标与桌面目标都可能出现），`message` 列出会话名，并按目标说明到哪里核对 |
-| `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 被中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
+| `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 或使用方中断导致的中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`；设备目标另有 `device_session`，见 `explain` 一节）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
 
@@ -107,7 +107,7 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | `pending` / `running` / `passed` / `failed` / `error` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
+| `status` | `pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |

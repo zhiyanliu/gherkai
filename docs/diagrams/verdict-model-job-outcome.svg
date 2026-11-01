@@ -461,7 +461,7 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="q1" data-edge-to="q2" data-edge-label="否" data-edge-key="0" data-edge-id="q1-q2" data-composition-points="192,188;230,188" d="M 192 188 L 230 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q1" data-edge-to="sk" data-edge-key="1" data-edge-id="q1-sk" data-composition-points="120,214;120,424" d="M 120 214 L 120 424" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="q2" data-edge-to="q3" data-edge-key="2" data-edge-id="q2-q3" data-composition-points="374,188;402,188" d="M 374 188 L 402 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast" data-edge-key="3" data-edge-id="q3-ab" data-composition-points="476,214;476,304;558,304;558,526;542,526" d="M 476 214 L 476 304 L 558 304 L 558 526 L 542 526" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast / 中断" data-edge-key="3" data-edge-id="q3-ab" data-composition-points="476,214;476,304;558,304;558,526;542,526" d="M 476 214 L 476 304 L 558 304 L 558 526 L 542 526" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="q3" data-edge-to="q4" data-edge-label="无中止" data-edge-key="4" data-edge-id="q3-q4" data-composition-points="550,188;596.8,188" d="M 550 188 L 596.8 188" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="q3" data-edge-to="to" data-edge-label="墙钟到点" data-edge-key="5" data-edge-id="q3-to" data-composition-points="402,188;386,188;386,304;476,304;476,424" d="M 402 188 L 386 188 L 386 304 L 476 304 L 476 424" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
         <path data-edge-from="q4" data-edge-to="ee2" data-edge-label="其余" data-edge-key="6" data-edge-id="q4-ee2" data-composition-points="672.8,214;672.8,304;754.8,304;754.8,526;738.8,526" d="M 672.8 214 L 672.8 304 L 754.8 304 L 754.8 526 L 738.8 526" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
@@ -471,15 +471,15 @@ rect.c-bg-rect { fill: var(--bg); }
         <path data-edge-from="q5" data-edge-to="wk" data-edge-label="是" data-edge-key="10" data-edge-id="q5-wk" data-composition-points="862.8,214;862.8,304;954.8,304;954.8,450;938.8,450" d="M 862.8 214 L 862.8 304 L 954.8 304 L 954.8 450 L 938.8 450" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
 
         <!-- Nodes -->
-        <g id="node-q1" data-node-id="q1" data-node-label="fail-fast 中止？" tabindex="0" role="button" aria-label="聚焦fail-fast 中止？，worker 启动前, 判据：有序短路链，前一判据命中即定案 › 启动" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 启动前" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动">
-          <title>fail-fast 中止？ · worker 启动前 · 判据：有序短路链，前一判据命中即定案 › 启动</title>
+        <g id="node-q1" data-node-id="q1" data-node-label="run 已中止？" tabindex="0" role="button" aria-label="聚焦run 已中止？，worker 启动前, 判据：有序短路链，前一判据命中即定案 › 启动" aria-pressed="false" data-node-kind="security" data-node-sublabel="worker 启动前" data-node-context="判据：有序短路链，前一判据命中即定案 › 启动">
+          <title>run 已中止？ · worker 启动前 · 判据：有序短路链，前一判据命中即定案 › 启动</title>
           <rect x="48" y="162" width="144" height="52" rx="6" class="c-mask"/>
           <rect x="48" y="162" width="144" height="52" rx="6" class="c-security" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(54 168) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
           </g>
-          <text data-node-label="" x="120" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">fail-fast 中止？</text>
+          <text data-node-label="" x="120" y="183" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">run 已中止？</text>
           <text x="120" y="200" class="t-muted" font-size="8" text-anchor="middle">worker 启动前</text>
         </g>
 
@@ -620,9 +620,9 @@ rect.c-bg-rect { fill: var(--bg); }
         </g>
 
 
-        <g data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast" data-edge-key="3" data-edge-id="q3-ab">
-          <rect x="531.4" y="395" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
-          <text x="558" y="405" class="t-security" font-size="8" text-anchor="middle">fail-fast</text>
+        <g data-edge-from="q3" data-edge-to="ab" data-edge-label="fail-fast / 中断" data-edge-key="3" data-edge-id="q3-ab">
+          <rect x="514.6" y="395" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="558" y="405" class="t-security" font-size="8" text-anchor="middle">fail-fast / 中断</text>
         </g>
         <g data-edge-from="q3" data-edge-to="q4" data-edge-label="无中止" data-edge-key="4" data-edge-id="q3-q4">
           <rect x="554" y="168" width="38.8" height="14" rx="3" class="c-mask"/>
@@ -670,4 +670,4 @@ rect.c-bg-rect { fill: var(--bg); }
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=c8c4d1fa0c04a8f2199d40d9c30af0fac46ee0a608d5e539a9aff9b2678c638e -->
+<!-- gherkai:source-sha256=f4b2743b1607eeb7f566b347d7828b2c838f8495e1d900e70a10dbea55f6c7ea -->

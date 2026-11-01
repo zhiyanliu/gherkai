@@ -91,7 +91,7 @@
       "lane": "laneChain",
       "col": 0,
       "type": "security",
-      "label": "fail-fast 中止？",
+      "label": "run 已中止？",
       "sublabel": "worker 启动前",
       "width": 144
     },
@@ -262,7 +262,7 @@
       "id": "q3-ab",
       "from": "q3",
       "to": "ab",
-      "label": "fail-fast",
+      "label": "fail-fast / 中断",
       "variant": "security",
       "role": "error",
       "labelSegment": 2
@@ -297,7 +297,7 @@
       "dot": "amber",
       "title": "顺序即判据",
       "items": [
-        "先判 fail-fast 是否已中止，再起 worker（起不来按退出码未知进后面的判据），然后判是否被主动中止，再看退出与内容是否完整，最后才做 scenario 归约",
+        "先判这个 run 是否已被中止（fail-fast 或使用方中断），再起 worker（起不来按退出码未知进后面的判据），然后判是否被主动中止，再看退出与内容是否完整，最后才做 scenario 归约",
         "前一判据一旦命中即就地定案，不再进入后续判据",
         "主动中止的原因在作出停止决定的那一刻落定：墙钟已过记 timeout，否则记 aborted；之后 worker 如何退出都不改写",
         "内容完整（干净退出且发了 scope_done）的 job 不受「被主动中止」约束：收尾拖过预算只催停，判定按内容"
