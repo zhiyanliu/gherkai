@@ -17,7 +17,7 @@ import path from "node:path";
 import ts from "typescript";
 import type { Browser } from "webdriverio";
 import {
-  ACQUIRE_TIMEOUT_MESSAGE, HELPER_REJECTED_AGAIN_MESSAGE, HELPER_REJECTED_NO_TIME_MESSAGE,
+  ACQUIRE_INTERRUPTED_MESSAGE, ACQUIRE_TIMEOUT_MESSAGE, HELPER_REJECTED_AGAIN_MESSAGE, HELPER_REJECTED_NO_TIME_MESSAGE,
   LIVENESS_FAILED_MESSAGE, PRE_STEP_FAILED_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE,
   WEB_CONTEXT_PROBE_ERROR_MESSAGE, WEB_CONTEXT_UNAVAILABLE_MESSAGE, acquireErrorMessage, createDeviceSurface, deviceAgentOpts,
   restoreFailedMessage, warmupErrorMessage,
@@ -479,6 +479,8 @@ test("进入终结后获取停下：等到 RUNNING 期间中断，之后不再�
   const r = await acquiring;
   await releasing;
   assert.equal(r.ready, false);
+  // 结论只进日志：写明被停止信号中断，不借预算到期那句（中止信号会让预算的 expired() 为真）
+  assert.deepEqual(r.ready ? null : r.termination, { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE });
   assert.ok(!h.calls.some((c) => c.startsWith("appium.connect")), h.calls.join(", "));
   assert.ok(!h.calls.some((c) => c.startsWith("guards.create")), h.calls.join(", "));
 });
@@ -495,6 +497,7 @@ test("进入终结后获取停下：探测在终结开始时成功返回，之�
   const r = await acquiring;
   await releasing;
   assert.equal(r.ready, false);
+  assert.deepEqual(r.ready ? null : r.termination, { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE });
   for (const prefix of ["adapters.select", "guards.create", "agents.create"]) {
     assert.ok(!h.calls.some((c) => c.startsWith(prefix)), `${prefix}: ${h.calls.join(", ")}`);
   }
@@ -645,6 +648,8 @@ test("获取期的启动命令在途时进入终结或预算到期：命令返�
   const r = await acquiring;
   await releasing;
   assert.equal(r.ready, false);
+  // 启动原语因中止信号抛出：进入终结的结论记为被停止信号中断，不记 acquire_timeout（真机演练里曾把 SIGTERM 记成没拿到可用设备）
+  assert.deepEqual(r.ready ? null : r.termination, { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE });
   assert.ok(!interrupted.calls.some((c) => c.startsWith("sessions.status")), interrupted.calls.join(", "));
   assert.ok(!interrupted.calls.some((c) => c.startsWith("probe.run")), interrupted.calls.join(", "));
 

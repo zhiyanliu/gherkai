@@ -77,6 +77,9 @@ import { defaultDeviceParts } from "./parts.mjs";
 
 /** 获取预算耗尽（ADR 0051 决策 4 的原文）。 */
 export const ACQUIRE_TIMEOUT_MESSAGE = "在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间";
+// 进入终结后获取期部件因中止信号返回的失败：结论不会被使用（终结路径不发 scope_done），只进 worker 日志；写明是被停止信号中断，
+// 不借预算到期那句——预算的中止信号与到期共用 expired() 判据，不区分就会把一次 SIGTERM 记成「没拿到可用设备」（真机演练实遇）。
+export const ACQUIRE_INTERRUPTED_MESSAGE = "获取被停止信号中断";
 /** 会话丢失与会话到期（ADR 0051 决策 4 的原文）。 */
 export const SESSION_LOST_MESSAGE =
   "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话";
@@ -713,17 +716,22 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return { ok: false, termination };
   }
 
-  /** 每一步之后的核对：进入终结即停（这个结果不会被使用，终结路径不发 scope_done），预算到期归 acquire_timeout。 */
+  /** 每一步之后的核对：进入终结即停（这个结果不会被使用，终结路径不发 scope_done；日志写明被停止信号中断），预算到期归 acquire_timeout。 */
   private expiredOutcome(budget: Budget): { ok: false; termination: ScopeTermination } | null {
-    if (this.finalizing) return { ok: false, termination: { errorType: "engine_error", message: acquireErrorMessage("") } };
+    if (this.finalizing) return { ok: false, termination: this.interruptedTermination() };
     return budget.expired() ? { ok: false, termination: { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE } } : null;
   }
 
-  /** 预算到期时，非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因）。 */
+  /** 进入终结后的结论：engine_error 加「获取被停止信号中断」，先于预算到期的判断（中止信号会让 expired() 为真）。 */
+  private interruptedTermination(): ScopeTermination {
+    return { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE };
+  }
+
+  /** 预算到期时，非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因）；进入终结的先记为被停止信号中断。 */
   private budgetAware(termination: ScopeTermination, budget: Budget): ScopeTermination {
-    if (termination.errorType !== "precheck_failed" && budget.expired()) {
-      return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
-    }
+    if (termination.errorType === "precheck_failed") return termination;
+    if (this.finalizing) return this.interruptedTermination();
+    if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
     return termination;
   }
 
@@ -734,11 +742,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   private async unclassifiedPreparationFailure(
     e: unknown, budget: Budget, describe: (reason: string) => string,
   ): Promise<ScopeTermination> {
+    // 进入终结时预算被中止、在途调用随之失败：这个结果不会被使用（终结路径不发 scope_done），不另记日志、不再查状态；
+    // 先于预算到期的判断——中止信号会让 expired() 为真，不区分就会记成 acquire_timeout。
+    if (this.finalizing) return this.interruptedTermination();
     if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
     const lostBeforeStart: ScopeTermination = { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE };
     if (readClassification(e)?.errorType === "session_lost") return lostBeforeStart;
-    // 进入终结时预算被中止、在途调用随之失败：这个结果不会被使用（终结路径不发 scope_done），不另记日志、不再查状态。
-    if (this.finalizing) return { errorType: "engine_error", message: acquireErrorMessage("") };
     if (this.connectedAppium !== null && await this.sessionEnded(e)) return lostBeforeStart;
     this.deps.log(`worker: ${describe("")}：${errorText(e)}`);
     return { errorType: "engine_error", message: describe(reasonOf(e)) };

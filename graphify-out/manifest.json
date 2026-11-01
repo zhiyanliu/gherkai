@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793501741.892323,
-    "ast_hash": "bbf49fb2af39e7ae00beeb7a4949aaae",
+    "mtime": 1793523521.8350582,
+    "ast_hash": "6edaeb3db753c38917f421127aff7e3b",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793509760.3296719,
-    "ast_hash": "7d351e7dc25a765ffeb8ad82eecee5f2",
+    "mtime": 1793523521.8354402,
+    "ast_hash": "5d835f1df4504f82e08ceaaac3b6a0cd",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2220,23 +2220,23 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793501905.496258,
-    "ast_hash": "02aa77c7599475b268859beb400605fd",
+    "mtime": 1793521838.8965225,
+    "ast_hash": "f933814557f7aae13062c2fff8b560e0",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793502927.4189785,
-    "ast_hash": "2a9e45688509f1bae706ebba060e11a1",
+    "mtime": 1793521873.2233188,
+    "ast_hash": "a1efafcb4b2d30d2b614bc7121a6a02c",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
-    "mtime": 1793378512.8308346,
-    "ast_hash": "bef30336696027a118a9e206ac3aa2f9",
+    "mtime": 1793521838.896684,
+    "ast_hash": "b947b6846b9ffe3d4e214ea484e28739",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.test.mts": {
-    "mtime": 1793378512.8312051,
-    "ast_hash": "0ca3fcbfc5fe8e7cf9a1190b571f6975",
+    "mtime": 1793521838.8968294,
+    "ast_hash": "d8d7c617ee7790dcf80704afb35d8912",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/wdio-log.mts": {

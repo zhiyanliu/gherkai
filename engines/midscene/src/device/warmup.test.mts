@@ -433,7 +433,7 @@ test("获取预算中止后不再发起新的尝试：导航失败的同时预�
   const pending = h.run();
   h.controller.abort(new Error("获取预算到期"));
   const got = await pending;
-  assert.equal(got?.errorType, "engine_error", "归因由设备侧接缝按预算改写为 acquire_timeout");
+  assert.equal(got?.errorType, "engine_error", "归因由设备侧接缝改写：终结中记为被停止信号中断，预算到期改写为 acquire_timeout");
   assert.equal(h.navCalls().length, 1);
 });
 
