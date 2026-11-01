@@ -95,7 +95,7 @@ page-source.xml                                本工具自己取的那次原始
 | `page` | `--url` 的打开结果与路线（`url` / `deep_link`） |
 | `snapshot` | 接缝的界面快照（与失败 step 的证据同一条采集路径）：`url` / `url_missing`、`controls`、`page_source_path` 与 `page_source_truncated` |
 | `page_source` | 真机控件树的控件数与它和控件树样例的属性差集 `diff` |
-| `cases` | 每条快照用例：`status`（`ok` / `failed` / `skipped`）、跳过原因、失败原因与归类、发出的命令（`commands` 为与快照格式相同的树，`flat` 带每条命令的成败 `error` 与耗时 `ms`）、快照的命令（`expected`）、`matches_fixture` |
+| `cases` | 每条快照用例：`status`（`ok` / `failed` / `skipped`）、跳过原因、失败原因与归类、发出的命令（`commands` 为与快照格式相同的树，`flat` 带每条命令的成败 `error` 与耗时 `ms`）、快照的命令（`expected`）、`matches_fixture`；快照用例带 `device_dependent`（命令序列取决于设备此刻的界面，目前是 iOS 收起键盘：键盘里有收起键就点键、没有就点键盘上方工具栏的 Done、键盘没显示只读控件树）时 `matches_fixture` 为 null、`note` 带说明，形态照常参与 `rejected` / `unexpected` / `not_exercised` 的核对 |
 | `cases[].flat[].ms` | 这条命令从发出到落定（返回或抛出）的毫秒数，取整；用例记录结束时尚未落定的命令为 null |
 | `lifecycle` | 生命周期步骤的计时，按发生次序每步一项 `{step, ms, ok, error?}`：`ms` 为这一步从开始到结束的毫秒数（取整），`error` 只在 `ok` 为 false 时出现。小写下划线的步骤名与 `probe.items` 里同名的逐项事实一一对应；其余是 `navigate` 与紧随其后的 `restore`（只在给了 `--url` 时）、`screenshot`（写出 `screenshot.png` 的那次截图）、`readAddress`、`snapshot`、`pageSource`（本工具自己取的控件树，与 `page_source` 同一次读取）。`readAddress` 的缺失原因为 `timeout` / `error`、`snapshot` 有改判或控件摘要缺失、`restore` 有改判时也记为失败。执行中每步另写一行到标准输出：`device_reprobe: 步骤 <名> <ms> 毫秒 ok` 或 `device_reprobe: 步骤 <名> <ms> 毫秒 失败: <原因>` |
 | `diff` | 与命令契约快照的差集，见下节 |
@@ -110,7 +110,7 @@ page-source.xml                                本工具自己取的那次原始
 | `rejected` | 快照里的命令形态被真机拒绝（附用例与真机给的原因）；适配器归为 `capability_unavailable` 的用例不计入，见 `failed_cases` | 先排除用例环境的原因（输入框没有获得焦点、`--deep-link` 的地址应用处理不了）；排除后即平台行为变了：按真机接受的写法改适配器、同步改快照，并回写 ADR 0052 决策 4 的映射表与实测依据 |
 | `not_exercised` | 快照里的形态这次没有执行到（附原因：跳过、执行中途失败、这台设备不提供这项能力、执行成功但没有发出这一形态） | 补齐选项后再执行一次；原因为设备不提供这项能力时，换一台提供它的设备核对这一形态；全部执行到之前不算完成重新探测 |
 | `unexpected` | 执行中发出了快照里没有的形态 | 适配器在真机应答下走了快照没覆盖的分支；补快照用例，或修适配器 |
-| `mismatched_cases` | 执行成功、但归一后的命令序列与快照不同的用例 | 同上，逐条对照 `cases[].commands` 与 `expected` |
+| `mismatched_cases` | 执行成功、但归一后的命令序列与快照不同的用例（带 `device_dependent` 的用例不计入） | 同上，逐条对照 `cases[].commands` 与 `expected` |
 | `failed_cases` | 执行失败、却不是某条命令被拒的用例（命令守卫拒绝、适配器在发命令之前判定不提供），以及命令被驱动以已知的能力缺失拒绝、适配器归为 `capability_unavailable` 的用例 | 看 `error_type` 与 `error`；`capability_unavailable` 多半是这台设备本就不提供，记进矩阵即可。例如 iOS 15.8 上 DeepLink 用例被 WebDriverAgent 以「The current Xcode SDK does not support opening of URLs with given application」拒绝：这是已记录的能力缺失（ADR 0048 决策 7、ADR 0052 决策 5），worker 同样归为 `capability_unavailable`，不是平台行为变化。归类由适配器按驱动文本判定，本工具只读适配器挂在异常上的标记；会话状态没能确认时适配器不归类，这样的用例仍记进 `rejected` |
 
 再看两处探测相关的事实：
