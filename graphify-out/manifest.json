@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793507821.531306,
-    "ast_hash": "6dbdfe35e45790ee5503dec6ccedd655",
+    "mtime": 1793509600.157853,
+    "ast_hash": "f2756ae8bdf3f479722db89420ec3a73",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -830,8 +830,8 @@
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/run_scope.py": {
-    "mtime": 1793507818.4895587,
-    "ast_hash": "3be9f119dfbd73138b8f2af0ad6afff8",
+    "mtime": 1793509600.1582534,
+    "ast_hash": "dec61e27ec29dc4b80f9e4ad87a294a8",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/user_steps.py": {
@@ -2320,8 +2320,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/parent-watchdog.mts": {
-    "mtime": 1793507818.4891524,
-    "ast_hash": "9edc2b8916da1a3782742548908dcacc",
+    "mtime": 1793509600.1579854,
+    "ast_hash": "0f19924bb957d4572098ebc06a7e8b9c",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/parent-watchdog.test.mts": {
