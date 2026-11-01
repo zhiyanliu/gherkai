@@ -20,10 +20,12 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
   failFast = false,      // 任一 job 崩是否中止整批
   gracePeriod = 5,       // 停止请求后等 worker 优雅退出的宽限秒，超期强杀
   clock,                 // 时间源（可注入 fake clock 单测超时/grace 路径；默认 monotonic，抗系统时钟回拨）
-  interrupt,             // 使用方中断的轮询回调（返回 0 / 1 / 2：无 / 协作停止 / 强制），不注入则不轮询；on_interrupt(level) 供组合根提示使用方（0024 终止契约）
+  interrupt,             // 使用方中断的轮询回调（返回 0 / 1 / 2：无 / 协作停止 / 强制），不注入则不轮询（0024 终止契约）
+  onInterrupt,           // 级别首次升高时的通知回调，供组合根提示使用方
+  interruptPoll = 0.5,   // 中断轮询间隔秒
 }
 ```
-（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎向 worker 查自报值后传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。）
+（上为语言中立伪代码；实际实现为 dataclass `ScheduleOpts`，字段 snake_case：`max_concurrency`/`fail_fast`/`grace_period_s`/`min_grace_s`（默认 0.0，grace 下限，引擎无关纯数、组合根按引擎向 worker 查自报值后传入，schedule enforce `grace ≥ min_grace_s`，见 [0024](./0024-worker-core-protocol.md) grace 硬约束）/`clock`/`network_retry`（默认 0）/`retry_sleep`/`heartbeat_interval_s`（默认 0.5，静默 worker 超时兜底轮询间隔，见下「静默 worker 的超时如何触发」）（[0028](./0028-transient-network-ssl-resilience.md)）。/`interrupt`（默认 None，中断级别轮询回调）/`on_interrupt`（默认 None，级别首次升高时的通知回调）/`interrupt_poll_s`（默认 0.5，中断轮询间隔）） 
 
 **per-job 墙钟预算不在 `opts`**——载体是 definition 的 `Job.timeout_s`（`@timeout:N` tag / CLI `--default-job-timeout` 在组合根解析定值，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)），schedule 起 job 时据它算 deadline；`opts` 只留并发/隔离/grace/重试/心跳这些策略旋钮。
 

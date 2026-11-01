@@ -31,7 +31,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 3 本机还是云端，run 还是 submit
 
-- `run`：前台同步，CLI 全程在线，退出码即判定。人在等结果、批量不大时用它。
+- `run`：前台同步，CLI 全程在线，正常结束的退出码即判定。人在等结果、批量不大时用它。
 - `submit`：提交即返回，stdout 只打一个 `run_id`，退出码 0 只表示提交成功；判定看 `status <run_id> --wait`。local 后端由本机一个脱离 CLI 的后台进程推进（本机需开机）；cloud 后端由云端推进，提交后关机也会运行到结束。
 - **cloud 一条线**：依次执行 `doctor --backend cloud --prefix P`、`plan`、`submit --backend cloud --prefix P`、`status --backend cloud --prefix P --wait`、`explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就以退出码 2 结束、说找不到这个 run（那句提示只提 `submit`，按上面那条对齐参数，不要照它只改 `submit`）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
@@ -76,7 +76,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 8 退出码分流
 
-- `run`：退出码即判定。0 全通过；1 已运行但有失败或出错；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、云端凭证 / 版本 / variant 问题）。
+- `run`：正常结束的退出码即判定。0 全通过；1 已运行但有失败或出错；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、云端凭证 / 版本 / variant 问题）。处理了中断时以 130 / 143 结束，不表示判定。
 - `status`：**只有读到终态才表判定**（通过时退出码 0、其余终态 1）；未到终态一律以退出码 0 结束、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。退出码 2 表示查不到这个 run，或这个 run 的提交记录格式与本机 CLI 不一致（消息会点名写出它的版本：由更新版本写出的就升级本机 CLI，由更早版本写出的就用那个版本查看或用当前版本重新提交；同一个报告目录不要混用 1.4 与 1.5 的 CLI）；cloud 后端还包括云端读不到、CLI 与后端版本不匹配。
 - `submit` / `plan` / `explain` / `doctor`：只表做成没做成（退出码 0 或 2）。`explain` 哪怕用例全红也以退出码 0 结束。
 - CI 接 `run` 的退出码，或 `submit` 之后接 `status --wait` 的退出码；别接 `submit`、`explain` 的。

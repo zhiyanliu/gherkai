@@ -37,8 +37,8 @@
 | `passed` | worker 上报 / core 归约 | step·scenario·job·run | 断言全部通过 | — |
 | `failed` | worker 上报（未过多数票 / 确定性 `AssertionError`） | step·scenario·job·run | **测试发现了问题** | 先看现场、不要直接重新运行：`gherkai explain <run_id>` 逐步查看向 AI 提出的断言与 AI 的观察；报告中有引擎原生 report / trajectory |
 | `error` | worker 上报（act 抛异常）/ core 派生（各条收场判据见 §3c 图） | step·scenario·job·run | **测试未能执行完成** | 先按 `error_type` + `message` 归因（§3b）：`timeout`/`network_error` 多数可原样重新运行；`engine_error`/`guardrail` 先查 worker 日志 |
-| `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（fail-fast 下 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（但整个 run 里必然伴随另一个 job 的 `error`，根因在别处）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
-| `aborted` | **core 本地赋值**（终结函数：停止原因为主动中止——fail-fast，或使用方中断本机 `run`——且内容不完整） | job | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
+| `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（这个 run 已被中止——fail-fast 或使用方中断——时 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（fail-fast 时伴随触发中止的 error job、根因在别处；使用方中断时不要求存在 error job，看 `message` 即知）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
+| `aborted` | **core 本地赋值**（终结函数：停止原因为主动中止——fail-fast，或使用方中断本机 `run`——且内容不完整；run 级由 `schedule` 在被使用方中断且有 job 记 aborted 或 skipped 时直接赋） | job·run（run 级只在使用方中断时） | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 尚未启动 | 等待；提交较久而**所有** job 仍为 pending 时，`status` 会提示用 `--wait` 接力推进 |
 | `running` | 收到 `scope_started` 或 `origin` 不是 `attempted` 的 `session_opened`（取设备期间）后写入，只有 `attempted` 的 `session_opened` 时仍为 `pending` / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
 
@@ -99,7 +99,7 @@
 
 几处判据的由来与边界：
 
-- **判据不看「是否被自己停过」**：超时与 fail-fast 两条路径都会主动停 worker，被停的 worker 随后可能以网络故障退出码退出，所以那道分叉只取图注所说的首次仲裁结果（`stop_reason`），不看笼统的「被停过」标志。`abort_flag` 只负责传播中止请求（fail-fast 或使用方中断），排队中的 job 起 worker 前看到它即记 `skipped`，它不作归因依据。无状态路径的 `TaskExited.timed_out` 对应 `stop_reason = timeout`，因为该次停止本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
+- **判据不看「是否被自己停过」**：超时与主动中止（fail-fast 或使用方中断）两条路径都会主动停 worker，被停的 worker 随后可能以网络故障退出码退出，所以那道分叉只取图注所说的首次仲裁结果（`stop_reason`），不看笼统的「被停过」标志。`abort_flag` 只负责传播中止请求（fail-fast 或使用方中断），排队中的 job 起 worker 前看到它即记 `skipped`，它不作归因依据。无状态路径的 `TaskExited.timed_out` 对应 `stop_reason = timeout`，因为该次停止本就由超时处置发起。这样切分的理由见 [ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一的注（「aborted 只认 fail-fast」）。
 - **`skipped` 不覆盖建连失败的原因**：建连失败的 job 已经建立过会话、已经计费，`saw_step == False` 只表示「可安全重试（无 act 副作用）」、不表示「未产生费用」，因此它照常进入 run 级聚合，`skipped` 的边界严格停在「worker 从未 spawn」。现状补充：`ScheduleOpts.network_retry` 默认 0 且 CLI 未暴露该参数，所以当前 `run` **不做**整个 job 的重新运行；生效的只有 worker 自身的建连退避（`_CONNECT_ATTEMPTS` / `_BACKOFF_S`，只包裹幂等的建连段），重试耗尽即以网络专用退出码退出。
 - 另一条边界：worker 收到停止信号时**不为未执行完的单元生成判定**——Nova 在投票循环与 step 循环开头检查停止标志，票数未投满就不 emit 带判定的 `step_done`、也不发 `step_skipped`；Midscene 执行 SIGTERM 收尾序列（释放会话 → 安全点提前上传 → 排空队列）。两侧都把未完成的单元交由 core 按派生态处理，区别只在停止的处置形态。
 
@@ -126,7 +126,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示与「判定明细尚未落地」提示、`project_full` 的不变量检查、云端推进器 Lambda 的「已收尾的 run 不再推演」跳过判据（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`：读到终态即 no-op，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)「已终态 run 在两个后端的重入」）、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
 | `_NON_VERDICT` | run 级判定（是否算作结论） | 含（**另含** pending/running） | `_aggregate` 入口过滤 |
 
-**run 级聚合不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此聚合结果只会是 `passed`、`failed`、`error` 三者之一。唯一例外在 `_aggregate` 之外：同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `aborted` 或 `skipped` 时，`schedule` 把 `RunResult.status` 直接记 `aborted`——判定不完整，不能按仅有的几个判定聚合（全部 job 都被掐断时过滤后为空、按原规则会判 passed）；fail-fast 不走这个例外，它必伴随 error。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
+**run 级聚合不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此聚合结果只会是 `passed`、`failed`、`error` 三者之一。唯一例外在 `_aggregate` 之外：同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `aborted` 或 `skipped` 时，`schedule` 把 `RunResult.status` 直接记 `aborted`——判定不完整，不能按仅有的几个判定聚合（全部 job 都被中止时过滤后为空、按原规则会判 passed）；fail-fast 不走这个例外，它必伴随 error。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
 
 控制面的 `RunState.status` 多两个可能取值（另有上一段的 `aborted`，由被中断的同步 `run` 经 `finalize` 落下）：执行期间为 `pending`/`running`（同步 `run` 路径全程保持 `pending`，由 `finalize` 一次落终态；无状态路径每轮投影写按 `projected_run_status` 钳在 pending/running）。run 级终态是 `finalize` 这个提交点的专属，提前落终态会使 run 永不 finalize。
 
@@ -138,7 +138,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 归纳：**表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
 
-`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读可能停在 pending 的落库态）；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
+`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读可能停在 pending 的落库态）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 
 **CI 应接哪一条**：
 
