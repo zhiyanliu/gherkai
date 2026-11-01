@@ -2,18 +2,19 @@
 // 运行：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";
-import { AppiumInterface, DISMISS_KEYBOARD_ACTION } from "./interface.mjs";
+import { AppiumInterface, DISMISS_KEYBOARD_ACTION, KEYBOARD_NOT_DISMISSED_MESSAGE } from "./interface.mjs";
 import { createUiAutomator2Adapter } from "./adapters/uiautomator2.mjs";
 import { createXcuitestAdapter } from "./adapters/xcuitest.mjs";
 
 /** 只记录调用的假驱动：收起键盘的命令（Android 的 hideKeyboard、iOS 的 mobile: hideKeyboard）可按需抛出。 */
-function fakeDriver(opts: { hideFails?: boolean } = {}) {
+function fakeDriver(opts: { hideFails?: boolean; keyboardStays?: boolean } = {}) {
   const calls: string[] = [];
   const fail = () => { if (opts.hideFails) throw new Error("WebDriverError: cannot hide keyboard"); };
   return {
     calls,
     hideKeyboard: async () => { calls.push("hideKeyboard"); fail(); },
     execute: async (cmd: string) => { calls.push(`execute:${cmd}`); if (cmd === "mobile: hideKeyboard") fail(); },
+    isKeyboardShown: async () => { calls.push("isKeyboardShown"); return opts.keyboardStays ?? false; },
     takeScreenshot: async () => "",
   };
 }
@@ -42,16 +43,18 @@ for (const [label, adapter, hideCommand] of [
     assert.match(dismiss.description, /keyboard/i);
     assert.ok(!dismiss.paramSchema, "无参数");
     await dismiss.call(undefined as never);
-    assert.deepEqual(driver.calls, [hideCommand]);
+    assert.deepEqual(driver.calls, [hideCommand, "isKeyboardShown"]);
     assert.deepEqual(logs, []);
   });
 
-  test(`${label}：「收起键盘」动作失败只记一行日志、不抛出`, async () => {
+  test(`${label}：「收起键盘」动作：命令报错但键盘已不在时只记一行日志、不抛出；键盘仍在时抛出产品语言的原因`, async () => {
     const driver = fakeDriver({ hideFails: true });
     const logs: string[] = [];
     const dismiss = iface(adapter, driver, logs).actionSpace().find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
     await dismiss.call(undefined as never);
     assert.equal(logs.length, 1);
     assert.match(logs[0], /^worker: 「收起键盘」动作未能收起软键盘（不影响这一步的判定）：/);
+    const stays = iface(adapter, fakeDriver({ keyboardStays: true }), []).actionSpace().find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
+    await assert.rejects(stays.call(undefined as never), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE);
   });
 }

@@ -92,8 +92,10 @@ export interface DeviceAdapter extends DriverAdapter {
   keyboardPress(ctx: PrimitiveContext, keyName: string): Promise<void>;
   /** 清空当前获得焦点的输入框。 */
   clearInput(ctx: PrimitiveContext): Promise<void>;
-  /** 收起软键盘。命令失败原样抛出，失败的处置（收键盘是尽力动作）由界面实现决定。 */
+  /** 收起软键盘。命令失败原样抛出，失败的处置由界面实现决定。 */
   hideKeyboard(ctx: PrimitiveContext): Promise<void>;
+  /** 软键盘此刻是否显示（只读命令；收起之后核一次，驱动报成功而键盘仍在的情形由此识别）。 */
+  keyboardShown(ctx: PrimitiveContext): Promise<boolean>;
 }
 
 // ---- 适配器共用的小工具 ----
@@ -288,6 +290,12 @@ function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): s
   return `worker: ${where}未能收起软键盘（不影响这一步的判定）：${errorText(e)}`;
 }
 
+/** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：iOS 上收起键盘只能走应用或系统浏览器提供的途径，
+ *  一条都没有的输入框谁都收不起；让这一步快速、明确地失败，免得模型反复重规划。 */
+export const KEYBOARD_NOT_DISMISSED_MESSAGE =
+  "键盘仍然显示：这台设备上当前的输入框没有提供收起键盘的途径（应用没有处理 Return 键，也不响应点击空白处），这一步无法按用例的写法完成；" +
+  "若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可";
+
 /** 「收起键盘」动作的名字与给模型看的说明（ADR 0052 决策 7）。说明写明用途与边界：用例要求收起、或键盘遮住下一步要操作的元素时用；
  *  它不是返回键，不会离开当前界面。 */
 export const DISMISS_KEYBOARD_ACTION = "DismissKeyboard";
@@ -403,13 +411,29 @@ export class AppiumInterface extends AbstractInterface {
     if (opts?.autoDismissKeyboard === true) await this.hideKeyboard("after_input");
   }
 
-  /** 收起键盘是尽力动作：失败只记一行日志、不传出异常，也不重试。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
-   *  执行窗口的判定上（并中止当前 act），这里不传出异常不会掩盖它；其余失败（如驱动报无法收起；按驱动源码，键盘未显示时两平台都直接返回成功，由真机验收核对）不进判定。 */
+  /** 收起键盘（ADR 0052 决策 7）。输入完成后顺带收起是尽力动作：失败只记一行日志、不传出异常，也不重试。模型显式调用的「收起键盘」动作
+   *  则要快速明确地失败：命令之后核一次键盘是否仍显示（驱动可能报成功而键盘仍在，iOS 26 实测），仍在即抛出产品语言的原因，让 Midscene
+   *  结束这一步而不是反复重规划；核不出来（只读命令失败）按未知、不抛。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
+   *  执行窗口的判定上（并中止当前 act），这里的处置不会掩盖它。 */
   private async hideKeyboard(when: "after_input" | "action"): Promise<void> {
+    let failure: unknown = null;
     try {
       await this.adapter.hideKeyboard(this.ctx);
     } catch (e) {
+      failure = e;
       this.log(keyboardNotHiddenLogLine(e, when));
+    }
+    let shown: boolean | null = null;
+    try {
+      shown = await this.adapter.keyboardShown(this.ctx);
+    } catch {
+      shown = null;  // 核不出来：按未知处理
+    }
+    if (when === "action" && (shown === true || (shown === null && failure !== null))) {
+      throw new Error(KEYBOARD_NOT_DISMISSED_MESSAGE);
+    }
+    if (when === "after_input" && shown === true && failure === null) {
+      this.log("worker: 输入完成后收起键盘的命令已返回，但键盘仍然显示（不影响这一步的判定）");
     }
   }
 

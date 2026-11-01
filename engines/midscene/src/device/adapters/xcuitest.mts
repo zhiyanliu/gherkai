@@ -181,6 +181,10 @@ export function createXcuitestAdapter(): DeviceAdapter {
       await ctx.driver.execute(HIDE_KEYBOARD, { keys: [...IOS_DISMISS_KEYBOARD_KEYS] });
     },
 
+    async keyboardShown(ctx: PrimitiveContext): Promise<boolean> {
+      return await ctx.driver.isKeyboardShown();
+    },
+
     async deepLink(driver: Browser, address: string, appId: string | null): Promise<void> {
       if (deepLinkUnsupported) throw capabilityUnavailable(DEEP_LINK_UNSUPPORTED_MESSAGE);
       try {

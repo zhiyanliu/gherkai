@@ -16,7 +16,8 @@ import { attachClassification, readClassification, type StepClassification } fro
 import { RESULT_UNKNOWN_MESSAGE, commandFailedMessage, createCommandGuard } from "../guard.mjs";
 import { CONTROLS_MAX_ITEMS } from "../limits.mjs";
 import {
-  AppiumInterface, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry, createAppiumInterface, createDeviceAgentFactory,
+  AppiumInterface, DISMISS_KEYBOARD_ACTION, KEYBOARD_NOT_DISMISSED_MESSAGE, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry,
+  createAppiumInterface, createDeviceAgentFactory,
   driverTextMatchAllowed, unmappedKeyMessage, type DeviceAdapter, type InputContext, type PrimitiveContext,
 } from "../interface.mjs";
 import {
@@ -54,6 +55,7 @@ function recorder(responses: Record<string, unknown[]> = {}): Recorder {
   const queues = new Map(Object.entries(responses).map(([k, v]) => [k, [...v]]));
   const defaults: Record<string, () => unknown> = {
     getActiveElement: () => ({ [W3C_ELEMENT_KEY]: "active-1" }),
+    isKeyboardShown: () => false,  // 收起之后的核对：缺省当作已收起
   };
   const driver = new Proxy({}, {
     get(_t, prop) {
@@ -138,6 +140,7 @@ async function runCase(make: (rec: Recorder) => DeviceAdapter, c: ContractCase):
     case "keyboardPress": await adapter.keyboardPress(ctx, i.keyName); break;
     case "clearInput": await adapter.clearInput(ctx); break;
     case "hideKeyboard": await adapter.hideKeyboard(ctx); break;
+    case "keyboardShown": await adapter.keyboardShown(ctx); break;
     case "home": await adapter.systemButtons.home.press(ctx); break;
     case "back": {
       const back = adapter.systemButtons.back;
@@ -185,7 +188,7 @@ test("Android：输入只发 mobile: type，全程不用 W3C 指针或键盘动�
     assert.deepEqual(flatten(c.commands).map((x) => x.args[0]), ["mobile: type"], c.name);
   }
   const all = flatten(doc.cases.flatMap((c) => c.commands));
-  assert.deepEqual([...new Set(all.map((x) => x.method))].sort(), ["execute", "getCurrentPackage", "hideKeyboard"]);
+  assert.deepEqual([...new Set(all.map((x) => x.method))].sort(), ["execute", "getCurrentPackage", "hideKeyboard", "isKeyboardShown"]);
   const clear = doc.cases.find((c) => c.call === "clearInput")!;
   assert.ok(flatten(clear.commands).every((x) => JSON.stringify(x.args) === JSON.stringify(["mobile: pressKey", { keycode: 67 }])));
 });
@@ -691,6 +694,7 @@ const KEYBOARD_INTERFACES: Array<{
 ];
 const isHide = (c: { method: string; args: unknown[] }): boolean =>
   c.method === "hideKeyboard" || (c.method === "execute" && c.args[0] === "mobile: hideKeyboard");
+const KEYBOARD_SHOWN = { method: "isKeyboardShown", args: [] };  // 收起之后核一次键盘是否仍显示（ADR 0052 决策 7）
 
 test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键盘一次；为 false 或没有给时不收", async () => {
   const params = [
@@ -707,9 +711,9 @@ test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键
       };
       const without = await run({});
       const name = `${label} ${JSON.stringify(param)}`;
-      assert.ok(without.length > 0 && !without.some(isHide), name);
+      assert.ok(without.length > 0 && !without.some(isHide) && !without.some((c) => c.method === "isKeyboardShown"), name);
       assert.deepEqual(await run({ autoDismissKeyboard: false }), without, `${name}：false 与没有给相同，不发收键盘命令`);
-      assert.deepEqual(await run({ autoDismissKeyboard: true }), [...without, hide],
+      assert.deepEqual(await run({ autoDismissKeyboard: true }), [...without, hide, KEYBOARD_SHOWN],
         `${name}：先完成点击、清空与输入，最后发一次收键盘命令`);
     }
   }
@@ -729,6 +733,28 @@ test("Input 动作：收起键盘失败不改判定，动作照常完成，失�
   // 没有注入日志出口时同样不传出异常
   const quiet = KEYBOARD_INTERFACES[0].make({ responses: { hideKeyboard: [new Error("x")] } });
   await action(quiet.ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
+});
+
+test("「收起键盘」动作：命令之后核一次键盘是否仍显示——仍显示即抛出产品语言的原因让这一步快速失败；已收起则无事；核不出来按未知不抛", async () => {
+  for (const { label, make, hideKey } of KEYBOARD_INTERFACES) {
+    const dismiss = (ui: AppiumInterface) => action(ui, DISMISS_KEYBOARD_ACTION).call(undefined as never, {} as never);
+    // 已收起
+    const ok = make();
+    await dismiss(ok.ui);
+    assert.deepEqual(flatten(ok.rec.commands).map((c) => c.method === "execute" ? `${c.method}:${c.args[0]}` : c.method),
+      label === "iOS" ? ["execute:mobile: hideKeyboard", "isKeyboardShown"] : ["hideKeyboard", "isKeyboardShown"], label);
+    // 命令返回成功但键盘仍在（iOS 26 实测形态）
+    const stays = make({ responses: { isKeyboardShown: [true] } });
+    await assert.rejects(dismiss(stays.ui), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE, label);
+    // 命令本身报错且键盘仍在（iOS 18.6 实测形态）：同一句原因，另有一行日志
+    const lines: string[] = [];
+    const failed = make({ responses: { [hideKey]: [new Error("Did not know how to dismiss the keyboard")], isKeyboardShown: [true] }, log: (l) => lines.push(l) });
+    await assert.rejects(dismiss(failed.ui), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE, label);
+    assert.equal(lines.length, 1, label);
+    // 核不出来：命令成功则不抛
+    const unknown = make({ responses: { isKeyboardShown: [new Error("boom")] } });
+    await dismiss(unknown.ui);
+  }
 });
 
 test("经命令守卫：收起键盘遇到服务端报错时窗口没有判定；会话丢失仍由守卫记在窗口上，不因这里不传出异常而被掩盖", async () => {

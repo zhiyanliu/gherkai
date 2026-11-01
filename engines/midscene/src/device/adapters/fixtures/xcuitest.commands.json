@@ -165,6 +165,15 @@
       ]
     },
     {
+      "name": "键盘是否显示：只读命令 isKeyboardShown，在原生上下文发出",
+      "call": "keyboardShown",
+      "context": {"scale": 3, "inputContext": "web"},
+      "responses": {"isKeyboardShown": [false]},
+      "commands": [
+        {"method": "isKeyboardShown", "args": []}
+      ]
+    },
+    {
       "name": "主屏键：mobile: pressButton 只用于这里",
       "call": "home",
       "context": {"scale": 3},

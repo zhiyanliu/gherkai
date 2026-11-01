@@ -191,6 +191,14 @@
       ]
     },
     {
+      "name": "键盘是否显示：只读命令 isKeyboardShown",
+      "call": "keyboardShown",
+      "responses": {"isKeyboardShown": [false]},
+      "commands": [
+        {"method": "isKeyboardShown", "args": []}
+      ]
+    },
+    {
       "name": "主屏键",
       "call": "home",
       "commands": [

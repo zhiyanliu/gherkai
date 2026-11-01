@@ -189,6 +189,10 @@ export function createUiAutomator2Adapter(options: UiAutomator2Options): DeviceA
       await ctx.driver.hideKeyboard();
     },
 
+    async keyboardShown(ctx: PrimitiveContext): Promise<boolean> {
+      return await ctx.driver.isKeyboardShown();
+    },
+
     async deepLink(driver: Browser, address: string, appId: string | null): Promise<void> {
       const bad = undeliverableAddressChars(address);
       if (bad.length > 0) throw capabilityUnavailable(undeliverableAddressMessage(bad));

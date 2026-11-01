@@ -189,7 +189,7 @@ export interface ReadOnlyMobileCommands {
 }
 
 const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
-  "takeScreenshot", "getContexts", "getAppiumContexts", "getPageSource", "getCurrentPackage", "status",
+  "takeScreenshot", "getContexts", "getAppiumContexts", "getPageSource", "getCurrentPackage", "status", "isKeyboardShown",
 ]);
 const ADDRESS_COMMAND = "getUrl";
 const SCRIPT_COMMANDS: ReadonlySet<string> = new Set(["execute", "executeScript"]);
