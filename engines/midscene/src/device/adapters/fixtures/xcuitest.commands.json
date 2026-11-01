@@ -149,19 +149,63 @@
       ]
     },
     {
-      "name": "收起键盘：mobile: hideKeyboard 带固定的候选键名表，在原生上下文发出",
+      "name": "收起键盘：键盘子树里有收起语义的键（Return 键配成 done）时，先读控件树，经类链查询取句柄后点击该元素",
       "call": "hideKeyboard",
+      "device_dependent": "命令序列取决于设备此刻的键盘与工具栏：键盘里有收起语义的键就点键，没有就点紧贴键盘上方工具栏里的 Done，键盘没有显示则只读控件树",
       "context": {"scale": 3, "inputContext": "native"},
+      "responses": {
+        "getPageSource": ["<AppiumAUT><XCUIElementTypeApplication type=\"XCUIElementTypeApplication\" name=\"App\" x=\"0\" y=\"0\" width=\"375\" height=\"812\" visible=\"true\"><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"375\" height=\"812\" visible=\"true\"><XCUIElementTypeKeyboard type=\"XCUIElementTypeKeyboard\" x=\"0\" y=\"521\" width=\"375\" height=\"233\" visible=\"true\"><XCUIElementTypeKey type=\"XCUIElementTypeKey\" name=\"space\" label=\"space\" x=\"93\" y=\"690\" width=\"189\" height=\"46\" visible=\"true\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Return\" label=\"done\" x=\"281\" y=\"690\" width=\"94\" height=\"46\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeKeyboard></XCUIElementTypeWindow></XCUIElementTypeApplication></AppiumAUT>"],
+        "findElements": [[{"element-6066-11e4-a52e-4f735466cecf": "key-1"}]]
+      },
       "commands": [
-        {"method": "execute", "args": ["mobile: hideKeyboard", {"keys": ["Done", "done", "完成", "Hide keyboard", "收起键盘", "return", "Return"]}]}
+        {"method": "getPageSource", "args": []},
+        {"method": "findElements", "args": ["-ios class chain", "**/XCUIElementTypeKeyboard/**/*[`label ==[c] \"done\" OR label ==[c] \"完成\" OR label ==[c] \"hide keyboard\" OR label ==[c] \"收起键盘\" OR label ==[c] \"隐藏键盘\"`]"]},
+        {"method": "elementClick", "args": ["key-1"]}
       ]
     },
     {
-      "name": "收起键盘：输入上下文为网页时同样在原生上下文发出，不切入网页上下文",
+      "name": "收起键盘：键盘里没有收起键、紧贴键盘上方的工具栏里有 Done（Safari 的 Done 条）时点击该按钮；输入上下文为网页时同样在原生上下文发出",
       "call": "hideKeyboard",
+      "device_dependent": "命令序列取决于设备此刻的键盘与工具栏：键盘里有收起语义的键就点键，没有就点紧贴键盘上方工具栏里的 Done，键盘没有显示则只读控件树",
       "context": {"scale": 3, "inputContext": "web"},
+      "responses": {
+        "getPageSource": ["<AppiumAUT><XCUIElementTypeApplication type=\"XCUIElementTypeApplication\" name=\"Safari\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"true\"><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"false\"><XCUIElementTypeToolbar type=\"XCUIElementTypeToolbar\" name=\"Toolbar\" label=\"Toolbar\" x=\"0\" y=\"509\" width=\"390\" height=\"44\" visible=\"true\"><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Previous\" label=\"Previous\" x=\"0\" y=\"509\" width=\"48\" height=\"44\" visible=\"true\" enabled=\"true\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Next\" label=\"Next\" x=\"50\" y=\"509\" width=\"35\" height=\"44\" visible=\"true\" enabled=\"false\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Done\" label=\"Done\" x=\"324\" y=\"509\" width=\"66\" height=\"44\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeToolbar></XCUIElementTypeWindow><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"true\"><XCUIElementTypeKeyboard type=\"XCUIElementTypeKeyboard\" x=\"0\" y=\"553\" width=\"390\" height=\"234\" visible=\"true\"><XCUIElementTypeKey type=\"XCUIElementTypeKey\" name=\"space\" label=\"space\" x=\"97\" y=\"722\" width=\"196\" height=\"47\" visible=\"true\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Search\" label=\"search\" x=\"292\" y=\"722\" width=\"98\" height=\"47\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeKeyboard></XCUIElementTypeWindow></XCUIElementTypeApplication></AppiumAUT>"],
+        "findElements": [[{"element-6066-11e4-a52e-4f735466cecf": "done-1"}]]
+      },
       "commands": [
-        {"method": "execute", "args": ["mobile: hideKeyboard", {"keys": ["Done", "done", "完成", "Hide keyboard", "收起键盘", "return", "Return"]}]}
+        {"method": "getPageSource", "args": []},
+        {"method": "findElements", "args": ["-ios class chain", "**/XCUIElementTypeToolbar/**/XCUIElementTypeButton[`label ==[c] \"done\" OR label ==[c] \"完成\" OR label ==[c] \"hide keyboard\" OR label ==[c] \"收起键盘\" OR label ==[c] \"隐藏键盘\"`]"]},
+        {"method": "elementClick", "args": ["done-1"]}
+      ]
+    },
+    {
+      "name": "收起键盘：类链查询返回多个同名按钮时逐个读矩形，点与控件树里位置一致的那个",
+      "call": "hideKeyboard",
+      "device_dependent": "命令序列取决于设备此刻的键盘与工具栏：键盘里有收起语义的键就点键，没有就点紧贴键盘上方工具栏里的 Done，键盘没有显示则只读控件树",
+      "context": {"scale": 3, "inputContext": "native"},
+      "responses": {
+        "getPageSource": ["<AppiumAUT><XCUIElementTypeApplication type=\"XCUIElementTypeApplication\" name=\"Safari\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"true\"><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"true\"><XCUIElementTypeToolbar type=\"XCUIElementTypeToolbar\" name=\"Toolbar\" label=\"Toolbar\" x=\"0\" y=\"100\" width=\"390\" height=\"44\" visible=\"true\"><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Done\" label=\"Done\" x=\"0\" y=\"100\" width=\"60\" height=\"44\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeToolbar></XCUIElementTypeWindow><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"false\"><XCUIElementTypeToolbar type=\"XCUIElementTypeToolbar\" name=\"Toolbar\" label=\"Toolbar\" x=\"0\" y=\"509\" width=\"390\" height=\"44\" visible=\"true\"><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Previous\" label=\"Previous\" x=\"0\" y=\"509\" width=\"48\" height=\"44\" visible=\"true\" enabled=\"true\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Next\" label=\"Next\" x=\"50\" y=\"509\" width=\"35\" height=\"44\" visible=\"true\" enabled=\"false\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Done\" label=\"Done\" x=\"324\" y=\"509\" width=\"66\" height=\"44\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeToolbar></XCUIElementTypeWindow><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"390\" height=\"844\" visible=\"true\"><XCUIElementTypeKeyboard type=\"XCUIElementTypeKeyboard\" x=\"0\" y=\"553\" width=\"390\" height=\"234\" visible=\"true\"><XCUIElementTypeKey type=\"XCUIElementTypeKey\" name=\"space\" label=\"space\" x=\"97\" y=\"722\" width=\"196\" height=\"47\" visible=\"true\"/><XCUIElementTypeButton type=\"XCUIElementTypeButton\" name=\"Search\" label=\"search\" x=\"292\" y=\"722\" width=\"98\" height=\"47\" visible=\"true\" enabled=\"true\"/></XCUIElementTypeKeyboard></XCUIElementTypeWindow></XCUIElementTypeApplication></AppiumAUT>"],
+        "findElements": [[{"element-6066-11e4-a52e-4f735466cecf": "far-1"}, {"element-6066-11e4-a52e-4f735466cecf": "done-1"}]],
+        "getElementRect": [{"x": 0, "y": 100, "width": 60, "height": 44}, {"x": 324, "y": 509, "width": 66, "height": 44}]
+      },
+      "commands": [
+        {"method": "getPageSource", "args": []},
+        {"method": "findElements", "args": ["-ios class chain", "**/XCUIElementTypeToolbar/**/XCUIElementTypeButton[`label ==[c] \"done\" OR label ==[c] \"完成\" OR label ==[c] \"hide keyboard\" OR label ==[c] \"收起键盘\" OR label ==[c] \"隐藏键盘\"`]"]},
+        {"method": "getElementRect", "args": ["far-1"]},
+        {"method": "getElementRect", "args": ["done-1"]},
+        {"method": "elementClick", "args": ["done-1"]}
+      ]
+    },
+    {
+      "name": "收起键盘：键盘没有显示时只读一次控件树、不点击",
+      "call": "hideKeyboard",
+      "device_dependent": "命令序列取决于设备此刻的键盘与工具栏：键盘里有收起语义的键就点键，没有就点紧贴键盘上方工具栏里的 Done，键盘没有显示则只读控件树",
+      "context": {"scale": 3, "inputContext": "native"},
+      "responses": {
+        "getPageSource": ["<AppiumAUT><XCUIElementTypeApplication type=\"XCUIElementTypeApplication\" name=\"App\" x=\"0\" y=\"0\" width=\"375\" height=\"812\" visible=\"true\"><XCUIElementTypeWindow type=\"XCUIElementTypeWindow\" x=\"0\" y=\"0\" width=\"375\" height=\"812\" visible=\"true\"><XCUIElementTypeTextField type=\"XCUIElementTypeTextField\" x=\"9\" y=\"100\" width=\"357\" height=\"41\" visible=\"true\"/></XCUIElementTypeWindow></XCUIElementTypeApplication></AppiumAUT>"]
+      },
+      "commands": [
+        {"method": "getPageSource", "args": []}
       ]
     },
     {

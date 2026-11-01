@@ -25,14 +25,14 @@ import {
   extractAndroidControls, undeliverableAddressChars, uiautomator2Entry,
 } from "./uiautomator2.mjs";
 import {
-  DEEP_LINK_UNSUPPORTED_MESSAGE, IOS_DISMISS_KEYBOARD_KEYS, READ_ONLY_MOBILE_COMMANDS as IOS_READ_ONLY, XCUITEST, activeAppInfo, createXcuitestAdapter,
-  deviceScreenInfo, extractIosControls, xcuitestEntry,
+  ACCESSORY_DISMISS_BUTTON_QUERY, DEEP_LINK_UNSUPPORTED_MESSAGE, IOS_DISMISS_KEY_LABELS, KEYBOARD_DISMISS_KEY_QUERY,
+  READ_ONLY_MOBILE_COMMANDS as IOS_READ_ONLY, XCUITEST, activeAppInfo, createXcuitestAdapter, deviceScreenInfo, extractIosControls, xcuitestEntry,
 } from "./xcuitest.mjs";
 import { READ_ONLY_MOBILE_COMMANDS as ANDROID_READ_ONLY } from "./uiautomator2.mjs";
 import { applicationLongEdge } from "../probe.mjs";
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");
-const W3C_ELEMENT_KEY = "element-6066-11e4-a52f-4f735466cecf";
+const W3C_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const FOREGROUND_POLL = { attempts: 3, intervalMs: 250 };
 
 // ---- 假 driver：记录每条命令，按用例给的应答返回 ----
@@ -111,6 +111,8 @@ interface ContractCase {
   context?: { scale?: number; inputContext?: InputContext | null };
   input?: Record<string, unknown>;
   responses?: Record<string, unknown[]>;
+  /** 命令序列取决于设备此刻的界面（收起键盘按控件树选路线）：离线按 responses 回放仍逐条比对，真机重新探测工具只核形态是否被拒。 */
+  device_dependent?: string;
   commands: Recorded[];
 }
 
@@ -225,20 +227,32 @@ test("iOS：坐标为截图像素除以探测得到的比例", async () => {
 
 // ---- 收起键盘 ----
 
-test("收起键盘：各发一条命令——Android 不带参数的 hideKeyboard，iOS 的 mobile: hideKeyboard 带固定候选键名表；iOS 不论输入上下文都在原生上下文发出", async () => {
-  const expected = {
-    uiautomator2: [{ method: "hideKeyboard", args: [] }],
-    xcuitest: [{ method: "execute", args: ["mobile: hideKeyboard", { keys: [...IOS_DISMISS_KEYBOARD_KEYS] }] }],
-  } as const;
-  for (const name of ["uiautomator2", "xcuitest"] as const) {
-    const cases = loadFixture(name).cases.filter((c) => c.call === "hideKeyboard");
-    assert.ok(cases.length > 0, name);
-    for (const c of cases) assert.deepEqual(c.commands, expected[name], c.name);
+test("收起键盘：Android 发一条不带参数的 hideKeyboard；iOS 先读控件树、经类链查询取句柄后点击元素，标签表只含纯收起语义；iOS 不论输入上下文都不切入网页上下文", async () => {
+  for (const c of loadFixture("uiautomator2").cases.filter((c) => c.call === "hideKeyboard")) {
+    assert.deepEqual(c.commands, [{ method: "hideKeyboard", args: [] }], c.name);
   }
-  // 候选键名只含「收起」语义的键：不含会提交或移动焦点的 Search、Go、Next、Send
-  for (const k of IOS_DISMISS_KEYBOARD_KEYS) assert.ok(!/^(Search|Go|Next|Send|Join)$/i.test(k), k);
-  const contexts = loadFixture("xcuitest").cases.filter((c) => c.call === "hideKeyboard").map((c) => c.context?.inputContext);
-  assert.deepEqual(contexts.sort(), ["native", "web"], "iOS 两种输入上下文各有一条用例");
+  const ios = loadFixture("xcuitest").cases.filter((c) => c.call === "hideKeyboard");
+  assert.ok(ios.length >= 3, "iOS 至少有键盘路线、工具栏路线与无键盘三条用例");
+  for (const c of ios) {
+    const flat = flatten(c.commands);
+    assert.deepEqual(flat[0], { method: "getPageSource", args: [] }, `${c.name}：先读一次控件树`);
+    assert.ok(!c.commands.some((x) => "withWebContext" in x), `${c.name}：不切入网页上下文`);
+    for (const x of flat.filter((x) => x.method === "findElements")) {
+      assert.equal(x.args[0], "-ios class chain", c.name);
+      assert.ok([KEYBOARD_DISMISS_KEY_QUERY, ACCESSORY_DISMISS_BUTTON_QUERY].includes(x.args[1] as string), c.name);
+    }
+    assert.ok(typeof c.device_dependent === "string" && c.device_dependent.length > 0, `${c.name}：命令序列取决于设备，快照须标明`);
+  }
+  const all = ios.flatMap((c) => flatten(c.commands));
+  assert.ok(all.some((x) => x.args[1] === KEYBOARD_DISMISS_KEY_QUERY) && all.some((x) => x.args[1] === ACCESSORY_DISMISS_BUTTON_QUERY), "两条查询都有用例");
+  assert.ok(all.some((x) => x.method === "elementClick") && all.some((x) => x.method === "getElementRect"), "点击元素与按矩形核对都有用例");
+  // 标签表只含纯收起语义：不含 return（键面随输入框类型变）与会提交或移动焦点的键；两条查询都带全部标签
+  for (const l of IOS_DISMISS_KEY_LABELS) {
+    assert.ok(!/^(return|search|go|next|send|join|换行|搜索|前往|发送|下一项)$/i.test(l), l);
+    assert.ok(KEYBOARD_DISMISS_KEY_QUERY.includes(JSON.stringify(l)) && ACCESSORY_DISMISS_BUTTON_QUERY.includes(JSON.stringify(l)), l);
+  }
+  const contexts = new Set(ios.map((c) => c.context?.inputContext));
+  assert.ok(contexts.has("native") && contexts.has("web"), "iOS 两种输入上下文都有用例");
 });
 
 // ---- 未映射的键 ----
@@ -682,18 +696,28 @@ test("Input 动作：先点目标、按替换语义清空，再输入", async ()
   ]);
 });
 
-// 两平台的收起键盘命令各一条（ADR 0052 决策 4）：hide 是期望记录到的命令，hideKey 是给假 driver 注入应答时的键
-const IOS_HIDE_KEYBOARD = { method: "execute", args: ["mobile: hideKeyboard", { keys: [...IOS_DISMISS_KEYBOARD_KEYS] }] };
+// 两平台的收起键盘路线各一条（ADR 0052 决策 4）：hide 是期望记录到的命令序列，hideKey 是给假 driver 注入报错时的键（落在最后一条有副作用的命令上）。
+// iOS 的假 driver 缺省回一棵键盘里有 done 键的控件树（取命令契约快照里键盘路线那条用例的）与一个元素句柄。
+const IOS_KEYBOARD_DONE_TREE = loadFixture("xcuitest").cases.find((c) => c.call === "hideKeyboard")!.responses!.getPageSource[0] as string;
+const IOS_KEY_REF = { [W3C_ELEMENT_KEY]: "key-1" };
+const IOS_HIDE_KEYBOARD = [
+  { method: "getPageSource", args: [] },
+  { method: "findElements", args: ["-ios class chain", KEYBOARD_DISMISS_KEY_QUERY] },
+  { method: "elementClick", args: ["key-1"] },
+];
 const KEYBOARD_INTERFACES: Array<{
-  label: string; make: (opts?: Parameters<typeof iface>[1]) => ReturnType<typeof iface>; hide: { method: string; args: unknown[] }; hideKey: string;
+  label: string; make: (opts?: Parameters<typeof iface>[1]) => ReturnType<typeof iface>; hide: Array<{ method: string; args: unknown[] }>; hideKey: string;
 }> = [
   { label: "Android", make: (opts = {}) => iface(createUiAutomator2Adapter({ foregroundPoll: FOREGROUND_POLL }), opts),
-    hide: { method: "hideKeyboard", args: [] }, hideKey: "hideKeyboard" },
-  { label: "iOS", make: (opts = {}) => iface(createXcuitestAdapter(), { scale: 2, inputContext: "native", ...opts }),
-    hide: IOS_HIDE_KEYBOARD, hideKey: "execute mobile: hideKeyboard" },
+    hide: [{ method: "hideKeyboard", args: [] }], hideKey: "hideKeyboard" },
+  { label: "iOS", make: (opts = {}) => iface(createXcuitestAdapter(), {
+      scale: 2, inputContext: "native", ...opts,
+      responses: { getPageSource: Array(10).fill(IOS_KEYBOARD_DONE_TREE), findElements: Array(10).fill([IOS_KEY_REF]), ...opts.responses },
+    }),
+    hide: IOS_HIDE_KEYBOARD, hideKey: "elementClick" },
 ];
-const isHide = (c: { method: string; args: unknown[] }): boolean =>
-  c.method === "hideKeyboard" || (c.method === "execute" && c.args[0] === "mobile: hideKeyboard");
+const HIDE_METHODS: ReadonlySet<string> = new Set(["hideKeyboard", "getPageSource", "findElements", "getElementRect", "elementClick"]);
+const isHide = (c: { method: string; args: unknown[] }): boolean => HIDE_METHODS.has(c.method);
 const KEYBOARD_SHOWN = { method: "isKeyboardShown", args: [] };  // 收起之后核一次键盘是否仍显示（ADR 0052 决策 7）
 
 test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键盘一次；为 false 或没有给时不收", async () => {
@@ -713,8 +737,8 @@ test("Input 动作：autoDismissKeyboard 为 true 时在输入完成后收起键
       const name = `${label} ${JSON.stringify(param)}`;
       assert.ok(without.length > 0 && !without.some(isHide) && !without.some((c) => c.method === "isKeyboardShown"), name);
       assert.deepEqual(await run({ autoDismissKeyboard: false }), without, `${name}：false 与没有给相同，不发收键盘命令`);
-      assert.deepEqual(await run({ autoDismissKeyboard: true }), [...without, hide, KEYBOARD_SHOWN],
-        `${name}：先完成点击、清空与输入，最后发一次收键盘命令`);
+      assert.deepEqual(await run({ autoDismissKeyboard: true }), [...without, ...hide, KEYBOARD_SHOWN],
+        `${name}：先完成点击、清空与输入，最后走一次收键盘路线`);
     }
   }
 });
@@ -725,7 +749,7 @@ test("Input 动作：收起键盘失败不改判定，动作照常完成，失�
     const driverError = Object.assign(new Error("The software keyboard cannot be hidden\n    at hideKeyboard"), { name: "unknown error" });
     const { rec, ui } = make({ responses: { [hideKey]: [driverError] }, log: (line) => lines.push(line) });
     await action(ui, "Input").call({ value: "abc", autoDismissKeyboard: true }, {} as never);
-    assert.equal(flatten(rec.commands).filter(isHide).length, 1, label);
+    assert.equal(flatten(rec.commands).filter((c) => c.method === hideKey).length, 1, label);
     assert.equal(lines.length, 1, label);
     assert.match(lines[0], /键盘/, label);
     assert.ok(lines[0].includes("unknown error: The software keyboard cannot be hidden") && !lines[0].includes("\n"), lines[0]);
@@ -742,7 +766,7 @@ test("「收起键盘」动作：命令之后核一次键盘是否仍显示—�
     const ok = make();
     await dismiss(ok.ui);
     assert.deepEqual(flatten(ok.rec.commands).map((c) => c.method === "execute" ? `${c.method}:${c.args[0]}` : c.method),
-      label === "iOS" ? ["execute:mobile: hideKeyboard", "isKeyboardShown"] : ["hideKeyboard", "isKeyboardShown"], label);
+      label === "iOS" ? ["getPageSource", "findElements", "elementClick", "isKeyboardShown"] : ["hideKeyboard", "isKeyboardShown"], label);
     // 命令返回成功但键盘仍在（iOS 26 实测形态）
     const stays = make({ responses: { isKeyboardShown: [true] } });
     await assert.rejects(dismiss(stays.ui), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE, label);
@@ -760,7 +784,10 @@ test("「收起键盘」动作：命令之后核一次键盘是否仍显示—�
 test("经命令守卫：收起键盘遇到服务端报错时窗口没有判定；会话丢失仍由守卫记在窗口上，不因这里不传出异常而被掩盖", async () => {
   for (const [status, expected] of [["RUNNING", null], ["COMPLETED", "session_lost"]] as const) {
     const adapter = createXcuitestAdapter();
-    const rec = recorder({ "execute mobile: hideKeyboard": [Object.assign(new Error("Did not know how to dismiss the keyboard"), { name: "unknown error" })] });
+    const rec = recorder({
+      getPageSource: [IOS_KEYBOARD_DONE_TREE], findElements: [[IOS_KEY_REF]],
+      elementClick: [Object.assign(new Error("Element is not hittable"), { name: "unknown error" })],
+    });
     const guard = createCommandGuard({ exec: rec.driver, adapter, sessionStatus: async () => status });
     guard.openWindow(new AbortController());
     const lines: string[] = [];

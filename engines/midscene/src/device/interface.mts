@@ -160,9 +160,14 @@ export interface XmlElement {
   attrs: ReadonlyMap<string, string>;
 }
 
-// 开始标签（含自闭合）：属性值用引号括起，值里可以出现未转义的 `>`（XML 允许），所以属性逐个匹配、不用 `[^>]*`。
-// 处理指令（`<?xml ...?>`）、注释与结束标签都不以字母开头，不会匹配。
-const START_TAG = /<([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*\/?>/g;
+/** 控件树里带层级的一个元素：子元素按文档顺序。 */
+export interface XmlNode extends XmlElement {
+  children: XmlNode[];
+}
+
+// 控件树的词法单元：处理指令（`<?xml ...?>`）、注释、结束标签、开始标签（含自闭合）。开始标签的属性值用引号括起，值里可以出现
+// 未转义的 `>`（XML 允许），所以属性逐个匹配、不用 `[^>]*`。文本节点不是单元：两个驱动的控件树都没有文本节点。
+const XML_TOKEN = /<\?[\s\S]*?\?>|<!--[\s\S]*?-->|<\/([A-Za-z_][\w.:-]*)\s*>|<([A-Za-z_][\w.:-]*)((?:\s+[^\s=/>]+\s*=\s*(?:"[^"]*"|'[^']*'))*)\s*(\/?)>/g;
 const ATTRIBUTE = /([^\s=/>]+)\s*=\s*(?:"([^"]*)"|'([^']*)')/g;
 const ENTITY = /&(?:#x([0-9a-fA-F]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g;
 const NAMED_ENTITIES: Readonly<Record<string, string>> = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" };
@@ -175,17 +180,47 @@ function decodeXmlEntities(text: string): string {
   });
 }
 
-/** 按文档顺序列出控件树里的全部元素。不是 XML（一个元素都没有）时抛出：空列表只表示「这一屏没有可识别的控件」，不能用来
- *  掩盖采集到的是错误页。 */
+/** 把控件树解析成带层级的元素（根元素列表，通常只有一个）。结束标签弹到同名的最近一个开始标签，没有同名的就忽略：控件树不成对时
+ *  仍给出能用的层级，不整体失败。不是 XML（一个元素都没有）时抛出：空结果只表示「这一屏没有可识别的控件」，不能用来掩盖采集到的
+ *  是错误页。 */
+export function parseXmlTree(xml: string): XmlNode[] {
+  const roots: XmlNode[] = [];
+  const open: XmlNode[] = [];
+  let count = 0;
+  for (const m of xml.matchAll(XML_TOKEN)) {
+    const [, endTag, startTag, rawAttrs, selfClosing] = m;
+    if (endTag !== undefined) {
+      const at = open.map((n) => n.tag).lastIndexOf(endTag);
+      if (at >= 0) open.length = at;
+      continue;
+    }
+    if (startTag === undefined) continue;  // 处理指令与注释
+    const attrs = new Map<string, string>();
+    for (const a of (rawAttrs ?? "").matchAll(ATTRIBUTE)) attrs.set(a[1], decodeXmlEntities(a[2] ?? a[3] ?? ""));
+    const node: XmlNode = { tag: startTag, attrs, children: [] };
+    (open.length > 0 ? open[open.length - 1].children : roots).push(node);
+    count++;
+    if (selfClosing === "") open.push(node);
+  }
+  if (count === 0) throw new Error("设备返回的控件树不是可识别的 XML");
+  return roots;
+}
+
+/** 按文档顺序列出控件树里的全部元素（parseXmlTree 的扁平视图；不是 XML 时同样抛出）。 */
 export function scanXmlElements(xml: string): XmlElement[] {
   const elements: XmlElement[] = [];
-  for (const m of xml.matchAll(START_TAG)) {
-    const attrs = new Map<string, string>();
-    for (const a of (m[2] ?? "").matchAll(ATTRIBUTE)) attrs.set(a[1], decodeXmlEntities(a[2] ?? a[3] ?? ""));
-    elements.push({ tag: m[1], attrs });
-  }
-  if (elements.length === 0) throw new Error("设备返回的控件树不是可识别的 XML");
+  const visit = (node: XmlNode): void => {
+    elements.push(node);
+    for (const child of node.children) visit(child);
+  };
+  for (const root of parseXmlTree(xml)) visit(root);
   return elements;
+}
+
+/** 按文档顺序遍历一个元素及其全部后代。 */
+export function* descendantsOf(node: XmlNode): IterableIterator<XmlNode> {
+  yield node;
+  for (const child of node.children) yield* descendantsOf(child);
 }
 
 /** 属性值：缺失或空串都按「控件树里没有」记为 null（ADR 0051 决策 8 的控件摘要字段）。 */
@@ -291,19 +326,21 @@ function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): s
   return `worker: 「收起键盘」动作的收起命令报错：${errorText(e)}`;
 }
 
-/** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：iOS 上收起键盘只能走应用或系统浏览器提供的途径，
- *  一条都没有的输入框谁都收不起；让这一步快速、明确地失败，免得模型反复重规划。 */
+/** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：动作只点纯收起语义的控件，iOS 上收起键盘只能走
+ *  应用或系统浏览器提供的途径，一条都没有的输入框谁都收不起；让这一步快速、明确地失败，免得模型反复重规划，并指出用例可以怎么改。 */
 export const KEYBOARD_NOT_DISMISSED_MESSAGE =
-  "键盘仍然显示：这台设备上当前的输入框没有提供收起键盘的途径（应用没有处理 Return 键，也不响应点击空白处），这一步无法按用例的写法完成；" +
-  "若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可";
+  "键盘仍然显示：收起键盘的动作只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，这台设备上当前的输入框没有这样的控件，这一步无法按用例的写法完成；" +
+  "若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可；若这个输入框靠 Return 键或点击空白处收起，在用例里写明「按下 Return」或「点击空白处」";
 
 /** 「收起键盘」动作的名字与给模型看的说明（ADR 0052 决策 7）。说明写明用途与边界：用例要求收起、或键盘遮住下一步要操作的元素时用；
- *  它不是返回键，不会离开当前界面。 */
+ *  它不是返回键，不会离开当前界面；它只点纯收起语义的控件，不按 Return、不点空白处（决策 4），要那样做时模型用 Tap 或 KeyboardPress。 */
 export const DISMISS_KEYBOARD_ACTION = "DismissKeyboard";
 export const DISMISS_KEYBOARD_DESCRIPTION =
   "Dismiss (hide) the on-screen soft keyboard and stay on the current screen. Use it when the test step asks to dismiss, hide or " +
   "collapse the keyboard, or when the keyboard covers the element you need to interact with next. It does not press Back or Home and " +
-  "never leaves the current screen.";
+  "never leaves the current screen. It only taps a dedicated dismiss control (a Done key on the keyboard, or the Done button in the " +
+  "toolbar above it); it never presses Return and never taps a blank area. If the step asks to press Return or to tap outside the " +
+  "field, use KeyboardPress or Tap instead.";
 
 /** Midscene 的界面实现：截图、尺寸与动作集（ADR 0052 决策 7）。 */
 export class AppiumInterface extends AbstractInterface {
@@ -413,7 +450,7 @@ export class AppiumInterface extends AbstractInterface {
   }
 
   /** 收起键盘（ADR 0052 决策 7）。输入完成后顺带收起是尽力动作：失败只记一行日志、不传出异常，也不重试。模型显式调用的「收起键盘」动作
-   *  则要快速明确地失败：命令之后核一次键盘是否仍显示（驱动可能报成功而键盘仍在，iOS 26 实测），仍在即抛出产品语言的原因，让 Midscene
+   *  则要快速明确地失败：原语之后核一次键盘是否仍显示（点了收起控件但没收起，或驱动报成功而键盘仍在），仍在即抛出产品语言的原因，让 Midscene
    *  结束这一步而不是反复重规划；核不出来（只读命令失败）按未知、不抛。经守卫发出的命令若遇到会话丢失或结果未知，守卫已把它记在本次
    *  执行窗口的判定上（并中止当前 act），这里的处置不会掩盖它。 */
   private async hideKeyboard(when: "after_input" | "action"): Promise<void> {

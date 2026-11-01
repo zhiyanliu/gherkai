@@ -17,6 +17,8 @@
 //     真机的坐标比例与输入上下文另记在 probe 段，不改用例的输入，否则命令序列无法与快照逐条比对；
 //   - 已知的能力缺失不算平台行为变化：用例的异常上带着适配器挂的 capability_unavailable 标记（例如 WebDriverAgent 拒绝打开地址）
 //     时，它被拒的命令不进 rejected，用例进 failed_cases，被拒命令的形态记进 not_exercised（在这台设备上无法核对）。
+//   - 快照用例带 device_dependent（命令序列取决于设备此刻的界面，如 iOS 收起键盘按控件树选路线）时不做用例级比对：matches_fixture 为 null、
+//     note 带说明，形态仍进 rejected / unexpected / not_exercised 的核对；这些用例的逐条比对由命令契约测试按快照应答承担。
 // 快照用例的解读（原语名到适配器方法的映射）与 adapters/adapters.contract.test.mts 的 runCase 相同，加原语时两处一起改。
 //
 // 计时：记下的每条命令带从发出到落定的毫秒数（cases[].flat[].ms）；能力探测的逐项事实、打开测试页与随后的复原、截图、读地址、
@@ -68,11 +70,11 @@ const MATRIX_SCHEMA = "gherkai-device-reprobe/1";
 const SCOPE_ID = "device-reprobe";
 // 与命令行工具的 acquire-timeout-s 缺省值相同（core/gherkai_core/model.py 的 DEFAULT_ACQUIRE_TIMEOUT_S）。
 const DEFAULT_ACQUIRE_TIMEOUT_S = 600;
-const W3C_ELEMENT_KEYS = ["element-6066-11e4-a52f-4f735466cecf", "ELEMENT"];
+const W3C_ELEMENT_KEYS = ["element-6066-11e4-a52e-4f735466cecf", "ELEMENT"];
 const SCRIPT_METHODS = new Set(["execute", "executeScript"]);
 const INPUT_CALLS = new Set(["typeText", "keyboardPress", "clearInput", "hideKeyboard"]);
 // 用例的执行次序：输入类紧跟聚焦，手势之后才是会离开当前页面的 DeepLink 与系统键，主屏键最后。
-const CALL_ORDER = ["typeText", "clearInput", "keyboardPress", "hideKeyboard", "tap", "longPress", "scroll", "deepLink", "back", "home"];
+const CALL_ORDER = ["typeText", "clearInput", "keyboardPress", "hideKeyboard", "keyboardShown", "tap", "longPress", "scroll", "deepLink", "back", "home"];
 const PAGE_SOURCE_FIXTURE: Record<Device, string> = { android: "android-page-source.xml", ios: "ios-page-source.xml" };
 // 本工具自己取控件树（与样例做属性差集）时的截止时限，只用于测量，不是 worker 的预算。它比 worker 的证据采集预算
 // （控件树的 CONTROLS_CAPTURE_BUDGET_MS）宽得多：在 worker 预算下会超时的控件树也能读完，lifecycle 里 pageSource 一步的耗时因此是真实耗时。
@@ -89,6 +91,8 @@ interface ContractCase {
   context?: { scale?: number; inputContext?: InputContext | null };
   input?: Record<string, unknown>;
   responses?: Record<string, unknown[]>;
+  /** 命令序列取决于设备此刻的界面（收起键盘按控件树选路线）：真机上不逐条比对，只核形态是否被拒；值是说明。 */
+  device_dependent?: string;
   commands: Recorded[];
 }
 
@@ -219,6 +223,10 @@ class CommandRecorder {
 
   private learnElement(value: unknown): void {
     if (value === null || typeof value !== "object") return;
+    if (Array.isArray(value)) {  // findElements 的应答是元素引用的列表
+      for (const item of value) this.learnElement(item);
+      return;
+    }
     for (const key of W3C_ELEMENT_KEYS) {
       const id = (value as Record<string, unknown>)[key];
       if (typeof id === "string" && !this.elementIds.has(id)) this.elementIds.set(id, `active-${this.elementIds.size + 1}`);
@@ -283,8 +291,10 @@ interface CaseResult {
   error_type?: string | null;
   commands?: Recorded[];
   expected: Recorded[];
-  /** 归一后与快照逐条相同；没有执行或执行失败为 null。 */
+  /** 归一后与快照逐条相同；没有执行、执行失败，或用例的命令序列取决于设备（见 note）时为 null。 */
   matches_fixture: boolean | null;
+  /** 用例的命令序列取决于设备时的说明（快照的 device_dependent）。 */
+  note?: string;
   flat?: FlatCommand[];
 }
 
@@ -299,6 +309,7 @@ async function runPrimitive(adapter: DeviceAdapter, ctx: PrimitiveContext, call:
     case "keyboardPress": return adapter.keyboardPress(ctx, i.keyName);
     case "clearInput": return adapter.clearInput(ctx);
     case "hideKeyboard": return adapter.hideKeyboard(ctx);
+    case "keyboardShown": { await adapter.keyboardShown(ctx); return; }
     case "home": return adapter.systemButtons.home.press(ctx);
     case "back": {
       const back = adapter.systemButtons.back;
@@ -324,6 +335,7 @@ function finishCase(
       matches_fixture: null,
     };
   }
+  if (c.device_dependent !== undefined) return { ...base, status: "ok", matches_fixture: null, note: c.device_dependent };
   const same = JSON.stringify(collapse(recorded.tree)) === JSON.stringify(collapse(expected));
   return { ...base, status: "ok", matches_fixture: same };
 }
@@ -390,6 +402,7 @@ function diffAgainstFixture(file: string, results: CaseResult[]): Diff {
       reasons.add(r.status === "skipped" ? `${r.name}：${r.reason ?? ""}`
         : isCapabilityUnavailable(r) ? `${r.name}：这台设备不提供这项能力（capability_unavailable），这一形态在本设备上无法核对`
         : r.status === "failed" ? `${r.name}：执行中途失败，没有发到这条命令`
+        : r.note !== undefined ? `${r.name}：命令序列取决于设备（${r.note}），这一次没有走到这一形态`
         : `${r.name}：执行成功，但发出的命令里没有这一形态（见 mismatched_cases）`);
     }
     notExercised.push({ form, reasons: [...reasons] });

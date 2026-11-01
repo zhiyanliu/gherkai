@@ -190,6 +190,7 @@ export interface ReadOnlyMobileCommands {
 
 const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
   "takeScreenshot", "getContexts", "getAppiumContexts", "getPageSource", "getCurrentPackage", "status", "isKeyboardShown",
+  "findElements", "getElementRect",  // 查元素与读元素矩形：iOS 收起键盘原语定位收起控件用（ADR 0052 决策 4），不改设备状态
 ]);
 const ADDRESS_COMMAND = "getUrl";
 const SCRIPT_COMMANDS: ReadonlySet<string> = new Set(["execute", "executeScript"]);

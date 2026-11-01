@@ -8,8 +8,10 @@
 //   - 输入：W3C 活动元素 sendKeys（element/active 加 element/value），在哪个上下文取活动元素由能力探测定（网页上下文可用即网页，
 //     否则原生）。回车、退格与清空也走这一条路：经活动元素发控制字符（回车 `\n`、退格 `\b`，清空为若干个 `\b`）。不用旧版
 //     `POST /keys`，也不在多条输入路线之间试错（被拒方案）；
-//   - 收起键盘：WebdriverIO 的 hideKeyboard（Appium 的跨平台端点，不是 `mobile:` 命令），不带参数，在原生上下文发出，不论输入
-//     上下文是网页还是原生；
+//   - 收起键盘：自己定位并点击界面提供的收起控件（决策 4）——读一次原生控件树，在键盘子树里找标签为纯收起语义的键，没有则找紧贴
+//     键盘上方的工具栏里同类标签的按钮（Safari 的 Done 条、应用的键盘附属工具栏），经 `-ios class chain` 查询取元素句柄后 elementClick
+//     点击该元素；点元素不点坐标：未适配新机型的应用以 375 乘 812 的兼容窗口运行时，控件树坐标是应用窗口坐标系，坐标手势会落错。键盘不在
+//     树里即无事返回；键盘在而没有收起控件则抛出。在原生上下文发出，不论输入上下文是网页还是原生；
 //   - 系统键：`mobile: pressButton` 只用于主屏（它只接受物理按键名）；iOS 没有系统返回键，不向模型注册返回动作；
 //   - 导航：`mobile: deepLink` 带 bundleId，地址不经 shell、原样送达，成功只表示已送达且应用在前台。
 //
@@ -23,9 +25,9 @@
 import type { Browser } from "webdriverio";
 import { attachClassification, type ControlItem, type Controls } from "../../worker/surface.mjs";
 import {
-  attrOrNull, capabilityUnavailable, driverErrorText, driverTextMatchAllowed, identifiable, keyNameKey, scanXmlElements, toControls,
-  unmappedKeyMessage, type AdapterEntry, type DeviceAdapter, type Point, type PrimitiveContext, type ScrollDirection,
-  type ScrollGesture,
+  attrOrNull, capabilityUnavailable, descendantsOf, driverErrorText, driverTextMatchAllowed, identifiable, keyNameKey, parseXmlTree,
+  scanXmlElements, toControls, unmappedKeyMessage, type AdapterEntry, type DeviceAdapter, type Point, type PrimitiveContext,
+  type ScrollDirection, type ScrollGesture, type XmlNode,
 } from "../interface.mjs";
 
 export const XCUITEST = "XCUITest";
@@ -40,12 +42,123 @@ const PRESS_BUTTON = "mobile: pressButton";
 const DEEP_LINK = "mobile: deepLink";
 const DEVICE_SCREEN_INFO = "mobile: deviceScreenInfo";
 const ACTIVE_APP_INFO = "mobile: activeAppInfo";
-const HIDE_KEYBOARD = "mobile: hideKeyboard";
 
-/** 收起键盘时交给 WebDriverAgent 的候选键名（ADR 0052 决策 4）：驱动在一条命令内按顺序找到第一个存在的键并点按。只列「收起」语义的键，
- *  不列 Search、Go、Next 这类会提交或移动焦点的键；return 放在末尾，单行输入框上它只收起键盘。真机实测：不带键名时 iOS 18.6 报
- *  「Did not know how to dismiss the keyboard」、iOS 26.3.1 返回成功但键盘仍在。 */
-export const IOS_DISMISS_KEYBOARD_KEYS: readonly string[] = ["Done", "done", "完成", "Hide keyboard", "收起键盘", "return", "Return"];
+// ---- 收起键盘：定位界面提供的收起控件（ADR 0052 决策 4）----
+
+/** 纯收起语义的键面标签（比对时去首尾空白、不分大小写）：输入框把 Return 键配成 Done / 完成时的键面、iPad 键盘的收起键、Safari 与应用的
+ *  键盘附属工具栏上的 Done。不含 return（键面随输入框的 returnKeyType 变，多行框上是换行）与 Search、Go、Send、Next 等提交键：要不要按
+ *  由模型按用例自行决定。 */
+export const IOS_DISMISS_KEY_LABELS: readonly string[] = ["done", "完成", "hide keyboard", "收起键盘", "隐藏键盘"];
+
+/** 键盘附属工具栏的底边到键盘顶边的最大间距（点）：真机上 Safari 的 Done 条在 iOS 18.6 紧贴键盘、在 26.3.1 隔 27 点。 */
+export const ACCESSORY_TOOLBAR_MAX_GAP = 60;
+
+const KEYBOARD_TYPE = "XCUIElementTypeKeyboard";
+const TOOLBAR_TYPE = "XCUIElementTypeToolbar";
+const BUTTON_TYPE = "XCUIElementTypeButton";
+const CLASS_CHAIN = "-ios class chain";
+
+const DISMISS_LABEL_PREDICATE = IOS_DISMISS_KEY_LABELS.map((label) => `label ==[c] ${JSON.stringify(label)}`).join(" OR ");
+/** 类链查询：键盘子树里任一类型、标签为收起语义的键。 */
+export const KEYBOARD_DISMISS_KEY_QUERY = `**/${KEYBOARD_TYPE}/**/*[\`${DISMISS_LABEL_PREDICATE}\`]`;
+/** 类链查询：工具栏里标签为收起语义的按钮（是否紧贴键盘由控件树判定，查询结果多于一个时按矩形核对）。 */
+export const ACCESSORY_DISMISS_BUTTON_QUERY = `**/${TOOLBAR_TYPE}/**/${BUTTON_TYPE}[\`${DISMISS_LABEL_PREDICATE}\`]`;
+
+/** 控件树里的矩形（点，应用窗口坐标系）。 */
+export interface ElementRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** 控件树里选定的收起控件：在键盘子树里，或在紧贴键盘上方的工具栏里。 */
+export interface DismissControl {
+  route: "keyboard" | "toolbar";
+  label: string;
+  rect: ElementRect;
+}
+
+// 原语抛出的原因（进 worker 诊断日志；收不起时交给模型的原因由界面实现给出）。
+export const NO_DISMISS_CONTROL_MESSAGE = "键盘上没有 Done / 完成这类收起键，键盘上方也没有带 Done 的工具栏";
+export const DISMISS_CONTROL_VANISHED_MESSAGE = "控件树里有收起控件，但按它查询元素时没有找到（界面可能正在变化）";
+export const DISMISS_CONTROL_AMBIGUOUS_MESSAGE = "找到多个同名的收起控件，没有一个与控件树里的位置一致";
+
+function typeOf(node: XmlNode): string {
+  return attrOrNull(node, "type") ?? node.tag;
+}
+
+function isVisible(node: XmlNode): boolean {
+  return node.attrs.get("visible") !== "false";
+}
+
+function rectOf(node: XmlNode): ElementRect | null {
+  const read = (name: string): number | null => {
+    const v = Number(node.attrs.get(name));
+    return Number.isFinite(v) ? v : null;
+  };
+  const [x, y, width, height] = [read("x"), read("y"), read("width"), read("height")];
+  if (x === null || y === null || width === null || height === null || width <= 0 || height <= 0) return null;
+  return { x, y, width, height };
+}
+
+const DISMISS_LABEL_KEYS = new Set(IOS_DISMISS_KEY_LABELS.map(keyNameKey));
+
+/** 元素的键面标签（label，空时取 name）是收起语义时返回它，否则 null。 */
+function dismissLabelOf(node: XmlNode): string | null {
+  const label = attrOrNull(node, "label") ?? attrOrNull(node, "name");
+  return label !== null && DISMISS_LABEL_KEYS.has(keyNameKey(label)) ? label : null;
+}
+
+/** 工具栏紧贴键盘上方：底边在键盘顶边之上、间距不超过上限，且水平有重叠。 */
+function adjacentAbove(toolbar: ElementRect, keyboard: ElementRect): boolean {
+  const gap = keyboard.y - (toolbar.y + toolbar.height);
+  const overlap = Math.min(toolbar.x + toolbar.width, keyboard.x + keyboard.width) - Math.max(toolbar.x, keyboard.x);
+  return gap >= 0 && gap <= ACCESSORY_TOOLBAR_MAX_GAP && overlap > 0;
+}
+
+/** 从原生控件树里选收起控件：先看键盘子树里有没有收起语义的键，再看紧贴键盘上方的工具栏里有没有收起语义的按钮（可用的）。
+ *  树里没有显示中的键盘时返回 "no_keyboard"（没有东西要收）；有键盘但两处都没有时返回 null。 */
+export function findDismissControl(pageSource: string): DismissControl | "no_keyboard" | null {
+  const keyboards: XmlNode[] = [];
+  const toolbars: XmlNode[] = [];
+  for (const root of parseXmlTree(pageSource)) {
+    for (const node of descendantsOf(root)) {
+      if (!isVisible(node) || rectOf(node) === null) continue;
+      const type = typeOf(node);
+      if (type === KEYBOARD_TYPE) keyboards.push(node);
+      else if (type === TOOLBAR_TYPE) toolbars.push(node);
+    }
+  }
+  if (keyboards.length === 0) return "no_keyboard";
+  for (const keyboard of keyboards) {
+    for (const node of descendantsOf(keyboard)) {
+      if (node === keyboard || !isVisible(node)) continue;
+      const rect = rectOf(node);
+      const label = dismissLabelOf(node);
+      if (rect !== null && label !== null) return { route: "keyboard", label, rect };
+    }
+  }
+  for (const keyboard of keyboards) {
+    const keyboardRect = rectOf(keyboard)!;
+    for (const toolbar of toolbars) {
+      if (!adjacentAbove(rectOf(toolbar)!, keyboardRect)) continue;
+      for (const node of descendantsOf(toolbar)) {
+        if (typeOf(node) !== BUTTON_TYPE || !isVisible(node) || node.attrs.get("enabled") === "false") continue;
+        const rect = rectOf(node);
+        const label = dismissLabelOf(node);
+        if (rect !== null && label !== null) return { route: "toolbar", label, rect };
+      }
+    }
+  }
+  return null;
+}
+
+function sameRect(a: unknown, b: ElementRect): boolean {
+  const r = (a ?? {}) as Record<string, unknown>;
+  const close = (v: unknown, want: number): boolean => typeof v === "number" && Math.abs(v - want) <= 1;
+  return close(r.x, b.x) && close(r.y, b.y) && close(r.width, b.width) && close(r.height, b.height);
+}
 
 /** 只读的 `mobile:` 命令（命令守卫只读白名单里 `mobile:` 形态的条目）。 */
 export const READ_ONLY_MOBILE_COMMANDS: ReadonlySet<string> = new Set([DEVICE_SCREEN_INFO, ACTIVE_APP_INFO]);
@@ -60,7 +173,7 @@ export const CLEAR_INPUT_BACKSPACES = 40;
 const FINGER_DIRECTION: Readonly<Record<ScrollDirection, ScrollDirection>> = { down: "up", up: "down", left: "right", right: "left" };
 
 // W3C 元素引用的键；旧版 JSON Wire 协议的键作后备（同一个元素 id 的两种写法，不是两条路线）。
-const W3C_ELEMENT_KEY = "element-6066-11e4-a52f-4f735466cecf";
+const W3C_ELEMENT_KEY = "element-6066-11e4-a52e-4f735466cecf";
 const LEGACY_ELEMENT_KEY = "ELEMENT";
 
 // ---- 给使用方看的消息（ADR 0039；处置按 ADR 0051 决策 4 的类别表：改写为 AI 步或换设备）----
@@ -115,10 +228,16 @@ function toPoints(v: number, scale: number): number {
   return Math.round((v / scale) * 100) / 100;
 }
 
-function elementIdOf(ref: unknown): string {
+/** 元素引用里的元素 id；形态不对为 null。 */
+function elementRefId(ref: unknown): string | null {
   const r = (ref ?? {}) as Record<string, unknown>;
   const id = r[W3C_ELEMENT_KEY] ?? r[LEGACY_ELEMENT_KEY];
-  if (typeof id !== "string" || id === "") throw new Error("设备没有返回当前获得焦点的元素");
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
+function elementIdOf(ref: unknown): string {
+  const id = elementRefId(ref);
+  if (id === null) throw new Error("设备没有返回当前获得焦点的元素");
   return id;
 }
 
@@ -178,7 +297,19 @@ export function createXcuitestAdapter(): DeviceAdapter {
     },
 
     async hideKeyboard(ctx: PrimitiveContext): Promise<void> {
-      await ctx.driver.execute(HIDE_KEYBOARD, { keys: [...IOS_DISMISS_KEYBOARD_KEYS] });
+      const control = findDismissControl(await ctx.driver.getPageSource());
+      if (control === "no_keyboard") return;
+      if (control === null) throw new Error(NO_DISMISS_CONTROL_MESSAGE);
+      const query = control.route === "keyboard" ? KEYBOARD_DISMISS_KEY_QUERY : ACCESSORY_DISMISS_BUTTON_QUERY;
+      const refs = await ctx.driver.findElements(CLASS_CHAIN, query);
+      const ids = (Array.isArray(refs) ? refs : []).map(elementRefId).filter((id): id is string => id !== null);
+      if (ids.length === 0) throw new Error(DISMISS_CONTROL_VANISHED_MESSAGE);
+      let target: string | null = ids.length === 1 ? ids[0] : null;
+      for (const id of ids.length > 1 ? ids : []) {
+        if (sameRect(await ctx.driver.getElementRect(id), control.rect)) { target = id; break; }
+      }
+      if (target === null) throw new Error(DISMISS_CONTROL_AMBIGUOUS_MESSAGE);
+      await ctx.driver.elementClick(target);
     },
 
     async keyboardShown(ctx: PrimitiveContext): Promise<boolean> {
