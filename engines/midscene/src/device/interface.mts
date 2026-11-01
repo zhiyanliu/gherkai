@@ -326,21 +326,47 @@ function keyboardNotHiddenLogLine(e: unknown, when: "after_input" | "action"): s
   return `worker: 「收起键盘」动作的收起命令报错：${errorText(e)}`;
 }
 
-/** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：动作只点纯收起语义的控件，iOS 上收起键盘只能走
- *  应用或系统浏览器提供的途径，一条都没有的输入框谁都收不起；让这一步快速、明确地失败，免得模型反复重规划，并指出用例可以怎么改。 */
-export const KEYBOARD_NOT_DISMISSED_MESSAGE =
-  "键盘仍然显示：收起键盘的动作只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，这台设备上当前的输入框没有这样的控件，这一步无法按用例的写法完成；" +
-  "若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可；若这个输入框靠 Return 键或点击空白处收起，在用例里写明「按下 Return」或「点击空白处」";
+// 适配器的收起键盘原语在「界面上没有收起控件」时抛出的异常带这个标记（iOS 走自己定位控件的路线，ADR 0052 决策 4），界面实现据它把
+// 失败原因写成「没有这样的控件」而不是「点了没收起」。
+const NO_DISMISS_CONTROL = Symbol.for("gherkai.noDismissControl");
+
+/** 构造「界面上没有收起键盘的控件」的异常（适配器用）。 */
+export function noDismissControlError(message: string): Error {
+  return Object.assign(new Error(message), { [NO_DISMISS_CONTROL]: true });
+}
+
+export function isNoDismissControlError(e: unknown): boolean {
+  return e !== null && typeof e === "object" && (e as Record<symbol, unknown>)[NO_DISMISS_CONTROL] === true;
+}
+
+/** 「收起键盘」动作执行后键盘仍在时交给模型的失败原因（产品语言，ADR 0052 决策 7）：按平台与失败形态分写——iOS 的动作只点纯收起语义的
+ *  控件，没有这样的控件时说清并指出用例可以怎么改（iOS 上收起键盘只能走应用或系统浏览器提供的途径，一条都没有的输入框谁都收不起）；
+ *  点了控件键盘仍在、或 Android 的系统命令没收起，就只说发生了什么。都以同一前缀开头，让这一步快速、明确地失败，免得模型反复重规划。 */
+export const KEYBOARD_NOT_DISMISSED_PREFIX = "键盘仍然显示：";
+const REMOVE_STEP_ADVICE = "这一步无法按用例的写法完成；若下一步的目标没有被键盘遮住，去掉用例里的「收起键盘」即可";
+export function keyboardNotDismissedMessage(device: Device, cause: "no_control" | "not_dismissed"): string {
+  if (device === "android") return `${KEYBOARD_NOT_DISMISSED_PREFIX}系统的收起键盘命令没有收起这台设备上的键盘，${REMOVE_STEP_ADVICE}`;
+  if (cause === "no_control") {
+    return `${KEYBOARD_NOT_DISMISSED_PREFIX}收起键盘的动作只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，这台设备上当前的输入框没有这样的控件，`
+      + `${REMOVE_STEP_ADVICE}；若这个输入框靠 Return 键或点击空白处收起，在用例里写明「按下 Return」或「点击空白处」`;
+  }
+  return `${KEYBOARD_NOT_DISMISSED_PREFIX}已点击键盘的收起控件（Done / 完成）但键盘没有收起（或点击没有成功），${REMOVE_STEP_ADVICE}`;
+}
 
 /** 「收起键盘」动作的名字与给模型看的说明（ADR 0052 决策 7）。说明写明用途与边界：用例要求收起、或键盘遮住下一步要操作的元素时用；
- *  它不是返回键，不会离开当前界面；它只点纯收起语义的控件，不按 Return、不点空白处（决策 4），要那样做时模型用 Tap 或 KeyboardPress。 */
+ *  它不是返回键，不会离开当前界面。iOS 补一句它只点纯收起语义的控件、不按 Return、不点空白处（决策 4），要那样做时模型用 KeyboardPress
+ *  或 Tap；Android 走系统的收起命令，不涉及 Done 这类控件。 */
 export const DISMISS_KEYBOARD_ACTION = "DismissKeyboard";
-export const DISMISS_KEYBOARD_DESCRIPTION =
-  "Dismiss (hide) the on-screen soft keyboard and stay on the current screen. Use it when the test step asks to dismiss, hide or " +
-  "collapse the keyboard, or when the keyboard covers the element you need to interact with next. It does not press Back or Home and " +
-  "never leaves the current screen. It only taps a dedicated dismiss control (a Done key on the keyboard, or the Done button in the " +
-  "toolbar above it); it never presses Return and never taps a blank area. If the step asks to press Return or to tap outside the " +
-  "field, use KeyboardPress or Tap instead.";
+export function dismissKeyboardDescription(device: Device): string {
+  const common =
+    "Dismiss (hide) the on-screen soft keyboard and stay on the current screen. Use it when the test step asks to dismiss, hide or " +
+    "collapse the keyboard, or when the keyboard covers the element you need to interact with next. It does not press Back or Home and " +
+    "never leaves the current screen.";
+  if (device === "android") return `${common} On Android it asks the system to hide the keyboard.`;
+  return `${common} On iOS it only taps a dedicated dismiss control (a Done key on the keyboard, or the Done button in the toolbar ` +
+    "above it); it never presses Return and never taps a blank area. If the step asks to press Return or to tap outside the field, " +
+    "use KeyboardPress or Tap instead.";
+}
 
 /** Midscene 的界面实现：截图、尺寸与动作集（ADR 0052 决策 7）。 */
 export class AppiumInterface extends AbstractInterface {
@@ -420,7 +446,7 @@ export class AppiumInterface extends AbstractInterface {
       // 键盘上的按钮去凑（Android 有退出当前界面的风险，iOS 原生应用上收不起）；有了它这一步就有正确的工具。失败同样是尽力动作。
       defineAction({
         name: DISMISS_KEYBOARD_ACTION,
-        description: DISMISS_KEYBOARD_DESCRIPTION,
+        description: dismissKeyboardDescription(this.adapter.device),
         call: async () => { await this.hideKeyboard("action"); },
       }),
     ];
@@ -468,7 +494,7 @@ export class AppiumInterface extends AbstractInterface {
       shown = null;  // 核不出来：按未知处理
     }
     if (when === "action" && (shown === true || (shown === null && failure !== null))) {
-      throw new Error(KEYBOARD_NOT_DISMISSED_MESSAGE);
+      throw new Error(keyboardNotDismissedMessage(this.adapter.device, isNoDismissControlError(failure) ? "no_control" : "not_dismissed"));
     }
     if (when === "after_input" && shown === true && failure === null) {
       this.log("worker: 输入完成后收起键盘的命令已返回，但键盘仍然显示（不影响这一步的判定）");

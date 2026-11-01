@@ -508,6 +508,21 @@ test("进入终结后获取停下：等到 RUNNING 期间中断，之后不再�
   assert.ok(!h.calls.some((c) => c.startsWith("guards.create")), h.calls.join(", "));
 });
 
+test("进入终结后获取停下：部件因中止信号把等到 RUNNING 的失败报成会话丢失，结论仍记被停止信号中断（返回值路径与抛出路径同一次序）", async () => {
+  let entered!: () => void;
+  const inWait = new Promise<void>((resolve) => { entered = resolve; });
+  const h = harness({
+    waitRunning: (signal) => { entered(); return new Promise((resolve) => signal.addEventListener("abort", () => resolve(), { once: true })); },
+    waitRunningFailure: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE },
+  });
+  const acquiring = h.surface.acquire();
+  await inWait;
+  const releasing = h.surface.release("interrupt");
+  const r = await acquiring;
+  await releasing;
+  assert.deepEqual(r.ready ? null : r.termination, { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE });
+});
+
 test("进入终结后获取停下：探测在终结开始时成功返回，之后不建守卫与 Agent、不注入导航", async () => {
   let entered!: () => void;
   const inProbe = new Promise<void>((resolve) => { entered = resolve; });

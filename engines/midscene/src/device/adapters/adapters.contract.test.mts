@@ -16,7 +16,7 @@ import { attachClassification, readClassification, type StepClassification } fro
 import { RESULT_UNKNOWN_MESSAGE, commandFailedMessage, createCommandGuard } from "../guard.mjs";
 import { CONTROLS_MAX_ITEMS } from "../limits.mjs";
 import {
-  AppiumInterface, DISMISS_KEYBOARD_ACTION, KEYBOARD_NOT_DISMISSED_MESSAGE, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry,
+  AppiumInterface, DISMISS_KEYBOARD_ACTION, keyboardNotDismissedMessage, LONG_PRESS_DEFAULT_MS, SCROLL_TO_EDGE_GESTURES, adapterRegistry,
   createAppiumInterface, createDeviceAgentFactory,
   driverTextMatchAllowed, unmappedKeyMessage, type DeviceAdapter, type InputContext, type PrimitiveContext,
 } from "../interface.mjs";
@@ -126,7 +126,7 @@ function loadFixture(name: string): ContractFixture {
 }
 
 const PRIMITIVES = [
-  "tap", "longPress", "scroll", "typeText", "keyboardPress", "clearInput", "hideKeyboard", "home", "back", "deepLink",
+  "tap", "longPress", "scroll", "typeText", "keyboardPress", "clearInput", "hideKeyboard", "keyboardShown", "home", "back", "deepLink",
 ] as const;
 
 async function runCase(make: (rec: Recorder) => DeviceAdapter, c: ContractCase): Promise<Recorded[]> {
@@ -767,14 +767,23 @@ test("「收起键盘」动作：命令之后核一次键盘是否仍显示—�
     await dismiss(ok.ui);
     assert.deepEqual(flatten(ok.rec.commands).map((c) => c.method === "execute" ? `${c.method}:${c.args[0]}` : c.method),
       label === "iOS" ? ["getPageSource", "findElements", "elementClick", "isKeyboardShown"] : ["hideKeyboard", "isKeyboardShown"], label);
-    // 命令返回成功但键盘仍在（iOS 26 实测形态）
+    const device = label === "iOS" ? "ios" : "android";
+    // 收起路线走完但键盘仍在：原因说「点了没收起」（Android 说系统命令没收起）
     const stays = make({ responses: { isKeyboardShown: [true] } });
-    await assert.rejects(dismiss(stays.ui), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE, label);
-    // 命令本身报错且键盘仍在（iOS 18.6 实测形态）：同一句原因，另有一行日志
+    await assert.rejects(dismiss(stays.ui), (e: Error) => e.message === keyboardNotDismissedMessage(device, "not_dismissed"), label);
+    // 路线里最后一条命令报错且键盘仍在：同一句原因，另有一行日志
     const lines: string[] = [];
-    const failed = make({ responses: { [hideKey]: [new Error("Did not know how to dismiss the keyboard")], isKeyboardShown: [true] }, log: (l) => lines.push(l) });
-    await assert.rejects(dismiss(failed.ui), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE, label);
+    const failed = make({ responses: { [hideKey]: [new Error("Element is not hittable")], isKeyboardShown: [true] }, log: (l) => lines.push(l) });
+    await assert.rejects(dismiss(failed.ui), (e: Error) => e.message === keyboardNotDismissedMessage(device, "not_dismissed"), label);
     assert.equal(lines.length, 1, label);
+    if (label === "iOS") {
+      // 控件树里没有收起控件（示例应用的真树）：原因说「没有这样的控件」并指出用例可以怎么改，不点击
+      const noControl = make({ responses: { getPageSource: [fs.readFileSync(path.join(FIXTURES, "ios18-sample-app-keyboard.xml"), "utf-8")], isKeyboardShown: [true] } });
+      await assert.rejects(dismiss(noControl.ui), (e: Error) => e.message === keyboardNotDismissedMessage("ios", "no_control"));
+      assert.ok(!flatten(noControl.rec.commands).some((c) => c.method === "elementClick" || c.method === "findElements"));
+      assert.notEqual(keyboardNotDismissedMessage("ios", "no_control"), keyboardNotDismissedMessage("ios", "not_dismissed"));
+      assert.ok(keyboardNotDismissedMessage("ios", "no_control").includes("Return") && !keyboardNotDismissedMessage("android", "no_control").includes("Done"));
+    }
     // 核不出来：命令成功则不抛
     const unknown = make({ responses: { isKeyboardShown: [new Error("boom")] } });
     await dismiss(unknown.ui);

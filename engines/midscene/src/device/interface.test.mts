@@ -2,7 +2,7 @@
 // 经类链查询取句柄后点击元素）；动作之后核键盘是否仍在。另有接缝模块控件树解析的用例。运行：node --import tsx --test。
 import { test } from "node:test";
 import assert from "node:assert";
-import { AppiumInterface, DISMISS_KEYBOARD_ACTION, KEYBOARD_NOT_DISMISSED_MESSAGE, parseXmlTree, scanXmlElements } from "./interface.mjs";
+import { AppiumInterface, DISMISS_KEYBOARD_ACTION, keyboardNotDismissedMessage, parseXmlTree, scanXmlElements } from "./interface.mjs";
 import { createUiAutomator2Adapter } from "./adapters/uiautomator2.mjs";
 import { KEYBOARD_DISMISS_KEY_QUERY, createXcuitestAdapter } from "./adapters/xcuitest.mjs";
 
@@ -55,6 +55,9 @@ for (const [label, adapter, hideCalls] of [
     if (adapter.systemButtons.back) assert.ok(names.includes(adapter.systemButtons.back.action.name));
     const dismiss = actions.find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
     assert.match(dismiss.description, /keyboard/i);
+    // 说明按平台分写：iOS 说明只点收起控件、不按 Return；Android 不提 Done 这类控件
+    assert.equal(/never presses Return/.test(dismiss.description), label === "iOS", dismiss.description);
+    assert.equal(/Done/.test(dismiss.description), label === "iOS", dismiss.description);
     assert.ok(!dismiss.paramSchema, "无参数");
     await dismiss.call(undefined as never);
     assert.deepEqual(driver.calls, [...hideCalls, "isKeyboardShown"]);
@@ -69,7 +72,8 @@ for (const [label, adapter, hideCalls] of [
     assert.equal(logs.length, 1);
     assert.match(logs[0], /^worker: 「收起键盘」动作的收起命令报错：/);
     const stays = iface(adapter, fakeDriver({ keyboardStays: true }), []).actionSpace().find((a) => a.name === DISMISS_KEYBOARD_ACTION)!;
-    await assert.rejects(stays.call(undefined as never), (e: Error) => e.message === KEYBOARD_NOT_DISMISSED_MESSAGE);
+    await assert.rejects(stays.call(undefined as never),
+      (e: Error) => e.message === keyboardNotDismissedMessage(label === "iOS" ? "ios" : "android", "not_dismissed"));
   });
 }
 

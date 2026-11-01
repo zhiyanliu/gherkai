@@ -10,7 +10,8 @@
 // 复原核对，与 worker 执行一个 step 的次序相同。不调模型：设备 Agent 照常构造（借它列出向模型注册的动作），不执行任何 AI 动作。
 //
 // 差集的口径：
-//   - 命令形态指方法名，execute 类命令另加脚本名与参数对象的键集合（ADR 0052 决策 8「命令名与参数形态」）；
+//   - 命令形态指方法名，execute 类命令另加脚本名与参数对象的键集合，查元素（findElements）另加定位策略与查询串（ADR 0052 决策 8
+//     「命令名与参数形态」）；
 //   - 用例级比对：归一后的命令序列与快照逐条相同。归一有两处：元素句柄按出现次序换成 active-1、active-2……（快照的假 driver 就是这样
 //     命名的）；连续重复的同一条命令按一条比较（轮询次数随真机应答变化，例如 DeepLink 之后核对前台包名）；
 //   - 快照用例的输入照原样执行（坐标、文本与上下文取快照里的值），只有 DeepLink 的地址与应用标识换成 --deep-link 与本次目标的值；
@@ -247,6 +248,8 @@ function flatten(commands: Recorded[]): Array<{ method: string; args: unknown[] 
 
 /** 命令形态：方法名；execute 类命令另加脚本名与参数对象的键集合。 */
 function formOf(c: { method: string; args: unknown[] }): string {
+  // 查元素的形态带定位策略与查询串：iOS 收起键盘的两条类链查询是两个要分别核对的形态，只记方法名会让没执行到的那条漏报
+  if (c.method === "findElements" || c.method === "findElement") return `${c.method} ${String(c.args[0])} ${String(c.args[1])}`;
   if (!SCRIPT_METHODS.has(c.method)) return c.method;
   const [script, params] = c.args;
   const name = typeof script === "string" ? ` ${script}` : "";

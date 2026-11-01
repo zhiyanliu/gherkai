@@ -9,7 +9,7 @@ import {
   ACCESSORY_DISMISS_BUTTON_QUERY, ACCESSORY_TOOLBAR_MAX_GAP, DISMISS_CONTROL_AMBIGUOUS_MESSAGE, DISMISS_CONTROL_VANISHED_MESSAGE,
   IOS_DISMISS_KEY_LABELS, KEYBOARD_DISMISS_KEY_QUERY, NO_DISMISS_CONTROL_MESSAGE, createXcuitestAdapter, findDismissControl,
 } from "./xcuitest.mjs";
-import type { PrimitiveContext } from "../interface.mjs";
+import { isNoDismissControlError, type PrimitiveContext } from "../interface.mjs";
 
 const FIXTURES = path.join(import.meta.dirname, "fixtures");
 const tree = (name: string): string => fs.readFileSync(path.join(FIXTURES, name), "utf-8");
@@ -52,9 +52,12 @@ test("示例应用：键盘里只有键面为 return 的回车键、没有工具
   }
 });
 
-test("键盘里的回车键面配成 done 时选键盘路线（键盘路线优先于工具栏）；键面比对不分大小写、不计首尾空白", () => {
-  const sample = tree("ios18-sample-app-keyboard.xml").replace('name="Return" label="return"', 'name="Return" label=" Done "');
-  assert.deepEqual(findDismissControl(sample), { route: "keyboard", label: " Done ", rect: { x: 281, y: 690, width: 94, height: 46 } });
+test("键盘里的回车键面配成 done 时选键盘路线（键盘路线优先于工具栏）；键面只比对 label、只忽略大小写——与类链查询的 ==[c] 同口径", () => {
+  const sample = tree("ios18-sample-app-keyboard.xml");
+  const relabel = (label: string): string => sample.replace('name="Return" label="return"', `name="Return" label="${label}"`);
+  assert.deepEqual(findDismissControl(relabel("DONE")), { route: "keyboard", label: "DONE", rect: { x: 281, y: 690, width: 94, height: 46 } });
+  assert.equal(findDismissControl(relabel(" Done ")), null, "带首尾空白的 label 查询查不到，树上也不选");
+  assert.equal(findDismissControl(sample.replace('name="Return" label="return"', 'name="Done" label=""')), null, "label 为空不回落到 name");
   const both = app(window(false, toolbar(TOOLBAR_RECT, button("Done", DONE_RECT))),
     window(true, keyboard(key("Button", "完成", { x: 292, y: 722, width: 98, height: 47 }))));
   assert.deepEqual(findDismissControl(both), { route: "keyboard", label: "完成", rect: { x: 292, y: 722, width: 98, height: 47 } });
@@ -132,7 +135,8 @@ test("hideKeyboard：没有句柄、句柄都与控件树位置不符、树里�
     { a: { x: 0, y: 0, width: 1, height: 1 }, b: { x: 324, y: 509, width: 66, height: 40 } });
   await assert.rejects(adapter.hideKeyboard(ambiguous.ctx), (e: Error) => e.message === DISMISS_CONTROL_AMBIGUOUS_MESSAGE);
   const noControl = fakeCtx(tree("ios26-sample-app-keyboard.xml"), [{ [REF]: "x" }]);
-  await assert.rejects(adapter.hideKeyboard(noControl.ctx), (e: Error) => e.message === NO_DISMISS_CONTROL_MESSAGE);
+  await assert.rejects(adapter.hideKeyboard(noControl.ctx), (e: Error) => e.message === NO_DISMISS_CONTROL_MESSAGE && isNoDismissControlError(e));
+  await assert.rejects(adapter.hideKeyboard(fakeCtx(tree("ios18-safari-keyboard.xml"), []).ctx), (e: Error) => !isNoDismissControlError(e));
   assert.deepEqual(noControl.calls, ["getPageSource"]);
   const noKeyboard = fakeCtx(app(window(true, button("Done", DONE_RECT))), [{ [REF]: "x" }]);
   await adapter.hideKeyboard(noKeyboard.ctx);

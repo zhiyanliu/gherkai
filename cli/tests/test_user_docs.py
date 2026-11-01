@@ -85,11 +85,36 @@ def test_user_doc_prose_has_no_symbolic_shorthand(doc: Path):
     assert not hits, "用户文档正文写完整句（即 / 是 / 表示；退出码 N；然后 / 得到），符号留给代码块：\n" + "\n".join(hits)
 
 
+_INLINE_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")           # [文字](目标 "标题") 与 [文字](<目标>)
+_REFERENCE_DEF = re.compile(r"^\s*\[[^\]]+\]:\s*<?(\S+?)>?\s*(?:\s[\"'(].*)?$", re.M)  # [标签]: 目标 "标题"
+
+
+def _link_targets(markdown: str) -> list[str]:
+    """Markdown 里全部链接目标：行内链接与引用式定义。按目标判断而不是按几种相对写法的黑名单匹配——黑名单漏掉的写法
+    （不带 ./ 的目录路径、括号内带空格、引用式定义）到了 Releases 页面同样是死链。"""
+    return _INLINE_LINK.findall(markdown) + _REFERENCE_DEF.findall(markdown)
+
+
+def test_link_target_extraction_covers_relative_forms():
+    """提取器本身的护栏：Codex 复核列出的三种漏网写法都要被提出来、都要被判为相对。"""
+    sample = "[引擎](engines/midscene/README.md) [指南]( docs/user-guide/README.md ) [a](./x.md) [b](../y.md) [c](https://e.com/p) [d](<docs/z.md>)\n" \
+        "[指南][g]\n[g]: docs/user-guide/README.md\n[h]: https://e.com/q \"标题\"\n"
+    targets = _link_targets(sample)
+    assert targets == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md", "https://e.com/p", "docs/z.md",
+                       "docs/user-guide/README.md", "https://e.com/q"], targets
+    assert [t for t in targets if not _absolute(t)] == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md",
+                                                        "docs/z.md", "docs/user-guide/README.md"]
+
+
+def _absolute(target: str) -> bool:
+    return target.startswith(("https://", "http://", "mailto:", "#"))
+
+
 def test_changelog_uses_absolute_links_only():
-    """CHANGELOG 全文只写绝对 URL（ADR 0039）：Release 正文由发布脚本直接截取本版那一节、不改写链接，相对链接到了 Releases 页面就是死链。"""
-    import re as _re
+    """CHANGELOG 全文只写绝对 URL（ADR 0039）：Release 正文由发布脚本直接截取本版那一节、不改写链接，相对链接到了 Releases 页面就是死链。
+    按链接目标判断（行内与引用式都算），不按相对写法的黑名单。"""
     text = (REPO / "CHANGELOG.md").read_text(encoding="utf-8")
-    relative = [m.group(0) for m in _re.finditer(r"\]\((?:\./|\.\./|docs/|[A-Za-z0-9_-]+\.md)[^)]*\)", text)]
+    relative = [t for t in _link_targets(text) if not _absolute(t)]
     assert relative == [], f"CHANGELOG 里有相对链接（改成 https://github.com/zhiyanliu/gherkai/blob/HEAD/<path>）：{relative}"
 
 

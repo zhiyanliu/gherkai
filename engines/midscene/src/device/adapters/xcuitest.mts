@@ -25,8 +25,8 @@
 import type { Browser } from "webdriverio";
 import { attachClassification, type ControlItem, type Controls } from "../../worker/surface.mjs";
 import {
-  attrOrNull, capabilityUnavailable, descendantsOf, driverErrorText, driverTextMatchAllowed, identifiable, keyNameKey, parseXmlTree,
-  scanXmlElements, toControls, unmappedKeyMessage, type AdapterEntry, type DeviceAdapter, type Point, type PrimitiveContext,
+  attrOrNull, capabilityUnavailable, descendantsOf, driverErrorText, driverTextMatchAllowed, identifiable, keyNameKey, noDismissControlError,
+  parseXmlTree, scanXmlElements, toControls, unmappedKeyMessage, type AdapterEntry, type DeviceAdapter, type Point, type PrimitiveContext,
   type ScrollDirection, type ScrollGesture, type XmlNode,
 } from "../interface.mjs";
 
@@ -45,9 +45,10 @@ const ACTIVE_APP_INFO = "mobile: activeAppInfo";
 
 // ---- 收起键盘：定位界面提供的收起控件（ADR 0052 决策 4）----
 
-/** 纯收起语义的键面标签（比对时去首尾空白、不分大小写）：输入框把 Return 键配成 Done / 完成时的键面、iPad 键盘的收起键、Safari 与应用的
- *  键盘附属工具栏上的 Done。不含 return（键面随输入框的 returnKeyType 变，多行框上是换行）与 Search、Go、Send、Next 等提交键：要不要按
- *  由模型按用例自行决定。 */
+/** 纯收起语义的键面标签：输入框把 Return 键配成 Done / 完成时的键面、iPad 键盘的收起键、Safari 与应用的键盘附属工具栏上的 Done。
+ *  不含 return（键面随输入框的 returnKeyType 变，多行框上是换行）与 Search、Go、Send、Next 等提交键：要不要按由模型按用例自行决定。
+ *  控件树里只比对 label、不分大小写、不做其它归一（不去空白、不回落到 name），与类链查询的 `label ==[c]` 完全同一口径——两处判据
+ *  不一致时树上选中的控件会查不到句柄。 */
 export const IOS_DISMISS_KEY_LABELS: readonly string[] = ["done", "完成", "hide keyboard", "收起键盘", "隐藏键盘"];
 
 /** 键盘附属工具栏的底边到键盘顶边的最大间距（点）：真机上 Safari 的 Done 条在 iOS 18.6 紧贴键盘、在 26.3.1 隔 27 点。 */
@@ -102,12 +103,12 @@ function rectOf(node: XmlNode): ElementRect | null {
   return { x, y, width, height };
 }
 
-const DISMISS_LABEL_KEYS = new Set(IOS_DISMISS_KEY_LABELS.map(keyNameKey));
+const DISMISS_LABELS_LOWER = new Set(IOS_DISMISS_KEY_LABELS.map((label) => label.toLowerCase()));
 
-/** 元素的键面标签（label，空时取 name）是收起语义时返回它，否则 null。 */
+/** 元素的键面标签（label）是收起语义时返回它，否则 null；判据与类链查询的 `label ==[c]` 相同：只看 label、只忽略大小写。 */
 function dismissLabelOf(node: XmlNode): string | null {
-  const label = attrOrNull(node, "label") ?? attrOrNull(node, "name");
-  return label !== null && DISMISS_LABEL_KEYS.has(keyNameKey(label)) ? label : null;
+  const label = attrOrNull(node, "label");
+  return label !== null && DISMISS_LABELS_LOWER.has(label.toLowerCase()) ? label : null;
 }
 
 /** 工具栏紧贴键盘上方：底边在键盘顶边之上、间距不超过上限，且水平有重叠。 */
@@ -299,7 +300,7 @@ export function createXcuitestAdapter(): DeviceAdapter {
     async hideKeyboard(ctx: PrimitiveContext): Promise<void> {
       const control = findDismissControl(await ctx.driver.getPageSource());
       if (control === "no_keyboard") return;
-      if (control === null) throw new Error(NO_DISMISS_CONTROL_MESSAGE);
+      if (control === null) throw noDismissControlError(NO_DISMISS_CONTROL_MESSAGE);
       const query = control.route === "keyboard" ? KEYBOARD_DISMISS_KEY_QUERY : ACCESSORY_DISMISS_BUTTON_QUERY;
       const refs = await ctx.driver.findElements(CLASS_CHAIN, query);
       const ids = (Array.isArray(refs) ? refs : []).map(elementRefId).filter((id): id is string => id !== null);

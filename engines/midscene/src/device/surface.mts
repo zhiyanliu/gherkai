@@ -727,11 +727,12 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE };
   }
 
-  /** 预算到期时，非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因；部件已确认的 session_lost 也保持——
-   *  会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 2）；进入终结的先记为被停止信号中断。 */
+  /** 进入终结的一律记为被停止信号中断（这个结果不会被使用，只进日志；中止信号会让部件把在途调用的失败报成会话丢失或到期，与抛出路径
+   *  同一次序）。其余：预算到期时非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因；部件已确认的 session_lost
+   *  也保持——会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 2）。 */
   private budgetAware(termination: ScopeTermination, budget: Budget): ScopeTermination {
-    if (termination.errorType === "precheck_failed" || termination.errorType === "session_lost") return termination;
     if (this.finalizing) return this.interruptedTermination();
+    if (termination.errorType === "precheck_failed" || termination.errorType === "session_lost") return termination;
     if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
     return termination;
   }
