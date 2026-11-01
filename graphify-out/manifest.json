@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793524592.1171737,
-    "ast_hash": "23c431edeb78cade996c4f9fd7eeb54f",
+    "mtime": 1793525810.4668596,
+    "ast_hash": "4c990a8fa83b04fa34e963ed3b5a7626",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793462169.692215,
-    "ast_hash": "490da56c51972632c0e0565bb9fd5272",
+    "mtime": 1793525810.4670897,
+    "ast_hash": "977abf5683c02d7968f66693873525c3",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1905,8 +1905,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793524514.517685,
-    "ast_hash": "bbb191b6ee67d02135aab898d952f628",
+    "mtime": 1793525810.467397,
+    "ast_hash": "0086b75a033a7a8ef1b34bb6e526cb29",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
