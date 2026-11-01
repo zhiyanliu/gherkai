@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-11-01)
 
 ## Corpus Check
-- 445 files · ~772,412 words
+- 445 files · ~772,492 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `22b01f48`
+- Built from commit: `25399b5a`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -879,7 +879,7 @@ Nodes (29): gherkai：产品本体即组合根共享层（ADR 0016「演进」�
 
 ### Community 52 - "test_user_docs.py"
 Cohesion: 0.07
-Nodes (45): _absolute(), _default_model_claims(), _default_model_ids(), _link_targets(), 仓库内用户文档的护栏：`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料…, CHANGELOG 全文只写绝对 URL（ADR 0039）：Release 正文由发布脚本直接截取本版那一节、不改写链接，相对链接到了 Releases…, 护栏的退役词表是词表各条 `_Avoid_` 的子集：两份清单同源，禁词才有「规范名是什么」的出处。 差集单向即够：`_Avoid_` 比护栏宽（不少旧名只在…, owner 表（docs/user-guide/README.md）与目录里的页一一对应：两向差集。 (+37 more)
+Nodes (45): _absolute(), _default_model_claims(), _default_model_ids(), _link_targets(), 仓库内用户文档的护栏：`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料…, 提取器本身的护栏：同僚复核列出的漏网写法（不带 ./ 的目录路径、括号内带空格、引用式定义、引用块里的引用式定义）都要被提出来、都要被判为相对；正文里形如…, CHANGELOG 全文只写绝对 URL（ADR 0039）：Release 正文由发布脚本直接截取本版那一节、不改写链接，相对链接到了 Releases…, 护栏的退役词表是词表各条 `_Avoid_` 的子集：两份清单同源，禁词才有「规范名是什么」的出处。 差集单向即够：`_Avoid_` 比护栏宽（不少旧名只在… (+37 more)
 
 ### Community 53 - "_explain_run"
 Cohesion: 0.08

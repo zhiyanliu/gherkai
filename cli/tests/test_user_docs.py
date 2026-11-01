@@ -89,21 +89,41 @@ _INLINE_LINK = re.compile(r"\]\(\s*<?([^)\s>]+)")           # [文字](目标 "�
 _REFERENCE_DEF = re.compile(r"^\s*(?:>\s*)*\[[^\]]+\]:\s*<?(\S+?)>?\s*(?:\s[\"'(].*)?$", re.M)  # [标签]: 目标 "标题"，含引用块里的
 
 
+_BLOCKQUOTE_PREFIX = re.compile(r"^\s*(?:>\s*)*")
+
+
 def _link_targets(markdown: str) -> list[str]:
     """Markdown 里全部链接目标：行内链接与引用式定义。按目标判断而不是按几种相对写法的黑名单匹配——黑名单漏掉的写法
-    （不带 ./ 的目录路径、括号内带空格、引用式定义）到了 Releases 页面同样是死链。"""
-    return _INLINE_LINK.findall(markdown) + _REFERENCE_DEF.findall(markdown)
+    （不带 ./ 的目录路径、括号内带空格、引用式定义）到了 Releases 页面同样是死链。引用式定义按 GFM 的规则认：它不能打断段落，
+    所以只有紧跟空行（引用块里只有 > 的行也算空）、文档开头或另一条定义的 `[标签]: 目标` 行才是定义，正文里形如
+    `[错误]: 说明文字` 的续行不是。"""
+    targets = _INLINE_LINK.findall(markdown)
+    in_paragraph = False
+    for line in markdown.splitlines():
+        if _BLOCKQUOTE_PREFIX.sub("", line).strip() == "":
+            in_paragraph = False
+            continue
+        m = _REFERENCE_DEF.match(line)
+        if m and not in_paragraph:
+            targets.append(m.group(1))
+            continue
+        in_paragraph = True
+    return targets
 
 
 def test_link_target_extraction_covers_relative_forms():
-    """提取器本身的护栏：同僚复核列出的漏网写法（不带 ./ 的目录路径、括号内带空格、引用式定义、引用块里的引用式定义）都要被提出来、都要被判为相对。"""
+    """提取器本身的护栏：同僚复核列出的漏网写法（不带 ./ 的目录路径、括号内带空格、引用式定义、引用块里的引用式定义）都要被提出来、都要被判为相对；正文里形如 `[错误]: 说明` 的续行不能被当成定义。"""
     sample = "[引擎](engines/midscene/README.md) [指南]( docs/user-guide/README.md ) [a](./x.md) [b](../y.md) [c](https://e.com/p) [d](<docs/z.md>)\n" \
-        "[指南][g]\n[g]: docs/user-guide/README.md\n[h]: https://e.com/q \"标题\"\n> [引用块][q]\n>\n> [q]: docs/quoted.md\n"
+        "[指南][g]\n\n[g]: docs/user-guide/README.md\n[h]: https://e.com/q \"标题\"\n> [引用块][q]\n>\n> [q]: docs/quoted.md\n" \
+        "> 连接失败时显示具体原因：\n> [错误]: 无法连接浏览器，请确认浏览器已启动。\n"
     targets = _link_targets(sample)
     assert targets == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md", "https://e.com/p", "docs/z.md",
                        "docs/user-guide/README.md", "https://e.com/q", "docs/quoted.md"], targets
     assert [t for t in targets if not _absolute(t)] == ["engines/midscene/README.md", "docs/user-guide/README.md", "./x.md", "../y.md",
                                                         "docs/z.md", "docs/user-guide/README.md", "docs/quoted.md"]
+    # 文档开头的定义算定义；紧跟正文的 `[标签]: …` 行按 GFM 是段落续行、不是定义
+    assert _link_targets("[g]: docs/a.md\n") == ["docs/a.md"]
+    assert _link_targets("正文一行\n[g]: docs/a.md\n") == []
 
 
 def _absolute(target: str) -> bool:
