@@ -2300,13 +2300,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {
-    "mtime": 1793377796.6367075,
-    "ast_hash": "",
+    "mtime": 1793529020.827347,
+    "ast_hash": "140119228878041a4ffb1800b3e9427c",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/xcuitest.commands.json": {
-    "mtime": 1793527312.4035106,
-    "ast_hash": "",
+    "mtime": 1793529020.8275604,
+    "ast_hash": "82f770162407f43abaf2cbc868c13223",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_stderr_redaction.py": {

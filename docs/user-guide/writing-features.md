@@ -100,6 +100,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 - **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。
 - **`@device:<平台>` 与 `@app:<别名>` 声明设备目标**：`@device:android` / `@device:ios` 让这个 scope 在该平台的真机上执行，只标 `@device` 时测的是设备上的浏览器（Android 的 Chrome、iOS 的 Safari），再标 `@app:<别名>` 时测的是原生应用。声明、继承与冲突的规则与 `@engine` 相同，`@app` 的别名要在项目配置文件的 `[apps]` 里绑定安装包，用哪台设备在 `[devices]` 或命令行选项里指定（见[配置](./configuration.md)）。设备目标只有 Midscene 引擎支持（各引擎支持的目标见[引擎能力矩阵](./engines.md)），设备 scope 要同时标 `@engine:midscene` 或用 `--default-engine midscene`；落到 Nova Act 的设备 scope 在 `plan` 与执行前被拒绝并给出改法。一个设备 scope 对应一个远程访问会话，同一 scope 里的 scenario 之间不重启应用；需要干净起点的用例在 `Background` 里写一条重启应用的确定性 step（模板见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)「内建的导航与 `steps/` 模板」）。
+- **设备上的软键盘**：输入之后键盘留在屏幕上是正常的，不需要收起时不要在用例里写「收起键盘」，AI 会自己绕开它；只在键盘挡住了下一步要操作的元素时写明「输入 … 后收起键盘」，并进同一步或单独一步都可以。Android 上收起键盘不依赖应用。iOS 上收起键盘只能走应用或系统浏览器提供的途径——Safari 键盘上的 Done、应用处理过的 Return 键、点击空白处收起的手势；一个既不处理 Return 也不响应点击空白的输入框，任何自动化工具和真人都收不起，这一步会以「键盘仍然显示」为由判出错。这时先确认下一步的目标是否真的被键盘遮住：没遮住就删掉「收起键盘」；遮住了，那是被测应用自身的可用性问题，测试如实失败是对的。
 - **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 运行。
 - 以上校验都在起第一个 job 之前完成，任一条不满足即整个 run 拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
