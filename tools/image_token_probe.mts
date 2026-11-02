@@ -9,7 +9,7 @@
 // 运行（要 AWS 凭证与 region；跳板机上）：
 //   cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx ../../tools/image_token_probe.mts <png>... [--k 1,2,2.625,3] [--n 3] [--json out.json]
 // 模型取 lib/agentcore-sigv4 的 MODEL（可用 MIDSCENE_MODEL_ID 覆盖），与生产同一个。请求只问一句「用一个词回答图里是什么」、
-// max_tokens 16，花费可忽略。输出不含任何凭证；打印的只有尺寸、字节数与 token 数。
+// max_completion_tokens 16（GPT-5 系列不接受 max_tokens），花费可忽略。输出不含任何凭证；打印的只有尺寸、字节数与 token 数。
 import { readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { sigv4Fetch, getBaseUrl, MODEL } from "../engines/midscene/src/lib/agentcore-sigv4.mjs";
@@ -36,7 +36,7 @@ function parseArgs(argv: string[]) {
 }
 
 async function promptTokens(client: OpenAIClient, content: unknown): Promise<number> {
-  const r = await client.chat.completions.create({ model: MODEL, max_tokens: 16, messages: [{ role: "user", content }] as never });
+  const r = await client.chat.completions.create({ model: MODEL, max_completion_tokens: 16, messages: [{ role: "user", content }] as never });
   const u = r.usage?.prompt_tokens;
   if (typeof u !== "number") throw new Error(`响应里没有 usage.prompt_tokens：${JSON.stringify(r.usage)}`);
   return u;

@@ -1231,7 +1231,7 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1793610911.6543584,
-    "ast_hash": "",
+    "ast_hash": "b0439bb78de183fd587482c916845f52",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793607586.1336062,
-    "ast_hash": "9077bf12c7cbf47058700f66e2ba9c90",
+    "mtime": 1793611982.188678,
+    "ast_hash": "50974ad9d253863387d81d927450610b",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
@@ -2360,18 +2360,18 @@
     "semantic_hash": ""
   },
   "tools/image_token_probe.mts": {
-    "mtime": 1793611557.633006,
-    "ast_hash": "911ae2f086a994870590f9bc50196bc8",
+    "mtime": 1793612025.7917666,
+    "ast_hash": "85ad31d71a3eae0e5d23b47ac122db39",
     "semantic_hash": ""
   },
   "docs/journey/0016-screenshot-shrink-evaluation.md": {
-    "mtime": 1793611854.48147,
-    "ast_hash": "7d436d6d579cbfcddbf2aa6c145385d7",
+    "mtime": 1793612368.551724,
+    "ast_hash": "875f9efd8bc960d431dce5b72701d8c6",
     "semantic_hash": ""
   },
   "tools/image_token_probe.md": {
-    "mtime": 1793610909.8058581,
-    "ast_hash": "2be142acd6ba2b88f8a145a3368e81c3",
+    "mtime": 1793612025.7896028,
+    "ast_hash": "14ec877f27190e76df12f92a5aa6e8f3",
     "semantic_hash": ""
   }
 }

@@ -13,7 +13,7 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx ../../tools/image_token_probe.mts /pa
 
 - 输入是真机截图的 PNG（原生像素）。缩放用 Midscene 送模型前的同一种编码（JPEG 质量 90），尺寸为 round(原图 ÷ k)。
 - 每个尺寸发两类带图请求：不带 `detail`（生产的定位与规划请求形态）、`detail: "high"`（生产的断言请求形态）；另发纯文本对照。每类 `--n` 次。
-- 模型取 `lib/agentcore-sigv4` 的缺省（可用 `MIDSCENE_MODEL_ID` 覆盖），与生产相同。每次请求只要一个词、`max_tokens` 16，花费可忽略。
+- 模型取 `lib/agentcore-sigv4` 的缺省（可用 `MIDSCENE_MODEL_ID` 覆盖），与生产相同。每次请求只要一个词、`max_completion_tokens` 16（GPT-5 系列不接受 `max_tokens`），花费可忽略。
 
 ## 读数
 
