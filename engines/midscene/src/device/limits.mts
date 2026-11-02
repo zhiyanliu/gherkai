@@ -8,7 +8,8 @@
 // 单位写在名字里：`_MS` 是毫秒，用于计时器与请求超时；`_S` 是秒，用于协议面的值（能力自述）、Appium 能力项与 S3 预签名。
 // 标注「实施期校准、真机验收后可调」的，是 ADR 原文标明的校准值；改它们只改这里，消费方不另写字面量。
 // 次数上限里只有重规划上限可由使用方经 env 覆盖，覆盖键的读取与校验也在本文件（replanningCycleLimit，ADR 0044 决策 2）：
-// worker 启动时的校验与设备 Agent 的构造项共用这一份，不各写一套解析。
+// worker 启动时的校验与设备 Agent 的构造项共用这一份，不各写一套解析。另有一个实验开关（screenshotShrinkFactor，截图缩放除数，
+// ADR 0052 第 9 节的评估项）同样在这里读 env：缺省不设即不缩、构造项与生产逐键相同。
 import { WARMUP_ATTEMPTS } from "../lib/tunnel-warmup.mjs";
 
 // ---- 会话寿命（ADR 0051 决策 2；ADR 0049 决策 4）----
@@ -152,4 +153,24 @@ export function deviceGraceSeconds(tail: SharedShutdownTailMs): number {
   const totalMs = FINALIZE_AWAIT_CREATE_MS + FINALIZE_RECONCILE_MS + FINALIZE_RELEASE_MS
     + tail.uploadMs + tail.queueDrainExitMs + tail.marginMs;
   return totalMs / 1000;
+}
+
+// ---- 实验开关：截图缩放（ADR 0052 第 9 节的评估项；评估结论落定前缺省关闭）----
+
+/** 截图缩放除数的 env 键。值 k ≥ 1：送模型的截图缩到 round(原图 ÷ k)，由 Midscene 的构造项 `screenshotShrinkFactor` 实现——
+ *  `size()` 仍报原生像素、动作坐标自动乘回 k，适配器与坐标比例都不动。只在设备 Agent 的构造项上读（桌面不经这里）。 */
+export const SCREENSHOT_SHRINK_ENV = "GHERKAI_EXPERIMENT_SCREENSHOT_SHRINK";
+/** 截图缩放除数的取值：env 里没有这个键或为空串、或值恰为 1 时返回 undefined（构造项不带这个键，与生产逐键相同）；否则须为 ≥ 1 的
+ *  有限数，不合即抛出、点名该键（在建会话之前，不拖到截图时才变成 engine_error）。只读传入的 env、无副作用。 */
+export function screenshotShrinkFactor(env: NodeJS.ProcessEnv = process.env): number | undefined {
+  const raw = env[SCREENSHOT_SHRINK_ENV];
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const value = Number(raw.trim());
+  if (!Number.isFinite(value) || value < 1) {
+    throw new Error(
+      `环境变量 ${SCREENSHOT_SHRINK_ENV} 的值 ${JSON.stringify(raw)} 须为不小于 1 的数（截图缩放的除数，2 表示缩到一半）；` +
+      "请改为这样的数，或删除这个环境变量",
+    );
+  }
+  return value === 1 ? undefined : value;
 }

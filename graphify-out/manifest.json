@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793543487.684191,
-    "ast_hash": "2342e4be3a4fc96e62e39b84fd7e561d",
+    "mtime": 1793610988.1975975,
+    "ast_hash": "b85a7db7ea80ce57c554fa9c83d85348",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1793243849.3606725,
-    "ast_hash": "20d85cc8d6a0880968bff1fa1f5dc5a6",
+    "mtime": 1793610912.0199022,
+    "ast_hash": "6f83164524dddd2f2a6a1b7fb616f836",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1180,8 +1180,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
-    "mtime": 1793242696.361147,
-    "ast_hash": "b1366f780e193039acaed4f58d42cd30",
+    "mtime": 1793610692.1874864,
+    "ast_hash": "63a0d4aa7cf9deb58163169c728ba4d9",
     "semantic_hash": ""
   },
   "cli/tests/test_skill_install.py": {
@@ -1195,8 +1195,8 @@
     "semantic_hash": "5f643feb054c0f76c10ded4f3eb9aa51"
   },
   "skills/gherkai-evals/materialize.py": {
-    "mtime": 1793201058.1063228,
-    "ast_hash": "00ac4aeff35fbfe0e3711b6bbc702be3",
+    "mtime": 1793610692.1871307,
+    "ast_hash": "1d71e976a78abaf9983a8e74d500b5c1",
     "semantic_hash": ""
   },
   "tools/render_skill_contract.py": {
@@ -1205,8 +1205,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1793506819.2201793,
-    "ast_hash": "28daa0b1d11ec95cf85e540d47cbb27f",
+    "mtime": 1793611208.0022383,
+    "ast_hash": "9dedce6d036e258ce87eb6e717aa1942",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1220,8 +1220,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
-    "mtime": 1793373899.5252142,
-    "ast_hash": "a5144951bc0a87a960e6a537ec42c47f",
+    "mtime": 1793610691.4961598,
+    "ast_hash": "7215eca55d714b1549e9b896813b3cfb",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1793200324.138087,
-    "ast_hash": "96cc385ca974dda5a2498fea74fd4ec7",
+    "mtime": 1793610911.6543584,
+    "ast_hash": "b0439bb78de183fd587482c916845f52",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793607586.1332042,
-    "ast_hash": "386a7fa9626320bcef432d7ea4a88007",
+    "mtime": 1793610912.0202353,
+    "ast_hash": "87b7f7982207148cc3fba6f609c70dc1",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2170,13 +2170,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
-    "mtime": 1793440722.0148723,
-    "ast_hash": "77ed0e6e5d60bc036464c4a46f66cfe8",
+    "mtime": 1793610760.6515405,
+    "ast_hash": "cb5dab0e424edfaff11e52c937ca0db0",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.test.mts": {
-    "mtime": 1793360578.3137965,
-    "ast_hash": "9a5e7edb09d0de9ee1d464a696bf408f",
+    "mtime": 1793610985.8086438,
+    "ast_hash": "1e1465186488eba2a3015add54862342",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/parts.mts": {
@@ -2220,13 +2220,13 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793534876.124124,
-    "ast_hash": "d540a2fe3edf1634335630517b9527d4",
+    "mtime": 1793610985.808181,
+    "ast_hash": "c01b599ac1c5c3be20aa2a2a5069ec27",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {
-    "mtime": 1793543487.3516653,
-    "ast_hash": "3b4137b21885fd6c9ec76121ba7bfd72",
+    "mtime": 1793610985.8093026,
+    "ast_hash": "9002ed489d09097665af3f38a9c2697b",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/warmup.mts": {
@@ -2357,6 +2357,21 @@
   "core/tests/test_event_log_recording.py": {
     "mtime": 1793600723.2415335,
     "ast_hash": "0ea4c88328f3ee65bd1056692290c1a9",
+    "semantic_hash": ""
+  },
+  "tools/image_token_probe.mts": {
+    "mtime": 1793611557.633006,
+    "ast_hash": "911ae2f086a994870590f9bc50196bc8",
+    "semantic_hash": ""
+  },
+  "docs/journey/0016-screenshot-shrink-evaluation.md": {
+    "mtime": 1793611854.48147,
+    "ast_hash": "7d436d6d579cbfcddbf2aa6c145385d7",
+    "semantic_hash": ""
+  },
+  "tools/image_token_probe.md": {
+    "mtime": 1793610909.8058581,
+    "ast_hash": "2be142acd6ba2b88f8a145a3368e81c3",
     "semantic_hash": ""
   }
 }

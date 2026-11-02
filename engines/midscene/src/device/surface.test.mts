@@ -35,7 +35,7 @@ import {
 import { APP_LAUNCH_SELF_EXIT_MESSAGE, APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_MISSING_MESSAGE, APP_STATE } from "./app.mjs";
 import {
   DEVICE_REPLANNING_CYCLE_LIMIT, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES, REPLACE_DEVICE_MIN_REMAINING_MS, REPLANNING_LIMIT_ENV,
-} from "./limits.mjs";
+ SCREENSHOT_SHRINK_ENV } from "./limits.mjs";
 import {
   attachClassification, readClassification, type ScopeTermination, type SurfaceDeps, type TargetSurface,
 } from "../worker/surface.mjs";
@@ -1467,6 +1467,19 @@ test("构造期：重规划上限缺省 12，env 覆盖为正整数，非法值�
     assert.throws(() => deviceAgentOpts(base, { [REPLANNING_LIMIT_ENV]: bad }), new RegExp(REPLANNING_LIMIT_ENV), bad);
   }
   assert.throws(() => harness({ env: { [REPLANNING_LIMIT_ENV]: "x" } }), new RegExp(REPLANNING_LIMIT_ENV));
+});
+
+test("构造期：截图缩放实验开关缺省不设时构造项不带 screenshotShrinkFactor（与生产逐键相同），设了 ≥1 的数原样传入，非法值在构造期抛出并点名该键", () => {
+  const base = { generateReport: true, persistExecutionDump: true } as never;
+  for (const env of [{}, { [SCREENSHOT_SHRINK_ENV]: "" }, { [SCREENSHOT_SHRINK_ENV]: "1" }]) {
+    assert.equal("screenshotShrinkFactor" in deviceAgentOpts(base, env), false);
+  }
+  assert.equal((deviceAgentOpts(base, { [SCREENSHOT_SHRINK_ENV]: "2" }) as { screenshotShrinkFactor?: number }).screenshotShrinkFactor, 2);
+  assert.equal((deviceAgentOpts(base, { [SCREENSHOT_SHRINK_ENV]: "2.625" }) as { screenshotShrinkFactor?: number }).screenshotShrinkFactor, 2.625);
+  for (const bad of ["0.5", "abc", "0"]) {
+    assert.throws(() => deviceAgentOpts(base, { [SCREENSHOT_SHRINK_ENV]: bad }), new RegExp(SCREENSHOT_SHRINK_ENV), bad);
+  }
+  assert.throws(() => harness({ env: { [SCREENSHOT_SHRINK_ENV]: "0.5" } }), new RegExp(SCREENSHOT_SHRINK_ENV));
 });
 
 test("构造期：不注入部件时用缺省装配，只组装、不发事件；缺本次运行编号时同步抛出并点名该键；桌面目标不能构造设备接缝", () => {
