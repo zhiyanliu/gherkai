@@ -352,7 +352,9 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
 _NO_RECORD = "无记录（未执行或未上报）"          # 骨架有、判定记录没有的 step / scenario
 _THOUGHT_BUDGET = 800                            # 单段推理文本的字符预算（ADR 0042 决策四「文本预算」）
 # 中止 job 的提示语：evidence 已产、ref 只在事件记录里（explain 不读事件流，ADR 0042 决策四「记录缺口」）
-_ABORTED_PARTIAL_HINT = "本 job 被中止，部分已执行 step 的证据未进判定记录"
+_ABORTED_PARTIAL_HINT = "本 job 被中止，无法从事件流补取已执行 step 的记录与证据"  # 后接原因（ADR 0042 决策七）
+_FROM_EVENTS = "（记录取自事件流）"
+_UNFINISHED = "未完成"
 _EVIDENCE_MISSING_TEXT = {
     "no_ref": "无 AI 证据",
     "unreadable": "AI 证据读不到（文件不在或内容已损坏）",
@@ -381,7 +383,8 @@ def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
 
 def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult],
                     evidence_reader, wants_evidence=None,
-                    scenario_ids: "set[str] | None" = None, step_index: int | None = None) -> dict:
+                    scenario_ids: "set[str] | None" = None, step_index: int | None = None,
+                    recovered: "dict | None" = None, recovery_error: str | None = None) -> dict:
     """把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。
 
     **骨架是 job 定义**（`JobResult.job`）而非判定记录：worker 被外部中止时未完成的 scenario 不进 `jobs/*.json`，
@@ -392,10 +395,14 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
     wants_evidence(step_dict) → bool：None 表示每个有记录的 step 都读（`--json` 契约要求全给）；文本模式传
     `explain_step_expands` 的绑定版，跳过不渲染的 step（见其 docstring）。
     scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None 表示不筛）；匹配器在前端（它还要出候选清单）。
+    recovered：scope_id → 从事件流补取的未完成 scenario（project.UnfinishedScenario 列表，ADR 0042 决策七）；补到的 step 以
+    record_source="events" 进文档、所属 scenario 标 unfinished。recovery_error：需要补取却读不到事件流时的原因，落到 aborted_hint。
     """
     scopes = []
+    recovered = recovered or {}
     for jr in results:
         by_scenario = {sr.scenario_id: sr for sr in jr.scenarios}
+        from_events = {u.scenario_id: {st.index: st for st in u.steps} for u in recovered.get(jr.scope_id, [])}
         # 记录缺口按**整个 job 定义**算、不受 --scenario/--step 影响：aborted_hint 说的是这个 job 的事实，
         # 不该随筛选闪烁。
         recorded = {(sr.scenario_id, st.index) for sr in jr.scenarios for st in sr.steps}
@@ -406,11 +413,15 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                 continue
             sr = by_scenario.get(sc.id)
             by_index = {st.index: st for st in (sr.steps if sr is not None else ())}
+            ev_index = from_events.get(sc.id, {}) if sr is None else {}  # 判定真值里有的 scenario 不再看事件流
             steps = []
             for sd in sc.steps:
                 if step_index is not None and sd.index != step_index:
                     continue
                 st = by_index.get(sd.index)
+                source = "verdict" if st is not None else ("events" if sd.index in ev_index else None)
+                if st is None:
+                    st = ev_index.get(sd.index)
                 d = {
                     "index": sd.index,
                     "keyword": sd.keyword,
@@ -424,6 +435,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                     "duration_ms": None if st is None else st.duration_ms,
                     "report_refs": [] if st is None else [ref_to_dict(rr) for rr in st.report_refs],
                     "record_missing": st is None,
+                    "record_source": source,  # verdict：判定真值；events：从事件流补取（ADR 0042 决策七）；无记录为 null
                     "evidence": None,
                     # 无记录的 step 没有任何 ref，故与「有记录但没挂 evidence」同归 no_ref
                     "evidence_missing": "no_ref" if st is None else None,
@@ -435,6 +447,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                 "scenario_id": sc.id,
                 "name": sc.name,
                 "status": None if sr is None else sr.status.value,
+                "unfinished": sr is None and sc.id in from_events,  # 没有 scenario_done、但事件流里有它的 step 记录
                 "steps": steps,
             })
         if (scenario_ids is not None or step_index is not None) and not scenarios:
@@ -447,9 +460,9 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "message": jr.message,
             "session_id": jr.session_id,
             "report_refs": [ref_to_dict(rr) for rr in jr.report_refs],
-            # 中止的 job 里已执行完的 step 其证据已产，但 ref 只在事件记录里、不进判定记录 → 明说，别让读者以为没产
-            "aborted_hint": (_ABORTED_PARTIAL_HINT
-                             if jr.status in (Status.ABORTED, Status.ERROR) and 0 < len(recorded) < total_steps
+            # 被中止 job 的 step 记录正常从事件流补取（ADR 0042 决策七）；只有需要补取却读不到时才打这句并带原因
+            "aborted_hint": (f"{_ABORTED_PARTIAL_HINT}：{recovery_error}"
+                             if recovery_error is not None and jr.status in (Status.ABORTED, Status.ERROR) and len(recorded) < total_steps
                              else None),
             # 「这个 job 有没有任何 step 记录」是 job 的事实、按未筛的判定树算一次——渲染层据此在 scope 节点下给出 job 级判定；
             # 曾在筛后的 scenarios 上重算，--scenario/--step 筛剩无记录 step 时会把有完整记录的 job 误判为零记录。
@@ -577,6 +590,8 @@ def _add_step(parent: TreeNode, step: dict, *, expand_passed: bool, full: bool, 
     n = _step_note(step["status"], step["shortcircuited"])
     if n:
         bits.append(n)
+    if step.get("record_source") == "events":
+        bits.append(_FROM_EVENTS)
     stn = parent.add(Text.assemble(head, "  ", status_text(step["status"]), ("  " + "  ".join(bits)) if bits else ""))
     if step["message"]:
         stn.add(f"message: {_one_line(step['message'])}")
@@ -667,7 +682,8 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
             scn.add(sc["aborted_hint"])
         for scen in sc["scenarios"]:
             scen_n = scn.add(Text.assemble(f"scenario {scen['scenario_id']}  {scen['name']}  ",
-                                           status_text(scen["status"]) if scen["status"] else styled(_NO_RECORD, "yellow")))
+                                           status_text(scen["status"]) if scen["status"]
+                                           else styled(_UNFINISHED if scen.get("unfinished") else _NO_RECORD, "yellow")))
             for step in scen["steps"]:
                 _add_step(scen_n, step, expand_passed=expand_passed, full=full, device=device)
     return root

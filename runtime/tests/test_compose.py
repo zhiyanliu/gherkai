@@ -189,6 +189,41 @@ def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
         engines["midscene"].run_scope(object())
 
 
+def test_build_engines_wraps_subprocess_legs_with_event_recorder_when_event_log_given(tmp_path: Path, monkeypatch, midscene_env_cmd):
+    """event_log（ADR 0042 决策七）：两个真引擎项都包成 EventRecordingEngine（Engine port 形状不变、cmd 等成员转发）；定位 miss 的占位
+    项不包，安装指引照常在 run_scope 时抛出；不传 event_log 时不包。"""
+    from gherkai_core.adapters.event_log import EventRecordingEngine, SqliteEventLog
+    log = SqliteEventLog(tmp_path / "events.db")
+    engines = compose.build_engines(event_log=log)
+    assert all(isinstance(e, EventRecordingEngine) for e in engines.values())
+    assert engines["midscene"].cmd == ["node", "/fake/midscene-worker.mjs"]
+    assert not any(isinstance(e, EventRecordingEngine) for e in compose.build_engines().values())
+    monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
+    monkeypatch.setattr(compose.shutil, "which", lambda n: None)
+    monkeypatch.setattr(compose, "_runtime_version", lambda: None)
+    engines2 = compose.build_engines(event_log=log)
+    assert not isinstance(engines2["midscene"], EventRecordingEngine)
+    with pytest.raises(compose.WorkerNotFoundError, match="npm i -g"):
+        engines2["midscene"].run_scope(object())
+
+
+def test_events_db_path_and_local_event_log(tmp_path: Path):
+    """事件库路径单点 <report_dir>/<run_id>/events.db；库不存在时 build_local_event_log 给 None（旧版本执行的 run 或 --no-report）。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    assert compose.events_db_path(tmp_path, "r1") == tmp_path / "r1" / "events.db"
+    assert compose.build_local_event_log(tmp_path, "r1") is None
+    (tmp_path / "r1").mkdir()
+    SqliteEventLog(tmp_path / "r1" / "events.db")
+    assert isinstance(compose.build_local_event_log(tmp_path, "r1"), SqliteEventLog)
+
+
+def test_build_cloud_event_log_uses_injected_table(tmp_path: Path):
+    """云端事件流读取按 run 与 scope 列表装配 DdbEventLog；句柄可注入、不碰 boto3。"""
+    from gherkai_core.adapters.event_log import DdbEventLog
+    log = compose.build_cloud_event_log(events_table="t-events", run_id="r1", scope_ids=["a", "b"], ddb_table=object())
+    assert isinstance(log, DdbEventLog)
+
+
 def test_build_engines_injects_extra_http_headers_env(monkeypatch, midscene_env_cmd):
     """extra_http_headers（ADR 0035 决策 4）→ 两 worker env 注 GHERKAI_EXTRA_HTTP_HEADERS（JSON）；
     不传则**不注入、且清掉宿主继承的同名值**（该键由组合根拥有，见 compose._COMPOSE_OWNED_WORKER_ENV）。"""

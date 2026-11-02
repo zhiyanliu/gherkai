@@ -17,7 +17,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
-from gherkai_core.adapters.event_log import SqliteEventLog
+from gherkai_core.adapters.event_log import SqliteEventLog, make_raw_sink
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
@@ -68,14 +68,9 @@ class SubprocessLauncher:
         scope_id = job.scope_id
         self.owned_scopes.add(scope_id)
         engine: SubprocessEngine = self._resolver(job.engine)
-        # raw_sink：SubprocessEngine 读 fd3 每行原始 JSON（解析前）旁路调它——落 SQLite 存原样（存原始行、
-        # 读回复用 wire.event_from_line，零新序列化）。seq 按到达序单调递增（worker 一个 scope 串行 emit）。
-        # 续号：从 SQLite 已有 max_seq 起（重试/继续运行幂等）。闭包持 seq，_pump 的线程内单线程递增、无竞态。
-        seq_box = [self._event_log.max_seq(scope_id)]
-
-        def raw_sink(line: str) -> None:
-            seq_box[0] += 1
-            self._event_log.append_event(scope_id, seq_box[0], line, time.time())
+        # raw_sink：SubprocessEngine 读 fd3 每行原始 JSON（解析前）旁路调它——落 SQLite 存原样、按到达序续号；写法与同步 run 的
+        # 记录器同一份（gherkai_core.adapters.event_log.recording，ADR 0042 决策七）。
+        raw_sink = make_raw_sink(self._event_log, scope_id)
 
         # grace 下限要 spawn 一次 worker 自述才能取得（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
         # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
@@ -220,9 +215,8 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
 
 
 def _paths(report_dir: str, run_id: str):
-    """local 无状态批量运行的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/。"""
-    root = Path(report_dir)
-    return root, root / run_id / "events.db"
+    """local 无状态批量运行的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/（路径取 compose.events_db_path 单点）。"""
+    return Path(report_dir), compose.events_db_path(report_dir, run_id)
 
 
 def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,

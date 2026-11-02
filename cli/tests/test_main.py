@@ -2402,7 +2402,8 @@ def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
     assert out.count("无记录（未执行或未上报）") == 8
     assert "scenario features/login.feature:20  锁定账户提示  无记录（未执行或未上报）" in out
     doc = json.loads(_explain(capsys, root, run_id, "--json")[1])
-    assert doc["scopes"][0]["aborted_hint"] is None      # 零记录不是「部分记录」，不打那句
+    # 被中止且有无记录 step → 要从事件流补取；这个 run 没有 events.db（旧版本执行或 --no-report）→ 提示写明读不到的原因（ADR 0042 决策七）
+    assert doc["scopes"][0]["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "事件流记录" in doc["scopes"][0]["aborted_hint"]
 
 
 def _explain_cloud_stores(jr, state):
@@ -2422,6 +2423,121 @@ def _explain_cloud_stores(jr, state):
             return jr if scope_id == jr.scope_id else None
 
     return _RunStore(), _ResultStore(), object(), (lambda run_id, report_index: {})
+
+
+def _events_db_with_unfinished_scenario(root, run_id, scope_id: str, evidence_uri: str):
+    """给 _explain_run 搭的 run 写一份事件流：scenario :12 执行到第三步被中止（两条 step_done、第三步只有 step_started），:20 零事件。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    log = SqliteEventLog(compose.events_db_path(root, run_id))
+    lines = [
+        {"type": "scope_started", "scopeId": scope_id, "sessionId": "01a0deadbeef"},
+        {"type": "scenario_started", "scenarioId": "features/login.feature:12"},
+        {"type": "step_started", "scenarioId": "features/login.feature:12", "stepIndex": 0},
+        {"type": "step_done", "scenarioId": "features/login.feature:12", "stepIndex": 0, "status": "passed"},
+        {"type": "step_started", "scenarioId": "features/login.feature:12", "stepIndex": 1},
+        {"type": "step_done", "scenarioId": "features/login.feature:12", "stepIndex": 1, "status": "failed",
+         "votes": {"yes": 0, "total": 1}, "errorType": "assertion_failed", "message": "AI 断言未过多数票（0/1）：页面显示「已登录」",
+         "reportRefs": [{"kind": "evidence", "ref": evidence_uri, "label": "evidence"}]},
+        {"type": "step_started", "scenarioId": "features/login.feature:12", "stepIndex": 2},
+    ]
+    for i, d in enumerate(lines, start=1):
+        log.append_event(scope_id, i, json.dumps(d, ensure_ascii=False), 1000.0 + i)
+    return log
+
+
+def test_explain_recovers_unfinished_steps_from_the_event_stream(tmp_path, capsys):
+    """被中止 job 的 step 记录从事件流补取（ADR 0042 决策七）：没有 scenario_done 的 scenario 标 unfinished、其已执行完的 step 带
+    record_source=events 与证据，被中止时正在执行的第三步与没到的第四步仍无记录；aborted_hint 为 null；文本标「记录取自事件流」。"""
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    ev_uri = (root / run_id / "evidence" / "evidence.json").resolve().as_uri()
+    _events_db_with_unfinished_scenario(root, run_id, "features/login.feature:6", ev_uri)
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and err == ""
+    sc = json.loads(out)["scopes"][0]
+    assert sc["aborted_hint"] is None and sc["has_step_records"] is False  # 判定明细里仍然零记录，这是 job 的事实
+    s12, s20 = sc["scenarios"]
+    assert s12["status"] is None and s12["unfinished"] is True
+    assert [st["record_source"] for st in s12["steps"]] == ["events", "events", None, None]
+    assert [st["record_missing"] for st in s12["steps"]] == [False, False, True, True]
+    assert s12["steps"][0]["status"] == "passed" and s12["steps"][1]["status"] == "failed"
+    assert s12["steps"][1]["votes"] == {"yes": 0, "total": 1} and s12["steps"][1]["message"].startswith("AI 断言未过")
+    assert s12["steps"][1]["evidence"]["schema_version"] == 1 and s12["steps"][1]["evidence_missing"] is None
+    assert s12["steps"][0]["duration_ms"] == 1000.0  # step_started 到 step_done 的到达时刻差
+    assert s20["status"] is None and s20["unfinished"] is False and all(st["record_missing"] for st in s20["steps"])
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert "scenario features/login.feature:12  密码错误时不放行  未完成" in out
+    assert "step 1  When 输入用户名「alice」与密码「wrong」  failed  votes 0/1" in out and "（记录取自事件流）" in out
+    assert out.count("（记录取自事件流）") == 2 and "本 job 被中止" not in out
+    assert "scenario features/login.feature:20  锁定账户提示  无记录（未执行或未上报）" in out
+
+
+def test_explain_recovery_is_only_attempted_for_aborted_or_error_jobs_with_gaps(tmp_path, capsys):
+    """有完整判定记录的 failed job 不读事件流；判定明细已有的 scenario 不从事件流改写。"""
+    root, run_id = _explain_run(tmp_path)  # failed、scenario :12 有判定记录（step 3 无记录）
+    _events_db_with_unfinished_scenario(root, run_id, "features/login.feature:6", "file:///tmp/none.json")
+    doc = json.loads(_explain(capsys, root, run_id, "--json")[1])
+    s12 = doc["scopes"][0]["scenarios"][0]
+    assert s12["status"] == "failed" and s12["unfinished"] is False
+    assert [st["record_source"] for st in s12["steps"]] == ["verdict", "verdict", "verdict", None]
+
+
+def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(monkeypatch, capsys):
+    """云端：补取经 compose.build_cloud_event_log（events 表 Query）；表读不到或缺权限时只在 aborted_hint 写原因、退出码仍 0。"""
+    from gherkai_core.model import JobResult, JobState, RunState
+    from gherkai_core.project import EventRecord
+    from gherkai_core.wire import event_from_line
+    job = _explain_job()
+    jr = JobResult(job=job, status=Status.ABORTED, session_id="s-1", error_type="timeout", message="预算用尽")
+    state = RunState(run_id="r", status=Status.ABORTED, jobs={job.scope_id: JobState(job.scope_id, Status.ABORTED)}, ended_at="t9")
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: _explain_cloud_stores(jr, state))
+    asked = []
+
+    class _Log:
+        def records(self):
+            lines = [
+                {"type": "scope_started", "scopeId": job.scope_id},
+                {"type": "scenario_started", "scenarioId": "features/login.feature:12"},
+                {"type": "step_done", "scenarioId": "features/login.feature:12", "stepIndex": 0, "status": "passed"},
+            ]
+            return [EventRecord(scope_id=job.scope_id, kind="event", seq=i, event=event_from_line(json.dumps(d)), emit_ts=float(i))
+                    for i, d in enumerate(lines, start=1)]
+
+    def fake_build(**kw):
+        asked.append(kw)
+        return _Log()
+
+    monkeypatch.setattr(m.compose, "build_cloud_event_log", fake_build)
+    rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
+    sc = json.loads(capsys.readouterr().out)["scopes"][0]
+    assert rc == 0 and asked[0]["events_table"] == "vfy-events" and asked[0]["scope_ids"] == [job.scope_id]
+    assert sc["aborted_hint"] is None and sc["scenarios"][0]["unfinished"] is True
+    assert sc["scenarios"][0]["steps"][0]["record_source"] == "events"
+
+    class _Denied(Exception):
+        pass
+
+    def denied(**kw):
+        raise _Denied("AccessDeniedException: Query")
+
+    monkeypatch.setattr(m.compose, "build_cloud_event_log", denied)
+    monkeypatch.setattr(m.compose, "is_botocore_error", lambda e: isinstance(e, _Denied))
+    rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
+    sc = json.loads(capsys.readouterr().out)["scopes"][0]
+    assert rc == 0 and sc["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "vfy-events" in sc["aborted_hint"]
+    assert all(st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
+
+
+def test_sync_run_writes_the_event_stream_db_unless_no_report(tmp_path, monkeypatch, capsys):
+    """前台 run 也落 <report_dir>/<run_id>/events.db（ADR 0042 决策七）；--no-report 的零落盘运行不写。"""
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    feat = _write_feature(tmp_path)
+    report_dir = tmp_path / "reports"
+    assert m.main(["run", str(feat), "--json", "--report-dir", str(report_dir)]) == 0
+    run_id = json.loads(capsys.readouterr().out)["run_id"]
+    assert compose.events_db_path(report_dir, run_id).exists()
+    assert m.main(["run", str(feat), "--json", "--no-report"]) == 0
+    assert not list(tmp_path.rglob("events.db")) or all(p.parent.parent == report_dir for p in tmp_path.rglob("events.db"))
 
 
 def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch, capsys):

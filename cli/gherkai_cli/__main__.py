@@ -1579,7 +1579,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
     run_store.create_run(run_meta, initial)
-    SqliteEventLog(report_root / run_id / "events.db")  # 建库（schema），per-run/status 共用
+    SqliteEventLog(compose.events_db_path(report_root, run_id))  # 建库（schema），per-run/status/explain 共用（路径单点）
     if tunnel_info is not None:
         # 隧道收尾凭据落盘（ADR 0035 决策 3）：pid 经 tunnel.json 交给收尾者（per-run 终态后拆；
         # per-run 崩了由 status --wait 接力拆）。进程对象句柄跨进程传不过去，落盘是唯一通道。
@@ -2097,8 +2097,36 @@ def _explain_empty(args, state, *, hint: str) -> int:
     return 0
 
 
-def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str) -> int:
+def _needs_recovery(jr) -> bool:
+    """这个 job 要不要从事件流补取（ADR 0042 决策七）：被中止或出错，且骨架里仍有无记录的 step。"""
+    if jr.status not in (Status.ABORTED, Status.ERROR):
+        return False
+    recorded = {(sr.scenario_id, st.index) for sr in jr.scenarios for st in sr.steps}
+    return any((sc.id, st.index) not in recorded for sc in jr.job.scenarios for st in sc.steps)
+
+
+def _explain_recover(results, recover):
+    """对需要补取的 job 读事件流（一次读齐全部需要的 scope），归约出未完成 scenario 的 step 记录（ADR 0042 决策七）。
+
+    recover(scope_ids) → (records | None, 原因)：读不到时给出产品语言的原因，由 explain_to_dict 落到 aborted_hint；读到了则
+    每个 job 各自经 project.recover_unfinished 投影。返回 (recovered, recovery_error)。
+    """
+    from gherkai_core.project import recover_unfinished
+    needing = [jr for jr in results if _needs_recovery(jr)]
+    if not needing:
+        return {}, None
+    records, error = recover([jr.scope_id for jr in needing])
+    if records is None:
+        return {}, error
+    return {jr.scope_id: recover_unfinished(jr.job, [r for r in records if r.scope_id == jr.scope_id])
+            for jr in needing}, None
+
+
+def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, recover=None) -> int:
     """local/cloud 共用的后半段：取判定明细 → 筛 scenario/step → 合成文档 → 打文本或 JSON。
+
+    `recover(scope_ids)` 读这些 scope 的事件流记录（ADR 0042 决策七），只在有被中止、带无记录 step 的 job 时才调；
+    None 表示本路径不提供补取（测试用）。
 
     带 `scope_id` 时只 `load_job_result`（云端是一次 GetObject），不带才 `load_all`（云端还需列举对象权限）
     ——权限面按需求最小化，见 ADR 0042 决策四「云端权限面」。
@@ -2146,10 +2174,13 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str) -> i
             matched = with_step
         scenario_ids = {sc.id for sc in matched}
 
+    # 被中止 job 的 step 记录从事件流补取（ADR 0042 决策七）；读不到只影响 aborted_hint，不改退出码
+    recovered, recovery_error = _explain_recover(results, recover) if recover is not None else ({}, None)
     # 显式点名一步（--step）即展开它的证据——点名就是想看，不必再给 --all（ADR 0042 决策四）
     expand_passed = bool(args.all) or args.step is not None
     doc = render.explain_to_dict(
         run_id=state.run_id, status=state.status.value, results=results,
+        recovered=recovered, recovery_error=recovery_error,
         evidence_reader=lambda refs: _explain_read_evidence(refs, read_bytes),
         # --json 契约要求证据全给；文本模式「不展开就不读」，省掉云端逐 step 一次 GetObject 的白下载
         wants_evidence=(None if args.json
@@ -2188,8 +2219,17 @@ def _cmd_explain(args) -> int:
     if (state := run_store.load_run_state(args.run_id)) is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
+    def recover(scope_ids):
+        log = compose.build_local_event_log(report_root, args.run_id)
+        if log is None:
+            return None, "本机没有这个 run 的事件流记录（由不落事件流的旧版本执行，或以 --no-report 运行）"
+        try:
+            return log.records(), None
+        except Exception as e:  # 库文件损坏等：说清原因，不让 explain 失败
+            return None, f"事件流记录读取失败：{e}"
+
     return _explain_emit(
-        args, state, result_store, read_bytes=compose.read_resource,
+        args, state, result_store, read_bytes=compose.read_resource, recover=recover,
         # --report-dir 无条件带（即便是默认值），与 submit 提示/status 的 wait_hint 同惯例
         wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
     )
@@ -2235,9 +2275,20 @@ def _explain_cloud(args) -> int:
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
+    def recover(scope_ids):
+        # 云端的事件流在 events 表：按 run 与需要补取的 scope 点查（dynamodb:Query）；缺权限或不可达只归到 aborted_hint 的原因
+        try:
+            log = compose.build_cloud_event_log(events_table=target.events_table, run_id=args.run_id, scope_ids=scope_ids,
+                                                region=target.region, profile=target.profile)
+            return log.records(), None
+        except Exception as e:
+            if not compose.is_botocore_error(e):
+                raise
+            return None, f"云端事件流记录读取失败（events 表 {target.events_table} 不可达或缺读权限）：{e}"
+
     try:
         return _explain_emit(
-            args, state, result_store, read_bytes=read_bytes,
+            args, state, result_store, read_bytes=read_bytes, recover=recover,
             # 用已解析的 target.prefix（args.prefix 可能是 None，靠 env/默认兜底才成 prefix）；
             # 刻意不带 --region/--profile，与 status 的 cloud 提示一致（也别把 profile 名打到终端）
             wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
@@ -2525,8 +2576,15 @@ def _cmd_run(args) -> int:
                                else Path(_tf.gettempdir()) / f"gherkai-worker-{run_id}.log")
             worker_log_path.parent.mkdir(parents=True, exist_ok=True)
             worker_log_fh = open(worker_log_path, "a", encoding="utf-8")
+        # 同步 run 也落事件流（ADR 0042 决策七）：与 submit 同一文件 <report_dir>/<run_id>/events.db，供 explain 对被中止 job 补取
+        # 已执行 step 的记录与证据；--no-report 的零落盘运行不写。
+        event_log = None
+        if do_report:
+            from gherkai_core.adapters.event_log import SqliteEventLog as _SqliteEventLog
+            event_log = _SqliteEventLog(compose.events_db_path(report_root, run_id))
         engines = compose.build_engines(
             no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
+            event_log=event_log,
             nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 同上（ADR 0035）

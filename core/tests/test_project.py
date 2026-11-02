@@ -15,7 +15,8 @@ from gherkai_core.model import (
     Status,
     Step,
 )
-from gherkai_core.project import PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full
+from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full,
+                                  recover_unfinished)
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -359,3 +360,56 @@ def test_step_done_message_is_kept_in_step_result():
     result = project_full(_meta("a"), recs)
     st = result.jobs[0].scenarios[0].steps[0]
     assert st.status == Status.FAILED and st.message == "AI 断言未过多数票（0/1）：x"
+
+
+# ---------- 未完成 scenario 的事件流投影（ADR 0042 决策七）----------
+
+def test_recover_unfinished_returns_only_scenarios_with_step_records_but_no_scenario_done():
+    """三条 scenario：A 完整（有 scenario_done，进判定真值，不补）；B 被中止在第三步（两条 step_done、一条只有 step_started）；
+    C 零事件。补取只给 B，且 B 只含两条有 step_done 的 step，字段（含 report_refs）与归约路径一致；不写判定、不看退出记录。"""
+    from gherkai_core.model import ReportRef, StepDone, StepStarted, ScenarioStarted, Votes
+    steps = tuple(Step(index=i, keyword="When", text=f"s{i}") for i in range(3))
+    job = Job(scope_id="a", scope_name="a", engine="novaact", scenarios=(
+        Scenario(id="a:A", name="A", steps=steps), Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)))
+    ref = ReportRef(kind="evidence", ref="file:///tmp/ev-b1.json", label="evidence")
+    recs = [
+        _ev("a", 1, ScopeStarted(scope_id="a", session_id="s")),
+        _ev("a", 2, ScenarioStarted(scenario_id="a:A"), 10.0),
+        _ev("a", 3, StepDone(scenario_id="a:A", step_index=0, status=Status.PASSED), 11.0),
+        _ev("a", 4, ScenarioDone(scenario_id="a:A", status=Status.PASSED), 12.0),
+        _ev("a", 5, ScenarioStarted(scenario_id="a:B"), 20.0),
+        _ev("a", 6, StepStarted(scenario_id="a:B", step_index=0), 20.0),
+        _ev("a", 7, StepDone(scenario_id="a:B", step_index=0, status=Status.PASSED), 23.5),
+        _ev("a", 8, StepStarted(scenario_id="a:B", step_index=1), 24.0),
+        _ev("a", 9, StepDone(scenario_id="a:B", step_index=1, status=Status.FAILED, votes=Votes(yes=0, total=1),
+                              error_type="assertion_failed", message="没过", report_refs=(ref,)), 30.0),
+        _ev("a", 10, StepStarted(scenario_id="a:B", step_index=2), 31.0),  # 被中止时正在执行：没有 step_done
+        _exit("a", -15),
+    ]
+    out = recover_unfinished(job, recs)
+    assert [u.scenario_id for u in out] == ["a:B"]
+    b = out[0].steps
+    assert [(st.index, st.status) for st in b] == [(0, Status.PASSED), (1, Status.FAILED)]
+    assert b[0].duration_ms == 3500.0 and b[1].report_refs == (ref,) and b[1].votes == Votes(yes=0, total=1)
+    assert b[1].error_type == "assertion_failed" and b[1].message == "没过"
+    # 乱序到达的记录按 seq 归约（与 _reduce_scope 同一排序）
+    assert [u.scenario_id for u in recover_unfinished(job, list(reversed(recs)))] == ["a:B"]
+    # 没有任何事件：空；只有完整 scenario：空
+    assert recover_unfinished(job, []) == [] and recover_unfinished(job, recs[:4]) == []
+
+
+def test_recover_unfinished_ignores_scenarios_synthesized_after_scope_error():
+    """scope 级 error 后 core 合成的 SKIPPED scenario（零事件）不是「未完成」；有 step 记录的在途 scenario 仍补取。"""
+    from gherkai_core.model import StepDone, StepStarted, ScenarioStarted
+    steps = (Step(index=0, keyword="When", text="x"), Step(index=1, keyword="Then", text="y"))
+    job = Job(scope_id="a", scope_name="a", engine="midscene", scenarios=(
+        Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)))
+    recs = [
+        _ev("a", 1, ScopeStarted(scope_id="a")),
+        _ev("a", 2, ScenarioStarted(scenario_id="a:B")),
+        _ev("a", 3, StepStarted(scenario_id="a:B", step_index=0)),
+        _ev("a", 4, StepDone(scenario_id="a:B", step_index=0, status=Status.PASSED)),
+        _ev("a", 5, ScopeDone(scope_id="a", status=Status.ERROR, error_type="session_lost", message="丢了")),
+    ]
+    out = recover_unfinished(job, recs)
+    assert [(u.scenario_id, [st.index for st in u.steps]) for u in out] == [("a:B", [0])]

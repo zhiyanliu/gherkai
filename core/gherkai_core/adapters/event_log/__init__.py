@@ -7,5 +7,6 @@ run_id 隐含在路径里）+ 独立键空间的 task_exited 退出记录（机�
 """
 from gherkai_core.adapters.event_log.sqlite import SqliteEventLog
 from gherkai_core.adapters.event_log.ddb import DdbEventLog
+from gherkai_core.adapters.event_log.recording import EventRecordingEngine, make_raw_sink
 
-__all__ = ["SqliteEventLog", "DdbEventLog"]
+__all__ = ["SqliteEventLog", "DdbEventLog", "EventRecordingEngine", "make_raw_sink"]

@@ -331,6 +331,42 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
     )
 
 
+def _sorted_events(recs: list[EventRecord]) -> list[EventRecord]:
+    """一个 scope 的 worker 事件段，按 seq 升序（退出记录不在其中）。"""
+    return sorted([r for r in recs if r.kind == "event" and r.event is not None],
+                  key=lambda r: (r.seq if r.seq is not None else 0))
+
+
+@dataclass
+class UnfinishedScenario:
+    """被中止 job 里有 step 记录却没有 `scenario_done` 的 scenario（ADR 0042 决策七）：事件流的只读投影，不是判定。
+
+    steps 与判定真值里的 StepResult 字段相同（status / votes / error_type / message / duration_ms / report_refs），供 explain 补齐
+    骨架并按 report_refs 读证据；被中止时正在执行的 step 只有 step_started、不在其中。
+    """
+
+    scenario_id: str
+    steps: list[StepResult]
+
+
+def recover_unfinished(job: Job, records: list[EventRecord]) -> list[UnfinishedScenario]:
+    """从一个 scope 的事件记录里取出未完成 scenario 的 step 记录（ADR 0042 决策七）。
+
+    复用 reduce_event 归约全部事件（与判定路径同一份归约，step 的字段不会另写一遍），然后把「timing 里有 step 记录、
+    result.scenarios 里没有」的 scenario 按 definition 顺序给出。不写任何 store、不调终结函数、不改判定：收到 scenario_done 的
+    scenario 已在判定真值里，这里只补判定真值没有的那部分。
+    """
+    result = JobResult(job=job, status=Status.PENDING)
+    scenario_status: dict[str, Status] = {}
+    timing = Timing()
+    for r in _sorted_events(records):
+        if r.event is not None:
+            reduce_event(r.event, result, scenario_status, timing, r.emit_ts or 0.0)
+    done = {sr.scenario_id for sr in result.scenarios}
+    return [UnfinishedScenario(scenario_id=sc.id, steps=list(timing.steps[sc.id]))
+            for sc in job.scenarios if sc.id not in done and timing.steps.get(sc.id)]
+
+
 def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status, int]:
     """单 scope 归约（project / project_full 共用一份，避免归约逻辑双写漂移）：
 
@@ -338,8 +374,7 @@ def _reduce_scope(job: Job, recs: list[EventRecord]) -> tuple[JobResult, Status,
     返回 (完整 JobResult, 派生 status, 该 scope 的 worker 段 max seq)。JobResult.status 会被派生 status 覆盖
     （reduce 期只累积 scenario 明细，最终 job 态由 finalize_job 的真值表定，机制二）。
     """
-    evs = sorted([r for r in recs if r.kind == "event" and r.event is not None],
-                 key=lambda r: (r.seq if r.seq is not None else 0))
+    evs = _sorted_events(recs)
     max_seq = 0
     for r in evs:
         if r.seq is not None:

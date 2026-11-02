@@ -330,6 +330,7 @@ def build_engines(
     no_artifacts: bool = False,
     run_id: str | None = None,
     worker_log=None,
+    event_log=None,
 ) -> dict[str, Engine]:
     """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
 
@@ -449,7 +450,12 @@ def build_engines(
             wc = resolve_worker_cmd(engine)
         except WorkerNotFoundError as miss:
             return _UnavailableEngine(miss)
-        return SubprocessEngine(cmd=wc.cmd, cwd=wc.cwd, env=env, log_sink=worker_log)
+        engine_impl = SubprocessEngine(cmd=wc.cmd, cwd=wc.cwd, env=env, log_sink=worker_log)
+        if event_log is None:
+            return engine_impl
+        # 同步 run 也把原始事件行落 events.db（ADR 0042 决策七）：包一层记录器，Engine port 形状不变；占位引擎不包
+        from gherkai_core.adapters.event_log import EventRecordingEngine
+        return EventRecordingEngine(engine_impl, event_log)
 
     return {"novaact": _leg("novaact", nova_env), "midscene": _leg("midscene", midscene_env)}
 
@@ -821,6 +827,28 @@ def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run
 def _normalize_prefix(prefix: str) -> str:
     """S3 key 前缀分隔符规范化：非空且不以 / 结尾则补 /（否则 S3*Store 拼 f'{prefix}{run_id}' 生成粘连 key）。"""
     return prefix + "/" if prefix and not prefix.endswith("/") else prefix
+
+
+def events_db_path(report_dir: str | Path, run_id: str) -> Path:
+    """本机后端一个 run 的事件流落点：`<report_dir>/<run_id>/events.db`（ADR 0034；同步 `run` 自 ADR 0042 决策七起也写它）。
+    submit 的 per-run 进程、status --wait 的接力者、同步 run 的记录器与 explain 的补取都从这一个函数取路径。"""
+    return Path(report_dir) / run_id / "events.db"
+
+
+def build_local_event_log(report_dir: str | Path, run_id: str):
+    """本机后端读一个 run 的事件流：库文件存在返回 SqliteEventLog，不存在返回 None（不落事件流的旧版本执行的 run，或 --no-report）。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    path = events_db_path(report_dir, run_id)
+    return SqliteEventLog(path) if path.exists() else None
+
+
+def build_cloud_event_log(*, events_table: str, run_id: str, scope_ids: list[str],
+                          region: str | None = None, profile: str | None = None, ddb_table=None):
+    """云端后端读一个 run 的事件流：按 run 与 scope 列表点查 events 表（ADR 0042 决策七的 explain 补取用；只需 dynamodb:Query）。
+    boto3 惰性 import 在 _make_ddb_table 里；句柄可注入（测试与 Lambda 组合根复用）。"""
+    from gherkai_core.adapters.event_log import DdbEventLog
+    table = ddb_table if ddb_table is not None else _make_ddb_table(events_table, region=region, profile=profile)
+    return DdbEventLog(table, run_id, list(scope_ids))
 
 
 def build_local_stores(*, report_dir: str | Path):
