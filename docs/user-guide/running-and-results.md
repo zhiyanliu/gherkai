@@ -188,7 +188,7 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - 默认展开状态为失败、出错、被跳过的步；通过的步只列一行。
 - `--step N` 点名的那一步连通过也展开，须与 `--scenario` 同给；`--all` 让通过的步也展开。
 - 文本形态是摘要：每次 AI 调用只显示最后一段推理与它的截图地址，`--full` 逐帧全文，`--json` 内嵌完整证据。
-- job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时正在执行的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
+- job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时还没上报完成记录的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
 - `explain` 的退出码从不表示判定结果，用例失败它照样以退出码 0 结束。`submit` 提交的 run 还没到终态时判定明细尚未写出，它会提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分。
 - 哪一步没有 AI 证据（确定性 step 本就不产，设备目标上只有判为 passed 的确定性与导航 step 不产；或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 - 设备目标上，判为 failed / error 的确定性与导航 step 也有证据（没有 AI 调用，`acts` 为空）。设备的证据多几项：这一步的执行方式 `step_kind`（`ai` / `deterministic` / `navigation`）；step 结束时的页面地址 `url`，取不到时 `url_missing` 说明原因（设备不提供网页上下文、应用目标没有地址、读取超时或出错）；判为 failed / error 的 step 另有控件摘要 `controls`（每个控件的类型、id、文本与无障碍标识，条数有上限、超出时注明截断）与原始控件树文件 `page_source`（只给地址，超过大小上限时截断并以 `page_source_truncated` 注明）。设备 job 另有一条 `device_session` 链接，指向上面的 `device-session.json`，`explain` 只给链接、不解析它。地址读取与控件采集按 step 累加计入 job 的墙钟预算。

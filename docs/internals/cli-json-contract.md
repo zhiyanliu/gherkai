@@ -134,7 +134,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、骨架里有无记录的 step，而本工具**没能**从事件流补取它们的记录（后半句写明原因：这个 run 没有事件流记录、云端 events 表读不到或缺权限）。补取成功时为 null，补到的 step 见 `steps[].record_source`。不应据此判断终态，终态见同层 `status` |
 | `has_step_records` | bool | 该 job 在判定明细里是否有任何 step 记录（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化；含本工具在 scope 级 error 后补记的 skipped 记录）；false 表示判定只有 job 级一层 |
 
-`scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，未执行完的 scenario 不进入判定明细）、`unfinished`（bool：true 表示这条 scenario 没有判定记录，但事件流里有它已执行 step 的记录、已补进下面的 `steps[]`）、`steps[]`：
+`scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，未执行完的 scenario 不进入判定明细）、`unfinished`（bool：true 表示这条 scenario 没有判定记录也没有 `scenario_done`，但事件流里有它已执行 step 的记录、已补进下面的 `steps[]`；判定明细缺这条 scenario 而事件流里有 `scenario_done` 时，`status` 取事件流里的判定、`unfinished` 为 false，其 step 的 `record_source` 仍为 `events`）、`steps[]`：
 
 | 键 | 类型 | 含义 |
 |---|---|---|

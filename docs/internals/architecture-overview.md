@@ -51,7 +51,7 @@
 | worker 位置 | 本机子进程，事件经专用 fd 传输 | Fargate task（ECS cluster `{prefix}cluster`），job 输入放 S3，事件逐条写 DynamoDB |
 | 启动 worker 的 adapter | `adapters/subprocess_engine.py`（前台）、`runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（后台） | `adapters/fargate_engine.py`（前台）、`adapters/cloud_launcher.py`（后台） |
 | 运行态与判定真值 | 文件树 `<report-dir>/<run_id>/`（缺省 `reports/`） | DynamoDB `{prefix}runs`（元数据与运行态两个 item）+ S3 `{prefix}artifacts`（判定真值与报告，key 镜像本机树的相对路径） |
-| 事件 | 前台在线消费、不落盘；后台推进时事件另写入 `events.db`（SQLite） | DynamoDB `{prefix}events`（worker `PutItem`，读侧 `Query`） |
+| 事件 | 前台在线消费，同时与后台推进一样写入 `events.db`（SQLite；`--no-report` 不写） | DynamoDB `{prefix}events`（worker `PutItem`，读侧 `Query`） |
 | `submit` 的推进器 | 本机 `setsid` 脱离出的后台进程，本机需保持开机 | 三个 Lambda（`{prefix}kicker` / `{prefix}reconciler` / `{prefix}exit-observer`）由两条表 Stream 与一条「ECS 任务已停止」事件规则串联（互不调用），提交后关机也能执行完毕 |
 | 确定性 step 来源 | `--steps-dir`（缺省 `./steps`，或 env `GHERKAI_STEPS_DIR`），worker 启动时加载 | 在构建 variant 镜像时打包进镜像，提交侧 `--steps-dir` 对它无效（给出时仅告警） |
 | worker 日志 | 输出到屏幕；`--quiet` 时写入 `<report-dir>/<run_id>/worker.log` | CloudWatch 日志组 `/<prefix>worker/<engine>` |

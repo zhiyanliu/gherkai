@@ -100,7 +100,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 
 最后一条不对称（**能否中途终止**）：cloud 的 `--wait` 检测到停滞时只是调起 kicker（fire-and-forget），调起后随时可以离开，云端链会自行执行至结束；local 的 `--wait` 接力者与 per-run 进程执行同一段幂等推进、可以并存，per-run 进程仍在时退出接力者无影响；per-run 进程已终止时接力者**才是唯一推进器**，终止它 run 即就地停止（已 claim job 的计时也随进程一起丢失，由下一次接力恢复）。根因是主推进器的位置不同（云端 Lambda 与本机进程）。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制三：投影钳制与条件写；「命令形态」节：status/退出码）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（终态提交点）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)（决定五：退出码语义）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策三：查询类命令的 `--json` 与 `artifacts`）、[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策四：`explain` 只读判定明细、不读事件流）。
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制三：投影钳制与条件写；「命令形态」节：status/退出码）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（终态提交点）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md)（决定五：退出码语义）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策三：查询类命令的 `--json` 与 `artifacts`）、[ADR 0042](../adr/0042-step-evidence-and-explain.md)（决策四：`explain` 以判定明细为骨架；决策七：被中止 job 的 step 记录从事件流补取）。
 
 ## 5. 同一条事件流的四条物理通道（横切对照）
 
