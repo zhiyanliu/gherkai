@@ -510,7 +510,7 @@ def test_eval_assets_exist_only_under_repo_root_skills():
 # 以 `/` 打头的字符串值一律算路径」：假红——step 原文 `Then 页面地址匹配 "/wiki/OpenAI"` 会以转义字串嵌进运行
 # 元信息与判定明细，URL 路径与机器路径在形态上分不开。这里在根之后多收一段路径尾巴，报错时能打出整条路径。
 ABSOLUTE_PATH = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/[^\s\"'\\]*")
-TEXT_SUFFIXES = {".json", ".md", ".txt", ".html", ".feature", ".py", ".ts", ".mts", ".log", ".csv", ".yml", ".yaml"}
+TEXT_SUFFIXES = {".json", ".md", ".txt", ".html", ".feature", ".py", ".ts", ".mts", ".log", ".csv", ".yml", ".yaml", ".toml", ".xml"}
 
 
 def test_fixtures_carry_no_absolute_paths():

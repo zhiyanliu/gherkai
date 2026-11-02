@@ -54,7 +54,7 @@ HERE = Path(__file__).resolve().parent
 REPO = HERE.parent.parent
 FIXTURES = HERE / "fixtures"
 PLACEHOLDER = "{{FIXTURE_ROOT}}"
-TEXT_SUFFIXES = {".json", ".html", ".feature", ".py", ".mts", ".mjs", ".md", ".txt", ".example"}
+TEXT_SUFFIXES = {".json", ".html", ".feature", ".py", ".mts", ".mjs", ".md", ".txt", ".example", ".toml", ".xml"}  # 设备 fixture 另有 gherkai.toml 与控件树 .xml
 SKILL_DIRS = (Path(".claude/skills/gherkai"), Path(".agents/skills/gherkai"))
 # 舞台用的 CLI 装在这里（仓库外）：舞台里的一切只许指向它，不许指向仓库（见模块头注释第 0 步）。
 DEFAULT_CLI_DIR = Path("/tmp/gherkai-eval-cli")
@@ -309,7 +309,7 @@ TINY_PNG = bytes.fromhex(
     "1b0e2d0e0000000049454e44ae426082"
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
-DROP_NAMES = {"worker.log", "reconcile.log"}
+DROP_NAMES = {"worker.log", "reconcile.log", "events.db"}  # events.db 是本机 run 的事件流（SQLite 二进制，含录制机路径与真实账号），explain 对终态完整的 run 不读它
 # 引擎 SDK 的原生产物（Nova 每次 act 一份 HTML + trajectory JSON；Midscene 一份 playwright-*.html 报告 + 每次执行一份 *.execution.json，动辄几 MB、内嵌截图）：skill 教 agent 不去解析它们，
 # 评测只靠 evidence.json + 截图 + session_summary.json，故不入库。判定明细里指向它们的 ref 保留原样（只是指向不存在的文件）。
 DROP_GLOBS = ("act_*.html", "act_*_trajectory.json", "playwright-*.html", "*.execution.json")
