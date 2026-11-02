@@ -99,8 +99,21 @@ deterministic(
 只有 Midscene 支持设备目标，落到 Nova Act 的设备 scope 在 `plan` 与执行前被拒；本机 worker 实际支持什么，以 `gherkai doctor` 的 `engines.targets.<引擎>` 行为准（设备目标后附会话上限的分钟数）。
 
 - **声明**：scope 标 `@device:android` 或 `@device:ios` 并标 `@engine:midscene`，测设备上的浏览器（Android 的 Chrome、iOS 的 Safari）；再标 `@app:<别名>` 测原生应用，别名在 `gherkai.toml` 的 `[apps.<别名>.<平台>]` 绑定安装包与包名或 bundle id。
-- **设备选择**：不自动挑设备。按平台用 `--android-device-arn` / `--ios-device-arn`，或 `gherkai.toml` 的 `[devices.android]` / `[devices.ios]` 给设备 ARN（键 arn）或系统版本（键 `os-version`）；没有任何来源时 `run` / `submit` 以退出码 2 结束、`plan` 只警告。本机后端另要 Device Farm 项目（`--device-farm-project-arn` 或 `[devices]` 的 `project-arn`），应用目标还要放安装包的桶（`--app-bucket` 或 `[devices]` 的 `app-bucket`）；云端后端用部署时建立的项目。
-- **费用**：一个设备 scope 一个远程访问会话，按设备分钟计费，设备的准备时间（创建到可用，约 1 到 2.5 分钟）与停止后的收尾都计入。`plan --json` 的 `device_session_count` 就是这次要开的会话数，首次运行前把它与设备选择一起报给人。
+- **设备选择**：不自动挑设备。按平台用 `--android-device-arn` / `--ios-device-arn`，或 `gherkai.toml` 的 `[devices.android]` / `[devices.ios]` 给设备 ARN（键 arn）或系统版本（键 `os-version`）；没有任何来源时 `run` / `submit` 以退出码 2 结束、`plan` 只警告。本机后端另要 Device Farm 项目（`--device-farm-project-arn` 或 `[devices]` 的 `project-arn`），应用目标还要放安装包的桶（`--app-bucket` 或 `[devices]` 的 `app-bucket`）；云端后端用部署时建立的项目。一份本机后端、Android 应用目标的最小配置（键名以 `gherkai.toml` 的 `[devices]` / `[devices.<平台>]` / `[apps.<别名>.<平台>]` 三节为准，`os-version` 要写成字符串）：
+
+  ```toml
+  [devices]
+  project-arn = "arn:aws:devicefarm:us-west-2:<账号>:project:<项目 id>"
+  app-bucket = "<放安装包的桶>"
+
+  [devices.android]
+  arn = "arn:aws:devicefarm:us-west-2::device:<设备 id>"   # 或 os-version = "14"
+
+  [apps.shop.android]
+  file = "app/shop.apk"          # 相对配置文件所在目录
+  package = "com.example.shop"   # iOS 用 bundle-id
+  ```
+- **费用**：一个设备 scope 一个远程访问会话，按设备分钟计费，设备的准备时间（创建到可用，约 1 到 2.5 分钟）与停止后的收尾都计入。`plan --json` 的 `device_session_count` 就是这次要开的会话数，首次运行前把它与设备选择一起报给人，并说明 `plan` 对设备只核设备 ARN 的形态与安装包文件是否存在——项目 ARN、安装包桶是否可用、设备此刻能否拿到，都要到实际运行时才知道，`plan` 退出码 0 不代表这些就位。
 - **写法差异**：同一 scope 的 scenario 之间不重启应用，需要干净起点时在 `Background` 写一条重启应用的确定性 step（第 3 节末的模板）。导航步在网页目标上打开地址，在应用目标上把地址经 DeepLink 交给被测应用（Android 上地址里的 `;`、`'`、`(`、`)` 或空格、非 ASCII 字符要先百分号编码），后面紧跟一条 AI 断言核对落点——应用目标没有页面地址，「页面地址匹配」这类地址核对 step 在它上面没有实现、会交给 AI；iOS 应用上地址只保证送达，应用忽略链接时导航步照样通过，紧跟的核对才判出来。iOS 网页目标在 1.5 也推荐用 AI 断言核对落点。确定性 step 在设备上调用的是 webdriver 实现（第 3 节的七个字段）；只有 playwright 实现的 step 在设备上交给 AI，`gherkai plan` 会注明。
 - **证据**：设备上判为 failed / error 的确定性与导航 step 也有证据（`acts` 为空），另带 `step_kind`、`url` / `url_missing`，失败 step 还有 `controls` 与 `page_source`，字段读法见 `references/cli-json-contract.md`；设备 job 的 `device_session` 链接指向这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用会话与设备、换台记录与各阶段时刻），只给链接、不解析。
 - **错误类别**：`precheck_failed`、`acquire_timeout`、`session_lost`、`capability_unavailable`、`release_failed` 的处置见 `references/setup-and-diagnosis.md` 第 7 节的表。
