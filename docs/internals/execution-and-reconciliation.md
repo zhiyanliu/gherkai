@@ -37,7 +37,7 @@ local 后端没有也不需要这个标记：不存在常驻在共享基础设�
 ```
 plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
   ├─ 按并发闸启动 worker(每 scope 一个)
-  ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（设备 job 取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成落判定(RunPersistence;事件本体不落盘)
+  ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（设备 job 取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成落判定(RunPersistence)；事件原始行同时经 raw_sink 落 events.db（--no-report 不写）
   ├─ 静默停滞由心跳检出、超出 job 超时预算即停 → handle.stop(local=SIGTERM→宽限→SIGKILL;cloud=StopTask)
   └─ 全部收敛 → finalize(终态一次落定)+ RunReport
 ```
@@ -108,7 +108,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 
 | 组合         | worker 写入何处                      | 读取方与读取方式                                                                     |
 |--------------|--------------------------------------|--------------------------------------------------------------------------------------|
-| local run    | 专用 fd（`EVENTS_FD`）               | CLI 进程 schedule 逐行阻塞读（内存流，不落盘）                                       |
+| local run    | 专用 fd（`EVENTS_FD`）               | CLI 进程 schedule 逐行阻塞读；同时经 `raw_sink` 旁路原样落 SQLite（`explain` 补取被中止 job 用；`--no-report` 不写） |
 | local submit | 同上 fd                              | per-run 进程读取的同时经 `raw_sink` **旁路原样落 SQLite**；`tick` 从 SQLite 全量重放 |
 | cloud run    | worker 直接 PutItem 进 DDB events 表 | CLI 进程 `FargateEngine` 轮询 Query（只扫 worker seq 段）                            |
 | cloud submit | 同上                                 | events 表 **Stream 触发 reconciler** Lambda；`tick` 从表里全量重放                   |
