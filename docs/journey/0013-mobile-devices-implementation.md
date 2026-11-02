@@ -6,11 +6,11 @@
 
 ## 恢复现场
 
-第 0 到 7 批已闭合（第 7 批剩下的 task role 端到端使用已并入第 8 批的真跑清单）。第 8 批（B6 设备模块）实施完成、已提交两笔；提交后叠加的复核修正、遗留收口与 owner 拍板项（F1–F6）落地在工作树里、未提交，待提交、Codex 闭合确认与真机验收：两个阻断项已解除，现状、拍板结论与已校准的文档在 0015 第 8 节的状态段与「施工现状」段，先读它们；真跑清单在同节「真跑或对抗核查才算数的结论」段。
+第 0 到 8 批已闭合并 push、CI 绿：第 8 批（B6 设备模块）的复核修正、拍板项 F1–F6、真机验收两轮、故障演练与部署后云端验证都已完成（含第 7 批遗留的 task role 端到端使用），现场在 0015 第 8 节的状态段、「真跑或对抗核查才算数的结论」段与其后的「部署后云端验证」「拍板记录」两段。第 9 批（真机验收浮出的拍板项）已落地：收起键盘（iOS 改为自己从控件树定位收起控件并点击，加 Input 参数说明的兜底，ADR 0052 决策 4 / 7）、被中止 job 的 explain 从事件流补取并让本机同步 run 也落 events.db（ADR 0042 决策七），都经真跑与双轨复核（Codex 同僚复核多轮加一轮三视角对抗核验）；Q4 的 Codex 闭合确认在第 103 轮通过（第 100 到 102 轮各有一到六项、已全部落地）。本地自 179f4c9b 起 17 笔未 push，push 由 owner 决定、之后确认 CI。
 
-云端验证已做（owner 部署了 dev 版本后端、两引擎 dev 镜像以 variant base 推上）：`doctor --backend cloud` 全绿、两引擎直连 cloud run passed（definition 结构版本 1、带 cli_version、无 run 级消息、会话 id 为 AgentCore 格式）、两引擎 `submit --backend cloud --expose-local` passed（推进器读回预热地址进 RunTask、Fargate worker 预热就绪、上游收到带 cookie 的请求、隧道终态即拆、无会话残留）；证据已内联进 ADR 0051 实测依据。应用上传的云端路径与设备目标的执行都待第 8 批的真跑核对（第 7 批的部署侧已真部署核过）。
+验证环境 vfy 保留（owner 以 179f4c9b 删项目重新部署过，Device Farm 项目换新；验收期对照用的临时执行角色已删）。1.5 剩余（owner 定；Appium 3 端点升级放发版后）：截图缩放评估；iOS Safari 建连实例超时归属记为边界；Device Farm 数据保留一句进用户文档；评测集加设备用例；发版前 doc-health / code-health 复盘与 CHANGELOG 收口。
 
-跳板机要点：源码树已同步到本分支工作树（rsync）；`GHERKAI_WORKER_MIDSCENE_CMD` 要指向 dev 树的 `dist/bin.mjs`（全局装的是 1.4.9 的旧 worker）。
+跳板机要点：`~/gherkai` 是部署用的干净检出（按已推送提交 prep），未 push 的工作树验证用独立目录 rsync 过去并补 `.git`，用完即删；`GHERKAI_WORKER_MIDSCENE_CMD` 要指向 dev 树的 `dist/bin.mjs`（全局装的是 1.4.9 的旧 worker）。
 
 ## 现场
 
