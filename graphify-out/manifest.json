@@ -95,8 +95,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_project.py": {
-    "mtime": 1793596248.758766,
-    "ast_hash": "7adb0587bd3baad7fcb93fa9a29e4a6a",
+    "mtime": 1793596660.7619321,
+    "ast_hash": "b00e1f776ca20564eec3434a852ff85e",
     "semantic_hash": ""
   },
   "core/tests/test_reconcile.py": {
@@ -580,8 +580,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/project.py": {
-    "mtime": 1793596197.5907981,
-    "ast_hash": "7bd7b907e9192e41e12f1f341d970bd2",
+    "mtime": 1793596660.7617817,
+    "ast_hash": "bc0ac6fbbf38b4463b1d04ac19872535",
     "semantic_hash": ""
   },
   "core/gherkai_core/reconcile.py": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793596197.962284,
-    "ast_hash": "822bbfeb873e8c849892f4eb49dfb05a",
+    "mtime": 1793596701.7503915,
+    "ast_hash": "a05ac1a9f779e4ed55d596fef188c327",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1793596198.2300367,
-    "ast_hash": "e7d648adf79064c4bb948f02a0074978",
+    "mtime": 1793596701.955675,
+    "ast_hash": "db51d4744834884248bad4014b54fbef",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1380,13 +1380,13 @@
     "semantic_hash": ""
   },
   "docs/internals/artifacts-and-evidence.md": {
-    "mtime": 1793596197.9628594,
-    "ast_hash": "7a69b8d685fcaf9b40e5b37a9106bfcc",
+    "mtime": 1793596701.7509208,
+    "ast_hash": "e5a8e47c594d0c6879d667ccfefc9d2b",
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1793596197.9638262,
-    "ast_hash": "9bb0413d7c7882c5d10a5135037e0ba0",
+    "mtime": 1793596701.7505977,
+    "ast_hash": "d2733780eb8222f4da025f271028acf4",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1793596197.963568,
-    "ast_hash": "eb70ff24aa6f11a4a38843794cf2075d",
+    "mtime": 1793596701.7507534,
+    "ast_hash": "73fb14d5978e24cb3010369b3bde71da",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {

@@ -368,7 +368,9 @@ def recover_from_events(job: Job, records: list[EventRecord], *, recorded: "set[
     by_id = {sr.scenario_id: sr for sr in result.scenarios}
     out: list[RecoveredScenario] = []
     for sc in job.scenarios:
-        if sc.id in recorded:
+        # 只看事件流里真出现过的 scenario（timing.seen_scenarios）：scope 级 error 后 reduce_event 给零事件 scenario 合成的 SKIPPED
+        # 明细不是事件流里的记录，不能当成「已执行、从事件流补取」给出
+        if sc.id in recorded or sc.id not in timing.seen_scenarios:
             continue
         sr = by_id.get(sc.id)
         steps = list(sr.steps) if sr is not None else list(timing.steps.get(sc.id, []))

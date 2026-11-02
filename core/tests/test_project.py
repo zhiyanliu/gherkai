@@ -418,3 +418,7 @@ def test_recover_from_events_ignores_scenarios_synthesized_after_scope_error():
     # 合成的 SKIPPED（C）会进判定真值，故在 recorded 里；B 在途、不在判定真值里 → 补取
     out = recover_from_events(job, recs, recorded={"a:C"})
     assert [(u.scenario_id, u.status, [st.index for st in u.steps]) for u in out] == [("a:B", None, [0])]
+    # scope_done(error) 已在事件流、判定真值却一条 scenario 都没有：零事件的 C 仍不能被当成「从事件流补取」（它只是合成的 SKIPPED），
+    # 只补事件流里真出现过的 B
+    out2 = recover_from_events(job, recs, recorded=set())
+    assert [(u.scenario_id, u.status) for u in out2] == [("a:B", None)]
