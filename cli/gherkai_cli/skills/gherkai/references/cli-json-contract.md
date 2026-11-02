@@ -119,8 +119,8 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 
 | 键 | 类型 | 含义 |
 |---|---|---|
-| `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、骨架里有无记录的 step，而本工具**没能**从事件流补取它们的记录（后半句写明原因：这个 run 没有事件流记录、事件流里没有这个 job 的记录（云端 events 表只保留 7 天，或 worker 在发出任何事件前就被中止）、云端 events 表读不到或缺权限、记录解析失败）。补取成功时为 null，补到的 step 见 `steps[].record_source`。不应据此判断终态，终态见同层 `status` |
-| `recovered_steps` | int | 本文档里这个 job 从事件流补取到的 step 数（`record_source` 为 `events` 的 step 个数，随 `--scenario` / `--step` 筛选变化）；为 0 且 `has_step_records` 为 false 时文本形态才指去看 worker 日志 |
+| `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、骨架里有无记录的 step，而本工具**没能**从事件流补取它们的记录（后半句写明原因：这个 run 没有事件流记录、事件流里没有这个 job 的记录（云端 events 表只保留 7 天，或 worker 在发出任何事件前就被中止）、本机事件库读取失败、云端 events 表读不到或缺权限、记录解析失败）。补取成功时为 null，补到的 step 见 `steps[].record_source`。不应据此判断终态，终态见同层 `status` |
+| `recovered_steps` | int | 这个 job 从事件流补取到的 step 数（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化；筛后文档里 `record_source` 为 `events` 的 step 可能少于它）；为 0 且 `has_step_records` 为 false 时文本形态才指去看 worker 日志 |
 | `has_step_records` | bool | 该 job 在判定明细里是否有任何 step 记录（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化；含本工具在 scope 级 error 后补记的 skipped 记录）；false 表示判定只有 job 级一层 |
 
 `scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，未执行完的 scenario 不进入判定明细）、`unfinished`（bool：true 表示这条 scenario 没有判定记录也没有 `scenario_done`，但事件流里有它已执行 step 的记录、已补进 `steps[]`（给了 `--step` 筛选时只出现被筛到的那一步）；判定明细缺这条 scenario 而事件流里有 `scenario_done` 时，`status` 取事件流里的判定、`unfinished` 为 false，其 step 的 `record_source` 仍为 `events`）、`steps[]`：
