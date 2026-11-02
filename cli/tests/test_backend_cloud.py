@@ -575,7 +575,7 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
         def get_item(self, **kw):
             if kw["Key"]["item_type"] == "META":
                 return _META_HEADER
-            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {}}}
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {}, "detached": True}}
 
     class _NoKickerLambda:
         def invoke(self, **kw):
@@ -591,6 +591,109 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
     assert rc == 2
     err = capsys.readouterr().err
     assert "gherkai-kicker" in err and "--prefix" in err
+
+
+def test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached(monkeypatch, capsys):
+    """同步 `run --backend cloud` 的 run（STATE 没有 detached 标记）上执行 status --wait：只轮询等待、一次都不 invoke kicker
+    （kicker 对它本就整体 no-op，踢只是空转；接力只对 submit 的 run，ADR 0034 两道闸的 cloud 侧），提示一句，等到终态按判定给退出码。"""
+    reads = {"n": 0}
+
+    class _Table:
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            reads["n"] += 1
+            status = "passed" if reads["n"] >= 6 else "running"  # 前几轮进行中（卡住判定本会在第 3 轮踢），之后到终态
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": status, "jobs": {}}}
+
+    invoked = []
+
+    class _Lambda:
+        def invoke(self, **kw):
+            invoked.append(kw)
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    monkeypatch.setattr(m.compose, "_make_lambda_client", lambda *, region, profile: _Lambda())
+    import time as _t
+    monkeypatch.setattr(_t, "sleep", lambda s: None)
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--wait"])
+    assert rc == 0 and invoked == []
+    assert "只等待它结束、不接力推进" in capsys.readouterr().err
+
+
+def test_status_cloud_pending_hint_offers_relay_only_for_detached_runs_and_stays_quiet_when_the_marker_is_unreadable(monkeypatch, capsys):
+    """云端 status（不带 --wait）全 job pending 时的「可接力推进」提示只对 submit 的 run 打；读标记遇到 AWS 错误时不提示、也不另报
+    「云端不可达」（提示只是附加诊断，主查询已成功）。"""
+    from botocore.exceptions import ClientError
+
+    class _Table:
+        def __init__(self, detached, marker_error=False):
+            self.detached, self.marker_error = detached, marker_error
+
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            if "ProjectionExpression" in kw:  # is_detached 的点查
+                if self.marker_error:
+                    raise ClientError({"Error": {"Code": "ProvisionedThroughputExceededException", "Message": "slow down"}}, "GetItem")
+                return {"Item": {"run_id": "r1", "item_type": "STATE", **({"detached": True} if self.detached else {})}}
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {},
+                             **({"detached": True} if self.detached else {})}}
+
+    _patch_skew(monkeypatch)
+    for table, expect_hint in ((_Table(False), False), (_Table(True), True), (_Table(True, marker_error=True), False)):
+        monkeypatch.setattr(m.compose, "_make_ddb_table", lambda t, *, region, profile, _tb=table: _tb)
+        rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
+        err = capsys.readouterr().err
+        assert rc == 0 and ("可接力推进" in err) is expect_hint and "云端不可达" not in err
+
+
+def test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read(monkeypatch, capsys):
+    """--wait 要先知道能不能接力：读标记遇到 AWS 错误时以退出码 2 结束并报云端不可达，不能当成不可接力静默等下去（那会让本该接力的
+    submit run 看起来像挂住）；一次都不 invoke kicker。"""
+    from botocore.exceptions import ClientError
+
+    class _Table:
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            if "ProjectionExpression" in kw:
+                raise ClientError({"Error": {"Code": "InternalServerError", "Message": "boom"}}, "GetItem")
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "jobs": {}, "detached": True}}
+
+    invoked = []
+
+    class _Lambda:
+        def invoke(self, **kw):
+            invoked.append(kw)
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    monkeypatch.setattr(m.compose, "_make_lambda_client", lambda *, region, profile: _Lambda())
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--wait"])
+    assert rc == 2 and invoked == [] and "云端不可达" in capsys.readouterr().err
+
+
+def test_status_wait_cloud_interrupted_by_ctrl_c_exits_130_with_a_notice(monkeypatch, capsys):
+    """云端 --wait 的轮询被 Ctrl-C 打断：一句说明、退出码 130，没有回溯。"""
+    class _Table:
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "running", "jobs": {}, "detached": True}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    import time as _t
+
+    def interrupt(s):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_t, "sleep", interrupt)
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--wait"])
+    err = capsys.readouterr().err
+    assert rc == 130 and "已停止等待" in err and "Traceback" not in err
 
 
 def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):

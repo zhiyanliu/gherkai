@@ -855,7 +855,7 @@ def build_cloud_event_log(*, events_table: str, run_id: str, scope_ids: list[str
     return DdbEventLog(table, run_id, list(scope_ids))
 
 
-def build_local_stores(*, report_dir: str | Path):
+def build_local_stores(*, report_dir: str | Path, detached: bool = False):
     """本地文件三层 store + local artifacts descriptor（file:// 完整路径）。
 
     落 <report_dir>/<run_id>/：RunStore(run_meta+run_state) + ResultStore(jobs/) + ReportStore(index/manifest)。
@@ -865,7 +865,7 @@ def build_local_stores(*, report_dir: str | Path):
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
     root = Path(report_dir)
-    run_store: RunStore = LocalRunStore(root)
+    run_store: RunStore = LocalRunStore(root, detached=detached)  # detached：submit 的组合根传 True，run_state.json 带标记（ADR 0034）
     result_store: ResultStore = LocalResultStore(root)
     report_store: ReportStore = LocalReportStore(root)
 

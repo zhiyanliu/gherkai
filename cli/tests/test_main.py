@@ -2577,12 +2577,104 @@ def test_explain_recovered_steps_is_a_job_level_count_so_filtering_does_not_brin
     assert rc == 0 and "诊断细节见 worker 日志" not in out
 
 
+def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_path, monkeypatch):
+    """本机 submit 建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有（ADR 0034）。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+    reports = tmp_path / "s"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    run_dir = next(d for d in reports.iterdir() if d.is_dir())
+    assert json.loads((run_dir / "run_state.json").read_text(encoding="utf-8"))["detached"] is True
+    # 前台 run 真走一遍 `run` 命令（假 schedule，不起 worker）：它建的 run_state.json 不带标记
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    fg = tmp_path / "fg"
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(fg), "--quiet"]) == 0
+    fg_dir = next(d for d in fg.iterdir() if d.is_dir())
+    assert "detached" not in json.loads((fg_dir / "run_state.json").read_text(encoding="utf-8"))
+
+
+def test_status_wait_on_a_foreground_run_only_waits_and_never_relays(tmp_path, monkeypatch, capsys):
+    """前台 `run` 正在执行的 run（没有 detached 标记）上执行 status --wait：不接力推进（接力者会与前台进程双开推进器、再起一个 worker），
+    只轮询等它到终态，提示一句，再按判定给退出码（ADR 0034 两道闸的第一道；第二道是终态）。"""
+    import time as _time
+    root, run_id = _explain_run(tmp_path)  # 终态 failed
+    path = root / run_id / "run_state.json"
+    final = path.read_text(encoding="utf-8")
+    st = json.loads(final)
+    st["status"] = "running"
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+
+    def boom(*a, **k):
+        raise AssertionError("前台 run 不该被接力推进")
+
+    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)
+    polls = []
+
+    def sleep(s):  # 第一次轮询间隔里「前台进程」把 run 推到终态
+        polls.append(s)
+        path.write_text(final, encoding="utf-8")
+
+    monkeypatch.setattr(_time, "sleep", sleep)
+    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
+    err = capsys.readouterr().err
+    assert rc == 1 and polls == [1.0]
+    assert "只等待它结束、不接力推进" in err and "Ctrl-C" in err
+
+
+def test_status_wait_interrupted_by_ctrl_c_exits_130_with_a_notice_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
+    """提示让用户按 Ctrl-C 停止等待，按下去就不能是一屏回溯：只等待的分支与接力分支各打一句说明、以退出码 130 结束（同前台 run 的中断）。"""
+    import time as _time
+    root, run_id = _explain_run(tmp_path)
+    path = root / run_id / "run_state.json"
+    st = json.loads(path.read_text(encoding="utf-8"))
+    st["status"] = "running"
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+
+    def interrupt(*a, **k):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(_time, "sleep", interrupt)  # 前台 run 的记录：只等待分支在第一次轮询间隔里被打断
+    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
+    err = capsys.readouterr().err
+    assert rc == 130 and "已停止等待" in err and "Traceback" not in err
+    st["detached"] = True  # submit 的记录：接力分支里被打断
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", interrupt)
+    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
+    err = capsys.readouterr().err
+    assert rc == 130 and "已停止接力" in err and "再执行同一条命令可继续推进" in err
+
+
+def test_status_pending_hint_offers_relay_only_for_detached_runs(tmp_path, capsys):
+    """全 job pending 的提示「可接力推进」只对 submit 的 run 打：前台 run 刚建记录时同样全 pending，但它没有可接力的推进器。"""
+    root, run_id = _explain_run(tmp_path)
+    path = root / run_id / "run_state.json"
+    st = json.loads(path.read_text(encoding="utf-8"))
+    st["status"] = "pending"
+    for j in st["jobs"]:
+        j["status"] = "pending"
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    assert m.main(["status", run_id, "--report-dir", str(root)]) == 0
+    assert "可接力推进" not in capsys.readouterr().err
+    st["detached"] = True
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    assert m.main(["status", run_id, "--report-dir", str(root)]) == 0
+    assert "可接力推进" in capsys.readouterr().err
+
+
 def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, capsys):
     """status --wait 对已到终态的 run（含前台 run 产出的）不再接力推进：终态即提交点；此前它会拿事件流重放，前台 run 只有事件没有退出记录
     时会在收尾聚合处抛出。"""
     root, run_id = _explain_run(tmp_path)  # 终态 failed
+    path = root / run_id / "run_state.json"
+    st = json.loads(path.read_text(encoding="utf-8"))
+    st["detached"] = True  # 要守的是第二道闸：种子得是 submit 的 run，否则第一道闸（非 detached 不接力）就把接力挡掉了，测试会假绿
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+
     def boom(*a, **k):
         raise AssertionError("终态 run 不该接力推进")
+
     monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)  # 主程序在函数内按模块引用它
     rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
     assert rc == 1  # 终态 failed 的判定退出码

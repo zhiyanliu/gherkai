@@ -806,3 +806,54 @@ def test_run_state_message_is_omitted_when_none_and_round_trips_when_set():
     d = run_state_to_dict(told)
     assert d["message"] == told.message
     assert run_state_from_dict(d).message == told.message
+
+
+def test_local_run_store_detached_marker_is_written_by_submit_and_kept_by_every_rewrite(tmp_path: Path):
+    """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）：submit 的组合根传 detached=True，create_run 写出的 run_state.json
+    带顶层 `detached: true`；不带 detached 的实例经同步路径的 update_job_state / finalize_run 重写文件时保留它（条件写三方见下一条）；
+    同步 run 的实例不写、`is_detached` 为 False；记录不存在也为 False。标记不进 RunState 模型（读回的对象上没有它）。"""
+    from gherkai_core.model import JobState
+
+    r = _sample_run("run-d")
+    initial = run_state_from_result(r)
+    LocalRunStore(tmp_path / "runs", detached=True).create_run(r.run_meta, initial)
+    path = tmp_path / "runs" / "run-d" / "run_state.json"
+    assert json.loads(path.read_text("utf-8"))["detached"] is True
+    relay = LocalRunStore(tmp_path / "runs")  # 接力者：不带 detached
+    assert relay.is_detached("run-d") is True
+    relay.update_job_state("run-d", JobState(scope_id="features/wiki.feature:6", status=Status.RUNNING))
+    assert json.loads(path.read_text("utf-8"))["detached"] is True
+    assert relay.try_claim_job("run-d", "登录场景") is False  # 已非 pending，不写（条件写成功时的保留由下一条守）
+    relay.finalize_run("run-d", Status.FAILED, "2026-06-29T00:10:00Z")
+    assert json.loads(path.read_text("utf-8"))["detached"] is True
+    assert not hasattr(relay.load_run_state("run-d"), "detached")
+    sync = LocalRunStore(tmp_path / "runs")
+    sync.create_run(_sample_run("run-s").run_meta, run_state_from_result(_sample_run("run-s")))
+    assert "detached" not in json.loads((tmp_path / "runs" / "run-s" / "run_state.json").read_text("utf-8"))
+    assert sync.is_detached("run-s") is False and sync.is_detached("no-such-run") is False
+
+
+def test_local_run_store_detached_marker_survives_the_three_conditional_writes_of_a_relay(tmp_path: Path):
+    """接力者与 per-run 进程只经条件写三方（try_claim_job / project_state / try_finalize，都走 _locked_rmw）重写 run_state.json，
+    且它们的实例不带 detached：三次成功写回后标记都还在（若 _locked_rmw 绕过 _write_state 直接落盘，标记会在第一次 claim 后消失、
+    之后 status --wait 把这个 run 当成前台 run 只等不接力）。写路径读旧标记失败不吞错：损坏的文件让写回抛出，而不是悄悄去掉标记。"""
+    from gherkai_core.model import JobState, RunState
+
+    meta = _sample_run("run-p").run_meta
+    sid = meta.jobs[0].scope_id
+    pending = RunState(run_id="run-p", status=Status.PENDING, jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in meta.jobs})
+    LocalRunStore(tmp_path / "runs", detached=True).create_run(meta, pending)
+    path = tmp_path / "runs" / "run-p" / "run_state.json"
+    relay = LocalRunStore(tmp_path / "runs")
+    assert relay.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z") is True
+    assert json.loads(path.read_text("utf-8"))["detached"] is True
+    running = RunState(run_id="run-p", status=Status.RUNNING, high_water_mark=1,
+                       jobs={**pending.jobs, sid: JobState(scope_id=sid, status=Status.RUNNING, session_id="s1")})
+    assert relay.project_state("run-p", running) is True
+    assert json.loads(path.read_text("utf-8"))["detached"] is True
+    assert relay.try_finalize("run-p", Status.FAILED, "2026-06-29T00:10:00Z") is True
+    assert json.loads(path.read_text("utf-8"))["detached"] is True and relay.is_detached("run-p") is True
+    path.write_text("{not json", encoding="utf-8")
+    assert relay.is_detached("run-p") is False  # 读路径保守
+    with pytest.raises(ValueError):
+        relay._write_state(running)  # 写路径不吞：不会把损坏文件当「没有标记」覆盖掉

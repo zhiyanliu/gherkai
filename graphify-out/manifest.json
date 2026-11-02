@@ -5,13 +5,13 @@
     "semantic_hash": "9550a074eee65233c91557ce1f465e90"
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1793086928.6072464,
-    "ast_hash": "554329dafb05ca33cd4aef51dd02c8d8",
+    "mtime": 1793605568.7797704,
+    "ast_hash": "66f8ab720ca34ba4e183fe81f25c2359",
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793599975.254234,
-    "ast_hash": "d644124a753ff7309b871399b269bc3a",
+    "mtime": 1793605568.7795968,
+    "ast_hash": "01880a49ec77f3ad40ba3849afe95345",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -130,8 +130,8 @@
     "semantic_hash": "e2837e6d981c5ea2856d41a151fbbfe6"
   },
   "core/tests/test_stores.py": {
-    "mtime": 1793077887.47978,
-    "ast_hash": "51cbf34ea71fd1c257e9200be07e672d",
+    "mtime": 1793605568.7786272,
+    "ast_hash": "60abba456782d076adf033c792d3fe71",
     "semantic_hash": ""
   },
   "core/tests/test_subprocess_engine.py": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1793598867.5644426,
-    "ast_hash": "cd357a458340a183badcf547f01da78a",
+    "mtime": 1793605585.3842611,
+    "ast_hash": "aae928362cd34209dca5765cd58ee9bb",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793599687.812256,
-    "ast_hash": "1d17a9aaafede9bb4cc905e43f3f4d5a",
+    "mtime": 1793605568.7782357,
+    "ast_hash": "a228f331f7d4a9ab1470499a6eb70c98",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -545,8 +545,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/run_store/local.py": {
-    "mtime": 1793080196.6893253,
-    "ast_hash": "8370eafb6cc6e697b4b257319a888642",
+    "mtime": 1793605568.7759995,
+    "ast_hash": "a5409379cc9de14ff690e69fa969c84f",
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/subprocess_engine.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": "cb5346fd214c36aabf47fdf937c0281b"
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1793597988.5069158,
-    "ast_hash": "735981416cc782e8d4c67c3de07fa172",
+    "mtime": 1793602841.2217913,
+    "ast_hash": "7f7cbc68033f5268f0ff6bcd36ab3096",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793599816.8487983,
-    "ast_hash": "a2b4bd1f5df42b6b2d6f751313acb9ef",
+    "mtime": 1793605585.3847842,
+    "ast_hash": "3be10f63822194b8d0582ab23f04ca0b",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1793595159.5161319,
-    "ast_hash": "159219ae593b430173e971d820e16414",
+    "mtime": 1793605585.38639,
+    "ast_hash": "f1d29c79cd353b464d58309ec1a79763",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1793596937.4846232,
-    "ast_hash": "6bc338f383e6043a911108a35413e1fb",
+    "mtime": 1793605585.38524,
+    "ast_hash": "fb70fac23e544a89a28ec1a4f3c871e6",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {
@@ -1425,8 +1425,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1793358595.235653,
-    "ast_hash": "adeecfc777badbb49c74af587e277991",
+    "mtime": 1793605585.3861983,
+    "ast_hash": "2666daec161455385b87ac114ca95406",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
@@ -1435,13 +1435,13 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793596197.9637,
-    "ast_hash": "8ae74b20d2f07ca95b9f7bc1940f22d9",
+    "mtime": 1793605585.3854866,
+    "ast_hash": "74060df4df0c0e42a378224051d2961c",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1793534876.8505425,
-    "ast_hash": "ddf93823addbb9d5b347c6fa2fb361a4",
+    "mtime": 1793605585.3858843,
+    "ast_hash": "c343fa436fcfc33bd2441b72af0c6eb0",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -2005,8 +2005,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
-    "mtime": 1793598670.5818038,
-    "ast_hash": "1afb27e458a9040266335fd9ec36027a",
+    "mtime": 1793603072.2352724,
+    "ast_hash": "e807511f22a61d1f199f4568c121700d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/device_selection.py": {

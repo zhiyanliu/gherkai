@@ -49,15 +49,45 @@ def _atomic_write_json(path: Path, obj) -> None:
     atomic_write_json(path, obj, mode=0o600)
 
 class LocalRunStore:
-    """RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。"""
+    """RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。
 
-    def __init__(self, root: str | Path) -> None:
+    detached（ADR 0034）：本组合根是否「无状态批量运行的 submit」——True 则 create_run 写出的 run_state.json 带顶层
+    `detached: true` 标记，之后每次写回都保留它（接力者与同步路径的实例不带 detached，重写时不能把它丢掉）。标记是执行环境
+    属性、不进 RunState 模型；读它只经 `is_detached`（对位 `DynamoDBRunStore.is_detached`）。
+    """
+
+    def __init__(self, root: str | Path, *, detached: bool = False) -> None:
         self._root = Path(root)
+        self._detached = detached
 
     def _write_state(self, state: RunState) -> None:
         run_dir = self._root / state.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(run_dir / "run_state.json", run_state_to_dict(state))
+        path = run_dir / "run_state.json"
+        d = run_state_to_dict(state)
+        # 写路径读旧标记**不吞错**：这里一旦读失败就静默去掉标记，之后再也加不回来，run 会被 status --wait 当成前台 run、只等不接力；
+        # 同一段 RMW 前面的 load_run_state 碰到同样的错误也是抛出，两边口径一致
+        if self._detached or self._marker_in(path):
+            d["detached"] = True
+        _atomic_write_json(path, d)
+
+    @staticmethod
+    def _marker_in(path: Path) -> bool:
+        if not path.exists():
+            return False
+        return json.loads(path.read_text(encoding="utf-8")).get("detached") is True
+
+    def is_detached(self, run_id: str) -> bool:
+        """run_state.json 上有没有 `detached` 标记（ADR 0034）：True 表示无状态批量运行的 submit 建的 run。
+
+        **adapter-only 只读访问器、不在 RunStore port 上**（执行环境属性不进 core）。`status --wait` 据此分流：detached run
+        才接力推进；同步 `run` 由进程内 schedule 推进，接力者碰它即双开推进器——与云端推进器「只碰 detached run」同一道闸。
+        文件缺失、读不出或没有标记 → False（读路径保守：读不出标记就当不可接力）。
+        """
+        try:
+            return self._marker_in(self._root / run_id / "run_state.json")
+        except (OSError, ValueError):
+            return False
 
     def save_run(self, meta: RunMeta, state: RunState) -> None:
         """落 <root>/<run_id>/{run_meta.json, run_state.json}（一次性写完整态，写面）。"""

@@ -450,8 +450,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
     # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲提交者看得见的差别。
     st.add_argument("--wait", action="store_true",
-                    help="轮询到 run 达终态再返回（两路都支持，接力方式不同：local 在本机接着把它推到底；"
-                         "cloud 检测卡住即触发云端接力）")
+                    help="轮询到 run 达终态再返回，并按判定给退出码。对 submit 提交的 run 还会接力推进（local 在本机接着把它推到底；"
+                         "cloud 检测卡住即触发云端接力）；对正在前台 run 的 run 只等待、不接力")
     # 本 flag 只是回落值：RunMeta 带 max_concurrency 时以它为准（提交时定的并发闸才是这个 run 的口径）。
     st.add_argument("--max-concurrency", type=int, default=None,
                     help="[local --wait] 接力推进的并发上限：默认按提交时的值走，提交记录里没有值才用这里给的")
@@ -1577,7 +1577,10 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     from gherkai_core.adapters.event_log import SqliteEventLog
 
     report_root = Path(args.report_dir).resolve()
-    run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+    run_store, _rs, _rp, _mk = compose.build_local_stores(
+        report_dir=str(report_root),
+        detached=True,  # run_state.json 带 detached 标记 → status --wait 认它可接力（同步 run 不带，ADR 0034；对位云端 STATE 的标记）
+    )
     run_store.create_run(run_meta, initial)
     SqliteEventLog(compose.events_db_path(report_root, run_id))  # 建库（schema），per-run/status/explain 共用（路径单点）
     if tunnel_info is not None:
@@ -1851,7 +1854,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     return 0
 
 
-def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
+def _render_status(state, args, *, wait_hint: str, locations: dict, relay_available=None) -> int:
     """渲染 RunState + pending 诊断提示 + 终态产物位置 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
 
     state 已确认非 None（调用方先查）。wait_hint 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、
@@ -1860,6 +1863,8 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
     --json 机读：RunState 键形状不变，另**附加** `artifacts`（约定落点、无论终态都给，终态后才真有内容，ADR 0041 决策三）；
     人读提示一律不打（pending 提示的触发条件见下方注释）。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
+    relay_available：零参回调，答「--wait 对这个 run 能不能接力」（detached run 才能，ADR 0034）；只在 pending 提示的触发条件
+    成立时才调（云端是一次点查）。None 当 True（旧调用方）。
     """
     if args.json:
         from gherkai_core.serialize import run_state_to_dict
@@ -1876,7 +1881,8 @@ def _render_status(state, args, *, wait_hint: str, locations: dict) -> int:
     # 下一次 tick 要等 worker 发出第一个事件——Fargate 拉起那几十秒里恒是「job running、run pending」，此时推进
     # 早已开始，提示「推进可能未启动」是误报（实际运行 submit 后连查三次撞见）。任一 job 已 claim 即闭嘴。
     all_jobs_pending = all(js.status == Status.PENDING for js in state.jobs.values())
-    if not args.wait and not args.json and state.status == Status.PENDING and all_jobs_pending:
+    if (not args.wait and not args.json and state.status == Status.PENDING and all_jobs_pending
+            and (relay_available is None or relay_available())):  # 前台 run 刚建 run 时同样全 pending，但没有可接力的推进器、不提示
         _progress(f"提示：run 仍 pending。若已提交较久，推进可能未启动——`{wait_hint}` 可接力推进。")
     if state.status == Status.PASSED:
         return 0
@@ -1891,13 +1897,30 @@ def _cmd_status(args) -> int:
     - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须运行到底）。
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
+
+    --wait 的等待或接力被 Ctrl-C 打断：按进入的分支打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端
+    （ADR 0030 决定七、0039）。各分支进入等待前把自己的说明放进 interrupted["notice"]。
     """
+    interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE}
+    try:
+        return _cmd_status_body(args, interrupted)
+    except KeyboardInterrupt:
+        _progress(interrupted["notice"])
+        return 128 + signal.SIGINT
+
+
+# `status --wait` 被 Ctrl-C 打断时的说明（产品语言），按分支选用
+_INTERRUPTED_WAIT_NOTICE = "已停止等待。这个 run 仍在原处继续执行，稍后可再查。"
+_INTERRUPTED_RELAY_NOTICE = "已停止接力：这个 run 停在当前状态（它的 worker 会在几秒内自行退出），再执行同一条命令可继续推进。"
+
+
+def _cmd_status_body(args, interrupted: dict) -> int:
     from gherkai_runtime import detached
 
     if not _validate_max_concurrency(args):  # --wait 接力的回落值同校验（meta 缺值时它就是并发闸）
         return 2
     if args.backend == "cloud":
-        return _status_cloud(args)
+        return _status_cloud(args, interrupted)
 
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
@@ -1915,27 +1938,51 @@ def _cmd_status(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
 
+    # --wait 的两道闸与云端推进器同构（ADR 0034）：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
+    # 推进器（抢 claim、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
     if args.wait and state.status not in TERMINAL_STATUSES:
-        # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
-        # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
-        # 已到终态的 run（含前台 run 产出的）不再接力：终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
-        region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
-        try:
-            detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
-                                           region=region, profile=profile)
-        except DefinitionContractError as e:  # 结构版本不合已由上面的版本闸拦下；形态违约在这里（同 _cmd_reconcile）
-            _progress(_definition_contract_message(e))
-            return 2
+        if run_store.is_detached(args.run_id):
+            # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
+            # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+            interrupted["notice"] = _INTERRUPTED_RELAY_NOTICE
+            region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+            try:
+                detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
+                                               region=region, profile=profile)
+            except DefinitionContractError as e:  # 结构版本不合已由上面的版本闸拦下；形态违约在这里（同 _cmd_reconcile）
+                _progress(_definition_contract_message(e))
+                return 2
+        else:
+            _progress(_WAIT_WITHOUT_RELAY_NOTICE)
+            interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE
+            _wait_local_terminal(run_store, args.run_id)
 
     state = run_store.load_run_state(args.run_id)
-    if state is None:  # 不可达（上面已查过），保险分支
+    if state is None:  # 只等待的分支里记录中途被删会到这里（_wait_local_terminal 在记录消失时也返回）
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
     return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
-                          locations=compose.local_artifact_locations(str(report_root), args.run_id))
+                          locations=compose.local_artifact_locations(str(report_root), args.run_id),
+                          relay_available=lambda: run_store.is_detached(args.run_id))
 
 
-def _status_cloud(args) -> int:
+# `status --wait` 对不可接力的 run 的提示（产品语言）：不是 submit 提交到后台执行的 run，推进它的是别的进程。
+_WAIT_WITHOUT_RELAY_NOTICE = ("这个 run 不是 submit 提交到后台执行的（由前台 run 执行）：本命令只等待它结束、不接力推进。"
+                              "执行它的进程若已不在，它不会再到终态，可按 Ctrl-C 停止等待。")
+
+
+def _wait_local_terminal(run_store, run_id: str, *, poll_interval_s: float = 1.0) -> None:
+    """只等待、不推进：轮询本机运行态到终态（或记录消失）。写端是原子替换文件，读不到半写的内容。"""
+    import time as _time
+
+    while True:
+        state = run_store.load_run_state(run_id)
+        if state is None or state.status in TERMINAL_STATUSES:
+            return
+        _time.sleep(poll_interval_s)
+
+
+def _status_cloud(args, interrupted: dict | None = None) -> int:
     """cloud status：读 DDB RunState 渲染。--wait 则无感接力兜底——**检测卡住才** invoke kicker Lambda 做 kickoff
     + 重读，直到终态（ADR 0034 三触发源之一）。
 
@@ -1980,9 +2027,38 @@ def _status_cloud(args) -> int:
                 return 2  # 哨兵：调用方转退出码
             raise
 
+    def _is_detached():
+        try:
+            return run_store.is_detached(args.run_id)
+        except Exception as e:
+            if compose.is_botocore_error(e):
+                _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
+                return 2  # 哨兵：调用方转退出码
+            raise
+
+    def _relay_available():  # 只给 pending 提示用：读不到标记就当不可接力、不提示，不另打「云端不可达」
+        try:
+            return run_store.is_detached(args.run_id)
+        except Exception as e:
+            if compose.is_botocore_error(e):
+                return False
+            raise
+
     state = _read()
     if state == 2:
         return 2
+    if args.wait and state is not None and state.status not in TERMINAL_STATUSES:
+        # 只对 detached run 接力（ADR 0034 两道闸的本机侧同构）：同步 `run --backend cloud` 由进程内 schedule 推进，kicker 对它本就
+        # 整体 no-op，踢只是空转；--wait 对它退化为只等待
+        relay = _is_detached()
+        if relay == 2:
+            return 2
+        if not relay:
+            _progress(_WAIT_WITHOUT_RELAY_NOTICE)
+        if interrupted is not None:
+            interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE  # 云端两种 run 都在原处继续：detached 由云端链、同步 run 由它的前台进程
+    else:
+        relay = False
     if args.wait:
         # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke kicker 做 kickoff**（非每轮无脑踢——正常推进时
         # 云端链自行运行、kickoff 也 no-op 白耗，对齐零空转，ADR 0034 三触发源 cloud 侧）。「卡住」指状态连续 _STALL_KICK
@@ -1995,7 +2071,7 @@ def _status_cloud(args) -> int:
             snap = (state.status, state.high_water_mark)
             stall = stall + 1 if snap == last_snap else 0  # 有变化即重置（推进中不踢）
             last_snap = snap
-            if stall >= _STALL_KICK:
+            if relay and stall >= _STALL_KICK:
                 if lam is None:
                     lam = compose._make_lambda_client(region=target.region, profile=target.profile)
                 try:
@@ -2025,7 +2101,8 @@ def _status_cloud(args) -> int:
                           wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
                           locations=compose.cloud_artifact_locations(
                               bucket=target.bucket, report_prefix=args.report_dir, table=target.runs_table,
-                              run_id=args.run_id))
+                              run_id=args.run_id),
+                          relay_available=_relay_available)
 
 
 # ============================================================================
