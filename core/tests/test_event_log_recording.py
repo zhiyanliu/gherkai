@@ -160,7 +160,7 @@ def test_exit_recorder_serializes_the_stop_thread_and_the_event_thread(tmp_path)
 
     class _SlowLog:
         def record_exit(self, scope_id, exit_code, **kw):
-            if not writes:  # 第一次写：停止线程在落库中途被挂起
+            if exit_code is None:  # 只挂起未知码的落库（停止线程）：真码的写入不阻塞，没有锁时事件线程会抢先写、随后被恢复的停止线程覆盖
                 entered.set()
                 assert release.wait(5)
             writes.append(exit_code)
