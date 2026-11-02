@@ -32,18 +32,23 @@ def make_raw_sink(event_log: SqliteEventLog, scope_id: str) -> Callable[[str], N
 
 
 class _ExitRecorder:
-    """一个 job 的退出记录只写一次：事件迭代结束（含非零退出码的异常）或 stop 完成时，谁先到谁写。"""
+    """一个 job 的退出记录只写一次：事件迭代结束（含非零退出码的异常）或 stop 完成时，谁先到谁写。
+
+    唯一的例外是用真码覆盖未知码：stop 的强杀分支先返回、退出码还没就位时按未知写了一条，随后 schedule 排空事件流读到带码的
+    WorkerExitError——再写一次（INSERT OR REPLACE 同键），让记录与 launcher 经 wait 拿到的真码一致。"""
 
     def __init__(self, event_log: SqliteEventLog, scope_id: str, handle: SubprocessWorkerHandle) -> None:
         self._event_log = event_log
         self._scope_id = scope_id
         self._handle = handle
         self._done = False
+        self._recorded: int | None = None
 
     def record(self, exit_code: int | None) -> None:
-        if self._done:
+        if self._done and (exit_code is None or self._recorded is not None):
             return
         self._done = True
+        self._recorded = exit_code
         try:
             self._event_log.record_exit(self._scope_id, exit_code)
         except Exception:
@@ -61,7 +66,18 @@ class _RecordingHandle:
         try:
             self._inner.stop(grace_period_s)
         finally:
-            self._recorder.record(self._inner.returncode())
+            self._recorder.record(self._exit_code_after_stop())
+
+    _REAP_WAIT_S = 2.0  # stop 已向整组发过信号，进程只差被内核回收；SIGKILL 兜底与二次中断两条路径都是发出即返回、不等回收
+
+    def _exit_code_after_stop(self) -> int | None:
+        rc = self._inner.returncode()
+        if rc is None:
+            try:
+                rc = self._inner.wait(self._REAP_WAIT_S)
+            except Exception:
+                rc = None  # 仍拿不到：按退出码未知写（投影判 ERROR、非宽限，ADR 0034 机制二「退出码缺失」条），与 launcher 同一口径
+        return rc
 
     def __getattr__(self, name: str):
         return getattr(self._inner, name)

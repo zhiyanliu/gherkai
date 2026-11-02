@@ -89,14 +89,16 @@ class SubprocessWorkerHandle:
         # 必须带超时：另开了进程组的进程可能仍持有 stdout 写端。
         _join_pumps(self._pumps, 0.5)
 
-    def wait(self) -> int:
+    def wait(self, timeout: float | None = None) -> int:
         """阻塞等 worker 退出、返回 returncode（ADR 0034：local 无状态批量运行的退出观察者用）。
 
         per-run 进程的 SubprocessLauncher 消费完 fd3 事件流后调此拿 exitcode 写 task_exited——扮演
-        「平台侧退出观察者」（cloud 对位是 ECS STOPPED 事件 payload 的 exitCode）。同步 run 路径不用（那条走
-        schedule 迭代事件流、_read_events 内部 proc.wait）。SIGKILL 硬杀 → 负码（Python subprocess 约定）。
+        「平台侧退出观察者」（cloud 对位是 ECS STOPPED 事件 payload 的 exitCode）。同步 run 的事件迭代路径不用（那条走
+        schedule 迭代事件流、_read_events 内部 proc.wait）；同步 run 的事件记录器在 stop 之后带 timeout 调它取退出码
+        （ADR 0042 决策七）：stop 的 SIGKILL 兜底发出即返回、不等内核回收，此刻 poll 可能还看不到码。timeout 到期抛
+        subprocess.TimeoutExpired。SIGKILL 硬杀 → 负码（Python subprocess 约定）。
         """
-        return self._proc.wait()
+        return self._proc.wait(timeout)
 
 
 class SubprocessEngine:

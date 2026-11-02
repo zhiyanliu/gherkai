@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from gherkai_core.adapters.event_log import EventRecordingEngine, SqliteEventLog, make_raw_sink
 from gherkai_core.model import Job, Scenario, Step
 
@@ -14,16 +16,27 @@ def _job(scope_id: str) -> Job:
 
 
 class _StubHandle:
-    def __init__(self, rc: int | None = 0) -> None:
+    def __init__(self, rc: int | None = 0, *, rc_after_stop: int | None = -15, rc_after_wait: int | None = None) -> None:
         self.rc = rc
+        self.rc_after_stop = rc_after_stop
+        self.rc_after_wait = rc_after_wait
         self.stopped: list[float] = []
+        self.waited: list[float | None] = []
 
     def returncode(self):
         return self.rc
 
     def stop(self, grace):
         self.stopped.append(grace)
-        self.rc = -15  # 停止后进程以 SIGTERM 的负码结束
+        self.rc = self.rc_after_stop  # 协作停：stop 等到整组消失，退出码就位（SIGTERM 的负码）
+
+    def wait(self, timeout=None):
+        self.waited.append(timeout)
+        if self.rc_after_wait is None:
+            import subprocess
+            raise subprocess.TimeoutExpired("fake", timeout)
+        self.rc = self.rc_after_wait
+        return self.rc
 
 
 class _StubEngine:
@@ -97,9 +110,41 @@ def test_recording_engine_writes_the_exit_record_on_nonzero_exit_and_on_stop(tmp
     assert len([r for r in log.records() if r.kind == "exit" and r.scope_id == "b"]) == 1
 
 
+def test_recording_handle_waits_briefly_for_the_exit_code_when_stop_returns_before_the_process_is_reaped(tmp_path):
+    """stop 的 SIGKILL 兜底与二次中断都是发出即返回、不等内核回收，此刻 poll 还看不到码：记录器带超时 wait 一次取真码；
+    仍拿不到才按退出码未知写（投影判 ERROR）。"""
+    log = SqliteEventLog(tmp_path / "events.db")
+    killed = _StubEngine([], handle=_StubHandle(rc=None, rc_after_stop=None, rc_after_wait=-9))
+    handle, _events = EventRecordingEngine(killed, log).run_scope(_job("k"))
+    handle.stop(0)
+    assert killed.handle.waited == [2.0]
+    assert [(r.scope_id, r.exited.exit_code) for r in log.records() if r.kind == "exit"] == [("k", -9)]
+    stuck = _StubEngine([], handle=_StubHandle(rc=None, rc_after_stop=None, rc_after_wait=None))
+    handle, _events = EventRecordingEngine(stuck, log).run_scope(_job("s"))
+    handle.stop(0)
+    assert [(r.scope_id, r.exited.exit_code) for r in log.records() if r.kind == "exit" and r.scope_id == "s"] == [("s", None)]
+
+
 def test_make_raw_sink_is_the_shared_writer(tmp_path):
     log = SqliteEventLog(tmp_path / "events.db")
     sink = make_raw_sink(log, "x")
     sink(json.dumps({"type": "scope_started", "scopeId": "x"}))
     assert [(r.seq, r.event.type) for r in log.records() if r.kind == "event"] == [(1, "scope_started")]
     assert log.max_seq("x") == 1
+
+
+def test_recording_engine_overwrites_an_unknown_exit_code_with_the_real_one_from_the_event_stream(tmp_path):
+    """stop 的强杀分支返回时码仍未就位、有界 wait 也没等到：先按未知码写；随后 schedule 排空事件流读到带码的 WorkerExitError，
+    用真码覆盖（同键 INSERT OR REPLACE）。反向不成立：已有真码时再来一个未知码不改。"""
+    from gherkai_core.errors import WorkerExitError
+    log = SqliteEventLog(tmp_path / "events.db")
+    eng = _StubEngine([], exit_error=WorkerExitError(-9, "worker 被强制结束"), handle=_StubHandle(rc=None, rc_after_stop=None, rc_after_wait=None))
+    handle, events = EventRecordingEngine(eng, log).run_scope(_job("k"))
+    handle.stop(0)
+    exits = lambda: [(r.scope_id, r.exited.exit_code) for r in log.records() if r.kind == "exit"]
+    assert exits() == [("k", None)]
+    with pytest.raises(WorkerExitError):
+        list(events)
+    assert exits() == [("k", -9)]
+    handle.stop(0)  # 再 stop：码已就位为 None 的 stub 会再给 None，不覆盖真码
+    assert exits() == [("k", -9)]

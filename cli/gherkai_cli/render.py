@@ -475,7 +475,9 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         }
-        scope_doc["recovered_steps"] = sum(1 for scen in scenarios for st in scen["steps"] if st["record_source"] == "events")
+        # 从事件流补到的 step 数同样是 job 级事实、按未筛的补取结果算（曾按筛后文档数：--scenario/--step 筛剩无记录 step 时会把
+        # 补回了记录的 job 当成零记录、重新打出「诊断细节见 worker 日志」）
+        scope_doc["recovered_steps"] = sum(len(u.steps) for u in from_events.values())
         # 会话记录与计量（ADR 0051 决策 4、7），形状同 run --json 的 jobs[]：sessions[] 桌面 job 有会话记录时也有，计量两键仅设备目标
         scope_doc.update(_device_keys_for_explain(jr))
         url = console_url(jr.session_id)  # 代表会话是 Device Farm 会话 ARN 时给控制台链接（ADR 0051 决策 8）；桌面省键

@@ -2531,6 +2531,52 @@ def test_explain_reports_when_the_event_stream_has_no_record_for_the_job(tmp_pat
     assert "诊断细节见 worker 日志" in out  # 判定明细与事件流都没给出 step 时才指去看日志
 
 
+def test_explain_treats_an_exit_only_event_stream_as_no_record_for_the_job(tmp_path, capsys):
+    """事件库里这个 job 只有退出记录、没有任何事件行（云端 events 表的事件行 7 天过期后只剩不带 TTL 的退出记录；本机 worker 没发事件就退出）：
+    算补取失败并写明原因，不是「补到零条、也不说明」。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    SqliteEventLog(compose.events_db_path(root, run_id)).record_exit("features/login.feature:6", 1)
+    sc = json.loads(_explain(capsys, root, run_id, "--json")[1])["scopes"][0]
+    assert "没有这个 job 的记录" in sc["aborted_hint"] and sc["recovered_steps"] == 0
+
+
+def test_explain_degrades_when_event_reduction_fails(tmp_path, capsys):
+    """事件行能过解析、归约时却因 worker 违约的字段值抛出（这里计量给成字串，求和时 TypeError）：与读取失败同一口径，只落 aborted_hint
+    的原因，explain 不抛、退出码不变。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    log = SqliteEventLog(compose.events_db_path(root, run_id))
+    scope_id = "features/login.feature:6"
+    lines = [
+        {"type": "scope_started", "scopeId": scope_id, "sessionId": "01a0deadbeef"},
+        {"type": "scenario_started", "scenarioId": "features/login.feature:12"},
+        {"type": "step_started", "scenarioId": "features/login.feature:12", "stepIndex": 0},
+        {"type": "step_done", "scenarioId": "features/login.feature:12", "stepIndex": 0, "status": "passed", "cost": {"tokens": "1"}},
+        {"type": "step_started", "scenarioId": "features/login.feature:12", "stepIndex": 1},
+        {"type": "step_done", "scenarioId": "features/login.feature:12", "stepIndex": 1, "status": "passed", "cost": {"tokens": "1"}},
+    ]
+    for i, d in enumerate(lines, start=1):
+        log.append_event(scope_id, i, json.dumps(d), 1000.0 + i)
+    rc, out, _ = _explain(capsys, root, run_id, "--json")
+    sc = json.loads(out)["scopes"][0]
+    assert rc == 0 and "事件流记录解析失败" in sc["aborted_hint"] and "unsupported operand" in sc["aborted_hint"]
+    assert sc["recovered_steps"] == 0 and all(st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
+
+
+def test_explain_recovered_steps_is_a_job_level_count_so_filtering_does_not_bring_back_the_log_hint(tmp_path, capsys):
+    """recovered_steps 按整个 job 统计、不随 --scenario/--step 变化：筛到补回了记录的 job 里一个无记录 step 时，文档仍报补到的步数、
+    文本不再打「诊断细节见 worker 日志」（曾按筛后文档数，筛剩无记录 step 就把它当成零记录 job）。"""
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    _events_db_with_unfinished_scenario(root, run_id, "features/login.feature:6", "file:///tmp/none.json")
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "12", "--step", "3", "--json")
+    sc = json.loads(out)["scopes"][0]
+    steps = [st for scen in sc["scenarios"] for st in scen["steps"]]
+    assert rc == 0 and sc["recovered_steps"] == 2 and len(steps) == 1 and steps[0]["record_missing"]
+    rc, out, _ = _explain(capsys, root, run_id, "--scenario", "12", "--step", "3")
+    assert rc == 0 and "诊断细节见 worker 日志" not in out
+
+
 def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, capsys):
     """status --wait 对已到终态的 run（含前台 run 产出的）不再接力推进：终态即提交点；此前它会拿事件流重放，前台 run 只有事件没有退出记录
     时会在收尾聚合处抛出。"""

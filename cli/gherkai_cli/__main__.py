@@ -2127,11 +2127,16 @@ def _explain_recover(results, recover):
         return {}, {jr.scope_id: error for jr in needing}
     recovered, errors = {}, {}
     for jr in needing:
-        mine = [r for r in records if r.scope_id == jr.scope_id]
+        # 只数事件行：退出记录不算「这个 job 的事件」——云端 events 表的事件行 7 天过期、不带 TTL 的退出记录仍在；本机 worker 没发任何事件
+        # 就退出时也只剩它。拿它当有记录会把这两种情形混成「补到零条、也不说明原因」
+        mine = [r for r in records if r.scope_id == jr.scope_id and r.kind == "event"]
         if not mine:
             errors[jr.scope_id] = _NO_EVENTS_FOR_SCOPE
             continue
-        recovered[jr.scope_id] = recover_from_events(jr.job, mine, recorded={sr.scenario_id for sr in jr.scenarios})
+        try:
+            recovered[jr.scope_id] = recover_from_events(jr.job, mine, recorded={sr.scenario_id for sr in jr.scenarios})
+        except Exception as e:  # 归约时的形态错误（worker 违约的字段值，如计量不是数字）：与读取失败同一口径，只落原因
+            errors[jr.scope_id] = f"事件流记录解析失败：{e}"
     return recovered, errors
 
 
