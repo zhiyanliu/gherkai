@@ -37,7 +37,7 @@ local 后端没有也不需要这个标记：不存在常驻在共享基础设�
 ```
 plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
   ├─ 按并发闸启动 worker(每 scope 一个)
-  ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（设备 job 取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成落判定(RunPersistence)；事件原始行同时经 raw_sink 落 events.db（--no-report 不写）
+  ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（设备 job 取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成落判定(RunPersistence)；本机后端下事件原始行同时经 raw_sink 落 events.db（--no-report 不写；云端 run 的事件由 worker 直接写 events 表）
   ├─ 静默停滞由心跳检出、超出 job 超时预算即停 → handle.stop(local=SIGTERM→宽限→SIGKILL;cloud=StopTask)
   └─ 全部收敛 → finalize(终态一次落定)+ RunReport
 ```
