@@ -128,7 +128,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 |---|---|---|
 | `index` / `keyword` / `text` | int / string / string | 来自 job 定义（骨架）：0 起的书写序号、Given/When/Then、step 原文 |
 | `status` / `votes` / `error_type` / `message` / `shortcircuited` / `duration_ms` / `report_refs[]` | | 同 `run --json` 的 `steps[]`；`record_missing` 为 true 时 `status` / `votes` / `error_type` / `message` / `duration_ms` 为 null、`report_refs` 为空数组、`shortcircuited` 恒 false（类型始终是 bool；判断有无记录一律以 `record_missing` 为准） |
-| `record_missing` | bool | true 表示骨架里有这一步，判定明细里没有它、从事件流也没补到（未执行、被中止时还没上报完成记录，或事件流读不到——这种情形同层 `aborted_hint` 带原因） |
+| `record_missing` | bool | true 表示骨架里有这一步，判定明细里没有它、从事件流也没补到（未执行、被中止时还没上报完成记录，或事件流读不到——这种情形所属 scope 的 `aborted_hint` 带原因） |
 | `record_source` | `verdict` / `events` \| null | 这一步记录的来源：`verdict` 来自判定明细；`events` 是 job 被中止后从事件流补取的（这条 scenario 不在判定明细里，这一步已执行完并上报），字段与判定明细里的相同；`record_missing` 为 true 时为 null |
 | `evidence` | object \| null | 这一步的机读证据全文（固定键见下）；为 null 时原因见 `evidence_missing`；`record_missing` 为 true 时恒为 null |
 | `evidence_missing` | `no_ref` / `unreadable` / `unsupported_schema` \| null | null 表示证据已读取。`no_ref` 表示这一步没有证据指针，三种情形在此字段上无法区分：确定性步 / 导航步本不产出证据（设备目标上只有 passed 的确定性步 / 导航步如此）、AI 已执行但抽取失败、或这一步没有判定记录（`record_missing` 为 true）；区分「未执行」与「已执行但未产出证据」一律以 `record_missing` 为准；`unreadable` 表示指针存在但读不到，或内容不是 JSON；`unsupported_schema` 表示证据的格式版本当前 CLI 不识别 |
