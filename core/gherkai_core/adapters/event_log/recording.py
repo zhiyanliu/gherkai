@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable, Iterator
 
@@ -35,7 +36,10 @@ class _ExitRecorder:
     """一个 job 的退出记录只写一次：事件迭代结束（含非零退出码的异常）或 stop 完成时，谁先到谁写。
 
     唯一的例外是用真码覆盖未知码：stop 的强杀分支先返回、退出码还没就位时按未知写了一条，随后 schedule 排空事件流读到带码的
-    WorkerExitError——再写一次（INSERT OR REPLACE 同键），让记录与 launcher 经 wait 拿到的真码一致。"""
+    WorkerExitError——再写一次（INSERT OR REPLACE 同键），让记录与 launcher 经 wait 拿到的真码一致。
+
+    两个调用方在不同线程（stop 由 schedule 的主线程调、事件迭代在该 scope 的读线程），判重与落库在同一把锁里串行：否则停止线程
+    判完「未写过」、落库前被挂起，事件线程先写了真码，停止线程恢复后再把它覆盖成未知码（同僚复核用真实 SQLite 控制线程交错复现）。"""
 
     def __init__(self, event_log: SqliteEventLog, scope_id: str, handle: SubprocessWorkerHandle) -> None:
         self._event_log = event_log
@@ -43,16 +47,18 @@ class _ExitRecorder:
         self._handle = handle
         self._done = False
         self._recorded: int | None = None
+        self._lock = threading.Lock()
 
     def record(self, exit_code: int | None) -> None:
-        if self._done and (exit_code is None or self._recorded is not None):
-            return
-        self._done = True
-        self._recorded = exit_code
-        try:
-            self._event_log.record_exit(self._scope_id, exit_code)
-        except Exception:
-            pass  # 落库失败不拖垮执行（与 raw_sink 同一口径）；判定真值走 RunPersistence，不依赖这条记录
+        with self._lock:
+            if self._done and (exit_code is None or self._recorded is not None):
+                return
+            self._done = True
+            self._recorded = exit_code
+            try:
+                self._event_log.record_exit(self._scope_id, exit_code)
+            except Exception:
+                pass  # 落库失败不拖垮执行（与 raw_sink 同一口径）；判定真值走 RunPersistence，不依赖这条记录
 
 
 class _RecordingHandle:

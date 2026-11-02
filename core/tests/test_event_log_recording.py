@@ -148,3 +148,34 @@ def test_recording_engine_overwrites_an_unknown_exit_code_with_the_real_one_from
     assert exits() == [("k", -9)]
     handle.stop(0)  # 再 stop：码已就位为 None 的 stub 会再给 None，不覆盖真码
     assert exits() == [("k", -9)]
+
+
+def test_exit_recorder_serializes_the_stop_thread_and_the_event_thread(tmp_path):
+    """停止线程按未知码写、落库中途被挂起，事件线程同时拿到真码：两次写入串行、真码后写——终值是真码，不会被恢复的停止线程覆盖成未知码。"""
+    import threading
+    from gherkai_core.adapters.event_log.recording import _ExitRecorder
+
+    writes: list[int | None] = []
+    entered, release = threading.Event(), threading.Event()
+
+    class _SlowLog:
+        def record_exit(self, scope_id, exit_code, **kw):
+            if not writes:  # 第一次写：停止线程在落库中途被挂起
+                entered.set()
+                assert release.wait(5)
+            writes.append(exit_code)
+
+    rec = _ExitRecorder(_SlowLog(), "s", _StubHandle())
+    stopper = threading.Thread(target=rec.record, args=(None,))
+    stopper.start()
+    assert entered.wait(5)
+    eventer = threading.Thread(target=rec.record, args=(-9,))
+    eventer.start()
+    eventer.join(0.3)
+    assert eventer.is_alive() and writes == []  # 事件线程在锁上等，没有抢先写
+    release.set()
+    stopper.join(5)
+    eventer.join(5)
+    assert writes == [None, -9]  # 未知码先落、真码覆盖；再来一个未知码不改
+    rec.record(None)
+    assert writes == [None, -9]
