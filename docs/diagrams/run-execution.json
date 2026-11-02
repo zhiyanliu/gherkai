@@ -182,7 +182,7 @@
       "col": 4,
       "type": "database",
       "label": "事件通道",
-      "sublabel": "专用通道，不落盘",
+      "sublabel": "专用通道，落 events.db",
       "width": 140
     },
     {

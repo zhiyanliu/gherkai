@@ -1,6 +1,6 @@
 # 0042. step 级机读证据（evidence）与 `gherkai explain`
 
-> **Status:** Accepted（2026-09-11）—— 六项决策已实装并有护栏；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 引入的加法已在本篇原位登记：决策四的 scope 级 error 后合成的 SKIPPED（0051 决策 4，桌面会话预热失败同样产生）已实装；设备目标的例外（0051 决策 8）——决策一（失败的确定性与导航 step 也产 evidence、schema 1 加设备键）、决策二（失败步的界面快照采集计入 job 墙钟）、决策四（`step_kind`）、决策五（`device_session` 只作链接）——`explain` 侧的渲染已实装，worker 侧的产出随 1.5 的 Midscene 设备模块实施。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
+> **Status:** Accepted（2026-09-11）—— 七项决策已实装并有护栏（决策七 2026-11-02 加入）；两引擎在本机与云端两个后端的真跑证据见「验证」节；影响面所列反向链（0024 / 0027 / 0029 / 0032 / 0037 / 0041 / CONTEXT）已逐条落。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 引入的加法已在本篇原位登记：决策四的 scope 级 error 后合成的 SKIPPED（0051 决策 4，桌面会话预热失败同样产生）已实装；设备目标的例外（0051 决策 8）——决策一（失败的确定性与导航 step 也产 evidence、schema 1 加设备键）、决策二（失败步的界面快照采集计入 job 墙钟）、决策四（`step_kind`）、决策五（`device_session` 只作链接）——`explain` 侧的渲染已实装，worker 侧的产出随 1.5 的 Midscene 设备模块实施。后续修订：决策四的 `--step` 展开口径在 v1.4.2 发版验证后改为「显式 `--step` 即展开」（首版口径要求再加 `--all`、被判反直觉；见决策四「输入」段）。
 
 ## 背景
 
@@ -173,17 +173,17 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ### 七、被中止 job 的 step 记录与证据从事件流补取；本机同步 `run` 也把事件流落盘（2026-11-02）
 
-**问题**。worker 被中止（使用方中断、fail-fast、超时、外部停止）时，没有收到 `scenario_done` 的 scenario 不进判定真值（`jobs/*.json`，[0031](./0031-job-lifecycle-states-and-severity.md)「前置态不进判定」），其已执行 step 的 `step_done`（含 evidence 指针）只留在事件流里；explain 只能打 `aborted_hint`，排障得去产物目录或 S3 翻。
+**问题**。worker 被中止（使用方中断、fail-fast、超时、外部停止）时，没有收到 `scenario_done` 的 scenario 不进判定真值（`jobs/*.json`，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一「在途明细的显式规则」），其已执行 step 的 `step_done`（含 evidence 指针）只留在事件流里；explain 只能打 `aborted_hint`，排障得去产物目录或 S3 翻。
 
 **决策**：
 
-1. **事件流是每个 run 的落点之一，三条执行路径的落点形态相同**。`submit --backend local` 已落 `<report_dir>/<run_id>/events.db`（SQLite，[0034](./0034-detached-batch-reconciler.md)），云端 worker 已写 events 表；本机同步 `run` 补上同一份 `events.db`：组合根给 SubprocessEngine 包一层记录器，`run_scope` 时经既有的 `raw_sink` 扩展形参把每行原始事件 JSON 按到达序写进库（seq 为该 scope 内到达序、emit_ts 为到达时刻，与 `submit` 的 launcher 同一写法），Engine port 不变、schedule 不知情；`--no-report` 的零落盘运行不写。被拒方案：RunPersistence 在 on_event 里重新序列化 Event 写库——wire 只有解析方向，要新增一份序列化且与 worker 的原始行不逐字相同；在 schedule 里加事件 sink——执行编排不碰存储（[0030](./0030-realtime-persistence-seam.md)）。
-2. **core 新增只读投影 `project.recover_from_events(job, records, recorded)`**：复用 `reduce_event` 归约该 scope 的全部事件，取出事件流里有 step 记录、却不在 `recorded`（判定真值里已有的 scenario）里的 scenario，每条给 `scenario_id`、`status`（事件流里的 `scenario_done` 给的判定，没有即 None、表示未完成）与 `steps`（`StepResult`，与判定真值里的 step 字段相同：status / votes / error_type / message / duration_ms / report_refs）。判据只能是「判定真值有没有」而不是「事件流里有没有 scenario_done」：同步 `run` 可能在归约前退出（进度输出遇到管道断开、收尾排空超时），事件流完整而判定真值缺整条 scenario（同僚复核用真实子进程复现）。它不改判定：不写 ResultStore、不进 RunResult、不触发终结函数，只是事件流的另一个视图。读事件流照用既有适配器（`SqliteEventLog` / `DdbEventLog` 的 `records()`），由组合根装配：本机按 `<report_dir>/<run_id>/events.db`，云端按 events 表加 run 的全部 scope_id。
-3. **explain 的用法**。对 `status` 为 `aborted` 或 `error`、且骨架里仍有无记录 step 的 job 读事件流补取（比 `aborted_hint` 原先的「部分记录」条件宽：零记录的 job 也可能在事件流里有已执行 step，如 scope 级 error 发生在第一条 scenario 中途）。补到的 step 以 `record_missing: false`、新键 `record_source: "events"`（判定真值里的记录为 `"verdict"`）进文档，证据按同一 `report_refs` 读；所属 scenario 的 `status` 取事件流里 `scenario_done` 的判定，没有 `scenario_done` 即 null 并带新键 `unfinished: true`。仍无记录的 step（被中止时还没上报完成记录、只有 `step_started`）保持 `record_missing: true`。`aborted_hint` 改为只在**补取失败**时出现并写明原因（没有 events.db 的旧 run、云端缺 events 表读权限或表不可达），补取成功时为 null。文本形态：补取的 step 行尾标「（记录取自事件流）」；所属 scenario 没有 `scenario_done` 时行标「未完成」，有则显示事件流里的判定。
+1. **事件流是每个 run 的落点之一，三条执行路径的落点形态相同**。`submit --backend local` 已落 `<report_dir>/<run_id>/events.db`（SQLite，[0034](./0034-detached-batch-reconciler.md)），云端 worker 已写 events 表；本机同步 `run` 补上同一份 `events.db`：组合根给 SubprocessEngine 包一层记录器，`run_scope` 时经既有的 `raw_sink` 扩展形参把每行原始事件 JSON 按到达序写进库（seq 为该 scope 内到达序、emit_ts 为到达时刻，与 `submit` 的 launcher 同一写法），并在事件流结束或 worker 被停止后写一条退出记录——同步 run 的 `events.db` 因此与 detached 的形态相同（事件加退出记录，[0034](./0034-detached-batch-reconciler.md) 机制二「两件都要」），`status --wait` 的接力推进读到它不会把已结束的 job 当成仍在运行（同僚复核发现：只写事件不写退出记录时，对已结束的前台 run 执行 `status --wait` 会在收尾聚合处抛出）；`status --wait` 对已到终态的 run 也不再接力——终态即提交点，没有东西要推进。Engine port 不变、schedule 不知情；`--no-report` 的零落盘运行不写。被拒方案：RunPersistence 在 on_event 里重新序列化 Event 写库——wire 只有解析方向，要新增一份序列化且与 worker 的原始行不逐字相同；在 schedule 里加事件 sink——执行编排不碰存储（[0030](./0030-realtime-persistence-seam.md)）。
+2. **core 新增只读投影 `project.recover_from_events(job, records, recorded)`**：复用 `reduce_event` 归约该 scope 的全部事件，取出事件流里有 step 记录、却不在 `recorded`（判定真值里已有的 scenario）里的 scenario，每条给 `scenario_id`、`status`（事件流里的 `scenario_done` 给的判定，没有即 None、表示未完成）与 `steps`（`StepResult`，与判定真值里的 step 字段相同：status / votes / error_type / message / duration_ms / report_refs）。判据只能是「判定真值有没有」而不是「事件流里有没有 scenario_done」：同步 `run` 可能在归约前退出（进度输出遇到管道断开、收尾排空超时），事件流完整而判定真值缺整条 scenario（同僚复核用真实子进程复现）。它不改判定：不写 ResultStore、不进 RunResult、不触发终结函数，只是事件流的另一个视图。读事件流照用既有适配器（`SqliteEventLog` / `DdbEventLog` 的 `records()`），由组合根装配：本机按 `<report_dir>/<run_id>/events.db`，云端按 events 表加需要补取的 scope_id。
+3. **explain 的用法**。对 `status` 为 `aborted` 或 `error`、且骨架里仍有无记录 step 的 job 读事件流补取（比 `aborted_hint` 原先的「部分记录」条件宽：零记录的 job 也可能在事件流里有已执行 step，如 scope 级 error 发生在第一条 scenario 中途）。补到的 step 以 `record_missing: false`、新键 `record_source: "events"`（判定真值里的记录为 `"verdict"`）进文档，证据按同一 `report_refs` 读；所属 scenario 的 `status` 取事件流里 `scenario_done` 的判定，没有 `scenario_done` 即 null 并带新键 `unfinished: true`。仍无记录的 step（被中止时还没上报完成记录、只有 `step_started`）保持 `record_missing: true`。`aborted_hint` 改为只在**补取失败**时出现并写明原因，按 scope 各自给：这个 run 没有事件流记录（不落事件流的旧版本执行、库文件被删）、事件流里没有这个 job 的记录（云端 events 表的记录 7 天过期——[0033](./0033-iac-aws-backend-and-composition-wiring.md)「events 表开 TTL」条，或 worker 在发出任何事件前就被中止）、云端 events 表读不到或缺权限、记录解析失败（worker 违约行）；补取成功时为 null。补取是附加视图，任何读取失败都只落到这一句，不让 explain 以退出码 2 结束或抛出。文本形态：补取的 step 行尾标「（记录取自事件流）」；所属 scenario 没有 `scenario_done` 时行标「未完成」，有则显示事件流里的判定。
 4. **云端权限面**：explain 对需要补取的 job 另需 events 表的 `dynamodb:Query`（按主键查该 run 各 scope）；不需要补取的 run 不发这个请求；缺权限只影响这一项（归到 `aborted_hint` 的原因），不让 explain 以退出码 2 结束。
 5. **与「detached run 中途可见」的关系**：同一接缝（EventLog 读加 project 的只读投影）；中途可见要的是对未终态 run 从事件流归约出进行中的 JobResult，`project` / `project_full` 已有、只差 CLI 装配与「非终态快照」的表达，本决策不做、仍另议。
 
-**被拒方案**：①worker 被中止时补发 `scenario_done`——判定只由 `scenario_done` 决定（[0026](./0026-schedule-module.md) 归约语义），补发等于让中止产生判定，且 SIGKILL 或容器被收时 worker 根本来不及发；②core 终结时把未完成 scenario 的 step 记录写进 `jobs/*.json`——判定真值里混入非判定的过程记录，违背 [0031](./0031-job-lifecycle-states-and-severity.md)「前置态不进判定」，`has_step_records` 等语义随之失真；③explain 直接扫产物目录或 S3 前缀找 evidence 文件——绕过指针、与两引擎的产物布局耦合，云端还要 `ListBucket`；④只给 `submit` 与云端做补取、同步 `run` 不落事件流——使用方中断（Ctrl-C）恰恰最常发生在同步 `run` 上，少了它这条决策就落空。
+**被拒方案**：①worker 被中止时补发 `scenario_done`——判定只由 `scenario_done` 决定（[0026](./0026-schedule-module.md) 归约语义），补发等于让中止产生判定，且 SIGKILL 或容器被收时 worker 根本来不及发；②core 终结时把未完成 scenario 的 step 记录写进 `jobs/*.json`——判定真值里混入非判定的过程记录，违背 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一「在途明细的显式规则」，`has_step_records` 等语义随之失真；③explain 直接扫产物目录或 S3 前缀找 evidence 文件——绕过指针、与两引擎的产物布局耦合，云端还要 `ListBucket`；④只给 `submit` 与云端做补取、同步 `run` 不落事件流——使用方中断（Ctrl-C）恰恰最常发生在同步 `run` 上，少了它这条决策就落空。
 
 ## 被拒方案
 
@@ -206,7 +206,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 已知缺口与重议闸门
 
-前两处是仍开放、有意接受的取舍，不是遗漏；第三处已关闭、留作记录（含被拒做法）；末条是设备目标的指针。这里把「什么情况下该回来改」写成可对表的信号。
+第一处是仍开放、有意接受的取舍，不是遗漏；第二、三处已关闭、留作记录（含被拒做法）；末条是设备目标的指针。这里把「什么情况下该回来改」写成可对表的信号。
 
 - **截图字节的残余风险**（只在云端后端；本机后端不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
 - **已关闭（决策七，2026-11-02）：被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件流里，explain 此前只打 `aborted_hint`；原触发信号是 skill 用起来后 agent 在被中止 job 上排障要靠人去 S3 翻，1.5 真机验收期间在被中断的设备 run 上先撞到了。现在 explain 从事件流补取（含本机同步 `run`，为此它也落 `events.db`），`aborted_hint` 只在补取失败时出现。
@@ -223,7 +223,8 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 - `engines/novaact/gherkai_worker_novaact/run_scope.py`（evidence 钩子、追加 ref、删「SDK 在 finally 已写盘」的错误注释）+ 新模块 `evidence.py`；`lib/artifact_upload.py`（Content-Type 映射、`ref_for`、后台队列 `enqueue` / 有界 `drain`、队列与 flush 共用的「重试一次」）；`run_scope.py` 三条 emit 点之后入队、scope 末与三条退出路径排空；fixture 测试。
 - `engines/midscene/src/worker/run-scope.mts`（`persistExecutionDump: true`、`runStep` 拿 uploader 与 page、step 级 reportRefs 首次出现、emit 之后入队、scope 末 / `shutdownSequence` / catch 路径排空）+ 新模块 `evidence.mts`（自写结构类型）与 `error-text.mts`（失败原因压成一行、按码点封顶，与 Nova `_error_text` 同规则）；`src/lib/artifact-upload.mts`（Content-Type 映射、`refFor`、`enqueue` / `drain`、重试一次）；fixture 测试。
 - Midscene 的 grace 下限 25→31 s（收尾多一段 6 s 排空），Nova margin 不动。（当时该下限是 `compose.py` 里的常量、靠本条提醒同步；后按 [0024](./0024-worker-core-protocol.md)「引擎自报下限」改为 worker 经 `--capabilities` 由收尾预算常量算出、组合根不再持常量。）
-- `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`。
+- `runtime/gherkai_runtime/compose.py`：`read_resource(uri)`；决策七加 `events_db_path` / `build_local_event_log` / `build_cloud_event_log`，`build_engines(event_log=…)` 把子进程引擎包成记录器。
+- 决策七另有：`core/gherkai_core/project.py` 的 `RecoveredScenario` / `recover_from_events`；新模块 `core/gherkai_core/adapters/event_log/recording.py`（`make_raw_sink`、`EventRecordingEngine`，`runtime/gherkai_runtime/detached.py` 的 launcher 共用前者）；`core/gherkai_core/adapters/subprocess_engine.py` 句柄的 `returncode()`；`cli/gherkai_cli/__main__.py` 的 explain 补取与 `status --wait` 的终态守卫；`cli/gherkai_cli/render.py` 的 `record_source` / `unfinished` / `recovered_steps` 与文本标记；反向链 [0016](./0016-execution-architecture-core-lib-run-model.md)（EventLog 的服务对象）、[0034](./0034-detached-batch-reconciler.md)（raw_sink 定位）、[0035](./0035-local-app-testing-via-tunnel.md)（原样落库清单）、[0033](./0033-iac-aws-backend-and-composition-wiring.md)（explain 的 events 表 Query）、`CONTEXT.md`「核心注入接口」。
 - `cli/gherkai_cli/__main__.py`：`explain` 子命令（含 skew 闸门、结果树匹配器）；`render.py`：文本渲染 + step 行补原因；`cli/tests/test_cli_json_contract.py`：`_leaf_keys` 支持在指定键处停止下钻 + explain 样例（内嵌 evidence 夹具）。
 
 **文档（ADR 反向链逐处列出）**
@@ -242,7 +243,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 验证（已完成，结论内联）
 
-**决策七的真跑（2026-11-02，跳板机本机后端，Nova 桌面多步 scope）**：前台 `run` 执行到第二步后向 CLI 发 SIGINT，CLI 2 秒内退出、浏览器会话释放（AgentCore 无 READY 会话），run 记 aborted；`<report_dir>/<run_id>/events.db` 落了 10 行（session_opened、scope_started、三步各自的 step_started 与 step_done、session_closed）。`explain` 文本把这条 scenario 标「未完成」，前三步带「记录取自事件流」——两步 passed 带投票与时长、第三步 error（中断关掉了浏览器连接，act 在截图时失败）并带证据，后三步「无记录」；`--json` 里 `record_source` 为 `events`、`unfinished` 为 true、`aborted_hint` 为 null、`has_step_records` 仍为 false（判定明细确实零记录）。云端的事件表读取路径只有假 events 表的单测（装配经 `build_cloud_event_log`，与 reconciler 读表的同一适配器），没有另起云端中断真跑。
+**决策七的真跑（2026-11-02，跳板机本机后端，Nova 桌面多步 scope）**：前台 `run` 执行到第二步后向 CLI 发 SIGINT，CLI 2 秒内退出、浏览器会话释放（AgentCore 无 READY 会话），run 记 aborted；`<report_dir>/<run_id>/events.db` 落了 10 行（session_opened、scope_started、scenario_started、三步各自的 step_started 与 step_done、session_closed）。`explain` 文本把这条 scenario 标「未完成」，前三步带「记录取自事件流」——两步 passed 带投票与时长、第三步 error（中断关掉了浏览器连接，act 在截图时失败）并带证据，后三步「无记录」；`--json` 里 `record_source` 为 `events`、`unfinished` 为 true、`aborted_hint` 为 null、`has_step_records` 仍为 false（判定明细确实零记录）。云端的事件表读取路径只有假 events 表的单测（装配经 `build_cloud_event_log`，与 reconciler 读表的同一适配器），没有另起云端中断真跑。
 
 
 **本机后端（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
