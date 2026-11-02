@@ -79,7 +79,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `gherkai doctor` | 只读自检：CLI 版本、引擎 worker、实际使用的模型、`steps/` 加载结果；装了部署工具链（Node、cdk、容器引擎）时连带自检它；给了 `--backend cloud` 或 `--prefix` 时再查凭证、后端资源与后端版本 | `--backend cloud`、`--prefix`、`--report-dir`、`--steps-dir`、`--json` |
 | `gherkai --version` | 打印 CLI 版本 | — |
 
-`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
@@ -142,7 +142,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；有 job 记为 aborted 或 skipped 时 run 级判定记 `aborted`，退出码为 130（Ctrl-C）或 143（SIGTERM）。本机后端给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
 
-分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
+分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定；接力中的 run 停在当前状态，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
 ## 结果在哪
 

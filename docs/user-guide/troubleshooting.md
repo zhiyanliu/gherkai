@@ -67,7 +67,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件 `[common]` 的 `region`、`--profile` / `AWS_PROFILE`（或配置文件的 `profile`）指的 profile 配置，五处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
 | `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
-| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 会接着推进这个 run，那时需要凭证 |
+| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 对 `submit` 提交的 run 会接着推进，那时需要凭证 |
 
 ## 模型
 

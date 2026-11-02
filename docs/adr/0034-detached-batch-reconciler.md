@@ -36,13 +36,13 @@ gherkai submit <features> --backend cloud
      （只写 runs 表，feature 带多行参数或设备安装包时另写 S3；不起 task——冷启动交kicker Lambda，见下 cloud 端到端流程；local 则 fork per-run 进程推进）
 gherkai status <run_id> [--wait]
    → 不带 --wait：读 RunState 渲染一次（**纯只读、零副作用、不 kickoff/tick**——保「查看」无惊讶 + 只需读权限）。
-     读到 run 级仍 `pending` **且所有 job 仍 pending** 时**只打一句诊断提示**「若已提交较久仍 pending，推进可能未启动，
-     可 `status --wait` 接力」（判据的后半条为何必要——claim 窗口内 run 级 pending 而 job 已 running，见下机制三「已知诊断窗口」）
+     读到 run 级仍 `pending` **且所有 job 仍 pending、且这个 run 带 detached 标记（可接力）** 时**只打一句诊断提示**「若已提交较久仍 pending，推进可能未启动，
+     可 `status --wait` 接力」（前台 `run` 刚建记录时同样全 pending，但没有可接力的推进器、不提示）（判据的后半条为何必要——claim 窗口内 run 级 pending 而 job 已 running，见下机制三「已知诊断窗口」）
      ——提示而不自动推进（决定权留用户；救活走 --wait，不给纯查看强加 invoke/起 task 权限）。**local/cloud 两路
      此渲染+提示+退出码逻辑经共享函数（`_render_status`）同一份实现、行为一致**，只 `--wait` 命令示例按后端异
      （local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`）。
-   → 带 --wait：轮询到终态；期间接力推进——**local=本机跑 tick 到底 / cloud=invoke kicker Lambda kickoff**
-     （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）
+   → 带 --wait：轮询到终态；期间**只对 detached run** 接力推进——**local=本机跑 tick 到底 / cloud=invoke kicker Lambda kickoff**
+     （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）；前台 `run` 正在执行的 run 只等待、不接力（两道闸见下「兜底/接力」条）。
 gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（ThreadPoolExecutor），行为不变
 ```
 
@@ -78,6 +78,7 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      直接 no-op；判据与 kicker filter 同一真源（同一个标记）。两半的具体故障形态：reconciler 抢 claim/RunTask/
      finalize、与同步 schedule 双开推进器（与上述 kicker 误触发同一形态）；exit-observer 写的 `task_exited` 无 `body` 属性、被同步路径 events Query 读到
      即 `KeyError`（见下机制一）。
+     **本机侧同一标记、同一分流**：`LocalRunStore(detached=True)`（`submit --backend local` 的组合根）在 run_state.json 顶层写 `detached: true`，之后每次写回都保留它（接力者与同步路径的实例不带 detached，重写文件时不能把标记丢掉）；`LocalRunStore.is_detached` 同为 adapter-only 只读访问器。本机的接力宿主是 `status --wait`，它据此只接力 detached run（见下「兜底/接力」条的两道闸）——此前本机没有这个标记，`status --wait` 对前台 `run` 正在执行的 run 也会接力，与进程内 schedule 双开推进器（抢 claim、再起一个 worker）。
      **不变量：标记挂在 `STATE` item 上，且 `create_run` 的写序 `META`→`STATE` 是契约**——kicker 由 STATE 的
      INSERT 触发，故被触发时 META（definition）必已落；若把标记挂 META，kicker 可能在 STATE 落库前就 tick，
      claim/投影全 CCF 空转（`DynamoDBRunStore.create_run` 守此写序）。
@@ -125,7 +126,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 1. **主力**：cloud=DDB Stream 事件（runs 表 INSERT→kicker 冷启动 / events 表→reconciler 级联推进）/ local=per-run 进程——正常一路推完。
 2. **兜底/接力**：`status --wait`——per-run 进程崩、或 Stream 偶发断链/丢投时，人来查即接力推（状态全持久、tick 幂等，断点续）。**local 与 cloud 的接力机制本质不对称（关键，勿混）**：
-   - **local 接力 = 本机进程亲自跑 tick**（spawn subprocess worker、读 SQLite、finalize）。**推进全靠这个本机进程**——掐掉即停（local 无云端接管者）。故 local 必须**有本机进程真跑到终态**：要么 submit fork 的 per-run 进程，要么 per-run 崩后 `status --wait` 顶上、且**必须一直 wait 到底**；运行态已终态则只读不接力——本机侧同守上面「已收尾的 run 不再推演」（前台 `run` 的 `events.db` 与 detached 的形态相同，[0042](./0042-step-evidence-and-explain.md) 决策七；拿它重放只会改写已落的判定）。
+   - **local 接力 = 本机进程亲自跑 tick**（spawn subprocess worker、读 SQLite、finalize）。**推进全靠这个本机进程**——掐掉即停（local 无云端接管者）。故 local 必须**有本机进程真跑到终态**：要么 submit fork 的 per-run 进程，要么 per-run 崩后 `status --wait` 顶上、且**必须一直 wait 到底**。**接力前两道闸、与云端推进器同构**：①只接力 detached run（run_state.json 带标记，见上「filter 必须区分写入者」条的本机侧）——前台 `run` 正在执行的 run 由进程内 schedule 推进，接力者碰它即双开推进器；对这样的 run，`--wait` 退化为只轮询运行态到终态再给判定退出码，并提示一句（执行它的进程若已不在，它不会再到终态）。没有标记的 run 只可能是前台 `run` 产出的：旧版本写的记录在读运行态之前就被结构版本闸拒绝（[0037](./0037-distribution-and-packaging.md) 决策 7），云端 STATE 的标记自 1.4.0 起就有。②运行态已终态则只读不接力——本机侧同守上面「已收尾的 run 不再推演」：挡的是已收尾的 detached run 被重放改写判定（前台 `run` 的 run 已在第①道闸分流；它的 `events.db` 与 detached 形态相同是 [0042](./0042-step-evidence-and-explain.md) 决策七的落点契约，不是这一道的理由）。云端 `status --wait` 对非 detached run 同样只轮询、不 invoke kicker（kicker 对它本就整体 no-op，踢只是空转）；全 job pending 时的「可接力推进」提示也只对 detached run 打。等待或接力期间按 Ctrl-C：以退出码 130 结束、不打回溯（同前台 `run` 的中断口径，[0024](./0024-worker-core-protocol.md)「使用方中断」条）；只等待的 run 不受影响，接力中的 run 停在当前状态（worker 几秒内自行退出），再执行同一条命令可续。
    - **cloud 接力 = 检测卡住才异步 fire-and-forget invoke kicker Lambda**（`InvocationType=Event`、不等返回）。**kickoff（秒级）即完成救活**——此后即便退出 `status`，云端 Lambda 链（kicker起首批 → events Stream → reconciler）自接管跑完，**不依赖本机 status 进程存活**。**「检测卡住」= 状态连续 K 轮无变化才踢**（记住上轮 `(status, high_water_mark)`，连续 K 轮不变→判卡住→invoke 一次→重置）——**非每轮无脑踢**：run 正常推进（hwm 在涨/态在变）时一次都不踢，只在真卡住（冷启动丢投卡 pending、或中途丢投卡 running）时踢。避免正常路径下 N 次无效 invoke（kicker tick 发现无 pending 即 no-op、白白重放读 DDB）——对齐「零空转、只在真需要时动」的事件驱动精神（[CLAUDE.md「工作方式」：交付物运行成本是设计约束](../../CLAUDE.md)，同否决定时器轮询的理由）。检测是纯客户端内存比较、零额外 AWS 调用/权限。保 status 机器零 ECS 权限（起 task 走 Lambda 角色）；Lambda 名从 `--prefix` 推理、用户无感。
    - **一句话**：cloud「kickoff即可离场」/ local「本机必须跑到底」。根因在**主推进器位置**（cloud 云端 Lambda / local 本机进程，见 1.）——三触发源「齐备」是表层对称，「本机是否必须跑到底」才是里层不对称。
 3. 三者同时触发也无害——靠下面 CAS + HWM 条件写。**`status` 对 cloud 是可选的查看+崩溃kickoff（非推进链必需环，云端链才是）；对 local，per-run 崩后 status --wait 是唯一本机推进器、此时反而是必需环**。
@@ -281,6 +282,8 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 - **H3/机制三/四 并发写序（真 DDB）**：HWM 条件写——B 写终态(hwm=20)后 A 用旧快照(hwm=10)迟到写被 `ConditionalCheckFailedException` 挡、终态未被刷回 running；同 hwm 重复写幂等。**DDB Streams 并发度=2**（4 job 触发 2 个并发 Lambda 实例）→ 坐实「并发 reconciler」前提真实、HWM 条件写用得上；**同 PK 严格保序**（每 job seq `[1..5]` 按序到达）。
 
 **已补真验**：`status --wait` 接力 + Stream 丢投 → **已真验**（复现法与结果见「重议闸门」丢投条）；`setsid` local 脱离 → **已真验**（local submit → per-run 进程脱离 CLI 后台推进 → CLI 退出后 status 读到 running/passed）；四机制 → core 单测（`test_reconcile.py`/`test_cloud_reconcile.py`/`test_project.py`）+ local/cloud 端到端真跑覆盖。仍留未做项见下「重议闸门」（如 Stream 长期丢失率的量化、动态定时兜底规则）。
+
+**本机 `status --wait` 两道闸的真跑（2026-11-02，跳板机本机后端，Nova 桌面 scope）**：前台 `run` 执行到第一步完成后，另一个进程对同一 run 执行 `status --wait`——打出「只等待、不接力」的提示，71 秒后随前台运行到终态按判定退出（退出码 0），期间 worker 进程始终只有前台那一个（`events.db` 只有一条 `session_opened` 与一条 `scope_started`、一条退出码 0 的退出记录）。对照：`submit --backend local` 的 run（run_state.json 带 `detached: true`）在 per-run 进程被强杀后执行 `status --wait`，接力者接管——该 job 已被 claim、worker 随 per-run 进程死亡没发出任何事件，接力者按 claimed_at 超预算（90 秒加 10 秒余量）写超时退出记录、run 判 error，99 秒后以退出码 1 返回；接力者重写 run_state.json 后标记仍在。两段结束后无残留进程与浏览器会话。
 
 ## 被拒方案（护栏，防未来重踩）
 

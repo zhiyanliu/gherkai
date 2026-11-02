@@ -60,7 +60,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 | Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0`       | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建                                                                                       |
 | 两个引擎都要  | AgentCore Browser（`bedrock-agentcore`）            | 每个 scope 一个会话                                                                                                                                                                        |
 
-- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 会在本机接着把这个 run 推完，那时需要凭证）。
+- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 对 `submit` 提交的 run 会在本机接着把它推完，那时需要凭证）。
 - 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
 - 用 `--backend cloud` 之前，需要有人先用 `gherkai deploy` 把云端后端建好，见[云端后端](./cloud-backend.md)。
 

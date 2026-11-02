@@ -11,9 +11,7 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 不论哪种驱动，worker 与 `core` 之间的回传只有两类：**事件流**（`scope_started`/`step_done`/… 的逐条事件）与**进程退出信号**（退出码由父进程或平台观察得到，不由 worker 上报；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定要求两者同时成立：事件内容完整且进程干净终止，缺一即不判通过（防假绿）。两种驱动的本质差别在于**有没有在线的接收方**：前台有在线接收方，`schedule` 全程在线、收到事件即处理，退出信号由 Engine adapter 当场观察；后台没有常驻接收方，事件流被持久化、退出信号也被转写成 `task_exited` 记入同一份日志，于是任何宿主都能仅凭重放这份日志推进（各组合的物理通道见 §5）。
 
-两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。cloud 后端的分界线是 `detached` 标记：cloud `submit` 会在 runs 表的 STATE item 上写它，云端三 Lambda 据它只认领**带 `detached` 标记的后台 run**，不介入前台 run（保证手段见 §7）。
-
-local 后端没有也不需要这个标记：不存在常驻在共享基础设施上的推进器（每个 run 的推进器都是由它自身 fork 出的进程），无需拦截任何一方。
+两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。分界线是 `detached` 标记：`submit` 建 run 时写它（cloud 写在 runs 表的 STATE item 上，local 写在 run_state.json 顶层、每次写回保留），推进器据它只认领**带标记的后台 run**，不介入前台 run。cloud 的推进器是云端三 Lambda（保证手段见 §7）；local 没有常驻推进器，唯一会碰到别人 run 的是 `status --wait` 的接力者，它同样只接力带标记的 run，对前台 run 只等待（§7 末段）。
 
 `reconcile.tick` 有**四个宿主**在不同场景下调用它：local 的 per-run 进程（即 `submit` 时 `setsid` fork 出的推进进程）、**local** `status --wait` 的接力者（cloud 的 `--wait` 只在检测到停滞时 invoke kicker，不在本机执行 `tick`，使 status 所在机器无需 ECS 权限，见 §4b）、cloud 的 kicker Lambda、cloud 的 reconciler Lambda。四处执行的是同一份代码，差别只在注入的 adapter（事件从 SQLite 还是 DDB 读、job 以子进程还是 ECS RunTask 启动）。
 
@@ -62,7 +60,7 @@ per-run 进程:run_reconcile_loop 循环调用 tick
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
   ├─ worker 退出 → 本进程 handle.wait() 取 exitcode 写 task_exited(自兼"平台侧退出观察者")
   └─ 全 job 终态 → tick 收敛并提交(写序见 §4c) → 拆除临时资源,退出
-status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛
+status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit 的 run)——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛
 ```
 
 要点：推进进程是 **per-run** 的（一个 run 一个，不是常驻守护进程）；`setsid` 使它在 CLI 与终端退出后继续存在；SQLite 里的事件表结构刻意镜像 DDB events 表（保持心智对称）。
@@ -95,7 +93,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进——per-run 进
 
 - **收尾的写序**：三段有序，前两段在同一次 `tick` 里：① 各 job 的判定明细（`jobs/*.json`）由本轮 records 聚合落库 → ② `try_finalize`（CAS）落 run 终态，这一步是**提交点**；③ 提交点之后由宿主写入派生的 RunReport（在 `tick` 返回 done 之后才写，写失败被隔离，不会回退已提交的 run 终态）。三段均幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。
 - **由写序推出的读者保证**：**读到终态即判定明细已完整落库**（它在提交点之前落定）；RunReport 则是提交点之后的派生物，「已读到终态、报告文件尚缺」是合法中间态，读者不应把它当判定真源。落点：local 后端下是 `--report-dir/<run_id>/`，cloud 后端下是 S3 桶里的 `<report_dir>/<run_id>/`；cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对，不一致则以退出码 2 结束），否则 run 执行完成后在提交者给出的前缀下找不到结果。
-- **已终态 run 在两个后端的重入**：cloud 后端的云端推进器对已提交终态的 run 整体不动作（§7 里 reconciler 的第二道判）——RunReport 若在提交点之后写入失败，云端不会补写（判定明细不受影响，见上条）；local 后端没有这道拦截，`status --wait` 接力会把已终态的 run 重放一次并重新写出报告（本机事件不过期）。
+- **已终态 run 在两个后端的重入**：cloud 后端的云端推进器对已提交终态的 run 整体不动作（§7 里 reconciler 的第二道判）——RunReport 若在提交点之后写入失败，云端不会补写（判定明细不受影响，见上条）；local 后端的 `status --wait` 同守两道判断（只接力 submit 的 run、已终态不接力），已终态的 run 不会被重放改写；对前台 `run` 正在执行的 run，它只等待到终态、不接力。
 - **落地之后由谁读取**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键，给出报告 / 判定明细 / 元信息的约定落点，无论是否终态都会给出，终态后才有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这一步为何如此判定」。两者都受落地时机约束：detached run 的判定明细在提交点一次性落地，未到终态时 `explain` 无可渲染内容，只提示先用 `status --wait`（同步 `run` 逐 job 落库，中途即可读到已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 最后一条不对称（**能否中途终止**）：cloud 的 `--wait` 检测到停滞时只是调起 kicker（fire-and-forget），调起后随时可以离开，云端链会自行执行至结束；local 的 `--wait` 接力者与 per-run 进程执行同一段幂等推进、可以并存，per-run 进程仍在时退出接力者无影响；per-run 进程已终止时接力者**才是唯一推进器**，终止它 run 即就地停止（已 claim job 的计时也随进程一起丢失，由下一次接力恢复）。根因是主推进器的位置不同（云端 Lambda 与本机进程）。
@@ -160,7 +158,9 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 - **reconciler**：`tick` 装配前查 `is_detached`（日志 `skip: run … 不是 submit 提交到后台执行的 run`）；紧接的第二道判断读 run 终态（日志 `skip: run … 已结束，不再改写它的结果`），针对的不是本节这件事。两道判断都在 reconciler 与 kicker **共用的装配**里，kicker 无论从哪个入口进入（新 run 落库、`status --wait` 检测到停滞后的调起、超时定时器到点）都要经过，因此图上这两个判点不标注 Lambda 名；冷启动那一路画成直达，只为看清「谁在哪一层被挡」。
 - **exit-observer**：判据同为 `is_detached`。它不推进，防范的是另一件事：无 `body` 的 exit item 混入前台 run 的事件流（前台的退出观察由 Engine adapter 自行完成，§5）。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那条只滤得掉 TTL 删除，`detached` 那半只能在 handler 内判）。
+本机侧是同一道判断、换了落点：`submit --backend local` 把标记写在 run_state.json 顶层（之后每次写回保留），`status --wait` 的接力者据 `LocalRunStore.is_detached` 分流——不是 submit 的 run 只轮询等待并提示「只等待它结束、不接力推进」，不会与前台 run 的进程双开推进器。cloud 的 `--wait` 对这样的 run 同样不 invoke kicker。等待或接力被 Ctrl-C 打断时以退出码 130 结束、打一句说明，不打回溯。
+
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（「filter 必须区分写入者」条与「兜底/接力」条）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（Stream/filter 资源；events 表那条只滤得掉 TTL 删除，`detached` 那半只能在 handler 内判）。
 
 ## 8. 延伸阅读
 
