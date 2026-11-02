@@ -131,17 +131,17 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 
 | 键 | 类型 | 含义 |
 |---|---|---|
-| `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、且判定明细里只有**部分** step 的记录（一条记录都没有时不给出此提示）：已执行 step 的证据已产出，但指针未写入判定记录。不应据此判断终态，终态见同层 `status` |
+| `aborted_hint` | string \| null | 非 null 表示该 job 终态是 `aborted` 或 `error`、骨架里有无记录的 step，而本工具**没能**从事件流补取它们的记录（后半句写明原因：这个 run 没有事件流记录、云端 events 表读不到或缺权限）。补取成功时为 null，补到的 step 见 `steps[].record_source`。不应据此判断终态，终态见同层 `status` |
 | `has_step_records` | bool | 该 job 在判定明细里是否有任何 step 记录（按整个 job 统计，不随 `--scenario` / `--step` 筛选变化；含本工具在 scope 级 error 后补记的 skipped 记录）；false 表示判定只有 job 级一层 |
 
-`scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，
-未执行完的 scenario 不进入判定明细）、`steps[]`：
+`scenarios[]` 每项包含 `scenario_id`、`name`、`status`（**null 表示这条 scenario 没有判定记录**：worker 被外部中止时，未执行完的 scenario 不进入判定明细）、`unfinished`（bool：true 表示这条 scenario 没有判定记录，但事件流里有它已执行 step 的记录、已补进下面的 `steps[]`）、`steps[]`：
 
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `index` / `keyword` / `text` | int / string / string | 来自 job 定义（骨架）：0 起的书写序号、Given/When/Then、step 原文 |
 | `status` / `votes` / `error_type` / `message` / `shortcircuited` / `duration_ms` / `report_refs[]` | | 同 `run --json` 的 `steps[]`；`record_missing` 为 true 时 `status` / `votes` / `error_type` / `message` / `duration_ms` 为 null、`report_refs` 为空数组、`shortcircuited` 恒 false（类型始终是 bool；判断有无记录一律以 `record_missing` 为准） |
-| `record_missing` | bool | true 表示骨架里有这一步，判定明细里没有对应记录（未执行或未上报） |
+| `record_missing` | bool | true 表示骨架里有这一步，判定明细与事件流里都没有对应记录（未执行或未上报，含被中止时正在执行的那一步） |
+| `record_source` | `verdict` / `events` \| null | 这一步记录的来源：`verdict` 来自判定明细；`events` 是 job 被中止后从事件流补取的（scenario 没有判定、但这一步已执行完并上报），字段与判定明细里的相同；`record_missing` 为 true 时为 null |
 | `evidence` | object \| null | 这一步的机读证据全文（固定键见下）；为 null 时原因见 `evidence_missing`；`record_missing` 为 true 时恒为 null |
 | `evidence_missing` | `no_ref` / `unreadable` / `unsupported_schema` \| null | null 表示证据已读取。`no_ref` 表示这一步没有证据指针，三种情形在此字段上无法区分：确定性步 / 导航步本不产出证据（设备目标上只有 passed 的确定性步 / 导航步如此）、AI 已执行但抽取失败、或这一步没有判定记录（`record_missing` 为 true）；区分「未执行」与「已执行但未产出证据」一律以 `record_missing` 为准；`unreadable` 表示指针存在但读不到，或内容不是 JSON；`unsupported_schema` 表示证据的格式版本当前 CLI 不识别 |
 

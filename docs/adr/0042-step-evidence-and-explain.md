@@ -242,6 +242,9 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 ## 验证（已完成，结论内联）
 
+**决策七的真跑（2026-11-02，跳板机本机后端，Nova 桌面多步 scope）**：前台 `run` 执行到第二步后向 CLI 发 SIGINT，CLI 2 秒内退出、浏览器会话释放（AgentCore 无 READY 会话），run 记 aborted；`<report_dir>/<run_id>/events.db` 落了 10 行（session_opened、scope_started、三步各自的 step_started 与 step_done、session_closed）。`explain` 文本把这条 scenario 标「未完成」，前三步带「记录取自事件流」——两步 passed 带投票与时长、第三步 error（中断关掉了浏览器连接，act 在截图时失败）并带证据，后三步「无记录」；`--json` 里 `record_source` 为 `events`、`unfinished` 为 true、`aborted_hint` 为 null、`has_step_records` 仍为 false（判定明细确实零记录）。云端的事件表读取路径只有假 events 表的单测（装配经 `build_cloud_event_log`，与 reconciler 读表的同一适配器），没有另起云端中断真跑。
+
+
 **本机后端（跳板机本机 run、两引擎、故意失败的 AI 断言 + 强制 act 超时）**：
 
 - Nova 故意失败断言：trajectory json 真落盘、evidence.json 的 `frames` 非空、末帧 thought 原文「…there is no red banner… I should return false」、`vote=false`、`result={"value":"false"}`、截图 200 KB 有效 JPEG、prompt 不含 SDK 追加的 schema 样板；passed 动作步 2 帧、只末帧有截图；`explain` 三形态（默认 / `--scenario 3 --step 1 --full` / `--json`）正确、stderr 干净、`--json` 严格可解析；manifest kinds 含 `evidence`、index.html 显示 step 原因。

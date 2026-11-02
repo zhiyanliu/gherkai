@@ -155,6 +155,8 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 - **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 - **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
+两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时另需 events 表（`<prefix>events`）的 `dynamodb:Query`；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。
+
 无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
 
 ## 拆除与清理

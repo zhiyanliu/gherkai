@@ -28,6 +28,8 @@
 - 前台 `run` 支持使用方中断：按一次 Ctrl-C（或向命令进程发 SIGTERM）后，命令请求全部 worker 停止并等它们释放会话，再照常输出汇总与产物位置；有 job 被中止或跳过时 run 级判定记 `aborted`，被中止的 job 的判定消息写明「收到中断信号」，退出码为 130（Ctrl-C）或 143（SIGTERM）。再按一次会立即结束 worker，会话可能来不及释放，命令会提示到控制台核对。说明见[运行测试与查看结果](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md)。
 - 设备目标上多一个供 AI 使用的「收起键盘」动作：用例写「输入 … 后收起键盘」时，Android 由系统收起键盘，iOS 只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done（Safari 给网页输入框配的那一条、应用自己加的工具栏），不按 Return 键、不点空白处；收不起时这一步以「键盘仍然显示」为由判出错并说明原因与改法，不再反复重试。写法与边界见[编写 .feature](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md)「设备上的软键盘」一条。
 
+- `gherkai explain` 对被中止或出错的 job 补取已执行 step 的记录与证据：worker 被中止时未执行完的 scenario 不进判定明细，此前这些 step 只显示「无记录」；现在从这个 run 的事件流补取（`--json` 里这些 step 的 `record_source` 为 `events`、所属 scenario 带 `unfinished`），文本形态在 step 行尾标「记录取自事件流」。为此本机前台 `run` 也把 worker 事件记录写到产物目录的 `events.db`（与 `submit` 同一文件），`--no-report` 不写；云端后端下 `explain` 对这类 job 另需 events 表的 `dynamodb:Query`，见[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)「团队成员需要的最小云端权限」。
+
 ### 变化
 
 - Nova Act 引擎的 worker 自己管理云端浏览器会话的启动与停止：停止有超时预算，停止失败或超时时 job 记为 error（scenario 明细保留，退出码 1）；此前停止由 SDK 内部执行，部分失败不会反映在退出状态里。Nova Act 的 job 记录的会话 id 随之改为 AgentCore 浏览器会话 id（与 Midscene 同一种 id；此前是 Nova Act 服务侧的会话 id）；`nova-trajectories/` 下的子目录仍按 Nova Act 侧的会话 id 命名，不再等于 job 记录里的会话 id，worker 日志里有两者的对应行。
@@ -54,6 +56,7 @@
 - 引擎 worker 在另一个进程组里运行，并自行监视命令进程是否还在：命令进程被强制结束（如 `kill -9`）后，worker 在几秒内察觉、释放会话并退出，不再留下继续计费的会话。
 - 两个桌面引擎建立 AgentCore 浏览器会话时，按 job 的墙钟预算加 120 秒设定会话的服务端存活上限（限定在 60 到 28800 秒之间，预算为「不超时」时保持服务默认的 1 小时）：worker 被强制结束而没来得及释放时，会话最晚到这个时限由服务端回收。
 - 设备 scope 在获取设备期间会话丢失与墙钟预算到期同时成立时，判定记会话丢失这个更具体的原因，而不是获取超时。
+- `explain --json` 的 `aborted_hint` 改为只在没能从事件流补取被中止 job 的记录时出现，并写明原因（没有事件流记录、events 表读不到或缺权限）；此前它在判定明细只有部分记录时就出现。
 
 ## [1.4.9] - 2026-10-12
 
