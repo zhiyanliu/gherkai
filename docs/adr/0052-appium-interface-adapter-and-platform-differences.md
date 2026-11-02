@@ -150,7 +150,7 @@ newSession 的能力集由「Appium 建连与上下文切换」块单点组装�
 ### 9. 未来方向（不在 1.5 范围）
 
 - 向上游提 PR，让 `@midscene/webdriver` 支持 Appium 端点；合并后自写的界面实现退役，适配器只留平台差异部分。
-- 截图缩放降低 token 是可选的成本手段，需另行评估对定位准确率的影响。
+- 截图缩放降低 token 是可选的成本手段，需另行评估对定位准确率的影响。评估用的实验开关已在：设备 Agent 的构造项按 env `GHERKAI_EXPERIMENT_SCREENSHOT_SHRINK`（k ≥ 1 的除数）带上 Midscene 自带的 `screenshotShrinkFactor`——`size()` 仍报原生像素、送模型的图缩到 round(原图 ÷ k)、动作坐标由 SDK 乘回，适配器与坐标比例都不动；缺省不设即不缩、构造项与生产逐键相同，只走设备路径（桌面不经它），生效的 k 记进会话就绪日志。已知代价：Android 的 Scroll 距离不随 1/k 换算、evidence 与报告里存的是缩后图。评估的方案与进度在 journey，结论落定后在此改写（接受则新写决策并同步决策 4「坐标单位」行与决策 8 的验收矩阵，拒绝则进被拒方案并删开关）。
 
 ## 实测依据
 
