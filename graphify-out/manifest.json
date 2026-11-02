@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1793605568.7795968,
-    "ast_hash": "01880a49ec77f3ad40ba3849afe95345",
+    "mtime": 1793606484.010588,
+    "ast_hash": "590b3dc0e83f503a68fd367e2db25b47",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1793605585.3842611,
-    "ast_hash": "aae928362cd34209dca5765cd58ee9bb",
+    "mtime": 1793606484.0109735,
+    "ast_hash": "eed289ad2f8dcc8f39e9102dd0eca209",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -450,8 +450,8 @@
     "semantic_hash": "d82024d7c70df2a1f5ae5d17ed9298ba"
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1793605568.7782357,
-    "ast_hash": "a228f331f7d4a9ab1470499a6eb70c98",
+    "mtime": 1793606485.576219,
+    "ast_hash": "838742b9f96925aa1414ef98d359851d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793605585.3854866,
-    "ast_hash": "74060df4df0c0e42a378224051d2961c",
+    "mtime": 1793606484.0110984,
+    "ast_hash": "30b114bd970c8d8765c7ecf7427d5d7f",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793600901.1290588,
-    "ast_hash": "97181751c88684dd5e73d6e9e548adb5",
+    "mtime": 1793606172.1433527,
+    "ast_hash": "7ddc394c61cbdc49bd9c49a6df1f96d8",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {

@@ -1911,7 +1911,8 @@ def _cmd_status(args) -> int:
 
 # `status --wait` 被 Ctrl-C 打断时的说明（产品语言），按分支选用
 _INTERRUPTED_WAIT_NOTICE = "已停止等待。这个 run 仍在原处继续执行，稍后可再查。"
-_INTERRUPTED_RELAY_NOTICE = "已停止接力：这个 run 停在当前状态（它的 worker 会在几秒内自行退出），再执行同一条命令可继续推进。"
+_INTERRUPTED_RELAY_NOTICE = ("已停止接力。这个 run 若没有别的进程在推进，会停在当前状态；本命令起的 worker 察觉后自行收尾并释放会话。"
+                             "再执行同一条命令可继续推进。")
 
 
 def _cmd_status_body(args, interrupted: dict) -> int:
@@ -1967,7 +1968,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
 
 
 # `status --wait` 对不可接力的 run 的提示（产品语言）：不是 submit 提交到后台执行的 run，推进它的是别的进程。
-_WAIT_WITHOUT_RELAY_NOTICE = ("这个 run 不是 submit 提交到后台执行的（由前台 run 执行）：本命令只等待它结束、不接力推进。"
+_WAIT_WITHOUT_RELAY_NOTICE = ("这个 run 没有后台执行的标记（通常是由前台 run 执行的）：本命令只等待它结束、不接力推进。"
                               "执行它的进程若已不在，它不会再到终态，可按 Ctrl-C 停止等待。")
 
 

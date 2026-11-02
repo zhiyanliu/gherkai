@@ -2611,14 +2611,15 @@ def test_status_wait_on_a_foreground_run_only_waits_and_never_relays(tmp_path, m
     monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)
     polls = []
 
-    def sleep(s):  # 第一次轮询间隔里「前台进程」把 run 推到终态
+    def sleep(s):  # 前两个轮询间隔里 run 仍在进行，第三个间隔里「前台进程」把它推到终态——等待必须持续轮询，不是看一眼就返回
         polls.append(s)
-        path.write_text(final, encoding="utf-8")
+        if len(polls) == 3:
+            path.write_text(final, encoding="utf-8")
 
     monkeypatch.setattr(_time, "sleep", sleep)
     rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
     err = capsys.readouterr().err
-    assert rc == 1 and polls == [1.0]
+    assert rc == 1 and polls == [1.0, 1.0, 1.0]
     assert "只等待它结束、不接力推进" in err and "Ctrl-C" in err
 
 
