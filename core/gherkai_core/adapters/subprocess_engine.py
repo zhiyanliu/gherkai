@@ -196,9 +196,9 @@ def _read_events(
     schedule 层的 `_heartbeat_wrap`（后台线程 + queue 超时）兜底唤醒并查超时（ADR 0026/0028）。
     心跳是「schedule 对任何慢/静默流的通用兜底」，不渗进端口契约，也不要每个 adapter 各写一遍。
 
-    raw_sink（可选，ADR 0034 无状态批量运行）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
-    **之前**）旁路调它一次——供 SubprocessLauncher 把原始行落 SqliteEventLog（存原样、读回复用 event_from_line，
-    零新序列化、不破 wire 单向契约）。同步 run 路径不传（None）→ 零行为变化。sink 异常不打断事件流（吞掉，
+    raw_sink（可选，ADR 0034 无状态批量运行；ADR 0042 决策七起同步 run 也用）：非 None 时，每读到一行**原始 JSON 文本**（event_from_line 解析
+    **之前**）旁路调它一次——无状态运行的 SubprocessLauncher 与同步 run 的 EventRecordingEngine 都经它把原始行落 SqliteEventLog
+    （存原样、读回复用 event_from_line，零新序列化、不破 wire 单向契约）。不传（None，如 --no-report）→ 零行为变化。sink 异常不打断事件流（吞掉，
     落库失败不该拖垮执行；reconciler 靠事件持久性推进、丢一条下轮 worker 不会重发，但那是 cloud 事件日志（DDB）
     路径的边界，ADR 0034）。
     """

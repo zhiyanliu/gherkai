@@ -550,8 +550,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/subprocess_engine.py": {
-    "mtime": 1793507794.0326476,
-    "ast_hash": "f10221491f4e4c2794ba0315a59d92df",
+    "mtime": 1793596980.6523976,
+    "ast_hash": "437e04b1d0299dc04a14516c56aea29d",
     "semantic_hash": ""
   },
   "core/gherkai_core/errors.py": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1793596701.955675,
-    "ast_hash": "db51d4744834884248bad4014b54fbef",
+    "mtime": 1793596937.6398125,
+    "ast_hash": "499109d56d32e024b924e37262a9b36d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1793596701.7505977,
-    "ast_hash": "d2733780eb8222f4da025f271028acf4",
+    "mtime": 1793596937.4843879,
+    "ast_hash": "34a32e22585793cf7609a2fd821fc041",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1400,8 +1400,8 @@
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1793596701.7507534,
-    "ast_hash": "73fb14d5978e24cb3010369b3bde71da",
+    "mtime": 1793596937.4846232,
+    "ast_hash": "6bc338f383e6043a911108a35413e1fb",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {
