@@ -2471,6 +2471,40 @@ def test_explain_recovers_unfinished_steps_from_the_event_stream(tmp_path, capsy
     assert "scenario features/login.feature:20  锁定账户提示  无记录（未执行或未上报）" in out
 
 
+def test_explain_recovers_a_scenario_whose_scenario_done_never_reached_the_verdict(tmp_path, capsys):
+    """事件流里有 scenario_done、判定明细却没有这条 scenario（同步 run 在归约前退出）：也补取，scenario 的 status 取事件流里的判定、
+    unfinished 为 false，其 step 的 record_source 仍是 events。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    log = SqliteEventLog(compose.events_db_path(root, run_id))
+    lines = [
+        {"type": "scope_started", "scopeId": "features/login.feature:6"},
+        {"type": "scenario_started", "scenarioId": "features/login.feature:20"},
+        {"type": "step_done", "scenarioId": "features/login.feature:20", "stepIndex": 0, "status": "passed"},
+        {"type": "step_done", "scenarioId": "features/login.feature:20", "stepIndex": 1, "status": "passed"},
+        {"type": "scenario_done", "scenarioId": "features/login.feature:20", "status": "passed"},
+    ]
+    for i, d in enumerate(lines, start=1):
+        log.append_event("features/login.feature:6", i, json.dumps(d), 10.0 + i)
+    sc = json.loads(_explain(capsys, root, run_id, "--json")[1])["scopes"][0]
+    s20 = sc["scenarios"][1]
+    assert s20["status"] == "passed" and s20["unfinished"] is False
+    assert [st["record_source"] for st in s20["steps"]] == ["events", "events"] and sc["aborted_hint"] is None
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert "scenario features/login.feature:20  锁定账户提示  passed" in out and out.count("（记录取自事件流）") == 2
+
+
+def test_explain_unreadable_event_db_degrades_to_the_hint(tmp_path, capsys):
+    """events.db 打不开或损坏：explain 仍以退出码 0 输出，只在该 job 的 aborted_hint 写明读取失败（ADR 0042 决策七第 3 条）。"""
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    compose.events_db_path(root, run_id).write_bytes(b"not a sqlite file at all")
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0
+    sc = json.loads(out)["scopes"][0]
+    assert sc["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "读取失败" in sc["aborted_hint"]
+    assert all(st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
+
+
 def test_explain_recovery_is_only_attempted_for_aborted_or_error_jobs_with_gaps(tmp_path, capsys):
     """有完整判定记录的 failed job 不读事件流；判定明细已有的 scenario 不从事件流改写。"""
     root, run_id = _explain_run(tmp_path)  # failed、scenario :12 有判定记录（step 3 无记录）

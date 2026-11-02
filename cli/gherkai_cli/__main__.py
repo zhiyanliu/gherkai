@@ -2109,16 +2109,17 @@ def _explain_recover(results, recover):
     """对需要补取的 job 读事件流（一次读齐全部需要的 scope），归约出未完成 scenario 的 step 记录（ADR 0042 决策七）。
 
     recover(scope_ids) → (records | None, 原因)：读不到时给出产品语言的原因，由 explain_to_dict 落到 aborted_hint；读到了则
-    每个 job 各自经 project.recover_unfinished 投影。返回 (recovered, recovery_error)。
+    每个 job 各自经 project.recover_from_events 投影（判据是判定真值里没有的 scenario）。返回 (recovered, recovery_error)。
     """
-    from gherkai_core.project import recover_unfinished
+    from gherkai_core.project import recover_from_events
     needing = [jr for jr in results if _needs_recovery(jr)]
     if not needing:
         return {}, None
     records, error = recover([jr.scope_id for jr in needing])
     if records is None:
         return {}, error
-    return {jr.scope_id: recover_unfinished(jr.job, [r for r in records if r.scope_id == jr.scope_id])
+    return {jr.scope_id: recover_from_events(jr.job, [r for r in records if r.scope_id == jr.scope_id],
+                                             recorded={sr.scenario_id for sr in jr.scenarios})
             for jr in needing}, None
 
 
@@ -2220,12 +2221,12 @@ def _cmd_explain(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
     def recover(scope_ids):
-        log = compose.build_local_event_log(report_root, args.run_id)
-        if log is None:
-            return None, "本机没有这个 run 的事件流记录（由不落事件流的旧版本执行，或以 --no-report 运行）"
         try:
+            log = compose.build_local_event_log(report_root, args.run_id)  # 打开即连库、建 schema：库文件损坏在这里就会抛
+            if log is None:
+                return None, "本机没有这个 run 的事件流记录（由不落事件流的旧版本执行，或以 --no-report 运行）"
             return log.records(), None
-        except Exception as e:  # 库文件损坏等：说清原因，不让 explain 失败
+        except Exception as e:  # 库文件损坏、打不开、行解析失败：说清原因，不让 explain 失败
             return None, f"事件流记录读取失败：{e}"
 
     return _explain_emit(

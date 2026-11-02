@@ -395,14 +395,15 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
     wants_evidence(step_dict) → bool：None 表示每个有记录的 step 都读（`--json` 契约要求全给）；文本模式传
     `explain_step_expands` 的绑定版，跳过不渲染的 step（见其 docstring）。
     scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None 表示不筛）；匹配器在前端（它还要出候选清单）。
-    recovered：scope_id → 从事件流补取的未完成 scenario（project.UnfinishedScenario 列表，ADR 0042 决策七）；补到的 step 以
-    record_source="events" 进文档、所属 scenario 标 unfinished。recovery_error：需要补取却读不到事件流时的原因，落到 aborted_hint。
+    recovered：scope_id → 从事件流补取的 scenario（project.RecoveredScenario 列表，ADR 0042 决策七）；补到的 step 以
+    record_source="events" 进文档，scenario 的 status 取事件流里的 scenario_done（没有即 null 并标 unfinished）。
+    recovery_error：需要补取却读不到事件流时的原因，落到 aborted_hint。
     """
     scopes = []
     recovered = recovered or {}
     for jr in results:
         by_scenario = {sr.scenario_id: sr for sr in jr.scenarios}
-        from_events = {u.scenario_id: {st.index: st for st in u.steps} for u in recovered.get(jr.scope_id, [])}
+        from_events = {u.scenario_id: u for u in recovered.get(jr.scope_id, [])}
         # 记录缺口按**整个 job 定义**算、不受 --scenario/--step 影响：aborted_hint 说的是这个 job 的事实，
         # 不该随筛选闪烁。
         recorded = {(sr.scenario_id, st.index) for sr in jr.scenarios for st in sr.steps}
@@ -413,7 +414,8 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
                 continue
             sr = by_scenario.get(sc.id)
             by_index = {st.index: st for st in (sr.steps if sr is not None else ())}
-            ev_index = from_events.get(sc.id, {}) if sr is None else {}  # 判定真值里有的 scenario 不再看事件流
+            rec_sc = from_events.get(sc.id) if sr is None else None  # 判定真值里有的 scenario 不再看事件流
+            ev_index = {st.index: st for st in rec_sc.steps} if rec_sc is not None else {}
             steps = []
             for sd in sc.steps:
                 if step_index is not None and sd.index != step_index:
@@ -446,8 +448,10 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             scenarios.append({
                 "scenario_id": sc.id,
                 "name": sc.name,
-                "status": None if sr is None else sr.status.value,
-                "unfinished": sr is None and sc.id in from_events,  # 没有 scenario_done、但事件流里有它的 step 记录
+                # 判定真值没有这条 scenario 时，status 可来自事件流里的 scenario_done（同步 run 在归约前退出的情形）；两处都没有即 null
+                "status": (sr.status.value if sr is not None
+                           else (rec_sc.status.value if rec_sc is not None and rec_sc.status is not None else None)),
+                "unfinished": rec_sc is not None and rec_sc.status is None,  # 事件流里有它的 step 记录、却没有 scenario_done
                 "steps": steps,
             })
         if (scenario_ids is not None or step_index is not None) and not scenarios:

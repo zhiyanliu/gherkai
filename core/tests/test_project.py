@@ -16,7 +16,7 @@ from gherkai_core.model import (
     Step,
 )
 from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full,
-                                  recover_unfinished)
+                                  recover_from_events)
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -364,9 +364,10 @@ def test_step_done_message_is_kept_in_step_result():
 
 # ---------- 未完成 scenario 的事件流投影（ADR 0042 决策七）----------
 
-def test_recover_unfinished_returns_only_scenarios_with_step_records_but_no_scenario_done():
-    """三条 scenario：A 完整（有 scenario_done，进判定真值，不补）；B 被中止在第三步（两条 step_done、一条只有 step_started）；
-    C 零事件。补取只给 B，且 B 只含两条有 step_done 的 step，字段（含 report_refs）与归约路径一致；不写判定、不看退出记录。"""
+def test_recover_from_events_returns_scenarios_absent_from_the_verdict_with_their_step_records():
+    """三条 scenario：A 完整（有 scenario_done 且已在判定真值里，不补）；B 被中止在第三步（两条 step_done、一条只有 step_started）；
+    C 零事件。补取只给 B（status None 即未完成），且 B 只含两条有 step_done 的 step，字段（含 report_refs）与归约路径一致；不写判定、
+    不看退出记录。判定真值里**没有** A 时（同步 run 在归约前退出），A 也补取、带事件流里的 scenario 判定。"""
     from gherkai_core.model import ReportRef, StepDone, StepStarted, ScenarioStarted, Votes
     steps = tuple(Step(index=i, keyword="When", text=f"s{i}") for i in range(3))
     job = Job(scope_id="a", scope_name="a", engine="novaact", scenarios=(
@@ -386,19 +387,22 @@ def test_recover_unfinished_returns_only_scenarios_with_step_records_but_no_scen
         _ev("a", 10, StepStarted(scenario_id="a:B", step_index=2), 31.0),  # 被中止时正在执行：没有 step_done
         _exit("a", -15),
     ]
-    out = recover_unfinished(job, recs)
-    assert [u.scenario_id for u in out] == ["a:B"]
+    out = recover_from_events(job, recs, recorded={"a:A"})
+    assert [(u.scenario_id, u.status) for u in out] == [("a:B", None)]
     b = out[0].steps
     assert [(st.index, st.status) for st in b] == [(0, Status.PASSED), (1, Status.FAILED)]
     assert b[0].duration_ms == 3500.0 and b[1].report_refs == (ref,) and b[1].votes == Votes(yes=0, total=1)
     assert b[1].error_type == "assertion_failed" and b[1].message == "没过"
     # 乱序到达的记录按 seq 归约（与 _reduce_scope 同一排序）
-    assert [u.scenario_id for u in recover_unfinished(job, list(reversed(recs)))] == ["a:B"]
-    # 没有任何事件：空；只有完整 scenario：空
-    assert recover_unfinished(job, []) == [] and recover_unfinished(job, recs[:4]) == []
+    assert [u.scenario_id for u in recover_from_events(job, list(reversed(recs)), recorded={"a:A"})] == ["a:B"]
+    # 判定真值里连 A 都没有：A 带事件流里的判定补取（status 来自 scenario_done），B 仍是未完成
+    out2 = recover_from_events(job, recs, recorded=set())
+    assert [(u.scenario_id, u.status, [st.index for st in u.steps]) for u in out2] == [("a:A", Status.PASSED, [0]), ("a:B", None, [0, 1])]
+    # 没有任何事件：空；判定真值已有的 scenario 不补
+    assert recover_from_events(job, [], recorded=set()) == [] and recover_from_events(job, recs[:4], recorded={"a:A"}) == []
 
 
-def test_recover_unfinished_ignores_scenarios_synthesized_after_scope_error():
+def test_recover_from_events_ignores_scenarios_synthesized_after_scope_error():
     """scope 级 error 后 core 合成的 SKIPPED scenario（零事件）不是「未完成」；有 step 记录的在途 scenario 仍补取。"""
     from gherkai_core.model import StepDone, StepStarted, ScenarioStarted
     steps = (Step(index=0, keyword="When", text="x"), Step(index=1, keyword="Then", text="y"))
@@ -411,5 +415,6 @@ def test_recover_unfinished_ignores_scenarios_synthesized_after_scope_error():
         _ev("a", 4, StepDone(scenario_id="a:B", step_index=0, status=Status.PASSED)),
         _ev("a", 5, ScopeDone(scope_id="a", status=Status.ERROR, error_type="session_lost", message="丢了")),
     ]
-    out = recover_unfinished(job, recs)
-    assert [(u.scenario_id, [st.index for st in u.steps]) for u in out] == [("a:B", [0])]
+    # 合成的 SKIPPED（C）会进判定真值，故在 recorded 里；B 在途、不在判定真值里 → 补取
+    out = recover_from_events(job, recs, recorded={"a:C"})
+    assert [(u.scenario_id, u.status, [st.index for st in u.steps]) for u in out] == [("a:B", None, [0])]
