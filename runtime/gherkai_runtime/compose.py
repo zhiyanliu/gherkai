@@ -332,7 +332,11 @@ def build_engines(
     worker_log=None,
     event_log=None,
 ) -> dict[str, Engine]:
-    """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）。
+    """每个引擎一个 SubprocessEngine（cmd 不同，core 引擎无关，ADR 0026）；给了 event_log 时真引擎项包成 EventRecordingEngine。
+
+    event_log（ADR 0042 决策七）：本机同步 run 的 SqliteEventLog；给了就把每个解析成功的引擎项包成 EventRecordingEngine，
+    原始事件行与退出记录旁路落它（定位失败的占位项不包，安装指引照常在 run_scope 时抛出）；None 表示不落事件流（--no-report）。
+    只有本机后端用它，云端 run 的事件由 worker 直接写 events 表。
 
     worker_log（ADR 0041 决策二）：worker stdout/stderr 透传的落点文件句柄；None 表示本进程 stderr（默认）。组合根只转发。
 

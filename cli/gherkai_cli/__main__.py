@@ -1910,13 +1910,15 @@ def _cmd_status(args) -> int:
     # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退出码 2 + 提示」，
     # 别让 build_local_reconcile 的 FileNotFoundError 变成裸 traceback + 退出码 1
     # （退出码契约：查不到 run → 2，见 docs/user-guide/running-and-results.md「退出码」）。
-    if run_store.load_run_state(args.run_id) is None:
+    state = run_store.load_run_state(args.run_id)
+    if state is None:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
         return 2
 
-    if args.wait:
+    if args.wait and state.status not in TERMINAL_STATUSES:
         # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
         # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+        # 已到终态的 run（含前台 run 产出的）不再接力：终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
         region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
         try:
             detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
@@ -2105,22 +2107,32 @@ def _needs_recovery(jr) -> bool:
     return any((sc.id, st.index) not in recorded for sc in jr.job.scenarios for st in sc.steps)
 
 
-def _explain_recover(results, recover):
-    """对需要补取的 job 读事件流（一次读齐全部需要的 scope），归约出未完成 scenario 的 step 记录（ADR 0042 决策七）。
+_NO_EVENTS_FOR_SCOPE = "事件流里没有这个 job 的记录（云端 events 表只保留 7 天；或 worker 在发出任何事件之前就被中止）"
 
-    recover(scope_ids) → (records | None, 原因)：读不到时给出产品语言的原因，由 explain_to_dict 落到 aborted_hint；读到了则
-    每个 job 各自经 project.recover_from_events 投影（判据是判定真值里没有的 scenario）。返回 (recovered, recovery_error)。
+
+def _explain_recover(results, recover):
+    """对需要补取的 job 读事件流（一次读齐全部需要的 scope），归约出判定真值里没有的 scenario 的 step 记录（ADR 0042 决策七）。
+
+    recover(scope_ids) → (records | None, 原因)：读不到时给出产品语言的原因；读到了则每个 job 各自经 project.recover_from_events
+    投影（判据是判定真值里没有的 scenario）。事件流里一条该 job 的记录都没有时同样算补取失败（云端 events 表的记录 7 天过期，
+    或 worker 在发事件前就被中止），不能让它与「本来就没执行」混成同一种无提示。返回 (recovered, errors)，errors 按 scope_id 给原因，
+    由 explain_to_dict 落到该 scope 的 aborted_hint。
     """
     from gherkai_core.project import recover_from_events
     needing = [jr for jr in results if _needs_recovery(jr)]
     if not needing:
-        return {}, None
+        return {}, {}
     records, error = recover([jr.scope_id for jr in needing])
     if records is None:
-        return {}, error
-    return {jr.scope_id: recover_from_events(jr.job, [r for r in records if r.scope_id == jr.scope_id],
-                                             recorded={sr.scenario_id for sr in jr.scenarios})
-            for jr in needing}, None
+        return {}, {jr.scope_id: error for jr in needing}
+    recovered, errors = {}, {}
+    for jr in needing:
+        mine = [r for r in records if r.scope_id == jr.scope_id]
+        if not mine:
+            errors[jr.scope_id] = _NO_EVENTS_FOR_SCOPE
+            continue
+        recovered[jr.scope_id] = recover_from_events(jr.job, mine, recorded={sr.scenario_id for sr in jr.scenarios})
+    return recovered, errors
 
 
 def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, recover=None) -> int:
@@ -2176,12 +2188,12 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
         scenario_ids = {sc.id for sc in matched}
 
     # 被中止 job 的 step 记录从事件流补取（ADR 0042 决策七）；读不到只影响 aborted_hint，不改退出码
-    recovered, recovery_error = _explain_recover(results, recover) if recover is not None else ({}, None)
+    recovered, recovery_errors = _explain_recover(results, recover) if recover is not None else ({}, {})
     # 显式点名一步（--step）即展开它的证据——点名就是想看，不必再给 --all（ADR 0042 决策四）
     expand_passed = bool(args.all) or args.step is not None
     doc = render.explain_to_dict(
         run_id=state.run_id, status=state.status.value, results=results,
-        recovered=recovered, recovery_error=recovery_error,
+        recovered=recovered, recovery_errors=recovery_errors,
         evidence_reader=lambda refs: _explain_read_evidence(refs, read_bytes),
         # --json 契约要求证据全给；文本模式「不展开就不读」，省掉云端逐 step 一次 GetObject 的白下载
         wants_evidence=(None if args.json
@@ -2224,7 +2236,7 @@ def _cmd_explain(args) -> int:
         try:
             log = compose.build_local_event_log(report_root, args.run_id)  # 打开即连库、建 schema：库文件损坏在这里就会抛
             if log is None:
-                return None, "本机没有这个 run 的事件流记录（由不落事件流的旧版本执行，或以 --no-report 运行）"
+                return None, "本机没有这个 run 的事件流记录（由不落事件流的旧版本执行，或库文件已被删除）"
             return log.records(), None
         except Exception as e:  # 库文件损坏、打不开、行解析失败：说清原因，不让 explain 失败
             return None, f"事件流记录读取失败：{e}"
@@ -2277,15 +2289,16 @@ def _explain_cloud(args) -> int:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
         return 2
     def recover(scope_ids):
-        # 云端的事件流在 events 表：按 run 与需要补取的 scope 点查（dynamodb:Query）；缺权限或不可达只归到 aborted_hint 的原因
+        # 云端的事件流在 events 表：按 run 与需要补取的 scope 点查（dynamodb:Query）。表名按 --prefix 推导、与部署侧同一命名真源
+        # （ADR 0033 两层命名），explain 不另收 --events-table（同 submit，见解析器处的注）。补取是附加视图：缺权限、表不可达、
+        # 记录解析失败（worker 违约行）一律只归到 aborted_hint 的原因，与本机分支同一口径，不让 explain 因此失败
         try:
             log = compose.build_cloud_event_log(events_table=target.events_table, run_id=args.run_id, scope_ids=scope_ids,
                                                 region=target.region, profile=target.profile)
             return log.records(), None
         except Exception as e:
-            if not compose.is_botocore_error(e):
-                raise
-            return None, f"云端事件流记录读取失败（events 表 {target.events_table} 不可达或缺读权限）：{e}"
+            why = "不可达或缺读权限" if compose.is_botocore_error(e) else "记录读取或解析失败"
+            return None, f"云端事件流记录读取失败（events 表 {target.events_table} {why}）：{e}"
 
     try:
         return _explain_emit(

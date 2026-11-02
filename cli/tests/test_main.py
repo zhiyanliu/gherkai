@@ -2505,14 +2505,41 @@ def test_explain_unreadable_event_db_degrades_to_the_hint(tmp_path, capsys):
     assert all(st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
 
 
-def test_explain_recovery_is_only_attempted_for_aborted_or_error_jobs_with_gaps(tmp_path, capsys):
+def test_explain_recovery_is_only_attempted_for_aborted_or_error_jobs_with_gaps(tmp_path, capsys, monkeypatch):
     """有完整判定记录的 failed job 不读事件流；判定明细已有的 scenario 不从事件流改写。"""
-    root, run_id = _explain_run(tmp_path)  # failed、scenario :12 有判定记录（step 3 无记录）
+    root, run_id = _explain_run(tmp_path)  # failed、scenario :12 有判定记录（step 3 无记录）、:20 有判定记录
     _events_db_with_unfinished_scenario(root, run_id, "features/login.feature:6", "file:///tmp/none.json")
+    opened = []
+    real = compose.build_local_event_log
+    monkeypatch.setattr(m.compose, "build_local_event_log", lambda *a, **k: (opened.append(a), real(*a, **k))[1])
     doc = json.loads(_explain(capsys, root, run_id, "--json")[1])
     s12 = doc["scopes"][0]["scenarios"][0]
+    assert opened == []  # failed 的 job 不读事件流
     assert s12["status"] == "failed" and s12["unfinished"] is False
     assert [st["record_source"] for st in s12["steps"]] == ["verdict", "verdict", "verdict", None]
+
+
+def test_explain_reports_when_the_event_stream_has_no_record_for_the_job(tmp_path, capsys):
+    """事件库在、却没有这个 job 的任何记录（云端 7 天过期后的形态，本机则是 worker 没发过事件）：算补取失败，aborted_hint 写明原因。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    root, run_id = _explain_run(tmp_path, job_only=True)
+    SqliteEventLog(compose.events_db_path(root, run_id))  # 建库但不写任何记录
+    sc = json.loads(_explain(capsys, root, run_id, "--json")[1])["scopes"][0]
+    assert sc["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "没有这个 job 的记录" in sc["aborted_hint"]
+    assert sc["recovered_steps"] == 0
+    rc, out, _ = _explain(capsys, root, run_id)
+    assert "诊断细节见 worker 日志" in out  # 判定明细与事件流都没给出 step 时才指去看日志
+
+
+def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, capsys):
+    """status --wait 对已到终态的 run（含前台 run 产出的）不再接力推进：终态即提交点；此前它会拿事件流重放，前台 run 只有事件没有退出记录
+    时会在收尾聚合处抛出。"""
+    root, run_id = _explain_run(tmp_path)  # 终态 failed
+    def boom(*a, **k):
+        raise AssertionError("终态 run 不该接力推进")
+    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)  # 主程序在函数内按模块引用它
+    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
+    assert rc == 1  # 终态 failed 的判定退出码
 
 
 def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(monkeypatch, capsys):
@@ -2559,7 +2586,18 @@ def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission
     rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
     sc = json.loads(capsys.readouterr().out)["scopes"][0]
     assert rc == 0 and sc["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "vfy-events" in sc["aborted_hint"]
+    assert "不可达或缺读权限" in sc["aborted_hint"]
     assert all(st["record_missing"] for scen in sc["scenarios"] for st in scen["steps"])
+
+    # 记录解析失败（worker 违约行，不是 botocore 异常）同样降级：explain 不抛、原因写明
+    class _BadLog:
+        def records(self):
+            raise ValueError("未知事件 type: 'brand_new_event'（不符合 worker↔core 协议）")
+
+    monkeypatch.setattr(m.compose, "build_cloud_event_log", lambda **kw: _BadLog())
+    rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
+    sc = json.loads(capsys.readouterr().out)["scopes"][0]
+    assert rc == 0 and "记录读取或解析失败" in sc["aborted_hint"] and "brand_new_event" in sc["aborted_hint"]
 
 
 def test_sync_run_writes_the_event_stream_db_unless_no_report(tmp_path, monkeypatch, capsys):
@@ -2570,8 +2608,10 @@ def test_sync_run_writes_the_event_stream_db_unless_no_report(tmp_path, monkeypa
     assert m.main(["run", str(feat), "--json", "--report-dir", str(report_dir)]) == 0
     run_id = json.loads(capsys.readouterr().out)["run_id"]
     assert compose.events_db_path(report_dir, run_id).exists()
+    before = sorted(tmp_path.rglob("events.db"))
+    monkeypatch.chdir(tmp_path)  # --no-report 不给 --report-dir：若守卫失效，库会落到 cwd/reports 下，chdir 后它在 tmp_path 里才照得出
     assert m.main(["run", str(feat), "--json", "--no-report"]) == 0
-    assert not list(tmp_path.rglob("events.db")) or all(p.parent.parent == report_dir for p in tmp_path.rglob("events.db"))
+    assert sorted(tmp_path.rglob("events.db")) == before  # 零落盘运行没有新建任何事件库
 
 
 def test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(monkeypatch, capsys):

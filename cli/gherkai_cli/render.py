@@ -351,7 +351,7 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
 
 _NO_RECORD = "无记录（未执行或未上报）"          # 骨架有、判定记录没有的 step / scenario
 _THOUGHT_BUDGET = 800                            # 单段推理文本的字符预算（ADR 0042 决策四「文本预算」）
-# 中止 job 的提示语：evidence 已产、ref 只在事件记录里（explain 不读事件流，ADR 0042 决策四「记录缺口」）
+# 中止 job 的提示语：只在需要从事件流补取却补不到时打，后接原因（ADR 0042 决策七）
 _ABORTED_PARTIAL_HINT = "本 job 被中止，无法从事件流补取已执行 step 的记录与证据"  # 后接原因（ADR 0042 决策七）
 _FROM_EVENTS = "（记录取自事件流）"
 _UNFINISHED = "未完成"
@@ -384,7 +384,7 @@ def explain_step_expands(step: dict, *, expand_passed: bool) -> bool:
 def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult],
                     evidence_reader, wants_evidence=None,
                     scenario_ids: "set[str] | None" = None, step_index: int | None = None,
-                    recovered: "dict | None" = None, recovery_error: str | None = None) -> dict:
+                    recovered: "dict | None" = None, recovery_errors: "dict | None" = None) -> dict:
     """把 JobResult 列表 + evidence 合成 explain 的机读文档（形状即 ADR 0042 决策四的 JSON 形态）。
 
     **骨架是 job 定义**（`JobResult.job`）而非判定记录：worker 被外部中止时未完成的 scenario 不进 `jobs/*.json`，
@@ -397,11 +397,13 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
     scenario_ids / step_index：`--scenario` / `--step` 的筛选结果（None 表示不筛）；匹配器在前端（它还要出候选清单）。
     recovered：scope_id → 从事件流补取的 scenario（project.RecoveredScenario 列表，ADR 0042 决策七）；补到的 step 以
     record_source="events" 进文档，scenario 的 status 取事件流里的 scenario_done（没有即 null 并标 unfinished）。
-    recovery_error：需要补取却读不到事件流时的原因，落到 aborted_hint。
+    recovery_errors：scope_id → 需要补取却补不到时的原因（事件流读不到、或事件流里没有这个 job 的记录），落到该 scope 的 aborted_hint。
     """
     scopes = []
     recovered = recovered or {}
+    recovery_errors = recovery_errors or {}
     for jr in results:
+        recovery_error = recovery_errors.get(jr.scope_id)
         by_scenario = {sr.scenario_id: sr for sr in jr.scenarios}
         from_events = {u.scenario_id: u for u in recovered.get(jr.scope_id, [])}
         # 记录缺口按**整个 job 定义**算、不受 --scenario/--step 影响：aborted_hint 说的是这个 job 的事实，
@@ -473,6 +475,7 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             "has_step_records": bool(recorded),
             "scenarios": scenarios,
         }
+        scope_doc["recovered_steps"] = sum(1 for scen in scenarios for st in scen["steps"] if st["record_source"] == "events")
         # 会话记录与计量（ADR 0051 决策 4、7），形状同 run --json 的 jobs[]：sessions[] 桌面 job 有会话记录时也有，计量两键仅设备目标
         scope_doc.update(_device_keys_for_explain(jr))
         url = console_url(jr.session_id)  # 代表会话是 Device Farm 会话 ARN 时给控制台链接（ADR 0051 决策 8）；桌面省键
@@ -680,8 +683,8 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
             elif sc["message"]:
                 why = f"  ({sc['message']})"
             scn.add(f"判定：{sc['status']}{why}")
-        if not sc["has_step_records"]:
-            scn.add("诊断细节见 worker 日志")
+        if not sc["has_step_records"] and not sc.get("recovered_steps"):
+            scn.add("诊断细节见 worker 日志")  # 判定明细与事件流都没给出任何 step 时才指去看日志
         if sc["aborted_hint"]:
             scn.add(sc["aborted_hint"])
         for scen in sc["scenarios"]:

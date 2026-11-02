@@ -147,8 +147,13 @@ def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback
     d = json.loads(path.read_text(encoding="utf-8"))
     d["jobs"][0].pop("target")
     path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
+    # 接力宿主只对未到终态的 run 接力（终态即提交点，status --wait 对终态 run 只读不推）：把运行态改回进行中，模拟 per-run 进程中途被杀
+    state_path = reports / run_id / "run_state.json"
+    st = json.loads(state_path.read_text(encoding="utf-8"))
+    st["status"] = "running"
+    state_path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     cmd, *rest = argv_head
-    before = (reports / run_id / "run_state.json").read_text(encoding="utf-8")
+    before = state_path.read_text(encoding="utf-8")
     assert m.main([cmd, run_id, *rest, "--report-dir", str(reports)]) == 2
     err = capsys.readouterr().err
     assert "提交记录不完整" in err and "target" in err

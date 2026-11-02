@@ -35,6 +35,10 @@ class SubprocessWorkerHandle:
         self._proc = proc
         self._pumps = pumps  # 透传 worker stdout/stderr 的两条 daemon 线程：stop 后有界 join，让日志尾部落完（ADR 0041 决策二）
 
+    def returncode(self) -> int | None:
+        """worker 进程的退出码，仍在运行为 None（poll，不等待）。同步 run 的事件记录器据此写退出记录（ADR 0042 决策七）。"""
+        return self._proc.poll()
+
     def _signal_group(self, sig: int) -> None:
         # worker 以自己为组长另开进程组启动（见 run_scope 的 process_group=0），信号发给整组：定位链里 uvx / npx 这类包装进程是组长、
         # 真正的 worker 是孙进程，只发给组长时 SIGTERM 要靠包装进程转发、SIGKILL 则会留下仍持有事件管道的孙进程（schedule 只能等到
@@ -210,7 +214,7 @@ def _read_events(
                     continue
                 if raw_sink is not None:
                     try:
-                        raw_sink(line)  # 旁路落原始行（无状态批量运行），解析前
+                        raw_sink(line)  # 旁路落原始行（detached 的 launcher 与同步 run 的记录器），解析前
                     except Exception:
                         pass
                 yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error

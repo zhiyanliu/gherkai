@@ -1,4 +1,4 @@
-"""SqliteEventLog（ADR 0034）：local 无状态批量运行的持久事件通道。
+"""SqliteEventLog（ADR 0034；ADR 0042 决策七起同步 run 也写）：本机后端的持久事件通道。
 
 worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退出记录（task_exited，独立键空间）
 都落一个本机 SQLite 文件；reconciler 从这里全量重放（`records()` → `project()` 的 EventRecord 列表）。
@@ -12,8 +12,8 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
 - exits 表：(scope_id) 主键，exit_code（NULL 表示退出码未知，仅超时处置直写时出现；投影判 ERROR、非宽限）+ timed_out（超时处置
   所致退出的归因标志，[0034]「job timeout」节）+ reason（平台侧归因串，cloud 观察者落哨兵时带；local 恒空）。独立表即独立键空间（机制一：退出记录不占 worker 数值 seq 段、不参与断号）。
 
-并发：per-run 进程写、reconciler 读（同进程内两职责，也可能 status --wait 另进程读）。SQLite WAL 模式 +
-短事务，多读单写足够；跨进程写并发不在 local 目标内（写只有 per-run 进程一个）。
+并发：detached 下 per-run 进程写、reconciler 读（同进程内两职责，也可能 status --wait 另进程读）；同步 run 下 schedule 的各 worker
+读线程各持一个 scope 的闭包写（每条一次连接加一次提交，SQLite 文件锁串行）。SQLite WAL 模式 + 短事务，多读少写足够；跨进程写并发不在 local 目标内。
 """
 from __future__ import annotations
 
