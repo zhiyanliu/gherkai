@@ -1415,8 +1415,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1793598049.8474061,
-    "ast_hash": "f189172ec4695c11f2cd464465640708",
+    "mtime": 1793607531.2874029,
+    "ast_hash": "026adbf73677e41dc4e4fde8eaae9995",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793606484.0110984,
-    "ast_hash": "30b114bd970c8d8765c7ecf7427d5d7f",
+    "mtime": 1793607531.2871096,
+    "ast_hash": "c649bedd1f46b1b2de32a616eda666fb",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793544679.8782234,
-    "ast_hash": "875b61bf54fb04d14ac7a6fa006d3bbf",
+    "mtime": 1793607586.1332042,
+    "ast_hash": "386a7fa9626320bcef432d7ea4a88007",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1900,13 +1900,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793607219.7041056,
-    "ast_hash": "868ad5f3b0e929a89f957aa0b6b2c306",
+    "mtime": 1793607586.1336062,
+    "ast_hash": "9077bf12c7cbf47058700f66e2ba9c90",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793600901.1293383,
-    "ast_hash": "19a8af216cda3caddae5b5dc68fd4a73",
+    "mtime": 1793607586.133482,
+    "ast_hash": "40730a5753fe3cf3e3fed3595a142fd6",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

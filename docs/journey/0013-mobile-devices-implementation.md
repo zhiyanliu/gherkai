@@ -8,7 +8,7 @@
 
 第 0 到 8 批已闭合并 push、CI 绿：第 8 批（B6 设备模块）的复核修正、拍板项 F1–F6、真机验收两轮、故障演练与部署后云端验证都已完成（含第 7 批遗留的 task role 端到端使用），现场在 0015 第 8 节的状态段、「真跑或对抗核查才算数的结论」段与其后的「部署后云端验证」「拍板记录」两段。第 9 批（真机验收浮出的拍板项）已落地：收起键盘（iOS 改为自己从控件树定位收起控件并点击，加 Input 参数说明的兜底，ADR 0052 决策 4 / 7）、被中止 job 的 explain 从事件流补取并让本机同步 run 也落 events.db（ADR 0042 决策七），都经真跑与双轨复核（Codex 同僚复核多轮加一轮三视角对抗核验）；Q4 的 Codex 闭合确认在第 103 轮通过（第 100 到 102 轮各有一到六项、已全部落地），这批 17 笔已 push、CI 绿。随后按 owner 点名修了 Q4 收尾时报出的边界「`status --wait` 对前台 run 正在执行的 run 也会接力」：detached 标记补到本机 run_state.json，`status --wait` 两道闸（只接力 submit 的 run、已终态不接力）与云端推进器同构，Ctrl-C 的 130 口径（ADR 0034「兜底/接力」条）；三视角对抗核验 16 项已落地、跳板机与本机真跑已内联 ADR 0034 地基实测节；Codex 同僚复核第 104 轮三项已落地、第 105 轮闭合确认通过；已 push、CI 绿（2026-11-02）。第 9 批至此收口。
 
-验证环境 vfy 保留（owner 以 179f4c9b 删项目重新部署过，Device Farm 项目换新；验收期对照用的临时执行角色已删）。1.5 剩余（owner 定；Appium 3 端点升级放发版后）：截图缩放评估；iOS Safari 建连实例超时归属记为边界；Device Farm 数据保留一句进用户文档；评测集加设备用例；发版前 doc-health / code-health 复盘与 CHANGELOG 收口。
+验证环境 vfy 保留（owner 以 179f4c9b 删项目重新部署过，Device Farm 项目换新；验收期对照用的临时执行角色已删）。1.5 剩余（owner 定；Appium 3 端点升级放发版后）：截图缩放评估；评测集加设备用例；发版前 doc-health / code-health 复盘与 CHANGELOG 收口。已完成：iOS Safari 建连实例超时归属记为边界（ADR 0052 实测依据）；Device Farm 数据保留一句进用户指南（运行篇与云端篇）。
 
 跳板机要点：`~/gherkai` 是部署用的干净检出（按已推送提交 prep），未 push 的工作树验证用独立目录 rsync 过去并补 `.git`，用完即删；`GHERKAI_WORKER_MIDSCENE_CMD` 要指向 dev 树的 `dist/bin.mjs`（全局装的是 1.4.9 的旧 worker）。
 

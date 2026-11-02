@@ -162,7 +162,7 @@ reports/<run_id>/
 
 同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定要读 `jobs/` 下的明细或退出码，别读 `index.html`——那是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
-设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录与获取设备各阶段的时刻）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。
+设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录与获取设备各阶段的时刻）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天、上传的安装包保留 30 天，到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；要留得更久，自己从控制台或 API 归档。
 
 `--backend cloud` 下没有这棵本地树：提交记录与运行状态在 DynamoDB 的运行记录表里，判定明细与报告在产物桶（`<前缀>artifacts`）的 `<报告前缀>/<run_id>/` 下，相对位置与上面这棵树一一对应；worker 日志在 CloudWatch 日志组 `/<前缀>worker/<引擎>`。
 
