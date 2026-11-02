@@ -1125,8 +1125,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
-    "mtime": 1793534876.8500311,
-    "ast_hash": "b02af2e90b12f4ac1f97f7f09cdc5a27",
+    "mtime": 1793594551.784641,
+    "ast_hash": "79cf5b19d145ff04247be0069960bbb3",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/evidence.mts": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793548823.9581835,
-    "ast_hash": "68e718b064607b091b37cbc4689d4146",
+    "mtime": 1793594601.1478674,
+    "ast_hash": "24b2f9b605d6505c88f6636d2d6c816b",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {

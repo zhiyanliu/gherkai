@@ -73072,10 +73072,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "0015-mobile-devices-implementation-batches.md"
+      "norm_label": "0015-mobile-devices-implementation-batches.md",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches"
     },
     {
       "label": "8. B6-midscene-device\uff1aMidscene worker \u8bbe\u5907\u6a21\u5757\uff08\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence\uff09",
@@ -73083,10 +73083,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L8",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)"
+      "norm_label": "8. b6-midscene-device:midscene worker \u8bbe\u5907\u6a21\u5757(\u63a5\u7f1d\u3001\u547d\u4ee4\u5b88\u536b\u3001\u80fd\u529b\u63a2\u6d4b\u3001\u9002\u914d\u5668\u3001\u7ec8\u7ed3\u56db\u9636\u6bb5\u3001evidence)",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
     },
     {
       "label": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
@@ -73094,10 +73094,10 @@
       "source_file": "docs/journey/0015-mobile-devices-implementation-batches.md",
       "source_location": "L3",
       "_origin": "ast",
-      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
       "community": 201,
       "community_name": "\u79fb\u52a8\u771f\u673a\u652f\u6301\uff081.5\uff09\uff1a\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
+      "norm_label": "\u79fb\u52a8\u771f\u673a\u652f\u6301(1.5):\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
+      "id": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "label": "\u5047 DDB table \u53e5\u67c4\uff1aDynamoDBRunStore\u2026",
@@ -95942,7 +95942,7 @@
       "label": "\u88ab\u62d2\u65b9\u6848\uff08\u62a4\u680f\uff09",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L234",
+      "source_location": "L236",
       "_origin": "ast",
       "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u88ab\u62d2\u65b9\u6848_\u62a4\u680f",
       "community": 87,
@@ -95953,7 +95953,7 @@
       "label": "\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "file_type": "document",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L281",
+      "source_location": "L283",
       "_origin": "ast",
       "id": "docs_adr_0051_device_session_lifecycle_and_app_distribution_\u8fb9\u754c\u4e0e\u4e92\u94fe",
       "community": 87,
@@ -244341,7 +244341,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L234",
+      "source_location": "L236",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
@@ -244352,7 +244352,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L281",
+      "source_location": "L283",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution_0051_\u8fdc\u7a0b\u8bbf\u95ee\u4f1a\u8bdd\u751f\u547d\u5468\u671f\u4e0e\u5e94\u7528\u5206\u53d1",
@@ -244960,9 +244960,9 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5"
     },
     {
       "relation": "contains",
@@ -244971,9 +244971,9 @@
       "source_location": "L8",
       "weight": 1.0,
       "_origin": "ast",
+      "confidence_score": 1.0,
       "source": "docs_journey_0015_mobile_devices_implementation_batches_\u79fb\u52a8\u771f\u673a\u652f\u6301_1_5_\u5b9e\u65bd\u6279\u6b21\u7684\u6539\u52a8\u9762\u4e0e\u5148\u5199\u7684\u62a4\u680f\u6d4b\u8bd5",
-      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence",
-      "confidence_score": 1.0
+      "target": "docs_journey_0015_mobile_devices_implementation_batches_8_b6_midscene_device_midscene_worker_\u8bbe\u5907\u6a21\u5757_\u63a5\u7f1d_\u547d\u4ee4\u5b88\u536b_\u80fd\u529b\u63a2\u6d4b_\u9002\u914d\u5668_\u7ec8\u7ed3\u56db\u9636\u6bb5_evidence"
     },
     {
       "relation": "contains",
@@ -304503,7 +304503,7 @@
       "relation": "references",
       "confidence": "EXTRACTED",
       "source_file": "docs/adr/0051-device-session-lifecycle-and-app-distribution.md",
-      "source_location": "L289",
+      "source_location": "L291",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_adr_0051_device_session_lifecycle_and_app_distribution",
@@ -329614,5 +329614,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "b415632e5da489a69f10e0de7f5ab9f7af50ef71"
+  "built_at_commit": "d9428ca356113675120c6216c009310433a47106"
 }

@@ -171,6 +171,20 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 - **Midscene 1.12.8 → 1.15.1（2026-10-12）**。动机是在探索移动设备方向之前先与上游拉平，少背一次跨大版本迁移。差距 8 个版本，逐项对照我们的接缝：模型调用链重构两次并加入 Responses API——新键 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）与 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 只传模型名 / 地址 / key / 家族四项、不传新键即落默认，线上请求形态不变；[0008](./0008-midscene-bedrock-auth-sigv4-selfsign.md) 依赖的「给 `modelConfig` 即隔离管理器且采纳 `createOpenAIClient`」分支原样成立，legacy 家族推导仍在。dump 的类型声明只增不删（57 行差异全是 `rawAssistantOutput` 一类新增字段），`persistExecutionDump` 与截图目录 `dirname(reportPath)/screenshots` 逻辑未变，`metrics.totalTokens` 未变；`PlaywrightAgent` 多两个可选构造项（页面 html 就位检查超时默认 5 秒、Puppeteer 专用网络空闲等待）。报告页重设计属使用者可见变化、worker 不解析它。真跑见「验证」节。1.12.9 起上游暴露了设备适配器的 schema 与类型（设备目标上的复用边界见 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 7）。
 
+### 七、被中止 job 的 step 记录与证据从事件流补取；本机同步 `run` 也把事件流落盘（2026-11-02）
+
+**问题**。worker 被中止（使用方中断、fail-fast、超时、外部停止）时，没有收到 `scenario_done` 的 scenario 不进判定真值（`jobs/*.json`，[0031](./0031-job-lifecycle-states-and-severity.md)「前置态不进判定」），其已执行 step 的 `step_done`（含 evidence 指针）只留在事件流里；explain 只能打 `aborted_hint`，排障得去产物目录或 S3 翻。
+
+**决策**：
+
+1. **事件流是每个 run 的落点之一，三条执行路径的落点形态相同**。`submit --backend local` 已落 `<report_dir>/<run_id>/events.db`（SQLite，[0034](./0034-detached-batch-reconciler.md)），云端 worker 已写 events 表；本机同步 `run` 补上同一份 `events.db`：组合根给 SubprocessEngine 包一层记录器，`run_scope` 时经既有的 `raw_sink` 扩展形参把每行原始事件 JSON 按到达序写进库（seq 为该 scope 内到达序、emit_ts 为到达时刻，与 `submit` 的 launcher 同一写法），Engine port 不变、schedule 不知情；`--no-report` 的零落盘运行不写。被拒方案：RunPersistence 在 on_event 里重新序列化 Event 写库——wire 只有解析方向，要新增一份序列化且与 worker 的原始行不逐字相同；在 schedule 里加事件 sink——执行编排不碰存储（[0030](./0030-realtime-persistence-seam.md)）。
+2. **core 新增只读投影 `project.recover_unfinished(job, records)`**：复用 `reduce_event` 归约该 scope 的全部事件，取出有 step 记录却没有 `scenario_done` 的 scenario，每条给 `scenario_id` 与 `steps`（`StepResult`，与判定真值里的 step 字段相同：status / votes / error_type / message / duration_ms / report_refs）。它不改判定：不写 ResultStore、不进 RunResult、不触发终结函数，只是事件流的另一个视图。读事件流照用既有适配器（`SqliteEventLog` / `DdbEventLog` 的 `records()`），由组合根装配：本机按 `<report_dir>/<run_id>/events.db`，云端按 events 表加 run 的全部 scope_id。
+3. **explain 的用法**。对 `status` 为 `aborted` 或 `error`、且骨架里仍有无记录 step 的 job 读事件流补取（比 `aborted_hint` 原先的「部分记录」条件宽：零记录的 job 也可能在事件流里有已执行 step，如 scope 级 error 发生在第一条 scenario 中途）。补到的 step 以 `record_missing: false`、新键 `record_source: "events"`（判定真值里的记录为 `"verdict"`）进文档，证据按同一 `report_refs` 读；所属 scenario 的 `status` 仍为 null（没有 `scenario_done` 就没有 scenario 判定），新键 `unfinished: true`。仍无记录的 step（被中止时正在执行、只有 `step_started`）保持 `record_missing: true`。`aborted_hint` 改为只在**补取失败**时出现并写明原因（没有 events.db 的旧 run、云端缺 events 表读权限或表不可达），补取成功时为 null。文本形态：补取的 step 行尾标「（记录取自事件流）」，所属 scenario 行标「未完成」。
+4. **云端权限面**：explain 对需要补取的 job 另需 events 表的 `dynamodb:Query`（按主键查该 run 各 scope）；不需要补取的 run 不发这个请求；缺权限只影响这一项（归到 `aborted_hint` 的原因），不让 explain 以退出码 2 结束。
+5. **与「detached run 中途可见」的关系**：同一接缝（EventLog 读加 project 的只读投影）；中途可见要的是对未终态 run 从事件流归约出进行中的 JobResult，`project` / `project_full` 已有、只差 CLI 装配与「非终态快照」的表达，本决策不做、仍另议。
+
+**被拒方案**：①worker 被中止时补发 `scenario_done`——判定只由 `scenario_done` 决定（[0026](./0026-schedule-module.md) 归约语义），补发等于让中止产生判定，且 SIGKILL 或容器被收时 worker 根本来不及发；②core 终结时把未完成 scenario 的 step 记录写进 `jobs/*.json`——判定真值里混入非判定的过程记录，违背 [0031](./0031-job-lifecycle-states-and-severity.md)「前置态不进判定」，`has_step_records` 等语义随之失真；③explain 直接扫产物目录或 S3 前缀找 evidence 文件——绕过指针、与两引擎的产物布局耦合，云端还要 `ListBucket`；④只给 `submit` 与云端做补取、同步 `run` 不落事件流——使用方中断（Ctrl-C）恰恰最常发生在同步 `run` 上，少了它这条决策就落空。
+
 ## 被拒方案
 
 - **CLI 事后解析 SDK 原生产物做 explain**：CLI 得认两套随 SDK 版本漂的内部格式、云端后端先下载兆级文件、引擎知识跑进 CLI（违背 0022 / 0027 的分层）。脆弱只是从 skill 搬进了 code。
@@ -186,7 +200,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 
 - **断言时向模型要理由**（Nova `BOOL_SCHEMA` → `{result, reason}`、Midscene `aiBoolean` → 带 reason 的 `aiQuery`）：一行就知道为什么判否，但改了断言提问方式、影响判定质量与两引擎对标口径（[0010](./0010-spike-as-apples-to-apples-benchmark.md)、[0014](./0014-ai-first-assertions.md)），需单独 ADR + 真跑对比。先看 thought 文本够不够用。
 - **Nova error act 的现场截图**（失败点直接 `nova.page.screenshot()` + `page.url`）：可补上 Nova 侧 error step 的空 frames，但 CDP 断连类失败下该路径自身也不可用，仍是 best-effort；不混进映射表当既有来源，等 explain 用起来看是否真缺。
-- **explain 读事件流找回被中止 job 的 evidence ref**、**detached run 中途可见**：都要同一条新的 core 接缝（事件流读取）。前者已立项进 1.5、排在设备验收之后（见下「重议闸门」末条），后者另议。
+- **detached run 中途可见**：与决策七共用同一条接缝（事件流读取加 project 的只读投影）；要的是对未终态 run 从事件流归约出进行中的 JobResult 并表达「非终态快照」，另议。
 - 桌面确定性 step 的 evidence（当时 URL / 截图）：0027 另一留口子，本 ADR 不动；设备目标上判为 failed / error 的确定性与导航 step 产一份只含界面快照的 evidence，见决策一的设备例外。
 - 报告 index.html 内嵌渲染 evidence（截图缩略、thought 折叠）：皮层富渲染，等 explain 用起来再定形态。
 
@@ -195,7 +209,7 @@ agent / skill 只依赖 evidence schema 与 `explain` 输出，两者都是我�
 前两处是仍开放、有意接受的取舍，不是遗漏；第三处已关闭、留作记录（含被拒做法）；末条是设备目标的指针。这里把「什么情况下该回来改」写成可对表的信号。
 
 - **截图字节的残余风险**（只在云端后端；本机后端不受影响）。决策一已改为「step_done 后进后台队列上传 + 收尾有界排空 + 重试一次」，取代最初「只靠 scope 末 flush」的形态——那个形态有两面风险：提前退出路径不 flush、正常路径 flush 单次无重试，一次 S3 抖动就是一个永久 404 的 URI。改后残余风险 = 进程被硬杀（SIGKILL / 容器被收）时最后一个 step 尚在途的一两张、以及排空预算内传不完的部分。**触发信号**：agent 顺 evidence 取截图仍撞 404 且不是硬杀场景。**预案**：evidence.json 里的截图 URI 改为上传成功后回写（evidence.json 二次上传覆盖），或 explain 对截图 URI 做存在性标注。
-- **被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件记录里；explain 现在只打 `aborted_hint`。**触发信号**：skill 用起来后 agent 在被中止 job 上排障时反复撞到这行提示、要靠人去 S3 翻。**已立项（2026-11-01）**：做进 1.5、排在设备验收之后——core 暴露事件流读接缝（RunStore / EventLog 层），explain 对 `aborted_hint` 的 job 从事件记录补取 evidence ref；与「detached run 中途可见」共用同一接缝。
+- **已关闭（决策七，2026-11-02）：被中止的 job，explain 找不到它已产的 evidence**。未完成 scenario 不发 `scenario_done`，其 step 记录不进 `jobs/*.json`，evidence 指针只留在事件流里，explain 此前只打 `aborted_hint`；原触发信号是 skill 用起来后 agent 在被中止 job 上排障要靠人去 S3 翻，1.5 真机验收期间在被中断的设备 run 上先撞到了。现在 explain 从事件流补取（含本机同步 `run`，为此它也落 `events.db`），`aborted_hint` 只在补取失败时出现。
 - **已关闭：job 判 error 且有 step 记录时 `explain` 文本不打判定行**（v1.4.3 发版验证观察到，云端 timeout 是首例）：设备目标让全部 scenario 都是合成记录的 job 成为常态，缺口由决策四「带 error_type 的 error / aborted 总打判定行」关闭。被拒的另一做法是不把合成记录计入 `has_step_records`：它补不了「执行中途会话丢失、真实记录与合成记录混在一起」的情形，还会让字段语义与 JSON 的 steps 数组对不上。
 
 - **设备目标的证据字段与平台旁证**：设备目标的 evidence 在 schema 1 上加键（`step_kind`、顶层 `url` / `url_missing`、失败步的 `controls` 与 `page_source`，见决策一的设备例外）；机型与系统版本放在 scope 表头（由 `session_opened.device` 派生），不进 evidence；Device Farm 的录像与日志只记会话 ARN、`explain` 给出控制台链接，不下载进 run 产物，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8。
