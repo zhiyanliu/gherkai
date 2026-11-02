@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1793610911.6543584,
-    "ast_hash": "",
+    "mtime": 1793613485.5896482,
+    "ast_hash": "6105a7e4b9687bad85aa73b1eac5d465",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -2365,8 +2365,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0016-screenshot-shrink-evaluation.md": {
-    "mtime": 1793612368.551724,
-    "ast_hash": "875f9efd8bc960d431dce5b72701d8c6",
+    "mtime": 1793614061.5048215,
+    "ast_hash": "ad75523890f3ba8d55fccf455794afaa",
     "semantic_hash": ""
   },
   "tools/image_token_probe.md": {
