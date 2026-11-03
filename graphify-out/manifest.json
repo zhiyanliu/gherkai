@@ -1205,8 +1205,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1793669766.4094183,
-    "ast_hash": "c9476baaf66fbafe2d8eb2ab264a6c42",
+    "mtime": 1793670824.7901316,
+    "ast_hash": "e16779666abfa695f7be76a5334911d1",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1220,8 +1220,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
-    "mtime": 1793669731.8431838,
-    "ast_hash": "1e7db6b1c0ff45cc2c7a58d713e8de82",
+    "mtime": 1793670824.790281,
+    "ast_hash": "baea71d5d62eafe6de978db03525c7bb",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
