@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1793676118.217541,
-    "ast_hash": "51fa0baa1634f8b212d4e03f0a8375a9",
+    "mtime": 1793677937.657635,
+    "ast_hash": "ccb616f2972442db05b920bff6e29074",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1195,8 +1195,8 @@
     "semantic_hash": "5f643feb054c0f76c10ded4f3eb9aa51"
   },
   "skills/gherkai-evals/materialize.py": {
-    "mtime": 1793670550.2672358,
-    "ast_hash": "fc7c87deaff7d5aabe900770be1bbe86",
+    "mtime": 1793677937.6573603,
+    "ast_hash": "1481e9204032bacc50781d5e63e15551",
     "semantic_hash": ""
   },
   "tools/render_skill_contract.py": {
@@ -1231,7 +1231,7 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1793677657.2947814,
-    "ast_hash": "3675e6929e85710f502ac9c647b7e0c9",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {

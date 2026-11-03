@@ -33,7 +33,7 @@
 物化与快照不联网、不装东西、不碰 AWS；只有 `--prepare-cli` 构建并联网取依赖。
 
 `--snapshot` 是物化的逆操作（录 fixture 用）：拷贝 features/ steps/ reports/，把项目目录的绝对路径（含 file:// 形态）换成
-占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用）与 events.db（事件流 SQLite，二进制里带录制机路径与真实账号），把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
+占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用）与 events.db 及其 -wal / -shm（事件流 SQLite，二进制里带录制机路径与真实账号）、Midscene 原生报告 html，把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
 最后扫一遍不得再有绝对路径。录制约束：录时 feature 必须用**相对路径**调用（scope_id / scenario_id 与 jobs/ 文件名里都带
 它，绝对路径进了文件名占位符救不了），且 cwd 为项目目录、`--report-dir reports`。
 """
@@ -309,10 +309,10 @@ TINY_PNG = bytes.fromhex(
     "1b0e2d0e0000000049454e44ae426082"
 )
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
-DROP_NAMES = {"worker.log", "reconcile.log", "events.db"}  # events.db 是本机 run 的事件流（SQLite 二进制，含录制机路径与真实账号），explain 对终态完整的 run 不读它
+DROP_NAMES = {"worker.log", "reconcile.log", "events.db", "events.db-wal", "events.db-shm"}  # events.db 及其 WAL 伴随文件是本机 run 的事件流（SQLite 二进制，含录制机路径与真实账号），explain 对终态完整的 run 不读它
 # 引擎 SDK 的原生产物（Nova 每次 act 一份 HTML + trajectory JSON；Midscene 一份 playwright-*.html 报告 + 每次执行一份 *.execution.json，动辄几 MB、内嵌截图）：skill 教 agent 不去解析它们，
 # 评测只靠 evidence.json + 截图 + session_summary.json，故不入库。判定明细里指向它们的 ref 保留原样（只是指向不存在的文件）。
-DROP_GLOBS = ("act_*.html", "act_*_trajectory.json", "playwright-*.html", "*.execution.json")
+DROP_GLOBS = ("act_*.html", "act_*_trajectory.json", "playwright-*.html", "appium-webdriver-*.html", "*.execution.json")  # 设备路径上 Midscene 原生报告的文件名以 appium-webdriver- 开头
 
 
 def snapshot(project: Path, case: str) -> None:
