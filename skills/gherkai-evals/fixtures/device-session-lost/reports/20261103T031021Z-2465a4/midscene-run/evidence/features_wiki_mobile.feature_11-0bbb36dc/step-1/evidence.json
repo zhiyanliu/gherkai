@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "wiki-browse",
+  "scenario_id": "features/wiki_mobile.feature:11",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前页面是英文维基百科的首页\""
+  },
+  "status": "passed",
+  "message": null,
+  "step_kind": "ai",
+  "url": "https://en.wikipedia.org/wiki/Main_Page",
+  "url_missing": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前页面是英文维基百科的首页",
+      "vote": true,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "frames": [
+        {
+          "url": null,
+          "thought": "The screenshot shows en.wikipedia.org and the Wikipedia landing page in English, including “Welcome to Wikipedia,” English article/editor counts, and a featured article section.",
+          "actions": [
+            {
+              "name": "Insight/Boolean",
+              "args": {
+                "domIncluded": false,
+                "dataDemand": "当前页面是英文维基百科的首页"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/report/screenshots/cd182c75-2c53-4d01-a72f-b8df89ddb2fd.jpeg"
+        }
+      ],
+      "result": true,
+      "error": null,
+      "time_worked_s": null
+    }
+  ]
+}

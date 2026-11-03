@@ -1,0 +1,18 @@
+{
+  "run_id": "20261103T031021Z-2465a4",
+  "status": "error",
+  "started_at": "2026-11-03T03:10:22.003523+00:00",
+  "ended_at": "2026-11-03T03:15:18.479158+00:00",
+  "jobs": [
+    {
+      "scope_id": "wiki-browse",
+      "status": "error",
+      "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/16fd2706-8baf-433b-82eb-8c7fada847da/00000"
+    },
+    {
+      "scope_id": "wiki-mobile-url",
+      "status": "failed",
+      "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/c9bf9e57-1685-4c89-bafb-ff5af830be8a/00000"
+    }
+  ]
+}

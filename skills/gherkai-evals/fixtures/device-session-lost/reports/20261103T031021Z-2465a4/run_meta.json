@@ -1,0 +1,128 @@
+{
+  "schema_version": 1,
+  "cli_version": "1.4.9.post300.dev0+e455b146",
+  "run_id": "20261103T031021Z-2465a4",
+  "created_at": "2026-11-03T03:10:21.994750+00:00",
+  "jobs": [
+    {
+      "scope_id": "wiki-browse",
+      "scope_name": "wiki-browse",
+      "engine": "midscene",
+      "scenarios": [
+        {
+          "id": "features/wiki_mobile.feature:6",
+          "name": "打开 OpenAI 词条",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "\"https://en.wikipedia.org/wiki/OpenAI\""
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "\"当前是 OpenAI 的维基百科词条页\""
+            }
+          ]
+        },
+        {
+          "id": "features/wiki_mobile.feature:11",
+          "name": "从首页搜索 Python",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "\"https://en.wikipedia.org/wiki/Main_Page\""
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "\"当前页面是英文维基百科的首页\""
+            },
+            {
+              "index": 2,
+              "keyword": "When",
+              "text": "\"在搜索框输入 Python 并提交搜索\""
+            },
+            {
+              "index": 3,
+              "keyword": "Then",
+              "text": "\"页面显示与 Python 相关的词条或搜索结果\""
+            }
+          ]
+        },
+        {
+          "id": "features/wiki_mobile.feature:18",
+          "name": "打开 Linux 词条",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "\"https://en.wikipedia.org/wiki/Linux\""
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "\"当前是 Linux 的维基百科词条页\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 1500.0,
+      "target": {
+        "device": "android",
+        "ui_kind": "web"
+      },
+      "device_request": {
+        "provider": "aws-device-farm",
+        "billing_method": "METERED",
+        "project_arn": "arn:aws:devicefarm:us-west-2:111122223333:project:7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "acquire_timeout_s": 600.0,
+        "device_arn": "arn:aws:devicefarm:us-west-2::device:49DF63F491EE48C1B5B3944104705D62"
+      }
+    },
+    {
+      "scope_id": "wiki-mobile-url",
+      "scope_name": "wiki-mobile-url",
+      "engine": "midscene",
+      "scenarios": [
+        {
+          "id": "features/wiki_mobile.feature:23",
+          "name": "OpenAI 词条的地址精确核对",
+          "steps": [
+            {
+              "index": 0,
+              "keyword": "Given",
+              "text": "\"https://en.m.wikipedia.org/wiki/OpenAI\""
+            },
+            {
+              "index": 1,
+              "keyword": "Then",
+              "text": "页面地址匹配 \"^https://en\\.m\\.wikipedia\\.org/wiki/OpenAI$\""
+            }
+          ]
+        }
+      ],
+      "assertion_votes": 1,
+      "timeout_s": 1500.0,
+      "target": {
+        "device": "android",
+        "ui_kind": "web"
+      },
+      "device_request": {
+        "provider": "aws-device-farm",
+        "billing_method": "METERED",
+        "project_arn": "arn:aws:devicefarm:us-west-2:111122223333:project:7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "acquire_timeout_s": 600.0,
+        "device_arn": "arn:aws:devicefarm:us-west-2::device:49DF63F491EE48C1B5B3944104705D62"
+      }
+    }
+  ],
+  "extra_http_headers": null,
+  "max_concurrency": 1,
+  "steps_dir": "{{FIXTURE_ROOT}}/steps",
+  "worker_variant": null,
+  "worker_task_defs": null,
+  "session_warmup_url": null
+}

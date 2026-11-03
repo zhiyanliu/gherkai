@@ -1,0 +1,39 @@
+{
+  "target": {
+    "device": "android",
+    "ui_kind": "web",
+    "app_id": null
+  },
+  "session": {
+    "arn": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/c9bf9e57-1685-4c89-bafb-ff5af830be8a/00000",
+    "name": "gherkai:20261103T031021Z-2465a4:21e141c5e46697ab:1:wiki-mobile-url",
+    "device": {
+      "platform": "android",
+      "model": "Google Pixel 8a",
+      "osVersion": "14",
+      "unit": null
+    }
+  },
+  "replaced_sessions": [],
+  "automation_name": "UiAutomator2",
+  "probe": {
+    "web_context": "available",
+    "web_context_candidates": 1,
+    "input_context": null,
+    "scale": 1,
+    "scale_source": "fixed",
+    "appium_version": "2.11.5"
+  },
+  "timings": {
+    "acquire_started_at": "2026-11-03T03:13:08.936Z",
+    "session_created_at": "2026-11-03T03:13:09.728Z",
+    "session_running_at": "2026-11-03T03:14:14.079Z",
+    "appium_connected_at": "2026-11-03T03:14:28.831Z",
+    "probe_done_at": "2026-11-03T03:14:43.607Z",
+    "ready_at": "2026-11-03T03:14:43.611Z",
+    "warmup_done_at": null,
+    "released_at": "2026-11-03T03:15:18.454Z"
+  },
+  "acquire_failure": null,
+  "release_failed": false
+}

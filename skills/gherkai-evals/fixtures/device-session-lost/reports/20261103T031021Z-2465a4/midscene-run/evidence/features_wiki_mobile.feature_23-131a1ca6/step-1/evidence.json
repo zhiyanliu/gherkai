@@ -1,0 +1,176 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "wiki-mobile-url",
+  "scenario_id": "features/wiki_mobile.feature:23",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "页面地址匹配 \"^https://en\\.m\\.wikipedia\\.org/wiki/OpenAI$\""
+  },
+  "status": "failed",
+  "message": "页面地址应匹配 \"^https://en\\\\.m\\\\.wikipedia\\\\.org/wiki/OpenAI$\"，实际 \"https://en.wikipedia.org/wiki/OpenAI\"",
+  "step_kind": "deterministic",
+  "url": "https://en.wikipedia.org/wiki/OpenAI",
+  "url_missing": null,
+  "controls": {
+    "items": [
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/action_bar_root",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "android:id/content",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/edge_to_edge_base_layout",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.view.ViewGroup",
+        "id": "com.android.chrome:id/coordinator",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/compositor_view_holder",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": null,
+        "text": null,
+        "a11y_id": "Web View"
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/control_container",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.view.ViewGroup",
+        "id": "com.android.chrome:id/toolbar_container",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/toolbar",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.ImageButton",
+        "id": "com.android.chrome:id/home_button",
+        "text": null,
+        "a11y_id": "Open the home page"
+      },
+      {
+        "type": "android.view.ViewGroup",
+        "id": "com.android.chrome:id/location_bar",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.LinearLayout",
+        "id": "com.android.chrome:id/location_bar_status",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.LinearLayout",
+        "id": "com.android.chrome:id/location_bar_status_icon_view",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.ImageView",
+        "id": "com.android.chrome:id/location_bar_status_icon",
+        "text": null,
+        "a11y_id": "Connection is secure"
+      },
+      {
+        "type": "android.view.View",
+        "id": "com.android.chrome:id/focus_thief",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.EditText",
+        "id": "com.android.chrome:id/url_bar",
+        "text": "en.wikipedia.org/wiki/OpenAI",
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.LinearLayout",
+        "id": "com.android.chrome:id/toolbar_buttons",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/optional_toolbar_button_container",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.ImageButton",
+        "id": "com.android.chrome:id/optional_toolbar_button",
+        "text": null,
+        "a11y_id": "New tab"
+      },
+      {
+        "type": "android.widget.ImageButton",
+        "id": "com.android.chrome:id/tab_switcher_button",
+        "text": null,
+        "a11y_id": "See 1 tab"
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/menu_button_wrapper",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.ImageButton",
+        "id": "com.android.chrome:id/menu_button",
+        "text": null,
+        "a11y_id": "Customize and control Google Chrome"
+      },
+      {
+        "type": "android.widget.ImageView",
+        "id": "com.android.chrome:id/toolbar_hairline",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.widget.FrameLayout",
+        "id": "com.android.chrome:id/toolbar_progress_bar_container",
+        "text": null,
+        "a11y_id": null
+      },
+      {
+        "type": "android.view.View",
+        "id": "com.android.chrome:id/edge_to_edge_bottom_chin",
+        "text": null,
+        "a11y_id": null
+      }
+    ],
+    "total": 25,
+    "truncated": false
+  },
+  "controls_missing": null,
+  "page_source": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/device/wiki-mobile-url-17e3a454/page-source/step-0001.xml",
+  "page_source_truncated": false,
+  "acts": []
+}

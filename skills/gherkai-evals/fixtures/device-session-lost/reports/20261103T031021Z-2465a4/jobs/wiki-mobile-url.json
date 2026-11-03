@@ -1,0 +1,110 @@
+{
+  "job": {
+    "scope_id": "wiki-mobile-url",
+    "scope_name": "wiki-mobile-url",
+    "engine": "midscene",
+    "scenarios": [
+      {
+        "id": "features/wiki_mobile.feature:23",
+        "name": "OpenAI 词条的地址精确核对",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "\"https://en.m.wikipedia.org/wiki/OpenAI\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "页面地址匹配 \"^https://en\\.m\\.wikipedia\\.org/wiki/OpenAI$\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 1500.0,
+    "target": {
+      "device": "android",
+      "ui_kind": "web"
+    },
+    "device_request": {
+      "provider": "aws-device-farm",
+      "billing_method": "METERED",
+      "project_arn": "arn:aws:devicefarm:us-west-2:111122223333:project:7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "acquire_timeout_s": 600.0,
+      "device_arn": "arn:aws:devicefarm:us-west-2::device:49DF63F491EE48C1B5B3944104705D62"
+    }
+  },
+  "status": "failed",
+  "duration_ms": 34844.68132816255,
+  "total_tokens": null,
+  "total_time_worked_s": null,
+  "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/c9bf9e57-1685-4c89-bafb-ff5af830be8a/00000",
+  "error_type": null,
+  "message": null,
+  "sessions": [
+    {
+      "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/c9bf9e57-1685-4c89-bafb-ff5af830be8a/00000",
+      "name": "gherkai:20261103T031021Z-2465a4:21e141c5e46697ab:1:wiki-mobile-url",
+      "origin": "created",
+      "release": "confirmed",
+      "observed_s": 128.495,
+      "provider_minutes": {
+        "total": 0,
+        "metered": 0,
+        "unmetered": 0
+      },
+      "device": {
+        "platform": "android",
+        "model": "Google Pixel 8a",
+        "osVersion": "14",
+        "unit": null
+      }
+    }
+  ],
+  "device_observed_s": 128.495,
+  "device_observed_missing": 0,
+  "report_refs": [
+    {
+      "kind": "device_session",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/device/wiki-mobile-url-17e3a454/device-session.json",
+      "label": null
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/wiki_mobile.feature:23",
+      "status": "failed",
+      "duration_ms": 33483.398334123194,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 11824.634198099375,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "failed",
+          "duration_ms": 21644.711145199835,
+          "votes": null,
+          "error_type": "assertion_failed",
+          "message": "页面地址应匹配 \"^https://en\\\\.m\\\\.wikipedia\\\\.org/wiki/OpenAI$\"，实际 \"https://en.wikipedia.org/wiki/OpenAI\"",
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/evidence/features_wiki_mobile.feature_23-131a1ca6/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}

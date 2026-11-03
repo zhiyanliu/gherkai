@@ -1,0 +1,99 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "wiki-browse",
+  "scenario_id": "features/wiki_mobile.feature:11",
+  "step_index": 2,
+  "step": {
+    "keyword": "When",
+    "text": "\"在搜索框输入 Python 并提交搜索\""
+  },
+  "status": "error",
+  "message": "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话",
+  "step_kind": "ai",
+  "url": null,
+  "url_missing": "error",
+  "controls": null,
+  "controls_missing": "error",
+  "page_source": null,
+  "page_source_truncated": false,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "在搜索框输入 Python 并提交搜索",
+      "vote": null,
+      "url": null,
+      "frames": [
+        {
+          "url": null,
+          "thought": "The Wikipedia mobile homepage is open, and the search icon is visible in the top header. To search for “Python” and submit it, I should first open the site search by tapping that icon.",
+          "actions": [
+            {
+              "name": "Planning/Plan",
+              "args": {
+                "userInstruction": "在搜索框输入 Python 并提交搜索",
+                "replanningCycleLimit": 12,
+                "imagesIncludeCount": 1,
+                "effort": "balance"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/report/screenshots/6f4e3207-ccbe-489c-9bc8-7b816f606ed6.jpeg"
+        },
+        {
+          "url": null,
+          "thought": null,
+          "actions": [
+            {
+              "name": "Planning/Locate",
+              "args": {
+                "prompt": "Wikipedia search icon in the top header",
+                "locatedPixelResult": {
+                  "center": [
+                    903,
+                    336
+                  ],
+                  "rect": {
+                    "left": 876,
+                    "top": 309,
+                    "width": 55,
+                    "height": 55
+                  }
+                }
+              }
+            }
+          ],
+          "screenshot": null
+        },
+        {
+          "url": null,
+          "thought": null,
+          "actions": [
+            {
+              "name": "Action Space/Tap",
+              "args": {
+                "locate": {
+                  "center": [
+                    903,
+                    336
+                  ],
+                  "description": "Wikipedia search icon in the top header",
+                  "rect": {
+                    "left": 876,
+                    "top": 309,
+                    "width": 55,
+                    "height": 55
+                  }
+                }
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/report/screenshots/6f4e3207-ccbe-489c-9bc8-7b816f606ed6.jpeg"
+        }
+      ],
+      "result": null,
+      "error": "WebDriverError: Device Farm session is not currently running arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/16fd2706-8baf-433b-82eb-8c7fada847da/00000 when running \"execute/sync\" with method \"POST\"",
+      "time_worked_s": null
+    }
+  ]
+}

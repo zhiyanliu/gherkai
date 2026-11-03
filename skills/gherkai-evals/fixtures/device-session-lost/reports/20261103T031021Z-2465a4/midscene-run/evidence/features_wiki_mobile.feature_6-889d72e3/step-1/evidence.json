@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "engine": "midscene",
+  "scope_id": "wiki-browse",
+  "scenario_id": "features/wiki_mobile.feature:6",
+  "step_index": 1,
+  "step": {
+    "keyword": "Then",
+    "text": "\"当前是 OpenAI 的维基百科词条页\""
+  },
+  "status": "passed",
+  "message": null,
+  "step_kind": "ai",
+  "url": "https://en.wikipedia.org/wiki/OpenAI",
+  "url_missing": null,
+  "acts": [
+    {
+      "index": 0,
+      "prompt": "当前是 OpenAI 的维基百科词条页",
+      "vote": true,
+      "url": "https://en.wikipedia.org/wiki/OpenAI",
+      "frames": [
+        {
+          "url": null,
+          "thought": "The screenshot shows the mobile Wikipedia page titled “OpenAI,” with the URL en.wikipedia.org/wiki/OpenAI visible and article content describing OpenAI.",
+          "actions": [
+            {
+              "name": "Insight/Boolean",
+              "args": {
+                "domIncluded": false,
+                "dataDemand": "当前是 OpenAI 的维基百科词条页"
+              }
+            }
+          ],
+          "screenshot": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/report/screenshots/8df90ecc-56cf-44be-a126-bce6db09762c.jpeg"
+        }
+      ],
+      "result": true,
+      "error": null,
+      "time_worked_s": null
+    }
+  ]
+}

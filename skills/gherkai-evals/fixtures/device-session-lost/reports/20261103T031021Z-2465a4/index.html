@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh"><head><meta charset="utf-8">
+<title>运行报告 20261103T031021Z-2465a4</title>
+<style>
+  body { font: 14px/1.5 -apple-system, system-ui, sans-serif; margin: 2rem; color: #1f2328; }
+  h1 { font-size: 1.2rem; }
+  h2 { font-size: 1rem; margin: 1.4rem 0 .5rem; }
+  .summary { padding: .6rem .9rem; border-left: 4px solid #9a6700; background: #f6f8fa; margin: 1rem 0; }
+  .status { font-weight: 700; color: #9a6700; text-transform: uppercase; }
+  .job { margin: .8rem 0; padding: .5rem .8rem; border: 1px solid #e1e4e8; border-radius: 6px; }
+  .jobhd b { text-transform: uppercase; font-size: .85em; }
+  .jobmeta { color: #57606a; font-size: .85em; margin: .2rem 0 .3rem 1.1rem; }
+  ul.scns, ul.steps { list-style: none; padding-left: 1.1rem; margin: .2rem 0; }
+  ul.steps { padding-left: 1.6rem; }
+  ul.scns li, ul.steps li { padding: .15rem 0; }
+  .scn { color: #1f2328; }
+  .stp { color: #57606a; }
+  .t { color: #8c959f; font-size: .85em; }
+  .votes { color: #0969da; font-size: .85em; }
+  .err { color: #cf222e; font-size: .85em; }
+  .note { color: #57606a; font-size: .85em; }
+  .taint { color: #9a6700; font-size: .85em; }
+  ul.refs { list-style: none; padding: 0; }
+  ul.refs li { padding: .35rem 0; border-bottom: 1px solid #eee; }
+  .dot { display: inline-block; width: .6rem; height: .6rem; border-radius: 50%; margin-right: .5rem; vertical-align: middle; }
+  .eng { color: #57606a; }
+  .kind { color: #8250df; font-size: .85em; }
+  code { background: #eff1f3; padding: .1rem .3rem; border-radius: 4px; }
+  .empty { color: #57606a; }
+  /* 判定明细树 ↔ 产物列表的双向关联：📎（树→产物）、↑（产物→树），点击平滑滚动 + 高亮落点 */
+  .clip, .uplink { text-decoration: none; font-size: .85em; }
+  .clip { color: #8250df; }
+  .uplink { color: #57606a; }
+  html { scroll-behavior: smooth; }
+  :target { background: #fff8c5; border-radius: 4px; box-shadow: 0 0 0 4px #fff8c5; }
+</style></head>
+<body>
+<h1>运行报告</h1>
+<div class="summary">
+  <div>run_id: <code>20261103T031021Z-2465a4</code></div>
+  <div>总状态: <span class="status">error</span> · 墙钟 296.4s · 成本 15189 tokens</div>
+</div>
+<h2>判定明细（2 job）</h2>
+<div class="job" id="node-j0"><div class="jobhd"><span class="dot" style="background:#9a6700"></span><code>wiki-browse</code> <b>error</b> <span class="err">session_lost: 远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话</span> <a class="clip" href="#ref-0" title="2 个报告产物">📎×2</a><div class="jobmeta">midscene · 墙钟 69.1s · 15189 tokens · 会话 <code>arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/16fd2706-8baf-433b-82eb-8c7fada847da/00000</code> · 设备 android Google Pixel 8a 14 · <a href="https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/7c9e6679-7425-40de-944b-e07fc1f90ae7/sessions/16fd2706-8baf-433b-82eb-8c7fada847da">设备控制台</a> · 设备占用 162.6s</div></div><ul class="scns"><li id="node-j0-s0"><span class="dot" style="background:#1a7f37"></span><span class="scn">features/wiki_mobile.feature:6</span> passed <span class="t">32.3s</span><ul class="steps"><li id="node-j0-s0-t0"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[0]</span> passed <span class="t">11.7s</span></li><li id="node-j0-s0-t1"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[1]</span> passed <span class="t">20.5s</span> <a class="clip" href="#ref-2" title="1 个报告产物">📎</a></li></ul></li><li id="node-j0-s1"><span class="dot" style="background:#9a6700"></span><span class="scn">features/wiki_mobile.feature:11</span> error <span class="t">36.5s</span><ul class="steps"><li id="node-j0-s1-t0"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[0]</span> passed <span class="t">11.4s</span></li><li id="node-j0-s1-t1"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[1]</span> passed <span class="t">17.2s</span> <a class="clip" href="#ref-3" title="1 个报告产物">📎</a></li><li id="node-j0-s1-t2"><span class="dot" style="background:#9a6700"></span><span class="stp">step[2]</span> error <span class="t">7.9s</span> <span class="err">session_lost: 远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话</span> <a class="clip" href="#ref-4" title="1 个报告产物">📎</a></li><li id="node-j0-s1-t3"><span class="dot" style="background:#8c959f"></span><span class="stp">step[3]</span> skipped <span class="t">?</span> <span class="taint">⚠ 因前置 step error 被跳过（未执行）</span></li></ul></li><li id="node-j0-s2"><span class="dot" style="background:#8c959f"></span><span class="scn">features/wiki_mobile.feature:18</span> skipped <span class="t">?</span><ul class="steps"><li id="node-j0-s2-t0"><span class="dot" style="background:#8c959f"></span><span class="stp">step[0]</span> skipped <span class="t">?</span> <span class="taint">未执行（scope 级错误，原因见 job 判定）</span></li><li id="node-j0-s2-t1"><span class="dot" style="background:#8c959f"></span><span class="stp">step[1]</span> skipped <span class="t">?</span> <span class="taint">未执行（scope 级错误，原因见 job 判定）</span></li></ul></li></ul></div>
+<div class="job" id="node-j1"><div class="jobhd"><span class="dot" style="background:#cf222e"></span><code>wiki-mobile-url</code> <b>failed</b> <a class="clip" href="#ref-5" title="1 个报告产物">📎</a><div class="jobmeta">midscene · 墙钟 34.8s · 会话 <code>arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/c9bf9e57-1685-4c89-bafb-ff5af830be8a/00000</code> · 设备 android Google Pixel 8a 14 · <a href="https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/7c9e6679-7425-40de-944b-e07fc1f90ae7/sessions/c9bf9e57-1685-4c89-bafb-ff5af830be8a">设备控制台</a> · 设备占用 128.5s</div></div><ul class="scns"><li id="node-j1-s0"><span class="dot" style="background:#cf222e"></span><span class="scn">features/wiki_mobile.feature:23</span> failed <span class="t">33.5s</span><ul class="steps"><li id="node-j1-s0-t0"><span class="dot" style="background:#1a7f37"></span><span class="stp">step[0]</span> passed <span class="t">11.8s</span></li><li id="node-j1-s0-t1"><span class="dot" style="background:#cf222e"></span><span class="stp">step[1]</span> failed <span class="t">21.6s</span> <span class="err">assertion_failed: 页面地址应匹配 &quot;^https://en\\.m\\.wikipedia\\.org/wiki/OpenAI$&quot;，实际 &quot;https://en.wikipedia.org/wiki/OpenAI&quot;</span> <a class="clip" href="#ref-6" title="1 个报告产物">📎</a></li></ul></li></ul></div>
+<h2>报告产物（7）——引擎原生产物 + 每个 AI 步骤的证据</h2>
+<ul class="refs">
+<li id="ref-0"><span class="dot" style="background:#9a6700"></span><code>wiki-browse</code> <a class="uplink" href="#node-j0" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[report]</span> <a href="midscene-run/report/appium-webdriver-2026-11-03_03-11-58-6e101c70.html">Midscene report</a></li>
+<li id="ref-1"><span class="dot" style="background:#9a6700"></span><code>wiki-browse</code> <a class="uplink" href="#node-j0" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[device_session]</span> <a href="midscene-run/device/wiki-browse-da5a7dfd/device-session.json">device_session</a></li>
+<li id="ref-2"><span class="dot" style="background:#9a6700"></span><code>wiki-browse · features/wiki_mobile.feature:6 · step[1]</code> <a class="uplink" href="#node-j0-s0-t1" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[evidence]</span> <a href="midscene-run/evidence/features_wiki_mobile.feature_6-889d72e3/step-1/evidence.json">evidence</a></li>
+<li id="ref-3"><span class="dot" style="background:#9a6700"></span><code>wiki-browse · features/wiki_mobile.feature:11 · step[1]</code> <a class="uplink" href="#node-j0-s1-t1" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[evidence]</span> <a href="midscene-run/evidence/features_wiki_mobile.feature_11-0bbb36dc/step-1/evidence.json">evidence</a></li>
+<li id="ref-4"><span class="dot" style="background:#9a6700"></span><code>wiki-browse · features/wiki_mobile.feature:11 · step[2]</code> <a class="uplink" href="#node-j0-s1-t2" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[evidence]</span> <a href="midscene-run/evidence/features_wiki_mobile.feature_11-0bbb36dc/step-2/evidence.json">evidence</a></li>
+<li id="ref-5"><span class="dot" style="background:#cf222e"></span><code>wiki-mobile-url</code> <a class="uplink" href="#node-j1" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[device_session]</span> <a href="midscene-run/device/wiki-mobile-url-17e3a454/device-session.json">device_session</a></li>
+<li id="ref-6"><span class="dot" style="background:#cf222e"></span><code>wiki-mobile-url · features/wiki_mobile.feature:23 · step[1]</code> <a class="uplink" href="#node-j1-s0-t1" title="定位到判定明细">↑</a> <span class="eng">midscene</span> <span class="kind">[evidence]</span> <a href="midscene-run/evidence/features_wiki_mobile.feature_23-131a1ca6/step-1/evidence.json">evidence</a></li>
+</ul>
+</body></html>

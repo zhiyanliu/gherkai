@@ -1,0 +1,251 @@
+{
+  "job": {
+    "scope_id": "wiki-browse",
+    "scope_name": "wiki-browse",
+    "engine": "midscene",
+    "scenarios": [
+      {
+        "id": "features/wiki_mobile.feature:6",
+        "name": "打开 OpenAI 词条",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "\"https://en.wikipedia.org/wiki/OpenAI\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "\"当前是 OpenAI 的维基百科词条页\""
+          }
+        ]
+      },
+      {
+        "id": "features/wiki_mobile.feature:11",
+        "name": "从首页搜索 Python",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "\"https://en.wikipedia.org/wiki/Main_Page\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "\"当前页面是英文维基百科的首页\""
+          },
+          {
+            "index": 2,
+            "keyword": "When",
+            "text": "\"在搜索框输入 Python 并提交搜索\""
+          },
+          {
+            "index": 3,
+            "keyword": "Then",
+            "text": "\"页面显示与 Python 相关的词条或搜索结果\""
+          }
+        ]
+      },
+      {
+        "id": "features/wiki_mobile.feature:18",
+        "name": "打开 Linux 词条",
+        "steps": [
+          {
+            "index": 0,
+            "keyword": "Given",
+            "text": "\"https://en.wikipedia.org/wiki/Linux\""
+          },
+          {
+            "index": 1,
+            "keyword": "Then",
+            "text": "\"当前是 Linux 的维基百科词条页\""
+          }
+        ]
+      }
+    ],
+    "assertion_votes": 1,
+    "timeout_s": 1500.0,
+    "target": {
+      "device": "android",
+      "ui_kind": "web"
+    },
+    "device_request": {
+      "provider": "aws-device-farm",
+      "billing_method": "METERED",
+      "project_arn": "arn:aws:devicefarm:us-west-2:111122223333:project:7c9e6679-7425-40de-944b-e07fc1f90ae7",
+      "acquire_timeout_s": 600.0,
+      "device_arn": "arn:aws:devicefarm:us-west-2::device:49DF63F491EE48C1B5B3944104705D62"
+    }
+  },
+  "status": "error",
+  "duration_ms": 69059.88007318228,
+  "total_tokens": 15189,
+  "total_time_worked_s": null,
+  "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/16fd2706-8baf-433b-82eb-8c7fada847da/00000",
+  "error_type": "session_lost",
+  "message": "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话",
+  "sessions": [
+    {
+      "session_id": "arn:aws:devicefarm:us-west-2:111122223333:session:7c9e6679-7425-40de-944b-e07fc1f90ae7/16fd2706-8baf-433b-82eb-8c7fada847da/00000",
+      "name": "gherkai:20261103T031021Z-2465a4:39b321b92c4ef7a7:1:wiki-browse",
+      "origin": "created",
+      "release": "confirmed",
+      "observed_s": 162.612,
+      "provider_minutes": {
+        "total": 0,
+        "metered": 0,
+        "unmetered": 0
+      },
+      "device": {
+        "platform": "android",
+        "model": "Google Pixel 8a",
+        "osVersion": "14",
+        "unit": null
+      }
+    }
+  ],
+  "device_observed_s": 162.612,
+  "device_observed_missing": 0,
+  "report_refs": [
+    {
+      "kind": "report",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/report/appium-webdriver-2026-11-03_03-11-58-6e101c70.html",
+      "label": "Midscene report"
+    },
+    {
+      "kind": "device_session",
+      "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/device/wiki-browse-da5a7dfd/device-session.json",
+      "label": null
+    }
+  ],
+  "scenarios": [
+    {
+      "scenario_id": "features/wiki_mobile.feature:6",
+      "status": "passed",
+      "duration_ms": 32288.976470008492,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 11733.121355995536,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 20545.702047646046,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/evidence/features_wiki_mobile.feature_6-889d72e3/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        }
+      ]
+    },
+    {
+      "scenario_id": "features/wiki_mobile.feature:11",
+      "status": "error",
+      "duration_ms": 36504.84456308186,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "passed",
+          "duration_ms": 11376.188000664115,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "passed",
+          "duration_ms": 17200.913480482996,
+          "votes": {
+            "yes": 1,
+            "total": 1
+          },
+          "error_type": null,
+          "message": null,
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/evidence/features_wiki_mobile.feature_11-0bbb36dc/step-1/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 2,
+          "status": "error",
+          "duration_ms": 7908.3012118935585,
+          "votes": null,
+          "error_type": "session_lost",
+          "message": "远程访问会话在执行中途结束，本 scope 余下的 step 未执行；可缩短 scope 或检查是否有人手动停止了会话",
+          "report_refs": [
+            {
+              "kind": "evidence",
+              "ref": "file://{{FIXTURE_ROOT}}/reports/20261103T031021Z-2465a4/midscene-run/evidence/features_wiki_mobile.feature_11-0bbb36dc/step-2/evidence.json",
+              "label": "evidence"
+            }
+          ],
+          "shortcircuited": false
+        },
+        {
+          "index": 3,
+          "status": "skipped",
+          "duration_ms": null,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": true
+        }
+      ]
+    },
+    {
+      "scenario_id": "features/wiki_mobile.feature:18",
+      "status": "skipped",
+      "duration_ms": null,
+      "report_refs": [],
+      "steps": [
+        {
+          "index": 0,
+          "status": "skipped",
+          "duration_ms": null,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        },
+        {
+          "index": 1,
+          "status": "skipped",
+          "duration_ms": null,
+          "votes": null,
+          "error_type": null,
+          "message": null,
+          "report_refs": [],
+          "shortcircuited": false
+        }
+      ]
+    }
+  ]
+}
