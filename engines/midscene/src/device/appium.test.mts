@@ -177,7 +177,7 @@ test("三个实例的超时与重试各自显式设定：建连取下限与剩�
   assert.deepEqual(remote!.options.capabilities, newSessionCapabilities(webReq()));
   assert.deepEqual(f.attaches.map((a) => a.options.connectionRetryTimeout), [EXEC_REQUEST_TIMEOUT_MS, PROBE_TIMEOUT_MS]);
   assert.equal(EXEC_REQUEST_TIMEOUT_MS, 180_000);
-  assert.equal(PROBE_TIMEOUT_MS, 15_000);
+  assert.equal(PROBE_TIMEOUT_MS, EXEC_REQUEST_TIMEOUT_MS);  // 探测实例与执行实例同一个超时（ADR 0052 分层表 ⑪）
   assert.deepEqual(f.attaches.map((a) => a.options.sessionId), ["0f0f-1", "0f0f-1"]);
   assert.equal(f.calls[0], "installLogMasking", "建第一个实例之前装好日志掩码");
 });

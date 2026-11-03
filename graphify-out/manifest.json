@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793695127.9186985,
-    "ast_hash": "6bb4b1a93385dd9a5f8a9a925365c5f3",
+    "mtime": 1793695741.6339839,
+    "ast_hash": "c7d44696f7ee9fb704a0169b4830cac8",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793695403.6663728,
-    "ast_hash": "fb626c9ab19439149b22da8ab333aee3",
+    "mtime": 1793695768.0716133,
+    "ast_hash": "a676763ab82d362b45cf661c664c02b1",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793695176.2115123,
-    "ast_hash": "61a51bb3e989c54877eb38b61a017613",
+    "mtime": 1793695860.9534292,
+    "ast_hash": "5b3e9364c7aa5fb60dd703d834a09a0f",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793695428.5468798,
-    "ast_hash": "3f1b7aee6491b8c2ab5b3fa4161cbd92",
+    "mtime": 1793695922.1506355,
+    "ast_hash": "08cd3fc71631e4865b58d14209e5050b",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
@@ -2135,8 +2135,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/appium.test.mts": {
-    "mtime": 1793445025.2412024,
-    "ast_hash": "83e2b9afa4081ad2002422adb20b7f1f",
+    "mtime": 1793695741.633808,
+    "ast_hash": "f77f549ed116fdaafb595ce9a30f5e15",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/device-session.mts": {
@@ -2170,8 +2170,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
-    "mtime": 1793669197.2407346,
-    "ast_hash": "77ed0e6e5d60bc036464c4a46f66cfe8",
+    "mtime": 1793695715.52144,
+    "ast_hash": "9c1f4121b8182f50e7d51869fa5f5fcb",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.test.mts": {
@@ -2185,8 +2185,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.mts": {
-    "mtime": 1793440743.0493162,
-    "ast_hash": "9ce55aa1a19d3a96336d895163054a18",
+    "mtime": 1793695741.6334758,
+    "ast_hash": "abef7e57e2189531f6b8efc51fa99b1a",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.test.mts": {
