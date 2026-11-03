@@ -251,7 +251,7 @@ export interface AppiumSession {
   currentContext(): Promise<string>;
   /** 生命周期通道：切回原生上下文。 */
   switchToNative(): Promise<void>;
-  /** 生命周期通道：经探测实例在原生上下文截图，受探测客户端的短超时约束（scenario 前的存活探测）；连接层错误与 502 / 503 / 504
+  /** 生命周期通道：经探测实例在原生上下文截图，受探测客户端的单请求超时约束（与执行实例同值；scenario 前的存活探测）；连接层错误与 502 / 503 / 504
    *  重试一次，超时与 500 不重试。 */
   probeScreenshot(): Promise<void>;
   /** 生命周期通道：原生上下文的 page source，受传入的截止信号约束；连接层错误与 502 / 503 / 504 在信号未中止时重试一次。 */

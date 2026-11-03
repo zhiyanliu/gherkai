@@ -415,7 +415,7 @@ class WdioAppiumSession implements ProbeableAppiumSession {
     await this.exec.switchContext(NATIVE_CONTEXT);
   }
 
-  /** 存活截图：经探测实例发出，受它的短超时约束；连接层错误与 502 / 503 / 504 重试一次（见模块头）。 */
+  /** 存活截图：经探测实例发出，受它的单请求超时约束（与执行实例同值）；连接层错误与 502 / 503 / 504 重试一次（见模块头）。 */
   async probeScreenshot(): Promise<void> {
     await retryReadOnce(() => this.probe.takeScreenshot());
   }

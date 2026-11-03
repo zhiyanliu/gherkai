@@ -240,7 +240,7 @@ export interface TargetSurface {
    *  返回 null 表示继续；返回 scope 级终止时 run-scope 经「scope 终止」出口收尾，这条与后续 scenario 不再发事件。
    *  - 桌面：恒返回 null；
    *  - 设备：上一条 scenario 里发生过结果未知（命令守卫置过结果未知标志，实现另记一个 scenario 级的记录）时，经生命周期通道
-   *    在原生上下文截图一次作存活探测（受探测客户端的短超时约束），失败先查一次会话状态：非 RUNNING 归 session_lost，RUNNING 归
+   *    在原生上下文截图一次作存活探测（受探测客户端的单请求超时约束，与执行实例同值），失败先查一次会话状态：非 RUNNING 归 session_lost，RUNNING 归
    *    engine_error；会话年龄已达 max_session_s 时直接返回 session_lost，不为让第一个 step 报错而开一条 scenario。 */
   preScenarioCheck(): Promise<ScopeTermination | null>;
 
