@@ -165,10 +165,10 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 场景 | 做法 | 判据与回写 |
 |---|---|---|
 | 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run；另在正常收尾的 `deleteSession` 发出之前与在途时各停止一次 | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5；正常收尾中途停止的两次，尚未发出的 `deleteSession` 不再发出、`device-session.json` 交给退出前的队列排空、在预算内尽力上传（预算内没传完时，本机后端留在本地产物目录） |
-| 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
-| 命令结果未知 | 让一条点击或输入命令在客户端超时 | 命令不被重复执行；下一条 scenario 开始前的截图存活探测按会话状态分流（ADR 0052 决策 6、ADR 0051 决策 12） |
-| 进程级兜底 | 让 newSession 的客户端超时以未处理的 Promise 拒绝形式出现 | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |
-| 脱敏 | 故意让建连失败一次；会话执行中外部停止一次（WebdriverIO 报 `UND_ERR_CLOSED`） | stderr（含 WebdriverIO 自身的日志）、事件、evidence、`device-session.json` 与原始控件树里的签名与端点令牌都已盖住（ADR 0051 决策 11） |
+| 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备；生产值的年龄后备要直接拉起 worker、把 job 预算置空（经 CLI 时 core 的超时催停先到），让一条每 30 秒发一次设备命令的确定性 step 执行超过 8880 秒 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
+| 命令结果未知 | 用测试构建把执行期单请求超时改成 20 秒（不能统一调到 1.5 秒：先撞上的是截图命令），再用确定性 step 发一条服务端执行时长超过它的 `mobile: longClickGesture`；真 Agent 的样本用测试构建丢弃第一条点按的回应 | 命令不被重复执行；下一条 scenario 开始前的截图存活探测按会话状态分流（ADR 0052 决策 6、ADR 0051 决策 12） |
+| 进程级兜底 | 用测试构建在首次 newSession 失败的那一刻注入一个没人处理的 Promise 拒绝（自然情况下 2 秒客户端超时不产生未处理拒绝） | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |
+| 脱敏 | 应用目标配一个内容随机的安装包让建连失败一次；网页目标用自写确定性 step 在 handler 里拼出带伪造签名类参数与隧道令牌的地址（步文本不带秘密形态）打开一个回显页并接一条故意失败的 AI 断言，再把经守卫代理读到的会话端点放进一条错误消息抛出；执行中外部停止一次；本机与云端后端各一遍，云端另核 CloudWatch 日志与事件表 | stderr（含 WebdriverIO 自身的日志）、事件、evidence、`device-session.json` 与原始控件树里的签名与端点令牌都已盖住（ADR 0051 决策 11） |
 
 ## 运行 spike（分段自检，可独立运行）
 

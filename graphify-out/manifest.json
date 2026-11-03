@@ -420,8 +420,8 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1793597850.4659638,
-    "ast_hash": "e33ef73354590d2e4d8ddd3c9b2400da",
+    "mtime": 1793684893.6524663,
+    "ast_hash": "33896ede3b45e05bcf07413da4ac9a02",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793669197.2417567,
-    "ast_hash": "2342e4be3a4fc96e62e39b84fd7e561d",
+    "mtime": 1793691893.2154338,
+    "ast_hash": "b07a44f62cc462b550ada99aacc01f73",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1793677657.2947814,
-    "ast_hash": "",
+    "mtime": 1793677937.6571414,
+    "ast_hash": "d8e8398ec517d8ad7ea1c24a8405f13c",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793670550.2664998,
-    "ast_hash": "15f2cddb7814d30c120bba6b108e1d77",
+    "mtime": 1793694402.6984675,
+    "ast_hash": "ebaa76a3f691175650606797e42e1e66",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1885,23 +1885,23 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793594601.1478674,
-    "ast_hash": "24b2f9b605d6505c88f6636d2d6c816b",
+    "mtime": 1793694380.2878916,
+    "ast_hash": "da4aa720896f4d35c747153db900c106",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793670550.2663677,
-    "ast_hash": "197d26b604c5ad0bf42ae60de197f4bc",
+    "mtime": 1793691751.1546018,
+    "ast_hash": "c3347445f77baf7f63705d9650eb8b6a",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1793458270.97176,
-    "ast_hash": "5a701bcf5e6c8ef55a6bae34274fba2d",
+    "mtime": 1793694402.698147,
+    "ast_hash": "88272cbc699584722b1c8fe7f0f92e1e",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793677719.7698717,
-    "ast_hash": "191e2f442daebc4196ea6b6ae4eae9da",
+    "mtime": 1793691821.4623888,
+    "ast_hash": "5a7a07ea44adbd0a0ddd87bf58c36838",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
