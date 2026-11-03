@@ -1,6 +1,6 @@
 # image_token_probe：截图缩放后的图片 token 探针
 
-ADR 0052 第 9 节「截图缩放降低 token」评估的离线第一步：不上真机，只向生产用的模型发请求，看同一张截图缩到不同尺寸后服务端计的 `prompt_tokens` 怎么变。它回答两个问题：Bedrock 对不带 `detail` 的图是否在服务端缩图（本仓库在签名前删掉了 `detail: "original"`）；图片 token 随尺寸下降的幅度，用来外推整个 job 的净降幅。
+「截图缩放降低 token」评估（结论见 ADR 0052 被拒方案节，换模型或 Midscene 改了缩后尺寸的范围校验时重议）的离线第一步：不上真机，只向生产用的模型发请求，看同一张截图缩到不同尺寸后服务端计的 `prompt_tokens` 怎么变。它回答两个问题：Bedrock 对不带 `detail` 的图是否在服务端缩图（本仓库在签名前删掉了 `detail: "original"`）；图片 token 随尺寸下降的幅度，用来外推整个 job 的净降幅。
 
 ## 运行
 
@@ -22,4 +22,4 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx ../../tools/image_token_probe.mts /pa
 - 若 k=2 的图片 token 不到 k=1 的 60%，说明服务端按发出的尺寸计费、缩放有效。
 - 若 k=2 与 k=1 接近，说明服务端已在内部缩图或按固定额计费，客户端缩放省不了 token，评估到此为止。
 
-外推 job 级净降幅要结合基线 run 的 `log/ai-profile-stats.log`（每次调用的 prompt / completion），见 `docs/journey/` 里截图缩放评估的进度总纲。
+外推 job 级净降幅要结合基线 run 的 `midscene-run/log/ai-profile-stats.log`（每次模型调用一行，含 prompt-tokens 与 completion-tokens）：按每次调用带一张图估图片占比，再按本表的降幅折算。2026-11-02 的读数与外推内联在 ADR 0052 被拒方案节。

@@ -65,7 +65,7 @@ import {
 } from "./app.mjs";
 import {
   ADDRESS_CAPTURE_BUDGET_MS, CONTROLS_CAPTURE_BUDGET_MS, CONTROLS_MAX_ITEMS, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES,
-  REPLACE_DEVICE_MIN_REMAINING_MS, replanningCycleLimit, screenshotShrinkFactor,
+  REPLACE_DEVICE_MIN_REMAINING_MS, replanningCycleLimit,
 } from "./limits.mjs";
 import {
   DEVICE_SESSION_REPORT_KIND, sessionEventSink, writeDeviceSessionFile,
@@ -145,8 +145,7 @@ export function restoreFailedMessage(tentative: TentativeVerdict): string {
  *  MIDSCENE_REPLANNING_CYCLE_LIMIT 的读法与非法值的报错都在那里，与 worker 启动期的校验同一份）；设备路径必须自己读这个键并经
  *  构造项传入，因为 SDK 的取值顺序是构造项优先于 env。桌面不经这里，SDK 按同名 env 自行处理。 */
 export function deviceAgentOpts(base: AgentOpt, env: NodeJS.ProcessEnv = process.env): AgentOpt {
-  const shrink = screenshotShrinkFactor(env);  // 实验开关（ADR 0052 第 9 节）：缺省 undefined，构造项不带这个键
-  return { ...base, replanningCycleLimit: replanningCycleLimit(env), ...(shrink === undefined ? {} : { screenshotShrinkFactor: shrink }) };
+  return { ...base, replanningCycleLimit: replanningCycleLimit(env) };
 }
 
 // ---- 端口：各设备模块对本模块提供的面 ----
@@ -766,10 +765,8 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     const candidates = c.webContextCandidates === null ? "" : `，候选 ${c.webContextCandidates} 个`;
     const scaleFrom = c.scaleSource === "device_screen_info" ? "取自设备屏幕信息"
       : c.scaleSource === "page_source" ? "由截图与应用窗口的尺寸换算" : "固定值";
-    const shrink = (this.cfg.agentOpts as { screenshotShrinkFactor?: number }).screenshotShrinkFactor;
-    const shrinkText = shrink === undefined ? "" : `；实验开关：送模型的截图缩到 1/${shrink}`;  // ADR 0052 第 9 节的评估项，缺省不设
     return `worker: 设备已就绪：${deviceText}；自动化驱动 ${appium.automationName}；网页上下文 ${web}${candidates}；` +
-      `坐标比例 ${c.scale}（${scaleFrom}）；Appium ${c.appiumVersion ?? "版本未知"}${shrinkText}`;
+      `坐标比例 ${c.scale}（${scaleFrom}）；Appium ${c.appiumVersion ?? "版本未知"}`;
   }
 
   // ---- 预热 ----

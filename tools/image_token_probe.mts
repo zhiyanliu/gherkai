@@ -1,4 +1,4 @@
-// 图片 token 探针：同一张截图缩到不同尺寸后，模型侧 prompt_tokens 怎么变（ADR 0052 第 9 节「截图缩放降低 token」评估的闸 0）。
+// 图片 token 探针：同一张截图缩到不同尺寸后，模型侧 prompt_tokens 怎么变（「截图缩放降低 token」评估的离线第一步；结论见 ADR 0052 被拒方案节，换模型时重议用）。
 //
 // 做什么：读一张或多张 PNG 截图，用与生产同一种编码（Midscene 的 resizeBase64ImageToJpeg，JPEG 质量 90）缩到给定的除数 k，
 // 对每个尺寸各发三类请求——「带图、无 detail」（生产的定位与规划请求经 lib/agentcore-sigv4 的方言适配后的形态）、「带图、detail
