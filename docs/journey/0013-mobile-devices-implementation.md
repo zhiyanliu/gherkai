@@ -68,15 +68,9 @@
 ## 实施期要核的点（ADR 已定、实施时顺手验证）
 
 - 0051 决策 13 的边缘策略由 gherkai 的隧道实现生成后，在三种浏览器上各走一次（设计阶段已用手写策略文件验过）。
-- 0051 决策 11 的脱敏：一次故意建连失败的真机执行，核报错文本里的签名与令牌已被盖住。
 - 0049 决策 8 的差集测试在 CI 里如何取得两个 worker 的能力自述（直接调起 `--capabilities`，或各 worker 自测同步维护的快照）。
 - 会话摘要投影的护栏测试（同步与推进器两条路径）：`attempted` 的 `session_opened` 不擦掉已记的真实 ARN；终结阶段交叠或重入时 `attempted` 只发一对、真实会话按 ARN 去重；`device_observed_s` 与 `device_observed_missing` 都不计 `attempted` 项，人读展示把它们标为「结果未知的创建尝试」。
 - 0034 终结真值表的双路径对拍测试：事件矩阵在设计阶段的行之外加「先判 abort、收尾期间 deadline 才到仍为 abort」与「无 ARN 的未知 Create 加取消」两行。
-- 0052 决策 6 命令守卫的实测：对缓存的元素句柄、提取出的方法与晚到回调的覆盖；旧执行的晚到命令与事件在下一 scenario 开始之后的表现。
-- iOS 26 上「探测超时 → 恢复原生上下文 → deepLink → READY」整链路。
-- 预热验收的三个失败分支实际触发：拒收 cookie、校验 401、请求失败。
-- 计费：起点、排队是否计费、`deviceMinutes` 是否实时累计；claim 到进入设备解析的启动开销；真实设备 scope 的执行耗时分布（校准 0051 决策 2 的 900 秒与 180 秒）。
+- 计费的两项未核：claim 到进入设备解析的启动开销（云端）；真实设备 scope 的执行耗时分布（校准 0051 决策 2 的 900 秒与 180 秒）。起点、排队、实时累计已核（0051 实测依据「计费起点与排队」）。
 - 控件摘要与 page source 的采集耗时与字节量。
-- Device Farm 接口形态：`ListDevices` 的 os 字段格式与 formFactor 取值；UNMETERED 无槽位时 Create 的行为；项目名唯一性与按名找回；`ListRemoteAccessSessions` 返回体是否带签名端点。
-- S3 同键 CopyObject 刷新后过期是否重新计时。
-- CloudTrail 的 RunTask 记录是否含 `containerOverrides`（0035 决策 5 的不脱敏清单依据）。
+- Device Farm 接口形态只剩一项未核：`ListRemoteAccessSessions` 返回体是否带签名端点（ListDevices 字段、UNMETERED 无槽位、项目名唯一性与按名找回都已核）。

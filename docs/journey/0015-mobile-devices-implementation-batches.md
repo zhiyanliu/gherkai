@@ -127,35 +127,9 @@
 
 **拍板记录（2026-11-01，owner 当面讨论）**：①获取期会话丢失与预算到期同时成立时 session_lost 优先（查状态确认），已落 ADR 0051 错误表与 code；②收起键盘：先注册「收起键盘」动作、真机确认后再把 Input 参数说明作兜底（顺序不能反，否则模型先走参数路线、动作在真机上测不到）。动作已注册并确认：三台真机模型都选用它、都不给 `autoDismissKeyboard`；Android 收起成功，iOS 18.6 驱动显式拒绝、iOS 26.3.1 静默无效。iOS 原语随后按 owner 拍板改为带固定候选键名表的 `mobile: hideKeyboard`（ADR 0052 决策 4），复跑后 iPhone 两代系统上驱动仍找不到键盘里的 Return 与键盘外的 Done（Safari 18.6 连 Done 条也点不到），这条驱动路线在 iPhone 上不可用；随后按 owner 同意的三件事落地：平台边界写进用户指南、动作执行后核键盘仍在即快速失败（ADR 0052 决策 7；iPhone 14 示例应用复跑确认一次收起即判定、用量约 3.0 万 token）、Safari 与 Android Chrome 复跑作正确样本。owner 随后拍板：iOS 收起路线改为自己从控件树定位收起控件并点击（附带子决策：标签表去掉 return，只点纯收起语义的键）。已落地（ADR 0052 决策 4）：读一次原生控件树选控件（键盘子树里 done / 完成 / hide keyboard / 收起键盘 / 隐藏键盘的键，否则紧贴键盘上方工具栏里的同类按钮），经类链查询取句柄后点击元素、多个句柄按矩形核对，点元素不点坐标（示例应用在两台 iPhone 上都是 375 乘 812 兼容窗口、控件树坐标是应用窗口坐标系）；真机五次复跑：Safari 两代通过（工具栏 Done）、示例应用两台快速失败（原语报没有收起控件）、Android 回归通过；顺带修正 W3C 元素引用键拼写（a52f 应为 a52e）、探测工具补认 keyboardShown；同僚复核（键盘系列与拍板落地批各一轮，加四轮闭合确认）的意见已全部落地并闭合，其中 CHANGELOG 链接护栏改为用 CommonMark 解析器提取目标。Input 参数说明的兜底（拍板记录②的 (a)）随后落地：参数说明替换为「用例要求时才给」、给了即与动作同一严格口径；真机三次复跑两条路线模型都会选、失败口径一致（ADR 0052 决策 7 与实测段）。收键盘一题至此闭合；③云端 job 预算维持从 claim 起算（ADR 0034 job timeout 节），用户文档写明并建议留余量；④被中止 job 的 explain 补已完成 step：已落地（ADR 0042 决策七）——explain 从事件流补取、本机同步 run 也落 events.db 并带退出记录、status --wait 对终态 run 不接力；本机真跑两次（中断后补取；协作停与强杀两种退出记录、终态守卫），同僚复核第 95 到 102 轮与一轮三视角对抗核验的意见全部落地，第 103 轮闭合确认通过；⑤AgentCore 浏览器会话的 sessionTimeoutSeconds 按 job 预算加 120 秒设定（ADR 0024）；⑥CHANGELOG 全文只写绝对 URL，加护栏测试（ADR 0039）；⑦清扫会话命令与 Nova 退出段看门狗保持候选。
 
-- E6 动作集的第三项（没有 Swipe 时模型能否用 Scroll 完成横向翻页）：不单独做 spike，随 engines/midscene/DEVELOPMENT.md「真机验收矩阵」节那一行核对；前两项已核过：①依据 SDK 1.15.1 源码核对，离线护栏锁住两平台实际注册出的清单；②由离线护栏核过（见 E6 条）
-- 获取期孤儿即停（F4）的证据边界：获取侧与终结交叠（换台或获取侧的 Get 在途、换台侧的 Stop 在途时进入终结）的结论只在虚拟时钟与假 Device Farm API 下验证过；真实 SDK 遇到已中止的信号是否在发出请求之前就拒绝，没有真跑核对（获取期孤儿的 Get / Stop 接获取预算的信号，进入终结时预算随即中止，在途的 Stop 可能没到服务端，所以释放阶段不假定它已生效、照常先 Get 再决定）。这种情形难以自然复现，真机验收时可用一次结果未知的 Create 制造孤儿，核对获取期即发 Stop、终结时这个会话的 session_closed 为 confirmed
-- 输入后收起键盘（F2）的真机观测项：见 engines/midscene/DEVELOPMENT.md「真机验收矩阵」节（输入后收起键盘一行）；离线测试只锁住命令形态、调用时机与失败处置
-- 全新会话、尚未导航时的探测时机（D9）：iOS 15.8、18.6 Safari 与 Android Chrome 刚建好会话时是否已有 WEBVIEW_<pid> 或 CHROMIUM 候选，作为真机验收矩阵的一行。若首次导航前候选为零，探测会把 iOS 15.8 判成「不提供」，转去走它不支持的 deepLink，导致预热失败；届时改探测为「先经探测实例导航预热地址再列上下文」并回写 ADR 0052 决策 5。这一点 mock 证明不了
-- Appium 服务端串行（D10）：iOS 26 行加观测项「探测实例的网页命令挂住后，执行实例的原生命令延迟多少」，结论回写 ADR 0052 决策 5
-- iOS 26 整条链路：探测超时 → 恢复原生上下文 → deepLink → READY，在真机验收矩阵里单列一行
-- 预热三个失败分支各真实触发一次：边缘拒收 cookie、校验 401、请求失败
-- 执行实例 connectionRetryCount=0 时，真实点击或输入在客户端超时后不被重复执行；结果未知处置后的截图存活探测；多个客户端实例共享 undici Agent 时执行实例先发命令、超时按其值生效（D11）
-- iOS Safari 上 remote() 返回前建连实例会读一次当前上下文：真机上核对这条请求确已改用执行实例的单请求超时，执行实例的长命令不被建连实例的封顶超时切断（ADR 0052 决策 6）——owner 定为不再真机核、记为边界（ADR 0052 实测依据「超时语义」段末：只由本机真实 webdriver 客户端的测试锁定，失效时的表现与归属已写明）
-- iOS 26 探测的重试：首次只读命令挂到探测实例超时之后，重试时列上下文与切入各自是否成功；重试的切入失败会判成「探测出错」而不是「不提供」，需回写 ADR 0052 决策 5 的判据（device_reprobe 记下每次尝试失败在哪一环）
-- 网关状态码与解析、路由失败的真实形态：Device Farm 网关是否真会回 502 / 503 / 504，域名解析与路由失败在生产上的错误形态（只读重试与状态码读回只在本机假 WebDriver 服务端加真实 webdriverio 10.0.2 上核过）
-- iOS 网页上下文的命名形态：用 tools/device_reprobe.mts 的 contexts 列表记下真机上出现的是 WEBVIEW_<pid> 还是 WEBVIEW_<pid>.<页号>，结论回写 ADR 0052 决策 5
-- Midscene 1.15.1 用真实的 Agent 加自写 AppiumInterface 时，适配器抛错并置 abortSignal 后，act 立即结束、零后续动作（spike 只用假界面验过）
-- SIGTERM 落在各阶段的表现：Create 在途、PENDING_CONCURRENCY 排队（E2 下也发 Stop）、释放中网络退化；终结四阶段在 Fargate stopTimeout 下能否收完，63.5s 是否够用，要在网络退化条件下校准
-- 正常收尾进行中收到 SIGTERM（终结升级为中断）：在 deleteSession 发出之前与在途时各发一次，另在 device-session.json 的实时上传在途时发一次（上传失败时核对文件已入队一次、worker 日志只有一行上传失败且不承诺再次上传），核对退出时间在宽限内、每个会话恰一条 session_closed、尚未发出的 deleteSession 不再发出、device-session.json 交给退出前的队列排空、在排空预算内尽力上传（ADR 0051 决策 5）
-- 释放阶段的网络退化：Get / Stop 的 2xx 响应体读到一半失败的形态（只在本机网络层模拟核过）；云端事件出口在退化网络下单条写入的耗时（attempted 一对与释放并行写出的前提）
-- 获取期的中止：activateApp 在途时收到 SIGTERM，在途命令返回后不再发应用状态查询（单测只锁住次序）
-- 进程级兜底：newSession 客户端超时触发 unhandledRejection 后能进入终结，会话不泄漏
-- 脱敏：故意建连失败一次、外部 Stop 一次（制造 UND_ERR_CLOSED），核对 stderr（含 webdriver logger 输出，E8）、事件、evidence、device-session.json 中的签名都已盖住
-- 终结核对扫到分页结束的真机耗时：真实项目里 ListRemoteAccessSessions 的每页耗时与页数（项目里历史会话多时），5 秒截止线内能否扫完；扫不完时还没命中的名字按 attempted 上报（误报方向）。获取期的核对没有单独的截止线，多翻的页推迟下一次 Create，耗时也要记下
-- 等待 RUNNING 期间被外部停止（会话在 PREPARING 时手动 Stop）：核对 scope_done{session_lost} 用准备阶段那句、newSession 零调用、session_closed 为 confirmed、释放阶段对这个会话零次 Get 与 Stop、observedS 止点为读到停止状态的时刻（后两项只在假 API 与虚拟时钟下核过）
-- session_lost 的两条路径：外部停止会话；会话年龄后备（可在测试构建里注入较小的年龄上限），以及 150 分钟边界上端点拒绝命令而 API 仍报 RUNNING 的情形
-- 应用分发：预签名 S3 地址配 appium:app 加 autoLaunch:false 与 noReset:true，再 activateApp、采样，以及换台重建；task role 下 HeadObject 缺失键返回 404
-- task role 的端到端使用（第 7 批遗留）：云端设备 run 里 Midscene task role 实际发出的 Device Farm 动作与应用桶读取都被放行、没有 AccessDenied（ADR 0033 的设备权限表）——已核（2026-11-01 第二次部署后的云端验证：三条设备 scope 按预期、日志零 AccessDenied，见下「部署后云端验证」段；第一次部署暴露的交互端点字面量授权已补进 IaC）
+- 正常收尾进行中收到 SIGTERM：`deleteSession` 发出之前与在途两种已核（亚秒窗口从外部分不出，记 0052 已知缺口）；只剩 `device-session.json` 的实时上传在途时发一次（只在云端产物上传时存在：核对文件已入队一次、worker 日志只有一行上传失败且不承诺再次上传）
 - 获取预算（deviceRequest.acquireTimeoutS）在并发排队与换台重建下是否够用，D13 各常量实施期校准
 - --capabilities 在容器镜像里不加载设备依赖、启动耗时不回退；Dockerfile 冒烟能拦住设备依赖缺失（D28）
-- 本机设备 run 的会话名带正确的 run_id（E7）
-- 桌面路径在接缝搬移与桌面会话事件（E1）之后，用 tools/e2e_harness.py 在本机与云端各真跑一次（Midscene 与 Nova 都要），对照事件与 evidence 无回归、每个会话成对 confirmed、job 不判 release_failed
-- 真机验收矩阵：Android 加两代 iOS，网页加应用，加故障演练
 
 **易错点**
 
@@ -166,5 +140,3 @@
 （4）脱敏规则已齐，缺的是出口：log()、bin 的 fatal 行、uploader 与 user-steps 的 logFn、device-session.json、page_source 都要经 `redactSecrets`（D30），WebdriverIO 自身 logger 经掩码（E8）。不要再改规则或另起参数名集合。
 
 另外两点：
-- 「真实 IAM 角色闭环」在 B8 已按表建角色逐项核过，真部署后 task role 的六个 devicefarm 动作与 ListBucket 形态也已核对。本批真跑还剩两项：云端设备 run 里 task role 的端到端使用（task role 实际发出这些设备动作，即原第 7 批 B8 唯一的剩余项，ADR 0051 实测依据与 ADR 0033 记为待真机验收时核对）；经 worker 代码路径走一遍 HeadObject 缺失键返回 404 与预签名。
-- 建议先写 guard、session-name、probe、step 顺序这四组测试，再动 run-scope；接缝形状（五个操作、四项义务）已在 ADR 0052 决策 2 定下。
