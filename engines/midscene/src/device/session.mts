@@ -470,12 +470,13 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
         // 已是 STOPPING / COMPLETED：按 Stop 规则即确认、不发 Stop，确认的时刻与设备分钟记进登记，释放阶段据此不再查询（observedS 的
         // 止点因此是读到停止状态的这一刻）。终结已接手时不记：那时这个会话由释放阶段按自己的截止线下结论（ADR 0051 决策 5）。
         if (!this.registry.closed) this.confirmStopped(this.registry.sessions.get(session.arn) ?? null, info);
-        // 还没有 step 开始。result 为 SKIPPED / FAILED 是服务商没有安排设备（如不计量方式没有槽位）：判据型失败归 precheck_failed、
-        // 消息带服务端说明；其余（含被人停止的 STOPPED、设备侧出错的 ERRORED）按会话丢失终止、用准备阶段那句，结果与说明只进日志
+        // 还没有 step 开始。COMPLETED 且 result 为 SKIPPED / FAILED 是服务商没有安排设备（如不计量方式没有槽位）：判据型失败归
+        // precheck_failed、消息带服务端说明；其余（STOPPING 不论 result；COMPLETED 而 result 为被人停止的 STOPPED、设备侧出错的 ERRORED）
+        // 按会话丢失终止、用准备阶段那句，结果与说明只进日志
         const reason = info?.message ? oneLineError(info.message) : "";
         const result = info?.result ? `，结果 ${info.result}` : "";
         this.log(`worker: 远程访问会话 ${session.arn} 在就绪之前就结束了（状态 ${status}${result}${reason ? `：${reason}` : ""}）`);
-        if (NOT_SCHEDULED_RESULTS.has(String(info?.result))) {
+        if (status === "COMPLETED" && NOT_SCHEDULED_RESULTS.has(String(info?.result))) {
           return { ok: false, termination: { errorType: "precheck_failed", message: sessionNotScheduledMessage(reason) } };
         }
         return { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } };

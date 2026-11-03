@@ -880,21 +880,34 @@ test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失�
   }
 });
 
-test("waitRunning：就绪之前读到 COMPLETED 且 result 为 SKIPPED / FAILED 即服务商没有安排设备——归 precheck_failed、消息带服务端说明；确认与设备分钟照样记进登记、不发 Stop", async () => {
+test("waitRunning：就绪之前读到 COMPLETED 且 result 为 SKIPPED / FAILED 即服务商没有安排设备——归 precheck_failed、消息带服务端说明；确认与设备分钟照样记进登记、不发 Stop；STOPPING 时不论 result 都仍按会话丢失", async () => {
   const reason = "Unable to schedule your run. Please make sure you have purchased unmetered device slots";
+  const minutes = { total: 0, metered: 0, unmetered: 0 };
   for (const result of ["SKIPPED", "FAILED"] as const) {
     const h = setup();
     const created = await h.clock.run(h.block.create(CHOICE, h.budget));
     assert.ok(created.ok);
     if (!created.ok) return;
     h.farm.getImpl = (_arn, signal) => h.clock.timers.sleep(300, signal)
-      .then(() => ({ status: "COMPLETED", result, message: reason }));
+      .then(() => ({ status: "COMPLETED", result, message: reason, deviceMinutes: minutes }));
     const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
     assert.deepEqual(got, { ok: false, termination: { errorType: "precheck_failed", message: sessionNotScheduledMessage(reason) } }, result);
     assert.ok(got.ok === false && got.termination.message.includes("unmetered device slots"), result);
     assert.equal(h.farm.ops("stop").length, 0, result);
-    assert.notEqual(h.block.registry.sessions.get(created.value.arn)!.confirmedAt, null, result);
+    const tracked = h.block.registry.sessions.get(created.value.arn)!;
+    assert.equal(tracked.confirmedAt, h.farm.ops("get")[0].at + 300, result);
+    assert.deepEqual(tracked.providerMinutes, minutes, result);
     assert.ok(h.logs.some((l) => l.includes(created.value.arn) && l.includes(result) && l.includes("unmetered")), h.logs.join("\n"));
+  }
+  // 还在 STOPPING：结果字段再像「没有安排」也不算，服务商还没给出最终结论，仍按会话丢失那句
+  for (const result of ["SKIPPED", "FAILED"] as const) {
+    const h = setup();
+    const created = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.ok(created.ok);
+    if (!created.ok) return;
+    h.farm.getImpl = (_arn, signal) => h.clock.timers.sleep(300, signal).then(() => ({ status: "STOPPING", result, message: reason }));
+    const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
+    assert.deepEqual(got, { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } }, `STOPPING+${result}`);
   }
 });
 
