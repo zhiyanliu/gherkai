@@ -1,6 +1,6 @@
 # gherkai
 
-**gherkai** 是一个 UI 自动化测试工具。测试用 Gherkin（`.feature` 文件）写成自然语言，由 AI 引擎（Midscene 或 Nova Act）读懂后，在 AWS Bedrock AgentCore 承载的云端浏览器里执行，并给出可复核的判定与证据。浏览器、模型与云端组件全部运行在你自己的 AWS 账户内，本机不需要安装浏览器。
+**gherkai** 是一个 UI 自动化测试工具。测试用 Gherkin（`.feature` 文件）写成自然语言，由 AI 引擎（Midscene 或 Nova Act）读懂后，在 AWS Bedrock AgentCore 承载的云端浏览器里执行，并给出可复核的判定与证据。浏览器、模型与云端组件全部运行在你自己的 AWS 账户内，本机不需要安装浏览器。标了 `@device` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行（Midscene 引擎），网页与原生应用都能测。
 
 一个 step 有三种执行路径：
 

@@ -1,6 +1,6 @@
 # gherkai
 
-用 Gherkin `.feature` 写 UI 端到端测试，交给 AI 浏览器引擎（Nova Act 或 Midscene）在云端浏览器里操作页面、判定断言。本包是 gherkai 的命令行入口：解析 `.feature`、按 tag 分组成可并发的 job、派给引擎执行、汇总每条用例的判定与报告。测试在你自己的 AWS 账户里运行，会产生真实 AWS 费用，金额以你的 AWS 账单为准。
+用 Gherkin `.feature` 写 UI 端到端测试，交给 AI 浏览器引擎（Nova Act 或 Midscene）在云端浏览器里操作页面、判定断言；标了 `@device` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行（Midscene 引擎）。本包是 gherkai 的命令行入口：解析 `.feature`、按 tag 分组成可并发的 job、派给引擎执行、汇总每条用例的判定与报告。测试在你自己的 AWS 账户里运行，会产生真实 AWS 费用，金额以你的 AWS 账单为准。
 
 ## 安装
 

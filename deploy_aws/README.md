@@ -1,6 +1,6 @@
 # gherkai-deploy-aws
 
-gherkai 的 AWS 部署 provider：一条命令在你自己的 AWS 账户里建齐 `gherkai --backend cloud` 所需的资源——运行状态表、事件表、产物桶、Fargate 集群、镜像仓库、让 run 在云端自动推进的后台组件、网络与最小权限角色——并把官方 worker 基础镜像同步进你账号的镜像仓库、登记成名为 `base` 的默认镜像（自己 build 的定制镜像用 `gherkai deploy push-worker` 推）。
+gherkai 的 AWS 部署 provider：一条命令在你自己的 AWS 账户里建齐 `gherkai --backend cloud` 所需的资源——运行状态表、事件表、产物桶、Fargate 集群、镜像仓库、让 run 在云端自动推进的后台组件、网络与最小权限角色、真机执行所用的 Device Farm 项目——并把官方 worker 基础镜像同步进你账号的镜像仓库、登记成名为 `base` 的默认镜像（自己 build 的定制镜像用 `gherkai deploy push-worker` 推）。
 
 只有部署方需要装；团队里只提交 run 的人不必装。
 
