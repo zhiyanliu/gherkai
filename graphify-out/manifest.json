@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793696741.515249,
-    "ast_hash": "754f596e1aeaee3ae8444859e0ea01d0",
+    "mtime": 1793697132.4414597,
+    "ast_hash": "504c822ecccebc919140d59e4743df6b",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2170,8 +2170,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.mts": {
-    "mtime": 1793696741.5158033,
-    "ast_hash": "e69a9e9e1de50b2a5ead4c00d233dbad",
+    "mtime": 1793697132.4416595,
+    "ast_hash": "750023d320ce050880d5fc73fbf86c15",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/limits.test.mts": {
@@ -2190,8 +2190,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/probe.test.mts": {
-    "mtime": 1793440910.5468636,
-    "ast_hash": "43d5505c744dab4f503107929bf8b11a",
+    "mtime": 1793697085.6289177,
+    "ast_hash": "d890909c2759d0530fbe6f910d9574b6",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/read-points.test.mts": {

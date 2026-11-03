@@ -404,7 +404,7 @@ test("应用目标固定原生上下文，不探测网页上下文；iOS 应用�
   assert.ok(!i.calls.some((c) => c.includes("getContexts")));
 });
 
-// ---- 独立的短超时实例，不用 Promise.race ----
+// ---- 独立的探测实例，不用 Promise.race ----
 
 test("探测的网页命令只由探测实例发出，探测本身不设放弃式计时：只读命令挂得再久也等它由客户端超时结束", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
@@ -415,7 +415,7 @@ test("探测的网页命令只由探测实例发出，探测本身不设放弃�
   const pending = h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
   for (let i = 0; i < 20 && !h.calls.includes("probe.getUrl"); i++) await new Promise((r) => setImmediate(r));
   assert.ok(h.calls.includes("probe.getUrl"));
-  // 远超短预算：若探测自己用计时器放弃这条命令，结论此时就已定下（不提供或探测出错）
+  // 远超探测实例的单请求超时：若探测自己用计时器放弃这条命令，结论此时就已定下（不提供或探测出错）
   t.mock.timers.tick(PROBE_TIMEOUT_MS * 10);
   for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
   release();
