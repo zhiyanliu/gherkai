@@ -86566,7 +86566,7 @@
       "label": "\u8fdb\u5ea6",
       "file_type": "document",
       "source_file": "docs/journey/0016-screenshot-shrink-evaluation.md",
-      "source_location": "L57",
+      "source_location": "L59",
       "_origin": "ast",
       "id": "docs_journey_0016_screenshot_shrink_evaluation_\u8fdb\u5ea6",
       "community": 407,
@@ -244243,7 +244243,7 @@
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0016-screenshot-shrink-evaluation.md",
-      "source_location": "L57",
+      "source_location": "L59",
       "weight": 1.0,
       "_origin": "ast",
       "source": "docs_journey_0016_screenshot_shrink_evaluation_\u622a\u56fe\u7f29\u653e\u5bf9\u8bbe\u5907\u76ee\u6807\u5b9a\u4f4d\u51c6\u786e\u7387\u7684\u8bc4\u4f30",
@@ -330564,5 +330564,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "793232a6d9f5811df0bbbeee8038ecacddc57e06"
+  "built_at_commit": "5d5a02ac9b94916dcb6469147f040bcc37cdcbda"
 }
