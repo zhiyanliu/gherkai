@@ -87,6 +87,14 @@ export const SESSION_LOST_MESSAGE =
  *  （ADR 0051 决策 4 的消息要求：发生了什么、为什么、怎么办）。 */
 export const SESSION_LOST_BEFORE_START_MESSAGE =
   "远程访问会话在准备设备时已结束，本 scope 的 step 都没有执行；请确认是否有人手动停止了会话，然后重新运行";
+/** 等待就绪期间读到 COMPLETED 且 result 为 SKIPPED / FAILED：服务商没有安排设备就结束了会话（实测形态：账号没有不计量设备槽位却以
+ *  UNMETERED 建会话，Create 受理后 2 秒 COMPLETED、result SKIPPED），是判据型失败、重新运行也不会变，归 precheck_failed 并把服务端的
+ *  说明带进消息（ADR 0051 决策 4）。reason 为空时只给头尾两句。 */
+export function sessionNotScheduledMessage(reason: string): string {
+  const head = "Device Farm 没有安排设备就结束了会话";
+  const tail = "请按说明核对配置（不计量方式需要账号里有对应平台的不计量设备槽位）与设备可用性，然后重新运行";
+  return reason === "" ? `${head}；${tail}` : `${head}：${reason}；${tail}`;
+}
 /** 能力探测出错时需要网页上下文的 step（ADR 0052 决策 5 的原文）。 */
 export const WEB_CONTEXT_PROBE_ERROR_MESSAGE = "未能确认设备是否提供网页上下文";
 /** 能力探测确认不提供网页上下文时需要它的 step（处置按 ADR 0051 决策 4 的类别表：改写为 AI 断言或换设备）。 */

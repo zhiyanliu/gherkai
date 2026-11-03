@@ -50,7 +50,7 @@ import type {
   AcquireBudget, DeviceChoice, DeviceFarmSessions, DevicePartsEnv, Outcome, RemoteSession, RunningSession,
 } from "./surface.mjs";
 // 接缝模块与本块互相 import：消息常量只在函数体内读，模块顶层不读（见 device/parts.mts 的装配约定）。
-import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
+import { SESSION_LOST_BEFORE_START_MESSAGE, sessionNotScheduledMessage } from "./surface.mjs";
 import type { ProviderMinutes, SessionDeviceInfo, SessionEventSink, SessionOpenedFact } from "./device-session.mjs";
 import { encode, runIdFromEnv } from "./session-name.mjs";
 import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_MS, busyBackoffMs } from "./limits.mjs";
@@ -138,6 +138,8 @@ export const RUNNING_POLL_INTERVAL_MS = DEVICE_RELIST_DELAY_MS;
 
 const RUNNING = "RUNNING";
 const STOPPED_STATUSES: ReadonlySet<string> = new Set(["STOPPING", "COMPLETED"]);
+/** 等待就绪期间读到停止状态时，表示服务商没有安排设备的 result 取值（ADR 0051 决策 4）；STOPPED（被人停止）与 ERRORED 不在内。 */
+const NOT_SCHEDULED_RESULTS: ReadonlySet<string> = new Set(["SKIPPED", "FAILED"]);
 /** 机型可用性里要排除的两种取值（ADR 0051 决策 3）。 */
 const UNAVAILABLE: ReadonlySet<string> = new Set(["BUSY", "TEMPORARY_NOT_AVAILABLE"]);
 
@@ -468,10 +470,14 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
         // 已是 STOPPING / COMPLETED：按 Stop 规则即确认、不发 Stop，确认的时刻与设备分钟记进登记，释放阶段据此不再查询（observedS 的
         // 止点因此是读到停止状态的这一刻）。终结已接手时不记：那时这个会话由释放阶段按自己的截止线下结论（ADR 0051 决策 5）。
         if (!this.registry.closed) this.confirmStopped(this.registry.sessions.get(session.arn) ?? null, info);
-        // 还没有 step 开始：按会话丢失终止，用准备阶段那句；Device Farm 的结果与说明只进日志，不进事件消息
+        // 还没有 step 开始。result 为 SKIPPED / FAILED 是服务商没有安排设备（如不计量方式没有槽位）：判据型失败归 precheck_failed、
+        // 消息带服务端说明；其余（含被人停止的 STOPPED、设备侧出错的 ERRORED）按会话丢失终止、用准备阶段那句，结果与说明只进日志
+        const reason = info?.message ? oneLineError(info.message) : "";
         const result = info?.result ? `，结果 ${info.result}` : "";
-        const detail = info?.message ? `：${oneLineError(info.message)}` : "";
-        this.log(`worker: 远程访问会话 ${session.arn} 在就绪之前就结束了（状态 ${status}${result}${detail}）`);
+        this.log(`worker: 远程访问会话 ${session.arn} 在就绪之前就结束了（状态 ${status}${result}${reason ? `：${reason}` : ""}）`);
+        if (NOT_SCHEDULED_RESULTS.has(String(info?.result))) {
+          return { ok: false, termination: { errorType: "precheck_failed", message: sessionNotScheduledMessage(reason) } };
+        }
         return { ok: false, termination: { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE } };
       }
       await this.timers.sleep(RUNNING_POLL_INTERVAL_MS, budget.signal);

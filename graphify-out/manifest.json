@@ -1060,8 +1060,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
-    "mtime": 1793691893.2154338,
-    "ast_hash": "b07a44f62cc462b550ada99aacc01f73",
+    "mtime": 1793695127.9186985,
+    "ast_hash": "6bb4b1a93385dd9a5f8a9a925365c5f3",
     "semantic_hash": ""
   },
   "engines/novaact/DEVELOPMENT.md": {
@@ -1420,8 +1420,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
-    "mtime": 1793458270.6745489,
-    "ast_hash": "35c8de73aba8016fdd6e486f903d562c",
+    "mtime": 1793695373.7714906,
+    "ast_hash": "b1ca0c46e4322e391194982a9d44cd50",
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
@@ -1440,8 +1440,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1793605585.3858843,
-    "ast_hash": "c343fa436fcfc33bd2441b72af0c6eb0",
+    "mtime": 1793695373.7718322,
+    "ast_hash": "c011c4921f443f4f4fb97e88d8f3f652",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1885,23 +1885,23 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793694380.2878916,
-    "ast_hash": "da4aa720896f4d35c747153db900c106",
+    "mtime": 1793695403.6663728,
+    "ast_hash": "fb626c9ab19439149b22da8ab333aee3",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793691751.1546018,
-    "ast_hash": "c3347445f77baf7f63705d9650eb8b6a",
+    "mtime": 1793695176.2115123,
+    "ast_hash": "61a51bb3e989c54877eb38b61a017613",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1793694402.698147,
-    "ast_hash": "88272cbc699584722b1c8fe7f0f92e1e",
+    "mtime": 1793695127.9184835,
+    "ast_hash": "4144dafdb4408fba31ed68291654ac9b",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793691821.4623888,
-    "ast_hash": "5a7a07ea44adbd0a0ddd87bf58c36838",
+    "mtime": 1793695428.5468798,
+    "ast_hash": "3f1b7aee6491b8c2ab5b3fa4161cbd92",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
@@ -2210,18 +2210,18 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.mts": {
-    "mtime": 1793456413.5558836,
-    "ast_hash": "39b9bc01108bbaa2e371f45adaf1b276",
+    "mtime": 1793695307.8515816,
+    "ast_hash": "f80cfb3855f15fa5f9c00a9e028abc7f",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/session.test.mts": {
-    "mtime": 1793456783.972078,
-    "ast_hash": "fde159964a978771f1e386461c79611d",
+    "mtime": 1793695326.252859,
+    "ast_hash": "177b51673a328485ecf63b9c4fc7f3a9",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.mts": {
-    "mtime": 1793669274.7954564,
-    "ast_hash": "d540a2fe3edf1634335630517b9527d4",
+    "mtime": 1793695293.3459747,
+    "ast_hash": "8a68b81eecf5614e3c519ff2d74d49bd",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/surface.test.mts": {

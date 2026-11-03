@@ -18,7 +18,7 @@ import {
 import { encode, RUN_ID_ENV } from "./session-name.mjs";
 import { sessionEventSink } from "./device-session.mjs";
 import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_MS, busyBackoffMs } from "./limits.mjs";
-import { SESSION_LOST_BEFORE_START_MESSAGE, type AcquireBudget, type DevicePartsEnv } from "./surface.mjs";
+import { SESSION_LOST_BEFORE_START_MESSAGE, sessionNotScheduledMessage, type AcquireBudget, type DevicePartsEnv } from "./surface.mjs";
 import type { Job } from "../lib/job-source.mjs";
 
 // ---- 虚拟时钟 ----
@@ -877,6 +877,24 @@ test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失�
     assert.equal(h.emitted.filter((e) => e.type === "session_closed").length, 0, status);
     const line = h.logs.find((l) => l.includes(created.value.arn) && l.includes(status));
     assert.ok(line && line.includes("device setup failed") && line.includes("ERRORED"), h.logs.join("\n"));
+  }
+});
+
+test("waitRunning：就绪之前读到 COMPLETED 且 result 为 SKIPPED / FAILED 即服务商没有安排设备——归 precheck_failed、消息带服务端说明；确认与设备分钟照样记进登记、不发 Stop", async () => {
+  const reason = "Unable to schedule your run. Please make sure you have purchased unmetered device slots";
+  for (const result of ["SKIPPED", "FAILED"] as const) {
+    const h = setup();
+    const created = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.ok(created.ok);
+    if (!created.ok) return;
+    h.farm.getImpl = (_arn, signal) => h.clock.timers.sleep(300, signal)
+      .then(() => ({ status: "COMPLETED", result, message: reason }));
+    const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
+    assert.deepEqual(got, { ok: false, termination: { errorType: "precheck_failed", message: sessionNotScheduledMessage(reason) } }, result);
+    assert.ok(got.ok === false && got.termination.message.includes("unmetered device slots"), result);
+    assert.equal(h.farm.ops("stop").length, 0, result);
+    assert.notEqual(h.block.registry.sessions.get(created.value.arn)!.confirmedAt, null, result);
+    assert.ok(h.logs.some((l) => l.includes(created.value.arn) && l.includes(result) && l.includes("unmetered")), h.logs.join("\n"));
   }
 });
 
