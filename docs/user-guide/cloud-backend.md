@@ -180,7 +180,7 @@ aws ecr delete-repository --repository-name gherkai-midscene-worker --force
 
 worker 镜像映射与默认 variant 指针这两族 SSM 参数也不随 destroy 删除：同前缀重建后它们还记着上一套环境里的 variant。ECR 仓库还在的话，重新 `gherkai deploy` 会把这些 variant 按原镜像重新登记、照样可用；ECR 仓库也删了的话，这些 variant 变成有记录、没镜像，提交时以退出码 2 结束并提示找不到镜像，重推同名 variant 即恢复。想彻底清空，用 `aws ssm get-parameters-by-path --path /gherkai-backend/worker-image --recursive --query 'Parameters[].Name' --output text` 列出后逐条 `aws ssm delete-parameter --name …`，再删 `/gherkai-backend/worker-default`。
 
-部署时建立的 Device Farm 项目 `gherkai-devices` 也不随 destroy 删除：它由 `gherkai deploy` 在部署 stack 之前建立、不属于 stack，项目连同其中的远程访问会话记录与录像一起保留（会话录像与日志由 AWS 保留 400 天、上传的安装包 30 天，到期自动删除，见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)），SSM 里记着项目 ARN 的 `/gherkai-backend/device-farm-project` 参数则随 stack 删除。项目留着时，同一前缀重新部署会按名称找回并沿用它，不会冲突。不再需要时手动删除：
+部署时建立的 Device Farm 项目 `gherkai-devices` 也不随 destroy 删除：它由 `gherkai deploy` 在部署 stack 之前建立、不属于 stack，项目连同其中的远程访问会话记录与录像一起保留（会话录像与日志由 AWS 保留 400 天，到期自动删除，见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)），SSM 里记着项目 ARN 的 `/gherkai-backend/device-farm-project` 参数则随 stack 删除。项目留着时，同一前缀重新部署会按名称找回并沿用它，不会冲突。不再需要时手动删除：
 
 ```bash
 aws devicefarm list-projects --region us-west-2 --query "projects[?name=='gherkai-devices'].arn" --output text   # 查出项目 ARN
