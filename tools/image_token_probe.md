@@ -17,7 +17,7 @@ AWS_REGION=us-east-1 node_modules/.bin/tsx ../../tools/image_token_probe.mts /pa
 
 ## 读数
 
-表的最后一列是「图片 token 估算」= 带图请求的 `prompt_tokens` 均值减纯文本对照均值。判读：
+表的最后一列「图片 token 估算」是带图请求的 `prompt_tokens` 均值减去纯文本对照的均值。判读：
 
 - 若 k=2 的图片 token 不到 k=1 的 60%，说明服务端按发出的尺寸计费、缩放有效。
 - 若 k=2 与 k=1 接近，说明服务端已在内部缩图或按固定额计费，客户端缩放省不了 token，评估到此为止。

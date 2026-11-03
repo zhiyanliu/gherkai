@@ -33,7 +33,7 @@
 物化与快照不联网、不装东西、不碰 AWS；只有 `--prepare-cli` 构建并联网取依赖。
 
 `--snapshot` 是物化的逆操作（录 fixture 用）：拷贝 features/ steps/ reports/，把项目目录的绝对路径（含 file:// 形态）换成
-占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用），把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
+占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用）与 events.db（事件流 SQLite，二进制里带录制机路径与真实账号），把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
 最后扫一遍不得再有绝对路径。录制约束：录时 feature 必须用**相对路径**调用（scope_id / scenario_id 与 jobs/ 文件名里都带
 它，绝对路径进了文件名占位符救不了），且 cwd 为项目目录、`--report-dir reports`。
 """
@@ -353,7 +353,7 @@ def snapshot(project: Path, case: str) -> None:
                     leaks.append(f"{p.relative_to(dst)}:{i}")
     if leaks:
         fail("快照里仍有绝对路径（占位符没覆盖到）：\n  " + "\n  ".join(leaks[:20]))
-    print(f"快照 → {dst}：删 {dropped} 个日志、裁 {images} 张截图、占位符替换 {replaced} 个文件", file=sys.stderr)
+    print(f"快照 → {dst}：删 {dropped} 个日志与事件库、裁 {images} 张截图、占位符替换 {replaced} 个文件", file=sys.stderr)
 
 
 def main() -> None:

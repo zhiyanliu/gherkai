@@ -1195,8 +1195,8 @@
     "semantic_hash": "5f643feb054c0f76c10ded4f3eb9aa51"
   },
   "skills/gherkai-evals/materialize.py": {
-    "mtime": 1793610692.1871307,
-    "ast_hash": "1d71e976a78abaf9983a8e74d500b5c1",
+    "mtime": 1793670550.2672358,
+    "ast_hash": "fc7c87deaff7d5aabe900770be1bbe86",
     "semantic_hash": ""
   },
   "tools/render_skill_contract.py": {
@@ -1205,8 +1205,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/SKILL.md": {
-    "mtime": 1793611208.0022383,
-    "ast_hash": "9dedce6d036e258ce87eb6e717aa1942",
+    "mtime": 1793669766.4094183,
+    "ast_hash": "c9476baaf66fbafe2d8eb2ab264a6c42",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
@@ -1220,8 +1220,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/engines.md": {
-    "mtime": 1793613517.9201632,
-    "ast_hash": "4d87a5f938422c42e2650bfa625430ae",
+    "mtime": 1793669731.8431838,
+    "ast_hash": "1e7db6b1c0ff45cc2c7a58d713e8de82",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1793613485.5896482,
-    "ast_hash": "6105a7e4b9687bad85aa73b1eac5d465",
+    "mtime": 1793669732.58354,
+    "ast_hash": "a4ff58729c2bc4e63ffe5542c471ab1e",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1335,8 +1335,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1793503218.7027237,
-    "ast_hash": "917b56847d7812603d66494af3ce0389",
+    "mtime": 1793670550.2658927,
+    "ast_hash": "c322d32f539c58516b7e03f25850d416",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1415,8 +1415,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1793607531.2874029,
-    "ast_hash": "026adbf73677e41dc4e4fde8eaae9995",
+    "mtime": 1793670550.2666163,
+    "ast_hash": "499c90c6c0295f0a9acd06932bfaf92c",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793607531.2871096,
-    "ast_hash": "c649bedd1f46b1b2de32a616eda666fb",
+    "mtime": 1793670550.2664998,
+    "ast_hash": "15f2cddb7814d30c120bba6b108e1d77",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1450,8 +1450,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
-    "mtime": 1793534876.8504028,
-    "ast_hash": "9b59fe6a2b90331239b48f76255fd09a",
+    "mtime": 1793670550.2668817,
+    "ast_hash": "d78c8d9fcbdf60374a986f2d9be37581",
     "semantic_hash": ""
   },
   "tools/build_diagrams.mjs": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793669285.2210581,
-    "ast_hash": "5d9a0c90e61ca0794447e1d03b3af1d7",
+    "mtime": 1793670550.2663677,
+    "ast_hash": "197d26b604c5ad0bf42ae60de197f4bc",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2365,8 +2365,8 @@
     "semantic_hash": ""
   },
   "tools/image_token_probe.md": {
-    "mtime": 1793669197.241896,
-    "ast_hash": "ee1e5d86bac275dd7d70897c52028c11",
+    "mtime": 1793670550.2661543,
+    "ast_hash": "3015a93b96cddb066aa9705e8432662e",
     "semantic_hash": ""
   }
 }
