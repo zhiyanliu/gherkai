@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793762208.9858398,
-    "ast_hash": "25d325ef6e0445969a52c88ecb276c70",
+    "mtime": 1793762625.3786783,
+    "ast_hash": "465d54d80310bbd07fb35df2ca2547f6",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
