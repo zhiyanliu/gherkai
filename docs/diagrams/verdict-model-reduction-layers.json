@@ -3,6 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "判定的逐层归约：一票 → run",
+    "output": "verdict-model-reduction-layers.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "viewBox": [
@@ -125,7 +126,7 @@
       "title": "直链之外的三处旁路",
       "items": [
         "上游 step 报 error 后被跳过的 step 不进入 scenario 归约",
-        "job 命中任一收场判据（启动前被 fail-fast 中止、被主动中止、非零退出或内容不全、worker 自报 scope 级 error）时直接定态，不做 scenario 归约",
+        "job 命中任一收场判据（启动前 run 已被中止（fail-fast 或使用方中断）、被主动中止、非零退出或内容不全、worker 自报 scope 级 error）时直接定态，不做 scenario 归约",
         "run 层在归约入口先滤掉不构成结论的状态"
       ]
     }

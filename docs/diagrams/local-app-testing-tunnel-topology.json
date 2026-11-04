@@ -3,6 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "隧道拓扑与流量方向",
+    "output": "local-app-testing-tunnel-topology.html",
     "locale": "zh-CN",
     "quality_profile": "showcase"
   },
@@ -12,24 +13,42 @@
       "type": "external",
       "label": "第三方域资源",
       "sublabel": "页面引用的外部域",
-      "pos": [60, 90],
-      "size": [186, 72]
+      "pos": [
+        60,
+        90
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "outsider",
       "type": "external",
       "label": "公网访问者",
       "sublabel": "不带凭据",
-      "pos": [360, 90],
-      "size": [186, 72]
+      "pos": [
+        360,
+        90
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "browser",
       "type": "cloud",
       "label": "云端浏览器会话",
       "sublabel": "两个后端共用",
-      "pos": [60, 280],
-      "size": [186, 72]
+      "pos": [
+        60,
+        280
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "edge",
@@ -37,8 +56,14 @@
       "label": "隧道服务商边缘",
       "sublabel": "分配公网地址",
       "tag": "校验凭据",
-      "pos": [360, 280],
-      "size": [186, 72]
+      "pos": [
+        360,
+        280
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "tunnel",
@@ -46,43 +71,68 @@
       "label": "隧道进程",
       "sublabel": "出站长连",
       "tag": "不开入站端口",
-      "pos": [660, 280],
-      "size": [186, 72]
+      "pos": [
+        660,
+        280
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "app",
       "type": "backend",
       "label": "被测应用",
       "sublabel": "本机或局域网主机",
-      "pos": [960, 280],
-      "size": [186, 72]
+      "pos": [
+        960,
+        280
+      ],
+      "size": [
+        186,
+        72
+      ]
     },
     {
       "id": "cli",
       "type": "frontend",
       "label": "gherkai 命令行",
       "sublabel": "启动隧道并换地址",
-      "pos": [660, 440],
-      "size": [186, 72]
+      "pos": [
+        660,
+        440
+      ],
+      "size": [
+        186,
+        72
+      ]
     }
   ],
   "boundaries": [
     {
       "kind": "region",
       "label": "云端（浏览器所在）",
-      "wraps": ["browser"],
+      "wraps": [
+        "browser"
+      ],
       "pad": 20
     },
     {
       "kind": "region",
       "label": "隧道服务商（公网侧）",
-      "wraps": ["edge"],
+      "wraps": [
+        "edge"
+      ],
       "pad": 20
     },
     {
       "kind": "region",
       "label": "CLI 所在机器",
-      "wraps": ["tunnel", "cli"],
+      "wraps": [
+        "tunnel",
+        "cli"
+      ],
       "pad": 20
     }
   ],
@@ -138,7 +188,7 @@
       "items": [
         "实线链是请求方向，响应沿同一路径返回",
         "隧道为出站长连，本机不开入站端口",
-        "命令行负责隧道启停，不转发流量"
+        "命令行负责启动隧道，不转发流量"
       ]
     },
     {
@@ -154,7 +204,7 @@
       "dot": "rose",
       "title": "边缘闸门",
       "items": [
-        "公网地址由服务商边缘分配，每个 run 更换",
+        "公网地址由服务商边缘分配",
         "凭据随机生成、每个 run 更换，由边缘校验",
         "不带凭据的请求无法到达本机"
       ]

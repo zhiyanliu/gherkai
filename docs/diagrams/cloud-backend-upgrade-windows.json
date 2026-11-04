@@ -3,81 +3,186 @@
   "diagram_type": "sequence",
   "meta": {
     "title": "升级三步与两段降级窗口",
+    "output": "cloud-backend-upgrade-windows.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
-    "viewBox": [980, 940],
+    "viewBox": [
+      980,
+      972
+    ],
     "legend": {
       "mode": "auto",
       "entries": {
-        "default": { "label": "正常放行" },
-        "emphasis": { "label": "升级动作" },
-        "security": { "label": "被拒" }
+        "default": {
+          "label": "正常放行"
+        },
+        "emphasis": {
+          "label": "升级动作"
+        },
+        "security": {
+          "label": "被拒"
+        }
       }
     }
   },
   "participants": [
-    { "id": "deployer", "type": "frontend", "label": "部署方 CLI", "sublabel": "发起升级的机器" },
-    { "id": "backend", "type": "backend", "label": "云端后端", "sublabel": "保存版本戳" },
-    { "id": "registry", "type": "cloud", "label": "你的 ECR 仓库", "sublabel": "worker 镜像" },
-    { "id": "member", "type": "frontend", "label": "其他成员 CLI", "sublabel": "延后升级" }
+    {
+      "id": "deployer",
+      "type": "frontend",
+      "label": "部署方 CLI",
+      "sublabel": "发起升级的机器"
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "云端后端",
+      "sublabel": "保存版本戳"
+    },
+    {
+      "id": "registry",
+      "type": "cloud",
+      "label": "你的 ECR 仓库",
+      "sublabel": "worker 镜像"
+    },
+    {
+      "id": "member",
+      "type": "frontend",
+      "label": "其他成员 CLI",
+      "sublabel": "延后升级"
+    }
   ],
   "segments": [
-    { "from": 158, "to": 220, "label": "升级前：三方同版本" },
-    { "from": 250, "to": 356, "label": "第 1 步之后进入窗口一：仅拒部署方本机" },
-    { "from": 500, "to": 652, "label": "第 2 步之后进入窗口二：仅拒已升级提交者" },
-    { "from": 750, "to": 858, "label": "第 3 步之后恢复" }
+    {
+      "from": 158,
+      "to": 220,
+      "label": "升级前：三方同版本"
+    },
+    {
+      "from": 250,
+      "to": 356,
+      "label": "第 1 步之后进入窗口一：仅拒部署方本机"
+    },
+    {
+      "from": 509,
+      "to": 670,
+      "label": "第 2 步之后进入窗口二：仅拒已升级提交者"
+    },
+    {
+      "from": 768,
+      "to": 876,
+      "label": "第 3 步之后恢复"
+    }
   ],
   "messages": [
     {
-      "from": "deployer", "to": "backend", "y": 192, "label": "提交与镜像命令放行", "variant": "default",
+      "from": "deployer",
+      "to": "backend",
+      "y": 192,
+      "label": "提交与镜像命令放行",
+      "variant": "default",
       "note": "两侧同版本，提交前检查放行"
     },
     {
-      "from": "deployer", "to": "backend", "y": 282, "label": "提交与镜像命令被拒", "variant": "security",
+      "from": "deployer",
+      "to": "backend",
+      "y": 282,
+      "label": "提交与镜像命令被拒",
+      "variant": "security",
       "note": "第 1 步仅升级本机：CLI 新于后端一律拒绝，无放行选项"
     },
     {
-      "from": "member", "to": "backend", "y": 328, "label": "提交放行", "variant": "default",
+      "from": "member",
+      "to": "backend",
+      "y": 328,
+      "label": "提交放行",
+      "variant": "default",
       "note": "该成员未升级，仍与后端同版本"
     },
     {
-      "from": "deployer", "to": "backend", "y": 402, "label": "第 2 步：部署后端", "variant": "emphasis",
+      "from": "deployer",
+      "to": "backend",
+      "y": 402,
+      "label": "第 2 步：部署后端",
+      "variant": "emphasis",
       "note": "写入新版本戳；部署自身不做版本比对，窗口一内可执行"
     },
     {
-      "from": "deployer", "to": "registry", "y": 448, "label": "同步新版本基础镜像", "variant": "emphasis",
+      "from": "deployer",
+      "to": "registry",
+      "y": 457,
+      "label": "同步新版本基础镜像",
+      "variant": "emphasis",
       "note": "本版本已有的 variant 按记录重新派生"
     },
     {
-      "from": "deployer", "to": "backend", "y": 532, "label": "variant 尚无镜像", "variant": "security",
+      "from": "deployer",
+      "to": "backend",
+      "y": 541,
+      "label": "variant 尚无镜像",
+      "variant": "security",
       "note": "仅在默认指向自定义 variant、或提交时显式指定时出现"
     },
     {
-      "from": "member", "to": "backend", "y": 578, "label": "提交放行", "variant": "default",
+      "from": "member",
+      "to": "backend",
+      "y": 587,
+      "label": "提交放行",
+      "variant": "default",
       "note": "镜像标签含提交者本机的 CLI 版本，该成员仍解析到旧版本镜像（提交记录格式与后端相同时）"
     },
     {
-      "from": "member", "to": "backend", "y": 624, "label": "升级后同样被拒", "variant": "security",
-      "note": "第 3 步先升级成员 CLI：升级后与部署方同处窗口二"
+      "from": "member",
+      "to": "backend",
+      "y": 642,
+      "label": "升级后同样被拒",
+      "variant": "security",
+      "note": "提前升级的成员：第 3 步重推完成前与部署方同处窗口二"
     },
     {
-      "from": "deployer", "to": "registry", "y": 698, "label": "第 3 步：重推 variant", "variant": "emphasis",
-      "note": "部署方从新版本基础镜像重建后推送；不可提前到部署之前"
+      "from": "deployer",
+      "to": "registry",
+      "y": 716,
+      "label": "第 3 步：重推 variant",
+      "variant": "emphasis",
+      "note": "测试开发从新版本基础镜像重建，部署方推送；不可提前到部署之前"
     },
     {
-      "from": "deployer", "to": "backend", "y": 782, "label": "提交与镜像命令恢复", "variant": "default",
+      "from": "deployer",
+      "to": "backend",
+      "y": 800,
+      "label": "提交与镜像命令恢复",
+      "variant": "default",
       "note": "自定义 variant 在新版本已有镜像"
     },
     {
-      "from": "member", "to": "backend", "y": 828, "label": "提交放行", "variant": "default",
+      "from": "member",
+      "to": "backend",
+      "y": 846,
+      "label": "提交放行",
+      "variant": "default",
       "note": "三方同版本，两段窗口均已关闭"
     }
   ],
   "activations": [
-    { "participant": "backend", "from": 394, "to": 422, "type": "backend" },
-    { "participant": "registry", "from": 440, "to": 462, "type": "cloud" },
-    { "participant": "registry", "from": 690, "to": 712, "type": "cloud" }
+    {
+      "participant": "backend",
+      "from": 394,
+      "to": 422,
+      "type": "backend"
+    },
+    {
+      "participant": "registry",
+      "from": 449,
+      "to": 471,
+      "type": "cloud"
+    },
+    {
+      "participant": "registry",
+      "from": 708,
+      "to": 730,
+      "type": "cloud"
+    }
   ],
   "cards": [
     {
@@ -114,7 +219,7 @@
       "items": [
         "后端版本戳取自发起该次部署的 CLI，故先升级本机再部署",
         "重推 variant 提前到部署之前，即推到后端尚不识别的版本标签下",
-        "两段窗口中被拒的是同一种拒绝，按顺序执行即恢复"
+        "两段窗口里被拒的命令都以退出码 2 结束，按顺序执行即恢复"
       ]
     }
   ]

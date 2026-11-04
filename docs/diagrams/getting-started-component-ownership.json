@@ -3,6 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "部件归属：本机与 AWS 账户",
+    "output": "getting-started-component-ownership.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -125,13 +126,27 @@
       ]
     },
     {
+      "id": "device",
+      "type": "cloud",
+      "label": "Device Farm 真机",
+      "sublabel": "设备 scope 使用",
+      "pos": [
+        900,
+        640
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
       "id": "app",
       "type": "external",
       "label": "被测应用",
-      "sublabel": "浏览器需可访问",
+      "sublabel": "浏览器或真机需可访问",
       "pos": [
-        900,
-        650
+        560,
+        640
       ],
       "size": [
         186,
@@ -157,7 +172,8 @@
       "wraps": [
         "worker_cloud",
         "model",
-        "browser"
+        "browser",
+        "device"
       ],
       "pad": 24
     }
@@ -236,11 +252,47 @@
       "toSide": "right"
     },
     {
+      "id": "local-to-device",
+      "from": "worker_local",
+      "to": "device",
+      "label": "创建远程访问会话并驱动",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          493,
+          790
+        ],
+        [
+          993,
+          790
+        ]
+      ]
+    },
+    {
+      "id": "cloud-to-device",
+      "from": "worker_cloud",
+      "to": "device",
+      "label": "同样创建并驱动",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
       "id": "browser-visits-app",
       "from": "browser",
       "to": "app",
       "label": "访问页面",
-      "labelDy": 84
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "device-opens-app",
+      "from": "device",
+      "to": "app",
+      "label": "打开网页或启动应用",
+      "fromSide": "left",
+      "toSide": "right",
+      "labelDx": -12
     }
   ],
   "cards": [
@@ -250,7 +302,7 @@
       "items": [
         "本机后端：worker 为本机子进程",
         "云端后端：worker 以任务形式在账户内运行",
-        "两个后端使用同一套引擎，对浏览器会话与模型服务的调用一致",
+        "两个后端使用同一套引擎，对浏览器会话、真机与模型服务的调用一致",
         "仅提交到云端时无需安装本机 worker"
       ]
     },

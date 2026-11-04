@@ -3,6 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "执行与推进全景：run / submit × local / cloud",
+    "output": "run-execution.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "views": [
@@ -32,7 +33,7 @@
           "exitWatch",
           "settle"
         ],
-        "note": "同一个循环换云端载体：任务在云端执行、事件经轮询读回。关闭 CLI 只是放弃接收结果，任务继续运行并持续计费。"
+        "note": "同一个循环换云端载体：任务在云端执行、事件经轮询读回。按 Ctrl-C 或对 CLI 发 SIGTERM 时，CLI 请求停止云端任务并等它们收尾；CLI 进程被强制结束时，任务继续运行并持续计费。"
       },
       {
         "id": "submit-local",
@@ -303,7 +304,8 @@
       "label": "submit：落库即返回",
       "variant": "default",
       "role": "branch",
-      "toSide": "left"
+      "toSide": "left",
+      "labelDy": 13
     },
     {
       "id": "e-bg-step",
@@ -311,7 +313,8 @@
       "to": "stepOnce",
       "label": "反复推进到收敛",
       "variant": "default",
-      "role": "branch"
+      "role": "branch",
+      "labelDy": 7
     },
     {
       "id": "e-cloudfn-step",
@@ -355,7 +358,8 @@
         ]
       ],
       "labelSegment": 0,
-      "labelDx": -52
+      "labelDx": -52,
+      "labelDy": 11
     },
     {
       "id": "e-dispatch-cloud",
@@ -389,7 +393,7 @@
       "id": "e-pipe-store",
       "from": "pipeLocal",
       "to": "storeLocal",
-      "label": "后台：旁路落库",
+      "label": "旁路落库（前台也写）",
       "variant": "dashed",
       "role": "async",
       "route": "straight"
@@ -409,7 +413,11 @@
       "to": "settle",
       "label": "前台：在线消费",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "channelY": 197,
+      "labelDy": 13
     },
     {
       "id": "e-store-settle",
@@ -419,8 +427,7 @@
       "variant": "dashed",
       "role": "async",
       "route": "straight",
-      "labelDx": -55.6,
-      "labelDy": 61
+      "labelDy": 34
     },
     {
       "id": "e-table-settle",
@@ -428,7 +435,11 @@
       "to": "settle",
       "label": "前台：分段轮询",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "channelY": 289,
+      "labelDy": 13
     },
     {
       "id": "e-stream-settle",
@@ -436,7 +447,9 @@
       "to": "settle",
       "label": "唤醒推进至收敛",
       "variant": "dashed",
-      "role": "async"
+      "role": "async",
+      "fromSide": "top",
+      "toSide": "bottom"
     },
     {
       "id": "e-local-exit",
@@ -446,7 +459,8 @@
       "variant": "security",
       "role": "branch",
       "fromSide": "bottom",
-      "toSide": "top"
+      "toSide": "left",
+      "labelDy": 13
     },
     {
       "id": "e-cloud-exit",

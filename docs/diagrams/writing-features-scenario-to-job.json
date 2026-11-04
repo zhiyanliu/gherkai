@@ -3,6 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "scenario 归成 job：分组与并发上限",
+    "output": "writing-features-scenario-to-job.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -208,7 +209,7 @@
       "dot": "cyan",
       "title": "分组的两条规则",
       "items": [
-        "标注同一 scope 名的 scenario 合成一个 job：共享一个浏览器会话，按书写顺序串行执行",
+        "标注同一 scope 名的 scenario 合成一个 job：共享一个会话，按书写顺序串行执行",
         "未标注的 scenario 逐条成为一个 job，编号形如「文件路径:行号」"
       ]
     },

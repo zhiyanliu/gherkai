@@ -3,6 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "五层全景：从用例文本到被测应用",
+    "output": "architecture-overview-layers.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -124,10 +125,24 @@
       ]
     },
     {
+      "id": "devicefarm",
+      "type": "cloud",
+      "label": "Device Farm 真机",
+      "sublabel": "每个设备 scope 一个远程访问会话",
+      "pos": [
+        380,
+        640
+      ],
+      "size": [
+        220,
+        76
+      ]
+    },
+    {
       "id": "app",
       "type": "external",
       "label": "被测应用",
-      "sublabel": "公网站点 或 本机 / 内网",
+      "sublabel": "网站（公网 / 本机 / 内网）或移动应用",
       "pos": [
         1020,
         640
@@ -182,9 +197,10 @@
     },
     {
       "kind": "region",
-      "label": "④ 浏览器层",
+      "label": "④ 承载层：云端浏览器或真机",
       "wraps": [
-        "browser"
+        "browser",
+        "devicefarm"
       ],
       "pad": 20
     },
@@ -261,6 +277,15 @@
       "toSide": "top"
     },
     {
+      "id": "midscene-appium",
+      "from": "midscene",
+      "to": "devicefarm",
+      "label": "Appium 连入（设备目标）",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
       "id": "browser-app",
       "from": "browser",
       "to": "app",
@@ -281,6 +306,25 @@
       "labelDy": 20
     },
     {
+      "id": "devicefarm-app",
+      "from": "devicefarm",
+      "to": "app",
+      "label": "打开网页或启动应用",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "bottom",
+      "via": [
+        [
+          490,
+          790
+        ],
+        [
+          1130,
+          790
+        ]
+      ]
+    },
+    {
       "id": "cli-deploy",
       "from": "cli",
       "to": "deploy",
@@ -293,11 +337,12 @@
   "cards": [
     {
       "dot": "cyan",
-      "title": "两个引擎对称",
+      "title": "两个引擎协议相同、目标各自声明",
       "items": [
         "平级、同一套协议：核心不感知 worker 的实现语言",
-        "scenario 未标引擎时采用命令行指定的缺省引擎",
-        "两个引擎的模型为当前值，真源在代码常量"
+        "scope 内的 scenario 都未标引擎时采用缺省引擎（由命令行或项目配置文件指定）",
+        "两个引擎的模型为当前值，真源在代码常量",
+        "设备目标只有 Midscene 支持，由能力自述声明"
       ]
     },
     {

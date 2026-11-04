@@ -3,6 +3,7 @@
   "diagram_type": "sequence",
   "meta": {
     "title": "提交时刻固定 worker 身份，之后照抄",
+    "output": "cloud-backend-carriers-revision-pinning.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",
@@ -118,21 +119,21 @@
     {
       "from": "ops",
       "to": "taskdef",
-      "y": 532,
+      "y": 536,
       "label": "注册新 revision",
       "note": "从模板复制，镜像栏按新 digest"
     },
     {
       "from": "ops",
       "to": "ssm",
-      "y": 584,
+      "y": 592,
       "label": "覆盖映射",
       "note": "覆盖语义、最后写者赢；下一次提交才解析到新映射"
     },
     {
       "from": "ops",
       "to": "taskdef",
-      "y": 636,
+      "y": 648,
       "label": "标记退休",
       "note": "只标记、不注销；注销待回收侧放行"
     },
@@ -180,7 +181,7 @@
     {
       "participant": "ops",
       "from": 474,
-      "to": 644,
+      "to": 656,
       "type": "external"
     },
     {

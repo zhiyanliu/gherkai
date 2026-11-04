@@ -3,6 +3,7 @@
   "diagram_type": "sequence",
   "meta": {
     "title": "云端超时处置：从定时器到点到停止 worker",
+    "output": "execution-timeout-chain.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "column_fit": "spread",

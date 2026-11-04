@@ -3,23 +3,41 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "两个真值源、一个岔口：本机后端由目录决定，云端后端由镜像决定",
+    "output": "deterministic-steps-truth-sources.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
-    "viewBox": [1080, 520],
+    "viewBox": [
+      1080,
+      520
+    ],
     "legend": {
       "mode": "auto",
       "entries": {
-        "default": { "label": "本机后端流向：目录载体" },
-        "emphasis": { "label": "云端后端流向：镜像载体" }
+        "default": {
+          "label": "本机后端流向：目录载体"
+        },
+        "emphasis": {
+          "label": "云端后端流向：镜像载体"
+        }
       }
     }
   },
   "stages": [
-    { "label": "项目 steps 目录" },
-    { "label": "提交之前：构建并推送" },
-    { "label": "提交时刻" },
-    { "label": "随 run 的定义" },
-    { "label": "worker 进程内" }
+    {
+      "label": "项目 steps 目录"
+    },
+    {
+      "label": "提交之前：构建并推送"
+    },
+    {
+      "label": "提交时刻"
+    },
+    {
+      "label": "随 run 的定义"
+    },
+    {
+      "label": "worker 进程内"
+    }
   ],
   "nodes": [
     {

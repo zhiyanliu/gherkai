@@ -3,6 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "一条确定性 step 的四段路径：写 · 装 · 查 · 执行",
+    "output": "deterministic-steps-registry-overview.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -182,10 +183,7 @@
       "to": "dispatch",
       "label": "每步先查表",
       "variant": "emphasis",
-      "role": "main",
-      "fromSide": "top",
-      "toSide": "top",
-      "channelY": 325
+      "role": "main"
     }
   ],
   "cards": [

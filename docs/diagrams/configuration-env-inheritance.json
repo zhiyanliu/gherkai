@@ -3,6 +3,7 @@
   "diagram_type": "dataflow",
   "meta": {
     "title": "环境变量归属与继承",
+    "output": "configuration-env-inheritance.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {
@@ -104,7 +105,7 @@
       "sublabel": "Fargate 上的 worker",
       "stage": 4,
       "row": 1,
-      "yOffset": -14,
+      "yOffset": -18,
       "tag": "云端"
     }
   ],
@@ -163,6 +164,7 @@
       "label": "注入",
       "classification": "run --backend cloud",
       "variant": "emphasis",
+      "labelDx": 108,
       "labelDy": 36
     },
     {

@@ -3,6 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "gherkai 运行拓扑：本机后端与云端后端",
+    "output": "readme-runtime-topology.html",
     "locale": "zh-CN",
     "quality_profile": "showcase"
   },
@@ -94,12 +95,27 @@
       ]
     },
     {
+      "id": "devices",
+      "type": "cloud",
+      "label": "Device Farm 真机",
+      "sublabel": "Android / iOS",
+      "tag": "每个分组一个远程访问会话",
+      "pos": [
+        700,
+        470
+      ],
+      "size": [
+        186,
+        72
+      ]
+    },
+    {
       "id": "app_public",
       "type": "external",
       "label": "公网被测应用",
       "pos": [
         990,
-        260
+        60
       ],
       "size": [
         186,
@@ -113,7 +129,7 @@
       "sublabel": "仅在你的网络内可达",
       "pos": [
         990,
-        440
+        365
       ],
       "size": [
         186,
@@ -136,7 +152,8 @@
       "label": "你的 AWS 账户内的托管服务",
       "wraps": [
         "model",
-        "browser"
+        "browser",
+        "devices"
       ],
       "pad": 20
     }
@@ -190,8 +207,19 @@
       "from": "browser",
       "to": "app_public",
       "label": "公网直达",
-      "fromSide": "right",
-      "toSide": "left"
+      "fromSide": "top",
+      "toSide": "bottom",
+      "via": [
+        [
+          793,
+          196
+        ],
+        [
+          1083,
+          196
+        ]
+      ],
+      "labelDx": 40
     },
     {
       "id": "open-local",
@@ -199,14 +227,57 @@
       "to": "app_local",
       "label": "经隧道回本机",
       "variant": "dashed",
-      "fromSide": "bottom",
+      "fromSide": "right",
+      "toSide": "top",
+      "via": [
+        [
+          1083,
+          296
+        ]
+      ]
+    },
+    {
+      "id": "drive-device",
+      "from": "worker",
+      "to": "devices",
+      "label": "Appium",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "device-open-public",
+      "from": "devices",
+      "to": "app_public",
+      "label": "公网直达",
+      "fromSide": "right",
+      "toSide": "right",
+      "via": [
+        [
+          1210,
+          506
+        ],
+        [
+          1210,
+          96
+        ]
+      ],
+      "labelSegment": 0
+    },
+    {
+      "id": "device-open-local",
+      "from": "devices",
+      "to": "app_local",
+      "label": "经隧道回本机",
+      "variant": "dashed",
+      "fromSide": "top",
       "toSide": "left",
       "via": [
         [
           793,
-          476
+          401
         ]
-      ]
+      ],
+      "labelSegment": 0
     },
     {
       "id": "write-results",
@@ -251,8 +322,8 @@
       "dot": "amber",
       "title": "费用与数据边界",
       "items": [
-        "模型与云端浏览器均在你自己的 AWS 账户内",
-        "费用来自模型调用与云端浏览器会话",
+        "模型、云端浏览器与 Device Farm 真机均在你自己的 AWS 账户内",
+        "费用来自模型调用、云端浏览器会话与设备分钟",
         "用例预检为纯本地执行，不产生费用"
       ]
     }

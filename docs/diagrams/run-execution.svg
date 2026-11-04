@@ -1,4 +1,5 @@
-<svg viewBox="0 0 1138 652" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase" style="" width="1138" height="652" xmlns="http://www.w3.org/2000/svg"><style>
+<?xml version="1.0" encoding="UTF-8"?>
+<svg viewBox="0 0 1157 652" data-layout-contract="readable-v2" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" style="--flow-cycle: 6.403s; width: 1157px; height: 652px; min-width: 0px;" width="1157" height="652" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -133,15 +134,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD; }
   
 svg { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace; }
-:root, [data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
-[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --text-muted: #64748b; --text-dim: #94a3b8; --text-faint: #64748b; --panel: #ffffff; --panel-border: #e2e8f0; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #94a3b8; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; }
+:root, [data-theme="dark"] { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
+[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; }
 [data-preset="signal-flow"][data-theme="dark"] { --bg: #030711; --grid: #15233a; --panel: rgba(6, 14, 28, 0.78); --panel-border: #1d3350; --lane-fill: rgba(9, 22, 40, 0.5); --lane-stroke: #2c4564; --text: #f5fbff; --text-muted: #9eb0c7; --text-dim: #52667f; --text-faint: #7890ad; --mask: #07101e; --frontend-fill: rgba(6, 182, 212, 0.14); --frontend-stroke: #67e8f9; --backend-fill: rgba(16, 185, 129, 0.14); --backend-stroke: #5eead4; --database-fill: rgba(139, 92, 246, 0.16); --database-stroke: #c4b5fd; --cloud-fill: rgba(245, 158, 11, 0.13); --cloud-stroke: #fcd34d; --security-fill: rgba(244, 63, 94, 0.13); --security-stroke: #fda4af; --messagebus-fill: rgba(249, 115, 22, 0.13); --messagebus-stroke: #fdba74; --external-fill: rgba(71, 85, 105, 0.24); --external-stroke: #a5b4c7; --arrow: #7890ad; --arrow-emphasis: #2dd4bf; --toolbar-bg: rgba(7, 16, 30, 0.86); --toolbar-border: #29415f; --toolbar-menu-bg: #07101e; }
 [data-preset="signal-flow"][data-theme="light"] { --bg: #f4f9fc; --grid: #d4e5ee; --panel: rgba(255, 255, 255, 0.82); --panel-border: #bfd5e2; --lane-fill: rgba(232, 243, 248, 0.62); --lane-stroke: #a9c5d5; --text: #102638; --text-muted: #587287; --text-dim: #8aa2b4; --text-faint: #668397; --mask: #ffffff; --frontend-fill: rgba(6, 182, 212, 0.09); --frontend-stroke: #0789a1; --backend-fill: rgba(5, 150, 105, 0.09); --backend-stroke: #087f69; --database-fill: rgba(124, 58, 237, 0.09); --database-stroke: #7254c7; --cloud-fill: rgba(217, 119, 6, 0.08); --cloud-stroke: #b9670b; --security-fill: rgba(225, 29, 72, 0.08); --security-stroke: #c53a59; --messagebus-fill: rgba(234, 88, 12, 0.08); --messagebus-stroke: #c65f27; --external-fill: rgba(100, 116, 139, 0.1); --external-stroke: #607a8c; --arrow: #7b97aa; --arrow-emphasis: #0d9488; }
 [data-preset="blueprint"][data-theme="dark"] { --bg: #06131f; --grid: #17425a; --panel: rgba(7, 27, 43, 0.9); --panel-border: #27627f; --lane-fill: rgba(10, 43, 66, 0.36); --lane-stroke: #34799a; --text: #e3f6ff; --text-muted: #91b8ca; --text-dim: #557e92; --text-faint: #739caf; --mask: #0a2031; --frontend-fill: rgba(26, 157, 193, 0.14); --frontend-stroke: #66d9ef; --backend-fill: rgba(31, 155, 124, 0.13); --backend-stroke: #69dfbd; --database-fill: rgba(120, 105, 196, 0.14); --database-stroke: #b4a8ff; --cloud-fill: rgba(197, 145, 43, 0.13); --cloud-stroke: #ffd166; --security-fill: rgba(199, 76, 104, 0.13); --security-stroke: #ff8da1; --messagebus-fill: rgba(207, 112, 49, 0.13); --messagebus-stroke: #ffad66; --external-fill: rgba(84, 119, 139, 0.18); --external-stroke: #a7cad9; --arrow: #78a3b7; --arrow-emphasis: #64dfc1; --toolbar-bg: rgba(7, 28, 45, 0.92); --toolbar-border: #34799a; --toolbar-text: #d8f3ff; --toolbar-hover: rgba(18, 58, 83, 0.95); --toolbar-menu-bg: #0a2031; }
 [data-preset="blueprint"][data-theme="light"] { --bg: #edf7fa; --grid: #b5d5e1; --panel: rgba(249, 253, 255, 0.94); --panel-border: #78aabd; --lane-fill: rgba(210, 232, 240, 0.42); --lane-stroke: #83b2c4; --text: #123344; --text-muted: #4e7486; --text-dim: #86a6b4; --text-faint: #668c9d; --mask: #f9fdff; --frontend-fill: rgba(8, 145, 178, 0.08); --frontend-stroke: #087f9c; --backend-fill: rgba(5, 128, 101, 0.08); --backend-stroke: #08755f; --database-fill: rgba(100, 75, 180, 0.08); --database-stroke: #6757a8; --cloud-fill: rgba(181, 120, 15, 0.08); --cloud-stroke: #a86609; --security-fill: rgba(190, 48, 80, 0.07); --security-stroke: #b32f50; --messagebus-fill: rgba(196, 81, 22, 0.07); --messagebus-stroke: #b65120; --external-fill: rgba(79, 112, 128, 0.08); --external-stroke: #506f7e; --arrow: #6d93a5; --arrow-emphasis: #087f69; --toolbar-bg: rgba(247, 252, 254, 0.94); --toolbar-border: #8ab5c5; --toolbar-text: #294f61; --toolbar-hover: #ffffff; --toolbar-menu-bg: #f9fdff; }
 [data-preset="editorial"][data-theme="dark"] { --bg: #181611; --grid: #39342a; --panel: rgba(35, 31, 24, 0.96); --panel-border: #625a4a; --lane-fill: rgba(52, 46, 35, 0.46); --lane-stroke: #726957; --text: #f4eddf; --text-muted: #b9ae9b; --text-dim: #776e60; --text-faint: #9d917e; --mask: #231f18; --frontend-fill: rgba(43, 133, 142, 0.16); --frontend-stroke: #7fc6c7; --backend-fill: rgba(63, 132, 92, 0.16); --backend-stroke: #8fc29e; --database-fill: rgba(117, 91, 141, 0.17); --database-stroke: #c0a4d0; --cloud-fill: rgba(170, 119, 49, 0.16); --cloud-stroke: #d8ad68; --security-fill: rgba(157, 69, 65, 0.17); --security-stroke: #df9085; --messagebus-fill: rgba(174, 79, 42, 0.16); --messagebus-stroke: #df946f; --external-fill: rgba(126, 115, 96, 0.18); --external-stroke: #b8ad99; --arrow: #948978; --arrow-emphasis: #dd6b3d; --toolbar-bg: rgba(35, 31, 24, 0.92); --toolbar-border: #625a4a; --toolbar-text: #eee5d5; --toolbar-hover: #302a20; --toolbar-menu-bg: #231f18; }
 [data-preset="editorial"][data-theme="light"] { --bg: #f2eee5; --grid: #d8d0c2; --panel: rgba(251, 248, 241, 0.97); --panel-border: #c4b9a6; --lane-fill: rgba(229, 221, 207, 0.42); --lane-stroke: #b8aa94; --text: #242018; --text-muted: #6f6658; --text-dim: #a09788; --text-faint: #817767; --mask: #fbf8f1; --frontend-fill: rgba(31, 117, 126, 0.09); --frontend-stroke: #287e84; --backend-fill: rgba(42, 119, 75, 0.09); --backend-stroke: #397b53; --database-fill: rgba(105, 75, 130, 0.09); --database-stroke: #765d86; --cloud-fill: rgba(157, 103, 31, 0.1); --cloud-stroke: #9a671f; --security-fill: rgba(153, 58, 52, 0.09); --security-stroke: #9e463f; --messagebus-fill: rgba(182, 70, 27, 0.09); --messagebus-stroke: #ad4b25; --external-fill: rgba(101, 91, 75, 0.09); --external-stroke: #746b5e; --arrow: #8a806f; --arrow-emphasis: #bb4c23; --toolbar-bg: rgba(251, 248, 241, 0.94); --toolbar-border: #c4b9a6; --toolbar-text: #40392f; --toolbar-hover: #fffdf8; --toolbar-menu-bg: #fbf8f1; }
-svg { width: 100%; min-width: min(900px, 100%); display: block; transform-origin: 0px 0px; transition: transform 0.18s; }
+svg { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono CJK SC", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", monospace; width: 100%; min-width: min(900px, 100%); display: block; transform-origin: 0px 0px; transition: transform 0.18s; }
 @keyframes archify-lens-in { 
   0% { opacity: 0; transform: translateY(5px) scale(0.985); }
   100% { opacity: 1; transform: translateY(0px) scale(1); }
@@ -150,22 +151,22 @@ svg { width: 100%; min-width: min(900px, 100%); display: block; transform-origin
   0% { opacity: 0; transform: translateY(-5px) scale(0.985); }
   100% { opacity: 1; transform: translateY(0px) scale(1); }
 }
-svg[data-chapter-handoff] [data-node-id][data-chapter-role="stay"] { opacity: 1; }
-svg[data-chapter-handoff] [data-node-id][data-chapter-role="enter"] { opacity: 0.78; }
-svg[data-chapter-handoff] [data-node-id][data-chapter-role="leave"] { opacity: 0.26; }
-@keyframes archify-chapter-anchor { 
-  0% { opacity: 0.35; stroke-dashoffset: 8; }
-  45% { opacity: 1; }
-  100% { opacity: 0.72; stroke-dashoffset: 0; }
-}
-@keyframes archify-story-caption-in { 
-  0% { opacity: 0; transform: translateY(3px); }
-  100% { opacity: 1; transform: translateY(0px); }
-}
+[data-theme="dark"] .toolbar #btn-theme::before { background: rgba(148, 163, 184, 0.16); }
+[data-theme="dark"] .toolbar #btn-theme::after { left: calc(100% - 1.6875rem); background: rgb(59, 74, 99); box-shadow: rgba(0, 0, 0, 0.4) 0px 1px 3px; }
+[data-theme="dark"] .toolbar #theme-icon { left: calc(100% - 1.5rem); color: rgb(199, 210, 254); }
 [data-theme="light"] #theme-icon { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cg fill='none' stroke='black' stroke-width='1.7' stroke-linecap='round'%3E%3Ccircle cx='10' cy='10' r='3.1'/%3E%3Cpath d='M10 2.2v1.4M10 16.4v1.4M2.2 10h1.4M16.4 10h1.4M4.5 4.5l1 1M14.5 14.5l1 1M15.5 4.5l-1 1M5.5 14.5l-1 1'/%3E%3C/g%3E%3C/svg%3E"); }
 [data-theme="dark"] #theme-icon { mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20'%3E%3Cpath d='M15.2 12.7A6.3 6.3 0 017.3 4.8a6.3 6.3 0 107.9 7.9Z' fill='none' stroke='black' stroke-width='1.7' stroke-linejoin='round'/%3E%3C/svg%3E"); }
+[data-theme="dark"] .toolbar .preset-menu, [data-theme="dark"] .toolbar .export-menu { border-color: rgba(148, 163, 184, 0.16); box-shadow: rgba(0, 0, 0, 0.3) 0px 1px 2px, rgba(0, 0, 0, 0.6) 0px 18px 44px -12px; }
+[data-theme="light"] .preset-option-swatch.classic { background: radial-gradient(circle at 1px 1px, rgb(217, 222, 229) 0.6px, transparent 0.9px) 0px 0px / 5px 5px, rgb(255, 255, 255); }
+[data-theme="light"] .preset-option-swatch.classic::before { border-color: rgb(27, 135, 163); background: rgba(14, 116, 144, 0.08); box-shadow: rgba(17, 24, 39, 0.12) 0px 2px 4px; }
+@keyframes archify-motion-dot-breathe { 
+  0%, 100% { opacity: 1; transform: scale(1); }
+  46% { opacity: 0.55; transform: scale(0.72); }
+}
 .c-grid { stroke: var(--grid); fill: none; }
 .c-mask { fill: var(--mask); stroke: none; }
+.c-lane-rule { stroke: var(--lane-stroke); fill: none; opacity: 0.7; }
+.c-lane-wash { fill: var(--lane-fill); stroke: none; }
 .c-frontend { fill: var(--frontend-fill); stroke: var(--frontend-stroke); }
 .c-backend { fill: var(--backend-fill); stroke: var(--backend-stroke); }
 .c-database { fill: var(--database-fill); stroke: var(--database-stroke); }
@@ -183,6 +184,10 @@ svg[data-chapter-handoff] [data-node-id][data-chapter-role="leave"] { opacity: 0
 .t-security { fill: var(--security-stroke); }
 .t-messagebus { fill: var(--messagebus-stroke); }
 .t-external { fill: var(--external-stroke); }
+.t-edge-default { fill: var(--arrow); }
+.t-edge-emphasis { fill: var(--arrow-emphasis); }
+.t-edge-security { fill: var(--security-stroke); }
+.t-edge-dashed { fill: var(--database-stroke); }
 svg .semantic-sigil { fill: none; stroke: currentcolor; stroke-width: 1.35; stroke-linecap: round; stroke-linejoin: round; opacity: 0.76; pointer-events: none; }
 svg .semantic-sigil &gt; * { vector-effect: non-scaling-stroke; }
 svg .semantic-sigil .sigil-fill { fill: currentcolor; stroke: none; }
@@ -200,8 +205,8 @@ svg .brand-mark-fallback { fill: none; stroke: rgb(71, 85, 105); stroke-width: 1
 svg[data-preset="blueprint"] .brand-mark-badge, svg[data-preset="blueprint"] .brand-mark-frame { rx: 1px; }
 svg [data-detail] { transition: opacity 160ms; }
 svg [data-detail-anchor] { transform-box: fill-box; transform-origin: center center; transition: transform 160ms; }
-svg[data-focus-active] [data-focus-match][data-detail], svg[data-focus-active] [data-focus-match] [data-detail], svg[data-reach-active] [data-reach-match][data-detail], svg[data-reach-active] [data-reach-match] [data-detail], svg[data-lens-active] [data-lens-match][data-detail], svg[data-lens-active] [data-lens-match] [data-detail], svg[data-legend-preview-active] [data-legend-preview-match][data-detail], svg[data-legend-preview-active] [data-legend-preview-match] [data-detail], svg[data-intent-trace-active] [data-intent-trace-match][data-detail], svg[data-intent-trace-active] [data-intent-trace-match] [data-detail], svg[data-route-active] [data-route-match][data-detail], svg[data-route-active] [data-route-match] [data-detail], svg[data-story-active] [data-story-step][data-detail], svg[data-story-active] [data-story-step] [data-detail], svg[data-relationship-preview-active] [data-relationship-preview][data-detail], svg[data-relationship-preview-active] [data-relationship-preview] [data-detail], svg [data-node-id]:hover [data-detail], svg [data-node-id]:focus-visible [data-detail] { opacity: 1; pointer-events: auto; }
-svg[data-focus-active] [data-focus-match] [data-detail-anchor], svg[data-reach-active] [data-reach-match] [data-detail-anchor], svg[data-lens-active] [data-lens-match] [data-detail-anchor], svg[data-legend-preview-active] [data-legend-preview-match] [data-detail-anchor], svg[data-intent-trace-active] [data-intent-trace-match] [data-detail-anchor], svg[data-route-active] [data-route-match] [data-detail-anchor], svg[data-story-active] [data-story-step] [data-detail-anchor], svg [data-node-id]:hover [data-detail-anchor], svg [data-node-id]:focus-visible [data-detail-anchor] { transform: none; }
+svg[data-focus-active] [data-focus-match][data-detail], svg[data-focus-active] [data-focus-match] [data-detail], svg[data-reach-active] [data-reach-match][data-detail], svg[data-reach-active] [data-reach-match] [data-detail], svg[data-lens-active] [data-lens-match][data-detail], svg[data-lens-active] [data-lens-match] [data-detail], svg[data-legend-preview-active] [data-legend-preview-match][data-detail], svg[data-legend-preview-active] [data-legend-preview-match] [data-detail], svg[data-intent-trace-active] [data-intent-trace-match][data-detail], svg[data-intent-trace-active] [data-intent-trace-match] [data-detail], svg[data-route-active] [data-route-match][data-detail], svg[data-route-active] [data-route-match] [data-detail], svg[data-relationship-preview-active] [data-relationship-preview][data-detail], svg[data-relationship-preview-active] [data-relationship-preview] [data-detail], svg [data-node-id]:hover [data-detail], svg [data-node-id]:focus-visible [data-detail] { opacity: 1; pointer-events: auto; }
+svg[data-focus-active] [data-focus-match] [data-detail-anchor], svg[data-reach-active] [data-reach-match] [data-detail-anchor], svg[data-lens-active] [data-lens-match] [data-detail-anchor], svg[data-legend-preview-active] [data-legend-preview-match] [data-detail-anchor], svg[data-intent-trace-active] [data-intent-trace-match] [data-detail-anchor], svg[data-route-active] [data-route-match] [data-detail-anchor], svg [data-node-id]:hover [data-detail-anchor], svg [data-node-id]:focus-visible [data-detail-anchor] { transform: none; }
 .a-default { stroke: var(--arrow); fill: none; }
 .a-emphasis { stroke: var(--arrow-emphasis); fill: none; }
 .a-security { stroke: var(--security-stroke); fill: none; stroke-dasharray: 5, 5; }
@@ -210,12 +215,9 @@ svg[data-focus-active] [data-focus-match] [data-detail-anchor], svg[data-reach-a
 .m-emphasis { fill: var(--arrow-emphasis); }
 .m-security { fill: var(--security-stroke); }
 .m-dashed { fill: var(--database-stroke); }
-svg [data-node-id] { cursor: pointer; transition: opacity 0.18s, filter 0.18s; }
-svg [data-edge-from] { transition: opacity 0.18s, filter 0.18s; }
+svg [data-node-id] { cursor: pointer; transition: opacity 0.18s, fill-opacity 0.18s, stroke-opacity 0.18s, filter 0.18s; }
+svg [data-edge-from], svg [data-graph-role="automatic-crossover-underlay"] { transition: opacity 0.18s, filter 0.18s; }
 svg [data-node-id]:hover, svg [data-node-id]:focus-visible { filter: drop-shadow(0 0 7px var(--frontend-stroke)); outline: none; }
-svg [data-node-id]:hover .source-evidence-beacon, svg [data-node-id]:focus-visible .source-evidence-beacon, svg [data-node-id][data-focus-selected] .source-evidence-beacon { opacity: 1; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--backend-stroke) 72%, transparent)); }
-svg[data-preset="signal-flow"] .source-evidence-beacon { opacity: 0.9; }
-svg[data-preset="blueprint"] .source-evidence-beacon rect { rx: 0.8px; filter: none; }
 svg [data-legend-kind][role="button"] { cursor: pointer; }
 svg [data-legend-kind]:focus { outline: none; }
 svg [data-legend-hit] { fill: transparent; stroke: transparent; stroke-width: 1.4; pointer-events: all; vector-effect: non-scaling-stroke; transition: stroke 150ms, stroke-width 150ms, filter 150ms; }
@@ -242,11 +244,19 @@ svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="out"], svg[da
 svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="in"], svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="reverse"] { filter: drop-shadow(0 0 6px var(--database-stroke)); }
 svg[data-preset="signal-flow"] .semantic-lens-flow[data-direction="within"] { filter: drop-shadow(0 0 6px var(--messagebus-stroke)); }
 svg[data-preset="blueprint"] .semantic-lens-flow { stroke-width: 2.45; stroke-linecap: square; filter: none; opacity: 0.78; }
+svg[data-legend-preview-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"], svg[data-lens-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.11; }
+svg[data-legend-preview-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-legend-preview-match]) &gt; [data-graph-role="automatic-crossover-underlay"], svg[data-lens-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-lens-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
+svg[data-legend-preview-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-legend-preview-peer]) &gt; [data-graph-role="automatic-crossover-underlay"], svg[data-lens-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-lens-peer]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.62; }
 svg[data-focus-active] [data-node-id], svg[data-focus-active] [data-edge-from] { opacity: 0.13; }
+svg[data-focus-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.13; }
+svg[data-focus-active] [data-lifecycle-rail] { opacity: 0; }
 svg[data-focus-active] [data-focus-match] { opacity: 1; }
+svg[data-focus-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-focus-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-focus-active] [data-focus-selected] { filter: drop-shadow(0 0 10px var(--frontend-stroke)); }
 svg[data-reach-active] [data-node-id], svg[data-reach-active] [data-edge-from] { opacity: 0.09; }
+svg[data-reach-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.09; }
 svg[data-reach-active] [data-reach-match] { opacity: 1; }
+svg[data-reach-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-reach-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-reach-active="upstream"] [data-reach-origin] { filter: drop-shadow(0 0 11px var(--database-stroke)); }
 svg[data-reach-active="downstream"] [data-reach-origin] { filter: drop-shadow(0 0 11px var(--backend-stroke)); }
 svg[data-reach-active="upstream"] [data-edge-from][data-reach-match] { filter: drop-shadow(0 0 4px color-mix(in srgb, var(--database-stroke) 72%, transparent)); }
@@ -254,10 +264,15 @@ svg[data-reach-active="downstream"] [data-edge-from][data-reach-match] { filter:
 svg[data-preset="blueprint"][data-reach-active] [data-reach-origin], svg[data-preset="blueprint"][data-reach-active] [data-edge-from][data-reach-match] { filter: none; }
 svg[data-preset="blueprint"] .relationship-hit-target:focus-visible .relationship-focus-rail { stroke-linecap: square; filter: none; }
 svg[data-relationship-direct-active] [data-node-id], svg[data-relationship-direct-active] [data-edge-from] { opacity: 0.16; }
+svg[data-relationship-direct-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.16; }
 svg[data-relationship-direct-active] [data-relationship-preview], svg[data-relationship-direct-active] [data-relationship-preview-node] { opacity: 1; }
-svg[data-focus-active]:not([data-relationship-pin-active]) .relationship-hit-rail, svg[data-story-active] .relationship-hit-rail, svg[data-route-picking] .relationship-hit-rail, svg[data-route-active] .relationship-hit-rail, svg[data-lens-active] .relationship-hit-rail, svg[data-chapter-preview] .relationship-hit-rail { pointer-events: none; }
+svg[data-relationship-direct-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-relationship-preview]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
+svg[data-focus-active]:not([data-relationship-pin-active]) .relationship-hit-rail, svg[data-route-picking] .relationship-hit-rail, svg[data-route-active] .relationship-hit-rail, svg[data-lens-active] .relationship-hit-rail { pointer-events: none; }
 svg[data-relationship-preview-active] [data-focus-match] { opacity: 0.18; }
+svg[data-relationship-preview-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-focus-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.18; }
+svg[data-relationship-preview-active] [data-lifecycle-rail] { opacity: 0; }
 svg[data-relationship-preview-active] [data-relationship-preview], svg[data-relationship-preview-active] [data-relationship-preview-node] { opacity: 1; }
+svg[data-relationship-preview-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-relationship-preview]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-relationship-preview-active] [data-relationship-preview] { filter: drop-shadow(0 0 5px var(--arrow-emphasis)); }
 svg[data-relationship-preview-active] [data-relationship-preview] path, svg[data-relationship-preview-active] path[data-relationship-preview], svg[data-relationship-preview-active] [data-relationship-preview] line, svg[data-relationship-preview-active] line[data-relationship-preview], svg[data-relationship-preview-active] [data-relationship-preview] polyline, svg[data-relationship-preview-active] polyline[data-relationship-preview] { stroke-width: 2.75; }
 svg[data-relationship-preview-active] [data-relationship-preview-source] { filter: drop-shadow(0 0 7px var(--frontend-stroke)); }
@@ -268,8 +283,14 @@ svg[data-preset="editorial"] .relationship-flow-pulse { stroke: var(--arrow-emph
 svg[data-preset="signal-flow"] .semantic-flow-token { filter: drop-shadow(currentcolor 0px 0px 5px); }
 svg[data-preset="blueprint"] .semantic-flow-token { filter: none; }
 svg[data-preset="editorial"] .semantic-flow-token { filter: none; }
-svg[data-intent-trace-active] [data-node-id], svg[data-intent-trace-active] [data-edge-from] { opacity: 0.2; }
+svg[data-intent-trace-active] [data-node-id] { fill-opacity: 0.2; stroke-opacity: 0.2; }
+svg [data-node-id] &gt; .c-mask { fill-opacity: 1; }
+svg[data-intent-trace-active] [data-node-id][data-intent-trace-match] { fill-opacity: 1; stroke-opacity: 1; }
+svg[data-intent-trace-active] [data-edge-from] { opacity: 0.2; }
+svg[data-intent-trace-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.2; }
+svg[data-intent-trace-active] [data-lifecycle-rail] { opacity: 0; }
 svg[data-intent-trace-active] [data-intent-trace-match] { opacity: 1; }
+svg[data-intent-trace-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-intent-trace-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-intent-trace-active] [data-intent-trace-selected] { filter: drop-shadow(0 0 10px var(--frontend-stroke)); }
 svg[data-preset="blueprint"] [data-intent-trace-selected], svg[data-preset="blueprint"] .intent-trace-flow { filter: none; stroke-linecap: square; }
 svg[data-preset="editorial"] [data-intent-trace-selected], svg[data-preset="editorial"] .intent-trace-flow { filter: none; }
@@ -278,13 +299,18 @@ svg[data-route-picking="target"] [data-route-candidate], svg[data-route-picking=
 svg[data-route-picking] [data-node-id] { cursor: crosshair; }
 svg[data-route-picking] [data-route-start] { filter: drop-shadow(0 0 10px var(--frontend-stroke)); }
 svg[data-route-active] [data-node-id], svg[data-route-active] [data-edge-from] { opacity: 0.11; }
+svg[data-route-active] [data-graph-role="automatic-crossover"] &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.11; }
 svg[data-route-active] [data-route-match] { opacity: 1; }
+svg[data-route-active] [data-graph-role="automatic-crossover"]:has(&gt; [data-route-match]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-route-active] [data-route-start] { filter: drop-shadow(0 0 11px var(--frontend-stroke)); }
 svg[data-route-active] [data-route-end] { filter: drop-shadow(0 0 11px var(--security-stroke)); }
 svg[data-route-active] [data-route-step]:not([data-route-start]):not([data-route-end]) { filter: drop-shadow(0 0 7px var(--backend-stroke)); }
 svg[data-route-journey] [data-route-match][data-route-journey-state="past"] { opacity: 0.62; }
 svg[data-route-journey] [data-route-match][data-route-journey-state="future"] { opacity: 0.34; }
 svg[data-route-journey] [data-route-match][data-route-journey-state="current"] { opacity: 1; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(&gt; [data-route-match][data-route-journey-state="past"]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.62; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(&gt; [data-route-match][data-route-journey-state="future"]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 0.34; }
+svg[data-route-journey] [data-graph-role="automatic-crossover"]:has(&gt; [data-route-match][data-route-journey-state="current"]) &gt; [data-graph-role="automatic-crossover-underlay"] { opacity: 1; }
 svg[data-route-journey] [data-node-id][data-route-journey-current] { filter: drop-shadow(0 0 10px var(--backend-stroke)); }
 svg[data-route-journey] [data-edge-from][data-route-journey-current] { opacity: 1; filter: drop-shadow(0 0 6px var(--backend-stroke)); }
 svg[data-preset="blueprint"] [data-route-start], svg[data-preset="blueprint"] [data-route-end], svg[data-preset="blueprint"] [data-route-step], svg[data-preset="blueprint"] .route-probe-flow { filter: none; stroke-linecap: square; }
@@ -300,43 +326,17 @@ svg[data-preset="blueprint"] [data-node-id]:hover, svg[data-preset="blueprint"] 
 svg[data-preset="blueprint"][data-focus-active] [data-focus-selected] { filter: drop-shadow(0 0 3px var(--frontend-stroke)); }
 svg[data-preset="blueprint"][data-focus-active][data-reach-active] [data-focus-selected][data-reach-origin] { filter: none; }
 svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview], svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-source], svg[data-preset="blueprint"][data-relationship-preview-active] [data-relationship-preview-target] { filter: drop-shadow(0 0 3px var(--frontend-stroke)); }
-svg[data-story-beat] [data-story-step] { opacity: 0.22; filter: saturate(0.42); transition: opacity 180ms, filter 180ms; }
-svg[data-story-beat] [data-story-step][data-story-beat-state="past"] { opacity: 0.72; filter: saturate(0.82); }
-svg[data-story-beat] [data-story-step][data-story-beat-state="next"] { opacity: 0.5; filter: saturate(0.66); }
-svg[data-story-beat] [data-story-step][data-story-beat-state="active"] { opacity: 1; filter: drop-shadow(0 0 7px var(--frontend-stroke)); animation: 360ms cubic-bezier(0.22, 1, 0.36, 1) 0s 1 normal both running archify-story-beat-node; }
-svg[data-story-beat] [data-edge-from][data-story-beat-step] { opacity: 0.16; transition: opacity 160ms; }
-svg[data-story-beat] [data-edge-from][data-story-beat-step][data-story-beat-state="past"] { opacity: 0.58; }
-svg[data-story-beat] [data-edge-from][data-story-beat-step][data-story-beat-state="next"] { opacity: 0.34; }
-svg[data-story-beat] [data-edge-from][data-story-beat-step][data-story-beat-state="active"] { opacity: 1; }
-svg[data-story-beat] .story-trail-flow { opacity: 0; transition: opacity 160ms; }
-svg[data-story-beat] .story-trail-flow[data-story-beat-state="past"] { opacity: 0.34; }
-svg[data-story-beat] .story-trail-flow[data-story-beat-state="next"] { opacity: 0.2; }
-svg[data-story-beat] .story-trail-flow[data-story-beat-state="active"] { opacity: 0.92; }
-svg[data-story-beat] .story-trail-flow[data-story-pulse="true"] { stroke-dasharray: 2, 13; stroke-dashoffset: 30; opacity: 0.92; animation: 0.78s linear 0s 1 normal both running archify-story-flow; }
-svg[data-preset="blueprint"] .story-trail-flow { stroke-linecap: square; filter: none; opacity: 0.5; }
-svg[data-preset="blueprint"][data-story-beat] [data-story-step][data-story-beat-state="active"] { filter: none; animation: auto ease 0s 1 normal none running none; }
-svg[data-preset="editorial"] .story-trail-flow { filter: none; }
-svg[data-preset="editorial"][data-story-beat] [data-story-step][data-story-beat-state="active"] { filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--text) 16%, transparent)); }
-svg[data-chapter-preview] [data-node-id], svg[data-chapter-preview] [data-edge-from] { opacity: 0.1 !important; filter: none !important; transition: none !important; }
-svg[data-chapter-preview] .story-trail-overlay { opacity: 0.08 !important; }
-svg[data-chapter-preview] [data-node-id][data-chapter-preview-role="stay"] { opacity: 0.76 !important; filter: saturate(0.7) !important; }
-svg[data-chapter-preview] [data-node-id][data-chapter-preview-role="enter"] { opacity: 1 !important; filter: saturate(1.2) !important; }
-svg[data-chapter-preview] [data-node-id][data-chapter-preview-role="leave"] { opacity: 0.28 !important; filter: grayscale(0.72) !important; }
-svg[data-preset="blueprint"][data-chapter-preview] [data-node-id] { filter: none !important; }
 .c-security-group { fill: transparent; stroke: var(--security-stroke); stroke-dasharray: 4, 4; }
 .c-region { fill: rgba(251, 191, 36, 0.05); stroke: var(--cloud-stroke); stroke-dasharray: 8, 4; }
 .c-lane { fill: var(--lane-fill); stroke: var(--lane-stroke); stroke-dasharray: 6, 6; }
-svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="edge"] { stroke-linecap: round; filter: drop-shadow(0 0 3px var(--arrow-emphasis)); animation-duration: 1.75s; }
-svg[data-preset="signal-flow"][data-animation="trace"] [data-animate="node"] { animation-duration: 3.1s; }
-svg[data-preset="blueprint"][data-animation="trace"] [data-animate="edge"] { stroke-linecap: square; filter: none; animation-duration: 2.15s; }
-svg[data-preset="blueprint"][data-animation="trace"] [data-animate="node"] { animation-name: archify-blueprint-node-pulse; animation-duration: 3.8s; }
-svg[data-preset="editorial"][data-animation="trace"] [data-animate="edge"] { filter: none; animation-duration: 2.2s; }
-svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { animation-name: archify-editorial-node-pulse; animation-duration: 3.5s; }
-@keyframes archify-edge-flow { 
-  0% { stroke-dasharray: 10, 8; stroke-dashoffset: 54; opacity: 0.42; }
-  88% { stroke-dasharray: 10, 8; stroke-dashoffset: 0; opacity: 1; }
-  99.9% { stroke-dasharray: 10, 8; stroke-dashoffset: 0; opacity: 1; }
-  100% { stroke-dashoffset: 0; opacity: 1; }
+svg[data-animation="trace"] { --flow-cycle: 6.4s; --flow-halo-peak: 0.17; --flow-glow-peak: 0.5; --flow-tail-peak: 0.42; --flow-head-peak: 0.95; --flow-wake-peak: 0.3; --flow-ripple-peak: 0.65; }
+svg[data-preset="editorial"] .ambient-flow-fill { --flow-peak: 0.2; }
+svg[data-preset="editorial"] .ambient-flow-playhead-glow { --flow-peak: 0.14; }
+svg[data-preset="blueprint"] .ambient-edge-flow { stroke-linecap: square; }
+svg[data-preset="editorial"] { --flow-halo-peak: 0.07; --flow-glow-peak: 0.28; --flow-tail-peak: 0.2; --flow-head-peak: 0.7; --flow-wake-peak: 0.14; --flow-ripple-peak: 0.3; }
+@keyframes archify-node-enter { 
+  0% { opacity: 0; }
+  100% { opacity: 1; }
 }
 @keyframes archify-node-pulse { 
   0%, 72%, 100% { filter: none; stroke-width: 1.5; }
@@ -358,13 +358,6 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
 @keyframes archify-radar-live { 
   0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--backend-stroke) 52%, transparent); }
   55%, 100% { box-shadow: transparent 0px 0px 0px 0.32rem; }
-}
-@keyframes archify-guided-progress { 
-  0% { transform: scaleX(var(--guided-progress-start, 0)); }
-  100% { transform: scaleX(1); }
-}
-@keyframes archify-story-flow { 
-  100% { stroke-dashoffset: 0; }
 }
 @keyframes archify-intent-trace-flow { 
   0% { opacity: 0.28; stroke-dashoffset: 0; }
@@ -396,11 +389,6 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
   13%, 82% { opacity: 1; }
   100% { opacity: 0; }
 }
-@keyframes archify-story-beat-node { 
-  0% { opacity: 0.48; filter: saturate(0.6); }
-  58% { opacity: 1; filter: drop-shadow(0 0 10px var(--frontend-stroke)); }
-  100% { opacity: 1; filter: drop-shadow(0 0 7px var(--frontend-stroke)); }
-}
 @keyframes archify-share-cue-enter { 
   0% { opacity: 0; transform: translate(-50%, -0.45rem); }
   100% { opacity: 1; transform: translate(-50%, 0px); }
@@ -409,12 +397,662 @@ svg[data-preset="editorial"][data-animation="trace"] [data-animate="node"] { ani
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.48; transform: scale(0.78); }
 }
-:root, svg { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
-@media (prefers-color-scheme: light) { :root, svg { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --text-muted: #64748b; --text-dim: #94a3b8; --text-faint: #64748b; --panel: #ffffff; --panel-border: #e2e8f0; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #94a3b8; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; } }
-svg[data-theme="light"] { --bg: #f8fafc; --grid: #e2e8f0; --text: #0f172a; --text-muted: #64748b; --text-dim: #94a3b8; --text-faint: #64748b; --panel: #ffffff; --panel-border: #e2e8f0; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #94a3b8; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; }
-svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #64748b; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; }
+@keyframes archify-relay-ripple { 
+  0% { r: 2px; opacity: var(--flow-peak, 0.6); }
+  11.714%, 100% { r: 20px; opacity: 0; }
+}
+@keyframes archify-relay-comet-0 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  23.427% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  25.926%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-0 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  23.427% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  37.484%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-1 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  18.763% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  21.262%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-1 { 
+  0%, 5.629% { opacity: 0; }
+  18.763% { opacity: var(--flow-peak, 0.3); }
+  32.82%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-2 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-2 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-3 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  11.992% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  14.491%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-3 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  11.992% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  26.048%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-4 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  14.725% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  17.224%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-4 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  14.725% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  28.781%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-5 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.64% { opacity: var(--flow-peak, 0.9); }
+  8.199% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  10.698%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-5 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  8.199% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  22.255%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-6 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-6 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-7 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-7 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  6.56% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-8 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  11.51% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  14.009%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-8 { 
+  0%, 3.453% { opacity: 0; }
+  11.51% { opacity: var(--flow-peak, 0.3); }
+  25.567%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-9 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-9 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-10 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  17.848% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  20.347%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-10 { 
+  0%, 5.354% { opacity: 0; }
+  17.848% { opacity: var(--flow-peak, 0.3); }
+  31.904%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-11 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-11 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-12 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-12 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  6.56% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-13 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  11.958% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  14.457%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-13 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  11.958% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  26.015%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-14 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-14 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-15 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  10.933% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  13.432%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-15 { 
+  0%, 3.28% { opacity: 0; }
+  10.933% { opacity: var(--flow-peak, 0.3); }
+  24.989%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-16 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  10.875% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  13.373%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-16 { 
+  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  10.875% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  24.931%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-17 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.874% { opacity: var(--flow-peak, 0.9); }
+  23.427% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  25.926%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-17 { 
+  0%, 7.028% { opacity: 0; }
+  23.427% { opacity: var(--flow-peak, 0.3); }
+  37.484%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-comet-18 { 
+  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
+  1.312% { opacity: var(--flow-peak, 0.9); }
+  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+}
+@keyframes archify-relay-wake-18 { 
+  0%, 1.968% { opacity: 0; }
+  6.56% { opacity: var(--flow-peak, 0.3); }
+  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+}
+@keyframes archify-relay-node-0 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  0% { filter: var(--ambient-node-base-filter, none); }
+  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  18.742% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-1 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  0% { filter: var(--ambient-node-base-filter, none); }
+  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  18.742% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-2 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  0% { filter: var(--ambient-node-base-filter, none); }
+  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  18.742% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-3 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  10.875% { filter: var(--ambient-node-base-filter, none); }
+  12.749%, 17.434% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  29.616% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-4 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  6.56% { filter: var(--ambient-node-base-filter, none); }
+  8.434%, 13.119% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  25.301% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-5 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  14.681% { filter: var(--ambient-node-base-filter, none); }
+  16.555%, 21.241% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  33.423% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-6 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  30.968% { filter: var(--ambient-node-base-filter, none); }
+  32.842%, 37.527% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  49.71% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-7 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  24.442% { filter: var(--ambient-node-base-filter, none); }
+  26.316%, 31.001% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  43.183% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-8 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  37.514% { filter: var(--ambient-node-base-filter, none); }
+  39.388%, 44.074% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  56.256% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-9 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  32.563% { filter: var(--ambient-node-base-filter, none); }
+  34.437%, 39.123% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  51.305% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-10 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  39.089% { filter: var(--ambient-node-base-filter, none); }
+  40.963%, 45.649% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  57.831% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-11 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  45.635% { filter: var(--ambient-node-base-filter, none); }
+  47.509%, 52.195% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  64.377% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-12 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  40.684% { filter: var(--ambient-node-base-filter, none); }
+  42.559%, 47.244% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  59.426% { filter: var(--ambient-node-base-filter, none); }
+}
+@keyframes archify-relay-node-13 { 
+  0%, 100% { filter: var(--ambient-node-base-filter, none); }
+  47.211% { filter: var(--ambient-node-base-filter, none); }
+  49.085%, 53.77% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  65.952% { filter: var(--ambient-node-base-filter, none); }
+}
+svg[data-node-ui] [data-node-id] &gt; rect:not(.c-mask) { stroke-width: 1.25px; }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-frontend { fill: color-mix(in srgb, var(--frontend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--frontend-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-backend { fill: color-mix(in srgb, var(--backend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--backend-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-database { fill: color-mix(in srgb, var(--database-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--database-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-cloud { fill: color-mix(in srgb, var(--cloud-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-security { fill: color-mix(in srgb, var(--security-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-messagebus { fill: color-mix(in srgb, var(--messagebus-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--messagebus-stroke) 72%, var(--mask)); }
+:is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-external { fill: color-mix(in srgb, var(--external-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--external-stroke) 72%, var(--mask)); }
+svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-region { fill: color-mix(in srgb, var(--cloud-stroke) 3%, transparent); stroke: color-mix(in srgb, var(--cloud-stroke) 42%, var(--lane-stroke)); stroke-dasharray: none; }
+svg[data-node-ui] .c-security-group { stroke: color-mix(in srgb, var(--security-stroke) 58%, var(--lane-stroke)); }
+svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-security-group { stroke-dasharray: 4, 3; }
+svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-lane { stroke: var(--lane-stroke); stroke-dasharray: none; }
+svg[data-node-ui] [data-graph-role="structural-frame-label-mask"] { rx: 5px; fill: color-mix(in srgb, var(--cloud-stroke) 10%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 38%, var(--mask)); stroke-width: 0.8px; }
+svg[data-node-ui] [data-composition-frame-kind="security-group"] &gt; [data-graph-role="structural-frame-label-mask"] { fill: color-mix(in srgb, var(--security-stroke) 9%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 36%, var(--mask)); }
+svg[data-node-ui] .phase-rule { opacity: 0.5; stroke-dasharray: none; }
+svg[data-node-ui] .phase-chip { stroke: var(--lane-stroke); stroke-width: 0.75px; }
+svg[data-node-ui] g[data-edge-from] &gt; rect.c-mask { rx: 7px; stroke: var(--lane-stroke); stroke-width: 0.75px; }
+svg[data-node-ui][data-preset="blueprint"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 2px; }
+svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 3px; }
+:root, svg { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
+@media (prefers-color-scheme: light) { :root, svg { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; } }
+svg[data-theme="light"] { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
+svg[data-theme="dark"] { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
 rect.c-bg-rect { fill: var(--bg); }
-</style><rect width="100%" height="100%" class="c-bg-rect"/>
+</style><rect x="0" y="0" width="1157" height="652" class="c-bg-rect"/><metadata id="archify-software-notices">NOTICE
+Archify
+Copyright (c) 2026 tt-a1i (Archify)
+Copyright (c) 2025 Cocoon AI
+
+Archify is distributed under the Apache License, Version 2.0 (LICENSE),
+except where a file, package manifest, or third-party notice specifies otherwise.
+The separately versioned DeepSeek Harness adapter remains MIT; its bundled
+Skill retains the license of the immutable source selected in release.json.
+
+Code and contributions received under the MIT License through pre-transition
+commit 25cf37080fc8b1dbe758a4efc3935b55f3327083 remain available under their
+original terms. Previously published releases keep their existing licenses. The complete historical MIT
+copyright and permission notice is preserved in LICENSE-MIT. This transition
+does not revoke existing MIT grants or assert a new patent grant on behalf
+of historical contributors.
+
+Archify originated from Cocoon-AI/architecture-diagram-generator:
+https://github.com/Cocoon-AI/architecture-diagram-generator
+
+Third-party components retain their own licenses; see THIRD_PARTY_NOTICES.md
+and the license files beside those components. Names and logos do not imply
+official endorsement, and the software license grants no general trademark
+permission.
+
+These software licenses cover Archify's embedded runtime and templates, not
+ownership of a user's authored content, business data, or source repository.
+
+LICENSE
+
+                                 Apache License
+                           Version 2.0, January 2004
+                        http://www.apache.org/licenses/
+
+   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION
+
+   1. Definitions.
+
+      "License" shall mean the terms and conditions for use, reproduction,
+      and distribution as defined by Sections 1 through 9 of this document.
+
+      "Licensor" shall mean the copyright owner or entity authorized by
+      the copyright owner that is granting the License.
+
+      "Legal Entity" shall mean the union of the acting entity and all
+      other entities that control, are controlled by, or are under common
+      control with that entity. For the purposes of this definition,
+      "control" means (i) the power, direct or indirect, to cause the
+      direction or management of such entity, whether by contract or
+      otherwise, or (ii) ownership of fifty percent (50%) or more of the
+      outstanding shares, or (iii) beneficial ownership of such entity.
+
+      "You" (or "Your") shall mean an individual or Legal Entity
+      exercising permissions granted by this License.
+
+      "Source" form shall mean the preferred form for making modifications,
+      including but not limited to software source code, documentation
+      source, and configuration files.
+
+      "Object" form shall mean any form resulting from mechanical
+      transformation or translation of a Source form, including but
+      not limited to compiled object code, generated documentation,
+      and conversions to other media types.
+
+      "Work" shall mean the work of authorship, whether in Source or
+      Object form, made available under the License, as indicated by a
+      copyright notice that is included in or attached to the work
+      (an example is provided in the Appendix below).
+
+      "Derivative Works" shall mean any work, whether in Source or Object
+      form, that is based on (or derived from) the Work and for which the
+      editorial revisions, annotations, elaborations, or other modifications
+      represent, as a whole, an original work of authorship. For the purposes
+      of this License, Derivative Works shall not include works that remain
+      separable from, or merely link (or bind by name) to the interfaces of,
+      the Work and Derivative Works thereof.
+
+      "Contribution" shall mean any work of authorship, including
+      the original version of the Work and any modifications or additions
+      to that Work or Derivative Works thereof, that is intentionally
+      submitted to Licensor for inclusion in the Work by the copyright owner
+      or by an individual or Legal Entity authorized to submit on behalf of
+      the copyright owner. For the purposes of this definition, "submitted"
+      means any form of electronic, verbal, or written communication sent
+      to the Licensor or its representatives, including but not limited to
+      communication on electronic mailing lists, source code control systems,
+      and issue tracking systems that are managed by, or on behalf of, the
+      Licensor for the purpose of discussing and improving the Work, but
+      excluding communication that is conspicuously marked or otherwise
+      designated in writing by the copyright owner as "Not a Contribution."
+
+      "Contributor" shall mean Licensor and any individual or Legal Entity
+      on behalf of whom a Contribution has been received by Licensor and
+      subsequently incorporated within the Work.
+
+   2. Grant of Copyright License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      copyright license to reproduce, prepare Derivative Works of,
+      publicly display, publicly perform, sublicense, and distribute the
+      Work and such Derivative Works in Source or Object form.
+
+   3. Grant of Patent License. Subject to the terms and conditions of
+      this License, each Contributor hereby grants to You a perpetual,
+      worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+      (except as stated in this section) patent license to make, have made,
+      use, offer to sell, sell, import, and otherwise transfer the Work,
+      where such license applies only to those patent claims licensable
+      by such Contributor that are necessarily infringed by their
+      Contribution(s) alone or by combination of their Contribution(s)
+      with the Work to which such Contribution(s) was submitted. If You
+      institute patent litigation against any entity (including a
+      cross-claim or counterclaim in a lawsuit) alleging that the Work
+      or a Contribution incorporated within the Work constitutes direct
+      or contributory patent infringement, then any patent licenses
+      granted to You under this License for that Work shall terminate
+      as of the date such litigation is filed.
+
+   4. Redistribution. You may reproduce and distribute copies of the
+      Work or Derivative Works thereof in any medium, with or without
+      modifications, and in Source or Object form, provided that You
+      meet the following conditions:
+
+      (a) You must give any other recipients of the Work or
+          Derivative Works a copy of this License; and
+
+      (b) You must cause any modified files to carry prominent notices
+          stating that You changed the files; and
+
+      (c) You must retain, in the Source form of any Derivative Works
+          that You distribute, all copyright, patent, trademark, and
+          attribution notices from the Source form of the Work,
+          excluding those notices that do not pertain to any part of
+          the Derivative Works; and
+
+      (d) If the Work includes a "NOTICE" text file as part of its
+          distribution, then any Derivative Works that You distribute must
+          include a readable copy of the attribution notices contained
+          within such NOTICE file, excluding those notices that do not
+          pertain to any part of the Derivative Works, in at least one
+          of the following places: within a NOTICE text file distributed
+          as part of the Derivative Works; within the Source form or
+          documentation, if provided along with the Derivative Works; or,
+          within a display generated by the Derivative Works, if and
+          wherever such third-party notices normally appear. The contents
+          of the NOTICE file are for informational purposes only and
+          do not modify the License. You may add Your own attribution
+          notices within Derivative Works that You distribute, alongside
+          or as an addendum to the NOTICE text from the Work, provided
+          that such additional attribution notices cannot be construed
+          as modifying the License.
+
+      You may add Your own copyright statement to Your modifications and
+      may provide additional or different license terms and conditions
+      for use, reproduction, or distribution of Your modifications, or
+      for any such Derivative Works as a whole, provided Your use,
+      reproduction, and distribution of the Work otherwise complies with
+      the conditions stated in this License.
+
+   5. Submission of Contributions. Unless You explicitly state otherwise,
+      any Contribution intentionally submitted for inclusion in the Work
+      by You to the Licensor shall be under the terms and conditions of
+      this License, without any additional terms or conditions.
+      Notwithstanding the above, nothing herein shall supersede or modify
+      the terms of any separate license agreement you may have executed
+      with Licensor regarding such Contributions.
+
+   6. Trademarks. This License does not grant permission to use the trade
+      names, trademarks, service marks, or product names of the Licensor,
+      except as required for reasonable and customary use in describing the
+      origin of the Work and reproducing the content of the NOTICE file.
+
+   7. Disclaimer of Warranty. Unless required by applicable law or
+      agreed to in writing, Licensor provides the Work (and each
+      Contributor provides its Contributions) on an "AS IS" BASIS,
+      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+      implied, including, without limitation, any warranties or conditions
+      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A
+      PARTICULAR PURPOSE. You are solely responsible for determining the
+      appropriateness of using or redistributing the Work and assume any
+      risks associated with Your exercise of permissions under this License.
+
+   8. Limitation of Liability. In no event and under no legal theory,
+      whether in tort (including negligence), contract, or otherwise,
+      unless required by applicable law (such as deliberate and grossly
+      negligent acts) or agreed to in writing, shall any Contributor be
+      liable to You for damages, including any direct, indirect, special,
+      incidental, or consequential damages of any character arising as a
+      result of this License or out of the use or inability to use the
+      Work (including but not limited to damages for loss of goodwill,
+      work stoppage, computer failure or malfunction, or any and all
+      other commercial damages or losses), even if such Contributor
+      has been advised of the possibility of such damages.
+
+   9. Accepting Warranty or Additional Liability. While redistributing
+      the Work or Derivative Works thereof, You may choose to offer,
+      and charge a fee for, acceptance of support, warranty, indemnity,
+      or other liability obligations and/or rights consistent with this
+      License. However, in accepting such obligations, You may act only
+      on Your own behalf and on Your sole responsibility, not on behalf
+      of any other Contributor, and only if You agree to indemnify,
+      defend, and hold each Contributor harmless for any liability
+      incurred by, or claims asserted against, such Contributor by reason
+      of your accepting any such warranty or additional liability.
+
+   END OF TERMS AND CONDITIONS
+
+   APPENDIX: How to apply the Apache License to your work.
+
+      To apply the Apache License to your work, attach the following
+      boilerplate notice, with the fields enclosed by brackets "[]"
+      replaced with your own identifying information. (Don't include
+      the brackets!)  The text should be enclosed in the appropriate
+      comment syntax for the file format. We also recommend that a
+      file or class name and description of purpose be included on the
+      same "printed page" as the copyright notice for easier
+      identification within third-party archives.
+
+   Copyright [yyyy] [name of copyright owner]
+
+   Licensed under the Apache License, Version 2.0 (the "License");
+   you may not use this file except in compliance with the License.
+   You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+   Unless required by applicable law or agreed to in writing, software
+   distributed under the License is distributed on an "AS IS" BASIS,
+   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+   See the License for the specific language governing permissions and
+   limitations under the License.
+
+LICENSE-MIT
+MIT License
+
+Copyright (c) 2026 tt-a1i (Archify)
+Copyright (c) 2025 Cocoon AI
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+THIRD_PARTY_NOTICES.md
+# Third-party notices
+
+Archify includes optional vector data for third-party brand marks. These marks
+are provided only to identify technologies and services in user-authored
+diagrams. Their inclusion does not imply sponsorship, endorsement, partnership,
+or affiliation with Archify.
+
+Archify's license and historical MIT grants are described in LICENSE, NOTICE,
+and LICENSE-MIT. The software license does not
+replace the copyright licenses, trademark policies, or brand guidelines that
+apply to third-party marks. Users are responsible for confirming that their
+particular use is permitted.
+
+## Simple Icons
+
+Most of the built-in vector paths and their metadata were generated from
+[Simple Icons 16.28.0](https://github.com/simple-icons/simple-icons/tree/16.28.0).
+Simple Icons makes its collection work available under
+[CC0 1.0 Universal](https://github.com/simple-icons/simple-icons/blob/16.28.0/LICENSE.md).
+
+As Simple Icons explains in its
+[disclaimer](https://github.com/simple-icons/simple-icons/blob/16.28.0/DISCLAIMER.md),
+CC0 for the collection does not mean that every underlying icon is CC0. License
+and brand-guideline metadata may be incomplete or change over time. The absence
+of an individual license entry is not a grant of permission.
+
+Archify embeds the selected icons as vector-path data and may render them in a
+user-selected color. The following individual licenses were recorded in the
+pinned Simple Icons 16.28.0 metadata:
+
+| Mark | Recorded source | Recorded license | Archify treatment |
+|---|---|---|---|
+| Angular | [Angular press kit](https://angular.dev/press-kit) | [`CC-BY-4.0`](https://creativecommons.org/licenses/by/4.0/) | Embedded as vector-path data; color may be changed by the authored diagram. |
+| Apache Airflow | [Apache logos](https://apache.org/logos) | [`Apache-2.0`](https://www.apache.org/licenses/LICENSE-2.0) | Embedded as vector-path data; Apache trademarks remain subject to the [ASF trademark policy](https://www.apache.org/foundation/marks/). |
+| Apache Kafka | [Apache logos](https://apache.org/logos) | [`Apache-2.0`](https://www.apache.org/licenses/LICENSE-2.0) | Embedded as vector-path data; Apache trademarks remain subject to the [ASF trademark policy](https://www.apache.org/foundation/marks/). |
+| .NET | [.NET brand repository](https://github.com/dotnet/brand/blob/c7d0f51b8ec59531332d05fb27a5b758a7a3d689/logo/dotnet-logo.svg) | [`CC0-1.0`](https://creativecommons.org/publicdomain/zero/1.0/) | Embedded as vector-path data; color may be changed by the authored diagram. |
+| JavaScript | [JS community logo](https://github.com/voodootikigod/logo.js/blob/1544bdeed6d618a6cfe4f0650d04ab8d9cfa76d9/js.svg) | [`MIT`](https://github.com/voodootikigod/logo.js/blob/1544bdeed6d618a6cfe4f0650d04ab8d9cfa76d9/LICENSE) | Embedded as vector-path data; color may be changed by the authored diagram. |
+| Jenkins | [Jenkins artwork source](https://get.jenkins.io/art/) | [`CC-BY-SA-3.0`](https://creativecommons.org/licenses/by-sa/3.0/) | Embedded as vector-path data; color may be changed by the authored diagram. Jenkins retains its trademark rights. |
+| Rust | [Rust project](https://www.rust-lang.org) | [`CC-BY-SA-4.0`](https://creativecommons.org/licenses/by-sa/4.0/) | Embedded as vector-path data; color may be changed by the authored diagram. See the [Rust media guide](https://www.rust-lang.org/policies/media-guide). |
+| Vue.js | [Vue logo source](https://github.com/vuejs/art/blob/a1c78b74569b70a25300925b4eacfefcc143b8f6/logo.svg) | [`CC-BY-NC-SA-4.0`](https://creativecommons.org/licenses/by-nc-sa/4.0/) | Embedded as vector-path data; color may be changed by the authored diagram. The non-commercial and share-alike conditions remain applicable; see the [Vue artwork terms](https://github.com/vuejs/art/blob/a1c78b74569b70a25300925b4eacfefcc143b8f6/README.md). |
+
+The source, guideline, and known license fields for every packaged mark are
+preserved in `renderers/shared/generated-brand-marks.mjs`.
+
+## OpenAI mark
+
+The OpenAI vector path is recorded from the
+[OpenAI brand guidelines](https://openai.com/brand/), not from Simple Icons.
+Use remains subject to those current guidelines and any applicable trademark
+rights. Its inclusion does not state or imply endorsement by OpenAI.
+
+## JetBrains Mono
+
+Delivered Archify viewer artifacts embed the JetBrains Mono variable font
+subsets served by Google Fonts. For characters covered by these subsets, font
+selection does not depend on a network request or a locally installed copy.
+Uncovered characters (including CJK) still use the system fallback stack;
+browser and operating-system rasterization can differ.
+JetBrains Mono is maintained at
+[github.com/JetBrains/JetBrainsMono](https://github.com/JetBrains/JetBrainsMono)
+and is distributed under the SIL Open Font License 1.1. The complete license
+text is preserved in `assets/JetBrainsMono-OFL.txt` in the packaged Skill and
+in the font CSS carried by standalone HTML and SVG exports.
+
+## Pele
+
+The explainer renders Mermaid chart fences with an unmodified subset of
+[Pele 1.3.0](https://github.com/obsidianmd/pele), copyright (c) 2026 kepano,
+distributed under the MIT License. The subset and its license text are in
+`explainer/vendor/pele/` in the packaged Skill. Charts are rendered to static
+SVG when a page is built; delivered pages contain no Pele code.
+
+## No additional rights granted
+
+Brand names, logos, and trademarks remain the property of their respective
+owners. This notice records provenance and known terms; it does not grant rights
+that Archify does not hold, and it does not state that every packaged mark has
+been cleared for every commercial, promotional, or redistributive use.</metadata>
         <title id="archify-diagram-title">执行与推进全景：run / submit × local / cloud</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
@@ -435,63 +1073,84 @@ rect.c-bg-rect { fill: var(--bg); }
             <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
           </pattern>
         </defs>
+        <style>
+          svg[data-node-ui] [data-node-id] &gt; rect:not(.c-mask) { stroke-width: 1.25px; }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-frontend { fill: color-mix(in srgb, var(--frontend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--frontend-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-backend { fill: color-mix(in srgb, var(--backend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--backend-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-database { fill: color-mix(in srgb, var(--database-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--database-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-cloud { fill: color-mix(in srgb, var(--cloud-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-security { fill: color-mix(in srgb, var(--security-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-messagebus { fill: color-mix(in srgb, var(--messagebus-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--messagebus-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-external { fill: color-mix(in srgb, var(--external-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--external-stroke) 72%, var(--mask)); }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-region { fill: color-mix(in srgb, var(--cloud-stroke) 3%, transparent); stroke: color-mix(in srgb, var(--cloud-stroke) 42%, var(--lane-stroke)); stroke-dasharray: none; }
+          svg[data-node-ui] .c-security-group { stroke: color-mix(in srgb, var(--security-stroke) 58%, var(--lane-stroke)); }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-security-group { stroke-dasharray: 4 3; }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-lane { stroke: var(--lane-stroke); stroke-dasharray: none; }
+          svg[data-node-ui] [data-graph-role="structural-frame-label-mask"] { rx: 5px; fill: color-mix(in srgb, var(--cloud-stroke) 10%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 38%, var(--mask)); stroke-width: .8px; }
+          svg[data-node-ui] [data-composition-frame-kind="security-group"] &gt; [data-graph-role="structural-frame-label-mask"] { fill: color-mix(in srgb, var(--security-stroke) 9%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 36%, var(--mask)); }
+          svg[data-node-ui] .phase-rule { opacity: .5; stroke-dasharray: none; }
+          svg[data-node-ui] .phase-chip { stroke: var(--lane-stroke); stroke-width: .75px; }
+          svg[data-node-ui] g[data-edge-from] &gt; rect.c-mask { rx: 7px; stroke: var(--lane-stroke); stroke-width: .75px; }
+          svg[data-node-ui][data-preset="blueprint"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 2px; }
+          svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] &gt; rect.c-mask, .phase-chip) { rx: 3px; }
+        </style>
 
         <!-- Background Grid -->
         <rect width="100%" height="100%" fill="url(#grid)"/>
 
         <!-- Swimlanes -->
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="74" class="t-dim" font-size="10" font-weight="600">01 / 本机后端（local）</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / 本机后端（local）</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-dim" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="322" class="t-dim" font-size="10" font-weight="600">03 / 无状态单步推进</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="322" class="t-muted" font-size="10" font-weight="600">03 / 无状态单步推进</text>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="1082" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="446" class="t-dim" font-size="10" font-weight="600">04 / 云端后端（cloud）</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="424" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="446" class="t-muted" font-size="10" font-weight="600">04 / 云端后端（cloud）</text>
 
         <!-- Phase headers -->
-        <line x1="72" y1="35" x2="164" y2="35" class="a-default" stroke-width="1.1"/>
-        <rect x="72" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="118" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">入口与承载进程</text>
-        <line x1="250" y1="35" x2="854.8" y2="35" class="a-emphasis" stroke-width="1.1"/>
-        <rect x="250" y="27" width="604.8" height="16" rx="4" class="c-mask"/>
-        <text x="552.4" y="39" class="t-backend" font-size="8" font-weight="600" text-anchor="middle">驱动循环：每批事件推进一步</text>
-        <line x1="997.5999999999999" y1="35" x2="1089.6" y2="35" class="a-default" stroke-width="1.1"/>
-        <rect x="997.5999999999999" y="27" width="92" height="16" rx="4" class="c-mask"/>
-        <text x="1043.6" y="39" class="t-muted" font-size="8" font-weight="600" text-anchor="middle">重放与收敛</text>
+        <path d="M 80 35 H 156" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="78" y="27" width="80" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="118" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">入口与承载进程</text>
+        <path d="M 258 35 H 846.8" class="a-emphasis phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="480" y="27" width="144.8" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="552.4" y="38.5" class="t-backend" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">驱动循环：每批事件推进一步</text>
+        <path d="M 1024.8 35 H 1100.8" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="1028.8" y="27" width="68" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="1062.8" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">重放与收敛</text>
 
         <!-- Workflow groups -->
 
 
         <!-- Edge paths -->
-        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推进到收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 32 119 L 32 420 L 289 420 L 289 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit" data-composition-points="614.4,465;614.4,243;738.8,243" d="M 614.4 465 L 614.4 243 L 738.8 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table" data-composition-points="682.4,491;738.8,491" d="M 682.4 491 L 738.8 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推进一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-points="188,491;303,491;303,393" d="M 188 491 L 303 491 L 303 393" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-composition-points="501.4,269;501.4,491;546.4,491" d="M 501.4 269 L 501.4 491 L 546.4 491" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-composition-points="494.4,217;494.4,119;546.4,119" d="M 494.4 217 L 494.4 119 L 546.4 119" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle" data-composition-points="878.8,243;973.5999999999999,243" d="M 878.8 243 L 973.5999999999999 243" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="foreLoop" data-edge-to="dispatch" data-edge-label="在线派发" data-edge-key="7" data-edge-id="e-fore-dispatch" data-composition-points="366,243;422.4,243" d="M 366 243 L 422.4 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程" data-edge-key="8" data-edge-id="e-local-exit" data-composition-points="614.4,145;614.4,166;808.8,166;808.8,217" d="M 614.4 145 L 614.4 166 L 808.8 166 L 808.8 217" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="workerLocal" data-edge-to="pipeLocal" data-edge-label="逐条事件" data-edge-key="9" data-edge-id="e-local-pipe" data-composition-points="682.4,119;738.8,119" d="M 682.4 119 L 738.8 119" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle" data-composition-points="808.8,145;808.8,166;1043.6,166;1043.6,217" d="M 808.8 145 L 808.8 166 L 1043.6 166 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落库" data-edge-key="11" data-edge-id="e-pipe-store" data-composition-points="878.8,119;973.5999999999999,119" d="M 878.8 119 L 973.5999999999999 119" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run" data-composition-points="188,243;226,243" d="M 188 243 L 226 243" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-composition-points="368,367;487.4,367;487.4,269" d="M 368 367 L 487.4 367 L 487.4 269" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-composition-points="1043.6,145;1043.6,217" d="M 1043.6 145 L 1043.6 217" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-composition-points="1043.6,465;1043.6,269" d="M 1043.6 465 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 290 L 208 290 L 208 367 L 224 367" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle" data-composition-points="808.8,465;808.8,352;1043.6,352;1043.6,269" d="M 808.8 465 L 808.8 352 L 1043.6 352 L 1043.6 269" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-composition-points="878.8,491;973.5999999999999,491" d="M 878.8 491 L 973.5999999999999 491" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推进到收敛" data-edge-key="0" data-edge-id="e-bg-step" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="48,119;32,119;32,420;289,420;289,393" d="M 48 119 L 40 119 Q 32 119 32 127 L 32 412 Q 32 420 40 420 L 281 420 Q 289 420 289 412 L 289 393" class="a-default" data-animate="edge" style="--step: 6;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit" data-edge-role="branch" data-composition-points="614.4,465;614.4,250;738.8,250" d="M 614.4 465 L 614.4 258 Q 614.4 250 622.4 250 L 738.8 250" class="a-security" data-animate="edge" style="--step: 7;" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="682.4,491;738.8,491" d="M 682.4 491 L 738.8 491" class="a-dashed" data-animate="edge" style="--step: 8;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推进一步" data-edge-key="3" data-edge-id="e-cloudfn-step" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="188,491;308,491;308,393" d="M 188 491 L 300 491 Q 308 491 308 483 L 308 393" class="a-default" data-animate="edge" style="--step: 9;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud" data-edge-role="branch" data-composition-points="501.4,269;501.4,491;546.4,491" d="M 501.4 269 L 501.4 483 Q 501.4 491 509.4 491 L 546.4 491" class="a-default" data-animate="edge" style="--step: 10;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local" data-edge-role="main" data-composition-points="494.4,217;494.4,119;546.4,119" d="M 494.4 217 L 494.4 127 Q 494.4 119 502.4 119 L 546.4 119" class="a-emphasis" data-animate="edge" style="--step: 2;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="878.8,243;992.8,243" d="M 878.8 243 L 992.8 243" class="a-security" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="foreLoop" data-edge-to="dispatch" data-edge-label="在线派发" data-edge-key="7" data-edge-id="e-fore-dispatch" data-composition-routing="workflow-v2-auto" data-edge-role="main" data-composition-points="366,243;422.4,243" d="M 366 243 L 422.4 243" class="a-emphasis" data-animate="edge" style="--step: 1;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程" data-edge-key="8" data-edge-id="e-local-exit" data-edge-role="branch" data-composition-points="614.4,145;614.4,166;722.8,166;722.8,236;738.8,236" d="M 614.4 145 L 614.4 158 Q 614.4 166 622.4 166 L 714.8 166 Q 722.8 166 722.8 174 L 722.8 228 Q 722.8 236 730.8 236 L 738.8 236" class="a-security" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <path data-edge-from="workerLocal" data-edge-to="pipeLocal" data-edge-label="逐条事件" data-edge-key="9" data-edge-id="e-local-pipe" data-composition-routing="workflow-v2-auto" data-edge-role="async" data-composition-points="682.4,119;738.8,119" d="M 682.4 119 L 738.8 119" class="a-dashed" data-animate="edge" style="--step: 3;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle" data-edge-role="async" data-composition-points="808.8,145;808.8,197;1062.8,197;1062.8,217" d="M 808.8 145 L 808.8 189 Q 808.8 197 816.8 197 L 1054.8 197 Q 1062.8 197 1062.8 205 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step: 4;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="旁路落库（前台也写）" data-edge-key="11" data-edge-id="e-pipe-store" data-edge-role="async" data-composition-points="878.8,119;992.8,119" d="M 878.8 119 L 992.8 119" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run" data-edge-role="main" data-composition-points="188,243;226,243" d="M 188 243 L 226 243" class="a-emphasis" data-animate="edge" style="--step: 0;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-edge-role="branch" data-composition-points="368,367;487.4,367;487.4,269" d="M 368 367 L 479.4 367 Q 487.4 367 487.4 359 L 487.4 269" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-edge-role="async" data-composition-points="1062.8,145;1062.8,217" d="M 1062.8 145 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-edge-role="async" data-composition-points="1062.8,465;1062.8,269" d="M 1062.8 465 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-edge-role="branch" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 282 Q 118 290 126 290 L 200 290 Q 208 290 208 298 L 208 359 Q 208 367 216 367 L 224 367" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle" data-edge-role="async" data-composition-points="808.8,465;808.8,289;1062.8,289;1062.8,269" d="M 808.8 465 L 808.8 297 Q 808.8 289 816.8 289 L 1054.8 289 Q 1062.8 289 1062.8 281 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机后端（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机后端（local） › 入口与承载进程">
           <title>本机后台进程 · submit 派生 · 可被接力 · 本机后端（local） › 入口与承载进程</title>
-          <rect x="48" y="93" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="48" y="93" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <rect x="48" y="93" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="48" y="93" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 6; --flow-node-name: archify-relay-node-0;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
@@ -501,8 +1160,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机后端（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机后端（local） › 驱动循环：每批事件推进一步">
           <title>本机 worker · 子进程 · 本机后端（local） › 驱动循环：每批事件推进一步</title>
-          <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-mask"/>
-          <rect x="546.4" y="93" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
+          <rect x="546.4" y="93" width="136" height="52" rx="8" class="c-mask"/>
+          <rect x="546.4" y="93" width="136" height="52" rx="8" class="c-external" data-animate="node" style="--step: 3; --flow-node-name: archify-relay-node-7;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 99) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
@@ -513,8 +1172,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-pipeLocal" data-node-id="pipeLocal" data-node-label="事件通道" tabindex="0" role="button" aria-label="聚焦事件通道，专用通道，落 events.db, 本机后端（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="专用通道，落 events.db" data-node-context="本机后端（local） › 驱动循环：每批事件推进一步">
           <title>事件通道 · 专用通道，落 events.db · 本机后端（local） › 驱动循环：每批事件推进一步</title>
-          <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="738.8" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
+          <rect x="738.8" y="93" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="738.8" y="93" width="140" height="52" rx="8" class="c-database" data-animate="node" style="--step: 4; --flow-node-name: archify-relay-node-9;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 99) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
@@ -525,20 +1184,20 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-storeLocal" data-node-id="storeLocal" data-node-label="本机事件库" tabindex="0" role="button" aria-label="聚焦本机事件库，旁路原样落库, 本机后端（local） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="旁路原样落库" data-node-context="本机后端（local） › 重放与收敛">
           <title>本机事件库 · 旁路原样落库 · 本机后端（local） › 重放与收敛</title>
-          <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="973.5999999999999" y="93" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(979.5999999999999 99) scale(0.6875)">
+          <rect x="992.8" y="93" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="992.8" y="93" width="140" height="52" rx="8" class="c-database" data-animate="node" style="--step: 9; --flow-node-name: archify-relay-node-12;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(998.8 99) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" x="1043.6" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">本机事件库</text>
-          <text x="1043.6" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
+          <text data-node-label="" x="1062.8" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">本机事件库</text>
+          <text x="1062.8" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
         </g>
 
         <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种组合共用） › 入口与承载进程">
           <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种组合共用） › 入口与承载进程</title>
-          <rect x="48" y="217" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="48" y="217" width="140" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <rect x="48" y="217" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="48" y="217" width="140" height="52" rx="8" class="c-frontend" data-animate="node" style="--step: 0; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(54 223) scale(0.6875)">
             <rect x="2" y="3" width="12" height="10" rx="2"/>
             <path d="M2 6.5h12"/>
@@ -551,8 +1210,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
           <title>前台在线循环 · 全程在线接收 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
-          <rect x="226" y="217" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="226" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <rect x="226" y="217" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="226" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 1; --flow-node-name: archify-relay-node-4;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(232 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
@@ -562,8 +1221,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
           <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
-          <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-mask"/>
-          <rect x="422.4" y="217" width="144" height="52" rx="6" class="c-messagebus" stroke-width="1.5"/>
+          <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-mask"/>
+          <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-messagebus" data-animate="node" style="--step: 2; --flow-node-name: archify-relay-node-5;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(428.4 223) scale(0.6875)">
             <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11"/>
             <circle cx="5" cy="4.5" r="1" class="sigil-fill"/>
@@ -576,8 +1235,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
           <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
-          <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="738.8" y="217" width="140" height="52" rx="6" class="c-security" stroke-width="1.5"/>
+          <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-security" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-8;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(744.8 223) scale(0.6875)">
             <path d="M8 2.2 13 4v3.5c0 3.1-1.8 5.4-5 6.5-3.2-1.1-5-3.4-5-6.5V4Z"/>
             <path d="m5.8 8 1.5 1.5 3-3"/>
@@ -588,19 +1247,19 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种组合共用） › 重放与收敛">
           <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种组合共用） › 重放与收敛</title>
-          <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="973.5999999999999" y="217" width="140" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(979.5999999999999 223) scale(0.6875)">
+          <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-11;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(998.8 223) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
-          <text data-node-label="" x="1043.6" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">收敛与提交点</text>
-          <text x="1043.6" y="255" class="t-muted" font-size="8" text-anchor="middle">一次落定终态</text>
+          <text data-node-label="" x="1062.8" y="238" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">收敛与提交点</text>
+          <text x="1062.8" y="255" class="t-muted" font-size="8" text-anchor="middle">一次落定终态</text>
         </g>
 
         <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态单步推进" tabindex="0" role="button" aria-label="聚焦无状态单步推进，重放 · 条件写抢占 job, 无状态单步推进 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写抢占 job" data-node-context="无状态单步推进 › 驱动循环：每批事件推进一步">
           <title>无状态单步推进 · 重放 · 条件写抢占 job · 无状态单步推进 › 驱动循环：每批事件推进一步</title>
-          <rect x="224" y="341" width="144" height="52" rx="6" class="c-mask"/>
-          <rect x="224" y="341" width="144" height="52" rx="6" class="c-backend" stroke-width="1.5"/>
+          <rect x="224" y="341" width="144" height="52" rx="8" class="c-mask"/>
+          <rect x="224" y="341" width="144" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(230 347) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
@@ -610,8 +1269,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件均可唤醒, 云端后端（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件均可唤醒" data-node-context="云端后端（cloud） › 入口与承载进程">
           <title>云端推进函数 · 提交与事件均可唤醒 · 云端后端（cloud） › 入口与承载进程</title>
-          <rect x="48" y="465" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="48" y="465" width="140" height="52" rx="6" class="c-cloud" stroke-width="1.5"/>
+          <rect x="48" y="465" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="48" y="465" width="140" height="52" rx="8" class="c-cloud" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-1;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(54 471) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
@@ -621,8 +1280,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-workerCloud" data-node-id="workerCloud" data-node-label="云端 worker" tabindex="0" role="button" aria-label="聚焦云端 worker，云上任务, 云端后端（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="云上任务" data-node-context="云端后端（cloud） › 驱动循环：每批事件推进一步">
           <title>云端 worker · 云上任务 · 云端后端（cloud） › 驱动循环：每批事件推进一步</title>
-          <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-mask"/>
-          <rect x="546.4" y="465" width="136" height="52" rx="6" class="c-external" stroke-width="1.5"/>
+          <rect x="546.4" y="465" width="136" height="52" rx="8" class="c-mask"/>
+          <rect x="546.4" y="465" width="136" height="52" rx="8" class="c-external" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-6;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(552.4 471) scale(0.6875)">
             <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
             <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
@@ -633,8 +1292,8 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-tableCloud" data-node-id="tableCloud" data-node-label="云端事件表" tabindex="0" role="button" aria-label="聚焦云端事件表，逐条写入表, 云端后端（cloud） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="database" data-node-sublabel="逐条写入表" data-node-context="云端后端（cloud） › 驱动循环：每批事件推进一步">
           <title>云端事件表 · 逐条写入表 · 云端后端（cloud） › 驱动循环：每批事件推进一步</title>
-          <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="738.8" y="465" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
+          <rect x="738.8" y="465" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="738.8" y="465" width="140" height="52" rx="8" class="c-database" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-10;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(744.8 471) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
@@ -645,125 +1304,125 @@ rect.c-bg-rect { fill: var(--bg); }
 
         <g id="node-streamCloud" data-node-id="streamCloud" data-node-label="事件表流" tabindex="0" role="button" aria-label="聚焦事件表流，写入即触发, 云端后端（cloud） › 重放与收敛" aria-pressed="false" data-node-kind="database" data-node-sublabel="写入即触发" data-node-context="云端后端（cloud） › 重放与收敛">
           <title>事件表流 · 写入即触发 · 云端后端（cloud） › 重放与收敛</title>
-          <rect x="973.5999999999999" y="465" width="140" height="52" rx="6" class="c-mask"/>
-          <rect x="973.5999999999999" y="465" width="140" height="52" rx="6" class="c-database" stroke-width="1.5"/>
-          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(979.5999999999999 471) scale(0.6875)">
+          <rect x="992.8" y="465" width="140" height="52" rx="8" class="c-mask"/>
+          <rect x="992.8" y="465" width="140" height="52" rx="8" class="c-database" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-13;" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(998.8 471) scale(0.6875)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
           </g>
-          <text data-node-label="" x="1043.6" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">事件表流</text>
-          <text x="1043.6" y="503" class="t-muted" font-size="8" text-anchor="middle">写入即触发</text>
+          <text data-node-label="" x="1062.8" y="486" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">事件表流</text>
+          <text x="1062.8" y="503" class="t-muted" font-size="8" text-anchor="middle">写入即触发</text>
         </g>
 
         <!-- Edge labels -->
         <g data-edge-from="bgProc" data-edge-to="stepOnce" data-edge-label="反复推进到收敛" data-edge-key="0" data-edge-id="e-bg-step">
-          <rect x="121.9" y="400" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="160.5" y="410" class="t-muted" font-size="8" text-anchor="middle">反复推进到收敛</text>
+          <rect x="121.9" y="407" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="160.5" y="417" class="t-muted" font-size="8" text-anchor="middle">反复推进到收敛</text>
         </g>
         <g data-edge-from="workerCloud" data-edge-to="exitWatch" data-edge-label="云端：平台记录" data-edge-key="1" data-edge-id="e-cloud-exit">
-          <rect x="637.9999999999999" y="223" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="676.5999999999999" y="233" class="t-security" font-size="8" text-anchor="middle">云端：平台记录</text>
+          <rect x="637.9999999999999" y="230" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="676.5999999999999" y="240" class="t-edge-security" font-size="8" text-anchor="middle">云端：平台记录</text>
         </g>
         <g data-edge-from="workerCloud" data-edge-to="tableCloud" data-edge-label="逐条事件" data-edge-key="2" data-edge-id="e-cloud-table">
           <rect x="686.3999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="710.5999999999999" y="481" class="t-database" font-size="8" text-anchor="middle">逐条事件</text>
+          <text x="710.5999999999999" y="481" class="t-edge-dashed" font-size="8" text-anchor="middle">逐条事件</text>
         </g>
         <g data-edge-from="cloudFn" data-edge-to="stepOnce" data-edge-label="每批事件推进一步" data-edge-key="3" data-edge-id="e-cloudfn-step">
-          <rect x="202.1" y="471" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="245.5" y="481" class="t-muted" font-size="8" text-anchor="middle">每批事件推进一步</text>
+          <rect x="204.6" y="471" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="248" y="481" class="t-muted" font-size="8" text-anchor="middle">每批事件推进一步</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerCloud" data-edge-label="云端：起云上任务" data-edge-key="4" data-edge-id="e-dispatch-cloud">
           <rect x="516" y="360" width="86.8" height="14" rx="3" class="c-mask"/>
           <text x="559.4" y="370" class="t-muted" font-size="8" text-anchor="middle">云端：起云上任务</text>
         </g>
         <g data-edge-from="dispatch" data-edge-to="workerLocal" data-edge-label="本机：起子进程" data-edge-key="5" data-edge-id="e-dispatch-local">
-          <rect x="403.79999999999995" y="148" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="442.4" y="158" class="t-backend" font-size="8" text-anchor="middle">本机：起子进程</text>
+          <rect x="403.79999999999995" y="159" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="442.4" y="169" class="t-edge-emphasis" font-size="8" text-anchor="middle">本机：起子进程</text>
         </g>
         <g data-edge-from="exitWatch" data-edge-to="settle" data-edge-label="有退出记录才收敛" data-edge-key="6" data-edge-id="e-exit-settle">
-          <rect x="882.8" y="223" width="86.8" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="233" class="t-security" font-size="8" text-anchor="middle">有退出记录才收敛</text>
+          <rect x="892.4" y="223" width="86.8" height="14" rx="3" class="c-mask"/>
+          <text x="935.8" y="233" class="t-edge-security" font-size="8" text-anchor="middle">有退出记录才收敛</text>
         </g>
         <g data-edge-from="foreLoop" data-edge-to="dispatch" data-edge-label="在线派发" data-edge-key="7" data-edge-id="e-fore-dispatch">
           <rect x="370" y="223" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="394.2" y="233" class="t-backend" font-size="8" text-anchor="middle">在线派发</text>
+          <text x="394.2" y="233" class="t-edge-emphasis" font-size="8" text-anchor="middle">在线派发</text>
         </g>
         <g data-edge-from="workerLocal" data-edge-to="exitWatch" data-edge-label="本机：父进程" data-edge-key="8" data-edge-id="e-local-exit">
-          <rect x="677.8" y="146" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="711.5999999999999" y="156" class="t-security" font-size="8" text-anchor="middle">本机：父进程</text>
+          <rect x="634.8" y="159" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="668.5999999999999" y="169" class="t-edge-security" font-size="8" text-anchor="middle">本机：父进程</text>
         </g>
         <g data-edge-from="workerLocal" data-edge-to="pipeLocal" data-edge-label="逐条事件" data-edge-key="9" data-edge-id="e-local-pipe">
           <rect x="686.3999999999999" y="99" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="710.5999999999999" y="109" class="t-database" font-size="8" text-anchor="middle">逐条事件</text>
+          <text x="710.5999999999999" y="109" class="t-edge-dashed" font-size="8" text-anchor="middle">逐条事件</text>
         </g>
         <g data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle">
-          <rect x="887.5999999999999" y="146" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="156" class="t-database" font-size="8" text-anchor="middle">前台：在线消费</text>
+          <rect x="897.1999999999999" y="190" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="935.8" y="200" class="t-edge-dashed" font-size="8" text-anchor="middle">前台：在线消费</text>
         </g>
-        <g data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="后台：旁路落库" data-edge-key="11" data-edge-id="e-pipe-store">
-          <rect x="887.5999999999999" y="99" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="109" class="t-database" font-size="8" text-anchor="middle">后台：旁路落库</text>
+        <g data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="旁路落库（前台也写）" data-edge-key="11" data-edge-id="e-pipe-store">
+          <rect x="882.8" y="99" width="106" height="14" rx="3" class="c-mask"/>
+          <text x="935.8" y="109" class="t-edge-dashed" font-size="8" text-anchor="middle">旁路落库（前台也写）</text>
         </g>
         <g data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run">
           <rect x="192" y="223" width="30" height="14" rx="3" class="c-mask"/>
-          <text x="207" y="233" class="t-backend" font-size="8" text-anchor="middle">run</text>
+          <text x="207" y="233" class="t-edge-emphasis" font-size="8" text-anchor="middle">run</text>
         </g>
         <g data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch">
           <rect x="398.7" y="347" width="58" height="14" rx="3" class="c-mask"/>
           <text x="427.7" y="357" class="t-muted" font-size="8" text-anchor="middle">抢占后派发</text>
         </g>
         <g data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle">
-          <rect x="949.3999999999999" y="186" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="987.9999999999999" y="196" class="t-database" font-size="8" text-anchor="middle">全量重放定终态</text>
+          <rect x="1024.2" y="159" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1062.8" y="169" class="t-edge-dashed" font-size="8" text-anchor="middle">全量重放定终态</text>
         </g>
         <g data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle">
-          <rect x="1004.9999999999999" y="445" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="1043.6" y="455" class="t-database" font-size="8" text-anchor="middle">唤醒推进至收敛</text>
+          <rect x="1024.2" y="357" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="1062.8" y="367" class="t-edge-dashed" font-size="8" text-anchor="middle">唤醒推进至收敛</text>
         </g>
         <g data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit">
-          <rect x="114.80000000000001" y="270" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
-          <text x="163" y="280" class="t-muted" font-size="8" text-anchor="middle">submit：落库即返回</text>
+          <rect x="114.80000000000001" y="283" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="163" y="293" class="t-muted" font-size="8" text-anchor="middle">submit：落库即返回</text>
         </g>
         <g data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle">
-          <rect x="887.5999999999999" y="332" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="342" class="t-database" font-size="8" text-anchor="middle">前台：分段轮询</text>
+          <rect x="897.1999999999999" y="282" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="935.8" y="292" class="t-edge-dashed" font-size="8" text-anchor="middle">前台：分段轮询</text>
         </g>
         <g data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream">
-          <rect x="901.9999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
-          <text x="926.1999999999999" y="481" class="t-database" font-size="8" text-anchor="middle">每批写入</text>
+          <rect x="911.5999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="935.8" y="481" class="t-edge-dashed" font-size="8" text-anchor="middle">每批写入</text>
         </g>
 
         <!-- Legend -->
         <g data-legend="">
           <text x="20" y="552" class="t-primary" font-size="12" font-weight="650">图例</text>
-          <g data-legend-semantic-kind="frontend" data-legend-x="20" data-legend-baseline="572" data-legend-width="78">
+          <g data-legend-semantic-kind="frontend" data-legend-x="20" data-legend-baseline="572" data-legend-width="81">
             <rect x="20" y="564" width="14" height="9" rx="2" class="c-frontend" stroke-width="1"/>
             <text x="42" y="572" class="t-muted" font-size="7.5" font-weight="500">命令入口</text>
           </g>
-          <g data-legend-semantic-kind="backend" data-legend-x="105" data-legend-baseline="572" data-legend-width="87">
-            <rect x="105" y="564" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
-            <text x="127" y="572" class="t-muted" font-size="7.5" font-weight="500">驱动与执行</text>
+          <g data-legend-semantic-kind="backend" data-legend-x="108" data-legend-baseline="572" data-legend-width="90">
+            <rect x="108" y="564" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+            <text x="130" y="572" class="t-muted" font-size="7.5" font-weight="500">驱动与执行</text>
           </g>
-          <g data-legend-semantic-kind="security" data-legend-x="199" data-legend-baseline="572" data-legend-width="78">
-            <rect x="199" y="564" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
-            <text x="221" y="572" class="t-muted" font-size="7.5" font-weight="500">退出观察</text>
+          <g data-legend-semantic-kind="security" data-legend-x="205" data-legend-baseline="572" data-legend-width="81">
+            <rect x="205" y="564" width="14" height="9" rx="2" class="c-security" stroke-width="1"/>
+            <text x="227" y="572" class="t-muted" font-size="7.5" font-weight="500">退出观察</text>
           </g>
-          <g data-legend-semantic-kind="messagebus" data-legend-x="284" data-legend-baseline="572" data-legend-width="91">
-            <rect x="284" y="564" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
-            <text x="306" y="572" class="t-muted" font-size="7.5" font-weight="500">派发 worker</text>
+          <g data-legend-semantic-kind="messagebus" data-legend-x="293" data-legend-baseline="572" data-legend-width="95">
+            <rect x="293" y="564" width="14" height="9" rx="2" class="c-messagebus" stroke-width="1"/>
+            <text x="315" y="572" class="t-muted" font-size="7.5" font-weight="500">派发 worker</text>
           </g>
-          <g data-legend-semantic-kind="database" data-legend-x="382" data-legend-baseline="572" data-legend-width="78">
-            <rect x="382" y="564" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
-            <text x="404" y="572" class="t-muted" font-size="7.5" font-weight="500">事件载体</text>
+          <g data-legend-semantic-kind="database" data-legend-x="395" data-legend-baseline="572" data-legend-width="81">
+            <rect x="395" y="564" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="417" y="572" class="t-muted" font-size="7.5" font-weight="500">事件载体</text>
           </g>
-          <g data-legend-semantic-kind="cloud" data-legend-x="467" data-legend-baseline="572" data-legend-width="96">
-            <rect x="467" y="564" width="14" height="9" rx="2" class="c-cloud" stroke-width="1"/>
-            <text x="489" y="572" class="t-muted" font-size="7.5" font-weight="500">云端推进函数</text>
+          <g data-legend-semantic-kind="cloud" data-legend-x="483" data-legend-baseline="572" data-legend-width="99">
+            <rect x="483" y="564" width="14" height="9" rx="2" class="c-cloud" stroke-width="1"/>
+            <text x="505" y="572" class="t-muted" font-size="7.5" font-weight="500">云端推进函数</text>
           </g>
-          <g data-legend-semantic-kind="external" data-legend-x="570" data-legend-baseline="572" data-legend-width="156">
-            <rect x="570" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
-            <text x="592" y="572" class="t-muted" font-size="7.5" font-weight="500">worker：子进程 或 云端任务</text>
+          <g data-legend-semantic-kind="external" data-legend-x="589" data-legend-baseline="572" data-legend-width="164">
+            <rect x="589" y="564" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="611" y="572" class="t-muted" font-size="7.5" font-weight="500">worker：子进程 或 云端任务</text>
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=d32f56fd0d4d5a3d6813dae2d7787669d4f68bbb08f92c430d45bc8dfd24e1db -->
+<!-- gherkai:source-sha256=121b0cc0482c4434b99e726c6f0213da32dea6c1737a8c77ba06bf87d973d85d -->

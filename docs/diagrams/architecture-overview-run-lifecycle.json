@@ -3,6 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "一次 run 的生命周期主干",
+    "output": "architecture-overview-run-lifecycle.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {

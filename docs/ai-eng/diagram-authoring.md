@@ -6,7 +6,7 @@
 
 1. **先定要不要画**：结构 / 顺序 / 状态 / 分支用文字确实费劲，且能指出它替代或压缩了哪段文字；一张表能说清的不画。
 2. **选类型**（archify 五类）：组件与边界 → `architecture`；步骤 / 分支 / 循环 / 闸门 → `workflow`（schema_version 2）；数据从哪流到哪、谁消费 → `dataflow`；调用链与时序 → `sequence`；状态与终态 → `lifecycle`。拿不准跑 `node ~/.agents/skills/archify/bin/archify.mjs guide "<一句话场景>" --lang zh --json`。
-3. **作者化 JSON**：读 archify `SKILL.md` 的 fast authoring path，只读匹配类型的 `schemas/<type>.schema.json`、`schemas/common.schema.json` 与一个 `examples/*.<type>.json`；写 `docs/diagrams/<页面短名>-<主题>.json`；`meta.locale: "zh-CN"`、`meta.quality_profile: "showcase"`。
+3. **作者化 JSON**：读 archify `SKILL.md` 的 fast authoring path，只读匹配类型的 `schemas/<type>.schema.json`、`schemas/common.schema.json` 与一个 `examples/*.<type>.json`；写 `docs/diagrams/<页面短名>-<主题>.json`；`meta.locale: "zh-CN"`、`meta.quality_profile: "showcase"`、`meta.output: "<name>.html"`（archify 3.x 起必填，取值须是可移植的相对 `.html` 路径，本仓库统一写图名本身；缺它 `deliver` 在校验阶段即停、不产 HTML）。本仓库图源按 archify 3.2.0 作者化与校验，升级 archify 后先对全部图源执行一遍第 4 步的校验再改图——校验规则随版本变严（3.x 新增 `meta.output` 必填，布局校验也更严：图例换行、sequence 的 note 折行压到下一条消息、歧义走廊、标签间距都会报 error），以免改图时才发现整条链路不可用。
 4. **校验**：`node ~/.agents/skills/archify/bin/archify.mjs validate <type> docs/diagrams/<name>.json --quality showcase --json`，循环到 0 error 0 warning（9 项 artifact 检查全过）。
 5. **构建与目视**：`node tools/build_diagrams.mjs --png docs/diagrams/<name>.json`（deliver 出 HTML → 导出 SVG 与 PNG，SVG 末尾带图源指纹）。用 Read 打开 PNG，按第三节清单逐项过。**迭代时不要用 `--no-deliver`**：它复用旧 HTML，看不到 JSON 改动。看完**删掉 PNG**。
 6. **嵌入**：markdown 图片语法引用 `../diagrams/<name>.svg`，alt 写一句话说明（根 README 用 `./docs/diagrams/` 路径），图下一行图注交代图外事实与和别图的分工；只有发布到 Pages 的图在图注末尾加交互版链接。被图替代的散文删掉或压成一句，结论句与指针保留（user-guide / README 的读者含 AI agent，它读不了图）。
@@ -48,7 +48,7 @@
 - **端口模型（dataflow / architecture）**：同一侧的自动边按固定 14 单位分散，带 via / channel 的显式边一律锚在该侧中点——一侧同时有两条自动边和一条显式边，显式那条必夹在正中（±7 单位），箭头三角互压。因此每个节点每一侧最多放两条边，第三条换侧（顶 / 底）；同源同目标的两条边要各走不同入口侧（一条左侧、一条顶边），做成嵌套直角，而不是并排且形状一致——同一对节点的两条自动边会共用同一条走廊、竖段完全共线。
 - **改一条边的副作用**：把某条边改成 `straight` 或改侧后，自动路由会重算其它边，可能把别的边绕进已放置的标签而使 `straight` 被否（route-preset-conflict）——用 `toSide` / `fromSide` 把受影响的边钉回原侧。
 - **画布贴内容**：dataflow 横向几何固定（列距 215、容器宽 168），右侧留白由 `meta.viewBox[0]` 决定，最小宽度 = 图例单行宽度 + 80（图例换行会撞 legend/vertical-overflow）；收窄会改变长宽比，只对发布到 Pages 的交互版有 viewport-overflow 影响，静态 SVG 无碍。workflow v2 的画布由编译器算出，无 `meta.viewBox` 可调。
-- **图上文字同守口吻**：节点与图例里的字读者直接看到，隐喻（「烙进」）、口头语一律不用，护栏 `test_user_docs.py` 对图源扫禁词与口头语表。
+- **图上文字同守口吻**：节点与图例里的字读者直接看到，隐喻（「烙进」）、口头语一律不用，护栏 `test_user_docs.py` 对图源扫禁词、口头语表、退役旧名、符号当谓语与「退 N」式缩写，写入时的措辞 hook 与它同源（`cli/tests/_doc_rules.py`）。
 - **相对的两个节点之间走直线（workflow v2）**：`straight` 要求两节点之间的净空 ≥ max(28, 标签遮罩宽 + 8)——标签是横在两点之间的，`labelDx` / `labelDy` 挪不掉这条判定；净空不够时缩短标签文字（如「派发一个 job」→「派发 job」）或拉开两节点（`yOffset` 会与别的边的显式 via 起 explicit-pin-conflict，先看哪条边钉了绝对坐标）。`validate --layout-json` 只在校验失败时给 diagnostics、不给几何，拿几何要先让它过校验。
 - **回传边（workflow v2）**：优先用预设 `route: "return-left"`；把目标节点对齐到同一列后预设会因端口被占而失效，此时改为 `fromSide` / `toSide` + `channelX` 钉一条走廊（走廊离任何节点边缘 ≥ 28 单位，否则报 route-preset-conflict）并用 `labelSegment` / `labelDx` 把标签放到竖段旁；`layout/constraint` 的 message 里带具体的 labelDy / labelAt 建议值，直接照抄。**别把回传边留给全自动路由**：它会为躲开走廊绕整张画布的外沿。
 - **改标签文字也会动布局（workflow v2）**：列间距是全图统一值、取自最宽的跨列边标签——缩短那条标签会让列距变窄，连带把别的直线边压到 28 单位下限而报错；改字时保持跨列边标签的宽度不变（等宽替换），或改后重新校验全图。lane 标题带是障碍：从最左列节点底边竖直下落会撞下一 lane 的标题文字（explicit-pin-conflict：lane/phase/group label clearance），自动路由的「先右再下」正是为此绕行。

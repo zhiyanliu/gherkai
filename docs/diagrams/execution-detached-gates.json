@@ -3,6 +3,7 @@
   "diagram_type": "workflow",
   "meta": {
     "title": "两道拦截：云端推进器为何不介入前台 run",
+    "output": "execution-detached-gates.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "legend": {

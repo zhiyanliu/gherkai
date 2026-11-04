@@ -3,6 +3,7 @@
   "diagram_type": "architecture",
   "meta": {
     "title": "云端交付与 worker 身份拓扑",
+    "output": "cloud-delivery-identity.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
     "views": [
@@ -47,9 +48,10 @@
           "derived",
           "retired",
           "cleanup",
+          "mapping",
           "runs"
         ],
-        "note": "旧 revision 允许删除的条件：被替换时仅标记退休；满静默期且无未到终态的 run 引用，才注销并删除。"
+        "note": "旧 revision 允许删除的条件：被替换时仅标记退休；满静默期、无未到终态的 run 引用，且不再被任何版本的映射引用，才注销并删除。"
       }
     ]
   },

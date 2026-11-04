@@ -1581,97 +1581,97 @@
   },
   "docs/diagrams/architecture-overview-layers.json": {
     "mtime": 1793780511.1514943,
-    "ast_hash": "95da24826460c482bb77f9c63f529602",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.json": {
     "mtime": 1793778688.7129269,
-    "ast_hash": "8a79060b9c038589d66d30d33333b11c",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.json": {
     "mtime": 1793779387.1165767,
-    "ast_hash": "f5ba5f34cbdf87a2e50c2e3b3df94224",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.json": {
     "mtime": 1793778857.6906726,
-    "ast_hash": "498efda8a71d89ab79753b66be48e45b",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-upgrade-windows.json": {
     "mtime": 1793780511.1516452,
-    "ast_hash": "1f79b16174f64941912159af7d17d3e2",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
     "mtime": 1793778688.7137823,
-    "ast_hash": "27f29dc1d3c3aa7f55afcd6d67b7b858",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
     "mtime": 1793778981.0061476,
-    "ast_hash": "7819ee013da973ebf2d633986ef915aa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
     "mtime": 1793779062.5972173,
-    "ast_hash": "72bd6c591c0ae2072211a41ef929812f",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
     "mtime": 1793778688.7144806,
-    "ast_hash": "5c35385d0f2cafd6d629d4b36321dfaa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.json": {
     "mtime": 1793778688.7149434,
-    "ast_hash": "7048d2477d5128ef8e4fc94741fd1249",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-detached-gates.json": {
     "mtime": 1793778688.7152061,
-    "ast_hash": "1fc3a03d0b38b5076bc0e327b260c3dd",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.json": {
     "mtime": 1793778688.7153974,
-    "ast_hash": "ed8e03890cd8c0f39e3183049aa9d827",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
     "mtime": 1793778688.715607,
-    "ast_hash": "ef67486773ee6c930400d70342c4933d",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
     "mtime": 1793778688.715778,
-    "ast_hash": "df720d44df00700141fb3b75631e9195",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/readme-runtime-topology.json": {
     "mtime": 1793778688.7159758,
-    "ast_hash": "cf4831481e3a563a493e91b3d308f129",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
     "mtime": 1793780365.1821952,
-    "ast_hash": "e18f740b1b91078e45e31925acd9f71b",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793780277.7677033,
-    "ast_hash": "4384801bfeef5725f33ee6c163a77663",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1793778688.716607,
-    "ast_hash": "e7dd7405a14362207d9de79f2540654e",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
     "mtime": 1793778688.7167816,
-    "ast_hash": "e247d97cc1c3561d7775b09b6dfcba3a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
