@@ -8,11 +8,11 @@
 
 | 载体 | 内容 | 更新者 | 生效时机 | 名称 / 真源 |
 |---|---|---|---|---|
-| **CloudFormation stack** | 全部资源与其形态：runs 表（另带 `status-index` 稀疏 GSI）与 events 表（另带 TTL），两表都开 Stream；artifacts 桶（含 job-in 的按 tag 过期规则）；ECS cluster；每引擎一个 **task-def 模板 revision** 与一个 ECR repo；三个 Lambda + EventBridge rule + 两条 Stream 事件源；IAM 角色；VPC/子网/安全组；以及随事务写的几族 SSM 参数 | `gherkai deploy`（组装 context → 由 cdk CLI 启动 `gherkai_deploy_aws.app` 合成 → `cdk deploy`） | 变更集应用完即生效；**回滚时随事务一起回滚**（版本戳与模板不留错值） | stack 名取 `names.stack_name(prefix)`（provider 专有，与 `LAMBDA_ASSET_DIR_ENV` 同在 `deploy_aws/gherkai_deploy_aws/names.py`）；云资源名都由 `--prefix` 推导：cli 与 IaC 两侧都要用的名字经 `gherkai_runtime.names`；只有 stack 自己用的日志组 `/{prefix}worker/{engine}`、EventBridge rule `{prefix}ecs-stopped` 与 Scheduler 执行角色 `{prefix}timeout-scheduler` 直接写在 `stack.py` 里 |
+| **CloudFormation stack** | 全部资源与其形态：runs 表（另带 `status-index` 稀疏 GSI）与 events 表（另带 TTL），两表都开 Stream；artifacts 桶（含两条按对象 tag 过期的规则：派给 worker 的 job-in 与设备目标的安装包）；ECS cluster；每引擎一个 **task-def 模板 revision** 与一个 ECR repo；三个 Lambda + EventBridge rule + 两条 Stream 事件源；IAM 角色（启用设备支持时，Midscene 的 task role 另加 Device Farm 与安装包前缀权限）；VPC/子网/安全组；以及随事务写的几族 SSM 参数 | `gherkai deploy`（找回或建立云端 Device Farm 项目 → 组装 context（含项目 ARN）→ 由 cdk CLI 启动 `gherkai_deploy_aws.app` 合成 → `cdk deploy`；拿不到项目 ARN 时 stack 不写 `device-farm-project`、不给 Midscene task role 授设备权限） | 变更集应用完即生效；**回滚时随事务一起回滚**（版本戳与模板不留错值） | stack 名取 `names.stack_name(prefix)`（provider 专有，与 `LAMBDA_ASSET_DIR_ENV` 同在 `deploy_aws/gherkai_deploy_aws/names.py`）；云资源名都由 `--prefix` 推导：cli 与 IaC 两侧都要用的名字经 `gherkai_runtime.names`；只有 stack 自己用的日志组 `/{prefix}worker/{engine}`、EventBridge rule `{prefix}ecs-stopped` 与 Scheduler 执行角色 `{prefix}timeout-scheduler` 直接写在 `stack.py` 里 |
 | **三个 Lambda 的部署 asset** | `lambdas/` 的 handler 源（`reconciler.py` 一份两个入口 + `exit_observer.py`）+ `BackendStack.LAMBDA_ASSET_PACKAGES` 逐项**从当前 venv 已安装位置复制**的 import 包（含 `gherkai_core` / `gherkai_runtime`）。boto3 由 Lambda runtime 自带 | 同一条 `gherkai deploy`（asset 由 `stack._build_lambda_asset()` 在本次部署时复制到临时目录） | asset 内容变 → CDK 算出的 asset hash 变 → 本次 deploy 的变更集包含三个函数的代码更新 | `stack.BackendStack.LAMBDA_ASSET_PACKAGES`；落点经 env `names.LAMBDA_ASSET_DIR_ENV` 从命令进程传给 cdk 启动的 app 进程 |
 | **官方基础镜像** | 同版本 worker 包 + SDK 运行时 + 协议层，**零使用方内容**（`engines/*/Dockerfile`） | 发布方的 CI 按 tag 发到 GHCR（`workers.GHCR_BASE_IMAGE`） | 在 GHCR 就位**之后**，仍需 `gherkai deploy` 第 2 步 pull→push 进本账户的 ECR 才在云端可用；**运行时不直连 GHCR** | `ghcr.io/…/gherkai-worker-<engine>:<版本>` |
 | **使用方的 variant 镜像** | 基础镜像 + 使用方 `COPY` 进去的确定性 step 目录（`GHERKAI_STEPS_DIR`）；**云端执行哪套 step 由镜像决定**，不由提交侧 `--steps-dir` 决定 | 使用方自行 build（gherkai 不拥有构建）+ `gherkai deploy push-worker`（推 ECR、从模板注册 revision、写 SSM 映射） | 写完 SSM 映射后，**下一次提交**解析到新 revision；已在运行的 run 不切换（见 §5） | ECR tag 取 `names.image_tag(CLI 版本, variant)`；repo 名取 `names.ecr_repo_name` |
-| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 取值）、`worker-template/<engine>`（模板 revision ARN）、`subnets`、`security-groups` 这五族是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）这两族由命令 `put_parameter` 写 | 前五族随 cdk 事务；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
+| **SSM 参数** | `version`（后端版本戳）、`vpc`（生效 VPC 取值）、`worker-template/<engine>`（模板 revision ARN）、`subnets`、`security-groups` 这五族，以及拿到云端 Device Farm 项目 ARN 时才建的 `device-farm-project`（项目 ARN），是 **stack 资源**；`worker-image/<engine>/<tag>`（映射 JSON）、`worker-default`（默认 variant 指针）这两族由命令 `put_parameter` 写 | 前六族随 cdk 事务（`device-farm-project` 的值由 `gherkai deploy` 在 cdk 之前找回或建立项目后经 context 传入）；后两族由 `push-worker` / `deploy` 的第 2-4 步写 | `put_parameter` 即生效（**覆盖语义、最后写者赢**） | 路径全经 `names.ssm_path(prefix, key)`，键名常量在 `gherkai_runtime.names` |
 
 ![官方基础镜像与使用方 build 的镜像如何进入本账户的 ECR、挂在哪个 task-def revision 上、由哪些指针指向，以及旧 revision 何时允许回收](../diagrams/cloud-delivery-identity.svg)
 
@@ -21,10 +21,10 @@
 三条容易出错的载体边界：
 
 - **模板 revision 与 variant revision 是两回事**：模板由 stack 创建（承载 cpu/memory/两个 role/日志组/`runtimePlatform`/`stopTimeout`），镜像栏为 `latest` 占位、**永不被 RunTask**；每个（引擎，variant）另有一个从模板复制、镜像栏替换为 `repo@sha256:<digest>` 的 revision，实际起 task 用的是后者。
-- **数据类资源不随 `gherkai destroy` 删**（两表、桶、两个 ECR repo 都是 `RETAIN`）；而 `worker-image/*` 与 `worker-default` 不是 stack 资源（由命令 `put_parameter` 写），`destroy` 同样不清除它们。同一 prefix 重建后这两族参数的原值仍在，记录的仍是上一套 stack 时期的 revision / 模板 ARN。
+- **数据类资源不随 `gherkai destroy` 删**（两表、桶、两个 ECR repo 都是 `RETAIN`）；而 `worker-image/*` 与 `worker-default` 不是 stack 资源（由命令 `put_parameter` 写），`destroy` 同样不清除它们。同一 prefix 重建后这两族参数的原值仍在，记录的仍是上一套 stack 时期的 revision / 模板 ARN。`push-worker` 与 `deploy` 派生注册的各 variant task-def revision 同样不归 stack 管理，`destroy` 之后留在账户里。云端 Device Farm 项目 `{prefix}devices` 由 `gherkai deploy` 在 cdk 之前找回或建立，也不归 stack 管理：`destroy` 保留它（连同会话记录与录像），只有记录其 ARN 的 `device-farm-project` 参数随 stack 删除；同一 prefix 重新部署时按名称找回并沿用它。
 - **asset 的来源是发起这次部署的那个 venv**，不是仓库相对路径，也不联网安装：dev 版部署得到的就是本机当前的那份 code。清单漏一个传递依赖，后果是 Lambda 运行期 `ImportError`（清单完整性由 `deploy_aws/tests/test_lambda_asset.py` 的「剥掉 site-packages 真 import」那条用例保证）。
 
-> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/两层命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 取值）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
+> 权威：[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（资源清单/两层命名/IAM/preflight）、[ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6（部署形态、asset 来源、版本戳、VPC 取值）、[ADR 0038](../adr/0038-worker-image-delivery.md)（概念模型、SSM 参数真源表）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 10（Device Farm 项目、`device-farm-project` 参数、无权限降级）；code：`deploy_aws/gherkai_deploy_aws/stack.py`、`.../cli.py`、`.../names.py`（provider 专有名：stack 名 / asset 落点 env）、`runtime/gherkai_runtime/names.py`（共享命名纯函数）。
 
 ## 2. 行为归属哪个载体（改动前的定位表）
 
@@ -66,18 +66,19 @@
 |---|---|---|
 | 任何 cloud 命令直接以退出码 2 结束，提示「本机 CLI 新于后端」 | ② 未执行（stack 未重新部署 → 版本戳仍是旧值） | `compose.SKEW_BLOCK` 分支 |
 | 退出码 2，提示后端没有版本戳、部署早于设备目标功能 | ② 未执行（旧部署没有版本戳，带隧道或设备目标的 run 要求后端先升级） | `compose.check_version_skew` 的缺戳分支 |
+| 带设备目标的云端 run 以退出码 2 结束，提示「部署未启用设备支持」 | ② 执行时没有建立 Device Farm 项目：部署所用的 CLI 早于设备目标功能，或部署方凭证没有 Device Farm 权限（deploy 只警告并按未启用设备支持部署）；用有 Device Farm 权限的凭证重新执行 `gherkai deploy` | `compose.read_device_farm_project` 读不到参数（提示语在 `submission.cloud_device_requests`）；降级分支在 `cli.Provider._resolve_device_farm_project_for_deploy` |
 | 云端 `submit` 的判定明细缺新字段（如 step 级 `message`），同版本本机 `run` 却有 | ② 未执行（**Lambda asset** 未重新上传；云端 `jobs/*.json` 由 asset 里那份 `gherkai_core` 投影产出） | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「交付链」条 |
 | 云端执行完没有证据 / step 行为仍是旧的 | ③ 未执行（**worker 镜像**未重新推送；发行版经 ② 的基础镜像同步，dev 树经 `push-worker`） | 同上 |
-| 退出码 2，提示「默认 variant `X` 在新版本尚无镜像」 | ③ 未执行。**默认指针不随升级重置**（它记录的是团队意图，`init_default_pointer` 在参数已存在时不改动）：指针仍指向 `X`，而 `<新版本>-X` 尚未推送 | `workers.init_default_pointer`；提示语在 `compose._variant_miss_hint` |
+| 默认 variant 在新版本尚无镜像：退出码 2，提示「引擎 `<engine>` 的 worker variant 'X' 解析失败（SSM 里没有这个（引擎，variant）的镜像映射，镜像标签 `<新版本>-X`）」 | ③ 未执行。**默认指针不随升级重置**（它记录的是团队意图，`init_default_pointer` 在参数已存在时不改动）：指针仍指向 `X`，而 `<新版本>-X` 尚未推送 | `workers.init_default_pointer`；提示语在 `compose._variant_miss_hint` |
 | 退出码 2，提示「读不到 worker task-def 模板（SSM `worker-template/<engine>`）」 | 本 prefix 从未执行过 `gherkai deploy`（或上次部署所用的 CLI 版本尚无镜像机制） | `workers._template_arn` |
 | `deploy` 调整了 cpu / `stopTimeout`，但 variant 仍以旧配置运行 | ② 的第 4 步（重派生）未完成：revision 是不可变快照、不继承模板变更 | `workers.rederive_variants`（按模板 ARN 判定、幂等；`pushed_at` 保留原值，镜像内容不变） |
 | 提交以退出码 2 结束，提示「产物前缀不一致」 | 推进器 Lambda 的 `REPORT_DIR` 与提交侧 `--report-dir` 不同（前者 IaC 有意不注入、由 handler 缺省供给） | `compose.preflight_cloud_resources` |
 | `deploy` 以退出码 1 结束并提示「stack 已生效，但同步基础镜像要 pull/push——deploy 的机器需要容器引擎」 | ② 的第 2 步未执行：纯发行版要求部署机具备容器引擎，探活失败即**硬失败**，第 3/4 步与清理 pass 均未执行——安装后重新运行 `gherkai deploy`（幂等收敛）。非纯发行版不探测容器引擎，第 2 步整步跳过并输出一条警告，第 3/4 步照常执行 | `workers.run_deploy_steps`（探活分支退出码 1）/ `workers.sync_base`（非纯发行版跳过；判据 `compose.is_pure_release`）；cdk 前那句预告在 `cli.Provider.deploy` |
 | `list-workers` 里 revision 比 variant 多 | 正常现象：已退休 / 孤儿 revision 正等待清理 pass（见 §5），`_pending_cleanup` 逐条列出原因 | `workers.list_workers` |
 
-`gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），云端 task-def 的停止宽限与本机 worker 自报的最短收尾宽限之间的比对（可选项；本机没有该引擎 worker 时跳过该引擎），以及部署工具链（Node / cdk / 容器引擎）。
+`gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），云端 task-def 的停止宽限与本机 worker 自报的最短收尾宽限之间的比对（可选项；本机没有该引擎 worker 时跳过该引擎），Device Farm 项目记录（部署是否启用设备支持）与项目里未结束的远程访问会话（两项都是可选项），以及部署工具链（Node / cdk / 容器引擎）。
 
-> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)（四步、preflight、`--set-default` 只警告不拦）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 的 provider 段）。
+> 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)（四步、preflight、`--set-default` 只警告不拦）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 的 provider 段）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 6、10（doctor 读项目记录并列未结束的会话）。
 
 ## 5. `submit` 在提交时刻固定下来的内容
 
@@ -120,6 +121,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 | worker 镜像交付全部决策/护栏/被拒方案 | [ADR 0038](../adr/0038-worker-image-delivery.md) |
 | 分发形态、`gherkai deploy` 的 provider 接缝、版本真源与 skew | [ADR 0037](../adr/0037-distribution-and-packaging.md) 决策 6-7 |
 | 云资源 IaC / 命名 / IAM / preflight | [ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md) |
+| 设备目标的云端项目、权限与会话 | [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 10 |
 | Fargate 执行面：`deploy --stop-timeout` 设置容器的 `stopTimeout`（默认值与 Fargate 硬上限见 `stack.BackendStack` 的两个常量与 `--help`）、grace 预算、中断韧性 | [ADR 0032](../adr/0032-fargate-execution-environment.md)（真容器校准结论 3-4） |
 | 事件驱动推进链、超时定时器、投影与提交点 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)、[ADR 0034](../adr/0034-detached-batch-reconciler.md) |
 | 判定的计算路径（票 → step → scenario → job → run 四层归约与严重度） | [`verdict-model.md`](./verdict-model.md) |

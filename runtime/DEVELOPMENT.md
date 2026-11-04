@@ -4,7 +4,7 @@
 
 发行名 `gherkai-runtime` / import 名 `gherkai_runtime`（ADR 0037 决策 2a「三名分离」；发行名 `gherkai` 归 CLI 包）。
 
-`cli` / `lambdas` / 未来 WebUI 的**共同地基**（ADR 0016「演进」节）：本包持有产品级知识——两个引擎的注册与拉起、
+`cli`、部署 provider `deploy_aws`（含其中的 Lambda handler `gherkai_deploy_aws/lambdas/`）与未来 WebUI 的**共同地基**（ADR 0016「演进」节）：本包持有产品级知识——两个引擎的注册与拉起、
 云资源命名、run 的装配与推进；各入口只做参数解析与呈现。依赖方向：`入口 → gherkai_runtime → gherkai_core`
 （窄腰红线不变：引擎知识不进 core）。
 
@@ -17,11 +17,11 @@
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
     midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 后端）/
     `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本
-    模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL`：有值显式注入、无值显式清除）。
+    模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：有值显式注入、无值显式清除）。
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
-    steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
+    steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id / 支持的测试目标（顶层 `targets`，缺键按版本不一致拒绝）/ 会话预热支持键 `session_warmup`；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
     目录」缓存；`engine_min_grace` 从中取下限，Nova 查询时注入 `NOVA_ACT_TIMEOUT_S` 使两端同源）与 `match_deterministic`
-    （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现。
+    （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
   - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（云资源终名 +
     region/profile 一处解析）/ `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `preflight_cloud_resources`
     （提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/
@@ -36,17 +36,17 @@
 - `devicefarm.py` —— 部署与诊断用的 Device Farm 客户端（ADR 0051 决策 10「调用归属」「项目」、决策 6）：`project_name`（项目名 `{prefix}devices`）/ `read_project_arn`（从后端区域的 SSM 读项目 ARN，ssm client 由调用方注入）/ `resolve_or_create_project`（供 `deploy` 在 cdk 之前找回或建立项目；记录的项目已不存在时经 `warn` 回调立即发出警告）/ `verify_project`（供 `diff` 用 GetProject 只读核对 SSM 记录的项目：存在为 True，NotFound 为 False，不按名称列举、不建立）/ `list_open_sessions`（供 `doctor` 列出未到 COMPLETED 的会话）/ `is_access_denied`（provider 判定读 SSM 失败是否为无权限，与本模块共用一份错误码集合）；无权限归为 `DeviceFarmAccessDenied`（记录的项目已不存在而找回或新建又被拒时带 `stored_project_missing`）、同名项目多于一个归为 `AmbiguousProject`，其余 botocore 异常原样抛出。Python 侧唯一构造 devicefarm 客户端的地方，区域恒为 `names.DEVICE_FARM_REGION`（构造点、区域与延迟导入的护栏在 `tests/test_devicefarm_client_placement.py`）；不创建、不停止会话（护栏在 `tests/test_devicefarm.py`）
 - `app_upload.py` —— 安装包上传到 S3 应用前缀（ADR 0051 决策 9）：按内容哈希定键、managed 桶打标签与按保留承诺同键刷新、本机应用桶只做存在性复用；s3 client 由调用方注入
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
-  避免复刻）：资源名 / SSM 路径 / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
+  避免复刻）：资源名（含 Device Farm 项目名与固定区域 `DEVICE_FARM_REGION`）/ SSM 路径 / Device Farm 项目 ARN 校验与会话 ARN 前缀、交互端点资源的推导（task role 授权用）/ 安装包在产物桶里的键前缀、标签与过期和保留天数（`APP_OBJECT_*`，IaC 与上传侧共用）/ 引擎产物子目录名 `ARTIFACT_SUBDIR` / ECR repo 名 / 血缘 tag 键 / worker 镜像 tag（`image_tag` 是 PEP 440 → docker tag 字符集的
   **唯一归一化与校验点**，ADR 0038）
 - `tunnel.py` —— 隧道 provider（ADR 0035；鉴权按 ADR 0051 决策 13）：`--expose-local` 启动 / 拆除 ngrok（每个 run 生成访问令牌与会话 cookie 值、
   渲染四条规则的流量策略、给出会话预热地址；按 pid 跨进程收尾）+ job 文本里 origin 的带边界替换（`replace_origin` / `map_origin_in_jobs`，
   替换成干净的隧道地址；core 对隧道无知、worker 只做一次预热导航）；边缘契约常量（路径、参数名、cookie 名、页面标记）与两个 worker 各持一份同值，由 `engines/fixtures/tunnel-warmup.json` 对拍
-- `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 恒注入的额外请求头
-  （`TUNNEL_EXTRA_HTTP_HEADERS`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
+- `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 隧道模式下恒同时给出的额外请求头（`TUNNEL_EXTRA_HTTP_HEADERS`）与会话预热地址
+  （`TunnelSetup.warmup_url`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
 - `textui.py` —— 人读输出的呈现件（ADR 0047）：`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain`
-  与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：`NO_COLOR` /
-  `FORCE_COLOR` / `TERM=dumb` / 是否终端）与状态色映射 `STATUS_STYLE` 全在此一处；cli 与部署 provider 只经本模块使用 rich
+  与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：环境变量 `NO_COLOR` /
+  `FORCE_COLOR` / `TERM=dumb` 的判定取自 `gherkai_core.termcolor`、与 worker 日志前缀共用一份，本模块再看标准输出是否为终端）与状态色映射 `STATUS_STYLE` 都由本模块提供；cli 与部署 provider 只经本模块使用 rich
 
 ## 从 checkout 运行 / 测试
 
@@ -64,6 +64,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 ## 相关 ADR
 
 - [0016](../docs/adr/0016-execution-architecture-core-lib-run-model.md) 执行架构 / 组合根注入 /「演进」节（本包为何从 cli 拆出）
+- [0024](../docs/adr/0024-worker-core-protocol.md) worker 与 core 的协议（单 act 上界注入、引擎自报 grace 下限、`RUN_ID` 注入）
 - [0026](../docs/adr/0026-schedule-module.md) schedule 契约（engines 注入形状）
 - [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝（两套 store 装配复用同一写序）
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) 云端资源清单与命名契约
@@ -73,7 +74,9 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离、worker 定位链、版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 revision、镜像 tag 归一化）
 - [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（`textui`）
+- [0049](../docs/adr/0049-worker-capabilities-targets-keys.md) 能力自述的测试目标键（`compose` 的 targets 契约校验与交集）
 - [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话的生命周期与应用分发（`app_upload` 的应用前缀与保留承诺、`devicefarm` 的项目找回与会话列举）
+- [0053](../docs/adr/0053-project-config-file.md) 项目配置文件（region / profile 解析链里的配置文件层）
 
 参与开发的总入口（环境、测试、发布链、文档地图）见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)；执行与推进的机理解读见
 [`docs/internals/`](../docs/internals/README.md)。

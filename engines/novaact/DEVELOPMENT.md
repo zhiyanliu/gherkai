@@ -14,12 +14,12 @@
 gherkai_worker_novaact/
 ├── __init__.py             ← 包级契约：零 `gherkai_core` / `gherkai_runtime` 依赖、必须是被组合根直接 spawn 的那个进程（ADR 0024）；修改本包前先阅读该文件
 ├── __main__.py             ← 包入口，argv 直通 `run_scope.main`（console script 指向同一个 main，零包装）
-├── run_scope.py            ← 薄 worker 主流程：job 循环、step 派发、会话与信号收尾、两个非 job 入口的分派
+├── run_scope.py            ← 薄 worker 主流程：读一个 scope 的 job 并逐个执行其 scenario（含建连重试）、step 派发、会话与信号收尾、两个非 job 入口的分派
 ├── deterministic.py        ← 确定性 step 注册表：`@deterministic` 登记、单条匹配与批量 match
 ├── deterministic_steps.py  ← 包内建脚手架：只有内建导航一条（Given / When 后整句是一个地址；判定类示范进 features/steps/ 模板）
 ├── user_steps.py           ← 使用方 `steps/` 目录的加载（fail-loud，退出码 `EX_STEPS_LOAD = 2`）
 ├── evidence.py             ← step 级机读证据：Nova trajectory 裁成自有 schema 的 `evidence.json`（[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）
-└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `redact.py`（凭据脱敏，事件、evidence 与 stderr 出口共用）· `precheck.py`（建会话前按自己的 targets 核对 job 的目标与墙钟预算）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `tunnel_warmup.py`（隧道会话预热：第一个 scenario 之前对预热地址导航一次，并按页面的可见结果归因，ADR 0051 决策 13）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S` / `SESSION_STOP_BUDGET_S`，以及隧道会话预热的常量，与组合根同值）；`__init__.py` 说明这组为何单独成子包
+└── lib/                    ← I/O 边缘与常量：`job_source.py`（job 入口）· `event_sink.py`（事件出口）· `artifact_upload.py`（产物上传）· `redact.py`（凭据脱敏，事件、evidence 与 stderr 出口共用）· `precheck.py`（建会话前的自检：先核 job 行的 `schemaVersion`，再按自己的 targets 核对 job 的目标与墙钟预算；协议版本常量 `PROTOCOL_SCHEMA_VERSION` 也在这里，能力自述的 `schema_version` 取自它）· `workflow_setup.py`（workflow definition 的 create-if-not-exists）· `tunnel_warmup.py`（隧道会话预热：第一个 scenario 之前对预热地址导航一次，并按页面的可见结果归因，ADR 0051 决策 13）· `constants.py`（`MODEL_ID` / `WORKFLOW_DEF` / `NOVA_GRACE_MARGIN_S` / `SESSION_STOP_BUDGET_S`，以及隧道会话预热的常量，与组合根同值）；`__init__.py` 说明这组为何单独成子包
 ```
 
 `tests/` 是 pytest 用例（`fixtures/` 中是真产物裁出的 trajectory 与一个中断用 worker），`spikes/` 是可独立运行的对标脚本。
@@ -29,7 +29,7 @@ gherkai_worker_novaact/
 **本目录没有自己的 `.venv`**：它是 repo 根 uv workspace 的一个成员，worker 装进**与 CLI 同一个 venv**。依据见 ADR 0037 决策 3：「安装」与「拉起」正交；同 venv 使组合根可用 `[sys.executable, "-m", "gherkai_worker_novaact"]` 直接拉起，无包装进程，EVENTS_FD 经 `pass_fds` 直达。
 
 ```bash
-uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker 一并装为 editable
+uv sync            # 在 repo 根运行一次，五个 workspace 成员（core / runtime / cli / 本 worker / deploy_aws）一并装为 editable
 ```
 
 依赖与版本锁定（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **锁定精确版本** `nova-act==3.4.187.0`，直接使用的 `bedrock-agentcore==1.22.0` 同样钉精确版本（worker 直接调它的 `BrowserClient`，nova-act 对它只给范围）
@@ -40,7 +40,7 @@ uv sync            # 在 repo 根运行一次，core/runtime/cli + 本 worker �
 
 执行入口是包入口 `python -m gherkai_worker_novaact`（即 `gherkai_worker_novaact/run_scope.py` 的 `main()`），它是被组合根 spawn 的薄 worker：core 自解析 `.feature`，把每个 step 经 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 协议派发给 worker（[ADR 0022](../../docs/adr/0022-bdd-runner-retired-core-parses-thin-worker.md)）。**pytest-bdd 入口（`bdd/` 层）已随 v0.x BDD 层退役删除**。
 
-`python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（worker 定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间任何包装层都会使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道）。
+`python -m gherkai_worker_novaact` 与 console script `gherkai-worker-novaact` 是**同一个 `main()`**（worker 定位链第二、三级，ADR 0037 决策 3），行为逐字一致；**入口不做任何包装**（不起子进程、不改 fd）：worker 必须是组合根直接 spawn 的那个进程，中间的包装层可能使 fd3 丢失（EVENTS_FD 经 `pass_fds` 继承，ADR 0024 三通道；`npx` 实测会丢失，`uvx` 实测原样传递 fd3，是下文定位链第四级的依据）。
 
 常规路径是经 `gherkai` CLI 运行；调试时也可手动直接运行 worker（下列命令从 repo 根执行；`<job json>` 的字段说明与可直接改用的样例见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「输入（core → worker）」一节）：
 
@@ -64,9 +64,10 @@ worker 侧**只有这两个 flag**：确定性清单是 `--capabilities` 对象�
 | `NOVA_GRACE_MARGIN_S` | `30`（`lib/constants.py`） | 自报 grace 下限的收尾余量：`min_grace_s = NOVA_ACT_TIMEOUT_S + NOVA_GRACE_MARGIN_S`。30 由真容器标定得出（会话释放 ≤9 秒 + 截图队列退出段排空 6 秒，留约两倍余量；推导写在该常量旁注） |
 | `NOVA_LOGS_DIR` | 无（不设即回落 SDK `mkdtemp` 出的临时目录） | Nova SDK 的 trajectory 落点，组合根注入 `<report_dir>/<run_id>/nova-trajectories` 绝对路径（子目录名的单一真源是 `runtime/gherkai_runtime/names.py` 的 `ARTIFACT_SUBDIR`）；worker 主流程与 uploader 都读它 |
 | `RUN_ID` | 无（缺失时 worker 在执行前自检之后、建会话之前以 1 退出，不发事件） | 本次运行的编号，编码 StartBrowserSession 请求名的 run 段（见下文「浏览器会话与会话事件」节，[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 3、4）；本机由组合根注入，云端由 RunTask overrides 注入（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md)「run_id + scope_id 注入 worker」条）；有 `EVENTS_DDB_TABLE` 时事件出口也读它（`lib/event_sink.py`） |
-| `AWS_REGION` | 无（模块级读一次，未设则 `Workflow` 构造失败） | Workflow / AgentCore 会话 / 三条 I/O 边共用的 region，由组合根落实后注入（见 `run_scope.REGION`） |
+| `AWS_REGION` | 无（模块级读一次；未设时建 AgentCore 浏览器会话即失败：`BrowserClient` 只认显式的 region 字符串、不读 profile 配置；boto3 默认链里也没有 region 时，更早在 `ensure_workflow_definition` 处报 `NoRegionError`） | Workflow / AgentCore 会话 / 三条 I/O 边共用的 region，由组合根落实后注入（见 `run_scope.REGION`） |
 | `GHERKAI_EXTRA_HTTP_HEADERS` | 无（未设即零行为变化） | JSON 对象；组合根在 `--expose-local` 方式下注入，worker 在 browser context 级设为额外请求头（[ADR 0035](../../docs/adr/0035-local-app-testing-via-tunnel.md)） |
 | `GHERKAI_SESSION_WARMUP_URL` | 无（未设即不预热） | 隧道会话预热地址；组合根在 `--expose-local` 方式下与 `GHERKAI_EXTRA_HTTP_HEADERS` 一并注入，worker 在第一个 scenario 之前对网页目标导航一次以换取会话 cookie；只有额外请求头而没有预热地址时记 `precheck_failed`、不建会话（[ADR 0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 13）；常量在 `lib/constants.py`，预热逻辑在 `lib/tunnel_warmup.py` |
+| `GHERKAI_PARENT_PID` | 无（不设即不核验所属进程；容器主进程与手动直接运行都不设） | 本机启动方（core 的子进程 adapter）传入的所属进程号；worker 进入 job 模式时起守护线程，立即核验一次，此后每 `run_scope.PARENT_POLL_S`（5 秒）核验一次，所属进程已退出即按收到 SIGTERM 协作停止并释放会话（[ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 终止契约「父进程消失视同停止信号」条） |
 
 使 CLI 指向本 checkout（dev 覆写，worker 定位链第一级）：`export GHERKAI_WORKER_NOVAACT_CMD="$(pwd)/.venv/bin/python -m gherkai_worker_novaact"`；workspace 已装 editable 时通常**不需要**（第二级同 venv 即命中）。本引擎还有**第四级**：CLI 版本是纯发行版、且 `uvx` 在 PATH 时，回落到 `uvx gherkai-worker-novaact==<CLI 版本>` 拉起（uvx 虽是包装进程，实测不丢弃 fd3，也转发 SIGTERM）；midscene 没有这一级（`npx` 实测会替换 fd，事件全部丢失）。
 
@@ -84,6 +85,7 @@ worker 为自己持有的每个 AgentCore 浏览器会话向 core 成对发出 `
 
 - **发出时机**：`StartBrowserSession` 返回后、取连接头与建立 NovaAct 连接之前发 `session_opened`（`origin: created`，`sessionId` 与 `name` 都取 AgentCore 会话 id，不带 `device`）；正常收尾、停止信号、会话预热失败、建连重试丢弃的 attempt 这几条收尾路径都为每个会话发恰一条 `session_closed`。`StopBrowserSession` 在 `NOVA_SESSION_STOP_BUDGET_S` 内成功返回记 `release: confirmed`，否则记 `unconfirmed` 并以退出码 1 退出。桌面会话的 `session_closed` 不带 `observedS` 与 `providerMinutes`，job 也因此没有设备计量两键（决策 7）。
 - **请求名**：每次 `StartBrowserSession` 都带会话名，格式与 Midscene 的 `src/device/session-name.mts` 相同：`gherkai:<run_id>:<scope 哈希>:<尝试序号>:<scope_id 百分号编码>`，长度上限按 AgentCore 的约束取 100，超长只截最后一段。尝试序号从 1 起，建连重试每发一次 Start 加一。规则在本 worker 里另有一份 Python 实现（`run_scope.session_request_name`），改规则时两处同改，单测用同一组期望值。
+- **会话超时**：每次 `StartBrowserSession` 同时带 `sessionTimeoutSeconds`，取 job 的墙钟预算（`timeoutS`）向上取整加 120 秒、限制在 60 到 28800 秒之间，预算为空时不传、保持服务默认（`run_scope.browser_session_timeout_s`；用途是收紧泄漏会话的计费上界，见 [ADR 0024](../../docs/adr/0024-worker-core-protocol.md) 终止契约「泄漏兜底」条）。三个数与 Midscene 桌面 worker（`engines/midscene/src/worker/surface-desktop.mts` 的 `browserSessionTimeoutS`）取值相同，两边的单测都读 `engines/fixtures/browser-session-timeout.json` 核对，改动时两处一起改。
 - **停止时仍在途的 Start**：停止信号到达时 Start 尚未返回，worker 再等 `run_scope.START_SETTLE_S`（1.5 秒）；仍未返回即发一对 `origin: attempted` 的事件（`sessionId` 为 null，`name` 取请求名）并记为释放失败，以退出码 1 退出。这段等待只在没有 act 在途时出现，已含在 `NOVA_GRACE_MARGIN_S` 的余量之内。Start 在等待窗口内返回、或停止信号落在 Start 返回之后与 `scope_started` 之前时，会话已建起：发出 `session_opened` 后直接释放并发 `session_closed`，不取连接头、不建 NovaAct 连接（Start 返回时已停止的情形）、不发 `scope_started`，退出码按释放结果取 0 或 1。
 - **依赖 `RUN_ID`**：请求名的 run 段取 env `RUN_ID`（见上文 env 表）。经 CLI 运行时由组合根注入，手动直接运行 worker 时须自行设置（见上文命令）。
 
@@ -91,7 +93,7 @@ worker 为自己持有的每个 AgentCore 浏览器会话向 core 成对发出 `
 
 确定性注册表由两部分组成：**本包内建脚手架**（`gherkai_worker_novaact/deterministic_steps.py`，只有内建导航一条；曾内置的「页面地址匹配」已退役，示范进仓库 `features/steps/`）**与使用方项目里的 `steps/` 目录**（ADR 0037 决策 4）。使用方**不修改包内文件**（包内文件是发行内容，修改等同于 fork）；使用方侧的写法见 [user guide](../../docs/user-guide/writing-deterministic-steps.md)。
 
-steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag / 默认 `./steps` / 随 run definition 持久化，全部由 CLI 侧（组合根）解析后注入，worker 不自行推断路径（ADR 0037 决策 4）。手动直接运行 worker 时须自行设置该 env：
+steps 目录 worker **只认环境变量 `GHERKAI_STEPS_DIR`**：`--steps-dir` flag、提交时 CLI 进程的 env `GHERKAI_STEPS_DIR`、项目配置文件 `gherkai.toml` 的 `steps-dir`、默认 `./steps` 依次取第一个给出的值，由 CLI 侧（组合根）解析、随 run definition 持久化后注入（配置文件那一层见 ADR 0053 决策 2），worker 不自行推断路径（ADR 0037 决策 4）。手动直接运行 worker 时须自行设置该 env：
 
 ```bash
 GHERKAI_STEPS_DIR=$PWD/steps uv run gherkai-worker-novaact --capabilities   # deterministic_steps 含使用方 step
@@ -174,4 +176,5 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
 [0037](../../docs/adr/0037-distribution-and-packaging.md) 分发与打包 ·
 [0038](../../docs/adr/0038-worker-image-delivery.md) 镜像交付 ·
 [0042](../../docs/adr/0042-step-evidence-and-explain.md) step 级证据与 SDK 版本锁定 ·
-[0044](../../docs/adr/0044-engine-model-selection-and-override.md) 模型选择与覆盖
+[0044](../../docs/adr/0044-engine-model-selection-and-override.md) 模型选择与覆盖 ·
+[0051](../../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 会话事件、会话请求名与隧道会话预热

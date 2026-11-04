@@ -46,6 +46,7 @@ markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即�
 - `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表含 ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名与 construct 名 / 施工与失败语义行话，另收口头语、量词「档」与退役旧名（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八；真值集是该文件的 `FORBIDDEN`，见面一）；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下两条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
 - `cli/tests/test_package_readmes.py`：根 README 零禁词，禁词之外另扫口头语与退役旧名两张表（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八）；进包的六份 README 与 Release 正文的固定块 `.github/release_body_footer.md` 同属包页面，走 `_doc_rules.scan("package-page", …)`，规则束是用户文档的整套规则（内部指代、口头语、退役旧名、符号当谓语、「退 N」、正文箭头、悬空指针）再加零相对链接（正则 `](../` `](./` `](x.md`），固定块先代入占位符样例值再扫、另要求仓库链接锁定 tag（不带 `blob/HEAD/`）；pyproject / package.json `description` 零禁词，根有 `CONTRIBUTING.md`、每包有 `DEVELOPMENT.md`，且 `release.yml` 必须仍调 `release_notes.py check`/`render`、不得有内联 `body: |`；扫描面路径缺失即失败（包搬家 / workflow 改形态不许让护栏变绿）。
 - `cli/tests/test_skill.py`：随 wheel 发行的 agent skill 的 markdown 扫描器——同一禁词表与相对链接正则（共享常量 `cli/tests/_doc_rules.py`），另对照 CLI argparse 真值与契约页键名（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策六）。
+- `cli/tests/test_user_docs.py`：`CHANGELOG.md` 全文只许绝对 URL（按链接目标判断，行内与引用式都算；Release 正文直接截取本版节、不改写链接，见面二表 Release 行）；它守的用户文档面其余规则，判据在 [0045](./0045-documentation-layering-and-placement.md) 决策三 / 六。
 - **护栏管不到的**：正则抓不住的行话（皮 / 装配 / 唯一真源 / 产品本体层）与「使用者读得懂吗」的判断，靠 review——两轮对抗核验都在这一类抓到过遗漏（runtime 页面整篇行话、`--grace` 漏标「仅 run」、定位链顺序写反）。**review 抓到的行话只要能正则化就入表、不留在这一类**：上传与收尾的失败语义那族（best-effort / 抢传 / flush 兜底 / 不带 ref）曾在两引擎 worker 日志各留过几行、全靠人眼 review 才发现，此后已入表；留在这一类的是词形不固定、只能靠读的那些。
 
 ## 代价与权衡
@@ -73,5 +74,5 @@ markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即�
 
 ## 对既有文档与 code 的影响
 
-- CLAUDE.md：代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条压回规则 + 判据 + 护栏 + 指向本 ADR。
+- CLAUDE.md：代码纪律「产品面文案不带内部指代」与文档纪律当时的「README / DEVELOPMENT 分层」条（现为「文档按读者三分类归位」条，[0045](./0045-documentation-layering-and-placement.md)）两条压回规则 + 判据 + 护栏 + 指向本 ADR。
 - [0037](./0037-distribution-and-packaging.md) 被拒方案里「contributor README 当长描述」一条改为指向本 ADR。

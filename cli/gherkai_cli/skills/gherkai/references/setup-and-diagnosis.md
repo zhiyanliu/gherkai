@@ -63,13 +63,13 @@
 
   `plan` 不检查 feature 里有没有这个地址，地址不匹配它照样以退出码 0 结束，所以对照只能靠眼睛：大小写、端口、localhost 与 127.0.0.1 都要一致。
 - **一个 run 只能暴露一个地址**：重复给 `--expose-local` 不报错，只有最后一个生效，前面的地址不被替换。多个本机地址先收敛到同一个入口。
-- **被测应用收到的 Host 头是隧道分配的 ngrok 域名**，不是 localhost。校验 Host 的开发服务器会在框架层拒绝：Vite 的 `server.allowedHosts`、Django 的 `ALLOWED_HOSTS`、Rails 的 host authorization 都要放行隧道域名；域名每个 run 一换，用通配写法（如 `.ngrok-free.app`）改动最小。症状是请求到了应用却返回 400 或「Blocked request / host not allowed」，本机直连正常。
+- **被测应用收到的 Host 头是隧道分配的 ngrok 域名**，不是 localhost。校验 Host 的开发服务器会在框架层拒绝：Vite 的 `server.allowedHosts`、Django 的 `ALLOWED_HOSTS`、Rails 的 host authorization 都要放行隧道域名；域名以「隧道已建立」那行给出的公网地址为准：ngrok 给每个账号分配一个固定的开发域名，后缀视账号是 `.ngrok-free.dev` 或 `.ngrok-free.app`；放行这个域名，或用与它后缀一致的通配写法（如 `.ngrok-free.dev`）。症状是请求到了应用却返回 400 或「Blocked request / host not allowed」，本机直连正常。
 
-**隧道的持有与拆除**：`run` 由前台 CLI 进程持有，命令结束或 Ctrl-C 即拆；`submit` 由本机后台进程持有，run 到终态即拆；`submit --backend cloud` 由本机守护进程持有，到终态或 `--tunnel-ttl` 到点即拆。三种都要求**本机保持开机联网到 run 终态**。用 kill 命令结束 CLI 不会拆隧道，要到进程列表里结束 ngrok。隧道断了不自动重连，受影响的 scenario 以导航失败告终，修好后重新运行。
+**隧道的持有与拆除**：`run` 由前台 CLI 进程持有，命令结束或 Ctrl-C 即拆；`submit` 由本机后台进程持有，run 到终态即拆；`submit --backend cloud` 由本机守护进程持有，到终态或 `--tunnel-ttl` 到点即拆。三种都要求**本机保持开机联网到 run 终态**。执行期间用 kill 命令（SIGTERM）结束 `run` 与 Ctrl-C 一样：先停止 worker、输出汇总，再拆隧道；`kill -9`，以及在开始执行之前或输出汇总期间收到的 SIGTERM，都不会拆隧道，此时到进程列表里结束 ngrok。隧道断了不自动重连，受影响的 scenario 以导航失败告终，修好后重新运行。
 
 **排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；本机后端 `submit` 的隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`；`submit --backend cloud` 的隧道守护进程日志在系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`（提交时「隧道由守护进程持有」那一行给出完整路径）；起隧道的完整日志（ngrok 自己的日志）在系统临时目录里以 `gherkai-tunnel-` 开头、文件名不含 watch 的 `.log` 文件，按修改时间取最新；`submit` 若打出「隧道已拆除」，这个 run 已经不可用，别再等它的结果，修好报错后重新提交。
 
-**向用户说明隧道的安全边界**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`，引擎原生产物不脱敏，报告按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
+**向用户说明隧道的安全边界**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`；引擎原生产物、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容、设备目标上 Device Farm 的会话录像与 Appium 日志不脱敏，报告与日志按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
 
 **预热失败的四种消息**（都在 `status` 的 job 消息里，scope 没执行任何 step）：「隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受…」是令牌被拒（隧道已重建，或两侧隧道配置不一致），重新提交这次运行，仍出现时核对命令行工具与后端是否同版本；「隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie…」是会话 cookie 未通过校验（浏览器没有保存或没有带上会话 cookie，或隧道在预热期间重建），确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交；「隧道会话预热未能确认就绪（已尝试 3 次）…」是隧道已拆或浏览器到隧道入口的网络不通（预热的两个地址都由边缘直接响应，与本机应用是否在运行无关），确认隧道仍在后重新提交；「后端未传递会话预热地址，部署版本可能低于命令行工具…」是云端后端旧于命令行工具，请部署方 `gherkai deploy` 后重新提交。
 
@@ -86,12 +86,12 @@
 | 你看到 | 多半是 | 怎么办 |
 |---|---|---|
 | 以退出码 2 结束，说某引擎 worker 未找到 | 没装或不在 PATH | 照打印的装法装；或设 `GHERKAI_WORKER_<ENGINE>_CMD` |
-| `engine_error`，起 worker 失败 | worker 版本与 CLI 不一致 | 重装到同版本（第 1 节） |
-| `release_failed`，说明里说会话未能确认停止并列出会话名 | worker 停止会话时失败或超时，或收到停止信号时建立会话的请求还没有返回；会话可能仍在计费 | 把会话名与说明里的核对位置原样转告用户：桌面目标的浏览器会话在 Amazon Bedrock AgentCore 控制台，设备目标的远程访问会话在 Device Farm 控制台（云端后端也可看 `doctor --backend cloud` 的 `devices.sessions` 行）；停止前须确认没有 run 在使用它。已报出的 scenario 结果照常可读，别靠重新运行掩盖残留会话 |
+| 以退出码 2 结束、说「引擎 X 的 worker 自述失败，拒绝运行」并提到版本不一致；或 job 记 `precheck_failed`、消息说命令行工具与 worker 的版本不一致（或「这个 job 没有带测试目标」） | worker 与 CLI 不是同一版本 | 重装到同版本（第 1 节）；云端请部署方运行 `gherkai deploy`，用与 CLI 同版本的 worker 镜像 |
+| `release_failed`，说明里说会话未能确认停止并列出会话名 | worker 停止会话时失败或超时，或建立会话的请求结果未知、收尾前也没能核实（收到停止信号时请求还没有返回；设备目标上还包括请求没有得到完整的回应或回应里没有会话 ARN，之后按会话名也没有找到）；会话可能仍在计费 | 把会话名与说明里的核对位置原样转告用户：桌面目标的浏览器会话在 Amazon Bedrock AgentCore 控制台，设备目标的远程访问会话在 Device Farm 控制台（云端后端也可看 `doctor --backend cloud` 的 `devices.sessions` 行）；停止前须确认没有 run 在使用它。已报出的 scenario 结果照常可读，别靠重新运行掩盖残留会话 |
 | `precheck_failed`，设备 scope 一条 step 都没执行 | 没有符合条件的设备、指定的设备 ARN 被拒、安装包不在或不可读、应用启动后立即自行退出、设备拒绝安装驱动辅助程序；重新运行不会变 | 按消息改设备选择、换测试包或换设备；应用启动即自退多半是应用带运行环境检测，要人提供关闭检测的测试包 |
 | `acquire_timeout` | 在获取设备的等待时间内没拿到可用设备 | 稍后重新运行，或请人在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s`；等待期间可能已产生设备分钟，别连续重试 |
 | `session_lost` | 远程访问会话在执行中途结束（被人手动停止，或到达会话上限），本 scope 余下的 scenario 未执行 | 判定不完整，别当用例失败汇报；缩短 scope 后重新运行，或请人核对是否有人停止了会话；会话也可能在准备设备时就已结束（获取设备、启动应用或会话预热期间），这时本 scope 的 step 都没有执行，不必缩短 scope，请人核对是否有人停止了会话后重新运行 |
-| step 记 `capability_unavailable` | 这台设备不提供这一步需要的能力（需要网页上下文的确定性 step、设备不支持经系统打开地址、Android 地址含没编码的 `;` `'` `(` `)` 或空格、非 ASCII 字符） | 改写为 AI 步、改地址或换设备；重新运行不会变 |
+| step 记 `capability_unavailable` | 这台设备不提供这一步需要的能力（需要网页上下文的确定性 step、设备不支持经系统打开地址、Android 地址含没编码的 `;` `'` `(` `)` 或非 ASCII 字符） | 改写为 AI 步、改地址或换设备；重新运行不会变 |
 | 设备上 step 记 `engine_error`，消息说「这一步可能已执行也可能未执行」 | 设备命令在等待时间内没有回应，本 scenario 余下的 step 未执行 | 先用 `explain` 看这一步的证据核对设备状态（AI step 看截图，确定性与导航 step 看控件摘要与原始控件树），再收窄重新运行这一条 |
 | 启动时报告未设置 region 的错误 | `--region` / `AWS_REGION` / `AWS_DEFAULT_REGION` / 配置文件的 `region` / profile 配置五处都没有 region | 任选一处设上（第 4 节）；缺失时不会改用任何默认 region |
 | `AccessDenied` / 模型不可用 | region 未开通模型，或凭证缺 Bedrock / AgentCore 权限 | 换 region 或补权限（第 4 节） |

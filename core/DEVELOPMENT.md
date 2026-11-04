@@ -27,7 +27,7 @@ core/gherkai_core/
 ├── scope.py      ← tag 分组 + engine / 测试目标 / timeout 校验 → Job[]；对外 plan(features, config, *, select=None) -> Job[]（select 是 `--scope/--tags/--scenario` 的筛选谓词，筛选只缩小要运行的范围、不增不改，ADR 0041 决策一）
 ├── target.py     ← 测试目标的定义层结构校验 validate_job_definition：字段成对、非空、类型与合法组合；组合根写 definition 之前与推进器读 definition 时各校验一次，违约时抛 DefinitionContractError（ADR 0048 决策 3）
 ├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
-├── wire.py       ← Job↔JSON 与 0024 事件↔JSON 的线序列化 + 退出码约定 EX_WORKER_NETWORK/raise_for_worker_exit（两 Engine adapter 共用一份，ADR 0024/0028）；worker↔core 协议的实装处
+├── wire.py       ← Job→JSON（core 发给 worker）与 JSON→0024 事件（worker 发回 core）的单向线序列化 + 退出码约定 EX_WORKER_NETWORK/raise_for_worker_exit（两 Engine adapter 共用一份，ADR 0024/0028）；worker↔core 协议的实装处
 ├── errors.py     ← core 类型化异常：WorkerExitError（worker 非零退出，带原退出码）及其子类 WorkerNetworkError（network_error 重试分类，ADR 0028）/ UnsupportedDefinitionSchema（definition 结构版本不符，ADR 0037 决策 7）/ DefinitionContractError（definition 结构违约，ADR 0048 决策 3）/ FeatureContractError（feature 写法与配置违约，parse/scope 共用，ADR 0019/0025）
 ├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）；**另两个 port（`EventLog` / `Launcher`）定义在 `reconcile.py`**，只服务无状态推进路径（ADR 0034），清点注入面时须同时查看两处，理由见 `ports.py` 模块头
 ├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
@@ -41,7 +41,8 @@ core/gherkai_core/
     ├── subprocess_engine.py        ← Engine 实装（local）：spawn worker 子进程 + 读事件流
     ├── fargate_engine.py           ← Engine 实装（cloud）：RunTask 启动 Fargate 容器（task-def 恒为组合根注入的**显式 revision ARN**、绝不 family 名，ADR 0038）+ job-in 经 S3 / events-out 经 DDB / stop→StopTask + start_scope fire-and-forget（ADR 0024/0032/0034）
     ├── cloud_launcher.py           ← 无状态批量运行 cloud Launcher（ADR 0034）：经 resolver 选 FargateEngine，调 start_scope 启动 task（fire-and-forget）
-    ├── event_log/{sqlite,ddb}.py   ← 无状态批量运行持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此处全量重放推演
+    ├── event_log/{sqlite,ddb}.py   ← 持久事件通道（ADR 0034）：local=SQLite / cloud=DDB events 表，reconciler 从此处全量重放推演；本机库自 ADR 0042 决策七起同步 run 也写，explain 从两种库补取被中止 job 的 step 记录
+    ├── event_log/recording.py      ← 原始事件行记录器（ADR 0042 决策七）：make_raw_sink（一个 scope 的逐行落库回调，runtime 的 SubprocessLauncher 与同步 run 共用）+ EventRecordingEngine（组合根为同步 run 的 SubprocessEngine 加一层包装，把事件行与退出记录旁路落 SqliteEventLog，Engine port 形状不变、schedule 不知情）
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（boto3 缺失时给出可读报错，ADR 0016 窄腰）
     ├── _atomic.py                  ← 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace` + 显式 mode）：run_state.json / jobs/*.json / 报告三面都有真实并发读者，truncate-then-write 会使读者读到空文件
     ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 无状态批量运行条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
@@ -49,7 +50,7 @@ core/gherkai_core/
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```
 
-各 `__init__.py` 无逻辑，只有包说明与 re-export：`event_log/` 两个实装都 re-export；`run_store/` / `result_store/` / `report_store/` 只 re-export local 类，云端类由消费方按模块路径直接 import。四个子包口径不统一是排版惯例、**不是** import 期约束（云端模块顶层都不 import boto3，守卫在 `_boto.py`），理由见各 `__init__.py` 的 docstring。
+各 `__init__.py` 无逻辑，只有包说明与 re-export：`event_log/` 两个实装与 `recording.py` 的 `EventRecordingEngine` / `make_raw_sink` 都 re-export；`run_store/` / `result_store/` / `report_store/` 只 re-export local 类，云端类由消费方按模块路径直接 import。四个子包口径不统一是排版惯例、**不是** import 期约束（云端模块顶层都不 import boto3，守卫在 `_boto.py`），理由见各 `__init__.py` 的 docstring。
 
 云端 adapter（DDB/S3）行为对拍 local，moto 全程 mock 单测（ADR 0030 决定六）；boto3 是可选依赖 `gherkai-core[aws]`（库消费者按需安装；CLI 发行包 `gherkai` 硬依赖 `gherkai-runtime[aws]`，安装它即带入 boto3，ADR 0037 决策 2c）。
 组合根按 `--backend {local,cloud}` 注入对应的一套 adapter（装配逻辑在产品本体 `runtime/gherkai_runtime/compose.py` 的 `build_local_stores` / `build_cloud_stores`，cli / Lambda / 未来 WebUI 共用；ADR 0016「演进」节 / 0030 决定七）。

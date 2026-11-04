@@ -16,7 +16,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 一、scenario 筛选：`--scope` / `--tags` / `--scenario`，run / plan / submit 三命令写法相同
 
-- 三个可重复 flag，都在 **scope 分组与 engine/timeout 解析之后、Job 组装之前**筛（core `plan(features, config, select=…)` 收一个 `(ParsedScenario, scope_id) → bool` 谓词（scope_id 一并传入，业务概念按分组键判、不从 tags 反推））。**不变量：筛选只减少「跑哪几条」**——scope 的引擎、墙钟预算、会话身份一律按全量成员解析，与不筛时逐字一致；否则筛后跑的与全量跑的不是同一件事，迭代结论不可迁移（曾在分组前筛：把带 `@engine:midscene @timeout:900` 的成员筛掉，剩下的成员静默跑在 novaact / 300s，对抗审查真跑复现）。整组被筛空的 scope 不进任何 job，且在解析 engine/timeout **之前**跳过——被筛掉的 scope 里的 tag 冲突不拦本次迭代；`_scope_key`（一个 scenario 多个 `@scope`）仍对全量成员 fail-fast；`scope_id` 命名空间撞名（`@scope` 的值 = 某条未标 scope 的 scenario 的 id，见 [0025](./0025-plan-module-feature-to-jobs.md)「id 派生」）同样按**全量**成员判、且判在施加筛选**之前**——`--scope` 收窄到只跑其中一个 scope 也仍退 2（已真跑核对）。**这是有意代价**，与上句「被筛掉的 scope 里的 tag 冲突不拦本次迭代」并不矛盾：tag 冲突只影响那个 scope 自己怎么跑，筛掉了就与本次无关；撞名撞的是下游主键（状态 Map 的键、结果文件、claim），会让**本次要跑的** job 丢结果，故不因筛选放过。跨文件合并 warning 按**要跑的**成员算。三个命令同一套解析（`_load_and_plan`），definition 即筛后的 job 集——`submit` 落库的就是它，`plan` 标注的也是它。空值（`--tags ""`）退 2，不静默降级成跑全批。
+- 三个可重复 flag，都在 **scope 分组与 engine/target/timeout 解析之后、Job 组装之前**筛（core `plan(features, config, select=…)` 收一个 `(ParsedScenario, scope_id) → bool` 谓词（scope_id 一并传入，业务概念按分组键判、不从 tags 反推））。**不变量：筛选只减少「跑哪几条」**——scope 的引擎、测试目标、墙钟预算、会话身份一律按全量成员解析，与不筛时逐字一致；否则筛后跑的与全量跑的不是同一件事，迭代结论不可迁移（曾在分组前筛：把带 `@engine:midscene @timeout:900` 的成员筛掉，剩下的成员静默跑在 novaact / 300s，对抗审查真跑复现）。整组被筛空的 scope 不进任何 job，且在解析 engine/target/timeout **之前**跳过——被筛掉的 scope 里的 tag 冲突不拦本次迭代；`_scope_key`（一个 scenario 多个 `@scope`）仍对全量成员 fail-fast；`scope_id` 命名空间撞名（`@scope` 的值 = 某条未标 scope 的 scenario 的 id，见 [0025](./0025-plan-module-feature-to-jobs.md)「id 派生」）同样按**全量**成员判、且判在施加筛选**之前**——`--scope` 收窄到只跑其中一个 scope 也仍退 2（已真跑核对）。**这是有意代价**，与上句「被筛掉的 scope 里的 tag 冲突不拦本次迭代」并不矛盾：tag 冲突只影响那个 scope 自己怎么跑，筛掉了就与本次无关；撞名撞的是下游主键（状态 Map 的键、结果文件、claim），会让**本次要跑的** job 丢结果，故不因筛选放过。跨文件合并 warning 按**要跑的**成员算。三个命令同一套解析（`_load_and_plan`），definition 即筛后的 job 集——`submit` 落库的就是它，`plan` 标注的也是它。空值（`--tags ""`）退 2，不静默降级成跑全批。
 - **`--scope ID`**：可重复、彼此为**或**；值 = 报告与 `--json` 里的 `scope_id`（`@scope:` 的名字，未标 scope 时是 `<uri>:<行>`），按分组键**精确**匹配。这是「重跑某个失败 job」的直接回路：agent 从 `jobs/*.json` 读到 `scope_id` 原样填回来。scope 是业务概念，在 Gherkin 里靠 tag 承载（[0019](./0019-feature-tags-scope-and-engine.md) 的取舍——Gherkin 没有别的 per-scenario 元数据位）；筛选面上不让使用者反推这层实现细节（`--tags scope:x` 仍可用，那是通用 tag 筛选顺带覆盖的）。
 - **`--tags TAG[,TAG…]`**：一个值内逗号分隔为**或**（任一命中）；flag 重复为**且**；`@` 可带可不带。tag 集 = gherkin 已合并的 feature 级 + scenario 级。
 - **`--scenario SEL`**：可重复、彼此为**或**。`SEL` 三种写法**按序试、互斥**：等于 scenario id（`<uri>:<声明行>[:<Examples 行>]`）；ASCII 纯数字或 `:数字` = 行号（只当行号、不回落标题匹配，否则 `--scenario 3` 会连带选中标题「重试3次」；Scenario Outline 给声明行 = 选中它全部 example，给数据行 = 只选那一条）；否则按 scenario 标题**子串**匹配（大小写敏感）。三个 flag 同给为**且**。
@@ -33,7 +33,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 三、JSON 覆盖补齐：查询类命令都有机读形态
 
-边界：`submit` 的机读形态就是 stdout 那一个 `run_id`（进度/结果走 `status --json`）；`deploy` / `destroy` / `push-worker` 是变更类命令，机读面 = 退出码，只读查询面留给 `list-workers --json` 与 `doctor --json`。`--json` 下 stdout 只有一个 JSON 文档，诊断（含 skew 提示、读失败）一律走 stderr；退出码非 0 的前置/读取失败路径 stdout 可为空，按退出码分流。
+边界：`submit` 的机读形态就是 stdout 那一个 `run_id`（进度/结果走 `status --json`）；`deploy` / `destroy` / `push-worker` / `skill install`（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策三；其 `--print` 只把 SKILL.md 正文打到 stdout 供管道）是变更类命令，机读面 = 退出码，只读查询面留给 `list-workers --json` 与 `doctor --json`。`--json` 下 stdout 只有一个 JSON 文档，诊断（含 skew 提示、读失败）一律走 stderr；退出码非 0 的前置/读取失败路径 stdout 可为空，按退出码分流。
 
 - `list-engines --json`：每引擎 `{engine, available, cmd, cwd, source, hint}`。
 - `deploy list-workers --json`：`{prefix, version, default_variant, engines: {<engine>: {family, ecr_repo, variants: […], pending_cleanup: […]}}}`。
@@ -43,14 +43,14 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 四、`doctor`：一个入口、按组件分组
 
-- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--config FILE] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未查的云端项标 ok + `required=false`）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
+- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--config FILE] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未给云端参数时未查的云端项标 ok + `required=false`；给了云端参数而 region 或凭证先失败时，占位项 `backend.reachability` 标未查、ok=false + `required=false`，失败本身由其上的 `aws` 必修项报）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
 - 组件与归属（**按 extra 实施、单入口汇总**——自检能力跟着它检查的组件走，入口只做编排）：
   - `cli`：版本、Python。
   - `config`：本次加载的项目配置文件路径，或「未使用配置文件」；只作展示、可选（[0053](./0053-project-config-file.md) 决策 1）。
-  - `engines`：两引擎的定位链结果（同 `list-engines`），各自 `required=false`（缺一个不算故障）；聚合项「至少一个可用」为 required 闸门——两个都定位不到时本机后端一个 job 也起不来；`--backend cloud` 时该聚合项降为可选（只提交、不在本机跑的人不需要 worker）。
+  - `engines`：两引擎的定位链结果（同 `list-engines`），各自 `required=false`（缺一个不算故障）；聚合项「至少一个可用」为 required 闸门——两个都定位不到时本机后端一个 job 也起不来；`--backend cloud` 时该聚合项降为可选（只提交、不在本机跑的人不需要 worker）。另有每个可用引擎 worker 自述出的模型与测试目标两行，纯展示、可选，自述失败时不出（[0004](./0004-novaact-iam-auth-via-workflow.md)、[0049](./0049-worker-capabilities-targets-keys.md) 决策 6）。
   - `steps`：解析到的 `steps/` 目录（显式给的目录不存在 = 必修失败，原因进 detail）；对每个可用引擎跑一次 worker 自述（`--capabilities`，清单取其 `deterministic_steps`）——有 steps 目录时是使用方 step 能否加载（必修，加载失败会静默降级成 AI），没有时只验 worker 起得来（可选，单引擎不连坐）。
   - `aws`（给了 `--backend cloud` 或 `--prefix` 才查）：region 解析（解析不出即必修失败、云端其余项标未查）、凭证身份（STS；profile 名不存在等解析期错误与探针失败同一句诊断）。
-  - `backend`（同上）：版本戳与 skew 三态、资源 preflight（表/桶/cluster/两引擎 task-def/三 Lambda，并比对后端 `REPORT_DIR` 与 `--report-dir` 一致——复用 submit 的 `preflight_cloud_resources`）、默认 worker variant：先读指针（缺失 = 必修失败），再**逐引擎**解析（各自可选——单引擎团队不必为另一个引擎推镜像，同 submit 只按用到的引擎判）+ 聚合「至少一个引擎可用」为必修。
+  - `backend`（同上）：版本戳与 skew 三态、资源 preflight（表/桶/cluster/两引擎 task-def/三 Lambda，并比对后端 `REPORT_DIR` 与 `--report-dir` 一致——复用 submit 的 `preflight_cloud_resources`）、默认 worker variant：先读指针（缺失 = 必修失败），再**逐引擎**解析（各自可选——单引擎团队不必为另一个引擎推镜像，同 submit 只按用到的引擎判）+ 聚合「至少一个引擎可用」为必修；其后两组可选项：停止宽限比对（本机 worker 自报的停止宽限期下限对云端 task-def 的 `stopTimeout`，只比解析到镜像的引擎，缺口按可选能力缺失报，[0032](./0032-fargate-execution-environment.md)「真容器校准结论」第 4 条的既定接受）与设备支持（部署记录的 Device Farm 项目、项目里未结束的远程访问会话，只列不停，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 6 / 10）。
   - `provider`：按 entry point 结构化判——没装 `[deploy-aws]` extra → 一行「部署方才需要」（可选）；装了多个未指名 → 未查（可选）；装了但加载失败 → 必修失败（明确装了的东西坏了）；装了且提供可选的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，缺省 False；只读、不返退出码，[0037](./0037-distribution-and-packaging.md) 决策 6 契约）→ 并入输出。AWS provider 报 Node ≥ 22、cdk 可定位、容器引擎可用，**三项都可选**：provider 段是部署能力清单，doctor 不知道这台机器要不要部署；真正的硬拦在 `gherkai deploy` 自身。人读尾行单独点出「部署工具链有缺口」。
 - 被拒：另起 `gherkai-deploy doctor` 独立入口——agent 要记两条、且「后端可达」这类检查本就横跨两包；把自检做成 `plan` 的副作用——plan 要保持零费用、零网络。
 
@@ -58,7 +58,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 - 文档住 repo：`docs/internals/cli-json-contract.md`（给使用者/agent 的参考层，读者是「拿 `--json` 写脚本或 skill 的人」；不写 why），是唯一手写源、本身不进发行包；agent skill 带一份**确定性转换**的副本随 CLI 发行（为何不能 link、转换规则与相等性护栏见 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四）——手写第二份才是第二事实源，生成副本由护栏钉住。
 - **契约面只覆盖机读输出形状与退出码语义**：人读输出（终端流水、提示行、`index.html` 这类人看视图）与引擎原生产物的报告页，其**版式与内容不在其内**——加法兼容与本决策的契约护栏不承诺它们形状稳定（用户可见文案另有 [0039](./0039-user-facing-surfaces-no-internal-references.md) 的约束）；指向它们的机读字段（`report_index` / `report_refs[]`）仍在契约面内、照常受加法兼容保护。
-- **护栏 = 真值集对照**（CLAUDE.md 文档纪律）：`cli/tests/test_cli_json_contract.py` 用真渲染器生成各命令的 JSON 样例，递归收集全部键名，逐个断言文档里以反引号出现——文档漏键即红。
+- **护栏 = 真值集对照**（CLAUDE.md 文档纪律）：`cli/tests/test_cli_json_contract.py` 用真渲染器生成各命令的 JSON 样例（`deploy list-workers` 的样例要 moto，同一护栏放在 `deploy_aws/tests/test_workers.py`、读同一份契约页），递归收集全部键名，逐个断言文档里以反引号出现——文档漏键即红。
 - 被拒：`gherkai schema <cmd>` 输出 JSON Schema——更机读，但要维护一套 schema 生成；先用文档 + 护栏，需求出现再升级（重议闸门）。
 
 ## 影响

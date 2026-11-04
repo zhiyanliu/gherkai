@@ -4,7 +4,7 @@
 
 ## 背景与问题
 
-1.4 之前，gherkai 的配置只有两层：命令行选项与环境变量，两者都没给就用内建默认。这对桌面网页目标够用：一个项目通常只需固定 `--default-engine`、`--steps-dir`、`--prefix` 少数几项，写进 shell 或 CI 的环境变量即可。
+到 1.4 为止，gherkai 的配置只有两层：命令行选项与环境变量，两者都没给就用内建默认。这对桌面网页目标够用：一个项目通常只需固定 `--default-engine`、`--steps-dir`、`--prefix` 少数几项，其中后两项写进 shell 或 CI 的环境变量（`GHERKAI_STEPS_DIR`、`AWS_RESOURCE_PREFIX`）即可；`--default-engine` 没有环境变量，靠命令行选项或 feature 里的 `@engine` tag 给出。
 
 移动真机目标（[0048](./0048-test-targets-device-and-ui-kind.md)）带来三类新值，它们既不适合每次在命令行重复，也不适合塞进环境变量：
 
@@ -31,7 +31,7 @@
 - 对每个可配置项，按上述顺序取第一个给出的值。没有对应环境变量的项，跳过该层。
 - 配置文件排在环境变量之后，是因为环境变量是「本次调用的临时覆盖」的惯用载体（CI 矩阵、单次排障），文件是项目的稳定基线；反过来排会让 CI 里的环境变量被入库文件静默覆盖。
 - region 因此依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件的 `region`、AWS profile 配置里的 region，前者优先；gherkai 仍不自行补默认 region。
-- **`default-job-timeout` 的最后一层不是固定值**：选项或配置文件给出的值都算「显式给出」（本项没有环境变量层）；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
+- **`default-job-timeout` 的最后一层不是固定值**：选项或配置文件给出的值都算「显式给出」（本项没有环境变量层）；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，`@timeout` tag 自身的语义归 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
 - **路径类值相对配置文件所在目录解析**（`steps-dir`、`[apps]` 里的 `file`，以及本机后端下的 `report-dir`）。`steps-dir` 解析成绝对路径后写进 definition；`file` 解析成绝对路径后用于上传，definition 里记的是上传后的 S3 位置（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）；本机后端的 `report-dir` 决定报告与判定明细的落点，不进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。**云端后端下 `report-dir` 不是路径**：它是产物桶内的键前缀，原样使用、不做绝对化，并与推进器 Lambda 的 `REPORT_DIR` 核对一致（[0033](./0033-iac-aws-backend-and-composition-wiring.md)、[0034](./0034-detached-batch-reconciler.md)），与选项、环境变量给出时同一形态。
 
 ### 3. 节与键
@@ -77,7 +77,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
   > 这个 run 里有在 Android 设备上执行的 scope，但没有指定用哪台设备。请在 gherkai.toml 的 [devices.android] 里给出 arn 或 os-version，或用 --android-device-arn 指定。
 
-- **选项与环境变量**：`--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）、`--device-farm-project-arn`（`GHERKAI_DEVICE_FARM_PROJECT_ARN`）、`--app-bucket`（`GHERKAI_APP_BUCKET`），按决策 2 的顺序覆盖配置文件。按平台分开命名，是因为一个 run 可以同时含 Android 与 iOS 的 scope，单个 `--device-arn` 无法表达。筛选条件只在配置文件里给，命令行只接受 ARN。
+- **选项与环境变量**：`--android-device-arn` / `--ios-device-arn`（环境变量 `GHERKAI_ANDROID_DEVICE_ARN` / `GHERKAI_IOS_DEVICE_ARN`）、`--device-farm-project-arn`（`GHERKAI_DEVICE_FARM_PROJECT_ARN`）、`--app-bucket`（`GHERKAI_APP_BUCKET`），按决策 2 的顺序覆盖配置文件。按平台分开命名，是因为一个 run 可以同时含 Android 与 iOS 的 scope，单个 `--device-arn` 无法表达。`run` / `submit` 收全部四个选项，`plan` 只收两个设备 ARN：设备 ARN 改变 plan 的标注；项目 ARN 与应用桶对 plan 的输出没有作用，所以不收（与 `--expose-local` 在 `plan` 上只作标注同一先例，[0035](./0035-local-app-testing-via-tunnel.md) 决策 2）。筛选条件只在配置文件里给，命令行只接受 ARN。
 - **ARN 直接使用**：CLI 只核对 ARN 的服务与资源类型段（设备 ARN 形如 `arn:aws:devicefarm:<区域>::device:<id>`、项目 ARN 形如 `arn:aws:devicefarm:<区域>:<账号>:project:<id>`，零 AWS 调用；拦的是把项目 ARN 或设备池 ARN 贴进设备 ARN 这类最常见的错，提交前以退出码 2 结束并点名贴错的类型），之后 worker 以该 ARN 建立远程访问会话，不事先查可用性、不做静态过滤；该机型全部单元被占用时会话排队等待，与并发排队同处置，受获取预算约束；ARN 被同步拒绝（不存在、已下架、不支持远程访问）记 `precheck_failed`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3）。
 - **筛选条件由 worker 在获取设备时解析**（不是 CLI 在提交时解析）：设备可用性随时间变化，detached 提交可能在数分钟后才真正启动 worker，提交时解析出的 ARN 到那时可能已不可用。本篇只定用户面语义，解析算法归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 3：
   - `os-version` 按点分段的族匹配——配置值按点切段，设备版本的前几段完全相等即命中（`18` 命中 `18.x.y`，`18.6` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`，`18.1` 不命中 `18.10`），写全段即精确匹配；`plan` 对按系统版本挑选的平台一律注明命中范围，并提示「设备池新增版本时实际分到的版本可能改变，写全版本号可以固定」（`plan` 不调用 Device Farm，无从判断某个值是否已写全）。
@@ -87,8 +87,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ### 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件
 
-- 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、`NOVA_ACT_TIMEOUT_S`、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。配置文件不收这些键。
-- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn、per-run 进程、`status --wait` 接力者、云端 RunTask 与 detached Lambda 各条路径，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的「四个注入面四处漂移」；配置文件不重新打开该决定。
+- 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。`NOVA_ACT_TIMEOUT_S` 不在这条链上：它的单一真值在组合根（[0024](./0024-worker-core-protocol.md)「组合根持引擎特定的值」条），由起 worker 的那一侧从自己的环境变量读出后显式注入 worker（本机 spawn 与能力自述查询经子进程 env，云端经 RunTask overrides、盖过镜像 `ENV`；detached 云端提交由推进器 Lambda 起任务，取缺省 120），写进 variant 镜像的 `ENV` 不生效。配置文件不收这些键，`NOVA_ACT_TIMEOUT_S` 也不收。
+- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含 per-run 进程与 `status --wait` 接力者）、前台 Fargate（同步 run 的 RunTask）、detached Lambda 与能力自述四个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的「四个注入面就是四个会漂的地方」；配置文件不重新打开该决定。
 - 配置文件也不收凭证与密钥：AWS 凭证走默认凭证链，`NGROK_AUTHTOKEN` 留在环境变量或 ngrok 自己的配置。`gherkai.toml` 预期入库，密钥进去即泄漏。
 
 ### 6. 护栏
@@ -106,7 +106,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 | 观察 | 数据 | 支撑的决策 |
 |---|---|---|
 | 同一账号远程访问并发 | 同机型连发 6 个会话请求，前 5 个进入 RUNNING，第 6 个进入 `PENDING_CONCURRENCY` 排队而不是报错；排队早期样本最长约 6 分钟，槽位被占满时实测排队到 19 分钟；排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段、排队时段不计费（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据） | 获取预算必须可配，且要覆盖排队时间 |
-| 取设备开销 | 创建到 RUNNING：Android 51 到 92 秒、iOS 61 到 82 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟；服务商回报的设备分钟从设备分配起计，并发槽位满时的排队不计费（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据） | `acquire-timeout-s` 的默认值不能低于分钟级 |
+| 取设备开销 | 创建到 RUNNING：Android 50 到 92 秒、iOS 61 到 114 秒；加上 Appium 建连，创建到 Appium 可用约 1 到 2.5 分钟，计入 job 墙钟；服务商回报的设备分钟从设备分配起计，并发槽位满时的排队不计费（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据） | `acquire-timeout-s` 的默认值不能低于分钟级 |
 | 停止到 COMPLETED | Android 52 到 85 秒，iOS 超过 2 分钟（最长约 150 秒），只计入服务商回报的设备分钟、不占 job 墙钟 | 费用口径以账单为准、估算时不能漏掉收尾一段；与获取预算无关 |
 | 计费方式的拐点 | 不计量槽位 250 美元每月除以计量单价 0.17 美元每分钟，约 1470 分钟每月每平台 | `billing-method` 必须可选，而不是内建固定 |
 | 系统版本决定能力 | iOS 15.8 的 Safari 网页上下文完整可用，iOS 26.3 的网页上下文整体不可用 | 筛选条件以系统版本为必给项，而不是只按平台挑 |

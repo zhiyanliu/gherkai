@@ -38,7 +38,7 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 - **fork 不会误发**：`pypi` / `npm` 两个 job 带 `if: github.repository == 'zhiyanliu/gherkai'`。
 - **只认正式发行 tag `vX.Y.Z`**：`v1.4.0rc1` 这类预发行在 gate 第一步就被拦——它是合法 PEP 440
   但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440 到 semver 的转换件；
-  放行就会出现「PyPI 发布成功、npm 在 `npm version` 一步失败」的半发布状态。演练 tag 因此**别 push 到本仓库**（下节）。
+  放行就会出现「PyPI 发布成功、npm 在 `npm version` 一步失败」的半发布状态。演练 tag 因此**别 push 到本仓库**（见下「TestPyPI 演练」节）。
 
 ## 一次性人工前置（可一遍做完）
 
@@ -80,7 +80,7 @@ npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名�
   job 里多一步 `npm i -g npm@^11.5.1`）、Node ≥ 22.14。provenance 自动生成，不必 `--provenance`。
 - 仍需：仓库**公开**、`package.json` 的 `repository.url` 与实际仓库一致（已满足）。
 
-### 4. GHCR：首次推送后把两个 package 改成 public
+### 4. GHCR：首次推送后核对两个 package 是否为 public
 
 推 GHCR 用 `GITHUB_TOKEN`，**不需要任何 secret**。GitHub 文档说首次发布的 package 默认 private，**实测（v1.4.0 首发）
 两个 package 随公开仓库直接就是 public、可匿名 `docker manifest inspect`**——首个 release 完成后核对一次
@@ -118,8 +118,8 @@ uv publish --index testpypi          # 本地执行要 TestPyPI token（UV_PUBLI
 - **`uv publish --index <name>` 要求 checkout 里有 `pyproject.toml`**（它得读 `[[tool.uv.index]]`）——
   这就是 `release.yml` 的 `pypi` job 明明只上传产物、却仍带一步 checkout 的原因。
 - **TestPyPI 是独立账号体系**，占名与 trusted publisher 都要在 test.pypi.org 上另配一遍。
-- **本地构建出的版本是非纯净的**（形如 `1.3.0.post16.dev0+<sha>`，ADR 0037 决策 2b 把
-  `dirty`/`metadata` 显式打开了），**PyPI 与 TestPyPI 都拒收带 `+` 本地段的版本**——确需演练上传时，
+- **本地构建出的版本是非纯净的**（形如 `1.3.0.post16.dev0+<sha>`：ADR 0037 决策 2b 显式打开 `dirty`、`metadata` 留默认，
+  非 tag commit 与脏树的构建都带 `+` 本地段），**PyPI 与 TestPyPI 都拒收带 `+` 本地段的版本**——确需演练上传时，
   须在一个干净的 tag commit 上构建。演练用的 tag **只打本地、不 push**（推送 `v*` tag 会触发
   `release.yml`，通过 gate 后即向正式 PyPI 发布；即便被 gate 的形态检查拦下，也是一次没必要的失败构建）。
   不打 tag 时用 `uv publish --dry-run` 走完除上传外的全部流程。
@@ -148,7 +148,7 @@ npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真�
 CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验证镜像内容，用 local 态装入本地构建的产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
 `--build-arg WORKER_SOURCE=local`，context 即放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
-`… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态只能在首个正式发行后验（占位 `0.0.0` 是空包）。
+`… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态用任一已发行版本验证（`--build-arg WORKER_VERSION=<已发行的 X.Y.Z>`；占位版本 `0.0.0` 是空包，不含 worker）。
 
 ## 维护
 

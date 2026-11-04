@@ -80,7 +80,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ## 模型选择
 
-两个引擎各自把默认模型固定在一个具体版本，换默认模型只随 gherkai 发版。判定结果会随模型变化：同一条断言在不同模型上可能翻转，所以升级模型前请先用同一批用例对照一遍。换成别的模型前，先在所用 region 为该模型开通访问权限；没开通时 worker 在建立浏览器会话阶段报权限被拒，处置见 [`troubleshooting.md`](./troubleshooting.md)。
+两个引擎各自把默认模型固定在一个具体版本，换默认模型只随 gherkai 发版。判定结果会随模型变化：同一条断言在不同模型上可能翻转，所以升级模型前请先用同一批用例对照一遍。换成别的模型前，先在所用 region 为该模型开通访问权限；没开通时 worker 日志或 `explain` 里会出现权限被拒、模型不可用一类报错，处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 | 引擎 | 默认模型 | 换模型 |
 |---|---|---|
@@ -101,7 +101,7 @@ Midscene 还要知道模型属于哪个家族（家族决定它用哪套提示�
 | `deepseek.` | `deepseek` |
 | 以 `zai.glm-` 开头且后面还有 `v` | `glm-v` |
 
-除最后一行外，匹配看的是片段出现在 id 里的任意位置，所以带 `us.` 或 `global.` 前缀的推理配置文件 id 同样命中；最后一行要求 id 以 `zai.glm-` 开头，带前缀的 id 不命中。一条都不命中时 worker 启动即报错、不做猜测：家族推错不会报错，只会让模型在页面上找元素和判定的准确度下降，比直接失败更难发现。这时设 `MIDSCENE_MODEL_FAMILY` 指明家族，可取值见 Midscene 文档 <https://midscenejs.com/model-common-config.html>。
+除最后一行外，匹配看的是片段出现在 id 里的任意位置，所以带 `us.` 或 `global.` 前缀的推理配置文件 id 同样命中；最后一行要求 id 以 `zai.glm-` 开头，带前缀的 id 不命中。一条都不命中时 worker 启动即报错、不做猜测：家族推错不会报错，只会让模型在页面上找元素和判定的准确度下降，比直接失败更难发现。这时设 `MIDSCENE_MODEL_FAMILY` 指明家族，可取值见 Midscene 文档 <https://midscenejs.com/model-api-setup>。
 
 查当前实际用的模型：
 
@@ -181,13 +181,13 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 
 下面这些变量由 gherkai 自己写入，**使用者不要设**。设了不报错：一部分在起 worker 时被清掉或覆盖，另一部分会被 worker 原样读到，把 job 的来源、事件表、产物落点指到别处，本机运行与云端运行就此不一致。要调整对应行为，用括号里的选项。
 
-- worker 侧：`RUN_ID`、`SCOPE_ID`、`JOB_S3_URI`、`EVENTS_DDB_TABLE`、`EVENTS_FD`、`ARTIFACT_S3_BUCKET`、`ARTIFACT_S3_PREFIX`、`NOVA_LOGS_DIR` 与 `MIDSCENE_RUN_DIR`（产物落点用 `--report-dir` 定）、`GHERKAI_NO_ARTIFACTS`（用 `--no-report`）、`GHERKAI_EXTRA_HTTP_HEADERS` 与 `GHERKAI_SESSION_WARMUP_URL`（都由 `--expose-local` 决定）。
+- worker 侧：`RUN_ID`、`SCOPE_ID`、`JOB_S3_URI`、`EVENTS_DDB_TABLE`、`EVENTS_FD`、`GHERKAI_PARENT_PID`、`ARTIFACT_S3_BUCKET`、`ARTIFACT_S3_PREFIX`、`NOVA_LOGS_DIR` 与 `MIDSCENE_RUN_DIR`（产物落点用 `--report-dir` 定）、`GHERKAI_NO_ARTIFACTS`（用 `--no-report`）、`GHERKAI_EXTRA_HTTP_HEADERS` 与 `GHERKAI_SESSION_WARMUP_URL`（都由 `--expose-local` 决定）。
 - 云端后端侧：`REGION`、`CLUSTER`、`SUBNETS`、`SECURITY_GROUPS`、`RUNS_TABLE`、`EVENTS_TABLE`、`ARTIFACTS_BUCKET`、`PREFIX`、`MAX_CONCURRENCY`、`KICKER_ARN`、`SCHEDULER_ROLE_ARN`。`REPORT_DIR` 与 `ASSIGN_PUBLIC_IP` 云端不注入，走内置缺省（`reports` / 公网 IP 启用）；要改报告前缀或让 worker 走私有子网，由部署方在部署时调整。
 - 部署工具链侧：`GHERKAI_LAMBDA_ASSET_DIR`（部署命令给合成过程用的临时目录）。部署命令还会把解析出的 region 以 `AWS_REGION` / `AWS_DEFAULT_REGION` 写进它启动的 cdk 子进程，覆盖你 shell 里的同名值；`CDK_DEFAULT_ACCOUNT` / `CDK_DEFAULT_REGION` 由 CDK 自己注入，不用你设。
 
 ## 跨命令通用选项
 
-下面这些选项在多个命令上同名同义（`deploy` / `destroy` **特有**的 `--vpc`、`--stop-timeout`、`--refresh-context`、`--container-engine` 见 [`cloud-backend.md`](./cloud-backend.md)；`--prefix` / `--region` / `--profile` 运行侧与部署侧都有，见下表）。这一节只回答「哪些命令上有它、跨命令有什么差异」，语义、默认值与取舍见 [`running-and-results.md`](./running-and-results.md)；每个命令的完整选项表看 `gherkai <命令> --help`。
+下面这些选项在多个命令上同名同义（部署命令特有的选项见 [`cloud-backend.md`](./cloud-backend.md)：`--provider`、`--vpc`、`--stop-timeout`、`--refresh-context` 在 `deploy` 与 `destroy` 上都有，`--container-engine` 只在 `deploy` 与 `deploy push-worker` 上；`--prefix` / `--region` / `--profile` 运行侧与部署侧都有，见下表）。这一节只回答「哪些命令上有它、跨命令有什么差异」，语义、默认值与取舍见 [`running-and-results.md`](./running-and-results.md)；每个命令的完整选项表看 `gherkai <命令> --help`。
 
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|

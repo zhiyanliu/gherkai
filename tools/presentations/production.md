@@ -60,7 +60,7 @@
 
 交付时核对：页数及图文布局、PPT/备注/口播一致性、媒体完整解码、章节时间、字幕正文和时间轴、逐页画面对照、切换、首页首帧与结尾淡出、音量，以及 ZIP 完整性。校验清单和 SHA-256 存入最终 manifest；不保留重复渲染和验证日志。
 
-manifest 的 `narration_sha256` 与 `speaker_notes_sha256` 记录 `narration.md` 与 `speaker-notes.md` 定稿版本的 SHA-256。文件内容与所记值一致时，文档护栏把这两份文字视为已配音的定稿原文，不再按用户文档的口吻规则检查，词表已退役的旧名、内部指代、相对链接与个人目录下的绝对路径仍然检查。改写口播后，两份文件按普通用户文档整份检查，未改动的段落也须符合用户文档口吻；重新配音并交付后，按新文件更新这两个值。判定规则见 [ADR 0045](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/adr/0045-documentation-layering-and-placement.md) 决策六「演示材料的定稿口播稿」条。
+manifest 的 `narration_sha256` 与 `speaker_notes_sha256` 记录 `narration.md` 与 `speaker-notes.md` 定稿版本的 SHA-256。文件内容与所记值一致时，文档护栏把这两份文字视为已配音的定稿原文，不再按用户文档的口吻规则检查；词表已退役的旧名、内部指代、悬空指针（指向 journey 文件的链接与裸 WP 编号）、相对链接与本机坐标（个人目录下的绝对路径与本地 clone 目录名）仍然检查。改写口播后，两份文件按普通用户文档整份检查，未改动的段落也须符合用户文档口吻；重新配音并交付后，按新文件更新这两个值。判定规则见 [ADR 0045](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/adr/0045-documentation-layering-and-placement.md) 决策六「演示材料的定稿口播稿」条。
 
 ## 溯源与保存规则
 

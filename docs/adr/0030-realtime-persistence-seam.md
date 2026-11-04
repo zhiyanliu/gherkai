@@ -14,7 +14,7 @@ DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「
 
 ## 背景：v1.0 是「跑完一次性写」，零实时
 
-当前（[0016](./0016-execution-architecture-core-lib-run-model.md) 三层切分）：`schedule` 跑完返回完整 `RunResult` →
+v1.0 时（[0016](./0016-execution-architecture-core-lib-run-model.md) 三层切分）：`schedule` 跑完返回完整 `RunResult` →
 cli 单进程顺序写三层（RunStore→ResultStore→ReportStore）。`schedule` 是**纯 reducer**：每 worker 一线程把事件流
 归约成 `JobResult`，主线程 `as_completed` 收齐、聚合成 `RunResult`，**全程不碰任何 store**（[0026](./0026-schedule-module.md)
 刻意：为 fake-clock 可确定性单测 + 引擎/存储无关）。`sink` 只透传原始事件给进度显示。
@@ -28,7 +28,7 @@ v1.1 要「边跑边落库」（WebUI 提交即返回 runId、之后轮询看进
 |---|---|---|
 | A. 持久化 sink | cli 的 sink 收原始事件、自己落库 | sink 拿的是**原始 Event**、不是 `JobResult`；落 ResultStore 得在组合根**重写一遍** `schedule` 内部的「事件→JobResult 归约」（cost 累加/duration 时间戳/状态机），**必然漂移**，连 duration 都算不准 |
 | B. 给 schedule 注入 store | `schedule(..., run_store=, result_store=)` | 把「几个 store / 数据面先于控制面的写序 / 写一半失败怎么办」这类 **I/O 编排职责**塞进 reducer，破坏 [0026](./0026-schedule-module.md)「只收 sink 回调、不碰 store」。port 可注入 fake ≠ 该注入——争议不在能否 fake，在 reducer 该不该承担编排 |
-| **C. 完成回调（采纳）** | `schedule` 加 `on_job_complete(JobResult)`，在 `as_completed` 拿到**已归约好**的 `jr` 时 fire | 复用 schedule 内部成品 JobResult、**零重复归约**；schedule 仍不知道 store/写序/失败编排；与现有 `sink` 同性质（都是回调、可注入 no-op） |
+| **C. 完成回调（采纳）** | `schedule` 加 `on_job_complete(JobResult)`，在主线程等待 job 完成的循环收到**已归约好**的 `jr` 时 fire | 复用 schedule 内部成品 JobResult、**零重复归约**；schedule 仍不知道 store/写序/失败编排；与现有 `sink` 同性质（都是回调、可注入 no-op） |
 
 `on_job_complete` 是 [0026](./0026-schedule-module.md)「注入 sink、schedule 不决定结果存哪」原则从「跑完一次性」
 **推广到 per-job 粒度**——同一条纪律，不是新范式。
@@ -48,7 +48,7 @@ def schedule(run_meta, engines, sink, opts=None,
 
 - **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 用例、`--no-report` 路径都不必造 no-op 传进去。
 - **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...`/`on_event=...` 保自说明。
-- on_job_complete fire 在主线程 `as_completed` 循环里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。
+- on_job_complete fire 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。
 
 ## 决定二：落库编排收进 `core/gherkai_core/persist.py` 的 `RunPersistence` 应用服务，组合根只注入 adapter
 
@@ -115,7 +115,7 @@ run 结束（schedule 返回后）:
 **detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态批量运行的 commit point 是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的 finalize 分支内、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上）。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态、events 不再变化、没有下一次触发，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。真跑坐实：cloud detached run 收尾后 S3 `reports/<run_id>/` 下 jobs/*.json（判定真值）与 index.html/manifest.json（派生）齐全、reconciler 日志 `done + finalized` 无异常。
 
 > **两条写 RunStore 的路径必须共享同一把锁**（实装关键）：RUNNING 中间态刷在 **worker 线程**（经 `on_event`，在
-> `sink_lock` **之外**调）；job 终态刷 + finalize 在 **主线程**（经 on_job_complete，as_completed 串行）。这是**两个不同
+> `sink_lock` **之外**调）；job 终态刷 + finalize 在 **主线程**（经 on_job_complete，在主线程等待 job 完成的循环里串行）。这是**两个不同
 > 线程**写同一个 RunStore（local adapter 是「读 run_state→改→写回」的整文件 read-modify-write，**非自身线程安全**）。
 > 若各跑各的，一个 worker 正刷某 scope 的 RUNNING、主线程同时刷另一 scope 的终态，整文件 RMW 会互相覆盖、丢更新。
 > **不变量：所有 `update_job_state`/`create_run`/`finalize_run` 经同一把 store 锁**（`RunPersistence` 内持一把锁，
@@ -129,7 +129,7 @@ run 结束（schedule 返回后）:
 > **⚠️ 此把进程内锁只在「单编排进程」拓扑成立**（同步 `run`）：[0034](./0034-detached-batch-reconciler.md) 无状态批量运行下 reconciler 是**跨进程/跨 Lambda 的并发实例**（DDB Stream 按 PK 分片触发多实例，实测并发度 2），进程内 `_lock` 不复存在——改由 `RunState` 的 `high_water_mark` 条件写跨实例挡 stale 覆盖（「我处理到的 seq ≥ 库中 seq 才写」）、finalize 单独条件写保 commit 恰一次。这是本 ADR「重议」条预告的落地（见下）。
 
 > **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满），schedule **在异常
-> 冒泡前先 stop 所有在跑 worker**（`abort_flag.set()` + 逐个 `_stop()`）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
+> 冒泡前先 stop 所有在跑 worker**（`_stop_all()`：置 `abort_flag`，先对在跑 worker 全部落定停止原因，再各起线程并行发停止请求）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
 > `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话持续计费。异常仍冒泡（落库失败=真问题、要暴露），
 > 只是先掐掉在跑会话。
 
@@ -165,7 +165,7 @@ class RunStore(Protocol):
 
 **接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）、条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)），以及只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7）。
 
-- **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）、一次性写场景也仍用。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
+- **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）；生产路径不直接调它：local adapter 的 `create_run` 委托它写盘，DDB adapter 则由它委托 `create_run`。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
@@ -209,7 +209,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 ## 决定七：cli 接线 cloud 后端（offloader 生产默认挂载 + 失败退出码分层）
 
-cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 的 `build_local_stores`/`build_cloud_stores`、两种 boto3 句柄、单桶复用 report-dir、`--region`/`--profile`、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节。这里记三条与实时写落库形态强相关的决策：
+cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 的 `build_local_stores`/`build_cloud_stores`、两种 boto3 句柄、单桶复用 report-dir、`--region`/`--profile`、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节。这里记三条与实时写落库形态强相关的决策：
 
 **offloader 生产默认挂载、不做可选关闭 flag**：cloud 后端下 `S3StepArgumentOffloader` 默认挂（复用同一 `--s3-bucket`）。DDB 400KB 是协议**硬限**、不是调优空间——决定六把 offloader 设成「可选注入（`None`→内联）」是为 **core 单测省一层 S3 + 旧 run 兼容**，**不是给生产用户选「要不要正确」**。不引入 `--no-offload`：真出现「明确不带大 argument、想省一次 S3 往返」再纯加法加。**trade-off**：牺牲「小 run 省一次 S3 往返」换「大 docString/dataTable 不静默撞 400KB 崩」。
 
@@ -226,8 +226,8 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 - **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/gherkai_core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
-- **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli backend 选择」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
-- **留口子不做 → 决定八（多写者，已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
+- **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
+- **留口子不做 → 多写者（已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
 
 ## 重议
 

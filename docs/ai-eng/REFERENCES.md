@@ -6,14 +6,14 @@
 ## Midscene（任意页加 `.md` 取 markdown）
 
 - https://midscenejs.com/model-config.md — 全部环境变量（含 `MIDSCENE_*_MODEL_*` 分槽）
-- https://midscenejs.com/model-strategy.md — grounding 排名 + 多模型分工（planning 需 multimodal）
-- https://midscenejs.com/model-common-config.md — family 列表 + 配置块
+- https://midscenejs.com/model-selection.md — 支持的多模态模型清单 + 多模型分工（Default / Planning / Locate / Insight 四角色；单一 Default 模型须 multimodal、兼管 planning）
+- https://midscenejs.com/model-api-setup.md — family 列表 + 配置块
 - https://midscenejs.com/integrate-with-playwright.md
-- https://midscenejs.com/bridge-mode.md — 连桌面 Chrome（CDP 接法参考）
+- https://midscenejs.com/bridge-mode.md — 经 Midscene Chrome 扩展连桌面 Chrome（扩展桥接、不走 CDP；本项目未用）
 - 安装的源码（本机 ground truth，现为 1.15.1）：`engines/midscene/node_modules/@midscene/core/dist/`、`.../shared/dist/`
   - `createOpenAIClient` 注入点：`@midscene/core .../ai-model/service-caller/openai/openai-client`（`createAndWrapClient` 里 `await createOpenAIClient(baseOpenAI, openAIOptions)`，经同文件导出的 `createClient` 调用，调用方是同目录的 `call-openai`；`service-caller/index` 只再导出 `callAI` 等符号、不含此回调；1.12.8 时该文件在 `service-caller/openai-client`、外层函数名为 `createChatClient`；见 ADR 0008）
   - 隔离 ModelConfigManager：`@midscene/core .../agent/agent.js`（传 `modelConfig` 即切隔离——我们的接线同时传 createOpenAIClient 与 modelConfig；1.12.8 起只传 createOpenAIClient 则是 agent 作用域包装、仍读全局 env，1.15.1 不变；1.14 起多了 `MIDSCENE_MODEL_PROTOCOL`（openai-chat 默认 / openai-responses）、1.15 起多了 `MIDSCENE_MODEL_STREAM_MODE`（默认 non-stream），我们的隔离 modelConfig 不传它们、即落默认，见 ADR 0042 决策六「历次升级」的 1.12.8 → 1.15.1 条）
-  - planning 无条件附图：`@midscene/core .../ai-model/workflows/planning/standard-planning.js`（`standardPlan()` 两个消息分支都附 `{type:'image'}` 内容块，chat-completion 协议实现（`service-caller/openai/chat-completion/utils`）再把它转成线上的 `image_url`，`includeLocateInPlanning` 不去图、只改 system prompt 与定位解析；1.9.8 时此逻辑在 `ai-model/llm-planning.js`，见 ADR 0012）
+  - planning 无条件附图：`@midscene/core .../ai-model/workflows/planning/standard-planning.js`（`standardPlan()` 两个消息分支都附 `{type:'image'}` 内容块，chat-completion 协议实现（`service-caller/openai/chat-completion/utils`）再把它转成线上的 `image_url`，`includeLocateInPlanning` 不去图，改的是 system prompt、定位解析与请求的图像 detail（为 true 时作 `requiresOriginalImageDetail` 传给 `callAI`，GPT family 适配器 `ai-model/models/gpt` 据此发 `detail:'original'`、否则缺省 `'high'`；Bedrock 拒 `'original'`，由自签 fetch 在签名前去掉，见 ADR 0044 决策 3）；1.9.8 时此逻辑在 `ai-model/llm-planning.js`，见 ADR 0012）
   - 取结构化 API：`aiBoolean/aiNumber/aiString/aiQuery/aiAsk`（`.../agent/agent.d.ts`，见 ADR 0010/0014）
 
 ## Nova Act
@@ -29,7 +29,7 @@
 
 ## AWS Bedrock / AgentCore
 
-- https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions-mantle.html — **OpenAI chat-completions 端点**（`bedrock-mantle` /v1 与 `bedrock-runtime` /openai/v1；SigV4 或 Bedrock API key）
+- https://docs.aws.amazon.com/bedrock/latest/userguide/inference-chat-completions.html — **OpenAI chat-completions 端点**（`bedrock-mantle` /v1 与 `bedrock-runtime` /openai/v1；SigV4 或 Bedrock API key）
 - https://docs.aws.amazon.com/bedrock-agentcore/latest/devguide/browser-tool.html — AgentCore Browser
 - https://docs.aws.amazon.com/bedrock/latest/userguide/ — Bedrock 模型卡、API keys、各模型"支持的 API"矩阵
 
@@ -70,7 +70,7 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 - https://docs.brew.sh/Package-Acceptance-Policy — homebrew-core 收录门槛（star/fork/仓库年龄）
 - https://docs.aws.amazon.com/cdk/v2/guide/getting-started.html — CDK 前置：Python CDK 亦需 Node.js（jsii）
 - https://github.com/dagster-io/dagster/blob/master/helm/dagster/README.md — 「chart 版本 = 包版本，镜像 tag 缺省跟 chart」；https://github.com/dagster-io/dagster-cloud/issues/38 — 无版本模板硬编码 URL 致 EU 部署断的事故
-- https://docs.prefect.io/v3/concepts/server — client/server 版本兼容的一句规则（本项目改写为「升级即三步」，见 ADR 0037 决策 7）
+- https://www.prefect.io/docs/v3/concepts/server — client/server 版本兼容的一句规则（本项目改写为「升级即三步」，见 ADR 0037 决策 7）
 - https://aws.github.io/chalice/topics/cfn.html · https://aws.github.io/chalice/topics/tf.html — Chalice「IaC 进 wheel + `package --pkg-format cloudformation|terraform` 导出阀」模式；https://github.com/outerbounds/metaflow-tools — Metaflow 的 IaC 单独 repo 模式（被拒方案对照）
 
 ## 镜像与 ECS 交付（见 ADR 0038）
@@ -90,7 +90,7 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 ## Agent Skills（见 ADR 0043）
 
 - https://agentskills.io/specification — Agent Skills 开放规范：`SKILL.md` frontmatter（`name` 小写连字符 ≤ 64 且等于目录名、`description` ≤ 1024 字符）、正文建议 < 500 行、`references/` `scripts/` `assets/` 三类捆绑资源、渐进式披露（元数据常驻 → 触发时读正文 → 按需读 references）
-- https://github.com/vercel-labs/skills — `npx skills add <source>`：容器目录默认只扫 `skills/` `.claude/skills/` 等惯用位，任意路径用 `tree/<ref>/<path>` 直指（可钉 tag）；`--agent` 选安装位，`-g` 切全局；Claude Code 落 `.claude/skills/` / `~/.claude/skills/`、Codex 落 `.agents/skills/` / **`~/.codex/skills/`**（项目级 `.codex/skills` 官方从未列出；Codex 全局位与 `gherkai skill install` 的 `~/.agents/skills/` 分叉，见 ADR 0043 决策三）
-- https://developers.openai.com/codex/skills — Codex skills：项目级 `.agents/skills/`、用户级 `~/.agents/skills/`；AGENTS.md 只需一行指针
+- https://github.com/vercel-labs/skills — `npx skills add <source>`：容器目录默认只扫 `skills/` `.claude/skills/` 等惯用位，任意路径用 `tree/<ref>/<path>` 直指（可钉 tag）；`--agent` 选安装位，`-g` 切全局；Claude Code 落 `.claude/skills/` / `~/.claude/skills/`、Codex 落 `.agents/skills/` / `~/.agents/skills/`（全局位自 skills CLI 1.7.2 起与 `gherkai skill install` 一致；1.7.1 及以前写 `$CODEX_HOME/skills`，缺省 `~/.codex/skills/`；项目级 `.codex/skills` 官方从未列出；见 ADR 0043 决策三）
+- https://learn.chatgpt.com/docs/build-skills — Codex skills：项目级 `.agents/skills/`、用户级 `~/.agents/skills/`；AGENTS.md 只需一行指针
 - https://code.claude.com/docs/en/skills — Claude Code skills：项目级 `.claude/skills/`、用户级 `~/.claude/skills/`；frontmatter 允许宿主扩展键
 - skill-creator（Anthropic `example-skills` 插件内，本机 `~/.claude/plugins/cache/anthropic-agent-skills/example-skills/<hash>/skills/skill-creator/`）——评测循环（`evals.json` schema、with-skill vs baseline 两臂、`scripts/aggregate_benchmark.py`、`eval-viewer/generate_review.py`）与 description 优化（`scripts/run_loop.py --eval-set <触发集> --skill-path <skill> --model <模型>`，train / held-out 分割；**其触发测量经 `scripts/run_eval.py` 走 `.claude/commands/<name>.md` 那套、在 Claude Code 2.1.270 上对本项目 skill 实测恒 0**，触发率改用自写驱动，见 ADR 0043 决策七）

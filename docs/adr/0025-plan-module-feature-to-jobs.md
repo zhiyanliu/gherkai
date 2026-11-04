@@ -19,7 +19,7 @@ Job = {
   scopeId, scopeName, engine, assertionVotes,   // votes 维度语义权威在 ADR 0014，本模块只透传
   timeoutS,                                     // job 墙钟预算秒（null=不超时，仅非设备 scope；设备 scope 恒为有限正数）；tag 语义权威在 ADR 0019、
                                                 // 设计取舍与三路 enforce 在 ADR 0034，本模块只解析 + 校验；
-                                                // 属 definition 层；1.5 起作为恒在的键进 worker 的 job line（不超时写 null，键集见 ADR 0024），只供建会话前与 max_session_s 比较作自检（ADR 0051）
+                                                // 属 definition 层；1.5 起作为恒在的键进 worker 的 job line（不超时写 null，键集见 ADR 0024）；worker 不据它计时或自停，只在两处读取：建会话前与 max_session_s 比较作自检（ADR 0051），桌面 worker 另据它设浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）
   target,                                       // {device, ui_kind, app?}；scope 级，规则与校验见 ADR 0048 决策 2、3。本模块按 config.apps 核对别名
                                                 // 与平台、违约抛 FeatureContractError；产出的 app 只有 {alias, app_id}（plan 形态），安装包位置由
                                                 // 组合根在 run / submit 上传后补入，device_request 同样由组合根填
@@ -30,7 +30,7 @@ Job = {
 ```
 
 - **接受 feature 内容（`{uri, text}`）而非路径** → core 不碰文件系统（skill：accept dependencies, don't create them），纯数据 in / 纯数据 out，可被 test 直接喂字符串。读文件是组合根/CLI 的事。
-- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 恒在、不超时写 null，只供 worker 自检，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
+- **输出 `Job[]` 承载 [0024](./0024-worker-core-protocol.md) 协议输入的全部内容（`timeoutS` 恒在、不超时写 null，worker 只用它作建会话前自检与设桌面浏览器会话存活上限、不据它计时，见 0024 与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）**：一个 Job = 一个 scope = 一个会话边界 = schedule 交给单个 worker 的活。
 - **`select` 谓词（可选，[0041](./0041-agent-facing-cli-affordances.md) 决策一追加）**：scenario 筛选施加在**分组与 engine/target/timeout 解析之后、Job 组装之前**。不变量：**筛选只减少「跑哪几条」**——scope 的引擎、测试目标、墙钟预算、会话身份一律按**全量**成员解析，与不筛时逐字一致；整组被筛空的 scope 不进任何 job（且在解析 engine/target/timeout 之前跳过），`_scope_key` 仍对全量成员校验。`None` = 不筛，下文其余语义均按不筛描述；谓词由调用方组装，core 不认 flag 语义——`--scope/--tags/--scenario` 的语义、设计取舍与被拒方案见 [0041](./0041-agent-facing-cli-affordances.md) 决策一。
 - **删除测试**：删掉本模块，「按 tag 分组 + engine 校验 + Gherkin 展开」会在 CLI / 未来 WebUI 各写一遍 → 它在挣钱。
 
@@ -43,7 +43,7 @@ Job = {
 - 每个 feature：`Parser().parse(text)` → 原始 AST → `Compiler().compile({**doc, "uri": uri})` → **pickles（完全展开）** → 映射成我们的领域模型 `{id, name, steps:[{index, keyword, text, argument?}]}`。（`Compiler().compile()` **要求 `gherkin_document` 带 `uri` 键**，缺则 `KeyError`——故 `uri` 是 parse 的必填燃料，不只是关联键元数据。）
 - **Background / Scenario Outline+Examples / DataTable / DocString 三类结构由 Compiler 展开**（实测 `gherkin-official` 已装版可一步给出：Background 前插每个 scenario、Outline 按 Examples 行笛卡尔展开成 N 个 scenario、`<placeholder>` 已插值、DataTable/DocString 已归入 step `argument`）。**不自己写展开**——其边角（And/But 的 Conjunction keywordType 继承、多 Examples 表 + 三层 tag 合并、Rule 层 background 叠加、占位符转义）cucumber 官方都处理好且有跨语言一致性测试背书，自己重写 = 维护一份 cucumber compiler，不值。
 - **step 保持 pickle 内顺序 = feature 书写顺序**（见下「step 顺序」语义）。
-- **`keyword` 字段（实测要点，避免踩坑）**：pickle step **不含字面 keyword**，只暴露归一化 `type`（取值 `Context`/`Action`/`Outcome`，And/But 已折叠继承上一条非连接词的类型）。parse 把 `type` 映射成我们领域模型的 `keyword`，**统一取书写词 `Given`/`When`/`Then`**（`Context→Given`、`Action→When`、`Outcome→Then`）与 [0024](./0024-worker-core-protocol.md) 示例一致；worker 只需「是不是 `Then`（断言）」这个类别即足够派发（[0024](./0024-worker-core-protocol.md)），故 And/But 字面丢失无碍。
+- **`keyword` 字段（实测要点，避免踩坑）**：pickle step **不含字面 keyword**，只暴露归一化 `type`（取值 `Context`/`Action`/`Outcome`，And/But 已折叠继承上一条非连接词的类型）。parse 把 `type` 映射成我们领域模型的 `keyword`，**统一取书写词 `Given`/`When`/`Then`**（`Context→Given`、`Action→When`、`Outcome→Then`）与 [0024](./0024-worker-core-protocol.md) 示例一致；worker 派发只用 Given / When / Then 三类（`Then` 走断言；确定性条目可用 `keywords` 声明适用关键字，如内建导航只认 Given / When，见 [0024](./0024-worker-core-protocol.md)「worker 派发」与 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），And/But 已折叠成前驱的类，故字面丢失无碍。
 - **`index`**：scenario 内 0-based 书写序号，由 parse 合成（pickle step 无此字段），作 [0024](./0024-worker-core-protocol.md) `stepIndex` 的回指键、不参与重排。
 - **`argument`**：承载展开后的 dataTable/docString（有则有、无则缺省）；其内部形状（重映射成自有 `{kind, content/rows}`、不透传 pickle 子 dict）见下「第三方库 seam」节。
 - **行号来源（id 派生依赖）**：pickle **不带 `location`/行号**，只有顶层 `astNodeIds`。parse seam **内部同时持有 AST**，用 pickle 的 `astNodeIds` → AST 节点 `location.line` 回查行号（供下「id 派生」用）；Outline 展开的 example 行号取 `astNodeIds` 中的 Examples 行节点。行号属 seam 内部细节，不外泄。
@@ -89,12 +89,12 @@ Job = {
 
 - worker 拿到的 steps **严格按 feature 书写顺序**，逐条执行；**keyword 不约束顺序、不触发重排**。
 - 合法且要支持乱序：`Given→Then→When→Then`（现有 `features/wikipedia_assertions.feature` 就是真实样本）——Then 在 When 前 = 就在那个时点判定。Gherkin 关键字本不强制 Given/When/Then 顺序，我们忠于此。
-- keyword 的唯一作用 = worker 派发（`When`→AI 动作 / `Then`→AI 断言+投票 / URL 形态→确定性导航 / 命中注册表→确定性，见 [0024](./0024-worker-core-protocol.md)/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)）。core 不消费 keyword 的顺序语义。
+- keyword 的唯一作用 = worker 派发（先查确定性注册表、命中走精确实现，含唯一的内建条目「导航」：Given / When 后整句只是一个地址；未命中时 `Then`→AI 断言+投票、其余关键字→AI 动作，见 [0024](./0024-worker-core-protocol.md)「worker 派发」/[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条）。core 不消费 keyword 的顺序语义。
 - **keyword 判不出 = 拒绝猜（fail-fast，首轮 code-health 逼出）**：gherkin Compiler 对 `*` 步骤与「无前驱非连接词」的首条 And/But 给 `type='Unknown'`（实测 gherkin 41.0）——此时派发语义无从判定，曾静默兜底成 Given，会把本该是断言的 step 当动作派发、断言永不执行（假绿方向的静默错标）。现抛 `FeatureContractError` 让用户写明关键字；有前驱的 And/But 照常继承、不受影响。回归护栏 `core/tests/test_plan.py` 的 fail-fast 两用例。
 
 ### id 派生（RunStore/RunReport 关联键：稳定 + 可追溯）
 
-**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON/dict key/未来 DB key 用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。需安全字符 id 的消费层由该层做**可逆**编码（urlencode 等、保唯一），core 一侧不做有损转换——已是既成事实：local ResultStore 落文件名用 `quote(scope_id, safe="")`，RunReport 的 `#fragment` 锚点 id 用位置序号拼成纯 ASCII（见 [0027](./0027-runreport-aggregation-index.md)「①②双向锚点关联」，理由正是 scope_id 可含中文/冒号）。
+**id 是不透明标识符**：`scenarioId`/`scopeId` 只在 JSON / dict key / DB 表键（DynamoDB 与本机 SQLite 事件库；DynamoDB 事件表的键见 [0024](./0024-worker-core-protocol.md)「表键设计」）里用（全支持任意 UTF-8），core **不拿它当路径解析**。**不对 id 做 normalize**——清洗字符（空格→下划线、删非 ASCII 等）会把不同输入映射成同一输出、**制造撞名**，而撞名是静默灾难（schedule 归位错乱、DB 主键冲突），远比「id 含空格/中文」严重。故含空格/中文的 uri **原样保留**。需安全字符 id 的消费层由该层做**可逆**编码（urlencode 等、保唯一），core 一侧不做有损转换——已是既成事实：local ResultStore 落文件名用 `quote(scope_id, safe="")`，RunReport 的 `#fragment` 锚点 id 用位置序号拼成纯 ASCII（见 [0027](./0027-runreport-aggregation-index.md)「①②双向锚点关联」，理由正是 scope_id 可含中文/冒号）。
 
 **`uri` 约定 + 互异契约**：plan 把调用方传入的 `uri` **原样**用作 id 前缀，**不做路径解析**（plan 不碰 FS、无 base dir）。调用方（组合根/CLI）负责传**稳定可读且互异**的 `uri`。**plan 入口校验 uri 互异——重复 = 接口违约 → 报错**（同一文件喂两遍会撞 scenarioId、结果错乱；这是脏输入，fail-fast，不静默吞）。注意这与「跨文件同 `@scope` 合并」（领域语义、warning）**正交**：前者是 uri 重复（bug、报错），后者是不同 uri 但同 scope 值（有意、合并、warning）。收集去重等便利逻辑由调用方负责，core 窄腰只接 uri 互异的列表。**CLI 侧已履约**：组合根读完 feature 后按 `load_feature` 算出的 uri **保序去重**、并打一行点名被忽略路径的提示（`features/*.feature features/a.feature` 这类 glob 与显式路径并列同给不该撞库级违约）；去重键取 uri 而非原始路径字符串，免得调用方重抄一份路径归一规则（其单一事实源在 `load_feature`）。core 的报错**不是死分支**——uri 互异是库契约，其它调用方（未来 WebUI、直接喂字符串的 test）仍要守；被接受的代价是「路径写法归一不到同一 uri 的混写」两侧都不拦（同一文件的绝对路径与相对路径并列：CLI 去重键不同、core 按「不同 uri 即便内容相同 → 放行」，该文件的 scenario 跑两遍）。下文 id 规则统一以 `<uri>` 表示。
 
@@ -124,18 +124,19 @@ Job = {
 - 同一 scope 多个不同 engine → 报错；
 - 一个 scenario 多个不同 `@scope` 值（feature 级传播 + scenario 级）→ 报错；feature 级 `@scope` 传播（无冲突时）→ 正常归一个 scope；
 - scope 缺省 engine → 用 defaultEngine；scope 内任一 scenario 标了 → 全 scope 继承；
+- 测试目标（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）：`@device` / `@app` 按 engine 同样的三条规则归约（排在后面的成员标了、feature 级标了都对整个 scope 生效；不标即桌面网页）；同一 scope 多个 `@device` 或多个 `@app`、`@device` 取值不是 android / ios（含 `@device:desktop`）、`@app` 用在桌面、别名查不到或缺本平台条目 → 报错；plan 形态不带 `device_request`；
 - 同一 scope 多个不同 `@timeout` → 报错；`@timeout` 非数字 / `<=0` / `nan` / `inf`（含 `1e400` 溢出成 inf）→ 报错；
 - timeout 缺省兜底 + tag 优先（同一批里标了 `@timeout` 的 scope 走 tag、未标的走 `defaultJobTimeout`）；无 tag 又无显式值 → 桌面 scope 取桌面缺省、设备 scope 取设备缺省；非正显式值 → 非设备 scope 不超时；设备 scope 遇非正显式值取设备缺省、不报错；设备 scope 的 tag 或显式值低于下限 → 报错；
 - 未标 scope 的 scenario → 各自独立成 job（含未标 scope 的 Outline → N 个 job 不撞 id）；
 - **`@scope` 的值撞未标 scope 的 scenario id → 报错**（同文件 / 跨文件、named 在前与在后共四种顺序都报，钉死判定与遍历顺序无关）；值等于某条**自身已标 `@scope`** 的 scenario 的 id → 不报错（钉死不误杀）；
-- 裸 `@scope:` / `@engine:` / `@timeout:`（空值）→ 报错，且消息带 `uri:line` 定位；
+- 裸 `@scope:` / `@engine:` / `@timeout:` / `@device:` / `@app:`（空值）→ 报错，且消息带 `uri:line` 定位；
 - Rule 内嵌 scenario：行号经 `astNodeIds` 下钻 Rule 回查到真实行 → 多个 Rule 场景 id 互异、不塌成 `<uri>:None`；
 - `select` 谓词（[0041](./0041-agent-facing-cli-affordances.md) 决策一）：筛后 scope 的 engine/target/timeout 与全量解析逐字一致；整组被筛空的 scope 其 tag 冲突不拦本次迭代；
 - id 派生稳定可追溯。
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上文已描述的全部；边界由下条「留口子不实现」界定。
+- **现在做**：上文已描述的全部（v1.0 起；`@timeout` 随 [0034](./0034-detached-batch-reconciler.md)、`select` 随 [0041](./0041-agent-facing-cli-affordances.md) 决策一、测试目标随 [0048](./0048-test-targets-device-and-ui-kind.md) 追加）；边界由下条「留口子不实现」界定。
 - **留口子不实现**：`@id:` 显式 id tag；Rule 层级的特殊处理（Compiler 已展开；parse 仅为行号回查下钻 Rule 内节点，不把 Rule 概念暴露到领域模型）；feature 级 tag 的更多语义（现有 `@scope`/`@engine`/`@timeout`/`@device`/`@app`，后两者见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2）。
 
 ## 重议

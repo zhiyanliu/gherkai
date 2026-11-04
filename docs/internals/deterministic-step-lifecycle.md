@@ -33,17 +33,18 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 | handler 的行为 | step 判定 | `error_type` |
 |---|---|---|
 | 正常返回 | `passed` | — |
-| 抛 `AssertionError`（Nova）/ `DeterministicAssertion` 或 `name === "AssertionError"`（Midscene） | `failed` | `assertion_failed` |
+| 抛 `AssertionError`（Nova）/ `DeterministicAssertion` 或 `name === "AssertionError"`（Midscene；设备目标上若命令守卫已在该异常上挂了会话丢失或结果未知的归类标记，按标记记 `error`，见下一行） | `failed` | `assertion_failed` |
 | 抛其它异常（含 Nova 的「handler 是 async」→ `TypeError`） | `error` | Midscene 先认异常上的归类标记（命令守卫与设备接缝挂上的 `session_lost` / `engine_error` / `capability_unavailable`，`readClassification`），认到即按它归类，设备路径因此没有 `network_error`；读不到标记时（桌面路径的异常）两侧都经瞬时网络白名单判定（Nova `_classify_act_error` → `_is_transient_network`、Midscene `isTransientNetwork`），命中则细分 `network_error`（细分口径见 [`verdict-model.md`](./verdict-model.md) §3b），否则 `engine_error` |
 | 一条 step 命中多条模式 → `DeterministicConflict` | `error` | `engine_error`，在派发处直接记、不经瞬时网络白名单；冲突模式清单在 `message` 里 |
 | 命中一条模式但关键字不在其 `keywords` 里 → `DeterministicKeywordMismatch` | `error` | `engine_error`，消息给出该条目接受的关键字 |
 | 命中、且在当前目标上有句柄的 step 带 DataTable / DocString | `error` | `engine_error`，确定性 step 不接收多行参数（目标上没有句柄、走 AI 的 step 把参数照常交给 AI） |
+| Midscene 设备目标上命中的 `webdriver` 条目声明了 `requires: ["web_context"]`，而能力探测确认设备不提供网页上下文、或探测出错（1.5 只有 Midscene 有设备路径） | `error` | 不提供时 `capability_unavailable`、探测出错时 `engine_error`；handler 不被调用、不转 AI（设备接缝的 `bindHandler` 抛出带归类标记的异常，按上面「抛其它异常」一行的标记优先规则归类） |
 
 两处容易误解的机制事实：**匹配是未锚定的 `search` / `exec`**（子串匹配，不是整句 `fullmatch`），**因此**模式写得过宽既容易误命中、也容易产生冲突（内建导航的模式自带 `^…$` 锚定，那是条目自己写的、不是匹配面的规则）；**内建导航在注册表里**，因此它出现在 `list-deterministic` 清单、也被 `plan` 标注。1.4 及之前版本它是独立于注册表的一级，两处都看不到它。
 
 **匹配面只有 worker 一份**：CLI 与 `core` 不持有任何 step 正则，`core` 只下发裸 step 文本，命中与否全由 worker 的表判定（此项分工的理由见本节末权威行 ADR 0022「匹配放 worker，不放核心」条）。由此带来一条约束：两侧正则方言不同（Python `(?P<n>)` vs JS `(?<n>)`），CLI 侧任何「复刻一份匹配」的实现都会在某天与实际运行结果不一致。
 
-> 权威：[ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条与冲突规则、[ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条（导航判据）、[ADR 0050](../adr/0050-deterministic-step-handles-and-testing.md) 决策 1（关键字声明）、[ADR 0024](../adr/0024-worker-core-protocol.md)（worker 收到的 step 形态）。判定语义（`failed` vs `error`、votes）见 [`verdict-model.md`](./verdict-model.md)。
+> 权威：[ADR 0022](../adr/0022-bdd-runner-retired-core-parses-thin-worker.md)「设计要点」节「匹配放 worker，不放核心」条与冲突规则、[ADR 0020](../adr/0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条（导航判据）、[ADR 0050](../adr/0050-deterministic-step-handles-and-testing.md) 决策 1（关键字声明与前提声明 `requires`）、[ADR 0048](../adr/0048-test-targets-device-and-ui-kind.md) 决策 6（声明了前提的确定性 step 在网页上下文不可用时记 error、不转 AI）、[ADR 0052](../adr/0052-appium-interface-adapter-and-platform-differences.md) 决策 5 与 6（网页上下文不可用时的归类、设备路径的归类标记优先）、[ADR 0024](../adr/0024-worker-core-protocol.md)（worker 收到的 step 形态）。判定语义（`failed` vs `error`、votes）见 [`verdict-model.md`](./verdict-model.md)。
 
 ## 2. 三个入口，一张表：为什么清单、标注、实际执行不可能分叉
 
@@ -51,7 +52,7 @@ worker 收到的只有 `keyword` + 裸 `text`（+可选多行参数）。派发�
 
 | 入口 | 调用者 | worker 做什么 |
 |---|---|---|
-| `--capabilities`（自述） | `gherkai list-deterministic`、`gherkai plan` 的目标核对（`_cmd_plan`，不受支持的目标以退出码 2 结束）与派发标注里按 scope 目标核对命中的 step（`_available_step_targets`）、`doctor` 的 `steps.load.<engine>`、`engines.model.<engine>` 与 `engines.targets.<engine>` 三项（同一次自述）、`run` / `submit` 的本机前置（共用 `_plan_and_preflight`；`run` 侧同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限 | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example` / `keywords` / `targets`）+ `targets`（该 worker 支持的测试目标）+ `session_warmup`（是否支持隧道会话预热，本机后端在 `--expose-local` 下的执行前预检据此放行）+ `min_grace_s` + `model_id`（该 worker 起 job 时真会用的模型 id，`doctor` 的 `engines.model.<engine>` 行取它）+ `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
+| `--capabilities`（自述） | `gherkai list-deterministic`、`gherkai plan` 的目标核对（`_cmd_plan`，不受支持的目标以退出码 2 结束）与派发标注里按 scope 目标核对命中的 step（`_available_step_targets`）、`doctor` 的 `steps.load.<engine>`、`engines.model.<engine>` 与 `engines.targets.<engine>` 三项（同一次自述）、`run` / `submit` 的本机前置（共用 `_plan_and_preflight`；`run` 侧同一次 spawn 兼定 grace 下限）、`doctor --backend cloud` 比对云端停止宽限、本机后端的两处后台宿主（`submit` 的后台推进进程与 `status --wait` 接力者）启动带墙钟预算的 job 前取 grace 下限（`detached.build_local_reconcile` 把 `compose.engine_min_grace` 交给 launcher；这一处不带 steps 目录） | 输出一个 JSON 对象即退出：`deterministic_steps`（`list_registry()` / `listRegistry()`，每项 `pattern` / `description` / `example` / `keywords` / `targets`）+ `targets`（该 worker 支持的测试目标）+ `session_warmup`（是否支持隧道会话预热，本机后端在 `--expose-local` 下的执行前预检据此放行）+ `min_grace_s` + `model_id`（该 worker 起 job 时真会用的模型 id，`doctor` 的 `engines.model.<engine>` 行取它）+ `engine` / `schema_version`；先加载 steps 目录，加载失败同样 fail-loud |
 | `--match-steps`（查询） | `gherkai plan` 的派发标注 | 自 stdin 读入 `{keyword, text}` 数组 → `match_batch` / `matchBatch` → 输出一行 JSON 即退出 |
 | job 模式（无 flag） | `run` / `submit` 实际执行 | 建立会话、按 §1 派发 |
 
@@ -102,7 +103,7 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | worker 启动即非零退出、stderr 指出某个文件 | 目录里**任一**文件 import 失败（语法/依赖错） | 修复该文件；Nova 用 `EX_STEPS_LOAD`（即 2）、Midscene 由 `bin.mts` 统一返回非零退出码（有意不用 `80`，那是网络故障退出码） |
 | `--steps-dir` / `GHERKAI_STEPS_DIR` / 配置文件的 `steps-dir` 指向的目录不存在 → 退出码 2 | 显式指定了一个位置，而该位置不存在或不是目录，即配置错误（`_steps_dir_or_error`） | 改为正确路径。缺省的 `./steps` 不存在**不算错误**，多数项目本就没有确定性 step |
 | `plan` 直接以退出码 2 结束，提示「向引擎 worker 查询确定性 step 失败，plan 拒绝出结果」并给出成因提示（使用方 steps 加载失败，或 worker 与 CLI 版本不一致）；有非桌面 scope 时，目标核对那一步的自述失败另提示「引擎 X 的 worker 自述失败，plan 拒绝出结果」 | `plan` 自己的标注探活（`--match-steps`，`_probe_deterministic_dispatch` → `compose.match_deterministic`）遇到 `WorkerSelfDescribeError`；`run` / `submit` 另有一道等价的本机前置，走 `--capabilities`（`_preflight_worker_runtimes`；两命令共用 `_plan_and_preflight`） | 同上，修复该文件。这是 `plan` 唯一**不降级**的失败：降级为「无标注」等于让读者误以为那些 step 会走 AI |
-| `plan` 只输出一行「（标注降级）引擎 X … 无派发标注」，计划本体照常输出 | 该引擎的 worker 未能定位（worker 定位链逐级都未命中，Midscene 没有第四级），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
+| `plan` 在 stderr 输出一行「（标注降级）引擎 X … 无派发标注」（有非桌面 scope 时，此前目标核对那一步另输出一行「（目标核对降级）引擎 X 的能力自述取不到…」），计划本体照常输出 | 该引擎的 worker 未能定位（worker 定位链逐级都未命中，Midscene 没有第四级），属环境问题 | 安装该引擎，或忽略（`plan` 对 miss 一律 best-effort；`run`/`submit`/`list-deterministic` 对同一件事以退出码 2 结束） |
 | 某 step 实际执行时记 `error`，`message` 里列出多条模式 | 一条 step 命中多条模式 | 收紧模式，或改 step 措辞避开；`plan` 会提前用 ⚠ 标出 |
 | `submit --backend cloud` 以退出码 2 结束，提示 variant 解析失败 | 请求的 variant 在该引擎当前版本下未推送过 / revision 已清理 / digest 已删除 | 由部署方 `push-worker` 推送；紧急情况下可临时用 `--worker-variant base`（`gherkai deploy` 已把本版本基础镜像同步成 `base`）。CLI 旧于后端时提示改为「先升 CLI」，因为向旧版本命名空间推 tag 无法消除版本不一致 |
 | Midscene 报「某文件一条确定性 step 都没注册」 | 双实例守卫：裸 specifier 若解析到第二份包副本，注册会写进 worker 永不读取的表 | 确认文件 import 的是 `@gherkai/worker-midscene`，且在顶层调用了 `deterministic(...)` |

@@ -10,6 +10,6 @@
 
 **为什么不是把 HITL 当一等公民**：内建「跑到登录步暂停等人」会牺牲无人值守，CI 里无法自动跑，会把工具带向「必须有人盯着」，背离测试工具的本质。
 
-**spike 阶段**：第一个 spike 用无登录站点（维基百科），**完全不碰认证**，避免登录复杂度污染链路验证。本 ADR 只定方向，登录代码留到接入真实被测系统时再写。**落点已定（演进）**：登录这类固定动作走确定性 step，代码归使用方项目的 `steps/` 目录（桌面浏览器目标上两引擎的 `playwright` 句柄都拿到 `ctx.page`；设备目标的 `webdriver` 句柄拿到 `ctx.driver`，见 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1、2），本仓库只内建示范、不内建登录 step——见 [0037](./0037-distribution-and-packaging.md) 决策 4。
+**spike 阶段**：第一个 spike 用无登录站点（维基百科），**完全不碰认证**，避免登录复杂度污染链路验证。本 ADR 只定方向，登录代码留到接入真实被测系统时再写。**落点已定（演进）**：登录这类固定动作走确定性 step，代码归使用方项目的 `steps/` 目录（桌面浏览器目标上两引擎的 `playwright` 句柄都拿到 `ctx.page`；设备目标的 `webdriver` 句柄拿到 `ctx.driver`，见 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 1、2），产品不内建登录 step：worker 包里的内建条目只有导航一条，示范放在 `features/steps/` 模板里由使用方复制——见 [0037](./0037-distribution-and-packaging.md) 决策 4、[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2 条。
 
-**范围前提**：与 [0001](./0001-scope-limited-to-english-ui.md) 一致——若未来出现强 CAPTCHA/必须人工的场景，再单独重议 HITL 的地位。
+**范围前提**：本 ADR 的定调以「正式用例的认证都能程序化完成」为前提——若未来出现强 CAPTCHA / 必须人工的场景，再单独重议 HITL 的地位。

@@ -18,7 +18,7 @@
 - 因此它**消除了 bearer 路那个最低置信的承重假设**（bearer 对 `/openai/v1`+vision 是否被接受、AWS 无文档）——根本不碰 bearer。
 - 风险性质从「AWS 政策侧未知」变为「进程内 SigV4 fetch 接线是否字节级正确」——后者在我们掌控内。
 
-**剩余风险（spike 第一锤要坐实）**：`createOpenAIClient` 的自定义 `fetch` 能否产出与 OpenAI SDK 序列化字节一致、且满足 Bedrock 签名头/body 预期的签名请求。要点：签 `init.body`（字符串本身、AS-IS hash）与 url；覆盖 SDK 用 dummy apiKey 设的 `Authorization` 头；只签最小规范头集（host/x-amz-date/content-type），避免对会被改动的易变头过度签名导致签名不符；处理凭证刷新；确认 Midscene 是否请求流式响应（SigV4 签的是请求，不影响响应流式）。
+**剩余风险（spike 第一锤要坐实）**：`createOpenAIClient` 的自定义 `fetch` 能否产出与 OpenAI SDK 序列化字节一致、且满足 Bedrock 签名头/body 预期的签名请求。要点：签最终发出的那份 body 字符串（即 `init.body` 经上「决定」中方言适配条去掉 `image_url.detail` 后的结果；按该字符串原样算 hash，签后不再改动）与 url；覆盖 SDK 用 dummy apiKey 设的 `Authorization` 头；只签最小规范头集（host/x-amz-date/content-type），避免对会被改动的易变头过度签名导致签名不符；处理凭证刷新；确认 Midscene 是否请求流式响应（SigV4 签的是请求，不影响响应流式）。
 
 **退路（Option B，仅当自签 fetch 太脆时启用）**：本地跑 `aws-samples/bedrock-access-gateway`，它以 boto3 默认链（纯 IAM）签名转发、把 OpenAI `image_url`→Converse 图块；Midscene 指向 `http://localhost:<port>/v1` 配 dummy bearer。须先在账号+region 开通所用模型，否则网关返回 400（spike 期所用模型为 `qwen.qwen3-vl-235b-a22b`，ON_DEMAND；现行默认模型见 [0044](./0044-engine-model-selection-and-override.md)「现值」，是跨区 inference profile，启用此退路前须重新核对网关是否支持该模型）。
 

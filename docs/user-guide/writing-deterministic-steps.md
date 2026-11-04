@@ -1,12 +1,12 @@
 # 编写确定性 step
 
-把必须精确、不能因模型判断而波动的检查写成代码，涉及以下内容：`steps/` 目录约定、Python（Nova Act 引擎）与 TypeScript（Midscene 引擎）两侧并排的注册 API、`description` / `example` 的作用、加载失败的表现，以及如何核对与带到云端。哪些判定该写成确定性 step、哪些留给 AI 由 [`writing-features.md`](./writing-features.md) 讲；命令、退出码与报告见 [`running-and-results.md`](./running-and-results.md)；镜像与部署流程见 [`cloud-backend.md`](./cloud-backend.md)。
+把必须精确、不能因模型判断而波动的检查写成代码，涉及以下内容：`steps/` 目录约定、Python（Nova Act 引擎）与 TypeScript（Midscene 引擎）两侧并排的注册 API、给设备目标加第二份实现（`playwright` 与 `webdriver` 两种句柄，以及 `webdriver` 句柄拿到的上下文）、`description` / `example` 的作用、加载失败的表现，以及如何核对与带到云端。哪些判定该写成确定性 step、哪些留给 AI 由 [`writing-features.md`](./writing-features.md) 讲；命令、退出码与报告见 [`running-and-results.md`](./running-and-results.md)；镜像与部署流程见 [`cloud-backend.md`](./cloud-backend.md)。
 
 ## 写之前
 
 按 [`writing-features.md`](./writing-features.md) 定下哪些 step 要精确、哪些留给 AI 之后，动手写代码前先确认两点：
 
-- 确定性 step 命中后走你自己的函数：不调模型、不投票、不产生模型费用，同一个页面状态永远给同一个判定。代价是它**不产生 AI 证据**——这一步的判定与耗时照常记进报告和退出码，但没有轨迹页或回放页可看（证据形态见 [`../internals/artifacts-and-evidence.md`](../internals/artifacts-and-evidence.md)）。
+- 确定性 step 命中后走你自己的函数：不调模型、不投票、不产生模型费用，同一个页面状态永远给同一个判定。代价是它**不产生 AI 证据**——这一步的判定与耗时照常记进报告和退出码，但没有轨迹页或回放页可看；设备目标上判为 failed / error 的确定性 step 例外，另有一份只含页面地址与控件快照的证据（见 [`running-and-results.md`](./running-and-results.md)「看失败原因」，证据形态见 [`../internals/artifacts-and-evidence.md`](../internals/artifacts-and-evidence.md)）。
 - 分工是固定的：feature 作者（QA）只在 `.feature` 里写自然语言；确定性 step 由测试开发写在**你自己项目**的 `steps/` 目录里，不改引擎包的文件。
 - 成本与速度也是判据。AI step 每次判定都调用一次模型，投票再乘票数，一步要几秒到几十秒（模型往返与截图）；确定性 step 零模型费用、毫秒级完成，整套用例的总耗时与云端浏览器会话时长随之缩短。出现频次高的检查优先写成确定性：`Background` 里每条 scenario 都要重做的前置检查、`Scenario Outline` 每行数据都要过的断言、被要求投票的断言。费用量级见仓库首页的模型披露表。
 
@@ -75,7 +75,7 @@ deterministic(
 
 `keywords` 可选：声明这条 step 接受哪些 Gherkin 关键字（`Given` / `When` / `Then` 的子集，Nova Act 写 `keywords=("Then",)`，Midscene 写 `keywords: ["Then"]`），不写就三个都接受。step 文本命中了模式而关键字不在声明里时，这一步记 `error`、不交给 AI，`gherkai plan` 会提前用 ⚠ 标出。断言类 step 声明只接受 `Then`，可以挡住 `Given 页面地址匹配 "…"` 这种写法；`And` / `But` 按它承接的那条算。
 
-Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion`，以及类型 `DeterministicCtx` / `DeterministicHandler` / `DeterministicMeta`（桌面句柄）与 `DeterministicHandlers` / `WebdriverEntry` / `WebdriverCtx` / `WebdriverHandler` / `WebdriverDevice` / `WebdriverApp`（设备句柄，见下一节），以及条目字段取值的类型 `UiKind` / `Device` / `Requirement`（给辅助函数写类型注解时用）。
+Midscene 侧的 step 文件只从包名 `@gherkai/worker-midscene` 导入，可用的导出是 `deterministic`、`DeterministicAssertion`，以及类型 `DeterministicCtx` / `DeterministicHandler`（桌面句柄）、`WebdriverEntry` / `WebdriverCtx` / `WebdriverHandler` / `WebdriverDevice` / `WebdriverApp`（设备句柄，见下一节）、`DeterministicHandlers`（按句柄种类分键的第二个参数）与 `DeterministicMeta`（第三个参数 `{ description, example, keywords? }`），以及条目字段取值的类型 `UiKind` / `Device` / `Requirement`（给辅助函数写类型注解时用）。
 
 你的项目不需要 `package.json` 或 `node_modules`，也不必在项目里另装这个包：worker 在加载你的 step 文件之前，把这个包名解析到它自己那一份。反过来，把导入写成指向某个安装位置的文件路径（例如另一处 `node_modules` 里的 `dist/index.mjs`）会加载到第二份副本，注册落进 worker 不读的那张表，worker 会报这个文件一条 step 都没注册并拒绝启动。
 
@@ -206,7 +206,7 @@ Nova Act 引擎只在桌面网页上运行：Python 侧也接受 `webdriver` 条
 3. **给等待一个几秒的上限。** Playwright 默认 30 秒，一条 step 等满 30 秒，这 30 秒都计入这个 scope 的 job 墙钟预算（`@timeout`），也会拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
 4. **瞬态窗口内的多个动作合成一次页面内调用。** 页面只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用要往返几百毫秒，「点击、再点击、读数」分三次调用就落到了窗口之后，而本机单测因为浏览器就在旁边照样能过。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，step 代码只做断言。传字符串时注意 Node 版 Playwright 不会自动调用字符串里的函数表达式（Python 版会），要把参数拼成 JSON 字面量、写成立即调用的表达式。
 
-Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环境自带 Playwright。Midscene 侧**运行期不要 import `playwright`**：step 文件所在目录没有 `node_modules`，worker 只把 `@gherkai/worker-midscene` 这一个包名解析到自己那份，别的包名解析不到；`import type { Page } from "playwright"` 只当类型用、编译期擦除，可以写。
+Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环境自带 Playwright。Midscene 侧**运行期不要 import `playwright`**：worker 只把 `@gherkai/worker-midscene` 这一个包名解析到自己那份，别的包名按 Node 的默认规则从 step 文件所在目录逐级向上查找 `node_modules`。项目按下文装了单测用的开发依赖时，本机能找到你项目里的那份 Playwright（与 worker 用的不是同一份）；云端镜像里只复制了 `steps/`、没有这份 `node_modules`，同一个文件在云端加载失败，worker 拒绝启动。`import type { Page } from "playwright"` 只当类型用、编译期擦除，可以写。
 
 ## 写得能诊断：失败消息带现场
 

@@ -1,6 +1,6 @@
 # gherkai-deploy-aws
 
-gherkai 的 AWS 部署 provider：一条命令在你自己的 AWS 账户里建齐 `gherkai --backend cloud` 所需的资源——运行状态表、事件表、产物桶、Fargate 集群、镜像仓库、让 run 在云端自动推进的后台组件、网络与最小权限角色、真机执行所用的 Device Farm 项目——并把官方 worker 基础镜像同步进你账号的镜像仓库、登记成名为 `base` 的默认镜像（自己 build 的定制镜像用 `gherkai deploy push-worker` 推）。
+gherkai 的 AWS 部署 provider：一条命令在你自己的 AWS 账户里建齐云端后端（`--backend cloud`）所需的资源——运行状态表、事件表、产物桶、Fargate 集群、镜像仓库、让 run 在云端自动推进的后台组件、网络与最小权限角色、真机执行所用的 Device Farm 项目——并把官方 worker 基础镜像同步进你账号的镜像仓库、登记成名为 `base` 的默认镜像（自己 build 的定制镜像用 `gherkai deploy push-worker` 推）。
 
 只有部署方需要装；团队里只提交 run 的人不必装。
 
@@ -19,7 +19,7 @@ gherkai deploy --vpc default --prefix gherkai-      # 建或更新云端后端
 gherkai destroy --vpc default --prefix gherkai-     # 拆掉后端；数据类资源保留
 ```
 
-`destroy` 不删数据类资源：两张 DynamoDB 表、产物桶与镜像仓库都保留，防止误删历史与镜像。它们需要手动清理，用同一前缀重新部署前尤其要注意。
+`destroy` 不删数据类资源：两张 DynamoDB 表、产物桶与镜像仓库都保留，防止误删历史与镜像。它们需要手动清理，用同一前缀重新部署前尤其要注意。部署时建立的 Device Farm 项目也不随 `destroy` 删除：它不属于后端 stack，连同其中的远程访问会话记录与录像一起保留；项目留着时，用同一前缀重新部署会按名称找回并沿用它、不会冲突，不再需要时手动删除。
 
 `--vpc` 与 `--prefix` 的取值规则、首次 `gherkai deploy --bootstrap`、`--diff` 预览与拆除后的清理步骤见：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md
 

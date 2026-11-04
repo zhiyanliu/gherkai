@@ -12,7 +12,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 
 **三层，同一份规则源，按能否机械判定分流。**
 
-1. **规则源唯一**：`cli/tests/_doc_rules.py` 存全部逐行可判的规则（内部指代表、口吻表、退役词表、决策六三形态的启发式、悬空指针形态）与**扫描面**（用户文档、skill、包页、技术文档、AI 侧文档、图源、code 注释与 docstring 各是一束），并提供 `classify(path)` 与 `scan(kind, path, only_lines)`。测试、hook、提交闸门都调它，不各存一份。唯一例外是用户可见字符串字面量的禁词表：判据与 markdown 面不同（见 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节），它单独住在 `cli/tests/test_user_facing_messages.py`，hook 不扫字符串字面量，扩表时两侧都要过一遍。
+1. **规则源唯一**：`cli/tests/_doc_rules.py` 存全部逐行可判的规则（内部指代表、口吻表、退役词表、决策六三形态的启发式、悬空指针形态、包页面的相对链接与 Release 固定块里未锁定 tag 的仓库链接）与**扫描面**（用户文档、skill、包页、技术文档、AI 侧文档、图源、code 注释与 docstring、其余 markdown（含 journey，只拦本机坐标）各是一束），并提供 `classify(path)` 与 `scan(kind, path, only_lines)`。测试、hook、提交闸门都调它，不各存一份。唯一例外是用户可见字符串字面量的禁词表：判据与 markdown 面不同（见 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节），它单独住在 `cli/tests/test_user_facing_messages.py`，hook 不扫字符串字面量，扩表时两侧都要过一遍。
 2. **第一层：测试兜底**（CI 与 `uv run pytest`）。每个扫描面一份护栏测试，逐文件参数化、命中即红。除措辞与术语外，把 doc-health 历轮靠人查的形态项也机械化：ADR Status 头与「被取代」链双向、`docs/` 文件名 kebab-case 与编号不复用、journey 首行类型头、长期文档与 AI 侧文档里指向 journey 文件的链接与裸 WP 编号、全仓 markdown（含 journey）与 code 注释里的本机坐标（个人目录下的绝对路径、本地 clone 目录名——写下它的 agent 顺手复制了编辑器里的路径，对别的机器上的 contributor 是悬空的；文件写 repo 相对路径）、CONTEXT 词条形态（术语行 + 至多两句 + 至多一个 ADR 指针 + `_Avoid_` 只列词）。
 3. **第二层：hook 写完即查**（只在 Claude Code 里生效，随仓库入库）。
    - PostToolUse（Edit / Write / MultiEdit / Bash 之后）：`tools/doc_rules_check.py --changed`，已跟踪文件**只报本次改动的行**（`git diff -U0 HEAD` 的区间）、未跟踪文件全扫；命中即 `exit 2`，命中行回给 agent、它必须先改再继续。**阻断式而非提醒式**：提醒会被当成噪声滚过去，正是本 ADR 要替换的「正向要求」。**只报改动行**：历史欠账另有测试与复盘兜底，hook 只该报「你刚写的」，否则一次大改动进行中会被旧命中刷屏、逼人关掉它。
@@ -27,7 +27,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 ## 边界与已知盲区
 
 - hook 只在 Claude Code 会话里生效；Codex 与人手编辑靠测试与可选 git hook。
-- 启发式有形态盲区：等号一侧是英文、全角括号或跨行时正则不命中（`（= X`、`英文词 = 中文`、折行的 `恒 ⏎ ==`）；模板字符串与 f-string 里的中文不在注释抽取面内。清扫时靠人工宽扫补，护栏不追求零漏报，只保证「命中即真」（低误报）以维持阻断式可接受。
+- 启发式有形态盲区：等号紧贴英文或全角括号这类非汉字字符、两侧都不留空格、写成 `==` 或跨行时正则不命中（`word= 中文`、`（= X`、`中文=中文`、`恒 == 真`、折行的 `恒 ⏎ = 真`）；模板字符串与 f-string 里的中文不在注释抽取面内。清扫时靠人工宽扫补，护栏不追求零漏报，只保证「命中即真」（低误报）以维持阻断式可接受。
 - 定义禁词表与讨论这些词本身的文件（`cli/tests/_doc_rules.py` 的 `SELF_FILES`：各护栏测试与两个工具脚本）整份不扫，其注释与 docstring 的措辞靠复盘时人工检查。
 - 「本批 / 这一批 / 整批」在 Lambda 与 Stream 侧注释里指事件批，注释层的退役表去掉这三个词，Run 义的残留交 code-health 复盘人判。
 - 判断型规则不进护栏，也不装作能进。

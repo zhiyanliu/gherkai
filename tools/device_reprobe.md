@@ -6,7 +6,7 @@
 
 ## 定位与适用场景
 
-两个驱动适配器（UiAutomator2、XCUITest）发出的命令由离线的命令契约快照锁定（`engines/midscene/src/device/adapters/fixtures/<适配器>.commands.json`，护栏是同目录的 `adapters.contract.test.mts`），能力探测的判据由假 driver 的真值表锁定。这两层只证明「适配器发出的是快照里的命令」，证明不了「真机现在还接受这些命令」：Device Farm 升级 Appium 服务端或驱动、升级 WebdriverIO 或 Midscene 之后，命令名、参数形态、上下文命名与控件树属性都可能变化，离线测试照样通过。
+两个驱动适配器（UiAutomator2、XCUITest）发出的命令由离线的命令契约快照锁定（`engines/midscene/src/device/adapters/fixtures/<适配器>.commands.json`，护栏是上一级 `adapters/` 目录里的 `adapters.contract.test.mts`），能力探测的判据由假 driver 的真值表锁定。这两层只证明「适配器发出的是快照里的命令」，证明不了「真机现在还接受这些命令」：Device Farm 升级 Appium 服务端或驱动、升级 WebdriverIO 或 Midscene 之后，命令名、参数形态、上下文命名与控件树属性都可能变化，离线测试照样通过。
 
 本工具在一台真机上建立一个远程访问会话，用与 worker 相同的设备侧接缝完成获取与能力探测，再逐个执行快照里的原语，把以下内容写成能力矩阵 `capability-matrix.json`：
 
@@ -28,7 +28,7 @@
 
 ## 费用
 
-一次执行建立一个远程访问会话，按设备分钟计费：取设备的等待（约 1 到 2.5 分钟）、原语执行、停止到 COMPLETED 的收尾（Android 约 1 分钟，iOS 最长约 2.5 分钟）都计入。工具在正常结束、获取失败、出错与收到 SIGINT / SIGTERM 时都会停止它建立的会话；会话名以 `gherkai:device-reprobe-` 开头（run 段为启动时刻加随机后缀，同一秒内并行启动的两次运行不会同名），释放没能确认时到 Device Farm 控制台按这个名字核对，或用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出。
+一次执行建立一个远程访问会话，按设备分钟计费：设备分配到可用的准备（约 1 到 2.5 分钟）与原语执行计入，停止到 COMPLETED 的收尾（Android 约 1 分钟，iOS 最长约 2.5 分钟）通常也计入；并发槽位满时的排队不计入，只占墙钟。工具在正常结束、获取失败、出错与收到 SIGINT / SIGTERM 时都会停止它建立的会话；会话名以 `gherkai:device-reprobe-` 开头（run 段为启动时刻加随机后缀，同一秒内并行启动的两次运行不会同名），释放没能确认时到 Device Farm 控制台按这个名字核对；项目是 `gherkai deploy` 建立的那个时，也可用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出（doctor 只列部署记录里的项目，本机后端用的项目要到控制台看）。
 
 ## 调用
 
@@ -94,16 +94,17 @@ page-source.xml                                本工具自己取的那次原始
 | `probe.items` | 逐项事实，经生命周期通道读取（不经命令守卫）：`current_context`、`contexts`、`web_context_candidates`、`switch_to_native`；有网页上下文候选时另有 `switch_to_web`（切入第一个候选，值为候选名）与 `switch_back`（切回原生），两项经执行实例直接发出，测量上下文切换一次的耗时（耗时见 `lifecycle`）；iOS 另有 `device_screen_info_scale`、`screenshot_long_edge`、`window_long_edge`、`page_source_scale`、`active_app_bundle_id`，Android 另有 `current_package`。`web_context_candidates` 与 `page_source_scale` 是由其它几项推出的值，其余每项是 `{value}` 或 `{error}` |
 | `page` | `--url` 的打开结果与路线（`url` / `deep_link`） |
 | `snapshot` | 接缝的界面快照（与失败 step 的证据同一条采集路径）：`url` / `url_missing`、`controls`、`page_source_path` 与 `page_source_truncated` |
-| `page_source` | 真机控件树的控件数与它和控件树样例的属性差集 `diff` |
+| `page_source` | 真机控件树的控件数与它和控件树样例的属性差集 `diff`；控件树没能读取时只有 `error` |
 | `cases` | 每条快照用例：`status`（`ok` / `failed` / `skipped`）、跳过原因、失败原因与归类、发出的命令（`commands` 为与快照格式相同的树，`flat` 带每条命令的成败 `error` 与耗时 `ms`）、快照的命令（`expected`）、`matches_fixture`；快照用例带 `device_dependent`（命令序列取决于设备此刻的界面，目前是 iOS 收起键盘：键盘里有收起键就点键、没有就点键盘上方工具栏的 Done、键盘没显示只读控件树）时 `matches_fixture` 为 null、`note` 带说明，形态照常参与 `rejected` / `unexpected` / `not_exercised` 的核对 |
 | `cases[].flat[].ms` | 这条命令从发出到落定（返回或抛出）的毫秒数，取整；用例记录结束时尚未落定的命令为 null |
 | `lifecycle` | 生命周期步骤的计时，按发生次序每步一项 `{step, ms, ok, error?}`：`ms` 为这一步从开始到结束的毫秒数（取整），`error` 只在 `ok` 为 false 时出现。小写下划线的步骤名与 `probe.items` 里同名的逐项事实一一对应；其余是 `navigate` 与紧随其后的 `restore`（只在给了 `--url` 时）、`screenshot`（写出 `screenshot.png` 的那次截图）、`readAddress`、`snapshot`、`pageSource`（本工具自己取的控件树，与 `page_source` 同一次读取）。`readAddress` 的缺失原因为 `timeout` / `error`、`snapshot` 有改判或控件摘要缺失、`restore` 有改判时也记为失败。执行中每步另写一行到标准输出：`device_reprobe: 步骤 <名> <ms> 毫秒 ok` 或 `device_reprobe: 步骤 <名> <ms> 毫秒 失败: <原因>` |
 | `diff` | 与命令契约快照的差集，见下节 |
 | `release`、`session_events` | 释放结果与本次发出的会话事件（每个会话恰一对，`release_failed` 为 true 表示有会话没能确认停止） |
+| `error` | 就绪之后执行中途抛出的错误（一行原因，例如没有与会话驱动名对应的命令契约快照）；出现时，出错点之后才写入的键（如 `cases`、`diff`）缺失 |
 
 ## 判读
 
-先看 `acquire.ready`：为 false 时没有执行任何原语，按 `error_type` 与 `message` 处置（与 worker 的执行前失败相同，例如 `precheck_failed` 的零候选设备、安装包缺失）。就绪之后看 `diff`：
+先看 `acquire.ready`：为 false 时没有执行任何原语，按 `error_type` 与 `message` 处置（与 worker 的执行前失败相同，例如 `precheck_failed` 的零候选设备、安装包缺失）。就绪之后先看有没有 `error`：有则执行在中途中断，`cases` 与 `diff` 可能缺失，按它的原因处置后重新执行；没有再看 `diff`：
 
 | 字段 | 含义 | 处置 |
 |---|---|---|
@@ -143,9 +144,9 @@ page-source.xml                                本工具自己取的那次原始
 
 | 退出码 | 含义 |
 |---|---|
-| 0 | 会话就绪，`diff` 的 `rejected`、`unexpected`、`mismatched_cases`、`failed_cases` 均为空，控件树属性无缺失，会话确认停止（`--offline`：零差异，含 `not_exercised` 为空，且能力缺失归类核对通过）。真机方式的 `not_exercised` 不影响退出码，须另看 |
-| 1 | 会话未就绪、差集不为空、会话中途丢失或释放未确认；矩阵照常写出 |
-| 2 | 选项不合法 |
+| 0 | 会话就绪，`diff` 的 `rejected`、`unexpected`、`mismatched_cases`、`failed_cases` 均为空，控件树属性无缺失（真机控件树没能读取时不做属性比较、不影响退出码，须另看 `page_source.error`），会话确认停止（`--offline`：零差异，含 `not_exercised` 为空，且能力缺失归类核对通过）。真机方式的 `not_exercised` 不影响退出码，须另看 |
+| 1 | 会话未就绪、差集不为空、会话中途丢失、就绪之后执行中途出错（矩阵带 `error`）、进程级异常或释放未确认，矩阵照常写出（`--offline`：有差异或能力缺失归类核对未通过，结果只打在标准输出、不写矩阵） |
+| 2 | 选项不合法，或给了 `--help`（只打印用法） |
 | 130 / 143 | 收到 SIGINT / SIGTERM，已按终结路径停止会话并写出已有的矩阵 |
 
 ## 类型检查

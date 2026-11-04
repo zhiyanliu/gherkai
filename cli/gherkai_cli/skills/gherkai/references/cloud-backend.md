@@ -13,22 +13,22 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 
 
 ## 2 交给部署方的清单
 
-前置：`uv tool install 'gherkai[deploy-aws]'`；Node ≥ 22 在 PATH；容器引擎 docker 可用（要拉官方 worker 基础镜像并推进 ECR）；凭证有云端写权限（CloudFormation、DynamoDB、S3、ECS、ECR、Lambda、EventBridge、VPC、日志组、IAM 建角色与 PassRole、SSM 读写 `/<prefix>backend/*`、`sts:GetCallerIdentity`）；region 已定。
+前置：`uv tool install 'gherkai[deploy-aws]'`；Node ≥ 22 在 PATH；容器引擎 docker 可用（要拉官方 worker 基础镜像并推进 ECR）；凭证有云端写权限（CloudFormation、DynamoDB、S3、ECS、ECR、Lambda、EventBridge、VPC、日志组、IAM 建角色与 PassRole、SSM 读写 `/<prefix>backend/*`、Device Farm 在 us-west-2 的 `ListProjects` / `GetProject` / `CreateProject`（找到已有的设备项目或新建一个）、`sts:GetCallerIdentity`）；region 已定。缺 Device Farm 这三项时部署照常完成并给出警告：后端已记录项目时沿用记录；没有记录，或记录的项目已被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 提交时以退出码 2 结束。
 
 ```bash
 gherkai deploy --bootstrap                                  # 每个 account+region 首次一次
 gherkai deploy --diff --vpc default --prefix gherkai-       # 先看变更集（尤其网络 / IAM），每次 deploy 前
 gherkai deploy --vpc default --prefix gherkai-              # 真部署 / 更新，幂等
 gherkai deploy --synth-only ./out --vpc default             # 只导模板给自己的审批流水线，不碰账户
-gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶 / 镜像仓库保留
+gherkai destroy --vpc default --prefix gherkai- --yes       # 拆栈；表 / 桶 / 镜像仓库与 Device Farm 项目保留
 ```
 
 - `--vpc` **必给、无隐式默认**（只有 `--bootstrap` 不需要）：`default`（账户默认 VPC）/ `new`（新建，2 可用区、零 NAT）/ `vpc-<id>`。生效的取值记在后端，下次给错会以退出码 2 结束；确认要换网络时加 `--allow-vpc-change` 放行一次。
 - `--prefix`（默认 `gherkai-`）是全部云资源的命名空间，**必须与 `run` / `submit` / `status` / `explain` 的 `--prefix` 一致**。换 prefix 就是换一套独立环境（`prod-` / `stage-`），闲置成本近零。
 - 其它：`--require-approval never|any-change|broadening`（IAM 变更要不要人过目）、`--stop-timeout N`（worker 容器停止宽限秒；默认值与上限见 `--help`，上限是平台限制、更大的值在命令期就被拒；云端对应本机 `run --grace`）、`--container-engine 名`（默认 docker）、`--refresh-context`、`--region` / `--profile`。
-- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 取值不符、容器引擎名不认、`push-worker` 架构或版本不符）；1 账户可能已被改动，两种来源——cdk 自身失败（它自己的退出码多为 1、原样透传，处置看 cdk 输出），或 cdk 已成功而 worker 镜像步骤失败（重新运行 `gherkai deploy` 幂等收敛）；`destroy` 没有镜像步骤，它的 1 只来自 cdk；其余原样透传 cdk。
+- 退出码：0 成功；2 前置 / 校验失败（Node 缺失、VPC 取值不符、容器引擎名不认、`push-worker` 架构或版本不符；读不到后端记录的 Device Farm 项目、记录不是合法的项目 ARN、Device Farm 里有不止一个名为 `<prefix>devices` 的项目，这几种都在动账户之前拦下；`--diff` 核对记录的项目时遇到限流、网络或服务端故障也以 2 结束、不输出变更集）；1 账户可能已被改动，三种来源——cdk 自身失败（它自己的退出码多为 1、原样透传，处置看 cdk 输出），cdk 已成功而 worker 镜像步骤失败（重新运行 `gherkai deploy` 幂等收敛），或部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；stack 没有改动、项目可能已建立，重新运行 `gherkai deploy` 会按名称找回、不会重复建立）；`destroy` 没有镜像步骤，它的 1 只来自 cdk；其余原样透传 cdk。
 
-建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 取值的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 取值、worker 镜像映射与默认指针）。`submit --backend cloud` 提交的一个 run，并行 job 数为 min(提交时 `--max-concurrency`, 部署侧上限 20)：超过上限时 `submit` 打印一行提示、本 run 按上限并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
+建出来的东西：DynamoDB 两张表（run 状态、事件）、S3 桶（判定结果、报告、引擎产物）、ECS 集群与每引擎一个 Fargate task 定义、每引擎一个 ECR 仓库、三个 Lambda 与调度规则（让 `submit` 的 run 在云上自我推进）、按 `--vpc` 取值的子网与安全组、每引擎最小权限角色、SSM 参数（版本戳、VPC 取值、worker 镜像映射与默认指针、启用设备支持时的 Device Farm 项目 ARN）。stack 之外，deploy 还会在部署 stack 之前在 us-west-2 找回或新建 Device Farm 项目 `<prefix>devices`，供带设备目标的云端 run 建立远程访问会话；它不属于 stack，destroy 时保留（见第 6 节）。`submit --backend cloud` 提交的一个 run，并行 job 数为 min(提交时 `--max-concurrency`, 部署侧上限 20)：超过上限时 `submit` 打印一行提示、本 run 按上限并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
 
 ## 3 使用方一条线
 
@@ -85,7 +85,7 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 ## 6 多环境与清理
 
 - 多环境靠 `--prefix`：`prod-` / `stage-` 各一套后端，互不影响；所有 cloud 命令带同一个 prefix。
-- `gherkai destroy` 之后两张 DynamoDB 表、S3 桶、两个 ECR 仓库**保留、需手动删**（防误删数据）。不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。worker 镜像映射与默认指针也不随 destroy 删，ECR 留着则重建后照样能用。命令样例见用户指南云端后端页（https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md ）的「拆除与清理」节。
+- `gherkai destroy` 之后两张 DynamoDB 表、S3 桶、两个 ECR 仓库**保留、需手动删**（防误删数据）。不手动删则同 prefix 重新 deploy 会因资源已存在而冲突。worker 镜像映射与默认指针也不随 destroy 删，ECR 留着则重建后照样能用。部署时在 us-west-2 建立的 Device Farm 项目 `<prefix>devices` 不属于 stack，也随 destroy 保留（连同其中的远程访问会话记录与录像；记着项目 ARN 的 SSM 参数随 stack 删除）；它留着时同 prefix 重新 deploy 会按名称找回并沿用、不冲突；不再需要时手动删除（删除会一并删掉会话记录与录像，旧 run 报告里指向这些会话的控制台链接随之失效）。命令样例见用户指南云端后端页（https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md ）的「拆除与清理」节。
 
 ## 7 `--expose-local` 在 cloud 后端的例外
 

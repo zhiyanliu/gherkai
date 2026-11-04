@@ -14,9 +14,9 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 标记 | 含义 |
 |---|---|
-| `✓` | 通过。标「未查」的项也算通过 |
+| `✓` | 通过。标「未查」的项一般也标 `✓`；例外是 `backend.reachability` 因 region 或凭证先失败而没有检查时标 `-`，见下表该行 |
 | `✗` | **必修项**没通过 |
-| `-` | 可选能力缺失，不影响退出码（例如另一个引擎没装、部署工具链不全） |
+| `-` | 可选项没通过，不影响退出码（例如另一个引擎没装、部署工具链不全、项目里还有未结束的远程访问会话） |
 
 退出码规则与 `--json` 每项的字段见[开始使用](./getting-started.md)的「用 doctor 自检」。下表说明每一行在查什么、判 `✗` 时怎么办。
 
@@ -40,11 +40,12 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，下面三行 `backend.worker.*` 都不出现；设备支持的两行照常检查 |
 | `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
 | `backend.worker.any` | 云端，且 `backend.worker.default` 通过后 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
-| `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码，这一行会说明云端宽限是否还能调高 |
+| `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码；行内给出两种情形的处置：云端宽限还没到平台上限时，可以请部署方用 `gherkai deploy --stop-timeout` 调高；已到上限时，这条差距来自平台限制，不必处理（按默认值部署的后端上停止宽限已是平台上限，Nova Act 这一项通常就是这种情形） |
 | `backend.devices.project` | 云端 | 这套后端是否启用了设备支持，即部署时建立的 Device Farm 项目 ARN 是否记在 SSM 里。没有时标 `-` 并提示「部署未启用设备支持」：不测设备的团队可以忽略；要测设备时，请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`。读这个参数本身失败时同样只标 `-`，行内给出原因。不影响退出码 |
 | `backend.devices.sessions` | 云端，且 `backend.devices.project` 读到项目后 | 项目里还没结束的远程访问会话（含排队中的），每条带控制台链接与停止命令 `aws devicefarm stop-remote-access-session --region us-west-2 --arn <会话 ARN>`；doctor 使用了 profile（来自 `--profile`、`AWS_PROFILE` 或配置文件 `[common]` 的 `profile`）时，命令末尾还带同一个 `--profile <名称>`。没有时标 `✓`；有时标 `-`：正在执行的 run 也有会话，停止前先确认没有 run 在使用它，没有 run 使用的会话会继续计费并占用设备，最长到 Device Farm 的 150 分钟上限。列举需要 us-west-2 上对这个项目的 `devicefarm:ListRemoteAccessSessions` 权限，缺这项权限时这一行说明缺什么，遇到限流、网络等其他错误时同样只标 `-`、行内给出原因与下一步；停止需要 `devicefarm:StopRemoteAccessSession`，只提交 run 的成员的最小权限里没有这一项，请有该权限的人停止。表格在窄终端里会把长链接与命令折成多行，`doctor --json` 的 `detail` 里是完整的一行。不影响退出码 |
 | `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种只是说明（部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
 | `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机运行 |
+| `provider.aws` | 部署 provider 的自检本身出错时（这时不出现上一行的三项） | 行内给出错误原因；只标 `-`，不影响退出码 |
 
 给 `--backend cloud` 或 `--prefix` 才会查 `aws.*` 与 `backend.*` 两段；`--prefix` 与 `--report-dir` 都要与提交时用的值一致，否则查的是另一套资源。云端两段中途早退不影响 `provider.*` 段，它照常查。自检不查隧道前置。
 
@@ -73,15 +74,15 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| worker 日志或 `explain` 里出现 AWS 的权限被拒、模型不可用一类报错 | 该 region 未开通所用模型，或凭证缺 Bedrock、AgentCore Browser、Nova Act 的权限 | 在该 region 开通模型或补权限。`gherkai doctor` 的 `engines.model.<引擎>` 行显示这台机器实际会用哪个模型 |
-| Midscene worker 启动即退，`模型 … 不在已知家族里——无法确定该按哪种模型去驱动浏览器` | `MIDSCENE_MODEL_ID` 换成了识别不出家族的模型 | 设 `MIDSCENE_MODEL_FAMILY` 指明家族（取值见 https://midscenejs.com/model-common-config.html ），或把 `MIDSCENE_MODEL_ID` 换回受支持的模型；默认值是 `us.openai.gpt-5.6-terra` |
+| worker 日志或 `explain` 里出现 AWS 的权限被拒、模型不可用一类报错 | 该 region 未开通所用模型，或凭证缺 Bedrock、AgentCore Browser、Nova Act 的权限；本机后端的设备 run 还要 Device Farm 与应用桶的权限 | 在该 region 开通模型或补权限，本机后端所需的动作与资源见[运行测试与查看结果](./running-and-results.md#本机后端的凭证需要什么权限)。`gherkai doctor` 的 `engines.model.<引擎>` 行显示这台机器实际会用哪个模型 |
+| Midscene worker 启动即退，`模型 … 不在已知家族里——无法确定该按哪种模型去驱动浏览器` | `MIDSCENE_MODEL_ID` 换成了识别不出家族的模型 | 设 `MIDSCENE_MODEL_FAMILY` 指明家族（取值见 https://midscenejs.com/model-api-setup ），或把 `MIDSCENE_MODEL_ID` 换回受支持的模型；默认值是 `us.openai.gpt-5.6-terra` |
 | Nova Act 侧报模型不存在或不可用 | `NOVA_MODEL_ID` 覆盖成了该 region 没有的模型 | 取消该环境变量，回到默认的 `nova-act-v1.0` |
 
 ## 引擎与判定
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒） | 给慢的 scope 标 `@timeout:600`，或调高 `--default-job-timeout`；也可以把长流程拆成多个 scope |
+| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒） | 给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取设备的预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取设备的预算加 180 秒，否则在开始执行前就以退出码 2 被拒；也可以把长流程拆成多个 scope |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
@@ -95,11 +96,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `network_error` | 网络瞬时故障（建连失败，或中途断网）。原样重新运行通常就能过 |
 | `engine_error` | worker 无法启动、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
-| `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者收到停止信号时会话的建立请求还没有返回（说明里记为「结果未知的创建尝试」）。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
+| `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者某次建立会话的请求结果未知、收尾前也没能核实（说明里记为「结果未知的创建尝试」）。结果未知的情形是收到停止信号时建立请求还没有返回；设备目标上还包括建立请求超时、连接中断或回应里没有会话 ARN，之后按会话名也没有找到这个会话。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
 | `precheck_failed` | 没有开始测、重新运行也不会变，scope 里一条 step 都没执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序、服务商没有安排设备就结束了会话（消息带服务商的说明，常见于不计量方式而账号没有不计量设备槽位：改回按量或先购买槽位）。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
 | `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s` |
 | `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话。会话也可能在准备设备时就已结束（获取设备、启动应用或会话预热期间），这时本 scope 的 step 都没有执行；核对是否有人在控制台停止了会话，然后重新运行 |
-| `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或空格、中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
+| `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
 
 本机运行时的 worker 日志：前台 `run` 直接打在终端里，每行带 `[worker <scope_id>:out]` 或 `[worker <scope_id>:err]` 前缀，前缀的颜色只用来区分来源 scope（按 job 启动顺序分配，不用红绿），不表示严重程度；加 `--quiet` 时落 `<report-dir>/<run_id>/worker.log`；`submit --backend local` 的后台进程把它写进同一目录的 `reconcile.log`。云端运行时的日志位置见下面「云端后端」。
 
@@ -122,7 +123,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
-| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端部署早于本版本、从未升级，它丢得掉这类 run 的关键信息 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
+| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端在 1.4.0 之前部署（那时的部署不写版本戳），之后没有升级过；它会丢掉这类 run 的设备目标或会话预热设置，结果可能被误判为通过 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`；之后 `doctor --backend cloud` 的 `backend.devices.project` 行应显示项目 ARN |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 
@@ -145,7 +146,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `配置文件 … 里有不认识的键 …`，随后列出可用的键 | 键名拼错，或把只影响本次调用的选项写进了文件 | 键名是选项长名去掉 `--`，可用键见[配置](./configuration.md)「项目配置文件」；只影响本次调用的选项在命令行上给 |
+| `配置文件 … 里有不认识的键 …`，随后列出可用的键 | 键名拼错，或把只影响本次调用的选项写进了文件 | `[common]` 与 `[cloud]` 的键名是选项长名去掉 `--`，`[devices]` 与 `[apps]` 的键见[配置](./configuration.md)「项目配置文件」，报错里也列出了该节可用的键；只影响本次调用的选项在命令行上给 |
 | `配置文件 … 不是合法的 TOML：…` | 文件语法错 | 按报出的行列改 |
 | `… os-version = 18.6 要写成字符串、加引号` | 版本号写成了数字，会被当成浮点数读、末尾的 0 丢失 | 写成 `os-version = "18.6"` |
 | `这个 run 里有在 Android 设备上执行的 scope，但没有指定用哪台设备` | 该平台没有任何来源给出设备 | 在 `gherkai.toml` 的 `[devices.android]` 给 `arn` 或 `os-version`，或用 `--android-device-arn`（iOS 同理）；`plan` 对此只警告 |
@@ -163,7 +164,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `未找到 run：<run_id>（--report-dir 是否与 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix` |
+| `未找到 run：<run_id>（--report-dir 是否与 submit 一致？）`，云端后端为 `（--prefix/--ddb-table 是否与 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix`，给过 `--ddb-table` 的也要一致 |
 | `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |
 

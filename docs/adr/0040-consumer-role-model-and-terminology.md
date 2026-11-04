@@ -44,8 +44,8 @@
 |---|---|---|
 | `plan` | 无凭证；装了 worker 才有确定性 step 标注（[0036](./0036-deterministic-capability-discovery.md) 决策 4 的 best-effort） | 无 |
 | `run` / `submit` `--backend local` | 本机 AWS 凭证（Bedrock 模型 / AgentCore Browser / Nova Act 服务）+ 要用到的引擎 worker | 自己 |
-| `submit` / `status --wait` `--backend cloud` | 最小云端权限：runs 表读写 + 只读探活 + `lambda:GetFunction` / `InvokeFunction` + variant 解析只读（0038）+ 报告桶 `s3:PutObject`（feature 含 DataTable / DocString 时，提交即把正文搬 S3，[0030](./0030-realtime-persistence-seam.md) 决定六）；**无任何 ECS 写**——起 task 全走 Lambda 执行角色 | 部署方 |
-| `run --backend cloud`（同步） | 另一套云端权限（**不含**上一级的 `lambda:GetFunction` / `InvokeFunction`）：`ecs:RunTask` / `StopTask` / `DescribeTasks` + `iam:PassRole` + `dynamodb:Query` / `PutItem` + 报告桶 `s3:PutObject`（此级恒需：进程内起 task、自己上传 job、自己推进）+ 同一套只读探活 + variant 解析只读（0038） | 部署方 |
+| `submit` / `status --wait` `--backend cloud` | 最小云端权限：runs 表读写 + 只读探活 + `ssm:GetParameter`（`/{prefix}backend/*`：版本戳、variant 映射与默认指针）+ `lambda:GetFunction` / `InvokeFunction` + variant 解析只读（0038）+ 报告桶 `s3:PutObject`（feature 含 DataTable / DocString 时，提交即把正文搬 S3，[0030](./0030-realtime-persistence-seam.md) 决定六）；**无任何 ECS 写**——起 task 全走 Lambda 执行角色 | 部署方 |
+| `run --backend cloud`（同步） | 另一套云端权限（**不含**上一级的 `lambda:GetFunction` / `InvokeFunction`）：`ecs:RunTask` / `StopTask` / `DescribeTasks` + `iam:PassRole` + `dynamodb:Query` / `PutItem` + 报告桶 `s3:PutObject` 与 `s3:PutObjectTagging`（此级恒需：进程内起 task、自己上传 job 并打 `gherkai=job-in` 标签供 lifecycle 过期、自己推进）+ 同一套只读探活 + `ssm:GetParameter`（`/{prefix}backend/*`：版本戳、variant 映射与默认指针，不给 `--subnet` / `--security-group` 时另读 subnet / sg）+ variant 解析只读（0038） | 部署方 |
 
 设备目标（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）在各级上的权限增量登记在 0033「设备目标增量」段与 task role 权限表的设备目标各行：提交侧多应用前缀 `apps/` 的读、写、分段上传中止与带前缀条件的 `s3:ListBucket`（云端后端写进产物桶并另需 `s3:PutObjectTagging`，本机后端写进使用方配置的应用桶），`doctor` 多一项列举远程访问会话的只读权限；本机后端驱动真机时 worker 在本机执行，本机凭证另需 task role 权限表里设备目标各行的全部权限。四级划分与「权限挂在执行轴上、不挂在帽子上」不变。
 
@@ -82,7 +82,7 @@
 ## 被拒方案
 
 - **只放 CONTEXT.md**：词条给得了定义，装不下 why、边界矩阵与「帽子不是人」这两条设计约束。
-- **放 docs/internals/**：guide 只讲 how、不做决策（CLAUDE.md 文档纪律）；正名与门槛都是决策。
+- **放 docs/internals/**：internals 只讲 how、不做决策（CLAUDE.md 文档纪律）；正名与门槛都是决策。
 - **维持分散**：现状，已证明会漂（三名一义、两名一义、README 有角色无定义）。
 - **立「执行方」第五顶帽子**：能给 CI 一个名字，但另外三顶帽子在实际里永远与它同戴、机器也戴——人人都戴的帽子给不出可验证的边界。执行改为正交轴（决策 3）后 CI 自然有位置。
 - **按岗位设 persona 而非按帽子**：岗位头衔在团队间不可比（同一头衔两家公司职责不同）；帽子按产物 / 权限切、可验证。
@@ -90,5 +90,5 @@
 ## 影响
 
 - 用户文档（0045 决策一 / 二 归位后）：`getting-started.md`「按角色选安装形态」表承载帽子与安装形态，并以产品语言写「一个人可以同时承担多个角色」（隐喻「帽子不是人」按 0045 决策六不进使用者面）；`running-and-results.md`「两个独立的选择」节承载执行权限梯级表（决策 3 的派生视图，不带 ADR 编号），角色表的「需要什么凭证」列指向它。
-- CONTEXT.md：加「角色与权限」节的词条组（使用方 vs contributor、四顶帽子、执行权限梯级、提交者），指向本 ADR。
+- CONTEXT.md：加「角色与权限」节的词条组（使用方 vs contributor、发布方、四顶帽子、执行权限梯级、提交者、两侧 AI agent 及使用者侧 / contributor 侧两条），指向本 ADR。
 - 0020「角色边界」节、0038「默认画像」句：加指向本 ADR 的指针；术语按决策 1。

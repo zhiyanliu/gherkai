@@ -1,6 +1,6 @@
 # 开始使用
 
-开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎只自带导航一条，判定类的由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
+开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器（标了 `@device` 的 scope 改为操作 AWS Device Farm 上的 Android / iOS 真机，仅 Midscene 引擎）并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎只自带导航一条，判定类的由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
 
 ## 按角色选安装形态
 
@@ -32,7 +32,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 刚发布的版本若在升级时提示找不到，多半是 uv 复用了缓存的软件包索引：给命令加 `--refresh`（如 `uv tool install --force --refresh 'gherkai[local]'`）即可。
 
-各发行包的页面：[`gherkai`](https://pypi.org/project/gherkai/)、[`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/)、[`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene)、[`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/)。
+上面安装涉及的发行包页面：[`gherkai`](https://pypi.org/project/gherkai/)、[`gherkai-worker-novaact`](https://pypi.org/project/gherkai-worker-novaact/)、[`@gherkai/worker-midscene`](https://www.npmjs.com/package/@gherkai/worker-midscene)、[`gherkai-deploy-aws`](https://pypi.org/project/gherkai-deploy-aws/)。
 
 ## 运行环境要求
 
@@ -45,23 +45,24 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ## AWS 前置
 
-![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
+![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话、Device Farm 真机与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
 
-图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
+图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话、真机与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
-- **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile` 或 `AWS_PROFILE` 指定 profile。
+- **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile`、`AWS_PROFILE` 或项目配置文件 `gherkai.toml` 里 `[common]` 的 `profile` 指定 profile，按此顺序取第一个给出的。
 - **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 项目配置文件 `gherkai.toml` 里 `[common]` 的 `region` > profile 配置里的 region。五处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
-- 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表三项服务与你要用的模型在该 region 都可用：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
-- 该 region 下的账号需要能用以下服务与模型：
+- 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表中除 Device Farm 以外的服务与你要用的模型在该 region 都可用（Device Farm 只在 us-west-2 提供，设备目标总在那里建立会话，与所选 region 无关）：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
+- 账号需要能用以下服务与模型（Device Farm 一行固定在 us-west-2，其余在上面解析出的 region）：
 
-| 你要用的      | 需要开通                                          | 说明                                                                                                                                                                                       |
-|---------------|---------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Midscene 引擎 | Amazon Bedrock 上的模型 `us.openai.gpt-5.6-terra` | 默认模型。它经跨区推理在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型 |
-| Nova Act 引擎 | Amazon Nova Act 服务 + 模型 `nova-act-v1.0`       | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建                                                                                       |
-| 两个引擎都要  | AgentCore Browser（`bedrock-agentcore`）            | 每个 scope 一个会话                                                                                                                                                                        |
+| 你要用的                              | 需要开通                                                     | 说明                                                                                                                                                                                                                                                                                               |
+|---------------------------------------|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Midscene 引擎                         | Amazon Bedrock 上的模型 `us.openai.gpt-5.6-terra`            | 默认模型。它经跨区推理在美国境内三个 region（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region（设备目标的远程访问会话，以及 Device Farm 为它保留的录像与日志，在 us-west-2）。环境变量 `MIDSCENE_MODEL_ID` 可换成 Bedrock 上 Midscene 支持的其它模型                     |
+| Nova Act 引擎                         | Amazon Nova Act 服务 + 模型 `nova-act-v1.0`                  | 默认固定该版本，环境变量 `NOVA_MODEL_ID` 可指定其它模型；所需的 workflow definition 首次运行时自动创建                                                                                                                                                                                             |
+| 桌面网页目标（两个引擎）              | AgentCore Browser（`bedrock-agentcore`）                     | 每个桌面 scope 一个浏览器会话                                                                                                                                                                                                                                                                      |
+| Android / iOS 真机目标（仅 Midscene） | AWS Device Farm（只在 us-west-2 提供，与你选的 region 无关） | 每个设备 scope 一个远程访问会话，按设备分钟计费。本机后端要自己指定 Device Farm 项目（可用 `aws devicefarm create-project --region us-west-2 --name <项目名>` 新建；应用目标另需一个放安装包的 S3 桶），见[配置](./configuration.md)；云端后端用部署时建立的项目，见[云端后端](./cloud-backend.md) |
 
-- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 对 `submit` 提交的 run 会在本机接着把它推完，那时需要凭证）。
-- 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话），以 AWS 账单为准。费用量级、以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
+- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话、真机与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 对 `submit` 提交的 run 会在本机接着把它推完，那时需要凭证）。
+- 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话；设备目标为 Device Farm 远程访问会话的设备分钟），以 AWS 账单为准。费用量级、以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
 - 用 `--backend cloud` 之前，需要有人先用 `gherkai deploy` 把云端后端建好，见[云端后端](./cloud-backend.md)。
 
 ## 用 doctor 自检
@@ -124,7 +125,7 @@ gherkai skill install --print           # 只把正文打到标准输出，不�
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai -a claude-code -a codex   # 每个 -a 一个 agent，只装一处就只写一个
 ```
 
-这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；不能用带斜杠的分支名，安装器会在第一个斜杠处截断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。Codex 的用户级落点两条路也不同，`npx` 写 `~/.codex/skills/`。
+这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；不能用带斜杠的分支名，安装器会在第一个斜杠处截断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。
 
 装完直接告诉 agent 要测什么，例如：
 
@@ -172,7 +173,7 @@ plan（用例预检，未执行）  1 job(scope)  ·  1 scenario  ·  远程访�
 
 这是用 Nova Act 时的输出。换成 Midscene 时，内建导航那一行的说明多一句应用目标上的做法：「内建导航：整句只是一个地址时直接打开它（网页目标只接受 http(s) 地址；应用目标上经 DeepLink 交给被测应用）」。
 
-它给出本次运行会开几个 job（每个 job 对应一个云端浏览器会话）、各自用哪个引擎、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
+它给出本次运行会开几个 job（每个 job 对应一个会话：桌面网页目标是云端浏览器会话，设备目标是 Device Farm 的远程访问会话，表头的「远程访问会话」就是后者的个数）、各自用哪个引擎与测试目标（`target=` 一项，`desktop/web` 即桌面网页）、每一步走确定性 step 还是走 AI。**先 plan 后执行**：`plan` 零费用，能在实际运行产生费用之前暴露写法与配置问题。
 
 用 `@engine:` tag 指定了引擎的用例，在本机运行要求该引擎的 worker 已安装，否则 `run` 停下并以退出码 2 结束。仓库示例里的 `engine_routing.feature` 两个 scenario 分别指定两个引擎，只装了一个引擎时改用未标 `@engine` 的用例，或用 `--scope` 只运行其中一个。
 

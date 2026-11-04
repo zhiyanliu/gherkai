@@ -4,7 +4,7 @@
 
 发行名 `gherkai` / import 名 `gherkai_cli` / 命令 `gherkai`（ADR 0037 决策 2a「三名分离」）。
 
-`core/` 是纯库（零引擎依赖、不访问文件系统）。**cli 是它的第一个前端**：解析参数 → 经产品本体
+`core/` 是执行核心库（窄腰、零引擎依赖；编排模块不访问文件系统，读 `.feature` 与选择 Store adapter 都由组合根负责，文件读写只在 `adapters/` 下的本机 adapter 里）。**cli 是它的第一个前端**：解析参数 → 经产品本体
 `gherkai_runtime.compose` 读 `.feature`、装配引擎与 Store adapter 注入给 core → 把 `RunResult` 渲染供人或 CI 消费。
 WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_runtime`（compose 等组合根逻辑所在的平级包 `runtime/`，ADR 0016「演进」节）**，不经本 cli。
 
@@ -22,14 +22,14 @@ cli/gherkai_cli/
 ├── console.py    ← 进度与诊断输出到 stderr（`__main__` 与编排模块共用）
 ├── device_selection.py ← 设备选择与设备请求的解析（选项 > 环境变量 > 配置文件；ARN 只核服务与资源类型段；ADR 0053 决策 4、0048 决策 3），纯函数、不连 AWS
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
-├── render.py     ← 表层渲染：0024 事件 → 进度行；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
+├── render.py     ← 表层渲染：0024 事件 → 进度行；plan 的 scope/job 分组 → 文本 / JSON；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
 ├── skill_install.py ← `gherkai skill install`：importlib.resources 定位包内 skills/gherkai/、整目录收敛 + `.gherkai-skill-version` 标记、`--print`（ADR 0043 决策三）
 └── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 把包目录内的非 `.py` 文件一并收进 wheel；sdist 侧由 `include` 白名单整目录收录）。references/cli-json-contract.md **不手写**：
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich；安装包上传到 S3 应用前缀也在 runtime（`gherkai_runtime.app_upload`，ADR 0051 决策 9），由 `submission.py` 调用。
+组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich；安装包上传到 S3 应用前缀也在 runtime（`gherkai_runtime.app_upload`，ADR 0051 决策 9），由 `submission.py` 调用；`doctor` 的云端自检列出未结束远程访问会话所用的 Device Farm 客户端同样在 runtime（`gherkai_runtime.devicefarm`，ADR 0051 决策 10「调用归属」）。
 
 已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并以退出码 `2` 结束。
 
@@ -93,7 +93,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 
 ### RunReport 内部
 
-- `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + 每个 AI step 的 gherkai evidence）。判定、时长、成本**不在此**：须以
+- `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + step 级 gherkai evidence：每个 AI step 各一份，设备目标上失败或出错的确定性 step 与导航 step 也各一份；设备目标另有 scope 级 `device_session` 诊断文件 device-session.json）。判定、时长、成本**不在此**：须以
   `run_id` 到 `ResultStore`（`jobs/*.json`）取判定真值；`index.html` 才含判定明细。
 - `index.html` —— 判定明细树 + 每个报告产物（Midscene html / Nova trajectory / step evidence）一行链接，链接打开的是**原样**文件。
   RunReport 只索引与链接、**不解析融合**产物内容；新引擎上报任意 `kind` 都无需改动 core（ADR 0027）。
@@ -110,11 +110,11 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 ## 为何拆 `submit` / `status`
 
 `run` 要求 CLI 全程在线（网断或关机即中止）；`submit` 提交完就走：local 由脱离 CLI 的 per-run 进程推进，
-cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机）。
+cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机；带 `--expose-local` 时例外，隧道由本机的守护进程持有，本机须保持开机联网到 run 终态，ADR 0035 决策 3）。
 `status --wait` 是三个推进触发源之一（查询者到来即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。
 
-`submit` **有意不接受** `--subnet`/`--security-group`：cloud submit 只写 runs 表、不访问 SSM/ECS，Fargate 网络由 IaC
-注入 reconciler/kicker Lambda 的 env；在 `submit` 上声明这两个 flag 恒不生效。
+`submit` **有意不接受** `--subnet`/`--security-group`：cloud submit 不起 task、也不读网络参数：它写 runs 表，
+对 SSM 只读版本戳与 variant 映射（带设备 scope 时另读 Device Farm 项目参数），对 ECS 与 ECR 只做只读调用（preflight 探活与 variant 解析），带应用 scope 时另把安装包写进产物桶的 `apps/` 前缀（完整权限面登记在 ADR 0033「编排进程角色」段与「设备目标增量」段）；Fargate 网络由 IaC 注入 reconciler/kicker Lambda 的 env，在 `submit` 上声明这两个 flag 恒不生效。
 
 cloud submit 的 `--max-concurrency` 受部署侧 cap 钳制（kicker/reconciler Lambda 的 env `MAX_CONCURRENCY`，
 由 IaC 设定（`deploy_aws/gherkai_deploy_aws/stack.py` 的 `BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY`），当前为 20；task 计入部署方账单，故设一道上限）；声明值超上限时 preflight 提示「本 run 将按上限并行」、不拦截提交。
@@ -142,6 +142,8 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对，输出一条警告（dev 版逐提交前进，逐字比对会把每次都判成 skew） |
 | 取不到本机 CLI 版本（未以包形式安装、从源码直接运行） | 跳过比对，输出一条警告 |
 
+判序（`compose.check_version_skew`）：先判后端有无版本戳，缺戳一律按「后端没有版本戳」一行处置，本机是开发版或取不到本机版本时也一样，带设备目标或会话预热地址的 run 照样以退出码 `2` 结束；其次判能否取到本机 CLI 版本，再判任一侧是否开发版，最后才比较 release 段。
+
 **不设放行口是有意的**：放行等于让新 CLI 写入的任务定义被旧后端读取，后果不可知且静默；以
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按指定版本临时运行的成本为零。版本只有一处可调：`gherkai` 与后端被 `==`
 约束在同一版本，不存在「先升后端再升 CLI」这种次序。
@@ -155,7 +157,7 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 [`deploy_aws/DEVELOPMENT.md`](../deploy_aws/DEVELOPMENT.md)。
 
 `--refresh-context` 丢弃本机缓存的 CDK 环境查询结果（VPC/子网/AZ）并重新查询；缓存位置与首次查询时的 CDK 警告见
-同一页。
+[`docs/user-guide/cloud-backend.md`](../docs/user-guide/cloud-backend.md)「首次部署」节。
 
 ## 相关 ADR
 
@@ -168,6 +170,8 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述（`list-deterministic`、plan 标注）
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
+- [0039](../docs/adr/0039-user-facing-surfaces-no-internal-references.md) 用户可见面不带内部指代（`--help`、提示与错误文案；护栏 `test_user_facing_messages.py`）
+- [0041](../docs/adr/0041-agent-facing-cli-affordances.md) 面向 AI agent 的 CLI 能力（scenario 筛选与空值拒收、`--quiet` 落盘、JSON 覆盖、`doctor` 自检、JSON 字段契约）
 - [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）
 - [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内源文件随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）
 - [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（经 `gherkai_runtime.textui` 渲染）

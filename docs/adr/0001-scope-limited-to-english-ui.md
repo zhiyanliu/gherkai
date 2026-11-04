@@ -59,6 +59,6 @@ Nova 的失败形态**不是读不出中文**：动作步的推理明确读出�
 
 ## 影响
 
-- 根 README「判定由谁做出」节末的语言句与 user guide「编写 `.feature`」页「按引擎选写法」节按引擎写语言支持与路由建议；两个引擎包的 README 各带一句语言支持说明（使用者向、不带本 ADR 编号）；随 CLI 发行的 agent skill 在 `references/engines.md` 同承载这条口径、诊断规则与三条出路（同为使用者面，[0043](./0043-agent-skill-for-driving-gherkai.md)）。
+- 根 README「判定由谁做出」节末的语言句与 user guide「编写 `.feature`」页「按引擎选写法」节按引擎写语言支持与路由建议；两个引擎包的 README 各带一句语言支持说明（使用者向、不带本 ADR 编号）；随 CLI 发行的 agent skill 在 `SKILL.md`「引擎怎么选」节与 `references/engines.md`「选择依据」节同承载这条口径、诊断规则与三条出路（同为使用者面，[0043](./0043-agent-skill-for-driving-gherkai.md)）。
 - CONTEXT.md「探针用例」词条：选站标准去掉「英文」，英文与中文探针用例各一组。
 - `features/wikipedia_zh.feature` 是本 ADR 的测量夹具与重议闸门的复测入口，与英文探针用例同构、不进日常 QA 流。探针用例不是交付给使用方的业务测试；探针站点自身改版或抖动带来的噪声属夹具噪声，不等于本工具的缺陷。

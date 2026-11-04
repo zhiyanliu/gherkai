@@ -27,7 +27,7 @@
 核心**对一个 scope** spawn 一个 worker 子进程。worker 的一生：
 
 1. **启动**：从 stdin 首行接收一个 job（云端后端改由 env `JOB_S3_URI` 指向的 S3 对象提供，见 [0024](./0024-worker-core-protocol.md)「远程传输演进」节）——这个 scope 的 scenario 列表（每个含有序 steps：关键字+文本）、引擎配置。
-2. **开会话**：建一个 AgentCore 浏览器会话。
+2. **开会话**：建一个 AgentCore 浏览器会话（设备目标改为建一个 Device Farm 远程访问会话，同样一个 scope 一个；只有 Midscene worker 有设备路径，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1、[0049](./0049-worker-capabilities-targets-keys.md) 决策 9）。
 3. **按 scope 串行跑 scenarios**：对每个 step——
    - 先查 worker 的**确定性 step 注册表** → 命中走 handler（精确 assert、不投票）；
    - 未命中 → 落到 catch-all → 走 AI（Then→`aiBoolean`/`act_get` + 多次投票；其余关键字（When / Given）→`aiAct`/`act`）。

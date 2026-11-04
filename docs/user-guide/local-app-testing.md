@@ -14,7 +14,7 @@
 
 `ORIGIN` 是「运行 CLI 的这台机器可达」的任意地址，不限 `localhost`：局域网另一台机器上的应用（如 `http://192.168.1.50:3000`）同样可以，目标机器不需要任何配置。
 
-隧道模式下，云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`，用于跳过 ngrok 对浏览器返回的警告页（被测应用的访问日志里会看到它）；机读输出里对应 `extra_http_headers` 字段，应用侧不需要为它做任何处理。
+隧道模式下，桌面目标的云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`，用于跳过 ngrok 对浏览器返回的警告页（被测应用的访问日志里会看到它）；设备上的浏览器无法附加请求头，它们的请求不带这一项，目前在设备浏览器上也没有出现过这个警告页。机读输出里对应 `extra_http_headers` 字段（只测设备的 run 也照常写出），应用侧不需要为它做任何处理。
 
 隧道受本次运行专用的会话保护：引擎的浏览器在第一个场景之前访问一次「会话预热地址」换到会话 cookie，之后对隧道的请求都带着它；预热在 worker 建好浏览器会话之后、执行第一个 step 之前只做一次，不按场景重做。机读输出里预热地址是 `run_meta` 的 `session_warmup_url`。
 
@@ -31,6 +31,8 @@ export NGROK_AUTHTOKEN=<token>       # 或者用环境变量
 ```
 
 `<token>` 在 ngrok dashboard（https://dashboard.ngrok.com/ ）的 **Your Authtoken** 页取。不要用 **API Keys** 页上的值：API key 只能调 ngrok 的管理接口，拿它起不了隧道。两类值都是长随机串、肉眼分不出，按页面取值。填错时会以「隧道未就绪」失败，报错附带的 ngrok 日志会点明鉴权原因。
+
+另有一项版本要求：本机后端的引擎 worker 要与命令行工具装成同一个版本，较旧的 worker 不支持会话预热，会在起隧道之前以退出码 2 结束；云端后端还没有版本戳（在 1.4.0 之前部署、此后没有重新部署过）时，带 `--expose-local` 的 run 以退出码 2 结束，要先由部署方运行 `gherkai deploy` 升级。处置见[排错](./troubleshooting.md)。
 
 ## 用法
 
@@ -65,7 +67,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 | 组合 | 持有隧道的进程 | 拆除时机 |
 |---|---|---|
-| `run`（`--backend local` 或 `cloud`） | 前台的 CLI 进程 | 命令正常结束或 Ctrl-C 时拆 |
+| `run`（`--backend local` 或 `cloud`） | 前台的 CLI 进程 | 命令正常结束、Ctrl-C 或执行期间收到 SIGTERM 时拆 |
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |
 | `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆 |
 
@@ -77,7 +79,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 只有 `submit --backend cloud` 配 `--expose-local` 时用得上，作用是防止 run 卡住时隧道长期留在公网。
 
-- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（云端排队、拉镜像与收尾的时间）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
+- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（job 预算之外的云端耗时：提交后到云端开始调度之间的投递与启动、job 之间的衔接与最后的收尾；起任务与拉镜像的时间已计入各 job 的预算）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
 - `submit` 会把生效的秒数打印出来，不用自己算。
 - 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续运行，以导航失败告终。
 - 值须为有限正数，否则退出码 2。
@@ -86,19 +88,20 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 ## 安全
 
 - 隧道存活期间，被测应用可从公网访问。gherkai 为每次运行生成专用的访问令牌与会话 cookie 值，由 ngrok 在边缘节点校验：只有带着本次会话 cookie 的请求才会被转发到你的机器，不带或不对的请求在边缘就被拒（隧道拓扑图上被拦在边缘的那条支路）；引擎的浏览器凭访问令牌在预热地址上换到这枚 cookie。令牌与 cookie 随隧道拆除即失效。
-- step 文本里只有干净的隧道地址，不带凭据，所以发给模型的提示里不会出现令牌。令牌只出现在预热地址里，它记在提交记录 `run_meta.json` 的 `session_warmup_url`（运行要读回它，明文）；引擎的浏览器访问过预热地址，所以引擎原生产物里可能记下它。gherkai 自己产出的文字里令牌与 S3 预签名地址的签名类参数显示为 `***`：失败消息、`explain` 输出、`run --json`、AI 证据的 JSON、本机转发的 worker 日志与云端 worker 自己写进 CloudWatch 的诊断行都是如此。仍是明文的：`run_meta.json`、引擎自己的原生产物（Nova Act 的轨迹文件、Midscene 的报告页）、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容；报告与日志仍应按内部资料对待。
+- step 文本里只有干净的隧道地址，不带凭据，所以发给模型的提示里不会出现令牌。令牌只出现在预热地址里，它记在提交记录 `run_meta.json` 的 `session_warmup_url`（运行要读回它，明文）；引擎的浏览器访问过预热地址，所以引擎原生产物里可能记下它。gherkai 自己产出的文字里令牌与 S3 预签名地址的签名类参数显示为 `***`：失败消息、`explain` 输出、`run --json`、AI 证据的 JSON、本机转发的 worker 日志与云端 worker 自己写进 CloudWatch 的诊断行都是如此。仍是明文的：`run_meta.json`、本机系统临时目录下的隧道流量策略文件 `gherkai-tunnel-policy-*.yml`（同时含令牌与会话 cookie 值，只有本用户可读）、引擎自己的原生产物（Nova Act 的轨迹文件、Midscene 的报告页）、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容，以及测试设备上的网页时 Device Farm 控制台里该会话的录像与日志（设备浏览器访问过预热地址，AWS 保留 400 天）；报告与日志仍应按内部资料对待。
 - 已知边界：会话 cookie 会随每个请求到达被测应用，出现在它的访问日志里（在边缘剥掉它是服务商的付费功能）；被测应用若用 `Clear-Site-Data` 清掉 cookie，之后的请求会被边缘拒绝；确定性 step 里自己发起的 HTTP 请求要经浏览器上下文发出才带这枚 cookie。
 - 只把测试环境的实例接上隧道，不要暴露带生产数据或生产凭证的服务。
-- 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；用 `kill` 结束 CLI 进程不会拆（SIGTERM 与 `kill -9` 都不会），此时在进程列表里找到 `ngrok` 结束它即可。
+- 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；`run` 执行期间用 `kill`（SIGTERM）结束 CLI 进程，与 Ctrl-C 一样先停止 worker 再拆隧道。`kill -9` 不会拆隧道，隧道建立后到执行开始之前、或执行结束之后（输出汇总期间）收到的 SIGTERM 也不会拆，此时在进程列表里找到 `ngrok` 结束它即可。
 
 ## 限制
 
 - 一个 run 只能暴露一个地址。重复给 `--expose-local` 不会报错，只有最后一个取值生效——前面给的地址不会被替换，用到它的 scenario 会导航失败。被测应用依赖多个本机地址时，先让它们收敛到同一个入口再测。
 - 只替换与选项值完全相同、且作为一个地址出现的部分，`localhost` 与 `127.0.0.1` 不互认（见上「用法」）。
-- 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`——「工作方式」的隧道拓扑图上，浏览器导航的是边缘分配的公网地址。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。域名每个 run 一换，用通配写法（如 `.ngrok-free.app`）改动最小。
+- 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`——「工作方式」的隧道拓扑图上，浏览器导航的是边缘分配的公网地址。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。这个域名是 ngrok 分配给你账号的固定开发域名（免费账号形如 `xxx.ngrok-free.dev`，较早注册的账号可能是 `xxx.ngrok-free.app`），不随 run 变化：把「隧道已建立」那一行里的域名加进允许列表一次即可；团队成员各用自己的 ngrok 账号时，可以改用通配写法（如 `.ngrok-free.dev`）。
 - 隧道转发 HTTP、HTTPS 与 WebSocket 流量。被测应用自身域下的请求（HTML、脚本、样式、图片、接口）全部经隧道，吞吐与延迟受隧道链路影响，也都计入 ngrok 配额；页面引用的第三方域资源由云端浏览器直接访问，不经隧道（隧道拓扑图上通向第三方域资源的那条虚线）。
 - ngrok 免费层有配额（量级为每月 1 GB 流量与 2 万次请求，以 ngrok 的定价页为准），重度使用可能超出配额，表现为 429 或断流。
 - 隧道断了不会自动重连。受影响的 scenario 以导航失败告终，修好后重新运行即可。
+- 隧道只服务网页目标：桌面浏览器与真机浏览器访问替换后的地址时经过隧道。原生应用（`@app:<别名>`）连本机或内网里的后端目前不支持：应用请求的后端地址打包在安装包里，gherkai 只替换 step 文本里的地址、不改写应用；应用目标也不做会话预热，应用打开替换后的隧道地址时不带会话 cookie，请求会在边缘被拒。测原生应用时让它连公网可达的测试环境。
 
 ## 常见故障
 
@@ -116,6 +119,6 @@ ngrok 没装、authtoken 没配这两类报错见[排错](./troubleshooting.md)�
 | 加载变慢、间歇 429 | 碰到免费层的配额或带宽限制 | 减少单次运行的 scenario 数，或升级 ngrok 套餐 |
 | `submit` 打印「隧道已拆除（本机的被测应用不再对外暴露）」 | 提交过程中出错，接手隧道的后台进程没起来 | 先修同时打出的那条报错，再重新提交。如果上面已经打出提交成功（拿到了 run_id），这个 run 已经不可用：不要再等它的结果，它要访问的地址已随隧道失效，只会以导航失败告终 |
 
-起隧道失败时，报错只附 ngrok 日志的尾部。完整日志是系统临时目录下的 `gherkai-tunnel-*.log`，每起一次隧道一个文件，按修改时间取最新的那个。
+起隧道失败时，报错只附 ngrok 日志的尾部。完整日志（ngrok 自己的日志）在系统临时目录里，是以 `gherkai-tunnel-` 开头、文件名不含 `watch` 的 `.log` 文件，每起一次隧道一个文件，按修改时间取最新的那个；`gherkai-tunnel-watch-<run_id>.log` 是云端提交时隧道守护进程的日志，不属于这一类。
 
 feature 的写法与断言规范见 [`writing-features.md`](./writing-features.md)，示例 feature 在 [`features/`](../../features/)。

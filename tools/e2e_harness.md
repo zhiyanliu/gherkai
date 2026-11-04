@@ -15,7 +15,7 @@
 ## 前置条件
 
 - **AWS 凭证 + region us-east-1**（default profile 即可）。
-- **宿主 export 的 `GHERKAI_*` 一律不生效**：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL`，清单以 `gherkai_runtime.compose` 的 `_COMPOSE_OWNED_WORKER_ENV` 为准）先被显式清空；只有 `--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的值会被显式注回。起手行会回显 `steps_dir=…`（`None` 表示已清空），据此确认注入生效。预热地址不会注回，因此 harness 运行不包含会话预热。
+- **宿主 export 的组合根拥有的 worker env 一律不生效**（其余 `GHERKAI_*` 照常从宿主继承，例如下文定位链第一级用的 `GHERKAI_WORKER_MIDSCENE_CMD`）：harness 与 adapter 同一起手式，组合根拥有的 worker env（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`，清单以 `gherkai_runtime.compose` 的 `_COMPOSE_OWNED_WORKER_ENV` 为准）先被显式清空；随后只显式注回两项：`--steps-dir`（或环境变量 `HARNESS_STEPS_DIR`）给的 steps 目录，与 `--run-id` 的值（作为 `RUN_ID`，两个 worker 用它编码会话名的 run 段）。起手行会回显 `steps_dir=…`（`None` 表示已清空），据此确认注入生效。预热地址不会注回，因此 harness 运行不包含会话预热。
 - **一个可写 S3 桶**，经环境变量 `HARNESS_S3_BUCKET` 传入（**勿硬编码**账号相关值）。运行结束后自行清理桶内 `harness/<run-id>/` 前缀（见下「清理」）。
 - 用**仓库根的 workspace venv** 运行（`uv run python …`，等价 `.venv/bin/python`）：harness 复用真实 `gherkai_core.scope.plan` 生成 job（避免手写 JSON 造成漂移），并复用 `gherkai_runtime.compose` 的 worker 定位链；根 `uv sync` 已把 `gherkai_core` 与 `gherkai_runtime` 都装成 editable（ADR 0037 决策 2）。**cwd 与 `PYTHONPATH` 都不限**，这由 editable 安装保证：harness 不改 `sys.path`，只由 `__file__` 派生仓库根推导 `features/` 路径。worker 路径不由它推导，见下条四级定位链。
 - **worker 经四级定位链启动**（与 CLI 同一真源，ADR 0037 决策 3），harness 不按仓库布局拼接路径：novaact 随仓库根 `uv sync` 装进同一 workspace venv，即命中「同 venv `-m` 入口」，无需独立 venv；midscene 需先在 `engines/midscene/` 执行 `npm install && npm run build` 生成 `dist/bin.mjs`，再用 `GHERKAI_WORKER_MIDSCENE_CMD="node <仓库根绝对路径>/engines/midscene/dist/bin.mjs"` 显式覆写（第一级）。四级全 miss 抛 `WorkerNotFoundError`，并附安装指引。
@@ -41,7 +41,7 @@ HARNESS_S3_BUCKET=<你的可写桶> uv run python tools/e2e_harness.py \
 | `--feature`   | `wikipedia_assertions` | `features/<名>.feature`，**不含后缀**                                                 |
 | `--votes`     | `1`                    | AI 断言投票次数（ADR 0014）                                                            |
 | `--interrupt` | `none`                 | 中断时机，见下表                                                                      |
-| `--run-id`    | **必填**               | 本次运行的唯一 id，用作 S3 前缀 `harness/<run-id>/` 与本地目录 `/tmp/harness-runs/<run-id>/` 的名字 |
+| `--run-id`    | **必填**               | 本次运行的唯一 id，用作 S3 前缀 `harness/<run-id>/` 与本地目录 `/tmp/harness-runs/<run-id>/` 的名字，并作为 `RUN_ID` 注给 worker（编码会话名的 run 段） |
 | `--grace-cap` | `30.0`                 | SIGTERM 后超过该墙钟 worker 仍未退出 → 判 `hung=true` 并发 SIGKILL 强制终止          |
 | `--steps-dir` | `HARNESS_STEPS_DIR` / 空 | 使用方确定性 step 目录（ADR 0037 决策 4），注给 worker 的绝对路径；不给则 worker 一侧无使用方 step；目录不存在直接报错退出 |
 

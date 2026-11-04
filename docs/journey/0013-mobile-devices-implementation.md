@@ -24,7 +24,7 @@
 
 新页：
 
-- **设备主题页**（不存在，索引未登记）。@device / @app 写法、应用别名、设备选择、费用这四块的内容已分散写在 `writing-features.md`（tag 规则条）、`configuration.md`（`[devices]` 与 `[apps]`）、`faq.md`（真机与费用两问）、`running-and-results.md`（费用量级）、`engines.md`（计价公式）里；skill 的 `references/engines.md` 第 7 节有一个面向 agent 的集中版本。无论建不建独立页，下面这些点在用户文档里还没有：Android 上「应用未处理该地址」的情形（地址须是被测应用声明能处理的链接，否则记 `capability_unavailable`，改法是改地址或确认应用声明了该链接；`writing-features.md` 导航行只有笼统一句「无法送达时记 error」）；老设备不支持 DeepLink（如 iOS 15.8；结论在本会话内缓存，后续同类 step 不再调用）；国内消费级应用的线上包在公共真机上会自行退出、须提供关闭检测的测试包（现只在排障页作为 `precheck_failed` 的一种形态出现，没有作为事前限制写）；iOS 26 网页上下文不可用（现只有「设备不提供网页上下文」的通用表述，`writing-features.md` 推荐 iOS Safari 用 AI 断言核对落点但没说原因）；Compose 应用控件无标识、确定性 step 无法定位（任何用户文档都没有）；数据驻留——根 README 与 `getting-started.md` 的数据边界句说「浏览器会话与产物仍在你选的 region」，没补设备会话的录像与日志固定落在 us-west-2、保留 400 天。
+- **设备主题页**（不存在，索引未登记）。@device / @app 写法、应用别名、设备选择、费用这四块的内容已分散写在 `writing-features.md`（tag 规则条）、`configuration.md`（`[devices]` 与 `[apps]`）、`faq.md`（真机与费用两问）、`running-and-results.md`（费用量级）、`engines.md`（计价公式）里；skill 的 `references/engines.md` 第 7 节有一个面向 agent 的集中版本。无论建不建独立页，下面这些点在用户文档里还没有：Android 上「应用未处理该地址」的情形（地址须是被测应用声明能处理的链接，否则记 `capability_unavailable`，改法是改地址或确认应用声明了该链接；`writing-features.md` 导航行只有笼统一句「无法送达时记 error」）；老设备不支持 DeepLink（如 iOS 15.8；结论在本会话内缓存，后续同类 step 不再调用）；国内消费级应用的线上包在公共真机上会自行退出、须提供关闭检测的测试包（现只在排障页作为 `precheck_failed` 的一种形态出现，没有作为事前限制写）；iOS 26 网页上下文不可用（现只有「设备不提供网页上下文」的通用表述，`writing-features.md` 推荐 iOS Safari 用 AI 断言核对落点但没说原因）；Compose 应用控件无标识、确定性 step 无法定位（任何用户文档都没有）。
 - **docs/internals：设备会话与 Appium 适配的机理解读一篇**（会话获取、就绪、能力探测、预热、换台、释放与终结核对这条生命周期，加 Appium 接口适配与平台差异；权威指回 ADR 0051 / 0052），`docs/internals/README.md` 登记并在相关各篇的延伸阅读补指针。现有零散落点：`artifacts-and-evidence.md`（page-source 与 device-session.json 的落点、scope 键分目录）、`deterministic-step-lifecycle.md`（webdriver 句柄与设备接缝的 navigate）、`verdict-model.md`（四个 job 级错误类别）、`execution-and-reconciliation.md`（SessionOpened 置 RUNNING）。
 
 既有用户文档的触点（按页列；每条只写缺的）：
@@ -37,7 +37,7 @@
 - `local-app-testing.md`：「限制」没写设备浏览器没有注入请求头的通道、只能靠服务商不弹警告页（服务商一旦改变行为，设备目标用隧道就得上付费层），也没写免费层每个策略至多 5 条规则（gherkai 用了 4 条）；同时「工作方式」一节「云端浏览器发出的请求恒带一个固定请求头 `ngrok-skip-browser-warning: 1`」只对桌面浏览器成立、设备浏览器不带（ADR 0035 决策 4），补「限制」时一起改。
 - `writing-deterministic-steps.md`：材料规则与验收定位五点一条都没有（期望来自需求；材料只定位置；材料来源平铺——应用源码与测试标识、桌面开发者工具或 Playwright、Appium Inspector 或 WebDriver 客户端连 Device Farm 远程访问会话、已有运行的 evidence 控件摘要与控件树；agent 自行开远程访问会话须项目约定放行、无论成败都要停止会话；一条动作步只表达一屏之内的意图、跨多屏的长流程拆成多步；真机验收是验收不是单测）；测试分层缺设备侧（设备网页句柄的离线层：本机 WebdriverIO 加 Chrome for Testing 打开同一份材料页、与桌面句柄共用选择器表、显式固定缓存目录；真机验收层 `run --scope` 收窄到 Device Farm；可选的 Appium fake driver 层；handler 保持薄、判定抽纯函数）；原生应用先看控件有没有稳定标识、没有就写 AI 步。
 - 索引与入口页：`docs/user-guide/README.md` 的 writing-features 行只列 `@engine` / `@scope` / `@timeout`，补 `@device` / `@app`（设备页若建则登记）；`engines/midscene/README.md` 没有设备支持一段，开头仍说只在云端浏览器上执行（可照搬 `docs/user-guide/engines.md` 的那句）；`deploy_aws/README.md` 只补了「Device Farm 项目」，缺部署凭证要有 us-west-2 的 Device Farm 权限（`ListProjects` / `GetProject` / `CreateProject`）与缺权限时部署照常完成、后端不启用设备支持的降级一句，destroy 保留的数据类资源列表也没列 Device Farm 项目。
-- CHANGELOG 与 1.5 的 Release 正文：1.5 节已覆盖设备支持各点，发版前收口。
+- CHANGELOG 与 1.5 的 Release 正文：`[Unreleased]` 节已写设备支持的主体，还缺这些点：设备会话的录像与日志由 Device Farm 保留 400 天、驻留 us-west-2（现只在 destroy 一条提到项目连同录像保留）；以及 1.4.3 与 1.4.4 两节都有的「升级须知」小节（本节的升级动作散在各条里：CLI 与 worker 同版本、重新 `gherkai deploy`、导航步改为整句地址、同一报告目录不混用 1.4 与 1.5）。发版前收口。
 
 其它读者的文档：
 

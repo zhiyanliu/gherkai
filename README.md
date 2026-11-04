@@ -1,6 +1,6 @@
 # gherkai
 
-**gherkai** 是一个 UI 自动化测试工具。测试用 Gherkin（`.feature` 文件）写成自然语言，由 AI 引擎（Midscene 或 Nova Act）读懂后，在 AWS Bedrock AgentCore 承载的云端浏览器里执行，并给出可复核的判定与证据。浏览器、模型与云端组件全部运行在你自己的 AWS 账户内，本机不需要安装浏览器。标了 `@device` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行（Midscene 引擎），网页与原生应用都能测。
+**gherkai** 是一个 UI 自动化测试工具。测试用 Gherkin（`.feature` 文件）写成自然语言，由 AI 引擎（Midscene 或 Nova Act）读懂后，在 AWS Bedrock AgentCore 承载的云端浏览器里执行，并给出可复核的判定与证据。浏览器、模型与云端组件全部运行在你自己的 AWS 账户内，本机不需要安装浏览器。标了 `@device:android` 或 `@device:ios` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行：只标它时测设备上的浏览器，再标 `@app:<别名>` 时测原生应用。设备目标只有 Midscene 引擎支持，这类 scope 要同时标 `@engine:midscene` 或用 `--default-engine midscene`。
 
 一个 step 有三种执行路径：
 
@@ -55,19 +55,19 @@ gherkai explain <run_id>                              # 有用例没过：逐步
 
 ## 它是如何工作的
 
-![本机与云端两个后端：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定、经 CDP 驱动云端浏览器，浏览器直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
+![本机与云端两个后端：命令行读入 .feature，起本机 worker 或提交到云端后端；worker 用你账户里的模型做 AI step 的操作与判定，桌面网页经 CDP 驱动云端浏览器，设备 scope 经 Appium 驱动 Device Farm 真机；浏览器与真机直达公网被测应用或经隧道回本机应用；结果与证据由 explain / status 读回](./docs/diagrams/readme-runtime-topology.svg)
 
-本机后端与云端后端各自把结果落在哪、要什么凭证与权限，见下面三条；判定由哪个模型做出，见下一节的披露表。浏览器会话按用例分组算：同一个分组（`.feature` 里的 `@scope` 标签）的用例串行共享一个云端浏览器会话，写法见 [编写 .feature](./docs/user-guide/writing-features.md)。
+本机后端与云端后端各自把结果落在哪、要什么凭证与权限，见下面三条；判定由哪个模型做出，见下一节的披露表。会话按用例分组分配：同一个分组（`.feature` 里的 `@scope` 标签）的用例串行共享一个会话，桌面网页用一个云端浏览器会话，设备 scope 用一台真机的远程访问会话，写法见 [编写 .feature](./docs/user-guide/writing-features.md)。
 
 - **本机后端**（默认）：worker 是本机子进程，结果落当前目录的 `reports/`。需要本机 AWS 凭证。
 - **云端后端**：worker 在部署方建好的 Fargate 上运行，状态落 DynamoDB、结果落 S3；提交完关机也会继续运行到结束。团队成员只需最小的云端权限，见 [部署与维护云端后端](./docs/user-guide/cloud-backend.md)。
-- **费用**来自模型调用与云端浏览器会话，按你账户的 AWS 账单计。`plan` 是纯本地的用例预检，不产生费用。
+- **费用**来自模型调用与会话：桌面网页是云端浏览器会话，设备 scope 是 Device Farm 远程访问会话、按设备分钟计费；都按你账户的 AWS 账单计，量级见[运行测试与查看结果 › 费用量级](./docs/user-guide/running-and-results.md#费用量级)。`plan` 是纯本地的用例预检，不产生费用。
 
 更完整的架构与执行模型见 [`docs/internals/architecture-overview.md`](./docs/internals/architecture-overview.md)。
 
 ## 判定由谁做出：底层模型披露
 
-gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。各部件与数据边界见 [开始使用 › AWS 前置](./docs/user-guide/getting-started.md#aws-前置)。
+gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作与判定由下面两个模型完成，全部在**你的 AWS 账户**里的托管服务上运行：Nova Act 在你选的 region；Midscene 默认的 GPT-5.6 经 Bedrock 跨区推理在**美国境内三个 region**（us-east-1 / us-east-2 / us-west-2）处理，浏览器会话与产物仍在你选的 region；设备 scope 的远程访问会话固定在 us-west-2（AWS Device Farm 只在这个 region 提供），会话录像与日志由 Device Farm 在 us-west-2 保留 400 天，见[运行测试与查看结果 › 结果在哪](./docs/user-guide/running-and-results.md#结果在哪)。发给模型的是 step 文本与被测页面的截图。唯一的第三方是可选的 ngrok：只有用 `--expose-local` 测本机应用时，云端浏览器到你本机应用的流量才经过 ngrok 的隧道。各部件与数据边界见 [开始使用 › AWS 前置](./docs/user-guide/getting-started.md#aws-前置)。
 
 | 引擎           | 模型                                            | 服务            | 版本策略                                                | 怎么看 / 怎么换                                                                                                                                                |
 |----------------|-------------------------------------------------|-----------------|---------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -99,7 +99,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 
 ## 注意
 
-- 运行会产生真实的 AWS 费用（模型调用与云端浏览器会话）。先用 `plan` 做用例预检，再运行。
+- 运行会产生真实的 AWS 费用（模型调用，加上桌面网页的云端浏览器会话或设备 scope 的 Device Farm 设备分钟）。先用 `plan` 做用例预检，再运行。
 - 用于生产之前，先用示例用例（`features/` 里的 wikipedia 用例）确认环境与凭证正常。
 
 ## 许可证

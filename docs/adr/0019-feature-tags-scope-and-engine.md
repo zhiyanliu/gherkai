@@ -9,7 +9,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 - scope/engine 是**配置**不是**测试意图**；配置该精确可解析，tag 是 Gherkin 标准做法。
 - QA 学一两个 tag 约定（`@scope:` `@engine:`）成本远低于"让机器从自然语言里猜配置意图"的不可靠。
 - 不放外部配置文件：避免用例与配置两处维护、对应关系易漂移。
-- **两个引擎可解析已实查确认**：cucumber-js 经 `Before` hook 的 `pickle.tags` 拿原始 tag；pytest-bdd 经 `scenario.tags`（带值 tag 不强制转 pytest marker，可取原始字符串）。带值 tag `@scope:x`/`@engine:x` 两个引擎都读得到。
+- **两个引擎可解析已实查确认**（v0.x 两套 runner 形态下的选型核查；现由核心库解析 tag、worker 收不到 tag，见 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)、[0025](./0025-plan-module-feature-to-jobs.md)）：cucumber-js 经 `Before` hook 的 `pickle.tags` 拿原始 tag；pytest-bdd 经 `scenario.tags`（带值 tag 不强制转 pytest marker，可取原始字符串）。带值 tag `@scope:x`/`@engine:x` 两个引擎都读得到。
 
 ## tag 语义
 

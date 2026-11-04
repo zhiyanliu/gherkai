@@ -1,6 +1,6 @@
 # 运行测试与查看结果
 
-运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，全部选项与环境变量的总表见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
+运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，项目配置文件、环境变量与跨命令通用选项见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
 
 ## 两个独立的选择：怎么运行、在哪运行
 
@@ -28,8 +28,8 @@
 |---|---|---|
 | `plan` | 不需要凭证（装了 worker 才有确定性 step 的派发标注） | 不产生费用 |
 | `run` / `submit`，`--backend local` | 本机 AWS 凭证 + 要用的引擎 worker | 自己的 AWS 账户 |
-| `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
-| `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、上传 job 与写产物桶；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
+| `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
+| `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、上传 job 与写产物桶，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
 
 完整的权限清单见 [`cloud-backend.md`](./cloud-backend.md)「团队成员需要的最小云端权限」。
 
@@ -49,13 +49,13 @@
 | 设备目标：查询与停止会话 | `devicefarm:GetRemoteAccessSession`、`devicefarm:StopRemoteAccessSession` | 同一条语句里列两种：`arn:aws:devicefarm:us-west-2:<账号>:session:<项目 id>/*` 与项目 ARN |
 | 设备目标：连接设备上的 Appium | `devicefarm:GetRemoteAccessSession` | `arn:aws:devicefarm:us-west-2:<账号>:project:session`。这是 Device Farm 为这条连接做授权检查时用的固定资源名，不是某个项目或会话的 ARN；缺它时远程访问会话能建立、Appium 会话却被拒，这个 job 记为执行前失败 |
 | 设备目标：核对遗留会话 | `devicefarm:ListRemoteAccessSessions` | 项目 ARN |
-| 应用目标：安装包 | `s3:PutObject`、`s3:AbortMultipartUpload`、`s3:GetObject` | `arn:aws:s3:::<应用桶>/apps/*`；另加 `s3:ListBucket` 于 `arn:aws:s3:::<应用桶>`（条件 `s3:prefix` 为 `apps/*`），`<应用桶>` 是 `[devices] app-bucket` 指定的桶 |
+| 应用目标：安装包 | `s3:PutObject`、`s3:AbortMultipartUpload`、`s3:GetObject` | `arn:aws:s3:::<应用桶>/apps/*`；另加 `s3:ListBucket` 于 `arn:aws:s3:::<应用桶>`（条件 `s3:prefix` 为 `apps/*`），`<应用桶>` 是放安装包的桶（由 `--app-bucket`、环境变量 `GHERKAI_APP_BUCKET` 或 `[devices] app-bucket` 指定，依次优先） |
 
-云端后端下这些事由部署建立的 worker 任务角色去做，你的凭证只需要上表之前那一节的云端权限。
+云端后端下，除安装包上传外，这些事都由部署建立的 worker 任务角色去做；安装包仍由你的命令进程上传到部署的产物桶（`<前缀>artifacts`）的 `apps/` 前缀并打标签，所以你的凭证需要上表之前那一节的云端权限，其中已含应用目标的这项增量。
 
 ## 命令
 
-一个 job 即一个 scope 里的全部 scenario，它们共享一个浏览器会话、按书写顺序串行执行。scope 由 `.feature` 里的 `@scope` 标签划分；未标 `@scope` 的 scenario 各自成为一个 job，编号是 `<文件>:<行号>`（见 [`writing-features.md`](./writing-features.md)）。
+一个 job 即一个 scope 里的全部 scenario，它们共享一个会话（桌面目标是一个云端浏览器会话，设备目标是一个 Device Farm 远程访问会话）、按书写顺序串行执行。scope 由 `.feature` 里的 `@scope` 标签划分；未标 `@scope` 的 scenario 各自成为一个 job，编号是 `<文件>:<行号>`（见 [`writing-features.md`](./writing-features.md)）。
 
 一次典型的流程：
 
@@ -103,7 +103,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 |---|---|---|
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
 | `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
-| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个浏览器会话，不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
+| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
 | `--default-job-timeout S` | 按目标 | 单个 job 的墙钟预算秒。不给时桌面 scope 为 300 秒，设备 scope 为获取设备的预算加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取设备的预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按这个 run 用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前以退出码 2 结束。`--backend cloud` 不接受这个选项（给了直接以退出码 2 结束），云端的停止宽限在部署时定；写在 `gherkai.toml` 里的 `grace` 在云端后端下只提示一句、不生效 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
@@ -121,7 +121,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整个 run 拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
-**仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
+**仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。仅 `run`：不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给；`submit` 没有这两个选项，它提交的 run 用部署时写进后端的网络配置。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
 
 ## 退出码
 
@@ -130,11 +130,11 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
 | `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错；`--backend cloud` 执行到一半时运行记录存储不可达也以这个退出码结束 | 开始执行前的配置或可达性问题 |
-| `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致 |
-| `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但有用例失败或出错 | 同上，另加后端没部署或 `--prefix` 配错 |
+| `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
+| `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或前台 `run` 被中断、run 级判定记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
 | `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
-| `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细尚未写出同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致 |
+| `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细尚未写出同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一必修项失败（可选能力缺失只标 `-`，不影响退出码） |
 | `list-deterministic` | 这个引擎有哪些确定性 step | 列出来了 | — | `--steps-dir` 指的不是目录、worker 定位不到、`steps/` 加载失败、该引擎的 worker 自述失败（多为 worker 与 CLI 版本不一致，处置见 [`troubleshooting.md`](./troubleshooting.md)） |
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
@@ -162,7 +162,7 @@ reports/<run_id>/
 
 同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定要读 `jobs/` 下的明细或退出码，别读 `index.html`——那是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
-设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录与获取设备各阶段的时刻）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；要留得更久，自己从控制台或 API 归档。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
+设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录、从获取设备到释放各阶段的时刻，以及执行前失败的原因与释放时是否有会话未能确认停止）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，存放在 us-west-2（与运行用的 region 无关），到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；gherkai 不删除任何会话。要留得更久，自己从控制台或 API 归档；要提前删除，在 Device Farm 控制台删除对应的会话，或执行 `aws devicefarm delete-remote-access-session --region us-west-2 --arn <会话 ARN>`（只能删除已结束的会话），删除后报告与 `explain` 里指向这个会话的控制台链接随之失效。录像会录下设备屏幕上显示的全部内容，在被测应用里登录请使用专用的测试账号。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
 
 `--backend cloud` 下没有这棵本地树：提交记录与运行状态在 DynamoDB 的运行记录表里，判定明细与报告在产物桶（`<前缀>artifacts`）的 `<报告前缀>/<run_id>/` 下，相对位置与上面这棵树一一对应；worker 日志在 CloudWatch 日志组 `/<前缀>worker/<引擎>`。
 

@@ -1,6 +1,6 @@
 # gherkai
 
-用 Gherkin `.feature` 写 UI 端到端测试，交给 AI 浏览器引擎（Nova Act 或 Midscene）在云端浏览器里操作页面、判定断言；标了 `@device` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行（Midscene 引擎）。本包是 gherkai 的命令行入口：解析 `.feature`、按 tag 分组成可并发的 job、派给引擎执行、汇总每条用例的判定与报告。测试在你自己的 AWS 账户里运行，会产生真实 AWS 费用，金额以你的 AWS 账单为准。
+用 Gherkin `.feature` 写 UI 端到端测试，交给 AI 浏览器引擎（Nova Act 或 Midscene）在云端浏览器里操作页面、判定断言；标了 `@device:android` 或 `@device:ios` 的 scope 改在 AWS Device Farm 的 Android / iOS 真机上执行（只有 Midscene 引擎支持，这类 scope 要同时标 `@engine:midscene` 或用 `--default-engine midscene`）。本包是 gherkai 的命令行入口：解析 `.feature`、按 tag 分组成可并发的 job、派给引擎执行、汇总每条用例的判定与报告。测试在你自己的 AWS 账户里运行，会产生真实 AWS 费用，金额以你的 AWS 账单为准。
 
 ## 安装
 
@@ -15,7 +15,7 @@ Midscene worker 与命令行须是同一个版本：用 `gherkai --version` 查�
 ## 最小用法
 
 ```bash
-export AWS_REGION=us-east-1               # region 必须有出处：--region、环境变量或 profile 配置
+export AWS_REGION=us-east-1               # region 必须有出处：--region、环境变量、项目配置文件 gherkai.toml 或 profile 配置
 gherkai doctor                            # 自检环境；加 --backend cloud 连带查凭证与云端后端
 gherkai plan features/checkout.feature    # 用例预检：分组与派发预期，不连云端、不产生费用
 gherkai run features/checkout.feature     # 在本机起 worker 执行这个 run（浏览器与模型仍在云端）；退出码给出判定
@@ -31,7 +31,7 @@ gherkai explain <run_id>                  # 读这个 run 的每步证据，看�
 - 装什么、要哪些 AWS 前置、第一次怎么完整运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
 - 四种组合（执行方式 × 执行后端）、结果在哪、退出码什么意思：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
 - `.feature` 怎么写才能稳定运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md
-- 环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
+- 项目配置文件 `gherkai.toml`、环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
 - 报错了先看哪：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/troubleshooting.md
 - 每版变更：https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md
 

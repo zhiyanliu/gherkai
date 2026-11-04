@@ -78,17 +78,19 @@ deterministic(
 
 同一 feature 要在两个引擎上运行（或团队两引擎都用），每条确定性 step 两侧都要注册：正则语义相同、`description` / `example` 同文，只是方言不同。只写一侧，另一引擎上这一步会静默换回 AI 判定，执行前预检不替你发现（它只查本次用到的引擎）。核对法：`gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各查一遍，再 `gherkai plan` 看标注。
 
-## 5 用错了会怎样（一律响亮失败，不静默降级）
+## 5 用错了会怎样
+
+多数情形直接报错并点名原因；以下几种不报错：扩展名不在加载范围、只在一个引擎上注册、正则没命中、缺省的 `./steps` 不在当前目录下，只能靠 `list-deterministic` 清单与 `plan` 标注发现。
 
 | 情况 | 表现 | 怎么办 |
 |---|---|---|
 | 注册时缺 `description` / `example` | 启动即报错退出，点名那条 pattern | 补齐元数据 |
-| `steps/` 下某个文件 import 失败（语法错、缺依赖、Midscene 用了 `.ts`） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 以退出码 2 结束，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
+| `steps/` 下某个文件 import 失败（语法错、缺依赖） | `plan` / `run` / `submit` 在起第一个 job 前整个 run 以退出码 2 结束，点名文件与异常，**不跳过** | 先修那个文件，不是怀疑 feature |
 | Midscene 某个 step 文件一条都没注册 | 非 0 退出并点名 | 多半 import 到了第二份 `@gherkai/worker-midscene`，检查项目里有没有另一份 |
 | `--steps-dir`（或 `GHERKAI_STEPS_DIR`、配置文件的 `steps-dir`）指的目录不存在 | 直接以退出码 2 结束：明确指了一个地方而那里没东西 | 改路径；缺省 `./steps` 不存在不算错 |
 | 一个 step 文本命中多条 pattern | 该步记 error 并列出同时命中的 pattern；`plan` 会提前暴露 | 收窄其中一条正则 |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到、或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对；`list-deterministic --steps-dir …` 看清单里有没有你那条；对照 `example` 改 step 文本 |
-| `engine_error` 说起 worker 失败 | worker 没装或版本与 CLI 不一致 | 见 `references/setup-and-diagnosis.md` |
+| worker 没装，或 worker 与 CLI 版本不一致 | 以退出码 2 结束：没装时说 worker 运行时未找到并给出装法，版本不一致时说「worker 自述失败，拒绝运行」；也可能是 job 记 `precheck_failed`、消息说命令行工具与 worker 的版本不一致 | 见 `references/setup-and-diagnosis.md` |
 
 ## 6 把 steps 带到云端
 
@@ -113,7 +115,8 @@ deterministic(
   file = "app/shop.apk"          # 相对配置文件所在目录
   package = "com.example.shop"   # iOS 用 bundle-id
   ```
-- **费用**：一个设备 scope 一个远程访问会话，按设备分钟计费，设备的准备时间（创建到可用，约 1 到 2.5 分钟）与停止后的收尾都计入。`plan --json` 的 `device_session_count` 就是这次要开的会话数，首次运行前把它与设备选择一起报给人，并说明 `plan` 对设备只核设备 ARN 的形态与安装包文件是否存在——项目 ARN、安装包桶是否可用、设备此刻能否拿到，都要到实际运行时才知道，`plan` 退出码 0 不代表这些就位。
-- **写法差异**：同一 scope 的 scenario 之间不重启应用，需要干净起点时在 `Background` 写一条重启应用的确定性 step（第 3 节末的模板）。导航步在网页目标上打开地址，在应用目标上把地址经 DeepLink 交给被测应用（Android 上地址里的 `;`、`'`、`(`、`)` 或空格、非 ASCII 字符要先百分号编码），应用目标上后面紧跟的落点核对用一条 AI 断言——它没有页面地址，「页面地址匹配」这类地址核对 step 在它上面没有实现、会交给 AI；iOS 应用上地址只保证送达，应用忽略链接时导航步照样通过，紧跟的核对才判出来。网页目标上：Android 只在要精确核对地址时用地址核对 step、否则也用 AI 断言；iOS 在 1.5 一律推荐用 AI 断言核对落点。输入之后键盘留在屏幕上是正常的，不需要时不写「收起键盘」、AI 会自己绕开它；只在键盘挡住了下一步要操作的元素时写明「输入 … 后收起键盘」——iOS 上它只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，不按 Return、不点空白处；输入框要靠 Return 或点空白处才收起的，直接写「按下 Return」或「点击输入框外的空白处」。确定性 step 在设备上调用的是 webdriver 实现（第 3 节的七个字段）；只有 playwright 实现的 step 在设备上交给 AI，`gherkai plan` 会注明。
+- **费用**：一个设备 scope 一个远程访问会话，按设备分钟计费，从服务商开始准备设备起算（并发槽位满时的排队等待不计）；准备设备到可用的时间（约 1 到 2.5 分钟）通常计费，停止后的收尾可能继续计费，费用以 AWS 账单为准。`plan --json` 的 `device_session_count` 就是这次要开的会话数，首次运行前把它与设备选择一起报给人，并说明 `plan` 对设备只核设备 ARN 的形态与安装包文件是否存在——项目 ARN、安装包桶是否可用、设备此刻能否拿到，都要到实际运行时才知道，`plan` 退出码 0 不代表这些就位。
+- **墙钟预算**：设备 scope 不标 `@timeout` 时的缺省是获取预算（`gherkai.toml` 里 `[devices]` 的 `acquire-timeout-s`）加 900 秒，比桌面长；`@timeout:<秒>` 或正值的 `--default-job-timeout` 低于获取预算加 180 秒时，`plan` / `run` / `submit` 以退出码 2 拒绝运行，报错写明下限与改法；`--default-job-timeout` 给 0 或负值只让桌面 scope 不超时，设备 scope 仍取缺省。
+- **写法差异**：同一 scope 的 scenario 之间不重启应用，需要干净起点时在 `Background` 写一条重启应用的确定性 step（第 3 节末的模板）。导航步在网页目标上只打开 `http://` / `https://` 地址（写别的协议这一步记 error、不转 AI），在应用目标上地址不限协议（自定义 scheme 与 `http(s)://` 都行），经 DeepLink 交给被测应用而不是系统浏览器（Android 上地址里的 `;`、`'`、`(`、`)` 以及 `{`、`}`、`|`、非 ASCII 字符这类 RFC 3986 字符集以外的字符要先百分号编码，否则这一步记 error、类别 `capability_unavailable`；地址里有空格或双引号时整句不算地址、交给 AI，任何目标上都要先编码，空格写成 `%20`），应用目标上后面紧跟的落点核对用一条 AI 断言——它没有页面地址，「页面地址匹配」这类地址核对 step 在它上面没有实现、会交给 AI；iOS 应用上地址只保证送达，应用忽略链接时导航步照样通过，紧跟的核对才判出来。网页目标上：Android 只在要精确核对地址时用地址核对 step、否则也用 AI 断言；iOS 在 1.5 一律推荐用 AI 断言核对落点。输入之后键盘留在屏幕上是正常的，不需要时不写「收起键盘」、AI 会自己绕开它；只在键盘挡住了下一步要操作的元素时写明「输入 … 后收起键盘」——iOS 上它只点键盘上的 Done / 完成键或键盘上方工具栏里的 Done，不按 Return、不点空白处；输入框要靠 Return 或点空白处才收起的，直接写「按下 Return」或「点击输入框外的空白处」。确定性 step 在设备上调用的是 webdriver 实现（第 3 节的七个字段）；只有 playwright 实现的 step 在设备上交给 AI，`gherkai plan` 会注明。
 - **证据**：设备上判为 failed / error 的确定性与导航 step 也有证据（`acts` 为空），另带 `step_kind`、`url` / `url_missing`，失败 step 还有 `controls` 与 `page_source`，字段读法见 `references/cli-json-contract.md`；设备 job 的 `device_session` 链接指向这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用会话与设备、换台记录与各阶段时刻），只给链接、不解析。
 - **错误类别**：`precheck_failed`、`acquire_timeout`、`session_lost`、`capability_unavailable`、`release_failed` 的处置见 `references/setup-and-diagnosis.md` 第 7 节的表。

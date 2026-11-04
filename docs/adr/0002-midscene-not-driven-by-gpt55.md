@@ -6,7 +6,7 @@
 
 ## 核心事实（2026-06-23 本账号实测，AWS 直接报错坐实）
 
-**Bedrock 上的 gpt-5.5 不支持 chat-completions API。** Midscene 只会调 chat-completions，故 gpt-5.5 无法驱动 Midscene。AWS 在 `bedrock-mantle` 端点直接返回：
+**Bedrock 上的 gpt-5.5 不支持 chat-completions API。** 当时（2026-06）Midscene 只会调 chat-completions，故 gpt-5.5 无法驱动 Midscene。AWS 在 `bedrock-mantle` 端点直接返回：
 
 ```
 POST https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions
@@ -24,4 +24,4 @@ POST https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions
 
 GPT-5 系被 Midscene 官方点名对小字/非拉丁文字**视觉定位偏弱**（该弱项是 GPT-5 的 **per-model 属性**、非 Midscene 框架属性——换引擎模型即换该弱项，见 [0001](./0001-scope-limited-to-english-ui.md)「非英文的真实边界」），本就不适合当**主力 grounding** 角色（grounding 是 Midscene 引擎模型的核心职责）。
 
-**决定**：Midscene 的主力视觉定位引擎模型改用走 chat-completions 的开源 VL 模型，托管在 AWS 上——即 Qwen3-VL on Bedrock（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)，已实测 chat-completions + 视觉通道可用）。gpt-5.5 因不支持 chat-completions 而**完全出局**，连可选 planning 角色都当不了（Midscene 无 Responses 代码路径）。
+**决定**：Midscene 的主力视觉定位引擎模型改用走 chat-completions 的开源 VL 模型，托管在 AWS 上——即 Qwen3-VL on Bedrock（[0003](./0003-midscene-grounding-qwen3vl-bedrock.md)，已实测 chat-completions + 视觉通道可用）。gpt-5.5 因不支持 chat-completions 而**完全出局**，连可选 planning 角色都当不了（当时 Midscene 无 Responses 代码路径；SDK 后来加入了 Responses 协议，但 worker 不传协议键、请求仍走 chat-completions，见 [0042](./0042-step-evidence-and-explain.md) 决策六「历次升级」）。

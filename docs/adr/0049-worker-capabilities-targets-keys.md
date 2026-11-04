@@ -65,13 +65,13 @@
 
 - 语义：worker 在该目标上能持有一次会话的最长秒数，计时起点为会话创建时刻（Device Farm 为 CreateRemoteAccessSession 的时刻；计费口径以账单为准，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
 - 取值：Device Farm 的 150 分钟上限（9000 秒）减去 Fargate 停止宽限的硬顶 120 秒，即 8880 秒，由 worker 设备模块的限值常量算出，CLI 不另写字面量；减 120 秒的依据是云端收尾最多拿到 Fargate 的停止宽限，本机后端使用方显式给的 `--grace` 若超过 120 秒，收尾挂住时会话年龄可能越过 150 分钟，这一边界不在本保证之内；文档里写出的 8880 只是该算式的结果，以常量算出的值为准；与 `min_grace_s` 由收尾预算常量算出是同一做法（[0036](./0036-deterministic-capability-discovery.md) 决策 5）。同一个值既是自检的阈值（决策 7），也是 worker 会话年龄后备的触发点（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2）。
-- **余量取停止宽限的硬顶、不取收尾各段之和**：deleteSession 与 StopRemoteAccessSession 等释放步骤排在 `scope_done` 之前（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5），到点后从 SIGTERM 到强制终止最多 120 秒，余量取这个上界，会话年龄在收尾结束前不会越过 150 分钟。只减释放各段之和（deleteSession 5 秒、终结核对 5 秒、释放阶段 25 秒，得 8965 秒）的方案被拒：它把 `max_session_s` 绑在会随网络退化实测调整的收尾预算上，每调一次都要重算，且收尾挂住到硬顶时会话会越过上限；硬顶是 Fargate 的固定值，也是决策 5 重议条件的判据。
+- **余量取停止宽限的硬顶、不取收尾各段之和**：deleteSession 与 StopRemoteAccessSession 等释放步骤排在 `scope_done` 之前（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5），到点后从 SIGTERM 到强制终止最多 120 秒，余量取这个上界，会话年龄在收尾结束前不会越过 150 分钟。只减释放各段之和（deleteSession 5 秒、终结核对 5 秒、释放阶段 25 秒，得 8965 秒）的方案被拒：它把 `max_session_s` 绑在日后重新校准时会调整的收尾预算上，每调一次都要重算，且收尾挂住到硬顶时会话会越过上限；硬顶是 Fargate 的固定值，也是决策 5 重议条件的判据。
 - 消费：job 墙钟预算（自推进器 claim 这个 job 起算，[0034](./0034-detached-batch-reconciler.md)）超过该目标的 `max_session_s` 时，本机后端在执行前预检里拒绝（[0048](./0048-test-targets-device-and-ui-kind.md)），云端后端由 worker 在建会话前读取 Job 输入携带的 `timeoutS`、与该目标的 `max_session_s` 比较作自检拒绝（决策 7）。设备 scope 的缺省墙钟由 core 的 plan 层给出（[0034](./0034-detached-batch-reconciler.md)「job timeout」节），显式值与 tag 的下限校验也在 core；获取预算与会话生命周期归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。会话在 job 启动之后才创建，故墙钟不超过 `max_session_s` 即保证会话寿命不超过上限，不必为设备另立起算点。取设备的开销（创建到 Appium 可用，约 1 到 2.5 分钟）计入墙钟；停止到 COMPLETED 的时间发生在 job 结束之后，只计设备分钟、不占墙钟。
 - **按目标给值，不做顶层单值**：同一 worker 的桌面与远程访问会话上限来源不同，顶层单值只能取最小值，会把桌面 job 也限制在设备的上限之内。
 
 ### 5. `min_grace_s` 保持顶层单值
 
-- 设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 的终结四阶段推导：等在途 Create 10 秒、终结核对 5 秒、释放阶段 25 秒、中断兜底上传 10 秒、排空 6 秒，加事件写出与余量 7.5 秒，共 63.5 秒（文中「约 64 秒」均以常量算出的 63.5 为准），低于 Fargate `stopTimeout` 的 120 秒硬上限（[0024](./0024-worker-core-protocol.md)「引擎自报下限」条、[0032](./0032-fargate-execution-environment.md)）；各段上限以网络退化实测校准后定数。worker 不等会话到 COMPLETED。
+- 设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 的终结四阶段推导：等在途 Create 10 秒、终结核对 5 秒、释放阶段 25 秒、中断兜底上传 10 秒、排空 6 秒，加事件写出与余量 7.5 秒，共 63.5 秒（文中「约 64 秒」均以常量算出的 63.5 为准），低于 Fargate `stopTimeout` 的 120 秒硬上限（[0024](./0024-worker-core-protocol.md)「引擎自报下限」条、[0032](./0032-fargate-execution-environment.md)）；各段上限没有在网络退化条件下校准（到 us-west-2 的丢包无法人工制造，现有覆盖面与失效表现见 [0052](./0052-appium-interface-adapter-and-platform-differences.md)「已知缺口」的释放阶段网络退化条），日后重新校准只改常量，下限随之由常量算出。worker 不等会话到 COMPLETED。
 - Midscene worker 的 `min_grace_s` 取两条收尾路径各自之和的较大者：桌面路径为等在途 StartBrowserSession 1.5 秒、停浏览器会话 3 秒、关浏览器 3 秒、中断兜底上传 10 秒、排空 6 秒加余量 7.5 秒，共 31 秒；设备路径即上一条的 63.5 秒；取较大者得 63.5 秒。两条路径共用的上传、排空与余量常量只有一份，各段由同一组常量派生，不另设设备专用下限。把两条路径的各段全部相加（约 71 秒）的读法被拒：一次 scope 只走其中一条收尾路径，相加得到的是不会发生的串行时长，只会虚增宽限。Midscene 的下限由约 31 秒升到约 64 秒：这不算「本机默认宽限显著提高」——本机宽限只是 SIGTERM 之后等待收尾的上界，worker 收尾完即退出，正常路径与桌面 run 的耗时不受影响；真正的代价只在收尾挂住时多等约半分钟，低于 120 秒的硬顶才是判据。
 - **重议条件**：设备收尾的预算之和使 Midscene 的下限超过 120 秒（云端 doctor 的宽限比对会变成可选能力缺失），或本机默认宽限的提高开始影响正常路径的耗时。届时把该键改为按 device 取值的对象，并按 [0036](./0036-deterministic-capability-discovery.md) 的规则递增 `schema_version`，因为那是既有键的语义变化。
 
@@ -106,7 +106,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 | 量 | 实测 | 用于 |
 |---|---|---|
 | 远程访问会话上限的计时起点 | 创建后约 150.4 分钟命令开始报会话关闭，计费 150.29 分钟，从创建算、不从 RUNNING 算 | 决策 4：上限从创建起算 |
-| 创建到 RUNNING | Android 51 到 92 秒、iOS 61 到 82 秒（排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段，是否计费以账单为准） | 决策 4：会话在 job 启动之后创建，墙钟覆盖这段开销 |
+| 创建到 RUNNING | Android 50 到 92 秒、iOS 61 到 114 秒（排队中撤回的会话返回体与 Get 都没有 `deviceMinutes` 字段，排队时段不计费，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据「计费起点与排队」） | 决策 4：会话在 job 启动之后创建，墙钟覆盖这段开销 |
 | Appium 建连 | Android 13 到 26 秒；新 iPhone 5 到 17 秒、老 iPhone 65 秒（老机型上 WebDriverAgent 启动慢） | 同上 |
 | deleteSession | 约 0.9 秒；跳过 deleteSession 只 Stop 的会话同样产出录像与日志（Android 两会话） | 决策 5：SIGTERM 路径不调 deleteSession 不损失产物 |
 | StopRemoteAccessSession | 调用即时返回；到 COMPLETED 另需 Android 52 到 85 秒、iOS 超过 2 分钟（最长约 150 秒），只计设备分钟、不占墙钟，worker 不必等待 | 决策 4、决策 5 |

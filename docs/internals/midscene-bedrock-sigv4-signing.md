@@ -28,13 +28,13 @@ Midscene 的 `createOpenAIClient` 回调把一个带自定义 `fetch` 的 OpenAI
 | 400「value did not match any expected variant」 | 请求体带了 `image_url.detail: "original"` | 签名前删字段 |
 | 404 | 路径用了 `/v1` 而不是 `/openai/v1`；或模型不在该 region | 保持 `/openai/v1`；核模型在 region 的可用性 |
 | `ReferenceError: HttpRequest is not defined` | 漏了 `@aws-sdk/protocol-http` 的 import | 补 import；这是崩溃不是鉴权失败 |
-| `Model configuration is incomplete` | 模型配置没有随 `modelConfig` 给进 Agent，隔离态不读 env | 按 ADR 0008 把模型名与家族随 `modelConfig` 给 |
+| `Model configuration is incomplete` | 交给 Agent 的 `modelConfig` 里缺模型名（给了 `modelConfig` 时 SDK 只读这个对象、不读 env）；或根本没给 `modelConfig`，SDK 改读全局 env，而 worker 不往 env 写模型名（版本差异见 ADR 0008「关键实现坑」） | 按 ADR 0008 把模型名与家族随 `modelConfig` 给 |
 
 首次接线最可能遇到的是第一行：若有人把签名「简化」成签 SDK 的整个头包，一定 403。Bedrock 的 403 响应体会回显它算出的 CanonicalRequest，与线路上实际发出的头逐项对照即可定位。
 
 ## 4. 依赖与自检
 
-签名链用到 `@aws-sdk/signature-v4`、`@aws-sdk/protocol-http`、`@aws-crypto/sha256-js`、`@aws-sdk/credential-providers` 与 `openai`，版本以 `engines/midscene/package.json` 为准（这几个包有意不钉精确版本；钉精确版本的只有引擎 SDK `@midscene/web` 及其配套的 `playwright` / `@playwright/test`，见 ADR 0042 决策六）。从零接线或换环境时，先用 `engines/midscene/spikes/01-model-sigv4.ts` 单独核模型连接，再用 `03-midscene-grounding.ts` 核 Midscene 整条链（运行方式见 `engines/midscene/DEVELOPMENT.md`）。
+签名链用到 `@aws-sdk/signature-v4`、`@aws-sdk/protocol-http`、`@aws-crypto/sha256-js`、`@aws-sdk/credential-providers` 与 `openai`，版本以 `engines/midscene/package.json` 为准（这几个包有意不锁定精确版本；锁定精确版本的是引擎 SDK 与浏览器、设备驱动，清单见 `engines/midscene/DEVELOPMENT.md`「依赖分类（实测约束）」节，升级规则见 ADR 0042 决策六）。从零接线或换环境时，先用 `engines/midscene/spikes/01-model-sigv4.ts` 单独核模型连接，再用 `03-midscene-grounding.ts` 核 Midscene 整条链（运行方式见 `engines/midscene/DEVELOPMENT.md`）。
 
 ## 延伸阅读
 

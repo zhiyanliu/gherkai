@@ -5,7 +5,7 @@
 ## 如何参与
 
 - **提 issue**：报告缺陷时附上可复现的最小 `.feature`、完整命令行与 `--json` 输出（`plan` / `run` / `status` / `explain` 均有机读形态）；提需求先写场景，再写期望的命令面。
-- **提 PR**：本仓库没有常驻 `main`，开发在版本线分支上（当前分支用 `git branch -a` 查看，如 `feat/v1.4-doc-skill`）；从该分支切出或 fork，PR 同样提回该分支；一个 PR 只做一件事。CI（`.github/workflows/ci.yml`）在 push 与 PR 上运行三件检查，清单与触发面见下文「发布与版本」节末。
+- **提 PR**：本仓库没有常驻 `main`，开发在版本线分支上（当前分支用 `git branch -a` 查看，命名形如 `feat/v<主版本>.<次版本>-<主题>`，即下文版本线表里状态为施工中的那一条）；从该分支切出或 fork，PR 同样提回该分支；一个 PR 只做一件事。CI（`.github/workflows/ci.yml`）在 push 与 PR 上运行三件检查，清单与触发面见下文「发布与版本」节末。
 - **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。人读文本（注释、docstring、文档、用户可见字符串）的措辞标准在 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策六，护栏 `cli/tests/test_code_comments.py`（注释与 docstring）、`test_technical_docs.py`（技术文档）、`test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`（用户文档、skill、包页）、`test_user_facing_messages.py`（用户可见字符串）随 `uv run pytest` 一并执行。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
@@ -60,7 +60,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/              ← npm 包 @gherkai/worker-midscene（ESM）：薄 worker + 使用方 steps 文件唯一应 import 的公开 API
 │   ├── novaact/               ← 发行包 gherkai-worker-novaact：薄 worker，`python -m` 入口
-│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、会话预热常量
+│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、会话预热常量、浏览器会话超时的取值规则
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack + 随部署打成 asset 的三个 Lambda handler 源 + worker 镜像交付命令，ADR 0033/0034/0037/0038）
 ├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，contributor 与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
 ├── graphify-out/              ← 代码 + 文档知识图（供 AI agent 先查图再读源码；刷新见下文「知识图刷新」）
@@ -121,7 +121,7 @@ ssh <host> 'cd ~/<repo-copy> && export PATH=$PATH:~/.local/bin && AWS_REGION=<re
 - 演练中断时把信号发给 CLI 进程本身：`uv run` 不转发 SIGINT（用 `pgrep -P <uv 的进程号>` 取到子进程再 `kill -INT`）；非交互 shell 里后台启动的进程 SIGINT 被忽略、Python 不会装 KeyboardInterrupt 处理器，演练脚本要先把 SIGINT 恢复为缺省处置再 exec 命令（`python3 -c 'import os,signal,sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' <命令>`）。
 - ssh 的长时间等待会被远端中断：连接加 `-o ServerAliveInterval=15`，`status --wait` 这类长等待改为 15 秒一轮的 `status --json` 轮询；长任务用 `setsid nohup … > log 2>&1 < /dev/null &` 启动（不接管标准输入，ssh 才能立刻返回），再轮询日志；`setsid` 只有 Linux 有，macOS 本机上没有它，命令会静默不执行，本机后台任务改用 `nohup … &` 或工具自带的后台执行；ssh 偶尔不随远端任务启动而返回，结束本地的 ssh 客户端即可，远端任务不受影响；远端命令行里不要写会匹配到自身的 `pkill -f` / `pgrep -f` 模式：模式文本也出现在该命令自身的命令行里，会连同发出命令的会话一起终止。偶发 kex 阶段被拒（TCP 可达、sshd 拒绝）时等待几分钟重试，无需重启实例。
 - 查模型用量看 CloudWatch 而不是账单：`bedrock-runtime` 的调用（Nova Act、Claude）计在命名空间 `AWS/Bedrock`（维度 ModelId）并进 CloudTrail 管理事件；Midscene worker 走的 OpenAI 兼容端点（bedrock-mantle）计在 `AWS/BedrockMantle`（维度 Model、Project），不进 CloudTrail 管理事件，CloudTrail 里对应的事件名是 `ChatCompletions`。Cost Explorer 滞后约 36 小时，且各模型分散在不同服务名下（2026-09-16 实测）。
-- 录制评测 fixture 的远端步骤见 ADR 0043 决策七；知识图刷新见下节。
+- 录制评测 fixture 的远端步骤见 ADR 0043 决策七；知识图刷新见下文「知识图刷新（graphify）」节。
 
 ## 测试
 
@@ -140,7 +140,7 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 | `deploy_aws/tests/test_workers.py`             | 同一份契约页的 `list-workers` 字段（样例需要 moto，故断言留在 provider 包侧）                                                                                                                                                                                                                                       |
 | `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，注释与 docstring 放行                                                                                                                                                                                                            |
 | `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与 GitHub Release 正文的固定块：按用户文档的整套规则扫（`_doc_rules.scan("package-page", …)`）再加零相对链接，固定块另要求仓库链接锁定 tag；各包 Summary：零内部指代；根 `README.md`：只查内部指代、口头语与退役旧名（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 `release.yml` 仍经 `release_notes.py` 渲染 Release 正文 |
-| `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料 `docs/presentations/**`；定稿口播稿的 SHA-256 与同目录 `manifest.json` 所记一致时免扫口吻表与决策六形态①③）：零内部指代、相对链接可达、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
+| `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料 `docs/presentations/**`；定稿口播稿的 SHA-256 与同目录 `manifest.json` 所记一致时免扫口吻表与决策六形态①③）：零内部指代、口吻表、退役旧名与决策六形态①③、相对链接可达（`CHANGELOG.md` 例外：全文只许绝对 URL，因为 Release 正文直接截取本版那一节、不改写链接）、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集、默认模型 id 与引擎常量一致（这一项的扫描面另带随包 agent skill）；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
 | `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 三件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」与「根 README 的 `npx skills add` 命令钉本版 tag」两道 gate，以及 Release 正文渲染；另对照真 CHANGELOG / README                                                                                                                  |
 | `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
 | `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
@@ -163,7 +163,7 @@ uv run python tools/doc_rules_check.py --staged               # 扫描暂存区�
 uv run python tools/doc_rules_check.py docs/internals/x.md    # 指定文件全扫
 ```
 
-输出形态 `路径:行号: 类别 · 原文`；退出码 0 无命中、1 有命中、2 脚本自身出错（hook 对 2 不阻断，工具自身的故障不应阻塞编辑）。加一条规则的顺序：先在规则所属的 ADR 立决策（口吻类归 ADR 0045 决策六；术语类归决策八，先改 `CONTEXT.md` 词表；产品文案类归 ADR 0039），再在 `_doc_rules.py` 加正则或扩扫描面（固定词进 `COLLOQUIAL` / `RETIRED_TERMS_WORDS`，后者要先在 CONTEXT 某条 `_Avoid_` 登记；新形态的启发式单独命名并在 `scan()` 里挂到对应的面），把当前命中清零后再加词——护栏当场失败属于设计内行为；最后检查 CLAUDE.md 对应条能否精化为「判据 + 指针」。豁免与盲区：`SELF_FILES` 与 `COINAGE_DISCUSSION` 两个集合（定义禁词表、讨论这些词本身的文件不扫自己）；「绿≠对」是 CLAUDE.md 立的判据名、排版学义的「同形字符」与「协同调度」放行；启发式认不出等号一侧是英文、全角括号或跨行的写法与模板字符串里的中文，清扫时由人工扩大范围逐项补查，护栏只保证命中必为真；注释层不用退役表里指一次 run 的「批」义三词（与 Stream 事件批撞词），注释里这类残留交由 code-health 复盘处理；代码块、行内代码、机读键名、命令示例里的符号不计入，表格单元格仍在扫描范围内。
+输出形态 `路径:行号: 类别 · 原文`；退出码 0 无命中、1 有命中、2 脚本自身出错（hook 对 2 不阻断，工具自身的故障不应阻塞编辑）。加一条规则的顺序：先在规则所属的 ADR 立决策（口吻类归 ADR 0045 决策六；术语类归决策八，先改 `CONTEXT.md` 词表；产品文案类归 ADR 0039），再在 `_doc_rules.py` 加正则或扩扫描面（固定词进 `COLLOQUIAL` / `RETIRED_TERMS_WORDS`，后者要先在 CONTEXT 某条 `_Avoid_` 登记；新形态的启发式单独命名并在 `scan()` 里挂到对应的面），把当前命中清零后再加词——护栏当场失败属于设计内行为；最后检查 CLAUDE.md 对应条能否精化为「判据 + 指针」。豁免与盲区：`SELF_FILES` 与 `COINAGE_DISCUSSION` 两个集合（定义禁词表、讨论这些词本身的文件不扫自己）；「绿≠对」是 CLAUDE.md 立的判据名、排版学义的「同形字符」与「协同调度」放行；启发式认不出等号紧贴英文或全角括号这类非汉字字符、两侧都不留空格、写成 `==` 或跨行的写法与模板字符串里的中文，清扫时由人工扩大范围逐项补查，护栏只保证命中必为真；注释层不用退役表里指一次 run 的「批」义三词（与 Stream 事件批撞词），注释里这类残留交由 code-health 复盘处理；代码块、行内代码、机读键名、命令示例里的符号不计入，表格单元格仍在扫描范围内。
 
 ## Spike（可独立运行的技术验证脚本）
 
@@ -181,7 +181,7 @@ AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 
 `graphify-out/`（`graph.json` / `GRAPH_REPORT.md` / `wiki/`）是给 AI agent 的代码 + 文档知识图（CLAUDE.md「graphify」节要求 agent 先查图再读源码）。维护分两层：
 
-- **AST 层自动**：`graphify hook install` 安装的 post-commit hook 在每次含代码文件的 commit 后重新抽取代码、重新聚类；不调用 LLM。
+- **AST 层自动**：`graphify hook install` 安装的 post-commit hook 在每次含代码文件的 commit 后重新抽取代码、重新聚类；不调用 LLM。hook 装进 git 当前生效的 hooks 目录：启用了上文「开发环境」节的 `core.hooksPath tools/git-hooks` 后，`.git/hooks/` 里已装的 hook 不再执行，需重新执行 `graphify hook install`，它会把 `post-commit` / `post-checkout` 写进 `tools/git-hooks/`（入库目录，这两个生成文件不提交）。
 - **LLM 层手动、周期性**：文档语义抽取与社区命名需要 LLM（AWS Bedrock），hook 不覆盖这一层；修改了 ADR / README / `docs/` 下的页面，或报告里社区名退化成文件名（hook 按枢纽节点生成的临时名）时，运行：
 
 ```bash
@@ -189,13 +189,13 @@ tools/graphify_refresh.sh            # 抽取到收敛 → LLM 命名社区 + �
 tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费用按全仓文档量计）
 ```
 
-扫描范围由 `.gitignore` + 根 `.graphifyignore` 决定：评测 fixture（`skills/gherkai-evals/fixtures/`，运行产物快照、截图是 PNG 占位却带 .jpg 扩展名，提交 Bedrock 会被拒绝并导致整块抽取失败）与评测 workspace 排除在图外。需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没有凭证时到有凭证的机器上运行：用 rsync 把工作区同步过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 运行脚本 → 用 rsync 回传 `graphify-out/`，回传时**排除 `.graphify_root`**（其中存的是绝对路径，回传会导致本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
+扫描范围由 `.gitignore` + 根 `.graphifyignore` 决定：评测 fixture（`skills/gherkai-evals/fixtures/`，运行产物快照、截图是 PNG 占位却带 .jpg 扩展名，提交 Bedrock 会被拒绝并导致整块抽取失败）、评测 workspace、演示材料的媒体文件（`docs/presentations/**` 下的 pptx / mp4 / srt / zip，内容由 Markdown 讲稿保留）与演示制作工具的图标素材（`tools/presentations/assets/`）排除在图外。需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没有凭证时到有凭证的机器上运行：用 rsync 把工作区同步过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 运行脚本 → 用 rsync 回传 `graphify-out/`，回传时**排除 `.graphify_root`**（其中存的是绝对路径，回传会导致本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
 
 ## 发布与版本
 
 **推送 tag `vX.Y.Z` 不触发 CI、直接进入发布链**（`.github/workflows/release.yml`；CI 的分支过滤把 tag 排除在外）：发布路径上只有下述一道 gate，不运行 `pytest` 与 `npm test`，因此测试与本地校验必须在推送 tag 之前全部完成并通过。
 
-**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都写 `dynamic = ["version"]`、没有版本字段（版本号由 uv-dynamic-versioning 从 tag 计算；不发行的 workspace 根另固定为 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
+**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都把 `version` 列进 `dynamic`、没有版本字段（版本号由 uv-dynamic-versioning 从 tag 计算；依赖兄弟包的 `gherkai` / `gherkai-runtime` / `gherkai-deploy-aws` 另把依赖也声明为动态，同版本 pin 由同一 metadata hook 在构建时渲染；不发行的 workspace 根另固定为 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
 
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release

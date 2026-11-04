@@ -21,14 +21,14 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 | AWS 凭证与 region | 凭证走 `--profile` / `AWS_PROFILE`；region 取 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置 |
 | 每个 account + region 初始化一次 | `gherkai deploy --bootstrap`（账户级动作，不需要 `--vpc`）。未初始化就部署会报错并指回这个选项 |
 
-部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、注册与注销任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
+部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、列出、查看、注册、注销与删除任务定义 revision 并打标签、查询运行记录表及其 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
 
 ## 后端包含什么
 
 一套 CloudFormation stack，名字随 `--prefix` 走（前缀 `gherkai-` 对应 stack `BackendStack-gherkai`），因此同一账户可按前缀并存多套环境，例如 `prod-` 与 `stage-`：
 
 - **DynamoDB**：`<prefix>runs`（run 状态）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
-- **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物；派给 worker 的输入对象 7 天自动过期）。
+- **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
 - **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
@@ -119,7 +119,7 @@ gherkai submit features/login.feature --backend cloud --worker-variant login   #
 
 - **重推同名 variant 直接放行**，只打印原 digest 到新 digest 的变化。正在运行的 run 手里的 revision 按 digest 指着旧镜像层，不受影响。
 - **variant 按版本隔离**：标签含 CLI 版本，旧版本的 variant 留在 ECR 作历史、不参与当前版本的解析。升级不重置默认指针。
-- **退休的旧 revision 顺带回收**：`push-worker` 与 `deploy` 末尾各回收一次，退休满 1 小时且没有未结束的 run 引用才真删，否则留到下一次。滞留不影响使用，`list-workers` 看得到。`delete-worker` 尚未提供（执行会以退出码 2 结束并说明），旧版本 variant 的 ECR 标签目前请按需自行清理。
+- **退休的旧 revision 顺带回收**：`push-worker` 与 `deploy` 末尾各回收一次，退休满 1 小时且没有未结束的 run 引用才真删，否则留到下一次。例外是 `run --backend cloud --no-report`：它不写运行记录，回收时看不到它正在使用的 revision；这样的 run 可能执行超过 1 小时时，执行期间不要重推它使用的 variant，也不要重新部署后端。滞留不影响使用，`list-workers` 看得到。`delete-worker` 尚未提供（执行会以退出码 2 结束并说明），旧版本 variant 的 ECR 标签目前请按需自行清理。
 
 ## 部署输出怎么读
 
@@ -132,15 +132,15 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 ## 版本与升级
 
-后端记一个版本戳，提交前检查拿它比对 CLI 版本。**CLI 比后端新时拒绝执行并以退出码 2 结束**（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常提交，所以团队成员可以晚一步再升。任一侧不是发行版本时跳过比对。后端还没有版本戳（部署早于本版本、从未升级）时，没有使用 `--expose-local` 的桌面 run 只提示、照常提交；带设备目标或使用 `--expose-local` 的 run 以退出码 2 结束，需要先升级部署。CLI 与后端保持同版本，因此升级是三步：
+后端记一个版本戳，提交前检查拿它比对 CLI 版本。**CLI 比后端新时拒绝执行并以退出码 2 结束**（新 CLI 写的任务定义旧后端读不懂，没有放行选项）；CLI 比后端旧时只打印一行提示、照常提交，所以团队成员可以晚一步再升。任一侧不是发行版本时跳过比对。后端还没有版本戳（这套后端在 1.4.0 之前部署、此后没有重新部署过）时，没有使用 `--expose-local` 的桌面 run 只提示、照常提交；带设备目标或使用 `--expose-local` 的 run 以退出码 2 结束，需要先升级部署。CLI 与后端保持同版本，因此升级是三步：
 
 1. 部署方 `uv tool upgrade gherkai`（安装时带的 extra 沿用）。
 2. 部署方立刻 `gherkai deploy --vpc <与上次相同的取值> --prefix <同前缀>`：新模板、新版本基础镜像同步进 ECR、对本版本已有的 variant 重新派生。
-3. 团队其他成员再升自己的 CLI；有自定义 variant 的，由测试开发从新版本基础镜像重新构建，交部署方用 `gherkai deploy push-worker` 推一遍。
+3. 有自定义 variant 的，由测试开发从新版本基础镜像重新构建，交部署方用 `gherkai deploy push-worker` 推一遍。三步完成后，团队其他成员再升级自己的 CLI。
 
 三步之间有两段窗口，被拒的人不同：
 
-![升级三步（部署方先升本机、再部署后端，成员最后升并重推自定义 variant）之间的两段降级窗口，以及每段里谁被拒、谁照常](../diagrams/cloud-backend-upgrade-windows.svg)
+![升级三步（部署方先升级本机、再部署后端、最后重推自定义 variant，其他成员在三步完成后升级）之间的两段降级窗口，以及每段里谁被拒、谁照常](../diagrams/cloud-backend-upgrade-windows.svg)
 
 图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推送镜像与列出镜像都会被拒绝；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 本身不做这项版本比对，所以第 2 步照常执行。窗口二里被拦下的是已升到新版本的提交者——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦（提交记录格式不变的升级里如此；格式变化的升级里，旧版本 CLI 提交的 run 会被后端置为 `error`，要先升级 CLI 再重新提交，见下段），而镜像标签由**提交者本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基础镜像备好了。图上只画这两段窗口的起止。
 
@@ -152,10 +152,12 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
 
-- **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
-- **`run --backend cloud`**：运行记录表读写、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
+- **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
+- **`run --backend cloud`**：运行记录表读写、events 表（`<prefix>events`）的 `dynamodb:Query`（逐 scope 读取执行事件）、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
-两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时另需 events 表（`<prefix>events`）的 `dynamodb:Query`；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
+无论哪一级，提交带设备目标或 `@app` 的 scope 时，都另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
+
+两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时需要 events 表（`<prefix>events`）的 `dynamodb:Query`（`run --backend cloud` 这一级已含，`submit` + `status` 这一级要另加）；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
 
 无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
 
@@ -191,7 +193,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 
 ## 费用
 
-后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时——Fargate 任务按运行时长计费，加上 AI step 调用模型的费用。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
+后端闲置时的成本接近零：不建 NAT 网关，两张表按请求计费，S3 与日志按量。ECR 镜像存储按量计费：仓库不设自动过期，重推同名 variant 会留下旧镜像层，需要时按上面 worker 镜像一节的说明自行清理。费用主要产生在执行 run 时：Fargate 任务按运行时长计费，另有 AI step 调用模型的费用、云端浏览器会话的费用，以及设备目标的 Device Farm 远程访问会话费用（按设备分钟计费）。量级见 [`running-and-results.md`](./running-and-results.md)，实际数字以你账户的 AWS 账单为准。
 
 ## 退出码与常见错误
 

@@ -83,10 +83,10 @@
 | `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时 `{arn, source}`，按系统版本挑选时 `{os_version, source}`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
-`steps[].deterministic` 四态：至少一个引擎自述成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
+`steps[].deterministic` 四态：至少一个引擎的确定性命中查询成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
 表示命中该确定性 step（设备目标上另带 `requires`：该实现的前提，当前只有 `web_context`，设备不提供时这一步会记 error 而不转 AI；命中的模式在该 scope 的目标上没有实现时同样为 `null`，stderr 说明走 AI 的原因）；带 `conflict`（命中的模式列表）表示多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）；带 `keyword_mismatch`（命中的模式）与 `keywords`（该 step 接受的关键字）表示这条写法在当前关键字下无意义，实际执行会记 error（如 Then 后只写一个地址）。
-**全部引擎都取不到 worker 自述时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎降级时，该引擎的 step 同样是
-`null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。
+**全部引擎的确定性命中查询都失败时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎的命中查询失败时，该引擎的 step 同样是
+`null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。命中查询成功而能力自述取不到的引擎，命中的 step 不按 scope 目标核对、一律带 `pattern` 与 `description`（stderr 同样有「标注降级」提示）。
 
 ## `gherkai status <run_id> --json`
 
@@ -150,7 +150,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `step_kind` | `ai` / `deterministic` / `navigation` \| 省略 | 仅设备目标：这一步的执行方式；据它区分「没有 act 是正常的」与「证据抽取失败」 |
 | `url` / `url_missing` | string \| null / string \| null | 仅设备目标：step 结束时的页面地址；取不到时 `url` 为 null 并由 `url_missing` 说明原因（`no_web_context` 设备不提供网页上下文、`not_applicable` 应用目标、`timeout`、`error`） |
 | `controls` / `controls_missing` | object \| null / string \| null | 仅设备目标且仅 failed / error 步：`controls` 是一个对象，含 `items[]`（每项 `type` / `id` / `text` / `a11y_id`，空数组表示采集成功但这一屏没有可识别控件）、`total`（采到的控件总数）与 `truncated`（`items[]` 是否因上限被截断）；采集失败时 `controls` 为 null、`controls_missing` 为 `timeout` 或 `error`；passed 步与桌面目标省略 |
-| `page_source` / `page_source_truncated` | string \| null / bool | 仅设备目标且仅 failed / error 步：原始控件树文件的地址（`file://` 或 `s3://`，只给地址不内嵌；采集或写盘失败时为 null）与它是否因超过大小上限被截断 |
+| `page_source` / `page_source_truncated` | string \| null / bool | 仅设备目标且仅 failed / error 步：原始控件树文件的地址（`file://` 或 `s3://`，只给地址不内嵌；采集或写盘失败时为 null）与它是否因超过大小上限被截断；云端后端若 worker 中途被强制终止，该地址可能取不到对象（同 `frames[].screenshot`，按「读不到」处理） |
 
 `acts[]` 每项：
 
@@ -159,7 +159,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `index` | int | 本 step 内的调用序号（0 起） |
 | `prompt` | string \| null | 提交给引擎的指令（step 文本 + 多行参数），不含引擎追加的输出格式样板 |
 | `vote` | bool \| null | 本次调用计入判定的票值；null 表示非投票调用（Given/When 的动作步） |
-| `url` | string \| null | 页面地址：Nova 引擎给的是该次调用末 frame 的地址；Midscene 引擎给的是本 **step** 结束时读取的一次 `page.url()`，同 step 各 act 共用同一值 |
+| `url` | string \| null | 页面地址：Nova 引擎给的是该次调用末 frame 的地址；Midscene 引擎给的是本 **step** 结束时读取的一次地址（桌面为 `page.url()`；设备目标为网页上下文里读到的地址，与证据顶层 `url` 同值，取不到时为 null、原因见顶层 `url_missing`），同 step 各 act 共用同一值 |
 | `frames[]` | array | 引擎内部逐步的「观察—思考—动作」，见下 |
 | `result` | object \| null | **引擎原样返回值**：内部键随引擎版本变化，**不属本契约**，只供阅读；票值见 `vote` |
 | `error` | string \| null | 本次调用抛出的错误（`类型: 信息`）。Nova 出错的调用没有 frames（引擎不写轨迹文件），这是正常形态、不是抽取失败 |
@@ -185,7 +185,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `engine` | `novaact` / `midscene` |
 | `available` | 本机能否启动该引擎的 worker |
 | `cmd` / `cwd` | 启动命令（数组）与工作目录（多为 null）；不可用时为 null |
-| `source` | 命中 worker 查找顺序的哪一级（`env …` / `同 venv 模块 …` / `PATH 可执行 …` / `uvx 兜底拉起 …`） |
+| `source` | 命中 worker 查找顺序的哪一级（`env …` / `同 venv 模块 …` / `PATH 可执行 …` / `uvx 兜底拉起 …`）；不可用时为 null |
 | `hint` | 不可用时的安装指引；可用时 null |
 
 ## `gherkai list-deterministic --engine <名> --json`

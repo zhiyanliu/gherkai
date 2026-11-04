@@ -62,7 +62,7 @@ python3 tools/presentations/minimax_narration.py \
   tools/presentations/work/narration.json --dry-run
 ```
 
-默认选择全部页面，也可用 `--pages 1,3-5`。去掉预检选项才发送请求；已有完整且正文相同的配音会复用。失败或不完整请求不自动付费重试。此工具生成的原始时间戳不能覆盖人工定稿 SRT。
+默认选择全部页面，也可用 `--pages 1,3-5`。加 `--pause-after-preview` 时，本次新生成的第一页配音保存后暂停，试听确认后按回车继续其余页面；已复用的页面不触发暂停。去掉预检选项才发送请求；已有完整且正文相同的配音会复用。失败或不完整请求不自动付费重试。此工具生成的原始时间戳不能覆盖人工定稿 SRT。
 
 ## 视频画面与字幕更新
 

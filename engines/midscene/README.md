@@ -1,6 +1,6 @@
 # @gherkai/worker-midscene
 
-gherkai 的 Midscene 执行引擎 worker：在云端浏览器（Amazon Bedrock AgentCore Browser）上执行 `.feature` 的每个 step——AI step 交给 Bedrock 上的视觉模型看图定位、操作与判定，确定性 step 走你自己写的 Playwright 函数。它由 `gherkai` 命令行按需拉起，**不必手动运行**；本机装上它，就是让 `gherkai` 能用 `midscene` 引擎执行测试。被测 UI 的语言不限，中文界面上的动作与断言与英文界面同级可靠。
+gherkai 的 Midscene 执行引擎 worker：在云端浏览器（Amazon Bedrock AgentCore Browser）上执行 `.feature` 的每个 step，标了 `@device` 的 scope 改在 AWS Device Farm（us-west-2）的 Android / iOS 真机上执行，网页与原生应用都能测——AI step 交给 Bedrock 上的视觉模型看图定位、操作与判定，确定性 step 交给你自己写的函数执行（桌面浏览器上 handler 拿到 Playwright 的页面对象，真机上拿到连到设备上那个会话的 WebdriverIO 客户端）。它由 `gherkai` 命令行按需拉起，**不必手动运行**；本机装上它，就是让 `gherkai` 能用 `midscene` 引擎执行测试。被测 UI 的语言不限，中文界面上的动作与断言与英文界面同级可靠。
 
 ## 安装
 
@@ -8,7 +8,7 @@ gherkai 的 Midscene 执行引擎 worker：在云端浏览器（Amazon Bedrock A
 npm i -g @gherkai/worker-midscene@<版本号>   # 需 Node ≥ 22；版本号须与命令行一致，用 gherkai --version 查
 ```
 
-本 worker 由命令行 `gherkai` 拉起。请先安装命令行、配置 AWS 凭证与 region，并开通 Amazon Bedrock 上默认模型与 AgentCore Browser 的访问：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
+本 worker 由命令行 `gherkai` 拉起。请先安装命令行、配置 AWS 凭证与 region，并开通 Amazon Bedrock 上默认模型与 AgentCore Browser 的访问：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md 。在真机上执行另需 us-west-2 的 AWS Device Farm 访问（设备资源固定在 us-west-2，与所配 region 无关），所需权限见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md#本机后端的凭证需要什么权限
 
 ## 最小用法：写一条确定性 step
 

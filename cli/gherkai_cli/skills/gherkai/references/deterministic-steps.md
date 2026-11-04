@@ -20,7 +20,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 
 **handler**。签名见 `references/engines.md` 第 3 节。一条 step 可按句柄种类给多份实现：第二参从单个函数换成 `{ playwright, webdriver: [...] }`（Nova Act 用字典、字段名下划线）；每个 webdriver 条目用 `uiKinds`（web / app）与 `devices`（android / ios）声明适用范围，两个数组各自独立、覆盖全部组合，缺省为全部；要在网页上下文里读写的条目声明 `requires: ["web_context"]`（此时 `uiKinds` 只能是 `["web"]`）。Android 与 iOS 选择器不同就写两个条目，不在 handler 里按平台分支。两个条目覆盖同一个（设备, 界面类型）组合在注册时就被拒。命中的 step 在当前目标上没有实现时走 AI、不顺延到别的模式。Python 侧必须是同步函数，写成 `async def` 的那一步直接记 error。handler 只拿到上下文与具名组；命中确定性 step、且在当前目标上有实现的那一步带了 DataTable 或 DocString 就记 error，多行参数只给 AI 步用（在当前目标上没有实现、改走 AI 的那一步，参数照常交给 AI）。同一 scope 的 scenario 串行共享一个浏览器会话，所以 handler 别假定页面是新鲜的、别在断言步里导航、别留下会改变后续 step 的状态（新开标签页、切换 frame 不复位）；设备 scope 同样共享一个会话、scenario 之间不重启应用，设备上的写法差异见 `references/engines.md` 第 7 节。
 
-**失败消息**。确定性 step 不产截图与模型思考，`gherkai explain` 里这一步只有一行原因。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。没有现场的失败消息在云端只剩「断言未过」四个字，人与 agent 都无从下手。
+**失败消息**。确定性 step 不产截图与模型思考，`gherkai explain` 里这一步只有一行原因（设备目标上判为 failed / error 的确定性 step 另有页面地址、控件摘要与原始控件树）。消息必须自带现场：当前页面地址、用的选择器、期望值与实际值（长文本截断）。没有现场的失败消息在云端只剩「断言未过」四个字，人与 agent 都无从下手。
 
 ## 3 等待与判定：四条规则
 
@@ -32,7 +32,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 ## 4 组织：判定逻辑与注册分离
 
 - `steps/<主题>.py` 与 `steps/<主题>.mts` 只做注册（薄壳）；判定逻辑放 `_` 前缀的辅助模块（`_checks.py`、`_checks.mts`，或整个 `_pages/` 目录），step 文件相对导入它。理由有三：判定逻辑能单测；两侧共享同一份选择器表；辅助模块不会被当成 step 文件加载（Midscene 侧一条都不注册的文件会让 worker 拒绝启动）。
-- Midscene 侧的辅助模块里 `import type { Page } from "playwright"` 只当类型用，编译期擦除；**运行期不要 import playwright**：step 文件所在目录没有 node_modules，worker 只把 `@gherkai/worker-midscene` 这一个包名重定向到自己那份，别的包名解析不到。Python 侧 `from playwright.sync_api import expect` 可以直接用，worker 环境自带。
+- Midscene 侧的辅助模块里 `import type { Page } from "playwright"` 只当类型用，编译期擦除；**运行期不要 import playwright**：worker 只把 `@gherkai/worker-midscene` 这一个包名重定向到自己那份，别的包名按 Node 的默认规则从 step 文件所在目录逐级向上查找 node_modules。项目按第 5 节装了开发依赖时，本机会解析到项目里那份 playwright（与 worker 用的不是同一份），照常加载；云端镜像里 `steps/` 旁边没有 node_modules，同一个文件会加载失败、worker 拒绝启动，所以本机运行通过不代表云端能加载。Python 侧 `from playwright.sync_api import expect` 可以直接用，worker 环境自带。
 - 两侧成对：同一条判定两份实现，模式语义相同、`description` 与 `example` 同文；改一侧同步另一侧，用 `gherkai list-deterministic --engine novaact` 与 `gherkai list-deterministic --engine midscene` 各核一遍。只写一侧，另一引擎上这一步会静默换回 AI 判定。
 - 文件按主题命名（`navigation.py`、`cart.py`），模式按用例作者的语言写，不按实现（「购物车角标是 N」，不是「cart-count 文本等于 N」）。
 

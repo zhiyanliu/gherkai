@@ -22,7 +22,7 @@
 头等约束。保证机制：
 
 - **`ReportRef = {kind: str, ref: ResourceUri, label: str | None}`**（取代旧 `{granularity: Literal["scope","act"], path}`）：
-  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ `evidence`（gherkai 自有 schema 的 step 级机读证据，[0042](./0042-step-evidence-and-explain.md)）/ `device_session`（远程访问会话开头能力探测结论的文件，scope 级、只作链接不解析，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
+  - `kind` —— **产物类型**（开放字符串，引擎自报）：`report`（完整报告页）/ `trajectory`（轨迹页）/ `summary`（数字汇总）/ `evidence`（gherkai 自有 schema 的 step 级机读证据，[0042](./0042-step-evidence-and-explain.md)）/ `device_session`（远程访问会话的诊断文件，scope 级、只作链接不解析，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8）/ 未来 `video`/`trace`/`har`…。core/gherkai_core/wire/schedule **永不读它的值、永不按它分支**，是文档化约定常量、非枚举。**「粒度」不由 kind 表达，而由 report_ref 挂在哪一级表达**——`StepResult.report_refs`=step 级、`ScenarioResult.report_refs`=scenario 级、`JobResult.report_refs`=scope 级。（旧值 `scope`/`act` 把粒度混进了 kind——`scope` 是粒度、`act` 是引擎内部动作类型；归正为纯类型维度，粒度交给挂载层级，二者正交、不重复不撞名。）
   - `ref` —— **统一指针 `ResourceUri`**，不假定是本地文件。本地产物用 `file://` 前缀；未来可是 `s3://`/`https://`。core/ReportStore **不 stat、不 fetch、不打开** ref，只索引/链接。**皮层侧按层收窄**（[0042](./0042-step-evidence-and-explain.md)）：`model / wire / schedule / ReportStore` 永不解引用不变；CLI `explain` 与 `compose.read_resource` **只对 gherkai 自有 schema 的 ref（`kind == "evidence"`）解引用**，对引擎原生产物（`report` / `trajectory` / `summary`）仍只当链接、永不解析——解引用许可绑在「内容是不是我们自己定义的 schema」上。
   - `label` —— 可选人类可读锚文本；缺省由消费端回落 `kind`。worker 可全部不报。
 - **铁律**：`core/gherkai_core/model.py`、`core/gherkai_core/wire.py`、`core/gherkai_core/schedule.py` 对 `ReportRef` 永久是**不透明搬运**。任何「按 kind 选 `<video>`/`<iframe>`」之类的渲染分支**只允许出现在 cli / WebUI 皮层**，绝不写回 core。
@@ -54,10 +54,11 @@ class ReportStore(Protocol):
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
         """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
-        读 result 的 report_refs + 各级 status/时长/成本 + step 级 votes/error_type/shortcircuited，
+        读 result 的 report_refs + 各级 status/时长/成本 + step 级 votes/error_type·message/shortcircuited，
         渲染成「判定明细树 + 产物导航」的**人看视图**（明细树见下「index.html 形态」）；
         **但不拿 status 当 CI 判定源**（判定真值在 RunResult/ResultStore，index.html 只是派生人看视图）。
         """
+    def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：云端探桶、local no-op
 ```
 
 （无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）
@@ -68,7 +69,7 @@ class ReportStore(Protocol):
 
 > **`ref` 由 worker 定，`href` 由 core 算——铁律圈的是 `ref`，不是 `href`（关键边界，别混）**：
 > - `ReportRef.ref` 指向**哪**是 **worker** 决定的——`--backend local`(subprocess) worker 产物落本地、报 `file://`；`--backend cloud`(Fargate) worker（或 subprocess+注入落点的内部预演路径，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）**自己上传 S3**、报 `s3://`（[0029](./0029-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、注入即上传）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker 产物持久化 ⊥ store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
-> - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<Nova Act 会话 id>/act_<序号>_<指令片段>.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
+> - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<Nova Act 会话 id>/act_<act id>_<指令片段>.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
 > - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。（无状态批量运行路径同守此序：RunReport 由推进器在 `try_finalize` CAS **之后**经 `reconcile.finalize_report` 写、同一失败隔离，见 [0030](./0030-realtime-persistence-seam.md) 决定三与 [0034](./0034-detached-batch-reconciler.md)）
@@ -113,7 +114,7 @@ class ReportStore(Protocol):
 
 - `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
 - **每条只含 `href`（导航链接），不含 `ref`**（曾有 `ref` 字段，随 materialize 一并移除）。理由：① manifest 是**纯派生导航视图**，`href` 承担全部导航语义、无人读 `ref`（index.html 渲染只用 `href`；全仓无生产代码回读 manifest.json）；② 若保留 `ref`，`href` 相对化后 `ref` 因铁律必须留绝对（不能相对化它）→ 变成一条**无人读却泄漏机器路径的绝对 `file://`**。删 `ref` 既消冗余又消泄漏。**原始不透明指针 `ref` 的权威落盘处收敛到 `jobs/*.json`（ResultStore 判定真值）+ 内存 `RunResult`**——未来 WebUI/CI 要原始指针应去 ResultStore 取（判定真值），不向派生 report 视图要，这反而强化了三层分层。（这是 manifest schema 契约变更，本仓无 in-repo 消费者故低风险，仍记为契约变更防漂移。）
-- index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
+- index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type·message/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
 
 ## index.html 形态
@@ -121,7 +122,7 @@ class ReportStore(Protocol):
 纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。**两大块**（皆从内存 `RunResult` 渲染）：
 
 - 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
-- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
+- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type 与失败原因原文 message（[0042](./0042-step-evidence-and-explain.md) 决策三）/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。scope 级 error 后合成的 skipped（`shortcircuited=False`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）另显「未执行（scope 级错误，原因见 job 判定）」旁注。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
 - **② 报告产物导航清单（引擎原生产物 + gherkai evidence，[0042](./0042-step-evidence-and-explain.md)）**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
 - **①②双向锚点关联**：①里挂了产物的节点行尾加 📎（同节点多产物显 📎×N、链到首条）链到②对应条目，②每条加 ↑ 链回所属树节点；关联键 = 产物挂载层级的 `(scope_id, scenario_id, step_index)` 三元组，锚点 id 纯 ASCII（`node-jN-sN-tN` 用 job/scenario 的位置序号 + step 自身 index，`ref-N` 用在 `report_index` 里的序号）——`scope_id` 可含中文/冒号，不能直接进 `#fragment`；落点 `:target` 高亮 + 平滑滚动。平铺清单表达不了「产物属于哪个 job/scenario/step」，借①的树结构补上。仍守本节「无外链 JS/CSS、单文件」：只用同文件内 fragment 链接 + 内联 CSS，零 JS。
 - 上色用内联 `<style>`。
@@ -142,7 +143,7 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
 
 ## 纯确定性用例 → 空 report_index（已知、合理、非缺陷）
 
-一个**只含确定性 step**（导航 + `@deterministic` 注册的确定性 step，零 AI step）的用例，跑出的 RunReport
+一个**只含确定性 step**（导航 + `@deterministic` 注册的确定性 step，零 AI step）的**桌面目标**用例，跑出的 RunReport
 `report_index` **为空**、`index.html` 显示「本次 run 无报告产物」的空态提示（页面文案同时点出纯确定性步骤既不产引擎报告、也不产 AI 步骤证据）。这是**有意的诚实空态**，不是 bug：
 
 - 原生报告产物**只在引擎实际执行 AI 操作时才产生**（Midscene 的 `agent.reportFile` 仅在调过
@@ -152,8 +153,9 @@ Nova worker 设 `NovaAct(logs_directory=<run 专属持久目录>)`，act/act_get
   全程可用）。空的只是「人看的原生轨迹链接」，不是判定数据。
 - **验证 Midscene scope 级归集必须用含 AI 的用例**——这不是 walkaround，是 Midscene 报告天生
   scope 级、且只在用 AI 时产生的客观事实。
+- **设备目标不在此列**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8、[0042](./0042-step-evidence-and-explain.md) 决策一的设备例外）：设备 job 正常收尾时挂一条 scope 级 `kind=device_session` 链接，判为 failed / error 的确定性与导航 step 也产一份 `acts` 为空的 evidence，故纯确定性的设备用例 `report_index` 通常不空。
 
-**但这暴露一个上游缺口**（非本 ADR 范围）：确定性 step **不产任何可观测产物**——连「检查了哪个
+**但这暴露一个上游缺口**（非本 ADR 范围）：桌面目标上确定性 step **不产任何可观测产物**——连「检查了哪个
 URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大量用确定性 step 的团队，其 RunReport
 人看部分会长期空。这是「确定性 step 产物可观测性」问题，留待后续（见下「留口子」），本 ADR 的 RunReport
 只负责归集**已有的**产物。
@@ -162,7 +164,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 - **现在做（v1.0）**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
 - **留口子不实现**：
-  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性 step」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。
+  - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性 step」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。设备目标上判为 failed / error 的确定性与导航 step 已产一份只含界面快照（地址、控件摘要、原始控件树）的 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一的设备例外，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），由 worker 采集、不经 handler；本口子要的 handler 自产产物在两类目标上都仍未实现，跑后完全看不到产物的仍是桌面目标的确定性 step 与设备上 passed 的确定性 step。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。
 
 ## 重议
