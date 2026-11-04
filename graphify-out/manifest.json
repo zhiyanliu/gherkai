@@ -260,8 +260,8 @@
     "semantic_hash": ""
   },
   "README.md": {
-    "mtime": 1793697865.3744912,
-    "ast_hash": "ba166872bbf056dfb2ce4b309f233fc4",
+    "mtime": 1793764264.1408517,
+    "ast_hash": "60bf089e9cb8100c09b1fa8112690925",
     "semantic_hash": ""
   },
   "cli/README.md": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1793534876.8502781,
-    "ast_hash": "79370ef51221e6dea5fd218d146ed8fd",
+    "mtime": 1793765110.9666386,
+    "ast_hash": "57b97347aafd61d8ceda32ce208d95a3",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -1450,8 +1450,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/writing-features.md": {
-    "mtime": 1793670550.2668817,
-    "ast_hash": "d78c8d9fcbdf60374a986f2d9be37581",
+    "mtime": 1793764264.141161,
+    "ast_hash": "90dd317d3652b7d4aea77b1887dd24cc",
     "semantic_hash": ""
   },
   "tools/build_diagrams.mjs": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793761472.7434914,
-    "ast_hash": "2a68fcbd4d36ef332571d90dc8cac992",
+    "mtime": 1793765035.403995,
+    "ast_hash": "c6d5f09ea6c0559b476e0cd84274e36e",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1900,13 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793761472.7439604,
-    "ast_hash": "cb8d50b3398358489c540c4ffa8cbf63",
-    "semantic_hash": ""
-  },
-  "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793761472.7438269,
-    "ast_hash": "9a6b801bcb5b55464f4243115720944b",
+    "mtime": 1793765514.3866422,
+    "ast_hash": "3eb907edfc2081128d62f970ac7aee94",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
