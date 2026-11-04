@@ -58,7 +58,7 @@ scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界�
 
 newSession 的能力集由「Appium 建连与上下文切换」块单点组装：网页目标带 `browserName`（Android 为 Chrome，iOS 为 Safari）；应用目标带 `appium:app`（安装包的预签名地址，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）、`appium:autoLaunch: false` 与 `appium:noReset: true`，两个平台都**不带**应用标识能力（`appium:appPackage` / `appium:appActivity` / `appium:bundleId`）；两种目标都带 `appium:newCommandTimeout`（决策 6 的 ⑧）。Appium 服务端的大版本不在能力集里选：它是 Device Farm 建会话的会话参数 `appium:version`（0051 决策 3）。应用目标关掉自动启动与重置，是因为启动由 worker 显式 `activateApp` 并做启动采样（0051 决策 9），不让 Appium 在建会话时按自己的缺省启动或重置被测应用。不带应用标识能力有两层原因：Android 实测中，Device Farm 的交互端点把 `appium:appPackage` 当作「用已安装应用」路线的信号，与 `appium:app` 同发时跳过安装包下载、却仍把 `appium:app` 改写成主机本地路径，驱动随即报文件不存在（带 `appium:appPackage` 时预签名、公网与 S3 URI 三种地址、Appium 2 与 3 全部失败，移除后安装成功；iOS 的能力集本就不带 bundleId、不受影响，0051 决策 9）；两平台均不提供应用标识能力，遵循官方区分的「安装包」与「已安装应用」两条路线，iOS 携带 `appium:bundleId` 时是否发生同一下载故障未做同类对照；驱动能从安装包读出包名或 bundle id，worker 启停与采样应用用的标识走 `activateApp` / `terminateApp` / `queryAppState` 的命令参数（0051 决策 9）。关掉自动启动后也不需要 `appActivity`：自动启动按启动器 intent 找活动，维基百科客户端的启动器 intent 匹配多个活动会让它失败，而 `activateApp` 不经这条路。被拒方案「Android 另带 `appium:appPackage` 让驱动识别被测应用」正因上述端点行为而弃。
 
-设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。
+设备模块动态加载：桌面路径与 `--capabilities` 不加载 WebdriverIO 与 Device Farm SDK。为什么：能力自述要求零费用、快速返回（[0036](./0036-deterministic-capability-discovery.md)），桌面使用方不应为设备依赖付启动成本。实测（worker 容器镜像）：`--capabilities` 约 0.3 秒；在容器里删掉 webdriverio 之后 `--capabilities` 照常返回，而 Dockerfile 里那条 import 设备接缝的冒烟随即失败——动态加载与冒烟的拦截都成立。
 
 ### 4. 驱动适配器：平台专属命令只在这里出现
 
@@ -242,7 +242,7 @@ newSession 的能力集由「Appium 建连与上下文切换」块单点组装�
 - **换台重建**：真机上只见过一次厂商 ROM 拒装驱动辅助包（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据），无法按需复现；换台路径（停被替换的会话、剩余预算核对、第二台 newSession）只由虚拟时钟与假 Device Farm API 的测试覆盖。
 - **释放阶段的网络退化**（归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5）：Get / Stop 的 2xx 响应体读到一半失败、云端事件出口在退化网络下的单条写入耗时，只在本机网络层模拟核过；63.5 秒的收尾下限没有在退化条件下校准，无法人工制造到 us-west-2 的丢包。
 - **iOS Safari 建连实例超时的归属**：见实测依据「超时语义」段末。
-- **`deleteSession` 在途与 scenario 之间恰好年龄到点的亚秒窗口**：正常收尾里 `deleteSession` 发出到返回不到 1 秒，两次停止信号都落在它之前（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据）；年龄后备的实测到点都落在 step 执行中。这两个窗口从外部分不出，不再追。
+- **`deleteSession` 在途与 scenario 之间恰好年龄到点的亚秒窗口**：正常收尾里 `deleteSession` 发出到返回不到 1 秒，两次停止信号都落在它之前（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 实测依据）；年龄后备的实测到点都落在 step 执行中；云端正常收尾里 `device-session.json` 实时上传在途的窗口同样子秒级，按事件表盯 `scenario_done` 再 `StopTask` 三次都没有落进去。这三个窗口从外部分不出，不再追。
 - **确定性 handler 收不到中止信号**：会话年龄到点时 `execute` 撤销令牌并中止 Agent 的 act；结果未知时只置标志、中止 act 并拒绝之后的有副作用命令，只读命令照常放行。两种情形下 `execute` 都等 handler 自己返回：handler 里不发设备命令的长等待、或捕获了拒绝继续等待的写法，都没有强制返回的上界。年龄后备的真机样本里 handler 没有捕获拒绝、下一次截图被拒即结束，到点与 step 结束相差 5 秒（它的命令间隔是 30 秒）。这是 [0050](./0050-deterministic-step-handles-and-testing.md) 决策 2 的 ctx 形态所致（七个字段里没有中止信号），要不要给 ctx 加信号属 0050 的新决策。
 
 ## 边界与互链

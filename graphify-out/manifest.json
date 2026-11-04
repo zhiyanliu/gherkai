@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1793606484.0109735,
-    "ast_hash": "eed289ad2f8dcc8f39e9102dd0eca209",
+    "mtime": 1793758857.1808896,
+    "ast_hash": "5cbdf106696b6e8a51347bfe427ccfe8",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1230,8 +1230,8 @@
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
-    "mtime": 1793677937.6571414,
-    "ast_hash": "",
+    "mtime": 1793697865.3763316,
+    "ast_hash": "936ff94f2f6aacb2cffeef2ad5a7e5c1",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
@@ -1875,8 +1875,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0049-worker-capabilities-targets-keys.md": {
-    "mtime": 1793358249.416378,
-    "ast_hash": "a1c14f10e5c2a8f5ba904aef1dd275e3",
+    "mtime": 1793758857.1810253,
+    "ast_hash": "c48244ce77b6da263478278d58eaee01",
     "semantic_hash": ""
   },
   "docs/adr/0050-deterministic-step-handles-and-testing.md": {
@@ -1885,13 +1885,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793696741.515671,
-    "ast_hash": "19c14c23fe090cd7a04172183b1b3dbd",
+    "mtime": 1793761472.7432144,
+    "ast_hash": "3f5bae5e09af62a3c013dc611e2066e1",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1793697132.4414597,
-    "ast_hash": "504c822ecccebc919140d59e4743df6b",
+    "mtime": 1793761472.7434914,
+    "ast_hash": "2a68fcbd4d36ef332571d90dc8cac992",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1900,13 +1900,13 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793697949.3910668,
-    "ast_hash": "c15f5b746e4fde8c64bf3359bac18aae",
+    "mtime": 1793761472.7439604,
+    "ast_hash": "cb8d50b3398358489c540c4ffa8cbf63",
     "semantic_hash": ""
   },
   "docs/journey/0015-mobile-devices-implementation-batches.md": {
-    "mtime": 1793696550.8414183,
-    "ast_hash": "ba345c5ee1f7bc89394b29abd58e04aa",
+    "mtime": 1793761472.7438269,
+    "ast_hash": "9a6b801bcb5b55464f4243115720944b",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
