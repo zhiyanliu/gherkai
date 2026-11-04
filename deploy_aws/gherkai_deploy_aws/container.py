@@ -115,10 +115,10 @@ class ContainerEngine:
             out = subprocess.run([self.binary, "version", "--format", "{{.Server.Version}}"],
                                  capture_output=True, text=True, timeout=30)
         except (OSError, subprocess.SubprocessError) as exc:
-            return f"`{self.binary} version` 起不动：{exc}"
+            return f"无法运行 `{self.binary} version`：{exc}"
         if out.returncode != 0:
             return (f"`{self.binary}` 在 PATH 上但连不上 daemon（exit {out.returncode}）："
-                    f"{_tail(out.stderr) or _tail(out.stdout)}\n先把容器引擎的 daemon 起起来。")
+                    f"{_tail(out.stderr) or _tail(out.stdout)}\n请先启动容器引擎的 daemon。")
         return None
 
     # ---- 五动词 ----
@@ -193,7 +193,7 @@ class ContainerEngine:
         try:
             out = subprocess.run([self.binary, *argv], capture_output=True, text=True, input=stdin_text)
         except OSError as exc:
-            raise ContainerError(f"起不动 `{self.binary} {argv[0]}`：{exc}") from exc
+            raise ContainerError(f"无法启动 `{self.binary} {argv[0]}`：{exc}") from exc
         if out.returncode != 0:
             raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（exit {out.returncode}）："
                                  f"{_tail(out.stderr) or _tail(out.stdout)}")
@@ -204,7 +204,7 @@ class ContainerEngine:
         try:
             rc = subprocess.run([self.binary, *argv]).returncode
         except OSError as exc:
-            raise ContainerError(f"起不动 `{self.binary} {argv[0]}`：{exc}") from exc
+            raise ContainerError(f"无法启动 `{self.binary} {argv[0]}`：{exc}") from exc
         if rc != 0:
             raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（exit {rc}）——诊断见上方 {self.binary} 输出。")
 

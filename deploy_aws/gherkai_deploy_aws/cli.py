@@ -281,12 +281,12 @@ class Provider:
         )
         parser.add_argument(
             "--vpc", default=None, type=_vpc_flag, metavar="取值",
-            help="VPC 来源三种取值：default（账户默认 VPC）/ new（本 stack 新建，2-AZ 零 NAT）/ vpc-<id>（复用现有）。"
+            help="VPC 来源三种取值：default（账户默认 VPC）/ new（本 stack 新建，跨两个可用区、不建 NAT 网关）/ vpc-<id>（复用现有）。"
                  "deploy / --diff / --synth-only / destroy 必给、无隐式默认；--bootstrap 不需要（账户级动作、不合成 stack）",
         )
         parser.add_argument(
             "--stop-timeout", default=None, type=int, metavar="N",
-            help="worker container 的 SIGTERM→SIGKILL 宽限秒数（默认 120，Fargate 硬上限 120）",
+            help="worker container 收到 SIGTERM 后、被 SIGKILL 强制结束前的宽限秒数（默认 120，Fargate 上限 120）",
         )
         parser.add_argument(
             "--refresh-context", action="store_true",
@@ -389,7 +389,7 @@ class Provider:
 
     @staticmethod
     def _add_container_engine_flag(parser: argparse.ArgumentParser) -> None:
-        """`--container-engine`（ADR 0038「容器引擎口子」）：这一期只 docker，别的名字以退出码 2 结束、不静默回落。"""
+        """`--container-engine`（ADR 0038「容器引擎口子」）：目前只支持 docker，其它名字以退出码 2 结束、不静默回落。"""
         from gherkai_deploy_aws.container import (
             CONTAINER_ENGINE_ENV,
             DEFAULT_CONTAINER_ENGINE,
@@ -399,7 +399,7 @@ class Provider:
         parser.add_argument(
             "--container-engine", default=argparse.SUPPRESS, metavar="名",
             help=f"用哪个容器引擎（默认 {DEFAULT_CONTAINER_ENGINE}，或 env {CONTAINER_ENGINE_ENV}）；"
-                 f"这一期只实装 {'/'.join(SUPPORTED_ENGINES)}",
+                 f"目前只支持 {'/'.join(SUPPORTED_ENGINES)}",
         )
 
     @staticmethod
@@ -425,7 +425,7 @@ class Provider:
         toolchain = self._toolchain_gate()
         if toolchain is not None:
             return toolchain
-        # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——这一期 deploy 机器需要容器引擎，
+        # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——deploy 机器需要容器引擎，
         # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，以退出码 2 结束、绝不动账户；
         # - **装了但不可用 / 没装** → 只警告：退出码语义归 cdk 之后的四步（账户已改 → 退出码 1、重新运行幂等收敛）。
@@ -545,7 +545,7 @@ class Provider:
             try:
                 return subprocess.run(argv, cwd=str(work_dir), env=env).returncode
             except FileNotFoundError as exc:
-                print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
+                print(f"无法启动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
 
     # ---- 命令面（worker 镜像族，ADR 0038「命令族」；前端经 args._deploy_verb 分派到 push_worker / list_workers / delete_worker）----
@@ -810,7 +810,7 @@ class Provider:
             try:
                 rc = subprocess.run(argv, cwd=str(work_dir), env=env).returncode
             except FileNotFoundError as exc:  # cdk/npx 在 which 之后消失（极少见）——别抛 traceback
-                print(f"起不动 cdk CLI：{exc}", file=sys.stderr)
+                print(f"无法启动 cdk CLI：{exc}", file=sys.stderr)
                 return EXIT_PRECONDITION
             if work_ctx.exists():  # cdk 查过/更新过 → 存回缓存（失败与否都存：查到的值本身是对的）
                 ctx_cache.parent.mkdir(parents=True, exist_ok=True)

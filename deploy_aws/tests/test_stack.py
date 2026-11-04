@@ -504,7 +504,7 @@ def test_task_role_resource_arns_narrowed():
 
 # ---- Device Farm 授权（ADR 0033 task role 权限表 devicefarm / 应用前缀各行、ADR 0051 决策 9 与 10）----
 _MIDSCENE_DF_ACTIONS = {
-    "devicefarm:ListDevices", "devicefarm:GetDevice", "devicefarm:CreateRemoteAccessSession",
+    "devicefarm:ListDevices", "devicefarm:CreateRemoteAccessSession",
     "devicefarm:GetRemoteAccessSession", "devicefarm:StopRemoteAccessSession", "devicefarm:ListRemoteAccessSessions",
 }
 
@@ -519,7 +519,7 @@ def test_midscene_device_farm_grants_follow_the_permission_table():
     stmts = _role_statements(_template(context=DF_CONTEXT), "TaskRoleMidscene")
 
     granted = {a for st in stmts for a in _as_list(st["Action"]) if a.startswith("devicefarm:")}
-    assert granted == _MIDSCENE_DF_ACTIONS, f"设备动作应恰为权限表的 6 个：{sorted(granted)}"
+    assert granted == _MIDSCENE_DF_ACTIONS, f"设备动作应恰为权限表的 5 个：{sorted(granted)}"
 
     def resources_of(action: str) -> list[set[str]]:
         found = _statements_with(stmts, action)
@@ -529,11 +529,7 @@ def test_midscene_device_farm_grants_follow_the_permission_table():
 
     # ListDevices：SAR 无资源类型，只出现在资源为 * 的 statement
     assert all(res == {"*"} for res in resources_of("devicefarm:ListDevices"))
-    # GetDevice：设备 ARN，账户段为空（设备是 AWS 公有资源）
-    for res in resources_of("devicefarm:GetDevice"):
-        assert res == {DF_DEVICE_ANY}, res
-        assert all(r.split(":")[4] == "" for r in res), f"设备 ARN 的账户段应为空：{res}"
-    # 建会话：同一条列项目 ARN 与 device:*（SAR 要求 project 与 device 同时授权）
+    # 建会话：同一条列项目 ARN 与 device:*（SAR 要求 project 与 device 同时授权；设备是 AWS 公有资源，DF_DEVICE_ANY 的账户段为空）
     for res in resources_of("devicefarm:CreateRemoteAccessSession"):
         assert res == {DF_PROJECT_ARN, DF_DEVICE_ANY}, res
     # 会话查询与停止：同一条列会话前缀与项目 ARN，缺一种即失败

@@ -37,13 +37,42 @@
       "text": "\"https://example.com",
       "hit": true,
       "url": "https://example.com",
-      "note": "引号不配对：模式命中，handler 记 error"
+      "note": "只有开头一侧带引号：模式命中，handler 记 error"
     },
     {
       "text": "https://example.com\"",
       "hit": true,
       "url": "https://example.com",
-      "note": "引号不配对：模式命中，handler 记 error"
+      "note": "只有结尾一侧带引号：模式命中，handler 记 error"
+    },
+    {
+      "text": "\"https://example.com/.",
+      "hit": true,
+      "url": "https://example.com/.",
+      "note": "只有开头一侧带引号、地址末尾是标点：整句带引号，末尾标点规则不适用，命中、handler 记 error（与结尾一侧对称）"
+    },
+    {
+      "text": "https://example.com/.\"",
+      "hit": true,
+      "url": "https://example.com/.",
+      "note": "只有结尾一侧带引号、引号前是标点：命中、handler 记 error（与开头一侧对称）"
+    },
+    {
+      "text": "\"https://example.com/。",
+      "hit": true,
+      "url": "https://example.com/。",
+      "note": "只有开头一侧带引号、地址末尾是全角句号：同样命中、handler 记 error"
+    },
+    {
+      "text": "https://example.com/。\"",
+      "hit": true,
+      "url": "https://example.com/。",
+      "note": "只有结尾一侧带引号、引号前是全角句号：同样命中、handler 记 error"
+    },
+    {
+      "text": "https://example.com/\".",
+      "hit": false,
+      "note": "结尾引号之外还有标点：不是整句一个地址，走 AI"
     },
     {
       "text": "\"https://example.com/.\"",
@@ -140,11 +169,6 @@
       "text": "https://en.wikipedia.org/wiki/Foo_(bar)",
       "hit": false,
       "note": "地址本身以括号结尾：不带引号时走 AI，要导航就加引号"
-    },
-    {
-      "text": "\"https://example.com/.",
-      "hit": false,
-      "note": "引号不配对且末尾标点：不命中、走 AI"
     },
     {
       "text": "\"https://example.com/\" \"https://example.org/\"",

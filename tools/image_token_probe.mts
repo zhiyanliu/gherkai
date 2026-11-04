@@ -6,7 +6,7 @@
 // 的估算（带图请求减纯文本对照）。本仓库在签名前删掉 `detail: "original"`，Bedrock 对无 detail 的图是否在服务端缩图、图片
 // token 是否随尺寸下降，都只能靠这张表回答。
 //
-// 运行（要 AWS 凭证与 region；跳板机上）：
+// 运行（需要 AWS 凭证与 region，且凭证能在该 region 的 Bedrock 上调用生产所用的模型）：
 //   cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx ../../tools/image_token_probe.mts <png>... [--k 1,2,2.625,3] [--n 3] [--json out.json]
 // 模型取 lib/agentcore-sigv4 的 MODEL（可用 MIDSCENE_MODEL_ID 覆盖），与生产同一个。请求只问一句「用一个词回答图里是什么」、
 // max_completion_tokens 16（GPT-5 系列不接受 max_tokens），花费可忽略。输出不含任何凭证；打印的只有尺寸、字节数与 token 数。

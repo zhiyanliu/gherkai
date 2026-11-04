@@ -124,3 +124,7 @@ docs/diagrams/*.delivery.json
 # 演示材料的制作缓存；正式交付在 docs/presentations/
 /tools/presentations/work/
 /.chart-data-*/
+
+# graphify hook install 生成的两个 git hook 带本机 python 绝对路径（_PINNED），只由安装器生成、不入库（tools/git-hooks/ 只入库 pre-commit）
+tools/git-hooks/post-commit
+tools/git-hooks/post-checkout

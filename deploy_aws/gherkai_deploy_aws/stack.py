@@ -450,8 +450,8 @@ class BackendStack(Stack):
         any_device = f"arn:aws:devicefarm:{df_region}::device:*"  # 设备是 AWS 公有资源，ARN 的账户段为空
         # ListDevices：SAR 无资源类型，结构上只能 `*`（与 AgentCore 的 Connect×2 同性质）。单独写一条、不与可收窄的动作混写；
         # 合成时 CDK 的策略合并会把它并进同为 `*` 的 Connect 那一条，合并后那条里仍只有只能用 `*` 的动作。
+        # 不授 GetDevice：worker 不调用它（直接给设备 ARN 时不列举、直接建会话，按系统版本选设备只调 ListDevices，ADR 0051 决策 3）。
         role.add_to_policy(iam.PolicyStatement(actions=["devicefarm:ListDevices"], resources=["*"]))
-        role.add_to_policy(iam.PolicyStatement(actions=["devicefarm:GetDevice"], resources=[any_device]))
         # 建会话：SAR 要求 project 与 device 两种资源同时授权；筛选设备时无法预知选中哪台，故设备用通配。
         role.add_to_policy(iam.PolicyStatement(
             actions=["devicefarm:CreateRemoteAccessSession"],

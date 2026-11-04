@@ -841,7 +841,7 @@ def _cmd_doctor(args) -> int:
                                                   **_config_layers(args))
         except Exception as e:
             add("aws", "identity", False, cred_fail.format(e=e))
-            add("backend", "reachability", False, "未查：凭证先过不了", required=False)
+            add("backend", "reachability", False, "未查：AWS 身份检查未通过", required=False)
         else:
             _doctor_cloud(args, target, add, cred_fail)
 
@@ -871,14 +871,14 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
     """
     if target.region is None:
         add("aws", "region", False, "没解析出 region：给 --region，或设 AWS_REGION / AWS_DEFAULT_REGION，或在配置文件 [common] 里给 region，或让 --profile 指的 profile 配置里带 region")
-        add("backend", "reachability", False, "未查：region 还没解析出来", required=False)
+        add("backend", "reachability", False, "未查：region 未能解析", required=False)
         return
     add("aws", "region", True, target.region)
     try:
         ident = compose.probe_aws_identity(region=target.region, profile=target.profile)
     except Exception as e:
         add("aws", "identity", False, cred_fail.format(e=e))
-        add("backend", "reachability", False, "未查：凭证先过不了", required=False)
+        add("backend", "reachability", False, "未查：AWS 身份检查未通过", required=False)
         return
     add("aws", "identity", True, f"身份 {ident['arn']}")
     backend_version = None
