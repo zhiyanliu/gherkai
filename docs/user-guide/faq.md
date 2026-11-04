@@ -12,11 +12,11 @@ gherkai 不是它们的插件，也没有迁移命令：`.feature` 的语法基�
 
 ### 它在什么浏览器里运行？能测移动端视口，或换成 Firefox、Safari 吗？
 
-桌面 scope 在云端托管的 Chromium 会话里执行（每个 scope 一个），没有浏览器种类、窗口尺寸或设备模拟这类设置。要测移动端，不用模拟视口：给 scope 加 `@device:android` 或 `@device:ios` 标签，Midscene 引擎会在 AWS Device Farm 的真机上执行——Android 用设备上的 Chrome，iOS 用 Safari，这也是唯一能测到 Safari 的方式；打 `@app:<别名>` 还能测你自己的 Android / iOS 应用安装包。桌面侧不能换成 Firefox 或 Safari。写法见[编写用例](./writing-features.md)，设备与安装包的配置见[配置](./configuration.md)。
+桌面 scope 在云端托管的 Chromium 会话里执行（每个 scope 一个），没有浏览器种类、窗口尺寸或设备模拟这类设置。要测移动端，不用模拟视口：给 scope 加 `@device:android` 或 `@device:ios` 标签，Midscene 引擎会在 AWS Device Farm 的真机上执行——Android 用设备上的 Chrome，iOS 用 Safari，这也是唯一能测到 Safari 的方式；添加 `@app:<别名>` 标签还能测你自己的 Android / iOS 应用安装包。桌面侧不能换成 Firefox 或 Safari。写法见[编写用例](./writing-features.md)，设备与安装包的配置见[配置](./configuration.md)。
 
 ### 测真机要多少钱？必须用 AWS 的设备吗？
 
-真机只能用 AWS Device Farm（us-west-2）上的公共设备，按设备分钟计费，按量约 0.17 美元每分钟；每个设备 scope 占一个远程访问会话，除了用例本身的执行时间，服务商准备设备（约 1 到 2.5 分钟）与停止后的收尾也计入，排队等待不计。一条五步左右的用例一次大约 3 到 5 设备分钟，再加 AI 步的模型费用。每月用量大时可以在 AWS 购买不计量的设备槽位并把 `billing-method` 设为 `UNMETERED`；没有槽位时这样设会在准备阶段就被服务商结束。费用口径以你的 AWS 账单为准，量级与计费口径见[运行与结果](./running-and-results.md#费用量级)。
+真机只能用 AWS Device Farm（us-west-2）上的公共设备，按设备分钟计费，按量约 0.17 美元每分钟；每个设备 scope 占一个远程访问会话，除了用例本身的执行时间，服务商准备设备的时间（约 1 到 2.5 分钟）通常也计费，停止后的收尾可能继续计费，排队等待不计。一条五步左右的用例一次大约 3 到 5 设备分钟，再加 AI 步的模型费用。每月用量大时可以在 AWS 购买不计量的设备槽位并把 `billing-method` 设为 `UNMETERED`；没有槽位时这样设会在准备阶段就被服务商结束。费用口径以你的 AWS 账单为准，量级与计费口径见[运行与结果](./running-and-results.md#费用量级)。
 
 ### 想先试一下，必须先在 AWS 里部署一整套云端后端吗？
 

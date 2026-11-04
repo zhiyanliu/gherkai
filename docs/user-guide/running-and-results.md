@@ -195,7 +195,7 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 
 ## 费用量级
 
-`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话；设备目标为 Device Farm 远程访问会话，按设备分钟计费，从服务商开始准备设备起算（并发槽位满时的排队等待不计费），准备设备到可用的时间（约 1 到 2.5 分钟）与停止会话后的收尾都计入，一个设备 scope 一个会话）。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
+`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话；设备目标为 Device Farm 远程访问会话，按设备分钟计费，从服务商开始准备设备起算（并发槽位满时的排队等待不计费），准备设备到可用的时间（约 1 到 2.5 分钟）通常计费，停止会话后的收尾可能继续计费，一个设备 scope 一个会话）。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
 
 ## 机读输出
 
