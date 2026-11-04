@@ -120,8 +120,8 @@
     "semantic_hash": "22dabb28f8d1742bebdc1553241300bc"
   },
   "core/tests/test_schedule.py": {
-    "mtime": 1793506443.2962604,
-    "ast_hash": "9e53e943fd7431b3eaf8277af161054e",
+    "mtime": 1793762251.3949585,
+    "ast_hash": "d3717a5de2dc099d1b8b4b82e7f0915e",
     "semantic_hash": ""
   },
   "core/tests/test_sqlite_event_log.py": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1793697865.375345,
-    "ast_hash": "b52381bde33be09709f5448025f8b76a",
+    "mtime": 1793762143.484766,
+    "ast_hash": "1fb31b58d5755aa46a4c24eda1da2210",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
@@ -1480,8 +1480,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/faq.md": {
-    "mtime": 1793697949.390879,
-    "ast_hash": "0bb782a1f20750d0345175e4bd84b194",
+    "mtime": 1793762143.4843493,
+    "ast_hash": "2e731c1d7799e5031ddd78053d9ad557",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-layers.svg": {
@@ -1885,8 +1885,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1793761472.7432144,
-    "ast_hash": "3f5bae5e09af62a3c013dc611e2066e1",
+    "mtime": 1793762208.9858398,
+    "ast_hash": "25d325ef6e0445969a52c88ecb276c70",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {

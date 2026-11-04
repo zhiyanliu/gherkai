@@ -953,6 +953,36 @@ def test_abort_decided_before_deadline_stays_aborted_when_deadline_passes_during
     assert [s.release for s in v.sessions] == ["confirmed"] and "未能确认停止" not in (v.message or "")
 
 
+def test_attempted_session_without_arn_plus_abort_stays_aborted_and_lists_the_attempt():
+    """0034 对拍矩阵「无 ARN 的未知 Create 加取消」的取消组合：设备 job 只发出 attempted 的 session_opened（结果未知的创建尝试，没有 ARN），
+    另一 job 崩溃触发 fail-fast 中止；停止后到达的 attempted session_closed(unconfirmed) 照常归约。判定仍为 ABORTED（中止先于 deadline，
+    不是 release_failed），U 非空时 message 追加「未能确认停止」提示并把这次尝试标为结果未知的创建尝试；两个计量键都不计 attempted。"""
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    crash_now = threading.Event()
+
+    def crash_gen(job):
+        yield ScenarioStarted(scenario_id="c:0")
+        crash_now.wait(timeout=5)
+        raise RuntimeError("crash job 崩了")
+
+    def on_event(scope_id, i):
+        if scope_id == "v":
+            crash_now.set()
+
+    tail = [SessionClosed(scope_id="v", name="n", release="unconfirmed", session_id=None, observed_s=None)]
+    engine = FakeEngine({"v": [SessionOpened(scope_id="v", name="n", origin="attempted", session_id=None)], "c": crash_gen},
+                        on_event=on_event, tail_after_stop={"v": tail}, tail_delay_s=0.6)
+    res = schedule(_rm([_job("v", timeout_s=5.0, device="android"), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0))
+    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    assert (v.status, v.error_type) == (Status.ABORTED, None)
+    assert v.session_id is None
+    assert [(x.origin, x.release, x.session_id) for x in v.sessions] == [("attempted", "unconfirmed", None)]
+    assert (v.device_observed_s, v.device_observed_missing) == (0.0, 0)  # attempted 不计入两个计量键
+    assert "未能确认停止" in (v.message or "") and "结果未知的创建尝试" in (v.message or "")
+
+
 def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_finalize():
     """事件流中的普通异常（解析失败 / sink 抛错）后仍向 worker 发停止请求（别留孤儿进程）；起 worker 失败以退出码未知进终结函数：
     消息保留「起 worker 失败」，已过 deadline 的按首次仲裁记 timeout。"""
