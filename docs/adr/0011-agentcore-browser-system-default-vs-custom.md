@@ -1,4 +1,4 @@
-# AgentCore 浏览器层：spike 用系统默认，接内网真实系统时切自建 custom browser
+# AgentCore 浏览器层：默认用系统 browser，被测系统不能经隧道暴露、或需自定义证书 / 审计录像 / enterprise policy 时切自建 custom browser
 
 > **Status:** Accepted
 

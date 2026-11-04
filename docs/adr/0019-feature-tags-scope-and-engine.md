@@ -28,7 +28,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 
 ### `@timeout:<N>`（job 墙钟预算——tag 体系的第三个成员，随 [0034](./0034-detached-batch-reconciler.md)「job timeout」节加入）
 - 语义同为 **scope 级属性**：本 scope（=job）最多允许跑 N 秒（墙钟，从推进器 claim 起算、含启动开销）。N 须 >0（声明预算，0/负值无意义 → FeatureContractError）。
-- 声明/冲突**完全复刻 `@engine:` 的两条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → FeatureContractError（不静默取某个）。**缺省按目标**：未标 → 显式给出的 `--default-job-timeout`（命令行选项或配置文件 `[common]` 的 `default-job-timeout`；本项没有环境变量层）；都没给 → 目标缺省（桌面 scope 300 秒；设备 scope 为获取预算加 900 秒）。`--default-job-timeout` 的非正值只表示非设备 scope 不超时；设备 scope 不存在「不超时」，tag 或显式正值低于获取预算加 180 秒 → FeatureContractError（可能还没拿到设备就被判超时）。覆盖与校验的顺序、两层、命名、载体=definition、三路 enforce 见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，此处只定 tag 语义。
+- 声明/冲突**完全复刻 `@engine:` 的两条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → FeatureContractError（不静默取某个）。**缺省按目标**：未标 → 显式给出的 `--default-job-timeout`（命令行选项或配置文件 `[common]` 的 `default-job-timeout`；本项没有环境变量层）；都没给 → 目标缺省（桌面 scope 300 秒；设备 scope 为获取预算加 900 秒）。`--default-job-timeout` 的非正值只表示非设备 scope 不超时；设备 scope 不存在「不超时」，tag 或显式正值低于获取预算加 180 秒 → FeatureContractError（可能还没拿到设备就被判超时）。覆盖与校验的顺序、两层、命名、载体=definition、三路 enforce 见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，设备 scope 的缺省墙钟与下限见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，此处只定 tag 语义。
 
 ## 示例
 

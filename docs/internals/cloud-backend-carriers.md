@@ -84,7 +84,7 @@
 
 cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant 不影响正在运行的 run」的全部根据：
 
-1. preflight 把 `--worker-variant`（缺省即默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 中仍存在（三相时序见下图）；任一环缺失即以退出码 2 结束，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
+1. preflight 把 `--worker-variant`（缺省即默认指针）解析成**本 run 用到的每个引擎**的 task-def revision，三环校验：SSM 有当前版本的映射 → 该 revision 仍 `ACTIVE` → 该 digest 在 ECR 中仍存在（三个阶段的先后见下图）；任一环缺失即以退出码 2 结束，**绝不回落**默认指针 / family 最新 ACTIVE / 模板 revision。
 2. 解析结果写进 definition：`RunMeta.worker_variant`（人读）+ `RunMeta.worker_task_defs`（引擎到 revision ARN 的映射），同一批 ARN 另以扁平形式写入 runs 表 STATE item 的顶层属性 `worker_task_def_arns`。
 3. 云端推进器（kicker / reconciler）与前台 `run` 的 `FargateEngine` 一律**照 definition 起 task**，用显式 revision、永不用 family 取最新；revision 的镜像栏是 `repo@sha256:<digest>`。
 4. 结构版本不是后端所认那一版的提交记录（由更早或更新版本的 CLI 写出），以及 definition 里没有 `worker_task_defs` 的提交记录，都**不被执行**：推进器把该 run 标为 `error`、原因写进 run 级 `message`（`status` 可见），不按默认指针解析；同批别的 run 不受影响（events Stream 一批含多个 run，向外抛异常才会让该批次重投后丢弃）。

@@ -1601,7 +1601,7 @@
   },
   "docs/diagrams/cloud-backend-upgrade-windows.json": {
     "mtime": 1793785211.8839462,
-    "ast_hash": "a6285743b3592bf047013c3aa197584f",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
@@ -1641,7 +1641,7 @@
   },
   "docs/diagrams/getting-started-component-ownership.json": {
     "mtime": 1793783692.90534,
-    "ast_hash": "e3934ca5e4c4b2b97e60a449e3efaefa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
@@ -1661,7 +1661,7 @@
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793784736.3557057,
-    "ast_hash": "b3cfb8f74dacbd8e63b5d652d89f93c0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
@@ -1915,8 +1915,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/navigation-address-cases.json": {
-    "mtime": 1792993076.116232,
-    "ast_hash": "",
+    "mtime": 1793785149.1404114,
+    "ast_hash": "bee81e75070216e00de3e736097c4c39",
     "semantic_hash": ""
   },
   "cli/tests/test_engines_matrix.py": {

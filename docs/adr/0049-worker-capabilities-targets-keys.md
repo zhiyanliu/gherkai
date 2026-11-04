@@ -1,6 +1,6 @@
 # 0049. worker 能力自述增键：`targets`、step 级 `targets` 与 `max_session_s`
 
-> **Status:** Accepted（2026-10-15）——在 [0036](./0036-deterministic-capability-discovery.md) 决策 5 的能力自述对象上增键，`schema_version` 仍为 1；测试目标的声明与拒绝规则归 [0048](./0048-test-targets-device-and-ui-kind.md)。决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 加 `requires` 与会话预热支持键。
+> **Status:** Accepted（2026-10-15）——在 [0036](./0036-deterministic-capability-discovery.md) 决策 5 的能力自述对象上增键，`schema_version` 仍为 1；测试目标的声明与拒绝规则归 [0048](./0048-test-targets-device-and-ui-kind.md)。决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 随 0051 的修订增加 step 级 `requires` 与会话预热支持键。
 
 ## 背景与问题
 
@@ -71,13 +71,13 @@
 
 ### 5. `min_grace_s` 保持顶层单值
 
-- 设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 的终结四阶段推导：等在途 Create 10 秒、终结核对 5 秒、释放阶段 25 秒、中断兜底上传 10 秒、排空 6 秒，加事件写出与余量 7.5 秒，共 63.5 秒（文中「约 64 秒」均以常量算出的 63.5 为准），低于 Fargate `stopTimeout` 的 120 秒硬上限（[0024](./0024-worker-core-protocol.md)「引擎自报下限」条、[0032](./0032-fargate-execution-environment.md)）；各段上限没有在网络退化条件下校准（到 us-west-2 的丢包无法人工制造，现有覆盖面与失效表现见 [0052](./0052-appium-interface-adapter-and-platform-differences.md)「已知缺口」的释放阶段网络退化条），日后重新校准只改常量，下限随之由常量算出。worker 不等会话到 COMPLETED。
-- Midscene worker 的 `min_grace_s` 取两条收尾路径各自之和的较大者：桌面路径为等在途 StartBrowserSession 1.5 秒、停浏览器会话 3 秒、关浏览器 3 秒、中断兜底上传 10 秒、排空 6 秒加余量 7.5 秒，共 31 秒；设备路径即上一条的 63.5 秒；取较大者得 63.5 秒。两条路径共用的上传、排空与余量常量只有一份，各段由同一组常量派生，不另设设备专用下限。把两条路径的各段全部相加（约 71 秒）的读法被拒：一次 scope 只走其中一条收尾路径，相加得到的是不会发生的串行时长，只会虚增宽限。Midscene 的下限由约 31 秒升到约 64 秒：这不算「本机默认宽限显著提高」——本机宽限只是 SIGTERM 之后等待收尾的上界，worker 收尾完即退出，正常路径与桌面 run 的耗时不受影响；真正的代价只在收尾挂住时多等约半分钟，低于 120 秒的硬顶才是判据。
+- 设备收尾按 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 5 的终结四阶段推导：等在途 Create 10 秒、终结核对 5 秒、释放阶段 25 秒、中断兜底上传 10 秒、排空 6 秒，加事件写出与余量 7.5 秒，共 63.5 秒，低于 Fargate `stopTimeout` 的 120 秒硬上限（[0024](./0024-worker-core-protocol.md)「引擎自报下限」条、[0032](./0032-fargate-execution-environment.md)）；各段上限没有在网络退化条件下校准（到 us-west-2 的丢包无法人工制造，现有覆盖面与失效表现见 [0052](./0052-appium-interface-adapter-and-platform-differences.md)「已知缺口」的释放阶段网络退化条），日后重新校准只改常量，下限随之由常量算出。worker 不等会话到 COMPLETED。
+- Midscene worker 的 `min_grace_s` 取两条收尾路径各自之和的较大者：桌面路径为等在途 StartBrowserSession 1.5 秒、停浏览器会话 3 秒、关浏览器 3 秒、中断兜底上传 10 秒、排空 6 秒加余量 7.5 秒，共 31 秒；设备路径即上一条的 63.5 秒；取较大者得 63.5 秒。两条路径共用的上传、排空与余量常量只有一份，各段由同一组常量派生，不另设设备专用下限。把两条路径的各段全部相加（约 71 秒）的读法被拒：一次 scope 只走其中一条收尾路径，相加得到的是不会发生的串行时长，只会虚增宽限。Midscene 的下限由 31 秒升到 63.5 秒，不触发本决策的重议条件：本机宽限只是 SIGTERM 之后等待收尾的上界，worker 收尾完即退出，正常路径与桌面 run 的耗时不受影响；真正的代价只在收尾挂住时多等约半分钟，低于 120 秒的硬顶才是判据。
 - **重议条件**：设备收尾的预算之和使 Midscene 的下限超过 120 秒（云端 doctor 的宽限比对会变成可选能力缺失），或本机默认宽限的提高开始影响正常路径的耗时。届时把该键改为按 device 取值的对象，并按 [0036](./0036-deterministic-capability-discovery.md) 的规则递增 `schema_version`，因为那是既有键的语义变化。
 
 ### 6. 各消费点的呈现
 
-- **plan**：每个 job 带目标；命中确定性 step 但交集不含该 scope 目标的 step，标注为走 AI，并写明原因（「这条确定性 step 在 Android 网页上没有实现，将由 AI 执行」）。交集条目带 `requires` 时 plan 写明前提（「需要网页上下文；设备不提供时记为错误」）；运行期网页上下文不可用时这类 step 记 error、类别 `capability_unavailable`、不转 AI（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），探测规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 与 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
+- **plan**：每个 job 带目标；命中确定性 step 但交集不含该 scope 目标的 step，标注为走 AI，并写明原因（「这条确定性 step 在 Android 网页上没有实现，将由 AI 执行」）。交集条目带 `requires` 时 plan 写明前提（「需要网页上下文；设备不提供时记为错误」）。机读形态：`plan --json` 的 `steps[].deterministic` 在与 scope 目标对应的交集条目 `requires` 非空时另带 `requires` 键（字符串数组），无前提时省略该键；与 `list-deterministic --json` 的 `available_targets` 保留 `requires` 对齐，agent 据此在执行前分流。运行期网页上下文不可用时这类 step 记 error、类别 `capability_unavailable`、不转 AI（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），探测规则归 [0048](./0048-test-targets-device-and-ui-kind.md) 与 [0052](./0052-appium-interface-adapter-and-platform-differences.md)。
 - **`list-deterministic`**：文本表格增加「目标」列，列出交集目标；声明了但该引擎不支持的目标单独注明（「声明了 Android 应用，此引擎不支持」）。文本表格的目标列对带 `requires` 的条目附前提标注（如「需要网页上下文」）。`--json` 每项保留 worker 原样报出的 `targets`，另加 CLI 算出的 `available_targets`（条目保留 `requires`），两者分开，机读消费方无需自己求交；doctor 的目标清单不展示 `requires`。
 - **doctor**：engines 段为每个可用引擎增加一行目标清单（required=False，纯展示），带 `max_session_s` 的目标附上分钟数；与模型行同源于同一次自述。
 - **不做**：不按目标过滤 `list-deterministic` 的输出（目标列已足够、清单规模小），不在 doctor 里把「不支持设备」当作失败。
@@ -115,7 +115,7 @@ Nova Act SDK 驱动的是 Playwright 浏览器（本机或 AgentCore 浏览器�
 ## 被拒方案（护栏）
 
 - **升到协议版本 2**：各键都是新增，1.5 之前的 worker 不在支持范围内，升版没有要区分的对象、只会迫使 CLI 维护两套解析分支；不符合「只在协议出现不兼容变化时递增」的规则。缺 `targets` 的 worker 由契约校验按版本不一致拒绝，不需要版本号来识别。
-- **`min_grace_s` 取各目标最大值或立即拆成按设备的对象**：按终结四阶段推导的设备收尾约 64 秒，仍低于 120 秒硬上限，拆分只增加协议面而不改变任何下限的结论；拆分的条件写在决策 5 的重议条件里。
+- **`min_grace_s` 取各目标最大值或立即拆成按设备的对象**：按终结四阶段推导的设备收尾 63.5 秒，仍低于 120 秒硬上限，拆分只增加协议面而不改变任何下限的结论；拆分的条件写在决策 5 的重议条件里。
 - **worker 只报交集后的 step 目标**：声明了但不受支持的句柄在所有视图中消失，测试开发得不到「这条句柄永远不会被调用」的信号（决策 3）。
 - **CLI 按引擎名硬编码目标支持表**（如「novaact 只有桌面」）：形成自述之外的第二事实源，worker 增减目标时 CLI 静默漂移；与 [0036](./0036-deterministic-capability-discovery.md) 拒绝外置清单文件同理。
 - **云端提交时由 CLI 启动镜像查询自述**：提交机器不必装容器引擎与 worker，为一次目标判断引入镜像拉取违背云端后端的前提；worker 侧自检在建会话前完成，同样零会话费用（决策 7）。

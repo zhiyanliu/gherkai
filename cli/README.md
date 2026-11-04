@@ -15,7 +15,7 @@ Midscene worker 与命令行须是同一个版本：用 `gherkai --version` 查�
 ## 最小用法
 
 ```bash
-export AWS_REGION=us-east-1               # region 必须有出处：--region、环境变量、项目配置文件 gherkai.toml 或 profile 配置
+export AWS_REGION=us-east-1               # 必须能解析出 region：--region、环境变量、项目配置文件 gherkai.toml 或 profile 配置
 gherkai doctor                            # 自检环境；加 --backend cloud 连带查凭证与云端后端
 gherkai plan features/checkout.feature    # 用例预检：分组与派发预期，不连云端、不产生费用
 gherkai run features/checkout.feature     # 在本机起 worker 执行这个 run（浏览器与模型仍在云端）；退出码给出判定

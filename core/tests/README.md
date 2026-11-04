@@ -26,12 +26,12 @@ uv run pytest -q           # 安静模式
 
 ## 集成测试（连真 DDB/S3，验证 moto 抓不到的真语义）
 
-moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 中文·斜杠 key 编码 / `load_all` 全量；offload 真往返）。集成测试连真后端钉这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 里的两条集成测试（`test_claim_is_exclusive_on_real_ddb`、`test_stale_projection_never_regresses_terminal_job_on_real_ddb`）复验：两个推进器抢同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。
+moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 中文·斜杠 key 编码 / `load_all` 全量；offload 真往返）。集成测试连接真实后端验证这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 里的两条集成测试（`test_claim_is_exclusive_on_real_ddb`、`test_stale_projection_never_regresses_terminal_job_on_real_ddb`）复验：两个推进器抢同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。
 
 **最高价值的两条是 DDB 400KB item 上限**——moto **只在 `put_item` 校验 400KB、`update_item` 增量路径零校验**（实测写到近 1.5MB 仍全部 ACCEPT），故只有真 DDB 能证：
 
-- STATE item 经反复 `SET jobs.#sid` 增量长大越过 400KB → `ValidationException`（钉「控制面 jobs Map 无上限保护」这个真实天花板，STATE 从不 offload）。
-- 含 >400KB docString 的 RunMeta：不挂 offloader 时 `create_run` 撞限抛错、挂 offloader 时成功且 META 只留 `s3://` 指针 —— **offloader 存在理由（解 400KB 限）的因果闭环**。
+- STATE item 经反复 `SET jobs.#sid` 增量增长、越过 400KB 时抛 `ValidationException`（验证「控制面 jobs Map 没有上限保护」这一真实上限：STATE 从不 offload）。
+- 含超过 400KB docString 的 RunMeta：不挂 offloader 时 `create_run` 因超过 400KB 上限而报错；挂上 offloader 后同一份 RunMeta 写入成功，META 只保留 `s3://` 指针——这条用例完整证明了 offloader 的存在理由（绕开 400KB 上限）。
 
 ### 一次性：建真表 + 真桶
 

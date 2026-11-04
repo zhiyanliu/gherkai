@@ -88,7 +88,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 ### 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件
 
 - 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。`NOVA_ACT_TIMEOUT_S` 不在这条链上：它的单一真值在组合根（[0024](./0024-worker-core-protocol.md)「组合根持引擎特定的值」条），由起 worker 的那一侧从自己的环境变量读出后显式注入 worker（本机 spawn 与能力自述查询经子进程 env，云端经 RunTask overrides、盖过镜像 `ENV`；detached 云端提交由推进器 Lambda 起任务，取缺省 120），写进 variant 镜像的 `ENV` 不生效。配置文件不收这些键，`NOVA_ACT_TIMEOUT_S` 也不收。
-- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含 per-run 进程与 `status --wait` 接力者）、前台 Fargate（同步 run 的 RunTask）、detached Lambda 与能力自述四个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的「四个注入面就是四个会漂的地方」；配置文件不重新打开该决定。
+- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含 per-run 进程与 `status --wait` 接力者）、前台 Fargate（同步 run 的 RunTask）、detached Lambda 与能力自述四个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的「四个注入面就是四个会漂的地方」；配置文件不重新打开该决定。`NOVA_ACT_TIMEOUT_S` 不收另有一层理由：它的真值由起 worker 的那一侧自己持有——本机后端与云端前台 `run` 是 CLI 进程的环境变量，云端后台 `submit` 是推进器 Lambda 自己的缺省 120（部署不给推进器 Lambda 设这个变量），而配置文件只有 CLI 读。若配置文件收它，按决策 1 的惯例就得把值固化进 definition，让推进器 Lambda 与 `status --wait` 接力者读回同一个值，等于新开一条跨宿主的传递通道，还要定它与宿主环境变量谁优先；收益只是少设一个环境变量。
 - 配置文件也不收凭证与密钥：AWS 凭证走默认凭证链，`NGROK_AUTHTOKEN` 留在环境变量或 ngrok 自己的配置。`gherkai.toml` 预期入库，密钥进去即泄漏。
 
 ### 6. 护栏
@@ -119,7 +119,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **CLI 在提交时把筛选条件解析成 ARN**：detached 提交到 worker 真正启动之间有时间差，提交时可用的设备到时可能已忙；同时让 `plan` / `submit` 需要 Device Farm 读权限，破坏 `plan` 的零 AWS。
 - **配置文件优先于环境变量**：CI 与单次排障惯用环境变量做临时覆盖，被入库文件覆盖后表现为「设了不生效」。
 - **用户级配置文件叠加（`~/.config/gherkai/…`）**：多份文件合并让同一个仓库在不同机器上得到不同值，排查时要同时看两处；1.5 的需求是项目级共享，单文件足够。
-- **向上级目录逐层查找**：在 monorepo 子目录执行时可能拿到另一个项目的文件，且与 `./steps` 相对当前目录的既有约定冲突。
+- **向上级目录逐层查找**：在 monorepo 子目录执行时可能静默拿到另一个项目的文件，且与 `./steps` 相对当前目录的既有约定冲突。
 - **YAML 或 JSON**：YAML 需新增依赖且隐式类型转换易出错（`NO` 变布尔、版本号 `18.10` 变浮点）；JSON 不能写注释。TOML 由标准库直接读取，Python 使用方也熟悉 `pyproject.toml`。
 - **配置文件承载引擎模型等 worker 侧覆盖项**：见决策 5，等于以另一种形态重新引入 [0044](./0044-engine-model-selection-and-override.md) 已拒的多注入面。
 - **静默忽略未知键**：拼错的键表现为「配置没生效」，比报错更难排查。

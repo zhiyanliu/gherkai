@@ -11,7 +11,7 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 不论哪种驱动，worker 与 `core` 之间的回传只有两类：**事件流**（`scope_started`/`step_done`/… 的逐条事件）与**进程退出信号**（退出码由父进程或平台观察得到，不由 worker 上报；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定要求两者同时成立：事件内容完整且进程干净终止，缺一即不判通过（防假绿）。两种驱动的本质差别在于**有没有在线的接收方**：前台有在线接收方，`schedule` 全程在线、收到事件即处理，退出信号由 Engine adapter 当场观察；后台没有常驻接收方，事件流被持久化、退出信号也被转写成 `task_exited` 记入同一份日志，于是任何宿主都能仅凭重放这份日志推进（各组合的物理通道见 §5）。
 
-两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。分界线是 `detached` 标记：`submit` 建 run 时写它（cloud 写在 runs 表的 STATE item 上，local 写在 run_state.json 顶层、每次写回保留），推进器据它只认领**带标记的后台 run**，不介入前台 run。cloud 的推进器是云端三 Lambda（保证手段见 §7）；local 没有常驻推进器，唯一会碰到别人 run 的是 `status --wait` 的接力者，它同样只接力带标记的 run，对前台 run 只等待（§7 末段）。
+两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。分界线是 `detached` 标记：`submit` 建 run 时写它（cloud 写在 runs 表的 STATE item 上，local 写在 run_state.json 顶层、每次写回保留），推进器据它只认领**带标记的后台 run**，不介入前台 run。cloud 的推进器是云端三 Lambda（保证手段见 §7）；local 由各 run 自己的 per-run 推进进程或 `status --wait` 的接力者推进，接力者是唯一会碰到别人 run 的一方，它同样只接力带标记的 run，对前台 run 只等待（§7 末段）。
 
 `reconcile.tick` 有**四个宿主**在不同场景下调用它：local 的 per-run 进程（即 `submit` 时 `setsid` fork 出的推进进程）、**local** `status --wait` 的接力者（cloud 的 `--wait` 只在检测到停滞时 invoke kicker，不在本机执行 `tick`，使 status 所在机器无需 ECS 权限，见 §4b）、cloud 的 kicker Lambda、cloud 的 reconciler Lambda。四处执行的是同一份代码，差别只在注入的 adapter（事件从 SQLite 还是 DDB 读、job 以子进程还是 ECS RunTask 启动）。
 
@@ -25,7 +25,7 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 |           | **run（前台同步）**                                                                                                                                                        | **submit（后台运行）**                                                                                                                                                                                                                                             |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **local** | CLI 进程内 `schedule()`；worker 是本机子进程（fd3 事件流直达）；超时由 schedule 循环内计时到点；关闭 CLI 即中止                                                            | **per-run 推进进程**（`setsid` 脱离 CLI）循环调用 `tick`；事件旁路落 SQLite；该进程自兼退出观察者；本机需保持开机                                                                                                                                                  |
+| **local** | CLI 进程内 `schedule()`；worker 是本机子进程（fd3 事件流直达）；超时由 schedule 循环内计时到点；关闭 CLI 即中止                                                            | **per-run 推进进程**（`setsid` 脱离 CLI）循环调用 `tick`；事件旁路落 SQLite；该进程同时担任退出观察者；本机需保持开机                                                                                                                                                  |
 | **cloud** | 同一个进程内 `schedule()`，worker 改为 Fargate task（job-in 走 S3、事件走 DDB events 表、adapter 轮询读）；云端 Lambda 对这种 run **一律不动作**（no-op；两道拦截，见 §7） | **三 Lambda 事件驱动链**：kicker（冷启动）、reconciler（主推进）、exit-observer（退出观察），由事件串接、非调用链（§4b）；提交后关机也能执行至结束（例外：`--expose-local` 隧道模式下本机须保持开机联网，[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)） |
 
 此处明确一个贯穿全文的粒度：**一个 job 即一个 scope**——一个 `@scope` 分组即一个调度/执行单位（上云后确立，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时定时器的 per-(run,scope) 即 per-job。四种组合的详细解剖在 §3-§4，横切机制（事件通道/退出观察/超时）在 §5-§6。四种组合的权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台运行全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
@@ -58,7 +58,7 @@ submit:plan → 落 definition + 全 pending 初始态 → fork per-run 推进�
 per-run 进程:run_reconcile_loop 循环调用 tick
   ├─ tick 抢占到 PENDING job → SubprocessLauncher 启动本机 worker
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
-  ├─ worker 退出 → 本进程 handle.wait() 取 exitcode 写 task_exited(自兼"平台侧退出观察者")
+  ├─ worker 退出 → 本进程 handle.wait() 取 exitcode 写 task_exited(本进程同时担任"平台侧退出观察者")
   └─ 全 job 终态 → tick 收敛并提交(写序见 §4c) → 拆除临时资源,退出
 status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit 的 run)——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛
 ```
@@ -134,7 +134,7 @@ PK = run_id#scope_id
 
 | 路径         | 到点机制                                                                                                                                                                                                          | 停止方式                                                                                                                                                                                             |
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 前台 `run`   | schedule 循环内计时到点（deadline）                                                                                                                                                                               | local=`handle.stop(grace)`（SIGTERM→宽限→SIGKILL）；cloud=`StopTask`（宽限由 task-def `stopTimeout` 决定、不逐次传入——上限与取舍见 [ADR 0032](../adr/0032-fargate-execution-environment.md) 结论 4） |
+| 前台 `run`   | schedule 循环内计时到点（deadline）                                                                                                                                                                               | 本机后端下是 `handle.stop(grace)`（SIGTERM→宽限→SIGKILL）；云端后端下是 `StopTask`（宽限由 task-def `stopTimeout` 决定、不逐次传入——上限与取舍见 [ADR 0032](../adr/0032-fargate-execution-environment.md) 结论 4） |
 | local submit | per-run 进程的 launcher 在启动 worker 子进程时装配的到点计时器（`threading.Timer`，存在于 owner 进程内）；该进程若中断，计时随之丢失——接力者改按库里的 `claimed_at` 起算、每轮推进时复查是否超出预算（+固定余量） | 本进程启动的 job：`handle.stop(grace)`（协作式停止，同前台 local，grace 取引擎最小宽限）；接力恢复的他人 job：worker 已随 fd3 断管退出、无 handle 可停，直接记一条 `timed_out` 退出记录收敛          |
 | cloud submit | 启动 task 时为该 job **设置一个一次性到点定时器**（EventBridge Scheduler one-time；与 §4b exit-observer 的 EventBridge **rule** 同名不同物：那是事件总线订阅，这是独立定时服务）                                  | 到点由 kicker 处置，整条链见下图；另有任意 `tick` 的防御扫描作为双保险                                                                                                                               |
 

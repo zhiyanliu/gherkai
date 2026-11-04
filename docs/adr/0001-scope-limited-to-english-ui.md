@@ -4,7 +4,7 @@
 
 ## 决策
 
-- **Midscene 引擎不限被测 UI 语言**。中文 UI 上动作与 AI 断言的可靠性已量化到与英文基线同级（[0010](./0010-spike-as-apples-to-apples-benchmark.md)/[0014](./0014-ai-first-assertions.md) 的英文基线 = AI 断言 ×10 零抖动；中文见下表）。
+- **Midscene 引擎不限被测 UI 语言**。中文 UI 上动作与 AI 断言的可靠性已量化到与英文基线同级（[0010](./0010-spike-as-apples-to-apples-benchmark.md)/[0014](./0014-ai-first-assertions.md) 的英文基线 = AI 断言 ×10 零抖动；中文见下表）。实测只覆盖桌面网页目标；设备目标（Android / iOS）上的非英文界面尚无测量。
 - **Nova Act 引擎的支持范围 = 英文 UI**。非英文 UI 上它的动作与页面级语义断言可用，但**「正文里是否出现某个中文词」这类断言系统性判否**（下表 0/45；同一中文页面上的英文词包含类断言仍 5/5 通过），且 AWS 的语言声明只覆盖英文。
 - **非英文应用的路由建议**：`@engine:midscene`（[0019](./0019-feature-tags-scope-and-engine.md) 的 tag 路由）；若必须用 Nova Act，断言只写页面级语义（「当前是 X 的词条页」），文本包含类检查改走确定性 step（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。
 - 这是**支持范围与证据边界**的划分，不是「非英文跑不起来」的技术断言——两引擎在中文页面上都能导航、能读中文按钮与标题（见下）。

@@ -7,10 +7,8 @@
 这是云端（DDB/S3）落库的前置（见决定六）。
 
 **定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
-job 生命周期态（`skipped`/`aborted`/`pending`/`running`/severity）见 [0031](./0031-job-lifecycle-states-and-severity.md)；
+job 生命周期态（`skipped`/`aborted`/`pending`/`running`）的定义与 severity 归属全在 [0031](./0031-job-lifecycle-states-and-severity.md)，本篇只用它们描述时序；
 DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态）。
-
-> **本文出现的 `pending`/`running`/`skipped`/`aborted` 这些状态值，定义与 severity 归属全在 [0031](./0031-job-lifecycle-states-and-severity.md)**；本篇只用它们描述时序，不定义。
 
 ## 背景：v1.0 是「跑完一次性写」，零实时
 
@@ -213,9 +211,9 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 
 **offloader 生产默认挂载、不做可选关闭 flag**：cloud 后端下 `S3StepArgumentOffloader` 默认挂（复用同一 `--s3-bucket`）。DDB 400KB 是协议**硬限**、不是调优空间——决定六把 offloader 设成「可选注入（`None`→内联）」是为 **core 单测省一层 S3 + 旧 run 兼容**，**不是给生产用户选「要不要正确」**。不引入 `--no-offload`：真出现「明确不带大 argument、想省一次 S3 往返」再纯加法加。**trade-off**：牺牲「小 run 省一次 S3 往返」换「大 docString/dataTable 不静默撞 400KB 崩」。
 
-**Store port 增 `preflight()`——begin 前探活，配置错一律 begin 退 2（体验+实现统一）**：三个 Store port（Run/Result/Report）各加 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题，一行 `pass`）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`：探活失败抛的 botocore 异常由 cli 的 `need_cloud` gated except 接住 → 退 2。
+**Store port 增 `preflight()`——begin 前探活，配置错一律 begin 退 2（体验+实现统一）**：三个 Store port（Run/Result/Report）各加 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`：探活失败抛的 botocore 异常由 cli 的 `need_cloud` gated except 接住 → 退 2。
 
-**为何从「不做主动预检」反转为「做 preflight」**（推翻早先决策，记明理由）：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
+**为何从「不做主动预检」反转为「做 preflight」**：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
 - **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：（曾有「缺 table/bucket：入口显式校验非空」一项；[0033](./0033-iac-aws-backend-and-composition-wiring.md) 两层命名后表/桶恒有 `--prefix` 推导的默认名、不会为空，此项不再出现）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
@@ -227,7 +225,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
   `RunPersistence`（单一 store 锁）；RunStore 三增量方法的 local adapter；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
 - **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
 - **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
-- **留口子不做 → 多写者（已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，此「留口子」被兑现——机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
+- **留口子不做 → 多写者（已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
 
 ## 重议
 

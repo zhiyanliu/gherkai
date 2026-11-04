@@ -1,10 +1,10 @@
 # image_token_probe：截图缩放后的图片 token 探针
 
-「截图缩放降低 token」评估（结论见 ADR 0052 被拒方案节，换模型或 Midscene 改了缩后尺寸的范围校验时重议）的离线第一步：不上真机，只向生产用的模型发请求，看同一张截图缩到不同尺寸后服务端计的 `prompt_tokens` 怎么变。它回答两个问题：Bedrock 对不带 `detail` 的图是否在服务端缩图（本仓库在签名前删掉了 `detail: "original"`）；图片 token 随尺寸下降的幅度，用来外推整个 job 的净降幅。
+「截图缩放降低 token」评估（结论见 ADR 0052 被拒方案节，换模型或 Midscene 改了缩后尺寸的范围校验时重议）的离线第一步：不使用真机，只向生产用的模型发请求，观察同一张截图缩到不同尺寸后服务端计入的 `prompt_tokens` 如何变化。它回答两个问题：Bedrock 对不带 `detail` 的图是否在服务端缩图（本仓库在签名前删掉了 `detail: "original"`）；图片 token 随尺寸下降的幅度，用来外推整个 job 的净降幅。
 
 ## 运行
 
-要 AWS 凭证与 region（跳板机上），在 `engines/midscene` 目录里执行：
+需要 AWS 凭证与 region，且凭证能在该 region 的 Bedrock 上调用生产所用的模型（模型见下文），在 `engines/midscene` 目录里执行：
 
 ```bash
 cd engines/midscene

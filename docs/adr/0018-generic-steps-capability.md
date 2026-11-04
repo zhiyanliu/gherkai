@@ -22,7 +22,7 @@ v0.x 验证「QA 只写 `.feature`、零 step 代码」靠一组**通用 step**�
 | AI 否定断言（**已收敛进「AI 布尔断言」，非独立原语**） | 确认"不存在"——QA 直接写否定句，走同一布尔投票路径 | `aiBoolean` | `act_get(BOOL_SCHEMA)` |
 | 确定性 step | 不靠 AI、由代码执行的精确核对（URL/DOM）或固定动作（如登录，[0014](./0014-ai-first-assertions.md) 第 2 条） | 按句柄种类分实现：`playwright` 句柄拿 `page`（桌面，如 `page.url()`），`webdriver` 句柄拿受守卫的 `ctx.driver`（设备；网页目标经 `ctx.withWebContext` 读地址，[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1、2） | `nova.page.url` 等 |
 
-**两个引擎对称（精确化）**：提取类从「对称布尔路径」推广到「对称提取路径」——`aiNumber/aiString` ↔ `act_get(各 schema)`。**但对称仅在命题清晰时成立**；命题措辞有歧义时两个引擎表现可能分叉（见下"负向验证"：同一句宽松断言 Midscene 判 false、Nova Act 判 true）。是 [0010](./0010-spike-as-apples-to-apples-benchmark.md) 对称论断的扩展 + 边界修正。
+**两个引擎对称（精确化）**：打磨期曾把提取类从「对称布尔路径」推广到「对称提取路径」（`aiNumber/aiString` ↔ `act_get(各 schema)`，两条原语后被删，见上）。**但对称仅在命题清晰时成立**；命题措辞有歧义时两个引擎表现可能分叉（见下「负向验证」：同一句宽松断言 Midscene 判 false、Nova Act 判 true）。是 [0010](./0010-spike-as-apples-to-apples-benchmark.md) 对称论断的扩展（仅限已删的提取原语）+ 边界修正。
 
 ## 刁钻用例暴露的边界（两批打磨）
 

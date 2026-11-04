@@ -19,16 +19,16 @@
 | 浏览器接入 | connectOverCDP + 自签 upgrade | BrowserClient.start + generate_ws_headers（bedrock-agentcore 签名） | ⚠️ 概念像、实现各异 |
 | 断言 | aiBoolean / page | act_get(BOOL_SCHEMA) / page | ⚠️ 语义对齐、API 不同 |
 
-即便都用同一语言，SigV4 与 IAM-Workflow 也是两套东西，抽不到一起。**共享停留在概念层（都接 AgentCore、都出报告、都跑同一 `.feature`），不在代码层。** 引擎内复用（如 `engines/midscene/src/lib/agentcore-sigv4.mts` 被 Midscene 的 spike 与 worker 共用）是健康的，但那是**引擎内**，不是跨引擎——勿混（CONTEXT 曾误把 SigV4 写成"两个引擎共享"，已更正）。
+即便都用同一语言，SigV4 与 IAM-Workflow 也是两套东西，抽不到一起。**共享停留在概念层（都接 AgentCore、都出报告、都跑同一 `.feature`），不在代码层。** 引擎内复用（如 `engines/midscene/src/lib/agentcore-sigv4.mts` 被 Midscene 的 spike 与 worker 共用）是健康的，但那是**引擎内**，不是跨引擎——勿混。
 
 ## 公共设施：由核心库与各引擎 worker 分担，不靠跨引擎共享
 
-不属于任一引擎、属于"工具"本身的东西——**曾设想做成跨引擎共享层，实际由核心库与各引擎 worker 分担承载，会话的起停与清理留在各引擎 worker 内**（下述三项各自的承载方式见本节末段）：
+不属于任一引擎、属于"工具"本身的东西——**曾设想做成跨引擎共享层，实际由核心库与各引擎 worker 分担承载**（下述三项各自的承载方式见本节末段）：
 - 报告归集 / 统一
 - AgentCore 会话生命周期编排（起/停/清理/配额）
 - 用例与测试数据的组织规范、跑批入口
 
-**这些落地的前提**原以为是「统一到一种语言（形态 B 编排器）」，但后续实查证伪了这个前提的可行性：**Nova Act acting 锁死 Python，全 TS 统一不可行**（[0023](./0023-novaact-acting-python-locked-no-ts-core.md)：`@aws-sdk/client-nova-act` 是客户端驱动的 REST 循环、非 `nova.act()` 等价物）。公共设施改由**核心库（Python）+ 两个引擎子进程 worker**承载（[0016](./0016-execution-architecture-core-lib-run-model.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）：报告归集=`ReportStore`/RunReport、会话生命周期=各 worker 内、跑批入口=核心调度+CLI。即「跨引擎共享止于 `features/`」仍成立（worker 代码仍各属各引擎），公共设施由**核心库**承载（会话的起停与清理由各 worker 自己持有，并发上限在核心调度），不靠跨引擎共享引擎代码。
+**这些落地的前提**原以为是「统一到一种语言（形态 B 编排器）」，但后续实查证伪了这个前提的可行性：**Nova Act acting 锁死 Python，全 TS 统一不可行**（[0023](./0023-novaact-acting-python-locked-no-ts-core.md)：`@aws-sdk/client-nova-act` 是客户端驱动的 REST 循环、非 `nova.act()` 等价物）。公共设施改由**核心库（Python）+ 两个引擎子进程 worker**承载（[0016](./0016-execution-architecture-core-lib-run-model.md)/[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）：报告归集=`ReportStore`/RunReport、会话生命周期=起停与清理由各 worker 自己持有（并发上限在核心调度）、跑批入口=核心调度+CLI。即「跨引擎共享止于 `features/`」仍成立（worker 代码仍各属各引擎），公共设施由核心库与各 worker 分担、不靠跨引擎共享引擎代码。
 
 ## 何时重议
 

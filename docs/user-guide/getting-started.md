@@ -21,7 +21,7 @@ uv tool install 'gherkai[local]'              # 本体 + 在本机运行 Nova Ac
 npm i -g @gherkai/worker-midscene             # 在本机运行 Midscene 引擎的 worker（需 Node ≥ 22）
 uv tool install 'gherkai[deploy-aws]'         # 部署方：gherkai deploy / destroy（另需 Node ≥ 22 与容器引擎）
 uvx gherkai --version                         # 免安装临时运行一次（uvx --from 'gherkai[local]' gherkai run …）
-pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时的回落；本项目要 Python ≥ 3.13
+pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时改用 pipx；本项目要 Python ≥ 3.13
 ```
 
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
@@ -50,7 +50,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话、真机与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile`、`AWS_PROFILE` 或项目配置文件 `gherkai.toml` 里 `[common]` 的 `profile` 指定 profile，按此顺序取第一个给出的。
-- **region 必须有出处**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 项目配置文件 `gherkai.toml` 里 `[common]` 的 `region` > profile 配置里的 region。五处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
+- **必须能解析出 region**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 项目配置文件 `gherkai.toml` 里 `[common]` 的 `region` > profile 配置里的 region。五处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。
 - 当前验证过的 region 是 `us-east-1`。换其它 region 之前，先确认下表中除 Device Farm 以外的服务与你要用的模型在该 region 都可用（Device Farm 只在 us-west-2 提供，设备目标总在那里建立会话，与所选 region 无关）：`gherkai doctor --backend cloud --prefix <前缀>` 报出凭证与 region 的解析结果，模型与服务的可用性在 AWS 控制台确认。
 - 账号需要能用以下服务与模型（Device Farm 一行固定在 us-west-2，其余在上面解析出的 region）：
 
@@ -76,7 +76,7 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 
 输出是一张表，每个检查项一行，说明过长时在终端内折行。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
 
-只查本机的一次实际输出（这台机器没装 Midscene worker，容器引擎的 daemon 也没起）：
+只查本机时的输出示例（示例机器未安装 Midscene worker，容器引擎的 daemon 未启动）：
 
 ```text
 ╭──────┬───────────────────────────┬─────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -125,7 +125,7 @@ gherkai skill install --print           # 只把正文打到标准输出，不�
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v<版本>/cli/gherkai_cli/skills/gherkai -a claude-code -a codex   # 每个 -a 一个 agent，只装一处就只写一个
 ```
 
-这条路不经命令行，版本要自己指定：URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；不能用带斜杠的分支名，安装器会在第一个斜杠处截断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到本仓库自用的作图 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。
+URL 里的 `v<版本>` 填你要跟随的 CLI 版本（tag 或完整 commit 均可；不能用带斜杠的分支名，安装器会在第一个斜杠处截断 ref；`HEAD` 不是可用的 ref，安装器会报找不到分支）。不带 `/tree/…` 的仓库短写会克隆仓库默认分支，但在那里找不到这份 skill，只会找到与使用 gherkai 无关的其它 skill。它装出的目录不带版本标记：之后改用 `gherkai skill install`，命令会因为目标目录不是它装的而停下并以退出码 2 结束，先把该目录移走或删掉再装。
 
 装完直接告诉 agent 要测什么，例如：
 
@@ -148,7 +148,7 @@ Feature: 冒烟
 仓库里另有一组示例用例在 [`features/`](../../features/)，克隆仓库、或把其中的文件复制进你的项目就能用。`.feature` 的完整写法见[编写 .feature](./writing-features.md)。
 
 ```bash
-# ① 用例预检：看分组与每步的派发预期，不连云端、不产生费用
+# ① 用例预检：查看分组，以及每一步预计由确定性 step 还是 AI 执行；不连云端、不产生费用
 gherkai plan features/smoke.feature
 
 # ② 实际运行：产生模型调用与云端浏览器会话费用

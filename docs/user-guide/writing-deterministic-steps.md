@@ -8,7 +8,7 @@
 
 - 确定性 step 命中后走你自己的函数：不调模型、不投票、不产生模型费用，同一个页面状态永远给同一个判定。代价是它**不产生 AI 证据**——这一步的判定与耗时照常记进报告和退出码，但没有轨迹页或回放页可看；设备目标上判为 failed / error 的确定性 step 例外，另有一份只含页面地址与控件快照的证据（见 [`running-and-results.md`](./running-and-results.md)「看失败原因」，证据形态见 [`../internals/artifacts-and-evidence.md`](../internals/artifacts-and-evidence.md)）。
 - 分工是固定的：feature 作者（QA）只在 `.feature` 里写自然语言；确定性 step 由测试开发写在**你自己项目**的 `steps/` 目录里，不改引擎包的文件。
-- 成本与速度也是判据。AI step 每次判定都调用一次模型，投票再乘票数，一步要几秒到几十秒（模型往返与截图）；确定性 step 零模型费用、毫秒级完成，整套用例的总耗时与云端浏览器会话时长随之缩短。出现频次高的检查优先写成确定性：`Background` 里每条 scenario 都要重做的前置检查、`Scenario Outline` 每行数据都要过的断言、被要求投票的断言。费用量级见仓库首页的模型披露表。
+- 成本与速度也是判据：确定性 step 不调模型、毫秒级完成，出现频次高的检查（`Background` 里的前置检查、`Scenario Outline` 每行都要过的断言、被要求投票的断言）写成确定性 step 收益最大，取舍见 [`writing-features.md`](./writing-features.md)「什么交给 AI，什么必须精确」。
 
 ## `steps/` 目录与查找顺序
 
@@ -191,20 +191,20 @@ deterministic("^重新启动应用$", {
 
 ## 两侧对称地写
 
-同一份 `.feature` 要能在两个引擎上运行，所以每条确定性 step 都在两侧各注册一份：正则语义相同、`description` 与 `example` 文字相同，只有语言方言不同。
+同一份 `.feature` 要能在两个引擎上运行，所以每条确定性 step 都在两侧各注册一份：正则语义相同、`description` 与 `example` 文字相同，只有编程语言的写法不同。
 
-只写一侧时，另一个引擎上这一步会改由 AI 判定，运行前检查不会提示你（它只检查本次用到的引擎）。核对方法是两个引擎各查一遍清单，再用 `gherkai plan` 看标注。
+只写一侧时，另一个引擎上这一步会改由 AI 判定，执行前预检不会提示你（它只检查本次用到的引擎）。核对方法是两个引擎各查一遍清单，再用 `gherkai plan` 看标注。
 
 Nova Act 引擎只在桌面网页上运行：Python 侧也接受 `webdriver` 条目（写法与校验同 Midscene 侧，字段名用下划线），但这些条目在该引擎上永远不会被调用，只会出现在 `gherkai list-deterministic` 的「目标」列里、注明该引擎不支持。
 
 ## 写得稳：等待与判定
 
-确定性 step 假失败的头号来源是**读了瞬时值**：`is_visible()` / `isVisible()`、直接取 `text_content()` 这类调用取的是当下那一瞬间，页面还在加载就判否，手动打开页面却明明能看到。四条规则：
+确定性 step 误判失败最常见的原因是**读取了瞬时值**：`is_visible()` / `isVisible()`、直接取 `text_content()` 这类调用只读取调用那一刻的状态，页面还在加载时就判为不成立，而手动打开页面时元素是可见的。四条规则：
 
-1. **用带等待的判定，不用瞬时值，也不用固定等待。** Python 侧用 Playwright 的 `expect(...)` 一族（`expect(page.locator(sel)).to_be_visible(timeout=...)`、`to_have_text(...)`、`to_have_url(...)`），它自动重试到超时，超时抛 `AssertionError`，这一步记 `failed`。Midscene 侧用 `locator.waitFor({ state, timeout })` 与 `page.waitForURL(...)`。固定 `sleep` 既慢又照样抖。
+1. **用带等待的判定，不用瞬时值，也不用固定等待。** Python 侧用 Playwright 的 `expect(...)` 一族（`expect(page.locator(sel)).to_be_visible(timeout=...)`、`to_have_text(...)`、`to_have_url(...)`），它自动重试到超时，超时抛 `AssertionError`，这一步记 `failed`。Midscene 侧用 `locator.waitFor({ state, timeout })` 与 `page.waitForURL(...)`。固定 `sleep` 会拖慢运行，也不能保证判定稳定。
 2. **等待超时不是断言。** `locator.wait_for(...)` / `locator.waitFor(...)` 超时抛的是 Playwright 的 `TimeoutError`，不是断言异常，这一步会记 `error` 而不是 `failed`，退出码与报告都会把它当执行错误。要让它记 `failed`，捕获后转成 `AssertionError`（Python）或 `DeterministicAssertion`（Midscene），转换时把现场补进消息。
 3. **给等待一个几秒的上限。** Playwright 默认 30 秒，一条 step 等满 30 秒，这 30 秒都计入这个 scope 的 job 墙钟预算（`@timeout`），也会拖慢整轮反馈。按页面实际响应给 3 到 10 秒。
-4. **瞬态窗口内的多个动作合成一次页面内调用。** 页面只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用要往返几百毫秒，「点击、再点击、读数」分三次调用就落到了窗口之后，而本机单测因为浏览器就在旁边照样能过。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，step 代码只做断言。传字符串时注意 Node 版 Playwright 不会自动调用字符串里的函数表达式（Python 版会），要把参数拼成 JSON 字面量、写成立即调用的表达式。
+4. **瞬态窗口内的多个动作合成一次页面内调用。** 页面只停留一两秒的状态（答对后自动切题、会自动消失的提示）在云端容易漏判：step 代码与远程浏览器之间每次 Playwright 调用要往返几百毫秒，「点击、再点击、读数」分三次调用时，读数已落在窗口结束之后；本机单测的浏览器与 step 代码在同一台机器上，往返延迟低得多，同样的写法仍可能通过，因此本机单测不一定能暴露这个问题。把这几步写成一段页面内脚本，一次 `page.evaluate(...)` 完成并把读到的值一并返回，step 代码只做断言。传字符串时注意 Node 版 Playwright 不会自动调用字符串里的函数表达式（Python 版会），要把参数拼成 JSON 字面量、写成立即调用的表达式。
 
 Python 侧 `from playwright.sync_api import expect` 可以直接用：worker 环境自带 Playwright。Midscene 侧**运行期不要 import `playwright`**：worker 只把 `@gherkai/worker-midscene` 这一个包名解析到自己那份，别的包名按 Node 的默认规则从 step 文件所在目录逐级向上查找 `node_modules`。项目按下文装了单测用的开发依赖时，本机能找到你项目里的那份 Playwright（与 worker 用的不是同一份）；云端镜像里只复制了 `steps/`、没有这份 `node_modules`，同一个文件在云端加载失败，worker 拒绝启动。`import type { Page } from "playwright"` 只当类型用、编译期擦除，可以写。
 
@@ -359,7 +359,7 @@ node --test steps/*.test.mts          # Node 22.18 起原生执行 .mts；更早
 
 - 改判定逻辑：先单测，再按下一节核对清单与标注；云端还要重新构建镜像并推送，见 [带到云端](#带到云端)。
 - 改措辞（`example`）：`example` 就是 feature 作者照抄的接口，改它等于改所有用到它的 feature。宁可加一条新模式、旧模式保留一段过渡期，但两条模式不得同时命中同一句 step 文本。
-- 删 step：先全文搜索全部 feature 确认没人用；删后那些 step 会静默改由 AI 判定，`plan` 里标注消失是唯一信号。
+- 删 step：先在全部 feature 中搜索，确认没有用例用到它；删后那些 step 会静默改由 AI 判定，`plan` 里标注消失是唯一信号。
 
 ## 在本机核对
 
@@ -389,14 +389,14 @@ gherkai doctor --steps-dir ./steps                                 # 目录与�
 | 启动即报错并点名某条模式，消息提到 `keywords` | `keywords` 声明为空、有重复，或取值不在 `Given` / `When` / `Then` 之内 | 改成这三个关键字的非空子集，或去掉声明 |
 | Midscene 报某个文件一条确定性 step 都没注册 | 该文件没在顶层调用 `deterministic(...)`，或按文件路径导入了另一处安装的同名包 | 确认顶层有注册调用，且导入写的是包名 `@gherkai/worker-midscene` |
 | 命令以退出码 2 结束，说 `--steps-dir`、`GHERKAI_STEPS_DIR` 或配置文件的 `steps-dir` 指的目录不存在 | 路径写错或目录被移走 | 改成正确路径 |
-| `list-deterministic`、`plan` 或运行前检查以退出码 2 结束，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
+| `list-deterministic`、`plan` 或执行前预检以退出码 2 结束，只有一句解析错误、没点名文件 | worker 与命令行工具版本不一致 | 把两侧装成同版本后重试 |
 | 写了 `steps/` 却全部走 AI，或少了几条 | 目录没被读到；Midscene 侧文件用了 `.mts` / `.mjs` 以外的扩展名（被跳过，不报错）；或正则与 step 文本不匹配 | 确认 `--steps-dir` 指对，扩展名改成 `.mts` 或 `.mjs`，再用 `list-deterministic` 核对清单条数，对照 `example` 改 step 文本 |
 
 写法问题不会让加载失败，只在判定结果上露出来：
 
 | 症状 | 多半是 | 怎么办 |
 |---|---|---|
-| 时不时判否，手动打开页面明明能看到 | 读了瞬时值（`is_visible()` / `isVisible()`、没等页面就取文本） | 换成带等待的判定，见 [写得稳](#写得稳等待与判定) |
+| 偶发判否，但手动打开页面时元素可见 | 读取了瞬时值（`is_visible()` / `isVisible()`、页面未就绪就取文本） | 换成带等待的判定，见 [写得稳](#写得稳等待与判定) |
 | 判定不成立却记 `error` 而不是 `failed` | 抛的是 `TimeoutError` 或别的异常 | 捕获后转成 `AssertionError` / `DeterministicAssertion`，补上现场 |
 | Nova Act 上这一步记 `error`，Midscene 上正常 | Python handler 写成了 `async def` | 改成同步函数 |
 | Midscene 上 `plan` 没有确定性标注，Nova Act 上有 | Midscene 侧文件扩展名是 `.ts` / `.js`（收集时静默跳过），或只写了 Python 一侧 | 改成 `.mts`，或补另一侧 |

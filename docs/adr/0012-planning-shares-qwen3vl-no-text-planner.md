@@ -16,7 +16,7 @@ Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续
 ## 决定
 
 - planning **复用同一个引擎模型**（本 ADR 成文时为 `qwen.qwen3-vl-235b-a22b`，现值见 [0044](./0044-engine-model-selection-and-override.md)），即不设 `MIDSCENE_PLANNING_MODEL_*`，让 default/grounding 模型兼任 planning。这是成文时（2026-06）AWS 约束 + Midscene 约束下唯一"既可达又收图"的务实解。
-- 不引入独立 planner：纯文本模型会被拒图像；另找一个 Bedrock VL 模型做 planner 无实际增益（见 ADR 0003 的 VL 选型；成文时 Bedrock 上可用的 chat-completions VL 选项很窄，这是 2026-06 的真值，2026-09 起已增多，见 [0044](./0044-engine-model-selection-and-override.md) 背景 2；现行不拆的理由见下「不拆的理由」）。
+- 不引入独立 planner：纯文本模型会被拒图像；另找一个 Bedrock VL 模型做 planner 无实际增益（见 ADR 0003 的 VL 选型；成文时（2026-06）Bedrock 上可用的 chat-completions VL 选项很窄，2026-09 起已增多，见 [0044](./0044-engine-model-selection-and-override.md) 背景 2；现行不拆的理由见下「不拆的理由」）。
 
 ## 何时重议
 

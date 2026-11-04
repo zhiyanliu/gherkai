@@ -4,7 +4,7 @@
 
 ## 1. 五类产物，各回答一个问题
 
-一次 run 的产出按**职责**分五类。分类比目录结构更重要：同一个目录里既有真值也有派生视图，混读会把派生视图当成判定源。
+一次 run 的产出按**职责**分五类。分类比目录结构更重要：同一个目录里既有真值也有派生视图，不分类别地读，会把派生视图当成判定源。
 
 | 类别           | 内容                                                                                                                                                                                                                                        | 回答的问题                      | 落在哪（见 §2）                           | 可否删除                    |
 |----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------|-----------------------------------------|-----------------------------|
@@ -41,13 +41,13 @@
 | `midscene-run/log/`                                          | 现场证据：Midscene SDK 日志                                              | key 镜像相对路径                                                              |
 | `midscene-run/evidence/<scenario 键>/step-<n>/evidence.json` | 现场证据：gherkai 自有                                                   | key 镜像相对路径                                                              |
 | `midscene-run/device/<scope 键>/page-source/step-<NNNN>.xml` | 现场证据：设备目标判为 failed / error 的 step 的原始控件树（写盘前脱敏、超过 1 MiB 截断；由该 step 的 `evidence.json` 的 `page_source` 引用；`<NNNN>` 是本 scope 内的采集序号，四位补零） | key 镜像相对路径；上传带 `Content-Type: application/xml`，字节与截图同走后台上传队列 |
-| `midscene-run/device/<scope 键>/device-session.json`        | 现场证据：设备 scope 的诊断文件（能力探测结论、所用会话与设备、换台记录与各阶段时刻；写盘前脱敏）；`explain` 只给 `kind=device_session` 的链接、不解析 | key 镜像相对路径；释放之后写盘，正常收尾与执行前失败时实时上传（`application/json`）、链接挂在 `scope_done` 上，停止信号与进程级兜底的路径写盘后入队，由收尾的截图队列排空在预算内尽力上传（正常收尾的实时上传已在途时收到停止信号，上传不打断，失败才改为入队）（这两条路径不实时上传、不做整目录上传，也不发 `scope_done`，文件没有链接；只有云端后端经排空在预算内尽力上传，没传完的随容器退出丢失；本机后端不上传，文件留在本地产物目录） |
+| `midscene-run/device/<scope 键>/device-session.json`        | 现场证据：设备 scope 的诊断文件（能力探测结论、所用会话与设备、换台记录与各阶段时刻；写盘前脱敏）；`explain` 只给 `kind=device_session` 的链接、不解析 | key 镜像相对路径。释放之后写盘；链接只在发出 `scope_done` 的路径上有：正常收尾与执行前失败（含会话预热失败）时实时上传（`application/json`），链接以 `kind=device_session` 挂在 `scope_done` 上。以下两类路径上的文件没有链接：停止信号与进程级兜底的路径写盘后交给收尾的截图队列，在排空预算内尽力上传，没传完时随容器退出丢失；主流程抛出的其余异常（建连重试耗尽、原样重抛到入口的异常）仍按正常模式实时上传，但不发 `scope_done`。本机后端不上传，文件始终在本地产物目录。上传时机与停止信号升级的完整规则见 [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 5 |
 | `worker.log`                                                 | 诊断日志                                                                | 仅 `--quiet` 且本机执行时存在；cloud 无此文件 → 进 CloudWatch（组名与真值见 §5） |
 | `reconcile.log`                                              | 诊断日志（本机后台推进进程的输出）                                        | 仅 local `submit`；cloud 后端不生成（推进不在本机）                                |
 | `events.db`                                                  | 事件通道（SQLite）                                                        | 本机前台 `run` 与 local `submit` 都写（`--no-report` 不写）；cloud 后端事件在 events 表、不在桶里 |
 | `tunnel.json`                                                | 隧道收尾凭据（pid）                                                       | 仅 local `submit` 且带 `--expose-local`                                          |
 | `.runstate.lock`                                             | `run_state` 写面互斥                                                    | 本地文件载体独有                                                              |
-| `jobs-in/`                                                   | job 输入（**不是判定**，勿与 `jobs/` 混读）                                | cloud 独有：起 task 时写                                                       |
+| `jobs-in/`                                                   | job 输入（**不是判定**，勿与 `jobs/` 混在一起读）                                | cloud 独有：起 task 时写                                                       |
 | `args/`                                                      | definition 的外置正文                                                   | cloud 独有：docString / dataTable 一律 offload、无 size 阈值                    |
 
 日志、机制文件与 `jobs-in/` 不属 §1 的五类：它们不是判定材料，只在特定组合下出现（`args/` 例外，它存放的正是 definition 被外置的那部分正文）。

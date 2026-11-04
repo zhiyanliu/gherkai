@@ -22,7 +22,7 @@
     steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id / 支持的测试目标（顶层 `targets`，缺键按版本不一致拒绝）/ 会话预热支持键 `session_warmup`；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
     目录」缓存；`engine_min_grace` 从中取下限，Nova 查询时注入 `NOVA_ACT_TIMEOUT_S` 使两端同源）与 `match_deterministic`
     （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
-  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（云资源终名 +
+  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（云资源的完整名称 +
     region/profile 一处解析）/ `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `preflight_cloud_resources`
     （提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/
     `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）。

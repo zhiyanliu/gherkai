@@ -30,7 +30,7 @@ ngrok config add-authtoken <token>   # 写进 ngrok 自己的配置文件
 export NGROK_AUTHTOKEN=<token>       # 或者用环境变量
 ```
 
-`<token>` 在 ngrok dashboard（https://dashboard.ngrok.com/ ）的 **Your Authtoken** 页取。不要用 **API Keys** 页上的值：API key 只能调 ngrok 的管理接口，拿它起不了隧道。两类值都是长随机串、肉眼分不出，按页面取值。填错时会以「隧道未就绪」失败，报错附带的 ngrok 日志会点明鉴权原因。
+`<token>` 在 ngrok dashboard（https://dashboard.ngrok.com/ ）的 **Your Authtoken** 页取。不要用 **API Keys** 页上的值：API key 只能调 ngrok 的管理接口，拿它起不了隧道。两类值都是较长的随机字符串，从外观上无法区分，请按所在页面取值。填错时会以「隧道未就绪」失败，报错附带的 ngrok 日志会点明鉴权原因。
 
 另有一项版本要求：本机后端的引擎 worker 要与命令行工具装成同一个版本，较旧的 worker 不支持会话预热，会在起隧道之前以退出码 2 结束；云端后端还没有版本戳（在 1.4.0 之前部署、此后没有重新部署过）时，带 `--expose-local` 的 run 以退出码 2 结束，要先由部署方运行 `gherkai deploy` 升级。处置见[排错](./troubleshooting.md)。
 
@@ -71,7 +71,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |
 | `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆 |
 
-因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。隧道拓扑图上从边缘回到被测应用那一段全在你的机器这一侧，关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。云端后端平时可以提交完就关机，用了 `--expose-local` 时不行——这是那条便利的唯一例外。
+因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。隧道拓扑图上从边缘回到被测应用那一段全在你的机器这一侧，关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。云端后端通常可以在提交后关机，用了 `--expose-local` 时不行，这是唯一的例外。
 
 提交后用 `gherkai status <run_id> --wait` 等到 run 达终态：这条命令会一直等到 run 结束再返回。本机后端用过非默认 `--report-dir` 时要带上同一个值，否则查不到这个 run；云端后端还要带 `--backend cloud --prefix <前缀>`。两个后端的定位参数都与 `submit` 时一致，照抄 `submit` 打出的那行提示即可。
 
@@ -79,7 +79,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 只有 `submit --backend cloud` 配 `--expose-local` 时用得上，作用是防止 run 卡住时隧道长期留在公网。
 
-- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（job 预算之外的云端耗时：提交后到云端开始调度之间的投递与启动、job 之间的衔接与最后的收尾；起任务与拉镜像的时间已计入各 job 的预算）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
+- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（job 预算之外的云端耗时：提交后到云端开始调度之间的投递与启动、job 之间的衔接与最后的收尾；起任务与拉镜像的时间已计入各 job 的预算）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
 - `submit` 会把生效的秒数打印出来，不用自己算。
 - 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续运行，以导航失败告终。
 - 值须为有限正数，否则退出码 2。
@@ -100,7 +100,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 - 被测应用收到的 `Host` 头是隧道分配的 ngrok 域名，不是 `localhost`——「工作方式」的隧道拓扑图上，浏览器导航的是边缘分配的公网地址。校验 Host 的开发服务器要先放行这个域名（Vite 设 `server.allowedHosts`、Django 加 `ALLOWED_HOSTS`、Rails 放宽 host authorization），否则应用会在框架层拒绝请求。这个域名是 ngrok 分配给你账号的固定开发域名（免费账号形如 `xxx.ngrok-free.dev`，较早注册的账号可能是 `xxx.ngrok-free.app`），不随 run 变化：把「隧道已建立」那一行里的域名加进允许列表一次即可；团队成员各用自己的 ngrok 账号时，可以改用通配写法（如 `.ngrok-free.dev`）。
 - 隧道转发 HTTP、HTTPS 与 WebSocket 流量。被测应用自身域下的请求（HTML、脚本、样式、图片、接口）全部经隧道，吞吐与延迟受隧道链路影响，也都计入 ngrok 配额；页面引用的第三方域资源由云端浏览器直接访问，不经隧道（隧道拓扑图上通向第三方域资源的那条虚线）。
 - ngrok 免费层有配额（量级为每月 1 GB 流量与 2 万次请求，以 ngrok 的定价页为准），重度使用可能超出配额，表现为 429 或断流。
-- 隧道断了不会自动重连。受影响的 scenario 以导航失败告终，修好后重新运行即可。
+- 隧道中断后不会自动重连。受影响的 scenario 以导航失败告终，解决导致中断的问题后重新运行即可。
 - 隧道只服务网页目标：桌面浏览器与真机浏览器访问替换后的地址时经过隧道。原生应用（`@app:<别名>`）连本机或内网里的后端目前不支持：应用请求的后端地址打包在安装包里，gherkai 只替换 step 文本里的地址、不改写应用；应用目标也不做会话预热，应用打开替换后的隧道地址时不带会话 cookie，请求会在边缘被拒。测原生应用时让它连公网可达的测试环境。
 
 ## 常见故障

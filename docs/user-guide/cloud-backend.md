@@ -54,7 +54,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 `--diff`、`--synth-only DIR`、`--bootstrap` 三者互斥，各自把默认动作换成一个只读或准备动作；都不给就是真部署。`--synth-only DIR` 只把 CloudFormation 模板导出到 `DIR`、不改动账户里的任何资源，适合交给你自己的审批流水线；`--vpc default` 与 `--vpc vpc-<id>` 仍要向账户查一次网络信息，因此这两个取值也需要可用凭证。有可用凭证时，`--diff` 与 `--synth-only` 执行前还会在后端所在区域读取 SSM 里记录的 Device Farm 项目 ARN，使变更集或模板与已部署的 stack 一致；读不到（凭证或 region 不可用、缺 `ssm:GetParameter` 权限、网络、限流）就以退出码 2 结束。后端还没有项目记录时，`--diff` 提示用于计算变更集的模板不含设备支持相关的授权与项目 ARN 参数，用有 Device Farm 权限的凭证实际部署会多出这两部分。记录的项目已被手动删除时，`--diff` 给出警告，同样用不含这些授权与参数的模板计算变更集，已部署的模板含它们时变更集会显示移除；用有 Device Farm 权限的凭证执行 `gherkai deploy` 时会按名称找回或新建项目。完全没有凭证时 `--synth-only` 照常离线导出，但模板按未启用设备支持生成、不含远程访问会话的授权，可能与已部署的 stack 不一致，命令会给出警告；需要与已部署一致的模板时，配好凭证后重新导出。
 
-`--vpc default` 与 `--vpc vpc-<id>` 要向账户查 VPC、子网与可用区。结果按前缀缓存在 `$XDG_CACHE_HOME`（缺省 `~/.cache`）下的 `gherkai/cdk-context/`。首次查询某个前缀时会出现一条含 `Template validation found issues` 的告警，这是 CDK 在查询值就位前先用占位网络合成一遍所致，之后走缓存即不再出现。默认 VPC 的子网确实变了、或除这条警告之外真出现「新建或替换子网」的变更时，先 `--refresh-context` 再 `--diff`。
+`--vpc default` 与 `--vpc vpc-<id>` 要向账户查 VPC、子网与可用区。结果按前缀缓存在 `$XDG_CACHE_HOME`（缺省 `~/.cache`）下的 `gherkai/cdk-context/`。首次查询某个前缀时会出现一条含 `Template validation found issues` 的告警，这是 CDK 在查询结果就绪前先用占位网络合成一遍所致；之后改用缓存的查询结果，不再出现。默认 VPC 的子网确实变了、或除这条警告之外真出现「新建或替换子网」的变更时，先 `--refresh-context` 再 `--diff`。
 
 ## VPC 的三种取值
 
@@ -64,7 +64,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 |---|---|
 | `default` | 用账户的默认 VPC |
 | `new` | 本 stack 新建一套（2 个可用区，不建 NAT 网关） |
-| `vpc-<id>` | 复用现有的某个 VPC。worker 落该 VPC 的公有子网；该 VPC 没有公有子网时 worker 落私有子网、没有出网路径，此时须自备 NAT 网关或 VPC 端点，否则 worker 连不上模型与浏览器服务 |
+| `vpc-<id>` | 复用现有的某个 VPC。worker 运行在该 VPC 的公有子网；该 VPC 没有公有子网时 worker 运行在私有子网，没有出网路径，此时须自备 NAT 网关或 VPC 端点，否则 worker 连不上模型与浏览器服务 |
 
 生效的取值记录在后端，每次部署前比对，结果分四种：取值一致则放行；**不一致**则以退出码 2 结束并打印两个取值，确认要换就带 `--allow-vpc-change` 放行一次；**后端没有这条记录而 stack 已存在**（早于取值记录机制的环境）则以退出码 2 结束，先用 `gherkai deploy --diff --vpc <取值>` 核对变更集，再带 `--allow-vpc-change` 放行一次登记；stack 不存在（真首次部署）则放行。
 
@@ -79,7 +79,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
-| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 硬上限就是 120，更大的值在命令期即被拒。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错并以退出码 2 结束，写在 `gherkai.toml` 里的 `grace` 在云端只提示一句、不生效 |
+| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 的上限是 120 秒，更大的值在生成部署模板时即报错，stack 不会被改动。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错并以退出码 2 结束，写在 `gherkai.toml` 里的 `grace` 在云端只提示一句、不生效 |
 | `--container-engine 名` | 用哪个容器引擎（默认 `docker`，也可用 `GHERKAI_CONTAINER_ENGINE`）；当前只支持 `docker`，别的名字以退出码 2 结束、不静默回落 |
 | `--provider NAME` | 用哪个部署 provider；装了一个时不必给 |
 | `--region R` / `--profile P` | 与 `run` / `submit` 同名同义 |
@@ -92,7 +92,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | 概念 | 是什么 | 谁写 |
 |---|---|---|
 | **基础镜像** | `ghcr.io/zhiyanliu/gherkai-worker-<engine>:<版本>`，linux/amd64，不含任何使用方内容 | 官方发布 |
-| **variant** | 一套具名的确定性 step 集构建成的定制镜像，落 ECR 标签 `<CLI 版本>-<variant 名>`，对应一个任务定义 revision（镜像按 digest 引用） | 你的 `push-worker` |
+| **variant** | 一套具名的确定性 step 集构建成的定制镜像，推送到 ECR 时打上标签 `<CLI 版本>-<variant 名>`，对应一个任务定义 revision（镜像按 digest 引用） | 你的 `push-worker` |
 | **默认指针** | 提交时不给 `--worker-variant` 时用哪个 variant（一个部署一个） | `gherkai deploy` 初始化为 `base`；`push-worker --set-default` 改指 |
 
 云端运行哪套确定性 step 由镜像决定，不由提交侧的 `--steps-dir` 决定。怎么写这些 step 见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
@@ -123,7 +123,7 @@ gherkai submit features/login.feature --backend cloud --worker-variant login   #
 
 ## 部署输出怎么读
 
-CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最后顺带清理一次，输出按顺序看：
+CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步，最后清理一次旧 revision。输出依次如下：
 
 1. `== 基础镜像同步 novaact：ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本> ==` —— 把当前版本的官方基础镜像拉下来、推成你 ECR 里的 `<版本>-base`。两个引擎各一段。
 2. `已保留默认 worker 镜像 variant common（部署不改动已有的默认设置）` —— 默认指针已存在，部署不动它，它记录的是团队的选择。首次部署这里是 `默认 worker 镜像 variant 初始化为 base（官方基础镜像，未定制）`。
@@ -152,8 +152,8 @@ CDK 的资源变更打完之后，命令继续做 worker 镜像的三步，最�
 
 同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
 
-- **`submit` + `status`**：运行记录表读写、只读探活（表、桶、集群、任务定义、后端 Lambda）、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
-- **`run --backend cloud`**：运行记录表读写、events 表（`<prefix>events`）的 `dynamodb:Query`（逐 scope 读取执行事件）、只读探活、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
+- **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages` 与 `ecs:DescribeTaskDefinition`。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
+- **`run --backend cloud`**：运行记录表读写、events 表（`<prefix>events`）的 `dynamodb:Query`（逐 scope 读取执行事件）、同样的只读检查、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
 无论哪一级，提交带设备目标或 `@app` 的 scope 时，都另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 
@@ -197,7 +197,15 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 
 ## 退出码与常见错误
 
-`0` 成功；`2` 前置或校验失败，都是你可修的，其中缺 Node、找不到 cdk、容器引擎名不认这几条在动你的账户之前就拦下，读不到后端里的 Device Farm 项目记录（凭证或 region 不可用、缺 `ssm:GetParameter`、网络、限流）或记录不是合法的项目 ARN（被手工改过）也在动账户之前拦下，`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障同样以 `2` 结束、不输出变更集，稍后重试即可；`1` 账户可能已被改动，有三种来源：CDK 自身失败（它自己的退出码多为 `1`，原样透传，原因看上方 cdk 输出），CDK 已成功而随后的 worker 镜像步骤失败（带同一组选项重新运行 `gherkai deploy` 幂等收敛），或部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障；这时 stack 没有改动，项目可能已经建立，重新运行 `gherkai deploy` 会按名称找回它、不会重复建立）；`gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。其余退出码是 cdk 命令自己的返回值，原样透传。`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但那时镜像与 revision 可能已写入账户。
+- `0`：成功。
+- `2`：前置或校验失败，都可由你修正。缺 Node、找不到 cdk、容器引擎名无法识别、读不到后端里的 Device Farm 项目记录（凭证或 region 不可用、缺 `ssm:GetParameter`、网络、限流）、记录不是合法的项目 ARN（被手工改过），都在改动账户之前拦下；`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障，同样以 `2` 结束、不输出变更集，稍后重试即可。例外：`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但这时镜像与 revision 可能已写入账户。
+- `1`：账户可能已被改动，来源有三种：
+  - CDK 自身失败：CDK 的退出码原样透传（多为 `1`），原因看上方 cdk 输出；
+  - CDK 已成功、随后的 worker 镜像步骤失败：带同一组选项重新运行 `gherkai deploy` 幂等收敛；
+  - 部署 stack 之前找回或建立 Device Farm 项目时遇到权限以外的错误（限流、网络、服务端故障）：这时 stack 没有改动，项目可能已经建立，重新运行 `gherkai deploy` 会按名称找回它、不会重复建立。
+
+  `gherkai destroy` 没有 worker 镜像步骤，它的 `1` 只会来自 CDK。
+- 其余退出码：cdk 命令自己的返回值，原样透传。
 
 | 现象 | 处置 |
 |---|---|
@@ -209,8 +217,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 | cdk deploy 失败且报错提到 bootstrap | 先 `gherkai deploy --bootstrap`（同 `--profile` / `--region`） |
 | 找不到容器引擎或连不上其守护进程 | 装好 docker 并让守护进程运行。stack 仍会照常部署，随后的基础镜像同步以退出码 1 结束，带同一组选项重新运行 `gherkai deploy` 幂等收敛 |
 | `push-worker` 说架构不对 | 带 `--platform linux/amd64` 重新构建 |
-| 提交时说后端没有默认 variant 指针 | 部署方运行一次 `gherkai deploy` 完成初始化，或提交时用 `--worker-variant` 显式指定 |
 | `deploy` 以退出码 2 结束，提示 Device Farm 里有多个名为 `<prefix>devices` 的项目 | 部署不替你选用其中哪一个，消息里列出了命中的全部项目 ARN，本次没有改动后端。用 `aws devicefarm delete-project --region us-west-2 --arn <项目 ARN>` 删掉多余的、只留一个（删除会一并删掉其中的会话记录与录像），再重新运行 `gherkai deploy` |
 | `deploy` 或 `deploy --diff` 警告当前凭证没有 Device Farm 权限 | 命令照常完成：之前的部署记录过项目就沿用它，设备支持保持不变（`--diff` 按记录的项目计算变更集，项目若恰好已被手动删除，变更集会与下一次部署不同）；记录的项目已被手动删除而又无法找回或新建时，本次按未启用设备支持部署、撤掉设备授权；没有记录就跳过设备支持。后两种情形下带设备目标的云端 run 在提交时以退出码 2 结束并提示「部署未启用设备支持」。要启用，给部署用的凭证加上 us-west-2 的 `devicefarm:ListProjects`、`GetProject` 与 `CreateProject`（见[前置要求](#前置要求)），再重新运行 `gherkai deploy`；不测设备的团队可以忽略这条警告 |
 
-提交侧遇到的症状（CLI 与后端版本不一致、variant 解析不到、读不到后端版本戳、云端 job 判 `error`）以及更多按症状分类的处置见 [`troubleshooting.md`](./troubleshooting.md)。`gherkai deploy --help` 与 `gherkai deploy push-worker --help` 列出全部选项。
+提交侧遇到的症状（CLI 与后端版本不一致、variant 解析不到、后端没有默认 variant 指针、读不到后端版本戳、云端 job 判 `error`）以及更多按症状分类的处置见 [`troubleshooting.md`](./troubleshooting.md)。`gherkai deploy --help` 与 `gherkai deploy push-worker --help` 列出全部选项。

@@ -1,6 +1,6 @@
 # gherkai 用户指南
 
-给使用 gherkai 的人和替你操作它的 AI agent。这里讲**怎么用**：安装、写用例、运行、看结果、部署云端后端、配置、排错与常见问题。每个主题只在一篇里展开，其余页面只给链接。想了解内部机理请看 [`docs/internals/`](../internals/README.md)；仓库首页 [`README.md`](../../README.md) 是简要介绍。
+本指南写给使用 gherkai 的你，以及替你操作它的 AI agent。这里讲**怎么用**：安装、写用例、运行、看结果、部署云端后端、配置、排错与常见问题。每个主题只在一篇里展开，其余页面只给链接。想了解内部机理请看 [`docs/internals/`](../internals/README.md)；仓库首页 [`README.md`](../../README.md) 是简要介绍。
 
 | 页 | 回答什么问题 | 这一篇负责的主题（其余页只给链接、不展开） |
 |---|---|---|
@@ -8,12 +8,12 @@
 | [`writing-features.md`](./writing-features.md) | `.feature` 怎么写才能稳定运行 | 最小 `.feature` 骨架与 Gherkin 支持范围（含中文关键字）、AI 步与确定性步的分工、断言怎么写、`@engine` / `@scope` / `@timeout` 标签、声明设备目标的 `@device` / `@app` 标签（含同一设备 scope 内不重启应用）、设备上的软键盘、整句地址直接导航的内建行为、按引擎选写法（含非英文 UI）、投票、敏感信息 |
 | [`engines.md`](./engines.md) | 两个引擎各能在什么目标上运行、默认用哪个模型、费用按什么公式计 | 引擎能力矩阵（引擎 × 测试目标 × 确定性 step 的句柄 × 默认模型 × 计价公式）、用 `doctor` 与 `list-deterministic` 核对本机 worker 的目标与模型 |
 | [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) | 精确判定的步骤怎么自己写 | `steps/` 目录约定、Python 与 TypeScript 两侧并排的注册 API、给设备目标加第二份实现（`playwright` 与 `webdriver` 两种句柄）、`description` / `example` 的作用、写得稳（等待与判定）、失败消息带现场、判定逻辑与注册分离并本地单测、加载失败怎么表现、如何核对与带到云端 |
-| [`running-and-results.md`](./running-and-results.md) | 四种组合（执行方式 × 执行后端）怎么选、结果在哪、退出码什么意思 | `plan` / `run` / `submit` / `status` / `explain` 的用法与差别、`list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、本机与云端两个后端、本机后端的凭证需要的权限（含设备目标与安装包两组）、`run` / `submit` 的常用选项、退出码（部署方命令的退出码归云端后端页）、报告与证据在哪、费用量级、机读输出的入口、在 CI 里运行 |
+| [`running-and-results.md`](./running-and-results.md) | 四种组合（执行方式 × 执行后端）怎么选、结果在哪、退出码什么意思 | `plan` / `run` / `submit` / `status` / `explain` 的用法与差别、`list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、本机与云端两个后端、本机后端的凭证需要的权限（含设备目标与安装包两组）、`run` / `submit` 的常用选项、退出码（部署方命令的退出码归云端后端页）、报告与证据在哪、费用量级（含设备分钟的单价、每条用例的量级与计费时段）、机读输出的入口、在 CI 里运行 |
 | [`local-app-testing.md`](./local-app-testing.md) | 被测应用只在本机或内网时怎么测 | `--expose-local` 的前置、行为、限制、存活时间、安全与常见故障 |
 | [`cloud-backend.md`](./cloud-backend.md) | 团队怎么部署与维护云端后端 | 后端包含哪些资源（含设备支持用的 Device Farm 项目）、`gherkai deploy` / `destroy`、VPC 的三种取值、版本与升级、worker 镜像 variant 与默认指针、清理（含 Device Farm 项目）、后端的费用构成、部署机权限、团队成员需要的最小云端权限、`deploy` / `destroy` 的退出码、常见错误 |
 | [`configuration.md`](./configuration.md) | 有哪些配置项、各自在哪里生效 | 项目配置文件 `gherkai.toml`（含设备选择 `[devices]` 与应用安装包 `[apps]`）、环境变量与选项总表：模型选择、region、超时与停止宽限、报告与 steps 目录、设备与安装包（设备 ARN、Device Farm 项目、应用桶）、worker 拉起、云端资源名与网络的单项覆盖、由 gherkai 注入的变量 |
 | [`troubleshooting.md`](./troubleshooting.md) | 报错了先看哪 | `doctor` 的读法、按症状分表的处置（安装与版本 / 凭证与 region / 模型 / 引擎与判定 / 云端 / 提交后进度停住 / 隧道 / 项目配置文件与设备目标 / 其它退出码 2）；确定性 step 加载失败的表现归 writing-deterministic-steps，这里只留指针与 worker 自述失败两行 |
-| [`faq.md`](./faq.md) | 决策前的疑问：必须先部署云端后端吗、AI 判定能不能当门禁、和别的测试框架什么关系 | 跨页问题的一句话结论加去哪读；就地拥有的选型类问题：与 Playwright / Cucumber 的关系与迁移、浏览器与视口、真机可达的被测环境、无 JUnit XML 等第三方报告格式的输出 |
+| [`faq.md`](./faq.md) | 决策前的疑问：必须先部署云端后端吗、AI 判定能不能当门禁、和别的测试框架什么关系 | 跨页问题的一句话结论加去哪读；就地拥有的选型类问题：与 Playwright / Cucumber 的关系与迁移、浏览器与视口、真机的设备来源、真机可达的被测环境、无 JUnit XML 等第三方报告格式的输出 |
 
 ## 约定
 

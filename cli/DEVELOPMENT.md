@@ -15,7 +15,7 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**别改用 `argparse.SUPPRESS`**——会以「==SUPPRESS==」漏进 `--help`，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**不应改用 `argparse.SUPPRESS`**——它会以「==SUPPRESS==」出现在 `--help` 里，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── config.py     ← 项目配置文件 gherkai.toml 的定位、读取与形态校验（ADR 0053）；不知道命令与 argparse
 ├── settings.py   ← 配置文件合成进命令行选项（选项 > 环境变量 > 配置文件 > 内建默认，ADR 0053 决策 2、3、6）；argparse 的私有访问集中于此
 ├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：本机为账号比对 → 设备请求 → 安装包上传 → 写前校验，云端为读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）

@@ -18,7 +18,7 @@ POST https://bedrock-mantle.us-east-1.api.aws/v1/chat/completions
 - gpt-5.5 在 mantle `models.list` 中**存在**（id `openai.gpt-5.5` / `openai.gpt-5.5-2026-04-23`），只在 **us-east-1**（us-west-2 仅有 gpt-5.4），但**不支持 chat-completions**——只能走 Responses API。
 - `bedrock-runtime` 裸 `/v1/chat/completions` 对 gpt-5.5 返回 `UnknownOperationException`（一个 HTTP 200 但 body 是框架异常的假象，曾一度被误读为"通过"）。
 
-> 诚实存档（本 ADR 的判断反复）：Responses-only → 中途误判为"支持 chat-completions"（被假 200 骗）→ 实测纠正回 **不支持 chat-completions**。用户最初的"Responses-only"判断是对的。教训：**只认响应 body，不认 HTTP 状态码**；web 核实 ≠ 账号实证。
+> 诚实存档（本 ADR 的判断反复）：Responses-only → 中途误判为"支持 chat-completions"（被假 200 骗）→ 实测纠正回 **不支持 chat-completions**。教训：**只认响应 body，不认 HTTP 状态码**；web 核实 ≠ 账号实证。
 
 ## 次要理由（即便接口能通也不选它作主力 grounding）
 

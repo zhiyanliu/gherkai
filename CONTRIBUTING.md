@@ -82,7 +82,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 | `render_skill_contract.py`                      | 把 `--json` 契约页确定性转换为 agent skill 里的副本（ADR 0043 决策四）                                                                                                                                        |
 | `doc_rules_check.py`                            | 人读文本的措辞与悬空指针护栏命令行入口：`--changed` 只报本次改动的行、`--staged` 扫暂存区（hook 与提交闸门调用它；规则在 `cli/tests/_doc_rules.py`，见下文「测试」节「护栏三层」段） |
 | `git-hooks/pre-commit`                          | 可选的 git 提交闸门（`git config core.hooksPath tools/git-hooks` 启用），与 Claude Code 的提交闸门共用同一份规则 |
-| `presentations/` | 演示材料的生图、配音、视频更新工具；用法见 [媒体工具说明](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/README.md)，制作规范见 [演示维护资料](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/production.md) |
+| `presentations/` | 演示材料的生图、配音、视频更新工具；用法见 [媒体工具说明](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/README.md)，定位、视觉、口播与交付约定见 [演示制作规范](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/production.md) |
 | `graphify_refresh.sh`                           | 知识图的 LLM 侧刷新（见下文「知识图刷新」）                                                                                                                                                                      |
 
 ## 开发环境（从 checkout 运行）
@@ -149,7 +149,7 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 | `cli/tests/test_adr_hygiene.py`                | ADR Status 头形态与「被取代」链双向、`docs/` 文件名 kebab-case 与编号不复用、journey 首行类型头、长期文档与 AI 侧文档不指向 journey 文件与裸 WP 编号、AI 侧文档不用自造复合词、全仓 markdown 与 code 注释不写本机坐标 |
 | `cli/tests/test_context_glossary.py`           | `CONTEXT.md` 词条形态：术语行、至多两句、至多一个 ADR 指针、`_Avoid_` 只列词、六个固定节 |
 
-禁词表、口吻表、退役词表、决策六形态的启发式、悬空指针形态、扫描面与抽取器全部位于 `cli/tests/_doc_rules.py`，护栏测试（`test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py` / `test_adr_hygiene.py` / `test_context_glossary.py` / `test_skill_deploy_tokens.py`）、`tools/doc_rules_check.py`（hook 与提交闸门）、`tools/render_skill_contract.py` 的自查与 `skills/gherkai-evals/materialize.py`（复用其中的本机绝对路径判据 `MACHINE_ROOT`）共用，不应再复制第二份；三层护栏的分工见 [ADR 0046](./docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md)，操作见下文「护栏三层」段。单测通过不等于结论正确：凡结论依赖 mock 之外的真实行为（进程/信号/并发/真 AWS），按 CLAUDE.md「绿≠对」升级验证；端到端真实运行的现成工具在 `tools/`，用前先检索该目录、避免重复实现。
+禁词表、口吻表、退役词表、决策六形态的启发式、悬空指针形态、扫描面与抽取器全部位于 `cli/tests/_doc_rules.py`，护栏测试（`test_package_readmes.py` / `test_user_docs.py` / `test_skill.py` / `test_technical_docs.py` / `test_code_comments.py` / `test_adr_hygiene.py` / `test_context_glossary.py` / `test_skill_deploy_tokens.py`）、`tools/doc_rules_check.py`（hook 与提交闸门）、`tools/render_skill_contract.py` 的自查与 `skills/gherkai-evals/materialize.py`（复用其中的本机绝对路径判据 `MACHINE_ROOT`）共用，不应再复制第二份；三层护栏的分工见 [ADR 0046](./docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md)，操作见下文「护栏三层」段。
 
 **图**：全部图统一用 archify，图源与静态图在 [`docs/diagrams/`](./docs/diagrams/)：改图即修改 `<name>.json`，运行 `node tools/build_diagrams.mjs [docs/diagrams/<name>.json]`（deliver 出 HTML、再从 HTML 导出 SVG；`--png` 另导 PNG 只供目视、不入库），JSON 与 SVG 同 commit；正文以 markdown 图片语法嵌入 `docs/diagrams/<name>.svg`。HTML 默认不入库（`.gitignore` 排除）；只有发布到 GitHub Pages 的可交互大图才入库 HTML，发布要求 `.gitignore` 加白名单行、`docs/diagrams/index.html` 加链接、HTML 入库，三者同 commit，[`.github/workflows/pages.yml`](./.github/workflows/pages.yml) 把该目录原样上传。图上只画结构与指向，易漂移的字面量留在正文；图源零内部指代（护栏 `cli/tests/test_user_docs.py` 扫 JSON、断言 JSON 与 SVG 成对且 SVG 末尾的图源 sha256 指纹与 JSON 一致——图源改动未重新导出即在 CI 中失败、正文无 mermaid 块、入库 HTML 有图源且在 index 有链接）。形态、立图门槛与被拒方案见 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策七。作图方法（类型、内容规则、布局清单、archify 技法）见 [`docs/ai-eng/diagram-authoring.md`](./docs/ai-eng/diagram-authoring.md)；在 Claude Code 里执行 `/doc-diagram` 或在对话中提到改图，即自动加载该方法（项目级 skill [`.claude/skills/doc-diagram/`](./.claude/skills/doc-diagram/SKILL.md)）。
 
@@ -181,7 +181,7 @@ AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 
 `graphify-out/`（`graph.json` / `GRAPH_REPORT.md` / `wiki/`）是给 AI agent 的代码 + 文档知识图（CLAUDE.md「graphify」节要求 agent 先查图再读源码）。维护分两层：
 
-- **AST 层自动**：`graphify hook install` 安装的 post-commit hook 在每次含代码文件的 commit 后重新抽取代码、重新聚类；不调用 LLM。hook 装进 git 当前生效的 hooks 目录：启用了上文「开发环境」节的 `core.hooksPath tools/git-hooks` 后，`.git/hooks/` 里已装的 hook 不再执行，需重新执行 `graphify hook install`，它会把 `post-commit` / `post-checkout` 写进 `tools/git-hooks/`（入库目录，这两个生成文件不提交）。
+- **AST 层自动**：`graphify hook install` 安装的 post-commit hook 在每次含代码文件的 commit 后重新抽取代码、重新聚类；不调用 LLM。hook 装进 git 当前生效的 hooks 目录：启用了上文「开发环境」节的 `core.hooksPath tools/git-hooks` 后，`.git/hooks/` 里已装的 hook 不再执行，需重新执行 `graphify hook install`，它会把 `post-commit` / `post-checkout` 写进 `tools/git-hooks/`（入库目录，`.gitignore` 已忽略这两个生成文件）。
 - **LLM 层手动、周期性**：文档语义抽取与社区命名需要 LLM（AWS Bedrock），hook 不覆盖这一层；修改了 ADR / README / `docs/` 下的页面，或报告里社区名退化成文件名（hook 按枢纽节点生成的临时名）时，运行：
 
 ```bash
@@ -195,7 +195,7 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 
 **推送 tag `vX.Y.Z` 不触发 CI、直接进入发布链**（`.github/workflows/release.yml`；CI 的分支过滤把 tag 排除在外）：发布路径上只有下述一道 gate，不运行 `pytest` 与 `npm test`，因此测试与本地校验必须在推送 tag 之前全部完成并通过。
 
-**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像同号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都把 `version` 列进 `dynamic`、没有版本字段（版本号由 uv-dynamic-versioning 从 tag 计算；依赖兄弟包的 `gherkai` / `gherkai-runtime` / `gherkai-deploy-aws` 另把依赖也声明为动态，同版本 pin 由同一 metadata hook 在构建时渲染；不发行的 workspace 根另固定为 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
+**版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像都使用这个版本号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都把 `version` 列进 `dynamic`、没有版本字段（版本号由 uv-dynamic-versioning 从 tag 计算；依赖兄弟包的 `gherkai` / `gherkai-runtime` / `gherkai-deploy-aws` 另把依赖也声明为动态，同版本 pin 由同一 metadata hook 在构建时渲染；不发行的 workspace 根另固定为 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
 
 ```bash
 git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release

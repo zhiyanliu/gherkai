@@ -27,9 +27,9 @@
 | 命令与后端 | 需要什么 | 费用记到 |
 |---|---|---|
 | `plan` | 不需要凭证（装了 worker 才有确定性 step 的派发标注） | 不产生费用 |
-| `run` / `submit`，`--backend local` | 本机 AWS 凭证 + 要用的引擎 worker | 自己的 AWS 账户 |
+| `run` / `submit`，`--backend local` | 本机 AWS 凭证与要用的引擎 worker | 自己的 AWS 账户 |
 | `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
-| `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、上传 job 与写产物桶，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
+| `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、把 worker 的任务角色与执行角色传给 ECS（`iam:PassRole`）、上传 job 与写产物桶，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
 
 完整的权限清单见 [`cloud-backend.md`](./cloud-backend.md)「团队成员需要的最小云端权限」。
 
@@ -44,7 +44,6 @@
 | Midscene 引擎调用模型 | `bedrock:InvokeModel` | `arn:aws:bedrock:*::foundation-model/*`、`arn:aws:bedrock:*:<账号>:inference-profile/*`、`arn:aws:bedrock:*:<账号>:project/default` |
 | Nova Act 引擎 | `nova-act:GetWorkflowDefinition`、`nova-act:CreateWorkflowDefinition`、`nova-act:CreateWorkflowRun`、`nova-act:UpdateWorkflowRun`、`nova-act:CreateSession`、`nova-act:CreateAct`、`nova-act:UpdateAct`、`nova-act:InvokeActStep` | `arn:aws:nova-act:<区域>:<账号>:workflow-definition/*` 与 `arn:aws:nova-act:<区域>:<账号>:workflow-definition/*/workflow-run/*` |
 | 设备目标：找设备 | `devicefarm:ListDevices` | `*`（不支持按资源限定） |
-| 设备目标：找设备 | `devicefarm:GetDevice` | `arn:aws:devicefarm:us-west-2::device:*`（设备 ARN 的账号段为空） |
 | 设备目标：建立远程访问会话 | `devicefarm:CreateRemoteAccessSession` | 同一条语句里列两种：你的 Device Farm 项目 ARN，与 `arn:aws:devicefarm:us-west-2::device:*` |
 | 设备目标：查询与停止会话 | `devicefarm:GetRemoteAccessSession`、`devicefarm:StopRemoteAccessSession` | 同一条语句里列两种：`arn:aws:devicefarm:us-west-2:<账号>:session:<项目 id>/*` 与项目 ARN |
 | 设备目标：连接设备上的 Appium | `devicefarm:GetRemoteAccessSession` | `arn:aws:devicefarm:us-west-2:<账号>:project:session`。这是 Device Farm 为这条连接做授权检查时用的固定资源名，不是某个项目或会话的 ARN；缺它时远程访问会话能建立、Appium 会话却被拒，这个 job 记为执行前失败 |
@@ -104,7 +103,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
 | `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
 | `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
-| `--default-job-timeout S` | 按目标 | 单个 job 的墙钟预算秒。不给时桌面 scope 为 300 秒，设备 scope 为获取设备的预算加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取设备的预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
+| `--default-job-timeout S` | 按目标 | job 墙钟预算，单位为秒。不给时桌面 scope 为 300 秒，设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 关闭云端浏览器会话的秒数，不给则按这个 run 用到的引擎自报的最短宽限推导。值过小会漏关会话、继续计费，命令在开始执行前以退出码 2 结束。`--backend cloud` 不接受这个选项（给了直接以退出码 2 结束），云端的停止宽限在部署时定；写在 `gherkai.toml` 里的 `grace` 在云端后端下只提示一句、不生效 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
 
@@ -140,9 +139,9 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
 | `skill install` | agent skill 装上了吗 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录、目标目录里已有不是本命令装的内容、包内 agent skill 缺失、写入失败 |
 
-前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；有 job 记为 aborted 或 skipped 时 run 级判定记 `aborted`，退出码为 130（Ctrl-C）或 143（SIGTERM）。本机后端给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
+前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；退出码为 130（Ctrl-C）或 143（SIGTERM），与各 job 的判定无关；有 job 记为 aborted 或 skipped 时，run 级判定记 `aborted`。本机后端给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
 
-分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。只等待的 run 与云端后端的推进不受影响；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
+分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。这条命令若只是在等待（所等的 run 由前台 `run` 推进），或这个 run 在云端后端，停止它不影响 run 的推进；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
 ## 结果在哪
 
@@ -160,7 +159,7 @@ reports/<run_id>/
 └─ worker.log          仅 `run --quiet` 且在本机运行时
 ```
 
-同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定要读 `jobs/` 下的明细或退出码，别读 `index.html`——那是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
+同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定以 `jobs/` 下的明细或退出码为准，不要以 `index.html` 为准：它是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
 设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录、从获取设备到释放各阶段的时刻，以及执行前失败的原因与释放时是否有会话未能确认停止）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，存放在 us-west-2（与运行用的 region 无关），到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；gherkai 不删除任何会话。要留得更久，自己从控制台或 API 归档；要提前删除，在 Device Farm 控制台删除对应的会话，或执行 `aws devicefarm delete-remote-access-session --region us-west-2 --arn <会话 ARN>`（只能删除已结束的会话），删除后报告与 `explain` 里指向这个会话的控制台链接随之失效。录像会录下设备屏幕上显示的全部内容，在被测应用里登录请使用专用的测试账号。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
 
@@ -191,11 +190,11 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时还没上报完成记录的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
 - `explain` 的退出码从不表示判定结果，用例失败它照样以退出码 0 结束。`submit` 提交的 run 还没到终态时判定明细尚未写出，它会提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分。
 - 哪一步没有 AI 证据（确定性 step 本就不产，设备目标上只有判为 passed 的确定性与导航 step 不产；或抽取当时失败了），它会明说，并给出该步其它产物的链接。
-- 设备目标上，判为 failed / error 的确定性与导航 step 也有证据（没有 AI 调用，`acts` 为空）。设备的证据多几项：这一步的执行方式 `step_kind`（`ai` / `deterministic` / `navigation`）；step 结束时的页面地址 `url`，取不到时 `url_missing` 说明原因（设备不提供网页上下文、应用目标没有地址、读取超时或出错）；判为 failed / error 的 step 另有控件摘要 `controls`（每个控件的类型、id、文本与无障碍标识，条数有上限、超出时注明截断）与原始控件树文件 `page_source`（只给地址，超过大小上限时截断并以 `page_source_truncated` 注明）。设备 job 另有一条 `device_session` 链接，指向上面的 `device-session.json`，`explain` 只给链接、不解析它。地址读取与控件采集按 step 累加计入 job 的墙钟预算。
+- 设备目标上，判为 failed / error 的确定性与导航 step 也有证据（没有 AI 调用，`acts` 为空）。设备的证据多几项：这一步的执行方式 `step_kind`（`ai` / `deterministic` / `navigation`）；step 结束时的页面地址 `url`，取不到时 `url_missing` 说明原因（设备不提供网页上下文、应用目标没有地址、读取超时或出错）；判为 failed / error 的 step 另有控件摘要 `controls`（每个控件的类型、id、文本与无障碍标识，条数有上限、超出时注明截断）与原始控件树文件 `page_source`（只给地址，超过大小上限时截断并以 `page_source_truncated` 注明）。设备 job 另有一条 `device_session` 链接，指向上面的 `device-session.json`，`explain` 只给链接、不解析它。地址读取与控件采集按 step 累加计入 job 墙钟预算。
 
 ## 费用量级
 
-`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用（模型调用 + 云端浏览器会话；设备目标为 Device Farm 远程访问会话，按设备分钟计费，从服务商开始准备设备起算（并发槽位满时的排队等待不计费），准备设备到可用的时间（约 1 到 2.5 分钟）通常计费，停止会话后的收尾可能继续计费，一个设备 scope 一个会话）。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与实测 token 估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
+`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用：桌面目标是模型调用与云端浏览器会话的费用；设备目标是模型调用与 Device Farm 远程访问会话的费用。远程访问会话按设备分钟计费，一个设备 scope 通常只建一个会话；获取设备期间设备拒绝安装驱动辅助程序而换一台时（至多一次），被替换的那个会话同样计费。设备分钟从服务商开始准备设备起算，并发槽位满时的排队等待不计费；准备设备到可用的时间约 1 到 2.5 分钟，通常计费；停止会话后的收尾可能继续计费。设备分钟按量约 0.17 美元每分钟，一条 5 步左右的设备 scenario 一次大约 3 到 5 设备分钟；每平台每月用量很大时（约 1470 设备分钟以上），不计量槽位（约 250 美元每月）更省：须先在 AWS 为对应平台购买不计量设备槽位，再把 `gherkai.toml` 的 `billing-method` 设为 `UNMETERED`；没有槽位时服务商在准备阶段就结束会话，见 [`configuration.md`](./configuration.md)「项目配置文件」。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与一条 5 步示例用例的 token 用量估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
 
 ## 机读输出
 

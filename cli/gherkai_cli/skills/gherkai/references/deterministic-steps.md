@@ -14,7 +14,7 @@ https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-determini
 
 **先看清单再写**。两个引擎各查一遍 `gherkai list-deterministic --engine <名>`：要判的东西已有 step 就复用，不注册同义的模式，两条模式同时命中一步会记 error。
 
-**模式**。匹配是子串搜索、不锚定，一条 step 文本命中多条模式即记 error，所以模式要窄：带引号参数与特征词，参数组写 `[^"]+`（不写 `.+`，第二对引号会被贪婪吞掉），正则里不写 `Given` / `Then` 关键字。两侧方言只差具名组：Python `(?P<name>…)`，Midscene `(?<name>…)`。别让新模式与项目里已有的模式（如地址核对 step）有重叠的命中面，也别让它匹配到整句只是地址的文本，那会与内建导航冲突。断言类 step 声明 `keywords` 只接受 `Then`，挡住 `Given` 下的误用。
+**模式**。匹配是子串搜索、不锚定，一条 step 文本命中多条模式即记 error，所以模式要窄：带引号参数与特征词，参数组写 `[^"]+`（不写 `.+`，第二对引号会被贪婪吞掉），正则里不写 `Given` / `Then` 关键字。两侧正则写法只差具名组：Python `(?P<name>…)`，Midscene `(?<name>…)`。别让新模式与项目里已有的模式（如地址核对 step）有重叠的命中面，也别让它匹配到整句只是地址的文本，那会与内建导航冲突。断言类 step 声明 `keywords` 只接受 `Then`，挡住 `Given` 下的误用。
 
 **元数据**。`description` 一句话说这一步判什么，是 `gherkai list-deterministic` 清单「说明」列与 `gherkai plan` 命中标注里给用例作者看的那句说明；`example` 是用例作者会照抄进 feature 的完整 step 文本（含关键字）。**`example` 的措辞就是接口**：改它等于改所有用到它的 feature，定下来别轻易动。
 

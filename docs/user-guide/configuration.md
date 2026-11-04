@@ -10,7 +10,7 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 |---|---|---|
 | 本机 CLI 进程 | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-engines` / `list-deterministic` 本身 | 在运行命令的 shell 里 export |
 | 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型与测试目标），与 `--backend` 无关 | 同上 |
-| 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上运行的 worker | 把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推上去（见 [`cloud-backend.md`](./cloud-backend.md)） |
+| 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上运行的 worker | 把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推送并注册（见 [`cloud-backend.md`](./cloud-backend.md)） |
 | 部署机 | `gherkai deploy` / `destroy` / `push-worker` / `list-workers` | 在运行部署命令的 shell 里 export |
 | 项目配置文件 `gherkai.toml` | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-deterministic` 本身；worker、云端后端与部署命令都不读 | 放在运行命令的当前目录，或用 `--config` / `GHERKAI_CONFIG` 指定；见下文「项目配置文件」 |
 
@@ -18,7 +18,7 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 
 ![环境变量从你设的地方流到本机 CLI 进程、它起的子进程与云端 worker 容器，四类边分别是继承、由 gherkai 注入、被选项覆盖、不传](../diagrams/configuration-env-inheritance.svg)
 
-图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承**指原样拿到上一级的值；**被覆盖**指起子进程时用解析后的选项值改写同名变量；**不传**指值到不了对面，要生效就设在对面；**由 gherkai 注入**指由起这个进程的那一方写入，压过继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker` / `list-workers`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。项目配置文件不是环境变量：它只被本机 CLI 进程读取、解析成具体值后随提交记录走，不出现在这张图上。
+图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承**指原样拿到上一级的值；**被覆盖**指起子进程时用解析后的选项值改写同名变量；**不传**指值到不了对面，要生效就设在对面；**由 gherkai 注入**指由启动这个进程的一方写入，优先于继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker` / `list-workers`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。项目配置文件不是环境变量：它只被本机 CLI 进程读取、解析成具体值后随提交记录走，不出现在这张图上。
 
 ## 项目配置文件
 
@@ -126,7 +126,7 @@ gherkai doctor
 | `AWS_DDB_TABLE` | 运行状态表名，`--ddb-table` 没给时用它 | `<prefix>runs` | 本机 CLI 进程 |
 | `AWS_S3_BUCKET` | 产物 S3 桶名，`--s3-bucket` 没给时用它 | `<prefix>artifacts` | 本机 CLI 进程 |
 
-region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 配置文件 `[common]` 的 `region` > profile 配置里的 region。五处都没有时 gherkai 不补一个默认 region，缺 region 的后果与处置见 [`getting-started.md`](./getting-started.md)。云端 worker 的 region 由起任务的那一方以 `AWS_REGION` 注入，不用写进 variant 镜像。
+region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件 `[common]` 的 `region`、profile 配置里的 region，排在前面的优先。五处都没有时 gherkai 不补一个默认 region，缺 region 的后果与处置见 [`getting-started.md`](./getting-started.md)。云端 worker 的 region 由起任务的那一方以 `AWS_REGION` 注入，不用写进 variant 镜像。
 
 凭证本身不经 gherkai 的变量传递，走 AWS 默认凭证链：profile、`AWS_ACCESS_KEY_ID` 等标准变量、实例角色都可以，配法见 [`getting-started.md`](./getting-started.md)。
 
@@ -143,7 +143,7 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 | `NO_COLOR` | 设为非空值即关闭人读输出里的颜色，包括本机 worker 日志行的来源前缀（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
 
-- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接着推完时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
+- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接力推进到结束时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是由它的收尾超时算出的 63.5 秒，不随环境变量变化），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
 - `MIDSCENE_REPLANNING_CYCLE_LIMIT` 的取值须为正整数，不是正整数（含空值）时 Midscene worker 在建立任何会话之前报错退出并点名这个变量，桌面与设备目标都核对。设备上原生应用的翻页类动作每翻一页消耗一次规划，缺省值因此取 12；一条 AI step 在设备上因规划次数用尽而失败时，可以调大它或把这一步拆细。
@@ -199,8 +199,8 @@ region 的完整解析链是 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 
 | `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
 | `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让用例预检列出的每个 job 的票数与实际运行一致 |
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
-| `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 接力本机后端时用得上。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
-| `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上真起隧道，`plan` 上只做标注、不起隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 为本机后端的 run 接力推进时起作用。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
+| `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
 | `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束；写在 gherkai.toml 里的 `grace` 在云端只提示一句、不生效 |

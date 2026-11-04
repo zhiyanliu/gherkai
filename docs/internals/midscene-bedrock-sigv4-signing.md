@@ -30,7 +30,7 @@ Midscene 的 `createOpenAIClient` 回调把一个带自定义 `fetch` 的 OpenAI
 | `ReferenceError: HttpRequest is not defined` | 漏了 `@aws-sdk/protocol-http` 的 import | 补 import；这是崩溃不是鉴权失败 |
 | `Model configuration is incomplete` | 交给 Agent 的 `modelConfig` 里缺模型名（给了 `modelConfig` 时 SDK 只读这个对象、不读 env）；或根本没给 `modelConfig`，SDK 改读全局 env，而 worker 不往 env 写模型名（版本差异见 ADR 0008「关键实现坑」） | 按 ADR 0008 把模型名与家族随 `modelConfig` 给 |
 
-首次接线最可能遇到的是第一行：若有人把签名「简化」成签 SDK 的整个头包，一定 403。Bedrock 的 403 响应体会回显它算出的 CanonicalRequest，与线路上实际发出的头逐项对照即可定位。
+首次接线最可能遇到的是第一行：若有人把签名「简化」成签 SDK 请求上的全部头，一定会返回 403。Bedrock 的 403 响应体会回显它算出的 CanonicalRequest，与线路上实际发出的头逐项对照即可定位。
 
 ## 4. 依赖与自检
 

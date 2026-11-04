@@ -31,11 +31,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `engines.model.<引擎>` | 该引擎 worker 自述成功时 | 这台机器起 job 时**实际会用**的模型 id，由 worker 自报。展示项 |
 | `engines.targets.<引擎>` | 该引擎 worker 自述成功时 | 该引擎 worker 支持的测试目标（桌面网页、Android 网页这类名称），带会话上限的目标附分钟数；由 worker 自报，不支持设备不算失败。展示项；两引擎的能力矩阵见 [`engines.md`](./engines.md) |
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir`、`GHERKAI_STEPS_DIR` 或配置文件的 `steps-dir` 指的路径不是目录时是必修失败 |
-| `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不问自述，本行与 `engines.model.<引擎>`、`engines.targets.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
+| `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不查询 worker 的能力自述，本行与 `engines.model.<引擎>`、`engines.targets.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
 | `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。五处都没有 region 时必修失败 |
 | `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
-| `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 还没解析出来」/「未查：凭证先过不了」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
-| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示让部署方运行一次 `gherkai deploy` 把戳写上。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
+| `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 未能解析」/「未查：AWS 身份检查未通过」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
+| `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示请部署方运行一次 `gherkai deploy` 写入版本戳。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
 | `backend.resources` | 云端 | 两张表、产物桶、cluster、两个引擎的 task 定义、三个 Lambda 是否都在，报告前缀与 `--report-dir` 是否一致。必修 |
 | `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，下面三行 `backend.worker.*` 都不出现；设备支持的两行照常检查 |
 | `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
@@ -58,7 +58,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `能力自述格式版本是 … 命令行工具认的是 …`、`自述的最短停止宽限不是非负有限数` | 同上，版本不一致的另一种形态 | 同上 |
 | `要问的是引擎 X 的 worker，回答的却自称 Y` | `GHERKAI_WORKER_*_CMD` 指到了另一个引擎的 worker | 改正该环境变量，或取消设置改用已安装的 worker |
 | Midscene worker 无法启动，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
-| `plan` 打出「标注降级」 | 某个引擎的 worker 不可用，只影响命中标注 | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
+| `plan` 输出以「（标注降级）」开头的提示 | 某个引擎的 worker 不可用，只影响命中标注 | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
 
 只提交云端 run 的人不必装任何 worker：`--backend cloud` 的 `run` / `submit` 不查本机 worker。
 
@@ -82,10 +82,10 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取设备的预算加 900 秒） | 给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取设备的预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取设备的预算加 180 秒，否则在开始执行前就以退出码 2 被拒；也可以把长流程拆成多个 scope |
+| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒） | 给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取预算加 180 秒，否则在开始执行前就以退出码 2 被拒；也可以把长流程拆成多个 scope |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
-| 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 运行多次取多数票，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
+| 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 让每条 AI 断言判三次、取多数，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
 | 设备上要求收起键盘的那一步判 `error`，说明以 `键盘仍然显示：` 开头 | 说明的后半句写明原因：iOS 上「收起键盘」只点纯粹用来收起的控件（键盘上的 Done / 完成键、键盘上方工具栏里的 Done），这个输入框没有这样的控件；或点了控件键盘仍在；Android 上是系统的收起命令没有收起 | 输入框靠 Return 键或点空白处收起的，在用例里写明「按下 Return」或「点击输入框外的空白处」；下一步的目标没有被键盘遮住就删掉「收起键盘」；两者都不是则是被测应用自身的可用性问题，按失败处理；写法见[编写 .feature](./writing-features.md)的「设备上的软键盘」 |
 
 判 `error` 的 job 与 step 带一个归因标记：`gherkai status` 与 `run` 的文本输出把它显示成 `(<归因>: <说明>)`，`--json` 输出里它是 `error_type` 字段（机读字段全表见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)）。常见的几种：
@@ -97,7 +97,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `engine_error` | worker 无法启动、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
 | `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者某次建立会话的请求结果未知、收尾前也没能核实（说明里记为「结果未知的创建尝试」）。结果未知的情形是收到停止信号时建立请求还没有返回；设备目标上还包括建立请求超时、连接中断或回应里没有会话 ARN，之后按会话名也没有找到这个会话。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
-| `precheck_failed` | 没有开始测、重新运行也不会变，scope 里一条 step 都没执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序、服务商没有安排设备就结束了会话（消息带服务商的说明，常见于不计量方式而账号没有不计量设备槽位：改回按量或先购买槽位）。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
+| `precheck_failed` | 测试还没有开始，重新运行结果也不会变，scope 里一条 step 都没有执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序、服务商没有安排设备就结束了会话（消息带服务商的说明，常见于不计量方式而账号没有不计量设备槽位：改回按量或先购买槽位）。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
 | `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s` |
 | `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话。会话也可能在准备设备时就已结束（获取设备、启动应用或会话预热期间），这时本 scope 的 step 都没有执行；核对是否有人在控制台停止了会话，然后重新运行 |
 | `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
@@ -129,7 +129,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 ## 提交后进度停住
 
-`submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进停了：本机后端下是那个后台进程已退出，云端后端下是事件链没有继续。用与 `submit` 相同的定位参数运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态。
+`submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进已经停止：本机后端下是负责推进的后台进程已退出，云端后端下是负责推进的云端后台任务没有继续触发。用与 `submit` 相同的定位参数（`--backend`、`--report-dir`，云端后端还有 `--prefix`）运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态。
 
 ## 隧道（`--expose-local`）
 

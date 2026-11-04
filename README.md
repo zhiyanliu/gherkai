@@ -35,7 +35,7 @@ uv tool install 'gherkai[deploy-aws]'       # 部署方：部署与维护云端�
 gherkai skill install          # 装给 Claude Code；--agent codex 装给 Codex，--agent all 两处都装
 ```
 
-也可以用 Agent Skills 通用安装器装同一份内容，URL 里的 tag 与你装的 gherkai 版本一致（`gherkai --version`）；两种装法的差别见 [开始使用 › 上手路径一](./docs/user-guide/getting-started.md#上手路径一交给-ai-agent)：
+也可以用 Agent Skills 通用安装器装同一份内容，把 URL 里的 tag 换成你装的 gherkai 版本（`gherkai --version` 可查）；两种装法的差别见 [开始使用 › 上手路径一](./docs/user-guide/getting-started.md#上手路径一交给-ai-agent)：
 
 ```bash
 npx skills add https://github.com/zhiyanliu/gherkai/tree/v1.4.9/cli/gherkai_cli/skills/gherkai -a claude-code -a codex
@@ -51,7 +51,7 @@ gherkai run  features/wikipedia_generic.feature       # 运行；结果落在 re
 gherkai explain <run_id>                              # 有用例没过：逐步看问了 AI 什么、AI 看见了什么、截图在哪
 ```
 
-后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 切到团队的云端后端。执行方式与执行后端的四种组合、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。
+后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 改用团队的云端后端。执行方式与执行后端的四种组合、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。
 
 ## 它是如何工作的
 

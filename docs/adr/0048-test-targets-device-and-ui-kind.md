@@ -75,7 +75,7 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 
 - 网页上下文在部分设备与系统版本上运行期才知道是否可用（探测归 [0052](./0052-appium-interface-adapter-and-platform-differences.md)）；现状是 iOS 26 的 Safari 在 Device Farm 当前提供的 Appium 驱动下网页上下文整体不可用。
 - **前提由注册元数据显式声明**：需要网页上下文的 `webdriver` 条目声明 `requires: ["web_context"]`（[0050](./0050-deterministic-step-handles-and-testing.md) 决策 1），能力自述把它带进 step 级 `targets`，plan 标注「确定性（需要网页上下文；设备不提供时记为错误）」（[0049](./0049-worker-capabilities-targets-keys.md)）。core 只把 worker 报来的已知取值映射成产品文案，不推断 handler 的行为。
-- 运行期：探测**确认**不提供时，worker 不调用 handler，step 记 error、类别 `capability_unavailable`，消息「这台设备不提供网页上下文，这一步需要网页上下文才能执行；请改写为 AI 断言，或换一台设备」；探测**出错**（列上下文的调用失败、传输层错误或会话异常这类无法区分设备能力的情形；有候选但网页命令持续超时而原生命令正常属于确认不提供，归类规则在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）时同样不调用 handler，但类别记 `engine_error`、消息「未能确认设备是否提供网页上下文」，以免把瞬时故障说成「重试不会变」。没有声明前提却调用了 `withWebContext` 的 handler，由 `withWebContext` 抛出同一类别。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。这个类别在 iOS 网页目标上可能少被触发（决策 7 推荐 iOS 的落点核对用 AI 断言），保留它是因为处置语义与 `engine_error` 不同（重试不会变）；样本积累后再议是否合并。
+- 运行期：探测**确认**不提供时，worker 不调用 handler，step 记 error、类别 `capability_unavailable`，消息「这台设备不提供网页上下文，这一步需要网页上下文才能执行；请改写为 AI 断言，或换一台设备」；探测**出错**（列上下文的调用失败、传输层错误或会话异常这类无法区分设备能力的情形；两次都切入网页上下文、只读命令两次都失败于服务端报错或超时，而原生只读命令正常，属于确认不提供，完整归类规则在 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 5）时同样不调用 handler，但类别记 `engine_error`、消息「未能确认设备是否提供网页上下文」，以免把瞬时故障说成「重试不会变」。没有声明前提却调用了 `withWebContext` 的 handler，由 `withWebContext` 抛出同一类别。**不转 AI**：plan 的标注是 feature 作者读到的契约，运行期悄悄换成 AI 判定会改变判定依据而不留痕，属于静默降级。这个类别在 iOS 网页目标上可能少被触发（决策 7 推荐 iOS 的落点核对用 AI 断言），保留它是因为处置语义与 `engine_error` 不同（重试不会变）；样本积累后再议是否合并。
 
 ### 7. 应用目标上的导航 step 与落点核对规则
 
@@ -114,10 +114,6 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 
 ## 被拒方案（护栏）
 
-- **应用目标上不支持网址导航、一律记 error，DeepLink列为未来方向**：scenario 之间不复位（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1），每条 scenario 都要先把应用带到已知页面，没有DeepLink就只能让 AI 从当前页面点回去，慢、费 token、随界面变动失败；实测 Android 与 iOS 18.6、26.3 上指定应用的DeepLink都可靠，不支持它的设备（iOS 15.8 实测）首次调用即报错、记为 `capability_unavailable`，可识别（决策 7）。
-- **应用目标上自定义 scheme 不自动识别、由显式确定性 step 承接**：顾虑是 `When 输入 "shop://x"` 被当成导航。[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条改为「整句是地址」的结构判据后，这类句子不再命中（句子里还有别的内容），顾虑消失；显式 step 要使用方多学一种写法，不取。iOS 第三方应用的 https 链接（Universal Links）未实测、不能承诺，自定义 scheme 在支持DeepLink的设备上两个平台都实测可靠。
-- **Android 上静默把 `( ) ' ;` 改写成百分号编码再传**：`%28` 与 `(` 对应用的 intent-filter 匹配未必等价，改写后成功与否都不是使用方写的那个地址；校验并提示改法（决策 7）。
-
 - **从 step 文本推断 ui_kind 与应用**（双引号内是地址即网页、等于已绑定别名即启动应用）：被拒。它让 core 匹配 step 文本，违反 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的「匹配放 worker」红线；同时与 worker 的导航识别构成两份事实源，二者对同一句话的判断会漂移。显式 `@app:` 让「一个 scope 一个应用」由 FeatureContractError 机械保证。
 - **要求「第一步必须是打开应用」**：被拒。这是用 step 文本承载配置，core 要么解析它（同上），要么无法校验；应用由 worker 在会话建立后启动即可，用例保持只写测试意图。
 - **`@device` 作 scenario 级属性**：被拒。scope 是会话边界，同一 scope 内的 scenario 共享一台设备，设备只能是 scope 级属性，与 engine 同理。
@@ -125,6 +121,9 @@ job 墙钟预算的语义沿用 [0034](./0034-detached-batch-reconciler.md)：�
 - **目标不受支持时静默改用另一个引擎**：被拒。scope 的引擎是用例声明的事实，替用户换引擎会改变判定方式与费用，且对用户不可见。
 - **确定性 step 在目标上无实现时拒绝整个 run**：被拒。缺省走 AI 是 [0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 的默认哲学，plan 标注已让降级可见；拒绝会迫使测试开发为每个目标补齐所有 step 才能开始测试。
 - **运行期网页上下文不可用时转 AI**：被拒，理由见第 6 条。
+- **应用目标上不支持网址导航、一律记 error，DeepLink列为未来方向**：scenario 之间不复位（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1），每条 scenario 都要先把应用带到已知页面，没有DeepLink就只能让 AI 从当前页面点回去，慢、费 token、随界面变动失败；实测 Android 与 iOS 18.6、26.3 上指定应用的DeepLink都可靠，不支持它的设备（iOS 15.8 实测）首次调用即报错、记为 `capability_unavailable`，可识别（决策 7）。
+- **应用目标上自定义 scheme 不自动识别、由显式确定性 step 承接**：顾虑是 `When 输入 "shop://x"` 被当成导航。[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 3 条改为「整句是地址」的结构判据后，这类句子不再命中（句子里还有别的内容），顾虑消失；显式 step 要使用方多学一种写法，不取。iOS 第三方应用的 https 链接（Universal Links）未实测、不能承诺，自定义 scheme 在支持DeepLink的设备上两个平台都实测可靠。
+- **Android 上静默把 `( ) ' ;` 改写成百分号编码再传**：`%28` 与 `(` 对应用的 intent-filter 匹配未必等价，改写后成功与否都不是使用方写的那个地址；校验并提示改法（决策 7）。
 - **推进器在执行时读取项目配置文件**：被拒。推进器读不到使用方机器上的文件，且会让同一个 run 前后不一致，见 [0053](./0053-project-config-file.md)。
 - **对设备目标关闭隧道鉴权**：被拒。隧道地址是公网地址，关闭鉴权等于把使用方本机应用在 run 期间向公网开放；统一的鉴权方案见 [0051](./0051-device-session-lifecycle-and-app-distribution.md)。
 

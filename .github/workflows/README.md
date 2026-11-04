@@ -44,23 +44,23 @@ build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
 
 ### 1. PyPI 占名（先于一切）
 
-七个名字各真传一版 `0.0.0` 占位 sdist——**pending publisher 不占名**（他人先注册即失效，ADR 0037 决策 8）。
+七个名字各实际上传一版 `0.0.0` 占位 sdist——**pending publisher 不占名**（他人先注册即失效，ADR 0037 决策 8）。
 
 现状（2026-09-08 核对 `https://pypi.org/pypi/<name>/json`）：**七名全部已占**（owner `Zhi Yan Liu`）——
-`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`（真发行：占名时各真传一版 `0.0.0`，此后按 tag 发正式版本）、`gherkai-cli` / `gherkai-worker-midscene`（防混淆占位，索引上只有那一版 `0.0.0`、永不发真内容）。
+`gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`（实际发行的包：占名时各上传一版 `0.0.0`，此后按 tag 发正式版本）、`gherkai-cli` / `gherkai-worker-midscene`（防混淆占位，索引上只有那一版 `0.0.0`、永不发真内容）。
 
 npm 侧已占（maintainer `liuzhiyan`）：`@gherkai/worker-midscene`（占名的 `0.0.0` 之后按 tag 发正式版本）与非 scoped 的 `gherkai@0.0.0`（防混淆占位）。
 
-### 2. PyPI trusted publisher × 5（只有真发行的五个需要）
+### 2. PyPI trusted publisher × 5（只有实际发行的五个包需要）
 
 对 `gherkai` / `gherkai-runtime` / `gherkai-core` / `gherkai-worker-novaact` / `gherkai-deploy-aws`
 逐个进 *Manage project → Publishing*（项目还不存在时用 *Your account → Publishing* 建 pending publisher，
-但见上：pending 不占名，占名要真传），填：
+但见上：pending 不占名，占名必须实际上传），填：
 
 - Owner：`zhiyanliu`
 - Repository name：`gherkai`
 - Workflow name：`release.yml`
-- Environment name：**留空**——`release.yml` 的 `pypi` job 没声明 `environment:`，这栏填了反而对不上、
+- Environment name：**留空**——`release.yml` 的 `pypi` job 没声明 `environment:`，这栏填了值就与 job 的声明不一致、
   publish 被拒。（想加人工审批门就先给 job 加 `environment: pypi`、再在这里填同名，两边必须一致。）
 
 两个防混淆占位名（`gherkai-cli` / `gherkai-worker-midscene`）**不配** publisher：它们永不由 CI 发布。

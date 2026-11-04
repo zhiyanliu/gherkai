@@ -138,7 +138,7 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 2. WebdriverIO（含 webdriver 与 `@wdio/` 下的包）与 `@aws-sdk/client-device-farm` 的值导入只出现在 `src/device/` 下。`import type` 不受限：它在编译期擦除、运行期不加载，注册面 `worker/deterministic.mts` 的 `import type { Browser } from "webdriverio"` 即属此类。
 3. `new DeviceFarmClient` 只出现在 Device Farm 会话块，它是执行期唯一调用 Device Farm SDK 的地方。
 4. `mobile:` 命令字面量只出现在 `src/device/adapters/` 下；命令守卫、能力探测与会话预热只调用适配器导出的原语与只读命令名集合。
-5. 系统版本与机型只从会话能力对象读取，读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的透传是三类显式豁免。豁免按声明逐处列出（`device/read-points.test.mts` 的 `VERSION_MODEL_ALLOWED`），除设备选择的输入外，豁免里读出的值只原样透传（按白名单判：填进字段、数组或不带标签的模板插值，作初值、单独成句的赋值（外面带括号、类型断言或非空断言也算）、返回值或箭头函数的表达式体，以及存在性判断（直接判断真假，或与 null / undefined 作相等或不等比较；大小比较、`in`、`instanceof` 报红）；括号、类型断言、非空断言、条件表达式的两个分支、`??` / `||` / `&&` 与赋值表达式不改变取值，穿过后沿外层再判），参与运算、用作下标、取属性或调方法、与非空值比较、按它 switch 或用作 case 标签、交给函数处理（含 `new` 与带标签的模板）等其余写法都报红。另有一条结构差集：会话能力对象只在 Appium 块（`device/appium.mts`）读取。
+5. 系统版本与机型只从会话能力对象读取（读取点只有 Appium 块 `device/appium.mts`），读出的值只进诊断与 evidence，不作分支条件；设备选择的输入、协议载荷与句柄上下文的透传是三类显式豁免，按声明逐处列在 `device/read-points.test.mts` 的 `VERSION_MODEL_ALLOWED`，除设备选择的输入外豁免里读出的值只许原样透传。「原样透传」的白名单与报红写法以 ADR 0052「读取点测试」条为准，实现是同一测试文件的 `valueUse`。
 6. run-scope 的主流程不写按设备的条件分支：差异落在接缝实现里，或由实现返回的数据表达。执行异常的 step 级归类由命令守卫与设备实现挂到异常对象上（`worker/surface.mts` 的 `attachClassification`），runStep 先认这个标记，设备路径因此不会归成 `network_error`；桌面路径只有派发出错的防御分支（句柄不适用于桌面浏览器）带标记，其余异常不带标记、沿用瞬时网络判定。
 
 第 1 条与第 2 条的运行期效果由 `worker/no-device-deps.test.mts` 守：它在真实子进程里执行 `--capabilities` 与一条桌面 job，记录被解析的模块，断言 WebdriverIO（含 webdriver 与 `@wdio/` 下的包）、Device Farm SDK 与 `limits.mts`、`session-name.mts` 之外的设备模块都没有被加载。第 2 到 5 条由 `device/read-points.test.mts` 用语法树扫 `src/` 的非测试源文件做差集（每条带正向对照，检测失效时不会空过）。两个驱动适配器每个原语发出的命令由 `device/adapters/adapters.contract.test.mts` 对照 `adapters/fixtures/<适配器>.commands.json` 的快照核对，改命令须显式改快照（ADR 0052 决策 8）；同一份快照也是真机重新探测工具的对照基准，见下节。
@@ -166,9 +166,9 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 场景 | 做法 | 判据与回写 |
 |---|---|---|
 | 停止信号落在各阶段 | 分别在 Create 在途、会话排队中（PENDING_CONCURRENCY）、释放阶段网络退化时停止 run；另在正常收尾的 `deleteSession` 发出之前与在途时各停止一次 | 每个会话恰一条 `session_closed`，`doctor --backend cloud` 的 `backend.devices.sessions` 没有遗留；终结四阶段在 Fargate 停止宽限内收完，63.5 秒的下限是否够用按网络退化的实测校准 ADR 0051 决策 5；正常收尾中途停止的两次，尚未发出的 `deleteSession` 不再发出、`device-session.json` 写盘后交给退出前的队列排空：云端后端在预算内尽力上传（没传完的随容器退出丢失），本机后端不上传、文件留在本地产物目录 |
-| 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备；生产值的年龄后备要直接启动 worker、把 job 预算置空（经 CLI 时 core 的超时催停先到），让一条每 30 秒发一次设备命令的确定性 step 执行超过 8880 秒 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
+| 会话中途丢失 | 外部停止会话；另用测试构建注入较小的会话年龄上限，触发年龄后备；生产值的年龄后备要直接启动 worker、把 job 预算置空（经 CLI 时 core 在 job 超时后发出的停止请求先到），让一条每 30 秒发一次设备命令的确定性 step 执行超过 8880 秒 | 当前 step 记 error、本 scenario 余下 step 为 skipped、scope 归 `session_lost`，后续 scenario 由 core 标为 skipped（ADR 0051 决策 4） |
 | 命令结果未知 | 用测试构建把执行期单请求超时改成 20 秒（不能统一调到 1.5 秒：首先触发的是截图命令），再用确定性 step 发一条服务端执行时长超过它的 `mobile: longClickGesture`；真 Agent 的样本用测试构建丢弃第一条点按的回应 | 命令不被重复执行；下一条 scenario 开始前的截图存活探测按会话状态分流（ADR 0052 决策 6、ADR 0051 决策 12） |
-| 进程级兜底 | 用测试构建在首次 newSession 失败的那一刻注入一个未处理的 Promise 拒绝（三次自然复测都没有观察到未处理拒绝，所以用注入核兜底） | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |
+| 进程级兜底 | 用测试构建在首次 newSession 失败的那一刻注入一个未处理的 Promise 拒绝（三次自然复测都没有观察到未处理拒绝，所以改用注入来核对这条兜底） | worker 记录后进入终结，会话不泄漏（ADR 0051 决策 5） |
 | 脱敏 | 应用目标配一个内容随机的安装包让建连失败一次；网页目标用自写确定性 step 在 handler 里拼出带伪造签名类参数与隧道令牌的地址（步文本不带秘密形态）打开一个回显页并接一条故意失败的 AI 断言，再把经守卫代理读到的会话端点放进一条错误消息抛出；执行中外部停止一次；本机与云端后端各一遍，云端另核 CloudWatch 日志与事件表 | stderr（含 WebdriverIO 自身的日志）、事件、evidence、`device-session.json` 与原始控件树里的签名与端点令牌都已盖住（ADR 0051 决策 11） |
 
 ## 运行 spike（分段自检，可独立运行）
@@ -196,7 +196,7 @@ npx tsc --ignoreConfig --noEmit --module nodenext --moduleResolution nodenext --
 
 ## 容器镜像（面向发布方）
 
-`Dockerfile` 构建的是云端后端（Fargate）的 worker **基础镜像**（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 已降为入口页、不再带模板）。
+`Dockerfile` 构建的是云端后端（Fargate）的 worker **基础镜像**（同版本 `@gherkai/worker-midscene` + SDK 运行时 + 协议层，**零使用方内容**）；使用方的定制层模板（`FROM <基础镜像>` + `COPY steps/` + `GHERKAI_STEPS_DIR`）与推送流程见 [ADR 0038](../../docs/adr/0038-worker-image-delivery.md)（包 README 只是入口页，不带模板）。
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 
@@ -210,7 +210,7 @@ docker build --platform linux/amd64 -f engines/midscene/Dockerfile \
   -t gherkai-worker-midscene:dev dist/        # context = 放 tarball 的目录
 ```
 
-真 build 已验证的两条约束：
+实际构建镜像时验证过的两条约束：
 
 - **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；arm Mac 上不加则 build 出 arm64，容器启动期报 `exec format error`、无法启动（ADR 0033/0038）。
 - **经典 builder（无 buildx）会把未选中的 stage 一并执行**，故两个 stage 都对「自身参数未给」保持容忍（`if [ -n … ]`）；真正的校验点在 final stage 的两条冒烟：`--capabilities`（不需要 AWS）在 build-arg 漏给时 fail-loud，不延后到 Fargate 启动期；另一条只 import 已安装包的 `dist/device/surface.mjs`、不调用任何导出（零 AWS 调用），拦住设备依赖没装进镜像——`--capabilities` 按设计不加载设备模块，照不出这一类缺失。

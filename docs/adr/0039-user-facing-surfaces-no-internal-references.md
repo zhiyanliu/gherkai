@@ -35,7 +35,7 @@
 | 根 `CONTRIBUTING.md` | contributor 入口：版本线叙事、目录结构、从 checkout 运行、测试、spike、发布与版本、各包 DEVELOPMENT 索引、纪律/术语/ADR 指针 | 相对链接 |
 | 各包 `DEVELOPMENT.md` | 该包 contributor 文档：模块布局、从 checkout 运行、测试、contributor 踩坑（真踩过的坑一条不丢）；**不进发行包**（wheel 本就不含，sdist 按 hatch 白名单 `include` 只收源码目录与 README / LICENSE / pyproject） | 相对链接 |
 | agent skill（`cli/gherkai_cli/skills/gherkai/**`：`SKILL.md` + `references/`） | 随 CLI wheel 发行、由 `gherkai skill install` 拷进使用方项目或用户级 agent 目录（[0043](./0043-agent-skill-for-driving-gherkai.md)）——**使用者面**，读者是 agent，安装态没有仓库上下文 | **只用绝对 URL**（相对链接在安装态必死）；跨文件指针写反引号裸路径（如 `references/engines.md`）；零 ADR / 决策号 / 内部机制名 |
-| GitHub Release 正文（由 `.github/scripts/release_notes.py` 从 `CHANGELOG.md` 本版节 + `.github/release_body_footer.md` 渲染） | Releases 页面——**使用者面**，没有仓库上下文；各包 pyproject `[project.urls] Changelog` 改指根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五反转了 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的「Release 正文作 changelog 锚点」） | 只用绝对 URL（同包 README）：`CHANGELOG.md` 全文只写绝对 URL（仓库内文件用 `blob/HEAD/<path>`），渲染脚本不改写链接，护栏见 `cli/tests/test_user_docs.py`；被拒方案是在渲染脚本里把相对链接改写成绝对 URL——多一层转换只服务一个消费者，CHANGELOG 在 GitHub 上也是人读的用户面；footer 里指向仓库文档的链接钉 `blob/vX.Y.Z/`；升级/用法细节指 user guide，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已在 GitHub 上手工修正） |
+| GitHub Release 正文（由 `.github/scripts/release_notes.py` 从 `CHANGELOG.md` 本版节 + `.github/release_body_footer.md` 渲染） | Releases 页面——**使用者面**，没有仓库上下文；各包 pyproject `[project.urls] Changelog` 改指根 `CHANGELOG.md`（[0045](./0045-documentation-layering-and-placement.md) 决策五反转了 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的「Release 正文作 changelog 锚点」） | 只用绝对 URL（同包 README）：`CHANGELOG.md` 全文只写绝对 URL（仓库内文件用 `blob/HEAD/<path>`），渲染脚本不改写链接，护栏见 `cli/tests/test_user_docs.py`（被拒的链接改写方案见「被拒方案」）；footer 里指向仓库文档的链接钉 `blob/vX.Y.Z/`；升级/用法细节指 user guide，不写 ADR/决策号（首发正文曾漏一处「见 ADR 0037 决策 7」，已在 GitHub 上手工修正） |
 
 页顶 Summary（pyproject / package.json 的 `description`）同属包页面，同一规则。搬家不是删：从使用者向文件移出的每条事实与踩坑，必须在对应 DEVELOPMENT.md 里找得到。
 
@@ -43,7 +43,7 @@
 
 markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即查的 hook 与提交闸门，见 [0046](./0046-guardrail-layers-tests-hooks-and-lean-claude-md.md)；code 字面量那张表仍独立住在 `cli/tests/test_user_facing_messages.py`（见下第一条）。
 
-- `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表含 ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名与 construct 名 / 施工与失败语义行话，另收口头语、量词「档」与退役旧名（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八；真值集是该文件的 `FORBIDDEN`，见面一）；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下两条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
+- `cli/tests/test_user_facing_messages.py`：AST 扫五个生产包全部**非 docstring** 字符串字面量 + midscene `.mts` 去注释后按行扫，禁词表含 ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名与 construct 名 / 施工与失败语义行话，另收口头语、量词「档」与退役旧名（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八；真值集是该文件的 `FORBIDDEN`，见面一）；Python 与 TS 同一张表（曾因 TS 表更松漏掉一处「组合根装配错误」）。**这张表只管 code 字面量**，与使用者向 markdown 那张（`cli/tests/_doc_rules.py`，见下三条）**不同源**：code 面扩了词不会自动传导到包页面 / skill，同一个词可能在 code 里被拦、在使用者向 markdown 里仍在（如 `preflight`）——扩表时两侧都要过一遍。
 - `cli/tests/test_package_readmes.py`：根 README 零禁词，禁词之外另扫口头语与退役旧名两张表（[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八）；进包的六份 README 与 Release 正文的固定块 `.github/release_body_footer.md` 同属包页面，走 `_doc_rules.scan("package-page", …)`，规则束是用户文档的整套规则（内部指代、口头语、退役旧名、符号当谓语、「退 N」、正文箭头、悬空指针）再加零相对链接（正则 `](../` `](./` `](x.md`），固定块先代入占位符样例值再扫、另要求仓库链接锁定 tag（不带 `blob/HEAD/`）；pyproject / package.json `description` 零禁词，根有 `CONTRIBUTING.md`、每包有 `DEVELOPMENT.md`，且 `release.yml` 必须仍调 `release_notes.py check`/`render`、不得有内联 `body: |`；扫描面路径缺失即失败（包搬家 / workflow 改形态不许让护栏变绿）。
 - `cli/tests/test_skill.py`：随 wheel 发行的 agent skill 的 markdown 扫描器——同一禁词表与相对链接正则（共享常量 `cli/tests/_doc_rules.py`），另对照 CLI argparse 真值与契约页键名（[0043](./0043-agent-skill-for-driving-gherkai.md) 决策六）。
 - `cli/tests/test_user_docs.py`：`CHANGELOG.md` 全文只许绝对 URL（按链接目标判断，行内与引用式都算；Release 正文直接截取本版节、不改写链接，见面二表 Release 行）；它守的用户文档面其余规则，判据在 [0045](./0045-documentation-layering-and-placement.md) 决策三 / 六。
@@ -64,6 +64,7 @@ markdown 护栏共用的规则源 `cli/tests/_doc_rules.py` 另接入写完即�
 - **用环境变量/详细模式切换是否显示内部指代**：两套文案等于两倍维护，且默认面仍会漏。
 - **单份 README、分「使用者」「开发者」两节**：PyPI/npm 拿的是整份文件，节切分挡不住 contributor 内容上页面；分文件才能让「进包」这条线物理成立。
 - **包 README 用相对链接指 `../docs/…`**：PyPI/npm 页面上全是死链；用 `blob/HEAD/` 的绝对 URL。
+- **在 Release 渲染脚本里把 CHANGELOG 的相对链接改写成绝对 URL**：多一层转换只服务一个消费者（Release 正文），CHANGELOG 在 GitHub 上也是人读的用户面；改为 CHANGELOG 全文只写绝对 URL（`blob/HEAD/<path>`）。
 - **中文文件名**（journey 曾用）：文件名是引用锚点，要在 URL/终端/grep 里稳定可打——文档文件名一律英文 kebab（CLAUDE.md 文档纪律）。
 
 ## 重议闸门

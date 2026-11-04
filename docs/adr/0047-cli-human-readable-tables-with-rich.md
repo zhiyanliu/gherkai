@@ -23,7 +23,7 @@ CLI 的人读输出里有一类内容是「多行同结构」的清单：`deploy
 - `runtime/gherkai_runtime/textui.py` 新增；`runtime/pyproject.toml` 依赖加 `rich`。
 - `cli/gherkai_cli/__main__.py` 的 `list-engines`、`list-deterministic`、`doctor`，`cli/gherkai_cli/render.py` 的 `render_text`（run 汇总）、`render_plan_text`、`render_explain_text`、`render_run_state`，`deploy_aws/gherkai_deploy_aws/workers.py` 的 `list_workers` 改用 textui；各自的首行说明与空清单提示保留。
 - `core/gherkai_core/termcolor.py` 新增（颜色开关的统一判定，textui 与 worker 日志前缀共用）；`core/gherkai_core/adapters/subprocess_engine.py` 的 worker 日志前缀改为按 job 启动顺序取色、经 termcolor 判定是否上色。
-- 用户指南：`doctor` 示例改为表格形态，「示例行」改「示例列」，配置页加 `NO_COLOR`；skill 的排障参考同步 `doctor` 读法；CHANGELOG 记为变化。
+- 用户指南：`doctor` 示例改为表格形态，配置页加 `NO_COLOR`；skill 的排障参考同步 `doctor` 读法；CHANGELOG 记为变化。
 
 ## 不做 / 延后
 

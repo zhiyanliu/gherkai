@@ -15,6 +15,6 @@
 - [0012](./0012-planning-shares-qwen3vl-no-text-planner.md)：planning 角色由 Midscene 的引擎模型兼任（现值见 [0044](./0044-engine-model-selection-and-override.md)），不引入 AWS 外的多模态推理模型作独立 planner（当年依据是「AWS 内『chat-completions + 收图像』的选项只有 VL 模型」；2026-09 实查该集合已扩到 GPT-5.6 / GPT-6 / Kimi，但仍全在 Bedrock 内——离开 AWS 才有的选项按本约束不取，属需另立 ADR 的破例）。
 
 **已记录的例外**（按上「决定」段的登记要求）：
-- [0035](./0035-local-app-testing-via-tunnel.md)：本地应用测试的出站隧道用 ngrok（AWS 外 SaaS）——「开发机 → 云端浏览器」的入站通道在 AWS 内实查无等价物（SSM 端口转发方向相反；IoT Secure Tunneling 两端 localproxy、不产公网 URL；AgentCore Browser VPC 模式够不到开发者笔记本，已评估并缓），满足本约束的「AWS 内确实无任何可行选项」条件。例外面被压到最小：经可插拔 `TunnelProvider` 口子隔离、仅在显式给出 `--expose-local`（命令行选项，或配置文件 `[common]` 的同名键，见 [0053](./0053-project-config-file.md) 决策 3）时启用、数据面只有被测应用自身流量——模型/浏览器/存储/编排仍全在 AWS 内。
+- [0035](./0035-local-app-testing-via-tunnel.md)：本地应用测试的出站隧道用 ngrok（AWS 外 SaaS）——「开发机 → 云端浏览器」的入站通道在 AWS 内实查无等价物（SSM 端口转发方向相反；IoT Secure Tunneling 两端 localproxy、不产公网 URL；AgentCore Browser VPC 模式够不到开发者笔记本，已评估并缓），满足本约束的「AWS 内确实无任何可行选项」条件。例外面被压到最小：经可插拔 `TunnelProvider` 口子隔离、仅在显式给出 `--expose-local`（命令行选项，或配置文件 `[common]` 的同名键，见 [0053](./0053-project-config-file.md) 决策 3）时启用、数据面只有被测应用自身流量——模型/浏览器/存储/编排仍全在 AWS 内。1.5 起 Device Farm 设备上的网页同走这条隧道，隧道鉴权为每 run 令牌换 cookie、桌面与设备一条路（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 8、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）。
 
 **明确的非目标**：即便将来 spike 实测发现 AWS 内方案（如 Qwen3-VL 英文定位质量）不如 AWS 外方案，**也不以「离开 AWS」作为默认出路**；应优先在 AWS 内寻找改进（换 Bedrock 上其他模型、自托管于 SageMaker、调 grounding 策略等）。

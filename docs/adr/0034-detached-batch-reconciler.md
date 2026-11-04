@@ -230,7 +230,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 
 **`timed_out` 归因链**：`TaskExited.timed_out`（退出记录新字段，独立键空间内的属性、不动键结构）——local 由 launcher 标志传入；cloud 经 **StopTask 的 `reason` 参数原样出现在 STOPPED 事件 `detail.stoppedReason`** 这条现成通道传递（零新键空间/零新事件类型）。`timed_out` 有三个来源：deadline 到点处置后经观察链写入的退出记录；接力者在观察链丢失时直接落的 `timed_out`（见下 `claimed_at` 条①）；cloud tick 在 RUNNING 与 STOPPED 两个 task 列表都无踪时直写的 `timed_out`（见上执行方式表）。终结函数据 timed_out 取 `stop_reason = timeout`、判 ERROR 并归因 `timeout`（内容完整的干净退出除外，见机制二「终结函数与真值表」）——与同步路径归因语义对齐（超时是主动中止、非引擎故障，但按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一超时记 error+timeout）。
 
-**`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline——自家新 claim 的 job 有 timer；**他人 claim、无 handle** 的 RUNNING job 超预算（+余量）且无退出记录 → 观察链已死（timer 随 owner 进程丢、worker 因 fd3 断管随之早亡）→ 直接 `record_exit(timed_out=True)` 收敛（不与下方被拒方案「处置者直接写 task_exited」冲突：那条拒的是**有活观察链时**绕过它；若 owner 尚活，其 timer 同一 deadline 早已触发、真退出记录同带 timed_out，后到覆盖归因不变）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout + 余量` 的 job 走同一超时处置（余量让 Scheduler 主机制先处置、避开与在途 STOPPED 观察链的竞态，非正确性参数，值见 `lambdas/reconciler.py` 的 `_DEFENSIVE_TIMEOUT_MARGIN_S`；这一扫是 Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算（含拉镜像等启动开销——简单可预期，文档写明）。
+**`JobState.claimed_at`**（`try_claim_job` 时写，机制四扩展）：① local 接力（per-run 崩后 `status --wait`）据此恢复 deadline——自家新 claim 的 job 有 timer；**他人 claim、无 handle** 的 RUNNING job 超预算（+余量）且无退出记录 → 观察链已死（timer 随 owner 进程丢、worker 因 fd3 断管随之早亡）→ 直接 `record_exit(timed_out=True)` 收敛（不与下方被拒方案「处置者直接写 task_exited」冲突：那条拒的是**有活观察链时**绕过它；若 owner 尚活，其 timer 同一 deadline 早已触发、真退出记录同带 timed_out，后到覆盖归因不变）；② cloud tick 的**防御性顺带扫**——任何 tick 对 running 且 `now-claimed_at > timeout + 余量` 的 job 走同一超时处置（余量让 Scheduler 主机制先处置、避开与在途 STOPPED 观察链的竞态，非正确性参数，值见 `lambdas/reconciler.py` 的 `_DEFENSIVE_TIMEOUT_MARGIN_S`；这一扫是 Scheduler 的双保险：CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救）；③ status 可显示已跑时长。timeout 从 claim 起算、含启动开销（规则与理由见本节「产品语义」段）。
 
 **与「idle 零成本」的关系**：one-time schedule 到点即删、无常驻轮询；**bonus**——到点 invoke 本身是一次强制 tick，等于每个 job 至少在 timeout 时刻被推进一次，顺带部分兜住「事件丢投级联断裂」（重议闸门首条的场景）。
 
@@ -283,7 +283,7 @@ moto 立即返回测不到事件投递/并发时序，健康网真跑不触发�
 
 **已补真验**：`status --wait` 接力 + Stream 丢投 → **已真验**（复现法与结果见「重议闸门」丢投条）；`setsid` local 脱离 → **已真验**（local submit → per-run 进程脱离 CLI 后台推进 → CLI 退出后 status 读到 running/passed）；四机制 → core 单测（`test_reconcile.py`/`test_cloud_reconcile.py`/`test_project.py`）+ local/cloud 端到端真跑覆盖。仍留未做项见下「重议闸门」（如 Stream 长期丢失率的量化、动态定时兜底规则）。
 
-**本机 `status --wait` 两道闸的真跑（2026-11-02，跳板机本机后端，Nova 桌面 scope）**：前台 `run` 执行到第一步完成后，另一个进程对同一 run 执行 `status --wait`——打出「只等待、不接力」的提示，71 秒后随前台运行到终态按判定退出（退出码 0），期间 worker 进程始终只有前台那一个（`events.db` 只有一条 `session_opened` 与一条 `scope_started`、一条退出码 0 的退出记录）。对照：`submit --backend local` 的 run（run_state.json 带 `detached: true`）在 per-run 进程被强杀后执行 `status --wait`，接力者接管——该 job 已被 claim、worker 随 per-run 进程死亡没发出任何事件，接力者按 claimed_at 超预算（90 秒加 10 秒余量）写超时退出记录、run 判 error，99 秒后以退出码 1 返回；接力者重写 run_state.json 后标记仍在。两段结束后无残留进程与浏览器会话。
+**本机 `status --wait` 两道闸的真跑（2026-11-02，跳板机本机后端，Nova 桌面 scope）**：前台 `run` 执行到第一步完成后，另一个进程对同一 run 执行 `status --wait`——打出「只等待、不接力」的提示，随前台运行到终态按判定退出（退出码 0），期间 worker 进程始终只有前台那一个（`events.db` 只有一条 `session_opened` 与一条 `scope_started`、一条退出码 0 的退出记录）。对照：`submit --backend local` 的 run（run_state.json 带 `detached: true`）在 per-run 进程被强杀后执行 `status --wait`，接力者接管——该 job 已被 claim、worker 随 per-run 进程死亡没发出任何事件，接力者按 claimed_at 超预算（90 秒加 10 秒余量）写超时退出记录、run 判 error，99 秒后以退出码 1 返回；接力者重写 run_state.json 后标记仍在。两段结束后无残留进程与浏览器会话。
 
 ## 被拒方案（护栏，防未来重踩）
 

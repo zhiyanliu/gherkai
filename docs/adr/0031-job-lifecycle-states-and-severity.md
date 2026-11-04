@@ -27,7 +27,7 @@ fail-fast（[0026](./0026-schedule-module.md)：任一 job error → 中止整�
 class Status(str, Enum):
     PASSED = "passed"; FAILED = "failed"; ERROR = "error"
     SKIPPED = "skipped"    # core 派生。job 级：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn，没执行/没花钱/可无脑重跑，session_id 必 None；step 级与 scenario 级见决定六、决定一
-    ABORTED = "aborted"    # core 派生：主动中止（fail-fast 或使用方中断）时跑一半被掐。有副作用/有现场可查。session_id 保留不清；使用方中断已被处理且有 job 记 aborted 或 skipped 时，run 级 status 也取它（决定三）
+    ABORTED = "aborted"    # core 派生：主动中止（fail-fast 或使用方中断）时跑一半被掐。有副作用/有现场可查。session_id 保留不清；run 级 status 也可取它，条件见决定三的例外
 ```
 
 | 态 | 含义 | 对使用者 | 产生处（schedule） |
@@ -95,8 +95,7 @@ run 级（聚合用）：
 **视觉映射（severity 序在报告着色上的落法）**：每个终态各配一个可区分的颜色、**别走兜底灰**——`aborted` 要**比 error 更扎眼**（severity 最高、有现场最该被人看），且**别和兜底灰混**；`skipped` 用**弱化灰**（最轻、最该被无视），但须与兜底灰可分。否则新态全走兜底灰、aborted 看不出严重。（前置态 pending/running 另配「进行中」视觉，见决定一·补；落点符号见下「touch points」的 `_STATUS_COLOR`。）
 
 **为何 run 级不含 skipped/aborted**（验证过的关键洞察）：job 级 skipped/aborted 由 fail-fast 产生时，fail-fast 的唯一触发条件是「某 job 已经 `error`」——那个 error job 在 run 级聚合里已把 run 顶成 `error`。
-所以无论 skipped/aborted 怎么算，run 必为 error，它俩**根本不需要进 run 级比较**（使用方中断是它们的另一来源、不伴随 error，run 级不经聚合直接记 `aborted`，见决定三的例外）（scenario 级与 step 级的合成 SKIPPED——决定一、决定六——只出现在收到 `scope_done.status = error` 的 job 里，该 job 判为 error 或 aborted，同样不进 run 级比较）。它们是 job 级、单写者
-（fail-fast 主线程 / worker 自己一次写定终态）、**不参与 run 级单调升级**。
+所以无论 skipped/aborted 怎么算，run 必为 error，它俩**根本不需要进 run 级比较**；它们是 job 级、单写者（fail-fast 主线程 / worker 自己一次写定终态）、**不参与 run 级单调升级**。另两种情形同样不进 run 级比较：使用方中断是 job 级 skipped/aborted 的另一来源、不伴随 error，有 job 记 aborted 或 skipped 时 run 级在聚合之外直接记 `aborted`（决定三的例外）；scenario 级与 step 级的合成 SKIPPED（决定一、决定六）只出现在收到 `scope_done.status = error` 的 job 里，该 job 判为 error 或 aborted。
 
 ## 决定三：`_aggregate` 入口过滤 skipped/aborted（run 级只看已出判定的 job）
 

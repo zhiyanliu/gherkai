@@ -63,14 +63,14 @@ class ReportStore(Protocol):
 
 （无 `materialize` 参数——产物拷贝式的 materialize 已否决，见下「被拒方案」。）
 
-- **返回 `ResourceUri` 而非 `Path`**：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（v1.1 已建，ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/gherkai_core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——**唯一例外**是 `explain` / `compose.read_resource` 对 `kind == "evidence"` 的自有 schema ref 解引用（见上 `ref` 条）。
+- **返回 `ResourceUri` 而非 `Path`**：`LocalReportStore` 回 `file://…/index.html`，`S3ReportStore` 回 `s3://…/index.html`（ADR 0030 决定六）——**同一签名容两种落点**，否则 S3 adapter 被迫返回 `Path` 包 `s3://`（`Path` 会把 `s3://b/x` 折成 `s3:/b/x`，错）。`ResourceUri = NewType("ResourceUri", str)`（定义在 `core/gherkai_core/model.py`）：把这个**本就存在于 `ReportRef.ref` 注释里**的约定提升成命名类型，统一「`ReportRef.ref` 与 `write` 返回值都是带 scheme 的资源指针」。比裸 `str` 多一层意图、又零运行时成本/零依赖（运行时即 `str`）。消费端（cli/WebUI）只当 URI 用、不 stat/open——**唯一例外**是 `explain` / `compose.read_resource` 对 `kind == "evidence"` 的自有 schema ref 解引用（见上 `ref` 条）。
   - 实现注意：`LocalReportStore` 内 `index_path.resolve().as_uri()`——`as_uri()` 要求绝对路径，而 cli 默认 `--report-dir` 是相对的（`reports`），不 `resolve()` 会抛 `ValueError`。
 - **`index.html` 链接（`href`）指向产物原位**：不拷贝、不搬运产物。`href` 是 core 自己生成的**导航链接**（`index.html` 的 `<a href>`），local 相对化、cloud 恒等于 `ref`（见下「href 相对化」）。
 
 > **`ref` 由 worker 定，`href` 由 core 算——铁律圈的是 `ref`，不是 `href`（关键边界，别混）**：
 > - `ReportRef.ref` 指向**哪**是 **worker** 决定的——`--backend local`(subprocess) worker 产物落本地、报 `file://`；`--backend cloud`(Fargate) worker（或 subprocess+注入落点的内部预演路径，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）**自己上传 S3**、报 `s3://`（[0029](./0029-engine-artifacts-to-s3.md)，落点由组合根注入的 S3 配置驱动、注入即上传）。**ReportStore 不上传 worker 产物、不碰其持久化**（per-worker by-design，[0016](./0016-execution-architecture-core-lib-run-model.md)「worker 产物持久化 ⊥ store」），只**不透明搬运**这个 `ref`（不 stat/fetch/open/**改写**——包括绝不把 `ref` 从绝对改成相对）。
 > - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<Nova Act 会话 id>/act_<act id>_<指令片段>.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
-> - `LocalReportStore` → `S3ReportStore`（v1.1 已建）只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
+> - `LocalReportStore` → `S3ReportStore` 只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
 - **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（`finalize_run`，判定真值已落 ResultStore）之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。（无状态批量运行路径同守此序：RunReport 由推进器在 `try_finalize` CAS **之后**经 `reconcile.finalize_report` 写、同一失败隔离，见 [0030](./0030-realtime-persistence-seam.md) 决定三与 [0034](./0034-detached-batch-reconciler.md)）
 
@@ -85,7 +85,7 @@ class ReportStore(Protocol):
   （SDK 用 `path.resolve(cwd, MIDSCENE_RUN_DIR)`，cli 传**绝对路径**避 worker cwd 歧义。）
 - 故 RunReport 的产物**都在 `reports/<run_id>/` 树内**。**正因产物就在树内**，`index.html` 的 `href` 相对化（相对 run 目录）即让整个 `reports/<run_id>/` 目录可原样搬走、链接不断——这正是移除 materialize 的底气（无需拷贝即自包含）。
 - **归位的另一收益**：产物不再落相对 worker cwd 的固定 `midscene_run/`（每 run 覆盖、与 run 无关），
-  而是 run 专属目录——为 v1.1 云端归集/上传（[0016](./0016-execution-architecture-core-lib-run-model.md)「worker 产物持久化 ⊥ store」）铺路，两引擎落点对称、处理一致。
+  而是 run 专属目录——为云端归集/上传（产物 S3 key 镜像这棵 run 树、与 manifest/index 同 `<prefix>/<run_id>/` 前缀，[0029](./0029-engine-artifacts-to-s3.md)；产物持久化归 worker，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「worker 产物持久化 ⊥ store」）提供按 run 划分的落点，两引擎落点对称、处理一致。
 
 ### href 相对化（local 相对 / cloud 恒等 ref）
 
@@ -162,7 +162,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
+- **现在做**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性 step」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。设备目标上判为 failed / error 的确定性与导航 step 已产一份只含界面快照（地址、控件摘要、原始控件树）的 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一的设备例外，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），由 worker 采集、不经 handler；本口子要的 handler 自产产物在两类目标上都仍未实现，跑后完全看不到产物的仍是桌面目标的确定性 step 与设备上 passed 的确定性 step。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。

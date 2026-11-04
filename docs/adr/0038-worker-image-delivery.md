@@ -6,7 +6,7 @@
 
 [0037](./0037-distribution-and-packaging.md) 决策 5 定了 worker 镜像**两层分工**：发布方按版本发基础镜像到 GHCR，使用方在本地叠自己的确定性 step 构建定制镜像。本 ADR 定**最后一层怎么交付到云端后端并被 run 使用**。
 
-**当前（施工前）**：每个引擎一个镜像；部署方用 `tools/build_push_workers.py` 从整个 repo 构建、推自己私有 ECR 的 `{prefix}{engine}-worker:latest`；task-def 由 IaC 建、镜像栏焊死 `tag="latest"`；RunTask 只传 task-def 的 **family 名**（ECS 取该 family 最新 ACTIVE revision）；CLI 完全不知道也不能选跑哪个镜像；「更新 steps」= 改 repo 里的脚手架文件、整体重建、重推 `latest`，下次起 task 自然拉到。使用方 build 时必须带 `--platform linux/amd64`，漏给的后果是 Fargate **启动期** `exec format error`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的坑）。
+**施工前**：每个引擎一个镜像；部署方用 `tools/build_push_workers.py` 从整个 repo 构建、推自己私有 ECR 的 `{prefix}{engine}-worker:latest`；task-def 由 IaC 建、镜像栏焊死 `tag="latest"`；RunTask 只传 task-def 的 **family 名**（ECS 取该 family 最新 ACTIVE revision）；CLI 完全不知道也不能选跑哪个镜像；「更新 steps」= 改 repo 里的脚手架文件、整体重建、重推 `latest`，下次起 task 自然拉到。使用方 build 时必须带 `--platform linux/amd64`，漏给的后果是 Fargate **启动期** `exec format error`（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 记的坑）。
 
 **要解的问题**：
 - **多套 step 集并存**：不同测试开发 / 分支在同一个共享后端上各跑各的确定性 step 集而互不覆盖；跑时可选。单 tag cover 不了。

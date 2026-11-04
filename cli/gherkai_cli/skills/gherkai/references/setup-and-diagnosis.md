@@ -40,7 +40,7 @@
 ## 4 凭证与 region
 
 - 走本机 AWS 默认凭证链：profile / 环境变量 / 实例角色皆可，`--profile` 或 `AWS_PROFILE` 选 profile。**不需要任何 API key**。
-- **region 必须有出处**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `gherkai.toml` 里 `[common]` 的 `region` > `--profile`（或 `AWS_PROFILE`、或配置文件 `[common]` 里设的 profile）指的那个 profile 配置里的 region。五处都没有才报错；缺失时不会改用任何默认 region。
+- **必须能解析出 region**，按序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > `gherkai.toml` 里 `[common]` 的 `region` > `--profile`（或 `AWS_PROFILE`、或配置文件 `[common]` 里设的 profile）指的那个 profile 配置里的 region。五处都没有才报错；缺失时不会改用任何默认 region。
 - 该 region 下账号要能用这些服务：Nova Act 引擎需要 Nova Act 服务与模型 nova-act-v1.0（默认锁定；环境变量 NOVA_MODEL_ID 可换，`doctor` 会显示实际模型）；Midscene 引擎需要 Bedrock 模型 us.openai.gpt-5.6-terra（默认；环境变量 MIDSCENE_MODEL_ID 可换，`doctor` 会显示实际模型）；两者都要 AgentCore Browser。`AccessDenied` / 模型不可用多半是 region 未开通模型或凭证缺这些权限。
 - 本机 `run` / `submit` 也要 AWS 凭证（浏览器与模型在云端）；只有 `plan` / `list-engines` / `list-deterministic` / `doctor`（不带 cloud 参数）纯本地。
 - 本机后端上测设备目标时凭证还要有 Device Farm 的动作（含对固定资源 `arn:aws:devicefarm:us-west-2:<账号>:project:session` 的 `devicefarm:GetRemoteAccessSession`，缺它时远程访问会话能建立、Appium 会话却被拒）与应用桶的读写；按场合分的完整清单见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 「本机后端的凭证需要什么权限」一节。

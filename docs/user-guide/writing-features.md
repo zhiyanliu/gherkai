@@ -1,6 +1,6 @@
 # 编写 .feature
 
-`.feature` 文件的写法包括：最小骨架的形态，哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 等有语义的 tag（含声明设备目标的 `@device` 与 `@app`），Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），以及哪些内容不该写进 `.feature`。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
+`.feature` 文件的写法包括：最小骨架的形态，一个 step 走哪条执行路径（含整句地址直接打开的内建导航），哪些 step 交给 AI、哪些必须精确，AI 断言怎么写才稳定，投票次数怎么用，`@scope` / `@engine` / `@timeout` 等有语义的 tag（含声明设备目标的 `@device` 与 `@app`），Gherkin 各种写法的支持范围，按引擎调整写法（含非英文 UI），哪些内容不该写进 `.feature`，以及写完怎么用 `gherkai plan` 自检。确定性 step 的代码怎么写见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)；运行命令、选项、退出码与结果位置见 [`running-and-results.md`](./running-and-results.md)。
 
 引用的片段出自仓库的 [`features/`](../../features/) 目录。
 
@@ -25,7 +25,7 @@ worker 拿到一个 step 后先查确定性 step 的注册表，命中就走代�
 
 | 执行路径 | 命中条件 | 怎么执行 |
 |---|---|---|
-| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，地址中间有空格也不算（空格要写成 `%20`）；不带引号的地址末尾若是句号、逗号、分号、冒号、叹号、问号或右括号、右引号这类标点（ASCII 与全角都算），整句也不算地址、交给 AI；地址本身以这些字符结尾时加双引号写，引号内一律原样当地址 | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。应用目标（`@app:<别名>`）上地址不限协议，自定义 scheme 与 `http(s)://` 都经 DeepLink 交给被测应用而不是系统浏览器；地址无法送达被测应用时这一步记 `error` 并给出改法（Android 上地址里的 `;`、`'`、`(`、`)` 与 URI 不允许的字符（如 `{`、`}`、`|`、非 ASCII 字符）要先百分号编码，出错消息会列出是哪几个字符），iOS 上只保证送达、应用忽略链接时这一步照样通过，由紧跟的落点核对判定（见[下文](#ai-断言怎么写才稳)）。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
+| ① 导航（内建的确定性 step） | `Given` / `When` 之后**整句只是一个地址**：`Given "https://example.com/"` 与 `Given https://example.com/` 都算，加不加双引号一样；地址前后再有别的字就不算，地址中间有空格也不算（空格要写成 `%20`）；不带双引号的地址末尾若是句号、逗号、分号、冒号、叹号、问号或右括号、右引号这类标点（ASCII 与全角都算），整句也不算地址、交给 AI；地址本身以这些字符结尾时两侧加双引号写，引号内一律原样当地址；双引号只加了一侧（开头或结尾）时，不论地址末尾是不是标点，这一步都记 `error` 并提示两侧都加或都不加，不交给 AI（`gherkai plan` 仍把它标为内建导航，执行到这一步才报） | 直接打开这个地址，不问 AI。网页上只接受 `http://` / `https://` 地址，写别的协议这一步记 `error`。应用目标（`@app:<别名>`）上地址不限协议，自定义 scheme 与 `http(s)://` 都经 DeepLink 交给被测应用而不是系统浏览器；地址无法送达被测应用时这一步记 `error` 并给出改法（Android 上地址里的 `;`、`'`、`(`、`)` 与 URI 不允许的字符（如 `{`、`}`、`|`、非 ASCII 字符）要先百分号编码，出错消息会列出是哪几个字符），iOS 上只保证送达、应用忽略链接时这一步照样通过，由紧跟的落点核对判定（见[下文](#ai-断言怎么写才稳)）。它与其它确定性 step 一样出现在 `gherkai list-deterministic` 的清单与 `gherkai plan` 的标注里 |
 | ② 项目注册的确定性 step | step 文本命中项目 `steps/` 目录里注册的正则，且这条 step 在当前测试目标上有实现（没有时交给 AI，例如只有 `playwright` 实现的 step 写在设备目标上） | 调用注册的函数直接查被测对象：桌面网页上拿 Playwright 的页面对象，设备目标上拿连到远程访问会话的 WebdriverIO 客户端。不问 AI、不投票、逐次可复现 |
 | ③ AI（默认） | 以上都不命中 | `Then` 的文本当布尔断言交给模型判真假（可投票）；`Given` / `When` 的文本当动作交给模型执行 |
 
@@ -44,7 +44,7 @@ worker 拿到一个 step 后先查确定性 step 的注册表，命中就走代�
 | 页面级语义（是不是这个词条页、有没有报错、内容是否完整） | AI step | 语义理解正是模型的长处，写起来零代码 |
 | 页面结构经常变、一次性的探索式用例 | AI step | 选择器会随改版失效，语义陈述不会 |
 
-确定性 step 是少数：多数用例整篇用自然语言写完即可，只在上表前两行的场景补一两条确定性 step。写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
+确定性 step 是少数：多数用例整篇用自然语言写完即可，只在上表前两行的场景，以及下面说的高频检查上补确定性 step。成本与速度也影响取舍：AI step 每次判定都调用一次模型，投票再乘票数，一步要几秒到几十秒（模型往返与截图）；确定性 step 不产生模型费用、毫秒级完成，整套用例的总耗时与云端浏览器会话时长随之缩短。所以能写成代码的检查里，出现频次高的优先写成确定性 step：`Background` 里每条 scenario 都要重做的前置检查、`Scenario Outline` 每行数据都要过的断言、被要求投票的断言。费用量级见 [`running-and-results.md`](./running-and-results.md#费用量级)。写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
 ## AI 断言怎么写才稳
 
@@ -96,13 +96,13 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 - **写在 Feature 行、`Rule` 行、`Examples` 块上的 tag 都会传给其下（或其展开出的）每一条 scenario**。`@scope` 标在 Feature 行等于把整个文件编成一个串行 job，标在 `Rule` 行等于把这条规则下的 scenario 编成一个。
 - **传下来的 `@scope` 不能被单条 scenario 覆盖**：同一条 scenario 解析出两个不同的 `@scope` 值即整个 run 拒绝运行。要按 scenario 分组，就不要在 Feature 行或 `Rule` 行标 `@scope`。
-- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（不给时桌面 scope 为 300 秒、设备 scope 为获取设备的预算加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；两者也可写进项目配置文件，见[配置](./configuration.md)）。
+- **`@engine` 与 `@timeout` 按 scope 生效**：scope 里任一条 scenario 标了，整个 scope 继承；同一个 scope 出现两个不同值，整个 run 拒绝运行（同一个会话不可能同时属于两个引擎，一个 job 也只能有一个预算）。都没标时用命令行的 `--default-engine`（默认 `novaact`）与 `--default-job-timeout`（不给时桌面 scope 为 300 秒、设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 只让桌面 scope 不超时，设备 scope 仍取缺省；两者也可写进项目配置文件，见[配置](./configuration.md)）。
 - **scope 名在整个 run 里是全局的**：两个 `.feature` 文件写了同一个名字就合并成一个 job，本可并发的两条用例只能串行共享一个会话。名字带上来源前缀（`checkout-happy-path`、`admin-login`），不要用 `login`、`smoke` 这类通名。
 - **未标 `@scope` 的 job 用 `<文件路径>:<行号>` 当编号**。因此 `@scope` 的值不要写成这个形状：正好等于同一个 run 里某条未标 scope 的 scenario 编号时，整个 run 拒绝运行。
-- **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:`、`@device:`、`@app:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒；设备 scope 上它不得低于获取设备的预算加 180 秒（获取预算即项目配置 `[devices]` 的 `acquire-timeout-s`，不给时为 600 秒，即至少 780 秒），也不得超过远程访问会话的时长上限（`gherkai doctor` 的目标行会显示，见[引擎能力矩阵](./engines.md)），否则整个 run 拒绝运行。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。只写 `@device` 或 `@app` 同样不报错、被当成普通标签：这个 scope 照常在桌面网页（或设备上的浏览器）上执行。`gherkai plan` 的每个 job 行会显示测试目标，目标不对时先看这一行。分组没生效时先用 `gherkai plan` 看分组结果。
+- **标了 tag 就得给值**：`@scope:`、`@engine:`、`@timeout:`、`@device:`、`@app:` 后面空着会被拒绝；想用默认值就删掉这个 tag。`@timeout` 的值必须是正数秒；设备 scope 上它不得低于获取预算加 180 秒（获取预算即项目配置 `[devices]` 的 `acquire-timeout-s`，不给时为 600 秒，即至少 780 秒），也不得超过远程访问会话的时长上限（`gherkai doctor` 的目标行会显示，见[引擎能力矩阵](./engines.md)），否则整个 run 拒绝运行。连冒号和值一起漏掉、只写 `@scope` 不会报错：它会被当成普通标签忽略，这条 scenario 仍各自成为一个 job。只写 `@device` 或 `@app` 同样不报错、被当成普通标签：这个 scope 照常在桌面网页（或设备上的浏览器）上执行。`gherkai plan` 的每个 job 行会显示测试目标，目标不对时先看这一行。分组没生效时先用 `gherkai plan` 看分组结果。
 - **预算从这个 job 启动时算起**，云端后端下包含拉取 worker 镜像等启动开销；到点这个 job 会被停下，判定记为出错、原因是超时。设定预算时在用例本身需要的时间之上留出余量：云端后端的启动开销通常是几十秒，建议多留一到两分钟。
 - **`@device:<平台>` 与 `@app:<别名>` 声明设备目标**：`@device:android` / `@device:ios` 让这个 scope 在该平台的真机上执行，只标 `@device` 时测的是设备上的浏览器（Android 的 Chrome、iOS 的 Safari），再标 `@app:<别名>` 时测的是原生应用。声明、继承与冲突的规则与 `@engine` 相同，`@app` 的别名要在项目配置文件的 `[apps]` 里绑定安装包，用哪台设备在 `[devices]` 或命令行选项里指定（见[配置](./configuration.md)）。`@device` 只接受 `android` 与 `ios`，桌面网页不标（写 `@device:desktop` 也会被拒绝）；`@app` 标在没有 `@device` 的 scope 上、别名在 `[apps]` 里查不到、或别名没有这个 scope 所在平台的条目时，整个 run 都拒绝运行。设备目标只有 Midscene 引擎支持（各引擎支持的目标见[引擎能力矩阵](./engines.md)），设备 scope 要同时标 `@engine:midscene` 或用 `--default-engine midscene`；落到 Nova Act 的设备 scope 在 `plan` 与执行前被拒绝并给出改法。一个设备 scope 对应一个远程访问会话，同一 scope 里的 scenario 之间不重启应用；需要干净起点的用例在 `Background` 里写一条重启应用的确定性 step（模板见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)「内建的导航与 `steps/` 模板」）。
-- **设备上的软键盘**：输入之后键盘留在屏幕上是正常的，不需要收起时不要在用例里写「收起键盘」，AI 会自己绕开它；只在键盘挡住了下一步要操作的元素时写明「输入 … 后收起键盘」，并进同一步或单独一步都可以。Android 上收起键盘不依赖应用。iOS 上收起键盘只能走应用或系统浏览器提供的途径。「收起键盘」只会点纯粹用来收起的控件：键盘上的 Done / 完成键，或键盘上方工具栏里的 Done（Safari 给网页输入框配的那一条、应用自己加的工具栏）；它不会按 Return 键，也不会点空白处，因为这两样可能提交表单、换行或误触别的东西。输入框靠 Return 或点空白处收起时，在用例里写明「按下 Return」或「点击输入框外的空白处」。一个哪种途径都没有的输入框，任何自动化工具和真人都收不起，这一步会以「键盘仍然显示」为由判出错；这时先确认下一步的目标是否真的被键盘遮住：没遮住就删掉「收起键盘」；遮住了，那是被测应用自身的可用性问题，测试如实失败是对的。
+- **设备上的软键盘**：输入之后键盘留在屏幕上是正常的，不需要收起时不要在用例里写「收起键盘」，AI 会自己绕开它；只在键盘挡住了下一步要操作的元素时写明「输入 … 后收起键盘」，并进同一步或单独一步都可以。Android 上收起键盘不依赖应用。iOS 上收起键盘只能走应用或系统浏览器提供的途径。「收起键盘」只会点纯粹用来收起的控件：键盘上的 Done / 完成键，或键盘上方工具栏里的 Done（Safari 给网页输入框配的那一条、应用自己加的工具栏）；它不会按 Return 键，也不会点空白处，因为这两样可能提交表单、换行或误触别的东西。输入框靠 Return 或点空白处收起时，在用例里写明「按下 Return」或「点击输入框外的空白处」。一个哪种途径都没有的输入框，任何自动化工具和真人都收不起，这一步会以「键盘仍然显示」为由判出错；这时先确认下一步的目标是否真的被键盘遮住：没遮住就删掉「收起键盘」；遮住了，那是被测应用自身的可用性问题，这一步判出错如实反映了它。
 - **其它 tag 都是普通标签**，没有内置语义，用来配合 `--tags` 挑一部分 scenario 运行。
 - 以上校验都在起第一个 job 之前完成，任一条不满足即整个 run 拒绝运行，不产生模型与浏览器费用。用 `gherkai plan` 提前验。
 
@@ -110,7 +110,7 @@ Scenario: 维基百科首页与 OpenAI 词条首段的 AI 断言
 
 ![一批 .feature 里的 scenario 按 @scope 归成 job，job 再按并发上限决定同时运行还是排队](../diagrams/writing-features-scenario-to-job.svg)
 
-图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。并发上限就是 `--max-concurrency`：上限内的 job 同时运行，超出上限的排队等空位、有位子空出来再运行，它的取值与写法见 [`running-and-results.md`](./running-and-results.md)。
+图注：job 编号在图上只写出形状，准确形状见上面的规则；两个 `.feature` 文件用同一个 scope 名，也会并进同一个 job。图中的并发上限就是 `--max-concurrency`，默认值与调整方法见下一段。
 
 **scope 与并发**：并发只发生在 job 之间，所以互不相干的用例分到不同 scope，是并发执行的前提。并发上限默认是 4 个 job：分好 scope 之后，最多 4 个 job 同时运行，超出的 job 排队等空位；要改变同时运行的数量，用 `--max-concurrency` 或项目配置文件的 `max-concurrency` 调整（见 [`configuration.md`](./configuration.md)）。用 `submit` 提交到云端后端时，并发还受部署侧设定的上限约束。
 
@@ -137,7 +137,7 @@ Scenario: 仍停留在 OpenAI 词条页
 | `Rule` | 支持 | 其下的 scenario 照常展开 |
 | DataTable | 支持 | 挂在 AI step 上，还原成表格文本接在该步文本后面，一起交给模型 |
 | DocString | 支持 | 挂在 AI step 上，多行文本原样接在该步文本后面 |
-| `And` / `But` | 支持 | 承接前一条 `Given` / `When` / `Then` 的派发身份 |
+| `And` / `But` | 支持 | 沿用前一条 `Given` / `When` / `Then` 的关键字；交给 AI 时，跟在 `Then` 后是断言，跟在 `Given` / `When` 后是动作 |
 | `Example:`、`Scenario Template:`、`Scenarios:` | 支持 | 分别是 `Scenario:`、`Scenario Outline:`、`Examples:` 的同义写法 |
 | 中文关键字（`功能:` / `背景:` / `场景:` / `场景大纲:` / `例子:` / `假如` / `当` / `那么` / `并且` / `而且` / `但是`） | 支持 | 文件第一行须写 `# language: zh-CN`；不写这一行时中文关键字解析失败，报错指向 `功能:` 所在的那一行。关键字用哪种语言写不影响派发：`那么` 等于 `Then`（断言），`假如` / `当` 等于 `Given` / `When`（动作） |
 | `*` 开头的步；前面没有可继承关键字的 `And` / `But`（scenario 第一步且这个 feature 没有 `Background`，或紧跟在 `*` 之后） | 不支持 | 判不出是动作还是断言，整个 run 拒绝运行；改成写明关键字 |
@@ -151,7 +151,7 @@ Scenario: 仍停留在 OpenAI 词条页
 | 被测 UI 语言 | 英文 UI。非英文页面上能导航、能判页面级语义，但「正文里是否出现某个中文词」这类断言会系统性判否（同一页面上判断是否出现英文词仍然可靠） | 不限，中文 UI 上的动作与 AI 断言同样可靠 |
 | 确定性 step 语言 | Python（`steps/*.py`） | TypeScript / JavaScript（`steps/*.mts`、`steps/*.mjs`） |
 
-被测 UI 不是英文时有三条出路，按对用例的改动量从小到大：给 scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`），前提是运行用例的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
+被测 UI 不是英文时有三种做法，按对用例的改动从小到大排列：给 scenario 标 `@engine:midscene`（或整个 run 用 `--default-engine midscene`），前提是运行用例的环境里装了这个引擎的 worker；把断言改写成页面级语义陈述；把文本与结构检查改成确定性 step——改动最大，但这些 step 之后不再产生模型费用。
 
 同一份 `.feature` 要在两个引擎上运行时，用到的每条确定性 step 都要在两侧成对注册，否则在缺失的那一侧这一步会换回 AI 判定。见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md)。
 
