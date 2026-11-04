@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `0cc73425`
+- Built from commit: `89e37384`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -636,14 +636,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `--interrupt 中断时机矩阵` --shares_data_with--> `plan()`  [EXTRACTED]
   tools/e2e_harness.md → core/gherkai_core/scope.py
+- `e2e_harness.py（opt-in 手动端到端验证脚本）` --calls--> `plan()`  [EXTRACTED]
+  tools/e2e_harness.md → core/gherkai_core/scope.py
 - `test_skill.py（skill 产品面与真值护栏）` --references--> `render()`  [EXTRACTED]
   docs/adr/0043-agent-skill-for-driving-gherkai.md → tools/render_skill_contract.py
 - `ADR 0043：驱动 gherkai 的 agent skill` --references--> `render()`  [EXTRACTED]
   docs/adr/0043-agent-skill-for-driving-gherkai.md → tools/render_skill_contract.py
 - `render()` --references--> `docs/internals/cli-json-contract.md（机读字段级参考页）`  [EXTRACTED]
   tools/render_skill_contract.py → docs/adr/0045-documentation-layering-and-placement.md
-- `e2e_harness.py（opt-in 手动端到端验证脚本）` --calls--> `plan()`  [EXTRACTED]
-  tools/e2e_harness.md → core/gherkai_core/scope.py
 
 ## Import Cycles
 - None detected.
@@ -2045,7 +2045,7 @@ Nodes (52): gherkai-deploy-aws contributor 手册, AgentCore Evaluations（去�
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1410 isolated node(s):** `背景与问题`, `1. 测试目标由三个正交维度描述：engine、device、ui_kind`, `2. 两个 scope 级 tag：`@device` 与 `@app``, `3. core 的三处改动`, `4. 目标不受支持时的拒绝：由能力自述决定，消息给出改法` (+1405 more)
+- **1410 isolated node(s):** `REPO`, `DEFAULT_DIR`, `args`, `wantPng`, `noDeliver` (+1405 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **273 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

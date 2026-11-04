@@ -12,6 +12,8 @@
 //   （先在那里 `npm ci`），浏览器用本机 Chrome（channel: "chrome"），不下载。
 // - 导出靶点是 viewer 内部结构：`button[data-format="svg"|"png"]` 与 `<html data-last-export-*>` 回执属性。
 //   archify skill 升级后这些名字可能变——脚本会响亮失败（找不到按钮 / 回执不符），届时对照新版 HTML 改这两处即可。
+// - archify 3.x 的 deliver 先按 schema 与 showcase 布局规则校验图源，不过即停、不产 HTML（本脚本随之以非 0 退出并打印 diagnostics）；
+//   图源必须带 meta.output（可移植的相对 .html 路径）。升级 archify 后先对全部图源执行 `archify validate`，再改图。
 //
 // 用法：
 //   node tools/build_diagrams.mjs                       # docs/diagrams/*.json 全部：① 渲染 + ② 导出 SVG
@@ -24,7 +26,7 @@
 // 导出的 SVG 末尾带一行图源 sha256 指纹注释，护栏与 hook 靠它判「改了 JSON 没重导」。
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, readdirSync, unlinkSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -50,6 +52,9 @@ function deliver(jsonPath, htmlPath) {
   if (!existsSync(cli)) throw new Error(`找不到 archify：${cli}（设 ARCHIFY_HOME）`);
   const r = spawnSync('node', [cli, 'deliver', type, jsonPath, htmlPath, '--quality', 'showcase', '--json'], { encoding: 'utf8' });
   if (r.status !== 0) throw new Error(`archify deliver 失败（exit ${r.status}）：\n${(r.stderr || r.stdout || '').slice(-1500)}`);
+  // archify 3.x 在输出旁写 `<图名>.delivery.json` 回执（含本机绝对路径）：只是副产物，不入库、也不该被当成图源枚举到，交付成功即删
+  const receipt = htmlPath.replace(/\.html$/, '.delivery.json');
+  if (existsSync(receipt)) unlinkSync(receipt);
   return type;
 }
 
@@ -101,7 +106,7 @@ async function main() {
     const html = path.resolve(htmlOnly);
     jobs.push({ json: null, html, stem: html.replace(/\.html$/, '') });
   } else {
-    const jsons = args.length ? args.map((a) => path.resolve(a)) : readdirSync(dir).filter((f) => f.endsWith('.json')).map((f) => path.join(dir, f));
+    const jsons = args.length ? args.map((a) => path.resolve(a)) : readdirSync(dir).filter((f) => f.endsWith('.json') && !f.endsWith('.delivery.json')).map((f) => path.join(dir, f));
     for (const json of jsons) jobs.push({ json, html: json.replace(/\.json$/, '.html'), stem: json.replace(/\.json$/, '') });
   }
   if (!jobs.length) { console.error(`没有可处理的图（目录 ${dir}）`); return 1; }

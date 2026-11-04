@@ -115,6 +115,8 @@ dist/
 # 文档图的可交互 HTML 是 JSON 图源经 `archify deliver` 的确定性渲染物（tools/build_diagrams.mjs），默认只作导出 SVG 的中间物、不入库；
 # 发布到 Pages 的图在此白名单放行，并在 docs/diagrams/index.html 加链接（ADR 0045 决策七）
 docs/diagrams/*.html
+# archify 3.x 的 deliver 在输出旁写 `<图名>.delivery.json` 回执（含本机绝对路径），只是构建副产物、不入库
+docs/diagrams/*.delivery.json
 !docs/diagrams/index.html
 !docs/diagrams/run-execution.html
 !docs/diagrams/cloud-delivery-identity.html
