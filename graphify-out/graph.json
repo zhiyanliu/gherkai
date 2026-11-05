@@ -83003,540 +83003,540 @@
       "label": "`cli/gherkai_cli/__main__.py`\uff0811\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L29",
+      "source_location": "L30",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_main_py_11",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`cli/gherkai_cli/__main__.py`(11)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_main_py_11"
+      "norm_label": "`cli/gherkai_cli/__main__.py`(11)"
     },
     {
       "label": "`cli/gherkai_cli/render.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L42",
+      "source_location": "L43",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_render_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`cli/gherkai_cli/render.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_render_py_1"
+      "norm_label": "`cli/gherkai_cli/render.py`(1)"
     },
     {
       "label": "`cli/pyproject.toml`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L45",
+      "source_location": "L46",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_pyproject_toml_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`cli/pyproject.toml`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_pyproject_toml_1"
+      "norm_label": "`cli/pyproject.toml`(1)"
     },
     {
       "label": "`cli/tests/test_main.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L48",
+      "source_location": "L49",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_tests_test_main_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`cli/tests/test_main.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_cli_tests_test_main_py_2"
+      "norm_label": "`cli/tests/test_main.py`(2)"
     },
     {
       "label": "`core/gherkai_core/adapters/_atomic.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L52",
+      "source_location": "L53",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_atomic_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/adapters/_atomic.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_atomic_py_1"
+      "norm_label": "`core/gherkai_core/adapters/_atomic.py`(1)"
     },
     {
       "label": "`core/gherkai_core/adapters/event_log/sqlite.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L55",
+      "source_location": "L56",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_event_log_sqlite_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/adapters/event_log/sqlite.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_event_log_sqlite_py_2"
+      "norm_label": "`core/gherkai_core/adapters/event_log/sqlite.py`(2)"
     },
     {
       "label": "`core/gherkai_core/adapters/subprocess_engine.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L59",
+      "source_location": "L60",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_subprocess_engine_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/adapters/subprocess_engine.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_subprocess_engine_py_1"
+      "norm_label": "`core/gherkai_core/adapters/subprocess_engine.py`(1)"
     },
     {
       "label": "`core/gherkai_core/errors.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L62",
+      "source_location": "L63",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_errors_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/errors.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_errors_py_1"
+      "norm_label": "`core/gherkai_core/errors.py`(1)"
     },
     {
       "label": "`core/gherkai_core/model.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L65",
+      "source_location": "L66",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_model_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/model.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_model_py_2"
+      "norm_label": "`core/gherkai_core/model.py`(2)"
     },
     {
       "label": "`core/gherkai_core/persist.py`\uff083\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L69",
+      "source_location": "L70",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_persist_py_3",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/persist.py`(3)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_persist_py_3"
+      "norm_label": "`core/gherkai_core/persist.py`(3)"
     },
     {
       "label": "`core/gherkai_core/ports.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L74",
+      "source_location": "L75",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_ports_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/ports.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_ports_py_2"
+      "norm_label": "`core/gherkai_core/ports.py`(2)"
     },
     {
       "label": "`core/gherkai_core/project.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L78",
+      "source_location": "L79",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_project_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/project.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_project_py_1"
+      "norm_label": "`core/gherkai_core/project.py`(1)"
     },
     {
       "label": "`core/gherkai_core/schedule.py`\uff084\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L81",
+      "source_location": "L82",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_schedule_py_4",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/schedule.py`(4)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_schedule_py_4"
+      "norm_label": "`core/gherkai_core/schedule.py`(4)"
     },
     {
       "label": "`core/gherkai_core/wire.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L87",
+      "source_location": "L88",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_wire_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/gherkai_core/wire.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_wire_py_2"
+      "norm_label": "`core/gherkai_core/wire.py`(2)"
     },
     {
       "label": "`core/tests/test_lifecycle_states.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L91",
+      "source_location": "L92",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_lifecycle_states_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/tests/test_lifecycle_states.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_lifecycle_states_py_1"
+      "norm_label": "`core/tests/test_lifecycle_states.py`(1)"
     },
     {
       "label": "`core/tests/test_stores.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L94",
+      "source_location": "L95",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_stores_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`core/tests/test_stores.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_stores_py_1"
+      "norm_label": "`core/tests/test_stores.py`(1)"
     },
     {
       "label": "`deploy_aws/gherkai_deploy_aws/cli.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L97",
+      "source_location": "L98",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_cli_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`deploy_aws/gherkai_deploy_aws/cli.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_cli_py_1"
+      "norm_label": "`deploy_aws/gherkai_deploy_aws/cli.py`(1)"
     },
     {
       "label": "`deploy_aws/gherkai_deploy_aws/stack.py`\uff084\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L100",
+      "source_location": "L101",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_stack_py_4",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`deploy_aws/gherkai_deploy_aws/stack.py`(4)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_stack_py_4"
+      "norm_label": "`deploy_aws/gherkai_deploy_aws/stack.py`(4)"
     },
     {
       "label": "`deploy_aws/gherkai_deploy_aws/workers.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L106",
+      "source_location": "L107",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_workers_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`deploy_aws/gherkai_deploy_aws/workers.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_workers_py_1"
+      "norm_label": "`deploy_aws/gherkai_deploy_aws/workers.py`(1)"
     },
     {
       "label": "`engines/fixtures/redaction-cases.json`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L109",
+      "source_location": "L110",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_fixtures_redaction_cases_json_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/fixtures/redaction-cases.json`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_fixtures_redaction_cases_json_1"
+      "norm_label": "`engines/fixtures/redaction-cases.json`(1)"
     },
     {
       "label": "`engines/midscene/package.json`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L112",
+      "source_location": "L113",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_package_json_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/package.json`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_package_json_1"
+      "norm_label": "`engines/midscene/package.json`(1)"
     },
     {
       "label": "`engines/midscene/spikes/01-model-sigv4.ts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L115",
+      "source_location": "L116",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_01_model_sigv4_ts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/spikes/01-model-sigv4.ts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_01_model_sigv4_ts_1"
+      "norm_label": "`engines/midscene/spikes/01-model-sigv4.ts`(1)"
     },
     {
       "label": "`engines/midscene/spikes/03-midscene-grounding.ts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L118",
+      "source_location": "L119",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_03_midscene_grounding_ts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/spikes/03-midscene-grounding.ts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_03_midscene_grounding_ts_1"
+      "norm_label": "`engines/midscene/spikes/03-midscene-grounding.ts`(1)"
     },
     {
       "label": "`engines/midscene/spikes/04-planning-probe.ts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L121",
+      "source_location": "L122",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_04_planning_probe_ts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/spikes/04-planning-probe.ts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_04_planning_probe_ts_1"
+      "norm_label": "`engines/midscene/spikes/04-planning-probe.ts`(1)"
     },
     {
       "label": "`engines/midscene/src/device/limits.mts`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L124",
+      "source_location": "L125",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_limits_mts_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/device/limits.mts`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_limits_mts_2"
+      "norm_label": "`engines/midscene/src/device/limits.mts`(2)"
     },
     {
       "label": "`engines/midscene/src/device/read-points.test.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L128",
+      "source_location": "L129",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_read_points_test_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/device/read-points.test.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_read_points_test_mts_1"
+      "norm_label": "`engines/midscene/src/device/read-points.test.mts`(1)"
     },
     {
       "label": "`engines/midscene/src/lib/agentcore-sigv4.mts`\uff083\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L131",
+      "source_location": "L132",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_lib_agentcore_sigv4_mts_3",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/lib/agentcore-sigv4.mts`(3)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_lib_agentcore_sigv4_mts_3"
+      "norm_label": "`engines/midscene/src/lib/agentcore-sigv4.mts`(3)"
     },
     {
       "label": "`engines/midscene/src/resolve-hook.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L136",
+      "source_location": "L137",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_resolve_hook_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/resolve-hook.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_resolve_hook_mts_1"
+      "norm_label": "`engines/midscene/src/resolve-hook.mts`(1)"
     },
     {
       "label": "`engines/midscene/src/worker/deterministic.steps.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L139",
+      "source_location": "L140",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_deterministic_steps_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/worker/deterministic.steps.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_deterministic_steps_mts_1"
+      "norm_label": "`engines/midscene/src/worker/deterministic.steps.mts`(1)"
     },
     {
       "label": "`engines/midscene/src/worker/run-scope.mts`\uff083\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L142",
+      "source_location": "L143",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_run_scope_mts_3",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/worker/run-scope.mts`(3)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_run_scope_mts_3"
+      "norm_label": "`engines/midscene/src/worker/run-scope.mts`(3)"
     },
     {
       "label": "`engines/midscene/src/worker/surface.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L147",
+      "source_location": "L148",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_surface_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/worker/surface.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_surface_mts_1"
+      "norm_label": "`engines/midscene/src/worker/surface.mts`(1)"
     },
     {
       "label": "`engines/midscene/src/worker/user-steps.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L150",
+      "source_location": "L151",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_user_steps_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/midscene/src/worker/user-steps.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_user_steps_mts_1"
+      "norm_label": "`engines/midscene/src/worker/user-steps.mts`(1)"
     },
     {
       "label": "`engines/novaact/gherkai_worker_novaact/lib/constants.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L159",
+      "source_location": "L160",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_constants_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/novaact/gherkai_worker_novaact/lib/constants.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_constants_py_1"
+      "norm_label": "`engines/novaact/gherkai_worker_novaact/lib/constants.py`(1)"
     },
     {
       "label": "`engines/novaact/gherkai_worker_novaact/lib/__init__.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L156",
+      "source_location": "L157",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_init_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/novaact/gherkai_worker_novaact/lib/__init__.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_init_py_1"
+      "norm_label": "`engines/novaact/gherkai_worker_novaact/lib/__init__.py`(1)"
     },
     {
       "label": "`engines/novaact/gherkai_worker_novaact/__main__.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L153",
+      "source_location": "L154",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_main_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/novaact/gherkai_worker_novaact/__main__.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_main_py_1"
+      "norm_label": "`engines/novaact/gherkai_worker_novaact/__main__.py`(1)"
     },
     {
       "label": "`engines/novaact/gherkai_worker_novaact/run_scope.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L162",
+      "source_location": "L163",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_run_scope_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/novaact/gherkai_worker_novaact/run_scope.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_run_scope_py_2"
+      "norm_label": "`engines/novaact/gherkai_worker_novaact/run_scope.py`(2)"
     },
     {
       "label": "`engines/novaact/gherkai_worker_novaact/user_steps.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L166",
+      "source_location": "L167",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_user_steps_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`engines/novaact/gherkai_worker_novaact/user_steps.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_user_steps_py_1"
+      "norm_label": "`engines/novaact/gherkai_worker_novaact/user_steps.py`(1)"
     },
     {
       "label": "`.github/workflows/release.yml`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L21",
+      "source_location": "L22",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_github_workflows_release_yml_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`.github/workflows/release.yml`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_github_workflows_release_yml_2"
+      "norm_label": "`.github/workflows/release.yml`(2)"
     },
     {
       "label": "`.gitignore`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L25",
+      "source_location": "L26",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_gitignore_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`.gitignore`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_gitignore_2"
+      "norm_label": "`.gitignore`(2)"
     },
     {
       "label": "`runtime/gherkai_runtime/compose.py`\uff083\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L172",
+      "source_location": "L173",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_compose_py_3",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`runtime/gherkai_runtime/compose.py`(3)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_compose_py_3"
+      "norm_label": "`runtime/gherkai_runtime/compose.py`(3)"
     },
     {
       "label": "`runtime/gherkai_runtime/detached.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L177",
+      "source_location": "L178",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_detached_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`runtime/gherkai_runtime/detached.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_detached_py_1"
+      "norm_label": "`runtime/gherkai_runtime/detached.py`(1)"
     },
     {
       "label": "`runtime/gherkai_runtime/__init__.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L169",
+      "source_location": "L170",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_init_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`runtime/gherkai_runtime/__init__.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_init_py_1"
+      "norm_label": "`runtime/gherkai_runtime/__init__.py`(1)"
     },
     {
       "label": "`runtime/gherkai_runtime/tunnel_host.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L183",
+      "source_location": "L184",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_host_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`runtime/gherkai_runtime/tunnel_host.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_host_py_1"
+      "norm_label": "`runtime/gherkai_runtime/tunnel_host.py`(1)"
     },
     {
       "label": "`runtime/gherkai_runtime/tunnel.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L180",
+      "source_location": "L181",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`runtime/gherkai_runtime/tunnel.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_py_1"
+      "norm_label": "`runtime/gherkai_runtime/tunnel.py`(1)"
     },
     {
       "label": "`skills/gherkai-evals/fixtures/android-app/steps/url_matches.mts`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L186",
+      "source_location": "L187",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_fixtures_android_app_steps_url_matches_mts_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`skills/gherkai-evals/fixtures/android-app/steps/url_matches.mts`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_fixtures_android_app_steps_url_matches_mts_1"
+      "norm_label": "`skills/gherkai-evals/fixtures/android-app/steps/url_matches.mts`(1)"
     },
     {
       "label": "`skills/gherkai-evals/summarize_runs.py`\uff081\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L189",
+      "source_location": "L190",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_summarize_runs_py_1",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`skills/gherkai-evals/summarize_runs.py`(1)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_summarize_runs_py_1"
+      "norm_label": "`skills/gherkai-evals/summarize_runs.py`(1)"
     },
     {
       "label": "`tools/build_diagrams.mjs`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L192",
+      "source_location": "L193",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_tools_build_diagrams_mjs_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`tools/build_diagrams.mjs`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_tools_build_diagrams_mjs_2"
+      "norm_label": "`tools/build_diagrams.mjs`(2)"
     },
     {
       "label": "`tools/e2e_harness.py`\uff082\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L196",
+      "source_location": "L197",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_tools_e2e_harness_py_2",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "`tools/e2e_harness.py`(2)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_tools_e2e_harness_py_2"
+      "norm_label": "`tools/e2e_harness.py`(2)"
     },
     {
       "label": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L19",
+      "source_location": "L20",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
       "community": 32,
       "community_name": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb\uff0883 \u6761\uff0c\u7ecf\u5bf9\u6297\u9a8c\u8bc1 CONFIRMED\uff0c\u6587\u6863\u590d\u76d8\u4e0d\u6539 code\uff09",
-      "norm_label": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb(83 \u6761,\u7ecf\u5bf9\u6297\u9a8c\u8bc1 confirmed,\u6587\u6863\u590d\u76d8\u4e0d\u6539 code)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code"
+      "norm_label": "\u4e8c\u3001code / \u914d\u7f6e / \u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb(83 \u6761,\u7ecf\u5bf9\u6297\u9a8c\u8bc1 confirmed,\u6587\u6863\u590d\u76d8\u4e0d\u6539 code)"
     },
     {
       "label": "precheck.test.mts",
@@ -88219,10 +88219,10 @@
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff",
       "community": 419,
       "community_name": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165\uff1acode \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
-      "norm_label": "0018-doc-health-round9-code-handoff.md",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff"
+      "norm_label": "0018-doc-health-round9-code-handoff.md"
     },
     {
       "label": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165\uff1acode \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
@@ -88230,10 +88230,10 @@
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
       "source_location": "L3",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a",
       "community": 419,
       "community_name": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165\uff1acode \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
-      "norm_label": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165:code \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001adr \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a"
+      "norm_label": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165:code \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001adr \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a"
     },
     {
       "label": "\u4e00\u3001\u88c1\u5b9a\u4e3a\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u8bbe\u8ba1\u504f\u79bb\uff08VIOLATES_ADR\uff09",
@@ -88241,21 +88241,21 @@
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
       "source_location": "L7",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e00_\u88c1\u5b9a\u4e3a_\u6539_code_adr_\u4e0d\u52a8_\u7684\u8bbe\u8ba1\u504f\u79bb_violates_adr",
       "community": 419,
       "community_name": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165\uff1acode \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
-      "norm_label": "\u4e00\u3001\u88c1\u5b9a\u4e3a\u300c\u6539 code\u3001adr \u4e0d\u52a8\u300d\u7684\u8bbe\u8ba1\u504f\u79bb(violates_adr)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e00_\u88c1\u5b9a\u4e3a_\u6539_code_adr_\u4e0d\u52a8_\u7684\u8bbe\u8ba1\u504f\u79bb_violates_adr"
+      "norm_label": "\u4e00\u3001\u88c1\u5b9a\u4e3a\u300c\u6539 code\u3001adr \u4e0d\u52a8\u300d\u7684\u8bbe\u8ba1\u504f\u79bb(violates_adr)"
     },
     {
       "label": "\u4e09\u3001\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684 code \u6587\u4ef6\uff08\u5df2\u968f\u300ccode \u8fde\u5e26\u300d\u63d0\u4ea4\uff0ccode-health \u53ea\u9700\u77e5\u6089\uff09",
       "file_type": "document",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L200",
+      "source_location": "L201",
       "_origin": "ast",
+      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e09_\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684_code_\u6587\u4ef6_\u5df2\u968f_code_\u8fde\u5e26_\u63d0\u4ea4_code_health_\u53ea\u9700\u77e5\u6089",
       "community": 419,
       "community_name": "doc-health \u7b2c\u4e5d\u8f6e\u79fb\u4ea4 code-health \u7684\u8f93\u5165\uff1acode \u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e\u300c\u6539 code\u3001ADR \u4e0d\u52a8\u300d\u7684\u88c1\u5b9a",
-      "norm_label": "\u4e09\u3001\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684 code \u6587\u4ef6(\u5df2\u968f\u300ccode \u8fde\u5e26\u300d\u63d0\u4ea4,code-health \u53ea\u9700\u77e5\u6089)",
-      "id": "docs_journey_0018_doc_health_round9_code_handoff_\u4e09_\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684_code_\u6587\u4ef6_\u5df2\u968f_code_\u8fde\u5e26_\u63d0\u4ea4_code_health_\u53ea\u9700\u77e5\u6089"
+      "norm_label": "\u4e09\u3001\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684 code \u6587\u4ef6(\u5df2\u968f\u300ccode \u8fde\u5e26\u300d\u63d0\u4ea4,code-health \u53ea\u9700\u77e5\u6089)"
     },
     {
       "label": "BaseException",
@@ -243835,31 +243835,31 @@
       "source_location": "L3",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L19",
+      "source_location": "L20",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L200",
+      "source_location": "L201",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e09_\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684_code_\u6587\u4ef6_\u5df2\u968f_code_\u8fde\u5e26_\u63d0\u4ea4_code_health_\u53ea\u9700\u77e5\u6089"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e09_\u7b2c\u4e5d\u8f6e\u843d\u5730\u65f6\u987a\u624b\u6539\u8fc7\u7684_code_\u6587\u4ef6_\u5df2\u968f_code_\u8fde\u5e26_\u63d0\u4ea4_code_health_\u53ea\u9700\u77e5\u6089",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -243868,537 +243868,537 @@
       "source_location": "L7",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_doc_health_\u7b2c\u4e5d\u8f6e\u79fb\u4ea4_code_health_\u7684\u8f93\u5165_code_\u4fa7\u5ba2\u89c2\u53d1\u73b0\u4e0e_\u6539_code_adr_\u4e0d\u52a8_\u7684\u88c1\u5b9a",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e00_\u88c1\u5b9a\u4e3a_\u6539_code_adr_\u4e0d\u52a8_\u7684\u8bbe\u8ba1\u504f\u79bb_violates_adr"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_\u4e00_\u88c1\u5b9a\u4e3a_\u6539_code_adr_\u4e0d\u52a8_\u7684\u8bbe\u8ba1\u504f\u79bb_violates_adr",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L100",
+      "source_location": "L101",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_stack_py_4"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_stack_py_4",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L106",
+      "source_location": "L107",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_workers_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_workers_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L109",
+      "source_location": "L110",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_fixtures_redaction_cases_json_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_fixtures_redaction_cases_json_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L112",
+      "source_location": "L113",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_package_json_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_package_json_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L115",
+      "source_location": "L116",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_01_model_sigv4_ts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_01_model_sigv4_ts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L118",
+      "source_location": "L119",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_03_midscene_grounding_ts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_03_midscene_grounding_ts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L121",
+      "source_location": "L122",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_04_planning_probe_ts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_spikes_04_planning_probe_ts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L124",
+      "source_location": "L125",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_limits_mts_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_limits_mts_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L128",
+      "source_location": "L129",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_read_points_test_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_device_read_points_test_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L131",
+      "source_location": "L132",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_lib_agentcore_sigv4_mts_3"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_lib_agentcore_sigv4_mts_3",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L136",
+      "source_location": "L137",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_resolve_hook_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_resolve_hook_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L139",
+      "source_location": "L140",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_deterministic_steps_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_deterministic_steps_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L142",
+      "source_location": "L143",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_run_scope_mts_3"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_run_scope_mts_3",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L147",
+      "source_location": "L148",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_surface_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_surface_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L150",
+      "source_location": "L151",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_user_steps_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_midscene_src_worker_user_steps_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L153",
+      "source_location": "L154",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_main_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_main_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L156",
+      "source_location": "L157",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_init_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_init_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L159",
+      "source_location": "L160",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_constants_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_lib_constants_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L162",
+      "source_location": "L163",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_run_scope_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_run_scope_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L166",
+      "source_location": "L167",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_user_steps_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_engines_novaact_gherkai_worker_novaact_user_steps_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L169",
+      "source_location": "L170",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_init_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_init_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L172",
+      "source_location": "L173",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_compose_py_3"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_compose_py_3",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L177",
+      "source_location": "L178",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_detached_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_detached_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L180",
+      "source_location": "L181",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L183",
+      "source_location": "L184",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_host_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_runtime_gherkai_runtime_tunnel_host_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L186",
+      "source_location": "L187",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_fixtures_android_app_steps_url_matches_mts_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_fixtures_android_app_steps_url_matches_mts_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L189",
+      "source_location": "L190",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_summarize_runs_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_skills_gherkai_evals_summarize_runs_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L192",
+      "source_location": "L193",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_tools_build_diagrams_mjs_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_tools_build_diagrams_mjs_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L196",
+      "source_location": "L197",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_tools_e2e_harness_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_tools_e2e_harness_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L21",
+      "source_location": "L22",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_github_workflows_release_yml_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_github_workflows_release_yml_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L25",
+      "source_location": "L26",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_gitignore_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_gitignore_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L29",
+      "source_location": "L30",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_main_py_11"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_main_py_11",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L42",
+      "source_location": "L43",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_render_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_gherkai_cli_render_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L45",
+      "source_location": "L46",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_pyproject_toml_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_pyproject_toml_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L48",
+      "source_location": "L49",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_tests_test_main_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_cli_tests_test_main_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L52",
+      "source_location": "L53",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_atomic_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_atomic_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L55",
+      "source_location": "L56",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_event_log_sqlite_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_event_log_sqlite_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L59",
+      "source_location": "L60",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_subprocess_engine_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_adapters_subprocess_engine_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L62",
+      "source_location": "L63",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_errors_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_errors_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L65",
+      "source_location": "L66",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_model_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_model_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L69",
+      "source_location": "L70",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_persist_py_3"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_persist_py_3",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L74",
+      "source_location": "L75",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_ports_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_ports_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L78",
+      "source_location": "L79",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_project_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_project_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L81",
+      "source_location": "L82",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_schedule_py_4"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_schedule_py_4",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L87",
+      "source_location": "L88",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_wire_py_2"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_gherkai_core_wire_py_2",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L91",
+      "source_location": "L92",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_lifecycle_states_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_lifecycle_states_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L94",
+      "source_location": "L95",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_stores_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_core_tests_test_stores_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "docs/journey/0018-doc-health-round9-code-handoff.md",
-      "source_location": "L97",
+      "source_location": "L98",
       "weight": 1.0,
       "_origin": "ast",
-      "confidence_score": 1.0,
       "source": "docs_journey_0018_doc_health_round9_code_handoff_\u4e8c_code_\u914d\u7f6e_\u6ce8\u91ca\u4e0a\u7684\u5ba2\u89c2\u6f02\u79fb_83_\u6761_\u7ecf\u5bf9\u6297\u9a8c\u8bc1_confirmed_\u6587\u6863\u590d\u76d8\u4e0d\u6539_code",
-      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_cli_py_1"
+      "target": "docs_journey_0018_doc_health_round9_code_handoff_deploy_aws_gherkai_deploy_aws_cli_py_1",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -333981,5 +333981,5 @@
       "source_file": "docs/adr/0043-agent-skill-for-driving-gherkai.md"
     }
   ],
-  "built_at_commit": "f067a4a9e7c645d5884ea12f787fcd7ba5ff87d9"
+  "built_at_commit": "08dc9b61f18bc6606739ff7a164c921babb0d263"
 }

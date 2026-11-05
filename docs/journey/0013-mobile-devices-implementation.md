@@ -8,7 +8,7 @@
 
 - 实施已完成：第 0 到 8 批（九个实施块：导航规则与注册面关键字声明、能力自述增键、core 会话事件与终结函数、目标模型与建会话前自检、配置文件与提交侧、确定性 step 多句柄注册、隧道令牌换 cookie、部署侧、Midscene 设备模块）与第 9 到 13 批（真机验收浮出的拍板项、边界与残余的真跑、评测集设备用例、靶向制造的边界真跑、journey 待项清理）全部闭合并 push、CI 绿（最后一批 2026-11-04）。设计期与实施期的结论都已内联进 ADR 0048 到 0053、按条改写的既有 ADR（Status 头带反向链）、CONTEXT.md 与各包 DEVELOPMENT.md；各批的改动面、护栏测试、同僚复核与真机验收的过程在 commit 历史里。
 - 1.5 剩余，按 owner 定的顺序（2026-11-03）：① doc-health 复盘——**已完成**（第九轮，落地提交带 `Doc-Health-Round: 9` trailer，2026-11-05）；它移交 code-health 的 code 侧客观发现与「改 code、ADR 不动」的裁定在 journey 0018 → ② code-health 复盘（下文遗留项里标为 code-health 候选的两条与 journey 0018 在此处理）→ ③ owner 单独做用户文档（下文「documenting 清单」里仍未写的项、README、CHANGELOG 收口）与人读文本的措辞改写（口吻问题先单独讨论）。Appium 3 端点升级放发版后（ADR 0051 决策 3）。
-- doc-health 第九轮留下两件待 owner 的事：task role 撤掉 `devicefarm:GetDevice` 后要用受限角色真跑一次云端设备 run（指定 ARN 与按系统版本、Android 与 iOS、网页与应用目标，两个 worker 日志组零 AccessDenied），核过后把 ADR 0033 权限表与 0051 实测依据里「受限角色的真跑核对待补」两句改成已核；零 scenario 的 feature 不加筛选时 `run` 判 passed 退 0（筛空时才以 2 拒绝），要不要在 plan / run 层拒绝零 job 的批，待 owner 定。
+- doc-health 第九轮留下两件待 owner 的事：task role 撤掉 `devicefarm:GetDevice` 后要用受限角色真跑一次云端设备 run（指定 ARN 与按系统版本、Android 与 iOS、网页与应用目标，两个 worker 日志组零 AccessDenied），核过后把 ADR 0033 权限表与 0051 实测依据里「受限角色的真跑核对待补」两句改成已核；零 scenario 的 feature 不加筛选时 `run` 判 passed 退 0（筛空时才以 2 拒绝）——owner 已定拒绝、与筛选后为空同一处置（ADR 0041 决策一），实现归 code-health（journey 0018 D21）。
 - 验证环境 vfy 保留（Device Farm 项目为重新部署后的新项目；验收期对照用的临时执行角色已删）。跳板机的操作要点与演练装置不入库。
 
 ## 遗留项

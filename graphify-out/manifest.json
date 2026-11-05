@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1793849255.3952243,
-    "ast_hash": "8004e88c43c562ceab02fad8b965d9b9",
+    "mtime": 1793851313.9802477,
+    "ast_hash": "c3c612c5f40e1681c441866602165e07",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1900,8 +1900,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1793850681.6432166,
-    "ast_hash": "e96e429e843c787d36450051ad7b4555",
+    "mtime": 1793851313.980408,
+    "ast_hash": "b8fdef7ae410842944eeea6b8bda4509",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2365,8 +2365,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-doc-health-round9-code-handoff.md": {
-    "mtime": 1793784493.6312153,
-    "ast_hash": "19da9aef41410802fb9012aa9a73ff54",
+    "mtime": 1793851226.5935733,
+    "ast_hash": "a994b90532a95be0849926c9f7d86a2e",
     "semantic_hash": ""
   }
 }

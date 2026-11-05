@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-11-05)
 
 ## Corpus Check
-- 449 files · ~881,177 words
+- 449 files · ~881,240 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `f067a4a9`
+- Built from commit: `08dc9b61`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -1999,7 +1999,7 @@ Nodes (44): Archify Diagram Viewer Preset (classic, showcase quality), 五层全
   docs/diagrams/getting-started-component-ownership.svg · relation: conceptually_related_to
 
 ## Knowledge Gaps
-- **1295 isolated node(s):** `恢复现场`, `遗留项`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总）`, `CommandGuardArgs`, `Derivation` (+1290 more)
+- **1295 isolated node(s):** `恢复现场`, `遗留项`, `documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总）`, `一、裁定为「改 code、ADR 不动」的设计偏离（VIOLATES_ADR）`, ``.github/workflows/release.yml`（2）` (+1290 more)
   These have ≤1 connection - possible missing edges or undocumented components.
 - **277 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 

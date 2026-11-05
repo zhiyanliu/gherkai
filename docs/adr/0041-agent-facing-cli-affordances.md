@@ -20,7 +20,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 - **`--scope ID`**：可重复、彼此为**或**；值 = 报告与 `--json` 里的 `scope_id`（`@scope:` 的名字，未标 scope 时是 `<uri>:<行>`），按分组键**精确**匹配。这是「重跑某个失败 job」的直接回路：agent 从 `jobs/*.json` 读到 `scope_id` 原样填回来。scope 是业务概念，在 Gherkin 里靠 tag 承载（[0019](./0019-feature-tags-scope-and-engine.md) 的取舍——Gherkin 没有别的 per-scenario 元数据位）；筛选面上不让使用者反推这层实现细节（`--tags scope:x` 仍可用，那是通用 tag 筛选顺带覆盖的）。
 - **`--tags TAG[,TAG…]`**：一个值内逗号分隔为**或**（任一命中）；flag 重复为**且**；`@` 可带可不带。tag 集 = gherkin 已合并的 feature 级 + scenario 级。
 - **`--scenario SEL`**：可重复、彼此为**或**。`SEL` 三种写法**按序试、互斥**：等于 scenario id（`<uri>:<声明行>[:<Examples 行>]`）；ASCII 纯数字或 `:数字` = 行号（只当行号、不回落标题匹配，否则 `--scenario 3` 会连带选中标题「重试3次」；Scenario Outline 给声明行 = 选中它全部 example，给数据行 = 只选那一条）；否则按 scenario 标题**子串**匹配（大小写敏感）。三个 flag 同给为**且**。
-- **筛后为空 → 退 2**，并列出本批全部 scenario（`id  标题  tags`）供改参数——不静默跑空批。筛掉了 scenario 时在 stderr 打一行「筛选：N/M」。
+- **筛后为空 → 退 2**，并列出本批全部 scenario（`id  标题  tags`）供改参数——不静默跑空批。筛掉了 scenario 时在 stderr 打一行「筛选：N/M」。**不筛选时的零 scenario 批同样以退出码 2 拒绝**（feature 只有头、没有一条 scenario）：零 job 的 run 没有执行任何东西，判 passed 退 0 是空洞的成功，与筛选后为空的情形同一处置：拒绝；run 级聚合对空输入仍返回 passed 只是函数层的兜底（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三），不是放行的理由。现行实现尚未拒绝这种批（plan 退 0、run 判 passed），归 code-health 补齐。
 - **有意的语义代价**：named scope（`@scope:X`）里只选其中几个 scenario，会话仍按 scope 建，只是少跑几条——这是迭代用法，不是回归用法；scope 内 scenario 若互相依赖，筛掉前置即可能失败，由使用者判断。
 - 被拒：cucumber 风格 tag 表达式（`@a and not @b`）——多一门小语言，agent 与人都得学；三个 flag 的且/或已覆盖迭代场景。行号范围、glob 同理不做。
 

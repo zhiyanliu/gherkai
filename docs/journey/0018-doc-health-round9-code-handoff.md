@@ -14,7 +14,8 @@
 - **D11** 护栏规则源两处缺口：`_doc_rules.FORBIDDEN` 补「推进器」（代价：`docs/diagrams/execution-detached-gates.json` 两处与 `run-execution.json` 一处要改说「云端后台 / 后台推进」并重出 SVG；契约源页的「推进器」已登记在 render_skill_contract 的改写表，核一致）；`BARE_WP` 正则扩成覆盖纯字母形态如 `\bWP(?:-?\d+[A-Za-z]?(?:-\d+)?|-[A-Z])\b`，`test_adr_hygiene` 补 `WP-S` 命中、`WPS` 不命中两例。
 - **D12** wire 解码不校验三态：`core/gherkai_core/wire.py` `event_from_json` 的 step_done / scenario_done 分支按 scope_done 的写法校验 status ∈ {passed, failed, error}，否则抛 ValueError（worker 违约），并校准 :183 注释。
 
-补充：D08（导航地址只带一侧引号的不对称处置）与 D09（task role 多授 `devicefarm:GetDevice`，须用受限角色真跑后再撤）待 owner 定，定为改 code 时一并接收。
+补充：D08 与 D09 已由 owner 定并随第九轮 code 连带落地（导航单侧引号对称化、撤 GetDevice），不再是待办。
+- **D21** 零 scenario 批拒绝（owner 2026-11-05 拍板，决策写在 ADR 0041 决策一）：feature 只有头、没有一条 scenario 时，不加筛选的 `plan` / `run` / `submit` 也要像筛空那样以退出码 2 拒绝并说明；现行实现 plan 退 0、run 判 passed 退 0。落点在 `cli/gherkai_cli/__main__.py` 筛选为空的那条分支之外（约 :1174 起 `if select is not None` 只管筛选情形），补零 job 的检查与单测；`project_full` 全无记录的防御分支不动。
 
 ## 二、code / 配置 / 注释上的客观漂移（83 条，经对抗验证 CONFIRMED，文档复盘不改 code）
 
