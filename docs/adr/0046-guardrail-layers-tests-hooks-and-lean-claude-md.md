@@ -12,13 +12,17 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 
 **三层，同一份规则源，按能否机械判定分流。**
 
-1. **规则源唯一**：`cli/tests/_doc_rules.py` 存全部逐行可判的规则（内部指代表、口吻表、退役词表、决策六三形态的启发式、悬空指针形态、包页面的相对链接与 Release 固定块里未锁定 tag 的仓库链接）与**扫描面**（用户文档、skill、包页、技术文档、AI 侧文档、图源、code 注释与 docstring、其余 markdown（含 journey，只拦本机坐标）各是一束），并提供 `classify(path)` 与 `scan(kind, path, only_lines)`；`scan` 另有可选参数 `text`，给了就扫它、不读文件（提交闸门借此传入暂存区里的版本）。测试、hook、提交闸门都调它，不各存一份。唯一例外是用户可见字符串字面量的禁词表：判据与 markdown 面不同（见 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节），它单独住在 `cli/tests/test_user_facing_messages.py`，hook 不扫字符串字面量，扩表时两侧都要过一遍。
+1. **规则源唯一**：`cli/tests/_doc_rules.py` 存全部逐行可判的规则（内部指代表、口吻表、退役词表、决策六三形态的启发式、悬空指针形态、包页面的相对链接与 Release 固定块里未锁定 tag 的仓库链接）与**扫描面**（用户文档、skill、包页、技术文档、AI 侧文档、图源、code 注释与 docstring、其余 markdown（含 journey，只拦本机坐标）各是一束），并提供 `classify(path)` 与 `scan(kind, path, only_lines)`；`scan` 另有可选参数 `text`，给了就扫它、不读文件（提交闸门借此传入暂存区里的版本）。测试、hook、提交闸门都调它，不各存一份。唯一例外是用户可见字符串字面量的两条规则——禁词表与 markdown 强调记号（成对的 `**…**`）：判据与 markdown 面不同（见 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节），二者单独住在 `cli/tests/test_user_facing_messages.py`，hook 不扫字符串字面量。禁词表扩表时两侧都要过一遍；强调记号那条在 markdown 面没有对应规则（markdown 里 `**` 是正当的强调），只在字面量一侧。
 2. **第一层：测试兜底**（CI 与 `uv run pytest`）。每个扫描面一份护栏测试，逐文件参数化、命中即红。除措辞与术语外，把 doc-health 历轮靠人查的形态项也机械化：ADR Status 头与「被取代」链双向、`docs/` 文件名 kebab-case 与编号不复用、journey 首行类型头、长期文档与 AI 侧文档里指向 journey 文件的链接与裸 WP 编号、全仓 markdown（含 journey）与 code 注释里的本机坐标（个人目录下的绝对路径、本地 clone 目录名——写下它的 agent 顺手复制了编辑器里的路径，对别的机器上的 contributor 是悬空的；文件写 repo 相对路径）、CONTEXT 词条形态（术语行 + 至多两句 + 至多一个 ADR 指针 + `_Avoid_` 只列词）。
 3. **第二层：hook 写完即查**（只在 Claude Code 里生效，随仓库入库）。
    - PostToolUse（Edit / Write / MultiEdit / Bash 之后）：`tools/doc_rules_check.py --changed`，已跟踪文件**只报本次改动的行**（`git diff -U0 HEAD` 的区间）、未跟踪文件全扫；命中即 `exit 2`，命中行回给 agent、它必须先改再继续。**阻断式而非提醒式**：提醒会被当成噪声滚过去，正是本 ADR 要替换的「正向要求」。**只报改动行**：历史欠账另有测试与复盘兜底，hook 只该报「你刚写的」，否则一次大改动进行中会被旧命中刷屏、逼人关掉它。
    - PreToolUse（`git commit` 之前）：`tools/doc_rules_check.py --staged`，按暂存区（index）里将要提交的版本整份再扫、不读工作区，命中即阻断提交。兜住绕过编辑工具的改法（脚本批量改文件）。取暂存区的版本是因为部分暂存或暂存后又改了工作区时，工作区与这次提交的内容不一致：扫工作区会放行暂存版本里的违规，也会拦下与本次提交无关的未完成改动。
+     - **提交内容还没进暂存区的写法扫超集**：PreToolUse 在整条命令执行之前运行，同一条命令里随后才进暂存区的内容不在 `--staged` 的名单上。`commit-gate.sh` 从命令文本识别这几种形态：同一条命令里 `git add` 出现在 `git commit` 之前；commit 带 `-a` / `--all`（含 `-am` 这类组合短选项）、`-i` / `--include`、`-o` / `--only` 或尾随 pathspec。遇到其一即改为调用 `tools/doc_rules_check.py --uncommitted`，整份扫暂存区、`git diff HEAD --name-only --diff-filter=ACMR` 列出的文件与未跟踪文件（遵守 `.gitignore`）三者的并集，仍排除 `graphify-out/`；暂存区里的文件取暂存的版本，其余取工作区的版本，同一文件两版不同时两版都扫（这几种形态下，每个文件提交进去的改动只可能来自其中一版）。常规形态（前面没有 `git add`、也不带上述选项与 pathspec 的 `git commit`，含 `git commit -F <msg>` 与 `--amend`）仍只扫暂存区。
+     - 集合由 `doc_rules_check.py` 的 `--uncommitted` 计算，不在 shell 里拼：文件名的 `-z` 处理、`graphify-out/` 的排除与内容取哪一版都已在 `--staged` 的实现里，shell 再写一份，两份实现会逐渐不一致。
+     - 代价与接受理由：工作区里有未提交改动、却不在本次提交里的文件也会被整份扫描，偶尔因此拦下提交。接受它，因为这些命中同样是真实违规：在测试为绿的基线上，工作区文件里的命中只能来自未提交的改动，符合「命中即真」的低误报标准，改完即可提交。CLAUDE.md 规定的 graphify 回填写法 `git add graphify-out && git commit --amend --no-edit` 属于先 add 再 commit 的形态，刚提交完时工作区通常只剩 `graphify-out/` 的改动，并集为空，照常放行；上一笔提交没有包含全部改动时，留在工作区的文件照样整份扫描，有命中同样先改再提交。
+     - 证据（据临时 clone 复现）：对含本机坐标命中的文件，`git add -A && git commit -F <msg>`、`git commit -a`、`git commit -F <msg> <pathspec>` 三种写法在只扫暂存区时都放行，先 add 再单独一条 `git commit` 则阻断。PostToolUse 对这几种写法也无法补救：命令结束时改动已进提交、这些文件相对 HEAD 已无改动，`--changed` 扫不到它们。可选的 git pre-commit（第 4 条）运行时 git 已备好提交用的 index（`GIT_INDEX_FILE`），`--staged` 对这些写法本就准确（临时 clone 里 `-a`、pathspec 与 `-o` 三种写法实测均阻断），不需要超集。
    - 派生物同步（`sync-derived.sh`）维持提醒式：它做的是自动修复与提示，不是拒绝。
-   - 脚本自身出错不阻断：两道 hook 只在 `doc_rules_check.py` 退出码为 1（有命中）时阻断，其余非零退出码（脚本自身出错为 2）一律不阻断，并把工具的错误输出经 `hookSpecificOutput.additionalContext` 作为提示回给 agent，让它知道这次改动或提交未经检查。工具问题不该把编辑卡死，也不该在 agent 不知情时被当成检查已通过。
+   - 脚本自身出错不阻断：两道 hook 只在 `doc_rules_check.py` 退出码为 1（有命中）时阻断，其余非零退出码（脚本自身出错为 2）一律不阻断，并把工具的错误输出经 `hookSpecificOutput.additionalContext` 作为提示回给 agent，让它知道这次改动或提交未经检查。工具问题不该把编辑卡死，也不该在 agent 不知情时被当成检查已通过。两道 hook 都保留工具的 stderr、不丢弃；`doc_rules_check.py` 把自身的一切故障（git 调用失败、规则模块出错、指定的路径不存在、无法识别的选项等）都归为退出码 2：Python 未捕获异常的默认退出码是 1，与「有命中」是同一个退出码，hook 会阻断、却只给出空的命中列表（据向规则模块注入异常的实测），丢弃 stderr 时连故障原因也看不到。
 4. **人类 contributor**：同一份脚本给一个可选的 git pre-commit（`tools/git-hooks/pre-commit`，`git config core.hooksPath tools/git-hooks` 启用）；不启用的仍由 CI 兜底。git hook 不随仓库分发，故只能 opt-in，不能替代第一层。
 5. **第三层：CLAUDE.md 只留判据与指针**。凡已被第一、二层机械化的条目，CLAUDE.md 里精化为「判据一句 + 护栏 / hook 指针」，不再复述枚举；留在 CLAUDE.md 里作正向要求的只剩机器判不了的判断型规则——读者比例定压缩方向、绿≠对的证据边界、接口诚实优先于改动规模、AWS 免费的适用期、「改完 code 回头校准文档」的差集习惯。判据：一条规则若能写成「某文件某行命中某正则即错」，它就不该只活在 CLAUDE.md 里。
 
@@ -27,6 +31,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 ## 边界与已知盲区
 
 - hook 只在 Claude Code 会话里生效；Codex 与人手编辑靠测试与可选 git hook。
+- 提交闸门靠命令文本识别提交与形态：命令里没有字面的 `git commit`（`git -C <dir> commit`、`git -c <key>=<value> commit`、git 别名、在脚本内部发起的提交）时闸门不运行；`git add` 以外修改暂存区的命令（如 `git mv`、`git apply --cached`、带路径的 `git checkout <commit> -- <path>`）与 `git commit` 写在同一条命令里时，仍按常规形态只扫暂存区。这些提交由第一层测试兜底。
 - 启发式有形态盲区：等号紧贴英文或全角括号这类非汉字字符、两侧都不留空格、写成 `==` 或跨行时正则不命中（`word= 中文`、`（= X`、`中文=中文`、`恒 == 真`、折行的 `恒 ⏎ = 真`）；模板字符串与 f-string 里的中文不在注释抽取面内。清扫时靠人工宽扫补，护栏不追求零漏报，只保证「命中即真」（低误报）以维持阻断式可接受。
 - 定义禁词表与讨论这些词本身的文件（`cli/tests/_doc_rules.py` 的 `SELF_FILES`：各护栏测试与两个工具脚本）整份不扫，其注释与 docstring 的措辞靠复盘时人工检查。
 - 「本批 / 这一批 / 整批」在 Lambda 与 Stream 侧注释里指事件批，注释层的退役表去掉这三个词，Run 义的残留交 code-health 复盘人判。
@@ -35,7 +40,8 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 ## 被拒方案（护栏）
 
 - **全靠 CLAUDE.md 正向提示**：引入护栏前的一次全仓扫描查出约 1000 处违规，都写在 CLAUDE.md 已有要求之后，且别的 contributor 读不到 agent 的个人 memory。
-- **只用 git hook**：不随仓库分发、只对人有效，Claude Code 的 Bash 提交也绕不过它但拿不到即时反馈；故 git hook 只作 opt-in 补充。
+- **只用 git hook**：不随仓库分发、只对人有效，Claude Code 的 Bash 提交也绕不过它但拿不到即时反馈；故 git hook 只作 opt-in 补充。同理，提交内容还没进暂存区的写法也不靠把提交闸门挪到 git pre-commit 解决：那里 `--staged` 虽然准确，但只对启用了它的人生效。
+- **提交内容还没进暂存区的写法的其余处理**：①拒绝这类写法、要求先 add 再单独一条 `git commit`——与 CLAUDE.md 规定的 graphify 回填写法冲突，`-a` 与 pathspec 这类 git 常规用法也会变成闸门错误；②提交之后再查、有命中再 amend——违规内容已进提交，修正靠 agent 自觉补做，回到正向要求的失败形态；③只登记为盲区——这正是 agent 的常用写法，登记之后照样每次绕过；④所有提交都扫超集——常规形态下暂存区就是这次提交的内容，扩集合只会多拦下与本次提交无关的未完成改动，代价只该在暂存区不等于提交内容的形态下付。
 - **hook 只提醒不阻断**：与正向提示同一失败形态——被滚过去。阻断式的前提是低误报与只报改动行，两者本 ADR 都做了。
 - **hook 全文件扫**：改一行报出全文件历史命中，一次清扫进行中会刷屏；改动行判据用 `git diff -U0 HEAD` 直接给出、零成本。
 - **规则散在各测试文件里各写一份**：hook 与测试会漂；`_doc_rules.py` 已是既有护栏的单一事实源，扩它而不是复制。
@@ -43,7 +49,7 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 
 ## 与既有 ADR 的关系
 
-- [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节：产品文案的正则表与「靠 review」那半，本 ADR 不改判据，只把正则表里已收进 `_doc_rules.py` 的那部分（使用者向 markdown 与 skill 的禁词）由提交后 CI 才报前移到写完即查；code 字面量那张表仍只在 `test_user_facing_messages.py`，「靠 review」那半不变，也不进护栏。
+- [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节：产品文案的正则表与「靠 review」那半，本 ADR 不改判据，只把正则表里已收进 `_doc_rules.py` 的那部分（使用者向 markdown 与 skill 的禁词）由提交后 CI 才报前移到写完即查；code 字面量的两条规则（禁词表与 markdown 强调记号）仍只在 `test_user_facing_messages.py`，「靠 review」那半不变，也不进护栏。
 - [0045](./0045-documentation-layering-and-placement.md) 决策六 / 八：措辞标准与词表流程仍在那里；本 ADR 是它们的执行层。
 - [0043](./0043-agent-skill-for-driving-gherkai.md) 决策六：skill 的产品面护栏并入同一份规则源与 hook。
 

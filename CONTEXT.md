@@ -62,7 +62,7 @@ worker 把设备请求里的条件落到一台具体设备的过程（见 ADR 00
 _Avoid_: 设备筛选、挑设备
 
 **获取预算 (acquisition budget)**:
-从进入设备解析到被测对象就绪的等待上限，只在 worker 内执行；取设备的开销计入 job 墙钟预算，但两者分开设定、不合并为一个值（见 ADR 0051）。
+从 worker 开始准备设备到被测对象就绪的等待上限，只在 worker 内执行；取设备的开销计入 job 墙钟预算，但两者分开设定、不合并为一个值（见 ADR 0051）。
 _Avoid_: 取设备超时、acquire 超时
 
 **模型评测集 (model evaluation set)**:

@@ -74,12 +74,12 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 | 选项 | 作用 |
 |---|---|
-| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`），至多 32 个字符：job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 64 个字符，更长的前缀在生成部署模板时即报错，stack 不会被改动。**须与 `run` / `submit` 的 `--prefix` 一致**，包括 `gherkai.toml` 里 `[cloud]` 节的 `prefix`：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀。部署命令不读 `gherkai.toml`，项目在配置文件里指定了前缀时，部署时要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一值 |
+| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`），至多 32 个字符：job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 64 个字符，更长的前缀在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。**须与 `run` / `submit` 的 `--prefix` 一致**，包括 `gherkai.toml` 里 `[cloud]` 节的 `prefix`：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀。部署命令不读 `gherkai.toml`，项目在配置文件里指定了前缀时，部署时要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一值 |
 | `--vpc` 取值 | 见上「VPC 的三种取值」，必给 |
 | `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
-| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 的上限是 120 秒，更大的值在生成部署模板时即报错，stack 不会被改动。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错并以退出码 2 结束，写在 `gherkai.toml` 里的 `grace` 在云端只提示一句、不生效 |
+| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 的上限是 120 秒，更大的值在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错并以退出码 2 结束，写在 `gherkai.toml` 里的 `grace` 在云端只提示一句、不生效 |
 | `--container-engine 名` | 用哪个容器引擎（默认 `docker`，也可用 `GHERKAI_CONTAINER_ENGINE`）；当前只支持 `docker`，别的名字以退出码 2 结束、不静默回落 |
 | `--provider NAME` | 用哪个部署 provider；装了一个时不必给 |
 | `--region R` / `--profile P` | 与 `run` / `submit` 同名同义 |
