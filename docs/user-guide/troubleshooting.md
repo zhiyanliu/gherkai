@@ -1,6 +1,6 @@
 # 排错
 
-报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道、项目配置文件与设备目标；定位参数不一致、筛选筛成空集、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
+报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道、项目配置文件与设备目标；定位参数不一致、筛选筛成空集、给定的 `.feature` 里没有任何 scenario、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
 
 ## 先运行 gherkai doctor
 
@@ -68,6 +68,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件 `[common]` 的 `region`、`--profile` / `AWS_PROFILE`（或配置文件的 `profile`）指的 profile 配置，五处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
 | `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
+| 以退出码 2 结束，`AWS 身份不可用：--profile / AWS_PROFILE / 配置文件 [common] profile 指定的 profile 读不出来，或凭证链不可用：…` | `--profile`、`AWS_PROFILE` 或配置文件 `[common]` 的 `profile` 给的 profile 名不存在（拼错，或指向已删除的 profile），而 region 没有从 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION` 或配置文件 `[common]` 的 `region` 给出、只能从这个 profile 的配置里读；也可能是 AWS 的配置文件（默认 `~/.aws/config`）本身无法解析 | 改成本机已配置的 profile 名，或去掉它改用默认凭证链；AWS 配置文件无法解析时按报错里的路径修正。提示末尾附有 AWS SDK 的原始报错，写明是哪个 profile 读不出来，或哪个文件无法解析 |
 | 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 对 `submit` 提交的 run 会接着推进，那时需要凭证 |
 
 ## 模型
@@ -135,12 +136,13 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
+| `--expose-local 的取值 '…' 不是 origin：…`，随后提示只写到端口为止 | 取值要是 origin，即 `scheme://主机[:端口]`；这里含路径、查询串、片段、用户信息或空白字符，scheme 不是 `http` 或 `https`，缺少主机名，冒号之后缺少端口号或端口为 0，或主机、端口无法解析。提示里写明了是哪一种 | 只写到端口为止，例如 `http://localhost:3000`（末尾带一个斜杠也可以）；路径写在 feature 的 step 里 |
 | `--expose-local 隧道未就绪：找不到 ngrok 可执行文件` | ngrok 没装，或不在 PATH 上 | 装好 ngrok（https://ngrok.com/download ）并确认 `ngrok version` 能正常执行 |
 | `ngrok 隧道未就绪（…s 内拿不到公网 URL）`，提示 authtoken 未配置或无外网 | authtoken 没配，或本机连不上外网 | 运行 `ngrok config add-authtoken <token>`，或设 `NGROK_AUTHTOKEN`；两处任一即可。前置与限制见[测本机应用](./local-app-testing.md) |
 | 本机后端 `--expose-local` 以退出码 2 结束，提示「worker 不支持本机应用测试需要的会话预热」 | 引擎 worker 比命令行工具旧，不会在隧道上做会话预热 | 把 worker 与命令行工具装成同一个版本（`uv tool upgrade gherkai`；Midscene 侧 `npm i -g @gherkai/worker-midscene@<同版本>`） |
 | run 里每个 scope 都没执行任何 step，job 的消息以「隧道会话预热」或「后端未传递会话预热地址」开头 | 隧道的会话预热失败：令牌不被接受、会话 cookie 未通过校验、隧道已拆或浏览器到隧道入口的网络不通、云端后端旧于命令行工具 | 按消息处置，见[测本机应用](./local-app-testing.md)的「常见故障」 |
 
-`gherkai doctor` 不查隧道前置，隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。
+`gherkai doctor` 不查隧道前置。取值不是 origin 的错误 `plan` 就能报出，其余隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。
 
 ## 项目配置文件与设备目标
 
@@ -164,8 +166,9 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| `未找到 run：<run_id>（--report-dir 是否与 submit 一致？）`，云端后端为 `（--prefix/--ddb-table 是否与 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix`，给过 `--ddb-table` 的也要一致 |
+| `未找到 run：<run_id>（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）`，云端后端为 `（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix`，给过 `--ddb-table` 的也要一致 |
 | `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
+| `没有可执行的 scenario：<文件> 里一个 scenario 都没有（常见原因：只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行）` | 没有加筛选，给定的 `.feature` 里也没有任何可执行的 scenario：文件为空、只有 Feature 头、只有 Background 或不含 scenario 的 Rule，或 Scenario Outline 的 Examples 没有数据行 | 补写 scenario，或给 Examples 补上数据行；同时核对传入的路径是否是要测的那批文件 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |
 
 ## 仍未定位到原因时

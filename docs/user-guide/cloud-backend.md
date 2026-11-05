@@ -36,7 +36,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 
 stack 之外，`gherkai deploy` 还会在部署 stack 之前找到已有的或新建一个 Device Farm 项目 `<prefix>devices`，供带设备目标的云端 run 在其中建立远程访问会话。项目固定在 us-west-2（Device Farm 只在这个区域提供），不属于 stack，destroy 时保留，见[拆除与清理](#拆除与清理)。
 
-前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。
+前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。前缀至多 32 个字符，更长的前缀在生成部署模板时即被拒绝，原因见下文「deploy 与 destroy 的选项」。
 
 云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
 
@@ -74,7 +74,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 
 | 选项 | 作用 |
 |---|---|
-| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`）。**须与 `run` / `submit` 的 `--prefix` 一致**：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀 |
+| `--prefix P` | 资源名前缀（默认 `gherkai-`，也可用 `AWS_RESOURCE_PREFIX`），至多 32 个字符：job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 64 个字符，更长的前缀在生成部署模板时即报错，stack 不会被改动。**须与 `run` / `submit` 的 `--prefix` 一致**，包括 `gherkai.toml` 里 `[cloud]` 节的 `prefix`：建出来的资源名就是提交侧推导的默认名，不一致时提交前检查会报错并点名前缀。部署命令不读 `gherkai.toml`，项目在配置文件里指定了前缀时，部署时要用 `--prefix` 或 `AWS_RESOURCE_PREFIX` 给出同一值 |
 | `--vpc` 取值 | 见上「VPC 的三种取值」，必给 |
 | `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
@@ -127,8 +127,9 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 1. `== 基础镜像同步 novaact：ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本> ==` —— 把当前版本的官方基础镜像拉下来、推成你 ECR 里的 `<版本>-base`。两个引擎各一段。
 2. `已保留默认 worker 镜像 variant common（部署不改动已有的默认设置）` —— 默认指针已存在，部署不动它，它记录的是团队的选择。首次部署这里是 `默认 worker 镜像 variant 初始化为 base（官方基础镜像，未定制）`。
-3. `<engine>/<variant> 的 worker 运行配置已按本次部署更新为 <family>:<n>（旧配置 <family>:<m> 已标记待清理）` —— 本次部署改了任务定义模板（如 `--stop-timeout`），已有 variant 按记录的镜像重新派生一份 revision。模板没变时这里是 `各 variant 的 worker 运行配置已是最新，无需更新`。
-4. `清理：回收 N 个 revision（…）` —— 顺带回收了已退休且无人引用的旧 revision，没有可回收的就不打印。
+3. `<engine>/<variant>：已有按本次配置与同一镜像注册的 <family>:<n>（上次部署可能在注册之后中断），直接复用，不再重复注册` —— 上次部署在注册新 revision 之后中断时，同一 variant 的更新行（下一项）之前先出现这一行，本次沿用那次注册的 revision。
+4. `<engine>/<variant> 的 worker 运行配置已按本次部署更新为 <family>:<n>（旧配置 <family>:<m> 已标记待清理）` —— 本次部署改了任务定义模板（如 `--stop-timeout`），已有 variant 按记录的镜像重新派生一份 revision。模板没变时这里是 `各 variant 的 worker 运行配置已是最新，无需更新`。
+5. `清理：回收 N 个 revision（…）` —— 顺带回收了已退休且无人引用的旧 revision，没有可回收的就不打印。
 
 ## 版本与升级
 
@@ -198,7 +199,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 ## 退出码与常见错误
 
 - `0`：成功。
-- `2`：前置或校验失败，都可由你修正。缺 Node、找不到 cdk、容器引擎名无法识别、读不到后端里的 Device Farm 项目记录（凭证或 region 不可用、缺 `ssm:GetParameter`、网络、限流）、记录不是合法的项目 ARN（被手工改过），都在改动账户之前拦下；`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障，同样以 `2` 结束、不输出变更集，稍后重试即可。例外：`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但这时镜像与 revision 可能已写入账户。
+- `2`：前置或校验失败，都可由你修正。缺 Node、找不到 cdk、容器引擎名无法识别、取不到 gherkai 自身的版本号（gherkai 未以发行包形式安装；`deploy`、`--diff`、`--synth-only`、`destroy`、`push-worker` 与 `list-workers` 都要用这个版本号）、读不到后端里的 Device Farm 项目记录（凭证或 region 不可用、缺 `ssm:GetParameter`、网络、限流）、记录不是合法的项目 ARN（被手工改过），都在改动账户之前拦下；`--diff` 核对后端记录的项目时遇到限流、网络或服务端故障，同样以 `2` 结束、不输出变更集，稍后重试即可。例外：`push-worker` 推送途中的 AWS 调用失败也以 `2` 结束，但这时镜像与 revision 可能已写入账户。
 - `1`：账户可能已被改动，来源有三种：
   - CDK 自身失败：CDK 的退出码原样透传（多为 `1`），原因看上方 cdk 输出；
   - CDK 已成功、随后的 worker 镜像步骤失败：带同一组选项重新运行 `gherkai deploy` 幂等收敛；
@@ -211,6 +212,7 @@ Device Farm 只在 us-west-2 提供，这两条命令的区域与后端所在区
 |---|---|
 | 找不到 node | 装 Node ≥ 22 后重新运行 |
 | 找不到 cdk 也找不到 npx | 装 Node ≥ 22（自带 npx），或 `npm i -g aws-cdk`，之后重新运行 |
+| 提示 `取不到 gherkai 自身的版本号：gherkai 未以发行包形式安装（例如直接从源码运行）` | 把 gherkai 装成包（`uv tool install 'gherkai[deploy-aws]'`，或在工作区执行 `uv sync`）后重新运行 |
 | 缺 `--vpc` | 补上三个取值之一。环境已存在时提示里会给出上次部署用的那个取值 |
 | `--vpc` 取值不合法 | 只能是 `default`、`new`、`vpc-<id>` 三种形态 |
 | VPC 取值与后端记录不符，或后端没有取值记录 | 先 `gherkai deploy --diff`（带同一组选项）核对变更集，确认无误再带 `--allow-vpc-change` 放行一次 |

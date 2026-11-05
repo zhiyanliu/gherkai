@@ -15,21 +15,30 @@
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级 worker 定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
-    midscene 无本级，理由见下）；四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/ `build_engines`（local 后端）/
-    `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）。注入 worker 的 env 由本
-    模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` / `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：有值显式注入、无值显式清除）。
+    midscene 无本级，理由见下）；解析结果是 `WorkerCmd`，四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/
+    `is_pure_release`（版本是否为纯发行版，第四级的门槛之一；部署 provider 判断是否同步基础镜像时也用它）/ `build_engines`（local 后端）/
+    `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）/ `make_resolver`（把引擎映射包成 core 要的
+    `EngineResolver`）。注入 worker 的 env 由本模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` /
+    `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：有值显式注入、无值显式清除；`scrubbed_environ` 继承 `os.environ` 并先清除这些键，是每次注入的起点，
+    `tools/e2e_harness.py` 也复用它）。`nova_act_timeout_s` 是 Nova 单 act 上界（注入的 `NOVA_ACT_TIMEOUT_S`）的单一取值点：惰性取值并缓存，
+    坏值抛 `ValueError`；两个 builder 遇到坏值时把 Nova 那一项装配为一用即抛的占位项，只用 Midscene 的 run 不受影响。
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
-    steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id / 支持的测试目标（顶层 `targets`，缺键按版本不一致拒绝）/ 会话预热支持键 `session_warmup`；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
+    steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id / 支持的测试目标（顶层 `targets`，缺键按版本不一致拒绝）/ 会话预热支持键 `session_warmup`（`SESSION_WARMUP_KEY`）；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
     目录」缓存；`engine_min_grace` 从中取下限，Nova 查询时注入 `NOVA_ACT_TIMEOUT_S` 使两端同源）与 `match_deterministic`
-    （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
-  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（云资源的完整名称 +
-    region/profile 一处解析）/ `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `preflight_cloud_resources`
-    （提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/
-    `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）。
+    （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现；worker 已启动但自述失败（最常见的成因是使用方
+    `steps/` 加载失败）时抛 `WorkerSelfDescribeError`，与定位不到的 `WorkerNotFoundError` 分开，调用点以退出码 2 结束、不降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
+  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
+    region/profile 一处解析）/ `resolve_aws_identity`（profile 与 region 解析链的唯一实现，`resolve_cloud_target` 与本机后台宿主共用）/
+    `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
+    None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
+    自己的退出码层）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/ `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）/
+    `events_db_path`·`build_local_event_log`·`build_cloud_event_log`（一个 run 的事件流落点与两个后端的读取入口）。
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
-    `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run 判为 `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `resolve_worker_variant`
-    （提交侧解析 variant → 各引擎 revision）/
-    `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`run_duration_ms`（run_id 与时钟）/
+    `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run（由 `run_requires_backend_stamp` 判定）判为
+    `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `read_backend_version`
+    （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`；失败抛
+    `WorkerVariantError`，消息本身是给使用方看的整句）/ `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/
+    `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
@@ -40,9 +49,10 @@
   **唯一归一化与校验点**，ADR 0038）
 - `tunnel.py` —— 隧道 provider（ADR 0035；鉴权按 ADR 0051 决策 13）：`--expose-local` 启动 / 拆除 ngrok（每个 run 生成访问令牌与会话 cookie 值、
   渲染四条规则的流量策略、给出会话预热地址；按 pid 跨进程收尾）+ job 文本里 origin 的带边界替换（`replace_origin` / `map_origin_in_jobs`，
-  替换成干净的隧道地址；core 对隧道无知、worker 只做一次预热导航）；边缘契约常量（路径、参数名、cookie 名、页面标记）与两个 worker 各持一份同值，由 `engines/fixtures/tunnel-warmup.json` 对拍
+  替换成干净的隧道地址；core 对隧道无知、worker 只做一次预热导航）；边缘契约常量中，预热路径、校验路径、令牌参数名与 cookie 名只在本模块持有，
+  页面标题与正文标记与两个 worker 中消费它们的那份同值（Nova 只持标题，Midscene 持标题与正文标记），由 `engines/fixtures/tunnel-warmup.json` 对拍
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 隧道模式下恒同时给出的额外请求头（`TUNNEL_EXTRA_HTTP_HEADERS`）与会话预热地址
-  （`TunnelSetup.warmup_url`）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
+  （`TunnelInfo.warmup_url`，经 `TunnelSetup.info` 取得）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
 - `textui.py` —— 人读输出的呈现件（ADR 0047）：`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain`
   与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：环境变量 `NO_COLOR` /

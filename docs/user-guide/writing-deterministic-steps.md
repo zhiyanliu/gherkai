@@ -31,6 +31,8 @@ worker 启动时排序递归遍历该目录，两个引擎各取自己的扩展�
 | 跳过 | `test_*.py` | `*.test.*` |
 | 都跳过 | 路径中任一段以 `_` 开头的文件或目录（`_helpers.py`、`_pages/`） | 同左 |
 
+符号链接在两个引擎上的处理相同：指向文件的链接按目标文件加载，目标可以在 steps 目录之外；指向目录的链接不进入。上表的筛选看链接自身的名字，名字通过筛选却指向目录的链接（如 `shared.mts`）会让 worker 在加载时报错、拒绝启动。
+
 `_` 开头的文件与目录用来放辅助模块，step 文件按相对路径导入它们：Python 侧写 `from . import _helpers` 或 `from ._pages import selectors`（`steps/` 不在模块搜索路径上，`import _helpers` 会失败）；TypeScript 侧写 `import { SUBMIT } from "./_pages/selectors.mts"`。辅助模块务必带 `_` 前缀，或整个放进 `_` 开头的目录：Midscene 侧被自动加载却一条 step 都没注册的文件会让 worker 拒绝启动。
 
 Midscene 侧只加载 `.mts` / `.mjs`。这两个扩展名恒按 ESM 解析，与你项目里有没有 `package.json`、`type` 写什么无关。**其它扩展名（含 `.ts` / `.js`）会被直接跳过，也不报错**——那个文件里的 step 一条都不会注册，这些 step 会改由 AI 判定。写完用 `gherkai list-deterministic --engine midscene` 确认清单里有你那条。

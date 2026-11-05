@@ -52,6 +52,8 @@
 - **ngrok 可执行文件**装好且在 PATH 上（`ngrok version` 能正常执行；下载 https://ngrok.com/download ）。没装的报错点名找不到 ngrok 可执行文件。
 - **ngrok 账号的 authtoken**（免费账号即够）：`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可。排障别只看环境变量在不在——配置文件里配过就够。取值在 ngrok 控制台的 **Your Authtoken** 页；**API Keys** 页的值起不了隧道，两者都是长随机串、肉眼分不出，填错的表现是「隧道未就绪」、报错附带的 ngrok 日志会点明鉴权原因。
 
+**取值只写到端口为止**：`--expose-local http://localhost:3000`，末尾多一个 `/` 可以接受（按不带斜杠处理）。带路径、查询串、片段或用户信息（`http://localhost:3000/app`、`http://user@localhost:3000`），或不以 `http://` / `https://` 开头的取值，`plan`、`run`、`submit` 都以退出码 2 结束，报错说这个取值「不是 origin」并给出写法；`run` / `submit` 在起隧道之前就拒绝，不产生费用。路径写进 step 文本，不写进选项值。
+
 **写法三条**，都是导航失败的常见来源：
 
 - **选项值与 feature 里书写的地址逐字一致**。`http://localhost:3000` 与 `http://127.0.0.1:3000` 互不匹配，大小写、端口都要一样；只替换「作为一个地址出现」的选项值（后面是路径、查询串、句末标点或正好结束），`http://localhost:30000`、`http://localhost:3000.evil/` 不会被改坏；没匹配上就不替换，云端浏览器照着原地址导航、第一步就失败，而被测应用的日志里一条请求都不会有。
@@ -101,6 +103,7 @@
 | `status` / `explain` 以退出码 2 结束、说找不到 run（提示只提 `submit`） | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致 | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix` |
 | `status` / `explain` 以退出码 2 结束、说提交记录由更新或更早版本写出 | 记录格式与本机 CLI 不一致 | 更新版本写出的就升级本机 CLI；更早版本写出的就按消息换用那个版本查看，或用当前版本重新提交 |
 | `--expose-local` 起隧道失败 | 没装 ngrok、或 authtoken 没配（配置文件与环境变量都没有）、或填的是 API key、或本机没外网 | 第 5 节 |
+| 以退出码 2 结束、说 `--expose-local` 的取值「不是 origin」 | 取值带了路径、查询串、片段或用户信息，或不以 `http://` / `https://` 开头 | 只写到端口为止（如 `http://localhost:3000`），路径留在 step 文本里（第 5 节） |
 | 隧道已建立，每条 scenario 第一步导航就失败，应用日志里没有请求 | 选项值与 feature 书写的地址不一致（localhost 对 `127.0.0.1`、端口、大小写），地址没被替换 | 第 5 节：`plan --expose-local` 回显与 step 文本逐字对照，改成一致 |
 | 请求到了应用，页面返回 400 或「host not allowed」，本机直连正常 | 开发服务器校验 Host，拒绝了隧道域名 | 第 5 节：放行隧道域名（通配写法） |
 | run 中途开始每条 scenario 都导航失败 | 隧道已拆：本机关机或断网，或 `--tunnel-ttl` 到点 | 保持开机联网；批量大时给更长的 `--tunnel-ttl` |

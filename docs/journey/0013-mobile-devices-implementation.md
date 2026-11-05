@@ -7,15 +7,15 @@
 ## 恢复现场
 
 - 实施已完成：第 0 到 8 批（九个实施块：导航规则与注册面关键字声明、能力自述增键、core 会话事件与终结函数、目标模型与建会话前自检、配置文件与提交侧、确定性 step 多句柄注册、隧道令牌换 cookie、部署侧、Midscene 设备模块）与第 9 到 13 批（真机验收浮出的拍板项、边界与残余的真跑、评测集设备用例、靶向制造的边界真跑、journey 待项清理）全部闭合并 push、CI 绿（最后一批 2026-11-04）。设计期与实施期的结论都已内联进 ADR 0048 到 0053、按条改写的既有 ADR（Status 头带反向链）、CONTEXT.md 与各包 DEVELOPMENT.md；各批的改动面、护栏测试、同僚复核与真机验收的过程在 commit 历史里。
-- 1.5 剩余，按 owner 定的顺序（2026-11-03）：① doc-health 复盘——**已完成**（第九轮，落地提交带 `Doc-Health-Round: 9` trailer，2026-11-05）；它移交 code-health 的 code 侧客观发现与「改 code、ADR 不动」的裁定在 journey 0018 → ② code-health 复盘（下文遗留项里标为 code-health 候选的两条与 journey 0018 在此处理）→ ③ owner 单独做用户文档（下文「documenting 清单」里仍未写的项、README、CHANGELOG 收口）与人读文本的措辞改写（口吻问题先单独讨论）。Appium 3 端点升级放发版后（ADR 0051 决策 3）。
-- doc-health 第九轮留下两件待 owner 的事：task role 撤掉 `devicefarm:GetDevice` 的受限角色真跑已核（vfy 重部署后四个云端设备 scope、两个 worker 日志组零 AccessDenied，ADR 0033 与 0051 已改成已核）；零 scenario 的 feature 不加筛选时 `run` 判 passed 退 0（筛空时才以 2 拒绝）——owner 已定拒绝、与筛选后为空同一处置（ADR 0041 决策一），实现归 code-health（journey 0018 D21）。
+- 1.5 剩余，按 owner 定的顺序（2026-11-03）：① doc-health 复盘——**已完成**（第九轮，落地提交带 `Doc-Health-Round: 9` trailer，2026-11-05）→ ② code-health 复盘——**客观批已落地、待批报告在审**（第 6 轮，2026-11-05：客观类与 doc-health 移交的八项实现项已随 code / docs 两笔提交落地，第九轮移交清单 journey 0018 吸收后删除；6 项裁定、重构与主观提案、方法变更待 owner 批，报告在 journey 0019；批毕落改的提交带 `Code-Health-Round: 6` trailer 并删 0019）→ ③ owner 单独做用户文档（下文「documenting 清单」里仍未写的项、README、CHANGELOG 收口）与人读文本的措辞改写（口吻问题先单独讨论）。Appium 3 端点升级放发版后（ADR 0051 决策 3）。
+- doc-health 第九轮留下两件待 owner 的事：task role 撤掉 `devicefarm:GetDevice` 的受限角色真跑已核（vfy 重部署后四个云端设备 scope、两个 worker 日志组零 AccessDenied，ADR 0033 与 0051 已改成已核）；零 scenario 的 feature 不加筛选时 `plan` / `run` / `submit` 以退出码 2 拒绝——owner 已定、与筛选后为空同一处置（ADR 0041 决策一），实现已随 code-health 第 6 轮落地。
 - 验证环境 vfy 保留（Device Farm 项目为重新部署后的新项目；验收期对照用的临时执行角色已删）。跳板机的操作要点与演练装置不入库。
 
 ## 遗留项
 
-- 两侧错误文本归一化的分行与空白规则不完全对称（Python 的 splitlines / split 认 U+2028 等 Unicode 行列分隔符与 Unicode 空白，Midscene 只按 CR / LF 分行、按 JS 的空白折叠），`A\u2028B` 一侧得 `A`、一侧得 `A B`。既有的低优先级差异，属 code 层、不必进 ADR，code-health 候选。
-- 契约页护栏按全页扁平键名核对（`cli/tests/test_cli_json_contract.py` 的 `_leaf_keys`），删掉 list-deterministic 节的 keywords 说明仍能过（既有设计限制），code-health 候选。
-- 契约页护栏夹具没有覆盖设备形态：设备 job 的夹具没设 `target` 与 `device_request`（落到模型缺省的 desktop/web、`device_request` 为 None），`target.app` 与 `device_request` 的子键从没被真渲染器产出过；plan 的差集只传桌面 job、`devices` 渲染为空对象，各平台的 `arn` / `os_version` / `source` 子键没进差集。契约页字段说明本身是全的。code-health 候选。
+- 两侧错误文本归一化的分行与空白规则不完全对称（Python 的 splitlines / split 认 U+2028 等 Unicode 行列分隔符与 Unicode 空白，Midscene 只按 CR / LF 分行、按 JS 的空白折叠），`A\u2028B` 一侧得 `A`、一侧得 `A B`。既有的低优先级差异，属 code 层、不必进 ADR；code-health 第 6 轮的分片发现里没有出现，作下一轮的显式输入。
+- 契约页护栏按全页扁平键名核对（`cli/tests/test_cli_json_contract.py` 的 `_leaf_keys`），删掉 list-deterministic 节的 keywords 说明仍能过（既有设计限制）；code-health 第 6 轮未纳入，作下一轮的显式输入。
+- 契约页护栏夹具没有覆盖设备形态：设备 job 的夹具没设 `target` 与 `device_request`（落到模型缺省的 desktop/web、`device_request` 为 None），`target.app` 与 `device_request` 的子键从没被真渲染器产出过；plan 的差集只传桌面 job、`devices` 渲染为空对象，各平台的 `arn` / `os_version` / `source` 子键没进差集。契约页字段说明本身是全的。code-health 第 6 轮未纳入，作下一轮的显式输入。
 - **没有列出 run 的命令**：`status` 必须带 run_id，想知道「现在有哪些 run 在跑」只能查云端 runs 表（`item_type = STATE` 且 status 为 pending / running）、ECS 的运行中 task 或 Device Farm 的会话，本机后端只能翻报告目录。是否给 `status` 加「不带 run_id 时列出本后端近期 run」这类入口，属 ADR 0041 agent 可用形态的新增项，待 owner 定。
 - 策略文件不删除的前提仍需真实核实：ngrok agent 在隧道存活期是否会重读策略文件（`runtime/gherkai_runtime/tunnel.py` 的 `NgrokTunnel.start` 注释已点明，只靠单测证明不了）。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。doc-health 第九轮核出、因冻结留到下一版的两处：`speaker-notes.md` 开头那句自述（「14 页最终稿。口播与演示提示保持定稿原文；资料与素材统一见制作规范和素材包。」）改为陈述内容并给素材包链接，例如「共 14 页，每页包含口播正文与不朗读的演示提示。PPT、逐页画面与原始配音见素材包」；`manifest.json` 的 `brand_pronunciation`（现为「用户已选定 A：…」）与 `narration_style`（现为「…可比已认可小样稍增加感染力」）改成对参数本身的陈述句，仓库里的 manifest 与素材包内的那份一起改。

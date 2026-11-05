@@ -130,6 +130,9 @@ run 结束（schedule 返回后）:
 > 冒泡前先 stop 所有在跑 worker**（`_stop_all()`：置 `abort_flag`，先对在跑 worker 全部落定停止原因，再各起线程并行发停止请求）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
 > `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话持续计费。异常仍冒泡（落库失败=真问题、要暴露），
 > 只是先掐掉在跑会话。
+> `on_event` 的运行期异常走同一条止血路径、不产生判定：它在 worker 线程里抛出时，该 worker 不调终结函数（以免把落库失败归因成
+> `engine_error` 写进结果），先停掉本 worker 再原样重抛；异常在主线程取该 job 结果（`future.result()`）时再次抛出，与 on_job_complete
+> 共用同一个 `except BaseException`，同样先 `_stop_all()` 再重抛。
 
 > **写序的失败语义（残留风险，本地接受）**：若 `save_job_result` 成功但 `update_job_state` 失败，
 > run_state 落后于 jobs/——但 **jobs/*.json 是判定唯一权威、run_state 是可重建摘要**（依据 [0016](./0016-execution-architecture-core-lib-run-model.md)
@@ -217,7 +220,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 
 **cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
 - **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：（曾有「缺 table/bucket：入口显式校验非空」一项；[0033](./0033-iac-aws-backend-and-composition-wiring.md) 两层命名后表/桶恒有 `--prefix` 推导的默认名、不会为空，此项不再出现）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
-- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛，故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
+- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete` 抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_event` 或 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛（`on_event` 的异常不产生判定），故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
 
 ## 现在做 / 留口子
 

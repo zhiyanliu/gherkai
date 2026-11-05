@@ -53,11 +53,13 @@ RUN_ID=$(gherkai submit my_app.feature --backend cloud --prefix gherkai- \
 gherkai plan my_app.feature --expose-local http://localhost:3000
 ```
 
+选项值只写到端口为止（如 `http://localhost:3000`）；末尾多一个 `/`（`http://localhost:3000/`）也可以，按不带斜杠的形式处理。取值带路径、查询串、片段或用户信息（如 `http://localhost:3000/app`、`http://user@localhost:3000`），或者不以 `http://`、`https://` 开头时，`run`、`submit` 与 `plan` 都以退出码 2 结束，报错说明这个取值不是 origin，`run` 与 `submit` 不会起隧道；路径写在 feature 的 step 里。
+
 选项值必须与 feature 中书写的形式完全一致：`http://localhost:3000` 与 `http://127.0.0.1:3000` 两者不会互相匹配。替换覆盖 step 文本以及它挂的 DocString 与 DataTable 单元格，替换进去的是干净的隧道地址，不带任何凭据。
 
 只替换「作为一个地址出现」的选项值：后面紧跟路径、查询串、片段或句末标点，或者正好到此结束的才算（`http://localhost:3000/login`、`去 http://localhost:3000。`、`(见 http://localhost:3000)` 都替换）；`http://localhost:30000`、`http://localhost:3000.evil/` 是别的端口或主机，不会被改坏；`xhttp://localhost:3000` 这类不是地址起点的也不替换。
 
-`plan` 的「注：」行只是把你给的取值原样回显，不检查 feature 里有没有这个地址——地址写错时 `plan` 同样不报异常。把这一行的地址与 `plan` 打印出的 step 文本逐字符对照（大小写、端口、`localhost` 与 `127.0.0.1` 都要一致），即可确认能替换上。
+`plan` 的「注：」行只是把你给的取值回显出来（末尾的 `/` 已去掉），不检查 feature 里有没有这个地址——地址写错时 `plan` 同样不报异常。把这一行的地址与 `plan` 打印出的 step 文本逐字符对照（大小写、端口、`localhost` 与 `127.0.0.1` 都要一致），即可确认能替换上。
 
 隧道建立后 CLI 打印一行「隧道已建立」，其中依次给出原始地址与替换后的公网地址。`--tunnel` 选择隧道服务，当前只有 `ngrok` 一个取值，默认即它。
 
@@ -69,7 +71,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 |---|---|---|
 | `run`（`--backend local` 或 `cloud`） | 前台的 CLI 进程 | 命令正常结束、Ctrl-C 或执行期间收到 SIGTERM 时拆 |
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |
-| `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆 |
+| `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆；守护进程被 `kill`（SIGTERM 或 SIGHUP）结束时也拆 |
 
 因此：**用了 `--expose-local`，本机要保持开机联网直到 run 达终态**。隧道拓扑图上从边缘回到被测应用那一段全在你的机器这一侧，关机或断网等于隧道断，剩下的 scenario 会以导航失败告终。云端后端通常可以在提交后关机，用了 `--expose-local` 时不行，这是唯一的例外。
 
@@ -91,7 +93,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 - step 文本里只有干净的隧道地址，不带凭据，所以发给模型的提示里不会出现令牌。令牌只出现在预热地址里，它记在提交记录 `run_meta.json` 的 `session_warmup_url`（运行要读回它，明文）；引擎的浏览器访问过预热地址，所以引擎原生产物里可能记下它。gherkai 自己产出的文字里令牌与 S3 预签名地址的签名类参数显示为 `***`：失败消息、`explain` 输出、`run --json`、AI 证据的 JSON、本机转发的 worker 日志与云端 worker 自己写进 CloudWatch 的诊断行都是如此。仍是明文的：`run_meta.json`、本机系统临时目录下的隧道流量策略文件 `gherkai-tunnel-policy-*.yml`（同时含令牌与会话 cookie 值，只有本用户可读）、引擎自己的原生产物（Nova Act 的轨迹文件、Midscene 的报告页）、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容，以及测试设备上的网页时 Device Farm 控制台里该会话的录像与日志（设备浏览器访问过预热地址，AWS 保留 400 天）；报告与日志仍应按内部资料对待。
 - 已知边界：会话 cookie 会随每个请求到达被测应用，出现在它的访问日志里（在边缘剥掉它是服务商的付费功能）；被测应用若用 `Clear-Site-Data` 清掉 cookie，之后的请求会被边缘拒绝；确定性 step 里自己发起的 HTTP 请求要经浏览器上下文发出才带这枚 cookie。
 - 只把测试环境的实例接上隧道，不要暴露带生产数据或生产凭证的服务。
-- 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；`run` 执行期间用 `kill`（SIGTERM）结束 CLI 进程，与 Ctrl-C 一样先停止 worker 再拆隧道。`kill -9` 不会拆隧道，隧道建立后到执行开始之前、或执行结束之后（输出汇总期间）收到的 SIGTERM 也不会拆，此时在进程列表里找到 `ngrok` 结束它即可。
+- 隧道进程是本机上一个可见的独立进程。命令正常结束与 Ctrl-C 都会拆隧道；`run` 执行期间用 `kill`（SIGTERM）结束 CLI 进程，与 Ctrl-C 一样先停止 worker 再拆隧道；`submit --backend cloud` 的隧道守护进程被 `kill`（SIGTERM 或 SIGHUP）结束时同样先拆隧道再退出。`kill -9` 不会拆隧道，`run` 在隧道建立后到执行开始之前、或执行结束之后（输出汇总期间）收到的 SIGTERM 也不会拆，此时在进程列表里找到 `ngrok` 结束它即可。
 
 ## 限制
 
@@ -109,7 +111,7 @@ ngrok 没装、authtoken 没配这两类报错见[排错](./troubleshooting.md)�
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| 隧道起来了，但每个 scenario 都在第一步导航失败 | 选项值与 feature 里书写的地址不一致；或被测应用没在监听该地址 | 执行 `gherkai plan my_app.feature --expose-local <ORIGIN>`，把回显的取值与打印出的 step 文本逐字符对照；再在本机直接访问一次该地址，确认应用正在运行 |
+| 隧道起来了，但每个 scenario 都在第一步导航失败 | 选项值与 feature 里书写的地址不一致（取值带路径时会在开始执行之前以退出码 2 被拒，不会表现为这里的导航失败）；或被测应用没在监听该地址 | 执行 `gherkai plan my_app.feature --expose-local <ORIGIN>`，把回显的取值与打印出的 step 文本逐字符对照；再在本机直接访问一次该地址，确认应用正在运行 |
 | 页面返回「Host 不被允许」一类的提示或 400，但 `plan` 对照无误、本机直连也正常 | 被测应用只接受自己配置的域名，拒绝了隧道域名 | 在应用的允许域名列表里加上隧道域名（地址见「隧道已建立」那一行），或临时放开该校验后重新运行 |
 | run 执行到中途开始，之后每个 scenario 都导航失败 | 隧道已拆：本机关机或断网，或存活时间上限到点 | 保持本机开机联网；批量很大时用 `--tunnel-ttl` 显式给一个更长的值 |
 | run 的每个 scope 都没执行任何 step，`status` 里 job 的消息是「隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受…」 | 隧道已经重建（令牌换了一次），或提交侧与后端对隧道的配置不一致 | 重新提交这次运行；仍出现时核对命令行工具与后端是否同版本 |

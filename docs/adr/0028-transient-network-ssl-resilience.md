@@ -26,6 +26,7 @@
 - 重试域的物理边界 = **`scope_started` 事件 emit 之前**。一旦 emit（会话已起、act 即将跑），
   worker 内 `started=True`（Nova）/ 跳出建连循环（Midscene），core 侧 `saw_step=True`（见过 `step_done`）——
   **任何一方越过此点都永久退出重试域**。这是**结构性保证**,不靠「小心编码」。
+  - **`scope_started` 的 emit 自身抛错按已越过边界处理**：worker 在 emit `scope_started` 之前就已退出建连重试域（Nova 先置 `started=True` 再 emit；Midscene 在建连循环返回之后才 emit）。emit 自身抛错时结果不确定（DDB 写入可能已在服务端提交、只是客户端读超时；Nova 侧 fd 写失败是 `BrokenPipeError`，属 `ConnectionError`），一律按已越过重试域边界处理、不进建连重试——否则事件通道的故障会被瞬时网络判据当成建连故障，再建一个计费会话，还可能出现第二条 `scope_started`。两个引擎在这一点上的处理相同。
 - 幂等性依据:建连段每个操作都可安全重放——`StartBrowserSession`（新会话）、取 CDP 连接头的 SigV4 握手
   （无状态签名）、`connectOverCDP`（新连接）、`ensure_workflow_definition`（create-if-not-exists 幂等,[0004](./0004-novaact-iam-auth-via-workflow.md)）。
 - **执行期只读原语的传输层有界重试不在本节禁令之内**：它既不是建连重试也不是 act 重试；白名单与次数归 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6。
@@ -134,6 +135,8 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
 - **留口子不实现**:
   - **act 中途的瞬时恢复**（长任务执行中 CDP 闪断 → 涉及会话状态恢复,复杂且有副作用风险）——明确 defer。
   - **`ensure_workflow_definition` 自身的 SSL 故障**:它在重试循环外（单次廉价 boto3 调用,SSL 失败面远小于 CDP/websocket 握手——后者才是实测崩的点）。若它 SSL 失败 → 仍归 engine_error。已知小缺陷,可随真实失败样本扩充。
+  - **Workflow 进入时 `CreateWorkflowRun` 的 SSL 故障**：Nova worker 的 `main`（`run_scope.py`）以 `with _WorkflowGuard(wf)` 进入时，SDK 的 `Workflow.__enter__` 发这一次请求建立工作流运行，它同样在建连重试循环外：也是单次廉价 boto3 调用，SDK 默认的 boto 配置内部另有一次重试（`total_max_attempts=2`）。它在 SSL 失败时异常冒泡出 `main`、以退出码 1 结束，core 归 engine_error、不按网络错重试。与上条 `ensure_workflow_definition` 是同一已知小缺陷、同一理由不纳入重试域，随真实失败样本再定是否纳入。
+  - **`session_opened` 的 emit 位于建连重试域内且未包装（已知边界，不单独分类）**：两引擎都在 Start 返回后、取 CDP 连接头之前发 `session_opened`（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4），这条 emit 在建连重试域内、异常不另包装。事件通道写失败（fd 读端已关时的 EPIPE、DDB 写入超时）会被瞬时网络判据当成建连瞬时故障，worker 丢弃这个会话、重新 `StartBrowserSession`，至多建 4 个会话（两引擎的建连尝试次数常量 `_CONNECT_ATTEMPTS` / `CONNECT_ATTEMPTS`），每个被丢弃的会话都会被 Stop，代价有界；两个引擎在这一点上的处理相同。不单独分类的理由：DDB 瞬时故障时重试可能成功；fd 读端关闭这类故障不会因重连而恢复，但代价只是几个随即停止的短会话。**被拒方案**：在 Python 与 TypeScript 两侧的瞬时网络判据里各加一条分类分支、把事件通道写失败排除在建连瞬时故障之外——收益只是少建几个随即被 Stop 的短会话。EPIPE 与 DDB 写入超时实际抛出的异常类型与文案尚未经真实执行核实。
   - **成功重试在 RunResult 里没有结构化记录——「本轮抖了多少」只能间接推出（已知边界，真跑暴露）**：worker 层建连重试**成功**后（如实测中曾连撞 3 次、第 4 次成功），最终 `JobResult` 就是干净的 `passed`——**每次失败原因只在 worker 的 stderr 日志里、不进 RunResult/RunReport**（成功重试=不记 error，是本 ADR 开头「务实止血、非 enterprise resilience」定位的有意取舍）。两个衍生的可观测性缺口：
     - **重试次数**：建出了会话的 attempt 各以一条会话记录（`session_opened` / `session_closed`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）进入 job 的会话清单，只能从条数间接推出（Start 之前就失败的 attempt 不留会话记录），没有结构化计数；跨 run 统计「近期建连失败率」仍需另抓 stderr。
     - **重试/建连耗时**：`JobResult.duration_ms` 是 `scope_started→scope_done` 墙钟（[0024](./0024-worker-core-protocol.md)），**建连+重试全发生在 `scope_started` 之前**，故这段耗时既不进任何 scope 墙钟、也不单列——只隐没在 `RunResult.duration_ms`（run 总墙钟）里。实测：一次 3 连重试（光首个 attempt 的 CDP 超时就 30s）+ Nova 会话建立固有延迟（~40s）使总墙钟 249s 远大于两 scope 墙钟之和 67s，读者看「跑了 4 分钟但 scope 才 1 分钟」会困惑，却无处解释这 ~182s 去哪了。

@@ -78,7 +78,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `gherkai doctor` | 只读自检：CLI 版本、引擎 worker、实际使用的模型、`steps/` 加载结果；装了部署工具链（Node、cdk、容器引擎）时连带自检它；给了 `--backend cloud` 或 `--prefix` 时再查凭证、后端资源与后端版本 | `--backend cloud`、`--prefix`、`--report-dir`、`--steps-dir`、`--json` |
 | `gherkai --version` | 打印 CLI 版本 | — |
 
-`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与 `submit` 时一致，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
 使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
@@ -94,7 +94,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--tags TAG[,TAG...]` | 只运行带这些 tag 的 scenario。一个值内用逗号分隔表示任一命中，重复给本选项表示都要命中；`@` 可省。feature 行上的 tag 对其下每个 scenario 生效 |
 | `--scenario SEL` | 只运行这些 scenario。`SEL` 可以是完整 scenario id、行号（`12` 或 `:12`，纯数字只当行号）、或标题的一段文字（区分大小写）。可重复，任一命中 |
 
-三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时以退出码 2 结束并列出这个 run 的全部候选（id、标题、tags），不会静默执行一个空 run。
+三者同给时都要满足。筛掉一部分时命令会打印一行 `筛选：<已选>/<总数> scenario`，后面附上你给的筛选条件；一条都没选中时以退出码 2 结束并列出这个 run 的全部候选（id、标题、tags），不会静默执行一个空 run。不加任何筛选时，给出的 `.feature` 文件里一个 scenario 都没有（例如只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行），`plan`、`run`、`submit` 同样以退出码 2 结束并提示 `没有可执行的 scenario`，不会启动一个空的 run。
 
 **执行**
 
@@ -118,7 +118,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。在本机运行时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
 | `--json` | 关 | 仅 `run`：标准输出只打机器可读 JSON、不打文本汇总；进度与诊断照常走标准错误，逐事件进度可用 `--quiet` 静音 |
 | `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整个 run 拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
-| `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器，配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器与设备上的浏览器（只用于网页目标，原生应用不适用），配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
 **仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。仅 `run`：不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给；`submit` 没有这两个选项，它提交的 run 用部署时写进后端的网络配置。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
 

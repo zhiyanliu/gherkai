@@ -127,8 +127,8 @@ def _aggregate(statuses):
 - **空判定集规则**（判定集为空而输入非空）：按 aborted、skipped、running、pending 的顺序取输入里第一个出现的态——全 skipped 得 `skipped`、
   全 aborted 得 `aborted`，未来引入**非-fail-fast 的 skip**（如主动 `--skip`）时，全 skipped 的 run 不会再被判 `passed`（退出码语义见「重议」首条）。
   fail-fast 来源的 skipped/aborted 必伴随同批 error、判定集非空、run 级已是 error，不受此规则影响；使用方中断见上「唯一例外」段。
-  **空输入仍判 `passed`**，且可达：不加筛选时，只含 Feature 头、没有 scenario 的 `.feature` 经 plan 得到零个 job，同步路径以零个 job 结束、run 级为 passed；
-  无状态路径下零个 job 的 `project`，以及 `project_full` 在所有 job 都没有记录时的防御分支，也是空输入。保留终态的理由：无状态路径在没有 pending 与 running 时
+  **空输入仍判 `passed`**，只是函数层兜底：CLI 入口对零 scenario 批（筛选后为空或不加筛选）以退出码 2 拒绝，不会产生零个 job 的 run（[0041](./0041-agent-facing-cli-affordances.md) 决策一）。
+  函数不依赖这项拒绝：无状态路径下零个 job 的 `project`，以及 `project_full` 在所有 job 都没有记录时的防御分支，仍按空输入处理。保留终态的理由：无状态路径在没有 pending 与 running 时
   把 `_aggregate` 的值交给 `finalize` 写入，返回前置态会让零个 job 的无状态 run 永远停在非终态。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted；scenario 判定集为空的情形由终结函数先判 error，见 [0034](./0034-detached-batch-reconciler.md) 机制二，过滤与空判定集规则在这条路径都不生效）。
 - **合成的 scenario 级 SKIPPED 不喂给 `_aggregate`**（决定一）：它只进 JobResult 的明细，不进 scenario 判定集；该 job 的判定来自 [0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」（`scope_done.status = error` 在无主动停止、退出码 0 时判 ERROR，归因见真值表），不经 scenario 归约。`_NON_VERDICT` 含 SKIPPED 是第二道保险，真正的保证是「压根不喂进去」，与决定六对 step 级 SKIPPED 的处理同一取向。
@@ -198,7 +198,7 @@ cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 sev
 - `core/gherkai_core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`_NON_VERDICT` 过滤名单；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
 - `core/gherkai_core/schedule.py`：job 级 SKIPPED/ABORTED 的赋态点——起 worker 前 `abort_flag` 已 set → SKIPPED（worker 从未 spawn）；事件循环中因 `abort_flag` 作出停止决定 → 首次仲裁落定 `stop_reason = abort`，再调 `project.finalize_job` 按真值表在内容不完整时判 ABORTED（不论退出形态；`abort_flag` 记下首次置位的来源 fail-fast / interrupt，只决定两态的消息措辞）；**超时（deadline）分支维持 `error`+`errorType=timeout`、不归 aborted**（判定看该 job 停止决定那一刻落定的 `stop_reason`，判据与理由见决定一「aborted 只认主动中止（fail-fast 与使用方中断），不认 timeout」注）。
 - `core/gherkai_core/project.py`：`finalize_job`（终结函数：`stop_reason = abort` 且内容不完整 → ABORTED，[0034](./0034-detached-batch-reconciler.md) 机制二）；`_aggregate`（入口过滤 `_NON_VERDICT` 与空判定集规则；两路共用的真源，`schedule._aggregate` 为其别名，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；收到 `scope_done.status = error` 后合成 scenario 级 SKIPPED 与 `shortcircuited=False` 的 step 级 SKIPPED（决定一、决定六，合成态不进 `_aggregate`）。
-- `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）；`scope_done` 的可选 `status` / `errorType` / `message`（决定四，`status` 只接受 `error`）。
+- `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）；`step_done` 与 `scenario_done` 的 `status` 只接受 `passed` / `failed` / `error` 三态（决定四），其余取值与缺键按 worker 违约抛 `ValueError`；`scope_done` 的可选 `status` / `errorType` / `message`（决定四，`status` 只接受 `error`）。
 - `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值；StepResult to/from_dict 的 `shortcircuited`（`.get` 默认 False，向后兼容旧落盘）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) 决定五的落点清单，非本 enum 的落点。）
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。
 - `cli/gherkai_cli/render.py`：文本汇总的连锁失败旁注同读 `shortcircuited`（被短路 step 显 skipped 态 + 旁注）。

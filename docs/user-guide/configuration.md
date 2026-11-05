@@ -143,7 +143,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 | `NO_COLOR` | 设为非空值即关闭人读输出里的颜色，包括本机 worker 日志行的来源前缀（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
 
-- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接力推进到结束时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。
+- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接力推进到结束时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。取值须是正整数秒，不是正整数（含空值）时，用到 Nova 的 `run`（两个后端都算）与 `submit --backend local` 在开始执行之前以退出码 2 结束并点名这个变量；只用 Midscene 的运行不受影响。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是由它的收尾超时算出的 63.5 秒，不随环境变量变化），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
 - `MIDSCENE_REPLANNING_CYCLE_LIMIT` 的取值须为正整数，不是正整数（含空值）时 Midscene worker 在建立任何会话之前报错退出并点名这个变量，桌面与设备目标都核对。设备上原生应用的翻页类动作每翻一页消耗一次规划，缺省值因此取 12；一条 AI step 在设备上因规划次数用尽而失败时，可以调大它或把这一步拆细。
@@ -192,7 +192,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|
 | `--backend {local,cloud}` | `run`、`submit`、`status`、`explain`、`doctor` | 默认 `local`。查一个 run 的 `status` / `explain` 要给与 `submit` 相同的值 |
-| `--prefix P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。多环境切换（`prod-` / `stage-`）用它 |
+| `--prefix P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。部署侧的前缀至多 32 个字符，见 [`cloud-backend.md`](./cloud-backend.md)「deploy 与 destroy 的选项」。多环境切换（`prod-` / `stage-`）用它 |
 | `--report-dir DIR` | `run`、`submit`、`status`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
@@ -200,7 +200,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `--assertion-votes N` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不执行断言，给它是为了让用例预检列出的每个 job 的票数与实际运行一致 |
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
 | `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 为本机后端的 run 接力推进时起作用。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
-| `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。取值须是 `http://主机[:端口]` 或 `https://主机[:端口]`，末尾的一个 `/` 会被去掉；其余形态（带路径、查询串、片段或用户信息）在三个命令上都以退出码 2 结束。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
 | `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束；写在 gherkai.toml 里的 `grace` 在云端只提示一句、不生效 |
