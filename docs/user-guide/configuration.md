@@ -182,7 +182,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 下面这些变量由 gherkai 自己写入，**使用者不要设**。设了不报错：一部分在起 worker 时被清掉或覆盖，另一部分会被 worker 原样读到，把 job 的来源、事件表、产物落点指到别处，本机运行与云端运行就此不一致。要调整对应行为，用括号里的选项。
 
 - worker 侧：`RUN_ID`、`SCOPE_ID`、`JOB_S3_URI`、`EVENTS_DDB_TABLE`、`EVENTS_FD`、`GHERKAI_PARENT_PID`、`ARTIFACT_S3_BUCKET`、`ARTIFACT_S3_PREFIX`、`NOVA_LOGS_DIR` 与 `MIDSCENE_RUN_DIR`（产物落点用 `--report-dir` 定）、`GHERKAI_NO_ARTIFACTS`（用 `--no-report`）、`GHERKAI_EXTRA_HTTP_HEADERS` 与 `GHERKAI_SESSION_WARMUP_URL`（都由 `--expose-local` 决定）。
-- 云端后端侧：`REGION`、`CLUSTER`、`SUBNETS`、`SECURITY_GROUPS`、`RUNS_TABLE`、`EVENTS_TABLE`、`ARTIFACTS_BUCKET`、`PREFIX`、`MAX_CONCURRENCY`、`KICKER_ARN`、`SCHEDULER_ROLE_ARN`。`REPORT_DIR` 与 `ASSIGN_PUBLIC_IP` 云端不注入，走内置缺省（`reports` / 公网 IP 启用）；要改报告前缀或让 worker 走私有子网，由部署方在部署时调整。
+- 云端后端侧：`REGION`、`CLUSTER`、`SUBNETS`、`SECURITY_GROUPS`、`RUNS_TABLE`、`EVENTS_TABLE`、`ARTIFACTS_BUCKET`、`PREFIX`、`MAX_CONCURRENCY`、`KICKER_ARN`、`SCHEDULER_ROLE_ARN`。`REPORT_DIR` 与 `ASSIGN_PUBLIC_IP` 云端不注入，走内置缺省（`reports` / 公网 IP 启用）；部署命令没有调整这两项的选项；要改报告前缀或让 worker 走私有子网且不分配公网 IP，由部署方修改后端 stack 的定义后重新部署（worker 落公有还是私有子网由部署时 `--vpc` 的取值决定，见 [`cloud-backend.md`](./cloud-backend.md)）。
 - 部署工具链侧：`GHERKAI_LAMBDA_ASSET_DIR`（部署命令给合成过程用的临时目录）。部署命令还会把解析出的 region 以 `AWS_REGION` / `AWS_DEFAULT_REGION` 写进它启动的 cdk 子进程，覆盖你 shell 里的同名值；`CDK_DEFAULT_ACCOUNT` / `CDK_DEFAULT_REGION` 由 CDK 自己注入，不用你设。
 
 ## 跨命令通用选项
