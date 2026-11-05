@@ -61,6 +61,12 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 - **护栏 = 真值集对照**（CLAUDE.md 文档纪律）：`cli/tests/test_cli_json_contract.py` 用真渲染器生成各命令的 JSON 样例（`deploy list-workers` 的样例要 moto，同一护栏放在 `deploy_aws/tests/test_workers.py`、读同一份契约页），递归收集全部键名，逐个断言文档里以反引号出现——文档漏键即红。
 - 被拒：`gherkai schema <cmd>` 输出 JSON Schema——更机读，但要维护一套 schema 生成；先用文档 + 护栏，需求出现再升级（重议闸门）。
 
+### 六、定位参数：执行后端、报告落点、部署前缀三项与产生 run 的命令一致，查询才找得到
+
+- **规则**：`status` / `explain` 查的是哪一个 run，由三项定位参数决定——执行后端（`--backend local|cloud`）、报告落点（本机后端的 `--report-dir`）、部署前缀（云端后端的 `--prefix`，连同它所在的 region 与 profile）。查询命令的这三项须与产生该 run 的 `run` / `submit` 逐项一致（前台同步执行与提交后台执行都算），否则以退出码 2 结束并说未找到 run。`doctor` 的云端项同理按这三项定位后端。
+- **为什么不跨后端搜、不猜**：run 的记录只存在于产生它的那个后端与落点——本机是 `--report-dir` 下的 run 目录与事件库，云端是 `<prefix>` 对应的 runs 表与产物桶（[0034](./0034-detached-batch-reconciler.md)）；CLI 不维护跨后端、跨目录的 run 索引，也不按 run_id 到处找：猜中是巧合，猜错会把另一个落点里同名 run 的判定当成这个 run 的。三项由使用方给出、与产生时相同，是唯一可靠的定位，所以不一致时直接拒绝、不降级成「找最像的」。
+- **本条是权威，其余处只给结论与指针**：本机与云端各自的定位旗标在 [0034](./0034-detached-batch-reconciler.md)「命令形态」节；`explain` 的输入在 [0042](./0042-step-evidence-and-explain.md) 决策四；agent skill 教 agent 保持三项一致在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五第 3 条；用户指南运行篇与云端篇写同一句。CONTEXT.md「定位参数」词条指向本条。
+
 ## 影响
 
 - 用户文档（[0045](./0045-documentation-layering-and-placement.md) 决策一 / 二 归位后）：筛选 flag 与 `--quiet` 语义在 `docs/user-guide/running-and-results.md`「常用选项」节，各选项出现在哪些命令（含 `--json` 覆盖）在 `configuration.md`「跨命令通用选项」表，`doctor` 在 `getting-started.md`「用 doctor 自检」节，`deploy list-workers --json` 在 `cloud-backend.md`；根 README 与 cli README 只保留入口与「查询类命令都有 `--json`」一句。

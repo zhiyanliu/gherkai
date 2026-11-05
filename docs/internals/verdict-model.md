@@ -14,7 +14,7 @@
 | **step** | AI 断言（`Then`）：`yes > N/2` → `passed`/`failed`，事件带 `votes={yes,total}`。确定性注册表命中（含内建导航）：`AssertionError`→`failed`、其它异常→`error`。`When`·`Given` 的 AI 动作步：正常返回→`passed`、抛异常→`error` | `_run_step`（Nova）/ `runStep`（Midscene） |
 | **scenario** | 任一 step `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**被短路跳过的 step 不进入该列表** | worker 侧 `_aggregate` / `aggregate`；结论经 `scenario_done` 事件上报 |
 | **job**（即 scope） | 同步 `run` 与无状态批量运行共用一个终结函数与真值表（ADR 0034 机制二）：按行序取第一个命中——推进器首次仲裁落定的停止原因（timeout / abort，只约束内容不完整的 job）→ 退出码非零或未知 → 干净退出无 `scope_done` → `scope_done` 带 scope 级 error → scenario 判定集为空 → 各 scenario 归约；会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因改 `release_failed`、其余行只追加提示（§3c 图画的是同步路径的事件收场） | `project.finalize_job`（`schedule._Worker._run_once` 与 `project._reduce_scope` 只准备输入） |
-| **run** | 任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**入口先滤掉非判定状态** | `project._aggregate`（唯一实现，`schedule._aggregate` 是它的别名） |
+| **run** | **入口先滤掉非判定状态**，对剩下的判定集：任一 job `error`→`error`；任一 `failed`→`failed`；否则 `passed`。判定集为空而输入非空时按 `aborted`、`skipped`、`running`、`pending` 的顺序取第一个出现的态，零个 job 判 `passed`（见 §4） | `project._aggregate`（唯一实现，`schedule._aggregate` 是它的别名） |
 
 几点补充：
 
@@ -26,7 +26,7 @@
 
 > 图注：图给出层次、方向与 worker / core 的分界；每层规则见上表。三处不走这条链的旁路见 §3a（短路 step）、§3c 图（job 收场判据）、§4（run 归约入口过滤）。
 
-> 权威：[ADR 0014](../adr/0014-ai-first-assertions.md)（AI 断言与投票纪律）、[ADR 0024](../adr/0024-worker-core-protocol.md)（事件协议、三态、投票 tally 字段）、[ADR 0026](../adr/0026-schedule-module.md)（三级归约）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定三（`_aggregate` 入口过滤）；code：`core/gherkai_core/model.py`、`project.py`、`schedule.py`、`engines/novaact/gherkai_worker_novaact/run_scope.py`、`engines/midscene/src/worker/run-scope.mts`。
+> 权威：[ADR 0014](../adr/0014-ai-first-assertions.md)（AI 断言与投票纪律）、[ADR 0024](../adr/0024-worker-core-protocol.md)（事件协议、三态、投票 tally 字段）、[ADR 0026](../adr/0026-schedule-module.md)（三级归约）、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定三（`_aggregate` 入口过滤与空判定集规则）；code：`core/gherkai_core/model.py`、`project.py`、`schedule.py`、`engines/novaact/gherkai_worker_novaact/run_scope.py`、`engines/midscene/src/worker/run-scope.mts`。
 
 ## 2. 七个状态：含义与处置
 
@@ -126,11 +126,11 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 | `TERMINAL_STATUSES` | 生命周期（状态是否还会变） | 含 | `--wait` 轮询、`status` 退出码判定与仅在终态打印的产物位置、`explain` 的「run 仍在运行」提示与「判定明细尚未落地」提示、`project_full` 的不变量检查、云端推进器 Lambda 的「已收尾的 run 不再推演」跳过判据（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`：读到终态即 no-op，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)「已终态 run 在两个后端的重入」）、隧道守护的拆除判据（`runtime/gherkai_runtime/tunnel_host.py`：读到终态即提前拆除，否则等满 TTL）；另有一处**取补**用法——revision 清理的运行中 run 引用检查，判断是否仍有未达终态的 run 引用（`deploy_aws/gherkai_deploy_aws/workers.py`）。跨栈护栏要求消费方全部引用这一份、不各自维护白名单 |
 | `_NON_VERDICT` | run 级判定（是否算作结论） | 含（**另含** pending/running） | `_aggregate` 入口过滤 |
 
-**run 级聚合不出现 skipped/aborted**：`_aggregate` 在入口就把它们连同两个前置态滤掉，因此聚合结果只会是 `passed`、`failed`、`error` 三者之一。唯一例外在 `_aggregate` 之外：同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `aborted` 或 `skipped` 时，`schedule` 把 `RunResult.status` 直接记 `aborted`——判定不完整，不能按仅有的几个判定聚合（全部 job 都被中止时过滤后为空、按原规则会判 passed）；fail-fast 不走这个例外，它必伴随 error。这条过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态，过滤为 no-op。
+**run 级聚合的取值**：`_aggregate` 在入口把 skipped/aborted 连同两个前置态滤掉，只按剩下的判定集归约；判定集非空时结果只会是 `passed`、`failed`、`error` 三者之一。判定集为空而输入非空时（还没有任何 job 出判定），按 `aborted`、`skipped`、`running`、`pending` 的顺序取输入里第一个出现的态：全 skipped 的 run 得 `skipped`、全 aborted 的得 `aborted`，不会被记成 `passed`；无状态投影里还没有 job 出判定的 run 得到 `pending` 或 `running`。空输入（零个 job）判 `passed`。另有一个例外在 `_aggregate` 之外：同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `aborted` 或 `skipped` 时，`schedule` 把 `RunResult.status` 直接记 `aborted`——判定不完整，不能按仅有的几个判定聚合。它在两种情形下改变结果：被中止的 job 与已出判定的 job 并存（`_aggregate` 按已有判定聚合，如 aborted 与 passed 并存时为 `passed`），以及全部 job 都没有启动（`_aggregate` 给 `skipped`）；无状态路径不作中止决定，没有这个例外。fail-fast 不走这个例外，它必伴随 error。过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态。
 
 控制面的 `RunState.status` 多两个可能取值（另有上一段的 `aborted`，由被中断的同步 `run` 经 `finalize` 落下）：执行期间为 `pending`/`running`（同步 `run` 路径全程保持 `pending`，由 `finalize` 一次落终态；无状态路径每轮投影写按 `projected_run_status` 钳在 pending/running）。run 级终态是 `finalize` 这个提交点的专属，提前落终态会使 run 永不 finalize。
 
-> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定二（severity 序、视觉映射、「run 级为何不含 skipped/aborted」的洞察）与决定三（入口过滤）、[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三（投影写钳制）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（提交点）。
+> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定二（severity 序、视觉映射、「run 级为何不含 skipped/aborted」的洞察）与决定三（入口过滤与空判定集规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三（投影写钳制）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（提交点）。
 
 ## 5. 退出码：各命令的语义不同
 
