@@ -1,5 +1,5 @@
 {
-  "_comment": "隧道「令牌换 cookie」的边缘契约常量（ADR 0051 决策 13）。真源在 runtime/gherkai_runtime/tunnel.py（组合根生成策略与预热地址），两个 worker 各持一份同值（Nova lib/constants.py、Midscene lib/tunnel-warmup.mts），三方测试都读本文件断言相等。titles 是预热页面的 document.title（桌面 worker 读），markers 是正文标记（设备 worker 在控件树里找）。 messages 是两个 worker 逐字相同的四句产品语言消息（error_template 里 {attempts} / {reason} 是占位）。",
+  "_comment": "隧道「令牌换 cookie」的边缘契约常量（ADR 0051 决策 13）。真源在 runtime/gherkai_runtime/tunnel.py（组合根生成策略与预热地址）；各方只持有自己消费的键，各自的测试读本文件断言相等。warmup_path / check_path / token_param / cookie_name 只由 runtime/tests/test_tunnel.py 对拍（worker 只读预热地址、不持有这几项）；titles 由组合根与两个 worker 对拍，markers 由组合根与 Midscene worker 对拍；env、capability_key、messages 由两个 worker 对拍（Nova lib/constants.py 持标题、env 名、能力键与消息，Midscene lib/tunnel-warmup.mts 另持正文标记）。titles 是预热页面的 document.title（桌面 worker 读），markers 是正文标记（设备 worker 在控件树里找）。 messages 是两个 worker 逐字相同的四句产品语言消息（error_template 里 {attempts} / {reason} 是占位）。",
   "warmup_path": "/.well-known/gherkai-tunnel-auth",
   "check_path": "/.well-known/gherkai-tunnel-check",
   "token_param": "gherkai_tunnel_token",

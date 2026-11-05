@@ -36,7 +36,6 @@ def test_start_tunnel_for_jobs_maps_and_injects_headers(monkeypatch):
     assert calls == ["ngrok", "http://localhost:3000"]
     assert setup.info is INFO
     assert setup.extra_http_headers == {"ngrok-skip-browser-warning": "1"}
-    assert setup.warmup_url == INFO.warmup_url  # 预热地址与额外请求头成对给出（ADR 0051 决策 13）
     token = INFO.warmup_url.rsplit("=", 1)[1]
     assert token not in repr(setup) and token not in str(setup)  # 令牌不进 repr（日志与异常里打印对象时不带出来）
     # 映射后是新 Job（definition 不可变）：原 jobs 不动；替换进文本的是干净的隧道地址，不内嵌凭据
@@ -91,7 +90,7 @@ def _patch_run_store(monkeypatch, states):
     class _FakeStore:
         def load_run_state(self, run_id):
             got = seq.pop(0) if len(seq) > 1 else seq[0]
-            if isinstance(got, Exception):
+            if isinstance(got, BaseException):
                 raise got
             return got
 
@@ -141,7 +140,7 @@ def test_watch_ttl_fallback_when_run_never_settles(monkeypatch):
 
 def test_watch_stops_tunnel_even_when_store_assembly_fails(monkeypatch):
     """store 装配段抛（region 解析不出/凭证坏）→ 守护进程带着异常退出，但隧道**必须已拆**（ADR 0035：守护进程是隧道
-    唯一宿主，它死了没人再拆）。曾只在轮询循环之后拆，装配一炸 ngrok 永久留在公网。"""
+    唯一宿主，它死了没人再拆）。不要把拆除移到循环之后：装配段抛出时执行不到那里，ngrok 会永久留在公网。"""
     import pytest
 
     stopped = []
@@ -150,3 +149,28 @@ def test_watch_stops_tunnel_even_when_store_assembly_fails(monkeypatch):
     with pytest.raises(RuntimeError, match="no region"):
         tunnel_host.watch_run_and_stop_tunnel("r1", tunnel_pid=778, runs_table="tbl", ttl_s=600.0, region=None)
     assert stopped == [778]
+
+
+def test_watch_stops_tunnel_when_stop_signal_interrupts_polling(monkeypatch):
+    """守护进程入口把 SIGTERM / SIGHUP 转成 SystemExit：它不是 Exception，轮询里容忍读库异常的 `except Exception`
+    不能把它当成一次读库失败吞掉，异常须冒出主体，隧道经 finally 拆掉（守护进程是隧道唯一宿主，ADR 0035 决策 3）。"""
+    import pytest
+
+    stopped, warned = [], []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+    monkeypatch.setattr(compose, "resolve_region", lambda r, p, **kw: r)
+    _patch_run_store(monkeypatch, [_state(Status.RUNNING), SystemExit(128 + 15)])
+    import time as _t
+
+    monkeypatch.setattr(_t, "sleep", lambda s: None)
+    clock = {"t": 0.0}
+
+    def mono():  # 每读一次前进 1s：SystemExit 若被当成读库失败吞掉，约 600 次轮询后按 TTL 返回、本条随即失败，不会忙等满 600 秒
+        clock["t"] += 1.0
+        return clock["t"]
+
+    monkeypatch.setattr(_t, "monotonic", mono)
+    with pytest.raises(SystemExit):
+        tunnel_host.watch_run_and_stop_tunnel(
+            "r1", tunnel_pid=779, runs_table="tbl", ttl_s=600.0, region="us-east-1", on_warn=warned.append)
+    assert stopped == [779] and warned == []

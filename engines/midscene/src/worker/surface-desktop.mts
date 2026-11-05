@@ -41,7 +41,7 @@ const CONNECT_BACKOFF_MS: readonly number[] = [500, 1000, 2000];
 // 套这个预算：挂死时及时放弃，至少让 worker 干净退出、不被强杀。须 < grace——本段是自报下限
 // minGraceSeconds（run-scope）的加数之一，故「够执行完」由那个下限保证、不靠人对数字。
 export const STOP_SESSION_BUDGET_MS = 3000;
-// StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028；ADR 0051 决策 5 桌面收尾的「等在途 Start」一段）：
+// StartBrowserSession 已发出 RPC 但 sessionId 未返回的在途窗口兜底（ADR 0028；ADR 0049 决策 5 桌面收尾路径的「等在途 StartBrowserSession」一段）：
 // SIGTERM 落在这一瞬时服务端可能已建会话但客户端没拿到 id。给一小段时间让 Start 的 await 返回、id 落进待清理集，再 cleanup；
 // 到点仍未返回即按结果未知的尝试发一对 attempted 事件（ADR 0051 决策 4）。本段同样是 minGraceSeconds 的加数之一。
 export const INFLIGHT_SETTLE_MS = 1500;
@@ -66,7 +66,7 @@ const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 /** 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错 / AWS SDK v3 服务端瞬时识别。
  *  遍历 error.cause 链：SDK 常把底层 socket/TLS 错、或 AWS 服务端错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
  *
- *  两处调用：本文件的建连重试判定，与 run-scope 对执行异常的分类里「没有归类标记」那一支（桌面路径的全部异常，ADR 0052
+ *  两处调用：本文件的建连重试判定，与 run-scope 对执行异常的分类里「没有归类标记」那一支（桌面路径上除派发出错的防御分支外的全部异常，ADR 0052
  *  决策 6）。connecting=true（仅建连阶段传，ADR 0028）：额外认 Playwright TargetClosedError 的 message
  *  "...has been closed"——CDP 连接被网络断掉后的下游症状（Playwright 把底层 socket 故障吞掉、只留这句）。
  *  与 Nova 侧对称（Nova SDK 建连时主动 CDPSession.send 会撞出它；Midscene connectOverCDP 通常招 websocket
@@ -99,7 +99,7 @@ export function isTransientNetwork(e: unknown, connecting = false, byMessage = t
   return false;
 }
 
-// 建连重试耗尽时 acquire 抛出的那个异常（原样抛出、不包装，bin 的 fatal 行与改动前一字不差）。run-scope 据此判退出码：
+// 建连重试耗尽时 acquire 抛出的那个异常（原样抛出、不包装，bin 的 fatal 行因此直接是底层异常的文本）。run-scope 据此判退出码：
 // 会话已全部确认停止即网络专用退出码，有会话没能确认停止则改为重抛（释放优先，ADR 0028）。
 const connectRetriesExhausted = new WeakSet<object>();
 
@@ -116,7 +116,8 @@ export function isConnectRetriesExhausted(e: unknown): boolean {
 //   ③ 有在途、本次是 final 语义 → 等在途结束，若 hasLeftovers()（仍有未确认释放的会话）则忘掉记忆、以
 //      final 语义再清一次。缺这一步时，在途那次若是 discardAttempt 语义（其 Stop 失败只记日志、按约定不点亮
 //      最终态的泄漏标记），最终态会话的泄漏就永远不被记账、退出码照旧是 0；会话已全部确认释放则直接返回。
-//   ④ reset() 忘掉在途记忆（建连重试分支用：本次 attempt 的清理已结束，下一次要能再清）。
+//   ④ reset() 忘掉在途记忆，只在本次丢弃语义的清理结束之后调用（建连重试分支：下一次 attempt 要能再清），不在发起清理
+//      之前调用——发起前重置会丢掉停止信号那次释放的在途记忆，同一会话因此收到第二次 StopBrowserSession。
 // 布尔守卫的两处失真即上面②③要挡的：重入者见「已清过」立刻返回，而在途那次还在 await Stop（调用方据此
 // 以为会话已释放，接着做提前上传与退出）；且丢弃语义的一次清理会把后续 final 语义的清理整个吞掉。
 export function makeGuardedCleanup(
@@ -166,9 +167,6 @@ export interface DesktopSurfaceHooks {
   settleMs?: number;
 }
 
-/** 桌面实现的构造函数（导出名由 worker/surface.mts 的 SurfaceFactory 约定）。只组装、不做 I/O；本次运行的编号缺失（env RUN_ID）
- *  或 AWS_REGION 未设时同步报错——前者是起 worker 一方的装配错误，在建会话之前报出、不发任何事件、以 1 退出（与 Nova Act worker
- *  对称）。PlaywrightAgent 的构造项是 deps.agentOpts（两种 Agent 共用的项）加 forceChromeSelectRendering。 */
 // AgentCore 浏览器会话的 sessionTimeoutSeconds（ADR 0024 终止契约「泄漏兜底」条）：按 job 的墙钟预算加余量设定，收紧泄漏会话的计费上界；
 // 余量盖住超时催停后的收尾。三个数与 Nova 桌面 worker 同值，由 engines/fixtures/browser-session-timeout.json 对拍。
 export const BROWSER_SESSION_TIMEOUT = { marginS: 120, minS: 60, maxS: 28800 } as const;
@@ -180,6 +178,9 @@ export function browserSessionTimeoutS(timeoutS: number | null | undefined): num
   return Math.max(BROWSER_SESSION_TIMEOUT.minS, Math.min(BROWSER_SESSION_TIMEOUT.maxS, value));
 }
 
+/** 桌面实现的构造函数（导出名由 worker/surface.mts 的 SurfaceFactory 约定）。只组装、不做 I/O；本次运行的编号缺失（env RUN_ID）
+ *  或 AWS_REGION 未设时同步报错——前者是起 worker 一方的装配错误，在建会话之前报出、不发任何事件、以 1 退出（与 Nova Act worker
+ *  对称）。PlaywrightAgent 的构造项是 deps.agentOpts（两种 Agent 共用的项）加 forceChromeSelectRendering。 */
 export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHooks = {}): TargetSurface {
   const { emit, log } = deps;
   const agentOpts = {
@@ -327,6 +328,10 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
     // 血缘先行（ADR 0051 决策 4；ADR 0028 血缘窗口条）：会话自 Start 返回起即在计费，建连与预热被打断时 core 也记得到它。
     // 先登记再发：发出期间到达的停止信号也会为它发配对的 session_closed（事件序号在调用 emit 时即已分配）。
     opened.add(sid);
+    // 已知边界：这条 emit 在建连重试域内、不包装。事件通道写失败（fd 读端关闭时的 EPIPE、DDB 写入超时）会被 isTransientNetwork
+    // 当作建连瞬时故障，于是丢弃这个会话、重新 StartBrowserSession，至多建 CONNECT_ATTEMPTS 个会话；读端关闭这类故障并不会因重连
+    // 而恢复。不为它单独分类：每个被丢弃的会话都会被 Stop，代价是几个随即停止的短会话，DDB 瞬时故障时重试反而可能成功；
+    // Nova 桌面 worker 在同一位置的处理与此相同。
     await emit({ type: "session_opened", scopeId, sessionId: sid, name: sid, origin: "created" });
     const wsUrl = started.streams?.automationStream?.streamEndpoint!;
     const headers = await sign(wsUrl);
@@ -365,7 +370,8 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
           // 丢弃本次 attempt 部分建起的会话/browser（如 connectOverCDP 失败但 StartBrowserSession 成功）。
           // discardAttempt=true：Stop 失败不污染 final cleanupFailed（这个会话本就要丢，ADR 0028）。
           // cleanup 遍历 pendingSessions 逐个 Stop，成功的从集里删；未删的（Stop 失败/超时）留到后续 cleanup 再试。
-          cleanupGuard.reset(); // 忘掉上一次 attempt 的清理记忆，允许对本次 attempt 的部分会话再清一次
+          // 不先重置守卫：停止信号的 interrupt 释放可能正在清理，丢弃语义的重入按守卫的②等在途那次、不再发第二次 Stop；
+          // 非终结时守卫此刻没有在途的清理（初始即如此，之后每次 attempt 失败都在下方重置）。
           await cleanup(true);
           browser = undefined;
           const sid = sessionId; sessionId = undefined; // 清血缘：失败 attempt 的 id 不该进 scope_done

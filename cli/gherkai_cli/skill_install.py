@@ -163,6 +163,9 @@ def install(args, *, version: str | None) -> int:
 
     answer = args.pointer
     if answer == "yes" or (answer is None and _ask_pointer(pointer_paths)):
+        # 逐个文件处理，某个文件失败也接着处理后面的：若在首个失败处就返回，`--agent all` 时另一个文件
+        # 既不会尝试、诊断里也不会提到，使用方会以为它已经加好。每个失败的文件都单独点名并附上那一行，因此不另加汇总。
+        rc = 0
         for p in pointer_paths:
             try:
                 added = _append_pointer(p)
@@ -173,12 +176,15 @@ def install(args, *, version: str | None) -> int:
                 # 与下面的 OSError 分开报：混在「写不进去」里会把人引去查写权限/磁盘，真因（文件编码）只剩一句
                 # 英文 codec 报文。skill 本身已装好，退出码照「没全做成」算。
                 _stderr(f"skill 已装好，但 {p} 不是 UTF-8 编码、不敢改它（怕把原文写坏）。这一行请自己贴：{POINTER_LINE}")
-                return 2
+                rc = 2
+                continue
             except OSError as e:
                 # skill 本身已装好；只是要加的那一行没写进去——说清两件事，退出码照「没全做成」算
                 _stderr(f"skill 已装好，但写不进 {p}：{e}。这一行请自己贴：{POINTER_LINE}")
-                return 2
+                rc = 2
+                continue
             _stderr(f"已加进 {p}：{POINTER_LINE}" if added else f"{p} 里已有这一行，没重复加")
+        return rc
     else:
         _stderr("想让 agent 更早想起它，把这一行贴进 " + "、".join(str(p) for p in pointer_paths) + "：")
         _stderr(f"  {POINTER_LINE}")

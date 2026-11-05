@@ -1,13 +1,15 @@
 """core 领域模型 ↔ 朴素 dict（单一序列化真理源，ADR 0027/0016）。
 
-序列化的是 core 的领域模型，故属 core——cli 的 --json、ReportStore 的 manifest、
-RunStore（RunMeta/RunState）、ResultStore（JobResult）的落盘都复用这里，不各写一份（避免漂移）。
-手写映射（不靠 dataclasses.asdict/反射）：形状是对外契约（CI/WebUI/manifest 消费），须显式、稳定。
+序列化的是 core 的领域模型，故属 core——cli 的 --json、RunStore（RunMeta/RunState）与
+ResultStore（JobResult）的落盘都复用这里，不各写一份（避免漂移）。
+手写映射（不靠 dataclasses.asdict/反射）：形状是对外契约（CI/WebUI 消费），须显式、稳定。
 
 往返一致（round-trip）：`X_to_dict` 与 `X_from_dict` 须保持 from_dict(to_dict(x)) == x——有 round-trip 单测护栏。
 **规范化一律归写端**（读端只忠实还原落盘内容）：这样 to_dict 的产物本身是规范形、往返恒等；反之（读端规范化）
-落盘内容会随内存值的偶然形态漂、且往返把值悄悄变形。唯一带规范化的字段是 `RunMeta.extra_http_headers`
-（无序 header 表、tuple 只是 frozen 载体）：写端按键排序 + 空表当 None，故往返保 mapping 恒等、键序落定字典序。
+落盘内容会随内存值的偶然形态漂、且往返把值悄悄变形。带规范化的字段有两个：`RunMeta.extra_http_headers`
+（无序 header 表、tuple 只是 frozen 载体）：写端按键排序 + 空表当 None，故往返保 mapping 恒等、键序落定字典序；
+会话记录的 `release`：写端把 None（没收到 session_closed）归为 unconfirmed（契约只列 confirmed / unconfirmed），
+故 release 为 None 的 SessionRecord 往返后为 unconfirmed，`confirmed` 判定不变。
 
 注：worker 协议的 Job 序列化在 wire.py（单向 Job→JSON 喂 worker，协议形状）；这里的 Job↔dict 是
 **双向持久化**（RunMeta 落盘要能读回完整 Job），用途不同、各自一份、各自被 round-trip 测护。
@@ -17,7 +19,6 @@ cost 只含 engine 报的原生量、不折美元（ADR 0024）；report_refs �
 from __future__ import annotations
 
 from gherkai_core.model import (
-    DEFAULT_ACQUIRE_TIMEOUT_S,
     AppRef,
     DeviceFarmRequest,
     Job,

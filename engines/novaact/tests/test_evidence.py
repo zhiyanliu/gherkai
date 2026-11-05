@@ -576,23 +576,23 @@ def test_drain_noop_when_uploader_never_used(monkeypatch, capsys):
 
 
 def test_drain_logs_one_line_when_not_fully_drained(monkeypatch, capsys):
-    """提前退出路径（其后不 flush）：超时提示说链接可能打不开——不承诺任何后续兜底。"""
+    """提前退出路径（其后不 flush）：超时提示只说已放弃与不影响什么——不承诺任何后续兜底（与 Midscene 同一句）。"""
     trace: list = []
     monkeypatch.setattr(rs, "_uploader_singleton", _RecUploader(trace, drained=False))
     rs._drain_evidence_uploads(6.0, flush_follows=False)
     assert trace == [("drain", 6.0)]
     err = capsys.readouterr().err.splitlines()
-    assert len(err) == 1 and "未能在收尾时限内传完" in err[0]
-    assert "链接可能打不开" in err[0] and "改由收尾统一上传" not in err[0]
+    assert len(err) == 1 and "部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）" in err[0]
+    assert "改由收尾统一上传" not in err[0]
 
 
-def test_drain_timeout_before_flush_promises_flush_not_broken_links(monkeypatch, capsys):
+def test_drain_timeout_before_flush_promises_flush_not_abandonment(monkeypatch, capsys):
     """scope 末（其后紧跟整目录 flush）：超时不等于丢，提示只说改由收尾统一上传、不吓人。"""
     trace: list = []
     monkeypatch.setattr(rs, "_uploader_singleton", _RecUploader(trace, drained=False))
     rs._drain_evidence_uploads(6.0, flush_follows=True)
     err = capsys.readouterr().err.splitlines()
-    assert len(err) == 1 and "改由收尾统一上传" in err[0] and "链接可能打不开" not in err[0]
+    assert len(err) == 1 and "改由收尾统一上传" in err[0] and "已放弃" not in err[0]
 
 
 # ---- main() 三条收尾路径的接线（fake 掉 SDK：不建会话、零费用）----
@@ -671,7 +671,7 @@ def main_fakes(monkeypatch, logs_dir):
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
         lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x"}, "scenarios": [],
-                            "target": {"device": "desktop", "uiKind": "web"}}))})())  # 键集固定：结构版本与桌面目标都要带
+                            "target": {"device": "desktop", "uiKind": "web"}}))})())  # 键集固定：协议版本与桌面目标都要带
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
     monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCm())      # with wf: 用同一个上下文管理器形状
     monkeypatch.setattr(rs, "get_current_workflow", lambda: None)

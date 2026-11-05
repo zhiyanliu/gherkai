@@ -476,7 +476,7 @@ def test_job_from_dict_maps_missing_keys_and_wrong_shapes_to_definition_error(mu
 
 
 def test_job_to_dict_keeps_target_for_illegal_desktop_app_so_read_side_can_reject():
-    """写端只对 desktop/web 且无应用条目省键：非法的桌面应用目标不会因省键而在往返后变成合法的 desktop/web。"""
+    """写端总是写出 target 键（桌面也写 desktop/web，键集固定，ADR 0037 决策 7）：非法的桌面应用目标原样写出、由读端拒绝，不会在往返后变成合法的 desktop/web。"""
     from gherkai_core.errors import DefinitionContractError
     from gherkai_core.model import AppRef, Target
     from gherkai_core.serialize import job_from_dict, job_to_dict
@@ -510,7 +510,7 @@ def test_job_from_dict_rejects_incomplete_app_entry_and_desktop_with_app():
 
 
 def test_run_meta_extra_http_headers_round_trip():
-    # RunMeta.extra_http_headers（ADR 0035 决策 4）：非空往返不丢；None/空表均省键（旧落盘兼容 + 空即无）
+    # RunMeta.extra_http_headers（ADR 0035 决策 4）：非空往返不丢；None 与空表都写 null、读回 None（键集固定，ADR 0037 决策 7；空表与 None 同义，都是不注入额外头）
     import dataclasses
 
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
@@ -527,7 +527,7 @@ def test_run_meta_extra_http_headers_round_trip():
 
 
 def test_run_meta_max_concurrency_round_trip():
-    # RunMeta.max_concurrency（ADR 0034 机制四）：带值往返不丢；None 省键（旧落盘/旧提交侧无此键即回落）
+    # RunMeta.max_concurrency（ADR 0034 机制四）：带值往返不丢；None 写 null（键集固定，ADR 0037 决策 7），表示提交侧没有给，推进器按各自口径回落
     import dataclasses
 
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
@@ -545,7 +545,7 @@ def test_run_meta_max_concurrency_round_trip():
 
 
 def test_run_meta_steps_dir_round_trip():
-    """RunMeta.steps_dir（ADR 0037 决策 4）：带值往返不丢；None 省键（旧落盘 / 云端后端不写该字段）。
+    """RunMeta.steps_dir（ADR 0037 决策 4）：带值往返不丢；None 写 null（键集固定，ADR 0037 决策 7；没有使用方 step 时为 None，云端后端恒为 None）。
 
     载体在 definition 的理由：起 worker 的三个 local 宿主（同步 run / per-run 进程 / `status --wait` 接力者）
     CWD 各不相同，只有随 definition 走才对三者一致（core 只搬运、不消费语义）。
@@ -566,7 +566,7 @@ def test_run_meta_steps_dir_round_trip():
 
 
 def test_run_meta_worker_fields_round_trip():
-    """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 省键（本机后端 / 旧落盘）。
+    """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 写 null（键集固定，ADR 0037 决策 7；本机后端两者都为 None）。
 
     载体在 definition 的理由与 max_concurrency 同源（ADR 0034「随 definition 走、宿主只读回」）：起 task 的宿主
     （同步 run 的 FargateEngine / kicker / reconciler）与提交进程分离，只有随 META 持久化才到得了推进器；

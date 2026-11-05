@@ -843,7 +843,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     assert "关键字" in out and "任意" in out  # 条目没有 keywords 声明（旧 worker）→ 显示接受任意关键字
     assert "Given / When" in out  # 声明了子集的条目按声明显示
     assert out.count("任意") == 2  # 没声明的与三个全声明的都显示「任意」
-    assert "目标" in out and out.count("桌面网页") == 3  # 条目与 worker 都没声明 targets → 按缺键语义都是桌面网页（ADR 0049 决策 2）
+    assert "目标" in out and out.count("桌面网页") == 3  # 条目都没声明 targets → step 级按缺键语义为桌面网页，与 worker 声明的桌面网页取交集后都是桌面网页（ADR 0049 决策 2、3）
     assert "^nav$" in out  # 模式列是复制源、不折行（ADR 0047 标识列）
     assert m.main(["list-deterministic", "--json"]) == 0  # 默认 novaact（对齐 run 缺省）
     doc = json.loads(capsys.readouterr().out)
@@ -1307,7 +1307,7 @@ def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monke
 
 
 def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
-    """给了目录 / 读不了的路径 → 以退出码 2 结束并报「读 feature 失败」，不是 IsADirectoryError traceback（退出码语义见 ADR 0021）。
+    """给了目录 / 读不了的路径 → 以退出码 2 结束并报「读 feature 失败」，不是 IsADirectoryError traceback（退出码分层见 ADR 0030 决定七）。
     读 feature 的失败面不止 FileNotFoundError：目录、权限、非 UTF-8 都属输入问题，同类处置。"""
     rc = m.main(["plan", str(tmp_path)])
     assert rc == 2
@@ -2008,10 +2008,10 @@ def test_doctor_reports_worker_self_reported_model(tmp_path, monkeypatch, capsys
 
 def test_doctor_reports_worker_targets_with_session_limit_minutes(tmp_path, monkeypatch, capsys):
     """doctor 出一行 engines.targets.<engine>（ADR 0049 决策 6）：目标清单取自同一次自述、纯展示（required=False）；带
-    max_session_s 的目标附分钟数；不展示 requires；缺 targets 的旧 worker 按缺键语义显示桌面网页；不支持设备不算失败。"""
+    max_session_s 的目标附分钟数；不展示 requires；worker 只声明桌面网页时显示桌面网页；不支持设备不算失败。"""
     _fake_locator(monkeypatch, available=("novaact", "midscene")); _no_provider(monkeypatch)
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False); monkeypatch.chdir(tmp_path)
-    stubbed = compose.query_capabilities  # conftest 的假自述：不带 targets（旧 worker 形态）
+    stubbed = compose.query_capabilities  # conftest 的假自述：顶层 targets 只有桌面网页
 
     def with_targets(engine, **kw):
         caps = dict(stubbed(engine, **kw))
@@ -2995,7 +2995,7 @@ def test_run_interrupt_not_acted_on_exits_by_verdict(tmp_path, monkeypatch, caps
 
 
 def test_run_second_interrupt_prints_release_warning(tmp_path, monkeypatch, capsys):
-    """再次中断（级别 2）：提示会话可能未释放、用 doctor 核对。"""
+    """再次中断（级别 2）：提示会话可能未释放、到 AWS 控制台核对（设备目标看 Device Farm，桌面目标看 AgentCore）。"""
     import signal as _signal
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
@@ -3024,3 +3024,188 @@ def test_interrupt_prompts_by_backend_and_level():
     assert local2.startswith("再次收到中断信号，立即结束 worker") and "Device Farm" in local2 and "AgentCore" in local2
     cloud2 = m._interrupt_prompt(2, cloud=True, grace=63.5)
     assert "重发云端停止请求" in cloud2 and "立即结束" not in cloud2 and "Device Farm" in cloud2
+
+
+# ---- 零 scenario 批（ADR 0041 决策一）----
+
+@pytest.mark.parametrize("cmd", ["plan", "run", "submit"])
+def test_zero_scenario_batch_is_rejected_with_exit_2(tmp_path, cmd, monkeypatch, capsys):
+    """不加筛选、plan 产出零个 job 的批（只有 Feature 头）与筛空一样以退出码 2 拒绝：消息点名文件，run 不进入执行、
+    submit 不落 run 记录——零 job 的 run 判 passed、退出码 0 是空洞的成功。"""
+    import subprocess
+
+    feat = tmp_path / "empty.feature"
+    feat.write_text("Feature: 只有标题\n", encoding="utf-8")
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("零 scenario 批不该进入执行"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("零 scenario 批不该起后台推进进程"))
+    reports = tmp_path / "reports"
+    argv = [cmd, str(feat)] + ([] if cmd == "plan" else ["--report-dir", str(reports)])
+    assert m.main(argv) == 2
+    err = capsys.readouterr().err
+    assert "没有可执行的 scenario" in err and str(feat) in err
+    assert not reports.exists()
+
+
+# ---- plan 预告确定性 step 的运行期前提（ADR 0048 决策 6、ADR 0049 决策 6）----
+
+def test_plan_shows_step_requires_only_on_targets_that_declare_it(tmp_path, monkeypatch, capsys):
+    """命中条目在该 scope 目标上带运行期前提：设备网页目标的文本标注追加前提说明、--json 的 deterministic 带 requires；
+    同一条 step 在桌面网页与设备应用目标上没有前提，输出不变（不带 requires 键）。"""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "app.apk").write_bytes(b"x")  # plan 只核对安装包存在
+    (tmp_path / "gherkai.toml").write_text("[apps.wiki]\nandroid = { file = 'app.apk', package = 'org.wikipedia' }\n",
+                                           encoding="utf-8")
+
+    def fake_caps(engine, *, steps_dir=None, **kw):
+        return {"schema_version": 1, "engine": engine, "min_grace_s": 0, "model_id": "m",
+                "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"]}],
+                "deterministic_steps": [
+                    {"pattern": "p", "description": "URL 断言", "example": "e", "keywords": ["Given", "When", "Then"],
+                     "targets": [{"device": "desktop", "ui_kinds": ["web"]},
+                                 {"device": "android", "ui_kinds": ["app"]},
+                                 {"device": "android", "ui_kinds": ["web"], "requires": ["web_context"]}]}]}
+
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda engine, items, steps_dir=None: [({"pattern": "p", "description": "URL 断言"}
+                                                                if "页面地址" in it["text"] else None) for it in items])
+    monkeypatch.setattr(m.compose, "query_capabilities", fake_caps)
+    note = "（需要网页上下文；设备不提供时记为错误）"
+    cases = [("", False), ("@device:android\n", True), ("@device:android @app:wiki\n", False)]
+    for i, (tags, has_requires) in enumerate(cases):
+        f = tmp_path / f"t{i}.feature"
+        f.write_text(f'{tags}Feature: d\n  Scenario: s\n    Then 页面地址匹配 "x"\n', encoding="utf-8")
+        assert m.main(["plan", str(f)]) == 0
+        out = capsys.readouterr().out
+        assert "← 确定性: URL 断言" in out and (note in out) is has_requires, tags
+        assert m.main(["plan", str(f), "--json"]) == 0
+        det = json.loads(capsys.readouterr().out)["jobs"][0]["scenarios"][0]["steps"][0]["deterministic"]
+        expected = {"pattern": "p", "description": "URL 断言"}
+        assert det == ({**expected, "requires": ["web_context"]} if has_requires else expected), tags
+
+
+# ---- AWS 身份解析失败（ADR 0030 决定七：凭证与 region 不可用以退出码 2 结束、不冒 traceback）----
+
+_NO_SUCH_PROFILE = "gherkai-no-such-profile"
+
+
+def _no_such_profile_env(tmp_path, monkeypatch) -> None:
+    """profile 名不存在、region 不从任何来源给出：解析 region 时要读这个 profile 的配置，boto3 在构造期抛 ProfileNotFound。
+    AWS 配置指向空文件（不读本机真实的 ~/.aws），工作目录换到 tmp（不读仓库里的 gherkai.toml）。"""
+    for k in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "GHERKAI_CONFIG"):
+        monkeypatch.delenv(k, raising=False)
+    empty = tmp_path / "aws-empty"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(empty))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(empty))
+    monkeypatch.chdir(tmp_path)
+
+
+def _assert_identity_error(capsys) -> None:
+    err = capsys.readouterr().err
+    assert "AWS 身份不可用" in err and _NO_SUCH_PROFILE in err and "Traceback" not in err
+
+
+def test_missing_profile_exits_2_before_side_effects_on_run_and_local_submit(tmp_path, monkeypatch, capsys):
+    """run 与本机 submit：profile 读不出来时在起隧道、上传与落库之前以退出码 2 结束，submit 不留没有推进进程的 run 记录。"""
+    import subprocess
+
+    _no_such_profile_env(tmp_path, monkeypatch)
+    feat = _write_feature(tmp_path)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("身份解析失败不该进入执行"))
+    monkeypatch.setattr(m, "_setup_tunnel", lambda *a, **k: pytest.fail("身份解析失败不该起隧道"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("身份解析失败不该起后台推进进程"))
+    reports = tmp_path / "reports"
+    assert m.main(["run", str(feat), "--report-dir", str(reports), "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)
+    assert m.main(["submit", str(feat), "--report-dir", str(reports), "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)
+    assert not reports.exists()
+
+
+@pytest.mark.parametrize("cmd", ["status", "explain"])
+def test_missing_profile_exits_2_on_cloud_queries(tmp_path, cmd, monkeypatch, capsys):
+    _no_such_profile_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(m, "_cloud_skew_gate", lambda *a, **k: pytest.fail("身份解析失败不该读云端"))
+    assert m.main([cmd, "r1", "--backend", "cloud", "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)
+
+
+def test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay(tmp_path, monkeypatch, capsys):
+    """云端 submit 在 skew 闸之前、本机 status --wait 在接力推进之前，同样以退出码 2 结束。"""
+    import subprocess
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    run_id = capsys.readouterr().out.strip()
+
+    _no_such_profile_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(m, "_cloud_skew_gate", lambda *a, **k: pytest.fail("身份解析失败不该读云端"))
+    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile",
+                        lambda *a, **k: pytest.fail("身份解析失败不该接力推进"))
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)
+    assert m.main(["status", run_id, "--report-dir", str(reports), "--wait", "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)
+
+
+# ---- 打给使用方照抄执行的 status 命令（ADR 0042 决策四）----
+
+def test_status_hints_quote_report_dir_with_spaces(tmp_path, monkeypatch, capsys):
+    """submit 的查进度提示、status 与 explain 的 --wait 提示对 --report-dir 加 shell 引号：项目路径带空格时，
+    shlex 切回来的 --report-dir 与原路径相等，命令能原样粘贴执行。"""
+    import shlex
+    import subprocess
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
+    reports = tmp_path / "My Project" / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    cap = capsys.readouterr()
+    run_id = cap.out.strip()
+    hints = [re.search(r"查进度：(gherkai status .*)$", cap.err, re.M).group(1)]
+    assert m.main(["status", run_id, "--report-dir", str(reports)]) == 0
+    hints.append(re.search(r"`(gherkai status .*? --wait)`", capsys.readouterr().err).group(1))
+    assert m.main(["explain", run_id, "--report-dir", str(reports)]) == 0
+    hints.append(re.search(r"可先用 (gherkai status .*? --wait) 等到终态", capsys.readouterr().err).group(1))
+    for hint in hints:
+        argv = shlex.split(hint)
+        assert argv[:3] == ["gherkai", "status", run_id], hint
+        assert argv[argv.index("--report-dir") + 1] == str(reports), hint
+
+
+# ---- 隧道守护进程的停止信号（ADR 0035 决策 3）----
+
+@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
+def test_tunnel_watch_turns_stop_signals_into_exit_that_still_stops_the_tunnel(signame, monkeypatch, capsys):
+    """隧道守护进程是 cloud submit 隧道的唯一宿主：被 kill 时 SIGTERM / SIGHUP 转为 SystemExit(128 + 信号号)，异常穿过主体的
+    finally 把隧道拆掉、日志留一行。缺省处置下进程直接结束、finally 不执行，ngrok agent 会留在公网。"""
+    import signal as _signal
+
+    from gherkai_runtime import tunnel_host
+
+    sig = getattr(_signal, signame)
+    stopped = []
+
+    def fake_watch(run_id, *, tunnel_pid, **kw):
+        try:
+            _signal.raise_signal(sig)
+            pytest.fail("停止信号应已转为退出")
+        finally:
+            stopped.append(tunnel_pid)
+
+    monkeypatch.setattr(tunnel_host, "watch_run_and_stop_tunnel", fake_watch)
+    saved = {s: _signal.getsignal(s) for s in (_signal.SIGTERM, _signal.SIGHUP)}
+    try:
+        with pytest.raises(SystemExit) as ei:
+            m.main(["_tunnel_watch", "r1", "--tunnel-pid", "4242", "--ddb-table", "t", "--ttl", "60"])
+    finally:
+        for s, h in saved.items():  # 处理器是守护进程级的全局状态，别留给后面的用例
+            _signal.signal(s, h)
+    assert ei.value.code == 128 + sig and stopped == [4242]
+    assert "收到停止信号，隧道已拆 run=r1 pid=4242" in capsys.readouterr().out

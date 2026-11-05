@@ -78,14 +78,14 @@ __pycache__/
 .tmp/
 *.tmp
 
-# Claude 工作流工具（个人/工作流，非本项目框架代码）——只放行 .claude/commands/：那是复盘方法
-# （docs/{doc,code}-health-review.md）的 Claude Code 入口、属项目资产；skills / settings 是个人配置，不入库
+# Claude 工作流工具（个人/工作流，非本项目框架代码）——.claude/ 默认不入库，只放行下列项目资产：.claude/commands/ 是复盘方法
+# （docs/ai-eng/{doc,code}-health-review.md）的 Claude Code 入口；项目级 hook 与作图 skill 见下两段，其余 skills 与 settings.local.json 是个人配置，不入库
 .claude/*
 !.claude/commands/
 # 项目级 hook 随仓库走（派生文件同步，ADR 0043 决策四 / ADR 0045 决策七）；个人项在 .claude/settings.local.json（不入库）
 !.claude/settings.json
 !.claude/hooks/
-# 项目级 skill 只放行 diagram/（作图入口，随仓库走）；其余 .claude/skills/ 是个人的
+# 项目级 skill 只放行 doc-diagram/（作图入口，随仓库走）；其余 .claude/skills/ 是个人的
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/doc-diagram/

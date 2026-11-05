@@ -19,13 +19,12 @@ from pathlib import Path
 
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import render_table, styled
-from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, TERMINAL_STATUSES, Event, RunMeta, Status
+from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
 from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
-from gherkai_core.target import validate_job_definition
 from gherkai_core.schedule import ScheduleOpts, schedule
 
 from gherkai_runtime import compose
@@ -116,8 +115,8 @@ def _installed_version() -> "str | None":
 # 其后追加本命令特有的补充说明。
 # 文案是产品面（不带 ADR/内部机制名）；定制 step 的解析与 fail-loud 判据见 ADR 0037 决策 4。
 _STEPS_DIR_HELP = (
-    "你自己的确定性 step 目录（默认 ./steps 存在即用；亦可 env GHERKAI_STEPS_DIR）：worker 启动时排序递归"
-    "加载其中的 step 定义文件、注册进它的确定性注册表"
+    "你自己的确定性 step 目录（不给时依次取环境变量 GHERKAI_STEPS_DIR、配置文件的 steps-dir，都没有则 ./steps 存在即用）："
+    "worker 启动时按路径排序递归加载其中的 step 定义文件，注册进它的确定性 step 注册表"
 )
 # `run` / `submit`（实际运行与提交那一侧）另加两句：值随提交记录走、云端后端不生效。
 # 同一段措辞两处共用（曾字节级抄两份），改一处即两处生效。判据不是「带 --backend」——
@@ -253,7 +252,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--max-concurrency", type=int, default=None,
-        help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}；并发只改同时开几个浏览器会话、不改 job 数与总费用，"
+        help=f"同时运行的 worker 上限（默认 {DEFAULT_MAX_CONCURRENCY}；并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话）、不改 job 数与总费用，"
              "配额紧可调低）",
     )
     run.add_argument(
@@ -273,7 +272,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # 隧道暴露本机应用的整套机制（令牌换 cookie 的鉴权、生命周期、谁负责拆）见 ADR 0035 与 ADR 0051 决策 13。
     run.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="把「本机可达」的被测应用经隧道暴露给云端浏览器：值为 feature 中书写的原始 origin"
+        help="把「本机可达」的被测应用经隧道暴露给云端浏览器与真机上的浏览器：值为 feature 中书写的原始 origin"
              "（如 http://localhost:3000，也可是局域网地址），gherkai 会起隧道并把 job 文本中作为地址出现的该值替换成隧道的公网地址；"
              "访问受本次运行专用的会话保护（引擎的浏览器在第一个场景之前凭令牌换到会话 cookie），运行结束即拆除。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
     )
@@ -300,11 +299,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     _add_device_flags(run, project=True)
-    # backend 选择（ADR 0016「cli backend 选择」/ 0030 决定七）：local 是文件落盘（默认）；cloud 是 DDB/S3。
-    # 仅 run 加（plan 纯本地不落库、不连 AWS，不加）。cloud 一次换齐三层（RunStore→DDB、Result/Report→S3）。
+    # 执行后端（ADR 0016 决策 A / 0033 / 0030 决定七）：local 在本机起 worker、落文件（默认）；cloud 在 Fargate 执行、
+    # 状态落 DDB、结果与报告落 S3。plan 纯本地、不连 AWS，不收此 flag。
     run.add_argument(
         "--backend", choices=["local", "cloud"], default=None,
-        help="落库后端：local 把文件落 --report-dir（默认）；cloud 把状态落 DynamoDB、结果与报告落 S3",
+        help="执行后端：local 在本机起 worker、文件落 --report-dir（默认）；cloud 在云端（Fargate）起 worker，"
+             "状态落 DynamoDB、结果与报告落 S3",
     )
     run.add_argument(
         "--prefix", default=None, metavar="P",
@@ -345,11 +345,13 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--region", default=None, metavar="R",
-        help="AWS region（解析链 --region > AWS_REGION > AWS_DEFAULT_REGION > 配置文件 [common] region > profile config；喂 store + worker）",
+        help="AWS region（依次取本参数、环境变量 AWS_REGION、AWS_DEFAULT_REGION、配置文件 [common] region、所选 profile 配置的 region）；"
+             "本机发起的 AWS 调用与 worker 都用它",
     )
     run.add_argument(
         "--profile", default=None, metavar="P",
-        help="AWS profile（--profile > AWS_PROFILE）；喂 store + subprocess worker（其 region 字段也作 --region 兜底）",
+        help="AWS profile（依次取本参数、环境变量 AWS_PROFILE、配置文件 [common] profile）；用于本机发起的 AWS 调用与本机后端的 worker，"
+             "云端执行的 worker 不使用它；该 profile 配置的 region 也作为 --region 的最后一级回落",
     )
 
     # 用例预检（plan）：纯本地解析 + 分组；**零 AWS、零花费、零副作用**（ADR 0036——派发标注会起本地
@@ -420,11 +422,13 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                          "（提交前会比对，不一致即以退出码 2 结束）")
     sm.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     _add_device_flags(sm, project=True)
-    sm.add_argument("--region", default=None, metavar="R", help="AWS region（喂 worker）")
-    sm.add_argument("--profile", default=None, metavar="P", help="AWS profile（喂 subprocess worker）")
+    sm.add_argument("--region", default=None, metavar="R",
+                    help="AWS region（取值顺序同 run 的 --region）；本机发起的 AWS 调用与 worker 都用它")
+    sm.add_argument("--profile", default=None, metavar="P",
+                    help="AWS profile（取值顺序同 run 的 --profile）；用于本机发起的 AWS 调用与本机后端的 worker")
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
     sm.add_argument("--backend", choices=["local", "cloud"], default=None,
-                    help="local 由本机后台进程推进（默认）；cloud 由 Fargate + 云端 Lambda 事件驱动链推进（提交完真关机也会运行到结束）")
+                    help="local 由本机后台进程推进（默认）；cloud 由已部署的云端后端推进，提交后即使本机关机也会执行到结束")
     sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     # --s3-bucket 对 submit 有真实作用（run_store 挂的超大 step 参数卸载器写这个桶），故保留。
@@ -434,7 +438,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
         help="[cloud] 云端 worker 镜像 variant（语义同 run）：缺省用部署的默认指针；提交时解析成各引擎的"
              "精确 task-def revision 写进提交记录（云端照它起 task）。local 后端忽略",
     )
-    # 注：submit 不收 --subnet/--security-group——cloud submit 只写 runs 表、不碰 SSM/ECS（ADR 0034），
+    # 注：submit 不收 --subnet/--security-group——cloud submit 不起任何 task、不读网络参数（ADR 0034；完整权限面见 _submit_cloud
+    # 里 create_run 前的注释），
     # 网络配置由 IaC 注给 reconciler/kicker Lambda 的 env（曾在此声明过两个从不生效的 flag，已删）。
     # **同理不收 --events-table / --cluster**（也曾声明过、已删）：真正读它们的是云端推进器，取自自己的 Lambda
     # env，与提交记录无关；在 submit 侧它们唯一的作用是改「提交前检查」探哪个资源名，给错值会把「探针指错」
@@ -442,11 +447,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # cloud submit 的探针一律按 --prefix 推——与部署侧同一套命名真源（ADR 0033 两层命名）。
 
     st = sub.add_parser("status", help="[后台运行] 查一个 run 的进度/结果（--wait 轮询到完成）")
-    st.add_argument("run_id", help="submit 返回的 run_id")
+    st.add_argument("run_id", help="run 或 submit 打印的 run_id")
     _add_config_flag(st)
-    st.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与 submit 一致")
+    st.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与产生这个 run 的 run 或 submit 一致")
     st.add_argument("--report-dir", default=None, metavar="DIR",
-                    help="run 落点（local）/ 后端报告前缀（cloud）——须与 submit 一致；终态时据此打印报告与判定明细位置")
+                    help="run 落点（local）/ 后端报告前缀（cloud）——须与产生这个 run 的 run 或 submit 一致；终态时据此打印报告与判定明细位置")
     # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
     # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲提交者看得见的差别。
     st.add_argument("--wait", action="store_true",
@@ -481,9 +486,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--full", action="store_true",
                     help="逐 frame 全文展开（默认每次 AI 调用只显示最后一段推理与它的截图）")
     ex.add_argument("--json", action="store_true", help="输出机器可读 JSON（内嵌证据全文）")
-    ex.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与 submit 一致")
+    ex.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与产生这个 run 的 run 或 submit 一致")
     ex.add_argument("--report-dir", default=None, metavar="DIR",
-                    help="run 落点（local）/ 后端报告与判定明细前缀（cloud）——须与 submit 一致")
+                    help="run 落点（local）/ 后端报告与判定明细前缀（cloud）——须与产生这个 run 的 run 或 submit 一致")
     ex.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（须与部署一致）")
     ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     ex.add_argument("--region", default=None, metavar="R")
@@ -603,7 +608,7 @@ def _resolve_steps_dir(args) -> "str | int | None":
     解析只在提交侧做一次（值随 definition 走给起 worker 的宿主，见 `RunMeta.steps_dir`）；**绝对化是硬要求**
     ——worker 是 cwd 与 CLI 不同的子进程（定位链后多为继承调用者 CWD，ADR 0037 决策 3），相对路径两侧解析不同。
 
-    **显式给的（flag / env）不是目录 → 以退出码 2 结束**：静默忽略等于把该目录里的确定性 step 悄悄换成 AI catch-all、
+    **显式给的（flag / env / 配置文件）不是目录 → 以退出码 2 结束**：静默忽略等于把该目录里的确定性 step 悄悄换成 AI catch-all、
     run 还可能「通过」——本项目最忌的静默降级（与 ADR 0037 决策 4「加载失败 fail-loud」同源立场）。默认
     `./steps` 不同：「没这个目录」是多数项目的常态、不是错，故只在存在时才用。
     返回 int（2）时调用方原样返回（同 `_load_and_plan`/`_setup_tunnel` 的失败即退出码惯例）。
@@ -1099,11 +1104,14 @@ def _finite_float(raw: str) -> float:
 
 
 def _load_and_plan(args) -> "list | int":
-    """plan 与 run 的共享前置装配：votes 校验 → 读 feature → plan。
+    """plan / run / submit 的共享前置装配：votes、筛选值与 `--expose-local` 取值的校验 → 读 feature → plan
+    → 拒绝零 scenario 批（筛空或不加筛选）。
 
-    成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错，均"没开始执行就被拒"，
-    对齐 docs/user-guide/running-and-results.md「退出码」一节的分层）。
-    _cmd_plan 与 _cmd_run 都调它（曾各手抄一份、会漂移）。
+    成功返回 `Job[]`；任一前置失败返回**退出码 2**（配置矛盾/读不到/语法错/`--expose-local` 的取值不是 origin，
+    均"没开始执行就被拒"，对齐 docs/user-guide/running-and-results.md「退出码」一节的分层）。
+    `--expose-local` 经 `tunnel.normalize_origin` 校验，归一化后的值写回 `args.expose_local`：plan 的标注行与
+    `_setup_tunnel` 起隧道、映射 job 文本用的是同一个 origin；plan 因此同样报出取值错误，run / submit 在起隧道与落库之前拒绝。
+    _cmd_plan 直接调它，_cmd_run 与 _cmd_submit 经 `_plan_and_preflight` 调它（曾各手抄一份、会漂移）。
     """
     # 0) 校验：assertion_votes 必须 ≥1。否则 worker 执行 0 次 AI 断言——votes=0 全判失败（假阴性）、
     #    votes<0 更危险：0 > 负数/2 = True → **零 AI 调用却全绿**（假阳性）。入口拦截，不让坏值流进 worker。
@@ -1122,6 +1130,15 @@ def _load_and_plan(args) -> "list | int":
     for raw in (getattr(args, "scope", None) or []):
         if not raw.strip():
             _progress("--scope 的值不能为空：给报告里的 scope_id（@scope 的名字，或 <文件>:<行号>）")
+            return 2
+    # `--expose-local` 的 origin 校验（ADR 0035 决策 2）：判据与归一化只在 tunnel.normalize_origin 一处
+    # （NgrokTunnel.start 与 map_origin_in_jobs 也调它），这里不另写一套；tunnel 模块只依赖标准库与 core，plan 不因此多加载重依赖。
+    if getattr(args, "expose_local", None):
+        from gherkai_runtime.tunnel import TunnelError, normalize_origin
+        try:
+            args.expose_local = normalize_origin(args.expose_local)
+        except TunnelError as e:
+            _progress(str(e))
             return 2
     # 1) 读 feature（组合根的事，core 不碰 FS）→ FeatureSource[]
     #    保序按 uri 去重：core 窄腰只接 uri 互异的列表，收集去重这类便利逻辑由调用方（组合根/CLI）负责
@@ -1154,9 +1171,7 @@ def _load_and_plan(args) -> "list | int":
     try:
         # 获取预算（ADR 0051 决策 2）：项目配置 [devices] acquire-timeout-s > 内建 600 秒；设备 scope 的缺省墙钟与下限由它推出。
         project = getattr(args, "project_config", _config.NO_CONFIG)
-        acquire_s = (project.devices.acquire_timeout_s
-                     if project.devices is not None and project.devices.acquire_timeout_s is not None
-                     else DEFAULT_ACQUIRE_TIMEOUT_S)
+        acquire_s = _devsel.acquire_timeout_for(project)
         cfg = PlanConfig(
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
@@ -1171,6 +1186,13 @@ def _load_and_plan(args) -> "list | int":
         )
         select = _build_selector(args)
         jobs = plan(features, cfg, select=select)
+        if not jobs and select is None:
+            # 零 scenario 批（ADR 0041 决策一）：不加筛选时 plan 产出零个 job，同样以退出码 2 拒绝——零 job 的 run 判 passed、
+            # 退出码 0 是空洞的成功（run 级聚合对空输入返回 passed 只是函数层兜底）。消息说清没有可执行的 scenario 并点名文件
+            # （筛空那一条另列全部候选）；括号里只举常见原因：空文件、只有 Background 或只有 Rule 的文件同样走到这里。
+            _progress("没有可执行的 scenario：" + "、".join(f.uri for f in features)
+                      + " 里一个 scenario 都没有（常见原因：只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行）")
+            return 2
         if select is not None:
             # 筛选（ADR 0041 决策一）：筛空即以退出码 2 结束并列出全部候选——别静默运行空批；有筛掉的就打一行 N/M 让人/agent 确认没选错。
             # 候选与总数直接 parse（不再调一次 plan：那会把跨文件 scope 合并的 warning 打两遍），顺带带上 tags 便于改 --tags。
@@ -1184,7 +1206,7 @@ def _load_and_plan(args) -> "list | int":
                 return 2
             if picked < len(everything):
                 _progress(f"筛选：{picked}/{len(everything)} scenario（{_selection_label(args)}）")
-        # 引擎名预检（配置错在 plan 层即拦、以退出码 2 结束——否则 local run 要到起 job 时 resolver 才炸，那时已开始执行、只能给退出码 1
+        # 引擎名校验（配置错在 plan 层即拦、以退出码 2 结束——否则 local run 要到起 job 时 resolver 才炸，那时已开始执行、只能给退出码 1
         # 且错误形态差）。--default-engine 已被 argparse choices 拦，此处兜的是 @engine tag 拼错。
         unknown = sorted({j.engine for j in jobs} - set(_names.ENGINES))
         if unknown:
@@ -1243,7 +1265,8 @@ def _validate_worker_variant(args) -> bool:
 def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
-    返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）。match 用**裸 step 文本**加关键字
+    返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）；命中条目在该 scope 目标上带运行期前提时，
+    probe 另带 `requires`（ADR 0049 决策 6）。match 用**裸 step 文本**加关键字
     ——与 worker 实际执行时派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024；关键字只用于核对条目的
     keywords 声明，ADR 0050 决策 1）。按引擎 best-effort：
     某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体——**含定位链 miss**
@@ -1275,11 +1298,17 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
             # 命中与目标无关（ADR 0050 决策 1），命中之后再看这条 step 在该 scope 的目标上有没有实现（声明与 worker 支持的交集，
             # ADR 0049 决策 3、6）：没有即走 AI——不进表（--json 里 deterministic 为 null）、stderr 说明原因，不标「确定性」
             avail = available.get(probe["pattern"]) if "pattern" in probe and available is not None else None
-            if avail is not None and not compose.target_supported(avail, target.device, target.ui_kind):
-                label = render.spaced(render.target_label(target.device, target.ui_kind))
-                _progress(f"提示：scope {key[0]!r} 的 step「{item['text']}」命中确定性 step「{probe.get('description', probe['pattern'])}」，"
-                          f"但这条 step 在{label}上没有实现，将由 AI 执行。")
-                continue
+            if avail is not None:
+                matched = [t for t in avail if t["device"] == target.device and target.ui_kind in t["ui_kinds"]]
+                if not matched:
+                    label = render.spaced(render.target_label(target.device, target.ui_kind))
+                    _progress(f"提示：scope {key[0]!r} 的 step「{item['text']}」命中确定性 step「{probe.get('description', probe['pattern'])}」，"
+                              f"但这条 step 在{label}上没有实现，将由 AI 执行。")
+                    continue
+                # 与 scope 目标对应的交集条目带前提时附到命中结果上（ADR 0049 决策 6）：文本标注写明前提，--json 的
+                # deterministic 带 requires 键、无前提省略。worker 注册期保证一个 step 在一个目标上只有一份实现，故至多一条。
+                if matched[0].get("requires"):
+                    probe = {**probe, "requires": list(matched[0]["requires"])}
             dispatch[key] = probe
     return dispatch if ok_any else None
 
@@ -1496,7 +1525,8 @@ def _cmd_submit(args) -> int:
     - **local**：setsid fork per-run 进程执行 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
     - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
       （runs Stream INSERT→kicker 起首批→events Stream→reconciler→…→finalize），**提交完真关机也能运行到结束**。
-      CLI 不留本机进程、submit 机器零 ECS 权限。
+      CLI 不留本机进程；submit 机器没有任何 ECS 写或执行权限（只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition，
+      完整权限面见 `_submit_cloud` 里 create_run 前的注释）。
     退出码表示提交成功与否（非 run 判定；判定由 status 查）。
     """
     # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → steps 目录 → 本机后端 worker preflight。
@@ -1514,7 +1544,12 @@ def _cmd_submit(args) -> int:
     if args.tunnel_ttl is not None and (not _math.isfinite(args.tunnel_ttl) or args.tunnel_ttl <= 0):
         _progress(f"--tunnel-ttl={args.tunnel_ttl} 无效：须为有限正数（TTL 到点无条件拆隧道，<=0/nan/inf 均拒）")
         return 2
+    identity = None  # 本机后端的 (region, profile)：交给 per-run 进程；云端后端由 _submit_cloud 自己解析
     if args.backend != "cloud":
+        # AWS 身份先于填 definition、起隧道与落库解析：profile 名不存在时在这里以退出码 2 结束，不上传、不起隧道、不留 run 记录
+        identity = _aws_identity(args)
+        if isinstance(identity, int):
+            return identity
         # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前
         jobs = _complete_local_definition(args, prepped)
         if isinstance(jobs, int):
@@ -1556,7 +1591,8 @@ def _cmd_submit(args) -> int:
             rc_ = _submit_cloud(args, run_id, run_meta, initial,
                                 tunnel_info=tunnel_info, on_handoff=_mark_handoff, prepared=prepped)
         else:
-            rc_ = _submit_local(args, run_id, run_meta, initial, tunnel_info=tunnel_info, on_handoff=_mark_handoff)
+            rc_ = _submit_local(args, run_id, run_meta, initial, identity=identity,
+                                tunnel_info=tunnel_info, on_handoff=_mark_handoff)
     finally:
         if tunnel_info is not None and not handed_off:
             from gherkai_runtime.tunnel import stop_tunnel
@@ -1567,8 +1603,12 @@ def _cmd_submit(args) -> int:
     return rc_
 
 
-def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None) -> int:
+def _submit_local(args, run_id: str, run_meta, initial, *, identity: "tuple[str | None, str | None]",
+                  tunnel_info=None, on_handoff=None) -> int:
     """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。
+
+    `identity` 是调用方在落库之前经 `_aws_identity` 解析好的 (region, profile)：解析失败时调用方已以退出码 2 结束，
+    磁盘上不会留下没有推进进程的 run 记录。
 
     `on_handoff`（给了就调）在 fork 成功那一刻通知调用方「隧道已有后台宿主」——它是 `_cmd_submit` 里
     「未交棒即就地拆隧道」的分界线（ADR 0035 决策 3），故必须紧跟 Popen、不能等到本函数收尾。
@@ -1596,7 +1636,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
            "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency)]
     # region / profile 传**解析后的值**（选项 > 环境变量 > 配置文件）：per-run 进程不读配置文件（ADR 0053 决策 1），
     # 只传原始选项会让配置文件给的 region 到不了它；环境变量两边都看得见、传了也无害。
-    region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+    region, profile = identity
     if region:
         cmd += ["--region", region]
     if profile:
@@ -1611,7 +1651,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     if on_handoff is not None:
         on_handoff()  # 紧跟 fork：往下每一行都可能抛，而此刻宿主已在运行、隧道不该再被拆
     log_f.close()  # 子进程已持有 fd（Popen 继承），父进程侧句柄即关
-    _progress(f"已提交（本机后台推进中）。查进度：gherkai status {run_id} --report-dir {args.report_dir}")
+    _progress(f"已提交（本机后台推进中）。查进度：{_status_cmd(run_id, report_dir=args.report_dir)}")
     print(run_id)
     return 0
 
@@ -1651,6 +1691,49 @@ def _definition_schema_gate(header: "tuple[int, str | None] | None", run_id: str
     return 2
 
 
+# AWS 身份解析的入口守卫（ADR 0030 决定七：凭证与 region 不可用以退出码 2 结束、一句诊断、不冒 traceback）。region 没有从
+# 选项、环境变量或配置文件给出时，解析要读所选 profile 的配置：profile 名不存在（拼错，或环境变量 / 配置文件指向已删的
+# profile）时 boto3 在构造期就抛 ProfileNotFound。doctor 把同一失败写进自己的检查行，不走这里。
+_AWS_IDENTITY_UNAVAILABLE = ("AWS 身份不可用：--profile / AWS_PROFILE / 配置文件 [common] profile 指定的 profile 读不出来，"
+                             "或凭证链不可用：{e}")
+
+
+def _aws_identity(args) -> "tuple[str | None, str | None] | int":
+    """`compose.resolve_aws_identity` 的入口守卫：返回 (region, profile)；botocore 异常打一句诊断并返回退出码 2，别的异常照常上抛。"""
+    try:
+        return compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        _progress(_AWS_IDENTITY_UNAVAILABLE.format(e=e))
+        return 2
+
+
+def _cloud_target(args, **kw) -> "compose.CloudTarget | int":
+    """`compose.resolve_cloud_target` 的入口守卫：prefix / region / profile 取自 args，资源名与配置文件层经 kw 传入；
+    失败的处置同 `_aws_identity`。"""
+    try:
+        return compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile, **kw)
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        _progress(_AWS_IDENTITY_UNAVAILABLE.format(e=e))
+        return 2
+
+
+def _status_cmd(run_id: str, *, report_dir=None, prefix: str | None = None, wait: bool = False) -> str:
+    """打给使用方照抄执行的 `gherkai status` 整条命令（ADR 0042 决策四：提示里的命令要能原样执行）。本机给 report_dir，
+    云端给 prefix；每个值都经 shlex.quote——配置文件给的 report-dir 已按配置文件目录绝对化，项目路径带空格时不加引号就粘贴不了。"""
+    parts = ["gherkai", "status", shlex.quote(run_id)]
+    if report_dir is not None:
+        parts += ["--report-dir", shlex.quote(str(report_dir))]
+    if prefix is not None:
+        parts += ["--backend", "cloud", "--prefix", shlex.quote(prefix)]
+    if wait:
+        parts.append("--wait")
+    return " ".join(parts)
+
+
 def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | None, str | None]":
     """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。
     返回 `(退出码 or None, 后端版本戳 or None)`——放行时给 `(None, 戳)`，拦下时给 `(2, …)`。
@@ -1661,7 +1744,7 @@ def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | No
 
     **戳一并返回、全程只读一次**：worker variant 解析（ADR 0038「运行时与 preflight」）要拿同一个戳给出
     skew 感知的提示语（与后端同版本 → 指向 `push-worker`；CLI 偏旧 → 指向升级 CLI，不引导去推一个旧版本
-    tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；WebUI/推进器都调用它，措辞单点），
+    tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；本 CLI 的四个 cloud 入口与 doctor、`gherkai-deploy-aws` 的 `push_worker` / `list_workers` 都调用它，判据与措辞单点；推进器不读 SSM），
     本函数只把 verdict 翻成退出码。
     比的是**本 CLI 自己的**版本（`_installed_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
     它也是写任务定义的那一方；两者靠 `==` pin 恒同版本，显式传免得读者去猜哪个；未装成包 → None → 跳过。
@@ -1709,14 +1792,14 @@ def _cloud_worker_variant_gate(args, target, engines, *, backend_version) -> "in
         # `names.image_tag` 的字符集校验（唯一 ValueError 来源）。显式给的 `--worker-variant` 已在入口拦过，
         # 走到这里只剩「后端默认指针本身是个非法名」——部署侧写坏的值，同样是可修的配置错、不该冒 traceback。
         _progress(f"--backend cloud 的 worker variant 名不合法（若未给 --worker-variant，检查后端默认指针 "
-                  f"SSM /{target.prefix}backend/{_names.WORKER_DEFAULT_KEY}）：{e}")
+                  f"SSM {_names.ssm_path(target.prefix, _names.WORKER_DEFAULT_KEY)}）：{e}")
         return 2
     except ImportError as e:
         _progress(f"--backend cloud 需要 boto3：{e}")
         return 2
     except Exception as e:
         if compose.is_botocore_error(e):
-            _progress(f"--backend cloud 解析 worker 镜像 variant 失败（读 SSM /{target.prefix}backend/worker-* "
+            _progress(f"--backend cloud 解析 worker 镜像 variant 失败（读 SSM {_names.ssm_path(target.prefix, 'worker-*')} "
                       f"或探 ECS/ECR——凭证/region/权限？）：{e}")
             return 2
         raise
@@ -1732,7 +1815,8 @@ def _worker_meta_fields(resolutions: dict) -> dict:
 
     variant 名取任一条解析结果——「**一个 run 一个 variant 名、跨引擎同名**」是 ADR 0038 的不变量
     （某引擎缺该 variant 时上面那道闸已以退出码 2 拦下），故各条 resolution 的 variant 恒同。
-    空 dict（理论上不会有：plan 至少产一个 job）→ 两个字段都 None，走 serialize 的 omit-when-None。
+    空 dict（理论上不会有：plan 至少产一个 job）时两个字段都为 None，序列化照常写出这两个键、值为 null（definition 键集固定，
+    ADR 0037 决策 7）。
     """
     if not resolutions:
         return {"worker_variant": None, "worker_task_defs": None}
@@ -1749,15 +1833,14 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     无棒可交、不调）。本函数各道闸的退出码 2 都在 fork 之前，`_cmd_submit` 侧「未交棒即拆」自然涵盖它们。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
-    events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 DDB、不碰 ECS——机器权限收窄到只剩
+    events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
     「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
     """
     # events 表/cluster 名不收 flag、一律按 prefix 推（判据见 _build_parser 里 submit 的 flag 面注释）：
     # 它们在这条路上只被下面的 preflight 探针消费，与写进提交记录的内容无关。
-    target = compose.resolve_cloud_target(
-        prefix=args.prefix, region=args.region, profile=args.profile,
-        runs_table=args.ddb_table, bucket=args.s3_bucket, **_config_layers(args),
-    )
+    target = _cloud_target(args, runs_table=args.ddb_table, bucket=args.s3_bucket, **_config_layers(args))
+    if isinstance(target, int):
+        return target
 
     # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
     skew_rc, backend_version = _cloud_skew_gate(target, requires_stamp=compose.run_requires_backend_stamp(run_meta))
@@ -1846,10 +1929,10 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
             on_handoff()  # 紧跟 fork：守护已接管隧道，往下几行抛也不能再拆
         _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
                   f"（即各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
-                  f"**本机需保持开机联网直到 run 终态**——关机会断隧道，测试将以导航失败告终。")
-        _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
+                  f"注意：本机需保持开机联网直到 run 终态——关机会断隧道，测试将以导航失败告终。")
+        _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
     else:
-        _progress(f"已提交到云端（提交记录已落库，云端已接管推进，可关机）。查进度：gherkai status {run_id} --backend cloud --prefix {target.prefix}")
+        _progress(f"已提交到云端（提交记录已落库，云端已接管推进，可关机）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
     print(run_id)
     return 0
 
@@ -1936,7 +2019,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
     # （退出码契约：查不到 run → 2，见 docs/user-guide/running-and-results.md「退出码」）。
     state = run_store.load_run_state(args.run_id)
     if state is None:
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
 
     # --wait 的两道闸与云端推进器同构（ADR 0034）：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
@@ -1945,8 +2028,11 @@ def _cmd_status_body(args, interrupted: dict) -> int:
         if run_store.is_detached(args.run_id):
             # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
             # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+            identity = _aws_identity(args)
+            if isinstance(identity, int):
+                return identity
+            region, profile = identity
             interrupted["notice"] = _INTERRUPTED_RELAY_NOTICE
-            region, profile = compose.resolve_aws_identity(args.region, args.profile, **_identity_layers(args))
             try:
                 detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
                                                region=region, profile=profile)
@@ -1960,9 +2046,9 @@ def _cmd_status_body(args, interrupted: dict) -> int:
 
     state = run_store.load_run_state(args.run_id)
     if state is None:  # 只等待的分支里记录中途被删会到这里（_wait_local_terminal 在记录消失时也返回）
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
-    return _render_status(state, args, wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
+    return _render_status(state, args, wait_hint=_status_cmd(args.run_id, report_dir=args.report_dir, wait=True),
                           locations=compose.local_artifact_locations(str(report_root), args.run_id),
                           relay_available=lambda: run_store.is_detached(args.run_id))
 
@@ -1994,8 +2080,9 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
     """
     import time as _time
 
-    target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
-                                          profile=args.profile, runs_table=args.ddb_table, **_config_layers(args))
+    target = _cloud_target(args, runs_table=args.ddb_table, **_config_layers(args))
+    if isinstance(target, int):
+        return target
     kicker_fn = target.kicker_lambda  # {prefix}kicker，从 prefix 推理出、无需提交者配
 
     # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）。**status 不解析 variant**（ADR 0038）：它只读运行态、
@@ -2096,10 +2183,10 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
                 return 2
 
     if state is None:
-        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
+        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
     return _render_status(state, args,
-                          wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
+                          wait_hint=_status_cmd(args.run_id, prefix=target.prefix, wait=True),
                           locations=compose.cloud_artifact_locations(
                               bucket=target.bucket, report_prefix=args.report_dir, table=target.runs_table,
                               run_id=args.run_id),
@@ -2155,7 +2242,8 @@ def _explain_read_evidence(refs, read_bytes) -> "tuple[dict | None, str | None]"
         return None, "no_ref"
     try:
         doc = json.loads(read_bytes(ev_refs[0].ref))
-    except Exception:  # 文件不在（云端后端 flush 前被杀）/ 权限 / 不是 JSON：一律归「读不到」
+    except Exception:  # 文件或对象不在（如产物被手动清理）/ 无权限 / 不是 JSON：一律归「读不到」
+        # （evidence.json 先上传、再随 step_done 发出 ref，worker 被杀不会留下指向未上传文件的 ref）
         return None, "unreadable"
     if not isinstance(doc, dict) or doc.get("schema_version") != 1:
         return None, "unsupported_schema"
@@ -2313,7 +2401,7 @@ def _cmd_explain(args) -> int:
     if bad is not None:
         return bad
     if (state := run_store.load_run_state(args.run_id)) is None:
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与 submit 一致？）")
+        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
     def recover(scope_ids):
         try:
@@ -2327,19 +2415,20 @@ def _cmd_explain(args) -> int:
     return _explain_emit(
         args, state, result_store, read_bytes=compose.read_resource, recover=recover,
         # --report-dir 无条件带（即便是默认值），与 submit 提示/status 的 wait_hint 同惯例
-        wait_hint=f"gherkai status {args.run_id} --report-dir {args.report_dir} --wait",
+        wait_hint=_status_cmd(args.run_id, report_dir=args.report_dir, wait=True),
     )
 
 
 def _explain_cloud(args) -> int:
     """cloud explain：DDB 读 run 运行态、S3 读判定明细与证据。
 
-    次序同 `_status_cloud`：`resolve_cloud_target`（纯字符串推导、不连 AWS）→ 版本 skew 闸门（先于任何云端读，
+    次序同 `_status_cloud`：`_cloud_target`（纯字符串推导与本机 profile 配置读取、不连 AWS）→ 版本 skew 闸门（先于任何云端读，
     ADR 0037 决策 7）→ 装 store。权限面与 status 不同（ADR 0042 决策四）：同样要版本戳读 + runs 表 GetItem，
     另需该桶的读对象权限（判定明细与证据），不带 scope_id 时还需列举对象；不需要 status --wait 的 Lambda 调用权限。
     """
-    target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region,
-                                          profile=args.profile, runs_table=args.ddb_table, **_config_layers(args))
+    target = _cloud_target(args, runs_table=args.ddb_table, **_config_layers(args))
+    if isinstance(target, int):
+        return target
     skew_rc, _backend_version = _cloud_skew_gate(target)
     if skew_rc is not None:
         return skew_rc
@@ -2369,7 +2458,7 @@ def _explain_cloud(args) -> int:
         _progress(f"explain --backend cloud 云端不可达（表/凭证/region）：{e}")
         return 2
     if state is None:
-        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与 submit 一致？）")
+        _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
     def recover(scope_ids):
         # 云端的事件流在 events 表：按 run 与需要补取的 scope 点查（dynamodb:Query）。表名按 --prefix 推导、与部署侧同一命名真源
@@ -2388,7 +2477,7 @@ def _explain_cloud(args) -> int:
             args, state, result_store, read_bytes=read_bytes, recover=recover,
             # 用已解析的 target.prefix（args.prefix 可能是 None，靠 env/默认兜底才成 prefix）；
             # 刻意不带 --region/--profile，与 status 的 cloud 提示一致（也别把 profile 名打到终端）
-            wait_hint=f"gherkai status {args.run_id} --backend cloud --prefix {target.prefix} --wait",
+            wait_hint=_status_cmd(args.run_id, prefix=target.prefix, wait=True),
         )
     except Exception as e:
         if not compose.is_botocore_error(e):
@@ -2435,14 +2524,33 @@ def _cmd_tunnel_watch(args) -> int:
 
     守护主体在 `gherkai_runtime.tunnel_host.watch_run_and_stop_tunnel`（产品本体）；此处只接线 + 打印
     （stdout 已被 submit 重定向到 /tmp 的守护日志，故诊断走 print 而非 _progress 的 stderr 惯例）。
+
+    **SIGTERM / SIGHUP 转为退出**：本进程是隧道唯一的宿主，缺省处置下被 `kill <pid>` 直接结束、主体的 finally 不执行，
+    ngrok agent（另开会话）会一直留在公网。信号处置是进程级全局状态，归进程入口装（与前台 run 把 `_InterruptState`
+    放在 CLI 同一取法），主体函数不碰它。处理器零 I/O（ADR 0024 记过的 stderr 重入问题），只抛 SystemExit：它是
+    BaseException，轮询里的 `except Exception` 吞不掉，异常穿过主体的 finally 把隧道拆掉；处理器先把两个信号改为忽略，
+    第二个信号不会打断 finally 里正在进行的拆除。SIGKILL 不兜（ngrok agent 是本机可见的独立进程，可手动结束）。
     """
     from gherkai_runtime import tunnel_host
 
-    reason = tunnel_host.watch_run_and_stop_tunnel(
-        args.run_id, tunnel_pid=args.tunnel_pid, runs_table=args.ddb_table, ttl_s=args.ttl,
-        region=args.region, profile=args.profile,
-        on_warn=lambda msg: print(f"tunnel-watch: {msg}"),
-    )
+    stop_signals = (signal.SIGTERM, signal.SIGHUP)
+
+    def _stop(signum, _frame) -> None:
+        for sig in stop_signals:
+            signal.signal(sig, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    for sig in stop_signals:
+        signal.signal(sig, _stop)
+    try:
+        reason = tunnel_host.watch_run_and_stop_tunnel(
+            args.run_id, tunnel_pid=args.tunnel_pid, runs_table=args.ddb_table, ttl_s=args.ttl,
+            region=args.region, profile=args.profile,
+            on_warn=lambda msg: print(f"tunnel-watch: {msg}"),
+        )
+    except SystemExit:
+        print(f"tunnel-watch: 收到停止信号，隧道已拆 run={args.run_id} pid={args.tunnel_pid}")
+        raise
     print(f"tunnel-watch: 隧道已拆（{reason}）run={args.run_id} pid={args.tunnel_pid}")
     return 0
 
@@ -2488,6 +2596,14 @@ def _cmd_run(args) -> int:
             except (ValueError, RuntimeError) as e:  # 版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约
                 _progress(f"引擎 {_engine} 的 worker 自述失败，拒绝运行：{e}")
                 return 2
+    elif any(j.engine == "novaact" for j in jobs):
+        # 云端后端不问本机 worker，Nova 单 act 上界的取值在这里先核一次（本机后端由运行前检查的能力自述查询核）：
+        # 值写错时 build_fargate_engines 只把 Nova 引擎项装成一用即抛的占位项，不在这里拒绝就会落下一个逐 job 报错的 run。
+        try:
+            compose.nova_act_timeout_s()
+        except ValueError as e:
+            _progress(f"拒绝运行：{e}")
+            return 2
     import math as _math
     if args.grace is not None and (not _math.isfinite(args.grace) or args.grace <= 0 or args.grace < min_grace):
         # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效就是挂死），与 --tunnel-ttl / @timeout 的判据相同。
@@ -2499,6 +2615,22 @@ def _cmd_run(args) -> int:
     # --grace 哨兵默认（None）→ 跟随本 run 引擎自报的下限（Nova 自然 ≥ 单 act 上界 + 收尾；midscene-only 回到小值；
     #    云端后端 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
+    # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
+    # **本机后端也解析**：region/profile 两路都要（本机发起的 AWS 调用与 subprocess worker 都用），云资源名多算几个纯字符串、不用即弃。
+    # 排在本机后端填 definition 与起隧道之前：profile 名不存在时由 _cloud_target 在这里以退出码 2 结束，不上传、不起隧道。
+    # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
+    # - profile：--profile > AWS_PROFILE > 配置文件 [common] profile（ADR 0053 决策 2）。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
+    #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
+    # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
+    #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
+    #   崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉。
+    # 均可为 None，表示真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
+    target = _cloud_target(
+        args, runs_table=args.ddb_table, events_table=args.events_table,
+        bucket=args.s3_bucket, cluster=args.cluster, **_config_layers(args),
+    )
+    if isinstance(target, int):
+        return target
     if args.backend != "cloud":
         # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前（submission.complete_local_definition）
         jobs = _complete_local_definition(args, prepped)
@@ -2506,7 +2638,9 @@ def _cmd_run(args) -> int:
             return jobs
 
     # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
-    #     跟 CLI 进程走——atexit 拆（正常结束/Ctrl-C 都收；SIGTERM 直杀的极端泄漏由 ngrok 进程可见性兜）。
+    #     跟 CLI 进程走——atexit 拆（正常结束、Ctrl-C 都收；执行期间的 SIGTERM 由 _InterruptState 接住、协作停止后照常经 atexit 拆；
+    #     处理器装上之前（起隧道到开始执行之间）或卸下之后（finalize 与归集报告）收到的 SIGTERM、以及 SIGKILL 仍会直接结束进程，
+    #     这类泄漏靠 ngrok 进程在本机可见、可手动结束来兜底）。
     tunneled = _setup_tunnel(args, jobs)
     if isinstance(tunneled, int):
         return tunneled
@@ -2542,21 +2676,6 @@ def _cmd_run(args) -> int:
     # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演路径
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
     cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None 表示走 subprocess
-    # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
-    # **本机后端也解析**：region/profile 两路都要（喂 subprocess worker + store），云资源名多算几个纯字符串、不用即弃。
-    # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
-    # - profile：--profile > AWS_PROFILE。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
-    #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
-    # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
-    #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
-    #   崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉。
-    # 均可为 None，表示真无（fail-loud、不硬编码 east，对齐 store 宽容边界）。
-    target = compose.resolve_cloud_target(
-        prefix=args.prefix, region=args.region, profile=args.profile,
-        runs_table=args.ddb_table, events_table=args.events_table,
-        bucket=args.s3_bucket, cluster=args.cluster, **_config_layers(args),
-    )
-
     # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud 即 Fargate 执行，**与 report 正交**——`--no-report` 只关
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 运行，只是不生成 report。cloud_fargate 置值表示下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
@@ -2604,10 +2723,10 @@ def _cmd_run(args) -> int:
             )
         except Exception as e:
             if compose.is_botocore_error(e):
-                _progress(f"--backend cloud 读 subnet/sg SSM 失败（/{target.prefix}backend/*——CDK 未写或无权限？）：{e}")
+                _progress(f"--backend cloud 读 subnet/sg SSM 失败（{_names.ssm_path(target.prefix, '*')}——CDK 未写或无权限？）：{e}")
                 return 2
             raise
-        cloud_fargate = {"prefix": target.prefix, "cluster": target.cluster,
+        cloud_fargate = {"cluster": target.cluster,
                          "events_table": target.events_table, "bucket": target.bucket,
                          "network_config": network_config,
                          # 引擎 → 显式 revision ARN（ADR 0038 不变量：永不用 family 取最新）
@@ -2655,7 +2774,7 @@ def _cmd_run(args) -> int:
     if cloud_fargate is not None:
         engines = compose.build_fargate_engines(
             no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
-            run_id=run_id, prefix=cloud_fargate["prefix"], cluster=cloud_fargate["cluster"],
+            run_id=run_id, cluster=cloud_fargate["cluster"],
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
             # 每引擎的显式 task-def revision ARN（ADR 0038）：preflight 解析出的那一批，与写进 definition 的同源
@@ -2708,7 +2827,8 @@ def _cmd_run(args) -> int:
         _progress(f"[core {scope}:event] {render.format_event(ev)}")
 
     # 实时写（ADR 0030）：sink 始终是纯进度（不再装饰落库）；落库走两个旁路注入——
-    #   on_event（sink_lock 外，收 ScopeStarted 刷 RUNNING+血缘，不阻塞别 worker 进度显示）
+    #   on_event（sink_lock 外，收 ScopeStarted 或非 attempted 的 SessionOpened 即把该 job 刷成 RUNNING 并记会话血缘（ADR 0051 决策 4），
+    #   不阻塞别的 worker 的进度显示）
     #   on_job_complete（主线程，每 job 完成落数据面+控制面终态）。--no-report（persistence=None）则零落盘运行、两者皆 None。
     on_event = persistence.on_event if persistence else None
     on_job_complete = persistence.on_job_complete if persistence else None
@@ -2784,8 +2904,9 @@ def _cmd_run(args) -> int:
     if worker_log_fh is not None:
         artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
 
-    # cloud 模式：清理本地 run 根的空壳（ADR 0029）。cloud 下 <report_dir>/<run_id>/ 只是 worker 写产物的临时
-    # 暂存区——产物已上传 S3、worker 已 rmtree 各自子目录（nova-trajectories/midscene-run），只剩空目录。
+    # cloud 模式：清理本地 run 根的空壳（ADR 0029「删本地」组合根半）。cloud 执行在 Fargate：worker 在容器内写产物、上传 S3 后
+    # 在容器内 rmtree，本机 <report_dir>/<run_id>/ 不会被 worker 写入；本进程在 cloud 分支也不往这里落文件（worker.log 与 events.db
+    # 只在本机后端写），所以这次调用通常是 no-op（目录不存在即返回），作为防御保留。
     # 只删空目录（若某个引擎整目录 flush 失败保留了产物、其目录非空则自然不删，与 worker「上传失败保留本地」护栏自洽）。
     # 这是 cli 组合根清自己算出的本地落点——core 对本地文件系统无知（0016 窄腰），不该由 core/store 删。
     # local 模式不清（产物就该留本地当最终落点）。

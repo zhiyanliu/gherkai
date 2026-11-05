@@ -8,7 +8,8 @@
 退出码约定），不 import core 的任何东西——协议是跨语言契约（Node 侧 worker 结构相同），共享代码会把
 「契约」偷偷变成「共享实现」。`EX_WORKER_NETWORK=80` 这类常量两侧各自持有一份、以 ADR 0024 为准。
 
-**必须是被直接 spawn 的那个进程**（ADR 0024 EVENTS_FD 经 `pass_fds` 继承）：故拉起形态是
+**本进程必须就是写事件的那个进程**（ADR 0024 EVENTS_FD 经 `pass_fds` 继承）：故主路径的拉起形态是
 `python -m gherkai_worker_novaact` / console script `gherkai-worker-novaact`，中间**不加包装进程**
-（包装层会吞 fd3，midscene 换 `--import tsx` 那次已踩过）。
+（包装进程未必把 fd3 原样传给子进程：midscene 改用 `--import tsx` 前实测过 tsx 二进制，它再拉起子 node 进程，
+子进程写 fd3 即报 EBADF）；定位链第四级的 uvx 是实测过的例外，原样传下 fd3 并转发 SIGTERM（ADR 0037 决策 3）。
 """

@@ -15,7 +15,8 @@ CLI 前端负责：
   `bootstrap`，都不给 → `deploy`；`gherkai destroy` → `destroy`；
 - 先声明 `--require-approval` 与 `--allow-vpc-change` 的**中立版**，使 `deploy --help` 在**没装任何 provider**
   时也列得出这两个动作选项；
-- 可选把自身版本放进 `args.version`（缺则本包自报 dist 版本，见 `_resolve_version`）；
+- 必须把 CLI 自身版本放进 `args.version`；缺失时 provider 以退出码 2 结束，不自报（ADR 0037 决策 6「版本戳」，见
+  `_cli_version_or_report`）；
 - `gherkai doctor` 时若 provider 提供**可选**的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，
   缺省 False；只读、不返退出码），把它并进自检输出的 provider 段（ADR 0041 决策四）。
 
@@ -43,7 +44,7 @@ cdk CLI 调用、VPC 取值三态比对、工具链前置检查（Node ≥ 22 �
 
 ## 退出码
 
-`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、VPC 取值不符或无记录、prefix/region/profile 解析不出
+`0` 成功；`2` **前置/校验失败**（Node 缺失或 cdk CLI 定位不到、前端没交 CLI 自身版本（未装成包）、VPC 取值不符或无记录、prefix/region/profile 解析不出
 （`--profile` 名不存在等，见 `_resolve_target_or_report`）、读后端失败（含读不到 SSM 里的 Device Farm 项目记录、记录不是合法的项目 ARN、diff 核对记录里的项目时
 遇到权限以外的错误）、同名 Device Farm 项目不止一个、容器引擎名不认、push-worker 的架构/skew 拦截——部署方可修，对齐 CLI 既有
 preflight 退出码 2 的口径）；**`1`** 表示 cdk 已成功而 worker 镜像四步失败（账户已被改动，重新运行 `gherkai deploy` 幂等收敛，
@@ -277,7 +278,8 @@ class Provider:
         """
         parser.add_argument(
             "--prefix", default=None, metavar="P",
-            help="资源名前缀（默认 gherkai-，或 AWS_RESOURCE_PREFIX）；**须与 run/submit 的 --prefix 一致**",
+            help=f"资源名前缀（默认 gherkai-，或 AWS_RESOURCE_PREFIX；至多 {names.prefix_max_len()} 个字符）；"
+                 "须与 run/submit 的 --prefix 一致",
         )
         parser.add_argument(
             "--vpc", default=None, type=_vpc_flag, metavar="取值",
@@ -354,7 +356,7 @@ class Provider:
         )
         push = sub.add_parser(
             "push-worker", help="[部署方] 推一个本地镜像并注册为某引擎的一个 variant",
-            description="推送一个**已 build 好**的本地镜像到本 prefix 的 ECR，并把它注册成该引擎的一个 variant "
+            description="推送一个已经构建好的本地镜像到本 prefix 的 ECR，并把它注册成该引擎的一个 variant "
                         "（一个 task-def revision，镜像按 digest 引用）。一次一个引擎；两个引擎要分两次执行本命令。"
                         "镜像构建不归 gherkai——定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。",
         )
@@ -371,7 +373,7 @@ class Provider:
 
         listing = sub.add_parser(
             "list-workers", help="[部署方] 列各引擎当前版本的 variant / digest / 默认指针 / 待清理 revision",
-            description="按引擎列出**当前版本**（即本 CLI 自身版本）的 variant、digest、推送时间与 revision，"
+            description="按引擎列出当前版本（即本 CLI 自身版本）的 variant、digest、推送时间与 revision，"
                         "加上默认指针，以及已退休待清理与孤儿 revision。",
         )
         self._add_locator_flags(listing)
@@ -425,6 +427,8 @@ class Provider:
         toolchain = self._toolchain_gate()
         if toolchain is not None:
             return toolchain
+        if self._cli_version_or_report(args) is None:
+            return EXIT_PRECONDITION
         # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——deploy 机器需要容器引擎，
         # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
         # - **名字不认**（env/flag 给了 podman）→ 纯参数问题，以退出码 2 结束、绝不动账户；
@@ -465,13 +469,17 @@ class Provider:
         return self._worker_image_steps(args, engine)
 
     def destroy(self, args) -> int:
-        """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留清单见 README。
+        """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留资源清单与手动清理步骤见
+        `docs/user-guide/cloud-backend.md`「拆除与清理」节。
 
         不过 VPC 取值三态：destroy 不改 VPC 形态，比对只会拦住「取值记错了但想删干净」的人。
         但 `--vpc` 仍必给：destroy 也要合成 app（stack 的网络分支按取值走），缺了它合成不出同一个 stack。
         Device Farm 项目只读 SSM 现值（见 `_stored_device_farm_project`）；项目本身不归 stack 管理，destroy 保留它
         （含会话记录与录像，ADR 0051 决策 10），stack 写的那个 SSM 参数随 stack 删除。
         """
+        blocked = self._toolchain_gate()  # 先于 `_require_vpc`：它缺值时的提示要读后端，理由见 `_toolchain_gate`
+        if blocked is not None:
+            return blocked
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -487,20 +495,26 @@ class Provider:
         模板含它们时（记录的项目已被删除），变更集会显示移除它们；真 deploy 会先找回或建立项目、再带着 ARN 合成，所以首次启用
         设备支持（或记录的项目已被删除）后的那次 deploy 会比 diff 多出这两部分，提示与警告都把这一点说给使用方。读不到记录、记录不是合法的项目 ARN、核对遇到权限以外的失败则以退出码 2 结束；核对被拒则沿用
         记录并警告（见 `_stored_device_farm_project`）。"""
+        blocked = self._toolchain_gate()  # 先于 `_require_vpc`，同 destroy
+        if blocked is not None:
+            return blocked
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
         return self._run_cdk("diff", args)
 
     def synth_only(self, args) -> int:
-        """导出 CloudFormation 模板到 `args.synth_only`（escape valve：不让 0.x 工具改自己生产账号的
-        reviewer 靶点，ADR 0037 决策 6）。目录由 CLI 前端的 `--synth-only DIR` 提供（接缝契约）。
+        """导出 CloudFormation 模板到 `args.synth_only`（escape valve：给部署方的 reviewer 留一个靶点，部署方审阅
+        变更集之前，工具不改其生产账号，ADR 0037 决策 6）。目录由 CLI 前端的 `--synth-only DIR` 提供（接缝契约）。
 
         Device Farm 项目与 diff 同样只读 SSM 现值、不建立；唯一不同是完全没有凭证时回落「待建立」占位并警告，
         保住无凭证离线导出这项既有能力（ADR 0051 决策 10，见 `_stored_device_farm_project`）。"""
         out = getattr(args, "synth_only", None)
         if not out:
             raise ValueError("synth_only 需要 args.synth_only（--synth-only DIR）")
+        blocked = self._toolchain_gate()  # 先于 `_require_vpc`，同 destroy
+        if blocked is not None:
+            return blocked
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
@@ -553,6 +567,8 @@ class Provider:
         """`gherkai deploy push-worker <镜像> --engine … --variant …`（八步见 `workers.push_worker`）。"""
         from gherkai_deploy_aws import workers
 
+        if self._cli_version_or_report(args) is None:
+            return EXIT_PRECONDITION
         engine = self._container_engine(args)
         if engine is None:
             return EXIT_PRECONDITION
@@ -571,6 +587,8 @@ class Provider:
         """`gherkai deploy list-workers`——只读（SSM + ECS describe），不碰容器引擎。"""
         from gherkai_deploy_aws import workers
 
+        if self._cli_version_or_report(args) is None:
+            return EXIT_PRECONDITION
         target = self._resolve_target_or_report(args)
         if target is None:
             return EXIT_PRECONDITION
@@ -620,7 +638,8 @@ class Provider:
         """解析 `--container-engine` / env → 引擎对象；本期未实装的名字 → 打诊断并返回 None（调用点以退出码 2 结束）。
 
         **只解析、不探活**：探活（`probe()`）归真要用它的那一步——push-worker 在 skew 前置之后探（skew 拦下的
-        人不该先被要求装 docker），deploy 的四步在 cdk 之后探（见 `_worker_image_steps`）。
+        人不该先被要求装 docker）；deploy 对纯发行版在 cdk 之前探一次、只警告（见 `deploy`），cdk 之后由
+        `workers.run_deploy_steps` 再探并决定退出码 1。
         """
         from gherkai_deploy_aws.container import UnsupportedContainerEngine, resolve_container_engine
 
@@ -657,8 +676,10 @@ class Provider:
     def _toolchain_gate() -> int | None:
         """Node 与 cdk CLI 两个前置：缺 → 打一句话、以退出码 2 结束；齐 → None。
 
-        `deploy` / `bootstrap` / `_run_cdk` 三处共用（每条命令都要过这一关，不靠调用者记得）。**排在动任何
+        每个要调 cdk 的动作入口（`deploy` / `bootstrap` / `diff` / `destroy` / `synth_only`）开头都过这一关，`_run_cdk`
+        里再过一次作兜底（每条命令都要过这一关，不靠调用者记得；代价是 `node --version` 多执行一次）。**排在动任何
         AWS 读之前**：工具链缺失不花网络、不要凭证——缺工具的人不该先被要求配好 AWS 凭证才看到「你缺工具」。
+        `_require_vpc` 缺值时的提示也要读后端，所以入口处的这一关必须排在它前面。
         """
         for error in (check_node(), check_cdk()):
             if error:
@@ -766,6 +787,8 @@ class Provider:
         blocked = self._toolchain_gate()
         if blocked is not None:
             return blocked
+        if self._cli_version_or_report(args) is None:
+            return EXIT_PRECONDITION
         cdk_argv = cdk_command()
 
         target = self._resolve_target_or_report(args)
@@ -850,7 +873,7 @@ class Provider:
         if state == VPC_UNRECORDED:
             message = (
                 f"stack {stack} 已存在，但 {path} 没有 VPC 取值记录——这个部署早于 VPC 取值登记机制，"
-                f"本次 deploy 无从核对 `--vpc {args.vpc}` 是否与当初一致。**这恰是最危险的那一次 deploy**："
+                f"本次 deploy 无从核对 `--vpc {args.vpc}` 是否与当初一致。这恰是最危险的那一次 deploy："
                 f"取值给错会被当成新建一套网络、把在用的整套换掉。"
             )
         else:
@@ -1038,9 +1061,11 @@ class Provider:
     # ---- 内部：prefix/region/profile 与版本 ----
     @staticmethod
     def _resolve_target(args):
-        """prefix / region / profile 走产品本体的**同一条解析链**（`compose.resolve_cloud_target`，ADR 0016
-        决策 C / 0033 两层命名）——部署侧与 run/submit 侧解析出的 prefix 必须恒等，否则 deploy 到一套资源、
-        run 连另一套。惰性 import：`--help` 不该为此拉起 core。"""
+        """prefix / region / profile 在选项、环境变量、默认值三层走与产品本体**同一条解析链**
+        （`compose.resolve_cloud_target`，ADR 0016 决策 C / 0033 两层命名），这三层上部署侧与 run/submit 侧的解析
+        结果相同。配置文件层只在运行侧生效、部署命令不读（ADR 0053 决策 1）：项目在配置文件里定了 prefix（或
+        region / profile）时，两侧一致要靠部署方用对应选项或环境变量（如 `--prefix` / `AWS_RESOURCE_PREFIX`）
+        显式给出同一值。惰性 import：`--help` 不该为此拉起 core。"""
         from gherkai_runtime import compose
 
         return compose.resolve_cloud_target(
@@ -1067,25 +1092,35 @@ class Provider:
             return None
 
     @staticmethod
-    def _resolve_version(args) -> str:
-        """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源）。
+    def _cli_version_or_report(args) -> str | None:
+        """CLI 前端交进来的自身版本（`args.version`，接缝契约见模块头）；缺失或为空 → 打一句诊断、返 None（调用点以退出码 2 结束）。
 
-        优先 CLI 前端交进来的 `args.version`（即运行中的 CLI 的版本，决策 7 比对的正是它）；缺则本包自报 dist
-        版本——两者被 `==` 同版本 pin 成同一个（决策 2b），此回落不引入第二个真源。都取不到 → fail-fast：
-        戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
+        **不自报、不回落**（ADR 0037 决策 6「版本戳」、决策 7「接线」）：前端在 gherkai 未装成包时有意给 None，表示「取不到
+        自身版本」；换成本包的 dist 版本会抹掉这个信号——editable 树里各包版本各自漂，写进后端的就成了另一个包的版本戳，
+        push-worker 的镜像 tag 前缀与 list-workers 的版本筛选也随之失真。纯本地判断：deploy / push-worker / list-workers
+        在入口处检查，排在任何 AWS 读之前；diff / destroy / `--synth-only` 经 `_run_cdk` 检查，排在目标解析与 cdk 之前
+        （缺 `--vpc` 时 `_require_vpc` 为补全提示而做的那次读取先于它）。
+        """
+        version = getattr(args, "version", None)
+        if version:
+            return str(version)
+        print("取不到 gherkai 自身的版本号：gherkai 未以发行包形式安装（例如直接从源码运行）。部署命令要用这个版本号标记后端"
+              "与 worker 镜像，不能留空也不能猜。请先把 gherkai 装成包（`uv tool install 'gherkai[deploy-aws]'`，"
+              "或在工作区执行 `uv sync`）再重新运行。", file=sys.stderr)
+        return None
+
+    @staticmethod
+    def _resolve_version(args) -> str:
+        """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源）：CLI 前端交进来的 `args.version`，
+        即运行中的 CLI 的版本（决策 7 比对的正是它）。
+
+        契约守卫：每条调用路径都已先经 `_cli_version_or_report` 检查、缺值时在那里以退出码 2 结束，正常走不到这里的
+        raise。缺值不回落：戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
         """
         explicit = getattr(args, "version", None)
-        if explicit:
-            return str(explicit)
-        from importlib.metadata import PackageNotFoundError
-        from importlib.metadata import version as dist_version
-        try:
-            return dist_version("gherkai-deploy-aws")
-        except PackageNotFoundError as exc:  # 从源码直接运行、未装成包
-            raise RuntimeError(
-                "取不到版本号：本包未以发行包形式安装（源码直接运行）。后端版本戳无隐式默认——"
-                "装成包（`uv tool install 'gherkai[deploy-aws]'` 或 workspace `uv sync`）后再部署"
-            ) from exc
+        if not explicit:
+            raise ValueError("_resolve_version 需要 args.version：调用前先经 _cli_version_or_report 检查")
+        return str(explicit)
 
 
 # ---------------------------------------------------------------------------
@@ -1123,25 +1158,25 @@ def _node_major(node: str) -> int | None:
 def check_cdk() -> str | None:
     """cdk CLI 前置：PATH 上既无 `cdk` 也无 `npx` → 返回给人看的一句话；能定位 → None。
 
-    与 `check_node()` 写法相同（**不抛 traceback**，ADR 0037 决策 6）。消息在此单点维护——`deploy` / `bootstrap` /
-    `_run_cdk` 三处共用（`doctor` 的 detail 是自检清单的另一种措辞，另写）。
+    与 `check_node()` 写法相同（**不抛 traceback**，ADR 0037 决策 6）。消息在此单点维护——经 `_toolchain_gate` 由每个
+    要调 cdk 的动作入口共用（`doctor` 的 detail 是自检清单的另一种措辞，另写）。
     """
     if cdk_command():
         return None
-    return f"找不到 cdk 也找不到 npx：cdk CLI 是 npm 物，装 Node（≥ {NODE_MIN_MAJOR}）后重试。"
+    return f"找不到 cdk 也找不到 npx：cdk CLI 以 npm 包发布，需要 Node（≥ {NODE_MIN_MAJOR}），装好后重试。"
 
 
 def check_node() -> str | None:
     """Node 前置：缺失/过低 → 返回给人看的一句话；OK → None。**不抛 traceback**（ADR 0037 决策 6）。
 
-    为何必查：`aws-cdk-lib` 是 jsii 绑定，**app 子进程 import 即起 node**；cdk CLI 本身也是 npm 物。
+    为何必查：`aws-cdk-lib` 是 jsii 绑定，**app 子进程 import 即起 node**；cdk CLI 本身也以 npm 包发布。
     缺 node 的原生症状是 jsii 在子进程里抛一段与 Node 无关的堆栈，对部署方是纯噪声。
     """
     node = shutil.which("node")
     if node is None:
         return (
             f"找不到 node：`gherkai deploy` 需要 Node ≥ {NODE_MIN_MAJOR} 在 PATH——CDK 的 Python 绑定是 jsii"
-            f"（import 即起 node 子进程），cdk CLI 本身也是 npm 物。装好 Node 后重试。"
+            f"（import 即起 node 子进程），cdk CLI 本身也以 npm 包发布。装好 Node 后重试。"
         )
     major = _node_major(node)
     if major is not None and major < NODE_MIN_MAJOR:

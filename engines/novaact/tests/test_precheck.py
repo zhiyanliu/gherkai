@@ -1,4 +1,4 @@
-"""建会话前的自检（ADR 0049 决策 7；0048 决策 3、4；0024 的结构版本）：job 行的 schemaVersion 不等于本 worker 认的、目标不在 targets 里、
+"""建会话前的自检（ADR 0049 决策 7；0048 决策 3、4；0024 的协议版本）：job 行的 schemaVersion 不等于本 worker 认的、目标不在 targets 里、
 预算超过会话上限都拒绝；target 必有，缺键即版本不一致；消息是产品语言、不带内部指代；与能力自述同一份 WORKER_TARGETS。"""
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ def test_desktop_job_passes_and_missing_target_is_a_version_mismatch():
 
 
 def test_schema_version_is_checked_first_and_pinned_by_golden():
-    """job 行的结构版本（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝、先于目标核对；本 worker 认的值与跨语言 golden 一致。"""
+    """job 行的协议版本（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝、先于目标核对；本 worker 认的值与跨语言 golden 一致。"""
     import json
     from pathlib import Path
 

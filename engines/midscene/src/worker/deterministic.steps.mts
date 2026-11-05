@@ -2,7 +2,7 @@
 //
 // 机制（ADR 0022）：worker 派发每个 step 时**先查确定性注册表**（命中走 handler），未命中才落 AI catch-all。
 // 本文件的条目经 `registerBuiltin("navigation", 正则, handlers, { description, example, keywords })` 注册：校验与使用方的
-// `deterministic(...)` 同一套（元数据必填、缺则 fail-loud——ADR 0036「注册即暴露」），另带内建标记（ADR 0050 决策 1），
+// `deterministic(...)` 同一套（元数据必填、缺则 fail-loud——ADR 0036 决策 1 与「边界与互链」节），另带内建标记（ADR 0050 决策 1），
 // run-scope 据此把这条 step 的 step_kind 定为 navigation。worker 启动时 import 本模块，顶层的注册副作用把条目登记进表。
 //
 // 内建导航（ADR 0020 第 3 条）：一条 step 去掉关键字后**整句只是一个地址**（加不加引号都一样）、且关键字是 Given 或

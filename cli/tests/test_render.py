@@ -212,8 +212,8 @@ def test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synth
 
 
 def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_records():
-    """ADR 0042 决策四：job 判 error / aborted 且带 error_type 时总打判定行，与有无 step 记录无关；「诊断细节见 worker 日志」只在零记录时打；
-    passed / failed 有记录时不打判定行。"""
+    """ADR 0042 决策四：job 判 error 且带 error_type 时总打判定行，与有无 step 记录无关；「诊断细节见 worker 日志」只在零记录时打；
+    passed / failed 有记录时不打判定行；message 为空时括号里只有 error_type，不留吊着的冒号。"""
     from gherkai_core.model import Scenario, Step
 
     sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"),))
@@ -228,6 +228,9 @@ def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_rec
     assert "判定：error  (release_failed: m)" in with_records and "诊断细节见 worker 日志" not in with_records
     zero = text(JobResult(job=job, status=Status.ERROR, error_type="timeout", message="job 超时"))
     assert "判定：error  (timeout: job 超时)" in zero and "诊断细节见 worker 日志" in zero
+    for empty in (None, ""):  # worker 的 scope_done 可以只给 errorType、message 为 null（与 run 汇总树同一判法）
+        bare = text(JobResult(job=job, status=Status.ERROR, error_type="engine_error", message=empty, scenarios=recorded))
+        assert "判定：error  (engine_error)" in bare and "engine_error:" not in bare
     assert "判定：" not in text(JobResult(job=job, status=Status.PASSED, scenarios=recorded))
     desktop = render.explain_to_dict(run_id="r", status="passed", results=[_sample_run().jobs[0]], evidence_reader=lambda refs: (None, "no_ref"))
     assert "sessions" not in desktop["scopes"][0]  # 没有会话记录的桌面 job 省键

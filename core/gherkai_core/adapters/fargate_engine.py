@@ -14,7 +14,7 @@
 对 ECS/DDB 无知（存活/退出码判定藏在本 adapter 的迭代器/handle 内，非 schedule）；port 签名/线格式/wire 一行不改（复用 `event_from_line`/`job_to_line`）。
 
 **PK 由 run_id + scope_id 复合**（防重复运行同一 feature 撞键——scope_id 只在 feature 内稳定、不含 run_id，见 ADR 0024）：
-run_id 组合根构造期注入本 adapter（对称已有 artifact_s3 落点注入，__main__ 在 new_run_id 后才 build_engines）。
+run_id 由组合根 `compose.build_fargate_engines` 构造期注入（与 artifact_s3 落点同一处注入；调用方在 new_run_id 之后才装配引擎）。
 
 **证据边界（CLAUDE.md「绿≠对」）**：moto 能验接线/RunTask 调对/Query 增量/退出码翻异常；但 moto 对 ECS `lastStatus`
 状态机（STOPPED 前 exitCode=null 时序）、DDB 最终一致读的真实时序**保真度存疑**——轮询节奏/STOPPED 滞后/终读一致性的
@@ -101,7 +101,7 @@ class FargateWorkerHandle:
 class FargateEngine:
     """Engine port 的 Fargate 实现（组合根注入 boto3 client + run 级配置）。对称 SubprocessEngine。
 
-    组合根构造期注入（对称 __main__ 在 new_run_id 后 build_engines 注入 artifact_s3 落点）：
+    组合根构造期注入（`compose.build_fargate_engines`，调用方在 new_run_id 之后装配）：
     - ecs/s3/ddb client：boto3 句柄（adapter 不自建，ADR 0016）。
     - run_id：拼 events 表 PK 用（每 run 一个 engine 实例，run_id 构造期已生成）。
     - task_config：cluster / task_definition / network（subnet/security-group/assign-public-ip）——**真值由后端 stack（`gherkai-deploy-aws`）
@@ -111,11 +111,11 @@ class FargateEngine:
       任何一次 `push-worker` 都会劫持正在运行的 run（中途换 step 集）。选哪个 revision 是组合根的事（`compose` 按
       definition 的 `worker_variant` 解析），本 adapter 原样传给 RunTask、不做任何名字推导。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
-    - region：组合根**落实成具体字符串**的 AWS region（`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config，
-      ADR 0016 决策 C）——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，使 worker 建 boto3/aws-sdk client
-      （EventSink DDB / JobSource S3 / ArtifactUploader）拿到与 core store 侧**同源**的 region。Fargate 容器不继承本地 env、
-      也不吃 profile config（AgentCore `validate_region` 要显式字符串），故必须由组合根落实后显式注入（否则 worker
-      `region_name=None` → NoRegionError / AgentCore InvalidRegionError）。**与 subprocess 的 `build_engines` 注入同源**。
+    - region：组合根**落实成具体字符串**的 AWS region（解析链见 `compose.resolve_region`：命令行、环境变量、项目配置文件、
+      profile config 依次回落，ADR 0016 决策 C / 0053 决策 2）——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，
+      使 worker 建 boto3/aws-sdk client（EventSink DDB / JobSource S3 / ArtifactUploader）拿到与 core store 侧**同源**的 region。
+      Fargate 容器不继承本地 env、也不吃 profile config（AgentCore `validate_region` 要显式字符串），故必须由组合根落实后显式注入
+      （否则 worker `region_name=None` → NoRegionError / AgentCore InvalidRegionError）。**与 subprocess 的 `build_engines` 注入同源**。
       **不接收 profile**（正确的非对称，ADR 0016 决策 C）：Fargate 容器无 `~/.aws`、用 task role 凭证链——注入一个容器内
       不存在的 profile 名会让 boto3 在 client 创建期 `ProfileNotFound` 崩、且盖过 task role。profile 只对 subprocess
       有意义（继承本机 `~/.aws`），故只 `build_engines` 注入、本 adapter 绝不碰。

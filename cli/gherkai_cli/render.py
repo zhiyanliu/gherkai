@@ -4,7 +4,7 @@ core 产出纯数据（RunResult、Event）；怎么展示是前端的事，故�
 """
 from __future__ import annotations
 
-from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, Status
+from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, SessionRecord, Status
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tree, status_text, styled  # rich 只经 textui 进来（ADR 0047 渲染面单点）
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
@@ -79,12 +79,11 @@ def _step_note(status: str, shortcircuited: bool) -> str:
     return ""
 
 
-def device_header_lines(sessions, session_id: str | None) -> list[str]:
+def device_header_lines(sessions: list[SessionRecord], session_id: str | None) -> list[str]:
     """scope 表头的设备两行（ADR 0051 决策 8）：代表会话的设备描述、会话 ARN 对应的 Device Farm 控制台链接；桌面 job 两行都没有。
-    run 文本树与 explain 文本共用；入参既可是 SessionRecord 列表也可是机读文档里的 dict 列表。"""
-    recs = [_SessionView(s) if isinstance(s, dict) else s for s in sessions]
+    run 文本树用（explain 文本另由 _explain_session_lines 按 JSON 字段名输出）；入参是 SessionRecord 列表。"""
     lines: list[str] = []
-    label = device_label(representative_device(recs, session_id))
+    label = device_label(representative_device(sessions, session_id))
     if label:
         lines.append(f"设备: {label}")
     url = console_url(session_id)
@@ -94,7 +93,7 @@ def device_header_lines(sessions, session_id: str | None) -> list[str]:
 
 
 class _SessionView:
-    """机读文档里 sessions[] 一项的 dict → 具 session_id / device 属性的视图（让 representative_device 两种输入同一份代码）。"""
+    """机读文档里 sessions[] 一项的 dict → 具 session_id / device 属性的视图，供 _explain_session_lines 把 dict 交给 representative_device。"""
 
     def __init__(self, d: dict) -> None:
         self.session_id = d.get("session_id")
@@ -104,7 +103,7 @@ class _SessionView:
 def session_lines(jr: JobResult) -> list[str]:
     """job 的会话摘要行（ADR 0051 决策 4、7；0034 机制二 U 集）：设备 job 给设备占用时长与缺计量会话数；未确认停止的会话按名列出，
     结果未知的创建尝试单独标出。桌面 worker 也发会话事件，桌面 job 同样可有后两类行，只是没有占用时长一行；没有会话记录的桌面 job
-    返回空列表。run 文本树与 explain 文本共用。"""
+    返回空列表。run 文本树用。"""
     lines: list[str] = []
     if jr.device_observed_s is not None or jr.device_observed_missing is not None:
         missing = jr.device_observed_missing or 0
@@ -207,7 +206,7 @@ def render_run_state(state: RunState) -> str:
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
 
 def render_plan_text(jobs: list[Job], default_engine: str, dispatch: dict | None = None, devices: dict | None = None) -> str:
-    """plan 产出的 Job[] → 人读的树形预检视图（job → scenario → step 及派发标注，不实际运行；结构见 plan_tree，ADR 0047）。
+    """plan 产出的 Job[] → 人读的树形用例预检视图（job → scenario → step 及派发标注，不实际运行；结构见 plan_tree，ADR 0047）。
 
     dispatch（可选，ADR 0036 决策 4）：{(scope_id, scenario_id, step_index): probe}——worker 的命中
     自述。命中 → 行尾标「← 确定性:」；冲突或关键字不符 → 标 ⚠（实际运行该 step 将 error）；None/缺失 → 不标（默认 AI，少噪声）。
@@ -239,8 +238,8 @@ def plan_tree(jobs: list[Job], default_engine: str, dispatch: dict | None = None
     return root
 
 
-# 测试目标的产品语言名称（ADR 0049 决策 6；ADR 0039：用户可见文本不带内部指代）——list-deterministic 与 doctor 共用这一份，
-# plan 按目标标注落地时也用它。
+# 测试目标的产品语言名称（ADR 0049 决策 6；ADR 0039：用户可见文本不带内部指代）——list-deterministic、doctor、plan 的目标核对提示与
+# 确定性标注，以及 run / submit 的目标拒绝消息共用这一份。
 _DEVICE_LABEL = {"desktop": "桌面", "android": "Android", "ios": "iOS"}
 _UI_KIND_LABEL = {"web": "网页", "app": "应用"}
 _REQUIRES_LABEL = {"web_context": "需要网页上下文"}
@@ -293,7 +292,10 @@ def _dispatch_hint(dispatch: dict | None, scope_id: str, scenario_id: str, step_
     if "keyword_mismatch" in probe:
         kws = " / ".join(probe.get("keywords") or [])
         return f"  ← ⚠ 写法与关键字不符：这条 step 只在 {kws} 下有意义（实际执行该 step 将 error）"
-    return f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
+    hint = f"  ← 确定性: {probe.get('description', probe.get('pattern', ''))}"
+    if probe.get("requires"):  # 该 scope 目标上的运行期前提（ADR 0049 决策 6）：运行期不满足时这一步记 error、不转 AI
+        hint += f"（{requires_label(probe['requires'])}；设备不提供时记为错误）"
+    return hint
 
 
 def _arg_hint(arg) -> str:
@@ -320,7 +322,8 @@ def plan_to_dict(jobs: list[Job], default_engine: str, dispatch: dict | None = N
     """plan 产出 → 机器可读 dict（--json）。复用 gherkai_core.serialize 的 job 序列化保单一真理源。
 
     dispatch 非 None 时给每个 step dict 注入 "deterministic" 键（plan 视图字段、非 definition——
-    值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]} / {"keyword_mismatch","keywords"}，ADR 0036）。
+    值为 worker 自述的命中结果：null / {"pattern","description"} / {"conflict":[...]} / {"keyword_mismatch","keywords"}，ADR 0036）；
+    命中条目在该 scope 目标上带运行期前提时另有 `requires`（字符串数组），无前提省略该键（ADR 0049 决策 6）。
     """
     from gherkai_core.serialize import job_to_dict
 
@@ -674,14 +677,16 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
         device = "device_observed_s" in sc or "device_observed_missing" in sc
         for line in _explain_session_lines(sc):  # 设备表头与会话摘要（ADR 0051 决策 7、8），文本 key 用 JSON 字段名
             scn.add(line)
-        # 判定行（ADR 0042 决策四）：job 判 error / aborted 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无
+        # 判定行（ADR 0042 决策四）：job 判 error 且带 error_type 时总打一行「判定：status (error_type: message)」，与有无
         # step 记录无关——全部 scenario 都是合成记录的设备 job（如 precheck_failed）靠它显示原因，合成 step 上「原因见 job 判定」
         # 才落到实处；一个 step 记录都没有的 job（worker 没起来 / 起来就被掐）另加诊断指引，免得读者在一片「无记录」里找不到原因。
         # has_step_records 是 job 级事实（explain_to_dict 按未筛判定树算），不在筛后的 steps 上重算。
-        if (sc["status"] in ("error", "aborted") and sc["error_type"]) or not sc["has_step_records"]:
+        # aborted 的 error_type 恒为空（ADR 0034 机制二「终结函数与真值表」），它的判定行只在一条 step 记录都没有时由后半条件打出。
+        if (sc["status"] == "error" and sc["error_type"]) or not sc["has_step_records"]:
             why = ""
             if sc["error_type"]:
-                why = f"  ({sc['error_type']}: {sc['message'] or ''})"
+                # 空 message 不留吊着的冒号（与 run_tree 和报告页判法一致）
+                why = f"  ({sc['error_type']}: {sc['message']})" if sc["message"] else f"  ({sc['error_type']})"
             elif sc["message"]:
                 why = f"  ({sc['message']})"
             scn.add(f"判定：{sc['status']}{why}")

@@ -55,8 +55,12 @@ function step(keyword: string, text: string, index = 0): any {
 const DESKTOP = { device: "desktop", uiKind: "web" };
 const SCOPE = { id: "features/a.feature", name: "a" };
 
-/** 假的 AgentCore 控制面：Start 依次给 sess-1、sess-2……，记下每次请求名；Stop 按 stopFails 决定成败。trace 记 start / stop 次序。 */
-function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean; startHangs?: (nth: number) => boolean; trace?: string[] } = {}) {
+/** 假的 AgentCore 控制面：Start 依次给 sess-1、sess-2……，记下每次请求名；Stop 按 stopFails 决定成败。trace 记 start / stop 次序。
+ *  startWaits 给第 n 次 Start 一个要先等的 promise：它兑现后 Start 照常返回，它拒绝时 Start 以同一个异常失败。 */
+function fakeAgentCore(opts: {
+  stopFails?: (sid: string, nth: number) => boolean; startHangs?: (nth: number) => boolean;
+  startWaits?: (nth: number) => Promise<void> | undefined; trace?: string[];
+} = {}) {
   const names: string[] = [];
   const timeouts: Array<number | undefined> = [];  // 每次 Start 带的 sessionTimeoutSeconds（未传为 undefined）
   const stops: string[] = [];
@@ -71,6 +75,8 @@ function fakeAgentCore(opts: { stopFails?: (sid: string, nth: number) => boolean
         timeouts.push(cmd.input.sessionTimeoutSeconds);
         opts.trace?.push(`start:${cmd.input.name}`);
         if (opts.startHangs?.(n)) return await new Promise(() => {});  // 永不返回：Start 在途
+        const wait = opts.startWaits?.(n);
+        if (wait !== undefined) await wait;
         return { sessionId: `sess-${n}`, streams: { automationStream: { streamEndpoint: `wss://agentcore.test/${n}` } } };
       }
       if (cmd instanceof StopBrowserSessionCommand) {
@@ -649,7 +655,7 @@ test("shutdownSequence: cleanup 先于中断提前上传（会话释放优先铁
   assert.equal(code, 0, "cleanup 未失败 → 退出码 0");
 });
 
-// 在途窗口兜底（ADR 0028；ADR 0051 决策 5 桌面收尾的「等在途 Start」一段）住在桌面接缝的 interrupt 释放里：shutdownSequence 的
+// 在途窗口兜底（ADR 0028；ADR 0049 决策 5 桌面收尾路径的「等在途 StartBrowserSession」一段）住在桌面接缝的 interrupt 释放里：shutdownSequence 的
 // cleanup 就是它。Start 在途时先等一小段、让会话 id 落进待清理集再 Stop；到点仍未返回即发一对 attempted 事件、退出码为 1。
 test("桌面 interrupt 释放：Start 在途、等待窗口内返回 → 先等再 Stop，这个会话成对 confirmed（不等就会漏掉它）", async () => {
   const { createDesktopSurface } = await import("./surface-desktop.mjs");
@@ -1788,7 +1794,7 @@ test("桌面停止信号落在建连退避期间：退避立即结束、不再�
     failures: [true, true, true, true], hooks: { backoffMs: [60_000, 60_000, 60_000] },
   });
   const { io, events, signal, exited } = scopeIo(createSurface);
-  // 这条路径上 runScope 最终以建连异常拒绝（收到停止信号即不再重试，异常原样穿出）；接住它，只看它何时结束
+  // 这条路径上建连循环收到停止信号即不再重试、抛出建连异常，runScope 不让它穿出，改为以收尾序列的退出码结束；这里只看它何时结束
   let settled = false;
   void runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io).then(() => { settled = true; }, () => { settled = true; });
   while (!events.some((e) => e.type === "session_closed")) await new Promise((r) => setTimeout(r, 1));
@@ -1800,6 +1806,52 @@ test("桌面停止信号落在建连退避期间：退避立即结束、不再�
   while (!settled && Date.now() < deadline) await new Promise((r) => setTimeout(r, 1));
   assert.ok(settled, "停止信号唤醒退避，建连循环不等满退避时长");
   assert.deepEqual(types(events), ["session_opened", "session_closed"]);
+});
+
+test("桌面停止信号落在 Start 在途、等待窗口内 Start 以网络错误失败：runScope 以收尾序列的退出码 0 结束、不以建连异常拒绝，退出先于它结束", async () => {
+  const { runScope } = await importMod();
+  let failStart!: (e: Error) => void;
+  const startGate = new Promise<void>((_, reject) => { failStart = reject; });
+  const { createSurface } = desktopFactory(scopeAgent(), { core: fakeAgentCore({ startWaits: (n) => (n === 1 ? startGate : undefined) }) });
+  const { io, trace, events, signal, exited } = scopeIo(createSurface);
+  const running = runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io).then(
+    (rc) => { trace.push(`resolved:${rc}`); return rc; },
+    (e) => { trace.push("rejected"); throw e; });
+  await new Promise((r) => setTimeout(r, 5));
+  signal();
+  failStart(econnreset());  // 等待窗口（settleMs 20 毫秒）之内失败：建连循环见到已进入终结、不再重试
+  assert.equal(await running, 0, "进入终结之后，退出码归收尾序列，入口不会以 worker fatal 抢先退出");
+  assert.equal(exited(), 0);
+  assert.ok(trace.indexOf("exit:0") < trace.indexOf("resolved:0"), trace.join(" "));
+  assert.deepEqual(trace.slice(trace.indexOf("drain:6000")), ["drain:6000", "exit:0", "resolved:0"], "收尾序列走完排空才退出");
+  assert.deepEqual(types(events), [], "Start 没有返回过会话：不发会话事件，也不发 attempted");
+});
+
+test("桌面停止信号落在建连期间、建连在 interrupt 释放的 Stop 应答之前失败 → 丢弃语义的清理等在途那次，同一会话只发一次 Stop", async () => {
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const sessionEvents: any[] = [];
+  const core = fakeAgentCore();
+  // Stop 的请求照常记进 core.stops，应答延后返回：建连失败时 interrupt 释放的那次清理仍在途
+  const slowStopClient = { send: async (cmd: any) => {
+    const r = await core.client.send(cmd);
+    if (cmd instanceof StopBrowserSessionCommand) await new Promise((res) => setTimeout(res, 30));
+    return r;
+  } };
+  let failConnect: (() => void) | undefined;
+  const connectOverCDP = () => new Promise<never>((_res, reject) => { failConnect = () => reject(econnreset()); });
+  const surface = createDesktopSurface(surfaceDeps({ emit: async (e: any) => { sessionEvents.push(e); } }),
+    desktopHooks({}, fakePage, { client: slowStopClient, connectOverCDP }));
+  const acquiring = surface.acquire().then(() => undefined, (e: unknown) => e);
+  while (failConnect === undefined) await new Promise((r) => setTimeout(r, 1));
+  const released = surface.release("interrupt");  // interrupt 释放发出 Stop，应答还没回来
+  failConnect();  // 建连此刻失败，进入丢弃语义的清理
+  const outcome = await released;
+  const err = await acquiring;
+  assert.match(String((err as Error | undefined)?.message), /ECONNRESET/, "已收到停止信号：建连异常原样抛出、不再重试");
+  assert.deepEqual(core.stops, ["sess-1"], "丢弃语义的清理等在途那次，不对同一会话再发一次 StopBrowserSession");
+  assert.deepEqual(sessionEvents, [opened("sess-1"), closed("sess-1")]);
+  assert.equal(outcome.releaseFailed, false);
+  assert.equal(core.names.length, 1);
 });
 
 test("桌面缺本次运行的编号（RUN_ID）→ 构造期报错、点名该变量，不建会话、不发任何事件", async () => {

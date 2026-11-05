@@ -104,7 +104,7 @@ jobs:
         # 在干净 checkout 上打一个**本地** annotated tag 再 build：算出的版本必须逐字等于 tag——这正是
         # release.yml 的 gate。日常 CI 由此照出「干净 tag commit 也算出带 +local 版本」这类回归（曾因 pyproject
         # 显式 `metadata = true` 埋下、只有推真 tag 才会炸，ADR 0037 决策 2b），不必等到发布日。
-        # 产物落 /tmp：落仓库内会被 dunamai 判成脏树（未跟踪文件也算）、版本带 +dirty、演练假失败。
+        # 产物落 /tmp：dist/ 里已有上一步构建出的非纯净版本产物，与本步的 99.0.0 混放会被产物校验判成「同一成员多个版本」。
         run: |
           set -euo pipefail
           if [ -n "$(git status --porcelain)" ]; then

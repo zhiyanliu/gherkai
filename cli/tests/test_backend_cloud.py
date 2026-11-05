@@ -413,12 +413,27 @@ def test_cloud_wires_fargate_engines(tmp_path, monkeypatch, capsys):
     assert rc == 0
     assert len(made["fargate"]) == 1, "cloud 应走 build_fargate_engines"
     fk = made["fargate"][0]
-    assert fk["prefix"] == "prod-"
     assert fk["cluster"] == "prod-cluster"
     assert fk["events_table"] == "prod-events"
     assert fk["bucket"] == "prod-artifacts"
     assert fk["region"] == "us-west-2"
     assert fk["network_config"]["subnets"] == ["subnet-x"]  # 来自 resolve_network（fake）
+
+
+def test_cloud_bad_nova_act_timeout_exits_2_before_side_effects(tmp_path, monkeypatch, capsys):
+    # 云端后端不问本机 worker，NOVA_ACT_TIMEOUT_S 写错要在入口以退出码 2 拒绝：build_fargate_engines 只会把 Nova 引擎项
+    # 装成一用即抛的占位项，不拦就会落下一个逐 job 报错的 run。拒绝排在探资源与装配之前，零副作用。
+    record: list = []
+    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    monkeypatch.setattr(m.compose, "_nova_act_timeout_cached", None)  # 别让先前用例缓存的合法值掩盖本例的坏值
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "120s")
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--default-engine", "novaact",
+                 "--region", "us-west-2", "--quiet"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "NOVA_ACT_TIMEOUT_S" in err and "'120s'" in err and "Traceback" not in err
+    assert made["fargate"] == [] and preflight_calls == []
 
 
 def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):

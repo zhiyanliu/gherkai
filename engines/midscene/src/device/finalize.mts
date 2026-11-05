@@ -189,8 +189,8 @@ async function emit(s: DeviceFarmSessionBlock, send: () => Promise<void>): Promi
 
 /** 等 work 落定，但不越过 deadline；返回是否在截止线之前落定。到线即不再等它：Device Farm 的每次调用另带不越过截止线的中止信号，
  *  这里只兜底不响应中止的调用与 deleteSession。Device Farm 客户端是无状态的 HTTP 调用，一次被放下的请求不会阻塞同一客户端上
- *  后续的 Get / Stop，所以不是 ADR 0052 被拒的「放弃挂住的命令再在同一 WebDriver 客户端上继续发命令」；deleteSession 被放下
- *  之后不再经 Appium 客户端发任何命令。 */
+ *  后续的 Get / Stop，所以不属于 ADR 0052 被拒方案「探测用 `Promise.race` 放弃挂住的只读命令」所指的情形（放弃不解除同一
+ *  WebDriver 客户端上的队列阻塞）；deleteSession 被放下之后不再经 Appium 客户端发任何命令。 */
 function settleBy(s: DeviceFarmSessionBlock, work: Promise<unknown>, deadline: number): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     const stop = new AbortController();

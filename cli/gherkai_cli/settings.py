@@ -11,8 +11,9 @@ from gherkai_cli import config as _config
 from gherkai_cli.console import progress
 
 
-# run / submit 的并发默认值（ADR 0026「并发上限」定为 4）：并发只改同时开几个浏览器会话，不改 job 数与总费用；
-# status --wait 与 reconcile 的同名 flag 只是提交记录缺值时的回落，取同一常量避免漂移。
+# run / submit 的并发默认值（ADR 0026「并发上限」定为 4）：并发只改同时开几个会话（桌面目标是浏览器会话，
+# 设备目标是远程访问会话），不改 job 数与总费用；status --wait 与 reconcile 的同名 flag 只是提交记录缺值时的回落，
+# 取同一常量避免漂移。
 DEFAULT_MAX_CONCURRENCY = 4
 
 # ---- 项目配置文件 gherkai.toml（ADR 0053）：七个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----

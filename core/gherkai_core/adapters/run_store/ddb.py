@@ -7,7 +7,7 @@
 RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可原子捞回该 run 全部）：
 - **META item**：`{run_id, item_type='META', meta_json=<json.dumps(run_meta_to_dict)>}`。RunMeta 是 definition，
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
-  且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。第 4 步 offload 在 `json.dumps`
+  且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?, message?,
   jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
@@ -50,7 +50,7 @@ _WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
 
 def _schema_version_attr(v) -> int:
     """META 顶层的 schema_version 属性 → 整数：缺读作 0（早于结构版本号的写端）；DDB 把数值还成 Decimal，须为整数值；
-    bool / 字符串 / 带小数的值都是定义违约——与本机读头（serialize.definition_schema_version）同一口径，不靖默转换。"""
+    bool / 字符串 / 带小数的值都是定义违约——与本机读头（serialize.definition_schema_version）同一口径，不静默转换。"""
     from decimal import Decimal
 
     from gherkai_core.errors import DefinitionContractError

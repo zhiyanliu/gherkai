@@ -58,9 +58,9 @@ function mean(xs: number[]): number {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
 }
 
-// 关键（源码 agent.js:852-853）：一旦给 Agent 传 createOpenAIClient，它就切到「隔离 ModelConfigManager」，
-// 只读 opts.modelConfig，完全无视 overrideAIConfig/全局 env。
-// 所以模型配置必须随 opts.modelConfig 一起给（见下方 new PlaywrightAgent）。
+// 关键（@midscene/core Agent 构造函数里选 modelConfigManager 的分支）：给 Agent 传 opts.modelConfig 即进入「隔离 ModelConfigManager」，
+// 只读 opts.modelConfig，不读 overrideAIConfig/全局 env；只传 createOpenAIClient、不传 modelConfig 时则是 AgentScopedModelConfigManager 包住全局管理器、仍读全局 env（ADR 0008「关键实现坑」）。
+// 所以 SigV4 client 经 createOpenAIClient 注入，模型配置随 opts.modelConfig 一起给（见下方 new PlaywrightAgent）。
 const MODEL_CONFIG = {
   MIDSCENE_MODEL_NAME: MODEL,
   MIDSCENE_MODEL_BASE_URL: BASE_URL,

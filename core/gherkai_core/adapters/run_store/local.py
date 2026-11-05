@@ -39,7 +39,7 @@ from gherkai_core.serialize import (
 def _atomic_write_json(path: Path, obj) -> None:
     """控制面文件（run_meta.json / run_state.json）的原子写。
 
-    并发读者真实存在（ADR 0030 决定四/0034）：per-run 推进进程在 `_locked_rmw` 里写 run_state.json 时，
+    并发读者真实存在（ADR 0030 决定三/0034）：per-run 推进进程在 `_locked_rmw` 里写 run_state.json 时，
     `gherkai status` / 接力进程**无锁**读同一文件（读面不持 `.runstate.lock`，只写面互斥）。原子性的实现与
     其余两面的读者见 `gherkai_core.adapters._atomic`。
 

@@ -8,7 +8,8 @@
 **指针不是删掉，是搬家**：contributor 要的设计判据留在紧邻的注释或 docstring 里（那才是给读 code 的人/AI 看的），
 所以本护栏**只扫非 docstring 的字符串字面量**，注释与 docstring 里的 ADR 指针一律放行、且鼓励保留。
 
-覆盖面：五个生产包的 `.py`（AST 扫字面量）+ Midscene worker 的 `.mts` 源（去注释后扫行）。
+覆盖面：五个生产包的 `.py`（AST 扫字面量）+ Midscene worker 的 `.mts` 源（去注释后扫行），外加 `features/steps/` 的
+确定性 step 模板（两种语言都扫：用户文档让使用方把它复制进自己的项目，里面的字面量随之成为使用方看到的文字）。
 测试自身的字面量不在扫描面内（测试不面向使用者）。开发者契约型异常（只在内部 code 误用内部 API 时抛，
 永不因用户输入触发）可留一句点名内部符号的短诊断——但不带 ADR/决策字样，故同样能过本护栏。
 """
@@ -22,15 +23,16 @@ import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
-# 生产包（含 CLI 前端、runtime 组合根、部署 provider + 其 Lambda、core、Nova worker）
+# 生产包（含 CLI 前端、runtime 组合根、部署 provider + 其 Lambda、core、Nova worker）与 steps/ 模板
 PY_ROOTS = (
     "cli/gherkai_cli",
     "runtime/gherkai_runtime",
     "deploy_aws/gherkai_deploy_aws",
     "core/gherkai_core",
     "engines/novaact/gherkai_worker_novaact",
+    "features/steps",
 )
-MTS_ROOT = "engines/midscene/src"
+MTS_ROOTS = ("engines/midscene/src", "features/steps")
 
 # 内部指代的形态：ADR 编号 / 决策·决定编号 / 内部机制名 / 内部函数名
 FORBIDDEN = re.compile(
@@ -38,6 +40,7 @@ FORBIDDEN = re.compile(
     r"|决策\s*[0-9A-Za-z]"
     r"|决定\s*[一二三四五六七八九十0-9]"
     r"|推进器|宿主"  # 内部机制名（ADR 0034 的 advancer/host 词条）：产品面只说「后端/云端/进程」
+    r"|无状态批量运行|事件驱动链"  # contributor 词表术语与机制描述（ADR 0034）：产品面只说「后台运行 / 云端后台运行」
     r"|不变量|定位链|实测项|被拒方案|重议闸门|接缝契约|模块头|组合根装配|窄腰"
     # 设备会话与命令执行的内部机制名（ADR 0051 决策 3、5，ADR 0052 决策 2、6）：产品面只说发生了什么，如「在等待时间之后才
     # 返回」「这一步可能已执行也可能未执行」。待核尝试一族禁两种写法：名词「待核尝试」与动作短语「记为待核」（含「不再记为待核」
@@ -97,22 +100,23 @@ def _strip_ts_comments(src: str) -> list[tuple[int, str]]:
     return [(i, line.split("//", 1)[0]) for i, line in enumerate(src.splitlines(), 1)]
 
 
-def _scan_midscene() -> list[str]:
+def _scan_mts() -> list[str]:
     hits: list[str] = []
-    base = REPO_ROOT / MTS_ROOT
-    assert base.is_dir(), f"扫描面失效：{MTS_ROOT} 不存在（包搬家了？请更新 MTS_ROOT）"
-    for path in sorted(base.rglob("*.mts")):
-        if path.name.endswith(".test.mts"):
-            continue
-        for lineno, code in _strip_ts_comments(path.read_text(encoding="utf-8")):
-            if FORBIDDEN.search(code) or any(bad in code for bad in FORBIDDEN_TS_BARE):
-                hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {code.strip()[:100]!r}")
+    for root in MTS_ROOTS:
+        base = REPO_ROOT / root
+        assert base.is_dir(), f"扫描面失效：{root} 不存在（包搬家了？请更新 MTS_ROOTS）"
+        for path in sorted(base.rglob("*.mts")):
+            if path.name.endswith(".test.mts"):
+                continue
+            for lineno, code in _strip_ts_comments(path.read_text(encoding="utf-8")):
+                if FORBIDDEN.search(code) or any(bad in code for bad in FORBIDDEN_TS_BARE):
+                    hits.append(f"{path.relative_to(REPO_ROOT)}:{lineno}: {code.strip()[:100]!r}")
     return hits
 
 
 def test_no_internal_pointers_in_user_facing_text():
-    """五个生产包的非 docstring 字面量 + Midscene 源的非注释行：一处内部指代都不许有。"""
-    hits = _scan_python() + _scan_midscene()
+    """五个生产包与 steps/ 模板的非 docstring 字面量 + Midscene 源与 steps/ 模板的非注释行：一处内部指代都不许有。"""
+    hits = _scan_python() + _scan_mts()
     assert not hits, (
         "产品面文案带了内部指代（使用者手里没有仓库）。改成「发生了什么 / 一句产品语言的为什么 / 怎么办」，"
         "设计判据搬进紧邻的注释或 docstring：\n  " + "\n  ".join(hits)

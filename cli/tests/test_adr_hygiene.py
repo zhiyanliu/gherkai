@@ -4,8 +4,8 @@
 - 「被取代」链双向：Status 头点名 NNNN，NNNN 那篇必须回指本篇编号（doc-health 第 7 轮曾一轮三处同犯反向链缺口）；
 - `docs/` 下文件名全是英文 kebab-case，`docs/adr/` 与 `docs/journey/` 带四位编号且各自不复用；
 - `docs/journey/` 每份首行声明 `> 类型:`；
-- 长期文档与 AI 侧文档不指向具体的 journey 文件（仓库路径与相对路径两种写法，规则形态另有正反例单测）、不写裸 WP 编号（悬空指针红线）；
-  AI 侧文档也不用决策六形态②的自造复合词。
+- 长期文档与 AI 侧文档不指向具体的 journey 文件（仓库路径与相对路径两种写法）、不写裸 WP 编号（悬空指针红线），两条规则的形态
+  另有正反例单测；AI 侧文档也不用决策六形态②的自造复合词，它的扫描面含已入库的项目 skill 与 skill 评测的 grader 提示（按 git 清单取）。
 - 全仓已跟踪的 markdown（含 journey 与工具说明，扫原文含行内代码）不写本机坐标，即个人目录下的绝对路径与本地 clone 目录名；规则形态另有正反例单测，TS / JS 注释里反引号包着的路径另有一条单测。
 规则与扫描面在 `_doc_rules`；同一束由 hook 在写完即查（ADR 0046）。
 """
@@ -140,6 +140,21 @@ def test_dangling_journey_rule_shape(text: str, hit: bool):
     assert bool(DANGLING_JOURNEY.search(text)) is hit, text
 
 
+@pytest.mark.parametrize("text, hit", [
+    ("进度见 WP3", True),
+    ("WP-3 收尾", True),
+    ("WP3-B 的结论", True),
+    ("WP12a-2", True),
+    ("WP-S 已完成", True),                              # 带连字符的单字母形态
+    ("WPS 文档", False),                                # 连写的词不是编号
+    ("WP 编号", False),                                 # 只提到这个说法
+    ("WP-Sync", False),
+])
+def test_bare_wp_rule_shape(text: str, hit: bool):
+    """裸 WP 编号的规则正反例：数字形态与带连字符的单字母形态命中；连写成词的 `WPS`、只提到「WP 编号」这个说法不命中。"""
+    assert bool(BARE_WP.search(text)) is hit, text
+
+
 def test_journey_files_are_outside_the_pointer_scan_surface():
     """journey 是暂存区、彼此引用合法：不在长期文档的扫描面里，归类为只拦本机坐标的 other-md。"""
     journeys = sorted(JOURNEY_DIR.glob("*.md"))
@@ -155,6 +170,18 @@ def test_markdown_has_no_machine_coordinates(doc: Path):
     hits = [f"{_rel(doc)}:{i}: {line.strip()[:110]}" for i, line in enumerate(doc.read_text(encoding="utf-8").splitlines(), 1)
             if MACHINE_COORDINATE.search(line)]
     assert not hits, "本机坐标（只在产出机器上成立）——改成 repo 相对路径：\n" + "\n".join(hits)
+
+
+def test_ai_side_docs_take_only_tracked_skills():
+    """AI 侧扫描面里的项目 skill 与 grader 提示都是 git 已跟踪的：本机装的、不入库的 skill 不在内，入库的那几份不漏。"""
+    tracked = set(subprocess.run(["git", "ls-files", ".claude/skills", "skills/gherkai-evals"], cwd=REPO, check=True,
+                                 capture_output=True, text=True).stdout.split())
+    docs = {_rel(p) for p in ai_side_docs()}
+    from_skills = {d for d in docs if d.startswith((".claude/skills/", "skills/"))}
+    assert from_skills <= tracked, f"未入库的文件进了 AI 侧扫描面：{sorted(from_skills - tracked)}"
+    expected = {d for d in tracked if (d.startswith(".claude/skills/") and d.count("/") == 3 and d.endswith("/SKILL.md"))
+                or d == "skills/gherkai-evals/grader-prompt.md"}
+    assert expected and expected <= docs, f"已入库的 skill 文档没进 AI 侧扫描面：{sorted(expected - docs)}"
 
 
 @pytest.mark.parametrize("doc", ai_side_docs(), ids=_rel)

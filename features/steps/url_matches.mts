@@ -1,8 +1,8 @@
 // 示范用确定性 step（Midscene 侧）：断言当前页面地址匹配给定正则。
 //
 // 这是 `steps/` 目录的模板：复制进你的项目后按需改措辞与判定。与 `url_matches.py` 成对（同一正则，具名组写法
-// 不同），两个引擎读同一份 .feature 时行为一致。运行时经 `--steps-dir features/steps` 或环境变量
-// `GHERKAI_STEPS_DIR` 加载进 worker 的注册表。
+// 不同），两个引擎读同一份 .feature 时行为一致。运行时从当前目录下的 `steps/` 自动加载
+// 进 worker 的注册表（目录放在别处时用 `--steps-dir` 或环境变量 `GHERKAI_STEPS_DIR` 指定）。
 //
 // 两份实现：`playwright` 给桌面浏览器；`webdriver` 给设备上的网页目标——地址要在网页上下文里读，所以条目声明
 // `requires: ["web_context"]`：设备不提供网页上下文时这一步记 error、不交给 AI。应用目标没有「地址」可核，故不给 app 条目。

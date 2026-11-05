@@ -226,8 +226,8 @@ def _print_human(result: dict) -> None:
         print(f"\n=== 单 act wall_s 分布（n={s['n_acts']}，coarse≤1s={s['n_coarse_le_1s']}"
               f"{f'，已排除 {n_multi} 个 MULTI-ACT' if n_multi else ''}）===")
         print(f"min={s['min']}  p50={s['p50']}  p90={s['p90']}  p99={s['p99']}  max={s['max']}")
-        # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值住 runtime/gherkai_runtime/compose.py 的 NOVA_ACT_TIMEOUT_S**
-        # （可经同名 env 覆盖）——用非缺省 act timeout 执行时，这里的判语只是参考，按真值重读分位数。
+        # 下面的 120 是本脚本自带的对照基线（缺省值副本），**真值取自 runtime/gherkai_runtime/compose.py 的 `nova_act_timeout_s()`**
+        # （读环境变量 NOVA_ACT_TIMEOUT_S，未设置时为 120）——用非缺省 act timeout 执行时，这里的判语只是参考，按真值重读分位数。
         print(f"对照 NOVA_ACT_TIMEOUT_S=120：p99={s['p99']}s → "
               f"{'单 act 远低于 act_timeout，grace margin 有压缩空间' if s['p99'] < 120 else '有 act 逼近/超 120，act_timeout 不宜降'}")
     elif n_multi:

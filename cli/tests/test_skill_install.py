@@ -2,7 +2,7 @@
 
 覆盖：首装（包内那份逐字节 + 版本标记）、`--print`（stdout 只此一处）、跨版本收敛（旧 reference 必须消失）、
 自护判据（不像本命令装的目录 → 以退出码 2 结束且一个字节都不动）、`--agent all` 两处落点、`--global` 认 HOME、
-那行提示的追加语义（幂等、按 agent 挑 CLAUDE.md / AGENTS.md、非交互缺省不写）、取不到版本时的标记、
+那行提示的追加语义（幂等、按 agent 挑 CLAUDE.md / AGENTS.md、非交互缺省不写、一个文件失败不连累另一个）、取不到版本时的标记、
 裸 `gherkai skill` 由 argparse 以退出码 2 结束。
 """
 from __future__ import annotations
@@ -227,3 +227,16 @@ def test_non_utf8_pointer_file_stays_inside_the_exit_code_set(tmp_path, capsys):
     assert "这一行请自己贴" in err and "不是 UTF-8 编码" in err  # 说真因（编码），不误导去查写权限
     # 宁可不写也不写坏：读不了就一个字节都别动（errors="replace" 那种写法会把用户文件的非 UTF-8 段落毁掉）
     assert claude_md.read_bytes() == before
+
+
+def test_agent_all_pointer_failure_on_one_file_still_handles_the_other(tmp_path, capsys):
+    # `--agent all` 要加两个指令文件：CLAUDE.md 读不了时 AGENTS.md 照样加上，两个文件的结果都要点名报出
+    claude_md = tmp_path / "CLAUDE.md"
+    before = "中文\n".encode("gbk")
+    claude_md.write_bytes(before)
+    assert m.main(["skill", "install", "--dir", str(tmp_path), "--agent", "all", "--pointer", "yes"]) == 2
+    err = capsys.readouterr().err
+    assert claude_md.read_bytes() == before
+    assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8").endswith(skill_install.POINTER_LINE + "\n")
+    assert f"{claude_md} 不是 UTF-8 编码" in err
+    assert f"已加进 {tmp_path / 'AGENTS.md'}" in err

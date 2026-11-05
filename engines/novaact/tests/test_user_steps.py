@@ -72,6 +72,34 @@ def test_same_basename_in_different_dirs_both_load(tmp_path):
     assert sorted(e.raw for e in d._REGISTRY[before:]) == ["P-a-login", "P-b-login"]
 
 
+def test_symlink_to_file_loads_its_target(tmp_path):
+    """指向文件的符号链接按其目标加载，目标在 steps 根之外也一样。Midscene 侧同一条规则：只在一侧收，
+    同一份 steps/ 就会在另一个引擎上静默落回 AI。"""
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    _step_file(tmp_path / "shared" / "login.py", "P-linked")
+    (steps / "login.py").symlink_to(tmp_path / "shared" / "login.py")
+
+    before = len(d._REGISTRY)
+    loaded = load_user_steps(str(steps))
+
+    assert [f.name for f in loaded] == ["login.py"]
+    assert [e.raw for e in d._REGISTRY[before:]] == ["P-linked"]
+
+
+def test_symlink_to_dir_with_step_name_fails_loud(tmp_path):
+    """名字像 step 文件却指向目录的符号链接：`rglob` 照样收进来、加载时报错。Midscene 侧同样报错，
+    两侧都起不来，不会一侧静默跳过。"""
+    steps = tmp_path / "steps"
+    steps.mkdir()
+    _step_file(tmp_path / "shared" / "inner.py", "P-inner")
+    (steps / "odd.py").symlink_to(tmp_path / "shared", target_is_directory=True)
+
+    with pytest.raises(UserStepsError) as ei:
+        load_user_steps(str(steps))
+    assert "odd.py" in str(ei.value)
+
+
 # ---- (b) 排除规则 ----
 def test_excludes_underscore_and_test_prefixed_files(tmp_path):
     _step_file(tmp_path / "real.py", "P-real")

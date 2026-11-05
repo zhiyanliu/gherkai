@@ -199,6 +199,79 @@ def test_digest_not_in_ecr_is_a_miss(aws):
     assert "digest" in str(e.value) and "ECR" in str(e.value)
 
 
+def test_deleted_revision_is_a_miss(aws):
+    """映射里的 revision 根本不可 Describe（已删除 / 不存在，ECS 回 ClientException）→ miss。"""
+    recs = _seed(aws, variant="base")
+    rec = dict(recs["novaact"], revision_arn="arn:aws:ecs:us-east-1:123456789012:task-definition/gone:9")
+    tag = names.image_tag(_VERSION, "base")
+    aws["ssm"].put_parameter(Name=names.ssm_path(_PREFIX, names.worker_image_key("novaact", tag)),
+                             Value=json.dumps(rec), Type="String", Overwrite=True)
+    with pytest.raises(compose.WorkerVariantError) as e:
+        _resolve(aws)
+    assert "不可 Describe" in str(e.value)
+
+
+def test_missing_ecr_repository_is_a_miss(aws):
+    """ECR 仓库整个不在（RepositoryNotFoundException）也是「找不到镜像」这一种 miss，重推同名 variant 即恢复。"""
+    recs = _seed(aws, variant="base")
+    aws["ecr"].delete_repository(repositoryName=names.ecr_repo_name(_PREFIX, "novaact"), force=True)
+    with pytest.raises(compose.WorkerVariantError) as e:
+        _resolve(aws)
+    assert "找不到镜像" in str(e.value) and recs["novaact"]["digest"] in str(e.value)
+
+
+class _Failing:
+    """包一个 moto client，让指定方法抛给定异常（模拟提交者缺只读权限、限流或网络故障），其余方法照常转发。"""
+
+    def __init__(self, inner, method: str, exc: Exception):
+        self._inner, self._method, self._exc = inner, method, exc
+
+    def __getattr__(self, name):
+        if name == self._method:
+            def _raise(**_kw):
+                raise self._exc
+            return _raise
+        return getattr(self._inner, name)
+
+
+def _client_error(code: str, op: str):
+    from botocore.exceptions import ClientError
+    return ClientError({"Error": {"Code": code, "Message": "x"}}, op)
+
+
+@pytest.mark.parametrize("client, method, op", [
+    ("ecs", "describe_task_definition", "DescribeTaskDefinition"),
+    ("ecr", "describe_images", "DescribeImages"),
+])
+@pytest.mark.parametrize("code", ["AccessDeniedException", "ThrottlingException"])
+def test_access_errors_are_not_misses(aws, client, method, op, code):
+    """权限不足 / 限流不是「资源不在」：原样抛 ClientError，由入口按凭证 / region / 权限诊断。
+
+    翻成 WorkerVariantError 会附上「请部署方推送该 variant」的指引，把缺只读权限的提交者引去重推镜像、原地绕圈。
+    """
+    from botocore.exceptions import ClientError
+
+    _seed(aws, variant="base")
+    clients = {**aws, client: _Failing(aws[client], method, _client_error(code, op))}
+    with pytest.raises(ClientError) as e:
+        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
+                                       backend_version=_VERSION, **clients)
+    assert not isinstance(e.value, compose.WorkerVariantError)
+    assert compose.is_botocore_error(e.value)  # 入口前端靠它归到「凭证 / region / 权限」分支
+
+
+def test_network_error_on_ecr_is_not_a_miss(aws):
+    """连不上端点（BotoCoreError，无错误码）同样原样抛。"""
+    from botocore.exceptions import EndpointConnectionError
+
+    _seed(aws, variant="base")
+    clients = {**aws, "ecr": _Failing(aws["ecr"], "describe_images",
+                                      EndpointConnectionError(endpoint_url="https://api.ecr.us-east-1.amazonaws.com"))}
+    with pytest.raises(EndpointConnectionError):
+        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
+                                       backend_version=_VERSION, **clients)
+
+
 def test_one_engine_missing_fails_whole_resolution(aws):
     """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合运行」的静默路径。"""
     _seed(aws, variant="base", engines=("novaact",))
@@ -246,7 +319,7 @@ def test_engine_absent_from_mapping_gets_throwing_placeholder(monkeypatch):
 
     monkeypatch.setattr(fe, "FargateEngine", lambda **kw: ("fake", kw["task_definition"]))
     engines = compose.build_fargate_engines(
-        run_id="r1", prefix=_PREFIX, cluster="c", events_table="ev", bucket="b", report_dir="runs",
+        run_id="r1", cluster="c", events_table="ev", bucket="b", report_dir="runs",
         network_config={"subnets": ["s"]},
         worker_task_defs={"novaact": "arn:aws:ecs:us-east-1:1:task-definition/t-novaact-worker:7"},
         ecs=object(), s3=object(), ddb_events_table=object(),
@@ -264,7 +337,7 @@ def test_worker_task_defs_is_required():
     """漏传 worker_task_defs → TypeError（不静默缺省成 family 名，ADR 0038 不变量做成硬约束）。"""
     with pytest.raises(TypeError):
         compose.build_fargate_engines(
-            run_id="r1", prefix=_PREFIX, cluster="c", events_table="ev", bucket="b",
+            run_id="r1", cluster="c", events_table="ev", bucket="b",
             report_dir="runs", network_config={"subnets": ["s"]},
             ecs=object(), s3=object(), ddb_events_table=object(),
         )

@@ -58,7 +58,7 @@ class DdbEventLog:
             pk = events_pk(self._run_id, scope_id)
             # 逐 scope 全量 Query（含翻页；SK 升序保序）。worker 段 + 可能的 task_exited 高位 item 都在同 PK 下。
             # ConsistentRead：本读面是 reconcile 的投影输入，且 finalize 前的 _final_drain / 退出观察者写入紧接着
-            # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在运行（ADR 0030 决定四）。
+            # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在运行（ADR 0030 决定六）。
             kwargs = {"KeyConditionExpression": Key(PK_ATTR).eq(pk), "ScanIndexForward": True, "ConsistentRead": True}
             while True:
                 resp = self._table.query(**kwargs)
@@ -115,7 +115,8 @@ class DdbEventLog:
 
         exit_code：观察者缺 exitCode 时应落 `PLATFORM_FAILED_EXIT` 哨兵而非 None（机制二「退出码缺失」条）；None 仅
         超时处置直写（timed_out=True）时出现。timed_out：STOPPED 事件 stoppedReason 含超时哨兵（ADR 0034「job timeout」节
-        归因链）；reason：平台侧归因串（`stopCode: stoppedReason`），随哨兵一起带。两者 omit-when-empty。"""
+        归因链）；reason：平台侧归因串（`stopCode: stoppedReason`），随哨兵一起带。云端 tick 的 launch 失败补偿也经这里
+        写 reason（「起 worker 失败：异常文本」，同样配哨兵退出码）。两者 omit-when-empty。"""
         item = {
             PK_ATTR: events_pk(self._run_id, scope_id),
             SK_ATTR: EXIT_SK,

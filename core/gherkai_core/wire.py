@@ -4,9 +4,10 @@ core 把 Job 序列化成 JSON 喂 worker stdin；worker 逐行吐 ADR 0024 事�
 EVENTS_FD 传给 worker；非 stdout——stdout 留给引擎 SDK 噪声，ADR 0024 三通道分离），
 core 读行反序列化成 model.Event。这是两端（core 子进程 adapter + 语言无关的 worker）共用的形状约定。
 
-事件行之外，协议还有一条 **out-of-band 通道：worker 退出码**（建连失败早于任何事件 emit，走不了事件
-通道，ADR 0024「退出码约定」/ 0028）——故 `EX_WORKER_NETWORK` 与「退出码 → 异常」的翻译也归这里，
-各 Engine adapter 只负责把自己传输里的码取出来交给它（见文件末段）。
+事件行之外，协议还有一条 **out-of-band 通道：worker 退出码**（桌面 worker 建连失败发生在 scope_started 之前、
+不发 scope_done，事件通道上至多有会话事件、没有能承载失败原因的判定事件，ADR 0024「退出码约定」/ 0028）——
+故 `EX_WORKER_NETWORK` 与「退出码 → 异常」的翻译也归这里，各 Engine adapter 只负责把自己传输里的码取出来交给它
+（见文件末段）。
 
 设计：dataclass ↔ plain dict ↔ JSON。事件按 "type" 字段分派回正确的 Event 子类。
 保持手写映射（不靠 dataclasses.asdict 自动），因为 wire 形状是跨语言契约——
@@ -81,8 +82,9 @@ PROTOCOL_SCHEMA_VERSION = 1
 def job_to_json(job: Job) -> dict:
     """Job → JSON dict（喂 worker stdin，ADR 0024 输入形状）。
 
-    键集固定（ADR 0024「job 行的结构版本与固定键集」、0048 决策 3）：`schemaVersion` 恒写；`timeoutS` 供 worker 建会话前与
-    max_session_s 比较作自检、不超时写 null；`target` 桌面也写 desktop/web；`deviceRequest` 非设备 job 写 null。
+    键集固定（ADR 0024「协议版本与 job 行的固定键集」、0048 决策 3）：`schemaVersion` 恒写；`timeoutS` 供 worker 建会话前与
+    max_session_s 比较作自检、桌面 worker 另据它设定浏览器会话的服务端存活上限，不超时写 null；`target` 桌面也写
+    desktop/web；`deviceRequest` 非设备 job 写 null。
     字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
     """
     return {
@@ -154,6 +156,19 @@ def _report_refs_from_json(items: list | None) -> tuple[ReportRef, ...]:
     )
 
 
+# step_done / scenario_done 的判定只许三态（ADR 0024「status 三态」、0031 决定四）：skipped / aborted / pending / running 是
+# core 内态，由 core 本地赋、不经 wire（scope 内短路另走独立的 step_skipped 事件）。
+_WIRE_STATUSES = ("passed", "failed", "error")
+
+
+def _wire_status_from_json(d: dict, event_type: str) -> Status:
+    status = d.get("status")
+    if status not in _WIRE_STATUSES:
+        # 与 scope_done 的 status 校验同一口径，按 worker 违约报错：三态之外的值会破坏 scenario 内归约只见 worker 三态的前提
+        raise ValueError(f"{event_type} 的 status 只允许 \"passed\" / \"failed\" / \"error\"，收到 {status!r}（不符合 worker↔core 协议）")
+    return Status(status)
+
+
 def event_from_json(d: dict) -> Event:
     """JSON dict（worker 事件通道一行）→ model.Event，按 "type" 分派（ADR 0024）。
 
@@ -171,7 +186,7 @@ def event_from_json(d: dict) -> Event:
         return StepDone(
             scenario_id=d["scenarioId"],
             step_index=d["stepIndex"],
-            status=Status(d["status"]),
+            status=_wire_status_from_json(d, "step_done"),
             votes=_votes_from_json(d.get("votes")),
             cost=_cost_from_json(d.get("cost")),
             error_type=d.get("errorType"),
@@ -180,12 +195,12 @@ def event_from_json(d: dict) -> Event:
         )
     if t == "step_skipped":
         # scope 内短路（ADR 0031 决定六 / 0024）：独立事件、无 status/votes/cost——加法解析，
-        # 不碰上面 step_done 的三态 Status(d["status"]) 分支。core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)。
+        # 不碰上面 step_done 的三态校验。core 据此本地赋 StepResult(SKIPPED, shortcircuited=True)。
         return StepSkipped(scenario_id=d["scenarioId"], step_index=d["stepIndex"])
     if t == "scenario_done":
         return ScenarioDone(
             scenario_id=d["scenarioId"],
-            status=Status(d["status"]),
+            status=_wire_status_from_json(d, "scenario_done"),
             report_refs=_report_refs_from_json(d.get("reportRefs")),
         )
     if t == "scope_done":
@@ -245,7 +260,8 @@ def event_from_line(line: str) -> Event:
 # worker → core：退出码（out-of-band 信号，ADR 0024「退出码约定」/ 0028）
 # ============================================================================
 
-# worker 网络故障专用退出码：建连失败、重试耗尽时 worker 以这个退出码退出（建连早于任何事件 emit，无法走事件通道）。
+# worker 网络故障专用退出码：桌面 worker 建连失败、重试耗尽时以这个退出码退出（失败发生在 scope_started 之前、不发 scope_done，
+# 事件通道上至多有各次尝试的会话事件，没有能承载失败原因的判定事件；设备 worker 的执行前失败走 scope_done，不使用这个退出码）。
 # 值避开 POSIX sysexits(64-78)/shell 保留(126-128+n)/信号区。**两个引擎 worker 各自硬编码同一个值**
 # （Nova: engines/novaact/gherkai_worker_novaact/run_scope.py；Midscene: engines/midscene/src/worker/run-scope.mts
 #  ——语言边界抄不掉）；core 侧只此一处，Engine adapter 一律 import 本常量与下面的翻译函数，别各抄一份

@@ -4,7 +4,8 @@
 local `submit` 的 per-run 进程 / cloud `submit` 的隧道守护进程）。本模块住产品本体层（`gherkai_runtime` 知道
 run 生命周期，ADR 0016「演进」节）；入口前端（cli / 未来 WebUI）只负责 argparse 与打印：
 
-- `start_tunnel_for_jobs`：起隧道 → 映射 definition → 给出隧道模式恒注入的额外请求头（决策 1/2/4）。
+- `start_tunnel_for_jobs`：起隧道 → 映射 definition → 给出隧道模式恒注入的额外请求头与会话预热地址（决策 1/2/4；
+  预热地址在 `info.warmup_url`，见 ADR 0051 决策 13）。
 - `compute_watch_ttl_s` + `watch_run_and_stop_tunnel`：cloud submit 守护进程的 TTL 算法与主体循环。
 
 **术语护栏**（同 ADR 0016「演进」节的命名护栏）：叫 host（宿主，取自 ADR 0035 决策 3 的表头术语），
@@ -13,7 +14,7 @@ run 生命周期，ADR 0016「演进」节）；入口前端（cli / 未来 WebU
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from gherkai_core.model import TERMINAL_STATUSES, Job
 
@@ -41,14 +42,13 @@ UNBOUNDED_JOB_BUDGET_S = 3600.0
 
 @dataclass(frozen=True)
 class TunnelSetup:
-    """隧道就绪后的四件产物：映射过的 definition + 隧道模式的额外请求头 + 会话预热地址 + 隧道事实（收尾凭据）。
-    额外请求头与预热地址在隧道模式下**恒同时给出**（含只有设备目标的 run），worker 侧的 definition 完整性判据（有请求头必有预热地址，
-    ADR 0035「边界与不变量」）才在任何目标上都成立。"""
+    """隧道就绪后的三件产物：映射过的 definition + 隧道模式的额外请求头 + 隧道事实（收尾凭据）。
+    会话预热地址在 `info.warmup_url`（ADR 0035 决策 1），隧道模式下与额外请求头**恒同时给出**（含只有设备目标的 run），
+    worker 侧的 definition 完整性判据（有请求头必有预热地址，ADR 0035「边界与不变量」）才在任何目标上都成立。"""
 
     jobs: tuple[Job, ...]
     extra_http_headers: dict[str, str]
     info: _tunnel.TunnelInfo
-    warmup_url: str = field(repr=False)  # 含本次令牌：不进 repr（日志与异常里打印对象时不带出来）
 
 
 def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -> TunnelSetup:
@@ -59,7 +59,7 @@ def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -
     """
     info = _tunnel.make_tunnel(provider).start(local_origin)
     mapped = _tunnel.map_origin_in_jobs(list(jobs), local_origin, info.url)  # 干净的隧道地址，不内嵌凭据（ADR 0051 决策 13）
-    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), info=info, warmup_url=info.warmup_url)
+    return TunnelSetup(jobs=tuple(mapped), extra_http_headers=dict(TUNNEL_EXTRA_HTTP_HEADERS), info=info)
 
 
 def compute_watch_ttl_s(
@@ -87,8 +87,9 @@ def watch_run_and_stop_tunnel(
     TTL 到点 → 拆隧道自杀（防「run 卡死 / 查询持续异常」时 ngrok 进程泄漏）。返回拆除原因（调用方打印）。
 
     读库异常不致命（瞬时网络/限流）——经 `on_warn`（可选，前端层给打印口）报一句后继续轮询，TTL 是最终兜底。
-    **拆隧道在 finally**：store 装配抛（region 解析不出 / 凭证坏）或轮询被非 Exception 中断，本进程带着异常死掉——
-    它是隧道唯一宿主（ADR 0035 决策 3），不在此拆就没人拆、ngrok 永久留在公网。曾只在循环之后拆、装配段裸奔。
+    **拆隧道在 finally**：store 装配抛（region 解析不出 / 凭证坏）或轮询被非 Exception 中断（如守护进程入口把 SIGTERM / SIGHUP
+    转成的 SystemExit），本进程带着异常死掉——它是隧道唯一宿主（ADR 0035 决策 3），不在此拆就没人拆、ngrok 永久留在公网。
+    不要把拆除移到循环之后：装配段抛出时执行不到那里。
     """
     reason = f"TTL 兜底 {ttl_s:.0f}s"
     try:

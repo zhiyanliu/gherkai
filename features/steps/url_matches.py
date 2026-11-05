@@ -1,8 +1,8 @@
 """示范用确定性 step（Nova Act 侧）：断言当前页面地址匹配给定正则。
 
 这是 `steps/` 目录的模板：复制进你的项目后按需改措辞与判定。与 `url_matches.mts` 成对（同一正则，具名组写法
-不同），两个引擎读同一份 .feature 时行为一致。运行时经 `--steps-dir features/steps` 或环境变量
-`GHERKAI_STEPS_DIR` 加载进 worker 的注册表。
+不同），两个引擎读同一份 .feature 时行为一致。运行时从当前目录下的 `steps/` 自动加载
+进 worker 的注册表（目录放在别处时用 `--steps-dir` 或环境变量 `GHERKAI_STEPS_DIR` 指定）。
 """
 import re
 

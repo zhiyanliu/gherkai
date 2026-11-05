@@ -200,7 +200,7 @@ def test_cli_version_is_handed_to_provider(monkeypatch):
 
 def test_provider_subverb_seam_takes_precedence(monkeypatch):
     """0038 的子动词接缝：provider 在 `add_arguments` 里挂 subparser + `set_defaults(_deploy_verb=…)`，
-    前端先看它、不再走默认的真部署（`gherkai deploy push-worker …` 那族命令届时前端一行不改）。"""
+    前端先看它、不再走默认的真部署（`gherkai deploy push-worker …` 那族命令的实现全在 provider 一侧、前端没有对应代码）。"""
     seen: list[str] = []
 
     class _WithVerb(_StubProvider):

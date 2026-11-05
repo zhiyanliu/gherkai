@@ -11,8 +11,11 @@
 local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 
 **另两个 port 不在本模块**：`EventLog` 与 `Launcher` 定义在 `reconcile.py`、与消费它们的 reconciler 同处——
-只服务无状态推进路径，与本模块那批「同步 `run` 也用」的口生命周期不同（ADR 0016「`EventLog` / `Launcher`
-两个 port 定义在 `reconcile.py`」条；亦见 ADR 0034「Engine port 演进」）。同样组合根注入、各两个实装：
+两个 port 的推进语义（reconciler 读全量 events 重放、CAS 抢占成功后起一个 job）只服务无状态推进路径，与本模块那批
+「同步 `run` 也用」的口生命周期不同；`EventLog` 的实装另被同步 `run` 用来落事件流与退出记录（组合根给引擎包一层
+`EventRecordingEngine`，ADR 0042 决策七）、被 `explain` 用来读（本机 `SqliteEventLog`、云端 `DdbEventLog`）
+（ADR 0016「`EventLog` / `Launcher` 两个 port 定义在 `reconcile.py`」条；
+亦见 ADR 0034「Engine port 演进」）。同样组合根注入、各两个实装：
 `EventLog` 的实装是 `adapters/event_log/sqlite.py`（local）与 `adapters/event_log/ddb.py`（cloud）；`Launcher` 的
 实装是 `runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（local）与 `adapters/cloud_launcher.py` 的
 `CloudLauncher`（cloud）。盘点 core 的注入接缝时**两处都要看**。
@@ -87,7 +90,7 @@ class Sink(Protocol):
 
 # JobSink：每个 job 完成时的回调，收 schedule **已归约好的** JobResult（非原始 Event）——供实时落库（ADR 0030 决定一）。
 # 与 Sink 同性质（都是注入回调、可注入 no-op、schedule 不碰 store），但粒度是「整 job 完成」而非「单个事件」。
-# schedule 在 as_completed 主线程串行 fire，故实现无需自己加锁。
+# schedule 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行 fire，故实现无需自己加锁。
 class JobSink(Protocol):
     def __call__(self, job: JobResult) -> None: ...
 

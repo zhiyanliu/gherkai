@@ -4,12 +4,13 @@ name: release
 # 基础镜像 tag、GitHub Release——版本真源（ADR 0037 决策 2b/7）。
 # 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本==tag）→ ① PyPI（build → attest → publish）
 # → ② npm → ③ GHCR 基础镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
-# 一次性人工前置（PyPI trusted publisher / npm token / GHCR 包可见性）见 .github/workflows/README.md。
+# 一次性人工前置（PyPI trusted publisher / npm trusted publisher / GHCR 包可见性）见 .github/workflows/README.md。
 on:
   push:
     tags: ["v*"]
 
-# 同一 tag 上的重复运行不互相取消：对已发行版本单独重新运行镜像 job 是「半发布态」的修复动作（ADR 0037 决策 8）。
+# 同一 tag 上的重复运行不互相取消：对已发行版本单独重新运行镜像 job 是「半发布态」的修复动作（ADR 0037 决策 8）；
+# 已存在的版本镜像不重建。
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -33,7 +34,6 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.tag.outputs.version }}
-      is-latest: ${{ steps.gate.outputs.is-latest }}
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -91,8 +91,10 @@ jobs:
           uv run --no-project python .github/scripts/check_dist_metadata.py \
             --dist dist --expect-version "$version"
 
-          # `latest` 只跟随最新 tag（ADR 0037 决策 8）：重新运行旧版本时不许把 latest 拽回去——
-          # 判据是本 tag 就是全仓库按版本序最大的那个 tag（重新运行旧 tag 时不成立）。
+          # 这里只把「触发时本 tag 是否最新」写进 step summary 供人核对，不作为 job output：`latest` 只跟随
+          # 最新正式发行 tag（ADR 0037 决策 8），是否推 `latest`、Release 是否标为 Latest，由 images 与 release
+          # 两个 job 在推镜像 / 建 Release 的那一刻按远端 tag 判定，任何重新运行方式都成立。经 job output 传递不成立：
+          # 「Re-run failed jobs」不重新运行 build，下游拿到的是首次运行时算出的旧值，会把 latest 指回旧版本。
           # `|| true` 防 grep 无匹配撞上 pipefail。
           newest="$(git tag --list 'v*' --sort=version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | tail -n1 || true)"
           if [ "$newest" = "$tag" ]; then
@@ -101,12 +103,11 @@ jobs:
             is_latest=false
           fi
 
-          echo "is-latest=$is_latest" >> "$GITHUB_OUTPUT"
           {
             echo "### release $tag"
             echo ""
             echo "- 版本：\`$version\`（仓库最新正式发行 tag：\`$newest\`）"
-            echo "- 镜像/Release 打 latest：\`$is_latest\`"
+            echo "- 触发时本 tag 是否最新：\`$is_latest\`（镜像与 Release 是否打 latest，以各自 job 推送那一刻的判定为准）"
           } >> "$GITHUB_STEP_SUMMARY"
         env:
           VERSION: ${{ steps.tag.outputs.version }}
@@ -269,10 +270,17 @@ jobs:
           owner="${GITHUB_REPOSITORY_OWNER,,}" # registry 路径必须全小写
           image="ghcr.io/${owner}/gherkai-worker-${ENGINE}"
           tags="${image}:${VERSION}"
-          if [ "${IS_LATEST}" = "true" ]; then
+          # `latest` 只跟随最新正式发行 tag（ADR 0037 决策 8）：在推镜像这一刻按远端 tag 判定，任何重新运行方式都成立
+          # （不读 build job 的输出：「Re-run failed jobs」不重新运行 build，沿用的是首次运行时的旧值）。
+          # 用 ls-remote、不用本地 `git tag`：本 job 的 checkout 是浅仓库，本地看不全 tag；公开仓库可匿名读。
+          # 查询远端失败即本步失败（赋值里的命令替换受 set -e 约束），不默认成「不推 latest」；
+          # `|| true` 只防 grep 无匹配撞上 pipefail。
+          remote_tags="$(git ls-remote --tags --refs "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" 'v*')"
+          newest="$(printf '%s\n' "$remote_tags" | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ "$newest" = "${GITHUB_REF_NAME}" ]; then
             tags="${tags}"$'\n'"${image}:latest"
           else
-            echo "::notice::本 tag 不是最新正式发行，不动 ${image}:latest"
+            echo "::notice::本 tag 不是最新正式发行（远端最新：${newest}），不动 ${image}:latest"
           fi
           {
             echo "image=$image"
@@ -283,7 +291,6 @@ jobs:
         env:
           ENGINE: ${{ matrix.engine }}
           VERSION: ${{ needs.build.outputs.version }}
-          IS_LATEST: ${{ needs.build.outputs.is-latest }}
 
       - uses: docker/setup-buildx-action@v4.3.0
 
@@ -293,8 +300,32 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: 版本镜像已存在则跳过（版本 tag 不可变）
+        id: exists
+        # 版本 tag `X.Y.Z` 不可变（ADR 0037 决策 5）：index 态构建的依赖在构建时才解析（上游基础镜像、pip / npm 的
+        # 传递依赖），重建出来的 digest 几乎必然不同，「Re-run all jobs」或重新运行已成功的镜像 job 就会覆盖已发行的
+        # 版本镜像。做法与 pypi（--check-url）、npm（npm view）两个 job 一致：已存在就跳过。只有确认不存在才往下构建，
+        # 网络或鉴权错误一律失败，避免查询失败时误入构建、照样覆盖。镜像缺失时照常构建，半发布态的修复语义不变。
+        run: |
+          set -euo pipefail
+          if out="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" 2>&1)"; then
+            digest="$(printf '%s\n' "$out" | awk '/^Digest:/ {print $2; exit}')"
+            echo "::notice::${IMAGE}:${VERSION} 已存在，跳过构建（版本 tag 不可变）"
+            echo "- \`${IMAGE}:${VERSION}\` 已存在 → \`${digest}\`（未重建）" >> "$GITHUB_STEP_SUMMARY"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$out" | grep -qiE 'not found|manifest unknown'; then
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::查询 ${IMAGE}:${VERSION} 失败：$out"
+            exit 1
+          fi
+        env:
+          IMAGE: ${{ steps.meta.outputs.image }}
+          VERSION: ${{ needs.build.outputs.version }}
+
       - uses: docker/build-push-action@v7.3.0
         id: push
+        if: steps.exists.outputs.skip != 'true'
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.context }}/Dockerfile
@@ -319,6 +350,7 @@ jobs:
             org.opencontainers.image.licenses=MIT
 
       - name: 记 digest
+        if: steps.exists.outputs.skip != 'true'
         run: |
           {
             echo "- \`${IMAGE}:${VERSION}\` → \`${DIGEST}\`"
@@ -355,10 +387,25 @@ jobs:
           OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
 
+      - name: 判定本 tag 是否为最新正式发行（决定 make_latest）
+        id: latest
+        run: |
+          set -euo pipefail
+          # 与 images job「算镜像 tag」一步同一判定、同一理由：建 Release 这一刻按远端 tag 判定，任何重新运行方式都成立；
+          # 本 job 是 sparse checkout，本地 `git tag` 同样靠不住。
+          remote_tags="$(git ls-remote --tags --refs "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git" 'v*')"
+          newest="$(printf '%s\n' "$remote_tags" | sed 's#.*refs/tags/##' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          if [ "$newest" = "${GITHUB_REF_NAME}" ]; then
+            echo "is-latest=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::本 tag 不是最新正式发行（远端最新：${newest}），Release 不标为 Latest"
+            echo "is-latest=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           generate_release_notes: false
-          make_latest: ${{ needs.build.outputs.is-latest }}
+          make_latest: ${{ steps.latest.outputs.is-latest }}
           body_path: release_body.md

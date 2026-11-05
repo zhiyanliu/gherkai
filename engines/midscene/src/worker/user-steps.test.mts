@@ -37,6 +37,42 @@ test("collectStepFiles: 排序递归、只取 .mts/.mjs、排除 _* 与 *.test.*
   assert.deepEqual(got, ["a.mjs", "b.mts", path.join("m", "y.mjs"), path.join("z", "deep", "x.mts")]);
 });
 
+// steps 根与它旁边的 `shared/` 同建在一个临时目录下：链接目标放在 steps 根之外，才是使用方共用文件的真实形态。
+function tmpStepsWithShared(shared: Record<string, string>): { steps: string; shared: string } {
+  const base = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-steps-link-test-"));
+  const steps = path.join(base, "steps");
+  const sharedDir = path.join(base, "shared");
+  fs.mkdirSync(steps);
+  fs.mkdirSync(sharedDir);
+  for (const [rel, content] of Object.entries(shared)) {
+    const p = path.join(sharedDir, rel);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, content);
+  }
+  return { steps, shared: sharedDir };
+}
+
+test("collectStepFiles: 指向文件的符号链接收进清单，指向目录的不进入，`_*` 链接不收（与 Nova 侧 rglob 对称）", () => {
+  const { steps, shared } = tmpStepsWithShared({
+    "login.mts": "", "helper.mts": "", "dir/inner.mts": "",
+  });
+  fs.writeFileSync(path.join(steps, "plain.mts"), "");
+  fs.symlinkSync(path.join(shared, "login.mts"), path.join(steps, "login.mts"));      // 指向文件：收
+  fs.symlinkSync(path.join(shared, "helper.mts"), path.join(steps, "_helper.mts"));   // `_` 前缀：辅助模块面，不收
+  fs.symlinkSync(path.join(shared, "dir"), path.join(steps, "linkdir"));              // 指向目录：不进入
+  fs.symlinkSync(path.join(shared, "gone.mts"), path.join(steps, "gone.mts"));        // 悬空、名字通过筛选：收，交给 import 失败点名
+  fs.symlinkSync(path.join(shared, "notes.txt"), path.join(steps, "notes.txt"));      // 悬空、名字不通过筛选：不收、也不报错
+  const got = collectStepFiles(steps).map((f) => path.relative(steps, f));
+  assert.deepEqual(got, ["gone.mts", "login.mts", "plain.mts"]);
+});
+
+test("collectStepFiles: 名字通过筛选却指向目录的符号链接 → 点名报错，不静默跳过（Nova 侧对同名目录同样起不来）", () => {
+  const { steps, shared } = tmpStepsWithShared({ "dir/inner.mts": "" });
+  fs.writeFileSync(path.join(steps, "plain.mts"), "");
+  fs.symlinkSync(path.join(shared, "dir"), path.join(steps, "odd.mts"));
+  assert.throws(() => collectStepFiles(steps), /steps 文件加载失败 .*odd\.mts：它是指向目录的符号链接/);
+});
+
 test("loadUserSteps: _* 辅助模块（文件与目录两形态）不进加载清单（ADR 0037 决策 4）", async () => {
   // 辅助模块（页面对象/选择器常量）一条 step 都不注册，若被自动加载就会撞上零注册 fail-loud。
   const root = tmpSteps({ "_helpers.mts": "", "_pages/selectors.mts": "", "a.mts": "" });
@@ -170,6 +206,20 @@ deterministic('目录辅助模块 step "(?<x>[^"]+)"', () => { void SUBMIT; }, {
   assert.equal(code, 0, `应以退出码 0 结束（辅助模块目录整棵不自动加载），stderr=${err}`);
   const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
   assert.ok(patterns.includes('目录辅助模块 step "(?<x>[^"]+)"'), `使用方 step 该在表里：${patterns}`);
+});
+
+test("实际运行: 经符号链接放进 steps 目录的 .mts（目标在 steps 之外）注册进同一张注册表", async () => {
+  // 链接目标的真实路径在 steps 根之外：Node 按真实路径定模块 URL，裸 specifier 仍要靠 resolve hook 解析。
+  // 只判 `isFile()` 时这类文件被静默跳过、零注册守卫也不开火，同一份 steps/ 在 Nova 上注册、在这里落回 AI。
+  const { steps, shared } = tmpStepsWithShared({
+    "login.mts": `import { deterministic } from "@gherkai/worker-midscene";
+deterministic('链接 step "(?<x>[^"]+)"', () => {}, { description: "d", example: "e" });\n`,
+  });
+  fs.symlinkSync(path.join(shared, "login.mts"), path.join(steps, "login.mts"));
+  const { code, out, err } = await runBin(steps);
+  assert.equal(code, 0, `应以退出码 0 结束，stderr=${err}`);
+  const patterns = JSON.parse(out).deterministic_steps.map((e: { pattern: string }) => e.pattern);
+  assert.ok(patterns.includes('链接 step "(?<x>[^"]+)"'), `经链接的使用方 step 该在表里：${patterns}`);
 });
 
 test("实际运行: 语法错的 steps 文件 → 非零退出 + stderr 点名该文件（绝不静默跳过）", async () => {

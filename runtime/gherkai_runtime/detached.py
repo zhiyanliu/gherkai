@@ -30,7 +30,8 @@ from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头�
 # launch，且本判据每 poll_interval 才查一次。**不覆盖**活 owner 的 stop→协作退收尾——SIGTERM 是 flag-only、
 # 只在 act 边界被检测（in-flight act 要有界返回才退），之后还有会话释放与证据有界排空，故引擎 grace 下限本身
 # 就取到数十秒级（各引擎 worker 经自述入口 `--capabilities` 自报、compose.engine_min_grace 只查询聚合；今值
-# midscene 31s / Nova 150s），远大于本余量。所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
+# midscene 63.5s（桌面与设备两条收尾路径取较大者，桌面一条为 31s）/ Nova 150s），远大于本余量。
+# 所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
 # （同带 timed_out=True、record_exit 是 INSERT OR REPLACE 同 key），**不靠本余量抢先**。故本值是非正确性参数，
 # 调大调小只影响 owner 真死时的恢复延迟。
 _RECOVERY_MARGIN_S = 10.0
@@ -104,7 +105,8 @@ class SubprocessLauncher:
         """驱动一个 worker 的 fd3 事件流直到结束（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
 
         迭代 events 只为驱动 fd3 读（每行触发 raw_sink 落库）——迭代产出的 Event 本身丢弃（我们要的是原始行、
-        已落库）。异常（含 _read_events 对 rc>0 抛的 RuntimeError/WorkerNetworkError）吞掉：下面 handle.wait()
+        已落库）。异常（含 _read_events 对非零退出码抛的 WorkerExitError：自行异常退出的正码与被信号强杀的负码
+        都抛，网络故障码抛其子类 WorkerNetworkError；也含事件行解析失败的 ValueError）吞掉：下面 handle.wait()
         拿真实 exitcode 写 task_exited，让 project 据「两件都要」判终态（机制二）。无论如何都写退出记录——
         否则该 job 永远 RUNNING、reconciler 卡住不收尾。
         """
@@ -232,8 +234,9 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     worker cmd 走定位链（ADR 0037 决策 3，不再由仓库结构推导，故本函数不收 repo）；env 覆写对两宿主自然可见
     （per-run 继承提交进程 env、接力者用自己的 env）。
     """
-    # region/profile 走与前台 run 完全相同的解析链（ADR 0016 决策 C：--region > AWS_REGION > AWS_DEFAULT_REGION >
-    # profile config）——此前原样透传 None：profile-only/config-only 的使用方下 worker env 不注入 AWS_REGION，
+    # region/profile 的解析链与前台 run 同源（`compose.resolve_aws_identity`；顺序见 ADR 0016 决策 C 与 ADR 0053
+    # 决策 2）：配置文件那一层由 CLI 在 fork 或接力前解析好、经参数传入，本函数按 ADR 0053 决策 1 不读配置文件，
+    # 只补环境变量与 profile 的末段回落。此前原样透传 None：profile-only/config-only 的使用方下 worker env 不注入 AWS_REGION，
     # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 实际运行复现）。
     # 单点在 `compose.resolve_aws_identity`（而非各调用方各写一份）：submit fork 的 per-run /
     # status --wait 接力 / 手动 _reconcile 三路全覆盖。

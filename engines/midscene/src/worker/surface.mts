@@ -27,7 +27,8 @@
 // 失败的两种传递方式按调用方是谁来分：生命周期通道上的成员（四项义务、预热、acquire 的执行前失败）由 run-scope 直接调用，
 // 失败作为返回值交回、不抛出，run-scope 据返回值决定判定与出口；经使用方 handler 或 Midscene 抛出的执行异常（execute、
 // bindHandler 绑好的调用、navigate）由命令守卫与实现把 step 级归类挂到异常对象上（attachClassification），runStep 的通用异常
-// 分类先读这个标记（readClassification）、读到即按它归类，读不到的（桌面路径的全部异常）沿用瞬时网络判定（ADR 0052 决策 6）。
+// 分类先读这个标记（readClassification）、读到即按它归类，读不到的沿用瞬时网络判定（ADR 0052 决策 6）；桌面路径只有派发出错的
+// 防御分支（bindHandler 收到不适用于桌面浏览器的句柄）带标记，其余异常都不带。
 import type { Agent, AgentOpt } from "@midscene/core";
 import type { ArtifactUploader } from "../lib/artifact-upload.mjs";
 import type { Job } from "../lib/job-source.mjs";
@@ -333,7 +334,7 @@ export interface TargetSurface {
 // 标记挂在异常对象的一个 symbol 键上：不进 JSON、不出现在可枚举键里，日志与 errorText 的输出不受影响；用 Symbol.for 是为了
 // 模块被重复加载（同一文件的两个实例）时读写两侧仍认得同一个键。
 const CLASSIFICATION_KEY = Symbol.for("gherkai.worker-midscene.step-classification");
-// cause 链的查找上限，与 run-scope 瞬时网络判定遍历 cause 链的上限相同，同时防环。
+// cause 链的查找上限，与 worker/surface-desktop.mts 的 isTransientNetwork 遍历 cause 链的上限相同，同时防环。
 const MAX_CAUSE_DEPTH = 8;
 
 /** 挂在执行异常上的归类标记：step 级归类，另可带一项命令守卫查到的会话事实。runStep 只用其中的类别与消息；那项事实只给

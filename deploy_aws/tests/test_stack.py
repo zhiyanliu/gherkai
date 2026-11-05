@@ -178,6 +178,18 @@ def test_two_task_defs_container_name_without_prefix():
         })
 
 
+def test_task_defs_pin_linux_x86_64_runtime_platform():
+    # 模板 revision 是 worker 架构的真值源（ADR 0038「架构」）：push-worker 复制它时原样带走 runtimePlatform，
+    # 推送前也按 linux/amd64 校验镜像，所以两个模板都得显式带这个字段，不能靠 Fargate 的缺省行为。
+    t = _template()
+    task_defs = t.find_resources("AWS::ECS::TaskDefinition")
+    assert len(task_defs) == 2
+    for logical_id, td in task_defs.items():
+        assert td["Properties"].get("RuntimePlatform") == {
+            "CpuArchitecture": "X86_64", "OperatingSystemFamily": "LINUX",
+        }, f"{logical_id} 的 RuntimePlatform 不对：{td['Properties'].get('RuntimePlatform')}"
+
+
 def test_two_ecr_repos():
     t = _template()
     t.resource_count_is("AWS::ECR::Repository", 2)
@@ -674,6 +686,21 @@ def test_execution_role_and_two_task_roles():
     #        + 1 job timeout 的 Scheduler 执行角色（Scheduler 服务 assume 它 invoke kicker，ADR 0034「job timeout」节）。
     t = _template()
     t.resource_count_is("AWS::IAM::Role", 7)
+
+
+# ---- prefix 长度上限（ADR 0033「两层命名」护栏）----
+def test_prefix_at_length_limit_synthesizes():
+    # 32 个字符恰为上限：job timeout schedule 名（前缀 + 摘要）恰为 64 字符，合成照常通过。
+    prefix = "a" * 31 + "-"
+    assert len(prefix) == 32
+    _template(prefix=prefix)
+
+
+def test_prefix_over_length_limit_fails_at_synth():
+    # 33 个字符超限：其余资源仍建得出来，只有运行期 CreateSchedule 会被拒、超时保护静默失效，故合成期即拒。
+    prefix = "a" * 32 + "-"
+    with pytest.raises(ValueError, match="至多 32 个字符，当前为 33 个"):
+        _template(prefix=prefix)
 
 
 # ---- stopTimeout（grace 真容器校准入口，ADR 0032）----

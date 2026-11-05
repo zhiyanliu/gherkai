@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // docs 图的两段式构建（ADR 0045 决策七）：
-//   ① 渲染  JSON 图源 --archify deliver--> 可交互 HTML   纯 CLI、确定性、无 LLM；Pages 上暴露的就是它，CI 也运行同一条命令
+//   ① 渲染  JSON 图源 --archify deliver--> 可交互 HTML   纯 CLI、确定性、无 LLM；只在本机执行，发布到 Pages 的图把这份 HTML 入库、由 pages.yml 原样上传（CI 不渲染）
 //   ② 导出  HTML --headless Chrome 点导出菜单--> SVG      只为嵌进 markdown 的静态图；可选再导 PNG 供目视检查
 // 作者化（写 JSON）是唯一需要智能的一步，由 AI 在 push 前完成，本脚本不碰。
 //
@@ -19,7 +19,7 @@
 //   node tools/build_diagrams.mjs                       # docs/diagrams/*.json 全部：① 渲染 + ② 导出 SVG
 //   node tools/build_diagrams.mjs docs/diagrams/x.json  # 只做这几张
 //   node tools/build_diagrams.mjs --png                 # 另导 PNG（只供目视检查，不入库）
-//   node tools/build_diagrams.mjs --no-deliver          # 跳过 ①，只从现有 HTML 导出
+//   node tools/build_diagrams.mjs --no-deliver          # 跳过 ①，只从现有 HTML 导出，要求旧 SVG 带图源指纹
 //   node tools/build_diagrams.mjs --html some.html      # 只导出一个现成 HTML（不需要 JSON）
 //   node tools/build_diagrams.mjs --dir <目录>          # 换图源目录（缺省 docs/diagrams）
 // 退出码：0 全成；1 有失败（逐张打出原因）。入库的是 JSON 与 SVG（同 commit）；HTML 只对发布到 Pages 的图入库。
@@ -124,6 +124,8 @@ async function main() {
       // --no-deliver 复用旧 HTML，导出的图形来自旧图源，指纹必须沿用旧的，否则会把「改了图源没重导」盖成绿
       //（ADR 0045 决策七的护栏）。沿用值只能在导出覆写 SVG 之前读出来。
       const carried = job.json && noDeliver ? readStampedFingerprint(`${job.stem}.svg`) : null;
+      // 没有可沿用的指纹就无从确认现有 HTML 出自当前图源：在覆写 SVG 之前拒绝，护栏照常判红
+      if (job.json && noDeliver && !carried) throw new Error('旧 SVG 没有可沿用的图源指纹，无法确认现有 HTML 来自当前图源：去掉 --no-deliver 重新渲染');
       const svg = await exportFrom(page, job.html, 'svg', `${job.stem}.svg`);
       let note = '';
       if (carried) {
@@ -131,7 +133,6 @@ async function main() {
         note = '  指纹沿用旧 SVG（--no-deliver 没重渲染 HTML，导出的图形仍来自旧图源）';
       } else if (job.json) {
         stampSource(`${job.stem}.svg`, job.json);
-        if (noDeliver) note = '  指纹按当前 JSON 算（旧 SVG 没有可沿用的指纹）';
       }
       let line = `ok   ${name}${type ? ` [${type}]` : ''}  svg ${svg.bytes} B${note}`;
       if (wantPng) { const png = await exportFrom(page, job.html, 'png', `${job.stem}.png`); line += `  png ${png.bytes} B`; }

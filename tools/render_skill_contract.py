@@ -22,7 +22,7 @@ skill 的消费现场是使用方项目里的一份拷贝，那些指代对使�
 
 用法：
     python3 tools/render_skill_contract.py             # 渲染并写入副本
-    python3 tools/render_skill_contract.py --check     # 只比对（漂了以退出码 1 结束），CI / 本地自查用
+    python3 tools/render_skill_contract.py --check     # 只比对（漂了以退出码 1 结束），.claude/hooks/sync-derived.sh 与本地自查用；CI 的等值断言在 cli/tests/test_skill.py
 """
 
 from __future__ import annotations
@@ -54,8 +54,8 @@ POINTER_REWRITES: dict[str, str] = {
 }
 
 # 规则 3：禁词 → 产品语言。同样是逐字替换的显式登记表；未登记的禁词由 `_assert_clean` 拦。
-# `FORBIDDEN` 正则只收得住成形的内部指代（ADR 编号 / 决策号 / 那几个固定机制名），源页里的其它
-# 内部用词（推进器 / 投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
+# `FORBIDDEN` 正则只收得住成形的内部指代（ADR 编号 / 决策号 / 那几个固定机制名，「推进器」也在其中），源页里的其它
+# 内部用词（投影 / definition …）机械层照不出、只能靠人眼发现后登记在此。
 FORBIDDEN_REWRITES: dict[str, str] = {
     "命中 worker 定位链的哪一级": "命中 worker 查找顺序的哪一级",
     "顶层由三部分组成：RunResult（判定）、": "顶层由三部分组成：这次运行的判定、",

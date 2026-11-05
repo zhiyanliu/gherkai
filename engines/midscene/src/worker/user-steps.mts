@@ -1,7 +1,8 @@
 // 使用方 `steps/` 目录的加载（ADR 0037 决策 4；Nova 引擎侧 `*.py` 遍历是其对称版）。
 //
-// 契约（约定逻辑**不在这里**）：目录由组合根解析（`--steps-dir` > env > `./steps`）、随 definition 持久化、
-// 经 env `GHERKAI_STEPS_DIR` 注给 worker。worker 只认这个 env、不认约定、不重解析——保持薄（ADR 0016 分层）。
+// 契约（约定逻辑**不在这里**）：目录由组合根解析（`--steps-dir` > env > 项目配置文件的 `steps-dir` > `./steps`，
+// ADR 0037 决策 4、0053 决策 2）、随 definition 持久化、经 env `GHERKAI_STEPS_DIR` 注给 worker。worker 只认这个 env、
+// 不认约定、不重解析——保持薄（ADR 0016 分层）。
 //
 // 加载规则：**排序**递归遍历 `*.mts` / `*.mjs`（排除 `_*` 与 `*.test.*`），逐个 `await import(fileURL)`，
 // 文件顶层 `deterministic(...)` 的副作用完成注册。排序保证 conflict 清单可复现（ADR 0036）。
@@ -10,6 +11,11 @@
 // `_selectors.mts` 与 `_pages/selectors.mts` 都不自动加载，故辅助模块既可按文件前缀标、也可按目录分组
 // （目录级排除两侧同时在，否则同一个 `_pages/login.mts` 会在一侧注册、在另一侧静默落回 AI）。它同时挡住
 // 下面零注册检查的一类误报：辅助模块自己一条都不注册，被自动加载就会撞上那条 fail-loud。
+//
+// 符号链接与 Nova 侧 `rglob` 的行为对齐：指向文件的链接按其目标加载，指向目录的链接不进入。名字筛选看链接自身的
+// 名字、且先于读取目标类型，故 `steps/` 里与 step 无关的链接（如悬空的 `notes.txt`、指向目录的 `pages`）两侧都不理会；
+// 通过名字筛选的悬空链接照样收进清单，由下面 ① 点名报错；通过名字筛选却指向目录的链接（如 `shared.mts` 指向一个目录）
+// 在收集时就以 ① 的措辞报错。Nova 侧对这两种同样在加载该文件时报错，两侧都起不来，不静默跳过。
 //
 // 两条 fail-loud（本项目最忌静默降级——跳过一个 step 文件就等于把确定性判定静默换成 AI catch-all、run 可能「通过」）：
 //   ① import 失败（语法/依赖错）→ 立刻抛，带文件名与原异常；
@@ -32,7 +38,7 @@ import { redactSecrets } from "../lib/redact.mjs";
 const STEP_EXTS = [".mts", ".mjs"];
 
 /** 排序递归收集 step 文件（同层按名字排序、目录深度优先，保加载次序可复现）。
- * 路径任一段以 `_` 开头即辅助模块面：`_*` 目录整棵跳过、`_*` 文件跳过（见模块头）。 */
+ * 路径任一段以 `_` 开头即辅助模块面：`_*` 目录整棵跳过、`_*` 文件跳过；符号链接按目标类型分流（均见模块头）。 */
 export function collectStepFiles(root: string): string[] {
   const out: string[] = [];
   const entries = fs.readdirSync(root, { withFileTypes: true });
@@ -44,10 +50,16 @@ export function collectStepFiles(root: string): string[] {
       out.push(...collectStepFiles(full));
       continue;
     }
-    if (!e.isFile()) continue;
+    if (!e.isFile() && !e.isSymbolicLink()) continue;
     if (!STEP_EXTS.includes(path.extname(e.name))) continue;
     if (e.name.startsWith("_")) continue;  // 使用方的辅助模块（页面对象/选择器常量/共享 helper），供 step 文件相对 import
     if (/\.test\./.test(e.name)) continue; // 使用方的测试文件不是 step 文件
+    if (e.isSymbolicLink()) {
+      // 名字筛选已通过才读目标类型。指向文件的收进清单；悬空链接（返回 undefined）也收，交给 loadUserSteps 的
+      // import 失败那条点名报错；指向目录的不进入、就地报错（跳过的话本引擎静默少一批 step，Nova 侧却起不来）。
+      const target = fs.statSync(full, { throwIfNoEntry: false });
+      if (target?.isDirectory()) throw new Error(`steps 文件加载失败 ${full}：它是指向目录的符号链接`);
+    }
     out.push(full);
   }
   return out;

@@ -41,7 +41,7 @@ def test_load_missing_returns_none(ddb_run_store):
 
 def test_run_meta_deep_argument_round_trip(ddb_run_store):
     # META 存 JSON 字符串——含 docString/dataTable（含空 cell）的深 Job 树要逐字节还原。
-    # 这是第 4 步 offload 必须保持的基线：不 offload 时 argument 内容原样往返。
+    # 这是 StepArgument offload（ADR 0030 决定六）必须保持的基线：不 offload 时 argument 内容原样往返。
     from gherkai_core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument, Status
 
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(

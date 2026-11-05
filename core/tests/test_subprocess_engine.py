@@ -519,6 +519,52 @@ def test_pump_log_colors_prefix_only_when_policy_says_so(monkeypatch, capsys):
     assert capsys.readouterr().err == "[worker s2:err] d\n"
 
 
+# ---- worker 日志里的非 UTF-8 字节：转发线程替换后照常转发，不让 worker 卡在写管道上 ----
+
+# 假 worker：stdout 与 stderr 各先写一段非法 UTF-8 字节，再写 100KB 文本（超过约 64KB 的管道缓冲），最后才发事件。
+# 转发线程若因解码错误退出，这条管道就没人再读，worker 阻塞在写上，事件永远发不出来。
+_BAD_BYTES_WORKER = r"""
+import json, os, sys
+job = json.loads(sys.stdin.readline())
+for out in (sys.stdout.buffer, sys.stderr.buffer):
+    out.write(b"bad \xff\xfe bytes\n" + b"z" * 100_000 + b"\n")
+    out.flush()
+scope_id = job["scope"]["id"]
+with os.fdopen(int(os.environ["EVENTS_FD"]), "w", encoding="utf-8") as ev:
+    ev.write(json.dumps({"type": "scope_started", "scopeId": scope_id, "sessionId": "bad-bytes"}) + "\n")
+    ev.write(json.dumps({"type": "scope_done", "scopeId": scope_id, "sessionId": "bad-bytes"}) + "\n")
+"""
+
+
+@_pytest.mark.parametrize("to_file", [False, True], ids=["stderr", "log_sink"])
+def test_non_utf8_worker_output_is_replaced_and_does_not_stall(to_file, tmp_path, capsys):
+    """worker 的 stdout / stderr 出现非 UTF-8 字节时，事件流在有界时间内结束，坏字节以替换字符转发。
+
+    写本进程 stderr（sink=None）与写 log_sink 文件句柄两条分支各覆盖一次。"""
+    import threading
+
+    sink = open(tmp_path / "worker.log", "w", encoding="utf-8") if to_file else None
+    engine = SubprocessEngine(cmd=[sys.executable, "-c", _BAD_BYTES_WORKER], log_sink=sink)
+    handle, events = engine.run_scope(_job("s"))
+    types: list[str] = []
+    consumer = threading.Thread(target=lambda: types.extend(e.type for e in events), daemon=True)
+    consumer.start()
+    consumer.join(15.0)
+    if consumer.is_alive():
+        handle.stop(grace_period_s=0)  # 收尾：强杀卡住的 worker，让消费线程随管道关闭结束
+        consumer.join(5.0)
+        _pytest.fail("worker 日志里的非 UTF-8 字节让事件流停住了")
+    assert types == ["scope_started", "scope_done"]
+    if sink is not None:
+        sink.close()
+        log = (tmp_path / "worker.log").read_text(encoding="utf-8")
+    else:
+        log = capsys.readouterr().err
+    assert "[worker s:out] bad \ufffd\ufffd bytes\n" in log
+    assert "[worker s:err] bad \ufffd\ufffd bytes\n" in log
+    assert log.count("z" * 100_000) == 2
+
+
 # ---- 进程组与所属进程号（ADR 0024 终止契约「使用方中断」「父进程消失」条）----
 
 def _wait_dead(pid: int, timeout_s: float = 5.0) -> bool:

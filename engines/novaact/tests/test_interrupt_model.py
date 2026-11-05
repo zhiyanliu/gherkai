@@ -191,8 +191,8 @@ def test_run_scenario_stops_on_flag_no_step_skipped(captured):
     nova = _RecordNova()
     rs._stop.set()  # 置位 → scenario 循环第一 step 前即 break
     steps = [_step("When", '"a"', 0), _step("When", '"b"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, 1, captured)
-    assert statuses == []  # 一步没执行
+    statuses, completed = rs._run_scenario(nova, "sc:0", steps, 1, captured)
+    assert statuses == [] and completed is False  # 一步没执行
     assert nova.act_timeouts == []  # 确认没调 act
     assert not any(e["type"] == "step_skipped" for e in captured)  # 停止不发 step_skipped（那是 error 短路语义）
 
@@ -213,25 +213,44 @@ def test_run_scenario_stops_midway(captured):
 
     import unittest.mock as m
     with m.patch.object(rs, "_run_step", _wrap):
-        rs._run_scenario(nova, "sc:0", steps, 1, captured)
+        statuses, completed = rs._run_scenario(nova, "sc:0", steps, 1, captured)
     assert calls == [0]  # 只执行了第一步，第二步被 _stop break 掉
+    assert statuses == ["passed"] and completed is False  # 部分 statuses：未完整执行
     assert not any(e["type"] == "step_skipped" for e in captured)
 
 
-# ---- scenario_done 出口 + 中止护栏：中途 _stop → 不 emit（不把没执行完的 scenario 标成假 passed）----
+def test_run_scenario_stop_during_last_step_still_counts_as_completed(captured):
+    # 停止信号落在最后一个 step 的 act 期间：act 照常返回、step_done 照常发出，scenario 已完整执行（ADR 0024 判据是单元完成度）
+    nova = _RecordNova()
+    steps = [_step("When", '"a"', 0), _step("When", '"b"', 1)]
+    orig = rs._run_step
+
+    def _wrap(n, sid, st, v, sink, **kw):
+        r = orig(n, sid, st, v, sink, **kw)
+        if st["index"] == 1:
+            rs._stop.set()  # 最后一步执行完才置位
+        return r
+
+    import unittest.mock as m
+    with m.patch.object(rs, "_run_step", _wrap):
+        statuses, completed = rs._run_scenario(nova, "sc:0", steps, 1, captured)
+    assert statuses == ["passed", "passed"] and completed is True
+
+
+# ---- scenario_done 出口 + 中止护栏：判据是单元完成度——未完成不 emit（不把没执行完的 scenario 标成假 passed），已完成照发 ----
 def test_scenario_done_emitted_when_not_stopped(captured):
     # 正常完成（_stop 未置）：emit scenario_done、带聚合判定；返 False（继续执行后续 scenario）。
-    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed", "passed"])
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed", "passed"], True)
     assert aborted is False
     done = [e for e in captured if e["type"] == "scenario_done"]
     assert len(done) == 1 and done[0]["status"] == "passed" and done[0]["scenarioId"] == "sc:0"
 
 
 def test_scenario_done_suppressed_when_stopped(captured):
-    # 中途中止（_stop 置位，statuses 只含中止前的部分 step）：**不 emit** scenario_done（否则 _aggregate(["passed"])
+    # 中途中止（_stop 置位，statuses 只含中止前的部分 step、未完成）：**不 emit** scenario_done（否则 _aggregate(["passed"])
     # 会把没执行完的 scenario 标成确定 passed，假阳性），返 True 让 _run_session 停。（ADR 0031/0024「worker 不越权标注」）
     rs._stop.set()
-    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed"])
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed"], False)
     assert aborted is True
     assert not any(e["type"] == "scenario_done" for e in captured)  # 关键：中止不留假 verdict
 
@@ -239,9 +258,19 @@ def test_scenario_done_suppressed_when_stopped(captured):
 def test_scenario_done_suppressed_even_with_zero_statuses(captured):
     # 极端：中止发生在首 step 前（statuses=[]）→ _aggregate([])=="passed" 更是纯假阳性 → 同样不 emit。
     rs._stop.set()
-    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", [])
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", [], False)
     assert aborted is True
     assert not any(e["type"] == "scenario_done" for e in captured)
+
+
+def test_scenario_done_emitted_for_a_completed_scenario_even_when_stopped(captured):
+    # 停止信号落在最后一个 step 的 act 期间：statuses 完整、标志已置位。判定已是执行事实，照发 scenario_done（否则这个已完整
+    # 执行的 scenario 会从 JobResult 里消失，ADR 0024 判据是单元完成度、ADR 0031 不合成在途 scenario），再返 True 停本 session。
+    rs._stop.set()
+    aborted = rs._emit_scenario_done_unless_stopped(captured, "sc:0", ["passed", "failed"], True)
+    assert aborted is True
+    done = [e for e in captured if e["type"] == "scenario_done"]
+    assert len(done) == 1 and done[0]["status"] == "failed" and done[0]["scenarioId"] == "sc:0"
 
 
 # ---- 建连退避 _backoff_interrupted：收到停止信号即唤醒返回 True（驱动 run_scope 真退避路径）----

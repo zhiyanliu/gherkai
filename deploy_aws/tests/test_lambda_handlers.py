@@ -217,6 +217,16 @@ def test_timeout_watch_creates_one_time_schedule():
     assert payload == {"run_id": "run-1", "timeout_scope": "features/x.feature:7"}
 
 
+def test_timeout_watch_name_is_exactly_64_chars_at_prefix_limit():
+    # prefix 取上限 32 个字符（stack 合成期校验的边界）时，schedule 名恰为 EventBridge Scheduler 的 64 字符上限。
+    prefix = "a" * 31 + "-"
+    watch = reconciler.EventBridgeTimeoutWatch(
+        _FakeSchedulerClient(), kicker_arn="arn:k", role_arn="arn:r", prefix=prefix)
+    name = watch.schedule_name("run-1", "features/x.feature:7")
+    assert name.startswith(f"{prefix}job-timeout-")
+    assert len(name) == 64
+
+
 def test_timeout_watch_conflict_is_idempotent():
     """同名已在（同 run+scope 重复 arm）→ ConflictException 吞掉视作已武装（幂等）。"""
     watch = reconciler.EventBridgeTimeoutWatch(

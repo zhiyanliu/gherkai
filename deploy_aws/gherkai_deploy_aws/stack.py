@@ -11,7 +11,8 @@
   **无 lifecycle 规则**，见 _one_task_def）
 - Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
-  （kicker 那条带 INSERT 且 detached 的 filter）
+  （两条都带 filter：events 表那条排除 TTL 过期删除（anything-but REMOVE），kicker 那条只收 INSERT 且带
+  detached 标记的）
 - IAM：每引擎一个 task role（最小权限；拿到 Device Farm 项目 ARN 时 Midscene 的另加设备与应用前缀权限，见
   _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点触发器的 Scheduler 执行角色
   {prefix}timeout-scheduler
@@ -74,6 +75,7 @@ class BackendStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, *, prefix: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
         self.prefix = prefix
+        self._validate_prefix()
         self.stop_timeout_s = self._resolve_stop_timeout()
         self.version = self._resolve_version()
         self.device_farm_project_arn = self._resolve_device_farm_project()  # None 即不启用设备支持
@@ -87,6 +89,23 @@ class BackendStack(Stack):
         self._ssm_device_farm()  # 有项目 ARN 时写进 SSM（ADR 0051 决策 10，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
 
+    # ---- prefix 长度校验（ADR 0033「两层命名」护栏）----
+    def _validate_prefix(self) -> None:
+        """**synth 期 fail-fast**：prefix 长到 job timeout schedule 名超出 EventBridge Scheduler 的名称上限时拒绝合成。
+
+        超长 prefix 下其余资源都建得出来、部署照常成功，只有推进器运行期的 CreateSchedule 每次被拒；arm 是 best-effort
+        （只打日志），job timeout 会静默降级成只剩防御扫。因此在合成期报错并说明上限，而不是等到运行期才失效。
+        代价：diff / destroy 同样要合成本 stack，也会被这条校验拦下（同 _resolve_stop_timeout）；deploy 在调 cdk 之前
+        已找回或建立 Device Farm 项目，被这条校验拦下时账户里会留下 `{prefix}devices` 项目。
+        """
+        name_len = len(names.job_timeout_schedule_prefix(self.prefix)) + names.JOB_TIMEOUT_DIGEST_LEN
+        if name_len > names.SCHEDULE_NAME_MAX_LEN:
+            raise ValueError(
+                f"--prefix 至多 {names.prefix_max_len()} 个字符，当前为 {len(self.prefix)} 个（{self.prefix!r}）："
+                f"job 超时保护所用定时计划的名称由前缀加固定后缀组成，不能超过 AWS 规定的 {names.SCHEDULE_NAME_MAX_LEN} 个字符，"
+                "前缀过长时超时保护无法生效。请改用更短的前缀。"
+            )
+
     # ---- stopTimeout 解析（grace 真容器校准落点，ADR 0032）----
     def _resolve_stop_timeout(self) -> int:
         """container stopTimeout（秒）：`-c stop_timeout=N` 覆盖，默认 120s。
@@ -94,7 +113,7 @@ class BackendStack(Stack):
         grace 真容器校准的**唯一落点**（`FargateWorkerHandle.stop` 忽略运行期 grace 参数，真实宽限由 task-def
         期这个常量决定，见 ADR 0024/0032）。做成 context 可配是为迭代试不同 grace 值免改 code。
         **synth 期 fail-fast**：Fargate 硬上限 120s，>120 部署期必被 ECS 拒——早报错、点明是 Fargate 限制而非笔误。
-        （Nova grace 下限 150s>120s 的冲突正卡在这条硬上限上，解法见 ADR 0032 grace 预算条。）
+        （Nova grace 下限 150s>120s 的冲突正卡在这条硬上限上，解法见 ADR 0032「真容器校准结论」节第 4 条。）
         """
         raw = self.node.try_get_context("stop_timeout")
         if raw is None:
@@ -212,7 +231,7 @@ class BackendStack(Stack):
             # 无清理会随 run 堆积。**按对象 tag `gherkai=job-in` 过期、非 key 前缀**——job-in 落 `<prefix><run_id>/jobs-in/`
             # （run_id 在中间），lifecycle 纯前缀 filter 框不住、且会误伤同前缀下的判定真值(jobs/)/报告；tag 精确只框 job-in。
             # 7 天：对齐 events 表 TTL 心智（协调/输入类脚手架，留窗口供事后调查失败 run，之后自动清）。判定真值(jobs/)、
-            # 报告(reports/)不打此 tag、不受影响（长期保留，误删代价高，同 RETAIN 精神）。
+            # 报告(index.html / manifest.json)不打此 tag、不受影响（长期保留，误删代价高，同 RETAIN 精神）。
             lifecycle_rules=[
                 s3.LifecycleRule(
                     id=self.LIFECYCLE_EXPIRE_JOB_IN,
@@ -252,9 +271,10 @@ class BackendStack(Stack):
             self._vpc_spec = "default"
             return ec2.Vpc.from_lookup(self, "BackendVpc", is_default=True)
         # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _worker_subnet_ids 的
-        # 「公有子网优先」及 cli assignPublicIp=ENABLED 一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC
-        # endpoint 出网）留 backlog**：现三种取值均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有
-        # 子网 + cli assignPublicIp=DISABLED（跨组件联动）。
+        # 「公有子网优先」及 assignPublicIp 缺省 ENABLED（`compose.resolve_network` 缺省与推进器 Lambda 的
+        # ASSIGN_PUBLIC_IP 缺省）一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC endpoint 出网）留 backlog**：
+        # 现三种取值均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有子网 + 两处 assignPublicIp
+        # 取值改 DISABLED（`compose.resolve_network` 缺省与推进器 Lambda 的 ASSIGN_PUBLIC_IP env，跨组件联动）。
         vpc = ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
         # vpc_id 是 CDK token（部署期才有值）——拼进字符串由 CloudFormation 的 Fn::Join 解析，参数落地即真 id。
         self._vpc_spec = f"new:{vpc.vpc_id}"
@@ -316,10 +336,17 @@ class BackendStack(Stack):
         # 都经 CDP 连 AgentCore 云浏览器、镜像不装 chromium 二进制（ADR 0033「2 镜像」条）。取 1vCPU/2GB 起步
         # （实际运行标定，属运维配置）。stopTimeout（SIGTERM→SIGKILL 宽限）取 self.stop_timeout_s（默认 120s、
         # -c stop_timeout= 覆盖，Fargate ≤120s 硬上限——grace 真容器校准见 _resolve_stop_timeout / ADR 0032）。
+        # runtimePlatform 显式写成 Linux / X86_64：模板 revision 是 worker 架构的真值源（ADR 0038「架构」），
+        # push-worker 复制模板时原样带走，推送前也按 linux/amd64 校验镜像。不写时合成出的模板里没有这个字段，
+        # X86_64 只是 Fargate 的缺省行为，「模板 revision 承载架构」这一条就没有落在任何资源上。
         task_def = ecs.FargateTaskDefinition(
             self, f"TaskDef{engine.capitalize()}",
             family=names.task_def_name(self.prefix, engine),
             cpu=1024, memory_limit_mib=2048,
+            runtime_platform=ecs.RuntimePlatform(
+                cpu_architecture=ecs.CpuArchitecture.X86_64,
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+            ),
             execution_role=execution_role,
             task_role=task_role,
         )
@@ -335,7 +362,8 @@ class BackendStack(Stack):
                     removal_policy=RemovalPolicy.DESTROY,  # 日志组可随 stack 销毁（非数据）
                 ),
             ),
-            # 不设 AWS_REGION/AWS_PROFILE（ADR 0033 决策 C）：region 每 run 经 RunTask overrides 注入、凭证靠 task role。
+            # 不设 AWS_REGION/AWS_PROFILE（ADR 0033「task-def 不焊 region/凭证」节、ADR 0016 决策 C）：region 每 run
+            # 经 RunTask overrides 注入、凭证靠 task role。
             stop_timeout=Duration.seconds(self.stop_timeout_s),  # grace 真容器校准（ADR 0032），默认 120s、-c stop_timeout= 覆盖（见 _resolve_stop_timeout）
         )
 
@@ -486,9 +514,11 @@ class BackendStack(Stack):
     # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----
     def _ssm_network(self, vpc: ec2.IVpc) -> None:
         # subnet 选取走 _worker_subnet_ids（与两个推进器 Lambda 的 SUBNETS env 同源）。
-        # cli FargateEngine 的 assignPublicIp="ENABLED" 与公有子网配套（worker 只出不入连 AgentCore/Bedrock/S3/DDB）。
+        # assignPublicIp="ENABLED"（`compose.resolve_network` 缺省、推进器 Lambda 的 ASSIGN_PUBLIC_IP 缺省）与公有子网
+        # 配套（worker 只出不入连 AgentCore/Bedrock/S3/DDB）。
         subnet_ids = self._worker_subnet_ids(vpc)
-        # Fargate 用的默认安全组（出站全开、入站无——worker 只出不入）。
+        # worker task 缺省用的安全组（未给 --security-group 时经 SSM 读到它）：本 stack 新建的 WorkerSg，
+        # 不是 VPC 的 default 安全组；出站全开、入站无——worker 只出不入。
         sg = ec2.SecurityGroup(
             self, "WorkerSg", vpc=vpc,
             description=f"{self.prefix}fargate worker sg (egress only)",
@@ -556,7 +586,8 @@ class BackendStack(Stack):
         - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（机制二）。
         - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合（机制三/四）。
         - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
-          直接 invoke kickoff（卡住救活）→ tick 起首批 task。职责『让 run 动起来』（对 reconciler 的『推着走』）。
+          直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
+          timeout_scope，先做超时处置再 tick，见下『job timeout 到点触发器』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
         Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。**复用同步 cloud run 的资源**（runs/events
         表、桶、cluster、task-def、task/execution role）——reconciler 起 worker task 与同步路径同一套
@@ -764,8 +795,9 @@ class BackendStack(Stack):
     # Lambda 不背 argparse/render，ADR 0016「演进」节）+ gherkai_core（核心库）+ gherkin（core 的 feature 解析）
     # + packaging（gherkai_runtime 的硬依赖，ADR 0037 决策 2c）+ **typing_extensions**。
     # boto3 由 Lambda runtime 自带、不打（省包体）。
-    # **typing_extensions 是踩出来的**：它是 `gherkin-official>=42` 的传递依赖（`gherkin/parser_types.py` 无条件
-    # `from typing_extensions import NotRequired`，即便 3.13 的 typing 已有该名），旧实现靠 `pip install --target`
+    # **typing_extensions 是踩出来的**：它是 `gherkin-official` 的传递依赖（该库自 31.0.0、即 core 的声明下限起
+    # 就声明 `typing-extensions>=4`；`gherkin/parser_types.py` 无条件 `from typing_extensions import NotRequired`，
+    # 即便 3.13 的 typing 已有该名），旧实现靠 `pip install --target`
     # 顺带装上、改成「按名复制已安装包」后就漏了。单测全绿、真 synth 出的 asset 一 import 就 ModuleNotFoundError
     # ——故 `tests/test_lambda_asset.py::test_asset_imports_with_only_stdlib_beside_it` 用**剥掉 site-packages 的
     # 子进程**真 import 一遍 asset，把这类漏传递依赖从「实际运行才暴露」拉回单测。加/换依赖时那条测试是判据。

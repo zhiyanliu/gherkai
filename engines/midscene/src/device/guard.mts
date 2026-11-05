@@ -23,12 +23,12 @@
 //     发出，与 ECONNREFUSED 一样按保守处理。
 //
 // 只读白名单按原语列、不按 HTTP 方法判（ADR 0052 决策 6）：截图、取上下文列表、page source、网页上下文中的读地址、Android 的
-// 前台应用查询、/status，以及驱动适配器导出的只读 mobile 命令集合（含 iOS 的前台应用查询与屏幕信息；集合的元素是 execute 的
-// 完整脚本串，守卫整串比对，mobile 命令的前缀只在适配器里出现，ADR 0052 决策 4）。只对执行实例本身发出的这些命令放行，元素上的
-// 命令一律按有副作用处理。「网页上下文中」的判定：窗口打开时会话在原生上下文（step 前核对的义务），此后经守卫成功切入的非原生
-// 上下文即视为网页上下文。端口把守卫代理作为 driver 参数交给 AppiumSession 的 withWebContext 与 openUrl，它们经这个参数切入的、
-// 按 ADR 0052 决策 5 重新定位确认过的被测页面由此被认出；经执行实例直接切换（生命周期通道）守卫看不到，读地址此时按有副作用
-// 处理，只会更保守。
+// 前台应用查询、/status、键盘是否显示、查元素与读元素矩形（iOS 收起键盘时定位收起控件用），以及驱动适配器导出的只读 mobile
+// 命令集合（含 iOS 的前台应用查询与屏幕信息；集合的元素是 execute 的完整脚本串，守卫整串比对，mobile 命令的前缀只在适配器里
+// 出现，ADR 0052 决策 4）。只对执行实例本身发出的这些命令放行，元素上的命令一律按有副作用处理。「网页上下文中」的判定：窗口打开
+// 时会话在原生上下文（step 前核对的义务），此后经守卫成功切入的非原生上下文即视为网页上下文。端口把守卫代理作为 driver 参数交给
+// AppiumSession 的 withWebContext 与 openUrl，它们经这个参数切入的、按 ADR 0052 决策 5 重新定位确认过的被测页面由此被认出；
+// 经执行实例直接切换（生命周期通道）守卫看不到，读地址此时按有副作用处理，只会更保守。
 //
 // 失败的分流（ADR 0052 决策 6；ADR 0051 决策 4）：
 //   - 只读命令遇到连接层错误码或 502 / 503 / 504 由守卫重试一次（执行实例的传输层重试为 0，有副作用的命令任何情况都不补发）；
@@ -55,8 +55,8 @@ import { types } from "node:util";
 import type { Browser } from "webdriverio";
 import { errorText } from "../worker/error-text.mjs";
 import { attachClassification, readClassification, type StepClassification, type StepFailure } from "../worker/surface.mjs";
-// 循环引用说明：装配设备部件的模块可能被 surface.mts 静态导入，而本模块又从 surface.mts 取会话丢失的消息。这时本模块先于
-// surface.mts 求值，所以这个值只在函数体内读取，模块顶层不读取 surface.mts 的任何绑定。
+// 循环引用说明：装配设备部件的模块（parts.mts）被 surface.mts 静态导入，而本模块又从 surface.mts 取会话丢失的消息，所以本模块先于
+// surface.mts 求值；因此这个值只在函数体内读取，模块顶层不读取 surface.mts 的任何绑定。
 import {
   SESSION_LOST_MESSAGE, type CommandGuard, type DriverAdapter, type GuardFactory, type WindowOutcome,
 } from "./surface.mjs";

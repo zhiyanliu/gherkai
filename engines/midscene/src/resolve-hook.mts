@@ -4,7 +4,8 @@
 // `import { deterministic } from "@gherkai/worker-midscene"`，Node 解析裸 specifier 只沿**该文件所在目录**
 // 上溯找 `node_modules`——不认全局安装根（`npm i -g`）、也不认 `npx` 的临时缓存目录。使用方装的是
 // Python 命令行，其项目只有 `features/` + `steps/`，根本没有 `node_modules` → 默认解析必 `ERR_MODULE_NOT_FOUND`。
-// （云镜像里恰好能解析——`/app/steps` 上溯命中 `/app/node_modules`——那是巧合，不能当机制。）
+// 云镜像同样不能靠默认解析：基础镜像用 `npm install -g` 把 worker 装进全局根，定制层的 `/app/steps` 上溯找不到它；
+// 即使某种镜像布局让上溯恰好命中，那也是巧合、不能当机制。
 //
 // **机制**：worker 进程（`bin.mts`）在 import 使用方 step 文件之前注册本 hook，把这一个裸 specifier
 // 映射到**worker 自身已加载的那个 URL**（`import.meta.resolve("@gherkai/worker-midscene")`，包自引用）。

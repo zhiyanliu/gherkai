@@ -1,6 +1,6 @@
-"""隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器可访问的公网 URL。
+"""隧道口子（ADR 0035）：把 CLI 所在机器可达的被测应用暴露成云端浏览器与真机浏览器都可访问的公网 URL。
 
-TunnelProvider 的形状为 `start(local_origin) -> TunnelInfo`；停止用 `stop_tunnel(pid)`——隧道生命周期
+TunnelProvider 的形状为 `start(local_origin, *, timeout_s) -> TunnelInfo`；停止用 `stop_tunnel(pid)`——隧道生命周期
 可能跨进程（local submit 的 per-run 进程 / cloud submit 的守护进程收尾），进程对象句柄传不过去，
 故 TunnelInfo 携带 pid、由收尾者 kill（ADR 0035 决策 3 的三形态宿主）。
 
@@ -9,8 +9,8 @@ TunnelProvider 的形状为 `start(local_origin) -> TunnelInfo`；停止用 `sto
 导航一次换到 cookie。step 文本只做「origin 到干净隧道地址」的映射，不内嵌凭据、不附令牌；T 与 C 只出现在预热地址
 （经 definition 的 `RunMeta.session_warmup_url` 下发）与策略文件（0600）里。
 
-worker/core 对隧道无知：URL 映射（map_origin_in_jobs）在组合根完成、job-in 前替换进 definition
-（ADR 0035 决策 2——对 worker/引擎/AI 完全透明）。
+core 对隧道无知，worker 只做一次预热导航、不感知令牌与 cookie 的值（ADR 0035「边界与不变量」）。
+URL 映射（map_origin_in_jobs）在组合根完成、job-in 前替换进 definition（ADR 0035 决策 2——映射对 worker/引擎/AI 透明）。
 """
 from __future__ import annotations
 
@@ -23,11 +23,14 @@ import tempfile
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from gherkai_core.model import Job
 
 # ---- 令牌换 cookie 的边缘契约常量（ADR 0051 决策 13）----
-# 两个 worker 各持一份同值（Nova `lib/constants.py`、Midscene `lib/tunnel-warmup.mts`），由 engines/fixtures/tunnel-warmup.json 对拍。
+# 预热路径、校验路径、令牌参数名与 cookie 名只在本模块持有（worker 只读预热地址、不感知令牌与 cookie）；页面标题与正文标记
+# 与消费它们的 worker 同值（Nova `lib/constants.py` 只持标题，Midscene `lib/tunnel-warmup.mts` 持标题与正文标记），
+# 全部由 engines/fixtures/tunnel-warmup.json 对拍。
 WARMUP_PATH = "/.well-known/gherkai-tunnel-auth"   # 预热路径：凭令牌换 cookie
 CHECK_PATH = "/.well-known/gherkai-tunnel-check"   # 校验路径：只凭 cookie 放行，预热页面的脚本请求它一次
 TOKEN_PARAM = "gherkai_tunnel_token"
@@ -50,7 +53,7 @@ POLICY_RULE_LIMIT = 5
 
 
 class TunnelError(Exception):
-    """隧道起不来 / provider 未知 / 前置缺失——调用方接住归「没开始执行就被拒」（退出码 2）。"""
+    """隧道起不来 / provider 未知 / 前置缺失 / `--expose-local` 的取值不是 origin——调用方接住归「没开始执行就被拒」（退出码 2）。"""
 
 
 @dataclass(frozen=True)
@@ -193,6 +196,8 @@ class NgrokTunnel:
         self._monotonic = monotonic
 
     def start(self, local_origin: str, *, timeout_s: float = 20.0) -> TunnelInfo:
+        # 先校验再建临时文件与 spawn：取值不是 origin 时在这里以 TunnelError 拒绝，不留下文件、不起 agent
+        local_origin = normalize_origin(local_origin)
         token, cookie = _gen_secret(), _gen_secret()
         # 只要路径：agent 自己打开写、我们只轮询读。fd 必须立刻关——留着就是进程存活期的 fd 泄漏。
         # 文件**有意不删**：隧道存活期 agent 一直在写，且它是唯一诊断通道（authtoken 缺失等 err 行在其中）。
@@ -213,8 +218,9 @@ class NgrokTunnel:
             # start_new_session=True（setsid）让 agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
             # （ADR 0035 决策 3 三形态宿主 + stop_tunnel(pid)），不该由终端的信号转发决定。否则 submit 时
             # CLI 收 SIGINT/SIGHUP 会连坐杀掉「还要交棒给后台宿主」的 agent（local 交 per-run 进程、cloud 交
-            # 守护进程，两个宿主本身也都 setsid）。前台 run 方式语义不变：Ctrl-C → KeyboardInterrupt → atexit
-            # 拆（决策 3 表格「有意选 atexit 而非 finally」），只是不再额外挨一发终端广播的 SIGINT。
+            # 守护进程，两个宿主本身也都 setsid）。前台 run 的拆除方式不变：CLI 进程退出时由 atexit 拆（决策 3 表格
+            # 「有意选 atexit 而非 finally」）。执行期间的 Ctrl-C 由 CLI 的中断处理器置标志，协作停止后 run 照常返回、再退出；
+            # 执行期之外的 Ctrl-C 以 KeyboardInterrupt 结束进程；两条路径都经过 atexit。agent 只是不再额外收到终端广播的 SIGINT。
             proc = self._popen(cmd, stdin=subprocess.DEVNULL,
                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                                start_new_session=True)
@@ -285,6 +291,49 @@ _URL_CHARS = r"A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%"
 # 左边界：串首，或前一个字符不是 scheme 字符（字母、数字、+ . -）——`xhttp://…` 不命中；`=http://…`、中文后紧跟地址命中。
 _LEFT_BOUNDARY = r"(?<![A-Za-z0-9+.\-])"
 _TRAILING_PUNCT = set(".,;:!)]'")
+# origin 的整体形状：scheme、`://`、authority（到第一个 / ? # 为止），其余部分另行判定
+_ORIGIN_SHAPE = re.compile(r"(?P<scheme>[^:/?#]+)://(?P<authority>[^/?#]*)(?P<rest>.*)", re.DOTALL)
+_ORIGIN_EXAMPLE = "http://localhost:3000"
+
+
+def normalize_origin(value: str) -> str:
+    """把 `--expose-local` 的取值校验并归一化成 origin（`scheme://host[:port]`，ADR 0035 决策 2）。
+
+    末尾恰好一个 `/` 时去掉：origin 语义没有歧义，这种写法也常见；不去掉的话 `http://localhost:3000/` 之后剩下的
+    `login` 既不为空、也不以 `/ ? #` 开头，`http://localhost:3000/login` 就不会被映射，导航失败却看不出原因。
+    其余非 origin 形态（路径、查询串、片段、用户信息、http 与 https 之外的 scheme、空主机、非法端口、含空白）一律以
+    TunnelError 拒绝，不做隐式截断：截掉路径会静默改变使用方的意图。大小写原样保留，因为映射按 feature 的书写形式逐字匹配。
+    """
+    def _reject(reason: str) -> TunnelError:
+        return TunnelError(
+            f"--expose-local 的取值 {value!r} 不是 origin：{reason}。"
+            f"请只写到端口为止，例如 {_ORIGIN_EXAMPLE}，路径写在 feature 的 step 里。")
+
+    if re.search(r"\s", value):
+        raise _reject("含有空白字符")
+    m = _ORIGIN_SHAPE.fullmatch(value)
+    if m is None:
+        raise _reject("缺少 http:// 或 https:// 开头")
+    scheme, authority, rest = m.group("scheme"), m.group("authority"), m.group("rest")
+    if scheme.lower() not in ("http", "https"):
+        raise _reject(f"只支持 http 与 https，这里是 {scheme}")
+    if rest == "/":
+        rest = ""
+    if rest:
+        raise _reject(f"含有路径、查询串或片段 {rest!r}")
+    if "@" in authority:
+        raise _reject("含有用户信息（@ 之前的部分）")
+    try:
+        parsed = urlsplit(f"{scheme}://{authority}")
+        port = parsed.port  # 端口不是 0 到 65535 之间的整数时抛 ValueError；冒号之后为空时返回 None
+    except ValueError:
+        raise _reject("主机或端口无法解析") from None
+    if not parsed.hostname:
+        raise _reject("缺少主机名")
+    if authority.endswith(":") or port == 0:
+        # 冒号之后为空时，feature 里带端口号的地址不会被映射；0 号端口则无法连接
+        raise _reject("冒号之后缺少端口号，或端口为 0")
+    return f"{scheme}://{authority}"
 
 
 def replace_origin(text: str, origin: str, base: str) -> str:
@@ -307,9 +356,12 @@ def map_origin_in_jobs(jobs: list[Job], origin: str, base: str) -> list[Job]:
     """把 job 文本中的 origin 替换成干净的隧道地址 base（ADR 0035 决策 2：job-in 前、worker/AI 无感）。
 
     替换面为 step.text + step.argument（docString content / dataTable 各单元格）——URL 可能出现在任一处，三处各自独立套用
-    `replace_origin` 的边界规则。origin 的写法须与 feature 书写一致（`localhost` vs `127.0.0.1` 不互认，文档写明）。
+    `replace_origin` 的边界规则。origin 的写法须与 feature 书写一致（`localhost` vs `127.0.0.1` 不互认，文档写明）；
+    先经 `normalize_origin` 校验与归一化，与 `NgrokTunnel.start` 暴露的是同一个 origin（取值不是 origin 时抛 TunnelError）。
     frozen dataclass 逐层重建，原 jobs 不变（definition 不可变惯例）。
     """
+    origin = normalize_origin(origin)
+
     def sub(s: str | None) -> str | None:
         return replace_origin(s, origin, base) if s else s
 

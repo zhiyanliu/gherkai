@@ -44,7 +44,7 @@ PROVIDER_GROUP = "gherkai.deploy"
 # 前端的分派**先看 `_deploy_verb`**，有就交给它、没有才走 `--diff/--synth-only/--bootstrap/deploy` 那四路。
 # **组合规则**：子动词与三个「不真部署」flag 同给 → 前端以退出码 2 结束（`readonly_flag_conflict`）——子动词会真写账户（推镜像/
 # 注册 task-def），若让它静默盖过部署方点名要的只读预览，正是那三个 flag 要防的事（ADR 0037 决策 6 的 reviewer 靶点）。
-# 这样那族命令落地时**前端一行不改**（它们要读 SSM/ECR/task-def、碰容器引擎，全属 provider 那半边）。
+# 因此那族命令的实现全在 provider 那半边、前端没有对应代码（它们要读 SSM/ECR/task-def、碰容器引擎）。
 # 子动词 subparser 不可设 `required=True`——否则裸 `gherkai deploy`（默认动作是真部署）会被 argparse 拒。
 # ============================================================================
 
@@ -68,7 +68,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     if not eps:
         return None, (
             "没有可用的部署 provider：装 `gherkai[deploy-aws]`（AWS 后端；带 Python CDK，另需 Node ≥22 在 PATH）。"
-            "只有**部署方**需要装它——只提交 run 的人不必。"
+            "只有部署方需要装它——只提交 run 的人不必。"
         )
     names = ", ".join(ep.name for ep in eps)
     if name is None:
@@ -137,7 +137,7 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     _add_provider_flag(dp)
     # 三个互斥的「不真部署」动作（ADR 0037 决策 6 的命令面）：给 reviewer/谨慎的人留靶点——
-    # 不让一个 0.x 工具在没人看过变更集之前改自己的生产账号。
+    # 部署方审阅变更集之前，工具不改其生产账号。
     act = dp.add_mutually_exclusive_group()
     act.add_argument(
         "--diff", action="store_true",

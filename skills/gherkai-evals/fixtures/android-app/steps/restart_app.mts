@@ -1,8 +1,8 @@
 // 示范用确定性 step（Midscene 侧）：重新启动被测应用，让后面的步骤从应用刚启动时的界面开始。
 //
 // 这是 `steps/` 目录的模板：复制进你的项目后按需改措辞。设备目标上同一个 scope 的 scenario 共用一个远程访问会话，
-// scenario 之间不重启应用；需要干净起点的用例在 Background 里写这一步。运行时经 `--steps-dir features/steps` 或环境变量
-// `GHERKAI_STEPS_DIR` 加载进 worker 的注册表。
+// scenario 之间不重启应用；需要干净起点的用例在 Background 里写这一步。运行时从当前目录下的 `steps/` 自动加载
+// 进 worker 的注册表（目录放在别处时用 `--steps-dir` 或环境变量 `GHERKAI_STEPS_DIR` 指定）。
 //
 // 只有一个 webdriver 条目，只覆盖应用目标：`ctx.app` 只在应用目标上有值，`restart()` 关闭被测应用、再启动它，并确认它
 // 启动后没有自行退出（自行退出时这一步记 error）。桌面与设备网页上这条 step 没有实现，写在那些目标上会交给 AI 执行，

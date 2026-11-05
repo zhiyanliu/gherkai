@@ -15,7 +15,9 @@ task 时用的是 revision（不可变快照），故重推同名 variant 不会
 - **digest 只在推送后取，且要按仓库挑**：见 `container` 模块头两条事实。
 - **幂等靠每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
   按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重新运行收敛，不堆垃圾 revision。
-- **删 revision 前有两个前置条件**：退休满 `RETIRE_QUIET_PERIOD` + 无未到终态的 run 引用（`cleanup_pass`）。
+- **删 revision 前有三个前置条件**：退休满 `RETIRE_QUIET_PERIOD`、无未到终态的 run 引用，且不再被任何版本的
+  `worker-image/*` 映射引用（已退休但仍被映射引用的留着，删了会让那条映射悬空；孤儿按定义不在任何映射里）
+  （`cleanup_pass`）。
   `DeregisterTaskDefinition` 让 revision 再也起不了新 task（且注销后最多 10 分钟才生效），detached run 逐 job
   起 task——删早了剩余 job 全起不来（ADR 0038 被拒方案「重派生/重推后立即删旧 revision」）。
 
@@ -353,7 +355,7 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
 
 
 def _retire(ecs, arn: str, *, now: datetime, out) -> None:
-    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的那两个前置条件）。
+    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的三个前置条件）。
 
     打不上（revision 已被删/无权限）→ 警告不拦：映射已经指向新 revision，旧的下一次 pass 会以**孤儿**
     身份（不在任何映射里 + 带血缘 tags）被同样处置，退休时刻取其 `registeredAt`。
@@ -366,13 +368,13 @@ def _retire(ecs, arn: str, *, now: datetime, out) -> None:
 
 
 # ---------------------------------------------------------------------------
-# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 引用检查，机会式、无定时任务
+# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 引用 + 映射引用三项检查，机会式、无定时任务
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class CleanupOutcome:
     """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
-    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言这两个前置条件（静默期 + 运行中 run 引用）的判定，
+    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言这三个前置条件（静默期、运行中 run 引用、映射引用）的判定，
     不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_pending_cleanup` 现扫 family
     产出机读行、文本渲染在 `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
     """
@@ -433,10 +435,13 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
     - **孤儿**：带血缘 tags、ACTIVE、却不在 SSM **任何版本**的 `worker-image/*` 映射里 —— 覆盖「上次中断在
       注册与写 SSM 之间」与「两人并发推同名 variant，先写者的映射被顶掉」。退休时刻取其 `registeredAt`。
       **旧版本 variant 的 revision 仍在映射里、不是孤儿**（其回收归 `delete-worker`）。
-    删的两个前置条件：退休满 `RETIRE_QUIET_PERIOD` **且** 无未到终态的 run 引用；任一不满足 → 留到下次 pass
+    删的三个前置条件：退休满 `RETIRE_QUIET_PERIOD`、无未到终态的 run 引用，**且** 不再被任何版本的
+    `worker-image/*` 映射引用（孤儿按定义满足这一条）；任一不满足 → 留到下次 pass
     （长期无人 push/deploy 时会滞留，无害：ACTIVE 但无人引用）。
 
-    **不抛**：清理是收尾动作，失败不该把一次成功的 push/deploy 变成失败（打警告、留给下次 pass）。
+    **不抛**：清理是收尾动作，失败不该把一次成功的 push/deploy 变成失败。读不全映射、列不出 family 时打警告并
+    留给下次 pass；单个 revision 回收失败只记进 `kept`（不打印），其中注销前就失败的下次 pass 会重试，已注销、
+    删除未完成的则不会再被扫到。
     """
     # **枚举映射失败就整趟放弃**（不是「当作没有映射继续」）：孤儿判据是「不在任何映射里」，读不全映射会把
     # 别人在用的 revision 全判成孤儿；真实 ECS 的 `registeredAt` 是过去时刻，静默期这一条拦不住它们。
@@ -474,14 +479,25 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
             if now - retired_at < RETIRE_QUIET_PERIOD:
                 kept.append((rev.arn, f"{reason}，未满 {_hours(RETIRE_QUIET_PERIOD)} 静默期"))
                 continue
+            # 注销之后 revision 即为 INACTIVE，而 `scan_family` 只列 ACTIVE：删除这一步没完成的，后续 pass 不会再扫到它
+            # （起不了新 task、不产生费用，只是残留）。故原因串要分清「注销前就失败、下次 pass 重试」与「已注销、
+            # 删除未完成」，后者不能写成会重试的样子。
+            deregistered = False
             try:
                 if _referenced_by_live_run(ddb, runs_table, rev.arn):
                     kept.append((rev.arn, f"{reason}，仍有未到终态的 run 引用"))
                     continue
                 ecs.deregister_task_definition(taskDefinition=rev.arn)
-                ecs.delete_task_definitions(taskDefinitions=[rev.arn])
+                deregistered = True
+                resp = ecs.delete_task_definitions(taskDefinitions=[rev.arn])
             except Exception as exc:
-                kept.append((rev.arn, f"{reason}，本次回收失败：{exc}"))
+                why = "已注销、删除未完成" if deregistered else "本次回收失败"
+                kept.append((rev.arn, f"{reason}，{why}：{exc}"))
+                continue
+            # 批量 API 的逐项失败放在 `failures` 里、不抛异常——不读它就会把没删掉的也算成回收
+            failures = resp.get("failures") or []
+            if failures:
+                kept.append((rev.arn, f"{reason}，已注销、删除未完成：{_failure_text(failures)}"))
                 continue
             deleted.append(rev.arn)
     if deleted:
@@ -501,6 +517,17 @@ def _mapped_arn(raw: str):
         return
     if isinstance(data, dict) and data.get("revision_arn"):
         yield data["revision_arn"]
+
+
+def _failure_text(failures) -> str:
+    """`DeleteTaskDefinitions` 的 `failures`（每项 `arn` / `reason` / `detail`）→ 一句原因（多项以「；」连接）。"""
+    parts = []
+    for f in failures:
+        text = str(f.get("reason") or "未给出原因")
+        if f.get("detail"):
+            text += f"（{f['detail']}）"
+        parts.append(text)
+    return "；".join(parts)
 
 
 def _hours(delta: timedelta) -> str:
@@ -597,7 +624,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     info = container.inspect(image)
     if not info.exists:
         raise WorkerCommandError(
-            f"本地找不到镜像 {image!r}：push-worker 只推**已 build 好**的镜像，不替你 build。\n"
+            f"本地找不到镜像 {image!r}：push-worker 只推已经构建好的镜像，不替你 build。\n"
             f"定制镜像的 Dockerfile 模板见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 。"
         )
     if not info.matches_target_platform():
@@ -610,7 +637,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         raise WorkerCommandError(
             f"镜像 {image!r} 的平台是 {info.platform}，worker 固定 linux/amd64（云端 worker 任务是 X86_64）。\n"
             f"重 build 时带上平台：docker build --platform linux/amd64 -t {image} .\n"
-            f"（arm Mac 上漏 `--platform` 的后果本来要拖到 Fargate **启动期** `exec format error` 才暴露，"
+            f"（arm Mac 上漏 `--platform` 的后果本来要拖到 Fargate 启动期 `exec format error` 才暴露，"
             f"这里提前拦下。）"
         )
 
@@ -664,7 +691,14 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
 
 
 def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
-    """family 里有没有**本 variant** 同（模板 ARN、digest）、ACTIVE、**未退休**的 revision（ADR 0038 步 5 的孤儿复用）。
+    """push 路径的孤儿复用（ADR 0038 步 5）：现扫一次 family，判据见 `_pick_reusable`。"""
+    return _pick_reusable(scan_family(ecs, names.task_def_name(prefix, engine)),
+                          variant=variant, template_arn=template_arn, digest=digest)
+
+
+def _pick_reusable(revisions, *, variant: str, template_arn: str, digest: str) -> str | None:
+    """`revisions`（`scan_family` 的结果，均为 ACTIVE）里有没有**本 variant** 同（模板 ARN、digest）、**未退休**的
+    revision → 其 ARN。push-worker 步 5 与 deploy 重派生共用这一份判据，免得两套写法漂移。
 
     **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。实际运行踩过：
     variant B 推的镜像 digest 恰与 A 相同，复用了 A 正在用的 revision → 之后 A 换 digest 重推会把它退休、
@@ -673,7 +707,7 @@ def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn:
     为何不复用已退休的：退休 tag 说的是「有人决定它下岗」，复用它等于把它从清理 pass 手里抢回来、语义混乱；
     重新注册一个干净的 revision 更便宜（ECR 镜像层一个字节不动）。
     """
-    for rev in scan_family(ecs, names.task_def_name(prefix, engine)):
+    for rev in revisions:
         if (rev.tags.get(names.TAG_TEMPLATE) == template_arn
                 and rev.tags.get(names.TAG_DIGEST) == digest
                 and rev.tags.get(names.TAG_VARIANT) == variant
@@ -717,7 +751,8 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
         out(str(exc))
         return EXIT_PRECONDITION
     except Exception as exc:  # 凭证/权限/region/网络：对部署方是「先修凭证」，与前置同一类、不该抛 traceback
-        out(f"AWS 调用失败：{exc}\n需要部署方权限（ECR 推送域 + ecr:GetAuthorizationToken/DescribeImages、"
+        out(f"AWS 调用失败：{exc}\n需要部署方权限（向 worker 镜像 ECR 仓库推送所需的 ecr:BatchCheckLayerAvailability/"
+            f"InitiateLayerUpload/UploadLayerPart/CompleteLayerUpload/PutImage，另需 ecr:GetAuthorizationToken/DescribeImages、"
             f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource、iam:PassRole、"
             f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region。")
         return EXIT_PRECONDITION
@@ -793,7 +828,8 @@ def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: d
         out(f"警告：CLI 版本 {version} 不是纯发行版（含 .dev/.post/本地段）——GHCR 上不存在对应基础镜像，"
             f"跳过基础镜像同步。\n"
             f"     dev 版要能运行：本地 build 一份镜像后 `gherkai deploy push-worker <镜像> --engine <e> "
-            f"--variant base`（默认指针已初始化为 base）。")
+            f"--variant base`（默认指针缺失时会初始化为 base；已设为别的 variant 时，提交时用 "
+            f"`--worker-variant base`，或推那个同名 variant）。")
         return []
     results = []
     for engine in engines:
@@ -843,10 +879,20 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
         # repo URI 只依赖（模板，引擎）——两者都是下面这个循环的不变量，故**每引擎算一次**：放进循环会让
         # 待重派生的每个 variant 多打一次模板 describe。整个引擎无事可做时连这一次也不打。
         repo_uri = _repo_uri_from_template(aws.ecs, template_arn=template_arn, engine=engine)
+        # 孤儿复用同 push-worker 步 5（ADR 0038「不变量·幂等」）：上次 deploy 若中断在「注册新 revision」与
+        # 「写映射」之间，映射里仍是旧模板，不复用就会再注册一个、把上一个变成垃圾 revision。family 每引擎只扫
+        # 一次（扫描要 describe 全部 revision），逐 variant 在内存里按同一判据匹配。
+        revisions = scan_family(aws.ecs, names.task_def_name(prefix, engine))
         for mapping in stale:
-            new_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
-                                         image_ref=f"{repo_uri}@{mapping.digest}", digest=mapping.digest,
-                                         variant=mapping.variant, version=version)
+            new_arn = _pick_reusable(revisions, variant=mapping.variant, template_arn=template_arn,
+                                     digest=mapping.digest)
+            if new_arn is not None:
+                out(f"{engine}/{mapping.variant}：已有按本次配置与同一镜像注册的 {_short_arn(new_arn)}"
+                    f"（上次部署可能在注册之后中断），直接复用，不再重复注册")
+            else:
+                new_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
+                                             image_ref=f"{repo_uri}@{mapping.digest}", digest=mapping.digest,
+                                             variant=mapping.variant, version=version)
             _put_ssm(aws.ssm, _mapping_path(prefix, engine, mapping.tag),
                      _record_json(template_arn=template_arn, revision_arn=new_arn,
                                   digest=mapping.digest, pushed_at=mapping.pushed_at))
@@ -1010,13 +1056,7 @@ def _pushed_at_human(iso: str | None) -> str:
     机读形态（`--json`）仍是完整的 ISO 串；缺值给 `-`；解析不了的原样返回、不抛。"""
     if not iso:
         return "-"
-    from datetime import datetime, timezone
-    try:
-        dt = datetime.fromisoformat(iso)
-    except ValueError:
-        return iso
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%d %H:%M")
+    dt = _parse_ts(iso)  # 与 tag 时刻同一个解析入口；不带时区的按 UTC 读
+    return iso if dt is None else dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 

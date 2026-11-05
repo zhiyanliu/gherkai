@@ -351,10 +351,10 @@ def test_build_engines_no_dirs_midscene_env_none(monkeypatch, midscene_env_cmd):
 
 def test_build_engines_nova_always_has_act_timeout(midscene_env_cmd):
     # Nova env **恒非 None**：即便无产物落点，组合根也要注入 NOVA_ACT_TIMEOUT_S（双端同源，ADR 0024 grace 硬约束）——
-    # worker 读它作 act timeout、组合根用同一常量算 grace 下限，消除两处独立 120 的漂移。
+    # worker 读它作 act timeout、自报的 grace 下限也按同一个注入值算，消除两处独立 120 的漂移。
     engines = compose.build_engines()
     assert engines["novaact"]._env is not None
-    assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
+    assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.nova_act_timeout_s())
 
 
 def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path, midscene_env_cmd):
@@ -541,7 +541,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     清单、grace 下限、steps 加载结果、当前模型 id 都出自**这一次** spawn（ADR 0036「5.」「加键不加入口」）。
 
     Nova 查询**必须注入 NOVA_ACT_TIMEOUT_S**：worker 自报的下限是这个注入值 + 它自己的 margin，不注入则它按
-    自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一真值的意义就在此）。
+    自带缺省算，operator 调大单 act 上界后下限静默偏低（组合根持单一取值点的意义就在此）。
     """
     import os
     import subprocess
@@ -559,7 +559,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
         "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}],
         "model_id": "nova-act-v1.0"}
     assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
-    assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
+    assert captured["env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.nova_act_timeout_s())
     # 未给 steps 目录：env 仍自建一份——组合根拥有的键「有值注、无值清」，宿主 shell 的 GHERKAI_STEPS_DIR 不得
     # 越过调用方解析出的结果（清单要与本次要运行的 step 集一致）；其余环境照常继承。
     assert "GHERKAI_STEPS_DIR" not in captured["env"]
@@ -822,6 +822,123 @@ def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_c
     assert "NOVA_ACT_TIMEOUT_S" not in captured["env"]
 
 
+# ---- _ask_worker：起不来的各种 OSError 都收成 RuntimeError（调用点据此以退出码 2 结束、不冒 traceback）----
+# 真起子进程（不 mock subprocess）：要验的正是 subprocess.run 在这几种情形下实际抛什么，mock 掉就验不到。
+
+def test_ask_worker_non_executable_override_is_runtime_error(monkeypatch, fresh_caps_cache, tmp_path):
+    """env 覆写指向一个没有执行权限的文件 → subprocess 抛 PermissionError（不是 FileNotFoundError），也要收成 RuntimeError。"""
+    script = tmp_path / "worker.sh"
+    script.write_text("#!/bin/sh\necho '{}'\n", encoding="utf-8")
+    script.chmod(0o644)
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", str(script))
+    monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CWD", raising=False)
+    with pytest.raises(RuntimeError, match="起不来") as e:
+        compose.query_capabilities("novaact")
+    assert isinstance(e.value.__cause__, PermissionError)
+    assert "GHERKAI_WORKER_NOVAACT_CMD" in str(e.value)  # 点名用的是哪一级的命令
+    assert compose._CAPABILITIES_CACHE == {}
+
+
+def test_ask_worker_cwd_not_a_directory_is_runtime_error(monkeypatch, fresh_caps_cache, tmp_path):
+    """配套的 _CWD 指向普通文件 → subprocess 抛 NotADirectoryError，同样收成 RuntimeError。"""
+    import shlex
+
+    not_a_dir = tmp_path / "plain-file"
+    not_a_dir.write_text("x", encoding="utf-8")
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", shlex.quote(sys.executable))
+    monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CWD", str(not_a_dir))
+    with pytest.raises(RuntimeError, match="起不来") as e:
+        compose.query_capabilities("novaact")
+    assert isinstance(e.value.__cause__, NotADirectoryError)
+
+
+# ---- nova_act_timeout_s：惰性取值、坏值给产品语言的 ValueError（不在 import 时求值）----
+
+@pytest.fixture
+def fresh_nova_timeout(monkeypatch):
+    """清空取值缓存（monkeypatch 在用例结束时还原原值）：缓存跨用例泄漏会让「环境变量怎么设就取到什么」的断言失真。"""
+    monkeypatch.setattr(compose, "_nova_act_timeout_cached", None)
+
+
+def test_nova_act_timeout_default_and_override(monkeypatch, fresh_nova_timeout):
+    monkeypatch.delenv("NOVA_ACT_TIMEOUT_S", raising=False)
+    assert compose.nova_act_timeout_s() == 120
+    monkeypatch.setattr(compose, "_nova_act_timeout_cached", None)
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "300")
+    assert compose.nova_act_timeout_s() == 300
+
+
+def test_nova_act_timeout_is_cached_after_first_read(monkeypatch, fresh_nova_timeout):
+    """一个进程内只解析一次：注给 worker 的值与自述查询用的值是同一个（自述缓存不设失效的前提）。"""
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "200")
+    assert compose.nova_act_timeout_s() == 200
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "500")
+    assert compose.nova_act_timeout_s() == 200
+
+
+@pytest.mark.parametrize("bad", ["120s", "150.5", "", "0", "-5", "abc"])
+def test_nova_act_timeout_bad_value_raises_product_message(monkeypatch, fresh_nova_timeout, bad):
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", bad)
+    with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S") as e:
+        compose.nova_act_timeout_s()
+    assert repr(bad) in str(e.value)
+    # 坏值不进缓存：改对之后立刻生效
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "90")
+    assert compose.nova_act_timeout_s() == 90
+
+
+def test_bad_nova_act_timeout_does_not_break_import(tmp_path):
+    """坏值不在 import 时炸：CLI 顶层 import 本模块，import 期抛异常会让 --version、plan 这些与 Nova 无关的命令也以 traceback 结束。"""
+    import os
+    import subprocess
+
+    env = {**os.environ, "NOVA_ACT_TIMEOUT_S": "120s"}
+    proc = subprocess.run([sys.executable, "-c", "import gherkai_runtime.compose"], env=env,
+                          capture_output=True, cwd=tmp_path, timeout=60)
+    assert proc.returncode == 0, proc.stderr.decode("utf-8", errors="replace")
+
+
+def test_bad_nova_act_timeout_only_disables_nova_leg(monkeypatch, fresh_nova_timeout, midscene_env_cmd):
+    """本机后端：坏值只让 Nova 引擎项变成一用即抛的占位项，Midscene 照常装配（不连坐）。"""
+    from gherkai_core.adapters.subprocess_engine import SubprocessEngine
+
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "120s")
+    engines = compose.build_engines()
+    assert isinstance(engines["midscene"], SubprocessEngine)
+    for call in (lambda: engines["novaact"].run_scope(object()), lambda: engines["novaact"].start_scope(object())):
+        with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S"):
+            call()
+
+
+def test_bad_nova_act_timeout_fails_nova_capabilities_query(monkeypatch, fresh_nova_timeout, novaact_env_cmd,
+                                                            fresh_caps_cache):
+    """能力自述查询同样取这个值：用到 Nova 的本机 run 在运行前检查就以退出码 2 结束（调用点收 ValueError），不 spawn。"""
+    import subprocess
+
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("坏值不应 spawn worker"))
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "150.5")
+    with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S"):
+        compose.query_capabilities("novaact")
+    assert compose._CAPABILITIES_CACHE == {}
+
+
+def test_bad_nova_act_timeout_only_disables_nova_fargate_leg(monkeypatch, fresh_nova_timeout):
+    """云端后端同理：装配本身不抛，Nova 引擎项一用即抛，Midscene 照常构造。"""
+    from gherkai_core.adapters import fargate_engine as fe
+
+    captured: list = []
+    monkeypatch.setattr(fe, "FargateEngine", lambda **kw: captured.append(kw) or "fake")
+    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "0")
+    engines = compose.build_fargate_engines(
+        run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
+        network_config={"subnets": ["subnet-x"]}, worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
+        region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+    assert engines["midscene"] == "fake" and len(captured) == 1
+    assert "NOVA_ACT_TIMEOUT_S" not in captured[0]["extra_env"]
+    with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S"):
+        engines["novaact"].start_scope(object())
+
+
 # ---- engine_min_grace：下限取自自述对象、复用该引擎任一份缓存（ADR 0024「引擎自报下限」）----
 
 def test_engine_min_grace_takes_worker_self_reported_value(monkeypatch, novaact_env_cmd, fresh_caps_cache):
@@ -889,7 +1006,7 @@ def test_engine_min_grace_miss_raises_worker_not_found(monkeypatch, fresh_caps_c
 
 # ---- 两层命名（ADR 0033）：prefix + 基名推导 / task-def / container / SSM 路径 ----
 def test_default_name_prefix_original_concat():
-    # prefix 原样拼基名（含分隔符由部署方负责，防粘连——同 S3 prefix 先例）
+    # prefix 按原样拼接基名（分隔符由部署方负责，不带分隔符即与基名粘连；与 S3 key 前缀由 _normalize_prefix 补 / 的做法相反）
     assert names.default_name("gherkai-", "runs") == "gherkai-runs"
     assert names.default_name("prod-", "events") == "prod-events"
     assert names.default_name("nodash", "runs") == "nodashruns"  # 无分隔符 → 粘连（部署方负责）
@@ -1078,7 +1195,7 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
 
     monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
     engines = compose.build_fargate_engines(
-        run_id="rid-1", prefix="prod-", cluster="prod-cluster", events_table="prod-events",
+        run_id="rid-1", cluster="prod-cluster", events_table="prod-events",
         bucket="prod-artifacts", report_dir="runs", network_config={"subnets": ["subnet-x"]},
         worker_task_defs=_REV, region="us-west-2", profile="myprof",
         ecs=object(), s3=object(), ddb_events_table=object(),  # 注入句柄免惰性建
@@ -1101,7 +1218,7 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["sdk_artifact_dir_env"] == {"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid-1/nova-trajectories"}
     # Nova act timeout **双端同源**（ADR 0024 grace 硬约束）：云端后端也须显式注入——容器不继承本地 env，
     # 缺它则 worker 落回自带字面量、调 NOVA_ACT_TIMEOUT_S 只抬高 grace 下限、改不动容器内单 act 上界。
-    assert nova["extra_env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.NOVA_ACT_TIMEOUT_S)
+    assert nova["extra_env"]["NOVA_ACT_TIMEOUT_S"] == str(compose.nova_act_timeout_s())
     mid = by_engine[_REV["midscene"]]
     assert mid["sdk_artifact_dir_env"] == {"MIDSCENE_RUN_DIR": "/tmp/gherkai-run/rid-1/midscene-run"}
     assert "NOVA_ACT_TIMEOUT_S" not in mid["extra_env"]  # 引擎特定值只给该引擎（Midscene 无可控 act timeout）
@@ -1267,6 +1384,7 @@ def test_preflight_missing_chain_lambda_names_prefix():
         lam=_FakeLambdaClient({"g-kicker", "g-exit-observer"}),  # reconciler 缺
     )
     assert err is not None and "g-reconciler" in err
+    assert "后台运行" in err  # 说使用者能指认的用途，不说内部机制名
 
 
 def test_preflight_task_defs_and_lambdas_all_present():
@@ -1742,7 +1860,7 @@ def test_fargate_engines_leave_run_id_to_the_engine_adapter(monkeypatch):
             captured.append(kwargs)
 
     monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
-    compose.build_fargate_engines(run_id="rid-1", prefix="p-", cluster="c", events_table="e", bucket="b", report_dir="runs",
+    compose.build_fargate_engines(run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
                                   network_config={"subnets": ["subnet-x"]},
                                   worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
                                   region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
@@ -1761,7 +1879,7 @@ def test_fargate_engines_carry_session_warmup_url_in_extra_env_only_when_given(m
             captured.append(kwargs)
 
     monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
-    common = dict(run_id="rid-1", prefix="p-", cluster="c", events_table="e", bucket="b", report_dir="runs",
+    common = dict(run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
                   network_config={"subnets": ["subnet-x"]}, worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
                   region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32

@@ -22,8 +22,7 @@ WARMUP_URL = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_t
 
 def test_edge_contract_constants_match_the_cross_language_fixture():
     fx = json.loads(FIXTURE.read_text(encoding="utf-8"))
-    assert (C.WARMUP_PATH, C.CHECK_PATH, C.TOKEN_PARAM, C.COOKIE_NAME) == (fx["warmup_path"], fx["check_path"], fx["token_param"], fx["cookie_name"])
-    assert C.WARMUP_TITLES == fx["titles"] and C.WARMUP_MARKERS == fx["markers"]
+    assert C.WARMUP_TITLES == fx["titles"]
     assert (C.SESSION_WARMUP_URL_ENV, C.EXTRA_HTTP_HEADERS_ENV, C.SESSION_WARMUP_KEY) == (fx["env"]["warmup_url"], fx["env"]["extra_http_headers"], fx["capability_key"])
     # 四条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
     assert (C.INCOMPLETE_DEFINITION_MESSAGE, C.WARMUP_AUTH_REQUIRED_MESSAGE, C.WARMUP_DENIED_MESSAGE, C.WARMUP_ERROR_MESSAGE) == (
@@ -344,7 +343,7 @@ def test_warmup_precedes_scope_started_and_scenarios(driven, monkeypatch):
 
     box["page"] = _TracingPage([200], [C.WARMUP_TITLES["ready"]])
     monkeypatch.setattr(rs, "_run_scenario",
-                        lambda nova, sid, steps, votes_n, sink, *, scope_id: trace.append(("run_scenario", sid)) or ["passed"])
+                        lambda nova, sid, steps, votes_n, sink, *, scope_id: trace.append(("run_scenario", sid)) or (["passed"], True))
     monkeypatch.setenv(C.EXTRA_HTTP_HEADERS_ENV, '{"ngrok-skip-browser-warning": "1"}')
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0

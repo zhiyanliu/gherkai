@@ -9,6 +9,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 import gherkai_cli.__main__ as m
 from gherkai_core.model import JobResult, RunResult, Status
 from gherkai_runtime import tunnel as gtunnel
@@ -249,6 +251,51 @@ def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
     captured = capsys.readouterr()
     assert "http://localhost:3000" in captured.out  # 原始地址（替换前）
     assert "原始地址" in captured.err  # 标注在 stderr（诊断面）
+
+
+@pytest.mark.parametrize("argv", [
+    ["plan"],
+    ["run", "--no-report"],
+    ["submit"],
+    ["submit", "--backend", "cloud"],
+], ids=["plan", "run", "submit-local", "submit-cloud"])
+def test_expose_local_rejects_non_origin_value_at_entry_before_starting_tunnel(argv, tmp_path, monkeypatch, capsys):
+    """--expose-local 的取值带路径：plan / run / submit 在共享的入口校验阶段以退出码 2 结束，stderr 说明取值不是 origin，
+    隧道没有起、submit 没有落库也没有起后台进程（ADR 0035 决策 2）。"""
+    calls = []
+    _patch_tunnel(monkeypatch, calls)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("取值不是 origin 时不该进入执行"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("取值不是 origin 时不该起后台进程"))
+    reports = tmp_path / "reports"
+    extra = ["--report-dir", str(reports)] if argv[0] == "submit" else []
+    rc = m.main([argv[0], str(_write_feature(tmp_path)), *argv[1:], *extra,
+                 "--expose-local", "http://localhost:3000/login"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "不是 origin" in err and "http://localhost:3000/login" in err and "Traceback" not in err
+    assert calls == []  # 隧道一次都没起
+    assert not reports.exists()
+
+
+def test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(tmp_path, monkeypatch, capsys):
+    """末尾恰好一个斜杠：plan 通过、标注行显示归一化后的 origin；run 起隧道与映射用的是同一个归一化值（ADR 0035 决策 2）。"""
+    feat = _write_feature(tmp_path)
+    assert m.main(["plan", str(feat), "--expose-local", "http://localhost:3000/"]) == 0
+    assert "注：http://localhost:3000 将在" in capsys.readouterr().err
+
+    calls, box = [], {}
+    _patch_tunnel(monkeypatch, calls)
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        box["run_meta"] = run_meta
+        return RunResult(run_meta=run_meta, status=Status.PASSED,
+                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    assert m.main(["run", str(feat), "--no-report", "--expose-local", "http://localhost:3000/"]) == 0
+    assert ("start", "http://localhost:3000") in calls
+    assert "隧道已建立：http://localhost:3000 → " in capsys.readouterr().err
+    assert "https://t.ngrok-free.app/login" in box["run_meta"].jobs[0].scenarios[0].steps[0].text
 
 
 def test_submit_rejects_nonpositive_tunnel_ttl_before_starting_tunnel(tmp_path, monkeypatch, capsys):

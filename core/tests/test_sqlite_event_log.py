@@ -99,21 +99,47 @@ def test_record_exit_reason_roundtrip(tmp_path):
     assert exits["b"].reason is None
 
 
-def test_opening_a_v140_shaped_db_adds_the_reason_column(tmp_path):
-    """唯一存活的迁移分支必须有红灯：v1.4.0（已发行）建的 exits 表没有 reason 列，新版接力同一 run 的 events.db 时
-    `_init_schema` 补列且旧行照常读回。删这条 ALTER 前先看到这里变红——「不可达就删」的判据是 git tag 真值集，
-    v1.4.0 的 CREATE TABLE 逐字：scope_id / exit_code / timed_out，无 reason。"""
-    import sqlite3
+def test_records_reads_events_and_exits_from_one_snapshot(tmp_path, monkeypatch):
+    """records() 的两表在同一读事务内读取：读 events 期间另一连接提交了末尾事件与退出记录，结果里两者要么都在、要么都不在。
+
+    分两次各取快照时会读到退出记录、却漏掉在它之前提交的 scope_done，投影把「退出码 0、无 scope_done」判成 ERROR。"""
+    from gherkai_core.adapters.event_log import sqlite as sqlite_mod
 
     path = tmp_path / "events.db"
-    with sqlite3.connect(path) as conn:
-        conn.execute("CREATE TABLE exits (scope_id TEXT PRIMARY KEY, exit_code INTEGER, timed_out INTEGER NOT NULL DEFAULT 0)")
-        conn.execute("INSERT INTO exits (scope_id, exit_code, timed_out) VALUES ('old', 0, 0)")
-    log = SqliteEventLog(path)
-    with sqlite3.connect(path) as conn:
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(exits)")}
-    assert "reason" in cols
-    log.record_exit("new", 255, reason="TaskFailedToStart: x")
-    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
-    assert exits["old"].exit_code == 0 and exits["old"].reason is None
-    assert exits["new"].reason == "TaskFailedToStart: x"
+    reader = SqliteEventLog(path)
+    writer = SqliteEventLog(path)
+    reader.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
+    reader.append_event("a", 2, '{"type":"scenario_done","scenarioId":"a:1","status":"passed"}', 2.0)
+
+    real_event_from_line = sqlite_mod.event_from_line
+    calls = {"n": 0}
+
+    def interleaving_event_from_line(line):
+        calls["n"] += 1
+        if calls["n"] == 1:  # reader 正在逐行解析 events 结果集时，写端按真实次序先提交事件、再提交退出记录
+            writer.append_event("a", 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
+            writer.record_exit("a", 0)
+        return real_event_from_line(line)
+
+    monkeypatch.setattr(sqlite_mod, "event_from_line", interleaving_event_from_line)
+    recs = reader.records()
+    seqs = {r.seq for r in recs if r.kind == "event"}
+    has_exit = any(r.kind == "exit" for r in recs)
+    assert (3 in seqs) == has_exit
+
+
+def test_every_call_closes_its_connection(tmp_path):
+    """每次调用的短连接都显式关闭：`with sqlite3.connect(...)` 只管事务，不关闭的连接被回收时逐个发 ResourceWarning。"""
+    import gc
+    import warnings
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        log = _log(tmp_path)
+        log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
+        log.record_exit("a", 0)
+        log.has_exit("a")
+        log.records()
+        log.max_seq("a")
+        gc.collect()
+    assert [w for w in caught if issubclass(w.category, ResourceWarning)] == []

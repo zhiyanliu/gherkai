@@ -260,7 +260,7 @@ function clientOptions(endpoint: EndpointParts, timeoutMs: number, onStatus?: (s
   };
 }
 
-// 消息常量来自 surface.mts；接线后两者可能形成静态 import 循环，模块顶层不读它们（暂时性死区），每次调用时再组装。
+// 消息常量来自 surface.mts：surface.mts 经 parts.mts 静态 import 本模块，两者构成静态 import 循环（见 parts.mts 头注释），故模块顶层不读它们（暂时性死区），每次调用时再组装。
 function acquireTimedOut(): ConnectOutcome {
   return { kind: "terminated", termination: { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE } };
 }

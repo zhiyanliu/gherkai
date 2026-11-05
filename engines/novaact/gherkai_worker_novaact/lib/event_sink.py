@@ -9,7 +9,7 @@
 
 **emit 同步（合理不对称，ADR 0024）**：Nova worker 是同步 + greenlet 模型、全链路零 async，emit 同步；
 Midscene 那个引擎 emit 为 async（Node 事件循环 + Fargate 化后 aws-sdk-js DDB PutItem 本就 async）。Fargate 化后
-Nova 用 boto3（同步 SDK）put_item、同步 emit 天然容纳，无需 async 化（那是本 ADR 终止契约被拒的 asyncio 路）。
+Nova 用 boto3（同步 SDK）put_item、同步 emit 天然容纳，无需 async 化（那是 ADR 0024 终止契约里被拒的 asyncio 路）。
 
 **两态（ADR 0024「DynamoDB 作 events-out」）**：
 - **fd 态（subprocess）**：写 EVENTS_FD fd（无/非法 → 回落 stdout 调试）。

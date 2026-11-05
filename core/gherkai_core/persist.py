@@ -5,15 +5,15 @@
 一遍必漂移。故收成依赖 Store **ports**（不含具体 adapter、不含执行 reducer）的服务，组合根只注入 adapter。
 
 架构对位：schedule 编排**执行**（Engine port），RunPersistence 编排**存储**（Store ports），两者平级、
-都在 core、由组合根组合。schedule 一行不碰 store——它经 sink / on_job_complete 两个回调把事件/JobResult
-喂给本服务（ADR 0026/0030）。
+都在 core、由组合根组合。schedule 一行不碰 store——它经 on_event / on_job_complete 两个回调把事件/JobResult
+喂给本服务（sink 只供进度显示，不经本服务；ADR 0026/0030）。
 
 commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.finalize 最后写。
 「finalize 一落，就表示 run 已提交、判定就绪」。
 
 并发不变量（ADR 0030 决定三）：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 on_event，
 在 schedule 的 sink_lock **之外** fire，故落库 RMW 不堵别的 worker 的进度显示）、job 终态刷在 **主线程**
-（经 on_job_complete，as_completed 串行）。local adapter 的 update_job_state 是整文件 read-modify-write、
+（经 on_job_complete，在 schedule 等待 job 完成的循环里串行调用）。local adapter 的 update_job_state 是整文件 read-modify-write、
 非自身线程安全，而 on_event 不受 sink_lock 保护——故本服务**自持一把锁**，所有写 store 的入口都走它。
 """
 from __future__ import annotations
@@ -87,7 +87,7 @@ class RunPersistence:
 
     def on_event(self, event: Event) -> None:
         """事件旁路观察者（注入 schedule 的 on_event，在 sink_lock **之外**调，ADR 0030 决定三）：
-        收 SessionOpened（origin 不是 attempted，ADR 0051 决策 4：取设备期间 job 即算 RUNNING）或 ScopeStarted 实时刷该 job 为
+        收 SessionOpened（origin 不是 attempted，ADR 0051 决策 4：scope_started 之前的准备期 job 即算 RUNNING）或 ScopeStarted 实时刷该 job 为
         RUNNING，session_id 按代表会话规则（scope_started 的值一经取到锁定；此前取最近一条非 attempted 的 session_opened；
         attempted 不写入），写入永不带 None 覆盖已有值。
 
@@ -107,7 +107,7 @@ class RunPersistence:
                 )
 
     def on_job_complete(self, jr: JobResult) -> None:
-        """每个 job 完成（主线程 as_completed 串行 fire）：commit-point 写序——数据面先、控制面 job 态后。
+        """每个 job 完成（在主线程等待 job 完成的循环里串行调用）：commit-point 写序——数据面先、控制面 job 态后。
 
         skipped 的 job 从没 event 流过，但仍经此落库（否则 ResultStore 缺该 scope 文件、CI 读单 scope 落空）。
         """

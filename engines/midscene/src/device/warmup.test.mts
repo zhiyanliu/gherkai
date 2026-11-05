@@ -75,7 +75,7 @@ interface HarnessOptions {
   /** 第 n 次（从 0 起）切回原生上下文：返回 Error 即抛出。 */
   nativeFails?: (n: number) => Error | undefined;
   sessionStatus?: DeviceWarmupArgs["sessionStatus"];
-  /** 不传 sessionStatus（端口当前的调用形态）。 */
+  /** 不传 sessionStatus（本块的参数允许缺省；设备侧接缝总是传入）。 */
   omitStatus?: boolean;
 }
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 from gherkai_core.adapters.event_log import SqliteEventLog
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.project import project_full
 from gherkai_core.reconcile import tick
 
 
@@ -156,6 +157,15 @@ def test_launch_failure_does_not_wedge_run(tmp_path):
     assert state.status == Status.ERROR
     assert all(js.status == Status.ERROR for js in state.jobs.values())
     assert boom.attempts == ["a", "b"]  # 不重复 launch（已 ERROR、plan_next 不再提议）
+
+
+def test_launch_failure_reason_reaches_job_message(tmp_path):
+    """launch 抛错的异常文本随退出记录进 job message（与同步路径同句），使用方能看到起不来的原因。"""
+    meta, log, store = _setup(tmp_path, "a")
+    tick("run-1", meta, log, store, BoomLauncher(), max_concurrency=1, now_iso="t1")
+    (jr,) = project_full(meta, log.records()).jobs
+    assert jr.status == Status.ERROR
+    assert "起 worker 失败：boom: a" in (jr.message or "")
 
 
 def test_launch_failure_isolated_other_job_completes(tmp_path):

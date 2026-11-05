@@ -5,6 +5,9 @@
 `NOVA_GRACE_MARGIN_S` 只被生产 worker 用（自述入口 `--capabilities` 报的 grace 下限的两个组成项之一），
 放这里是因为它与 MODEL_ID 同类：有标定/评估来历、缺省锁定值 + env 可 opt-in 覆盖的引擎常量
 （WORKFLOW_DEF 不给 env 配置项——它是账户里那个 definition 的名字，改名是一次发版决定）。
+`SESSION_STOP_BUDGET_S` 与 `NOVA_GRACE_MARGIN_S` 同类（真容器标定的缺省值，可用 env 覆盖）。文件末尾是隧道会话预热的常量
+（ADR 0051 决策 13），只包含本 worker 消费的部分，跨语言同值的几项由 `engines/fixtures/tunnel-warmup.json` 对拍；
+worker 只读预热地址与页面标题。
 
 WORKFLOW_DEF 取**产品名**：`workflow_setup.py` 的 create-if-not-exists 会在**每个使用方账户**里建出这个
 definition（ADR 0004），名字直接出现在使用方自己的 AWS 控制台，故不留试验期代号。
@@ -18,8 +21,8 @@ import os
 # 模型版本（ADR 0004「模型版本选择策略」）：**缺省锁定 GA 版本 id，不用 `nova-act-latest` 别名**——别名的
 # 语义是「AWS 发新 GA 时自动换模型」、时点由 AWS 定；而本工具的 pass / fail 靠 AI 投票，模型一换判定就变
 # （已 A/B 实测：同一批用例里有 scenario 在两个模型间稳定翻转，不是噪声）。这类变化必须随一次有 changelog 的
-# 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 重新运行同一批用例的 A/B → 改本常量
-# → 发版点明模型换代）见该 ADR，别在这里改成别名。
+# 显式发布落地，而不是藏在别名里在使用方账户中静默发生；升级流程（新 GA → 用模型评测集（ADR 0044 决策 1）
+# 重新运行 A/B → 改本常量 → 发版点明模型换代）见该 ADR，别在这里改成别名。
 # env `NOVA_MODEL_ID` 是 **opt-in 配置项**（与下面的 NOVA_GRACE_MARGIN_S 规则一致：worker 读、缺省即锁定值）：
 # 本机执行时在 shell 里设即生效；云端 Fargate 容器 env 是显式枚举，要用就构建进定制 worker 镜像的 `ENV`（即
 # ADR 0038 的 variant 机制）。可设 `nova-act-preview` 试新模型，但 **preview 不作产品默认**：无支持承诺、
@@ -41,8 +44,9 @@ WORKFLOW_DEF = "gherkai-worker"
 # 加截图排空 6s，合计 15s，故 60→30（Nova grace 下限 180→150），30 仍留 ~2x 余量。
 # （上传本体在队列线程内执行、`use_threads=False`，无 s3transfer 线程池被 atexit join 的尾巴——否则要再加一次
 # client 超时 ≈10s，实际运行中量过。）env 可覆盖（再标定/调优）。
-# 停止信号到达时 Start 仍在途的 1.5 秒等待窗口（`run_scope.START_SETTLE_S`，ADR 0051 决策 5 桌面收尾）已在本余量内：它只在没有 act
-# 在途时出现、不与单 act 上界叠加，加上 Stop 预算（SESSION_STOP_BUDGET_S）与截图排空仍在缺省的 30 秒之内，不必为它加大余量。
+# 停止信号到达时 Start 仍在途的 1.5 秒等待窗口（`run_scope.START_SETTLE_S`，窗口内未返回即发一对 attempted，见 ADR 0051 决策 4；
+# 1.5 秒与 Midscene 桌面收尾的 INFLIGHT_SETTLE_MS 同值，见 ADR 0049 决策 5）已在本余量内：它只在没有 act 在途时出现、
+# 不与单 act 上界叠加，加上 Stop 预算（SESSION_STOP_BUDGET_S）与截图排空仍在缺省的 30 秒之内，不必为它加大余量。
 NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 
 # AgentCore 会话 Stop 的预算（ADR 0028「会话泄漏防护」，对称 Midscene 的 STOP_SESSION_BUDGET_MS）：worker 自己持有 StopBrowserSession，
@@ -53,19 +57,14 @@ NOVA_GRACE_MARGIN_S = int(os.environ.get("NOVA_GRACE_MARGIN_S", "30"))
 SESSION_STOP_BUDGET_S = float(os.environ.get("NOVA_SESSION_STOP_BUDGET_S", "8"))
 
 # ---- 隧道「令牌换 cookie」的会话预热（ADR 0051 决策 13；ADR 0035「边界与不变量」）----
-# 常量与组合根（runtime/gherkai_runtime/tunnel.py）同值，由 engines/fixtures/tunnel-warmup.json 对拍；worker 只读预热地址、不感知令牌与 cookie 的值。
+# 本 worker 只持自己消费的部分：标题、env 名、能力键与组合根同值，四句消息与 Midscene worker 逐字相同，均由 engines/fixtures/tunnel-warmup.json 对拍。
+# 边缘路径、令牌参数名、cookie 名与正文标记不在此持有：worker 只读预热地址、不感知令牌与 cookie 的值，正文标记只有设备 worker 用。
 SESSION_WARMUP_URL_ENV = "GHERKAI_SESSION_WARMUP_URL"
 EXTRA_HTTP_HEADERS_ENV = "GHERKAI_EXTRA_HTTP_HEADERS"
 SESSION_WARMUP_KEY = "session_warmup"  # 能力自述里的布尔键（ADR 0049 决策 1）
-WARMUP_PATH = "/.well-known/gherkai-tunnel-auth"
-CHECK_PATH = "/.well-known/gherkai-tunnel-check"
-TOKEN_PARAM = "gherkai_tunnel_token"
-COOKIE_NAME = "__Host-gherkai_tunnel"
-# 预热页面的四种可见结果：桌面 worker 读 document.title；正文标记给设备 worker 在控件树里找
+# 预热页面四种可见结果的标题（桌面 worker 读 document.title）
 WARMUP_TITLES = {"ready": "gherkai-tunnel-ready", "denied": "gherkai-tunnel-denied", "error": "gherkai-tunnel-error",
                  "auth_required": "gherkai-tunnel-auth-required"}
-WARMUP_MARKERS = {"ready": "GHERKAI TUNNEL READY", "denied": "GHERKAI TUNNEL DENIED", "error": "GHERKAI TUNNEL ERROR",
-                  "auth_required": "GHERKAI TUNNEL AUTH REQUIRED"}
 # 预热的预算：一次导航的上限、等标记的上限、原地重导航的次数（ERROR 或无标记才重试；拒绝是确定性的、不重试）
 WARMUP_NAV_TIMEOUT_MS = 30_000
 WARMUP_MARKER_WAIT_S = 10.0

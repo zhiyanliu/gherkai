@@ -145,6 +145,10 @@ class SubprocessEngine:
                 env=child_env,
                 text=True,
                 encoding="utf-8",
+                # stdout / stderr 只转发、不解析，坏字节替换成 U+FFFD 无害；按严格解码时日志里一个非 UTF-8 字节就让转发线程
+                # 抛错退出，这条管道从此没人读，worker 写满管道缓冲后卡在写上、事件流随之停住。
+                # fd3 事件通道另行严格解码（见 _read_events）。
+                errors="replace",
                 bufsize=1,  # 行缓冲：worker 每吐一行即可读到（流式，ADR 0024）
                 pass_fds=(events_w,),  # 让子进程继承写端
                 # worker 自成一个进程组（ADR 0024 终止契约「使用方中断」条）：终端的 Ctrl-C 只送到前台进程组，于是只有 CLI 收到，
@@ -228,7 +232,8 @@ def _read_events(
     proc.wait()
     rc = proc.returncode
     if rc is not None and rc != 0:
-        # fd3 自然 EOF 后拿退出码：0 表示正常；正非零表示 worker 自行异常退出（崩溃 / 会话清理失败的 1 / 网络故障的 80）；
+        # fd3 自然 EOF 后拿退出码：0 表示正常；正非零表示 worker 自行异常退出（崩溃 / 会话清理失败的 1 /
+        # Nova worker 加载使用方 steps 失败的 2 / 网络故障的 80）；
         # 负码表示被信号强杀（SIGKILL 为 -9：grace 超时后 stop() 的兜底，或外部 kill -9）——进程非干净终止本身即终态
         # 信号（ADR 0034 机制二），一律翻成异常让 schedule 的终结函数按「退出码非零」判。schedule 停止后仍有界消费到 EOF
         # （ADR 0034 机制二「停止后继续有界消费」），故主动停的退出码也经此；两个引擎 worker 收 SIGTERM 后以正码退出

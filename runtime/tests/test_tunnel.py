@@ -18,7 +18,9 @@ import yaml
 
 from gherkai_core.model import Job, Scenario, Step, StepArgument
 from gherkai_runtime import tunnel
-from gherkai_runtime.tunnel import NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, stop_tunnel, warmup_url_for
+from gherkai_runtime.tunnel import (
+    NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, normalize_origin, stop_tunnel, warmup_url_for,
+)
 
 
 # ---------- TunnelInfo 与边缘契约常量 ----------
@@ -36,7 +38,8 @@ def test_tunnel_info_carries_clean_url_and_token_only_in_warmup_url():
 
 
 def test_edge_contract_constants_match_the_cross_language_fixture():
-    """路径、参数名、cookie 名、页面标题与正文标记：runtime 与两个 worker 各持一份同值，三方都对同一份 fixture（ADR 0051 决策 13）。"""
+    """边缘契约常量与跨语言 fixture 一致（ADR 0051 决策 13）：路径、参数名、cookie 名只在 runtime 持有；页面标题与正文标记
+    与消费它们的 worker 同值（Nova 只持标题，Midscene 持标题与正文标记），各方测试都与同一份 fixture 比对。"""
     fx = json.loads(FIXTURE.read_text(encoding="utf-8"))
     assert (tunnel.WARMUP_PATH, tunnel.CHECK_PATH, tunnel.TOKEN_PARAM, tunnel.COOKIE_NAME) == (
         fx["warmup_path"], fx["check_path"], fx["token_param"], fx["cookie_name"])
@@ -186,6 +189,57 @@ def test_map_leaves_other_jobs_and_original_untouched():
     assert out[1].scenarios[0].steps[0].text == "别的"
 
 
+# ---------- normalize_origin：--expose-local 的取值只接受 origin（ADR 0035 决策 2） ----------
+
+@pytest.mark.parametrize("value, expected", [
+    ("http://localhost:3000", "http://localhost:3000"),
+    ("http://localhost:3000/", "http://localhost:3000"),  # 末尾恰好一个斜杠：去掉
+    ("https://127.0.0.1:8443/", "https://127.0.0.1:8443"),
+    ("http://192.168.1.50:3000", "http://192.168.1.50:3000"),
+    ("http://[::1]:3000/", "http://[::1]:3000"),
+    ("http://Example.test:3000", "http://Example.test:3000"),  # 大小写原样保留：映射按 feature 的书写形式逐字匹配
+])
+def test_normalize_origin_accepts_origins_and_drops_one_trailing_slash(value, expected):
+    assert normalize_origin(value) == expected
+
+
+@pytest.mark.parametrize("value", [
+    "http://localhost:3000/login",       # 路径：不隐式截断，截掉会静默改变意图
+    "http://localhost:3000//",           # 不止一个斜杠
+    "http://localhost:3000?x=1",         # 查询串
+    "http://localhost:3000/?",           # 空查询串也算
+    "http://localhost:3000#top",         # 片段
+    "http://user:pw@localhost:3000",     # 用户信息
+    "ftp://localhost:3000",              # http 与 https 之外的 scheme
+    "localhost:3000",                    # 缺 scheme
+    "http://",                           # 缺主机
+    "http:///",
+    "http://localhost:99999",            # 端口越界
+    "http://localhost:abc",              # 端口不是数字
+    "http://localhost:3000:8080",
+    "http://localhost:",                 # 冒号之后缺少端口号
+    "http://[::1]:/",
+    "http://localhost:0",                # 0 号端口
+    " http://localhost:3000",            # 含空白
+    "http://localhost:3000\n",
+])
+def test_normalize_origin_rejects_non_origin_values(value):
+    with pytest.raises(TunnelError, match="不是 origin"):
+        normalize_origin(value)
+
+
+def test_map_with_trailing_slash_origin_still_maps_paths():
+    """取值带末尾斜杠时，step 里的 `http://localhost:3000/login` 照常映射：不归一化的话 origin 之后剩下 `login`、
+    判为不命中，job 文本里留着本机地址，云端浏览器导航失败。"""
+    out = map_origin_in_jobs([_job_with('打开 "http://localhost:3000/login"')], ORIGIN + "/", BASE)
+    assert out[0].scenarios[0].steps[0].text == '打开 "https://abc.ngrok-free.app/login"'
+
+
+def test_map_rejects_origin_with_path():
+    with pytest.raises(TunnelError, match="不是 origin"):
+        map_origin_in_jobs([_job_with('打开 "http://localhost:3000/login"')], ORIGIN + "/login", BASE)
+
+
 # ---------- NgrokTunnel（fake spawn/API） ----------
 
 class _FakeProc:
@@ -239,6 +293,24 @@ def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
     assert re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy2).group(1) != cookie  # cookie 值也每次不同，不只是令牌
     with pytest.raises(TypeError):
         t.start("http://localhost:3000", with_auth=False)  # 曾有的开关已删：隧道模式恒带鉴权
+
+
+def test_ngrok_start_exposes_normalized_origin():
+    """末尾斜杠在交给 ngrok 之前去掉：agent 的上游地址与 TunnelInfo.local_origin 都是归一化后的 origin。"""
+    spawned: dict = {}
+    info = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start(
+        "http://localhost:3000/")
+    assert spawned["cmd"][2] == "http://localhost:3000"
+    assert info.local_origin == "http://localhost:3000"
+
+
+def test_ngrok_start_rejects_non_origin_before_spawning():
+    """取值不是 origin：以 TunnelError 拒绝（调用方归退出码 2），不起 agent。"""
+    spawned: dict = {}
+    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None)
+    with pytest.raises(TunnelError, match="不是 origin"):
+        t.start("http://localhost:3000/login")
+    assert "cmd" not in spawned
 
 
 def test_ngrok_start_timeout_reports_authtoken_hint():

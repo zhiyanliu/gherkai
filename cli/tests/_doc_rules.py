@@ -5,11 +5,13 @@ RETIRED_TERMS（注释层用去掉「批」义三词的 RETIRED_TERMS_IN_CODE）
 NUMERIC_SHORTHAND / ARROW、悬空指针形态 DANGLING_JOURNEY / BARE_WP / MACHINE_COORDINATE（本机坐标：全仓 markdown 与 code 注释都拦）、
 相对链接 RELATIVE_LINK、Release 固定块里未锁定 tag 的仓库链接 UNPINNED_BLOB、已知机器根 MACHINE_ROOTS；
 ②扫描面——user_docs（含演示材料；措辞规则的适用范围由 wording_scope 截取：CHANGELOG 已发行节与定稿口播稿 final_transcript
-豁免）/ package_pages（包 README 与 Release 正文的固定块）/ technical_docs / ai_side_docs / code_comment_files /
-diagram_sources / skill_markdown_files / long_term_docs / all_markdown（本机坐标规则适用的全仓已跟踪 markdown），与 classify(path)；
+豁免）/ package_pages（包 README 与 Release 正文的固定块）/ technical_docs / ai_side_docs（含 git 已跟踪的项目 skill 与
+skill 评测的 grader 提示）/ code_comment_files（PY_ROOTS_FOR_COMMENTS 各根下与匹配 CODE_COMMENT_GLOBS 的、按后缀或文件名认的
+code 文件，含 steps/ 模板；判定 _is_code_comment_file 与 classify 共用）/ diagram_sources / skill_markdown_files /
+long_term_docs / all_markdown（本机坐标规则适用的全仓已跟踪 markdown），与 classify(path)；
 ③抽取器——prose_lines（markdown 正文，剥代码块与行内代码）、comment_units（注释与 docstring 原文，comment_blocks 按段分组）、
 comment_prose_lines（注释与 docstring 的正文，同样剥代码块与行内代码）、skill 的命令 token 抽取。scan(kind, path, only_lines)
-按面套规则束。
+按面套规则束；可选的 text 给了就扫它、不读文件（提交闸门传暂存区里的版本），注释抽取器同样接受 text。
 
 消费方三处，同源才不会各自漂：`cli/tests/test_*.py` 各面的护栏（CI 兜底）、`tools/doc_rules_check.py`（Claude Code 的
 写完即查 hook 与提交闸门，人类 contributor 的可选 git pre-commit）、`tools/render_skill_contract.py`（契约副本转换器的自查）；
@@ -22,7 +24,7 @@ comment_prose_lines（注释与 docstring 的正文，同样剥代码块与行�
 from __future__ import annotations
 
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import NamedTuple
 
 REPO = Path(__file__).resolve().parents[2]
@@ -34,7 +36,7 @@ SKILL_ROOT = REPO / "cli" / "gherkai_cli" / "skills" / "gherkai"
 FORBIDDEN = re.compile(
     r"\bADR\b"                       # ADR 编号 / 「见 ADR」
     r"|决策\s*[0-9A-Za-z]"            # 决策 N
-    r"|不变量|定位链|被拒方案|重议闸门|实测项|接缝契约|模块头|组合根"
+    r"|不变量|定位链|被拒方案|重议闸门|实测项|接缝契约|模块头|组合根|推进器"
 )
 
 # 口头语 / 隐喻（ADR 0045 决策六）：给人读的文档与产品文案不用；「跑」作动词禁用，只放行提及词「跑」（后接 `」`）。
@@ -176,10 +178,12 @@ def _consecutive_runs(units: list[tuple[int, str]]) -> list[list[tuple[int, str]
     return runs
 
 
-def comment_blocks(path: Path) -> list[list[tuple[int, str]]]:
+def comment_blocks(path: Path, text: str | None = None) -> list[list[tuple[int, str]]]:
     """注释与 docstring 按段分组，每段是一组 (行号, 文本)：一个 docstring 一段，行号相连的注释行一段（连续的 `#` / `//`
-    行、一个 `/* … */` 块）。分段让围栏代码块的起止只在同一段内配对（见 `comment_prose_lines`）。"""
-    text = path.read_text(encoding="utf-8", errors="replace")
+    行、一个 `/* … */` 块）。分段让围栏代码块的起止只在同一段内配对（见 `comment_prose_lines`）。text 给了就抽它、
+    不读文件（提交闸门传暂存区里的内容），path 只用来按后缀选抽取方式。"""
+    if text is None:
+        text = path.read_text(encoding="utf-8", errors="replace")
     suffix = path.suffix
     out: list[tuple[int, str]] = []
     if suffix == ".py":
@@ -225,31 +229,31 @@ def comment_blocks(path: Path) -> list[list[tuple[int, str]]]:
                 in_block = True
                 rest = rest[s2 + 2:]
         return _consecutive_runs(out)
-    for i, line in enumerate(text.splitlines(), 1):  # .sh / .yml / Dockerfile
+    for i, line in enumerate(text.splitlines(), 1):  # .sh / .yml / Dockerfile / pre-commit
         m = _HASH_COMMENT.search(line)
         if m and not line.lstrip().startswith("#!"):
             out.append((i, m.group(1)))
     return _consecutive_runs(out)
 
 
-def comment_units(path: Path) -> list[tuple[int, str]]:
-    """注释与 docstring 的原文行（`comment_blocks` 展平）。"""
-    return [unit for block in comment_blocks(path) for unit in block]
+def comment_units(path: Path, text: str | None = None) -> list[tuple[int, str]]:
+    """注释与 docstring 的原文行（`comment_blocks` 展平；text 的含义同 `comment_blocks`）。"""
+    return [unit for block in comment_blocks(path, text) for unit in block]
 
 
 _COMMENT_LEADER = re.compile(r"^\s*[#*]*")  # 判围栏前去掉的行首注释记号：`#` 注释的井号、`/* … */` 块内续行的星号
 
 
-def comment_prose_lines(path: Path) -> list[tuple[int, str]]:
+def comment_prose_lines(path: Path, text: str | None = None) -> list[tuple[int, str]]:
     """注释与 docstring 的正文行：每段内跳过围栏代码块、行内反引号代码替换为空格（与 `prose_lines` 对 markdown 的处理一致），
     行号与原文一致。
 
     只给决策六形态①③的启发式用：代码示例里的 `=` 与「退 N」本来就是符号。口吻表、退役旧名、悬空指针与本机坐标扫原文
     （`comment_units`）：本机坐标多半写在反引号里，剥掉就漏。围栏只在同一段内配对，一段里没闭合的围栏不会吞掉下一段。
-    TS / JS 注释里的反引号在抽取时已随字符串遮蔽一并换成空格，这一步对它们不再起作用。
+    TS / JS 注释里的反引号在抽取时已随字符串遮蔽一并换成空格，这一步对它们不再起作用。text 的含义同 `comment_blocks`。
     """
     out: list[tuple[int, str]] = []
-    for block in comment_blocks(path):
+    for block in comment_blocks(path, text):
         in_fence = False
         for line_no, line in block:
             if _FENCE.match(_COMMENT_LEADER.sub("", line, count=1)):
@@ -276,7 +280,8 @@ MACHINE_ROOT = re.compile(rf"(?:file://)?/(?:{'|'.join(MACHINE_ROOTS)})/")
 # `journey/NNNN-`；前面紧挨字母、数字、`_` 或 `-` 的不认，那是别的目录名（`my-journey/`、`user_journey/`）。
 # journey 文件之间的互链不受影响：journey 不在长期文档的扫描面里，归类为只拦本机坐标的 other-md。
 DANGLING_JOURNEY = re.compile(r"(?<![A-Za-z0-9_-])journey/\d{4}-")
-BARE_WP = re.compile(r"\bWP-?\d+[A-Za-z]?(?:-\d+)?\b")
+# 裸 WP 编号：数字形态（`WP3`、`WP-3`、`WP3-B`）与带连字符的单字母形态（`WP-S`）；`WPS` 这类连写的词不算。
+BARE_WP = re.compile(r"\bWP(?:-?\d+[A-Za-z]?(?:-\d+)?|-[A-Z])\b")
 # 本机坐标：产出机器个人目录下的绝对路径与本地 clone 目录名——只在那台机器上成立，对别的 contributor 是悬空的，文件一律写
 # repo 相对路径。与 MACHINE_ROOTS 分开：那组根服务于「录制机产物里的任何绝对路径」（含 /tmp、/app 这类容器内路径），这里只认
 # 个人目录与 clone 名——容器布局（`/tmp/gherkai-run/<run_id>`、`/app`）是设计事实、允许写进文档。全仓 markdown（含 journey
@@ -292,11 +297,15 @@ MACHINE_COORDINATE = re.compile(
 
 # ── 扫描面与规则束（测试与 tools/doc_rules_check.py 的单一事实源）────────────────
 # 每个人读面一束规则；hook 与提交闸门按 classify() 把改动文件映射到同一束，写完即查、提交前再查（ADR 0046）。
+# features/ 收的是 steps/ 模板（用户文档让使用方复制它），.feature 不带 code 后缀、不进这一面。
 PY_ROOTS_FOR_COMMENTS = (
     "core", "runtime", "cli", "deploy_aws", "engines/novaact", "engines/midscene/src", "engines/midscene/spikes",
-    "tools", "skills/gherkai-evals", ".github", ".claude/hooks",
+    "tools", "skills/gherkai-evals", ".github", ".claude/hooks", "features",
 )
+# 不在上面任何根下、按路径单独收的 code 文件：各引擎包根目录的 Dockerfile（engines/midscene 只有 src/ 与 spikes/ 在根里）。
+CODE_COMMENT_GLOBS = ("engines/*/Dockerfile",)
 CODE_SUFFIXES = frozenset({".py", ".mts", ".ts", ".mjs", ".sh", ".yml"})
+CODE_FILENAMES = frozenset({"Dockerfile", "pre-commit"})  # 没有后缀、按文件名认的 code 文件（pre-commit 即 tools/git-hooks 里的 git hook）
 _SKIP_DIRS = frozenset({".venv", "node_modules", "dist", "__pycache__", ".pytest_cache", "graphify-out"})
 # 定义禁词表 / 把这些词当数据讨论的文件，不扫自己。
 SELF_FILES = frozenset({
@@ -391,11 +400,27 @@ def all_markdown() -> list[Path]:
     return sorted(p for p in files if p.exists() and not (_SKIP_DIRS & set(p.parts)))
 
 
+# AI 侧文档里按 git 清单收的那部分：入库的项目 skill 与 skill 评测的 grader 提示。`:(glob)` 让 `*` 只匹配一级目录。
+AI_SIDE_TRACKED = (":(glob).claude/skills/*/SKILL.md", ":(glob)skills/gherkai-evals/grader-prompt.md")
+
+
 def ai_side_docs() -> list[Path]:
-    """contributor 侧 AI agent 文档：口吻放开，但形态②的自造词与悬空指针照样不许（ADR 0045 决策六 / 悬空指针红线）。"""
+    """contributor 侧 AI agent 文档（ADR 0045 决策一）：口吻放开，但形态②的自造词与悬空指针照样不许（ADR 0045 决策六 /
+    悬空指针红线）。
+
+    项目 skill 与 grader 提示只收 git 已跟踪的（AI_SIDE_TRACKED）：`.claude/skills/` 下还有本机装的、不入库的 skill，
+    它们不归本仓库管；拿不到 git 时这一部分不收。journey 与评测 fixtures 不在这一面。
+    """
+    import subprocess
     docs = [REPO / "CONTEXT.md", REPO / "CLAUDE.md"]
     docs += sorted((REPO / "docs" / "adr").glob("*.md")) + sorted((REPO / "docs" / "ai-eng").glob("*.md"))
     docs += sorted((REPO / ".claude" / "commands").glob("*.md"))
+    try:
+        out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--", *AI_SIDE_TRACKED],
+                             capture_output=True, check=True)
+        docs += [REPO / f for f in out.stdout.decode("utf-8").split("\0") if f]
+    except (OSError, subprocess.CalledProcessError):
+        pass
     return sorted({p for p in docs if p.exists()})
 
 
@@ -406,21 +431,23 @@ COINAGE_DISCUSSION = frozenset({
 })
 
 
+def _is_code_comment_file(p: Path) -> bool:
+    """注释护栏扫描面的判定，`code_comment_files` 与 `classify` 共用，测试兜底与 hook 的扫描面因此一致：后缀在
+    CODE_SUFFIXES 里或文件名在 CODE_FILENAMES 里，路径在 PY_ROOTS_FOR_COMMENTS 某个根下或匹配 CODE_COMMENT_GLOBS，
+    且不在 _SKIP_DIRS 与 SELF_FILES 里。p 须是仓库内的绝对路径。"""
+    rel = _rel(p)
+    if rel in SELF_FILES or _SKIP_DIRS & set(p.parts):
+        return False
+    if p.suffix not in CODE_SUFFIXES and p.name not in CODE_FILENAMES:
+        return False
+    return (any(rel.startswith(root + "/") for root in PY_ROOTS_FOR_COMMENTS)
+            or any(PurePosixPath(rel).full_match(pattern) for pattern in CODE_COMMENT_GLOBS))
+
+
 def code_comment_files() -> list[Path]:
-    out: list[Path] = []
-    for root in PY_ROOTS_FOR_COMMENTS:
-        base = REPO / root
-        if not base.exists():
-            continue
-        for p in base.rglob("*"):
-            if not p.is_file() or _SKIP_DIRS & set(p.parts):
-                continue
-            if (p.suffix in CODE_SUFFIXES or p.name == "Dockerfile") and _rel(p) not in SELF_FILES:
-                out.append(p)
-    for p in REPO.glob("engines/*/Dockerfile"):
-        if p not in out:
-            out.append(p)
-    return sorted(set(out))
+    candidates = [p for root in PY_ROOTS_FOR_COMMENTS if (REPO / root).exists() for p in (REPO / root).rglob("*")]
+    candidates += [p for pattern in CODE_COMMENT_GLOBS for p in REPO.glob(pattern)]
+    return sorted({p for p in candidates if p.is_file() and _is_code_comment_file(p)})
 
 
 def classify(path: Path) -> str | None:
@@ -439,9 +466,8 @@ def classify(path: Path) -> str | None:
         return "technical-doc"
     if p in ai_side_docs():
         return "ai-doc"
-    if (p.suffix in CODE_SUFFIXES or p.name == "Dockerfile") and not (_SKIP_DIRS & set(p.parts)):
-        if any(_rel(p).startswith(root + "/") for root in PY_ROOTS_FOR_COMMENTS):
-            return "code"
+    if _is_code_comment_file(p):
+        return "code"
     if p in package_pages():
         return "package-page"
     if p.suffix == ".md" and not (_SKIP_DIRS & set(p.parts)):
@@ -472,10 +498,17 @@ def _js_comment_raw_lines(text: str) -> list[tuple[int, str]]:
     return out
 
 
-def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tuple[int, str, str]]:
-    """按人读面的规则束扫一个文件，返回 (行号, 类别, 原文)。only_lines 给了就只报这些行（hook 的「只报本次改动的行」）。"""
+def scan(kind: str, path: Path, only_lines: set[int] | None = None,
+         text: str | None = None) -> list[tuple[int, str, str]]:
+    """按人读面的规则束扫一个文件，返回 (行号, 类别, 原文)。only_lines 给了就只报这些行（hook 的「只报本次改动的行」）。
+
+    text 给了就扫它、不读文件：提交闸门传暂存区里的内容，判的是将要提交的版本，path 仍用来定位与归类。唯一的例外是
+    定稿口播稿的豁免判断（`final_transcript`），它照旧按工作区文件的哈希算：只涉及演示材料的两份口播稿，暂存版本与
+    工作区不一致时，豁免与否以工作区为准。
+    """
     p = path if path.is_absolute() else REPO / path
-    text = p.read_text(encoding="utf-8", errors="replace")
+    if text is None:
+        text = p.read_text(encoding="utf-8", errors="replace")
     if kind == "package-page" and p == RELEASE_FOOTER:
         for placeholder, sample in RELEASE_FOOTER_SAMPLE.items():  # 扫渲染后的形态；占位符都在行内，行号不变
             text = text.replace(placeholder, sample)
@@ -502,8 +535,8 @@ def scan(kind: str, path: Path, only_lines: set[int] | None = None) -> list[tupl
         apply(raw_lines, coords)  # markdown 扫原文含行内代码与代码块：路径多半就写在反引号里
     if kind == "code":
         # 形态①③扫剥掉代码块与行内代码后的正文，其余规则扫注释原文（本机坐标多半写在反引号里，剥掉就漏）
-        apply(comment_units(p), (("口头语或自造复合词", COLLOQUIAL), ("退役旧名", RETIRED_TERMS_IN_CODE)) + pointers + coords)
-        apply(comment_prose_lines(p), shorthand)
+        apply(comment_units(p, text), (("口头语或自造复合词", COLLOQUIAL), ("退役旧名", RETIRED_TERMS_IN_CODE)) + pointers + coords)
+        apply(comment_prose_lines(p, text), shorthand)
         if p.suffix in {".mts", ".ts", ".mjs", ".js"}:
             # comment_units 先遮蔽字符串再找注释，注释里反引号包着的路径会被一并遮掉——本机坐标另按注释原文扫一遍
             apply(_js_comment_raw_lines(text), coords)

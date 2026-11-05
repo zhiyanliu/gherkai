@@ -638,7 +638,7 @@ def test_on_job_complete_exception_propagates_not_swallowed():
 
 def test_on_job_complete_exception_stops_inflight_workers_before_raise():
     # 回调抛异常时，冒泡前必须先 stop 所有运行中的 worker——否则异常跳出 with、shutdown(wait=True)
-    # 会等它们自然结束（真 AgentCore 会话持续计费）。验：异常仍抛 + in-flight worker 的 handle 被 stop。
+    # 会等它们自然结束（实际的 AgentCore 会话持续计费）。验：异常仍抛 + in-flight worker 的 handle 被 stop。
     import pytest
     slow_started = threading.Event()  # slow 已 spawn 且在事件循环里
     release_fast = threading.Event()  # 放行 fast 完成（确保 slow 先在运行）
@@ -667,6 +667,41 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
                  opts=ScheduleOpts(max_concurrency=2), on_job_complete=boom_on_fast)
     # 关键断言：slow 的 worker 在异常冒泡前被 stop（止血，不让会话空转计费）
     assert engine.handles["slow"].stopped
+
+
+def test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers():
+    """on_event（实时落库）在运行期抛异常时冒泡出 schedule()，类型与对象都不变（ADR 0030 决定七：组合根据此以退出码 1 报运行期
+    落库失败）；它不进「worker 异常」分支，故不给这个 job 产生 engine_error 判定；冒泡前本 worker 与其余运行中的 worker 都收到停止请求。"""
+
+    class _StoreDown(Exception):
+        pass
+
+    slow_started = threading.Event()
+
+    def slow_gen(_job):
+        yield ScenarioStarted(scenario_id="slow:0")
+        slow_started.set()
+        yield StepDone(scenario_id="slow:0", step_index=0, status=Status.PASSED, votes=Votes(3, 3))
+
+    def obs_gen(_job):
+        slow_started.wait(5.0)  # slow 已在运行，obs 的落库失败冒泡时它是运行中的 worker
+        yield from _passing_events("obs", "obs:0")
+
+    engine = FakeEngine({"obs": obs_gen, "slow": slow_gen}, tail_after_stop={"obs": [], "slow": []})
+    boom = _StoreDown("运行期落库失败")
+
+    def on_event(event):
+        if isinstance(event, StepDone) and event.scenario_id == "obs:0":
+            raise boom
+
+    seen: list = []
+    with pytest.raises(_StoreDown) as exc_info:
+        schedule(_rm([_job("obs"), _job("slow")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=2), on_job_complete=seen.append, on_event=on_event)
+    assert exc_info.value is boom
+    assert seen == []  # 没有任何判定经回调落库，尤其没有归因成「worker 异常」的 engine_error
+    assert engine.handles["obs"].stopped  # 本 worker：冒泡前停掉
+    assert engine.handles["slow"].stopped  # 其余运行中的 worker：主线程冒泡前停掉
 
 
 # ---- grace 硬约束 enforce（ADR 0024）：schedule 起 worker 前校验 grace 合法且 ≥ min_grace_s ----
@@ -887,7 +922,7 @@ def test_deadline_after_scope_done_hurries_exit_but_keeps_verdict():
 
 
 def test_fail_fast_does_not_preempt_network_retry():
-    """开 fail_fast 时，可重试的瞬时网络故障（零 step_done 的 network_error）先重试、不触发整批中止；重试成功则 run 通过。"""
+    """开 fail_fast 时，可重试的瞬时网络故障（零 step_done 的 network_error）先重试、不触发 run 中止；重试成功则 run 通过。"""
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")}, network_crash_after={"a": [0]})
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, fail_fast=True, network_retry=1, retry_sleep=lambda s: None))
@@ -1053,7 +1088,7 @@ def test_generic_exception_arbitrates_before_blocking_stop():
         orig(self, *a, **kw)
         captured["w"] = self
 
-    def gen(job):  # 零事件：整批已被中止，随后事件流以普通异常断掉
+    def gen(job):  # 零事件：这个 run 已被中止，随后事件流以普通异常断掉
         captured["w"].abort_flag.set()
         raise RuntimeError("解析失败")
 
@@ -1088,7 +1123,7 @@ def test_hang_after_hurry_exit_is_timeout_like_stateless_path():
 
 
 def test_fail_fast_during_retry_backoff_keeps_network_error_not_skipped():
-    """退避期间整批被 fail-fast 中止：不再重试，但已经运行过一次的 job 保留上次的 network_error 判定（不记成「未启动」的 SKIPPED）。"""
+    """退避期间 run 被 fail-fast 中止：不再重试，但已经运行过一次的 job 保留上次的 network_error 判定（不记成「未启动」的 SKIPPED）。"""
     import gherkai_core.schedule as sch
 
     captured = {}
@@ -1398,6 +1433,37 @@ def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs()
     only_desk = schedule(_rm([_job("desk")]), FakeResolver(FakeEngine({"desk": _passing_events("desk", "desk:0")})), CollectSink(),
                          opts=ScheduleOpts(max_concurrency=1))
     assert (only_desk.device_observed_s, only_desk.device_observed_missing) == (None, None)
+
+
+def test_device_job_skipped_before_spawn_still_carries_metering_keys():
+    """未启动记 SKIPPED 的设备 job 也成对带计量两键（ADR 0051 决策 7：只按目标判，没有会话记录时为 0.0 与 0），run 级两键随之出现；
+    同一路径上的桌面 job 两键保持 None。"""
+    engine = FakeEngine({"crash": _passing_events("crash", "crash:0")}, crash_after={"crash": 0})
+    res = schedule(_rm([_job("crash"), _job("dev", device="android"), _job("desk")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True))
+    dev = next(jr for jr in res.jobs if jr.scope_id == "dev")
+    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
+    assert dev.status == Status.SKIPPED and dev.sessions == []
+    assert (dev.device_observed_s, dev.device_observed_missing) == (0.0, 0)
+    assert desk.status == Status.SKIPPED and (desk.device_observed_s, desk.device_observed_missing) == (None, None)
+    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
+
+
+def test_device_job_spawn_failure_still_carries_metering_keys():
+    """起 worker 失败的设备 job 也成对带计量两键（合计 0.0、缺计量 0、会话记录为空），run 级两键随之出现；桌面 job 两键保持 None。"""
+
+    class Boom:
+        def run_scope(self, job):
+            raise OSError("spawn 失败")
+
+    res = schedule(_rm([_job("dev", device="ios"), _job("desk")]), FakeResolver(Boom()), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1))
+    dev = next(jr for jr in res.jobs if jr.scope_id == "dev")
+    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
+    assert (dev.status, dev.message) == (Status.ERROR, "起 worker 失败：spawn 失败") and dev.sessions == []
+    assert (dev.device_observed_s, dev.device_observed_missing) == (0.0, 0)
+    assert desk.status == Status.ERROR and (desk.device_observed_s, desk.device_observed_missing) == (None, None)
+    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
 
 
 # ---- 使用方中断（ADR 0024 终止契约「使用方中断」条；ADR 0031 决定三的例外）----

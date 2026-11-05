@@ -361,7 +361,7 @@ def test_run_scenario_shortcircuits_after_error(captured):
         _step("When", '"在页面上操作"', 1),                    # 应被短路（不调 act）
         _step("Then", '"页面有预期内容"', 2),                   # 应被短路（不调 act_get）
     ]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
+    statuses, completed = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     # 上游 error 后：AI 一次没调（省钱、不在损坏环境上得出误导性假失败）
     assert nova.act_calls == 0 and nova.act_get_calls == 0
     # step 1/2 发 step_skipped（独立事件，非 step_done）
@@ -371,14 +371,15 @@ def test_run_scenario_shortcircuits_after_error(captured):
     # 被短路步不进 statuses → 不参与 _aggregate；scenario 判定由那个 error step 决定
     assert statuses == ["error"]
     assert rs._aggregate(statuses) == "error"
+    assert completed is True  # 短路后发了 step_skipped 的也算完整执行，scenario_done 照发
 
 
 def test_run_scenario_no_shortcircuit_when_all_pass(captured):
     # 反向护栏：无 error 时不短路——每步照常执行、无 step_skipped 事件。
     nova = _FakeNova(bool_seq=[True])
     steps = [_step("When", '"做事A"', 0), _step("Then", '"对吗"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
-    assert statuses == ["passed", "passed"]
+    statuses, completed = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
+    assert statuses == ["passed", "passed"] and completed is True
     assert [e for e in captured if e["type"] == "step_skipped"] == []
 
 
@@ -387,8 +388,9 @@ def test_run_scenario_failed_does_not_shortcircuit(captured):
     # failed 是业务结论、环境没坏，后续步该照常运行（只有 error 这种执行故障才短路）。
     nova = _FakeNova(bool_seq=[False, True])  # 第一个 Then failed，第二个 Then passed
     steps = [_step("Then", '"对吗A"', 0), _step("Then", '"对吗B"', 1)]
-    statuses = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
+    statuses, completed = rs._run_scenario(nova, "sc:0", steps, votes_n=1, sink=captured)
     assert statuses == ["failed", "passed"]  # failed 不触发短路，第二步照常执行
+    assert completed is True
     assert [e for e in captured if e["type"] == "step_skipped"] == []
 
 
@@ -420,6 +422,31 @@ def test_failed_vote_keeps_already_billed_votes_in_cost(captured):
 
     assert rs._run_step(_Nova(), "sc:0", _step("Then", '"对吗"'), 3, captured) == "error"
     assert _done(captured)["cost"] == {"time_worked_s": 3.5}
+
+
+def test_action_cost_survives_a_trajectory_upload_failure_after_the_act(captured, monkeypatch, tmp_path):
+    """When 的 act 成功（已计费 4.0s）、之后即时上传 trajectory 失败（云端 S3 抖动）：step 记 error，cost 仍是这次 act 的
+    time_worked_s——except 分支重建事件时不丢已发生的费用（ADR 0024「失败的 act 同样带 cost」；ADR 0029 上传失败即抛）。"""
+    traj_json = tmp_path / "act_1_x_trajectory.json"
+    traj_json.write_text("{}")
+    (tmp_path / "act_1_x.html").write_text("<html></html>")
+
+    class _Uploader:
+        def to_report_ref(self, path):
+            raise ConnectionError("s3 reset")
+
+    class _Nova(_FakeNova):
+        def act(self, instr, timeout=None):
+            r = _FakeResult(True, tw=4.0)
+            r.metadata.trajectory_file_path = str(traj_json)
+            return r
+
+    monkeypatch.delenv("GHERKAI_NO_ARTIFACTS", raising=False)
+    monkeypatch.delenv("NOVA_LOGS_DIR", raising=False)
+    monkeypatch.setattr(rs, "_get_uploader", lambda: _Uploader())
+    assert rs._run_step(_Nova(), "sc:0", _step("When", '"做事"'), 1, captured) == "error"
+    ev = _done(captured)
+    assert ev["status"] == "error" and ev["cost"] == {"time_worked_s": 4.0}
 
 
 def test_failed_act_without_metadata_has_no_cost(captured):

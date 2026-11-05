@@ -48,7 +48,7 @@ async function main() {
   const rows: Row[] = [];
   const text = "用一个词回答：这张图里主要是什么？";
   const textOnly: number[] = [];
-  for (let i = 0; i < n; i++) textOnly.push(await promptTokens(client, "用一个词回答：天空通常是什么颜色？"));
+  for (let i = 0; i < n; i++) textOnly.push(await promptTokens(client, [{ type: "text", text }]));
   rows.push({ file: "-", k: 0, width: 0, height: 0, bytes: 0, mode: "text", prompt_tokens: textOnly });
   for (const file of files) {
     const png = readFileSync(file);

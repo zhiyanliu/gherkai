@@ -13,16 +13,22 @@ plan_next() 决定动作 → 对每个 start 动作 CAS 抢占成功即经注入
 """
 from __future__ import annotations
 
+import logging
 from typing import Protocol
 
 from gherkai_core.model import Job, RunMeta
 from gherkai_core.ports import ResultStore, RunStore
 from gherkai_core.project import plan_next, project, project_full
 
+logger = logging.getLogger("gherkai_core.reconcile")
+
 
 class EventLog(Protocol):
-    """事件日志口（reconciler 读全量 records 重放；写侧仅 launch 失败补偿的 record_exit——正常路径的
-    events 由 worker/观察者写，reconciler 不写）。"""
+    """事件日志口（reconciler 读全量 records 重放）。写侧：`tick` 只在 launch 失败补偿时调
+    `record_exit`；其余退出记录来自退出观察者（本机 launcher 的 proc.wait、云端 exit-observer Lambda、本机同步 run 的
+    `EventRecordingEngine`）与推进器宿主的超时处置（本机接力恢复、云端 tick 对无踪 task 的直写，均带 timed_out；云端 tick
+    遇已停止却缺退出记录的 task 时，按 DescribeTasks 结果补写，与观察者同一提取算法）；worker 执行事件由 worker（云端）或
+    launcher 旁路（本机）写。"""
 
     def records(self) -> list: ...  # list[EventRecord]（gherkai_core.project）
 
@@ -50,7 +56,8 @@ class Launcher(Protocol):
 
 
 def finalize_report(run_id, meta, event_log, report_store, now_iso: str, *, run_duration_ms: float | None = None) -> None:
-    """done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034 收尾）。宿主在 tick 返回 done 后调。
+    """done 后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034「数据模型三件套」RunReport 行与
+    「端到端流程」cloud 第 4 步 ④）。宿主在 tick 返回 done 后调。
 
     判定真值（ResultStore 各 job）**不在此写**——它在 tick 的 finalize 分支、CAS 之前落（写序见 `tick`）；这里只剩
     派生的报告：从 events 全量重放 project_full → RunResult → report_store.write。幂等（重放 + 覆盖写同 key）——多个
@@ -109,12 +116,16 @@ def tick(
                     continue  # plan_next 从 state.jobs 提议、键集是 meta.jobs 的子集，不该发生；防御跳过
                 try:
                     launcher.launch(job)
-                except Exception:
+                except Exception as e:
                     # launch 失败补偿（ADR 0034 机制二推论）：job 已 CAS 成 RUNNING 却永无 events/
                     # task_exited（进程没起、平台观察者无从观察）——不补偿则永停 RUNNING、整批 wedge、
                     # 三触发源都救不回。tick 在此扮演「起不来」时刻的退出观察者：记非 0 退出，下轮
                     # 重放走「退出码非零 → ERROR」既有谓词收敛。异常不裸穿（失败隔离：别拖垮同批其余 job）。
-                    event_log.record_exit(act.scope_id, PLATFORM_FAILED_EXIT)
+                    # 异常文本作 reason 随退出记录进 job message（措辞与同步路径 schedule 的「起 worker 失败：…」一致），
+                    # 否则 RunTask 放置失败的归因、引擎未解析的指引都会丢；traceback 另留在日志里供排障。
+                    logger.warning("这个 job 没能启动，已按错误处理：run=%s scope=%s", run_id, act.scope_id,
+                                   exc_info=True)
+                    event_log.record_exit(act.scope_id, PLATFORM_FAILED_EXIT, reason=f"起 worker 失败：{e}")
         elif act.kind == "finalize":
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # ① 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），

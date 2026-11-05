@@ -79,11 +79,7 @@ def test_validate_rejects_other_shapes(arn):
     assert "arn:aws:devicefarm:us-west-2:" in msg               # 给出应有的形态
 
 
-# ---- 项目 id 与会话前缀 ----
-def test_project_id_is_the_resource_segment():
-    assert names.device_farm_project_id(ARN) == PROJECT_ID
-
-
+# ---- 会话前缀 ----
 def test_session_prefix_takes_account_and_project_id_from_project_arn():
     assert names.device_farm_session_arn_prefix(ARN) == (
         f"arn:aws:devicefarm:us-west-2:111122223333:session:{PROJECT_ID}/*")
@@ -103,7 +99,7 @@ def test_session_prefix_covers_own_sessions_only():
     assert not fnmatchcase(other_account, pattern)
 
 
-@pytest.mark.parametrize("fn", [names.device_farm_project_id, names.device_farm_session_arn_prefix, names.device_farm_interactive_endpoint_resource])
+@pytest.mark.parametrize("fn", [names.device_farm_session_arn_prefix, names.device_farm_interactive_endpoint_resource])
 @pytest.mark.parametrize("bad", [
     f"arn:aws:devicefarm:us-east-1:111122223333:project:{PROJECT_ID}",
     "arn:aws:devicefarm:us-west-2:111122223333:project:a/b",

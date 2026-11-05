@@ -9,9 +9,12 @@
 **中断只是能力之一**（--interrupt）：--interrupt none 的 baseline 可验「事件流端到端正常 + 三通道分离 +
 零行为变化」（如 worker I/O 边缘重构后的回归）；--interrupt <时机> 才验中断韧性。
 
-忠实复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env + S3 上传 env；
+复现 SubprocessEngine adapter 的 spawn 环境（自建 events pipe + EVENTS_FD、注入产物落点 env + S3 上传 env；
 组合根拥有的 worker env——GHERKAI_STEPS_DIR / GHERKAI_NO_ARTIFACTS / GHERKAI_EXTRA_HTTP_HEADERS / GHERKAI_SESSION_WARMUP_URL /
-RUN_ID——先经 scrubbed_environ 显式清除，其中 GHERKAI_STEPS_DIR 按 --steps-dir、RUN_ID 按 --run-id 显式注回（与 adapter 两步写法相同），其余三键保持清空），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
+RUN_ID——先经 scrubbed_environ 显式清除，其中 GHERKAI_STEPS_DIR 按 --steps-dir、RUN_ID 按 --run-id 显式注回（与 adapter 两步写法相同），其余三键保持清空。
+与 adapter 有两处不同：不注入 GHERKAI_PARENT_PID，宿主没有残留同名变量时 worker 不启用所属进程核验；不另开进程组，
+SIGTERM 与 SIGKILL 兜底只发给 worker 进程本身，终端的 Ctrl-C 也会送到 worker。因此「父进程消失视同停止信号」与本机 CLI 的使用方中断
+这两条路径不在本 harness 的验证范围内），起真 worker 运行一个 scope，按事件时机外部 SIGTERM 命中中断点，中断后快照：
   - 盘上有什么（NOVA_LOGS_DIR / MIDSCENE_RUN_DIR 递归）
   - S3 有什么（list prefix）
   - 差集（盘有 S3 无）即 **Fargate 容器盘销毁时会丢的**（subprocess 下留本地盘、非真丢）
@@ -25,7 +28,9 @@ RUN_ID——先经 scrubbed_environ 显式清除，其中 GHERKAI_STEPS_DIR 按 
   #              下一 scenario 运行中——验 scenario 边界 log 提前上传，需多 scenario feature) / scope_end(flush 前) /
   #              none(baseline 不中断)
   # --steps-dir: 使用方确定性 step 目录（ADR 0037 决策 4），也可经环境变量 HARNESS_STEPS_DIR 给；不给则显式清空，
-  #              **宿主 export 的 GHERKAI_* 一律不生效**（与 adapter 同）。
+  #              宿主 export 的 GHERKAI_STEPS_DIR 不生效（与 adapter 同：组合根拥有的键先经 scrubbed_environ 清除，
+  #              清单以 gherkai_runtime.compose 的 _COMPOSE_OWNED_WORKER_ENV 为准）；其余 GHERKAI_* 照常继承，
+  #              如 GHERKAI_WORKER_<ENGINE>_CMD 仍决定启动哪个 worker，宿主残留的 GHERKAI_PARENT_PID 会原样传给 worker。
   # 桶经环境变量 HARNESS_S3_BUCKET 传（勿硬编码；运行结束后自行清理桶内 <prefix>）。
 
 历史：中断丢失预演、Nova 中断模型改造验证、提前上传验证都用它（实测结论/量级已内联 ADR 0024 终止契约 / 0029 安全点提前上传 / 0032 中断丢失量级）。
@@ -105,7 +110,7 @@ def snapshot_s3(prefix: str) -> list[tuple[str, int]]:
 
 def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grace_cap: float,
         steps_dir: str | None = None):
-    from gherkai_runtime.names import ARTIFACT_SUBDIR  # 子目录名单点（与三宿主同名，ADR 0029）——harness 忠实复现生产布局
+    from gherkai_runtime.names import ARTIFACT_SUBDIR  # 子目录名单点（与三宿主同名，ADR 0029）——harness 的产物目录由此与生产布局同名
     if not BUCKET:
         sys.exit("错误：需经环境变量 HARNESS_S3_BUCKET 提供可写 S3 桶")
     job = build_job(feature, engine, votes)
@@ -152,8 +157,8 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             print(f"[worker {tag}] {line.rstrip()}", flush=True)
 
     # 先起 pump、再写 stdin：与 `SubprocessEngine.run_scope` 同序（理由见该 adapter 同处注释——大 job 写 stdin
-    # 阻塞 × worker 读 stdin 前先吐 stdout 噪声，即父子互锁）。harness 要忠实复现 adapter 的 spawn 环境，
-    # 顺序分叉会让这里运行得出的中断/丢失结论不可迁移到生产路径。
+    # 阻塞 × worker 读 stdin 前先吐 stdout 噪声，即父子互锁）。这一顺序须与 adapter 相同（harness 与 adapter 的 spawn 环境
+    # 有两处已知不同，见模块 docstring，均不涉及这一顺序），顺序分叉会让这里运行得出的中断/丢失结论不可迁移到生产路径。
     threading.Thread(target=log_pump, args=(proc.stdout, "out"), daemon=True).start()
     threading.Thread(target=log_pump, args=(proc.stderr, "err"), daemon=True).start()
 
@@ -222,9 +227,10 @@ def run(engine: str, feature: str, votes: int, interrupt: str, run_id: str, grac
             # scenario 边界提前上传的验证时机（ADR 0029「第四级」，Midscene 单引擎）：第一个 scenario 完成后延迟 kill——
             # 让 scenario1 的 snapshotLogs 在其 scenario_done 后执行完毕（log 进 S3）、scenario2 起来，SIGTERM 落在
             # scenario2 运行中。验证：S3 应已有 scenario1 期间的 log（对照单 scenario scope_end 中断 S3 log=0）。
-            # 需 jobs[0] 有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**（如 concurrency_and_scope
-            # 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、jobs[0] 只含 1 个 scenario、
-            # 此时机不触发（退化成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan 确认 jobs[0] 的 scenario 数。
+            # 需所选 job（匹配 --engine 的第一个 job，见 build_job）有 >1 scenario——即**多 scenario 归一个 @scope 的 feature**
+            # （如 concurrency_and_scope 的 @scope:browse）；无 @scope tag 的 scenario 各自独立成单 scenario scope（ADR 0025）、
+            # 所选 job 只含 1 个 scenario、此时机不触发（退化成 baseline、无效样本）。选 feature 前用 gherkai_core.scope.plan
+            # 确认匹配本引擎的第一个 job 的 scenario 数。
             if interrupt == "scenario" and scen_done == 1 and n_scen > 1:
                 threading.Timer(3.0, lambda: do_kill("after_scenario1")).start()
             if interrupt == "scope_end" and scen_done == n_scen:

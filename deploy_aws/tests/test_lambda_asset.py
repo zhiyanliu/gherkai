@@ -136,7 +136,7 @@ def test_asset_imports_with_only_stdlib_beside_it(tmp_path, monkeypatch):
     """把**真** asset 摊出来，在**剥掉 site-packages** 的子进程里 import 一遍。
 
     这是清单完整性的唯一有效判据：`LAMBDA_ASSET_PACKAGES` 是手写清单，漏掉某个**传递依赖**时上面所有
-    「摆放规则」用例照样绿——只有真 import 才炸（`gherkin-official>=42` 的 `typing_extensions` 就是这么抓到的）。
+    「摆放规则」用例照样绿——只有真 import 才会暴露缺失的传递依赖（例如 `gherkin-official` 依赖的 `typing_extensions`）。
     子进程 + 剥 site-packages 是关键：留着 site-packages 会让漏项从开发机的 venv 里悄悄补上、假绿。
 
     只 import 不需要 boto3 的那几个模块（boto3 由 Lambda runtime 自带、有意不打进 asset，故本地无从提供）；

@@ -113,11 +113,15 @@ def test_run_json_keys_are_documented():
 
 
 def test_plan_json_keys_are_documented():
-    job = _sample_run_result().run_meta.jobs[0]
+    jobs = list(_sample_run_result().run_meta.jobs)
     dispatch = {("f.feature:3", "f.feature:3", 0): {"pattern": "p", "description": "d"},
                 ("f.feature:3", "f.feature:3", 1): {"conflict": ["a", "b"]},
-                ("f.feature:3", "f.feature:3", 2): {"keyword_mismatch": "p", "keywords": ["Given", "When"]}}
-    _assert_documented(render.plan_to_dict([job], "novaact", dispatch), section="plan --json")
+                ("f.feature:3", "f.feature:3", 2): {"keyword_mismatch": "p", "keywords": ["Given", "When"]},
+                # 命中条目在该 scope 目标上带运行期前提（ADR 0049 决策 6）：deterministic 另带 requires
+                ("d.feature:3", "d.feature:3", 0): {"pattern": "p", "description": "d", "requires": ["web_context"]}}
+    doc = render.plan_to_dict(jobs, "novaact", dispatch)
+    assert doc["jobs"][1]["scenarios"][0]["steps"][0]["deterministic"]["requires"] == ["web_context"]
+    _assert_documented(doc, section="plan --json")
 
 
 def test_status_json_keys_are_documented():

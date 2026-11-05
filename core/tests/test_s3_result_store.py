@@ -40,7 +40,8 @@ def test_load_missing_returns_none(s3_result_store):
 
 
 def test_scope_id_with_slash_not_subprefix(s3_result_store, aws):
-    # scope_id 含 / 被 quote 成 %2F、恒是单段 key，不在 S3 里造假子前缀、load_all 不歧义
+    # scope_id 含 / 被 quote 成 %2F、恒是单段 key：不在 S3 里造假子前缀，每个 scope 在 jobs/ 下恰好对应一个对象，
+    # load_all 按前缀翻页列举时不漏不重
     # （对拍 test_result_store_scope_id_not_path_traversal）
     jr = JobResult(job=_job_def("a/b/c:9", "anchor", "midscene"), status=Status.PASSED)
     s3_result_store.save_job_result("run-3", jr)

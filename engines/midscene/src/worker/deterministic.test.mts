@@ -85,6 +85,8 @@ test("keywords 声明：封闭集合、非空、不重复，自述按规范顺�
   assert.throws(() => deterministic("a", () => {}, { description: "x", example: "y", keywords: [] }), /不能为空/);
   assert.throws(() => deterministic("b", () => {}, { description: "x", example: "y", keywords: ["And" as any] }), /未知取值/);
   assert.throws(() => deterministic("c", () => {}, { description: "x", example: "y", keywords: ["Then", "Then"] }), /重复/);
+  assert.throws(() => deterministic("d", () => {}, { description: "x", example: "y", keywords: null as any }), /不是数组/);
+  assert.throws(() => deterministic("e", () => {}, { description: "x", example: "y", keywords: "Then" as any }), /不是数组/);
 });
 
 test("match 在命中后核对关键字：不符 → DeterministicKeywordMismatch；不传关键字不核对（兼容）", () => {

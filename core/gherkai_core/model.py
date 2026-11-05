@@ -123,8 +123,9 @@ class Job:
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag、显式给出的 --default-job-timeout，或 plan 层按目标补的缺省
     # （桌面 300，设备为获取预算加 900）；None 表示不超时，只有非设备 scope 可取（设备 scope 恒为有限正数，ADR 0048 决策 3 /
-    # 0051 决策 2）。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；worker 只在建会话前拿它与
-    # 能力自述的 max_session_s 比较作自检，不计时、不自停。
+    # 0051 决策 2）。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；worker 只在两处读它：建会话前
+    # 与能力自述的 max_session_s 比较作自检，以及桌面 worker 据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；
+    # 不计时、不自停。
     timeout_s: float | None = None
     # 测试目标（ADR 0048）：由 @device / @app 归约，缺省桌面网页；现有构造点不受影响。
     target: Target = Target()
@@ -247,7 +248,9 @@ class ReportRef:
     不 stat/fetch ref、不按 kind 分支。新引擎报任意 kind 都零改 core（扩展性契约）。
 
     kind:  **产物类型**（开放字符串，引擎自报）。约定值 "report"（完整报告页）/"trajectory"（轨迹页）/
-           "summary"（数字汇总）/"evidence"（gherkai 自有 schema 的 step 级机读证据，ADR 0042 决策一），
+           "summary"（数字汇总）/"evidence"（gherkai 自有 schema 的 step 级机读证据，ADR 0042 决策一）/
+           "device_session"（远程访问会话的 scope 诊断文件：能力探测结论、执行所用的会话与设备、换台记录与各阶段
+           时刻等，只作链接不解析，ADR 0051 决策 8），
            未来可 "video"/"trace"/"har"…（非枚举）。**粒度不由 kind 表达**，而由
            report_ref 挂在 StepResult/ScenarioResult/JobResult 哪一级表达（二者正交，ADR 0027）。
     ref:   统一指针 URI（ResourceUri）——不假定是本地文件。本地产物用 file:// 前缀；未来可 s3://、https://。
@@ -267,8 +270,9 @@ class ReportRef:
 @dataclass(frozen=True)
 class ScopeStarted:
     scope_id: str
-    # 会话血缘随**首个**事件即回传（不再等 scope_done）——这样超时/SIGTERM 中途打断、scope_done
-    # 从未 emit 时，core 仍能记下 session_id（诊断/计费血缘，ADR 0024/0028）。scope_done 仍带它（冗余兜底）。
+    # 执行所用的会话 id（AgentCore 会话 id 或远程访问会话 ARN，ADR 0024 / 0051 决策 4）。建了会话的 job 由首个事件
+    # session_opened 先行承载血缘（超时 / SIGTERM 中途打断、scope_done 从未发出时 core 仍记得到）；本字段一经取到即为
+    # 代表会话，之后的 session_opened 不覆盖；scope_done 仍带它作冗余兜底。
     session_id: str | None = None
     type: Literal["scope_started"] = "scope_started"
 
@@ -525,10 +529,10 @@ class RunMeta:
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
     # 与部署侧 cap 取 min）。None 表示提交侧没有给出（推进器按各自口径回落）；落盘为 null（键集固定，ADR 0037 决策 7）。
     max_concurrency: int | None = None
-    # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按
-    # `--steps-dir` > env `GHERKAI_STEPS_DIR` > 默认 `./steps`（存在才用）解析成绝对路径后填这里，
-    # 所有起 worker 的宿主（同步 run / local per-run 进程 / status --wait 接力者）从 definition 读回、
-    # 经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），只有随 definition 走才对三者一致，且
+    # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按 `--steps-dir` >
+    # env `GHERKAI_STEPS_DIR` > 项目配置文件 `steps-dir`（ADR 0053 决策 2）> 默认 `./steps`（存在才用）
+    # 解析成绝对路径后填这里，所有起 worker 的宿主（同步 run / local per-run 进程 / status --wait 接力者）从
+    # definition 读回、经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），只有随 definition 走才对三者一致，且
     # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
     # None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
@@ -561,7 +565,7 @@ class JobState:
 
     scope_id: str
     status: Status
-    session_id: str | None = None  # AgentCore 会话血缘
+    session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
     # claim（CAS pending→running）时刻 ISO 串（ADR 0034「job timeout」节 claimed_at）：local 接力恢复
     # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）。
     claimed_at: str | None = None

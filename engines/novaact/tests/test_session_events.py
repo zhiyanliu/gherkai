@@ -283,7 +283,7 @@ def world(monkeypatch, tmp_path):
     monkeypatch.setattr(rs, "NovaAct", nova_factory)
     monkeypatch.setattr(rs, "EventSink", type("E", (), {"from_env": staticmethod(lambda: sink)}))
     monkeypatch.setattr(rs, "_run_scenario",
-                        lambda nova, sid, steps, votes_n, sink, *, scope_id: w.trace.append(("run_scenario", sid)) or ["passed"])
+                        lambda nova, sid, steps, votes_n, sink, *, scope_id: w.trace.append(("run_scenario", sid)) or (["passed"], True))
     monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: rs._stop.is_set())
     real_warmup = W.warmup_session
     monkeypatch.setattr(W, "warmup_session", lambda page, url, *, log, sleep=None, stop=lambda: False: real_warmup(
@@ -382,22 +382,24 @@ def test_novaact_close_failure_alone_does_not_unconfirm_a_stopped_session(world,
 
 
 def test_stop_signal_between_scenarios_pairs_the_session_without_scope_done(world, monkeypatch):
+    """停止信号落在第一个 scenario 执行期间、而它已完整执行：照发它的 scenario_done，不再执行第二个，不发 scope_done。"""
     world.job = _job(n_scenarios=2)
 
     def stop_after_first(nova, sid, steps, votes_n, sink, *, scope_id):
         world.trace.append(("run_scenario", sid))
         rs._stop.set()
-        return ["passed"]
+        return ["passed"], True
 
     monkeypatch.setattr(rs, "_run_scenario", stop_after_first)
     assert rs.main() == 0
-    assert _types(world) == ["session_opened", "scope_started", "scenario_started", "session_closed"]
+    assert _types(world) == ["session_opened", "scope_started", "scenario_started", "scenario_done", "session_closed"]
+    assert [t for t in world.trace if t[0] == "run_scenario"] == [("run_scenario", f"{SCOPE_ID}:0")]
     assert _session_events(world.sink.events) == [_opened("sess-1"), _closed("sess-1")]
 
 
 def test_stop_signal_with_a_failed_stop_exits_1(world, monkeypatch):
     world.stop_plan = [ConnectionError("reset")]
-    monkeypatch.setattr(rs, "_run_scenario", lambda *a, **k: rs._stop.set() or ["passed"])
+    monkeypatch.setattr(rs, "_run_scenario", lambda *a, **k: rs._stop.set() or (["passed"], False))
     assert rs.main() == 1
     assert _session_events(world.sink.events) == [_opened("sess-1"), _closed("sess-1", "unconfirmed")]
     assert "scope_done" not in _types(world)
@@ -424,6 +426,24 @@ def test_stop_signal_during_warmup_pairs_the_session_only(world, monkeypatch):
     monkeypatch.setenv(C.SESSION_WARMUP_URL_ENV, WARMUP_URL)
     assert rs.main() == 0
     assert world.sink.events == [_opened("sess-1"), _closed("sess-1")]
+
+
+def test_scope_started_emit_failure_is_not_retried_as_a_connect_failure(world, monkeypatch):
+    """scope_started 的 emit 自身抛错（事件管道已断，BrokenPipeError 是 ConnectionError 的子类）：结果不确定，按已越过重试域
+    边界处理（ADR 0028）——不再建一个计费会话、不发第二条 scope_started，异常原样冒泡；这次的会话照常释放并配对。"""
+    monkeypatch.setattr(rs, "_backoff_interrupted", lambda attempt: False)
+    emit = world.sink.emit
+
+    def broken_on_scope_started(ev):
+        if ev["type"] == "scope_started":
+            raise BrokenPipeError("events pipe closed")
+        emit(ev)
+
+    monkeypatch.setattr(world.sink, "emit", broken_on_scope_started)
+    with pytest.raises(BrokenPipeError):
+        rs.main()
+    assert world.n_start == 1
+    assert _session_events(world.sink.events) == [_opened("sess-1"), _closed("sess-1")]
 
 
 def test_connect_retry_pairs_the_discarded_attempt_and_names_each_attempt(world):

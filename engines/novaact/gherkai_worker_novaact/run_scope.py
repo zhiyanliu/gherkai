@@ -33,8 +33,9 @@ cost（ADR 0024）：Nova SDK 原生给 time_worked_s，worker 只报该原生�
   echo '<job json>' | AWS_REGION=us-east-1 uv run python -m gherkai_worker_novaact
 
 进程形态（ADR 0037 决策 3）：本模块的 `main()` 就是包入口 `__main__:main` 与 console script
-`gherkai-worker-novaact` 背后的同一个函数——worker 必须是**被直接 spawn 的那个进程**（EVENTS_FD 经
-`pass_fds` 继承，中间加包装层会吞 fd3，ADR 0024）。
+`gherkai-worker-novaact` 背后的同一个函数。本模块不做包装：`EVENTS_FD` 靠 `pass_fds` 继承（ADR 0024），
+本模块所在的进程必须就是写事件的那个进程；包装进程能否把 fd3 原样传给子进程不能预设——tsx 二进制与 npx
+实测都没有原样传下，uvx 实测原样传下（ADR 0037 决策 3）。
 """
 from __future__ import annotations
 
@@ -74,7 +75,7 @@ from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据
 from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, load_user_steps
 
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前用错 region。**正常路径由组合根落实**——
-# compose.resolve_region 把 `--region > AWS_REGION > AWS_DEFAULT_REGION > profile config` 落实成具体字符串、经 AWS_REGION
+# compose.resolve_region 按其解析链（含项目配置文件层，见该函数 docstring，ADR 0053 决策 2）落实成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
 # 尤其 AgentCore 那条路径（下方 _BrowserSession 里 bedrock-agentcore 的 BrowserClient）构造时的 validate_region
 # **不读 profile config、要显式字符串**，region=None 起会话直接失败（bedrock-agentcore 1.22.0 抛 InvalidRegionError，
@@ -420,14 +421,15 @@ def _emit_step_done(sink: EventSink, ev: dict, *, scope_id: str | None, scenario
 def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
     """收尾：**有界**等 evidence 截图的后台队列传完（ADR 0042 决策一）。best-effort、绝不抛。
 
-    调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——AgentCore 会话已释放：NovaAct /
+    调用位置守两条：①**在会话释放之后**（ADR 0024「会话释放优先」——AgentCore 会话已释放：
     NovaAct 连接与 AgentCore 会话已随 _BrowserSession 退出释放；异常路径下最外层 with wf 尚在栈上），与安全点提前上传
     （`_presend_act_siblings`）同属 best-effort 的产物保全层（那层在 act 边界提前传、本函数在收尾排空）。
     Nova 没有中断 handler 内的兜底上传（greenlet 使然，见 ADR 0032）；② scope 末排在 `flush_and_cleanup`
     **之前**（队列传完的文件 flush 会跳过，漏网的由它兜）——故 scope 末这一段超时不等于丢：紧随的整目录
     flush 会把剩下的传上去。
     `flush_follows` 由调用点声明「我后面还跟着 flush 吗」（不在这里猜调用栈），超时提示据此分两句：会 flush 的
-    只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）才说链接可能打不开。必传、无默认：
+    只说改由收尾统一上传，不会 flush 的（提前退出路径只排空、不 flush）只说已放弃与不影响什么（与 Midscene 的
+    drainArtifactQueue 逐字一致，ADR 0039 面一）。必传、无默认：
     默认值会让新调用点静默拿到一句可能为假的承诺。
     `_uploader_singleton is None` 即本进程从未用过上传器（零 evidence）→ 队列必空，直接返回：此时也不该在
     退出路径上现造上传器，`from_env` 对「半注入」是 fail-loud 的（ADR 0033），会把干净退出变成 traceback。
@@ -437,8 +439,8 @@ def _drain_evidence_uploads(timeout_s: float, *, flush_follows: bool) -> None:
         if u is None or not u.enabled:
             return  # 无队列（零 evidence）/ 本机 no-op 路径（截图就在本地，无需上传）
         if not u.drain(timeout_s):
-            log("部分证据截图未能在收尾时限内传完（剩余的改由收尾统一上传；判定与报告不受影响）" if flush_follows
-                else "部分证据截图未能在收尾时限内传完（这些截图的链接可能打不开；判定与报告不受影响）")
+            log("部分证据截图未能在收尾预算内传完（剩余的改由收尾统一上传；判定与报告不受影响）" if flush_follows
+                else "部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）")
     except Exception as e:  # noqa: BLE001  收尾路径绝不因它改变退出码
         log(f"证据截图收尾上传未能完成（判定与报告不受影响）：{type(e).__name__}: {e}")
 
@@ -564,6 +566,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         inflight = None
         ev = {"type": "step_done", "scenarioId": scenario_id, "stepIndex": idx, "status": "passed"}
         cost = _cost_from_result(r)
+        if cost and cost.get("time_worked_s") is not None:
+            # 这次 act 已计费：之后挂 trajectory（云端即时上传）或发事件时若抛错，except 分支据 tw_total 仍能报出这笔费用（ADR 0024）
+            tw_total += cost["time_worked_s"]
         if cost:
             ev["cost"] = cost
         _attach_traj_refs(ev, step_traj)
@@ -578,8 +583,9 @@ def _run_step(nova, scenario_id: str, step: dict, votes_n: int, sink: EventSink,
         _collect_traj(e, step_traj)
         # 诊断分类细化（ADR 0028）：act 中途若是网络瞬时故障（CDP 闪断等），标 network_error 比笼统
         # engine_error 更准——便于排查"是网络抖动还是 AI 真出错"。**仅分类、不触发重试/恢复**：act 不幂等，
-        # schedule 的 job 级重试要求「会话未起（零 step_done）」，而此处 step_started 早已 emit、saw_step=True，
-        # 双条件 AND 天然不满足；且本失败走 step_done 事件流（非退出码 80），core 侧 is_network=False。
+        # schedule 的 job 级重试要求三个条件同时成立（network_error、本次零 step_done、job 目标不是设备；ADR 0028、
+        # ADR 0051 决策 2），本分支自己就会 emit step_done，core 侧 saw_step 随之为 True，门槛自然不满足；且本失败走
+        # step_done 事件流（非退出码 80），core 侧 is_network=False。
         # 故"act 中途恢复"仍是 defer（ADR 0028），这里只把失败原因记准。
         ev = {
             "type": "step_done", "scenarioId": scenario_id, "stepIndex": idx,
@@ -649,7 +655,7 @@ def _instruction(text: str, step: dict) -> str:
 
 
 def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink: EventSink,
-                  *, scope_id: str | None = None) -> list[str]:
+                  *, scope_id: str | None = None) -> tuple[list[str], bool]:
     """scope 内串行执行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028）。
 
     短路：scenario 内一旦某 step `status==error`（导航 SSL 失败等），后续 step 不再调 AI——
@@ -658,8 +664,10 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     判据锁 `status==error`（不看 error_type）——两个引擎对称、network/engine 错都触发。
 
     **短路只作用于本 scenario**（不跨 scenario：下一 scenario 可能导航到新页恢复，独立测试用例不该被牵连；
-    跨 job 的中止是 fail-fast 的职责，两者正交，ADR 0031 决定六）。返回各步 status——被跳过步**不进** statuses，
-    故不参与 _aggregate；scenario 判定由那个 error step 决定（与后面短路了几步无关）。
+    跨 job 的中止是 fail-fast 的职责，两者正交，ADR 0031 决定六）。返回 `(statuses, completed)`：statuses 是各步 status——
+    被跳过步**不进** statuses，故不参与 _aggregate；scenario 判定由那个 error step 决定（与后面短路了几步无关）。
+    completed 表示本 scenario 是否完整执行：每个 step 都已执行或因短路发了 step_skipped，中途既没有因循环顶的 _stop
+    提前结束、也没有 step 返回 "aborted"。它是 scenario 级中止护栏的判据（见 _emit_scenario_done_unless_stopped）。
 
     scope_id：只为透传给 evidence 的自包含头（ADR 0042 决策一），对派发/判定无影响。
     """
@@ -667,7 +675,7 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
     shortcircuit = False
     for st in steps:
         if _stop.is_set():
-            break  # 停止信号（ADR 0024 flag-only）：不再执行后续 step，交上层协作式退出释放会话。
+            return statuses, False  # 停止信号（ADR 0024 flag-only）：不再执行后续 step，交上层协作式退出释放会话。
             # 不发 step_skipped（那是 error 短路的语义、表"因上游故障跳过"）；停止是外部中止、非执行事实，
             # 未执行的 step 由 core 侧按 aborted/pending 派生态处理（wire 不传，ADR 0031），worker 不越权标注。
         if shortcircuit:
@@ -675,12 +683,12 @@ def _run_scenario(nova, scenario_id: str, steps: list[dict], votes_n: int, sink:
             continue
         status = _run_step(nova, scenario_id, st, votes_n, sink, scope_id=scope_id)
         if status == "aborted":
-            break  # step 被外部中止（投票途中收到 _stop）：不进 statuses、不参与 _aggregate，
-            # 与循环顶 _stop 检查同语义（外部中止非执行事实）。下轮循环顶的 _stop 检查也会 break，这里提前收。
+            return statuses, False  # step 被外部中止（投票途中收到 _stop）：不进 statuses、不参与 _aggregate，
+            # 与循环顶 _stop 检查同语义（外部中止非执行事实）。下轮循环顶的 _stop 检查也会结束循环，这里提前收。
         statuses.append(status)
         if status == "error":
             shortcircuit = True  # 本 scenario 后续 step 短路（不跨 scenario）
-    return statuses
+    return statuses, True
 
 
 def _aggregate(statuses: list[str]) -> str:
@@ -767,8 +775,9 @@ def session_request_name(run_id: str, scope_id: str, attempt: int, *, max_length
     return head + "".join(segment)
 
 
-# 停止信号到达时 Start 仍在途：再等这段时间让它返回，以便取得会话 id 并发出 Stop（ADR 0051 决策 5 桌面收尾里「等在途 Start」那一段，与 Midscene
-# 的 INFLIGHT_SETTLE_MS 同值）；到点仍未返回即按结果未知的尝试处置（见 _BrowserSession._start）。这一段只在没有 act 在途时出现，不与
+# 停止信号到达时 Start 仍在途：再等这段时间让它返回，以便取得会话 id 并发出 Stop（ADR 0049 决策 5 桌面收尾路径里「等在途
+# StartBrowserSession」那一段；结果未知时发 attempted 的规则见 ADR 0051 决策 4；与 Midscene 的 INFLIGHT_SETTLE_MS 同值）；到点仍未返回
+# 即按结果未知的尝试处置（见 _BrowserSession._start）。这一段只在没有 act 在途时出现，不与
 # 「单 act 上界 + NOVA_GRACE_MARGIN_S」的 grace 下限叠加：它加上 Stop 预算与截图排空仍在 30 秒余量之内。
 START_SETTLE_S = 1.5
 _START_POLL_S = 0.05  # 等待 Start 期间检查停止标志的间隔：handler 只置标志（ADR 0024 flag-only），须由主线程自行检查
@@ -803,10 +812,11 @@ def browser_session_timeout_s(timeout_s) -> int | None:
 class _BrowserSession:
     """worker 自持的一次 AgentCore 浏览器会话（ADR 0028「Nova 会话由 worker 自己持有」；ADR 0024 终止契约「Nova worker」条）。
 
-    进入：Start（只带请求名：不带 profile 配置、默认浏览器标识）→ 会话 id 立刻在手、发 session_opened → 取 CDP 连接头 → 进 NovaAct（只给
-    CDP 地址与连接头、不传 browser_auth：会话从干净状态起步，退出时不存回浏览器状态，与 Midscene 对称）。Start 之前失败就是建连失败、
-    没有会话要释放；Start 之后任何一步失败（连写日志那一行都可能抛：stderr 管道已关）都先释放再抛。发出 session_opened 之后、取连接头
-    之前是一个安全点（ADR 0024 flag-only）：停止信号已置位即释放会话、抛 _StoppedAfterStart，不建没有预算上限的 NovaAct 连接。
+    进入：Start（带请求名，job 有墙钟预算时另带会话存活上限，见 browser_session_timeout_s；不带 profile 配置、默认浏览器标识）→
+    会话 id 立刻在手、发 session_opened → 取 CDP 连接头 → 进 NovaAct（只给 CDP 地址与连接头、不传 browser_auth：会话从干净状态起步，
+    退出时不存回浏览器状态，与 Midscene 对称）。Start 之前失败就是建连失败、没有会话要释放；Start 之后任何一步失败（连写日志那一行
+    都可能抛：stderr 管道已关）都先释放再抛。发出 session_opened 之后、取连接头之前是一个安全点（ADR 0024 flag-only）：停止信号已
+    置位即释放会话、抛 _StoppedAfterStart，不建没有预算上限的 NovaAct 连接。
     退出：先关 NovaAct 连接（它的 __exit__ 收到真实的 exc_info，对称 with 语义；本 worker 自己持有 Workflow，SDK 不据它标记结局）、
     再 Stop 会话（套 SESSION_STOP_BUDGET_S 的预算），两步都执行、失败只记进 release_errors——绝不抛，也绝不抑制 body 的异常，外层建连
     循环因此只会看到建连与 body 的异常，释放失败只体现为退出码 1（ADR 0051 决策 5）。仅捕获 Exception：KeyboardInterrupt / SystemExit
@@ -960,19 +970,23 @@ def stop_session_within_budget(client, budget_s: float) -> None:
         raise outcome["exc"]
 
 
-def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str]) -> bool:
+def _emit_scenario_done_unless_stopped(sink: EventSink, scenario_id: str, statuses: list[str], completed: bool) -> bool:
     """scenario 运行结束后的 scenario_done 出口 + 中止护栏（模块级、供单测直驱）。
 
-    返回 True 表示中止（调用方应停止本 session、不再执行后续 scenario）。**中止时绝不 emit scenario_done**：
-    scenario 中途收到 _stop 时 `_run_scenario` 返回**部分 statuses**，用它算判定会把没执行完的 scenario 标成
-    确定 passed（假阳性——`_aggregate([])`/`_aggregate(["passed"])` 都 == "passed"），违反「停止是外部中止、
-    非执行事实、worker 不越权标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。对称 step 级投票
-    中止（**票没投满**时不 emit 带 verdict 的 step_done）+ scenario 循环顶护栏（不发 step_skipped）。
+    返回 True 表示中止（调用方应停止本 session、不再执行后续 scenario）。**判据是单元完成度、不是此刻的停止标志**
+    （ADR 0024：安全点丢弃未完成单元的判定，但不丢弃已成的执行事实），与 step 级投票的判据（票是否投满）一致：
+    - 未完成（`completed` 为 False，`_run_scenario` 因停止信号提前结束、只带回**部分 statuses**）：绝不 emit
+      scenario_done，返回 True。用部分 statuses 算判定会把没执行完的 scenario 标成确定 passed（假阳性——
+      `_aggregate([])` 与 `_aggregate(["passed"])` 都得 "passed"），违反「停止是外部中止、非执行事实、worker 不越权
+      标注」（ADR 0031/0024）；未完成 scenario 交 core 按派生态处理。
+    - 已完成：照常 emit scenario_done，再返回此刻的停止标志。停止信号落在最后一个 step 的 act 期间时，act 照常返回、
+      step_done 照常发出，scenario 的判定已是执行事实；此时若吞掉 scenario_done，core 按在途 scenario 处理、不合成
+      记录（ADR 0031），这个已完整执行的 scenario 就会从 JobResult 里消失。
     """
-    if _stop.is_set():
+    if not completed:
         return True
     sink.emit({"type": "scenario_done", "scenarioId": scenario_id, "status": _aggregate(statuses)})
-    return False
+    return _stop.is_set()
 
 
 import socket
@@ -1168,7 +1182,7 @@ def _capabilities() -> dict[str, object]:
         "targets": [{**t, "ui_kinds": list(t["ui_kinds"])} for t in WORKER_TARGETS],  # ADR 0049 决策 1（与 Midscene 侧同样整条拷出）
         "deterministic_steps": _deterministic.list_registry(),  # 同一张注册表（ADR 0036「2.」真值单一）
         "model_id": MODEL_ID,  # 与下面 Workflow(model_id=...) 同一常量（ADR 0004「模型版本选择策略」）
-        SESSION_WARMUP_KEY: True,  # 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）：本机 --expose-local 的预检据此放行
+        SESSION_WARMUP_KEY: True,  # 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）：本机 --expose-local 的执行前预检据此放行
     }
 
 
@@ -1193,11 +1207,12 @@ def main() -> int:
         # 「写了 steps 却全走 AI」的头号原因是目录没被注入，没这行使用方分不清是没读到还是没命中。
         log(f"worker: 已加载使用方 steps {len(loaded)} 个文件（{steps_dir}）")
 
-    # 批量 match 查询（ADR 0036「4.」，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout
-    # 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；不建会话、零 AWS。
+    # 批量 match 查询（ADR 0036「4.」，plan 命中标注）：stdin 是一个 JSON 数组（读到 EOF 为止），每项为 `{keyword, text}`；
+    # 旧版命令行工具传的裸字符串也接受，此时不核对关键字。stdout 输出逐条命中结果。匹配语义留在 worker（CLI 零复刻）；
+    # 不建会话、零 AWS。
     if "--match-steps" in sys.argv:
-        texts = json.loads(sys.stdin.read())
-        print(json.dumps(_deterministic.match_batch(texts), ensure_ascii=False))
+        items = json.loads(sys.stdin.read())
+        print(json.dumps(_deterministic.match_batch(items), ensure_ascii=False))
         return 0
     # 引擎能力自述（ADR 0036「5.」，唯一的自述入口）：不建会话、不读 stdin、零费用。确定性清单是本对象的
     # `deterministic_steps` 键，**没有 `--list-deterministic` 别名**（加键不加入口，见 ADR 0036「5.」）——
@@ -1221,9 +1236,10 @@ def main() -> int:
         return 0  # 读 job 期间已收到停止信号（对齐 _run_session 顶的检查）：零事件、正常退出，core 判 error 不误归因
     sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
     # 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
-    # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。别的版本写出的
-    # job 行连 scope / scenarios 的形状都不保证，先取它们会把「版本不一致」变成一个 KeyError。不满足即按执行前失败的统一规则（ADR 0051
-    # 决策 4）发 scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此
+    # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（worker 不按 timeoutS 计时、不自停；除这里的
+    # 自检外，它只用来设定浏览器会话的存活上限，见 browser_session_timeout_s）。别的版本写出的 job 行连 scope / scenarios 的
+    # 形状都不保证，先取它们会把「版本不一致」变成一个 KeyError。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发
+    # scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此
     # 合成 SKIPPED 明细并按 scope 级 error 判定。scopeId 尽力取（形状未知时记 unknown）。
     rejected = precheck_job(job, WORKER_TARGETS)
     if rejected is not None:
@@ -1238,7 +1254,8 @@ def main() -> int:
     # definition 完整性判据（ADR 0035「边界与不变量」；ADR 0051 决策 13）：隧道模式下额外请求头与会话预热地址成对下发——收到请求头却没有
     # 预热地址，是旧后端丢字段的部署残缺（开发版本混搭），按执行前失败发 scope_done{precheck_failed}、不建会话、零会话费用。
     warmup_url = os.environ.get(SESSION_WARMUP_URL_ENV) or None
-    if os.environ.get(EXTRA_HTTP_HEADERS_ENV) and not warmup_url:
+    extra_headers = os.environ.get(EXTRA_HTTP_HEADERS_ENV) or None  # 完整性判据与下方会话里的注入读同一个值
+    if extra_headers and not warmup_url:
         log(f"worker: precheck failed — {INCOMPLETE_DEFINITION_MESSAGE}")
         sink.emit({"type": "scope_done", "scopeId": scope["id"], "status": "error", "errorType": "precheck_failed",
                    "message": INCOMPLETE_DEFINITION_MESSAGE})
@@ -1250,7 +1267,7 @@ def main() -> int:
         log(f"worker: {MISSING_RUN_ID_MESSAGE}")
         return 1
     votes_n = int(job.get("assertionVotes", 1))  # AI 断言投票次数（ADR 0014/0024）；缺省 1
-    session_id = None  # AgentCore 浏览器会话 id（血缘，进 scope_started / scope_done；ADR 0051 决策 5 对 sessionId 的定义）
+    session_id = None  # AgentCore 浏览器会话 id（血缘，进 scope_started / scope_done；ADR 0051 决策 4 对 sessionId 的定义）
     nova_session_id = None  # Nova Act 服务侧的会话 id：只用于定位 SDK 落盘的 session_summary.json（路径按它拼）
     warmup_failure: _warmup.WarmupFailure | None = None  # 会话预热的归因（ADR 0051 决策 13）：非 None 即不发 scope_started、经 scope_done 传递
     release_error: BaseException | None = None  # 释放阶段（关 NovaAct 连接、Stop AgentCore 会话）抛出的异常：只记录、不冒泡、不清零，让退出码为 1
@@ -1258,12 +1275,12 @@ def main() -> int:
 
     ensure_workflow_definition(WORKFLOW_DEF, region=REGION, description="Nova Act worker")
     wf = Workflow(model_id=MODEL_ID, boto_session_kwargs={"region_name": REGION}, workflow_definition_name=WORKFLOW_DEF)
-    # 建连重试状态（ADR 0028）：started 一旦 True（scope_started 已 emit、会话已起），
+    # 建连重试状态（ADR 0028）：started 一旦 True（会话已起、即将 emit scope_started，在 emit 之前置位），
     # 任何后续异常都不再当「可重试建连失败」——act 已可能执行、有副作用，绝不重试。
     started = False
 
     def _run_session(attempt: int) -> None:
-        """建连 + 执行完所有 scenarios（`attempt` 是建连重试循环的序号，从 0 起）。建连段异常可被外层重试；scope_started emit 后不可。
+        """建连 + 执行完所有 scenarios（`attempt` 是建连重试循环的序号，从 0 起）。建连段异常可被外层重试；从 emit scope_started 起不可。
 
         停止（_stop）在此协作式生效：scope_started 之前与 scenario 循环顶检测 → 正常 return 出本函数 → with 退出释放会话（ADR 0024
         flag-only，不靠异常穿透）。会话的建立与释放全在 _BrowserSession 里（Start → 发 session_opened → 取连接头 → 进 NovaAct；
@@ -1284,7 +1301,6 @@ def main() -> int:
                 # 额外请求头（ADR 0035，如 ngrok-skip-browser-warning）：组合根经 env 注入，context 级
                 # 对所有请求（含 SDK 之后新开的 page）生效。纯 CDP 命令、无回调——不触碰 SDK 的
                 # route/greenlet 面（nova.page 是 SDK 公开属性，_DeterministicCtx 同源用法）。
-                extra_headers = os.environ.get("GHERKAI_EXTRA_HTTP_HEADERS")
                 if extra_headers:
                     nova.page.context.set_extra_http_headers(json.loads(extra_headers))
                 # 隧道会话预热（ADR 0051 决策 13）：第一个 scenario 之前导航预热地址一次换会话 cookie，不按 scenario 重做。失败不发
@@ -1305,8 +1321,10 @@ def main() -> int:
                     return
                 # 血缘已在 Start 返回时随 session_opened 先行回传；scope_started 带执行所用的会话 id（ADR 0051 决策 4、ADR 0024
                 # sessionId 条）——超时/SIGTERM 中途打断时 scope_done 不会 emit，core 仍从这两条事件取到血缘。
+                # started 先于 emit 置位（ADR 0028）：emit 自身抛错时结果不确定（DDB 写入可能已在服务端提交、只是读超时），按已越过
+                # 重试域边界处理、不进建连重试——否则事件通道的故障会被判成瞬时网络错，再建一个计费会话，还可能发出第二条 scope_started。
+                started = True  # 越过此点表示会话已起、act 即将执行，退出建连重试域（ADR 0028）
                 sink.emit({"type": "scope_started", "scopeId": scope["id"], "sessionId": session_id})  # 三级时长起点
-                started = True  # 越过此点表示会话已起、act 即将执行 → 退出建连重试域（ADR 0028）
                 # scope 内串行执行 scenarios，共享同一会话（ADR 0019/0024）
                 for sc in scenarios:
                     if _stop.is_set():
@@ -1317,10 +1335,11 @@ def main() -> int:
                     # 不再在 scenario 级聚合；scenario_done 不带 reportRefs（协议字段保留、向后兼容）。
                     # scope 内 step 短路（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）在 _run_scenario 内。
                     # scope_id 透传到 step：evidence 的头里带它（文件自包含，ADR 0042 决策一）
-                    statuses = _run_scenario(nova, sid, sc["steps"], votes_n, sink, scope_id=scope["id"])
-                    # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：
-                    # 中途中止时不 emit（部分 statuses 会算出假 passed），返 True → 停本 session。
-                    if _emit_scenario_done_unless_stopped(sink, sid, statuses):
+                    statuses, completed = _run_scenario(nova, sid, sc["steps"], votes_n, sink, scope_id=scope["id"])
+                    # scenario_done 出口 + 中止护栏（模块级 _emit_scenario_done_unless_stopped，供单测直驱）：判据是 scenario
+                    # 是否完整执行。未完成时不 emit（部分 statuses 会算出假 passed）；已完成时照常 emit，即使停止标志已置位。
+                    # 返回 True（未完成，或已完成而停止标志已置位）即停本 session。
+                    if _emit_scenario_done_unless_stopped(sink, sid, statuses, completed):
                         return
         except _StartUnresolved:
             return  # 停止信号到达时 Start 仍未返回：attempted 事件已发、已记为释放失败；main 尾按 _stop 走停止路径（退出码 1）
@@ -1334,7 +1353,7 @@ def main() -> int:
         outer = get_current_workflow()
         set_current_workflow(wf)
         try:
-            # 建连重试循环（ADR 0028）：仅裹建连段；scope_started 一 emit 即 started=True、跳出重试。
+            # 建连重试循环（ADR 0028）：仅裹建连段；emit scope_started 之前即置 started=True，此后不再重试。
             # 每次 attempt 用全新的 _BrowserSession（BrowserClient / NovaAct），它的退出清掉本次部分建起的会话、为它发 session_closed
             # （丢弃的 attempt 确认停止后不影响退出码，没能确认即退出码 1，ADR 0051 决策 4）。
             for attempt in range(_CONNECT_ATTEMPTS):
@@ -1357,8 +1376,8 @@ def main() -> int:
                     if _backoff_interrupted(attempt):
                         break  # 退避中收到停止信号 → 不再重连
         except BaseException:
-            # 异常退出路径（ADR 0042 决策一第三条）：AgentCore 会话已在 _run_session 内的两层
-            # _BrowserSession 退出时释放（NovaAct 连接与 AgentCore 会话；最外层 with wf 仍在栈上、与会话无关），此处
+            # 异常退出路径（ADR 0042 决策一第三条）：AgentCore 会话已在 _run_session 内随 _BrowserSession 的退出释放
+            # （先关 NovaAct 连接、再 Stop AgentCore 会话；最外层 with wf 仍在栈上、与会话无关），此处
             # 只给在途截图同一份有界预算再传一把（best-effort，不改变冒泡的异常与退出码）。
             _drain_evidence_uploads(EVIDENCE_DRAIN_EXIT_S, flush_follows=False)
             raise

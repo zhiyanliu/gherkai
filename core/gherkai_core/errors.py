@@ -9,8 +9,9 @@ from __future__ import annotations
 class WorkerExitError(RuntimeError):
     """worker 进程以非零退出码结束（ADR 0024「退出码约定」/ 0034 机制二「退出信息」）。
 
-    `wire.raise_for_worker_exit` 把非零退出码翻成本异常（两个 Engine adapter 共用），`exit_code` 带原码：正码是 worker 自报
-    （崩溃 / 会话清理失败的 1 / 网络故障的 80），负码是被信号强杀（SIGKILL 为 -9）。终结函数据此判「退出码非零」一行，
+    `wire.raise_for_worker_exit` 把非零退出码翻成本异常（两个 Engine adapter 共用），`exit_code` 带原码：正码多为 worker 自报
+    （崩溃 / 会话清理失败的 1、Nova worker 加载使用方 steps 失败的 2、网络故障的 80）；本机子进程被信号强杀时为负码
+    （SIGKILL 为 -9），云端任务被强杀时 ECS 报正码（SIGKILL 为 137），云端取不到退出码时按 1 计。终结函数据此判「退出码非零」一行，
     不再从消息文本里解析退出码。
     """
 

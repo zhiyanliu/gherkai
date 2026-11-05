@@ -6,6 +6,7 @@
 //   - 输入：`mobile: type`，不探测、不走 W3C 路线（Android Chrome 上网页活动元素读回为空，原生活动元素指向 WebView 容器）；
 //     清空为连发若干次 `mobile: pressKey` 退格键；
 //   - 收起键盘：WebdriverIO 的 hideKeyboard（Appium 的跨平台端点，不是 `mobile:` 命令），不带参数；
+//   - 键盘是否显示：WebdriverIO 的 isKeyboardShown（只读，收起键盘之后核一次，ADR 0052 决策 7）；
 //   - 按键与系统键：`mobile: pressKey`（回车 66、退格 67、返回 4、主屏 3 等键码），没有映射的键名记 capability_unavailable；
 //   - 导航：`mobile: deepLink` 带 package。驱动经 `adb shell am start -d` 传地址，所以发命令前按 RFC 3986 校验地址字符（拦下
 //     `; ' ( )` 与一切非 URI 字符，它们会让命令出错或被截断后部分执行），网页目标经同一条驱动路径传地址、同样校验。应用目标

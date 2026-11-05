@@ -33,9 +33,10 @@ import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs"
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { startParentWatchdog } from "../lib/parent-watchdog.mjs";  // 所属进程消失视同 SIGTERM（ADR 0024 终止契约）
 import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
-import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的结构版本、目标与预算自检（ADR 0049 决策 7、0024）
-// 设备目标的会话上限与设备收尾之和（ADR 0049 决策 4、5），以及重规划上限覆盖键的启动期校验（ADR 0044 决策 2）：设备模块里
-// 唯一允许值 import 的文件，它不 import 任何 SDK（ADR 0052 决策 3）
+import { precheckJob } from "../lib/precheck.mjs";  // 建会话前的协议版本、目标与预算自检（ADR 0049 决策 7、0024）
+// 设备目标的会话上限与设备收尾之和（ADR 0049 决策 4、5），以及重规划上限覆盖键的启动期校验（ADR 0044 决策 2）：限值常量模块
+// 不 import 任何 SDK，是桌面路径允许静态加载的两个设备模块之一（另一个是桌面实现用的 device/session-name.mts，由
+// worker/no-device-deps.test.mts 守，ADR 0052 决策 3）
 import { MAX_SESSION_S, deviceGraceSeconds, replanningCycleLimit } from "../device/limits.mjs";
 // 确定性 step 注册表（ADR 0022）。内建导航由下方 import 的脚手架 deterministic.steps.mts 在模块顶层经 registerBuiltin(...) 登记、
 // 带内建标记（ADR 0050 决策 1）——import 即注册，对称 Nova 引擎 import deterministic_steps；使用方 steps 在 main 里随后加载。
@@ -81,10 +82,12 @@ export const QUEUE_DRAIN_EXIT_MS = 6_000;
 
 // 自报 grace 下限的余量（ADR 0024 grace 硬约束的 margin）：收尾各段预算之和之外再多留一份，吸收段间调度、
 // SDK 抖动与不被上述预算覆盖的零碎（诊断写出、事件 flush、进程退出本身）。
-// **取值来路**：使下限落在已标定的 31 s 上（各段之和 23.5 + 本余量 7.5）——31 不是新数，是 ADR 0032 真容器校准
+// **取值来路**：使桌面收尾路径之和落在已标定的 31 秒上（各段之和 23.5 加本余量 7.5）——31 不是新数，是 ADR 0032 真容器校准
 // 判「25 够用」（实测约 2x 余量）后、又被 ADR 0042 决策一的 6 s 截图队列排空顶上来的今值。改本常量就是改一个
 // 已标定的下限，要有意识地改。与 Nova 侧不对称的一点：Nova 的 margin 可 env 覆盖（再标定免改代码），本常量是
 // 编译期值、再标定要改这里重编。
+// 设备收尾路径共用本余量（各段之和 56 加 7.5 为 63.5 秒，见 device/limits.mts 的 deviceGraceSeconds），自报下限取两条路径的
+// 较大者（见下 minGraceSeconds）。
 export const MIN_GRACE_MARGIN_MS = 7500;
 /** 本 worker 支持的测试目标（ADR 0049 决策 1）：桌面网页，加 Android 与 iOS 的网页与应用（Appium 经 Device Farm 远程访问
  *  会话）。设备条目带 max_session_s，取自设备常量模块（会话硬上限减停止宽限的硬上限，ADR 0049 决策 4）；桌面条目不带
@@ -141,8 +144,9 @@ function modelConfig() {
 }
 
 // 事件出口抽进 ../lib/event-sink.mts（ADR 0024「I/O 边缘可注入接口」）：可注入、可测；subprocess 态写
-// EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：为 Fargate 化的 DDB PutItem（aws-sdk-js）
-// 预留；Nova 那个引擎 emit 同步）+ 作参数注入 runStep/runScenario（两个引擎统一打桩机制），不再是模块级函数。
+// EVENTS_FD fd（无则回落 stdout 调试）。emit 为 async（合理不对称：DDB 态（注入 EVENTS_DDB_TABLE 时）的 PutItem
+// 走 aws-sdk-js、本就是 async，见 lib/event-sink.mts；Nova 那个引擎 emit 同步）+ 作参数注入 runStep/runScenario
+// （两个引擎统一打桩机制），不再是模块级函数。
 // log（stderr 诊断）**不属那三条 I/O 边、不进 sink**（协议传输面 vs 诊断面物理隔离，ADR 0024），保模块级。
 function log(msg: string): void {
   // 诊断行常拼着异常文本，可能带设备端点、预签名地址或隧道令牌：写出前经 redactSecrets（ADR 0051 决策 11、0035 决策 5）
@@ -353,12 +357,12 @@ export async function main(): Promise<number> {
   // 云端浏览器会话、第一次调模型时才炸。返回值不用（真正取值在构造界面接缝时的 modelConfig()）；这一步只为早失败。
   modelFamily();
 
-  // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（step 文本）→ stdout 一行
-  // 逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
+  // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（每项 `{keyword, text}`，旧版 CLI 给裸字符串）
+  // → stdout 一行逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
   if (process.argv.includes("--match-steps")) {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
-    const items: MatchItem[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));  // {keyword, text}[]；旧版 CLI 给裸字符串
+    const items: MatchItem[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
     await writeStdoutFlushed(JSON.stringify(matchBatch(items)) + "\n");
     return 0;
   }
@@ -406,7 +410,8 @@ export async function main(): Promise<number> {
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
 
   // 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
-  // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（timeoutS 只在这里被读，不计时、不自停）。别的版本写出的
+  // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（worker 不据 timeoutS 计时、不自停；除这里的自检外，
+  // 它只用于桌面实现设定浏览器会话的服务端存活上限，见 surface-desktop.mts 的 browserSessionTimeoutS，ADR 0024 输入节）。别的版本写出的
   // job 行连 scope 的形状都不保证，先取它会把「版本不一致」变成一个 TypeError。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发
   // scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此合成 SKIPPED
   // 明细并按 scope 级 error 判定。scopeId 尽力取（形状未知时记 unknown）。
@@ -472,7 +477,8 @@ export interface ScopeIo {
  *    排空截图队列 → 整目录 flush（ADR 0051 决策 5；桌面原有次序）；
  *  - scope 终止出口（acquire 返回的执行前失败、会话丢失、scenario 前核对终止）：同正常收尾，scope_done 带 status / errorType /
  *    message；执行前失败时还没有 agent，从释放开始。三者在实践中只来自设备实现（ADR 0051 决策 4、5；ADR 0052 决策 2）；
- *  - 会话预热失败与其余异常：exitAfterFailure（释放 → 排空 → scope_done 或退出码），不 flush（见该函数）；
+ *  - 会话预热失败与其余异常：exitAfterFailure（释放 → 排空 → scope_done 或退出码），不 flush（见该函数）；已进入终结之后抛出的
+ *    异常不走这条，改等停止信号的收尾序列、取它的退出码（入口的 fatal 出口不会抢先退出）；
  *  - 停止信号与设备接缝的进程级兜底：shutdownSequence（interrupt 释放 → 中断兜底提前上传 → 排空 → 退出），之后本函数不再发任何
  *    step、scenario 或 scope 事件（ADR 0051 决策 5 阶段 1）；会话事件由接缝经未门控的 io.emit 照发。 */
 export async function runScope(job: Job, io: ScopeIo): Promise<number> {
@@ -495,15 +501,18 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
 
   // SIGTERM/SIGINT 与设备接缝的进程级兜底：清理会话再退（防会话泄漏后持续计费）。收尾序列提出为可测的 shutdownSequence
   // （cleanup 先于提前上传的顺序不变量在那里被单测锁住）；此处只做「守卫去重 + 门控事件 + 退出」这层外壳。
+  // shutdownDone 是进入终结后的收尾序列：赋值在第一个 await 之前，所以 finalizing 为真时它一定非空；主流程的异常出口据此
+  // 改等收尾序列（见下 catch）。
+  let shutdownDone: Promise<number> | null = null;
   const onSignal = async (): Promise<void> => {
     if (finalizing) return;
     finalizing = true;
-    const code = await shutdownSequence({
+    const code = await (shutdownDone = shutdownSequence({
       cleanup: async () => { await release("interrupt"); },
       uploader,
       reportFile: () => agentRef?.reportFile,
       getCleanupFailed: () => released.releaseFailed,
-    });
+    }));
     io.exit(code);
   };
 
@@ -612,6 +621,10 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
       await runAcquired(acquired.agent, acquired.sessionId);
     }
   } catch (e) {
+    // 已进入终结时，退出码与收尾归停止信号的收尾序列，主流程不再走异常出口：否则异常重抛到入口，入口的 fatal 出口会抢先
+    // 以 1 退出、截断中断兜底提前上传与截图排空（ADR 0024 终止契约；ADR 0051 决策 5 的退出码）。典型时机是 Start 在途时收到
+    // 停止信号、Start 随后在等待窗口内失败：建连循环见到已进入终结即抛出，而收尾序列还停在等待窗口里。
+    if (shutdownDone !== null) return await shutdownDone;
     // 统一出口（exitAfterFailure，deps 注入、单测锁次序）：先释放会话、再排空截图队列，然后按异常种类定事件与退出码。
     return await exitAfterFailure(e, {
       cleanup: async () => { await release("normal"); },
@@ -657,7 +670,7 @@ export interface FailureExitDeps {
   sessionId: string | null;
   emit: (ev: Record<string, unknown>) => Promise<void>;
   /** 释放之后的 scope 级产物链接（设备的 device-session.json，ADR 0051 决策 8），挂进执行前失败的 scope_done；同样要在 cleanup 之后
-   *  取。没给或为空即不带 reportRefs 键（桌面的这条事件与改动前逐字节一致）。 */
+   *  取。没给或为空即不带 reportRefs 键（桌面的这条事件因此不带该键，与引入界面接缝之前逐字节一致）。 */
   reportRefs?: () => ReportRef[];
   logFn?: (line: string) => void;
 }
@@ -786,9 +799,9 @@ function dispatchOf(text: string, keyword: string, target: StepTargetKey): Dispa
  *  handler（内建导航也是其中一条）或 AI，得暂定判定；④ 本 run 产 evidence 时按暂定判定读地址；⑤ 接缝复原并核对，失败即最终
  *  判定改 error（类别与消息取返回值）；⑥ 本 run 产 evidence 时采界面快照（只在 failed / error 采控件），唯一可能改判的是会话丢失；
  *  ⑦ 产 evidence、发 step_done，然后把截图与原始控件树入队。桌面接缝上 ②⑤ 是空操作、④⑥ 只在 AI step 取一次 page.url()，
- *  事件流与 evidence 与改动前逐字节一致。
+ *  事件流与 evidence 与引入界面接缝之前逐字节一致（ADR 0052 决策 2）。
  *  执行异常的归类先认接缝或命令守卫挂在异常上的标记（session_lost / engine_error / capability_unavailable），没有标记的
- *  （桌面路径的全部异常）沿用瞬时网络判定（ADR 0052 决策 6）。 */
+ *  （桌面路径上除派发出错的防御分支外的全部异常）沿用瞬时网络判定（ADR 0052 决策 6）。 */
 async function runStep(
   seam: ScopeSeam, scenarioId: string, step: Step, votesN: number,
   sink: { emit: (e: unknown) => Promise<void> },
@@ -865,7 +878,7 @@ async function runStep(
       const passed = yes > votesN / 2;
       ev.status = passed ? "passed" : "failed";
       ev.votes = { yes, total: votesN };
-      const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（修：原 lastCost 只算最后一票）
+      const cost = stepCost(tokBefore, agent);  // N 票 token 增量合计（不能只取最后一票的用量，否则欠计 (N-1)/N，ADR 0024）
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
     } else {
@@ -881,9 +894,9 @@ async function runStep(
   } catch (e) {
     // 归类标记优先（ADR 0052 决策 6）：命令守卫与设备接缝把会话丢失、结果未知（engine_error，消息写明这一步可能已执行也可能
     // 未执行）与能力不提供挂在异常上，读到即按它归类——设备路径的执行异常因此不进瞬时网络判定。
-    // 没有标记的（桌面路径的全部异常）沿用诊断分类细化（ADR 0028，对称 Nova）：act 中途网络瞬时故障（CDP 闪断等）标
-    // network_error 比笼统 engine_error 更准。**仅分类、不触发重试/恢复**：act 不幂等，schedule job 级重试要求「会话未起（零
-    // step_done）」，此处 step_started 早已 emit、saw_step=True，双条件 AND 天然不满足；本失败走 step_done
+    // 没有标记的（桌面路径上除派发出错的防御分支外的全部异常）沿用诊断分类细化（ADR 0028，对称 Nova）：act 中途网络瞬时故障（CDP 闪断等）标
+    // network_error 比笼统 engine_error 更准。**仅分类、不触发重试/恢复**：act 不幂等，schedule job 级重试的门槛之一是「会话未起（零
+    // step_done）」，而本 step 随后照常发出 step_done（core 收到即置 saw_step=True），这一条天然不满足；本失败走 step_done
     // 事件流（非退出码 80），core 侧 is_network=False。"act 中途恢复"仍 defer，这里只把失败原因记准。
     const mark = readClassification(e);
     const errorType = mark !== null ? mark.errorType : isTransientNetwork(e, false, !fromHandler) ? "network_error" : "engine_error";

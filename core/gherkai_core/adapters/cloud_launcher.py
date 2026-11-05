@@ -54,7 +54,8 @@ class CloudLauncher:
                 except Exception:
                     logger.warning(
                         "这个 job 的超时看护没能设置好（不影响本次启动）：run=%s scope=%s"
-                        "——超时改由后台巡检兜底收敛；若反复出现，检查后端的定时权限配置",
+                        "——超时改由后台巡检兜底收敛；若反复出现，按日志中的错误信息检查后端配置"
+                        "（常见原因是定时权限不足）",
                         self._run_id, job.scope_id, exc_info=True)
         # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
         # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。

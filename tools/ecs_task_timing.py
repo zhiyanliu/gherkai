@@ -31,7 +31,7 @@ grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟耗时**（`s
   --wait：轮询 DescribeTasks 直到 lastStatus==STOPPED（时间字段才全）再吐；默认单次快照（可能字段未齐）。
   --container：算 container 级 exitCode 时匹配的 container 名（默认取第一个）。
   --stop-timeout：task-def 生效的 stopTimeout 秒（判 SIGTERM→退出是否被 SIGKILL 截断的阈值；范围 [1,120]，
-                  不给则回落 Fargate 上限 120）——写死 120 会在执行 -c stop_timeout=60 时把「达 60 被截断」误判成过保守。
+                  不给则回落 Fargate 上限 120）——写死 120 会在以 `gherkai deploy --stop-timeout 60` 部署时把「达 60 被截断」误判成过保守。
 
 输出：时间字段原值（ISO）+ 派生的三段耗时（created→started 启动、stopping→executionStopped SIGTERM→退出、
 stopping→stopped 总停）+ stopCode/stoppedReason + container exitCode。
@@ -148,7 +148,7 @@ def _print_human(r: dict) -> None:
     ste = d["stopping_to_execution_stopped"]
     if ste is not None:
         # 判 SIGKILL 截断的阈值取**实际生效的 stopTimeout**（--stop-timeout 告知），非写死 120——校准时本就会试不同
-        # stop_timeout 值，写死 120 会在 -c stop_timeout=60 时把「达 60 被 SIGKILL」误判成「远低于 120、过保守」（方向反）。
+        # stop_timeout 值，写死 120 会在以 `gherkai deploy --stop-timeout 60` 部署时把「达 60 被 SIGKILL」误判成「远低于 120、过保守」（方向反）。
         # 未告知则回落 Fargate 上限 120（保守）。再交叉 exitCode（137≈128+9=SIGKILL）辅助消歧。
         # 用 `is not None`（非 `or`）判在场：--stop-timeout 已在 main() 校验 [1,120]（0/负被拒），此处不会遇非法值；
         # `is not None` 保证「告知了就用告知值」的语义清晰（不因某假值静默回落）。

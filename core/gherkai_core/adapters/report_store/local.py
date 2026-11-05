@@ -33,7 +33,7 @@ def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], 
     """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
 
     粒度由 scenario_id/step_index 是否为 None 表达：都为 None 即 scope 级；仅 step_index 为 None 即 scenario 级；
-    两者都非 None 即 step 级（Nova trajectory 下沉，同 scenario 多 trajectory 靠 step_index 区分）。
+    两者都非 None 即 step 级（Nova trajectory、两引擎 evidence；同 scenario 多条靠 step_index 区分）。
     遍历顺序（每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
 
     href（导航链接）由 make_href(rr) 回调注入：Local 把 run 树内 file:// 产物相对化，其余情形 href 等于 ref；S3 版 href 恒等于 ref。
@@ -46,7 +46,7 @@ def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], 
         return {
             "scope_id": scope_id,
             "scenario_id": scenario_id,
-            "step_index": step_index,  # 为 None 即 scope/scenario 级；非 None 即 step 级（同 scenario 多 trajectory 区分）
+            "step_index": step_index,  # 为 None 即 scope/scenario 级；非 None 即 step 级（同 scenario 多条 step 级产物靠它区分）
             "engine": engine,
             "kind": rr.kind,
             "href": make_href(rr),    # 导航用链接（Local 相对化；S3 恒等于 ref）；原始 ref 不进 manifest
@@ -54,13 +54,13 @@ def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], 
         }
 
     for jr in result.jobs:
-        for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary）
+        for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary / 设备 device_session）
             entries.append(_entry(jr.scope_id, None, None, jr.engine, rr))
         for sr in jr.scenarios:
             for rr in sr.report_refs:  # scenario 级（当前引擎均不填，留作扩展）
                 entries.append(_entry(jr.scope_id, sr.scenario_id, None, jr.engine, rr))
             for st in sr.steps:
-                for rr in st.report_refs:  # step 级（Nova trajectory 下沉）
+                for rr in st.report_refs:  # step 级（Nova trajectory 与两引擎的 evidence）
                     entries.append(_entry(jr.scope_id, sr.scenario_id, st.index, jr.engine, rr))
     return entries
 
@@ -350,7 +350,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     for seq, e in enumerate(manifest["report_index"]):
         anchor = e.get("label") or e["kind"]
         scen = f" · {esc(e['scenario_id'])}" if e.get("scenario_id") else ""
-        # step 级 trajectory：拼 step[N]，否则同 scenario 多 trajectory 在导航里无法区分
+        # step 级产物：拼 step[N]，否则同 scenario 多条 step 级产物在导航里无法区分
         step = f" · step[{e['step_index']}]" if e.get("step_index") is not None else ""
         # ↑ 回链：跳到判定明细树里该产物所属的节点（scope/scenario/step 级各自的锚点）
         node = _node_anchor(e["scope_id"], e.get("scenario_id"), e.get("step_index"))

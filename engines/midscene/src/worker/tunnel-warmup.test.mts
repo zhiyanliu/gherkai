@@ -12,9 +12,8 @@ import * as W from "../lib/tunnel-warmup.mjs";
 const FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/tunnel-warmup.json");
 const WARMUP_URL = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a".repeat(32);
 
-test("边缘契约常量与跨语言 fixture 一致（runtime、Nova、Midscene 三方同值）", () => {
+test("worker 持有的预热常量与跨语言 fixture 一致（标题、正文标记、env 名、能力键与四句消息）", () => {
   const fx = JSON.parse(fs.readFileSync(FIXTURE, "utf8"));
-  assert.deepEqual([W.WARMUP_PATH, W.CHECK_PATH, W.TOKEN_PARAM, W.COOKIE_NAME], [fx.warmup_path, fx.check_path, fx.token_param, fx.cookie_name]);
   assert.deepEqual({ ...W.WARMUP_TITLES }, fx.titles);
   assert.deepEqual({ ...W.WARMUP_MARKERS }, fx.markers);
   assert.deepEqual([W.SESSION_WARMUP_URL_ENV, W.EXTRA_HTTP_HEADERS_ENV, W.SESSION_WARMUP_KEY], [fx.env.warmup_url, fx.env.extra_http_headers, fx.capability_key]);

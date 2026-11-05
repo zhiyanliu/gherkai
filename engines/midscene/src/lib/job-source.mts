@@ -12,7 +12,7 @@
 // **无「回落调试」分支**：stdin 本就是手动直接运行的入口，subprocess 态即调试态。
 import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 
-// core 发来的 job 行（ADR 0024 输入形状与「job 行的结构版本与固定键集」；0048 决策 3 的目标与设备请求）。键集固定、无值为 null。
+// core 发来的 job 行（ADR 0024 输入形状与「协议版本与 job 行的固定键集」；0048 决策 3 的目标与设备请求）。键集固定、无值为 null。
 // 字段清单 JOB_KEYS 由 job-source.test.mts 与 engines/fixtures/job-lines.json（Python 侧 job_to_json 的 golden）对照：任一侧加字段而
 // 另一侧没跟，测试就会变红。
 /** 本 worker 认的 worker↔core 协议版本（ADR 0024）：一个数、两个方向各带——能力自述写进 schema_version、job 行核 schemaVersion；与 core 的
@@ -29,7 +29,7 @@ export interface Job {
   engine: string;
   scenarios: unknown[];
   assertionVotes: number;
-  timeoutS: number | null;      // 只供建会话前自检（ADR 0051 决策 2），不计时；不超时为 null
+  timeoutS: number | null;      // job 墙钟预算（秒），只在两处读：建会话前与目标的 max_session_s 比较作自检（ADR 0051 决策 2），以及桌面实现据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；worker 不据此计时、不自停；不超时为 null
   target: JobTargetShape;       // 桌面也写 desktop/web（ADR 0048 决策 3）
   deviceRequest: JobDeviceRequest | null;
 }

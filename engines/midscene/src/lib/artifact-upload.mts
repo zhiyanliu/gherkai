@@ -90,7 +90,7 @@ export class ArtifactUploader {
     const runDir = runRoot ? path.dirname(path.resolve(runRoot)) : undefined;
     if (bucket !== undefined && runDir === undefined) {
       // fail-loud（对称 Nova artifact_upload.py）：注入了桶却没给 MIDSCENE_RUN_DIR 即组合根配置矛盾，
-      // 静默 no-op 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033「只注①不注②等于没上传」）。
+      // 静默 no-op 会让产物报 file:// 且随容器盘销毁必丢（ADR 0033「产物上传要注入两组 env、缺一不可」）。
       throw new Error(
         "产物上传：已注入 ARTIFACT_S3_BUCKET 但缺 MIDSCENE_RUN_DIR，算不出产物落点、无法上传"
         + "（起 worker 的一方须同时注入两者，否则产物随容器盘销毁）");
@@ -160,7 +160,7 @@ export class ArtifactUploader {
 
   // reportRef 文件 → 实时上传（不删、记 uploaded）、报 s3://；no-op 时报 file://。
   // 失败原样抛（worker 记 engine_error、可观测）——报告链接强保证，不吞。
-  // ref 一律经 refFor 算（单一事实源：两个方法的 ref 逐字一致是 ADR 0042 决策一「先算 URI 后传字节」的前提）。
+  // ref 一律经 refFor 算（单一事实源：两个方法的 ref 逐字一致是 ADR 0042 决策一「上传时机分两类」（URI 先算、字节后传）的前提）。
   async toReportRef(localPath: string): Promise<string> {
     if (!this.enabled) return this.refFor(localPath);
     const abs = path.resolve(localPath);

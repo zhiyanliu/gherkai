@@ -1,6 +1,6 @@
 // Planning 候选探针：验证一个纯文本推理模型能否做 Midscene 的 planning 角色。
 // 两关：(a) chat-completions 在本账号 200；(b) 容忍 image_url 部件——
-//   因为 Midscene 的 planner 即便不做定位也会无条件附带截图（调查 P1 挖出的真未知）。
+//   因为 Midscene 的 planner 即便不做定位也会无条件附带截图（逐行核查 Midscene 源码后确认，见 ADR 0012「为什么不是"用一个强推理纯文本模型做 planner"」节第 1 条）。
 // 复用已验证的 SigV4 自签（service "bedrock"，与 grounding 同源）。
 // 运行：cd engines/midscene && AWS_REGION=us-east-1 node_modules/.bin/tsx spikes/04-planning-probe.ts
 import OpenAI from "openai";

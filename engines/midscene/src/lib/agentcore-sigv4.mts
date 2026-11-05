@@ -5,7 +5,7 @@
 // 两套签名 service code 不同（ADR 0008 决定第一条已写明两套场景独立、不可互用）：
 //   - 模型连接 → service "bedrock"           （Bedrock /openai/v1 chat-completions）
 //   - 浏览器连接（CDP）→ service "bedrock-agentcore"  （AgentCore CDP WebSocket upgrade）
-// 签名契约与失败模式的机理解读见 repo 里的 docs/internals/midscene-bedrock-sigv4-signing.md（不随包发行），决策见 docs/adr/0008。
+// 模型连接一侧的签名契约与失败模式的机理解读见 repo 里的 docs/internals/midscene-bedrock-sigv4-signing.md（不随包发行）；CDP upgrade 一侧的签名要点（GET、无请求体、只签 host）与两套场景的决策见 docs/adr/0008 决定第一条。
 import { SignatureV4 } from "@aws-sdk/signature-v4";
 import { HttpRequest } from "@aws-sdk/protocol-http";
 import { Sha256 } from "@aws-crypto/sha256-js";
@@ -61,7 +61,7 @@ export function modelFamily(modelId: string = MODEL): string {
   }
   throw new Error(
     `Midscene worker: 模型 ${modelId} 不在已知家族里——无法确定该按哪种模型去驱动浏览器。`
-    + `请设 MIDSCENE_MODEL_FAMILY 指明它属于哪个家族（可取值见 Midscene 文档 https://midscenejs.com/model-common-config.html），`
+    + `请设 MIDSCENE_MODEL_FAMILY 指明它属于哪个家族（可取值见 Midscene 文档 https://midscenejs.com/model-api-setup），`
     + `或把 MIDSCENE_MODEL_ID 换回已支持的模型。`
   );
 }
@@ -84,8 +84,9 @@ function modelSigner_(): SignatureV4 {
 
 /** Bedrock OpenAI 兼容层的方言适配（ADR 0044 决策 3 / ADR 0008）：去掉 `image_url.detail: "original"`。
  *  OpenAI 原生认这个取值，Bedrock 对任何模型都 400「Invalid 'content': value did not match any expected variant」；
- *  Midscene 的 gpt-5 / gpt-6 family 适配器对定位请求固定发它、无配置可关。只删这一个字段、其余原样；非 JSON /
- *  无 messages 的体原样返回。**必须在签名之前改**（SigV4 含 payload hash，签完再改即 403）。导出供单测。 */
+ *  Midscene 的 gpt-5 / gpt-6 family 适配器对定位请求与兼任定位的规划请求（未设独立定位模型且不是 deepThink）固定发它、
+ *  无配置可关。只删这一个字段、其余原样；非 JSON / 无 messages 的体原样返回。
+ *  **必须在签名之前改**（SigV4 含 payload hash，签完再改即 403）。导出供单测。 */
 export function bedrockCompatBody(body: string): string {
   let parsed: unknown;
   try { parsed = JSON.parse(body); } catch { return body; }

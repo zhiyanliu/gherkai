@@ -1,5 +1,5 @@
 {
-  "_comment": "凭据脱敏三条规则的用例（ADR 0035 决策 5、0051 决策 11）。消费者：core/tests/test_redact.py、engines/novaact/tests/test_redact.py、engines/midscene/src/worker/redact.test.mts，三份实现读同一个文件、逐条相等。每项 [输入, 期望]。",
+  "_comment": "凭据脱敏三条规则的用例（ADR 0035 决策 5、0051 决策 11）。消费者：core/tests/test_redact.py、engines/novaact/tests/test_redact.py、engines/midscene/src/worker/redact.test.mts，三份实现读同一个文件、逐条相等；另有 engines/midscene/src/device/wdio-log.test.mts 逐条核对 WebdriverIO 日志掩码与规则二、三盖住的范围相同，engines/midscene/src/worker/evidence.test.mts 与 engines/novaact/tests/test_stderr_redaction.py 取输入与期望不同的条目，核对 stderr 出口写出前已脱敏。每项 [输入, 期望]。",
   "cases": [
     [
       "https://u1:p1@h.example/login",

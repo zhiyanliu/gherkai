@@ -278,10 +278,10 @@ export const LONG_PRESS_DEFAULT_MS = 800;
 export const SCROLL_TO_EDGE_GESTURES = 5;
 
 const EDGE_SCROLLS: Readonly<Record<string, ScrollDirection>> = {
-  scrollToBottom: "down", untilBottom: "down",
-  scrollToTop: "up", untilTop: "up",
-  scrollToRight: "right", untilRight: "right",
-  scrollToLeft: "left", untilLeft: "left",
+  scrollToBottom: "down",
+  scrollToTop: "up",
+  scrollToRight: "right",
+  scrollToLeft: "left",
 };
 const SCROLL_DIRECTIONS: readonly string[] = ["up", "down", "left", "right"];
 
@@ -535,7 +535,7 @@ export class AppiumInterface extends AbstractInterface {
       for (let i = 0; i < SCROLL_TO_EDGE_GESTURES; i++) await this.adapter.scroll(this.ctx, { direction: edge, distance, screen });
       return;
     }
-    if (type !== "singleAction" && type !== "once") throw new Error(`不支持的滚动方式：${JSON.stringify(type)}`);
+    if (type !== "singleAction") throw new Error(`不支持的滚动方式：${JSON.stringify(type)}`);
     const direction = param.direction ?? "down";
     if (!SCROLL_DIRECTIONS.includes(direction)) throw new Error(`不支持的滚动方向：${JSON.stringify(direction)}`);
     const distance = typeof param.distance === "number" && param.distance > 0 ? param.distance : null;

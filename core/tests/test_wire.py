@@ -49,7 +49,7 @@ def test_job_to_json_shape():
 
 
 def test_job_to_json_key_set_is_fixed_and_carries_schema_version():
-    """协议（ADR 0024「job 行的结构版本与固定键集」、0048 决策 3）：键集与 job 形态无关、恒为八键；无值写 null；schemaVersion 恒为 1。"""
+    """协议（ADR 0024「协议版本与 job 行的固定键集」、0048 决策 3）：键集与 job 形态无关、恒为八键；无值写 null；schemaVersion 恒为 1。"""
     from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION
 
     fixed = {"schemaVersion", "scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
@@ -204,11 +204,36 @@ def test_event_step_skipped():
 
 
 def test_event_step_done_parse_unaffected_by_step_skipped():
-    # 回归护栏：step_skipped 分支是加法——step_done 的三态解析（Status(d["status"])）不受影响。
+    # 回归护栏：step_skipped 分支是加法——step_done 的三态解析不受影响。
     ev = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": "error",
                           "errorType": "network_error"})
     assert isinstance(ev, StepDone)
     assert ev.status == Status.ERROR
+
+
+def test_step_and_scenario_done_decode_each_wire_status():
+    """step_done 与 scenario_done 的三态照常解码（ADR 0024「status 三态」、0031 决定四）。"""
+    for raw, expected in (("passed", Status.PASSED), ("failed", Status.FAILED), ("error", Status.ERROR)):
+        step = event_from_json({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": raw})
+        assert isinstance(step, StepDone) and step.status is expected
+        sc = event_from_json({"type": "scenario_done", "scenarioId": "s:0", "status": raw})
+        assert isinstance(sc, ScenarioDone) and sc.status is expected
+
+
+def test_step_and_scenario_done_reject_status_outside_wire_states():
+    """三态之外的取值按 worker 违约拒收：core 内态（skipped / aborted / pending / running）不经 wire，未知值与缺键同样拒收；
+    消息点明事件类型与收到的值。"""
+    import pytest
+
+    for bad in ("skipped", "aborted", "pending", "running", "bogus", "PASSED", None):
+        for ev in ({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0, "status": bad},
+                   {"type": "scenario_done", "scenarioId": "s:0", "status": bad}):
+            with pytest.raises(ValueError, match=rf"{ev['type']} 的 status 只允许.*收到 {bad!r}"):
+                event_from_json(ev)
+    for missing in ({"type": "step_done", "scenarioId": "s:0", "stepIndex": 0},
+                    {"type": "scenario_done", "scenarioId": "s:0"}):
+        with pytest.raises(ValueError, match=r"收到 None"):
+            event_from_json(missing)
 
 
 def test_event_scope_done():

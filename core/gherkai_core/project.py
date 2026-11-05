@@ -232,16 +232,23 @@ PLATFORM_FAILED_EXIT = 255
 class TaskExited:
     """平台侧退出观察者写入 events 表**独立键空间**的退出记录（ADR 0034 机制一/二）。
 
-    **不是 worker 的 wire 事件**（不在 model.Event union、不进 wire.py 的 worker↔core 协议）——它由
-    平台侧观察者产生：云端后端下是 ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode）；
-    本机后端下是 per-run 进程 `proc.wait()`。走独立键空间（云端后端下是保留高位数值 SK 加属性 `item_type='exit'`——
-    events 表 SK 是 NUMBER、字符串前缀结构上不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占
-    worker 的连续数值 seq 段，故不参与 adapter 的单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
+    **不是 worker 的 wire 事件**（不在 model.Event union、不进 wire.py 的 worker↔core 协议）——它
+    主要由平台侧退出观察者产生：云端后端下是 ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode），
+    本机后端下是 per-run 进程 `proc.wait()`，本机同步 `run` 由 `EventRecordingEngine` 代写；另有 tick 的 launch
+    失败补偿（哨兵码），以及推进器宿主在超时处置中的直接写入（本机接力者在观察链丢失时、云端 tick 在两个 task
+    列表都无踪时，带 timed_out；云端 tick 遇到已停止却无退出记录的 task 时，按观察者同一提取函数补写）。
+    走独立键空间（云端后端下是保留高位数值 SK 加属性 `item_type='exit'`——events 表 SK 是 NUMBER、字符串前缀结构上
+    不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占 worker 的连续数值 seq 段，故不参与 adapter 的
+    单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
 
     exit_code 为 None 表示退出码未知（有退出记录、却没取到码）。**不是宽限态**（ADR 0034 机制二「退出码缺失」条）：
-    观察者只有一次机会看到 STOPPED，缺码时它应落 `PLATFORM_FAILED_EXIT` 哨兵 + reason；仍写 None 的（老版本观察者/
-    未知写者）由 `_job_status` 判 ERROR，绝不判 RUNNING（否则 run 永久 wedge）。
-    reason：平台侧归因（云端后端下是 `stopCode: stoppedReason`），只在观察者落哨兵时带；投影进 job message 给使用方看。
+    观察者只有一次机会看到 STOPPED，缺码时它应落 `PLATFORM_FAILED_EXIT` 哨兵 + reason。None 还来自超时处置的
+    直接写入（带 timed_out，终结函数按超时判 ERROR）、per-run 进程的 `proc.wait()` 抛异常、同步 run 记录器停止后
+    未取到码，以及老版本观察者或未知写者；终结函数 `finalize_job` 对不带 timed_out 的 None 判 ERROR，绝不判 RUNNING
+    （否则 run 永久 wedge）。
+    reason：退出的归因，只在落 `PLATFORM_FAILED_EXIT` 哨兵时带，投影进 job message 给使用方看。两种来源：观察者缺退出码时
+    带平台侧归因（云端后端下是 `stopCode: stoppedReason`，云端 tick 按同一提取函数补写时也带）；tick 的 launch 失败补偿带
+    「起 worker 失败：异常文本」，措辞与同步路径一致。
     """
 
     scope_id: str
@@ -250,7 +257,7 @@ class TaskExited:
     # local 由 launcher 的 timer 标志传入；cloud 经 StopTask reason → STOPPED 事件 detail.stoppedReason
     # 哨兵串还原。终结函数据此取 stop_reason = timeout（内容完整的干净退出除外，见 finalize_job）。
     timed_out: bool = False
-    reason: str | None = None  # 平台侧归因（观察者落哨兵时带），见类 docstring
+    reason: str | None = None  # 退出归因（观察者落哨兵、tick 的 launch 失败补偿时带），见类 docstring
 
 
 @dataclass(frozen=True)
@@ -280,7 +287,7 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
 
     全量重放（非增量）→ 天然幂等、抗乱序、抗重投（ADR 0034 机制三前提）。步骤：
     1. 按 scope_id 分组 records；每组内 kind='event' 的按 seq 升序喂 reduce_event 归约出 JobResult；
-    2. 终结判定（机制二「终结函数与真值表」，单一真源是 `finalize_job`，`_job_status` 是它的薄委托，别在两处各写一份）：
+    2. 终结判定（机制二「终结函数与真值表」，单一真源是 `finalize_job`，别在两处各写一份）：
        有退出记录时进程终止本身即终态信号（stop_reason 为 timeout / abort 且内容不完整 → 对应终态；退出码非零或未知 → ERROR；
        exit==0 且见 scope_done → scope 级 error 或 scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR）；无退出记录时
        见 scope_started 或非 attempted 的 session_opened → RUNNING、否则 PENDING（只有 attempted 的 session_opened 仍为 PENDING）。
@@ -629,56 +636,6 @@ def run_device_metering(job_results: list[JobResult]) -> dict:
             "device_observed_missing": sum(jr.device_observed_missing or 0 for jr in dev)}
 
 
-def _job_status(
-    saw_scope_started: bool,
-    saw_scope_done: bool,
-    exited: TaskExited | None,
-    scenario_status: dict[str, Status],
-    *,
-    saw_session_opened: bool = False,
-    scope_done_status: Status | None = None,
-    sessions: list[SessionRecord] | None = None,
-) -> Status:
-    """单个 job 的态——终结函数（`finalize_job`，ADR 0034 机制二真值表）的薄委托，只取 status；保留此名供既有引用与测试。
-
-    下面的 docstring 记录的是「两件都要」谓词的来历与各分支的理由，判定逻辑本身在 finalize_job 一处。
-
-    「两件都要」的**内容完整（scope_done）要求只对声称成功（exit==0）的进程成立**——退出码非零时进程非干净
-    终止（崩溃/网络故障/SIGKILL），scope_done 本就不会来（worker 崩了没机会发），此时进程终止本身即终态信号，
-    不能再等 scope_done（否则 crash job 永远 RUNNING、reconciler 死循环——实际运行 crash worker 复现）。
-
-    **判定以「有无 task_exited」为一级键，不设 saw_scope_started 前置**（ADR 0034 机制二）——零事件 + exit==0
-    （构造期 SIGTERM 干净退出，0024 设计内）若短路成 PENDING，会与已 claim 的 RUNNING 基线单调合并成永停
-    RUNNING、run 永不收敛（对抗验证探针复现）：
-    - 有 task_exited（进程已终止，退出即终态信号，不论生命周期到哪）：
-        · exit_code != 0 → ERROR（崩溃/网络故障/SIGKILL/launch 失败哨兵；也防"发完 scope_done 又非0退出"
-          的误报 PASSED）；
-        · exit_code is None → ERROR（有退出记录却无码：不可判定为通过；机制二「退出码缺失」条——观察者本应落
-          哨兵，此分支是防 wedge 的防御。曾判 RUNNING「等观察者补」，但 STOPPED 事件只来一次、永远补不上）；
-        · exit_code == 0 且 saw_scope_done → scenario 归约的终态（passed/failed/error）；
-        · exit_code == 0 但没 scope_done（含零事件干净退出）→ ERROR（内容不完整但进程说成功，两者矛盾，
-          judged as error 比 running 死循环安全）。
-    - 无 task_exited（进程还没终止）：见过 scope_started 或非 attempted 的 session_opened → RUNNING；否则 PENDING（还没起/还没写事件，
-      或只有结果未知的创建尝试）。
-    """
-    probe_job = Job(scope_id="_", scope_name="_", engine="_", scenarios=())
-    scope_done = ScopeDone(scope_id="_", status=scope_done_status,
-                           error_type="engine_error" if scope_done_status == Status.ERROR else None,
-                           message=None) if saw_scope_done else None
-    return finalize_job(
-        job=probe_job,
-        stop_reason="timeout" if (exited is not None and exited.timed_out) else "none",
-        exited=exited is not None,
-        exit_code=exited.exit_code if exited is not None else None,
-        exit_reason=exited.reason if exited is not None else None,
-        saw_scope_started=saw_scope_started,
-        saw_session_opened=saw_session_opened,
-        scope_done=scope_done,
-        scenario_status=scenario_status,
-        sessions=sessions or [],
-    ).status
-
-
 def _lifecycle_rank(status: Status) -> int:
     """生命周期推进序（ADR 0034，仅用于 project 的单调合并、防态倒退）：pending < running < 任何终态。
 
@@ -701,8 +658,8 @@ def _aggregate(statuses: list[Status]) -> Status:
     否则有 running 判 running，否则（全部 pending）判 pending。全部 job 被中止或没有启动的 run 因此不会记成 passed，
     这一点在函数内成立，不依赖「fail-fast 产生的 skipped 必定伴随一个 error」这类调用方条件；无状态投影里还没有任何
     job 出判定的 run 得到前置态，不得到终态。
-    空输入仍判 passed，而且可达：不加筛选时，只含 Feature 头、没有 scenario 的 .feature 经 plan 得到零个 job，同步路径
-    以零个 job 结束、总状态 passed；无状态路径下零个 job 的 project，以及所有 job 都没有记录时的 project_full，也是空输入。
+    空输入仍判 passed，只作函数层兜底：CLI 入口对零 scenario 批（筛空或不加筛选）以退出码 2 拒绝（ADR 0041 决策一）；
+    无状态路径下仍可能遇到空输入：旧版本 CLI 提交的零个 job 的 run，以及所有 job 都没有记录时的 project_full（防御分支）。
     这里保留终态：无状态路径在没有 pending 与 running 时把本函数的值交给 finalize 写入，返回前置态会让零个 job 的 run
     永远停在非终态。
     scenario 级归约（finalize_job）只喂 worker 报的三态，且判定集为空的情形在那里另判 error，过滤与空判定集规则都不生效。

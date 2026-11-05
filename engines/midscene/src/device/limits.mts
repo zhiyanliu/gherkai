@@ -19,7 +19,7 @@ export const SESSION_CAP_S = 9000;
 export const FARGATE_STOP_TIMEOUT_CAP_S = 120;
 /** 设备目标的单次会话上限：会话硬上限减去停止宽限的硬上限，即 8880 秒。写进能力自述的 max_session_s，同时是
  *  worker 自检的阈值（墙钟预算超过它即 precheck_failed）与会话年龄后备的触发点（到点归 session_lost）。
- *  余量取停止宽限的硬上限、不取收尾各段之和：后者会随网络退化实测调整，且收尾挂住到硬上限时会话会越过 150 分钟
+ *  余量取停止宽限的硬上限、不取收尾各段之和：后者会随日后重新校准调整，且收尾挂住到硬上限时会话会越过 150 分钟
  *  （ADR 0049 决策 4 的被拒读法）。 */
 export const MAX_SESSION_S = SESSION_CAP_S - FARGATE_STOP_TIMEOUT_CAP_S;
 
@@ -34,7 +34,8 @@ export const STOP_CALL_TIMEOUT_MS = 3_000;
 export const FINALIZE_GET_TIMEOUT_MS = 5_000;
 
 // ---- 获取期（ADR 0051 决策 2、3、9；超时分层表 ③ ⑤）----
-// 获取预算本身不在这里：worker 只读 Job 设备请求里的 acquireTimeoutS，缺省的填入与上界的校验都在 core（ADR 0051 决策 2）。
+// 获取预算本身不在这里：worker 只读 Job 设备请求里的 acquireTimeoutS；缺省值与上界只在 core 持有一份，由 CLI 读项目配置时
+// 填入缺省、校验上界（ADR 0051 决策 2）。
 
 /** 设备解析首轮零候选时，间隔这么久再列举一次，仍为零即 precheck_failed。实施期校准、真机验收后可调。 */
 export const DEVICE_RELIST_DELAY_MS = 2_000;
@@ -126,7 +127,8 @@ export const PAGE_SOURCE_MAX_BYTES = 1024 * 1024;
 
 // ---- 收尾（ADR 0051 决策 5；超时分层表 ⑩）----
 // 终结的前三个阶段依次接续，各段截止线在本段开始时取定；中断路径上三段之和不超过进入终结后的 10 + 5 + 25 秒，事件写出不占
-// 这三段。各段上限以网络退化实测校准后定数（ADR 0049 决策 5）。
+// 这三段。各段上限按现有常量定数，没有在网络退化条件下校准（到 us-west-2 的丢包无法人工制造，见 ADR 0052「已知缺口」的
+// 释放阶段网络退化条）；推导见 ADR 0049 决策 5、ADR 0051 决策 5。
 
 /** 正常收尾、Appium 会话建成后的执行前失败与 scope 级终止（会话丢失、scenario 前核对终止）里 deleteSession 的预算：不重试，不阻塞 Stop；远程访问会话已是 STOPPING 或 COMPLETED 时不调。SIGTERM 与进程级异常路径不调。 */
 export const DELETE_SESSION_TIMEOUT_MS = 5_000;

@@ -40,8 +40,9 @@
 // 设备产物（原始控件树、device-session.json）落在 `<产物根>/device/<scope 键>/` 下：产物根按 run 共享，各 scope 分目录才不互相覆盖。
 //
 // 本模块静态 import 缺省装配，WebdriverIO 与 Device Farm SDK 因此在本模块的静态加载闭包里：镜像的设备依赖冒烟只 import 本模块
-// （engines/midscene/Dockerfile），这条闭包断了冒烟就照不出依赖缺失（护栏见 surface.test.mts）。各块与本模块互相 import，
-// 各块只在函数体内读本模块导出的消息常量，本模块也只在函数体内读 Appium 块导出的准备阶段会话丢失消息，两侧模块顶层都不读。
+// （engines/midscene/Dockerfile），这条闭包断了冒烟就照不出依赖缺失（护栏见 surface.test.mts）。各块（经 parts.mts 的缺省装配）
+// 与本模块互相 import：各块只在函数体内读本模块导出的消息常量，本模块只在构造时经 defaultDeviceParts 调用各块，两侧模块顶层都不读
+// 对方的导出。
 import path from "node:path";
 import fs from "node:fs";
 import type { Agent, AgentOpt } from "@midscene/core";
@@ -737,7 +738,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
 
   /** 进入终结的一律记为被停止信号中断（这个结果不会被使用，只进日志；中止信号会让部件把在途调用的失败报成会话丢失或到期，与抛出路径
    *  同一次序）。其余：预算到期时非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因；部件已确认的 session_lost
-   *  也保持——会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 2）。 */
+   *  也保持——会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 4 归因表「获取预算耗尽」行）。 */
   private budgetAware(termination: ScopeTermination, budget: Budget): ScopeTermination {
     if (this.finalizing) return this.interruptedTermination();
     if (termination.errorType === "precheck_failed" || termination.errorType === "session_lost") return termination;
@@ -755,8 +756,9 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     // 进入终结时预算被中止、在途调用随之失败：这个结果不会被使用（终结路径不发 scope_done），不另记日志、不再查状态；
     // 先于预算到期的判断——中止信号会让 expired() 为真，不区分就会记成 acquire_timeout。
     if (this.finalizing) return this.interruptedTermination();
-    // 会话丢失优先于预算到期（ADR 0051 决策 2）：异常已带会话丢失归类（各块自己的状态读取确认过）时，即使预算同时到期也记
-    // session_lost；没有确认丢失的到期记 acquire_timeout，且到期后不再另查状态（在途调用多半正是被预算信号中止的）。
+    // 会话丢失优先于预算到期（ADR 0051 决策 4 归因表「获取预算耗尽」行）：异常已带会话丢失归类（各块自己的状态读取确认过）时，
+    // 即使预算同时到期也记 session_lost；没有确认丢失的到期记 acquire_timeout，且到期后不再另查状态（在途调用多半正是被预算信号
+    // 中止的）。
     const lostBeforeStart: ScopeTermination = { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE };
     if (readClassification(e)?.errorType === "session_lost") return lostBeforeStart;
     if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };

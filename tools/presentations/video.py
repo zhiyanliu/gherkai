@@ -330,7 +330,6 @@ def refresh():
             "[0:v]format=yuv444p[a];[1:v]format=yuv444p[b];[a][b]ssim",
             "-frames:v", "1", "-an", "-f", "null", "-",
         ], args.stage / f"frame-{page['page']:02}.log")
-        import re
         score = float(re.findall(r"All:([0-9.]+)", result)[-1])
         assert score >= .98, (page["page"], score)
         return {"page": page["page"], "ssim": score}

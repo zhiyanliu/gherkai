@@ -7,7 +7,7 @@
 commit（CAS）**之前**从同一份 events 快照一次性落全部 job（ADR 0034 数据模型三件套表 / 0030 决定三「detached 路径同守」）——
 故 detached run 未达终态时本目录零文件，CLI 对提交者说的「判定明细尚未落地」即此（ADR 0042 决策四）。
 
-**克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_to_dict/from_dict），
+**克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_result_to_dict / job_result_from_dict），
 不发明 ADR 有意 defer 的数据面新字段。
 
 scope_id 是**不透明标识符**（可含 `/`:`空格/中文，ADR 0025）——落文件名时做**可逆 urlencode**

@@ -152,6 +152,9 @@ const REGISTRY: Entry[] = [];
 /** 校验并归一 keywords 声明：封闭集合、非空、不重复；缺省为全部三个关键字，按规范顺序排列（便于自述与跨语言对拍）。 */
 function normalizeKeywords(pattern: string, keywords: readonly Keyword[] | undefined): readonly Keyword[] {
   if (keywords === undefined) return KEYWORDS;
+  if (!Array.isArray(keywords)) {  // null 也走这里：显式空值不是缺省（与条目字段的封闭集合校验同一口径）
+    throw new Error(`deterministic(${JSON.stringify(pattern)}) 的 keywords 不是数组（null 也不行：缺省就不要给这个字段）`);
+  }
   if (keywords.length === 0) {
     throw new Error(`deterministic(${JSON.stringify(pattern)}) 的 keywords 不能为空：缺省（不传）即接受全部关键字`);
   }

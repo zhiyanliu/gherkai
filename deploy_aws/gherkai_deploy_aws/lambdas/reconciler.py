@@ -107,8 +107,9 @@ class EventBridgeTimeoutWatch:
     EventBridge Scheduler **one-time schedule**（at 取 now+timeout、ActionAfterCompletion=DELETE 到点自动删
     ——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
 
-    schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id)[:20]：确定性（重复 arm
-    幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符。
+    schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id) 的前 `names.JOB_TIMEOUT_DIGEST_LEN`
+    位：确定性（重复 arm 幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符
+    （前提是 prefix 不超过 `names.prefix_max_len()`，由 stack 合成期校验保证）。
     名字空间前缀走命名真源 `gherkai_runtime.names`——IaC 的 IAM 资源域同源推导（ADR 0033「两层命名」，两侧硬契约）。
     best-effort：调用方（CloudLauncher）兜异常。
     """
@@ -123,7 +124,7 @@ class EventBridgeTimeoutWatch:
         import hashlib
         from gherkai_runtime import names
 
-        digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:20]
+        digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:names.JOB_TIMEOUT_DIGEST_LEN]
         return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
 
     def arm(self, run_id: str, scope_id: str, timeout_s: float) -> None:
@@ -369,7 +370,7 @@ def _build(run_id: str):
     }
     worker_task_defs = dict(meta.worker_task_defs)  # definition 里的显式 revision（ADR 0038 不变量）；缺值已在 _load_definition 标 error
     engines = compose.build_fargate_engines(
-        run_id=run_id, prefix=prefix, cluster=os.environ["CLUSTER"],
+        run_id=run_id, cluster=os.environ["CLUSTER"],
         events_table=os.environ["EVENTS_TABLE"], bucket=bucket, report_dir=report_dir,
         network_config=network, worker_task_defs=worker_task_defs, region=region,
         # 额外请求头从 definition 读回（ADR 0035：submit 落 META、此处重建 engine 时注入 RunTask env）
@@ -447,7 +448,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             # 瞬时 5xx 抛，而这一步在 finalize 的 commit point **之后**执行：commit 后的失败无人重试（ADR 0030
             # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，连坐同批其它
             # run 的事件（同下面超时兜底检查的隔离理由）。故整段隔离、失败按缺值走
-            # （ADR 0034 收尾节把 run 级墙钟划在「派生、失败隔离」那一侧）。
+            # （ADR 0034「端到端流程」cloud 第 ④ 步把 run 级墙钟划在「派生、失败隔离」那一侧）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
             except Exception:

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 可选的 git pre-commit：人类 contributor 的提交闸门（与 Claude Code 的 .claude/hooks/commit-gate.sh 同一份规则）。
 # 启用：git config core.hooksPath tools/git-hooks   （git hook 不随仓库分发，故 opt-in；CI 里的 uv run pytest 仍是兜底）
-# 做什么：对暂存区里的文件全扫 tools/doc_rules_check.py --staged，命中即拒绝提交并列出命中行。
+# 做什么：按暂存区里将要提交的版本整份扫 tools/doc_rules_check.py --staged（不读工作区），命中即拒绝提交并列出命中行。
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 0
 export PATH="$PATH:$HOME/.local/bin"

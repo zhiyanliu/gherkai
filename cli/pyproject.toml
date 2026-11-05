@@ -2,7 +2,7 @@
 name = "gherkai"
 # version 与依赖均动态：`gherkai-runtime[aws]=={{ version }}` 由 metadata hook 在 build 时渲染（ADR 0037 决策 2b）。
 dynamic = ["version", "dependencies", "optional-dependencies"]
-description = "gherkai 命令行：用 Gherkin .feature 驱动 AI 浏览器测试（Nova Act / Midscene），本机或 AWS 云端执行"
+description = "gherkai 命令行：用 Gherkin .feature 驱动 AI 端到端 UI 测试，在云端浏览器（Nova Act 或 Midscene 引擎）或 AWS Device Farm 的 Android / iOS 真机（Midscene 引擎）上执行，可在本机运行或提交到 AWS 云端后端"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]

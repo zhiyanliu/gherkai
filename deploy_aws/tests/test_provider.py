@@ -386,11 +386,58 @@ def test_context_prefix_follows_the_runtime_resolution_chain(monkeypatch):
     assert _ctx("--vpc", "new", "--prefix", "prod-")["prefix"] == "prod-"
 
 
-def test_version_falls_back_to_installed_dist_version():
-    """CLI 前端没交版本 → 本包自报 dist 版本（`==` 同版本 pin 成同一个，不引入第二个真源）。"""
+CLI_VERSION_VERBS = ("deploy", "diff", "destroy", "synth", "push-worker", "list-workers")
+
+
+def _cli_version_verb_call(verb: str):
+    """按动作取 Provider 方法与 args：合成 stack 的四个动作给齐 `--vpc`，worker 镜像子命令给齐必填参数。"""
+    if verb == "deploy":
+        return Provider().deploy, _parse("--vpc", "default", "--region", "us-east-1")
+    if verb == "push-worker":
+        return Provider().push_worker, _parse("push-worker", "acme:img", "--engine", "novaact", "--variant", "login",
+                                              "--region", "us-east-1")
+    if verb == "list-workers":
+        return Provider().list_workers, _parse("list-workers", "--region", "us-east-1")
+    return _verb_call(verb, "--vpc", "default", "--region", "us-east-1")
+
+
+@pytest.mark.parametrize("how", ("none", "absent"))
+@pytest.mark.parametrize("verb", CLI_VERSION_VERBS)
+def test_missing_cli_version_exits_2_without_cdk_or_aws(cdk, df, verb, how, monkeypatch, capsys):
+    """CLI 前端没交自身版本（未装成包时前端有意给 None，或别的前端根本不设这个属性）→ 以退出码 2 结束，不起 cdk、不建
+    AWS 句柄、不解析目标（ADR 0037 决策 6「版本戳」：provider 不自报；换成本包的版本，写进后端的就是另一个包的版本戳）。"""
+    aws_reads: list[str] = []
+
+    def _no_aws(**kw):
+        aws_reads.append("read")
+        raise AssertionError("缺 CLI 版本时不该读 AWS")  # 可能被宽 except 吞掉，故另立账
+
+    for factory in ("_make_cfn_client", "_make_ssm_client", "_make_hint_clients", "_make_sts_client"):
+        monkeypatch.setattr(provider_cli, factory, _no_aws)
+    # pytest.fail 抛的是 BaseException：解析目标那一口的宽 except 接不住，走到即失败
+    monkeypatch.setattr(Provider, "_resolve_target", staticmethod(lambda args: pytest.fail("缺 CLI 版本时不该解析目标")))
+
+    method, args = _cli_version_verb_call(verb)
+    if how == "none":
+        args.version = None
+    else:
+        del args.version
+    assert method(args) == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert "取不到 gherkai 自身的版本号" in err and "uv tool install" in err
+    assert "Traceback" not in err
+    assert cdk.calls == [] and cdk.worker_steps == []
+    assert aws_reads == []
+    assert df.reads == [] and df.resolves == []
+
+
+def test_resolve_version_is_a_contract_guard_without_fallback():
+    """`_resolve_version` 不回落到本包的发行版本：调用点已先检查，走到这里还缺值是 code 误用、直接抛。"""
     args = _parse("--vpc", "new")
-    del args.version
-    assert Provider().build_context(args, device_farm_project=None)["version"]  # 非空即可（dev 版形如 1.3.0.postN.devM+sha.dirty）
+    assert Provider._resolve_version(args) == VERSION
+    args.version = None
+    with pytest.raises(ValueError):
+        Provider._resolve_version(args)
 
 
 def test_context_carries_the_resolved_project_arn_verbatim_and_pending_otherwise():
@@ -1268,6 +1315,37 @@ def test_missing_cdk_stops_deploy_before_any_aws_read(df, monkeypatch, capsys):
     assert ran.calls == []   # 一个子进程都没起
     assert aws_reads == []   # 一次 AWS 句柄都没建
     assert df.reads == [] and df.resolves == []  # 也没碰 Device Farm
+
+
+@pytest.mark.parametrize("verb", READ_ONLY_VERBS)
+def test_missing_node_stops_read_only_verbs_before_the_vpc_hint_reads_aws(df, verb, monkeypatch, capsys):
+    """node 缺失且漏给 `--vpc`：diff / destroy / --synth-only 与 deploy 同序，先报工具链、以退出码 2 结束。
+
+    「缺 --vpc」的提示要读后端（DescribeStacks、GetParameter）补上次的取值；工具链闸若排在它后面，缺 node 的人要先等
+    几秒网络、补上 `--vpc` 之后才看到「找不到 node」（ADR 0037 决策 6：工具链闸排在任何 AWS 读之前）。
+    """
+    monkeypatch.setattr(provider_cli.shutil, "which", lambda name: None)
+    ran = _Recorder()
+    monkeypatch.setattr(provider_cli.subprocess, "run", ran)
+
+    aws_reads: list[str] = []
+
+    def _no_aws(**kw):
+        aws_reads.append("read")
+        raise AssertionError("工具链前置不该先读 AWS")  # 会被提示那一层的宽 except 吞掉，故另立账
+
+    monkeypatch.setattr(provider_cli, "_make_cfn_client", _no_aws)
+    monkeypatch.setattr(provider_cli, "_make_ssm_client", _no_aws)
+    monkeypatch.setattr(provider_cli, "_make_hint_clients", _no_aws)
+
+    method, args = _verb_call(verb, "--region", "us-east-1")
+    assert args.vpc is None
+    assert method(args) == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert "找不到 node" in err and "缺 --vpc" not in err
+    assert ran.calls == []
+    assert aws_reads == []
+    assert df.reads == [] and df.resolves == []
 
 
 def test_node_too_old_is_rejected(monkeypatch, capsys):

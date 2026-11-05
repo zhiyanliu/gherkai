@@ -1,7 +1,8 @@
 // 隧道会话预热（ADR 0051 决策 13）：worker 在第一个 scenario 之前对预热地址导航一次换到会话 cookie，并按页面的可见结果归因。
 //
-// 常量与组合根（runtime/gherkai_runtime/tunnel.py）、Nova worker（lib/constants.py）同值，由 engines/fixtures/tunnel-warmup.json 对拍；
-// worker 只读预热地址、不感知令牌与 cookie 的值。
+// 本模块只持 worker 自己消费的常量，其中页面标题、正文标记、env 名、能力键与四句消息与组合根（runtime/gherkai_runtime/tunnel.py）、
+// Nova worker（lib/constants.py）中的对应常量同值，由 engines/fixtures/tunnel-warmup.json 对拍。边缘路径、令牌参数名与 cookie 名
+// 不在此持有：worker 只读预热地址、不感知令牌与 cookie 的值。
 //
 // 三种可见结果、三端同一条判据（桌面读响应状态与 document.title，设备在控件树里找正文标记）：
 // - READY：就绪；
@@ -15,10 +16,6 @@ import { redactSecrets } from "./redact.mjs";
 export const SESSION_WARMUP_URL_ENV = "GHERKAI_SESSION_WARMUP_URL";
 export const EXTRA_HTTP_HEADERS_ENV = "GHERKAI_EXTRA_HTTP_HEADERS";
 export const SESSION_WARMUP_KEY = "session_warmup";  // 能力自述里的布尔键（ADR 0049 决策 1）
-export const WARMUP_PATH = "/.well-known/gherkai-tunnel-auth";
-export const CHECK_PATH = "/.well-known/gherkai-tunnel-check";
-export const TOKEN_PARAM = "gherkai_tunnel_token";
-export const COOKIE_NAME = "__Host-gherkai_tunnel";
 export const WARMUP_TITLES = {
   ready: "gherkai-tunnel-ready", denied: "gherkai-tunnel-denied", error: "gherkai-tunnel-error", auth_required: "gherkai-tunnel-auth-required",
 } as const;

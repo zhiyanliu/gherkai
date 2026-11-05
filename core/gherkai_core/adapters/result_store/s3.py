@@ -8,8 +8,9 @@ import 本模块不崩、构造时才友好报错，守 [0016] 窄腰）。
 无需查询）；将来若需「跨 scope 查询/过滤」再加 DDB 索引层（加法不返工，[0016]）。
 
 **key 为 `<prefix><run_id>/jobs/<quote(scope_id, safe='')>.json`**：scope_id 是不透明标识（可含 `/`:空格/中文，
-[0025]），`quote(safe='')` 把 `/` 也编码成 `%2F`——否则 scope_id 里的 `/` 会在 S3 里造出假的子前缀、
-让 `load_all` 的 prefix 反解歧义。对拍 LocalResultStore 的可逆编码。`load_all` 用 list_objects prefix + unquote basename 还原。
+[0025]），`quote(safe='')` 把 `/` 也编码成 `%2F`——否则 scope_id 里的 `/` 会在 S3 里造出假的子前缀、key 不再是单段。
+对拍 LocalResultStore 的可逆编码。`load_all` 用 list_objects_v2 按前缀翻页列出、逐个读对象体经 serialize 还原
+（scope_id 取自对象内容、不从 key 反解）。
 
 body：`json.dumps(job_result_to_dict(jr))`（自包含，嵌完整 Job def，同 local）；serialize 是单一真理源。
 """

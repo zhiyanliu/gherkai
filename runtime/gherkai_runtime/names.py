@@ -22,6 +22,10 @@ BASE_EXIT_OBSERVER_LAMBDA = "exit-observer"
 # job timeout 到点触发器的 one-time schedule 基名（ADR 0034「job timeout」节）：推进器运行期建
 # `{prefix}job-timeout-{摘要}`、IaC 只给这一族名的 IAM 资源域——名字空间前缀见 job_timeout_schedule_prefix。
 BASE_JOB_TIMEOUT_SCHEDULE = "job-timeout"
+# job timeout schedule 名的长度构成：名字空间前缀之后接 run+scope 的 sha1 摘要前 JOB_TIMEOUT_DIGEST_LEN 位，整名受 EventBridge
+# Scheduler 的名称上限 SCHEDULE_NAME_MAX_LEN 约束（AWS API 规定）。由二者推出的 prefix 长度上限见 prefix_max_len。
+JOB_TIMEOUT_DIGEST_LEN = 20
+SCHEDULE_NAME_MAX_LEN = 64
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
@@ -88,6 +92,15 @@ def job_timeout_schedule_prefix(prefix: str) -> str:
     return f"{default_name(prefix, BASE_JOB_TIMEOUT_SCHEDULE)}-"
 
 
+def prefix_max_len() -> int:
+    """prefix 的长度上限：job timeout schedule 名（名字空间前缀加摘要）不得超过 SCHEDULE_NAME_MAX_LEN。
+
+    带 prefix 的资源名里这条约束最紧（其次是 IAM role `{prefix}timeout-scheduler` 的 64 字符上限）。上限由公式推出、不写死，
+    基名或摘要长度改动时随之变化。stack 在合成期据此校验 prefix（ADR 0033「两层命名」护栏）。
+    """
+    return SCHEDULE_NAME_MAX_LEN - len(job_timeout_schedule_prefix("")) - JOB_TIMEOUT_DIGEST_LEN
+
+
 def ssm_path(prefix: str, key: str) -> str:
     """`/{prefix}backend/<key>`：本部署**全部** SSM 参数的路径构造单点（网络 subnets/security-groups、
     version/vpc、device-farm-project、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
@@ -113,11 +126,6 @@ def _match_device_farm_project_arn(arn: str) -> re.Match[str]:
             f"现在是 {arn!r}"
         )
     return m
-
-
-def device_farm_project_id(project_arn: str) -> str:
-    """项目 ARN 里 `project:` 之后的项目 id（会话 ARN 以它为前缀段）。形态不对抛 `ValueError`。"""
-    return _match_device_farm_project_arn(project_arn).group("project_id")
 
 
 def device_farm_session_arn_prefix(project_arn: str) -> str:

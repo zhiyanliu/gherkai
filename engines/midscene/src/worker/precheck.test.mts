@@ -19,7 +19,7 @@ test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、
   assert.ok(msg !== null && msg.includes("没有带测试目标") && msg.includes("同一版本"));
 });
 
-test("job 行的结构版本先于目标核对（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝；本 worker 认的值与跨语言 golden 一致", () => {
+test("job 行的协议版本先于目标核对（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝；本 worker 认的值与跨语言 golden 一致", () => {
   assert.equal(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION }), null);
   assert.ok(precheckSchema({})!.includes("缺失"));
   assert.notEqual(precheckSchema({ schemaVersion: 1.5 }), null);  // 非整数不算 1

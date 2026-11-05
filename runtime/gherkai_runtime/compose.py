@@ -28,18 +28,50 @@ from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
 
 
-# Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一真值**，注入 worker 的 NOVA_ACT_TIMEOUT_S env
-# （worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：本机后端见 build_engines、云端后端见
-# build_fargate_engines、能力自述查询见 query_capabilities——**三处都注**，否则那条路上的 worker 落回自带字面量。
+# Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一取值点** `nova_act_timeout_s()`，注入 worker 的
+# NOVA_ACT_TIMEOUT_S env（worker run_scope.py 读它，缺省也是 120、此处显式注入使两端同源）：本机后端见 build_engines、
+# 云端后端见 build_fargate_engines、能力自述查询见 query_capabilities——**三处都注**，否则那条路上的 worker 落回自带字面量。
 # **grace 下限不在这里算**（ADR 0024「引擎自报下限」）：worker 按这同一个注入值 + 自己的 margin 自报下限
-# （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于本常量。env 可覆盖（实际运行标定/调优）。
-NOVA_ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [2,1800]
+# （见 engine_min_grace），故「worker 的单 act 上界」与「grace 下限」仍同源于这一个取值点。env 可覆盖（实际运行标定/调优）。
+# **惰性取值、不在 import 时求值**：CLI 顶层 import 本模块，import 期解析一个写错的值会让所有命令（含 `--version`、`plan`、
+# 只用 Midscene 的 run）都以 traceback 结束——库模块在 import 期只能抛异常、拿不到退出码 2。
+_NOVA_ACT_TIMEOUT_DEFAULT_S = 120
+_nova_act_timeout_cached: int | None = None
+
+
+def nova_act_timeout_s() -> int:
+    """Nova 单 act 时间上界（秒）：取环境变量 `NOVA_ACT_TIMEOUT_S`，未设置时为 120。
+
+    首次调用时解析并缓存：一个进程内注给 worker 的值与能力自述查询用的值是同一个（自述缓存据此不设失效，
+    见 `_CAPABILITIES_CACHE`）。值须是正整数；SDK 允许的范围 [2,1800] 交给 SDK 校验、不在此复制。
+    不合要求 → ValueError（消息是给使用方看的整句；坏值不进缓存，每次调用都抛），调用点按既有的
+    `(ValueError, RuntimeError)` 分支以退出码 2 结束；两个 builder 把它收成 Nova 引擎项的「一用即抛」占位项。
+    """
+    global _nova_act_timeout_cached
+    if _nova_act_timeout_cached is not None:
+        return _nova_act_timeout_cached
+    raw = os.environ.get("NOVA_ACT_TIMEOUT_S")
+    if raw is None:
+        value = _NOVA_ACT_TIMEOUT_DEFAULT_S
+    else:
+        try:
+            value = int(raw)
+        except ValueError:
+            value = None
+        if value is None or value <= 0:
+            raise ValueError(
+                f"环境变量 NOVA_ACT_TIMEOUT_S 须是正整数秒（单个 AI 操作的时间上界），当前值：{raw!r}。"
+                f"改成整数秒（如 120），或删掉它使用默认值 {_NOVA_ACT_TIMEOUT_DEFAULT_S}。"
+            )
+    _nova_act_timeout_cached = value
+    return value
 
 
 # ============================================================================
 # 两层命名（ADR 0033）：`--prefix`（默认 gherkai-）批量决定所有名字类资源的默认名；单资源 override 给完整终值。
 # **单一事实源**：CDK 部署吃同一 prefix → CDK 建的名与 cli 推导的默认名一致，不漂移。覆盖时 prefix 自然不参与
-# （覆盖即直接给完整名，不走「拼默认名」路径，无特判）。prefix 含分隔符、原样拼（使用方负责，防粘连——同 S3 prefix 先例）。
+# （覆盖即直接给完整名，不走「拼默认名」路径，无特判）。prefix 自带分隔符、按原样拼接（分隔符由使用方负责，不带分隔符的
+# prefix 会与基名粘连）；这与 S3 key 前缀的做法相反——那里由组合根 `_normalize_prefix` 补 `/`（ADR 0016「单 S3 桶」条）。
 # ============================================================================
 # 资源命名真源在 gherkai_runtime.names（零依赖，iac 与 Lambda 直接 import）；本模块一律经 _names 访问、**不设
 # re-export**：同一命名真源不该有两条 import 路径，包外消费者一律直接 import names。
@@ -50,7 +82,6 @@ from gherkai_runtime import names as _names  # noqa: E402
 # 键含 steps 目录是因为清单键随它变（下限不随，见 engine_min_grace）。**不设失效**：一个进程内 worker 二进制、
 # 注入的 NOVA_ACT_TIMEOUT_S 与那个目录的内容都不会变，而调用点按 job / 按引擎逐个问（run 里 N 个 job 同一引擎）。
 _CAPABILITIES_CACHE: dict[tuple[str, str | None], dict] = {}
-# 能力自述（`--capabilities`）的格式版本（ADR 0036「5.」）：两引擎 worker 各自报同一个数；只在键语义变时递增。
 from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION  # 协议版本一个数、两个方向各带（ADR 0024）：能力自述的 schema_version 核它
 
 
@@ -79,6 +110,8 @@ def new_run_id() -> str:
 
     对调用方不透明，只保证「可排序（时间戳前缀）+ 抗碰撞（随机尾）」。格式是 compose 实现细节、
     不入 ADR 契约。形如 20260629T141207Z-a3f9c1。
+    另保证不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id
+    依赖这一点（scope_id 是用户文本、可能含 `#`），改格式时不得引入 `#`。
     """
     ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{ts}-{secrets.token_hex(3)}"
@@ -361,8 +394,8 @@ def build_engines(
       相对 worker cwd 解析，相对路径会落错地方（与 Nova trajectory 早期踩的 cwd 歧义同源）。
 
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
-    **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析（flag > env > `./steps`）
-    在提交侧、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析 `./steps`**
+    **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析（flag > env > 配置文件 `steps-dir` >
+    `./steps`，ADR 0037 决策 4、ADR 0053 决策 2）在提交侧、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析 `./steps`**
     （三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None 表示无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
@@ -374,8 +407,8 @@ def build_engines(
     上传落点由 `build_fargate_engines` 注入（云端后端，ADR 0029）；`subprocess worker + 注入 S3 落点` 的
     内部预演由 `tools/e2e_harness.py` 自拼 env 承载（ADR 0016 决策 B），不经本函数。
 
-    region/profile（ADR 0016 决策 C）——组合根解析后的 AWS region（已由 `resolve_region` 落实成具体字符串：`--region` >
-    `AWS_REGION` > `AWS_DEFAULT_REGION` > profile config）与 profile（`--profile` > `AWS_PROFILE`）：非 None 时经 `_inject_aws`
+    region/profile（ADR 0016 决策 C）——组合根解析后的 AWS region 与 profile（解析链见 `resolve_aws_identity`；region 已由
+    `resolve_region` 落实成具体字符串）：非 None 时经 `_inject_aws`
     显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
     同源、消除分叉。None 表示不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Nova/Midscene 补建路径见下）。
@@ -430,14 +463,20 @@ def build_engines(
 
     nova_env = _env(nova_logs_dir, "NOVA_LOGS_DIR")
     midscene_env = _env(midscene_run_dir, "MIDSCENE_RUN_DIR")
-    # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根持 NOVA_ACT_TIMEOUT_S 单一真值，
-    # 显式注入给 worker（消除「worker 私有默认 120」与本常量两处独立 120 的漂移——worker 自报的 grace 下限
+    # Nova 的 act timeout **双端同源**（ADR 0024 grace 硬约束）：组合根经 `nova_act_timeout_s()` 单点取值，
+    # 显式注入给 worker（消除「worker 私有默认 120」与组合根默认值两处独立 120 的漂移——worker 自报的 grace 下限
     # 也是按注入值算的，见 engine_min_grace / query_capabilities）。
     # nova_env 为 None（调用方未给产物落点）时也要建一份注入——故补一份 scrub 后的继承 env（同 `_env` 的起手式）。
     if nova_env is None:
         nova_env = scrubbed_environ()
         _inject_aws(nova_env)  # 补建路径也须叠加 --region/--profile（Nova Workflow 的 nova-act client 读 AWS_REGION/凭证）
-    nova_env["NOVA_ACT_TIMEOUT_S"] = str(NOVA_ACT_TIMEOUT_S)
+    # 环境变量写错只让 Nova 引擎项变成一用即抛的占位项（同下面 _leg 的 per-engine 容错）：只用 Midscene 的 run 不连坐；
+    # 用到 Nova 的本机 run 在运行前检查的能力自述查询里就以退出码 2 结束（query_capabilities 同样取这个值）。
+    nova_bad_timeout: ValueError | None = None
+    try:
+        nova_env["NOVA_ACT_TIMEOUT_S"] = str(nova_act_timeout_s())
+    except ValueError as bad:
+        nova_bad_timeout = bad
     # Midscene 补建同理（对称，ADR 0016 决策 C）：midscene_env 为 None（未给落点、无共注 env）且 --region/--profile
     # 有值时也须建 env 注入——否则 midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain()
     # 消费凭证做 AgentCore/Bedrock 鉴权（真消费、非无害）。仅在有值时补建（无值则继承 os.environ 本就够、免无谓拷贝）。
@@ -450,6 +489,8 @@ def build_engines(
         # 引擎，故 miss 不连坐——装成一用即报错的空占位项（爆点挪到真 spawn 时，带安装指引）。
         # 「worker 必须是被直接 spawn 的那个进程」（fd3 经 pass_fds 继承，ADR 0024）是定位链的不变量，
         # 由各级供给方保证（见 resolve_worker_cmd 第 2 级注释）——本处只转发 cmd/cwd。
+        if engine == "novaact" and nova_bad_timeout is not None:
+            return _UnavailableEngine(nova_bad_timeout)
         try:
             wc = resolve_worker_cmd(engine)
         except WorkerNotFoundError as miss:
@@ -500,9 +541,12 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
         # Nova worker 接常开的 stdin 管子阻塞 >20s 不退）。
         proc = subprocess.run(cmd, cwd=wc.cwd, env=env, capture_output=True, timeout=timeout_s,
                               input=payload, stdin=subprocess.DEVNULL if payload is None else None)
-    except FileNotFoundError as e:
+    except OSError as e:
+        # 不止 FileNotFoundError：命令不可执行（PermissionError）、工作目录不是目录（NotADirectoryError）、脚本缺 shebang
+        # （Exec format error）同属 OSError。定位链第一级的 env 覆写可以指向任意路径，这几种都可达，一律收成 RuntimeError，
+        # 调用点按既有的 (ValueError, RuntimeError) 分支以退出码 2 结束、不冒 traceback。TimeoutExpired 不是 OSError，走下一支。
         raise RuntimeError(
-            f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行？"
+            f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行或工作目录不可用？"
         ) from e
     except subprocess.TimeoutExpired as e:
         raise RuntimeError(f"引擎 {engine} 的 {what}超时（{timeout_s:.0f}s）") from e
@@ -528,8 +572,8 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     `min_grace_s` 非负有限数、`deterministic_steps` 是数组、`model_id` 是非空字符串；**不合契约不写缓存**
     （一次坏自述不该被记成「这引擎就这样」）。身份位当场核的理由见下方注释。
     **Nova 查询也注入 `NOVA_ACT_TIMEOUT_S`**：它自报的下限是这个注入值 + worker 侧 margin，不注入则 worker 按
-    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见该常量注释；两个实际运行路径
-    build_engines / build_fargate_engines 注的是同一个值）。
+    自带缺省算——operator 调大单 act 上界后下限静默偏低，正是「两端同源」要挡的漂移（见 `nova_act_timeout_s` 上方注释；
+    两个实际运行路径 build_engines / build_fargate_engines 注的是同一个值）。
     steps_dir（ADR 0037 决策 4）：该入口同样加载 steps 目录，故 `deterministic_steps` 是内建脚手架 + 使用方定制、
     且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
     step」的情形（grace 下限与 step 无关，故 `engine_min_grace` 走这一种）。
@@ -540,13 +584,13 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     cached = _CAPABILITIES_CACHE.get(key)
     if cached is not None:
         return cached
-    extra_env = {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)} if engine == "novaact" else None
+    extra_env = {"NOVA_ACT_TIMEOUT_S": str(nova_act_timeout_s())} if engine == "novaact" else None  # 值不合要求 → ValueError
     caps = _ask_worker(engine, "--capabilities", what="能力自述", steps_dir=steps_dir,
                        timeout_s=timeout_s, extra_env=extra_env)
     if not isinstance(caps, dict):
         raise RuntimeError(f"引擎 {engine} 的能力自述输出不是 JSON 对象：{caps!r}")
     # 身份位当场核（**不是**将来才用的预留位）：定位链第一级是 env 覆写（GHERKAI_WORKER_*_CMD），指错引擎时不核
-    # 就静默拿另一引擎的自述（Nova 拿到 midscene 的 31s → grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀、
+    # 就静默拿另一引擎的自述（Nova 拿到 midscene 自报的下限（按当前常量 63.5s）→ grace < 单 act 上界 120s → SIGTERM 落 act 中途必被硬杀、
     # 会话泄漏），正是本机制要消除的「grace 默默不够」。schema_version 同理：认不出的格式版本按 fail-loud 处置、
     # 不猜键语义。
     if caps.get("engine") != engine:
@@ -575,8 +619,9 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
             f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
             "——worker 与命令行工具版本不一致？两者须同版本安装。"
         )
-    # 条目的 keywords 声明（ADR 0050 决策 1）：可缺键（旧 worker，视为接受全部关键字）；有键则须是封闭集合里不重复的
-    # 非空字符串数组（显式 null 也不合契约）。先核元素类型再去重：非字符串元素进 set() 会抛 TypeError，绕过这里的契约错误。
+    # 条目的 keywords 声明（ADR 0050 决策 1）：可缺键（自述契约的缺省：未声明即接受 Given / When / Then 全部，ADR 0036「2.」）；
+    # 有键则须是封闭集合里不重复的非空字符串数组（显式 null 也不合契约）。先核元素类型再去重：非字符串元素进 set() 会抛
+    # TypeError，绕过这里的契约错误。
     for entry in caps["deterministic_steps"]:
         if not isinstance(entry, dict):
             raise RuntimeError(
@@ -849,7 +894,7 @@ def build_local_event_log(report_dir: str | Path, run_id: str):
 def build_cloud_event_log(*, events_table: str, run_id: str, scope_ids: list[str],
                           region: str | None = None, profile: str | None = None, ddb_table=None):
     """云端后端读一个 run 的事件流：按 run 与 scope 列表点查 events 表（ADR 0042 决策七的 explain 补取用；只需 dynamodb:Query）。
-    boto3 惰性 import 在 _make_ddb_table 里；句柄可注入（测试与 Lambda 组合根复用）。"""
+    boto3 惰性 import 在 `_make_ddb_table` 钩子里，未给 `ddb_table` 时走它；句柄可注入（测试用）。"""
     from gherkai_core.adapters.event_log import DdbEventLog
     table = ddb_table if ddb_table is not None else _make_ddb_table(events_table, region=region, profile=profile)
     return DdbEventLog(table, run_id, list(scope_ids))
@@ -894,6 +939,8 @@ def resolve_region(explicit_region: str | None, profile: str | None, *, config_r
     catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
     依赖 boto3」不变量（否则纯 local + 无 region env 的使用方执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
     真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None，即 fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。
+    profile 名不存在时 boto3 在构造 Session 时就抛 `ProfileNotFound`（`BotoCoreError` 子类）：本函数原样上抛、不翻译，
+    由入口前端按 `is_botocore_error` 归口诊断并以退出码 2 结束（doctor 与 deploy 已有同样的处理）。
     """
     r = explicit_region or os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or config_region
     if r:
@@ -1115,7 +1162,8 @@ def _read_ssm_list(ssm, path: str) -> list[str]:
     """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读，ADR 0033）。
 
     **空值 fail-fast（低频加固，ADR 0033）**：正常路径 CDK 一定写非空（subnet 取自 `vpc.public_subnets or
-    private_subnets`、sg 写默认 SG id，均非空），故空值**几乎不可达**——只可能来自配置异常（参数被改空 / 值为空串）。
+    private_subnets`、sg 写本 stack 新建的 worker 安全组 `WorkerSg` 的 id，均非空），故空值**几乎不可达**——只可能
+    来自配置异常（参数被改空 / 值为空串）。
     但若不拦，空列表会一路传到 `awsvpcConfiguration` 的 subnets/securityGroups、拖到 **RunTask 才炸**且错误
     不直观（不像"SSM 参数空"那么明确）。故在此就地 fail-fast、点名是哪个 SSM 路径空了，把不可达但代价高的
     静默失败挡在源头（对齐本项目 preflight fail-fast 点名 prefix 的加固风格）。
@@ -1147,7 +1195,7 @@ def resolve_network(
 
 
 def build_fargate_engines(
-    *, run_id: str, prefix: str, cluster: str, events_table: str, bucket: str, report_dir: str,
+    *, run_id: str, cluster: str, events_table: str, bucket: str, report_dir: str,
     network_config: dict, worker_task_defs: Mapping[str, str],
     region: str | None = None, profile: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
@@ -1171,10 +1219,10 @@ def build_fargate_engines(
     - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
     - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
       具体字符串、经 RunTask overrides 注入 worker）。
-    - job-in 落点为 (bucket, `{prefix_key}<run_id>/jobs-in/`)——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、
-      load_all 枚举它；job-in 独立前缀避撞 key + 误读）。artifact 上传落点为 (bucket, `{prefix_key}<run_id>/`)——与
-      report 同前缀镜像 run 树。**artifact_s3 必注入**（云端后端唯一的上传落点注入点——local 的 `build_engines`
-      恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
+    - job-in 落点为 (bucket, `<前缀><run_id>/jobs-in/`)，前缀是 report_dir 规范化后的值（`_normalize_prefix(report_dir)`）
+      ——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、load_all 枚举它；job-in 独立前缀避撞 key + 误读）。
+      artifact 上传落点为 (bucket, `<前缀><run_id>/`)——与 report 同前缀镜像 run 树。**artifact_s3 必注入**
+      （云端后端唯一的上传落点注入点——local 的 `build_engines` 恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
     句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
     """
     from gherkai_core.adapters.fargate_engine import FargateEngine
@@ -1187,9 +1235,10 @@ def build_fargate_engines(
         ddb_events_table = _make_ddb_table(events_table, region=region, profile=profile)
 
     pfx = _normalize_prefix(report_dir)
-    # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json、
-    # 且 load_all 用 `list jobs/ + unquote basename` 枚举判定——job-in（输入）与 ResultStore（输出判定）scope_id 编码
-    # 相同、若共用 jobs/ 前缀会撞 key（互相覆盖）+ 被 load_all 误当判定读。故 job-in 独立前缀 jobs-in/。（实际运行暴露。）
+    # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json，
+    # load_all 列出 jobs/ 前缀下的全部对象、逐个当判定读。job-in（输入）与 ResultStore（输出判定）的 scope_id 编码
+    # 相同，若共用 jobs/ 前缀，两者会撞 key、互相覆盖，job-in 对象还会被 load_all 当判定读。故 job-in 用独立前缀
+    # jobs-in/。（实际运行暴露。）
     job_s3 = (bucket, f"{pfx}{run_id}/jobs-in/")
     # 产物上传落点（ADR 0029）：prefix 为 <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 report 同前缀镜像
     # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。
@@ -1215,9 +1264,17 @@ def build_fargate_engines(
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故云端后端必须显式注，
     # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 改不动容器内的单 act 上界，
     # ADR 0032 明写的手动覆盖项（「要更长 act 就调这个 env」）在云端静默失效、local/cloud 行为分叉。
-    engine_env = {"novaact": {"NOVA_ACT_TIMEOUT_S": str(NOVA_ACT_TIMEOUT_S)}}
+    # 值写错只让 Nova 引擎项变成一用即抛的占位项（同 build_engines）：不连坐 Midscene，也不让装配本身抛异常。
+    engine_env: dict[str, dict[str, str]] = {}
+    nova_bad_timeout: ValueError | None = None
+    try:
+        engine_env["novaact"] = {"NOVA_ACT_TIMEOUT_S": str(nova_act_timeout_s())}
+    except ValueError as bad:
+        nova_bad_timeout = bad
 
     def _engine(engine: str) -> Engine:
+        if engine == "novaact" and nova_bad_timeout is not None:
+            return _UnavailableEngine(nova_bad_timeout)
         revision_arn = worker_task_defs.get(engine)
         if revision_arn is None:
             # 本 run 没解析该引擎的 worker revision（正常态：没用到它）——空占位项，真去起才抛（见 _UnavailableEngine）。
@@ -1242,13 +1299,14 @@ def build_fargate_engines(
 
 # ============================================================================
 # 版本 skew（ADR 0037 决策 7）：CLI 版本 vs 后端 SSM 版本戳，三态齐全 + 非纯净版本跳过。
-# **住产品本体、不住入口前端**：Lambda 推进器 / WebUI 将来同样要比「自己 vs 后端」，判据与措辞单点维护、
+# **住产品本体、不住入口前端**：CLI 的 cloud 入口与 doctor、部署包的 push-worker / list-workers 都比「自己 vs 后端」，
+# 将来的 WebUI 复用同一处（推进器不读版本戳，只核 definition 的结构版本），判据与措辞单点维护、
 # 不在第二处复刻（同 names 抽包的理由）。比对是纯函数（不连 AWS）；读戳是下面 read_backend_version 的事。
 # ============================================================================
 
 SKEW_OK = "ok"        # release 段相同
-SKEW_WARN = "warn"    # CLI 旧于后端 / 后端无戳——警告不拦
-SKEW_BLOCK = "block"  # CLI 新于后端——调用点以退出码 2 结束，无放行口
+SKEW_WARN = "warn"    # CLI 旧于后端 / 后端无戳且本 run 不要求戳——警告不拦
+SKEW_BLOCK = "block"  # CLI 新于后端，或后端无戳而本 run 要求戳——调用点以退出码 2 结束，无放行口
 SKEW_SKIP = "skip"    # 任一侧非纯发行版（或自身版本取不到）——无从比较
 
 
@@ -1317,14 +1375,15 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None, *, requ
     后果不可知且静默；uvx 按版本临时运行同版本 CLI 零成本，放行口没有真实需求）。其余三种判定只打一行、不拦。
 
     判序——「无从比较」一律先于「比较结果」：
-    1. **戳缺失**（`ssm_version` 为 None/空）→ warn + 提示部署方运行一次 `gherkai deploy` 写入。**不可判成退出码 2**：
-       否则本机制之前部署的所有环境被 preflight 锁死（决策 7 明写要避免的后果）。
+    1. **戳缺失**（`ssm_version` 为 None/空）→ 默认 warn + 提示部署方运行一次 `gherkai deploy` 写入（**不可一律判成退出码 2**，
+       否则本机制之前部署的所有环境被 preflight 锁死，决策 7 明写要避免的后果）；**例外**：`requires_stamp=True`（本 run
+       带设备目标或会话预热地址，见 `run_requires_backend_stamp`）→ block、无放行口。
     2. **自身版本取不到**（`cli_version` 为 None：未装成包、从源码直接运行）→ skip。**`cli_version` 必给、不缺省成本包
        版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
        （按各自 git 状态算），缺省读 `gherkai-runtime` 版本会埋一个只在各包同版本的发行态下才等价的第二真源。
     3. **任一侧非纯发行版**（含 `.dev`/`.post`/本地段，或压根解析不了）→ skip：dev 版逐提交前进，逐字比较
-       会把每次都判成 skew（判据 `is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty=true`/`metadata=true`
-       保证「非纯净构建一定带 `+`」才可靠）。
+       会把每次都判成 skew（判据 `is_pure_release` 与定位链第四级共用——它靠 2b 的 `dirty = true` 加 metadata 默认行为
+       保证「非纯净构建一定带 `+`」才可靠；显式 `metadata = true` 是 2b 的被拒方案，会让干净 tag 也带 `+<sha>`）。
     4. **只比 release 段**（决策 7）：pre/post/dev/本地段不参与，故同 release 段的 rc 与正式版视作同版本。
        两侧位数不同（`1.4` vs `1.4.0`）时补零再比，避免元组字典序把 `1.4` 判成小于 `1.4.0`。
     """
@@ -1364,8 +1423,8 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None, *, requ
 
 def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, profile=None,
                        ssm=None, requires_stamp: bool = False) -> tuple[str, str, str | None]:
-    """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口前端**：CLI / WebUI /
-    推进器任何组合根要做「自己 vs 后端」比对都调这一处，判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
+    """读后端版本戳 + 判 skew 一步到位（ADR 0037 决策 7）——**编排住产品本体、不住入口前端**：CLI、部署包与将来的
+    WebUI 要做「自己 vs 后端」比对都调这一处（推进器不做这项比对），判据、措辞与「戳缺失→警告不拦」的分叉单点维护。
     **调用次序约定：先于 `preflight_cloud_resources`**——skew 的修复动作是部署方运行一次 `gherkai deploy`，那一步
     同时把资源建齐/补齐；先报「表不存在」只会把人引去查 `--prefix`、绕一圈回到同一个动作。
     读戳的异常（凭证/region/权限）原样抛，由调用方归到自己的退出码层（与 `read_backend_version` 一致）。
@@ -1422,6 +1481,15 @@ def _make_ecr_client(*, region, profile):
     return boto3.session.Session(profile_name=profile, region_name=region).client("ecr")
 
 
+def _aws_error_code(e: BaseException) -> str | None:
+    """botocore `ClientError` 的错误码（`e.response["Error"]["Code"]`）；不是 ClientError（含 `BotoCoreError`）或取不到 → None。
+
+    各读侧据它把「资源不在」与「凭证 / 权限 / 网络坏了」分开：前者翻成带指引的 miss，后者原样冒泡给入口前端。
+    """
+    err = getattr(e, "response", None)
+    return (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
+
+
 def _ssm_get(ssm, path: str) -> str | None:
     """读一个 SSM String 参数 → 值（strip 后空串视作缺失）；**`ParameterNotFound` → None，其余异常照抛**。
 
@@ -1432,9 +1500,7 @@ def _ssm_get(ssm, path: str) -> str | None:
     try:
         resp = ssm.get_parameter(Name=path)
     except Exception as e:
-        err = getattr(e, "response", None)
-        code = (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
-        if code == "ParameterNotFound":
+        if _aws_error_code(e) == "ParameterNotFound":
             return None
         raise
     return (resp["Parameter"]["Value"] or "").strip() or None
@@ -1523,6 +1589,10 @@ def resolve_worker_variant(
     `variant=None` → 取部署级默认指针（缺失即抛，提示运行 `gherkai deploy`）。tag 由 `names.image_tag`
     单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（从源码直接运行）时
     无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
+    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS `ClientException`（revision
+    不可 Describe）、ECR `ImageNotFoundException` / `RepositoryNotFoundException`。权限不足、限流、网络等其余 botocore 异常
+    原样抛，由入口前端按「凭证 / region / 权限」诊断——翻成 miss 会把缺只读权限（ADR 0038 提交者的 `ecr:DescribeImages` /
+    `ecs:DescribeTaskDefinition`）的提交者引去重推镜像、原地绕圈。
     句柄可注入（测试/复用同一 session）；未注入则惰性建。
     """
     if not cli_version:
@@ -1556,7 +1626,7 @@ def resolve_worker_variant(
         try:
             td = ecs.describe_task_definition(taskDefinition=revision_arn)
         except Exception as e:
-            if is_botocore_error(e):
+            if _aws_error_code(e) == "ClientException":  # ECS 对不存在 / 已删除的 revision 回这个码；其余错误原样抛
                 raise _miss(engine, f"task-def revision {revision_arn} 已不可 Describe（可能已被清理删除）") from e
             raise
         if (td.get("taskDefinition", {}).get("status") or "").upper() != "ACTIVE":
@@ -1565,7 +1635,7 @@ def resolve_worker_variant(
         try:
             resp = ecr.describe_images(repositoryName=repo, imageIds=[{"imageDigest": digest}])
         except Exception as e:
-            if is_botocore_error(e):
+            if _aws_error_code(e) in ("ImageNotFoundException", "RepositoryNotFoundException"):  # 只有镜像 / 仓库不在算 miss
                 raise _miss(engine, f"ECR 仓库 {repo} 里按 digest {digest} 找不到镜像") from e
             raise
         if not resp.get("imageDetails"):
@@ -1676,7 +1746,7 @@ def preflight_cloud_resources(
             try:
                 resp = lam.get_function(FunctionName=fn)  # 返回体已含 Configuration.Environment，无需二次调用
             except (ClientError, BotoCoreError):
-                return _hint(f"Lambda 函数 {fn}（无状态批量运行的事件驱动链）")
+                return _hint(f"Lambda 函数 {fn}（submit 提交到云端的后台运行依赖它）")
             if fn not in advancers:
                 continue
             env = (resp.get("Configuration", {}).get("Environment") or {}).get("Variables") or {}
@@ -1707,8 +1777,9 @@ def preflight_cloud_resources(
 def is_botocore_error(exc: BaseException) -> bool:
     """是否 botocore 异常（云端不可达/权限/凭证/region 等）——入口前端据此把云端故障归到自己的退出码层。
 
-    惰性 import botocore（cli 主依赖不含 boto3，顶层 import 会在纯 local 环境炸；且只在 cloud 路径才会调到
-    这里）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
+    惰性 import botocore（boto3 只在 gherkai-runtime 的 `[aws]` extra 里：CLI 发行包硬依赖 `gherkai-runtime[aws]`，
+    但库消费者可以不带该 extra 安装，顶层 import 会让这类纯 local 环境 import 失败；且只在 cloud 路径才会调到这里，
+    纯 local 路径绝不触发 import）。缺 botocore（不该发生，能走到 cloud 就装了 boto3）时保守返回 False。
     """
     try:
         from botocore.exceptions import BotoCoreError, ClientError

@@ -1,7 +1,7 @@
 """`push-worker` 八步 / `deploy` 三步 / 清理 pass / `list-workers` 测试（ADR 0038）。
 
 **证据边界**：AWS 侧全走 moto（SSM/ECS/ECR/DynamoDB），容器引擎走假替身 —— 验的是**编排**（步序、幂等查重、
-血缘 tags、退休与清理的两个前置条件、SSM 记录形状）。**mock 不出来的两类**另处交代：容器引擎的真实行为在
+血缘 tags、退休与清理的三个前置条件、SSM 记录形状）。**mock 不出来的两类**另处交代：容器引擎的真实行为在
 `test_container.py` 的真 docker 那三条；真 ECR push / RunTask 拉起注册出来的 revision 需要真账号，本机无凭证、
 **未验**（ADR 0038「实测项」6 的后半段仍挂着）。
 
@@ -80,6 +80,7 @@ def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1
                 "image": f"{REGISTRY}/{repo}:latest", "cpu": 0, "memory": 2048,
             }],
             requiresCompatibilities=["FARGATE"], networkMode="awsvpc", cpu=cpu, memory="2048",
+            # 与 BackendStack 合成出的模板 revision 取值相同（test_stack 的 RuntimePlatform 断言守那一侧）
             runtimePlatform={"cpuArchitecture": "X86_64", "operatingSystemFamily": "LINUX"},
         )
         arn = resp["taskDefinition"]["taskDefinitionArn"]
@@ -608,10 +609,18 @@ def test_cleanup_never_touches_the_template_revision(aws):
 
 
 class _StubEcs:
-    """最小 ECS 替身：**返回 `registeredAt`**（moto 不返回）——专供「孤儿满静默期后被回收」那一支。"""
+    """最小 ECS 替身：**返回 `registeredAt`**（moto 不返回）——专供「孤儿满静默期后被回收」那一支。
 
-    def __init__(self, arn: str, family: str, registered_at: datetime, tags: dict[str, str]):
+    `delete_failures` / `delete_error` 造出删除没完成的两种形态：批量 API 的逐项失败（放在响应的 `failures` 里、
+    不抛异常）与调用本身抛错；`deregister_error` 造出注销这一步就失败的形态。
+    """
+
+    def __init__(self, arn: str, family: str, registered_at: datetime, tags: dict[str, str], *,
+                 delete_failures: list[dict] | None = None, delete_error: Exception | None = None,
+                 deregister_error: Exception | None = None):
         self.arn, self.family, self.registered_at, self._tags = arn, family, registered_at, tags
+        self.delete_failures, self.delete_error = delete_failures or [], delete_error
+        self.deregister_error = deregister_error
         self.deregistered: list[str] = []
         self.deleted: list[str] = []
 
@@ -624,10 +633,17 @@ class _StubEcs:
                 "tags": [{"key": k, "value": v} for k, v in self._tags.items()]}
 
     def deregister_task_definition(self, **kw):
+        if self.deregister_error is not None:
+            raise self.deregister_error
         self.deregistered.append(kw["taskDefinition"])
 
     def delete_task_definitions(self, **kw):
+        if self.delete_error is not None:
+            raise self.delete_error
+        if self.delete_failures:
+            return {"taskDefinitions": [], "failures": self.delete_failures}
         self.deleted.extend(kw["taskDefinitions"])
+        return {"taskDefinitions": [{"taskDefinitionArn": a} for a in kw["taskDefinitions"]], "failures": []}
 
 
 def test_cleanup_deletes_an_old_orphan(aws):
@@ -640,6 +656,44 @@ def test_cleanup_deletes_an_old_orphan(aws):
     outcome = workers.cleanup_pass(prefix=PREFIX, engines=("novaact",), ssm=aws.ssm, ecs=stub,
                                    ddb=aws.ddb, now=NOW, out=lambda *a: None)
     assert outcome.deleted == (arn,) and stub.deregistered == [arn] and stub.deleted == [arn]
+
+
+def _old_orphan_stub(**kw) -> tuple[str, _StubEcs]:
+    family = names.task_def_name(PREFIX, "novaact")
+    arn = f"arn:aws:ecs:{REGION}:{ACCOUNT}:task-definition/{family}:99"
+    return arn, _StubEcs(arn, family, NOW - timedelta(hours=5),
+                         {names.TAG_VARIANT: "stray", names.TAG_DIGEST: "sha256:" + "8" * 64}, **kw)
+
+
+def test_cleanup_does_not_count_a_per_item_delete_failure_as_reclaimed(aws):
+    """`DeleteTaskDefinitions` 是批量 API：逐项失败放在响应的 `failures` 里、不抛异常——不读它就会把没删掉的也算成回收。"""
+    seed_backend(aws)
+    arn, stub = _old_orphan_stub(delete_failures=[{"arn": "arn:x", "reason": "INVALID", "detail": "busy"}])
+    outcome = workers.cleanup_pass(prefix=PREFIX, engines=("novaact",), ssm=aws.ssm, ecs=stub,
+                                   ddb=aws.ddb, now=NOW, out=lambda *a: None)
+    assert outcome.deleted == ()
+    assert outcome.kept == ((arn, "孤儿，已注销、删除未完成：INVALID（busy）"),), outcome
+
+
+def test_cleanup_reports_a_delete_error_after_deregister_as_not_retryable(aws):
+    """注销成功、删除抛错：revision 已是 INACTIVE，`scan_family` 只列 ACTIVE、以后再也扫不到——原因串不能写成会重试的样子。"""
+    seed_backend(aws)
+    arn, stub = _old_orphan_stub(delete_error=RuntimeError("Throttling"))
+    outcome = workers.cleanup_pass(prefix=PREFIX, engines=("novaact",), ssm=aws.ssm, ecs=stub,
+                                   ddb=aws.ddb, now=NOW, out=lambda *a: None)
+    assert outcome.deleted == () and stub.deregistered == [arn]
+    assert outcome.kept == ((arn, "孤儿，已注销、删除未完成：Throttling"),), outcome
+    assert "本次回收失败" not in outcome.kept[0][1]
+
+
+def test_cleanup_reports_a_deregister_error_as_retryable(aws):
+    """注销这一步就抛错：revision 仍是 ACTIVE，下次 pass 还会扫到它——原因串保留「本次回收失败」。"""
+    seed_backend(aws)
+    arn, stub = _old_orphan_stub(deregister_error=RuntimeError("Throttling"))
+    outcome = workers.cleanup_pass(prefix=PREFIX, engines=("novaact",), ssm=aws.ssm, ecs=stub,
+                                   ddb=aws.ddb, now=NOW, out=lambda *a: None)
+    assert outcome.deleted == () and stub.deregistered == [] and stub.deleted == []
+    assert outcome.kept == ((arn, "孤儿，本次回收失败：Throttling"),), outcome
 
 
 def test_push_worker_runs_a_cleanup_pass_at_the_end(aws):
@@ -779,9 +833,34 @@ def test_rederive_enumerates_ssm_once_and_reads_the_template_once_per_engine(aws
                                                         ("midscene", "login")}
     assert ssm_spy.calls.count("get_parameters_by_path") == 1, \
         f"全量枚举应只执行一次（两个引擎共用），实际 {ssm_spy.calls.count('get_parameters_by_path')} 次"
-    # 每引擎：取 repo URI 读模板一次 + 每个新 revision 从模板复制一次
-    assert ecs_counter.described.count(new_templates["novaact"]) == 3, ecs_counter.described
-    assert ecs_counter.described.count(new_templates["midscene"]) == 2, ecs_counter.described
+    # 每引擎：取 repo URI 读模板一次 + 找可复用孤儿时扫 family 一次（模板也在 family 里）+ 每个新 revision
+    # 从模板复制一次
+    assert ecs_counter.described.count(new_templates["novaact"]) == 4, ecs_counter.described
+    assert ecs_counter.described.count(new_templates["midscene"]) == 3, ecs_counter.described
+
+
+def test_rederive_reuses_an_orphan_left_by_an_interrupted_deploy(aws):
+    """上次 deploy 中断在「注册新 revision」与「写映射」之间：映射里仍是旧模板。重新运行时按血缘 tags 复用那个
+    孤儿（同 push-worker 步 5 的判据），不再注册一个（ADR 0038「不变量」的幂等条）。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "3" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    new_templates = seed_backend(aws, cpu="2048")
+    repo_uri = f"{REGISTRY}/{names.ecr_repo_name(PREFIX, 'novaact')}"
+    orphan = workers._register_revision(aws.ecs, template_arn=new_templates["novaact"], engine="novaact",
+                                        image_ref=f"{repo_uri}@{before['digest']}", digest=before["digest"],
+                                        variant="login", version=VERSION)   # 注册了、映射没写
+    revisions = _revisions(aws, "novaact")
+
+    out, text = _out()
+    results = workers.rederive_variants(prefix=PREFIX, engines=("novaact",), version=VERSION,
+                                        aws=aws, now=NOW, out=out)
+    after = _mapping(aws, "novaact", "login")
+    assert [r.revision_arn for r in results] == [orphan]
+    assert after["revision_arn"] == orphan and after["template_arn"] == new_templates["novaact"]
+    assert _revisions(aws, "novaact") == revisions, "孤儿应被复用，不该再注册"
+    assert _tags(aws, before["revision_arn"])[names.TAG_RETIRED_AT] == NOW.isoformat()
+    assert "直接复用" in text()
 
 
 def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
