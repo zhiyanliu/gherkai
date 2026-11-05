@@ -1449,6 +1449,41 @@ def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
     assert h.stopped and h.stop_graces and all(g > 0 for g in h.stop_graces)
 
 
+def test_user_interrupt_with_passed_and_aborted_marks_run_aborted():
+    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由 schedule 的中断例外记 aborted
+    （ADR 0031 决定三的例外）。这条例外只在同步路径上有：无状态路径不作中止决定，推不出 job 级 aborted。"""
+    from gherkai_core.schedule import _aggregate
+
+    a_started, b_done = threading.Event(), threading.Event()
+
+    def a_gen(_job):
+        a_started.set()  # 事件开始读出时 a 的句柄已返回：中断到达时 a 必是运行中的 worker、不会被记成 skipped
+        yield from _RUNNING_HALF
+
+    def b_gen(_job):
+        a_started.wait(5.0)
+        yield from _WHOLE_PASS
+
+    engine = FakeEngine({"a": a_gen, "b": b_gen}, tail_after_stop={"a": []})
+    levels: list[int] = []
+    result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: 1 if b_done.is_set() else 0,
+                                        on_interrupt=levels.append, interrupt_poll_s=0.05),
+                      on_job_complete=lambda jr: b_done.set() if jr.scope_id == "b" else None)
+    statuses = {jr.scope_id: jr.status for jr in result.jobs}
+    assert statuses == {"a": Status.ABORTED, "b": Status.PASSED}
+    assert _aggregate(list(statuses.values())) == Status.PASSED  # 只看判定的归约给 passed：例外不可省
+    assert result.status == Status.ABORTED
+    assert levels == [1]
+
+
+def test_zero_job_run_is_passed():
+    """零个 job 的 run 可达（不加筛选时，没有 scenario 的 .feature 经 plan 得到零个 job）：_aggregate 收到空输入，run 级 passed。"""
+    result = schedule(_rm([]), FakeResolver(FakeEngine({})), CollectSink())
+    assert result.jobs == []
+    assert result.status == Status.PASSED
+
+
 def test_user_interrupt_level2_forces_running_worker_with_zero_grace():
     """再次中断（级别 2）：在协作停止之外对运行中 worker 再发一次零宽限的 stop（子进程 adapter 即 SIGKILL）；
     on_interrupt 依次收到 1、2；判定仍按首次仲裁的 abort 落 ABORTED。"""

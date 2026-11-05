@@ -284,7 +284,8 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
        有退出记录时进程终止本身即终态信号（stop_reason 为 timeout / abort 且内容不完整 → 对应终态；退出码非零或未知 → ERROR；
        exit==0 且见 scope_done → scope 级 error 或 scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR）；无退出记录时
        见 scope_started 或非 attempted 的 session_opened → RUNNING、否则 PENDING（只有 attempted 的 session_opened 仍为 PENDING）。
-    3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 终态）+
+    3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 的值：任一 job 出了判定即为终态，
+       还没有 job 出判定时为前置态；投影写不落它，见 projected_run_status）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
     只吐状态、不碰 store、不决定"启不启下一个"（那是 plan_next + adapter 的事）。
@@ -692,27 +693,41 @@ def _lifecycle_rank(status: Status) -> int:
 
 
 def _aggregate(statuses: list[Status]) -> Status:
-    """终态归约（唯一一份，schedule 与本模块两路径共用——ADR 0031 决定三 / 0034「不复制归约逻辑」）：
-    滤非终态判定后，任一 error→error；任一 failed→failed；否则 passed（空/全前置态也算 passed）。
+    """状态归约（唯一一份，schedule 与本模块两条路径共用，ADR 0031 决定三、ADR 0034「不复制归约逻辑」）。
 
-    过滤 _NON_VERDICT（skipped/aborted 派生态 + pending/running 前置态）——run 级只看真正出了判定的
-    job。把正确性钉在函数内、不依赖「skipped 必伴随 error」的外部不变量（防未来引入主动 skip 时
-    全-skipped run 被误判 passed）。scenario 内归约喂的全是 worker 三态，过滤为 no-op。
+    先滤掉 _NON_VERDICT（skipped、aborted 两个派生态与 pending、running 两个前置态），只看已出判定的态：
+    判定集非空时，有 error 判 error，否则有 failed 判 failed，否则判 passed。
+    判定集为空而输入非空时不判 passed（ADR 0031 决定三）：输入里有 aborted 判 aborted，否则有 skipped 判 skipped，
+    否则有 running 判 running，否则（全部 pending）判 pending。全部 job 被中止或没有启动的 run 因此不会记成 passed，
+    这一点在函数内成立，不依赖「fail-fast 产生的 skipped 必定伴随一个 error」这类调用方条件；无状态投影里还没有任何
+    job 出判定的 run 得到前置态，不得到终态。
+    空输入仍判 passed，而且可达：不加筛选时，只含 Feature 头、没有 scenario 的 .feature 经 plan 得到零个 job，同步路径
+    以零个 job 结束、总状态 passed；无状态路径下零个 job 的 project，以及所有 job 都没有记录时的 project_full，也是空输入。
+    这里保留终态：无状态路径在没有 pending 与 running 时把本函数的值交给 finalize 写入，返回前置态会让零个 job 的 run
+    永远停在非终态。
+    scenario 级归约（finalize_job）只喂 worker 报的三态，且判定集为空的情形在那里另判 error，过滤与空判定集规则都不生效。
     """
     verdicts = [s for s in statuses if s not in _NON_VERDICT]
     if any(s == Status.ERROR for s in verdicts):
         return Status.ERROR
     if any(s == Status.FAILED for s in verdicts):
         return Status.FAILED
-    return Status.PASSED
+    if verdicts or not statuses:
+        return Status.PASSED
+    # 判定集为空：输入全在 _NON_VERDICT 里，按 aborted、skipped、running 的顺序取第一个出现的，剩下的只能全是 pending
+    for s in (Status.ABORTED, Status.SKIPPED, Status.RUNNING):
+        if s in statuses:
+            return s
+    return Status.PENDING
 
 
 def projected_run_status(jobs: dict[str, JobState]) -> Status:
     """投影写该落库的 run 级 status（ADR 0034 机制三）：投影里全 job 仍 pending → `pending`，否则 `running`。
 
-    **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的终态聚合值（见上：滤掉 pending/
-    running，故连「全 job 还 pending」的 run 也吐 `passed`）；提前落 run 级终态会被 `try_finalize` 的单调
-    条件写认成「已 finalize」而挡住 commit point（ADR 0030），run 永远 finalize 不了。
+    **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的值，只要有一个 job 出了判定就是终态（一个 job
+    已 passed、其余还 pending 的 run 得到 `passed`），只有还没有 job 出判定时才是前置态；提前落 run 级终态会被 `try_finalize`
+    的单调条件写认成「已 finalize」而挡住 commit point（ADR 0030），run 永远 finalize 不了。故 `_aggregate` 对空判定集
+    给出前置态之后，这条钳制仍然需要：运行中的 run 只要有 job 出了判定，`_aggregate` 的值就不能原样落库。
 
     **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
     标量条件写发生在 per-job 条件写之前（那一刻库中 job 态还没更新、读它无意义），判据依赖库就没法对拍。

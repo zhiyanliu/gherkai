@@ -228,8 +228,8 @@ class LocalRunStore:
                         scope_id=sid, status=js.status,
                         session_id=js.session_id or cur_js.session_id,
                         claimed_at=js.claimed_at or cur_js.claimed_at)
-            # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值是
-            # 终态聚合值、一律不用（规则与理由见 projected_run_status）。
+            # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值在有 job
+            # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。
             return replace(cur, status=projected_run_status(state.jobs), jobs=jobs, started_at=state.started_at or cur.started_at,
                            ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)

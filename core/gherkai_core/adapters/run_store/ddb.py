@@ -234,8 +234,8 @@ class DynamoDBRunStore:
         from gherkai_core.project import _lifecycle_rank, projected_run_status
 
         new_hwm = state.high_water_mark or 0
-        # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值是终态
-        # 聚合值、一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
+        # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值在有 job
+        # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
         # 才碰它们），判据只看投影——与 local 同一规则、可对拍。
         run_status = projected_run_status(state.jobs).value
         try:

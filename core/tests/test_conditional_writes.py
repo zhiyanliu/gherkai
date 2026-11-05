@@ -189,20 +189,39 @@ def test_projection_preserves_started_at(run_store):
 
 
 def test_projection_keeps_pending_while_no_job_started(run_store):
-    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：project 的 run 级
-    status 是终态聚合值——连「全 job 还 pending」的 run 它也吐 PASSED——投影写必须整个钳掉它；且此刻
-    落库该是 **pending**（还没起过任何 job，status 如实反映「未启动」，ADR 0034 机制三）。
+    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：还没起过任何 job 时落库该是
+    **pending**（status 如实反映「未启动」，ADR 0034 机制三）。project 的 run 级 status 此时也是 pending（ADR 0031 决定三：
+    判定集为空不判 passed），但落库取值只按 job 态定，不依赖它。
     """
     from gherkai_core.project import project
 
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     projected = project(meta, [])  # 零事件、全 job pending
-    assert projected.status == Status.PASSED, "前提：project 的 run 级 status 是终态聚合值（空 verdict 集→PASSED）"
+    assert projected.status == Status.PENDING
     assert run_store.project_state("run-1", projected) is True
     got = run_store.load_run_state("run-1")
-    assert got.status == Status.PENDING  # 钳掉聚合终态、且不虚报 running
-    # 钳制到位的意义：commit point 仍可落（若投影落了 passed，这一步会被状态机单调条件写挡成 False）
+    assert got.status == Status.PENDING  # 不虚报 running
+    assert run_store.try_finalize("run-1", Status.PASSED, "2026-07-19T02:00:00Z") is True
+
+
+def test_projection_clamps_terminal_aggregate_of_running_run(run_store):
+    """喂**真 project() 产物**验钳制仍承重：a 已 passed、b 仍 pending 时 project 的 run 级 status 已是终态 passed，
+    投影写必须钳成 running；否则紧接的 try_finalize 会被投影自己写的终态挡成 False（ADR 0030 commit point）。"""
+    from gherkai_core.model import ScenarioDone, ScopeDone, ScopeStarted
+    from gherkai_core.project import EventRecord, TaskExited, project
+
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    evs = [ScopeStarted(scope_id="a", session_id="sess-1"), ScenarioDone(scenario_id="a:1", status=Status.PASSED),
+           ScopeDone(scope_id="a")]
+    recs = [EventRecord(scope_id="a", kind="event", seq=i + 1, event=ev, emit_ts=0.0) for i, ev in enumerate(evs)]
+    recs.append(EventRecord(scope_id="a", kind="exit", exited=TaskExited(scope_id="a", exit_code=0)))
+    projected = project(meta, recs)
+    assert (projected.jobs["a"].status, projected.jobs["b"].status) == (Status.PASSED, Status.PENDING)
+    assert projected.status == Status.PASSED, "前提：运行中的 run 只要有 job 出了判定，聚合值就是终态"
+    assert run_store.project_state("run-1", projected) is True
+    assert run_store.load_run_state("run-1").status == Status.RUNNING
     assert run_store.try_finalize("run-1", Status.PASSED, "2026-07-19T02:00:00Z") is True
 
 

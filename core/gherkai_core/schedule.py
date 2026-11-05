@@ -559,8 +559,10 @@ def schedule(
     job_results.sort(key=lambda jr: order.get(jr.scope_id, 0))
 
     run_status = _aggregate([jr.status for jr in job_results])
-    # 使用方中断的 run（ADR 0031 决定三的例外）：有 job 被掐断或没起，判定不完整，run 级记 aborted、不按仅有的判定聚合
-    # （全部 job 都被掐断时 _aggregate 过滤后为空会判 passed）。fail-fast 不走这里：它必伴随 error。
+    # 使用方中断的 run（ADR 0031 决定三的例外）：有 job 被中止或没有启动，判定不完整，run 级记 aborted、不按仅有的判定聚合。
+    # _aggregate 只覆盖判定集为空的情形（全部 aborted 时同样给 aborted），这条例外仍然必需：其余 job 已出判定时（如 aborted
+    # 与 passed 并存）_aggregate 给 passed，全部 job 都没有启动时它给 skipped，被中断的 run 在两种情形下都应记 aborted。
+    # fail-fast 不走这里：它必伴随 error，run 级由 _aggregate 判 error。
     if interrupt_level >= 1 and any(jr.status in (Status.ABORTED, Status.SKIPPED) for jr in job_results):
         run_status = Status.ABORTED
     # 成本归约（ADR 0024）：core 只各自合计 engine 报的原生量，不算美元、不判可信度。

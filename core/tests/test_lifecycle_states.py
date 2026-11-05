@@ -86,18 +86,36 @@ def test_terminal_and_non_verdict_are_two_different_cuts():
 
 # ---- _aggregate 入口过滤（ADR 0031 决定三）----
 def test_aggregate_filters_non_verdict():
-    # 只有 skipped/aborted/pending/running → 过滤后空 → passed（不被这些态污染）
-    assert _aggregate([Status.SKIPPED, Status.ABORTED]) == Status.PASSED
-    assert _aggregate([Status.PENDING, Status.RUNNING]) == Status.PASSED
-    # error 仍穿透：一个 error + 一堆非终态 → error
+    # 判定集非空时只看判定：error 仍穿透（一个 error 加一组非判定态 → error）
     assert _aggregate([Status.PASSED, Status.SKIPPED, Status.ERROR, Status.RUNNING]) == Status.ERROR
     # failed 穿透：passed + failed + skipped → failed
     assert _aggregate([Status.PASSED, Status.FAILED, Status.SKIPPED]) == Status.FAILED
+    # skipped 与 passed 并存 → passed：skipped 不污染已出的判定
+    assert _aggregate([Status.PASSED, Status.SKIPPED]) == Status.PASSED
 
 
-def test_aggregate_all_skipped_no_error_not_misjudged_passed():
-    # 防御：未来若引入非-fail-fast 的 skip，「全 skipped 无 error」不该被误判（过滤后为空即 passed，但至少不崩、语义明确）
-    assert _aggregate([Status.SKIPPED, Status.SKIPPED]) == Status.PASSED
+def test_aggregate_all_skipped_no_error_is_skipped_not_passed():
+    # 判定集为空时不判 passed（ADR 0031 决定三）：全部 skipped 且没有 error → skipped，
+    # 不依赖「fail-fast 产生的 skipped 必定伴随 error」这条调用方条件
+    assert _aggregate([Status.SKIPPED, Status.SKIPPED]) == Status.SKIPPED
+
+
+def test_aggregate_all_aborted_is_aborted():
+    assert _aggregate([Status.ABORTED, Status.ABORTED]) == Status.ABORTED
+
+
+def test_aggregate_empty_verdict_set_precedence():
+    # 判定集为空时按 aborted、skipped、running、pending 的顺序取第一个出现的
+    assert _aggregate([Status.SKIPPED, Status.ABORTED, Status.PENDING]) == Status.ABORTED
+    assert _aggregate([Status.PENDING, Status.SKIPPED, Status.RUNNING]) == Status.SKIPPED
+    assert _aggregate([Status.PENDING, Status.RUNNING]) == Status.RUNNING  # 投影路径：pending 与 running 并存
+    assert _aggregate([Status.PENDING, Status.PENDING]) == Status.PENDING  # 投影路径：全部 pending
+
+
+def test_aggregate_fail_fast_shapes_stay_error():
+    # fail-fast 的 skipped 与 aborted 必伴随触发它的 error：判定集非空、规则不变，run 级仍 error
+    assert _aggregate([Status.ERROR, Status.SKIPPED]) == Status.ERROR
+    assert _aggregate([Status.ERROR, Status.ABORTED, Status.SKIPPED]) == Status.ERROR
 
 
 # ---- fail-fast：排队没起 → SKIPPED（worker 从未 spawn）----
@@ -215,7 +233,7 @@ def test_severity_full_chain():
 def test_aggregate_running_does_not_pollute_clean_pass():
     # 干净的 [PASSED, RUNNING]：running 被滤掉、不把结果带偏 → PASSED（ADR 0031 决定三）
     assert _aggregate([Status.PASSED, Status.RUNNING]) == Status.PASSED
-    # 空集兜底（schedule docstring「空也算 passed」）
+    # 空输入仍判 passed：零个 job 的 run 可达（没有 scenario 的 .feature），而且无状态路径要在 finalize 时写入终态
     assert _aggregate([]) == Status.PASSED
 
 

@@ -189,9 +189,9 @@ _STATUS_SEVERITY: dict[Status, int] = {
 # run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
 # 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断已被处理且有 job 记为 aborted 或 skipped 时在聚合之外另记 run 级 aborted，见 ADR 0031 决定三）
 # + pending/running（前置态）。
-# 两路共用（ADR 0031 决定三 / 0034）：schedule 沿事件流实时聚合，喂的都是终态、过滤是 no-op；
-# project 的无状态投影真实喂入 pending/running（未起/正在运行的 job），此处过滤**承重**——否则前置态会污染
-# run 级 status。
+# 两路共用（ADR 0031 决定三 / 0034）：schedule 喂的都是终态，名单滤掉其中的 skipped/aborted；project 的无状态投影
+# 还真实喂入 pending/running（未起或正在运行的 job）。滤后的判定集非空时按它归约，前置态与 skipped/aborted 不影响结果；
+# 判定集为空时 _aggregate 不判 passed，按 aborted、skipped、running、pending 的顺序取输入里第一个出现的态。
 _NON_VERDICT: frozenset[Status] = frozenset(
     {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
 )

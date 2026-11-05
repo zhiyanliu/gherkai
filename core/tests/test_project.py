@@ -5,6 +5,8 @@ reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此�
 """
 from __future__ import annotations
 
+import pytest
+
 from gherkai_core.model import (
     Job,
     RunMeta,
@@ -58,7 +60,7 @@ def test_no_records_job_is_pending():
     """definition 里的 job 没有任何 record → PENDING（还没起）。"""
     state = project(_meta("a"), [])
     assert state.jobs["a"].status == Status.PENDING
-    assert state.status == Status.PASSED  # 全 pending 被 _NON_VERDICT 过滤，run 级空判定即 passed
+    assert state.status == Status.PENDING  # 判定集为空时不判 passed（ADR 0031 决定三）：全部 pending 的 run 级值是 pending
 
 
 def test_scope_started_but_no_exit_is_running():
@@ -232,13 +234,76 @@ def test_projected_run_status_pending_only_while_all_jobs_pending():
 
 
 def test_projected_run_status_ignores_aggregate_value_from_project():
-    """判据只看 job 态：project() 的 run 级 status 是终态聚合值（零事件的全 pending run 也吐 PASSED），
-    喂它的 jobs 仍得 pending——守「投影写不能沿用传入的 run 级值」。"""
+    """判据只看 job 态：运行中的 run 只要有一个 job 出了判定，project() 的 run 级 status 就是终态（a 已 passed、b 仍 pending
+    时为 passed），投影写仍得 running——守「投影写不能原样落传入的 run 级值」。"""
     from gherkai_core.project import projected_run_status
 
-    state = project(_meta("a", "b"), [])
-    assert state.status == Status.PASSED  # 前提：聚合值是终态
-    assert projected_run_status(state.jobs) == Status.PENDING
+    state = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)])
+    assert state.jobs["b"].status == Status.PENDING
+    assert state.status == Status.PASSED  # 前提：运行中的 run 的聚合值已是终态
+    assert projected_run_status(state.jobs) == Status.RUNNING
+
+
+def test_project_run_status_before_any_verdict_is_pre_terminal():
+    """还没有 job 出判定时，project() 的 run 级 status 是前置态（ADR 0031 决定三的空判定集规则）：
+    全部 pending 得 pending；pending 与 running 并存得 running。与投影写落库的取值一致，但投影写不依赖它。"""
+    from gherkai_core.project import projected_run_status
+
+    all_pending = project(_meta("a", "b"), [])
+    assert all_pending.status == Status.PENDING
+    assert projected_run_status(all_pending.jobs) == Status.PENDING
+
+    mixed = project(_meta("a", "b"), [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))])
+    assert (mixed.jobs["a"].status, mixed.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
+    assert mixed.status == Status.RUNNING
+    assert projected_run_status(mixed.jobs) == Status.RUNNING
+
+
+def _scope_events(scope_id: str, outcome: str) -> list:
+    """一个 job 干净结束时的 worker 事件：outcome 为 passed / failed（scenario 判定）或 error（scope 级 error）。"""
+    started = ScopeStarted(scope_id=scope_id, session_id=f"sess-{scope_id}")
+    if outcome == "error":
+        return [started, ScopeDone(scope_id=scope_id, status=Status.ERROR, error_type="engine_error", message="未就绪")]
+    return [started, ScenarioDone(scenario_id=f"{scope_id}:1", status=Status(outcome)), ScopeDone(scope_id=scope_id)]
+
+
+@pytest.mark.parametrize("outcomes, expected", [
+    (("passed", "passed"), Status.PASSED),
+    (("passed", "failed"), Status.FAILED),
+    (("failed", "error"), Status.ERROR),
+])
+def test_run_status_agrees_between_schedule_and_project_full(outcomes, expected):
+    """两条路径共用同一个 _aggregate：同一组 job 事件分别经同步 schedule 与无状态 project_full，run 级 status 相同。"""
+    from gherkai_core.schedule import ScheduleOpts, schedule
+    from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+
+    scopes = [f"j{i}" for i in range(len(outcomes))]
+    streams = {s: _scope_events(s, o) for s, o in zip(scopes, outcomes)}
+    meta = _meta(*scopes)
+    sync = schedule(meta, FakeResolver(FakeEngine(streams)), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    recs = [_ev(s, i + 1, ev) for s in scopes for i, ev in enumerate(streams[s])] + [_exit(s, 0) for s in scopes]
+    stateless = project_full(meta, recs)
+    assert [jr.status for jr in sync.jobs] == [jr.status for jr in stateless.jobs] == [Status(o) for o in outcomes]
+    assert sync.status == stateless.status == expected
+
+
+def test_stateless_path_cannot_yield_aborted_job():
+    """无状态路径不作中止决定：推进器停掉的 job 只带 timed_out，判 error 与 timeout，不判 aborted。故使用方中断的 run 级 aborted
+    例外只在同步路径上有，project_full 的 run 级 status 只由 _aggregate 给出。"""
+    recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", 143)] \
+        + _passed_events("b") + [_exit("b", 0)]
+    full = project_full(_meta("a", "b"), recs)
+    a = next(jr for jr in full.jobs if jr.scope_id == "a")
+    assert (a.status, a.error_type) == (Status.ERROR, "timeout")
+    assert all(jr.status not in (Status.ABORTED, Status.SKIPPED) for jr in full.jobs)
+    assert full.status == Status.ERROR
+
+
+def test_project_full_without_any_record_is_passed():
+    """所有 job 都没有记录时 project_full 不臆造明细，_aggregate 收到空输入、run 级 passed（防御分支，记下空输入的这个来源）。"""
+    full = project_full(_meta("a", "b"), [])
+    assert full.jobs == []
+    assert full.status == Status.PASSED
 
 
 # ---------- plan_next（机制四）----------
