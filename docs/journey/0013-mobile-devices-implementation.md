@@ -16,6 +16,7 @@
 - 两侧错误文本归一化的分行与空白规则不完全对称（Python 的 splitlines / split 认 U+2028 等 Unicode 行列分隔符与 Unicode 空白，Midscene 只按 CR / LF 分行、按 JS 的空白折叠），`A\u2028B` 一侧得 `A`、一侧得 `A B`。既有的低优先级差异，属 code 层、不必进 ADR，code-health 候选。
 - 契约页护栏按全页扁平键名核对（`cli/tests/test_cli_json_contract.py` 的 `_leaf_keys`），删掉 list-deterministic 节的 keywords 说明仍能过（既有设计限制），code-health 候选。
 - 契约页护栏夹具没有覆盖设备形态：设备 job 的夹具没设 `target` 与 `device_request`（落到模型缺省的 desktop/web、`device_request` 为 None），`target.app` 与 `device_request` 的子键从没被真渲染器产出过；plan 的差集只传桌面 job、`devices` 渲染为空对象，各平台的 `arn` / `os_version` / `source` 子键没进差集。契约页字段说明本身是全的。code-health 候选。
+- **没有列出 run 的命令**：`status` 必须带 run_id，想知道「现在有哪些 run 在跑」只能查云端 runs 表（`item_type = STATE` 且 status 为 pending / running）、ECS 的运行中 task 或 Device Farm 的会话，本机后端只能翻报告目录。是否给 `status` 加「不带 run_id 时列出本后端近期 run」这类入口，属 ADR 0041 agent 可用形态的新增项，待 owner 定。
 - 策略文件不删除的前提仍需真实核实：ngrok agent 在隧道存活期是否会重读策略文件（`runtime/gherkai_runtime/tunnel.py` 的 `NgrokTunnel.start` 注释已点明，只靠单测证明不了）。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。doc-health 第九轮核出、因冻结留到下一版的两处：`speaker-notes.md` 开头那句自述（「14 页最终稿。口播与演示提示保持定稿原文；资料与素材统一见制作规范和素材包。」）改为陈述内容并给素材包链接，例如「共 14 页，每页包含口播正文与不朗读的演示提示。PPT、逐页画面与原始配音见素材包」；`manifest.json` 的 `brand_pronunciation`（现为「用户已选定 A：…」）与 `narration_style`（现为「…可比已认可小样稍增加感染力」）改成对参数本身的陈述句，仓库里的 manifest 与素材包内的那份一起改。
 
