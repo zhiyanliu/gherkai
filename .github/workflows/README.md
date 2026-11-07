@@ -9,8 +9,8 @@
 
 | 文件 | 触发 | 作用 |
 |---|---|---|
-| `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag） |
-| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 根 README 的 skill 安装命令钉本版 tag + 算出的版本与 tag 一致）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
+| `ci.yml` | push 任意分支 / 所有 PR / 手动 | ① `uv sync --locked` + 根 `pytest`（全 workspace 成员，含 deploy_aws 的 CDK synth 测试）；② midscene `npm ci && npm run build && npm test`，再 `npm pack` 出 tarball；③ `uv build --all-packages` smoke + 产物校验 + 发布 gate 演练（打本地临时 tag、不 push：版本必须逐字等于 tag）；④ 镜像 gate：用 ② 的 tarball 与 ③ 的 wheel 按 local 态构建两个基础镜像（不推送），每次都运行、不按路径过滤 |
+| `release.yml` | push tag `v*` | gate（tag 形态 + CHANGELOG.md 有本版节 + 根 README 的 skill 安装命令钉本版 tag + 算出的版本与 tag 一致）→ 镜像 gate（用将要发布的 wheel 与 tarball 按 local 态构建两个基础镜像，不推送）→ ① PyPI → ② npm → ③ GHCR 基础镜像 → ④ GitHub Release（正文由 `.github/scripts/release_notes.py` 从 CHANGELOG.md 渲染） |
 | `pages.yml` | push 改动 `docs/diagrams/**` 或 `pages.yml` 自身（只在默认分支部署）/ 手动 | 只把 `docs/diagrams/` 原样上传 GitHub Pages（`index.html` + 已入库的可交互 HTML + SVG，不做任何构建）；Pages 的 build type 已切为 workflow，不再从分支根目录做 Jekyll 构建（ADR 0045 决策七） |
 
 发布是**一个动作**：`git tag vX.Y.Z && git push origin vX.Y.Z`。版本真源只有 git tag
@@ -20,21 +20,33 @@
 ### `release.yml` 的 job 图与重新运行语义
 
 ```
-build（gate + uv build --all-packages + 产物校验 + 上传 artifact）
- ├─▶ pypi   （download artifact → attest-action 生成 PEP 740 → uv publish，OIDC 免密）
- ├─▶ npm    （npm version <tag> → npm ci → build → npm publish，trusted publishing、provenance 自动）
- │
- └─▶ images （needs: build + pypi + npm；matrix novaact/midscene → GHCR）
-      └─▶ release（GitHub Release：正文 = CHANGELOG.md 本版节 + 装法块，文档链接固定到 tag）
+build（gate + uv build --all-packages + 产物校验 + npm version <tag> → npm ci → build → npm pack；Python 产物与 tarball 各上传一个 artifact）
+ └─▶ image-gate（matrix novaact/midscene：local 态构建 + 冒烟，不推送）
+      ├─▶ pypi   （needs: build + image-gate；download artifact → attest-action 生成 PEP 740 → uv publish，OIDC 免密）
+      ├─▶ npm    （needs: build + image-gate；npm publish <build 定稿的 tarball>，trusted publishing、provenance 自动）
+      │
+      └─▶ images （needs: build + pypi + npm；matrix novaact/midscene，index 态 → GHCR）
+           └─▶ release（GitHub Release：正文 = CHANGELOG.md 本版节 + 装法块，文档链接固定到 tag）
 ```
 
-- **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：基础镜像的 CI 形态按版本装已发行的 worker 包
+- **`image-gate` 排在不可逆发布之前**（ADR 0037 决策 8「发布前镜像 gate」）：PyPI 与 npm 的同一版本号都不能重发，
+  而 `images` 排在两者之后，Dockerfile、冒烟或 worker 包内容的回归若到 `images` 才暴露，重新运行用的仍是同一份
+  Dockerfile 与同一份已发行包，只能另发新版本。gate 装的是将要发布的同一份产物：novaact 用 build job 产出、`pypi` 将上传的 wheel，
+  midscene 用 build job 打出、`npm` 将发布的 tarball（`npm` job 不重新构建）。任一引擎失败，`pypi` / `npm` 都不运行，
+  PyPI、npm、GHCR 上都还没有这个版本。
+- **`image-gate` 覆盖不到的**：Dockerfile 的 index 态安装分支、「等索引可见」、GHCR 推送；第三方传递依赖在
+  gate 与 `images` 各解析一次，不保证结果相同。这几类失败仍在 `images` 才暴露。GHCR 包可见性不由任何 job 检查，
+  见下文「一次性人工前置」第 4 步。
+- **build job 里 npm 的版本改写与打包（`npm version` 到 `npm pack`）排在 `uv build` 与产物校验之后**：`npm version`
+  改写 `package.json` 会让工作树变脏，排在前面则算出的 Python 版本带本地段，版本 gate 必然失败。
+- **`images` 依赖 `pypi`/`npm` 且带「等索引可见」一步**：`images` 以 index 态按版本装已发行的 worker 包
   （ADR 0037 决策 5「两态」），而上传成功不等于立刻可装（索引过 CDN）。等待逻辑与完整理由在
   `.github/scripts/wait_for_index.sh` 的头注释里。
-- **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：对同一 tag 幂等，
+- **单独重新运行 `images` 是「PyPI 已发、镜像缺失」半发布态的修复动作**（ADR 0037 决策 8）：适用于索引传播、推送这类失败
+  （Dockerfile、冒烟与包内容的回归已由 `image-gate` 挡在发布之前）；对同一 tag 幂等，
   且**重新运行旧版本不会动 `latest`**——`latest` 只在「本 tag 是全仓库版本序最大的**正式发行** tag」时才推。
 - **`pypi` 可重新运行**：`uv publish --check-url` 跳过已存在且逐字节相同的文件（内容不同则报错，不静默覆盖）。
-- **`npm` 可重新运行**：publish 前先用 `npm view` 查询一次，已发行就跳过（npm 不允许重发同版本）。
+- **`npm` 可重新运行**：publish 前先用 `npm view` 查询一次，已发行就跳过（npm 不允许重发同版本）；发布的始终是 build job 定稿的那个 tarball。
 - **fork 不会误发**：`pypi` / `npm` 两个 job 带 `if: github.repository == 'zhiyanliu/gherkai'`。
 - **只认正式发行 tag `vX.Y.Z`**：`v1.4.0rc1` 这类预发行在 gate 第一步就被拦——它是合法 PEP 440
   但不是合法 semver（npm 要 `1.4.0-rc.1`），而 ADR 0037 决策 2b 明确不做 PEP 440 到 semver 的转换件；
@@ -141,11 +153,11 @@ WAIT_ATTEMPTS=1 bash .github/scripts/wait_for_index.sh npm @midscene/web 1.9.8
 ```
 
 **只有向本仓库推送正式 tag 才能验证的**：trusted publishing 的 OIDC 交换、attestation 真的落到 PyPI 上、
-npm provenance、GHCR 推送与包可见性、以及「等索引可见」在真实传播窗口下的表现。
+npm provenance（以 tarball 发布时是否照常附带）、GHCR 推送与包可见性、以及「等索引可见」在真实传播窗口下的表现。
 
 ## 两态基础镜像 Dockerfile 的本地态 build（不发行也能验镜像）
 
-CI 的 `images` job 用 index 态（按 tag 版本装已发行包）；发行前要验证镜像内容，用 local 态装入本地构建的产物——命令与 build-arg
+`release.yml` 的 `images` job 用 index 态（按 tag 版本装已发行包）；两个工作流的 `image-gate` 用 local 态，装的是同一次构建出的 wheel 与 tarball。本地复现 gate 或在发行前验证镜像内容，同样用 local 态装入本地构建的产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
 `--build-arg WORKER_SOURCE=local`，context 即放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
 `… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态用任一已发行版本验证（`--build-arg WORKER_VERSION=<已发行的 X.Y.Z>`；占位版本 `0.0.0` 是空包，不含 worker）。

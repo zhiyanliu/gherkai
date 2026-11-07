@@ -109,8 +109,8 @@ newSession 的能力集由「Appium 建连与上下文切换」块单点组装�
   |---|---|---|---|---|---|
   | ① job 墙钟 `Job.timeout_s` | 推进器 claim | 推进器 | 拉镜像、获取、执行、收尾 | `timeout` | 设备 job 不参与 core 的 `network_retry` |
   | ② 会话上限 `max_session_s` | 发出 Create | 由「① 不超过 ②」的预检或自检保证；worker 另按会话年龄做后备 | 单会话寿命 | 年龄到点：当前 step error、余下 skipped、发 Stop、归 `session_lost` | 不重试、不重建 |
-  | ③ 获取预算（缺省 600 秒，可配，上界 3600 秒） | worker 开始准备设备（界面接缝 `acquire` 的入口；直接给 ARN 的网页目标与首次 Create 重合） | worker | 应用目标的安装包存在性检查（HeadObject，桶不在本区域时跟随 301 再发一次；没有单次超时，以本预算为上界）、筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、会话预热；止于被测对象就绪 | `acquire_timeout`；判据型失败归 `precheck_failed` | worker 内手写退避，跨重建不重置；剩余不足 150 秒不再换台；存在性检查不重试（S3 客户端 `maxAttempts = 1`，跟随 301 不算重试） |
-  | ④ Device Farm 单次调用 | 每次调用 | worker | Create、Get、List、Stop | 获取期计入 ③ | `maxAttempts = 1`，请求超时 10 秒（Stop 3 秒，终结期 Get 5 秒），手写退避，停止信号可穿透 |
+  | ③ 获取预算（缺省 600 秒，可配，上界 3600 秒） | worker 开始准备设备（界面接缝 `acquire` 的入口；直接给 ARN 的网页目标与首次 Create 重合） | worker | 应用目标的安装包准备（凭据与区域解析、存在性检查 HeadObject 含跟随 301、会话 RUNNING 之后的预签名；没有单次超时，worker 对本预算截止信号的等待是上界）、筛选与繁忙等待、创建与限流退避、排队、准备、newSession 含安装、至多一次换台重建、`activateApp` 与自退采样、能力探测、会话预热；止于被测对象就绪 | `acquire_timeout`；判据型失败归 `precheck_failed` | worker 内手写退避，跨重建不重置；剩余不足 150 秒不再换台；安装包准备各步不重试（S3 客户端 `maxAttempts = 1`，跟随 301 不算重试）；到期即停止等待，迟到的结果丢弃、不再推进，底层请求照传截止信号、只作尽力取消（0051 决策 2） |
+  | ④ Device Farm 单次调用 | 每次调用 | worker | Create、Get、List、Stop | 获取期计入 ③ | `maxAttempts = 1`，请求超时 10 秒（Stop 3 秒，终结期 Get 5 秒），手写退避，停止信号可穿透；Create 的结果未知（含任何 5xx）先记待核、按名核对后才以新序号重试（0051 决策 3） |
   | ⑤ newSession 单请求超时（不小于 4 分钟加 65 秒，封顶优先） | 发出 newSession | WebDriver 客户端（建连实例） | 建会话加 `appium:app` 安装 | 计入 ③；被剩余 ③ 封顶后到期归 `acquire_timeout`；未被封顶的超时视为瞬时失败，预算允许时只重试 newSession 一次，否则 `acquire_timeout`（0051 决策 3） | 传输层 0 次 |
   | ⑥ 执行期单请求超时（180 秒，实施期校准、真机验收后可调） | 每个请求 | WebDriver 客户端（执行实例） | 单条命令，**它是单条命令的真实上界** | 结果未知（见下） | 0 次；只读原语白名单重试 1 次 |
   | ⑦ W3C `pageLoad`（设备模块常量，暂定 150 秒） | 每条导航 | 服务端驱动 | 页面加载，**只是尽力而为** | 服务端回 `timeout` 时结果已知 | 不重试；单次加载超过它的站点在 1.5 不受支持，调大 `@timeout` 只解决多次加载累积的墙钟不足 |
