@@ -59,7 +59,7 @@ from gherkai_deploy_aws import names
 
 class BackendStack(Stack):
     # Fargate 平台对 container stopTimeout 的硬上限（SIGTERM→SIGKILL 宽限）。ECS 部署期会拒 >120s（对 EC2 launch
-    # type 无此限、对 Fargate 有）；此常量供 synth 期 fail-fast，别等 deploy 才炸（Nova grace 下限 150s>120s 冲突的根源，见 ADR 0032）。
+    # type 无此限、对 Fargate 有）；此常量供 synth 期 fail-fast，别等到 deploy 时才失败（Nova grace 下限 150s>120s 冲突的根源，见 ADR 0032）。
     FARGATE_STOP_TIMEOUT_MAX_S = 120
     # 部署侧 per-run 并发 cap（**非真源**：真源是 definition 的 max_concurrency，推进器取 min，ADR 0034 机制四）。task 计入
     # 部署方账单，故部署方保留总量控制权、钳住提交侧声明。reconciler 与 kicker 两个推进器**必须同值**（首批与续起并行度
@@ -140,7 +140,7 @@ class BackendStack(Stack):
         真要与命令进程分叉（换 interpreter / 混装），回落值会静默写错戳，而戳恰是 preflight 唯一判据（决策 7
         CLI 新于后端即以退出码 2 结束、不设放行口）。写错比缺失更坏，故缺即 fail-fast、点明该走 `gherkai deploy`。
         **synth 期校验 PEP 440**：戳的消费者用 `packaging.version.Version` 比较（决策 7），非法串会让 preflight
-        在每个提交者那里炸；这里花一次校验换那边永不炸。
+        在每个提交者那里失败；这里校验一次，那边就不会再因此失败。
         """
         raw = self.node.try_get_context("version")
         if not raw:
@@ -795,7 +795,7 @@ class BackendStack(Stack):
     # Lambda 不背 argparse/render，ADR 0016「演进」节）+ gherkai_core（核心库）+ gherkin（core 的 feature 解析）
     # + packaging（gherkai_runtime 的硬依赖，ADR 0037 决策 2c）+ **typing_extensions**。
     # boto3 由 Lambda runtime 自带、不打（省包体）。
-    # **typing_extensions 是踩出来的**：它是 `gherkin-official` 的传递依赖（该库自 31.0.0、即 core 的声明下限起
+    # **typing_extensions 是实际运行中才发现要打进包的**：它是 `gherkin-official` 的传递依赖（该库自 31.0.0、即 core 的声明下限起
     # 就声明 `typing-extensions>=4`；`gherkin/parser_types.py` 无条件 `from typing_extensions import NotRequired`，
     # 即便 3.13 的 typing 已有该名），旧实现靠 `pip install --target`
     # 顺带装上、改成「按名复制已安装包」后就漏了。单测全绿、真 synth 出的 asset 一 import 就 ModuleNotFoundError
@@ -846,7 +846,7 @@ class BackendStack(Stack):
         """当前 venv 里某个 import 名的源路径（`find_spec`）——Lambda asset 的复制源，见 `_build_lambda_asset`。
 
         **两种形态都要认**：包 → 目录（`submodule_search_locations`）；**单文件模块 → `.py` 文件**
-        （`typing_extensions` 就是这形态——按「包即目录」一刀切会把它判成「找不到」，实测踩过）。
+        （`typing_extensions` 就是这形态——按「包即目录」一刀切会把它判成「找不到」，实测中遇到过）。
         """
         import importlib.util
 

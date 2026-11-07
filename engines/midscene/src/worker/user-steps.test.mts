@@ -231,7 +231,7 @@ test("实际运行: 语法错的 steps 文件 → 非零退出 + stderr 点名�
 
 test("实际运行: --capabilities 同样先加载 steps：语法错的目录 → 非零退出 + 点名 + stdout 不吐半份能力声明", async () => {
   // 两个非 job 入口对称（ADR 0037 决策 4）：能力自述本身不需要 steps，「反正用不上、把分支挪到加载之前」是很自然的
-  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行才炸。Nova 侧有同样的用例，这里锁住位置契约。
+  // 想法——但那会让坏 steps 目录在 run 的下限查询这一步静默通过、到实际运行时才失败。Nova 侧有同样的用例，这里锁住位置契约。
   const root = tmpSteps({ "broken.mts": `import { deterministic } from "@gherkai/worker-midscene"; deterministic(\n` });
   const { code, out, err } = await runBin(root, "--capabilities");
   assert.notEqual(code, 0, "加载失败必须非零退出");

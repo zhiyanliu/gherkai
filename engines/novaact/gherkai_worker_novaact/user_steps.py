@@ -1,10 +1,9 @@
 """加载使用方的确定性 step 目录（ADR 0037 决策 4，Nova 侧实现）。
 
-**约定与解析不在这里**：`--steps-dir` flag > env `GHERKAI_STEPS_DIR` > 项目配置文件 `steps-dir`（相对配置文件
-所在目录，ADR 0053 决策 2）> 默认 `./steps`（相对提交时的 CWD，存在才用）的解析、写进 definition、以及经
-`GHERKAI_STEPS_DIR` 注给 worker，全在组合根（ADR 0037 决策 4：约定逻辑不进 worker，worker 保持薄，
-ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有 flag、不猜 `./steps`、不相对 worker
-自身找任何东西（worker 的 CWD 在分发形态下就是使用方的 CWD，猜就是漂移面）。
+**约定与解析不在这里**：目录取哪个值（取值顺序见 ADR 0037 决策 4，配置文件那一层见 ADR 0053 决策 2）、解析成
+绝对路径、写进 definition、以及经 `GHERKAI_STEPS_DIR` 注给 worker，全在组合根（同一决策：约定逻辑不进 worker，
+worker 保持薄，ADR 0016 分层）。**worker 只认一个 env `GHERKAI_STEPS_DIR`**——没有 flag、不猜 `./steps`、
+不相对 worker 自身找任何东西（worker 的 CWD 在分发形态下就是使用方的 CWD，猜就是漂移面）。
 
 机制（与内建脚手架 `deterministic_steps` 的注册机制**完全同一**）：按排序递归遍历 `*.py`、逐个 import，
 文件顶层 `from gherkai_worker_novaact.deterministic import deterministic` 后的 `@deterministic` 副作用
@@ -48,7 +47,7 @@ _NS_ROOT = "gherkai_user_steps"
 
 
 class UserStepsError(Exception):
-    """使用方 steps 目录加载失败（目录不存在 / 某文件 import 炸）。
+    """使用方 steps 目录加载失败（目录不存在 / 某文件 import 失败）。
 
     消息自带「哪个文件 + 什么异常」，调用点直接打给使用方看即可（诊断信息不靠调用点二次拼装）。
     """

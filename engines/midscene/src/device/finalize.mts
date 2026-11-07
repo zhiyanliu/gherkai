@@ -29,7 +29,7 @@
 // 只进入一次：重复调用（信号重复、超时与信号交叠、两种模式先后到达）返回同一个结果，四阶段不重新进入。每个真实会话按 ARN 只发
 // 一条 session_closed，不先发 unconfirmed 再补 confirmed（会话事件出口另按配对键去重，见 device/device-session.mts）。
 // releaseFailed 为真表示有会话未能确认停止或发过 attempted，是退出码 1 的依据。
-import { errorText } from "../worker/error-text.mjs";
+import { errorText } from "../lib/error-text.mjs";
 import type { ReleaseMode } from "../worker/surface.mjs";
 import type { DeviceFinalizer, FinalizeHooks } from "./surface.mjs";
 import type { SessionClosedFact } from "./device-session.mjs";

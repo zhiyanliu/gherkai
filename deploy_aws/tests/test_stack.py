@@ -271,7 +271,7 @@ def test_ssm_parameter_set_without_device_farm_project_is_exactly_six(context):
     context 不带 Device Farm 项目或带「待建立」占位时，不建项目 ARN 参数（ADR 0037 决策 6：两者等价、都不报错）。
 
     逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
-    都有一个读侧消费者：漏了只在实际运行中才炸（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
+    都有一个读侧消费者：漏了只在实际运行中才暴露（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
     """
     assert set(_ssm_params(_template(context=context))) == _BASE_SSM_PARAMS
 
@@ -308,7 +308,7 @@ def test_version_context_is_required():
 
 
 def test_version_context_must_be_pep440():
-    # 非法版本串 synth 期就拒——否则每个提交者的 preflight（packaging.version 解析）都会炸。
+    # 非法版本串 synth 期就拒——否则每个提交者的 preflight（packaging.version 解析）都会失败。
     with pytest.raises(ValueError, match="PEP 440"):
         _template(context={"version": "not a version"})
 

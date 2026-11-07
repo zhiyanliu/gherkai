@@ -1,5 +1,5 @@
 {
-  "_comment": "内建导航与注册表的跨语言对拍用例（ADR 0020 第 3 条、0050 决策 1）。消费者：engines/novaact/tests/test_deterministic.py 与 engines/midscene/src/worker/deterministic.test.mts，两侧读同一个文件。cases：两个引擎的 ADDRESS_PATTERN 对每条 text 须给出相同的命中结果，命中时 url 组相同，hit 为 false 的文本走 AI。registry：清空注册表后按顺序注册 entries，清单的 keywords 与 matchBatch 对 probes 的回答两侧须一致；pattern 用 Python 具名组写法，JS 侧把 (?P< 换成 (?<；<NAV> 指内建导航的 ADDRESS_PATTERN。",
+  "_comment": "内建导航与注册表的跨语言对拍用例（ADR 0020 第 3 条、0050 决策 1）。消费者：engines/novaact/tests/test_deterministic.py 与 engines/midscene/src/worker/deterministic.test.mts，两侧读同一个文件。cases：两个引擎的 ADDRESS_PATTERN 对每条 text 须给出相同的命中结果，命中时 url 组相同，hit 为 false 的文本走 AI。registry：清空注册表后按顺序注册 entries，清单的 keywords 与 matchBatch 对 probes 的回答两侧须一致，probes 每条都带 keyword 键（null 表示不核关键字；缺键属于版本不一致、整批拒绝，不进对拍）；pattern 用 Python 具名组写法，JS 侧把 (?P< 换成 (?<；<NAV> 指内建导航的 ADDRESS_PATTERN。",
   "cases": [
     {
       "text": "\"https://www.wikipedia.org/\"",
@@ -315,12 +315,13 @@
         }
       },
       {
+        "keyword": null,
         "text": "\"https://x.example/\"",
         "expect": {
           "pattern": "<NAV>",
           "description": "nav"
         },
-        "note": "裸字符串形态不核关键字"
+        "note": "keyword 为 null 时不核关键字：带 Then 时判为关键字不符的同一段文本也答作命中"
       },
       {
         "keyword": null,
@@ -329,7 +330,7 @@
           "pattern": "仅给定 \"(?P<x>[^\"]+)\"",
           "description": "d1"
         },
-        "note": "keyword 为 null 与缺键同义、不核关键字"
+        "note": "keyword 为 null 时不核关键字：只接受 Given / When 的条目也答作命中"
       },
       {
         "keyword": "Given",

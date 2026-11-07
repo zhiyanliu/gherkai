@@ -68,7 +68,7 @@ def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch):
 
     def spy_build(**kwargs):
         box["kwargs"] = kwargs
-        return real_build()
+        return real_build(run_id=kwargs["run_id"])
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta

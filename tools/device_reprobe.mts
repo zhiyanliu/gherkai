@@ -59,7 +59,7 @@ import { DEVICES, UI_KINDS, type Device, type UiKind } from "../engines/midscene
 import { readClassification, type SurfaceDeps, type TargetSurface } from "../engines/midscene/src/worker/surface.mjs";
 import { PROTOCOL_SCHEMA_VERSION } from "../engines/midscene/src/lib/job-source.mjs";
 import { redactSecrets } from "../engines/midscene/src/lib/redact.mjs";
-import { errorText } from "../engines/midscene/src/worker/error-text.mjs";
+import { errorText } from "../engines/midscene/src/lib/error-text.mjs";
 
 type Browser = AppiumSession["exec"];
 
@@ -594,7 +594,8 @@ function recordingParts(captured: Captured, recorder: CommandRecorder): (env: De
           if (adapter === null || adapter !== args.adapter) throw new Error("界面实现收到的适配器不是适配器清单选出的那个实例");
           const full = { ...args, adapter };
           captured.agent = { driver: args.driver, session: args.session, scale: args.scale, inputContext: args.inputContext };
-          captured.actionSpace = createAppiumInterface(full).actionSpace().map((a) => a.name);
+          // 这个界面实现只用来列出动作名、不执行原语，不会写诊断日志，日志出口给空函数。
+          captured.actionSpace = createAppiumInterface({ ...full, log: () => {} }).actionSpace().map((a) => a.name);
           return real.agents.create(full);
         },
       },

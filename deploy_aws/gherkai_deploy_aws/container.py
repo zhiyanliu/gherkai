@@ -80,7 +80,7 @@ def digest_for_repo(repo_digests, repo_uri: str) -> str | None:
     """从 `RepoDigests` 里挑出**本仓库**那条的 digest（`sha256:<hex>`）；没有 → None。
 
     **绝不取第一条**：基础镜像同步先 `pull` 过 GHCR，同一镜像会挂着多个仓库的 digest，取错了写进 task-def 就是
-    「ECR 里不存在这个 digest」——RunTask 拉镜像时才炸（ADR 0038 步 4）。
+    「ECR 里不存在这个 digest」——RunTask 拉镜像时才失败（ADR 0038 步 4）。
     """
     for entry in repo_digests or ():
         repo, _, digest = str(entry).partition("@")
@@ -117,7 +117,7 @@ class ContainerEngine:
         except (OSError, subprocess.SubprocessError) as exc:
             return f"无法运行 `{self.binary} version`：{exc}"
         if out.returncode != 0:
-            return (f"`{self.binary}` 在 PATH 上但连不上 daemon（exit {out.returncode}）："
+            return (f"`{self.binary}` 在 PATH 上但连不上 daemon（退出码 {out.returncode}）："
                     f"{_tail(out.stderr) or _tail(out.stdout)}\n请先启动容器引擎的 daemon。")
         return None
 
@@ -131,7 +131,7 @@ class ContainerEngine:
             err = (out.stderr or "") + (out.stdout or "")
             if "No such image" in err or "no such image" in err:
                 return ImageInfo(exists=False)
-            raise ContainerError(f"`{self.binary} image inspect {ref}` 失败（exit {out.returncode}）：{_tail(err)}")
+            raise ContainerError(f"`{self.binary} image inspect {ref}` 失败（退出码 {out.returncode}）：{_tail(err)}")
         try:
             data = json.loads(out.stdout.strip().splitlines()[0])
         except (ValueError, IndexError) as exc:
@@ -163,7 +163,7 @@ class ContainerEngine:
             err = (out.stderr or "") + (out.stdout or "")
             if "does not provide the specified platform" in err or "No such image" in err or "no such image" in err:
                 return None, None  # 索引不含目标平台：引擎按「找到了镜像但没有这个平台」报
-            raise ContainerError(f"`{self.binary} image inspect {ref} --platform {TARGET_PLATFORM}` 失败（exit {out.returncode}）："
+            raise ContainerError(f"`{self.binary} image inspect {ref} --platform {TARGET_PLATFORM}` 失败（退出码 {out.returncode}）："
                                  f"{_tail(err)}")
         try:
             data = json.loads(out.stdout.strip().splitlines()[0])
@@ -195,7 +195,7 @@ class ContainerEngine:
         except OSError as exc:
             raise ContainerError(f"无法启动 `{self.binary} {argv[0]}`：{exc}") from exc
         if out.returncode != 0:
-            raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（exit {out.returncode}）："
+            raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（退出码 {out.returncode}）："
                                  f"{_tail(out.stderr) or _tail(out.stdout)}")
         return out.stdout or ""
 
@@ -206,7 +206,7 @@ class ContainerEngine:
         except OSError as exc:
             raise ContainerError(f"无法启动 `{self.binary} {argv[0]}`：{exc}") from exc
         if rc != 0:
-            raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（exit {rc}）——诊断见上方 {self.binary} 输出。")
+            raise ContainerError(f"`{self.binary} {' '.join(argv)}` 失败（退出码 {rc}）——诊断见上方 {self.binary} 输出。")
 
 
 def resolve_container_engine(requested: str | None = None) -> ContainerEngine:

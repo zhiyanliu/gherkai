@@ -124,16 +124,12 @@ registerBuiltin(
   },
 );
 
-// 使用方确定性 step 的写法示例（**抄进你项目的 `steps/*.mts` 里改**，别改本文件——见上「产品不内置任何有措辞的 step」）：
+// 使用方确定性 step 的写法示例（**抄进你项目的 `steps/*.mts` 里改**，别改本文件——见上「产品不内置任何有措辞的 step」）。
+// 核对页面地址的 `Then 页面地址匹配 "<正则>"` 有可直接复制的模板（含设备网页上的第二份实现），
+// 见用户指南《编写确定性 step》的「内建的导航与 `steps/` 模板」一节：
+// https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-deterministic-steps.md
 //
 // import { deterministic, DeterministicAssertion } from "@gherkai/worker-midscene";
-//
-// deterministic('页面地址匹配 "(?<pattern>[^"]+)"', ({ page }, { pattern }) => {
-//   const url = page.url();
-//   if (!new RegExp(pattern).test(url)) {
-//     throw new DeterministicAssertion(`页面地址应匹配 ${JSON.stringify(pattern)}，实际 ${JSON.stringify(url)}`);
-//   }
-// }, { description: "断言当前页面地址匹配给定正则（精确判定，不走 AI、不投票）", example: 'Then 页面地址匹配 "/wiki/OpenAI"', keywords: ["Then"] });
 //
 // deterministic('元素 "(?<sel>[^"]+)" 可见', async ({ page }, { sel }) => {
 //   if (!(await page.locator(sel).isVisible())) {

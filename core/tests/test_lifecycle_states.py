@@ -137,7 +137,7 @@ def test_fail_fast_queued_job_is_skipped():
     queued_jr = next(jr for jr in result.jobs if jr.scope_id == "queued")
     assert crash_jr.status == Status.ERROR          # 触发者：自身崩
     assert queued_jr.status == Status.SKIPPED       # 被牵连、worker 从未 spawn
-    assert queued_jr.error_type is None             # skipped 无错（可无脑重新运行）
+    assert queued_jr.error_type is None             # skipped 无错（可直接重新运行）
     assert engine.run_count.get("queued") is None   # 关键：queued 的 worker 从未被 run_scope（没花钱）
     assert result.status == Status.ERROR            # run 级仍 error（crash 顶上去），skipped 不污染
 
@@ -192,7 +192,7 @@ def test_fail_fast_inflight_job_is_aborted():
     engine = _AbortProbeEngine()
     jobs = [_job("crash"), _job("victim")]
 
-    # 放行信号必须精确对应「abort_flag 已 set」。踩过的坑：crash 崩溃时 schedule 会 self._stop() 停**它自己**的
+    # 放行信号必须精确对应「abort_flag 已 set」。曾出现过的问题：crash 崩溃时 schedule 会 self._stop() 停**它自己**的
     # handle（schedule.py except 分支），这早于主线程 _stop_all() 的 abort_flag.set()——若见任意 stop 就放行，
     # victim 会在 abort_flag 还是 False 时醒来吐事件、一路查到 False → 误判 PASSED（flaky 根因）。
     # 正解：只在 **victim 自己的 handle** 被 stop 时才放行——victim 的 handle 只由 _stop_all() 停，那时 abort_flag 必已 set。

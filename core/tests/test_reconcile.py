@@ -146,10 +146,10 @@ def test_launch_failure_does_not_wedge_run(tmp_path):
     """launch 抛异常 → 补偿记非0退出 → 下轮判 ERROR 收敛，run 不 wedge（ADR 0034 机制二推论）。"""
     meta, log, store = _setup(tmp_path, "a", "b")
     boom = BoomLauncher()
-    # tick1：两个 job 都被 claim、launch 都炸——异常不裸穿、补偿落 task_exited
+    # tick1：两个 job 都被 claim、launch 都抛异常——异常不向外抛出、补偿落 task_exited
     done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t1")
     assert done is False
-    assert boom.attempts == ["a", "b"]  # 第一个炸不拖垮第二个（失败隔离）
+    assert boom.attempts == ["a", "b"]  # 第一个失败不拖垮第二个（失败隔离）
     # tick2：重放看到退出码非零 → 两 job ERROR → 全终态 → finalize，run 收敛
     done = tick("run-1", meta, log, store, boom, max_concurrency=2, now_iso="t2")
     assert done is True
@@ -236,7 +236,7 @@ def test_finalize_writes_verdicts_before_commit_point(tmp_path):
 
 
 def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path):
-    """判定真值落库失败 → 异常裸穿、**未** commit（状态仍 running）；下一轮 tick（触发源重试）成功落完并 commit。
+    """判定真值落库失败 → 异常原样抛出、**未** commit（状态仍 running）；下一轮 tick（触发源重试）成功落完并 commit。
     若反过来先 CAS 再落，失败发生在 commit 之后就没有下一轮了。"""
     import pytest
     seq: list = []

@@ -57,10 +57,16 @@ class Scenario:
 # 设备请求是具名结构、由组合根从配置解析成具体值后随 definition 走（core 只校验形态、不解释服务商状态）
 # ============================================================================
 
-# 获取预算的内建默认秒数（ADR 0051 决策 2）：项目配置可覆盖、上界 3600；设备 scope 的缺省墙钟与下限由它推出（加 900 / 加 180）。
+# 获取预算的内建默认秒数（ADR 0051 决策 2）：项目配置可覆盖、上界 3600；设备 scope 的缺省墙钟与下限由它加下面两个附加秒数推出。
 DEFAULT_ACQUIRE_TIMEOUT_S = 600.0
 # 获取预算的上界（ADR 0051 决策 2）：项目配置 [devices] acquire-timeout-s 不得超过它，超过在读配置时拒绝。
 MAX_ACQUIRE_TIMEOUT_S = 3600.0
+# job 墙钟预算按目标的缺省与下限（ADR 0034「job timeout」节、0051 决策 2），三个数只在这里持有一份：桌面 scope 的缺省秒数；
+# 设备 scope 的缺省是获取预算加 DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S，下限是获取预算加 MIN_DEVICE_JOB_TIMEOUT_EXTRA_S。
+# 推算归组合根（它知道项目配置的获取预算），plan 层只按目标选用（ADR 0025「timeout 解析」节）；CLI 的 help 文案也引用这里。
+DEFAULT_DESKTOP_JOB_TIMEOUT_S = 300.0
+DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S = 900.0
+MIN_DEVICE_JOB_TIMEOUT_EXTRA_S = 180.0
 # 合法的 (device, ui_kind) 组合（ADR 0048 决策 1）：桌面只有网页，不为桌面应用预留空位。
 VALID_TARGETS: frozenset[tuple[str, str]] = frozenset({
     ("desktop", "web"), ("android", "web"), ("android", "app"), ("ios", "web"), ("ios", "app"),
@@ -100,12 +106,14 @@ class Target:
 @dataclass(frozen=True)
 class DeviceFarmRequest:
     """向 AWS Device Farm 要哪台设备（ADR 0048 决策 3）：名字明说服务商、不起中立名；`device_arn` 与 `os_version` 二选一。
-    取值域（billing_method 的枚举、os_version 的点分形态、ARN 的服务与资源类型段）由 CLI 校验，core 只校验形态。"""
+    取值域（billing_method 的枚举、os_version 的点分形态、ARN 的服务与资源类型段）由 CLI 校验，core 只校验形态。
+    billing_method 没有缺省值、必须以关键字给出：它的内建缺省与枚举同在 CLI（`gherkai_cli.config.DEFAULT_BILLING_METHOD`），
+    组合根总是写入具体值，core 不另持一份。"""
 
     project_arn: str
     device_arn: str | None = None
     os_version: str | None = None
-    billing_method: str = "METERED"
+    billing_method: str = field(kw_only=True)
     acquire_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S
     provider: Literal["aws-device-farm"] = "aws-device-farm"
 
@@ -122,7 +130,7 @@ class Job:
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag、显式给出的 --default-job-timeout，或 plan 层按目标补的缺省
-    # （桌面 300，设备为获取预算加 900）；None 表示不超时，只有非设备 scope 可取（设备 scope 恒为有限正数，ADR 0048 决策 3 /
+    # （数值见上方 DEFAULT_DESKTOP_JOB_TIMEOUT_S 等三个常量）；None 表示不超时，只有非设备 scope 可取（设备 scope 恒为有限正数，ADR 0048 决策 3 /
     # 0051 决策 2）。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；worker 只在两处读它：建会话前
     # 与能力自述的 max_session_s 比较作自检，以及桌面 worker 据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；
     # 不计时、不自停。
@@ -170,7 +178,7 @@ class Status(str, Enum):
     PASSED = "passed"  # 测试通过
     FAILED = "failed"  # 断言投票没过，即测试发现了问题
     ERROR = "error"  # 引擎抛异常，即测试未能运行完成
-    SKIPPED = "skipped"  # core 派生终态：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn。没执行/没花钱/可无脑重新运行（ADR 0031）
+    SKIPPED = "skipped"  # core 派生终态：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn。没执行/没花钱/可直接重新运行（ADR 0031）
     ABORTED = "aborted"  # core 派生终态：主动中止（fail-fast 或使用方中断）时执行到一半被停止。有副作用/有现场可查（ADR 0031）
     PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
     RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 或非 attempted 的 session_opened 后刷（ADR 0030/0031/0051）
@@ -217,7 +225,7 @@ def severity(status: Status) -> int:
 
 # errorType 规范化类别集（ADR 0024，可随真实失败样本扩充）。
 # 本 Literal 是协议类别集的**单一事实源**（ADR 0024/0028），有意**不作字段注解**——wire 需容忍 worker
-# 报的未知类别（引擎先报、core 后补枚举，不能反序列化即炸），故各 error_type 字段一律标 str | None。
+# 报的未知类别（引擎先报、core 后补枚举，不能遇到未知类别就反序列化失败），故各 error_type 字段一律标 str | None。
 ErrorType = Literal[
     "assertion_failed",  # failed 态：断言没过
     "timeout",  # error 态：超时
@@ -226,7 +234,7 @@ ErrorType = Literal[
     "navigation_error",  # error 态：导航失败
     "network_error",  # error 态：网络/SSL/连接层瞬时故障（建连失败，可重试，ADR 0028）
     # 设备目标按扩充规则加的五项（ADR 0051 决策 4 类别表、ADR 0024「errorType」条）：
-    "precheck_failed",  # scope 级：执行前判定不可用（目标不受支持、墙钟预算超过会话上限、设备零候选、应用启动即自退…），重试不会变
+    "precheck_failed",  # scope 级：执行前判定不可用（目标不受支持、job 墙钟预算超过会话上限、设备零候选、应用启动即自退…），重试不会变
     "acquire_timeout",  # scope 级：获取设备超过预算，稍后重试或调大获取预算
     "session_lost",  # scope 级：会话在执行中途被外部停止或到期，判定不完整、job 级不重试
     "capability_unavailable",  # step 级：这一步需要的能力当前目标上不提供（网页上下文、DeepLink…），改写 step 或换目标
@@ -529,12 +537,11 @@ class RunMeta:
     # 分离，必须随 META 持久化才到得了推进器）——core 只搬运不消费，消费者是各推进器组合根（cloud 侧还会
     # 与部署侧 cap 取 min）。None 表示提交侧没有给出（推进器按各自口径回落）；落盘为 null（键集固定，ADR 0037 决策 7）。
     max_concurrency: int | None = None
-    # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）按 `--steps-dir` >
-    # env `GHERKAI_STEPS_DIR` > 项目配置文件 `steps-dir`（ADR 0053 决策 2）> 默认 `./steps`（存在才用）
-    # 解析成绝对路径后填这里，所有起 worker 的宿主（同步 run / local per-run 进程 / status --wait 接力者）从
-    # definition 读回、经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），只有随 definition 走才对三者一致，且
-    # 「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费（约定逻辑在组合根）。
-    # None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
+    # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）解析成绝对路径后填这里
+    # （取值顺序见该决策，配置文件那一层见 ADR 0053 决策 2），所有起 worker 的宿主（同步 run / local
+    # per-run 进程 / status --wait 接力者）从 definition 读回、经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），
+    # 只有随 definition 走才对三者一致，且「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费
+    # （约定逻辑在组合根）。None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
     # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次用的是哪套确定性
     # step 集」。人读面只有 definition 自身：落库的 META（云端后端下是 runs 表 META item；本机后端此字段恒 None、

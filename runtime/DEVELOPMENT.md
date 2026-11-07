@@ -19,7 +19,7 @@
     `is_pure_release`（版本是否为纯发行版，第四级的门槛之一；部署 provider 判断是否同步基础镜像时也用它）/ `build_engines`（local 后端）/
     `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）/ `make_resolver`（把引擎映射包成 core 要的
     `EngineResolver`）。注入 worker 的 env 由本模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` /
-    `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：有值显式注入、无值显式清除；`scrubbed_environ` 继承 `os.environ` 并先清除这些键，是每次注入的起点，
+    `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：前四个有值显式注入、无值显式清除，`RUN_ID` 是 `build_engines` 的必给参数、恒注入；`scrubbed_environ` 继承 `os.environ` 并先清除这些键，是每次注入的起点，
     `tools/e2e_harness.py` 也复用它）。`nova_act_timeout_s` 是 Nova 单 act 上界（注入的 `NOVA_ACT_TIMEOUT_S`）的单一取值点：惰性取值并缓存，
     坏值抛 `ValueError`；两个 builder 遇到坏值时把 Nova 那一项装配为一用即抛的占位项，只用 Midscene 的 run 不受影响。
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
@@ -36,9 +36,14 @@
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
     `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run（由 `run_requires_backend_stamp` 判定）判为
     `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `read_backend_version`
-    （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`；失败抛
-    `WorkerVariantError`，消息本身是给使用方看的整句）/ `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/
-    `read_task_def_stop_timeout`（doctor cloud 侧的对照值）/ `new_run_id`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟）/
+    （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`，其中
+    `stop_timeout_s` 是该 revision 上 worker container 的 `stopTimeout`（秒；没设或 task-def 里找不到该 container 时为 None），取自校验
+    revision 仍为 ACTIVE 的那次 DescribeTaskDefinition、不另发 AWS 调用；失败抛 `WorkerVariantError`，消息本身是给使用方看的整句）/
+    `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/ `read_task_def_stop_timeout`（doctor cloud 侧的对照值，与
+    `stop_timeout_s` 按同一 container 名认、读的是同一个量）/ `cloud_stop_bound_s`（云端同步 run 的停止后等待预算，作
+    `ScheduleOpts.stop_bound_s` 传入 schedule：本 run 用到的各引擎 worker container 的 `stopTimeout` 取最大，没设的按 Fargate 平台上限
+    `FARGATE_STOP_TIMEOUT_MAX_S`（120 秒）计，再加 ECS 记下 STOPPED 那段滞后的经验余量 `ECS_STOPPED_LAG_MARGIN_S`（20 秒）；core 的排空余量不在其中，
+    本机后端不调用它；ADR 0034 机制二）/ `new_run_id`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
@@ -53,7 +58,8 @@
   页面标题与正文标记与两个 worker 中消费它们的那份同值（Nova 只持标题，Midscene 持标题与正文标记），由 `engines/fixtures/tunnel-warmup.json` 对拍
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 隧道模式下恒同时给出的额外请求头（`TUNNEL_EXTRA_HTTP_HEADERS`）与会话预热地址
   （`TunnelInfo.warmup_url`，经 `TunnelSetup.info` 取得）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
-  Σ 各 job 预算 + 启动/级联余量 `CLOUD_STARTUP_MARGIN_S`，执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
+  一次性余量 `CLOUD_STARTUP_MARGIN_S`（900 秒）加 Σ(各 job 预算 + 每 job 余量 `CLOUD_PER_JOB_MARGIN_S`)，每 job 余量 210 秒由 Scheduler 触发精度 60 秒、
+  Fargate 停止宽限上限 120 秒与事件链尾延迟约 30 秒组成，最后一项是经验值、不是硬上界；执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
 - `textui.py` —— 人读输出的呈现件（ADR 0047）：`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain`
   与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：环境变量 `NO_COLOR` /
   `FORCE_COLOR` / `TERM=dumb` 的判定取自 `gherkai_core.termcolor`、与 worker 日志前缀共用一份，本模块再看标准输出是否为终端）与状态色映射 `STATUS_STYLE` 都由本模块提供；cli 与部署 provider 只经本模块使用 rich

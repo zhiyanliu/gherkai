@@ -216,7 +216,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     # step 层级；用锚点把每条产物和它所属的树节点互相链上，读者点 📎 从树跳到产物、点 ↑ 从产物跳回树节点。
     # 关联键是产物挂载层级的 (scope_id, scenario_id, step_index) 三元组（None 表该级为止，对齐 report_index 投影）。
     # node_anchor：把三元组编成 html-safe 的稳定 id（不含任意 UTF-8——scope_id 可能是中文/带 : 的路径，直接进
-    # id/#fragment 易踩坑，故用层级前缀 + 在 report_index 里的序号，纯 ASCII、稳定、两边一致）。
+    # id/#fragment 容易出问题，故用层级前缀 + 在 report_index 里的序号，纯 ASCII、稳定、两边一致）。
     def _node_anchor(scope_id: str, scenario_id, step_index) -> str:
         # 用该节点在 result.jobs 里的位置编号（job i / scenario j / step k），纯 ASCII、确定性、树与列表共用同一算法。
         ji = _job_pos.get(scope_id)

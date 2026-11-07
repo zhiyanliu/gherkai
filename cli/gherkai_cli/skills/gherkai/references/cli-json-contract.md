@@ -1,7 +1,5 @@
 # gherkai CLI 的 `--json` 字段契约
 
-本页讲 `--json` 各命令输出有哪些字段、什么意思、何时出现。
-
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断与进度一律输出到 stderr；`null` 表示「无此值」（如无成本、未落值），
 省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置 / 读取失败路径 stdout 可为空、诊断输出在 stderr，因此**须先按退出码分流，再解析 stdout**。
 退出码含义见 `SKILL.md` 的退出码一节，或 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 「退出码」。
@@ -80,7 +78,7 @@
 | `default_engine` | string | 未标 `@engine` 的 scope 使用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
 | `device_session_count` | int | 这次 run 将建立的远程访问会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
-| `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时 `{arn, source}`，按系统版本挑选时 `{os_version, source}`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
+| `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时含 `arn`（设备 ARN）与 `source`，按系统版本挑选时含 `os_version`（要求的系统版本）与 `source`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
 `steps[].deterministic` 四态：至少一个引擎的确定性命中查询成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
@@ -213,6 +211,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 |---|---|
 | `prefix` / `version` | 后端前缀；「当前版本」指本 CLI 版本（镜像 tag 命名空间） |
 | `default_variant` | 默认 variant 名；未初始化为 null |
+| `engines` | 按引擎名分组的对象，每个引擎一项（下面各行是它的子键） |
 | `engines.<engine>.family` / `ecr_repo` | task-def family 与 ECR 仓库名 |
 | `engines.<engine>.variants[]` | `variant`、`tag`（`<版本>-<variant>`）、`digest`、`pushed_at`、`revision_arn`、`template_arn` |
-| `engines.<engine>.pending_cleanup[]` | 待清理 revision：`revision_arn`、`reason`（`retired` / `orphan`）、`variant`、`retired_at`、`registered_at` |
+| `engines.<engine>.pending_cleanup[]` | 待清理 revision：`revision_arn`、`reason`（`retired` / `orphan`）、`variant`、`retired_at`、`registered_at`、`still_mapped`（布尔，每条都带：该 revision 是否仍被某个版本的映射引用；为 `true` 时清理不会删它，为 `false` 不表示下次清理就删，退休满静默期、没有未到终态的 run 引用两个条件照样要满足；孤儿恒为 `false`） |

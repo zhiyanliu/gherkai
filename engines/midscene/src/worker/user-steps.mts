@@ -1,8 +1,8 @@
 // 使用方 `steps/` 目录的加载（ADR 0037 决策 4；Nova 引擎侧 `*.py` 遍历是其对称版）。
 //
-// 契约（约定逻辑**不在这里**）：目录由组合根解析（`--steps-dir` > env > 项目配置文件的 `steps-dir` > `./steps`，
-// ADR 0037 决策 4、0053 决策 2）、随 definition 持久化、经 env `GHERKAI_STEPS_DIR` 注给 worker。worker 只认这个 env、
-// 不认约定、不重解析——保持薄（ADR 0016 分层）。
+// 契约（约定逻辑**不在这里**）：目录由组合根解析成绝对路径（取值顺序见 ADR 0037 决策 4，配置文件那一层见 ADR 0053
+// 决策 2）、随 definition 持久化、经 env `GHERKAI_STEPS_DIR` 注给 worker。worker 只认这个 env、不认约定、不重解析
+// `./steps`——保持薄（ADR 0016 分层）。
 //
 // 加载规则：**排序**递归遍历 `*.mts` / `*.mjs`（排除 `_*` 与 `*.test.*`），逐个 `await import(fileURL)`，
 // 文件顶层 `deterministic(...)` 的副作用完成注册。排序保证 conflict 清单可复现（ADR 0036）。

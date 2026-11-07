@@ -24,7 +24,9 @@ def test_schema_version_is_checked_first_and_pinned_by_golden():
 
     assert precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION}) is None
     assert "缺失" in precheck_schema({}) and "同一版本" in precheck_schema({})
-    assert precheck_schema({"schemaVersion": True}) is not None and precheck_schema({"schemaVersion": "1"}) is not None  # true 与 "1" 都不是 1
+    v = PROTOCOL_SCHEMA_VERSION
+    assert all(precheck_schema({"schemaVersion": bad}) is not None for bad in (True, str(v), float(v)))  # 布尔值、字符串与浮点数都不算整数版本号
+    assert "格式版本是 1" in precheck_schema({"schemaVersion": 1})  # 1.4 的命令行工具写出的 job 行（协议版本 1）
     assert f"格式版本是 {PROTOCOL_SCHEMA_VERSION + 1}" in precheck_schema({"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1})
     bad = {"schemaVersion": PROTOCOL_SCHEMA_VERSION + 1, "target": {"device": "ios", "uiKind": "app"}}
     assert "格式版本" in precheck_job(bad, rs.WORKER_TARGETS)  # 版本先于目标
@@ -65,7 +67,7 @@ def test_main_entry_rejects_device_job_before_any_session():
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     env = {k: v for k, v in os.environ.items() if k in keep}
     env["AWS_EC2_METADATA_DISABLED"] = "true"
-    job = {"schemaVersion": 1, "scope": {"id": "dev", "name": "dev"}, "engine": "novaact", "assertionVotes": 1, "timeoutS": 1500,
+    job = {"schemaVersion": 2, "scope": {"id": "dev", "name": "dev"}, "engine": "novaact", "assertionVotes": 1, "timeoutS": 1500,
            "target": {"device": "android", "uiKind": "web"}, "deviceRequest": None,
            "scenarios": [{"id": "d.feature:3", "name": "s", "steps": [{"index": 0, "keyword": "Given", "text": "https://x/"}]}]}
     proc = subprocess.run([sys.executable, "-m", "gherkai_worker_novaact"], input=(json.dumps(job) + "\n").encode("utf-8"),

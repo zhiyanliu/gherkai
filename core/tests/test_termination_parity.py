@@ -34,7 +34,7 @@ from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
 SCOPE = "dev"
 
 
-_DEVICE = dict(target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+_DEVICE = dict(target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
 
 
 def _job(timeout_s: float | None = None, device: str = "android") -> Job:
@@ -195,6 +195,67 @@ def test_sync_and_stateless_paths_feed_finalize_the_same_flags(monkeypatch, row:
     _stateless(row)
     assert seen["sync"] and seen["stateless"]
     assert seen["sync"][-1] == seen["stateless"][-1], f"\n同步：{seen['sync']}\n无状态：{seen['stateless']}"
+
+
+# 停止后的收尾晚于 grace 加余量（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：Fargate 上从发出停止请求到事件流结束要经过
+# 容器停止宽限与 ECS 记下 STOPPED 的滞后，远超运行期 grace。同步路径按组合根注入的停止后等待预算排空，同一组事实与无状态路径的结论仍一致；
+# 排空上界只取 grace 加 5 秒时，同步路径丢掉晚到的收尾，与无状态路径分歧（该条理由段记下的两个后果）。
+
+class _LateStopClock:
+    """与 _Clock 相同地越过 deadline；发出停止请求后停在请求时刻加 20 秒：停止后的收尾事件与 EOF 都在这个时刻到达，
+    超出 grace 1 秒加 5 秒余量，落在等待预算 30 秒加余量之内。"""
+
+    WINDOW_S = 20.0
+
+    def __init__(self, jump_after: int):
+        self.inner = _Clock(jump_after)
+        self.frozen: float | None = None
+
+    def __call__(self) -> float:
+        return self.frozen if self.frozen is not None else self.inner()
+
+    def on_stop(self, scope_id: str) -> None:  # FakeEngine 的 on_stop 钩子：停止请求时刻已经记下
+        if self.frozen is None:
+            self.frozen = self.inner.t + self.WINDOW_S
+
+
+def _sync_late_stop(row: Row, stop_bound_s: float | None):
+    """超时行的同步路径，收尾改为停止请求后 20 秒才到（事件序列与 _sync 相同，与 _stateless 同源）。"""
+    job = _job(row.timeout_s, row.device)
+    clock = _LateStopClock(jump_after=len(row.events) * 2 + 2)
+    main = list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]
+    engine = FakeEngine({SCOPE: main}, tail_after_stop={SCOPE: list(row.tail)},  # 发完事件后活着等停，收尾隔一会儿才到
+                        exit_code={SCOPE: row.exit_code} if row.exit_code else {}, tail_delay_s=0.2, on_stop=clock.on_stop)
+    if row.crash:
+        engine.crash_after = {SCOPE: len(main)}
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,)), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0,
+                                     stop_bound_s=stop_bound_s))
+    return res.jobs[0]
+
+
+_TIMED_OUT = [r for r in MATRIX if r.timed_out]
+# 内容完整（scope_done 已到、干净退出）后 deadline 才到：无状态路径按「内容完整后不再仲裁」判 PASSED
+_COMPLETE_THEN_DEADLINE = Row("内容完整后 deadline 才到", [_opened("a"), ScopeStarted(scope_id=SCOPE, session_id="arn:a"),
+                                                       *_passed_scenario(0), *_passed_scenario(1), _closed("a"), ScopeDone(scope_id=SCOPE)],
+                              [], 0, timed_out=True, timeout_s=5.0)
+
+
+@pytest.mark.parametrize("row", [*_TIMED_OUT, _COMPLETE_THEN_DEADLINE], ids=[r.name for r in [*_TIMED_OUT, _COMPLETE_THEN_DEADLINE]])
+def test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound(row: Row):
+    a, b = _comparable(_sync_late_stop(row, stop_bound_s=30.0)), _comparable(_stateless(row))
+    assert a == b, f"\n同步：{a}\n无状态：{b}"
+
+
+def test_grace_only_drain_bound_diverges_under_late_stop_tail():
+    """上一组对拍的时序确实超出 grace 加余量（不是碰巧相等）：不给等待预算时，同步路径复现两个后果——①停止后晚到的 confirmed
+    session_closed 被丢弃，message 多出释放提示；②内容已完整的 job 等不到 EOF，退出码记为未知，判成 ERROR timeout，而无状态路径判 PASSED。"""
+    row = next(r for r in MATRIX if r.name == "scenario 中途超时加停止后 session_closed")
+    late = _sync_late_stop(row, stop_bound_s=None)
+    assert DEVICE_RELEASE_FAILED_HINT in late.message and DEVICE_RELEASE_FAILED_HINT not in (_stateless(row).message or "")
+    late = _sync_late_stop(_COMPLETE_THEN_DEADLINE, stop_bound_s=None)
+    assert (late.status, late.error_type) == (Status.ERROR, "timeout")
+    assert _stateless(_COMPLETE_THEN_DEADLINE).status == Status.PASSED
 
 
 # 未退出时的 job 态（ADR 0034 机制二真值表「未退出」行、ADR 0051 决策 4）：同步路径由实时落库（schedule 把每条事件原样转给

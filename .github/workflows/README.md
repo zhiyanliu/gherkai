@@ -157,7 +157,8 @@ npm provenance（以 tarball 发布时是否照常附带）、GHCR 推送与包�
 
 ## 两态基础镜像 Dockerfile 的本地态 build（不发行也能验镜像）
 
-`release.yml` 的 `images` job 用 index 态（按 tag 版本装已发行包）；两个工作流的 `image-gate` 用 local 态，装的是同一次构建出的 wheel 与 tarball。本地复现 gate 或在发行前验证镜像内容，同样用 local 态装入本地构建的产物——命令与 build-arg
+`release.yml` 的 `images` job 用 index 态（按 tag 版本装已发行包）；两个工作流的 `image-gate` 用 local 态，装的是同一次构建出的 wheel 与 tarball，
+构建逻辑共用 `.github/scripts/image_gate.sh <novaact|midscene> <产物目录>`（只把目录里匹配的那一个产物拷进临时 build context），本地复现 gate 用同一条命令。在发行前验证镜像内容，同样用 local 态装入本地构建的产物——命令与 build-arg
 见各 `engines/*/Dockerfile` 头注释（`uv build --package gherkai-worker-novaact` 出 wheel、`npm pack` 出 tarball，
 `--build-arg WORKER_SOURCE=local`，context 即放产物的目录）。冒烟（不需要 AWS）：`docker run --rm --platform linux/amd64 <镜像> python -m gherkai_worker_novaact --capabilities` /
 `… <镜像> gherkai-worker-midscene --capabilities`（要给完整命令：上游 `node:22-slim` 镜像的 entrypoint 会把以 `-` 开头的首参当 node 选项）。index 态用任一已发行版本验证（`--build-arg WORKER_VERSION=<已发行的 X.Y.Z>`；占位版本 `0.0.0` 是空包，不含 worker）。

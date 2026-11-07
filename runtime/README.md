@@ -16,10 +16,13 @@ from pathlib import Path
 from gherkai_runtime import compose
 
 features = [compose.load_feature(Path("features/checkout.feature"))]
-engines = compose.build_engines(region="us-east-1")     # 本机 worker 子进程
+run_id = compose.new_run_id()                                       # 这次 run 的 id
+engines = compose.build_engines(run_id=run_id, region="us-east-1")  # 本机 worker 子进程
 resolver = compose.make_resolver(engines)
-# 接着把 features 分组成 job、连同 resolver 交给 gherkai_core.schedule.schedule(...) 执行
+# 接着把 features 分组成 job，用同一个 run_id 构造 RunMeta，连同 resolver 交给 gherkai_core.schedule.schedule(...) 执行
 ```
+
+`build_engines` 必须给 `run_id`，并且要与交给 `schedule` 的 `RunMeta.run_id` 是同一个值：worker 用它给云端浏览器会话与远程访问会话命名，没有它，worker 在建立会话之前就会退出。
 
 分组到执行的完整用法见核心库的页面：https://pypi.org/project/gherkai-core/ 。
 

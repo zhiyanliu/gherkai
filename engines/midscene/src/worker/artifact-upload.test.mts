@@ -9,7 +9,8 @@ import assert from "node:assert";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { ArtifactUploader } from "../lib/artifact-upload.mjs";
+import { ArtifactUploader, DEVICE_SESSION_BASENAME, QUEUE_GENERIC_NOUN, queuedFileNoun } from "../lib/artifact-upload.mjs";
+import { DEVICE_SESSION_FILE } from "../device/device-session.mjs";
 
 // 塞 mock S3 client（记录 send 的 key；failKeys 里的 key 抛错），绕过真 aws-sdk。返回纯 key 数组（老测试直接
 // deepEqual 用）。send 的第二参 options（含 abortSignal）另记到 client.sendOpts 上，供超时 plumbing 断言读
@@ -46,7 +47,7 @@ test("no-op reports file:// and does not touch local", async () => {
   const u = ArtifactUploader.fromEnv();
   assert.equal(u.enabled, false);
   assert.equal(await u.toReportRef(f), `file://${f}`);  // 裸拼 file://（与 Nova 对称、保旧行为）
-  await u.flushAndCleanup(path.join(root, "midscene-run"));
+  await u.flushAndCleanup(path.join(root, "midscene-run"), () => false);
   assert.ok(fs.existsSync(f));  // no-op 不碰本地
 });
 
@@ -80,7 +81,7 @@ test("flush uploads rest, skips uploaded, deletes whole dir", async () => {
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   await u.toReportRef(html);           // 实时传 html
-  await u.flushAndCleanup(msDir);
+  await u.flushAndCleanup(msDir, () => false);
   // html 只传一次（实时；flush 跳过）；log 由 flush 传（整目录、不按文件挑）
   assert.equal(keys.filter((k) => k.endsWith("report/x.html")).length, 1);
   assert.ok(keys.includes("reports/rid/midscene-run/log/ai-call.log"));
@@ -129,9 +130,65 @@ test("flush failure swallowed but dir kept", async () => {
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   withMockClient(u, { failKeys: ["reports/rid/midscene-run/log/ai.log"] });  // 剩余 log 上传失败
   await u.toReportRef(html);            // 实时传 html（成功）
-  await u.flushAndCleanup(msDir);        // 传 log 失败 → 吞掉、不抛
+  await u.flushAndCleanup(msDir, () => false);        // 传 log 失败 → 吞掉、不抛
   assert.ok(fs.existsSync(msDir));       // 整目录保留（产物不丢）
   assert.ok(fs.existsSync(html) && fs.existsSync(log));
+});
+
+// ---- 进入终结之后 flush 让位（ADR 0051 决策 5「进入终结之后主流程让位」）：stopRequested 在每个文件之前、单个文件失败后的重试之前与
+// 删目录之前读；已在途的那个文件照常传完 ----
+function flushTree(names: string[]): { runDir: string; msDir: string; files: string[] } {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const msDir = path.join(runDir, "midscene-run");
+  const logDir = path.join(msDir, "log");
+  fs.mkdirSync(logDir, { recursive: true });
+  const files = names.map((n) => { const f = path.join(logDir, n); fs.writeFileSync(f, n); return f; });
+  return { runDir, msDir, files };
+}
+
+test("flush：第一个文件在途时进入终结 → 它照常传完，不再发起下一个文件，目录不删", async () => {
+  const { runDir, msDir, files } = flushTree(["a.log", "b.log", "c.log"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let stop = false;
+  const keys: string[] = [];
+  (u as any).client = { send: async (cmd: any) => { keys.push(cmd.input.Key); stop = true; return {}; } };  // 第一个上传期间进入终结
+  await u.flushAndCleanup(msDir, () => stop);
+  assert.equal(keys.length, 1, `进入终结之后不再发起下一个文件，实际发起 ${keys.length} 个`);
+  assert.ok(fs.existsSync(msDir) && files.every((f) => fs.existsSync(f)), "进入终结之后不删运行目录，产物留在本地");
+});
+
+test("flush：单个文件首传失败、失败期间进入终结 → 不再重试（重试之前读终结标志）", async () => {
+  const { runDir, msDir } = flushTree(["a.log"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let stop = false;
+  let sends = 0;
+  (u as any).client = { send: async () => { sends++; stop = true; throw new Error("s3 fail"); } };
+  await u.flushAndCleanup(msDir, () => stop);
+  assert.equal(sends, 1, "首传失败之后已进入终结：不发起那次重试");
+  assert.ok(fs.existsSync(msDir));
+});
+
+test("flush：最后一个文件在途时进入终结 → 全部上传成功也不删目录", async () => {
+  const { runDir, msDir, files } = flushTree(["a.log", "b.log"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let stop = false;
+  const keys: string[] = [];
+  (u as any).client = { send: async (cmd: any) => { keys.push(cmd.input.Key); if (keys.length === 2) stop = true; return {}; } };
+  await u.flushAndCleanup(msDir, () => stop);
+  assert.equal(keys.length, 2, "两个文件都已发起并传完");
+  assert.ok(fs.existsSync(msDir) && files.every((f) => fs.existsSync(f)), "收尾序列还要读这个目录：不删");
+});
+
+test("后台队列不读终结标志：单个文件失败照常重试一次（停止路径的排空等的就是这条队列）", async () => {
+  const { runDir, files } = flushTree(["shot.png"]);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let sends = 0;
+  (u as any).client = { send: async () => { sends++; if (sends === 1) throw new Error("s3 fail"); return {}; } };
+  u.logFn = () => {};
+  u.enqueue(files);
+  assert.equal(await u.drain(1000), true);
+  assert.equal(sends, 2, "首传失败后重试一次");
 });
 
 // ---- fromEnv：读注入 env，runDir 取 MIDSCENE_RUN_DIR 的父级 ----
@@ -151,7 +208,7 @@ test("fromEnv enabled when bucket set, runDir = MIDSCENE_RUN_DIR parent", () => 
 });
 
 
-// ---- snapshotReport（act 边界提前上传，ADR 0029 为 Fargate 预演）：overwrite 同 key、不记 uploaded、不删目录 ----
+// ---- snapshotReport（act 边界提前上传，ADR 0029）：overwrite 同 key、不记 uploaded、不删目录 ----
 test("snapshotReport overwrites same key, does not touch uploaded ledger", async () => {
   const root = tmproot();
   const runDir = path.join(root, "reports", "rid");
@@ -233,7 +290,7 @@ test("snapshotLogs uploads all log files, keys mirror tree, overwrites same key 
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   const seen = new Map<string, number>();
-  await u.snapshotLogs(logDir, seen, 5000);
+  await u.snapshotLogs(logDir, seen, 5000, () => false);
   assert.deepEqual(
     keys.sort(),
     ["reports/rid/midscene-run/log/ai-call.log", "reports/rid/midscene-run/log/planning.log"],
@@ -250,13 +307,13 @@ test("snapshotLogs mtime 去重：未变文件不重传，变了才重传", asyn
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   const seen = new Map<string, number>();
-  await u.snapshotLogs(logDir, seen, 5000);       // 首次传
-  await u.snapshotLogs(logDir, seen, 5000);       // mtime 未变 → 跳过
+  await u.snapshotLogs(logDir, seen, 5000, () => false);       // 首次传
+  await u.snapshotLogs(logDir, seen, 5000, () => false);       // mtime 未变 → 跳过
   assert.equal(keys.length, 1, "第二次 mtime 未变 → 去重跳过");
   // log 增长（append）+ mtime 变 → 重传
   fs.writeFileSync(p, "v1-and-more");
   fs.utimesSync(p, 2000, 2000);
-  await u.snapshotLogs(logDir, seen, 5000);
+  await u.snapshotLogs(logDir, seen, 5000, () => false);
   assert.equal(keys.length, 2, "mtime 变 → 重传一次（overwrite 同 key）");
   assert.ok(keys.every((k) => k === "reports/rid/midscene-run/log/ai-call.log"));
 });
@@ -268,12 +325,12 @@ test("snapshotLogs 逐文件吞失败：某 log 传失败不饿死其余、失�
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u, { failKeys: ["reports/rid/midscene-run/log/bad.log"] });
   const seen = new Map<string, number>();
-  await u.snapshotLogs(logDir, seen, 5000);  // bad 抛、good 照传（不整体抛）
+  await u.snapshotLogs(logDir, seen, 5000, () => false);  // bad 抛、good 照传（不整体抛）
   assert.ok(keys.includes("reports/rid/midscene-run/log/good.log"), "good 照传");
   assert.ok(keys.includes("reports/rid/midscene-run/log/bad.log"), "bad 尝试过");
   // good 记 seen、bad 没记 → 下轮 good 跳过、bad 重试
   const before = keys.length;
-  await u.snapshotLogs(logDir, seen, 5000);
+  await u.snapshotLogs(logDir, seen, 5000, () => false);
   const retried = keys.slice(before);
   assert.deepEqual(retried, ["reports/rid/midscene-run/log/bad.log"], "下轮只重试失败的 bad，good 已 seen 跳过");
 });
@@ -285,8 +342,21 @@ test("snapshotLogs 总墙钟预算：budgetMs=0 → 一个都不传", async () =
   const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys = withMockClient(u);
   const seen = new Map<string, number>();
-  await u.snapshotLogs(logDir, seen, 0);  // 预算 0 → 循环首行即超 deadline、break
+  await u.snapshotLogs(logDir, seen, 0, () => false);  // 预算 0 → 循环首行即超 deadline、break
   assert.equal(keys.length, 0, "budgetMs=0 → 放弃全部（best-effort）");
+});
+
+test("snapshotLogs：第一个文件在途时进入终结 → 不再发起下一个文件（ADR 0051 决策 5「进入终结之后主流程让位」）", async () => {
+  const { logDir, runDir, mk } = mkLogDir();
+  for (const n of ["a.log", "b.log", "c.log"]) mk(n, n, 1000);
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  let stop = false;
+  const keys: string[] = [];
+  (u as any).client = { send: async (cmd: any) => { keys.push(cmd.input.Key); stop = true; return {}; } };
+  const seen = new Map<string, number>();
+  await u.snapshotLogs(logDir, seen, 5000, () => stop);
+  assert.equal(keys.length, 1, `进入终结之后不再发起下一个文件，实际发起 ${keys.length} 个`);
+  assert.equal(seen.size, 1, "已在途的那个照常传完、记 seen");
 });
 
 test("snapshotLogs no-op when not enabled / log 目录不存在", async () => {
@@ -294,14 +364,14 @@ test("snapshotLogs no-op when not enabled / log 目录不存在", async () => {
   delete process.env.ARTIFACT_S3_BUCKET;
   const u1 = ArtifactUploader.fromEnv();
   const keys1 = withMockClient(u1);
-  await u1.snapshotLogs("/nonexistent/log", new Map(), 5000);
+  await u1.snapshotLogs("/nonexistent/log", new Map(), 5000, () => false);
   assert.deepEqual(keys1, []);
   // enabled 但 log 目录不存在 → 直接返回、不抛
   const root = tmproot();
   const runDir = path.join(root, "reports", "rid");
   const u2 = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
   const keys2 = withMockClient(u2);
-  await u2.snapshotLogs(path.join(runDir, "midscene-run", "log"), new Map(), 5000);
+  await u2.snapshotLogs(path.join(runDir, "midscene-run", "log"), new Map(), 5000, () => false);
   assert.deepEqual(keys2, [], "log 目录不存在 → no-op");
 });
 
@@ -339,7 +409,7 @@ test("snapshotLogs 预算中途耗尽：传部分后 break，未传的仍可下�
     },
   };
   const seen = new Map<string, number>();
-  await u.snapshotLogs(logDir, seen, 50);  // 预算 50ms、每次 send 40ms → 传 1~2 个后循环顶越界 break
+  await u.snapshotLogs(logDir, seen, 50, () => false);  // 预算 50ms、每次 send 40ms → 传 1~2 个后循环顶越界 break
   assert.ok(sent >= 1 && sent < 3, `预算中途耗尽应传部分（1~2 个）、非全部，实传 ${sent}`);
   assert.equal(seen.size, sent, "只有真传成功的记 seen，未传的不进 seen（下轮/scope 末 flush 可重试）");
 });
@@ -377,7 +447,7 @@ test("refFor: ref 与 toReportRef 逐字一致，但不上传、不记 uploaded"
   assert.equal(ref, "s3://bkt/reports/rid/midscene-run/report/screenshots/abc.jpeg");
   // 只算过 ref、没被实时传的截图，字节由 scope 末 flush 兜上去（ADR 0042 决策一「上传时机分两类」）——
   // 否则 evidence 里的 URI 悬空。abc.jpeg 已被 toReportRef 实时传过，flush 按幂等守卫跳过它、不重传。
-  await u.flushAndCleanup(path.join(runDir, "midscene-run"));
+  await u.flushAndCleanup(path.join(runDir, "midscene-run"), () => false);
   assert.deepEqual(keys, [
     "reports/rid/midscene-run/report/screenshots/abc.jpeg",
     "reports/rid/midscene-run/report/screenshots/def.jpeg",
@@ -507,7 +577,7 @@ test("enqueue: 传成功记账 → scope 末 flush 跳过它，同一 key 不双
   const keys = withMockClient(u);
   u.enqueue(files);
   await u.drain(5000);
-  await u.flushAndCleanup(msDir);
+  await u.flushAndCleanup(msDir, () => false);
   const shotKey = "reports/rid/midscene-run/report/screenshots/a.jpeg";
   assert.equal(keys.filter((k) => k === shotKey).length, 1, "队列已传的截图 flush 不重传");
   assert.ok(keys.includes("reports/rid/midscene-run/log/ai.log"), "漏网的仍由 flush 传");
@@ -535,10 +605,10 @@ test("enqueue: 上传失败重试一次；再失败 → 一行日志放弃，不
   assert.equal(await u.drain(5000), true, "失败也算排空（链不 reject）");
   assert.deepEqual(keys, [shotKey, shotKey], "首传 + 重试一次，共两次");
   assert.equal(logs.length, 1, "放弃时只记一行");
-  assert.ok(logs[0].includes("截图"));
+  assert.ok(logs[0].startsWith("worker: 证据截图上传失败（"), logs[0]);
   assert.equal((u as any).uploaded.size, 0, "没传成功 → 不记账，flush 仍会再试");
   // flush 兜底：还会再试（且它自己也重试一次）
-  await u.flushAndCleanup(msDir);
+  await u.flushAndCleanup(msDir, () => false);
   assert.equal(keys.filter((k) => k === shotKey).length, 4, "flush 又试两次（首传+重试）");
   assert.ok(fs.existsSync(msDir), "始终没传成 → 整目录保留（产物不丢）");
 });
@@ -625,7 +695,7 @@ test("device-session.json：toReportRef 即时上传、key 镜像 run 树、按 
   assert.equal(ref, `s3://bkt/${key}`, "scope_done 的 reportRefs 带的就是这条 ref");
   assert.deepEqual(keys, [key], "即时上传（链接随 scope_done 发出时对象已在）");
   assert.equal((u as any).client.inputs[0].ContentType, "application/json");
-  await u.flushAndCleanup(msDir);
+  await u.flushAndCleanup(msDir, () => false);
   assert.equal(keys.filter((k) => k === key).length, 1, "flush 按已传集合跳过");
   assert.ok(!fs.existsSync(msDir), "全成功 → 整目录删");
 });
@@ -657,7 +727,69 @@ test("原始控件树：refFor 先算 URI，enqueue 后台传到同一 key，在
   const key = "reports/rid/midscene-run/device/page-source-0.xml";
   assert.deepEqual(keys, [key]);
   assert.equal(ref, `s3://bkt/${key}`, "evidence 里的 URI 与真上去的 key 逐字一致");
-  await u.flushAndCleanup(msDir);
+  await u.flushAndCleanup(msDir, () => false);
   assert.equal(keys.filter((k) => k === key).length, 1, "队列已传的 flush 不重传");
   assert.ok(!fs.existsSync(msDir));
+});
+
+// ---- 后台队列日志的名词（ADR 0039 面一「两引擎措辞一致」）：按文件真实类型取，截图与 Nova 同名，认不出与混排用泛称 ----
+
+test("queuedFileNoun：截图、原始控件树、设备诊断文件各用自己的名称，其余用泛称；设备诊断文件名与设备模块同值", () => {
+  assert.equal(DEVICE_SESSION_BASENAME, DEVICE_SESSION_FILE, "两处文件名漂移就会把设备诊断文件说成泛称");
+  assert.equal(queuedFileNoun("/r/midscene-run/report/screenshots/a.jpeg"), "证据截图");
+  assert.equal(queuedFileNoun("/r/midscene-run/report/screenshots/a.JPG"), "证据截图");
+  assert.equal(queuedFileNoun("/r/midscene-run/report/screenshots/a.png"), "证据截图");
+  assert.equal(queuedFileNoun("/r/midscene-run/device/s/page-source/step-0001.xml"), "原始控件树");
+  assert.equal(queuedFileNoun(`/r/midscene-run/device/s/${DEVICE_SESSION_FILE}`), "设备诊断文件");
+  assert.equal(queuedFileNoun("/r/midscene-run/device/s/other.json"), QUEUE_GENERIC_NOUN, "按文件名精确认，别的 .json 不算");
+  assert.equal(queuedFileNoun("/r/midscene-run/log/ai.log"), QUEUE_GENERIC_NOUN);
+});
+
+test("enqueue：上传失败那行按文件类型取名词（原始控件树、设备诊断文件不再说成截图）", async () => {
+  const root = tmproot();
+  const runDir = path.join(root, "reports", "rid");
+  const devDir = path.join(runDir, "midscene-run", "device", "s");
+  fs.mkdirSync(path.join(devDir, "page-source"), { recursive: true });
+  const xml = path.join(devDir, "page-source", "step-0001.xml");
+  const diag = path.join(devDir, DEVICE_SESSION_FILE);
+  fs.writeFileSync(xml, "<hierarchy/>");
+  fs.writeFileSync(diag, "{}");
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  withMockClient(u, { failKeys: [
+    "reports/rid/midscene-run/device/s/page-source/step-0001.xml",
+    `reports/rid/midscene-run/device/s/${DEVICE_SESSION_FILE}`,
+  ] });
+  const logs: string[] = [];
+  (u as any).logFn = (m: string) => logs.push(m);
+  u.enqueue([xml, diag]);
+  assert.equal(await u.drain(5000), true);
+  assert.equal(logs.length, 2, logs.join("\n"));
+  assert.ok(logs[0].startsWith("worker: 原始控件树上传失败（") && logs[0].includes("step-0001.xml"), logs[0]);
+  assert.ok(logs[1].startsWith("worker: 设备诊断文件上传失败（") && logs[1].includes(DEVICE_SESSION_FILE), logs[1]);
+  assert.ok(logs.every((l) => !l.includes("截图")), "不把别的文件说成截图");
+  assert.equal(u.pendingNoun(), QUEUE_GENERIC_NOUN, "全部落定（含失败）之后不再有未落定项");
+  assert.equal((u as any).pendingByNoun.size, 0);
+});
+
+test("pendingNoun：只剩截图时用「证据截图」（与 Nova 同名），截图与设备诊断文件混排时用泛称，落定即减", async () => {
+  const { runDir, msDir, files } = mkShots(["a.jpeg", "b.jpeg"]);
+  const diag = path.join(msDir, "device", "s", DEVICE_SESSION_FILE);
+  fs.mkdirSync(path.dirname(diag), { recursive: true });
+  fs.writeFileSync(diag, "{}");
+  const u = new (ArtifactUploader as any)("bkt", "reports/rid/", runDir);
+  const gates: (() => void)[] = [];
+  (u as any).client = { send: async () => { await new Promise<void>((r) => { gates.push(r); }); return {}; } };
+  const release = async () => { while (gates.length === 0) await new Promise((r) => setTimeout(r, 1)); gates.shift()!(); };
+  u.enqueue(files);
+  assert.equal(await u.drain(10), false);
+  assert.equal(u.pendingNoun(), "证据截图", "桌面目标的队列只有截图");
+  u.enqueue([diag]);
+  assert.equal(u.pendingNoun(), QUEUE_GENERIC_NOUN, "几类混在一起用泛称");
+  await release();  // a.jpeg 落定
+  await release();  // b.jpeg 落定
+  while (gates.length === 0) await new Promise((r) => setTimeout(r, 1));  // 设备诊断文件开始上传，即 b.jpeg 已落定
+  assert.equal(u.pendingNoun(), "设备诊断文件", "截图都落定之后只剩设备诊断文件");
+  await release();
+  assert.equal(await u.drain(5000), true);
+  assert.equal((u as any).pendingByNoun.size, 0, "全部落定 → 计数清空");
 });

@@ -14,6 +14,7 @@
 import type { Device } from "../worker/deterministic.mjs";
 import { attachClassification, type StepFailure } from "../worker/surface.mjs";
 import { WEB_CONTEXT_RELIST_DELAY_MS } from "./limits.mjs";
+import { defaultSleep } from "./sleep.mjs";
 
 /** 原生上下文的名字（Appium 的固定取值）。 */
 export const NATIVE_CONTEXT = "NATIVE_APP";
@@ -28,15 +29,21 @@ export const NO_WEB_PAGE_MESSAGE = "设备上没有找到被测网页页面，�
 const ANDROID_WEB_CONTEXT = "CHROMIUM";
 const IOS_WEB_CONTEXT = /^WEBVIEW_[0-9]+(?:\.[0-9]+)?$/;
 
-/** 上下文列表的字符串形态：Appium 回的是字符串数组；WebdriverIO 打开详细列表时回对象，取其 id。其余形态的项丢弃。 */
+/** 一项上下文的名字：Appium 回的是字符串，原样返回（空字符串也是合法取值）；WebdriverIO 打开详细列表时回对象，取其 id。其余形态
+ *  返回 null，由调用方决定丢弃还是另给取值。 */
+export function contextNameOf(raw: unknown): string | null {
+  if (typeof raw === "string") return raw;
+  if (raw !== null && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
+  return null;
+}
+
+/** 上下文列表的字符串形态：逐项经 contextNameOf 取名，认不出的项丢弃。 */
 export function contextNames(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   const names: string[] = [];
   for (const item of raw) {
-    if (typeof item === "string") names.push(item);
-    else if (item !== null && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") {
-      names.push((item as { id: string }).id);
-    }
+    const name = contextNameOf(item);
+    if (name !== null) names.push(name);
   }
   return names;
 }
@@ -58,8 +65,6 @@ export interface LocateDeps {
   /** 零候选之后、再列一次之前的等待；调用方可传入受截止信号约束的等待。 */
   sleep?: (ms: number) => Promise<void>;
 }
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** 重新定位一次：列出上下文、按类别筛选；零候选等 WEB_CONTEXT_RELIST_DELAY_MS 再列一次。多个候选不再列，直接拒绝。
  *  列上下文的调用失败原样抛出（调用方按自己的规则归类）。 */

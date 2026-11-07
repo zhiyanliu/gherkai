@@ -24,9 +24,9 @@
 // device/guard.mts 的 recordHttpStatus 把状态码记到请求选项上（错误对象的 opts 就是它），读取一律经守卫的 httpStatusOf；连接层错误码、
 // 超时码与网关类状态码也只取守卫导出的那一份，newSession 的瞬时失败与 commandFailureKind 的失败种类都据此判定。
 //
-// 生命周期通道上的只读原语（scenario 前的存活截图、控件树、为 evidence 读地址时的列上下文与读地址）对连接层错误与 502 / 503 / 504
-// 重试一次，超时与 500 不重试：与守卫的只读白名单是同一条规则、同一个函数（守卫的 retryReadOnce，ADR 0052 决策 6 的只读白名单
-// 「由设备模块重试 1 次」）。切换上下文不在白名单里，不重试。
+// 生命周期通道上的只读原语（scenario 前的存活截图、控件树、为 evidence 读地址时的列上下文与读地址，以及 device/probe.mts 里能力探测
+// 经执行实例发出的截图）对连接层错误与 502 / 503 / 504 重试一次，超时与 500 不重试：与守卫的只读白名单是同一条规则、同一个函数
+// （守卫的 retryReadOnce，ADR 0052 决策 6 的只读白名单「由设备模块重试 1 次」，获取期同样适用）。切换上下文不在白名单里，不重试。
 //
 // 能力集（ADR 0052 决策 3）由 newSessionCapabilities 单点组装。会话回报的 automationName 与系统版本只在 readSessionCapabilities 读一次
 // （ADR 0052 决策 1 的唯一读取点），系统版本只进诊断与句柄上下文。
@@ -40,11 +40,11 @@
 // newSession 之后的准备（建执行实例与探测实例、执行实例的第一条命令）失败时，本模块先尽力删掉刚建好的 Appium 会话再抛出，由接缝按
 // 未归类的获取期失败处置；获取预算已中止（到期或进入终结）时不再发命令。
 //
-// 端点与预签名地址是凭证（ADR 0051 决策 11）：只交给 WebdriverIO，进消息之前经 worker/error-text 的一行化（先脱敏再截断）。
+// 端点与预签名地址是凭证（ADR 0051 决策 11）：只交给 WebdriverIO，进消息之前经 lib/error-text 的一行化（先脱敏再截断）。
 import { AsyncLocalStorage } from "node:async_hooks";
 import { attach as wdioAttach, remote as wdioRemote, type Browser } from "webdriverio";
 import type { Device } from "../worker/deterministic.mjs";
-import { errorText, oneLineError } from "../worker/error-text.mjs";
+import { errorText, oneLineError } from "../lib/error-text.mjs";
 import type { ScopeTermination } from "../worker/surface.mjs";
 import {
   DELETE_SESSION_TIMEOUT_MS, EXEC_REQUEST_TIMEOUT_MS, NEW_COMMAND_TIMEOUT_S, NEW_SESSION_TIMEOUT_FLOOR_MS, PAGE_LOAD_TIMEOUT_MS,
@@ -58,7 +58,8 @@ import {
   CONNECTION_ERROR_CODES, GATEWAY_STATUS_CODES, TIMEOUT_ERROR_CODES, hasConnectionCode, httpStatusOf, isTimeout, recordHttpStatus,
   retryReadOnce,
 } from "./guard.mjs";
-import { NATIVE_CONTEXT, locateError, locateWebContext } from "./web-context.mjs";
+import { defaultSleep, type Sleep } from "./sleep.mjs";
+import { NATIVE_CONTEXT, contextNameOf, locateError, locateWebContext } from "./web-context.mjs";
 import { WDIO_LOG_LEVEL, installWdioLogMasking } from "./wdio-log.mjs";
 
 // ---- 能力集与会话能力的读取 ----
@@ -214,11 +215,10 @@ export interface WdioEntry {
   attach: typeof wdioAttach;
 }
 
-export type Sleep = (ms: number, signal?: AbortSignal) => Promise<void>;
-
 export interface AppiumConnectorOptions {
-  /** worker 日志，只记不影响判定的诊断（如未能设置页面加载超时）；不传时不记。 */
-  log?: (line: string) => void;
+  /** worker 日志，只记不影响判定的诊断（如未能设置页面加载超时）。必填，让漏接在编译期就报错：这些失败不影响判定，漏接时不留下
+   *  任何记录。 */
+  log: (line: string) => void;
   /** 以下只供测试注入：WebdriverIO 入口、三个实例的超时、装凭据掩码、网页上下文零候选之后的等待。 */
   wdio?: WdioEntry;
   timeouts?: ClientTimeouts;
@@ -269,25 +269,13 @@ function terminated(termination: ScopeTermination): ConnectOutcome {
   return { kind: "terminated", termination };
 }
 
-/** 缺省的等待：到时或 signal 中止时结束（不抛出，调用方自己核对 signal）。 */
-export const defaultSleep: Sleep = (ms, signal) => new Promise((resolve) => {
-  if (signal?.aborted) return resolve();
-  const timer = setTimeout(done, ms);
-  function done(): void {
-    clearTimeout(timer);
-    signal?.removeEventListener("abort", done);
-    resolve();
-  }
-  signal?.addEventListener("abort", done, { once: true });
-});
-
 /** Appium 块的建连面（端口 AppiumConnector）。 */
-export function createAppiumConnector(options: AppiumConnectorOptions = {}): AppiumConnector {
+export function createAppiumConnector(options: AppiumConnectorOptions): AppiumConnector {
   const wdio = options.wdio ?? { remote: wdioRemote, attach: wdioAttach };
   const timeouts = options.timeouts ?? CLIENT_TIMEOUTS;
   const installMasking = options.installLogMasking ?? installWdioLogMasking;
   const sleep = options.sleep ?? defaultSleep;
-  const log = options.log ?? (() => {});
+  const { log } = options;
 
   async function establish(
     client: Browser, req: ConnectRequest, endpoint: EndpointParts, budget: AcquireBudget,
@@ -362,7 +350,11 @@ export interface ProbeableAppiumSession extends AppiumSession {
   readonly probe: Browser;
 }
 
-/** 取会话的探测实例；会话不是本模块建的（没有探测实例）时抛出。 */
+/** 取会话的探测实例；会话没有探测实例时抛出。缺省的部件装配（device/parts.mts 的 defaultDeviceParts）里，会话一律由本模块的
+ *  createAppiumSession 建成、带探测实例，这里不会抛出；替换了建连部件的装配与测试交给能力探测的会话、真机重新探测工具
+ *  （tools/device_reprobe.mts）直接取探测实例的会话，同样须带探测实例。端口 AppiumSession 不声明探测实例，接缝因此读不到它（接缝
+ *  只经 probeScreenshot 间接用到）。要在编译期核对这层依赖，会话类型须作为类型参数贯通建连结果、建连部件、能力探测、部件装配、
+ *  接缝与就绪状态；只给其中几个端口加参数，类型关系仍会断开。 */
 export function probeClientOf(session: AppiumSession): Browser {
   const probe = (session as Partial<ProbeableAppiumSession>).probe;
   if (probe === undefined) throw new Error("这个 Appium 会话没有探测用的客户端，无法执行能力探测");
@@ -381,12 +373,6 @@ export interface AppiumSessionArgs {
 /** 由已建好的执行实例与探测实例组成会话（connect 内部用；测试通过该函数将模拟客户端封装为会话）。 */
 export function createAppiumSession(args: AppiumSessionArgs): ProbeableAppiumSession {
   return new WdioAppiumSession(args);
-}
-
-function contextNameOf(raw: unknown): string {
-  if (typeof raw === "string") return raw;
-  if (raw !== null && typeof raw === "object" && typeof (raw as { id?: unknown }).id === "string") return (raw as { id: string }).id;
-  return "";
 }
 
 class WdioAppiumSession implements ProbeableAppiumSession {
@@ -408,7 +394,7 @@ class WdioAppiumSession implements ProbeableAppiumSession {
   }
 
   async currentContext(): Promise<string> {
-    return contextNameOf(await this.exec.getContext());
+    return contextNameOf(await this.exec.getContext()) ?? "";
   }
 
   async switchToNative(): Promise<void> {

@@ -47,7 +47,7 @@ def _plan_json(argv: list[str], capsys) -> dict:
 
 
 def _android_caps(engine, *, steps_dir=None, timeout_s=60.0):
-    return {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
+    return {"schema_version": 2, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
             "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}]}
 
 
@@ -73,6 +73,7 @@ def test_every_long_option_is_classified_and_the_derived_key_sets_match():
     assert cfgmod.DEVICES_KEYS == ("billing-method", "acquire-timeout-s", "project-arn", "app-bucket")
     assert cfgmod.PLATFORM_KEYS == ("arn", "os-version", "billing-method")
     assert cfgmod.DEVICE_PLATFORMS == ("android", "ios") and cfgmod.BILLING_METHODS == ("METERED", "UNMETERED")
+    assert cfgmod.DEFAULT_BILLING_METHOD == "METERED"   # 决策 3：billing-method 内建默认
 
 
 # ---- 定位（决策 1）----
@@ -391,6 +392,17 @@ def test_devices_and_apps_parse_into_typed_config(tmp_path):
     assert pc.app_ids() == {"wiki": {"android": "org.wikipedia", "ios": "org.wikimedia.wikipedia"}}
 
 
+def test_billing_method_platform_table_then_top_level_then_builtin_default(tmp_path):
+    """计费方式的来源顺序（决策 3）：平台子表覆盖 [devices] 顶层，两处都没有给出时取 CLI 的内建缺省。"""
+    def load(body):
+        return cfgmod.load_project_config(_toml(tmp_path, body), common_keys=set(), cloud_keys=set())
+
+    pc = load("[devices]\nbilling-method = 'UNMETERED'\n[devices.android]\narn = 'arn:aws:devicefarm:us-west-2::device:d'\nbilling-method = 'METERED'\n")
+    assert (devsel.billing_method_for("android", pc), devsel.billing_method_for("ios", pc)) == ("METERED", "UNMETERED")
+    assert devsel.billing_method_for("android", load("[devices]\nacquire-timeout-s = 900\n")) == cfgmod.DEFAULT_BILLING_METHOD
+    assert devsel.billing_method_for("ios", cfgmod.NO_CONFIG) == cfgmod.DEFAULT_BILLING_METHOD
+
+
 def test_apps_table_reaches_plan_as_alias_to_app_id(tmp_path, monkeypatch, capsys):
     monkeypatch.chdir(tmp_path)
     (tmp_path / "app.apk").write_bytes(b"x")   # plan 只核对安装包存在
@@ -575,6 +587,21 @@ def test_cloud_submit_reads_project_arn_from_ssm_after_preflight_and_rejects_whe
     assert len(made["ddb_tables"]) == tables_before   # 没落库
 
 
+def test_cloud_submit_only_notes_a_malformed_local_project_arn(tmp_path, monkeypatch, capsys):
+    """本机给的项目 ARN 在云端只提示、不拦截（ADR 0053 决策 3）：形态不对也不在云端核对、不以退出码 2 结束。"""
+    from test_backend_cloud import _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    _android_env(monkeypatch)
+    _toml(tmp_path, f"[devices.android]\narn = '{DEV_ARN}'\n")
+    monkeypatch.setenv("GHERKAI_DEVICE_FARM_PROJECT_ARN", DEV_ARN)   # 贴错类型：本机会拒绝，云端只提示
+    _patch_cloud_handles(monkeypatch, [])
+    monkeypatch.setattr(compose, "preflight_cloud_resources", lambda **kw: None)
+    monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: "arn:aws:devicefarm:us-west-2:333333333333:project:cloud")
+    assert m.main(["submit", str(_feature(tmp_path, DEVICE_FEATURE)), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-"]) == 0
+    assert "project-arn 不生效" in capsys.readouterr().err
+
+
 # ---- 应用安装包：定位、上传与填位置（ADR 0051 决策 9、ADR 0048 决策 3）----
 
 APP_FEATURE_TWO_SCOPES = ("Feature: F\n  @scope:a @device:android @app:wiki\n  Scenario: a\n    When \"做事\"\n"
@@ -638,7 +665,9 @@ def test_local_run_uploads_each_installer_once_and_fills_app_location(tmp_path, 
     assert "AgentCore 云端浏览器会话" not in err
 
 
-def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("regions", [("eu-west-1", "eu-west-1"), (None, "eu-west-1")],
+                         ids=["both-files-see-region", "first-file-region-unknown"])
+def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, monkeypatch, capsys, regions):
     import hashlib
 
     from gherkai_runtime import app_upload
@@ -659,7 +688,8 @@ def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, mon
     def ensure(bucket, file, **kw):
         calls.append(file.name)
         digest = hashlib.sha256(file.read_bytes()).hexdigest()
-        return app_upload.AppLocation(bucket, f"apps/{digest}/{file.name}", digest, uploaded=False, refreshed=False, bucket_region="eu-west-1")
+        return app_upload.AppLocation(bucket, f"apps/{digest}/{file.name}", digest, uploaded=False, refreshed=False,
+                                      bucket_region=regions[len(calls) - 1])
 
     monkeypatch.setattr(app_upload, "ensure_app_object", ensure)
     feature = APP_FEATURE_TWO_SCOPES.replace("@scope:b @device:android @app:wiki", "@scope:b @device:android @app:wiki2")
@@ -668,7 +698,8 @@ def test_local_run_notes_once_when_app_bucket_is_in_another_region(tmp_path, mon
     assert calls == ["app.apk", "app2.apk"]
     err = capsys.readouterr().err
     assert "注意：应用桶 my-apps 在 eu-west-1，当前区域配置为 us-east-1" in err
-    assert err.count("注意：应用桶") == 1   # 两个文件同一个桶：只提示一次
+    # 两个文件同一个桶：只提示一次；第一个文件没查到桶所在区域时，由第二个文件提示
+    assert err.count("注意：应用桶") == 1
 
 
 def test_missing_installer_exits_2_in_plan_and_run(tmp_path, monkeypatch, capsys):
@@ -694,6 +725,22 @@ def test_local_app_run_without_bucket_exits_2(tmp_path, monkeypatch, capsys):
     assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--no-report"]) == 2
     err = capsys.readouterr().err
     assert "app-bucket" in err and "--app-bucket" in err and "GHERKAI_APP_BUCKET" in err
+
+
+def test_local_app_bucket_and_project_arn_sources_follow_flag_env_config_order():
+    """应用桶与项目 ARN 的三处来源（ADR 0053 决策 2、3）：选项 > 环境变量 > 配置文件，空串视同没有给、继续取下一处；
+    云端用的「是否给了项目 ARN」只看有没有值，形态不对也不抛。"""
+    cfg = cfgmod.ProjectConfig(devices=cfgmod.DevicesConfig(app_bucket="cfg-apps", project_arn="not-an-arn"))
+    env = {devsel.APP_BUCKET_ENV: "env-apps"}
+    assert devsel.resolve_local_app_bucket(flag="flag-apps", env=env, config=cfg) == "flag-apps"
+    assert devsel.resolve_local_app_bucket(flag="", env=env, config=cfg) == "env-apps"
+    assert devsel.resolve_local_app_bucket(flag=None, env={devsel.APP_BUCKET_ENV: ""}, config=cfg) == "cfg-apps"
+    empty = cfgmod.ProjectConfig(devices=cfgmod.DevicesConfig(app_bucket=""))
+    assert devsel.resolve_local_app_bucket(flag="", env={devsel.APP_BUCKET_ENV: ""}, config=empty) is None
+    assert devsel.resolve_local_app_bucket(flag=None, env={}, config=cfgmod.NO_CONFIG) is None
+    assert devsel.local_project_arn_given(flag_arn=None, env={}, config=cfg)   # 形态不对也算给了
+    assert devsel.local_project_arn_given(flag_arn="", env={devsel.PROJECT_ARN_ENV: "x"}, config=cfgmod.NO_CONFIG)
+    assert not devsel.local_project_arn_given(flag_arn="", env={devsel.PROJECT_ARN_ENV: ""}, config=empty)
 
 
 def test_cloud_submit_puts_installer_in_artifacts_bucket_with_tag(tmp_path, monkeypatch, capsys):

@@ -1,14 +1,17 @@
 // 设备侧界面接缝的编排单测（ADR 0052 决策 2、3；ADR 0051 决策 4、5、8、9；ADR 0050 决策 2）。运行：npx tsx --test src/device/surface.test.mts。
 //
 // 各设备模块换成记录调用序列的假部件（会话、终结、Appium、探测、适配器、守卫、界面实现、预热、安装包存储），只验本模块的编排：
-// 获取期的次序（存在性检查先于 Create；404 / 403 时 Create 零调用）、获取预算到期归 acquire_timeout、进入终结后获取停下、换台的
-// 条件、获取期与预热抛出的异常先查会话状态再归类、预热返回之后的预算核对、各项义务的失败归类（先查会话状态再分会话丢失与执行
-// 出错）、执行窗口出口的归类（未标记的非断言异常挂 engine_error）、交给探测与预热的会话状态查询、交给界面实现的输入上下文、句柄
-// 上下文恰为七个字段、界面快照的读取条件与采集结果、释放的两种模式与正常释放进行中升级为中断（含诊断文件上传在途时升级）、
-// device-session.json 的内容、按 scope 分目录的产物落点与 reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、
-// WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机验收负责；唯一的例外是「等到 RUNNING 期间会话已结束」的释放用例，它把
-// 会话块与终结块换成真实实现（Device Farm 仍是假的 API），核对接缝透传执行前失败之后，释放阶段以会话块在等待时记下的确认收尾、
-// 不再查询这个会话。文件末尾另验缺省装配（device/parts.mts）接上的是各块的真实实现，以及接缝模块的静态加载闭包带到两项设备依赖。
+// 获取期的次序（存在性检查先于 Create；404 / 403 时 Create 零调用）、获取预算到期归 acquire_timeout、安装包准备（存在性检查与
+// 预签名）挂住时预算到期即停止等待且迟到的结果被丢弃、进入终结后获取停下、换台的条件、获取期与预热抛出的异常先查会话状态再归类、
+// 预热返回之后的预算核对、各项义务的失败归类（先查会话状态再分会话丢失与执行出错）、执行窗口出口的归类（未标记的非断言异常挂
+// engine_error）、交给探测与预热的会话状态查询、交给界面实现的输入上下文、句柄上下文恰为七个字段、界面快照的读取条件与采集结果、
+// 释放的两种模式与正常释放进行中升级为中断（含诊断文件上传在途时升级）、device-session.json 的内容、按 scope 分目录的产物落点与
+// reportRefs，以及会话事件的线上形状。部件的真实行为（Device Farm、WebdriverIO、Midscene）不在这里证明，由各块自己的测试与真机
+// 验收负责；例外有三处：「等到 RUNNING 期间会话已结束」的释放用例把会话块与终结块换成真实实现（Device Farm 仍是假的 API），核对
+// 接缝透传执行前失败之后，释放阶段以会话块在等待时记下的确认收尾、不再查询这个会话；「预签名挂住」的用例同样换上真实的会话块与
+// 终结块，核对预签名阶段到期之后已建立的会话经释放停止并确认；安装包准备挂住的用例各有一份安装包存储换成真实实现，用凭据提供者
+// 永不返回的真实 S3 客户端构造（SDK 在等凭据时不响应中止信号）。文件末尾另验缺省装配（device/parts.mts）接上的是各块的真实实现，
+// 以及接缝模块的静态加载闭包带到三项设备依赖。
 import { afterEach, test } from "node:test";
 import assert from "node:assert";
 import fs from "node:fs";
@@ -16,9 +19,10 @@ import os from "node:os";
 import path from "node:path";
 import ts from "typescript";
 import type { Browser } from "webdriverio";
+import { S3Client } from "@aws-sdk/client-s3";
 import {
-  ACQUIRE_INTERRUPTED_MESSAGE, ACQUIRE_TIMEOUT_MESSAGE, HELPER_REJECTED_AGAIN_MESSAGE, HELPER_REJECTED_NO_TIME_MESSAGE,
-  LIVENESS_FAILED_MESSAGE, PRE_STEP_FAILED_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE,
+  ACQUIRE_INTERRUPTED_MESSAGE, ACQUIRE_TIMEOUT_MESSAGE, APP_PREPARE_TIMEOUT_MESSAGE, HELPER_REJECTED_AGAIN_MESSAGE,
+  HELPER_REJECTED_NO_TIME_MESSAGE, LIVENESS_FAILED_MESSAGE, PRE_STEP_FAILED_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE,
   WEB_CONTEXT_PROBE_ERROR_MESSAGE, WEB_CONTEXT_UNAVAILABLE_MESSAGE, acquireErrorMessage, createDeviceSurface, deviceAgentOpts,
   restoreFailedMessage, warmupErrorMessage,
   type AddressAttempt, type AppiumSession, type CommandGuard, type ConnectOutcome, type DeviceParts, type DevicePartsEnv,
@@ -32,7 +36,10 @@ import { RUN_ID_ENV } from "./session-name.mjs";
 import {
   DEVICE_SESSION_FILE, DEVICE_SESSION_REPORT_KIND, sessionClosedEvent, sessionEventSink, sessionOpenedEvent,
 } from "./device-session.mjs";
-import { APP_LAUNCH_SELF_EXIT_MESSAGE, APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_MISSING_MESSAGE, APP_STATE } from "./app.mjs";
+import {
+  APP_LAUNCH_SELF_EXIT_MESSAGE, APP_OBJECT_FORBIDDEN_MESSAGE, APP_OBJECT_MISSING_MESSAGE, APP_STATE, s3AppObjectStore,
+  type AppObjectHead, type AppObjectStore,
+} from "./app.mjs";
 import {
   DEVICE_REPLANNING_CYCLE_LIMIT, MAX_SESSION_S, PAGE_SOURCE_MAX_BYTES, REPLACE_DEVICE_MIN_REMAINING_MS, REPLANNING_LIMIT_ENV,
 } from "./limits.mjs";
@@ -65,6 +72,9 @@ interface HarnessOptions {
   headPresence?: "present" | "missing" | "forbidden";
   /** 给出即模拟应用桶在别的区域：存在性检查经重定向解析出这个区域（缺省同区域 us-west-2、未经重定向）。 */
   bucketRegion?: string;
+  /** 换掉安装包存储的存在性检查与预签名（调用仍记进调用序列）：可挂住不返回，或换成真实的 s3AppObjectStore。 */
+  appHead?: AppObjectStore["head"];
+  appPresign?: AppObjectStore["presign"];
   connectOutcomes?: Array<"connected" | "replace_device" | ConnectOutcome>;
   conclusion?: Partial<ProbeConclusion>;
   appStates?: number[];
@@ -98,7 +108,7 @@ interface HarnessOptions {
 
 function makeJob(target: Target, acquireTimeoutS: number, scopeId: string = SCOPE_ID): Omit<Job, "scenarios"> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     scope: { id: scopeId, name: "Checkout" },
     engine: "midscene",
     assertionVotes: 1,
@@ -221,8 +231,8 @@ function harness(opts: HarnessOptions = {}) {
     env = e;
     const fakeParts: DeviceParts = {
       sessions: {
-        async resolve(_budget, replacing) {
-          calls.push(`sessions.resolve:${replacing?.arn ?? "-"}`);
+        async resolve(_budget) {
+          calls.push("sessions.resolve");
           return { ok: true, value: { deviceArn: "arn:aws:devicefarm:us-west-2::device:PIXEL", model: "Pixel 8", osVersion: "14.0" } };
         },
         async create(choice, _budget) {
@@ -292,12 +302,14 @@ function harness(opts: HarnessOptions = {}) {
         },
       },
       appStore: {
-        async head(loc) {
+        async head(loc, abortSignal) {
           calls.push(`appStore.head:${loc.key}`);
+          if (opts.appHead) return opts.appHead(loc, abortSignal);
           return { presence: opts.headPresence ?? "present", region: opts.bucketRegion ?? "us-west-2", redirected: opts.bucketRegion !== undefined };
         },
         async presign(loc, expiresS, region) {
           calls.push(`appStore.presign:${expiresS}:${region}`);
+          if (opts.appPresign) return opts.appPresign(loc, expiresS, region);
           return `https://s3.example/${loc.key}?X-Amz-Signature=abc`;
         },
       },
@@ -382,7 +394,7 @@ test("网页目标的获取次序：解析、Create、等到 RUNNING、newSessio
   assert.equal(r.ready && r.sessionId, ARN1);
   assert.equal(h.surface.sessionId(), ARN1);
   assert.deepEqual(h.calls, [
-    "sessions.resolve:-", "sessions.create:arn:aws:devicefarm:us-west-2::device:PIXEL", `sessions.waitRunning:${ARN1}`,
+    "sessions.resolve", "sessions.create:arn:aws:devicefarm:us-west-2::device:PIXEL", `sessions.waitRunning:${ARN1}`,
     "appium.connect:web:-", "probe.run:web", "adapters.select:UiAutomator2", "guards.create:true",
     `agents.create:true:${DEVICE_REPLANNING_CYCLE_LIMIT}`,
   ]);
@@ -437,6 +449,141 @@ for (const [presence, message] of [["missing", APP_OBJECT_MISSING_MESSAGE], ["fo
     assert.equal(h.surface.sessionId(), null);
   });
 }
+
+// ---- 安装包准备的上界（ADR 0051 决策 2「安装包准备的上界」、决策 9）----
+
+/** 凭据提供者永不返回的真实 S3 客户端（ADR 0051 实测依据「凭据等待与中止信号」的构造）：SDK 在发出请求之前一直等凭据，传给
+ *  HeadObject 的截止信号对这一段不起作用，预签名同样一直不返回。网络层只作防线：凭据没有给出就不应发出请求。 */
+function credentialsHangingStore(): AppObjectStore {
+  return s3AppObjectStore({
+    client: new S3Client({
+      region: "us-west-2", maxAttempts: 1, credentials: () => new Promise(() => {}),
+      requestHandler: { handle: async () => { throw new Error("凭据没有给出，不应发出请求"); } } as never,
+    }),
+  });
+}
+
+/** 不看信号、由用例决定何时给出结果（或一直不给）的挂起调用。 */
+function pending<T>(): { promise: Promise<T>; resolve: (v: T) => void; reject: (e: unknown) => void } {
+  let resolve!: (v: T) => void;
+  let reject!: (e: unknown) => void;
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej; });
+  return { promise, resolve, reject };
+}
+
+const APP_PREPARE_TIMEOUT: ScopeTermination = { errorType: "acquire_timeout", message: APP_PREPARE_TIMEOUT_MESSAGE };
+const HANGING_VARIANTS = ["不看信号的挂起调用", "凭据提供者永不返回的真实 S3 客户端"] as const;
+
+for (const variant of HANGING_VARIANTS) {
+  test(`存在性检查挂住（${variant}）：预算到期即停止等待，归 acquire_timeout 并点明在准备安装包；Device Farm 零调用、不发事件`, async () => {
+    const real = credentialsHangingStore();
+    const h = harness({
+      target: { device: "android", uiKind: "app" }, acquireTimeoutS: 0.05,
+      appHead: variant === "不看信号的挂起调用" ? () => pending<AppObjectHead>().promise : real.head,
+    });
+    const r = await within(h.surface.acquire(), 2_000, `${variant} 时的获取`);
+    assert.deepEqual(r, { ready: false, termination: APP_PREPARE_TIMEOUT });
+    assert.deepEqual(h.calls, ["appStore.head:apps/9f2c/shop.apk"]);
+    assert.deepEqual(h.emitted, []);
+    assert.equal(h.surface.sessionId(), null);
+    await h.surface.release("normal");
+    const doc = JSON.parse(fs.readFileSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE), "utf-8"));
+    assert.deepEqual(doc.acquire_failure, { error_type: "acquire_timeout", message: APP_PREPARE_TIMEOUT_MESSAGE });
+  });
+}
+
+test("存在性检查停止等待之后迟到的结果一律丢弃：晚到的 404 不改判为 precheck_failed、不发 Create，晚到的拒绝不成为未处理的拒绝", async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (reason: unknown): void => { unhandled.push(reason); };
+  process.on("unhandledRejection", onUnhandled);
+  try {
+    for (const late of ["missing", "rejected"] as const) {
+      const head = pending<AppObjectHead>();
+      const h = harness({ target: { device: "ios", uiKind: "app" }, acquireTimeoutS: 0.05, appHead: () => head.promise });
+      assert.deepEqual(await within(h.surface.acquire(), 2_000, late), { ready: false, termination: APP_PREPARE_TIMEOUT }, late);
+      if (late === "missing") head.resolve({ presence: "missing", region: "us-west-2", redirected: false });
+      else head.reject(new Error("socket hang up"));
+      await settle();
+      assert.deepEqual(h.calls, ["appStore.head:apps/9f2c/shop.apk"], late);
+      await h.surface.release("normal");
+      const doc = JSON.parse(fs.readFileSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE), "utf-8"));
+      assert.deepEqual(doc.acquire_failure, { error_type: "acquire_timeout", message: APP_PREPARE_TIMEOUT_MESSAGE }, late);
+    }
+    await settle();
+  } finally {
+    process.off("unhandledRejection", onUnhandled);
+  }
+  assert.deepEqual(unhandled, []);
+});
+
+for (const variant of HANGING_VARIANTS) {
+  test(`预签名挂住（${variant}）：预算到期即停止等待、归 acquire_timeout，晚到的地址不交给 newSession；已建立的会话经失败收尾停止并确认`, async () => {
+    // 会话块与终结块是真实实现（Device Farm 是假的 API）：核对预签名阶段到期之后，已建立的会话由既有的释放路径发 Stop 并确认。
+    const farm: string[] = [];
+    let stopRequested = false;
+    const api: DeviceFarmApi = {
+      async listDevices() {
+        farm.push("listDevices");
+        return { devices: [{
+          arn: "arn:aws:devicefarm:us-west-2::device:PIXEL", os: "14.0", platform: "ANDROID", formFactor: "PHONE",
+          remoteAccessEnabled: true, fleetType: "PUBLIC", availability: "HIGHLY_AVAILABLE", model: "Pixel 8",
+        }] };
+      },
+      async createRemoteAccessSession(input) { farm.push("create"); return { arn: ARN1, name: input.name, status: "PENDING" }; },
+      async getRemoteAccessSession(arn) {
+        farm.push(`get:${arn}`);
+        return { arn, status: stopRequested ? "STOPPING" : "RUNNING", endpoints: { remoteDriverEndpoint: ENDPOINT } };
+      },
+      async stopRemoteAccessSession(arn) { farm.push(`stop:${arn}`); stopRequested = true; return { arn, status: "STOPPING" }; },
+      async listRemoteAccessSessions() { farm.push("listSessions"); return { remoteAccessSessions: [] }; },
+    };
+    const presign = pending<string>();
+    const real = credentialsHangingStore();
+    const h = harness({
+      target: { device: "android", uiKind: "app" }, acquireTimeoutS: 0.2,
+      appPresign: variant === "不看信号的挂起调用" ? () => presign.promise : real.presign,
+      sessionParts: (e) => {
+        const sessions = createDeviceFarmSessions(e, { api, runId: "run-1" });
+        return { sessions, finalizer: createDeviceFinalizer(sessions) };
+      },
+    });
+    const r = await within(h.surface.acquire(), 2_000, `${variant} 时的获取`);
+    assert.deepEqual(r, { ready: false, termination: APP_PREPARE_TIMEOUT });
+    assert.ok(h.calls.includes("appStore.presign:3600:us-west-2"), h.calls.join(", "));
+    assert.deepEqual(farm, ["listDevices", "create", `get:${ARN1}`]);
+    assert.equal(h.surface.sessionId(), ARN1);
+    presign.resolve("https://s3.example/late?X-Amz-Signature=late");
+    await settle();
+    assert.ok(!h.calls.some((c) => c.startsWith("appium.connect")), h.calls.join(", "));
+    const out = await within(h.surface.release("normal"), 2_000, `${variant} 时的正常释放`);
+    assert.equal(out.releaseFailed, false);
+    assert.ok(farm.slice(3).includes(`stop:${ARN1}`), farm.join(", "));
+    const closed = h.emitted.filter((e) => e.type === "session_closed");
+    assert.deepEqual(closed.map((e) => [e.sessionId, e.release]), [[ARN1, "confirmed"]]);
+    const doc = JSON.parse(fs.readFileSync(path.join(h.deviceDir!, DEVICE_SESSION_FILE), "utf-8"));
+    assert.deepEqual(doc.acquire_failure, { error_type: "acquire_timeout", message: APP_PREPARE_TIMEOUT_MESSAGE });
+  });
+}
+
+test("安装包准备期间进入终结：停止等待，结论记被停止信号中断（不记 acquire_timeout），之后不再推进", async () => {
+  for (const stage of ["head", "presign"] as const) {
+    let entered!: () => void;
+    const inStage = new Promise<void>((resolve) => { entered = resolve; });
+    const hang = <T,>(): Promise<T> => { entered(); return pending<T>().promise; };
+    const h = harness({
+      target: { device: "android", uiKind: "app" },
+      ...(stage === "head" ? { appHead: () => hang<AppObjectHead>() } : { appPresign: () => hang<string>() }),
+    });
+    const acquiring = h.surface.acquire();
+    await inStage;
+    const releasing = h.surface.release("interrupt");
+    const r = await within(acquiring, 2_000, stage);
+    await releasing;
+    assert.deepEqual(r.ready ? null : r.termination, { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE }, stage);
+    if (stage === "head") assert.ok(!h.calls.some((c) => c.startsWith("sessions.")), `${stage}: ${h.calls.join(", ")}`);
+    assert.ok(!h.calls.some((c) => c.startsWith("appium.connect")), `${stage}: ${h.calls.join(", ")}`);
+  }
+});
 
 test("获取预算到期：在途的等待被预算信号中止，归 acquire_timeout 并用原文消息", async () => {
   const h = harness({
@@ -547,8 +694,8 @@ test("设备单元拒装驱动辅助包：剩余预算足够时停掉被替换�
   const h = harness({ connectOutcomes: ["replace_device", "connected"] });
   await ready(h);
   assert.deepEqual(h.calls.slice(0, 9), [
-    "sessions.resolve:-", "sessions.create:arn:aws:devicefarm:us-west-2::device:PIXEL", `sessions.waitRunning:${ARN1}`,
-    "appium.connect:web:-", `sessions.retire:${ARN1}`, `sessions.resolve:${ARN1}`,
+    "sessions.resolve", "sessions.create:arn:aws:devicefarm:us-west-2::device:PIXEL", `sessions.waitRunning:${ARN1}`,
+    "appium.connect:web:-", `sessions.retire:${ARN1}`, "sessions.resolve",
     "sessions.create:arn:aws:devicefarm:us-west-2::device:PIXEL", `sessions.waitRunning:${ARN2}`, "appium.connect:web:-",
   ]);
   assert.equal(h.surface.sessionId(), ARN2);
@@ -1571,8 +1718,9 @@ test("缺省装配：Agent 工厂把部件环境的日志出口交给界面实�
 });
 
 // 镜像里的设备依赖冒烟（engines/midscene/Dockerfile）只 import dist/device/surface.mjs、不调用任何导出：它能拦住依赖没装进镜像，
-// 前提是接缝模块的静态 import 闭包带到这两个包（ADR 0052 决策 3、7）。缺省装配一旦改成动态加载，冒烟就会在缺依赖时照样通过。
-test("接缝模块的静态加载闭包带到 WebdriverIO 与 Device Farm SDK（镜像冒烟只 import 这个模块）", () => {
+// 前提是接缝模块的静态 import 闭包带到这三个包（ADR 0052 决策 3、7）。presigner 只由应用启停块（device/app.mts）import，经缺省
+// 装配进入闭包。缺省装配一旦改成动态加载，冒烟就会在缺依赖时照样通过。
+test("接缝模块的静态加载闭包带到 WebdriverIO、Device Farm SDK 与 S3 预签名包（镜像冒烟只 import 这个模块）", () => {
   const visited = new Set<string>();
   const packages = new Set<string>();
   const walk = (file: string): void => {
@@ -1594,7 +1742,7 @@ test("接缝模块的静态加载闭包带到 WebdriverIO 与 Device Farm SDK（
   };
   walk(path.join(import.meta.dirname, "surface.mts"));
   assert.ok(visited.has(path.join(import.meta.dirname, "parts.mts")), "接缝模块应静态 import 缺省装配");
-  for (const pkg of ["webdriverio", "@aws-sdk/client-device-farm"]) {
+  for (const pkg of ["webdriverio", "@aws-sdk/client-device-farm", "@aws-sdk/s3-request-presigner"]) {
     assert.ok(packages.has(pkg), `静态闭包里应有 ${pkg}，实际 ${[...packages].sort().join(", ")}`);
   }
 });

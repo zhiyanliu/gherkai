@@ -20,7 +20,6 @@
 
 ```jsonc
 {
-  "schema_version": 1,
   "targets": [
     {"device": "desktop", "ui_kinds": ["web"]},
     {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880},

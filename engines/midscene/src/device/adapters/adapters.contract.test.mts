@@ -646,7 +646,7 @@ function iface(adapter: DeviceAdapter, opts: {
   const rec = recorder({ takeScreenshot: Array(10).fill(PNG_1080x2400), ...opts.responses });
   const ui = createAppiumInterface({
     driver: rec.driver, adapter, session: { withWebContext: (_d, fn) => rec.ctx(1, null).withWebContext(fn) },
-    device: adapter.device, scale: opts.scale ?? 1, inputContext: opts.inputContext ?? null, log: opts.log,
+    device: adapter.device, scale: opts.scale ?? 1, inputContext: opts.inputContext ?? null, log: opts.log ?? (() => {}),
   });
   return { rec, ui };
 }
@@ -886,7 +886,9 @@ test("界面实现的描述不含系统版本与机型", () => {
 });
 
 test("构造前提：平台与驱动一致、比例为正数、iOS 带输入上下文", () => {
-  const base = { driver: recorder().driver, session: { withWebContext: async <T,>(_d: Browser, fn: () => Promise<T> | T) => fn() } };
+  const base = {
+    driver: recorder().driver, session: { withWebContext: async <T,>(_d: Browser, fn: () => Promise<T> | T) => fn() }, log: () => {},
+  };
   assert.throws(() => createAppiumInterface({ ...base, adapter: createXcuitestAdapter(), device: "android", scale: 1, inputContext: null }),
     /XCUITest/);
   assert.throws(() => createAppiumInterface({ ...base, adapter: createXcuitestAdapter(), device: "ios", scale: 0, inputContext: "web" }),

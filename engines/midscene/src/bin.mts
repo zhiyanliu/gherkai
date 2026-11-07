@@ -3,7 +3,7 @@
 //
 // **本进程就是 worker 进程**（ADR 0024 铁律）：这里只做「装 loader + 注册 resolve hook + 调 run-scope 的
 // main」，**绝不 spawn 子 node**——core 经 `pass_fds` 把事件通道 fd（EVENTS_FD）继承给它直接 spawn 的那个
-// 进程，中间多一层包装进程就把 fd3 吞掉（`node --import tsx` 那次踩过的坑，见 ADR 0037 决策 3 Python 侧那条）。
+// 进程，中间多一层包装进程就把 fd3 吞掉（`node --import tsx` 那次实际遇到过，见 ADR 0037 决策 3 Python 侧那条）。
 //
 // 三件事，顺序 load-bearing：
 //   ① 进程内注册 tsx 的 ESM loader——发布形态下进程由 `node dist/bin.mjs` 启动（不再是 `node --import tsx`），

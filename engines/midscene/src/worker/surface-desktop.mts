@@ -27,7 +27,7 @@ import { EXTRA_HTTP_HEADERS_ENV, warmupSession } from "../lib/tunnel-warmup.mjs"
 import { AGENTCORE_SESSION_NAME_MAX, encode as encodeSessionName, runIdFromEnv } from "../device/session-name.mjs";
 import type { SelectedHandler } from "./deterministic.mjs";
 import {
-  attachClassification,
+  MAX_CAUSE_DEPTH, attachClassification,
   type AcquireResult, type AddressReading, type HandlerCall, type ReleaseMode, type ReleaseOutcome, type ScopeTermination,
   type SnapshotResult, type StepFacts, type StepFailure, type SurfaceDeps, type TargetSurface,
 } from "./surface.mjs";
@@ -64,7 +64,7 @@ const AWS_TRANSIENT_NAMES = new Set([
 const AWS_TRANSIENT_STATUS = new Set([500, 502, 503, 504]);
 
 /** 是否网络/SSL 瞬时故障（可重试，ADR 0028）。Node 侧按 error code / TLS 错 / AWS SDK v3 服务端瞬时识别。
- *  遍历 error.cause 链：SDK 常把底层 socket/TLS 错、或 AWS 服务端错包成自有 Error，只看最外层会漏判（防环：限 8 层）。
+ *  遍历 error.cause 链：SDK 常把底层 socket/TLS 错、或 AWS 服务端错包成自有 Error，只看最外层会漏判（层数上限取 MAX_CAUSE_DEPTH，同时防环）。
  *
  *  两处调用：本文件的建连重试判定，与 run-scope 对执行异常的分类里「没有归类标记」那一支（桌面路径上除派发出错的防御分支外的全部异常，ADR 0052
  *  决策 6）。connecting=true（仅建连阶段传，ADR 0028）：额外认 Playwright TargetClosedError 的 message
@@ -77,7 +77,7 @@ export function isTransientNetwork(e: unknown, connecting = false, byMessage = t
     code?: string; name?: string; message?: string; cause?: unknown;
     $metadata?: { httpStatusCode?: number }; $retryable?: { throttling?: boolean };
   } | undefined;
-  for (let depth = 0; cur && depth < 8; depth++) {
+  for (let depth = 0; cur && depth < MAX_CAUSE_DEPTH; depth++) {
     const code = cur.code ?? "";
     if (code === "ENOTFOUND") return false; // DNS 未找到（永久），此层直接否决
     if (["ECONNRESET", "ECONNREFUSED", "ETIMEDOUT", "EPIPE", "EAI_AGAIN", "ECONNABORTED"].includes(code)) {
@@ -216,7 +216,7 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
   let browser: Browser | undefined;
   let page: Page | undefined;
   let cleanupFailed = false; // StopBrowserSession 失败 → worker 非 0 退出，让泄漏可观测（对照 Nova）
-  let terminated = false;    // 已进入终结（停止信号）：建连重试循环不再重试
+  let terminated = false;    // 已进入终结（停止信号）：建连重试循环不再重试，建连成功也不交出被测对象
   let onTerminate: (() => void) | undefined;  // 重试退避用：进入终结即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
 
   /** 发一条会话事件：发出失败不抛（释放绝不抛），记为释放失败让退出码为 1——事件没送到，core 看到的就是没有确认停止的会话。 */
@@ -239,6 +239,8 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
   async function stopSession(sid: string): Promise<boolean> {
     // 单个会话 Stop，套超时预算（ADR 0028）：退化网络下 Stop 可能挂死、超 grace 被 SIGKILL 打断 → 泄漏。
     // 超时即放弃（返回 false 表示未确认释放），让 worker 能干净退出。timedOut 哨兵区分「超时」与「Stop 成功」。
+    // 这里的日志只记这一次 Stop 的事实（会话 id、超时或出错原因），不给处置提示：丢弃语义下会话还会由之后的清理再次停止，
+    // 「可能仍在计费、请手动停止」只在 cleanupRun 按 final 语义判为未确认时给出（与设备 worker 收尾的日志分工一致）。
     const timedOut = Symbol("timeout");
     try {
       const r = await Promise.race([
@@ -246,12 +248,12 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
         new Promise<typeof timedOut>((res) => setTimeout(() => res(timedOut), STOP_SESSION_BUDGET_MS)),
       ]);
       if (r === timedOut) {
-        log(`worker: StopBrowserSession TIMEOUT >${STOP_SESSION_BUDGET_MS}ms (会话可能泄漏，需排查): session=${sid}`);
+        log(`worker: 停止浏览器会话 ${sid} 在 ${STOP_SESSION_BUDGET_MS / 1000} 秒内没有返回`);
         return false;
       }
       return true;
     } catch (e) {
-      log(`worker: StopBrowserSession FAILED (会话可能泄漏，需排查): ${(e as Error).message}`);
+      log(`worker: 停止浏览器会话 ${sid} 时出错：${(e as Error).message}`);
       return false;
     }
   }
@@ -266,10 +268,11 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
   //   多个泄漏会话把 cleanup 拖过 grace 被 SIGKILL 截断（正是 ADR 0028「重试放大的 in-flight 会话窗口」条
   //   要防的泄漏）。
   //   discardAttempt=true（丢弃中间建连 attempt 的部分会话，ADR 0028）：Stop 失败只 log、**不点亮
-  //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会毒化
+  //   final cleanupFailed**——那个会话本就要丢、与「最终态会话是否泄漏」无关；否则一次中间失败会错误地改变
   //   后续成功 attempt 的退出码（误报泄漏 → core 当 engine_error）。final cleanup（默认）才管 cleanupFailed。
   //   会话事件（ADR 0051 决策 4）：Stop 成功即发 confirmed；final 语义下 Stop 失败即发 unconfirmed；丢弃语义下 Stop 失败不发，
   //   会话留在集里等之后的清理，按最终处置发。session_closed 都在关 browser 之前发出（释放 → session_closed，ADR 0051 决策 5）。
+  //   处置提示同理只在 final 语义下未确认时写进日志；丢弃语义下 Stop 失败只有 stopSession 记的那条事实。
   async function cleanupRun(discardAttempt: boolean): Promise<void> {
     await Promise.all([...pendingSessions].map(async (sid) => {
       const ok = await stopSession(sid);
@@ -278,6 +281,10 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
         await closeSession(sid, "confirmed");
       } else if (!discardAttempt) {
         cleanupFailed = true;
+        // 每个会话只提示一次，与它那条 session_closed 同时：异常出口之后 final 语义的重入者再次清理时 Stop 仍失败，不再重复这条提示
+        if (!closed.has(sid)) {
+          log(`worker: 浏览器会话 ${sid} 未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止`);
+        }
         await closeSession(sid, "unconfirmed");
       }
     }));
@@ -344,7 +351,7 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
     const connectedPage = ctx.pages()[0] ?? (await ctx.newPage());
     // 页面里补一个 `__name` 空实现（ADR 0037 决策 4 的 tsx loader 副作用）：worker 用 tsx 转译使用方的 `.mts` step 文件，
     // esbuild 的 keepNames 会把函数包成 `__name(fn, "fn")`；这样的函数一旦经 page.evaluate / waitForFunction 序列化进页面，
-    // 页面里没有 `__name` 就抛 ReferenceError。使用方本地单测（node 直接执行、无 tsx）撞不到、云端一执行就全红，故由 worker
+    // 页面里没有 `__name` 就抛 ReferenceError。使用方本地单测（node 直接执行、无 tsx）撞不到、云端一执行就全部失败，故由 worker
     // 在每个文档里预置一个恒等实现：context 级 addInitScript 管此后的每次导航，evaluate 管当前已打开的文档。两处都传字符串——
     // 本文件同样经 tsx 转译，传函数会把同一个问题带进去。
     const NAME_SHIM = "globalThis.__name = globalThis.__name || ((fn) => fn);";
@@ -394,6 +401,9 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
           if (terminated) throw e;  // 退避被 SIGTERM 打断 → 不再重连
         }
       }
+      // 建连成功返回时已进入终结（停止信号落在建连的最后一段）：不交出就绪的被测对象，改为抛出；主流程的异常出口见到已进入终结即
+      // 等收尾序列，不预热、不发 scope_started（ADR 0051 决策 5「进入终结之后主流程让位」③）。会话已在待清理集里，由 interrupt 释放停止。
+      if (terminated) throw new Error("浏览器会话建立时已收到停止信号，不再执行本 scope");
       page = conn!.page;
       return { ready: true, agent: conn!.agent, sessionId: sessionId! };
     },

@@ -11,9 +11,11 @@ skill 的消费现场是使用方项目里的一份拷贝，那些指代对使�
 
 转换规则（稳定契约，改这里要同步 ADR 0043 决策四那三条）：
 
-1. 标题后到第一个 `##` 之间：剥掉全部 `>` 引用块（可多段）与「姊妹页…」导航段，换成一句产品语言。
-   **由此得出一条写作约定**：源页头部要新增给 contributor 的话（护栏在哪、权威在哪），写进引用块里——
-   块整体被剥；写成裸段落则会原样发到使用方项目。
+1. 标题后到第一个 `##` 之间：剥掉全部 `>` 引用块（可多段）与「姊妹页…」导航段，剥掉后不另加句子；
+   头部其余段落保留，与正文一样再经规则 2、3 改写。
+   **由此得出两条写作约定**：源页头部要新增给 contributor 的话（护栏在哪、权威在哪），写进引用块里——
+   块整体被剥；写成裸段落则会保留下来、发到使用方项目。头部除引用块与姊妹页导航段以外的第一段就是副本的开头，
+   须直接陈述、不写「本页…」式自述（副本随 skill 发到使用方项目，属用户文档）。
 2. 指向仓库内文件的指针 → `gherkai <子命令> --help` 或 `blob/HEAD/` 绝对 URL（`POINTER_REWRITES`）。
 3. 禁词按 `FORBIDDEN_REWRITES` 改写成产品语言。
 
@@ -39,9 +41,6 @@ TARGET = REPO_ROOT / "cli" / "gherkai_cli" / "skills" / "gherkai" / "references"
 # 禁词 / 相对链接正则复用护栏那份单一事实源（两份表必漂，见该模块 docstring）。
 sys.path.insert(0, str(REPO_ROOT / "cli" / "tests"))
 from _doc_rules import FORBIDDEN, RELATIVE_LINK  # noqa: E402
-
-# 剥掉头部引用块与导航段后补的一句：产品语言，只说这页是什么。
-LEAD = "本页讲 `--json` 各命令输出有哪些字段、什么意思、何时出现。"
 
 # 规则 2：仓库内文件指针 → 使用方拿得到的东西（`--help` 或绝对 URL）。key 是源页里的**原文片段**，
 # 逐字匹配、命中零次即红（源页改了措辞就该回来改这张表，而不是让替换悄悄失效）。
@@ -102,7 +101,7 @@ def transform(text: str) -> str:
     if dropped_nav != 1:
         raise TransformError(f"「姊妹页」导航段应恰好一段，实际 {dropped_nav} 段——先更新转换规则")
 
-    out = [lines[0], "", LEAD]
+    out = [lines[0]]
     for para in kept:
         out += [""] + para
     out += [""] + body

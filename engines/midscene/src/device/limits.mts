@@ -18,7 +18,7 @@ export const SESSION_CAP_S = 9000;
 /** Fargate 任务停止宽限 `stopTimeout` 的硬上限：会话年龄到点后收尾最多能拿到的时间。 */
 export const FARGATE_STOP_TIMEOUT_CAP_S = 120;
 /** 设备目标的单次会话上限：会话硬上限减去停止宽限的硬上限，即 8880 秒。写进能力自述的 max_session_s，同时是
- *  worker 自检的阈值（墙钟预算超过它即 precheck_failed）与会话年龄后备的触发点（到点归 session_lost）。
+ *  worker 自检的阈值（job 墙钟预算超过它即 precheck_failed）与会话年龄后备的触发点（到点归 session_lost）。
  *  余量取停止宽限的硬上限、不取收尾各段之和：后者会随日后重新校准调整，且收尾挂住到硬上限时会话会越过 150 分钟
  *  （ADR 0049 决策 4 的被拒读法）。 */
 export const MAX_SESSION_S = SESSION_CAP_S - FARGATE_STOP_TIMEOUT_CAP_S;

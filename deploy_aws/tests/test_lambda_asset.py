@@ -1,7 +1,7 @@
 """Lambda asset 构建测试（ADR 0037 决策 6「Lambda asset 来源」）：纯本地、不联网、不碰 AWS。
 
 护的是**来源与内容清单**这条契约：handler 源在包内、依赖从**当前 venv 已安装位置**复制、`__pycache__`/`tests`
-不进包、落点在临时目录而**非仓库/包目录**。漏一项的后果都要等到 Lambda 实际运行才炸
+不进包、落点在临时目录而**非仓库/包目录**。漏一项的后果都要等到 Lambda 实际运行时才暴露
 （ImportError / zip 臃肿 / 往只读的 site-packages 写）。
 
 **证据边界（绿≠对）**：多数用例用**假**复制源验「摆放规则」；`test_asset_imports_with_only_stdlib_beside_it`
@@ -23,7 +23,7 @@ from gherkai_deploy_aws.stack import BackendStack
 from synth_fixture import make_stack
 
 # 假源里故意做成**单文件模块**的那一项（真实世界里 typing_extensions 就是 `typing_extensions.py`）——
-# 「包即目录」一刀切会把它判成「找不到」，这是踩过的坑，故两种形态都要有用例覆盖。
+# 「包即目录」一刀切会把它判成「找不到」，这个问题实际出现过，故两种形态都要有用例覆盖。
 SINGLE_FILE_MODULE = "typing_extensions"
 
 

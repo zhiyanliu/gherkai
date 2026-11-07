@@ -139,7 +139,7 @@ function fakeWdio(script: FakeWdioScript = {}) {
   return { entry, calls, remotes, attaches };
 }
 
-function connector(f: ReturnType<typeof fakeWdio>, extra: AppiumConnectorOptions = {}) {
+function connector(f: ReturnType<typeof fakeWdio>, extra: Partial<AppiumConnectorOptions> = {}) {
   const logs: string[] = [];
   const order: string[] = f.calls;
   return {
@@ -449,6 +449,16 @@ test("为 evidence 读地址：列上下文与读地址各自对连接层错误�
   assert.equal(timeout.calls.at(-1), "exec.switchContext:NATIVE_APP", "读完尽力切回原生上下文");
 });
 
+test("读当前上下文：字符串原样返回，详细形态的对象取 id，认不出的形态为空字符串", async () => {
+  for (const [reported, expected] of [
+    ["WEBVIEW_1", "WEBVIEW_1"], ["", ""], [{ id: "CHROMIUM", title: "Shop" }, "CHROMIUM"], [null, ""], [{ id: 7 }, ""], [3, ""],
+  ] as const) {
+    const h = scriptedSession();
+    (h.session.exec as unknown as { getContext: () => Promise<unknown> }).getContext = async () => reported;
+    assert.strictEqual(await h.session.currentContext(), expected, JSON.stringify(reported));
+  }
+});
+
 test("执行前的会话丢失消息：说的是准备设备期间会话已结束、step 都没有执行，与执行中途的那句不同", () => {
   assert.notEqual(SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE);
   assert.ok(SESSION_LOST_BEFORE_START_MESSAGE.includes("准备设备"));
@@ -558,7 +568,7 @@ test("真实运行：修正之后执行实例的长命令不被建连实例与�
     routes: { "GET /source": { delayMs: SLOW_MS }, "GET /screenshot": { delayMs: SLOW_MS } },
   });
   try {
-    const c = createAppiumConnector({ timeouts: SHORT });
+    const c = createAppiumConnector({ timeouts: SHORT, log: () => {} });
     const outcome = await c.connect(webReq("ios", fake.endpoint), budgetOf({ ms: 300 }));
     assert.equal(outcome.kind, "connected");
     if (outcome.kind !== "connected") return;
@@ -586,7 +596,7 @@ test("真实运行：修正之后执行实例的长命令不被建连实例与�
 test("真实运行：截止信号中止在途请求本身（不是放弃等待）", async () => {
   const fake = await fakeWebDriver({ sessionCapabilities: ANDROID_APP, routes: { "GET /source": { delayMs: 2_000 } } });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(
       { ...appReq(), endpoint: fake.endpoint }, budgetOf({ ms: 600_000 }),
     );
     assert.equal(outcome.kind, "connected");
@@ -612,7 +622,7 @@ test("真实运行：服务端非 2xx 的状态码经生产钩子记下、能从
     },
   });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(
       { ...appReq(), endpoint: fake.endpoint }, budgetOf({ ms: 600_000 }),
     );
     assert.equal(outcome.kind, "connected");
@@ -644,7 +654,7 @@ test("真实运行：生命周期通道的只读原语遇到真实的 503、502 
     },
   });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(webReq("ios", fake.endpoint), budgetOf({ ms: 600_000 }));
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(webReq("ios", fake.endpoint), budgetOf({ ms: 600_000 }));
     assert.equal(outcome.kind, "connected");
     if (outcome.kind !== "connected") return;
     const { session } = outcome;
@@ -660,7 +670,7 @@ test("真实运行：生命周期通道的只读原语遇到真实的 503、502 
 
   const slow = await fakeWebDriver({ sessionCapabilities: IOS_SAFARI, routes: { "GET /screenshot": { delayMs: 1_000 } } });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(webReq("ios", slow.endpoint), budgetOf({ ms: 600_000 }));
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(webReq("ios", slow.endpoint), budgetOf({ ms: 600_000 }));
     assert.equal(outcome.kind, "connected");
     if (outcome.kind !== "connected") return;
     await assert.rejects(outcome.session.probeScreenshot(), (e) => commandFailureKind(e) === "client_timeout");
@@ -676,7 +686,7 @@ test("真实运行：newSession 被服务端拒绝时，消息里的服务端原
     routes: { "POST /session": { status: 500, body: { error: "session not created", message: `Could not download app from ${PRESIGNED}`, stacktrace: "" } } },
   });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(
       { ...appReq(), endpoint: rejected.endpoint }, budgetOf({ ms: 600_000 }),
     );
     assert.equal(outcome.kind, "terminated");
@@ -692,7 +702,7 @@ test("真实运行：newSession 被服务端拒绝时，消息里的服务端原
 
   const busy = await fakeWebDriver({ sessionCapabilities: ANDROID_APP, routes: { "POST /session": { status: 503, body: { error: "unknown error", message: "Service Unavailable", stacktrace: "" } } } });
   try {
-    const outcome = await createAppiumConnector({ timeouts: SHORT }).connect(
+    const outcome = await createAppiumConnector({ timeouts: SHORT, log: () => {} }).connect(
       { ...appReq(), endpoint: busy.endpoint }, budgetOf({ ms: 600_000 }),
     );
     assert.deepEqual(outcome, ACQUIRE_TIMED_OUT);

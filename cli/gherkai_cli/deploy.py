@@ -61,7 +61,7 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
     **多个** → 必须 `--provider <名>`，否则列出名字让人选（前端不替部署方猜「哪个云」）。全部失败情形由调用点以退出码 2 结束。
 
     加载即 `ep.load()`：拿到**类**则实例化（entry point 惯例指向 `Provider` 类），拿到现成对象/单例则原样用。
-    加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链炸）不让 traceback 裸奔——翻成点名 entry point
+    加载失败（provider 包半装 / 版本不匹配 / 它自己的 import 链抛异常）不直接输出 traceback——翻成点名 entry point
     的一句诊断（部署方视角这是「装了但不可用」，与「没装」是两回事，措辞必须分开）。
     """
     eps = provider_entry_points()
@@ -82,8 +82,8 @@ def resolve_provider(name: str | None) -> tuple[object | None, str | None]:
         ep = match[0]
     try:
         loaded = ep.load()
-        obj = loaded() if isinstance(loaded, type) else loaded  # 实例化也算「加载」：__init__ 炸同属装了但不可用
-    except Exception as e:  # 半装 / 版本不匹配 / provider 自己的 import 链或 __init__ 炸
+        obj = loaded() if isinstance(loaded, type) else loaded  # 实例化也算「加载」：__init__ 抛异常同属装了但不可用
+    except Exception as e:  # 半装 / 版本不匹配 / provider 自己的 import 链或 __init__ 抛异常
         return None, (
             f"部署 provider {ep.name!r} 加载失败（entry point {ep.value}）：{type(e).__name__}: {e}"
             f"——装了但不可用（版本不匹配？半装？），重装 `gherkai[deploy-aws]` 或 --provider 换一个。"
@@ -158,9 +158,9 @@ def add_parsers(sub, *, provider: object | None = None, provider_error: str | No
     )
     dp.add_argument(
         "--allow-vpc-change", action="store_true",
-        help="放行 VPC 取值变更：本次的取值与后端记着的上次生效取值不一致、或 stack 已存在但后端还没有取值记录时，deploy 以退出码 2 结束、"
-             "要你先 `--diff` 核对变更集；核对完带本 flag 放行一次——漏给 VPC 取值会合成"
-             "「新建整套 VPC + 替换安全组」的危险变更集（真踩过）",
+        help="放行 VPC 取值变更：本次的取值与后端记录的上次生效取值不一致、或 stack 已存在但后端还没有取值记录时，"
+             "deploy 以退出码 2 结束，提示先用 `--diff` 核对变更集；核对变更集后可带本选项放行一次。"
+             "更改 VPC 取值可能触发网络与安全组的替换",
     )
 
     # 说明按原样分行输出（RawDescriptionHelpFormatter）：默认的自动折行会在连字符处断开，把里面的删除命令拆成

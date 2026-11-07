@@ -224,13 +224,20 @@ class DynamoDBRunStore:
         **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
         DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
-        stale 返 False），再对每个 job **逐属性** `SET jobs.#sid.status/.session_id/.claimed_at` + 「当前非更推进态」的单元素
-        条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。逐属性而非整 entry：update_item 不碰未提及
-        属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job 落库、事件推演不出）天然保留——对拍 local 的
-        「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。两步非原子，但每步各自条件守卫、次序（先标量后
-        jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job 视图的合法投影，下轮重放收敛。
+        stale 返 False），再对每个 job（无效果的 pending 项除外，见末段）**逐属性** `SET jobs.#sid.status/.session_id/.claimed_at`
+        + 「当前非更推进态」的单元素条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。
+        逐属性而非整 entry：update_item 不碰未提及属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job
+        落库、事件推演不出）天然保留——对拍 local 的「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。
+        两步非原子，但每步各自条件守卫、次序（先标量后 jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job
+        视图的合法投影，下轮重放收敛。
         update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
-        started_at 抹掉」的对拍不一致）。"""
+        started_at 抹掉」的对拍不一致）。
+
+        **无效果的 pending 项不发写**（ADR 0034 机制三「逐 job 写跳过无效果的 pending 项」段）：投影里 status 为 pending、
+        session_id 与 claimed_at 都为空的 job 跳过。这类写只把 status 设为 pending，条件是库中该 job 为 pending：库中为 pending
+        时写入值与库中值相同；库中已 running 或终态、或该 job 不在 Map 里时条件不成立、写被挡下。两种情形库中都不变，跳过与否
+        结果相同，与调用方是否传 baseline 无关；而每次写都按整个 STATE item 的大小计费。三个条件缺一不可：投影一旦带了会话或
+        认领时刻，这次写就可能改变库中值，照常发出。local 不需要同样跳过（锁内整份写回一次，写入次数不随 job 数增长）。"""
         from gherkai_core.project import _lifecycle_rank, projected_run_status
 
         new_hwm = state.high_water_mark or 0
@@ -258,6 +265,8 @@ class DynamoDBRunStore:
         # 机制三② job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 的 rank
         # 不高于本次投影才写（同 rank 允许覆盖——running 刷 running 幂等、终态间以本次投影为准）。
         for sid, js in state.jobs.items():
+            if js.status == Status.PENDING and js.session_id is None and js.claimed_at is None:
+                continue  # 无效果的 pending 项不发写（等价性论证见 docstring 末段）
             new_rank = _lifecycle_rank(js.status)
             try:
                 if new_rank >= 2:
@@ -335,7 +344,7 @@ class DynamoDBRunStore:
         elif has_pointers(meta_dict):
             # fail-loud（ADR 0030 决定七「不给生产选要不要正确」）：META 含 offload 指针而本实例没注入
             # offloader 属组合根装配错误（曾发生：Lambda 组合根漏注入 → 正文静默还原成 None、worker 拿
-            # 空参数执行出错）。宁炸不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
+            # 空参数执行出错）。宁可报错，也不静默降级。判据走 arg_offload 的**位置遍历**（与 restore 同源，决定六
             # 「位置区分、非值探测」）——对 meta_json 原始串做 '"content_ref"' 子串 sniff 会被「正文恰为
             # 该串」的 docString/dataTable cell 误命中，把好 run 判成装配错误、读不回来。
             raise RuntimeError(

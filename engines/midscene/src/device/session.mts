@@ -12,12 +12,16 @@
 //   - 设备解析（决策 3）：按条件时完整分页列举，静态过滤平台、手机形态、支持远程访问与公共设备，版本族按点分段匹配；先排除
 //     BUSY 与 TEMPORARY_NOT_AVAILABLE，再按版本号高、HIGHLY_AVAILABLE 优先、ARN 字典序取第一台。首轮零候选隔一个短间隔再列一次，
 //     仍为零即 precheck_failed；全部繁忙才在预算内按 busyBackoffMs 退避重列，等待期间候选变空不改判。直接给 ARN 时不列举（获取
-//     预算从首次 Create 起算）。设备选择读 Device Farm 设备描述的 os 与 model，是系统版本读取点护栏的显式豁免（ADR 0052 决策 8）。
-//   - Create 的结果未知（决策 3）：请求超时或连接中断记为待核——没有 HTTP 响应，或响应头已到而响应体没读完（SDK 这时也在错误上
-//     带状态码 200，不能据状态码判为被拒）。待核只能由按名列举命中消除：以进入核对时的待核名字为准逐页比较、扫到分页结束，
-//     同名的每个 ARN 都登记进待清理集并发 session_opened(discovered)，命中的名字随之消除；没命中的名字不论列举为空还是分页没扫完
-//     都保留待核。全部名字都已命中也继续翻页：「一次尝试至多建立一个会话」没有幂等令牌担保，后页漏掉的同名会话会一路计费、没有
-//     session_closed。每次重试前与每条终结路径各核对一次。
+//     预算在接缝 acquire 入口起算：直接给 ARN 的网页目标，起点即首次 Create；应用目标还包括之前的存在性检查）。设备选择读
+//     Device Farm 设备描述的 os 与 model，是系统版本读取点护栏的显式豁免（ADR 0052 决策 8）。
+//   - Create 的结果未知（决策 3）：请求超时、连接中断或收到任何 HTTP 5xx 记为待核——没有 HTTP 响应，或响应头已到而响应体没读完
+//     （SDK 这时也在错误上带状态码 200，不能据状态码判为被拒），或收到服务端错误（5xx 不说明出错时会话是否已经建立；只看状态码，
+//     带限流类错误名也记待核）。按被拒处理的只有 4xx 与请求发出之前的凭证解析失败，其中 429 与限流类错误名在预算内重试。Create 的
+//     归类（classifyCreateFailure）单独成条，其余调用不随之改变：等待就绪的 Get 与设备列举用 classifyCallFailure，5xx 照旧退避重发
+//     （只读调用，重发不会多出计费会话）；按名核对的列举出错即停、Stop 按 Stop 规则不重试，都不经归类。待核只能由按名列举命中
+//     消除：以进入核对时的待核名字为准逐页比较、扫到分页结束，同名的每个 ARN 都登记进待清理集并发 session_opened(discovered)，命中
+//     的名字随之消除；没命中的名字不论列举为空还是分页没扫完都保留待核。全部名字都已命中也继续翻页：「一次尝试至多建立一个会话」
+//     没有幂等令牌担保，后页漏掉的同名会话会一路计费、没有 session_closed。每次重试前与每条终结路径各核对一次。
 //   - 记待核只有一个入口（markPending）：同名的会话已按名找回时不记（命中是正面证据，原请求晚到的失败或没带 ARN 的返回推翻
 //     不了它，再记会让同一个名字既有 discovered 又有 attempted、误判释放失败）；终结核对结束之后也不记（那时仍待核的名字已按
 //     attempted 上报）。
@@ -45,7 +49,7 @@ import {
 } from "@aws-sdk/client-device-farm";
 import type { Device } from "../worker/deterministic.mjs";
 import type { JobDeviceRequest } from "../lib/job-source.mjs";
-import { errorText, oneLineError } from "../worker/error-text.mjs";
+import { errorText, oneLineError } from "../lib/error-text.mjs";
 import type {
   AcquireBudget, DeviceChoice, DeviceFarmSessions, DevicePartsEnv, Outcome, RemoteSession, RunningSession,
 } from "./surface.mjs";
@@ -149,11 +153,17 @@ export function isStopped(status: string | null | undefined): boolean {
 }
 
 /** 一次调用失败的性质：
- *  - unknown：没有 HTTP 响应，或响应头已到而响应体没读完、没能解析（请求超时、连接中断、被中止）。对 Create 而言结果未知、
- *    要记待核；对其余调用按可重试处理。
- *  - retryable：限流与服务端错误（429、5xx、限流类错误名）。
+ *  - unknown：没有 HTTP 响应，或响应头已到而响应体没读完、没能解析（请求超时、连接中断、被中止）；Create 的归类另把任何 5xx 归到
+ *    这里（见 classifyCreateFailure）。对 Create 而言结果未知、要记待核；对其余调用按可重试处理。
+ *  - retryable：限流（429、限流类错误名）；classifyCallFailure 还把服务端错误（5xx）归到这里。
  *  - definitive：其余有响应的拒绝（参数无效、不存在、无权限等），重试不会变。凭证解析失败发生在请求发出之前，同样归这里。 */
 export type CallFailure = "unknown" | "retryable" | "definitive";
+
+/** SDK 错误上的 HTTP 状态码是 5xx 时返回它，否则返回 null。 */
+function serverErrorStatus(e: unknown): number | null {
+  const status = (e as { $metadata?: { httpStatusCode?: unknown } } | null | undefined)?.$metadata?.httpStatusCode;
+  return typeof status === "number" && status >= 500 ? status : null;
+}
 
 const THROTTLING_ERROR_NAMES: ReadonlySet<string> = new Set([
   "ThrottlingException", "Throttling", "ThrottledException", "TooManyRequestsException", "RequestLimitExceeded",
@@ -167,6 +177,9 @@ const AUTH_ERROR_NAMES: ReadonlySet<string> = new Set([
   "CredentialsProviderError",
 ]);
 
+/** 等待就绪的 Get 与设备列举的失败归类（ADR 0051 决策 3）：5xx 与限流可重试，据此决定退避重发还是报错；这两种调用只读，重发
+ *  不会多出计费会话。Create 的归类见 classifyCreateFailure：它只把 5xx 另行归类，其余输入沿用本函数，改这里也会改变 Create
+ *  的归类。 */
 export function classifyCallFailure(e: unknown): CallFailure {
   const err = (e ?? {}) as { name?: unknown; $metadata?: { httpStatusCode?: unknown } };
   const status = err.$metadata?.httpStatusCode;
@@ -174,6 +187,13 @@ export function classifyCallFailure(e: unknown): CallFailure {
   if (typeof status !== "number" || (status >= 200 && status < 300)) return err.name === "CredentialsProviderError" ? "definitive" : "unknown";
   if (status === 429 || status >= 500) return "retryable";
   return typeof err.name === "string" && THROTTLING_ERROR_NAMES.has(err.name) ? "retryable" : "definitive";
+}
+
+/** Create 的失败归类（ADR 0051 决策 3）：任何 5xx 都归结果未知，先于限流判断、只看状态码（带限流类错误名也归这里），其余与
+ *  classifyCallFailure 相同。5xx 不说明出错时会话是否已经建立，Create 又没有幂等令牌：归错的后果是终结时一次「请核对控制台」的
+ *  误报；按被拒以新序号重试，旧序号的名字就无人核对，服务端已建出的会话会一路计费到上限而不被上报。 */
+export function classifyCreateFailure(e: unknown): CallFailure {
+  return serverErrorStatus(e) !== null ? "unknown" : classifyCallFailure(e);
 }
 
 // ---- 版本族与设备选择（ADR 0051 决策 3）----
@@ -400,8 +420,7 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
 
   // ---- DeviceFarmSessions ----
 
-  async resolve(budget: AcquireBudget, _replacing: RemoteSession | null): Promise<Outcome<DeviceChoice>> {
-    // 换台按同一规则重新解析：拒装驱动辅助包是那台设备单元的状态，同一机型的另一台单元即正常（ADR 0051 实测依据）。
+  async resolve(budget: AcquireBudget): Promise<Outcome<DeviceChoice>> {
     const { deviceArn, osVersion } = this.request;
     if (deviceArn) return { ok: true, value: { deviceArn, model: null, osVersion: null } };
     if (!osVersion) throw new Error("这个 job 的设备请求既没有设备 ARN，也没有系统版本");
@@ -447,7 +466,7 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
           `Device Farm 拒绝建立远程访问会话：${errorText(result.error)}；若是权限或凭证问题，请核对运行凭证对这个 Device Farm 项目的权限`,
         );
       }
-      if (result.kind === "rejected") this.log(`worker: 建立远程访问会话的请求被限流或服务端出错，稍后重试：${errorText(result.error)}`);
+      if (result.kind === "rejected") this.log(`worker: 建立远程访问会话的请求被限流，稍后重试：${errorText(result.error)}`);
       await this.timers.sleep(busyBackoffMs(waits), budget.signal);
     }
   }
@@ -665,11 +684,14 @@ export class DeviceFarmSessionBlock implements DeviceFarmSessions {
     return { result: { kind: "created", remote: { arn: session.arn, name, createRequestedAt: requestedAt, device } }, opened: tracked.opened };
   }
 
-  /** Create 失败之后的登记：结果未知的记为待核（经 markPending），有响应的拒绝按是否可重试交给调用方。 */
+  /** Create 失败之后的登记：结果未知的记为待核（经 markPending），有响应的拒绝按是否可重试交给调用方。收到 5xx 时回应是完整的，
+   *  日志说明收到的是服务端错误与状态码，而不说没有得到完整的回应。 */
   private recordFailed(e: unknown, name: string, attempt: number): CreateResult {
-    const failure = classifyCallFailure(e);
+    const failure = classifyCreateFailure(e);
     if (failure !== "unknown") return { kind: "rejected", retryable: failure === "retryable", error: e };
-    this.markPending(name, attempt, "建立远程访问会话的请求没有得到完整的回应", `：${errorText(e)}`);
+    const status = serverErrorStatus(e);
+    const what = status === null ? "建立远程访问会话的请求没有得到完整的回应" : `建立远程访问会话的请求收到服务端错误 HTTP ${status}`;
+    this.markPending(name, attempt, what, `：${errorText(e)}`);
     return { kind: "unknown", error: e };
   }
 

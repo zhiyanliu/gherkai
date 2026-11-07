@@ -2,8 +2,9 @@ name: release
 
 # 推 tag `vX.Y.Z` 即触发发布全链（ADR 0037 决策 8）：一个 git tag 派生五个 wheel 的版本、npm 包版本、
 # 基础镜像 tag、GitHub Release——版本真源（ADR 0037 决策 2b/7）。
-# 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本==tag）→ ① PyPI（build → attest → publish）
-# → ② npm → ③ GHCR 基础镜像（依赖 ①② 索引可见）→ ④ GitHub Release。
+# 顺序与失败语义按 ADR 0037 决策 8：gate（tag 形态 + 算出的版本与 tag 一致）与产物定稿（wheel + npm tarball）
+# → 镜像 gate（用这份产物按 local 态构建两个基础镜像，不推送）→ ① PyPI（attest → publish）→ ② npm（发布定稿的 tarball）
+# → ③ GHCR 基础镜像（index 态，依赖 ①② 索引可见）→ ④ GitHub Release。
 # 一次性人工前置（PyPI trusted publisher / npm trusted publisher / GHCR 包可见性）见 .github/workflows/README.md。
 on:
   push:
@@ -70,8 +71,8 @@ jobs:
 
       - name: gate：CHANGELOG.md 有本版节、README 的 skill 安装命令钉本版 tag
         # 每版说明「不写发不出」（ADR 0045 决策五）：Release 正文为该节正文 + 固定装法块（.github/release_body_footer.md）。
-        # 根 README 里 `npx skills add …/tree/vX.Y.Z/…` 写死发行 tag（ADR 0043 决策三），忘了改就在这里红。
-        # 放在 build 之前：缺节 / 旧 tag 是编辑动作能补的，别先花几分钟 build 再红。
+        # 根 README 里 `npx skills add …/tree/vX.Y.Z/…` 写死发行 tag（ADR 0043 决策三），忘了改就在这一步失败。
+        # 放在 build 之前：缺节 / 旧 tag 是编辑动作能补的，不必先花几分钟 build 才失败。
         run: uv run --no-project python .github/scripts/release_notes.py check --version "${VERSION}"
         env:
           VERSION: ${{ steps.tag.outputs.version }}
@@ -79,14 +80,14 @@ jobs:
       - name: uv build --all-packages
         run: uv build --all-packages --out-dir dist
 
-      - name: gate：版本 == tag、成员齐、兄弟包 pin 已渲染
+      - name: gate：算出的版本与 tag 一致、workspace 成员齐全、兄弟包 pin 已渲染
         id: gate
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
           version="${VERSION}"
 
-          # 产物校验（版本==tag / workspace 成员齐 / 兄弟包 `==` 同版本 pin 已渲染）。
+          # 产物校验（版本与 tag 一致 / workspace 成员齐全 / 兄弟包 `==` 同版本 pin 已渲染）。
           # 用 uv 带的 3.13 运行脚本，不依赖 runner 自带 python3 的版本（脚本用 tomllib，需 ≥3.11）。
           uv run --no-project python .github/scripts/check_dist_metadata.py \
             --dist dist --expect-version "$version"
@@ -120,12 +121,84 @@ jobs:
           # 同一 run 内重新运行本 job 时允许覆盖（否则第二次上传撞名直接失败）。
           overwrite: true
 
+      # npm 包在这里定稿（ADR 0037 决策 8「发布前镜像 gate」条）：image-gate 安装的、npm job 发布的都是这一个 tarball，
+      # 两边不各自构建。以下几步必须排在 `uv build` 与产物校验之后：`npm version` 改写 package.json，工作树随之变脏，
+      # 排在前面会让算出的 Python 版本带本地段、「gate：算出的版本与 tag 一致」那一步必然失败。
+      - uses: actions/setup-node@v7.0.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: engines/midscene/package-lock.json
+
+      - name: npm version + build + pack（tarball 定稿）
+        working-directory: engines/midscene
+        run: |
+          set -euo pipefail
+          # --no-git-tag-version：只改 package.json / package-lock.json，不 commit 不打 tag
+          # （tag 已经是触发源，版本真源在 git tag 上，ADR 0037 决策 2b）。
+          npm version "${VERSION}" --no-git-tag-version
+          # `npm ci && npm run build` 不可省：dist/ 不入库、package.json 无 prepack 钩子，漏 build 打出的包 bin 直接失效。
+          npm ci
+          npm run build
+          mkdir -p "${RUNNER_TEMP}/npm-dist"
+          npm pack --pack-destination "${RUNNER_TEMP}/npm-dist"
+          # 文件名带版本：确认打出的就是本 tag 的版本，下游按这个名字取用。
+          tarball="${RUNNER_TEMP}/npm-dist/gherkai-worker-midscene-${VERSION}.tgz"
+          if [ ! -f "$tarball" ]; then
+            echo "::error::npm pack 没有产出 $(basename "$tarball")："; ls -l "${RUNNER_TEMP}/npm-dist"; exit 1
+          fi
+          echo "- npm tarball：\`$(basename "$tarball")\`" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          VERSION: ${{ steps.tag.outputs.version }}
+
+      # 独立 artifact、不放进 dist/：attest 与 `uv publish` 处理 dist 里的全部文件，只该是 Python 产物。
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/npm-dist/
+          if-no-files-found: error
+          overwrite: true
+
+  image-gate:
+    # 发布前镜像 gate（ADR 0037 决策 8「发布前镜像 gate」条）：PyPI 与 npm 的同一版本号都不能重发，而 ③ 排在两者之后；
+    # Dockerfile、冒烟或包内容的回归若到 ③ 才暴露，重新运行 ③ 修不好、只能另发新版本。故在 ①② 之前，用 build job
+    # 定稿的 wheel 与 tarball 按 local 态构建两个基础镜像（不推送），任一引擎失败则 ①② 都不运行。
+    # 覆盖不到 index 态安装分支、索引可见性与 GHCR 推送，这几类失败仍在 ③ 暴露（边界见同一条 ADR）。
+    # 构建逻辑在 .github/scripts/image_gate.sh，与 ci.yml 的 image-gate 共用。
+    name: image gate ${{ matrix.engine }}
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false # 两引擎各自给出失败结果
+      matrix:
+        include:
+          - engine: novaact
+            artifact: dist
+          - engine: midscene
+            artifact: npm-tarball
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/gate-input
+
+      - name: local 态构建 + 冒烟（不推送）
+        run: bash .github/scripts/image_gate.sh "${ENGINE}" "${RUNNER_TEMP}/gate-input"
+        env:
+          ENGINE: ${{ matrix.engine }}
+
   pypi:
     # ① PyPI：attest（生成 PEP 740 attestation）→ uv publish（trusted publishing，OIDC 免密）。
     # `uv publish` **自己不生成** attestation，只上传已存在的 `*.publish.attestation`——漏 attest 这步
     # 就是静默发出无证物件（ADR 0037 决策 8）。
     name: publish PyPI
-    needs: build
+    needs: [build, image-gate]
     if: github.repository == 'zhiyanliu/gherkai'  # fork 推 tag 不往公共索引发
     runs-on: ubuntu-latest
     permissions:
@@ -169,31 +242,23 @@ jobs:
 
   npm:
     # ② npm：`@gherkai/worker-midscene`（midscene worker 是 Node 地盘，pip extra 够不到，ADR 0037 决策 3）。
-    # package.json 常驻占位 `0.0.0-dev`，版本由 CI 从 tag 写入（ADR 0037 决策 2b）。
+    # 发布的是 build job 定稿、image-gate 验过的那个 tarball（版本已按 tag 写入，ADR 0037 决策 2b），本 job 不重新构建：
+    # 两次构建各自通过，不能说明发出去的就是 gate 验过的那一份（ADR 0037 决策 8「发布前镜像 gate」条）。
+    # 因此也不 checkout：发布用不到源码树。
     name: publish npm
-    needs: build
+    needs: [build, image-gate]
     if: github.repository == 'zhiyanliu/gherkai'
     runs-on: ubuntu-latest
     permissions:
       id-token: write # npm trusted publishing（OIDC）：免 token，provenance 自动附带
-      contents: read
-    defaults:
-      run:
-        working-directory: engines/midscene
     # **无 token、无 secret**：npm 侧走 trusted publishing——包在 npmjs.com 上登记了本仓库 + `release.yml`
     # 作 trusted publisher，npm CLI 用 GitHub 的 OIDC token 换发布授权（一次性人工前置见 workflows/README.md）。
     # 故这里**不**给 setup-node 配 registry-url：它会往 .npmrc 写 `${NODE_AUTH_TOKEN}` 占位，变量不存在时
     # 连只读的 `npm view` 都会以 "Failed to replace env in config" 报错。
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          persist-credentials: false
-
       - uses: actions/setup-node@v7.0.0
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: engines/midscene/package-lock.json
 
       - name: npm ≥ 11.5.1（trusted publishing 的下限；Node 22 自带的是 10.x）
         run: |
@@ -214,26 +279,29 @@ jobs:
         env:
           VERSION: ${{ needs.build.outputs.version }}
 
-      - name: version + build + publish
+      - uses: actions/download-artifact@v8.0.1
+        if: steps.check.outputs.skip == 'false'
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/npm-dist
+
+      - name: npm publish <tarball>
         if: steps.check.outputs.skip == 'false'
         run: |
           set -euo pipefail
-          # --no-git-tag-version：只改 package.json / package-lock.json，不 commit 不打 tag
-          # （tag 已经是触发源，版本真源在 git tag 上，ADR 0037 决策 2b）。
-          npm version "${VERSION}" --no-git-tag-version
-          npm ci
-          npm run build
+          # 参数是 tarball 路径：npm 直接上传这个文件，不读源码树、不执行打包。
           # trusted publishing 下 provenance 自动生成、不必 --provenance；--access public 是 scope 包首发必需
           # （`@gherkai` 默认 restricted）。
-          npm publish --access public
+          npm publish "${RUNNER_TEMP}/npm-dist/gherkai-worker-midscene-${VERSION}.tgz" --access public
           echo "已发布到 npm：@gherkai/worker-midscene@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
         env:
           VERSION: ${{ needs.build.outputs.version }}
 
   images:
     # ③ worker 基础镜像 → GHCR（ADR 0037 决策 5 两层分工；单架构 linux/amd64——ARM64 是被拒方案，ADR 0038）。
-    # 依赖 ①② 已发行**且索引可见**：基础镜像的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），
-    # 索引传播窗口内 build 会随机失败，故先等（下面 wait_for_index.sh 里写了完整理由）。
+    # 依赖 ①② 已发行**且索引可见**：推往 GHCR 的构建用 Dockerfile 的 index 态，按版本装已发行的 worker 包
+    # （ADR 0037 决策 5「两态」），索引传播窗口内 build 会随机失败，故先等（下面 wait_for_index.sh 里写了完整理由）。
+    # Dockerfile 结构、冒烟与包内容的回归已由 image-gate 挡在 ①② 之前；本 job 单独重新运行修的是索引传播与推送这类失败。
     name: base image ${{ matrix.engine }}
     needs: [build, pypi, npm]
     runs-on: ubuntu-latest
@@ -332,7 +400,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
-          # 两态 Dockerfile 的 CI 态（ADR 0037 决策 5）：按 tag 版本从 PyPI/npm 装已发行的 worker 包——
+          # 两态 Dockerfile 的 index 态（ADR 0037 决策 5，推往 GHCR 的构建用此态）：按 tag 版本从 PyPI/npm 装已发行的 worker 包——
           # 这就是上面「等索引可见」一步存在的原因（本 job 真消费索引）。
           build-args: |
             WORKER_SOURCE=index

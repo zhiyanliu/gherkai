@@ -306,7 +306,7 @@ def test_raise_model_classes_removed():
 def test_on_signal_does_no_io_even_if_stderr_is_locked(monkeypatch):
     """handler 里绝不做 I/O：信号落在主线程正写 stderr 的瞬间，handler 再写 stderr 会撞 BufferedWriter 的非重入锁
     （`RuntimeError: reentrant call inside <_io.BufferedWriter>`）、从 handler 抛出把主流程打崩（rc=1）——CI runner
-    实际运行抓到。把 log 与 sys.stderr.write 都换成一碰就炸的替身：handler 仍须只置标志、记信号号、不抛。"""
+    实际运行抓到。把 log 与 sys.stderr.write 都换成一调用就抛异常的替身：handler 仍须只置标志、记信号号、不抛。"""
     import sys
 
     def boom(*_a, **_k):

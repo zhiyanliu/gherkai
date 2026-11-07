@@ -33,14 +33,14 @@ src/
 ├── bin.mts            ← 唯一入口（npm bin + 容器 CMD）：装 tsx loader + 注册 resolve hook + 调 worker main
 ├── index.mts          ← 包的公开 API：使用方 step 文件 import 的 { deterministic, DeterministicAssertion, 类型 }
 ├── resolve-hook.mts   ← 裸 specifier "@gherkai/worker-midscene" → worker 自身安装位置（随 dist 发布的独立入口）
-├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 按目标选一次界面接缝 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`surface.mts`（界面接缝的类型契约：五个操作、四项边界义务与执行异常的归类标记，只有 `import type`，[ADR 0052](../../docs/adr/0052-appium-interface-adapter-and-platform-differences.md) 决策 2）、`surface-desktop.mts`（界面接缝的桌面实现：AgentCore 浏览器会话、Playwright 的 CDP 建连、会话预热与会话事件）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）、`error-text.mts`（失败原因压缩为一行有界文本，与 Nova 的 `_error_text` 规则一致）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
-├── device/            ← 设备模块（Android、iOS 经 Device Farm 与 Appium，按 ADR 0052 决策 3 的职责划分）：`surface.mts`（界面接缝的设备实现：只做编排，各块经端口类型 `DeviceParts` 注入）、`parts.mts`（部件的缺省装配 `defaultDeviceParts`，接缝模块静态 import 它）、`limits.mts`（设备目标的预算常量：超时、次数上限与截断阈值的单一来源，另有重规划上限覆盖键的读取与校验；零 SDK 依赖，能力自述与收尾下限只 import 它）、`session-name.mts`（会话名编码，零 SDK，桌面路径的 StartBrowserSession 请求名同样用它）、`session.mts`（Device Farm 会话：设备解析、Create、等到 RUNNING、查状态、换台、按 Stop 规则停止不再使用的会话（换台时被替换的、获取期按名找回的）；执行期唯一构造 Device Farm 客户端的地方）、`finalize.mts`（终结：两种释放模式与终结四阶段的前三段，与会话块共享同一份会话登记）、`appium.mts`（Appium 建连与上下文切换：建连、执行、探测三个客户端实例）、`web-context.mts`（网页上下文的重新定位）、`probe.mts`（能力探测）、`guard.mts`（命令守卫：执行令牌与结果未知标志）、`interface.mts`（界面实现 `AppiumInterface`、设备 Agent 的构造、驱动适配器的公共面与 `adapterRegistry`）、`adapters/`（驱动适配器 `uiautomator2.mts` 与 `xcuitest.mts`，`mobile:` 命令只出现在这里；`fixtures/` 放两个适配器的命令契约快照与控件树样例）、`warmup.mts`（设备上的会话预热）、`app.mts`（应用启停：安装包存在性检查与预签名、启动采样、`app.restart()`）、`device-session.mts`（会话事件的线上形状与 scope 诊断文件 `device-session.json`）、`wdio-log.mts`（WebdriverIO 自身日志的凭据掩码）；本目录下另有各模块的 `*.test.mts`，以及两条差集护栏 `read-points.test.mts`（读取点与依赖位置）与 `adapters/adapters.contract.test.mts`（命令契约快照）。划分与加载约定见下文「设备模块」节
-└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `redact.mts`（凭据脱敏，三条规则：URL 中的 userinfo、签名类查询参数与隧道令牌、设备端点路径令牌；后两条的正则对象另供 `device/wdio-log.mts` 生成 WebdriverIO 日志掩码）· `precheck.mts`（建会话前先核 job 行的协议版本，再按自己的 targets 核对 job 的目标与墙钟预算）· `parent-watchdog.mts`（所属进程消失视同停止信号：按启动方经 `GHERKAI_PARENT_PID` 传入的进程号定时核验所属进程是否存活，已退出即走与 SIGTERM 相同的收尾；未传入该变量时不启用，ADR 0024 终止契约）· `tunnel-warmup.mts`（隧道会话预热：与组合根、Nova 侧同值的常量，导航预热地址并按页面结果归因）
+├── worker/            ← 薄 worker：`run-scope.mts`（派发 / 按目标选一次界面接缝 / 事件 / 信号收尾 / 两个非 job 入口的分派）、`surface.mts`（界面接缝的类型契约：五个操作、四项边界义务与执行异常的归类标记，只有 `import type`，[ADR 0052](../../docs/adr/0052-appium-interface-adapter-and-platform-differences.md) 决策 2）、`surface-desktop.mts`（界面接缝的桌面实现：AgentCore 浏览器会话、Playwright 的 CDP 建连、会话预热与会话事件）、`deterministic.mts`（确定性注册表）、`deterministic.steps.mts`（内建脚手架）、`user-steps.mts`（使用方 steps 加载）、`argument.mts`（step 多行参数拼接：DataTable/DocString → 附加文本；两引擎须同一拼法）、`evidence.mts`（step 级机读证据：引擎 dump 裁剪为 evidence.json 供 explain 消费，[ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md)）；本目录下还有各模块的 `*.test.mts` 与测试夹具 `fixtures/`
+├── device/            ← 设备模块（Android、iOS 经 Device Farm 与 Appium，按 ADR 0052 决策 3 的职责划分）：`surface.mts`（界面接缝的设备实现：只做编排，各块经端口类型 `DeviceParts` 注入）、`parts.mts`（部件的缺省装配 `defaultDeviceParts`，接缝模块静态 import 它）、`limits.mts`（设备目标的预算常量：超时、次数上限与截断阈值的单一来源，另有重规划上限覆盖键的读取与校验；零 SDK 依赖，能力自述与收尾下限只 import 它）、`session-name.mts`（会话名编码，零 SDK，桌面路径的 StartBrowserSession 请求名同样用它）、`session.mts`（Device Farm 会话：设备解析、Create、等到 RUNNING、查状态、换台、按 Stop 规则停止不再使用的会话（换台时被替换的、获取期按名找回的）；执行期唯一构造 Device Farm 客户端的地方）、`finalize.mts`（终结：两种释放模式与终结四阶段的前三段，与会话块共享同一份会话登记）、`appium.mts`（Appium 建连与上下文切换：建连、执行、探测三个客户端实例）、`web-context.mts`（网页上下文的重新定位）、`probe.mts`（能力探测）、`guard.mts`（命令守卫：执行令牌与结果未知标志）、`interface.mts`（界面实现 `AppiumInterface`、设备 Agent 的构造、驱动适配器的公共面与 `adapterRegistry`）、`adapters/`（驱动适配器 `uiautomator2.mts` 与 `xcuitest.mts`，`mobile:` 命令只出现在这里；`fixtures/` 放两个适配器的命令契约快照与控件树样例）、`warmup.mts`（设备上的会话预热）、`app.mts`（应用启停：安装包存在性检查与预签名、启动采样、`app.restart()`）、`device-session.mts`（会话事件的线上形状与 scope 诊断文件 `device-session.json`）、`wdio-log.mts`（WebdriverIO 自身日志的凭据掩码）、`sleep.mts`（缺省等待 `defaultSleep` 与类型 `Sleep`：到时或中止信号中止时结束、不抛出，零依赖，Appium 块、应用启停、能力探测、网页上下文与 UiAutomator2 适配器共用）；本目录下另有各模块的 `*.test.mts`，以及两条差集护栏 `read-points.test.mts`（读取点与依赖位置）与 `adapters/adapters.contract.test.mts`（命令契约快照）。划分与加载约定见下文「设备模块」节
+└── lib/               ← I/O 边缘组件：`job-source.mts`（job 入口）· `event-sink.mts`（事件出口）· `artifact-upload.mts`（产物上传）· `agentcore-sigv4.mts`（SigV4 与模型常量）· `error-text.mts`（失败原因等文本压缩为一行有界文本，与 Nova 的 `_one_line` / `_error_text` 规则一致；worker、设备模块与两条会话预热路径共用这一份）· `redact.mts`（凭据脱敏，三条规则：URL 中的 userinfo、签名类查询参数与隧道令牌、设备端点路径令牌；后两条的正则对象另供 `device/wdio-log.mts` 生成 WebdriverIO 日志掩码）· `precheck.mts`（建会话前先核 job 行的协议版本，再按自己的 targets 核对 job 的目标与墙钟预算）· `parent-watchdog.mts`（所属进程消失视同停止信号：按启动方经 `GHERKAI_PARENT_PID` 传入的进程号定时核验所属进程是否存活，已退出即走与 SIGTERM 相同的收尾；未传入该变量时不启用，ADR 0024 终止契约）· `tunnel-warmup.mts`（隧道会话预热：与组合根、Nova 侧同值的常量，导航预热地址并按页面结果归因）
 dist/                  ← tsc 产物（*.mjs + *.d.mts），发布物；不入库
 spikes/                ← 分段自检脚本（不进包、不编译）：01 到 05 为桌面链路（模型连接、浏览器连接、模型与浏览器联合、规划探针、负向断言），06 为移动真机方向的 Device Farm 加 Appium 探针
 ```
 
-测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。测试位置按模块分两处：**worker 与 lib 的测试在 `src/worker/`**——`lib/` 各模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `event-sink.test.mts` / `job-source.test.mts` / `parent-watchdog.test.mts` / `redact.test.mts` / `precheck.test.mts` / `tunnel-warmup.test.mts`）与夹具 `fixtures/` 都落在这里，不另起 `src/lib/*.test.mts`；**设备模块的测试在 `src/device/`**，与所测模块同目录。
+测试都是 `src/**/*.test.mts`，按 tsconfig 的 `exclude` 不进 `dist`。测试位置按模块分两处：**worker 与 lib 的测试在 `src/worker/`**——`lib/` 各模块的测试（`agentcore-sigv4.test.mts` / `artifact-upload.test.mts` / `error-text.test.mts` / `event-sink.test.mts` / `job-source.test.mts` / `parent-watchdog.test.mts` / `redact.test.mts` / `precheck.test.mts` / `tunnel-warmup.test.mts`）与夹具 `fixtures/` 都落在这里，不另起 `src/lib/*.test.mts`；**设备模块的测试在 `src/device/`**，与所测模块同目录。
 
 ## 执行形态：薄 worker（cucumber 已退役）
 
@@ -126,11 +126,11 @@ GHERKAI_WORKER_MIDSCENE_CMD="node $(pwd)/src/bin.mts"     # 需 Node ≥ 22.18�
 | 能力探测 | `probe` | `probe.mts` | ADR 0052 决策 5 |
 | 驱动适配器（UiAutomator2、XCUITest） | `adapters` | `adapters/uiautomator2.mts`、`adapters/xcuitest.mts`，经 `interface.mts` 的 `adapterRegistry` 按会话回报的 automationName 选 | ADR 0052 决策 4 |
 | 命令守卫：执行令牌与结果未知标志 | `guards` | `guard.mts` | ADR 0052 决策 6 |
-| 界面实现与设备 Agent（`AbstractInterface`）；Input 动作带 `autoDismissKeyboard` 为 true 时输入后收起键盘一次并核键盘是否仍在（参数说明已替换为「用例要求时才给」），仍在即失败；另注册「收起键盘」动作 | `agents` | `interface.mts`（Agent 工厂的日志出口必填，缺省装配接部件环境的日志出口） | ADR 0052 决策 7 |
+| 界面实现与设备 Agent（`AbstractInterface`）；Input 动作带 `autoDismissKeyboard` 为 true 时输入后收起键盘一次并核键盘是否仍在（参数说明已替换为「用例要求时才给」），仍在即失败；另注册「收起键盘」动作 | `agents` | `interface.mts` | ADR 0052 决策 7 |
 | 会话预热 | `warmup` | `warmup.mts` | ADR 0052 决策 6、ADR 0051 决策 13 |
 | 应用启停：存在性检查、预签名、启动采样、`app.restart()` | `appStore`（安装包存储）加 `device/app.mts` 的原语 | `app.mts` | ADR 0051 决策 9、14 |
 
-缺省装配是 `device/parts.mts` 的 `defaultDeviceParts`，接缝每个 scope 装配一次；Device Farm 与 S3 客户端惰性构造，WebdriverIO 实例到建连时才建。`device/surface.test.mts` 经 `DeviceSurfaceOptions.parts` 注入假部件，核对编排次序与各条出口；各块的单测用假客户端与假 driver，不连 AWS、不连设备。离线测试证不到的结论（真机上的命令形态、探测时机、超时与连接池的真实行为）列在下文「真机验收矩阵」节。
+缺省装配是 `device/parts.mts` 的 `defaultDeviceParts`，接缝每个 scope 装配一次；Device Farm 与 S3 客户端惰性构造，WebdriverIO 实例到建连时才建。各块的诊断日志出口一律必填：Appium 建连、能力探测、会话预热、界面实现的直接构造（`createAppiumInterface`）与设备 Agent 工厂都不带缺省的空出口，缺省装配从部件环境接上 worker 的诊断日志出口；测试不需要日志时显式传空函数。`device/surface.test.mts` 经 `DeviceSurfaceOptions.parts` 注入假部件，核对编排次序与各条出口；各块的单测用假客户端与假 driver，不连 AWS、不连设备。离线测试证不到的结论（真机上的命令形态、探测时机、超时与连接池的真实行为）列在下文「真机验收矩阵」节。
 
 加载与读取约定（ADR 0052 决策 3、4、8）：
 
@@ -200,8 +200,8 @@ npx tsc --ignoreConfig --noEmit --module nodenext --moduleResolution nodenext --
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 
-- `index`（默认，CI 态）：以 `--build-arg WORKER_VERSION=X.Y.Z` 从 npm 安装已发行包（`npm install -g`）；本态不 COPY，build context 任意。
-- `local`（发行前本地验证镜像）：安装 build context 里 `npm pack` 产出的 tarball（下面两条命令**从 repo 根执行**）：
+- `index`（默认；发布链推往 GHCR 的构建用此态）：以 `--build-arg WORKER_VERSION=X.Y.Z` 从 npm 安装已发行包（`npm install -g`）；本态不 COPY，build context 任意。
+- `local`（发行前本地验证镜像；CI 与发布链的镜像 gate 也用此态，见 [`.github/workflows/README.md`](../../.github/workflows/README.md)）：安装 build context 里 `npm pack` 产出的 tarball（下面两条命令**从 repo 根执行**）：
 
 ```bash
 (cd engines/midscene && npm ci && npm run build && npm pack --pack-destination ../../dist)

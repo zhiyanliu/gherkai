@@ -81,7 +81,7 @@ def test_meta_json_holds_pointers_not_payload(ddb_run_store_offload, aws):
 
 # ---- 位置区分、非值探测：正文以 s3:// 开头也不被误判 ----
 def test_docstring_starting_with_s3_scheme_survives(ddb_run_store_offload):
-    # 正文本身就长得像指针——若读端靠"值是不是 s3:// 开头"猜，就会把正文当指针去 get、炸或串值。
+    # 正文本身就长得像指针——若读端靠"值是不是 s3:// 开头"猜，就会把正文当指针去 get，结果报错或取到别的值。
     tricky = "s3://not-a-real-bucket/looks/like/a/pointer.json"
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
         Scenario(id="s:1", name="sc", steps=(
@@ -130,7 +130,7 @@ def test_no_argument_run_offload_is_inert(ddb_run_store_offload, aws):
 # ---- restore 按 s3:// URI 自解析、不依赖当前 prefix（核心承诺的回归锚）----
 def test_restore_uses_uri_not_current_prefix(aws):
     # offloader 的 s3:// 指针是自描述的：restore 应直接解析 URI 取回，不用 self._prefix 重算 key。
-    # 若有人回归成 restore 用 self._prefix 拼 key，同 prefix 测试仍全绿、但换了 prefix 就 NoSuchKey 炸。
+    # 若有人回归成 restore 用 self._prefix 拼 key，同 prefix 测试仍全绿、但换了 prefix 就因 NoSuchKey 失败。
     # 故这里用「写端 prefix='writer/' 、读端 prefix='reader/'」的两个 offloader 验：读端仍逐字节还原。
     from gherkai_core.adapters.run_store.arg_offload import S3StepArgumentOffloader
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict

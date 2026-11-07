@@ -652,7 +652,7 @@ class _FakeNovaAct:
 
 
 class _RaisingSink:
-    """scope_started 时抛：模拟会话已起、NovaAct 已进入之后 body 才炸（覆盖「先释放会话再排空」）。"""
+    """scope_started 时抛：模拟会话已起、NovaAct 已进入之后 body 才抛异常（覆盖「先释放会话再排空」）。"""
 
     def __init__(self, exc):
         self._exc = exc
@@ -670,7 +670,7 @@ def main_fakes(monkeypatch, logs_dir):
     """把 main() 的 SDK 面全 fake 掉（job 走 stdin、scenarios 空 → 只执行到收尾序列）。"""
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
-        lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x"}, "scenarios": [],
+        lambda: json.dumps({"schemaVersion": 2, "scope": {"id": "x"}, "scenarios": [],
                             "target": {"device": "desktop", "uiKind": "web"}}))})())  # 键集固定：协议版本与桌面目标都要带
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
     monkeypatch.setattr(rs, "Workflow", lambda **k: _FakeCm())      # with wf: 用同一个上下文管理器形状
@@ -724,7 +724,7 @@ def test_network_exhausted_path_drains(main_fakes):
 
 
 def test_exception_path_drains_and_still_raises(main_fakes):
-    """异常退出路径（第三条）：会话已起后才炸 → 先释放会话（两个 __exit__）、再排空一次，异常仍原样冒泡。"""
+    """异常退出路径（第三条）：会话已起后才抛异常 → 先释放会话（两个 __exit__）、再排空一次，异常仍原样冒泡。"""
     trace: list = []
     main_fakes.setattr(rs, "_uploader_singleton", _RecUploader(trace))
     main_fakes.setattr(rs, "_is_transient_network", lambda e, connecting=False: False)

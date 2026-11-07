@@ -267,7 +267,7 @@ def _hits(text: str) -> list[tuple[_Entry, re.Match]]:
 
     两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、
     同一 search 实现」由此结构保证，改匹配面（search→fullmatch、大小写归一、pattern 预处理）不会
-    漏改一处让 plan 标注对实际运行撒谎。关键字不进匹配，只在命中之后核对条目的声明；目标也不进匹配。
+    漏改一处让 plan 标注与实际运行不一致。关键字不进匹配，只在命中之后核对条目的声明；目标也不进匹配。
     """
     return [(e, m) for e in _REGISTRY if (m := e.pattern.search(text))]
 
@@ -295,7 +295,8 @@ def match(text: str, keyword: str | None = None) -> Hit | None:
 def select_handler(hit: Hit, device: str, ui_kind: str):
     """命中之后按当前目标取句柄（ADR 0050 决策 1）：desktop/web 取 playwright；设备目标取覆盖这个（设备, 界面类型）组合的那条
     webdriver 条目（注册期已保证至多一条）。返回 ("playwright", fn) / ("webdriver", fn, requires) / None——None 表示命中的模式在
-    当前目标上没有句柄：调用方走 AI，**绝不顺延**到下一条能匹配的模式、也不记 error。本引擎的派发只会问 desktop/web。"""
+    当前目标上没有句柄：调用方走 AI，**绝不顺延**到下一条能匹配的模式、也不记 error。本引擎的派发只会问 desktop/web；
+    webdriver 分支保留是为了与 Midscene 的 selectHandler 同构（两种语言里命中后取句柄的语义一致），由单测覆盖，不是死代码。"""
     if device == "desktop":
         return ("playwright", hit.handles.playwright) if ui_kind == "web" and hit.handles.playwright is not None else None
     for e in hit.handles.webdriver:
@@ -304,20 +305,38 @@ def select_handler(hit: Hit, device: str, ui_kind: str):
     return None
 
 
-def match_batch(items: list) -> list[dict | None]:
+# match 查询的输入不合契约时给使用方的那一句（ADR 0036 决策 4）：与建会话前核 job 行版本不合同一口径（lib/precheck.py）。
+MATCH_INPUT_MISMATCH = "收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+
+
+class MatchInputError(ValueError):
+    """match 查询的输入不合契约（ADR 0036 决策 4）：不是数组，或有条目不是 `{keyword, text}` 对象。整批拒绝、不逐条跳过——
+    逐条跳过等于把那几条静默标成走 AI；条目形状就是这个入口上的协议版本信号（ADR 0024），消息即给使用方的那一句。"""
+
+    def __init__(self) -> None:
+        super().__init__(MATCH_INPUT_MISMATCH)
+
+
+def _is_match_item(item: object) -> bool:
+    """`{keyword, text}` 两键都在：text 是 step 原文（字符串），keyword 是关键字或 None（None 表示不核对关键字）。"""
+    return (isinstance(item, dict) and "keyword" in item and "text" in item and isinstance(item["text"], str)
+            and (item["keyword"] is None or isinstance(item["keyword"], str)))
+
+
+def match_batch(items: object) -> list[dict | None]:
     """批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 回答「命中哪条 / 冲突 / 关键字不符 / 未命中」。
 
-    每项是 `{"keyword", "text"}`；也接受裸字符串（旧版命令行工具的形态，此时不核对关键字）。
+    入参是 stdin 解析出的 JSON 值，须为数组、每项为 `{"keyword", "text"}`（keyword 为 None 时不核对关键字）；任一处不合
+    即整批抛 MatchInputError、不出部分结果（裸字符串是 1.4 命令行工具的形态，协议版本已因此递增，ADR 0024）。
     与 match() 共用 `_hits`（同一扫描实现面），冲突不抛、结构化返回（plan 是用例预检、不是执行）。输出不带目标信息：
     plan 用命中的模式关联自述清单里该条目的 targets，再按 scope 的目标标注（ADR 0049 决策 3）。
     返回元素：None | {"pattern","description"} | {"conflict": [patterns]} | {"keyword_mismatch": pattern, "keywords": [...]}。
     """
+    if not isinstance(items, list) or not all(_is_match_item(item) for item in items):
+        raise MatchInputError()
     out: list[dict | None] = []
     for item in items:
-        if isinstance(item, str):
-            keyword, text = None, item
-        else:
-            keyword, text = item.get("keyword"), item["text"]
+        keyword, text = item["keyword"], item["text"]
         hits = _hits(text)
         if not hits:
             out.append(None)

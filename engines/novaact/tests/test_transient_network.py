@@ -99,6 +99,16 @@ def test_connect_read_timeout_are_transient():
     assert rs._is_transient_network(ReadTimeoutError(endpoint_url="https://x")) is True
 
 
+def test_endpoint_closed_protocol_errors_are_transient():
+    # botocore EndpointConnectionError / ConnectionClosedError 与 urllib3 ProtocolError 都不继承内建的
+    # ConnectionError 或 OSError，只靠瞬时白名单里的显式条目命中；漏掉任一条目，这里即失败。
+    from botocore.exceptions import ConnectionClosedError, EndpointConnectionError
+    from urllib3.exceptions import ProtocolError
+    assert rs._is_transient_network(EndpointConnectionError(endpoint_url="https://x")) is True
+    assert rs._is_transient_network(ConnectionClosedError(endpoint_url="https://x")) is True
+    assert rs._is_transient_network(ProtocolError("Connection aborted.")) is True
+
+
 def test_agentcore_startfailed_wrapping_chain_is_transient():
     # 真实场景（ADR 0028）：NovaAct 进入阶段 nova-act 调用节流，底层 boto ClientError 先被 SDK 翻成自有错误类
     # （在 except 里抛出，经 __context__ 相连），再被包成 StartFailed（from）。遍历异常链必须穿透两层包装命中底层 ClientError。

@@ -7,7 +7,7 @@
 > 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 每项的键，worker 自述、CLI 转述；唯一例外 `available_targets` 由 CLI 调用 `runtime/gherkai_runtime/compose.py` 的 `available_targets()` 求交集后附加）。
 > 本页与 code 的一致性由护栏保证：`cli/tests/test_cli_json_contract.py` 与 `deploy_aws/tests/test_workers.py` 用真渲染器生成样例
 > （`explain` 的 `evidence` 用一份与两引擎映射测试结构相同的手写夹具）、递归收集全部键名（引擎原样透传的 `actions[].args` 与 `acts[].result`、对本工具不透明的 `sessions[].provider_minutes` 与 `sessions[].device` 四个节点不向下递归）、
-> 逐个断言出现在本页，漏键即测试失败；`doctor` 另把各检查项的 `name` 值（按引擎后缀归一为 `<engine>`）逐个对照本页。本页只说明有哪些字段、各自的含义与出现条件，不说明理由——理由在 ADR。
+> 逐个断言出现在本页对应命令的那一节里，漏键即测试失败（按 `## ` 标题分节，别节写过的同名键不计入本节；某节对与别节形状相同的结构只写一句「形状同 …」时，该结构以下的键在本节或被引用的节里写出即可，这类引用在 `cli/tests/test_cli_json_contract.py` 里逐条登记）；`doctor` 另把各检查项的 `name` 值（按引擎后缀归一为 `<engine>`）逐个对照本页的 `doctor` 一节。本页只说明有哪些字段、各自的含义与出现条件，不说明理由——理由在 ADR。
 > **agent skill 里的那份是本页的确定性转换副本**（`cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md`，随 CLI wheel 发行）：
 > 由 `tools/render_skill_contract.py` 生成，去掉本引用块与下方的姊妹页导航段，并把仓库内指针与内部用词改写成使用方可访问的形态；
 > 本页改动后需重新运行生成器，`cli/tests/test_skill.py` 断言副本与转换结果相等（不用链接、不人工维护第二份的理由见 ADR 0043 决策四）。
@@ -92,7 +92,7 @@
 | `default_engine` | string | 未标 `@engine` 的 scope 使用的引擎 |
 | `job_count` / `scenario_count` | int | 筛选后的数量（`--scope` / `--tags` / `--scenario` 生效后；多个筛选 flag 同时给出时需全部满足） |
 | `device_session_count` | int | 这次 run 将建立的远程访问会话数：一个设备目标的 scope 一个会话，全部桌面时为 0 |
-| `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时 `{arn, source}`，按系统版本挑选时 `{os_version, source}`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
+| `devices` | object | 各平台的设备选择，只列这次 run 里出现的平台（键为 `android` / `ios`）：指定一台时含 `arn`（设备 ARN）与 `source`，按系统版本挑选时含 `os_version`（要求的系统版本）与 `source`，没有任何来源指定时为 `null`（`run` / `submit` 会以退出码 2 结束）；`source` 是来源说明（选项名、环境变量名或配置文件的节与键）。全部桌面时为 `{}` |
 | `jobs[]` | array | 与 `run_meta.jobs[]` 结构相同；每个 step **可能**额外带一个 `deterministic` 键（出现条件见下） |
 
 `steps[].deterministic` 四态：至少一个引擎的确定性命中查询成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
@@ -225,6 +225,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 |---|---|
 | `prefix` / `version` | 后端前缀；「当前版本」指本 CLI 版本（镜像 tag 命名空间） |
 | `default_variant` | 默认 variant 名；未初始化为 null |
+| `engines` | 按引擎名分组的对象，每个引擎一项（下面各行是它的子键） |
 | `engines.<engine>.family` / `ecr_repo` | task-def family 与 ECR 仓库名 |
 | `engines.<engine>.variants[]` | `variant`、`tag`（`<版本>-<variant>`）、`digest`、`pushed_at`、`revision_arn`、`template_arn` |
-| `engines.<engine>.pending_cleanup[]` | 待清理 revision：`revision_arn`、`reason`（`retired` / `orphan`）、`variant`、`retired_at`、`registered_at` |
+| `engines.<engine>.pending_cleanup[]` | 待清理 revision：`revision_arn`、`reason`（`retired` / `orphan`）、`variant`、`retired_at`、`registered_at`、`still_mapped`（布尔，每条都带：该 revision 是否仍被某个版本的映射引用；为 `true` 时清理不会删它，为 `false` 不表示下次清理就删，退休满静默期、没有未到终态的 run 引用两个条件照样要满足；孤儿恒为 `false`） |

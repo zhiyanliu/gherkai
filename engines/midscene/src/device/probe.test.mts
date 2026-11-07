@@ -2,7 +2,8 @@
 //
 // 假客户端按脚本回结果，覆盖：网页上下文三类结论的归类真值表（重试后零候选、切入成功后只读命令持续失败、切入本身失败、列上下文
 // 失败、传输层错误、原生只读命令也失败时先查会话状态）、只认属于被测对象的候选、应用目标不探测网页上下文、探测命令只经探测实例发出且不自设放弃式
-// 计时、坐标比例的两级来源与都失败时的执行前失败、/status 的 Appium 版本，以及获取预算中止即停。WebdriverIO 与真机的真实行为
+// 计时、坐标比例的两级来源与都失败时的执行前失败（含回退所用截图与控件树的解析）、经执行实例的两次截图（比例回退与原生核对）按只读
+// 原语重试一次且中止后不再补发、/status 的 Appium 版本，以及获取预算中止即停。WebdriverIO 与真机的真实行为
 // （客户端超时是否真的生效、iOS 26 的挂起形态）不在这里证明：前者由 appium.test.mts 的真实运行层负责，后者列入真机验收。
 import { test } from "node:test";
 import assert from "node:assert";
@@ -11,7 +12,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser } from "webdriverio";
 import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
-import { SCALE_UNKNOWN_MESSAGE, createCapabilityProbe, type ProbeDeps } from "./probe.mjs";
+import { SCALE_UNKNOWN_MESSAGE, applicationLongEdge, createCapabilityProbe, pngLongEdge, type ProbeDeps } from "./probe.mjs";
 import { ACQUIRE_TIMEOUT_MESSAGE, type AcquireBudget, type AppiumSession } from "./surface.mjs";
 import { PROBE_TIMEOUT_MS, WEB_CONTEXT_RELIST_DELAY_MS } from "./limits.mjs";
 
@@ -67,6 +68,8 @@ interface Script {
   switchToNativeFails?: boolean;
   /** 执行实例的截图（原生只读命令与比例回退用）。 */
   screenshot?: string | Error;
+  /** 执行实例截图依次的结果，用完之后取 screenshot。 */
+  screenshots?: Array<string | Error>;
   pageSource?: string | Error;
   screenInfo?: unknown | Error;
   status?: unknown | Error;
@@ -79,12 +82,14 @@ function fakeSession(s: Script) {
   const contexts = [...(s.contexts ?? [])];
   const reads = [...(s.reads ?? [])];
   const switches = [...(s.switches ?? [])];
+  const screenshots = [...(s.screenshots ?? [])];
   let current = s.initialContext ?? "NATIVE_APP";
   const exec = {
     async takeScreenshot() {
       calls.push("exec.takeScreenshot");
-      if (s.screenshot instanceof Error) throw s.screenshot;
-      return s.screenshot ?? pngBase64(1080, 2400);
+      const next = screenshots.length > 0 ? screenshots.shift() : s.screenshot;
+      if (next instanceof Error) throw next;
+      return next ?? pngBase64(1080, 2400);
     },
     async getUrl() { calls.push("exec.getUrl"); return "https://wrong.example/"; },
     async url() { calls.push("exec.url"); },
@@ -355,13 +360,15 @@ test("原生只读命令也失败：先查会话状态，不是 RUNNING 归 sess
   assert.ok(r2.ok);
   assert.equal(r2.value.webContext, "probe_error");
 
-  // 状态查询本身失败或没有给查询函数：不据此判会话丢失
+  // 状态查询本身失败（返回 null 或抛出）：不据此判会话丢失
   const unknown = probeWith(script());
   const r3 = await unknown.capability.run(unknown.session, { device: "android", uiKind: "web" }, budget(), async () => null);
   assert.ok(r3.ok);
   assert.equal(r3.value.webContext, "probe_error");
-  const noQuery = probeWith(script());
-  const r4 = await noQuery.capability.run(noQuery.session, { device: "android", uiKind: "web" }, budget());
+  const throwing = probeWith(script());
+  const r4 = await throwing.capability.run(throwing.session, { device: "android", uiKind: "web" }, budget(), async () => {
+    throw new Error("GetRemoteAccessSession 超时");
+  });
   assert.ok(r4.ok);
   assert.equal(r4.value.webContext, "probe_error");
 });
@@ -480,6 +487,126 @@ test("坐标比例回退也失败：执行前失败 engine_error「无法确定�
   const badShot = probeWith({ ...script(), pageSource: IOS_SOURCE(390, 844), screenshot: "bm90IGEgcG5n" });
   const r3 = await badShot.capability.run(badShot.session, { device: "ios", uiKind: "web" }, budget(), async () => "RUNNING");
   assert.equal(r3.ok, false, "截图解不出尺寸同样定不下比例");
+});
+
+test("比例回退的解析：尺寸属性在含 `>` 的属性值之后照样读出；只取文档顺序上第一个 Application，非正数与解析不了的输入为 null", () => {
+  const quoted = `<?xml version="1.0" encoding="UTF-8"?><AppiumAUT><XCUIElementTypeApplication type="XCUIElementTypeApplication" ` +
+    `label="比较 a > b" value='x > y' name="Shop" width="390" height="844"><XCUIElementTypeWindow width="390" height="844"/>` +
+    `</XCUIElementTypeApplication></AppiumAUT>`;
+  assert.equal(applicationLongEdge(quoted), 844);
+  assert.equal(applicationLongEdge(IOS_SOURCE(874, 402)), 874, "横屏时宽是长边");
+  assert.equal(applicationLongEdge(IOS_SOURCE(390.5, 844.25)), 844.25);
+  // 两个 Application 节点：只看文档顺序上的第一个，它的尺寸不可用即为 null，不改取后一个
+  const two = (first: string): string => `<AppiumAUT><XCUIElementTypeApplication ${first}/>` +
+    `<XCUIElementTypeApplication width="1000" height="2000"/></AppiumAUT>`;
+  assert.equal(applicationLongEdge(two(`width="390" height="844"`)), 844);
+  assert.equal(applicationLongEdge(two(`width="0" height="844"`)), null, "宽为 0");
+  assert.equal(applicationLongEdge(two(`width="390"`)), null, "缺高");
+  assert.equal(applicationLongEdge(two(`width="-390" height="844"`)), null, "负数");
+  assert.equal(applicationLongEdge(two(`width="1e3" height="844"`)), null, "不是十进制数字");
+  // 注释里的 Application 标签不算节点
+  assert.equal(applicationLongEdge(`<AppiumAUT><!-- <XCUIElementTypeApplication width="1" height="1"> --></AppiumAUT>`), null);
+  for (const input of [undefined, null, 844, "", "not xml", "<AppiumAUT/>"]) {
+    assert.equal(applicationLongEdge(input), null, JSON.stringify(input));
+  }
+
+  assert.equal(pngLongEdge(pngBase64(1170, 2532)), 2532);
+  assert.equal(pngLongEdge(pngBase64(2532, 1170)), 2532);
+  for (const input of [undefined, null, 42, "", "bm90IGEgcG5n", pngBase64(0, 0)]) {
+    assert.equal(pngLongEdge(input), null, JSON.stringify(input));
+  }
+});
+
+test("坐标比例回退：控件树里尺寸属性位于含 `>` 的属性值之后，照样换算出比例", async () => {
+  const source = `<?xml version="1.0" encoding="UTF-8"?><AppiumAUT><XCUIElementTypeApplication type="XCUIElementTypeApplication" ` +
+    `label="a > b" width="390" height="844"/></AppiumAUT>`;
+  const s: Script = {
+    device: "ios", uiKind: "app", screenInfo: new Error("unknown command"), screenshot: pngBase64(1170, 2532), pageSource: source,
+  };
+  const h = probeWith(s);
+  const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+  assert.ok(r.ok);
+  assert.equal(r.value.scale, 3);
+  assert.equal(r.value.scaleSource, "page_source");
+});
+
+// ---- 经执行实例的截图：只读原语重试一次 ----
+
+const screenshotCalls = (calls: string[]): number => calls.filter((c) => c === "exec.takeScreenshot").length;
+
+/** 第一次截图时中止获取预算（模拟截图失败的同时预算到期或进入终结）。 */
+function abortOnFirstScreenshot(exec: Browser, b: ReturnType<typeof budget>): void {
+  const client = exec as unknown as { takeScreenshot: () => Promise<string> };
+  const original = client.takeScreenshot.bind(client);
+  let first = true;
+  client.takeScreenshot = async () => {
+    if (first) {
+      first = false;
+      b.controller.abort(new Error("finalizing"));
+    }
+    return original();
+  };
+}
+
+test("比例回退的截图：连接层错误与 502 / 503 / 504 重试一次后成功，比例照常换算；超时不重试，比例无法确定", async () => {
+  const fallback = (screenshots: Array<string | Error>): Script => ({
+    device: "ios", uiKind: "app", screenInfo: new Error("unknown command"), screenshots, pageSource: IOS_SOURCE(390, 844),
+  });
+  for (const failure of [connectionReset, gateway]) {
+    const s = fallback([failure(), pngBase64(1170, 2532)]);
+    const h = probeWith(s);
+    const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+    assert.ok(r.ok, failure.name);
+    assert.equal(r.value.scale, 3, failure.name);
+    assert.equal(r.value.scaleSource, "page_source", failure.name);
+    assert.equal(screenshotCalls(h.calls), 2, failure.name);
+  }
+  const s = fallback([clientTimeout(), pngBase64(1170, 2532)]);
+  const h = probeWith(s);
+  const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+  assert.deepEqual(r, { ok: false, termination: { errorType: "engine_error", message: SCALE_UNKNOWN_MESSAGE } });
+  assert.equal(screenshotCalls(h.calls), 1, "超时不重试");
+});
+
+test("原生核对的截图：连接层错误与 502 / 503 / 504 重试一次后成功，结论仍为「不提供」、不降为「探测出错」；超时不重试", async () => {
+  const unavailable = (screenshots: Array<string | Error>): Script => ({
+    device: "ios", uiKind: "web", contexts: [["NATIVE_APP", "WEBVIEW_8152"], ["NATIVE_APP", "WEBVIEW_8152"]],
+    reads: [runtimeDomainMissing(), runtimeDomainMissing()], screenshots,
+  });
+  for (const failure of [connectionReset, gateway]) {
+    const s = unavailable([failure(), pngBase64(1170, 2532)]);
+    const h = probeWith(s);
+    const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+    assert.ok(r.ok, failure.name);
+    assert.equal(r.value.webContext, "unavailable", failure.name);
+    assert.equal(r.value.scaleSource, "device_screen_info", "比例取自屏幕信息，截图只用于原生核对");
+    assert.equal(screenshotCalls(h.calls), 2, failure.name);
+  }
+  const s = unavailable([clientTimeout(), pngBase64(1170, 2532)]);
+  const h = probeWith(s);
+  const r = await h.capability.run(h.session, target(s), budget(), async () => "RUNNING");
+  assert.ok(r.ok);
+  assert.equal(r.value.webContext, "probe_error");
+  assert.equal(screenshotCalls(h.calls), 1, "超时不重试");
+});
+
+test("截图瞬时失败的同时获取预算中止：比例回退与原生核对都不再补发，归 acquire_timeout", async () => {
+  const fallback: Script = {
+    device: "ios", uiKind: "app", screenInfo: new Error("unknown command"),
+    screenshots: [connectionReset(), pngBase64(1170, 2532)], pageSource: IOS_SOURCE(390, 844),
+  };
+  const native: Script = {
+    device: "ios", uiKind: "web", contexts: [["NATIVE_APP", "WEBVIEW_8152"], ["NATIVE_APP", "WEBVIEW_8152"]],
+    reads: [runtimeDomainMissing(), runtimeDomainMissing()], screenshots: [connectionReset(), pngBase64(1170, 2532)],
+  };
+  for (const [label, s] of [["比例回退", fallback], ["原生核对", native]] as const) {
+    const h = probeWith(s);
+    const b = budget();
+    abortOnFirstScreenshot(h.exec, b);
+    const r = await h.capability.run(h.session, target(s), b, async () => "RUNNING");
+    assert.deepEqual(r, { ok: false, termination: { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE } }, label);
+    assert.equal(screenshotCalls(h.calls), 1, label);
+  }
 });
 
 // ---- 其余探测项与预算 ----

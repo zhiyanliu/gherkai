@@ -334,8 +334,8 @@ export interface TargetSurface {
 // 标记挂在异常对象的一个 symbol 键上：不进 JSON、不出现在可枚举键里，日志与 errorText 的输出不受影响；用 Symbol.for 是为了
 // 模块被重复加载（同一文件的两个实例）时读写两侧仍认得同一个键。
 const CLASSIFICATION_KEY = Symbol.for("gherkai.worker-midscene.step-classification");
-// cause 链的查找上限，与 worker/surface-desktop.mts 的 isTransientNetwork 遍历 cause 链的上限相同，同时防环。
-const MAX_CAUSE_DEPTH = 8;
+/** 沿 error.cause 链逐层查找的层数上限，同时防环。worker 里遍历 cause 链的函数（桌面与设备两条路径）共用这一个值。 */
+export const MAX_CAUSE_DEPTH = 8;
 
 /** 挂在执行异常上的归类标记：step 级归类，另可带一项命令守卫查到的会话事实。runStep 只用其中的类别与消息；那项事实只给
  *  驱动适配器用。 */

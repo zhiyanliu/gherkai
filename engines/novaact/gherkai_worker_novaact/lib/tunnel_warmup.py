@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -38,9 +39,20 @@ class WarmupStopped(Exception):
     """预热期间收到停止信号（ADR 0024 flag-only 协作停）：调用方按停止路径收尾，不算失败、不发 scope_done。"""
 
 
-def _one_line(text: str) -> str:
-    first = next((ln.strip() for ln in str(text).splitlines() if ln.strip()), "")
-    return redact_secrets(" ".join(first.split()))[:200]
+# 一行化规则（ADR 0042 决策一「一行化规则」）：空白字符集 W 与 run_scope.py 的 `_one_line` 及 Midscene worker 的一行化实现逐字相同，
+# 只有封顶长度不同（这里是嵌进预热失败消息的原因）。行与空白都不用语言缺省，理由见 run_scope.py 的 `_ONE_LINE_W`。
+_ONE_LINE_W = r"[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+_ONE_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_ONE_LINE_W_RUN = re.compile(_ONE_LINE_W + "+")
+_ONE_LINE_W_ONLY = re.compile(_ONE_LINE_W + "*")
+
+
+def _one_line(text: object, limit: int = 200) -> str:
+    """异常或多行文本 → 一行有界原因：分行只认 CR、LF 与 CRLF，取首个含 W 以外字符的行，W 的连续段折成一个空格、只去首尾的空格，
+    先脱敏再按码点取前 `limit` 个，截断恰在词间空格之后时去掉末尾的空格。"""
+    first = next((ln for ln in _ONE_LINE_BREAK.split(str(text)) if not _ONE_LINE_W_ONLY.fullmatch(ln)), "")
+    first = redact_secrets(_ONE_LINE_W_RUN.sub(" ", first).strip(" "))[:limit]  # 先脱敏再截断（ADR 0035 决策 5）
+    return first[:-1] if first.endswith(" ") else first
 
 
 def warmup_session(page, url: str, *, log: Callable[[str], None], sleep=time.sleep, monotonic=time.monotonic,

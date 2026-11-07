@@ -370,6 +370,23 @@ def test_contract_copy_equals_transform_of_source():
     )
 
 
+def test_contract_copy_opens_with_direct_statement():
+    """副本头部剥掉引用块与导航段后不另加句子：标题与第一个 `##` 之间至少留下一段源页头部的段落，
+    且这段直接陈述、不以「本页」「本文档」开头。副本随 skill 发到使用方项目，属用户文档；
+    源页头部的段落若全写进了引用块，副本的标题下面就直接是第一节。"""
+    sys.path.insert(0, str(REPO / "tools"))
+    import render_skill_contract as renderer
+
+    lines = renderer.transform(CONTRACT_SOURCE.read_text(encoding="utf-8")).splitlines()
+    head_end = next((i for i, ln in enumerate(lines) if ln.startswith("## ")), len(lines))
+    head = [ln for ln in lines[1:head_end] if ln.strip()]
+    assert head, "副本标题与第一个 `##` 之间一段都没有：源页头部除引用块与姊妹页导航段外须留一段直接陈述的开头"
+    first = head[0].lstrip()
+    assert not first.startswith(("本页", "本文档")), (
+        f"副本标题后第一段以页面自述开头（用户文档须直接陈述）：{first[:60]!r}"
+    )
+
+
 def test_rewrite_tables_are_all_used():
     """转换器的两张改写表（指针 / 禁词）里每条都得在源页命中：命中零次说明源页改了措辞、替换悄悄失效。
     `transform` 自己会为此抛异常，这里显式运行一次，让失败落在护栏而不是发布链上。"""

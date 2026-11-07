@@ -11,7 +11,7 @@
 // - ERROR（脚本请求失败）或预算内没有任何标记、导航本身抛出：原地重导航有界重试，耗尽后 engine_error。
 // 两者都不归 network_error（ADR 0028 的分类红线），一律经 scope_done{status, errorType} 传递（ADR 0051 决策 4）——所以本模块把导航
 // 异常吞在自己的重试里、以 WarmupFailure 返回，外层的建连重试域看不到它。
-import { redactSecrets } from "./redact.mjs";
+import { oneLineError } from "./error-text.mjs";
 
 export const SESSION_WARMUP_URL_ENV = "GHERKAI_SESSION_WARMUP_URL";
 export const EXTRA_HTTP_HEADERS_ENV = "GHERKAI_EXTRA_HTTP_HEADERS";
@@ -34,6 +34,8 @@ export const WARMUP_AUTH_REQUIRED_MESSAGE =
 export const WARMUP_DENIED_MESSAGE =
   "隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie——浏览器可能没有保存或没有带上它，或隧道在预热期间重建；" +
   "请确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交";
+// 失败消息里原因的封顶（码点数），与 Nova worker 预热原因的封顶同值；桌面与设备上的预热共用，同一句消息的原因在两条路径上一样长
+export const WARMUP_REASON_MAX = 200;
 export const warmupErrorMessage = (attempts: number, reason: string): string =>
   `隧道会话预热未能确认就绪（已尝试 ${attempts} 次）：${reason}——隧道可能已拆除，或浏览器到隧道入口的网络不通；请确认隧道仍在后重新提交`;
 
@@ -56,10 +58,10 @@ export interface WarmupDeps {
   now?: () => number;
 }
 
-function oneLine(e: unknown): string {
-  const raw = e instanceof Error ? e.message : String(e);
-  const first = raw.split(/\r\n|\r|\n/).find((ln) => ln.trim() !== "") ?? "";
-  return [...redactSecrets(first.trim().split(/\s+/).join(" "))].slice(0, 200).join("");
+/** 嵌进预热失败消息与日志的原因：Error 取 message、不带类型前缀（同 Nova 侧取 str(e)），其余抛出物按 `String()` 取值（null 与
+ *  undefined 也成文字），再按一行化规则（lib/error-text.mts）压到 `WARMUP_REASON_MAX` 个码点。 */
+function reasonOf(e: unknown): string {
+  return oneLineError(e instanceof Error ? e.message : String(e), WARMUP_REASON_MAX);
 }
 
 /** 对 page 导航预热地址、等页面标题落成四个标记之一；返回 null 表示就绪，否则返回归因与产品语言的消息。 */
@@ -74,7 +76,7 @@ export async function warmupSession(page: WarmupPage, url: string, deps: WarmupD
       const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: WARMUP_NAV_TIMEOUT_MS });
       status = resp ? resp.status() : null;
     } catch (e) {  // 导航失败（含网络类异常）走 ERROR 路线：有界重试、不向上抛、不进建连重试域
-      last = `预热导航失败：${oneLine(e)}`;
+      last = `预热导航失败：${reasonOf(e)}`;
       deps.log(`worker: tunnel warmup navigation failed (attempt ${attempt + 1}): ${last}`);
       continue;
     }
@@ -100,7 +102,7 @@ async function leaveWarmupPage(page: WarmupPage, log: (line: string) => void): P
   try {
     await page.goto("about:blank", { waitUntil: "domcontentloaded", timeout: WARMUP_NAV_TIMEOUT_MS });
   } catch (e) {
-    log(`worker: tunnel warmup page could not be left: ${oneLine(e)}`);
+    log(`worker: tunnel warmup page could not be left: ${reasonOf(e)}`);
   }
 }
 

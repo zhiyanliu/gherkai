@@ -8,7 +8,9 @@ from __future__ import annotations
 import pytest
 
 from gherkai_core.model import (
+    Cost,
     Job,
+    JobResult,
     RunMeta,
     Scenario,
     ScenarioDone,
@@ -16,9 +18,10 @@ from gherkai_core.model import (
     ScopeStarted,
     Status,
     Step,
+    StepDone,
 )
 from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full,
-                                  recover_from_events)
+                                  recover_from_events, run_totals)
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -146,6 +149,18 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
     assert "部署侧日志" in result2.jobs[0].message
 
 
+def test_platform_exit_reason_joins_stop_code_and_reason_with_fallback():
+    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用，ADR 0024「exitCode 落值延迟」条）：
+    两项齐全用「: 」相连，缺一项只用另一项，两项都缺（或为空串）时取固定兜底句、绝不为空。"""
+    from gherkai_core.project import platform_exit_reason
+
+    assert platform_exit_reason("TaskFailedToStart", "CannotPullContainerError: not found") == \
+        "TaskFailedToStart: CannotPullContainerError: not found"
+    assert platform_exit_reason("TaskFailedToStart", None) == "TaskFailedToStart"
+    assert platform_exit_reason(None, "Essential container in task exited") == "Essential container in task exited"
+    assert platform_exit_reason(None, None) == platform_exit_reason("", "") == "平台未给出退出码与原因"
+
+
 # ---------- job timeout 归因链（ADR 0034「job timeout」节）----------
 
 def test_timed_out_exit_is_error_regardless_of_exit_code_shape():
@@ -178,7 +193,7 @@ def test_error_without_reduce_message_gets_default_attribution():
     recs = [_exit("a", 1)]  # 零事件 + exit 1
     jr = project_full(_meta("a"), recs).jobs[0]
     assert jr.status == Status.ERROR
-    assert jr.message is not None and "exit 1" in jr.message
+    assert jr.message is not None and "退出码 1" in jr.message
 
 
 def test_error_clean_exit_incomplete_content_gets_attribution():
@@ -285,6 +300,46 @@ def test_run_status_agrees_between_schedule_and_project_full(outcomes, expected)
     stateless = project_full(meta, recs)
     assert [jr.status for jr in sync.jobs] == [jr.status for jr in stateless.jobs] == [Status(o) for o in outcomes]
     assert sync.status == stateless.status == expected
+
+
+def test_run_totals_agree_between_schedule_and_project_full():
+    """两条路径共用同一个 run_totals：同一组带成本的 job 事件分别经同步 schedule 与无状态 project_full，run 级四个合计键相同。
+    token 跨 job 求和；只有一个 job 报了工作时长且报的是 0，run 级照记 0、不当作没报；桌面 run 没有设备计量两键。"""
+    from gherkai_core.schedule import ScheduleOpts, schedule
+    from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+
+    costs = {"j0": Cost(tokens=1000), "j1": Cost(tokens=500, time_worked_s=0.0), "j2": None}
+    streams = {s: [ScopeStarted(scope_id=s, session_id=f"sess-{s}"),
+                   StepDone(scenario_id=f"{s}:1", step_index=0, status=Status.PASSED, cost=c),
+                   ScenarioDone(scenario_id=f"{s}:1", status=Status.PASSED), ScopeDone(scope_id=s)]
+               for s, c in costs.items()}
+    meta = _meta(*costs)
+    sync = schedule(meta, FakeResolver(FakeEngine(streams)), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
+    recs = [_ev(s, i + 1, ev) for s in costs for i, ev in enumerate(streams[s])] + [_exit(s, 0) for s in costs]
+    stateless = project_full(meta, recs)
+
+    def totals(r):
+        return (r.total_tokens, r.total_time_worked_s, r.device_observed_s, r.device_observed_missing)
+    assert totals(sync) == totals(stateless) == (1500, 0.0, None, None)
+
+
+def test_run_totals_keeps_separate_missing_rules_for_cost_and_device_metering():
+    """run_totals 的两组键各守各的缺失语义：成本原生量只合计报了的 job、全无值才为 None、报了 0 照记 0；设备计量按设备 job
+    成对合计，任一键有值即为设备 job、其另一键缺失按 0 计入，没有设备 job 时两键都是 None。"""
+    def jr(scope: str, **kw) -> JobResult:
+        return JobResult(job=_job(scope), status=Status.PASSED, **kw)
+
+    assert run_totals([]) == {"total_tokens": None, "total_time_worked_s": None,
+                              "device_observed_s": None, "device_observed_missing": None}
+    zero = run_totals([jr("a"), jr("b", total_tokens=0, total_time_worked_s=0.0)])  # 报了 0 不是没报
+    assert zero == {"total_tokens": 0, "total_time_worked_s": 0.0, "device_observed_s": None, "device_observed_missing": None}
+    mixed = run_totals([jr("a"), jr("b", total_tokens=0), jr("c", total_tokens=7, total_time_worked_s=1.5)])
+    assert (mixed["total_tokens"], mixed["total_time_worked_s"]) == (7, 1.5)
+    one_key = run_totals([jr("d1", device_observed_s=3.0), jr("web")])  # 设备 job 缺的那一键按 0 计入，不是 None
+    assert (one_key["device_observed_s"], one_key["device_observed_missing"]) == (3.0, 0)
+    device = run_totals([jr("d1", device_observed_s=3.0), jr("d2", device_observed_missing=2), jr("web")])
+    assert (device["device_observed_s"], device["device_observed_missing"]) == (3.0, 2)
+    assert (device["total_tokens"], device["total_time_worked_s"]) == (None, None)
 
 
 def test_stateless_path_cannot_yield_aborted_job():

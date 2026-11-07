@@ -340,7 +340,7 @@ def test_ngrok_agent_detaches_from_cli_process_group(tmp_path):
     """**真 spawn**（不 fake popen）：agent 必须落在自己的会话/进程组里（ADR 0035 决策 3）。
 
     这条不能用 fake popen 验——「进程组归属」正是 mock 之外的真实行为（CLAUDE.md「绿≠对」）。它承重：
-    同组时 CLI 收终端广播的 SIGINT 会连坐杀掉「还要交棒给后台宿主」的 agent（两个后台宿主本身也 setsid）。
+    同组时 CLI 收终端广播的 SIGINT 会连带杀掉「还要交棒给后台宿主」的 agent（两个后台宿主本身也 setsid）。
     用一个假 ngrok（写 started tunnel 行后 sleep）走真 subprocess.Popen 起来，只查 pgid、不碰网络。
     """
     import os

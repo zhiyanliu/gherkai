@@ -141,8 +141,8 @@ Nova Act 每次 `act`/`act_get` 各产出一个 trajectory HTML。落点分两�
 
 同一份 Dockerfile 有**两态**，由 `--build-arg WORKER_SOURCE=` 选择（ADR 0037 决策 5）：
 
-- `index`（默认，CI 态）：按 `--build-arg WORKER_VERSION=X.Y.Z` 从 PyPI 安装已发行包；本态不 COPY，build context 任意。
-- `local`（发行前本地验证镜像）：安装 build context 里的 wheel；容器内无 git 元数据，`pip install .` 无法算出版本，故先执行 `uv build`：
+- `index`（默认；发布链推往 GHCR 的构建用此态）：按 `--build-arg WORKER_VERSION=X.Y.Z` 从 PyPI 安装已发行包；本态不 COPY，build context 任意。
+- `local`（发行前本地验证镜像；CI 与发布链的镜像 gate 也用此态，见 [`.github/workflows/README.md`](../../.github/workflows/README.md)）：安装 build context 里的 wheel；容器内无 git 元数据，`pip install .` 无法算出版本，故先执行 `uv build`：
 
 ```bash
 uv build --package gherkai-worker-novaact --out-dir dist
@@ -151,7 +151,7 @@ docker build --platform linux/amd64 -f engines/novaact/Dockerfile \
   -t gherkai-worker-novaact:dev dist/        # context = 放 wheel 的目录
 ```
 
-真 build 已验证的三条约束：
+实际构建已验证的三条约束：
 
 - **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64；在 arm Mac 上不加该参数会 build 出 arm64 镜像，容器启动期报 `exec format error`、无法启动（ADR 0033/0038）。
 - **经典 builder（无 buildx）会连未选中的 stage 一并执行**，故两个 stage 都对「本 stage 的参数未给」保持容忍（`if [ -n … ]`）；把关点在 final stage 的冒烟（`--capabilities`，不需要 AWS）：未给 build-arg 时在此处 fail-loud，不延后到 Fargate 启动期。

@@ -25,16 +25,26 @@ from gherkai_runtime import tunnel as _tunnel
 # 致命），带任意值的该头即绕过；付费户带着无害（服务端忽略）→ 不做付费检测、隧道模式下恒注入。
 TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 
-# —— cloud submit 隧道守护 TTL 的两个记账常量（ADR 0035 决策 3 的「TTL 兜底自杀」）——
+# —— cloud submit 隧道守护 TTL 的记账常量（ADR 0035 决策 3 的「TTL 兜底自杀」与「余量兜什么」）——
 # TTL 只是**防 ngrok 进程泄漏的上界**，宁长不宜短：短于 run 实际预算时守护会在 run 尚未结束时拆隧道，
 # 剩余 job 在被测应用不可达下继续运行、以「AI 报导航失败」的假失败告终（兜底机制反成失败源）。
+# job.timeout_s 从 claim 起算、已含 RunTask 与拉镜像/挂 ENI（ADR 0034「job timeout」节），预算之外的耗时分下面两部分。
 #
-# 启动/级联余量（一次性）：submit 只写 runs 表，之后 Stream INSERT 投递 → kicker Lambda 冷启动 →
-# RunTask → Fargate 拉镜像/挂 ENI 才真正开始执行；job 之间还有云端事件链的固有尾延迟（ADR 0034 地基实测：
-# worker 真停到可归约 ~27s，瓶颈在 ECS `executionStoppedAt→stoppedAt` 的平台清理），末尾还有 finalize。
-# job.timeout_s 从 claim 起算、已含拉镜像（ADR 0034「job timeout」节），故此处兜的是「链路投递 + Lambda
-# 冷启动 + 每 job 尾延迟的累计 + 收尾」。取 900s：对常规批量留数倍余量；极大批量用显式 TTL 覆盖。
+# 一次性余量（每个 run 一份，与 job 数无关）：submit 只写 runs 表，之后还有 Stream INSERT 投递 → kicker Lambda
+# 冷启动才轮到首次 claim，末尾还有 finalize。取 900s。
 CLOUD_STARTUP_MARGIN_S = 900.0
+# 每 job 余量（每个 job 一份，随 job 数线性累加）：job 用尽预算后被停止时，预算点之后还有三段耗时，并发为 1 时逐个
+# job 串行累加，与 job 数成正比，不随 job 数变化的常数余量覆盖不了。
+#   ① 超时触发的调度精度 60s：job 超时由 EventBridge Scheduler 的一次性 schedule 在 claim + timeout 触发，
+#      Scheduler 的触发精度是 60 秒（关闭 flexible time window 也只保证落在指定时刻所在的那一分钟内）。
+#   ② 停止宽限 120s：StopTask 之后 worker 在 container stopTimeout 的宽限内收尾，按 Fargate 的平台上限
+#      （compose.FARGATE_STOP_TIMEOUT_MAX_S；云端同步 run 的停止后等待预算在 container 没设 stopTimeout 时也取它）记账，
+#      对任何 variant 都成立。
+#   ③ 事件链尾延迟 30s：task 停止到退出可被归约、下一个 job 被 claim 之间的固有延迟（ADR 0034 实测每步约 20-30 秒，
+#      瓶颈在 ECS 平台的清理开销）。这一项是经验值，**不是服务的硬上界**：平台降级、Lambda 限流或极大批量时可能超出，
+#      故算出的 TTL 是按任务量估算的上限、不是保证，`--tunnel-ttl` 保留为显式覆盖项。
+# 合计 210 秒。在预算内结束的 job 只有第 ③ 段，按 210 秒记账是高估，偏在安全的一侧。
+CLOUD_PER_JOB_MARGIN_S = 60.0 + float(compose.FARGATE_STOP_TIMEOUT_MAX_S) + 30.0
 # 无 job 预算（`--default-job-timeout <=0` 且未标 `@timeout`，即执行侧不超时）时的 TTL 记账上限。
 # **只用于算 TTL，不是执行超时**：TTL 必须有限（否则泄漏兜底失效），故给不超时的 job 记一个明确上界。
 UNBOUNDED_JOB_BUDGET_S = 3600.0
@@ -64,17 +74,21 @@ def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -
 
 def compute_watch_ttl_s(
     jobs, *, startup_margin_s: float = CLOUD_STARTUP_MARGIN_S,
+    per_job_margin_s: float = CLOUD_PER_JOB_MARGIN_S,
     unbounded_job_budget_s: float = UNBOUNDED_JOB_BUDGET_S,
 ) -> float:
-    """按 definition 算 cloud submit 隧道守护的 TTL 秒数为 Σ(各 job 预算) + 启动/级联余量。
+    """按 definition 算 cloud submit 隧道守护的 TTL 秒数：一次性余量 + Σ(各 job 预算 + 每 job 余量)。
 
+    缺省取值下即 `900 + Σ(各 job 的 timeout_s) + N × 210`，N 为 job 数（ADR 0035 决策 3）；两份余量的组成见模块级常量
+    `CLOUD_STARTUP_MARGIN_S` 与 `CLOUD_PER_JOB_MARGIN_S` 的注释。每 job 余量里的事件链尾延迟是经验值，故结果是按任务量
+    估算的上限、不是保证。
     **求和而非取 max**：并发 >1 时各 job 部分重叠、真实墙钟 < 各预算之和，故串行总预算对**任何**并发取值
     都是保守上界（并发随 definition 走、cloud 再受部署侧 cap 钳制，ADR 0034 机制四——此处不必知道取值）。
     高估无害：TTL 偏长即隧道多留一会儿（run 终态照常提前拆）；反向（低估）才会造出假失败。
-    无预算（执行侧不超时）的 job 按 `unbounded_job_budget_s` 记账——TTL 必须有限。
+    无预算（执行侧不超时）的 job 按 `unbounded_job_budget_s` 记账——TTL 必须有限；每 job 余量照样计入。
     """
     return startup_margin_s + sum(
-        (j.timeout_s if j.timeout_s else unbounded_job_budget_s) for j in jobs
+        (j.timeout_s if j.timeout_s else unbounded_job_budget_s) + per_job_margin_s for j in jobs
     )
 
 

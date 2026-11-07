@@ -1,7 +1,7 @@
 """core 的类型化异常（ADR 0028）。
 
 放 core 而非 adapter：schedule 要 catch 它做 network 重试判定，若定义在 adapter 里会让
-core 反依赖 adapter（违反 ports.py 六边形「adapter 一律组合根注入」）。adapter 抛、core 接。
+core 反依赖 adapter（违反核心注入接口「adapter 一律由组合根注入」的约定，见 ports.py 模块头）。adapter 抛、core 接。
 """
 from __future__ import annotations
 
@@ -11,13 +11,18 @@ class WorkerExitError(RuntimeError):
 
     `wire.raise_for_worker_exit` 把非零退出码翻成本异常（两个 Engine adapter 共用），`exit_code` 带原码：正码多为 worker 自报
     （崩溃 / 会话清理失败的 1、Nova worker 加载使用方 steps 失败的 2、网络故障的 80）；本机子进程被信号强杀时为负码
-    （SIGKILL 为 -9），云端任务被强杀时 ECS 报正码（SIGKILL 为 137），云端取不到退出码时按 1 计。终结函数据此判「退出码非零」一行，
-    不再从消息文本里解析退出码。
+    （SIGKILL 为 -9），云端任务被强杀时 ECS 报正码（SIGKILL 为 137）。云端任务已停止却取不到退出码时，`FargateEngine` 直接抛本异常，
+    `exit_code` 取平台侧哨兵 255（`project.PLATFORM_FAILED_EXIT`），`reason` 带 ECS 给的归因（`stopCode: stoppedReason`，
+    ADR 0024「exitCode 落值延迟」条）。
+
+    终结函数据 `exit_code` 判「退出码非零」一行；schedule 把 `reason` 作为退出原因交给终结函数，255 那一行把它接在消息之后。两者都是
+    有类型的字段，不从消息文本里解析。worker 自报的退出码与被信号强杀的退出码不带 `reason`（为 None），消息由终结函数按码给出。
     """
 
-    def __init__(self, exit_code: int, message: str) -> None:
+    def __init__(self, exit_code: int, message: str, *, reason: str | None = None) -> None:
         super().__init__(message)
         self.exit_code = exit_code
+        self.reason = reason
 
 
 class WorkerNetworkError(WorkerExitError):

@@ -18,11 +18,31 @@ test("worker 持有的预热常量与跨语言 fixture 一致（标题、正文�
   assert.deepEqual({ ...W.WARMUP_MARKERS }, fx.markers);
   assert.deepEqual([W.SESSION_WARMUP_URL_ENV, W.EXTRA_HTTP_HEADERS_ENV, W.SESSION_WARMUP_KEY], [fx.env.warmup_url, fx.env.extra_http_headers, fx.capability_key]);
   // 四条产品语言的消息也同源：两个 worker 对同一种失败给同一句话（排障文档只写一遍）
-  assert.equal(Object.keys(fx.messages).length, 4);  // fixture 多出一句而 worker 没跟上时在这里红
+  assert.equal(Object.keys(fx.messages).length, 4);  // fixture 多出一句而 worker 没跟上时这条断言失败
   assert.equal(W.INCOMPLETE_DEFINITION_MESSAGE, fx.messages.incomplete_definition);
   assert.equal(W.WARMUP_AUTH_REQUIRED_MESSAGE, fx.messages.auth_required);
   assert.equal(W.WARMUP_DENIED_MESSAGE, fx.messages.denied);
   assert.equal(W.warmupErrorMessage(3, "原因"), fx.messages.error_template.replace("{attempts}", "3").replace("{reason}", "原因"));
+});
+
+test("预热失败消息里的原因：Error 只取 message、不带类型前缀，其余抛出物按 String() 取值，再压成一行、封顶 WARMUP_REASON_MAX 个码点", async () => {
+  // 一行化规则本身由 error-text.test.mts 对跨语言夹具锁住（ADR 0042 决策一「一行化规则」）；这里锁的是预热这一处的取值与封顶
+  assert.equal(W.WARMUP_REASON_MAX, 200);  // 与 Nova worker 预热原因的封顶同值
+  const cases: Array<[unknown, string]> = [
+    [new Error(`${"x".repeat(250)}\nCall log:\n  - navigating to "${WARMUP_URL}"`), "x".repeat(W.WARMUP_REASON_MAX)],
+    [Object.assign(new Error("net::ERR_CONNECTION_RESET\n  at goto"), { name: "TimeoutError" }), "net::ERR_CONNECTION_RESET"],
+    ["boom\n第二行细节", "boom"],
+    [null, "null"],
+    [undefined, "undefined"],
+  ];
+  for (const [thrown, reason] of cases) {
+    const lines: string[] = [];
+    const page: W.WarmupPage = { async goto() { throw thrown; }, async title() { return ""; } };
+    const f = await W.warmupSession(page, WARMUP_URL, { ...deps(), log: (l) => lines.push(l) });
+    assert.deepEqual(f, { errorType: "engine_error", message: W.warmupErrorMessage(W.WARMUP_ATTEMPTS, `预热导航失败：${reason}`) }, String(thrown));
+    assert.equal(lines.length, W.WARMUP_ATTEMPTS);
+    assert.ok(lines.every((l) => l.endsWith(`预热导航失败：${reason}`)), lines.join("\n"));
+  }
 });
 
 /** 每次 goto 按序给出一个结果（数字状态码 / null / Error 实例）；title 按序给出，最后一个值一直保持。 */
@@ -105,7 +125,7 @@ test("主入口的完整性判据：有额外请求头、没有预热地址 → 
   for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env["AWS_EC2_METADATA_DISABLED"] = "true";
   env[W.EXTRA_HTTP_HEADERS_ENV] = '{"ngrok-skip-browser-warning": "1"}';
-  const job = { schemaVersion: 1, scope: { id: "s", name: "s" }, engine: "midscene", assertionVotes: 1, timeoutS: null,
+  const job = { schemaVersion: 2, scope: { id: "s", name: "s" }, engine: "midscene", assertionVotes: 1, timeoutS: null,
     target: { device: "desktop", uiKind: "web" }, deviceRequest: null,
     scenarios: [{ id: "f:3", name: "s", steps: [{ index: 0, keyword: "Given", text: "https://x/" }] }] };
   const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {

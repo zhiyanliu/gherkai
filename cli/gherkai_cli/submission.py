@@ -168,13 +168,13 @@ def app_entries(args, jobs) -> "dict | int":
 
 
 def local_app_bucket(args, entries: dict) -> "str | int | None":
-    """本机后端放安装包的 S3 桶（ADR 0053 决策 3）：选项 > 环境变量 > 配置文件 [devices] app-bucket；没有应用 job 返回 None；有而缺失以退出码 2 结束。"""
+    """本机后端放安装包的 S3 桶（ADR 0053 决策 3）：按 `device_selection.resolve_local_app_bucket` 的顺序取；没有应用 job 返回 None；
+    有而缺失以退出码 2 结束。"""
     if not entries:
         return None
     cfg = getattr(args, "project_config", _config.NO_CONFIG)
-    bucket = (getattr(args, "app_bucket", None) or os.environ.get(_devsel.APP_BUCKET_ENV)
-              or (cfg.devices.app_bucket if cfg.devices is not None else None))
-    if not bucket:
+    bucket = _devsel.resolve_local_app_bucket(flag=getattr(args, "app_bucket", None), env=os.environ, config=cfg)
+    if bucket is None:
         progress("本机运行应用 scope 需要一个放安装包的 S3 桶，但没有指定：请在 gherkai.toml 的 [devices] 里给出 app-bucket，"
                   f"或用 {_devsel.APP_BUCKET_FLAG} / 环境变量 {_devsel.APP_BUCKET_ENV} 指定。")
         return 2
@@ -196,7 +196,8 @@ def fill_app_locations(args, jobs, entries: dict, *, bucket: str, managed: bool,
         progress(f"上传安装包需要 boto3：{e}")
         return 2
     now = datetime.now(timezone.utc)
-    done: dict = {}
+    done: dict = {}   # 本次调用只用一个桶，按文件去重即可
+    region_noticed = False
     out = []
     for j in jobs:
         app = j.target.app
@@ -204,7 +205,7 @@ def fill_app_locations(args, jobs, entries: dict, *, bucket: str, managed: bool,
             out.append(j)
             continue
         file = entries[(app.alias, j.target.device)]
-        if (str(file), bucket) not in done:
+        if str(file) not in done:
             try:
                 loc = app_upload.ensure_app_object(bucket, file, managed=managed, s3=s3, now=now, on_warn=progress)
             except app_upload.AppUploadError as e:
@@ -215,12 +216,14 @@ def fill_app_locations(args, jobs, entries: dict, *, bucket: str, managed: bool,
                     progress(f"上传安装包 {file} 到 S3 桶 {bucket} 失败（凭证 / 权限 / 网络）：{e}")
                     return 2
                 raise
-            done[(str(file), bucket)] = loc
+            done[str(file)] = loc
             progress(f"安装包 {file.name}：{'已上传到' if loc.uploaded else '复用'} s3://{bucket}/{loc.key}" + ("（已刷新保留期）" if loc.refreshed else ""))
-            # 桶不在当前区域配置所指的区域：worker 按桶所在区域签发安装包地址，这里只提示（ADR 0051 决策 9；同一个桶只提示一次）
-            if loc.bucket_region and region and loc.bucket_region != region and not any(k[1] == bucket for k in done if k != (str(file), bucket)):
+            # 桶不在当前区域配置所指的区域：worker 按桶所在区域签发安装包地址，这里只提示（ADR 0051 决策 9）。
+            # 一次调用只提示一次；前面的文件没查到桶所在区域时，由第一个查到异地区域的文件提示
+            if not region_noticed and loc.bucket_region and region and loc.bucket_region != region:
                 progress(f"注意：应用桶 {bucket} 在 {loc.bucket_region}，当前区域配置为 {region}；安装包按桶所在区域处理，不需要改配置")
-        loc = done[(str(file), bucket)]
+                region_noticed = True
+        loc = done[str(file)]
         out.append(replace(j, target=replace(j.target, app=replace(app, bucket=loc.bucket, key=loc.key, sha256=loc.sha256))))
     return out
 
@@ -231,7 +234,7 @@ def cloud_app_locations(args, target, prepared: "Prepared", jobs) -> "list | int
     if not entries:
         return list(jobs)
     cfg = getattr(args, "project_config", _config.NO_CONFIG)
-    if getattr(args, "app_bucket", None) or os.environ.get(_devsel.APP_BUCKET_ENV) or (cfg.devices is not None and cfg.devices.app_bucket):
+    if _devsel.resolve_local_app_bucket(flag=getattr(args, "app_bucket", None), env=os.environ, config=cfg) is not None:
         progress(f"注：云端后端把安装包放进部署的产物桶，{_devsel.APP_BUCKET_FLAG}、环境变量 {_devsel.APP_BUCKET_ENV} 与配置文件里的 app-bucket 不生效")
     return fill_app_locations(args, jobs, entries, bucket=target.bucket, managed=True, region=target.region, profile=target.profile)
 
@@ -244,8 +247,7 @@ def cloud_device_requests(args, target, prepared: "Prepared", jobs) -> "list | i
     if not selections:
         return list(jobs)
     cfg = getattr(args, "project_config", _config.NO_CONFIG)
-    if getattr(args, "device_farm_project_arn", None) or os.environ.get(_devsel.PROJECT_ARN_ENV) \
-            or (cfg.devices is not None and cfg.devices.project_arn):
+    if _devsel.local_project_arn_given(flag_arn=getattr(args, "device_farm_project_arn", None), env=os.environ, config=cfg):
         progress(f"注：云端后端使用部署时建立的 Device Farm 项目，{_devsel.PROJECT_ARN_FLAG}、环境变量 {_devsel.PROJECT_ARN_ENV} 与"
                   "配置文件里的 project-arn 不生效")
     path = _names.ssm_path(target.prefix, _names.DEVICE_FARM_PROJECT_KEY)

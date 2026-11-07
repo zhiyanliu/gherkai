@@ -118,7 +118,7 @@ def test_worker_exit_error_carries_exit_code_and_network_is_a_subclass():
     assert WorkerNetworkError("x").exit_code == 80
 
 
-# ---- serialize：设备 job 带 sessions[] 与两个计量键、没有会话记录的桌面 job 省键、带会话记录的桌面 job 只有 sessions[]、往返一致、旧落盘可读 ----
+# ---- serialize：设备 job 带 sessions[] 与两个计量键、没有会话记录的桌面 job 省键、带会话记录的桌面 job 只有 sessions[]、往返一致、缺键读出空列表与 None ----
 
 def _job(scope_id: str = "s") -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene",
@@ -147,8 +147,8 @@ def test_device_job_round_trips_sessions_and_metering_and_desktop_job_omits_them
     ]
     desktop = job_result_to_dict(JobResult(job=_job("desk"), status=Status.PASSED))
     assert not {"sessions", "device_observed_s", "device_observed_missing"} & set(desktop)  # 没有会话记录的桌面 job 三键都不出现
-    old = job_result_from_dict(desktop)  # 旧落盘 / 没有会话记录的桌面 job：读出空列表与 None，不报错
-    assert old.sessions == [] and old.device_observed_s is None and old.device_observed_missing is None
+    desk_back = job_result_from_dict(desktop)  # 没有会话记录的桌面 job 缺这三个键：读出空列表与 None，不报错
+    assert desk_back.sessions == [] and desk_back.device_observed_s is None and desk_back.device_observed_missing is None
 
 
 def test_desktop_job_with_sessions_writes_sessions_without_metering_keys():

@@ -15,9 +15,10 @@ import json
 import boto3
 import pytest
 
-from gherkai_core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, events_pk
-from gherkai_core.errors import WorkerNetworkError
+from gherkai_core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, TaskProbe, events_pk
+from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
+from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
 
 
 _RUN_ID = "20260707T120000Z-abc123"
@@ -179,7 +180,7 @@ def test_runtask_injects_extra_env(fargate, monkeypatch):
 def test_artifact_injection_kwargs_are_mandatory(fargate):
     """产物落点两参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次）。
 
-    与 ADR 0038 的显式 revision 判法一致——漏传即在装配点 TypeError 炸，不做成「忘了传就静默破」。
+    与 ADR 0038 的显式 revision 判法一致——漏传即在装配点抛 TypeError，不做成「忘了传就静默破」。
     显式给 None（不上传）/ 空 dict（无 SDK 落点）仍可构造：本条锁的是「不许省」，不是「不许为空」。
     """
     base = dict(
@@ -306,7 +307,7 @@ def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
     # **不锁的**：① 「漏 ScanIndexForward」不会红——moto 默认即按 sort-key 升序返回（本测试预写也是升序），故这条
     #   决策靠此测试守不住（记账诚实，别声称锁了跨 9/10 数值重排）；② 「seq 误存 String」不由本测试兜——它全程手写
     #   {N}、不调 EventSink，String-wire 回归由 event-sink 单测（seq.N 断言）+ events 表 N-key schema（moto 拒 {S} 入 N-key）兜。
-    # moto 对 DDB 数据模型（N-key 编组/拒 {S}、sort-key 升序）保真（已探针证实），非「绿≠对」被 mock 掉的真实时序，可 moto 真验。
+    # moto 对 DDB 数据模型（N-key 编组/拒 {S}、sort-key 升序）保真（已探针证实），非「绿≠对」被 mock 掉的真实时序，可用 moto 实际验证。
     # 真低层 client（同一 moto 后端）：dynamodb **resource** 的 .meta.client 挂了高层序列化 handler、会把 {S:..} 再编组成 M，
     # 故直接建低层 client 写原始 attribute-value，精确模拟 Midscene 的 PutItemCommand({N:String(seq)}) 线格式。
     low = boto3.client("dynamodb", region_name="us-east-1")
@@ -544,26 +545,36 @@ def _engine_with_fake_ecs(describe_response, container_name="worker") -> Fargate
 
 
 def test_probe_task_not_stopped():
-    # 未 STOPPED → (stopped=False, exit_code=None)（调用方继续轮询等终态）
-    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": "worker"}]}]})
-    assert eng._probe_task("arn") == (False, None, False)
+    # 未 STOPPED → (stopped=False, exit_code=None)（调用方继续轮询等终态）；归因两项只在 STOPPED 时取
+    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "stopCode": "UserInitiated",
+                                            "containers": [{"name": "worker"}]}]})
+    assert eng._probe_task("arn") == TaskProbe(stopped=False, exit_code=None)
 
 
 def test_probe_task_stopped_with_exit_code():
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]})
-    assert eng._probe_task("arn") == (True, 0, False)
+    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=0)
     eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 137}]}]})
-    assert eng2._probe_task("arn") == (True, 137, False)
+    assert eng2._probe_task("arn") == TaskProbe(stopped=True, exit_code=137)
 
 
 def test_probe_task_stopped_but_exit_code_null():
     # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null，ADR 0024「exitCode 落值延迟」）
     # → (stopped=True, exit_code=None)：**两事实各自命名、不揉进单值**；调用方 _await_exit_code 据此有界多等几拍等落值、别当异常。
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
-    assert eng._probe_task("arn") == (True, None, False)
+    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=None)
     # STOPPED 但整个 containers 空（更极端的落值延迟）→ 同样 (True, None)、不崩
     eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": []}]})
-    assert eng2._probe_task("arn") == (True, None, False)
+    assert eng2._probe_task("arn") == TaskProbe(stopped=True, exit_code=None)
+
+
+def test_probe_task_stopped_reads_stop_code_and_reason():
+    """已 STOPPED 时一并取 task 级 stopCode 与 stoppedReason（ADR 0024「exitCode 落值延迟」条）：取不到退出码时据此提前落定、拼归因。"""
+    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "stopCode": "TaskFailedToStart",
+                                            "stoppedReason": "CannotPullContainerError: image not found",
+                                            "containers": [{"name": "worker"}]}]})
+    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=None, stop_code="TaskFailedToStart",
+                                               stopped_reason="CannotPullContainerError: image not found")
 
 
 def test_raise_for_worker_exit_maps_codes_with_fargate_label():
@@ -600,23 +611,70 @@ def _await_engine(responses, grace_polls=5, container_name="worker") -> FargateE
     return eng
 
 
-def _stopped_resp(exit_code):
+def _stopped_resp(exit_code, stop_code=None, stopped_reason=None):
     c = {"name": "worker"}
     if exit_code is not None:
         c["exitCode"] = exit_code
-    return {"tasks": [{"lastStatus": "STOPPED", "containers": [c]}]}
+    task = {"lastStatus": "STOPPED", "containers": [c]}
+    if stop_code is not None:
+        task["stopCode"] = stop_code
+    if stopped_reason is not None:
+        task["stoppedReason"] = stopped_reason
+    return {"tasks": [task]}
 
 
 def test_await_exit_code_waits_out_null_then_reads_landed_code():
     # STOPPED 但 exitCode 前 3 拍 null（落值延迟）、第 4 拍落值 0 → _await_exit_code 有界多等、读到落值 0（**不误报** error）。
     eng = _await_engine([_stopped_resp(None)] * 3 + [_stopped_resp(0)], grace_polls=5)
-    assert eng._await_exit_code("arn") == 0  # 等到落值、非落定 1
+    assert eng._await_exit_code("arn") == 0  # 等到落值，不落平台侧哨兵
 
 
-def test_await_exit_code_null_beyond_grace_settles_as_error():
-    # STOPPED 但 exitCode 恒 null 超过宽限拍数（容器真没报码，非落值延迟）→ 落定为 1（异常），不无限轮询。
-    eng = _await_engine([_stopped_resp(None)] * 50, grace_polls=3)
-    assert eng._await_exit_code("arn") == 1  # 超 grace_polls=3 仍 null → 落定 1
+def test_await_exit_code_null_beyond_grace_settles_as_platform_sentinel_with_reason():
+    """STOPPED 但 exitCode 恒 null 超过宽限拍数、stopCode 不是启动失败（容器真没报码，非落值延迟）→ 照常等满宽限后落平台侧哨兵 255，
+    reason 是 `stopCode: stoppedReason`（与退出观察者落的内容相同，ADR 0024「exitCode 落值延迟」条），不无限轮询。"""
+    resp = _stopped_resp(None, stop_code="EssentialContainerExited", stopped_reason="Essential container in task exited")
+    eng = _await_engine([resp] * 50, grace_polls=3)
+    with pytest.raises(WorkerExitError) as ei:
+        eng._await_exit_code("arn")
+    assert ei.value.exit_code == PLATFORM_FAILED_EXIT
+    assert ei.value.reason == "EssentialContainerExited: Essential container in task exited"
+    assert eng._ecs._i == 4  # 宽限 3 拍全部等过（第 4 拍落定）：非启动失败的 null 仍可能是落值延迟，不提前结束
+
+
+def test_await_exit_code_null_beyond_grace_without_any_reason_uses_fallback():
+    """stopCode 与 stoppedReason 都缺时归因取固定兜底句，与观察者同一份拼法（project.platform_exit_reason）。"""
+    eng = _await_engine([_stopped_resp(None)] * 50, grace_polls=2)
+    with pytest.raises(WorkerExitError) as ei:
+        eng._await_exit_code("arn")
+    assert ei.value.exit_code == PLATFORM_FAILED_EXIT and ei.value.reason == platform_exit_reason(None, None)
+
+
+def test_await_exit_code_task_failed_to_start_settles_without_grace(monkeypatch):
+    """stopCode 为 TaskFailedToStart（拉不到镜像、缺 secret）时 exitCode 永不落值：第一拍即落哨兵加归因，不空等宽限拍。"""
+    sleeps = []
+    monkeypatch.setattr("gherkai_core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
+    resp = _stopped_resp(None, stop_code="TaskFailedToStart",
+                         stopped_reason="CannotPullContainerError: ref pull has been retried 1 time(s): not found")
+    eng = _await_engine([resp] * 50, grace_polls=5)
+    with pytest.raises(WorkerExitError) as ei:
+        eng._await_exit_code("arn")
+    assert ei.value.exit_code == PLATFORM_FAILED_EXIT
+    assert ei.value.reason == "TaskFailedToStart: CannotPullContainerError: ref pull has been retried 1 time(s): not found"
+    assert eng._ecs._i == 1 and sleeps == []  # 只探了一次、没有睡过一拍
+
+
+def test_await_exit_code_early_settle_keys_on_stop_code_not_reason_text():
+    """提前落定只按 stopCode 这个结构化字段判：stoppedReason 文本里出现同样字样也照常走宽限、等到落值即读到真码。"""
+    eng = _await_engine([_stopped_resp(None, stop_code="EssentialContainerExited", stopped_reason="TaskFailedToStart"),
+                         _stopped_resp(1)], grace_polls=5)
+    assert eng._await_exit_code("arn") == 1
+
+
+def test_await_exit_code_uses_given_first_probe_without_extra_describe():
+    """调用方交进来的已 STOPPED 探测结果当作第一拍：落值了即刻返回，不再多调一次 DescribeTasks。"""
+    eng = _await_engine([_stopped_resp(7)], grace_polls=5)
+    assert eng._await_exit_code("arn", TaskProbe(stopped=True, exit_code=0)) == 0
+    assert eng._ecs._i == 0
 
 
 def test_await_exit_code_null_then_nonzero_landed_preserved():
@@ -704,7 +762,7 @@ def test_probe_task_missing_is_a_third_state_not_running():
     """DescribeTasks 空 tasks + failures MISSING → missing=True（不是「未 STOPPED」）：ECS 最终一致下 RunTask 刚返回可短暂
     查不到；持续 MISSING 则 task 已不在 ECS，再等永远等不到 STOPPED（ADR 0024「exitCode 落值延迟」条第三态）。"""
     eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
-    assert eng._probe_task("arn") == (False, None, True)
+    assert eng._probe_task("arn") == TaskProbe(stopped=False, exit_code=None, missing=True)
 
 
 def test_await_exit_code_missing_task_beyond_grace_raises():
@@ -791,3 +849,65 @@ def test_read_events_progress_resets_missing_count():
     eng = _gap_engine(_RoundsTable(rounds), _MissingThenStoppedEcs(missing_calls=3), gap_grace_s=5.0, missing_grace_polls=1)
     got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
     assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
+
+
+# ---- 同步 run --backend cloud 下取不到退出码：schedule 经 FargateEngine 把 ECS 的归因写进 job message（ADR 0024「exitCode 落值延迟」条）----
+
+class _NoExitCodeEcs:
+    """run_task 起一个 task；describe_tasks 恒返回 STOPPED、container 无 exitCode，带给定的 stopCode / stoppedReason。"""
+
+    def __init__(self, stop_code: str, stopped_reason: str):
+        self._task = {"lastStatus": "STOPPED", "stopCode": stop_code, "stoppedReason": stopped_reason,
+                      "containers": [{"name": "worker"}]}
+        self.describe_calls = 0
+
+    def run_task(self, **kw):
+        return {"tasks": [{"taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c/1"}]}
+
+    def describe_tasks(self, **kw):
+        self.describe_calls += 1
+        return {"tasks": [dict(self._task)]}
+
+    def stop_task(self, **kw):
+        return {"task": {}}
+
+
+class _NullS3:
+    def put_object(self, **kw):
+        return {}
+
+
+def _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls: int):
+    from gherkai_core.model import RunMeta
+    from gherkai_core.schedule import ScheduleOpts, schedule
+
+    eng = FargateEngine(
+        ecs_client=ecs, s3_client=_NullS3(), ddb_events_table=_RoundsTable([]), run_id=_RUN_ID, cluster="c",
+        task_definition="arn:aws:ecs:us-east-1:000000000000:task-definition/w:1", network_config={},
+        job_s3=("b", "jobs-in/"), events_table_name="events", container_name="worker",
+        artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.0, null_exit_grace_polls=null_exit_grace_polls,
+    )
+    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),)), lambda _engine: eng, lambda _event: None,
+                   opts=ScheduleOpts(max_concurrency=1))
+    return res.jobs[0]
+
+
+def test_sync_run_task_failed_to_start_puts_stopped_reason_in_job_message():
+    """镜像拉不到（stopCode=TaskFailedToStart、无 exitCode）：不等落值宽限，job 判 ERROR，message 带退出码 255 与 ECS 的
+    stoppedReason，与 submit 路径观察者落的归因同一句；不再给出「详见 worker 日志」（容器没起来、没有 worker 日志可看）。"""
+    reason = "CannotPullContainerError: pull image manifest has been retried 1 time(s): not found"
+    ecs = _NoExitCodeEcs("TaskFailedToStart", reason)
+    jr = _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls=5)
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error")
+    assert "退出码 255" in jr.message and f"TaskFailedToStart: {reason}" in jr.message
+    assert "详见 worker 日志" not in jr.message
+    assert ecs.describe_calls == 1  # 见到 STOPPED 的那一拍即落定：没等宽限，也没为读码再调一次 DescribeTasks
+
+
+def test_sync_run_other_stop_code_null_exit_beyond_grace_puts_reason_in_job_message():
+    """其余 stopCode 下 exitCode 始终为空：照常等满宽限（仍可能是落值延迟）后落 255，message 带 `stopCode: stoppedReason`。"""
+    ecs = _NoExitCodeEcs("EssentialContainerExited", "Essential container in task exited")
+    jr = _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls=3)
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error")
+    assert "退出码 255" in jr.message and "EssentialContainerExited: Essential container in task exited" in jr.message
+    assert ecs.describe_calls == 1 + 3  # 见到 STOPPED 的一拍，加宽限内的 3 拍

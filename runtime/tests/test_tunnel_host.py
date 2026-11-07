@@ -58,9 +58,33 @@ def test_start_tunnel_for_jobs_propagates_tunnel_error(monkeypatch):
 # ---- compute_watch_ttl_s：TTL 按 definition 算（不是拍一个常数）----
 
 def test_ttl_sums_job_budgets_plus_margin():
-    """Σ(各 job 预算) + 启动余量——求和对任何并发取值都是保守上界（ADR 0034 机制四）。"""
+    """一次性余量 + Σ(各 job 预算 + 每 job 余量)——求和对任何并发取值都是保守上界（ADR 0034 机制四）。"""
     jobs = [_job("a", 300.0), _job("b", 600.0), _job("c", 120.0)]
-    assert tunnel_host.compute_watch_ttl_s(jobs, startup_margin_s=900.0) == 900.0 + 1020.0
+    assert tunnel_host.compute_watch_ttl_s(jobs, startup_margin_s=900.0, per_job_margin_s=210.0) == (
+        900.0 + 1020.0 + 3 * 210.0)
+
+
+def test_ttl_default_margins_follow_the_documented_formula():
+    """缺省取值下 TTL 为 900 + Σ(各 job 预算) + N × 210（ADR 0035 决策 3）：每 job 的 210 秒由调度精度 60、
+    Fargate 停止宽限上限 120、事件链尾延迟 30 组成，停止宽限与云端同步 run 的停止后等待预算同用一个平台上限常量。"""
+    assert tunnel_host.CLOUD_STARTUP_MARGIN_S == 900.0
+    assert tunnel_host.CLOUD_PER_JOB_MARGIN_S == 210.0
+    assert tunnel_host.CLOUD_PER_JOB_MARGIN_S == 60.0 + compose.FARGATE_STOP_TIMEOUT_MAX_S + 30.0
+    jobs = [_job("a", 300.0), _job("b", 600.0)]
+    assert tunnel_host.compute_watch_ttl_s(jobs) == 900.0 + 900.0 + 2 * 210.0
+
+
+def test_ttl_per_job_margin_grows_with_job_count():
+    """每多一个 job，TTL 多出它的预算再加一份每 job 余量：并发为 1 时用尽预算被停止的 job 各带一段尾部耗时，
+    5 个这样的 job 的尾部（5 × 210 = 1050 秒）就超过一次性的 900 秒，余量不随 job 数增长时 TTL 会先到（ADR 0035 决策 3）。"""
+    four = [_job(f"s{i}", 300.0) for i in range(4)]
+    five = four + [_job("s4", 300.0)]
+    assert tunnel_host.compute_watch_ttl_s(five) - tunnel_host.compute_watch_ttl_s(four) == (
+        300.0 + tunnel_host.CLOUD_PER_JOB_MARGIN_S)
+    tail = 5 * tunnel_host.CLOUD_PER_JOB_MARGIN_S
+    assert tail > tunnel_host.CLOUD_STARTUP_MARGIN_S  # 只留一次性余量时，这 5 个 job 的尾部已超出它
+    assert tunnel_host.compute_watch_ttl_s(five) - sum(j.timeout_s for j in five) == (
+        tunnel_host.CLOUD_STARTUP_MARGIN_S + tail)
 
 
 def test_ttl_scales_past_the_old_fixed_hour():
@@ -71,13 +95,18 @@ def test_ttl_scales_past_the_old_fixed_hour():
 
 
 def test_ttl_gives_unbounded_jobs_an_explicit_ceiling():
-    """`--default-job-timeout <=0`（执行侧不超时）→ job.timeout_s=None：TTL 仍须有限（否则泄漏兜底失效）。"""
+    """`--default-job-timeout <=0`（执行侧不超时）→ job.timeout_s=None：TTL 仍须有限（否则泄漏兜底失效）；
+    每 job 余量对这样的 job 照样计入。"""
     ttl = tunnel_host.compute_watch_ttl_s([_job("a", None), _job("b", None)],
-                                          startup_margin_s=0.0, unbounded_job_budget_s=1000.0)
+                                          startup_margin_s=0.0, per_job_margin_s=0.0,
+                                          unbounded_job_budget_s=1000.0)
     assert ttl == 2000.0
+    assert tunnel_host.compute_watch_ttl_s([_job("a", None)], startup_margin_s=0.0, per_job_margin_s=210.0,
+                                           unbounded_job_budget_s=1000.0) == 1210.0
 
 
 def test_ttl_empty_definition_is_just_the_margin():
+    """没有 job 时只剩一次性余量：每 job 余量按 job 数计入，零个 job 不加。"""
     assert tunnel_host.compute_watch_ttl_s([], startup_margin_s=900.0) == 900.0
 
 

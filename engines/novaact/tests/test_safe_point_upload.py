@@ -1,4 +1,4 @@
-"""act 边界安全点提前上传单测（ADR 0029 上传时机第三级，为 Fargate 预演——subprocess+cloud 先建好并验证）。
+"""act 边界安全点提前上传单测（ADR 0029 上传时机第三级）。
 
 验 `_presend_act_siblings`：在 step_done 安全点，把本 step 各 act 的配套 `_trajectory.json` 也提前传走
 （不等 scope 末 flush）——中断落 flush 前时（Fargate 盘销毁）这些 json 才不丢。

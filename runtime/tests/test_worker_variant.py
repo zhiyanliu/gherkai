@@ -281,7 +281,7 @@ def test_one_engine_missing_fails_whole_resolution(aws):
 
 
 def test_malformed_ssm_record_is_named(aws):
-    """SSM 值不是合法 JSON（人手改坏）→ 点名是哪个参数坏了，不让 JSONDecodeError 裸奔。"""
+    """SSM 值不是合法 JSON（人手改坏）→ 点名是哪个参数坏了，不让 JSONDecodeError 原样抛出。"""
     tag = names.image_tag(_VERSION, "base")
     aws["ssm"].put_parameter(Name=names.ssm_path(_PREFIX, names.worker_image_key("novaact", tag)),
                              Value="{不是 JSON", Type="String", Overwrite=True)
@@ -299,7 +299,7 @@ def test_no_cli_version_fails_loud(aws):
 
 
 def test_invalid_variant_name_rejected_at_tag_layer(aws):
-    """非法 variant 名在 `names.image_tag` 这唯一校验点抛 ValueError（不到 AWS 那一层才炸）。"""
+    """非法 variant 名在 `names.image_tag` 这唯一校验点抛 ValueError（不等到 AWS 那一层才报错）。"""
     _seed(aws, variant="base")
     with pytest.raises(ValueError):
         _resolve(aws, variant="bad/name")

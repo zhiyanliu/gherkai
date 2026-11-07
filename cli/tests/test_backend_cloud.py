@@ -17,6 +17,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 from gherkai_core.model import JobResult, RunResult, ScopeStarted, Status
 
 from gherkai_cli import __main__ as m
@@ -105,7 +106,7 @@ def _stub_revision(engine: str) -> str:
 
 
 def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok", ""),
-                         variant_err=None, resolved_variant="base"):
+                         variant_err=None, resolved_variant="base", stop_timeouts=None):
     """patch store 钩子 + preflight（默认放行）+ 版本 skew 闸 + worker variant 闸（都默认放行）返回记录调用的
     fake（不连真 AWS）。
 
@@ -120,6 +121,8 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     默认给每个被问到的引擎一条假 resolution（variant 取显式给的 `--worker-variant`，缺省则 `resolved_variant`
     ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下的情形。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。
+    `stop_timeouts` 是引擎到 worker container `stopTimeout` 的映射，填进假 resolution 的 `stop_timeout_s`（缺省或
+    未列出的引擎为 None，即「没设或找不到该 container」）。
     """
     fake_s3 = _FakeS3(record)
     made = {"ddb_tables": [], "s3_clients": [], "fargate": [], "variant": []}
@@ -155,7 +158,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
         return {
             e: m.compose.WorkerResolution(
                 engine=e, variant=effective, revision_arn=_stub_revision(e),
-                digest=_STUB_DIGEST)
+                digest=_STUB_DIGEST, stop_timeout_s=(stop_timeouts or {}).get(e))
             for e in kwargs["engines"]
         }
 
@@ -264,6 +267,29 @@ def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, 
                  "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
     assert rc == 0
     assert box["opts"].min_grace_s == 0.0
+    assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s
+
+
+@pytest.mark.parametrize("stop_timeouts, expected", [
+    ({"novaact": 90, "midscene": 30}, 90 + 20.0),  # 各引擎取最大，再加 ECS 记下 STOPPED 的滞后余量 20 秒
+    ({"midscene": 30}, 120 + 20.0),  # novaact 没设 stopTimeout（或找不到该 container）：按 Fargate 平台上限 120 秒计
+], ids=["max-of-set", "unset-takes-platform-max"])
+def test_cloud_run_passes_stop_bound_from_resolved_stop_timeouts(tmp_path, monkeypatch, capsys, stop_timeouts, expected):
+    """云端同步 run 的停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：取 variant 解析带回的各引擎
+    worker container `stopTimeout` 的最大值加滞后余量，作 `stop_bound_s` 传给 schedule；运行期 grace 仍回落默认值、
+    与它互不影响（Fargate 句柄忽略运行期 grace，停止后的等待预算不取 grace）。"""
+    _patch_cloud_handles(monkeypatch, [], stop_timeouts=stop_timeouts)
+    box, inner = {}, _fake_schedule_factory()
+
+    def capturing(run_meta, engines, sink, opts=None, **kw):
+        box["opts"] = opts
+        return inner(run_meta, engines, sink, opts=opts, **kw)
+
+    monkeypatch.setattr(m, "schedule", capturing)
+    rc = m.main(["run", str(_two_engine_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T",
+                 "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    assert box["opts"].stop_bound_s == expected
     assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s
 
 
@@ -504,7 +530,7 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
 
     def spy_build(**kwargs):
         box.update(kwargs)
-        return real_build()
+        return real_build(run_id=kwargs["run_id"])
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -583,7 +609,7 @@ def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
     """--wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 并以退出码 2 结束，不再吞掉死等
-    （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞、下轮再踢——ADR 0033 preflight 条）。"""
+    （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞掉、下一个卡住窗口再 invoke——ADR 0033 preflight 条）。"""
     from botocore.exceptions import ClientError
 
     class _PendingTable:
@@ -610,7 +636,7 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
 
 def test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached(monkeypatch, capsys):
     """同步 `run --backend cloud` 的 run（STATE 没有 detached 标记）上执行 status --wait：只轮询等待、一次都不 invoke kicker
-    （kicker 对它本就整体 no-op，踢只是空转；接力只对 submit 的 run，ADR 0034 两道闸的 cloud 侧），提示一句，等到终态按判定给退出码。"""
+    （kicker 对它本就整体 no-op，invoke 只是空转；接力只对 submit 的 run，ADR 0034 两道闸的 cloud 侧），提示一句，等到终态按判定给退出码。"""
     reads = {"n": 0}
 
     class _Table:
@@ -618,7 +644,7 @@ def test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached(monkeypatch
             if kw["Key"]["item_type"] == "META":
                 return _META_HEADER
             reads["n"] += 1
-            status = "passed" if reads["n"] >= 6 else "running"  # 前几轮进行中（卡住判定本会在第 3 轮踢），之后到终态
+            status = "passed" if reads["n"] >= 6 else "running"  # 前几轮进行中（卡住判定本会在第 3 轮 invoke），之后到终态
             return {"Item": {"run_id": "r1", "item_type": "STATE", "status": status, "jobs": {}}}
 
     invoked = []
@@ -690,6 +716,84 @@ def test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read(monke
     assert rc == 2 and invoked == [] and "云端不可达" in capsys.readouterr().err
 
 
+def test_status_cloud_exits_2_when_the_definition_header_read_hits_an_aws_error(monkeypatch, capsys):
+    """读 definition 头（status 的第一个云端读）遇到 AWS 错误：报云端不可达并以退出码 2 结束，不再读运行态。"""
+    from botocore.exceptions import ClientError
+
+    reads = []
+
+    class _Table:
+        def get_item(self, **kw):
+            reads.append(kw["Key"]["item_type"])
+            if kw["Key"]["item_type"] == "META":
+                raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "GetItem")
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
+    assert rc == 2 and reads == ["META"] and "云端不可达" in capsys.readouterr().err
+
+
+def test_status_cloud_exits_2_when_the_first_state_read_hits_an_aws_error(monkeypatch, capsys):
+    """首次读运行态遇到 AWS 错误：带不带 --wait 都报云端不可达并以退出码 2 结束；--wait 时不读接力标记、不 invoke kicker。"""
+    from botocore.exceptions import ClientError
+
+    class _Table:
+        def __init__(self):
+            self.marker_reads = 0
+
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            if "ProjectionExpression" in kw:
+                self.marker_reads += 1
+                return {"Item": {"run_id": "r1", "item_type": "STATE", "detached": True}}
+            raise ClientError({"Error": {"Code": "ResourceNotFoundException", "Message": "no table"}}, "GetItem")
+
+    invoked = []
+
+    class _Lambda:
+        def invoke(self, **kw):
+            invoked.append(kw)
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_lambda_client", lambda *, region, profile: _Lambda())
+    for extra in ([], ["--wait"]):
+        table = _Table()
+        monkeypatch.setattr(m.compose, "_make_ddb_table", lambda t, *, region, profile, _tb=table: _tb)
+        rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", *extra])
+        assert rc == 2 and table.marker_reads == 0 and invoked == []
+        assert "云端不可达" in capsys.readouterr().err
+
+
+def test_status_wait_cloud_exits_2_when_a_poll_read_hits_an_aws_error_midway(monkeypatch, capsys):
+    """--wait 轮询中途重读运行态遇到 AWS 错误：报云端不可达并以退出码 2 结束，不向用户终端输出回溯。"""
+    from botocore.exceptions import ClientError
+
+    state_reads = {"n": 0}
+    sleeps = []
+
+    class _Table:
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            if "ProjectionExpression" in kw:
+                return {"Item": {"run_id": "r1", "item_type": "STATE", "detached": True}}
+            state_reads["n"] += 1
+            if state_reads["n"] >= 3:  # 首次读与第一轮重读正常，第二轮重读出错
+                raise ClientError({"Error": {"Code": "InternalServerError", "Message": "boom"}}, "GetItem")
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "running", "jobs": {}, "detached": True}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _Table())
+    import time as _t
+    monkeypatch.setattr(_t, "sleep", lambda s: sleeps.append(s))
+    rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1", "--wait"])
+    assert rc == 2 and len(sleeps) == 2 and state_reads["n"] == 3
+    assert "云端不可达" in capsys.readouterr().err
+
+
 def test_status_wait_cloud_interrupted_by_ctrl_c_exits_130_with_a_notice(monkeypatch, capsys):
     """云端 --wait 的轮询被 Ctrl-C 打断：一句说明、退出码 130，没有回溯。"""
     class _Table:
@@ -746,10 +850,13 @@ def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
     # TTL 按 definition 算并显式传给守护（ADR 0035 决策 3；曾恒 1h 且无生产写入者 → 与 run 预算脱钩）
     from gherkai_runtime import tunnel_host
 
-    expected = tunnel_host.CLOUD_STARTUP_MARGIN_S + 450.0  # 单 job × --default-job-timeout
+    # 单 job × --default-job-timeout：一次性余量 + 该 job 预算 + 一份每 job 余量
+    expected = tunnel_host.CLOUD_STARTUP_MARGIN_S + 450.0 + tunnel_host.CLOUD_PER_JOB_MARGIN_S
+    assert expected == 900.0 + 450.0 + 210.0
     assert float(cmd[cmd.index("--ttl") + 1]) == expected
     err = capsys.readouterr().err
     assert f"{expected:.0f}s" in err  # submit 打印该 TTL（可见性）
+    assert "估算的上限" in err and "每个 job 210 秒" in err  # 默认值称为估算的上限，写明每 job 余量
     assert "保持开机" in err  # 明示边界（关机就是隧道断）
 
 
@@ -774,6 +881,8 @@ def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, 
     assert rc == 0
     cmd = [c for c in forked if "_tunnel_watch" in c][0]
     assert float(cmd[cmd.index("--ttl") + 1]) == 120.0
+    err = capsys.readouterr().err
+    assert "TTL 兜底 120s（给定的 `--tunnel-ttl` 值）" in err and "估算" not in err  # 覆盖值不说成估算值
 
 
 # ---- 云端后端与 worker 定位链 / steps 定制面的边界（ADR 0037 决策 3/4）----
@@ -1090,7 +1199,7 @@ def test_variant_resolution_read_failure_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_skew_block_prevents_both_resource_preflight_and_variant(tmp_path, monkeypatch, capsys):
     """skew block 时资源 preflight 与 variant 解析都一次不执行——skew 的修复动作（deploy）是镜像重推的前置，
-    反过来先报「variant 没推」会让用户白推一轮（ADR 0038）。"""
+    反过来先报「variant 没推」会让用户先推一轮镜像、推完仍要重做（ADR 0038）。"""
     for cmd in (["run", "--quiet"], ["submit"]):
         record: list = []
         _, made, preflight_calls = _patch_cloud_handles(

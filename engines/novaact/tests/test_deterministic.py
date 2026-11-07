@@ -172,29 +172,45 @@ def test_registry_cross_engine_fixture():
                         keywords=e.get("keywords"))(lambda ctx, **groups: None)
     assert [x["keywords"] for x in d.list_registry()] == reg["expected_keywords"]
     for p in reg["probes"]:
-        item = {"keyword": p["keyword"], "text": p["text"]} if "keyword" in p else p["text"]
-        assert d.match_batch([item]) == [sub(p["expect"])], p
+        assert d.match_batch([{"keyword": p["keyword"], "text": p["text"]}]) == [sub(p["expect"])], p  # 每条都带 keyword 键（可为 null）
 
 
 def test_match_batch_hit_miss_conflict():
     """match_batch（ADR 0036 决策 4）：命中/未命中/冲突结构化返回（冲突不抛——plan 是用例预检、不是执行）。"""
     d.deterministic(r'页面地址匹配 "(?P<p>[^"]+)"', description="断言 URL", example="Then …")(lambda ctx, p: None)
     d.deterministic(r"地址(?P<a>.+)", description="x", example="y")(lambda ctx, a: None)
-    got = d.match_batch(['页面地址匹配 "x"', "无关文本", "地址什么的"])
+    got = d.match_batch([{"keyword": None, "text": t} for t in ('页面地址匹配 "x"', "无关文本", "地址什么的")])
     assert got[0] == {"conflict": [r'页面地址匹配 "(?P<p>[^"]+)"', r"地址(?P<a>.+)"]}  # 两条都命中 → 冲突
     assert got[1] is None
     assert got[2] == {"pattern": r"地址(?P<a>.+)", "description": "x"}
 
 
 def test_match_batch_items_with_keyword():
-    """match_batch 的每项可带关键字（{keyword, text}，ADR 0036 / 0050 决策 1）：命中但关键字不符 → keyword_mismatch。"""
+    """match_batch 的每项是 {keyword, text}（ADR 0036 决策 4、0050 决策 1）：命中但关键字不符 → keyword_mismatch；keyword 为 None 不核对。"""
     d.deterministic(r"仅给定", description="x", example="y", keywords=("Given",))(lambda ctx: None)
     got = d.match_batch([{"keyword": "Given", "text": "仅给定"}, {"keyword": "Then", "text": "仅给定"},
-                         {"keyword": "Then", "text": "没命中"}, "仅给定"])
+                         {"keyword": "Then", "text": "没命中"}, {"keyword": None, "text": "仅给定"}])
     assert got[0] == {"pattern": r"仅给定", "description": "x"}
     assert got[1] == {"keyword_mismatch": r"仅给定", "keywords": ["Given"]}
     assert got[2] is None
-    assert got[3] == {"pattern": r"仅给定", "description": "x"}  # 裸字符串（旧版命令行工具）不核对关键字
+    assert got[3] == {"pattern": r"仅给定", "description": "x"}  # keyword 为 None：不核对关键字
+
+
+@pytest.mark.parametrize("items", [
+    ["仅给定"],                                                   # 裸字符串（1.4 命令行工具的形态）
+    [{"keyword": "Given", "text": "仅给定"}, "仅给定"],            # 混在合法条目之后：整批拒绝、不出部分结果
+    [{"text": "仅给定"}],                                         # 缺 keyword 键（null 才表示不核对）
+    [{"keyword": "Given"}],                                       # 缺 text 键
+    [{"keyword": "Given", "text": 1}],                            # text 不是字符串
+    [{"keyword": 1, "text": "仅给定"}],                            # keyword 既不是字符串也不是 null
+    {"keyword": "Given", "text": "仅给定"},                        # 不是数组
+])
+def test_match_batch_rejects_whole_batch_on_bad_item_shape(items):
+    """条目只接受 {keyword, text} 对象（ADR 0036 决策 4）：任一处不合即整批抛 MatchInputError，消息是版本不一致那一句。"""
+    d.deterministic(r"仅给定", description="x", example="y", keywords=("Given",))(lambda ctx: None)
+    with pytest.raises(d.MatchInputError) as ei:
+        d.match_batch(items)
+    assert str(ei.value) == d.MATCH_INPUT_MISMATCH and "命令行工具与 worker 的版本不一致，请把两者装成同一版本" in str(ei.value)
 
 
 def test_worker_match_steps_mode_real_subprocess():
@@ -206,7 +222,7 @@ def test_worker_match_steps_mode_real_subprocess():
     payload = _json.dumps([{"keyword": "Given", "text": '"https://www.wikipedia.org/"'},
                            {"keyword": "Then", "text": "https://www.wikipedia.org/"},
                            {"keyword": "When", "text": '在输入框输入 "https://x.example/"'},
-                           "https://bare.example/"]).encode("utf-8")
+                           {"keyword": None, "text": "https://bare.example/"}]).encode("utf-8")
     proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--match-steps"],
                           input=payload, capture_output=True, timeout=60)
     assert proc.returncode == 0, proc.stderr.decode()[-300:]
@@ -214,7 +230,26 @@ def test_worker_match_steps_mode_real_subprocess():
     assert got[0] is not None and "://" in got[0]["pattern"] and "内建导航" in got[0]["description"]
     assert got[1] == {"keyword_mismatch": got[0]["pattern"], "keywords": ["Given", "When"]}  # Then 后只有地址
     assert got[2] is None  # 句子里还有别的内容 → 不是导航、走 AI
-    assert got[3] is not None and got[3]["pattern"] == got[0]["pattern"]  # 旧形态的裸字符串仍可用
+    assert got[3] is not None and got[3]["pattern"] == got[0]["pattern"]  # keyword 为 null：不核对关键字
+
+
+@pytest.mark.parametrize("payload", [
+    b'["https://bare.example/"]',                     # 1.4 命令行工具发的裸字符串数组
+    b'[{"text": "https://bare.example/"}]',           # 缺 keyword 键
+    b"not json",                                      # 不是 JSON
+    b'\xff\xfe',                                      # 不是 UTF-8
+])
+def test_worker_match_steps_rejects_bad_input_without_traceback(payload):
+    """--match-steps 真子进程（ADR 0036 决策 4）：输入不合契约时 stderr 只写版本不一致那一句、非零退出、stdout 不出结果、不带回溯
+    （worker 装了脱敏 excepthook，未捕获的异常会写出回溯，故入口须显式捕获）。"""
+    import subprocess
+    import sys as _sys
+
+    proc = subprocess.run([_sys.executable, "-m", "gherkai_worker_novaact", "--match-steps"],
+                          input=payload, capture_output=True, timeout=60)
+    err = proc.stderr.decode("utf-8", errors="replace")
+    assert proc.returncode != 0 and proc.stdout == b"", (proc.returncode, proc.stdout, err)
+    assert d.MATCH_INPUT_MISMATCH in err and "Traceback" not in err, err
 
 
 # ---- 多句柄注册面（ADR 0050 决策 1）：跨语言 fixture、单函数兼容、按目标选句柄、不顺延 ----

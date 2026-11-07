@@ -155,6 +155,21 @@ test("映射：多行超长 errorMessage 压成一行有界文本（与 step_don
   assert.deepEqual(doc.acts[0].frames.length, 1);
 });
 
+test("映射：errorMessage 压成一行后为空串即判空——act.error 取异常兜底、该帧不算出错帧", () => {
+  // U+0085 不在 JS 的 `\s` 里、trim() 不去它，但它在一行化规则的空白字符集 W 里：按 trim() 判非空会把它当原因、
+  // 与 Nova 对同一段文本的判据（压成一行后是否为空串）分叉（ADR 0042 决策一「一行化规则」）
+  for (const blank of ["\u0085", " \u2028\ufeff", "\u001f\n\u3000"]) {
+    const doc = build({ status: "error", executions: [exec(task({ errorMessage: blank }))], error: "ActError: timeout", votes: [] });
+    assert.equal(doc.acts[0].error, "ActError: timeout", `errorMessage ${JSON.stringify(blank)} 判空，末个 act 兜住抛出的异常`);
+    const failed = build({
+      status: "failed",
+      executions: [exec(task({ shot: "s0" }), task({ shot: "s1", errorMessage: blank }), task({ shot: "s2" }))],
+    });
+    assert.equal(failed.acts[0].error, null);
+    assert.deepEqual(failed.acts[0].frames.map((f) => f.screenshot !== null), [false, false, true], "判空的帧不作出错帧配截图");
+  }
+});
+
 test("映射：抛错早于任何 execution 落账 → 仍留一条只带 error 的 act（frames 空是 SDK 事实）", () => {
   const doc = build({ status: "error", executions: [], error: "TargetClosedError: closed", votes: [] });
   assert.equal(doc.acts.length, 1);
@@ -519,7 +534,7 @@ async function desktopSeam(agent: any, page: any = stepPage): Promise<any> {
   const ctx = { pages: () => [p], newPage: async () => p, addInitScript: async () => {}, setExtraHTTPHeaders: async () => {} };
   const browser = { contexts: () => [ctx], newContext: async () => ctx, close: async () => {} };
   const surface = createDesktopSurface({
-    job: { schemaVersion: 1, scope: { id: "sc", name: "sc" }, engine: "midscene", assertionVotes: 1, timeoutS: null, target, deviceRequest: null },
+    job: { schemaVersion: 2, scope: { id: "sc", name: "sc" }, engine: "midscene", assertionVotes: 1, timeoutS: null, target, deviceRequest: null },
     emit: async () => {}, log: () => {}, agentOpts: {}, uploader: {} as any, artifactRoot: undefined, requestFinalization: () => {},
   } as any, {
     client: { send: async () => ({ sessionId: "sess-1", streams: { automationStream: { streamEndpoint: "wss://agentcore.test/1" } } }) } as any,
@@ -528,7 +543,7 @@ async function desktopSeam(agent: any, page: any = stepPage): Promise<any> {
   });
   const acquired = await surface.acquire();
   assert.ok(acquired.ready, "桌面接缝应就绪");
-  return { surface, agent: acquired.agent, target, sessionLost: null };
+  return { surface, agent: acquired.agent, target, sessionLost: null, finalizing: () => false };
 }
 
 test("runStep：AI 断言 step 的 step_done 带 kind=evidence 的 step 级 ref（Midscene 首条）", async () => {

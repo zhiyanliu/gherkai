@@ -1,6 +1,6 @@
 """Lambda handler 事件解析测试（ADR 0034 P4b）：退出观察者 _extract + reconciler _run_ids_from_stream。
 
-主体测**事件格式解析**（最易错、最该测的纯逻辑）——用真验抓到的真实 ECS STOPPED event / DDB Stream event 形状；
+主体测**事件格式解析**（最易错、最该测的纯逻辑）——用实际运行抓到的 ECS STOPPED event / DDB Stream event 形状；
 另有一组走 moto 内存表运行真 handler（末尾「只推进 detached run」——组合根侧分流是行为契约，解析测不出来）。
 真 Stream 触发 / 真 Fargate / 真 EventBridge 投递仍是 moto 之外的真实运行边界（绿≠对的证据边界）。
 
@@ -24,7 +24,7 @@ import reconciler  # noqa: E402
 # ---------- 退出观察者 _extract（从 STOPPED event detail 拿 run_id/scope_id/exit_code）----------
 
 def _stopped_detail(run_id, scope_id, exit_code):
-    """构造真实形状的 ECS STOPPED event detail（RunTask 注入的 env 原样在 overrides，真验坐实）。"""
+    """构造真实形状的 ECS STOPPED event detail（RunTask 注入的 env 原样在 overrides，已由实际运行抓到的事件证实）。"""
     return {
         "taskArn": "arn:aws:ecs:us-east-1:000000000000:task/gherkai-cluster/abc",
         "lastStatus": "STOPPED",
@@ -159,7 +159,7 @@ def test_starter_run_ids_from_runs_stream():
 
 
 def test_starter_run_ids_from_direct_kick():
-    """② 直接 invoke 踢一脚（status --wait 接力）：payload {"run_id": ...}——真测抓到的 bug：
+    """② 直接 invoke 触发一次 kickoff（status --wait 接力）：payload {"run_id": ...}——实际运行中抓到的 bug：
     原启动器只认 Stream records、忽略此格式 → status --wait invoke 空转救不了卡 pending 的 run。"""
     assert reconciler._run_ids_from_runs_stream({"run_id": "run-x"}) == {"run-x"}
 
@@ -434,7 +434,7 @@ def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
 
 
 def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
-    """防御性超时扫抛异常不连坐：本次调用仍成功返回，同一批里其它 run 照常推进（同 revision 解析失败的逐 run 隔离）。"""
+    """防御性超时扫抛异常不影响其它 run：本次调用仍成功返回，同一批里其它 run 照常推进（同 revision 解析失败的逐 run 隔离）。"""
     ticked = []
     monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
     import gherkai_core.reconcile as _cr
@@ -665,7 +665,7 @@ def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
 def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkeypatch):
     """run 级墙钟只是报告里的派生指标（缺则显「?」），取它要在 finalize **之后**多读一次 RunState——那次强一致读
     抛（DDB 限流 / 瞬时 5xx）不许冒泡：commit 之后的失败无人重试，且在云端会让 events Stream 本批重试耗尽后整批
-    丢弃、连坐同批其它 run 的事件。断言 handler 正常返回、报告照写、墙钟按缺值走。
+    丢弃，同批其它 run 的事件随之丢失。断言 handler 正常返回、报告照写、墙钟按缺值走。
     """
     import gherkai_core.reconcile as core_reconcile
 
@@ -869,28 +869,29 @@ def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_
             return True
 
     s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
-    assert reconciler._load_definition(s, "r", "t") is None and s.finalized == [("r", Status.ERROR)]
-    assert "9.9.0" in capsys.readouterr().out
+    assert reconciler._load_definition(s, "r") is None and s.finalized == [("r", Status.ERROR)]
+    out = capsys.readouterr().out
+    assert "9.9.0" in out and out.startswith("reject: run r ")  # 诊断行按事件种类起前缀，与 skip: / timeout-stop: 同一风格
     # run 级消息随终态写入、status 可见：产品语言整句（谁写的、两边各第几版、怎么办），不是异常原文
     assert s.message.startswith("提交记录由更新版本的 gherkai 9.9.0 写出") and "第 2 版" in s.message and "重新提交" in s.message
     s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
-    assert reconciler._load_definition(s2, "r", "t") is None and s2.finalized == [("r", Status.ERROR)]
+    assert reconciler._load_definition(s2, "r") is None and s2.finalized == [("r", Status.ERROR)]
     assert s2.message.startswith("提交记录不完整或形态不对") and "缺键 target" not in s2.message  # 契约异常的原文只进诊断行
     assert "缺键 target" in capsys.readouterr().out
     s_old = _Store(exc=UnsupportedDefinitionSchema(0, 1, cli_version="1.4.9"))
-    assert reconciler._load_definition(s_old, "r", "t") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
+    assert reconciler._load_definition(s_old, "r") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
     # 写端版本来自提交记录、不受信：损坏成超长文本也不能把 message 撑大（ADR 0037 决策 7「有界」）
     s_long = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="v" * 5000))
-    reconciler._load_definition(s_long, "r", "t")
+    reconciler._load_definition(s_long, "r")
     assert len(s_long.message) < 300 and "v" * 41 not in s_long.message and "v" * 40 in s_long.message
     s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
-    assert reconciler._load_definition(s3, "r", "t") is None and s3.finalized == [("r", Status.ERROR)]
+    assert reconciler._load_definition(s3, "r") is None and s3.finalized == [("r", Status.ERROR)]
     assert "worker 镜像版本" in s3.message
     ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"})
     s4 = _Store(meta=ok)
-    assert reconciler._load_definition(s4, "r", "t") is ok and s4.finalized == []
+    assert reconciler._load_definition(s4, "r") is ok and s4.finalized == []
     s5 = _Store(meta=None)
-    assert reconciler._load_definition(s5, "r", "t") is None and s5.finalized == []
+    assert reconciler._load_definition(s5, "r") is None and s5.finalized == []
 
 
 def test_kicker_uses_definition_worker_task_defs(cloud_env):

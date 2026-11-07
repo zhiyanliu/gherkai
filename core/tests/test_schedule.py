@@ -51,7 +51,7 @@ def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_
     )
     # 设备目标带完整的设备请求（与 definition 的结构校验一致）；缺省是桌面网页
     target = {} if device == "desktop" else dict(target=Target(device=device, ui_kind="web"),
-                                                 device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+                                                 device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
     return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=scenarios, timeout_s=timeout_s, **target)
 
 
@@ -1204,6 +1204,162 @@ def test_drain_bound_applies_without_deadline_under_fail_fast():
     assert (v.status, v.error_type) == (Status.ABORTED, None)
 
 
+# ---- 停止后等待预算 stop_bound_s（ADR 0034 机制二「停止后继续有界消费完整事件流」）：排空上界取首次停止请求时刻加等待预算、再加余量 ----
+
+class _StopWindowClock:
+    """停止前每次读前进 1 ms；sink 见到触发事件后，下一次读一次性越过 deadline；发出停止请求后时钟停在请求时刻加 window 秒。
+
+    停在一个固定时刻，把「停止后的收尾在请求后 window 秒到达」写成确定的时序：之后每次排空检查读到的都是这个时刻，
+    收尾落在排空上界之内还是之外只由取法决定，与心跳次数无关。"""
+
+    def __init__(self, window: float):
+        self.t = 0.0
+        self.window = window
+        self.jump = False
+        self.frozen: float | None = None
+
+    def __call__(self) -> float:
+        if self.frozen is not None:
+            return self.frozen
+        self.t += 1000.0 if self.jump else 0.001
+        self.jump = False
+        return self.t
+
+    def on_stop(self, scope_id: str) -> None:  # FakeEngine 的 on_stop 钩子：handle.stop() 被调时，停止请求时刻已经记下
+        if self.frozen is None:
+            self.frozen = self.t + self.window
+
+
+class _TriggerSink(CollectSink):
+    """收到 trigger 类型的事件时让时钟在下一次读越过 deadline（触发点按事件认，不按读时钟的次数推算）。"""
+
+    def __init__(self, clock: _StopWindowClock, trigger: type):
+        super().__init__()
+        self.clock, self.trigger = clock, trigger
+
+    def __call__(self, event) -> None:
+        super().__call__(event)
+        if isinstance(event, self.trigger):
+            self.clock.jump = True
+
+
+@pytest.mark.parametrize("grace, stop_bound, eof_in_bound", [
+    (1.0, None, False),  # 未给等待预算：取 grace，排空上界为请求后 1 + 5 = 6 秒，20 秒处到达的 EOF 在它之外（原行为）
+    (1.0, 30.0, True),  # 等待预算 30 秒：排空上界为请求后 35 秒，20 秒处的 EOF 在它之内
+    (30.0, None, True),  # 未给时取 grace：grace 30 秒同样等得到
+    (30.0, 1.0, False),  # 给了值就取它、不与 grace 取较大者：排空上界为请求后 6 秒
+])
+def test_stop_bound_sets_drain_window_for_eof_after_hurry_exit(grace, stop_bound, eof_in_bound):
+    """内容完整后 deadline 才到（催收尾）、EOF 在停止请求后 20 秒到达：在排空上界之内即干净退出、判 PASSED；在上界之外则退出信息
+    未知、内容完整被回落，按首次仲裁判 ERROR timeout——云端只取 grace 时同一组事实会与无状态路径的 PASSED 不一致。"""
+    scope = "p"
+    clock = _StopWindowClock(window=20.0)
+    engine = FakeEngine({scope: _passing_events(scope, "p:0")}, tail_after_stop={scope: []}, tail_delay_s=0.2,
+                        on_stop=clock.on_stop)  # 发完事件后活着等停，收到停止请求后过一会儿才 EOF
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScopeDone),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=grace,
+                                     stop_bound_s=stop_bound))
+    jr = res.jobs[0]
+    assert engine.handles[scope].stopped and clock.frozen is not None  # 确实走了催收尾、时钟停在请求后 20 秒
+    expected = (Status.PASSED, None) if eof_in_bound else (Status.ERROR, "timeout")
+    assert (jr.status, jr.error_type) == expected
+    # 终结处只在排空上界到点退出时补发一次停止请求；事件流在上界内正常结束的不补发
+    assert len(engine.handles[scope].stop_graces) == (1 if eof_in_bound else 2)
+
+
+@pytest.mark.parametrize("stop_bound, closed_in_bound", [(None, False), (30.0, True)])
+def test_stop_bound_lets_late_session_closed_be_reduced(stop_bound, closed_in_bound):
+    """停止决定落在 scope 中途（超时）、confirmed 的 session_closed 在停止请求后 20 秒到达：在排空上界之内即被归约，未确认集为空、
+    job message 不带释放提示；未给等待预算（grace 1 秒，排空上界为请求后 6 秒）时它被丢弃，message 多出「未能确认停止」的提示。
+    两种情形的判定都是 ERROR timeout：停止原因在作出停止决定那一刻已落定，收尾到没到只影响会话记录与提示。"""
+    from gherkai_core.model import SessionClosed, SessionOpened
+
+    scope = "n"
+    clock = _StopWindowClock(window=20.0)
+    events = [SessionOpened(scope_id=scope, name="s-1", origin="created", session_id="s-1"),
+              ScopeStarted(scope_id=scope, session_id="s-1"), ScenarioStarted(scenario_id="n:0")]
+    tail = [SessionClosed(scope_id=scope, name="s-1", release="confirmed", session_id="s-1")]
+    engine = FakeEngine({scope: events}, tail_after_stop={scope: tail}, tail_delay_s=0.2, on_stop=clock.on_stop)
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScenarioStarted),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0,
+                                     stop_bound_s=stop_bound))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
+    if closed_in_bound:
+        assert [s.release for s in jr.sessions] == ["confirmed"]
+        assert "未能确认停止" not in (jr.message or "")
+    else:
+        assert "未能确认停止" in (jr.message or "") and "s-1" in jr.message
+    assert len(engine.handles[scope].stop_graces) == (1 if closed_in_bound else 2)  # 到点退出才补发
+
+
+@pytest.mark.parametrize("bad", [float("inf"), float("nan"), 0.0, -1.0])
+def test_stop_bound_must_be_finite_positive(bad):
+    # 等待预算给了值须为有限正数（inf 会让排空永不到点），起任何 worker 前就拒，与 grace 同一处校验
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    with pytest.raises(ValueError, match="停止后等待预算"):
+        schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(stop_bound_s=bad))
+    assert "a" not in engine.handles
+
+
+# ---- 终结处的补发停止请求（ADR 0034 机制二「停止调用自身也有界」条）：只在事件流没有正常结束时补发 ----
+# 排空上界到点退出与普通异常两种情形各有覆盖：上面两组等待预算测试的上界之外分支、test_generic_exception_still_stops_worker_*。
+
+@pytest.mark.parametrize("exit_kind", ["eof", "exit_code"])
+@pytest.mark.parametrize("trigger", ["deadline", "abort"])
+def test_re_arbitration_after_worker_exit_sends_no_stop(monkeypatch, trigger, exit_kind):
+    """worker 在事件间检查有机会执行之前就已退出（零事件 EOF，或以非零退出码退出）：终结前的回判按首次仲裁落定停止原因，但不跟停止请求。
+    事件流已正常结束说明 worker 已经退出，再发一次不改变任何事实，只会在控制面迟缓时把 job 的结束推迟一段客户端超时。"""
+    import gherkai_core.schedule as sch
+    from gherkai_core.errors import WorkerExitError
+
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    monkeypatch.setattr(sch._Worker, "__init__", spy)
+
+    def gen(job):  # worker 已 spawn、首事件之前：abort 情形在此置中止标志（模拟其他 job 恰在此刻失败），随后零事件即退出
+        if trigger == "abort":
+            captured["w"].abort_flag.set()
+        if exit_kind == "exit_code":
+            raise WorkerExitError(80, "fake 建连失败")
+        return iter([])
+
+    class _Clock:  # deadline 情形：前两次读（run 起点、deadline 基点）为 0，之后一律在 deadline 之后；abort 情形慢走、不越过 deadline
+        def __init__(self): self.n = 0
+        def __call__(self):
+            self.n += 1
+            if trigger == "abort":
+                return self.n * 0.001
+            return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
+
+    engine = FakeEngine({"s": gen})
+    # 关掉心跳：零事件的事件流直接结束，循环里的事件间检查一次也不执行，停止原因只能由终结前的回判落定
+    res = schedule(_rm([_job("s", timeout_s=1.0)]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0, grace_period_s=1.0))
+    jr = res.jobs[0]
+    expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
+    assert (jr.status, jr.error_type) == expected
+    assert not engine.handles["s"].stopped
+
+
+def test_exit_code_after_stop_request_is_not_followed_by_another_stop():
+    """事件循环里作出停止决定后，worker 收尾并以非零退出码退出（已拿到退出码）：终结处不补发，停止请求只有作出决定时的那一次。"""
+    scope = "e"
+    clock = _StopWindowClock(window=0.5)  # 收尾在请求后 0.5 秒结束，落在排空上界（1 加 5 秒）之内
+    engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="e:0")]},
+                        tail_after_stop={scope: []}, exit_code={scope: 1}, on_stop=clock.on_stop)
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScenarioStarted),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
+    assert len(engine.handles[scope].stop_graces) == 1
+
+
 @pytest.mark.parametrize("exit_kind", ["sigkill", "network", "exception"])
 @pytest.mark.parametrize("trigger", ["deadline", "abort"])
 def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigger):
@@ -1401,7 +1557,28 @@ def test_sigkill_negative_exit_code_is_error_not_clean():
     engine = FakeEngine({"k": []}, exit_code={"k": -9})
     res = schedule(_rm([_job("k")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
     jr = res.jobs[0]
-    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and "exit -9" in jr.message
+    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and "退出码 -9" in jr.message
+
+
+def test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not():
+    """WorkerExitError 上有类型的 reason 作为退出原因交给终结函数（ADR 0024「exitCode 落值延迟」条：同步云端路径取不到退出码时，
+    adapter 落平台侧哨兵 255 并在 reason 带 ECS 归因）；异常消息文本不当归因，不带 reason 时 job message 里也不出现它。"""
+    from gherkai_core.errors import WorkerExitError
+    from gherkai_core.project import PLATFORM_FAILED_EXIT
+
+    def with_reason(job):
+        raise WorkerExitError(PLATFORM_FAILED_EXIT, "异常消息文本", reason="TaskFailedToStart: CannotPullContainerError: not found")
+
+    def without_reason(job):
+        raise WorkerExitError(PLATFORM_FAILED_EXIT, "异常消息文本")
+
+    res = schedule(_rm([_job("r"), _job("n")]), FakeResolver(FakeEngine({"r": with_reason, "n": without_reason})), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2))
+    by = {jr.scope_id: jr for jr in res.jobs}
+    assert (by["r"].status, by["r"].error_type) == (Status.ERROR, "engine_error")
+    assert "退出码 255" in by["r"].message and by["r"].message.endswith("：TaskFailedToStart: CannotPullContainerError: not found")
+    assert (by["n"].status, by["n"].error_type) == (Status.ERROR, "engine_error")
+    assert "退出码 255" in by["n"].message and "异常消息文本" not in by["n"].message
 
 
 def test_scope_done_after_nonzero_exit_is_error_and_zero_scenario_scope_done_is_error():
@@ -1410,7 +1587,7 @@ def test_scope_done_after_nonzero_exit_is_error_and_zero_scenario_scope_done_is_
                         exit_code={"a": 1})
     res = schedule(_rm([_job("a"), _job("z")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=2))
     by = {jr.scope_id: jr for jr in res.jobs}
-    assert (by["a"].status, by["a"].error_type) == (Status.ERROR, "engine_error") and "exit 1" in by["a"].message
+    assert (by["a"].status, by["a"].error_type) == (Status.ERROR, "engine_error") and "退出码 1" in by["a"].message
     assert (by["z"].status, by["z"].error_type) == (Status.ERROR, "engine_error") and "未报告任何 scenario 判定" in by["z"].message
 
 
@@ -1511,7 +1688,7 @@ def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
     assert levels == [1]
     assert len(polls) >= 2
     h = engine.handles["a"]
-    # 协作停止：每次停止请求都带宽限（worker 线程在排空后会再确认一次停止请求，故可能不止一次），没有零宽限的强制
+    # 协作停止：每次停止请求都带宽限，没有零宽限的强制
     assert h.stopped and h.stop_graces and all(g > 0 for g in h.stop_graces)
 
 

@@ -23,7 +23,11 @@
 // 命令失败的会话丢失判定一律先查会话状态（ADR 0051 决策 4「会话丢失的判定靠查状态」）：状态不是 RUNNING 即会话丢失，并锁存，
 // 之后各项义务与快照不再向设备发命令。
 //
-// 获取预算（ADR 0052 决策 6 超时分层表 ③）：从 acquire 开始计，覆盖到 warmup 返回为止，跨换台重建不重置；预算只读
+// 获取预算（ADR 0052 决策 6 超时分层表 ③）：从 worker 开始准备设备起算，即 acquire 的入口，覆盖到 warmup 返回为止，跨换台重建
+// 不重置；应用目标的安装包准备（存在性检查排在入口之后、设备解析之前，预签名在会话 RUNNING 之后、newSession 之前）同样计入这个
+// 预算。安装包准备的上界是本模块对预算截止信号的等待（ADR 0051 决策 2「安装包准备的上界」）：S3 SDK 在发出请求之前先等凭据，
+// 传给 HeadObject 的信号对这一段不起作用，预签名也不接受信号，所以等待这两步（含其中的凭据与区域解析）的结果时同时等待预算的
+// 截止信号，信号一中止即停止等待，迟到的结果一律丢弃；预签名阶段到期时已建立的会话照常由释放收尾。预算只读
 // job.deviceRequest.acquireTimeoutS（ADR 0051 决策 2）。各块经 AcquireBudget 的 signal 感知到期与进入终结，本模块在每一步之后
 // 核对一次（预热返回之后也核对，预热成功也不例外）：到期的失败归 acquire_timeout（判据型的 precheck_failed 保持原归因），进入
 // 终结即停、不再向设备发命令。Appium 会话建成之后抛出的未归类异常先查一次会话状态：不是 RUNNING 归 session_lost（准备阶段的
@@ -39,10 +43,10 @@
 //
 // 设备产物（原始控件树、device-session.json）落在 `<产物根>/device/<scope 键>/` 下：产物根按 run 共享，各 scope 分目录才不互相覆盖。
 //
-// 本模块静态 import 缺省装配，WebdriverIO 与 Device Farm SDK 因此在本模块的静态加载闭包里：镜像的设备依赖冒烟只 import 本模块
-// （engines/midscene/Dockerfile），这条闭包断了冒烟就照不出依赖缺失（护栏见 surface.test.mts）。各块（经 parts.mts 的缺省装配）
-// 与本模块互相 import：各块只在函数体内读本模块导出的消息常量，本模块只在构造时经 defaultDeviceParts 调用各块，两侧模块顶层都不读
-// 对方的导出。
+// 本模块静态 import 缺省装配，WebdriverIO、Device Farm SDK 与应用启停块所用的 `@aws-sdk/s3-request-presigner` 因此在本模块的
+// 静态加载闭包里：镜像的设备依赖冒烟只 import 本模块（engines/midscene/Dockerfile），这条闭包断了冒烟就照不出依赖缺失（护栏见
+// surface.test.mts）。各块（经 parts.mts 的缺省装配）与本模块互相 import：各块只在函数体内读本模块导出的消息常量，本模块只在
+// 构造时经 defaultDeviceParts 调用各块，两侧模块顶层都不读对方的导出。
 import path from "node:path";
 import fs from "node:fs";
 import type { Agent, AgentOpt } from "@midscene/core";
@@ -51,7 +55,7 @@ import { injectDeviceNavigate } from "../worker/deterministic.steps.mjs";
 import {
   DEVICES, DeterministicAssertion, UI_KINDS, type Device, type SelectedHandler, type UiKind, type WebdriverCtx,
 } from "../worker/deterministic.mjs";
-import { errorText, oneLineError } from "../worker/error-text.mjs";
+import { errorText, oneLineError } from "../lib/error-text.mjs";
 import { scenarioKey } from "../worker/evidence.mjs";
 import { redactSecrets } from "../lib/redact.mjs";
 import {
@@ -73,11 +77,17 @@ import {
   type DeviceSessionRecord, type ScaleSource, type SessionDeviceInfo, type SessionEventSink,
 } from "./device-session.mjs";
 import { defaultDeviceParts } from "./parts.mjs";
+import { NATIVE_CONTEXT } from "./web-context.mjs";
 
 // ---- 给使用方看的消息（ADR 0039；ADR 给了原文整句的照原文）----
 
 /** 获取预算耗尽（ADR 0051 决策 4 的原文）。 */
 export const ACQUIRE_TIMEOUT_MESSAGE = "在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间";
+/** 获取预算在安装包准备（凭据与区域解析、存在性检查、预签名）期间到期：同归 acquire_timeout，消息点明到期时正在准备安装包，
+ *  与上一句同用「获取设备的等待时间」（ADR 0051 决策 2「安装包准备的上界」）。 */
+export const APP_PREPARE_TIMEOUT_MESSAGE =
+  "准备安装包时超过了获取设备的等待时间：检查存储桶里的安装包或生成安装包的下载地址没有在时限内完成，" +
+  "常见原因是网络或 AWS 凭证来源没有响应；请确认网络连接与 AWS 凭证正常后重新运行，必要时调大获取设备的等待时间";
 // 进入终结后获取期部件因中止信号返回的失败：结论不会被使用（终结路径不发 scope_done），只进 worker 日志；写明是被停止信号中断，
 // 不借预算到期那句——预算的中止信号与到期共用 expired() 判据，不区分就会把一次 SIGTERM 记成「没拿到可用设备」（真机演练实遇）。
 export const ACQUIRE_INTERRUPTED_MESSAGE = "获取被停止信号中断";
@@ -198,8 +208,8 @@ export interface RunningSession {
 /** Device Farm 会话块对本模块的面。 */
 export interface DeviceFarmSessions {
   /** 设备解析（ADR 0051 决策 3）：零候选重列一次仍为零、指定 ARN 被同步拒绝时返回 precheck_failed；全部繁忙时在预算内等待。
-   *  replacing 非 null 表示为换台重新解析，传被替换的会话。 */
-  resolve(budget: AcquireBudget, replacing: RemoteSession | null): Promise<Outcome<DeviceChoice>>;
+   *  换台时按同一规则重新解析：拒装驱动辅助包是那台设备单元的状态，同一机型的另一台单元即正常（ADR 0051 实测依据）。 */
+  resolve(budget: AcquireBudget): Promise<Outcome<DeviceChoice>>;
   /** Create：限流与机型繁忙在预算内重试，每次请求一个新尝试序号，结果未知的请求登记为待核；重试前按名找回的会话逐会话、与剩余
    *  分页并行按 Stop 规则停止（接预算的信号），这次核对返回、这些处理都结束才发下一次 Create；Create 返回 ARN 后、本调用返回之前
    *  经会话事件出口发 session_opened(created)。 */
@@ -248,7 +258,7 @@ export interface AppiumSession {
   readonly automationName: string;
   /** 会话能力对象回报的系统版本（唯一读取点在 Appium 块）；没有时为 null。 */
   readonly platformVersion: string | null;
-  /** 生命周期通道：读一次当前上下文。 */
+  /** 生命周期通道：读一次当前上下文。回报的形态认不出时为空字符串（不等于原生上下文，调用方照常切回原生）。 */
   currentContext(): Promise<string>;
   /** 生命周期通道：切回原生上下文。 */
   switchToNative(): Promise<void>;
@@ -442,7 +452,6 @@ export function createDeviceSurface(deps: SurfaceDeps, options: DeviceSurfaceOpt
 
 // ---- 实现 ----
 
-const NATIVE_CONTEXT = "NATIVE_APP";
 // setTimeout 的延时上限（约 24.8 天），会话年龄还很远时计时器取它；8880 秒的会话上限远在其内，只防无会话时的无穷大。
 const MAX_TIMER_MS = 2 ** 31 - 1;
 const RUNNING = "RUNNING";
@@ -510,6 +519,34 @@ function emptyRecord(target: { device: string; uiKind: string; appId: string | n
 
 function reasonOf(e: unknown): string {
   return oneLineError(e instanceof Error ? e.message : e);
+}
+
+/** 等待 start 给出的结果，同时等待 signal（ADR 0051 决策 2「安装包准备的上界」）：signal 先中止即返回 null，此后结果（含迟到的
+ *  拒绝）一律丢弃、不成为未处理的拒绝；signal 未中止时结果原样返回、失败原样抛出。调用时 signal 已中止则不调用 start。
+ *  只用于安装包准备：停止等待的 HeadObject 是 S3 客户端上无状态的只读请求、预签名是本地计算，不再等待它们不会阻塞之后的任何
+ *  调用，所以不属于 ADR 0052 被拒方案「探测用 `Promise.race` 放弃挂住的只读命令」所指的情形（那里的放弃解除不了同一 WebDriver
+ *  客户端上的队列阻塞）。 */
+function awaitUnlessAborted<T>(signal: AbortSignal, start: () => Promise<T>): Promise<{ value: T } | null> {
+  if (signal.aborted) return Promise.resolve(null);
+  return new Promise((resolve, reject) => {
+    const onAbort = (): void => resolve(null);
+    signal.addEventListener("abort", onAbort, { once: true });
+    const settled = (): boolean => {
+      signal.removeEventListener("abort", onAbort);
+      return signal.aborted;
+    };
+    let work: Promise<T>;
+    try {
+      work = start();
+    } catch (e) {
+      if (!settled()) reject(e);
+      return;
+    }
+    work.then(
+      (value) => { if (!settled()) resolve({ value }); },
+      (e: unknown) => { if (!settled()) reject(e); },
+    );
+  });
 }
 
 /** 断言异常：与 run-scope 判 failed 的条件逐项相同（DeterministicAssertion，或 name 为 AssertionError 的抛出物，ADR 0022）。 */
@@ -613,28 +650,30 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
   private async acquireSteps(budget: Budget): Promise<Outcome<Agent>> {
     const { sessions } = this.parts;
     const target = { device: this.cfg.device, uiKind: this.cfg.uiKind };
-    // 1. 应用目标：建会话之前做安装包的存在性检查，缺包或无权时 Create 零调用（ADR 0051 决策 9）。
-    let appLocation: AppObjectLocation | null = null;
-    let appRegion: string | null = null;
+    // 1. 应用目标：建会话之前做安装包的存在性检查，缺包或无权时 Create 零调用（ADR 0051 决策 9）。等待检查结果时同时等待预算的
+    //    截止信号（见模块头「获取预算」）：信号先中止即停下，晚到的 404 / 403 不再改判为 precheck_failed。
+    let appObject: { location: AppObjectLocation; region: string } | null = null;
     if (this.cfg.uiKind === "app") {
       const app = this.deps.job.target.app;
       if (!app || !app.bucket || !app.key || !app.appId) {
         return { ok: false, termination: { errorType: "precheck_failed", message: APP_LOCATION_MISSING_MESSAGE } };
       }
-      appLocation = { bucket: app.bucket, key: app.key };
-      const checked = await checkAppObject(this.parts.appStore, appLocation, budget.signal);
+      const location: AppObjectLocation = { bucket: app.bucket, key: app.key };
+      const head = await awaitUnlessAborted(budget.signal, () => checkAppObject(this.parts.appStore, location, budget.signal));
+      if (head === null) return this.appPreparationStopped();
+      const checked = head.value;
       if (!checked.ok) return { ok: false, termination: checked.termination };
-      appRegion = checked.region;
+      appObject = { location, region: checked.region };
       // 桶不在运行区域：预签名按桶所在区域签即可，只提示一句（本机后端的 AWS_REGION 多随模型所在区域，ADR 0051 决策 9）
       if (checked.redirected) this.deps.log(`worker: 应用桶 ${app.bucket} 在 ${checked.region}，与运行区域不同；安装包地址按桶所在区域签发`);
     }
     // 2. 解析、Create、等到 RUNNING、newSession；设备单元拒装驱动辅助包时至多换台一次（ADR 0051 决策 3）。
-    let replacing: RemoteSession | null = null;
+    let replaced = false;
     let appium: AppiumSession;
     for (;;) {
       const expired = this.expiredOutcome(budget);
       if (expired) return expired;
-      const choice = await sessions.resolve(budget, replacing);
+      const choice = await sessions.resolve(budget);
       if (!choice.ok) return choice;
       const created = await sessions.create(choice.value, budget);
       if (!created.ok) return created;
@@ -649,14 +688,21 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
       if (running.value.unit !== null && this.record.session) this.record.session.device.unit = running.value.unit;
       const afterRunning = this.expiredOutcome(budget);
       if (afterRunning) return afterRunning;
-      const appUrl = appLocation && appRegion ? await presignAppObject(this.parts.appStore, appLocation, appRegion) : null;
+      // 预签名同样与预算的截止信号同时等待：信号先中止即停下，晚到的地址不交给 newSession；这时会话已经建立，经释放收尾。
+      let appUrl: string | null = null;
+      if (appObject !== null) {
+        const { location, region } = appObject;
+        const signed = await awaitUnlessAborted(budget.signal, () => presignAppObject(this.parts.appStore, location, region));
+        if (signed === null) return this.appPreparationStopped();
+        appUrl = signed.value;
+      }
       const connected = await this.parts.appium.connect(
         { endpoint: running.value.endpoint, device: this.cfg.device, uiKind: this.cfg.uiKind, appId: this.appId, appUrl },
         budget,
       );
       if (connected.kind === "terminated") return { ok: false, termination: connected.termination };
       if (connected.kind === "replace_device") {
-        if (replacing !== null) {
+        if (replaced) {
           return { ok: false, termination: { errorType: "precheck_failed", message: HELPER_REJECTED_AGAIN_MESSAGE } };
         }
         if (budget.remainingMs() < REPLACE_DEVICE_MIN_REMAINING_MS) {
@@ -665,7 +711,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
         this.deps.log(`worker: 设备拒绝安装驱动辅助程序，换一台设备重新建立会话：${oneLineError(connected.reason)}`);
         this.record.replaced_sessions.push({ arn: created.value.arn, name: created.value.name, reason: connected.reason });
         await sessions.retire(created.value.arn);
-        replacing = created.value;
+        replaced = true;
         continue;
       }
       appium = connected.session;
@@ -736,12 +782,21 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return { errorType: "engine_error", message: ACQUIRE_INTERRUPTED_MESSAGE };
   }
 
+  /** 安装包准备的等待因预算信号中止而停下（ADR 0051 决策 2「安装包准备的上界」）：进入终结记被停止信号中断，否则是预算到期，
+   *  归 acquire_timeout 并点明到期时正在准备安装包。信号只在这两种情形下中止，所以不再按 expired() 另判。 */
+  private appPreparationStopped(): { ok: false; termination: ScopeTermination } {
+    if (this.finalizing) return { ok: false, termination: this.interruptedTermination() };
+    return { ok: false, termination: { errorType: "acquire_timeout", message: APP_PREPARE_TIMEOUT_MESSAGE } };
+  }
+
   /** 进入终结的一律记为被停止信号中断（这个结果不会被使用，只进日志；中止信号会让部件把在途调用的失败报成会话丢失或到期，与抛出路径
    *  同一次序）。其余：预算到期时非判据型的失败一律归 acquire_timeout（判据型的 precheck_failed 保持原归因；部件已确认的 session_lost
-   *  也保持——会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 4 归因表「获取预算耗尽」行）。 */
+   *  也保持——会话丢失与预算到期同时成立时，更具体的原因优先，ADR 0051 决策 4 归因表「获取预算耗尽」行）；已是 acquire_timeout 的
+   *  保持原消息（安装包准备阶段到期的那句点明了到期时在做什么）。 */
   private budgetAware(termination: ScopeTermination, budget: Budget): ScopeTermination {
     if (this.finalizing) return this.interruptedTermination();
     if (termination.errorType === "precheck_failed" || termination.errorType === "session_lost") return termination;
+    if (termination.errorType === "acquire_timeout") return termination;
     if (budget.expired()) return { errorType: "acquire_timeout", message: ACQUIRE_TIMEOUT_MESSAGE };
     return termination;
   }

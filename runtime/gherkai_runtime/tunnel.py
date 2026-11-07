@@ -217,7 +217,7 @@ class NgrokTunnel:
         try:
             # start_new_session=True（setsid）让 agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
             # （ADR 0035 决策 3 三形态宿主 + stop_tunnel(pid)），不该由终端的信号转发决定。否则 submit 时
-            # CLI 收 SIGINT/SIGHUP 会连坐杀掉「还要交棒给后台宿主」的 agent（local 交 per-run 进程、cloud 交
+            # CLI 收 SIGINT/SIGHUP 会连带杀掉「还要交棒给后台宿主」的 agent（local 交 per-run 进程、cloud 交
             # 守护进程，两个宿主本身也都 setsid）。前台 run 的拆除方式不变：CLI 进程退出时由 atexit 拆（决策 3 表格
             # 「有意选 atexit 而非 finally」）。执行期间的 Ctrl-C 由 CLI 的中断处理器置标志，协作停止后 run 照常返回、再退出；
             # 执行期之外的 Ctrl-C 以 KeyboardInterrupt 结束进程；两条路径都经过 atexit。agent 只是不再额外收到终端广播的 SIGINT。

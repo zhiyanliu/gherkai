@@ -122,7 +122,7 @@ def test_cloud_launcher_calls_start_scope():
         def start_scope(self, job): self.started.append(job.scope_id); return "arn:task/x"
 
     eng = FakeEngine()
-    CloudLauncher(lambda name: eng).launch(_job("a"))
+    CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a"))
     assert eng.started == ["a"]
 
 
@@ -206,6 +206,22 @@ def test_cloud_launcher_arm_failure_does_not_block_launch():
     assert eng.started == ["a"]  # launch 完成、异常被兜（日志降级）
 
 
+def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog):
+    """run_id 是必给参数（漏传在构造时就报 TypeError）；「后端未启用定时能力」的降级日志只对应 timeout_watch 为 None
+    （旧部署）这一种情形，task 照常起。"""
+    import logging
+    import pytest
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
+
+    with pytest.raises(TypeError, match="run_id"):
+        CloudLauncher(lambda name: _FakeStartEngine())
+    eng = _FakeStartEngine()
+    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.cloud_launcher"):
+        CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a", timeout_s=60.0))
+    assert eng.started == ["a"]
+    assert any("后端未启用定时能力" in r.getMessage() for r in caplog.records), caplog.records
+
+
 # ---------- reconcile.tick 用 DDB 后端（与 local 对拍）----------
 
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
@@ -223,7 +239,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
         def __init__(self): self.started = []
         def start_scope(self, job): self.started.append(job.scope_id)
     eng = FakeEngine()
-    launcher = CloudLauncher(lambda name: eng)
+    launcher = CloudLauncher(lambda name: eng, run_id="run-1")
 
     # tick1：起 a（CAS claim + launch）
     tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t1")

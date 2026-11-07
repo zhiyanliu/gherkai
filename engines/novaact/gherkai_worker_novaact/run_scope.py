@@ -45,6 +45,7 @@ import io
 import json
 import math
 import os
+import re
 import signal
 import sys
 import threading
@@ -52,6 +53,12 @@ import threading
 from nova_act import NovaAct, BOOL_SCHEMA, Workflow
 from bedrock_agentcore.tools.browser_client import BrowserClient  # 会话的 Start / Stop 由 worker 自己持有（ADR 0028「会话泄漏防护」）
 from nova_act.types.workflow import set_current_workflow, get_current_workflow
+from nova_act.types.act_errors import ActGuardrailsError, ActStateGuardrailError, ActTimeoutError  # act 异常归类（_classify_act_error）
+# 网络瞬时故障的判定类型（_is_transient_network 与 _is_transient_client_error，ADR 0028）：botocore 随 boto3 必装，urllib3 是 botocore 的依赖
+from botocore.exceptions import (
+    ClientError, ConnectionClosedError, ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError,
+)
+from urllib3.exceptions import ProtocolError
 
 from gherkai_worker_novaact.lib.workflow_setup import ensure_workflow_definition
 from gherkai_worker_novaact.lib.constants import MODEL_ID, WORKFLOW_DEF, NOVA_GRACE_MARGIN_S, SESSION_STOP_BUDGET_S  # 共享常量（单一真理源）
@@ -75,7 +82,7 @@ from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据
 from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, load_user_steps
 
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前用错 region。**正常路径由组合根落实**——
-# compose.resolve_region 按其解析链（含项目配置文件层，见该函数 docstring，ADR 0053 决策 2）落实成具体字符串、经 AWS_REGION
+# 它按 region 的解析链（ADR 0016 决策 C，配置文件那一层见 ADR 0053 决策 2）把值定成具体字符串、经 AWS_REGION
 # env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
 # 尤其 AgentCore 那条路径（下方 _BrowserSession 里 bedrock-agentcore 的 BrowserClient）构造时的 validate_region
 # **不读 profile config、要显式字符串**，region=None 起会话直接失败（bedrock-agentcore 1.22.0 抛 InvalidRegionError，
@@ -96,7 +103,7 @@ ACT_TIMEOUT_S = int(os.environ.get("NOVA_ACT_TIMEOUT_S", "120"))  # SDK 允许 [
 
 # 产物上传器（ADR 0029 第一期）：从组合根注入的 env（ARTIFACT_S3_BUCKET/PREFIX）造——cloud 时上传 S3+删本地+
 # 报 s3://，local/未注入时 no-op 报 file://。**惰性单例**（非 import 期构造）：from_env 对「半注入」fail-loud
-# （ADR 0033），若在 import 期炸则零事件、连诊断都发不出（且测试收集期即崩）——推迟到首次使用（step 事件流
+# （ADR 0033），若在 import 期抛异常则零事件、连诊断都发不出（且测试收集期即崩）——推迟到首次使用（step 事件流
 # 的 try 内），装配矛盾以 error 事件可见。worker 单进程单 run，单例语义不变。
 _uploader_singleton: ArtifactUploader | None = None
 
@@ -301,7 +308,7 @@ def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) 
     if not step_traj:
         return
     try:
-        _presend_act_siblings(step_traj)  # act 边界提前上传配套 json（ADR 0029，为 Fargate 预演）
+        _presend_act_siblings(step_traj)  # act 边界提前上传配套 json（ADR 0029）
         ev["reportRefs"] = _traj_refs(step_traj)  # step 级 trajectory（ADR 0027 下沉）
     except Exception:  # noqa: BLE001
         if not protect_emit:
@@ -310,7 +317,7 @@ def _attach_traj_refs(ev: dict, step_traj: list, *, protect_emit: bool = False) 
 
 
 def _presend_act_siblings(step_traj: list[str]) -> None:
-    """act 边界的安全点提前上传（ADR 0029 上传时机第三级，为 Fargate 预演）：在 step_done 安全点，把本 step 各 act 的
+    """act 边界的安全点提前上传（ADR 0029 上传时机第三级）：在 step_done 安全点，把本 step 各 act 的
     配套 `_trajectory.json`（数据文件，非 reportRef 指向的 .html）也提前传走，**不等 scope 末 flush**。
 
     否则中断落在 flush 前时这些 json 随容器盘销毁而丢（Fargate；subprocess 下留本地盘、非真丢）。
@@ -995,6 +1002,10 @@ import ssl
 # 网络专用退出码（ADR 0028）：与 core/gherkai_core/wire.py 的 EX_WORKER_NETWORK 同值（协议层单一事实源，两 Engine adapter 共用翻译）。
 EX_WORKER_NETWORK = 80
 
+# match 查询入口拒绝输入时的退出码（ADR 0036 决策 4）：与 steps 加载失败同为「还没开始执行就被拒」的通用非 0（取值理由见
+# user_steps.EX_STEPS_LOAD 的注释）；组合根只看是否非 0（WorkerSelfDescribeError），不按取值分支。
+EX_MATCH_INPUT = EX_STEPS_LOAD
+
 # 建连重试参数（ADR 0028）：仅裹幂等的建连段，act 永不重试。退避手写（不用 botocore 内部 retry，
 # 否则 SIGTERM 穿不透）；总退避预算 ~3.5s < schedule 默认 grace 5s。
 _CONNECT_ATTEMPTS = 4
@@ -1032,10 +1043,6 @@ _BOTO_TRANSIENT_STATUS = frozenset({500, 502, 503, 504})
 
 def _is_transient_client_error(e: BaseException) -> bool:
     """boto ClientError 是否服务端瞬时（按错误码/HTTP 状态码细分，ADR 0028）。非 ClientError 返回 False。"""
-    try:
-        from botocore.exceptions import ClientError
-    except ImportError:
-        return False
     if not isinstance(e, ClientError):
         return False
     resp = getattr(e, "response", None) or {}
@@ -1065,19 +1072,10 @@ def _is_transient_network(e: BaseException, *, connecting: bool = False) -> bool
     （网络断/会话正常关/浏览器真崩同报一句），**只在建连阶段认**（scope_started 未 emit、act 无副作用、重试安全，
     是已有重试域的物理边界）；act 中途（connecting=False）不认，守“拿不准→不归 network”铁律。
     """
-    transient: tuple[type[BaseException], ...] = (ssl.SSLError, ConnectionError, TimeoutError, socket.timeout)
-    try:
-        from botocore.exceptions import (
-            EndpointConnectionError, ConnectionClosedError, ConnectTimeoutError, ReadTimeoutError,
-        )
-        transient += (EndpointConnectionError, ConnectionClosedError, ConnectTimeoutError, ReadTimeoutError)
-    except ImportError:
-        pass
-    try:
-        from urllib3.exceptions import ProtocolError
-        transient += (ProtocolError,)
-    except ImportError:
-        pass
+    transient: tuple[type[BaseException], ...] = (
+        ssl.SSLError, ConnectionError, TimeoutError, socket.timeout,
+        EndpointConnectionError, ConnectionClosedError, ConnectTimeoutError, ReadTimeoutError, ProtocolError,
+    )
     _pw_closed_by_name = False
     if connecting:  # 建连阶段额外认 Playwright 连接被关（下游症状，见 docstring）
         # 精确匹配 TargetClosedError（不用其基类 Error——那会把参数错/协议错等永久错也当瞬时，违背不宽兜底）。
@@ -1113,19 +1111,33 @@ def _error_text(e: BaseException) -> str:
 
     Nova SDK 异常的 str() 是多行 repr（`ActTimeoutError(\n message = …\n metadata = ActMetadata(…)\n)` 再拖一段
     反馈链接），整段进 message 会把 run 文本 / explain / jobs json 的「原因」撑成十几行——实际运行暴露。SDK 异常带
-    `.message`（一句可读的错误说明），优先取它；没有则取 str() 的首个非空行。折叠空白、封顶 300 字：message 是一句原因、
+    `.message`（一句可读的错误说明），按 `_one_line` 处理后不是空串时取它，否则取 str() 按同一规则压成的一行。message 是一句原因、
     不是堆栈，完整对象在 worker 日志里。
     """
     msg = getattr(e, "message", None)
-    first = _one_line(msg if isinstance(msg, str) and msg.strip() else str(e))
+    first = (_one_line(msg) if isinstance(msg, str) else "") or _one_line(str(e))
     return f"{type(e).__name__}: {first}" if first else type(e).__name__
 
 
-def _one_line(text: str) -> str:
-    """多行文本 → 一行有界原因（首个非空行、折叠空白、先脱敏再封顶 300 字）；`_error_text` 与注册表层面的 error 消息共用。"""
-    first = next((ln.strip() for ln in text.splitlines() if ln.strip()), "")
-    first = redact_secrets(" ".join(first.split()))  # 先脱敏再截断：截在 userinfo 中间会丢掉 `@`、让出口处的规则失效（ADR 0035 决策 5）
-    return first[:300]
+# 一行化规则的空白字符集 W（ADR 0042 决策一「一行化规则」）：Python isspace 集合与 JS `\s` 集合之并，与 Midscene
+# lib/error-text.mts 的字符类逐字相同。行与空白都不用语言缺省：splitlines 多认 U+000B、U+0085、U+2028 等作行分隔，
+# isspace 与 JS 的 `\s` 各有对方没有的字符，按缺省写的两侧对同一段文本给出不同的一行。
+_ONE_LINE_W = r"[\x09-\x0d\x1c-\x20\x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+_ONE_LINE_BREAK = re.compile(r"\r\n|\r|\n")
+_ONE_LINE_W_RUN = re.compile(_ONE_LINE_W + "+")
+_ONE_LINE_W_ONLY = re.compile(_ONE_LINE_W + "*")
+
+
+def _one_line(text: str, limit: int = 300) -> str:
+    """多行文本 → 一行有界原因；`_error_text` 与注册表层面的 error 消息共用（ADR 0042 决策一「一行化规则」四步）。
+
+    分行只认 CR、LF 与 CRLF；取首个含 W 以外字符的行，没有则为空串；行内 W 的连续段折成一个空格、只去首尾的空格；
+    先脱敏再按码点取前 `limit` 个，截断恰在词间空格之后时去掉末尾的空格。
+    """
+    first = next((ln for ln in _ONE_LINE_BREAK.split(text) if not _ONE_LINE_W_ONLY.fullmatch(ln)), "")
+    first = redact_secrets(_ONE_LINE_W_RUN.sub(" ", first).strip(" "))  # 先脱敏再截断：截在 userinfo 中间会丢掉 `@`、让出口处的规则失效（ADR 0035 决策 5）
+    first = first[:limit]
+    return first[:-1] if first.endswith(" ") else first
 
 
 def _classify_act_error(e: BaseException) -> str:
@@ -1136,17 +1148,9 @@ def _classify_act_error(e: BaseException) -> str:
     便于排查与未来按类型处置（ADR 0024「errorType 已实现但粗粒度，留待细化」的兑现）。"""
     if _is_transient_network(e):
         return "network_error"
-    try:
-        from nova_act.types.act_errors import (
-            ActTimeoutError, ActGuardrailsError, ActStateGuardrailError,
-        )
-        timeout_types: tuple[type[BaseException], ...] = (ActTimeoutError,)
-        guardrail_types: tuple[type[BaseException], ...] = (ActGuardrailsError, ActStateGuardrailError)
-    except ImportError:
-        return "engine_error"
-    if isinstance(e, timeout_types):
+    if isinstance(e, ActTimeoutError):
         return "timeout"
-    if isinstance(e, guardrail_types):
+    if isinstance(e, (ActGuardrailsError, ActStateGuardrailError)):
         return "guardrail"
     return "engine_error"  # 其余执行故障（含未细分的 ActError 子类）仍归 engine_error
 
@@ -1194,7 +1198,7 @@ def main() -> int:
     # 位置是**契约的一部分**：先于下面任何一条路径（job 模式 / 两个非 job 入口 --capabilities 自述 /
     # --match-steps 查询），故自述报的注册表与实际运行派发用的是同一张表（ADR 0036「真值单一」不因定制而破）；
     # `--capabilities` 同样在这之后，故 steps 加载失败在它上面也 fail-loud（ADR 0037 决策 4）。
-    # worker 只认 env、不解析约定（`--steps-dir` / 默认 `./steps` / 写进 definition 全在组合根）。
+    # worker 只认 env、不解析约定（目录取哪个值、写进 definition 全在组合根，见 `user_steps` 模块文档）。
     # 加载失败 fail-loud（绝不静默跳过——跳过意味着把确定性 step 静默换成 AI catch-all、run 可能假「通过」）。
     steps_dir = os.environ.get("GHERKAI_STEPS_DIR")
     try:
@@ -1207,12 +1211,17 @@ def main() -> int:
         # 「写了 steps 却全走 AI」的头号原因是目录没被注入，没这行使用方分不清是没读到还是没命中。
         log(f"worker: 已加载使用方 steps {len(loaded)} 个文件（{steps_dir}）")
 
-    # 批量 match 查询（ADR 0036「4.」，plan 命中标注）：stdin 是一个 JSON 数组（读到 EOF 为止），每项为 `{keyword, text}`；
-    # 旧版命令行工具传的裸字符串也接受，此时不核对关键字。stdout 输出逐条命中结果。匹配语义留在 worker（CLI 零复刻）；
-    # 不建会话、零 AWS。
+    # 批量 match 查询（ADR 0036「4.」，plan 命中标注）：stdin 是一个 JSON 数组（读到 EOF 为止），每项为 `{keyword, text}`
+    # （keyword 为 null 时不核对关键字）。stdout 输出逐条命中结果。匹配语义留在 worker（CLI 零复刻）；不建会话、零 AWS。
+    # 输入不是 JSON（含非 UTF-8 字节）或条目形状不合，都是命令行工具与 worker 版本不一致的信号：在这里显式捕获、stderr 写
+    # 一句产品语言并以非零退出、stdout 不出结果——不交给上面的 excepthook（那条出口会写出回溯）。
     if "--match-steps" in sys.argv:
-        items = json.loads(sys.stdin.read())
-        print(json.dumps(_deterministic.match_batch(items), ensure_ascii=False))
+        try:
+            probes = _deterministic.match_batch(json.loads(sys.stdin.read()))
+        except (UnicodeDecodeError, json.JSONDecodeError, _deterministic.MatchInputError):
+            log(f"worker: {_deterministic.MATCH_INPUT_MISMATCH}")
+            return EX_MATCH_INPUT
+        print(json.dumps(probes, ensure_ascii=False))
         return 0
     # 引擎能力自述（ADR 0036「5.」，唯一的自述入口）：不建会话、不读 stdin、零费用。确定性清单是本对象的
     # `deterministic_steps` 键，**没有 `--list-deterministic` 别名**（加键不加入口，见 ADR 0036「5.」）——
@@ -1236,7 +1245,7 @@ def main() -> int:
         return 0  # 读 job 期间已收到停止信号（对齐 _run_session 顶的检查）：零事件、正常退出，core 判 error 不误归因
     sink = EventSink.from_env()  # main 级单例（对称 _uploader）；作参数注入 _run_scenario/_run_step
     # 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
-    # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（worker 不按 timeoutS 计时、不自停；除这里的
+    # 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与 job 墙钟预算（worker 不按 timeoutS 计时、不自停；除这里的
     # 自检外，它只用来设定浏览器会话的存活上限，见 browser_session_timeout_s）。别的版本写出的 job 行连 scope / scenarios 的
     # 形状都不保证，先取它们会把「版本不一致」变成一个 KeyError。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发
     # scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此

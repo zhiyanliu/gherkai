@@ -12,6 +12,8 @@ import {
   registerBuiltin,
   match,
   matchBatch,
+  MatchInputError,
+  MATCH_INPUT_MISMATCH,
   selectHandler,
   _clear,
   _snapshot,
@@ -98,21 +100,40 @@ test("match 在命中后核对关键字：不符 → DeterministicKeywordMismatc
     && e.pattern === "仅给定" && JSON.stringify(e.keywords) === JSON.stringify(["Given"]));
 });
 
-test("matchBatch 的每项可带关键字：命中但不符 → keyword_mismatch；裸字符串不核对", () => {
+test("matchBatch 的每项是 {keyword, text}：命中但不符 → keyword_mismatch；keyword 为 null 不核对", () => {
   deterministic("仅给定", () => {}, { description: "x", example: "y", keywords: ["Given"] });
   const got = matchBatch([{ keyword: "Given", text: "仅给定" }, { keyword: "Then", text: "仅给定" },
-    { keyword: "Then", text: "没命中" }, "仅给定"]);
+    { keyword: "Then", text: "没命中" }, { keyword: null, text: "仅给定" }]);
   assert.deepEqual(got[0], { pattern: "仅给定", description: "x" });
   assert.deepEqual(got[1], { keyword_mismatch: "仅给定", keywords: ["Given"] });
   assert.equal(got[2], null);
   assert.deepEqual(got[3], { pattern: "仅给定", description: "x" });
 });
 
+test("matchBatch 只接受 {keyword, text} 对象（ADR 0036 决策 4）：任一处不合即整批抛 MatchInputError，消息是版本不一致那一句", () => {
+  deterministic("仅给定", () => {}, { description: "x", example: "y", keywords: ["Given"] });
+  const bad: unknown[] = [
+    ["仅给定"],                                                // 裸字符串（1.4 命令行工具的形态）
+    [{ keyword: "Given", text: "仅给定" }, "仅给定"],          // 混在合法条目之后：整批拒绝、不出部分结果
+    [{ text: "仅给定" }],                                      // 缺 keyword 键（null 才表示不核对）
+    [{ keyword: "Given" }],                                    // 缺 text 键
+    [{ keyword: "Given", text: 1 }],                           // text 不是字符串
+    [{ keyword: 1, text: "仅给定" }],                          // keyword 既不是字符串也不是 null
+    [null], [["Given", "仅给定"]],                              // 条目不是对象
+    { keyword: "Given", text: "仅给定" },                      // 不是数组
+  ];
+  for (const items of bad) {
+    assert.throws(() => matchBatch(items), (e: unknown) =>
+      e instanceof MatchInputError && e.message === MATCH_INPUT_MISMATCH && /命令行工具与 worker 的版本不一致，请把两者装成同一版本/.test(e.message),
+      JSON.stringify(items));
+  }
+});
+
 
 test("matchBatch：命中/未命中/冲突结构化返回（ADR 0036 决策 4，冲突不抛）", () => {
   deterministic('页面地址匹配 "(?<p>[^"]+)"', () => {}, { description: "断言 URL", example: "Then …" });
   deterministic("地址(?<a>.+)", () => {}, { description: "x", example: "y" });
-  const got = matchBatch(['页面地址匹配 "x"', "无关文本", "地址什么的"]);
+  const got = matchBatch(['页面地址匹配 "x"', "无关文本", "地址什么的"].map((text) => ({ keyword: null, text })));
   assert.deepEqual(got[0], { conflict: ['页面地址匹配 "(?<p>[^"]+)"', "地址(?<a>.+)"] });
   assert.equal(got[1], null);
   assert.deepEqual(got[2], { pattern: "地址(?<a>.+)", description: "x" });
@@ -137,7 +158,7 @@ test("注册表语义的跨语言对拍：同一组注册输入，清单的 keyw
   const reg = JSON.parse(fs.readFileSync(file, "utf8")).registry as {
     entries: Array<{ pattern: string; description: string; example: string; keywords?: Keyword[] }>;
     expected_keywords: string[][];
-    probes: Array<{ keyword?: string; text: string; expect: unknown }>;
+    probes: Array<{ keyword: string | null; text: string; expect: unknown }>;
   };
   const sub = (v: unknown): unknown => {
     if (typeof v === "string") return v === "<NAV>" ? ADDRESS_PATTERN : v.replace(/\(\?P</g, "(?<");
@@ -151,8 +172,8 @@ test("注册表语义的跨语言对拍：同一组注册输入，清单的 keyw
   }
   assert.deepEqual(listRegistry().map((e) => e.keywords), reg.expected_keywords);
   for (const p of reg.probes) {
-    const item = "keyword" in p ? { keyword: p.keyword, text: p.text } : p.text;
-    assert.deepEqual(matchBatch([item]), [sub(p.expect)], JSON.stringify(p));
+    assert.ok("keyword" in p, `探针须带 keyword 键（可为 null）：${JSON.stringify(p)}`);
+    assert.deepEqual(matchBatch([{ keyword: p.keyword, text: p.text }]), [sub(p.expect)], JSON.stringify(p));
   }
 });
 

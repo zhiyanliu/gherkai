@@ -70,8 +70,8 @@ def test_from_env_falls_back_to_stdout_on_bad_fd_number(monkeypatch, capsys):
 
 
 def test_ddb_state_putitem(monkeypatch):
-    # DDB 态（Fargate 化，ADR 0024）：注入 EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID → emit = PutItem(PK=run_id#scope_id,
-    # SK=自增 seq, body=json line)。mock DDB Table（MagicMock，不加 moto 依赖——对称 test_artifact_upload.py 惯例）。
+    # DDB 态（Fargate 化，ADR 0024）：注入 EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 后，每次 emit 执行一次
+    # `PutItem(PK=run_id#scope_id, SK=自增 seq, body=json line)`。mock DDB Table（MagicMock，不加 moto 依赖——对称 test_artifact_upload.py 惯例）。
     from unittest.mock import MagicMock
 
     monkeypatch.setenv("EVENTS_DDB_TABLE", "ev")
@@ -83,7 +83,7 @@ def test_ddb_state_putitem(monkeypatch):
     sink.emit({"type": "scope_started", "scopeId": "browse"})
     sink.emit({"type": "scope_done", "scopeId": "browse"})
     items = [c.kwargs["Item"] for c in fake_table.put_item.call_args_list]
-    # 两条、PK=run_id#scope_id、SK 自增 1/2、body 是原样 json line
+    # 两条、PK 为 run_id#scope_id、SK 依次为 1 与 2、body 是原样 JSON 行
     assert [it["pk"] for it in items] == ["run-1#browse", "run-1#browse"]
     assert [it["seq"] for it in items] == [1, 2]
     assert json.loads(items[0]["body"])["type"] == "scope_started"
@@ -98,7 +98,7 @@ def test_ddb_state_putitem(monkeypatch):
 def test_ddb_state_binds_target_table_name(monkeypatch):
     # env→目标表接线（对称 Midscene event-sink.test.ts 断言 TableName=='ev'）：EVENTS_DDB_TABLE 必须真被用作
     # .Table(name) 的目标。上一条测试绕过了 _ddb()（直塞 _client），故表名接线无覆盖——若 _ddb() 绑错表名/读错
-    # env 仍会绿、只有真实运行才炸。这里 mock boto3.resource 让真 _ddb() 执行一遍、断言 .Table 以 "ev" 调用。
+    # env 仍会绿、只有真实运行时才暴露。这里 mock boto3.resource 让真 _ddb() 执行一遍、断言 .Table 以 "ev" 调用。
     import boto3
     from unittest.mock import MagicMock
 

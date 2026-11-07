@@ -10,6 +10,8 @@ ResultStore（JobResult）的落盘都复用这里，不各写一份（避免漂
 （无序 header 表、tuple 只是 frozen 载体）：写端按键排序 + 空表当 None，故往返保 mapping 恒等、键序落定字典序；
 会话记录的 `release`：写端把 None（没收到 session_closed）归为 unconfirmed（契约只列 confirmed / unconfirmed），
 故 release 为 None 的 SessionRecord 往返后为 unconfirmed，`confirmed` 判定不变。
+Job 的往返只对 definition 形态成立：`job_from_dict` 读时恒做结构校验（ADR 0048 决策 3），plan 形态的非桌面 Job
+（没有设备请求、应用条目只有别名与包名）只经 `job_to_dict` 写出（`plan --json`），不读回，读到即按定义违约拒绝。
 
 注：worker 协议的 Job 序列化在 wire.py（单向 Job→JSON 喂 worker，协议形状）；这里的 Job↔dict 是
 **双向持久化**（RunMeta 落盘要能读回完整 Job），用途不同、各自一份、各自被 round-trip 测护。
@@ -136,9 +138,9 @@ def job_to_dict(job: Job) -> dict:
     }
 
 
-def job_from_dict(d: dict, *, validate: bool = True) -> Job:
-    """dict → Job（键集固定，缺任一键即定义违约）。validate=True 时按 ADR 0048 决策 3 做推进器读 definition 时的那次结构校验
-    （违约抛 DefinitionContractError）；plan 形态或测试夹具可传 False。"""
+def job_from_dict(d: dict) -> Job:
+    """dict → Job（键集固定，缺任一键即定义违约）。读完恒按 ADR 0048 决策 3 做推进器读 definition 时的那次结构校验
+    （违约抛 DefinitionContractError）；只读完整的 definition 形态，plan 形态的非桌面 Job 通不过这次校验。"""
     job = Job(
         scope_id=_require(d, "scope_id", "job"),
         scope_name=_require(d, "scope_name", "job"),
@@ -149,9 +151,8 @@ def job_from_dict(d: dict, *, validate: bool = True) -> Job:
         target=_target_from_dict(_require(d, "target", "job")),
         device_request=_device_request_from_dict(_require(d, "device_request", "job")),
     )
-    if validate:
-        from gherkai_core.target import validate_job_definition  # 读时校验（ADR 0048 决策 3）；延迟导入避免 model/serialize 环
-        validate_job_definition(job)
+    from gherkai_core.target import validate_job_definition  # 读时校验（ADR 0048 决策 3）；延迟导入避免 model/serialize 环
+    validate_job_definition(job)
     return job
 
 
@@ -345,9 +346,11 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
                         duration_ms=st.get("duration_ms"),
                         votes=_votes_from_dict(st.get("votes")),
                         error_type=st.get("error_type"),
-                        message=st.get("message"),  # 向后兼容：ADR 0042 之前的落盘无此键 → None
-                        report_refs=tuple(_ref_from_dict(r) for r in st.get("report_refs", [])),  # 向后兼容：旧落盘无此键
-                        shortcircuited=st.get("shortcircuited", False),  # 向后兼容：旧落盘无此键 → 默认 False（ADR 0031）
+                        # 下面三个明细键缺键时各取 StepResult 的内存默认值（ADR 0031 决定六「判定结果读端对三个明细键的缺省」条）：
+                        # 判定结果不走 definition 的固定键集规则，缺键只表示这一步没有这项明细、不改变判定；index 与 status 缺键即读失败
+                        message=st.get("message"),  # step 级失败原因原文（ADR 0042 决策三），缺键取 None
+                        report_refs=tuple(_ref_from_dict(r) for r in st.get("report_refs", [])),  # step 级产物，缺键按空列表读
+                        shortcircuited=st.get("shortcircuited", False),  # scope 内短路标记，缺键取 False
                     )
                     for st in s.get("steps", [])
                 ],
@@ -361,7 +364,8 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
         report_refs=tuple(_ref_from_dict(r) for r in d.get("report_refs", [])),
         error_type=d.get("error_type"),
         message=d.get("message"),
-        # 会话记录与计量（ADR 0051 决策 4、7）：缺键（旧落盘、没有会话记录的桌面 job）→ 空列表与 None；带会话记录的桌面 job 只有 sessions
+        # 会话记录与计量（ADR 0051 决策 4、7）：写端按 `_device_keys` 的出现条件省键，读端缺键取空列表与 None；
+        # 没有会话记录的桌面 job 三个键都不出现，带会话记录的桌面 job 只出现 sessions
         sessions=[_session_from_dict(s) for s in d.get("sessions", [])],
         device_observed_s=d.get("device_observed_s"),
         device_observed_missing=d.get("device_observed_missing"),

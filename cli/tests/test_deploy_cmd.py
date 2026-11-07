@@ -106,7 +106,7 @@ def test_unknown_provider_name_lists_installed(monkeypatch, capsys):
 
 
 def test_provider_load_failure_is_named_not_traceback(monkeypatch, capsys):
-    """provider 装了但加载炸（半装/版本不匹配）→ 以退出码 2 结束并点名 entry point，不让 traceback 裸奔。
+    """provider 装了但加载失败（半装/版本不匹配）→ 以退出码 2 结束并点名 entry point，不直接输出 traceback。
 
     「装了但不可用」与「没装」是两种处境、措辞必须分开（前者不该被劝去 `pip install`）。
     """
@@ -255,9 +255,9 @@ def test_destroy_description_lists_what_survives_and_how_to_remove_the_device_fa
 def test_cli_does_not_import_aws_cdk(monkeypatch):
     """**前端不 import `aws_cdk`**（jsii 绑定，import 即起 node 子进程，ADR 0037 决策 6）。
 
-    做法是往 `sys.modules` 塞毒（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
+    做法是往 `sys.modules` 放一个毒化条目（值为 `None` 时 `import aws_cdk` 立即 ImportError），**不是**事后断言
     `"aws_cdk" not in sys.modules`——后者依赖「本 session 没有别的测试 import 过它」，而 provider 包自己的
-    CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。塞毒与顺序无关：前端真去 import 就炸。
+    CDK 合成测试就会 import 它，运行全量时那种断言会因执行顺序假失败。毒化条目与执行顺序无关：前端一旦真的 import 它就失败。
     只测前端这半边（provider 被 stub）：真 provider 的 import 面由它自己守（其模块头写明了同一条）。
     """
     monkeypatch.setitem(sys.modules, "aws_cdk", None)
@@ -306,7 +306,7 @@ def test_readonly_flags_cannot_be_combined_with_a_provider_subverb(monkeypatch, 
 
 
 def test_provider_init_failure_is_named_not_traceback(monkeypatch, capsys):
-    """entry point 指向类、但实例化炸（provider 的 __init__ 依赖缺失）→ 同「装了但不可用」的诊断，不裸奔 traceback。"""
+    """entry point 指向类、但实例化失败（provider 的 __init__ 依赖缺失）→ 同「装了但不可用」的诊断，不直接输出 traceback。"""
 
     class _Broken(_StubProvider):
         def __init__(self):

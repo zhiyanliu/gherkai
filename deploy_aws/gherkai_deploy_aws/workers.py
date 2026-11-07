@@ -466,7 +466,7 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
         for rev in revisions:
             retired_at, reason = rev.retired_at, "已退休"
             if retired_at is not None and rev.arn in referenced_by_ssm:
-                # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 共用），
+                # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 或另一版本共用），
                 # 删了就让那条映射悬空——留着，直到映射也不再引用。**前置条件之一，与运行中 run 引用并列。**
                 kept.append((rev.arn, "已退休，但仍被某个 worker-image 映射引用"))
                 continue
@@ -665,11 +665,11 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         out(f"{engine}/{variant}：映射已是（当前模板，本 digest）→ 跳过注册，沿用 {_short_arn(mapping.revision_arn)}")
         return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
                            revision_arn=mapping.revision_arn)
-    reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant,
+    reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant, version=version,
                            template_arn=template_arn, digest=digest)
     if reuse is not None:
         revision_arn = reuse
-        out(f"{engine}/{variant}：family 里已有本 variant 同（模板，digest）且未退休的 revision "
+        out(f"{engine}/{variant}：family 里已有本版本、本 variant 同（模板，digest）且未退休的 revision "
             f"{_short_arn(revision_arn)} → 复用（上次中断在注册与写 SSM 之间留下的孤儿）")
     else:
         # 步 6：从模板注册新 revision（镜像栏按 digest 引用）
@@ -690,20 +690,28 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
                        revision_arn=revision_arn)
 
 
-def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, template_arn: str, digest: str) -> str | None:
+def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, version: str, template_arn: str,
+                   digest: str) -> str | None:
     """push 路径的孤儿复用（ADR 0038 步 5）：现扫一次 family，判据见 `_pick_reusable`。"""
     return _pick_reusable(scan_family(ecs, names.task_def_name(prefix, engine)),
-                          variant=variant, template_arn=template_arn, digest=digest)
+                          variant=variant, version=version, template_arn=template_arn, digest=digest)
 
 
-def _pick_reusable(revisions, *, variant: str, template_arn: str, digest: str) -> str | None:
-    """`revisions`（`scan_family` 的结果，均为 ACTIVE）里有没有**本 variant** 同（模板 ARN、digest）、**未退休**的
-    revision → 其 ARN。push-worker 步 5 与 deploy 重派生共用这一份判据，免得两套写法漂移。
+def _pick_reusable(revisions, *, variant: str, version: str, template_arn: str, digest: str) -> str | None:
+    """`revisions`（`scan_family` 的结果，均为 ACTIVE）里有没有**本版本、本 variant** 同（模板 ARN、digest）、
+    **未退休**的 revision → 其 ARN。push-worker 步 5 与 deploy 重派生共用这一份判据，免得两套写法漂移；
+    `version` 是本次的 CLI 版本，与注册时写进 `gherkai:version` 的是同一个值。
 
-    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。实际运行踩过：
+    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。实际运行中遇到过：
     variant B 推的镜像 digest 恰与 A 相同，复用了 A 正在用的 revision → 之后 A 换 digest 重推会把它退休、
     满静默期被清理，B 的映射悬空。每个 variant 自己一个 revision（ECR 层共享、多一条 task-def 而已），
     退休与清理才能按 variant 独立判。
+    **限定同版本**（同一理由推广到每个（版本，variant）一个 revision）：模板与版本无关（镜像栏是 `:latest` 占位、
+    没有版本 env），升级后模板没改时模板 ARN 不变，新版本推同一份镜像就与旧版本同名 variant 的（模板 ARN、digest）
+    一致；不比版本会复用旧版本映射着的 revision，两个版本的映射共用它。之后任一方替换映射把它退休，另一版本的
+    映射仍引用它，清理 pass 因映射引用这一条一直留着它，`list-workers` 却列为待清理。同一版本下中断后重新执行时，
+    孤儿带的版本与本次相同，这一条不影响那种复用。它只阻止新产生的共用：映射已指向共用 revision 且二元组一致时，
+    `_push_one` 在调用本判据之前就跳过注册，已有的共用不在这里拆开。
     为何不复用已退休的：退休 tag 说的是「有人决定它下岗」，复用它等于把它从清理 pass 手里抢回来、语义混乱；
     重新注册一个干净的 revision 更便宜（ECR 镜像层一个字节不动）。
     """
@@ -711,6 +719,7 @@ def _pick_reusable(revisions, *, variant: str, template_arn: str, digest: str) -
         if (rev.tags.get(names.TAG_TEMPLATE) == template_arn
                 and rev.tags.get(names.TAG_DIGEST) == digest
                 and rev.tags.get(names.TAG_VARIANT) == variant
+                and rev.tags.get(names.TAG_VERSION) == version
                 and not rev.tags.get(names.TAG_RETIRED_AT)):
             return rev.arn
     return None
@@ -884,8 +893,8 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
         # 一次（扫描要 describe 全部 revision），逐 variant 在内存里按同一判据匹配。
         revisions = scan_family(aws.ecs, names.task_def_name(prefix, engine))
         for mapping in stale:
-            new_arn = _pick_reusable(revisions, variant=mapping.variant, template_arn=template_arn,
-                                     digest=mapping.digest)
+            new_arn = _pick_reusable(revisions, variant=mapping.variant, version=version,
+                                     template_arn=template_arn, digest=mapping.digest)
             if new_arn is not None:
                 out(f"{engine}/{mapping.variant}：已有按本次配置与同一镜像注册的 {_short_arn(new_arn)}"
                     f"（上次部署可能在注册之后中断），直接复用，不再重复注册")
@@ -1027,7 +1036,10 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
         # 待清理条目分已退休与孤儿两类、字段不同，不构成同结构的清单，按 ADR 0047 保持逐行输出、不手工对齐列。
         for item in info["pending_cleanup"]:
             if item["reason"] == "retired":
-                out(f"  待清理 {_short_arn(item['revision_arn'])}  已退休 {item['retired_at']}（variant {item['variant']}）")
+                # 映射引用只是清理的前置条件之一：解除引用之后，静默期与未到终态的 run 引用照样要满足，故不写成单一的解锁条件
+                still_mapped = "；仍被某个版本的映射引用，解除引用后仍须满足其他清理条件" if item["still_mapped"] else ""
+                out(f"  待清理 {_short_arn(item['revision_arn'])}  已退休 {item['retired_at']}"
+                    f"（variant {item['variant']}）{still_mapped}")
             else:
                 out(f"  待清理 {_short_arn(item['revision_arn'])}  孤儿：无任何版本的映射引用"
                     f"（variant {item['variant']}，注册于 {item['registered_at'] or '?'}）")
@@ -1037,17 +1049,24 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
 def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
     """已退休（带 retired-at）与孤儿（带血缘 tags、不在任何版本的映射里）——清理 pass 的候选，列出来才可解释
     「为什么 family 里 revision 比 variant 多」。`mapped` 是全部版本映射引用的 revision ARN 集合（调用方算一次）。
-    机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at}；文本渲染在 list_workers。"""
+    机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at, still_mapped}；文本渲染在 list_workers。
+
+    `still_mapped` 与清理 pass 的映射引用前置条件是同一份判据（ARN 在 `mapped` 里），每条都带、各条键集相同；
+    孤儿按定义不在任何映射里，恒为 False。它只回答这一个条件：True 时清理 pass 不会删它，False 不等于下次 pass
+    就删（静默期与未到终态的 run 引用照样要满足）。`reason` 仍是 retired / orphan 闭集，说的是条目为何成了清理
+    候选，不把「哪个前置条件此刻阻止回收」混进同一个枚举。"""
     items: list[dict] = []
     for rev in scan_family(aws.ecs, family):
         # registered_at 是 datetime → 转 ISO 串：doc 要能 json.dumps（真 AWS 返 registeredAt，moto 不返——单测照不出）
         reg = rev.registered_at.isoformat() if rev.registered_at else None
+        still_mapped = rev.arn in mapped
         if rev.tags.get(names.TAG_RETIRED_AT):
             items.append({"revision_arn": rev.arn, "reason": "retired", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": reg})
-        elif rev.has_lineage and rev.arn not in mapped:
+                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": reg,
+                          "still_mapped": still_mapped})
+        elif rev.has_lineage and not still_mapped:
             items.append({"revision_arn": rev.arn, "reason": "orphan", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": None, "registered_at": reg})
+                          "retired_at": None, "registered_at": reg, "still_mapped": False})
     return items
 
 

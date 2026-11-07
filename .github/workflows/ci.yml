@@ -1,8 +1,9 @@
 name: ci
 
 # push/PR 的常规检查。与 release.yml 的关系：这里运行的 `uv build --all-packages` smoke 用的是
-# **同一份**产物校验脚本（.github/scripts/check_dist_metadata.py），发布链上那道 gate 因此不会是
-# 「第一次运行」——打包元数据/metadata hook 的回归在日常提交就炸，不必等推 tag。
+# **同一份**产物校验脚本（.github/scripts/check_dist_metadata.py），镜像 gate 用的是同一份构建脚本
+# （.github/scripts/image_gate.sh），发布链上那两道 gate 因此都不会是「第一次运行」——打包元数据 / metadata hook、
+# Dockerfile 与冒烟的回归在日常提交就暴露，不必等推 tag（ADR 0037 决策 8）。
 on:
   push:
     branches: ['**'] # 任何分支的 push 都会运行（本仓库开发在 feat/* 分支上、无常驻 main）；tag push 不进这里（branches 过滤已排除），发布链见 release.yml
@@ -78,6 +79,21 @@ jobs:
 
       - run: npm test
 
+      - name: npm pack（镜像 gate 的输入）
+        # 日常构建的版本是占位 `0.0.0-dev`：基础镜像内容由 tarball 决定、不由版本串决定（ADR 0037 决策 2b）。
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/npm-dist"
+          npm pack --pack-destination "${RUNNER_TEMP}/npm-dist"
+
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: npm-tarball
+          path: ${{ runner.temp }}/npm-dist/
+          if-no-files-found: error
+          # 同一 run 内重新运行本 job 时允许覆盖（否则第二次上传撞名直接失败），与 release.yml 同。
+          overwrite: true
+
   build-smoke:
     name: uv build --all-packages（打包元数据 smoke）
     runs-on: ubuntu-latest
@@ -95,15 +111,23 @@ jobs:
 
       - run: uv build --all-packages --out-dir dist
 
-      - name: 产物校验（成员齐 / 版本一致 / 兄弟包 pin 已渲染）
+      - name: 产物校验（成员齐全 / 版本一致 / 兄弟包 pin 已渲染）
         # 不传 --expect-version：日常提交上算出的是 `X.Y.Z.postN.devM+<sha>` 这类非纯净版本
         # （ADR 0037 决策 2b：非 tag commit / 脏树带 `+` 本地段），与 tag 无从比对；这里只校内部一致性。
         run: uv run --no-project python .github/scripts/check_dist_metadata.py --dist dist
 
+      # 镜像 gate 只取其中 novaact 的 wheel；仍上传整个 dist/，与 release.yml 的 dist artifact 结构一致，两边的 image-gate job 因此写法相同。
+      - uses: actions/upload-artifact@v7.0.1
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+          overwrite: true # 与 node job 的 npm-tarball 上传同理：重新运行本 job 时允许覆盖
+
       - name: 发布 gate 演练（本地临时 tag，不 push）
         # 在干净 checkout 上打一个**本地** annotated tag 再 build：算出的版本必须逐字等于 tag——这正是
         # release.yml 的 gate。日常 CI 由此照出「干净 tag commit 也算出带 +local 版本」这类回归（曾因 pyproject
-        # 显式 `metadata = true` 埋下、只有推真 tag 才会炸，ADR 0037 决策 2b），不必等到发布日。
+        # 显式 `metadata = true` 埋下、只有推送正式版本 tag 时才会失败，ADR 0037 决策 2b），不必等到发布日。
         # 产物落 /tmp：dist/ 里已有上一步构建出的非纯净版本产物，与本步的 99.0.0 混放会被产物校验判成「同一成员多个版本」。
         run: |
           set -euo pipefail
@@ -115,3 +139,32 @@ jobs:
           uv run --no-project python .github/scripts/check_dist_metadata.py \
             --dist /tmp/dist-rehearsal --expect-version 99.0.0
           git tag -d v99.0.0
+
+  image-gate:
+    # 与 release.yml 的 image-gate 同一道 gate（ADR 0037 决策 8「发布前镜像 gate」条）：用日常构建的产物（build-smoke 的
+    # wheel、node job 打出的 tarball）按 local 态构建两个基础镜像，不推送；构建逻辑在 .github/scripts/image_gate.sh，两边共用。
+    # 每次都运行、不按路径过滤：输入不止 engines/（根 pyproject 的 workspace 配置、.github/scripts/、workflow 本身也是），
+    # 上游基础镜像的移动 tag 与第三方传递依赖的新版本也不随任何提交出现，路径过滤看不到（理由与重议条件见同一条 ADR）。
+    name: image gate ${{ matrix.engine }}（local 态，不推送）
+    needs: [node, build-smoke]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false # 两引擎各自给出失败结果
+      matrix:
+        include:
+          - engine: novaact
+            artifact: dist
+          - engine: midscene
+            artifact: npm-tarball
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - uses: actions/download-artifact@v8.0.1
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ runner.temp }}/gate-input
+
+      - name: local 态构建 + 冒烟（不推送）
+        run: bash .github/scripts/image_gate.sh "${ENGINE}" "${RUNNER_TEMP}/gate-input"
+        env:
+          ENGINE: ${{ matrix.engine }}

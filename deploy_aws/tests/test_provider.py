@@ -92,7 +92,7 @@ class _DeviceFarmStub:
 
 @pytest.fixture(autouse=True)
 def df(monkeypatch) -> _DeviceFarmStub:
-    """Device Farm 与项目记录读取一律打桩（autouse：现有 cdk 用例不经此就会直连真 SSM 与 Device Farm，仓库踩过一次同类坑）。
+    """Device Farm 与项目记录读取一律打桩（autouse：现有 cdk 用例不经此就会直连真 SSM 与 Device Farm，仓库里出现过一次同类问题）。
 
     另把 Device Farm 客户端的构造点换成直接失败：任何漏桩的调用都会在这里失败并暴露出来，而不是悄悄连到真账户。SSM 句柄默认换成
     「参数不存在」的替身；`_stub_backend` 与个别用例会再覆盖它。
@@ -354,8 +354,14 @@ def test_provider_name_is_aws():
 
 # ---------------------------------------------------------------- context 拼装
 
+def _target(args: argparse.Namespace):
+    """按真实解析链解析 args 的目标（deploy / `_run_cdk` 交给下游各步的就是这个值）。"""
+    return Provider._resolve_target(args)
+
+
 def _ctx(*argv: str, project: str | None = None) -> dict[str, str]:
-    return Provider().build_context(_parse(*argv), device_farm_project=project)
+    args = _parse(*argv)
+    return Provider().build_context(args, target=_target(args), version=args.version, device_farm_project=project)
 
 
 def test_context_new_dossier_gives_neither_vpc_knob():
@@ -431,15 +437,6 @@ def test_missing_cli_version_exits_2_without_cdk_or_aws(cdk, df, verb, how, monk
     assert df.reads == [] and df.resolves == []
 
 
-def test_resolve_version_is_a_contract_guard_without_fallback():
-    """`_resolve_version` 不回落到本包的发行版本：调用点已先检查，走到这里还缺值是 code 误用、直接抛。"""
-    args = _parse("--vpc", "new")
-    assert Provider._resolve_version(args) == VERSION
-    args.version = None
-    with pytest.raises(ValueError):
-        Provider._resolve_version(args)
-
-
 def test_context_carries_the_resolved_project_arn_verbatim_and_pending_otherwise():
     """项目 ARN 由调用方解析好传入、原样进 context；没有可用的 ARN（None）时恒给「待建立」占位、不省略这个键：
     cdk 的命令行因此写明本次的取值，其它来源的同名 context 也补不进来。stack 对占位与缺省同样处理（不写参数、不授权）。"""
@@ -449,8 +446,9 @@ def test_context_carries_the_resolved_project_arn_verbatim_and_pending_otherwise
 
 def test_build_context_requires_the_project_to_be_decided_by_the_caller():
     """`device_farm_project` 是必给的关键字、没有默认值：漏传若静默成占位，deploy 就会撤掉已部署的设备授权。"""
+    args = _parse("--vpc", "new")
     with pytest.raises(TypeError):
-        Provider().build_context(_parse("--vpc", "new"))
+        Provider().build_context(args, target=_target(args), version=VERSION)
 
 
 def test_build_context_does_no_io(df, monkeypatch):
@@ -657,16 +655,21 @@ def _stub_backend(monkeypatch, *, stack_exists: bool, stored: str | None) -> Non
                         lambda **kw: (_Cfn(stack_exists), _Ssm(stored)))
 
 
+def _guard(args: argparse.Namespace) -> int | None:
+    """deploy 里的那一步：目标先按真实解析链解析好，再交 VPC 取值比对。"""
+    return Provider()._guard_vpc_spec(args, _target(args))
+
+
 def test_guard_first_deploy_proceeds(monkeypatch):
     # ① stack 不存在即真首次部署 → 放行
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
-    assert Provider()._guard_vpc_spec(_parse("--vpc", "new", "--region", "us-east-1")) is None
+    assert _guard(_parse("--vpc", "new", "--region", "us-east-1")) is None
 
 
 def test_guard_unrecorded_blocks_and_points_at_diff(monkeypatch, capsys):
     # ② 参数缺失 + stack 已存在即本机制之前部署的环境（最危险的那一次）→ 以退出码 2 结束，指路 --diff
     _stub_backend(monkeypatch, stack_exists=True, stored=None)
-    rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--region", "us-east-1"))
+    rc = _guard(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
     err = capsys.readouterr().err
     assert "--diff" in err and "--allow-vpc-change" in err
@@ -675,20 +678,20 @@ def test_guard_unrecorded_blocks_and_points_at_diff(monkeypatch, capsys):
 def test_guard_unrecorded_allowed_once(monkeypatch, capsys):
     _stub_backend(monkeypatch, stack_exists=True, stored=None)
     args = _parse("--vpc", "default", "--region", "us-east-1", "--allow-vpc-change")
-    assert Provider()._guard_vpc_spec(args) is None
+    assert _guard(args) is None
     assert "警告" in capsys.readouterr().err  # 放行也要留声（不静默改 VPC 形态）
 
 
 def test_guard_match_proceeds(monkeypatch):
     # ③ 取值一致 → 放行（含 new 取值的 new:<id> 前缀匹配）
     _stub_backend(monkeypatch, stack_exists=True, stored="new:vpc-0abc")
-    assert Provider()._guard_vpc_spec(_parse("--vpc", "new", "--region", "us-east-1")) is None
+    assert _guard(_parse("--vpc", "new", "--region", "us-east-1")) is None
 
 
 def test_guard_mismatch_blocks(monkeypatch, capsys):
     # ③ 取值不一致 → 以退出码 2 结束（只强制显式给值挡不住第二次 deploy 敲错取值）
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc123")
-    rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--region", "us-east-1"))
+    rc = _guard(_parse("--vpc", "default", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
     err = capsys.readouterr().err
     assert "vpc-0abc123" in err and "default" in err  # 两个取值都点名，别让人猜
@@ -697,7 +700,7 @@ def test_guard_mismatch_blocks(monkeypatch, capsys):
 def test_guard_mismatch_allowed(monkeypatch):
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc123")
     args = _parse("--vpc", "default", "--region", "us-east-1", "--allow-vpc-change")
-    assert Provider()._guard_vpc_spec(args) is None
+    assert _guard(args) is None
 
 
 def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
@@ -705,25 +708,36 @@ def test_guard_unexpected_read_error_exits_2_not_traceback(monkeypatch, capsys):
     def boom(**kw):
         raise _ClientError("AccessDenied", "not authorized to perform cloudformation:DescribeStacks")
     monkeypatch.setattr(provider_cli, "_make_cfn_client", lambda **kw: boom())
-    rc = Provider()._guard_vpc_spec(_parse("--vpc", "new", "--region", "us-east-1"))
+    rc = _guard(_parse("--vpc", "new", "--region", "us-east-1"))
     assert rc == EXIT_PRECONDITION
     assert "cloudformation:DescribeStacks" in capsys.readouterr().err
 
 
-def test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(capsys):
+def test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(cdk, df, capsys):
     """`--profile` 名不存在、且未给 `--region`/`AWS_REGION` → 退出码 2 + 一句可读的说明，不抛 botocore 堆栈。
 
-    **这条有意不打桩**、走真实解析链：region 前三级都 miss 时解析会回落读 profile config，不存在的 profile 名
+    **解析链有意不打桩**、走真实推导：region 前三级都 miss 时解析会回落读 profile config，不存在的 profile 名
     在 `boto3.session.Session(...)` 构造期就抛 `ProfileNotFound`——抛点排在 `workers._connect` 之前，
     那一层的同类钩子照不到它（实际运行核过：没有这一口，`list-workers` / `push-worker` / `deploy` 三条
-    都吐裸堆栈）。故只读动作与 deploy 那条入口各断言一次。解析纯本地推导，这条不碰 AWS。
+    都吐裸堆栈）。故只读动作与 deploy 那条入口各断言一次；`cdk` 夹具替换的是 deploy 解析目标之前的本地前置
+    （工具链、容器引擎）与之后的 cdk、worker 镜像步骤，解析链本身照常执行。解析纯本地推导，这条不碰 AWS。
+
+    deploy 的目标解析排在本地前置之后：同时漏给 `--vpc` 时报的是缺 `--vpc`，不是凭证错误（「缺 --vpc」提示
+    自己的那次读取是 best-effort，解析不出就不给「怎么办」那半句）。
     """
     rc = Provider().list_workers(_parse("list-workers", "--profile", "definitely-not-a-profile"))
     assert rc == EXIT_PRECONDITION
     assert "连不上 AWS" in capsys.readouterr().err
-    rc = Provider()._guard_vpc_spec(_parse("--vpc", "default", "--profile", "definitely-not-a-profile"))
+    rc = Provider().deploy(_parse("--vpc", "default", "--profile", "definitely-not-a-profile"))
     assert rc == EXIT_PRECONDITION
-    assert "连不上 AWS" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "连不上 AWS" in err and "Traceback" not in err
+    rc = Provider().deploy(_parse("--profile", "definitely-not-a-profile"))
+    assert rc == EXIT_PRECONDITION
+    err = capsys.readouterr().err
+    assert "缺 --vpc" in err and "连不上 AWS" not in err
+    assert cdk.calls == [] and cdk.worker_steps == []
+    assert df.reads == [] and df.resolves == []
 
 
 def test_stack_not_found_detection_needs_both_code_and_text():
@@ -776,11 +790,11 @@ def cdk(monkeypatch) -> _Recorder:
     monkeypatch.setattr(provider_cli.subprocess, "run", rec)
     monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _FakeEngine()))
 
-    def _steps(self, args, engine=None):
-        rec.worker_steps.append(args)
+    def _steps(target, version, engine):
+        rec.worker_steps.append({"target": target, "version": version})
         return 0
 
-    monkeypatch.setattr(Provider, "_worker_image_steps", _steps)
+    monkeypatch.setattr(Provider, "_worker_image_steps", staticmethod(_steps))
     return rec
 
 
@@ -890,7 +904,7 @@ def test_destroy_invokes_cdk_destroy_with_same_context(cdk):
 
 def test_synth_only_pins_a_relative_dir_to_the_callers_cwd(cdk, tmp_path, monkeypatch):
     """用户给**相对** DIR：必须钉成绝对路径再交 cdk——cdk 子进程 cwd 是随后被删的临时工作目录，相对路径
-    原样传会让导出物落进那里、随之消失而命令以退出码 0 结束（实际运行踩过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
+    原样传会让导出物落进那里、随之消失而命令以退出码 0 结束（实际运行中遇到过的假成功；早先的测试用绝对 tmp_path、照不出来）。"""
     monkeypatch.chdir(tmp_path)
     args = _parse("--vpc", "new", "--region", "us-east-1")
     args.synth_only = "exported"  # CLI 前端的 --synth-only DIR（接缝契约），相对用户 cwd
@@ -930,7 +944,8 @@ def test_deploy_resolves_the_project_after_the_vpc_guard_and_before_cdk(cdk, df,
     events: list[str] = []
     df.events = events
     guard = Provider._guard_vpc_spec
-    monkeypatch.setattr(Provider, "_guard_vpc_spec", lambda self, a: (events.append("vpc"), guard(self, a))[1])
+    monkeypatch.setattr(Provider, "_guard_vpc_spec",
+                        staticmethod(lambda a, t: (events.append("vpc"), guard(a, t))[1]))
 
     def _run(argv, **kw):
         events.append("cdk")
@@ -1104,6 +1119,51 @@ def _verb_call(verb: str, *argv: str):
 
 
 READ_ONLY_VERBS = ("diff", "synth", "destroy")
+
+
+def _record_target_resolutions(monkeypatch) -> list:
+    """把目标解析换成带记录的真实解析：每解析一次记下得到的 target。"""
+    real = Provider._resolve_target
+    resolved: list = []
+
+    def _recording(args):
+        target = real(args)
+        resolved.append(target)
+        return target
+
+    monkeypatch.setattr(Provider, "_resolve_target", staticmethod(_recording))
+    return resolved
+
+
+def test_deploy_resolves_the_target_once_and_hands_the_same_values_to_every_step(cdk, df, monkeypatch):
+    """deploy 只在本地前置之后解析一次目标：VPC 取值比对、项目找回或建立、cdk 与 worker 镜像步骤拿到的是同一个 target
+    （cdk 与 worker 镜像步骤还拿到同一个 CLI 版本），不各自重新解析（未给 region 时每次解析都会为读 profile 配置
+    再构造一次 boto3 Session）。"""
+    _stub_backend(monkeypatch, stack_exists=False, stored=None)
+    resolved = _record_target_resolutions(monkeypatch)
+    guarded: list = []
+    guard = Provider._guard_vpc_spec
+    monkeypatch.setattr(Provider, "_guard_vpc_spec",
+                        staticmethod(lambda a, t: (guarded.append(t), guard(a, t))[1]))
+    assert _deploy() == 0
+    assert len(resolved) == 1
+    assert guarded == resolved
+    assert df.resolves == [{"prefix": "vfy-", "profile": None, "stored_arn": None}]
+    assert cdk.worker_steps == [{"target": resolved[0], "version": VERSION}]
+    pairs = _context_pairs(_argv(cdk))
+    assert pairs["prefix"] == "vfy-" and pairs["version"] == VERSION
+
+
+@pytest.mark.parametrize("verb", READ_ONLY_VERBS)
+def test_read_only_verbs_resolve_the_target_once(cdk, df, verb, tmp_path, monkeypatch):
+    """diff / --synth-only / destroy 经 `_run_cdk` 解析一次目标，拼 context 时沿用它、不再解析。
+    （提供了 `--vpc`，「缺 --vpc」提示那次 best-effort 解析不发生。）"""
+    monkeypatch.chdir(tmp_path)
+    resolved = _record_target_resolutions(monkeypatch)
+    method, args = _verb_call(verb, "--vpc", "new", "--region", "us-east-1", "--prefix", "vfy-")
+    assert method(args) == 0
+    assert len(resolved) == 1
+    assert _context_pairs(_argv(cdk))["prefix"] == "vfy-"
 
 
 @pytest.mark.parametrize("verb", READ_ONLY_VERBS)
@@ -1391,7 +1451,7 @@ def test_provider_module_does_not_import_aws_cdk():
 def test_help_does_not_pull_boto3_or_the_device_farm_module():
     """`gherkai deploy --help` / `destroy --help` 只需本模块与 flag 面：boto3 与 `gherkai_runtime.devicefarm` 都在函数内延迟导入。
 
-    子进程里往 `sys.modules` 塞毒（值为 None 时 import 立即失败），再贴两个 parser、生成帮助文本；同时断言 Device Farm 模块
+    子进程里往 `sys.modules` 放毒化条目（值为 None 时 import 立即失败），再贴两个 parser、生成帮助文本；同时断言 Device Farm 模块
     没被提前导入。放在子进程里，免得本会话其他测试早已 import 过的模块让断言恒绿。
     """
     import subprocess as sp
@@ -1420,7 +1480,7 @@ def test_tolerates_a_shell_that_declares_neither_command_face_flag(monkeypatch, 
     args.version = VERSION
     del args.allow_vpc_change, args.require_approval  # 模拟「前端压根没这两个 flag」
     _stub_backend(monkeypatch, stack_exists=True, stored="vpc-0abc")
-    assert Provider()._guard_vpc_spec(args) == EXIT_PRECONDITION
+    assert Provider()._guard_vpc_spec(args, _target(args)) == EXIT_PRECONDITION
 
 
 # ---------------------------------------------------------------- CDK 环境查询缓存（cdk.context.json 跨调用持久化）
@@ -1533,12 +1593,14 @@ def test_deploy_warns_about_missing_container_engine_only_for_pure_release_versi
     _stub_backend(monkeypatch, stack_exists=False, stored=None)
     monkeypatch.setattr(Provider, "_container_engine", staticmethod(lambda args: _AbsentEngine()))
 
-    monkeypatch.setattr(Provider, "_resolve_version", staticmethod(lambda args: "1.4.0"))
-    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    args = _parse("--vpc", "default", "--region", "us-east-1")
+    args.version = "1.4.0"
+    assert Provider().deploy(args) == 0
     assert "docker 未安装" in capsys.readouterr().err
 
-    monkeypatch.setattr(Provider, "_resolve_version", staticmethod(lambda args: "1.4.0.dev3+g0123abc"))
-    assert Provider().deploy(_parse("--vpc", "default", "--region", "us-east-1")) == 0
+    args = _parse("--vpc", "default", "--region", "us-east-1")
+    args.version = "1.4.0.dev3+g0123abc"
+    assert Provider().deploy(args) == 0
     assert "docker 未安装" not in capsys.readouterr().err
 
 

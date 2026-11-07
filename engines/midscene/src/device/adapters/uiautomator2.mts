@@ -24,6 +24,7 @@ import {
   scanXmlElements, toControls, unmappedKeyMessage, type AdapterEntry, type DeviceAdapter, type Point, type PrimitiveContext,
   type ScrollGesture,
 } from "../interface.mjs";
+import { defaultSleep } from "../sleep.mjs";
 
 export const UIAUTOMATOR2 = "UiAutomator2";
 
@@ -114,8 +115,6 @@ export interface UiAutomator2Options {
   /** 轮询间隔的等待，只供测试注入。 */
   sleep?: (ms: number) => Promise<void>;
 }
-
-const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 function pressKey(ctx: PrimitiveContext, keycode: number): Promise<unknown> {
   return ctx.driver.execute(PRESS_KEY, { keycode });

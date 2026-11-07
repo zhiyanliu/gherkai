@@ -18,7 +18,8 @@ from typing import Protocol
 
 from gherkai_core.model import Job, RunMeta
 from gherkai_core.ports import ResultStore, RunStore
-from gherkai_core.project import plan_next, project, project_full
+# PLATFORM_FAILED_EXIT：launch 失败补偿的哨兵退出码（机制二推论），定义在 project.py（与 TaskExited 同处、观察者 Lambda 亦 import），此处只引用。
+from gherkai_core.project import PLATFORM_FAILED_EXIT, plan_next, project, project_full
 
 logger = logging.getLogger("gherkai_core.reconcile")
 
@@ -38,10 +39,6 @@ class EventLog(Protocol):
     # 幂等（独立键空间，机制一）。timed_out：超时处置的 stop 所致退出（ADR 0034「job timeout」节归因链）。
     def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
                     reason: str | None = None) -> None: ...
-
-
-# launch 失败补偿的哨兵退出码（机制二推论）：定义在 project.py（与 TaskExited 同处、观察者 Lambda 亦 import），此处只引用。
-from gherkai_core.project import PLATFORM_FAILED_EXIT  # noqa: E402
 
 
 class Launcher(Protocol):
@@ -94,7 +91,7 @@ def tick(
        - start：try_claim_job() CAS 抢占（机制四），成功的那个（本实例）才 launcher.launch(job) 真起。
        - finalize：先从**同一份** records 快照聚合各 job 判定真值落 result_store（注入时；commit-point 写序，ADR 0030
          决定三 detached 同守），再 try_finalize() 状态机单调条件写（机制三）commit；RunReport 由宿主在 done 后写
-         （`finalize_report`）。聚合/落库异常裸穿：commit 前失败 → 本轮 tick 失败、触发源重试；commit 后无人重试。
+         （`finalize_report`）。聚合/落库异常原样抛出：commit 前失败 → 本轮 tick 失败、触发源重试；commit 后无人重试。
     """
     records = event_log.records()
     # 基线取当前 RunStore 态：让 project 的 job 态单调不倒退（已 CAS claim 成 running 但 worker 还没吐
@@ -109,18 +106,19 @@ def tick(
 
     for act in actions:
         if act.kind == "start" and act.scope_id is not None:
+            # 先确认 job 存在，再做 CAS 抢占：防御跳过时不会留下一个已抢占成 running 却无人启动的 job。
+            job = job_by_scope.get(act.scope_id)
+            if job is None:
+                continue  # plan_next 从 state.jobs 提议、键集是 meta.jobs 的子集，不该发生；防御跳过
             # CAS 抢占：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
             if run_store.try_claim_job(run_id, act.scope_id, claimed_at=now_iso):
-                job = job_by_scope.get(act.scope_id)
-                if job is None:
-                    continue  # plan_next 从 state.jobs 提议、键集是 meta.jobs 的子集，不该发生；防御跳过
                 try:
                     launcher.launch(job)
                 except Exception as e:
                     # launch 失败补偿（ADR 0034 机制二推论）：job 已 CAS 成 RUNNING 却永无 events/
                     # task_exited（进程没起、平台观察者无从观察）——不补偿则永停 RUNNING、整批 wedge、
                     # 三触发源都救不回。tick 在此扮演「起不来」时刻的退出观察者：记非 0 退出，下轮
-                    # 重放走「退出码非零 → ERROR」既有谓词收敛。异常不裸穿（失败隔离：别拖垮同批其余 job）。
+                    # 重放走「退出码非零 → ERROR」既有谓词收敛。异常不向外抛出（失败隔离：别拖垮同批其余 job）。
                     # 异常文本作 reason 随退出记录进 job message（措辞与同步路径 schedule 的「起 worker 失败：…」一致），
                     # 否则 RunTask 放置失败的归因、引擎未解析的指引都会丢；traceback 另留在日志里供排障。
                     logger.warning("这个 job 没能启动，已按错误处理：run=%s scope=%s", run_id, act.scope_id,
@@ -129,7 +127,7 @@ def tick(
         elif act.kind == "finalize":
             # 全 job 达终态（plan_next 只在此时给 finalize 动作）→ run 已 done。
             # ① 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），
-            #    project_full 逐 job 落 ResultStore；它对非终态 job 抛（ADR 0031 不变量守卫）——异常裸穿本 tick，
+            #    project_full 逐 job 落 ResultStore；它对非终态 job 抛（ADR 0031 不变量守卫）——异常不在本 tick 内捕获、原样抛出，
             #    让触发源重试；绝不先 CAS 再补（CAS 之后无人重试，产物缺失即永久）。多个推进器并发都落、幂等覆盖同 key。
             if result_store is not None:
                 for jr in project_full(meta, records).jobs:

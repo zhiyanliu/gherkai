@@ -23,7 +23,15 @@ import math
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
-from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, AppRef, Job, Target
+from gherkai_core.model import (
+    DEFAULT_ACQUIRE_TIMEOUT_S,
+    DEFAULT_DESKTOP_JOB_TIMEOUT_S,
+    DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    AppRef,
+    Job,
+    Target,
+)
 from gherkai_core.errors import FeatureContractError  # re-export（既有 `from gherkai_core.scope import FeatureContractError` 不变）
 from gherkai_core.parse import ParsedScenario, parse_feature
 
@@ -55,10 +63,10 @@ class PlanConfig:
     # 非正值表示「非设备 scope 不超时」（设备 scope 仍取设备缺省），正值对设备 scope 要过下限校验。
     default_job_timeout_s: float | None = None
     # 按目标的缺省与下限（ADR 0034「job timeout」节、0051 决策 2）：CLI 按获取预算算出传入；这里的缺省按内建获取预算推出，
-    # 让直接构造 PlanConfig 的调用方（测试、工具）不必都传。目标缺省自身不过下限校验。
-    default_desktop_job_timeout_s: float = 300.0
-    default_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + 900.0
-    min_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + 180.0
+    # 让直接构造 PlanConfig 的调用方（测试、工具）不必都传，数值与 CLI 引用同一组 core 常量。目标缺省自身不过下限校验。
+    default_desktop_job_timeout_s: float = DEFAULT_DESKTOP_JOB_TIMEOUT_S
+    default_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S
+    min_device_job_timeout_s: float = DEFAULT_ACQUIRE_TIMEOUT_S + MIN_DEVICE_JOB_TIMEOUT_EXTRA_S
     # 应用别名表（ADR 0048 决策 2 / 0053 [apps]）：别名到平台、再到包名或 bundle id 的两级映射，纯数据、不带文件路径；core 据此核对 @app。
     apps: dict[str, dict[str, str]] = field(default_factory=dict)
 

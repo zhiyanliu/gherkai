@@ -6,16 +6,16 @@
 // 三通道分离（ADR 0024）：协议事件走专用 fd（core adapter 读这个），与 SDK 打到 stdout 的进度噪声、worker
 // 自己的诊断（stderr、走模块级 log()、**不经本 sink**）物理隔离。adapter 经环境变量 EVENTS_FD 告知 fd 号
 // （pass_fds 继承、号不固定）。无 / 非法 EVENTS_FD（手动直接运行、无 adapter；或值非数字、fd 已关）时回落
-// fd 1=stdout，便于调试（`echo job | worker` 仍见事件）。
+// 到 fd 1（stdout），便于调试（`echo job | worker` 仍见事件）。
 //
 // **emit 为 async（合理不对称，ADR 0024）**：Midscene worker 是 Node 事件循环模型、Fargate 化后 aws-sdk-js DDB
 // PutItem 本就 async——emit 定 async 免二次改签名 + 污染调用点。Nova 那个引擎 emit 同步（Nova 同步 + greenlet 模型、
 // boto3 同步 SDK）。根源是语言/SDK 执行模型差异，非「该对称却漏」。
 //
 // **两态（ADR 0024「DynamoDB 作 events-out」）**：
-// - fd 态（subprocess）：写 EVENTS_FD fd（fs.writeSync 同步保序——async 签名下 await 立即完成的同步写、时序不变）；无 / 非法 → 回落 fd 1=stdout。
-// - DDB 态（Fargate 化）：EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 注入 → PutItem 到 events 表（PK=run_id#scope_id、
-//   SK=进程内自增 seq、body=JSON line）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
+// - fd 态（subprocess）：写 EVENTS_FD fd（fs.writeSync 同步保序——async 签名下 await 立即完成的同步写、时序不变）；无 / 非法时回落到 fd 1（stdout）。
+// - DDB 态（Fargate 化）：EVENTS_DDB_TABLE+RUN_ID+SCOPE_ID 注入 → PutItem 到 events 表（PK 为 run_id#scope_id、
+//   SK 为进程内自增 seq、body 为 JSON 行）。判据是有没有注入 EVENTS_DDB_TABLE，非「是否 Fargate」（ADR 0016 红线）。
 import { redactSecrets } from "./redact.mjs";
 import * as fs from "node:fs";
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
@@ -33,7 +33,7 @@ const EVENTS_TTL_S = 7 * 24 * 60 * 60;
 
 // EVENTS_FD 解析（ADR 0024「EVENTS_FD 无 / 非法 → 回落 stdout」调试兜底；语义对称 Nova 的
 // `try: os.fdopen(int(events_fd)) except (OSError, ValueError): sys.stdout`）：无 / 非整数 / 负 / 已关闭的
-// fd 号一律回落 1=stdout。**不能只判「有没有」**——fs.writeSync 对非法 fd 直抛（NaN→ERR_OUT_OF_RANGE、
+// fd 号一律回落到 fd 1（stdout）。**不能只判「有没有」**——fs.writeSync 对非法 fd 直抛（NaN→ERR_OUT_OF_RANGE、
 // 坏 fd→EBADF），而首条 emit 是 scope_started，抛在那里就等于整个 scope 零事件的 engine_error。
 // fstatSync 是廉价的存活探测（Node 无「这个 fd 可写吗」的直接问法，坏 fd 在此即 EBADF）。
 function resolveEventsFd(raw: string | undefined): number {
@@ -63,7 +63,7 @@ export class EventSink {
     this.scopeId = opts.scopeId;
   }
 
-  // 从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态（EVENTS_FD 合法→写该 fd、无 / 非法→回落 fd 1=stdout）。
+  // 从注入的 env 造（唯一读 env 处）。EVENTS_DDB_TABLE 非空 → DDB 态；否则 fd 态：EVENTS_FD 合法时写该 fd，无 / 非法时回落到 fd 1（stdout）。
   // DDB 态判据是有没有注入 EVENTS_DDB_TABLE（非「是否 Fargate」，ADR 0016 红线）；空串（|| undefined）当未注入。
   static fromEnv(): EventSink {
     const tableName = process.env.EVENTS_DDB_TABLE || undefined;
@@ -89,7 +89,7 @@ export class EventSink {
 
   // 吐一条 ADR 0024 事件（JSON Lines，字段名 camelCase 与 core/gherkai_core/wire.py 一致）。
   // fd 态：fs.writeSync 裸 fd 同步写保序（与旧内联逐字节一致）。
-  // DDB 态：PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)，套 AbortSignal.timeout 封顶（退出有界，ADR 0024）。
+  // DDB 态：`PutItem(PK=run_id#scope_id, SK=自增 seq, body=JSON line)`，套 AbortSignal.timeout 封顶（退出有界，ADR 0024）。
   // **只暴露 emit、绝不暴露底层 fd/stdout 句柄、绝不把事件挪回 stdout**（守三通道分离）。worker 是 producer/client、不 listen。
   async emit(event: unknown): Promise<void> {
     const line = redactSecrets(JSON.stringify(event));  // 隧道凭据不出 worker（ADR 0035 决策 5）

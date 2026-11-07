@@ -157,7 +157,7 @@ def test_crash_worker_finalizes_error(tmp_path):
 
 
 def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
-    """run 级墙钟取数失败不得连坐报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
+    """run 级墙钟取数失败不得影响报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
 
     墙钟是派生指标，取它要在 finalize commit **之后**多读一次 RunState——落盘读会因 IO 错/文件写坏抛。
     裸抛出去意味着判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、
@@ -200,7 +200,7 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
     launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
     store = _FailsOnTerminalRead(inner)
 
-    # 不抛是第一件要钉的事（退回「实参里直接取数」的写法即 OSError 裸穿）
+    # 不抛是第一件要钉的事（退回「实参里直接取数」的写法即 OSError 原样抛出）
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, now_iso_fn=compose.now_iso,
                        report_store=_RecordingReportStore())

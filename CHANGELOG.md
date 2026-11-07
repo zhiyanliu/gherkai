@@ -28,12 +28,14 @@
 
 ### 变化
 
+- 两个引擎把失败原因压成一行时对同一段文本给出逐字相同的结果：只按 CR / LF 分行、按同一张空白字符表折叠，再脱敏、按字符数截断；含 U+2028、U+0085、U+000B 这类字符的文本不再在 Nova 侧被截掉后半段，只含这类空白的错误说明按空处理、改用异常本身的文本。
 - 本机应用测试（`--expose-local`）的隧道改为「令牌换 cookie」：不再把 basic-auth 凭据内嵌在地址里。每次运行生成专用的访问令牌与会话 cookie 值，写进这次运行的 ngrok 流量策略（边缘节点拦截，不带 cookie 的请求到不了你的机器）；step 文本只替换成干净的隧道地址；引擎 worker 在第一个场景之前访问一次「会话预热地址」换到 cookie。同一套隧道对设备上的网页目标（Android 的 Chrome、iOS 的 Safari）同样可用；原生应用自己访问的后端地址打包在应用里、不经隧道替换，应用目标连本机或私网后端在本版本不受支持。预热被拒绝时，令牌被拒与会话 cookie 未通过校验给出不同的提示与处置。本机后端的 worker 不声明会话预热支持时在起隧道之前以退出码 2 拒绝。隧道地址在 step 文本里的识别带边界：`http://localhost:3000.evil/`、`http://localhost:30001/x` 不再被当成 `http://localhost:3000` 替换，`去 http://localhost:3000。`、`(see http://localhost:3000)` 照常替换。
 - 脱敏规则从一条扩成三条：除地址里的 `用户:口令@` 外，`X-Amz-Signature` / `X-Amz-Security-Token` / `X-Amz-Credential` / `gherkai_tunnel_token` 这四个查询参数的值（含控件树里 `&amp;` 转义的形态）与 Device Farm 远程端点地址里的路径令牌也显示为 `***`；`X-Amz-Date`、`X-Amz-Expires` 等不是凭证的参数保留明文。两个引擎 worker 自己写出的诊断日志也在写出时脱敏，本机转发的与云端写进 CloudWatch 的都是如此，引擎 SDK 自己写出的内容除外。落盘的运行定义（`run_meta.json`）仍是明文，运行要读回它。
 - Nova Act 引擎的 worker 自己管理云端浏览器会话的启动与停止：停止有超时预算，停止失败或超时时 job 记为 error（scenario 明细保留，退出码 1）；此前停止由 SDK 内部执行，部分失败不会反映在退出状态里。Nova Act 的 job 记录的会话 id 随之改为 AgentCore 浏览器会话 id（与 Midscene 同一种 id；此前是 Nova Act 服务侧的会话 id）；`nova-trajectories/` 下的子目录仍按 Nova Act 侧的会话 id 命名，不再等于 job 记录里的会话 id，worker 日志里有两者的对应行。
 - `gherkai deploy push-worker` 的平台校验认得 containerd 镜像存储（Docker 29 起新装的缺省）下的多平台索引：本机有 linux/amd64 内容的镜像照常通过，没有时提示只构建 linux/amd64 一个平台；此前这类镜像被报成「平台是 ?/?」。
+- `gherkai deploy push-worker` 与 `gherkai deploy` 只复用同一版本、同一 variant 在上次中断时留下的任务定义 revision：升级之后任务定义模板没有改动、又推送与旧版本相同的镜像时，新版本注册自己的 revision，不再与旧版本的同名 variant 共用；此前两个版本共用同一个 revision，其中一方替换映射之后，`list-workers` 把它列为待清理，清理却因另一版本的映射仍引用它而一直保留。已在共用的 revision 不受影响。`gherkai deploy list-workers --json` 的 `engines.<engine>.pending_cleanup[]` 每条多一个布尔字段 `still_mapped`，表示这个 revision 是否仍被某个版本的映射引用；文本输出在仍被引用的已退休条目后注明「仍被某个版本的映射引用，解除引用后仍须满足其他清理条件」。
 - 提交记录（`run_meta.json`、云端运行状态表里的提交记录，以及 `run --json` 与 `plan --json` 里的 `run_meta` / `jobs[]`）带结构版本 `schema_version`（整数，本版本为 1）与写出它的 `cli_version`；键集固定、不适用的值写 `null` 而不再省键：`timeout_s` 不超时为 `null`，`target` 对桌面 job 也写出 `desktop` / `web`，`device_request` 非设备 job 为 `null`，`steps_dir`、`worker_variant`、`worker_task_defs`、`extra_http_headers` 无值为 `null`。`status` / `explain` 与本机接力读到结构版本不等于本机支持的记录以退出码 2 结束，并点名写出它的版本：更新的提示升级 gherkai，更早的提示用那个版本查看或重新提交。**同一报告目录不要混用 1.4 与 1.5 的命令行工具读写**：1.4 的命令行工具读 1.5 的记录会静默误判，1.5 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录（结构版本与后端不一致、记录不完整、没有记 worker 镜像版本）时不执行、把 run 置为 `error`，原因写进运行状态：`status` 在状态行下多一行 `message`，`status --json` 多一个 `message` 键；正常收尾的 run 没有这一行与这个键。本机 `status` / `explain` / `status --wait` 接力读到不完整的提交记录以退出码 2 结束并说明。在云端推进后台 run 的 Lambda 函数不再读取 SSM 参数，部署时不再授予它们 SSM 读权限（已有部署重新 `gherkai deploy` 后生效）。
-- 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号），worker 在建立任何会话之前核对它：版本不一致时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本。
+- 命令行工具发给引擎 worker 的 job 带格式版本（与 worker 能力自述的格式版本是同一个号，本版本为 2），worker 在建立任何会话之前核对它：版本不一致时这个 job 记 `error`、类别 `precheck_failed`，消息提示把两者装成同一版本。
 - 带设备目标或使用 `--expose-local` 的 run 提交到没有版本戳的旧后端（1.4.0 之前部署、此后没有重新部署过）时以退出码 2 结束、提示先执行 `gherkai deploy` 升级部署；不使用 `--expose-local` 的桌面 run 维持只警告。
 - `gherkai destroy` 保留部署建立的 Device Farm 项目，连同其中的远程访问会话记录与录像；记着项目 ARN 的后端参数随 stack 删除，同一前缀重新部署会按名称找回并沿用这个项目。不再需要时按[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)「拆除与清理」一节手动删除。
 - 产物桶多一条按标签过期的规则：带 `gherkai=app` 标签的安装包对象 14 天后过期，不带这个标签的对象不受影响；已有部署重新运行 `gherkai deploy` 后生效。
@@ -46,10 +48,10 @@
 - 确定性 step 带 DataTable / DocString 时这一步记 `error`；此前多行参数被静默忽略。
 - **job 的最终判定由本机 `run` 与后台 `submit` 共用同一份规则**。对现有桌面用例的可见变化：worker 被强制结束（负退出码，如被系统 kill -9）此前按正常退出处理、现在按非正常退出处理（记 `error`；已被超时或 fail-fast 中止处置的 job 仍按那个处置记）；worker 正常退出却一条 scenario 判定都没报的 job 由 `passed` 改为 `error`（原因写「worker 未报告任何 scenario 判定」）；后台 `submit` 里 worker 崩溃或非零退出的 job 此前没有错误类别、现在记 `engine_error`，以网络故障退出码退出的记 `network_error`（与本机 `run` 一致）；超时与 fail-fast 中止同时成立的 job 按作出停止决定那一刻的事实归因（那一刻已超时记 `timeout`，否则记中止），此前本机 `run` 内部不同分支的判定顺序不一致；两条路径上超时的消息统一为「job 超时（预算 Ns，已中止）」；判定记录里的 `session_id` 以 worker 开始执行时报的会话为准，收尾时报的不再覆盖它。
 - worker 已报完全部结果并最终正常退出、只是收尾超出了预算的 job，判定按已报出的结果给出、不记超时；本机 `run` 在这种情形下只向 worker 发出停止请求、等它结束收尾。收尾里非正常退出或一直不退出的仍记超时。
-- 本机 `run` 在决定停止一个 job 之后继续读完 worker 的收尾事件（最多等到停止宽限再加几秒），worker 在收尾里报出的事实不再丢失。
+- 前台 `run` 在决定停止一个 job 之后继续读完 worker 的收尾事件，worker 在收尾里报出的事实（如会话已确认停止）不再丢失。worker 收尾完即结束等待，等待的上限按后端取：本机后端为停止宽限再加 5 秒；云端后端（`run --backend cloud`）为部署侧的容器停止宽限（`gherkai deploy --stop-timeout`，缺省 120 秒）再加 25 秒，这 25 秒包含 ECS 记下任务已停止所需的十几秒。
 - 两个引擎的桌面 worker 都报出云端浏览器会话的建立与停止：`run --json` 与 `explain --json` 的 job 带 `sessions[]`，每个 AgentCore 浏览器会话一项（`session_id` 与 `name` 都是会话 id；结果未知的创建尝试也占一项，`origin` 为 `attempted`、`session_id` 为 `null`、`name` 为请求携带的会话名；`observed_s`、`provider_minutes` 与 `device` 恒为 `null`），没有会话记录的桌面 job 仍省略这个键。浏览器会话没能确认停止时——停止失败或超时，或者收到停止信号时建立会话的请求还没有返回——job 记 `error`、归因 `release_failed`、worker 以 1 退出，说明里列出会话名并提示到 Amazon Bedrock AgentCore 控制台核对；已报出的 scenario 结果照常保留。建立浏览器会话的请求带上按运行与 scope 生成的会话名（形如 `gherkai:<运行编号>:…`），结果未知的创建尝试在说明里以这个名字列出。
 - **本机后端上 Midscene 的最小停止宽限由 31 秒变为 63.5 秒**（worker 按它的收尾超时算出）：只用 Midscene 的 run 不给 `--grace` 时，默认宽限随之变为 63.5 秒；显式给的 `--grace`（或 `gherkai.toml` 的 `grace`）小于 63.5 秒、且用到 Midscene 的 run 在开始执行前以退出码 2 结束，升级后请调大或删掉这个值。宽限只是中止时等待 worker 收尾的上限，worker 收尾完即退出，正常结束的 run 耗时不变。
-- Midscene worker 的 npm 包新增四项运行时依赖：`@midscene/core` 1.15.1（与 `@midscene/web` 同版本、精确锁定）、`@aws-sdk/client-device-farm`、`webdriverio` 10.0.2 与它的日志模块 `@wdio/logger` 10.0.0（两者同步精确锁定）。WebdriverIO 与 Device Farm SDK 只在设备目标上加载，桌面 run 与能力自述不加载它们。Nova Act worker 把 `bedrock-agentcore` 列为直接依赖并精确锁定 1.22.0（此前经 `nova-act` 以范围版本间接安装），worker 用它自己启动与停止浏览器会话。
+- Midscene worker 的 npm 包新增五项运行时依赖：`@midscene/core` 1.15.1（与 `@midscene/web` 同版本、精确锁定）、`@aws-sdk/client-device-farm`、`@aws-sdk/s3-request-presigner`（为应用目标的安装包生成下载地址，与 `@aws-sdk/client-s3` 同属 AWS SDK，按版本范围安装）、`webdriverio` 10.0.2 与它的日志模块 `@wdio/logger` 10.0.0（两者同步精确锁定）。WebdriverIO、Device Farm SDK 与 `@aws-sdk/s3-request-presigner` 只在设备目标上加载，桌面 run 与能力自述不加载它们。Nova Act worker 把 `bedrock-agentcore` 列为直接依赖并精确锁定 1.22.0（此前经 `nova-act` 以范围版本间接安装），worker 用它自己启动与停止浏览器会话。
 - agent skill 的云端参考：分工表恢复为 worker 镜像的推送与注册归部署方，一人兼任两个角色时可自己推送。
 - agent skill 覆盖设备目标：`references/engines.md` 新增设备目标一节（`@device` / `@app` 的声明、设备选择与配置、费用、写法差异、证据字段与错误类别）；写用例规则里的导航步改为整句地址，导航后的落点核对按目标分写（桌面用确定性 step；Android 网页需要精确核对地址时用确定性 step，否则与 iOS 网页、应用目标一样用 AI 断言），地址核对改用仓库 `features/steps/` 的模板、不再引用内建 step。
 - 本机后端的引擎 worker 在另一个进程组里运行，并自行监视命令进程是否还在：命令进程被强制结束（如 `kill -9`）后，worker 在几秒内察觉、释放会话并退出，不再留下继续计费的会话；云端 worker 不做这项检测。
@@ -57,17 +59,23 @@
 - 设备 scope 在获取设备期间会话丢失与墙钟预算到期同时成立时，判定记会话丢失这个更具体的原因，而不是获取超时。
 - `explain --json` 的 `aborted_hint` 改为只在没能从事件流补取被中止 job 的记录时出现，并写明原因（没有事件流记录、events 表读不到或缺权限）；此前它在判定明细只有部分记录时就出现。
 - `status --wait` 只对 `submit` 提交的 run 接力推进：对正在前台 `run` 的 run，它只等待那次运行结束再给判定并提示一句，不再接着推进（此前会与前台运行同时推进同一个 run）；云端后端同样不再对这样的 run 调起后台推进。等待或接力期间按 Ctrl-C 以退出码 130 停止并说明一句，不再打印异常栈。
+- 库层包 `gherkai-runtime`：`compose.build_engines` 新增必给的关键字参数 `run_id`，不传时调用即报 `TypeError`，传空值报 `ValueError`；传入的须与交给 `schedule` 的 `RunMeta.run_id` 是同一个值。本机 worker 用它给云端浏览器会话与远程访问会话命名，没有它会在建立会话之前以 1 退出。
+- `submit --backend cloud --expose-local` 的隧道存活时间上限（`--tunnel-ttl`）默认值改为各 job 墙钟预算之和，加一次性的 900 秒，再加每个 job 210 秒；此前只加固定的 900 秒，并发为 1 且多个 job 用尽预算时，隧道可能在 run 结束前被拆除，剩下的 scenario 以导航失败告终。`submit` 打印的秒数随之变大，并注明这是按任务量估算的上限、不是保证；显式给出的 `--tunnel-ttl`（或 `gherkai.toml` 的 `tunnel-ttl`）不受影响。说明见[本机应用测试](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/local-app-testing.md)「存活时间上限」一节。
 
 ### 修复
 
 - `--expose-local` 的取值末尾带 `/`（如 `http://localhost:3000/`）时，feature 里以这个地址开头的 URL（如 `http://localhost:3000/login`）此前不能正确替换成隧道地址，scenario 以导航失败告终；现在末尾的一个 `/` 按不带斜杠处理。取值带路径、查询串、片段或用户信息，或者不以 `http://` / `https://` 开头时，`plan`、`run`、`submit` 改为以退出码 2 结束并给出正确写法（只写到端口为止），`run` 与 `submit` 不再起隧道。
 - 运行中写入 job 状态失败时（如云端后端的运行状态表中途不可达），这个 job 此前被记成 `engine_error`、消息为「worker 异常：…」，run 照常继续；现在不给这个 job 记判定，而是停止这个 run 中仍在运行的 job 并原样报出这个错误，与写入 job 判定失败时的处理相同（云端后端以退出码 1 结束，提示运行期落库失败）。
+- 云端后端的前台 `run`（`run --backend cloud`）里 worker 的任务没能启动（如拉不到镜像、缺少 secret）时，job 的判定消息给出退出码 255 与 ECS 报出的停止原因（如「TaskFailedToStart: CannotPullContainerError: …」），与 `submit` 下同一故障的判定一致；此前记为退出码 1 并提示查看 worker 日志，而容器没有启动时并没有 worker 日志。这种情形下判定也不再多等几秒。任务已停止却始终没有给出退出码的其他情形同样记为 255 并附上原因。
+- Midscene worker 收到停止信号之后不再开始新的 step 与 scenario；此前在会话停止之前的几秒里，它仍会为下一个 step 调用模型、产生费用。停止期间除收尾本身的报告上传与排队中文件的上传之外，不再发起别的上传（step 与 scope 结束时的报告上传、诊断日志与 step 证据的上传、整目录上传剩余产物），也不再删除本地的运行目录；此前运行目录可能先被删除，收尾时的报告上传随之失败。worker 的退出码以停止收尾的结果为准。
 
 ### 升级须知
 
 - 命令行工具、两个引擎 worker 与云端后端升到同一版本；同一报告目录不要混用 1.4 与 1.5 的命令行工具读写。
+- 命令行工具与引擎 worker 之间的格式版本由 1 升为 2，1.5 的 worker 不再接受旧版命令行工具发来的确定性 step 查询。1.4 的命令行工具配 1.5 的 worker 时，`list-deterministic` 与本机后端的 `run`、`submit` 在读取 worker 能力自述这一步以退出码 2 结束（提示能力自述格式版本是 2、命令行工具认的是 1）；`plan` 同样以退出码 2 结束，转述 worker 的「命令行工具与 worker 的版本不一致，请把两者装成同一版本」（1.4 的命令行工具把这条消息冠以「使用方 steps 加载失败」，实际成因是版本不一致）。处置都是把两者装成同一版本。
 - 把 `Given 打开 "https://…"` 这类导航步改成整句只写地址；用到 `页面地址匹配` 的项目把仓库 `features/steps/` 的模板复制进 `steps/`。
 - 只用 Midscene 的本机 run 若显式给了小于 63.5 秒的 `--grace`（或 `gherkai.toml` 的 `grace`），调大或删掉它。
+- 直接调用 `gherkai_runtime.compose.build_engines` 的程序传入 `run_id`，取与 `RunMeta.run_id` 相同的值（可用 `compose.new_run_id()` 生成）。
 - 部署方重新执行 `gherkai deploy`：启用设备支持（建立 Device Farm 项目与 worker 授权；部署方的凭证要有 us-west-2 上的 `devicefarm:ListProjects`、`GetProject` 与 `CreateProject`，否则这套后端不启用设备支持）、加上安装包的过期规则、撤掉在云端推进后台 run 的 Lambda 函数的 SSM 读权限。有自定义 worker 镜像 variant 的，从新版本基础镜像重新构建后用 `gherkai deploy push-worker` 推送一次，升级步骤见[云端后端](https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md)「版本与升级」。
 
 ## [1.4.9] - 2026-10-12

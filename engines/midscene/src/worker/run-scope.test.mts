@@ -104,7 +104,7 @@ function fakeBrowser(page: any, trace?: string[]): any {
 /** 接缝构造参数：事件出口默认丢弃（runStep 的用例只看 step 事件），job 只给接缝要读的键。 */
 function surfaceDeps(over: Record<string, unknown> = {}): any {
   return {
-    job: { schemaVersion: 1, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target: DESKTOP, deviceRequest: null },
+    job: { schemaVersion: 2, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target: DESKTOP, deviceRequest: null },
     emit: async () => {}, log: () => {}, agentOpts: {}, uploader: {} as any, artifactRoot: undefined, requestFinalization: () => {},
     ...over,
   };
@@ -124,7 +124,7 @@ async function desktopSeam(agent: any, page: any = fakePage): Promise<any> {
   const surface = createDesktopSurface(surfaceDeps(), desktopHooks(agent, page));
   const acquired = await surface.acquire();
   assert.ok(acquired.ready, "桌面接缝应就绪");
-  return { surface, agent: acquired.agent, target: DESKTOP, sessionLost: null };
+  return { surface, agent: acquired.agent, target: DESKTOP, sessionLost: null, finalizing: () => false };
 }
 
 // ---- isTransientNetwork：白名单 + cause 链 + ENOTFOUND/EAI_AGAIN（对称 Nova test_transient_network）----
@@ -518,7 +518,7 @@ test("agentOpts: forceChromeSelectRendering 显式 false（CDP 远连浏览器�
 });
 
 
-// ---- act 边界提前上传（ADR 0029，为 Fargate 预演）：runScenario 每 step_done 后 snapshot report + mtime 去重 + 空窗跳过 ----
+// ---- act 边界提前上传（ADR 0029）：runScenario 每 step_done 后 snapshot report + mtime 去重 + 空窗跳过 ----
 // fail=true：snapshotReport 抛错（模拟上传失败）——验 worker 层 try/catch 吞错、best-effort 不打断主流程。
 function spyUploader(fail = false) {
   const snaps: string[] = [];
@@ -637,6 +637,7 @@ function shutdownSpy(opts: {
     uploader: {
       snapshotReport: async (_p: string) => { order.push("snapshot"); },
       drain: async (ms: number) => { order.push("drain"); drainBudgets.push(ms); return opts.drained ?? true; },
+      pendingNoun: () => "证据截图",
     },
     reportFile: () => rf,
     getCleanupFailed: () => opts.cleanupFailed ?? false,
@@ -739,7 +740,7 @@ test("shutdownSequence: 预算内没排空 → 一行日志、退出码不受影
 test("drainArtifactQueue: 队列已空（drain 返 true）→ 不记日志", async () => {
   const { drainArtifactQueue } = await importMod();
   const logs: string[] = [];
-  await drainArtifactQueue({ drain: async () => true }, 6000, false, (m) => logs.push(m));
+  await drainArtifactQueue({ drain: async () => true, pendingNoun: () => "证据截图" }, 6000, () => false, (m) => logs.push(m));
   assert.deepEqual(logs, []);
 });
 
@@ -747,13 +748,13 @@ test("drainArtifactQueue: 排不完的提示按 flushFollows 分两句（会 flu
   // 两句话承诺的事不同：后面跟着整目录 flush 时剩余字节还会被传上去；提前退出路径不 flush、那些截图就此丢。
   // 调用点声明、函数不猜调用栈——错句就是给使用方一个假承诺（说「改由收尾上传」而其实没人再传）。
   const { drainArtifactQueue } = await importMod();
-  const notDrained = { drain: async () => false };
+  const notDrained = { drain: async () => false, pendingNoun: () => "证据截图" };
   const withFlush: string[] = [];
-  await drainArtifactQueue(notDrained, 6000, true, (m) => withFlush.push(m));
+  await drainArtifactQueue(notDrained, 6000, () => true, (m) => withFlush.push(m));
   assert.equal(withFlush.length, 1);
   assert.ok(withFlush[0].includes("剩余的改由收尾统一上传"), `会 flush 的路径该说剩余的由收尾传：${withFlush[0]}`);
   const noFlush: string[] = [];
-  await drainArtifactQueue(notDrained, 6000, false, (m) => noFlush.push(m));
+  await drainArtifactQueue(notDrained, 6000, () => false, (m) => noFlush.push(m));
   assert.equal(noFlush.length, 1);
   assert.ok(noFlush[0].includes("已放弃"), `不 flush 的路径该说已放弃：${noFlush[0]}`);
   assert.ok(!noFlush[0].includes("改由收尾"), "不 flush 的路径不许承诺还有人传");
@@ -763,9 +764,31 @@ test("drainArtifactQueue: drain 抛（上传器坏了 / 没这个方法）→ �
   // 收尾路径上抛就会跳过后面的 process.exit / flush，比丢几张截图严重得多（best-effort 语义）。
   const { drainArtifactQueue } = await importMod();
   const logs: string[] = [];
-  await drainArtifactQueue({ drain: async () => { throw new Error("boom"); } }, 6000, false, (m) => logs.push(m));
+  await drainArtifactQueue({ drain: async () => { throw new Error("boom"); }, pendingNoun: () => "证据截图" }, 6000, () => false, (m) => logs.push(m));
   assert.equal(logs.length, 1);
   assert.ok(logs[0].includes("boom"));
+  assert.ok(logs[0].startsWith("worker: 证据截图收尾上传失败（"), `名词同样取未落定文件的统称（只剩截图时与 Nova 同名）：${logs[0]}`);
+  // 上传器连统称也给不出（方法缺失 / 抛出）→ 用泛称，同样只记一行、不抛
+  for (const broken of [{ drain: async () => { throw new Error("boom"); } }, {
+    drain: async () => { throw new Error("boom"); }, pendingNoun: () => { throw new Error("noun"); },
+  }]) {
+    const more: string[] = [];
+    await drainArtifactQueue(broken as any, 6000, () => false, (m) => more.push(m));
+    assert.equal(more.length, 1);
+    assert.ok(more[0].startsWith("worker: 产物文件收尾上传失败（") && more[0].includes("boom"), more[0]);
+  }
+});
+
+test("drainArtifactQueue: 排不完那句的名词取上传器给的未落定文件统称（只剩截图与 Nova 同名，混排用泛称）", async () => {
+  // 队列里除截图外还可能排着设备目标的原始控件树与中断释放时的 device-session.json：名词照上传器的统称写，
+  // 不把它们一律说成截图（ADR 0039 面一「两引擎措辞一致」条）。两种分句都用同一个名词。
+  const { drainArtifactQueue } = await importMod();
+  for (const [noun, flush] of [["证据截图", false], ["产物文件", false], ["产物文件", true], ["设备诊断文件", false]] as const) {
+    const logs: string[] = [];
+    await drainArtifactQueue({ drain: async () => false, pendingNoun: () => noun }, 6000, () => flush, (m) => logs.push(m));
+    assert.equal(logs.length, 1);
+    assert.ok(logs[0].startsWith(`worker: 部分${noun}未能在收尾预算内传完（`), logs[0]);
+  }
 });
 
 
@@ -838,12 +861,12 @@ test("makeGuardedCleanup: reset() 忘掉在途记忆 → 可再清一次（建�
 // 看不见它（写法看着都对、绿也照绿）。故这条 spawn 真 worker、喂超 64KB（pipe 缓冲）的 payload，断言 stdout
 // 是完整可解析 JSON——护住「写完再退」的机制（见 run-scope.mts writeStdoutFlushed 注释里两种失败写法）。
 test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 exit 截断）", async () => {
-  const texts = new Array(2000).fill('"https://en.wikipedia.org/wiki/OpenAI"');  // 命中内建导航，输出 ≈300KB > 64KB
+  const items = new Array(2000).fill({ keyword: "Given", text: '"https://en.wikipedia.org/wiki/OpenAI"' });  // 命中内建导航，输出 ≈300KB > 64KB
   // spawn 的是**真入口** bin.mts（ADR 0037 决策 3：进程即 worker、bin 装 loader 后调 main）——
   // 截断只发生在「真 pipe + 真 process.exit + 真 tsx 非阻塞 fd 1」的组合里，故必须走入口那条路。
   const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
     { stdio: ["pipe", "pipe", "pipe"] });
-  proc.stdin.end(JSON.stringify(texts));
+  proc.stdin.end(JSON.stringify(items));
   const out: Buffer[] = [];
   proc.stdout.on("data", (c) => out.push(c));
   const code: number = await new Promise((r) => proc.on("close", r));
@@ -851,10 +874,10 @@ test("--match-steps: 超 64KB payload 经 pipe 完整送出（ADR 0036，不被 
   assert.equal(code, 0, `worker 应以退出码 0 结束，stdout ${raw.length} 字符`);
   assert.ok(Buffer.byteLength(raw) > 65536, `payload 须超 pipe 缓冲才有意义，实际 ${Buffer.byteLength(raw)} 字节`);
   const got = JSON.parse(raw);  // 截断时这里抛（rc 仍 0，故只靠退出码守不住）
-  assert.equal(got.length, texts.length, "逐条命中结果不该丢");
+  assert.equal(got.length, items.length, "逐条命中结果不该丢");
 });
 
-test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只有地址是 keyword_mismatch、Given 命中内建导航、使用方宽模式与内建导航同时命中是 conflict、裸字符串不核关键字、未命中是 null（ADR 0036、0050 决策 1）", async () => {
+test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只有地址是 keyword_mismatch、Given 命中内建导航、使用方宽模式与内建导航同时命中是 conflict、keyword 为 null 不核关键字、未命中是 null（ADR 0036、0050 决策 1）", async () => {
   const { ADDRESS_PATTERN } = await import("./deterministic.steps.mjs");
   // 使用方 steps 目录里一条与内建导航撞车的宽模式（经真入口的 GHERKAI_STEPS_DIR 加载，ADR 0037 决策 4）
   const stepsDir = fs.mkdtempSync(path.join(os.tmpdir(), "gherkai-match-conflict-"));
@@ -862,7 +885,7 @@ test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只�
   fs.writeFileSync(path.join(stepsDir, "wide.mts"),
     `import { deterministic } from "@gherkai/worker-midscene";\ndeterministic(String.raw\`${wide}\`, () => {}, { description: "d", example: "Given https://conflict.example/" });\n`);
   const items = [{ keyword: "Then", text: '"https://x.example/"' }, { keyword: "Given", text: '"https://x.example/"' },
-                 { keyword: "Given", text: "https://conflict.example/a" }, '"https://x.example/"', { keyword: "When", text: "没有这条" }];
+                 { keyword: "Given", text: "https://conflict.example/a" }, { keyword: null, text: '"https://x.example/"' }, { keyword: "When", text: "没有这条" }];
   const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
     { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, GHERKAI_STEPS_DIR: stepsDir } });
   proc.stdin.end(JSON.stringify(items));
@@ -877,6 +900,23 @@ test("--match-steps: 真入口按 {keyword, text} 回答四态——Then 后只�
   assert.deepEqual(got[2], { conflict: [ADDRESS_PATTERN, wide] });
   assert.equal(got[3].pattern, ADDRESS_PATTERN);
   assert.equal(got[4], null);
+});
+
+test("--match-steps: 输入不合契约（裸字符串数组、缺 keyword 键、不是 JSON）时真入口 stderr 只写版本不一致那一句、非零退出、stdout 不出结果（ADR 0036 决策 4）", async () => {
+  const { MATCH_INPUT_MISMATCH } = await import("./deterministic.mjs");
+  for (const payload of ['["https://bare.example/"]', '[{"text": "https://bare.example/"}]', "not json"]) {
+    const proc = spawn(process.execPath, [path.join(import.meta.dirname, "..", "bin.mts"), "--match-steps"],
+      { stdio: ["pipe", "pipe", "pipe"] });
+    proc.stdin.end(payload);
+    const out: Buffer[] = []; const err: Buffer[] = [];
+    proc.stdout.on("data", (c) => out.push(c)); proc.stderr.on("data", (c) => err.push(c));
+    const code: number = await new Promise((r) => proc.on("close", r));
+    const stderr = Buffer.concat(err).toString("utf-8");
+    assert.notEqual(code, 0, `${payload}：应以非零退出，stderr=${stderr}`);
+    assert.equal(Buffer.concat(out).length, 0, `${payload}：stdout 不该有结果`);
+    assert.ok(stderr.includes(MATCH_INPUT_MISMATCH), `${payload}：stderr=${stderr}`);
+    assert.ok(!stderr.includes("worker fatal") && !/\n\s+at /.test(stderr), `${payload}：不该有 fatal 行或堆栈，stderr=${stderr}`);
+  }
 });
 
 
@@ -908,7 +948,7 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 tar
   // 消费侧读到 undefined；清单并入本对象后不再有独立的清单 flag（同 ADR 被拒方案「每个自述项一个独立 flag」）。
   assert.deepEqual(Object.keys(got).sort(),
     ["deterministic_steps", "engine", "min_grace_s", "model_id", "schema_version", "session_warmup", "targets"], `键集：${raw}`);
-  assert.equal(got.schema_version, 1);
+  assert.equal(got.schema_version, 2);  // 协议版本 2：match 查询条目改为对象而递增（ADR 0024）；本对象上增键本身不升版（0049 决策 1）
   assert.equal(got.session_warmup, true);  // 支持隧道会话预热（ADR 0051 决策 13）
   // 测试目标（ADR 0049 决策 1、2）：桌面网页，加 Android 与 iOS 的网页与应用；设备条目带由设备常量算出的 max_session_s，桌面
   // 条目不带。键是协议面的 snake_case（ui_kinds / max_session_s，不是注册面的 uiKinds），与 Nova 侧形状相同——CLI 的契约校验
@@ -1068,7 +1108,7 @@ test("--capabilities: MIDSCENE_MODEL_ID 覆盖时自报的 model_id 跟着变（
   assert.notEqual(got.model_id, DEFAULT_MODEL, "覆盖了还等于默认，说明这个覆盖项其实没接上");
 });
 
-test("模型家族推不出 → worker 启动期即非零退出，连自述入口都被挡下（不等到建了云端浏览器会话才炸）", async () => {
+test("模型家族推不出 → worker 启动期即非零退出，连自述入口都被挡下（不等到建了云端浏览器会话才失败）", async () => {
   const { code, out, err } = await spawnWorker(["--capabilities"],
     { MIDSCENE_MODEL_ID: "nonexistent.model-x", MIDSCENE_MODEL_FAMILY: undefined });
   assert.notEqual(code, 0, `坏配置该被拒，stdout=${out}`);
@@ -1216,6 +1256,7 @@ function fakeUploader(trace: string[]): any {
   return {
     snapshotReport: async () => { trace.push("snapshotReport"); },
     drain: async (ms: number) => { trace.push(`drain:${ms}`); return true; },
+    pendingNoun: () => "证据截图",
     flushAndCleanup: async () => { trace.push("flush"); },
     toReportRef: async (p: string) => `file://${p}`,
     refFor: (p: string) => `file://${p}`,
@@ -1244,7 +1285,7 @@ function scopeIo(createSurface: (deps: any) => Promise<any>, over: Record<string
 
 function aJob(scenarios: Array<{ id: string; steps: any[] }>, target: { device: string; uiKind: string } = DESKTOP): any {
   return {
-    schemaVersion: 1, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target, deviceRequest: null,
+    schemaVersion: 2, scope: SCOPE, engine: "midscene", assertionVotes: 1, timeoutS: null, target, deviceRequest: null,
     scenarios: scenarios.map((sc) => ({ name: sc.id, ...sc })),
   };
 }
@@ -1301,7 +1342,7 @@ function evidenceHook(trace: string[]): any {
 function deviceSeam(trace: string[], over: Record<string, unknown> = {}, agent: any = scopeAgent({ trace })) {
   const events: any[] = [];
   const sink = { emit: async (e: any) => { events.push(e); trace.push(`emit:${e.type}`); } };
-  return { seam: { surface: recordingSurface(trace, over), agent, target: ANDROID_WEB, sessionLost: null } as any, sink, events };
+  return { seam: { surface: recordingSurface(trace, over), agent, target: ANDROID_WEB, sessionLost: null, finalizing: () => false } as any, sink, events };
 }
 
 test("step 顺序：step_started → step 前核对 → 执行窗口 → 读地址（暂定判定）→ 复原 → 快照（最终判定）→ evidence → step_done → 入队", async () => {
@@ -1322,6 +1363,38 @@ test("step 顺序：step_started → step 前核对 → 执行窗口 → 读地�
   ]);
   const done = events.find((e) => e.type === "step_done");
   assert.equal(done.reportRefs[0].kind, "evidence", "设备 AI step 的 evidence 随 step_done 走");
+});
+
+test("进入终结之后的 evidence 产出（ADR 0051 决策 5「进入终结之后主流程让位」②）：在途 step 返回时已进入终结 → 不产 evidence、不入队；evidence.json 上传在途时进入终结 → 不入队", async () => {
+  const { runStep } = await importMod();
+  const pageSource = {
+    snapshot: async (f: any) => ({ snapshot: { url: null, url_missing: "no_web_context", step_kind: f.kind, controls: null, controls_missing: "error",
+      page_source_path: path.join(os.tmpdir(), "page-source-0.xml"), page_source_truncated: false }, failure: null }),
+  };
+  // ① act 在途时进入终结
+  {
+    const trace: string[] = [];
+    let finalizing = false;
+    const { seam, sink, events } = deviceSeam(trace, pageSource, { ...scopeAgent(), aiAct: async () => { finalizing = true; throw new Error("finalizing"); } });
+    seam.finalizing = () => finalizing;
+    const hook = evidenceHook(trace);
+    assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, hook), "error");
+    assert.ok(!trace.some((t) => t.startsWith("enqueue:")), trace.join(" "));
+    assert.equal(events.find((e) => e.type === "step_done").reportRefs, undefined, "evidence 不再产出");
+    assert.deepEqual(fs.readdirSync(hook.runDir), [], "evidence.json 不写出");
+  }
+  // ② evidence.json 的即时上传在途时进入终结：这份 evidence 照常产出，截图与原始控件树不再入队
+  {
+    const trace: string[] = [];
+    let finalizing = false;
+    const { seam, sink, events } = deviceSeam(trace, pageSource, { ...scopeAgent(), aiAct: async () => { throw new Error("AI boom"); } });
+    seam.finalizing = () => finalizing;
+    const hook = evidenceHook(trace);
+    hook.uploader.toReportRef = async (p: string) => { finalizing = true; return `file://${p}`; };
+    assert.equal(await runStep(seam, "sc:0", step("When", '"点一下"'), 1, sink, hook), "error");
+    assert.equal(events.find((e) => e.type === "step_done").reportRefs[0].kind, "evidence");
+    assert.ok(!trace.some((t) => t.startsWith("enqueue:")), trace.join(" "));
+  }
 });
 
 test("step 顺序：没有 evidence 落点时不读地址、不采快照（只有核对、执行与复原）", async () => {
@@ -1632,36 +1705,72 @@ test("预热失败（设备）：释放 → 排空 → scope_done{error, 归因}
   assert.ok(trace.indexOf("drain:6000") < trace.indexOf("emit:scope_done"));
 });
 
-test("停止信号：进入终结后在途 step 不再发 step_done、也不发 scope_done；interrupt 释放 → 中断兜底提前上传 → 排空 → 退出", async () => {
+test("停止信号：进入终结后在途 step 不再发 step_done、也不发 scope_done；interrupt 释放 → 中断兜底提前上传 → 排空 → 退出；主流程不再开始下一条 scenario", async () => {
   const { runScope } = await importMod();
   let open!: () => void;
   const gate = new Promise<void>((r) => { open = r; });
   const surfaceTrace: string[] = [];
   const { io, trace, events, signal, exited } = scopeIo(async (deps) => fakeDeviceSurface(deps, surfaceTrace, {}, scopeAgent({ gate, reportFile: "/tmp/run/report.html" })));
-  const running = runScope(aJob([{ id: "f:1", steps: [step("When", '"一"'), step("When", '"二"', 1)] }], ANDROID_WEB), io);
+  const running = runScope(aJob([
+    { id: "f:1", steps: [step("When", '"一"'), step("When", '"二"', 1)] },
+    { id: "f:2", steps: [step("When", '"三"')] },
+  ], ANDROID_WEB), io);
   while (!events.some((e) => e.type === "step_started")) await new Promise((r) => setTimeout(r, 1));
   signal();
   while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
   open();
-  await running;
+  assert.equal(await running, 0, "主流程返回收尾序列的退出码");
   const tail = trace.slice(trace.indexOf("emit:step_started") + 1, trace.indexOf("exit:0") + 1);
   assert.deepEqual(tail, ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0"]);
+  assert.deepEqual(trace.slice(trace.indexOf("exit:0") + 1), [], "在途 step 返回之后主流程不再发起上传、排空或整目录 flush");
   assert.ok(surfaceTrace.includes("release:interrupt"));
+  assert.ok(!surfaceTrace.includes("preScenarioCheck"), "进入终结之后不开始下一条 scenario，scenario 前核对也不调用");
+  assert.equal(surfaceTrace.filter((t) => t === "preStep").length, 1, "进入终结之后不开始下一个 step");
   assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "session_closed"],
     "终结之后只剩会话事件：在途 step 的 step_done、scenario_done 与 scope_done 都不发");
+});
+
+test("停止信号落在设备获取期：acquire 随后返回的执行前失败不被使用，释放之后让位——不发 scope_done、不排空、不 flush，runScope 以收尾序列的退出码结束", async () => {
+  const { runScope } = await importMod();
+  let acquiring = false;
+  let finishAcquire!: () => void;
+  const acquireGate = new Promise<void>((r) => { finishAcquire = r; });
+  const { io, trace, events, signal, exited } = scopeIo(async (deps) => fakeDeviceSurface(deps, [], {
+    acquire: async () => {
+      await deps.emit({ type: "session_opened", scopeId: SCOPE.id, sessionId: "arn:s1", name: "n", origin: "created" });
+      acquiring = true;
+      await acquireGate;
+      return { ready: false, termination: { errorType: "engine_error", message: "获取被停止信号中断" } };
+    },
+  }));
+  const running = runScope(aJob([{ id: "f:1", steps: [step("When", '"一"')] }], ANDROID_WEB), io)
+    .then((rc) => { trace.push(`resolved:${rc}`); return rc; });
+  while (!acquiring) await new Promise((r) => setTimeout(r, 1));
+  signal();
+  while (exited() === undefined) await new Promise((r) => setTimeout(r, 1));
+  finishAcquire();
+  assert.equal(await running, 0);
+  assert.deepEqual(types(events), ["session_opened", "session_closed"], "这个结论只进日志，不发 scope_done");
+  assert.deepEqual(trace.slice(trace.indexOf("emit:session_closed") + 1), ["drain:6000", "exit:0", "resolved:0"],
+    "只有收尾序列的排空；主流程的排空与整目录 flush 不再开始");
 });
 
 // ---- 桌面：每个 AgentCore 会话恰一对会话事件，与 main 级次序（真实桌面实现 + 假控制面与假 CDP；ADR 0051 决策 4、0028）----
 
 function econnreset(): Error { return Object.assign(new Error("connect ECONNRESET 10.0.0.1:443"), { code: "ECONNRESET" }); }
 
-/** 桌面实现的工厂：connectOverCDP 依 failures 次序决定第几次失败（true 即抛 ECONNRESET）；hooks 覆盖其余测试注入项（如退避序列）。 */
-function desktopFactory(agent: any, opts: { core?: ReturnType<typeof fakeAgentCore>; failures?: boolean[]; page?: any; hooks?: Record<string, unknown> } = {}) {
+/** 桌面实现的工厂：connectOverCDP 依 failures 次序决定第几次失败（true 即抛 ECONNRESET）；hooks 覆盖其余测试注入项（如退避序列）；
+ *  给了 logs 就把桌面实现写的日志收进它。 */
+function desktopFactory(agent: any, opts: {
+  core?: ReturnType<typeof fakeAgentCore>; failures?: boolean[]; page?: any; hooks?: Record<string, unknown>; logs?: string[];
+} = {}) {
   const core = opts.core ?? fakeAgentCore();
   let attempt = 0;
   const createSurface = async (deps: any) => {
     const { createDesktopSurface } = await import("./surface-desktop.mjs");
-    return createDesktopSurface({ ...deps, agentOpts: {} }, desktopHooks(agent, opts.page ?? fakePage, {
+    const logs = opts.logs;
+    const log = logs === undefined ? deps.log : (m: string) => { logs.push(m); };
+    return createDesktopSurface({ ...deps, agentOpts: {}, log }, desktopHooks(agent, opts.page ?? fakePage, {
       client: core.client,
       connectOverCDP: async () => { const fail = opts.failures?.[attempt++] ?? false; if (fail) throw econnreset(); return fakeBrowser(opts.page ?? fakePage); },
       ...opts.hooks,
@@ -1715,13 +1824,17 @@ test("桌面建连重试：丢弃的 attempt 确认停止即发 confirmed，下�
 test("桌面建连重试：丢弃那次的 Stop 没成功 → 先不发，留到最后一次清理按最终处置发（每个会话恰一条）", async () => {
   const { runScope } = await importMod();
   const core = fakeAgentCore({ stopFails: (sid, nth) => sid === "sess-1" && nth === 1 });
-  const { createSurface } = desktopFactory(scopeAgent(), { core, failures: [true, false] });
+  const logs: string[] = [];
+  const { createSurface } = desktopFactory(scopeAgent(), { core, failures: [true, false], logs });
   const { io, events } = scopeIo(createSurface);
   assert.equal(await runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), 0);
   assert.deepEqual(events.slice(0, 3), [opened("sess-1"), opened("sess-2"), { type: "scope_started", scopeId: SCOPE.id, sessionId: "sess-2" }]);
   const closings = events.filter((e) => e.type === "session_closed");
   assert.deepEqual(closings.map((e) => [e.sessionId, e.release]).sort(), [["sess-1", "confirmed"], ["sess-2", "confirmed"]]);
   assert.ok(events.indexOf(closings[0]) > events.findIndex((e) => e.type === "scenario_done"));
+  // 丢弃那次的 Stop 失败只记事实；会话随后由最终清理确认停止，日志里不能出现让使用方手动停止的提示（否则与随后的确认停止矛盾）
+  assert.ok(logs.includes("worker: 停止浏览器会话 sess-1 时出错：stop failed: sess-1"), logs.join("\n"));
+  assert.equal(logs.filter((m) => m.includes("手动停止")).length, 0, logs.join("\n"));
 });
 
 test("桌面建连重试耗尽：每个 attempt 成对 confirmed、不发 scope_started，释放之后排空、以 80 退出；最终仍有会话没停住则改为重抛（释放优先）", async () => {
@@ -1735,11 +1848,15 @@ test("桌面建连重试耗尽：每个 attempt 成对 confirmed、不发 scope_
   assert.ok(trace.lastIndexOf("emit:session_closed") < trace.indexOf("drain:6000"), trace.join(" "));
 
   const leaking = fakeAgentCore({ stopFails: () => true });
-  const { createSurface: leakingSurface } = desktopFactory(scopeAgent(), { core: leaking, failures: [true, true, true, true] });
+  const leakLogs: string[] = [];
+  const { createSurface: leakingSurface } = desktopFactory(scopeAgent(), { core: leaking, failures: [true, true, true, true], logs: leakLogs });
   const { io: io2, events: events2 } = scopeIo(leakingSurface);
   await assert.rejects(runScope(aJob([{ id: "f:1", steps: [] }]), io2), /ECONNRESET/);
   assert.deepEqual(events2.filter((e) => e.type === "session_closed").map((e) => e.release), ["unconfirmed", "unconfirmed", "unconfirmed", "unconfirmed"],
     "丢弃的会话没能确认停止 → 最终清理按 unconfirmed 发，core 改判 release_failed");
+  // 处置提示只在最终清理判为未确认时给，每个会话一条、点名会话；丢弃语义那几次的 Stop 失败不给
+  assert.deepEqual(leakLogs.filter((m) => m.includes("手动停止")).sort(), ["sess-1", "sess-2", "sess-3", "sess-4"].map((sid) =>
+    `worker: 浏览器会话 ${sid} 未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止`), leakLogs.join("\n"));
 });
 
 test("桌面预热失败：释放（session_closed）→ 排空 → scope_done{error, 归因, sessionId}，没有 scope_started，退出码 0", async () => {
@@ -1852,6 +1969,315 @@ test("桌面停止信号落在建连期间、建连在 interrupt 释放的 Stop 
   assert.deepEqual(sessionEvents, [opened("sess-1"), closed("sess-1")]);
   assert.equal(outcome.releaseFailed, false);
   assert.equal(core.names.length, 1);
+});
+
+// ---- 进入终结之后主流程让位（ADR 0051 决策 5「进入终结之后主流程让位」；真实桌面实现 + 假控制面与假 CDP）----
+// 三个窗口各一条：act 在途、正常收尾的释放进行中、scope 末的上传 / 排空 / 整目录 flush 在途；另有建连成功返回与异常出口两处。
+// 每条都核对：停止信号之后不为新的 step 调模型、除中断兜底上传与排空之外没有新发起的上传、运行目录不被删除，runScope 在收尾
+// 序列退出之后才以它的退出码结束（入口按返回值退出进程，先返回会截断收尾序列）。单测只锁门控与次序，真实时序仍要在桌面目标上核对。
+
+/** 在一个临时的 MIDSCENE_RUN_DIR 下执行（evidence 落点、诊断日志目录与整目录 flush 的根都由它决定），结束后还原。 */
+async function withRunDir<T>(fn: (dir: string) => Promise<T>): Promise<T> {
+  const prev = process.env.MIDSCENE_RUN_DIR;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "seam-yield-"));
+  process.env.MIDSCENE_RUN_DIR = dir;
+  try {
+    return await fn(dir);
+  } finally {
+    if (prev === undefined) delete process.env.MIDSCENE_RUN_DIR; else process.env.MIDSCENE_RUN_DIR = prev;
+  }
+}
+
+/** 逐毫秒让出事件循环，直到条件成立。 */
+async function until(cond: () => boolean): Promise<void> {
+  while (!cond()) await new Promise((r) => setTimeout(r, 1));
+}
+
+/** 让假上传器把报告上传（含 evidence.json）与诊断日志的提前上传也记进 trace。默认的假上传器不记这两项：step 顺序那组按逐项相等
+ *  断言 trace。 */
+function traceUploads(io: any, trace: string[]): void {
+  io.uploader.toReportRef = async (p: string) => { trace.push(`toReportRef:${path.basename(p)}`); return `file://${p}`; };
+  io.uploader.snapshotLogs = async () => { trace.push("snapshotLogs"); };
+}
+
+/** 应答可以延后的 StopBrowserSession：asked 表示请求已到，answer 放行应答。 */
+function slowStopCore() {
+  const core = fakeAgentCore();
+  let asked = false;
+  let answer!: () => void;
+  const gate = new Promise<void>((r) => { answer = r; });
+  const client = { send: async (cmd: any) => {
+    if (cmd instanceof StopBrowserSessionCommand) { asked = true; await gate; }
+    return await core.client.send(cmd);
+  } };
+  return { core: { ...core, client: client as any }, asked: () => asked, answer: () => answer() };
+}
+
+/** runScope 结束时在 trace 里记一笔，好断言它排在收尾序列的退出之后。 */
+function traced(running: Promise<number>, trace: string[]): Promise<number> {
+  return running.then((rc) => { trace.push(`resolved:${rc}`); return rc; });
+}
+
+test("让位·act 在途时收到停止信号：act 返回之后不产 evidence、不提前上传，不再为下一个 step 调模型，不 destroy、不上传报告、不排空、不 flush", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async (dir) => {
+    const reportFile = path.join(dir, "report.html");
+    fs.writeFileSync(reportFile, "<html>");
+    let open!: () => void;
+    const gate = new Promise<void>((r) => { open = r; });
+    const agentTrace: string[] = [];
+    const { createSurface } = desktopFactory(scopeAgent({ gate, reportFile, trace: agentTrace }));
+    const { io, trace, events, signal, exited } = scopeIo(createSurface);
+    traceUploads(io, trace);
+    const running = traced(runScope(aJob([
+      { id: "f:1", steps: [step("When", '"一"'), step("When", '"二"', 1)] },
+      { id: "f:2", steps: [step("When", '"三"')] },
+    ]), io), trace);
+    await until(() => agentTrace.includes("aiAct"));
+    signal();
+    await until(() => exited() !== undefined);
+    open();  // 桌面的 act 不接受中止信号，会话停止之后才返回
+    assert.equal(await running, 0);
+    assert.deepEqual(agentTrace, ["aiAct"], "停止信号之后不为新的 step 调模型，也不执行 agent.destroy");
+    assert.deepEqual(trace.slice(trace.indexOf("emit:step_started") + 1),
+      ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"],
+      "除收尾序列的中断兜底上传与排空之外没有新发起的上传；runScope 在收尾序列退出之后才结束");
+    assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "session_closed"]);
+    assert.deepEqual(fs.readdirSync(dir), ["report.html"], "运行目录保留，在途 step 的 evidence 不再写出");
+  });
+});
+
+test("让位·正常收尾的释放进行中收到停止信号：释放返回之后不发 scope_done、不排空、不 flush，运行目录保留", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async (dir) => {
+    const reportFile = path.join(dir, "report.html");
+    fs.writeFileSync(reportFile, "<html>");
+    const stop = slowStopCore();
+    const { createSurface } = desktopFactory(scopeAgent({ reportFile }), { core: stop.core });
+    const { io, trace, events, signal } = scopeIo(createSurface);
+    traceUploads(io, trace);
+    const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+    await until(stop.asked);  // 正常收尾的释放已发出 Stop、应答未回
+    signal();
+    stop.answer();
+    assert.equal(await running, 0);
+    assert.deepEqual(trace.slice(trace.indexOf("emit:scenario_done") + 1),
+      ["snapshotLogs", "toReportRef:report.html", "emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"],
+      "释放汇入进行中的那次终结；之后只剩收尾序列的中断兜底上传与排空");
+    assert.ok(!types(events).includes("scope_done"));
+    assert.equal(stop.core.stops.length, 1, "同一会话只发一次 Stop");
+    assert.ok(fs.existsSync(reportFile), "运行目录没有被删除，收尾序列读得到报告");
+  });
+});
+
+test("让位·agent.destroy 在途时收到停止信号：destroy 返回之后 scope 级报告上传不再开始", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async (dir) => {
+    const reportFile = path.join(dir, "report.html");
+    fs.writeFileSync(reportFile, "<html>");
+    let destroying = false;
+    let finishDestroy!: () => void;
+    const destroyGate = new Promise<void>((r) => { finishDestroy = r; });
+    const agent = { ...scopeAgent({ reportFile }), destroy: async () => { destroying = true; await destroyGate; } };
+    const { createSurface } = desktopFactory(agent);
+    const { io, trace, events, signal, exited } = scopeIo(createSurface);
+    traceUploads(io, trace);
+    const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+    await until(() => destroying);
+    signal();
+    await until(() => exited() !== undefined);
+    finishDestroy();
+    assert.equal(await running, 0);
+    assert.ok(!trace.includes("toReportRef:report.html"), trace.join(" "));
+    assert.deepEqual(trace.slice(trace.indexOf("snapshotLogs") + 1),
+      ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"]);
+    assert.ok(!types(events).includes("scope_done"));
+  });
+});
+
+test("让位·诊断日志的提前上传在途时收到停止信号：在途的那次读到终结标志（不再发起下一个文件），之后不开始下一条 scenario", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async () => {
+    const agentTrace: string[] = [];
+    const { createSurface } = desktopFactory(scopeAgent({ trace: agentTrace }));
+    const { io, trace, events, signal, exited } = scopeIo(createSurface);
+    traceUploads(io, trace);
+    let logStop: (() => boolean) | undefined;
+    let finishLogs!: () => void;
+    const logsGate = new Promise<void>((r) => { finishLogs = r; });
+    io.uploader.snapshotLogs = async (_dir: string, _seen: unknown, _budget: number, stopRequested: () => boolean) => {
+      trace.push("snapshotLogs"); logStop = stopRequested; await logsGate;
+    };
+    const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"一"')] }, { id: "f:2", steps: [step("When", '"二"')] }]), io), trace);
+    await until(() => logStop !== undefined);
+    assert.equal(logStop!(), false);
+    signal();
+    await until(() => exited() !== undefined);
+    assert.equal(logStop!(), true, "在途的提前上传读到终结标志");
+    finishLogs();
+    assert.equal(await running, 0);
+    assert.deepEqual(agentTrace, ["aiAct"], "第二条 scenario 不再开始");
+    assert.deepEqual(trace.slice(trace.indexOf("snapshotLogs") + 1), ["emit:session_closed", "drain:6000", "exit:0", "resolved:0"]);
+    assert.ok(!types(events).includes("scope_done"));
+  });
+});
+
+test("让位·scope 级报告上传在途时收到停止信号：在途的上传不中止，之后不排空、不 flush", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async (dir) => {
+    const reportFile = path.join(dir, "report.html");
+    fs.writeFileSync(reportFile, "<html>");
+    const { createSurface } = desktopFactory(scopeAgent({ reportFile }));
+    const { io, trace, events, signal, exited } = scopeIo(createSurface);
+    traceUploads(io, trace);
+    let uploading = false;
+    let finishUpload!: () => void;
+    const uploadGate = new Promise<void>((r) => { finishUpload = r; });
+    const recordRef = io.uploader.toReportRef;
+    io.uploader.toReportRef = async (p: string) => {
+      const ref = await recordRef(p);
+      if (path.basename(p) === "report.html") { uploading = true; await uploadGate; }
+      return ref;
+    };
+    const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+    await until(() => uploading);
+    signal();
+    await until(() => exited() !== undefined);
+    finishUpload();
+    assert.equal(await running, 0);
+    assert.deepEqual(trace.slice(trace.indexOf("toReportRef:report.html") + 1),
+      ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"]);
+    assert.ok(!types(events).includes("scope_done"));
+    assert.ok(fs.existsSync(reportFile));
+  });
+});
+
+test("让位·scope 末的排空在途时收到停止信号：排空返回之后不 flush；排不完的那句改用不跟 flush 的说法（截图已放弃）", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async () => {
+    const { createSurface } = desktopFactory(scopeAgent());
+    const { io, trace, signal, exited } = scopeIo(createSurface);
+    let finishDrain!: () => void;
+    const drainGate = new Promise<void>((r) => { finishDrain = r; });
+    io.uploader.drain = async (ms: number) => {
+      trace.push(`drain:${ms}`);
+      if (ms === 30_000) { await drainGate; return false; }  // 正常收尾的排空：在途、最终没排完
+      return true;
+    };
+    const lines: string[] = [];
+    const write = process.stderr.write;
+    (process.stderr as any).write = (chunk: unknown) => { lines.push(String(chunk)); return true; };
+    try {
+      const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+      await until(() => trace.includes("drain:30000"));
+      signal();
+      await until(() => exited() !== undefined);
+      finishDrain();
+      assert.equal(await running, 0);
+    } finally {
+      process.stderr.write = write;
+    }
+    assert.ok(!trace.includes("flush"), trace.join(" "));
+    const drained = lines.filter((l) => l.includes("部分证据截图未能在收尾预算内传完"));
+    assert.equal(drained.length, 1, lines.join(""));
+    assert.ok(drained[0].includes("已放弃") && !drained[0].includes("改由收尾"), `让位之后不再 flush，不许承诺收尾再传：${drained[0]}`);
+  });
+});
+
+test("让位·整目录 flush 在途时收到停止信号：flush 读到终结标志；runScope 不以自己的结论先返回，等收尾序列退出之后才结束", async () => {
+  const { runScope } = await importMod();
+  await withRunDir(async () => {
+    const { createSurface } = desktopFactory(scopeAgent({ reportFile: "/tmp/run/report.html" }));
+    const { io, trace, signal } = scopeIo(createSurface);
+    let flushStop: (() => boolean) | undefined;
+    let finishFlush!: () => void;
+    const flushGate = new Promise<void>((r) => { finishFlush = r; });
+    io.uploader.flushAndCleanup = async (_root: string, stopRequested: () => boolean) => {
+      trace.push("flush"); flushStop = stopRequested; await flushGate;
+    };
+    let signalled = false;
+    let finishSnapshot!: () => void;
+    const snapshotGate = new Promise<void>((r) => { finishSnapshot = r; });
+    io.uploader.snapshotReport = async () => { trace.push("snapshotReport"); if (signalled) await snapshotGate; };
+    const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+    await until(() => flushStop !== undefined);
+    assert.equal(flushStop!(), false);
+    signalled = true;
+    signal();
+    await until(() => trace.filter((t) => t === "snapshotReport").length > 0);  // 收尾序列停在中断兜底上传
+    assert.equal(flushStop!(), true, "在途的 flush 读到终结标志：不再发起下一个文件、不删目录");
+    finishFlush();
+    await new Promise((r) => setTimeout(r, 20));
+    assert.ok(!trace.some((t) => t.startsWith("resolved:")), "flush 返回之后主流程不以自己的结论返回，等收尾序列");
+    finishSnapshot();
+    assert.equal(await running, 0);
+    assert.deepEqual(trace.slice(trace.indexOf("flush") + 1), ["snapshotReport", "drain:6000", "exit:0", "resolved:0"]);
+  });
+});
+
+test("让位·桌面建连成功返回时已进入终结：不交出被测对象、不预热、不发 scope_started，runScope 以收尾序列的退出码结束", async () => {
+  const { runScope } = await importMod();
+  const gotos: string[] = [];
+  const page = { goto: async (u: string) => { gotos.push(u); return { status: () => 200 }; } };
+  let connecting = false;
+  let finishConnect!: () => void;
+  const connectGate = new Promise<void>((r) => { finishConnect = r; });
+  const { core, createSurface } = desktopFactory(scopeAgent(), {
+    page, hooks: { connectOverCDP: async () => { connecting = true; await connectGate; return fakeBrowser(page); } },
+  });
+  const { io, trace, events, signal, exited } = scopeIo(createSurface, { warmupUrl: "https://tunnel.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=t" });
+  const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+  await until(() => connecting);  // Start 已返回、CDP 握手在途
+  signal();
+  await until(() => exited() !== undefined);
+  finishConnect();  // 建连在会话停止之后成功返回
+  assert.equal(await running, 0);
+  assert.deepEqual(gotos, [], "不预热、不导航");
+  assert.deepEqual(types(events), ["session_opened", "session_closed"], "不发 scope_started");
+  assert.deepEqual(core.names.length, 1);
+  assert.ok(trace.indexOf("exit:0") < trace.indexOf("resolved:0"), trace.join(" "));
+});
+
+test("让位·异常出口的释放进行中收到停止信号：排空不再开始、scope_done 不发，runScope 等收尾序列退出之后以它的退出码结束", async () => {
+  const { runScope } = await importMod();
+  const W = await import("../lib/tunnel-warmup.mjs");
+  const page = { goto: async () => ({ status: () => 200 }), title: async () => W.WARMUP_TITLES.denied, url: () => "about:blank" };
+  const stop = slowStopCore();
+  const { createSurface } = desktopFactory(scopeAgent({ reportFile: "/tmp/run/report.html" }), { core: stop.core, page });
+  const { io, trace, events, signal } = scopeIo(createSurface, { warmupUrl: "https://tunnel.example/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=t" });
+  let finishSnapshot!: () => void;
+  const snapshotGate = new Promise<void>((r) => { finishSnapshot = r; });
+  io.uploader.snapshotReport = async () => { trace.push("snapshotReport"); await snapshotGate; };
+  const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+  await until(stop.asked);  // 预热失败，异常出口的释放已发出 Stop
+  signal();
+  stop.answer();
+  await until(() => trace.includes("snapshotReport"));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!trace.some((t) => t.startsWith("resolved:")), "异常出口不以自己的结论先返回");
+  finishSnapshot();
+  assert.equal(await running, 0);
+  assert.deepEqual(types(events), ["session_opened", "session_closed"], "scope_done 已被门控");
+  assert.deepEqual(trace.filter((t) => t.startsWith("drain:")), ["drain:6000"], "只有收尾序列排空一次，异常出口的排空不再开始");
+  assert.ok(trace.indexOf("exit:0") < trace.indexOf("resolved:0"), trace.join(" "));
+});
+
+test("让位·异常出口的释放进行中收到停止信号、异常随后原样重抛：runScope 不把异常抛给入口，等收尾序列退出之后以它的退出码结束", async () => {
+  const { runScope } = await importMod();
+  const stop = slowStopCore();
+  const { createSurface } = desktopFactory(scopeAgent(), { core: stop.core });
+  const { io, trace, events, signal } = scopeIo(createSurface);
+  // scope_started 写出失败是异常出口原样重抛的那一类（不是预热失败、也不是建连重试耗尽）
+  const emit = io.emit;
+  io.emit = async (e: any) => { await emit(e); if (e.type === "scope_started") throw new Error("事件出口写入失败"); };
+  const running = traced(runScope(aJob([{ id: "f:1", steps: [step("When", '"做事"')] }]), io), trace);
+  await until(stop.asked);  // 异常出口的释放已发出 Stop、应答未回
+  signal();
+  stop.answer();
+  assert.equal(await running, 0, "异常不交给入口：入口的 fatal 出口会以 1 退出、截断收尾序列");
+  assert.deepEqual(types(events), ["session_opened", "scope_started", "session_closed"]);
+  assert.deepEqual(trace.filter((t) => t.startsWith("drain:")), ["drain:6000"], "只有收尾序列排空一次");
+  assert.ok(trace.indexOf("exit:0") < trace.indexOf("resolved:0"), trace.join(" "));
 });
 
 test("桌面缺本次运行的编号（RUN_ID）→ 构造期报错、点名该变量，不建会话、不发任何事件", async () => {

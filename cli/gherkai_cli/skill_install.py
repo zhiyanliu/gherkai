@@ -6,14 +6,14 @@
 **语义是整目录收敛、不是幂等覆盖**（ADR 0043 决策三）：先删目标 skill 目录、整份写入包内那份、再写
 `.gherkai-skill-version` 标记；装完的目录是包内那份 + 该标记（标记只存在于安装态，包内不得有），
 跨版本升级不会留下上一版多出来的 reference。删前只认三种目标：不存在 / 空 / 带标记——否则以退出码 2 结束，
-防 `--dir` 打错把使用方自己的目录整掉。
+防 `--dir` 打错时误删使用方自己的目录。
 
 **版本由调用方传进来**（`__main__._cmd_skill_install` 交 `_installed_version()`，与后端版本 skew 比对同一取法，
 ADR 0037 决策 7）：本模块不自己去要版本，既避免与 `__main__` 循环 import，也让「版本怎么取」单点维护。
 从源码直接运行取不到 → 标记记 `UNKNOWN_VERSION`、安装照常完成（与「取不到就跳过比较」的分叉一致）；
 `_dist_version()` 给 `--version` 显示用的占位串绝不写进标记。
 
-**输出面**：stdout 只属 `--print`（供管道），其余全部诊断走 stderr（同 `console.progress` 的约定）。
+**输出面**：stdout 只属 `--print`（供管道），其余全部诊断经 `console.progress` 输出到 stderr（本模块内别名 `_stderr`）。
 退出码只有 0 / 2。
 """
 from __future__ import annotations
@@ -23,13 +23,15 @@ import sys
 from importlib.resources import as_file, files
 from pathlib import Path
 
+from gherkai_cli.console import progress as _stderr
+
 # skill 名、目录名与 frontmatter 的 name 三者相同（ADR 0043 决策六的形态护栏据此断言）
 SKILL_NAME = "gherkai"
 # 安装态标记：值为已安装发行版本；它是「这个目录是本命令装的」的唯一凭据（删前判据）
 MARKER_NAME = ".gherkai-skill-version"
 UNKNOWN_VERSION = "版本未知"
 
-# 一行提示，人手贴进项目的 agent 指令文件即可（发现与触发靠 SKILL.md 的 frontmatter，这行只是兜底提示）。
+# 一行提示，由使用者手动加入项目的 agent 指令文件即可（发现与触发靠 SKILL.md 的 frontmatter，这行只是兜底提示）。
 # 刻意**不带路径**：项目级 / 用户级两种落点混着写会让这行随机器而异，而它是要提交进仓库的。
 POINTER_LINE = "驾驭 gherkai 用 skill `gherkai`"
 
@@ -37,11 +39,6 @@ POINTER_LINE = "驾驭 gherkai 用 skill `gherkai`"
 _AGENT_SKILL_HOME = {"claude-code": Path(".claude") / "skills", "codex": Path(".agents") / "skills"}
 _AGENT_POINTER_FILE = {"claude-code": "CLAUDE.md", "codex": "AGENTS.md"}
 AGENT_CHOICES = ("claude-code", "codex", "all")
-
-
-def _stderr(*parts, end: str = "\n") -> None:
-    """诊断 → stderr（stdout 留给 `--print` 的管道产出）。"""
-    print(*parts, end=end, file=sys.stderr)
 
 
 def _packaged_skill_dir():
@@ -58,7 +55,7 @@ def _print_skill() -> int:
     try:
         text = (_packaged_skill_dir() / "SKILL.md").read_text(encoding="utf-8")
     except OSError as e:
-        _stderr(f"装的 gherkai 里找不到 skill 内容（安装包不完整？）：{e}。重装 gherkai 后再试")
+        _stderr(f"已安装的 gherkai 中缺少 skill 内容，安装包可能不完整：{e}。请重新安装 gherkai 后重试")
         return 2
     print(text, end="")
     return 0
@@ -74,7 +71,7 @@ def _converge(src: Path, dst: Path, version_text: str) -> None:
 
 
 def _is_ours(dst: Path) -> bool:
-    """删得起吗：不存在 / 空目录 / 带安装标记 → 是；其余（含目标是文件）→ 不是。"""
+    """能否安全删除：不存在、空目录或带安装标记时可以；其余情形（含目标是文件）不可以。"""
     if not dst.exists():
         return True
     if not dst.is_dir():
@@ -85,11 +82,11 @@ def _is_ours(dst: Path) -> bool:
 
 
 def _ask_pointer(paths: list[Path]) -> bool:
-    """交互终端下问一次（默认否）；非交互（管道 / CI）直接否，只打印那一行让人自己贴。"""
+    """交互终端下询问一次（默认否）；非交互（管道 / CI）直接取否，调用方只打印那一行，由使用者手动加入。"""
     stdin = getattr(sys, "stdin", None)
     if stdin is None or not stdin.isatty():
         return False
-    _stderr(f"把这一行写进 {'、'.join(str(p) for p in paths)}？(y/N) ", end="")
+    _stderr(f"是否把「{POINTER_LINE}」这一行加入 {'、'.join(str(p) for p in paths)}？(y/N) ", end="")
     try:
         reply = input()
     except EOFError:
@@ -123,11 +120,11 @@ def install(args, *, version: str | None) -> int:
     agents = _agents(args.agent)
     if args.global_:
         root = Path.home()
-        # 用户级装法没有「项目根」：指令文件仍按当前目录这个项目算（提示里给全路径，答 y 前看得见动的是谁）
+        # 用户级安装没有「项目根」：指令文件仍取当前目录所在的项目（提示里给出完整路径，回答 y 前能看到要修改哪个文件）
         pointer_root = Path.cwd()
     else:
         if args.dir is not None and not Path(args.dir).is_dir():
-            _stderr(f"--dir={args.dir!r} 不是目录：给项目根的路径（或先把它建出来）")
+            _stderr(f"--dir={args.dir!r} 不是目录。请传入项目根目录的路径，或先创建该目录")
             return 2
         root = Path(args.dir) if args.dir is not None else Path.cwd()
         pointer_root = root
@@ -136,23 +133,23 @@ def install(args, *, version: str | None) -> int:
     refused = [dst for dst in targets.values() if not _is_ours(dst)]
     if refused:
         for dst in refused:
-            _stderr(f"{dst} 里是别的东西（不是本命令装的）：安装会整个替掉它，为防误删这里先停下——"
-                    "把它挪走后再装")
+            _stderr(f"{dst} 已存在，且不是本命令安装的。安装会整个替换它，为避免误删，已停止安装。"
+                    "请先把它移到别处，然后重新执行")
         return 2
 
     version_text = version or UNKNOWN_VERSION
     with as_file(_packaged_skill_dir()) as src:
         if not (src / "SKILL.md").is_file():
-            _stderr(f"装的 gherkai 里找不到 skill 内容（安装包不完整？）：{src}。重装 gherkai 后再试")
+            _stderr(f"已安装的 gherkai 中缺少 skill 内容，安装包可能不完整：{src}。请重新安装 gherkai 后重试")
             return 2
         label = f"版本 {version}" if version else UNKNOWN_VERSION
         # 落盘失败（路径里某段是文件、只读目录、盘满…）也必须收在 0/2 的退出码里，不抛栈给使用者
         try:
             for agent, dst in targets.items():
                 _converge(Path(src), dst, version_text)
-                _stderr(f"{agent}：skill `{SKILL_NAME}` 已装到 {dst}（{label}）")
+                _stderr(f"{agent}：skill `{SKILL_NAME}` 已安装到 {dst}（{label}）")
         except OSError as e:
-            _stderr(f"装不进去：{e}。看一眼这个路径与它的写权限，再重来")
+            _stderr(f"安装失败：{e}。请检查路径中已存在的各级是否都是目录、目录是否可写、磁盘空间是否充足，然后重新执行")
             return 2
 
     pointer_paths: list[Path] = []
@@ -171,21 +168,21 @@ def install(args, *, version: str | None) -> int:
                 added = _append_pointer(p)
             except UnicodeDecodeError:
                 # 使用方的指令文件不是 UTF-8（GBK 存出的 CLAUDE.md 等）：读侧一个
-                # `read_text(encoding="utf-8")` 抛的栈不该冲到使用方眼前（同 `__main__` 读 feature 处的写法）。
+                # `read_text(encoding="utf-8")` 抛出的异常栈不应显示给使用方（同 `__main__` 读 feature 处的写法）。
                 # 宁可不写也不改用 errors="replace"：那会把使用方文件里的非 UTF-8 段落写坏。
-                # 与下面的 OSError 分开报：混在「写不进去」里会把人引去查写权限/磁盘，真因（文件编码）只剩一句
-                # 英文 codec 报文。skill 本身已装好，退出码照「没全做成」算。
-                _stderr(f"skill 已装好，但 {p} 不是 UTF-8 编码、不敢改它（怕把原文写坏）。这一行请自己贴：{POINTER_LINE}")
+                # 与下面的 OSError 分开报告：若并入「无法写入」，使用方会去查写权限或磁盘，真因（文件编码）只剩一句
+                # 英文 codec 报文。skill 本身已安装，退出码按「没有全部完成」算。
+                _stderr(f"skill 已安装，但 {p} 不是 UTF-8 编码，为避免损坏原文没有修改它。请手动加入这一行：{POINTER_LINE}")
                 rc = 2
                 continue
             except OSError as e:
-                # skill 本身已装好；只是要加的那一行没写进去——说清两件事，退出码照「没全做成」算
-                _stderr(f"skill 已装好，但写不进 {p}：{e}。这一行请自己贴：{POINTER_LINE}")
+                # skill 本身已安装，只是那一行没有写入：两件事都要说清，退出码按「没有全部完成」算
+                _stderr(f"skill 已安装，但无法写入 {p}：{e}。请手动加入这一行：{POINTER_LINE}")
                 rc = 2
                 continue
-            _stderr(f"已加进 {p}：{POINTER_LINE}" if added else f"{p} 里已有这一行，没重复加")
+            _stderr(f"已加入 {p}：{POINTER_LINE}" if added else f"{p} 中已有这一行，未重复添加")
         return rc
     else:
-        _stderr("想让 agent 更早想起它，把这一行贴进 " + "、".join(str(p) for p in pointer_paths) + "：")
+        _stderr("如需进一步提醒 agent 使用这个 skill，可把下面这一行加入 " + "、".join(str(p) for p in pointer_paths) + "：")
         _stderr(f"  {POINTER_LINE}")
     return 0

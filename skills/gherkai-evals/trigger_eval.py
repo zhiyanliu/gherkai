@@ -160,7 +160,7 @@ def main() -> None:
         with sem:
             try:
                 r = one(item["query"], item.get("project", "with-feature"), installer, a.model, a.timeout)
-            except Exception as e:  # 一条炸了不算触发也不算未触发（下面按 None 剔除）
+            except Exception as e:  # 一条出错时既不算触发也不算未触发（下面按 None 剔除）
                 r = (None, [repr(e)])
             with lock:
                 results[i].append(r)

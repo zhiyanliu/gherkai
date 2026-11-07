@@ -31,6 +31,8 @@ const SESSION_NAME = path.join(PKG_DIR, "src", "device", "session-name.mts");
 const DEVICE_DIRS = [path.join(PKG_DIR, "src", "device"), path.join(PKG_DIR, "dist", "device")];
 // 设备专属的包：WebdriverIO（含它的 webdriver 与 @wdio/ 下的包，与 src/device/read-points.test.mts 的 isDeviceSdk 同一口径）与
 // Device Farm SDK。各自的子路径与 node_modules 下的实体文件都算加载。@wdio/ 按前缀认，WebdriverIO 以后新增的子包也在其中。
+// 应用启停块所用的 `@aws-sdk/s3-request-presigner` 不在名单里：它依赖的包全部已在 client-s3 的依赖里，不进桌面路径靠的是设备模块
+// 整体动态加载（ADR 0052 决策 7）。
 const DEVICE_PACKAGES = ["webdriverio", "webdriver", "@aws-sdk/client-device-farm"];
 const DEVICE_SCOPES = ["@wdio/"];
 // 零 SDK、桌面路径也用的设备模块：限值常量与会话名编码（ADR 0051 决策 4 要求桌面请求带同格式会话名）
@@ -250,13 +252,18 @@ test("繁忙等待的重列间隔按 5、10、20 秒递增并封顶 30 秒；设
   assert.equal(DEVICE_WARMUP_ATTEMPTS, WARMUP_ATTEMPTS);
 });
 
-test("设备依赖进 dependencies、按验证过的版本精确锁定，锁文件与 package.json 同步（ADR 0052 决策 7）", () => {
+test("设备依赖进 dependencies、按验证过的版本精确锁定（presigner 用 ^ 范围），锁文件与 package.json 同步（ADR 0052 决策 7）", () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(PKG_DIR, "package.json"), "utf-8"));
   const deps = pkg.dependencies as Record<string, string>;
   const devDeps = (pkg.devDependencies ?? {}) as Record<string, string>;
   // 发行的包与云端基础镜像只装 dependencies：设备模块在执行期加载 Device Farm SDK，留在 devDependencies 会在使用方环境缺失
   assert.ok("@aws-sdk/client-device-farm" in deps, "@aws-sdk/client-device-farm 应在 dependencies");
   assert.ok(!("@aws-sdk/client-device-farm" in devDeps), "@aws-sdk/client-device-farm 不应再在 devDependencies");
+  // 应用启停块为安装包生成预签名地址所用的官方 presigner 同样只装 dependencies 才到得了使用方环境；它与 client-s3 等 @aws-sdk/*
+  // 同一取舍，用 ^ 范围、不精确锁定（ADR 0051 决策 9、ADR 0052 决策 7）
+  assert.ok("@aws-sdk/s3-request-presigner" in deps, "@aws-sdk/s3-request-presigner 应在 dependencies");
+  assert.ok(!("@aws-sdk/s3-request-presigner" in devDeps), "@aws-sdk/s3-request-presigner 不应在 devDependencies");
+  assert.match(deps["@aws-sdk/s3-request-presigner"], /^\^/, "@aws-sdk/s3-request-presigner 用 ^ 范围、不精确锁定");
   const exact = /^\d+\.\d+\.\d+$/;
   // @midscene/core 与 @midscene/web 锁同一版本（ADR 0042 决策六的 SDK 版本锁定）
   assert.match(deps["@midscene/core"] ?? "", exact);
@@ -267,6 +274,9 @@ test("设备依赖进 dependencies、按验证过的版本精确锁定，锁文�
   assert.deepEqual(lock.packages[""].dependencies, deps);
   assert.deepEqual(lock.packages[""].devDependencies ?? {}, devDeps);
   assert.notEqual(lock.packages["node_modules/@aws-sdk/client-device-farm"]?.dev, true, "锁文件里 Device Farm SDK 仍被标为开发依赖");
+  const presignerLock = lock.packages["node_modules/@aws-sdk/s3-request-presigner"];
+  assert.ok(presignerLock, "锁文件里没有 @aws-sdk/s3-request-presigner");
+  assert.notEqual(presignerLock.dev, true, "锁文件里 presigner 被标为开发依赖");
   assert.equal(lock.packages["node_modules/@midscene/core"]?.version, deps["@midscene/core"]);
   assert.equal(lock.packages["node_modules/webdriverio"]?.version, "10.0.2");
   // WebdriverIO 日志掩码装在 @wdio/logger 的模块级状态上，设备模块直接 import 它（ADR 0051 决策 11）：显式声明并精确锁定，

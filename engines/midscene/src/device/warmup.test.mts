@@ -11,13 +11,14 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { Browser } from "webdriverio";
-import { createDeviceWarmup, findWarmupMarker, type DeviceWarmupArgs } from "./warmup.mjs";
+import { createDeviceWarmup, findWarmupMarker } from "./warmup.mjs";
 import { DEVICE_WARMUP_ATTEMPTS } from "./limits.mjs";
 import {
-  SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE, type AcquireBudget, type AppiumSession, type DriverAdapter,
+  SESSION_LOST_BEFORE_START_MESSAGE, SESSION_LOST_MESSAGE, type AcquireBudget, type AppiumSession, type DeviceWarmup, type DriverAdapter,
 } from "./surface.mjs";
 import {
-  WARMUP_ATTEMPTS, WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, warmupErrorMessage,
+  WARMUP_ATTEMPTS, WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, WARMUP_REASON_MAX,
+  warmupErrorMessage,
 } from "../lib/tunnel-warmup.mjs";
 import { attachClassification } from "../worker/surface.mjs";
 
@@ -74,9 +75,8 @@ interface HarnessOptions {
   onSource?: (n: number) => void;
   /** 第 n 次（从 0 起）切回原生上下文：返回 Error 即抛出。 */
   nativeFails?: (n: number) => Error | undefined;
-  sessionStatus?: DeviceWarmupArgs["sessionStatus"];
-  /** 不传 sessionStatus（本块的参数允许缺省；设备侧接缝总是传入）。 */
-  omitStatus?: boolean;
+  /** 会话状态查询的回答；不给时回答 RUNNING。每次查询都记进 statusCalls。 */
+  sessionStatus?: () => Promise<string | null>;
 }
 
 function harness(opts: HarnessOptions = {}) {
@@ -140,12 +140,12 @@ function harness(opts: HarnessOptions = {}) {
   const controller = new AbortController();
   const budget: AcquireBudget = { signal: controller.signal, remainingMs: () => 600_000 };
   const statusCalls: number[] = [];
-  const sessionStatus = opts.omitStatus ? undefined : async () => {
+  const sessionStatus = async (): Promise<string | null> => {
     statusCalls.push(clock);
     return opts.sessionStatus ? opts.sessionStatus() : "RUNNING";
   };
   const block = createDeviceWarmup({ log: (line) => logs.push(line), now: () => clock });
-  const args: DeviceWarmupArgs = { session, adapter, route: opts.route ?? "url", url: WARMUP_URL, budget, sessionStatus };
+  const args: Parameters<DeviceWarmup["run"]>[0] = { session, adapter, route: opts.route ?? "url", url: WARMUP_URL, budget, sessionStatus };
   return {
     calls, logs, signals, statusCalls, controller,
     run: () => block.run(args),
@@ -365,17 +365,17 @@ test("导航失败先查会话状态：非 RUNNING 归 session_lost，不再重�
   }
 });
 
-test("会话仍在运行、状态查询失败（null 或抛出）或未传状态查询时：不据此判会话丢失，照常重试", async () => {
-  const cases: Array<Pick<HarnessOptions, "sessionStatus" | "omitStatus">> = [
+test("会话仍在运行或状态查询失败（null 或抛出）时：不据此判会话丢失，照常重试", async () => {
+  const cases: Array<Pick<HarnessOptions, "sessionStatus">> = [
     { sessionStatus: async () => "RUNNING" },
     { sessionStatus: async () => null },
     { sessionStatus: async () => { throw new Error("GetRemoteAccessSession 超时"); } },
-    { omitStatus: true },
   ];
   for (const c of cases) {
     const h = harness({ ...c, nav: () => new Error("导航失败") });
     assert.equal((await h.run())?.errorType, "engine_error");
     assert.equal(h.navCalls().length, DEVICE_WARMUP_ATTEMPTS);
+    assert.equal(h.statusCalls.length, DEVICE_WARMUP_ATTEMPTS, "每次导航失败都查一次");
   }
 });
 
@@ -390,6 +390,21 @@ test("导航异常带非会话丢失的归类标记：计一次尝试并原地�
   assert.equal(h.navCalls().length, DEVICE_WARMUP_ATTEMPTS);
 });
 
+test("失败消息里的原因与桌面预热同一封顶（WARMUP_REASON_MAX 个码点）：带归类标记与不带标记的导航异常都截到这里", async () => {
+  const long = "y".repeat(WARMUP_REASON_MAX + 80);
+  const plain = harness({ route: "deep_link", nav: () => new Error(`${long}\n第二行细节`) });
+  assert.deepEqual(await plain.run(), {
+    errorType: "engine_error", message: warmupErrorMessage(DEVICE_WARMUP_ATTEMPTS, `预热导航失败：${"y".repeat(WARMUP_REASON_MAX)}`),
+  });
+  const marked = harness({
+    route: "deep_link",
+    nav: () => attachClassification(new Error("deepLink failed"), { errorType: "capability_unavailable", message: long }),
+  });
+  assert.deepEqual(await marked.run(), {
+    errorType: "engine_error", message: warmupErrorMessage(DEVICE_WARMUP_ATTEMPTS, `预热导航失败：${"y".repeat(WARMUP_REASON_MAX)}`),
+  });
+});
+
 test("归类标记的消息同样先脱敏再截断：标记消息里带着预热地址时，终止消息只剩掩码", async () => {
   const marked = attachClassification(new Error("deepLink failed"), {
     errorType: "engine_error", message: `无法打开 ${WARMUP_URL}`,
@@ -401,11 +416,12 @@ test("归类标记的消息同样先脱敏再截断：标记消息里带着预�
   assert.ok(got!.message.includes("***"));
 });
 
-test("异常已带 session_lost 归类标记时直接归 session_lost，不必再查状态；消息用执行前的那句（预热时 step 都还没有执行）", async () => {
+test("异常已带 session_lost 归类标记时直接归 session_lost、不查会话状态；消息用执行前的那句（预热时 step 都还没有执行）", async () => {
   const lost = attachClassification(new Error("session ended"), { errorType: "session_lost", message: SESSION_LOST_MESSAGE });
-  const h = harness({ omitStatus: true, nav: () => lost });
+  const h = harness({ sessionStatus: async () => "RUNNING", nav: () => lost });
   assert.deepEqual(await h.run(), { errorType: "session_lost", message: SESSION_LOST_BEFORE_START_MESSAGE });
   assert.equal(h.navCalls().length, 1);
+  assert.equal(h.statusCalls.length, 0, "归类标记优先，不再查状态（这里的状态查询会回答 RUNNING）");
 });
 
 test("读控件树失败：先查会话状态，仍在运行则计一次尝试、原地重导航；非 RUNNING 归 session_lost", async () => {

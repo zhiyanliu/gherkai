@@ -1,6 +1,7 @@
 """compose（组合根逻辑）单测：不起任何子进程、零费用。"""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -167,8 +168,12 @@ def test_pure_release_predicate():
 
 # ---- build_engines：cmd/cwd 走定位链 + env 注入 ----
 
+# build_engines 的 run_id 是必给参数（本机 worker 缺 RUN_ID 会在建会话前退出）；不针对 run_id 的用例统一传这个值
+_RUN_ID = "20261030T000000Z-abc123"
+
+
 def test_build_engines_has_both_legs(midscene_env_cmd):
-    engines = compose.build_engines()
+    engines = compose.build_engines(run_id=_RUN_ID)
     assert set(engines) == {"novaact", "midscene"}
     # cmd 来自定位链（不实际起进程，只查接线）：novaact 在 dev 命中第二级、midscene 命中 env 覆写
     assert engines["novaact"].cmd == [sys.executable, "-m", "gherkai_worker_novaact"]
@@ -176,13 +181,13 @@ def test_build_engines_has_both_legs(midscene_env_cmd):
 
 
 def test_build_engines_miss_leg_does_not_break_the_other(monkeypatch):
-    """某引擎定位链 miss **不连坐**另一个引擎项（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
+    """某引擎定位链 miss **不影响**另一个引擎项（ADR 0037 决策 3）：dev 下 midscene 未装是常态，
     novaact-only 的 run 必须照常运行；miss 的那个引擎项一用即抛 WorkerNotFoundError（带安装指引），
     **不是** resolver 的「未知引擎」（那会把「没装」误导成「拼错名」）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
-    engines = compose.build_engines()
+    engines = compose.build_engines(run_id=_RUN_ID)
     assert set(engines) == {"novaact", "midscene"}  # 引擎名恒在册
     assert engines["novaact"].cmd[-1] == "gherkai_worker_novaact"
     with pytest.raises(compose.WorkerNotFoundError, match="npm i -g"):
@@ -194,14 +199,14 @@ def test_build_engines_wraps_subprocess_legs_with_event_recorder_when_event_log_
     项不包，安装指引照常在 run_scope 时抛出；不传 event_log 时不包。"""
     from gherkai_core.adapters.event_log import EventRecordingEngine, SqliteEventLog
     log = SqliteEventLog(tmp_path / "events.db")
-    engines = compose.build_engines(event_log=log)
+    engines = compose.build_engines(run_id=_RUN_ID, event_log=log)
     assert all(isinstance(e, EventRecordingEngine) for e in engines.values())
     assert engines["midscene"].cmd == ["node", "/fake/midscene-worker.mjs"]
-    assert not any(isinstance(e, EventRecordingEngine) for e in compose.build_engines().values())
+    assert not any(isinstance(e, EventRecordingEngine) for e in compose.build_engines(run_id=_RUN_ID).values())
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
-    engines2 = compose.build_engines(event_log=log)
+    engines2 = compose.build_engines(run_id=_RUN_ID, event_log=log)
     assert not isinstance(engines2["midscene"], EventRecordingEngine)
     with pytest.raises(compose.WorkerNotFoundError, match="npm i -g"):
         engines2["midscene"].run_scope(object())
@@ -229,7 +234,7 @@ def test_build_engines_injects_extra_http_headers_env(monkeypatch, midscene_env_
     不传则**不注入、且清掉宿主继承的同名值**（该键由组合根拥有，见 compose._COMPOSE_OWNED_WORKER_ENV）。"""
     import json as _json
 
-    engines = compose.build_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"})
+    engines = compose.build_engines(run_id=_RUN_ID, extra_http_headers={"ngrok-skip-browser-warning": "1"})
     for name in ("novaact", "midscene"):
         env = engines[name]._env
         assert env is not None, name
@@ -237,7 +242,7 @@ def test_build_engines_injects_extra_http_headers_env(monkeypatch, midscene_env_
     # 宿主 shell 里有同名值时不传 headers：两个引擎项都必须建 env（非 None）且该键已被清掉。
     # 断言不写成 `env2 is None or key not in env2`——env2 为 None 时那种写法空过，恰好照不出继承泄漏。
     monkeypatch.setenv("GHERKAI_EXTRA_HTTP_HEADERS", '{"leaked": "1"}')
-    engines2 = compose.build_engines()
+    engines2 = compose.build_engines(run_id=_RUN_ID)
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
         assert env2 is not None, name
@@ -248,12 +253,12 @@ def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, monkeypat
     """steps_dir（ADR 0037 决策 4）→ **两个** worker 都注 GHERKAI_STEPS_DIR（两引擎扫同一目录、各取自己的
     扩展名）；不传则不注入、且清掉宿主继承的同名值（worker 只剩内建脚手架）。约定逻辑不进 worker。"""
     steps = tmp_path / "steps"
-    engines = compose.build_engines(steps_dir=steps)
+    engines = compose.build_engines(run_id=_RUN_ID, steps_dir=steps)
     for name in ("novaact", "midscene"):
         assert engines[name]._env["GHERKAI_STEPS_DIR"] == str(steps), name
     # 同上：宿主 env 有值时收紧成「env2 必非 None 且不含该键」，不用会空过的 or 写法
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")
-    engines2 = compose.build_engines()
+    engines2 = compose.build_engines(run_id=_RUN_ID)
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
         assert env2 is not None, name
@@ -261,8 +266,8 @@ def test_build_engines_injects_steps_dir_env_both_legs(tmp_path: Path, monkeypat
 
 
 def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd):
-    """组合根拥有的 worker env「有值注、无值清」（ADR 0037 决策 4/3 + ADR 0035 决策 4 + ADR 0051 决策 13 + ADR 0024「run_id + scope_id
-    注入 worker」条）：入参说没有时，宿主 shell 里的同名值**不得**越过组合根直达 worker。
+    """组合根拥有的 worker env 先清后注（ADR 0037 决策 4/3 + ADR 0035 决策 4 + ADR 0051 决策 13 + ADR 0024「run_id + scope_id
+    注入 worker」条）：入参说没有的四个键，宿主 shell 里的同名值**不得**越过组合根直达 worker；必给的 `RUN_ID` 只取入参的值。
 
     真实触发形态：提交时既无 `--steps-dir`、也无 `./steps`，于是 definition 里 steps_dir 为 None；之后在 export 了
     GHERKAI_STEPS_DIR 的 shell 里 `status <run> --wait` 接力推进——只做加法的注入会让 worker 加载接力者那台机器的
@@ -277,18 +282,17 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     monkeypatch.setenv("RUN_ID", "host-run")
     assert {"GHERKAI_STEPS_DIR", "GHERKAI_NO_ARTIFACTS", "GHERKAI_EXTRA_HTTP_HEADERS", "GHERKAI_SESSION_WARMUP_URL",
             "RUN_ID"} == set(compose._COMPOSE_OWNED_WORKER_ENV)  # 宿主值全部预置，下面的逐键断言才覆盖整族
-    engines = compose.build_engines()  # 全都不传（即 definition 里都没有，也没有 run id）
+    engines = compose.build_engines(run_id=_RUN_ID)  # 只给必给的 run id，其余都不传（即 definition 里都没有）
     for name in ("novaact", "midscene"):
         env = engines[name]._env
-        # 宿主带 owned 键则必须建一份 scrub 后的 env；回落 None 等于整份继承 os.environ（泄漏）
-        assert env is not None, name
-        for key in compose._COMPOSE_OWNED_WORKER_ENV:
+        assert env["RUN_ID"] == _RUN_ID, name  # 宿主的 host-run 被入参覆盖
+        for key in set(compose._COMPOSE_OWNED_WORKER_ENV) - {"RUN_ID"}:
             assert key not in env, (name, key)
         assert env.get("PATH") == os.environ.get("PATH"), name  # 只清组合根拥有的键，其余（PATH/AWS 凭证等）照常继承
 
 
 def test_resolver_known_and_unknown(midscene_env_cmd):
-    engines = compose.build_engines()
+    engines = compose.build_engines(run_id=_RUN_ID)
     resolver = compose.make_resolver(engines)
     assert resolver("novaact") is engines["novaact"]
     with pytest.raises(ValueError, match="未知引擎"):
@@ -321,7 +325,7 @@ def test_no_repo_root_consumer_remains():
     """`repo_root()` 已整体退役（ADR 0037 决策 3）：分发后没有 repo，任何靠仓库结构的隐式行为都是漂移面。
 
     结构性护栏——名字回来（连同「从本文件上溯几层」的推导）就是回归，且这种回归在单测里天然隐形
-    （dev 树下上溯恰好成立、wheel 安装的使用方才炸）。
+    （dev 树下上溯恰好成立、wheel 安装的使用方那里才失败）。
     """
     assert not hasattr(compose, "repo_root")
     src = Path(compose.__file__).read_text(encoding="utf-8")
@@ -332,7 +336,7 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path, midsc
     # 两引擎对称：产物落点经环境变量注入各自 worker 的 env（ADR 0027 产物归位）。
     nova_dir = tmp_path / "r1" / "nova-trajectories"
     mid_dir = tmp_path / "r1" / "midscene-run"
-    engines = compose.build_engines(nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
+    engines = compose.build_engines(run_id=_RUN_ID, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
     assert engines["novaact"]._env["NOVA_LOGS_DIR"] == str(nova_dir)
     assert engines["midscene"]._env["MIDSCENE_RUN_DIR"] == str(mid_dir)
     # 完整继承 os.environ（叠加而非替换）——否则 worker 丢 AWS 凭证等
@@ -340,19 +344,25 @@ def test_build_engines_injects_artifact_dirs_symmetrically(tmp_path: Path, midsc
     assert engines["midscene"]._env.get("PATH") == os.environ.get("PATH")
 
 
-def test_build_engines_no_dirs_midscene_env_none(monkeypatch, midscene_env_cmd):
-    # 不传落点、也无共注 env：midscene env 保持 None，SubprocessEngine 回落继承 os.environ（不硬替换）。
-    # 前提是宿主 env 干净：宿主带组合根拥有的键时，按契约会建一份 scrub 后的 env（非 None），见上面 scrub 用例。
-    for key in compose._COMPOSE_OWNED_WORKER_ENV:
-        monkeypatch.delenv(key, raising=False)
-    engines = compose.build_engines()
-    assert engines["midscene"]._env is None
+def test_build_engines_no_dirs_injects_no_artifact_dir_env(monkeypatch, midscene_env_cmd):
+    # 不传落点：两个引擎都不注落点 env（回落 SDK 默认），但 env 照常新建——必给的 RUN_ID 恒要注入，
+    # 其余继承 os.environ（PATH/AWS 凭证等），不是整份替换。
+    import os
+
+    monkeypatch.delenv("NOVA_LOGS_DIR", raising=False)
+    monkeypatch.delenv("MIDSCENE_RUN_DIR", raising=False)
+    engines = compose.build_engines(run_id=_RUN_ID)
+    for name in ("novaact", "midscene"):
+        env = engines[name]._env
+        assert env["RUN_ID"] == _RUN_ID, name
+        assert "NOVA_LOGS_DIR" not in env and "MIDSCENE_RUN_DIR" not in env, name
+        assert env.get("PATH") == os.environ.get("PATH"), name
 
 
 def test_build_engines_nova_always_has_act_timeout(midscene_env_cmd):
     # Nova env **恒非 None**：即便无产物落点，组合根也要注入 NOVA_ACT_TIMEOUT_S（双端同源，ADR 0024 grace 硬约束）——
     # worker 读它作 act timeout、自报的 grace 下限也按同一个注入值算，消除两处独立 120 的漂移。
-    engines = compose.build_engines()
+    engines = compose.build_engines(run_id=_RUN_ID)
     assert engines["novaact"]._env is not None
     assert engines["novaact"]._env["NOVA_ACT_TIMEOUT_S"] == str(compose.nova_act_timeout_s())
 
@@ -362,7 +372,7 @@ def test_build_engines_never_injects_artifact_s3_env(tmp_path: Path, midscene_en
     # 上传落点只由云端后端的 build_fargate_engines 注入，预演由 e2e_harness 自拼 env（ADR 0016 决策 B）。
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
-    engines = compose.build_engines(nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
+    engines = compose.build_engines(run_id=_RUN_ID, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir)
     for eng in ("novaact", "midscene"):
         assert "ARTIFACT_S3_BUCKET" not in engines[eng]._env
         assert "ARTIFACT_S3_PREFIX" not in engines[eng]._env
@@ -376,7 +386,7 @@ def test_build_engines_region_profile_override_env(tmp_path: Path, monkeypatch, 
     nova_dir = tmp_path / "rid" / "nova-trajectories"
     mid_dir = tmp_path / "rid" / "midscene-run"
     engines = compose.build_engines(
-        nova_logs_dir=nova_dir, midscene_run_dir=mid_dir,
+        run_id=_RUN_ID, nova_logs_dir=nova_dir, midscene_run_dir=mid_dir,
         region="us-west-2", profile="cli-prof",  # --region west / --profile cli-prof
     )
     for eng in ("novaact", "midscene"):
@@ -390,34 +400,34 @@ def test_build_engines_region_profile_none_preserve_inherited(tmp_path: Path, mo
     monkeypatch.setenv("AWS_REGION", "eu-central-1")
     monkeypatch.setenv("AWS_PROFILE", "inherited-prof")
     nova_dir = tmp_path / "rid" / "nova-trajectories"
-    engines = compose.build_engines(nova_logs_dir=nova_dir, region=None, profile=None)
+    engines = compose.build_engines(run_id=_RUN_ID, nova_logs_dir=nova_dir, region=None, profile=None)
     assert engines["novaact"]._env["AWS_REGION"] == "eu-central-1"      # 原样继承、未被抹掉
     assert engines["novaact"]._env["AWS_PROFILE"] == "inherited-prof"
 
 
-def test_build_engines_region_profile_injected_on_rebuild_path_both_legs(monkeypatch, midscene_env_cmd):
-    # 补建路径（无产物落点、无共注 env → _env 返回 None）：region/profile 须在**两个引擎**补建路径都注入——
-    # Nova 恒补建（塞 NOVA_ACT_TIMEOUT_S，_inject_aws 搭便车）；Midscene 在 region/profile 有值时也补建（否则
-    # midscene worker 继承 os.environ、拿不到 --profile 覆盖，而它经 fromNodeProviderChain 消费 profile 做
-    # AgentCore/Bedrock 鉴权——真消费、非无害，ADR 0016 决策 C）。
+def test_build_engines_region_profile_injected_without_artifact_dirs_both_legs(monkeypatch, midscene_env_cmd):
+    # 不给产物落点时 region/profile 同样注入**两个引擎**：Nova Workflow 的 nova-act client 读 AWS_REGION 与凭证；
+    # Midscene worker 经 fromNodeProviderChain 消费 profile 做 AgentCore/Bedrock 鉴权（真消费、非无害，ADR 0016 决策 C），
+    # 少注一边，该引擎就拿不到 --profile 覆盖。
     monkeypatch.setenv("AWS_REGION", "us-east-1")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    engines = compose.build_engines(region="ap-southeast-1", profile="cli-prof")  # 无 dirs → 两个引擎走补建
+    engines = compose.build_engines(run_id=_RUN_ID, region="ap-southeast-1", profile="cli-prof")  # 无 dirs
     for eng in ("novaact", "midscene"):
-        assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 补建路径也覆盖生效
+        assert engines[eng]._env["AWS_REGION"] == "ap-southeast-1"  # 参数覆盖继承的 east
         assert engines[eng]._env["AWS_PROFILE"] == "cli-prof"
 
 
-def test_build_engines_midscene_no_rebuild_when_no_region_profile(monkeypatch, midscene_env_cmd):
-    # 对称边界：无落点、无共注 env 且 region/profile 均 None 时 Midscene **不**补建（env=None、继承 os.environ
-    # 本就够，免无谓拷贝）——补建只为 region/profile 覆盖，无值则不建。Nova 仍补建（NOVA_ACT_TIMEOUT_S 恒需）。
-    monkeypatch.delenv("AWS_REGION", raising=False)
-    monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    for key in compose._COMPOSE_OWNED_WORKER_ENV:  # 前提是宿主 env 干净（带 owned 键时按契约会建 scrub 后的 env）
+def test_build_engines_region_profile_none_writes_no_aws_keys_both_legs(monkeypatch, midscene_env_cmd):
+    # 对称边界：region/profile 均 None 时两个引擎都不写 AWS_REGION/AWS_PROFILE（宿主也没有时 env 里就没有，
+    # 留 boto 默认链与 profile config 兜底）；env 本身照常新建，带必给的 RUN_ID，Nova 另带 NOVA_ACT_TIMEOUT_S。
+    for key in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
         monkeypatch.delenv(key, raising=False)
-    engines = compose.build_engines(region=None, profile=None)
-    assert engines["midscene"]._env is None       # 不补建
-    assert engines["novaact"]._env is not None     # Nova 恒补建（timeout）
+    engines = compose.build_engines(run_id=_RUN_ID, region=None, profile=None)
+    for eng in ("novaact", "midscene"):
+        env = engines[eng]._env
+        assert env["RUN_ID"] == _RUN_ID, eng
+        assert "AWS_REGION" not in env and "AWS_PROFILE" not in env, eng
+    assert "NOVA_ACT_TIMEOUT_S" in engines["novaact"]._env
 
 
 # ---- resolve_region：region 落实成具体字符串（ADR 0016 决策 C，修 AgentCore profile-only 崩）----
@@ -472,7 +482,7 @@ def test_resolve_region_none_when_all_miss(monkeypatch):
 def test_resolve_region_no_boto3_returns_none_not_crash(monkeypatch):
     # 纯 local 不依赖 boto3：--region/env 全 miss 需回落 profile config，但**缺 boto3（未装 aws extra）时**
     # 不能抛未捕获 ImportError——catch → None fail-loud（等价「无 region」）。绿≠对：dev 装了 boto3 恒绿掩盖此路径，
-    # 故拦截 `import boto3` 抛 ImportError 真验。守「纯 local 路径绝不依赖 boto3」不变量（ADR 0016 决策 C；
+    # 故拦截 `import boto3` 抛 ImportError，实际验证这条路径。守「纯 local 路径绝不依赖 boto3」不变量（ADR 0016 决策 C；
     # boto3 走库层 `gherkai-core[aws]` extra——CLI 发行包 gherkai 已硬依赖它（ADR 0037 决策 2c），但本不变量
     # 与安装期装没装 boto3 无关）。
     monkeypatch.delenv("AWS_REGION", raising=False)
@@ -524,7 +534,7 @@ def _caps_json(engine: str = "novaact", min_grace_s=150, steps: str = "[]",
                model_id: str | None = None) -> bytes:
     """一份合契约的自述对象（五个键，ADR 0036「5.」）；模型 id 不给就按引擎取该引擎真实会自报的那个。"""
     model_id = model_id or ("nova-act-v1.0" if engine == "novaact" else "qwen.qwen3-vl-235b-a22b")
-    return (f'{{"schema_version": 1, "engine": "{engine}", "min_grace_s": {min_grace_s}, '
+    return (f'{{"schema_version": 2, "engine": "{engine}", "min_grace_s": {min_grace_s}, '
             f'"targets": [{{"device": "desktop", "ui_kinds": ["web"]}}], '
             f'"deterministic_steps": {steps}, "model_id": "{model_id}"}}').encode()
 
@@ -555,7 +565,7 @@ def test_query_capabilities_returns_whole_object(monkeypatch, novaact_env_cmd, f
     monkeypatch.setattr(subprocess, "run", fake_run)
     monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/steps")  # 先把宿主 shell 弄脏，否则下面「不含该键」的断言空过
     assert compose.query_capabilities("novaact") == {
-        "schema_version": 1, "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
+        "schema_version": 2, "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
         "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e"}],
         "model_id": "nova-act-v1.0"}
     assert captured["cmd"] == ["/fake/novaact-worker", "--capabilities"]  # 定位链 cmd + 唯一的自述 flag
@@ -625,7 +635,7 @@ def test_query_capabilities_worker_failure_fails_loud_verbatim(monkeypatch, nova
 
 
 # 身份位与必有的顶层 targets 合法，让每个用例只有一处缺陷（后面显式给的 targets 会覆盖这里的，JSON 重复键取后者）
-_OK_HEAD = b'"schema_version": 1, "engine": "novaact", "targets": [{"device": "desktop", "ui_kinds": ["web"]}]'
+_OK_HEAD = b'"schema_version": 2, "engine": "novaact", "targets": [{"device": "desktop", "ui_kinds": ["web"]}]'
 _OK_STEPS = b', "deterministic_steps": []'
 _OK_MODEL = b', "model_id": "nova-act-v1.0"'
 _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷在下限/身份位」那批用例
@@ -643,8 +653,9 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b', "model_id": ""}',   # 模型 id 空串
     b'{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_STEPS + b', "model_id": 1}',    # 模型 id 不是字符串
     b'[{' + _OK_HEAD + b', "min_grace_s": 150' + _OK_TAIL + b'}]',       # 不是 JSON 对象
-    b'{"schema_version": 1, "engine": "midscene", "min_grace_s": 31' + _OK_TAIL + b'}',  # 自称另一引擎
-    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',   # 版本不认识
+    b'{"schema_version": 2, "engine": "midscene", "min_grace_s": 31' + _OK_TAIL + b'}',  # 自称另一引擎
+    b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',   # 版本不认识（1.4 的 worker 报 1）
+    b'{"schema_version": 3, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',   # 版本不认识（比命令行工具新）
     b'{"engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',                        # 缺格式版本
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": []}]' + _OK_MODEL + b'}',          # keywords 空
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "keywords": ["And"]}]' + _OK_MODEL + b'}',     # keywords 未知取值
@@ -674,7 +685,7 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}]}]' + _OK_MODEL + b'}',  # step 级条目不带 max_session_s
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "deterministic_steps": [{"pattern": "p", "description": "d", "example": "e", "targets": [{"device": "android", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"]}]}]' + _OK_MODEL + b'}',  # 完全重复的 step 级条目
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": null' + _OK_TAIL + b'}',  # 顶层 targets 显式 null（必有且须为数组）
-    b'{"schema_version": 1, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',  # 顶层缺 targets：版本不一致、不兜缺省
+    b'{"schema_version": 2, "engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}',  # 顶层缺 targets：版本不一致、不兜缺省
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web", 1]}]' + _OK_TAIL + b'}',  # ui_kinds 元素不是字符串
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}, {"device": "android", "ui_kinds": ["app"], "max_session_s": 20}]' + _OK_TAIL + b'}',  # 同 device 两条都带 max_session_s
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "targets": [{"device": "android", "ui_kinds": ["web"], "max_session_s": 1' + b"0" * 400 + b'}]' + _OK_TAIL + b'}',  # 超出 float 范围的整数
@@ -800,9 +811,9 @@ def test_ask_worker_no_payload_entry_does_not_inherit_stdin(monkeypatch, novaact
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: captured.append(kw) or _fake_caps_proc(
         _caps_json() if "--capabilities" in cmd else b"[]"))
     compose.query_capabilities("novaact")
-    compose.match_deterministic("novaact", ["x"])
+    compose.match_deterministic("novaact", [{"keyword": None, "text": "x"}])
     assert [kw.get("stdin") for kw in captured] == [subprocess.DEVNULL, None]
-    assert captured[1]["input"] == b'["x"]'
+    assert captured[1]["input"] == b'[{"keyword": null, "text": "x"}]'
 
 
 def test_query_capabilities_unknown_engine_raises(fresh_caps_cache):
@@ -888,7 +899,7 @@ def test_nova_act_timeout_bad_value_raises_product_message(monkeypatch, fresh_no
 
 
 def test_bad_nova_act_timeout_does_not_break_import(tmp_path):
-    """坏值不在 import 时炸：CLI 顶层 import 本模块，import 期抛异常会让 --version、plan 这些与 Nova 无关的命令也以 traceback 结束。"""
+    """坏值不在 import 时抛异常：CLI 顶层 import 本模块，import 期抛异常会让 --version、plan 这些与 Nova 无关的命令也以 traceback 结束。"""
     import os
     import subprocess
 
@@ -899,11 +910,11 @@ def test_bad_nova_act_timeout_does_not_break_import(tmp_path):
 
 
 def test_bad_nova_act_timeout_only_disables_nova_leg(monkeypatch, fresh_nova_timeout, midscene_env_cmd):
-    """本机后端：坏值只让 Nova 引擎项变成一用即抛的占位项，Midscene 照常装配（不连坐）。"""
+    """本机后端：坏值只让 Nova 引擎项变成一用即抛的占位项，Midscene 照常装配（不受影响）。"""
     from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 
     monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "120s")
-    engines = compose.build_engines()
+    engines = compose.build_engines(run_id=_RUN_ID)
     assert isinstance(engines["midscene"], SubprocessEngine)
     for call in (lambda: engines["novaact"].run_scope(object()), lambda: engines["novaact"].start_scope(object())):
         with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S"):
@@ -1116,7 +1127,7 @@ def test_is_botocore_error_classifies():
 
 # ---- resolve_network（ADR 0033）：subnet/sg 覆盖 or 读 SSM ----
 def test_resolve_network_explicit_overrides_skip_ssm():
-    # 显式给 subnet/sg → 不读 SSM（ssm 注入个会炸的哨兵，验它没被调）
+    # 显式给 subnet/sg → 不读 SSM（ssm 注入一个一调用就抛异常的哨兵，验它没被调）
     class _BoomSsm:
         def get_parameter(self, **kw):
             raise AssertionError("显式给 subnet/sg 时不该读 SSM")
@@ -1160,7 +1171,7 @@ def test_resolve_network_partial_override_reads_only_missing():
 
 def test_resolve_network_empty_ssm_fails_fast():
     # 空值 fail-fast（低频加固，ADR 0033）：SSM 参数空（值空串 → split 过滤后 []）→ 就地报错点名路径，
-    # 不把空列表传到 awsvpcConfiguration、拖到 RunTask 才炸。空串 / 纯逗号 两种空形态都拦。
+    # 不把空列表传到 awsvpcConfiguration、拖到 RunTask 才失败。空串 / 纯逗号 两种空形态都拦。
     import pytest
 
     class _EmptySsm:
@@ -1171,7 +1182,7 @@ def test_resolve_network_empty_ssm_fails_fast():
     for empty_val in ("", ",", ",,"):  # 空串 / 逗号无值——过滤后都是 []
         with pytest.raises(ValueError, match="为空"):
             compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(empty_val))
-    # 错误须点名是哪个 SSM 路径（subnets 先读、先炸）
+    # 错误须点名是哪个 SSM 路径（subnets 先读、先报错）
     try:
         compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(""))
         assert False, "应 fail-fast"
@@ -1363,7 +1374,7 @@ def test_preflight_missing_events_table_names_prefix():
 
 
 def test_preflight_missing_task_def_names_prefix():
-    # task-def 维度的 prefix 配错（原漏到 RunTask 才炸、退出码 1 不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
+    # task-def 维度的 prefix 配错（原先漏到 RunTask 才失败、退出码 1 且不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
     err = compose.preflight_cloud_resources(
         prefix="prod-", events_table="prod-events", bucket="prod-artifacts", cluster="prod-cluster",
         task_defs=["prod-novaact-worker"],
@@ -1508,7 +1519,7 @@ def test_self_describe_miss_raises_worker_not_found(monkeypatch, fresh_caps_cach
     with pytest.raises(compose.WorkerNotFoundError):
         compose.query_capabilities("midscene")
     with pytest.raises(compose.WorkerNotFoundError):
-        compose.match_deterministic("midscene", ["a"])
+        compose.match_deterministic("midscene", [{"keyword": None, "text": "a"}])
 
 
 def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd):
@@ -1526,12 +1537,13 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
         return _P()
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    got = compose.match_deterministic("midscene", ["a", "b"])
+    plain = [{"keyword": None, "text": "a"}, {"keyword": None, "text": "b"}]
+    got = compose.match_deterministic("midscene", plain)
     assert got == [{"pattern": "p", "description": "d"}, None]
     assert captured["cmd"][-1] == "--match-steps"
     import json as _json
-    assert _json.loads(captured["input"].decode()) == ["a", "b"]
-    # 新契约形态（ADR 0036 / 0050 决策 1）：每项 {keyword, text} 原样送进 stdin，四态里的 keyword_mismatch 原样回传
+    assert _json.loads(captured["input"].decode()) == plain  # keyword 为 null 照样写出这个键（缺键是版本不一致，ADR 0036 决策 4）
+    # 每项 {keyword, text} 原样送进 stdin（ADR 0036 决策 4、0050 决策 1），四态里的 keyword_mismatch 原样回传
     _P.stdout = b'[{"keyword_mismatch": "nav", "keywords": ["Given", "When"]}, null]'
     items = [{"keyword": "Then", "text": '"https://x.example/"'}, {"keyword": "When", "text": "没有这条"}]
     assert compose.match_deterministic("midscene", items) == [{"keyword_mismatch": "nav", "keywords": ["Given", "When"]}, None]
@@ -1541,6 +1553,12 @@ def test_match_deterministic_feeds_stdin_and_parses(monkeypatch, novaact_env_cmd
     with pytest.raises(compose.WorkerSelfDescribeError) as ei:
         compose.match_deterministic("midscene", items)
     assert "确定性 step 查询失败" in str(ei.value) and "match" not in str(ei.value).lower()
+    # worker 拒绝输入形状时写的那一句原样进异常文本（plan 以退出码 2 结束时转述它，ADR 0036 决策 4）
+    sentence = "收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+    _P.returncode, _P.stderr = 2, f"worker: {sentence}\n".encode()
+    with pytest.raises(compose.WorkerSelfDescribeError) as ei:
+        compose.match_deterministic("midscene", items)
+    assert sentence in str(ei.value)
 
 
 # ---- read_task_def_stop_timeout（doctor 的 cloud 侧对照值，ADR 0032 真容器校准结论 4）----
@@ -1569,6 +1587,69 @@ def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
         ecs=_StopTimeoutEcs([{"name": names.container_name("novaact")}])) is None
     assert compose.read_task_def_stop_timeout(
         "arn:td:7", engine="novaact", ecs=_StopTimeoutEcs([{"name": "other", "stopTimeout": 90}])) is None
+
+
+# ---- 云端同步 run 的停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：stopTimeout 随 variant 解析带回 ----
+
+class _VariantAws:
+    """variant 解析要读的三个面（SSM 映射、ECS revision、ECR 镜像）的最小假替身：每个引擎的 revision 都 ACTIVE、镜像都在，
+    task-def 的 containerDefinitions 按引擎给定。只为验 stop_timeout_s 的取法；解析的 miss 分支由 moto 覆盖（test_worker_variant）。"""
+
+    def __init__(self, containers_by_engine: dict[str, list[dict]]):
+        self._containers = containers_by_engine
+        self.describes: list[str] = []
+        outer = self
+
+        class _Ssm:
+            def get_parameter(self, *, Name):
+                engine = next(e for e in outer._containers if f"/{e}/" in Name)
+                return {"Parameter": {"Value": json.dumps({"revision_arn": f"arn:td/{engine}:3", "digest": "sha256:0"})}}
+
+        class _Ecs:
+            def describe_task_definition(self, *, taskDefinition):
+                outer.describes.append(taskDefinition)
+                engine = taskDefinition.split("/")[1].split(":")[0]
+                return {"taskDefinition": {"status": "ACTIVE", "containerDefinitions": outer._containers[engine]}}
+
+        class _Ecr:
+            def describe_images(self, **kw):
+                return {"imageDetails": [{}]}
+
+        self.ssm, self.ecs, self.ecr = _Ssm(), _Ecs(), _Ecr()
+
+    def resolve(self):
+        return compose.resolve_worker_variant(
+            prefix="t-", variant="base", engines=sorted(self._containers), cli_version="1.5.0", backend_version="1.5.0",
+            ssm=self.ssm, ecs=self.ecs, ecr=self.ecr)
+
+
+@pytest.mark.parametrize("containers, expected", [
+    ([{"name": "sidecar", "stopTimeout": 5}, {"name": names.container_name("novaact"), "stopTimeout": 90}], 90),  # 按名认，不取第一个
+    ([{"name": names.container_name("novaact")}], None),  # 该 container 没设 stopTimeout
+    ([{"name": "not-the-worker", "stopTimeout": 60}], None),  # task-def 里找不到该 container
+], ids=["set", "unset", "container-absent"])
+def test_resolve_worker_variant_carries_worker_container_stop_timeout(containers, expected):
+    # 认法与 doctor 比对用的 read_task_def_stop_timeout 同一份；取自校验 revision 仍 ACTIVE 的那次 Describe，不另发调用
+    aws = _VariantAws({"novaact": containers, "midscene": [{"name": names.container_name("midscene"), "stopTimeout": 30}]})
+    got = aws.resolve()
+    assert {e: r.stop_timeout_s for e, r in got.items()} == {"novaact": expected, "midscene": 30}
+    assert sorted(aws.describes) == sorted(r.revision_arn for r in got.values())  # 每个引擎恰一次
+    assert compose.read_task_def_stop_timeout(got["novaact"].revision_arn, engine="novaact", ecs=aws.ecs) == expected
+
+
+def _res(engine: str, stop_timeout_s):
+    return compose.WorkerResolution(engine=engine, variant="base", revision_arn=f"arn:{engine}", digest="sha256:0",
+                                    stop_timeout_s=stop_timeout_s)
+
+
+def test_cloud_stop_bound_takes_max_stop_timeout_plus_ecs_stopped_lag():
+    # 各引擎 stopTimeout 取最大，再加 ECS 记下 STOPPED 的滞后余量；不含 core 的排空余量
+    assert compose.cloud_stop_bound_s([_res("novaact", 90), _res("midscene", 30)]) == 90 + compose.ECS_STOPPED_LAG_MARGIN_S
+    assert compose.cloud_stop_bound_s([_res("midscene", 30)]) == 30 + 20.0
+    # 没设 / 找不到 container（None）按 Fargate 平台上限 120 秒计：预算宁大勿小，即使别的引擎设得更小
+    assert compose.cloud_stop_bound_s([_res("novaact", None), _res("midscene", 30)]) == 120 + 20.0
+    assert compose.FARGATE_STOP_TIMEOUT_MAX_S == 120
+    assert compose.cloud_stop_bound_s([]) == 120 + 20.0
 
 
 # ---- 版本 skew（ADR 0037 决策 7）：读戳 + 三态齐全 + 非纯净跳过 ----
@@ -1617,13 +1698,13 @@ def test_read_backend_version_blank_value_is_none():
 
 
 def test_skew_ok_same_release_is_silent():
-    verdict, msg = compose.check_version_skew("1.4.0", "1.4.0")
+    verdict, msg = compose.check_version_skew("1.4.0", "1.4.0", prefix="g-")
     assert (verdict, msg) == (compose.SKEW_OK, "")
 
 
 def test_skew_block_when_cli_newer_names_both_exits():
     """CLI 新于后端 → block，且消息必须点名**两条**出路（决策 7 不设放行口，只有这两条）。"""
-    verdict, msg = compose.check_version_skew("1.3.0", "1.4.0")
+    verdict, msg = compose.check_version_skew("1.3.0", "1.4.0", prefix="g-")
     assert verdict == compose.SKEW_BLOCK
     assert "gherkai deploy" in msg                      # ① 部署方升后端
     assert "uvx --from 'gherkai==1.3.0'" in msg         # ② 临时运行同版本 CLI（点名后端版本）
@@ -1631,45 +1712,46 @@ def test_skew_block_when_cli_newer_names_both_exits():
 
 
 def test_skew_warn_when_cli_older():
-    verdict, msg = compose.check_version_skew("1.4.0", "1.3.0")
+    verdict, msg = compose.check_version_skew("1.4.0", "1.3.0", prefix="g-")
     assert verdict == compose.SKEW_WARN and "旧于" in msg
 
 
 def test_skew_warn_when_stamp_missing_points_at_deploy():
-    """戳缺失表示本机制之前部署的环境 → warn（不拦）+ 提示运行一次 `gherkai deploy` 写入。"""
-    verdict, msg = compose.check_version_skew(None, "1.4.0")
+    """戳缺失表示本机制之前部署的环境 → warn（不拦）+ 提示运行一次 `gherkai deploy` 写入；消息写出该部署的参数路径、不留占位。"""
+    verdict, msg = compose.check_version_skew(None, "1.4.0", prefix="g-")
     assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg
+    assert "/g-backend/version" in msg and "<prefix>" not in msg
 
 
 def test_skew_skip_when_either_side_impure():
     """任一侧带 .dev/.post/本地段 → skip（dev 逐提交前进，逐字比会把每次都判成 skew）。"""
     for stamp, cli in [("1.4.0", "1.4.0.post3.dev0+abc.dirty"), ("1.4.0.dev1", "1.4.0"),
                        ("1.4.0", "1.4.0+local"), ("1.4.0", "0+unknown")]:
-        verdict, msg = compose.check_version_skew(stamp, cli)
+        verdict, msg = compose.check_version_skew(stamp, cli, prefix="g-")
         assert verdict == compose.SKEW_SKIP, (stamp, cli)
         assert msg
 
 
 def test_skew_skip_when_own_version_unknown():
     """未装成包（从源码直接运行）→ 调用点取不到自身版本、传 None → skip，不误判成 skew。"""
-    verdict, msg = compose.check_version_skew("1.4.0", None)
+    verdict, msg = compose.check_version_skew("1.4.0", None, prefix="g-")
     assert verdict == compose.SKEW_SKIP and msg
 
 
 def test_skew_compares_release_segment_only():
     """只比 release 段（决策 7）：位数不同补零后比；同 release 段的 rc 与正式版视作同版本。"""
-    assert compose.check_version_skew("1.4.0", "1.4")[0] == compose.SKEW_OK
-    assert compose.check_version_skew("1.4", "1.4.0")[0] == compose.SKEW_OK
-    assert compose.check_version_skew("1.4.0", "1.4.0rc1")[0] == compose.SKEW_OK
-    assert compose.check_version_skew("1.4.0", "1.4.1")[0] == compose.SKEW_BLOCK
-    assert compose.check_version_skew("1.4.1", "1.4.0")[0] == compose.SKEW_WARN
+    assert compose.check_version_skew("1.4.0", "1.4", prefix="g-")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4", "1.4.0", prefix="g-")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4.0", "1.4.0rc1", prefix="g-")[0] == compose.SKEW_OK
+    assert compose.check_version_skew("1.4.0", "1.4.1", prefix="g-")[0] == compose.SKEW_BLOCK
+    assert compose.check_version_skew("1.4.1", "1.4.0", prefix="g-")[0] == compose.SKEW_WARN
 
 
 def test_skew_cli_version_is_mandatory_no_runtime_fallback():
     """`cli_version` 必给（决策 7 比的是「写任务定义那一方」的版本）：不缺省成 gherkai-runtime 的版本——
     editable 树里各包版本各自漂，缺省会埋一个只在各包同版本的发行态下才等价的第二真源。"""
     with pytest.raises(TypeError):
-        compose.check_version_skew("1.0.0")  # type: ignore[call-arg]
+        compose.check_version_skew("1.0.0", prefix="g-")  # type: ignore[call-arg]
 
 
 def test_check_backend_skew_reads_stamp_then_judges():
@@ -1683,8 +1765,9 @@ def test_check_backend_skew_reads_stamp_then_judges():
 
 def test_check_backend_skew_missing_stamp_warns_not_raises():
     ssm = _StampSsm(None, error=_client_error("ParameterNotFound"))
-    verdict, msg, stamp = compose.check_backend_skew(prefix="g-", cli_version="1.4.0", ssm=ssm)
+    verdict, msg, stamp = compose.check_backend_skew(prefix="stage-", cli_version="1.4.0", ssm=ssm)
     assert verdict == compose.SKEW_WARN and "gherkai deploy" in msg and stamp is None
+    assert "/stage-backend/version" in msg  # prefix 经 check_backend_skew 传到缺戳消息
 
 
 def test_check_backend_skew_propagates_read_errors():
@@ -1727,7 +1810,7 @@ def test_run_duration_ms_from_run_state_timestamps():
                                             started_at="2026-09-09T09:40:38+00:00")) is None  # 未 finalize
     assert compose.run_duration_ms(None) is None
     assert compose.run_duration_ms(RunState(run_id="r", status=Status.PASSED, jobs={}, high_water_mark=0,
-                                            started_at="t0", ended_at="t9")) is None  # 解析不了 → 派生指标显「?」，不炸收尾
+                                            started_at="t0", ended_at="t9")) is None  # 解析不了 → 派生指标显「?」，不让收尾失败
 
 
 # ---- 配置文件层（ADR 0053 决策 2）：排在环境变量之后、默认之前 ----
@@ -1774,11 +1857,12 @@ def test_resolve_cloud_target_config_layer_after_env_before_default(monkeypatch)
 # ---- 缺戳例外（ADR 0037 决策 7）：带设备目标或会话预热地址的 run 遇无戳后端即 block ----
 
 def test_skew_missing_stamp_blocks_when_run_requires_it():
-    verdict, msg = compose.check_version_skew(None, "1.5.0", requires_stamp=True)
+    verdict, msg = compose.check_version_skew(None, "1.5.0", prefix="g-", requires_stamp=True)
     assert verdict == compose.SKEW_BLOCK and "没有版本戳" in msg and "gherkai deploy" in msg
-    verdict, msg = compose.check_version_skew(None, "1.5.0", requires_stamp=False)
+    assert "/g-backend/version" in msg and "<prefix>" not in msg
+    verdict, msg = compose.check_version_skew(None, "1.5.0", prefix="g-", requires_stamp=False)
     assert verdict == compose.SKEW_WARN
-    assert compose.check_version_skew("1.5.0", "1.5.0", requires_stamp=True) == (compose.SKEW_OK, "")  # 有戳照常比对
+    assert compose.check_version_skew("1.5.0", "1.5.0", prefix="g-", requires_stamp=True) == (compose.SKEW_OK, "")  # 有戳照常比对
 
 
 def test_run_requires_backend_stamp_predicate():
@@ -1794,10 +1878,10 @@ def test_run_requires_backend_stamp_predicate():
 
 
 def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env_cmd, fresh_caps_cache):
-    """能力自述的协议版本比较整数严格：true 不是 1、"1" 不是 1（与 worker 核 job 行 schemaVersion 的口径对称）。"""
+    """能力自述的协议版本比较整数严格：布尔值、字符串 "2"、浮点数 2.0 都不等于整数 2（与 worker 核 job 行 schemaVersion 的口径对称）。"""
     import subprocess
 
-    for bad in (b"true", b'"1"', b"1.0"):
+    for bad in (b"true", b'"2"', b"2.0"):
         payload = b'{"schema_version": ' + bad + b', "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}]' + _OK_TAIL + b'}'
         monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
         with pytest.raises(RuntimeError, match="格式版本"):
@@ -1807,7 +1891,7 @@ def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env
 
 def test_step_targets_from_registry_fixture_pass_the_cli_contract_check():
     """worker 由句柄推出的 step 级 targets（跨语言 fixture 的全部合法用例）都能通过 CLI 唯一的自述契约校验（ADR 0049 决策 1、0050 决策 1）：
-    两侧 worker 的输出形态与 CLI 的接受形态由同一份 fixture 串起来，推出规则改了而契约没跟上会在这里红。"""
+    两侧 worker 的输出形态与 CLI 的接受形态由同一份 fixture 串起来，推出规则改了而契约没跟上时这条测试失败。"""
     import json
     from pathlib import Path
 
@@ -1821,31 +1905,33 @@ def test_session_warmup_url_is_owned_env_injected_to_both_engines_and_scrubbed_o
     三个宿主下同一个 run 用同一个值）。"""
     assert "GHERKAI_SESSION_WARMUP_URL" in compose._COMPOSE_OWNED_WORKER_ENV
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
-    engines = compose.build_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url)
+    engines = compose.build_engines(run_id=_RUN_ID, extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url)
     for name in ("novaact", "midscene"):
         assert engines[name]._env["GHERKAI_SESSION_WARMUP_URL"] == url, name
     monkeypatch.setenv("GHERKAI_SESSION_WARMUP_URL", "https://leaked/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=x")
-    engines2 = compose.build_engines()
+    engines2 = compose.build_engines(run_id=_RUN_ID)
     for name in ("novaact", "midscene"):
         env2 = engines2[name]._env
         assert env2 is not None and "GHERKAI_SESSION_WARMUP_URL" not in env2, name
 
 
-def test_run_id_is_owned_env_injected_to_both_engines_and_scrubbed_otherwise(monkeypatch, midscene_env_cmd):
-    """本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条、ADR 0037 决策 4）是组合根拥有的 worker env：有值以 RUN_ID 注给
-    两个引擎，与云端 RunTask overrides 同名（worker 用它编码会话名的 run 段）；不传则不注入、且清掉宿主继承的同名值——会话名里的
-    run 段只认组合根给的值。本机不注 SCOPE_ID，也不注 EVENTS_DDB_TABLE：worker 的事件出口仍是 fd 态。"""
+def test_run_id_is_required_owned_env_injected_to_both_engines(monkeypatch, midscene_env_cmd):
+    """本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条、ADR 0037 决策 4）是组合根拥有的 worker env、build_engines 的必给参数：
+    以 RUN_ID 注给两个引擎，与云端 RunTask overrides 同名（worker 用它编码会话名的 run 段）；宿主 shell 里继承的同名值被入参覆盖——
+    会话名里的 run 段只认组合根给的值。漏传在装配点报 TypeError、空值报 ValueError，不留到 worker 建会话前才退出。
+    本机不注 SCOPE_ID，也不注 EVENTS_DDB_TABLE：worker 的事件出口仍是 fd 态。"""
     assert "RUN_ID" in compose._COMPOSE_OWNED_WORKER_ENV
-    engines = compose.build_engines(run_id="20261030T000000Z-abc123")
+    monkeypatch.setenv("RUN_ID", "host-run")
+    engines = compose.build_engines(run_id="20261030T000000Z-def456")
     for name in ("novaact", "midscene"):
         env = engines[name]._env
-        assert env is not None and env["RUN_ID"] == "20261030T000000Z-abc123", name
+        assert env["RUN_ID"] == "20261030T000000Z-def456", name
         assert "SCOPE_ID" not in env and "EVENTS_DDB_TABLE" not in env, name
-    monkeypatch.setenv("RUN_ID", "host-run")
-    engines2 = compose.build_engines()
-    for name in ("novaact", "midscene"):
-        env2 = engines2[name]._env
-        assert env2 is not None and "RUN_ID" not in env2, name
+    with pytest.raises(TypeError, match="run_id"):
+        compose.build_engines()
+    for bad in ("", None):
+        with pytest.raises(ValueError, match="run_id"):
+            compose.build_engines(run_id=bad)
 
 
 def test_fargate_engines_leave_run_id_to_the_engine_adapter(monkeypatch):

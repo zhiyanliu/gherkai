@@ -56,6 +56,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 以退出码 2 结束，`引擎 novaact 的 worker 运行时未找到`（或 midscene），后面跟一句装法 | 该引擎的 worker 没装，或不在 PATH 上 | 按报错中给出的安装命令安装：Nova Act 用 `uv tool install 'gherkai[local]'`，Midscene 用 `npm i -g @gherkai/worker-midscene`。用自建 worker 时用 `GHERKAI_WORKER_NOVAACT_CMD` / `GHERKAI_WORKER_MIDSCENE_CMD` 指向它 |
 | 以退出码 2 结束，`worker 自述失败，拒绝运行`，末尾提到「worker 与命令行工具版本不一致——两者须同版本安装」 | worker 与 CLI 不是同一个版本 | 把两侧装成同版本：`uv tool upgrade gherkai`；Midscene 侧运行 `npm i -g @gherkai/worker-midscene@<gherkai --version 显示的版本>` |
 | `能力自述格式版本是 … 命令行工具认的是 …`、`自述的最短停止宽限不是非负有限数` | 同上，版本不一致的另一种形态 | 同上 |
+| `plan` 以退出码 2 结束，worker 的报错是「收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致」 | 同上：查询确定性 step 时暴露的版本不一致（1.4 的命令行工具把它冠以「使用方 steps 加载失败」） | 同上 |
 | `要问的是引擎 X 的 worker，回答的却自称 Y` | `GHERKAI_WORKER_*_CMD` 指到了另一个引擎的 worker | 改正该环境变量，或取消设置改用已安装的 worker |
 | Midscene worker 无法启动，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
 | `plan` 输出以「（标注降级）」开头的提示 | 某个引擎的 worker 不可用，只影响命中标注 | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
@@ -97,9 +98,9 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `network_error` | 网络瞬时故障（建连失败，或中途断网）。原样重新运行通常就能过 |
 | `engine_error` | worker 无法启动、运行中途崩溃，或干净退出却没交完结果。先看 worker 日志，再用 `gherkai explain <run_id>` 看已有的证据 |
 | `guardrail` | Nova Act 的安全护栏拦下了这一步的操作。改写这一步的措辞，或把这条 scenario 标 `@engine:midscene` |
-| `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者某次建立会话的请求结果未知、收尾前也没能核实（说明里记为「结果未知的创建尝试」）。结果未知的情形是收到停止信号时建立请求还没有返回；设备目标上还包括建立请求超时、连接中断或回应里没有会话 ARN，之后按会话名也没有找到这个会话。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
+| `release_failed` | 有会话没能确认停止，可能仍在计费：worker 停止会话时失败或超时，或者某次建立会话的请求结果未知、收尾前也没能核实（说明里记为「结果未知的创建尝试」）。结果未知的情形是收到停止信号时建立请求还没有返回；设备目标上还包括建立请求超时、连接中断、服务返回服务端错误（HTTP 5xx），以及回应里没有会话 ARN，之后按会话名也没有找到这个会话。说明里追加一句按目标给出的提示（接在原有的失败原因之后），桌面目标为「AgentCore 浏览器会话未能确认停止，可能仍在计费，请在 Amazon Bedrock AgentCore 控制台核对并手动停止」，设备目标为「远程访问会话未能确认停止，可能仍在计费，请在设备控制台核对并手动停止」，提示之后列出未确认停止的会话名与结果未知的创建尝试。桌面目标到 Amazon Bedrock AgentCore 控制台按会话名核对这些浏览器会话、手动停止仍在运行的；设备目标到 Device Farm 控制台核对远程访问会话，云端后端也可以用 `gherkai doctor --backend cloud` 的 `backend.devices.sessions` 行列出未结束的会话与停止命令。已报出的 scenario 结果照常保留 |
 | `precheck_failed` | 测试还没有开始，重新运行结果也不会变，scope 里一条 step 都没有执行。设备目标上常见的形态：没有符合条件的设备（消息带最接近的可用系统版本）、指定的设备 ARN 被拒、安装包已不在存储桶里或没有读取权限、应用启动后立即自行退出（多半带运行环境检测，要提供关闭检测的测试包）、设备拒绝安装驱动辅助程序、服务商没有安排设备就结束了会话（消息带服务商的说明，常见于不计量方式而账号没有不计量设备槽位：改回按量或先购买槽位）。按消息改设备选择、换测试包或换设备；会话预热被拒、命令行工具与 worker 版本不一致也归这一类，见下文对应各节 |
-| `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s` |
+| `acquire_timeout` | 在获取设备的等待时间内没有拿到可用设备（排队、设备繁忙或准备时间过长）。稍后重试，或在 `gherkai.toml` 的 `[devices]` 调大 `acquire-timeout-s`。应用目标在准备安装包（检查存储桶里的安装包、生成安装包的下载地址）时到期也归这一类，消息以「准备安装包时超过了获取设备的等待时间」开头：这几步正常很快就完成，到期多半是网络或 AWS 凭证来源没有响应，先确认网络连接与 AWS 凭证正常再重新运行 |
 | `session_lost` | 设备的远程访问会话在执行中途结束（被人手动停止，或到达会话上限），当前 step 记 `error`、本 scope 余下的 scenario 未执行，判定不完整。缩短 scope，或核对是否有人在控制台停止了会话。会话也可能在准备设备时就已结束（获取设备、启动应用或会话预热期间），这时本 scope 的 step 都没有执行；核对是否有人在控制台停止了会话，然后重新运行 |
 | `capability_unavailable` | step 级：这台设备不提供这一步需要的能力，重新运行不会变，例如需要网页上下文的确定性 step 落在不提供它的设备上、设备不支持经系统打开地址、Android 上地址含 `;`、`'`、`(`、`)` 或中文等地址中不允许的字符而没有百分号编码。按消息改写为 AI 步、改地址或换一台设备 |
 

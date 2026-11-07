@@ -58,9 +58,9 @@ class SubprocessLauncher:
         self._resolver = resolver
         self._event_log = event_log
         # engine→grace 下限，**必传**（组合根传 compose.engine_min_grace；测试传显式 fake）：timeout stop 用它当协作停
-        # 宽限（grace < 单 act 时长会致会话泄漏，ADR 0024 grace 硬约束——超时杀也不豁免）。不留缺省：任何回落值都必然
-        # 低于引擎下限（Nova 150s），漏注入宁在构造期 TypeError 炸掉，别让超时停静默变成杀会话（同 run_reconcile_loop
-        # 的 now_iso_fn 立场）。
+        # 宽限（grace 小于引擎自报的收尾下限时，worker 可能在释放会话或保存产物之前被强制终止，ADR 0024 grace 硬约束——
+        # 超时停止也不豁免）。不留缺省：任何回落值都必然低于引擎下限（如 Nova 150s），漏注入宁可在构造期抛 TypeError，
+        # 别让超时停止静默变成强制终止、丢掉会话清理（同 run_reconcile_loop 的 now_iso_fn 立场）。
         self._min_grace_fn = min_grace_fn
         # 本 launcher 起过的 scope（run_reconcile_loop 的接力恢复扫豁免它们——自家 job 的 deadline 有 timer 在管）
         self.owned_scopes: set[str] = set()

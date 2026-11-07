@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 import pytest
-from _doc_rules import REPO, classify, code_comment_files, scan
+from _doc_rules import REPO, classify, code_comment_files, comment_units, scan
 
 
 def _rel(p: Path) -> str:
@@ -57,6 +57,38 @@ def test_fenced_code_in_docstrings_is_not_symbolic_shorthand(tmp_path):
     src.write_text('"""示例模块。\n\n```python\njob = 范围\n```\n\n判据 = 范围\n"""\n', encoding="utf-8")
     hits = {(line_no, label) for line_no, label, _ in scan("code", src)}
     assert hits == {(7, "符号当谓语")}
+
+
+@pytest.mark.parametrize("text, hit", [
+    ("# 漏传即在装配点炸", True),
+    ("# 四象限全摆出来会组合爆炸", False),
+    ("# 不让 traceback 裸奔", True),
+    ("# 聚合异常裸穿本 tick", True),
+    ("# 可无脑重新运行", True),
+    ("# 已真验", True),
+    ("# 真验证据坐实", True),
+    ("# 认真验证每个分支", False),
+])
+def test_colloquial_comment_words_and_their_exemptions(tmp_path, text: str, hit: bool):
+    """注释层同事口头语的词形边界：「炸」放行「爆炸」，「真验」连同「真验证」都报、放行「认真验证」。"""
+    src = tmp_path / "sample.py"
+    src.write_text(text + "\n", encoding="utf-8")
+    labels = {label for _, label, _ in scan("code", src)}
+    assert ("口头语或自造复合词" in labels) is hit
+
+
+def test_ts_comment_line_numbers_survive_multiline_template_literals(tmp_path):
+    """TS / JS 的字符串遮蔽保留换行：跨行模板字面量之后的注释，抽出的行号与原文一致，命中也报在原文所在的行。"""
+    src = tmp_path / "sample.mts"
+    source = ("const page = `\n  <main>\n    <h1>标题</h1>\n  </main>`;\n"
+              "// 判据 = 范围\n/* 块注释\n   判据 = 范围 */\n")
+    src.write_text(source, encoding="utf-8")
+    lines = source.splitlines()
+    units = comment_units(src)
+    assert [line_no for line_no, _ in units] == [5, 6, 7]
+    assert all(text in lines[line_no - 1] for line_no, text in units)
+    hits = {(line_no, label) for line_no, label, _ in scan("code", src)}
+    assert hits == {(5, "符号当谓语"), (7, "符号当谓语")}
 
 
 def test_scan_reads_the_given_text_instead_of_the_file(tmp_path):

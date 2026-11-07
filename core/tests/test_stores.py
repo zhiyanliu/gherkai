@@ -317,7 +317,7 @@ def test_job_target_and_device_request_round_trip_and_fixed_keys():
     d = job_to_dict(j)
     assert d["target"] == {"device": "desktop", "ui_kind": "web"} and d["device_request"] is None
     assert job_from_dict(d).target == Target() and job_from_dict(d).device_request is None
-    dr = DeviceFarmRequest(project_arn="arn:p", os_version="15")
+    dr = DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED")
     aw = Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=j.scenarios, timeout_s=1500.0,
              target=Target(device="android", ui_kind="web"), device_request=dr)
     assert job_from_dict(job_to_dict(aw)) == aw
@@ -329,7 +329,6 @@ def test_job_target_and_device_request_round_trip_and_fixed_keys():
     plan_form = Job(scope_id="p", scope_name="p", engine="midscene", scenarios=j.scenarios, timeout_s=900.0,
                     target=Target(device="ios", ui_kind="app", app=AppRef(alias="shop", app_id="com.example.Shop")))
     assert job_to_dict(plan_form)["target"]["app"] == {"alias": "shop", "app_id": "com.example.Shop"}  # 位置三项省略
-    assert job_from_dict(job_to_dict(plan_form), validate=False) == plan_form
 
 
 @pytest.mark.parametrize("patch, match", [
@@ -352,7 +351,7 @@ def test_job_from_dict_rejects_malformed_device_definitions(patch, match):
 
     j = _job_def("s", "s", "midscene")
     aw = Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=j.scenarios, timeout_s=1500.0,
-             target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+             target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
     d = job_to_dict(aw)
     patch(d)
     with pytest.raises(DefinitionContractError, match=match):
@@ -437,12 +436,12 @@ def test_validate_definition_rejects_desktop_with_device_request_or_app_and_web_
     j = _job_def("s", "s", "midscene")
     app = AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")
     cases = [
-        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "非桌面目标当且仅当带设备请求"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED")), "非桌面目标当且仅当带设备请求"),
         (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, target=Target(device="desktop", ui_kind="app", app=app)), "不是合法组合"),
         (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="web", app=app),
-             device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "为网页时不得带"),
+             device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED")), "为网页时不得带"),
         (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="app", app=None),
-             device_request=DeviceFarmRequest(project_arn="p", os_version="15")), "必须带应用条目"),
+             device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED")), "必须带应用条目"),
         (dataclasses.replace(_ios_app_job(j.scenarios), target=Target(device=[], ui_kind="web")), "不是合法组合"),  # 错类型不抛 TypeError
     ]
     for job, match in cases:
@@ -496,7 +495,7 @@ def test_job_from_dict_rejects_incomplete_app_entry_and_desktop_with_app():
     from gherkai_core.serialize import job_from_dict, job_to_dict
 
     j = _job_def("s", "s", "midscene")
-    dr = DeviceFarmRequest(project_arn="arn:p", device_arn="arn:d")
+    dr = DeviceFarmRequest(project_arn="arn:p", device_arn="arn:d", billing_method="METERED")
     for app in (AppRef(alias="shop", app_id="x"), AppRef(alias="shop", app_id="x", bucket="b", key="k", sha256=""),
                 AppRef(alias="", app_id="x", bucket="b", key="k", sha256="h")):
         bad = Job(scope_id="ia", scope_name="ia", engine="midscene", scenarios=j.scenarios, timeout_s=900.0,
@@ -764,7 +763,7 @@ def test_run_state_jobs_map_round_trip(tmp_path: Path):
 
 def test_step_message_survives_round_trip_and_missing_key_is_none():
     """step 级 message 写读两端同批（ADR 0042 决策三）：样例必须带**非默认**的 message——全 None 时
-    to_dict/from_dict 往返照不出漏读端（默认值恰好相等的假绿）。旧落盘无此键 → None（向后兼容）。"""
+    to_dict/from_dict 往返照不出漏读端（默认值恰好相等的假绿）。缺键取 None（ADR 0031 决定六「判定结果读端对三个明细键的缺省」条）。"""
     jr = _sample_run().jobs[0]
     jr.scenarios[0].steps[1] = StepResult(index=1, status=Status.FAILED, error_type="assertion_failed",
                                           message="AI 断言未过多数票（0/1）：搜索 OpenAI")

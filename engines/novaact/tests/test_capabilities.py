@@ -22,7 +22,7 @@ def _clean_env(**extra: str) -> dict:
     """子进程 env：保留运行必需项，剥掉 GHERKAI_* / AWS_* / NOVA_*（含本机 region 与凭证落点）。
 
     剥 AWS 是断言的一部分——「不建会话、零费用」在这个 env 下若被违背（起 Workflow / AgentCore 会话）
-    必炸或挂，退出码 0 才成立。
+    必然失败或挂起，退出码 0 才成立。
     """
     keep = ("PATH", "PYTHONPATH", "PYTHONHOME", "HOME", "TMPDIR", "LANG", "LC_ALL", "SYSTEMROOT", "VIRTUAL_ENV")
     env = {k: v for k, v in os.environ.items() if k in keep}
@@ -45,7 +45,7 @@ def test_capabilities_shape_and_min_grace_from_injected_act_timeout():
     caps = json.loads(out)
     assert set(caps) == {"schema_version", "engine", "min_grace_s", "targets", "deterministic_steps", "model_id", "session_warmup"}, caps
     assert caps["session_warmup"] is True  # 支持隧道会话预热（ADR 0051 决策 13；0049 决策 1）
-    assert caps["schema_version"] == 1  # 只加键不改既有键语义 → 版本不递增（ADR 0036「5.」；0049 决策 1 增键不升版）
+    assert caps["schema_version"] == 2  # 协议版本 2：match 查询条目改为对象而递增（ADR 0024）；本对象上增键本身不升版（0049 决策 1）
     # 测试目标（ADR 0049 决策 1、2、9）：显式写出、只有桌面网页、不带 max_session_s（浏览器会话不施加会话级上限）；
     # 键是协议面的 snake_case，与 Midscene 侧逐字相同（CLI 的契约校验对两侧同一道）
     assert caps["targets"] == [{"device": "desktop", "ui_kinds": ["web"]}], caps

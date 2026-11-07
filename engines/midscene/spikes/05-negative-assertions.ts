@@ -61,7 +61,7 @@ async function main() {
       const has = para.toLowerCase().includes("zzqx-not-a-real-word");
       checks.push({ name: "aiString 必假(含杜撰词)", expectRed: true, gotRed: !has, detail: `包含杜撰词=${has}（期望 false）` });
     }
-    // (d) 对照正向——必真：确认确实是 OpenAI 页（防"全假"——证明它不是无脑返回 false）
+    // (d) 对照正向——必真：确认确实是 OpenAI 页（防"全假"——证明它不是对任何输入都返回 false）
     {
       const v = await agent.aiBoolean("当前页面是关于 OpenAI 的维基词条");
       checks.push({ name: "aiBoolean 必真(对照)", expectRed: false, gotRed: v === false, detail: `aiBoolean=${v}（期望 true）` });

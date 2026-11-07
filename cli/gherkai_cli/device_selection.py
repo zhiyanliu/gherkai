@@ -1,7 +1,7 @@
 """设备选择与设备请求的解析（ADR 0053 决策 4、ADR 0048 决策 3、ADR 0051 决策 2）：选项 > 环境变量 > 配置文件，解析成 Job 的具名设备请求。
 
 只有运行侧 CLI 读这些来源，解析出的具体值随 definition 走、宿主不重解析（ADR 0053 决策 1）。本模块是纯函数、不连 AWS：云端的
-Device Farm 项目 ARN 由调用方读 SSM 后传入，本机的由选项 / 环境变量 / 配置文件给出。
+Device Farm 项目 ARN 由调用方读 SSM 后传入，本机的项目 ARN 与应用桶由选项 / 环境变量 / 配置文件给出、取值顺序只在本模块写一处。
 ARN 只核对服务与资源类型段（ADR 0053 决策 4）：拦「贴错类型」这一种最常见的错（把项目 ARN 贴进设备 ARN 之类），零 AWS 调用；
 设备不存在、已下架、不支持远程访问等由 worker 建会话时记 precheck_failed。
 所有 `DeviceSelectionError` 的消息都是给使用方看的整句，调用点直接打印后以退出码 2 结束。
@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 from gherkai_core.model import DEFAULT_ACQUIRE_TIMEOUT_S, DeviceFarmRequest
 
-from gherkai_cli.config import ProjectConfig
+from gherkai_cli.config import DEFAULT_BILLING_METHOD, ProjectConfig
 
 PLATFORM_FLAG = {"android": "--android-device-arn", "ios": "--ios-device-arn"}
 PLATFORM_ENV = {"android": "GHERKAI_ANDROID_DEVICE_ARN", "ios": "GHERKAI_IOS_DEVICE_ARN"}
@@ -120,7 +120,7 @@ def selection_to_dict(sel: DeviceSelection | None) -> dict | None:
 
 
 def billing_method_for(platform: str, config: ProjectConfig) -> str:
-    """计费方式：平台子表 > [devices] 顶层 > METERED（ADR 0053 决策 3）。"""
+    """计费方式：平台子表 > [devices] 顶层 > 内建缺省 DEFAULT_BILLING_METHOD（ADR 0053 决策 3）。"""
     devices = config.devices
     if devices is not None:
         sub = devices.platforms.get(platform)
@@ -128,7 +128,7 @@ def billing_method_for(platform: str, config: ProjectConfig) -> str:
             return sub.billing_method
         if devices.billing_method is not None:
             return devices.billing_method
-    return "METERED"
+    return DEFAULT_BILLING_METHOD
 
 
 def acquire_timeout_for(config: ProjectConfig) -> float:
@@ -155,6 +155,18 @@ def resolve_local_project_arn(*, flag_arn: str | None, env: Mapping[str, str], c
         "本机运行设备 scope 需要一个 Device Farm 项目，但没有指定：请在 gherkai.toml 的 [devices] 里给出 project-arn，"
         f"或用 {PROJECT_ARN_FLAG} / 环境变量 {PROJECT_ARN_ENV} 指定。"
     )
+
+
+def local_project_arn_given(*, flag_arn: str | None, env: Mapping[str, str], config: ProjectConfig) -> bool:
+    """选项、环境变量与配置文件 [devices] project-arn 中是否有一处给了项目 ARN：只看有没有值、不核形态、不抛。云端后端据此提示
+    「本项不生效」；本机给的值在云端只提示、不拦截（ADR 0053 决策 3），所以这里不能走会核形态并抛错的 `resolve_local_project_arn`。"""
+    return bool(flag_arn or env.get(PROJECT_ARN_ENV) or (config.devices is not None and config.devices.project_arn))
+
+
+def resolve_local_app_bucket(*, flag: str | None, env: Mapping[str, str], config: ProjectConfig) -> str | None:
+    """本机后端放安装包的 S3 桶：选项 > 环境变量 > 配置文件 [devices] app-bucket（ADR 0053 决策 2、3）。空串视同没有给、继续取下一处；
+    三处都没有返回 None，缺失的处置归调用方：本机以退出码 2 结束，云端据此判断要不要提示「本项不生效」。不核形态、不抛。"""
+    return flag or env.get(APP_BUCKET_ENV) or (config.devices.app_bucket if config.devices is not None else None) or None
 
 
 def account_of(arn: str) -> str:

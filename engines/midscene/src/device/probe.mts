@@ -29,22 +29,28 @@
 //   - 原生只读命令也失败（会话异常）：先查会话状态，丢失归 session_lost，否则探测出错；
 //   - 多个候选：定位规则拒绝歧义、无法确定被测页面，同样是无法区分设备能力的情形，记探测出错，不按第一个去猜。
 // 会话丢失发生在 scope_started 之前，消息用执行前的那句（surface.mts 的 SESSION_LOST_BEFORE_START_MESSAGE）。
-// 原生一侧的核对（切回原生上下文与原生截图）经生命周期通道的执行实例发出：它的超时是单条命令的真实上界，探测实例的网页命令挂住时
-// 原生核对经执行实例发出，服务端排队仍可能让它失败：Appium 服务端对同一会话的命令串行执行，真机验收中 iOS 26.3 上探测实例的切入挂住期间，执行
-// 实例发出的原生只读命令曾被延迟约 105 秒。两种否定结论下导航都不走 url（接缝据此选 deepLink 路线）。
+// 原生一侧的核对（切回原生上下文与原生截图）经生命周期通道的执行实例发出，它的超时是单条命令的真实上界；探测实例的网页命令挂住时，
+// 服务端排队仍可能让原生核对失败：Appium 服务端对同一会话的命令串行执行，真机验收中 iOS 26.3 上探测实例的切入挂住期间，执行实例
+// 发出的原生只读命令曾被延迟约 105 秒。两种否定结论下导航都不走 url（接缝据此选 deepLink 路线）。
+//
+// 经执行实例发出的只读原语（比例回退的截图与原生控件树、原生核对的截图）属命令守卫的只读白名单（ADR 0052 决策 6；白名单按原语列，
+// 获取期同样适用）：经守卫的 retryReadOnce 对连接层错误与 502 / 503 / 504 重试一次，超时与 500 不重试，获取预算中止后不再补发；
+// 控件树由 AppiumSession.pageSource 按同一规则重试。回到原生上下文不在白名单里，不重试；探测实例上的网页命令不走这条规则，按上面的
+// 有界重试一次，从列上下文起重新执行一轮。比例回退解析截图与控件树复用界面实现（device/interface.mts）的 pngSize 与 parseXmlTree。
 //
 // 获取预算：整个探测在 Appium 块的 withDeadline 之下执行，预算到期或进入终结时在途命令随之中止；每一步之后核对一次，中止即停、归
 // acquire_timeout（进入终结时这个结果不会被使用）。
 //
 // mobile 命令只出现在驱动适配器里（ADR 0052 决策 4）：设备屏幕信息由部件装配方从 XCUITest 适配器的导出注入（ProbeDeps）。会话状态的
-// 查询经 run 的第四个参数注入（Device Farm 会话块的 status 绑定到当前会话 ARN）；不传时命令失败不判会话丢失。
+// 查询经 run 的第四个参数注入（Device Farm 会话块的 status 绑定到当前会话 ARN），查询失败（返回 null 或抛出）时不据此判会话丢失。
 import type { Browser } from "webdriverio";
 import type { Device, UiKind } from "../worker/deterministic.mjs";
-import { errorText } from "../worker/error-text.mjs";
+import { errorText } from "../lib/error-text.mjs";
 import type { ScaleSource } from "./device-session.mjs";
-import {
-  commandFailureKind, defaultSleep, probeClientOf, withDeadline, type CommandFailureKind, type Sleep,
-} from "./appium.mjs";
+import { commandFailureKind, probeClientOf, withDeadline, type CommandFailureKind } from "./appium.mjs";
+import { retryReadOnce } from "./guard.mjs";
+import { descendantsOf, parseXmlTree, pngSize, type XmlNode } from "./interface.mjs";
+import { defaultSleep, type Sleep } from "./sleep.mjs";
 import {
   ACQUIRE_TIMEOUT_MESSAGE, SESSION_LOST_BEFORE_START_MESSAGE,
   type AcquireBudget, type AppiumSession, type CapabilityProbe, type Outcome, type ProbeConclusion, type WebContextVerdict,
@@ -57,23 +63,14 @@ export const SCALE_UNKNOWN_MESSAGE = "无法确定坐标比例";
 export interface ProbeDeps {
   /** iOS 的设备屏幕信息：执行只读的 mobile 命令 deviceScreenInfo 并返回它的结果（XCUITest 适配器的导出）。探测经探测实例调用。 */
   deviceScreenInfo(driver: Browser): Promise<unknown>;
-  /** worker 日志：探测里不影响结论走向的失败原因（经一行化与脱敏）。不传时不记。 */
-  log?: (line: string) => void;
+  /** worker 日志：探测里不影响结论走向的失败原因（经一行化与脱敏）。必填，让漏接在编译期就报错：这些失败不改变结论，漏接时
+   *  不留下任何记录。 */
+  log: (line: string) => void;
   /** 零候选之后再列一次之前的等待，只供测试注入。 */
   sleep?: Sleep;
 }
 
-/** 会话状态的查询（GetRemoteAccessSession 的状态值）：查询失败返回 null 或抛出，此时不据此判会话丢失。 */
-export type SessionStatusQuery = () => Promise<string | null>;
-
-/** 端口 CapabilityProbe 的实现，run 另收可选的会话状态查询。 */
-export interface DeviceCapabilityProbe extends CapabilityProbe {
-  run(
-    session: AppiumSession, target: { device: Device; uiKind: UiKind }, budget: AcquireBudget, sessionStatus?: SessionStatusQuery,
-  ): Promise<Outcome<ProbeConclusion>>;
-}
-
-export function createCapabilityProbe(deps: ProbeDeps): DeviceCapabilityProbe {
+export function createCapabilityProbe(deps: ProbeDeps): CapabilityProbe {
   return {
     run(session, target, budget, sessionStatus) {
       if (budget.signal.aborted) return Promise.resolve(stoppedOutcome());
@@ -91,7 +88,8 @@ interface ProbeRun {
   probe: Browser;
   target: { device: Device; uiKind: UiKind };
   budget: AcquireBudget;
-  sessionStatus: SessionStatusQuery | undefined;
+  /** 会话状态的查询（GetRemoteAccessSession 的状态值）：查询失败返回 null 或抛出，此时不据此判会话丢失。 */
+  sessionStatus: () => Promise<string | null>;
   deps: ProbeDeps;
   sleep: Sleep;
 }
@@ -106,7 +104,7 @@ const lostOutcome = (): Outcome<ProbeConclusion> => ({
 const RUNNING = "RUNNING";
 
 function log(r: ProbeRun, line: string): void {
-  r.deps.log?.(`worker: 能力探测：${line}`);
+  r.deps.log(`worker: 能力探测：${line}`);
 }
 
 async function runProbe(r: ProbeRun): Promise<Outcome<ProbeConclusion>> {
@@ -158,9 +156,8 @@ async function ensureNative(session: AppiumSession): Promise<void> {
   if (await session.currentContext() !== NATIVE_CONTEXT) await session.switchToNative();
 }
 
-/** 会话是否已结束：查到的状态不是 RUNNING（查询失败或没有查询函数不算）。 */
+/** 会话是否已结束：查到的状态不是 RUNNING（查询失败不算）。 */
 async function sessionLost(r: ProbeRun): Promise<boolean> {
-  if (r.sessionStatus === undefined) return false;
   try {
     const status = await r.sessionStatus();
     return status !== null && status !== RUNNING;
@@ -194,7 +191,7 @@ async function probeScale(r: ProbeRun, nativeOk: boolean): Promise<{ value: numb
   if (!nativeOk) return null;
   try {
     const source = await r.session.pageSource(r.budget.signal);
-    const screenshot = await r.session.exec.takeScreenshot();
+    const screenshot = await execScreenshot(r);
     const scale = scaleFromSizes(pngLongEdge(screenshot), applicationLongEdge(source));
     if (scale !== null) return { value: scale, source: "page_source" };
     log(r, "截图或应用窗口没有可用的尺寸，坐标比例无法换算");
@@ -216,33 +213,59 @@ export function scaleFromSizes(screenshotLongEdge: number | null, windowLongEdge
   return Number.isFinite(scale) && scale >= 1 ? scale : null;
 }
 
-const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+/** 经执行实例截图一次：截图在只读白名单里，连接层错误与 502 / 503 / 504 在获取预算未中止时重试一次（见模块头）。 */
+function execScreenshot(r: ProbeRun): Promise<string> {
+  return retryReadOnce(() => r.session.exec.takeScreenshot(), () => !r.budget.signal.aborted);
+}
 
-/** PNG 截图（base64）的长边像素：读文件头里 IHDR 块的宽与高；不是 PNG 时为 null。 */
+/** PNG 截图（base64）的长边像素：经 interface.mts 的 pngSize 读文件头里 IHDR 块的宽与高；不是字符串、不是 PNG 或长边为 0 时
+ *  为 null。 */
 export function pngLongEdge(base64: unknown): number | null {
   if (typeof base64 !== "string") return null;
-  const head = Buffer.from(base64.slice(0, 44), "base64");
-  if (head.length < 24 || !head.subarray(0, 8).equals(PNG_SIGNATURE) || head.toString("ascii", 12, 16) !== "IHDR") return null;
-  const longEdge = Math.max(head.readUInt32BE(16), head.readUInt32BE(20));
+  let size: { width: number; height: number };
+  try {
+    size = pngSize(base64);
+  } catch {
+    return null;
+  }
+  const longEdge = Math.max(size.width, size.height);
   return longEdge > 0 ? longEdge : null;
 }
 
-const APPLICATION_TAG = /<XCUIElementTypeApplication\b[^>]*>/;
+const APPLICATION_TAG = "XCUIElementTypeApplication";
+const SIZE_VALUE = /^[0-9]+(?:\.[0-9]+)?$/;
 
-/** 原生控件树里第一个 XCUIElementTypeApplication 节点的宽与高中的较大者（单位为点）；找不到这个节点或尺寸时为 null。真机控件树的根
- *  是不带属性的 AppiumAUT，这个节点是它的第一个子节点，所以按标签名找节点，不取根节点。 */
+/** 原生控件树里按文档顺序第一个 XCUIElementTypeApplication 节点的宽与高中的较大者（单位为点）；不是字符串、不是 XML、找不到这个
+ *  节点或它的宽高不是正数时为 null。真机控件树的根是不带属性的 AppiumAUT，这个节点是它的第一个子节点，所以按标签名找节点，不取
+ *  根节点。控件树经 interface.mts 的 parseXmlTree 解析：属性逐个匹配，属性值里未转义的 `>` 不会截断标签。 */
 export function applicationLongEdge(pageSource: unknown): number | null {
   if (typeof pageSource !== "string") return null;
-  const tag = APPLICATION_TAG.exec(pageSource)?.[0];
-  if (tag === undefined) return null;
-  const size = (name: string): number | null => {
-    const m = new RegExp(`\\s${name}="([0-9]+(?:\\.[0-9]+)?)"`).exec(tag);
-    const value = m ? Number(m[1]) : NaN;
-    return Number.isFinite(value) && value > 0 ? value : null;
-  };
-  const width = size("width");
-  const height = size("height");
+  let roots: XmlNode[];
+  try {
+    roots = parseXmlTree(pageSource);
+  } catch {
+    return null;
+  }
+  const app = firstApplication(roots);
+  if (app === null) return null;
+  const width = sizeAttr(app, "width");
+  const height = sizeAttr(app, "height");
   return width === null || height === null ? null : Math.max(width, height);
+}
+
+function firstApplication(roots: readonly XmlNode[]): XmlNode | null {
+  for (const root of roots) {
+    for (const node of descendantsOf(root)) if (node.tag === APPLICATION_TAG) return node;
+  }
+  return null;
+}
+
+/** 尺寸属性的值：十进制数（可带小数）且为正数，否则为 null。 */
+function sizeAttr(node: XmlNode, name: string): number | null {
+  const raw = node.attrs.get(name);
+  if (raw === undefined || !SIZE_VALUE.test(raw)) return null;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 // ---- 网页上下文 ----
@@ -346,11 +369,12 @@ async function tryWebRead(r: ProbeRun): Promise<WebAttempt> {
   return { kind: "failed", candidates, confirmsUnavailable };
 }
 
-/** 经生命周期通道回到原生上下文；withScreenshot 时再在原生上下文截图一次，作「原生只读命令正常」的证据。失败先查会话状态。 */
+/** 经生命周期通道回到原生上下文；withScreenshot 时再在原生上下文截图一次（按只读原语重试一次），作「原生只读命令正常」的证据。
+ *  失败先查会话状态。 */
 async function nativeCheck(r: ProbeRun, withScreenshot: boolean): Promise<"ok" | "failed" | "lost" | "stopped"> {
   try {
     await ensureNative(r.session);
-    if (withScreenshot) await r.session.exec.takeScreenshot();
+    if (withScreenshot) await execScreenshot(r);
     return "ok";
   } catch (e) {
     if (r.budget.signal.aborted) return "stopped";

@@ -3,7 +3,7 @@
 #
 # 为什么要等：上传成功不等于立刻可装。PyPI / npm 的 simple index 与 registry 元数据都过 CDN，
 # 上传返回 200 之后到 `pip install <name>==<版本>` 能解析到，中间有秒级到分钟级的传播窗口。
-# 基础镜像的 CI 形态按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），赶在窗口里 build
+# 推往 GHCR 的基础镜像构建用 index 态，按版本装已发行的 worker 包（ADR 0037 决策 5「两态」），赶在窗口里 build
 # 会以「no matching distribution」/「No matching version found」形式随机失败——那是一次
 # 半发布态（PyPI 已发、镜像缺失），修起来要人工重新运行镜像 job。等一下比重新运行便宜。
 #

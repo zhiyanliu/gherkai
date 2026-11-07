@@ -19,15 +19,18 @@
 // restart() 的命令由调用方传入的 driver 发出：设备侧接缝传命令守卫代理，命令受执行令牌约束，守卫挂在异常上的归类原样传出。
 //
 // 依赖：S3 客户端沿用 lib/artifact-upload.mts 的构造（首个客户端的 region 取 AWS_REGION，即后端所在区域，不是 Device Farm 的
-// us-west-2，ADR 0051 决策 10；桶在别的区域时按 301 给出的区域再建一个；maxAttempts 为 1，单次调用的上界由调用方的截止信号给出）。应用状态的三条命令是 Appium 的跨平台端点
-// （activate_app、terminate_app、app_state），不是 `mobile:` 扩展命令，两个平台写法相同，不需要经驱动适配器。
+// us-west-2，ADR 0051 决策 10；桶在别的区域时按 301 给出的区域再建一个；maxAttempts 为 1，不设单次超时）。存在性检查与预签名的
+// 上界不在本模块：S3 SDK 在发出请求之前先等凭据，传给 HeadObject 的截止信号对这一段不起作用、预签名不接受信号，所以由调用方
+// 在等待结果时同时等待获取预算的截止信号，到期即停止等待（ADR 0051 决策 2「安装包准备的上界」）；传给 SDK 的信号只作尽力取消。
+// 应用状态的三条命令是 Appium 的跨平台端点（activate_app、terminate_app、app_state），不是 `mobile:` 扩展命令，两个平台写法相同，
+// 不需要经驱动适配器。
 import { GetObjectCommand, HeadObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { SignatureV4 } from "@aws-sdk/signature-v4";
-import { Sha256 } from "@aws-crypto/sha256-js";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import type { Browser } from "webdriverio";
 import { attachClassification, type ScopeTermination } from "../worker/surface.mjs";
 import type { WebdriverApp } from "../worker/deterministic.mjs";
 import { APP_PRESIGN_EXPIRES_S, LAUNCH_SAMPLE_COUNT, LAUNCH_SAMPLE_INTERVAL_MS } from "./limits.mjs";
+import { defaultSleep, type Sleep } from "./sleep.mjs";
 
 // ---- 给使用方看的消息（ADR 0039；ADR 0051 决策 4 给了原文的照原文）----
 
@@ -65,9 +68,11 @@ export interface AppObjectHead {
 /** 安装包存储的 I/O 面：设备侧接缝与测试各自注入，缺省实现是 s3AppObjectStore。 */
 export interface AppObjectStore {
   /** 检查安装包是否存在并确定桶所在的区域，区域重定向至多跟随一次。404 与 403 返回判定，无法确定区域时抛出区域错误，其余失败原样
-   *  抛出。abortSignal 是调用方的截止信号（获取预算），必传：SDK 缺省没有请求超时，不带信号的调用在退化网络下会一直挂着。 */
+   *  抛出。abortSignal 是调用方的截止信号（获取预算），交给每次 HeadObject 以尽力取消在途的请求；它不是上界：等凭据的一段不响应
+   *  中止，调用可能在信号中止之后仍不返回，上界是调用方对同一信号的等待（见模块头「依赖」）。 */
   head(loc: AppObjectLocation, abortSignal: AbortSignal): Promise<AppObjectHead>;
-  /** 对安装包的 GetObject 按给定区域预签名，返回带签名的 https 地址；本地计算、不发请求（凭证解析除外）。 */
+  /** 对安装包的 GetObject 按给定区域预签名，返回带签名的 https 地址；本地计算、不发请求（凭证解析除外）。不接受截止信号，凭证解析
+   *  卡住时一直不返回，上界由调用方的等待给出（见模块头「依赖」）。 */
   presign(loc: AppObjectLocation, expiresS: number, region: string): Promise<string>;
 }
 
@@ -76,7 +81,8 @@ export type AppObjectCheck =
   | { ok: true; region: string; redirected: boolean }
   | { ok: false; termination: ScopeTermination };
 
-/** 建会话前的存在性检查：对象存在时放行并给出桶所在区域；404 与 403 返回 precheck_failed 的 scope 级终止（消息不同）；其余失败原样抛出。 */
+/** 建会话前的存在性检查：对象存在时放行并给出桶所在区域；404 与 403 返回 precheck_failed 的 scope 级终止（消息不同）；其余失败原样抛出。
+ *  调用方在信号中止之后不再采信它的结果（迟到的 404 / 403 不改判，见模块头「依赖」）。 */
 export async function checkAppObject(
   store: AppObjectStore, loc: AppObjectLocation, abortSignal: AbortSignal,
 ): Promise<AppObjectCheck> {
@@ -143,72 +149,10 @@ export function s3AppObjectStore(opts: { client?: S3Client; clientFactory?: (reg
   };
 }
 
-// 预签名的写法：让 S3 客户端自己的中间件栈组装 GetObject 请求（终端节点规则、虚拟主机或路径形态、键的编码都由 SDK 决定），
-// 在签名中间件之前截下请求，改用查询串签名，不发出请求。这与官方 `@aws-sdk/s3-request-presigner` 的 getSignedUrl 做法相同，
-// 本包没有依赖那个包，签名器用本包已有的 `@aws-sdk/signature-v4`。签名形态与官方一致：载荷记 UNSIGNED-PAYLOAD（下载方的
-// 请求体与内容哈希不可预知），x-amz- 前缀的请求头移进查询串，其余请求头只留 host，所以 SignedHeaders 只有 host，下载方
-// （Appium 服务端）不必带任何额外请求头。在 client-s3 3.1074 上，同一签名时刻产出的地址与官方 getSignedUrl 逐字节相同；
-// 升级 client-s3 后应重新与官方对拍一次。app.test.mts 另按 SigV4 规范独立复算签名值。
-const PRESIGN_INTERCEPT = "gherkaiAppPresignIntercept";
-const UNSIGNED_PAYLOAD = "UNSIGNED-PAYLOAD";
-
-/** 截下来的请求（SDK 的 HttpRequest 的结构子集）。 */
-interface InterceptedRequest {
-  protocol: string;
-  hostname: string;
-  port?: number;
-  path: string;
-  query: Record<string, string | string[] | null>;
-  headers: Record<string, string>;
-}
-
-async function presignGetObject(client: S3Client, loc: AppObjectLocation, expiresS: number): Promise<string> {
-  const signer = new SignatureV4({
-    service: "s3",
-    region: await client.config.region(),
-    credentials: client.config.credentials,
-    sha256: Sha256,
-    uriEscapePath: false,   // S3 的规范 URI 不做二次编码（SDK 序列化出的路径已经编码过一次）
-    applyChecksum: false,
-  });
-  const intercept = () => async (args: { request: unknown }) => {
-    const request = args.request as InterceptedRequest;
-    // 请求头只留 host 与 x-amz- 前缀的项（签名时后者移进查询串，如 x-amz-checksum-mode），去掉 SDK 自己加的记账类请求头
-    // （调用 id、重试计数、用户代理）：它们若进入签名，下载方必须原样带上才能通过校验。与官方预签名的取舍相同。
-    const host = request.headers.host ?? (request.port ? `${request.hostname}:${request.port}` : request.hostname);
-    const kept: Record<string, string> = { host };
-    for (const [name, value] of Object.entries(request.headers)) {
-      const lower = name.toLowerCase();
-      if (lower.startsWith("x-amz-") && lower !== "x-amz-user-agent") kept[name] = value;
-    }
-    kept["X-Amz-Content-Sha256"] = UNSIGNED_PAYLOAD;
-    request.headers = kept;
-    const presigned = await signer.presign(request as never, { expiresIn: expiresS });
-    return { response: {}, output: { $metadata: {}, presigned } };
-  };
-  const command = new GetObjectCommand({ Bucket: loc.bucket, Key: loc.key });
-  const stack = client.middlewareStack.clone();
-  stack.addRelativeTo(intercept as never, {
-    name: PRESIGN_INTERCEPT, relation: "before", toMiddleware: "awsAuthMiddleware", override: true,
-  });
-  const handler = command.resolveMiddleware(stack, client.config, {});
-  const { output } = (await handler({ input: command.input } as never)) as unknown as { output: { presigned: InterceptedRequest } };
-  return formatUrl(output.presigned);
-}
-
-/** RFC 3986 的严格编码（与 SDK 拼查询串的规则相同）：只有 A-Z a-z 0-9 - . _ ~ 不编码。 */
-function escapeQueryPart(s: string): string {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-function formatUrl(req: InterceptedRequest): string {
-  const query = Object.keys(req.query).sort().flatMap((k) => {
-    const v = req.query[k];
-    if (v === null) return [escapeQueryPart(k)];
-    return (Array.isArray(v) ? v : [v]).map((one) => `${escapeQueryPart(k)}=${escapeQueryPart(one)}`);
-  }).join("&");
-  const port = req.port ? `:${req.port}` : "";
-  return `${req.protocol}//${req.hostname}${port}${req.path}${query ? `?${query}` : ""}`;
+// 预签名由官方 `@aws-sdk/s3-request-presigner` 的 getSignedUrl 用桶所在区域的客户端生成，本包不另写请求截获与地址拼接，
+// 理由见 ADR 0051 决策 9「预签名的生成」。
+function presignGetObject(client: S3Client, loc: AppObjectLocation, expiresS: number): Promise<string> {
+  return getSignedUrl(client, new GetObjectCommand({ Bucket: loc.bucket, Key: loc.key }), { expiresIn: expiresS });
 }
 
 // ---- 启动与启动采样（ADR 0051 决策 9、14）----
@@ -236,25 +180,9 @@ const _browserIsAppControl: _BrowserIsAppControl = true;
 void _browserIsAppControl;
 
 export interface AppTimingDeps {
-  /** 采样间隔的等待，只供测试注入。第二个参数是调用方的中止信号（可能没有）；缺省实现在信号中止时提前结束。 */
-  sleep?: (ms: number, abortSignal?: AbortSignal) => Promise<void>;
-}
-
-/** 缺省的等待：到时或信号中止即结束（中止时不抛，由调用方在等待之后核对）；结束时摘掉挂在信号上的监听。 */
-function defaultSleep(ms: number, abortSignal?: AbortSignal): Promise<void> {
-  return new Promise((resolve) => {
-    if (abortSignal?.aborted) {
-      resolve();
-      return;
-    }
-    const done = (): void => {
-      clearTimeout(timer);
-      abortSignal?.removeEventListener("abort", done);
-      resolve();
-    };
-    const timer = setTimeout(done, ms);
-    abortSignal?.addEventListener("abort", done, { once: true });
-  });
+  /** 采样间隔的等待，只供测试注入。第二个参数是调用方的中止信号（可能没有）；缺省实现（sleep.mts 的 defaultSleep）在信号中止时
+   *  提前结束、不抛出，由采样在等待之后核对。 */
+  sleep?: Sleep;
 }
 
 /** 启动后的状态采样：每隔 LAUNCH_SAMPLE_INTERVAL_MS 采一次、共 LAUNCH_SAMPLE_COUNT 次（第一次也在间隔之后，覆盖启动后的头几秒），

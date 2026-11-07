@@ -29,8 +29,10 @@ import {
 } from "@midscene/core/device";
 import { z, type AgentOpt } from "@midscene/core";
 import type { Browser } from "webdriverio";
-import { errorText } from "../worker/error-text.mjs";
-import { attachClassification, readClassification, type ControlItem, type Controls } from "../worker/surface.mjs";
+import { errorText } from "../lib/error-text.mjs";
+import {
+  MAX_CAUSE_DEPTH, attachClassification, readClassification, type ControlItem, type Controls,
+} from "../worker/surface.mjs";
 import type { Device } from "../worker/deterministic.mjs";
 import { RESULT_UNKNOWN_MESSAGE } from "./guard.mjs";
 import { CONTROLS_MAX_ITEMS } from "./limits.mjs";
@@ -131,9 +133,6 @@ export function driverTextMatchAllowed(e: unknown): boolean {
   return mark !== null && mark.errorType === "engine_error" && mark.sessionRunningConfirmed === true
     && mark.message !== RESULT_UNKNOWN_MESSAGE;
 }
-
-// cause 链的查找上限，与 worker/surface.mts 读归类标记时的上限相同，同时防环。
-const MAX_CAUSE_DEPTH = 8;
 
 /** 驱动报错的全文：异常及其 cause 链上的名字与消息，用来匹配实测过的驱动错误文本。WebdriverIO 把服务端的错误体放进 message，
  *  个别形态下 message 是对象，这里按 JSON 展开。 */
@@ -543,11 +542,11 @@ export class AppiumInterface extends AbstractInterface {
   }
 }
 
-/** 构造界面实现前的核对（都是装配错误，正常执行不会触发）：平台与驱动一致、比例为正数、iOS 带输入上下文。没有给日志出口时
- *  不记日志。 */
+/** 构造界面实现前的核对（都是装配错误，正常执行不会触发）：平台与驱动一致、比例为正数、iOS 带输入上下文。log 是诊断日志出口，
+ *  与设备 Agent 工厂的同名参数同义、同样必填。 */
 export function createAppiumInterface(args: {
   driver: Browser; adapter: DeviceAdapter; session: Pick<AppiumSession, "withWebContext">; device: Device; scale: number;
-  inputContext: InputContext | null; log?: (line: string) => void;
+  inputContext: InputContext | null; log: (line: string) => void;
 }): AppiumInterface {
   const { adapter, device, scale, inputContext } = args;
   if (adapter.device !== device) {
@@ -557,7 +556,7 @@ export function createAppiumInterface(args: {
   if (device === "ios" && inputContext !== "web" && inputContext !== "native") {
     throw new Error("iOS 设备的界面实现需要能力探测给出的输入上下文");
   }
-  return new AppiumInterface({ driver: args.driver, adapter, scale, inputContext, session: args.session, log: args.log ?? (() => {}) });
+  return new AppiumInterface({ driver: args.driver, adapter, scale, inputContext, session: args.session, log: args.log });
 }
 
 /** 设备 Agent 的构造参数：设备侧接缝 AgentFactory 端口的参数，适配器取完整面，另加能力探测给出的 iOS 输入上下文。 */

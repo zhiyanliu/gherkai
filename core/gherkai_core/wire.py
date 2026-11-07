@@ -75,8 +75,9 @@ def _scenario_to_json(sc: Scenario) -> dict:
 
 # worker↔core 协议的版本（ADR 0024「协议版本与 job 行的固定键集」）：**一个数、两个方向各带**——能力自述的 `schema_version`（worker 到 core，
 # 由 compose 核）与 job 行的 `schemaVersion`（core 到 worker，由 worker 建会话前核）写的都是它，任一方向出现不兼容变化就一起加 1；
-# 读端不等于自己认的即按版本不一致处置、不留分支。与 definition 的 schema_version（serialize）是另一份文档、各自编号；1.5 都是 1。
-PROTOCOL_SCHEMA_VERSION = 1
+# 读端不等于自己认的即按版本不一致处置、不留分支。与 definition 的 schema_version（serialize）是另一份文档、各自编号：1.5 的 definition
+# 结构版本仍为 1，协议版本为 2（match 查询条目从裸字符串改为 {keyword, text} 对象，递增理由见 ADR 0024 同条）。
+PROTOCOL_SCHEMA_VERSION = 2
 
 
 def job_to_json(job: Job) -> dict:

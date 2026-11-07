@@ -35,7 +35,7 @@ def _stub_engine_capabilities(monkeypatch):
         if engine not in FAKE_MIN_GRACE_S:
             raise ValueError(f"未知引擎 {engine!r}")  # 同 compose 定位链的引擎名校验
         compose.resolve_worker_cmd(engine)  # 定位链照真走：miss → WorkerNotFoundError，同真查询的第一步
-        caps = {"schema_version": 1, "engine": engine, "min_grace_s": FAKE_MIN_GRACE_S[engine],
+        caps = {"schema_version": 2, "engine": engine, "min_grace_s": FAKE_MIN_GRACE_S[engine],
                 "targets": [{"device": "desktop", "ui_kinds": ["web"]}],  # 顶层 targets 必有（ADR 0049 决策 2）
                 "deterministic_steps": [dict(e) for e in FAKE_DETERMINISTIC_STEPS],
                 "model_id": FAKE_MODEL_ID[engine],

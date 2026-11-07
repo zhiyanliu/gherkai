@@ -29,7 +29,7 @@ import * as os from "node:os";
 import { sigv4Fetch, getBaseUrl, MODEL, modelFamily } from "../lib/agentcore-sigv4.mjs";
 // 产物 S3 上传（ADR 0029；无落点 env 时 no-op 报 file://）；UPLOAD_TIMEOUT_MS 是自报 grace 下限的加数之一
 // （中断兜底提前上传那一段的预算，见下 minGraceSeconds），单一真值住上传器、此处只引用。
-import { ArtifactUploader, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
+import { ArtifactUploader, QUEUE_GENERIC_NOUN, UPLOAD_TIMEOUT_MS } from "../lib/artifact-upload.mjs";
 import { EventSink } from "../lib/event-sink.mjs";  // 事件出口（ADR 0024「I/O 边缘可注入接口」，两态见该模块头）
 import { startParentWatchdog } from "../lib/parent-watchdog.mjs";  // 所属进程消失视同 SIGTERM（ADR 0024 终止契约）
 import { JobSource, PROTOCOL_SCHEMA_VERSION, type Job as WireJob } from "../lib/job-source.mjs";  // job 入口（同上）；Job 类型是 core 发来的 job 行形状
@@ -42,12 +42,12 @@ import { MAX_SESSION_S, deviceGraceSeconds, replanningCycleLimit } from "../devi
 // 带内建标记（ADR 0050 决策 1）——import 即注册，对称 Nova 引擎 import deterministic_steps；使用方 steps 在 main 里随后加载。
 import {
   match as matchDeterministic, selectHandler, DeterministicAssertion, DeterministicConflict, DeterministicKeywordMismatch,
-  listRegistry, matchBatch, type Match, type MatchItem, type SelectedHandler, type StepTargetKey,
+  listRegistry, matchBatch, MatchInputError, MATCH_INPUT_MISMATCH, type Match, type MatchProbe, type SelectedHandler, type StepTargetKey,
 } from "./deterministic.mjs";
 import { buildInstruction } from "./argument.mjs";
 // step 级机读证据（ADR 0042）：SDK 结构 → gherkai 自有 schema 的映射与落盘全住那个模块；此处只挂钩子。
 import { stepEvidenceRef, executionsLength, EVIDENCE_KIND, ENGINE, type EvidenceHook } from "./evidence.mjs";
-import { errorText, oneLineError } from "./error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
+import { errorText, oneLineError } from "../lib/error-text.mjs";  // 失败原因压成一行有界文本（ADR 0042；与 evidence 侧同一规则）
 import { redactSecrets } from "../lib/redact.mjs";  // stderr 诊断行的脱敏出口（见下 log）
 import "./deterministic.steps.mjs";  // 内建脚手架（ADR 0022 退役 bdd 层后迁入 worker/）——**先于**使用方 steps 注册
 import { EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, SESSION_WARMUP_KEY, SESSION_WARMUP_URL_ENV } from "../lib/tunnel-warmup.mjs";
@@ -153,7 +153,7 @@ function log(msg: string): void {
   process.stderr.write(redactSecrets(msg) + "\n");
 }
 
-// 中断兜底的安全点提前上传（ADR 0029 上传时机第三级的 handler 兜底，为 Fargate 预演）——从 onSignal 提出为可测纯函数
+// 中断兜底的安全点提前上传（ADR 0029 上传时机第三级的 handler 兜底）——从 onSignal 提出为可测纯函数
 // （对称 Nova 把 _on_signal 提到模块级、供 test_interrupt_model/process 测；否则 main() 内闭包无法单测，是
 // 「该对称却漏」的测试缺口）。**调用点在 onSignal 里必须排在 cleanup 之后**（会话释放优先铁律，ADR 0024）——
 // 本函数只管「提前上传那一步」的决策，不含 cleanup/退出，顺序由调用方保证。
@@ -176,28 +176,35 @@ async function interruptSnapshot(
   }
 }
 
-// 截图后台队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 结构相同的可测小函数：只管「排空那一步」的
+// 后台上传队列的有界排空（ADR 0042 决策一）——与 interruptSnapshot 结构相同的可测小函数：只管「排空那一步」的
 // 决策（排不完记一行、放弃），**位置**（必须排在会话释放之后）由调用方保证。
 // best-effort、**绝不抛**：收尾路径上抛会跳过后面的 exit / flush；排不完不是错，正常路径还有整目录 flush 兜。
-// flushFollows 由调用点声明「我后面还跟着整目录 flush 吗」（不在这里猜调用栈）。分句按调用点是否真跟着整目录
-// flush：只在会 flush 的路径上说「改由收尾上传」（ADR 0039 面一的文案不变量例外条，两引擎措辞一致）；不跟 flush 的
-// 提前退出路径说这些截图已放弃。必传、无默认——默认值会让新调用点静默拿到一句可能为假的承诺。
+// flushFollows 由调用点声明「我后面还跟着整目录 flush 吗」（不在这里猜调用栈），在排空返回之后才取值：正常收尾的排空在途时
+// 进入终结，主流程随后让位、不再 flush（ADR 0051 决策 5「进入终结之后主流程让位」）。分句按调用点是否真跟着整目录
+// flush：只在会 flush 的路径上说「改由收尾上传」（ADR 0039 面一的文案不变量例外条，两引擎的分句与承诺一致）；不跟 flush 的
+// 提前退出路径说剩下的已放弃。必传、无默认——默认值会让新调用点静默拿到一句可能为假的承诺。
+// 句中的名词取上传器给的未落定文件统称（pendingNoun）：队列里除截图外还可能排着设备目标的原始控件树与中断释放时的
+// device-session.json，只剩截图时与 Nova 同名，几类混在一起时用泛称（ADR 0039 面一「两引擎措辞一致」条）。
 async function drainArtifactQueue(
-  uploader: { drain: (timeoutMs: number) => Promise<boolean> },
+  uploader: { drain: (timeoutMs: number) => Promise<boolean>; pendingNoun: () => string },
   budgetMs: number,
-  flushFollows: boolean,
+  flushFollows: () => boolean,
   logFn: (m: string) => void = log,
 ): Promise<void> {
   try {
     if (!(await uploader.drain(budgetMs))) {
+      const noun = uploader.pendingNoun();
       // 产品面一行：发生了什么 + 剩下的谁传 / 还能看什么 + 不影响什么。
-      logFn(flushFollows
-        ? "worker: 部分证据截图未能在收尾预算内传完（剩余的改由收尾统一上传；判定与报告不受影响）"
-        : "worker: 部分证据截图未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）");
+      logFn(flushFollows()
+        ? `worker: 部分${noun}未能在收尾预算内传完（剩余的改由收尾统一上传；判定与报告不受影响）`
+        : `worker: 部分${noun}未能在收尾预算内传完（已放弃，不影响判定结果；仍可看引擎原生报告）`);
     }
   } catch (e) {
-    // 产品面一行，与上面「排不完」那行措辞一致（best-effort、绝不抛的判据见上函数头）。
-    logFn(`worker: 证据截图收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
+    // 产品面一行，与上面「排不完」那行措辞一致（best-effort、绝不抛的判据见上函数头）。名词同样取未落定文件的统称，桌面目标的
+    // 队列只有截图、仍与 Nova 同名；上传器连统称也给不出（方法缺失或抛出）时用泛称。
+    let noun = QUEUE_GENERIC_NOUN;
+    try { noun = uploader.pendingNoun(); } catch { /* 用泛称 */ }
+    logFn(`worker: ${noun}收尾上传失败（不影响判定结果；仍可看引擎原生报告）：${(e as Error).message}`);
   }
 }
 
@@ -215,7 +222,8 @@ interface ShutdownDeps {
   cleanup: () => Promise<void>;        // 释放会话（**先执行**）
   uploader: {
     snapshotReport: (p: string) => Promise<void>;
-    drain: (timeoutMs: number) => Promise<boolean>;  // 截图后台队列的有界排空（ADR 0042 决策一）
+    drain: (timeoutMs: number) => Promise<boolean>;  // 后台上传队列的有界排空（ADR 0042 决策一）
+    pendingNoun: () => string;                         // 排不完时那句日志的名词（见 drainArtifactQueue）
   };
   reportFile: () => string | null | undefined;  // 惰性读（agentRef 可能收尾时才有值）
   getCleanupFailed: () => boolean;     // cleanup 内部副作用写的泄漏标记
@@ -226,9 +234,9 @@ async function shutdownSequence(deps: ShutdownDeps): Promise<number> {
   logFn("worker: signal received, releasing session(s)");
   await deps.cleanup();                                          // ① 会话释放优先（ADR 0024 铁律）
   await interruptSnapshot(deps.uploader, deps.reportFile(), logFn);  // ② 提前上传排其后（best-effort、不延迟①）
-  // ③ 截图后台队列的有界排空（ADR 0042 决策一）：同样排在①之后、与②并列。本路径**不 flush**，队列里
-  //    没传完的截图就此丢，故给一小段计入 grace 的预算把在途的落地。
-  await drainArtifactQueue(deps.uploader, QUEUE_DRAIN_EXIT_MS, false, logFn);
+  // ③ 后台上传队列的有界排空（ADR 0042 决策一）：同样排在①之后、与②并列。本路径**不 flush**，队列里
+  //    没传完的文件（截图，设备目标还有原始控件树与中断释放时入队的 device-session.json）就此丢，故给一小段计入 grace 的预算把在途的落地。
+  await drainArtifactQueue(deps.uploader, QUEUE_DRAIN_EXIT_MS, () => false, logFn);
   const failed = deps.getCleanupFailed();
   logFn(`worker: session shutdown complete after signal${failed ? " (WITH FAILURE)" : ""}`);
   return failed ? 1 : 0;
@@ -264,6 +272,10 @@ function stepCost(beforeTokens: number, agent: Agent): Record<string, unknown> |
   const delta = after - beforeTokens;
   return delta > 0 ? { tokens: delta } : undefined;
 }
+
+// match 查询入口拒绝输入时的退出码（ADR 0036 决策 4）：与 Nova 侧同值的通用非 0（不能是 ADR 0028 的网络专用 80）；组合根只看
+// 是否非 0（WorkerSelfDescribeError），不按取值分支。
+const EX_MATCH_INPUT = 2;
 
 // 两个非 job 入口（--capabilities 自述 / --match-steps 查询）的 stdout payload 写出（ADR 0036「stdout 一行 JSON 即退」）：
 // **必须等真 flush 完才能退**，否则 pipe 下大 payload 在 64KB 处静默截断且 rc 仍是 0——组合根只能报「输出非
@@ -354,16 +366,25 @@ export async function main(): Promise<number> {
 
   // 模型家族的启动期校验（ADR 0044 决策 2）：推不出即抛 → bin 一行 stderr + 非零退出。**位置 load-bearing**：
   // 在任何入口分派之前，故 `--capabilities` 这条 run 前置检查也会把坏配置挡下——不然要等到 job 模式里已经建好
-  // 云端浏览器会话、第一次调模型时才炸。返回值不用（真正取值在构造界面接缝时的 modelConfig()）；这一步只为早失败。
+  // 云端浏览器会话、第一次调模型时才报错。返回值不用（真正取值在构造界面接缝时的 modelConfig()）；这一步只为早失败。
   modelFamily();
 
-  // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（每项 `{keyword, text}`，旧版 CLI 给裸字符串）
-  // → stdout 一行逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。
+  // 批量 match 查询（ADR 0036 决策 4，plan 命中标注）：stdin 一行 JSON 数组（每项 `{keyword, text}`，keyword 为 null 时不核对
+  // 关键字）→ stdout 一行逐条命中结果。匹配语义留在 worker（CLI 零复刻）；同样不建会话、零 AWS。输入不是 JSON 或条目形状不合，
+  // 都是命令行工具与 worker 版本不一致的信号：在这里显式捕获、stderr 写一句产品语言并以非零退出、stdout 不出结果，不落到
+  // bin 的 fatal 行（那一行带异常类名与解析器的原文）。
   if (process.argv.includes("--match-steps")) {
     const chunks: Buffer[] = [];
     for await (const c of process.stdin) chunks.push(c as Buffer);
-    const items: MatchItem[] = JSON.parse(Buffer.concat(chunks).toString("utf-8"));
-    await writeStdoutFlushed(JSON.stringify(matchBatch(items)) + "\n");
+    let probes: MatchProbe[];
+    try {
+      probes = matchBatch(JSON.parse(Buffer.concat(chunks).toString("utf-8")));
+    } catch (e) {
+      if (!(e instanceof SyntaxError) && !(e instanceof MatchInputError)) throw e;
+      log(`worker: ${MATCH_INPUT_MISMATCH}`);
+      return EX_MATCH_INPUT;
+    }
+    await writeStdoutFlushed(JSON.stringify(probes) + "\n");
     return 0;
   }
   // 引擎能力自述（ADR 0036「5.」）：一个 JSON 对象即退，同样不建会话、不读 stdin、零费用。
@@ -410,7 +431,7 @@ export async function main(): Promise<number> {
   const eventSink = EventSink.fromEnv();  // main 级单例（对称 uploader）；作参数注入 runScenario/runStep
 
   // 建会话前的自检（ADR 0049 决策 7；ADR 0024 协议版本）**先于读 job 行的任何别的键**：先核 schemaVersion（不等于本 worker 认的即版本
-  // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与墙钟预算（worker 不据 timeoutS 计时、不自停；除这里的自检外，
+  // 不一致），再用与能力自述同一份 WORKER_TARGETS 核对 Job 的目标与 job 墙钟预算（worker 不据 timeoutS 计时、不自停；除这里的自检外，
   // 它只用于桌面实现设定浏览器会话的服务端存活上限，见 surface-desktop.mts 的 browserSessionTimeoutS，ADR 0024 输入节）。别的版本写出的
   // job 行连 scope 的形状都不保证，先取它会把「版本不一致」变成一个 TypeError。不满足即按执行前失败的统一规则（ADR 0051 决策 4）发
   // scope_done{status: error, errorType: precheck_failed}、不发 scope_started、不建会话、以 0 退出——零会话费用；core 据此合成 SKIPPED
@@ -477,17 +498,21 @@ export interface ScopeIo {
  *    排空截图队列 → 整目录 flush（ADR 0051 决策 5；桌面原有次序）；
  *  - scope 终止出口（acquire 返回的执行前失败、会话丢失、scenario 前核对终止）：同正常收尾，scope_done 带 status / errorType /
  *    message；执行前失败时还没有 agent，从释放开始。三者在实践中只来自设备实现（ADR 0051 决策 4、5；ADR 0052 决策 2）；
- *  - 会话预热失败与其余异常：exitAfterFailure（释放 → 排空 → scope_done 或退出码），不 flush（见该函数）；已进入终结之后抛出的
- *    异常不走这条，改等停止信号的收尾序列、取它的退出码（入口的 fatal 出口不会抢先退出）；
+ *  - 会话预热失败与其余异常：exitAfterFailure（释放 → 排空 → scope_done 或退出码），不 flush（见该函数）；
  *  - 停止信号与设备接缝的进程级兜底：shutdownSequence（interrupt 释放 → 中断兜底提前上传 → 排空 → 退出），之后本函数不再发任何
- *    step、scenario 或 scope 事件（ADR 0051 决策 5 阶段 1）；会话事件由接缝经未门控的 io.emit 照发。 */
+ *    step、scenario 或 scope 事件（ADR 0051 决策 5 阶段 1）；会话事件由接缝经未门控的 io.emit 照发。
+ *  进入终结之后主流程让位（ADR 0051 决策 5「进入终结之后主流程让位」；handler 模型不变，ADR 0024 终止契约的 Midscene 条）：scenario
+ *  与 step 的循环顶、在途 step 返回之后的 evidence 产出、step 与 scenario 之后的提前上传、scope 末的 agent.destroy 与报告上传、
+ *  释放之后的排空与整目录 flush，都在开始之前读终结标志，置位即不再开始；对释放的调用不跳过，它汇入进行中的那次终结。前三条出口
+ *  在进入终结之后都改等收尾序列、返回它的退出码：入口按本函数的返回值退出进程，先返回或抛出都会截断收尾序列。 */
 export async function runScope(job: Job, io: ScopeIo): Promise<number> {
   const scope = job.scope;
   const uploader = io.uploader;
   // 进入终结（停止信号或设备接缝的进程级兜底）之后，在途的 step 不再发 step_done、也不发 scope_done（ADR 0051 决策 5 阶段 1）：
-  // 主流程与 runScenario / runStep 经这个门控的出口发事件；接缝的会话事件走 io.emit 本身，终结期间照发。
+  // 主流程与 runScenario / runStep 经这个门控的出口发事件；接缝的会话事件走 io.emit 本身，终结期间照发。主流程的让位也读它。
   let finalizing = false;
   const sink = { emit: async (e: unknown): Promise<void> => { if (!finalizing) await io.emit(e as Record<string, unknown>); } };
+  const stopRequested = (): boolean => finalizing;  // 交给 runScenario / runStep 与上传器的只读访问器
   let surface: TargetSurface | undefined;
   // agent 引用上提到 handler 可见（ADR 0029 中断兜底提前上传：handler 里读 agent.reportFile 传那份增量 report）。
   let agentRef: Agent | undefined;
@@ -501,8 +526,8 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
 
   // SIGTERM/SIGINT 与设备接缝的进程级兜底：清理会话再退（防会话泄漏后持续计费）。收尾序列提出为可测的 shutdownSequence
   // （cleanup 先于提前上传的顺序不变量在那里被单测锁住）；此处只做「守卫去重 + 门控事件 + 退出」这层外壳。
-  // shutdownDone 是进入终结后的收尾序列：赋值在第一个 await 之前，所以 finalizing 为真时它一定非空；主流程的异常出口据此
-  // 改等收尾序列（见下 catch）。
+  // shutdownDone 是进入终结后的收尾序列：赋值在第一个 await 之前，所以 finalizing 为真时它一定非空；主流程让位时经
+  // awaitShutdown 等它结束、取它的退出码。
   let shutdownDone: Promise<number> | null = null;
   const onSignal = async (): Promise<void> => {
     if (finalizing) return;
@@ -515,6 +540,7 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
     }));
     io.exit(code);
   };
+  const awaitShutdown = (): Promise<number> => shutdownDone!;  // 只在 finalizing 为真时调用（见上）
 
   // 构造在建会话之前：只组装、不做 I/O；构造期错误（缺本次运行的编号、AWS_REGION 未设、设备侧的覆盖值非法）直接抛出，
   // 由 bin 写一行 fatal、以 1 退出，不发任何事件。
@@ -559,8 +585,10 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
     const evidence: EvidenceHook | undefined = evidenceRoot
       ? { runDir: evidenceRoot, scopeId: scope.id, uploader, logFn: log }
       : undefined;
-    const seam: ScopeSeam = { surface: surface!, agent, target: job.target, sessionLost: null };
+    const seam: ScopeSeam = { surface: surface!, agent, target: job.target, sessionLost: null, finalizing: stopRequested };
     for (const [i, sc] of job.scenarios.entries()) {
+      // 进入终结之后不再开始新的 scenario（ADR 0051 决策 5「进入终结之后主流程让位」①）：排在 scenario 前核对与 scenario_started 之前
+      if (finalizing) break;
       // scenario 前核对（ADR 0052 决策 2）：从第二条起、在 scenario_started 之前无条件调用；返回终止即经 scope 终止出口收尾，
       // 这条与后续 scenario 不发任何事件（core 合成 SKIPPED；在途 scenario 不合成，所以必须排在 scenario_started 之前）。
       if (i > 0) {
@@ -569,16 +597,17 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
       }
       await sink.emit({ type: "scenario_started", scenarioId: sc.id });
       // scope 内 step 短路在 runScenario 内（上游 error 跳过后续、发 step_skipped，ADR 0031 决定六）；
-      // act 边界提前上传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029，为 Fargate 预演）。
+      // act 边界提前上传（report snapshot）也在 runScenario 内 step_done 安全点（ADR 0029）。
       const statuses = await runScenario(seam, sc.id, sc.steps, votesN, uploader, snapState, sink, evidence);
       await sink.emit({ type: "scenario_done", scenarioId: sc.id, status: aggregate(statuses) });
-      // scenario 边界提前上传诊断 log（ADR 0029 上传时机第四级，Midscene 单引擎、为 Fargate 预演）：把该 scenario 期间已在盘、
+      // scenario 边界提前上传诊断 log（ADR 0029 上传时机第四级，Midscene 单引擎）：把该 scenario 期间已在盘、
       // 未传的 log/*.log 提前传进 S3，收窄 log 丢失窗口从「整个 run」到「当前正在执行的 scenario」。best-effort：失败吞、
       // 不阻塞下一 scenario（对齐 report 提前上传）。per-file mtime 去重 + 总墙钟预算在 snapshotLogs 内（退化网络护栏）。
       // no-op（local）下 snapshotLogs 直接返回。report 已由 runScenario 内 step_done 提前上传覆盖，此处只补 log。
-      if (logDir) {
+      // 进入终结之后不再开始；已在途的在每个文件之前读终结标志（ADR 0051 决策 5「进入终结之后主流程让位」②）。
+      if (logDir && !finalizing) {
         try {
-          await uploader.snapshotLogs(logDir, logSeen, SCENARIO_LOG_SNAPSHOT_BUDGET_MS);
+          await uploader.snapshotLogs(logDir, logSeen, SCENARIO_LOG_SNAPSHOT_BUDGET_MS, stopRequested);
         } catch (e) {
           // 产品面一行：**不承诺「收尾再试」**——正常完成路径的 scope 末整目录 flush 会兜一次，但停止信号 /
           // 网络耗尽 / 异常三条提前退出路径只排空队列、不 flush，那句在这些路径上是假的（与 Nova 上传器同一判据）。
@@ -591,11 +620,14 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
     }
     if (termination !== null) log(`worker: scope terminated — ${termination.errorType}: ${termination.message}`);
 
+    // 进入终结之后 agent.destroy 与 scope 级报告上传都不再开始（ADR 0051 决策 5「进入终结之后主流程让位」②）：destroy 改写报告文件，
+    // 报告上传与中断兜底上传写同一个对象键、读同一份报告；这两件归收尾序列的中断兜底上传。
+    if (finalizing) return;
     // 归集原生报告（ADR 0027 reportRefs）：destroy 后 reportFile finalize，Midscene 出 1 个 html/worker（scope 级）
     // kind=report（产物类型；粒度由挂在 scope_done 表达，ADR 0027）；agent.reportFile 是绝对路径。
     // ref 经 uploader：cloud 上传 S3+删本地报 s3://，local no-op 报 file://（ADR 0029，对称 Nova）。
     await agent.destroy().catch(() => {});
-    if (agent.reportFile && !NO_ARTIFACTS) {
+    if (agent.reportFile && !NO_ARTIFACTS && !finalizing) {
       // **scope 级 report 上传 best-effort：失败吞+log、不带 report ref、不 throw**（ADR 0032，对称 Nova summary）——
       // 此刻 scope 判定已 emit 完，report 上传失败（多为 S3 网络瞬时）不该 throw→冒泡到 bin.mts 的统一 catch→worker fatal + exit(1)、
       // 把已执行完的 scope 毁成 worker fatal。对齐同文件 interruptSnapshot/snapshotLogs 提前上传的 best-effort。
@@ -609,56 +641,78 @@ export async function runScope(job: Job, io: ScopeIo): Promise<number> {
     }
   };
 
-  try {
-    // 建立被测对象（桌面：建连段含 ADR 0028 的重试，越过 scope_started 即跳出重试域；设备：获取预算内的全部准备）。
-    const acquired = await surface.acquire();
-    if (!acquired.ready) {
-      // 执行前失败（只有设备实现会返回，ADR 0051 决策 4）：不发 scope_started、不发任何 scenario 或 step 事件，经 scope 终止出口按
-      // 正常收尾的次序收尾——释放（每会话 session_closed）→ scope_done{status: error} → 排空（ADR 0051 决策 5）。
-      termination = acquired.termination;
-      log(`worker: target not ready — ${termination.errorType}: ${termination.message}`);
-    } else {
-      await runAcquired(acquired.agent, acquired.sessionId);
+  // 正常收尾、scope 终止出口与异常出口。其中的让位点（已进入终结即等收尾序列）只决定不再开始哪些事；进入终结之后的退出码由下面的
+  // 外层统一取自收尾序列。
+  const runToExit = async (): Promise<number> => {
+    try {
+      // 建立被测对象（桌面：建连段含 ADR 0028 的重试，越过 scope_started 即跳出重试域；设备：获取预算内的全部准备）。
+      const acquired = await surface!.acquire();
+      if (!acquired.ready) {
+        // 执行前失败（只有设备实现会返回，ADR 0051 决策 4）：不发 scope_started、不发任何 scenario 或 step 事件，经 scope 终止出口按
+        // 正常收尾的次序收尾——释放（每会话 session_closed）→ scope_done{status: error} → 排空（ADR 0051 决策 5）。
+        termination = acquired.termination;
+        log(`worker: target not ready — ${termination.errorType}: ${termination.message}`);
+      } else {
+        await runAcquired(acquired.agent, acquired.sessionId);
+      }
+    } catch (e) {
+      // 已进入终结时，退出码与收尾归停止信号的收尾序列，主流程不再走异常出口：否则异常重抛到入口，入口的 fatal 出口会抢先
+      // 以 1 退出、截断中断兜底提前上传与截图排空（ADR 0024 终止契约；ADR 0051 决策 5 的退出码）。典型时机是 Start 在途时收到
+      // 停止信号、Start 随后在等待窗口内失败：建连循环见到已进入终结即抛出，而收尾序列还停在等待窗口里。
+      if (finalizing) return await awaitShutdown();
+      // 统一出口（exitAfterFailure，deps 注入、单测锁次序）：先释放会话、再排空截图队列，然后按异常种类定事件与退出码。
+      // 释放期间进入终结的，排空不再开始（收尾序列排空的是同一条队列）。
+      return await exitAfterFailure(e, {
+        cleanup: async () => { await release("normal"); },
+        drain: async () => { if (!finalizing) await drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, () => false); },
+        cleanupFailed: () => released.releaseFailed,
+        networkExhausted: isConnectRetriesExhausted(e),
+        scopeId: scope.id,
+        sessionId: surface!.sessionId(),
+        reportRefs: () => released.reportRefs,
+        emit: (ev) => sink.emit(ev),
+      });
+    } finally {
+      // 进入终结之后同样调用（ADR 0051 决策 5「进入终结之后主流程让位」④）：按释放的重入规则汇入进行中的那次终结
+      await release("normal");
     }
-  } catch (e) {
-    // 已进入终结时，退出码与收尾归停止信号的收尾序列，主流程不再走异常出口：否则异常重抛到入口，入口的 fatal 出口会抢先
-    // 以 1 退出、截断中断兜底提前上传与截图排空（ADR 0024 终止契约；ADR 0051 决策 5 的退出码）。典型时机是 Start 在途时收到
-    // 停止信号、Start 随后在等待窗口内失败：建连循环见到已进入终结即抛出，而收尾序列还停在等待窗口里。
-    if (shutdownDone !== null) return await shutdownDone;
-    // 统一出口（exitAfterFailure，deps 注入、单测锁次序）：先释放会话、再排空截图队列，然后按异常种类定事件与退出码。
-    return await exitAfterFailure(e, {
-      cleanup: async () => { await release("normal"); },
-      drain: () => drainArtifactQueue(uploader, QUEUE_DRAIN_EXIT_MS, false),
-      cleanupFailed: () => released.releaseFailed,
-      networkExhausted: isConnectRetriesExhausted(e),
-      scopeId: scope.id,
-      sessionId: surface.sessionId(),
-      reportRefs: () => released.reportRefs,
-      emit: (ev) => sink.emit(ev),
-    });
-  } finally {
-    await release("normal");
-  }
 
-  // 释放之后发 scope_done（ADR 0051 决策 5：释放结果经 session_closed 写进判定，scope_done 排在释放之后）；scope 级产物链接
-  // 是引擎报告加接缝给的（设备的 device-session.json，桌面为空）。
-  const refs = [...reportRefs, ...released.reportRefs];
-  await sink.emit(termination === null
-    ? { type: "scope_done", scopeId: scope.id, sessionId: surface.sessionId(), reportRefs: refs }
-    : scopeErrorEvent(scope.id, surface.sessionId(), termination, refs));
-  // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
-  // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成与 scope 级终止的路径走到此；异常/网络耗尽的 catch 内 return 不 flush
-  // ——中断产物保留本地（对称 Nova）。
-  const flushRoot = artifactFlushRoot();  // --no-report 方式 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
-  // 先排空后台截图队列、再整目录 flush（ADR 0042 决策一）：flush 只兜漏网的那几张——若反过来，队列里
-  // 在途的那张会被 flush 按「还没记 uploaded」重传一次（同 key 冗余）。
-  // flushFollows=true：本路径的排空后面就跟着整目录 flush。flushRoot 为 undefined（`--no-report` 方式）时
-  // 不 flush，但那一方式与 evidence 落点同一判据（见上 evidenceRoot）、队列必空，这句提示不会发出。
-  await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS, true);
-  if (flushRoot) await uploader.flushAndCleanup(flushRoot);
-  // 会话释放失败（含发过 attempted 事件）→ 非 0 退出，让 schedule 记 error、泄漏可观测
-  // （ADR 0024「会话释放失败可观测」，对照 Nova；ADR 0051 决策 5 的退出码）
-  return released.releaseFailed ? 1 : 0;
+    // 释放之后：已进入终结（释放进行中收到停止信号）即让位，scope_done 已被门控，排空与整目录 flush 不再开始（ADR 0051 决策 5
+    // 「进入终结之后主流程让位」②）：flush 全部成功会删除运行目录，收尾序列随后要读的报告就没了。
+    if (finalizing) return await awaitShutdown();
+    // 释放之后发 scope_done（ADR 0051 决策 5：释放结果经 session_closed 写进判定，scope_done 排在释放之后）；scope 级产物链接
+    // 是引擎报告加接缝给的（设备的 device-session.json，桌面为空）。
+    const refs = [...reportRefs, ...released.reportRefs];
+    await sink.emit(termination === null
+      ? { type: "scope_done", scopeId: scope.id, sessionId: surface!.sessionId(), reportRefs: refs }
+      : scopeErrorEvent(scope.id, surface!.sessionId(), termination, refs));
+    // scope 末：整目录 flush 剩余产物（report.html 已实时传、跳过；log/ 等一并传）+ 全成功删整目录（ADR 0029）。
+    // no-op（local/未注入落点）时直接返回、不碰本地。仅正常完成与 scope 级终止的路径走到此；异常/网络耗尽的 catch 内 return 不 flush
+    // ——中断产物保留本地（对称 Nova）。
+    const flushRoot = artifactFlushRoot();  // --no-report 方式 → undefined，不 flush（对称 Nova 的 no-artifacts 分支）
+    // 先排空后台截图队列、再整目录 flush（ADR 0042 决策一）：flush 只兜漏网的那几张——若反过来，队列里
+    // 在途的那张会被 flush 按「还没记 uploaded」重传一次（同 key 冗余）。
+    // flushFollows：本路径的排空后面跟着整目录 flush，除非排空在途时进入终结（之后让位、不再 flush）。flushRoot 为 undefined
+    // （`--no-report` 方式）时不 flush，但那一方式与 evidence 落点同一判据（见上 evidenceRoot）、队列必空，这句提示不会发出。
+    await drainArtifactQueue(uploader, QUEUE_DRAIN_SCOPE_END_MS, () => !finalizing);
+    // 排空在途时进入终结：它只等后台队列、与收尾序列的排空等同一条队列，返回之后在整目录 flush 之前让位
+    if (finalizing) return await awaitShutdown();
+    // 已在途的 flush 在每个文件之前读终结标志，进入终结即不再发起下一个文件、不删目录
+    if (flushRoot) await uploader.flushAndCleanup(flushRoot, stopRequested);
+    // 会话释放失败（含发过 attempted 事件）→ 非 0 退出，让 schedule 记 error、泄漏可观测
+    // （ADR 0024「会话释放失败可观测」，对照 Nova；ADR 0051 决策 5 的退出码）
+    return released.releaseFailed ? 1 : 0;
+  };
+
+  // 退出码（ADR 0051 决策 5「进入终结之后主流程让位」⑤）：已进入终结时，主流程无论正常返回还是抛出，都改等收尾序列、返回它的
+  // 退出码。覆盖让位点之后才进入终结的情形：异常出口的释放或排空期间、整目录 flush 的最后一个文件在途时。
+  try {
+    const rc = await runToExit();
+    return finalizing ? await awaitShutdown() : rc;
+  } catch (e) {
+    if (!finalizing) throw e;
+    return await awaitShutdown();
+  }
 }
 
 export interface FailureExitDeps {
@@ -702,12 +756,14 @@ export async function exitAfterFailure(e: unknown, deps: FailureExitDeps): Promi
 
 /** runScenario / runStep 的 scope 级上下文：界面接缝、执行所用的 agent、job 的目标（selectHandler 按它取句柄），以及 scope 级终止
  *  状态。sessionLost 由 runStep 在某个 step 的最终判定归会话丢失时置位（首个为准）：本 scenario 余下 step 照常短路，runScope 在
- *  scenario_done 之后不再开始后续 scenario、经 scope 终止出口收尾（ADR 0051 决策 5「会话丢失序列」）。 */
+ *  scenario_done 之后不再开始后续 scenario、经 scope 终止出口收尾（ADR 0051 决策 5「会话丢失序列」）。finalizing 是 runScope 的
+ *  「已进入终结」标志的只读访问器：置位之后不再开始新的 step、evidence 产出与提前上传（ADR 0051 决策 5「进入终结之后主流程让位」）。 */
 export interface ScopeSeam {
   surface: TargetSurface;
   agent: Agent;
   target: StepTargetKey;
   sessionLost: StepFailure | null;
+  readonly finalizing: () => boolean;
 }
 
 // scope 内串行运行一个 scenario 的 steps，上游 error 后**短路**后续 step（ADR 0031 决定六 / 0028，对称 Nova）。
@@ -726,17 +782,21 @@ async function runScenario(
   const statuses: string[] = [];
   let shortcircuit = false;
   for (const step of steps) {
+    // 进入终结之后不再开始新的 step，也不再为短路的 step 发 step_skipped（ADR 0051 决策 5「进入终结之后主流程让位」①）。
+    // 在途的 step 不打断：设备上终结已中止当前 act，桌面的 act 在会话停止之后失败返回。
+    if (seam.finalizing()) break;
     if (shortcircuit) {
       await sink.emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
       continue;
     }
     const status = await runStep(seam, scenarioId, step, votesN, sink, evidence);
     statuses.push(status);
-    // act 边界提前上传（ADR 0029，为 Fargate 预演）：step_done 安全点（act 已返回、SDK onTaskUpdate 已 await flush，
+    // act 边界提前上传（ADR 0029）：step_done 安全点（act 已返回、SDK onTaskUpdate 已 await flush，
     // 盘上 report 一致无半写），把增量增长的单份 report.html 用 snapshotReport overwrite 同 key 提前上传。
     // 在 error 短路判定**之前**——损坏那步的 report 最该留。mtime 去重（仅 report 变了才传，确定性/导航步不写
     // report → mtime 不变 → 跳过）；空窗跳过（首个 AI task 前 agent.reportFile 未置）；失败吞（best-effort、不打断）。
-    if (agent.reportFile) {
+    // 进入终结之后不再开始：这份报告由收尾序列的中断兜底上传（ADR 0051 决策 5「进入终结之后主流程让位」②）。
+    if (agent.reportFile && !seam.finalizing()) {
       try {
         const mt = fs.statSync(agent.reportFile).mtimeMs;
         if (mt !== snapState.mtime) {
@@ -901,7 +961,7 @@ async function runStep(
     const mark = readClassification(e);
     const errorType = mark !== null ? mark.errorType : isTransientNetwork(e, false, !fromHandler) ? "network_error" : "engine_error";
     // message 与 evidence 的 error 同一份文本（一行、有界；Playwright 异常的 message 常拖着多行 call log，规则与理由见
-    // error-text.mts，Nova 侧 `_error_text` 是对称版）：evidence 冗余 step_done 的 message 以自包含（ADR 0042 决策一）。
+    // lib/error-text.mts，Nova 侧 `_error_text` 是对称版）：evidence 冗余 step_done 的 message 以自包含（ADR 0042 决策一）。
     // 带标记时取标记里那句给使用方看的消息（ADR 给了原文整句的照原文）。
     const message = mark !== null ? oneLineError(mark.message) : errorText(e);
     ev.status = "error"; ev.errorType = errorType; ev.message = message;
@@ -935,7 +995,9 @@ async function runStep(
   // **绝不抛**（决策二：对判定零影响）——落在 act 异常分类路径之外的语义由 stepEvidenceRef 内部整体 try
   // 保证，enqueue 则是同步返回、不抛（见上传器）。故此处可直接 await。产不产由快照与判定决定：桌面上只有调过 AI 的 step 产，
   // 设备上 AI step 一律产、确定性与导航 step 在 failed / error 时产（evidence 模块的跳过规则）。
-  const produced = await stepEvidenceRef(evidence, {
+  // 进入终结之后 evidence 不再产出、截图与原始控件树不再入队（ADR 0051 决策 5「进入终结之后主流程让位」②）：step_done 已被门控，
+  // 这份 evidence 的链接送不到 core，入队的字节只会占用收尾序列的排空预算。两处分别在开始之前读终结标志。
+  const produced = seam.finalizing() ? null : await stepEvidenceRef(evidence, {
     scenarioId, step, status: ev.status as string, message: (ev.message as string | undefined) ?? null,
     agent, execFrom, snapshot, prompt: instr, votes, error: thrown,
   });
@@ -943,7 +1005,7 @@ async function runStep(
     appendReportRef(ev, { kind: EVIDENCE_KIND, ref: produced.ref, label: EVIDENCE_KIND });
   }
   await sink.emit(ev);
-  if (produced !== null && produced.screenshots.length > 0) {
+  if (produced !== null && produced.screenshots.length > 0 && !seam.finalizing()) {
     evidence?.uploader.enqueue(produced.screenshots);  // emit 之后：字节在下个 step 期间顺链传上去
   }
   return ev.status as string;

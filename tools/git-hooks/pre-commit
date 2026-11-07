@@ -2,6 +2,11 @@
 # 可选的 git pre-commit：人类 contributor 的提交闸门（与 Claude Code 的 .claude/hooks/commit-gate.sh 同一份规则）。
 # 启用：git config core.hooksPath tools/git-hooks   （git hook 不随仓库分发，故 opt-in；CI 里的 uv run pytest 仍是兜底）
 # 做什么：按暂存区里将要提交的版本整份扫 tools/doc_rules_check.py --staged（不读工作区），命中即拒绝提交并列出命中行。
+# 这里只用 --staged、不需要 commit-gate.sh 那样扫超集：git 运行 pre-commit 时已备好这次提交用的 index（GIT_INDEX_FILE），
+# `git add … && git commit`、`git commit -a`、带路径参数或 `-o` 的写法下，暂存区就是这次提交的内容。commit-gate.sh 认不出
+# 或超集覆盖不到的写法（同一条命令里先改写文件再提交、`git add -f` 加入被忽略的文件、换 GIT_INDEX_FILE 提交等）在这里
+# 同样按提交内容检查：这个 hook 是提交之前唯一能保证提交内容本身经过检查的一层（`git commit --no-verify` 跳过时除外），
+# 启用后 agent 在该 clone 里的提交同样经过它。
 set -u
 cd "$(git rev-parse --show-toplevel)" || exit 0
 export PATH="$PATH:$HOME/.local/bin"

@@ -221,11 +221,22 @@ def synthesize_skipped(result: JobResult, timing: Timing) -> None:
 # ============================================================================
 
 
-# 平台侧退出哨兵（ADR 0034 机制二及其「launch 失败补偿」「退出码缺失」两条推论）：worker 进程**没有**给出退出码的两种形态
+# 平台侧退出哨兵（ADR 0034 机制二及其「launch 失败补偿」「退出码缺失」两条推论）：worker 进程**没有**给出退出码的三种形态
 # 都落它——①tick 起 task 失败（RunTask 抛/Popen OSError，进程根本没起）；②观察者收到 STOPPED 却缺 exitCode（容器没能开始运行，
-# 如拉不到镜像）。非 0 即走「退出码非零 → ERROR」既有谓词，值本身不进任何分支判断；选 255 避开 worker 真实语义码（如网络故障退出码 80），
-# 只为日志/归因可辨识「这是平台侧起不来、不是 worker 执行中崩溃」。core 单点定义，tick 与观察者 Lambda 都 import 本常量、别各抄一份。
+# 如拉不到镜像）；③同步 `run --backend cloud` 下 task 已 STOPPED 却始终取不到 exitCode（ADR 0024「exitCode 落值延迟」条）。
+# 非 0 即走「退出码非零 → ERROR」既有谓词；终结函数只在消息里按它给出平台侧归因的说法，判定不看具体值。选 255 避开 worker 真实语义码
+# （如网络故障退出码 80），只为日志/归因可辨识「这是平台侧起不来、不是 worker 执行中崩溃」。core 单点定义，tick、观察者 Lambda 与
+# FargateEngine 都 import 本常量、别各抄一份。
 PLATFORM_FAILED_EXIT = 255
+
+
+def platform_exit_reason(stop_code: str | None, stopped_reason: str | None) -> str:
+    """ECS 没给出退出码时随 `PLATFORM_FAILED_EXIT` 一起落的归因串：`stopCode: stoppedReason`，缺一项只用另一项，两项都缺时用固定的
+    兜底句（ADR 0024「exitCode 落值延迟」条、ADR 0034 机制二「退出码缺失」条）。
+
+    唯一一份拼法：退出观察者与云端 tick 的补写（经 provider 包的同一提取函数）、同步路径的 `FargateEngine` 都调它，同一故障在同步与
+    无状态两条路径下得到逐字相同的归因（各拼一份即两处漂移，理由同哨兵常量）。"""
+    return ": ".join(x for x in (stop_code, stopped_reason) if x) or "平台未给出退出码与原因"
 
 
 @dataclass(frozen=True)
@@ -542,7 +553,8 @@ def finalize_job(
             error_type = "network_error"
             message = "worker 建连失败（网络/SSL 瞬时故障），退出码 80" + (f"：{exit_reason}" if exit_reason else "")
         elif exit_code == PLATFORM_FAILED_EXIT:
-            # 平台侧哨兵（无状态路径观察者缺退出码时落它）；本机 worker 真以 255 退出也走这行，措辞对两种来源都成立
+            # 平台侧哨兵（tick 起 task 失败，或观察者、同步云端路径的 FargateEngine 取不到退出码时落它，归因经 exit_reason
+            # 到这里）；本机 worker 真以 255 退出也走这行，措辞对两种来源都成立
             why = f"：{exit_reason}" if exit_reason else "——详见 worker 日志或部署侧日志"
             error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记为 255）{why}"
         elif exit_code is None:
@@ -550,9 +562,9 @@ def finalize_job(
             # exit_reason 由调用方带上下文写好（同步路径：「worker 异常：…」/「起 worker 失败：…」；平台侧：观察者的归因）
             message = exit_reason if exit_reason else "worker 已终止但退出码未知——无法判定为通过，按错误处理"
         elif said:
-            error_type, message = "engine_error", f"worker 随后非正常退出（exit {exit_code}）"
+            error_type, message = "engine_error", f"worker 随后非正常退出（退出码 {exit_code}）"
         else:
-            error_type, message = "engine_error", f"worker 非正常退出（exit {exit_code}；事件流里没有失败原因——详见 worker 日志）"
+            error_type, message = "engine_error", f"worker 非正常退出（退出码 {exit_code}；事件流里没有失败原因——详见 worker 日志）"
         if said:
             # 原因消息保留 worker 报的那句（设备 worker 有未确认会话时以 1 退出，ADR 0051 决策 5），退出的说明接在后面
             message = f"{scope_done.message or scope_done.error_type}；{message}"
@@ -613,27 +625,33 @@ def project_full(meta: RunMeta, records: list[EventRecord], *, run_duration_ms: 
         job_results.append(jr)
 
     run_status = _aggregate([jr.status for jr in job_results])
-    tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
-    tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     return RunResult(
         run_meta=meta,
         status=run_status,
         jobs=job_results,
         duration_ms=run_duration_ms,
-        total_tokens=sum(tok) if tok else None,
-        total_time_worked_s=sum(tw) if tw else None,
-        **run_device_metering(job_results),
+        **run_totals(job_results),
     )
 
 
-def run_device_metering(job_results: list[JobResult]) -> dict:
-    """run 级设备计量合计（ADR 0051 决策 7）：各设备 job 两键之和；没有设备 job 时两键都是 None（序列化省键）。
-    同步 schedule 与无状态 project_full 共用这一份写法。"""
+def run_totals(job_results: list[JobResult]) -> dict:
+    """RunResult 的 run 级合计四键（唯一一份，同步 schedule 与无状态 project_full 共用，ADR 0034「不复制归约逻辑」）。
+
+    加新的原生量字段（ADR 0024「成本信封」扩展条）只改这里。两组键的缺失语义不同，各自保留、不套同一条求和规则：
+    - total_tokens 与 total_time_worked_s 各自跨 job 求和，只合计报了这个量的 job：没有任何 job 报时为 None（不假装 0），
+      报了 0 照记 0（ADR 0024）。
+    - device_observed_s 与 device_observed_missing 是设备计量（ADR 0051 决策 7），按设备 job 成对合计：任一键有值的 job 即为
+      设备 job，其另一键缺失按 0 计入；没有设备 job 时两键都是 None（序列化省键）。
+    """
+    tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
+    tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
     dev = [jr for jr in job_results if jr.device_observed_s is not None or jr.device_observed_missing is not None]
-    if not dev:
-        return {"device_observed_s": None, "device_observed_missing": None}
-    return {"device_observed_s": sum(jr.device_observed_s or 0.0 for jr in dev),
-            "device_observed_missing": sum(jr.device_observed_missing or 0 for jr in dev)}
+    return {
+        "total_tokens": sum(tok) if tok else None,
+        "total_time_worked_s": sum(tw) if tw else None,
+        "device_observed_s": sum(jr.device_observed_s or 0.0 for jr in dev) if dev else None,
+        "device_observed_missing": sum(jr.device_observed_missing or 0 for jr in dev) if dev else None,
+    }
 
 
 def _lifecycle_rank(status: Status) -> int:

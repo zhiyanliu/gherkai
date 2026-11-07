@@ -26,6 +26,8 @@ DEVICES_KEYS = ("billing-method", "acquire-timeout-s", "project-arn", "app-bucke
 DEVICE_PLATFORMS = ("android", "ios")
 PLATFORM_KEYS = ("arn", "os-version", "billing-method")
 BILLING_METHODS = ("METERED", "UNMETERED")
+# 计费方式的内建缺省（ADR 0053 决策 3）：平台子表与 [devices] 顶层都没有给出 billing-method 时取它；core 的设备请求对这一字段不设缺省
+DEFAULT_BILLING_METHOD = "METERED"
 # [apps.<别名>.<平台>] 条目：安装包 file 加该平台的应用标识键（Android 包名 / iOS bundle id），两者都必须显式给出
 APP_ID_KEY = {"android": "package", "ios": "bundle-id"}
 _OS_VERSION_RE = re.compile(r"^\d+(\.\d+)*$")

@@ -10,7 +10,7 @@ import { afterEach, test } from "node:test";
 import assert from "node:assert";
 import type { Browser } from "webdriverio";
 import {
-  MULTIPLE_WEB_PAGES_MESSAGE, NATIVE_CONTEXT, NO_WEB_PAGE_MESSAGE, contextNames, locateWebContext, webContextCandidates,
+  MULTIPLE_WEB_PAGES_MESSAGE, NATIVE_CONTEXT, NO_WEB_PAGE_MESSAGE, contextNameOf, contextNames, locateWebContext, webContextCandidates,
 } from "./web-context.mjs";
 import { createAppiumSession } from "./appium.mjs";
 import { WEB_CONTEXT_RELIST_DELAY_MS } from "./limits.mjs";
@@ -84,6 +84,15 @@ test("候选筛选：Android 只认 CHROMIUM，iOS 只认 WEBVIEW_<数字>（可
   assert.deepEqual(webContextCandidates(names, "ios"), ["WEBVIEW_8152", "WEBVIEW_8152.3"]);
   assert.deepEqual(contextNames(["NATIVE_APP", { id: "WEBVIEW_1", title: "Shop" }, 3, null]), ["NATIVE_APP", "WEBVIEW_1"]);
   assert.deepEqual(contextNames("NATIVE_APP"), []);
+});
+
+test("上下文取名：字符串原样（含空字符串），对象取字符串 id，其余形态为 null；列表只丢弃 null，保留空字符串", () => {
+  assert.equal(contextNameOf("WEBVIEW_1"), "WEBVIEW_1");
+  assert.equal(contextNameOf(""), "");
+  assert.equal(contextNameOf({ id: "CHROMIUM", title: "Shop" }), "CHROMIUM");
+  assert.equal(contextNameOf({ id: "" }), "");
+  for (const raw of [undefined, null, 3, {}, { id: 7 }, ["NATIVE_APP"]]) assert.strictEqual(contextNameOf(raw), null, JSON.stringify(raw));
+  assert.deepStrictEqual(contextNames(["", { id: "" }, { id: 7 }, "NATIVE_APP"]), ["", "", "NATIVE_APP"]);
 });
 
 test("定位：一个候选即采用；多个候选立即拒绝、不再列；零候选等 WEB_CONTEXT_RELIST_DELAY_MS 再列一次", async () => {
@@ -251,7 +260,7 @@ function surfaceWith(webContext: ProbeConclusion["webContext"], execScript: Driv
   });
   const deps: SurfaceDeps = {
     job: {
-      schemaVersion: 1, scope: { id: "features/shop.feature::Cart", name: "Cart" }, engine: "midscene", assertionVotes: 1, timeoutS: 1500,
+      schemaVersion: 2, scope: { id: "features/shop.feature::Cart", name: "Cart" }, engine: "midscene", assertionVotes: 1, timeoutS: 1500,
       target: { device: "android", uiKind: "web" },
       deviceRequest: {
         provider: "aws-device-farm", osVersion: "14", billingMethod: "METERED", projectArn: "arn:project", acquireTimeoutS: 600,

@@ -1,5 +1,5 @@
 // 建会话前的自检（ADR 0049 决策 7；ADR 0024「协议版本与 job 行的固定键集」）：先核 job 行的 schemaVersion，再用与能力自述同一份
-// targets 核对 Job 携带的测试目标与墙钟预算。协议版本不等于本 worker 认的（含缺键）、目标不在 targets 里、墙钟预算超过该目标的
+// targets 核对 Job 携带的测试目标与 job 墙钟预算。协议版本不等于本 worker 认的（含缺键）、目标不在 targets 里、job 墙钟预算超过该目标的
 // max_session_s，都返回一句产品语言的原因；worker 据此发 scope_done{status: error, errorType: precheck_failed, message}、不发
 // scope_started、零会话费用退出（ADR 0051 决策 4 的执行前失败）。纯函数、不读 env、不建会话。job 行的键集固定（target 恒为对象、
 // 桌面也写 desktop/web），缺键不再当桌面：那是命令行工具与 worker 版本不一致的信号。对称 Nova 的 lib/precheck.py。

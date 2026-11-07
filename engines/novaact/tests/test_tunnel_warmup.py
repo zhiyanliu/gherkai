@@ -28,7 +28,7 @@ def test_edge_contract_constants_match_the_cross_language_fixture():
     assert (C.INCOMPLETE_DEFINITION_MESSAGE, C.WARMUP_AUTH_REQUIRED_MESSAGE, C.WARMUP_DENIED_MESSAGE, C.WARMUP_ERROR_MESSAGE) == (
         fx["messages"]["incomplete_definition"], fx["messages"]["auth_required"], fx["messages"]["denied"],
         fx["messages"]["error_template"])
-    assert len(fx["messages"]) == 4  # fixture 多出一句而 worker 没跟上时在这里红
+    assert len(fx["messages"]) == 4  # fixture 多出一句而 worker 没跟上时这条断言失败
 
 
 class _Resp:
@@ -250,7 +250,7 @@ def driven(monkeypatch, tmp_path):
     box: dict = {"page": _FakePage([200], [C.WARMUP_TITLES["ready"]])}
     monkeypatch.setattr(rs.signal, "signal", lambda s, h: None)
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
-        lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x", "name": "x"}, "scenarios": [],
+        lambda: json.dumps({"schemaVersion": 2, "scope": {"id": "x", "name": "x"}, "scenarios": [],
                             "target": {"device": "desktop", "uiKind": "web"}, "engine": "novaact", "assertionVotes": 1,
                             "timeoutS": None, "deviceRequest": None}))})())
     monkeypatch.setattr(rs, "ensure_workflow_definition", lambda *a, **k: None)
@@ -330,7 +330,7 @@ def test_warmup_precedes_scope_started_and_scenarios(driven, monkeypatch):
     """次序：预热导航 → scope_started → scenario_started → 执行 → scenario_done → scope_done；预热只做一次，不按 scenario 重做。"""
     trace, sink, box = driven
     monkeypatch.setattr(rs.sys, "stdin", type("S", (), {"readline": staticmethod(
-        lambda: json.dumps({"schemaVersion": 1, "scope": {"id": "x", "name": "x"},
+        lambda: json.dumps({"schemaVersion": 2, "scope": {"id": "x", "name": "x"},
                             "scenarios": [{"id": "x:1", "name": "s", "steps": [{"index": 0, "keyword": "Given", "text": "a"}]},
                                           {"id": "x:2", "name": "t", "steps": [{"index": 0, "keyword": "Given", "text": "b"}]}],
                             "target": {"device": "desktop", "uiKind": "web"}, "engine": "novaact", "assertionVotes": 1,

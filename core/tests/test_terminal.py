@@ -51,7 +51,7 @@ def _on(job: Job, device: str) -> Job:
     if device == "desktop":
         return replace(job, target=Target(), device_request=None)
     return replace(job, target=Target(device=device, ui_kind="web"),
-                   device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15"))
+                   device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
 
 
 def _agentcore(sid: str, release: str | None) -> SessionRecord:
@@ -101,13 +101,13 @@ _HINT = "〈按目标给出的释放提示〉"  # 占位：期望消息里含该
      Status.ERROR, "acquire_timeout", "没拿到设备"),
     # 行 3：退出码非零 / 未知；U 非空只改归因、退出原因的消息保留
     (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", _HINT),
-    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", "worker 非正常退出（exit 1"),
-    (dict(exit_code=-9, sessions=[_unconfirmed(), _attempted()]), Status.ERROR, "release_failed", "exit -9"),
+    (dict(exit_code=1, sessions=[_unconfirmed()]), Status.ERROR, "release_failed", "worker 非正常退出（退出码 1"),
+    (dict(exit_code=-9, sessions=[_unconfirmed(), _attempted()]), Status.ERROR, "release_failed", "退出码 -9"),
     (dict(exit_code=80), Status.ERROR, "network_error", "建连失败"),
-    (dict(exit_code=1), Status.ERROR, "engine_error", "worker 非正常退出（exit 1"),
+    (dict(exit_code=1), Status.ERROR, "engine_error", "worker 非正常退出（退出码 1"),
     (dict(exit_code=1, scope_done=ScopeDone(scope_id="s", status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")),
-     Status.ERROR, "engine_error", "没拿到设备；worker 随后非正常退出（exit 1）"),  # 先报 scope 级 error 再非零退出：原因保留
-    (dict(exit_code=-9), Status.ERROR, "engine_error", "exit -9"),
+     Status.ERROR, "engine_error", "没拿到设备；worker 随后非正常退出（退出码 1）"),  # 先报 scope 级 error 再非零退出：原因保留
+    (dict(exit_code=-9), Status.ERROR, "engine_error", "退出码 -9"),
     (dict(exit_code=None), Status.ERROR, "engine_error", "退出码未知"),
     (dict(exit_code=None, exit_reason="worker 异常：解析失败"), Status.ERROR, "engine_error", "worker 异常：解析失败"),  # 消息由调用方带上下文
     (dict(exit_code=255, exit_reason="TaskFailedToStart: 拉不到镜像"), Status.ERROR, "engine_error", "平台侧未取到退出码时也记为 255）：TaskFailedToStart"),

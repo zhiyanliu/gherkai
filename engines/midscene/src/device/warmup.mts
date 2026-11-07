@@ -31,12 +31,12 @@
 // 就绪后离开（ADR 0051 决策 13）：url 路线导航到 about:blank、再切回原生上下文，离开失败只记日志、不影响判定；deepLink 路线不离开，
 // 令牌留在设备浏览器的当前地址，是该决策记下的残留面。
 //
-// 脱敏（ADR 0051 决策 11）：预热地址带令牌。本模块不把地址写进任何日志与消息；导航与读取的错误文本经 worker/error-text.mts 的一行化
+// 脱敏（ADR 0051 决策 11）：预热地址带令牌。本模块不把地址写进任何日志与消息；导航与读取的错误文本经 lib/error-text.mts 的一行化
 // （先脱敏再截断）进入日志与消息。
-import { errorText, oneLineError } from "../worker/error-text.mjs";
+import { errorText, oneLineError } from "../lib/error-text.mjs";
 import { readClassification, type ScopeTermination } from "../worker/surface.mjs";
 import {
-  WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, warmupErrorMessage,
+  WARMUP_AUTH_REQUIRED_MESSAGE, WARMUP_DENIED_MESSAGE, WARMUP_MARKER_WAIT_MS, WARMUP_MARKERS, WARMUP_REASON_MAX, warmupErrorMessage,
 } from "../lib/tunnel-warmup.mjs";
 import { SESSION_LOST_BEFORE_START_MESSAGE } from "./surface.mjs";
 import { DEVICE_WARMUP_ATTEMPTS } from "./limits.mjs";
@@ -58,22 +58,9 @@ export function findWarmupMarker(pageSource: string): WarmupMarker | null {
   return null;
 }
 
-/** run 的参数：端口的六项，其中会话状态查询在本块可缺。sessionStatus 查一次当前远程访问会话的状态（Device Farm 会话块的 status
- *  绑定到当前会话 ARN；查询失败返回 null 或抛出，此时不据此判会话丢失）。不传时命令失败只认异常上的 session_lost 归类标记；设备侧
- *  接缝总是传入。 */
-export type DeviceWarmupArgs = Omit<Parameters<DeviceWarmup["run"]>[0], "sessionStatus"> & {
-  sessionStatus?: () => Promise<string | null>;
-};
-
-/** 会话预热块：满足 DeviceWarmup 端口（sessionStatus 可缺）。 */
-export interface DeviceWarmupBlock {
-  run(args: DeviceWarmupArgs): Promise<ScopeTermination | null>;
-}
-
-// 编译期核对：本块可以直接装进 DeviceParts.warmup。
-type _BlockIsPort = DeviceWarmupBlock extends DeviceWarmup ? true : never;
-const _blockIsPort: _BlockIsPort = true;
-void _blockIsPort;
+/** run 的参数，即端口的参数：sessionStatus 查一次当前远程访问会话的状态（Device Farm 会话块的 status 绑定到当前会话 ARN；查询失败
+ *  返回 null 或抛出，此时不据此判会话丢失）。 */
+type WarmupArgs = Parameters<DeviceWarmup["run"]>[0];
 
 export interface DeviceWarmupDeps {
   /** worker 日志（部件工厂环境里的 log）。 */
@@ -83,7 +70,7 @@ export interface DeviceWarmupDeps {
 }
 
 /** 构造会话预热块。只组装、不做 I/O。 */
-export function createDeviceWarmup(deps: DeviceWarmupDeps): DeviceWarmupBlock {
+export function createDeviceWarmup(deps: DeviceWarmupDeps): DeviceWarmup {
   const now = deps.now ?? Date.now;
   return { run: (args) => warmup(args, deps.log, now) };
 }
@@ -94,7 +81,7 @@ type AttemptResult =
   | { kind: "lost" }
   | { kind: "retry"; reason: string };
 
-async function warmup(args: DeviceWarmupArgs, log: (line: string) => void, now: () => number): Promise<ScopeTermination | null> {
+async function warmup(args: WarmupArgs, log: (line: string) => void, now: () => number): Promise<ScopeTermination | null> {
   let attempts = 0;
   let last = BUDGET_SPENT_REASON;
   while (attempts < DEVICE_WARMUP_ATTEMPTS && !args.budget.signal.aborted) {
@@ -114,7 +101,7 @@ async function warmup(args: DeviceWarmupArgs, log: (line: string) => void, now: 
 }
 
 /** 一次尝试：导航、切回原生上下文、在标记等待期内读控件树。 */
-async function attempt(args: DeviceWarmupArgs, n: number, log: (line: string) => void, now: () => number): Promise<AttemptResult> {
+async function attempt(args: WarmupArgs, n: number, log: (line: string) => void, now: () => number): Promise<AttemptResult> {
   const { session } = args;
   try {
     if (args.route === "url") await session.openUrl(session.exec, args.url);
@@ -134,7 +121,7 @@ async function attempt(args: DeviceWarmupArgs, n: number, log: (line: string) =>
   return waitForMarker(args, n, log, now);
 }
 
-async function waitForMarker(args: DeviceWarmupArgs, n: number, log: (line: string) => void, now: () => number): Promise<AttemptResult> {
+async function waitForMarker(args: WarmupArgs, n: number, log: (line: string) => void, now: () => number): Promise<AttemptResult> {
   const deadline = now() + WARMUP_MARKER_WAIT_MS;
   let latest: WarmupMarker | null = null;
   for (;;) {
@@ -174,9 +161,8 @@ async function leaveWarmupPage(session: AppiumSession, signal: AbortSignal, log:
 }
 
 /** 命令失败后的会话丢失判定：异常已带 session_lost 归类即是；否则查一次会话状态，查得到且不是 RUNNING 即是。 */
-async function sessionEnded(e: unknown, args: DeviceWarmupArgs): Promise<boolean> {
+async function sessionEnded(e: unknown, args: WarmupArgs): Promise<boolean> {
   if (readClassification(e)?.errorType === "session_lost") return true;
-  if (args.sessionStatus === undefined) return false;
   let status: string | null;
   try {
     status = await args.sessionStatus();
@@ -186,10 +172,11 @@ async function sessionEnded(e: unknown, args: DeviceWarmupArgs): Promise<boolean
   return status !== null && status !== RUNNING;
 }
 
-/** 失败原因的一句：异常带归类标记时用标记的消息（已是产品语言），否则取错误信息；两者都取一行（先脱敏再截断）。 */
+/** 失败原因的一句：异常带归类标记时用标记的消息（已是产品语言），否则取错误信息；两者都取一行（先脱敏再截断），封顶与桌面预热相同
+ *  （`WARMUP_REASON_MAX`），同一句失败消息的原因在两条路径上一样长。 */
 function reasonOf(e: unknown): string {
   const mark = readClassification(e);
-  if (mark !== null) return oneLineError(mark.message);
-  const text = oneLineError(e instanceof Error ? e.message : e);
+  if (mark !== null) return oneLineError(mark.message, WARMUP_REASON_MAX);
+  const text = oneLineError(e instanceof Error ? e.message : e, WARMUP_REASON_MAX);
   return text === "" ? errorText(e) : text;
 }

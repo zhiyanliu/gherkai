@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""校验 `uv build --all-packages` 的产物：成员齐、版本一致、兄弟包 pin 已渲染。
+"""校验 `uv build --all-packages` 的产物：成员齐全、版本一致、兄弟包 pin 已渲染。
 
-发布链的静态闸门（ADR 0037 决策 8「gate：断言算出的版本 == 触发 tag」），也在 CI 里作
+发布链的静态闸门（ADR 0037 决策 8 的 gate：断言算出的版本等于触发 tag），也在 CI 里作
 `uv build` smoke 的断言体——把「元数据/metadata hook 回归」挡在推索引之前，而不是等发行后
 用户装不上才发现（ADR 0037「现状实测」记的原始故障就是 `Requires-Dist: core` 裸名）。
 
@@ -26,7 +26,8 @@
    白名单是字面量，没有护栏就会静默漂回默认全收——而默认全收不只多带测试与 spike，还会把本机未跟踪的
    产物一并封进 sdist（hatchling 只认从项目根向上第一份 `.gitignore`，包内那份会挡住仓库根的规则）。
    例外一项：hatchling 把它认到的 `.gitignore` 强制塞进 sdist，不受 include / exclude / ignore-vcs 约束，
-   故该文件只容许、不要求。没写 include 白名单的包只剩「顶层不含 `tests` / `spikes`」这条恒真红线。
+   故该文件只容许、不要求。每个成员都必须写非空的 include 白名单，没写或写成空列表即报错：否则
+   hatchling 回落到默认全收，集合相等的比对也失去基准，新成员漏写这一行配置，本机未跟踪的产物就会进入发行包。
 
 用法：
     python3 .github/scripts/check_dist_metadata.py --dist dist [--expect-version 1.4.0]
@@ -92,8 +93,8 @@ SDIST_TOLERATED = frozenset({".gitignore"})
 def sdist_whitelists(repo_root: Path, members: dict[str, str]) -> dict[str, set[str]]:
     """真值集：发行名 → 该包 pyproject 的 sdist `include` 白名单（去前导 `/`，模式锚在包根）。
 
-    没写 `include` 的成员不进这张表，其 sdist 只受「顶层不含 `tests` / `spikes`」那条恒真红线约束
-    （见模块 docstring 断言 5）。
+    没写 `include` 或写成空列表的成员不进这张表，断言 5 对其 sdist 报错（每个成员都必须显式声明白名单，
+    见模块 docstring 断言 5）。
     """
     result: dict[str, set[str]] = {}
     for member_dir, name in members.items():
@@ -125,7 +126,7 @@ def skill_source_files(repo_root: Path) -> set[str]:
 
 
 def check_skill_payload(wheel: Path, repo_root: Path) -> list[str]:
-    """断言 4：wheel 内 skill 文件集 == 源目录文件集，且 wheel 里不含评测资产。"""
+    """断言 4：wheel 内 skill 文件集等于源目录文件集，且 wheel 里不含评测资产。"""
     expected = skill_source_files(repo_root)
     with zipfile.ZipFile(wheel) as zf:
         names = zf.namelist()
@@ -211,7 +212,7 @@ def main() -> int:
                     " [tool.hatch.metadata.hooks.uv-dynamic-versioning] 与 dynamic 声明，ADR 0037 决策 2b）"
                 )
 
-    # 断言 1：成员齐（sdist + wheel 各一）
+    # 断言 1：成员齐全（sdist + wheel 各一）
     for member_dir, name in sorted(members.items()):
         if name not in seen_wheels:
             errors.append(f"workspace 成员 {member_dir}（发行名 {name}）没有 wheel 产物——它没进发布链")
@@ -242,8 +243,9 @@ def main() -> int:
                     f"{name} 缺 sdist {expected_sdist.name}（现有：{[p.name for p in sdists]}）"
                 )
 
-    # 断言 5：sdist 顶层 == 该包的打包白名单（include 是字面量、无护栏会静默漂回默认全收）
+    # 断言 5：sdist 顶层条目集等于该包的打包白名单（include 是字面量、无护栏会静默漂回默认全收）
     whitelists = sdist_whitelists(repo_root, members)
+    dist_to_member = {name: member_dir for member_dir, name in members.items()}
     for s in sdists:
         with tarfile.open(s) as t:
             tops = {p[1] for p in (m.name.split("/") for m in t.getmembers()) if len(p) > 1}
@@ -260,7 +262,11 @@ def main() -> int:
             )
         expected = whitelists.get(sdist_dist_name)
         if expected is None:
-            # 该包还没写 include 白名单：顶层集合相等这一格照不出来，只剩上面那条红线
+            errors.append(
+                f"{s.name}：{dist_to_member[sdist_dist_name]}/pyproject.toml 没写非空的"
+                " [tool.hatch.build.targets.sdist] include 白名单——每个 workspace 成员都必须显式声明，"
+                "否则 sdist 回落到 hatchling 默认全收、把本机未跟踪产物一并封进去（ADR 0037 工程布局条）"
+            )
             continue
         expected = expected | SDIST_GENERATED
         if missing := sorted(expected - tops):
@@ -291,7 +297,7 @@ def main() -> int:
         for err in errors:
             fail(err)
         return 1
-    print("产物校验通过：成员齐、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致、sdist 顶层与打包白名单一致。")
+    print("产物校验通过：成员齐全、版本一致（无旧版本残留）、兄弟包 pin 已渲染、skill 文件集与源目录一致、sdist 顶层与打包白名单一致。")
     return 0
 
 

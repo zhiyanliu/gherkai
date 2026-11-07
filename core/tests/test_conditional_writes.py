@@ -8,6 +8,7 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制四 CAS：pending→running 只成功一次，并发抢占只一个赢。
 - 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
+- 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
 """
 from __future__ import annotations
 
@@ -313,6 +314,86 @@ def test_projection_with_unknown_scope_is_ignored_not_invented(run_store):
     assert run_store.project_state("run-1", projected) is True
     got = run_store.load_run_state("run-1")
     assert set(got.jobs) == {"a", "b"} and got.jobs["a"].status == Status.PASSED
+
+
+def test_bare_pending_projection_leaves_stored_job_unchanged(run_store):
+    """投影里的 job 为 pending 且无会话、无认领时刻时，库中该 job 原为 pending、已 claim 的 running、终态还是不在 Map 里，
+    落库结果都等于投影前库中该 job 的值（不在 Map 里时仍不在）。DDB 对这类 job 不发写、local 照常合并（ADR 0034 机制三
+    「逐 job 写跳过无效果的 pending 项」段），两 adapter 对拍。"""
+    meta = _meta("run-1", "p", "r", "t")
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    seeded = RunState(run_id="run-1", status=Status.RUNNING,
+                      jobs={"p": JobState("p", Status.PENDING), "r": JobState("r", Status.PENDING),
+                            "t": JobState("t", Status.PASSED, session_id="sess-t")},
+                      high_water_mark=1)
+    assert run_store.project_state("run-1", seeded) is True
+    assert run_store.try_claim_job("run-1", "r", claimed_at="2026-08-13T01:02:03Z") is True
+    before = run_store.load_run_state("run-1").jobs
+    assert {sid: js.status for sid, js in before.items()} == {
+        "p": Status.PENDING, "r": Status.RUNNING, "t": Status.PASSED}, "前提：库中三个 job 分处三个等级"
+
+    bare = RunState(run_id="run-1", status=Status.PENDING,
+                    jobs={sid: JobState(sid, Status.PENDING) for sid in ("p", "r", "t", "ghost")},
+                    high_water_mark=2)
+    assert run_store.project_state("run-1", bare) is True
+    got = run_store.load_run_state("run-1")
+    assert got.high_water_mark == 2  # 标量写成功，跳过的只是逐 job 写
+    assert got.jobs == before  # 各 job 逐字段等于投影前的值（含 r 的 claimed_at、t 的 session_id），ghost 仍不在
+
+
+def _ddb_store_counting_updates(aws, monkeypatch):
+    """DDB store 加 update_item 计数：返回 (store, calls)，calls 依次记下每次 update_item 的参数。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    table = aws["ddb"].Table(aws["table_name"])
+    calls: list[dict] = []
+    real_update_item = table.update_item
+
+    def counting_update_item(**kwargs):
+        calls.append(kwargs)
+        return real_update_item(**kwargs)
+
+    monkeypatch.setattr(table, "update_item", counting_update_item)
+    return DynamoDBRunStore(table), calls
+
+
+def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch):
+    """DDB 侧写入次数（ADR 0034 机制三「逐 job 写跳过无效果的 pending 项」段），前提是标量写成功：一次 project_state 发出的
+    update_item 为标量写一次加未跳过的 job 数。只跳过 status 为 pending、session_id 与 claimed_at 都为空的 job；
+    带认领时刻或带会话的 pending、running、终态照常发写。"""
+    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
+    meta = _meta("run-1", "p1", "p2", "pc", "ps", "r", "t")
+    store.create_run(meta, _initial(meta, hwm=0))
+    calls.clear()
+    projected = RunState(run_id="run-1", status=Status.RUNNING, jobs={
+        "p1": JobState("p1", Status.PENDING),
+        "p2": JobState("p2", Status.PENDING),
+        "pc": JobState("pc", Status.PENDING, claimed_at="2026-08-13T01:02:03Z"),
+        "ps": JobState("ps", Status.PENDING, session_id="sess-ps"),
+        "r": JobState("r", Status.RUNNING, session_id="sess-r"),
+        "t": JobState("t", Status.PASSED),
+    }, high_water_mark=1)
+    assert store.project_state("run-1", projected) is True
+    assert "#sid" not in calls[0]["ExpressionAttributeNames"], "首次 update_item 应是标量写"
+    assert len(calls) == 1 + 4
+    assert sorted(c["ExpressionAttributeNames"]["#sid"] for c in calls[1:]) == ["pc", "ps", "r", "t"]
+
+
+def test_ddb_rejected_scalar_write_issues_no_job_writes(aws, monkeypatch):
+    """标量写条件不成立（更小 HWM）时 project_state 直接返回 False、不发逐 job 写：update_item 只有标量写那一次。"""
+    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
+    meta = _meta()
+    store.create_run(meta, _initial(meta, hwm=0))
+    fresh = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.RUNNING)},
+                     high_water_mark=10)
+    assert store.project_state("run-1", fresh) is True
+    calls.clear()
+    stale = RunState(run_id="run-1", status=Status.RUNNING,
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
+                     high_water_mark=5)  # 两个 job 都不属于跳过项：标量写被挡后若仍发逐 job 写，调用次数会多出两次
+    assert store.project_state("run-1", stale) is False
+    assert len(calls) == 1
 
 
 # ---------- 真 DDB 复验（integration 标记，默认 deselect；需真表 + 真凭证）----------

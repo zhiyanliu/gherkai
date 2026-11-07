@@ -254,7 +254,7 @@ class _Page:
 
 def _job(scope_id: str = SCOPE_ID, n_scenarios: int = 1, target: dict | None = None) -> str:
     return json.dumps({
-        "schemaVersion": 1, "scope": {"id": scope_id, "name": "s"}, "engine": "novaact", "assertionVotes": 1,
+        "schemaVersion": 2, "scope": {"id": scope_id, "name": "s"}, "engine": "novaact", "assertionVotes": 1,
         "timeoutS": None, "deviceRequest": None, "target": target or {"device": "desktop", "uiKind": "web"},
         "scenarios": [{"id": f"{scope_id}:{i}", "name": "s", "steps": [{"index": 0, "keyword": "Given", "text": "a"}]}
                       for i in range(n_scenarios)]})

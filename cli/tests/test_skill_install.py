@@ -87,7 +87,7 @@ def test_refuses_target_that_is_not_ours(tmp_path, capsys):
     assert (dst / "mine.md").read_text(encoding="utf-8") == "用户自己的东西"   # 一个字节都没动
     assert not (dst / skill_install.MARKER_NAME).exists()
     err = capsys.readouterr().err
-    assert str(dst) in err and "挪走" in err
+    assert str(dst) in err and "移到别处" in err
 
 
 def test_agent_all_refuses_before_touching_the_other_location(tmp_path):
@@ -149,7 +149,7 @@ def test_pointer_no_leaves_instruction_file_alone(tmp_path, capsys):
     (tmp_path / "CLAUDE.md").write_text("原样\n", encoding="utf-8")
     assert m.main(["skill", "install", "--dir", str(tmp_path), "--pointer", "no"]) == 0
     assert (tmp_path / "CLAUDE.md").read_text(encoding="utf-8") == "原样\n"
-    assert skill_install.POINTER_LINE in capsys.readouterr().err   # 只打印那一行让人自己贴
+    assert skill_install.POINTER_LINE in capsys.readouterr().err   # 只打印那一行，由使用者手动加入
 
 
 def test_non_tty_default_does_not_touch_pointer_file(tmp_path):
@@ -214,7 +214,7 @@ def test_write_failure_stays_inside_the_exit_code_set(tmp_path, capsys):
     # 落盘失败（这里：.claude 位上是个文件）也只许以退出码 2 结束，不许抛栈给使用者
     (tmp_path / ".claude").write_text("这是个文件、不是目录", encoding="utf-8")
     assert m.main(["skill", "install", "--dir", str(tmp_path)]) == 2
-    assert "装不进去" in capsys.readouterr().err
+    assert "安装失败" in capsys.readouterr().err
 
 
 def test_non_utf8_pointer_file_stays_inside_the_exit_code_set(tmp_path, capsys):
@@ -224,7 +224,7 @@ def test_non_utf8_pointer_file_stays_inside_the_exit_code_set(tmp_path, capsys):
     claude_md.write_bytes(before)
     assert m.main(["skill", "install", "--dir", str(tmp_path), "--pointer", "yes"]) == 2
     err = capsys.readouterr().err
-    assert "这一行请自己贴" in err and "不是 UTF-8 编码" in err  # 说真因（编码），不误导去查写权限
+    assert "请手动加入这一行" in err and "不是 UTF-8 编码" in err  # 说真因（编码），不误导去查写权限
     # 宁可不写也不写坏：读不了就一个字节都别动（errors="replace" 那种写法会把用户文件的非 UTF-8 段落毁掉）
     assert claude_md.read_bytes() == before
 
@@ -239,4 +239,4 @@ def test_agent_all_pointer_failure_on_one_file_still_handles_the_other(tmp_path,
     assert claude_md.read_bytes() == before
     assert (tmp_path / "AGENTS.md").read_text(encoding="utf-8").endswith(skill_install.POINTER_LINE + "\n")
     assert f"{claude_md} 不是 UTF-8 编码" in err
-    assert f"已加进 {tmp_path / 'AGENTS.md'}" in err
+    assert f"已加入 {tmp_path / 'AGENTS.md'}" in err

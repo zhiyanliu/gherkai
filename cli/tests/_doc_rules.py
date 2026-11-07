@@ -43,10 +43,15 @@ FORBIDDEN = re.compile(
 # 末项管量词「档」：作取值 / 级别 / 类别 / 情形 / 后端义一律不用（照句意写「取值 / 级别 / 判定 / 情形 / 后端」），
 # 只放行「文档 / 归档 / 存档 / 档案 / 档期」这类固定词。它是用词规则而非口吻规则，故 CHANGELOG 已发行节
 # 随退役词表一起豁免（见 `changelog_unreleased`）。
+# 「炸 / 裸奔 / 裸穿 / 无脑 / 真验」一组管注释层常见的同事口头语：「炸」作「失败 / 抛异常」义（照句意写「失败 / 报错 / 抛异常」），放行「爆炸」一词
+# （「组合爆炸」「参数爆炸」是通行说法）；「裸奔 / 裸穿」写成「原样抛出 / 直接输出」；「无脑」写成「直接 / 不加判断地」；
+# 「真验」连同「真验证」写成「实际验证 / 实际运行证实」，放行「认真验证」。「连坐」「踩过」这类词义随语境变、
+# 正则分不出合法用法的不进表，由 code-health 复盘的口吻维度人判。
 # ADR 0045 决策六形态②：自造二字复合词与「码」缩略——歧义不是效率，AI 侧文档也不用（排版学义的「同形字符」与「协同调度」放行）。
 _COINAGES = r"同形(?!字)|同款|同律|(?<!协)同调|同口径|归码|退码|网络码|专用码|非零码|此码"
 COINAGES = re.compile(_COINAGES)
 COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|烙成|烙在|逃生舱|旋钮|(?<!访)问(?:不|得)到|跑(?!」)"
+                        r"|(?<!爆)炸|裸奔|裸穿|无脑|(?<!认)真验"
                         r"|(?<![文归存])档(?![案期])"
                         r"|" + _COINAGES)
 
@@ -206,7 +211,8 @@ def comment_blocks(path: Path, text: str | None = None) -> list[list[tuple[int, 
                     blocks.append([(first + k, line) for k, line in enumerate(doc.splitlines())])
         return blocks
     if suffix in {".mts", ".ts", ".mjs", ".js"}:
-        masked = _JS_STRING.sub(lambda m: " " * len(m.group(0)), text)
+        # 字符串逐字换成空格、换行原样保留：跨行的模板字面量遮蔽后仍占原来的行数，其后注释的行号与原文一致。
+        masked = _JS_STRING.sub(lambda m: re.sub(r"[^\n]", " ", m.group(0)), text)
         in_block = False
         for i, line in enumerate(masked.splitlines(), 1):
             rest = line

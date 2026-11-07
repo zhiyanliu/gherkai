@@ -159,7 +159,7 @@ class SubprocessEngine:
         except BaseException:
             # 起 worker 失败（cmd 不存在 / cwd 无效 / 其他 OSError）：管道两端是**裸 fd、没有 GC 兜底**，不显式
             # 关就永久泄漏。调用方（schedule）把「起 worker 失败」吞成本 job 的 error 后继续执行下一个 job，故
-            # worker 命令配错这类「每 job 必炸」的场景会按 job 数累积泄漏 → 撞进程 fd 上限。
+            # worker 命令配错这类「每个 job 都必然失败」的场景会按 job 数累积泄漏 → 撞进程 fd 上限。
             os.close(events_r)
             os.close(events_w)
             raise
@@ -181,7 +181,7 @@ class SubprocessEngine:
             proc.stdin.close()
         except BaseException:
             # worker 起来即崩（stdin 写入抛 BrokenPipeError）：events_r 同样是裸 fd、子进程也需 reap——
-            # 与上面 Popen 失败支同一「每 job 必炸 → 按 job 数累积泄漏」形态，同样显式收。
+            # 与上面 Popen 失败支同一「每个 job 都必然失败 → 按 job 数累积泄漏」形态，同样显式收。
             os.close(events_r)
             proc.kill()
             proc.wait()
@@ -226,7 +226,8 @@ def _read_events(
                 yield event_from_line(line)  # 解析失败 → 抛 ValueError，schedule 捕获记 error
     finally:
         # 自然 EOF 与被放弃（GeneratorExit，schedule 主动停后不再 next）两条路都有界等 pump 落完日志尾部，
-        # 再轮到调用方关 sink 句柄（ADR 0041 决策二）；stop() 路径另有一次 join，两处都在、哪条先到都不裸奔。
+        # 再轮到调用方关 sink 句柄（ADR 0041 决策二）；stop() 路径另有一次 join。两处都在，无论哪条路径先到，
+        # sink 句柄都在有界等待 pump 之后才关。
         _join_pumps(pumps, 2.0)
     # fd3 耗尽表示 worker 关了事件通道。等它真正退出，拿 returncode。
     proc.wait()

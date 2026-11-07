@@ -8,7 +8,7 @@
 | job-in | 写 worker stdin | `PutObject` 整 job 到 S3、RunTask overrides 经 env 传 `JOB_S3_URI` 小指针（RunTask overrides 8192 上限塞不下含 feature 的 job） |
 | events-out | 读 `EVENTS_FD` fd 逐行 | worker `PutItem` 到 DDB events 表；本 adapter `Query PK=run_id#scope_id AND last_seq<SK<EXIT_SK`（只读 worker seq 段，退出观察者的 `task_exited` 旁挂保留高位 SK、不入流）轮询增量拉 → `event_from_line` → yield（events-out=DDB，非 SQS/MSK，见 ADR 0024「DynamoDB 作 events-out」+ 三方案被拒护栏） |
 | stop | SIGTERM→grace→SIGKILL | `StopTask`（grace 由 task-def 期 `stopTimeout` 决定、≤120s、不逐次传——Nova 下限 150s>120s，真容器标定后 Fargate 侧对最坏长 act 接受 SIGKILL，ADR 0032 结论 4） |
-| 退出码 | `proc.wait()` returncode | `DescribeTasks` 轮询到 `lastStatus==STOPPED` → `containers[0].exitCode`（STOPPED 前常 null）→ 交 `wire.raise_for_worker_exit`（与 subprocess 共用同一份码→异常翻译） |
+| 退出码 | `proc.wait()` returncode | `DescribeTasks` 轮询到 `lastStatus==STOPPED` → `containers[0].exitCode`（STOPPED 前常 null）→ 交 `wire.raise_for_worker_exit`（与 subprocess 共用同一份码→异常翻译）；STOPPED 后始终取不到 exitCode 时直接抛平台侧哨兵 255 加 `stopCode: stoppedReason` 归因（与退出观察者落的内容相同） |
 
 **红线（ADR 0016/0024/0026）**：boto3 client 由组合根注入、adapter 不自建（`require_boto3` 首行守卫）；schedule 仍纯归约、
 对 ECS/DDB 无知（存活/退出码判定藏在本 adapter 的迭代器/handle 内，非 schedule）；port 签名/线格式/wire 一行不改（复用 `event_from_line`/`job_to_line`）。
@@ -28,7 +28,9 @@ from typing import Iterator, NamedTuple
 from urllib.parse import quote
 
 from gherkai_core.adapters._boto import require_boto3
+from gherkai_core.errors import WorkerExitError
 from gherkai_core.model import Event, Job, ScopeDone
+from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
 from gherkai_core.wire import event_from_line, job_to_line, raise_for_worker_exit
 
 # events 表 schema 的**单一事实源**（ADR 0024「DynamoDB 作 events-out」+ ADR 0034 机制一）：PK=run_id#scope_id、
@@ -54,8 +56,14 @@ ITEM_TYPE_ATTR = "item_type"
 EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 item 不带此属性）
 EXIT_CODE_ATTR = "exit_code"
 
+# ECS 的 stopCode 取值之一：task 没能开始运行（拉不到镜像、缺 secret、放置失败），容器的 exitCode 永不落值。
+# 同步路径据此不等落值宽限、立即落平台侧哨兵（ADR 0024「exitCode 落值延迟」条）；只按这个结构化字段判，不看 stoppedReason 的文本。
+TASK_FAILED_TO_START = "TaskFailedToStart"
+
+
 class TaskProbe(NamedTuple):
-    """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个 `missing` 见末段）：
+    """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个 `missing` 见倒数第二段），
+    另带 ECS 对停止的归因两项（见最后一段）：
 
     - `stopped`：task 是否已到 STOPPED 终态。
     - `exit_code`：container 的 exitCode；`None` 表示尚未落值。
@@ -67,10 +75,16 @@ class TaskProbe(NamedTuple):
 
     第三个正交事实 `missing`：DescribeTasks **查不到这个 task**（空 `tasks` + `failures[].reason=MISSING`）——不是「未 STOPPED」。
     ECS API 最终一致，RunTask 刚返回时可能短暂 MISSING（有界多等 `missing_task_grace_polls`）；持续 MISSING 表示 task 已不在
-    ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常（ADR 0024「exitCode 落值延迟」条）。"""
+    ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常（ADR 0024「exitCode 落值延迟」条）。
+
+    `stop_code` 与 `stopped_reason`：task 级的 `stopCode` 与 `stoppedReason`，只在 `stopped` 为真时取（未 STOPPED 或 missing 时为
+    None）。用途有二：`stop_code` 为 `TaskFailedToStart` 时 exitCode 永不落值、不必等宽限；取不到退出码而落平台侧哨兵时，两项拼成
+    归因随异常带出（`project.platform_exit_reason`）。"""
     stopped: bool
     exit_code: int | None
     missing: bool = False
+    stop_code: str | None = None
+    stopped_reason: str | None = None
 
 
 def events_pk(run_id: str, scope_id: str) -> str:
@@ -111,8 +125,8 @@ class FargateEngine:
       任何一次 `push-worker` 都会劫持正在运行的 run（中途换 step 集）。选哪个 revision 是组合根的事（`compose` 按
       definition 的 `worker_variant` 解析），本 adapter 原样传给 RunTask、不做任何名字推导。
     - job_s3：(bucket, prefix) job 对象落点；events_table_name：events 表名（worker PutItem 目标）。
-    - region：组合根**落实成具体字符串**的 AWS region（解析链见 `compose.resolve_region`：命令行、环境变量、项目配置文件、
-      profile config 依次回落，ADR 0016 决策 C / 0053 决策 2）——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，
+    - region：组合根**落实成具体字符串**的 AWS region（解析链见 `compose.resolve_region`，ADR 0016 决策 C / 0053 决策 2）
+      ——非 None 时经 RunTask overrides 注入 worker 的 `AWS_REGION`，
       使 worker 建 boto3/aws-sdk client（EventSink DDB / JobSource S3 / ArtifactUploader）拿到与 core store 侧**同源**的 region。
       Fargate 容器不继承本地 env、也不吃 profile config（AgentCore `validate_region` 要显式字符串），故必须由组合根落实后显式注入
       （否则 worker `region_name=None` → NoRegionError / AgentCore InvalidRegionError）。**与 subprocess 的 `build_engines` 注入同源**。
@@ -136,7 +150,7 @@ class FargateEngine:
         events_table_name: str,    # 注入 worker 的 events 表名（worker PutItem 目标）
         container_name: str,       # RunTask overrides 要指定往哪个 container 注 env
         # 下面两个产物落点参数**必给关键字、无缺省**：cloud 下两者必注，漏传即静默丢产物（实际运行暴露过一次），
-        # 与 ADR 0038 的显式 revision 判法一致——漏传即在装配点炸，不做成「忘了传就静默破」。
+        # 与 ADR 0038 的显式 revision 判法一致——漏传即在装配点报错，不做成「忘了传就静默破」。
         artifact_s3: tuple[str, str] | None,  # (bucket, prefix)：worker 产物上传落点（ADR 0029）——注入 worker 的
                                    # ARTIFACT_S3_BUCKET/PREFIX，否则容器盘停即销毁、产物必丢（ADR 0029「cloud 下注入不是可选」）。None 表示显式不上传
         sdk_artifact_dir_env: dict,  # 按引擎的 SDK 产物落点 env（如 {"NOVA_LOGS_DIR": "/容器内/…/nova-trajectories"}）——
@@ -149,7 +163,8 @@ class FargateEngine:
         missing_task_grace_polls: int = 20,  # DescribeTasks 连续 MISSING 的有界宽限拍数（ECS API 最终一致，RunTask 刚返回可短暂查不到；
                                    # 20×0.5s≈10s）——超限表示 task 已不在 ECS，抛而非无上界轮询（ADR 0024「exitCode 落值延迟」条）
         null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
-                                   # 多等这么多拍等落值，超限才落定异常码 1（防把落值延迟误报 error）。5×0.5s≈2.5s，远大于落值瞬时窗口。
+                                   # 多等这么多拍等落值，超限才落平台侧哨兵 255 加归因（防把落值延迟误报 error）；stopCode 为
+                                   # TaskFailedToStart 时不等这段。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
         require_boto3("FargateEngine")
         self._ecs = ecs_client
@@ -338,9 +353,10 @@ class FargateEngine:
                     # task 已 STOPPED。终读强一致 Query 从 last_seq+1 读全（含停在断号处未消费的部分；补最终一致还没看到的
                     # 末尾 PutItem，ADR 0024 读一致性条）——终读里的断号即真洞、只记警告。
                     yield from self._final_drain(pk, last_seq)
-                    # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）——
-                    # 与 scope_done 路径复用同一读码逻辑（此刻已 STOPPED、几乎立即返回，除非撞落值延迟窗口）。
-                    raise_for_worker_exit(self._await_exit_code(task_arn), code_label="exitCode")
+                    # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限与取不到退出码时的平台侧哨兵（ADR 0024
+                    # 「exitCode 落值延迟」）——与 scope_done 路径复用同一读码逻辑。把这次已 STOPPED 的探测结果交进去当第一拍，
+                    # 不再多调一次 DescribeTasks（落值了即刻返回，撞上落值延迟窗口才继续轮询）。
+                    raise_for_worker_exit(self._await_exit_code(task_arn, probe), code_label="exitCode")
                     return
                 time.sleep(self._poll)  # task 仍在运行、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
@@ -391,25 +407,27 @@ class FargateEngine:
             kwargs["ExclusiveStartKey"] = last_key  # 续下一页（>1MB 尾部才触发）
 
     def _probe_task(self, task_arn: str) -> TaskProbe:
-        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe(stopped, exit_code, missing)（ADR 0024「exitCode 落值延迟」）。
+        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe（ADR 0024「exitCode 落值延迟」）。
 
         未 STOPPED → (False, None)；已 STOPPED 但 exitCode 尚 null（缺 container 亦然）→ (True, None)；
         已 STOPPED 且落值 → (True, int)；**查不到 task** → (False, None, missing=True)。stopped 与 exit_code 非原子（见 TaskProbe），
-        故分开返回、不揉进单值。
+        故分开返回、不揉进单值。已 STOPPED 时一并取 task 级的 `stopCode` 与 `stoppedReason`（任一缺失为 None）。
         """
         resp = self._ecs.describe_tasks(cluster=self._cluster, tasks=[task_arn])
         tasks = resp.get("tasks", [])
         if not tasks:
             # 查不到 task（failures 里 reason=MISSING）不等于未 STOPPED：单独成态，让调用方有界等 / 超限抛（见 TaskProbe.missing）。
             return TaskProbe(stopped=False, exit_code=None, missing=True)
-        if tasks[0].get("lastStatus") != "STOPPED":
+        task = tasks[0]
+        if task.get("lastStatus") != "STOPPED":
             return TaskProbe(stopped=False, exit_code=None)  # 未 STOPPED
-        containers = tasks[0].get("containers", [])
+        containers = task.get("containers", [])
         # 已 STOPPED。找本 worker container 的 exitCode；缺 container / exitCode 尚 null → (True, None)（落值延迟，非"当异常"）。
         c = next((c for c in containers if c.get("name") == self._container), containers[0] if containers else None)
-        return TaskProbe(stopped=True, exit_code=(c.get("exitCode") if c else None))
+        return TaskProbe(stopped=True, exit_code=(c.get("exitCode") if c else None),
+                         stop_code=task.get("stopCode"), stopped_reason=task.get("stoppedReason"))
 
-    def _await_exit_code(self, task_arn: str) -> int:
+    def _await_exit_code(self, task_arn: str, first_probe: TaskProbe | None = None) -> int:
         """轮询 DescribeTasks 直到拿到确定的 exitCode——scope_done 后读退出码用（ADR 0024「事件流结束信号」）。
 
         scope_done 只表示事件流内容完整、非进程终态；等 STOPPED 读码才能捕获「worker 发完 scope_done 又会话释放失败
@@ -419,27 +437,36 @@ class FargateEngine:
         另由下述有界宽限兜住）。
 
         **STOPPED 但 exitCode 尚 null**（ADR 0024「exitCode 落值延迟」）：不立即当异常（否则把干净退出误报 error），
-        **有界**多等 `_null_exit_grace_polls` 拍等落值；超限仍 null 才落定为 1（容器真被强杀/没报码，非落值延迟）。
+        **有界**多等 `_null_exit_grace_polls` 拍等落值；超限仍 null 才落定（容器真被强杀/没报码，非落值延迟）。只有已识别的启动失败
+        提前落定：`stopCode` 为 `TaskFailedToStart` 时 exitCode 永不落值，见到即落定、不空等宽限拍。落定即**直接抛**
+        `WorkerExitError`：退出码取平台侧哨兵 `PLATFORM_FAILED_EXIT`（255），`reason` 取 `stopCode: stoppedReason`
+        （`platform_exit_reason`，与退出观察者对缺 exitCode 的 STOPPED 所落内容相同）；它不是 worker 给出的码，不经
+        `raise_for_worker_exit` 的码翻译。schedule 把 `reason` 交给终结函数，job message 里就有 ECS 给的原因。
 
         **DescribeTasks 查不到 task**（第三态、非「未 STOPPED」）：有界多等 `_missing_task_grace_polls` 拍（ECS API 最终一致），
         超限 **raise RuntimeError**（`_count_missing`）——本函数据此可抛，调用方按 error 收敛（ADR 0024 同条）。
+
+        first_probe：调用方刚做过的一次探测（`_read_events` 见到 STOPPED 的那次），给了就当作第一拍、不再重复 DescribeTasks。
         """
         pending_polls = 0
         missing_polls = 0
+        probe = first_probe if first_probe is not None else self._probe_task(task_arn)
         while True:
-            probe = self._probe_task(task_arn)
             if probe.missing:
                 missing_polls = self._count_missing(task_arn, missing_polls)
-                time.sleep(self._poll)
-                continue
-            missing_polls = 0
-            if not probe.stopped:  # 未 STOPPED → 继续轮询等终态
-                time.sleep(self._poll)
-                continue
-            if probe.exit_code is None:  # 已 STOPPED 但 exitCode 尚 null：有界多等几拍等落值
-                if pending_polls >= self._null_exit_grace_polls:
-                    return 1  # 超宽限仍 null → 落定异常（容器没报码，非落值延迟）
+            elif not probe.stopped:  # 未 STOPPED → 继续轮询等终态
+                missing_polls = 0
+            elif probe.exit_code is not None:
+                return probe.exit_code  # STOPPED 且落值
+            else:  # 已 STOPPED 但 exitCode 尚 null：有界多等几拍等落值
+                missing_polls = 0
+                # 启动失败（exitCode 永不落值）或超宽限仍 null（容器没报码，非落值延迟）→ 落平台侧哨兵加归因
+                if probe.stop_code == TASK_FAILED_TO_START or pending_polls >= self._null_exit_grace_polls:
+                    reason = platform_exit_reason(probe.stop_code, probe.stopped_reason)
+                    raise WorkerExitError(
+                        PLATFORM_FAILED_EXIT,
+                        f"云端任务已停止但没有给出 worker 的退出码，按 {PLATFORM_FAILED_EXIT} 记：{reason}",
+                        reason=reason)
                 pending_polls += 1
-                time.sleep(self._poll)
-                continue
-            return probe.exit_code  # STOPPED 且落值
+            time.sleep(self._poll)
+            probe = self._probe_task(task_arn)

@@ -1,11 +1,11 @@
 // 应用启停的单测（ADR 0051 决策 9、14；ADR 0052 决策 3「应用启停」块）。运行：npx tsx --test src/device/app.test.mts。
 //
 // 两层：存在性检查与预签名用真的 S3Client，只把网络层换成本地的请求处理器（离线、不连 AWS），这样 HeadObject 的错误形态（含
-// 跨区域的 301 与响应头）与预签名地址的形态都是 SDK 的真实行为，不是 fake 自己说了算；预签名的签名值另按 SigV4 规范在测试里
-// 独立复算一遍。启动与重启用记录调用序列的假 driver。
+// 跨区域的 301 与响应头）与预签名地址的形态都是 SDK 的真实行为，不是 fake 自己说了算。预签名由官方 presigner 生成，测试只核地址
+// 形态（按区域的主机名与签名范围、有效期、只签 host），不复算签名值：签名与请求形态的一致性由维护 SDK 的一方负责（ADR 0051
+// 决策 9）。启动与重启用记录调用序列的假 driver。
 import { after, test } from "node:test";
 import assert from "node:assert";
-import { createHash, createHmac } from "node:crypto";
 import { getEventListeners } from "node:events";
 import { Readable } from "node:stream";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -120,7 +120,7 @@ test("存在性检查：404 与 403 之外的失败不归类，原样抛给调�
   await assert.rejects(checkAppObject(store, LOC, AbortSignal.timeout(5_000)));
 });
 
-test("存在性检查：调用方的截止信号原样交到 SDK 的网络层（中止由网络层执行，单次调用的上界因此由调用方给出）", async () => {
+test("存在性检查：调用方的截止信号原样交到 SDK 的网络层，在途的请求可被中止（只作尽力取消；上界是调用方对同一信号的等待，见设备侧接缝）", async () => {
   const seen: SeenRequest[] = [];
   const store = s3AppObjectStore({ client: offlineClient(200, seen) });
   const deadline = AbortSignal.timeout(5_000);
@@ -145,28 +145,6 @@ test("存在性检查：截止信号已中止时网络层没有响应，原样�
 
 // ---- 预签名（newSession 前，ADR 0051 决策 9）----
 
-/** RFC 3986 的严格编码（SigV4 规范的 UriEncode）：只有 A-Z a-z 0-9 - . _ ~ 不编码。 */
-function uriEncode(s: string): string {
-  return encodeURIComponent(s).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
-}
-
-/** 按 SigV4 规范（查询串签名形态）独立复算签名，不经 SDK 的签名器。 */
-function recomputeSignature(url: URL, secretAccessKey: string): string {
-  const params = [...url.searchParams.entries()].filter(([k]) => k !== "X-Amz-Signature");
-  const canonicalQuery = params.map(([k, v]) => [uriEncode(k), uriEncode(v)] as const)
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join("&");
-  const signedHeaders = url.searchParams.get("X-Amz-SignedHeaders")!;
-  assert.equal(signedHeaders, "host");
-  const canonicalRequest = ["GET", url.pathname, canonicalQuery, `host:${url.host}`, "", signedHeaders, "UNSIGNED-PAYLOAD"].join("\n");
-  const amzDate = url.searchParams.get("X-Amz-Date")!;
-  const [, date, region, service] = url.searchParams.get("X-Amz-Credential")!.split("/");
-  const scope = `${date}/${region}/${service}/aws4_request`;
-  const stringToSign = ["AWS4-HMAC-SHA256", amzDate, scope, createHash("sha256").update(canonicalRequest).digest("hex")].join("\n");
-  const hmac = (key: string | Buffer, data: string) => createHmac("sha256", key).update(data).digest();
-  const signingKey = hmac(hmac(hmac(hmac(`AWS4${secretAccessKey}`, date), region), service), "aws4_request");
-  return createHmac("sha256", signingKey).update(stringToSign).digest("hex");
-}
-
 test("预签名：GET 应用键，有效期取 limits 的 3600 秒，只签 host，不发任何请求", async () => {
   const seen: SeenRequest[] = [];
   const store = s3AppObjectStore({ client: offlineClient(200, seen) });
@@ -183,13 +161,18 @@ test("预签名：GET 应用键，有效期取 limits 的 3600 秒，只签 host
   assert.match(url.searchParams.get("X-Amz-Signature")!, /^[0-9a-f]{64}$/);
 });
 
-test("预签名：签名值与按 SigV4 规范独立复算的结果一致（载荷记 UNSIGNED-PAYLOAD，下载方不必带任何额外请求头）", async () => {
+test("预签名：SDK 的记账类请求头不进签名也不进查询串，载荷记 UNSIGNED-PAYLOAD，下载方不必带任何额外请求头", async () => {
   const store = s3AppObjectStore({ client: offlineClient(200) });
   const url = new URL(await presignAppObject(store, LOC, "us-west-2"));
-  assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
+  assert.equal(url.searchParams.get("X-Amz-SignedHeaders"), "host");
+  assert.equal(url.searchParams.get("X-Amz-Content-Sha256"), "UNSIGNED-PAYLOAD");
+  const names = [...url.searchParams.keys()].map((k) => k.toLowerCase());
+  for (const bookkeeping of ["amz-sdk-invocation-id", "amz-sdk-request", "x-amz-user-agent", "user-agent"]) {
+    assert.ok(!names.includes(bookkeeping), `查询串里不应有 ${bookkeeping}`);
+  }
 });
 
-test("预签名：按存在性检查给出的桶区域签——桶在 us-east-1 时主机名与签名范围都是 us-east-1，签名可独立复算，不发请求", async () => {
+test("预签名：按存在性检查给出的桶区域签——桶在 us-east-1 时主机名与签名范围都是 us-east-1，不发请求", async () => {
   const seen: SeenRequest[] = [];
   const store = crossRegionStore(seen);
   const checked = await checkAppObject(store, LOC, AbortSignal.timeout(5_000));
@@ -199,17 +182,18 @@ test("预签名：按存在性检查给出的桶区域签——桶在 us-east-1 
   assert.equal(seen.length, before, "预签名是本地计算，不发请求");
   assert.equal(url.hostname, `${LOC.bucket}.s3.us-east-1.amazonaws.com`);
   assert.match(url.searchParams.get("X-Amz-Credential")!, /^AKIDEXAMPLE\/\d{8}\/us-east-1\/s3\/aws4_request$/);
-  assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
+  assert.equal(url.searchParams.get("X-Amz-SignedHeaders"), "host");
+  assert.equal(url.searchParams.get("X-Amz-Expires"), String(APP_PRESIGN_EXPIRES_S));
 });
 
-test("预签名：带会话令牌的凭证把令牌放进查询串（同样参与签名）", async () => {
+test("预签名：带会话令牌的凭证把令牌放进查询串", async () => {
   const client = new S3Client({
     region: "us-west-2", maxAttempts: 1, credentials: { ...FAKE_CREDS, sessionToken: "IQoJb3JpZ2luX2VjEXAMPLE" },
     requestHandler: { handle: async () => { throw new Error("预签名不应发请求"); } } as never,
   });
   const url = new URL(await presignAppObject(s3AppObjectStore({ client }), LOC, "us-west-2"));
   assert.equal(url.searchParams.get("X-Amz-Security-Token"), "IQoJb3JpZ2luX2VjEXAMPLE");
-  assert.equal(url.searchParams.get("X-Amz-Signature"), recomputeSignature(url, FAKE_CREDS.secretAccessKey));
+  assert.equal(url.searchParams.get("X-Amz-SignedHeaders"), "host");
 });
 
 test("预签名地址是凭证：经脱敏出口后不剩签名、访问密钥与会话令牌（ADR 0051 决策 11）", async () => {

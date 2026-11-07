@@ -13,7 +13,9 @@ moto 的两处已知偏差（顺手记下，别当成实现问题）：
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import boto3
 import pytest
@@ -418,6 +420,54 @@ def test_retired_orphan_is_not_reused(aws):
     rc, _ = _push(aws, FakeContainer(digests=[digest]))
     assert rc == 0
     assert _mapping(aws, "novaact", "login")["revision_arn"] != retired
+
+
+OLD_VERSION = "1.3.0"   # 比后端戳旧的 CLI 版本：skew 前置只警告、不拦，可在同一后端上摆出旧版本的映射
+
+
+def _share_with_old_version(aws, digest: str) -> str:
+    """摆出复用条件比对版本之前可能留下的跨版本共用：旧版本推一份镜像，再把它的映射原样抄成当前版本同名
+    variant 的映射（模板 ARN 与 digest 都一致）→ 两个版本的映射指着同一个 revision，返回其 ARN。"""
+    rc, text = _push(aws, FakeContainer(digests=[digest]), version=OLD_VERSION)
+    assert rc == 0, text
+    old = _mapping(aws, "novaact", "login", version=OLD_VERSION)
+    aws.ssm.put_parameter(Name=names.ssm_path(PREFIX, names.worker_image_key("novaact", names.image_tag(VERSION, "login"))),
+                          Value=json.dumps(old), Type="String", Overwrite=True)
+    return old["revision_arn"]
+
+
+def test_same_digest_under_another_version_is_not_reused(aws):
+    """升级后模板没变、新版本推同一份镜像：旧版本同名 variant 的 revision 与本次（模板 ARN、digest、variant）都一致，
+    但版本不同 → 不复用、注册本版本自己的 revision（ADR 0038 步 5「限定同版本」）。复用了的话两个版本的映射共用它，
+    任一方替换映射把它退休后，另一版本的映射仍引用它，清理 pass 一直留着它。"""
+    seed_backend(aws)
+    digest = "sha256:" + "5" * 64
+    rc, _ = _push(aws, FakeContainer(digests=[digest]), version=OLD_VERSION)
+    assert rc == 0
+    old_rev = _mapping(aws, "novaact", "login", version=OLD_VERSION)["revision_arn"]
+    before = _revisions(aws, "novaact")
+    rc, text = _push(aws, FakeContainer(digests=[digest]))
+    assert rc == 0, text
+    new_rev = _mapping(aws, "novaact", "login")["revision_arn"]
+    assert new_rev != old_rev and new_rev not in before, "跨版本同（模板，digest）不该复用旧版本的 revision"
+    assert _tags(aws, new_rev)[names.TAG_VERSION] == VERSION
+    assert names.TAG_RETIRED_AT not in _tags(aws, old_rev), "旧版本的映射没被替换，它的 revision 不该被退休"
+    assert "复用" not in text
+
+
+def test_existing_cross_version_sharing_still_takes_the_mapping_fast_path(aws):
+    """版本条件只阻止新产生的共用、不拆开已有的（ADR 0038 步 5「边界」）：当前版本的映射已指向共用 revision、
+    且（模板，digest）与本次一致 → 照旧跳过注册、沿用它，不另注册一个、也不退休它。"""
+    seed_backend(aws)
+    digest = "sha256:" + "4" * 64
+    shared = _share_with_old_version(aws, digest)
+    before = _revisions(aws, "novaact")
+    rc, text = _push(aws, FakeContainer(digests=[digest]))
+    assert rc == 0, text
+    assert "跳过注册" in text
+    assert _revisions(aws, "novaact") == before
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == shared
+    assert names.TAG_RETIRED_AT not in _tags(aws, shared)
 
 
 def test_repush_retires_the_replaced_revision_and_prints_digest_change(aws):
@@ -863,6 +913,28 @@ def test_rederive_reuses_an_orphan_left_by_an_interrupted_deploy(aws):
     assert "直接复用" in text()
 
 
+def test_rederive_does_not_reuse_a_revision_of_another_version(aws):
+    """重派生与 push-worker 步 5 共用同一份复用判据，版本条件同样生效：family 里另一版本有（新模板，同 digest，
+    同名 variant）的未退休 revision 时，当前版本的映射不复用它、注册自己的。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "8" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    new_templates = seed_backend(aws, cpu="2048")
+    repo_uri = f"{REGISTRY}/{names.ecr_repo_name(PREFIX, 'novaact')}"
+    other = workers._register_revision(aws.ecs, template_arn=new_templates["novaact"], engine="novaact",
+                                       image_ref=f"{repo_uri}@{before['digest']}", digest=before["digest"],
+                                       variant="login", version=OLD_VERSION)
+    revisions = _revisions(aws, "novaact")
+
+    out, text = _out()
+    results = workers.rederive_variants(prefix=PREFIX, engines=("novaact",), version=VERSION,
+                                        aws=aws, now=NOW, out=out)
+    [result] = results
+    assert result.revision_arn != other and result.revision_arn not in revisions
+    assert _tags(aws, result.revision_arn)[names.TAG_VERSION] == VERSION
+    assert "直接复用" not in text()
+
+
 def test_rederive_does_not_read_the_template_when_nothing_is_stale(aws):
     """模板没变（deploy 重新运行的常态）→ 一次模板 describe 都不打：判定只用映射里记的模板 ARN。"""
     seed_backend(aws)
@@ -942,7 +1014,7 @@ def test_list_workers_is_blocked_by_skew(aws):
 def test_skew_gate_read_failure_exits_2_without_a_traceback(aws):
     """读戳失败（无凭证/无权限）→ 退出码 2 + 一句可读的说明。
 
-    `compose.read_backend_version` 有意把这类异常抛给入口前端决定退出码，**本模块就是那个前端**——实际运行踩过：
+    `compose.read_backend_version` 有意把这类异常抛给入口前端决定退出码，**本模块就是那个前端**——实际运行中遇到过：
     没有凭证时 `gherkai deploy list-workers` 直接吐 botocore 的 `NoCredentialsError` 堆栈。
     """
     class _BrokenSsm:
@@ -1022,19 +1094,84 @@ def test_list_workers_json_shape(aws):
     assert doc["engines"]["midscene"]["variants"] == []
 
 
-def test_list_workers_json_keys_match_contract_doc(aws):
-    """`--json` 字段契约护栏（ADR 0041 决策五，与 cli/tests/test_cli_json_contract.py 读同一份文档）：真输出递归收键，
-    逐个断言 docs/internals/cli-json-contract.md 里以反引号出现。样例含 variant 与退休 revision，键才收得全。"""
-    import json as _json
-    import re
-    from pathlib import Path
+STILL_MAPPED_NOTE = "仍被某个版本的映射引用，解除引用后仍须满足其他清理条件"
 
+
+def test_list_workers_marks_retired_revisions_still_referenced_by_a_mapping(aws):
+    """`pending_cleanup[].still_mapped`（ADR 0038「命令族」节）：已退休、仍被另一版本的映射引用的 revision 为 true，
+    文本行注明不是单一的解锁条件；已退休且不再被引用的与孤儿为 false。各条键集相同。判据与清理 pass 的映射引用
+    前置条件同一份：清理 pass 对 true 的那条以映射引用为由留着它。"""
+    templates = seed_backend(aws)
+    shared = _share_with_old_version(aws, "sha256:" + "4" * 64)
+    _push(aws, FakeContainer(digests=["sha256:" + "9" * 64]))           # 当前版本换 digest 重推 → shared 退休
+    assert _mapping(aws, "novaact", "login", version=OLD_VERSION)["revision_arn"] == shared
+    _push(aws, FakeContainer(digests=["sha256:" + "a" * 64]), variant="base")
+    retired_unmapped = _mapping(aws, "novaact", "base")["revision_arn"]
+    _push(aws, FakeContainer(digests=["sha256:" + "b" * 64]), variant="base")  # 重推 base → 旧 revision 退休、无映射引用
+    repo_uri = f"{REGISTRY}/{names.ecr_repo_name(PREFIX, 'novaact')}"
+    orphan = workers._register_revision(aws.ecs, template_arn=templates["novaact"], engine="novaact",
+                                        image_ref=f"{repo_uri}@sha256:{'c' * 64}", digest="sha256:" + "c" * 64,
+                                        variant="stray", version=VERSION)
+
+    out, text = _out()
+    assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out, as_json=True) == 0
+    items = {i["revision_arn"]: i for i in json.loads(text())["engines"]["novaact"]["pending_cleanup"]}
+    assert set(items) == {shared, retired_unmapped, orphan}, items
+    assert (items[shared]["reason"], items[shared]["still_mapped"]) == ("retired", True)
+    assert (items[retired_unmapped]["reason"], items[retired_unmapped]["still_mapped"]) == ("retired", False)
+    assert (items[orphan]["reason"], items[orphan]["still_mapped"]) == ("orphan", False)
+    assert len({frozenset(i) for i in items.values()}) == 1, "各条目的键集应相同"
+
+    out, text = _out()
+    assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out) == 0
+    lines = {arn: next(line for line in text().splitlines() if f"待清理 {workers._short_arn(arn)} " in line)
+             for arn in items}
+    assert STILL_MAPPED_NOTE in lines[shared]
+    assert STILL_MAPPED_NOTE not in lines[retired_unmapped] and STILL_MAPPED_NOTE not in lines[orphan]
+
+    outcome, _ = _cleanup(aws, NOW + timedelta(hours=2))
+    assert shared not in outcome.deleted
+    assert any(a == shared and "映射引用" in why for a, why in outcome.kept)
+
+
+# 契约页的切节与键名提取规则同 cli/tests/test_cli_json_contract.py 的 `_sections` 与 `_documented_keys`（同源复制，改一处须同步另一处）。
+# 不从那里导入：两个测试目录都不是 Python 包，且那个模块导入 gherkai_cli，而本包是 CLI 的可选依赖，不反过来依赖 CLI。
+CONTRACT_DOC = Path(__file__).resolve().parents[2] / "docs" / "internals" / "cli-json-contract.md"
+
+
+def _sections() -> dict[str, str]:
+    """契约页按 `## ` 标题切节：键是标题里 `gherkai` 之后的命令名（`run`、`list-deterministic`、`deploy list-workers`…，
+    到第一个占位、省略号或选项为止），值是该节全文（含其下的 `###` 子节）。第一个 `## ` 之前的头部与通则不属于任何命令。"""
+    sections: dict[str, str] = {}
+    for chunk in re.split(r"^## ", CONTRACT_DOC.read_text(encoding="utf-8"), flags=re.M)[1:]:
+        heading = chunk.partition("\n")[0]
+        hit = re.match(r"`gherkai ([a-z][a-z-]*(?: [a-z][a-z-]*)*)", heading)
+        assert hit, f"契约页的节标题应形如「`gherkai <命令> … --json`」，现为 {heading!r}：改标题，或改这里的切法"
+        assert hit.group(1) not in sections, f"契约页有两节的命令名都是 {hit.group(1)!r}"
+        sections[hit.group(1)] = chunk
+    return sections
+
+
+def _documented_keys(text: str) -> set[str]:
+    """一段文档里以反引号写出的键名。合法书写形态：`key`、`a` / `b`（一格两个键）、`engines.<engine>.family`（取路径末段）、
+    `jobs[]`（数组键，比对时去掉 `[]`）。"""
+    keys = set()
+    for token in re.findall(r"`([A-Za-z_][A-Za-z0-9_.<>/ \[\]]*?)`", text):
+        for part in re.split(r"\s*/\s*", token):
+            keys.add(part.split(".")[-1].rstrip("[]"))
+    return keys
+
+
+def test_list_workers_json_keys_match_contract_doc(aws):
+    """`--json` 字段契约护栏（ADR 0041 决策五，与 cli/tests/test_cli_json_contract.py 读同一份文档）：从真实输出递归收集全部键名，
+    逐个断言出现在契约页「`gherkai deploy list-workers --json`」一节里（以反引号写出）；别节写过的同名键不计入本节。
+    样例含 variant 与退休 revision，键才收得全。"""
     seed_backend(aws)
     _push(aws, FakeContainer(digests=["sha256:" + "6" * 64]), set_default=True)
     _push(aws, FakeContainer(digests=["sha256:" + "7" * 64]))
     out, text = _out()
     assert workers.list_workers(prefix=PREFIX, cli_version=VERSION, aws=aws, out=out, as_json=True) == 0
-    doc = _json.loads(text())
+    doc = json.loads(text())
 
     def leaf_keys(o, acc=None):
         acc = set() if acc is None else acc
@@ -1047,13 +1184,10 @@ def test_list_workers_json_keys_match_contract_doc(aws):
                 leaf_keys(v, acc)
         return acc
 
-    contract = (Path(__file__).resolve().parents[2] / "docs" / "internals" / "cli-json-contract.md").read_text(encoding="utf-8")
-    documented = set()
-    for token in re.findall(r"`([A-Za-z_][A-Za-z0-9_.<>/ \[\]]*?)`", contract):
-        for part in re.split(r"\s*/\s*", token):
-            documented.add(part.split(".")[-1].rstrip("[]"))
+    documented = _documented_keys(_sections()["deploy list-workers"])
     missing = sorted(k for k in leaf_keys(doc) if k not in documented and k not in {"novaact", "midscene"})  # 引擎名是键、非契约字段
-    assert not missing, f"[deploy list-workers --json] 文档没写：{missing}"
+    assert not missing, (f"[deploy list-workers] 这些键出现在真实输出里、契约页「deploy list-workers」一节没写：{missing}——改 "
+                         "docs/internals/cli-json-contract.md 的对应节")
 
 
 def test_pending_cleanup_is_json_serializable_with_real_registered_at(monkeypatch):
@@ -1072,6 +1206,9 @@ def test_pending_cleanup_is_json_serializable_with_real_registered_at(monkeypatc
     items = workers._pending_cleanup(aws=SimpleNamespace(ecs=None), family="f", mapped=set())  # scan_family 已 fake，ecs 不被真用
     assert [i["reason"] for i in items] == ["retired", "orphan"]
     assert items[0]["registered_at"] == "2026-09-08T06:00:00+00:00"
+    assert [i["still_mapped"] for i in items] == [False, False]
+    mapped_items = workers._pending_cleanup(aws=SimpleNamespace(ecs=None), family="f", mapped={"arn:r/1"})
+    assert [(i["revision_arn"], i["still_mapped"]) for i in mapped_items] == [("arn:r/1", True), ("arn:r/2", False)]
     _json.dumps(items)  # 不抛
 
 

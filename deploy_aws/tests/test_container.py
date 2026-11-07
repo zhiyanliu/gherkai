@@ -95,7 +95,7 @@ def test_unsupported_engine_is_rejected_not_silently_downgraded():
 
 def test_digest_picked_by_repo_not_first_entry():
     """基础镜像同步先 pull 过 GHCR → `RepoDigests` 多条；**取第一条就会把 GHCR 的 digest 写进 task-def**
-    （ECR 里不存在它，RunTask 拉镜像才炸，ADR 0038 步 4）。"""
+    （ECR 里不存在它，RunTask 拉镜像时才失败，ADR 0038 步 4）。"""
     entries = [f"ghcr.io/zhiyanliu/gherkai-worker-novaact@sha256:{'a' * 64}",
                f"{ECR_REPO}@sha256:{'b' * 64}"]
     assert digest_for_repo(entries, ECR_REPO) == f"sha256:{'b' * 64}"

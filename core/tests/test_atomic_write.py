@@ -97,7 +97,7 @@ def test_target_name_at_name_max_still_writable(tmp_path):
 
 
 def test_failed_replace_leaves_no_tmp_behind(tmp_path):
-    """写失败（这里让目标是个目录，os.replace 必炸）时 tmp 要清掉、异常照常冒泡——不留残骸给 glob 到。"""
+    """写失败（这里让目标是个目录，os.replace 必然失败）时 tmp 要清掉、异常照常冒泡——不留残骸给 glob 到。"""
     target = tmp_path / "occupied"
     target.mkdir()
     with pytest.raises(OSError):

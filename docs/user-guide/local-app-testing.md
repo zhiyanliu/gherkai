@@ -81,7 +81,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 只有 `submit --backend cloud` 配 `--expose-local` 时用得上，作用是防止 run 卡住时隧道长期留在公网。
 
-- 默认值按这个 run 的任务量算：各 job 的墙钟预算之和，再加 900 秒固定余量（job 预算之外的云端耗时：提交后到云端开始调度之间的投递与启动、job 之间的衔接与最后的收尾；起任务与拉镜像的时间已计入各 job 的预算）。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
+- 默认值是按这个 run 的任务量估算的上限：各 job 的墙钟预算之和，加上一次性的 900 秒，再加上每个 job 210 秒。两份余量覆盖 job 预算之外的云端耗时（起任务与拉镜像的时间已计入各 job 的预算）：900 秒覆盖提交后到云端开始调度之间的投递与启动，以及最后的收尾；每个 job 的 210 秒覆盖 job 用尽预算后被停止的过程，即云端的超时触发最多晚约 60 秒，停止后的收尾宽限最多 120 秒，与下一个 job 之间的衔接约 30 秒。最后这段衔接时间是实测的经验值，云端平台变慢或批量极大时可能更长，所以默认值是估算、不是保证。job 预算来自 `@timeout` 标签或 `--default-job-timeout`（桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒）；把 `--default-job-timeout` 设成 0 或负数（桌面 scope 因此不超时）时，算这个上限仍要给这些不超时的桌面 job 各记一个预算，按 3600 秒计；设备 scope 按它自己的预算计入。
 - `submit` 会把生效的秒数打印出来，不用自己算。
 - 到点**无条件**拆隧道。调小有风险：短于 run 实际耗时时，剩下的 scenario 在被测应用不可达的情况下继续运行，以导航失败告终。
 - 值须为有限正数，否则退出码 2。

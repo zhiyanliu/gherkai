@@ -357,7 +357,7 @@ def main() -> None:
         with sem:
             try:
                 run_one(ev, arm, k, it_dir, cli_dir, a.model, a.timeout, old_skill_src)
-            except Exception as e:  # 一个格子炸了不能带走整轮
+            except Exception as e:  # 一个格子出错不能中断整轮
                 print(f"[fail] eval {ev['id']} {arm} run-{k}: {e!r}", flush=True)
 
     for ev, arm, k in jobs:

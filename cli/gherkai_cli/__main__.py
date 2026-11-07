@@ -19,7 +19,15 @@ from pathlib import Path
 
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import render_table, styled
-from gherkai_core.model import TERMINAL_STATUSES, Event, RunMeta, Status
+from gherkai_core.model import (
+    DEFAULT_DESKTOP_JOB_TIMEOUT_S,
+    DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    TERMINAL_STATUSES,
+    Event,
+    RunMeta,
+    Status,
+)
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
@@ -37,6 +45,7 @@ from gherkai_cli import render
 from gherkai_cli import skill_install as _skill_install
 from gherkai_cli.console import progress as _progress
 from gherkai_cli.settings import (
+    BUILTIN_DEFAULTS,
     DEFAULT_MAX_CONCURRENCY,
     apply_project_config as _apply_project_config,
     config_layers as _config_layers,
@@ -125,6 +134,16 @@ _STEPS_DIR_HELP_RUN_SUBMIT = (
     _STEPS_DIR_HELP
     + "。值随提交记录走，本机后台推进/接力进程都读回同一份；"
       "[--backend cloud] 不生效（云端 worker 的 steps 构建在定制镜像里，警告不拦）"
+)
+
+# `--default-job-timeout` 的公共 help：run / plan / submit 三处共用这一段措辞，单点维护；plan 在其后追加它自己的半句。
+# 三个数引用 core 的常量，与 _load_and_plan 传给 plan 层的缺省与下限同源（数值与覆盖顺序见 ADR 0034「job timeout」节、0051 决策 2）。
+_DEFAULT_JOB_TIMEOUT_HELP = (
+    "未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省："
+    f"桌面 {DEFAULT_DESKTOP_JOB_TIMEOUT_S:g} 秒，设备为获取预算加 {DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S:g} 秒；"
+    "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；"
+    f"给正值时设备 scope 不得低于获取预算加 {MIN_DEVICE_JOB_TIMEOUT_EXTRA_S:g} 秒）；"
+    "标了 @timeout:N 的按 tag 走"
 )
 
 
@@ -244,7 +263,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     _add_config_flag(run)
     run.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default=None,
-        help="未标 @engine 的 scope 用的默认引擎（默认 novaact）；标了 @engine: 的 scope 按 tag 走、不受此影响",
+        help=f"未标 @engine 的 scope 用的默认引擎（默认 {BUILTIN_DEFAULTS['default_engine']}）；标了 @engine: 的 scope 按 tag 走、不受此影响",
     )
     run.add_argument(
         "--assertion-votes", type=int, default=None, metavar="N",
@@ -257,15 +276,14 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
-             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
-             "标了 @timeout:N 的按 tag 走",
+        help=_DEFAULT_JOB_TIMEOUT_HELP,
     )
-    # 下限判据（为何必须 ≥ 单个 act 时长 + 收尾预算、以及为何改由 worker 自报）见 ADR 0024；help 只讲怎么用。
+    # 下限判据（为何不得小于引擎最坏情形下的收尾时长、以及为何改由 worker 自报）见 ADR 0024 与 ADR 0049 决策 5；help 只讲怎么用。
     run.add_argument(
         "--grace", type=float, default=None,
-        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 用到的引擎自己报的最短宽限推导，通常是分钟量级）；"
-             "小于单个 AI 操作的时长会让浏览器会话泄漏，给过小值直接以退出码 2 结束。"
+        help="停止后等 worker 优雅退出的宽限秒（默认按本 run 用到的引擎自己报的最短收尾宽限推导，通常是分钟量级）；"
+             "更短的宽限可能让 worker 在释放会话（浏览器会话或远程访问会话）或保存产物之前被强制终止，"
+             "给出小于该宽限的值直接以退出码 2 结束。"
              "只有本机运行才用它：--backend cloud 的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定，"
              "在云端执行时给了本 flag 直接以退出码 2 结束",
     )
@@ -361,13 +379,11 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     _add_config_flag(pl)
     pl.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
-             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
-             "标了 @timeout:N 的按 tag 走——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
+        help=_DEFAULT_JOB_TIMEOUT_HELP + "——与 run/submit 同源，让 plan 算出的 Job 与实际运行一致",
     )
     pl.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default=None,
-        help="未标 @engine 的 scope 用的默认引擎（默认 novaact）——影响分组结果，故用例预检也可设",
+        help=f"未标 @engine 的 scope 用的默认引擎（默认 {BUILTIN_DEFAULTS['default_engine']}）——影响分组结果，故用例预检也可设",
     )
     pl.add_argument(
         "--assertion-votes", type=int, default=None, metavar="N",
@@ -399,9 +415,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                          "（后端 stack 的 MAX_CONCURRENCY）钳制")
     sm.add_argument(
         "--default-job-timeout", type=_finite_float, default=None, metavar="S",
-        help="未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省：桌面 300 秒，设备为获取预算加 900 秒；"
-             "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；给正值时设备 scope 不得低于获取预算加 180 秒）；"
-             "标了 @timeout:N 的按 tag 走",
+        help=_DEFAULT_JOB_TIMEOUT_HELP,
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
@@ -414,8 +428,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument(
         "--tunnel-ttl", type=float, default=None, metavar="S",
-        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认为这个 run 各 job 预算之和 + 启动余量）；"
-             "给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
+        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认为按这个 run 的任务量估算的上限：各 job 预算之和，"
+             "加一次性的启动余量与每个 job 的余量）；给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default=None, metavar="DIR",
                     help="归集报告落点（默认 reports/）；云端后端须与后端部署的 REPORT_DIR 一致"
@@ -429,7 +443,8 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
     sm.add_argument("--backend", choices=["local", "cloud"], default=None,
                     help="local 由本机后台进程推进（默认）；cloud 由已部署的云端后端推进，提交后即使本机关机也会执行到结束")
-    sm.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（默认 gherkai-；须与 CDK 一致）")
+    sm.add_argument("--prefix", default=None, metavar="P",
+                    help=f"[cloud] 资源名前缀（默认 {_names.DEFAULT_PREFIX!r}；须与 `gherkai deploy --prefix` 一致）")
     sm.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     # --s3-bucket 对 submit 有真实作用（run_store 挂的超大 step 参数卸载器写这个桶），故保留。
     sm.add_argument("--s3-bucket", default=None, metavar="NAME", help="[cloud] S3 桶名")
@@ -532,8 +547,9 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
 
     # list-deterministic：按引擎查询确定性 step 能力清单（ADR 0036：worker 自述，feature 作者可发现）
     ld = sub.add_parser("list-deterministic", help="列出指定引擎支持的确定性 step（供 feature 作者复用；零费用）")
-    ld.add_argument("--engine", choices=sorted(_names.ENGINES), default="novaact",
-                    help="查哪个引擎的注册表（默认 novaact，对齐 run 的 --default-engine 缺省）")
+    # 缺省取 --default-engine 的内建缺省、不跟随配置文件（ADR 0036 决策 3）
+    ld.add_argument("--engine", choices=sorted(_names.ENGINES), default=BUILTIN_DEFAULTS["default_engine"],
+                    help=f"查哪个引擎的注册表（默认 {BUILTIN_DEFAULTS['default_engine']}，对齐 run 的 --default-engine 缺省）")
     ld.add_argument("--json", action="store_true", help="输出机器可读 JSON")
     _add_config_flag(ld)
     ld.add_argument(
@@ -584,9 +600,8 @@ def _tunnel_providers() -> list[str]:
 
 def _steps_dir_or_error(args) -> "tuple[str | None, str | None]":
     """`_resolve_steps_dir` 的**不打印**内核：返回 (绝对路径 | None, 错误串 | None)。doctor 把错误串放进机读 detail；
-    其余调用点经 `_resolve_steps_dir` 打印并以退出码 2 结束。判据见 `_resolve_steps_dir` docstring。"""
-    # 取值顺序（ADR 0037 决策 4、ADR 0053 决策 2）：--steps-dir > env GHERKAI_STEPS_DIR > 配置文件 steps-dir（已按配置文件目录
-    # 绝对化）> ./steps（存在才用）。显式给出的三层不是目录都以退出码 2 结束。
+    其余调用点经 `_resolve_steps_dir` 打印并以退出码 2 结束。取值顺序与判据见 `_resolve_steps_dir` docstring。"""
+    # 配置文件层的值在读配置时已按配置文件所在目录绝对化（ADR 0053 决策 2），下面的 resolve 对它不改变结果。
     cfg_path = getattr(getattr(args, "project_config", None), "path", None)
     for value, origin in ((getattr(args, "steps_dir", None), "--steps-dir"),
                           (os.environ.get("GHERKAI_STEPS_DIR"), "env GHERKAI_STEPS_DIR"),
@@ -646,14 +661,14 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None, *, require_session_w
     - 定位链四级全 miss → 打安装指引 + **以退出码 2 结束**：「运行时没装」是环境/配置问题，属「没开始执行就被拒」层，
       不该变成一批 job 级 `engine_error`（更不该运行到一半才发现）。
     - **每个引擎恒问一次能力自述**（`--capabilities`，ADR 0036「5.」）：worker 非零退出 → 转述其诊断 + **以退出码 2 结束**；
-      自述到手后再做两项目标检查（ADR 0048 决策 3、4）：job 的测试目标不在该引擎声明的 targets 里、或墙钟预算超过该目标的会话上限 → 退出码 2。
+      自述到手后再做两项目标检查（ADR 0048 决策 3、4）：job 的测试目标不在该引擎声明的 targets 里、或 job 墙钟预算超过该目标的会话上限 → 退出码 2。
       否则 `submit` 会「提交成功」后逐 job error、诊断只落 reconcile.log——那是静默降级（ADR 0037 决策 4
       「提交侧同样前置」）。**不再按「有没有 steps 目录」分支**：这一份自述同时给出「steps 加载成功 + 清单 +
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
       进程内缓存——本机 run 每引擎只 spawn 一次自述。
     - `require_session_warmup`（本机后端给了 `--expose-local`，ADR 0051 决策 13「能力与拒绝点」）：worker 自述不声明会话预热支持
       （键缺失或为 false）即以退出码 2 拒绝——在起隧道之前，故不需要拆隧道。
-    **只查本次用到的引擎**——另一个引擎没装不连坐（dev 下 midscene 常态未装）。返回 2 或 None。
+    **只查本次用到的引擎**——另一个引擎没装不影响本次检查（dev 下 midscene 常态未装）。返回 2 或 None。
     云端后端不调用本函数：那个后端的 worker 在 Fargate 容器里运行，本机定位链无关。
     """
     for engine in sorted({j.engine for j in jobs}):
@@ -672,7 +687,7 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None, *, require_session_w
         if require_session_warmup and caps.get(compose.SESSION_WARMUP_KEY) is not True:
             _progress(f"引擎 {engine} 的 worker 不支持本机应用测试需要的会话预热（--expose-local）：请把 worker 与命令行工具装成同一个版本后重试。")
             return 2
-        # 执行前预检的两项目标检查（ADR 0048 决策 3、4）：目标不在该引擎声明的 targets 里、墙钟预算超过会话上限——都在建立任何会话之前拒绝，
+        # 执行前预检的两项目标检查（ADR 0048 决策 3、4）：目标不在该引擎声明的 targets 里、job 墙钟预算超过会话上限——都在建立任何会话之前拒绝，
         # 不产生费用；归类为用例契约违约（改法在用例或命令行上），以退出码 2 结束。
         rejections = _target_rejections([j for j in jobs if j.engine == engine], caps)
         if rejections:
@@ -823,7 +838,7 @@ def _cmd_doctor(args) -> int:
     else:
         add("steps", "dir", True, steps_dir, required=False)
     # 加载结果：有 steps 目录时验使用方 step 能否加载（必修——加载失败会静默降级成 AI，ADR 0037 决策 4 fail-loud）；
-    # 没有时只验「worker 起得来、能自述」（可选：单引擎不连坐，与 engines.<engine> 同为可选）
+    # 没有时只验「worker 起得来、能自述」（可选：某个引擎起不来不影响其余检查项，与 engines.<engine> 同为可选）
     for engine, caps, err in described:
         if caps is not None:
             add("steps", f"load.{engine}", True,
@@ -841,7 +856,7 @@ def _cmd_doctor(args) -> int:
     else:
         cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）：{e}"
         try:
-            # region 落实要读 profile config：profile 名不存在在这里就炸，与探针失败共用一句诊断（对 agent 是同一件事）
+            # region 落实要读 profile config：profile 名不存在时在这里就抛异常，与探针失败共用一句诊断（对 agent 是同一件事）
             target = compose.resolve_cloud_target(prefix=args.prefix, region=args.region, profile=args.profile,
                                                   **_config_layers(args))
         except Exception as e:
@@ -1019,7 +1034,7 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
     这一行装运行时，同 engines.any 在云端后端降为可选的判据）。
     文案不能只给「抬高」一条路：`stopTimeout` 的部署缺省就是 Fargate 平台硬顶（deploy_aws 的 DEFAULT_STOP_TIMEOUT_S
     取的就是 FARGATE_STOP_TIMEOUT_MAX_S），Nova 自报下限恒大于它 → 部署正常的后端上这一行对 Nova **恒为 `-`**；cli 不依赖
-    deploy_aws、不知平台上限具体几秒，故文案分「未顶满可抬 / 顶满即接受」两支，别让部署方追一个 ADR 0032 已记录接受的残余。
+    deploy_aws，这一行也不按平台上限挑出其中一支，故文案分「未顶满可抬 / 顶满即接受」两支，别让部署方追一个 ADR 0032 已记录接受的残余。
     比对左侧用的是**本机** worker 自报的值：Nova 的 margin 可经宿主 env 覆盖、但 Fargate 容器 env 是显式枚举、
     容器内恒按缺省算——宿主覆盖过 margin 时这行偏保守（不会漏报）。
     """
@@ -1053,10 +1068,17 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
             details.append(f"{eng}: 收尾需 {need:g}s ≤ 云端停止宽限 {stop_timeout}s")
         else:
             ok_all = False
+            # 后果按引擎的下限构成分写：Nova 的下限是单个 AI 操作的时长上界加收尾余量，只有停止落在一次长操作的早期才会截断；
+            # 其余引擎（Midscene）的下限是收尾各段超时预算加余量之和、与 AI 操作时长无关，收尾实际耗时超过停止宽限即被截断，
+            # 不限于某个停止时机；下限是最坏情形，低于它不等于每次停止都被截断，故只写「收尾较慢时可能」（ADR 0049 决策 5）。
+            if eng == "novaact":
+                consequence = ("极端情形（停止信号正好落在一次耗满时长上限的 AI 操作刚开始时）收尾会被强制终止："
+                               "浏览器会话改由云端会话超时回收、该 scope 最后一两张截图可能没有保存至 S3")
+            else:
+                consequence = "收尾较慢时，worker 可能在释放会话或保存产物之前被强制终止"
             details.append(
-                f"{eng}: 收尾需 {need:g}s > 云端停止宽限 {stop_timeout}s——极端情形（停止信号正好落在一次"
-                f"耗满时长上限的 AI 操作刚开始时）收尾会被强制终止：浏览器会话改由云端会话超时回收、该 scope 最后"
-                f"一两张截图可能没有保存至 S3。云端宽限尚未达到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 提高超时配置；"
+                f"{eng}: 收尾需 {need:g}s > 云端停止宽限 {stop_timeout}s——{consequence}。"
+                f"云端宽限尚未达到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 提高超时配置；"
                 f"已达平台上限时则无法再提高——这条差距来自平台限制，属已知并接受的代价，不必处理"
             )
     if skipped:
@@ -1179,9 +1201,9 @@ def _load_and_plan(args) -> "list | int":
             # --default-job-timeout（None 即「未指定」，plan 层按目标补缺省；<=0 只让非设备 scope 不超时，三态原样传入、不在这里归一）。
             # 载体在 definition（Job.timeout_s），三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
             default_job_timeout_s=args.default_job_timeout,
-            default_desktop_job_timeout_s=300.0,
-            default_device_job_timeout_s=acquire_s + 900.0,
-            min_device_job_timeout_s=acquire_s + 180.0,
+            default_desktop_job_timeout_s=DEFAULT_DESKTOP_JOB_TIMEOUT_S,
+            default_device_job_timeout_s=acquire_s + DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+            min_device_job_timeout_s=acquire_s + MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
             apps=project.app_ids(),  # 应用别名表（ADR 0053 [apps]）：别名 → 平台 → 包名或 bundle id，纯数据
         )
         select = _build_selector(args)
@@ -1206,7 +1228,7 @@ def _load_and_plan(args) -> "list | int":
                 return 2
             if picked < len(everything):
                 _progress(f"筛选：{picked}/{len(everything)} scenario（{_selection_label(args)}）")
-        # 引擎名校验（配置错在 plan 层即拦、以退出码 2 结束——否则 local run 要到起 job 时 resolver 才炸，那时已开始执行、只能给退出码 1
+        # 引擎名校验（配置错在 plan 层即拦、以退出码 2 结束——否则 local run 要到起 job 时 resolver 才报错，那时已开始执行、只能给退出码 1
         # 且错误形态差）。--default-engine 已被 argparse choices 拦，此处兜的是 @engine tag 拼错。
         unknown = sorted({j.engine for j in jobs} - set(_names.ENGINES))
         if unknown:
@@ -1634,7 +1656,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, identity: "tuple[str 
     # setsid fork per-run 进程（start_new_session=True 即脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
     cmd = [sys.executable, "-m", "gherkai_cli", "_reconcile", run_id,
            "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency)]
-    # region / profile 传**解析后的值**（选项 > 环境变量 > 配置文件）：per-run 进程不读配置文件（ADR 0053 决策 1），
+    # region / profile 传**解析后的值**（`compose.resolve_aws_identity` 的结果，含配置文件层）：per-run 进程不读配置文件（ADR 0053 决策 1），
     # 只传原始选项会让配置文件给的 region 到不了它；环境变量两边都看得见、传了也无害。
     region, profile = identity
     if region:
@@ -1773,7 +1795,7 @@ def _cloud_worker_variant_gate(args, target, engines, *, backend_version) -> "in
     每个引擎的 task-def revision（ADR 0038「运行时与 preflight」）。放行 → `{engine: WorkerResolution}`；拦下 → 2。
 
     **次序是版本 skew → 资源 preflight → 本闸**（ADR 0038 明写）：skew 的修复动作（`gherkai deploy`）本身就是
-    镜像重推的前置，反过来先报「variant 没推」会让部署方白推一轮（推完还得因 skew 重来）。
+    镜像重推的前置，反过来先报「variant 没推」会让部署方先推一轮镜像、推完仍要因版本不一致重做。
     **engines 只含本 run 真用到的引擎**——对齐既有 task-def 判据「不探全注册表，没用到的引擎不该拦」：单引擎
     团队不必为另一个引擎凭空推镜像。
     **严格以退出码 2 结束、不回落默认**：静默换一套确定性 step 集与「不判 steps 内容」的分工矛盾（ADR 0038 被拒方案）；
@@ -1927,8 +1949,10 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
                       stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
         if on_handoff is not None:
             on_handoff()  # 紧跟 fork：守护已接管隧道，往下几行抛也不能再拆
-        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s"
-                  f"（即各 job 预算之和 + 启动余量；`--tunnel-ttl` 可覆盖）。"
+        ttl_origin = ("给定的 `--tunnel-ttl` 值" if args.tunnel_ttl is not None else
+                      f"按任务量估算的上限：各 job 预算之和，加一次性 {tunnel_host.CLOUD_STARTUP_MARGIN_S:.0f} 秒"
+                      f"与每个 job {tunnel_host.CLOUD_PER_JOB_MARGIN_S:.0f} 秒；`--tunnel-ttl` 可覆盖")
+        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s（{ttl_origin}）。"
                   f"注意：本机需保持开机联网直到 run 终态——关机会断隧道，测试将以导航失败告终。")
         _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
     else:
@@ -1978,7 +2002,7 @@ def _cmd_status(args) -> int:
     """[无状态批量运行] 查 run 进度/结果。
 
     - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须运行到底）。
-    - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（踢一脚即可、云端链自接管）。
+    - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（kickoff 一次即可，之后由云端链自行接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
     --wait 的等待或接力被 Ctrl-C 打断：按进入的分支打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端
@@ -2075,7 +2099,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
 
     **接力 invoke kicker（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
     status 机器只需 `lambda:InvokeFunction`。kicker 名 `{prefix}kicker` 从 --prefix 确定性推理（compose 单一命名
-    真源、cli↔IaC 同源）——提交者无感。检测卡住（状态连续 K 轮无变化才 kickoff、非每轮无脑踢）：正常推进时不 kickoff、
+    真源、cli↔IaC 同源）——提交者无感。检测卡住（状态连续 K 轮无变化才 kickoff，不是每轮都 invoke）：正常推进时不 kickoff、
     避免无效 invoke；卡住（冷启动丢投卡 pending / 中途丢投卡 running）时 kickoff 救回。kickoff 幂等（CAS/HWM 兜底）。
     """
     import time as _time
@@ -2095,35 +2119,6 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
     run_store = DynamoDBRunStore(compose._make_ddb_table(
         target.runs_table, region=target.region, profile=target.profile))
 
-    # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
-    try:
-        bad = _definition_header_gate(run_store, args.run_id)
-    except Exception as e:
-        if compose.is_botocore_error(e):
-            _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
-            return 2
-        raise
-    if bad is not None:
-        return bad
-
-    def _read():
-        try:
-            return run_store.load_run_state(args.run_id)
-        except Exception as e:
-            if compose.is_botocore_error(e):
-                _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
-                return 2  # 哨兵：调用方转退出码
-            raise
-
-    def _is_detached():
-        try:
-            return run_store.is_detached(args.run_id)
-        except Exception as e:
-            if compose.is_botocore_error(e):
-                _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
-                return 2  # 哨兵：调用方转退出码
-            raise
-
     def _relay_available():  # 只给 pending 提示用：读不到标记就当不可接力、不提示，不另打「云端不可达」
         try:
             return run_store.is_detached(args.run_id)
@@ -2132,55 +2127,63 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
                 return False
             raise
 
-    state = _read()
-    if state == 2:
-        return 2
-    if args.wait and state is not None and state.status not in TERMINAL_STATUSES:
-        # 只对 detached run 接力（ADR 0034 两道闸的本机侧同构）：同步 `run --backend cloud` 由进程内 schedule 推进，kicker 对它本就
-        # 整体 no-op，踢只是空转；--wait 对它退化为只等待
-        relay = _is_detached()
-        if relay == 2:
-            return 2
-        if not relay:
-            _progress(_WAIT_WITHOUT_RELAY_NOTICE)
-        if interrupted is not None:
-            interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE  # 云端两种 run 都在原处继续：detached 由云端链、同步 run 由它的前台进程
-    else:
+    # 渲染前的云端读（definition 头、运行态、接力标记、--wait 的每轮重读）遇到 AWS 错误，都在这一处报「云端不可达」并以
+    # 退出码 2 结束，非 AWS 错误原样抛出。范围包住整个轮询：轮询中途读失败同样以退出码 2 结束、不打印回溯。不经这里的两处：
+    # 接力 invoke 的 AWS 错误在调用处就地处理（kicker 不存在以退出码 2 结束，其余不致命、吞掉）；_relay_available 只服务
+    # 渲染阶段的 pending 提示，读不到标记时安静返回 False。
+    try:
+        # definition 的结构版本先于任何运行态读（ADR 0037 决策 7）：只取 META 顶层两个属性，不读 meta_json、不碰 S3 卸载正文
+        bad = _definition_header_gate(run_store, args.run_id)
+        if bad is not None:
+            return bad
+
+        state = run_store.load_run_state(args.run_id)
         relay = False
-    if args.wait:
-        # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke kicker 做 kickoff**（非每轮无脑踢——正常推进时
-        # 云端链自行运行、kickoff 也 no-op 白耗，对齐零空转，ADR 0034 三触发源 cloud 侧）。「卡住」指状态连续 _STALL_KICK
-        # 轮无变化（记 (status, hwm) 快照比对）。检测纯本地内存比较、零额外 AWS 调用/权限。
-        _STALL_KICK = 3  # 连续 3 轮（约 9s）状态不变判卡住、踢一次（覆盖冷启动丢投卡 pending / 中途丢投卡 running）
-        lam = None
-        last_snap = (state.status, state.high_water_mark) if state is not None else None
-        stall = 0
-        while state is not None and state.status not in TERMINAL_STATUSES:
-            snap = (state.status, state.high_water_mark)
-            stall = stall + 1 if snap == last_snap else 0  # 有变化即重置（推进中不踢）
-            last_snap = snap
-            if relay and stall >= _STALL_KICK:
-                if lam is None:
-                    lam = compose._make_lambda_client(region=target.region, profile=target.profile)
-                try:
-                    # payload {"run_id": ...}：kicker _run_ids_from_runs_stream 认此「直接 kickoff」格式（区别于
-                    # Stream records），对该 run tick 起首批。异步 invoke（Event、不等返回）。
-                    lam.invoke(FunctionName=kicker_fn, InvocationType="Event",
-                               Payload=json.dumps({"run_id": args.run_id}).encode())
-                except Exception as e:
-                    if not compose.is_botocore_error(e):
-                        raise  # 非 AWS 错才抛
-                    # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
-                    # 其他 AWS 错（限流/瞬时/无权限）仍吞——不致命，下轮再踢/靠云端链。
-                    if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
-                        _progress(f"status --wait 接力失败：接力 Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
-                                  f"不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？")
-                        return 2
-                stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
-            _time.sleep(3.0)
-            state = _read()
-            if state == 2:
-                return 2
+        if args.wait and state is not None and state.status not in TERMINAL_STATUSES:
+            # 只对 detached run 接力（ADR 0034 两道闸的本机侧同构）：同步 `run --backend cloud` 由进程内 schedule 推进，kicker
+            # 对它本就整体 no-op，invoke 只是空转；--wait 对它退化为只等待
+            relay = run_store.is_detached(args.run_id)
+            if not relay:
+                _progress(_WAIT_WITHOUT_RELAY_NOTICE)
+            if interrupted is not None:
+                interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE  # 云端两种 run 都在原处继续：detached 由云端链、同步 run 由它的前台进程
+        if args.wait:
+            # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke kicker 做 kickoff**（不是每轮都 invoke：正常推进时云端链
+            # 自行运行，kickoff 只会 no-op、多出一次无效调用，与 ADR 0034 三触发源 cloud 侧的零空转一致）。「卡住」指状态连续
+            # _STALL_KICK 轮无变化（记 (status, hwm) 快照比对）。检测纯本地内存比较、零额外 AWS 调用/权限。
+            _STALL_KICK = 3  # 连续 3 轮（约 9s）状态不变即判为卡住、invoke 一次（覆盖冷启动丢投卡 pending / 中途丢投卡 running）
+            lam = None
+            last_snap = (state.status, state.high_water_mark) if state is not None else None
+            stall = 0
+            while state is not None and state.status not in TERMINAL_STATUSES:
+                snap = (state.status, state.high_water_mark)
+                stall = stall + 1 if snap == last_snap else 0  # 有变化即重置（推进中不 invoke）
+                last_snap = snap
+                if relay and stall >= _STALL_KICK:
+                    if lam is None:
+                        lam = compose._make_lambda_client(region=target.region, profile=target.profile)
+                    try:
+                        # payload {"run_id": ...}：kicker _run_ids_from_runs_stream 认此「直接 kickoff」格式（区别于
+                        # Stream records），对该 run tick 起首批。异步 invoke（Event、不等返回）。
+                        lam.invoke(FunctionName=kicker_fn, InvocationType="Event",
+                                   Payload=json.dumps({"run_id": args.run_id}).encode())
+                    except Exception as e:
+                        if not compose.is_botocore_error(e):
+                            raise  # 非 AWS 错才抛
+                        # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
+                        # 其他 AWS 错误（限流/瞬时/无权限）仍吞掉：不致命，下一个卡住窗口再 invoke，或由云端链自行推进。
+                        if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
+                            _progress(f"status --wait 接力失败：接力 Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
+                                      f"不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？")
+                            return 2
+                    stall = 0  # kickoff 后重置，给云端链时间响应（下一个 _STALL_KICK 窗口再判是否仍卡）
+                _time.sleep(3.0)
+                state = run_store.load_run_state(args.run_id)
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        _progress(f"status --backend cloud 云端不可达（表/凭证/region）：{e}")
+        return 2
 
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）")
@@ -2609,17 +2612,21 @@ def _cmd_run(args) -> int:
         # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效就是挂死），与 --tunnel-ttl / @timeout 的判据相同。
         _progress(
             f"--grace={args.grace} 无效：须为有限正数且 ≥ {min_grace}s"
-            "（这是本 run 用到的引擎自己报的最短收尾宽限；更小的值会让停止变成强杀、浏览器会话泄漏）"
+            "（这是本 run 用到的引擎自己报的最短收尾宽限；更短时 worker 可能在释放会话或保存产物之前被强制终止）"
         )
         return 2
     # --grace 哨兵默认（None）→ 跟随本 run 引擎自报的下限（Nova 自然 ≥ 单 act 上界 + 收尾；midscene-only 回到小值；
     #    云端后端 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
+    #    回落的 grace 只用于 handle.stop：云端停止后的等待预算不取它，由 3a 按已解析 revision 的 stopTimeout 算出 stop_bound。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
+    # 停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：本机后端不传（None 表示 schedule 取 grace，本机句柄
+    # 等满 grace 即强杀、进程退出就是事件流结束）；云端后端在 3a 解析完 worker variant 后按部署侧的容器停止宽限加经验余量算好再传。
+    stop_bound: float | None = None
     # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
     # **本机后端也解析**：region/profile 两路都要（本机发起的 AWS 调用与 subprocess worker 都用），云资源名多算几个纯字符串、不用即弃。
     # 排在本机后端填 definition 与起隧道之前：profile 名不存在时由 _cloud_target 在这里以退出码 2 结束，不上传、不起隧道。
     # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
-    # - profile：--profile > AWS_PROFILE > 配置文件 [common] profile（ADR 0053 决策 2）。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
+    # - profile：解析链见 compose.resolve_aws_identity。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
     #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
     # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
     #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
@@ -2709,6 +2716,9 @@ def _cmd_run(args) -> int:
             return resolutions
         worker_meta = _worker_meta_fields(resolutions)
         run_meta = replace(run_meta, **worker_meta)  # 落进 definition（下面 persistence.begin 写它）
+        # 停止后等待预算：各引擎 worker container 的 stopTimeout 取最大（没设的按 Fargate 平台上限）加 ECS 记下 STOPPED 的滞后余量。
+        # stopTimeout 来自上面那道闸校验 revision 时的同一次 DescribeTaskDefinition，这里不再发 AWS 调用。
+        stop_bound = compose.cloud_stop_bound_s(resolutions.values())
         # 填完 definition（设备请求读 SSM、安装包进产物桶、写前校验，ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、begin 之前
         filled = _complete_cloud_definition(args, target, prepped, run_meta.jobs)
         if isinstance(filled, int):
@@ -2768,7 +2778,7 @@ def _cmd_run(args) -> int:
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
     # **决策 A 落到 CLI（ADR 0016/0033）**：cloud 走 FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
-    # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交，report⊥执行）——故
+    # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
     # `--no-report` 的零落盘运行路径只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
     if cloud_fargate is not None:
@@ -2870,6 +2880,7 @@ def _cmd_run(args) -> int:
                 fail_fast=args.fail_fast,
                 grace_period_s=grace,
                 min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
+                stop_bound_s=stop_bound,  # 停止后等待预算，排空上界取它加余量；None（本机后端）表示取 grace（ADR 0034 机制二）
                 interrupt=interrupt.level,
                 on_interrupt=_on_interrupt,
             ),

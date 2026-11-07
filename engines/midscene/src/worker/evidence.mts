@@ -32,7 +32,7 @@
 import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { oneLineError } from "./error-text.mjs";  // act.error 与 step_done.message 同一条压行规则
+import { oneLineError } from "../lib/error-text.mjs";  // act.error 与 step_done.message 同一条压行规则
 import { redactSecrets } from "../lib/redact.mjs";  // 隧道凭据、签名与端点令牌不进 evidence（ADR 0035 决策 5；ADR 0051 决策 11）
 import type { ControlItem, Controls, ControlsMissing, Snapshot, StepKind, UrlMissing } from "./surface.mjs";
 
@@ -216,10 +216,13 @@ function actionsOf(task: TaskLike): Array<{ name: string; args: unknown }> {
 
 /** 非空错误文本判据（按值，不按 SDK 标志）——同时是 act.error 与「出错帧」的**同一个**判据。
  *  取到的文本过 `oneLineError`：SDK 的 `errorMessage` 与抛出异常的 message 同源（多行 call log），两条来源
- *  须格式相同，否则同一个 `act.error` 字段会因文本从哪儿来而一行 / 上千字符不定（ADR 0042 决策一映射表）。 */
+ *  须格式相同，否则同一个 `act.error` 字段会因文本从哪儿来而一行 / 上千字符不定（ADR 0042 决策一映射表）。
+ *  「非空」指压成一行后不是空串：只含空白字符集 W 的文本（如单个 U+0085）判空，与 Nova 对 `.message` 的判据相同。 */
 function errorTextOf(task: TaskLike): string | null {
   const m = task.errorMessage;
-  return typeof m === "string" && m.trim() !== "" ? oneLineError(m) : null;
+  if (typeof m !== "string") return null;
+  const text = oneLineError(m);
+  return text === "" ? null : text;
 }
 
 /** 本 act 挑哪些 frame 配截图（ADR 0042 决策一截图策略）：

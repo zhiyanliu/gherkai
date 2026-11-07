@@ -19,7 +19,7 @@ min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 en
 **worker 镜像用哪个 task-def revision 不经 env**（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）：
 只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 把 run 标 error、不推进
 （ADR 0037 决策 7 不留兼容分支）。**推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未推过该 tag，拉镜像会拖到
-Fargate 启动期才炸（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
+Fargate 启动期才失败（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
 """
 from __future__ import annotations
 
@@ -67,10 +67,11 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
     STOPPED 事件的 `detail` 与 `DescribeTasks` 的 `tasks[i]` 是同一个 Task 形状，故同一 task 两边算出同一内容、
     PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
     exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
-    + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。timed_out：stoppedReason 含本模块
-    StopTask 时写入的哨兵串（「job timeout」节归因链）。
+    + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。哨兵与归因串的拼法都住 core
+    （`platform_exit_reason`，同步路径的 FargateEngine 共用同一份，ADR 0024「exitCode 落值延迟」条）。timed_out：stoppedReason
+    含本模块 StopTask 时写入的哨兵串（「job timeout」节归因链）。
     """
-    from gherkai_core.project import PLATFORM_FAILED_EXIT
+    from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
 
     exit_code = None
     for c in task.get("containers", []) or []:
@@ -82,7 +83,7 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
     reason = None
     if exit_code is None:
         exit_code = PLATFORM_FAILED_EXIT
-        reason = ": ".join(x for x in (task.get("stopCode"), stopped_reason) if x) or "平台未给出退出码与原因"
+        reason = platform_exit_reason(task.get("stopCode"), stopped_reason)
     return exit_code, timed_out, reason
 
 
@@ -247,7 +248,7 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
             _handle_timeout(run_id, sid, built)
 
 
-def _load_definition(run_store, run_id: str, label: str):
+def _load_definition(run_store, run_id: str):
     """读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
     **不推进该 run、记一条诊断并把 run 标为 error、原因写进运行态的 run 级 message**——重放投影没有退出码可交给使用方，只「不推进」会让
     run 永停 RUNNING（ADR 0034 对无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态，message 让 `status` 看得见原因
@@ -259,7 +260,7 @@ def _load_definition(run_store, run_id: str, label: str):
     from gherkai_runtime import compose
 
     def _mark(message: str, detail: str | None = None):
-        print(f"{label}: run {run_id} 不推进、标为 error——{message}" + (f"；诊断：{detail}" if detail else ""))
+        print(f"reject: run {run_id} 不推进、标为 error——{message}" + (f"；诊断：{detail}" if detail else ""))
         run_store.try_finalize(run_id, Status.ERROR, compose.now_iso(), message=message)
         return None
 
@@ -356,7 +357,7 @@ def _build(run_id: str):
     if state is not None and state.status in TERMINAL_STATUSES:
         print(f"skip: run {run_id} 已结束，不再改写它的结果")
         return None
-    meta = _load_definition(run_store, run_id, "build")  # 结构版本闸与定义违约 → 标 error、不推进（ADR 0037 决策 7）
+    meta = _load_definition(run_store, run_id)  # 结构版本闸与定义违约 → 标 error、不推进（ADR 0037 决策 7）
     if meta is None:
         return None
     scope_ids = [j.scope_id for j in meta.jobs]
@@ -433,12 +434,12 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
     prebuilt = prebuilt or {}
     for run_id in run_ids:
         # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs）由 _load_definition 把那个 run 标 error、返回 None，
-        # 不在这里抛、不连坐同批其它 run；装配期的 AWS 调用失败照常抛出、本次 invocation 失败、events Stream 重试本批。
+        # 不在这里抛、不影响同批其它 run；装配期的 AWS 调用失败照常抛出、本次 invocation 失败、events Stream 重试本批。
         built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
-        # 判定真值由 tick 在 finalize CAS 之前落 rstore（ADR 0030 决定三写序）；聚合异常裸穿 → 本次 invocation 失败 →
+        # 判定真值由 tick 在 finalize CAS 之前落 rstore（ADR 0030 决定三写序）；聚合异常原样抛出 → 本次 invocation 失败 →
         # events Stream 事件源重试本批（commit 之后再失败就没人重试了）。
         done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso(), result_store=rstore)
         if done:
@@ -446,8 +447,8 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             from gherkai_core.reconcile import finalize_report
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
             # 瞬时 5xx 抛，而这一步在 finalize 的 commit point **之后**执行：commit 后的失败无人重试（ADR 0030
-            # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，连坐同批其它
-            # run 的事件（同下面超时兜底检查的隔离理由）。故整段隔离、失败按缺值走
+            # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，同批其它
+            # run 的事件随之丢失（同下面超时兜底检查的隔离理由）。故整段隔离、失败按缺值走
             # （ADR 0034「端到端流程」cloud 第 ④ 步把 run 级墙钟划在「派生、失败隔离」那一侧）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
@@ -458,7 +459,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")
-            # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该连坐已经
+            # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该拖累已经
             # 推进成功的这一步——抛出去会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，
             # 同批其它 run 的事件一并永久丢失（同上面 run 级墙钟的隔离理由）。
             try:

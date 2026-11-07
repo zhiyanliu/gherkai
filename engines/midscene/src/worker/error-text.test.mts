@@ -1,13 +1,38 @@
-// 一行有界原因文本的边界单测（ADR 0042 决策一映射表 `act.error` / 决策三 `step_done.message`）。
+// lib/error-text.mts 的一行有界原因文本的边界单测（ADR 0042 决策一映射表 `act.error` / 决策三 `step_done.message`）。
 // 运行：npm test（node --import tsx --test "src/**/*.test.mts"）。
 //
-// 主路径（多行超长 → 首个非空行 + 折叠空白 + 封顶）在 run-scope.test.mts 与 evidence.test.mts 各锁住一条，
-// 这里锁住的是那两条照不出的抛出物形态与截断边界，逐条对称 Nova 侧 `_error_text` 的同名断言——两引擎格式相同
-// 是 ADR 0042 的要求（同一份 feature 在两侧运行，「原因」不该一侧一行、另一侧上千字符），退回
-// `${name}: ${message}` 的朴素写法时这些语义要有一条变红。
+// 一行化规则本身由跨语言夹具 engines/fixtures/one-line-text-cases.json 锁住（ADR 0042 决策一「一行化规则」）：oneLineError 是
+// Midscene 唯一一份一行化实现，本文件对它的夹具测试与 Nova 两份实现的测试读同一个文件、逐条相等。主路径（多行超长 → 首个非空行 + 折叠空白 + 封顶）在
+// run-scope.test.mts 与 evidence.test.mts 各锁住一条；这里另锁那两条照不出的抛出物形态与截断边界，逐条对称 Nova 侧
+// `_error_text` 的同名断言——两引擎格式相同是 ADR 0042 的要求（同一份 feature 在两侧运行，「原因」不该一侧一行、另一侧
+// 上千字符），退回 `${name}: ${message}` 的朴素写法时这些语义要有一条变红。
 import { test } from "node:test";
 import assert from "node:assert";
-import { errorText, oneLineError } from "./error-text.mjs";
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+import { errorText, oneLineError } from "../lib/error-text.mjs";
+
+const FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../fixtures/one-line-text-cases.json");
+const CASES = (JSON.parse(fs.readFileSync(FIXTURE, "utf-8")) as { cases: Array<{ input: string; max: number; expected: string }> }).cases;
+
+test("oneLineError: 跨语言夹具逐条相等（两引擎每份一行化实现读同一个文件）", () => {
+  assert.ok(CASES.length > 0);
+  for (const c of CASES) assert.equal(oneLineError(c.input, c.max), c.expected, `输入 ${JSON.stringify(c.input)}，封顶 ${c.max}`);
+});
+
+test("夹具的期望值交给 JS 缺省的空白折叠后不变（输出只有词间的单个空格，对两种语言都是一行）", () => {
+  for (const c of CASES) {
+    assert.equal(c.expected.trim().split(/\s+/).join(" "), c.expected, `期望 ${JSON.stringify(c.expected)}`);
+    assert.deepEqual(c.expected.split(/\r\n|\r|\n/), [c.expected]);
+  }
+});
+
+test("errorText: 类型名首尾按空白字符集 W 去掉（不用 trim()：U+0085 不在 JS 的 trim 集合里）", () => {
+  const e = Object.assign(new Error("boom"), { name: "\u0085TimeoutError\ufeff " });
+  assert.equal(errorText(e), "TimeoutError: boom");
+  assert.equal(errorText(Object.assign(new Error(""), { name: "\u001f\u3000" })), "Error", "类型名全由 W 组成时按无类型处理");
+});
 
 test("errorText: message 为空 → 只留类型（不留悬着的冒号）", () => {
   assert.equal(errorText(Object.assign(new Error(""), { name: "TimeoutError" })), "TimeoutError");

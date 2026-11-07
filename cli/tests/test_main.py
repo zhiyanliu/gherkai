@@ -255,7 +255,7 @@ def test_plan_shows_device_target_and_session_count_when_engine_supports_it(tmp_
     feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
 
     def caps_with_android(engine, *, steps_dir=None, timeout_s=60.0):
-        return {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
+        return {"schema_version": 2, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
                 "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}]}
 
     def no_match(*a, **k):
@@ -441,6 +441,8 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     assert box["run_meta"].max_concurrency == 3
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
     assert o.min_grace_s == FAKE_MIN_GRACE_S["novaact"]
+    # 本机后端不传停止后等待预算：None 表示 schedule 取 grace（ADR 0034 机制二「停止后继续有界消费完整事件流」条）
+    assert o.stop_bound_s is None
 
 
 def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
@@ -682,7 +684,7 @@ def test_run_wires_artifact_dirs_to_build_engines(tmp_path, monkeypatch, capsys)
 
     def spy_build(**kwargs):
         box["kwargs"] = kwargs
-        return real_build()  # 不带落点：拿真 engines（cmd 正确），落点断言看 box
+        return real_build(run_id=kwargs["run_id"])  # 只转发必给的 run id、不带落点：拿真 engines（cmd 正确），落点断言看 box
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -710,7 +712,7 @@ def test_no_report_disables_artifacts_instead_of_tempdir(tmp_path, monkeypatch):
 
     def spy_build(**kwargs):
         box.update(kwargs)
-        return real_build()
+        return real_build(run_id=kwargs["run_id"])
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -727,7 +729,7 @@ def test_report_run_passes_absolute_artifact_dirs_and_no_flag(tmp_path, monkeypa
 
     def spy_build(**kwargs):
         box.update(kwargs)
-        return real_build()
+        return real_build(run_id=kwargs["run_id"])
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -835,7 +837,7 @@ def test_list_deterministic_text_and_json(monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: calls.append(engine) or
-                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "qwen.qwen3-vl-235b-a22b",
+                        {"schema_version": 2, "engine": engine, "min_grace_s": 150.0, "model_id": "qwen.qwen3-vl-235b-a22b",
                          "targets": [{"device": "desktop", "ui_kinds": ["web"]}], "deterministic_steps": entries})
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
     out = capsys.readouterr().out
@@ -862,7 +864,7 @@ def test_list_deterministic_targets_column_intersection_and_unsupported_note(mon
                {"pattern": "b", "description": "只有设备", "example": "Then b", "targets": [{"device": "ios", "ui_kinds": ["web"], "requires": ["foo"]}]}]
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: {
-                            "schema_version": 1, "engine": engine, "min_grace_s": 31.0, "model_id": "m",
+                            "schema_version": 2, "engine": engine, "min_grace_s": 31.0, "model_id": "m",
                             "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web"], "max_session_s": 8880}],
                             "deterministic_steps": entries})
     assert m.main(["list-deterministic", "--engine", "midscene"]) == 0
@@ -880,7 +882,7 @@ def test_list_deterministic_targets_column_intersection_and_unsupported_note(mon
 
 def test_list_deterministic_worker_failure_exits_2(monkeypatch, capsys):
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
-        raise RuntimeError("worker 自述失败（exit 1）：...")
+        raise RuntimeError("worker 自述失败（退出码 1）：...")
 
     monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["list-deterministic"]) == 2
@@ -961,7 +963,7 @@ def test_plan_json_carries_deterministic_field(tmp_path, monkeypatch, capsys):
     assert steps[1]["deterministic"] == {"pattern": "p", "description": "d"}
 
 
-# ---- 引擎名预检（plan 层拦配置错，防延迟到 run 起 job 才炸）----
+# ---- 引擎名预检（plan 层拦配置错，防延迟到 run 起 job 时才报错）----
 
 def test_unknown_engine_tag_rejected_at_plan(tmp_path, capsys):
     f = tmp_path / "bad.feature"
@@ -1042,7 +1044,7 @@ def test_run_exits_2_before_spawn_when_worker_runtime_missing(tmp_path, monkeypa
 
 
 def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
-    """miss 只连坐**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行并以退出码 0 结束。
+    """miss 只影响**用到它**的 run：novaact-only 的 run 在 midscene 未装（dev 常态）下照常运行并以退出码 0 结束。
 
     preflight 只查本次 plan 用到的引擎；未用到的那个引擎即便 miss 也只是「一用即报错」。
     """
@@ -1233,7 +1235,7 @@ def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypa
                         lambda engine, texts, steps_dir=None: seen.update(match=steps_dir) or [None] * len(texts))
     monkeypatch.setattr(m.compose, "query_capabilities",
                         lambda engine, *, steps_dir=None, timeout_s=60.0: seen.update(query=steps_dir) or
-                        {"schema_version": 1, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "nova-act-v1.0",
+                        {"schema_version": 2, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "nova-act-v1.0",
                          "targets": [{"device": "desktop", "ui_kinds": ["web"]}]})
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     assert m.main(["list-deterministic"]) == 0
@@ -1265,6 +1267,22 @@ def test_plan_exits_2_when_user_steps_fail_to_load(tmp_path, monkeypatch, capsys
     assert rc == 2
     err = capsys.readouterr().err
     assert "plan 拒绝出结果" in err and "版本不一致" in err  # 不降级；成因提示（steps 加载失败或版本不一致）与其它入口同一句
+
+
+def test_plan_exits_2_and_relays_worker_sentence_when_match_input_rejected(tmp_path, monkeypatch, capsys):
+    """worker 拒绝 match 查询的输入形状（命令行工具与 worker 版本不一致，ADR 0036 决策 4）→ plan 以退出码 2 结束并转述 worker 的那一句，
+    不降级成「无标注」；worker 的这次非零退出与 steps 加载失败同属 WorkerSelfDescribeError，CLI 不另设分支。"""
+    feat = tmp_path / "t.feature"
+    feat.write_text('Feature: t\n  Scenario: s\n    When "做点啥"\n', encoding="utf-8")
+    sentence = "收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+
+    def rejected(engine, items, *, steps_dir=None, timeout_s=60.0):
+        raise compose.WorkerSelfDescribeError(engine, 2, f"worker: {sentence}\n", "确定性 step 查询")
+
+    monkeypatch.setattr(compose, "match_deterministic", rejected)
+    assert m.main(["plan", str(feat)]) == 2
+    err = capsys.readouterr().err
+    assert "plan 拒绝出结果" in err and sentence in err and "标注降级" not in err
 
 
 def test_plan_degrades_when_worker_missing(tmp_path, monkeypatch, capsys):
@@ -1564,7 +1582,7 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     _no_provider(monkeypatch)
     steps = tmp_path / "steps"; steps.mkdir()
     monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, *, steps_dir=None, timeout_s=60.0: {
-        "schema_version": 1, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
+        "schema_version": 2, "engine": engine, "min_grace_s": 150.0, "model_id": "nova-act-v1.0",
         "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
         "deterministic_steps": [{"pattern": "a"}, {"pattern": "b"}]})  # 计数取自述对象的清单键（ADR 0036「5.」）
     # 被拒方案的护栏（ADR 0051 决策 10）：本机后端即使配置了项目 ARN，doctor 也不读 SSM、不列会话——不带云端参数的 doctor 不做 AWS 调用。
@@ -1714,6 +1732,20 @@ def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeyp
     assert re.search(r"-\s*│\s*backend\.worker\.grace", capsys.readouterr().out)   # 表格：结果列 - 与检查项同行
 
 
+def test_doctor_cloud_worker_grace_shortfall_consequence_follows_engine(monkeypatch, capsys):
+    """缺口的后果按引擎的下限构成分写：Nova 的下限是单个 AI 操作的上界加收尾余量，后果写「停止落在长操作早期」那一种
+    极端情形；Midscene 的下限是收尾各段预算之和，与 AI 操作时长无关，不能套 Nova 的推导，只写收尾较慢时可能截断。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, 20)  # 两个引擎的下限都大于它
+    detail = _doctor_cloud_json(capsys)[("backend", "worker.grace")]["detail"]
+    nova, mids = (next(p for p in detail.split("；") if p.startswith(f"{e}:")) for e in ("novaact", "midscene"))
+    assert "AI 操作" in nova and "云端会话超时回收" in nova
+    assert "AI 操作" not in mids and "浏览器会话" not in mids
+    assert "可能在释放会话或保存产物之前被强制终止" in mids
+    assert "gherkai deploy --stop-timeout" in mids  # 处置照给
+
+
 def test_doctor_cloud_worker_grace_unset_stop_timeout_is_reported(monkeypatch, capsys):
     """云端没为该 container 设 stopTimeout（读回 None）→ 报「无从判断」，不当成 ✓（也不猜平台默认值）。"""
     _fake_locator(monkeypatch, available=("midscene",))
@@ -1786,7 +1818,7 @@ def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsy
 
 
 def test_doctor_cloud_profile_error_at_target_resolution_is_a_credential_failure(monkeypatch, capsys):
-    """--profile 打错在 resolve_cloud_target 就炸（读 profile config）→ 与探针失败同一句诊断、以退出码 2 结束，不冒 traceback。"""
+    """--profile 打错时 resolve_cloud_target 就抛异常（读 profile config）→ 与探针失败同一句诊断、以退出码 2 结束，不冒 traceback。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.setattr(m.compose, "resolve_cloud_target", lambda **kw: (_ for _ in ()).throw(RuntimeError("The config profile (nope) could not be found")))
     assert m.main(["doctor", "--prefix", "vfy-", "--profile", "nope", "--json"]) == 2
@@ -1936,7 +1968,7 @@ def test_doctor_cloud_devices_project_read_access_denied_names_permission(monkey
 def test_cli_help_does_not_load_device_farm_module_or_aws_sdk():
     """Device Farm 模块在 doctor 的设备两行里才导入：加载 CLI 与 `--help` 不为它拉起 AWS SDK。
 
-    在子进程里往 `sys.modules` 塞毒（值为 None 时 import 立即失败），而不是事后断言「不在 sys.modules 里」——本会话的其他用例早已
+    在子进程里往 `sys.modules` 放毒化条目（值为 None 时 import 立即失败），而不是事后断言「不在 sys.modules 里」——本会话的其他用例早已
     import 过它们。"""
     import subprocess
     import sys
@@ -2910,7 +2942,7 @@ def test_plan_marks_hit_without_handle_on_scope_target_as_ai(tmp_path, monkeypat
                  else {"pattern": "p", "description": "URL 断言"} if "页面地址" in it["text"] else None) for it in items]
 
     def fake_caps(engine, *, steps_dir=None, **kw):
-        return {"schema_version": 1, "engine": engine, "min_grace_s": 0, "model_id": "m",
+        return {"schema_version": 2, "engine": engine, "min_grace_s": 0, "model_id": "m",
                 "targets": [{"device": "desktop", "ui_kinds": ["web"]}],
                 "deterministic_steps": [
                     {"pattern": "设备专用", "description": "只有设备句柄", "example": "e", "keywords": ["Given", "When", "Then"],
@@ -3057,7 +3089,7 @@ def test_plan_shows_step_requires_only_on_targets_that_declare_it(tmp_path, monk
                                            encoding="utf-8")
 
     def fake_caps(engine, *, steps_dir=None, **kw):
-        return {"schema_version": 1, "engine": engine, "min_grace_s": 0, "model_id": "m",
+        return {"schema_version": 2, "engine": engine, "min_grace_s": 0, "model_id": "m",
                 "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"]}],
                 "deterministic_steps": [
                     {"pattern": "p", "description": "URL 断言", "example": "e", "keywords": ["Given", "When", "Then"],

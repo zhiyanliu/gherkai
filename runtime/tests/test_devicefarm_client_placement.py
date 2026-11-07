@@ -97,7 +97,7 @@ def test_client_region_is_the_device_farm_region_constant():
 def test_import_does_not_pull_boto3():
     """boto3 与 botocore 在函数内延迟导入：CLI 与 deploy 的 `--help` 不该为这个模块拉起 AWS SDK。
 
-    在子进程里往 `sys.modules` 塞毒（值为 None 时 import 立即失败），而不是事后断言「不在 sys.modules 里」——本会话的其他测试早已
+    在子进程里往 `sys.modules` 放毒化条目（值为 None 时 import 立即失败），而不是事后断言「不在 sys.modules 里」——本会话的其他测试早已
     import 过 boto3；放在子进程里也免得重新 import 出第二份模块对象、让别的测试按旧对象打的桩落空。
     """
     code = ("import sys\n"

@@ -20,7 +20,7 @@ cli/gherkai_cli/
 ├── settings.py   ← 配置文件合成进命令行选项（选项 > 环境变量 > 配置文件 > 内建默认，ADR 0053 决策 2、3、6）；argparse 的私有访问集中于此
 ├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：本机为账号比对 → 设备请求 → 安装包上传 → 写前校验，云端为读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）
 ├── console.py    ← 进度与诊断输出到 stderr（`__main__` 与编排模块共用）
-├── device_selection.py ← 设备选择与设备请求的解析（选项 > 环境变量 > 配置文件；ARN 只核服务与资源类型段；ADR 0053 决策 4、0048 决策 3），纯函数、不连 AWS
+├── device_selection.py ← 设备选择与设备请求的解析，以及本机后端项目 ARN 与应用桶的取值（选项 > 环境变量 > 配置文件，三处来源的顺序只写在这里；ARN 只核服务与资源类型段；ADR 0053 决策 2、3、4、0048 决策 3），纯函数、不连 AWS
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 ├── render.py     ← 表层渲染：0024 事件 → 进度行；plan 的 scope/job 分组 → 文本 / JSON；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
 │                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
@@ -170,7 +170,7 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述（`list-deterministic`、plan 标注）
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
-- [0039](../docs/adr/0039-user-facing-surfaces-no-internal-references.md) 用户可见面不带内部指代（`--help`、提示与错误文案；护栏 `test_user_facing_messages.py`）
+- [0039](../docs/adr/0039-user-facing-surfaces-no-internal-references.md) 用户可见面不带内部指代与 markdown 强调记号（`--help`、提示与错误文案；护栏 `test_user_facing_messages.py`）
 - [0041](../docs/adr/0041-agent-facing-cli-affordances.md) 面向 AI agent 的 CLI 能力（scenario 筛选与空值拒收、`--quiet` 落盘、JSON 覆盖、`doctor` 自检、JSON 字段契约）
 - [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）
 - [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内源文件随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）

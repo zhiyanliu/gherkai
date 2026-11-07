@@ -22,7 +22,8 @@ test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、
 test("job 行的协议版本先于目标核对（ADR 0024）：不等于本 worker 认的（含缺键）即拒绝；本 worker 认的值与跨语言 golden 一致", () => {
   assert.equal(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION }), null);
   assert.ok(precheckSchema({})!.includes("缺失"));
-  assert.notEqual(precheckSchema({ schemaVersion: 1.5 }), null);  // 非整数不算 1
+  assert.notEqual(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 0.5 }), null);  // 非整数不算版本号
+  assert.ok(precheckSchema({ schemaVersion: 1 })!.includes("格式版本是 1"));  // 1.4 的命令行工具写出的 job 行（协议版本 1）
   assert.notEqual(precheckTarget({ target: [] as unknown as { device: string; uiKind: string } }, WORKER_TARGETS), null);  // 数组不算对象
   assert.ok(precheckSchema({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1 })!.includes(`格式版本是 ${PROTOCOL_SCHEMA_VERSION + 1}`));
   assert.ok(precheckJob({ schemaVersion: PROTOCOL_SCHEMA_VERSION + 1, target: { device: "ios", uiKind: "app" } }, WORKER_TARGETS)!.includes("格式版本"));
@@ -60,7 +61,7 @@ test("主入口在建会话之前自检：真子进程喂墙钟预算超过会�
   for (const k of ["PATH", "HOME", "TMPDIR", "LANG", "LC_ALL", "NODE_OPTIONS"]) if (process.env[k] !== undefined) env[k] = process.env[k]!;
   env["AWS_EC2_METADATA_DISABLED"] = "true";
   // 9000 秒（服务商的会话硬上限）大于本 worker 自述的 max_session_s 8880：自检在建会话之前拒绝，不发 scope_started、零会话费用
-  const job = { schemaVersion: 1, scope: { id: "dev", name: "dev" }, engine: "midscene", assertionVotes: 1, timeoutS: 9000,
+  const job = { schemaVersion: 2, scope: { id: "dev", name: "dev" }, engine: "midscene", assertionVotes: 1, timeoutS: 9000,
     target: { device: "android", uiKind: "web" }, deviceRequest: null,
     scenarios: [{ id: "d.feature:3", name: "s", steps: [{ index: 0, keyword: "Given", text: "https://x/" }] }] };
   const result = await new Promise<{ code: number | null; out: string; err: string }>((resolve) => {

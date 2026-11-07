@@ -5,7 +5,7 @@
 ## 如何参与
 
 - **提 issue**：报告缺陷时附上可复现的最小 `.feature`、完整命令行与 `--json` 输出（`plan` / `run` / `status` / `explain` 均有机读形态）；提需求先写场景，再写期望的命令面。
-- **提 PR**：本仓库没有常驻 `main`，开发在版本线分支上（当前分支用 `git branch -a` 查看，命名形如 `feat/v<主版本>.<次版本>-<主题>`，即下文版本线表里状态为施工中的那一条）；从该分支切出或 fork，PR 同样提回该分支；一个 PR 只做一件事。CI（`.github/workflows/ci.yml`）在 push 与 PR 上运行三件检查，清单与触发面见下文「发布与版本」节末。
+- **提 PR**：本仓库没有常驻 `main`，开发在版本线分支上（当前分支用 `git branch -a` 查看，命名形如 `feat/v<主版本>.<次版本>-<主题>`，即下文版本线表里状态为施工中的那一条）；从该分支切出或 fork，PR 同样提回该分支；一个 PR 只做一件事。CI（`.github/workflows/ci.yml`）在 push 与 PR 上运行四项检查，清单与触发面见下文「发布与版本」节末。
 - **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。人读文本（注释、docstring、文档、用户可见字符串）的措辞标准在 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策六，护栏 `cli/tests/test_code_comments.py`（注释与 docstring）、`test_technical_docs.py`（技术文档）、`test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`（用户文档、skill、包页）、`test_user_facing_messages.py`（用户可见字符串）随 `uv run pytest` 一并执行。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
@@ -60,7 +60,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── engines/                   ← 两个可插拔引擎，与 core 平级
 │   ├── midscene/              ← npm 包 @gherkai/worker-midscene（ESM）：薄 worker + 使用方 steps 文件唯一应 import 的公开 API
 │   ├── novaact/               ← 发行包 gherkai-worker-novaact：薄 worker，`python -m` 入口
-│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、会话预热常量、浏览器会话超时的取值规则
+│   └── fixtures/              ← core、runtime 与两个引擎共读的跨语言一致性夹具（JSON）：凭据脱敏、导航地址、确定性句柄、job 行、会话预热常量、浏览器会话超时、失败原因的一行化的取值规则
 ├── deploy_aws/                ← 发行包 gherkai-deploy-aws：`gherkai deploy` 的 AWS provider（Python CDK stack + 随部署打成 asset 的三个 Lambda handler 源 + worker 镜像交付命令，ADR 0033/0034/0037/0038）
 ├── skills/                    ← 不是 skill 的源文件（源文件在 cli/、随 wheel 发行）：gherkai-evals/ = agent skill 的评测资产，contributor 与 AI 侧、不分发，资产清单与运行方法在 ADR 0043 决策七；结果工作区 gherkai-workspace/ 不入库
 ├── graphify-out/              ← 代码 + 文档知识图（供 AI agent 先查图再读源码；刷新见下文「知识图刷新」）
@@ -135,14 +135,14 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 
 | 护栏                                           | 覆盖范围                                                                                                                                                                                                                                                                                                         |
 |------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `cli/tests/test_cli_json_contract.py`          | `--json` 字段契约：真渲染器生成样例 → 递归收集全部键名 → 逐个断言出现在 `docs/internals/cli-json-contract.md`，文档缺键即失败                                                                                                                                                                                      |
+| `cli/tests/test_cli_json_contract.py`          | `--json` 字段契约：真渲染器生成样例（含设备目标形态） → 递归收集全部键名 → 逐个断言出现在 `docs/internals/cli-json-contract.md` 对应命令的那一节，文档缺键即失败                                                                                                                                                                                      |
 | `cli/tests/test_engines_matrix.py`             | 引擎能力矩阵 `docs/user-guide/engines.md` 的差集：表格结构与 Nova 行对照真起的 worker 自述（targets / model_id，句柄按目标推出）；Midscene 行由 `engines/midscene/src/worker/engines-matrix.test.mts` 在 npm 测试里同法核                                              |
 | `deploy_aws/tests/test_workers.py`             | 同一份契约页的 `list-workers` 字段（样例需要 moto，故断言留在 provider 包侧）                                                                                                                                                                                                                                       |
-| `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，以及 `features/steps/` 的确定性 step 模板（`.py` 字面量与 `.mts` 去注释后的行），注释与 docstring 放行 |
+| `cli/tests/test_user_facing_messages.py`       | 产品面文案不带内部指代，也不带 markdown 强调记号（成对的 `**…**`，终端不渲染）：AST 扫五个生产包的 Python 字面量 + Midscene 的 `.mts` 源，以及 `features/steps/` 的确定性 step 模板（`.py` 字面量与 `.mts` 源），注释与 docstring 放行；禁词表在 `.mts` 侧扫去注释后的行，强调记号逐个字面量判定（`.mts` 侧先经一遍词法扫描分出字面量，f-string 按整串判定） |
 | `cli/tests/test_package_readmes.py`            | 进包的 README（各包 pyproject `readme` 指向的那份 + npm `files` 里的）与 GitHub Release 正文的固定块：按用户文档的整套规则扫（`_doc_rules.scan("package-page", …)`）再加零相对链接，固定块另要求仓库链接锁定 tag；各包 Summary：零内部指代；根 `README.md`：只查内部指代、口头语与退役旧名（它的相对链接在 GitHub 上正常渲染，可达性由 `test_user_docs.py` 断言）；另断言每个包目录一份 `DEVELOPMENT.md`、根一份 `CONTRIBUTING.md`，以及 `release.yml` 仍经 `release_notes.py` 渲染 Release 正文 |
 | `cli/tests/test_user_docs.py`                  | 仓库内的用户文档（`docs/user-guide/**`、根 `README.md`、`CHANGELOG.md`、演示材料 `docs/presentations/**`；定稿口播稿的 SHA-256 与同目录 `manifest.json` 所记一致时免扫口吻表与决策六形态①③）：零内部指代、口吻表、退役旧名与决策六形态①③、相对链接可达（`CHANGELOG.md` 例外：全文只许绝对 URL，因为 Release 正文直接截取本版那一节、不改写链接）、不把读者引向 contributor 侧文档（ADR / CONTEXT / CLAUDE.md / journey / ai-eng）、owner 表与目录两向差集、默认模型 id 与引擎常量一致（这一项的扫描面另带随包 agent skill）；另守图：`docs/diagrams/` 的 JSON 图源与导出 SVG 成对、图源零内部指代、README / 本文 / `docs/**` 里不留 mermaid 块 |
 | `cli/tests/test_release_notes.py`              | `.github/scripts/release_notes.py` 三件事：「已发行 tag 在 `CHANGELOG.md` 里有非空节」与「根 README 的 `npx skills add` 命令钉本版 tag」两道 gate，以及 Release 正文渲染；另对照真 CHANGELOG / README                                                                                                                  |
-| `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
+| `cli/tests/test_skill.py`                      | 随 wheel 发行的 agent skill：文案与指针形态、`gherkai <子命令> --flag` 组合对照 argparse 真值与「仅某命令」排他、反引号键名对照契约页、契约页转换副本相等且开头直接陈述、目录白名单与形态上限、评测 fixture 的 ignore 行为与可搬迁不变量                                                                                               |
 | `deploy_aws/tests/test_skill_deploy_tokens.py` | skill 里 `deploy` / `destroy` 那批命令 token 对照 provider 的真 parser（provider 位于 `[deploy-aws]` extra，命令行前端的测试不应强依赖它）                                                                                                                                                                          |
 | `cli/tests/test_technical_docs.py`             | 技术文档（本文、各包 `DEVELOPMENT.md`、`docs/README.md`、`.github/workflows/README.md`、`core/tests/README.md`、`skills/README.md`、`docs/internals/`、工具手册与 `tools/<name>/` 下的说明）：口头语、退役旧名、决策六三种缩写形态、指向 journey 的链接与裸 WP 编号 |
 | `cli/tests/test_code_comments.py`              | repo 内 code 注释与 docstring（扫描面含 `features/steps/` 的 step 模板、各引擎包根目录的 `Dockerfile` 与 `tools/git-hooks/pre-commit`，且与 hook 的归类同源）：口吻表、退役旧名（不含「批」义三词）、决策六形态①③、悬空指针 |
@@ -155,7 +155,7 @@ uv run pytest core/tests -m integration          # 集成测试：假定真表/�
 
 **派生文件的自动同步（Claude Code）**：项目级 hook [`.claude/hooks/sync-derived.sh`](./.claude/hooks/sync-derived.sh)（由入库的 [`.claude/settings.json`](./.claude/settings.json) 挂在 Edit / Write / MultiEdit / Bash 之后）在每次工具调用后做两件事：skill 契约副本与源不同步时用 `tools/render_skill_contract.py` 重渲染并告知 agent；`docs/diagrams/*.json` 的 sha256 与同名 SVG 末尾的图源指纹不符（或 SVG 缺失）时提醒运行 `tools/build_diagrams.mjs`（不自动重建——与 CI 护栏同一指纹判据）。首次进入仓库时 Claude Code 会要求确认一次项目 hook。它只是编辑时刻的便利层，Codex、人工编辑与 CI 仍由 `cli/tests/test_skill.py`、`cli/tests/test_user_docs.py` 保障。同一处还挂了两道**阻断式**护栏 [`wording-guard.sh`](./.claude/hooks/wording-guard.sh) 与 [`commit-gate.sh`](./.claude/hooks/commit-gate.sh)，扫描范围与阻断方式见下文「护栏三层」段，人工提交的可选闸门见上文「开发环境」节。个人配置（graphify 的 hook-guard、plugin 开关）放 `.claude/settings.local.json`，不入库。
 
-**护栏三层（ADR 0046）**：能逐行判定的纪律不依赖人工记忆，由三层共用同一份规则源执行——规则、扫描面与抽取器全在 `cli/tests/_doc_rules.py`（模块 docstring 列了全部表与扫描面）。①测试兜底：`cli/tests/test_user_docs.py` / `test_skill.py` / `test_package_readmes.py` / `test_technical_docs.py` / `test_code_comments.py` / `test_adr_hygiene.py` / `test_context_glossary.py` 随 `uv run pytest` 与 CI 运行，各自全量扫描所负责的那一面；用户可见字符串那一面由 `test_user_facing_messages.py` 守，它的禁词表只管 code 字面量、单独维护，与 `_doc_rules.py` 不同源（ADR 0039 护栏节）。②写完即查：Claude Code 里每次 Edit / Write / MultiEdit / Bash 之后，[`wording-guard.sh`](./.claude/hooks/wording-guard.sh) 运行 `tools/doc_rules_check.py --changed`——已跟踪文件只检查本次改动的行、未跟踪文件全文扫描，命中即阻断并把该行返回给 agent；`git commit` 之前 [`commit-gate.sh`](./.claude/hooks/commit-gate.sh) 运行 `--staged`，按暂存区里将要提交的版本整份扫描、不读工作区，命中即阻断提交；同一条命令里先 `git add` 再 `git commit`，或 commit 带 `-a` / `--all`、`-i` / `--include`、`-o` / `--only` 或路径参数时，要提交的内容在闸门运行时还没进暂存区，闸门改为运行 `--uncommitted`，整份扫描暂存区、工作区相对 HEAD 的改动与未跟踪文件三者的并集（`graphify-out/` 除外），因此工作区里不属于本次提交、但有命中的文件也会阻断提交。③CLAUDE.md 只留判据与指针。本地自查：
+**护栏三层（ADR 0046）**：能逐行判定的纪律不依赖人工记忆，由三层共用同一份规则源执行——规则、扫描面与抽取器全在 `cli/tests/_doc_rules.py`（模块 docstring 列了全部表与扫描面）。①测试兜底：`cli/tests/test_user_docs.py` / `test_skill.py` / `test_package_readmes.py` / `test_technical_docs.py` / `test_code_comments.py` / `test_adr_hygiene.py` / `test_context_glossary.py` 随 `uv run pytest` 与 CI 运行，各自全量扫描所负责的那一面；用户可见字符串那一面由 `test_user_facing_messages.py` 守，它的两条规则（禁词表与 markdown 强调记号 `**…**`）只管 code 字面量、单独维护，与 `_doc_rules.py` 不同源；强调记号那条在 markdown 面没有对应规则，markdown 里 `**` 是正当的强调（ADR 0039 护栏节）。②写完即查：Claude Code 里每次 Edit / Write / MultiEdit / Bash 之后，[`wording-guard.sh`](./.claude/hooks/wording-guard.sh) 运行 `tools/doc_rules_check.py --changed`——已跟踪文件只检查本次改动的行、未跟踪文件全文扫描，命中即阻断并把该行返回给 agent；`git commit` 之前 [`commit-gate.sh`](./.claude/hooks/commit-gate.sh) 运行 `--staged`，按暂存区里将要提交的版本整份扫描、不读工作区，命中即阻断提交；同一条命令里先 `git add`（或同义的 `git stage`）再 `git commit`，或 commit 带 `-a` / `--all`、`-i` / `--include`、`-o` / `--only`、`--pathspec-from-file` 或路径参数时，要提交的内容在闸门运行时还没进暂存区，闸门改为运行 `--uncommitted`，整份扫描暂存区、工作区相对 HEAD 的改动与未跟踪文件三者的并集（`graphify-out/` 除外），因此工作区里不属于本次提交、但有命中的文件也会阻断提交；命令文本无法切词（如引号不配对）时同样按并集扫描。并集扫描是补强，不保证覆盖提交内容：同一条命令里先改写文件再 add 与 commit（或再用 `-a`、路径参数提交）、用 `git add -f` 加入被忽略的文件、改用别的 `GIT_INDEX_FILE`，以及闸门从命令文本识别不到的写法（如 `git -C <dir> commit`、`git -C <dir> add`），都不在它的覆盖范围内，由测试兜底，完整清单见 ADR 0046「边界与已知盲区」。要让提交内容本身在提交前经过检查，启用上文「开发环境」节的可选 git pre-commit：它在提交用的 index 就位之后运行。③CLAUDE.md 只留判据与指针。本地自查：
 
 ```bash
 uv run python tools/doc_rules_check.py --changed              # 检查本次改动的行（hook 调用的就是这条命令）
@@ -194,12 +194,12 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 
 ## 发布与版本
 
-**推送 tag `vX.Y.Z` 不触发 CI、直接进入发布链**（`.github/workflows/release.yml`；CI 的分支过滤把 tag 排除在外）：发布路径上只有下述一道 gate，不运行 `pytest` 与 `npm test`，因此测试与本地校验必须在推送 tag 之前全部完成并通过。
+**推送 tag `vX.Y.Z` 不触发 CI、直接进入发布链**（`.github/workflows/release.yml`；CI 的分支过滤把 tag 排除在外）：发布路径上只有下述两道 gate（版本与变更说明的 gate、发布前镜像 gate），不运行 `pytest` 与 `npm test`，因此测试与本地校验必须在推送 tag 之前全部完成并通过。
 
 **版本真源只有 git tag `vX.Y.Z`**——五个 Python 发行包、npm 包 `@gherkai/worker-midscene`、两个 worker 基础镜像都使用这个版本号（ADR 0037 决策 2b/7）。五个发行包的 pyproject 都把 `version` 列进 `dynamic`、没有版本字段（版本号由 uv-dynamic-versioning 从 tag 计算；依赖兄弟包的 `gherkai` / `gherkai-runtime` / `gherkai-deploy-aws` 另把依赖也声明为动态，同版本 pin 由同一 metadata hook 在构建时渲染；不发行的 workspace 根另固定为 `0.0.0`）；`engines/midscene/package.json` 只留占位 `0.0.0-dev`，发布链在 `npm publish` 前按 tag 改写它，该行不应由人工维护。发布因此是一个动作，前提是该版的变更说明已写就：
 
 ```bash
-git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本==tag）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
+git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本与 tag 一致）→ 镜像 gate（local 态构建两个基础镜像，不推送）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
 ```
 
 发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知），并把根 `README.md` 里 `npx skills add …/tree/vX.Y.Z/…` 命令的 tag 改成本版；发布 gate 校验本 tag 在 changelog 里有非空节、README 的这条命令钉的是本版，任一不满足则发版失败（ADR 0043 决策三）；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
@@ -208,7 +208,7 @@ git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 
 
 另一项是 Midscene 的真机验收矩阵，按条件触发而不是每版必做：升级 Midscene SDK 或 WebdriverIO，或 Device Farm 的 Appium 服务端版本变化时，由人在真机上执行一轮——Android 加两代 iOS、网页目标加应用目标、故障演练，iOS 26 的整条链路单列一行。执行矩阵之前先用 `tools/device_reprobe.mts` 在每个平台上重新探测一次，差集不为空时先修适配器与快照。矩阵、每一行的判据与结论回写到哪条 ADR，见 [`engines/midscene/DEVELOPMENT.md`](./engines/midscene/DEVELOPMENT.md)「真机验收矩阵」节；它需要远程访问会话与模型费用、失败要人判断是平台变化还是用例问题，所以不进 CI（ADR 0052 决策 8）。
 
-CI（任意分支的 push、PR、手动触发）运行三项检查：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练，以及**不推 tag 也可做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
+CI（任意分支的 push、PR、手动触发）运行四项检查：全成员 `pytest`、midscene 的 `npm ci && npm run build && npm test`、`uv build --all-packages` 的打包元数据 smoke + 发布 gate 演练，以及用后两项的产物按 local 态构建两个基础镜像的镜像 gate（与发布链同一道）。一次性人工前置（PyPI trusted publisher、npm trusted publisher、GHCR 可见性核对）、TestPyPI 演练，以及**不推 tag 也可做的本地静态校验**，全在 [`.github/workflows/README.md`](./.github/workflows/README.md)；决策与理由在 [ADR 0037 决策 8](./docs/adr/0037-distribution-and-packaging.md)。
 
 ## 文档去哪读
 

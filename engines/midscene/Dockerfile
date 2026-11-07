@@ -4,19 +4,20 @@
 # step 由定制层（`FROM <基础镜像>` + COPY steps/ + `GHERKAI_STEPS_DIR`）叠上去，模板与推送注册在 ADR 0038。
 #
 # **两态**（ADR 0037 决策 5）——同一份 Dockerfile，`--build-arg WORKER_SOURCE=` 选：
-#   index（默认，CI 态）：按版本从 npm 装已发行的包（`npm install -g`，运行时依赖全在 dependencies——ADR 0037 决策 3）。
-#                        `--build-arg WORKER_VERSION=X.Y.Z`（release.yml 传 tag 版本）。build context 任意（本态不 COPY）。
-#   local（本地态）：    装 build context 里 `npm pack` 出的 tarball（contributor 在发行前验镜像）：
+#   index（默认，推往 GHCR 的构建用此态）：按版本从 npm 装已发行的包（`npm install -g`，运行时依赖全在 dependencies——
+#       ADR 0037 决策 3）。`--build-arg WORKER_VERSION=X.Y.Z`（release.yml 传 tag 版本）。build context 任意（本态不 COPY）。
+#   local（CI 与发布链的镜像 gate、contributor 发行前验镜像都用此态）：装 build context 里 `npm pack` 出的 tarball：
 #     (cd engines/midscene && npm ci && npm run build && npm pack --pack-destination ../../dist)
 #     docker build --platform linux/amd64 -f engines/midscene/Dockerfile \
 #       --build-arg WORKER_SOURCE=local --build-arg WORKER_TARBALL=gherkai-worker-midscene-<ver>.tgz \
 #       -t gherkai-worker-midscene:dev dist/         # ← context 指放 tarball 的目录（会被整体 COPY 进 local stage）
+#   镜像 gate 用同一组参数构建，入口是 `bash .github/scripts/image_gate.sh midscene <产物目录>`（只把匹配的 tarball 拷进临时 context）。
 # **必须 `--platform linux/amd64`**：Fargate task-def 固定 X86_64（ARM64 是被拒方案，ADR 0038）；arm Mac 不加则 build 出
 # arm64、Fargate 启动期 exec format error 挂死（ADR 0033）。
 #
 # 容器入口与 npm bin 同一个：`gherkai-worker-midscene`（→ `dist/bin.mjs`，ADR 0037 决策 3）——bin 是带 shebang 的
 # 符号链接、内核直接 exec node，**本进程即 worker**、不套包装进程（EVENTS_FD 经 fd 继承，中间多一层就把 fd3 吞了，
-# ADR 0024 三通道）。job 走 S3、events 走 DDB、产物走 S3——全由 FargateEngine RunTask overrides 经 env 注入，worker fromEnv 判态。
+# ADR 0024 三通道）。job 走 S3、events 走 DDB、产物走 S3——全由 FargateEngine RunTask overrides 经 env 注入，worker 的 fromEnv 据此为各通道选择本机或云端实现。
 ARG WORKER_SOURCE=index
 
 FROM node:22-slim AS base
@@ -26,16 +27,16 @@ WORKDIR /app
 # playwright 只作 CDP 客户端库、不 launch 本地 chromium——不需 `playwright install chromium` 的二进制 + 系统库。
 
 # **两个 stage 都对「自己的参数没给」保持容忍**（`if [ -n … ]`）：经典 builder（无 buildx 的机器上裸 `docker build`）
-# **会把未选中的 stage 也执行一遍**，守卫写成硬失败会让未选中的那个先炸——真 build 踩过。
+# **会把未选中的 stage 也执行一遍**，守卫写成硬失败会让未选中的阶段先失败（实际构建中遇到过）。
 # 真正的把关在下面 final stage 的冒烟（不管走哪条 stage 都执行）。
 
-# ---- index 态：已发行包（CI / 使用方自建同版本基础镜像）----
+# ---- index 态：已发行包（推往 GHCR 的构建 / 使用方自建同版本基础镜像）----
 FROM base AS worker-index
 ARG WORKER_VERSION
 RUN if [ -n "${WORKER_VERSION}" ]; then npm install -g "@gherkai/worker-midscene@${WORKER_VERSION}" \
  && npm cache clean --force; fi
 
-# ---- local 态：context 里的 tarball（发行前验镜像）----
+# ---- local 态：context 里的 tarball（镜像 gate / 发行前验镜像）----
 FROM base AS worker-local
 ARG WORKER_TARBALL
 # COPY 整个 context 再按名装：**COPY 不能条件化**，而经典 builder 也会执行本 stage——参数为空时 `COPY ${…}` 直接语法错。
@@ -47,11 +48,12 @@ FROM worker-${WORKER_SOURCE} AS final
 # 两态共同的诚实校验 + 冒烟：worker 必须真装上、bin 必须真能启动（`--capabilities` 自述不需要 AWS）。
 # 漏 build-arg（选了 index 却没给版本 / 选了 local 却没给 tarball）在此 fail-loud，不拖到 Fargate 启动期。
 RUN gherkai-worker-midscene --capabilities > /dev/null
-# 设备依赖的冒烟：`--capabilities` 按设计不加载设备模块（ADR 0052 决策 3「设备模块动态加载」），照不出 WebdriverIO 或
-# Device Farm SDK 没装进镜像——那要等到云端第一个设备 job 动态 import 时才失败。这里只 import 设备接缝模块
-# （连带解析它的全部静态依赖），不调用任何导出、不建会话，零 AWS 调用。接缝模块静态 import 设备部件的缺省装配，
-# 两项设备依赖都在这条静态闭包里（src/device/surface.test.mts 守这一点），闭包断了这条冒烟就会在缺依赖时照样通过。
+# 设备依赖的冒烟：`--capabilities` 按设计不加载设备模块（ADR 0052 决策 3「设备模块动态加载」），照不出 WebdriverIO、
+# Device Farm SDK 或 `@aws-sdk/s3-request-presigner` 没装进镜像——那要等到云端第一个设备 job 动态 import 时才失败。这里只
+# import 设备接缝模块（连带解析它的全部静态依赖），不调用任何导出、不建会话，零 AWS 调用。接缝模块静态 import 设备部件的
+# 缺省装配，三项设备依赖都在这条静态闭包里（presigner 经 src/device/app.mts 进入；src/device/surface.test.mts 守这一点），
+# 闭包断了这条冒烟就会在缺依赖时照样通过。
 RUN node --input-type=module -e "await import('$(npm root -g)/@gherkai/worker-midscene/dist/device/surface.mjs')"
-# region 不焊镜像：AWS_REGION 经 RunTask overrides 注入（agentcore-sigv4 的 getRegion 读它、全可配，ADR 0033/0016 决策 C）；
+# region 不写进镜像：AWS_REGION 经 RunTask overrides 注入（agentcore-sigv4 的 getRegion 读它、全可配，ADR 0033/0016 决策 C）；
 # 凭证走 task role（fromNodeProviderChain 解析 AWS_CONTAINER_CREDENTIALS_RELATIVE_URI）。
 CMD ["gherkai-worker-midscene"]

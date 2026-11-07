@@ -28,12 +28,14 @@ class CloudLauncher:
     一致、零漂移（**revision 是组合根按 definition 解析出的显式 ARN**，本 launcher 对它无知——ADR 0038）。
     """
 
-    def __init__(self, resolver, *, run_id: str | None = None, timeout_watch=None) -> None:
+    def __init__(self, resolver, *, run_id: str, timeout_watch=None) -> None:
         self._resolver = resolver
+        # 本 run 的 id：arm 时交给到点触发器。必给参数——构造方（推进器 Lambda 的组合根）恒持有它，
+        # 缺省值只会让「漏传」伪装成「后端未启用定时能力」。
+        self._run_id = run_id
         # job timeout 的到点触发器（ADR 0034「job timeout」节的云端后端一侧，组合根注入；实现是 EventBridge Scheduler
         # one-time schedule，见 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s)。None 表示未装配
         # （旧部署/无 env）——有预算的 job 降级为 tick 防御扫 + status --wait，打日志。
-        self._run_id = run_id
         self._timeout_watch = timeout_watch
 
     def launch(self, job: Job) -> None:
@@ -41,7 +43,7 @@ class CloudLauncher:
         # 但若补偿也失败（双失败）、job 永停 RUNNING——先建的 schedule 到点仍能收敛（「永 running」的最后
         # 兜底不因 launch 失败缺位）；失败 launch 留下的 schedule 到点走 no-op/直接收敛并自动删，零残留。
         if job.timeout_s:
-            if self._timeout_watch is None or self._run_id is None:
+            if self._timeout_watch is None:
                 logger.warning(
                     "这个 job 没有超时看护：后端未启用定时能力（后端版本较旧时会这样，重新部署后端即可启用）"
                     "——scope=%s 预算 %ss；超时仍由后台巡检兜底收敛，只是不如到点准时",

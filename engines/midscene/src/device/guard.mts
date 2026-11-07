@@ -33,7 +33,7 @@
 // 失败的分流（ADR 0052 决策 6；ADR 0051 决策 4）：
 //   - 只读命令遇到连接层错误码或 502 / 503 / 504 由守卫重试一次（执行实例的传输层重试为 0，有副作用的命令任何情况都不补发）；
 //     一切超时（含 webdriver 自身的 ETIMEDOUT 客户端超时）与 500 不重试。这条规则写成 retryReadOnce，生命周期通道上的同类只读
-//     原语（appium.mts 的存活截图、控件树与为 evidence 读地址）用的是同一个函数。
+//     原语（appium.mts 的存活截图、控件树与为 evidence 读地址，probe.mts 里能力探测经执行实例发出的截图）用的是同一个函数。
 //   - 经守卫的命令失败（重试之后仍失败、或不重试）一律先查一次会话状态：不是 RUNNING 即会话丢失，锁存，中止当前 act，本窗口与之后
 //     的窗口里经代理的命令都按会话丢失拒绝；查询本身失败不据此判会话丢失。仍在运行时：有副作用的命令遇到传输层故障为结果未知，
 //     消息用 ADR 原文；只读命令超时为执行出错；其余（服务端已报错、结果已知）为执行出错并保留原因。
@@ -53,13 +53,16 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import { types } from "node:util";
 import type { Browser } from "webdriverio";
-import { errorText } from "../worker/error-text.mjs";
-import { attachClassification, readClassification, type StepClassification, type StepFailure } from "../worker/surface.mjs";
+import { errorText } from "../lib/error-text.mjs";
+import {
+  MAX_CAUSE_DEPTH, attachClassification, readClassification, type StepClassification, type StepFailure,
+} from "../worker/surface.mjs";
 // 循环引用说明：装配设备部件的模块（parts.mts）被 surface.mts 静态导入，而本模块又从 surface.mts 取会话丢失的消息，所以本模块先于
 // surface.mts 求值；因此这个值只在函数体内读取，模块顶层不读取 surface.mts 的任何绑定。
 import {
   SESSION_LOST_MESSAGE, type CommandGuard, type DriverAdapter, type GuardFactory, type WindowOutcome,
 } from "./surface.mjs";
+import { NATIVE_CONTEXT } from "./web-context.mjs";
 
 // ---- 给使用方看的消息（ADR 0039；ADR 给了原文整句的照原文）----
 
@@ -85,8 +88,6 @@ export function commandFailedMessage(reason: string): string {
 
 // 记在请求选项对象上的键：不可枚举，不进 fetch 的选项展开，也不进日志。Symbol.for 让模块被重复加载时两侧认得同一个键。
 const HTTP_STATUS_KEY = Symbol.for("gherkai.worker-midscene.http-status");
-// cause 链的查找上限，与 worker/surface.mts 读归类标记的上限相同，同时防环。
-const MAX_CAUSE_DEPTH = 8;
 
 /** 客户端实例的 transformResponse 钩子要做的记录（ADR 0052 决策 6）：把这次响应的 HTTP 状态码记到同一次请求的选项对象上，原样
  *  返回响应。webdriver 10.0.2 调这个钩子时传入的选项对象，正是随后抛出的 WebDriverResponseError 挂在 opts 上的那一个，经
@@ -195,7 +196,6 @@ const READ_ONLY_COMMANDS: ReadonlySet<string> = new Set([
 const ADDRESS_COMMAND = "getUrl";
 const SCRIPT_COMMANDS: ReadonlySet<string> = new Set(["execute", "executeScript"]);
 const CONTEXT_SWITCH_COMMANDS: ReadonlySet<string> = new Set(["switchContext", "switchAppiumContext"]);
-const NATIVE_CONTEXT = "NATIVE_APP";
 // Device Farm 远程访问会话的运行中状态（GetRemoteAccessSession 的状态值）。
 const RUNNING = "RUNNING";
 

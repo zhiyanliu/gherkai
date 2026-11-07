@@ -677,7 +677,7 @@ async function fakeWebDriver(): Promise<FakeServer> {
  *  缩到 0.4 秒，让客户端超时的用例几百毫秒内结束。 */
 async function realHarness(): Promise<{ server: FakeServer; exec: Browser; guard: CommandGuard; status: { calls: number } }> {
   const server = await fakeWebDriver();
-  const outcome = await createAppiumConnector({ timeouts: { newSessionFloorMs: 10_000, execRequestMs: 400, probeRequestMs: 400 } })
+  const outcome = await createAppiumConnector({ timeouts: { newSessionFloorMs: 10_000, execRequestMs: 400, probeRequestMs: 400 }, log: () => {} })
     .connect(
       { endpoint: server.url.href, device: "ios", uiKind: "app", appId: "com.example.Shop", appUrl: "https://apps.example.test/shop.ipa" },
       { signal: new AbortController().signal, remainingMs: () => 600_000 },

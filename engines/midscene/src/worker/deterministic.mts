@@ -363,7 +363,7 @@ export interface Match {
 
 /** 扫注册表收**全部**命中——match（实际运行中派发）与 matchBatch（用例预检）唯一的扫描实现面。
  * 两个消费者只在「命中数怎么处置」上分叉，匹配语义本身不复制成两份：ADR 0036 的「同一注册表、同一
- * exec 实现」由此结构保证，改匹配面（加锚定/归一化/优先级）不会漏改一处让 plan 标注对实际运行撒谎。
+ * exec 实现」由此结构保证，改匹配面（加锚定/归一化/优先级）不会漏改一处让 plan 标注与实际运行不一致。
  * 关键字不进匹配，只在命中之后核对条目的声明；目标也不进匹配。 */
 function scan(text: string): Array<{ entry: Entry; m: RegExpExecArray }> {
   const hits: Array<{ entry: Entry; m: RegExpExecArray }> = [];
@@ -413,26 +413,45 @@ export function selectHandler(hit: Match, target: StepTargetKey): SelectedHandle
   return entry ? { kind: "webdriver", fn: entry.handler, requires: entry.requires } : null;
 }
 
-/** 批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 回答「命中哪条 / 冲突 / 关键字不符 / 未命中」。
- * 每项是 `{keyword, text}`；也接受裸字符串（旧版命令行工具的形态，此时不核对关键字）。
- * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是用例预检、不是执行）。输出不带目标信息：
- * plan 用命中的 pattern 关联自述清单里该条目的 targets，再按 scope 的目标标注（ADR 0049 决策 3）。 */
-export type MatchItem = string | { keyword?: string | null; text: string };
+/** match 查询的一条输入（ADR 0036 决策 4）：两键都在，text 是 step 原文，keyword 是关键字或 null（null 表示不核对关键字）。 */
+export interface MatchItem { keyword: string | null; text: string }
 export type MatchProbe =
   | null
   | { pattern: string; description: string }
   | { conflict: string[] }
   | { keyword_mismatch: string; keywords: Keyword[] };
 
-export function matchBatch(items: MatchItem[]): MatchProbe[] {
-  return items.map((item) => {
-    const keyword = typeof item === "string" ? undefined : (item.keyword ?? undefined);  // null 与缺键同义（对齐 Nova 侧 is not None）
-    const text = typeof item === "string" ? item : item.text;
+/** match 查询的输入不合契约时给使用方的那一句（ADR 0036 决策 4）：与建会话前核 job 行版本不合同一口径（lib/precheck.mts）。 */
+export const MATCH_INPUT_MISMATCH = "收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致，请把两者装成同一版本。";
+
+/** match 查询的输入不合契约（ADR 0036 决策 4）：不是数组，或有条目不是 `{keyword, text}` 对象。整批拒绝、不逐条跳过——逐条跳过
+ *  等于把那几条静默标成走 AI；条目形状就是这个入口上的协议版本信号（ADR 0024），消息即给使用方的那一句。对称 Nova 的 MatchInputError。 */
+export class MatchInputError extends Error {
+  constructor() {
+    super(MATCH_INPUT_MISMATCH);
+    this.name = "MatchInputError";
+  }
+}
+
+function isMatchItem(item: unknown): item is MatchItem {
+  if (typeof item !== "object" || item === null || Array.isArray(item)) return false;
+  const o = item as Record<string, unknown>;
+  return "keyword" in o && "text" in o && typeof o.text === "string" && (o.keyword === null || typeof o.keyword === "string");
+}
+
+/** 批量 match 查询（ADR 0036 决策 4）：plan 命中标注用——对每条 step 回答「命中哪条 / 冲突 / 关键字不符 / 未命中」。
+ * 入参是 stdin 解析出的 JSON 值，须为数组、每项为 MatchItem；任一处不合即整批抛 MatchInputError、不出部分结果（裸字符串是
+ * 1.4 命令行工具的形态，协议版本已因此递增，ADR 0024）。入参标成 unknown 是因为它来自进程边界、形状由这里核，不由类型担保。
+ * 与 match() 共用 scan()（同一扫描实现面），冲突不抛、结构化返回（plan 是用例预检、不是执行）。输出不带目标信息：
+ * plan 用命中的 pattern 关联自述清单里该条目的 targets，再按 scope 的目标标注（ADR 0049 决策 3）。 */
+export function matchBatch(items: unknown): MatchProbe[] {
+  if (!Array.isArray(items) || !items.every(isMatchItem)) throw new MatchInputError();
+  return items.map(({ keyword, text }) => {
     const hits = scan(text);
     if (hits.length === 0) return null;
     if (hits.length > 1) return { conflict: hits.map((h) => h.entry.raw) };
     const { entry } = hits[0];
-    if (keyword !== undefined && !(entry.keywords as readonly string[]).includes(keyword)) {
+    if (keyword !== null && !(entry.keywords as readonly string[]).includes(keyword)) {
       return { keyword_mismatch: entry.raw, keywords: [...entry.keywords] };
     }
     return { pattern: entry.raw, description: entry.meta.description };

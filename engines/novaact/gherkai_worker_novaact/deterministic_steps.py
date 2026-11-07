@@ -69,17 +69,12 @@ def navigate(ctx, q1: str, url: str, q2: str | None) -> None:
     ctx.navigate(url)
 
 
-# 使用方确定性 step 的写法示例（**抄进你项目的 `steps/*.py` 里改**，别改本文件——见上「产品不内置任何有措辞的 step」）：
+# 使用方确定性 step 的写法示例（**抄进你项目的 `steps/*.py` 里改**，别改本文件——见上「产品不内置任何有措辞的 step」）。
+# 核对页面地址的 `Then 页面地址匹配 "<正则>"` 有可直接复制的模板，
+# 见用户指南《编写确定性 step》的「内建的导航与 `steps/` 模板」一节：
+# https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-deterministic-steps.md
 #
-# import re
-#
-# @deterministic(r'页面地址匹配 "(?P<pattern>[^"]+)"',
-#                description="断言当前页面地址匹配给定正则（精确判定，不走 AI、不投票）",
-#                example='Then 页面地址匹配 "/wiki/OpenAI"',
-#                keywords=("Then",))
-# def url_matches(ctx, pattern: str) -> None:
-#     url = ctx.page.url
-#     assert re.search(pattern, url), f"页面地址应匹配 {pattern!r}，实际 {url!r}"
+# from gherkai_worker_novaact.deterministic import deterministic
 #
 # @deterministic(r'元素 "(?P<sel>[^"]+)" 可见',
 #                description="断言选择器命中的元素可见",

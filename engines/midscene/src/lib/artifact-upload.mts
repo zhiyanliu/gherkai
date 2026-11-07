@@ -16,11 +16,13 @@
 // - refFor(path)：只算 ref、不上传、不记 uploaded（ADR 0042 决策一）——供 evidence 里引用的截图与设备目标的原始
 //   控件树文件（ADR 0051 决策 8）先拿确定性 URI，字节随后交 enqueue 的后台队列；ref 与 toReportRef 逐字一致（后者的
 //   ref 也经它算）。
-// - enqueue(paths) / drain(ms)：截图与原始控件树字节的后台队列（ADR 0042 决策一「上传时机分两类」）——step_done
-//   emit 之后入队、单条链 FIFO 顺序传（既不占判定临界路径、也不等到 scope 末），收尾对队列做有界排空。
-// - flushAndCleanup(dir)：scope 末调。递归 walk 整个产物目录上传剩余文件（已成功传过的跳过）——不按文件类型/名字挑
-//   （整目录一股脑传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+队列+剩余）才
-//   rmSync 整目录（本地零残留）；任一失败则整目录保留不删（产物不丢）。
+// - enqueue(paths) / drain(ms)：后台队列（ADR 0042 决策一「上传时机分两类」），排截图与原始控件树的字节（step_done emit
+//   之后入队），以及中断释放时的 device-session.json（设备目标会话释放之后入队，ADR 0051 决策 5）；单条链 FIFO 顺序传（既不占
+//   判定临界路径、也不等到 scope 末），收尾对队列做有界排空。失败日志与排空日志按文件类型取名词（见 queuedFileNoun）。
+// - flushAndCleanup(dir, stopRequested)：scope 末调。递归 walk 整个产物目录上传剩余文件（已成功传过的跳过）——不按文件类型/名字挑
+//   （整目录全部上传，本地清理不损耗任何产物、不受 SDK 升级影响）。剩余上传失败吞掉；全部成功（实时+队列+剩余）才
+//   rmSync 整目录（本地零残留）；任一失败则整目录保留不删（产物不丢）。worker 进入终结之后（stopRequested 为真）不再发起
+//   下一个文件、也不删目录（ADR 0051 决策 5「进入终结之后主流程让位」）。
 // 设备目标没有新增上传时机：device-session.json 与原始控件树都须落在产物落点目录（MIDSCENE_RUN_DIR）之下，scope 末的整目录 flush 才能覆盖到它们。
 import { S3Client, PutObjectCommand } from "@aws-sdk/client-s3";
 import * as fs from "node:fs";
@@ -59,6 +61,20 @@ function contentTypeFor(localAbs: string): string | undefined {
   return CONTENT_TYPES[path.extname(localAbs).toLowerCase()];
 }
 
+// 后台队列日志里的文件名称（ADR 0039 面一「两引擎措辞一致」：同一类产物与 Nova 用同一个名称，同样不承诺收尾再传）。按真实类型取：
+// 截图（Content-Type 映射为图片的后缀）叫「证据截图」；设备目标的原始控件树（`.xml`）与设备诊断文件沿用设备实现日志与用户文档
+// 里的名称，后者按文件名精确认（与 device/device-session.mts 的 DEVICE_SESSION_FILE 同值，测试断言两者相等；本模块在桌面
+// 路径上加载、不 import 设备模块，ADR 0052 决策 3）；认不出的类型与几类混在一起的汇总用泛称。
+export const QUEUE_GENERIC_NOUN = "产物文件";
+export const DEVICE_SESSION_BASENAME = "device-session.json";
+
+export function queuedFileNoun(localPath: string): string {
+  if (path.basename(localPath) === DEVICE_SESSION_BASENAME) return "设备诊断文件";
+  if (contentTypeFor(localPath)?.startsWith("image/")) return "证据截图";
+  if (path.extname(localPath).toLowerCase() === ".xml") return "原始控件树";
+  return QUEUE_GENERIC_NOUN;
+}
+
 export class ArtifactUploader {
   private bucket: string | undefined;
   private prefix: string;
@@ -70,6 +86,8 @@ export class ArtifactUploader {
   // 不会把 K × 票数个 PutObject 并发挤在一起（每个还各套 10s 超时）。链上每一项都吞掉自己的失败、故此链
   // 永不 reject（一项 reject 会毁掉其后所有项与 drain）。
   private chain: Promise<void> = Promise.resolve();
+  // 已入队、尚未落定的项按名称（queuedFileNoun）计数，计数归零即删键；排空没排完时那句日志按它取名词（见 pendingNoun）。
+  private pendingByNoun = new Map<string, number>();
 
   private constructor(bucket: string | undefined, prefix: string, runDir: string | undefined) {
     this.bucket = bucket;
@@ -132,9 +150,12 @@ export class ArtifactUploader {
 
   // 传一个文件、失败重试一次（后台队列与 scope 末 flush 共用，见 UPLOAD_ATTEMPTS）。成功 → 记 uploaded
   // 并返 null；尝试尽了 → 返最后一个错（**不记 uploaded**，故后续 flush 还有一次机会）。绝不抛。
-  private async uploadWithRetry(abs: string): Promise<Error | null> {
+  // skipRetry 在重试之前读：为真即不再重试、返回首传的错。整目录 flush 传入 worker 的终结标志（进入终结之后不再发起新的上传，
+  // ADR 0051 决策 5「进入终结之后主流程让位」）；后台队列恒不跳过——停止路径的排空等的就是这条队列。
+  private async uploadWithRetry(abs: string, skipRetry: () => boolean): Promise<Error | null> {
     let last: Error | null = null;
     for (let attempt = 1; attempt <= UPLOAD_ATTEMPTS; attempt++) {
+      if (attempt > 1 && skipRetry()) break;
       try {
         await this.uploadOne(abs);
         this.uploaded.add(abs);
@@ -171,7 +192,7 @@ export class ArtifactUploader {
     return this.refFor(abs);
   }
 
-  // act 边界的安全点提前上传单文件快照（ADR 0029 上传时机第三级，为 Fargate 预演）：供 worker 在每个 step_done 安全点
+  // act 边界的安全点提前上传单文件快照（ADR 0029 上传时机第三级）：供 worker 在每个 step_done 安全点
   // 反复提前上传**增量增长的单份 report.html**（Midscene report 运行中持续 append，中断落 destroy 前会整份丢）。
   // 与 toReportRef 三点区别（Midscene 单引擎增补、Nova 无需——见 ADR 0029 uploader 接口条）：
   //   ① **绕 uploaded 幂等守卫**：每次都真传（同 keyFor → S3 同 key overwrite），overwrite-latest 最新即最全；
@@ -186,7 +207,7 @@ export class ArtifactUploader {
     await this.uploadOne(path.resolve(localPath));  // 同 keyFor → overwrite；不查/不加 uploaded
   }
 
-  // scenario 边界的安全点提前上传诊断 log（ADR 0029 上传时机第四级，Midscene 单引擎、为 Fargate 预演）：
+  // scenario 边界的安全点提前上传诊断 log（ADR 0029 上传时机第四级，Midscene 单引擎）：
   // 供 worker 在每个 scenario_done 安全点提前上传该 scenario 期间**已在盘、尚未传**的 log/*.log——把 log 丢失窗口
   // 从「整个 run」收窄到「当前正在运行的 scenario」。log 在运行中由 createWriteStream 持续 append 写（`<MIDSCENE_RUN_DIR>/log/`），
   // scenario 边界截至已完成 scenario 的字节已在盘、可传。承 snapshotReport 的「绕 uploaded 幂等守卫 + 不记 uploaded」
@@ -206,13 +227,16 @@ export class ArtifactUploader {
   //     嵌套 log 在此被漏，靠 scope 末 flushAndCleanup（recursive）兜底传。
   //   · **永久失败的 log 每 scenario 边界都重试**：失败不记 seen（见下），若某 log 持续失败（非法 key/持续超时）
   //     则每边界重试它、浪费预算；但这是为 transient 失败重试的有意取舍（ADR 0028 主题），且 scope 末 flush 兜底。
+  // 除预算外的另一个停止条件 stopRequested 同样在每个文件之前读：worker 进入终结之后不再发起下一个文件（已在途的那个不中止，ADR 0051
+  // 决策 5「进入终结之后主流程让位」）。
   // no-op（未注入落点）→ 直接返回。log 目录不存在（还没产 log）→ 直接返回。
-  async snapshotLogs(logDir: string, seen: Map<string, number>, budgetMs: number): Promise<void> {
+  async snapshotLogs(logDir: string, seen: Map<string, number>, budgetMs: number, stopRequested: () => boolean): Promise<void> {
     if (!this.enabled) return;
     if (!fs.existsSync(logDir)) return;
     const deadline = Date.now() + budgetMs;  // 总墙钟软界（worker 生产代码，Date.now 可用）；见 docstring②
     for (const ent of fs.readdirSync(logDir, { withFileTypes: true })) {  // 非递归：假定 log 平铺，见 docstring
       if (Date.now() >= deadline) break;  // 超预算 → 不再发起新上传（软界；在途的仍耗满自身超时）
+      if (stopRequested()) break;         // 进入终结之后同样不再发起新上传
       if (!ent.isFile()) continue;
       const abs = path.resolve(logDir, ent.name);
       let mt: number;
@@ -227,8 +251,9 @@ export class ArtifactUploader {
     }
   }
 
-  // 截图字节入后台队列（ADR 0042 决策一「上传时机分两类」）：**调用点必须在 step_done emit 之后**——
-  // 判定不等字节，主流程入队即走、立刻进下一 step；字节在下个 step 运行的时候顺着链传上去。
+  // 文件字节入后台队列（ADR 0042 决策一「上传时机分两类」）。证据文件（截图、原始控件树）的**调用点必须在 step_done emit
+  // 之后**——判定不等字节，主流程入队即走、立刻进下一 step；字节在下个 step 运行的时候顺着链传上去。设备目标中断释放时的
+  // device-session.json 在会话释放之后入队，由停止路径的排空在预算内尽力上传（ADR 0051 决策 5）。
   // 队列语义：单条链 FIFO 顺序传（不重叠）；每项已传过（实时 / 上一次入队）→ 跳过、不重复 PutObject；
   // 失败重试一次；再失败记一行日志放弃（不记 uploaded → scope 末 flush 还有一次机会）；成功记 uploaded
   // → 让 flush 跳过它。
@@ -243,21 +268,37 @@ export class ArtifactUploader {
       } catch {
         continue;  // 路径算不出（拿到的不是字符串）→ 跳过这张，绝不抛给主流程
       }
+      const noun = queuedFileNoun(abs);
+      this.pendingByNoun.set(noun, (this.pendingByNoun.get(noun) ?? 0) + 1);
       // 串成链：前一项 settle 才起下一项。链尾一律 .catch 兜底——「永不 reject」是结构性保证，不依赖 uploadQueued
       // 每行恰好不抛（一项 reject 会毁掉其后所有项与 drain）；对称 Nova 队列线程的 except 兜底。
-      this.chain = this.chain.then(() => this.uploadQueued(abs)).catch(() => {});
+      this.chain = this.chain.then(() => this.uploadQueued(abs, noun)).catch(() => {});
     }
   }
 
-  // 队列里的一项。**永不 reject**（链上一项 reject 会毁掉其后所有项与 drain），失败到底就记一行日志。
-  private async uploadQueued(abs: string): Promise<void> {
-    if (this.uploaded.has(abs)) return;  // 已传过 → 不重复 PutObject
-    const err = await this.uploadWithRetry(abs);
-    if (err !== null) {
-      // 产品面一行：发生了什么 + 不影响什么 + 还能看什么（设计判据留在上面注释里）。
-      this.logFn(`worker: 证据截图上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
-        + `${path.basename(abs)}：${String((err as { message?: unknown }).message ?? err)}`);
+  // 队列里的一项。**永不 reject**（链上一项 reject 会毁掉其后所有项与 drain），失败到底就记一行日志。不论成败，落定即从
+  // 未落定计数里减去（finally：记日志抛出也照减）。
+  private async uploadQueued(abs: string, noun: string): Promise<void> {
+    try {
+      if (this.uploaded.has(abs)) return;  // 已传过 → 不重复 PutObject
+      const err = await this.uploadWithRetry(abs, () => false);  // 队列不读终结标志（见 uploadWithRetry）
+      if (err !== null) {
+        // 产品面一行：发生了什么 + 不影响什么 + 还能看什么（设计判据留在上面注释里）；名词按文件类型取（见 queuedFileNoun）。
+        this.logFn(`worker: ${noun}上传失败（已重试后放弃，不影响判定结果；仍可看引擎原生报告）：`
+          + `${path.basename(abs)}：${String((err as { message?: unknown }).message ?? err)}`);
+      }
+    } finally {
+      const left = (this.pendingByNoun.get(noun) ?? 1) - 1;
+      if (left > 0) this.pendingByNoun.set(noun, left);
+      else this.pendingByNoun.delete(noun);
     }
+  }
+
+  // 队列里尚未落定的文件的统称，供 drain 没排完时那句日志用：只剩一类文件就用这一类的名称（桌面目标的队列只有截图，与 Nova
+  // 那句同名），几类混在一起时用泛称；已经全部落定（drain 超时之后才落定的竞态）同样用泛称。
+  pendingNoun(): string {
+    if (this.pendingByNoun.size === 1) return this.pendingByNoun.keys().next().value as string;
+    return QUEUE_GENERIC_NOUN;
   }
 
   // 后台队列的**有界排空**（ADR 0042 决策一）：等队列运行结束，最多等 timeoutMs；返回是否在预算内排空完
@@ -283,23 +324,28 @@ export class ArtifactUploader {
 
   // scope 末：整目录递归上传剩余文件（跳过已传过的）+ 全成功则 rmSync 整目录（ADR 0029）。
   // no-op → 直接返回（不碰本地）。剩余上传失败吞掉（报告链接不依赖它），但置 flushOk=false → 整目录不删。
-  // 不按文件类型/名字挑——walk 整个目录、一股脑传，抗引擎 SDK 升级。
+  // 不按文件类型/名字挑——遍历整个目录、全部上传，抗引擎 SDK 升级。
   // 逐文件**失败重试一次**（见 UPLOAD_ATTEMPTS）：这是截图 URI 的最后一道兜底，单次 best-effort 的一次抖动
   // 就是一个永久 404。已被后台队列传成功的在此按 uploaded 跳过（同一 key 不重复 PutObject）；调用方应先
   // drain 再 flush，否则一个仍在途的队列项可能与本方法各传一次同一 key（同 key 同字节、只是冗余，接受）。
-  async flushAndCleanup(artifactDir: string): Promise<void> {
+  // stopRequested 是 worker 的终结标志（ADR 0051 决策 5「进入终结之后主流程让位」）：每个文件之前与单个文件失败后的那次重试之前
+  // 都读，为真即不再发起上传、也不删目录，产物与停止路径一样留在本地。已在途的那个文件不中止（有自己的单次超时）。不删目录的
+  // 理由：停止信号的收尾序列随后还要读这个目录里的报告做中断兜底上传。
+  async flushAndCleanup(artifactDir: string, stopRequested: () => boolean): Promise<void> {
     if (!this.enabled) return;
     if (!fs.existsSync(artifactDir)) return;
     const entries = fs.readdirSync(artifactDir, { recursive: true, withFileTypes: true }) as fs.Dirent[];
     for (const ent of entries) {
+      if (stopRequested()) return;  // 进入终结：不再发起下一个文件、不删目录
       if (!ent.isFile()) continue;
       // Node 的 recursive Dirent.parentPath（>=20）给出所在目录；拼回绝对路径
       const abs = path.resolve((ent as any).parentPath ?? (ent as any).path ?? artifactDir, ent.name);
       if (this.uploaded.has(abs)) continue; // 已传过（reportRef 实时传 / 后台队列传成功），跳过
-      if (await this.uploadWithRetry(abs) !== null) {
+      if (await this.uploadWithRetry(abs, stopRequested) !== null) {
         this.flushOk = false; // 剩余上传失败：吞掉（报告链接不依赖它），但标记 → 整目录不删
       }
     }
-    if (this.flushOk) fs.rmSync(artifactDir, { recursive: true, force: true }); // 全成功 → 删整目录
+    // 最后一个文件在途时进入终结同样不删
+    if (this.flushOk && !stopRequested()) fs.rmSync(artifactDir, { recursive: true, force: true }); // 全部成功才删整目录
   }
 }

@@ -73,10 +73,6 @@ EXIT_OK = 0
 EXIT_FAILED = 1        # 执行失败、可重新运行收敛（与 `workers.EXIT_FAILED` 同值，见模块头「退出码」）
 EXIT_PRECONDITION = 2  # 前置/校验失败（与 CLI preflight 同一类，见模块头「退出码」）
 
-# `_run_cdk` 的 `device_farm_project` 缺省值：调用方没有找回或建立项目，由 `_run_cdk` 只读 SSM 现值（diff / --synth-only /
-# destroy）。用哨兵而不是 None：None 是「已解析、本次没有可用的 ARN」（deploy 无权限且无记录时），两者处置不同。
-_READ_STORED_PROJECT = object()
-
 # Node 下限：与 worker 的 `engines.node` 同一下限（ADR 0037 决策 6「Node 前置是硬事实」，README 一处说清）。
 NODE_MIN_MAJOR = 22
 
@@ -98,14 +94,14 @@ VPC_UNRECORDED = "unrecorded"      # ② 参数缺失且 stack 已存在即本�
 VPC_MATCH = "match"                # ③ 取值一致 → 放行
 VPC_MISMATCH = "mismatch"          # ③ 取值不一致 → 以退出码 2 结束
 
-# `delete-worker` 的占位文案（ADR 0038「命令族」）：`--help` 的 description 与真敲下去看到的那句**同源**，
+# `delete-worker` 的占位文案（ADR 0038「命令族」）：`--help` 的 description 与实际执行时输出的那句**同源**，
 # 别让帮助与运行时给出两种说法。清理规则不写死时长——真源是 `workers.RETIRE_QUIET_PERIOD`，写死即漂移。
 DELETE_WORKER_PLACEHOLDER = (
     "`delete-worker` 尚未提供。\n"
-    "将来提供时会沿用 push-worker 的同一套清理规则（退休一段时间、且没有未结束的 run 还在用它才真删），"
-    "并一并回收旧版本 variant 的 ECR 标签、重推时被顶掉的旧镜像层与 worker 镜像映射。\n"
-    "当前可用的：`gherkai deploy list-workers` 看有哪些 variant 与待清理 revision；"
-    "重推同名 variant 直接覆盖，无需先删。"
+    "将来提供时会沿用 push-worker 的同一套清理规则（revision 退休满一段时间、且没有未结束的 run 仍在使用时才实际删除），"
+    "并一并回收旧版本 variant 的 ECR 标签、重推时被替换下来的旧镜像层与 worker 镜像映射。\n"
+    "当前可用的命令：`gherkai deploy list-workers` 查看现有 variant 与待清理的 revision；"
+    "重推同名 variant 会直接覆盖，无需先删除。"
 )
 
 
@@ -422,12 +418,13 @@ class Provider:
         """供给/更新后端。**先过 VPC 取值三态**（ADR 0037 决策 6），再找回或建立 Device Farm 项目（ADR 0051 决策 10），
         过了才调 `cdk deploy`。项目排在三态之后：被三态拦下的部署不该先在账户里建出项目。"""
         # 工具链前置（Node + cdk CLI）先于 VPC 取值比对，理由见 `_toolchain_gate`。**cdk 可定位性必须也在这一关**：
-        # 若只在 `_run_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才以退出码 2 结束，而那条路径上 cdk 一行输出都没有——
-        # 底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
+        # 若只在调起 cdk 的 `_invoke_cdk` 里拦，就要等读过后端、比对过 VPC 取值之后才以退出码 2 结束，而那条路径上 cdk
+        # 一行输出都没有——底下「失败原因见上方 cdk 输出」的提示会变成误导（它建议的 `--bootstrap` 也会以同样的原因失败）。
         toolchain = self._toolchain_gate()
         if toolchain is not None:
             return toolchain
-        if self._cli_version_or_report(args) is None:
+        version = self._cli_version_or_report(args)
+        if version is None:
             return EXIT_PRECONDITION
         # 容器引擎的两类问题也在这一关处置（本地、不花网络、不要凭证——deploy 机器需要容器引擎，
         # 同步基础镜像要 pull/push，ADR 0038「容器引擎口子」）：
@@ -445,19 +442,25 @@ class Provider:
         # `workers.run_deploy_steps` 共用同一个 `compose.is_pure_release`，ADR 0038「容器引擎口子」），对它们预告
         # 「之后会失败（退出码 1）」是假警告，还会与 `sync_base` 的「跳过基础镜像同步」自相矛盾。
         from gherkai_runtime import compose
-        if compose.is_pure_release(self._resolve_version(args)):
+        if compose.is_pure_release(version):
             probe = engine.probe()
             if probe:
                 print(f"警告：{probe}\n     stack 会照常部署，但之后的 worker 镜像步骤（同步基础镜像）会失败"
                       f"（退出码 1）；装好容器引擎后重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
-        blocked = self._guard_vpc_spec(args)
+        # 目标只在这里解析一次，排在上面几道本地前置之后：不存在的 `--profile` 与漏给的 `--vpc` 同时出现时，报的仍是
+        # 缺 `--vpc`。target 依次传给 VPC 取值比对、项目找回或建立、cdk 与 worker 镜像步骤，后两步还带上入口处取得的
+        # version，各步用的是同一组值。
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
+        blocked = self._guard_vpc_spec(args, target)
         if blocked is not None:
             return blocked
-        blocked, project = self._resolve_device_farm_project_for_deploy(args)
+        blocked, project = self._resolve_device_farm_project_for_deploy(target)
         if blocked is not None:
             return blocked
         extra = ["--require-approval", args.require_approval] if getattr(args, "require_approval", None) else []
-        rc = self._run_cdk("deploy", args, extra=extra, device_farm_project=project)
+        rc = self._invoke_cdk("deploy", args, target=target, version=version, device_farm_project=project, extra=extra)
         if rc != EXIT_OK:
             # cdk 自己的报错已在上面原样打出；只补一条**中性**提示、不改写也不猜它的诊断（失败原因很多：
             # 权限、变更集被拒、模板错……）。未 bootstrap 是首次部署最常见的一种（ADR 0037 决策 6）。
@@ -466,7 +469,7 @@ class Provider:
                   file=sys.stderr)
             return rc
         # cdk 成功 → worker 镜像四步（ADR 0038）。第 1 步（登记模板）已随 cdk 事务落地。
-        return self._worker_image_steps(args, engine)
+        return self._worker_image_steps(target, version, engine)
 
     def destroy(self, args) -> int:
         """销毁 stack。**表/桶/ECR 是 `RETAIN`、不随之删**（防误删，ADR 0033）——残留资源清单与手动清理步骤见
@@ -518,8 +521,8 @@ class Provider:
         missing = self._require_vpc(args)
         if missing is not None:
             return missing
-        # 部署方给的 DIR 相对**他的** cwd；`_run_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
-        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却以退出码 0 结束（实际运行踩过）。
+        # 部署方给的 DIR 相对**他的** cwd；`_invoke_cdk` 里把它钉成绝对路径再交给 cdk——cdk 子进程的 cwd 是随后
+        # 被删的临时工作目录，相对路径原样传会让导出物落进那里、随之消失而命令却以退出码 0 结束（实际运行中遇到过）。
         return self._run_cdk("synth", args, output=Path(out).expanduser())
 
     def bootstrap(self, args) -> int:
@@ -567,7 +570,8 @@ class Provider:
         """`gherkai deploy push-worker <镜像> --engine … --variant …`（八步见 `workers.push_worker`）。"""
         from gherkai_deploy_aws import workers
 
-        if self._cli_version_or_report(args) is None:
+        version = self._cli_version_or_report(args)
+        if version is None:
             return EXIT_PRECONDITION
         engine = self._container_engine(args)
         if engine is None:
@@ -579,7 +583,7 @@ class Provider:
             args.image, engine=args.engine, variant=args.variant,
             set_default=bool(getattr(args, "set_default", False)),
             # tag 用的版本是 **CLI 自身版本**（与写进 SSM 的戳同一个，ADR 0038「preflight」按它解析）
-            cli_version=self._resolve_version(args),
+            cli_version=version,
             prefix=target.prefix, region=target.region, profile=target.profile, container=engine,
         )
 
@@ -587,12 +591,13 @@ class Provider:
         """`gherkai deploy list-workers`——只读（SSM + ECS describe），不碰容器引擎。"""
         from gherkai_deploy_aws import workers
 
-        if self._cli_version_or_report(args) is None:
+        version = self._cli_version_or_report(args)
+        if version is None:
             return EXIT_PRECONDITION
         target = self._resolve_target_or_report(args)
         if target is None:
             return EXIT_PRECONDITION
-        return workers.list_workers(prefix=target.prefix, cli_version=self._resolve_version(args),
+        return workers.list_workers(prefix=target.prefix, cli_version=version,
                                     region=target.region, profile=target.profile,
                                     as_json=getattr(args, "json", False))
 
@@ -649,25 +654,21 @@ class Provider:
             print(str(exc), file=sys.stderr)
             return None
 
-    def _worker_image_steps(self, args, engine) -> int:
+    @staticmethod
+    def _worker_image_steps(target, version: str, engine) -> int:
         """cdk 成功之后的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
 
-        `engine` 由 `deploy` 解析好传进来：名字不认在 cdk 之前就以退出码 2 结束了（ADR 0038「容器引擎口子」），到这里必是
-        已实装的引擎；「装了但不可用」归 `workers.run_deploy_steps`（退出码 1）。
+        `target`、`version`、`engine` 都由 `deploy` 在 cdk 之前取得并传入，其中 `target` 与 `version` 和 cdk 用的是同一组值。
+        引擎名字不认在 cdk 之前就以退出码 2 结束了（ADR 0038「容器引擎口子」），到这里必是已实装的引擎；「装了但不可用」归
+        `workers.run_deploy_steps`（退出码 1）。
 
         **不做版本 skew 前置**：deploy 就是改戳的那个动作（ADR 0038）。失败给退出码 1（不是 2）——账户已经被 cdk
         改过了，压成「前置失败」会让人以为什么都没发生。
         """
         from gherkai_deploy_aws import workers
 
-        target = self._resolve_target_or_report(args)
-        if target is None:
-            # 退出码归属按本方法契约（见 docstring）：cdk 之后的失败给退出码 1，措辞与 `workers.run_deploy_steps`
-            # 建不出句柄时那一支相同——对部署方是同一件事。
-            print("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。", file=sys.stderr)
-            return workers.EXIT_FAILED
         return workers.run_deploy_steps(
-            prefix=target.prefix, version=self._resolve_version(args), container=engine,
+            prefix=target.prefix, version=version, container=engine,
             region=target.region, profile=target.profile,
         )
 
@@ -676,10 +677,11 @@ class Provider:
     def _toolchain_gate() -> int | None:
         """Node 与 cdk CLI 两个前置：缺 → 打一句话、以退出码 2 结束；齐 → None。
 
-        每个要调 cdk 的动作入口（`deploy` / `bootstrap` / `diff` / `destroy` / `synth_only`）开头都过这一关，`_run_cdk`
-        里再过一次作兜底（每条命令都要过这一关，不靠调用者记得；代价是 `node --version` 多执行一次）。**排在动任何
-        AWS 读之前**：工具链缺失不花网络、不要凭证——缺工具的人不该先被要求配好 AWS 凭证才看到「你缺工具」。
-        `_require_vpc` 缺值时的提示也要读后端，所以入口处的这一关必须排在它前面。
+        每个要调 cdk 的动作入口（`deploy` / `bootstrap` / `diff` / `destroy` / `synth_only`）开头都过这一关，调起 cdk 的
+        `_invoke_cdk` 里再过一次作兜底（每条命令都要过这一关，不靠调用者记得；代价是 `node --version` 多执行一次）。
+        **入口这一关排在动任何 AWS 读之前**：工具链缺失不花网络、不要凭证——缺工具的人不该先被要求配好 AWS 凭证才看到
+        「你缺工具」。`_require_vpc` 缺值时的提示也要读后端，所以入口处的这一关必须排在它前面；兜底那一关排在目标解析与
+        后端读取之后，替代不了入口这一关。
         """
         for error in (check_node(), check_cdk()):
             if error:
@@ -717,8 +719,11 @@ class Provider:
         return "这个环境已存在但后端没有网络取值记录，请给当初部署用的那个取值。"
 
     # ---- context / cdk.json（纯推导，单测直打）----
-    def build_context(self, args, *, device_farm_project: str | None) -> dict[str, str]:
+    def build_context(self, args, *, target, version: str, device_farm_project: str | None) -> dict[str, str]:
         """flag → CDK context（app/stack 侧读的那四个配置项 + 命令派生的版本戳与 Device Farm 项目 ARN）。
+
+        `target`（取其 prefix）与 `version` 是调用方已解析、已检查过的值（`_resolve_target_or_report` /
+        `_cli_version_or_report`），本方法不再解析，同一次命令里各步用的就是同一组值。
 
         `--vpc` 一个 flag 摊成两个配置项：`default` → `use_default_vpc=true`；`vpc-<id>` → `vpc_id=<id>`；
         `new` → **两个都不给**（stack 的建新分支，见 `stack._network`）。
@@ -730,8 +735,7 @@ class Provider:
         命令行写明本次的取值，也免得其它来源的同名 context（如用户级 cdk 配置）补进来。ARN 形态由 stack 在合成期校验。
         **关键字必给、没有默认值**：漏传若静默成占位，deploy 就会撤掉已部署的设备授权。
         """
-        target = self._resolve_target(args)
-        ctx: dict[str, str] = {"prefix": target.prefix, "version": self._resolve_version(args)}
+        ctx: dict[str, str] = {"prefix": target.prefix, "version": version}
         vpc = getattr(args, "vpc", None)
         if not vpc:  # 调用点已经 _require_vpc 过；这里是契约守卫，不是给部署方看的提示
             raise ValueError("build_context 需要 args.vpc：VPC 取值无隐式默认，调用前先做缺值检查")
@@ -776,28 +780,37 @@ class Provider:
         finally:
             shutil.rmtree(path, ignore_errors=True)
 
-    def _run_cdk(self, verb: str, args, *, extra=(), output: Path | None = None,
-                 device_farm_project=_READ_STORED_PROJECT) -> int:
+    def _run_cdk(self, verb: str, args, *, extra=(), output: Path | None = None) -> int:
+        """diff / destroy / --synth-only 调 cdk 的装配入口：检查 CLI 版本、解析目标、只读 SSM 里的 Device Farm 项目记录，
+        再把这三样交给 `_invoke_cdk`。
+
+        项目记录只读现值、不找回也不建立（diff 另用 GetProject 核对，见 `_stored_device_farm_project`），读不到或核对失败即
+        以退出码 2 结束。deploy 不经这里：它在 cdk 之前已解析好目标、找回或建立了项目，直接调 `_invoke_cdk`。
+        """
+        version = self._cli_version_or_report(args)
+        if version is None:
+            return EXIT_PRECONDITION
+        target = self._resolve_target_or_report(args)
+        if target is None:
+            return EXIT_PRECONDITION
+        blocked, device_farm_project = self._stored_device_farm_project(verb, target)
+        if blocked is not None:
+            return blocked
+        return self._invoke_cdk(verb, args, target=target, version=version,
+                                device_farm_project=device_farm_project, extra=extra, output=output)
+
+    def _invoke_cdk(self, verb: str, args, *, target, version: str, device_farm_project: str | None,
+                    extra=(), output: Path | None = None) -> int:
         """拼 context 与 argv、在一次性工作目录里调 cdk CLI，返回它的退出码。
 
-        `device_farm_project`：只有 deploy 传（已在 cdk 之前找回或建立，None 即本次不启用设备支持）；其余动作不传，
-        由本方法在工具链前置与目标解析之后只读 SSM 现值（diff 另用 GetProject 核对，见 `_stored_device_farm_project`），
-        读不到或核对失败即以退出码 2 结束。
+        `target`、`version`、`device_farm_project` 由调用方解析好传入（deploy 自己解析并找回或建立项目，其余动作经
+        `_run_cdk`），本方法不再解析。三者都必给、没有默认值：`device_farm_project` 为 None 表示已解析、本次没有可用的 ARN
+        （context 里给「待建立」占位），漏传若静默成 None，deploy 就会撤掉已部署的设备授权。
         """
         blocked = self._toolchain_gate()
         if blocked is not None:
             return blocked
-        if self._cli_version_or_report(args) is None:
-            return EXIT_PRECONDITION
         cdk_argv = cdk_command()
-
-        target = self._resolve_target_or_report(args)
-        if target is None:
-            return EXIT_PRECONDITION
-        if device_farm_project is _READ_STORED_PROJECT:
-            blocked, device_farm_project = self._stored_device_farm_project(verb, target)
-            if blocked is not None:
-                return blocked
         ctx_cache = context_cache_path(target.prefix)
         with self._work_dir() as work_dir:
             self.write_cdk_json(work_dir)
@@ -814,10 +827,11 @@ class Provider:
             elif ctx_cache.exists():
                 shutil.copyfile(ctx_cache, work_ctx)
             # 部署方给的导出目录钉成**绝对**路径：cdk 子进程 cwd 是本次临时工作目录（用完即删），相对路径
-            # 原样传会让导出物落进那里、随目录消失而命令以退出码 0 结束（实际运行踩过）。默认落工作目录、随之清理。
+            # 原样传会让导出物落进那里、随目录消失而命令以退出码 0 结束（实际运行中遇到过）。默认落工作目录、随之清理。
             out_dir = output.resolve() if output is not None else work_dir / "cdk.out"
             argv = [*cdk_argv, verb, "--app", self.app_command(), "--output", str(out_dir)]
-            for key, value in self.build_context(args, device_farm_project=device_farm_project).items():
+            context = self.build_context(args, target=target, version=version, device_farm_project=device_farm_project)
+            for key, value in context.items():
                 argv += ["-c", f"{key}={value}"]
             if target.profile:
                 argv += ["--profile", target.profile]  # cdk 原生 flag（凭证解析归它）
@@ -841,15 +855,13 @@ class Provider:
             return rc
 
     # ---- 内部：VPC 取值三态 ----
-    def _guard_vpc_spec(self, args) -> int | None:
+    @staticmethod
+    def _guard_vpc_spec(args, target) -> int | None:
         """deploy 前的 VPC 取值比对。放行 → None；拦 → 退出码（2）。
 
-        只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。解析 prefix/region/profile 失败与读后端失败
-        （凭证/权限/网络）都以退出码 2 结束而非抛 traceback：对部署方是「先修凭证」，与 Node 缺失同一类。
+        只在 deploy 前执行（见 `diff`/`destroy` 的 docstring）。`target` 由 `deploy` 解析好传入（解析失败在那里以退出码 2
+        结束）。读后端失败（凭证/权限/网络）以退出码 2 结束而非抛 traceback：对部署方是「先修凭证」，与 Node 缺失同一类。
         """
-        target = self._resolve_target_or_report(args)
-        if target is None:
-            return EXIT_PRECONDITION
         stack = names.stack_name(target.prefix)
         try:
             cfn = _make_cfn_client(region=target.region, profile=target.profile)
@@ -890,7 +902,7 @@ class Provider:
         return EXIT_PRECONDITION
 
     # ---- 内部：Device Farm 项目（ADR 0051 决策 10「项目」与无权限降级；ADR 0037 决策 6 的 context 闭集）----
-    def _resolve_device_farm_project_for_deploy(self, args) -> tuple[int | None, str | None]:
+    def _resolve_device_farm_project_for_deploy(self, target) -> tuple[int | None, str | None]:
         """deploy 在 cdk 之前找回或建立项目 `{prefix}devices`。返回 (退出码, ARN)：退出码不为 None 即就此结束、不调 cdk；
         否则把 ARN 交给 cdk（None 表示本次不启用设备支持，context 里是「待建立」占位）。
 
@@ -903,13 +915,11 @@ class Provider:
           又被拒，就警告并按未启用设备支持部署（不把已不存在的 ARN 写回 SSM、不给不存在的项目授权）。
         - 其余错误（限流、网络、服务端故障）→ 退出码 1，不猜测：当成「没有项目」会多建一个，当成无权限会撤掉设备授权，
           而这只有到设备 run 执行时才会暴露。stack 未改动；CreateProject 若已在服务端生效，重新运行会按名称找回它。
+        `target` 由 `deploy` 解析好传入，与 VPC 取值比对、cdk 用的是同一个。
         runtime.devicefarm 在函数内导入：`--help` 不为它拉起 AWS SDK。
         """
         from gherkai_runtime import devicefarm
 
-        target = self._resolve_target_or_report(args)
-        if target is None:
-            return EXIT_PRECONDITION, None
         path = names.ssm_device_farm_project_path(target.prefix)
         try:
             stored = devicefarm.read_project_arn(
@@ -1095,11 +1105,15 @@ class Provider:
     def _cli_version_or_report(args) -> str | None:
         """CLI 前端交进来的自身版本（`args.version`，接缝契约见模块头）；缺失或为空 → 打一句诊断、返 None（调用点以退出码 2 结束）。
 
+        返回值就是写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源：运行中的 CLI 的版本，决策 7 比对的正是它），
+        也是 push-worker 镜像 tag 的前缀与 list-workers 的筛选版本；调用点把它传给后续各步，不再另取。
+
         **不自报、不回落**（ADR 0037 决策 6「版本戳」、决策 7「接线」）：前端在 gherkai 未装成包时有意给 None，表示「取不到
         自身版本」；换成本包的 dist 版本会抹掉这个信号——editable 树里各包版本各自漂，写进后端的就成了另一个包的版本戳，
-        push-worker 的镜像 tag 前缀与 list-workers 的版本筛选也随之失真。纯本地判断：deploy / push-worker / list-workers
-        在入口处检查，排在任何 AWS 读之前；diff / destroy / `--synth-only` 经 `_run_cdk` 检查，排在目标解析与 cdk 之前
-        （缺 `--vpc` 时 `_require_vpc` 为补全提示而做的那次读取先于它）。
+        push-worker 的镜像 tag 前缀与 list-workers 的版本筛选也随之失真。戳写错比缺失更坏：缺失是「警告不拦」，写错会让所有
+        提交者的 skew 判定失真。纯本地判断：deploy / push-worker / list-workers 在入口处检查，排在任何 AWS 读之前；
+        diff / destroy / `--synth-only` 经 `_run_cdk` 检查，排在目标解析与 cdk 之前（缺 `--vpc` 时 `_require_vpc` 为补全
+        提示而做的那次读取先于它）。
         """
         version = getattr(args, "version", None)
         if version:
@@ -1108,19 +1122,6 @@ class Provider:
               "与 worker 镜像，不能留空也不能猜。请先把 gherkai 装成包（`uv tool install 'gherkai[deploy-aws]'`，"
               "或在工作区执行 `uv sync`）再重新运行。", file=sys.stderr)
         return None
-
-    @staticmethod
-    def _resolve_version(args) -> str:
-        """写进 SSM 版本戳的版本（ADR 0037 决策 6「版本戳」/ 决策 7 版本真源）：CLI 前端交进来的 `args.version`，
-        即运行中的 CLI 的版本（决策 7 比对的正是它）。
-
-        契约守卫：每条调用路径都已先经 `_cli_version_or_report` 检查、缺值时在那里以退出码 2 结束，正常走不到这里的
-        raise。缺值不回落：戳写错比缺失更坏（缺失是「警告不拦」，写错会让所有提交者的 skew 判定失真）。
-        """
-        explicit = getattr(args, "version", None)
-        if not explicit:
-            raise ValueError("_resolve_version 需要 args.version：调用前先经 _cli_version_or_report 检查")
-        return str(explicit)
 
 
 # ---------------------------------------------------------------------------

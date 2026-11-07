@@ -20,7 +20,7 @@
 
 三条容易出错的载体边界：
 
-- **模板 revision 与 variant revision 是两回事**：模板由 stack 创建（承载 cpu/memory/两个 role/日志组/`runtimePlatform`/`stopTimeout`），镜像栏为 `latest` 占位、**永不被 RunTask**；每个（引擎，variant）另有一个从模板复制、镜像栏替换为 `repo@sha256:<digest>` 的 revision，实际起 task 用的是后者。
+- **模板 revision 与 variant revision 是两回事**：模板由 stack 创建（承载 cpu/memory/两个 role/日志组/`runtimePlatform`/`stopTimeout`），镜像栏为 `latest` 占位、**永不被 RunTask**；每个（引擎，版本，variant）另有一个从模板复制、镜像栏替换为 `repo@sha256:<digest>` 的 revision，实际起 task 用的是后者（复用已有 revision 时要求血缘 tags 的版本与 variant 都与本次相同，判据在 `workers._pick_reusable`）。
 - **数据类资源不随 `gherkai destroy` 删**（两表、桶、两个 ECR repo 都是 `RETAIN`）；而 `worker-image/*` 与 `worker-default` 不是 stack 资源（由命令 `put_parameter` 写），`destroy` 同样不清除它们。同一 prefix 重建后这两族参数的原值仍在，记录的仍是上一套 stack 时期的 revision / 模板 ARN。`push-worker` 与 `deploy` 派生注册的各 variant task-def revision 同样不归 stack 管理，`destroy` 之后留在账户里。云端 Device Farm 项目 `{prefix}devices` 由 `gherkai deploy` 在 cdk 之前找回或建立，也不归 stack 管理：`destroy` 保留它（连同会话记录与录像），只有记录其 ARN 的 `device-farm-project` 参数随 stack 删除；同一 prefix 重新部署时按名称找回并沿用它。
 - **asset 的来源是发起这次部署的那个 venv**，不是仓库相对路径，也不联网安装：dev 版部署得到的就是本机当前的那份 code。清单漏一个传递依赖，后果是 Lambda 运行期 `ImportError`（清单完整性由 `deploy_aws/tests/test_lambda_asset.py` 的「剥掉 site-packages 真 import」那条用例保证）。
 
@@ -74,7 +74,7 @@
 | `deploy` 调整了 cpu / `stopTimeout`，但 variant 仍以旧配置运行 | ② 的第 4 步（重派生）未完成：revision 是不可变快照、不继承模板变更 | `workers.rederive_variants`（按模板 ARN 判定、幂等；`pushed_at` 保留原值，镜像内容不变） |
 | 提交以退出码 2 结束，提示「产物前缀不一致」 | 推进器 Lambda 的 `REPORT_DIR` 与提交侧 `--report-dir` 不同（前者 IaC 有意不注入、由 handler 缺省供给） | `compose.preflight_cloud_resources` |
 | `deploy` 以退出码 1 结束并提示「stack 已生效，但同步基础镜像要 pull/push——deploy 的机器需要容器引擎」 | ② 的第 2 步未执行：纯发行版要求部署机具备容器引擎，探活失败即**硬失败**，第 3/4 步与清理 pass 均未执行——安装后重新运行 `gherkai deploy`（幂等收敛）。非纯发行版不探测容器引擎，第 2 步整步跳过并输出一条警告，第 3/4 步照常执行 | `workers.run_deploy_steps`（探活分支退出码 1）/ `workers.sync_base`（非纯发行版跳过；判据 `compose.is_pure_release`）；cdk 前那句预告在 `cli.Provider.deploy` |
-| `list-workers` 里 revision 比 variant 多 | 正常现象：已退休 / 孤儿 revision 正等待清理 pass（见 §5），`_pending_cleanup` 逐条列出原因 | `workers.list_workers` |
+| `list-workers` 里 revision 比 variant 多 | 正常现象：已退休 / 孤儿 revision 正等待清理 pass（见 §5），`_pending_cleanup` 逐条列出原因；`still_mapped` 为真的已退休条目仍被某个版本的映射引用，清理 pass 不会删它 | `workers.list_workers` |
 
 `gherkai doctor --backend cloud --prefix …` 是这张表的只读版：一次性输出身份、后端版本比对、资源与三个 Lambda、报告前缀一致性、默认 variant 指针与**逐引擎的 revision 解析**（即上表「默认 variant 在新版本尚无镜像」那行的只读探针，至少一个引擎解析成功即算通过），云端 task-def 的停止宽限与本机 worker 自报的最短收尾宽限之间的比对（可选项；本机没有该引擎 worker 时跳过该引擎），Device Farm 项目记录（部署是否启用设备支持）与项目里未结束的远程访问会话（两项都是可选项），以及部署工具链（Node / cdk / 容器引擎）。
 
@@ -96,7 +96,7 @@ cloud 提交是**定义期解析、运行期照抄**，这是「重推 variant �
 第 3 条的正确性有两道配套护栏，都在回收侧：
 
 - **ECR 仓库不设任何 lifecycle 规则**：正在运行的 run 的旧 revision 按 digest 指向被重推后转为 untagged 的那一层，因此这两个 repo 上**不得添加 untagged 过期规则**；随之而来的 untagged 层增长是已知的存储成本（该决策的理由与代价记录见本节末权威行的 ADR 0038）。
-- **删 revision 要满足清理的三个前置条件**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）、无未到终态的 run 引用它，**且**不再被任何版本的 `worker-image/*` 映射引用（已退休但仍被某个映射引用的 revision 留着，删了会让那条映射悬空；孤儿按定义不在任何映射里，不受这一条影响）。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、运行中 run 引用检查静默失效。任一条不满足则留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对运行中 run 引用检查不可见。
+- **删 revision 要满足清理的三个前置条件**（机会式清理 pass，挂在 `push-worker` 末步与 `deploy` 第 4 步末，**无定时任务**）：退休满 `workers.RETIRE_QUIET_PERIOD`（值见该常量）、无未到终态的 run 引用它，**且**不再被任何版本的 `worker-image/*` 映射引用（已退休但仍被某个映射引用的 revision 留着，删了会让那条映射悬空，`list-workers` 以 `still_mapped` 标出这类条目；孤儿按定义不在任何映射里，不受这一条影响）。引用判定走 runs 表 `status-index` GSI 的 `Query` + `contains(worker_task_def_arns, :arn)`——GSI 必须 `INCLUDE` 这个属性，不投影则恒不匹配、运行中 run 引用检查静默失效。任一条不满足则留到下次 pass（滞留无害：`ACTIVE` 但无人引用）。**已知盲区**：`run --backend cloud --no-report` 不写 STATE item，其 revision 引用对运行中 run 引用检查不可见。
 
 > 权威：[ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」「运行时与 preflight」（含被拒方案：RunTask 传 family、缺字段回落模板、ECR untagged 过期规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（definition 随 run 走、宿主只读回）；code：`compose.resolve_worker_variant`、`workers.cleanup_pass`、`core/gherkai_core/adapters/run_store/ddb.py` 的 `create_run`。
 

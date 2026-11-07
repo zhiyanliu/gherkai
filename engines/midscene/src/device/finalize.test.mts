@@ -160,7 +160,7 @@ const CHOICE = { deviceArn: DEVICE_ARN, model: "Pixel 8", osVersion: "14" };
 
 function makeJob(): Omit<Job, "scenarios"> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     scope: { id: SCOPE_ID, name: "Checkout" },
     engine: "midscene",
     assertionVotes: 1,

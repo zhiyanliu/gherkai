@@ -1,20 +1,22 @@
 // Device Farm 会话块的单测（ADR 0051 决策 2、3、4、7、10；ADR 0052 决策 3）。运行：npx tsx --test src/device/session.test.mts。
 //
-// Device Farm 换成假的 API（不连 AWS），时钟与计时器换成虚拟时钟：设备解析的版本族、静态过滤、排序与完整分页，零候选重列与
-// 繁忙退避，Create 的尝试序号与会话名、限流重试、结果未知的待核与按名列举消除（扫到分页结束、同名的每个 ARN 都登记），获取期
-// 按名找回的会话在 session_opened 写出后随即按 Stop 规则停止（逐会话，不等同页其余会话的事件写完；与剩余分页并行，下一次
-// Create 等它处理完；本页事件写出期间预算中止即不再列举下一页），等到 RUNNING（就绪之前已结束即按会话丢失终止，并在登记里记下
-// 确认），查状态，换台时按同一 Stop 规则处理被替换的会话。另有一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、
-// 单次尝试、每次调用都带中止信号，以及响应体没读完的失败归结果未知。会话年龄的后备由接缝按 createRequestedAt 计算
+// Device Farm 换成假的 API（不连 AWS），时钟与计时器换成虚拟时钟：设备解析的版本族、静态过滤、排序与完整分页，零候选重列与繁忙
+// 退避，Create 的尝试序号与会话名、限流重试、结果未知的待核（含任何 HTTP 5xx，按名核对仍没找到时终结按 attempted 上报；Get 与
+// 列举收到 5xx 照旧退避重发）与按名列举消除（扫到分页结束、同名的每个 ARN 都登记），获取期按名找回的会话在 session_opened 写出
+// 后随即按 Stop 规则停止（逐会话，不等同页其余会话的事件写完；与剩余分页并行，下一次 Create 等它处理完；本页事件写出期间预算中止
+// 即不再列举下一页），等到 RUNNING（就绪之前已结束即按会话丢失终止，并在登记里记下确认），查状态，换台时按同一 Stop 规则处理被
+// 替换的会话。另有一组用真的 DeviceFarmClient（网络层换成本地处理器）核对区域、单次尝试、每次调用都带中止信号，以及 Create 的
+// 响应体没读完、服务端返回 500 与网关返回 502 的失败归结果未知。会话年龄的后备由接缝按 createRequestedAt 计算
 // （device/surface.mts），这里只核对这个起点是发出 Create 的时刻。
 import { test } from "node:test";
 import assert from "node:assert";
 import { PassThrough, Readable } from "node:stream";
 import type { Device as FarmDevice, RemoteAccessSession } from "@aws-sdk/client-device-farm";
 import {
-  APPIUM_SERVER_MAJOR_VERSION, DEVICE_FARM_REGION, RUNNING_POLL_INTERVAL_MS, classifyCallFailure, compareVersions, createDeviceFarmSessions,
-  deviceArnRejectedMessage, deviceFarmApi, matchesVersionFamily, type DeviceFarmApi, type Timers,
+  APPIUM_SERVER_MAJOR_VERSION, DEVICE_FARM_REGION, RUNNING_POLL_INTERVAL_MS, classifyCallFailure, classifyCreateFailure, compareVersions,
+  createDeviceFarmSessions, deviceArnRejectedMessage, deviceFarmApi, matchesVersionFamily, type DeviceFarmApi, type Timers,
 } from "./session.mjs";
+import { createDeviceFinalizer } from "./finalize.mjs";
 import { encode, RUN_ID_ENV } from "./session-name.mjs";
 import { sessionEventSink } from "./device-session.mjs";
 import { DEVICE_FARM_CALL_TIMEOUT_MS, DEVICE_RELIST_DELAY_MS, STOP_CALL_TIMEOUT_MS, busyBackoffMs } from "./limits.mjs";
@@ -162,7 +164,7 @@ const PROJECT = "arn:aws:devicefarm:us-west-2:123456789012:project:p";
 
 function makeJob(request: { osVersion?: string; deviceArn?: string }, device: "android" | "ios" = "ios"): Omit<Job, "scenarios"> {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     scope: { id: SCOPE_ID, name: "Checkout" },
     engine: "midscene",
     assertionVotes: 1,
@@ -249,21 +251,21 @@ test("设备解析：静态过滤平台、手机、远程访问与公共设备�
     dev("A", "18.6", "HIGHLY_AVAILABLE"),
     dev("Z", "18.1", "HIGHLY_AVAILABLE"),
   ]];
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.deepEqual(got, { ok: true, value: { deviceArn: "arn:aws:devicefarm:us-west-2::device:A", model: "iPhone A", osVersion: "18.6" } });
 });
 
 test("设备解析：版本号高优先于可用性（同族里 18.6 AVAILABLE 先于 18.1 HIGHLY_AVAILABLE）", async () => {
   const h = setup({ osVersion: "18" });
   h.farm.devicePages = [[dev("LOW", "18.1", "HIGHLY_AVAILABLE"), dev("HIGH", "18.6", "AVAILABLE")]];
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok && got.value.deviceArn, "arn:aws:devicefarm:us-west-2::device:HIGH");
 });
 
 test("设备解析：完整分页（带 nextToken 读完每一页），最合适的设备在最后一页也能选中，每次调用都带中止信号", async () => {
   const h = setup({ osVersion: "18" });
   h.farm.devicePages = [[dev("P1", "18.1", "AVAILABLE")], [dev("P2", "18.2", "AVAILABLE")], [dev("P3", "18.6", "AVAILABLE")]];
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok && got.value.deviceArn, "arn:aws:devicefarm:us-west-2::device:P3");
   assert.deepEqual(h.farm.ops("listDevices").map((c) => c.arg), [undefined, "page-1", "page-2"]);
   for (const c of h.farm.ops("listDevices")) assert.ok(c.signal instanceof AbortSignal);
@@ -272,7 +274,7 @@ test("设备解析：完整分页（带 nextToken 读完每一页），最合适
 test("设备解析：首轮零候选间隔 2 秒再列一次，仍为零即 precheck_failed，消息给出条件与最接近的可用版本", async () => {
   const h = setup({ osVersion: "17" });
   h.farm.devicePages = [[dev("A", "16.7", "AVAILABLE"), dev("B", "18.6", "BUSY"), dev("T", "17.2", "AVAILABLE", { formFactor: "TABLET" })]];
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok, false);
   if (got.ok) return;
   assert.equal(got.termination.errorType, "precheck_failed");
@@ -289,7 +291,7 @@ test("设备解析：首轮零候选间隔 2 秒再列一次，仍为零即 prec
 test("设备解析：没有任何同平台的手机时，零候选的消息不编造版本", async () => {
   const h = setup({ osVersion: "17" }, "android");
   h.farm.devicePages = [[dev("IOS", "17.0", "AVAILABLE")]];
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok, false);
   if (got.ok) return;
   assert.equal(got.termination.errorType, "precheck_failed");
@@ -301,7 +303,7 @@ test("设备解析：首轮零候选、重列后出现候选即选中", async ()
   const h = setup({ osVersion: "18" });
   let round = 0;
   h.farm.listDevicesImpl = async () => ({ devices: round++ === 0 ? [] : [dev("A", "18.6", "AVAILABLE")] });
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok && got.value.deviceArn, "arn:aws:devicefarm:us-west-2::device:A");
 });
 
@@ -317,7 +319,7 @@ test("设备解析：全部繁忙时在预算内等待，重列间隔 5、10、2
   ];
   let round = 0;
   h.farm.listDevicesImpl = async () => ({ devices: rounds[Math.min(round++, rounds.length - 1)] });
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.equal(got.ok && got.value.deviceArn, "arn:aws:devicefarm:us-west-2::device:A");
   const at = h.farm.ops("listDevices").map((c) => c.at);
   const gaps = at.slice(1).map((t, i) => t - at[i]);
@@ -328,7 +330,7 @@ test("设备解析：全部繁忙时在预算内等待，重列间隔 5、10、2
 test("设备解析：繁忙等待中预算到期或进入终结，等待立即中止并把中止原因抛给调用方，不再列举", async () => {
   const h = setup({ osVersion: "18" });
   h.farm.devicePages = [[dev("A", "18.6", "BUSY")]];
-  const pending = h.block.resolve(h.budget, null);
+  const pending = h.block.resolve(h.budget);
   await settle();
   const reason = new Error("在等待时间内没有拿到可用设备");
   h.budget.abort(reason);
@@ -339,7 +341,7 @@ test("设备解析：繁忙等待中预算到期或进入终结，等待立即�
 test("设备解析：列举被拒（非限流的 4xx）直接报错；限流与服务端错误在预算内退避后重列", async () => {
   const denied = setup({ osVersion: "18" });
   denied.farm.listDevicesImpl = async () => { throw sdkError("AccessDeniedException", 400); };
-  await assert.rejects(denied.clock.run(denied.block.resolve(denied.budget, null)), /AccessDeniedException/);
+  await assert.rejects(denied.clock.run(denied.block.resolve(denied.budget)), /AccessDeniedException/);
   assert.equal(denied.farm.ops("listDevices").length, 1);
 
   const throttled = setup({ osVersion: "18" });
@@ -348,16 +350,17 @@ test("设备解析：列举被拒（非限流的 4xx）直接报错；限流与�
     n += 1;
     if (n === 1) throw sdkError("ThrottlingException", 400);
     if (n === 2) throw sdkError("InternalServiceException", 500);
+    if (n === 3) throw sdkError("ServiceUnavailableException", 503);   // 列举收到 5xx 照旧退避重列，只有 Create 把 5xx 归结果未知
     return { devices: [dev("A", "18.6", "AVAILABLE")] };
   };
-  const got = await throttled.clock.run(throttled.block.resolve(throttled.budget, null));
+  const got = await throttled.clock.run(throttled.block.resolve(throttled.budget));
   assert.equal(got.ok, true);
-  assert.equal(throttled.farm.ops("listDevices").length, 3);
+  assert.equal(throttled.farm.ops("listDevices").length, 4);
 });
 
 test("设备解析：直接给 ARN 时不列举、不做静态过滤", async () => {
   const h = setup({ deviceArn: "arn:aws:devicefarm:us-west-2::device:FIXED" });
-  const got = await h.clock.run(h.block.resolve(h.budget, null));
+  const got = await h.clock.run(h.block.resolve(h.budget));
   assert.deepEqual(got, { ok: true, value: { deviceArn: "arn:aws:devicefarm:us-west-2::device:FIXED", model: null, osVersion: null } });
   assert.equal(h.farm.calls.length, 0);
 });
@@ -422,7 +425,40 @@ test("Create：请求超时即记为待核；重试前按名列举，列举为�
   assert.deepEqual([...h.block.registry.pending.keys()], [encode(RUN_ID, SCOPE_ID, 1)]);
 });
 
-test("Create：在途的 Create 不因获取预算到期而被中止（结果未知只来自它自己的请求超时或连接中断）", async () => {
+// 500 与 502 / 503 / 504 同样处理；503 带限流类错误名也记待核（只看状态码）
+for (const [errorName, status] of [["InternalServiceException", 500], ["UnknownError", 502], ["ThrottlingException", 503]] as const) {
+  test(`Create：收到 HTTP ${status}（${errorName}）记为待核、不按被拒处理；下一次 Create 之前先按名核对，没找到即保留待核，终结核对仍没找到时发一对 attempted、释放失败（退出码 1）`, async () => {
+    const h = setup();
+    const finalizer = createDeviceFinalizer(h.block);
+    const name1 = encode(RUN_ID, SCOPE_ID, 1);
+    let n = 0;
+    h.farm.createImpl = async (input) => {
+      n += 1;
+      if (n === 1) throw sdkError(errorName, status);
+      return { arn: "arn:session:2", name: input.name, status: "PENDING" };
+    };
+    const got = await h.clock.run(h.block.create(CHOICE, h.budget));
+    assert.equal(got.ok && got.value.name, encode(RUN_ID, SCOPE_ID, 2));
+    // 第二次 Create 之前先按名核对一次；列举为空不构成排除，这个名字仍待核
+    assert.deepEqual(h.farm.calls.map((c) => c.op), ["create", "listSessions", "create"]);
+    assert.deepEqual([...h.block.registry.pending.keys()], [name1]);
+    assert.ok(h.logs.some((l) => l.includes(`服务端错误 HTTP ${status}`) && l.includes(name1)), h.logs.join("\n"));
+    assert.ok(!h.logs.some((l) => l.includes("被限流")), h.logs.join("\n"));
+
+    const out = await h.clock.run(finalizer.finalize("interrupt", { deleteAppiumSession: null }));
+    assert.equal(h.farm.ops("listSessions").length, 2);                   // 终结核对再找一次
+    assert.deepEqual(h.emitted.map((e) => [e.type, e.origin ?? e.release, e.sessionId, e.name]), [
+      ["session_opened", "created", "arn:session:2", encode(RUN_ID, SCOPE_ID, 2)],
+      ["session_opened", "attempted", null, name1],
+      ["session_closed", "unconfirmed", null, name1],
+      ["session_closed", "confirmed", "arn:session:2", encode(RUN_ID, SCOPE_ID, 2)],
+    ]);
+    // 建成的会话已确认停止，释放失败只来自这次结果未知的尝试
+    assert.equal(out.releaseFailed, true);
+  });
+}
+
+test("Create：在途的 Create 不因获取预算到期而被中止（结果未知只来自这次请求自己的超时、连接中断或 5xx）", async () => {
   const h = setup();
   h.farm.createImpl = (input) => h.clock.timers.sleep(3_000).then(() => ({ arn: "arn:session:1", name: input.name, status: "PENDING" }));
   const pending = h.block.create(CHOICE, h.budget);
@@ -844,6 +880,7 @@ test("waitRunning：排队与准备中继续等，RUNNING 且端点可用才返�
   const replies: Array<RemoteAccessSession | Error> = [
     { status: "PENDING_CONCURRENCY" },
     sdkError("InternalServiceException", 500),
+    sdkError("ServiceUnavailableException", 503),                          // 查询收到 5xx 照常重试，只有 Create 把 5xx 归结果未知
     { status: "PREPARING" },
     { status: "RUNNING" },                                                    // 端点还没出现
     { status: "RUNNING", endpoints: { remoteDriverEndpoint: endpoint }, instanceArn: "arn:unit:7" },
@@ -852,8 +889,8 @@ test("waitRunning：排队与准备中继续等，RUNNING 且端点可用才返�
   const got = await h.clock.run(h.block.waitRunning(created.value, h.budget));
   assert.deepEqual(got, { ok: true, value: { endpoint, unit: "arn:unit:7" } });
   const gets = h.farm.ops("get");
-  assert.equal(gets.length, 5);
-  assert.deepEqual(gets.slice(1).map((c, i) => c.at - gets[i].at), Array(4).fill(RUNNING_POLL_INTERVAL_MS));
+  assert.equal(gets.length, 6);
+  assert.deepEqual(gets.slice(1).map((c, i) => c.at - gets[i].at), Array(5).fill(RUNNING_POLL_INTERVAL_MS));
 });
 
 test("waitRunning：就绪之前读到 STOPPING / COMPLETED 即按会话丢失终止——消息用准备阶段那句，状态与 Device Farm 的说明只进 worker 日志，不再查询、不发 Stop，在会话登记里记下确认的时刻与设备分钟", async () => {
@@ -937,7 +974,7 @@ test("status：返回 Get 的状态值，请求带 10 秒超时；查询失败�
 test("换台：被替换的会话按 Stop 规则先 Get，仍在运行即发一次 Stop（3 秒超时）、出错补查一次 Get，不重试、不等到确认；再按同一规则重新解析与 Create，两个会话都留在待清理集", async () => {
   const h = setup();
   h.farm.devicePages = [[dev("A", "18.6", "AVAILABLE")]];
-  const choice1 = await h.clock.run(h.block.resolve(h.budget, null));
+  const choice1 = await h.clock.run(h.block.resolve(h.budget));
   assert.ok(choice1.ok);
   if (!choice1.ok) return;
   const first = await h.clock.run(h.block.create(choice1.value, h.budget));
@@ -947,7 +984,7 @@ test("换台：被替换的会话按 Stop 规则先 Get，仍在运行即发一�
   const retireAt = h.clock.t;
   await h.clock.run(h.block.retire(first.value.arn));
   assert.equal(h.clock.t - retireAt, STOP_CALL_TIMEOUT_MS);
-  const choice2 = await h.clock.run(h.block.resolve(h.budget, first.value));
+  const choice2 = await h.clock.run(h.block.resolve(h.budget));
   assert.ok(choice2.ok);
   if (!choice2.ok) return;
   const second = await h.clock.run(h.block.create(choice2.value, h.budget));
@@ -1046,21 +1083,41 @@ test("构造：缺 RUN_ID 时同步报错（会话名不能缺本次运行的编
 
 // ---- 错误归类 ----
 
-test("调用失败的归类：没有 HTTP 响应或响应体没读完为结果未知，限流与服务端错误可重试，其余 4xx 为明确拒绝", () => {
-  assert.equal(classifyCallFailure(timeoutReason()), "unknown");
-  assert.equal(classifyCallFailure(connectionReset()), "unknown");
-  // 响应头已到（SDK 把 200 写进 $metadata）而响应体没读完：服务端可能已经建好了会话
-  assert.equal(classifyCallFailure(Object.assign(new Error("aborted"), { name: "AbortError", $metadata: { httpStatusCode: 200 } })), "unknown");
-  assert.equal(classifyCallFailure(Object.assign(connectionReset(), { $metadata: { httpStatusCode: 200 } })), "unknown");
-  assert.equal(classifyCallFailure(sdkError("ThrottlingException", 400)), "retryable");
-  assert.equal(classifyCallFailure(sdkError("LimitExceededException", 400)), "retryable");
-  assert.equal(classifyCallFailure(sdkError("TooManyRequestsException", 429)), "retryable");
+/** 两种归类在 5xx 以外的输入上相同：没有 HTTP 响应或响应体没读完为结果未知，限流可重试，其余 4xx 与凭证解析失败为明确拒绝。 */
+function assertCommonClassification(classify: (e: unknown) => string): void {
+  assert.equal(classify(timeoutReason()), "unknown");
+  assert.equal(classify(connectionReset()), "unknown");
+  // 响应头已到（SDK 把 200 写进 $metadata）而响应体没读完：服务端可能已经执行了请求
+  assert.equal(classify(Object.assign(new Error("aborted"), { name: "AbortError", $metadata: { httpStatusCode: 200 } })), "unknown");
+  assert.equal(classify(Object.assign(connectionReset(), { $metadata: { httpStatusCode: 200 } })), "unknown");
+  assert.equal(classify(sdkError("ThrottlingException", 400)), "retryable");
+  assert.equal(classify(sdkError("LimitExceededException", 400)), "retryable");
+  assert.equal(classify(sdkError("TooManyRequestsException", 429)), "retryable");
+  assert.equal(classify(sdkError("ArgumentException", 400)), "definitive");
+  assert.equal(classify(sdkError("NotFoundException", 400)), "definitive");
+  assert.equal(classify(sdkError("AccessDeniedException", 400)), "definitive");
+  assert.equal(classify(Object.assign(new Error("no creds"), { name: "CredentialsProviderError" })), "definitive");
+}
+
+test("等待就绪的 Get 与设备列举的失败归类：没有 HTTP 响应或响应体没读完为结果未知，限流与任何 5xx 可重试，其余 4xx 为明确拒绝", () => {
+  assertCommonClassification(classifyCallFailure);
   assert.equal(classifyCallFailure(sdkError("InternalServiceException", 500)), "retryable");
+  assert.equal(classifyCallFailure(sdkError("UnknownError", 502)), "retryable");
   assert.equal(classifyCallFailure(sdkError("ServiceUnavailable", 503)), "retryable");
-  assert.equal(classifyCallFailure(sdkError("ArgumentException", 400)), "definitive");
-  assert.equal(classifyCallFailure(sdkError("NotFoundException", 400)), "definitive");
-  assert.equal(classifyCallFailure(sdkError("AccessDeniedException", 400)), "definitive");
-  assert.equal(classifyCallFailure(Object.assign(new Error("no creds"), { name: "CredentialsProviderError" })), "definitive");
+  assert.equal(classifyCallFailure(sdkError("UnknownError", 504)), "retryable");
+  assert.equal(classifyCallFailure(sdkError("ThrottlingException", 503)), "retryable");
+});
+
+test("Create 的失败归类：任何 5xx 都为结果未知（带限流类错误名也一样），其余与等待就绪的 Get、设备列举的归类相同", () => {
+  assertCommonClassification(classifyCreateFailure);
+  assert.equal(classifyCreateFailure(sdkError("InternalServiceException", 500)), "unknown");
+  assert.equal(classifyCreateFailure(sdkError("UnknownError", 502)), "unknown");
+  assert.equal(classifyCreateFailure(sdkError("ServiceUnavailable", 503)), "unknown");
+  assert.equal(classifyCreateFailure(sdkError("UnknownError", 504)), "unknown");
+  assert.equal(classifyCreateFailure(sdkError("UnknownError", 501)), "unknown");
+  // 只看状态码：5xx 带限流类错误名也归结果未知
+  assert.equal(classifyCreateFailure(sdkError("ThrottlingException", 503)), "unknown");
+  assert.equal(classifyCreateFailure(sdkError("ThrottlingException", 500)), "unknown");
 });
 
 // ---- 真的 DeviceFarmClient，网络层换成本地处理器 ----
@@ -1134,6 +1191,7 @@ test("Device Farm 客户端：只尝试一次（服务端 500 不在 SDK 内重�
   assert.ok(err);
   assert.equal(seen.length, 1);
   assert.equal(classifyCallFailure(err), "retryable");
+  assert.equal(classifyCreateFailure(err), "unknown");
 
   const rejected: SeenRequest[] = [];
   const api2 = deviceFarmApi({
@@ -1144,6 +1202,32 @@ test("Device Farm 客户端：只尝试一次（服务端 500 不在 SDK 内重�
   assert.equal((err2 as { name?: string }).name, "ArgumentException");
   assert.equal(classifyCallFailure(err2), "definitive");
   assert.equal(rejected.length, 1);
+});
+
+test("Device Farm 客户端：Create 收到服务端的 500 与网关的 502（响应体不是 JSON）时都只尝试一次，错误带状态码、按 Create 的归类为结果未知", async () => {
+  const replies = [
+    { status: 500, type: "application/x-amz-json-1.1", body: JSON.stringify({ __type: "InternalServiceException", message: "boom" }) },
+    { status: 502, type: "text/html", body: "<html><body><h1>502 Bad Gateway</h1></body></html>" },
+  ];
+  for (const reply of replies) {
+    const seen: string[] = [];
+    const api = deviceFarmApi({
+      requestHandler: {
+        handle: async (req: { headers: Record<string, string> }) => {
+          seen.push(req.headers["x-amz-target"] ?? req.headers["X-Amz-Target"] ?? "");
+          const body = Readable.from([Buffer.from(reply.body)]);
+          return { response: { statusCode: reply.status, headers: { "content-type": reply.type }, body } };
+        },
+      } as never,
+      credentials: FAKE_CREDS,
+    });
+    const input = { projectArn: PROJECT, deviceArn: "arn:d", name: "gherkai:r:h:1:s", billingMethod: "METERED" };
+    const err = await api.createRemoteAccessSession(input, AbortSignal.timeout(60_000)).then(() => null, (e: unknown) => e);
+    assert.ok(err, String(reply.status));
+    assert.equal(seen.length, 1, String(reply.status));
+    assert.equal((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode, reply.status);
+    assert.equal(classifyCreateFailure(err), "unknown", String(reply.status));
+  }
 });
 
 /** 响应头为 200、响应体写到一半连接即被重置的网络层。 */
@@ -1175,7 +1259,7 @@ test("Device Farm 客户端：Create 收到 200 响应头后读响应体时连�
   const err = await api.createRemoteAccessSession(input, AbortSignal.timeout(60_000)).then(() => null, (e: unknown) => e);
   assert.ok(err);
   assert.equal((err as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode, 200);
-  assert.equal(classifyCallFailure(err), "unknown");
+  assert.equal(classifyCreateFailure(err), "unknown");
   assert.equal(seen.length, 1);
 
   const h = setup();

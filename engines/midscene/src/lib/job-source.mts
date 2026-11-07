@@ -17,7 +17,7 @@ import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
 // 另一侧没跟，测试就会变红。
 /** 本 worker 认的 worker↔core 协议版本（ADR 0024）：一个数、两个方向各带——能力自述写进 schema_version、job 行核 schemaVersion；与 core 的
  *  wire.PROTOCOL_SCHEMA_VERSION 同值，由 golden 钉住。 */
-export const PROTOCOL_SCHEMA_VERSION = 1;
+export const PROTOCOL_SCHEMA_VERSION = 2;
 export interface JobApp { alias: string; bucket: string | null; key: string | null; sha256: string | null; appId: string }
 export interface JobTargetShape { device: string; uiKind: string; app?: JobApp }
 export interface JobDeviceRequest {
