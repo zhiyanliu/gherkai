@@ -387,8 +387,8 @@ def _non_terminal_statuses() -> list[str]:
     """未到终态的 run 级 status 全集（`Status` - `TERMINAL_STATUSES`，至少含 `pending`）。
 
     **从 core 的枚举派生、不在此写死名单**：新增前置态时（ADR 0031 的 `_PRE_TERMINAL` 是那处的真源）引用检查
-    自动覆盖；写死会让新态的 run 被清理误判成「没人引用」。`gherkai_core` 经 `gherkai-runtime` 的 `==` 同版本 pin
-    传递可用（ADR 0037 决策 2b）。
+    自动覆盖；写死会让新态的 run 被清理误判成「没人引用」。`gherkai_core` 由本包直接声明同版本
+    （直接 import 就直接声明，ADR 0037 决策 2c）。
     """
     from gherkai_core.model import TERMINAL_STATUSES, Status
 

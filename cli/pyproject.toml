@@ -26,12 +26,14 @@ Repository = "https://github.com/zhiyanliu/gherkai"
 Changelog = "https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md"
 
 [tool.hatch.metadata.hooks.uv-dynamic-versioning]
-# 依赖产品本体 gherkai-runtime（它再依赖 core 窄腰）；引擎不在此声明——引擎是被 spawn 的子进程，
+# 依赖产品本体 gherkai-runtime；命令行也直接 import core 的模型、序列化与 adapter，故同样直接声明 gherkai-core[aws]
+# （直接 import 就直接声明、不靠 runtime 传递，ADR 0037 决策 2c）；引擎不在此声明——引擎是被 spawn 的子进程，
 # 装配 cmd 的知识在 runtime（ADR 0016「演进」节/0026）。
 # 硬依赖 `[aws]`：裸装 `gherkai` 即可 `--backend cloud`（ADR 0037 决策 2c 反转了「cli 主依赖不含 boto3」）；
 # local 路径仍绝不 import boto3（懒加载在 compose 的 _make_* 钩子里），与安装期是否装了 boto3 无关。
 dependencies = [
     "gherkai-runtime[aws]=={{ version }}",
+    "gherkai-core[aws]=={{ version }}",
 ]
 # [local] = 本机后端的 Python 侧 worker，装进 CLI 同一个 venv（安装与拉起正交：装靠 extra、起靠定位链，
 # ADR 0037 决策 3）。midscene 是 Node 地盘，pip extra 够不到，走 npm。
@@ -40,6 +42,7 @@ optional-dependencies = { local = ["gherkai-worker-novaact=={{ version }}"], dep
 
 [tool.uv.sources]
 gherkai-runtime = { workspace = true }
+gherkai-core = { workspace = true }
 gherkai-worker-novaact = { workspace = true }
 gherkai-deploy-aws = { workspace = true }
 

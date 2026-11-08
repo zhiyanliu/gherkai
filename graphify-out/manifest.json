@@ -1,7 +1,7 @@
 {
   "cli/pyproject.toml": {
-    "mtime": 1794038638.6255453,
-    "ast_hash": "93fb454083faba834a74ecf134307fd6",
+    "mtime": 1794126778.5454135,
+    "ast_hash": "7a26d6b84f112cd134035bf96f0ed218",
     "semantic_hash": ""
   },
   "cli/tests/test_backend_cloud.py": {
@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1794125767.7726085,
-    "ast_hash": "55ba3fe50a19948e2129a551064c0983",
+    "mtime": 1794126712.3888783,
+    "ast_hash": "18def3c6b30f4ba61efaaf55020724f3",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794125872.2554104,
-    "ast_hash": "0eb1ec5392d9a049af61f947314cea3a",
+    "mtime": 1794126778.5451288,
+    "ast_hash": "716a1b00c92154fdb3917e13d6529b52",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794125872.2550774,
-    "ast_hash": "bf5af3bd654778d5bf15b93dc788ed55",
+    "mtime": 1794126778.5461688,
+    "ast_hash": "46e066f187ce9dda80734cc357fedd96",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -910,8 +910,8 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "deploy_aws/pyproject.toml": {
-    "mtime": 1794125767.7729106,
-    "ast_hash": "fec4e607bfc5387fa65d3e04461850bb",
+    "mtime": 1794126778.545532,
+    "ast_hash": "886ae140bc8e429b987e7590a47ad079",
     "semantic_hash": ""
   },
   "deploy_aws/README.md": {
@@ -955,8 +955,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py": {
-    "mtime": 1794126069.7176569,
-    "ast_hash": "bacfd34cda1261dff7d7c6a41c966799",
+    "mtime": 1794126778.5448263,
+    "ast_hash": "010d08764c1619a25472feeb19d95161",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/names.py": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1794050562.646471,
-    "ast_hash": "7766b7797d831ca3d2bd205b2645b7d3",
+    "mtime": 1794126778.5458589,
+    "ast_hash": "b355ec6a474bded38b7561c5725d94ed",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1880,13 +1880,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1794125767.7722952,
-    "ast_hash": "71698e48362b043661d5701d69a0f402",
+    "mtime": 1794126712.3885102,
+    "ast_hash": "a3b69cef8f791e2a2ce77e14efd2f0c4",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1794120679.991204,
-    "ast_hash": "6d85b4fd7b83c2a6f5b7a69595cfce26",
+    "mtime": 1794127326.3642406,
+    "ast_hash": "556912ae0fc108635758e1e44f542be2",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -2255,8 +2255,8 @@
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface-desktop.mts": {
-    "mtime": 1794125767.7727604,
-    "ast_hash": "23dde576bfeccd0e3c5af93d5a11f6e0",
+    "mtime": 1794126712.389064,
+    "ast_hash": "d3929d62342c6d78fc3b0602cf37ae4f",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/surface.mts": {

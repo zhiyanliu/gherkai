@@ -737,6 +737,7 @@ wheels = [
 name = "gherkai"
 source = { editable = "cli" }
 dependencies = [
+    { name = "gherkai-core", extra = ["aws"] },
     { name = "gherkai-runtime", extra = ["aws"] },
 ]
 
@@ -750,6 +751,7 @@ local = [
 
 [package.metadata]
 requires-dist = [
+    { name = "gherkai-core", extras = ["aws"], editable = "core" },
     { name = "gherkai-deploy-aws", marker = "extra == 'deploy-aws'", editable = "deploy_aws" },
     { name = "gherkai-runtime", extras = ["aws"], editable = "runtime" },
     { name = "gherkai-worker-novaact", marker = "extra == 'local'", editable = "engines/novaact" },
@@ -782,6 +784,7 @@ dependencies = [
     { name = "aws-cdk-lib" },
     { name = "boto3" },
     { name = "constructs" },
+    { name = "gherkai-core", extra = ["aws"] },
     { name = "gherkai-runtime", extra = ["aws"] },
     { name = "packaging" },
 ]
@@ -791,6 +794,7 @@ requires-dist = [
     { name = "aws-cdk-lib", specifier = ">=2.150.0" },
     { name = "boto3", specifier = ">=1.34" },
     { name = "constructs", specifier = ">=10.0.0" },
+    { name = "gherkai-core", extras = ["aws"], editable = "core" },
     { name = "gherkai-runtime", extras = ["aws"], editable = "runtime" },
     { name = "packaging", specifier = ">=24" },
 ]

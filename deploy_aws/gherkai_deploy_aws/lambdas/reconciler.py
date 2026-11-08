@@ -150,7 +150,7 @@ class EventBridgeTimeoutWatch:
             self._client.create_schedule(
                 Name=self.schedule_name(run_id, scope_id),
                 # at() 表达式不带时区后缀（Scheduler 默认 UTC）、只收到秒，小数秒截去。带秒而不取整到分钟：触发早于 deadline
-                # 的部分由处置侧复查补足，取整只会把超时处置的最坏推迟翻倍（ADR 0034「job timeout」节被拒方案）。
+                # 的部分由处置侧复查补足，取整只会把取整与调度精度引入的推迟分量翻倍，异步投递与处置耗时另计（ADR 0034「job timeout」节被拒方案）。
                 ScheduleExpression=f"at({at.strftime('%Y-%m-%dT%H:%M:%S')})",
                 FlexibleTimeWindow={"Mode": "OFF"},
                 ActionAfterCompletion="DELETE",  # 到点触发即自动删（IAM 需随附 scheduler:DeleteSchedule）
