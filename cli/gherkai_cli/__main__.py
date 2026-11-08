@@ -648,9 +648,10 @@ def _resolve_steps_dir_for_backend(args) -> str | int | None:
     return None
 
 
-# worker 自述（--capabilities）非零退出的两种成因，三个消费点（run/submit 运行前检查、list-deterministic、doctor）同一句：
+# worker 自述（--capabilities）非零退出的两种成因，各消费点（run/submit 运行前检查、list-deterministic、doctor、plan）同一句：
 # 该入口会加载使用方 steps，非零退出既可能是那些文件加载失败，也可能是 worker 与 CLI 版本不一致（不认该入口、掉进
 # job 模式读到空 stdin 即退）；只转述 worker 的 stderr 时，后一种只剩一句与版本无关的 JSON 解析错、使用方不知升级哪一侧。
+# 只接在 WorkerSelfDescribeError 之后：自述取到了、不兼容（WorkerIncompatibleError）与取不到时，消息本身就是诊断、自带改法。
 _SELF_DESCRIBE_CAUSES = ("（以 worker 自己的报错为准；若它只报了一句解析错误、没说原因，常见成因是 steps/ 目录里的"
                          "文件加载失败，或 worker 与命令行工具版本不一致——两者须同版本安装）")
 
@@ -679,10 +680,14 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None, *, require_session_w
             return 2
         try:
             caps = compose.query_capabilities(engine, steps_dir=steps_dir)
-        except (ValueError, RuntimeError) as e:
-            # 含 WorkerSelfDescribeError（worker 起来了但非零退出）与超时 / 输出非 JSON / 自述不合契约；
-            # 文案中性、点到两种成因（见 _SELF_DESCRIBE_CAUSES）。
+        except compose.WorkerSelfDescribeError as e:
+            # worker 起来了但非零退出：文案中性、点到两种成因（见 _SELF_DESCRIBE_CAUSES）
             _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}\n{_SELF_DESCRIBE_CAUSES}")
+            return 2
+        except (ValueError, RuntimeError) as e:
+            # 自述不兼容（含版本不一致，消息以版本不一致那一句收尾）、取不到（超时 / 起不来 / 输出非 JSON）、
+            # NOVA_ACT_TIMEOUT_S 取值不合法：消息本身即诊断，三类失败在这里都以退出码 2 结束（ADR 0036「5.」末段）
+            _progress(f"引擎 {engine} 的 worker 自述失败，拒绝运行：{e}")
             return 2
         if require_session_warmup and caps.get(compose.SESSION_WARMUP_KEY) is not True:
             _progress(f"引擎 {engine} 的 worker 不支持本机应用测试需要的会话预热（--expose-local）：请把 worker 与命令行工具装成同一个版本后重试。")
@@ -706,11 +711,11 @@ def _cmd_list_deterministic(args) -> int:
     try:
         # 清单即能力自述对象的 deterministic_steps 键（ADR 0036「5.」「加键不加入口」：worker 只有两个非 job 入口）
         caps = compose.query_capabilities(args.engine, steps_dir=steps_dir)
-    except compose.WorkerNotFoundError as e:  # 定位链 miss：消息自带安装指引，别再叠版本不一致的猜测
-        _progress(f"list-deterministic 失败：{e}")
-        return 2
-    except (ValueError, RuntimeError) as e:  # 与运行前检查同一口径（两种成因）
+    except compose.WorkerSelfDescribeError as e:  # 与运行前检查同一口径（两种成因）
         _progress(f"list-deterministic 失败：{e}\n{_SELF_DESCRIBE_CAUSES}")
+        return 2
+    except (ValueError, RuntimeError) as e:  # 定位链 miss（消息自带安装指引）、自述不兼容、其余取不到：消息本身即诊断
+        _progress(f"list-deterministic 失败：{e}")
         return 2
     entries = caps["deterministic_steps"]
     # 每条 step 的实际可用目标是声明目标与该引擎支持目标的交集（ADR 0049 决策 3；交集与 step 级缺键语义都在 compose 一处实现，
@@ -815,8 +820,10 @@ def _cmd_doctor(args) -> int:
                 continue
             try:
                 described.append((r["engine"], compose.query_capabilities(r["engine"], steps_dir=steps_dir), ""))
-            except Exception as e:  # 自述失败即使用方 steps 加载失败 / 版本不一致 / 起不来：原样转述 + 点到成因（detail 要给「怎么办」）
-                described.append((r["engine"], None, str(e)))
+            except Exception as e:  # 自述失败（使用方 steps 加载失败 / 版本不一致 / 起不来）：原样转述，detail 要给「怎么办」——
+                # worker 非零退出时另点到两种成因；不兼容与取不到的消息自带改法
+                described.append((r["engine"], None, f"{e}{_SELF_DESCRIBE_CAUSES}"
+                                  if isinstance(e, compose.WorkerSelfDescribeError) else str(e)))
     # 模型行：worker 自报「它起 job 时实际会用哪个模型」，让 env 覆盖过的机器一眼可见（ADR 0004「模型版本选择
     # 策略」）。纯展示故 required=False；自述失败时**不出这一行**——模型未知就别拿占位符冒充事实（失败本身已由
     # steps.load 那行报）。
@@ -846,7 +853,7 @@ def _cmd_doctor(args) -> int:
                 + ("" if steps_dir else "；无 steps/ 目录，仅内建"),
                 required=steps_dir is not None)
         else:
-            add("steps", f"load.{engine}", False, f"worker 自述失败：{err}{_SELF_DESCRIBE_CAUSES}",
+            add("steps", f"load.{engine}", False, f"worker 自述失败：{err}",
                 required=steps_dir is not None)
 
     want_cloud = args.backend == "cloud" or args.prefix is not None
@@ -1284,18 +1291,47 @@ def _validate_worker_variant(args) -> bool:
     return True
 
 
-def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
+def _plan_capabilities(jobs, steps_dir: str | None) -> "dict[str, dict | compose.WorkerUnavailableError] | int":
+    """plan 的第一次 worker 查询：本次用到的每个引擎各取一次能力自述，先于匹配查询（ADR 0036 决策 4「匹配查询的前置」）。
+
+    契约（含协议版本）由 `compose.query_capabilities` 当场核，与 `run` / `submit` 的执行前预检、`list-deterministic`
+    同一道闸门——匹配查询的输入不带版本号，旧 worker 的回答形状可能完全合法，只有先核自述才看得出不兼容。
+    返回 {引擎: 自述对象，或取不到时的 WorkerUnavailableError}：这一结果在本次 plan 内复用（目标拒绝、标注的目标交集都用它，
+    取不到也不再重问），故自述取到时每引擎至多 spawn 两次（自述一次、匹配查询一次）。以下情形打诊断、返回退出码 2，
+    都不发匹配查询：worker 非零退出（使用方 steps 加载失败，或旧 worker 不认该入口）、自述与命令行工具不兼容（含版本
+    不一致，转述 compose 给的那一句）、`NOVA_ACT_TIMEOUT_S` 取值不合法——plan 不比 `run` 宽。只有取不到（定位不到
+    worker、起不来、超时、输出不是合法 JSON）降级：那是环境问题，只让该引擎的目标不核对，匹配查询照发。
+    """
+    out: dict = {}
+    for engine in sorted({j.engine for j in jobs}):
+        try:
+            out[engine] = compose.query_capabilities(engine, steps_dir=steps_dir)
+        except compose.WorkerUnavailableError as e:
+            out[engine] = e
+        except compose.WorkerSelfDescribeError as e:
+            _progress(f"引擎 {engine} 的 worker 自述失败，plan 拒绝出结果：{e}\n{_SELF_DESCRIBE_CAUSES}")
+            return 2
+        except (ValueError, RuntimeError) as e:  # 自述不兼容（WorkerIncompatibleError）与 NOVA_ACT_TIMEOUT_S 取值不合法：消息本身即诊断
+            _progress(f"引擎 {engine} 的 worker 自述失败，plan 拒绝出结果：{e}")
+            return 2
+    return out
+
+
+def _probe_deterministic_dispatch(jobs, steps_dir: str | None,
+                                  capabilities: "dict[str, dict | compose.WorkerUnavailableError]") -> dict | None:
     """plan 的派发预期标注（ADR 0036 决策 4）：按引擎分组 step 文本、批量问 worker 命中结果。
 
     返回 {(scope_id, scenario_id, step_index): probe} 或 None（全部引擎都没问成）；命中条目在该 scope 目标上带运行期前提时，
     probe 另带 `requires`（ADR 0049 决策 6）。match 用**裸 step 文本**加关键字
     ——与 worker 实际执行时派发的匹配面完全一致（不 unquote、不拼 argument，ADR 0024；关键字只用于核对条目的
-    keywords 声明，ADR 0050 决策 1）。按引擎 best-effort：
-    某引擎查询失败只让该引擎的 job 无标注（stderr 警告），不影响其他引擎与 plan 本体——**含定位链 miss**
-    （该引擎运行时没装，ADR 0037 决策 3 明确 plan 保持本降级、不像 run/submit 那样以退出码 2 结束）。**例外**：worker
-    起来了但自述非零退出（WorkerSelfDescribeError，典型情形是使用方 steps 加载失败，或 worker 与 CLI 版本不一致、旧 worker 不认新的查询输入形态）原样抛出、由 `_cmd_plan` 以退出码 2 结束
-    ——那是使用方代码错误，降级成无标注等于静默把定制 step 换成 AI（ADR 0037 决策 4）。
-    steps_dir 透传给 worker 自述入口，使标注反映使用方定制 step（ADR 0037 决策 4）。
+    keywords 声明，ADR 0050 决策 1）。
+    `capabilities` 是 `_plan_capabilities` 先取到的那份结果（协议版本已在那一步核过），命中之后的目标交集用它、不再重问。
+    按引擎 best-effort：某引擎的匹配查询取不到结果（WorkerUnavailableError）只让该引擎的 job 无标注（stderr 警告），
+    不影响其他引擎与 plan 本体——**含定位链 miss**（该引擎运行时没装，ADR 0037 决策 3 明确 plan 保持本降级、不像
+    run/submit 那样以退出码 2 结束）。其余失败原样抛出、由 `_cmd_plan` 以退出码 2 结束：典型是 worker 起来了但非零退出
+    （WorkerSelfDescribeError：使用方 steps 加载失败，或旧 worker 不认新的查询输入形态）——降级成无标注等于静默把定制
+    step 换成 AI（ADR 0037 决策 4）。
+    steps_dir 透传给 worker 查询入口，使标注反映使用方定制 step（ADR 0037 决策 4）。
     """
     by_engine: dict[str, list[tuple[tuple, dict, object]]] = {}
     for j in jobs:
@@ -1307,13 +1343,16 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     for engine, items in by_engine.items():
         try:
             probes = compose.match_deterministic(engine, [it for _, it, _t in items], steps_dir=steps_dir)
-        except compose.WorkerSelfDescribeError:
-            raise  # 使用方 steps 加载失败：不降级、由 _cmd_plan 以退出码 2 结束（ADR 0037 决策 4「提交侧同样前置」）
-        except (ValueError, RuntimeError) as e:
+        except compose.WorkerUnavailableError as e:
             _progress(f"（标注降级）引擎 {engine} 的确定性命中查询失败，该引擎 step 无派发标注：{e}")
             continue
         ok_any = True
-        available = _available_step_targets(engine, steps_dir)
+        caps = capabilities.get(engine)
+        if isinstance(caps, dict):
+            available = _available_step_targets(caps)
+        else:  # 自述取不到（上一步已记下原因）：命中照标确定性，只是不按 scope 目标核对
+            _progress(f"（标注降级）引擎 {engine} 的能力自述取不到，命中的确定性 step 不按 scope 目标核对、一律标为确定性：{caps}")
+            available = None
         for (key, item, target), probe in zip(items, probes):
             if not probe:  # AI=None 不进表，渲染端缺失即不标
                 continue
@@ -1335,16 +1374,9 @@ def _probe_deterministic_dispatch(jobs, steps_dir: str | None) -> dict | None:
     return dispatch if ok_any else None
 
 
-def _available_step_targets(engine: str, steps_dir: str | None) -> "dict[str, list] | None":
+def _available_step_targets(caps: dict) -> "dict[str, list]":
     """plan 标注用：该引擎每条确定性 step 实际可用的目标（声明与 worker 支持目标的交集，ADR 0049 决策 3），按模式索引。
-    自述取不到时返回 None（标注退回「命中即标确定性」，目标核对那一步已另行警告）；自述非零退出原样抛、由 `_cmd_plan` 以退出码 2 结束。"""
-    try:
-        caps = compose.query_capabilities(engine, steps_dir=steps_dir)
-    except compose.WorkerSelfDescribeError:
-        raise
-    except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
-        _progress(f"（标注降级）引擎 {engine} 的能力自述取不到，命中的确定性 step 不按 scope 目标核对、一律标为确定性：{e}")
-        return None
+    caps 是 `_plan_capabilities` 取到的那份自述（取不到时调用方不调本函数，标注退回「命中即标确定性」）。"""
     supported = compose.worker_targets(caps)
     return {e["pattern"]: compose.available_targets(compose.step_targets(e), supported) for e in caps["deterministic_steps"]}
 
@@ -1458,7 +1490,7 @@ def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict |
 
 def _cmd_plan(args) -> int:
     """用例预检：读 feature → plan → 渲染 scope/job 分组 + 派发预期标注（ADR 0036）。
-    **零 AWS、零花费、零副作用**（标注会起本地瞬时 worker 子进程做 match 自述——非执行 job；失败自动降级）。
+    **零 AWS、零花费、零副作用**（会起本地瞬时 worker 子进程取能力自述、做匹配查询——非执行 job；只有取不到结果时降级）。
 
     与 _cmd_run 共用 `_load_and_plan`（votes 校验 + load_feature + plan），但到此为止——
     省钱验证 feature 写法、看分组、暴露 FeatureContractError。退出码与 run 一致（0 ok / 2 配置错）。
@@ -1470,21 +1502,22 @@ def _cmd_plan(args) -> int:
     if isinstance(steps_dir, int):
         return steps_dir
 
-    # 目标拒绝（ADR 0048 决策 4）：按引擎能力自述核对各 job 的测试目标，不受支持即与其它用例契约违约同样以退出码 2 结束、消息给出改法。
-    # 只问有非桌面 job 的引擎（桌面网页没有会话上限、所有 worker 都支持，核对无意义）；自述取不到（引擎没装、查询失败）只警告、不判定；
-    # worker 起来了但自述非零退出（使用方 steps 加载失败、版本不一致）与派发标注查询同一口径以退出码 2 结束，不能静默。
+    # 能力自述先于一切匹配查询（ADR 0036 决策 4「匹配查询的前置」）：每个引擎问一次、核协议版本，不兼容即以退出码 2 结束
+    capabilities = _plan_capabilities(jobs, steps_dir)
+    if isinstance(capabilities, int):
+        return capabilities
+    # 目标拒绝（ADR 0048 决策 4）：按引擎能力自述核对各 job 的测试目标，不受支持即与其它用例契约违约同样以退出码 2 结束、消息给出改法；
+    # 与执行前预检同一判据、对全部 job 核对（plan 不比 run 宽）。自述取不到（引擎没装、超时等）只警告、不判定——桌面网页所有
+    # worker 都支持，故只在该引擎有非桌面 job 时提示。
     rejections: list[str] = []
-    for engine in sorted({j.engine for j in jobs if not j.target.is_desktop}):
-        try:
-            caps = compose.query_capabilities(engine, steps_dir=steps_dir)
-        except compose.WorkerSelfDescribeError as e:
-            _progress(f"引擎 {engine} 的 worker 自述失败，plan 拒绝出结果：{e}\n{_SELF_DESCRIBE_CAUSES}")
-            return 2
-        except (compose.WorkerNotFoundError, ValueError, RuntimeError) as e:
-            _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对——不受支持的目标仍会在执行前被拒绝："
-                      f"本机后端由执行前预检拒绝，云端最迟由 worker 在建会话前自检拒绝：{e}")
+    for engine, caps in capabilities.items():
+        engine_jobs = [j for j in jobs if j.engine == engine]
+        if isinstance(caps, compose.WorkerUnavailableError):
+            if any(not j.target.is_desktop for j in engine_jobs):
+                _progress(f"（目标核对降级）引擎 {engine} 的能力自述取不到，该引擎 job 的测试目标未核对——不受支持的目标仍会在执行前被拒绝："
+                          f"本机后端由执行前预检拒绝，云端最迟由 worker 在建会话前自检拒绝：{caps}")
             continue
-        rejections.extend(_target_rejections([j for j in jobs if j.engine == engine], caps))
+        rejections.extend(_target_rejections(engine_jobs, caps))
     if rejections:
         for msg in rejections:
             _progress(msg)
@@ -1501,13 +1534,16 @@ def _cmd_plan(args) -> int:
         return 2
 
     # 派发预期标注（ADR 0036 决策 4）：按引擎批量问 worker「哪些 step 命中确定性」。best-effort——
-    # 引擎环境未装/查询失败只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
+    # 引擎环境未装、查询取不到结果只降级为无标注+stderr 警告，plan 核心功能保持零依赖（不因标注挂掉）。
     try:
-        dispatch = _probe_deterministic_dispatch(jobs, steps_dir)
+        dispatch = _probe_deterministic_dispatch(jobs, steps_dir, capabilities)
     except compose.WorkerSelfDescribeError as e:
-        # 唯一不降级的失败（ADR 0036 决策 4）：成因可能是使用方 steps 加载失败，也可能是 worker 与 CLI 版本不一致（旧 worker
+        # 不降级（ADR 0036 决策 4）：成因可能是使用方 steps 加载失败，也可能是 worker 与 CLI 版本不一致（旧 worker
         # 不认新的 match 查询输入形态），两种都不能降级成「无标注」——那等于把定制 step 悄悄换成 AI。成因提示与其它入口同一句。
         _progress(f"向引擎 worker 查询确定性 step 失败，plan 拒绝出结果（否则标注静默缺失，即定制 step 被悄悄换成 AI）：{e}\n{_SELF_DESCRIBE_CAUSES}")
+        return 2
+    except (ValueError, RuntimeError) as e:  # 取不到之外的其余失败同样不降级（只有取不到是环境问题）
+        _progress(f"向引擎 worker 查询确定性 step 失败，plan 拒绝出结果：{e}")
         return 2
 
     # 核心产出 → stdout（与 run 的输出契约一致：--json 单文档 / 否则人看文本）

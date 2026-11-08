@@ -59,7 +59,7 @@ import { errorText, oneLineError } from "../lib/error-text.mjs";
 import { scenarioKey } from "../worker/evidence.mjs";
 import { redactSecrets } from "../lib/redact.mjs";
 import {
-  attachClassification, readClassification,
+  FINALIZING_ACT_MESSAGE, attachClassification, readClassification,
   type AcquireResult, type AddressReading, type Controls, type HandlerCall, type ReleaseMode, type ReleaseOutcome,
   type ReportRef, type ScopeTermination, type Snapshot, type SnapshotResult, type StepFacts, type StepFailure,
   type SurfaceDeps, type TargetSurface, type TentativeVerdict,
@@ -83,6 +83,8 @@ import { NATIVE_CONTEXT } from "./web-context.mjs";
 
 /** 获取预算耗尽（ADR 0051 决策 4 的原文）。 */
 export const ACQUIRE_TIMEOUT_MESSAGE = "在等待时间内没有拿到可用设备，请稍后重试或调大获取设备的等待时间";
+// 进入终结时中止获取预算信号的原因：获取各步把信号的 reason 当作失败原因抛出，会进 worker 日志，故用产品语言（ADR 0039）。
+export const FINALIZING_ACQUIRE_MESSAGE = "测试已进入收尾，获取设备已停止";
 /** 获取预算在安装包准备（凭据与区域解析、存在性检查、预签名）期间到期：同归 acquire_timeout，消息点明到期时正在准备安装包，
  *  与上一句同用「获取设备的等待时间」（ADR 0051 决策 2「安装包准备的上界」）。 */
 export const APP_PREPARE_TIMEOUT_MESSAGE =
@@ -494,7 +496,7 @@ class Budget implements AcquireBudget {
   /** 预算是否已用尽（按截止时刻判，不受进入终结时的中止影响）。 */
   expired(): boolean { return this.remainingMs() <= 0; }
 
-  abort(): void { this.stop(); this.controller.abort(new Error("finalizing")); }
+  abort(): void { this.stop(); this.controller.abort(new Error(FINALIZING_ACQUIRE_MESSAGE)); }
 
   stop(): void {
     if (this.timer !== null) { clearTimeout(this.timer); this.timer = null; }
@@ -913,7 +915,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     return async (groups) => { await selected.fn(ctx, groups); };
   }
 
-  async execute<T>(run: (abortSignal: AbortSignal | undefined) => Promise<T>): Promise<T> {
+  async execute<T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T> {
     if (this.lost) throw attachClassification(new Error(this.lost.message), this.lost);
     const ageLeftMs = this.ageLeftMs();
     if (ageLeftMs <= 0) {
@@ -1077,7 +1079,7 @@ class DeviceSurface<A extends DriverAdapter> implements TargetSurface {
     this.finalizing = true;
     this.budget?.abort();
     this.ready?.guard.shutdown();
-    this.currentAct?.abort(new Error("finalizing"));
+    this.currentAct?.abort(new Error(FINALIZING_ACT_MESSAGE));
     const appium = this.ready?.appium ?? this.connectedAppium;
     // 钩子在终结块调用它的那一刻核对升级：之前到达的中断让 deleteSession 不再发出（中断路径不调它，ADR 0051 决策 5）。
     const deleteAppiumSession = mode === "normal" && appium

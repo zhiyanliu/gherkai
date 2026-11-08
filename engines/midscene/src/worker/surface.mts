@@ -7,9 +7,10 @@
 //   五个操作：取 agent（acquire）、取确定性句柄（bindHandler）、导航或启动应用（navigate）、释放（release）、预热（warmup）；
 //   四项边界义务：scenario 前核对（preScenarioCheck）、step 前核对（preStep）、step 后复原并核对（restore）、
 //     采集界面快照（分两半：第 4 步的 readAddress 与第 6 步的 snapshot，原先单列的「读当前地址」即前一半）。
-//   另有两个成员把 ADR 已定的约束落到接口上：execute 是 step 第 3 步的执行窗口——执行令牌在 step 执行结束的那一刻撤销、
-//   结果未知与进入终结时要中止当前 act 的 abortSignal（ADR 0052 决策 6；ADR 0051 决策 5），实现必须知道这段窗口的起止并持有
-//   这个 signal；sessionId 是会话血缘，scope_done 在每条出口上都要带它。
+//   另有两个成员把 ADR 已定的约束落到接口上：execute 是 step 第 3 步的执行窗口——两种实现都为每次 act 开一个 abortSignal、
+//   进入终结时中止它（ADR 0051 决策 5）；设备另有执行令牌，在 step 执行结束的那一刻撤销，结果未知与会话年龄到点时同样中止这个
+//   signal（ADR 0052 决策 6；ADR 0051 决策 2）。实现必须知道这段窗口的起止并持有这个 signal。sessionId 是会话血缘，scope_done
+//   在每条出口上都要带它。
 //
 // 单个 step 的固定顺序（ADR 0052 决策 2，契约的一部分）落在本接口上：
 //   1. 发 step_started；
@@ -263,14 +264,18 @@ export interface TargetSurface {
   bindHandler(selected: SelectedHandler): HandlerCall;
 
   /** step 第 3 步的执行窗口：每个 step 至多调用一次，覆盖这一步的全部执行（确定性 handler，或 AI 的一次 act、多票断言的每一票）。
-   *  run 收到本次 act 的 abortSignal，AI 的 act 应把它作为 aiAct 的 abortSignal 传入（aiBoolean 不接受这一项，只截图、不发动作）。
-   *  - 桌面：直接调用 run(undefined)，原样返回或抛出，没有令牌；
+   *  run 收到本次 act 的 abortSignal（两种实现都给出），AI 的 act 把它作为 aiAct 的 abortSignal 传入（aiBoolean 不接受这一项，只截图、
+   *  不发动作；确定性 handler 不接收它，执行到自己返回为止）。两种实现在进入终结（release 的 interrupt 模式）时都中止它，在途的 act
+   *  以中止失败返回、随后不再发起模型调用；进入终结之后才打开的窗口，signal 一开始即已中止（ADR 0051 决策 5「进入终结之后主流程
+   *  让位」①）。
+   *  - 桌面：进入时新建本次 act 的中止控制，run 结束（返回或抛出）即不再持有它，原样返回或抛出；没有执行令牌与会话年龄后备，
+   *    中止只来自进入终结；
    *  - 设备：进入时发出执行令牌并新建本次 act 的中止控制；run 结束（返回或抛出）的那一刻撤销令牌；结果未知时命令守卫中止这个
    *    signal；进入终结（release 的 interrupt 模式）时立即撤销令牌并中止它（ADR 0052 决策 6；ADR 0051 决策 5 阶段 1）。
    *    窗口内命令守卫判定过结果未知或会话丢失时，execute 以带该归类标记的异常拒绝——即便 run 正常返回（handler 吞掉了守卫的
    *    异常），或 run 抛出的是 Midscene 包装后的另一个异常；已带归类的与断言异常原样抛出，其余挂 engine_error（设备路径没有
    *    network_error 出口）。 */
-  execute<T>(run: (abortSignal: AbortSignal | undefined) => Promise<T>): Promise<T>;
+  execute<T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T>;
 
   /** 导航或启动应用：内建导航 step 的执行面，打开 address（ADR 0020 第 3 条；ADR 0048 决策 7）。
    *  - 桌面：page.goto，等到 domcontentloaded，超时 60 秒；
@@ -316,11 +321,11 @@ export interface TargetSurface {
    *  - normal：桌面按现有清理次序，先 Stop 全部待清理会话、再关浏览器；设备在 Appium 会话已建成且远程访问会话不是 STOPPING /
    *    COMPLETED 时先 deleteSession（5 秒），再终结核对与释放阶段，Appium 会话没建成时从终结核对开始。run-scope 在正常收尾里
    *    把它排在 agent.destroy 与报告上传之后。
-   *  - interrupt：调用的那一刻即进入终结——桌面唤醒建连重试的退避，设备中止当前 act 的 signal 并撤销执行令牌；之后等在途的
-   *    建会话请求一段窗口（桌面为 INFLIGHT_SETTLE_MS，设备为终结阶段 1 的 10 秒），窗口内没有返回的发一对 attempted 事件，再
-   *    执行释放（设备即终结四阶段的前三段，不调 deleteSession）。阶段 4 的兜底上传与排空归 run-scope 的收尾序列；进入终结后
-   *    run-scope 不再为在途的 step 发 step_done，也不发 scope_done（ADR 0051 决策 5 阶段 1），所以这一模式返回的 reportRefs 不被使用；
-   *    设备的 device-session.json 只写盘并交给截图后台队列，由阶段 4 的排空带上。
+   *  - interrupt：调用的那一刻即进入终结——两种实现都中止当前 act 的 signal（execute 窗口给出的那个），桌面另唤醒建连重试的退避，
+   *    设备另撤销执行令牌；之后等在途的建会话请求一段窗口（桌面为 INFLIGHT_SETTLE_MS，设备为终结阶段 1 的 10 秒），窗口内没有
+   *    返回的发一对 attempted 事件，再执行释放（设备即终结四阶段的前三段，不调 deleteSession）。阶段 4 的兜底上传与排空归 run-scope
+   *    的收尾序列；进入终结后 run-scope 不再为在途的 step 发 step_done，也不发 scope_done（ADR 0051 决策 5 阶段 1），所以这一模式
+   *    返回的 reportRefs 不被使用；设备的 device-session.json 只写盘并交给截图后台队列，由阶段 4 的排空带上。
    *  - 升级（设备）：正常释放进行中到达的 interrupt 不重新进入终结，而是让同一次终结升级——尚未开始的 deleteSession 不再发出、
    *    尚未开始的 normal 模式诊断上传不再进行，device-session.json 按 interrupt 模式交给后台队列；已在途的 deleteSession 不打断，由它自己的
    *    5 秒上限封顶；已在途的诊断上传同样不打断（上传器的单次超时封顶），落定之后上传失败才把 device-session.json 交给后台队列。
@@ -336,6 +341,10 @@ export interface TargetSurface {
 const CLASSIFICATION_KEY = Symbol.for("gherkai.worker-midscene.step-classification");
 /** 沿 error.cause 链逐层查找的层数上限，同时防环。worker 里遍历 cause 链的函数（桌面与设备两条路径）共用这一个值。 */
 export const MAX_CAUSE_DEPTH = 8;
+
+// 进入终结时中止在途 act 的原因（ADR 0051 决策 5「进入终结之后主流程让位」①，桌面与设备同一机制）：Midscene 把它写进 act 的失败
+// 消息与执行报告，报告随产物交给使用方，故用产品语言（ADR 0039）。
+export const FINALIZING_ACT_MESSAGE = "测试已进入收尾，这一步的 AI 动作已中止";
 
 /** 挂在执行异常上的归类标记：step 级归类，另可带一项命令守卫查到的会话事实。runStep 只用其中的类别与消息；那项事实只给
  *  驱动适配器用。 */

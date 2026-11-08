@@ -55,11 +55,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 |---|---|---|
 | 以退出码 2 结束，`引擎 novaact 的 worker 运行时未找到`（或 midscene），后面跟一句装法 | 该引擎的 worker 没装，或不在 PATH 上 | 按报错中给出的安装命令安装：Nova Act 用 `uv tool install 'gherkai[local]'`，Midscene 用 `npm i -g @gherkai/worker-midscene`。用自建 worker 时用 `GHERKAI_WORKER_NOVAACT_CMD` / `GHERKAI_WORKER_MIDSCENE_CMD` 指向它 |
 | 以退出码 2 结束，`worker 自述失败，拒绝运行`，末尾提到「worker 与命令行工具版本不一致——两者须同版本安装」 | worker 与 CLI 不是同一个版本 | 把两侧装成同版本：`uv tool upgrade gherkai`；Midscene 侧运行 `npm i -g @gherkai/worker-midscene@<gherkai --version 显示的版本>` |
-| `能力自述格式版本是 … 命令行工具认的是 …`、`自述的最短停止宽限不是非负有限数` | 同上，版本不一致的另一种形态 | 同上 |
+| `能力自述格式版本是 …，这个命令行工具认的是 …：命令行工具与 worker 的版本不一致，请把两者装成同一版本`（本机后端的 `run`、`submit`，以及 `list-deterministic` 与 `plan` 都以退出码 2 结束并给出这一句）；`自述的最短停止宽限不是非负有限数` 等以同一句结尾的提示 | 同上，版本不一致的另一种形态 | 同上 |
 | `plan` 以退出码 2 结束，worker 的报错是「收到的确定性 step 查询不是这个 worker 认的格式：命令行工具与 worker 的版本不一致」 | 同上：查询确定性 step 时暴露的版本不一致（1.4 的命令行工具把它冠以「使用方 steps 加载失败」） | 同上 |
 | `要问的是引擎 X 的 worker，回答的却自称 Y` | `GHERKAI_WORKER_*_CMD` 指到了另一个引擎的 worker | 改正该环境变量，或取消设置改用已安装的 worker |
 | Midscene worker 无法启动，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
-| `plan` 输出以「（标注降级）」开头的提示 | 某个引擎的 worker 不可用，只影响命中标注 | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
+| `plan` 输出以「（标注降级）」开头的提示 | 某个引擎的 worker 不可用（没装、起不来或没有及时回应），只影响命中标注；worker 与命令行工具版本不一致不在此列，`plan` 以退出码 2 结束（见上） | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
 
 只提交云端 run 的人不必装任何 worker：`--backend cloud` 的 `run` / `submit` 不查本机 worker。
 

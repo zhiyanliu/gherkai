@@ -783,7 +783,7 @@ async function runScenario(
   let shortcircuit = false;
   for (const step of steps) {
     // 进入终结之后不再开始新的 step，也不再为短路的 step 发 step_skipped（ADR 0051 决策 5「进入终结之后主流程让位」①）。
-    // 在途的 step 不打断：设备上终结已中止当前 act，桌面的 act 在会话停止之后失败返回。
+    // 在途的 step 不打断：其中在途的 act 由终结中止（桌面与设备同一机制，见接缝的 execute），确定性 handler 执行到自己返回为止。
     if (seam.finalizing()) break;
     if (shortcircuit) {
       await sink.emit({ type: "step_skipped", scenarioId, stepIndex: step.index });
@@ -942,11 +942,12 @@ async function runStep(
       if (cost) ev.cost = cost;
       if (!passed) { ev.errorType = "assertion_failed"; ev.message = `AI 断言未过多数票（${yes}/${votesN}）：${text}`; }
     } else {
-      // When / Given → AI 动作（无 votes）。设备上执行窗口给出本次 act 的 abortSignal：结果未知与进入终结时中止它（ADR 0052 决策 6）
+      // When / Given → AI 动作（无 votes）。执行窗口总给出本次 act 的 abortSignal，这里不区分桌面与设备：两条路径都在进入终结时
+      // 中止它，设备另在结果未知与会话年龄到点时中止（ADR 0051 决策 5「进入终结之后主流程让位」①；ADR 0052 决策 6）。被中止的
+      // act 以异常返回、落到下面的 catch 记 error；进入终结之后 step_done 已被门控、evidence 不再产出，这条判定不出 worker。
       const prompt = buildInstruction(step.text, step.argument as any);
       instr = prompt;
-      await surface.execute((abortSignal) =>
-        abortSignal === undefined ? agent.aiAct(prompt) : agent.aiAct(prompt, { abortSignal }));
+      await surface.execute((abortSignal) => agent.aiAct(prompt, { abortSignal }));
       ev.status = "passed";
       const cost = stepCost(tokBefore, agent);
       if (cost) ev.cost = cost;

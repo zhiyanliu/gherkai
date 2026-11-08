@@ -40,7 +40,7 @@ _RECOVERY_MARGIN_S = 10.0
 class SubprocessLauncher:
     """local Launcher（ADR 0034 机制四回调 + 机制二退出观察者）。
 
-    launch(job)：起 worker（resolver 按 engine 选 SubprocessEngine）→ 后台线程消费 fd3 事件流落 SQLite +
+    launch(job, claimed_at=…)：起 worker（resolver 按 engine 选 SubprocessEngine）→ 后台线程消费 fd3 事件流落 SQLite +
     退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
@@ -65,7 +65,11 @@ class SubprocessLauncher:
         # 本 launcher 起过的 scope（run_reconcile_loop 的接力恢复扫豁免它们——自家 job 的 deadline 有 timer 在管）
         self.owned_scopes: set[str] = set()
 
-    def launch(self, job: Job) -> None:
+    def launch(self, job: Job, *, claimed_at: str) -> None:
+        # claimed_at 不参与计时：deadline timer 按本进程的单调时钟、在 worker 启动之后起算。claim 与 launch 同在本进程的
+        # 同一轮 tick 里，timer 晚于 claim 的只是查询宽限下限与启动 worker 的耗时，偏差只让到点略晚、不会提前；按 claimed_at
+        # 换算成墙钟差反而引入墙钟跳变的风险。接力恢复的判定另按库里的 claimed_at 起算（`_recover_timed_out_claims`）。
+        del claimed_at
         scope_id = job.scope_id
         self.owned_scopes.add(scope_id)
         engine: SubprocessEngine = self._resolver(job.engine)

@@ -51,8 +51,9 @@ def _android_caps(engine, *, steps_dir=None, timeout_s=60.0):
             "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}]}
 
 
-def _no_match(*a, **k):
-    raise RuntimeError("查询失败")
+def _no_match(engine, *a, **k):
+    # 取不到结果（plan 只对这一类降级，ADR 0036 决策 4）：这些用例只看 plan 本体的输出
+    raise compose.WorkerUnavailableError(engine, f"引擎 {engine} 的确定性 step 查询超时（60s）")
 
 
 # ---- 键集差集（ADR 0053 决策 6）----

@@ -1316,7 +1316,7 @@ function recordingSurface(trace: string[], over: Record<string, unknown> = {}): 
       trace.push("bindHandler");
       return async (groups: Record<string, string>) => { trace.push("handler"); await selected.fn({}, groups); };
     },
-    execute: async (run: (s: AbortSignal | undefined) => Promise<unknown>) => {
+    execute: async (run: (s: AbortSignal) => Promise<unknown>) => {
       trace.push("execute");
       try { return await run(new AbortController().signal); } finally { trace.push("execute:end"); }
     },
@@ -2018,15 +2018,34 @@ function traced(running: Promise<number>, trace: string[]): Promise<number> {
   return running.then((rc) => { trace.push(`resolved:${rc}`); return rc; });
 }
 
-test("让位·act 在途时收到停止信号：act 返回之后不产 evidence、不提前上传，不再为下一个 step 调模型，不 destroy、不上传报告、不排空、不 flush", async () => {
+/** 遵守中止信号的 act：一直在途，收到中止即以中止原因失败返回（Midscene 收到 aiAct 的 abortSignal 之后同样结束 act）。
+ *  aiAct 的调用记进 agentTrace；act 收到中止的那一刻调用 onAbort，好断言它与会话 Stop 的先后。 */
+function abortableAgent(agentTrace: string[], onAbort: () => void, reportFile?: string) {
+  const signals: AbortSignal[] = [];
+  const agent = {
+    ...scopeAgent({ reportFile, trace: agentTrace }),
+    aiAct: async (_prompt: string, opts?: { abortSignal?: AbortSignal }) => {
+      agentTrace.push("aiAct");
+      const s = opts?.abortSignal;
+      assert.ok(s instanceof AbortSignal, "桌面的执行窗口给出本次 act 的中止信号");
+      signals.push(s);
+      await new Promise<void>((_resolve, reject) => {
+        s.addEventListener("abort", () => { onAbort(); reject(s.reason); }, { once: true });
+      });
+    },
+  };
+  return { agent, signals };
+}
+
+test("让位·act 在途时收到停止信号：在途的 act 先于会话释放被中止、以中止失败返回，之后不产 evidence、不提前上传，不再为下一个 step 调模型，不 destroy、不上传报告、不排空、不 flush", async () => {
   const { runScope } = await importMod();
+  const { FINALIZING_ACT_MESSAGE } = await import("./surface.mjs");
   await withRunDir(async (dir) => {
     const reportFile = path.join(dir, "report.html");
     fs.writeFileSync(reportFile, "<html>");
-    let open!: () => void;
-    const gate = new Promise<void>((r) => { open = r; });
     const agentTrace: string[] = [];
-    const { createSurface } = desktopFactory(scopeAgent({ gate, reportFile, trace: agentTrace }));
+    const { agent, signals } = abortableAgent(agentTrace, () => trace.push("act:aborted"), reportFile);
+    const { createSurface } = desktopFactory(agent);
     const { io, trace, events, signal, exited } = scopeIo(createSurface);
     traceUploads(io, trace);
     const running = traced(runScope(aJob([
@@ -2034,17 +2053,79 @@ test("让位·act 在途时收到停止信号：act 返回之后不产 evidence�
       { id: "f:2", steps: [step("When", '"三"')] },
     ]), io), trace);
     await until(() => agentTrace.includes("aiAct"));
-    signal();
+    assert.equal(signals[0].aborted, false, "进入终结之前 act 的信号没有中止");
+    signal();  // 不放行 act：它只能靠中止返回
     await until(() => exited() !== undefined);
-    open();  // 桌面的 act 不接受中止信号，会话停止之后才返回
+    // 先断言中止、再等 runScope：没有中止时 act 永不返回，等 runScope 只会挂住而不是失败
+    assert.equal(signals[0].aborted, true, "进入终结时在途的 act 被中止");
+    assert.equal((signals[0].reason as Error).message, FINALIZING_ACT_MESSAGE, "中止原因是产品语言的那一句");
     assert.equal(await running, 0);
     assert.deepEqual(agentTrace, ["aiAct"], "停止信号之后不为新的 step 调模型，也不执行 agent.destroy");
     assert.deepEqual(trace.slice(trace.indexOf("emit:step_started") + 1),
-      ["emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"],
-      "除收尾序列的中断兜底上传与排空之外没有新发起的上传；runScope 在收尾序列退出之后才结束");
+      ["act:aborted", "emit:session_closed", "snapshotReport", "drain:6000", "exit:0", "resolved:0"],
+      "在途的 act 先于会话释放被中止；除收尾序列的中断兜底上传与排空之外没有新发起的上传；runScope 在收尾序列退出之后才结束");
     assert.deepEqual(types(events), ["session_opened", "scope_started", "scenario_started", "step_started", "session_closed"]);
     assert.deepEqual(fs.readdirSync(dir), ["report.html"], "运行目录保留，在途 step 的 evidence 不再写出");
   });
+});
+
+// 桌面执行窗口的中止信号（ADR 0051 决策 5「进入终结之后主流程让位」①）：直接驱动真实的桌面实现，只换掉控制面与 CDP 建连。
+
+/** 一个已就绪的桌面接缝实现；trace 记控制面的 start / stop。 */
+async function readyDesktopSurface(trace: string[]) {
+  const { createDesktopSurface } = await import("./surface-desktop.mjs");
+  const { FINALIZING_ACT_MESSAGE } = await import("./surface.mjs");
+  const surface = createDesktopSurface(surfaceDeps(), desktopHooks({}, fakePage, { client: fakeAgentCore({ trace }).client }));
+  assert.ok((await surface.acquire()).ready, "桌面接缝应就绪");
+  return { surface, FINALIZING_ACT_MESSAGE };
+}
+
+test("桌面执行窗口：interrupt 释放一进入就中止在途 act 的信号（排在会话 Stop 之前），act 以中止失败返回", async () => {
+  const trace: string[] = [];
+  const { surface, FINALIZING_ACT_MESSAGE } = await readyDesktopSurface(trace);
+  let inflight: AbortSignal | undefined;
+  const executing = surface.execute((s) => new Promise<never>((_resolve, reject) => {
+    inflight = s;
+    s.addEventListener("abort", () => { trace.push("act:aborted"); reject(s.reason); }, { once: true });
+  }));
+  assert.ok(inflight instanceof AbortSignal, "run 收到本次 act 的中止信号");
+  assert.equal(inflight.aborted, false);
+  const releasing = surface.release("interrupt");
+  assert.equal(inflight.aborted, true, "调用的那一刻即中止，不等会话 Stop");
+  await assert.rejects(executing, (e: Error) => e.message === FINALIZING_ACT_MESSAGE);
+  assert.equal((await releasing).releaseFailed, false);
+  assert.deepEqual(trace.filter((t) => !t.startsWith("start:")), ["act:aborted", "stop:sess-1"]);
+});
+
+test("桌面执行窗口：不进入终结的 act 信号始终未中止；run 返回或抛出之后不再持有它，之后的 interrupt 释放不中止已结束的 act", async () => {
+  const { surface } = await readyDesktopSurface([]);
+  const seen: AbortSignal[] = [];
+  assert.equal(await surface.execute(async (s) => { seen.push(s); return "done"; }), "done", "run 的返回值原样交回");
+  await assert.rejects(surface.execute(async (s) => { seen.push(s); throw new Error("AI boom"); }), /AI boom/, "run 的异常原样抛出");
+  assert.equal(seen.length, 2);
+  assert.notStrictEqual(seen[0], seen[1], "每次 act 一个新的中止信号");
+  assert.deepEqual(seen.map((s) => s.aborted), [false, false], "非终结路径的 act 不被中止");
+  await surface.release("interrupt");
+  assert.deepEqual(seen.map((s) => s.aborted), [false, false], "已结束的窗口不再被引用，终结只中止在途的 act");
+});
+
+test("桌面执行窗口：进入终结之后才打开的窗口，信号一开始即已中止（与设备的守卫在 shutdown 之后打开窗口同一处置）", async () => {
+  const { surface, FINALIZING_ACT_MESSAGE } = await readyDesktopSurface([]);
+  await surface.release("interrupt");
+  let late: AbortSignal | undefined;
+  await assert.rejects(surface.execute(async (s) => { late = s; s.throwIfAborted(); }),
+    (e: Error) => e.message === FINALIZING_ACT_MESSAGE);
+  assert.equal(late?.aborted, true);
+});
+
+test("runStep（桌面）：AI 动作把执行窗口的中止信号作为 aiAct 的 abortSignal 传入", async () => {
+  const { runStep } = await importMod();
+  const got: Array<AbortSignal | undefined> = [];
+  const agent = { aiAct: async (_prompt: string, opts?: { abortSignal?: AbortSignal }) => { got.push(opts?.abortSignal); } } as any;
+  assert.equal(await runStep(await desktopSeam(agent), "sc:0", step("When", '"点击提交"'), 1, testSink), "passed");
+  assert.equal(got.length, 1);
+  assert.ok(got[0] instanceof AbortSignal);
+  assert.equal(got[0].aborted, false);
 });
 
 test("让位·正常收尾的释放进行中收到停止信号：释放返回之后不发 scope_done、不排空、不 flush，运行目录保留", async () => {

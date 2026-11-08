@@ -1,7 +1,7 @@
 // 桌面浏览器的界面接缝实现（ADR 0052 决策 2）：Bedrock AgentCore 云端浏览器会话、Playwright 的 CDP 建连与 PlaywrightAgent。
 //
 // 建连、会话跟踪、并行释放与会话预热是原先 run-scope 主流程里这几段代码的原样搬移（ADR 0028 的建连重试与网络专用退出码的
-// 归因、ADR 0024 的释放优先、ADR 0051 决策 13 的会话预热），桌面路径的行为不变。在此之上只加了 ADR 0051 决策 4 的会话事件：
+// 归因、ADR 0024 的释放优先、ADR 0051 决策 13 的会话预热），桌面路径的行为不变。在此之上加了 ADR 0051 决策 4 的会话事件：
 //   - 每次 StartBrowserSession 都带会话名，按 device/session-name.mts 的规则生成、长度上限取 AgentCore 的 100，尝试序号从 1 起、
 //     每次建连尝试加一（与日志里的 attempt 编号一致）；取代原先的固定名，控制台据此能按名核对结果未知的尝试属于哪次运行的哪个 scope；
 //   - Start 返回后、一切长耗时动作之前发 session_opened（origin 为 created，sessionId 与 name 都取 AgentCore 会话 id，不带 device）；
@@ -10,6 +10,8 @@
 //     一次、按那次的处置发；
 //   - 停止信号到达时 StartBrowserSession 仍在途、等 INFLIGHT_SETTLE_MS 仍未返回：发一对 attempted 事件（sessionId 为 null，name 取
 //     这次请求的会话名），release 报释放失败，退出码因此为 1。
+// 另有 ADR 0051 决策 5「进入终结之后主流程让位」的两处：建连成功返回时已进入终结即不交出被测对象；执行窗口为每次 act 开一个
+// 中止信号交给 aiAct，进入终结时中止它，与设备的执行窗口同一模型（桌面没有执行令牌与会话年龄后备，只在进入终结时中止）。
 // 四项边界义务在桌面上都是空操作，界面快照只在 AI step 上取 page.url()（ADR 0052 决策 2）。
 //
 // 本文件不 import 任何设备依赖：device/session-name.mts 只依赖 node:crypto，是桌面路径允许加载的两个设备模块之一（另一个是
@@ -27,7 +29,7 @@ import { EXTRA_HTTP_HEADERS_ENV, warmupSession } from "../lib/tunnel-warmup.mjs"
 import { AGENTCORE_SESSION_NAME_MAX, encode as encodeSessionName, runIdFromEnv } from "../device/session-name.mjs";
 import type { SelectedHandler } from "./deterministic.mjs";
 import {
-  MAX_CAUSE_DEPTH, attachClassification,
+  FINALIZING_ACT_MESSAGE, MAX_CAUSE_DEPTH, attachClassification,
   type AcquireResult, type AddressReading, type HandlerCall, type ReleaseMode, type ReleaseOutcome, type ScopeTermination,
   type SnapshotResult, type StepFacts, type StepFailure, type SurfaceDeps, type TargetSurface,
 } from "./surface.mjs";
@@ -218,6 +220,7 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
   let cleanupFailed = false; // StopBrowserSession 失败 → worker 非 0 退出，让泄漏可观测（对照 Nova）
   let terminated = false;    // 已进入终结（停止信号）：建连重试循环不再重试，建连成功也不交出被测对象
   let onTerminate: (() => void) | undefined;  // 重试退避用：进入终结即 resolve、打断退避（对称 Nova 的 sleep 被信号打断）
+  let currentAct: AbortController | null = null;  // 在途 act 的中止控制：只在 execute 窗口内有值，进入终结即中止
 
   /** 发一条会话事件：发出失败不抛（释放绝不抛），记为释放失败让退出码为 1——事件没送到，core 看到的就是没有确认停止的会话。 */
   async function emitSessionEvent(ev: Record<string, unknown>): Promise<void> {
@@ -432,8 +435,20 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
       };
     },
 
-    // 桌面没有执行令牌（ADR 0052 决策 6 的命令守卫只在设备上）：直接执行，原样返回或抛出。
-    execute: (run) => run(undefined),
+    // 执行窗口（ADR 0052 决策 2；ADR 0051 决策 5「进入终结之后主流程让位」①）：为每次 act 开一个中止信号交给 run，run 结束
+    // （返回或抛出）即不再持有它；interrupt 释放一进入就中止它，在途的 act 随即以中止失败返回、不再发起模型调用。桌面没有执行令牌
+    // （ADR 0052 决策 6 的命令守卫只在设备上）与会话年龄后备，中止只来自进入终结；已进入终结之后才打开的窗口，信号一开始即已中止
+    // （与设备的守卫在 shutdown 之后打开窗口时同一处置）。run 原样返回或抛出。
+    async execute<T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T> {
+      const act = new AbortController();
+      if (terminated) act.abort(new Error(FINALIZING_ACT_MESSAGE));
+      currentAct = act;
+      try {
+        return await run(act.signal);
+      } finally {
+        if (currentAct === act) currentAct = null;
+      }
+    },
 
     async navigate(address: string): Promise<void> {
       await currentPage().goto(address, { waitUntil: "domcontentloaded", timeout: NAVIGATE_TIMEOUT_MS });
@@ -458,6 +473,9 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
       if (mode === "interrupt") {
         terminated = true;
         onTerminate?.();  // 立即唤醒正在退避的重试循环，使其尽快停（不再 reconnect/执行 act）
+        // 中止在途的 act（ADR 0051 决策 5「进入终结之后主流程让位」①）：不等它返回，也排在会话 Stop 之前，它以中止失败返回、
+        // 之后不再发起模型调用；这一步的判定被终结的事件门控挡住、不出 worker。
+        currentAct?.abort(new Error(FINALIZING_ACT_MESSAGE));
         // 在途窗口兜底（ADR 0028）：Start 在途则先等一小段，让 id 落进待清理集再 cleanup；仍未返回即发 attempted 事件。
         // 不要再加「待清理集为空」的条件：上一 attempt Stop 失败的遗留会话会让集非空，那恰恰是重试场景下最需要兜底的时刻；
         // 这段已计入 minGraceSeconds 的加数，等它不超 grace。

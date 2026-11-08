@@ -19,9 +19,11 @@ from gherkai_core.reconcile import tick
 class FakeLauncher:
     def __init__(self) -> None:
         self.launched: list[str] = []
+        self.claimed_at: dict[str, str] = {}
 
-    def launch(self, job: Job) -> None:
+    def launch(self, job: Job, *, claimed_at: str) -> None:
         self.launched.append(job.scope_id)
+        self.claimed_at[job.scope_id] = claimed_at
 
 
 def _job(sid: str) -> Job:
@@ -62,6 +64,17 @@ def test_first_tick_starts_up_to_concurrency(tmp_path):
     state = store.load_run_state("run-1")
     running = [s for s, js in state.jobs.items() if js.status == Status.RUNNING]
     assert len(running) == 2
+
+
+def test_launch_receives_the_claim_timestamp(tmp_path):
+    """launch 收到的 claimed_at 就是 CAS 抢占落库的那个时间戳（ADR 0034「job timeout」节：预算从 claim 起算，
+    云端的到点时刻按它取 deadline）——不是 launch 时另取的时刻。"""
+    meta, log, store = _setup(tmp_path, "a", "b")
+    launcher = FakeLauncher()
+    tick("run-1", meta, log, store, launcher, max_concurrency=2, now_iso="t1")
+    state = store.load_run_state("run-1")
+    assert launcher.claimed_at == {"a": "t1", "b": "t1"}
+    assert all(state.jobs[s].claimed_at == launcher.claimed_at[s] for s in ("a", "b"))
 
 
 def test_tick_idempotent_no_double_launch(tmp_path):
@@ -137,7 +150,7 @@ class BoomLauncher:
     def __init__(self) -> None:
         self.attempts: list[str] = []
 
-    def launch(self, job: Job) -> None:
+    def launch(self, job: Job, *, claimed_at: str) -> None:
         self.attempts.append(job.scope_id)
         raise RuntimeError(f"boom: {job.scope_id}")
 
@@ -175,7 +188,7 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
         def __init__(self) -> None:
             self.launched: list[str] = []
 
-        def launch(self, job: Job) -> None:
+        def launch(self, job: Job, *, claimed_at: str) -> None:
             if job.scope_id == "a":
                 raise RuntimeError("boom: a")
             self.launched.append(job.scope_id)

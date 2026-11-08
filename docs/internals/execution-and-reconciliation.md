@@ -142,7 +142,7 @@ cloud 路径的超时处置是一条多跳链，时序如下图。这里的「�
 
 ![云端超时 enforce 链：启动 task 时设置的一次性定时器到点调起 kicker，停止 worker 后由 exit-observer 写成带超时标记的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
 
-图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻为启动时刻加上该 job 的墙钟预算。到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录才执行停止**（重复到点、定时器与防御扫描同时命中均无害），`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止。停止之后**记为什么状态**（超时归因落在哪一类、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
+图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻为 `claimed_at`（领取该 job 的时刻）加上该 job 的墙钟预算，与防御扫描同一起算点，设置定时器晚于领取的那段间隔不推后到点。定时服务只承诺分钟精度，可能早于这一刻触发，因此到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录，再按 `claimed_at` 复查预算是否已用尽**：已用尽则执行停止；未用尽且相差不超过一分钟则等到预算用尽的时刻，重新确认后才执行停止；相差超过一分钟则本次不停止，交给防御扫描（取舍见 [ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节「到点不早于 deadline」条）。重复到点、定时器与防御扫描同时命中均无害。`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止。停止之后**记为什么状态**（超时归因落在哪一类、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节（取舍/归因链/防御扫）、[ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（`@timeout:` tag）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md)（决策 2：设备 scope 的缺省墙钟与下限）。
 

@@ -73,6 +73,7 @@
 
 - 命令行工具、两个引擎 worker 与云端后端升到同一版本；同一报告目录不要混用 1.4 与 1.5 的命令行工具读写。
 - 命令行工具与引擎 worker 之间的格式版本由 1 升为 2，1.5 的 worker 不再接受旧版命令行工具发来的确定性 step 查询。1.4 的命令行工具配 1.5 的 worker 时，`list-deterministic` 与本机后端的 `run`、`submit` 在读取 worker 能力自述这一步以退出码 2 结束（提示能力自述格式版本是 2、命令行工具认的是 1）；`plan` 同样以退出码 2 结束，转述 worker 的「命令行工具与 worker 的版本不一致，请把两者装成同一版本」（1.4 的命令行工具把这条消息冠以「使用方 steps 加载失败」，实际成因是版本不一致）。处置都是把两者装成同一版本。
+- 反过来，1.5 的命令行工具配 1.4 的 worker 时，`list-deterministic`、本机后端的 `run`、`submit` 与 `plan` 都在读取 worker 能力自述这一步以退出码 2 结束，提示「引擎 … 的能力自述格式版本是 1，这个命令行工具认的是 2：命令行工具与 worker 的版本不一致，请把两者装成同一版本。」；1.4.3 之前的 worker 没有能力自述入口，这些命令同样以退出码 2 结束并转述 worker 自己的报错。`plan` 现在只在取不到 worker 的结果时（没装、起不来、超时、输出不是合法 JSON）降级为警告并继续；worker 自述不兼容（含版本不一致）与 `NOVA_ACT_TIMEOUT_S` 取值不合法改为以退出码 2 结束，不再降级。
 - 把 `Given 打开 "https://…"` 这类导航步改成整句只写地址；用到 `页面地址匹配` 的项目把仓库 `features/steps/` 的模板复制进 `steps/`。
 - 只用 Midscene 的本机 run 若显式给了小于 63.5 秒的 `--grace`（或 `gherkai.toml` 的 `grace`），调大或删掉它。
 - 直接调用 `gherkai_runtime.compose.build_engines` 的程序传入 `run_id`，取与 `RunMeta.run_id` 相同的值（可用 `compose.new_run_id()` 生成）。

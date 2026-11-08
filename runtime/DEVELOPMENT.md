@@ -25,8 +25,11 @@
   - **worker 的两个非 job 入口**（ADR 0036「4.」「5.」）：`query_capabilities`（spawn `worker --capabilities` 读取自述对象——
     steps 加载结果 / 确定性 step 清单 / grace 下限 / 模型 id / 支持的测试目标（顶层 `targets`，缺键按版本不一致拒绝）/ 会话预热支持键 `session_warmup`（`SESSION_WARMUP_KEY`）；契约校验全在此、不合契约不写缓存；进程内按「引擎 + steps
     目录」缓存；`engine_min_grace` 从中取下限，Nova 查询时注入 `NOVA_ACT_TIMEOUT_S` 使两端同源）与 `match_deterministic`
-    （spawn `worker --match-steps` 做 plan 标注）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现；worker 已启动但自述失败（最常见的成因是使用方
-    `steps/` 加载失败）时抛 `WorkerSelfDescribeError`，与定位不到的 `WorkerNotFoundError` 分开，调用点以退出码 2 结束、不降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
+    （spawn `worker --match-steps` 做 plan 标注，plan 先取自述核过协议版本才发）。两者共用 `_ask_worker` 中的一份 spawn 与诊断实现；失败按成因分三类、
+    各一个异常类，调用点据类分叉、不解析消息（ADR 0036「5.」末段）：worker 已启动但非零退出（最常见的成因是使用方 `steps/` 加载失败）抛
+    `WorkerSelfDescribeError`；自述取到了、与命令行工具不兼容（身份位或载荷键不合契约，含协议版本不等；除 `engine` 身份位指错引擎那一项外，诊断都以
+    `VERSION_MISMATCH_ADVICE` 那一句结尾）抛 `WorkerIncompatibleError`；取不到（起不来、超时、输出不是合法 JSON）抛 `WorkerUnavailableError`，定位不到的
+    `WorkerNotFoundError` 是它的子类。前两类在各调用点都不降级（命令以退出码 2 结束，doctor 记为失败项），只有 `plan` 对取不到降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
   - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
     region/profile 一处解析）/ `resolve_aws_identity`（profile 与 region 解析链的唯一实现，`resolve_cloud_target` 与本机后台宿主共用）/
     `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回

@@ -19,6 +19,9 @@ from gherkai_runtime import compose
 
 from conftest import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
 
+# 收集期取到的真实现：conftest 的 autouse 替身在用例运行时才装上，要让真契约校验参与的用例把它装回去
+_REAL_QUERY_CAPABILITIES = compose.query_capabilities
+
 
 def _fake_schedule_factory():
     """造一个不起 worker 的假 schedule：发事件给 sink（进度）+ on_event（persistence 刷 RUNNING）+ 每 job
@@ -258,8 +261,8 @@ def test_plan_shows_device_target_and_session_count_when_engine_supports_it(tmp_
         return {"schema_version": 2, "engine": engine, "min_grace_s": 150.0, "deterministic_steps": [], "model_id": "m",
                 "targets": [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8000.0}]}
 
-    def no_match(*a, **k):
-        raise RuntimeError("查询失败")
+    def no_match(engine, *a, **k):
+        raise compose.WorkerUnavailableError(engine, "查询超时")  # 取不到：标注降级，plan 本体照出
 
     monkeypatch.setattr(compose, "query_capabilities", caps_with_android)
     monkeypatch.setattr(compose, "match_deterministic", no_match)
@@ -331,16 +334,101 @@ def test_plan_target_check_degrades_when_capabilities_unavailable(tmp_path, monk
     feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
 
     def unavailable(engine, *, steps_dir=None, timeout_s=60.0):
-        raise RuntimeError("自述超时")
+        raise compose.WorkerUnavailableError(engine, "自述超时")
 
-    def no_match(*a, **k):
-        raise RuntimeError("查询失败")
+    def no_match(engine, *a, **k):
+        raise compose.WorkerUnavailableError(engine, "查询超时")
 
     monkeypatch.setattr(compose, "query_capabilities", unavailable)
     monkeypatch.setattr(compose, "match_deterministic", no_match)
     assert m.main(["plan", str(feat)]) == 0
     err = capsys.readouterr().err
     assert "目标核对降级" in err and "不支持这个目标" not in err
+
+
+def _fake_old_worker(tmp_path: Path, monkeypatch, *, engine: str, schema_version: int) -> Path:
+    """真起子进程的假 worker（经定位链第一级的 env 覆写）：能力自述报给定的协议版本、不带 targets（1.4 的形态），
+    匹配查询逐条答作走 AI 并以 0 退出（1.4 的 Midscene worker 对对象条目的实际行为）。返回记录每次所收 flag 的日志文件。"""
+    import shlex
+    import sys
+
+    log = tmp_path / "worker-calls.log"
+    script = tmp_path / "old_worker.py"
+    script.write_text(
+        "import json, sys\n"
+        "log, flag = sys.argv[1], sys.argv[2]\n"
+        "open(log, 'a', encoding='utf-8').write(flag + '\\n')\n"
+        "if flag == '--capabilities':\n"
+        f"    print(json.dumps({{'schema_version': {schema_version}, 'engine': '{engine}', 'min_grace_s': 31,"
+        " 'deterministic_steps': [], 'model_id': 'm'}))\n"
+        "elif flag == '--match-steps':\n"
+        "    print(json.dumps([None for _ in json.load(sys.stdin)]))\n",
+        encoding="utf-8")
+    monkeypatch.setenv(f"GHERKAI_WORKER_{engine.upper()}_CMD",
+                       f"{shlex.quote(sys.executable)} {shlex.quote(str(script))} {shlex.quote(str(log))}")
+    monkeypatch.delenv(f"GHERKAI_WORKER_{engine.upper()}_CWD", raising=False)
+    monkeypatch.setattr(compose, "query_capabilities", _REAL_QUERY_CAPABILITIES)  # 真契约校验参与
+    return log
+
+
+def test_plan_checks_protocol_version_before_match_query(tmp_path, monkeypatch, capsys):
+    """ADR 0036 决策 4「匹配查询的前置」：新命令行工具配协议版本为 1 的旧 Midscene worker，plan 先取能力自述、核到版本不一致即以
+    退出码 2 结束并转述版本不一致那一句，不发匹配查询（旧 worker 对匹配查询的回答形状完全合法，先发就会被当作全部走 AI）。"""
+    feat = tmp_path / "t.feature"
+    feat.write_text('@engine:midscene\nFeature: t\n  Scenario: s\n    Given "https://example.com/"\n', encoding="utf-8")
+    log = _fake_old_worker(tmp_path, monkeypatch, engine="midscene", schema_version=1)
+    assert m.main(["plan", str(feat)]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "plan 拒绝出结果" in captured.err and "能力自述格式版本是 1，这个命令行工具认的是 2" in captured.err
+    assert "命令行工具与 worker 的版本不一致，请把两者装成同一版本。" in captured.err
+    assert "标注降级" not in captured.err and "以 worker 自己的报错为准" not in captured.err  # 不是降级、也不是 worker 自己的报错
+    assert log.read_text(encoding="utf-8").split() == ["--capabilities"]  # 匹配查询没有发出
+
+
+@pytest.mark.parametrize("failure", [
+    compose.WorkerIncompatibleError("novaact", "引擎 novaact 自述的模型 id 不是非空字符串（''）：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"),
+    compose.WorkerIncompatibleError("novaact", "要问的是引擎 novaact 的 worker，回答的却自称 'midscene'——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"),
+    ValueError("环境变量 NOVA_ACT_TIMEOUT_S 须是正整数秒（单个 AI 操作的时间上界），当前值：'120s'。改成整数秒（如 120），或删掉它使用默认值 120。"),
+    compose.WorkerSelfDescribeError("novaact", 2, "demo.py：SyntaxError", "能力自述"),
+])
+def test_plan_exits_2_without_match_query_when_capabilities_incompatible_or_misconfigured(tmp_path, monkeypatch, capsys, failure):
+    """自述取到了但不兼容（身份位或载荷键不合契约）、NOVA_ACT_TIMEOUT_S 取值不合法、worker 自述非零退出（使用方 steps 加载失败）：
+    plan 与 run 同样以退出码 2 结束、转述该项诊断，不降级、不发匹配查询（ADR 0036 决策 4：plan 不比 run 宽）；成因提示只接在
+    worker 非零退出之后，其余几项的消息出自命令行工具自己、本身即诊断。"""
+    def broken(engine, **kw):
+        raise failure
+
+    def forbidden(*a, **k):
+        raise AssertionError("能力自述不合要求时不应发匹配查询")
+
+    monkeypatch.setattr(m.compose, "query_capabilities", broken)
+    monkeypatch.setattr(m.compose, "match_deterministic", forbidden)
+    assert m.main(["plan", str(_det_feature(tmp_path))]) == 2
+    err = capsys.readouterr().err
+    assert "plan 拒绝出结果" in err and str(failure) in err and "降级" not in err
+    assert ("以 worker 自己的报错为准" in err) is isinstance(failure, compose.WorkerSelfDescribeError)
+
+
+def test_plan_asks_capabilities_before_match_once_per_engine(tmp_path, monkeypatch, capsys):
+    """正常路径的顺序（ADR 0036 决策 4）：每个用到的引擎先各取一次能力自述（桌面 job 也问），全部核过之后才发匹配查询；
+    标注阶段的目标交集复用那一份、不再重问，故每引擎恰好自述一次、匹配查询一次。"""
+    feat = tmp_path / "mixed.feature"
+    feat.write_text(
+        "Feature: mixed\n"
+        "  @engine:midscene\n  Scenario: a\n    When \"做点啥\"\n"
+        "  @engine:novaact\n  Scenario: b\n    When \"做点啥\"\n", encoding="utf-8")
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    calls: list[tuple[str, str]] = []
+    stubbed = compose.query_capabilities  # conftest autouse 的确定性假替身
+    monkeypatch.setattr(m.compose, "query_capabilities",
+                        lambda engine, **kw: calls.append(("capabilities", engine)) or stubbed(engine, **kw))
+    monkeypatch.setattr(m.compose, "match_deterministic",
+                        lambda engine, items, steps_dir=None: calls.append(("match", engine)) or [None for _ in items])
+    assert m.main(["plan", str(feat)]) == 0
+    assert sorted(calls[:2]) == [("capabilities", "midscene"), ("capabilities", "novaact")]
+    assert sorted(calls[2:]) == [("match", "midscene"), ("match", "novaact")]
+    assert "降级" not in capsys.readouterr().err
 
 
 def test_target_rejections_flag_timeout_over_session_limit():
@@ -941,9 +1029,9 @@ def test_plan_keyword_mismatch_annotated_and_warned(tmp_path, monkeypatch, capsy
 
 
 def test_plan_annotation_degrades_gracefully(tmp_path, monkeypatch, capsys):
-    """标注 best-effort：引擎环境未装/查询失败 → 无标注 + stderr 警告，plan 核心输出不受影响。"""
+    """标注 best-effort：引擎环境未装、查询取不到结果 → 无标注 + stderr 警告，plan 核心输出不受影响。"""
     def boom(engine, items, steps_dir=None):
-        raise RuntimeError("worker 起不来")
+        raise compose.WorkerUnavailableError(engine, "worker 起不来")
 
     monkeypatch.setattr(m.compose, "match_deterministic", boom)
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
@@ -1322,6 +1410,27 @@ def test_run_and_submit_exit_2_before_spawn_when_user_steps_fail(tmp_path, monke
     assert "demo.py：SyntaxError" in err  # 原样转述 worker 诊断
     assert "steps/ 目录里的文件加载失败" in err and "版本不一致" in err
     assert not (tmp_path / "r").exists() or not any((tmp_path / "r").iterdir())  # 没落任何 run 记录
+
+
+def test_incompatible_self_description_is_relayed_without_worker_cause_hint(tmp_path, monkeypatch, capsys):
+    """自述取到了、与命令行工具不兼容（此处是协议版本不一致）：run、list-deterministic 以退出码 2 结束，doctor 落进 steps.load 行，
+    三处都只转述 compose 给的那一句，不接「以 worker 自己的报错为准」的成因提示——这句诊断出自命令行工具自己的契约核对，
+    不是 worker 的报错（ADR 0036「5.」末段：消费者按异常类区分）。"""
+    sentence = "引擎 novaact 的能力自述格式版本是 1，这个命令行工具认的是 2：命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+    _fake_locator(monkeypatch)
+    _no_provider(monkeypatch)
+    monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
+        compose.WorkerIncompatibleError(engine, sentence)))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("自述不兼容时不应起 job"))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report"]) == 2
+    assert m.main(["list-deterministic"]) == 2
+    err = capsys.readouterr().err
+    assert err.count(sentence) == 2 and "以 worker 自己的报错为准" not in err
+    assert m.main(["doctor", "--json"]) == 0  # 无 steps/ 目录：自述失败只是可选项
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert by[("steps", "load.novaact")]["detail"] == f"worker 自述失败：{sentence}"
 
 
 def test_plan_rejects_a_directory_as_feature(tmp_path, capsys):
@@ -2964,18 +3073,22 @@ def test_plan_marks_hit_without_handle_on_scope_target_as_ai(tmp_path, monkeypat
 
 
 def test_plan_degrades_target_check_with_a_note_when_capabilities_unavailable(tmp_path, monkeypatch, capsys):
-    """能力自述取不到时按目标核对那一步降级（命中仍标确定性），stderr 有降级提示而不是静默；match 查询本身不受影响。"""
+    """能力自述取不到（超时、起不来、输出不是合法 JSON）时按目标核对那一步降级（命中仍标确定性），stderr 有降级提示而不是静默；
+    match 查询照发。取不到这一结果在本次 plan 内复用：自述只问一次，标注阶段不再重问（ADR 0036 决策 4）。"""
     monkeypatch.setattr(m.compose, "match_deterministic",
                         lambda engine, items, steps_dir=None: [({"pattern": "p", "description": "URL 断言"} if "页面地址" in it["text"] else None) for it in items])
+    asked: list[str] = []
 
     def boom(engine, *, steps_dir=None, **kw):
-        raise RuntimeError("自述起不来")
+        asked.append(engine)
+        raise compose.WorkerUnavailableError(engine, f"引擎 {engine} 的能力自述超时（60s）")
 
     monkeypatch.setattr(m.compose, "query_capabilities", boom)
     assert m.main(["plan", str(_det_feature(tmp_path))]) == 0
     captured = capsys.readouterr()
     assert "← 确定性: URL 断言" in captured.out
-    assert "标注降级" in captured.err and "不按 scope 目标核对" in captured.err
+    assert "标注降级" in captured.err and "不按 scope 目标核对" in captured.err and "能力自述超时" in captured.err
+    assert asked == ["novaact"]
 
 
 # ---- 使用方中断（ADR 0024 终止契约「使用方中断」条；退出码见 ADR 0031 决定五）----

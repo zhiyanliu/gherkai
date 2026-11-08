@@ -700,18 +700,60 @@ _OK_TAIL = _OK_STEPS + _OK_MODEL  # 两个合法的尾键：拿它填「缺陷�
     b'{' + _OK_HEAD + b', "min_grace_s": 150, "session_warmup": "yes"' + _OK_TAIL + b'}',  # 预热键不是 bool
 ])
 def test_query_capabilities_rejects_off_contract_answer(monkeypatch, novaact_env_cmd, fresh_caps_cache, payload):
-    """自述不合契约 → fail-loud（与「输出非 JSON」同类），且不写缓存。校验放在这一个函数里，**每个消费者
-    （run 前置 / list-deterministic / doctor / engine_min_grace）都受同一道**：下限当 0 处理会让 core 的 grace
+    """自述不合契约 → fail-loud，且不写缓存。校验放在这一个函数里，**每个消费者
+    （run 前置 / list-deterministic / doctor / engine_min_grace / plan）都受同一道**：下限当 0 处理会让 core 的 grace
     护栏形同废除；身份位（engine / schema_version）不核则 `GHERKAI_WORKER_NOVAACT_CMD` 指到 midscene bin 时
     Nova 静默拿 31s（grace < 单 act 上界 → SIGTERM 落 act 中途必被硬杀）；清单不是数组则消费者 len() 崩在无关处；
     模型 id 缺/空/非串则 doctor 的模型行显示成没信息的「模型 」，把「不知道用的哪个模型」伪装成「知道了」
     （模型选择本身是 ADR 0004「模型版本选择策略」的显式决策，展示不实等于让 env 覆盖不可见）。
+    失败类是「取到了、不兼容」（WorkerIncompatibleError），不是取不到：plan 据类区分，只对取不到降级（ADR 0036 决策 4）；
+    除身份位指错引擎那一句外，诊断都以版本不一致那一句收尾。
     """
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
-    with pytest.raises(RuntimeError):
+    with pytest.raises(compose.WorkerIncompatibleError) as ei:
         compose.query_capabilities("novaact")
+    assert not isinstance(ei.value, compose.WorkerUnavailableError)
+    assert str(ei.value).endswith(compose.VERSION_MISMATCH_ADVICE) or "自称 'midscene'" in str(ei.value)
+    assert compose._CAPABILITIES_CACHE == {}
+
+
+@pytest.mark.parametrize("version_part, shown", [(b'"schema_version": 1, ', "1"), (b"", "缺失"), (b'"schema_version": "2", ', '"2"')])
+def test_query_capabilities_version_mismatch_uses_the_worker_sentence(monkeypatch, novaact_env_cmd, fresh_caps_cache,
+                                                                     version_part, shown):
+    """协议版本不等（含缺键）→ 诊断先点明两个版本号、再接版本不一致那一句，与 worker 拒绝不合版本的 job 行和 match 查询输入时同一句
+    （ADR 0036 决策 4）；run / submit / list-deterministic / plan 转述的都是这一句。格式版本先于其余载荷键核对：1.4 的自述不带
+    targets，诊断仍是版本不一致、不是「缺 targets」。"""
+    import subprocess
+
+    payload = b'{' + version_part + b'"engine": "novaact", "min_grace_s": 150' + _OK_TAIL + b'}'
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
+    with pytest.raises(compose.WorkerIncompatibleError) as ei:
+        compose.query_capabilities("novaact")
+    assert str(ei.value) == (f"引擎 novaact 的能力自述格式版本是 {shown}，这个命令行工具认的是 {compose.PROTOCOL_SCHEMA_VERSION}："
+                             "命令行工具与 worker 的版本不一致，请把两者装成同一版本。")
+    assert compose.VERSION_MISMATCH_ADVICE == "命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+
+
+def test_ask_worker_timeout_and_non_json_are_unavailable(monkeypatch, novaact_env_cmd, fresh_caps_cache):
+    """超时与 stdout 不是合法 JSON 归入「取不到」（WorkerUnavailableError）：plan 只对这一类降级，与「取到了、不兼容」分开
+    （ADR 0036「5.」末段的三类）；两个非 job 入口同一机制。"""
+    import subprocess
+
+    def timeout(cmd, **kw):
+        raise subprocess.TimeoutExpired(cmd, kw.get("timeout"))
+
+    monkeypatch.setattr(subprocess, "run", timeout)
+    with pytest.raises(compose.WorkerUnavailableError, match="能力自述超时"):
+        compose.query_capabilities("novaact")
+    with pytest.raises(compose.WorkerUnavailableError, match="确定性 step 查询超时"):
+        compose.match_deterministic("novaact", [{"keyword": None, "text": "x"}])
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(b"Traceback (most recent call last):"))
+    with pytest.raises(compose.WorkerUnavailableError, match="输出非 JSON"):
+        compose.query_capabilities("novaact")
+    with pytest.raises(compose.WorkerUnavailableError, match="输出非 JSON"):
+        compose.match_deterministic("novaact", [{"keyword": None, "text": "x"}])
     assert compose._CAPABILITIES_CACHE == {}
 
 
@@ -749,7 +791,7 @@ def test_query_capabilities_accepts_target_keys_and_keeps_unknown_requires(monke
 def test_target_defaults_follow_missing_key_semantics():
     """ADR 0049 决策 2：顶层缺 targets 不兜缺省（版本不一致，fail-loud）；step 级缺 targets 归一为桌面网页——不是「全部目标」、不是「未知放行」；
     缺 max_session_s 即无上限（键不出现）；有键时原样取、返回的是副本。"""
-    with pytest.raises(RuntimeError, match="缺 targets"):
+    with pytest.raises(compose.WorkerIncompatibleError, match="缺 targets"):
         compose.worker_targets({"deterministic_steps": []})
     assert compose.step_targets({"pattern": "p"}) == [{"device": "desktop", "ui_kinds": ["web"]}]
     caps = {"targets": [{"device": "android", "ui_kinds": ["web", "app"], "max_session_s": 8880}]}
@@ -796,7 +838,7 @@ def test_query_capabilities_wrong_engine_names_the_misconfiguration(monkeypatch,
     import subprocess
 
     monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(_caps_json("midscene", 31)))
-    with pytest.raises(RuntimeError, match="自称 'midscene'.*GHERKAI_WORKER_"):
+    with pytest.raises(compose.WorkerIncompatibleError, match="自称 'midscene'.*GHERKAI_WORKER_"):
         compose.query_capabilities("novaact")
 
 
@@ -833,32 +875,32 @@ def test_query_capabilities_midscene_gets_no_nova_env(monkeypatch, novaact_env_c
     assert "NOVA_ACT_TIMEOUT_S" not in captured["env"]
 
 
-# ---- _ask_worker：起不来的各种 OSError 都收成 RuntimeError（调用点据此以退出码 2 结束、不冒 traceback）----
+# ---- _ask_worker：起不来的各种 OSError 都收成取不到（WorkerUnavailableError，调用点据类分叉、不冒 traceback）----
 # 真起子进程（不 mock subprocess）：要验的正是 subprocess.run 在这几种情形下实际抛什么，mock 掉就验不到。
 
-def test_ask_worker_non_executable_override_is_runtime_error(monkeypatch, fresh_caps_cache, tmp_path):
-    """env 覆写指向一个没有执行权限的文件 → subprocess 抛 PermissionError（不是 FileNotFoundError），也要收成 RuntimeError。"""
+def test_ask_worker_non_executable_override_is_unavailable(monkeypatch, fresh_caps_cache, tmp_path):
+    """env 覆写指向一个没有执行权限的文件 → subprocess 抛 PermissionError（不是 FileNotFoundError），也要收成取不到。"""
     script = tmp_path / "worker.sh"
     script.write_text("#!/bin/sh\necho '{}'\n", encoding="utf-8")
     script.chmod(0o644)
     monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", str(script))
     monkeypatch.delenv("GHERKAI_WORKER_NOVAACT_CWD", raising=False)
-    with pytest.raises(RuntimeError, match="起不来") as e:
+    with pytest.raises(compose.WorkerUnavailableError, match="起不来") as e:
         compose.query_capabilities("novaact")
     assert isinstance(e.value.__cause__, PermissionError)
     assert "GHERKAI_WORKER_NOVAACT_CMD" in str(e.value)  # 点名用的是哪一级的命令
     assert compose._CAPABILITIES_CACHE == {}
 
 
-def test_ask_worker_cwd_not_a_directory_is_runtime_error(monkeypatch, fresh_caps_cache, tmp_path):
-    """配套的 _CWD 指向普通文件 → subprocess 抛 NotADirectoryError，同样收成 RuntimeError。"""
+def test_ask_worker_cwd_not_a_directory_is_unavailable(monkeypatch, fresh_caps_cache, tmp_path):
+    """配套的 _CWD 指向普通文件 → subprocess 抛 NotADirectoryError，同样收成取不到。"""
     import shlex
 
     not_a_dir = tmp_path / "plain-file"
     not_a_dir.write_text("x", encoding="utf-8")
     monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CMD", shlex.quote(sys.executable))
     monkeypatch.setenv("GHERKAI_WORKER_NOVAACT_CWD", str(not_a_dir))
-    with pytest.raises(RuntimeError, match="起不来") as e:
+    with pytest.raises(compose.WorkerUnavailableError, match="起不来") as e:
         compose.query_capabilities("novaact")
     assert isinstance(e.value.__cause__, NotADirectoryError)
 
@@ -1511,13 +1553,15 @@ def novaact_env_cmd(monkeypatch):
 
 
 def test_self_describe_miss_raises_worker_not_found(monkeypatch, fresh_caps_cache):
-    """定位链 miss 时**两个非 job 入口**都抛 WorkerNotFoundError（而非「起不来」的通用 RuntimeError）——
-    调用点据此分叉：list-deterministic / run 以退出码 2 结束并打安装指引、plan 标注降级。"""
+    """定位链 miss 时**两个非 job 入口**都抛 WorkerNotFoundError（取不到里专带安装指引的一种）——
+    调用点据此分叉：list-deterministic / run 以退出码 2 结束并打安装指引、plan 标注降级（它是 WorkerUnavailableError 的子类，
+    plan 按取不到处置，ADR 0036「5.」末段）。"""
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CMD", raising=False)
     monkeypatch.setattr(compose.shutil, "which", lambda n: None)
     monkeypatch.setattr(compose, "_runtime_version", lambda: None)
-    with pytest.raises(compose.WorkerNotFoundError):
+    with pytest.raises(compose.WorkerNotFoundError) as ei:
         compose.query_capabilities("midscene")
+    assert isinstance(ei.value, compose.WorkerUnavailableError) and ei.value.engine == "midscene"
     with pytest.raises(compose.WorkerNotFoundError):
         compose.match_deterministic("midscene", [{"keyword": None, "text": "a"}])
 
@@ -1884,7 +1928,7 @@ def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env
     for bad in (b"true", b'"2"', b"2.0"):
         payload = b'{"schema_version": ' + bad + b', "engine": "novaact", "min_grace_s": 150, "targets": [{"device": "desktop", "ui_kinds": ["web"]}]' + _OK_TAIL + b'}'
         monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: _fake_caps_proc(payload))
-        with pytest.raises(RuntimeError, match="格式版本"):
+        with pytest.raises(compose.WorkerIncompatibleError, match="格式版本"):
             compose.query_capabilities("novaact")
         assert compose._CAPABILITIES_CACHE == {}
 

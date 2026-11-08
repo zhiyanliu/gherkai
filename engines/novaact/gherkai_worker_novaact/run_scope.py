@@ -54,7 +54,7 @@ from nova_act import NovaAct, BOOL_SCHEMA, Workflow
 from bedrock_agentcore.tools.browser_client import BrowserClient  # 会话的 Start / Stop 由 worker 自己持有（ADR 0028「会话泄漏防护」）
 from nova_act.types.workflow import set_current_workflow, get_current_workflow
 from nova_act.types.act_errors import ActGuardrailsError, ActStateGuardrailError, ActTimeoutError  # act 异常归类（_classify_act_error）
-# 网络瞬时故障的判定类型（_is_transient_network 与 _is_transient_client_error，ADR 0028）：botocore 随 boto3 必装，urllib3 是 botocore 的依赖
+# 网络瞬时故障的判定类型（_is_transient_network 与 _is_transient_client_error，ADR 0028）：botocore 与 urllib3 都在 pyproject 直接声明（ADR 0037 决策 2c）
 from botocore.exceptions import (
     ClientError, ConnectionClosedError, ConnectTimeoutError, EndpointConnectionError, ReadTimeoutError,
 )

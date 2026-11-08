@@ -83,8 +83,9 @@
 
 `steps[].deterministic` 四态：至少一个引擎的确定性命中查询成功时，该键在**每个** step 上都出现。`null` 表示该 step 交由 AI 执行；带 `pattern` 与 `description`
 表示命中该确定性 step（命中条目在该 scope 目标上的交集条目带前提时另带 `requires`（字符串数组，当前取值只有 `web_context`：设备不提供时这一步会记 error、不转 AI），无前提时省略该键；命中的模式在该 scope 的目标上没有实现时同样为 `null`，stderr 说明走 AI 的原因）；带 `conflict`（命中的模式列表）表示多条模式同时命中，实际执行该 step 会记 error（需先调整模式或 step 措辞）；带 `keyword_mismatch`（命中的模式）与 `keywords`（该 step 接受的关键字）表示这条写法在当前关键字下无意义，实际执行会记 error（如 Then 后只写一个地址）。
-**全部引擎的确定性命中查询都失败时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示）。部分引擎的命中查询失败时，该引擎的 step 同样是
+**全部引擎的确定性命中查询都取不到结果时该键在每个 step 上一律省略**（不是 null；stderr 有「标注降级」提示；取不到指该引擎的 worker 未能定位、起不来、超时或输出不是合法 JSON）。部分引擎的命中查询取不到结果时，该引擎的 step 同样是
 `null`、机读层与「交由 AI」不可区分；降级的引擎名见 stderr 的提示行。命中查询成功而能力自述取不到的引擎，命中的 step 不按 scope 目标核对、一律带 `pattern` 与 `description`（stderr 同样有「标注降级」提示）。
+其余失败不降级：worker 起来了但非零退出（如使用方 steps 加载失败）、能力自述与命令行工具不兼容（如两者版本不一致）时，`plan` 以退出码 2 结束、stdout 没有输出。
 
 ## `gherkai status <run_id> --json`
 

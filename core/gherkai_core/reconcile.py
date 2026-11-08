@@ -46,10 +46,14 @@ class Launcher(Protocol):
 
     本机后端下起 subprocess worker（事件旁路落 SQLite EventLog + proc.wait 写 task_exited）；
     云端后端下调 ECS RunTask（worker 自 PutItem events + 退出观察者 Lambda 写 task_exited）。
-    reconciler 对「怎么起」无知——只在 CAS 抢占成功后调 launch(job)。
+    reconciler 对「怎么起」无知——只在 CAS 抢占成功后调 launch(job, claimed_at=…)。
+
+    claimed_at：本次 CAS 抢占落库的同一个时间戳（`try_claim_job` 写进 `JobState.claimed_at` 的那个值）。job 墙钟预算
+    从 claim 起算（ADR 0034「job timeout」节「产品语义」段），到点时刻要按它算的实装（云端的一次性 schedule）据此取
+    deadline，不另取 launch 时刻；在本进程内计时的实装可以不用它。
     """
 
-    def launch(self, job: Job) -> None: ...
+    def launch(self, job: Job, *, claimed_at: str) -> None: ...
 
 
 def finalize_report(run_id, meta, event_log, report_store, now_iso: str, *, run_duration_ms: float | None = None) -> None:
@@ -88,7 +92,8 @@ def tick(
     1. 读 EventLog 全量 records → project() 纯推演完整 RunState（含 HWM）。
     2. project_state() HWM 条件写落 RunState（stale 被挡、无害——下轮重读重推，机制三）。
     3. plan_next() → 动作：
-       - start：try_claim_job() CAS 抢占（机制四），成功的那个（本实例）才 launcher.launch(job) 真起。
+       - start：try_claim_job() CAS 抢占（机制四），成功的那个（本实例）才 launcher.launch(job, claimed_at=now_iso) 真起
+         （与 claim 落库同一个时间戳，超时到点按它起算）。
        - finalize：先从**同一份** records 快照聚合各 job 判定真值落 result_store（注入时；commit-point 写序，ADR 0030
          决定三 detached 同守），再 try_finalize() 状态机单调条件写（机制三）commit；RunReport 由宿主在 done 后写
          （`finalize_report`）。聚合/落库异常原样抛出：commit 前失败 → 本轮 tick 失败、触发源重试；commit 后无人重试。
@@ -113,7 +118,7 @@ def tick(
             # CAS 抢占：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
             if run_store.try_claim_job(run_id, act.scope_id, claimed_at=now_iso):
                 try:
-                    launcher.launch(job)
+                    launcher.launch(job, claimed_at=now_iso)
                 except Exception as e:
                     # launch 失败补偿（ADR 0034 机制二推论）：job 已 CAS 成 RUNNING 却永无 events/
                     # task_exited（进程没起、平台观察者无从观察）——不补偿则永停 RUNNING、整批 wedge、

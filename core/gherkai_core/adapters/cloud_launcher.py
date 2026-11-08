@@ -1,6 +1,6 @@
 """CloudLauncher（ADR 0034 cloud 侧）：cloud 的 reconcile.Launcher——RunTask 起 Fargate task（fire-and-forget）。
 
-cloud 对位 local 的 SubprocessLauncher：reconciler（Lambda）机制四 CAS 抢占成功后调 launch(job)，经注入的
+cloud 对位 local 的 SubprocessLauncher：reconciler（Lambda）机制四 CAS 抢占成功后调 launch(job, claimed_at=…)，经注入的
 FargateEngine `start_scope` 起一个 Fargate task 就返回（不轮询、不读事件——worker 自 PutItem events 到 DDB、
 退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放推进）。
 
@@ -34,11 +34,12 @@ class CloudLauncher:
         # 缺省值只会让「漏传」伪装成「后端未启用定时能力」。
         self._run_id = run_id
         # job timeout 的到点触发器（ADR 0034「job timeout」节的云端后端一侧，组合根注入；实现是 EventBridge Scheduler
-        # one-time schedule，见 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s)。None 表示未装配
+        # one-time schedule，见 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s, claimed_at)，
+        # 实装按 claimed_at 加 timeout_s 取到点时刻（预算从 claim 起算，arm 晚于 claim 的间隔不推后到点）。None 表示未装配
         # （旧部署/无 env）——有预算的 job 降级为 tick 防御扫 + status --wait，打日志。
         self._timeout_watch = timeout_watch
 
-    def launch(self, job: Job) -> None:
+    def launch(self, job: Job, *, claimed_at: str) -> None:
         # 武装**先于**起 task（ADR 0034「job timeout」节）：start_scope 失败时 tick 会补偿 record_exit(PLATFORM_FAILED_EXIT)，
         # 但若补偿也失败（双失败）、job 永停 RUNNING——先建的 schedule 到点仍能收敛（「永 running」的最后
         # 兜底不因 launch 失败缺位）；失败 launch 留下的 schedule 到点走 no-op/直接收敛并自动删，零残留。
@@ -52,7 +53,7 @@ class CloudLauncher:
                 # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
                 # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
                 try:
-                    self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s)
+                    self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s, claimed_at)
                 except Exception:
                     logger.warning(
                         "这个 job 的超时看护没能设置好（不影响本次启动）：run=%s scope=%s"

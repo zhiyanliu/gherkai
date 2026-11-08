@@ -189,28 +189,57 @@ class WorkerCmd:
     source: str
 
 
+# 非 job 入口的失败按成因分三类、各由一个异常类表达（ADR 0036「5.」末段），调用点据类分叉、不解析消息文本：
+# WorkerSelfDescribeError（worker 起来了但非零退出）、WorkerIncompatibleError（取到了、与命令行工具不兼容）、
+# WorkerUnavailableError（取不到，WorkerNotFoundError 是它的子类）。前两类在任何调用点都不降级（`run` / `submit` /
+# `list-deterministic` / `plan` 以退出码 2 结束，doctor 记为失败项）；只有取不到可由调用点降级（`plan` 的标注与目标核对）。
+
+# 版本不一致的诊断（ADR 0024「协议版本与 job 行的固定键集」条）：与 worker 拒绝不合版本的 job 行、match 查询输入时同一句；
+# 能力自述不合契约的各项诊断都以它收尾，`engine` 身份位指错引擎的那一项除外（那一项的改法是改正 worker 路径）。
+VERSION_MISMATCH_ADVICE = "命令行工具与 worker 的版本不一致，请把两者装成同一版本。"
+
+
 class WorkerSelfDescribeError(RuntimeError):
-    """worker **起来了但自述失败**（非零退出）——与「定位不到」（WorkerNotFoundError）是两回事：最常见成因是使用方
+    """worker **起来了但自述失败**（非零退出）——与「取不到」（WorkerUnavailableError）是两回事：最常见成因是使用方
     `steps/` 目录里的文件加载失败（ADR 0037 决策 4 的 fail-loud），属使用方代码错误，调用点一律以退出码 2 结束、不降级
-    （`plan` 对 miss 降级，对本错误不降级：静默无标注等于把定制 step 悄悄换成 AI 判定）。"""
+    （`plan` 只对取不到降级，对本错误不降级：静默无标注等于把定制 step 悄悄换成 AI 判定）。"""
 
     def __init__(self, engine: str, returncode: int, stderr_tail: str, what: str):
         self.engine, self.returncode, self.stderr_tail = engine, returncode, stderr_tail
         super().__init__(f"引擎 {engine} 的 {what}失败（退出码 {returncode}）：{stderr_tail}")
 
 
-class WorkerNotFoundError(RuntimeError):
+class WorkerIncompatibleError(RuntimeError):
+    """能力自述**取到了、与命令行工具不兼容**：stdout 解析成 JSON 之后契约不合（身份位或载荷键，含 `schema_version` 与
+    命令行工具认的协议版本不等，ADR 0036「5.」）。消息是给使用方看的整句、自带改法；调用点一律以退出码 2 结束、不降级
+    ——不兼容不是「环境没装」，降级成无标注会把它藏起来。"""
+
+    def __init__(self, engine: str, message: str) -> None:
+        self.engine = engine
+        super().__init__(message)
+
+
+class WorkerUnavailableError(RuntimeError):
+    """非 job 入口**取不到结果**：worker 起不来（命令不可执行、工作目录不可用）、超时、stdout 不是合法 JSON，
+    以及定位不到 worker（子类 WorkerNotFoundError）。属环境问题：`plan` 只对这一类降级（ADR 0036 决策 4），
+    其余调用点以退出码 2 结束。"""
+
+    def __init__(self, engine: str, message: str) -> None:
+        self.engine = engine
+        super().__init__(message)
+
+
+class WorkerNotFoundError(WorkerUnavailableError):
     """定位链四级全 miss（ADR 0037 决策 3）：带引擎名 + 该引擎的安装指引，退出码交调用点。
 
-    **继承 RuntimeError 是有意的**：既有「worker 起不来 → RuntimeError」的调用点语义
+    **归入取不到（WorkerUnavailableError）是有意的**：「worker 取不到结果」的调用点语义
     （`list-deterministic` 退出码为 2、`plan` best-effort 降级）自动涵盖它；`run`/`submit` 另在 spawn 前
     显式 catch 本类型做 preflight（退出码 2，不进 job 级 engine_error）。
     """
 
     def __init__(self, engine: str, hint: str) -> None:
-        self.engine = engine
         self.hint = hint
-        super().__init__(hint)
+        super().__init__(engine, hint)
 
 
 class _UnavailableEngine:
@@ -505,13 +534,13 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
     与 `--match-steps`（查询，同 ADR「4.」）——只差 flag、stdin、注入 env 与错误措辞，故共用本体（曾各抄一份
     spawn+诊断，会漂移）。
     返回值形状随入口：match 查询是数组、能力自述是对象（契约校验在各自的调用方，见 `query_capabilities`）。
-    - worker cmd 走定位链（ADR 0037 决策 3）：miss → WorkerNotFoundError（RuntimeError 子类，调用点分叉）。
+    - worker cmd 走定位链（ADR 0037 决策 3）：miss → WorkerNotFoundError（取不到的一种，调用点分叉）。
     - steps_dir（ADR 0037 决策 4）经 env 注入：两个入口同样加载 steps 目录，故 `list-deterministic` 的清单
       与 `plan` 标注反映使用方定制 step（注册表即内建脚手架 + 加载的使用方模块）。
     - extra_env：该入口特有的注入（能力自述给 Nova 注 `NOVA_ACT_TIMEOUT_S`，见 `query_capabilities`）——
       叠在 scrub 后的继承 env 上，与 steps_dir 同一份 env。
     引擎名非法 → ValueError；worker 非 0 退出 → WorkerSelfDescribeError（如 steps 加载失败，调用点以退出码 2 结束、不降级）；
-    起不来/超时/输出非 JSON → RuntimeError 带诊断。
+    起不来/超时/输出非 JSON → WorkerUnavailableError 带诊断（取不到，只有 `plan` 据此降级）。
     """
     import subprocess
 
@@ -534,20 +563,20 @@ def _ask_worker(engine: str, flag: str, *, what: str, steps_dir: str | Path | No
                               input=payload, stdin=subprocess.DEVNULL if payload is None else None)
     except OSError as e:
         # 不止 FileNotFoundError：命令不可执行（PermissionError）、工作目录不是目录（NotADirectoryError）、脚本缺 shebang
-        # （Exec format error）同属 OSError。定位链第一级的 env 覆写可以指向任意路径，这几种都可达，一律收成 RuntimeError，
-        # 调用点按既有的 (ValueError, RuntimeError) 分支以退出码 2 结束、不冒 traceback。TimeoutExpired 不是 OSError，走下一支。
-        raise RuntimeError(
-            f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行或工作目录不可用？"
+        # （Exec format error）同属 OSError。定位链第一级的 env 覆写可以指向任意路径，这几种都可达，一律收成取不到
+        # （WorkerUnavailableError），调用点据类分叉、不冒 traceback。TimeoutExpired 不是 OSError，走下一支。
+        raise WorkerUnavailableError(
+            engine, f"引擎 {engine} 的 worker 起不来（{e}）——用的是「{wc.source}」，该命令不可执行或工作目录不可用？"
         ) from e
     except subprocess.TimeoutExpired as e:
-        raise RuntimeError(f"引擎 {engine} 的 {what}超时（{timeout_s:.0f}s）") from e
+        raise WorkerUnavailableError(engine, f"引擎 {engine} 的 {what}超时（{timeout_s:.0f}s）") from e
     if proc.returncode != 0:
         tail = proc.stderr.decode("utf-8", errors="replace")[-400:]
         raise WorkerSelfDescribeError(engine, proc.returncode, tail, what)
     try:
         return json.loads(proc.stdout.decode("utf-8"))
-    except ValueError as e:
-        raise RuntimeError(f"引擎 {engine} 的 {what}输出非 JSON：{proc.stdout[:200]!r}") from e
+    except ValueError as e:  # UnicodeDecodeError 也是 ValueError 子类，一并归入取不到
+        raise WorkerUnavailableError(engine, f"引擎 {engine} 的 {what}输出非 JSON：{proc.stdout[:200]!r}") from e
 
 
 def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
@@ -568,8 +597,10 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     steps_dir（ADR 0037 决策 4）：该入口同样加载 steps 目录，故 `deterministic_steps` 是内建脚手架 + 使用方定制、
     且使用方 steps 加载失败在这里就 fail-loud；不给时组合根拥有的键被显式清（见 `_ask_worker`），即「无使用方
     step」的情形（grace 下限与 step 无关，故 `engine_min_grace` 走这一种）。
-    异常语义见 `_ask_worker`（调用方各自分叉：`run`/`submit`/`list-deterministic` 退出码为 2、doctor 只报一行、
-    `plan` 的目标核对取不到自述只警告、派发标注走 match 查询）；输出不是 JSON 对象 → RuntimeError。
+    异常按三类（见 WorkerSelfDescribeError 上方注释）：`_ask_worker` 给出非零退出与取不到两类；解析成 JSON 之后的契约
+    不合（含输出不是 JSON 对象）在这里抛 WorkerIncompatibleError，`schema_version` 不等时的诊断以版本不一致那一句收尾
+    （VERSION_MISMATCH_ADVICE）。调用方各自分叉：`run`/`submit`/`list-deterministic` 三类都退出码为 2、doctor 只报一行、
+    `plan` 只对取不到降级（ADR 0036 决策 4）；`NOVA_ACT_TIMEOUT_S` 取值不合法或引擎名非法 → ValueError，不 spawn。
     """
     key = (engine, None if steps_dir is None else str(steps_dir))
     cached = _CAPABILITIES_CACHE.get(key)
@@ -579,80 +610,73 @@ def query_capabilities(engine: str, *, steps_dir: str | Path | None = None,
     caps = _ask_worker(engine, "--capabilities", what="能力自述", steps_dir=steps_dir,
                        timeout_s=timeout_s, extra_env=extra_env)
     if not isinstance(caps, dict):
-        raise RuntimeError(f"引擎 {engine} 的能力自述输出不是 JSON 对象：{caps!r}")
+        raise WorkerIncompatibleError(engine, f"引擎 {engine} 的能力自述输出不是 JSON 对象（{caps!r}）：{VERSION_MISMATCH_ADVICE}")
     # 身份位当场核（**不是**将来才用的预留位）：定位链第一级是 env 覆写（GHERKAI_WORKER_*_CMD），指错引擎时不核
     # 就静默拿另一引擎的自述（Nova 拿到 midscene 自报的下限（按当前常量 63.5s）→ grace < 单 act 上界 120s → SIGTERM 落 act 中途必被硬杀、
     # 会话泄漏），正是本机制要消除的「grace 默默不够」。schema_version 同理：认不出的格式版本按 fail-loud 处置、
     # 不猜键语义。
     if caps.get("engine") != engine:
-        raise RuntimeError(
+        raise WorkerIncompatibleError(
+            engine,
             f"要问的是引擎 {engine} 的 worker，回答的却自称 {caps.get('engine')!r}"
             "——这个引擎的 worker 路径指错了？（检查 GHERKAI_WORKER_*_CMD）"
         )
     found = caps.get("schema_version")
     if isinstance(found, bool) or not isinstance(found, int) or found != PROTOCOL_SCHEMA_VERSION:  # 布尔值不算整数版本号（与 worker 核 job 行的口径对称）
-        raise RuntimeError(
-            f"引擎 {engine} 的能力自述格式版本是 {caps.get('schema_version')!r}、命令行工具认的是 "
-            f"{PROTOCOL_SCHEMA_VERSION}——worker 与命令行工具版本不一致？两者须同版本安装。"
+        # 写法与 worker 拒绝不合版本的 job 行一致：先点明两个版本号，再接版本不一致那一句（ADR 0036 决策 4）
+        shown = "缺失" if "schema_version" not in caps else json.dumps(found, ensure_ascii=False)
+        raise WorkerIncompatibleError(
+            engine,
+            f"引擎 {engine} 的能力自述格式版本是 {shown}，这个命令行工具认的是 {PROTOCOL_SCHEMA_VERSION}："
+            f"{VERSION_MISMATCH_ADVICE}"
         )
     raw = caps.get("min_grace_s")
     # 契约校验：非负有限数（bool 是 int 子类、单独挡）。不合契约意味着 worker 与 CLI 不同版本 / 自述实现错，
-    # 与「输出非 JSON」同类 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
+    # 与「输出不是 JSON 对象」同类 fail-loud——把它当 0 会让 core 的 grace 护栏形同废除。
     if not _is_finite_number(raw) or raw < 0:
-        raise RuntimeError(
-            f"引擎 {engine} 自述的最短停止宽限不是非负有限数：{raw!r}"
-            "——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
+        raise WorkerIncompatibleError(
+            engine, f"引擎 {engine} 自述的最短停止宽限不是非负有限数（{raw!r}）：{VERSION_MISMATCH_ADVICE}")
     # 清单同类校验：不是数组则消费者（list-deterministic / doctor 计数）会拿 len() 崩在无关处，
     # 且「清单不可信」本身就是版本/实现不一致的信号。
     if not isinstance(caps.get("deterministic_steps"), list):
-        raise RuntimeError(
-            f"引擎 {engine} 自述的确定性 step 清单不是数组：{caps.get('deterministic_steps')!r}"
-            "——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
+        raise WorkerIncompatibleError(
+            engine,
+            f"引擎 {engine} 自述的确定性 step 清单不是数组（{caps.get('deterministic_steps')!r}）：{VERSION_MISMATCH_ADVICE}")
     # 条目的 keywords 声明（ADR 0050 决策 1）：可缺键（自述契约的缺省：未声明即接受 Given / When / Then 全部，ADR 0036「2.」）；
     # 有键则须是封闭集合里不重复的非空字符串数组（显式 null 也不合契约）。先核元素类型再去重：非字符串元素进 set() 会抛
     # TypeError，绕过这里的契约错误。
     for entry in caps["deterministic_steps"]:
         if not isinstance(entry, dict):
-            raise RuntimeError(
-                f"引擎 {engine} 自述的确定性 step 清单项不是对象：{entry!r}"
-                "——worker 与命令行工具版本不一致？两者须同版本安装。"
-            )
+            raise WorkerIncompatibleError(
+                engine, f"引擎 {engine} 自述的确定性 step 清单项不是对象（{entry!r}）：{VERSION_MISMATCH_ADVICE}")
         if "keywords" not in entry:
             continue
         kws = entry["keywords"]
         if (not isinstance(kws, list) or not kws or not all(isinstance(k, str) for k in kws)
                 or len(set(kws)) != len(kws) or any(k not in ("Given", "When", "Then") for k in kws)):
-            raise RuntimeError(
-                f"引擎 {engine} 自述的确定性 step 条目 keywords 不合契约：{kws!r}"
-                "——worker 与命令行工具版本不一致？两者须同版本安装。"
-            )
+            raise WorkerIncompatibleError(
+                engine, f"引擎 {engine} 自述的确定性 step 条目 keywords 不合契约（{kws!r}）：{VERSION_MISMATCH_ADVICE}")
     # 模型 id 同类校验：doctor 据它显示「这台机器实际会用的模型」（ADR 0004「模型版本选择策略」的 env 覆盖因此
     # 可见）。缺键 / 空串会让那一行显示成没信息的「模型 」，等于把「不知道」伪装成「知道了」——与下限、清单同为
     # 版本/实现不一致的信号，一并 fail-loud。
     if not isinstance(caps.get("model_id"), str) or not caps["model_id"]:
-        raise RuntimeError(
-            f"引擎 {engine} 自述的模型 id 不是非空字符串：{caps.get('model_id')!r}"
-            "——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
+        raise WorkerIncompatibleError(
+            engine, f"引擎 {engine} 自述的模型 id 不是非空字符串（{caps.get('model_id')!r}）：{VERSION_MISMATCH_ADVICE}")
     # 测试目标相关的键（ADR 0049 决策 1、2）：顶层 targets **必有**（缺键即版本不一致，不再当「只有桌面网页」兜）；每个清单项的
     # targets 可缺（使用方 step 未声明目标即只在桌面网页上有实现，见 step_targets）；会话预热支持键可缺。有则形态须合契约；
     # 交集不在这里算、不改写对象（消费点经下面的纯函数取）。
     if "targets" not in caps:
-        raise RuntimeError(
-            f"引擎 {engine} 的能力自述缺 targets（支持的测试目标）——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
+        raise WorkerIncompatibleError(
+            engine, f"引擎 {engine} 的能力自述缺 targets（支持的测试目标）：{VERSION_MISMATCH_ADVICE}")
     _validate_targets(engine, caps["targets"], where="顶层 targets", top_level=True)
     for entry in caps["deterministic_steps"]:
         if "targets" in entry:
             _validate_targets(engine, entry["targets"], where=f"确定性 step 条目 {entry.get('pattern')!r} 的 targets",
                               top_level=False)
     if SESSION_WARMUP_KEY in caps and not isinstance(caps[SESSION_WARMUP_KEY], bool):
-        raise RuntimeError(
-            f"引擎 {engine} 自述的会话预热支持键 {SESSION_WARMUP_KEY} 不是布尔值：{caps[SESSION_WARMUP_KEY]!r}"
-            "——worker 与命令行工具版本不一致？两者须同版本安装。"
-        )
+        raise WorkerIncompatibleError(
+            engine,
+            f"引擎 {engine} 自述的会话预热支持键 {SESSION_WARMUP_KEY} 不是布尔值（{caps[SESSION_WARMUP_KEY]!r}）：{VERSION_MISMATCH_ADVICE}")
     _CAPABILITIES_CACHE[key] = caps
     return caps
 
@@ -681,8 +705,8 @@ def _validate_targets(engine: str, targets, *, where: str, top_level: bool) -> N
     每项 device 取 TARGET_DEVICES 之一、ui_kinds 非空不重复且都取 UI_KINDS 之一、desktop 只允许 ["web"]；顶层条目 device
     不重复、可带 max_session_s（正有限数、排除 bool）；step 级条目可带 requires（字符串数组、不重复，取值不核——取值集合归
     worker 注册期校验，CLI 不另立第二事实源），且不出现 device / ui_kinds / requires 三项完全相同的重复条目。
-    不合即 RuntimeError（调用方不写缓存）。"""
-    bad = RuntimeError(f"引擎 {engine} 自述的{where}不合契约：{targets!r}——worker 与命令行工具版本不一致？两者须同版本安装。")
+    不合即 WorkerIncompatibleError（调用方不写缓存）。"""
+    bad = WorkerIncompatibleError(engine, f"引擎 {engine} 自述的{where}不合契约（{targets!r}）：{VERSION_MISMATCH_ADVICE}")
     if not isinstance(targets, list):
         raise bad
     seen: list[tuple] = []
@@ -725,7 +749,7 @@ def worker_targets(caps: dict) -> list[dict]:
     `query_capabilities` 的契约校验已拒绝；绕过它的调用方（测试替身）给了没有 targets 的对象在这里 fail-loud。返回副本。"""
     raw = caps.get("targets")
     if raw is None:
-        raise RuntimeError("能力自述缺 targets（支持的测试目标）——worker 与命令行工具版本不一致？两者须同版本安装。")
+        raise WorkerIncompatibleError(str(caps.get("engine")), f"能力自述缺 targets（支持的测试目标）：{VERSION_MISMATCH_ADVICE}")
     return [dict(t, ui_kinds=list(t["ui_kinds"])) for t in raw]
 
 
@@ -797,7 +821,8 @@ def match_deterministic(engine: str, items: list[dict], *, steps_dir: str | Path
     条目不接受这个关键字——后两种实际运行时将 error，用例预检提前暴露）。
     匹配语义 100% 在 worker（同一注册表同一 search 实现），CLI 零复刻（ADR 0022「匹配放 worker」红线）；关键字只用于
     核对条目的 keywords 声明，不进模式匹配（ADR 0050 决策 1）。
-    异常语义同 `query_capabilities`（调用方 plan 做 best-effort 降级）。
+    异常语义见 `_ask_worker`（非零退出 / 取不到两类）；调用方 plan 在此之前已核过能力自述的协议版本（ADR 0036 决策 4
+    「匹配查询的前置」条：输入不带版本号，旧 worker 的回答形状可能完全合法），只对取不到降级。
     """
     return _ask_worker(engine, "--match-steps", what="确定性 step 查询", steps_dir=steps_dir,  # what 进用户可见的失败文案（ADR 0039：不带协议名）
                        timeout_s=timeout_s, payload=json.dumps(items, ensure_ascii=False).encode("utf-8"))

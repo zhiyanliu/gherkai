@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import datetime as _dt
 import os
+import time
 
 
 def _run_ids_from_stream(event) -> set[str]:
@@ -98,15 +99,26 @@ def _task_scope_id(task: dict) -> str | None:
 # DescribeTasks 一次能收的 ARN 上限（AWS API 硬上限，超了直接 InvalidParameterException）——调用点据此分批。
 _DESCRIBE_TASKS_MAX = 100
 
-# 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制（到点准时处置），扫是双保险——
-# 余量让主机制先行、避免与在途的 STOPPED→exit_observer 链形成竞态。非正确性参数（处置幂等、退出记录在即让路）。
-_DEFENSIVE_TIMEOUT_MARGIN_S = 60.0
+# 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制，扫是双保险。余量不小于主机制的最坏推迟
+# 加处置本身的时长——Scheduler 在 deadline 所在那一分钟内偏晚触发（不到 60 秒），之后还有列 task、停 task 的调用——
+# 主机制才仍先于扫处置，也避开与在途的 STOPPED→exit_observer 链形成竞态。非正确性参数：两者先后颠倒也无害
+# （处置幂等，复查 deadline 与退出记录后才动手）。
+_DEFENSIVE_TIMEOUT_MARGIN_S = 120.0
+
+# 到点处置复查 deadline 时的等待上界秒（ADR 0034「job timeout」节「到点不早于 deadline」条②）：Scheduler 只承诺
+# 60 秒精度，按文档精度触发时离 deadline 至多约 59 秒；剩余超过它说明触发早于文档精度，此时不等待、不处置。
+_TIMEOUT_EARLY_WAIT_MAX_S = 60.0
+
+# 等到 deadline 之后本次调用还要完成的工作所留的秒数：处置（ListTasks 翻页、DescribeTasks、StopTask）与随后的一次 tick
+# （读写 runs/events 表，可能起下一个 task）。kicker 用 Lambda 剩余时间减去它作为本次可等待的上界，免得等完被超时截断。
+_TIMEOUT_HANDLING_RESERVE_S = 30.0
 
 
 class EventBridgeTimeoutWatch:
     """job timeout 的云端到点触发器（ADR 0034「job timeout」节）：CloudLauncher 起 task 后 arm 一个
-    EventBridge Scheduler **one-time schedule**（at 取 now+timeout、ActionAfterCompletion=DELETE 到点自动删
-    ——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
+    EventBridge Scheduler **one-time schedule**（at 取 deadline，即 claimed_at 加 timeout、带秒；ActionAfterCompletion=DELETE
+    到点自动删——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
+    Scheduler 只承诺分钟精度、可能早于 deadline 触发，「不早于 deadline」由处置侧复查保证（`_handle_timeout`），不靠 at 的秒数。
 
     schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id) 的前 `names.JOB_TIMEOUT_DIGEST_LEN`
     位：确定性（重复 arm 幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符
@@ -128,14 +140,17 @@ class EventBridgeTimeoutWatch:
         digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:names.JOB_TIMEOUT_DIGEST_LEN]
         return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
 
-    def arm(self, run_id: str, scope_id: str, timeout_s: float) -> None:
+    def arm(self, run_id: str, scope_id: str, timeout_s: float, claimed_at: str) -> None:
         import json
+        from gherkai_runtime import compose
 
-        at = _dt.datetime.now(_dt.timezone.utc) + _dt.timedelta(seconds=timeout_s)
+        # 到点时刻取 deadline 本身：claim 时刻加预算（与到点复查、防御扫同一算法），arm 晚于 claim 的间隔不推后到点。
+        at = compose.parse_iso(claimed_at).astimezone(_dt.timezone.utc) + _dt.timedelta(seconds=timeout_s)
         try:
             self._client.create_schedule(
                 Name=self.schedule_name(run_id, scope_id),
-                # at() 表达式不带时区后缀（Scheduler 默认 UTC）；秒级精度足够（timeout 是分钟级预算）
+                # at() 表达式不带时区后缀（Scheduler 默认 UTC）、只收到秒，小数秒截去。带秒而不取整到分钟：触发早于 deadline
+                # 的部分由处置侧复查补足，取整只会把超时处置的最坏推迟翻倍（ADR 0034「job timeout」节被拒方案）。
                 ScheduleExpression=f"at({at.strftime('%Y-%m-%dT%H:%M:%S')})",
                 FlexibleTimeWindow={"Mode": "OFF"},
                 ActionAfterCompletion="DELETE",  # 到点触发即自动删（IAM 需随附 scheduler:DeleteSchedule）
@@ -149,9 +164,20 @@ class EventBridgeTimeoutWatch:
             pass  # 同名已在（同 run+scope 重复 arm）→ 已武装，幂等
 
 
-def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
-    """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 才动手——ListTasks(startedBy=run_id) **同时列
-    RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides env SCOPE_ID 匹配 → 按 task 状态三路：
+def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, max_wait_s: float | None = None,
+                    now_fn=None, sleep_fn=None) -> str:
+    """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 且 deadline 已到才动手。
+
+    **先复查 deadline**（该节「到点不早于 deadline」条②）：Scheduler 只承诺分钟精度，触发可能早于 deadline。job 已不在
+    running 或退出记录已在时照常 no-op、不等待；仍 running 时按 claimed_at 加 Job.timeout_s 复查——已到直接处置；未到且剩余
+    不超过等待上界（`_TIMEOUT_EARLY_WAIT_MAX_S` 与 max_wait_s 取小）则等到 deadline，重读 job 状态与退出记录、仍需处置才往下；
+    剩余超过上界时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
+    缺 claimed_at 或预算时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调本函数，复查直接通过。
+    max_wait_s：本次调用可用于等待的秒数（kicker 按 Lambda 剩余时间给出），None 表示只受固定上界约束；
+    now_fn / sleep_fn：时钟与等待，供测试注入。
+
+    处置：ListTasks(startedBy=run_id) **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides
+    env SCOPE_ID 匹配 → 按 task 状态三路：
     - 运行中 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
       自然收敛，保住单一真源）；
     - **正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者。曾只列 RUNNING、把它判成
@@ -163,15 +189,43 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
     """
     import boto3
     from gherkai_core.model import Status
+    from gherkai_runtime import compose
 
     meta, event_log, run_store, *_ = built
-    state = run_store.load_run_state(run_id)
-    js = state.jobs.get(scope_id) if state is not None else None
-    if js is None or js.status != Status.RUNNING:
-        return "noop-not-running"  # 到点时 job 早收敛/未知 → 幂等 no-op（best-effort 边界）
-    # 只查本 scope（EventLog.has_exit 单点查）——一个 scope 的处置不该逐 scope 重放整 run 的 events。
-    if event_log.has_exit(scope_id):
-        return "noop-exit-in-flight"  # 退出记录已在、投影在途 → 让既有链收敛，不动手
+    now_fn = now_fn or (lambda: _dt.datetime.now(_dt.timezone.utc))  # 纯时间差比较、不落库（同防御扫）
+    sleep_fn = sleep_fn or time.sleep
+
+    def _check() -> tuple[str | None, str | None]:
+        """读一次 job 状态：返回 (no-op 结果串, claimed_at)，结果串为 None 表示仍需处置。"""
+        state = run_store.load_run_state(run_id)
+        js = state.jobs.get(scope_id) if state is not None else None
+        if js is None or js.status != Status.RUNNING:
+            return "noop-not-running", None  # 到点时 job 早收敛/未知 → 幂等 no-op（best-effort 边界）
+        # 只查本 scope（EventLog.has_exit 单点查）——一个 scope 的处置不该逐 scope 重放整 run 的 events。
+        if event_log.has_exit(scope_id):
+            return "noop-exit-in-flight", None  # 退出记录已在、投影在途 → 让既有链收敛，不动手
+        return None, js.claimed_at
+
+    noop, claimed_at = _check()
+    if noop:
+        return noop
+    job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
+    if claimed_at and job is not None and job.timeout_s:
+        deadline = compose.parse_iso(claimed_at) + _dt.timedelta(seconds=job.timeout_s)
+        remaining = (deadline - now_fn()).total_seconds()
+        if remaining > 0:
+            cap = _TIMEOUT_EARLY_WAIT_MAX_S if max_wait_s is None else min(_TIMEOUT_EARLY_WAIT_MAX_S, max_wait_s)
+            if remaining > cap:
+                why = ("早于定时服务承诺的触发精度" if remaining > _TIMEOUT_EARLY_WAIT_MAX_S
+                       else f"本次调用剩余的时间只够等 {max(cap, 0):.0f} 秒")
+                print(f"timeout-skip: run={run_id} scope={scope_id} 离预算用尽还有 {remaining:.0f} 秒，{why}"
+                      " → 本次不停止，超出预算后由之后的推进检查收尾")
+                return "skip-early"
+            print(f"timeout-wait: run={run_id} scope={scope_id} 定时触发早于预算用尽 {remaining:.1f} 秒 → 等到那时再处置")
+            sleep_fn(remaining)
+            noop, _ = _check()  # 等待期间 job 自行结束或退出记录已到 → 照常 no-op
+            if noop:
+                return noop
     ecs = ecs_client if ecs_client is not None else boto3.client(
         "ecs", region_name=os.environ.get("REGION") or os.environ.get("AWS_REGION"))
     cluster = os.environ["CLUSTER"]
@@ -214,7 +268,6 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None) -> str:
             # 不抢着写：退出记录由 exit_observer 收到 STOPPED 事件时落（本函数 docstring「正在停止」那路）
             print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等它的退出事件到达再收尾")
             return "noop-stopping"
-        job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
         budget = f"{job.timeout_s:g}" if job is not None and job.timeout_s else "?"
         ecs.stop_task(cluster=cluster, task=arn,
                       reason=f"{TIMEOUT_STOP_SENTINEL}: scope exceeded {budget}s budget")
@@ -485,8 +538,9 @@ def kicker_handler(event, context):
     「推着走」（events Stream 持续推进）。
 
     第三触发源（ADR 0034「job timeout」节）：EventBridge Scheduler 的到点 invoke，payload
-    `{"run_id","timeout_scope"}`——先超时处置（仍 running 才 StopTask/收敛），再照常 tick
-    （处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。
+    `{"run_id","timeout_scope"}`——先超时处置（仍 running 且 deadline 已到才 StopTask/收敛，触发早于 deadline 时先等到
+    deadline），再照常 tick（处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。等待上界在装配之后按本次
+    调用的剩余时间算，见 `_timeout_wait_budget_s`。
     """
     timeout_scope = event.get("timeout_scope")
     rid = event.get("run_id")
@@ -495,5 +549,14 @@ def kicker_handler(event, context):
         built = _build(rid)
         prebuilt[rid] = built  # 含 None（本 run 不该推进）——tick 侧据此也不重装
         if built is not None:
-            _handle_timeout(rid, timeout_scope, built)
+            _handle_timeout(rid, timeout_scope, built, max_wait_s=_timeout_wait_budget_s(context))
     return _tick_runs(_run_ids_from_runs_stream(event), "kicker", prebuilt=prebuilt)
+
+
+def _timeout_wait_budget_s(context) -> float | None:
+    """本次 invoke 还能拿多少秒等到 deadline：Lambda 剩余时间减去等完之后处置与 tick 所需的 `_TIMEOUT_HANDLING_RESERVE_S`。
+    context 不带剩余时间（测试或直接调用）时返回 None，只受固定等待上界约束。"""
+    remaining_ms = getattr(context, "get_remaining_time_in_millis", None)
+    if remaining_ms is None:
+        return None
+    return remaining_ms() / 1000.0 - _TIMEOUT_HANDLING_RESERVE_S

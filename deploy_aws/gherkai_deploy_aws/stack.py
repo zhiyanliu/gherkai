@@ -758,7 +758,9 @@ class BackendStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_13,
             handler=handler,
             code=code,
-            timeout=Duration.minutes(2),  # 起 task + 条件写；不等 worker 运行结束（fire-and-forget）
+            # 起 task + 条件写，不等 worker 运行结束（fire-and-forget）；kicker 的超时到点处置在定时提前触发时最多等 60 秒到
+            # deadline，此值须盖住这段等待加随后的处置与 tick（ADR 0034「job timeout」节「到点不早于 deadline」条）
+            timeout=Duration.minutes(2),
             memory_size=256,
             environment=environment,
         )

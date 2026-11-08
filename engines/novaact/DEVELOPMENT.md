@@ -34,7 +34,7 @@ uv sync            # 在 repo 根运行一次，五个 workspace 成员（core /
 
 依赖与版本锁定（`pyproject.toml`）：`requires-python = ">=3.13"`；SDK **锁定精确版本** `nova-act==3.4.187.0`，直接使用的 `bedrock-agentcore==1.22.0` 同样钉精确版本（worker 直接调它的 `BrowserClient`，nova-act 对它只给范围）
 （升级的步骤是改 pin → 全套测试 + 模型评测集实际运行 → 随发版说明，见 [ADR 0042](../../docs/adr/0042-step-evidence-and-explain.md) 决策六），
-`boto3>=1.34` 直接声明，不经 nova-act 传递依赖（ADR 0037 决策 2c）；包版本由 git tag 经 uv-dynamic-versioning 算出，不写入文件（ADR 0037 决策 2b）。
+`boto3>=1.34`、`botocore>=1.34`、`urllib3>=2` 直接声明，不经 nova-act 或 boto3 传递依赖：worker 直接 import 的包都自己声明（ADR 0037 决策 2c）；包版本由 git tag 经 uv-dynamic-versioning 算出，不写入文件（ADR 0037 决策 2b）。
 
 ## 执行形态：薄 worker（pytest-bdd 已退役）
 

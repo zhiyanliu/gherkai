@@ -113,6 +113,10 @@ def test_ddb_multi_scope_records(events_table):
 
 # ---------- CloudLauncher ----------
 
+# tick 传给 launch 的 claim 时间戳（与 try_claim_job 落库同一个值）；CloudLauncher 把它原样交给 arm。
+_CLAIMED = "2026-11-08T10:00:00.250000+00:00"
+
+
 def test_cloud_launcher_calls_start_scope():
     """CloudLauncher.launch → resolver 选 engine → start_scope（fire-and-forget，不轮询）。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
@@ -122,7 +126,7 @@ def test_cloud_launcher_calls_start_scope():
         def start_scope(self, job): self.started.append(job.scope_id); return "arn:task/x"
 
     eng = FakeEngine()
-    CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a"))
+    CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a"), claimed_at=_CLAIMED)
     assert eng.started == ["a"]
 
 
@@ -131,10 +135,10 @@ class _RecorderWatch:
         self.armed: list[tuple] = []
         self._raise = raise_on_arm
 
-    def arm(self, run_id, scope_id, timeout_s):
+    def arm(self, run_id, scope_id, timeout_s, claimed_at):
         if self._raise:
             raise RuntimeError("scheduler down")
-        self.armed.append((run_id, scope_id, timeout_s))
+        self.armed.append((run_id, scope_id, timeout_s, claimed_at))
 
 
 class _FakeStartEngine:
@@ -143,13 +147,15 @@ class _FakeStartEngine:
 
 
 def test_cloud_launcher_arms_timeout_watch():
-    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s)（ADR 0034「job timeout」节的云端后端一侧）。"""
+    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s, claimed_at)（ADR 0034「job timeout」节的云端后端
+    一侧）；claimed_at 原样转交，到点时刻按 claim 起算、不按 arm 时刻。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng, watch = _FakeStartEngine(), _RecorderWatch()
-    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a", timeout_s=60.0))
+    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(
+        _job("a", timeout_s=60.0), claimed_at=_CLAIMED)
     assert eng.started == ["a"]
-    assert watch.armed == [("run-1", "a", 60.0)]
+    assert watch.armed == [("run-1", "a", 60.0, _CLAIMED)]
 
 
 def test_cloud_launcher_no_arm_without_timeout():
@@ -157,7 +163,7 @@ def test_cloud_launcher_no_arm_without_timeout():
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
     eng, watch = _FakeStartEngine(), _RecorderWatch()
-    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a"))
+    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a"), claimed_at=_CLAIMED)
     assert eng.started == ["a"] and watch.armed == []
 
 
@@ -169,13 +175,13 @@ def test_cloud_launcher_arms_before_start_scope():
     order = []
 
     class OrderWatch:
-        def arm(self, run_id, scope_id, timeout_s): order.append("arm")
+        def arm(self, run_id, scope_id, timeout_s, claimed_at): order.append("arm")
 
     class OrderEngine:
         def start_scope(self, job): order.append("start")
 
     CloudLauncher(lambda name: OrderEngine(), run_id="run-1", timeout_watch=OrderWatch()).launch(
-        _job("a", timeout_s=60.0))
+        _job("a", timeout_s=60.0), claimed_at=_CLAIMED)
     assert order == ["arm", "start"]
 
 
@@ -192,8 +198,8 @@ def test_cloud_launcher_launch_failure_still_armed_and_raises():
 
     with pytest.raises(RuntimeError, match="placement"):
         CloudLauncher(lambda name: BoomEngine(), run_id="run-1", timeout_watch=watch).launch(
-            _job("a", timeout_s=60.0))
-    assert watch.armed == [("run-1", "a", 60.0)]  # 武装已完成、不随 launch 失败丢失
+            _job("a", timeout_s=60.0), claimed_at=_CLAIMED)
+    assert watch.armed == [("run-1", "a", 60.0, _CLAIMED)]  # 武装已完成、不随 launch 失败丢失
 
 
 def test_cloud_launcher_arm_failure_does_not_block_launch():
@@ -202,7 +208,8 @@ def test_cloud_launcher_arm_failure_does_not_block_launch():
 
     eng = _FakeStartEngine()
     CloudLauncher(lambda name: eng, run_id="run-1",
-                  timeout_watch=_RecorderWatch(raise_on_arm=True)).launch(_job("a", timeout_s=60.0))
+                  timeout_watch=_RecorderWatch(raise_on_arm=True)).launch(_job("a", timeout_s=60.0),
+                                                                          claimed_at=_CLAIMED)
     assert eng.started == ["a"]  # launch 完成、异常被兜（日志降级）
 
 
@@ -217,7 +224,7 @@ def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog)
         CloudLauncher(lambda name: _FakeStartEngine())
     eng = _FakeStartEngine()
     with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.cloud_launcher"):
-        CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a", timeout_s=60.0))
+        CloudLauncher(lambda name: eng, run_id="run-1").launch(_job("a", timeout_s=60.0), claimed_at=_CLAIMED)
     assert eng.started == ["a"]
     assert any("后端未启用定时能力" in r.getMessage() for r in caplog.records), caplog.records
 

@@ -908,7 +908,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="419.2" y="160" width="183.6" height="18" rx="3" class="c-mask"/>
           <text x="511" y="170" class="t-muted" font-size="11" text-anchor="middle">起 task 时设置一次性定时器</text>
         </g>
-        <text x="142" y="198" class="t-muted" font-size="7"><tspan x="142" dy="0">到点：启动时刻 + 该 job</tspan><tspan x="142" dy="11">的墙钟预算；由启动方设置</tspan></text>
+        <text x="142" y="198" class="t-muted" font-size="7"><tspan x="142" dy="0">到点：领取时刻 + 该 job</tspan><tspan x="142" dy="11">的墙钟预算；由启动方设置</tspan></text>
         </g>
 
         <g data-edge-from="alarm" data-edge-to="kicker" data-edge-label="到点调起，指定该 job" data-edge-key="1" data-edge-id="m-fire">
@@ -926,7 +926,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="263.99999999999994" y="306" width="183.6" height="18" rx="3" class="c-mask"/>
           <text x="355.79999999999995" y="316" class="t-edge-security" font-size="11" text-anchor="middle">仍在运行且无退出记录才停止</text>
         </g>
-        <text x="297.2" y="344" class="t-muted" font-size="7"><tspan x="297.2" dy="0">重复到点无害：停止前先查该</tspan><tspan x="297.2" dy="11">job 状态</tspan></text>
+        <text x="297.2" y="344" class="t-muted" font-size="7">提前触发则等到预算用尽再停</text>
         </g>
 
         <g data-edge-from="worker" data-edge-to="xo" data-edge-label="任务停止（平台事件）" data-edge-key="3" data-edge-id="m-stopped">
@@ -1061,4 +1061,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=c8c5888e7e2e1a05078f83908806f2ee636f7498e84f88238ceec4aca7d03de3 -->
+<!-- gherkai:source-sha256=e104c19d7d2c787a9e22693b817b44ca96aefc680708f47ce48e018f0f64496c -->

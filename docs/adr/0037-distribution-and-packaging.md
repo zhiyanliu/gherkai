@@ -82,18 +82,19 @@
 
 ```
 gherkai ──hard──▶ gherkai-runtime[aws]=={{v}} ──▶ gherkai-core[aws]=={{v}} ──▶ boto3
+   │                    └──▶ botocore（云端钩子直接 import 它的异常类型）
    │                    └──▶ packaging + rich              └──▶ gherkin-official
-   ├─[local]──────▶ gherkai-worker-novaact=={{v}} ──▶ nova-act + bedrock-agentcore + boto3
+   ├─[local]──────▶ gherkai-worker-novaact=={{v}} ──▶ nova-act + bedrock-agentcore + boto3 + botocore + urllib3
    └─[deploy-aws]─▶ gherkai-deploy-aws=={{v}} ──▶ aws-cdk-lib + constructs + gherkai-runtime[aws]=={{v}}
 ```
 
 | 包 | 硬依赖（渲染后等效） | extras |
 |---|---|---|
 | `gherkai-core` | `gherkin-official>=31.0.0` | `[aws]` = `boto3>=1.34`（DDB/S3 store、FargateEngine、CloudLauncher 等 adapter） |
-| `gherkai-runtime` | `gherkai-core=={{ version }}`、**`packaging>=24`**（preflight 的版本比较；施工前 venv 里能 import 到纯属 pytest 的传递依赖，生产路径必须自己声明）、`rich>=13`（人读输出的表格与树，[0047](./0047-cli-human-readable-tables-with-rich.md)） | `[aws]` = `gherkai-core[aws]=={{ version }}` |
+| `gherkai-runtime` | `gherkai-core=={{ version }}`、**`packaging>=24`**（preflight 的版本比较；施工前 venv 里能 import 到纯属 pytest 的传递依赖，生产路径必须自己声明）、`rich>=13`（人读输出的表格与树，[0047](./0047-cli-human-readable-tables-with-rich.md)） | `[aws]` = `gherkai-core[aws]=={{ version }}`、`botocore>=1.34`（compose 的云端钩子直接 import 它的 `ClientError` / `BotoCoreError`，直接 import 就直接声明） |
 | `gherkai`（CLI） | **`gherkai-runtime[aws]=={{ version }}`** | `[local]` = `gherkai-worker-novaact=={{ version }}`；`[deploy-aws]` = `gherkai-deploy-aws=={{ version }}` |
 | `gherkai-deploy-aws` | `gherkai-runtime[aws]=={{ version }}`、`aws-cdk-lib>=2.150.0`、`constructs>=10` | 无 |
-| `gherkai-worker-novaact` | `nova-act==3.4.187.0`（SDK 钉精确版本，[0042](./0042-step-evidence-and-explain.md) 决策六）、`bedrock-agentcore==1.22.0`（worker 直接用它的 `BrowserClient` 做会话的 Start / Stop，[0028](./0028-transient-network-ssl-resilience.md)「会话泄漏防护」；nova-act 对它只声明范围，故同样锁定精确版本）、**`boto3>=1.34`**（worker 自己直接 import boto3，直接 import 就直接声明、不靠 nova-act 传递） | 无（**不依赖 gherkai-core**：worker 讲协议、零 core 依赖，[0024](./0024-worker-core-protocol.md)） |
+| `gherkai-worker-novaact` | `nova-act==3.4.187.0`（SDK 钉精确版本，[0042](./0042-step-evidence-and-explain.md) 决策六）、`bedrock-agentcore==1.22.0`（worker 直接用它的 `BrowserClient` 做会话的 Start / Stop，[0028](./0028-transient-network-ssl-resilience.md)「会话泄漏防护」；nova-act 对它只声明范围，故同样锁定精确版本）、**`boto3>=1.34`**、**`botocore>=1.34`**、**`urllib3>=2`**（worker 自己直接 import 这三个包：boto3 建 client，botocore 的 `Config` 配置三条 I/O 边缘的 client，botocore 的网络异常类型与 urllib3 的 `ProtocolError` 用于判定网络瞬时故障；直接 import 就直接声明、不靠 nova-act 或 boto3 传递） | 无（**不依赖 gherkai-core**：worker 讲协议、零 core 依赖，[0024](./0024-worker-core-protocol.md)） |
 
 - **CLI 硬依赖 boto3（反转 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」）**：按用户画像过一遍，裸装 `gherkai` 时没有任何画像能跑起完整用法——提交 cloud run 要 boto3；local 跑 novaact 装 `[local]` 而 nova-act 自带 boto3；只剩「仅跑 midscene 的 local 用户」与「只 `plan`」两种边缘画像省下一次安装体积。而 `[aws]` 留在 CLI 上的摩擦落在头条用法：`uvx gherkai submit --backend cloud` 会因缺 boto3 失败、要改写成 `uvx --from 'gherkai[aws]' gherkai …`。**code 层不变量不动**：local 路径**绝不 import boto3**靠懒加载保证（`compose` 的 `_make_*` 钩子），与安装期是否装了 boto3 无关。
 - **`[aws]` 保留在 core 与 runtime 层**：[0030](./0030-realtime-persistence-seam.md) 决定六守的本来就是「core 作为库可轻量 import、不被 boto3 绑死」，针对的是库消费者；库层保留 extra 完整兑现它。
