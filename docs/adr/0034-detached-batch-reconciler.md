@@ -241,7 +241,12 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 |---|---|---|---|
 | 同步 `run`（schedule） | 进程内 per-job deadline（原机制，改读 `job.timeout_s`） | `handle.stop(grace)` | 原路径：error+timeout |
 | local detached（per-run 进程） | `SubprocessLauncher` 起 timer 线程 | `handle.stop(engine_min_grace)` + 置本 scope timed_out 标志 | worker 协作退 → `_pump` 写 `task_exited(timed_out=True)` → project 判 ERROR+timeout |
-| cloud detached | **EventBridge Scheduler one-time schedule**（claim 后 CreateSchedule，`at = claim+timeout`、`ActionAfterCompletion=DELETE` 自动清）→ 到点 invoke kicker（payload 带 `timeout_scope`） | 仍 running 才动手：`ListTasks(cluster, startedBy=run_id)` **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ `DescribeTasks` 按 overrides env `SCOPE_ID` 匹配（同 exit_observer 提取术）→ 按 task 状态分三路：**在跑** → `StopTask(reason 含哨兵串 gherkai-job-timeout)`；**正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者（曾只列 RUNNING、把它判成「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout，code-health 对抗验证发现）；**已 STOPPED 而无退出记录**（STOPPED 事件丢投）→ 从 DescribeTasks 的 task 对象用与观察者**同一提取函数**（`exit_from_task`）落真退出记录（同内容、同键幂等）；两个列表都无踪才直写 `timed_out` | worker 协作退 → exit_observer 见 `stoppedReason` 哨兵 → `task_exited(timed_out=True)` → 同上 |
+| cloud detached | **EventBridge Scheduler one-time schedule**（claim 后 CreateSchedule，`at` 取 deadline（claim+timeout，带秒、按 `claimed_at` 起算）、`ActionAfterCompletion=DELETE` 自动清）→ 到点 invoke kicker（payload 带 `timeout_scope`） | 仍 running 且 deadline 已到才动手（未到先等到 deadline，见下「到点不早于 deadline」条）：`ListTasks(cluster, startedBy=run_id)` **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ `DescribeTasks` 按 overrides env `SCOPE_ID` 匹配（同 exit_observer 提取术）→ 按 task 状态分三路：**在跑** → `StopTask(reason 含哨兵串 gherkai-job-timeout)`；**正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者（曾只列 RUNNING、把它判成「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点跑完的 passed job 可被终判成 timeout，code-health 对抗验证发现）；**已 STOPPED 而无退出记录**（STOPPED 事件丢投）→ 从 DescribeTasks 的 task 对象用与观察者**同一提取函数**（`exit_from_task`）落真退出记录（同内容、同键幂等）；两个列表都无踪才直写 `timed_out` | worker 协作退 → exit_observer 见 `stoppedReason` 哨兵 → `task_exited(timed_out=True)` → 同上 |
+
+**到点不早于 deadline（Scheduler 只承诺分钟精度）**：Scheduler 文档写明所有 schedule 类型以 60 秒精度触发目标，指定 `1:00` 时在 `1:00:00` 到 `1:00:59` 之间触发（未设 flexible time window），`at()` 里的秒数不在承诺之内。带秒的 deadline 因此可能在它所在那一分钟的开头就触发、最多早约 59 秒；处置若只看 job 是否仍 running，job 实际可用的墙钟就会比预算短最多约一分钟。cloud 一路因此在处置侧复查 deadline，「不早于 deadline」不依赖 Scheduler 的秒级表现（local 与同步两路的计时器在本进程内，没有这一偏差）：
+- ① **schedule 的触发时刻取 deadline 本身**：`claimed_at` 加 `Job.timeout_s`，带秒、不取整。起算点是 claim 时刻而不是 arm 时刻，与本节「产品语义」段的「从 claim 起算」及防御扫同一算法，arm 晚于 claim 的那段间隔不会推后到点。按文档语义，触发落在 deadline 所在的那一分钟内，早于或晚于 deadline 都不足 60 秒。
+- ② **到点处置先复查 deadline**：job 已不在 running 或其退出记录已在时照常 no-op、不等待；仍 running 时按 `claimed_at` 加 `Job.timeout_s` 复查，未到则等待剩余时间，等完重新读取 job 状态，仍 running 才进入上表的三路处置。等待只在 Scheduler 早于 deadline 触发时发生；按文档精度触发时剩余时间至多约 59 秒，正是文档精度之内的提前量。等待上界取 60 秒，落在推进器 Lambda 的超时（`stack.py` 的 `_advancer_function`，2 分钟）之内，等完仍有余裕完成处置与随后的 tick。剩余时间超过上界（Scheduler 早于其文档精度）时不等待、不处置，打一行诊断日志，保护降级为防御扫与 `status --wait`，与下文「best-effort 边界」条里 CreateSchedule 失败时的降级相同，宁可不处置也不提前处置（理由见 ③）。`JobState` 缺 `claimed_at` 时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调用处置，复查直接通过。
+- ③ **代价与边界**：超时处置最坏晚于 deadline 不到 60 秒（Scheduler 在那一分钟内偏晚的部分），job 相应多占这段墙钟及其计费；等待只发生在 Scheduler 早于 deadline 触发而 job 仍在运行时，这时 job 离 deadline 已不足一分钟、几乎占满了整段 Fargate 预算（等待期间自行结束的，等完重读状态即 no-op）；每次至多约一分钟的 Lambda 时长计入部署方的运行成本，相对这段 Fargate 用量很小。job 墙钟预算是保护、不是承诺：处置晚于预算点不违背它，早于预算点则截断使用方预算之内的正常执行，故宁晚勿早。防御扫（claimed_at ②）的余量取值不小于这一最坏推迟，主机制才仍先于它处置；两者先后颠倒也无害（处置幂等、复查后才动手）。隧道 TTL 的每 job 余量（[0035](./0035-local-app-testing-via-tunnel.md) 决策 3）里「调度精度 60 秒」那一段正是这一最坏推迟，记账不变。
 
 **best-effort 边界**：CreateSchedule 失败不阻塞 launch（保护降级为 tick 防御扫 + status --wait，打日志）；schedule 到点时 job 已终态 → tick no-op（幂等）。
 
@@ -259,6 +264,8 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 - 纯 tick 内时长判定（不加时间触发器）——静默 job 无事件 → 永不 tick，盲区恰是最需要超时的场景（卡死）。已作为**防御性补充**保留（见 claimed_at ②），非主机制。
 - `JobState` 存 task ARN 供 StopTask——`startedBy=run_id`（≤36 字符）+ DescribeTasks env 匹配已够、改动更窄；ARN 属执行环境句柄、暂不进读模型（真需要时再议）。
 - 超时时由处置者直接写 task_exited——进程未退、会与 observer 的真退出记录同 key 相互覆盖；stop 后让既有观察链自然收敛才是单一真源。
+- `at` 保留带秒的 deadline 且到点不复查——接受最多早约 59 秒的处置，会截断预算之内的正常执行，预算贴近实际耗时的 job 被误判为超时，与预算是使用方给出的上界、定位为保护相悖。
+- schedule 的触发时刻向上取整到整分钟、到点再复查——同样不早，但把超时处置的最坏推迟从不到 60 秒放大到不到 2 分钟（取整推迟与 Scheduler 那一分钟内的偏晚两段叠加）。取整后按文档精度触发总在 deadline 之后，复查的等待在文档精度之内永远用不上；取整多出的只是 Scheduler 早于其文档精度时仍可能等完再处置，而那种情形下不取整的方案已由复查保证不提前处置、交由防御扫兜底。用常态路径上翻倍的最坏推迟换文档之外情形的这点覆盖，不值。
 
 ## core 拆分（守 [0026](./0026-schedule-module.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰红线）
 

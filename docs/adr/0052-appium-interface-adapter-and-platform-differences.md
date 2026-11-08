@@ -1,6 +1,6 @@
 # 0052. Appium 界面适配与平台差异处理
 
-> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；界面接缝的桌面实现是原有桌面代码的搬移，桌面路径除 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的会话事件（及其带来的会话名与 `release_failed` 判定）与决策 5 的终结事件门控（停止信号之后不再发 step、scenario 与 scope 级事件）外行为不变。
+> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；界面接缝的桌面实现是原有桌面代码的搬移，桌面路径除 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的会话事件（及其带来的会话名与 `release_failed` 判定）、决策 5 的终结事件门控（停止信号之后不再发 step、scenario 与 scope 级事件）与主流程让位（含中止在途的 act）外行为不变。
 
 ## 背景与问题
 
@@ -26,7 +26,7 @@ run-scope 对被测对象只做五件事，另承担四项边界义务（一项 
 scenario 前核对 ／ step 前核对 ／ step 后复原并核对 ／ 采集界面快照
 ```
 
-- 桌面实现是现有 Playwright 与 AgentCore 浏览器代码的搬移，除会话事件与终结事件门控（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、5）外行为不变，现有测试照常覆盖；四项边界义务在桌面上都是空操作（scenario 前核对恒返回「继续」），只有「采集界面快照」在 AI step 上取 `page.url()`。原先单列的「读当前地址」并入快照采集。
+- 桌面实现是现有 Playwright 与 AgentCore 浏览器代码的搬移，除会话事件、终结事件门控、进入终结之后的主流程让位与在途 act 的中止（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4、5）外行为不变，现有测试照常覆盖；桌面没有命令守卫与执行令牌，执行窗口只为每次 act 开一个中止信号交给 `aiAct`，进入终结时中止，与设备的执行窗口同一模型（设备另在命令结果未知与会话年龄到点时中止，决策 6）；四项边界义务在桌面上都是空操作（scenario 前核对恒返回「继续」），只有「采集界面快照」在 AI step 上取 `page.url()`。原先单列的「读当前地址」并入快照采集。
 - **scenario 前核对**：从第二条 scenario 起，每条发 `scenario_started` 之前调用一次，只返回「继续」或「scope 终止」（带 errorType 与 message）。第一条之前不调用：被测对象刚就绪，结果未知标志不可能已置位，获取预算的上界也远低于 `max_session_s`，`scope_started` 之后紧跟第一个 `scenario_started` 的保证（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）因此不变。返回终止时 run-scope 发 `scope_done{status: error, errorType, message}`，这条与后续 scenario 不再发事件，由 core 合成 SKIPPED（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；放在 `scenario_started` 之前，是因为在途 scenario 不合成（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）。设备实现做两件事：上一条 scenario 里发生过结果未知（命令守卫置过结果未知标志；标志只在 step 内有效，所以设备实现另记一个 scenario 级的「发生过结果未知」记录）时，经生命周期通道在原生上下文截图一次作存活探测（受决策 6 探测客户端的超时约束，与执行实例同为 180 秒：上一条结果未知的命令还在服务端执行时，截图排在它后面、等它执行完再通过，活着的会话不被判成没有响应），探测失败不直接定类别，先查一次会话状态再分流：非 RUNNING 归 `session_lost`，RUNNING 归 `engine_error`；会话年龄已达 `max_session_s` 时直接返回终止、归 `session_lost`，不为让第一个 step 报错而开一条 scenario。step 中途发现的会话丢失与年龄到点仍走下面的 step 级失败契约。run-scope 只多一个无条件调用与一个通用的「scope 终止」出口，这个出口 step 级会话丢失收尾时同样要用，主流程仍无设备分支。
 - **单个 step 的固定顺序与失败契约**（接缝契约的一部分，不预先指定方法名）：
   1. 发 `step_started`；

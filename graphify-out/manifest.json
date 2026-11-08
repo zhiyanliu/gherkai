@@ -365,8 +365,8 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1794052673.7110457,
-    "ast_hash": "41881faa26e34ef05a5af46e675ef727",
+    "mtime": 1794120679.9892213,
+    "ast_hash": "6aad8b1621c9ec3ed1deabf623535de9",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1793941011.1239283,
-    "ast_hash": "cb8a4eb23e2570746cff187936b07e19",
+    "mtime": 1794119539.2121656,
+    "ast_hash": "ceebab5f3e263950f5d0948e121ea368",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -430,13 +430,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0036-deterministic-capability-discovery.md": {
-    "mtime": 1794035023.4650607,
-    "ast_hash": "3c579ffe48f5b4bc245897cdcb0cec73",
+    "mtime": 1794118812.9092002,
+    "ast_hash": "7bb5535fc11d24da742641c708547ba3",
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794036169.5922189,
-    "ast_hash": "6f76e853fcfe682447a7ec18cb5c2ca6",
+    "mtime": 1794118363.4809241,
+    "ast_hash": "ab55cf11444237a414ca3cb8b8f2c2e3",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1210,7 +1210,7 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1794037372.6994028,
+    "mtime": 1794118659.5362835,
     "ast_hash": "628e9c9a3e7e1d8e4d960d15f340ee5c",
     "semantic_hash": ""
   },
@@ -1880,13 +1880,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1794054859.3097043,
-    "ast_hash": "051544314e4d7d0de1c1464e335097c6",
+    "mtime": 1794120705.9430935,
+    "ast_hash": "03d77a3ad7f9f1fdec627277457d3230",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
-    "mtime": 1794054029.321896,
-    "ast_hash": "e601d8bd3045cd78abdd23015d4ca475",
+    "mtime": 1794120679.991204,
+    "ast_hash": "6d85b4fd7b83c2a6f5b7a69595cfce26",
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
@@ -1910,8 +1910,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/navigation-address-cases.json": {
-    "mtime": 1793785149.1404114,
-    "ast_hash": "",
+    "mtime": 1794046493.0682626,
+    "ast_hash": "ec8a9fe1d6a3a5fa1743cad622973d9a",
     "semantic_hash": ""
   },
   "cli/tests/test_engines_matrix.py": {
@@ -1960,8 +1960,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/job-lines.json": {
-    "mtime": 1793862215.2502837,
-    "ast_hash": "",
+    "mtime": 1794046162.7452474,
+    "ast_hash": "0d8624d861ba62794d75bd4a77277c29",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/precheck.mts": {
@@ -2365,8 +2365,8 @@
     "semantic_hash": ""
   },
   "engines/fixtures/one-line-text-cases.json": {
-    "mtime": 1793928941.7947195,
-    "ast_hash": "",
+    "mtime": 1794039541.0433729,
+    "ast_hash": "57c241969c12b928ff83750db9ae0d32",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_one_line.py": {
