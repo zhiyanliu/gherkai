@@ -149,7 +149,7 @@ class BackendStack(Stack):
                 "正式路径是 `gherkai deploy`（它传自己的版本）；手工合成请显式 -c version=<PEP 440 版本>"
             )
         version = str(raw)
-        from packaging.version import InvalidVersion, Version  # runtime 的硬依赖（ADR 0037 决策 2c）
+        from packaging.version import InvalidVersion, Version  # 本包直接 import、直接声明（ADR 0037 决策 2c）
         try:
             Version(version)
         except InvalidVersion as exc:

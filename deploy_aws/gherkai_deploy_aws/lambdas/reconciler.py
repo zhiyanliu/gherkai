@@ -99,10 +99,10 @@ def _task_scope_id(task: dict) -> str | None:
 # DescribeTasks 一次能收的 ARN 上限（AWS API 硬上限，超了直接 InvalidParameterException）——调用点据此分批。
 _DESCRIBE_TASKS_MAX = 100
 
-# 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制，扫是双保险。余量不小于主机制的最坏推迟
-# 加处置本身的时长——Scheduler 在 deadline 所在那一分钟内偏晚触发（不到 60 秒），之后还有列 task、停 task 的调用——
-# 主机制才仍先于扫处置，也避开与在途的 STOPPED→exit_observer 链形成竞态。非正确性参数：两者先后颠倒也无害
-# （处置幂等，复查 deadline 与退出记录后才动手）。
+# 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制，扫是双保险。余量是经验值：覆盖主机制的调度
+# 精度分量（Scheduler 在 deadline 所在那一分钟内偏晚触发，不到 60 秒）加一次处置的常态耗时（异步 invoke 的排队、列 task、
+# 停 task，秒级、没有硬上界），让主机制在常态下先于扫处置、也避开与在途的 STOPPED→exit_observer 链形成竞态；不是上界。
+# 非正确性参数：两者先后颠倒也无害（处置幂等，复查 deadline 与退出记录后才动手）。
 _DEFENSIVE_TIMEOUT_MARGIN_S = 120.0
 
 # 到点处置复查 deadline 时的等待上界秒（ADR 0034「job timeout」节「到点不早于 deadline」条②）：Scheduler 只承诺
@@ -164,16 +164,17 @@ class EventBridgeTimeoutWatch:
             pass  # 同名已在（同 run+scope 重复 arm）→ 已武装，幂等
 
 
-def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, max_wait_s: float | None = None,
+def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_budget_fn=None,
                     now_fn=None, sleep_fn=None) -> str:
     """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 且 deadline 已到才动手。
 
     **先复查 deadline**（该节「到点不早于 deadline」条②）：Scheduler 只承诺分钟精度，触发可能早于 deadline。job 已不在
     running 或退出记录已在时照常 no-op、不等待；仍 running 时按 claimed_at 加 Job.timeout_s 复查——已到直接处置；未到且剩余
-    不超过等待上界（`_TIMEOUT_EARLY_WAIT_MAX_S` 与 max_wait_s 取小）则等到 deadline，重读 job 状态与退出记录、仍需处置才往下；
+    不超过等待上界（`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到 deadline，重读 job 状态与退出记录、仍需处置才往下；
     剩余超过上界时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
     缺 claimed_at 或预算时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调本函数，复查直接通过。
-    max_wait_s：本次调用可用于等待的秒数（kicker 按 Lambda 剩余时间给出），None 表示只受固定上界约束；
+    wait_budget_fn：返回本次调用还能用于等待的秒数（kicker 按 Lambda 剩余时间给出），**临睡前才调用**——复查前的两次读取
+    也在消耗本次调用的时间，提前采样会把慢读取的耗时算进可等的额度、挤占处置与 tick 的预留；None 表示只受固定上界约束；
     now_fn / sleep_fn：时钟与等待，供测试注入。
 
     处置：ListTasks(startedBy=run_id) **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides
@@ -214,7 +215,8 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, max_w
         deadline = compose.parse_iso(claimed_at) + _dt.timedelta(seconds=job.timeout_s)
         remaining = (deadline - now_fn()).total_seconds()
         if remaining > 0:
-            cap = _TIMEOUT_EARLY_WAIT_MAX_S if max_wait_s is None else min(_TIMEOUT_EARLY_WAIT_MAX_S, max_wait_s)
+            budget = wait_budget_fn() if wait_budget_fn is not None else None  # 临睡前采样：此前的读取已花掉的时间不再算进额度
+            cap = _TIMEOUT_EARLY_WAIT_MAX_S if budget is None else min(_TIMEOUT_EARLY_WAIT_MAX_S, budget)
             if remaining > cap:
                 why = ("早于定时服务承诺的触发精度" if remaining > _TIMEOUT_EARLY_WAIT_MAX_S
                        else f"本次调用剩余的时间只够等 {max(cap, 0):.0f} 秒")
@@ -539,8 +541,8 @@ def kicker_handler(event, context):
 
     第三触发源（ADR 0034「job timeout」节）：EventBridge Scheduler 的到点 invoke，payload
     `{"run_id","timeout_scope"}`——先超时处置（仍 running 且 deadline 已到才 StopTask/收敛，触发早于 deadline 时先等到
-    deadline），再照常 tick（处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。等待上界在装配之后按本次
-    调用的剩余时间算，见 `_timeout_wait_budget_s`。
+    deadline），再照常 tick（处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。等待上界在临睡前按本次
+    调用的剩余时间算（复查的读取之后），见 `_timeout_wait_budget_s`。
     """
     timeout_scope = event.get("timeout_scope")
     rid = event.get("run_id")
@@ -549,7 +551,7 @@ def kicker_handler(event, context):
         built = _build(rid)
         prebuilt[rid] = built  # 含 None（本 run 不该推进）——tick 侧据此也不重装
         if built is not None:
-            _handle_timeout(rid, timeout_scope, built, max_wait_s=_timeout_wait_budget_s(context))
+            _handle_timeout(rid, timeout_scope, built, wait_budget_fn=lambda: _timeout_wait_budget_s(context))
     return _tick_runs(_run_ids_from_runs_stream(event), "kicker", prebuilt=prebuilt)
 
 

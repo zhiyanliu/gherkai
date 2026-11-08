@@ -464,7 +464,29 @@ def test_handle_timeout_skips_when_the_invocation_cannot_wait_long_enough(tmp_pa
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     clock = _Clock("2026-11-08T10:04:20+00:00")
     r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
-                                   max_wait_s=20.0, now_fn=clock.now, sleep_fn=clock.sleep)
+                                   wait_budget_fn=lambda: 20.0, now_fn=clock.now, sleep_fn=clock.sleep)
+    assert r == "skip-early" and ecs.stopped == [] and clock.slept == []
+
+
+def test_handle_timeout_samples_the_wait_budget_after_the_state_reads(tmp_path, monkeypatch):
+    """等待额度临睡前才采样：复查前的读取慢时，已花掉的时间不再算进可等的额度。Lambda 剩余 70 秒、离 deadline 50 秒、
+    一次读取 25 秒——提前采样会批准再等 25 秒、等完只剩 20 秒（低于处置预留）；临睡采样得到 15 秒的额度，等不到 deadline 即不处置。"""
+    monkeypatch.setenv("CLUSTER", "test-cluster")
+    ecs = _FakeEcs(task_arns=["arn:task/1"])
+    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    clock = _Clock("2026-11-08T10:04:10+00:00")
+    start = clock.now()
+    store = built[2]
+    real_load = store.load_run_state
+
+    def slow_load(run_id):
+        clock.t += _dt.timedelta(seconds=25)  # 慢读取：DDB 读取本身消耗本次调用的时间
+        return real_load(run_id)
+
+    monkeypatch.setattr(store, "load_run_state", slow_load)
+    budget = lambda: 70.0 - (clock.now() - start).total_seconds() - reconciler._TIMEOUT_HANDLING_RESERVE_S
+    r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs,
+                                   wait_budget_fn=budget, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early" and ecs.stopped == [] and clock.slept == []
 
 
@@ -494,7 +516,7 @@ def test_kicker_bounds_the_timeout_wait_by_the_remaining_invocation_time(monkeyp
     """kicker 把 Lambda 剩余时间减去处置与 tick 的余裕作为可等待的上界交给处置；拿不到 context 时不加这层约束。"""
     seen: list = []
     monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",))
-    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **kw: seen.append(kw["max_wait_s"]))
+    monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **kw: seen.append(kw["wait_budget_fn"]()))
     monkeypatch.setattr(reconciler, "_tick_runs", lambda run_ids, label, prebuilt=None: {"ok": True})
 
     class _Ctx:

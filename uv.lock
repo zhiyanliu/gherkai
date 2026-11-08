@@ -780,15 +780,19 @@ name = "gherkai-deploy-aws"
 source = { editable = "deploy_aws" }
 dependencies = [
     { name = "aws-cdk-lib" },
+    { name = "boto3" },
     { name = "constructs" },
     { name = "gherkai-runtime", extra = ["aws"] },
+    { name = "packaging" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "aws-cdk-lib", specifier = ">=2.150.0" },
+    { name = "boto3", specifier = ">=1.34" },
     { name = "constructs", specifier = ">=10.0.0" },
     { name = "gherkai-runtime", extras = ["aws"], editable = "runtime" },
+    { name = "packaging", specifier = ">=24" },
 ]
 
 [[package]]
@@ -802,12 +806,14 @@ dependencies = [
 
 [package.optional-dependencies]
 aws = [
+    { name = "boto3" },
     { name = "botocore" },
     { name = "gherkai-core", extra = ["aws"] },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "boto3", marker = "extra == 'aws'", specifier = ">=1.34" },
     { name = "botocore", marker = "extra == 'aws'", specifier = ">=1.34" },
     { name = "gherkai-core", editable = "core" },
     { name = "gherkai-core", extras = ["aws"], marker = "extra == 'aws'", editable = "core" },

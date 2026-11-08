@@ -436,7 +436,7 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
     },
 
     // 执行窗口（ADR 0052 决策 2；ADR 0051 决策 5「进入终结之后主流程让位」①）：为每次 act 开一个中止信号交给 run，run 结束
-    // （返回或抛出）即不再持有它；interrupt 释放一进入就中止它，在途的 act 随即以中止失败返回、不再发起模型调用。桌面没有执行令牌
+    // （返回或抛出）即不再持有它；interrupt 释放一进入就中止它，在途的 act 不再发起模型调用与新的动作、在 SDK 的下一个检查点以中止失败返回（已在途的页面操作要等到会话关闭才失败返回）。桌面没有执行令牌
     // （ADR 0052 决策 6 的命令守卫只在设备上）与会话年龄后备，中止只来自进入终结；已进入终结之后才打开的窗口，信号一开始即已中止
     // （与设备的守卫在 shutdown 之后打开窗口时同一处置）。run 原样返回或抛出。
     async execute<T>(run: (abortSignal: AbortSignal) => Promise<T>): Promise<T> {
@@ -473,8 +473,8 @@ export function createDesktopSurface(deps: SurfaceDeps, hooks: DesktopSurfaceHoo
       if (mode === "interrupt") {
         terminated = true;
         onTerminate?.();  // 立即唤醒正在退避的重试循环，使其尽快停（不再 reconnect/执行 act）
-        // 中止在途的 act（ADR 0051 决策 5「进入终结之后主流程让位」①）：不等它返回，也排在会话 Stop 之前，它以中止失败返回、
-        // 之后不再发起模型调用；这一步的判定被终结的事件门控挡住、不出 worker。
+        // 中止在途的 act（ADR 0051 决策 5「进入终结之后主流程让位」①）：不等它返回，也排在会话 Stop 之前，它不再发起模型调用与新的动作、
+        // 在 SDK 的下一个检查点以中止失败返回（已在途的页面操作要等到会话关闭才失败返回）；这一步的判定被终结的事件门控挡住、不出 worker。
         currentAct?.abort(new Error(FINALIZING_ACT_MESSAGE));
         // 在途窗口兜底（ADR 0028）：Start 在途则先等一小段，让 id 落进待清理集再 cleanup；仍未返回即发 attempted 事件。
         // 不要再加「待清理集为空」的条件：上一 attempt Stop 失败的遗留会话会让集非空，那恰恰是重试场景下最需要兜底的时刻；
