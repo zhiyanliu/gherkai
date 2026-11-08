@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794126778.5451288,
-    "ast_hash": "716a1b00c92154fdb3917e13d6529b52",
+    "mtime": 1794158205.6726284,
+    "ast_hash": "37ea1299d1d1abfcbdaf71e965d28cbe",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794052391.3098338,
-    "ast_hash": "ab3ac668df46f29e154fb5e31ce2ecb9",
+    "mtime": 1794158698.597986,
+    "ast_hash": "bc40b5b3bfb08d421f9680c426f04eae",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
