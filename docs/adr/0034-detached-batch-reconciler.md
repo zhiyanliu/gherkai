@@ -17,14 +17,14 @@
 - **读模型** = `RunState`（物化视图；**外部消费者只读它**）。
 - **reconciler 机制**（投影 + 推进）= 纯从 events 推演 `RunState` + 决定启下一个 job。**无状态、幂等**：谁触发、何时触发、并发触发都安全，进程内不留任何调度态。（消歧：此处 reconciler 指 CQRS 的机制角色；同名 Lambda 只是它在 cloud 的宿主之一——kicker 与之同 code，local 的 per-run 进程/接力者跑的也是这份机制。这些宿主统称**推进器**，定义见 CONTEXT。）
 
-**单一读接口不变量**：外部（`status` / 未来 WebUI）**永远只从 `RunState` 读状态**；`events → RunState` 的推演**只在 reconciler 一处**，不散落到各消费者（否则多份推演逻辑必漂移）。这是本设计的骨架原则。
+**单一读接口不变量**：外部（`status` / `list-runs` / 未来 WebUI）**永远只从 `RunState` 读状态**；`events → RunState` 的推演**只在 reconciler 一处**，不散落到各消费者（否则多份推演逻辑必漂移）。这是本设计的骨架原则。
 
 ## 数据模型三件套（职责分明）
 
 | | 是什么 | 谁写 | 谁读 |
 |---|---|---|---|
 | **events 表** | 真值日志 | worker（执行事件）+ **退出观察者**（退出事件） | reconciler |
-| **`RunState`** | 物化读视图 | **唯一写者 = reconciler** | 外部（`status`/WebUI）**只读** |
+| **`RunState`** | 物化读视图 | **唯一写者 = reconciler** | 外部（`status`/`list-runs`/WebUI）**只读** |
 | **ResultStore（jobs/*.json）** | 判定真值的持久副本（events 可重放重建） | reconciler 在 finalize **CAS 之前**从同一份 events 快照落（写序 [0030](./0030-realtime-persistence-seam.md) 决定三） | CI/人（按 scope 取单 job） |
 | **RunReport** | 派生产物（永远最后） | reconciler 在 finalize CAS **之后**聚合（[0027](./0027-runreport-aggregation-index.md)），失败隔离 | 人 |
 
@@ -43,6 +43,9 @@ gherkai status <run_id> [--wait]
      （local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`；查询命令的定位参数须与产生 run 的命令一致，规则与理由归 [0041](./0041-agent-facing-cli-affordances.md) 决策六）。
    → 带 --wait：轮询到终态；期间**只对 detached run** 接力推进——**local=本机跑 tick 到底 / cloud=invoke kicker Lambda kickoff**
      （机制与「本机是否须跑到底」的不对称见下「推进的三个触发源」）；前台 `run` 正在执行的 run 只等待、不接力（两道闸见下「兜底/接力」条）。
+gherkai list-runs [--status S]… [--limit N]
+   → 列出一个后端里的 run（全部非终态 run 与最近 N 条终态 run），状态只从 RunState 读、零副作用、不接力推进；
+     定位旗标与 status 相同（local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`），设计见 [0041](./0041-agent-facing-cli-affordances.md) 决策七。
 gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（ThreadPoolExecutor），行为不变
 ```
 
@@ -74,7 +77,7 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      events item / STOPPED 事件里**没有 `detached` 标记**（标记只在 runs 表 STATE item 上），Stream/rule 层无从滤；
      而同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，故它的 worker 事件与 task 停止
      必然打到这两个 handler。**故这两半在 handler 内判**：组合根用 `DynamoDBRunStore.is_detached(run_id)`（只读
-     adapter 访问器、读 STATE 顶层标记，**不进 RunStore port**——执行环境属性不进 core）在动手前分流，非 detached
+     adapter 访问器、读 STATE 顶层标记，**不进 RunState / RunMeta 模型**、访问器留在 adapter——执行环境属性不进 core 的运行态模型；例外：`list-runs` 的列举项把它作为数据字段随端口返回、core 不据它分支，[0041](./0041-agent-facing-cli-affordances.md) 决策七）在动手前分流，非 detached
      直接 no-op；判据与 kicker filter 同一真源（同一个标记）。两半的具体故障形态：reconciler 抢 claim/RunTask/
      finalize、与同步 schedule 双开推进器（与上述 kicker 误触发同一形态）；exit-observer 写的 `task_exited` 无 `body` 属性、被同步路径 events Query 读到
      即 `KeyError`（见下机制一）。

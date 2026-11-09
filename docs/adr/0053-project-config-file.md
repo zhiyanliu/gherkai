@@ -19,7 +19,7 @@
 ### 1. 文件定位：只有运行侧 CLI 读它，读出的值解析成具体值随 Job 走
 
 - 文件名 `gherkai.toml`。查找规则：`--config PATH`、环境变量 `GHERKAI_CONFIG`、当前目录下的 `gherkai.toml` 依次优先。缺省位置不存在不算错（等同于没有配置文件）；显式给出的路径不存在、或文件不是合法 TOML，以退出码 2 结束并点名文件与出错位置。
-- **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
+- **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`、`list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
 - **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，三个本机宿主（各自 CWD 不同）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
 - 解析用 Python 标准库 `tomllib`（CLI 要求 Python 3.13 起），零新增依赖；CLI 只读不写，不提供 `config set` 一类改写命令。
 - `doctor` 显示本次加载的配置文件绝对路径，或「未使用配置文件」，便于排查「我改的配置为什么没生效」。
@@ -64,7 +64,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 ```
 
 - **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型与取值范围校验，按 TOML 的原生类型直接校验、不经字符串：整数选项只接受 TOML 整数（浮点不截断、与命令行上给 4.7 同拒），浮点选项与自定义校验接受 TOML 整数或浮点，数字选项不接受文本（TOML 里 `"4"` 是文本），布尔一律拒绝；非法值的报错形态与在命令行上给错一致，内建类型的失败给产品语言的理由。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。`[devices]` 的键不受同词规则约束：命令行上设备选项平铺、要带平台或服务前缀，配置文件里有节层级、不需要前缀，对应关系见决策 4 与决策 6 的映射表。
-- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
+- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`list-runs` 的 `--status` 与 `--limit`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
 - **未知键以退出码 2 结束**，点名文件、节与键名。拼错的键若被静默忽略，表现是「配置没生效」，比直接报错更难发现（与 [0036](./0036-deterministic-capability-discovery.md) 对自述契约 fail-loud 同一取向）。
 - **只对本机后端起作用的 `[common]` 键（如 `grace`）在 `--backend cloud` 下不生效、只提示一句**，与 `project-arn` / `app-bucket` 同一形态；命令行上显式给出仍按 [0024](./0024-worker-core-protocol.md) 拒绝。
 - **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本的族匹配，必须写成 TOML 字符串——写成数字会被解析成浮点，以退出码 2 结束并提示加引号），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`，可在平台子表里覆盖（不计量槽位按平台购买）；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值与上界见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。

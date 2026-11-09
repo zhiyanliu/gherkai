@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。
+> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七（`list-runs`）已定、未实装。
 
 ## 背景与问题
 
@@ -39,6 +39,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 - `deploy list-workers --json`：`{prefix, version, default_variant, engines: {<engine>: {family, ecr_repo, variants: […], pending_cleanup: […]}}}`。
 - `status --json`：在 RunState 之外**附加** `artifacts`（与 `run --json` 同键：`run_meta` / `run_state` / `jobs_dir` / `report_index`），位置由 compose 单点拼、始终给出（是否已写成看 status 是否终态）。RunState 部分形状不变（加法兼容）。
 - `explain --json`：判定树 + 每步 evidence 合成的排障视图，形状见 [0042](./0042-step-evidence-and-explain.md) 决策四。
+- `list-runs --json`：一个后端里的 run 清单，形状见决策七。
 - 原则：stdout 只放数据、诊断走 stderr、`--json` 下不打人读提示（沿用既有）。
 
 ### 四、`doctor`：一个入口、按组件分组
@@ -63,17 +64,57 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 六、定位参数：执行后端、报告落点、部署前缀三项与产生 run 的命令一致，查询才找得到
 
-- **规则**：`status` / `explain` 查的是哪一个 run，由三项定位参数决定——执行后端（`--backend local|cloud`）、报告落点（本机后端的 `--report-dir`）、部署前缀（云端后端的 `--prefix`，连同它所在的 region 与 profile）。查询命令的这三项须与产生该 run 的 `run` / `submit` 逐项一致（前台同步执行与提交后台执行都算），否则以退出码 2 结束并说未找到 run。云端后端的报告前缀（`--report-dir`）同样须与产生 run 的命令一致：`explain` 据它读判定明细。`doctor` 的云端项同理按这三项定位后端。
+- **规则**：`status` / `explain` 查的是哪一个 run，由三项定位参数决定——执行后端（`--backend local|cloud`）、报告落点（本机后端的 `--report-dir`）、部署前缀（云端后端的 `--prefix`，连同它所在的 region 与 profile）。查询命令的这三项须与产生该 run 的 `run` / `submit` 逐项一致（前台同步执行与提交后台执行都算），否则以退出码 2 结束并说未找到 run。云端后端的报告前缀（`--report-dir`）同样须与产生 run 的命令一致：`explain` 据它读判定明细。`doctor` 的云端项同理按这三项定位后端；`list-runs` 列的是哪一个后端里的 run，也由这三项决定（决策七）。
 - **为什么不跨后端搜、不猜**：run 的记录只存在于产生它的那个后端与落点——本机是 `--report-dir` 下的 run 目录与事件库，云端是 `<prefix>` 对应的 runs 表与产物桶（[0034](./0034-detached-batch-reconciler.md)）；CLI 不维护跨后端、跨目录的 run 索引，也不按 run_id 到处找：猜中是巧合，猜错会把另一个落点里同名 run 的判定当成这个 run 的。三项由使用方给出、与产生时相同，是唯一可靠的定位，所以不一致时直接拒绝、不降级成「找最像的」。
 - **本条是权威，其余处只给结论与指针**：本机与云端各自的定位旗标在 [0034](./0034-detached-batch-reconciler.md)「命令形态」节；`explain` 的输入在 [0042](./0042-step-evidence-and-explain.md) 决策四；agent skill 教 agent 保持三项一致在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五第 3 条；用户指南运行篇与云端篇写同一句。CONTEXT.md「定位参数」词条指向本条。
+
+### 七、列出 run：`list-runs`
+
+本条是已定设计、尚未实装；实装后按本条末的「实测项」真实执行，结论内联进本条。
+
+- **缺口**：`status` 与 `explain` 都要先有 run_id，此前没有任何命令回答「这个后端里有哪些 run」。找不回 run_id 时（换了终端、提交时没记下、接手别人提交的 run），只能到 DynamoDB 控制台翻 runs 表，或去 ECS、Device Farm 看执行资源，而执行资源对应的是 task 与远程访问会话，不是 run。
+- **命令形态**：`gherkai list-runs [--backend local|cloud] [--report-dir DIR] [--prefix P] [--region R] [--profile NAME] [--ddb-table NAME] [--config FILE] [--status S]… [--limit N] [--json]`。按决策六的三项定位参数选定**一个**后端，旗标名与取值来源（含项目配置文件那一层，[0053](./0053-project-config-file.md)）与 `status` 相同，`--ddb-table` 与 `status` 同义。不跨后端、不跨报告落点搜，理由同决策六：每个后端只持有自己的 run 记录，把多处的清单合在一起会把不同落点里同名的 run 混为一谈。命令只读、零副作用（不接力推进、不起 task），机器只需读权限；云端后端与 `status` 一样，先经版本 skew 闸（[0037](./0037-distribution-and-packaging.md) 决策 7）再读任何云端资源。云端后端下 `--report-dir`（在云端是报告前缀）与清单无关，给了也忽略、不报错：清单不读报告，而使用者常把 `status` / `explain` 的整组定位参数原样复制过来。
+- **列哪些 run**：默认列出该后端**全部非终态 run** 与**最近 N 条终态 run**（N 默认 20，`--limit N` 调整，只约束终态部分）。状态集取自 code 真源，本条不另行枚举：run 级状态值是 `core/gherkai_core/model.py` 的 `Status`，终态集是同文件的 `TERMINAL_STATUSES`，其余为非终态。`--status S` 可重复，接受 run 级状态值全集（含 `skipped`），给出时只列这些状态，其中终态部分仍受 `--limit` 约束。「最近」按创建时间计、不按结束时间（见下「排序」）。终态 run 随历史单调增长，必须有界。
+  - **非终态不截断**：在途的 run 是使用者最需要找回的那部分。停在非终态的 run 有两类。一类是推进中断、无人接力的 detached run（`submit` 建的，带 detached 标记，[0034](./0034-detached-batch-reconciler.md)），`status --wait` 能接力把它推进到终态。另一类是前台 `run` 的进程被强制结束或宿主失联后留下的 run，没有 detached 标记：`status --wait` 对它只等待、不接力（0034「兜底/接力」条），本命令面也没有把它收尾的手段，它会一直停在非终态。人读表格对后一类行加一句提示，说明产生它的前台执行若已不在、它不会再到终态（措辞随实装定，受 [0039](./0039-user-facing-surfaces-no-internal-references.md) 约束）；判据是 detached 标记，它与运行态在同一处（云端 STATE item、本机 `run_state.json`），读回即有、不增读取（端口怎么带出见下「core 端口」）。后一类随前台执行被强制结束的次数累积、不会自行消失，所以非终态部分的规模是同时在途的 run 数加上停着未处置的 run 数（其中后一类无从处置、只增不减），不能当作恒小；遗留成为常态时再议标记为已放弃一类手段（见文末重议闸门）。
+- **排序**：按 run_id 降序，依赖 [0027](./0027-runreport-aggregation-index.md)「run_id：归集索引的主键」节的保证（字典序即创建时间序，同一秒内创建的 run 之间不定；格式不入契约，本条不复述、也不依赖具体格式），所以不另读时刻字段排序。由此「最近 N 条」按创建时间计、不按结束时间：早建而刚结束的 run 不会因为刚结束就排到前面。创建时间取生成 run_id 的机器（执行 `run` 或 `submit` 的那台）的时钟，多台机器向同一后端提交时，各机时钟的偏差直接体现为清单里的先后。
+- **人读形态**：`rich` 表格（[0047](./0047-cli-human-readable-tables-with-rich.md)），一行一个 run：run_id、状态（语义颜色同 `status`）、开始与结束时刻、各状态的 job 数、版本（见下「写出版本的标记」），run 级 `message` 有值时与上述遗留提示一同进说明列。STATE 解析失败的行只有 run_id 与版本列有值，状态列标「无法读取（可能由其它版本写出），用 status 查看」。清单为空时只打一行，点名所查的落点，并提示核对定位参数是否与产生 run 的命令一致：本机区分「报告落点目录不存在」与「目录下没有 run」两种说法，都点名解析后的目录；云端点名前缀、region 与解析后的 runs 表名（不按表名来自旗标、环境变量还是配置文件区分）。
+- **机读形态**（进决策五的契约面，受加法兼容保护）：`list-runs --json` 输出一个对象，顶层带所查的落点：`backend` 恒有；本机另带 `report_dir`（各层解析后的绝对路径）；云端另带 `prefix`、`region` 与 `ddb_table`（解析后的 runs 表名）。不带 profile（它决定用哪份凭证，不决定落点），不带云端报告前缀（清单不读报告）。这些取值由 compose 单点给出，与 `cloud_artifact_locations`（`runtime/gherkai_runtime/compose.py`）同一做法，CLI 不另拼。空清单时读者凭它们才分得清「这里没有 run」与「查错了地方」（`--json` 下不打人读提示，决策三）。`runs` 为数组，每项含 `run_id`、`status`、`started_at`、`ended_at`、`message`、`job_counts` 与 `detached`（布尔，恒有：非终态且为 false 的 run 是前台执行遗留的、`status --wait` 对它只等待不接力，与人读行的提示同源）。前五项取自 RunState（`core/gherkai_core/model.py` 的 `RunState`）：`run_id` 与 `status` 必有，`started_at`、`ended_at`、`message` 无值时省略该键；`job_counts` 是按 job 状态的计数（`{<状态>: <个数>}`，只含出现的状态，缺的状态按 0 读）。键名不复用 `jobs`：`status --json` 里的 `jobs` 是逐 job 的数组，同一个键名在两个命令里形状不同，读契约的脚本容易用错。STATE 解析失败的项只含 `run_id`、`unreadable`（值为 `true`，只在解析失败时出现）与适用时的 `cli_version`，其余键省略；该键随实装进契约页。清单不带 `artifacts`，除写出版本外不带 definition 里的信息（worker variant、job 定义），也不带 `high_water_mark`（推进器内部的并发写守卫，[0034](./0034-detached-batch-reconciler.md) 机制三）：清单只回答「有哪些 run、各到哪一步」，细节对选中的 run_id 用 `status` 与 `explain` 取。
+- **写出版本的标记**：清单不过 definition 的结构版本闸（[0037](./0037-distribution-and-packaging.md) 决策 7 的闸只在 `status` / `explain` 读某个 run 时生效）：它读的是 RunState 里跨版本稳定的几项（状态、起止时刻、job 状态），按宽容规则读，整条命令不因个别旧 run 失效。但每个 run 读其提交记录的头部（`RunStore` 既有的头部读取，不取整份 definition），拿到写出它的 CLI 版本：与本 CLI 版本不同的 run，人读表格在「版本」列显示该版本串（读不到头或头里没有版本的显示「未知」），当前版本写出的 run 该列留空、不加任何字样；机读形态每项加 `cli_version` 键，只在写出版本与本 CLI 版本都已知且相同时省略，其余情形出现：值为写出它的版本串，读不到时为 `null`。「读不到」只指头部不存在、没有版本字段或内容无法解析；权限、凭证、网络一类访问失败不吞成「未知」，按读不到这个后端以退出码 2 结束。只标差异、不逐行重复说明，清单才不会被同一句话占满；对这类 run 用 `status` / `explain` 时仍走版本闸。代价是每个列出的 run 多一次提交记录头部的读取，读量随清单条数：本机多读一次该 run 的 `run_meta.json`（现行的头部读取解析整份文件、只取两个值）；云端把该 run 的 META 键并进同一批 `BatchGetItem`、不另起请求，但读量按 item 计，META 与 STATE 各算一次（投影只减少传回的数据、不减少读量），每批请求能装下的 run 数也随之减半。清单规模让这次读取的成本可感时，可把写出版本冗余进 STATE（见文末重议闸门）。
+  - **本机与云端的不对称**：状态值本版本不认识的 run（由更新的版本写出），云端看不到——云端按已知状态逐分区查，它不在任何被查分区里；本机逐目录读，能看到它并标「无法读取」。状态值认识、但 STATE 其余部分解析失败的 run（如某个 job 状态值本版本不认识），两侧都标「无法读取」。无法读取的行没有可用的状态，不参与状态过滤与终态截取，找到即列出（跳过它会让人以为它不存在，同下被拒项）。
+  - 被拒：整条命令在遇到旧 run 时以退出码 2 结束（升级后这条命令就没法用了）；跳过旧 run（让人以为它不存在）；每行写一句「由其它版本写出」（重复、占满界面）。
+- **退出码**：0 表示读到了清单，空清单与含「无法读取」行的清单也是 0；2 表示参数不合法（`--limit` 不是正整数、`--status` 不是 run 级状态值）或读不到这个后端：本机是报告落点存在但不可读（权限）；云端是 region 或凭证解析失败、表不存在或无权限、索引缺失或未就绪（判据见下「云端实现」）、`BatchGetItem` 未处理的键重试耗尽、版本 skew 闸拒绝。退出码不表判定，判定对具体的 run 用 `status --wait` 取。
+- **本机实现**：本机后端没有跨 run 的状态文件，每个 run 的运行态只在它自己的目录 `<report_dir>/<run_id>/run_state.json`（与 `run_meta.json`、`events.db`、判定明细同目录）。列举的做法是列出报告落点下的子目录（目录名即 run_id），逐个读 `run_state.json`，没有该文件的目录跳过（不是 run 目录，或在写下运行态之前就中断的执行；`--no-report` 的执行不建 run 目录，见下「范围边界」）。报告落点目录不存在时按空清单处理（退出码 0），提示行说明目录不存在：本机后端的报告落点在第一次落盘时才建立，目录不存在可能是这里还没有落盘的 run，也可能是路径给错，命令无从区分，所以不报错，只把这一事实连同解析后的目录交使用者核对；目录存在但下面没有 run 时，提示行说目录下没有 run。读量等于该落点下的 run 数（随该落点的历史增长），每个都是小文件，另加列出的 run 各一次 `run_meta.json` 读取（见上「写出版本的标记」）。**不建全局索引文件**：目录名自带时间序，而索引文件会成为 run 状态的第二真值。同一个 run 的状态由三个宿主写（前台 `run`、per-run 推进进程、`status --wait` 接力者，[0034](./0034-detached-batch-reconciler.md)），索引要随每一处写入同步更新，任一宿主中途退出就会漂移，还要另配一套跨进程锁；直接读 `run_state.json`，清单与 `status` 读到的永远一致。
+- **云端实现**：runs 表加一个 GSI `status-run_id-index`（分区键 `status`、排序键 `run_id`、投影 `KEYS_ONLY`；只有 STATE item 带顶层 `status`，稀疏性与 `status-index` 相同，schema 登记在 [0030](./0030-realtime-persistence-seam.md) 决定六）。索引名的真源是 `runtime/gherkai_runtime/names.py`（与 `status-index` 同处），由 compose 注入云端 adapter，core 不依赖 runtime。adapter 对所请求的每个状态做一次 `Query`（`ScanIndexForward=False`，即 run_id 降序）：`limit` 给出时每个状态 `Limit=limit`，一页不足且还有下一页时续读；为 None 时分页读完。索引返回的键先按 run_id 去重（同一请求里出现重复的键，`BatchGetItem` 整个请求以 `ValidationException` 失败），再用 `BatchGetItem`（`ConsistentRead=True`，每次请求至多 100 个键，每个 run 取 STATE 与 META 两个键）读回；返回的 `UnprocessedKeys` 带退避重试、次数有界，耗尽时以退出码 2 结束，不给出缺行的清单。索引里有键、读回的 STATE 为空的行跳过（item 已不在，索引尚未跟上）。STATE item 到 RunState 的转换与 `load_run_state` 共用一处，不另写解析，解析点保持单一。
+  - **一致性边界**：行内容强一致（读回走 `ConsistentRead`），成员资格最终一致（GSI 只有最终一致读）：刚换状态的 run 在索引传播完成前可能短暂出现在旧分区，刚建的 run 可能短暂不在任何分区。所以状态、起止时刻与 job 计数一律以读回的 STATE 为准，索引只用来找 run_id，这守住 [0034](./0034-detached-batch-reconciler.md) 的单一读接口不变量（外部只从 RunState 读状态）；两次端口调用之间换状态的窗口由 CLI 的合并规则收窄（见下「core 端口」）。
+  - **读量**：终态部分有界（每个被查的终态状态至多 N 个键，加上对应的读回），非终态部分随在途与遗留的 run 数（见上「列哪些 run」）；都不随终态历史增长。
+  - **守 [0038](./0038-worker-image-delivery.md) 的红线**：runs 表 `RETAIN`、无 TTL、随历史单调增长，不许 Scan。
+  - **现有 `status-index` 保留不动、不复用**：它只有分区键，按状态读出的是整个状态分区，取不到有界的「最近 N 条」，而终态分区随历史增长、读量无上界。给它加排序键要替换索引（DynamoDB 不能修改已有 GSI 的键），且它投影 `worker_task_def_arns` 供 worker revision 清理的引用检查，本命令只要键，两个用途的投影需求不同。
+  - **代价**：建 run 时多一次索引写，STATE item 的 `status` 换值时多两次（删旧索引项、写新索引项）；只改 job 级状态的写入既不改索引键、也不改投影属性（投影只有键），不产生索引写（DynamoDB 的 GSI 写入计费规则）；索引项只有键，存储可忽略。已部署的后端升级时，DynamoDB 在后台为已有的 STATE item 回填新索引，索引从 `CREATING` 变为 `ACTIVE` 之前不能 `Query`；CloudFormation 发起建索引后不等回填完成就继续更新，所以 `gherkai deploy` 结束时索引可能仍在回填。这段时间与索引缺失同样以退出码 2 结束，说明须等索引就绪或重新部署。不为 1.5 之前部署的后端做兼容处理：那些部署没有使用者。升级还要承担 `AWS::DynamoDB::Table` 文档写明的三条限制：索引 `ACTIVE` 之前这张表不能再被更新，回填期间再次部署若要改 runs 表会失败；建索引期间 stack 更新失败回滚时，已发起的索引不会随回滚删除，须手动删掉再部署；文档建议加索引的那次更新不改其它资源，而 `gherkai deploy` 的升级是整个 stack 一次更新，无法把加索引单独拆成一次。三条随实装写进云端篇的升级说明。
+  - **索引就绪判据**：取自该表的 `DescribeTable` 结果（所需权限已在 preflight 只读探活里），不解析 `Query` 的报错文本。索引缺失、`IndexStatus` 为 `CREATING`（回填中）或 `DELETING` 时拦下，以退出码 2 结束；`ACTIVE` 放行；`UPDATING` 也放行，取舍是：文档只说索引正在更新、没写明期间能否读，拦下它会让一次与本命令无关的索引设置变更挡住清单，放行的风险是这期间 `Query` 若失败，该失败照样按读不到这个后端以退出码 2 结束，只是说明不如就绪判据具体；`UPDATING` 期间能否 `Query` 列入实测项。检查放在 compose 装配云端 RunStore 的路径上，只在 `list-runs` 调用时执行，不并入 `run` / `submit` 共用的资源 preflight：那些命令不用这个索引，不能因它缺失或回填而被拦。`doctor` 也不加这一项：回填是暂时的，`list-runs` 自己会说明；1.5 之前的部署没有使用者，不存在要靠 `doctor` 发现的旧部署。
+- **core 端口**：`RunStore` 加一个列举方法（形如 `list_runs(statuses, *, limit) -> list[RunListing]`），本机与云端两个 adapter 各自实现。语义：返回经这些状态分区找到的 run 的**当前** STATE，按 run_id 降序，**不按状态复筛**（读回的状态可能已不在 `statuses` 里）；`limit` 给出时每个状态至多取 `limit` 条、一页不足续读，为 None 时分页读完。本机 adapter 没有分区，逐目录读回后按读回的状态归入各状态，语义相同。每个列举项的 `run_id` 恒有（本机取自目录名、云端取自索引返回的主键，不依赖 RunState 能否解析，供 CLI 排序与去重），另带三样：读回的 RunState（解析失败时为空并标为无法读取）、detached 标记、提交记录头部（与 `peek_definition_header` 同一对值，读不到为空）。detached 标记仍是执行环境属性、不进 RunState 模型（0034「filter 必须区分写入者」条），这里作为列举项的字段出现在端口返回值上，是它第一次进入 RunStore 端口面：人读提示要它，而它与运行态在同一处、读回即有；改由 CLI 对每个非终态行调 adapter 的 `is_detached`，每行多一次读，CLI 还要绕过端口直接认 adapter。端口不认后端、不认引擎，也不承载默认清单的口径。
+  - **CLI 的合并**：默认清单的口径只在 CLI。两次调用，先非终态（`limit=None`，端口内按 `pending` 再 `running` 的顺序查分区：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run）、后终态（`limit=N`）；按所请求状态的并集过滤读回的状态，按 run_id 去重（两份都有时保留后一次读回的那份：运行态只向终态推进，后读的不会更旧），截取终态部分按 run_id 降序的前 N 条，最后整体按 run_id 降序。这一顺序加上端口不复筛，收窄了「两次调用之间换状态、或 GSI 尚未传播，导致 run 在两份结果里都不出现」的窗口：run 在第一次调用时仍在非终态分区（含索引还没跟上的旧分区），就被第一次调用找到，读回的终态状态在并集内而保留；否则它在第二次调用时已在终态分区。顺序反过来时，它可能先不在终态分区、后已离开非终态分区。剩余的边界在成员资格本身：DynamoDB 不承诺旧分区索引项的删除与新分区索引项的写入哪个先可见，两者之间若有间隙且两次 `Query` 都落在其中，这个 run 会在这一次清单里缺席，索引传播收敛后的查询可见。`--status` 只含一侧的状态时只做那一次调用。
+- **权限**：云端编排进程与 detached `submit` / `status` 的机器要用本命令，另需 runs 表索引 ARN `table/{prefix}runs/index/status-run_id-index` 上的 `dynamodb:Query`（表 ARN 上的 `Query` 授权覆盖不到 GSI）与表 ARN 上的 `dynamodb:BatchGetItem`（读回 STATE 与 META item）；清单登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「编排进程角色」段。
+- **范围边界**：只列 run，不列 ECS task、Device Farm 远程访问会话与隧道：那是运维视角的执行资源，不进本命令面（未结束的远程访问会话由 `doctor` 的设备支持项只读列出，决策四）。不落 run 记录的执行同样不在清单里：本机 `run --no-report`，以及云端 `run --backend cloud --no-report`（不写 STATE item，与 [0038](./0038-worker-image-delivery.md) 记下的已知盲区同源）。
+- **被拒方案**：
+  - `status` 不带 run_id 时列出 run：同一个命令按有没有位置参数切换成两种语义（看一个 run 与列出很多 run），退出码与 `--json` 形状都要分叉，从帮助里也难分辨。
+  - Scan runs 表：违背 [0038](./0038-worker-image-delivery.md) 的红线，读量随历史无上界。
+  - 列产物桶报告前缀下的 run 目录、从报告取终态：报告是派生视图（[0027](./0027-runreport-aggregation-index.md)），只有写出了报告的 run 可见（在途的 run、`--no-report` 的 run、报告聚合失败的 run 都看不到），且清单与 `status` 读的 runs 表成了两个来源，两者可能不一致。
+  - 复用 `status-index`、不加排序键：读整个状态分区、读量无上界，见上「保留不动、不复用」。
+  - 新索引投影状态、起止时刻与 `jobs`（`INCLUDE` 或 `ALL`），直接从索引出清单、省掉读回：索引的读只有最终一致，清单会与紧接着的 `status` 读到的状态不同；`jobs` Map 随 job 数增长，投影它等于每个 run 存第二份，且每次刷 job 状态都多一次索引写（`status-index` 不用 `ALL` 是同一理由）。
+  - 本机建索引文件：第二真值，见上「不建全局索引文件」。
+  - 端口按读回的状态复筛：两次调用之间换状态、或索引尚未传播的 run 会在两份结果里都被筛掉，清单里凭空少一条，见上「CLI 的合并」。
+- **实测项**：云端部署带新索引的后端后，`submit` 一个执行时间较长的 run，执行中 `list-runs` 列出它为 `running`、结束后它出现在终态部分；本机执行两次 run 后，`list-runs` 列出两条且新者在前；在已有 run 数据的后端上升级部署，回填期间（索引 `CREATING`）`list-runs` 以退出码 2 结束并说明须等索引就绪（moto 模拟不了 `CREATING`，只能在真实后端上核），索引就绪后已有的 run 出现在清单里；索引 `UPDATING` 期间 `Query` 能否成功（决定上面「索引就绪判据」的放行是否维持）。
 
 ## 影响
 
 - 用户文档（[0045](./0045-documentation-layering-and-placement.md) 决策一 / 二 归位后）：筛选 flag 与 `--quiet` 语义在 `docs/user-guide/running-and-results.md`「常用选项」节，各选项出现在哪些命令（含 `--json` 覆盖）在 `configuration.md`「跨命令通用选项」表，`doctor` 在 `getting-started.md`「用 doctor 自检」节，`deploy list-workers --json` 在 `cloud-backend.md`；根 README 与 cli README 只保留入口与「查询类命令都有 `--json`」一句。
-- 与 [0039](./0039-user-facing-surfaces-no-internal-references.md)：`doctor` 与筛选提示的文案同受产品面约束。
+- `list-runs`（决策七）随实现同步：用户指南运行篇（`running-and-results.md`）与云端篇（`cloud-backend.md`，含各级成员的权限清单与升级时新索引的三条限制），`configuration.md`「跨命令通用选项」表，agent skill 的参考（命令清单与退出码分流，内容归 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五），机读契约页 `docs/internals/cli-json-contract.md` 与决策五的契约护栏样例。
+- 与 [0039](./0039-user-facing-surfaces-no-internal-references.md)：`doctor`、筛选提示与 `list-runs` 的文案同受产品面约束。
 - agent skill：以本命令面为教学对象，内容（工作循环、旋钮分组、退出码分流、失败汇报）全在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五。
 
 ## 重议闸门
 
 - 失败证据的机读化（`explain` 子命令）：已由 [0042](./0042-step-evidence-and-explain.md) 落地——worker 在 step 边界产 gherkai 自有 schema 的 evidence、`explain` 合成判定树与证据；不是「引用 trajectory `.json`、格式由 skill 说明」那条路（被拒理由见该 ADR）。
 - JSON Schema 生成：见决策五被拒项。
+- 遗留的非终态 run（决策七「非终态不截断」条）：前台执行被强制结束留下的非终态 run 成为清单的常态内容（使用者反馈清单被它们占据，或它们的数量与在途 run 相当）时，再议一类把 run 标记为已放弃的手段；在那之前只在人读行提示。
+- 写出版本冗余进 STATE（决策七「写出版本的标记」条）：清单规模让每个 run 多一次提交记录头部读取的成本可感时，把写出它的 CLI 版本冗余进 STATE item 与 `run_state.json`，读回运行态即得、不再读 META 或 `run_meta.json`。

@@ -255,8 +255,8 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1793871356.0161605,
-    "ast_hash": "ce0c3445decc57ec1523ce3e67bd7935",
+    "mtime": 1794236740.7396984,
+    "ast_hash": "21df2c17ddf371750158d282d49bc0db",
     "semantic_hash": ""
   },
   "README.md": {
@@ -375,8 +375,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0027-runreport-aggregation-index.md": {
-    "mtime": 1793783617.74868,
-    "ast_hash": "46193b7767e6460c5cc28b043f3c585c",
+    "mtime": 1794239134.7352006,
+    "ast_hash": "a98af3487213dd05816e17d2c07975f1",
     "semantic_hash": ""
   },
   "docs/adr/0029-engine-artifacts-to-s3.md": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1793867227.0416965,
-    "ast_hash": "46038950bdd4a1af0526255e62f8dcc9",
+    "mtime": 1794239803.723768,
+    "ast_hash": "39aa7900d9487a0576a00e87f143df15",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -400,13 +400,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1793946163.4135492,
-    "ast_hash": "21e64f92038ad85e17df64b9b2c5e821",
+    "mtime": 1794239188.071569,
+    "ast_hash": "52c409245012b12100fa5c1707a62914",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794158205.6726284,
-    "ast_hash": "37ea1299d1d1abfcbdaf71e965d28cbe",
+    "mtime": 1794239803.723333,
+    "ast_hash": "c8e5a3edfa51bf43488a91ebdcebcbbc",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794126778.5461688,
-    "ast_hash": "46e066f187ce9dda80734cc357fedd96",
+    "mtime": 1794236707.7898288,
+    "ast_hash": "5f72db86cb45c243d17278136bfd4423",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1793866762.6468546,
-    "ast_hash": "aa7670fc2c0ef13e3614aa7efd12a4e0",
+    "mtime": 1794240250.9169815,
+    "ast_hash": "6d1e4334c877c84a6599318211e8df45",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1165,8 +1165,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1794052673.7115715,
-    "ast_hash": "7de3ad415552187e58f8b07c32e3f55d",
+    "mtime": 1794240028.2026527,
+    "ast_hash": "9e91be61e347fd267470187047e6fb54",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -1785,8 +1785,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0047-cli-human-readable-tables-with-rich.md": {
-    "mtime": 1793783676.137657,
-    "ast_hash": "96afd6f1eec94b665e1f28eda09983d8",
+    "mtime": 1794236671.342508,
+    "ast_hash": "f25bc6ad36537ccfd63a1e779b1ddd91",
     "semantic_hash": ""
   },
   "core/gherkai_core/termcolor.py": {
@@ -1890,8 +1890,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1793849214.2669768,
-    "ast_hash": "0075356be5dd718839698ed5b6daeecb",
+    "mtime": 1794239159.477024,
+    "ast_hash": "295a5b90d08691a28ab079528281a410",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
