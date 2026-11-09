@@ -250,8 +250,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794210622.9892058,
-    "ast_hash": "7cbed2b5a39448a3cceafd1a3ae15b7a",
+    "mtime": 1794215251.867171,
+    "ast_hash": "a7724436e24ca4e60fa1377ba54bd93d",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1141,7 +1141,7 @@
   },
   "engines/midscene/src/worker/fixtures/midscene_dump.json": {
     "mtime": 1789032560.2872798,
-    "ast_hash": "9f641f91ef686249b3f48414691e67e0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/gherkai_worker_novaact/evidence.py": {
@@ -1151,12 +1151,12 @@
   },
   "engines/novaact/tests/fixtures/nova_act_traj.json": {
     "mtime": 1789032560.2917712,
-    "ast_hash": "6ef1eea5b4ce11778547e2a61ac8376a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/tests/fixtures/nova_assert_traj.json": {
     "mtime": 1789032560.2911766,
-    "ast_hash": "395bd845d15c3095a69af066ff3e9022",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_evidence.py": {
@@ -1175,8 +1175,8 @@
     "semantic_hash": ""
   },
   "cli/tests/_doc_rules.py": {
-    "mtime": 1794052553.6911898,
-    "ast_hash": "408cec5a4154efc02f8f67993c177dd3",
+    "mtime": 1794213483.4973993,
+    "ast_hash": "6d6bbf6272fd14a8c5960866a9fee963",
     "semantic_hash": ""
   },
   "cli/tests/test_skill.py": {
@@ -1231,12 +1231,12 @@
   },
   "skills/gherkai-evals/evals.json": {
     "mtime": 1793864395.657303,
-    "ast_hash": "a4699724fa298dc5a2fc675eb0e5efa0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/trigger-eval.json": {
     "mtime": 1789844481.7145088,
-    "ast_hash": "b86052ed48e4b1acd8560fc7ba594726",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/run_evals.py": {
@@ -1296,7 +1296,7 @@
   },
   ".vscode/settings.json": {
     "mtime": 1789538913.1706197,
-    "ast_hash": "c65c2bb229c60f782cdb2f96f3e0985a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/adr/0044-engine-model-selection-and-override.md": {
@@ -1330,23 +1330,23 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794212450.3045888,
-    "ast_hash": "6abec4bd6670590eca4d215bbde9c5a1",
+    "mtime": 1794215570.7393942,
+    "ast_hash": "e47230d7e09fb9b28771309934687a39",
     "semantic_hash": ""
   },
   "docs/README.md": {
-    "mtime": 1793783517.189975,
-    "ast_hash": "3cfa461606afdce125d8063871ab91a8",
+    "mtime": 1794213483.498058,
+    "ast_hash": "3559e7bbe01278dbd8b1344600a1048f",
     "semantic_hash": ""
   },
   "docs/adr/0045-documentation-layering-and-placement.md": {
-    "mtime": 1793783666.167585,
-    "ast_hash": "7c124ec126259a90330d6f49769625ef",
+    "mtime": 1794213483.497832,
+    "ast_hash": "590ba765a6a4d57bf5d0d65f8045f8d1",
     "semantic_hash": ""
   },
   "docs/ai-eng/README.md": {
-    "mtime": 1794209112.631511,
-    "ast_hash": "bbde5b129e56aac60083c827ecc2e769",
+    "mtime": 1794213483.4981399,
+    "ast_hash": "802418d0ef58ba9180060530b80f1419",
     "semantic_hash": ""
   },
   "docs/ai-eng/REFERENCES.md": {
@@ -1360,8 +1360,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/doc-health-review.md": {
-    "mtime": 1794210663.5758781,
-    "ast_hash": "bf32739b0491c5ac68938351d216e108",
+    "mtime": 1794213966.424538,
+    "ast_hash": "2fb8d744152f5af51f3a75a70da3d7bb",
     "semantic_hash": ""
   },
   "docs/internals/README.md": {
@@ -1576,102 +1576,102 @@
   },
   "docs/diagrams/architecture-overview-layers.json": {
     "mtime": 1793780511.1514943,
-    "ast_hash": "95da24826460c482bb77f9c63f529602",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/architecture-overview-run-lifecycle.json": {
     "mtime": 1793778688.7129269,
-    "ast_hash": "8a79060b9c038589d66d30d33333b11c",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/artifacts-evidence-chain.json": {
     "mtime": 1793779387.1165767,
-    "ast_hash": "f5ba5f34cbdf87a2e50c2e3b3df94224",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-carriers-revision-pinning.json": {
     "mtime": 1793778857.6906726,
-    "ast_hash": "498efda8a71d89ab79753b66be48e45b",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-backend-upgrade-windows.json": {
     "mtime": 1793785211.8839462,
-    "ast_hash": "a6285743b3592bf047013c3aa197584f",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/cloud-delivery-identity.json": {
     "mtime": 1793778688.7137823,
-    "ast_hash": "27f29dc1d3c3aa7f55afcd6d67b7b858",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/configuration-env-inheritance.json": {
     "mtime": 1793778981.0061476,
-    "ast_hash": "7819ee013da973ebf2d633986ef915aa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-registry-overview.json": {
     "mtime": 1793779062.5972173,
-    "ast_hash": "72bd6c591c0ae2072211a41ef929812f",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/deterministic-steps-truth-sources.json": {
     "mtime": 1793778688.7144806,
-    "ast_hash": "5c35385d0f2cafd6d629d4b36321dfaa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-cloud-cascade.json": {
     "mtime": 1793778688.7149434,
-    "ast_hash": "7048d2477d5128ef8e4fc94741fd1249",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-detached-gates.json": {
     "mtime": 1793862289.4832704,
-    "ast_hash": "15b3a8d775a29934f004a31b7839d75b",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/execution-timeout-chain.json": {
     "mtime": 1794121911.616661,
-    "ast_hash": "c91965de81824df61175636deda97e1f",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/getting-started-component-ownership.json": {
     "mtime": 1793783692.90534,
-    "ast_hash": "e3934ca5e4c4b2b97e60a449e3efaefa",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/local-app-testing-tunnel-topology.json": {
     "mtime": 1793778688.715778,
-    "ast_hash": "df720d44df00700141fb3b75631e9195",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/readme-runtime-topology.json": {
     "mtime": 1793778688.7159758,
-    "ast_hash": "cf4831481e3a563a493e91b3d308f129",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/run-execution.json": {
     "mtime": 1793862289.4835768,
-    "ast_hash": "9cda387c18b0b545da2317200cafca5a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-job-outcome.json": {
     "mtime": 1793784736.3557057,
-    "ast_hash": "b3cfb8f74dacbd8e63b5d652d89f93c0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/verdict-model-reduction-layers.json": {
     "mtime": 1793778688.716607,
-    "ast_hash": "e7dd7405a14362207d9de79f2540654e",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/diagrams/writing-features-scenario-to-job.json": {
     "mtime": 1793778688.7167816,
-    "ast_hash": "e247d97cc1c3561d7775b09b6dfcba3a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   ".claude/settings.json": {
     "mtime": 1789874973.933686,
-    "ast_hash": "1600c66dec71a16dc74478a8dfbb6750",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
@@ -1715,13 +1715,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1793940306.6209729,
-    "ast_hash": "18b2156948773f2e4b6f820e3b856711",
+    "mtime": 1794215285.0118582,
+    "ast_hash": "12f71ff31695141fd6fdecf1a26cfe37",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
-    "mtime": 1794035922.2639787,
-    "ast_hash": "68fc674c37afa0d3c8618d982156c0c3",
+    "mtime": 1794215285.0120027,
+    "ast_hash": "92027c7adca7c64271b1a33b9aa669da",
     "semantic_hash": ""
   },
   ".claude/hooks/sync-derived.sh": {
@@ -1911,7 +1911,7 @@
   },
   "engines/fixtures/navigation-address-cases.json": {
     "mtime": 1794046493.0682626,
-    "ast_hash": "ec8a9fe1d6a3a5fa1743cad622973d9a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "cli/tests/test_engines_matrix.py": {
@@ -1961,7 +1961,7 @@
   },
   "engines/fixtures/job-lines.json": {
     "mtime": 1794046162.7452474,
-    "ast_hash": "0d8624d861ba62794d75bd4a77277c29",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/precheck.mts": {
@@ -2031,17 +2031,17 @@
   },
   "engines/fixtures/deterministic-handles.json": {
     "mtime": 1793085108.349918,
-    "ast_hash": "c1c0f90f21ce89810ead08dd046aa2b9",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/fixtures/redaction-cases.json": {
     "mtime": 1793862323.1427045,
-    "ast_hash": "7ba5df4a62033a5eb0428a665aa07afd",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/fixtures/tunnel-warmup.json": {
     "mtime": 1793866725.6708775,
-    "ast_hash": "9f24ffe52585d587a069ee1393a0b34a",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/midscene/src/lib/tunnel-warmup.mts": {
@@ -2060,8 +2060,8 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794210622.9892058,
-    "ast_hash": "7cbed2b5a39448a3cceafd1a3ae15b7a",
+    "mtime": 1794215251.867171,
+    "ast_hash": "a7724436e24ca4e60fa1377ba54bd93d",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/tunnel-warmup.test.mts": {
@@ -2291,12 +2291,12 @@
   },
   "engines/midscene/src/device/adapters/fixtures/uiautomator2.commands.json": {
     "mtime": 1793529020.827347,
-    "ast_hash": "140119228878041a4ffb1800b3e9427c",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/adapters/fixtures/xcuitest.commands.json": {
     "mtime": 1793533313.3005278,
-    "ast_hash": "8d2fba5c0f1ee15dae1d295dfa4ea9d0",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_stderr_redaction.py": {
@@ -2326,7 +2326,7 @@
   },
   "engines/fixtures/browser-session-timeout.json": {
     "mtime": 1793524593.8546755,
-    "ast_hash": "b987ba77c54be4e1c5742991e1753ee3",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/midscene/src/device/interface.test.mts": {
@@ -2366,7 +2366,7 @@
   },
   "engines/fixtures/one-line-text-cases.json": {
     "mtime": 1794039541.0433729,
-    "ast_hash": "57c241969c12b928ff83750db9ae0d32",
+    "ast_hash": "",
     "semantic_hash": ""
   },
   "engines/novaact/tests/test_one_line.py": {
@@ -2395,8 +2395,13 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/peer-review.md": {
-    "mtime": 1794212102.6450944,
-    "ast_hash": "c83dbe7a8b89a476672732a756a3974f",
+    "mtime": 1794215285.0123482,
+    "ast_hash": "a94f9562275eec4c50f594a694fb12a5",
+    "semantic_hash": ""
+  },
+  ".claude/README.md": {
+    "mtime": 1794214453.399258,
+    "ast_hash": "1763b3792d98b9e2c51a7d2cef396d20",
     "semantic_hash": ""
   }
 }

@@ -9,7 +9,7 @@
 - **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。人读文本（注释、docstring、文档、用户可见字符串）的措辞标准在 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策六，护栏 `cli/tests/test_code_comments.py`（注释与 docstring）、`test_technical_docs.py`（技术文档）、`test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`（用户文档、skill、包页）、`test_user_facing_messages.py`（用户可见字符串）随 `uv run pytest` 一并执行。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
-- **设计类改动先过独立复核**：新增或反转 ADR、改契约与不变量，以及把待审批事项交人裁定之前，按 [`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md) 做一次独立复核、分歧裁决与闭合确认。环境里有另一家模型的只读 CLI（本仓库用 Codex CLI）就用它作同僚，可用即默认启用；没有或说明原因后不用时，按该文的替代方式做，并在 PR 说明里写明用了哪种。机制本身不依赖任一工具。
+- **设计类改动先过独立复核**：新增或反转 ADR、改契约与不变量，以及把待审批事项交人裁定之前，按 [`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md) 做一次独立复核、分歧裁决与闭合确认。用 AI agent 起草方案的，首选请与起草所用模型不同厂商的只读 CLI 做同僚复核（本仓库用 Codex CLI）；没有可用的或决定不采用时，按该文的替代方式做。提交说明里写明复核方式与未采用首选方式的原因（经 PR 提交的也写进 PR 说明）。机制本身不依赖任一工具。
 - **改完回头校准文档**：受影响的 ADR、`CONTEXT.md`、各包 `README.md` 与 `DEVELOPMENT.md`、`docs/` 下的页面一并修改。枚举型内容（目录树、选项表、模块清单、护栏清单）靠 `ls` / grep / `--help` 逐条比对差集，不靠通读。
 
 ## 现状与版本线
@@ -38,7 +38,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 ├── LICENSE                    ← 许可证（MIT）
 ├── pyproject.toml / uv.lock   ← uv workspace 根（成员 = core / runtime / cli / engines/novaact / deploy_aws 五个发行包）：单一 lock + 共用 dev 依赖与 pytest 配置（ADR 0037）
 ├── .github/                   ← CI 与发布链（workflows/{ci,release,pages}.yml + scripts/ + release_body_footer.md（GitHub Release 正文的固定块）；pages.yml = 把 docs/diagrams/ 发到 GitHub Pages；一次性人工前置与本地校验见 .github/workflows/README.md，ADR 0037 决策 8）
-├── .claude/                   ← Claude Code 项目级资产（入库）：commands/（两条复盘入口）、settings.json + hooks/（sync-derived.sh 派生文件同步、wording-guard.sh 与 commit-gate.sh 措辞护栏，见下文「测试」节）、skills/doc-diagram/（作图入口）；个人配置放 .claude/settings.local.json、不入库
+├── .claude/                   ← Claude Code 项目级资产（入库）：README.md（Claude Code 在本仓库的操作要点）、commands/（两条复盘入口）、settings.json + hooks/（sync-derived.sh 派生文件同步、wording-guard.sh 与 commit-gate.sh 措辞护栏，见下文「测试」节）、skills/doc-diagram/（作图入口）；个人配置放 .claude/settings.local.json、不入库
 ├── .vscode/settings.json      ← 放行中文排版符号的 unicodeHighlight（真同形字符仍高亮）
 ├── docs/                      ← 全部文档；按读者的分层与归位见 ADR 0045（三类读者、四个入口）
 │   ├── README.md              ← 文档地图：使用者 / contributor / 想懂机理的人 / contributor 侧 AI agent 各自的入口
@@ -120,7 +120,7 @@ ssh <host> 'cd ~/<repo-copy> && export PATH=$PATH:~/.local/bin && AWS_REGION=<re
 - Midscene 的 dev worker：`cd engines/midscene && npm run build` 构建出 `dist/bin.mjs`，再将其软链为 PATH 上的 `gherkai-worker-midscene`（或设 `GHERKAI_WORKER_MIDSCENE_CMD`），CLI 即可按 worker 定位链找到它。
 - 需要一份带 error act 的证据（验证 `explain` 的错误分支）时：设 `NOVA_ACT_TIMEOUT_S=2`，使 Nova 的 act 必然超时。
 - 演练中断时把信号发给 CLI 进程本身：`uv run` 不转发 SIGINT（用 `pgrep -P <uv 的进程号>` 取到子进程再 `kill -INT`）；非交互 shell 里后台启动的进程 SIGINT 被忽略、Python 不会装 KeyboardInterrupt 处理器，演练脚本要先把 SIGINT 恢复为缺省处置再 exec 命令（`python3 -c 'import os,signal,sys; signal.signal(signal.SIGINT, signal.SIG_DFL); os.execvp(sys.argv[1], sys.argv[1:])' <命令>`）。
-- ssh 的长时间等待会被远端中断：连接加 `-o ServerAliveInterval=15`，`status --wait` 这类长等待改为 15 秒一轮的 `status --json` 轮询；长任务用 `setsid nohup … > log 2>&1 < /dev/null &` 启动（不接管标准输入，ssh 才能立刻返回），再轮询日志；`setsid` 只有 Linux 有，macOS 本机上没有它，命令会静默不执行，本机后台任务改用 `nohup … &` 或工具自带的后台执行；ssh 偶尔不随远端任务启动而返回，结束本地的 ssh 客户端即可，远端任务不受影响；远端命令行里不要写会匹配到自身的 `pkill -f` / `pgrep -f` 模式：模式文本也出现在该命令自身的命令行里，会连同发出命令的会话一起终止。偶发 kex 阶段被拒（TCP 可达、sshd 拒绝）时等待几分钟重试，无需重启实例。
+- ssh 的长时间等待会被远端中断：连接加 `-o ServerAliveInterval=15`，`status --wait` 这类长等待改为 15 秒一轮的 `status --json` 轮询；长任务用 `setsid nohup … > log 2>&1 < /dev/null &` 启动（不接管标准输入，ssh 才能立刻返回），再轮询日志；`setsid` 只有 Linux 有，macOS 本机上没有它，命令会静默不执行，本机后台任务改用 `nohup … &` 或工具自带的后台执行；ssh 偶尔不随远端任务启动而返回，结束本地的 ssh 客户端即可，远端任务不受影响；远端命令行里不要写会匹配到自身的 `pkill -f` / `pgrep -f` 模式：模式文本也出现在该命令自身的命令行里，会连同发出命令的会话一起终止。连接在 kex 阶段被拒或刚建立就被关闭（TCP 可达、`Connection closed by … port 22`）时先定位原因，再决定处置：`ssh -vvv` 区分连接超时与建连后关闭，具备日志访问权限时查服务端日志；确认是连续密集连接触发的服务端临时限制，隔几分钟重试、无需重启实例；本机出口 IP 变过时核对安全组白名单（`curl -s https://checkip.amazonaws.com` 取出口 IP）。
 - 查模型用量看 CloudWatch 而不是账单：`bedrock-runtime` 的调用（Nova Act、Claude）计在命名空间 `AWS/Bedrock`（维度 ModelId）并进 CloudTrail 管理事件；Midscene worker 走的 OpenAI 兼容端点（bedrock-mantle）计在 `AWS/BedrockMantle`（维度 Model、Project），不进 CloudTrail 管理事件，CloudTrail 里对应的事件名是 `ChatCompletions`。Cost Explorer 滞后约 36 小时，且各模型分散在不同服务名下（2026-09-16 实测）。
 - 录制评测 fixture 的远端步骤见 ADR 0043 决策七；知识图刷新见下文「知识图刷新（graphify）」节。
 
@@ -190,6 +190,8 @@ AWS_REGION=us-east-1 uv run python engines/novaact/spikes/negative_assertions.py
 tools/graphify_refresh.sh            # 抽取到收敛 → LLM 命名社区 + 重生成报告 → 导出 wiki（顺序有意义，env 默认值见脚本头注释）
 tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费用按全仓文档量计）
 ```
+
+- **提交前刷新与 hook 的关系**：改完 code 先执行 `PYTHONHASHSEED=0 graphify update .`（与 hook 共用 AST 重建实现，seed 相同聚类结果才一致；命令行走全量路径，工作区里尚未提交的代码也会进图，分批提交时留意），让 `graphify-out/` 随同一提交入库，提交命令带 `GRAPHIFY_SKIP_HOOK=1`，hook 就不再后台重建。未在提交前刷新时，hook 后台改写的产物在下次提交并入；不要等它的日志判断重建何时结束，那是用户级追加写的共享文件，也记排队与失败。
 
 扫描范围由 `.gitignore` + 根 `.graphifyignore` 决定：评测 fixture（`skills/gherkai-evals/fixtures/`，运行产物快照、截图是 PNG 占位却带 .jpg 扩展名，提交 Bedrock 会被拒绝并导致整块抽取失败）、评测 workspace、演示材料的媒体文件（`docs/presentations/**` 下的 pptx / mp4 / srt / zip，内容由 Markdown 讲稿保留）与演示制作工具的图标素材（`tools/presentations/assets/`）排除在图外。需要 Bedrock 凭证，且 env 里有 `AWS_REGION` 或 `AWS_PROFILE`（脚本会回落 `aws configure get region`）。本机没有凭证时到有凭证的机器上运行：用 rsync 把工作区同步过去（排除 `.git` / `.venv` / `node_modules`，**带上 `graphify-out/`** 以复用增量缓存）→ 运行脚本 → 用 rsync 回传 `graphify-out/`，回传时**排除 `.graphify_root`**（其中存的是绝对路径，回传会导致本地 hook 重建失败）→ commit `graph.json` / `GRAPH_REPORT.md` / `manifest.json` / `wiki/`（其余是缓存与滚动备份，`.gitignore` 已排除）。
 

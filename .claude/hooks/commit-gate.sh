@@ -9,7 +9,7 @@
 #   或 commit 带 `-a` / `--all`、`-i` / `--include`、`-o` / `--only`、`--pathspec-from-file`、路径参数（含 `--` 之后的）。
 #   PreToolUse 在整条命令执行之前运行，这些内容不在暂存区的名单上，改为调用 `--uncommitted`：暂存区、工作区相对 HEAD 的
 #   改动与未跟踪文件的并集（graphify-out/ 除外）。工作区里不属于本次提交的文件有命中时同样阻断，命中都是真实违规，先改再提交；
-#   graphify 回填写法 `git add graphify-out && git commit --amend --no-edit` 在工作区只剩 graphify-out/ 的改动时照常放行。
+#   `git add <路径> && git commit …` 这类形态同样按上述超集检查，扫描内容无命中时放行。
 # 形态由下面的 python3 片段用 shlex 切词识别：带值的选项（`-m` / `-F` / `-C` / `-c` / `-t` 与对应的长选项）的值不当成路径参数，
 # 组合短选项遇到带值的字母即停（`-am` 含 `-a`，`-ma` 是内容为「a」的 `-m`）；`bash -c '…'` 这类引号里的命令文本递归识别。
 # 切词失败（如引号不配对）时按超集处理：闸门判断不出形态，只扫暂存区可能漏掉要提交的内容；扫超集的最坏情况是多拦下这次
@@ -30,6 +30,8 @@
 # Edit 工具的改法，如脚本批量改文件）。
 # 脚本自身出错（退出码不是 0 或 1）不阻断提交：错误输出经 hookSpecificOutput.additionalContext 作为提示回给 agent，
 # 让它知道这次提交未经措辞检查；只有退出码 1（有命中）才阻断。
+# 下面 input=$(cat) 读的是 hook 传入的 JSON：空输入按没有 git commit 放行，所以手动核对改动请直接运行 tools/doc_rules_check.py --uncommitted；
+# 验证本脚本的行为时提供含 tool_input.command 的 JSON 并结束输入（stdin 不结束就一直等）。
 set -u
 cd "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null || exit 0
 export PATH="$PATH:$HOME/.local/bin"

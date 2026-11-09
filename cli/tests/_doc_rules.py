@@ -420,7 +420,7 @@ def ai_side_docs() -> list[Path]:
     import subprocess
     docs = [REPO / "CONTEXT.md", REPO / "CLAUDE.md"]
     docs += sorted((REPO / "docs" / "adr").glob("*.md")) + sorted((REPO / "docs" / "ai-eng").glob("*.md"))
-    docs += sorted((REPO / ".claude" / "commands").glob("*.md"))
+    docs += sorted((REPO / ".claude" / "commands").glob("*.md")) + [REPO / ".claude" / "README.md"]
     try:
         out = subprocess.run(["git", "-C", str(REPO), "ls-files", "-z", "--", *AI_SIDE_TRACKED],
                              capture_output=True, check=True)
