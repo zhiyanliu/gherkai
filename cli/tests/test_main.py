@@ -3412,14 +3412,17 @@ def test_list_runs_local_default_lists_all_ongoing_and_newest_finished_first(tmp
     monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
     root = tmp_path / "reports"
     _seed_listing_fixture(root)
+    # 早创建、晚结束：在已结束的 run 里创建得最早，结束得最晚
+    _seed_run(root, "20261110T075000Z-a00000", Status.PASSED, [Status.PASSED], started_at="2026-11-10T07:50:00+00:00",
+              ended_at="2026-11-10T12:00:00+00:00")
     doc = _list_runs_json(capsys, "--report-dir", str(root))
     assert [r["run_id"] for r in doc["runs"]] == [
-        "20261110T100000Z-a00003", "20261110T090000Z-a00002", "20261110T080000Z-a00001",
+        "20261110T100000Z-a00003", "20261110T090000Z-a00002", "20261110T080000Z-a00001", "20261110T075000Z-a00000",
         "20261110T070000Z-b00001", "20261110T060000Z-b00002", "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
-    # --limit 只约束已结束的部分：最近创建的一条留下（a00002 比 a00003 先结束，但 a00003 创建得更晚）
-    doc = _list_runs_json(capsys, "--report-dir", str(root), "--limit", "1")
+    # --limit 只约束已结束的部分，按创建时间取最近的：留下 a00003、a00002，结束得最晚的 a00000 不在其中
+    doc = _list_runs_json(capsys, "--report-dir", str(root), "--limit", "2")
     assert [r["run_id"] for r in doc["runs"]] == [
-        "20261110T100000Z-a00003", "20261110T070000Z-b00001", "20261110T060000Z-b00002",
+        "20261110T100000Z-a00003", "20261110T090000Z-a00002", "20261110T070000Z-b00001", "20261110T060000Z-b00002",
         "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
 
 
@@ -3460,6 +3463,31 @@ def test_list_runs_local_json_shape_and_writer_version_marking(tmp_path, monkeyp
     monkeypatch.setattr(m, "_installed_version", lambda: None)
     doc = _list_runs_json(capsys, "--report-dir", "reports")
     assert {r["run_id"]: r["cli_version"] for r in doc["runs"]}["20261110T080000Z-a00001"] == _LR_CLI
+
+
+def test_list_runs_local_wrongly_typed_fields_are_unreadable_rows_and_unknown_versions(tmp_path, monkeypatch, capsys):
+    """运行态里清单要输出的字段类型不对（起始时刻是数字、run 级 message 是对象、job 状态值不合法）列为无法读取；写出版本不是字符串
+    读作未知。--json 不带出非字符串的值，人读表格照常输出。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    bad_states = {"20261110T080000Z-e00001": {"started_at": 1731225600},
+                  "20261110T080000Z-e00002": {"message": {"text": "m"}},
+                  "20261110T080000Z-e00003": {"jobs": [{"scope_id": "s", "status": 3}]}}
+    for run_id, bad in bad_states.items():
+        _seed_raw_run_state(root, run_id, json.dumps({"run_id": run_id, "status": "passed", "jobs": [], **bad}))
+    numeric_writer = "20261110T090000Z-e00004"
+    _seed_run(root, numeric_writer, Status.PASSED, [Status.PASSED], ended_at="2026-11-10T09:05:00+00:00")
+    (root / numeric_writer / "run_meta.json").write_text(json.dumps({"schema_version": 1, "cli_version": 150}), encoding="utf-8")
+
+    by = {r["run_id"]: r for r in _list_runs_json(capsys, "--report-dir", str(root))["runs"]}
+    for run_id in bad_states:
+        assert by[run_id] == {"run_id": run_id, "unreadable": True, "cli_version": None}
+    assert by[numeric_writer]["status"] == "passed" and by[numeric_writer]["cli_version"] is None
+    assert m.main(["list-runs", "--report-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    for run_id in bad_states:
+        assert _table_row(out, run_id)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知", ""]
+    assert _table_row(out, numeric_writer)[5] == "未知"
 
 
 def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_leftovers(tmp_path, monkeypatch, capsys):
@@ -3547,7 +3575,8 @@ def _listing(run_id: str, status, *, detached: bool = True, header=(1, _LR_CLI),
 
 
 def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=None, list_error=None, skew_rc=None):
-    """把云端 list-runs 的 AWS 边界换成替身，返回记录调用顺序的列表。parts：状态元组 → 该次端口调用返回的列举项。"""
+    """把云端 list-runs 的 AWS 边界换成替身，返回记录调用顺序的列表。parts：状态元组 → 该次端口调用返回的列举项，值为异常时
+    该次调用抛出它（只让某一次调用失败）；list_error：每次调用都抛出的异常。"""
     from types import SimpleNamespace
 
     from gherkai_core.adapters.run_store import ddb as _ddb
@@ -3580,7 +3609,10 @@ def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=
             calls.append(("list", [s.value for s in statuses], limit))
             if list_error is not None:
                 raise list_error
-            return list((parts or {}).get(tuple(s.value for s in statuses), []))
+            got = (parts or {}).get(tuple(s.value for s in statuses), [])
+            if isinstance(got, Exception):
+                raise got
+            return list(got)
 
     monkeypatch.setattr(m, "_cloud_skew_gate", skew)
     monkeypatch.setattr(compose, "_make_ddb_table", make_table)
@@ -3669,6 +3701,26 @@ def test_list_runs_cloud_read_failures_exit_2_without_a_partial_list(tmp_path, m
     assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
     cap = capsys.readouterr()
     assert cap.out == "" and "没有读回" in cap.err and "Traceback" not in cap.err
+
+
+@pytest.mark.parametrize("as_json", [False, True])
+@pytest.mark.parametrize("error_kind", ["denied", "incomplete"])
+def test_list_runs_cloud_failure_in_the_finished_part_gives_no_partial_list(error_kind, as_json, tmp_path, monkeypatch, capsys):
+    """非终态那次已读到 run、终态那次失败：同样以退出码 2 结束，stdout 不输出已读到的那部分（人读与 --json 都一样）。"""
+    from botocore.exceptions import ClientError
+
+    from gherkai_core.adapters.run_store.ddb import RunListingIncomplete
+
+    error = (ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}}, "Query")
+             if error_kind == "denied" else RunListingIncomplete("vfy-runs", 3, 5))
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path, parts={
+        ("pending", "running"): [_listing("20261110T120000Z-a", Status.RUNNING)], tuple(_TERMINAL_VALUES): error})
+    argv = ["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"] + (["--json"] if as_json else [])
+    assert m.main(argv) == 2
+    cap = capsys.readouterr()
+    assert cap.out == "" and "20261110T120000Z-a" not in cap.err and "Traceback" not in cap.err
+    assert ("AccessDeniedException" if error_kind == "denied" else "没有读回") in cap.err
+    assert [c for c in calls if c[0] == "list"] == [("list", ["pending", "running"], None), ("list", _TERMINAL_VALUES, 20)]
 
 
 def test_list_runs_cloud_empty_hint_names_prefix_region_and_table(tmp_path, monkeypatch, capsys):

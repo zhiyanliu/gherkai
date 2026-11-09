@@ -1345,7 +1345,7 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
     assert seen["run_store"][1]["detached"] is True             # submit 方式标记透传（ADR 0034）
 
 
-# ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 的真实响应形状由 moto 给出 ----
+# ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 用 moto 模拟响应 ----
 
 def _moto_runs_table(*, with_list_index: bool):
     """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的 GSI。"""

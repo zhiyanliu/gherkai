@@ -497,3 +497,31 @@ def run_state_from_dict(d: dict) -> RunState:
             for j in d.get("jobs", [])
         },
     )
+
+
+def require_listing_state(state: RunState) -> RunState:
+    """列举 run 时（ADR 0041 决策七）对读回运行态的类型校验：起止时刻与 run 级 message 须为字符串或缺省，否则抛 ValueError，
+    两个 adapter 的列举把这个 run 列为无法读取，人读表格与 `list-runs --json` 都不会带出非字符串的值。run 级与各 job 的状态值在
+    解析时已由 `Status(...)` 校验，job 条目形态不对时解析同样已抛出，这里不重复。
+
+    只在列举入口调用：`status` / `explain` 读同一份运行态时保持原有的宽容读法。"""
+    for key in ("started_at", "ended_at", "message"):
+        value = getattr(state, key)
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"运行态的 {key} 须为字符串，现为 {type(value).__name__}")
+    return state
+
+
+def require_listing_header(header: tuple[int, str | None]) -> tuple[int, str | None]:
+    """列举 run 时（ADR 0041 决策七「写出版本的标记」）对提交记录头部的类型校验：写端 CLI 版本须为字符串或缺省，否则抛
+    DefinitionContractError，两个 adapter 的列举把头部读作读不到（写出版本显示「未知」、机读为 null）。结构版本在两个 adapter
+    读取头部时已核为整数（本机经 `definition_schema_version`，云端 adapter 按同一规则读数值属性），这里不重复。不把数字转成
+    版本串：写端只写字符串或 null，数字只可能来自损坏的记录或别的写入方，转出的串不对应任何一个版本。
+
+    只在列举入口调用：`status` / `explain` 的版本闸读头部的行为不变。"""
+    from gherkai_core.errors import DefinitionContractError
+
+    _schema_version, cli_version = header
+    if cli_version is not None and not isinstance(cli_version, str):
+        raise DefinitionContractError(f"提交记录头部的 cli_version 须为字符串，现为 {type(cli_version).__name__}")
+    return header

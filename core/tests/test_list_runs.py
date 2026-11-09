@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import dataclasses
+import errno
 import json
 import os
 from pathlib import Path
@@ -110,7 +111,28 @@ def test_local_list_runs_lists_every_unreadable_run_regardless_of_status_and_lim
     assert {r.run_id for r in store.list_runs([Status.PENDING], limit=None) if r.state is None} == set(unreadable)
 
 
-@pytest.mark.parametrize("content", [b"{broken", b"[]", json.dumps({"schema_version": "x"}).encode()])
+@pytest.mark.parametrize("bad", [
+    {"started_at": 1731225600},                  # 起始时刻是数字
+    {"ended_at": ["2026-07-01T00:05:00Z"]},      # 结束时刻是数组
+    {"message": {"text": "m"}},                  # run 级 message 是对象
+    {"jobs": [{"scope_id": "s", "status": 3}]},  # job 状态值不合法
+])
+def test_local_list_runs_lists_wrongly_typed_state_fields_as_unreadable(tmp_path: Path, bad: dict):
+    # 清单要输出的字段类型不对：列为无法读取，人读表格与 --json 都不会带出非字符串的值；提交记录头部照读
+    store = LocalRunStore(tmp_path)
+    _make(store, "run-01", Status.PASSED)
+    state = {"run_id": "run-01", "status": "passed", "started_at": "2026-07-01T00:00:00Z", "jobs": [], **bad}
+    (tmp_path / "run-01" / "run_state.json").write_text(json.dumps(state), encoding="utf-8")
+    [row] = store.list_runs([Status.PASSED], limit=None)
+    assert row.state is None and row.header == (1, "1.5.0")
+    # 无法读取的行不参与状态归入：只请求非终态时它同样列出
+    assert _ids(store.list_runs([Status.PENDING], limit=None)) == ["run-01"]
+
+
+@pytest.mark.parametrize("content", [b"{broken", b"[]", json.dumps({"schema_version": "x"}).encode(),
+                                     # 写端版本不是字符串：读作版本未知，不把数字转成版本串
+                                     json.dumps({"schema_version": 1, "cli_version": 150}).encode(),
+                                     json.dumps({"schema_version": 1, "cli_version": 1.5}).encode()])
 def test_local_list_runs_reads_unparseable_header_as_none(tmp_path: Path, content: bytes):
     store = LocalRunStore(tmp_path)
     _make(store, "run-01", Status.PASSED)
@@ -144,6 +166,47 @@ def test_local_list_runs_does_not_swallow_access_failures(tmp_path: Path):
             LocalRunStore(root).list_runs([Status.PASSED], limit=None)
     finally:
         root.chmod(0o700)
+
+
+@pytest.mark.parametrize("error", [PermissionError, FileNotFoundError, NotADirectoryError, "ELOOP"])
+def test_local_list_runs_raises_when_an_entry_cannot_be_inspected(tmp_path: Path, monkeypatch, error):
+    """判断条目是不是目录时的权限错误原样抛出（不当作「不是目录」跳过）；列出之后被删掉的条目（stat 报不存在）跳过；
+    穿过文件的符号链接（ENOTDIR）与链接环（ELOOP）同样原样抛出——契约只跳过枚举后消失的条目，其余访问失败由 CLI 以退出码 2 结束。"""
+    store = LocalRunStore(tmp_path)
+    _make(store, "run-01", Status.PASSED)
+    _make(store, "run-02", Status.PASSED)
+    blocked = os.fspath(tmp_path / "run-02")
+    real_stat = os.stat
+
+    def stat(path, *args, **kwargs):
+        if os.fspath(path) == blocked:
+            if error == "ELOOP":
+                raise OSError(errno.ELOOP, "injected", blocked)
+            raise error({PermissionError: 13, FileNotFoundError: 2, NotADirectoryError: 20}[error], "injected", blocked)
+        return real_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", stat)
+    # Python 3.14 起 Path.is_dir 把任何 OSError 都读作「不是目录」：换成这一语义，让本用例在各版本上都能区分显式 stat 与 is_dir
+    monkeypatch.setattr(Path, "is_dir", lambda self, **kwargs: os.path.isdir(self))
+    if error is FileNotFoundError:
+        assert _ids(store.list_runs([Status.PASSED], limit=None)) == ["run-01"]
+    else:
+        with pytest.raises(OSError):
+            store.list_runs([Status.PASSED], limit=None)
+
+
+def test_local_list_runs_keeps_rows_with_null_message_and_empty_jobs(tmp_path: Path):
+    """历史运行态的合法形态不被类型校验误判：message 与 ended_at 显式为 null、jobs 为空映射或空列表，都能读出、不是不可读行。"""
+    store = LocalRunStore(tmp_path)
+    for rid, jobs in (("run-01", {}), ("run-02", [])):
+        _make(store, rid, Status.PASSED)
+        path = tmp_path / rid / "run_state.json"
+        d = json.loads(path.read_text(encoding="utf-8"))
+        d.update(message=None, ended_at=None, jobs=jobs)
+        path.write_text(json.dumps(d), encoding="utf-8")
+    rows = store.list_runs([Status.PASSED], limit=None)
+    assert _ids(rows) == ["run-02", "run-01"]
+    assert all(r.state is not None and r.state.status == Status.PASSED and r.state.message is None and r.state.ended_at is None for r in rows)
 
 
 # ============================================================================
@@ -240,6 +303,24 @@ def test_ddb_list_runs_marks_unparseable_state_and_header(cloud_runs, listing_ta
     assert rows["run-04"].state is not None
 
 
+def test_ddb_list_runs_lists_wrongly_typed_fields_as_unreadable_and_unknown_version(cloud_runs, listing_table):
+    # 数值属性读回是 Decimal、Map 读回是 dict：都不是字符串，清单不带出它们（Decimal 连 json.dumps 都过不去）
+    from decimal import Decimal
+
+    meta = {"item_type": "META", "schema_version": 1, "cli_version": "1.5.0", "meta_json": "{}"}
+    for run_id, extra in (("run-07", {"started_at": 1731225600}), ("run-08", {"message": {"text": "m"}}),
+                          ("run-09", {"jobs": {"s": {"status": 3}}})):
+        listing_table.put_item(Item={**_state_item(run_id, "passed"), **extra})
+        listing_table.put_item(Item={"run_id": run_id, **meta})
+    listing_table.put_item(Item=_state_item("run-10", "passed"))
+    listing_table.put_item(Item={"run_id": "run-10", **meta, "cli_version": Decimal("1.5")})
+
+    rows = {r.run_id: r for r in cloud_runs.list_runs([Status.PASSED], limit=None)}
+    for run_id in ("run-07", "run-08", "run-09"):
+        assert rows[run_id].state is None and rows[run_id].header == (1, "1.5.0")
+    assert rows["run-10"].state is not None and rows["run-10"].header is None  # 写出版本未知，不把数字转成版本串
+
+
 def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, monkeypatch):
     store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
     for i in range(60):
@@ -312,22 +393,28 @@ class _FakeTable:
     """只实现列举用到的三样：`name`、`query`、`meta.client.batch_get_item`。
 
     partitions：{状态值: [run_id…]}（按 run_id 降序返回）；items：{(run_id, item_type): item}；page_size：每页最多几条
-    （模拟一页不足 Limit 却还有下一页）；unprocessed：前几次 batch_get_item 把全部键当作未处理返回。
+    （模拟一页不足 Limit 却还有下一页）；unprocessed：前几次 batch_get_item 把全部键当作未处理返回；empty_last_cursor：末页的
+    LastEvaluatedKey 给空字典而不是省略（同样表示没有下一页）。拿空游标再查时按分区开头处理，所以分页不在空游标上结束时会一直
+    重读；`query` 超过 _MAX_QUERIES 次即判定分页没有结束，让这类缺陷以失败而不是挂起暴露。
     """
 
+    _MAX_QUERIES = 50
+
     def __init__(self, partitions: dict[str, list[str]], items: dict, *, page_size: int | None = None,
-                 unprocessed: int = 0) -> None:
+                 unprocessed: int = 0, empty_last_cursor: bool = False) -> None:
         self.name = _TABLE
         self._partitions = partitions
         self._items = items
         self._page_size = page_size
         self._unprocessed = unprocessed
+        self._empty_last_cursor = empty_last_cursor
         self.queries: list[dict] = []
         self.batches: list[dict] = []
         self.meta = SimpleNamespace(client=SimpleNamespace(batch_get_item=self._batch_get_item))
 
     def query(self, **kwargs):
         self.queries.append(dict(kwargs))
+        assert len(self.queries) <= self._MAX_QUERIES, "分页没有结束"
         assert kwargs["IndexName"] == _LIST_INDEX and kwargs["ScanIndexForward"] is False
         run_ids = sorted(self._partitions.get(kwargs["ExpressionAttributeValues"][":s"], []), reverse=True)
         start = kwargs.get("ExclusiveStartKey", {}).get("offset", 0)
@@ -336,6 +423,8 @@ class _FakeTable:
         resp = {"Items": [{"run_id": rid, "item_type": "STATE", "status": "x"} for rid in page]}
         if start + n < len(run_ids):
             resp["LastEvaluatedKey"] = {"offset": start + n}
+        elif self._empty_last_cursor:
+            resp["LastEvaluatedKey"] = {}
         return resp
 
     def _batch_get_item(self, *, RequestItems):
@@ -368,6 +457,27 @@ def test_ddb_list_runs_continues_short_pages_until_limit(monkeypatch):
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=None)
     assert _ids(rows) == ["r2", "r1", "r0"]
     assert [("Limit" in q) for q in table.queries] == [False, False]  # 不截断：分页读完
+
+
+@pytest.mark.parametrize("limit", [None, 5])
+def test_ddb_list_runs_empty_partition_with_empty_cursor_returns_nothing(limit):
+    # 分区没有结果、末页游标还是空字典：返回空清单、只查一次、不发 BatchGetItem
+    table = _FakeTable({"pending": []}, {}, empty_last_cursor=True)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=limit)
+    assert rows == [] and len(table.queries) == 1 and table.batches == []
+
+
+@pytest.mark.parametrize("limit", [None, 5])
+@pytest.mark.parametrize("page_size, queries", [(2, 2), (None, 1)])
+def test_ddb_list_runs_empty_cursor_ends_pagination(page_size, queries, limit):
+    # 末页的游标是空字典：分页到此结束。分两页时只续读一次；一页就有全部结果时不再请求。截不截断都一样
+    table = _FakeTable({"pending": ["r0", "r1", "r2"]},
+                       {(f"r{i}", "STATE"): _state_item(f"r{i}", "pending") for i in range(3)},
+                       page_size=page_size, empty_last_cursor=True)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=limit)
+    assert _ids(rows) == ["r2", "r1", "r0"]
+    assert len(table.queries) == queries
+    assert all(q.get("ExclusiveStartKey") != {} for q in table.queries)
 
 
 def test_ddb_list_runs_dedupes_does_not_refilter_and_skips_vanished_state():

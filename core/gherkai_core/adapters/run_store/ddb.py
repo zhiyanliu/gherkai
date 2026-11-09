@@ -37,6 +37,8 @@ from gherkai_core.adapters.run_store.arg_offload import has_pointers
 from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.serialize import (
     require_definition_schema,
+    require_listing_header,
+    require_listing_state,
     run_meta_from_dict,
     run_meta_to_dict,
 )
@@ -440,9 +442,10 @@ class DynamoDBRunStore:
         `BatchGetItem` 强一致读回每个 run 的 STATE 与 META（同一批请求，不另起读取）。
 
         行内容以读回的 STATE 为准、不按状态复筛；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了
-        （形态违约、job 状态值本版本不认识）以 `state=None` 列出；detached 与 `is_detached` 同一判据（STATE 顶层标记）；头部与
-        `peek_definition_header` 同一读法，META 不在或头部解析不了为 None。Query 与读回的 AWS 错误原样抛出（索引缺失时 Query
-        以 ValidationException 失败）；读回的未处理键重试耗尽抛 `RunListingIncomplete`。
+        （形态违约、job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 与 `is_detached` 同一判据
+        （STATE 顶层标记）；头部与 `peek_definition_header` 同一读法，META 不在或头部解析不了（含写端版本不是字符串，如数值属性读回的
+        Decimal）为 None。Query 与读回的 AWS 错误原样抛出（索引缺失时 Query 以 ValidationException 失败）；读回的未处理键重试
+        耗尽抛 `RunListingIncomplete`。
         """
         if self._list_index_name is None:
             raise RuntimeError("本进程的 RunStore 没有配置列举 run 用的索引名，列不出 run"
@@ -465,13 +468,13 @@ class DynamoDBRunStore:
             if state_item is None:
                 continue
             try:
-                state = _run_state_from_item(state_item)
-            except (ValueError, KeyError, TypeError, AttributeError):  # 形态违约、状态值不认识
+                state = require_listing_state(_run_state_from_item(state_item))
+            except (ValueError, KeyError, TypeError, AttributeError):  # 形态违约、状态值不认识、字段类型不对
                 state = None
             meta_item = items.get((run_id, _META))
             try:
-                header = _header_from_item(meta_item) if meta_item is not None else None
-            except ValueError:  # 结构版本不是整数（DefinitionContractError）：头部解析不了，与本机同读作 None
+                header = require_listing_header(_header_from_item(meta_item)) if meta_item is not None else None
+            except ValueError:  # 结构版本不是整数、写端版本不是字符串（DefinitionContractError）：头部解析不了，与本机同读作 None
                 header = None
             rows.append(RunListing(run_id=run_id, state=state, detached=bool(state_item.get("detached")), header=header))
         rows.sort(key=lambda row: row.run_id, reverse=True)
@@ -493,7 +496,8 @@ class DynamoDBRunStore:
             resp = self._table.query(**kwargs)
             run_ids.extend(item["run_id"] for item in resp.get("Items", []))
             last = resp.get("LastEvaluatedKey")
-            if last is None or (limit is not None and len(run_ids) >= limit):
+            # 没有游标与空字典游标都按已到末页处理：空字典不标明续读的起点，用它续查不能推进分页，不截断时可能反复读同一段而不结束
+            if not last or (limit is not None and len(run_ids) >= limit):
                 return run_ids
             kwargs["ExclusiveStartKey"] = last
 

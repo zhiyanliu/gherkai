@@ -226,6 +226,21 @@ def test_status_json_keys_are_documented():
     _assert_documented(doc_error, section="status")
 
 
+def _assert_list_runs_value_types(doc: dict) -> None:
+    """list-runs 每项的值类型：差集只核键名，值的类型（契约页「list-runs」一节写明的字符串、布尔、计数）由这里核。"""
+    for r in doc["runs"]:
+        assert isinstance(r["run_id"], str)
+        if "unreadable" in r:
+            assert r["unreadable"] is True and set(r) <= {"run_id", "unreadable", "cli_version"}
+        else:
+            assert isinstance(r["status"], str) and isinstance(r["detached"], bool)
+            assert all(isinstance(r[k], str) for k in ("started_at", "ended_at", "message") if k in r)
+            assert isinstance(r["job_counts"], dict)
+            assert all(isinstance(k, str) and type(n) is int for k, n in r["job_counts"].items())
+        if "cli_version" in r:
+            assert r["cli_version"] is None or isinstance(r["cli_version"], str)
+
+
 def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
     """list-runs 的样例取真实命令的 --json 输出。本机 fixture 两个 run：一个终态（起止时刻、run 级 message 齐全，由别的版本写出、
     带 cli_version），一个未结束（当前版本写出、省略 cli_version）；另加一个运行态损坏的目录，`unreadable` 进差集。
@@ -246,6 +261,7 @@ def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
     assert "cli_version" not in by["20261110T090000Z-b00001"]
     assert by["20261110T100000Z-c00001"]["unreadable"] is True
     _assert_documented(doc, section="list-runs")
+    _assert_list_runs_value_types(doc)
 
     _cloud_list_runs_env(monkeypatch, tmp_path, parts={("pending", "running"): [
         _listing("20261110T090000Z-b00001", M.Status.RUNNING, jobs=[M.Status.RUNNING])]})
@@ -253,6 +269,7 @@ def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
     doc = json.loads(capsys.readouterr().out)
     assert {"prefix", "region", "ddb_table"} <= set(doc) and len(doc["runs"]) == 1
     _assert_documented(doc, section="list-runs")
+    _assert_list_runs_value_types(doc)
 
 
 def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch, capsys):
