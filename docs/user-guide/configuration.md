@@ -8,11 +8,11 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 
 | 位置 | 谁读它 | 怎么设 |
 |---|---|---|
-| 本机 CLI 进程 | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-engines` / `list-deterministic` 本身 | 在运行命令的 shell 里 export |
+| 本机 CLI 进程 | `gherkai run` / `plan` / `submit` / `status` / `list-runs` / `explain` / `doctor` / `list-engines` / `list-deterministic` 本身 | 在运行命令的 shell 里 export |
 | 本机 worker 进程 | 本机后端（`--backend local`）下由 CLI 起的引擎 worker。`plan`、`list-deterministic`、`doctor` 也各起一次本机 worker 读它的确定性 step 信息（`doctor` 还读它自报的模型与测试目标），与 `--backend` 无关 | 同上 |
 | 云端 worker 容器 | 云端后端（`--backend cloud`）下在 Fargate 上运行的 worker | 把变量写进 worker 镜像 variant 的 `ENV`，再用 `gherkai deploy push-worker` 推送并注册（见 [`cloud-backend.md`](./cloud-backend.md)） |
 | 部署机 | `gherkai deploy` / `destroy` / `push-worker` / `list-workers` | 在运行部署命令的 shell 里 export |
-| 项目配置文件 `gherkai.toml` | `gherkai run` / `plan` / `submit` / `status` / `explain` / `doctor` / `list-deterministic` 本身；worker、云端后端与部署命令都不读 | 放在运行命令的当前目录，或用 `--config` / `GHERKAI_CONFIG` 指定；见下文「项目配置文件」 |
+| 项目配置文件 `gherkai.toml` | `gherkai run` / `plan` / `submit` / `status` / `list-runs` / `explain` / `doctor` / `list-deterministic` 本身；worker、云端后端与部署命令都不读 | 放在运行命令的当前目录，或用 `--config` / `GHERKAI_CONFIG` 指定；见下文「项目配置文件」 |
 
 值怎么从你设的地方到真正读它的进程：
 
@@ -24,7 +24,7 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 
 每个项目基本固定的值写进 `gherkai.toml`，与 `.feature` 一起入库共享，不必每次在命令行重复。
 
-**定位**：`--config <路径>`、环境变量 `GHERKAI_CONFIG`、运行命令的当前目录下的 `gherkai.toml`，依次优先；只找当前目录，不向上级目录查找。缺省位置没有文件不算错，等于不用配置文件；显式给出的路径不存在、或文件不是合法的 TOML，以退出码 2 结束并点名文件与出错位置。只有 `run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic` 读它：读出的值在提交时解析成具体值写进提交记录，后台推进、云端 worker 与部署命令都不再读文件，提交之后改文件不影响已提交的 run。`gherkai doctor` 的 `config.file` 行显示本次加载的是哪个文件。
+**定位**：`--config <路径>`、环境变量 `GHERKAI_CONFIG`、运行命令的当前目录下的 `gherkai.toml`，依次优先；只找当前目录，不向上级目录查找。缺省位置没有文件不算错，等于不用配置文件；显式给出的路径不存在、或文件不是合法的 TOML，以退出码 2 结束并点名文件与出错位置。只有 `run`、`plan`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`list-deterministic` 读它：读出的值在提交时解析成具体值写进提交记录，后台推进、云端 worker 与部署命令都不再读文件，提交之后改文件不影响已提交的 run。`gherkai doctor` 的 `config.file` 行显示本次加载的是哪个文件。
 
 **取值顺序**：命令行选项、环境变量、配置文件、内建默认依次优先。配置文件排在环境变量之后，是因为环境变量通常是本次调用的临时覆盖（CI 矩阵、单次排障），文件是项目的稳定基线。
 
@@ -61,16 +61,16 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 |---|---|---|
 | `[common]` | `default-engine`、`assertion-votes`、`default-job-timeout` | `run`、`plan`、`submit` |
 | `[common]` | `max-concurrency` | `run`、`submit`、`status` |
-| `[common]` | `report-dir`、`backend` | `run`、`submit`、`status`、`explain`、`doctor` |
+| `[common]` | `report-dir`、`backend` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` |
 | `[common]` | `steps-dir` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` |
-| `[common]` | `region`、`profile` | `run`、`submit`、`status`、`explain`、`doctor` |
+| `[common]` | `region`、`profile` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` |
 | `[common]` | `expose-local` | `run`、`plan`、`submit` |
 | `[common]` | `tunnel`、`grace`、`tunnel-ttl` | `tunnel`：`run`、`submit`；`grace`：`run`；`tunnel-ttl`：`submit` |
-| `[cloud]` | `prefix`、`ddb-table` | `run`、`submit`、`status`、`explain`（`prefix` 也在 `doctor`） |
+| `[cloud]` | `prefix`、`ddb-table` | `run`、`submit`、`status`、`list-runs`、`explain`（`prefix` 也在 `doctor`） |
 | `[cloud]` | `s3-bucket`、`worker-variant` | `run`、`submit` |
 | `[cloud]` | `events-table`、`cluster`、`subnet`、`security-group` | `run`；`subnet` 与 `security-group` 写成字符串列表 |
 
-**只影响本次调用的选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--all`、`--full`、`--fail-fast`、`--no-report`、`list-deterministic` 的 `--engine`、`--config` 本身与位置参数。写进文件会让某次调用的范围、输出或中止方式在不显眼处改变。不认识的节或键以退出码 2 结束并点名文件、节与键，不静默忽略。
+**只影响本次调用的选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--all`、`--full`、`--fail-fast`、`--no-report`、`list-deterministic` 的 `--engine`、`list-runs` 的 `--status` 与 `--limit`、`--config` 本身与位置参数。写进文件会让某次调用的范围、输出或中止方式在不显眼处改变。不认识的节或键以退出码 2 结束并点名文件、节与键，不静默忽略。
 
 **`[devices]`**：`billing-method`（`METERED` / `UNMETERED`，不给为 `METERED`；不计量方式要求账号已为对应平台购买不计量设备槽位，否则服务商在准备阶段就结束会话、这个 scope 以 `precheck_failed` 结束并带服务商的说明，不产生设备分钟）、`acquire-timeout-s`（获取预算：从开始准备设备到被测对象就绪的时间上限（含应用目标的安装包检查、应用安装与预热），单位秒；不给时为 600，不得超过 3600）、`project-arn` 与 `app-bucket`（只供本机后端：远程访问会话所属的 Device Farm 项目，与放安装包的 S3 桶；桶可以不在当前区域配置所指的区域，上传安装包时会提示一句、不拦截；云端后端用部署时建立的项目与产物桶，这两项在云端不生效、只提示一句）。每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给 `arn`（指定一台设备）或 `os-version`（按系统版本挑选：`"18"` 命中 `18.x.y`，`"18.6"` 命中 `18.6` 与 `18.6.2`、不命中 `18.60`；要写成字符串，写成数字会被当成浮点数读、以退出码 2 结束），两者都给以退出码 2 结束；子表里的 `billing-method` 覆盖 `[devices]` 顶层的值。有某平台设备 scope 的 run，该平台没有任何来源指定设备时，`run` / `submit` 在提交前以退出码 2 结束，`plan` 标注并警告。CLI 只核对设备 ARN 与项目 ARN 的服务段与资源类型段：把项目 ARN 贴进设备 ARN 这类错在提交前以退出码 2 结束并点名贴错的类型；设备不存在、已下架等到 worker 建会话时才会报出。本机后端下 `project-arn` 所属账号与当前凭证所属账号不一致时提交前警告并点名两个账号，不拦截。
 
@@ -191,9 +191,9 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|
-| `--backend {local,cloud}` | `run`、`submit`、`status`、`explain`、`doctor` | 默认 `local`。查一个 run 的 `status` / `explain` 要给与 `submit` 相同的值 |
-| `--prefix P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。部署侧的前缀至多 32 个字符，见 [`cloud-backend.md`](./cloud-backend.md)「deploy 与 destroy 的选项」。多环境切换（`prod-` / `stage-`）用它 |
-| `--report-dir DIR` | `run`、`submit`、`status`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
+| `--backend {local,cloud}` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | 默认 `local`。查一个 run 的 `status` / `explain`、列 run 的 `list-runs` 要给与产生 run 的 `run` 或 `submit` 相同的值 |
+| `--prefix P` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `list-runs` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。部署侧的前缀至多 32 个字符，见 [`cloud-backend.md`](./cloud-backend.md)「deploy 与 destroy 的选项」。多环境切换（`prod-` / `stage-`）用它 |
+| `--report-dir DIR` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run，本机后端的 `list-runs` 同样据它定位；云端后端的 `list-runs` 不用它，给了也忽略。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
 | `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
@@ -204,10 +204,10 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
 | `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束；写在 gherkai.toml 里的 `grace` 在云端只提示一句、不生效 |
-| `--json` | `run`、`plan`、`status`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
+| `--json` | `run`、`plan`、`status`、`list-runs`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
 | `--quiet` | `run` | 只影响进度输出与本机 worker 日志的落点 |
-| `--region R`、`--profile P` | `run`、`submit`、`status`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 优先于同义的环境变量（解析链见上）。云端 worker 只收 region，凭证用它自己的任务角色 |
-| `--config FILE` | `run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic` | 七个命令上同义：项目配置文件的路径，见上文「项目配置文件」 |
+| `--region R`、`--profile P` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 优先于同义的环境变量（解析链见上）。云端 worker 只收 region，凭证用它自己的任务角色 |
+| `--config FILE` | `run`、`plan`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`list-deterministic` | 八个命令上同义：项目配置文件的路径，见上文「项目配置文件」 |
 | `--android-device-arn ARN`、`--ios-device-arn ARN` | `run`、`plan`、`submit` | 三个命令上同义：该平台的设备 scope 用哪台设备。`plan` 上只用于标注，不连任何 AWS 服务 |
 | `--device-farm-project-arn ARN`、`--app-bucket NAME` | `run`、`submit` | 只对本机后端起作用：远程访问会话所属的 Device Farm 项目，与放安装包的 S3 桶；云端后端用部署时建立的项目与产物桶，给了只提示一句 |
 
@@ -219,7 +219,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 
 | 选项 | 出现在 | 不给时用什么 | 环境变量 |
 |---|---|---|---|
-| `--ddb-table NAME` | `run`、`submit`、`status`、`explain` | `<prefix>runs` | `AWS_DDB_TABLE` |
+| `--ddb-table NAME` | `run`、`submit`、`status`、`list-runs`、`explain` | `<prefix>runs` | `AWS_DDB_TABLE` |
 | `--s3-bucket NAME` | `run`、`submit` | `<prefix>artifacts` | `AWS_S3_BUCKET` |
 | `--events-table NAME` | `run` | `<prefix>events` | 无 |
 | `--cluster NAME` | `run` | `<prefix>cluster` | 无 |

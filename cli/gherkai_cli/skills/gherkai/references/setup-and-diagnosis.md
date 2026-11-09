@@ -100,8 +100,13 @@
 | Midscene 侧某个 step 文件里的 step 全走了 AI、`list-deterministic` 清单里也没有它，且没有任何报错 | 扩展名用了 `.ts` / `.js`（收集阶段按扩展名过滤，静默跳过、不 import） | 改成 `.mts` / `.mjs` |
 | `plan` / `run` 以退出码 2 结束并点名某个 steps 文件 | 该文件加载失败 | 修那个文件，不是 feature |
 | 明明写了 `steps/` 却全走 AI | 目录没被读到或正则不匹配 | `list-deterministic --steps-dir …` 核对；对照 `example` 改 step 文本 |
-| `status` / `explain` 以退出码 2 结束、说找不到 run（提示只提 `submit`） | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致 | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix` |
-| `status` / `explain` 以退出码 2 结束、说提交记录由更新或更早版本写出 | 记录格式与本机 CLI 不一致 | 更新版本写出的就升级本机 CLI；更早版本写出的就按消息换用那个版本查看，或用当前版本重新提交 |
+| `status` / `explain` 以退出码 2 结束、说「未找到 run」；或 `list-runs` 打「没有找到 run」、清单为空 | 三个参数与**产生这个 run 的那条命令**（`run` 或 `submit`）不一致（云端 `list-runs` 不看 `--report-dir`） | 照那条命令逐字对齐 `--backend` / `--report-dir` / `--prefix`；`list-runs` 的提示点名了它查的落点（本机的目录，或云端的前缀、region 与表名），拿它与那条命令对照 |
+| `status` / `explain` 以退出码 2 结束、说提交记录由更新或更早版本写出 | 记录格式与本机 CLI 不一致 | 更新版本写出的就升级本机 CLI；更早版本写出的就按消息换用那个版本查看，或用当前版本重新提交；同一个报告目录不要混用 1.4 与 1.5 的 CLI |
+| `list-runs` 某行状态列是「无法读取（可能由其它版本写出），用 status 查看」，或「版本」列有值 | 这个 run 由另一个版本的 gherkai 写出 | 照提示对这个 run_id 用 `status`；格式不一致时按上一行处理 |
+| `list-runs --backend cloud` 以退出码 2 结束、说列出 run 用的索引「还在建立」 | 后端刚升级部署，AWS 正在为已有的 run 补齐索引 | 稍后重试，所需时间随已有 run 的数量增加；别让人为此重新部署（补齐之前要改运行状态表的部署会失败） |
+| `list-runs --backend cloud` 以退出码 2 结束、说「没有列出 run 用的索引」或索引「正在被删除」 | 后端部署早于这个功能，或索引被删 | 交部署方用当前版本的 `gherkai deploy` 重新部署（你不自己运行） |
+| `list-runs --backend cloud` 以退出码 2 结束、说重试后仍有 run 没有读回 | 读取被限流 | 稍后重试 |
+| `list-runs --backend cloud` 以退出码 2 结束、说读不到运行状态表 | 前缀、表名或 region 不对，或凭证缺索引上的 `dynamodb:Query`、表上的 `dynamodb:BatchGetItem` | 先核对 `--prefix` / `--region`；缺权限就交人补（清单见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 「团队成员需要的最小云端权限」一节） |
 | `--expose-local` 起隧道失败 | 没装 ngrok、或 authtoken 没配（配置文件与环境变量都没有）、或填的是 API key、或本机没外网 | 第 5 节 |
 | 以退出码 2 结束、说 `--expose-local` 的取值「不是 origin」 | 取值带了路径、查询串、片段或用户信息，或不以 `http://` / `https://` 开头 | 只写到端口为止（如 `http://localhost:3000`），路径留在 step 文本里（第 5 节） |
 | 隧道已建立，每条 scenario 第一步导航就失败，应用日志里没有请求 | 选项值与 feature 书写的地址不一致（localhost 对 `127.0.0.1`、端口、大小写），地址没被替换 | 第 5 节：`plan --expose-local` 回显与 step 文本逐字对照，改成一致 |

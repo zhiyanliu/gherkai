@@ -15,7 +15,7 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 前端：run/submit/status/explain/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**不应改用 `argparse.SUPPRESS`**——它会以「==SUPPRESS==」出现在 `--help` 里，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 前端：run/submit/status/explain/list-runs/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**不应改用 `argparse.SUPPRESS`**——它会以「==SUPPRESS==」出现在 `--help` 里，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── config.py     ← 项目配置文件 gherkai.toml 的定位、读取与形态校验（ADR 0053）；不知道命令与 argparse
 ├── settings.py   ← 配置文件合成进命令行选项（选项 > 环境变量 > 配置文件 > 内建默认，ADR 0053 决策 2、3、6）；argparse 的私有访问集中于此
 ├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：本机为账号比对 → 设备请求 → 安装包上传 → 写前校验，云端为读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）
@@ -23,7 +23,7 @@ cli/gherkai_cli/
 ├── device_selection.py ← 设备选择与设备请求的解析，以及本机后端项目 ARN 与应用桶的取值（选项 > 环境变量 > 配置文件，三处来源的顺序只写在这里；ARN 只核服务与资源类型段；ADR 0053 决策 2、3、4、0048 决策 3），纯函数、不连 AWS
 ├── deploy.py     ← deploy/destroy 的命令面 + 部署 provider 发现（entry point group `gherkai.deploy`）；**零 IaC 知识**、不 import aws_cdk（ADR 0037 决策 6）
 ├── render.py     ← 表层渲染：0024 事件 → 进度行；plan 的 scope/job 分组 → 文本 / JSON；RunResult → 树形汇总 / JSON；RunState → status 视图（表格与树经 `gherkai_runtime.textui` 渲染）；
-│                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）
+│                    JobResult + evidence → explain 的文本/JSON（两形态同源，见模块内 explain 节的注释）；RunListing → list-runs 的表格 / JSON（写出版本的标记两形态共用 `writer_version_mark`）
 ├── skill_install.py ← `gherkai skill install`：importlib.resources 定位包内 skills/gherkai/、整目录收敛 + `.gherkai-skill-version` 标记、`--print`（ADR 0043 决策三）
 └── skills/gherkai/  ← 随 wheel 发行的 agent skill（SKILL.md + references/；hatchling 把包目录内的非 `.py` 文件一并收进 wheel；sdist 侧由 `include` 白名单整目录收录）。references/cli-json-contract.md **不手写**：
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
@@ -131,7 +131,7 @@ cloud 失败分层的切分线是 run 是否已真正开始执行：启动 worke
 
 ## 版本 skew 六态（ADR 0037 决策 7）
 
-deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`run`/`submit`/`status`/`explain`）**先于执行前预检与任何云端读**与它比对（`doctor --backend cloud` 另把它作为一个自检项读取）：
+deploy 会把自身版本写成后端的版本戳；五个 cloud 入口（`run`/`submit`/`status`/`list-runs`/`explain`）**先于执行前预检与任何云端读**与它比对（`doctor --backend cloud` 另把它作为一个自检项读取）：
 
 | 比对结果 | 行为 |
 |---|---|
@@ -171,7 +171,7 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）
 - [0039](../docs/adr/0039-user-facing-surfaces-no-internal-references.md) 用户可见面不带内部指代与 markdown 强调记号（`--help`、提示与错误文案；护栏 `test_user_facing_messages.py`）
-- [0041](../docs/adr/0041-agent-facing-cli-affordances.md) 面向 AI agent 的 CLI 能力（scenario 筛选与空值拒收、`--quiet` 落盘、JSON 覆盖、`doctor` 自检、JSON 字段契约）
+- [0041](../docs/adr/0041-agent-facing-cli-affordances.md) 面向 AI agent 的 CLI 能力（scenario 筛选与空值拒收、`--quiet` 落盘、JSON 覆盖、`doctor` 自检、JSON 字段契约、定位参数、`list-runs` 列出 run）
 - [0042](../docs/adr/0042-step-evidence-and-explain.md) step 级机读证据与 `explain`（证据 schema、文本预算、只用 0/2 的退出码）
 - [0043](../docs/adr/0043-agent-skill-for-driving-gherkai.md) agent skill（包内源文件随 wheel 发行、`skill install` 整目录收敛、契约页确定性转换副本、护栏与评测）
 - [0047](../docs/adr/0047-cli-human-readable-tables-with-rich.md) 人读输出的表格、树与状态颜色（经 `gherkai_runtime.textui` 渲染）

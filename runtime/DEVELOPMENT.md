@@ -35,7 +35,12 @@
     `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
     None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
     自己的退出码层）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/ `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）/
-    `events_db_path`·`build_local_event_log`·`build_cloud_event_log`（一个 run 的事件流落点与两个后端的读取入口）。
+    `events_db_path`·`build_local_event_log`·`build_cloud_event_log`（一个 run 的事件流落点与两个后端的读取入口）/
+    `build_cloud_run_list_store`（`list-runs` 用的只读云端 RunStore：先经 `check_run_list_index` 按 DescribeTable 的 `IndexStatus` 判列举索引
+    是否就绪，缺失、`CREATING`、`DELETING` 与不认识的状态抛 `RunListIndexUnavailable`（消息是给使用方的整句），`ACTIVE` 与 `UPDATING` 放行；
+    就绪检查只在这条装配路径上，不并入 `preflight_cloud_resources`，ADR 0041 决策七）/ `local_run_list_location`·`cloud_run_list_location`
+    （`list-runs` 所查落点的单点，`--json` 顶层与空清单提示都从这里取值，与 `cloud_artifact_locations` 同一做法）。`build_cloud_stores` 与
+    `build_cloud_run_list_store` 都把列举索引名（`names.RUNS_STATUS_RUN_ID_GSI`）注入 `DynamoDBRunStore`，core 不认 runtime 的命名真源。
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
     `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run（由 `run_requires_backend_stamp` 判定）判为
     `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `read_backend_version`

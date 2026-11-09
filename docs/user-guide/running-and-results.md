@@ -1,6 +1,6 @@
 # 运行测试与查看结果
 
-运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，项目配置文件、环境变量与跨命令通用选项见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
+运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `list-runs` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，项目配置文件、环境变量与跨命令通用选项见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
 
 ## 两个独立的选择：怎么运行、在哪运行
 
@@ -29,6 +29,7 @@
 | `plan` | 不需要凭证（装了 worker 才有确定性 step 的派发标注） | 不产生费用 |
 | `run` / `submit`，`--backend local` | 本机 AWS 凭证与要用的引擎 worker | 自己的 AWS 账户 |
 | `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
+| `list-runs` | 本机后端不需要凭证；云端后端只需读权限：运行记录表与它的清单索引、版本戳参数与表结构的只读检查 | 本机后端不产生费用；云端后端只有少量读请求，记到部署方的 AWS 账户 |
 | `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、把 worker 的任务角色与执行角色传给 ECS（`iam:PassRole`）、上传 job 与写产物桶，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
 
 完整的权限清单见 [`cloud-backend.md`](./cloud-backend.md)「团队成员需要的最小云端权限」。
@@ -72,15 +73,16 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `gherkai run <feature...>` | 前台运行完这个 run，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
 | `gherkai submit <feature...>` | 提交这个 run 并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |
+| `gherkai list-runs` | 列出一个后端里的 run，用来找回 run_id：默认列出全部未结束的 run 与最近创建的 20 条已结束的 run。只读，见下「找回 run_id」 | `--backend`、`--report-dir`、`--prefix`、`--status`、`--limit`、`--json` |
 | `gherkai explain <run_id> [<scope_id>]` | 看每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判。用例没过时先运行这个命令 | `--scenario`、`--step`、`--all`、`--full`、`--json` |
 | `gherkai list-engines` | 列出本机两个引擎 worker 的拉起命令与来源，没装的那个在同一行给出安装提示 | `--json` |
 | `gherkai list-deterministic` | 列出某个引擎支持的确定性 step（含项目 `steps/` 里的），写 feature 时据此复用 | `--engine {midscene,novaact}`（默认 `novaact`）、`--steps-dir`、`--json` |
 | `gherkai doctor` | 只读自检：CLI 版本、引擎 worker、实际使用的模型、`steps/` 加载结果；装了部署工具链（Node、cdk、容器引擎）时连带自检它；给了 `--backend cloud` 或 `--prefix` 时再查凭证、后端资源与后端版本 | `--backend cloud`、`--prefix`、`--report-dir`、`--steps-dir`、`--json` |
 | `gherkai --version` | 打印 CLI 版本 | — |
 
-`status` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
+`status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run：`status` 与 `explain` 以退出码 2 结束，`list-runs` 列出的是另一处的 run（常见为空清单）。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
-使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
 提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；只有这类在派发前就不能执行的 run 才有这一行，job 自身的失败原因看 `explain`。
 
@@ -133,6 +135,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或前台 `run` 被中断、run 级判定记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
 | `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
+| `list-runs` | 读到清单了吗 | 读到了；清单为空、或其中有无法读取的行，同样以退出码 0 结束 | — | 参数不合法（`--limit` 不是正整数、`--status` 不是 run 的状态值）、本机报告落点目录不可读、云端读不到（region 或凭证、运行记录表不存在或无权限、清单索引缺失或还在建立、读取被限流后重试仍未读全）、CLI 与后端版本不匹配 |
 | `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细尚未写出同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
 | `doctor` | 必修项都过了吗 | 全过 | — | 任一必修项失败（可选能力缺失只标 `-`，不影响退出码） |
 | `list-deterministic` | 这个引擎有哪些确定性 step | 列出来了 | — | `--steps-dir` 指的不是目录、worker 定位不到、`steps/` 加载失败、该引擎的 worker 自述失败（多为 worker 与 CLI 版本不一致，处置见 [`troubleshooting.md`](./troubleshooting.md)） |
@@ -175,6 +178,30 @@ reports/<run_id>/
 
 `--json` 下同一组位置在 `artifacts` 键里。产物分类与每一份该拿来回答什么问题见 [`../internals/artifacts-and-evidence.md`](../internals/artifacts-and-evidence.md)。
 
+## 找回 run_id：`list-runs`
+
+`status` 与 `explain` 都要先有 run_id。换了终端、提交时没有记下、或要查看别人提交的 run 时，用 `list-runs` 列出一个后端里的 run：
+
+```bash
+gherkai list-runs                                           # 本机后端，报告落点 reports
+gherkai list-runs --backend cloud --prefix gherkai-         # 云端后端
+gherkai list-runs --status running --status pending         # 只看还没结束的
+gherkai list-runs --limit 50 --json > runs.json
+```
+
+- **查哪里**：`--backend`、`--report-dir`、`--prefix`、`--region`、`--profile`、`--ddb-table` 与 `status` 同名同义，同样读项目配置文件（见 [`configuration.md`](./configuration.md)）。一次只列一个后端、一处报告落点，不跨后端查找；要列另一处就换一组定位参数再执行一次。云端后端下 `--report-dir` 与清单无关，给了也忽略。
+- **列哪些**：默认列出全部还没结束的 run（`pending`、`running`），加上最近创建的 20 条已结束的 run；`--limit N` 改已结束部分的条数（正整数），还没结束的 run 不受它限制、全部列出。`--status S` 只列这些状态的 run，可重复给出，取值是 `passed`、`failed`、`error`、`skipped`、`aborted`、`pending`、`running`；其中已结束的状态同样受 `--limit` 约束。
+- **先后**：新创建的在前。「最近」按创建时间算、不按结束时间：早创建而刚结束的 run 不会因为刚结束就排到前面。创建时间取执行 `run` 或 `submit` 的那台机器的时钟，同一秒内创建的 run 之间先后不定；多台机器向同一个后端提交时，机器之间的时钟偏差会直接体现为清单里的先后。
+- **表格**：每行一个 run，列出 run_id、状态、开始与结束时刻（UTC）、各状态的 job 数、版本与说明。
+  - 「版本」列只在这个 run 由另一个版本的 gherkai 写出时显示那个版本，读不到时显示「未知」；当前版本写出的 run 这一列留空。对这样的 run 执行 `status` 或 `explain` 时，仍按上面「命令」一节末尾的提交记录格式版本规则处理。
+  - 「说明」列放这个 run 的 `message`（云端后台在派发前不能执行它时的原因）。还没结束、由前台 `run` 执行的 run，说明列另有一句「由前台 run 执行：执行它的进程若已不在，它不会再到终态；status --wait 对它只等待、不接力」：前台 `run` 被强制结束或所在的机器失联时，它会一直停在这个状态，不会自行消失。
+  - 运行状态读不出的行（多半由其它版本写出）只有 run_id 与版本两列有值，状态列显示「无法读取（可能由其它版本写出），用 status 查看」。这样的行不参与 `--status` 与 `--limit` 的筛选，找到即列出。由更新版本写出、状态值本版本不认识的 run，本机后端列为无法读取，云端后端不会列出。
+- **清单为空**：只打一行以「没有找到 run：」开头的提示，点名所查的落点，并提示核对定位参数是否与产生 run 的 `run` 或 `submit` 一致。本机后端分两种说法，都给出解析后的目录：目录不存在时说「报告落点目录 … 不存在（这里还没有落过盘的 run，或路径给错了）」，目录存在而其中没有 run 时说「报告落点目录 … 下没有任何 run」（给了 `--status` 时说没有这些状态的 run）；云端后端给出前缀、region 与运行记录表名。
+- **`--json`**：一个 JSON 文档，顶层是所查的落点（`backend`；本机另有 `report_dir`，云端另有 `prefix`、`region`、`ddb_table`），加上 `runs` 数组；清单为空时 `runs` 是空数组，不打人读提示。字段见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
+- **只读**：不推进任何 run、不启动任务。判定仍对具体的 run 用 `status --wait` 取；退出码见上「退出码」一节。
+- **不在清单里的**：`run --no-report` 的执行不留运行记录，两个后端的清单里都没有它。
+- **云端后端下刚变化的 run**：状态、时刻与 job 数总是读取那一刻的值；刚提交或刚改变状态的 run 偶尔会在一次清单里缺席，稍后再列即可看到。后端刚升级时清单所用的索引可能还在建立，这段时间 `list-runs --backend cloud` 以退出码 2 结束，见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+
 ## 看失败原因：`explain`
 
 ```bash
@@ -194,11 +221,11 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 
 ## 费用量级
 
-`plan`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用：桌面目标是模型调用与云端浏览器会话的费用；设备目标是模型调用与 Device Farm 远程访问会话的费用。远程访问会话按设备分钟计费，一个设备 scope 通常只建一个会话；获取设备期间设备拒绝安装驱动辅助程序而换一台时（至多一次），被替换的那个会话同样计费。设备分钟从服务商开始准备设备起算，并发槽位满时的排队等待不计费；准备设备到可用的时间约 1 到 2.5 分钟，通常计费；停止会话后的收尾可能继续计费。设备分钟按量约 0.17 美元每分钟，一条 5 步左右的设备 scenario 一次大约 3 到 5 设备分钟；每平台每月用量很大时（约 1470 设备分钟以上），不计量槽位（约 250 美元每月）更省：须先在 AWS 为对应平台购买不计量设备槽位，再把 `gherkai.toml` 的 `billing-method` 设为 `UNMETERED`；没有槽位时服务商在准备阶段就结束会话，见 [`configuration.md`](./configuration.md)「项目配置文件」。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与一条 5 步示例用例的 token 用量估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
+`plan`、`list-runs`、`list-engines`、`list-deterministic`、`doctor` 都是本地或只读操作，不产生模型费用。`run` 与 `submit` 每次都会真实消耗 AWS 费用：桌面目标是模型调用与云端浏览器会话的费用；设备目标是模型调用与 Device Farm 远程访问会话的费用。远程访问会话按设备分钟计费，一个设备 scope 通常只建一个会话；获取设备期间设备拒绝安装驱动辅助程序而换一台时（至多一次），被替换的那个会话同样计费。设备分钟从服务商开始准备设备起算，并发槽位满时的排队等待不计费；准备设备到可用的时间约 1 到 2.5 分钟，通常计费；停止会话后的收尾可能继续计费。设备分钟按量约 0.17 美元每分钟，一条 5 步左右的设备 scenario 一次大约 3 到 5 设备分钟；每平台每月用量很大时（约 1470 设备分钟以上），不计量槽位（约 250 美元每月）更省：须先在 AWS 为对应平台购买不计量设备槽位，再把 `gherkai.toml` 的 `billing-method` 设为 `UNMETERED`；没有槽位时服务商在准备阶段就结束会话，见 [`configuration.md`](./configuration.md)「项目配置文件」。设备 job 结果里的「设备占用时长」（`--json` 的 `device_observed_s`）是 worker 观察到的时长，与账单上的设备分钟口径不同，以账单为准。量级上，一条 5 步左右的 scenario 在 Midscene 默认模型（`us.openai.gpt-5.6-terra`）上约 5 美分，换成 `qwen.qwen3-vl-235b-a22b` 约 2 美分（按 2026-09 Bedrock 标价与一条 5 步示例用例的 token 用量估算，以账单为准），Nova Act 引擎按 Nova Act 服务计费。换模型的办法见 [`configuration.md`](./configuration.md)「模型选择」。每个 job 都有 job 墙钟预算（桌面 scope 默认 300 秒，设备 scope 默认为获取预算加 900 秒），超出即被停掉，防止任务卡住时持续计费。
 
 ## 机读输出
 
-运行与查询的命令都有 `--json`：`plan`、`run`、`status`、`explain`、`list-engines`、`list-deterministic`、`doctor`（部署方的 `gherkai deploy list-workers` 也有，见 [`cloud-backend.md`](./cloud-backend.md)）；`submit` 没有这个选项，它的 stdout 本来就只有一个 `run_id`。通则：stdout 只有一个 JSON 文档，进度与诊断一律走 stderr，所以 `gherkai run … --json > result.json` 拿到的是纯净 JSON、进度仍在终端可见。字段名、类型与出现条件见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
+运行与查询的命令都有 `--json`：`plan`、`run`、`status`、`list-runs`、`explain`、`list-engines`、`list-deterministic`、`doctor`（部署方的 `gherkai deploy list-workers` 也有，见 [`cloud-backend.md`](./cloud-backend.md)）；`submit` 没有这个选项，它的 stdout 本来就只有一个 `run_id`。通则：stdout 只有一个 JSON 文档，进度与诊断一律走 stderr，所以 `gherkai run … --json > result.json` 拿到的是纯净 JSON、进度仍在终端可见。字段名、类型与出现条件见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
 
 ## 在 CI 里运行
 

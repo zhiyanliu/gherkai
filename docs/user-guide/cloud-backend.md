@@ -27,7 +27,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 
 一套 CloudFormation stack，名字随 `--prefix` 走（前缀 `gherkai-` 对应 stack `BackendStack-gherkai`），因此同一账户可按前缀并存多套环境，例如 `prod-` 与 `stage-`：
 
-- **DynamoDB**：`<prefix>runs`（run 状态）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
+- **DynamoDB**：`<prefix>runs`（run 状态，带一个供 `gherkai list-runs` 按状态列出 run 的索引 `status-run_id-index`）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
@@ -37,6 +37,8 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 stack 之外，`gherkai deploy` 还会在部署 stack 之前找到已有的或新建一个 Device Farm 项目 `<prefix>devices`，供带设备目标的云端 run 在其中建立远程访问会话。项目固定在 us-west-2（Device Farm 只在这个区域提供），不属于 stack，destroy 时保留，见[拆除与清理](#拆除与清理)。
 
 前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。前缀至多 32 个字符，更长的前缀在生成部署模板时即被拒绝，原因见下文「deploy 与 destroy 的选项」。
+
+团队成员查结果时同样按前缀找到这套后端：`status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。查询命令的用法见 [`running-and-results.md`](./running-and-results.md)。
 
 云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
 
@@ -143,11 +145,17 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 ![升级三步（部署方先升级本机、再部署后端、最后重推自定义 variant，其他成员在三步完成后升级）之间的两段降级窗口，以及每段里谁被拒、谁照常](../diagrams/cloud-backend-upgrade-windows.svg)
 
-图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果与读证据（`explain`）、推送镜像与列出镜像都会被拒绝；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 本身不做这项版本比对，所以第 2 步照常执行。窗口二里被拦下的是已升到新版本的提交者——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦（提交记录格式不变的升级里如此；格式变化的升级里，旧版本 CLI 提交的 run 会被后端置为 `error`，要先升级 CLI 再重新提交，见下段），而镜像标签由**提交者本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基础镜像备好了。图上只画这两段窗口的起止。
+图注：窗口一里被拦下的只有刚升级的那台部署机——它的提交、查结果、列出 run（`list-runs`）与读证据（`explain`）、推送镜像与列出镜像都会被拒绝；其他成员的 CLI 仍与后端同版本，提交前检查直接放行、不受影响。`deploy` 本身不做这项版本比对，所以第 2 步照常执行。窗口二里被拦下的是已升到新版本的提交者——自定义 variant 在新版本下还没有镜像，止于第 3 步重推完成；这段里还没升级的成员，CLI 旧于后端只被打一行提示、不拦（提交记录格式不变的升级里如此；格式变化的升级里，旧版本 CLI 提交的 run 会被后端置为 `error`，要先升级 CLI 再重新提交，见下段），而镜像标签由**提交者本机的 CLI 版本**拼出（对应上面「variant 按版本隔离」），他解析到的仍是自己那一版的镜像。窗口二只出现在默认指针指的是自定义 variant（或提交时显式选了自定义 variant）的情形——指针是 `base` 且不显式指定时，第 2 步已经把新版本的基础镜像备好了。图上只画这两段窗口的起止。
 
 升级 CLI 之后，本机读到格式与本机 CLI 不一致的提交记录时怎么处理，见 [`running-and-results.md`](./running-and-results.md)「命令」一节末尾的提交记录格式版本说明。云端后台自己读到不能执行的提交记录（格式与后端不一致、记录不完整）时不执行，把这个 run 置为 `error`，原因显示在 `status` 的 `message` 行里；按原因升级后端或重新提交。
 
 两段窗口里被拒的命令都以退出码 2 结束。窗口一在第 2 步执行完后即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交者临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并以退出码 2 结束。
+
+**升级后清单索引要先建好**：已部署的后端升级到带 `list-runs` 清单索引的版本（1.5 起）时，第 2 步的 `gherkai deploy` 给运行记录表 `<prefix>runs` 加上索引 `status-run_id-index`，AWS 随后在后台为表里已有的 run 补齐索引。`gherkai deploy` 不等补齐就结束，所以部署完成后的一段时间里 `gherkai list-runs --backend cloud` 以退出码 2 结束并提示索引还在建立，所需时间随已有 run 的数量增加，稍后重试即可；`submit`、`status`、`explain` 等命令不用这个索引，不受影响。加索引的这次升级还要承担 [AWS::DynamoDB::Table](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-dynamodb-table.html) 文档写明的三条限制：
+
+- 索引补齐之前这张表不能再被更新：这段时间里再次执行 `gherkai deploy`，只要这次部署要改运行记录表就会失败，等补齐后再部署。补齐与否可用 `aws dynamodb describe-table --table-name <prefix>runs` 查看这个索引的 `IndexStatus`，变为 `ACTIVE` 即已补齐。
+- 建索引期间 stack 更新失败而回滚时，已经开始建立的索引不会随回滚删除，须先手动删掉再重新部署：`aws dynamodb update-table --table-name <prefix>runs --global-secondary-index-updates '[{"Delete":{"IndexName":"status-run_id-index"}}]'`。索引刚开始建立、还在分配资源的一小段时间里删不了，稍后重试。
+- AWS 建议加索引的那次更新不改其它资源，而 `gherkai deploy` 的升级是整个 stack 一次更新，无法把加索引单独拆成一次；所以这次升级前更要先用 `--diff` 核对变更集。
 
 ## 团队成员需要的最小云端权限
 
@@ -159,6 +167,8 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 无论哪一级，提交带设备目标或 `@app` 的 scope 时，都另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 
 两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时需要 events 表（`<prefix>events`）的 `dynamodb:Query`（`run --backend cloud` 这一级已含，`submit` + `status` 这一级要另加）；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
+
+两级都用 `gherkai list-runs --backend cloud` 列出 run 时，另需运行记录表索引上的 `dynamodb:Query`，资源要写成索引 ARN `arn:aws:dynamodb:<区域>:<账号>:table/<prefix>runs/index/status-run_id-index`（表 ARN 上的 `Query` 授权覆盖不到索引），以及表 ARN 上的 `dynamodb:BatchGetItem`（按 run_id 读回运行状态）；它读表结构用的 `dynamodb:DescribeTable` 与读版本戳用的参数读权限已含在上面两级里。`list-runs` 只读、不需要任何写权限，不用这个命令的成员可以不给这两项。
 
 无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
 

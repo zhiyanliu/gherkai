@@ -1,4 +1,4 @@
-"""项目配置文件合成进命令行选项（ADR 0053 决策 2、3、6）：七个运行侧命令在 parse_args 之后、分派之前经 `apply_project_config` 把 gherkai.toml
+"""项目配置文件合成进命令行选项（ADR 0053 决策 2、3、6）：八个运行侧命令在 parse_args 之后、分派之前经 `apply_project_config` 把 gherkai.toml
 的值按「选项 > 环境变量 > 配置文件 > 内建默认」合成进 args；有环境变量层的项不写进 args，经 `identity_layers` / `config_layers` 交给
 compose 的解析链放在环境变量之后。[common] / [cloud] 接受的键由 argparse 的选项面差集推出（单一真源在 argparse，三份名单只做归类）。
 读文件与形态校验在 `config`；本模块不知道命令的语义，只知道选项面。
@@ -16,13 +16,13 @@ from gherkai_cli.console import progress
 # 取同一常量避免漂移。
 DEFAULT_MAX_CONCURRENCY = 4
 
-# ---- 项目配置文件 gherkai.toml（ADR 0053）：七个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----
-CONFIG_COMMANDS = ("run", "plan", "submit", "status", "explain", "doctor", "list-deterministic")
+# ---- 项目配置文件 gherkai.toml（ADR 0053）：八个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----
+CONFIG_COMMANDS = ("run", "plan", "submit", "status", "explain", "doctor", "list-deterministic", "list-runs")
 # 按次选择型选项（ADR 0053 决策 3 的排除名单，用 argparse 的 dest 名）：只影响本次的范围、输出形态、中止方式、落盘取舍或
 # 查询对象，不进配置文件——写进文件会让某次调用的范围或中止语义在不显眼处改变。护栏 test_project_config 从 argparse 差集
-# 核对：七个命令的全部长选项恰好由本名单、CLOUD_OPTIONS、DEVICE_OPTIONS 与 [common] 同词键四者拼成，新增选项漏归类即失败。
+# 核对：八个命令的全部长选项恰好由本名单、CLOUD_OPTIONS、DEVICE_OPTIONS 与 [common] 同词键四者拼成，新增选项漏归类即失败。
 PER_CALL_OPTIONS = frozenset({"scope", "tags", "scenario", "step", "json", "quiet", "wait", "all", "full",
-                               "fail_fast", "no_report", "engine", "config"})
+                               "fail_fast", "no_report", "engine", "status", "limit", "config"})
 # 只在 --backend cloud 下起作用的选项 → [cloud] 节；本机后端下 [cloud] 整节静默不生效（ADR 0053 决策 3）
 CLOUD_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "events_table", "cluster", "subnet", "security_group",
                             "worker_variant"})
@@ -65,7 +65,7 @@ def _is_repeatable(action) -> bool:
 
 
 def configurable_keys(parser: argparse.ArgumentParser) -> dict[str, set[str]]:
-    """从 argparse 推出 [common] / [cloud] 两节接受的键（选项长名去掉 `--`，ADR 0053 决策 3 的同词规则）：七个读配置命令的全部
+    """从 argparse 推出 [common] / [cloud] 两节接受的键（选项长名去掉 `--`，ADR 0053 决策 3 的同词规则）：八个读配置命令的全部
     长选项，减去按次选择型与设备专用选项，再按是否只在云端生效分到两节。单一真源在 argparse：新增选项自动进入接受集，归类由
     三份名单决定。"""
     common: set[str] = set()
@@ -122,7 +122,7 @@ def convert_config_value(action, raw, *, section: str, key: str, path):
 def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
     """parse_args 之后、分派之前：读项目配置文件并合成取值顺序（ADR 0053 决策 1、2、3）。返回 2（配置文件不可用）或 None。
 
-    只对七个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值已在 definition 里，或由提交侧按解析后的值经
+    只对八个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值已在 definition 里，或由提交侧按解析后的值经
     argv 传入）、`deploy` / `destroy` / `skill` / `list-engines` 不读。
     三类选项三种去向：①没有环境变量层的 → 配置值填进仍为 None 的 args 字段（选项已给则不动），最后补内建默认；
     ②有环境变量层的（ENV_LAYER_OPTIONS）→ 只做类型校验、存进 `args.config_values`，由各解析链经 config_* 形参放在环境变量
@@ -206,7 +206,7 @@ def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
 
 
 def find_option_action(parser: argparse.ArgumentParser, dest: str):
-    """在七个读配置的命令里找某个 dest 的选项定义（任一命令的那份即可：同名选项各命令类型一致），供配置值转换。"""
+    """在八个读配置的命令里找某个 dest 的选项定义（任一命令的那份即可：同名选项各命令类型一致），供配置值转换。"""
     for name in CONFIG_COMMANDS:
         for action in option_actions(parser, name):
             if action.dest == dest:

@@ -21,7 +21,7 @@ DEVICE_FEATURE = '@device:android\nFeature: F\n  Scenario: a\n    When "做事"\
 
 # ADR 0053 决策 3 的三份名单，在测试里显式列出：新增选项必须有意识地归入其中一类（决策 6「键集差集」）
 PER_CALL = {"--scope", "--tags", "--scenario", "--step", "--json", "--quiet", "--wait", "--all", "--full",
-            "--fail-fast", "--no-report", "--engine", "--config"}
+            "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config"}
 COMMON = {"--default-engine", "--assertion-votes", "--max-concurrency", "--default-job-timeout", "--grace", "--expose-local",
           "--tunnel", "--tunnel-ttl", "--report-dir", "--steps-dir", "--backend", "--region", "--profile"}
 CLOUD = {"--prefix", "--ddb-table", "--s3-bucket", "--events-table", "--cluster", "--subnet", "--security-group", "--worker-variant"}
@@ -59,7 +59,7 @@ def _no_match(engine, *a, **k):
 # ---- 键集差集（ADR 0053 决策 6）----
 
 def test_every_long_option_is_classified_and_the_derived_key_sets_match():
-    """七个读配置命令的每个长选项都落在四份名单之一；由 argparse 推出的 [common] / [cloud] 接受集恰等于名单（多一键或少一键都红）。"""
+    """八个读配置命令的每个长选项都落在四份名单之一；由 argparse 推出的 [common] / [cloud] 接受集恰等于名单（多一键或少一键都红）。"""
     parser = m._build_parser()
     for name in settings.CONFIG_COMMANDS:
         flags = {s for a in settings.subparser(parser, name)._actions for s in a.option_strings if s.startswith("--")} - {"--help"}

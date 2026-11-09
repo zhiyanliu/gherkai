@@ -226,6 +226,35 @@ def test_status_json_keys_are_documented():
     _assert_documented(doc_error, section="status")
 
 
+def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
+    """list-runs 的样例取真实命令的 --json 输出。本机 fixture 两个 run：一个终态（起止时刻、run 级 message 齐全，由别的版本写出、
+    带 cli_version），一个未结束（当前版本写出、省略 cli_version）；另加一个运行态损坏的目录，`unreadable` 进差集。
+    云端变体经替身 store 让顶层落点的三个云端键进差集。"""
+    from test_main import _cloud_list_runs_env, _listing, _seed_raw_run_state, _seed_run
+
+    monkeypatch.setattr(m, "_installed_version", lambda: "1.5.0")
+    root = tmp_path / "reports"
+    _seed_run(root, "20261110T080000Z-a00001", M.Status.FAILED, [M.Status.PASSED, M.Status.FAILED], cli_version="1.4.0",
+              ended_at="2026-11-10T08:05:00+00:00", message="m")
+    _seed_run(root, "20261110T090000Z-b00001", M.Status.RUNNING, [M.Status.RUNNING], cli_version="1.5.0")
+    _seed_raw_run_state(root, "20261110T100000Z-c00001", "{broken")
+    assert m.main(["list-runs", "--report-dir", str(root), "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    by = {r["run_id"]: r for r in doc["runs"]}
+    # 正向断言：条件出现的键确实出现了（少一个 run，差集在缺键上直接变绿）
+    assert {"started_at", "ended_at", "message", "cli_version", "job_counts", "detached"} <= set(by["20261110T080000Z-a00001"])
+    assert "cli_version" not in by["20261110T090000Z-b00001"]
+    assert by["20261110T100000Z-c00001"]["unreadable"] is True
+    _assert_documented(doc, section="list-runs")
+
+    _cloud_list_runs_env(monkeypatch, tmp_path, parts={("pending", "running"): [
+        _listing("20261110T090000Z-b00001", M.Status.RUNNING, jobs=[M.Status.RUNNING])]})
+    assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 0
+    doc = json.loads(capsys.readouterr().out)
+    assert {"prefix", "region", "ddb_table"} <= set(doc) and len(doc["runs"]) == 1
+    _assert_documented(doc, section="list-runs")
+
+
 def test_list_engines_and_deterministic_json_keys_are_documented(monkeypatch, capsys):
     def fake(name, *, version=None):
         if name == "novaact":

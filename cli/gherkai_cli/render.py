@@ -4,7 +4,10 @@ core 产出纯数据（RunResult、Event）；怎么展示是前端的事，故�
 """
 from __future__ import annotations
 
-from gherkai_core.model import Event, Job, JobResult, RunResult, RunState, SessionRecord, Status
+from collections import Counter
+from datetime import datetime, timezone
+
+from gherkai_core.model import TERMINAL_STATUSES, Event, Job, JobResult, RunListing, RunResult, RunState, SessionRecord, Status
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tree, status_text, styled  # rich 只经 textui 进来（ADR 0047 渲染面单点）
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
@@ -201,6 +204,86 @@ def render_run_state(state: RunState) -> str:
     if state.ended_at:
         lines.append(f"ended_at={state.ended_at}")
     return "\n".join(lines)
+
+
+# ---- run 清单（list-runs，ADR 0041 决策七「人读形态」「机读形态」「写出版本的标记」）----
+
+# 非终态且没有后台执行标记的行：前台 run 的进程被强制结束或宿主失联后留下的 run 不会再到终态，status --wait 对它只等待、
+# 不接力（与 status --wait 的同一判据：detached 标记）
+FOREGROUND_RUN_NOTE = "由前台 run 执行：执行它的进程若已不在，它不会再到终态；status --wait 对它只等待、不接力"
+UNREADABLE_RUN_STATUS = "无法读取（可能由其它版本写出），用 status 查看"
+
+
+def writer_version_mark(item: RunListing, cli_version: str | None) -> tuple[bool, str | None]:
+    """写出版本的标记：返回（要不要标，写出它的 CLI 版本）。写出版本与本 CLI 版本都已知且相同才不标，其余情形都标；
+    提交记录头部读不到或其中没有版本时，写出版本为 None（人读显示「未知」、机读为 null）。"""
+    writer = item.header[1] if item.header is not None else None
+    return not (writer is not None and cli_version is not None and writer == cli_version), writer
+
+
+def run_job_counts(state: RunState) -> dict[str, int]:
+    """按 job 状态计数：只含出现的状态，键序取 `Status` 的声明序（缺的状态读作 0）。"""
+    counts = Counter(js.status for js in state.jobs.values())
+    return {s.value: counts[s] for s in Status if counts[s]}
+
+
+def run_listing_to_dict(item: RunListing, *, cli_version: str | None) -> dict:
+    """`list-runs --json` 的一项：`run_id`、`status` 必有，`started_at` / `ended_at` / `message` 无值省略，`job_counts` 与 `detached`
+    恒有；运行态解析失败的项只含 `run_id`、`unreadable` 与适用时的 `cli_version`。`cli_version` 只在要标写出版本时出现。"""
+    marked, writer = writer_version_mark(item, cli_version)
+    st = item.state
+    if st is None:
+        d: dict = {"run_id": item.run_id, "unreadable": True}
+    else:
+        d = {"run_id": item.run_id, "status": st.status.value}
+        for key in ("started_at", "ended_at", "message"):
+            if getattr(st, key) is not None:
+                d[key] = getattr(st, key)
+        d["job_counts"] = run_job_counts(st)
+        d["detached"] = item.detached
+    if marked:
+        d["cli_version"] = writer
+    return d
+
+
+def run_list_to_dict(location: dict, items: list[RunListing], *, cli_version: str | None) -> dict:
+    """`list-runs --json` 整个文档：顶层是所查的落点（compose 的清单落点单点给出），加 `runs` 数组（顺序同输入）。"""
+    return {**location, "runs": [run_listing_to_dict(i, cli_version=cli_version) for i in items]}
+
+
+def _utc_label(ts: str | None) -> str | None:
+    """ISO 8601 时刻 → `YYYY-MM-DD HH:MM:SS`（换算到 UTC；不带时区的按 UTC 读）；解析不了时原样给出，None 仍为 None（表格显示 -）。"""
+    if ts is None:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return ts
+    if dt.tzinfo is not None:
+        dt = dt.astimezone(timezone.utc)
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
+    """`list-runs` 的人读表格（ADR 0047）：一行一个 run，顺序同输入。run_id 是标识列、不折断，状态与说明列可折行。
+
+    版本列只在要标写出版本时有值（版本串或「未知」），当前版本写出的 run 留空；说明列放 run 级 `message` 与前台执行遗留的提示。
+    运行态解析失败的行只有 run_id 与版本列有值。空清单由调用方打一行落点提示，不经这里。"""
+    rows = []
+    for item in items:
+        marked, writer = writer_version_mark(item, cli_version)
+        version = (writer or "未知") if marked else ""
+        st = item.state
+        if st is None:
+            rows.append([item.run_id, UNREADABLE_RUN_STATUS, None, None, None, version, ""])
+            continue
+        notes = [_one_line(st.message)] if st.message else []
+        if st.status not in TERMINAL_STATUSES and not item.detached:
+            notes.append(FOREGROUND_RUN_NOTE)
+        counts = run_job_counts(st)
+        rows.append([item.run_id, status_text(st.status.value), _utc_label(st.started_at), _utc_label(st.ended_at),
+                     " · ".join(f"{k} {n}" for k, n in counts.items()) or "0", version, "；".join(notes)])
+    return render_table(["run_id", "状态", "开始（UTC）", "结束（UTC）", "job 数", "版本", "说明"], rows, wrap=[1, 6])
 
 
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----

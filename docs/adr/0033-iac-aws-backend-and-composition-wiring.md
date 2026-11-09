@@ -16,7 +16,7 @@
 
 一套 CDK stack（可按 prefix 多实例化，见「两层命名」）建：
 
-**DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源 = CDK（`deploy_aws/gherkai_deploy_aws/stack.py`）——moto 单测 fixture（`core/tests/conftest.py`）只按各测试需要局部复刻键 schema，两表 Stream（见下 13.）、events 表 TTL 属性 `expires_at`（见下「events 表开 TTL」条）、runs 表按 `status` 的稀疏 GSI `status-index`（[0038](./0038-worker-image-delivery.md)）都不在 fixture 里；runs 表的另一个稀疏 GSI `status-run_id-index`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）进不进 fixture 由 `list-runs` 实装时按测试需要定）：**
+**DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源 = CDK（`deploy_aws/gherkai_deploy_aws/stack.py`）——moto 单测 fixture（`core/tests/conftest.py`）只按各测试需要局部复刻键 schema，两表 Stream（见下 13.）、events 表 TTL 属性 `expires_at`（见下「events 表开 TTL」条）、runs 表按 `status` 的稀疏 GSI `status-index`（[0038](./0038-worker-image-delivery.md)）都不在 fixture 里；runs 表的另一个稀疏 GSI `status-run_id-index`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）同样不在共用的 fixture 里：云端 RunStore 列举 run 的测试（`core/tests/test_list_runs.py`）另建一张带该索引的表，索引的键与投影按 stack 复刻，供列举的 `Query` 使用）：**
 1. `{prefix}runs`（控制面 / RunStore，已有 adapter，本 ADR 纳入统一 IaC）：PK=`run_id`(S)、SK=`item_type`(S，值 `META`/`STATE`）。另有两个以 `status` 为分区键、只索引 STATE item 的稀疏 GSI：`status-index`（[0038](./0038-worker-image-delivery.md)，worker revision 清理的引用检查）与 `status-run_id-index`（[0041](./0041-agent-facing-cli-affordances.md) 决策七，`list-runs`）；键、投影与用途的分工见 [0030](./0030-realtime-persistence-seam.md) 决定六。
 2. `{prefix}events`（events-out，本 ADR 新增）：PK=`pk`(S，值 `run_id#scope_id`)、SK=`seq`(N)；非键属性 `body`(S) 不进 AttributeDefinitions。**独立于 runs 表、绝不合表**（[0024](./0024-worker-core-protocol.md)：两种访问模式——runs 点读/单元素刷、events 大量追加+范围 Query；合表会踩 run_id 热分区、破 [0030](./0030-realtime-persistence-seam.md) 单写者不变量）。
 

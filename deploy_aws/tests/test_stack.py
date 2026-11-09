@@ -208,16 +208,52 @@ def test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup():
     t.has_resource_properties("AWS::DynamoDB::Table", {
         "TableName": "gherkai-runs",
         "AttributeDefinitions": Match.array_with([{"AttributeName": "status", "AttributeType": "S"}]),
-        "GlobalSecondaryIndexes": [{
+        "GlobalSecondaryIndexes": Match.array_with([{
             "IndexName": "status-index",
             "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
             "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
-        }],
+        }]),
     })
     # 索引名与属性名都是**跨组件契约**（清理 pass 按它们查）——比字面量，防两侧各改一处
     from gherkai_deploy_aws import names as _names
     assert (_names.RUNS_STATUS_GSI, _names.STATE_WORKER_TASK_DEF_ARNS_ATTR) == (
         "status-index", "worker_task_def_arns")
+
+
+def test_runs_table_has_the_sparse_status_run_id_gsi_for_list_runs():
+    """runs 表按 `status` 分区、`run_id` 排序的 GSI（ADR 0041 决策七「云端实现」）：**排序键 `run_id`、投影 KEYS_ONLY**。
+
+    `list-runs` 对每个状态按 run_id 降序 `Query`、终态部分只取最近 N 条：没有排序键就只能读整个状态分区，终态分区
+    随历史增长、读量无上界。只投影键：GSI 只有最终一致读，状态一律以强一致读回的 STATE 为准；投影 `jobs` 等属性
+    会让每次刷 job 状态都多一次索引写。元素按原样逐字比对，投影里多出任何非键属性都会使断言失败。
+    """
+    t = _template()
+    t.has_resource_properties("AWS::DynamoDB::Table", {
+        "TableName": "gherkai-runs",
+        "AttributeDefinitions": Match.array_with([
+            {"AttributeName": "run_id", "AttributeType": "S"},
+            {"AttributeName": "status", "AttributeType": "S"},
+        ]),
+        "GlobalSecondaryIndexes": Match.array_with([{
+            "IndexName": "status-run_id-index",
+            "KeySchema": [
+                {"AttributeName": "status", "KeyType": "HASH"},
+                {"AttributeName": "run_id", "KeyType": "RANGE"},
+            ],
+            "Projection": {"ProjectionType": "KEYS_ONLY"},
+        }]),
+    })
+    # 索引名是**跨组件契约**（compose 把它注入云端 RunStore，`list-runs` 按它查）——比字面量，防两侧各改一处
+    assert names.RUNS_STATUS_RUN_ID_GSI == "status-run_id-index"
+
+
+def test_runs_table_gsis_are_exactly_the_two_status_indexes():
+    """runs 表的 GSI 恰为上面两个（枚举型护栏）：两者用途与投影各不相同，不合并、也不顺手再加（ADR 0030 决定六）。"""
+    t = _template()
+    runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
+            if res["Properties"]["TableName"] == "gherkai-runs"]
+    assert len(runs) == 1
+    assert [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]] == ["status-index", "status-run_id-index"]
 
 
 def test_events_table_has_no_gsi():

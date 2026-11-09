@@ -608,6 +608,23 @@ class RunState:
     message: str | None = None
 
 
+@dataclass(frozen=True)
+class RunListing:
+    """列举 run 时的一项（`RunStore.list_runs` 的返回元素，ADR 0041 决策七「core 端口」）。
+
+    `run_id` 恒有：本机取自 run 目录名、云端取自索引返回的主键，不依赖运行态能否解析，供调用方排序与去重。
+    `state` 是读回的当前运行态；读回了但解析不了（形态违约、状态值本版本不认识）时为 None，即这一行无法读取。
+    `detached` 是 run 的后台执行标记（ADR 0034），与运行态存在同一处、读回即有；它是执行环境属性，所以不进 RunState、
+    只作为列举项的字段出现。`header` 与 `RunStore.peek_definition_header` 同一对值（结构版本、写端 CLI 版本），
+    提交记录不存在或内容解析不了时为 None。
+    """
+
+    run_id: str
+    state: RunState | None
+    detached: bool
+    header: tuple[int, str | None] | None
+
+
 def run_state_from_result(result: RunResult) -> RunState:
     """从 RunResult 投影出控制面运行态（ADR 0016/0027）。
 

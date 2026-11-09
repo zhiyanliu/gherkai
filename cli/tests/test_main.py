@@ -3354,3 +3354,332 @@ def test_tunnel_watch_turns_stop_signals_into_exit_that_still_stops_the_tunnel(s
             _signal.signal(s, h)
     assert ei.value.code == 128 + sig and stopped == [4242]
     assert "收到停止信号，隧道已拆 run=r1 pid=4242" in capsys.readouterr().out
+
+
+# ---- list-runs（ADR 0041 决策七）----
+
+_LR_CLI = "1.5.0"  # 用例里本 CLI 的版本（写出版本的标记以它为比对对象）
+
+
+def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: bool = False, cli_version: "str | None" = _LR_CLI,
+              started_at: str = "2026-11-10T08:00:00+00:00", ended_at: "str | None" = None, message: "str | None" = None) -> None:
+    """用真 LocalRunStore 在 root 下写一个 run（run_meta.json 头带写出版本，run_state.json 按 detached 带标记）。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.model import JobState, RunMeta, RunState
+
+    jobs = {f"f.feature:{i}": JobState(f"f.feature:{i}", s) for i, s in enumerate(job_statuses)}
+    LocalRunStore(root, detached=detached).create_run(
+        RunMeta(run_id=run_id, created_at=started_at, jobs=(), cli_version=cli_version),
+        RunState(run_id=run_id, status=status, jobs=jobs, started_at=started_at, ended_at=ended_at, message=message))
+
+
+def _seed_raw_run_state(root: Path, run_id: str, text: str) -> None:
+    """只写一份原样的 run_state.json（损坏的、或状态值本版本不认识的），不写 run_meta.json。"""
+    (root / run_id).mkdir(parents=True, exist_ok=True)
+    (root / run_id / "run_state.json").write_text(text, encoding="utf-8")
+
+
+def _seed_listing_fixture(root: Path) -> None:
+    """三个终态、两个未结束（一个 submit 的、一个前台的）、一个运行态损坏、一个状态值不认识、一个不是 run 的目录。"""
+    S = Status
+    _seed_run(root, "20261110T080000Z-a00001", S.PASSED, [S.PASSED, S.PASSED], ended_at="2026-11-10T08:05:00+00:00")
+    _seed_run(root, "20261110T090000Z-a00002", S.FAILED, [S.PASSED, S.FAILED], ended_at="2026-11-10T09:05:00Z",
+              cli_version="1.4.0")
+    _seed_run(root, "20261110T100000Z-a00003", S.ERROR, [S.PENDING], detached=True, ended_at="2026-11-10T10:00:05+00:00",
+              message="提交记录不完整", cli_version=None)
+    _seed_run(root, "20261110T070000Z-b00001", S.PENDING, [S.PENDING], detached=True)
+    _seed_run(root, "20261110T060000Z-b00002", S.RUNNING, [S.RUNNING, S.PENDING])
+    _seed_raw_run_state(root, "20261110T050000Z-c00001", "{broken")
+    _seed_raw_run_state(root, "20261110T040000Z-c00002",
+                        json.dumps({"run_id": "20261110T040000Z-c00002", "status": "paused", "jobs": []}))
+    (root / "20261110T030000Z-d00001").mkdir()  # 没有 run_state.json：不是 run 目录，跳过
+
+
+def _list_runs_json(capsys, *argv) -> dict:
+    assert m.main(["list-runs", *argv, "--json"]) == 0, capsys.readouterr().err
+    return json.loads(capsys.readouterr().out)
+
+
+def _table_row(out: str, run_id: str) -> list[str]:
+    """人读表格里 run_id 所在那一行的各格（去掉框线与两侧空白）。"""
+    line = next(ln for ln in out.splitlines() if run_id in ln)
+    return [c.strip() for c in line.split("│")[1:-1]]
+
+
+def test_list_runs_local_default_lists_all_ongoing_and_newest_finished_first(tmp_path, monkeypatch, capsys):
+    """默认清单：全部未结束的 run、最近 N 条已结束的 run（按 run_id 即创建时间，不按结束时间），无法读取的找到即列出、不占 N 的名额，
+    整体按 run_id 降序；没有 run_state.json 的目录不列。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    _seed_listing_fixture(root)
+    doc = _list_runs_json(capsys, "--report-dir", str(root))
+    assert [r["run_id"] for r in doc["runs"]] == [
+        "20261110T100000Z-a00003", "20261110T090000Z-a00002", "20261110T080000Z-a00001",
+        "20261110T070000Z-b00001", "20261110T060000Z-b00002", "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
+    # --limit 只约束已结束的部分：最近创建的一条留下（a00002 比 a00003 先结束，但 a00003 创建得更晚）
+    doc = _list_runs_json(capsys, "--report-dir", str(root), "--limit", "1")
+    assert [r["run_id"] for r in doc["runs"]] == [
+        "20261110T100000Z-a00003", "20261110T070000Z-b00001", "20261110T060000Z-b00002",
+        "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
+
+
+def test_list_runs_local_status_filter_keeps_unreadable_rows_and_limit_only_on_finished(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    _seed_listing_fixture(root)
+    doc = _list_runs_json(capsys, "--report-dir", str(root), "--status", "running", "--status", "failed")
+    assert [(r["run_id"], r.get("status")) for r in doc["runs"]] == [
+        ("20261110T090000Z-a00002", "failed"), ("20261110T060000Z-b00002", "running"),
+        ("20261110T050000Z-c00001", None), ("20261110T040000Z-c00002", None)]
+    doc = _list_runs_json(capsys, "--report-dir", str(root), "--status", "passed", "--status", "failed", "--status", "error",
+                          "--limit", "2")
+    assert [r["run_id"] for r in doc["runs"] if not r.get("unreadable")] == [
+        "20261110T100000Z-a00003", "20261110T090000Z-a00002"]
+
+
+def test_list_runs_local_json_shape_and_writer_version_marking(tmp_path, monkeypatch, capsys):
+    """顶层是所查的落点（解析后的绝对路径）；每项的键按出现条件给出；cli_version 只在写出版本与本 CLI 版本都已知且相同时省略。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    monkeypatch.chdir(tmp_path)
+    _seed_listing_fixture(tmp_path / "reports")
+    doc = _list_runs_json(capsys, "--report-dir", "reports")
+    assert set(doc) == {"backend", "report_dir", "runs"}
+    assert doc["backend"] == "local" and doc["report_dir"] == str((tmp_path / "reports").resolve())
+    by = {r["run_id"]: r for r in doc["runs"]}
+    assert by["20261110T080000Z-a00001"] == {
+        "run_id": "20261110T080000Z-a00001", "status": "passed", "started_at": "2026-11-10T08:00:00+00:00",
+        "ended_at": "2026-11-10T08:05:00+00:00", "job_counts": {"passed": 2}, "detached": False}  # 当前版本写出：不带 cli_version
+    assert by["20261110T090000Z-a00002"]["cli_version"] == "1.4.0"
+    assert by["20261110T090000Z-a00002"]["job_counts"] == {"passed": 1, "failed": 1}
+    assert by["20261110T100000Z-a00003"]["cli_version"] is None and by["20261110T100000Z-a00003"]["message"] == "提交记录不完整"
+    assert by["20261110T070000Z-b00001"]["detached"] is True and "ended_at" not in by["20261110T070000Z-b00001"]
+    # 运行态解析不了的项只有 run_id、unreadable 与适用时的 cli_version（没有 run_meta.json，读不到写出版本）
+    assert by["20261110T050000Z-c00001"] == {"run_id": "20261110T050000Z-c00001", "unreadable": True, "cli_version": None}
+    assert by["20261110T040000Z-c00002"] == {"run_id": "20261110T040000Z-c00002", "unreadable": True, "cli_version": None}
+    # 本 CLI 版本未知（未装成包）时，每个读得到运行态的 run 都标出写出版本
+    monkeypatch.setattr(m, "_installed_version", lambda: None)
+    doc = _list_runs_json(capsys, "--report-dir", "reports")
+    assert {r["run_id"]: r["cli_version"] for r in doc["runs"]}["20261110T080000Z-a00001"] == _LR_CLI
+
+
+def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_leftovers(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    _seed_listing_fixture(root)
+    assert m.main(["list-runs", "--report-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    header = _table_row(out, "run_id")
+    assert header == ["run_id", "状态", "开始（UTC）", "结束（UTC）", "job 数", "版本", "说明"]
+    same = _table_row(out, "20261110T080000Z-a00001")
+    assert same == ["20261110T080000Z-a00001", "passed", "2026-11-10 08:00:00", "2026-11-10 08:05:00", "passed 2", "", ""]
+    assert _table_row(out, "20261110T090000Z-a00002")[4:6] == ["passed 1 · failed 1", "1.4.0"]
+    errored = _table_row(out, "20261110T100000Z-a00003")
+    assert errored[5] == "未知" and errored[6] == "提交记录不完整"
+    # 未结束的前台 run 才有遗留提示；submit 的 run（detached）没有
+    assert "不会再到终态" in _table_row(out, "20261110T060000Z-b00002")[6]
+    assert _table_row(out, "20261110T070000Z-b00001")[6] == ""
+    broken = _table_row(out, "20261110T050000Z-c00001")
+    assert broken == ["20261110T050000Z-c00001", m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知", ""]
+    assert "20261110T030000Z-d00001" not in out
+
+
+def test_list_runs_local_empty_hints_name_the_directory_and_tell_missing_from_empty(tmp_path, monkeypatch, capsys):
+    """空清单只打一行：目录不存在与目录下没有 run 两种说法，都点名解析后的目录、提示核对定位参数；--json 下没有提示，只有落点与空数组。"""
+    missing = tmp_path / "nope"
+    assert m.main(["list-runs", "--report-dir", str(missing)]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0 and str(missing.resolve()) in out and "不存在" in out and "--report-dir" in out
+    empty = tmp_path / "reports"
+    empty.mkdir()
+    assert m.main(["list-runs", "--report-dir", str(empty)]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0 and f"{empty.resolve()} 下没有任何 run" in out and "--report-dir" in out
+    _seed_run(empty, "20261110T080000Z-a00001", Status.PASSED, [Status.PASSED], ended_at="t")
+    assert m.main(["list-runs", "--report-dir", str(empty), "--status", "failed", "--status", "error"]) == 0
+    assert "没有状态为 failed、error 的 run" in capsys.readouterr().out
+    cap_json = _list_runs_json(capsys, "--report-dir", str(missing))
+    assert cap_json == {"backend": "local", "report_dir": str(missing.resolve()), "runs": []}
+
+
+def test_list_runs_local_unreadable_report_dir_exits_2(tmp_path, capsys):
+    import os
+    if os.geteuid() == 0:
+        pytest.skip("root 不受目录权限约束")
+    root = tmp_path / "reports"
+    _seed_run(root, "20261110T080000Z-a00001", Status.PASSED, [Status.PASSED], ended_at="t")
+    root.chmod(0)
+    try:
+        rc = m.main(["list-runs", "--report-dir", str(root)])
+    finally:
+        root.chmod(0o755)
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == "" and str(root.resolve()) in cap.err and "Traceback" not in cap.err
+
+
+@pytest.mark.parametrize("argv", [["--limit", "0"], ["--limit", "-3"], ["--limit", "x"], ["--status", "paused"]])
+def test_list_runs_rejects_bad_limit_and_status_with_exit_2(argv, capsys):
+    with pytest.raises(SystemExit) as ei:
+        m.main(["list-runs", *argv])
+    assert ei.value.code == 2
+    assert ("须为正整数" in capsys.readouterr().err) is (argv[0] == "--limit")
+
+
+def test_list_runs_reads_report_dir_from_the_project_config_file(tmp_path, monkeypatch, capsys):
+    """定位参数的取值来源与 status 相同，含配置文件那一层（路径相对配置文件所在目录）。"""
+    monkeypatch.delenv("GHERKAI_CONFIG", raising=False)
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    (proj / "gherkai.toml").write_text('[common]\nreport-dir = "out"\n', encoding="utf-8")
+    _seed_run(proj / "out", "20261110T080000Z-a00001", Status.PASSED, [Status.PASSED], ended_at="t")
+    monkeypatch.chdir(tmp_path)
+    doc = _list_runs_json(capsys, "--config", str(proj / "gherkai.toml"))
+    assert doc["report_dir"] == str((proj / "out").resolve()) and len(doc["runs"]) == 1
+
+
+# 云端：skew 闸记一笔、runs 表句柄与 DescribeTable 是替身、DynamoDBRunStore 换成按调用参数返回预置清单的替身
+
+def _listing(run_id: str, status, *, detached: bool = True, header=(1, _LR_CLI), jobs=()):
+    from gherkai_core.model import JobState, RunListing, RunState
+    state = None if status is None else RunState(run_id=run_id, status=status,
+                                                 jobs={f"s{i}": JobState(f"s{i}", s) for i, s in enumerate(jobs)},
+                                                 started_at="2026-11-10T08:00:00+00:00")
+    return RunListing(run_id=run_id, state=state, detached=detached, header=header)
+
+
+def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=None, list_error=None, skew_rc=None):
+    """把云端 list-runs 的 AWS 边界换成替身，返回记录调用顺序的列表。parts：状态元组 → 该次端口调用返回的列举项。"""
+    from types import SimpleNamespace
+
+    from gherkai_core.adapters.run_store import ddb as _ddb
+    from gherkai_runtime import names as _nm
+
+    for k in ("AWS_DDB_TABLE", "AWS_RESOURCE_PREFIX", "AWS_PROFILE", "GHERKAI_CONFIG"):
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    calls: list = []
+
+    def skew(target, **kw):
+        calls.append(("skew", target.prefix))
+        return skew_rc, None
+
+    def make_table(table, *, region, profile):
+        def describe_table(*, TableName):
+            calls.append(("describe", TableName))
+            gsis = [{"IndexName": _nm.RUNS_STATUS_GSI, "IndexStatus": "ACTIVE"}]
+            if index_status is not None:
+                gsis.append({"IndexName": _nm.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": index_status})
+            return {"Table": {"TableName": TableName, "GlobalSecondaryIndexes": gsis}}
+        return SimpleNamespace(name=table, meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
+
+    class FakeStore:
+        def __init__(self, table, **kw):
+            calls.append(("store", table.name, kw.get("list_index_name")))
+
+        def list_runs(self, statuses, *, limit):
+            calls.append(("list", [s.value for s in statuses], limit))
+            if list_error is not None:
+                raise list_error
+            return list((parts or {}).get(tuple(s.value for s in statuses), []))
+
+    monkeypatch.setattr(m, "_cloud_skew_gate", skew)
+    monkeypatch.setattr(compose, "_make_ddb_table", make_table)
+    monkeypatch.setattr(_ddb, "DynamoDBRunStore", FakeStore)
+    return calls
+
+
+_TERMINAL_VALUES = ["passed", "failed", "error", "skipped", "aborted"]
+
+
+def test_list_runs_cloud_checks_skew_then_index_then_lists_ongoing_before_finished(tmp_path, monkeypatch, capsys):
+    """调用顺序：版本 skew 闸 → DescribeTable 判索引就绪 → 装配注入索引名 → 先非终态（不截断，pending 在前）后终态（截 N）；
+    --report-dir 在云端被忽略、不报错；--json 顶层是前缀、region 与解析后的表名。"""
+    from gherkai_runtime import names as _nm
+
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path)
+    doc = _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--report-dir", "whatever")
+    table = _nm.default_name("vfy-", _nm.BASE_RUNS_TABLE)
+    assert calls == [("skew", "vfy-"), ("describe", table), ("store", table, _nm.RUNS_STATUS_RUN_ID_GSI),
+                     ("list", ["pending", "running"], None), ("list", _TERMINAL_VALUES, 20)]
+    assert doc == {"backend": "cloud", "prefix": "vfy-", "region": "us-east-1", "ddb_table": table, "runs": []}
+    assert "whatever" not in json.dumps(doc)
+
+
+def test_list_runs_cloud_merge_keeps_the_later_read_filters_by_read_back_status_and_cuts_finished(tmp_path, monkeypatch, capsys):
+    """端口不复筛：非终态那次读回已是终态的 run 归入终态部分、同受 --limit 截取；两次都有的 run 保留后一次读回的；
+    无法读取的找到即列出；--status 只含一侧时只做那一次调用，读回状态不在请求里的行被滤掉。"""
+    S = Status
+    parts = {
+        ("pending", "running"): [_listing("20261110T120000Z-a", S.PENDING), _listing("20261110T110000Z-c", S.RUNNING),
+                                 _listing("20261110T100000Z-b", S.RUNNING), _listing("20261110T095000Z-x", S.PASSED)],
+        tuple(_TERMINAL_VALUES): [_listing("20261110T100000Z-b", S.PASSED), _listing("20261110T090000Z-d", S.FAILED),
+                                  _listing("20261110T080000Z-e", S.ERROR), _listing("20261110T070000Z-u", None)],
+    }
+    _cloud_list_runs_env(monkeypatch, tmp_path, parts=parts)
+    doc = _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--limit", "2")
+    assert [(r["run_id"], r.get("status")) for r in doc["runs"]] == [
+        ("20261110T120000Z-a", "pending"), ("20261110T110000Z-c", "running"), ("20261110T100000Z-b", "passed"),
+        ("20261110T095000Z-x", "passed"), ("20261110T070000Z-u", None)]
+
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path, parts={("running",): [
+        _listing("20261110T110000Z-c", S.RUNNING), _listing("20261110T100000Z-y", S.PASSED)]})
+    doc = _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--status", "running")
+    assert [r["run_id"] for r in doc["runs"]] == ["20261110T110000Z-c"]
+    assert [c for c in calls if c[0] == "list"] == [("list", ["running"], None)]
+
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path)
+    _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--status", "aborted",
+                    "--status", "passed", "--limit", "5")
+    assert [c for c in calls if c[0] == "list"] == [("list", ["passed", "aborted"], 5)]  # 状态按固定顺序，不按给出的顺序
+
+
+@pytest.mark.parametrize("index_status, needle", [(None, "没有列出 run 用的索引"), ("CREATING", "还在建立"),
+                                                  ("DELETING", "正在被删除")])
+def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, needle, tmp_path, monkeypatch, capsys):
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status)
+    rc = m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == "" and needle in cap.err and "status-run_id-index" in cap.err
+    assert [c[0] for c in calls] == ["skew", "describe"]
+
+
+def test_list_runs_cloud_index_updating_is_let_through(tmp_path, monkeypatch, capsys):
+    _cloud_list_runs_env(monkeypatch, tmp_path, index_status="UPDATING")
+    assert _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1")["runs"] == []
+
+
+def test_list_runs_cloud_skew_block_exits_2_before_reading_the_table(tmp_path, monkeypatch, capsys):
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path, skew_rc=2)
+    assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    assert calls == [("skew", "vfy-")]
+
+
+def test_list_runs_cloud_read_failures_exit_2_without_a_partial_list(tmp_path, monkeypatch, capsys):
+    """AWS 错误（无权限一类）与批量读回重试耗尽都以退出码 2 结束、stdout 没有清单；不打印回溯。"""
+    from botocore.exceptions import ClientError
+
+    from gherkai_core.adapters.run_store.ddb import RunListingIncomplete
+
+    denied = ClientError({"Error": {"Code": "AccessDeniedException", "Message": "not authorized"}}, "Query")
+    _cloud_list_runs_env(monkeypatch, tmp_path, list_error=denied)
+    assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    cap = capsys.readouterr()
+    assert cap.out == "" and "读不到运行状态表 vfy-runs" in cap.err and "AccessDeniedException" in cap.err
+    _cloud_list_runs_env(monkeypatch, tmp_path, list_error=RunListingIncomplete("vfy-runs", 3, 5))
+    assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    cap = capsys.readouterr()
+    assert cap.out == "" and "没有读回" in cap.err and "Traceback" not in cap.err
+
+
+def test_list_runs_cloud_empty_hint_names_prefix_region_and_table(tmp_path, monkeypatch, capsys):
+    _cloud_list_runs_env(monkeypatch, tmp_path)
+    assert m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--ddb-table", "my-runs"]) == 0
+    out = capsys.readouterr().out.strip()
+    assert out.count("\n") == 0 and "vfy-" in out and "us-east-1" in out and "my-runs" in out and "--prefix" in out
+
+
+def test_list_runs_cloud_missing_profile_exits_2_before_reading_the_cloud(tmp_path, monkeypatch, capsys):
+    _no_such_profile_env(tmp_path, monkeypatch)
+    monkeypatch.setattr(m, "_cloud_skew_gate", lambda *a, **k: pytest.fail("身份解析失败不该读云端"))
+    assert m.main(["list-runs", "--backend", "cloud", "--profile", _NO_SUCH_PROFILE]) == 2
+    _assert_identity_error(capsys)

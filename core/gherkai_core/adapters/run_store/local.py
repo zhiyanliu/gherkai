@@ -21,11 +21,12 @@ finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
-from gherkai_core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.serialize import (
     definition_schema_version,
     run_meta_from_dict,
@@ -146,6 +147,61 @@ class LocalRunStore:
         if not path.exists():
             return None
         return run_state_from_dict(json.loads(path.read_text(encoding="utf-8")))
+
+    def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
+        """列举（语义见 RunStore port；本机做法见 ADR 0041 决策七「本机实现」）：列报告落点下的子目录（目录名即 run_id），逐个读
+        run_state.json，按读回的状态归入所请求的状态，每个状态按 run_id 降序取至多 `limit` 条。
+
+        没有 run_state.json 的目录跳过（不是 run 目录，或在写下运行态之前就中断的执行）。读回解析不了的（JSON 损坏、形态违约、
+        状态值本版本不认识）以 `state=None` 列出、不参与归入与截取，不论请求了哪些状态。报告落点目录不存在时返回空列表（落点在第一次
+        落盘时才建立，区分「目录不存在」与「目录下没有 run」是调用方的事）；目录或文件不可读一类 OSError 原样抛出。不建索引文件：
+        运行态的真值只在各 run 目录里，清单与 `status` 读到的永远一致。detached 与 `is_detached` 同一判据（run_state.json 顶层标记），
+        取自同一次读回；提交记录头部只对入选的 run 读，读法同 `peek_definition_header`，文件不存在或内容解析不了为 None。
+        """
+        wanted = list(dict.fromkeys(statuses))
+        if limit is not None and limit < 1:
+            raise ValueError(f"limit 须为正整数或 None，现为 {limit!r}")
+        try:
+            entries = list(self._root.iterdir())
+        except FileNotFoundError:
+            return []
+        by_status: dict[Status, list[tuple[str, RunState, bool]]] = {s: [] for s in wanted}
+        unreadable: list[tuple[str, bool]] = []
+        for entry in entries:
+            if not entry.is_dir():
+                continue
+            try:
+                raw = (entry / "run_state.json").read_bytes()
+            except (FileNotFoundError, IsADirectoryError):
+                continue
+            d = None
+            try:
+                d = json.loads(raw.decode("utf-8"))  # 解码放在这里：编码不对也是内容损坏，不是访问失败
+                state = run_state_from_dict(d)
+            except (ValueError, KeyError, TypeError, AttributeError):  # JSON 损坏、形态违约、状态值不认识
+                state = None
+            detached = isinstance(d, dict) and d.get("detached") is True
+            if state is None:
+                unreadable.append((entry.name, detached))
+            elif state.status in by_status:
+                by_status[state.status].append((entry.name, state, detached))
+        rows = [RunListing(run_id=run_id, state=None, detached=detached, header=self._listing_header(run_id))
+                for run_id, detached in unreadable]
+        for bucket in by_status.values():
+            bucket.sort(key=lambda row: row[0], reverse=True)
+            for run_id, state, detached in bucket if limit is None else bucket[:limit]:
+                rows.append(RunListing(run_id=run_id, state=state, detached=detached,
+                                       header=self._listing_header(run_id)))
+        rows.sort(key=lambda row: row.run_id, reverse=True)
+        return rows
+
+    def _listing_header(self, run_id: str) -> tuple[int, str | None] | None:
+        """列举用的头部读取：与 `peek_definition_header` 同一读法；内容解析不了（JSON 损坏、不是对象、结构版本不是整数）读作 None，
+        访问失败（OSError）照常抛出——权限一类问题不吞成「版本未知」（ADR 0041 决策七「写出版本的标记」）。"""
+        try:
+            return self.peek_definition_header(run_id)
+        except (ValueError, AttributeError):
+            return None
 
     def preflight(self) -> None:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「表不存在」问题，目录随写随建。"""

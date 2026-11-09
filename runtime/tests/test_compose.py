@@ -1321,8 +1321,10 @@ def test_build_cloud_stores_uses_injected_handles_without_building_clients(monke
     # prefix 规范化仍由本函数一处做（"reports" → "reports/"，避粘连 key）
     for name in ("offloader", "result_store", "report_store"):
         assert seen[name][0] == (s3, "prod-artifacts", "reports/")
-    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None
-    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False}
+    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None；列举用的索引名由这里注入
+    # （命名真源在 runtime，ADR 0041 决策七）
+    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False,
+                                    "list_index_name": names.RUNS_STATUS_RUN_ID_GSI}
 
 
 def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
@@ -1341,6 +1343,70 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
     assert seen["run_store"][0] == (made["ddb"],)               # 建出来的句柄就是喂进去的那个
     assert seen["result_store"][0] == (made["s3"], "prod-artifacts", "reports/")
     assert seen["run_store"][1]["detached"] is True             # submit 方式标记透传（ADR 0034）
+
+
+# ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 的真实响应形状由 moto 给出 ----
+
+def _moto_runs_table(*, with_list_index: bool):
+    """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的 GSI。"""
+    import boto3
+    gsis = [{"IndexName": names.RUNS_STATUS_GSI, "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+             "Projection": {"ProjectionType": "KEYS_ONLY"}}]
+    if with_list_index:
+        gsis.append({"IndexName": names.RUNS_STATUS_RUN_ID_GSI,
+                     "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}, {"AttributeName": "run_id", "KeyType": "RANGE"}],
+                     "Projection": {"ProjectionType": "KEYS_ONLY"}})
+    ddb = boto3.resource("dynamodb", region_name="us-east-1")
+    return ddb.create_table(
+        TableName="vfy-runs", BillingMode="PAY_PER_REQUEST",
+        KeySchema=[{"AttributeName": "run_id", "KeyType": "HASH"}, {"AttributeName": "item_type", "KeyType": "RANGE"}],
+        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("run_id", "item_type", "status")],
+        GlobalSecondaryIndexes=gsis)
+
+
+@pytest.mark.parametrize("with_list_index", [True, False])
+def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list_index, monkeypatch):
+    """索引就绪（moto 建出的 GSI 为 ACTIVE）才装配出能列举的 store；索引缺失抛产品语言的整句、点名表与索引，不装配。
+    只读命令不起 S3 client。"""
+    from moto import mock_aws
+
+    for k, v in (("AWS_ACCESS_KEY_ID", "testing"), ("AWS_SECRET_ACCESS_KEY", "testing"), ("AWS_DEFAULT_REGION", "us-east-1")):
+        monkeypatch.setenv(k, v)
+    monkeypatch.setattr(compose, "_make_s3_client", lambda **kw: pytest.fail("清单不该起 S3 client"))
+    with mock_aws():
+        table = _moto_runs_table(with_list_index=with_list_index)
+        if not with_list_index:
+            with pytest.raises(compose.RunListIndexUnavailable, match=f"vfy-runs.*{names.RUNS_STATUS_RUN_ID_GSI}"):
+                compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
+            return
+        from gherkai_core.model import Status
+
+        store = compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
+        assert store.list_runs([Status.PENDING, Status.RUNNING], limit=None) == []  # 注入了索引名：能对它 Query
+
+
+@pytest.mark.parametrize("status, ok", [("ACTIVE", True), ("UPDATING", True), ("CREATING", False), ("DELETING", False),
+                                        ("SOMETHING_NEW", False)])
+def test_check_run_list_index_lets_active_and_updating_through(status, ok):
+    """判据取自 DescribeTable 的 IndexStatus：ACTIVE 与 UPDATING 放行，回填中、删除中与不认识的状态都拦下。"""
+    from types import SimpleNamespace
+
+    def describe_table(*, TableName):
+        return {"Table": {"GlobalSecondaryIndexes": [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": status}]}}
+
+    table = SimpleNamespace(name="t", meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
+    if ok:
+        compose.check_run_list_index(table)
+    else:
+        with pytest.raises(compose.RunListIndexUnavailable):
+            compose.check_run_list_index(table)
+
+
+def test_run_list_locations_are_the_single_source_of_the_list_runs_top_level_keys(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert compose.local_run_list_location("reports") == {"backend": "local", "report_dir": str((tmp_path / "reports").resolve())}
+    assert compose.cloud_run_list_location(prefix="p-", region="us-east-1", table="p-runs") == {
+        "backend": "cloud", "prefix": "p-", "region": "us-east-1", "ddb_table": "p-runs"}
 
 
 # ---- preflight_cloud_resources（ADR 0033）：探资源存在性、缺则点名 prefix ----

@@ -1,7 +1,7 @@
 # gherkai CLI 的 `--json` 字段契约
 
 > **定位**：`--json` 字段的参考页，面向用它编写脚本或 agent skill 的读者（ADR 0041 决策五）。**权威在 code**：`core/gherkai_core/serialize.py`
-> 与 `cli/gherkai_cli/render.py`（渲染器）、`runtime/gherkai_runtime/compose.py`（`artifacts` 四键的落点拼装：`local_artifact_locations` / `cloud_artifact_locations`）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`，另注入 `artifacts.worker_log`）、
+> 与 `cli/gherkai_cli/render.py`（渲染器）、`runtime/gherkai_runtime/compose.py`（`artifacts` 四键的落点拼装：`local_artifact_locations` / `cloud_artifact_locations`；`list-runs` 的顶层落点：`local_run_list_location` / `cloud_run_list_location`）、`cli/gherkai_cli/__main__.py`（`doctor` / `list-engines`，另注入 `artifacts.worker_log`；`list-runs` 的清单口径与合并）、
 > `deploy_aws/gherkai_deploy_aws/workers.py`（`list-workers`）；worker 侧两组：`engines/novaact/gherkai_worker_novaact/evidence.py`
 > 与 `engines/midscene/src/worker/evidence.mts`（`evidence` 的固定键，两引擎结构相同）、`engines/novaact/gherkai_worker_novaact/deterministic.py`
 > 的 `list_registry()` 与 `engines/midscene/src/worker/deterministic.mts` 的 `listRegistry()`（`list-deterministic` 每项的键，worker 自述、CLI 转述；唯一例外 `available_targets` 由 CLI 调用 `runtime/gherkai_runtime/compose.py` 的 `available_targets()` 求交集后附加）。
@@ -108,12 +108,38 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | `pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
+| `status` | `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`；`skipped` 只在全部 job 都没有执行、又没有被中断时出现，现行的执行方式不产生这样的 run，读取方按可能的取值处理即可）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，仅在终态后有内容 |
+
+## `gherkai list-runs --json`
+
+一个对象：顶层是所查的落点，`runs[]` 是找到的 run，按 run_id 降序（即按创建时间从新到旧，创建时间取执行 `run` 或 `submit` 的那台机器的时钟；同一秒内创建的 run 之间先后不定）。默认列出这个后端全部未结束的 run（`pending` / `running`）与最近创建的 `--limit` 条已结束的 run（默认 20 条）；给了 `--status` 时只列这些状态的 run，其中已结束的状态仍受 `--limit` 约束。**不表判定**：退出码只有 `0`（读到了清单；清单为空时 `runs` 是空数组，含 `unreadable` 项的清单同样为 `0`）与 `2`（参数不合法或读不到这个后端，stdout 没有输出）；`--json` 下不输出人读提示，读取方凭顶层的落点分辨「这里没有 run」与「查错了地方」。
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `backend` | `local` / `cloud` | 所查的后端，恒有 |
+| `report_dir` | string | 仅本机后端：所查的报告落点目录（各层取值解析后的绝对路径；目录不存在时同样给出） |
+| `prefix` / `region` / `ddb_table` | string | 仅云端后端：所查部署的资源名前缀、region 与运行状态表名（都是解析后的值，不区分来自选项、环境变量还是配置文件）。不带 profile（它只决定用哪份凭证），不带云端的报告前缀（清单不读报告） |
+| `runs[]` | array | 每个 run 一项，见下 |
+
+`runs[]` 每项：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `run_id` | string | 恒有 |
+| `status` | 同 `status` 一节 | run 级状态，取值与 `status --json` 的 `status` 相同；是读回时的当前状态 |
+| `started_at` / `ended_at` | ISO 8601 \| 省略 | 无值时省略 |
+| `message` | string \| 省略 | 含义同 `status --json` 的 `message`，无值时省略 |
+| `job_counts` | object | 按 job 状态计数，形如 `{"passed": 2, "failed": 1}`：键取 job 级状态值 `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted`，只含出现的状态，缺的状态按 0 读。逐个 job 的状态用 `status --json` 的 `jobs[]` 取（形状不同，所以键名不复用） |
+| `detached` | bool | 运行态读得出的项恒有：true 表示由 `submit` 提交到后台执行的 run。未结束且为 false 的 run 由前台 `run` 执行：执行它的进程若已不在，它不会再到终态，`status --wait` 对它只等待、不接力 |
+| `cli_version` | string \| null \| 省略 | 写出这个 run 的 gherkai 版本。只在它与本机 gherkai 的版本都已知且相同时省略，其余情形出现；读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null |
+| `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与适用时的 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
+
+清单不带产物落点、任务定义的内容与事件水位：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚换状态或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`，云端后端看不到。
 
 ## `gherkai explain <run_id> [<scope_id>] --json`
 
@@ -124,7 +150,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级运行态；未到终态时文档只含已落地的 job |
+| `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted` | run 级运行态；未到终态时文档只含已落地的 job |
 | `scopes[]` | array | 每个 job 一项，见下；指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可少于该 run 的 job 数 |
 
 `scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]`（出现条件与形状同 `run --json`）与 `device_observed_s` / `device_observed_missing`（仅设备目标，形状同 `run --json`）、`console_url`（仅当 `session_id` 是 Device Farm 远程访问会话的 ARN 时出现：控制台里该会话页面的链接，录像与日志在那里看）、`report_refs[]`（形状同 `run --json`，

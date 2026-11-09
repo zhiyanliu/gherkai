@@ -108,8 +108,10 @@ def engine_min_grace(engine_name: str) -> float:
 def new_run_id() -> str:
     """生成一个 run_id（组合根职责，ADR 0027）。
 
-    对调用方不透明，只保证「可排序（时间戳前缀）+ 抗碰撞（随机尾）」。格式是 compose 实现细节、
-    不入 ADR 契约。形如 20260629T141207Z-a3f9c1。
+    对调用方不透明，只保证两点（ADR 0027「run_id：归集索引的主键」节）：**字典序即创建时间序**（创建时间取本机时钟，
+    精度到秒，同一秒内创建的 run 之间先后不定）与抗碰撞（随机尾）。`list-runs` 按 run_id 降序列出最近的 run、不另读时刻
+    字段排序，依赖前一点（ADR 0041 决策七「排序」）：改格式时须保持定宽、按 UTC 由高位到低位排列的时间戳前缀。
+    格式本身是 compose 实现细节、不入契约，形如 20260629T141207Z-a3f9c1。
     另保证不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id
     依赖这一点（scope_id 是用户文本、可能含 `#`），改格式时不得引入 `#`。
     """
@@ -881,6 +883,23 @@ def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run
 
 
 # ============================================================================
+# 清单落点单点（ADR 0041 决策七「机读形态」）：`list-runs` 所查的是哪一处，按后端各一份。`--json` 的顶层键与人读的
+# 空清单提示都从这里取，CLI 不另拼：空清单时读者凭它们分清「这里没有 run」与「查错了地方」。
+# 不带 profile（它决定用哪份凭证、不决定落点），不带云端报告前缀（清单不读报告）。
+# ============================================================================
+
+
+def local_run_list_location(report_dir: str | Path) -> dict:
+    """本机后端的清单落点：`backend` 加各层解析后的报告落点绝对路径（目录不存在时同样给出，提示里点名它）。"""
+    return {"backend": "local", "report_dir": str(Path(report_dir).resolve())}
+
+
+def cloud_run_list_location(*, prefix: str, region: str | None, table: str) -> dict:
+    """云端后端的清单落点：`backend` 加部署前缀、解析后的 region 与 runs 表名（表名不区分来自选项、环境变量还是配置文件）。"""
+    return {"backend": "cloud", "prefix": prefix, "region": region, "ddb_table": table}
+
+
+# ============================================================================
 # Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
 # （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。各返回：
 #   (run_store, result_store, report_store, make_artifacts)
@@ -1090,8 +1109,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
     # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
-    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。
-    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
+    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。列举用的索引名由这里注入（core 不认 runtime 的命名真源）。
+    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached,
+                                           list_index_name=_names.RUNS_STATUS_RUN_ID_GSI)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
 
@@ -1106,6 +1126,58 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
         return d
 
     return run_store, result_store, report_store, make_artifacts
+
+
+class RunListIndexUnavailable(RuntimeError):
+    """runs 表上列举 run 用的索引缺失或还不能查询（ADR 0041 决策七「索引就绪判据」）：消息是给使用方的整句，调用方原样打印并以退出码 2 结束。"""
+
+
+# 索引状态 → 给使用方的整句（产品语言）。ACTIVE 与 UPDATING 放行、不在表里：UPDATING 只表示索引设置在变更，拦下它会让
+# 一次与清单无关的变更挡住清单；那期间查询若失败，按读不到这个后端处理（ADR 0041 决策七）。
+_RUN_LIST_INDEX_NOT_READY = {
+    None: ("运行状态表 {table} 上没有列出 run 用的索引 {index}（这个部署早于该功能，或索引已被删除）。"
+           "请部署方用当前版本的 gherkai deploy 重新部署后端。"),
+    "CREATING": ("运行状态表 {table} 上列出 run 用的索引 {index} 还在建立：部署后要先为已有的 run 补齐索引，完成之前不能列出。"
+                 "请稍后重试（所需时间随已有 run 的数量增加）。"),
+    "DELETING": ("运行状态表 {table} 上列出 run 用的索引 {index} 正在被删除，不能列出。"
+                 "请部署方用当前版本的 gherkai deploy 重新部署后端。"),
+}
+_RUN_LIST_INDEX_OTHER = ("运行状态表 {table} 上列出 run 用的索引 {index} 当前不能查询（状态 {status}）。"
+                         "请稍后重试；仍不行时请部署方用当前版本的 gherkai deploy 重新部署后端。")
+
+
+def check_run_list_index(ddb_table) -> None:
+    """`list-runs` 的索引就绪检查（ADR 0041 决策七「索引就绪判据」）：取该表的 DescribeTable 结果判，不解析 Query 的报错文本。
+
+    缺失、`CREATING`（为已有 STATE item 回填中）、`DELETING` 与其它未知状态抛 `RunListIndexUnavailable`；`ACTIVE` 与
+    `UPDATING` 放行。只由 `build_cloud_run_list_store` 调用，不并入 run / submit 共用的 `preflight_cloud_resources`：
+    那些命令不用这个索引，不能因它缺失或回填而被拦。DescribeTable 的 AWS 异常（表不存在、无权限、凭证）原样抛出，由调用方
+    按读不到这个后端归到退出码 2。`ddb_table` 是 boto3 的 `dynamodb.Table` 资源，经它的 client 发请求、与读数据同一份会话。
+    """
+    desc = ddb_table.meta.client.describe_table(TableName=ddb_table.name)["Table"]
+    index = _names.RUNS_STATUS_RUN_ID_GSI
+    status = next((g.get("IndexStatus") for g in desc.get("GlobalSecondaryIndexes") or ()
+                   if g.get("IndexName") == index), None)
+    if status in ("ACTIVE", "UPDATING"):
+        return
+    template = _RUN_LIST_INDEX_NOT_READY.get(status, _RUN_LIST_INDEX_OTHER)
+    raise RunListIndexUnavailable(template.format(table=ddb_table.name, index=index, status=status))
+
+
+def build_cloud_run_list_store(*, table: str, region: str | None = None, profile: str | None = None,
+                               ddb_table=None) -> RunStore:
+    """`list-runs` 用的云端 RunStore：先过索引就绪检查，再装配只读的 DynamoDBRunStore（注入列举索引名）。
+
+    只读命令，不挂 S3 卸载器、不起 S3 client（清单不读 definition 正文与报告）；就绪检查在装配路径上、只在这里执行
+    （ADR 0041 决策七）。调用次序约定：入口前端先过版本 skew 闸（`check_backend_skew`）再调本函数。句柄可注入（测试用），
+    未给则走 `_make_ddb_table` 钩子。异常：`RunListIndexUnavailable` 与 DescribeTable 的 AWS 异常原样上抛。
+    """
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    if ddb_table is None:
+        ddb_table = _make_ddb_table(table, region=region, profile=profile)
+    check_run_list_index(ddb_table)
+    return DynamoDBRunStore(ddb_table, list_index_name=_names.RUNS_STATUS_RUN_ID_GSI)
 
 
 def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str | None = None) -> bytes:

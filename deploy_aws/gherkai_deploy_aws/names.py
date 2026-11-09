@@ -29,6 +29,7 @@ from gherkai_runtime.names import (  # noqa: F401
     ENGINES,
     JOB_TIMEOUT_DIGEST_LEN,
     RUNS_STATUS_GSI,
+    RUNS_STATUS_RUN_ID_GSI,
     STATE_WORKER_TASK_DEF_ARNS_ATTR,
     TAG_DIGEST,
     TAG_RETIRED_AT,

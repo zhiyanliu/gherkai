@@ -22,7 +22,7 @@ local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 """
 from __future__ import annotations
 
-from typing import Iterator, Protocol
+from typing import Iterator, Protocol, Sequence
 
 from gherkai_core.model import (
     Event,
@@ -30,6 +30,7 @@ from gherkai_core.model import (
     JobResult,
     JobState,
     ResourceUri,
+    RunListing,
     RunMeta,
     RunResult,
     RunState,
@@ -125,6 +126,26 @@ class RunStore(Protocol):
     #    不读整份 definition（云端 META 可能带 S3 卸载指针，整读会多一次 S3 取回与一份权限）。run 不存在返回 None；
     #    缺结构版本号读作 0（早于结构版本号的写端）。——
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None: ...
+
+    # —— 列举（ADR 0041 决策七「core 端口」）：`list-runs` 用，只读 ——
+    def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
+        """列出经这些状态找到的 run，每项带读回的**当前**运行态、detached 标记与提交记录头部，按 run_id 降序、run_id 不重复。
+
+        - **找**：云端按 `statuses` 的给定顺序逐个查状态分区（调用方据此安排先查 pending 再查 running）；本机没有分区，逐个 run
+          目录读回后按读回的状态归入。`limit` 为正整数时每个状态至多取 `limit` 条（按 run_id 降序的前 `limit` 条），为 None 时不截断。
+        - **不按状态复筛**：返回的是读回时的状态，可能已不在 `statuses` 里（找到之后、读回之前换了状态，或云端索引尚未跟上），
+          按所请求状态过滤是调用方的事。复筛会让两次调用之间换状态的 run 在两份结果里都被筛掉。
+        - **无法读取的行**（`RunListing.state` 为 None）没有可用的状态，不参与归入与截取，找到即列出：云端是被查分区里找到、
+          读回解析不了的 run；本机是读回解析不了的全部 run 目录（状态值本版本不认识的 run 本机看得到、云端看不到）。
+        - **一致性**：云端行内容强一致（读回走强一致读），成员资格最终一致（索引只有最终一致读）：刚换状态的 run 可能短暂仍在旧
+          分区、刚建的 run 可能短暂不在任何分区；读回时 run 已不在（运行态缺失）的行跳过。
+        - **访问失败照常抛出**（本机目录不可读、云端权限 / 网络 / 索引缺失、批量读回重试耗尽），不给出缺行的清单。本机报告落点
+          目录不存在时返回空列表。
+
+        端口不认后端、不承载默认清单的口径（列哪些状态、终态取几条、两次调用怎么合并都在调用方）。
+        """
+        ...
+
     # —— 探活（ADR 0030 决定七）：begin 前探底层可达（云端探表/桶），配置错一律 begin 暴露 → 以退出码 2 结束；
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...

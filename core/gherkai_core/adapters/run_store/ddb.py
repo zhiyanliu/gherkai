@@ -20,15 +20,21 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
 的字段集取自 `run_state_to_dict`，只是 jobs 的**容器形状**在本 adapter 从 list 特化成 Map（非第二真理源）。
 
+列举（`list_runs`，ADR 0041 决策七「云端实现」）经 runs 表的一个 GSI 找 run_id（分区键 `status`、排序键 `run_id`、投影
+`KEYS_ONLY`，只有 STATE item 带顶层 `status`），再用 `BatchGetItem` 强一致读回 STATE 与 META；索引名由组合根经构造参数注入
+（命名真源在 runtime，core 不 import 它）。守 ADR 0038 的红线：runs 表随历史单调增长，本 adapter 不 Scan。
+
 建表责任在 IaC/组合根、非本 adapter——adapter 假定表已存在（决定六；测试由 conftest fixture 建表）。
 """
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Sequence
 
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
-from gherkai_core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.serialize import (
     require_definition_schema,
     run_meta_from_dict,
@@ -46,6 +52,27 @@ _STATE = "STATE"  # item_type 取值：运行态 item
 # **写端在此、读端的命名真源在 `gherkai_runtime.names.STATE_WORKER_TASK_DEF_ARNS_ATTR`**：core 是窄腰下层、
 # 不 import 组合根共享层，故字面量两处各有；漂移由 runtime 侧的对拍测试挡（那里能同时 import 两边）。
 _WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
+
+# 列举的读回（ADR 0041 决策七「云端实现」）：BatchGetItem 每次请求至多 100 个键（DynamoDB 服务限额）；返回的未处理键带退避
+# 重试、次数有界，首次重试前等 _BATCH_GET_BACKOFF_S 秒、之后每次翻倍。
+_BATCH_GET_MAX_KEYS = 100
+_BATCH_GET_MAX_RETRIES = 5
+_BATCH_GET_BACKOFF_S = 0.05
+# 读回只取运行态、detached 标记与头部要用的属性：META 的 meta_json 可达数百 KB，整批拖回会让单次响应超出大小上限、变成更多
+# 未处理键；worker_task_def_arns 只服务清理的引用检查。投影只减少传回的数据，读量仍按整个 item 计。
+_LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at", "high_water_mark", "message", "jobs",
+                  "detached", "schema_version", "cli_version")
+
+
+class RunListingIncomplete(RuntimeError):
+    """列举 run 时批量读回重试耗尽、仍有 run 没有读回（ADR 0041 决策七「云端实现」）：不给出缺行的清单，调用方按读不到这个后端
+    处理（`list-runs` 以退出码 2 结束）。`table` 是 runs 表名，`missing` 是没有读回的 run 数。"""
+
+    def __init__(self, table: str, missing: int, retries: int) -> None:
+        super().__init__(f"读取运行状态表 {table} 时重试 {retries} 次后仍有 {missing} 个 run 没有读回（通常是读取被限流），"
+                         "为免给出缺行的清单，这次没有列出；请稍后重试。")
+        self.table = table
+        self.missing = missing
 
 
 def _schema_version_attr(v) -> int:
@@ -95,10 +122,35 @@ def _state_scalars(state: RunState) -> dict:
     return d
 
 
+def _run_state_from_item(item: dict) -> RunState:
+    """STATE item → RunState（jobs 原生 Map → dict[scope_id, JobState]）。`load_run_state` 与列举共用这一处，解析点只有一个。"""
+    jobs = {
+        sid: _job_state_from_item(sid, m)
+        for sid, m in (item.get("jobs") or {}).items()
+    }
+    hwm = item.get("high_water_mark")
+    return RunState(
+        run_id=item["run_id"],
+        status=Status(item["status"]),
+        jobs=jobs,
+        started_at=item.get("started_at"),
+        ended_at=item.get("ended_at"),
+        # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
+        high_water_mark=int(hwm) if hwm is not None else None,
+        message=item.get("message"),
+    )
+
+
+def _header_from_item(item: dict) -> tuple[int, str | None]:
+    """META item 顶层的（结构版本, 写端 CLI 版本）：`peek_definition_header` 与列举共用。"""
+    return _schema_version_attr(item.get("schema_version")), item.get("cli_version")
+
+
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
-    def __init__(self, table, arg_offloader=None, *, detached: bool = False) -> None:
+    def __init__(self, table, arg_offloader=None, *, detached: bool = False,
+                 list_index_name: str | None = None) -> None:
         """table：boto3 dynamodb.Table 资源（组合根注入；建表责任在 IaC，adapter 假定已存在）。
 
         arg_offloader：可选 S3StepArgumentOffloader（ADR 0030 决定六）。注入则 RunMeta 深树里的
@@ -108,11 +160,15 @@ class DynamoDBRunStore:
         detached（ADR 0034）：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
         `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
         create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
+
+        list_index_name：列举用的 GSI 名（ADR 0041 决策七；命名真源在 runtime，组合根注入）。只有 `list_runs` 用它；
+        None（默认）时其余方法照常，调用 `list_runs` 即抛错（装配缺失）。就绪与否由组合根在装配时核，本 adapter 不查。
         """
         require_boto3("DynamoDBRunStore")
         self._table = table
         self._arg_offloader = arg_offloader
         self._detached = detached
+        self._list_index_name = list_index_name
 
     # ---- 实时写三段（ADR 0030 决定六）----
 
@@ -128,7 +184,7 @@ class DynamoDBRunStore:
         self._table.put_item(Item={
             "run_id": meta.run_id,
             _ITEM_TYPE_ATTR: _META,
-            # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 用投影只取这两个值、不解析 meta_json、
+            # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 与 list-runs 用投影只取这两个值、不解析 meta_json、
             # 不触发卸载正文的 S3 取回；值与 meta_json 里的同名键恒同（同一份 meta_dict）。
             "schema_version": meta_dict["schema_version"],
             "cli_version": meta_dict["cli_version"],
@@ -364,7 +420,7 @@ class DynamoDBRunStore:
         item = resp.get("Item")
         if item is None:
             return None
-        return _schema_version_attr(item.get("schema_version")), item.get("cli_version")
+        return _header_from_item(item)
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。
@@ -375,21 +431,98 @@ class DynamoDBRunStore:
         item = resp.get("Item")
         if item is None:
             return None
-        jobs = {
-            sid: _job_state_from_item(sid, m)
-            for sid, m in (item.get("jobs") or {}).items()
+        return _run_state_from_item(item)
+
+    # ---- 列举（ADR 0041 决策七「云端实现」）----
+
+    def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
+        """列举（语义见 RunStore port）：按 `statuses` 的给定顺序逐个 Query 状态分区（run_id 降序），收集到的 run_id 先去重，再用
+        `BatchGetItem` 强一致读回每个 run 的 STATE 与 META（同一批请求，不另起读取）。
+
+        行内容以读回的 STATE 为准、不按状态复筛；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了
+        （形态违约、job 状态值本版本不认识）以 `state=None` 列出；detached 与 `is_detached` 同一判据（STATE 顶层标记）；头部与
+        `peek_definition_header` 同一读法，META 不在或头部解析不了为 None。Query 与读回的 AWS 错误原样抛出（索引缺失时 Query
+        以 ValidationException 失败）；读回的未处理键重试耗尽抛 `RunListingIncomplete`。
+        """
+        if self._list_index_name is None:
+            raise RuntimeError("本进程的 RunStore 没有配置列举 run 用的索引名，列不出 run"
+                               "（配置缺失：起 RunStore 的地方须注入 list_index_name）")
+        if limit is not None and limit < 1:
+            raise ValueError(f"limit 须为正整数或 None，现为 {limit!r}")
+        run_ids: list[str] = []
+        seen: set[str] = set()
+        for status in dict.fromkeys(statuses):
+            for run_id in self._query_status_partition(status, limit):
+                # 先去重再读回：同一 run 可能在索引传播期间同时出现在新旧两个分区，而 BatchGetItem 的同一请求里出现重复的键，
+                # 整个请求以 ValidationException 失败
+                if run_id not in seen:
+                    seen.add(run_id)
+                    run_ids.append(run_id)
+        items = self._batch_get_listing_items(run_ids)
+        rows: list[RunListing] = []
+        for run_id in run_ids:
+            state_item = items.get((run_id, _STATE))
+            if state_item is None:
+                continue
+            try:
+                state = _run_state_from_item(state_item)
+            except (ValueError, KeyError, TypeError, AttributeError):  # 形态违约、状态值不认识
+                state = None
+            meta_item = items.get((run_id, _META))
+            try:
+                header = _header_from_item(meta_item) if meta_item is not None else None
+            except ValueError:  # 结构版本不是整数（DefinitionContractError）：头部解析不了，与本机同读作 None
+                header = None
+            rows.append(RunListing(run_id=run_id, state=state, detached=bool(state_item.get("detached")), header=header))
+        rows.sort(key=lambda row: row.run_id, reverse=True)
+        return rows
+
+    def _query_status_partition(self, status: Status, limit: int | None) -> list[str]:
+        """按 run_id 降序读一个状态分区里的 run_id：`limit` 给出时取够为止（一页不足且还有下一页时续读），为 None 时分页读完。"""
+        kwargs: dict = {
+            "IndexName": self._list_index_name,
+            "KeyConditionExpression": "#st = :s",
+            "ExpressionAttributeNames": {"#st": "status"},  # status 是 DDB 保留字
+            "ExpressionAttributeValues": {":s": status.value},
+            "ScanIndexForward": False,
         }
-        hwm = item.get("high_water_mark")
-        return RunState(
-            run_id=item["run_id"],
-            status=Status(item["status"]),
-            jobs=jobs,
-            started_at=item.get("started_at"),
-            ended_at=item.get("ended_at"),
-            # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
-            high_water_mark=int(hwm) if hwm is not None else None,
-            message=item.get("message"),
-        )
+        run_ids: list[str] = []
+        while True:
+            if limit is not None:
+                kwargs["Limit"] = limit - len(run_ids)
+            resp = self._table.query(**kwargs)
+            run_ids.extend(item["run_id"] for item in resp.get("Items", []))
+            last = resp.get("LastEvaluatedKey")
+            if last is None or (limit is not None and len(run_ids) >= limit):
+                return run_ids
+            kwargs["ExclusiveStartKey"] = last
+
+    def _batch_get_listing_items(self, run_ids: list[str]) -> dict[tuple[str, str], dict]:
+        """强一致读回这些 run 的 STATE 与 META item，返回 {(run_id, item_type): item}；不在的 item 不出现。
+
+        `run_ids` 须已去重。每次请求至多 `_BATCH_GET_MAX_KEYS` 个键（每个 run 两个键）；返回的未处理键带退避重试，
+        至多 `_BATCH_GET_MAX_RETRIES` 次，耗尽抛 `RunListingIncomplete`、不返回缺行的结果。
+        """
+        client = self._table.meta.client
+        table_name = self._table.name
+        names = {f"#a{i}": attr for i, attr in enumerate(_LISTING_ATTRS)}  # 全部走 names：status、message 等是保留字
+        keys = [{"run_id": run_id, _ITEM_TYPE_ATTR: item_type} for run_id in run_ids for item_type in (_STATE, _META)]
+        read_options = {"ConsistentRead": True, "ProjectionExpression": ", ".join(names), "ExpressionAttributeNames": names}
+        got: dict[tuple[str, str], dict] = {}
+        for start in range(0, len(keys), _BATCH_GET_MAX_KEYS):
+            batch = keys[start:start + _BATCH_GET_MAX_KEYS]
+            for attempt in range(_BATCH_GET_MAX_RETRIES + 1):
+                resp = client.batch_get_item(RequestItems={table_name: {"Keys": batch, **read_options}})
+                for item in resp.get("Responses", {}).get(table_name, []):
+                    got[(item["run_id"], item[_ITEM_TYPE_ATTR])] = item
+                # 重试只发未处理的键，读取选项每次重新带上（强一致与投影不依赖响应里是否回带）
+                batch = ((resp.get("UnprocessedKeys") or {}).get(table_name) or {}).get("Keys") or []
+                if not batch:
+                    break
+                if attempt == _BATCH_GET_MAX_RETRIES:
+                    raise RunListingIncomplete(table_name, len({k["run_id"] for k in batch}), _BATCH_GET_MAX_RETRIES)
+                time.sleep(_BATCH_GET_BACKOFF_S * 2 ** attempt)
+        return got
 
     def is_detached(self, run_id: str) -> bool:
         """STATE item 上有没有 `detached` 标记（ADR 0034）：True 表示无状态批量运行的 submit 建的 run。

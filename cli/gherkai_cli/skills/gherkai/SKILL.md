@@ -1,6 +1,6 @@
 ---
 name: gherkai
-description: 用 gherkai 做 AI 驱动的 UI 端到端测试：从需求与被测应用写出 Gherkin .feature 与确定性 steps 代码，plan 用例预检、本机 run 或 submit 后台或云端批量运行、status 收判定、explain 读失败证据、收窄后重新运行并汇报；也覆盖环境就位与排障（doctor、引擎 worker、AWS 凭证与 region、版本不一致）和云端后端交付（deploy 交人、variant 镜像与 push-worker）。触发规则：项目里有 .feature 且 gherkai 在场（装了 gherkai CLI、steps/ 里 import 了 gherkai 的 worker 包、或项目文档提到 gherkai）时，用户一提到跑测试、写用例、看为什么失败就用本 skill，哪怕没说出 gherkai；项目里还没有 .feature 时看项目级信号：本 skill 装在这个项目里、项目文档提到 gherkai、或有 gherkai 式 steps/，有其一就照测试意图触发（从零写第一条用例正是本 skill 的活）；只是机器上装了 gherkai CLI 不算信号，那时要用户明确提到 gherkai。不接管两类：纯 Cucumber / Playwright 项目（有自己的 step definitions 或配置）；用户点名别的测试工具（pytest、Selenium、Cypress、Playwright、Cucumber、behave……）的问题，哪怕项目里也有 .feature——除非他要把它们迁到 gherkai。English triggers - gherkai, run/plan/submit gherkai tests, .feature with AI steps, deterministic steps, explain a failed scenario, gherkai doctor, worker variant, push-worker.
+description: 用 gherkai 做 AI 驱动的 UI 端到端测试：从需求与被测应用写出 Gherkin .feature 与确定性 steps 代码，plan 用例预检、本机 run 或 submit 后台或云端批量运行、status 收判定、list-runs 找回 run_id、explain 读失败证据、收窄后重新运行并汇报；也覆盖环境就位与排障（doctor、引擎 worker、AWS 凭证与 region、版本不一致）和云端后端交付（deploy 交人、variant 镜像与 push-worker）。触发规则：项目里有 .feature 且 gherkai 在场（装了 gherkai CLI、steps/ 里 import 了 gherkai 的 worker 包、或项目文档提到 gherkai）时，用户一提到跑测试、写用例、看为什么失败就用本 skill，哪怕没说出 gherkai；项目里还没有 .feature 时看项目级信号：本 skill 装在这个项目里、项目文档提到 gherkai、或有 gherkai 式 steps/，有其一就照测试意图触发（从零写第一条用例正是本 skill 的活）；只是机器上装了 gherkai CLI 不算信号，那时要用户明确提到 gherkai。不接管两类：纯 Cucumber / Playwright 项目（有自己的 step definitions 或配置）；用户点名别的测试工具（pytest、Selenium、Cypress、Playwright、Cucumber、behave……）的问题，哪怕项目里也有 .feature——除非他要把它们迁到 gherkai。English triggers - gherkai, run/plan/submit gherkai tests, .feature with AI steps, deterministic steps, explain a failed scenario, gherkai doctor, worker variant, push-worker.
 ---
 
 # gherkai：替使用者把 UI 测试整条走通
@@ -33,10 +33,10 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 - `run`：前台同步，CLI 全程在线，正常结束的退出码即判定。人在等结果、批量不大时用它。
 - `submit`：提交即返回，stdout 只打一个 `run_id`，退出码 0 只表示提交成功；判定看 `status <run_id> --wait`。local 后端由本机一个脱离 CLI 的后台进程推进（本机需开机）；cloud 后端由云端推进，提交后关机也会运行到结束。
-- **cloud 一条线**：依次执行 `doctor --backend cloud --prefix P`、`plan`、`submit --backend cloud --prefix P`、`status --backend cloud --prefix P --wait`、`explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份，标注只代表本机视图。`status` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致就以退出码 2 结束、说找不到这个 run（那句提示只提 `submit`，按上面那条对齐参数，不要照它只改 `submit`）。
+- **cloud 一条线**：依次执行 `doctor --backend cloud --prefix P`、`plan`、`submit --backend cloud --prefix P`、`status --backend cloud --prefix P --wait`、`explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份（第 10 节）。`status` / `list-runs` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致（云端 `list-runs` 不看 `--report-dir`）——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致时 `status` / `explain` 以退出码 2 结束、说找不到这个 run，`list-runs` 列出的是另一处的 run（常见为空清单）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
-- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成干净的隧道公网地址（访问受本次运行专用的会话保护：引擎的浏览器在第一个场景之前凭令牌换到会话 cookie）；选项值须与 feature 书写逐字一致，只替换作为一个地址出现的部分（localhost 与 `127.0.0.1` 不互认）。`run` / `submit` / `plan` 都收（`plan` 只标注、不起隧道、也不校验地址是否匹配得上）。前置是本机的 ngrok 与其 authtoken，`doctor` 不查、缺了在起隧道时失败；前置、Host 放行与排障入口见 `references/setup-and-diagnosis.md` 第 5 节。`submit` 后隧道由本机后台进程持有，本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
-- **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 后端且开了隧道时才有意义：隧道守护进程的兜底 TTL，缺省为这个 run 各 job 预算之和加余量；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别为「省一点」去调它。
+- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成隧道公网地址；选项值须与 feature 书写逐字一致（localhost 与 `127.0.0.1` 不互认）。`run` / `submit` / `plan` 都收（`plan` 只标注，不起隧道、不校验地址匹配）。前置是本机的 ngrok 与其 authtoken，`doctor` 不查、缺了在起隧道时失败；写法细则、Host 放行与排障见 `references/setup-and-diagnosis.md` 第 5 节。`submit` 后本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
+- **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 后端且开了隧道时才有意义：隧道存活上限，缺省按这个 run 各 job 预算之和加余量估算；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别调它。
 
 ## 4 编写 feature 与 steps
 
@@ -53,11 +53,11 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 ## 5 工作循环
 
 1. `gherkai doctor`（首次或环境变过；cloud 后端加 `--backend cloud --prefix P`）。
-2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数就是这个 run 要开几个云端浏览器会话**，费用随 job 数与步数走，`--max-concurrency` 只改同时运行几个、不减总账。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
-3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。
-4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（即使能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型所见与截图位置拼成一份可复现的证据，手翻 JSON 容易漏）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成：每次 AI 调用的票值与错误、它看见与想了什么、截图在哪；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起，与文本步号一致，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`，别解析 HTML 报告、别自己拼产物位置，顺 `ref` 走。
+2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数就是这个 run 要开几个云端浏览器会话**，费用随 job 数与步数走。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
+3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。找不回 run_id 时用 `gherkai list-runs`（定位参数同 `status`）列出这个后端里的 run；说明列标「由前台 run 执行」的未结束 run，`status --wait` 只等待、不接力。
+4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（即使能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型所见与截图位置拼成一份可复现的证据，手翻 JSON 容易漏）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成：每次 AI 调用的票值与错误、它看见与想了什么、截图在哪；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起，与文本步号一致，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`（读法与禁忌见第 10 节）。
 5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先重新投票复核**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，重新投票只会增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。** **四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
-6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 的值就是判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；给 `Scenario Outline` 声明行的行号表示选中它展开的全部数据行）；`--tags TAG[,TAG]`（一个值内的逗号表示任一命中，重复给表示都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给时都要命中；不同类同给时都要满足。筛成空集时以退出码 2 结束并列出全部候选，照着改。
+6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 的值就是判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；Outline 声明行见第 4 节）；`--tags TAG[,TAG]`（一个值内的逗号表示任一命中，重复给表示都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给时都要命中；不同类同给时都要满足。筛成空集时以退出码 2 结束并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整个 run 拒绝运行并以退出码 2 结束，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样以退出码 2 结束；缺省 `./steps` 不存在不算错。
 
 ## 6 机读读法
@@ -70,15 +70,15 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 |---|---|---|
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 只改同时开几个会话、不改总账，scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 见第 10 节 |
-| 仅 `submit` | `--tunnel-ttl` | 只在 cloud + `--expose-local` 时有意义 |
-| cloud 后端：`doctor` / `run` / `submit` / `status` / `explain` 各要给（`plan` 不接受） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致（第 3 节）；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
-| 查询类各自有 | `status --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
+| 仅 `submit` | `--tunnel-ttl` | 见第 3 节 |
+| cloud 后端：`doctor` / `run` / `submit` / `status` / `list-runs` / `explain` 各要给（`plan` 不接受） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `run` / `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致（第 3 节）；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
+| 查询类各自有 | `status --json`、`list-runs --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
 
 ## 8 退出码分流
 
 - `run`：正常结束的退出码即判定。0 全通过；1 已运行但有失败或出错；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、云端凭证 / 版本 / variant 问题）。处理了中断时以 130 / 143 结束，不表示判定。
-- `status`：**只有读到终态才表判定**（通过时退出码 0、其余终态 1）；未到终态一律以退出码 0 结束、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。退出码 2 表示查不到这个 run，或这个 run 的提交记录格式与本机 CLI 不一致（消息会点名写出它的版本：由更新版本写出的就升级本机 CLI，由更早版本写出的就用那个版本查看或用当前版本重新提交；同一个报告目录不要混用 1.4 与 1.5 的 CLI）；cloud 后端还包括云端读不到、CLI 与后端版本不匹配。
-- `submit` / `plan` / `explain` / `doctor`：只表做成没做成（退出码 0 或 2）。`explain` 哪怕用例全红也以退出码 0 结束。
+- `status`：**只有读到终态才表判定**（通过时退出码 0、其余终态 1）；未到终态一律以退出码 0 结束、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。退出码 2 表示查不到这个 run，或这个 run 的提交记录格式与本机 CLI 不一致（处置见 `references/setup-and-diagnosis.md` 第 7 节）；cloud 后端还包括云端读不到、CLI 与后端版本不匹配。
+- `submit` / `plan` / `list-runs` / `explain` / `doctor`：只表做成没做成（退出码 0 或 2）。`explain` 哪怕用例全红也以退出码 0 结束，`list-runs` 清单为空也是 0。
 - CI 接 `run` 的退出码，或 `submit` 之后接 `status --wait` 的退出码；别接 `submit`、`explain` 的。
 
 ## 9 失败汇报模板

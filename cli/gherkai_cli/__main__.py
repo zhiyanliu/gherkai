@@ -89,7 +89,7 @@ def _add_device_flags(p: argparse.ArgumentParser, *, project: bool) -> None:
 
 
 def _add_config_flag(p: argparse.ArgumentParser) -> None:
-    """七个读项目配置文件的子命令共用（ADR 0053 决策 1）。"""
+    """八个读项目配置文件的子命令共用（名单是 `settings.CONFIG_COMMANDS`，ADR 0053 决策 1）。"""
     p.add_argument("--config", default=None, metavar="FILE",
                    help="项目配置文件 gherkai.toml 的路径（不给时依次找环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml；"
                         "都没有就不用配置文件）。取值顺序：命令行选项 > 环境变量 > 配置文件 > 内建默认")
@@ -508,6 +508,25 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     ex.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     ex.add_argument("--region", default=None, metavar="R")
     ex.add_argument("--profile", default=None, metavar="P")
+
+    # list-runs：列出一个后端里的 run，找回 run_id（ADR 0041 决策七）。定位 flag 与 status 同名同义、同样读配置文件；
+    # 云端下 --report-dir 与清单无关，给了也忽略（使用者常把 status / explain 的整组定位参数原样复制过来）。
+    lr = sub.add_parser("list-runs", help="列出一个后端里的 run（全部未结束的，加最近几条已结束的），用来找回 run_id；只读")
+    _add_config_flag(lr)
+    lr.add_argument("--backend", choices=["local", "cloud"], default=None,
+                    help="列哪个后端里的 run；须与产生这些 run 的 run 或 submit 一致")
+    lr.add_argument("--report-dir", default=None, metavar="DIR",
+                    help="[local] run 落点，须与产生这些 run 的 run 或 submit 一致；云端后端的清单不用它，给了也忽略")
+    lr.add_argument("--status", action="append", default=None, choices=[s.value for s in Status], metavar="S",
+                    help="只列这些状态的 run（可重复）：" + "、".join(s.value for s in Status)
+                         + "；不给时列全部状态。已结束的状态同样受 --limit 约束")
+    lr.add_argument("--limit", type=_positive_int, default=_LIST_RUNS_DEFAULT_LIMIT, metavar="N",
+                    help=f"已结束的 run 最多列几条，取最近创建的（默认 {_LIST_RUNS_DEFAULT_LIMIT}）；未结束的 run 不受限、全部列出")
+    lr.add_argument("--json", action="store_true", help="输出机器可读 JSON（所查的落点 + 每个 run 的状态摘要）")
+    lr.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（据此定位要列的云端后端）")
+    lr.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
+    lr.add_argument("--region", default=None, metavar="R")
+    lr.add_argument("--profile", default=None, metavar="P")
 
     # _reconcile：per-run 进程入口（submit setsid fork 它，非使用方直接调）。执行 reconcile loop 到全 done。
     # 内部入口**不传 help**：argparse 只为带 help 的子命令登记帮助条目，不传即不出现在 --help 的命令说明里；
@@ -1727,7 +1746,8 @@ def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str
 
 def _definition_header_gate(run_store, run_id: str) -> int | None:
     """读 definition 的头（结构版本与写端版本）并过版本闸（ADR 0037 决策 7）。头本身读不出来（同版本下的形态违约，如版本字段不是整数）
-    也以退出码 2 结束并说明——不让它变成裸异常；本机与云端的 status / explain 四个读端都经这里（云端的 botocore 异常由调用方接）。"""
+    也以退出码 2 结束并说明——不让它变成裸异常；本机与云端的 status / explain 四个读端都经这里（云端的 botocore 异常由调用方接）；
+    list-runs 不过这道闸、不经这里（ADR 0041 决策七「写出版本的标记」）。"""
     try:
         header = run_store.peek_definition_header(run_id)
     except DefinitionContractError as e:
@@ -1802,7 +1822,8 @@ def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | No
 
     **戳一并返回、全程只读一次**：worker variant 解析（ADR 0038「运行时与 preflight」）要拿同一个戳给出
     skew 感知的提示语（与后端同版本 → 指向 `push-worker`；CLI 偏旧 → 指向升级 CLI，不引导去推一个旧版本
-    tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；本 CLI 的四个 cloud 入口与 doctor、`gherkai-deploy-aws` 的 `push_worker` / `list_workers` 都调用它，判据与措辞单点；推进器不读 SSM），
+    tag 的镜像）。读戳 + 判定住产品本体（`compose.check_backend_skew`，第三元即戳；本 CLI 的五个 cloud 入口（run / submit /
+    status / explain / list-runs）与 doctor、`gherkai-deploy-aws` 的 `push_worker` / `list_workers` 都调用它，判据与措辞单点；推进器不读 SSM），
     本函数只把 verdict 翻成退出码。
     比的是**本 CLI 自己的**版本（`_installed_version()`，而非产品本体包的）——`gherkai deploy` 往 SSM 写的戳就是它，
     它也是写任务定义的那一方；两者靠 `==` pin 恒同版本，显式传免得读者去猜哪个；未装成包 → None → 跳过。
@@ -2230,6 +2251,133 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
                               bucket=target.bucket, report_prefix=args.report_dir, table=target.runs_table,
                               run_id=args.run_id),
                           relay_available=_relay_available)
+
+
+# ============================================================================
+# list-runs（ADR 0041 决策七）：列出一个后端里的 run，找回 run_id。只读、零副作用（不接力推进、不起 task）；
+# 退出码只有 0（读到了清单，空清单与含「无法读取」行的清单也是 0）与 2（参数不合法或读不到这个后端），不表判定。
+# 默认清单的口径（列哪些状态、终态取几条、两次端口调用怎么合并）只在这里，端口与 adapter 不承载它。
+# ============================================================================
+
+_LIST_RUNS_DEFAULT_LIMIT = 20
+# 非终态按 pending 再 running 的顺序查：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run
+_LIST_RUNS_NON_TERMINAL = (Status.PENDING, Status.RUNNING)
+# 终态集取 core 真源，顺序固定为 Status 的声明序（不另行枚举，新增终态自动进清单）
+_LIST_RUNS_TERMINAL = tuple(s for s in Status if s in TERMINAL_STATUSES)
+
+
+def _positive_int(raw: str) -> int:
+    """`--limit` 的类型转换：只收正整数；报错形态与 argparse 其它类型错一致（退出码 2）。"""
+    try:
+        v = int(raw)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"须为正整数（收到 {raw!r}）") from None
+    if v < 1:
+        raise argparse.ArgumentTypeError(f"须为正整数（收到 {raw!r}）")
+    return v
+
+
+def _merge_run_listings(run_store, wanted: frozenset, *, limit: int) -> list:
+    """两次 `RunStore.list_runs` 合并成一份清单（ADR 0041 决策七「CLI 的合并」）。
+
+    先非终态（`limit=None`）、后终态（`limit=limit`），`wanted` 只含一侧的状态时只做那一次调用。端口不按状态复筛，所以这里
+    按 `wanted` 过滤**读回的**状态；按 run_id 去重，两份都有时保留后一次读回的那份（运行态只向终态推进，后读的不会更旧）；
+    读回的状态是终态的部分按 run_id 降序截前 `limit` 条，最后整体按 run_id 降序。这一顺序收窄了「两次调用之间换状态、或云端
+    索引尚未跟上，run 在两份结果里都不出现」的窗口。无法读取的行（`state` 为 None）没有可用的状态，不参与过滤与截取、找到即列出。
+    """
+    found: dict = {}
+    for part, part_limit in ((_LIST_RUNS_NON_TERMINAL, None), (_LIST_RUNS_TERMINAL, limit)):
+        statuses = [s for s in part if s in wanted]
+        if not statuses:
+            continue
+        for item in run_store.list_runs(statuses, limit=part_limit):
+            found[item.run_id] = item
+    unreadable = [i for i in found.values() if i.state is None]
+    readable = [i for i in found.values() if i.state is not None and i.state.status in wanted]
+    ongoing = [i for i in readable if i.state.status not in TERMINAL_STATUSES]
+    finished = sorted((i for i in readable if i.state.status in TERMINAL_STATUSES),
+                      key=lambda i: i.run_id, reverse=True)[:limit]
+    return sorted(unreadable + ongoing + finished, key=lambda i: i.run_id, reverse=True)
+
+
+def _run_noun(wanted: frozenset) -> str:
+    """空清单提示里的「run」：给了 --status 时说清是哪些状态的 run，免得把「没有这些状态的 run」说成「没有 run」。"""
+    if wanted == frozenset(Status):
+        return "任何 run"
+    return "状态为 " + "、".join(s.value for s in Status if s in wanted) + " 的 run"
+
+
+def _emit_run_list(args, location: dict, items: list, *, empty_hint: str) -> int:
+    """输出清单：`--json` 恒为一个文档（空清单也是，不打人读提示，ADR 0041 决策三）；人读形态为表格，空清单只打一行落点提示。"""
+    mine = _installed_version()  # 写出版本的比对对象：本 CLI 自己的版本，未装成包时为 None（每个 run 都标出写出版本）
+    if args.json:
+        print(json.dumps(render.run_list_to_dict(location, items, cli_version=mine), ensure_ascii=False, indent=2))
+    elif not items:
+        print(empty_hint)
+    else:
+        print(render.render_run_list(items, cli_version=mine))
+    return 0
+
+
+def _cmd_list_runs(args) -> int:
+    """[查询] 列出一个后端里的 run（ADR 0041 决策七）。
+
+    按三项定位参数选定**一个**后端，不跨后端、不跨报告落点搜（决策六）。本机逐目录读 `run_state.json`（目录不存在按空清单，
+    提示说明目录不存在；目录不可读以退出码 2 结束）；云端先过版本 skew 闸，再经 compose 装配（含索引就绪检查）后读。
+    清单不过 definition 的结构版本闸：只读运行态里跨版本稳定的几项，旧版本写出的 run 只在版本列标出写出版本。
+    """
+    wanted = frozenset(Status(s) for s in args.status) if args.status else frozenset(Status)
+    if args.backend == "cloud":
+        return _list_runs_cloud(args, wanted)
+
+    report_root = Path(args.report_dir).resolve()
+    location = compose.local_run_list_location(report_root)
+    run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+    try:
+        items = _merge_run_listings(run_store, wanted, limit=args.limit)
+    except OSError as e:
+        _progress(f"读不出报告落点目录 {location['report_dir']}（请检查目录权限，或 --report-dir 是否给对）：{e}")
+        return 2
+    if not Path(location["report_dir"]).exists():
+        where = f"报告落点目录 {location['report_dir']} 不存在（这里还没有落过盘的 run，或路径给错了）"
+    else:
+        where = f"报告落点目录 {location['report_dir']} 下没有{_run_noun(wanted)}"
+    return _emit_run_list(args, location, items,
+                          empty_hint=f"没有找到 run：{where}。请核对 --backend 与 --report-dir 是否与产生 run 的 run 或 submit 一致。")
+
+
+def _list_runs_cloud(args, wanted: frozenset) -> int:
+    """云端 list-runs：版本 skew 闸 → 装配（索引就绪检查在 compose 的装配路径上）→ 两次端口调用。机器只需读权限
+    （skew 闸的 SSM 读、DescribeTable、索引上的 Query 与表上的 BatchGetItem，权限清单在 ADR 0033「编排进程角色」段）。"""
+    target = _cloud_target(args, runs_table=args.ddb_table, **_config_layers(args))
+    if isinstance(target, int):
+        return target
+    # 版本 skew 先于任何云端读（ADR 0037 决策 7 的次序）；清单不解析 worker variant、不起 task
+    skew_rc, _backend_version = _cloud_skew_gate(target)
+    if skew_rc is not None:
+        return skew_rc
+    from gherkai_core.adapters.run_store.ddb import RunListingIncomplete
+
+    location = compose.cloud_run_list_location(prefix=target.prefix, region=target.region, table=target.runs_table)
+    # 装配、就绪检查与两次读都在这一处报错，一律以退出码 2 结束、不给出缺行的清单：索引缺失或未就绪与批量读回重试耗尽转述
+    # 各自的整句，AWS 错误（表不存在、无权限、凭证、region）打一句诊断，非 AWS 错误原样抛出
+    try:
+        run_store = compose.build_cloud_run_list_store(table=target.runs_table, region=target.region, profile=target.profile)
+        items = _merge_run_listings(run_store, wanted, limit=args.limit)
+    except (compose.RunListIndexUnavailable, RunListingIncomplete) as e:
+        _progress(str(e))
+        return 2
+    except ImportError as e:
+        _progress(f"--backend cloud 需要 boto3：{e}")
+        return 2
+    except Exception as e:
+        if not compose.is_botocore_error(e):
+            raise
+        _progress(f"list-runs --backend cloud 读不到运行状态表 {location['ddb_table']}（表、索引、凭证、region 或权限）：{e}")
+        return 2
+    return _emit_run_list(args, location, items, empty_hint=(
+        f"没有找到 run：前缀 {location['prefix']}（region {location['region']}）的运行状态表 {location['ddb_table']} "
+        f"里没有{_run_noun(wanted)}。请核对 --backend、--prefix、--region、--profile 与 --ddb-table 是否与产生 run 的 run 或 submit 一致。"))
 
 
 # ============================================================================
@@ -3124,6 +3272,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_status(args)
     if args.command == "explain":
         return _cmd_explain(args)
+    if args.command == "list-runs":
+        return _cmd_list_runs(args)
     if args.command == "_tunnel_watch":
         return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":

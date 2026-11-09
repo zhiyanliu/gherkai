@@ -61,7 +61,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 | 桌面网页目标（两个引擎）              | AgentCore Browser（`bedrock-agentcore`）                     | 每个桌面 scope 一个浏览器会话                                                                                                                                                                                                                                                                      |
 | Android / iOS 真机目标（仅 Midscene） | AWS Device Farm（只在 us-west-2 提供，与你选的 region 无关） | 每个设备 scope 一个远程访问会话，按设备分钟计费。本机后端要自己指定 Device Farm 项目（可用 `aws devicefarm create-project --region us-west-2 --name <项目名>` 新建；应用目标另需一个放安装包的 S3 桶），见[配置](./configuration.md)；云端后端用部署时建立的项目，见[云端后端](./cloud-backend.md) |
 
-- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话、真机与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain` 与 `status`（`status --wait` 对 `submit` 提交的 run 会在本机接着把它推完，那时需要凭证）。
+- 在本机运行（`--backend local`）同样需要 AWS 凭证：浏览器会话、真机与模型都在云端，本机只运行 worker 进程。纯本地、不需要凭证的命令：`plan`、`list-engines`、`list-deterministic`、`skill install`，不带云端参数的 `doctor`，以及本机后端下只读本地报告目录的 `explain`、`list-runs` 与 `status`（`status --wait` 对 `submit` 提交的 run 会在本机接着把它推完，那时需要凭证）。
 - 实际运行产生 AWS 费用（模型调用 + 云端浏览器会话；设备目标为 Device Farm 远程访问会话的设备分钟），以 AWS 账单为准。费用量级、以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。
 - 用 `--backend cloud` 之前，需要有人先用 `gherkai deploy` 把云端后端建好，见[云端后端](./cloud-backend.md)。
 
