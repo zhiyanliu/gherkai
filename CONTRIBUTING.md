@@ -9,6 +9,7 @@
 - **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。人读文本（注释、docstring、文档、用户可见字符串）的措辞标准在 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策六，护栏 `cli/tests/test_code_comments.py`（注释与 docstring）、`test_technical_docs.py`（技术文档）、`test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`（用户文档、skill、包页）、`test_user_facing_messages.py`（用户可见字符串）随 `uv run pytest` 一并执行。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
+- **设计类改动先过独立复核**：新增或反转 ADR、改契约与不变量，以及把待审批事项交人裁定之前，按 [`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md) 做一次独立复核、分歧裁决与闭合确认。环境里有另一家模型的只读 CLI（本仓库用 Codex CLI）就用它作同僚，可用即默认启用；没有或说明原因后不用时，按该文的替代方式做，并在 PR 说明里写明用了哪种。机制本身不依赖任一工具。
 - **改完回头校准文档**：受影响的 ADR、`CONTEXT.md`、各包 `README.md` 与 `DEVELOPMENT.md`、`docs/` 下的页面一并修改。枚举型内容（目录树、选项表、模块清单、护栏清单）靠 `ls` / grep / `--help` 逐条比对差集，不靠通读。
 
 ## 现状与版本线
@@ -44,7 +45,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 │   ├── adr/                   ← 架构决策记录（0001-0053，每篇带 Status 头）
 │   ├── internals/             ← 机理横切解读（只讲 how、权威在 ADR + code）；篇目与主题归属见 docs/internals/README.md
 │   ├── user-guide/            ← 使用者文档，一个主题一篇 owner（篇目与 owner 表见 docs/user-guide/README.md）
-│   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）+ diagram-authoring.md（作图方法）
+│   ├── ai-eng/                ← contributor 侧 AI agent 的工作文档：README.md（该层入口）+ REFERENCES.md（外部一手来源）+ {doc,code}-health-review.md（两条复盘方法）+ diagram-authoring.md（作图方法）+ peer-review.md（独立复核与同僚复核的工作约定）
 │   ├── journey/               ← 任务推进的 staging 区，按需创建（过程产物，吸收进 ADR/code 后即删，见 CLAUDE.md「文档纪律」）
 │   ├── presentations/         ← 演示材料：演示文稿、讲解视频、字幕与配套资料（入口 docs/presentations/README.md，制作工具在 tools/presentations/）
 │   └── diagrams/              ← 文档里的图：图源 JSON + 导出 SVG + 已发布到 Pages 的可交互 HTML + index.html（各层文档共用；GitHub Pages 只发布这一个目录）
@@ -224,3 +225,4 @@ CI（任意分支的 push、PR、手动触发）运行四项检查：全成员 `
 另外两处：术语在 [`CONTEXT.md`](./CONTEXT.md)；contributor 侧 AI agent 的工作文档在 [`docs/ai-eng/`](./docs/ai-eng/README.md)，含外部一手来源 [`REFERENCES.md`](./docs/ai-eng/REFERENCES.md) 与两条复盘方法。
 
 - 复盘方法（给 contributor 侧 AI agent 执行的任务指令，不是人手工清单）：[`docs/ai-eng/doc-health-review.md`](./docs/ai-eng/doc-health-review.md)（全部文档对照 code 去漂移）/ [`docs/ai-eng/code-health-review.md`](./docs/ai-eng/code-health-review.md)（全部生产代码查死代码 / 过时 / 违背 ADR）。事件驱动：显著构建里程碑或一批 ADR 增改后运行，不做周期性空转。Claude Code 里执行 `/doc-health-review`、`/code-health-review`（入口在 [`.claude/commands/`](./.claude/commands/)，作用是把方法文档提供给 agent 并强调不可跳过的步骤）；其它 AI coding 工具把对应方法文档整份作为任务指令即可。客观类问题由 agent 直接修改，主观类问题输出报告待批。
+- 独立复核与同僚复核的工作约定：[`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md)（何时做与怎么做见上文「如何参与」）。
