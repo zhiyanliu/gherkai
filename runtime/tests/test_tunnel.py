@@ -257,6 +257,10 @@ def _fake_popen_writing_log(url_value: str | None, spawned: dict, alive: bool = 
 
     def popen(cmd, **kw):
         spawned["cmd"] = cmd
+        if "--traffic-policy-file" in cmd:  # 策略文件在 agent 就绪后即删，只能在 spawn 时刻读它（ADR 0035 决策 4）
+            pp = cmd[cmd.index("--traffic-policy-file") + 1]
+            spawned["policy"] = open(pp, encoding="utf-8").read()
+            spawned["policy_mode"] = os.stat(pp).st_mode & 0o777
         if url_value is not None:
             log = cmd[cmd.index("--log") + 1]
             Path(log).write_text(
@@ -268,8 +272,8 @@ def _fake_popen_writing_log(url_value: str | None, spawned: dict, alive: bool = 
 
 
 def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
-    """start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600；预热地址带本次令牌；
-    两次 start 的令牌与 cookie 值都不同、各 128 位；不再有关掉鉴权的开关（ADR 0051 决策 13；0035「边界与不变量」）。"""
+    """start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600 且 agent 就绪后即删；
+    预热地址带本次令牌；两次 start 的令牌与 cookie 值都不同、各 128 位；不再有关掉鉴权的开关（ADR 0051 决策 13；0035「边界与不变量」）。"""
     import os as _os
 
     spawned: dict = {}
@@ -280,8 +284,8 @@ def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
     assert cmd[0] == "ngrok" and cmd[1] == "http" and cmd[2] == "http://localhost:3000"
     assert "--log" in cmd and "--log-format" in cmd  # 日志文件通道（v3 无 --web-addr，实际运行暴露）
     policy_path = cmd[cmd.index("--traffic-policy-file") + 1]
-    assert _os.stat(policy_path).st_mode & 0o777 == 0o600
-    policy = open(policy_path, encoding="utf-8").read()
+    assert spawned["policy_mode"] == 0o600 and not _os.path.exists(policy_path)  # 就绪后即删：秘密不在磁盘停留
+    policy = spawned["policy"]
     token = info.warmup_url.rsplit("=", 1)[1]
     assert info.warmup_url == f"https://xyz.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token={token}"
     assert re.fullmatch(r"[0-9a-f]{32}", token) and token in policy and "basic-auth" not in policy
@@ -289,7 +293,7 @@ def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
     assert len(cookie) == 32 and cookie != token
     info2 = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start("http://localhost:3000")
     assert info2.warmup_url != info.warmup_url
-    policy2 = open(spawned["cmd"][spawned["cmd"].index("--traffic-policy-file") + 1], encoding="utf-8").read()
+    policy2 = spawned["policy"]
     assert re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy2).group(1) != cookie  # cookie 值也每次不同，不只是令牌
     with pytest.raises(TypeError):
         t.start("http://localhost:3000", with_auth=False)  # 曾有的开关已删：隧道模式恒带鉴权
@@ -321,19 +325,65 @@ def test_ngrok_start_timeout_reports_authtoken_hint():
         clock["t"] += 8.0  # 三跳即越过 20s deadline
         return clock["t"]
 
-    t = NgrokTunnel(popen=_fake_popen_writing_log(None, {}),
+    spawned: dict = {}
+    t = NgrokTunnel(popen=_fake_popen_writing_log(None, spawned),
                     sleep=lambda s: None, monotonic=monotonic)
     with pytest.raises(TunnelError, match="authtoken"):
         t.start("http://localhost:3000")
+    assert not os.path.exists(spawned["cmd"][spawned["cmd"].index("--traffic-policy-file") + 1])  # 失败路径同样不留策略文件
 
 
 def test_ngrok_binary_missing_reports_install_hint():
+    seen: dict = {}
+
     def popen(cmd, **kw):
+        seen["policy"] = cmd[cmd.index("--traffic-policy-file") + 1]
         raise FileNotFoundError("ngrok")
 
     t = NgrokTunnel(popen=popen)
     with pytest.raises(TunnelError, match="ngrok"):
         t.start("http://localhost:3000")
+    assert not os.path.exists(seen["policy"])  # spawn 失败同样不留策略文件（finally 清理）
+
+
+def test_ngrok_policy_file_removed_when_rendering_fails(monkeypatch):
+    """策略写入阶段失败（渲染抛错）同样不留文件：try 紧接 mkstemp 之后，写入、spawn、等待就绪任一步失败都尝试删除。"""
+    created: list = []
+    real_mkstemp = tunnel.tempfile.mkstemp
+
+    def mkstemp(*a, **kw):
+        fd, path = real_mkstemp(*a, **kw)
+        created.append(path)
+        return fd, path
+
+    monkeypatch.setattr(tunnel.tempfile, "mkstemp", mkstemp)
+    monkeypatch.setattr(tunnel, "render_traffic_policy", lambda t, c: (_ for _ in ()).throw(RuntimeError("render failed")))
+    with pytest.raises(RuntimeError, match="render failed"):
+        NgrokTunnel(popen=lambda *a, **kw: pytest.fail("不该 spawn")).start("http://localhost:3000")
+    policies = [p for p in created if "gherkai-tunnel-policy-" in p]
+    assert len(policies) == 1 and not os.path.exists(policies[0])
+
+
+def test_ngrok_policy_file_lives_until_ready_then_removed():
+    """策略文件在 agent 就绪之前一直在（agent 启动时要读它），拿到 URL 之后才删：fake 延后两次轮询再写就绪行，
+    轮询期间断言文件仍在、返回后断言已删。防止把删除错放到 spawn 之后、就绪之前。"""
+    spawned: dict = {}
+    seen_during_poll: list = []
+
+    def popen(cmd, **kw):
+        spawned["cmd"] = cmd
+        spawned["log"] = cmd[cmd.index("--log") + 1]
+        spawned["policy"] = cmd[cmd.index("--traffic-policy-file") + 1]
+        return _FakeProc(alive=True)
+
+    def sleep(_s):
+        seen_during_poll.append(os.path.exists(spawned["policy"]))
+        if len(seen_during_poll) == 2:
+            Path(spawned["log"]).write_text(json.dumps({"lvl": "info", "msg": "started tunnel", "url": "https://late.ngrok-free.app"}) + "\n", encoding="utf-8")
+
+    info = NgrokTunnel(popen=popen, sleep=sleep).start("http://localhost:3000")
+    assert info.url == "https://late.ngrok-free.app"
+    assert seen_during_poll == [True, True] and not os.path.exists(spawned["policy"])
 
 
 def test_ngrok_agent_detaches_from_cli_process_group(tmp_path):

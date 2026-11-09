@@ -204,16 +204,23 @@ class NgrokTunnel:
         _log_fd, _log_name = tempfile.mkstemp(prefix="gherkai-tunnel-", suffix=".log")
         os.close(_log_fd)
         log_path = Path(_log_name)
-        # 流量策略文件**有意不删**（与 log 文件同）：agent 可能在隧道存活期重读 policy，删掉就有把边缘鉴权拆成裸公网口的风险；
-        # 令牌与 cookie 只对本隧道有效、随 stop_tunnel 即成死凭据，且 mkstemp 建出来就是 0600（仅本用户可读）。
-        # 真要清理须先在真实边界上核实 agent 不重读——只靠单测证明不了。
+        # 流量策略文件只在 agent 启动期间保留：真实边界上核过（ADR 0035 决策 4 隧道鉴权条）同一 agent 进程在隧道存活期改写、删除
+        # 该文件以及心跳超时后重连，边缘鉴权行为都保持一致，所以就绪或失败后都尝试删除、缩短凭据落盘的时间（尽力而为：删除失败
+        # 时文件残留，仍是 mkstemp 建出的 0600）。边界：另起一个 agent 进程仍须提供文件，本函数每次调用都重新生成。清理走 finally，
+        # 写入、spawn、等待就绪任一步失败都尝试删除。
         fd, policy_path = tempfile.mkstemp(prefix="gherkai-tunnel-policy-", suffix=".yml")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            f.write(render_traffic_policy(token, cookie))
-        cmd = [self._binary, "http", local_origin,
-               "--log", str(log_path), "--log-format", "json",
-               "--traffic-policy-file", policy_path]
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                f.write(render_traffic_policy(token, cookie))
+            cmd = [self._binary, "http", local_origin,
+                   "--log", str(log_path), "--log-format", "json",
+                   "--traffic-policy-file", policy_path]
+            return self._launch(cmd, proc_log=log_path, local_origin=local_origin, token=token, timeout_s=timeout_s)
+        finally:
+            _remove_quietly(policy_path)  # 就绪或失败都不再需要它；日志文件保留作诊断通道
 
+    def _launch(self, cmd: list[str], *, proc_log: Path, local_origin: str, token: str, timeout_s: float) -> TunnelInfo:
+        log_path = proc_log
         try:
             # start_new_session=True（setsid）让 agent 脱离 CLI 的会话/进程组：隧道的生命周期由**宿主**决定
             # （ADR 0035 决策 3 三形态宿主 + stop_tunnel(pid)），不该由终端的信号转发决定。否则 submit 时
@@ -264,6 +271,14 @@ class NgrokTunnel:
                 f"常见原因：authtoken 未配置（NGROK_AUTHTOKEN 或 `ngrok config add-authtoken`）/ 无外网。"
                 f"agent 日志尾部：{tail or '（空）'}")
         return TunnelInfo(url=url, pid=proc.pid, local_origin=local_origin, warmup_url=warmup_url_for(url, token))
+
+
+def _remove_quietly(path: str) -> None:
+    """尝试删临时文件，不存在或无权限都不抛：清理是尽力而为，不该把已就绪的隧道变成失败、也不遮蔽启动错误。"""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def stop_tunnel(pid: int) -> None:

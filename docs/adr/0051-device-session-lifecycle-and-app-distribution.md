@@ -170,7 +170,7 @@
 - **为什么统一**：iOS Safari 不采用地址内嵌凭据（被拒方案），iOS 必须换方案；同一方案在桌面与 Android 上同样成立，统一后只有一套鉴权、一套脱敏与一组用例。附带收益：跳转后文档地址不再带 userinfo，[0035](./0035-local-app-testing-via-tunnel.md) 决策 4 记录的「被测应用用绝对地址调 `history.pushState` 时抛 SecurityError」这类假失败随之消失，业务地址（`page.url()`、失败消息、AI 提示）里不再有 userinfo 形态的凭据（与 [0035](./0035-local-app-testing-via-tunnel.md) 的说法一致）；地址断言与正则参数不再被令牌污染。
 - **对隧道服务商的要求**：边缘能按路径、查询参数与 cookie 精确值分支，并返回带固定头的自定义响应；现行服务商 ngrok 的流量策略在本项目所用的免费层账号上实测具备。不具备该能力的服务商不能作为隧道实现，启动隧道时 fail-loud。四台真机实测都没有出现免费层警告页；若服务商改变行为，设备目标在隧道模式下要求付费层。
 - **已知边界**：被测应用在 scope 内下发 `Clear-Site-Data: "cookies"` 后，后续请求 401，1.5 记为已知边界（拆成多个 scope 规避）；step 代码直接向隧道域发请求时须经浏览器上下文的请求通道以共享 cookie；隧道 cookie 会到达被测应用。
-- **令牌与 cookie 的残留面**：T 落在 `run_meta.json`（0600）、DDB META、S3 参数卸载对象、流量策略文件、本机 worker 进程环境、云端 RunTask 的 `containerOverrides`、引擎原生产物（轨迹、报告可能记下预热地址）、浏览器会话的历史记录（离开预热页后仍留一条）、经 deepLink 路线预热的设备浏览器的当前地址（这条路线不离开预热页，已知边界）、设备录像与 Appium 日志里的预热地址、隧道服务商的流量记录；C 落在流量策略文件、浏览器 cookie 库与被测应用的访问日志。两者随隧道关闭失效。令牌不进 step 文本，`jobs/*.json` 不含秘密。
+- **令牌与 cookie 的残留面**：T 落在 `run_meta.json`（0600）、DDB META、S3 参数卸载对象、流量策略文件（只在隧道启动期间存在，agent 就绪或启动失败后尝试删除，[0035](./0035-local-app-testing-via-tunnel.md) 决策 4）、本机 worker 进程环境、云端 RunTask 的 `containerOverrides`、引擎原生产物（轨迹、报告可能记下预热地址）、浏览器会话的历史记录（离开预热页后仍留一条）、经 deepLink 路线预热的设备浏览器的当前地址（这条路线不离开预热页，已知边界）、设备录像与 Appium 日志里的预热地址、隧道服务商的流量记录；C 落在流量策略文件（同上，启动期间）、浏览器 cookie 库与被测应用的访问日志。两者随隧道关闭失效。令牌不进 step 文本，`jobs/*.json` 不含秘密。
 - **不变**：[0035](./0035-local-app-testing-via-tunnel.md) 的 URL 映射（匹配规则按边界精化，归 0035 决策 2）、隧道生命周期与桌面的 `ngrok-skip-browser-warning` 额外请求头照旧；只取代其决策 4 的鉴权方式。
 
 ### 14. 前提：国内消费级应用的线上包会自行退出

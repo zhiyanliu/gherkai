@@ -420,8 +420,8 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1794125998.0392888,
-    "ast_hash": "43557bd29c28189e157e749b0cda3aad",
+    "mtime": 1794233471.7219195,
+    "ast_hash": "8cafc2a3916bdba57d5fdc014cb427e3",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -635,8 +635,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel.py": {
-    "mtime": 1794050562.651977,
-    "ast_hash": "bf71a5279a33d00e3ef524447b479c2f",
+    "mtime": 1794233471.721719,
+    "ast_hash": "5e51d083490601f8fd6b8e5e6db59fd3",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel_host.py": {
@@ -660,8 +660,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_tunnel.py": {
-    "mtime": 1794050562.6533713,
-    "ast_hash": "ddca0522ea359f9c15c7d4c321210f73",
+    "mtime": 1794233471.722043,
+    "ast_hash": "5ea0200e320dbe5b6d6b6cc31d9e104b",
     "semantic_hash": ""
   },
   "runtime/tests/test_tunnel_host.py": {
@@ -1425,8 +1425,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
-    "mtime": 1794038519.5773304,
-    "ast_hash": "5fa211ea7e915435922bf87a29d615b0",
+    "mtime": 1794232233.58102,
+    "ast_hash": "2787a5d037929bc2ed8268d95fa611d4",
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
@@ -1880,8 +1880,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1794126712.3885102,
-    "ast_hash": "a3b69cef8f791e2a2ce77e14efd2f0c4",
+    "mtime": 1794232365.6046784,
+    "ast_hash": "a115ff762d750f3444e3fbc978e044e3",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794210663.5764947,
-    "ast_hash": "11a94c319c9d7e42402fde22fb136581",
+    "mtime": 1794231725.3779583,
+    "ast_hash": "160dd77e368f229134f6907945f97155",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
