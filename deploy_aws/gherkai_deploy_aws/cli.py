@@ -17,8 +17,9 @@ CLI 前端负责：
   时也列得出这两个动作选项；
 - 必须把 CLI 自身版本放进 `args.version`；缺失时 provider 以退出码 2 结束，不自报（ADR 0037 决策 6「版本戳」，见
   `_cli_version_or_report`）；
-- `gherkai doctor` 时若 provider 提供**可选**的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，
-  缺省 False；只读、不返退出码），把它并进自检输出的 provider 段（ADR 0041 决策四）。
+- `gherkai doctor` 时若 provider 提供**可选**的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`
+  与可选 `skipped`，两者都缺省 False；`skipped` 为 True 表示这一项没有执行检查，同时报 ok=False 的按失败输出，不被未查的
+  标记盖住；只读、不返退出码），把它并进自检输出的 provider 段（ADR 0041 决策四；契约见 ADR 0037 决策 6）。
 
 Provider 负责（CLI 一概不懂）：`--prefix`/`--vpc`/`--stop-timeout` 三个 context 配置项 + AWS 概念的
 `--region`/`--profile`（CLI 前端不在 deploy/destroy 子命令上声明这五个）、context 拼装、`cdk.json` 生成、

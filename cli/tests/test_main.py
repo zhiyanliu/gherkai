@@ -15,7 +15,7 @@ from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 
 from gherkai_cli import __main__ as m
 from gherkai_cli import submission
-from gherkai_runtime import compose
+from gherkai_runtime import compose, textui
 
 from conftest import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
 
@@ -1685,7 +1685,7 @@ def test_list_engines_json_shape(monkeypatch, capsys):
 
 
 def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
-    """local 自检：引擎（一缺一在→any ok）、steps 目录加载、云端项标未查、provider 未装标可选；全 required ok → 0；
+    """local 自检：引擎（一缺一在→any ok）、steps 目录加载、云端两项与未装的 provider 标未查；全 required ok → 0；
     steps 加载失败 → 2（agent 据退出码分流）。"""
     _fake_locator(monkeypatch)
     _no_provider(monkeypatch)
@@ -1852,6 +1852,28 @@ def test_doctor_cloud_worker_grace_without_any_local_worker_is_unchecked(monkeyp
     assert re.search(r"·\s*│\s*backend\.worker\.grace\s", capsys.readouterr().out)
 
 
+def test_doctor_cloud_worker_grace_single_revision_without_its_local_worker_is_unchecked(monkeypatch, capsys):
+    """只解析到 midscene 的镜像、本机只有 novaact 的 worker 时，解析到的引擎本机都没有 worker：一项比对都没做，整行记未查。
+    判据是「解析到的引擎」而不是全部引擎：本机有另一个引擎的 worker 不算做了比对，也不去读任何 task definition。"""
+    _fake_locator(monkeypatch, available=("novaact",))
+    _cloud_backend_ok(monkeypatch)
+
+    def resolve(**kw):
+        eng = kw["engines"][0]
+        if eng != "midscene":
+            raise compose.WorkerVariantError("没有映射", engine=eng)
+        return {eng: compose.WorkerResolution(engine=eng, variant=kw["variant"], revision_arn=f"arn:{eng}:7", digest="sha256:0")}
+    monkeypatch.setattr(m.compose, "resolve_worker_variant", resolve)
+    asked: list[tuple] = []
+    _stub_stop_timeout(monkeypatch, 120, asked)
+    by = _doctor_cloud_json(capsys)
+    assert by[("backend", "worker.midscene")]["ok"] and not by[("backend", "worker.novaact")]["ok"]
+    row = by[("backend", "worker.grace")]
+    assert row["skipped"] is True and row["ok"] is True and row["required"] is False
+    assert row["detail"].startswith("未查：") and "本机没有 midscene 的 worker" in row["detail"]
+    assert asked == []
+
+
 def test_doctor_cloud_worker_grace_probe_error_with_other_engine_skipped_is_a_result(monkeypatch, capsys):
     """一个引擎探测出错、另一个本机没有 worker：探测出错是检查失败、不是未查，整行按已做的部分给结果（ok=false、skipped=false）。"""
     _fake_locator(monkeypatch, available=("midscene",))
@@ -1877,7 +1899,7 @@ def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeyp
     assert "gherkai deploy --stop-timeout" in row["detail"]
     assert "已知并接受" in row["detail"]  # 顶满平台上限的那支处置也在（Nova 在部署缺省下恒落此格）
     assert f"midscene: 收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤" in row["detail"]  # 另一个引擎照过
-    # 人读形态：- 标可选缺失、末行点明 - 的含义（同 provider 段可选项）
+    # 人读形态：- 标可选缺失（同 provider 段可选项）
     _stub_stop_timeout(monkeypatch, 120)
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
     assert re.search(r"-\s*│\s*backend\.worker\.grace", capsys.readouterr().out)   # 表格：结果列 - 与检查项同行
@@ -1917,6 +1939,40 @@ def test_doctor_cloud_worker_grace_query_failure_lands_in_detail(monkeypatch, ca
                         lambda *a, **kw: (_ for _ in ()).throw(AssertionError("下限都没问到，不该去 describe")))
     row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
     assert row["ok"] is False and "未能从本机 worker 取得收尾宽限" in row["detail"]
+
+
+@pytest.mark.parametrize("stamp, cli_version, verdict, phrase", [
+    (None, "1.4.1", compose.SKEW_WARN, "后端没有版本戳"),
+    ("1.4.1", None, compose.SKEW_SKIP, "取不到自身版本"),
+    ("1.4.1", "1.5.0.dev3+g1234567", compose.SKEW_SKIP, "不是正式发行版本"),
+], ids=["stamp-missing", "cli-version-unknown", "not-a-release"])
+def test_doctor_cloud_backend_version_warn_or_skip_verdict_is_a_checked_pass(
+        monkeypatch, capsys, stamp, cli_version, verdict, phrase):
+    """版本戳缺失、CLI 版本取不到、有一侧不是正式发行版本：读到或确认缺失版本戳并按规则得出了「提示、不拦」的结论，
+    这一行是查过且通过（ok=true、skipped=false），不记未查。判定与提示语走真实的比对规则，只替掉读版本戳与取自身版本两处。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    real_skew = m.compose.check_backend_skew
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, 10_000)
+    monkeypatch.setattr(m.compose, "check_backend_skew", real_skew)
+    monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: stamp)
+    monkeypatch.setattr(m, "_installed_version", lambda: cli_version)
+    assert compose.check_version_skew(stamp, cli_version, prefix="vfy-")[0] == verdict  # 用例摆出的确实是这种判定
+    row = _doctor_cloud_json(capsys)[("backend", "version")]
+    assert row["ok"] is True and row["skipped"] is False and row["required"] is True
+    assert phrase in row["detail"]
+
+
+def test_doctor_cloud_backend_version_read_error_is_a_failure_not_unchecked(monkeypatch, capsys):
+    """读版本戳本身出错（权限、网络）：检查失败而不是未查——ok=false、skipped=false，必修项失败以退出码 2 结束。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, 10_000)
+    monkeypatch.setattr(m.compose, "check_backend_skew",
+                        lambda **kw: (_ for _ in ()).throw(RuntimeError("AccessDeniedException")))
+    row = _doctor_cloud_json(capsys, expect_rc=2)[("backend", "version")]
+    assert row["ok"] is False and row["skipped"] is False and row["required"] is True
+    assert "读不到后端版本戳" in row["detail"] and "AccessDeniedException" in row["detail"]
 
 
 def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys):
@@ -1998,17 +2054,76 @@ def test_doctor_provider_without_self_check_is_unchecked(monkeypatch, capsys):
     assert row["skipped"] is False and row["ok"] is False and "自检出错" in row["detail"]
 
 
-def test_doctor_tail_line_explains_unchecked_mark_only_when_present(monkeypatch, capsys):
-    """尾行只在有未查行时点明 ·：云端各项查过、provider 自检三项都给了结果、停止宽限比到了，表里没有 · 也不出这句。"""
+def _every_row_checked(monkeypatch):
+    """云端各项查过、provider 自检三项都给了结果、停止宽限比到了：整张表没有未查的行。"""
     _fake_locator(monkeypatch, available=("novaact", "midscene"))
     _cloud_backend_ok(monkeypatch)
     _stub_stop_timeout(monkeypatch, 10_000)
     _provider_with_doctor(monkeypatch, [{"name": n, "ok": True, "detail": "可用"} for n in ("node", "cdk", "container-engine")])
+
+
+def test_doctor_tail_line_explains_unchecked_mark_only_when_present(monkeypatch, capsys):
+    """尾行只在有未查行时点明 ·：表里没有未查的行时既没有 · 也不出这句。"""
+    _every_row_checked(monkeypatch)
     by = _doctor_cloud_json(capsys)
     assert not any(c["skipped"] for c in by.values())
     assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
     out = capsys.readouterr().out
     assert "·" not in out and out.rstrip().endswith("自检通过")
+
+
+def test_doctor_tail_line_on_failure_without_unchecked_rows_omits_unchecked_mark(monkeypatch, capsys):
+    """必修项失败、但表里没有未查的行：退出码 2，尾行只注 ✗ 与 -，不出 · 的说明——这句跟着未查的行出现，不跟着失败出现。"""
+    _every_row_checked(monkeypatch)
+    monkeypatch.setattr(m.compose, "check_backend_skew",
+                        lambda **kw: (compose.SKEW_BLOCK, "版本不一致：本机 CLI 新于后端", "1.3.0"))
+    by = _doctor_cloud_json(capsys, expect_rc=2)
+    assert by[("backend", "version")]["ok"] is False and by[("backend", "version")]["required"] is True
+    assert not any(c["skipped"] for c in by.values())
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    out = capsys.readouterr().out
+    assert re.search(r"✗\s*│\s*backend\.version\s", out)
+    assert "·" not in out and out.rstrip().endswith("自检有失败项（✗ 为必修；- 为可选能力缺失）")
+
+
+_REAL_USE_COLOR = textui.use_color  # 导入本模块时取真实的颜色策略：autouse 夹具在每条用例里把它换成固定关色
+
+
+def test_doctor_colors_unchecked_mark_dim_and_honours_no_color(monkeypatch, capsys):
+    """颜色开着时（FORCE_COLOR）结果列按语义上色：· 淡显、✓ 绿；NO_COLOR 为非空值时（与 FORCE_COLOR 同时设也一样）不发
+    任何 ANSI 序列，符号与文字照旧；颜色开着时 --json 也不带 ANSI、整段可解析。颜色策略用真实的那份。"""
+    _fake_locator(monkeypatch)
+    _no_provider(monkeypatch)
+    monkeypatch.setattr(textui, "use_color", _REAL_USE_COLOR)
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.delenv("TERM", raising=False)
+    monkeypatch.setenv("FORCE_COLOR", "1")
+    unchecked = ("aws.identity", "backend.reachability", "provider.deploy-aws")
+    assert m.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+
+    def sgr(mark: str, row: str) -> str | None:
+        """检查项为 row 的那一行里，结果列符号 mark 的 SGR 参数（如淡显为 2、绿为 32）。"""
+        line = next(l for l in out.splitlines() if re.search(re.escape(row) + r"\s", l))
+        hit = re.search(r"\x1b\[([0-9;]*)m" + re.escape(mark) + r"\x1b\[0m", line)
+        return hit.group(1) if hit else None
+
+    for row in unchecked:
+        assert sgr("·", row) == "2", row
+    assert sgr("✓", "engines.novaact") == "32"
+    monkeypatch.setenv("NO_COLOR", "1")
+    assert m.main(["doctor"]) == 0
+    out = capsys.readouterr().out
+    assert "\x1b[" not in out
+    for row in unchecked:
+        assert re.search(r"·\s*│\s*" + re.escape(row) + r"\s", out), row
+    assert re.search(r"✓\s*│\s*engines\.novaact\s", out) and "自检通过（· 为未查，原因见说明列）" in out
+    monkeypatch.delenv("NO_COLOR")
+    assert m.main(["doctor", "--json"]) == 0
+    raw = capsys.readouterr().out
+    assert "\x1b[" not in raw
+    doc = json.loads(raw)
+    assert {f"{c['section']}.{c['name']}" for c in doc["checks"] if c["skipped"]} == set(unchecked)
 
 
 def test_doctor_cloud_credential_failure_is_required_and_exits_2(monkeypatch, capsys):

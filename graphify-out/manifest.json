@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1794290797.2148943,
-    "ast_hash": "908e1678631c298b6b7a70bf335061a5",
+    "mtime": 1794292697.1220515,
+    "ast_hash": "8464c3a55da67832710fecd95498402b",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -450,7 +450,7 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1794291284.4137363,
+    "mtime": 1794292645.3185997,
     "ast_hash": "a5299f47ab1cb40e91695cfb18060ddc",
     "semantic_hash": ""
   },
@@ -945,8 +945,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/cli.py": {
-    "mtime": 1794050562.6455715,
-    "ast_hash": "aadba4dc1ce8a035c0a651bdd2c6c5a3",
+    "mtime": 1794292287.994232,
+    "ast_hash": "7673461709ae08873e078e332874f301",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py": {
@@ -1325,7 +1325,7 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794290917.1527297,
+    "mtime": 1794293031.484041,
     "ast_hash": "fbb9bcfef856de222889dd0f7a486521",
     "semantic_hash": ""
   },
@@ -1790,7 +1790,7 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/termcolor.py": {
-    "mtime": 1790749811.8720057,
+    "mtime": 1794292663.9744005,
     "ast_hash": "7c6b6e46d477d95ee53e35469632c078",
     "semantic_hash": "7c6b6e46d477d95ee53e35469632c078"
   },
