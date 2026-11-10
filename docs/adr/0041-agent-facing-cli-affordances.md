@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七（`list-runs`）已实装：本机与云端实测项已真实执行、结论内联在该条，只剩索引 `UPDATING` 期间的查询一项未遇到、未核。
+> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七（`list-runs`）已实装：本机与云端实测项已真实执行、结论内联在该条。
 
 ## 背景与问题
 
@@ -78,7 +78,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 七、列出 run：`list-runs`
 
-本条已实装。本条末「实测项」的本机与云端各项已真实执行、结论已内联；索引 `UPDATING` 期间的查询没有遇到、未核。
+本条已实装。本条末「实测项」的本机与云端各项已真实执行、结论已内联。
 
 - **缺口**：`status` 与 `explain` 都要先有 run_id，此前没有任何命令回答「这个后端里有哪些 run」。找不回 run_id 时（换了终端、提交时没记下、接手别人提交的 run），只能到 DynamoDB 控制台翻 runs 表，或去 ECS、Device Farm 看执行资源，而执行资源对应的是 task 与远程访问会话，不是 run。
 - **命令形态**：`gherkai list-runs [--backend local|cloud] [--report-dir DIR] [--prefix P] [--region R] [--profile NAME] [--ddb-table NAME] [--config FILE] [--status S]… [--limit N] [--json]`。按决策六的三项定位参数选定**一个**后端，旗标名与取值来源（含项目配置文件那一层，[0053](./0053-project-config-file.md)）与 `status` 相同，`--ddb-table` 与 `status` 同义。不跨后端、不跨报告落点搜，理由同决策六：每个后端只持有自己的 run 记录，把多处的清单合在一起会把不同落点里同名的 run 混为一谈。命令只读、零副作用（不接力推进、不起 task），机器只需读权限；云端后端与 `status` 一样，先经版本 skew 闸（[0037](./0037-distribution-and-packaging.md) 决策 7）再读任何云端资源。云端后端下 `--report-dir`（在云端是报告前缀）与清单无关，给了也忽略、不报错：清单不读报告，而使用者常把 `status` / `explain` 的整组定位参数原样复制过来。
@@ -98,7 +98,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
   - **守 [0038](./0038-worker-image-delivery.md) 的红线**：runs 表 `RETAIN`、无 TTL、随历史单调增长，不许 Scan。
   - **现有 `status-index` 保留不动、不复用**：它只有分区键，按状态读出的是整个状态分区，取不到有界的「最近 N 条」，而终态分区随历史增长、读量无上界。给它加排序键要替换索引（DynamoDB 不能修改已有 GSI 的键），且它投影 `worker_task_def_arns` 供 worker revision 清理的引用检查，本命令只要键，两个用途的投影需求不同。
   - **代价**：建 run 时多一次索引写，STATE item 的 `status` 换值时多两次（删旧索引项、写新索引项）；只改 job 级状态的写入既不改索引键、也不改投影属性（投影只有键），不产生索引写（DynamoDB 的 GSI 写入计费规则）；索引项只有键，存储可忽略。已部署的后端升级时，DynamoDB 在后台为已有的 STATE item 回填新索引，索引从 `CREATING` 变为 `ACTIVE` 之前不能 `Query`；CloudFormation 发起建索引后不等回填完成就继续更新，所以 `gherkai deploy` 结束时索引可能仍在回填。这段时间与索引缺失同样以退出码 2 结束，说明须等索引就绪或重新部署。不为 1.5 之前部署的后端做兼容处理：那些部署没有使用者。升级还要承担 `AWS::DynamoDB::Table` 文档写明的三条限制：索引 `ACTIVE` 之前这张表不能再被更新，回填期间再次部署若要改 runs 表会失败；建索引期间 stack 更新失败回滚时，已发起的索引不会随回滚删除，须手动删掉再部署；文档建议加索引的那次更新不改其它资源，而 `gherkai deploy` 的升级是整个 stack 一次更新，无法把加索引单独拆成一次。三条随实装写进云端篇的升级说明。
-  - **索引就绪判据**：取自该表的 `DescribeTable` 结果（所需权限已在 preflight 只读探活里），不解析 `Query` 的报错文本。索引缺失、`IndexStatus` 为 `CREATING`（回填中）或 `DELETING` 时拦下，以退出码 2 结束；`ACTIVE` 放行；`UPDATING` 也放行，取舍是：文档只说索引正在更新、没写明期间能否读，拦下它会让一次与本命令无关的索引设置变更挡住清单，放行的风险是这期间 `Query` 若失败，该失败照样按读不到这个后端以退出码 2 结束，只是说明不如就绪判据具体；`UPDATING` 期间能否 `Query` 列入实测项。检查放在 compose 装配云端 RunStore 的路径上，只在 `list-runs` 调用时执行，不并入 `run` / `submit` 共用的资源 preflight：那些命令不用这个索引，不能因它缺失或回填而被拦。`doctor` 也不加这一项：回填是暂时的，`list-runs` 自己会说明；1.5 之前的部署没有使用者，不存在要靠 `doctor` 发现的旧部署。
+  - **索引就绪判据**：取自该表的 `DescribeTable` 结果（所需权限已在 preflight 只读探活里），不解析 `Query` 的报错文本。索引缺失、`IndexStatus` 为 `CREATING`（回填中）或 `DELETING` 时拦下，以退出码 2 结束；`ACTIVE` 放行；`UPDATING` 也放行，取舍是：文档只说索引正在更新、没写明期间能否读，拦下它会让一次与本命令无关的索引设置变更挡住清单，放行的风险是这期间 `Query` 若失败，该失败照样按读不到这个后端以退出码 2 结束，只是说明不如就绪判据具体；`UPDATING` 期间的查询有一次有限的实测，没有见到失败，为维持放行提供有限支持（见本条末「实测项」）。检查放在 compose 装配云端 RunStore 的路径上，只在 `list-runs` 调用时执行，不并入 `run` / `submit` 共用的资源 preflight：那些命令不用这个索引，不能因它缺失或回填而被拦。`doctor` 也不加这一项：回填是暂时的，`list-runs` 自己会说明；1.5 之前的部署没有使用者，不存在要靠 `doctor` 发现的旧部署。
 - **core 端口**：`RunStore` 加一个列举方法（形如 `list_runs(statuses, *, limit) -> list[RunListing]`），本机与云端两个 adapter 各自实现。语义：返回经这些状态分区找到的 run 的**当前** STATE，按 run_id 降序，**不按状态复筛**（读回的状态可能已不在 `statuses` 里）；`limit` 给出时每个状态至多取 `limit` 条、一页不足续读，为 None 时分页读完。本机 adapter 没有分区，逐目录读回后按读回的状态归入各状态，语义相同。每个列举项的 `run_id` 恒有（本机取自目录名、云端取自索引返回的主键，不依赖 RunState 能否解析，供 CLI 排序与去重），另带三样：读回的 RunState（解析失败时为空并标为无法读取）、detached 标记、提交记录头部（与 `peek_definition_header` 同一对值，读不到为空）。detached 标记仍是执行环境属性、不进 RunState 模型（0034「filter 必须区分写入者」条），这里作为列举项的字段出现在端口返回值上，是它第一次进入 RunStore 端口面：人读提示要它，而它与运行态在同一处、读回即有；改由 CLI 对每个非终态行调 adapter 的 `is_detached`，每行多一次读，CLI 还要绕过端口直接认 adapter。端口不认后端、不认引擎，也不承载默认清单的口径。
   - **CLI 的合并**：默认清单的口径只在 CLI。两次调用，先非终态（`limit=None`，端口内按 `pending` 再 `running` 的顺序查分区：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run）、后终态（`limit=N`）；按所请求状态的并集过滤读回的状态，按 run_id 去重（两份都有时保留后一次读回的那份：运行态只向终态推进，后读的不会更旧），截取终态部分按 run_id 降序的前 N 条，最后整体按 run_id 降序。这一顺序加上端口不复筛，收窄了「两次调用之间换状态、或 GSI 尚未传播，导致 run 在两份结果里都不出现」的窗口：run 在第一次调用时仍在非终态分区（含索引还没跟上的旧分区），就被第一次调用找到，读回的终态状态在并集内而保留；否则它在第二次调用时已在终态分区。顺序反过来时，它可能先不在终态分区、后已离开非终态分区。剩余的边界在成员资格本身：DynamoDB 不承诺旧分区索引项的删除与新分区索引项的写入哪个先可见，两者之间若有间隙且两次 `Query` 都落在其中，这个 run 会在这一次清单里缺席，索引传播收敛后的查询可见。`--status` 只含一侧的状态时只做那一次调用。
 - **权限**：云端编排进程与 detached `submit` / `status` 的机器要用本命令，另需 runs 表索引 ARN `table/{prefix}runs/index/status-run_id-index` 上的 `dynamodb:Query`（表 ARN 上的 `Query` 授权覆盖不到 GSI）与表 ARN 上的 `dynamodb:BatchGetItem`（读回 STATE 与 META item）；清单登记在 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「编排进程角色」段。
@@ -114,7 +114,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 - **实测项**：
   - 本机（已核）：同一报告落点下先后执行两次前台 `run`，`list-runs` 列出两条、新者在前，人读表格与 `--json` 一致，两条都识别为当前版本写出。在有凭证的机器上两次 run 都真实执行到 `passed`，清单的状态、起止时刻与 job 计数与各 run 的判定一致；`--limit 1` 只留较新的一条，`--status` 筛到没有结果时给出点名该状态的空清单说法。同时核了两类非终态 run 与两种空清单：`submit` 的 run 结束前以非终态列在最前、`detached` 为 true、不带遗留提示，`status --wait` 收尾后进入终态部分；前台 `run` 在写下运行态后被 SIGKILL，留下的 run 列为非终态、`detached` 为 false，人读行带遗留提示；报告落点目录不存在与目录下没有 run 两种空清单各给出对应说法，退出码都是 0。
   - 云端（已核）：在已有 run 数据的后端上升级部署（runs 表约两百个 item）。部署前索引不存在，`list-runs` 以退出码 2 结束并说明；CloudFormation 报更新完成时索引仍为 `CREATING`、回填中，之后又过了十余分钟才转为 `ACTIVE`，这段时间 `list-runs` 一直以退出码 2 结束并说明须等索引就绪——「部署结束不等于索引就绪」成立；约两百个 item 的小数据量也不能保证索引立即就绪，所以提示里不对等待时长作承诺。索引就绪后，升级之前写下的 run 出现在清单里，由其它版本写出的各行在版本列带各自的版本串；`--json` 顶层给出后端、前缀、region 与解析后的表名。随后 `submit` 一个执行时间较长的 run：执行中它列在非终态部分（`detached` 为 true、不带遗留提示），结束后进入终态部分并排在最前，识别为当前版本写出、与升级之前写下的各行可区分。执行中有一次读到 run 级状态仍是 `pending` 而它的 job 已是 `running`：run 级状态由推进器的下一次投影推进，清单如实显示读回的运行态。
-  - 未核：索引 `UPDATING` 期间 `Query` 能否成功（决定上面「索引就绪判据」的放行是否维持）——这次升级未观察到这一状态。
+  - 索引 `UPDATING` 期间的查询（有限实测，放行维持）：在一张与 runs 表键结构及两个索引定义相同、按需计费的临时表上，六次调整这个索引的按需读吞吐上限；每次采样到索引为 `UPDATING` 后立即经 `list-runs` 所用的装配路径（先过索引就绪检查、再查索引并读回）列举全部状态，均成功返回 30 条 run，与索引 `ACTIVE` 时的数量相同。没有逐次确认装配内的就绪检查与各次 `Query` 发生时索引仍为 `UPDATING`；结果只覆盖这一种设置变更，没有覆盖其它进入 `UPDATING` 的原因，也不是在部署出来的表上做的。查询若在这期间失败，按上面「索引就绪判据」所述以退出码 2 结束。
 
 ## 影响
 
