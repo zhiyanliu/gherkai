@@ -96,6 +96,66 @@ def test_ddb_update_before_create_raises_real(real_aws):
         store.finalize_run(rid, Status.PASSED, "t")
 
 
+def _real_run(store, real_aws, tag: str):
+    """在真表上建一个全 pending 的 run，返回 (run_id, meta, scope_ids, 初始运行态)。"""
+    rid = _uniq(tag)
+    real_aws["cleanup_run_id"](rid)
+    meta = _sample_run(rid).run_meta
+    scope_ids = [j.scope_id for j in meta.jobs]
+    initial = RunState(run_id=rid, status=Status.PENDING,
+                       jobs={sid: JobState(scope_id=sid, status=Status.PENDING) for sid in scope_ids},
+                       started_at="2026-07-01T00:00:00Z", high_water_mark=0)
+    store.create_run(meta, initial)
+    return rid, meta, scope_ids, initial
+
+
+def test_ddb_claim_advances_run_and_is_rejected_after_finalize_real(real_aws):
+    """真 DDB 上的认领（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功的同一次写把 run 级置为 running；带着 pending 的
+    job 收尾为 error 之后，认领返回 False，run 级、结束时刻、原因、job 态与认领时刻都不变。同一条更新表达式同时写顶层属性
+    与 Map 内路径、条件同时判两处，是真 DDB 的表达式语义，moto 上通过不能替代。"""
+    store = _ddb_store(real_aws)
+    rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-claim")
+    assert store.try_claim_job(rid, scope_ids[0], claimed_at="2026-07-01T00:00:01Z") is True
+    mid = store.load_run_state(rid)
+    assert mid.status == Status.RUNNING and mid.high_water_mark == 0
+    assert mid.jobs[scope_ids[0]] == JobState(scope_ids[0], Status.RUNNING, claimed_at="2026-07-01T00:00:01Z")
+    assert mid.jobs[scope_ids[1]].status == Status.PENDING
+
+    assert store.try_finalize(rid, Status.ERROR, "2026-07-01T00:01:00Z", message="原因") is True
+    before = store.load_run_state(rid)
+    assert (before.status, before.jobs[scope_ids[1]].status) == (Status.ERROR, Status.PENDING)
+    assert store.try_claim_job(rid, scope_ids[1], claimed_at="2026-07-01T00:02:00Z") is False
+    assert store.load_run_state(rid) == before
+
+
+@pytest.mark.parametrize("hwm", [0, 3], ids=["same_hwm", "higher_hwm"])
+def test_ddb_stale_all_pending_projection_keeps_run_running_real(real_aws, hwm):
+    """真 DDB 上认领之后写入全 pending 的旧投影（同 HWM 与更高 HWM）：run 级保持 running，HWM 按条件前进，已认领的 job
+    仍为 running（条②：全 pending 的投影只写事件进度、不写 run 级）。"""
+    store = _ddb_store(real_aws)
+    rid, _meta, scope_ids, initial = _real_run(store, real_aws, f"ddb-stale-{hwm}")
+    assert store.try_claim_job(rid, scope_ids[0]) is True
+    stale = RunState(run_id=rid, status=Status.PENDING, jobs=dict(initial.jobs),
+                     started_at=initial.started_at, high_water_mark=hwm)
+    assert store.project_state(rid, stale) is True
+    got = store.load_run_state(rid)
+    assert got.status == Status.RUNNING
+    assert got.high_water_mark == hwm
+    assert got.jobs[scope_ids[0]].status == Status.RUNNING
+
+
+def test_ddb_job_write_on_finalized_run_lands_job_only_real(real_aws):
+    """真 DDB 上已收尾的 run 再收到前台 job 写（条③）：带 run 级的条件写被挡，回退的只写 job 那一次落库，run 级终态、
+    结束时刻不变。"""
+    store = _ddb_store(real_aws)
+    rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-latejob")
+    assert store.try_finalize(rid, Status.ERROR, "2026-07-01T00:01:00Z") is True
+    store.update_job_state(rid, JobState(scope_ids[0], Status.PASSED))
+    got = store.load_run_state(rid)
+    assert (got.status, got.ended_at) == (Status.ERROR, "2026-07-01T00:01:00Z")
+    assert got.jobs[scope_ids[0]].status == Status.PASSED and got.jobs[scope_ids[1]].status == Status.PENDING
+
+
 def test_ddb_session_id_none_omitted_real(real_aws):
     """真 DDB：session_id=None omit-when-None，读回仍 None（真 Map entry 缺键的读回语义）。"""
     store = _ddb_store(real_aws)

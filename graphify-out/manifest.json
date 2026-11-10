@@ -55,8 +55,8 @@
     "semantic_hash": "e54d7222d094971fe0ecdb10364ccbce"
   },
   "core/tests/test_cloud_integration.py": {
-    "mtime": 1794303274.3573918,
-    "ast_hash": "4956488a5dfa9c75ade9327ce489e5c7",
+    "mtime": 1794322556.7066116,
+    "ast_hash": "b52d61ab8911cf94aec2967ee6c7081b",
     "semantic_hash": ""
   },
   "core/tests/test_cloud_reconcile.py": {
@@ -65,8 +65,8 @@
     "semantic_hash": ""
   },
   "core/tests/test_conditional_writes.py": {
-    "mtime": 1794320592.3376088,
-    "ast_hash": "22d94f6f4d8b882423393cccfb965ec5",
+    "mtime": 1794322440.0599384,
+    "ast_hash": "859236f6a180df3f85eb3b33b75a2a0e",
     "semantic_hash": ""
   },
   "core/tests/test_ddb_run_store.py": {
@@ -255,8 +255,8 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1794236740.7396984,
-    "ast_hash": "21df2c17ddf371750158d282d49bc0db",
+    "mtime": 1794322440.0595415,
+    "ast_hash": "1c740e15143c91dca1b1537ad085ac69",
     "semantic_hash": ""
   },
   "README.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794320097.882393,
-    "ast_hash": "6ccc462693cb03af2d85fa6d30db6b22",
+    "mtime": 1794322801.1919756,
+    "ast_hash": "2e38113a7c320992f115204338c211c8",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794319970.154245,
-    "ast_hash": "bfe830d1d83a3b46bf0d6cf038dcf1eb",
+    "mtime": 1794322801.192228,
+    "ast_hash": "310502286f3cdba4c250ad99bc78f703",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1794320178.1412032,
-    "ast_hash": "3e3d8fce8c4b7d5875ec581c13fd17f6",
+    "mtime": 1794322440.0973482,
+    "ast_hash": "2b13485cef64fcb3df75a7488e2c9ed3",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794320220.106157,
-    "ast_hash": "0e2d5ebcc1150beea0c3f0b52fefa166",
+    "mtime": 1794322440.0597682,
+    "ast_hash": "cdc1a541314f0d952e34e7681b7af7d7",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1380,8 +1380,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1794320178.103387,
-    "ast_hash": "c85d044c0633fc36e2d6fa7dda392749",
+    "mtime": 1794322440.0590172,
+    "ast_hash": "c337b6b2bd666774840413f5fe3d5a76",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1395,8 +1395,8 @@
     "semantic_hash": ""
   },
   "docs/internals/execution-and-reconciliation.md": {
-    "mtime": 1794320150.3717062,
-    "ast_hash": "e4b97be13ae5f4d35cef695bd2266cfc",
+    "mtime": 1794322440.0592165,
+    "ast_hash": "7b216529db57beda1104b2a2347391a0",
     "semantic_hash": ""
   },
   "docs/internals/verdict-model.md": {

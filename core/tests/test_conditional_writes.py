@@ -490,6 +490,21 @@ def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch)
     assert sorted(c["ExpressionAttributeNames"]["#sid"] for c in calls[1:]) == ["pc", "ps", "r", "t"]
 
 
+def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
+    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级，条件同时判 job 仍 pending 与 run 未收尾
+    （ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的运行态分不出「一次写」与「先写 job、再写 run 级」。"""
+    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    calls.clear()
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    assert len(calls) == 1
+    update = calls[0]["UpdateExpression"].replace(" ", "")
+    assert "jobs.#sid.#st=:running" in update and ",#st=:running" in update
+    condition = calls[0]["ConditionExpression"].replace(" ", "")
+    assert "jobs.#sid.#st=:pending" in condition and "#stIN(:pending,:running)" in condition
+
+
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
     """DDB 侧 `update_job_state` 的写入次数（ADR 0034 机制三「run 级状态只进不退」条③）：run 未收尾时一次（写 pending、
     写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级的条件写被挡，再只写 job），STATE 不存在时
