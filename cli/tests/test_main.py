@@ -1716,8 +1716,20 @@ def test_doctor_local_json_checks_and_exit_codes(tmp_path, monkeypatch, capsys):
     assert by[("engines", "any")]["ok"] and by[("engines", "any")]["required"] is True
     assert by[("steps", "load.novaact")]["ok"] and "2 条" in by[("steps", "load.novaact")]["detail"]
     assert ("steps", "load.midscene") not in by  # 没装的引擎不探自述
-    assert by[("aws", "identity")]["required"] is False and "未查" in by[("aws", "identity")]["detail"]
-    assert by[("provider", "deploy-aws")]["ok"] and "只有部署方需要" in by[("provider", "deploy-aws")]["detail"]
+    assert "未查" in by[("aws", "identity")]["detail"]
+    # 未查是单独一种结果（ADR 0041 决策四）：每一行都带 skipped 键；未查的行恒 ok=true、required=false，其余行 skipped=false
+    assert all(isinstance(c.get("skipped"), bool) for c in doc["checks"])
+    unchecked = {key for key, c in by.items() if c["skipped"]}
+    assert unchecked == {("aws", "identity"), ("backend", "reachability"), ("provider", "deploy-aws")}
+    assert all(by[key]["ok"] is True and by[key]["required"] is False for key in unchecked)
+    assert "只有部署方需要" in by[("provider", "deploy-aws")]["detail"]  # 没装部署 provider：有没有装已查到，未查的是工具链自检
+    # 人读形态：未查的行结果列为 ·，查过且通过的仍为 ✓；尾行点明 · 的含义
+    assert m.main(["doctor", "--steps-dir", str(steps)]) == 0
+    out = capsys.readouterr().out
+    for row in ("aws.identity", "backend.reachability", "provider.deploy-aws"):
+        assert re.search(r"·\s*│\s*" + re.escape(row) + r"\s", out), row
+    assert re.search(r"✓\s*│\s*engines\.novaact\s", out)
+    assert "自检通过（· 为未查，原因见说明列）" in out
 
     def boom(engine, *, steps_dir=None, timeout_s=60.0):
         raise RuntimeError("worker 自述以退出码 1 结束：steps/login.py 第 3 行 SyntaxError")  # doctor 对任何加载异常都原样转述
@@ -1769,8 +1781,12 @@ def test_doctor_cloud_reports_backend_failures_and_exits_2(monkeypatch, capsys):
     assert not by[("backend", "resources")]["ok"] and "vfy-events" in by[("backend", "resources")]["detail"]
     assert not by[("backend", "worker.novaact")]["ok"] and not by[("backend", "worker.midscene")]["ok"]
     assert not by[("backend", "worker.any")]["ok"] and by[("backend", "worker.any")]["required"] is True  # 两引擎都解析不到才算必修失败
-    # 一个 revision 都没解析到 → 停止宽限无从比对（不去 describe 任何 task-def，也不冒充「查过了」）
-    assert by[("backend", "worker.grace")]["ok"] and "未查" in by[("backend", "worker.grace")]["detail"]
+    # 一个 revision 都没解析到 → 停止宽限无从比对：整行记未查（不去 describe 任何 task-def，也不冒充「查过了」）
+    grace = by[("backend", "worker.grace")]
+    assert grace["skipped"] is True and grace["ok"] is True and grace["required"] is False
+    assert "没有解析到镜像的引擎" in grace["detail"]
+    # 查过而没通过的行不记未查
+    assert by[("backend", "version")]["skipped"] is False and by[("backend", "worker.any")]["skipped"] is False
 
 
 # ---- doctor --backend cloud 的停止宽限比对（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4）----
@@ -1815,9 +1831,35 @@ def test_doctor_cloud_worker_grace_ok_and_skips_engine_without_local_worker(monk
     by = _doctor_cloud_json(capsys)
     row = by[("backend", "worker.grace")]
     assert row["ok"] and row["required"] is False
+    assert row["skipped"] is False  # 比了一个引擎：按已做的部分给结果，跳过的那个写在说明里，不记未查
     assert f"收尾需 {FAKE_MIN_GRACE_S['midscene']:g}s ≤ 云端停止宽限 120s" in row["detail"]
     assert "本机没有 novaact 的 worker，跳过" in row["detail"]
     assert asked == [("midscene", "arn:midscene:7")]  # 跳过的引擎不 describe
+
+
+def test_doctor_cloud_worker_grace_without_any_local_worker_is_unchecked(monkeypatch, capsys):
+    """两个引擎都解析到了镜像、但本机一个对应的 worker 都没有 → 一项比对都没做，整行记未查（ADR 0041 决策四），
+    不再以 ok=true 的「跳过」冒充查过；说明列点名缺的 worker，也不去 describe 任何 task-def。人读结果列为 ·。"""
+    _fake_locator(monkeypatch, available=())
+    _cloud_backend_ok(monkeypatch)
+    asked: list[tuple] = []
+    _stub_stop_timeout(monkeypatch, 120, asked)
+    row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
+    assert row["skipped"] is True and row["ok"] is True and row["required"] is False
+    assert row["detail"].startswith("未查：") and "midscene/novaact" in row["detail"]
+    assert asked == []
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
+    assert re.search(r"·\s*│\s*backend\.worker\.grace\s", capsys.readouterr().out)
+
+
+def test_doctor_cloud_worker_grace_probe_error_with_other_engine_skipped_is_a_result(monkeypatch, capsys):
+    """一个引擎探测出错、另一个本机没有 worker：探测出错是检查失败、不是未查，整行按已做的部分给结果（ok=false、skipped=false）。"""
+    _fake_locator(monkeypatch, available=("midscene",))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, lambda engine: (_ for _ in ()).throw(RuntimeError("ThrottlingException")))
+    row = _doctor_cloud_json(capsys)[("backend", "worker.grace")]
+    assert row["skipped"] is False and row["ok"] is False and row["required"] is False
+    assert "读不到云端为它设的停止宽限" in row["detail"] and "本机没有 novaact 的 worker，跳过" in row["detail"]
 
 
 def test_doctor_cloud_worker_grace_shortfall_is_optional_gap_not_failure(monkeypatch, capsys):
@@ -1893,26 +1935,102 @@ def test_doctor_provider_section_comes_from_provider_doctor(monkeypatch, capsys)
     by = {(c["section"], c["name"]): c for c in doc["checks"]}
     assert by[("provider", "node")]["required"] is True and not by[("provider", "node")]["ok"]
     assert by[("provider", "container-engine")]["required"] is False
+    assert by[("provider", "node")]["skipped"] is False and by[("provider", "container-engine")]["skipped"] is False  # provider 不给 skipped 即 false
     # 人读形态：✗ 标必修、- 标可选缺失
     assert m.main(["doctor"]) == 2
     out = capsys.readouterr().out
     assert re.search(r"✗\s*│\s*provider\.node", out) and re.search(r"-\s*│\s*provider\.container-engine", out)
-    assert "自检有失败项" in out
+    assert "自检有失败项（✗ 为必修；- 为可选能力缺失；· 为未查，原因见说明列）" in out  # 本机 doctor 有云端两行未查
     assert "部署工具链有缺口" in out  # provider 段缺项单独点出，别混在通用的可选缺失里
 
 
+def _provider_with_doctor(monkeypatch, checks):
+    class _Prov:
+        name = "aws"
+
+        def doctor(self, args):
+            return checks
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object()])
+    monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (_Prov(), None))
+
+
+def test_doctor_provider_reported_skipped_is_kept_but_never_masks_a_failure(monkeypatch, capsys):
+    """provider 自检项可带可选的 skipped（ADR 0037 决策 6 的契约）：给 true 且 ok=true 的记未查（required 一并落为 false）；
+    同时给 skipped=true 与 ok=false 的按它报告的问题输出——skipped 记 false，ok 与 required 照它给的，免得标记盖住失败。"""
+    _fake_locator(monkeypatch)
+    _provider_with_doctor(monkeypatch, [
+        {"name": "node", "ok": True, "required": True, "skipped": True, "detail": "未查：本机不部署"},
+        {"name": "cdk", "ok": False, "required": True, "skipped": True, "detail": "找不到 cdk"},
+        {"name": "container-engine", "ok": True, "detail": "docker 可用"}])
+    assert m.main(["doctor", "--json"]) == 2  # cdk 那行仍是必修失败
+    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
+    assert by[("provider", "node")] == {"section": "provider", "name": "node", "ok": True, "required": False,
+                                        "skipped": True, "detail": "未查：本机不部署"}
+    assert by[("provider", "cdk")]["skipped"] is False and by[("provider", "cdk")]["ok"] is False
+    assert by[("provider", "cdk")]["required"] is True
+    assert by[("provider", "container-engine")]["skipped"] is False  # 不给即 false，入口补齐键
+    assert m.main(["doctor"]) == 2
+    out = capsys.readouterr().out
+    assert re.search(r"·\s*│\s*provider\.node\s", out) and re.search(r"✗\s*│\s*provider\.cdk\s", out)
+
+
+def test_doctor_provider_without_self_check_is_unchecked(monkeypatch, capsys):
+    """装上的 provider 不提供自检 → 以 provider 名作项名的一行记未查（有没有装已查到，未查的是部署工具链自检）；
+    自检本身抛错则是检查失败、不是未查。"""
+    _fake_locator(monkeypatch)
+
+    class _NoDoctor:
+        name = "aws"
+    monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object()])
+    monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (_NoDoctor(), None))
+    assert m.main(["doctor", "--json"]) == 0
+    row = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}[("provider", "aws")]
+    assert row["skipped"] is True and row["ok"] is True and row["required"] is False and "未提供自检" in row["detail"]
+
+    class _Boom:
+        name = "aws"
+
+        def doctor(self, args):
+            raise RuntimeError("node 版本解析失败")
+    monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (_Boom(), None))
+    assert m.main(["doctor", "--json"]) == 0
+    row = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}[("provider", "aws")]
+    assert row["skipped"] is False and row["ok"] is False and "自检出错" in row["detail"]
+
+
+def test_doctor_tail_line_explains_unchecked_mark_only_when_present(monkeypatch, capsys):
+    """尾行只在有未查行时点明 ·：云端各项查过、provider 自检三项都给了结果、停止宽限比到了，表里没有 · 也不出这句。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    _cloud_backend_ok(monkeypatch)
+    _stub_stop_timeout(monkeypatch, 10_000)
+    _provider_with_doctor(monkeypatch, [{"name": n, "ok": True, "detail": "可用"} for n in ("node", "cdk", "container-engine")])
+    by = _doctor_cloud_json(capsys)
+    assert not any(c["skipped"] for c in by.values())
+    assert m.main(["doctor", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"]) == 0
+    out = capsys.readouterr().out
+    assert "·" not in out and out.rstrip().endswith("自检通过")
+
+
 def test_doctor_cloud_credential_failure_is_required_and_exits_2(monkeypatch, capsys):
-    """凭证探针抛 → aws.identity 必修失败、backend 标未查（可选）、以退出码 2 结束；不去碰后端。"""
+    """凭证探针抛 → aws.identity 必修失败、占位行 backend.reachability 记未查（ok=true、required=false：失败由上一行报，
+    这一行不重复报问题）、以退出码 2 结束；不去碰后端。人读形态：上一行 ✗、占位行 ·。"""
     _fake_locator(monkeypatch); _no_provider(monkeypatch)
     monkeypatch.setattr(m.compose, "probe_aws_identity", lambda **kw: (_ for _ in ()).throw(RuntimeError("Unable to locate credentials")))
     touched = []
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: touched.append("skew") or (compose.SKEW_OK, "", "1"))
     assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1", "--json"]) == 2
-    by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
-    assert not by[("aws", "identity")]["ok"] and by[("aws", "identity")]["required"] is True
-    assert "Unable to locate credentials" in by[("aws", "identity")]["detail"]
-    assert by[("backend", "reachability")]["required"] is False and "未查" in by[("backend", "reachability")]["detail"]
+    doc = json.loads(capsys.readouterr().out)
+    by = {(c["section"], c["name"]): c for c in doc["checks"]}
+    assert doc["ok"] is False
+    identity, reach = by[("aws", "identity")], by[("backend", "reachability")]
+    assert not identity["ok"] and identity["required"] is True and identity["skipped"] is False
+    assert "Unable to locate credentials" in identity["detail"]
+    assert reach["skipped"] is True and reach["ok"] is True and reach["required"] is False
+    assert reach["detail"] == "未查：AWS 身份检查未通过"
     assert touched == []
+    assert m.main(["doctor", "--prefix", "vfy-", "--region", "us-east-1"]) == 2
+    out = capsys.readouterr().out
+    assert re.search(r"✗\s*│\s*aws\.identity\s", out) and re.search(r"·\s*│\s*backend\.reachability\s", out)
 
 
 def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsys):
@@ -1923,7 +2041,10 @@ def test_doctor_cloud_without_region_fails_region_check_first(monkeypatch, capsy
     assert m.main(["doctor", "--backend", "cloud", "--json"]) == 2
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("aws", "region")]["ok"] and "AWS_REGION" in by[("aws", "region")]["detail"]
-    assert ("aws", "identity") not in by and "region" in by[("backend", "reachability")]["detail"]
+    assert by[("aws", "region")]["required"] is True and by[("aws", "region")]["skipped"] is False
+    reach = by[("backend", "reachability")]
+    assert ("aws", "identity") not in by and reach["detail"] == "未查：region 未能解析"
+    assert reach["skipped"] is True and reach["ok"] is True and reach["required"] is False
 
 
 def test_doctor_cloud_profile_error_at_target_resolution_is_a_credential_failure(monkeypatch, capsys):
@@ -1933,6 +2054,8 @@ def test_doctor_cloud_profile_error_at_target_resolution_is_a_credential_failure
     assert m.main(["doctor", "--prefix", "vfy-", "--profile", "nope", "--json"]) == 2
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("aws", "identity")]["ok"] and "凭证/region 不可用" in by[("aws", "identity")]["detail"]
+    reach = by[("backend", "reachability")]
+    assert reach["skipped"] is True and reach["ok"] is True and reach["required"] is False
 
 
 def test_doctor_cloud_missing_default_pointer_is_required_failure(monkeypatch, capsys):
@@ -1958,7 +2081,7 @@ _DF_SESSION_RUNNING = "arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/
 
 
 def _doctor_devices_cloud(monkeypatch, capsys, **stub):
-    """云端 doctor 其余各项摆成 ok（本机不装 worker：停止宽限整行跳过、不去 describe），只留设备两行做变量；退出码恒为 0——
+    """云端 doctor 其余各项摆成 ok（本机不装 worker：停止宽限整行记未查、不去 describe），只留设备两行做变量；退出码恒为 0——
     设备行全是可选项，任何结果都不改退出码。返回（按 (section, name) 索引的检查项, 替身的调用记录）。"""
     _fake_locator(monkeypatch, available=())
     _cloud_backend_ok(monkeypatch)
@@ -2103,10 +2226,13 @@ def test_doctor_provider_installed_but_broken_is_required_failure(monkeypatch, c
     assert m.main(["doctor", "--json"]) == 2
     by = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}
     assert not by[("provider", "deploy-aws")]["ok"] and by[("provider", "deploy-aws")]["required"] is True
-    # 装了多个未指名：不是故障，只是不替用户猜哪个云
+    assert by[("provider", "deploy-aws")]["skipped"] is False  # 装了却坏了是查过的失败，不是未查
+    # 装了多个未指名：不是故障，只是不替用户猜哪个云——部署工具链的自检没有执行，记未查
     monkeypatch.setattr(m._deploy, "provider_entry_points", lambda: [object(), object()])
     monkeypatch.setattr(m._deploy, "resolve_provider", lambda name=None: (None, "装了多个部署 provider（aws, gcp）：用 --provider <名> 指定其一。"))
     assert m.main(["doctor", "--json"]) == 0
+    row = {(c["section"], c["name"]): c for c in json.loads(capsys.readouterr().out)["checks"]}[("provider", "deploy-aws")]
+    assert row["skipped"] is True and row["ok"] is True and row["required"] is False and "多个部署 provider" in row["detail"]
 
 
 def test_doctor_runs_worker_self_describe_even_without_steps_dir(monkeypatch, capsys):

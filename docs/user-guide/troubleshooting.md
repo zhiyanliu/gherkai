@@ -10,15 +10,16 @@ gherkai doctor --backend cloud --prefix gherkai- --report-dir reports/   # 连�
 gherkai doctor --json             # 机读 {ok, checks[]}
 ```
 
-自检只做读操作：不建浏览器会话、不调模型，不产生模型费用。输出是一张表，每个检查项一行，「结果」列有三种标记：
+自检只做读操作：不建浏览器会话、不调模型，不产生模型费用。输出是一张表，每个检查项一行，「结果」列有四种标记：
 
 | 标记 | 含义 |
 |---|---|
-| `✓` | 通过。标「未查」的项一般也标 `✓`；例外是 `backend.reachability` 因 region 或凭证先失败而没有检查时标 `-`，见下表该行 |
+| `✓` | 查过且通过 |
 | `✗` | **必修项**没通过 |
-| `-` | 可选项没通过，不影响退出码（例如另一个引擎没装、部署工具链不全、项目里还有未结束的远程访问会话） |
+| `-` | 查过、可选项没通过，不影响退出码（例如另一个引擎没装、部署工具链不全、项目里还有未结束的远程访问会话） |
+| `·` | 未查：这一行这次没有检查，说明列写着原因（例如没给云端参数、前面的凭证检查已失败、没装部署 extra）。不影响退出码，也不表示那一部分没有问题 |
 
-退出码规则与 `--json` 每项的字段见[开始使用](./getting-started.md)的「用 doctor 自检」。下表说明每一行在查什么、判 `✗` 时怎么办。
+有未查的行时，表格下方的结论行会点明 `·` 的含义。退出码规则与 `--json` 每项的字段见[开始使用](./getting-started.md)的「用 doctor 自检」。下表说明每一行在查什么、判 `✗` 时怎么办。
 
 ### 各行查什么
 
@@ -33,19 +34,19 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `steps.dir` | 总是 | 解析到的确定性 step 目录。没有 `steps/` 目录是多数项目的常态；`--steps-dir`、`GHERKAI_STEPS_DIR` 或配置文件的 `steps-dir` 指的路径不是目录时是必修失败 |
 | `steps.load.<引擎>` | 每个可用引擎（`steps.dir` 判 `✗` 时不查询 worker 的能力自述，本行与 `engines.model.<引擎>`、`engines.targets.<引擎>` 都不出现） | 该引擎加载到多少条确定性 step（含内建）。有 steps 目录时必修，没有时只是可选 |
 | `aws.region` | 云端（region 只剩 profile 配置这一处可取时——`--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 指的 profile 读不出来，这一行不出现，失败报在 `aws.identity` 那行） | 落实到的 region。五处都没有 region 时必修失败 |
-| `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行只标「未查（给 --backend cloud 或 --prefix 才查云端）」 |
-| `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查：三种情形依次标「未查（同上）」/「未查：region 未能解析」/「未查：AWS 身份检查未通过」，后两种同时标 `-`——真正的失败在它上面那一行，`backend.*` 其余各行都不出现 |
+| `aws.identity` | 总是（云端而 `aws.region` 判 `✗` 时不出现） | 调用者身份。凭证不可用或 profile 名不存在时必修失败；未给云端参数时这一行标 `·`，说明为「未查（给 --backend cloud 或 --prefix 才查云端）」 |
+| `backend.reachability` | 未给云端参数时，或给了云端参数而 `aws.region`、`aws.identity` 先失败时（两者都通过就没有这一行，下面几行即实际探测结果） | 这一行只交代云端为什么没查，总是标 `·`：三种情形的说明依次为「未查（同上）」/「未查：region 未能解析」/「未查：AWS 身份检查未通过」。后两种情形下真正的失败在它上面那一行（标 `✗`），`backend.*` 其余各行都不出现 |
 | `backend.version` | 云端 | 后端版本戳与 CLI 版本比对。本机 CLI 新于后端时必修失败（提交也会被拒）；读版本戳本身失败（凭证、权限、网络）时同样必修失败。后端没有版本戳只提示、不拦，按提示请部署方运行一次 `gherkai deploy` 写入版本戳。两侧任一不是正式发行版本（含本机从源码直接运行、取不到自身版本）时跳过比对，只提示、标 `✓` |
 | `backend.resources` | 云端 | 两张表、产物桶、cluster、两个引擎的 task 定义、三个 Lambda 是否都在，报告前缀与 `--report-dir` 是否一致。必修 |
 | `backend.worker.default` | 云端 | 部署级默认 worker 镜像 variant 指针。缺失或读不到时必修失败，下面三行 `backend.worker.*` 都不出现；设备支持的两行照常检查 |
 | `backend.worker.<引擎>` | 云端，且 `backend.worker.default` 通过后 | 该引擎在默认 variant 下解析到的 task 定义 revision。单引擎解析不到只标 `-` |
 | `backend.worker.any` | 云端，且 `backend.worker.default` 通过后 | 至少一个引擎解析到 worker 镜像。两个都解析不到时必修失败 |
-| `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像时整行标「未查」；解析到了、但本机没装对应 worker 的引擎会被跳过并在行内说明。差距只标 `-`、不影响退出码；行内给出两种情形的处置：云端宽限还没到平台上限时，可以请部署方用 `gherkai deploy --stop-timeout` 调高；已到上限时，这条差距来自平台限制，不必处理（按默认值部署的后端上停止宽限已是平台上限，Nova Act 这一项通常就是这种情形） |
+| `backend.worker.grace` | 云端，且 `backend.worker.default` 通过后 | 本机 worker 自报的收尾宽限与云端为它设的停止宽限比对，只比解析到镜像、且本机装了 worker 的引擎：一个引擎都没解析到镜像，或解析到的引擎本机都没装对应 worker 时，整行标 `·`（未查）；只比了一部分时按比了的引擎给结果，本机没装 worker 的引擎被跳过并在行内说明。差距只标 `-`、不影响退出码；行内给出两种情形的处置：云端宽限还没到平台上限时，可以请部署方用 `gherkai deploy --stop-timeout` 调高；已到上限时，这条差距来自平台限制，不必处理（按默认值部署的后端上停止宽限已是平台上限，Nova Act 这一项通常就是这种情形） |
 | `backend.devices.project` | 云端 | 这套后端是否启用了设备支持，即部署时建立的 Device Farm 项目 ARN 是否记在 SSM 里。没有时标 `-` 并提示「部署未启用设备支持」：不测设备的团队可以忽略；要测设备时，请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`。读这个参数本身失败时同样只标 `-`，行内给出原因。不影响退出码 |
 | `backend.devices.sessions` | 云端，且 `backend.devices.project` 读到项目后 | 项目里还没结束的远程访问会话（含排队中的），每条带控制台链接与停止命令 `aws devicefarm stop-remote-access-session --region us-west-2 --arn <会话 ARN>`；doctor 使用了 profile（来自 `--profile`、`AWS_PROFILE` 或配置文件 `[common]` 的 `profile`）时，命令末尾还带同一个 `--profile <名称>`。没有时标 `✓`；有时标 `-`：正在执行的 run 也有会话，停止前先确认没有 run 在使用它，没有 run 使用的会话会继续计费并占用设备，最长到 Device Farm 的 150 分钟上限。列举需要 us-west-2 上对这个项目的 `devicefarm:ListRemoteAccessSessions` 权限，缺这项权限时这一行说明缺什么，遇到限流、网络等其他错误时同样只标 `-`、行内给出原因与下一步；停止需要 `devicefarm:StopRemoteAccessSession`，只提交 run 的成员的最小权限里没有这一项，请有该权限的人停止。表格在窄终端里会把长链接与命令折成多行，`doctor --json` 的 `detail` 里是完整的一行。不影响退出码 |
-| `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种只是说明（部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
+| `provider.deploy-aws` | 未装部署 extra、装了多个部署 provider、或装了却加载失败时 | 前两种标 `·`（部署工具链没有检查；部署 extra 只有部署方需要）；**装了却加载失败**是必修失败 |
 | `provider.node`、`provider.cdk`、`provider.container-engine` | 部署 provider 可自检时 | Node ≥ 22、`cdk` 或 `npx`、容器引擎能否连上。三项都不是必修项：通过标 `✓`，缺失或连不上只标 `-`，不影响退出码；它们只影响 `gherkai deploy` 与 `gherkai deploy push-worker`，不影响提交与本机运行 |
-| `provider.aws` | 部署 provider 的自检本身出错时（这时不出现上一行的三项） | 行内给出错误原因；只标 `-`，不影响退出码 |
+| `provider.aws` | 部署 provider 的自检本身出错时，或装上的部署 provider 不提供自检时（这时都不出现上一行的三项） | 自检出错时行内给出错误原因、只标 `-`；不提供自检时标 `·`。都不影响退出码 |
 
 给 `--backend cloud` 或 `--prefix` 才会查 `aws.*` 与 `backend.*` 两段；`--prefix` 与 `--report-dir` 都要与提交时用的值一致，否则查的是另一套资源。云端两段中途早退不影响 `provider.*` 段，它照常查。自检不查隧道前置。
 

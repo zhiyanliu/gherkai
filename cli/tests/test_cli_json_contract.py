@@ -317,6 +317,8 @@ def test_doctor_json_keys_are_documented(monkeypatch, capsys):
     _stub_local_doctor(monkeypatch)
     assert m.main(["doctor", "--json"]) == 0
     doc = json.loads(capsys.readouterr().out)
+    # 正向断言：每一行都带 skipped（未查的与查过的都有），这个键才确实进了差集
+    assert all("skipped" in c for c in doc["checks"]) and {c["skipped"] for c in doc["checks"]} == {True, False}
     _assert_documented(doc, section="doctor")
     _assert_check_names_documented(doc)
 

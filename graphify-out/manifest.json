@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1794285450.9469113,
-    "ast_hash": "ca13df2f8a3ae17364e85a7f156b8149",
+    "mtime": 1794290797.2148943,
+    "ast_hash": "908e1678631c298b6b7a70bf335061a5",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -435,8 +435,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794290071.3119,
-    "ast_hash": "ac66d4a43e7f5b766229c9e49a7ebe94",
+    "mtime": 1794290177.3361735,
+    "ast_hash": "7776e87d59ee5fc17532ef4b0733814f",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -450,8 +450,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1794285026.395359,
-    "ast_hash": "f63153706d38f0dd8151dd9ca5dc23d3",
+    "mtime": 1794291284.4137363,
+    "ast_hash": "a5299f47ab1cb40e91695cfb18060ddc",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -930,8 +930,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/deploy.py": {
-    "mtime": 1794050562.6416128,
-    "ast_hash": "a8b7018034d5f482d0d4d0f17c6f2a1a",
+    "mtime": 1794291395.385707,
+    "ast_hash": "4cd1a42550df333ede4feede0189ead0",
     "semantic_hash": ""
   },
   "cli/tests/test_deploy_cmd.py": {
@@ -1115,13 +1115,13 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794289652.4038134,
-    "ast_hash": "2431695d364dc3d9cf4a6435b2c9051e",
+    "mtime": 1794290439.3090434,
+    "ast_hash": "90b047cfea8eeae296ef471e869ab5b9",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
-    "mtime": 1794284189.5050206,
-    "ast_hash": "ad55f9655162443b3d30f909d20eb9ac",
+    "mtime": 1794290797.6082337,
+    "ast_hash": "b471675ebc18cf0638a9612cb3b2887b",
     "semantic_hash": ""
   },
   "docs/adr/0042-step-evidence-and-explain.md": {
@@ -1210,8 +1210,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md": {
-    "mtime": 1794284855.0006073,
-    "ast_hash": "112a8fcf788cf312abfc459b2d69c415",
+    "mtime": 1794290711.844413,
+    "ast_hash": "6b4fc30bada181634971b0cd7ce69b88",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/cloud-backend.md": {
@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1794285652.7959695,
-    "ast_hash": "649b2d12e522788acce615fe103976ce",
+    "mtime": 1794291026.422226,
+    "ast_hash": "86960d239738c4eb25fd7d0cf7b5a0f1",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794285450.9461465,
-    "ast_hash": "5882bed11ad5607994b09ff89b96c00c",
+    "mtime": 1794290917.1527297,
+    "ast_hash": "fbb9bcfef856de222889dd0f7a486521",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1380,8 +1380,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cli-json-contract.md": {
-    "mtime": 1794284854.915283,
-    "ast_hash": "6a89dbd47782254ed7b9ba23dd5ff95f",
+    "mtime": 1794291307.3997064,
+    "ast_hash": "57a5c3df38e038953445bf43f63010fe",
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
@@ -1420,8 +1420,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/getting-started.md": {
-    "mtime": 1794245421.5671508,
-    "ast_hash": "a6decc3eaac28219b31edf8dcb14cafe",
+    "mtime": 1794290886.1052003,
+    "ast_hash": "396450376d64213f68035bad88d205b6",
     "semantic_hash": ""
   },
   "docs/user-guide/local-app-testing.md": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1794283144.7884588,
-    "ast_hash": "6ae964dd1bb9e04b34b281ab913b5e9b",
+    "mtime": 1794290856.070278,
+    "ast_hash": "ecc629e641ba99d5af85ea960e84d4c3",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1785,8 +1785,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0047-cli-human-readable-tables-with-rich.md": {
-    "mtime": 1794282908.0144434,
-    "ast_hash": "3c4d4063be6759717d095897bfd9132a",
+    "mtime": 1794290177.33588,
+    "ast_hash": "a81b187575ca876181fda46102f103b4",
     "semantic_hash": ""
   },
   "core/gherkai_core/termcolor.py": {

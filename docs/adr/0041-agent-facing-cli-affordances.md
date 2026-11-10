@@ -44,7 +44,15 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 四、`doctor`：一个入口、按组件分组
 
-- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--config FILE] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起、未装 `[deploy-aws]` extra；未给云端参数时未查的云端项标 ok + `required=false`；给了云端参数而 region 或凭证先失败时，占位项 `backend.reachability` 标未查、ok=false + `required=false`，失败本身由其上的 `aws` 必修项报）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列 `✓` 表示通过，`✗` 表示必修项未通过，`-` 表示可选项未通过。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
+- `gherkai doctor [--backend cloud --prefix P --region R --profile NAME --report-dir DIR] [--steps-dir DIR] [--config FILE] [--json]`：**只读**自检，检查项按组件归类（机读形态以 `section` 字段表示），每项 `{ok, required, skipped, 一句诊断（怎么办）}`。**退出码只看 `required` 项**：全过退 0，任一 `required` 项 fail 退 2（agent 可直接分流）；`required=false` 的项失败只作能力展示、不改退出码（另一个引擎没定位到、容器引擎 daemon 没起；未查的项见下「未查是单独一种结果」条）。人读形态为三列表格（结果、检查项、说明，ADR 0047），检查项列写作「组件.项名」；结果列四种：`✓` 查过且通过，`✗` 必修项未通过，`-` 查过、可选能力缺失，`·` 未查。`required` 的判据 = **这次要跑的那个后端真跑得起来吗**。字段与项名取值见 `docs/internals/cli-json-contract.md`（单一事实源，不在此复述）。
+- **未查是单独一种结果**：一行检查没有被执行时标 `skipped=true`，人读结果列显示 `·`（淡显），原因写在说明列，尾行在有未查项时点明 `·` 的含义。未查的行恒为 `required=false`、`ok=true`；其余行 `skipped=false`。读法：整体能不能跑看顶层 `ok` 与退出码（规则不变，只看必修项）；某一行「查过且通过」是 `skipped=false` 且 `ok=true`；`ok=false` 专指这一行自己报告了问题。
+  - **哪些行算未查**（一行里一项检查都没有执行）：未给云端参数时的 `aws.identity` 与 `backend.reachability`；给了云端参数而 region 或凭证先失败时的占位行 `backend.reachability`（失败本身由其上的 `aws` 必修项报）；停止宽限比对在没有解析到镜像的引擎、或解析到了但本机一个对应的 worker 都没有时；`provider` 段的占位行在没装部署 provider、装了多个而未指名、或装上的 provider 不提供自检时——有没有装已经查到，未查的是部署工具链的自检。
+  - **哪些不算**：一行里部分检查做了、部分没做（停止宽限比对只比了一个引擎），按已做的那部分给结果，没做的在说明列交代，`skipped=false`；探测本身抛错是检查失败，不是未查；`backend.version` 检查的是「查询后端版本戳（包括确认它缺失），并按 skew 规则得出结论」（[0037](./0037-distribution-and-packaging.md) 决策 7）：缺戳、CLI 自身版本未知、任一侧为非正式版本，都是规则已经给出结论，`skipped=false`，沿用「不是拦下即通过、读取异常即失败」；这一行的 `✓` 表示通过了这条规则，不表示两个版本已验证兼容。
+  - **不为未查另造行**：只给现有的行加状态，行的出现条件不变（自述失败时不出模型与目标两行、前置失败时不出其下游各行，这些规则照旧）；承载「这一组为什么没查」的占位行保留。
+  - **provider 的自检项**可带可选的布尔 `skipped`（缺省 false，[0037](./0037-distribution-and-packaging.md) 决策 6 的契约随之扩充），入口输出时每行补齐这个键；provider 给了 `skipped=true` 却同时报 `ok=false` 的，入口按它报告的问题输出（`skipped=false`，`ok` 与 `required` 照它给的），不当作未查，免得一个标记盖住失败。
+  - 这是对单行 `ok` 含义的更正，不只是加一个键：占位行 `backend.reachability` 在前置失败时原为 `ok=false`，现为 `ok=true` 加 `skipped=true`。只读某一行 `ok` 的脚本要改为同时读 `skipped`；按「必修且未通过」筛选、或看顶层 `ok` 与退出码的不受影响。
+  - 取代的旧规则：未查的行不单列，按来由分别画成 `✓`（没有要求查，记 ok）与 `-`（前置失败，记 ok=false）。`✓` 表示查过且通过，画在没查的行上会让人以为那一部分是好的；`-` 同时表示「查过、可选能力缺失」与「没查」，读者分不清；同一个「未查」对应两种符号、两种 `ok` 取值。
+  - 被拒：未查的行记 `ok=false`——「没通过」的筛选结果里会混进没查的行，`ok=false` 不再专指一行自己报告的问题；记 `ok=null`——`ok` 是已发布的布尔契约，而「查没查」已有 `skipped` 回答，再让 `ok` 取第三个值是同一状态的重复表达；只改人读符号、机读不加 `skipped`——机读侧只能从说明文字里的「未查」二字判断；去掉承载未查原因的占位行——读者看不到「云端那部分这次没有查」这一事实，会把没有出现当成没有问题。
 - 组件与归属（**按 extra 实施、单入口汇总**——自检能力跟着它检查的组件走，入口只做编排）：
   - `cli`：版本、Python。
   - `config`：本次加载的项目配置文件路径，或「未使用配置文件」；只作展示、可选（[0053](./0053-project-config-file.md) 决策 1）。
@@ -52,7 +60,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
   - `steps`：解析到的 `steps/` 目录（显式给的目录不存在 = 必修失败，原因进 detail）；对每个可用引擎跑一次 worker 自述（`--capabilities`，清单取其 `deterministic_steps`）——有 steps 目录时是使用方 step 能否加载（必修，加载失败会静默降级成 AI），没有时只验 worker 起得来（可选，单引擎不连坐）。
   - `aws`（给了 `--backend cloud` 或 `--prefix` 才查）：region 解析（解析不出即必修失败、云端其余项标未查）、凭证身份（STS；profile 名不存在等解析期错误与探针失败同一句诊断）。
   - `backend`（同上）：版本戳与 skew 三态、资源 preflight（表/桶/cluster/两引擎 task-def/三 Lambda，并比对后端 `REPORT_DIR` 与 `--report-dir` 一致——复用 submit 的 `preflight_cloud_resources`）、默认 worker variant：先读指针（缺失 = 必修失败），再**逐引擎**解析（各自可选——单引擎团队不必为另一个引擎推镜像，同 submit 只按用到的引擎判）+ 聚合「至少一个引擎可用」为必修；其后两组可选项：停止宽限比对（本机 worker 自报的停止宽限期下限对云端 task-def 的 `stopTimeout`，只比解析到镜像的引擎，缺口按可选能力缺失报，[0032](./0032-fargate-execution-environment.md)「真容器校准结论」第 4 条的既定接受）与设备支持（部署记录的 Device Farm 项目、项目里未结束的远程访问会话，只列不停，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 6 / 10）。
-  - `provider`：按 entry point 结构化判——没装 `[deploy-aws]` extra → 一行「部署方才需要」（可选）；装了多个未指名 → 未查（可选）；装了但加载失败 → 必修失败（明确装了的东西坏了）；装了且提供可选的 `doctor(args) -> list[dict]`（每项 `{name, ok, detail}` + 可选 `required`，缺省 False；只读、不返退出码，[0037](./0037-distribution-and-packaging.md) 决策 6 契约）→ 并入输出。AWS provider 报 Node ≥ 22、cdk 可定位、容器引擎可用，**三项都可选**：provider 段是部署能力清单，doctor 不知道这台机器要不要部署；真正的硬拦在 `gherkai deploy` 自身。人读尾行单独点出「部署工具链有缺口」。
+  - `provider`：按 entry point 结构化判——没装 `[deploy-aws]` extra → 一行「部署方才需要」（未查）；装了多个未指名 → 未查；装了但加载失败 → 必修失败（明确装了的东西坏了）；装了且提供可选的 `doctor(args) -> list[dict]`（每项的字段见 [0037](./0037-distribution-and-packaging.md) 决策 6 的契约，含可选的 `required` 与 `skipped`；只读、不返退出码，[0037](./0037-distribution-and-packaging.md) 决策 6 契约）→ 并入输出。AWS provider 报 Node ≥ 22、cdk 可定位、容器引擎可用，**三项都可选**：provider 段是部署能力清单，doctor 不知道这台机器要不要部署；真正的硬拦在 `gherkai deploy` 自身。人读尾行单独点出「部署工具链有缺口」。
 - 被拒：另起 `gherkai-deploy doctor` 独立入口——agent 要记两条、且「后端可达」这类检查本就横跨两包；把自检做成 `plan` 的副作用——plan 要保持零费用、零网络。
 
 ### 五、JSON 字段契约文档 + 护栏

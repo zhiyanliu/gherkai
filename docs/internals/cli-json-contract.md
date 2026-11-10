@@ -240,12 +240,13 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | 键 | 含义 |
 |---|---|
 | `section` | `cli` / `config` / `engines` / `steps` / `aws` / `backend` / `provider` |
-| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限与云端 `stopTimeout` 的对比，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位）/ `devices.project`（设备支持是否已部署：部署时建立的 Device Farm 项目 ARN 是否记在 SSM 中，记着时 detail 给出项目 ARN；未部署、读 SSM 失败均为 ok=false/required=false）/ `devices.sessions`（读到项目 ARN 才出现：该项目里未到 COMPLETED 的远程访问会话，含排队中的；detail 给出会话数，以及每个会话的 ARN、状态（服务返回名称与创建时间时一并给出）、控制台链接与停止命令；没有会话 ok=true，有残留或列举失败（含无权限）ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装，或装了多个部署 provider、本项不查时 ok=true/required=false；已安装但加载失败时 ok=false）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检、或自检抛错时以它作项名） |
-| `ok` | 该项通过 |
-| `required` | false 表示可选能力缺失（另一个引擎未安装、未安装 deploy-aws extra、部署工具链缺项），不影响退出码；退出码取决于全部 required 项是否 ok |
-| `detail` | 一句说明：通过时给事实（命令、版本、ARN），失败时给处置办法 |
+| `name` | 项名：`cli`：`version`；`config`：`file`（本次加载的项目配置文件 gherkai.toml 的绝对路径，或「未使用配置文件」；纯展示，required=false）；`engines`：`novaact` / `midscene` / `any` / `model.<engine>`（本机该引擎 worker 自报的模型 id（云端 job 使用镜像内的模型），仅自述成功时出现）/ `targets.<engine>`（该引擎 worker 支持的测试目标清单，带会话上限的目标附分钟数；纯展示，required=false）；`steps`：`dir` / `load.<engine>`；`aws`：`region` / `identity`；`backend`：`version` / `resources` / `worker.default` / `worker.<engine>` / `worker.any` / `worker.grace`（本机 worker 自报的收尾宽限与云端 `stopTimeout` 的对比，缺口 ok=false/required=false）/ `reachability`（云端未查时的占位，恒为未查）/ `devices.project`（设备支持是否已部署：部署时建立的 Device Farm 项目 ARN 是否记在 SSM 中，记着时 detail 给出项目 ARN；未部署、读 SSM 失败均为 ok=false/required=false）/ `devices.sessions`（读到项目 ARN 才出现：该项目里未到 COMPLETED 的远程访问会话，含排队中的；detail 给出会话数，以及每个会话的 ARN、状态（服务返回名称与创建时间时一并给出）、控制台链接与停止命令；没有会话 ok=true，有残留或列举失败（含无权限）ok=false/required=false）；`provider`：`deploy-aws`（provider 不可用时的占位：未安装，或装了多个部署 provider 而未指名时为未查；已安装但加载失败时 ok=false、required=true）、provider 自报的 `node` / `cdk` / `container-engine`，或 provider 自身的 `name`（provider 未提供自检时以它作项名、为未查；自检抛错时同样以它作项名、ok=false） |
+| `ok` | 这一行没有报告问题；查过且通过要同时看 `skipped` 为 false。false 专指这一行自己报告了问题 |
+| `required` | true 表示必修项，没通过时退出码为 2；false 表示可选项，没通过只表示可选能力缺失（另一个引擎未安装、部署工具链缺项），不影响退出码。未查的行恒为 false |
+| `skipped` | bool，恒有：true 表示这一行没有执行检查，原因在 `detail`，这时 `ok` 恒为 true、`required` 恒为 false；其余行为 false |
+| `detail` | 一句说明：通过时给事实（命令、版本、ARN），失败时给处置办法，未查时给没有检查的原因 |
 
-未给 `--backend cloud` / `--prefix` 时，`aws` / `backend` 段标「未查」、`required=false`。
+未查的行：未给 `--backend cloud` / `--prefix` 时的 `aws.identity` 与 `backend.reachability`；给了云端参数而 region 或凭证先失败时的 `backend.reachability`（失败本身由其上的 `aws` 段必修项报出）；没有可比对的引擎时的 `backend.worker.grace`（没有解析到镜像的引擎，或解析到的引擎本机都没有 worker；比了一部分时按已比的部分给结果、`skipped` 为 false，跳过的引擎写在 `detail`）；`provider` 段的占位行在未安装部署 provider、装了多个而未指名、或装上的 provider 不提供自检时。整体能否运行看顶层 `ok` 与退出码，只取决于必修项；某一行查过且通过是 `skipped` 为 false 且 `ok` 为 true；按 `required` 为 true 且 `ok` 为 false 挑阻塞项，不必另看 `skipped`。
 
 ## `gherkai deploy list-workers --json`
 

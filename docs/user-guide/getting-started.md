@@ -74,7 +74,7 @@ gherkai doctor                                      # 只查本机
 gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region 与云端后端（前缀与部署时一致）
 ```
 
-输出是一张表，每个检查项一行，说明过长时在终端内折行。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `detail`，脚本按 `required && !ok` 挑出阻塞项。
+输出是一张表，每个检查项一行，说明过长时在终端内折行。全部必修项通过时退出码为 0，任一必修项未通过时退出码为 2。加 `--json` 输出 `{ok, checks[]}`，每项含 `section` / `name` / `ok` / `required` / `skipped` / `detail`，脚本按 `required && !ok` 挑出阻塞项；`skipped` 为 true 表示这一行没有检查（这时 `ok` 恒为 true），要确认某一行查过且通过，看 `ok && !skipped`。
 
 只查本机时的输出示例（示例机器未安装 Midscene worker，容器引擎的 daemon 未启动）：
 
@@ -91,8 +91,8 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 │ ✓    │ engines.targets.novaact   │ 支持的测试目标：桌面网页（本机 worker 自报）                                                    │
 │ ✓    │ steps.dir                 │ 无 steps/ 目录：只有内建确定性 step                                                             │
 │ ✓    │ steps.load.novaact        │ 1 条确定性 step（含内建）；无 steps/ 目录，仅内建                                               │
-│ ✓    │ aws.identity              │ 未查（给 --backend cloud 或 --prefix 才查云端）                                                 │
-│ ✓    │ backend.reachability      │ 未查（同上）                                                                                    │
+│ ·    │ aws.identity              │ 未查（给 --backend cloud 或 --prefix 才查云端）                                                 │
+│ ·    │ backend.reachability      │ 未查（同上）                                                                                    │
 │ ✓    │ provider.node             │ node /path/to/node                                                                              │
 │ ✓    │ provider.cdk              │ /path/to/cdk                                                                                    │
 │ -    │ provider.container-engine │ `docker` 在 PATH 上但连不上 daemon……                                                            │
@@ -100,10 +100,10 @@ gherkai doctor --backend cloud --prefix gherkai-    # 连带查凭证、region �
 
 部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行
 
-自检通过
+自检通过（· 为未查，原因见说明列）
 ```
 
-`steps.load.*` 的条数含引擎自带的那一条，所以没有 `steps/` 目录时它也不为零。每一项查什么、`✗` 与 `-` 分别怎么处置，见[排错](./troubleshooting.md)。
+`steps.load.*` 的条数含引擎自带的那一条，所以没有 `steps/` 目录时它也不为零。结果列的 `·` 表示这一行这次没有检查，原因写在说明列：示例只查本机，云端的两行就标 `·`，这不表示云端那部分没有问题。每一项查什么、`✗` 与 `-` 分别怎么处置，见[排错](./troubleshooting.md)。
 
 ## 上手路径一：交给 AI agent
 

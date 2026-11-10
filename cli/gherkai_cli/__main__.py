@@ -18,7 +18,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.redact import redact_deep
-from gherkai_runtime.textui import render_table, styled
+from gherkai_runtime.textui import DIM, render_table, styled
 from gherkai_core.model import (
     DEFAULT_DESKTOP_JOB_TIMEOUT_S,
     DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
@@ -802,14 +802,18 @@ def _cmd_list_engines(args) -> int:
 
 
 def _cmd_doctor(args) -> int:
-    """只读自检（ADR 0041 决策四）：一个入口、按组件分组；每项 {section, name, ok, required, detail}。
+    """只读自检（ADR 0041 决策四）：一个入口、按组件分组；每项 {section, name, ok, required, skipped, detail}。
     **退出码只看 required 项**：全过则退出码为 0，任一 required 项 fail 则退出码为 2；required=False 的项失败只作能力展示（另一个引擎
-    没装、没装 deploy-aws extra、容器引擎 daemon 没起）。不给 --backend cloud / --prefix 时只查本机。
+    没装、容器引擎 daemon 没起）。不给 --backend cloud / --prefix 时只查本机。
+    一行检查没有执行时记未查（skipped=True，恒 ok=True、required=False，原因在 detail）；哪些行算未查见 ADR 0041 决策四
+    「未查是单独一种结果」条，各调用点只在那些情形下传 skipped=True。
     provider 段经 deploy 接缝调 provider 可选的 `doctor(args) -> list[dict]`（部署方工具链归 provider 自查，入口只编排）。"""
     checks: list[dict] = []
 
-    def add(section: str, name: str, ok: bool, detail: str, *, required: bool = True) -> None:
-        checks.append({"section": section, "name": name, "ok": bool(ok), "required": required, "detail": detail})
+    def add(section: str, name: str, ok: bool, detail: str, *, required: bool = True, skipped: bool = False) -> None:
+        # 未查的行不报告问题、也不是必修：ok 与 required 在这里定死，调用点给的值不参与（ADR 0041 决策四）
+        checks.append({"section": section, "name": name, "ok": True if skipped else bool(ok),
+                       "required": False if skipped else required, "skipped": bool(skipped), "detail": detail})
 
     add("cli", "version", True, f"gherkai {_dist_version()}，Python {sys.version.split()[0]}", required=False)
     # 本次加载的配置文件（ADR 0053 决策 1）：排查「我改的配置为什么没生效」的第一眼
@@ -877,8 +881,8 @@ def _cmd_doctor(args) -> int:
 
     want_cloud = args.backend == "cloud" or args.prefix is not None
     if not want_cloud:
-        add("aws", "identity", True, "未查（给 --backend cloud 或 --prefix 才查云端）", required=False)
-        add("backend", "reachability", True, "未查（同上）", required=False)
+        add("aws", "identity", True, "未查（给 --backend cloud 或 --prefix 才查云端）", skipped=True)
+        add("backend", "reachability", True, "未查（同上）", skipped=True)
     else:
         cred_fail = "凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）：{e}"
         try:
@@ -887,7 +891,7 @@ def _cmd_doctor(args) -> int:
                                                   **_config_layers(args))
         except Exception as e:
             add("aws", "identity", False, cred_fail.format(e=e))
-            add("backend", "reachability", False, "未查：AWS 身份检查未通过", required=False)
+            add("backend", "reachability", True, "未查：AWS 身份检查未通过", skipped=True)  # 失败本身由上一行必修项报
         else:
             _doctor_cloud(args, target, add, cred_fail)
 
@@ -897,16 +901,26 @@ def _cmd_doctor(args) -> int:
     if args.json:
         print(json.dumps({"ok": ok_all, "checks": checks}, ensure_ascii=False, indent=2))
     else:
-        # 表格渲染（ADR 0047）：结果列 ✓ 过、✗ 必修项没过、- 可选能力缺失；说明列由表格折行
+        # 表格渲染（ADR 0047）：结果列 ✓ 查过且通过、✗ 必修项没过、- 查过而可选能力缺失、· 未查（淡显）；说明列由表格折行
         rows = []
         for c in checks:
-            mark = "✓" if c["ok"] else ("✗" if c["required"] else "-")
-            rows.append([styled(mark, "green" if c["ok"] else ("red" if c["required"] else "yellow")),
-                         f"{c['section']}.{c['name']}", c["detail"]])
+            if c["skipped"]:
+                mark, style = "·", DIM
+            elif c["ok"]:
+                mark, style = "✓", "green"
+            elif c["required"]:
+                mark, style = "✗", "red"
+            else:
+                mark, style = "-", "yellow"
+            rows.append([styled(mark, style), f"{c['section']}.{c['name']}", c["detail"]])
         print(render_table(["结果", "检查项", "说明"], rows, wrap=[2]))  # 说明列可折，结果与检查项不折
         if any(c["section"] == "provider" and not c["ok"] for c in checks):
             print("\n部署工具链有缺口（provider 段）：只影响 gherkai deploy / push-worker，不影响提交与本机运行")
-        print("\n自检通过" if ok_all else "\n自检有失败项（✗ 为必修；- 为可选能力缺失）")
+        # 尾行括注符号的含义：有失败时注 ✗ 与 -，有未查行时注 ·（ADR 0041 决策四）
+        legend = [] if ok_all else ["✗ 为必修", "- 为可选能力缺失"]
+        if any(c["skipped"] for c in checks):
+            legend.append("· 为未查，原因见说明列")
+        print(("\n自检通过" if ok_all else "\n自检有失败项") + (f"（{'；'.join(legend)}）" if legend else ""))
     return 0 if ok_all else 2
 
 
@@ -917,14 +931,14 @@ def _doctor_cloud(args, target, add, cred_fail: str) -> None:
     """
     if target.region is None:
         add("aws", "region", False, "没解析出 region：给 --region，或设 AWS_REGION / AWS_DEFAULT_REGION，或在配置文件 [common] 里给 region，或让 --profile 指的 profile 配置里带 region")
-        add("backend", "reachability", False, "未查：region 未能解析", required=False)
+        add("backend", "reachability", True, "未查：region 未能解析", skipped=True)  # 失败本身由上一行必修项报
         return
     add("aws", "region", True, target.region)
     try:
         ident = compose.probe_aws_identity(region=target.region, profile=target.profile)
     except Exception as e:
         add("aws", "identity", False, cred_fail.format(e=e))
-        add("backend", "reachability", False, "未查：AWS 身份检查未通过", required=False)
+        add("backend", "reachability", True, "未查：AWS 身份检查未通过", skipped=True)  # 失败本身由上一行必修项报
         return
     add("aws", "identity", True, f"身份 {ident['arn']}")
     backend_version = None
@@ -1057,7 +1071,8 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
     不是必修失败：它不挡任何一次正常的批量运行，只是把「这台后端的宽限够不够最坏情形」变成看得见的一行。
     比对面两侧各有前置：**只比已解析到 revision 的引擎**（没解析到的，上面 worker.<engine> 行已报）；
     **本机没定位到该引擎 worker 就跳过**（下限是 worker 自报的，没 worker 就问不出来——只用云端后端的提交者不必为
-    这一行装运行时，同 engines.any 在云端后端降为可选的判据）。
+    这一行装运行时，同 engines.any 在云端后端降为可选的判据）。一个引擎都没比到时整行记未查（没有解析到镜像的引擎，或解析到的
+    引擎本机都没有 worker）；只要有一个引擎完成了比对、或探测本身出错，就按已做的部分给结果，跳过的引擎写进说明（ADR 0041 决策四）。
     文案不能只给「抬高」一条路：`stopTimeout` 的部署缺省就是 Fargate 平台硬顶（deploy_aws 的 DEFAULT_STOP_TIMEOUT_S
     取的就是 FARGATE_STOP_TIMEOUT_MAX_S），Nova 自报下限恒大于它 → 部署正常的后端上这一行对 Nova **恒为 `-`**；cli 不依赖
     deploy_aws，这一行也不按平台上限挑出其中一支，故文案分「未顶满可抬 / 顶满即接受」两支，别让部署方追一个 ADR 0032 已记录接受的残余。
@@ -1065,7 +1080,7 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
     容器内恒按缺省算——宿主覆盖过 margin 时这行偏保守（不会漏报）。
     """
     if not revisions:
-        add("backend", "worker.grace", True, "未查：没有解析到镜像的引擎（见上各引擎那行）", required=False)
+        add("backend", "worker.grace", True, "未查：没有解析到镜像的引擎（见上各引擎那行）", skipped=True)
         return
     details: list[str] = []
     skipped: list[str] = []
@@ -1107,6 +1122,10 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
                 f"云端宽限尚未达到平台上限时，可让部署方运行一次 gherkai deploy --stop-timeout 提高超时配置；"
                 f"已达平台上限时则无法再提高——这条差距来自平台限制，属已知并接受的代价，不必处理"
             )
+    if len(skipped) == len(revisions):  # 解析到的引擎本机都没有 worker：一项比对都没做
+        add("backend", "worker.grace", True,
+            f"未查：本机没有 {'/'.join(skipped)} 的 worker，无从取得所需的收尾宽限（只提交、不在本机运行不需要它）", skipped=True)
+        return
     if skipped:
         details.append(f"本机没有 {'/'.join(skipped)} 的 worker，跳过（只提交、不在本机运行不需要它）")
     add("backend", "worker.grace", ok_all, "；".join(details), required=False)
@@ -1115,24 +1134,27 @@ def _doctor_worker_grace(target, add, revisions: dict) -> None:
 def _doctor_provider(args, add) -> None:
     """doctor 的 provider 段：按 entry point 结构化判「没装 / 装了多个 / 装了但坏 / 装了且可自检」，别靠匹配错误文案。
     provider 段是**部署能力清单**：装了但加载失败算必修（明确装了的东西坏了）；provider 自报的工具链缺项按它给的 required
-    （缺省可选），入口在人读尾行单独点出。"""
+    （缺省可选），入口在人读尾行单独点出。没装、装了多个而未指名、装上的不提供自检三种情形记未查：有没有装已经查到，
+    没有执行的是部署工具链的自检（ADR 0041 决策四）。"""
     eps = _deploy.provider_entry_points()
     if not eps:
-        add("provider", "deploy-aws", True, "未装 [deploy-aws] extra（只有部署方需要）", required=False)
+        add("provider", "deploy-aws", True, "未装 [deploy-aws] extra（只有部署方需要）", skipped=True)
         return
     provider, perr = _deploy.resolve_provider(None)
     if provider is None and len(eps) > 1:
-        add("provider", "deploy-aws", True, perr or "装了多个部署 provider：本项未查", required=False)  # 不是故障，doctor 不替部署方猜哪个云
+        add("provider", "deploy-aws", True, perr or "装了多个部署 provider：本项未查", skipped=True)  # 不是故障，doctor 不替部署方猜哪个云
         return
     if provider is None:
         add("provider", "deploy-aws", False, perr or "provider 不可用")
         return
     if not hasattr(provider, "doctor"):
-        add("provider", getattr(provider, "name", "provider"), True, "provider 未提供自检", required=False)
+        add("provider", getattr(provider, "name", "provider"), True, "provider 未提供自检", skipped=True)
         return
     try:
         for c in provider.doctor(args):
-            add("provider", c["name"], c["ok"], c["detail"], required=c.get("required", False))
+            # 可选的 skipped（ADR 0037 决策 6 的契约）：同时报了 ok=False 的按它报告的问题输出，不让未查的标记盖住失败
+            add("provider", c["name"], c["ok"], c["detail"], required=c.get("required", False),
+                skipped=bool(c.get("skipped", False)) and bool(c["ok"]))
     except Exception as e:
         add("provider", getattr(provider, "name", "provider"), False, f"provider 自检出错：{e}", required=False)
 
