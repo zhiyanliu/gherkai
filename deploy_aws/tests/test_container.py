@@ -2,8 +2,9 @@
 
 **两层证据，分清边界**：
 - 大部分用一个**假 docker**（记 argv/stdin 的 python 脚本）——验的是「拼出的命令与 stdin 用法」，这层纯逻辑。
-- 末尾三条用**真 docker**（`skipif` 保护）——验 ADR 里那两条只有真引擎才成立的事实：本地未推送镜像的
-  `RepoDigests` 为空、`--platform linux/arm64` 拉下来的镜像会被架构判据拒。这两条 mock 不出来（「绿≠对」）。
+- 末尾三条用**真 docker**（`skipif` 保护）——验只有真引擎才给得出的形态：未推送镜像的 `RepoDigests` 随镜像存储而不同
+  （overlay2 存储下为空；containerd 镜像存储下构建与 `tag` 之后就有条目）、`--platform linux/arm64` 拉下来的镜像会被架构判据拒。
+  这些 mock 不出来（「绿≠对」）。
 真 push 不在这里也不在任何单测里：本机无 AWS 凭证，推 ECR 只能真账号验。
 """
 from __future__ import annotations
@@ -11,11 +12,13 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+import uuid
 
 import pytest
 
 from gherkai_deploy_aws.container import (
     CONTAINER_ENGINE_ENV,
+    TARGET_PLATFORM,
     ContainerEngine,
     ContainerError,
     ImageInfo,
@@ -209,7 +212,7 @@ def test_probe_reports_missing_binary_without_raising():
     assert msg and "找不到容器引擎" in msg
 
 
-# ---------------------------------------------------------------- 真 docker（mock 不出来的那两条 ADR 事实）
+# ---------------------------------------------------------------- 真 docker（mock 不出来的引擎形态）
 
 def _docker_ok() -> bool:
     if shutil.which("docker") is None:
@@ -218,25 +221,63 @@ def _docker_ok() -> bool:
                           capture_output=True).returncode == 0
 
 
-def _has_image(ref: str) -> bool:
-    return subprocess.run(["docker", "image", "inspect", ref], capture_output=True).returncode == 0
+def _containerd_image_store() -> bool:
+    """引擎用的是不是 containerd 镜像存储（`docker info` 的 DriverStatus 带 `io.containerd.snapshotter`）；否则是 overlay2 等旧存储。"""
+    out = subprocess.run(["docker", "info", "--format", "{{json .DriverStatus}}"], capture_output=True, text=True)
+    assert out.returncode == 0, f"`docker info` 失败：{out.stderr.strip()[-600:]}"
+    return "io.containerd.snapshotter" in out.stdout
+
+
+def _repo_of(entry: str) -> str:
+    """`<repo>@sha256:<hex>` 的 repo 段。"""
+    return entry.partition("@")[0]
 
 
 real_docker = pytest.mark.skipif(not _docker_ok(), reason="需要可用的 docker daemon（真引擎事实，非纯逻辑）")
 
+# 现构建测试镜像的基础镜像。必须与 arm64 那条用例的 `alpine:3.20` 不同：containerd 镜像存储下同一引用是一个多平台索引，
+# 拉过的各平台内容都留在本机，amd64 主机上这里一旦拉了 3.20 的 linux/amd64 内容，那条用例的「本机没有 linux/amd64 的内容」
+# 前提就不成立、顶层视图直接给出 linux/amd64（ADR 0038 实测项 7）。
+_NEVER_PUSHED_BASE = "alpine:3.21"
+
+
+@pytest.fixture(scope="module")
+def never_pushed_image():
+    """现构建一个只属于本次测试、从未推送过的极小 linux/amd64 镜像，返回 (repo, ref)，用完删除。
+
+    以 `_NEVER_PUSHED_BASE` 为基础加一条唯一 LABEL，名字带随机后缀。不借用本机已有的 worker 镜像：在做过 push-worker 的机器上，
+    它已带着 ECR 的 repo digest，「从未推送」的前提不成立。基础镜像先由 `docker pull` 拉到本机（与 arm64 那条用例同样经 daemon 拉取），
+    构建时就不必再由构建器自己访问 registry。
+    """
+    nonce = uuid.uuid4().hex[:12]
+    repo = f"gherkai-test-never-pushed-{nonce}"
+    ref = f"{repo}:dev"
+    assert subprocess.run(["docker", "pull", "--platform", TARGET_PLATFORM, _NEVER_PUSHED_BASE],
+                          capture_output=True).returncode == 0, f"拉 {TARGET_PLATFORM} 的 {_NEVER_PUSHED_BASE} 失败（需要网络）"
+    dockerfile = f"FROM {_NEVER_PUSHED_BASE}\nLABEL gherkai.test.nonce={nonce}\n"
+    built = subprocess.run(["docker", "build", "--platform", TARGET_PLATFORM, "-t", ref, "-"],
+                           input=dockerfile, capture_output=True, text=True)
+    assert built.returncode == 0, f"构建测试镜像失败：{(built.stderr or built.stdout).strip()[-600:]}"
+    try:
+        yield repo, ref
+    finally:
+        subprocess.run(["docker", "image", "rm", "-f", ref], capture_output=True)
+
 
 @real_docker
-@pytest.mark.skipif(not _has_image("gherkai-worker-novaact:dev"),
-                    reason="需要本地 build 好的 gherkai-worker-novaact:dev")
-def test_real_local_image_has_no_repo_digests_and_is_amd64():
-    """ADR 0038 步 2 那条事实：**本地 build、从未推过的镜像 `RepoDigests` 为空** → 推送前拿不到 digest。
+def test_real_never_pushed_image_repo_digests_follow_the_image_store(never_pushed_image):
+    """从未推送的镜像在两种镜像存储下的 `RepoDigests` 形态（ADR 0038 步 2、实测项 6）。
 
-    这是「digest 只在推送后取」的全部理由（`.Id` 是 config digest、注册能过而 RunTask 才 `manifest unknown`）。
-    单测里 mock 一个空列表证明不了它——只有真引擎说话才算数。
+    overlay2 等旧存储：为空。containerd 镜像存储：构建后即有本地名的一条，没有任何 registry 的条目。两种形态都说明推送前
+    读到的东西当不了 registry digest，push-worker 只在推送成功之后取 digest。mock 一个列表证明不了它，只有真引擎给出的才算数。
     """
-    info = resolve_container_engine().inspect("gherkai-worker-novaact:dev")
+    repo, ref = never_pushed_image
+    info = resolve_container_engine().inspect(ref)
     assert info.exists and info.matches_target_platform(), info
-    assert info.repo_digests == (), f"从未推送的本地镜像不该有 registry digest：{info.repo_digests}"
+    if _containerd_image_store():
+        assert [_repo_of(d) for d in info.repo_digests] == [repo], info.repo_digests
+    else:
+        assert info.repo_digests == (), f"overlay2 等旧存储下从未推送的镜像不该有 repo digest：{info.repo_digests}"
 
 
 @real_docker
@@ -259,16 +300,26 @@ def test_real_arm64_image_is_rejected_by_the_platform_gate():
 
 
 @real_docker
-@pytest.mark.skipif(not _has_image("gherkai-worker-novaact:dev"),
-                    reason="需要本地 build 好的 gherkai-worker-novaact:dev")
-def test_real_tag_to_ecr_ref_still_has_no_digest():
-    """`docker tag` 到 ECR ref **不会**产生 registry digest（只有 push 才会）——第二次确认「推送后才取 digest」。"""
+def test_real_tag_to_ecr_ref_without_push_per_image_store(never_pushed_image):
+    """`docker tag` 到 ECR ref、没有推送时，两种镜像存储下的形态（ADR 0038 步 4、实测项 6）。
+
+    overlay2 等旧存储：仍没有该 repo 的条目，`digest_for_repo` 给 None。containerd 镜像存储：`tag` 之后就多出该 repo 的一条，
+    digest 与本地名那条相同——`digest_for_repo` 对这个从未推送过的 repo 也挑得出值，可见本地有这一条不等于推送过。
+    所以 push-worker 在 `push` 成功返回之后才取 digest、按本仓库挑。
+    """
+    repo, ref = never_pushed_image
     engine = resolve_container_engine()
-    target = f"{ECR_REPO}:test-only-never-pushed"
-    engine.tag("gherkai-worker-novaact:dev", target)
+    target = f"{ECR_REPO}:test-only-never-pushed-{uuid.uuid4().hex[:12]}"
+    engine.tag(ref, target)
     try:
         info = engine.inspect(target)
-        assert info.exists and info.matches_target_platform()
-        assert digest_for_repo(info.repo_digests, ECR_REPO) is None, info.repo_digests
+        assert info.exists and info.matches_target_platform(), info
+        if _containerd_image_store():
+            assert sorted(_repo_of(d) for d in info.repo_digests) == sorted([repo, ECR_REPO]), info.repo_digests
+            local = digest_for_repo(info.repo_digests, repo)
+            assert local and digest_for_repo(info.repo_digests, ECR_REPO) == local, info.repo_digests
+        else:
+            assert info.repo_digests == (), info.repo_digests
+            assert digest_for_repo(info.repo_digests, ECR_REPO) is None
     finally:
         subprocess.run(["docker", "image", "rm", target], capture_output=True)

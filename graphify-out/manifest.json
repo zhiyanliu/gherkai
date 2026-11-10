@@ -435,13 +435,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794236707.7898288,
-    "ast_hash": "5f72db86cb45c243d17278136bfd4423",
+    "mtime": 1794290071.3119,
+    "ast_hash": "ac66d4a43e7f5b766229c9e49a7ebe94",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1793940315.3595936,
-    "ast_hash": "dc4057a6f793e5b2b486ea8ed4df4b69",
+    "mtime": 1794290071.311233,
+    "ast_hash": "f2de4899065f559838d5ff48600dd909",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -980,8 +980,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_provider.py": {
-    "mtime": 1794051350.0722537,
-    "ast_hash": "252d3a09476185bd329e1fafb5599491",
+    "mtime": 1794290071.3124895,
+    "ast_hash": "2492f83b13e02a737f7d1fb8ec993f0d",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {
@@ -995,13 +995,13 @@
     "semantic_hash": ""
   },
   ".github/workflows/ci.yml": {
-    "mtime": 1794052696.0167668,
-    "ast_hash": "3ad0d2fb59ba0e17392d26e4da0df88e",
+    "mtime": 1794288873.1231081,
+    "ast_hash": "e44ea5133ee0e35a129f878948310d37",
     "semantic_hash": ""
   },
   ".github/workflows/release.yml": {
-    "mtime": 1794038638.6243262,
-    "ast_hash": "85009574f20b3d7530e059cc218becb4",
+    "mtime": 1794290071.3122025,
+    "ast_hash": "43d2b0ea6394db6d450e28ec4e657fd3",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_lambda_handlers.py": {
@@ -1010,13 +1010,13 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/container.py": {
-    "mtime": 1794050562.6456609,
-    "ast_hash": "9ade509019ab5deaf291e88b4624b917",
+    "mtime": 1794288599.1337888,
+    "ast_hash": "dbb16279ae6cce3a649338cc240e8333",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1794126778.5458589,
-    "ast_hash": "b355ec6a474bded38b7561c5725d94ed",
+    "mtime": 1794288755.5664148,
+    "ast_hash": "986c51b1f2858bfd6baab8b8b3ede474",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1030,13 +1030,13 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_container.py": {
-    "mtime": 1794050562.6467311,
-    "ast_hash": "0c4e1ef236c71022c3de39dc99199a58",
+    "mtime": 1794288579.7640395,
+    "ast_hash": "ac5bc06631d13b2091c37676c8e4542b",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794050562.6480815,
-    "ast_hash": "fa15d4d707411b9dc95b295bdc1146ba",
+    "mtime": 1794288067.3056567,
+    "ast_hash": "7ed30efd00d783af819d88c5d7de3921",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1055,8 +1055,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
-    "mtime": 1794240916.3822563,
-    "ast_hash": "d9ce585d21c8423247ee07946c8ef074",
+    "mtime": 1794288586.0577562,
+    "ast_hash": "9a4a46200f0d0441d79cc65d00fece91",
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794285450.946319,
-    "ast_hash": "afcba720cab59b08c63397947bc99333",
+    "mtime": 1794289652.4038134,
+    "ast_hash": "2431695d364dc3d9cf4a6435b2c9051e",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1350,8 +1350,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/REFERENCES.md": {
-    "mtime": 1793777456.519415,
-    "ast_hash": "0dba2a2569c84c7a7875a8db5aaa67b8",
+    "mtime": 1794290071.3115788,
+    "ast_hash": "f5618d708ae94644017dc671b7534c94",
     "semantic_hash": ""
   },
   "docs/ai-eng/code-health-review.md": {

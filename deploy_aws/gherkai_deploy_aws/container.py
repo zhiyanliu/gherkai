@@ -9,11 +9,12 @@ push-worker 与 `gherkai deploy` 的基础镜像同步之外，CLI / runtime / C
 
 ## 两条与 ADR 绑死的事实（别「优化」掉）
 
-- **推送前不取 digest**：本地 build 出来、从未推过的镜像 `RepoDigests` 为空（**真机核过**：
-  `gherkai-worker-novaact:dev` → `RepoDigests=[]`），而 `.Id` 是 **config digest**、不是 `repo@sha256:`
-  需要的 manifest digest——拿它注册 ECS 只校格式、RunTask 拉镜像时才 `manifest unknown`
-  （ADR 0038 被拒方案「推送前用本地 inspect 的 image Id 当 digest」）。故本类的 `inspect` 只负责「存在 + 架构」，
-  digest 由调用方在**推送后**再 `inspect` 一次、经 `digest_for_repo` 按仓库挑。
+- **推送前不取 digest**：推送前的 `RepoDigests` 随镜像存储而不同（真引擎核过，ADR 0038 实测项 6）——overlay2 存储下，
+  本地 build、从未推过的镜像为空，`tag` 到 ECR ref 后仍空；containerd 镜像存储下，构建后即有本地名的一条，`tag` 到 ECR ref
+  后即有该 repo 的一条（同一 digest），都没有推送。所以本地出现某个仓库的条目，不证明仓库里有这份内容。`.Id` 也顶替不了：
+  overlay2 存储下它是 **config digest**、不是 `repo@sha256:` 需要的 manifest digest——拿它注册 ECS 只校格式、RunTask
+  拉镜像时才 `manifest unknown`（ADR 0038 被拒方案「推送前用本地 inspect 的 image Id 当 digest」）。故本类的 `inspect`
+  只负责「存在 + 架构」，digest 由调用方在 `push` **成功返回之后**再 `inspect` 一次、经 `digest_for_repo` 按仓库挑。
 - **digest 要按仓库挑、不能取 `RepoDigests` 第一条**：基础镜像同步路径先 `pull` 过 GHCR，同一个本地镜像会同时
   挂着 GHCR 与 ECR 两条 repo digest（`docker pull` 后的 `alpine:3.20` 就带着 `alpine@sha256:…`，真机核过）。
 
@@ -53,7 +54,7 @@ class UnsupportedContainerEngine(ContainerError):
 
 @dataclass(frozen=True)
 class ImageInfo:
-    """`inspect` 的结果——**只有三件事**：在不在、什么平台、有哪些 registry digest。
+    """`inspect` 的结果——**只有三件事**：在不在、什么平台、有哪些 repo digest 条目。
 
     `repo_digests` 是 `<repo>@sha256:<hex>` 形态的原始条目（可能多条、可能空，见模块头两条事实）。
     """
@@ -81,6 +82,7 @@ def digest_for_repo(repo_digests, repo_uri: str) -> str | None:
 
     **绝不取第一条**：基础镜像同步先 `pull` 过 GHCR，同一镜像会挂着多个仓库的 digest，取错了写进 task-def 就是
     「ECR 里不存在这个 digest」——RunTask 拉镜像时才失败（ADR 0038 步 4）。
+    **只在推送成功之后用它取 digest**：containerd 镜像存储下 `tag` 之后就有该仓库的条目，推送前挑出值不说明推送过（见模块头）。
     """
     for entry in repo_digests or ():
         repo, _, digest = str(entry).partition("@")
@@ -123,7 +125,7 @@ class ContainerEngine:
 
     # ---- 五动词 ----
     def inspect(self, ref: str) -> ImageInfo:
-        """本地镜像的存在 + 平台 + registry digest 列表。镜像不存在 → `ImageInfo(exists=False)`（**不抛**：
+        """本地镜像的存在 + 平台 + repo digest 条目列表。镜像不存在 → `ImageInfo(exists=False)`（**不抛**：
         「本地没这个镜像」是调用方要给专属提示的正常分叉）。其余失败（daemon 挂了）→ `ContainerError`。"""
         out = subprocess.run([self.binary, "image", "inspect", ref, "--format", "{{json .}}"],
                              capture_output=True, text=True)

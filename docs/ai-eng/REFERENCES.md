@@ -85,7 +85,7 @@ aws bedrock-agentcore stop-browser-session  --region us-east-1 --browser-identif
 - https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-arm64.html — Fargate ARM64 的考虑事项（不可用面按 AZ：us-east-1 `use1-az3`）；https://docs.aws.amazon.com/AmazonECS/latest/developerguide/security_iam_id-based-policy-examples.html — task-def 类动作不支持资源级权限（`Resource: "*"`）
 - https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DescribeTaskDefinition.html · https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_RegisterTaskDefinition.html — 复制模板时须剔除的只读字段、`include=TAGS`、注册时打 tags 需 `ecs:TagResource`
 - https://docs.aws.amazon.com/systems-manager/latest/APIReference/API_GetParametersByPath.html — 单页最多 10 条、`Recursive` 默认 false；标准参数值上限 4KB
-- https://github.com/moby/moby/blob/master/api/swagger.yaml — `ImageInspect.RepoDigests` 仅在 pull/push 过 registry 后可用（本地 build 的镜像无 manifest digest）
+- https://github.com/moby/moby/blob/master/api/swagger.yaml — `ImageInspect.RepoDigests`：本地出现某个仓库的条目不证明该仓库里有这份内容——overlay2 存储下本地 build 的镜像没有条目，containerd 镜像存储下构建后与 `docker tag` 后就有（[ADR 0038](../adr/0038-worker-image-delivery.md) 实测项 6），所以只在推送成功之后按本仓库取
 
 ## Agent Skills（见 ADR 0043）
 

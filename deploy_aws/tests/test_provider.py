@@ -216,18 +216,28 @@ def test_bootstrap_needs_no_vpc_and_never_loads_the_app(cdk, df, monkeypatch):
     assert df.reads == [] and df.resolves == []
 
 
-def test_bootstrap_without_resolvable_region_exits_2(cdk, monkeypatch, capsys):
+def test_bootstrap_without_resolvable_region_exits_2(cdk, monkeypatch, capsys, tmp_path):
+    # region 的解析链会读环境变量与本机的 AWS 配置文件：把它们都隔离掉，这条用例才不随执行机器上有没有配置 region 而变
+    for var in ("AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_DEFAULT_PROFILE"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(tmp_path / "no-config"))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "no-credentials"))
+
+    asked: list = []
+
     class _Sts:
         class meta:
             region_name = None
 
         @staticmethod
         def get_caller_identity():
+            asked.append("sts")
             return {"Account": "123456789012"}
 
     monkeypatch.setattr(provider_cli, "_make_sts_client", lambda **kw: _Sts())
     assert Provider().bootstrap(_parse("--prefix", "gherkai-")) == 2
-    assert "region" in capsys.readouterr().err and cdk.calls == []
+    # 走到的必须是「取到了账户、region 仍为空」这一支：凭证或 profile 解析失败也以退出码 2 结束、消息里也有 region，不能混过去
+    assert asked == ["sts"] and "bootstrap 需要 region" in capsys.readouterr().err and cdk.calls == []
 
 
 @pytest.mark.parametrize("value", ["default", "new", "vpc-0abc123"])

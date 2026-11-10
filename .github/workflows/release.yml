@@ -408,7 +408,8 @@ jobs:
           # 关掉 provenance/sbom attestation：开着会把推上去的东西变成带 unknown/unknown 附属 manifest
           # 的 image index，而基础镜像下游要被 `gherkai deploy` pull 下来、重推进使用方 ECR、再按
           # `RepoDigests` 取 manifest digest 注册 task-def，并做「架构必须是 linux/amd64」的 inspect 校验
-          # （ADR 0038）——那条路径要的是一个干净的单 manifest 单架构镜像。
+          # （ADR 0038）——那条同步路径已验的是单 manifest 单架构的形态，带构建证明的索引重推后的 digest 一致性没有核过，
+          # 所以这份发布物保持单 manifest（ADR 0037 决策 8）。
           provenance: false
           sbom: false
           labels: |

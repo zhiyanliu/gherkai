@@ -113,8 +113,9 @@ def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1
 
 
 class FakeContainer:
-    """容器引擎替身。**只有 push 过的 ref 才有 `repo_digests`**——照抄真 docker 的行为（见 container 模块头：
-    本地 build 的镜像 `RepoDigests` 为空，这是「推送后才取 digest」的根据）。
+    """容器引擎替身。**只有 push 过的 ref 才有 `repo_digests`**——照抄 overlay2 存储下真 docker 的形态（见 container 模块头：
+    本地 build、未推送的镜像 `RepoDigests` 为空）。containerd 镜像存储下 `tag` 之后就有条目，编排只在 `push` 成功返回之后
+    才读，两种形态对它等价；在这个替身上提前读会取不到 digest、测试失败。
 
     `ghcr_noise=True` 时 post-push 的 `repo_digests` **第一条是 GHCR 的**（基础镜像同步路径的真实形态），
     用来让「取第一条」这种实现方式必然测红。
@@ -312,6 +313,29 @@ def test_digest_comes_from_post_push_inspect_and_is_picked_by_repo(aws):
     assert len(inspects) == 2 and inspects[0] == "acme:img"           # 推送前一次（存在+架构）
     assert inspects[1].endswith(":1.4.0-login")                       # 推送后一次（取 digest）
     assert _mapping(aws, "novaact", "login")["digest"] == "sha256:" + "c" * 64
+
+
+def test_missing_this_repo_digest_after_push_exits_2_without_registering(aws):
+    """推送后的 inspect 里没有本仓库的条目（只剩 GHCR 那条）→ 以退出码 2 结束、不注册 revision、不写映射。
+
+    提示点名本仓库、请人确认 push 后重新运行这条命令（同一段流程也服务 `gherkai deploy` 的基础镜像同步，不点名 push-worker）。
+    """
+    seed_backend(aws)
+
+    class NoRepoDigest(FakeContainer):
+        def inspect(self, ref):
+            info = super().inspect(ref)
+            kept = tuple(d for d in info.repo_digests if d.startswith("ghcr.io/"))
+            return ImageInfo(exists=info.exists, os=info.os, architecture=info.architecture, repo_digests=kept,
+                             multi_platform=info.multi_platform)
+
+    before = _revisions(aws, "novaact")
+    rc, text = _push(aws, NoRepoDigest())
+    assert rc == 2, text
+    assert "取不到本仓库" in text and names.ecr_repo_name(PREFIX, "novaact") in text and "重新运行这条命令" in text
+    assert _revisions(aws, "novaact") == before
+    with pytest.raises(aws.ssm.exceptions.ParameterNotFound):
+        _mapping(aws, "novaact", "login")
 
 
 def test_arch_mismatch_exits_2_before_touching_ecr_or_ecs(aws):

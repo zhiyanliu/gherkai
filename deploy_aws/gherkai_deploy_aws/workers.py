@@ -620,7 +620,7 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     repo = names.ecr_repo_name(prefix, engine)
     template_arn = _template_arn(aws, prefix=prefix, engine=engine)
 
-    # 步 2：inspect 本地镜像——只取**存在**与**架构**（digest 此时取不到，见 container 模块头）
+    # 步 2：inspect 本地镜像——只取**存在**与**架构**（此时读到的 repo digest 不证明仓库里有这份内容，不取，见 container 模块头）
     info = container.inspect(image)
     if not info.exists:
         raise WorkerCommandError(
@@ -646,14 +646,15 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     repo_uri = f"{registry}/{repo}"
     target = f"{repo_uri}:{tag}"
 
-    # 步 4：tag + push；**digest 的唯一来源是推送后再 inspect、按本 repo 挑**
+    # 步 4：tag + push；**digest 的唯一来源是推送成功之后再 inspect、按本 repo 挑**（push 失败由非零退出码抛错，走不到这里）
     container.tag(image, target)
     container.push(target)
     digest = digest_for_repo(container.inspect(target).repo_digests, repo_uri)
     if not digest:
         raise WorkerCommandError(
-            f"推送后在 {target} 上取不到本仓库（{repo_uri}）的 digest。digest 只能推送后取（本地 build 的镜像"
-            f"没有 registry digest）——确认 push 真的成功了。"
+            f"推送后在 {target} 上取不到本仓库（{repo_uri}）的 digest，无法注册 revision："
+            f"revision 按推送成功之后本仓库的 digest 引用镜像。\n"
+            f"请确认这次 push 确实成功，再重新运行这条命令（推送与注册都是幂等的）。"
         )
     if previous_digest and previous_digest != digest:
         out(f"tag {tag} 原已存在：原 digest {names.short_digest(previous_digest)} → 新 digest {names.short_digest(digest)}"
