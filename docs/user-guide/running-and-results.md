@@ -190,7 +190,7 @@ gherkai list-runs --limit 50 --json > runs.json
 ```
 
 - **查哪里**：`--backend`、`--report-dir`、`--prefix`、`--region`、`--profile`、`--ddb-table` 与 `status` 同名同义，同样读项目配置文件（见 [`configuration.md`](./configuration.md)）。一次只列一个后端、一处报告落点，不跨后端查找；要列另一处就换一组定位参数再执行一次。云端后端下 `--report-dir` 与清单无关，给了也忽略。
-- **列哪些**：默认列出全部还没结束的 run（`pending`、`running`），加上最近创建的 20 条已结束的 run；`--limit N` 改已结束部分的条数（正整数），还没结束的 run 不受它限制、全部列出。`--status S` 只列这些状态的 run，可重复给出，取值是 `passed`、`failed`、`error`、`skipped`、`aborted`、`pending`、`running`；其中已结束的状态同样受 `--limit` 约束。
+- **列哪些**：默认列出全部还没结束的 run（`pending`、`running`），加上最近创建的 20 条已结束的 run。还没结束的 run 里，`pending` 表示还没有 job 开始执行；一旦有 job 开始执行，run 就显示为 `running`，到结束之前不会再回到 `pending`，`status` 显示的状态也是如此。`--limit N` 改已结束部分的条数（正整数），还没结束的 run 不受它限制、全部列出。`--status S` 只列这些状态的 run，可重复给出，取值是 `passed`、`failed`、`error`、`skipped`、`aborted`、`pending`、`running`；其中已结束的状态同样受 `--limit` 约束。
 - **先后**：新创建的在前。「最近」按创建时间算、不按结束时间：早创建而刚结束的 run 不会因为刚结束就排到前面。创建时间取执行 `run` 或 `submit` 的那台机器的时钟，同一秒内创建的 run 之间先后不定；多台机器向同一个后端提交时，机器之间的时钟偏差会直接体现为清单里的先后。
 - **表格**：每行一个 run，列出 run_id、状态、开始与结束时刻（本机时区；run_id 开头的时间戳是 UTC）、job 数与版本，有提示时另有一列「提示」。
   - 「job」列是这个 run 的 job 总数；各 job 的状态与 run 的状态不全相同时，括注各状态的个数，如 `3（passed 2 · failed 1）`。

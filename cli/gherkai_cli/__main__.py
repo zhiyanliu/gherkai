@@ -528,7 +528,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     lr.add_argument("--region", default=None, metavar="R")
     lr.add_argument("--profile", default=None, metavar="P")
 
-    # _reconcile：per-run 进程入口（submit setsid fork 它，非使用方直接调）。执行 reconcile loop 到全 done。
+    # _reconcile：per-run 进程入口（submit setsid fork 它，非使用方直接调）。执行 reconcile loop 到 run 收尾。
     # 内部入口**不传 help**：argparse 只为带 help 的子命令登记帮助条目，不传即不出现在 --help 的命令说明里；
     # 传 help=argparse.SUPPRESS 反而会以「==SUPPRESS==」漏出（Python 3.13 仍如此）。命令集的花括号列表另由末尾的 metavar 收窄。
     rc = sub.add_parser("_reconcile")
@@ -2061,11 +2061,12 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
         print(render.render_run_state(state))
         if state.status in TERMINAL_STATUSES:
             _print_artifact_lines(locations)  # 与 `run` 结束时同一份（见其 docstring）
-    # 疑似卡住诊断（两路一致）：非 --wait、非 json、**所有 job 仍 pending** → 提示 --wait 接力（**只提示、不自动
-    # kickoff/tick**——保「查看」纯只读无副作用；救活决定权留提交者，走 --wait）。判据不能只看 run 级 status：
-    # 推进器 claim（CAS pending→running）只动那个 job、run 级 status 要等下一次 tick 的投影写才翻 running，而
-    # 下一次 tick 要等 worker 发出第一个事件——Fargate 拉起那几十秒里恒是「job running、run pending」，此时推进
-    # 早已开始，提示「推进可能未启动」是误报（实际运行 submit 后连查三次撞见）。任一 job 已 claim 即闭嘴。
+    # 疑似卡住诊断（两路一致）：非 --wait、非 json、run 级 pending 且**所有 job 仍 pending** → 提示 --wait 接力
+    # （**只提示、不自动 kickoff/tick**——保「查看」纯只读无副作用；救活决定权留提交者，走 --wait）。认领在同一次写里
+    # 把 job 与 run 级都置为 running，投影不把 run 级写回 pending（ADR 0034 机制三「run 级状态只进不退」条），所以未收尾的
+    # run 级 pending 已意味着没有 job 离开 pending，后半条判据由前半条推出。后半条保留，只防旧版写者留下的
+    # 「run 级 pending 而 job 已 running」记录：那时认领只翻 job，Fargate 拉起的几十秒里读到的正是这一组合，
+    # 推进早已开始，提示「推进可能未启动」是误报（实际运行 submit 后连查三次撞见）。
     all_jobs_pending = all(js.status == Status.PENDING for js in state.jobs.values())
     if (not args.wait and not args.json and state.status == Status.PENDING and all_jobs_pending
             and (relay_available is None or relay_available())):  # 前台 run 刚建 run 时同样全 pending，但没有可接力的推进器、不提示
@@ -2282,7 +2283,9 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
 # ============================================================================
 
 _LIST_RUNS_DEFAULT_LIMIT = 20
-# 非终态按 pending 再 running 的顺序查：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run
+# 非终态按 pending 再 running 的顺序查：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run。
+# 「只从 pending 走向 running」对未收尾的 run 由写级保证：认领、投影与前台 job 写都不把 run 级写回 pending
+# （ADR 0034 机制三「run 级状态只进不退」条，前提是全部写者都采用该条）
 _LIST_RUNS_NON_TERMINAL = (Status.PENDING, Status.RUNNING)
 # 终态集取 core 真源，顺序固定为 Status 的声明序（不另行枚举，新增终态自动进清单）
 _LIST_RUNS_TERMINAL = tuple(s for s in Status if s in TERMINAL_STATUSES)
@@ -2705,7 +2708,7 @@ def _definition_contract_message(e: DefinitionContractError) -> str:
 
 
 def _cmd_reconcile(args) -> int:
-    """per-run 进程入口（submit setsid fork 它，非使用方直接调）：执行 reconcile loop 到全 done 自退（ADR 0034）。
+    """per-run 进程入口（submit setsid fork 它，非使用方直接调）：执行 reconcile loop 到 run 收尾自退（ADR 0034）。
 
     **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
     `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉

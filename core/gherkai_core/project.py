@@ -602,7 +602,7 @@ def project_full(meta: RunMeta, records: list[EventRecord], *, run_duration_ms: 
 
     与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别只在保留完整明细
     （scenarios/steps/cost/report_refs）。tick 在 finalize **CAS 之前**用它落 ResultStore（判定真值，ADR 0030 决定三
-    写序）；宿主在 done 后用它聚合 RunReport。**守 ADR 0031 不变量**：任一 job 非终态即抛 NonTerminalSnapshot、一份
+    写序）；宿主在 tick 走完收尾分支后用它聚合 RunReport。**守 ADR 0031 不变量**：任一 job 非终态即抛 NonTerminalSnapshot、一份
     判定都不落（前置态绝不进 jobs/*.json）——tick 只在 plan_next 判全终态时才调本函数，正常到不了那一步。run 级 status 用真实聚合终态（此处是收尾、非投影，
     可落终态，与 project_state 的钳制不同）。收尾前提是全 job 终态、每个 job 至少有一条退出记录，故正常没有「无 record 的
     job」；防御分支：没 record 的 job 不臆造明细、不进 RunResult.jobs（与同步 schedule 不同——那边从未 spawn 的 job 记
@@ -697,7 +697,11 @@ def _aggregate(statuses: list[Status]) -> Status:
 
 
 def projected_run_status(jobs: dict[str, JobState]) -> Status:
-    """投影写该落库的 run 级 status（ADR 0034 机制三）：投影里全 job 仍 pending → `pending`，否则 `running`。
+    """投影写对 run 级 status 的取值（ADR 0034 机制三）：投影里全 job 仍 pending → `pending`，否则 `running`。
+
+    **`pending` 的含义是「不写 run 级」**：两个 RunStore adapter 拿到 `pending` 时都保留库中 run 级原值（`create_run` 落的
+    `pending`，或此前某次认领、投影写下的 `running`），只有 `running` 才落库。这样认领之后、拿着认领之前读到的 baseline
+    写出的全 pending 投影不会把 run 级改回 `pending`（ADR 0034 机制三「run 级状态只进不退」条②）。
 
     **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的值，只要有一个 job 出了判定就是终态（一个 job
     已 passed、其余还 pending 的 run 得到 `passed`），只有还没有 job 出判定时才是前置态；提前落 run 级终态会被 `try_finalize`
@@ -706,9 +710,9 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
 
     **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
     标量条件写发生在 per-job 条件写之前（那一刻库中 job 态还没更新、读它无意义），判据依赖库就没法对拍。
-    真实 tick 流里已 claim 的 job 必在投影中现 `running`（`project` 以 RunStore 态为基线单调合并），故
-    「全 pending」说明这个 run 还没起过任何 job——status 如实显示 `pending` 才有诊断价值（读到仍 pending
-    就意味着推进可能没启动）。两端取值都是非终态，commit point 的专属性不受影响。
+    并发实例可能拿着认领之前读到的 baseline 投影，所以「投影里全 pending」不证明库中没有 job 已被认领；run 级是否
+    已离开 `pending` 由认领与前台 job 写在同一次写里保证，投影在这种情形下不写 run 级、也就不会撤销它。两端取值都是
+    非终态，commit point 的专属性不受影响。
     """
     if all(js.status == Status.PENDING for js in jobs.values()):
         return Status.PENDING

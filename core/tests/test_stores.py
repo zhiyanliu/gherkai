@@ -267,7 +267,7 @@ def test_realtime_write_lifecycle(tmp_path: Path):
     assert mid.jobs["features/wiki.feature:6"].status == Status.RUNNING
     assert mid.jobs["features/wiki.feature:6"].session_id == "sess-1"
     assert mid.jobs["登录场景"].status == Status.PENDING  # 另一个还没动——Map 单元素更新不互相污染
-    assert mid.status == Status.PENDING  # 总状态还没 finalize
+    assert mid.status == Status.RUNNING  # job 离开 pending 时 run 级已是 running（ADR 0034 机制三），终态待 finalize
 
     # 3) 两个 job 各自完成
     store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1"))

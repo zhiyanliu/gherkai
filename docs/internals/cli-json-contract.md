@@ -108,7 +108,7 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`；`skipped` 只在全部 job 都没有执行、又没有被中断时出现，现行的执行方式不产生这样的 run，读取方按可能的取值处理即可）；job 已被认领时 run 级仍可能为 `pending`（投影滞后于 job 级状态） |
+| `status` | `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`；`skipped` 只在全部 job 都没有执行、又没有被中断时出现，现行的执行方式不产生这样的 run，读取方按可能的取值处理即可）。未到终态时，只要有 job 离开 `pending`（被认领、开始执行或已有判定），run 级即为 `running`、不再回到 `pending`；所以 run 级为 `pending` 表示还没有 job 离开 `pending`。反过来不成立：run 级为 `running` 时 job 仍可能全为 `pending`，要知道哪些 job 已开始，读 `jobs[]` |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |

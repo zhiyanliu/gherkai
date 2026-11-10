@@ -213,6 +213,130 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
     assert compose.run_duration_ms(inner.load_run_state("run-1")) is not None
 
 
+class _RecordingReports:
+    def __init__(self) -> None:
+        self.written: list[str] = []
+
+    def write(self, run_id, result, *, created_at):
+        self.written.append(run_id)
+
+
+class _BoundedReads:
+    """代理真 RunStore：load_run_state 超过上限即抛，推进循环不结束时用例以失败结束而不是挂住。"""
+
+    def __init__(self, inner, limit: int) -> None:
+        self._inner, self._limit, self.reads = inner, limit, 0
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def load_run_state(self, run_id):
+        self.reads += 1
+        if self.reads > self._limit:
+            raise RuntimeError("推进循环没有结束")
+        return self._inner.load_run_state(run_id)
+
+
+def test_loop_ends_on_finalized_run_with_pending_jobs_without_report(tmp_path):
+    """已收尾（error）而 job 仍 pending 的 run（definition 不可用时的收尾形态）：本机推进循环在有限轮内退出，
+    不起 worker、不写报告、不改运行态（ADR 0034 机制三「run 级状态只进不退」条④）。
+
+    不判停时，认领被「run 未收尾」条件挡下、plan_next 每轮都提议 start，循环永不结束，随后的拆隧道也一直不执行。
+    这里用读次数上限把「不结束」变成有界失败。"""
+    meta, log, inner, _ = _setup(tmp_path, "pass", "a", "b")
+    assert inner.try_finalize("run-1", Status.ERROR, "2026-07-19T00:00:00Z", message="definition 不可用") is True
+    before = inner.load_run_state("run-1")
+    spawned: list[str] = []
+    launcher = SubprocessLauncher(lambda _name: spawned.append(_name), log, min_grace_fn=lambda _engine: 1.0)
+    store, reports = _BoundedReads(inner, limit=20), _RecordingReports()
+
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=2,
+                       poll_interval_s=0.01, now_iso_fn=_now, report_store=reports)
+
+    assert store.reads == 1            # 一轮即停
+    assert spawned == [] and reports.written == []
+    assert inner.load_run_state("run-1") == before
+
+
+def test_loop_writes_report_when_its_commit_is_lost(tmp_path):
+    """本轮走完收尾分支但 try_finalize 写输（并发推进器先提交）：循环仍按收尾处理，写一次报告后退出；
+    库中终态是先提交的那一份（ADR 0034 机制三「run 级状态只进不退」条④）。"""
+
+    class _LosesCommit:
+        def __init__(self, inner) -> None:
+            self._inner = inner
+            self.results: list[bool] = []
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def try_finalize(self, run_id, status, ended_at, *, message=None):
+            self._inner.try_finalize(run_id, status, "other")  # 另一推进器先提交
+            self.results.append(self._inner.try_finalize(run_id, status, ended_at, message=message))
+            return self.results[-1]
+
+    meta, log, inner, launcher = _setup(tmp_path, "pass", "a")
+    store, reports = _LosesCommit(inner), _RecordingReports()
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=_now, report_store=reports)
+    assert store.results == [False]
+    assert reports.written == ["run-1"]
+    state = inner.load_run_state("run-1")
+    assert state.status == Status.PASSED and state.ended_at == "other"
+
+
+def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path):
+    """另一个推进器已提交终态并写过报告之后，本机推进循环读到既有终态即退出，不重写报告、不改运行态
+    （ADR 0034 机制三「run 级状态只进不退」条④）。job 全为终态、事件完整，若照旧走收尾路径就能重写出一份报告，
+    所以本例区分得出「读到既有终态时不写报告」。第二个循环经读次数上限代理，循环不结束时本例以失败结束而不是挂住。"""
+    meta, log, store, launcher = _setup(tmp_path, "pass", "a")
+    first = _RecordingReports()
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
+                       poll_interval_s=0.05, now_iso_fn=_now, report_store=first)
+    assert first.written == ["run-1"]
+    before = store.load_run_state("run-1")
+    assert before.status == Status.PASSED
+
+    again, bounded = _RecordingReports(), _BoundedReads(store, limit=20)
+    run_reconcile_loop("run-1", meta, log, bounded, launcher, max_concurrency=1,
+                       poll_interval_s=0.01, now_iso_fn=lambda: "2026-07-19T01:00:00Z", report_store=again)
+
+    assert bounded.reads == 1          # 一轮即停
+
+    assert again.written == []
+    assert store.load_run_state("run-1") == before
+
+
+def test_drive_local_reconcile_tears_down_tunnel_for_an_already_terminal_run(tmp_path, monkeypatch):
+    """`status --wait` 接力与 per-run 进程共用的入口：run 已收尾（error、job 仍 pending）时推进结束、照常拆隧道，
+    不写报告（ADR 0034 机制三「run 级状态只进不退」条④）。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
+    import threading
+
+    from gherkai_runtime import compose, detached
+    from gherkai_runtime import tunnel as gtunnel
+
+    _seed_for_build(tmp_path, "run-t", max_concurrency=1)
+    assert LocalRunStore(tmp_path).try_finalize("run-t", Status.ERROR, "t1", message="definition 不可用") is True
+    (tmp_path / "run-t" / "tunnel.json").write_text('{"pid": 4343}', encoding="utf-8")
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    env = {**os.environ, "WORKER_MODE": "pass"}
+    monkeypatch.setattr(compose, "build_engines",
+                        lambda **kw: {"novaact": SubprocessEngine(cmd=[sys.executable, _ECHO], env=env)})
+    stopped: list[int] = []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+
+    worker = threading.Thread(
+        target=detached.drive_local_reconcile, args=(str(tmp_path), "run-t", 1),
+        kwargs={"region": None, "profile": None, "poll_interval_s": 0.01}, daemon=True)
+    worker.start()
+    worker.join(timeout=10)
+
+    assert not worker.is_alive(), "推进循环没有结束"
+    assert stopped == [4343] and not (tmp_path / "run-t" / "tunnel.json").exists()
+    assert not (tmp_path / "run-t" / "index.html").exists() and not (tmp_path / "run-t" / "manifest.json").exists()
+    assert LocalRunStore(tmp_path).load_run_state("run-t").jobs["a"].status == Status.PENDING
+
+
 def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeypatch):
     """region 走与前台 run 相同的解析链（ADR 0016 决策 C）：不显式给 --region 时 env/profile config 兜底、
     落实成字符串注入 worker env——曾原样透传 None：worker 里 AgentCore validate_region 见 None 即崩

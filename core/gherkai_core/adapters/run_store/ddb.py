@@ -211,7 +211,28 @@ class DynamoDBRunStore:
 
         #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）；
         ConditionExpression 复刻 local「未 create 就报错」——捕 ConditionalCheckFailedException 转 FileNotFoundError。
+
+        **写入的 job 态不是 pending 时连同 run 级一起写**（ADR 0034 机制三「run 级状态只进不退」条③）：第一次写
+        `SET jobs.#sid = :js, #st = :running`，条件是 STATE 存在且 run 级为 pending 或 running；条件不成立（run 已收尾，
+        或 STATE 不存在）时再写一次、只写 job，条件只剩 STATE 存在，仍不成立即报错。已收尾的 run 上 job 照写、run 级不变。
+        正常路径一次写，第二次只在已收尾或 STATE 不存在时发生。写入 pending 时只写 job。
         """
+        ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
+        if job_state.status != Status.PENDING:
+            try:
+                self._table.update_item(
+                    Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                    UpdateExpression="SET jobs.#sid = :js, #st = :running",
+                    ExpressionAttributeNames={"#sid": job_state.scope_id, "#st": "status"},  # status 是 DDB 保留字
+                    ExpressionAttributeValues={
+                        ":js": _job_state_to_item(job_state),
+                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                    },
+                    ConditionExpression="attribute_exists(run_id) AND #st IN (:pending, :running)",
+                )
+                return
+            except ccf:
+                pass  # run 已收尾或 STATE 不存在：下面只写 job，STATE 不存在时由它报错
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
@@ -220,7 +241,7 @@ class DynamoDBRunStore:
                 ExpressionAttributeValues={":js": _job_state_to_item(job_state)},
                 ConditionExpression="attribute_exists(run_id)",
             )
-        except self._table.meta.client.exceptions.ConditionalCheckFailedException as e:
+        except ccf as e:
             raise FileNotFoundError(f"update_job_state：STATE 不存在（须先 create_run）：{run_id}") from e
 
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
@@ -251,11 +272,14 @@ class DynamoDBRunStore:
     # CCF=ConditionalCheckFailedException。
 
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
-        """CAS：仅当 jobs[scope_id].status == 'pending' 才置 'running'（机制四）。CCF → 已被抢/非 pending → False。
+        """CAS：仅当 jobs[scope_id].status == 'pending' 且 run 未收尾才置 'running'（机制四）。CCF → False。
 
+        同一条条件写把 run 级置 'running'（ADR 0034 机制三「run 级状态只进不退」条①）：顶层 `#st` 与 `jobs.#sid.#st`
+        路径不重叠、可在同一更新表达式里写。条件不成立的三种原因（已被抢、job 不在 Map 里、run 已收尾）不区分，
+        都不该由这次认领起 task；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
         随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。
         """
-        update = "SET jobs.#sid.#st = :running"
+        update = "SET jobs.#sid.#st = :running, #st = :running"
         values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value}
         if claimed_at is not None:
             update += ", jobs.#sid.claimed_at = :ca"
@@ -266,7 +290,8 @@ class DynamoDBRunStore:
                 UpdateExpression=update,
                 ExpressionAttributeNames={"#sid": scope_id, "#st": "status"},
                 ExpressionAttributeValues=values,
-                ConditionExpression="jobs.#sid.#st = :pending",  # 仅当前是 pending 才抢占
+                # 仅当该 job 当前是 pending、run 级未收尾才抢占
+                ConditionExpression="jobs.#sid.#st = :pending AND #st IN (:pending, :running)",
             )
             return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
@@ -275,9 +300,12 @@ class DynamoDBRunStore:
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 → False。
 
-        **run 级 status 钳为 pending/running、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会
-        挡住 try_finalize）。取值规则见 `projected_run_status`（与 local adapter 共用一份）。条件双守：
-        HWM 挡 stale + status 挡「已 finalize 被刷回」。
+        **run 级 status 只写 running、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住 try_finalize）。
+        取值规则见 `projected_run_status`（与 local adapter 共用一份）：它给出 running 时标量写带上 run 级；给出 pending
+        （投影里全 job 仍 pending）时更新表达式省略 run 级、只写 HWM，库中 run 级原样保留，认领或此前投影已写成的 running
+        不被拿着旧 baseline 的投影改回 pending（ADR 0034 机制三「run 级状态只进不退」条②）。条件双守不变：
+        HWM 挡 stale + status 挡「已 finalize 被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级，
+        所以 finalize 插在两阶段之间时，后续逐 job 写不会把终态改回 running。
 
         **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
@@ -299,14 +327,15 @@ class DynamoDBRunStore:
         from gherkai_core.project import _lifecycle_rank, projected_run_status
 
         new_hwm = state.high_water_mark or 0
-        # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值在有 job
+        # run 级 status 按投影里的 job 态定（全 pending → 不写，否则 running）；传入的 run 级值在有 job
         # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
         # 才碰它们），判据只看投影——与 local 同一规则、可对拍。
-        run_status = projected_run_status(state.jobs).value
+        writes_run_status = projected_run_status(state.jobs) == Status.RUNNING
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET #st = :s, high_water_mark = :h",
+                UpdateExpression=("SET #st = :running, high_water_mark = :h" if writes_run_status
+                                  else "SET high_water_mark = :h"),
                 # (库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态 → 允许；否则 CCF（stale / 已 finalize）
                 ConditionExpression=(
                     "(attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
@@ -314,8 +343,7 @@ class DynamoDBRunStore:
                 ),
                 ExpressionAttributeNames={"#st": "status"},
                 ExpressionAttributeValues={
-                    ":s": run_status, ":h": new_hwm,
-                    ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                    ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
                 },
             )
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:

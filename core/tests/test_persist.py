@@ -214,6 +214,29 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     assert run_store.load_run_state("r").jobs["s"].status == Status.PASSED
 
 
+def test_run_status_advances_when_first_job_leaves_pending(tmp_path):
+    """前台 run 的 run 级状态（ADR 0034 机制三「run 级状态只进不退」条③）：begin 后为 pending；第一个 job 离开 pending 的那一次写
+    之后为 running，哪怕那一次是从 pending 直接写成终态（SKIPPED 的 job 不经 RUNNING）；finalize 落定终态。RunPersistence
+    不另记「是否第一次」，推进由 RunStore 的 job 写自身保证。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+
+    run_store = LocalRunStore(tmp_path)
+    p = RunPersistence("r", run_store, LocalResultStore(tmp_path))
+    meta = _meta("r", ["a", "b"])
+    p.begin(meta, started_at="t0")
+    assert run_store.load_run_state("r").status == Status.PENDING
+    p.on_job_complete(_jr("a", Status.SKIPPED))
+    state = run_store.load_run_state("r")
+    assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (
+        Status.RUNNING, Status.SKIPPED, Status.PENDING)
+    p.on_event(ScopeStarted(scope_id="b", session_id="sess-b"))
+    p.on_job_complete(_jr("b", Status.PASSED, session_id="sess-b"))
+    assert run_store.load_run_state("r").status == Status.RUNNING
+    p.finalize(RunResult(run_meta=meta, status=Status.PASSED, jobs=[_jr("a", Status.SKIPPED), _jr("b")]), ended_at="t9")
+    assert run_store.load_run_state("r").status == Status.PASSED
+
+
 # ---- 会话事件（ADR 0051 决策 4）：session_opened 刷 RUNNING 带代表会话；attempted 不产生带 None 的写入；锁定后不改写 ----
 def test_on_event_session_opened_sets_running_and_never_writes_none_session_id():
     from gherkai_core.model import SessionOpened

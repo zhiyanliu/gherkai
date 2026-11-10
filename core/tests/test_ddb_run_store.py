@@ -78,7 +78,7 @@ def test_realtime_write_lifecycle(ddb_run_store):
     assert mid.jobs["features/wiki.feature:6"].status == Status.RUNNING
     assert mid.jobs["features/wiki.feature:6"].session_id == "sess-1"
     assert mid.jobs["登录场景"].status == Status.PENDING   # 另一个没动
-    assert mid.status == Status.PENDING                      # 总状态还没 finalize
+    assert mid.status == Status.RUNNING                      # job 离开 pending 时 run 级已是 running，终态待 finalize
 
     # 3) 两个 job 各自完成
     ddb_run_store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1"))

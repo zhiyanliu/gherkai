@@ -40,7 +40,7 @@
 | `skipped` | **core 本地赋值**（三处，见 §3a / §3c 图） | job（这个 run 已被中止——fail-fast 或使用方中断——时 worker 从未 spawn）· scenario 与其 step（scope 级 error 后对无事件的 scenario 合成）· step（scope 内短路） | 该单元未执行 | job 级：未执行、未产生费用，可直接重新运行（fail-fast 时伴随触发中止的 error job、根因在别处；使用方中断时不要求存在 error job，看 `message` 即知）。scenario 级：根因是 job 级的 scope 级 error，看 job 的 `error_type` 与 `message`。step 级：根因是其上游的 `error` step，或所属 scenario 整条未执行 |
 | `aborted` | **core 本地赋值**（终结函数：停止原因为主动中止——fail-fast，或使用方中断同步 `run`——且内容不完整；run 级由 `schedule` 在被使用方中断且有 job 记 aborted 或 skipped 时直接赋） | job·run（run 级只在使用方中断时） | 已启动，运行中被终止 | **不宜直接重新运行**：会话已被操作过、可能留下副作用；先查现场（`session_id` 已保留，可对上 worker 日志；Nova Act 的轨迹目录按日志里对应的另一种会话 id 找） |
 | `pending` | `create_run` 写初始态 | job（`JobState`）·run（`RunState`） | 尚未启动 | 等待；提交较久而**所有** job 仍为 pending 时，`status` 会提示用 `--wait` 接力推进 |
-| `running` | 收到 `scope_started` 或 `origin` 不是 `attempted` 的 `session_opened`（会话已建立、被测对象就绪之前；桌面与设备 worker 都先发它）后写入，只有 `attempted` 的 `session_opened` 时仍为 `pending` / 无状态路径 CAS claim | job·run | 执行中 | 等待 / `status --wait` |
+| `running` | job 级：收到 `scope_started` 或 `origin` 不是 `attempted` 的 `session_opened`（会话已建立、被测对象就绪之前；桌面与设备 worker 都先发它）后写入，只有 `attempted` 的 `session_opened` 时仍为 `pending` / 无状态路径 CAS claim。run 级：第一个 job 离开 `pending` 的那次写连带写入（见 §4 末段） | job·run | 执行中 | 等待 / `status --wait` |
 
 两条边界容易读错：
 
@@ -128,9 +128,9 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 **run 级聚合的取值**：`_aggregate` 在入口把 skipped/aborted 连同两个前置态滤掉，只按剩下的判定集归约；判定集非空时结果只会是 `passed`、`failed`、`error` 三者之一。判定集为空而输入非空时（还没有任何 job 出判定），按 `aborted`、`skipped`、`running`、`pending` 的顺序取输入里第一个出现的态：全 skipped 的 run 得 `skipped`、全 aborted 的得 `aborted`，不会被记成 `passed`；无状态投影里还没有 job 出判定的 run 得到 `pending` 或 `running`。空输入（零个 job）判 `passed`，这只是函数层兜底：CLI 对零 scenario 批（筛选后为空或不加筛选）以退出码 2 拒绝，不会产生零个 job 的 run。另有一个例外在 `_aggregate` 之外：同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `aborted` 或 `skipped` 时，`schedule` 把 `RunResult.status` 直接记 `aborted`——判定不完整，不能按仅有的几个判定聚合。它在两种情形下改变结果：被中止的 job 与已出判定的 job 并存（`_aggregate` 按已有判定聚合，如 aborted 与 passed 并存时为 `passed`），以及全部 job 都没有启动（`_aggregate` 给 `skipped`）；无状态路径不作中止决定，没有这个例外。fail-fast 不走这个例外，它必伴随 error。过滤在无状态投影路径上是**承重**的：`project` 每轮 tick 全量重放，`jobs_state` 确实含 pending/running 的 job 并原样传入；同步 run 路径传入的全是终态。
 
-控制面的 `RunState.status` 多两个可能取值（另有上一段的 `aborted`，由被中断的同步 `run` 经 `finalize` 落下）：执行期间为 `pending`/`running`（同步 `run` 路径全程保持 `pending`，由 `finalize` 一次落终态；无状态路径每轮投影写按 `projected_run_status` 钳在 pending/running）。run 级终态是 `finalize` 这个提交点的专属，提前落终态会使 run 永不 finalize。
+控制面的 `RunState.status` 多两个可能取值（另有上一段的 `aborted`，由被中断的同步 `run` 经 `finalize` 落下）：执行期间为 `pending`/`running`，只进不退：job 离开 `pending` 的那次写保证未收尾的 run 级已是 `running`——同步 `run` 路径是该 job 的实时写（写入的 job 态不是 `pending` 时连同 run 级一起写），无状态路径是 CAS 认领（同一次条件写置 job 与 run 级）；无状态路径的投影写按 `projected_run_status` 只写 `running` 或不写 run 级（投影里全部 job 仍 pending 时保留库中值，不把 run 级写回 `pending`）。由此，未收尾的 run 读到 run 级 `pending` 即没有 job 离开 `pending`；反过来不成立，run 级 `running` 不保证已有 job 离开 `pending`。run 级终态是 `finalize` 这个提交点的专属，由它一次落定，提前落终态会使 run 永不 finalize。
 
-> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定二（severity 序、视觉映射、「run 级为何不含 skipped/aborted」的洞察）与决定三（入口过滤与空判定集规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三（投影写钳制）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（提交点）。
+> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定二（severity 序、视觉映射、「run 级为何不含 skipped/aborted」的洞察）与决定三（入口过滤与空判定集规则）、[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三（投影写钳制与「run 级状态只进不退」条）、[ADR 0030](../adr/0030-realtime-persistence-seam.md)（提交点）。
 
 ## 5. 退出码：各命令的语义不同
 
@@ -138,7 +138,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 归纳：**部署方命令之外，表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**（`deploy` / `destroy` 的 1 不表判定，表示账户可能已被改动）；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
 
-`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读可能停在 pending 的落库态）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
+`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读落库态：落库态在实时写下可能仍未到终态，`--no-report` 时也不落库）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 
 **CI 应接哪一条**：
 

@@ -549,7 +549,7 @@ def test_kicker_timeout_path_builds_once(monkeypatch):
     monkeypatch.setattr(reconciler, "_build", lambda rid: builds.append(rid) or ("BUILT",) * 7)
     monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built, **_kw: "stopped")
     import gherkai_core.reconcile as _cr
-    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: False)
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: _cr.TickOutcome.CONTINUE)
     monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: None)
     reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)
     assert builds == ["run-1"]
@@ -587,7 +587,7 @@ def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
     ticked = []
     monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
     import gherkai_core.reconcile as _cr
-    monkeypatch.setattr(_cr, "tick", lambda run_id, *a, **kw: ticked.append(run_id) or False)
+    monkeypatch.setattr(_cr, "tick", lambda run_id, *a, **kw: ticked.append(run_id) or _cr.TickOutcome.CONTINUE)
 
     def _boom(run_id, built):
         raise RuntimeError("DescribeTable 超时")
@@ -597,6 +597,42 @@ def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
     assert result["ok"] is True and sorted(result["runs"]) == ["run-1", "run-2"]
     assert sorted(ticked) == ["run-1", "run-2"]  # 一个 run 的扫失败不挡另一个 run 的推进
     assert "超时兜底检查未完成" in capsys.readouterr().out
+
+
+def _stub_tick_runs_host(monkeypatch, outcome):
+    """把 _tick_runs 的三个外部动作换成记录：tick 返回给定结果，记下报告收尾与防御性超时扫是否被调。"""
+    import gherkai_core.reconcile as _cr
+    from gherkai_runtime import compose as _compose
+
+    calls: list[str] = []
+    monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: outcome)
+    monkeypatch.setattr(_cr, "finalize_report", lambda *a, **kw: calls.append("report"))
+    monkeypatch.setattr(_compose, "run_duration_ms", lambda state: None)
+    monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: calls.append("scan"))
+    return calls
+
+
+class _StateStub:
+    def load_run_state(self, run_id):
+        return None
+
+
+def test_tick_runs_branches_on_tick_outcome(monkeypatch):
+    """_tick_runs 按 tick 的三种结果分支（ADR 0034 机制三「run 级状态只进不退」条④）。"""
+    import gherkai_core.reconcile as _cr
+
+    cases = [
+        ("FINALIZED", ["report"]),       # 本轮走完收尾分支（含 try_finalize 写输）：写报告、不做超时扫
+        ("ALREADY_TERMINAL", []),        # 读到既有终态：既不写报告、也不做超时扫
+        ("CONTINUE", ["scan"]),          # 继续推进：只做防御性超时扫
+    ]
+    for outcome_name, expected in cases:
+        calls = _stub_tick_runs_host(monkeypatch, _cr.TickOutcome[outcome_name])
+        built = ("META", "LOG", _StateStub(), "LAUNCHER", 1, "RSTORE", "PSTORE")
+        result = reconciler._tick_runs({"run-1"}, "reconciler", prebuilt={"run-1": built})
+        assert result == {"ok": True, "runs": ["run-1"]}, outcome_name
+        assert calls == expected, outcome_name
 
 
 # ---------- 只推进 detached run（ADR 0034 端到端 cloud 1b 的 handler 侧分流）----------

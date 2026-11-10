@@ -283,10 +283,14 @@ def test_in_flight_job_state_agrees(tmp_path, events, expected):
     persistence.begin(meta, started_at="t0")
     for ev in events:
         persistence.on_event(ev)
-    synced = run_store.load_run_state("r").jobs[SCOPE]
+    synced_state = run_store.load_run_state("r")
+    synced = synced_state.jobs[SCOPE]
     records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
     projected = project(meta, records).jobs[SCOPE]
     assert (synced.status, synced.session_id) == (projected.status, projected.session_id) == expected
+    # 单 job 的 run：job 离开 pending 时实时落库的 run 级随之为 running，仍为 pending 时 run 级也是 pending
+    # （ADR 0034 机制三「run 级状态只进不退」条③）
+    assert synced_state.status == expected[0]
 
 
 def test_crash_row_sync_side_really_exits_with_unknown_code():

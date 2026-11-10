@@ -71,6 +71,7 @@ def test_ddb_run_store_lifecycle_real(real_aws):
     assert mid.jobs[scope_ids[0]].status == Status.RUNNING
     assert mid.jobs[scope_ids[0]].session_id == "sess-real"
     assert mid.jobs[scope_ids[1]].status == Status.PENDING  # 没被污染
+    assert mid.status == Status.RUNNING  # job 离开 pending 的同一次写把 run 级推进为 running（ADR 0034 机制三）
 
     # 各自完成 + finalize（真 DDB 保留字 status/ended_at 的 SET）
     store.update_job_state(rid, JobState(scope_ids[0], Status.PASSED, session_id="sess-real"))

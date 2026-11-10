@@ -114,9 +114,16 @@ class RunStore(Protocol):
     save_run 保留作「一次性写完整态」便捷方法（可由 create_run+finalize 组合）。
     """
 
-    # —— 实时写三段（ADR 0030，同步 run 路径；单进程内 RunPersistence._lock 串行、不带条件）——
+    # —— 实时写三段（ADR 0030，同步 run 路径；单进程内 RunPersistence._lock 串行，调用方不需要条件写）——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...
-    def update_job_state(self, run_id: str, job_state: JobState) -> None: ...
+    def update_job_state(self, run_id: str, job_state: JobState) -> None:
+        """按 scope_id 写单个 job 的运行态；运行态不存在则抛 FileNotFoundError（须先 create_run）。
+
+        写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变
+        （ADR 0034 机制三「run 级状态只进不退」条③）。写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
+        """
+        ...
+
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None: ...
     # —— 一次性写便捷方法（保留）——
     def save_run(self, meta: RunMeta, state: RunState) -> None: ...
@@ -154,10 +161,13 @@ class RunStore(Protocol):
     # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
     # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
-        """CAS 抢占：仅当该 job 当前是 PENDING 才置 RUNNING，成功返回 True（机制四）。
+        """CAS 抢占：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
 
         多个 reconciler 实例并发抢同一 pending job，只有一个 CAS 成功（返回 True）去真 RunTask/spawn，
-        其余返回 False 跳过——严格 max_concurrency 的并发闸（不靠进程内线程池）。job 不存在/已非 pending → False。
+        其余返回 False 跳过——严格 max_concurrency 的并发闸（不靠进程内线程池）。job 不存在/已非 pending/run 已收尾
+        （run 级为终态）→ False，三种原因不区分。
+        同一条条件写把 run 级置 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功后 run 级即为 RUNNING；
+        run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
 
         claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
         （ADR 0034「job timeout」节：local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
@@ -169,7 +179,11 @@ class RunStore(Protocol):
 
         stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
         state.high_water_mark 为 None 按 0 处理（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
-        不该走到这里。
+        不该走到这里。库中 run 级已是终态时同样被挡（返回 False）。
+
+        传入的 run 级 status 不落库：投影里任一 job 已离开 PENDING 时 run 级写 RUNNING，全 job 仍 PENDING 时不写 run 级、
+        保留库中值，因而不会把认领写成的 RUNNING 改回 PENDING（取值规则见 `project.projected_run_status`，ADR 0034
+        机制三「run 级状态只进不退」条②）。各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）。
         """
         ...
 

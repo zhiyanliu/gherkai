@@ -4,7 +4,7 @@
 - **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
   在独立线程里读它的 fd3 事件流旁路落 SqliteEventLog（赋 worker 段单调 seq）、worker 退出后 `handle.wait()`
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）。worker 不改、对 SQLite 无知（0034）。
-- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到全 done 自退。
+- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
@@ -21,7 +21,7 @@ from gherkai_core.adapters.event_log import SqliteEventLog, make_raw_sink
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
-from gherkai_core.reconcile import finalize_report, tick
+from gherkai_core.reconcile import TickOutcome, finalize_report, tick
 from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
 
@@ -97,7 +97,7 @@ class SubprocessLauncher:
             timer = threading.Timer(job.timeout_s, _on_deadline)
             timer.daemon = True
             timer.start()
-        # 不持线程引用：daemon 线程无人 join（收尾判据是 run_reconcile_loop 的「全 done」，即每 job 都有
+        # 不持线程引用：daemon 线程无人 join（循环何时结束由 tick 的结果决定，正常收尾时每 job 都有
         # _pump 写的退出记录），存下来只会随 job 数单调增长。
         threading.Thread(
             target=self._pump, args=(scope_id, handle, events, timer, timed_out), daemon=True,
@@ -143,21 +143,28 @@ def run_reconcile_loop(
     result_store=None,
     report_store=None,
 ) -> None:
-    """per-run 进程的推进循环：反复 tick 直到全 done（ADR 0034 local 主力触发源）。
+    """per-run 进程的推进循环：反复 tick 直到 run 收尾（ADR 0034 local 主力触发源）。
 
     now_iso_fn：**必传**的时间源（组合根传 `compose.now_iso`；测试传 fake 保确定性）——曾有个 strftime 的
     `…Z` 回落分支，漏传即让同一份 RunState 混两种时间戳格式（见 `compose.now_iso` docstring），故不留缺省。
-    tick 幂等——崩了 status --wait 可接力（状态全持久）。全 done（tick 返回 True）即退出（batch shape：
-    运行结束即停、不常驻）。
+    tick 幂等——崩了 status --wait 可接力（状态全持久）。循环按 tick 的结果分支（batch shape：运行结束即停、不常驻）：
+    - `TickOutcome.FINALIZED`（本轮走完收尾分支）：写 RunReport 后退出；
+    - `TickOutcome.ALREADY_TERMINAL`（读到既有终态）：不写报告、直接退出。按此刻的事件重写会覆盖已有报告；
+      带着 pending job 收尾的 run 在这里结束，循环不依赖「每个 job 都会到终态」（ADR 0034 机制三
+      「run 级状态只进不退」条④）；
+    - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
+    退出后由调用方照常拆隧道（`drive_local_reconcile`）。
 
     result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在 finalize CAS **之前**落（注入给 tick，
-    ADR 0030 决定三写序）；RunReport（index/manifest）在 done 后由 `finalize_report` 写（派生、失败隔离）。
-    两者都幂等（从 events 重放、覆盖写同 key）——多个推进器都 done 都写无害。注入 None（测试）则跳过。
+    ADR 0030 决定三写序）；RunReport（index/manifest）在本轮走完收尾分支后由 `finalize_report` 写（派生、失败隔离）。
+    两者都幂等（从 events 重放、覆盖写同 key）——并发推进器都走完收尾分支时各写一次无害。注入 None（测试）则跳过。
     """
     while True:
-        done = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
-                    now_iso=now_iso_fn(), result_store=result_store)
-        if done:
+        outcome = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
+                       now_iso=now_iso_fn(), result_store=result_store)
+        if outcome is TickOutcome.ALREADY_TERMINAL:
+            return
+        if outcome is TickOutcome.FINALIZED:
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
             # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
@@ -177,7 +184,7 @@ def run_reconcile_loop(
 
 def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *, region=None, profile=None,
                           poll_interval_s: float = 0.5) -> None:
-    """local 推进的**唯一入口**（ADR 0034 三宿主同一套机制）：装配 → tick 到终态 → 拆隧道。per-run 进程与
+    """local 推进的**唯一入口**（ADR 0034 三宿主同一套机制）：装配 → tick 到 run 收尾 → 拆隧道。per-run 进程与
     `status --wait` 接力都调这里——曾在 cli 两处逐字复写这三句装配，改一处漏一处就让接力者与 per-run 行为分叉。"""
     meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
         report_dir, run_id, max_concurrency, region=region, profile=profile)

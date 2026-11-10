@@ -96,7 +96,7 @@ run 开始（schedule 之前）:
 job 进行中（on_event 收 ScopeStarted，或 origin 不是 attempted 的 SessionOpened（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的加法扩展）；worker 线程、**sink_lock 之外**）:
   RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id))  ← RUNNING 中间态 + 血缘随首事件即落（session_id 按代表会话规则：scope_started 的值一经取到即锁定，此前取最近一条非 attempted 的 session_opened；任何写入都不以 None 覆盖已有值，终态写也守此规则）
 
-  （待实装：写入的 job 态非 PENDING 时——RUNNING 或从 PENDING 直接到终态——同一次写把未收尾的 run 级推进为 RUNNING，
+  （写入的 job 态非 PENDING 时——RUNNING 或从 PENDING 直接到终态——同一次写把未收尾的 run 级推进为 RUNNING，
    run 已收尾则只写 job；规则、DDB 的条件写与回退见 [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条）
 
 run 结束（schedule 返回后）:
@@ -160,7 +160,7 @@ run 结束（schedule 返回后）:
 class RunStore(Protocol):
     # —— 新增（实时写）——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...      # run 开始：写 definition + 初始全 PENDING 态
-    def update_job_state(self, run_id: str, job_state: JobState) -> None: ...       # 单 job 实时刷（按 scope_id 定位）；job 态非 PENDING 时连带把未收尾的 run 级推进为 RUNNING（待实装）
+    def update_job_state(self, run_id: str, job_state: JobState) -> None: ...       # 单 job 实时刷（按 scope_id 定位）；job 态非 PENDING 时连带把未收尾的 run 级推进为 RUNNING
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None: ... # commit point：写聚合 status + ended_at
     # —— 保留（一次性写便捷方法）——
     def save_run(self, meta: RunMeta, state: RunState) -> None: ...                 # 仍被 test_stores 的 save/load 往返用例护住；可由 create_run+finalize 组合
@@ -170,7 +170,7 @@ class RunStore(Protocol):
 **接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）、条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)），以及只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7）。
 
 - **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）；生产路径不直接调它：local adapter 的 `create_run` 委托它写盘，DDB adapter 则由它委托 `create_run`。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
-- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。写入的 job 态非 PENDING 时，同一次写连带把未收尾的 run 级推进为 RUNNING（待实装）：local 在同一次读改写里判 run 级未收尾才改；DDB 带条件 `#st IN (pending, running)` 连同 run 级一起写，条件不成立再只写 job（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
+- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。写入的 job 态非 PENDING 时，同一次写连带把未收尾的 run 级推进为 RUNNING：local 在同一次读改写里判 run 级未收尾才改；DDB 带条件 `#st IN (pending, running)` 连同 run 级一起写，条件不成立再只写 job（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
 
@@ -199,7 +199,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - 读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。events 表的**投影读**（`DdbEventLog.records()`，reconcile/finalize 的输入）同理强一致：finalize 前刚写的尾事件（终读 drain、退出观察者的 `task_exited`）必须立即可见，最终一致读漏尾会把已完成 job 投成仍在跑；2× RRU 相对 run 级读量可忽略。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
 - **两个 GSI，都以 `status` 为分区键、只索引 STATE item**（META item 没有顶层 `status`，稀疏由此构造），各管一条访问路径：`status-index`（只有分区键，投影 INCLUDE `worker_task_def_arns`）供 worker revision 清理检查「是否还有非终态 run 引用某个 revision」（[0038](./0038-worker-image-delivery.md)）；`status-run_id-index`（排序键 `run_id`，投影 KEYS_ONLY）供 `list-runs` 按状态取最近 N 条 run_id（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。不合成一个：前者要投影 revision 列表、后者只要键，前者没有排序键、取不到有界的「最近 N 条」，而 DynamoDB 不能修改已有 GSI 的键。GSI 的读只有最终一致，所以 `list-runs` 只从索引取 run_id，状态与 job 计数以 `BatchGetItem`（`ConsistentRead=True`）读回的 STATE item 为准，与上条「读用强一致」一致。两个索引都不改变「不 Scan runs 表」的约束（表 `RETAIN`、无 TTL，[0038](./0038-worker-image-delivery.md)）。
 
-**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 按 scope_id 单元素刷整 entry（`SET jobs.#sid=:js`，调用方给全量、对拍 local 的整 entry 替换；job 态非 PENDING 时同一次写连带 run 级（待实装），见上决定四）；**投影写（`project_state`）逐属性**（`SET jobs.#sid.<attr>=…`：未提及的 `session_id`/`claimed_at` 由 update_item 天然保留——对拍 local 的「投影缺字段回填库中值」兜底；曾整 entry 覆盖，不带 baseline 的投影会抹掉只由 claim 落库的 `claimed_at`）。blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）；run 级 `message`（[0037](./0037-distribution-and-packaging.md) 决策 7：推进器不经任何 job 就终结 run 时的原因）同样 omit-when-None，随 `try_finalize` 的同一次条件写落 STATE item。
+**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 按 scope_id 单元素刷整 entry（`SET jobs.#sid=:js`，调用方给全量、对拍 local 的整 entry 替换；job 态非 PENDING 时同一次写连带 run 级，见上决定四）；**投影写（`project_state`）逐属性**（`SET jobs.#sid.<attr>=…`：未提及的 `session_id`/`claimed_at` 由 update_item 天然保留——对拍 local 的「投影缺字段回填库中值」兜底；曾整 entry 覆盖，不带 baseline 的投影会抹掉只由 claim 落库的 `claimed_at`）。blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update/finalize 须复刻 local「报错」语义（条件写）；session_id=None 沿用 omit-when-None（不写该键、读回得 None）；run 级 `message`（[0037](./0037-distribution-and-packaging.md) 决策 7：推进器不经任何 job 就终结 run 时的原因）同样 omit-when-None，随 `try_finalize` 的同一次条件写落 STATE item。
 
 **ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每 job 一 S3 对象，key = `<prefix>/<run_id>/jobs/<quote(scope_id)>.json`（`quote` 编码——scope_id 含 `/`:中文原样嵌会让 `load_all` 的 prefix 反解歧义）。**赌 CI 按 run_id+scope_id 键取判定**；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
 

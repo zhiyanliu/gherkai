@@ -407,7 +407,9 @@ def _build(run_id: str):
     # 终态的前提就是每个 job 都已有退出记录或已判超时，不会漏 StopTask。
     # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——finalize_report 只有
     # 本 Lambda 与 detached 宿主两个调用点、本就没有独立的重生成命令，而事件过期后重 tick 只会生成错报告。
-    # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。
+    # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。tick 自身也先读运行态、
+    # 已收尾即停止推演，覆盖本闸之后才插入的收尾；本闸保留，是因为它在读 definition 之前，tick 内的判停管不到这一段
+    # （ADR 0034 机制三「run 级状态只进不退」条④）。
     state = run_store.load_run_state(run_id)
     if state is not None and state.status in TERMINAL_STATUSES:
         print(f"skip: run {run_id} 已结束，不再改写它的结果")
@@ -477,13 +479,16 @@ def _run_ids_from_runs_stream(event) -> set[str]:
 
 
 def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
-    """对每个 run tick 一步；done 则聚合收尾。reconciler（events Stream）与 kicker（runs Stream）共用。
+    """对每个 run tick 一步，按结果分支。reconciler（events Stream）与 kicker（runs Stream）共用。
+
+    tick 的三种结果（`TickOutcome`，ADR 0034 机制三「run 级状态只进不退」条④）：本轮走完收尾分支 → 写 RunReport；
+    读到既有终态 → 不写报告、不做超时扫（run 已在装配的语义闸之后被别的推进器收尾）；继续推进 → 防御性超时扫。
 
     prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
     （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
     """
-    from gherkai_core.reconcile import tick
+    from gherkai_core.reconcile import TickOutcome, tick
     from gherkai_runtime import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
 
     prebuilt = prebuilt or {}
@@ -496,8 +501,11 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
         # 判定真值由 tick 在 finalize CAS 之前落 rstore（ADR 0030 决定三写序）；聚合异常原样抛出 → 本次 invocation 失败 →
         # events Stream 事件源重试本批（commit 之后再失败就没人重试了）。
-        done = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso(), result_store=rstore)
-        if done:
+        outcome = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso(), result_store=rstore)
+        if outcome is TickOutcome.ALREADY_TERMINAL:
+            # 装配时的语义闸之后、tick 读运行态之前，别的推进器已收尾：与那道闸同一处置，判定真值与报告都不改写
+            print(f"{label}: run {run_id} 已结束，不再改写它的结果")
+        elif outcome is TickOutcome.FINALIZED:
             # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_report
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/

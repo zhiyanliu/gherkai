@@ -234,7 +234,7 @@ def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog)
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
     """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）走通：起 job → 推进 → finalize。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
-    from gherkai_core.reconcile import tick
+    from gherkai_core.reconcile import TickOutcome, tick
 
     meta = _meta("a")
     ddb_run_store.create_run(meta, RunState(
@@ -251,7 +251,10 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
     # tick1：起 a（CAS claim + launch）
     tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t1")
     assert eng.started == ["a"]
-    assert ddb_run_store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
+    state = ddb_run_store.load_run_state("run-1")
+    assert state.jobs["a"].status == Status.RUNNING
+    # 本轮投影在认领之前（全 pending、不写 run 级），run 级由认领同一次写推进（ADR 0034 机制三「run 级状态只进不退」条①）
+    assert state.status == Status.RUNNING
 
     # worker 事件 + 退出落表
     _passed_worker_events(events_table, "a")
@@ -259,8 +262,11 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
 
     # tick2：推进到终态 + finalize
     done = tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t2")
-    assert done is True
+    assert done is TickOutcome.FINALIZED
     assert ddb_run_store.load_run_state("run-1").status == Status.PASSED
+    # 再 tick：读到既有终态即停，不再推演
+    assert tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t3") is TickOutcome.ALREADY_TERMINAL
+    assert ddb_run_store.load_run_state("run-1").ended_at == "t2"
 
 
 def test_ddb_event_log_queries_with_consistent_read():

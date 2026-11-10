@@ -110,13 +110,19 @@ class LocalRunStore:
         self.save_run(meta, initial_state)
 
     def update_job_state(self, run_id: str, job_state: JobState) -> None:
-        """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。"""
+        """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
+
+        写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（ADR 0034 机制三「run 级状态只进不退」
+        条③，对拍 DDB 的带条件写与只写 job 的回退）；run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。"""
         state = self.load_run_state(run_id)
         if state is None:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
         jobs = dict(state.jobs)
         jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
-        self._write_state(replace(state, jobs=jobs))  # 其余字段原样保留（含 run 级 message）；用 replace 而不是逐字段重建，新字段不会被漏掉
+        status = state.status
+        if job_state.status != Status.PENDING and status in (Status.PENDING, Status.RUNNING):
+            status = Status.RUNNING
+        self._write_state(replace(state, status=status, jobs=jobs))  # 其余字段原样保留（含 run 级 message）；用 replace 而不是逐字段重建，新字段不会被漏掉
 
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
         """commit point：写总 status + ended_at（各 job 态此前已由 update_job_state 刷过）。"""
@@ -249,23 +255,31 @@ class LocalRunStore:
                 fcntl.flock(lf, fcntl.LOCK_UN)
 
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
-        """CAS：仅当 jobs[scope_id] 当前 PENDING 才置 RUNNING（机制四）；随写 claimed_at（timeout 起算点）。"""
+        """CAS：仅当 jobs[scope_id] 当前 PENDING 且 run 未收尾才置 RUNNING（机制四）；随写 claimed_at（timeout 起算点）。
+
+        同一次锁内写回把 run 级置为 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：run 已收尾后不再接受新认领，
+        条件不成立（job 不存在、已非 pending、run 已收尾）一律返回 False、不写。HWM 不变。"""
         def mutate(state: RunState):
+            if state.status not in (Status.PENDING, Status.RUNNING):
+                return None  # run 已收尾：不再接受新认领
             js = state.jobs.get(scope_id)
             if js is None or js.status != Status.PENDING:
                 return None  # 不存在 / 已非 pending（别人抢了或已运行）→ 不改
             jobs = dict(state.jobs)
             jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
                                       claimed_at=claimed_at)
-            return replace(state, jobs=jobs)  # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid 对拍
+            # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid 与顶层 status 对拍
+            return replace(state, status=Status.RUNNING, jobs=jobs)
         return self._locked_rmw(run_id, mutate)
 
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。
 
-        **run 级 status 钳为 pending/running、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point
+        **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point
         专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
-        （与 ddb adapter 共用一份）。已 finalize（库中 status 已终态）→ 挡。
+        （与 ddb adapter 共用一份）：它给出 pending（投影里全 job 仍 pending）时保留库中 run 级，认领或此前投影已写成的
+        running 不被拿着旧 baseline 的投影改回 pending（ADR 0034 机制三「run 级状态只进不退」条②）。
+        已 finalize（库中 status 已终态）→ 挡。
 
         **各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②的 job 级半边）**：task_exited 走独立
         键空间、不带数值 seq，「被 scope_done 触发」与「被 task_exited 触发」的投影可携带相同 HWM——
@@ -296,9 +310,10 @@ class LocalRunStore:
                         scope_id=sid, status=js.status,
                         session_id=js.session_id or cur_js.session_id,
                         claimed_at=js.claimed_at or cur_js.claimed_at)
-            # run 级 status 按投影里的 job 态定（全 pending → pending，否则 running）；传入的 run 级值在有 job
-            # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。
-            return replace(cur, status=projected_run_status(state.jobs), jobs=jobs, started_at=state.started_at or cur.started_at,
+            # run 级 status 按投影里的 job 态定（全 pending → 保留库中值，否则 running）；传入的 run 级值在有 job
+            # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。库中值此处必为 pending 或 running。
+            status = Status.RUNNING if projected_run_status(state.jobs) == Status.RUNNING else cur.status
+            return replace(cur, status=status, jobs=jobs, started_at=state.started_at or cur.started_at,
                            ended_at=state.ended_at, high_water_mark=state.high_water_mark)
         return self._locked_rmw(run_id, mutate)
 

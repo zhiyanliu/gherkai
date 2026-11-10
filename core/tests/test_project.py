@@ -234,7 +234,7 @@ def test_out_of_order_records_reduced_by_seq():
 # ---------- 投影写的 run 级 status（机制三，两 RunStore adapter 共用同一规则）----------
 
 def test_projected_run_status_pending_only_while_all_jobs_pending():
-    """全 job pending → pending（run 还没起过任何 job）；任一 job 推进 → running；恒非终态（终态归 finalize）。"""
+    """全 job pending → pending（两个 adapter 据此不写 run 级）；任一 job 推进 → running；恒非终态（终态归 finalize）。"""
     from gherkai_core.model import JobState
     from gherkai_core.project import projected_run_status
 

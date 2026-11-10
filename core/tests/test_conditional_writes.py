@@ -9,6 +9,8 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
+- 机制三「run 级状态只进不退」条：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
+  运行态不变、前台 job 写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
 """
 from __future__ import annotations
 
@@ -62,18 +64,126 @@ def test_claim_pending_succeeds_once(run_store):
 
 
 def test_claim_nonexistent_job_fails(run_store):
-    """claim 不在 definition 里的 scope → False（不臆造 job）。"""
+    """claim 不在 definition 里的 scope → False（不臆造 job），run 级不变（仍为 pending）。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
+    before = run_store.load_run_state("run-1")
     assert run_store.try_claim_job("run-1", "ghost") is False
+    assert run_store.load_run_state("run-1") == before
 
 
 def test_claim_two_different_jobs_both_succeed(run_store):
-    """抢两个不同 pending job 各自成功（互不干扰）。"""
+    """抢两个不同 pending job 各自成功（互不干扰）；run 级已是 running 时再认领另一个 pending job 照样成功。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_claim_job("run-1", "a") is True
+    assert run_store.load_run_state("run-1").status == Status.RUNNING
     assert run_store.try_claim_job("run-1", "b") is True
+    assert run_store.load_run_state("run-1").status == Status.RUNNING
+
+
+# ---------- run 级状态只进不退（ADR 0034 机制三「run 级状态只进不退」条）----------
+
+def test_claim_advances_run_status_in_the_same_write(run_store):
+    """认领成功后 run 级即为 running（条①：认领与 run 级同一条条件写），HWM 不变，另一个 job 不受影响。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=4))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.RUNNING
+    assert got.high_water_mark == 4
+    assert got.jobs["b"] == JobState("b", Status.PENDING)
+
+
+def test_claim_rejected_on_finalized_run_leaves_state_unchanged(run_store):
+    """已收尾（error、job 仍 pending）的 run 上认领返回 False，整份运行态不变：run 级、ended_at、message、job 态与 claimed_at
+    （条①：run 已收尾后不再接受新认领；推进器在 definition 不可用时带着 pending 的 job 收尾为 error，不能被认领复活）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    assert run_store.try_finalize("run-1", Status.ERROR, "2026-08-13T02:00:00Z", message="原因") is True
+    before = run_store.load_run_state("run-1")
+    assert (before.status, before.jobs["b"].status) == (Status.ERROR, Status.PENDING), "前提：带着 pending 的 job 收尾"
+    assert run_store.try_claim_job("run-1", "b", claimed_at="2026-08-13T03:00:00Z") is False
+    got = run_store.load_run_state("run-1")
+    assert got == before
+    assert (got.status, got.ended_at, got.message) == (Status.ERROR, "2026-08-13T02:00:00Z", "原因")
+    assert got.jobs["a"] == JobState("a", Status.RUNNING, claimed_at="2026-08-13T01:02:03Z")
+    assert got.jobs["b"] == JobState("b", Status.PENDING)
+
+
+def test_finalize_with_pending_jobs_succeeds(run_store):
+    """收尾不要求 job 全为终态：run 级 pending（零认领）与 running（已认领一个）两种起点上，带着 pending 的 job 都能收尾，
+    job 态原样保留（被拒方案「给 finalize 加『全部 job 须终态』」守此）。"""
+    meta = _meta("run-1")
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1") is True
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.ERROR and {js.status for js in got.jobs.values()} == {Status.PENDING}
+
+    meta2 = _meta("run-2")
+    run_store.create_run(meta2, _initial(meta2))
+    assert run_store.try_claim_job("run-2", "a") is True
+    assert run_store.try_finalize("run-2", Status.ERROR, "t1") is True
+    got = run_store.load_run_state("run-2")
+    assert got.status == Status.ERROR
+    assert (got.jobs["a"].status, got.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
+
+
+@pytest.mark.parametrize("hwm", [0, 3], ids=["same_hwm", "higher_hwm"])
+def test_all_pending_projection_after_claim_keeps_run_running(run_store, hwm):
+    """认领之后，拿着认领之前 baseline 的全 pending 投影（同 HWM 或更高 HWM，都过得了 HWM 守卫）不把 run 级改回 pending，
+    HWM 按条件前进，已认领的 job 仍为 running（条②：全 pending 的投影不写 run 级）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a") is True
+    assert run_store.project_state("run-1", _initial(meta, hwm=hwm)) is True
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.RUNNING
+    assert got.high_water_mark == hwm
+    assert got.jobs["a"].status == Status.RUNNING
+
+
+@pytest.mark.parametrize("job_status", [Status.RUNNING, Status.PASSED, Status.SKIPPED, Status.ERROR])
+def test_job_write_leaving_pending_advances_run_status(run_store, job_status):
+    """前台 job 写离开 pending 时 run 级为 running（条③）：判据是写入的 job 态非 pending，从 pending 直接写终态（SKIPPED 的
+    job、起 worker 失败的 job）同样推进；另一个 job 不受影响。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    run_store.update_job_state("run-1", JobState("a", job_status, session_id="sess-a"))
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.RUNNING
+    assert got.jobs["a"] == JobState("a", job_status, session_id="sess-a")
+    assert got.jobs["b"] == JobState("b", Status.PENDING)
+
+
+def test_pending_job_write_leaves_run_status(run_store):
+    """前台写入 pending 的 job 态只写 job、不改 run 级（条③）：run 级 pending 时仍为 pending。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    run_store.update_job_state("run-1", JobState("a", Status.PENDING, session_id="sess-a"))
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.PENDING
+    assert got.jobs["a"] == JobState("a", Status.PENDING, session_id="sess-a")
+
+
+def test_job_write_on_finalized_run_lands_job_only(run_store):
+    """已收尾的 run 上写 job：job 照写，run 级、ended_at 与 message 不变（条③：run 级的保护不改变 job 写落不落库）。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    run_store.update_job_state("run-1", JobState("a", Status.PASSED, session_id="sess-a"))
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at, got.message) == (Status.ERROR, "t1", "原因")
+    assert got.jobs["a"] == JobState("a", Status.PASSED, session_id="sess-a")
+
+
+def test_job_write_before_create_raises(run_store):
+    """运行态不存在时 update_job_state 抛 FileNotFoundError（须先 create_run），写入非 pending 与 pending 两条路径都是。"""
+    with pytest.raises(FileNotFoundError):
+        run_store.update_job_state("nope", JobState("a", Status.RUNNING))
+    with pytest.raises(FileNotFoundError):
+        run_store.update_job_state("nope", JobState("a", Status.PENDING))
 
 
 def test_claim_writes_claimed_at(run_store):
@@ -190,9 +300,10 @@ def test_projection_preserves_started_at(run_store):
 
 
 def test_projection_keeps_pending_while_no_job_started(run_store):
-    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：还没起过任何 job 时落库该是
-    **pending**（status 如实反映「未启动」，ADR 0034 机制三）。project 的 run 级 status 此时也是 pending（ADR 0031 决定三：
-    判定集为空不判 passed），但落库取值只按 job 态定，不依赖它。
+    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：全 pending 的投影不写 run 级，库中
+    还没有 job 被认领时 run 级仍是 `create_run` 落的 **pending**（status 如实反映「未启动」，ADR 0034 机制三「run 级状态只进
+    不退」条②）。project 的 run 级 status 此时也是 pending（ADR 0031 决定三：判定集为空不判 passed），但落库取值只按 job 态定，
+    不依赖它。
     """
     from gherkai_core.project import project
 
@@ -377,6 +488,32 @@ def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch)
     assert "#sid" not in calls[0]["ExpressionAttributeNames"], "首次 update_item 应是标量写"
     assert len(calls) == 1 + 4
     assert sorted(c["ExpressionAttributeNames"]["#sid"] for c in calls[1:]) == ["pc", "ps", "r", "t"]
+
+
+def test_ddb_job_write_update_item_counts(aws, monkeypatch):
+    """DDB 侧 `update_job_state` 的写入次数（ADR 0034 机制三「run 级状态只进不退」条③）：run 未收尾时一次（写 pending、
+    写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级的条件写被挡，再只写 job），STATE 不存在时
+    同样两次后报错。"""
+    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    counts = []
+    for js in (JobState("a", Status.PENDING), JobState("a", Status.RUNNING), JobState("b", Status.PASSED)):
+        calls.clear()
+        store.update_job_state("run-1", js)
+        counts.append(len(calls))
+    assert counts == [1, 1, 1]
+
+    assert store.try_finalize("run-1", Status.FAILED, "t1") is True
+    calls.clear()
+    store.update_job_state("run-1", JobState("a", Status.ERROR))
+    assert len(calls) == 2
+    assert store.load_run_state("run-1").jobs["a"].status == Status.ERROR
+
+    calls.clear()
+    with pytest.raises(FileNotFoundError):
+        store.update_job_state("nope", JobState("a", Status.RUNNING))
+    assert len(calls) == 2
 
 
 def test_ddb_rejected_scalar_write_issues_no_job_writes(aws, monkeypatch):
