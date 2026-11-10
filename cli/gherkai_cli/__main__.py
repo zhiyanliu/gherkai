@@ -2309,7 +2309,7 @@ def _run_noun(wanted: frozenset) -> str:
 
 def _emit_run_list(args, location: dict, items: list, *, empty_hint: str) -> int:
     """输出清单：`--json` 恒为一个文档（空清单也是，不打人读提示，ADR 0041 决策三）；人读形态为表格，空清单只打一行落点提示。"""
-    mine = _installed_version()  # 写出版本的比对对象：本 CLI 自己的版本，未装成包时为 None（每个 run 都标出写出版本）
+    mine = _installed_version()  # 写出版本的比对对象：本 CLI 自己的版本，未装成包时为 None（没有哪一行算当前版本写出）
     if args.json:
         print(json.dumps(render.run_list_to_dict(location, items, cli_version=mine), ensure_ascii=False, indent=2))
     elif not items:
@@ -2324,7 +2324,7 @@ def _cmd_list_runs(args) -> int:
 
     按三项定位参数选定**一个**后端，不跨后端、不跨报告落点搜（决策六）。本机逐目录读 `run_state.json`（目录不存在按空清单，
     提示说明目录不存在；目录不可读以退出码 2 结束）；云端先过版本 skew 闸，再经 compose 装配（含索引就绪检查）后读。
-    清单不过 definition 的结构版本闸：只读运行态里跨版本稳定的几项，旧版本写出的 run 只在版本列标出写出版本。
+    清单不过 definition 的结构版本闸：只读运行态里跨版本稳定的几项，旧版本写出的 run 照常列出，版本列给出各自的写出版本。
     """
     wanted = frozenset(Status(s) for s in args.status) if args.status else frozenset(Status)
     if args.backend == "cloud":

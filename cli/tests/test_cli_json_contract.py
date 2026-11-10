@@ -227,23 +227,24 @@ def test_status_json_keys_are_documented():
 
 
 def _assert_list_runs_value_types(doc: dict) -> None:
-    """list-runs 每项的值类型：差集只核键名，值的类型（契约页「list-runs」一节写明的字符串、布尔、计数）由这里核。"""
+    """list-runs 的值类型：差集只核键名，值的类型（契约页「list-runs」一节写明的字符串、布尔、计数）由这里核。
+    顶层与每项的 `cli_version` 恒有，值是字符串或 null。"""
+    assert "cli_version" in doc and (doc["cli_version"] is None or isinstance(doc["cli_version"], str))
     for r in doc["runs"]:
         assert isinstance(r["run_id"], str)
         if "unreadable" in r:
-            assert r["unreadable"] is True and set(r) <= {"run_id", "unreadable", "cli_version"}
+            assert r["unreadable"] is True and set(r) == {"run_id", "unreadable", "cli_version"}
         else:
             assert isinstance(r["status"], str) and isinstance(r["detached"], bool)
             assert all(isinstance(r[k], str) for k in ("started_at", "ended_at", "message") if k in r)
             assert isinstance(r["job_counts"], dict)
             assert all(isinstance(k, str) and type(n) is int for k, n in r["job_counts"].items())
-        if "cli_version" in r:
-            assert r["cli_version"] is None or isinstance(r["cli_version"], str)
+        assert "cli_version" in r and (r["cli_version"] is None or isinstance(r["cli_version"], str))
 
 
 def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
-    """list-runs 的样例取真实命令的 --json 输出。本机 fixture 两个 run：一个终态（起止时刻、run 级 message 齐全，由别的版本写出、
-    带 cli_version），一个未结束（当前版本写出、省略 cli_version）；另加一个运行态损坏的目录，`unreadable` 进差集。
+    """list-runs 的样例取真实命令的 --json 输出。本机 fixture 两个 run：一个终态（起止时刻、run 级 message 齐全，由别的版本写出），
+    一个未结束（当前版本写出，cli_version 与顶层相同）；另加一个运行态损坏的目录，`unreadable` 进差集。
     云端变体经替身 store 让顶层落点的三个云端键进差集。"""
     from test_main import _cloud_list_runs_env, _listing, _seed_raw_run_state, _seed_run
 
@@ -258,7 +259,8 @@ def test_list_runs_json_keys_are_documented(tmp_path, monkeypatch, capsys):
     by = {r["run_id"]: r for r in doc["runs"]}
     # 正向断言：条件出现的键确实出现了（少一个 run，差集在缺键上直接变绿）
     assert {"started_at", "ended_at", "message", "cli_version", "job_counts", "detached"} <= set(by["20261110T080000Z-a00001"])
-    assert "cli_version" not in by["20261110T090000Z-b00001"]
+    assert doc["cli_version"] == "1.5.0" and by["20261110T090000Z-b00001"]["cli_version"] == doc["cli_version"]
+    assert by["20261110T080000Z-a00001"]["cli_version"] == "1.4.0"
     assert by["20261110T100000Z-c00001"]["unreadable"] is True
     _assert_documented(doc, section="list-runs")
     _assert_list_runs_value_types(doc)

@@ -117,13 +117,14 @@
 
 ## `gherkai list-runs --json`
 
-一个对象：顶层是所查的落点，`runs[]` 是找到的 run，按 run_id 降序（即按创建时间从新到旧，创建时间取执行 `run` 或 `submit` 的那台机器的时钟；同一秒内创建的 run 之间先后不定）。默认列出这个后端全部未结束的 run（`pending` / `running`）与最近创建的 `--limit` 条已结束的 run（默认 20 条）；给了 `--status` 时只列这些状态的 run，其中已结束的状态仍受 `--limit` 约束。**不表判定**：退出码只有 `0`（读到了清单；清单为空时 `runs` 是空数组，含 `unreadable` 项的清单同样为 `0`）与 `2`（参数不合法或读不到这个后端，stdout 没有输出）；`--json` 下不输出人读提示，读取方凭顶层的落点分辨「这里没有 run」与「查错了地方」。
+一个对象：顶层是所查的落点与执行这次清单的 gherkai 版本，`runs[]` 是找到的 run，按 run_id 降序（即按创建时间从新到旧，创建时间取执行 `run` 或 `submit` 的那台机器的时钟；同一秒内创建的 run 之间先后不定）。默认列出这个后端全部未结束的 run（`pending` / `running`）与最近创建的 `--limit` 条已结束的 run（默认 20 条）；给了 `--status` 时只列这些状态的 run，其中已结束的状态仍受 `--limit` 约束。**不表判定**：退出码只有 `0`（读到了清单；清单为空时 `runs` 是空数组，含 `unreadable` 项的清单同样为 `0`）与 `2`（参数不合法或读不到这个后端，stdout 没有输出）；`--json` 下不输出人读提示，读取方凭顶层的落点分辨「这里没有 run」与「查错了地方」。
 
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `backend` | `local` / `cloud` | 所查的后端，恒有 |
 | `report_dir` | string | 仅本机后端：所查的报告落点目录（各层取值解析后的绝对路径；目录不存在时同样给出） |
 | `prefix` / `region` / `ddb_table` | string | 仅云端后端：所查部署的资源名前缀、region 与运行状态表名（都是解析后的值，不区分来自选项、环境变量还是配置文件）。不带 profile（它只决定用哪份凭证），不带云端的报告前缀（清单不读报告） |
+| `cli_version` | string \| null | 恒有：执行这次清单的 gherkai 版本，取不到时为 null。与 `runs[]` 各项的 `cli_version` 比较，可知哪些 run 由当前版本写出；为 null 时无从比较，没有哪一项算当前版本写出 |
 | `runs[]` | array | 每个 run 一项，见下 |
 
 `runs[]` 每项：
@@ -136,8 +137,8 @@
 | `message` | string \| 省略 | 含义同 `status --json` 的 `message`，无值时省略 |
 | `job_counts` | object | 按 job 状态计数，形如 `{"passed": 2, "failed": 1}`：键取 job 级状态值 `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted`，只含出现的状态，缺的状态按 0 读。逐个 job 的状态用 `status --json` 的 `jobs[]` 取（形状不同，所以键名不复用） |
 | `detached` | bool | 运行态读得出的项恒有：true 表示由 `submit` 提交到后台执行的 run。未结束且为 false 的 run 由前台 `run` 执行：执行它的进程若已不在，它不会再到终态，`status --wait` 对它只等待、不接力 |
-| `cli_version` | string \| null \| 省略 | 写出这个 run 的 gherkai 版本。只在它与本机 gherkai 的版本都已知且相同时省略，其余情形出现；读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null |
-| `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与适用时的 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
+| `cli_version` | string \| null | 恒有：写出这个 run 的 gherkai 版本，读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null。不为 null 且与顶层 `cli_version` 相同，即由当前版本写出 |
+| `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
 
 清单不带产物落点、任务定义的内容与事件水位：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚换状态或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`，云端后端看不到。
 

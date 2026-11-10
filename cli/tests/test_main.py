@@ -3358,7 +3358,7 @@ def test_tunnel_watch_turns_stop_signals_into_exit_that_still_stops_the_tunnel(s
 
 # ---- list-runs（ADR 0041 决策七）----
 
-_LR_CLI = "1.5.0"  # 用例里本 CLI 的版本（写出版本的标记以它为比对对象）
+_LR_CLI = "1.5.0"  # 用例里本 CLI 的版本（哪些 run 由当前版本写出，以它为比对对象）
 
 
 def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: bool = False, cli_version: "str | None" = _LR_CLI,
@@ -3441,27 +3441,32 @@ def test_list_runs_local_status_filter_keeps_unreadable_rows_and_limit_only_on_f
 
 
 def test_list_runs_local_json_shape_and_writer_version_marking(tmp_path, monkeypatch, capsys):
-    """顶层是所查的落点（解析后的绝对路径）；每项的键按出现条件给出；cli_version 只在写出版本与本 CLI 版本都已知且相同时省略。"""
+    """顶层是所查的落点（解析后的绝对路径）与执行这次清单的版本 cli_version；每项的键按出现条件给出，cli_version 恒有：
+    写出这个 run 的版本，读不到为 null，不为 null 且与顶层相同即由当前版本写出。"""
     monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
     monkeypatch.chdir(tmp_path)
     _seed_listing_fixture(tmp_path / "reports")
     doc = _list_runs_json(capsys, "--report-dir", "reports")
-    assert set(doc) == {"backend", "report_dir", "runs"}
+    assert set(doc) == {"backend", "report_dir", "cli_version", "runs"}
     assert doc["backend"] == "local" and doc["report_dir"] == str((tmp_path / "reports").resolve())
+    assert doc["cli_version"] == _LR_CLI
     by = {r["run_id"]: r for r in doc["runs"]}
     assert by["20261110T080000Z-a00001"] == {
         "run_id": "20261110T080000Z-a00001", "status": "passed", "started_at": "2026-11-10T08:00:00+00:00",
-        "ended_at": "2026-11-10T08:05:00+00:00", "job_counts": {"passed": 2}, "detached": False}  # 当前版本写出：不带 cli_version
+        "ended_at": "2026-11-10T08:05:00+00:00", "job_counts": {"passed": 2}, "detached": False,
+        "cli_version": _LR_CLI}  # 当前版本写出：与顶层的 cli_version 相同
     assert by["20261110T090000Z-a00002"]["cli_version"] == "1.4.0"
     assert by["20261110T090000Z-a00002"]["job_counts"] == {"passed": 1, "failed": 1}
     assert by["20261110T100000Z-a00003"]["cli_version"] is None and by["20261110T100000Z-a00003"]["message"] == "提交记录不完整"
     assert by["20261110T070000Z-b00001"]["detached"] is True and "ended_at" not in by["20261110T070000Z-b00001"]
-    # 运行态解析不了的项只有 run_id、unreadable 与适用时的 cli_version（没有 run_meta.json，读不到写出版本）
+    # 运行态解析不了的项只有 run_id、unreadable 与 cli_version（没有 run_meta.json，读不到写出版本）
     assert by["20261110T050000Z-c00001"] == {"run_id": "20261110T050000Z-c00001", "unreadable": True, "cli_version": None}
     assert by["20261110T040000Z-c00002"] == {"run_id": "20261110T040000Z-c00002", "unreadable": True, "cli_version": None}
-    # 本 CLI 版本未知（未装成包）时，每个读得到运行态的 run 都标出写出版本
+    assert all("cli_version" in r for r in doc["runs"])
+    # 本 CLI 版本未知（未装成包）时顶层为 null，每项照常给出写出版本
     monkeypatch.setattr(m, "_installed_version", lambda: None)
     doc = _list_runs_json(capsys, "--report-dir", "reports")
+    assert doc["cli_version"] is None
     assert {r["run_id"]: r["cli_version"] for r in doc["runs"]}["20261110T080000Z-a00001"] == _LR_CLI
 
 
@@ -3487,6 +3492,8 @@ def test_list_runs_local_wrongly_typed_fields_are_unreadable_rows_and_unknown_ve
     out = capsys.readouterr().out
     for run_id in bad_states:
         assert _table_row(out, run_id)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知"]  # 没有任何提示：提示列不出现
+    # 当前版本已知、没有任何一行由它写出、也没有提示列：图例照样是第一行（它说明比对的基准，不承诺有带星的行）
+    assert out.splitlines()[0] == f"当前 gherkai 版本 {_LR_CLI}（版本列以 * 标出）" and " *" not in out.split("\n", 1)[1]
     assert _table_row(out, numeric_writer)[5] == "未知"
     assert "提示" not in _table_row(out, "run_id")
 
@@ -3502,12 +3509,15 @@ def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_left
     _seed_listing_fixture(root)
     assert m.main(["list-runs", "--report-dir", str(root)]) == 0
     out = capsys.readouterr().out
+    # 表格上方一行图例点明当前版本；版本列恒有值，当前版本写出的在版本串后带 *
+    assert out.splitlines()[0] == f"当前 gherkai 版本 {_LR_CLI}（版本列以 * 标出）"
     header = _table_row(out, "run_id")
     assert header == ["run_id", "状态", "开始（本地）", "结束（本地）", "job", "版本", "提示"]
     same = _table_row(out, "20261110T080000Z-a00001")
     # job 的状态都与 run 的状态相同：只给总数，不把状态列再说一遍
-    assert same == ["20261110T080000Z-a00001", "passed", "2026-11-10 16:00:00", "2026-11-10 16:05:00", "2", "", ""]  # UTC 08:00 → 本机 16:00
-    # 有 job 的状态与 run 的状态不同：总数后括注各状态的个数
+    assert same == ["20261110T080000Z-a00001", "passed", "2026-11-10 16:00:00", "2026-11-10 16:05:00", "2",
+                    f"{_LR_CLI} *", ""]  # UTC 08:00 → 本机 16:00
+    # 有 job 的状态与 run 的状态不同：总数后括注各状态的个数；其它版本写出的只给版本串、不带 *
     assert _table_row(out, "20261110T090000Z-a00002")[4:6] == ["2（passed 1 · failed 1）", "1.4.0"]
     errored = _table_row(out, "20261110T100000Z-a00003")
     assert errored[5] == "未知" and errored[6] == "提交记录不完整"
@@ -3520,8 +3530,60 @@ def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_left
     assert "20261110T030000Z-d00001" not in out
 
 
+def test_list_runs_local_text_table_without_a_known_current_version_has_no_legend_and_no_star(tmp_path, monkeypatch, capsys):
+    """本 CLI 版本取不到（未装成包）时不打图例、没有哪一行带 *，版本列照常给出各 run 的写出版本。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: None)
+    root = tmp_path / "reports"
+    _seed_listing_fixture(root)
+    assert m.main(["list-runs", "--report-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert "当前 gherkai 版本" not in out and "*" not in out
+    assert out.lstrip().startswith("╭")  # 表格直接开头，上方没有图例行
+    assert _table_row(out, "20261110T080000Z-a00001")[5] == _LR_CLI
+    assert _table_row(out, "20261110T090000Z-a00002")[5] == "1.4.0"
+    assert _table_row(out, "20261110T100000Z-a00003")[5] == "未知"
+
+
+def test_list_runs_local_unreadable_rows_still_carry_the_writer_version(tmp_path, monkeypatch, capsys):
+    """运行态解析失败、提交记录头部读得到的 run：机读项照常带写出版本，人读版本列照常给出，当前版本写出的同样带 *。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    mine, older = "20261110T090000Z-g00001", "20261110T080000Z-g00002"
+    _seed_run(root, mine, Status.PASSED, [Status.PASSED])
+    _seed_run(root, older, Status.PASSED, [Status.PASSED], cli_version="1.4.0")
+    for run_id in (mine, older):
+        (root / run_id / "run_state.json").write_text("{broken", encoding="utf-8")
+    by = {r["run_id"]: r for r in _list_runs_json(capsys, "--report-dir", str(root))["runs"]}
+    assert by[mine] == {"run_id": mine, "unreadable": True, "cli_version": _LR_CLI}
+    assert by[older] == {"run_id": older, "unreadable": True, "cli_version": "1.4.0"}
+    assert m.main(["list-runs", "--report-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert _table_row(out, mine)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", f"{_LR_CLI} *"]
+    assert _table_row(out, older)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "1.4.0"]
+
+
+def test_list_runs_local_text_table_gives_an_out_of_range_time_as_is(tmp_path, monkeypatch, capsys, request):
+    """时刻换算到本机时区后越出可表示的范围：该格原样给出 ISO 时刻，整张表照常输出、退出码 0。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    import time as _time
+    monkeypatch.setenv("TZ", "Asia/Shanghai")  # UTC+8：9999-12-31 23:59:59 UTC 换算后落在 10000 年
+    _time.tzset()
+    request.addfinalizer(lambda: (monkeypatch.undo(), _time.tzset()))
+    root = tmp_path / "reports"
+    edge = "9999-12-31T23:59:59+00:00"
+    _seed_run(root, "20261110T090000Z-f00001", Status.PASSED, [Status.PASSED], started_at=edge,
+              ended_at="2026-11-10T08:05:00+00:00")
+    _seed_run(root, "20261110T080000Z-f00002", Status.PASSED, [Status.PASSED], ended_at="2026-11-10T08:05:00+00:00")
+    assert m.main(["list-runs", "--report-dir", str(root)]) == 0
+    out = capsys.readouterr().out
+    assert _table_row(out, "20261110T090000Z-f00001")[2:4] == [edge, "2026-11-10 16:05:00"]
+    assert _table_row(out, "20261110T080000Z-f00002")[2] == "2026-11-10 16:00:00"
+
+
 def test_list_runs_local_empty_hints_name_the_directory_and_tell_missing_from_empty(tmp_path, monkeypatch, capsys):
-    """空清单只打一行：目录不存在与目录下没有 run 两种说法，都点名解析后的目录、提示核对定位参数；--json 下没有提示，只有落点与空数组。"""
+    """空清单只打一行：目录不存在与目录下没有 run 两种说法，都点名解析后的目录、提示核对定位参数；--json 下没有提示，
+    只有落点、当前版本与空数组。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
     missing = tmp_path / "nope"
     assert m.main(["list-runs", "--report-dir", str(missing)]) == 0
     out = capsys.readouterr().out.strip()
@@ -3535,7 +3597,7 @@ def test_list_runs_local_empty_hints_name_the_directory_and_tell_missing_from_em
     assert m.main(["list-runs", "--report-dir", str(empty), "--status", "failed", "--status", "error"]) == 0
     assert "没有状态为 failed、error 的 run" in capsys.readouterr().out
     cap_json = _list_runs_json(capsys, "--report-dir", str(missing))
-    assert cap_json == {"backend": "local", "report_dir": str(missing.resolve()), "runs": []}
+    assert cap_json == {"backend": "local", "report_dir": str(missing.resolve()), "cli_version": _LR_CLI, "runs": []}
 
 
 def test_list_runs_local_unreadable_report_dir_exits_2(tmp_path, capsys):
@@ -3634,7 +3696,7 @@ _TERMINAL_VALUES = ["passed", "failed", "error", "skipped", "aborted"]
 
 def test_list_runs_cloud_checks_skew_then_index_then_lists_ongoing_before_finished(tmp_path, monkeypatch, capsys):
     """调用顺序：版本 skew 闸 → DescribeTable 判索引就绪 → 装配注入索引名 → 先非终态（不截断，pending 在前）后终态（截 N）；
-    --report-dir 在云端被忽略、不报错；--json 顶层是前缀、region 与解析后的表名。"""
+    --report-dir 在云端被忽略、不报错；--json 顶层是前缀、region、解析后的表名与当前版本。"""
     from gherkai_runtime import names as _nm
 
     calls = _cloud_list_runs_env(monkeypatch, tmp_path)
@@ -3642,7 +3704,8 @@ def test_list_runs_cloud_checks_skew_then_index_then_lists_ongoing_before_finish
     table = _nm.default_name("vfy-", _nm.BASE_RUNS_TABLE)
     assert calls == [("skew", "vfy-"), ("describe", table), ("store", table, _nm.RUNS_STATUS_RUN_ID_GSI),
                      ("list", ["pending", "running"], None), ("list", _TERMINAL_VALUES, 20)]
-    assert doc == {"backend": "cloud", "prefix": "vfy-", "region": "us-east-1", "ddb_table": table, "runs": []}
+    assert doc == {"backend": "cloud", "prefix": "vfy-", "region": "us-east-1", "ddb_table": table, "cli_version": _LR_CLI,
+                   "runs": []}
     assert "whatever" not in json.dumps(doc)
 
 

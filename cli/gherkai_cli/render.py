@@ -215,10 +215,10 @@ UNREADABLE_RUN_STATUS = "无法读取（可能由其它版本写出），用 sta
 
 
 def writer_version_mark(item: RunListing, cli_version: str | None) -> tuple[bool, str | None]:
-    """写出版本的标记：返回（要不要标，写出它的 CLI 版本）。写出版本与本 CLI 版本都已知且相同才不标，其余情形都标；
+    """写出版本与当前版本的关系：返回（是不是当前版本写出的，写出它的 CLI 版本）。两个版本都已知且相同才算当前版本写出；
     提交记录头部读不到或其中没有版本时，写出版本为 None（人读显示「未知」、机读为 null）。"""
     writer = item.header[1] if item.header is not None else None
-    return not (writer is not None and cli_version is not None and writer == cli_version), writer
+    return (writer is not None and cli_version is not None and writer == cli_version), writer
 
 
 def run_job_counts(state: RunState) -> dict[str, int]:
@@ -229,8 +229,9 @@ def run_job_counts(state: RunState) -> dict[str, int]:
 
 def run_listing_to_dict(item: RunListing, *, cli_version: str | None) -> dict:
     """`list-runs --json` 的一项：`run_id`、`status` 必有，`started_at` / `ended_at` / `message` 无值省略，`job_counts` 与 `detached`
-    恒有；运行态解析失败的项只含 `run_id`、`unreadable` 与适用时的 `cli_version`。`cli_version` 只在要标写出版本时出现。"""
-    marked, writer = writer_version_mark(item, cli_version)
+    恒有；运行态解析失败的项只含 `run_id`、`unreadable` 与 `cli_version`。`cli_version` 是写出这个 run 的版本，恒有、读不到为 null；
+    是不是当前版本写出的，由读者拿它与文档顶层的 `cli_version` 比较。"""
+    _current, writer = writer_version_mark(item, cli_version)
     st = item.state
     if st is None:
         d: dict = {"run_id": item.run_id, "unreadable": True}
@@ -241,14 +242,14 @@ def run_listing_to_dict(item: RunListing, *, cli_version: str | None) -> dict:
                 d[key] = getattr(st, key)
         d["job_counts"] = run_job_counts(st)
         d["detached"] = item.detached
-    if marked:
-        d["cli_version"] = writer
+    d["cli_version"] = writer
     return d
 
 
 def run_list_to_dict(location: dict, items: list[RunListing], *, cli_version: str | None) -> dict:
-    """`list-runs --json` 整个文档：顶层是所查的落点（compose 的清单落点单点给出），加 `runs` 数组（顺序同输入）。"""
-    return {**location, "runs": [run_listing_to_dict(i, cli_version=cli_version) for i in items]}
+    """`list-runs --json` 整个文档：顶层是所查的落点（compose 的清单落点单点给出）与执行这次清单的 gherkai 版本
+    `cli_version`（取不到为 null），加 `runs` 数组（顺序同输入）。"""
+    return {**location, "cli_version": cli_version, "runs": [run_listing_to_dict(i, cli_version=cli_version) for i in items]}
 
 
 def _local_time_label(ts: str | None) -> str | None:
@@ -262,20 +263,24 @@ def _local_time_label(ts: str | None) -> str | None:
         return ts
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
+    except (OverflowError, ValueError, OSError):  # 年份在边界上、换算后越出可表示范围：原样给出，不让一行坏值中断整张表
+        return ts
 
 
 def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
     """`list-runs` 的人读表格（ADR 0047）：一行一个 run，顺序同输入。run_id 是标识列、不折断，状态与提示列可折行。
 
     job 列是 job 总数；各 job 的状态与 run 的状态不全相同时，括注各状态的个数（全相同时状态列已经说明，不重复）。
-    版本列只在要标写出版本时有值（版本串或「未知」），当前版本写出的 run 留空。提示列放 run 级 `message` 与前台执行遗留的提示，
+    版本列恒给出写出这个 run 的版本（读不到为「未知」），当前版本写出的在版本串后加 ` *`，表格上方一行图例点明当前版本
+    （同 `deploy list-workers` 标默认 variant 的写法）。提示列放 run 级 `message` 与前台执行遗留的提示，
     没有任何一行有提示时整列不出现；job 级的原因不在运行态里，清单不列，用 `explain` 看（ADR 0041 决策七）。
     运行态解析失败的行只有 run_id 与版本列有值。空清单由调用方打一行落点提示，不经这里。"""
     rows = []
     for item in items:
-        marked, writer = writer_version_mark(item, cli_version)
-        version = (writer or "未知") if marked else ""
+        current, writer = writer_version_mark(item, cli_version)
+        version = f"{writer} *" if current else (writer or "未知")
         st = item.state
         if st is None:
             rows.append([item.run_id, UNREADABLE_RUN_STATUS, None, None, None, version, ""])
@@ -290,10 +295,11 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
         rows.append([item.run_id, status_text(st.status.value), _local_time_label(st.started_at), _local_time_label(st.ended_at),
                      jobs, version, "；".join(notes)])
     headers = ["run_id", "状态", "开始（本地）", "结束（本地）", "job", "版本", "提示"]
+    legend = f"当前 gherkai 版本 {cli_version}（版本列以 * 标出）\n" if cli_version else ""
     if not any(r[6] for r in rows):  # 没有任何提示时不留一列空白
         headers, rows = headers[:6], [r[:6] for r in rows]
-        return render_table(headers, rows, wrap=[1])
-    return render_table(headers, rows, wrap=[1, 6])
+        return legend + render_table(headers, rows, wrap=[1])
+    return legend + render_table(headers, rows, wrap=[1, 6])
 
 
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----
