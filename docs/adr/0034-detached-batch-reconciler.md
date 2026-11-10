@@ -258,7 +258,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
   - **由 `RunPersistence` 在第一个 job 离开 pending 时另调一次「标记 run 运行中」**：两次写之间要么现出被禁止的一侧（先写 job），要么在调用方另记「是否第一次」并给端口加一个方法；规则放在 adapter 的写表达式里，所有调用方一致得到保证。
   - **`begin` 时就把 run 级写成 `running`**：run 级 `pending` 在两条路径上的含义（还没有 job 离开 pending）就此分叉，前台刚建记录、worker 还没起来的 run 也读作已在执行。
 - **实测项**（真实环境执行；3 与 2 的云端一半待核，其余已核）：
-  1. 本机前台 `run`（已核）：run 建立后 `list-runs` 读到 run 级 `pending`、job `pending`；数秒后第一个 job 离开 pending，run 级与 job 同为 `running`，直到结束转为 `passed`。
+  1. 本机前台 `run`（已核）：run 建立后 `list-runs` 读到 run 级 `pending`、job `pending`；第一个 job 离开 pending 后，run 级与 job 同为 `running`，直到结束转为 `passed`。
   2. 前台 `run` 执行中被 SIGKILL。本机（已核）：留下的 run 停在 `running`、job `running`、不带 detached 标记，`list-runs` 按非终态列出并带遗留提示，`--status running` 列出它、`--status pending` 为空，`status` 同样显示 `running`。云端一次待核。
   3. 云端 `submit`（待核）：认领之后、该 worker 首个事件之前读 STATE，run 级已是 `running`。本机 `submit` 的对应观察已核：提交后第一次读清单，run 级已是 `running` 而两个 job 一个 `running`、一个仍 `pending`。
   4. 终态不被复活（已核）：真 DDB 上对带 pending job 的已收尾（error）run 调认领，返回 False，整份运行态（run 级、结束时刻、原因、job 态与认领时刻）读回与调用前相同；已收尾的 run 上再做前台 job 写，job 写落库而 run 级终态与结束时刻不变。这些断言作为真 DDB 集成用例留在 `core/tests/test_cloud_integration.py`。

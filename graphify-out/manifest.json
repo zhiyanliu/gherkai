@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794322801.1919756,
-    "ast_hash": "2e38113a7c320992f115204338c211c8",
+    "mtime": 1794323159.8621645,
+    "ast_hash": "d06ddf3db3c281f25be82df1ce17b9ca",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -2395,8 +2395,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/peer-review.md": {
-    "mtime": 1794302939.924689,
-    "ast_hash": "20285783711ef3636dc1a60ca76ff14c",
+    "mtime": 1794323159.8623466,
+    "ast_hash": "52affb88d6142564f96483188e3bb8d0",
     "semantic_hash": ""
   },
   ".claude/README.md": {
