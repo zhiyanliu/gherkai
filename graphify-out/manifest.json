@@ -385,13 +385,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1794239803.723768,
-    "ast_hash": "39aa7900d9487a0576a00e87f143df15",
+    "mtime": 1794301783.8586602,
+    "ast_hash": "9165b6419d0df0ae4a9087e4a916b1fa",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1793940040.729204,
-    "ast_hash": "1e6a9d603af536864e100727076501d6",
+    "mtime": 1794300137.3421001,
+    "ast_hash": "defa7343aee62907ea7bb0ad407768ed",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794239803.723333,
-    "ast_hash": "c8e5a3edfa51bf43488a91ebdcebcbbc",
+    "mtime": 1794302539.7551565,
+    "ast_hash": "60509905d054715430466bd5e6fcdd3d",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794295329.0259912,
-    "ast_hash": "47aa3860e8950325f8d6346f93ac48b3",
+    "mtime": 1794301804.591761,
+    "ast_hash": "6cc3f9c33ad28ba077f0426a460a4563",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {

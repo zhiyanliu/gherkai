@@ -135,8 +135,8 @@ def _aggregate(statuses):
 - **两路调用者、两种喂入**（[0034](./0034-detached-batch-reconciler.md) 落地后的现状）：`_aggregate` 被 ① 同步 `schedule` 归约 `RunResult` 时调一次
   （喂进的全是终态、不含前置态）② 无状态投影 `project`/`project_full` 调（`project` 每轮 tick 调、真实喂入前置态）
   两路复用**同一份**——同一过滤名单/severity 表使两路收敛到同一终值（这正是当年留口子的意图）。落库的 `RunState.status`
-  也不再「由 `finalize` 一次写定」：无状态路径下每轮投影写都落 run 级 status（钳在 `pending`/`running`——run 级终态是
-  `finalize` 这个 commit point 的专属，[0030](./0030-realtime-persistence-seam.md) / [0034](./0034-detached-batch-reconciler.md) 机制三），终态仍由 `finalize` 一次落定。
+  也不再「由 `finalize` 一次写定」：执行期间认领、投影写与前台的 job 写都会推进 run 级 status（钳在 `pending`/`running`、只进不退——run 级终态是
+  `finalize` 这个 commit point 的专属，[0030](./0030-realtime-persistence-seam.md) / [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条，该条待实装），终态仍由 `finalize` 一次落定。
 
 ## 决定四：[0024](./0024-worker-core-protocol.md) 线协议对 step 与 scenario 的判定保持三态，scope 级 error 另有载体
 
