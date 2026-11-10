@@ -124,11 +124,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 提交以退出码 2 结束，提示后端没有默认 worker 镜像 variant 指针 | 这个 prefix 下的后端还没完成过本版本的初始化，或默认指针被清掉 | 请部署方运行一次 `gherkai deploy` 完成初始化；急用时提交者用 `--worker-variant base` 显式指定 |
 | `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
-| 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 先用 `gherkai status <run_id> --backend cloud` 看 job 的 `message`，再用 `gherkai explain <run_id> --backend cloud` 看证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
+| 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 用 `gherkai explain <run_id> --backend cloud` 看 job 的 `message` 与证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
 | `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端在 1.4.0 之前部署（那时的部署不写版本戳），之后没有升级过；它会丢掉这类 run 的设备目标或会话预热设置，结果可能被误判为通过 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`；之后 `doctor --backend cloud` 的 `backend.devices.project` 行应显示项目 ARN |
-| `list-runs --backend cloud` 以退出码 2 结束，`运行状态表 … 上列出 run 用的索引 … 还在建立：部署后要先为已有的 run 补齐索引，完成之前不能列出。` | 后端刚升级到带清单索引的版本，AWS 正在后台为表里已有的 run 补齐索引 | 稍后重试，所需时间随已有 run 的数量增加；其它命令不受影响。补齐之前不要再部署要改运行记录表的变更，见[云端后端](./cloud-backend.md)「版本与升级」 |
-| `list-runs --backend cloud` 以退出码 2 结束，`运行状态表 … 上没有列出 run 用的索引 …（这个部署早于该功能，或索引已被删除）`，或说索引 `正在被删除` | 这个后端部署于该功能之前，或索引被删除了 | 请部署方用当前版本的 `gherkai deploy` 重新部署后端 |
+| `list-runs --backend cloud` 以退出码 2 结束，`云端后端的 run 清单索引还在建立，暂时不能列出 run。…` | 后端刚升级到带清单索引的版本，AWS 正在后台为表里已有的 run 补齐索引 | 稍后重试；其它命令不受影响。补齐之前不要再部署要改运行记录表的变更，见[云端后端](./cloud-backend.md)「版本与升级」 |
+| `list-runs --backend cloud` 以退出码 2 结束，`云端后端还没有 run 清单索引，不能列出 run。…`，或说索引 `正在被删除` | 这个后端还没有用当前版本部署，或索引被删除了 | 请部署方用当前版本的 `gherkai deploy` 重新部署后端 |
 | `list-runs --backend cloud` 以退出码 2 结束，`读取运行状态表 … 时重试 … 次后仍有 … 个 run 没有读回（通常是读取被限流）` | 读回运行状态时被限流，为免给出缺行的清单，这次没有列出 | 稍后重试 |
 | `list-runs --backend cloud 读不到运行状态表 …（表、索引、凭证、region 或权限）：…` | 表不存在（`--prefix`、`--ddb-table` 或 region 不对），或凭证缺列出 run 所需的权限 | 先按上面「资源缺失」一行核对前缀与 region；权限缺的是索引上的 `dynamodb:Query` 与表上的 `dynamodb:BatchGetItem`，见[云端后端](./cloud-backend.md)「团队成员需要的最小云端权限」 |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
@@ -172,7 +172,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `未找到 run：<run_id>（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）`，云端后端为 `（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）` | 定位参数与产生这个 run 的那条命令不一致 | 照那条命令逐字对齐 `--backend`、`--report-dir`、`--prefix`，给过 `--ddb-table` 的也要一致；不知道 run_id 或想确认它在不在这个后端里，用同一组定位参数执行 `gherkai list-runs` |
-| `读不出报告落点目录 …（请检查目录权限，或 --report-dir 是否给对）：…` | 本机后端的 `list-runs` 读不了报告落点目录或其中的运行状态文件 | 核对 `--report-dir` 与目录权限 |
+| `无法读取本机后端的报告目录 …（请检查目录权限，或 --report-dir 是否正确）：…` | 本机后端的 `list-runs` 无法读取报告目录或其中的运行状态文件 | 核对 `--report-dir` 与目录权限 |
 | `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
 | `没有可执行的 scenario：<文件> 里一个 scenario 都没有（常见原因：只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行）` | 没有加筛选，给定的 `.feature` 里也没有任何可执行的 scenario：文件为空、只有 Feature 头、只有 Background 或不含 scenario 的 Rule，或 Scenario Outline 的 Examples 没有数据行 | 补写 scenario，或给 Examples 补上数据行；同时核对传入的路径是否是要测的那批文件 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |

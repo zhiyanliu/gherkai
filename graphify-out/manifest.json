@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1794247977.1492045,
-    "ast_hash": "136a5fe5b4f92dc53ce3b93cfd4fdabe",
+    "mtime": 1794283219.5391092,
+    "ast_hash": "bf0119d77cda17ebdde999b9e156cc9b",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -450,13 +450,13 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1794248779.6846006,
-    "ast_hash": "a7081da0361b6fb99642c78a4c7126b6",
+    "mtime": 1794283144.7890444,
+    "ast_hash": "51dabc06e12cf25f5d8ec6daabae8083",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
-    "mtime": 1794248052.7467036,
-    "ast_hash": "92ed8adbbc64e6e3471b56eab6454857",
+    "mtime": 1794283204.6417718,
+    "ast_hash": "8ac57ce9fe72c47e2bb4e99d2d761654",
     "semantic_hash": ""
   },
   "core/gherkai_core/__init__.py": {
@@ -610,7 +610,7 @@
     "semantic_hash": ""
   },
   "pyproject.toml": {
-    "mtime": 1793536080.5501966,
+    "mtime": 1794281333.0083008,
     "ast_hash": "554494f081fe82c91e6e35640a4f0c70",
     "semantic_hash": ""
   },
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1794242686.9261718,
-    "ast_hash": "044e21eac408447716e9bd7da771ba02",
+    "mtime": 1794283144.7893894,
+    "ast_hash": "6990521d539cb64b15ba8890eb3c7caa",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794279192.1272762,
-    "ast_hash": "e78cf52fa77731c66c9aef56c5ce8439",
+    "mtime": 1794283204.6427076,
+    "ast_hash": "b066fe94406b8a88a76e39e448ee4e53",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1794245421.56666,
-    "ast_hash": "4185bedb6a5c93eaa486aaef65908510",
+    "mtime": 1794283144.7895346,
+    "ast_hash": "f931955cc4168e87a891c5cd27a9d936",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
@@ -1410,8 +1410,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1794246119.3843706,
-    "ast_hash": "f9859e53a70306f01a2998db1a713a95",
+    "mtime": 1794280776.9512122,
+    "ast_hash": "9a72b01514fc88479427238b54a79198",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
@@ -1430,13 +1430,13 @@
     "semantic_hash": ""
   },
   "docs/user-guide/running-and-results.md": {
-    "mtime": 1794245421.566481,
-    "ast_hash": "4b972143bef141bed41aac7c94da070f",
+    "mtime": 1794283204.6425436,
+    "ast_hash": "92ff8eabb7aeb4bb419e9c78ca9a4bae",
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1794244358.6170547,
-    "ast_hash": "ebe344771a0859064b07a30ca528d1ef",
+    "mtime": 1794283144.7884588,
+    "ast_hash": "6ae964dd1bb9e04b34b281ab913b5e9b",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {
@@ -1785,8 +1785,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0047-cli-human-readable-tables-with-rich.md": {
-    "mtime": 1794236671.342508,
-    "ast_hash": "f25bc6ad36537ccfd63a1e779b1ddd91",
+    "mtime": 1794282908.0144434,
+    "ast_hash": "3c4d4063be6759717d095897bfd9132a",
     "semantic_hash": ""
   },
   "core/gherkai_core/termcolor.py": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794231725.3779583,
-    "ast_hash": "160dd77e368f229134f6907945f97155",
+    "mtime": 1794283263.585391,
+    "ast_hash": "854a149b7de1580bb470ebad74a252f1",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

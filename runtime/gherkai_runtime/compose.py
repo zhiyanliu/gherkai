@@ -1135,15 +1135,15 @@ class RunListIndexUnavailable(RuntimeError):
 # 索引状态 → 给使用方的整句（产品语言）。ACTIVE 与 UPDATING 放行、不在表里：UPDATING 只表示索引设置在变更，拦下它会让
 # 一次与清单无关的变更挡住清单；那期间查询若失败，按读不到这个后端处理（ADR 0041 决策七）。
 _RUN_LIST_INDEX_NOT_READY = {
-    None: ("运行状态表 {table} 上没有列出 run 用的索引 {index}（这个部署早于该功能，或索引已被删除）。"
-           "请部署方用当前版本的 gherkai deploy 重新部署后端。"),
-    "CREATING": ("运行状态表 {table} 上列出 run 用的索引 {index} 还在建立：部署后要先为已有的 run 补齐索引，完成之前不能列出。"
-                 "请稍后重试（所需时间随已有 run 的数量增加）。"),
-    "DELETING": ("运行状态表 {table} 上列出 run 用的索引 {index} 正在被删除，不能列出。"
-                 "请部署方用当前版本的 gherkai deploy 重新部署后端。"),
+    None: ("云端后端还没有 run 清单索引，不能列出 run。请部署方用当前版本重新执行 gherkai deploy。"
+           "（表 {table}，索引 {index}）"),
+    "CREATING": ("云端后端的 run 清单索引还在建立，暂时不能列出 run。这是部署或升级后端之后的一次性过程，"
+                 "请稍后重试。（表 {table}，索引 {index}）"),
+    "DELETING": ("云端后端的 run 清单索引正在被删除，不能列出 run。请部署方用当前版本重新执行 gherkai deploy。"
+                 "（表 {table}，索引 {index}）"),
 }
-_RUN_LIST_INDEX_OTHER = ("运行状态表 {table} 上列出 run 用的索引 {index} 当前不能查询（状态 {status}）。"
-                         "请稍后重试；仍不行时请部署方用当前版本的 gherkai deploy 重新部署后端。")
+_RUN_LIST_INDEX_OTHER = ("云端后端的 run 清单索引当前不能查询（状态 {status}）。请稍后重试；若重试后仍无法查询，"
+                         "请部署方用当前版本重新执行 gherkai deploy。（表 {table}，索引 {index}）")
 
 
 def check_run_list_index(ddb_table) -> None:

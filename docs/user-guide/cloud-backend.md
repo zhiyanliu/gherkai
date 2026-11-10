@@ -151,7 +151,7 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 两段窗口里被拒的命令都以退出码 2 结束。窗口一在第 2 步执行完后即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交者临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并以退出码 2 结束。
 
-**升级后清单索引要先建好**：已部署的后端升级到带 `list-runs` 清单索引的版本（1.5 起）时，第 2 步的 `gherkai deploy` 给运行记录表 `<prefix>runs` 加上索引 `status-run_id-index`，AWS 随后在后台为表里已有的 run 补齐索引。`gherkai deploy` 不等补齐就结束，所以部署完成后的一段时间里 `gherkai list-runs --backend cloud` 以退出码 2 结束并提示索引还在建立，所需时间随已有 run 的数量增加，稍后重试即可；`submit`、`status`、`explain` 等命令不用这个索引，不受影响。加索引的这次升级还要承担 [AWS::DynamoDB::Table](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-dynamodb-table.html) 文档写明的三条限制：
+**升级后清单索引要先建好**：已部署的后端升级到带 `list-runs` 清单索引的版本（1.5 起）时，第 2 步的 `gherkai deploy` 给运行记录表 `<prefix>runs` 加上索引 `status-run_id-index`，AWS 随后在后台为表里已有的 run 补齐索引。`gherkai deploy` 不等补齐就结束，所以部署完成后的一段时间里 `gherkai list-runs --backend cloud` 以退出码 2 结束并提示索引还在建立，稍后重试即可；`submit`、`status`、`explain` 等命令不用这个索引，不受影响。加索引的这次升级还要承担 [AWS::DynamoDB::Table](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-dynamodb-table.html) 文档写明的三条限制：
 
 - 索引补齐之前这张表不能再被更新：这段时间里再次执行 `gherkai deploy`，只要这次部署要改运行记录表就会失败，等补齐后再部署。补齐与否可用 `aws dynamodb describe-table --table-name <prefix>runs` 查看这个索引的 `IndexStatus`，变为 `ACTIVE` 即已补齐。
 - 建索引期间 stack 更新失败而回滚时，已经开始建立的索引不会随回滚删除，须先手动删掉再重新部署：`aws dynamodb update-table --table-name <prefix>runs --global-secondary-index-updates '[{"Delete":{"IndexName":"status-run_id-index"}}]'`。索引刚开始建立、还在分配资源的一小段时间里删不了，稍后重试。

@@ -251,23 +251,26 @@ def run_list_to_dict(location: dict, items: list[RunListing], *, cli_version: st
     return {**location, "runs": [run_listing_to_dict(i, cli_version=cli_version) for i in items]}
 
 
-def _utc_label(ts: str | None) -> str | None:
-    """ISO 8601 时刻 → `YYYY-MM-DD HH:MM:SS`（换算到 UTC；不带时区的按 UTC 读）；解析不了时原样给出，None 仍为 None（表格显示 -）。"""
+def _local_time_label(ts: str | None) -> str | None:
+    """ISO 8601 时刻 → 本机时区的 `YYYY-MM-DD HH:MM:SS`（不带时区的按 UTC 读）；解析不了时原样给出，None 仍为 None（表格显示 -）。
+    只用于人读表格：机读输出保留原始的 ISO 时刻；run_id 开头的时间戳是 UTC，与这两列差一个时区偏移。"""
     if ts is None:
         return None
     try:
         dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
     except ValueError:
         return ts
-    if dt.tzinfo is not None:
-        dt = dt.astimezone(timezone.utc)
-    return dt.strftime("%Y-%m-%d %H:%M:%S")
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone().strftime("%Y-%m-%d %H:%M:%S")
 
 
 def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
-    """`list-runs` 的人读表格（ADR 0047）：一行一个 run，顺序同输入。run_id 是标识列、不折断，状态与说明列可折行。
+    """`list-runs` 的人读表格（ADR 0047）：一行一个 run，顺序同输入。run_id 是标识列、不折断，状态与提示列可折行。
 
-    版本列只在要标写出版本时有值（版本串或「未知」），当前版本写出的 run 留空；说明列放 run 级 `message` 与前台执行遗留的提示。
+    job 列是 job 总数；各 job 的状态与 run 的状态不全相同时，括注各状态的个数（全相同时状态列已经说明，不重复）。
+    版本列只在要标写出版本时有值（版本串或「未知」），当前版本写出的 run 留空。提示列放 run 级 `message` 与前台执行遗留的提示，
+    没有任何一行有提示时整列不出现；job 级的原因不在运行态里，清单不列，用 `explain` 看（ADR 0041 决策七）。
     运行态解析失败的行只有 run_id 与版本列有值。空清单由调用方打一行落点提示，不经这里。"""
     rows = []
     for item in items:
@@ -281,9 +284,16 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
         if st.status not in TERMINAL_STATUSES and not item.detached:
             notes.append(FOREGROUND_RUN_NOTE)
         counts = run_job_counts(st)
-        rows.append([item.run_id, status_text(st.status.value), _utc_label(st.started_at), _utc_label(st.ended_at),
-                     " · ".join(f"{k} {n}" for k, n in counts.items()) or "0", version, "；".join(notes)])
-    return render_table(["run_id", "状态", "开始（UTC）", "结束（UTC）", "job 数", "版本", "说明"], rows, wrap=[1, 6])
+        jobs = str(sum(counts.values()))
+        if set(counts) - {st.status.value}:  # 有 job 的状态与 run 的状态不同才展开，否则只是把状态列再说一遍
+            jobs += "（" + " · ".join(f"{k} {n}" for k, n in counts.items()) + "）"
+        rows.append([item.run_id, status_text(st.status.value), _local_time_label(st.started_at), _local_time_label(st.ended_at),
+                     jobs, version, "；".join(notes)])
+    headers = ["run_id", "状态", "开始（本地）", "结束（本地）", "job", "版本", "提示"]
+    if not any(r[6] for r in rows):  # 没有任何提示时不留一列空白
+        headers, rows = headers[:6], [r[:6] for r in rows]
+        return render_table(headers, rows, wrap=[1])
+    return render_table(headers, rows, wrap=[1, 6])
 
 
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----

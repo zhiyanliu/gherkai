@@ -13,7 +13,6 @@
 
 ## 遗留项
 
-- **没有列出 run 的命令**：`status` 必须带 run_id，想知道「现在有哪些 run 在跑」只能查云端 runs 表（`item_type = STATE` 且 status 为 pending / running）、ECS 的运行中 task 或 Device Farm 的会话，本机后端只能翻报告目录。是否给 `status` 加「不带 run_id 时列出本后端近期 run」这类入口，属 ADR 0041 agent 可用形态的新增项，待 owner 定。
 - **演示材料随 1.5 升级与增补**（`docs/presentations/value-method/`）：1.5 收尾后按 `tools/presentations/production.md` 的流程改口播、重配音、更新 manifest（含口播稿与讲者备注的 SHA-256）。随下一版一并改的角色词：口播稿与讲者备注里「编程 agent」改「AI agent」、「QA，也就是测试工程师」改「QA」（ADR 0040 的正名；v12 的定稿原文按文档护栏的定稿豁免规则不回溯改写）。doc-health 第九轮核出、因冻结留到下一版的两处：`speaker-notes.md` 开头那句自述（「14 页最终稿。口播与演示提示保持定稿原文；资料与素材统一见制作规范和素材包。」）改为陈述内容并给素材包链接，例如「共 14 页，每页包含口播正文与不朗读的演示提示。PPT、逐页画面与原始配音见素材包」；`manifest.json` 的 `brand_pronunciation`（现为「用户已选定 A：…」）与 `narration_style`（现为「…可比已认可小样稍增加感染力」）改成对参数本身的陈述句，仓库里的 manifest 与素材包内的那份一起改。
 
 ## documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总）
@@ -27,6 +26,7 @@
 
 既有用户文档的触点（按页列；每条只写缺的）：
 
+- `list-runs`（ADR 0041 决策七，已实装并在本机与云端实测）：用户指南运行篇、配置页、云端页、排障页、入门页与 agent skill 的相关段落已随实现写入，提示文案的逐字引文与 code 一致；这些段落的叙述与编排还没有按用户文档的标准整体过一遍，随用户文档这一步一并处理（含 skill 的教学清单与排障表）。
 - `writing-features.md`：tag 表仍是三行，`@device` / `@app` 只在规则列表的一条里，要改成五行；缺省「不标 `@device` 就是桌面」没写明；拒绝情形没列（`@app` 标在桌面目标、`@device` 的值不是 android / ios、别名在 `[apps]` 里没有该平台的条目）；「标了 tag 就得给值」一句只列了 `@scope:` / `@engine:` / `@timeout:`；`@timeout` 只写了桌面缺省 300 秒，设备 scope 的缺省（获取预算加 900 秒）与下限（获取预算加 180 秒，低于以退出码 2 拒绝；`@timeout` 同受下限约束）现在只在 `running-and-results.md` 讲 `--default-job-timeout` 时提到；「按目标选写法」没有与「按引擎选写法」并列成节（落点核对的分写在「AI 断言怎么写才稳」一条里，不复位与 Background 重启在 tag 规则一条里）；「写完先自检」没提 plan 对目标的标注读法（job 行的 `target=`、表头的远程访问会话数、每个平台一行设备选择；`getting-started.md` 的示例输出含该字段但没解释）。
 - `running-and-results.md`：「常用选项」没列 `--android-device-arn` / `--ios-device-arn` / `--device-farm-project-arn` / `--app-bucket` / `--config`、也没有指向设备选项的指针（语义在 `configuration.md` 选项总表里是全的）；`--default-job-timeout` 低于下限时的后果（开始执行前以退出码 2 拒绝）与 `@timeout` 同受下限约束没写；退出码表没点名设备缺项的 2（没指定设备、本机后端没给 Device Farm 项目或应用桶；排障页列了报错原文但没写退出码）；「结果在哪」没有会话列表（job 的 `sessions[]` 与文本汇总的「设备」「设备控制台」「设备占用时长」「设备占用时长合计」「未确认停止的会话」各行，整个用户指南都没有），设备占用时长与 `device_session` 链接分别在「费用量级」与 explain 节、本节没有指针。
 - `getting-started.md`：「AWS 前置」整节没有 Device Farm——服务表没有这一行，「三项服务」的数目与 region 提示没写设备资源固定在 us-west-2，费用句没提设备分钟，没有指向 `cloud-backend.md` 的部署方权限与 deploy 建项目。

@@ -3486,23 +3486,32 @@ def test_list_runs_local_wrongly_typed_fields_are_unreadable_rows_and_unknown_ve
     assert m.main(["list-runs", "--report-dir", str(root)]) == 0
     out = capsys.readouterr().out
     for run_id in bad_states:
-        assert _table_row(out, run_id)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知", ""]
+        assert _table_row(out, run_id)[1:] == [m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知"]  # 没有任何提示：提示列不出现
     assert _table_row(out, numeric_writer)[5] == "未知"
+    assert "提示" not in _table_row(out, "run_id")
 
 
-def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_leftovers(tmp_path, monkeypatch, capsys):
+def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_leftovers(tmp_path, monkeypatch, capsys, request):
     monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    # 时刻列换算到本机时区显示：把本机时区钉在 UTC+8，断言才不随执行测试的机器变化
+    import time as _time
+    monkeypatch.setenv("TZ", "Asia/Shanghai")
+    _time.tzset()
+    request.addfinalizer(lambda: (monkeypatch.undo(), _time.tzset()))
     root = tmp_path / "reports"
     _seed_listing_fixture(root)
     assert m.main(["list-runs", "--report-dir", str(root)]) == 0
     out = capsys.readouterr().out
     header = _table_row(out, "run_id")
-    assert header == ["run_id", "状态", "开始（UTC）", "结束（UTC）", "job 数", "版本", "说明"]
+    assert header == ["run_id", "状态", "开始（本地）", "结束（本地）", "job", "版本", "提示"]
     same = _table_row(out, "20261110T080000Z-a00001")
-    assert same == ["20261110T080000Z-a00001", "passed", "2026-11-10 08:00:00", "2026-11-10 08:05:00", "passed 2", "", ""]
-    assert _table_row(out, "20261110T090000Z-a00002")[4:6] == ["passed 1 · failed 1", "1.4.0"]
+    # job 的状态都与 run 的状态相同：只给总数，不把状态列再说一遍
+    assert same == ["20261110T080000Z-a00001", "passed", "2026-11-10 16:00:00", "2026-11-10 16:05:00", "2", "", ""]  # UTC 08:00 → 本机 16:00
+    # 有 job 的状态与 run 的状态不同：总数后括注各状态的个数
+    assert _table_row(out, "20261110T090000Z-a00002")[4:6] == ["2（passed 1 · failed 1）", "1.4.0"]
     errored = _table_row(out, "20261110T100000Z-a00003")
     assert errored[5] == "未知" and errored[6] == "提交记录不完整"
+    assert errored[4] == "1（pending 1）"  # 只有一种 job 状态、但与 run 的状态不同：同样括注
     # 未结束的前台 run 才有遗留提示；submit 的 run（detached）没有
     assert "不会再到终态" in _table_row(out, "20261110T060000Z-b00002")[6]
     assert _table_row(out, "20261110T070000Z-b00001")[6] == ""
@@ -3665,7 +3674,7 @@ def test_list_runs_cloud_merge_keeps_the_later_read_filters_by_read_back_status_
     assert [c for c in calls if c[0] == "list"] == [("list", ["passed", "aborted"], 5)]  # 状态按固定顺序，不按给出的顺序
 
 
-@pytest.mark.parametrize("index_status, needle", [(None, "没有列出 run 用的索引"), ("CREATING", "还在建立"),
+@pytest.mark.parametrize("index_status, needle", [(None, "还没有 run 清单索引"), ("CREATING", "还在建立"),
                                                   ("DELETING", "正在被删除")])
 def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, needle, tmp_path, monkeypatch, capsys):
     calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status)

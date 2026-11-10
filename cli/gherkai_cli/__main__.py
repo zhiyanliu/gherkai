@@ -2336,14 +2336,14 @@ def _cmd_list_runs(args) -> int:
     try:
         items = _merge_run_listings(run_store, wanted, limit=args.limit)
     except OSError as e:
-        _progress(f"读不出报告落点目录 {location['report_dir']}（请检查目录权限，或 --report-dir 是否给对）：{e}")
+        _progress(f"无法读取本机后端的报告目录 {location['report_dir']}（请检查目录权限，或 --report-dir 是否正确）：{e}")
         return 2
     if not Path(location["report_dir"]).exists():
-        where = f"报告落点目录 {location['report_dir']} 不存在（这里还没有落过盘的 run，或路径给错了）"
+        where = f"本机后端的报告目录 {location['report_dir']} 不存在，这里还没有 run"
     else:
-        where = f"报告落点目录 {location['report_dir']} 下没有{_run_noun(wanted)}"
+        where = f"本机后端的报告目录 {location['report_dir']} 下没有{_run_noun(wanted)}"
     return _emit_run_list(args, location, items,
-                          empty_hint=f"没有找到 run：{where}。请核对 --backend 与 --report-dir 是否与产生 run 的 run 或 submit 一致。")
+                          empty_hint=f"{where}。请核对 --report-dir 是否与执行 run 或 submit 时所用的一致。")
 
 
 def _list_runs_cloud(args, wanted: frozenset) -> int:
@@ -2376,8 +2376,8 @@ def _list_runs_cloud(args, wanted: frozenset) -> int:
         _progress(f"list-runs --backend cloud 读不到运行状态表 {location['ddb_table']}（表、索引、凭证、region 或权限）：{e}")
         return 2
     return _emit_run_list(args, location, items, empty_hint=(
-        f"没有找到 run：前缀 {location['prefix']}（region {location['region']}）的运行状态表 {location['ddb_table']} "
-        f"里没有{_run_noun(wanted)}。请核对 --backend、--prefix、--region、--profile 与 --ddb-table 是否与产生 run 的 run 或 submit 一致。"))
+        f"云端后端里没有{_run_noun(wanted)}（前缀 {location['prefix']}，region {location['region']}，运行状态表 {location['ddb_table']}）。"
+        f"请核对 --prefix、--region、--profile 与 --ddb-table 是否与执行 run 或 submit 时所用的一致。"))
 
 
 # ============================================================================
