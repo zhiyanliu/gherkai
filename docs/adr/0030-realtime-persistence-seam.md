@@ -167,7 +167,7 @@ class RunStore(Protocol):
     def load_run_meta(...); def load_run_state(...)                                 # 不变
 ```
 
-**接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）、条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)），以及只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7）。
+**接口真值以 `core/gherkai_core/ports.py` 为准**——上块是本决策期的**增量视图**，不是 `RunStore` 的完整现状：此后还追加了 `preflight`（探活，见下决定七）、条件写三方 `try_claim_job`/`project_state`/`try_finalize`（[0034](./0034-detached-batch-reconciler.md)）、只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7），以及按状态列出 run、每项返回 `RunListing` 的只读 `list_runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。
 
 - **新增三方法是 additive**：`save_run` 不删——`test_stores.py` 里多个 RunStore save/load 往返用例仍用它（`grep -rn 'save_run(' core/tests/` 可核）；生产路径不直接调它：local adapter 的 `create_run` 委托它写盘，DDB adapter 则由它委托 `create_run`。新方法只是把它的职责按生命周期拆成「开始/逐 job/结束」三段。
 - `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（**非自身线程安全**，靠 `RunPersistence` 的单一 store 锁串行，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。写入的 job 态非 PENDING 时，同一次写连带把未收尾的 run 级推进为 RUNNING：local 在同一次读改写里判 run 级未收尾才改；DDB 带条件 `#st IN (pending, running)` 连同 run 级一起写，条件不成立再只写 job（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条）。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。

@@ -1321,10 +1321,9 @@ def test_build_cloud_stores_uses_injected_handles_without_building_clients(monke
     # prefix 规范化仍由本函数一处做（"reports" → "reports/"，避粘连 key）
     for name in ("offloader", "result_store", "report_store"):
         assert seen[name][0] == (s3, "prod-artifacts", "reports/")
-    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None；列举用的索引名由这里注入
-    # （命名真源在 runtime，ADR 0041 决策七）
-    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False,
-                                    "list_index_name": names.RUNS_STATUS_RUN_ID_GSI}
+    # offloader 默认挂载（ADR 0030 决定七）：漏挂则 META 里的 content_ref 正文静默还原成 None。不注入列举用的索引名：
+    # 列举只经带索引就绪检查的 build_cloud_run_list_store（ADR 0041 决策七「索引就绪判据」）
+    assert seen["run_store"][1] == {"arg_offloader": "<offloader>", "detached": False}
 
 
 def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):

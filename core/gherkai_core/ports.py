@@ -175,10 +175,11 @@ class RunStore(Protocol):
         ...
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写整个 RunState：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
+        """HWM 条件写投影：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
 
+        写入的只有 HWM、run 级 status（按下段规则）与各 job 态；state 上的 started_at、ended_at、message 不用，库中值原样保留。
         stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
-        state.high_water_mark 为 None 按 0 处理（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
+        state.high_water_mark 为 None 按 0 处理，守卫与落库都用 0（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
         不该走到这里。库中 run 级已是终态时同样被挡（返回 False）。
 
         传入的 run 级 status 不落库：投影里任一 job 已离开 PENDING 时 run 级写 RUNNING，全 job 仍 PENDING 时不写 run 级、
@@ -193,7 +194,7 @@ class RunStore(Protocol):
         挡「已 finalize 的 run 被 stale 投影刷回」+ 保 commit 恰一次（多实例同时见全终态、只有一个写成功、
         触发一次 RunReport 聚合）。已是终态 → False（幂等：别人已 finalize）。
         message 是 run 级消息（ADR 0037 决策 7）：推进器不经任何 job 就把 run 置为终态时的原因，与终态同一次写入；
-        正常收尾不给（None 不写键）。
+        正常收尾不给；为 None 时不写这一项，库中值原样保留。
         """
         ...
 

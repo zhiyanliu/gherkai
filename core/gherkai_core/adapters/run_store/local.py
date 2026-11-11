@@ -273,7 +273,8 @@ class LocalRunStore:
         return self._locked_rmw(run_id, mutate)
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写 RunState：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。
+        """HWM 条件写投影：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。只写 HWM、run 级与 jobs，传入的
+        started_at、ended_at、message 不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍，ADR 0034 机制三「两端对拍口径」）。
 
         **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point
         专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
@@ -313,14 +314,17 @@ class LocalRunStore:
             # run 级 status 按投影里的 job 态定（全 pending → 保留库中值，否则 running）；传入的 run 级值在有 job
             # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。库中值此处必为 pending 或 running。
             status = Status.RUNNING if projected_run_status(state.jobs) == Status.RUNNING else cur.status
-            return replace(cur, status=status, jobs=jobs, started_at=state.started_at or cur.started_at,
-                           ended_at=state.ended_at, high_water_mark=state.high_water_mark)
+            # 只写 HWM、run 级与 jobs，其余字段（started_at、ended_at、message）保留库中值，与 DDB 只 SET 这几项对拍；
+            # HWM 为 None 时按 0 落库，同 DDB
+            return replace(cur, status=status, jobs=jobs, high_water_mark=new_hwm)
         return self._locked_rmw(run_id, mutate)
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
-        """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入。"""
+        """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入；
+        为 None 时不动库中值（对拍 DDB 不提及该属性）。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已终态：别人已 finalize → 幂等跳过
-            return replace(state, status=status, ended_at=ended_at, message=message)
+            return replace(state, status=status, ended_at=ended_at,
+                           message=state.message if message is None else message)
         return self._locked_rmw(run_id, mutate)

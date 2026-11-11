@@ -97,7 +97,8 @@ DEFINITION_SCHEMA_VERSION = 1
 
 
 def definition_schema_version(d: dict) -> int:
-    """从 definition 的 dict 读结构版本：缺键读作 0（早于结构版本号的写端）；不是整数即定义违约。"""
+    """从 definition 的 dict 读结构版本：缺键读作 0（早于结构版本号的写端）；不是整数即定义违约，显式 null 也是（云端读 META
+    顶层属性按同一口径区分缺键与 null）。"""
     v = d.get("schema_version", 0)
     if isinstance(v, bool) or not isinstance(v, int):
         from gherkai_core.errors import DefinitionContractError

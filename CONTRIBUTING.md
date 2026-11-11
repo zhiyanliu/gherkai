@@ -85,7 +85,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 | `git-hooks/pre-commit`                          | 可选的 git 提交闸门（`git config core.hooksPath tools/git-hooks` 启用），与 Claude Code 的提交闸门共用同一份规则 |
 | `presentations/` | 演示材料的生图、配音、视频更新工具；用法见 [媒体工具说明](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/README.md)，定位、视觉、口播与交付约定见 [演示制作规范](https://github.com/zhiyanliu/gherkai/blob/HEAD/tools/presentations/production.md) |
 | `graphify_refresh.sh`                           | 知识图的 LLM 侧刷新（见下文「知识图刷新」）                                                                                                                                                                      |
-| `codex_usage.py`                                | 按轮次汇总 Codex 会话（连同它的子代理）的用量分项，给出复核者上下文占模型窗口的比例，供同僚复核判断下一轮续接还是改用全新上下文（判据见 `docs/ai-eng/peer-review.md` 第四、五节）；只读本机的会话记录，不联网 |
+| `codex_usage.py`                                | 按轮次汇总 Codex 会话（连同它的子代理，默认同时查找活动目录与归档目录里的记录）的用量分项，给出复核者上下文占模型窗口的比例并注明读数可能不准的情况，供同僚复核判断下一轮续接还是改用全新上下文（判据见 `docs/ai-eng/peer-review.md` 第四、五节）；只读本机的会话记录，不联网 |
 
 ## 开发环境（从 checkout 运行）
 

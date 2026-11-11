@@ -321,6 +321,35 @@ def test_ddb_list_runs_lists_wrongly_typed_fields_as_unreadable_and_unknown_vers
     assert rows["run-10"].state is not None and rows["run-10"].header is None  # 写出版本未知，不把数字转成版本串
 
 
+@pytest.mark.parametrize("backend", ["local", "ddb"])
+def test_explicit_null_schema_version_is_contract_violation_but_missing_key_reads_zero(request, tmp_path: Path, backend):
+    """头部的结构版本：缺键读作 0（早于结构版本号的写端），显式 null 是定义违约——两端同一口径。清单里违约的头部读作 None，
+    缺键的照读 (0, 写端版本)；`peek_definition_header` 对违约抛 DefinitionContractError。"""
+    from gherkai_core.errors import DefinitionContractError
+
+    if backend == "local":
+        store = LocalRunStore(tmp_path)
+        for run_id in ("run-01", "run-02"):
+            _make(store, run_id, Status.PASSED)
+        (tmp_path / "run-01" / "run_meta.json").write_text(
+            json.dumps({"schema_version": None, "cli_version": "1.5.0"}), encoding="utf-8")
+        (tmp_path / "run-02" / "run_meta.json").write_text(json.dumps({"cli_version": "1.5.0"}), encoding="utf-8")
+    else:
+        table = request.getfixturevalue("listing_table")
+        store = DynamoDBRunStore(table, list_index_name=_LIST_INDEX)
+        for run_id in ("run-01", "run-02"):
+            _make(store, run_id, Status.PASSED)
+        table.put_item(Item={"run_id": "run-01", "item_type": "META", "schema_version": None, "cli_version": "1.5.0",
+                             "meta_json": "{}"})
+        table.put_item(Item={"run_id": "run-02", "item_type": "META", "cli_version": "1.5.0", "meta_json": "{}"})
+    rows = {r.run_id: r for r in store.list_runs([Status.PASSED], limit=None)}
+    assert rows["run-01"].state is not None and rows["run-01"].header is None
+    assert rows["run-02"].header == (0, "1.5.0")
+    with pytest.raises(DefinitionContractError, match="schema_version 须为整数"):
+        store.peek_definition_header("run-01")
+    assert store.peek_definition_header("run-02") == (0, "1.5.0")
+
+
 def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, monkeypatch):
     store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
     for i in range(60):
@@ -524,3 +553,31 @@ def test_ddb_list_runs_gives_up_after_bounded_retries(monkeypatch):
     table = _FakeTable({"passed": ["r1"]}, {("r1", "STATE"): _state_item("r1", "passed")}, unprocessed=retries)
     assert _ids(DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=None)) == ["r1"]
     assert len(sleeps) == retries
+
+
+@pytest.mark.parametrize("processed_in_failing_batch, missing", [(0, 70), (20, 50)])
+def test_ddb_list_runs_incomplete_counts_the_batches_never_sent(monkeypatch, processed_in_failing_batch, missing):
+    """多批读回时第二批重试耗尽：报的未读回数含这一批剩下的 run 与没有发出的第三批，第一批已完整读回、不计。
+    120 个 run 共 240 个键，按每批 100 个键分三批（50、50、20 个 run）；第二批第一次只处理前若干个 run 的键、其余一直未处理。"""
+    monkeypatch.setattr(ddb_module, "time", SimpleNamespace(sleep=lambda s: None))
+    run_ids = [f"r{i:03d}" for i in range(120)]
+    table = _FakeTable({"passed": run_ids}, {(r, "STATE"): _state_item(r, "passed") for r in run_ids})
+
+    def batch_get_item(*, RequestItems):
+        req = RequestItems[_TABLE]
+        table.batches.append(req)
+        keys = req["Keys"]
+        if len(table.batches) == 1:  # 第一批完整读回
+            return {"Responses": {_TABLE: [table._items[(k["run_id"], k["item_type"])] for k in keys
+                                           if (k["run_id"], k["item_type"]) in table._items]}, "UnprocessedKeys": {}}
+        done = keys[:2 * processed_in_failing_batch] if len(table.batches) == 2 else []
+        return {"Responses": {_TABLE: [table._items[(k["run_id"], k["item_type"])] for k in done
+                                       if (k["run_id"], k["item_type"]) in table._items]},
+                "UnprocessedKeys": {_TABLE: {"Keys": keys[len(done):]}}}
+
+    table.meta.client.batch_get_item = batch_get_item
+    with pytest.raises(RunListingIncomplete) as exc:
+        DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=None)
+    assert exc.value.missing == missing
+    assert f"仍有 {missing} 个 run 没有读回" in str(exc.value)
+    assert len(table.batches) == 1 + ddb_module._BATCH_GET_MAX_RETRIES + 1  # 第三批没有发出

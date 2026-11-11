@@ -1095,6 +1095,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     **句柄可注入**（`ddb_table` / `s3`，同 `build_fargate_engines` 的注入惯例；未给则走 `_make_*` 钩子）：
     Lambda 组合根要把同一个 s3 client 分给 engine、同一个 ddb resource 分给 events 表，注入让它复用这批
     句柄而不必手工重造本函数的装配——重造的那份里 prefix 规范化与 offloader 挂载会各自漂。
+
+    返回的 RunStore 不能列举 run（没有注入列举索引名，调 `list_runs` 即报装配缺失）：列举须经 `build_cloud_run_list_store`，
+    索引就绪检查只挂在那一条装配路径上（ADR 0041 决策七「索引就绪判据」）。
     """
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore
@@ -1109,9 +1112,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
     # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
-    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。列举用的索引名由这里注入（core 不认 runtime 的命名真源）。
-    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached,
-                                           list_index_name=_names.RUNS_STATUS_RUN_ID_GSI)
+    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
+    # 那条路径先过索引就绪检查；这里返回的 store 调 list_runs 即按装配缺失报错，不会绕过检查直接 Query。
+    run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
 

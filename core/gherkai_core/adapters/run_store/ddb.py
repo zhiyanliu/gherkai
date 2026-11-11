@@ -68,7 +68,8 @@ _LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at",
 
 class RunListingIncomplete(RuntimeError):
     """列举 run 时批量读回重试耗尽、仍有 run 没有读回（ADR 0041 决策七「云端实现」）：不给出缺行的清单，调用方按读不到这个后端
-    处理（`list-runs` 以退出码 2 结束）。`table` 是 runs 表名，`missing` 是没有读回的 run 数。"""
+    处理（`list-runs` 以退出码 2 结束）。`table` 是 runs 表名，`missing` 是没有完整读回的 run 数：重试耗尽那一批里剩下的，加上
+    因此不再发出的后续各批里的；此前各批已完整读回的不计。"""
 
     def __init__(self, table: str, missing: int, retries: int) -> None:
         super().__init__(f"读取运行状态表 {table} 时重试 {retries} 次后仍有 {missing} 个 run 没有读回（通常是读取被限流），"
@@ -77,15 +78,17 @@ class RunListingIncomplete(RuntimeError):
         self.missing = missing
 
 
-def _schema_version_attr(v) -> int:
-    """META 顶层的 schema_version 属性 → 整数：缺读作 0（早于结构版本号的写端）；DDB 把数值还成 Decimal，须为整数值；
-    bool / 字符串 / 带小数的值都是定义违约——与本机读头（serialize.definition_schema_version）同一口径，不静默转换。"""
+def _schema_version_attr(item: dict) -> int:
+    """META item 顶层的 schema_version 属性 → 整数：缺这个属性读作 0（早于结构版本号的写端）；DDB 把数值还成 Decimal，须为整数值；
+    显式 null（DDB 的 NULL 类型，读回为 None）、bool、字符串、带小数的值都是定义违约——与本机读头（serialize.definition_schema_version）
+    同一口径：区分「缺键」与「值为 null」，不静默转换。"""
     from decimal import Decimal
 
     from gherkai_core.errors import DefinitionContractError
 
-    if v is None:
+    if "schema_version" not in item:
         return 0
+    v = item["schema_version"]
     if isinstance(v, bool):
         raise DefinitionContractError(f"META 的 schema_version 须为整数，现为 {v!r}")
     if isinstance(v, int):
@@ -145,7 +148,7 @@ def _run_state_from_item(item: dict) -> RunState:
 
 def _header_from_item(item: dict) -> tuple[int, str | None]:
     """META item 顶层的（结构版本, 写端 CLI 版本）：`peek_definition_header` 与列举共用。"""
-    return _schema_version_attr(item.get("schema_version")), item.get("cli_version")
+    return _schema_version_attr(item), item.get("cli_version")
 
 
 class DynamoDBRunStore:
@@ -316,8 +319,8 @@ class DynamoDBRunStore:
         落库、事件推演不出）天然保留——对拍 local 的「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。
         两步非原子，但每步各自条件守卫、次序（先标量后 jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job
         视图的合法投影，下轮重放收敛。
-        update_item 天然不碰未提及属性——started_at 由 create_run 落、此处不再传（修「put_item 整 item 覆盖把
-        started_at 抹掉」的对拍不一致）。
+        update_item 天然不碰未提及属性——传入的 started_at、ended_at、message 都不写，库中值保留（started_at 由 create_run
+        落；修「put_item 整 item 覆盖把 started_at 抹掉」的对拍不一致，local 同样只写 HWM、run 级与 jobs）。
 
         **无效果的 pending 项不发写**（ADR 0034 机制三「逐 job 写跳过无效果的 pending 项」段）：投影里 status 为 pending、
         session_id 与 claimed_at 都为空的 job 跳过。这类写只把 status 设为 pending，条件是库中该 job 为 pending：库中为 pending
@@ -386,7 +389,7 @@ class DynamoDBRunStore:
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
         """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。
-        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 不写键（omit-when-None）。"""
+        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。"""
         update = "SET #st = :s, ended_at = :e"
         names = {"#st": "status"}  # status 是 DDB 保留字；message 走 names 以防同类
         values = {":s": status.value, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
@@ -552,7 +555,9 @@ class DynamoDBRunStore:
                 if not batch:
                     break
                 if attempt == _BATCH_GET_MAX_RETRIES:
-                    raise RunListingIncomplete(table_name, len({k["run_id"] for k in batch}), _BATCH_GET_MAX_RETRIES)
+                    # 没读回的 run 包括这一批剩下的与因此不再发出的后续各批里的（一个 run 只要有一个键没读回就计入）
+                    unread = {k["run_id"] for k in batch} | {k["run_id"] for k in keys[start + _BATCH_GET_MAX_KEYS:]}
+                    raise RunListingIncomplete(table_name, len(unread), _BATCH_GET_MAX_RETRIES)
                 time.sleep(_BATCH_GET_BACKOFF_S * 2 ** attempt)
         return got
 

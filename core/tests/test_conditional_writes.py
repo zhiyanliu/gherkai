@@ -299,6 +299,39 @@ def test_projection_preserves_started_at(run_store):
     assert got.started_at == "2026-07-19T00:00:00Z"  # create_run 落的起点仍在
 
 
+def test_projection_writes_only_hwm_run_status_and_jobs(run_store):
+    """投影写只写 HWM、run 级与 jobs：投影带来的 started_at、ended_at、message 一律不用，库中值原样保留；HWM 为 None 时按 0 落库。
+    两个 adapter 落库结果逐项相等（ADR 0034 机制三「两端对拍口径」）。"""
+    from dataclasses import replace
+
+    meta = _meta()
+    run_store.create_run(meta, replace(_initial(meta), message="库中消息"))
+    carried = RunState(run_id="run-1", status=Status.RUNNING,
+                       jobs={"a": JobState("a", Status.RUNNING, session_id="s1"), "b": JobState("b", Status.PENDING)},
+                       started_at="2099-01-01T00:00:00Z", ended_at="2099-01-02T00:00:00Z", message="投影消息")
+    assert run_store.project_state("run-1", carried) is True
+    got = run_store.load_run_state("run-1")
+    assert (got.started_at, got.ended_at, got.message) == ("2026-07-19T00:00:00Z", None, "库中消息")
+    assert got.high_water_mark == 0
+    assert got.status == Status.RUNNING and got.jobs["a"] == JobState("a", Status.RUNNING, session_id="s1")
+
+
+def test_finalize_without_message_keeps_stored_message(run_store):
+    """try_finalize 不给 message 时不动库中值，给了才覆盖：两个 adapter 同一语义。"""
+    from dataclasses import replace
+
+    meta = _meta()
+    run_store.create_run(meta, replace(_initial(meta), message="库中消息"))
+    assert run_store.try_finalize("run-1", Status.PASSED, "t1") is True
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at, got.message) == (Status.PASSED, "t1", "库中消息")
+
+    meta2 = _meta("run-2", "a")
+    run_store.create_run(meta2, replace(_initial(meta2), message="库中消息"))
+    assert run_store.try_finalize("run-2", Status.ERROR, "t1", message="收尾消息") is True
+    assert run_store.load_run_state("run-2").message == "收尾消息"
+
+
 def test_projection_keeps_pending_while_no_job_started(run_store):
     """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：全 pending 的投影不写 run 级，库中
     还没有 job 被认领时 run 级仍是 `create_run` 落的 **pending**（status 如实反映「未启动」，ADR 0034 机制三「run 级状态只进

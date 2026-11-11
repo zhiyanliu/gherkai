@@ -3667,6 +3667,17 @@ def test_list_runs_local_default_lists_all_ongoing_and_newest_finished_first(tmp
         "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
 
 
+def test_list_runs_local_limit_does_not_cut_ongoing_runs(tmp_path, monkeypatch, capsys):
+    """未结束的 run 多于 --limit 时全部列出：--limit 只截已结束的部分（夹具里未结束的有两条，--limit 1）。"""
+    monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
+    root = tmp_path / "reports"
+    _seed_listing_fixture(root)
+    doc = _list_runs_json(capsys, "--report-dir", str(root), "--limit", "1")
+    assert [r["run_id"] for r in doc["runs"]] == [
+        "20261110T100000Z-a00003", "20261110T070000Z-b00001", "20261110T060000Z-b00002",
+        "20261110T050000Z-c00001", "20261110T040000Z-c00002"]
+
+
 def test_list_runs_local_status_filter_keeps_unreadable_rows_and_limit_only_on_finished(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
     root = tmp_path / "reports"
@@ -3976,6 +3987,20 @@ def test_list_runs_cloud_merge_keeps_the_later_read_filters_by_read_back_status_
     _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--status", "aborted",
                     "--status", "passed", "--limit", "5")
     assert [c for c in calls if c[0] == "list"] == [("list", ["passed", "aborted"], 5)]  # 状态按固定顺序，不按给出的顺序
+
+
+def test_list_runs_cloud_limit_does_not_cut_ongoing_runs(tmp_path, monkeypatch, capsys):
+    """未结束的 run 多于 --limit 时全部列出：合并只截读回为终态的部分（三条未结束、两条已结束，--limit 1）。"""
+    S = Status
+    parts = {
+        ("pending", "running"): [_listing("20261110T120000Z-a", S.PENDING), _listing("20261110T110000Z-b", S.PENDING),
+                                 _listing("20261110T100000Z-c", S.RUNNING)],
+        tuple(_TERMINAL_VALUES): [_listing("20261110T090000Z-d", S.PASSED), _listing("20261110T080000Z-e", S.FAILED)],
+    }
+    _cloud_list_runs_env(monkeypatch, tmp_path, parts=parts)
+    doc = _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--limit", "1")
+    assert [r["run_id"] for r in doc["runs"]] == [
+        "20261110T120000Z-a", "20261110T110000Z-b", "20261110T100000Z-c", "20261110T090000Z-d"]
 
 
 @pytest.mark.parametrize("index_status, needle", [(None, "还没有 run 清单索引"), ("CREATING", "还在建立"),
