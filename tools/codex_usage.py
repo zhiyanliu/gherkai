@@ -24,8 +24,9 @@
 读数是近似值。上下文大小取最近一次调用的 total_tokens（该次调用的输入加输出）。轮次正常结束、之后记录里没有再写入历史时，
 下一次调用带上的历史与它相差不大：推理输出可能不带入下一次调用，读数比实际多出的部分最多是最后一次调用的推理输出，通常是
 数百 token。以下情况下读数与下一次调用的实际上下文不符，或不足以支撑续接，表尾逐条注明：最近一次调用之后记录里又写入了历史
-（例如工具结果），实际上下文更大；最近一次调用之后发生了压缩，实际上下文更小；最后一轮被中断或没有结束记录（仍在执行，或
-进程异常退出）；记录里出现过压缩，压缩之后的读数反映的是压缩后的上下文，压掉的细节已不在其中。判续接上限看根线程，因为
+（例如工具结果），读数不含这些历史、实际上下文更大；最近一次调用之后发生了压缩，读数是压缩之前的、实际上下文更小；两者
+同时出现时方向相反，只说明读数不能用来确定下一次调用的实际上下文；最后一轮被中断或没有结束记录（仍在执行，或进程异常
+退出）；记录里出现过压缩，被压掉的细节已不在上下文里。判续接上限看根线程，因为
 `codex exec resume` 续接的是它；子代理各有自己的窗口，表里一并列出供参考。
 
 记录格式（按 Codex CLI 0.153.4 至 0.167.1 的本机记录核过）：每行一个 JSON 对象。一个线程的记录可能分成多个片段文件：最初
@@ -291,18 +292,21 @@ def _root_context(root: Thread) -> tuple[dict | None, str | None]:
     if last is None:
         return None, "根线程没有模型调用，无法给出上下文占比"
     caveats = []
-    if root.history_after_last_call:
-        caveats.append(f"最近一次调用之后记录里又写入了 {root.history_after_last_call} 条历史（工具结果、消息等），"
-                       "下一次调用带上的上下文比这个读数大")
+    added, compacted_after = root.history_after_last_call, root.compactions_after_last_call
+    if added and compacted_after:  # 两者方向相反，合成一条，不分别断言下一次的上下文更大或更小
+        caveats.append(f"最近一次调用之后记录里又写入了 {added} 条历史（工具结果、消息等）并发生了压缩：读数是压缩之前的，"
+                       "也不含这些历史，无法据此确定下一次调用的实际上下文")
+    elif added:
+        caveats.append(f"最近一次调用之后记录里又写入了 {added} 条历史（工具结果、消息等），读数不含这些历史，"
+                       "下一次调用带上的上下文比它大")
+    elif compacted_after:
+        caveats.append("最近一次调用之后发生了压缩，读数是压缩之前的，下一次调用带上的上下文比它小")
     if root.last_turn_event == "turn_aborted":
         caveats.append("最后一轮被中断，没有正常结束")
     elif root.last_turn_event == "task_started":
         caveats.append("最后一轮没有结束记录：仍在执行，或进程异常退出")
-    if root.compactions_after_last_call:
-        caveats.append("最近一次调用之后发生了压缩，下一次调用带上的上下文比这个读数小")
     if root.compactions:
-        caveats.append(f"根线程的记录里出现过 {root.compactions} 次压缩：压缩之后的读数反映的是压缩后的上下文，"
-                       "压掉的细节已不在其中")
+        caveats.append(f"根线程的记录里出现过 {root.compactions} 次压缩，被压掉的细节已不在上下文里")
     return {"tokens": last.context, "window": last.window, "ratio": last.context / last.window,
             "caveats": caveats}, None
 

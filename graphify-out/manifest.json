@@ -2410,13 +2410,13 @@
     "semantic_hash": ""
   },
   "tools/codex_usage.py": {
-    "mtime": 1794368512.5188875,
-    "ast_hash": "9d7ca1054ae73fbc7bc6c5ea8328e716",
+    "mtime": 1794371425.2082663,
+    "ast_hash": "640465e3471f8e9a5e3e51f83a4dc687",
     "semantic_hash": ""
   },
   "cli/tests/test_codex_usage.py": {
-    "mtime": 1794368473.661167,
-    "ast_hash": "28f25d942932e4bbc9cae8baaa106a63",
+    "mtime": 1794371396.3825827,
+    "ast_hash": "76fda332c3f6dbdd94061e368fa98074",
     "semantic_hash": ""
   }
 }
