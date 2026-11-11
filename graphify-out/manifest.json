@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794323159.8621645,
-    "ast_hash": "d06ddf3db3c281f25be82df1ce17b9ca",
+    "mtime": 1794362444.2870796,
+    "ast_hash": "4311ba33a8f319f997eabdf1c98f7cfc",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794215570.7393942,
-    "ast_hash": "e47230d7e09fb9b28771309934687a39",
+    "mtime": 1794363020.0843866,
+    "ast_hash": "1ad6b4d38148ce49cf39ee8dc3ebaea2",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -2395,8 +2395,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/peer-review.md": {
-    "mtime": 1794323159.8623466,
-    "ast_hash": "52affb88d6142564f96483188e3bb8d0",
+    "mtime": 1794363268.2153687,
+    "ast_hash": "91a29146341266d4e36dbbf609284b88",
     "semantic_hash": ""
   },
   ".claude/README.md": {
@@ -2407,6 +2407,11 @@
   "core/tests/test_list_runs.py": {
     "mtime": 1794249662.5403202,
     "ast_hash": "d7badd74d2c4d98015b24c8f1e5cfe41",
+    "semantic_hash": ""
+  },
+  "tools/codex_usage.py": {
+    "mtime": 1794363268.5700104,
+    "ast_hash": "45318414f9b10b5e00bddd6fc3ac8e32",
     "semantic_hash": ""
   }
 }
