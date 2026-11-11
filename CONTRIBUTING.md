@@ -206,7 +206,7 @@ tools/graphify_refresh.sh --force    # 全量重抽（清残留节点时；费�
 git tag vX.Y.Z && git push origin vX.Y.Z   # GitHub Actions 接手：gate（tag 形态 + CHANGELOG 有本版节 + README 的 skill 安装命令钉本版 tag + 版本与 tag 一致）→ 镜像 gate（local 态构建两个基础镜像，不推送）→ PyPI → npm → GHCR 基础镜像 → GitHub Release
 ```
 
-发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知），并把根 `README.md` 里 `npx skills add …/tree/vX.Y.Z/…` 命令的 tag 改成本版；发布 gate 校验本 tag 在 changelog 里有非空节、README 的这条命令钉的是本版，任一不满足则发版失败（ADR 0043 决策三）；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
+发版前写 `CHANGELOG.md` 的该版节（Keep a Changelog 形态、使用者语言：小节名用 新增 / 变化 / 移除 / 修复，外加本项目自加的 升级须知；需要暂停使用才能完成的升级在升级须知里放在最前，写明影响与做法，判据见 ADR 0037 决策 7「后端形态变更的迁移口径」），并把根 `README.md` 里 `npx skills add …/tree/vX.Y.Z/…` 命令的 tag 改成本版；发布 gate 校验本 tag 在 changelog 里有非空节、README 的这条命令钉的是本版，任一不满足则发版失败（ADR 0043 决策三）；GitHub Release 正文由该节加 `.github/release_body_footer.md` 的固定块组成，由 `.github/scripts/release_notes.py` 渲染（ADR 0045 决策五）。
 
 发版后的验证中有一项需手动执行：把新版本部署到验证环境后，用 agent skill 的云端命令链（`doctor --backend cloud --prefix <前缀>` → `plan` → `submit` → `status --wait` → `explain`）在有凭证的机器上完整执行一次；云端后端这一侧是 skill 评测里唯一没被真实数据覆盖的部分（评测舞台刻意不配凭证），结论回填 ADR 0043「验证」节。
 

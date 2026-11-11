@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1794367296.0098917,
-    "ast_hash": "1eb39398d05f42a007057c5502a6338b",
+    "mtime": 1794383027.4219942,
+    "ast_hash": "7f0b67ddc1c4058c1e5b56b999d7b365",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -400,13 +400,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1794241354.129795,
-    "ast_hash": "8a640cab4228ce514658ad4ee5dfc53e",
+    "mtime": 1794380984.5273726,
+    "ast_hash": "624ace8af2cba49dc9353467727a5c64",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794370304.861873,
-    "ast_hash": "ae8023d2e6f4ea61479f23918d60428e",
+    "mtime": 1794379748.6615074,
+    "ast_hash": "2cfee133fc1a3302a28d89d519875281",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -435,13 +435,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794290177.3361735,
-    "ast_hash": "7776e87d59ee5fc17532ef4b0733814f",
+    "mtime": 1794383027.422376,
+    "ast_hash": "412b817278f717f4c1379a5ec3aeb8b9",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794290071.311233,
-    "ast_hash": "f2de4899065f559838d5ff48600dd909",
+    "mtime": 1794387889.2634678,
+    "ast_hash": "e6a6d1669905e088cfcd93c4760503a4",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -1055,8 +1055,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
-    "mtime": 1794288586.0577562,
-    "ast_hash": "9a4a46200f0d0441d79cc65d00fece91",
+    "mtime": 1794380984.5279183,
+    "ast_hash": "7f15f83fb6c8e9eb2a7bd0f92d726f4b",
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794369176.007162,
-    "ast_hash": "cb50a822cd9888ff1e0e86da48bfb32b",
+    "mtime": 1794380961.3900795,
+    "ast_hash": "d677562ded750df5086bd45b9c896333",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1330,8 +1330,8 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794369061.9922276,
-    "ast_hash": "448762e2b442d4622af5c80ed9c49c63",
+    "mtime": 1794379924.9949088,
+    "ast_hash": "5bc2752e635efcb559f0f745cadc02bf",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -1355,8 +1355,8 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/code-health-review.md": {
-    "mtime": 1794369210.6274824,
-    "ast_hash": "0470f0084b33fdc58e6044683dec7752",
+    "mtime": 1794372068.0719569,
+    "ast_hash": "4d0eb35548dcf6deaacf0cf8610e1c47",
     "semantic_hash": ""
   },
   "docs/ai-eng/doc-health-review.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794371694.3710063,
-    "ast_hash": "63b0f6f6e56eacb2353923bcfdaaf187",
+    "mtime": 1794387889.2637842,
+    "ast_hash": "5a340d797c1f31b561b9bafbebeb7b70",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
