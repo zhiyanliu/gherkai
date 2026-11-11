@@ -977,7 +977,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="302.35" y="206" width="64.8" height="18" rx="3" class="c-mask"/>
           <text x="334.75" y="216" class="t-edge-dashed" font-size="11" text-anchor="middle">写入唤醒</text>
         </g>
-        <text x="281.66666666666663" y="244" class="t-muted" font-size="7">（仅认领带标记的新 run）</text>
+        <text x="281.66666666666663" y="244" class="t-muted" font-size="7">（仅接手带标记的新 run）</text>
         </g>
 
         <g data-edge-from="kicker" data-edge-to="worker" data-edge-label="条件写成功后起 task" data-edge-key="2" data-edge-id="m-first-task">
@@ -1165,4 +1165,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=46991b957ca5f677b47d18e8204073ba41927c4e21d09d53eaf54ed730c5c4d3 -->
+<!-- gherkai:source-sha256=40d5cd49828e0055eb44e163a6e0edf5f04659d3fd0e4e0608d746b610464f94 -->

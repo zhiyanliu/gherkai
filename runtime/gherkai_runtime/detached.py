@@ -1,7 +1,7 @@
 """无状态批量运行的 local 执行接线（ADR 0034，本机后端）：SubprocessLauncher + per-run reconciler 进程。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
-- **SubprocessLauncher**：机制四 CAS 抢占成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
+- **SubprocessLauncher**：机制四认领成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
   在独立线程里读它的 fd3 事件流旁路落 SqliteEventLog（赋 worker 段单调 seq）、worker 退出后 `handle.wait()`
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）。worker 不改、对 SQLite 无知（0034）。
 - **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退。

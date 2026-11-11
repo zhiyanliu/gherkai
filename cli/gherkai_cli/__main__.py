@@ -2127,7 +2127,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
         return 2
 
     # --wait 的两道闸与云端推进器同构（ADR 0034）：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
-    # 推进器（抢 claim、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
+    # 推进器（认领、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
     if args.wait and state.status not in TERMINAL_STATUSES:
         if run_store.is_detached(args.run_id):
             # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。

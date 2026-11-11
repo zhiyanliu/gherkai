@@ -246,7 +246,7 @@
       "col": 1,
       "type": "backend",
       "label": "无状态单步推进",
-      "sublabel": "重放 · 条件写抢占 job",
+      "sublabel": "重放 · 条件写认领 job",
       "width": 144
     },
     {
@@ -336,7 +336,7 @@
       "id": "e-step-dispatch",
       "from": "stepOnce",
       "to": "dispatch",
-      "label": "抢占后派发",
+      "label": "认领后派发",
       "variant": "default",
       "role": "branch",
       "fromSide": "right",

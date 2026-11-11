@@ -1,6 +1,6 @@
 """CloudLauncher（ADR 0034 cloud 侧）：cloud 的 reconcile.Launcher——RunTask 起 Fargate task（fire-and-forget）。
 
-cloud 对位 local 的 SubprocessLauncher：reconciler（Lambda）机制四 CAS 抢占成功后调 launch(job, claimed_at=…)，经注入的
+cloud 对位 local 的 SubprocessLauncher：reconciler（Lambda）机制四认领成功后调 launch(job, claimed_at=…)，经注入的
 FargateEngine `start_scope` 起一个 Fargate task 就返回（不轮询、不读事件——worker 自 PutItem events 到 DDB、
 退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放推进）。
 

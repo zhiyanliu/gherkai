@@ -1000,7 +1000,7 @@ test("--capabilities: 一个 JSON 对象即以退出码 0 结束；七键含 tar
 
 
 // ---- 删掉的 flag 不留别名：--list-deterministic（ADR 0036 被拒方案「每个自述项一个独立 flag」）----
-// **必须真实运行**：「argv 里的某个 flag 不再被任何分支认领 → 掉进 job 模式」是进程 + argv + stdin 层的真实
+// **必须真实运行**：「argv 里的某个 flag 不再被任何分支处理 → 掉进 job 模式」是进程 + argv + stdin 层的真实
 // 行为，注 fake 的单测照不出（留个别名照样绿）。留了别名就等于保留第二个非 job 入口，run 前置每加一个自述项
 // 就多一次 spawn，正是那条被拒方案的坑。stdin 给 /dev/null（stdio ignore）：job 模式读到空载荷立刻非零退出、
 // 不挂在等 stdin 上。

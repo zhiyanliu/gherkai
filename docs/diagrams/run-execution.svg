@@ -1139,7 +1139,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <path data-edge-from="pipeLocal" data-edge-to="settle" data-edge-label="前台：在线消费" data-edge-key="10" data-edge-id="e-pipe-settle" data-edge-role="async" data-composition-points="808.8,145;808.8,197;1062.8,197;1062.8,217" d="M 808.8 145 L 808.8 189 Q 808.8 197 816.8 197 L 1054.8 197 Q 1062.8 197 1062.8 205 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step: 4;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="pipeLocal" data-edge-to="storeLocal" data-edge-label="旁路落库（前台也写）" data-edge-key="11" data-edge-id="e-pipe-store" data-edge-role="async" data-composition-points="878.8,119;992.8,119" d="M 878.8 119 L 992.8 119" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="foreLoop" data-edge-label="run" data-edge-key="12" data-edge-id="e-run" data-edge-role="main" data-composition-points="188,243;226,243" d="M 188 243 L 226 243" class="a-emphasis" data-animate="edge" style="--step: 0;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-edge-role="branch" data-composition-points="368,367;487.4,367;487.4,269" d="M 368 367 L 479.4 367 Q 487.4 367 487.4 359 L 487.4 269" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="认领后派发" data-edge-key="13" data-edge-id="e-step-dispatch" data-edge-role="branch" data-composition-points="368,367;487.4,367;487.4,269" d="M 368 367 L 479.4 367 Q 487.4 367 487.4 359 L 487.4 269" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-edge-role="async" data-composition-points="1062.8,145;1062.8,217" d="M 1062.8 145 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-edge-role="async" data-composition-points="1062.8,465;1062.8,269" d="M 1062.8 465 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-edge-role="branch" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 282 Q 118 290 126 290 L 200 290 Q 208 290 208 298 L 208 359 Q 208 367 216 367 L 224 367" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
@@ -1256,15 +1256,15 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="1062.8" y="255" class="t-muted" font-size="8" text-anchor="middle">一次落定终态</text>
         </g>
 
-        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态单步推进" tabindex="0" role="button" aria-label="聚焦无状态单步推进，重放 · 条件写抢占 job, 无状态单步推进 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写抢占 job" data-node-context="无状态单步推进 › 驱动循环：每批事件推进一步">
-          <title>无状态单步推进 · 重放 · 条件写抢占 job · 无状态单步推进 › 驱动循环：每批事件推进一步</title>
+        <g id="node-stepOnce" data-node-id="stepOnce" data-node-label="无状态单步推进" tabindex="0" role="button" aria-label="聚焦无状态单步推进，重放 · 条件写认领 job, 无状态单步推进 › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="重放 · 条件写认领 job" data-node-context="无状态单步推进 › 驱动循环：每批事件推进一步">
+          <title>无状态单步推进 · 重放 · 条件写认领 job · 无状态单步推进 › 驱动循环：每批事件推进一步</title>
           <rect x="224" y="341" width="144" height="52" rx="8" class="c-mask"/>
           <rect x="224" y="341" width="144" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(230 347) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" x="296" y="362" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">无状态单步推进</text>
-          <text x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写抢占 job</text>
+          <text x="296" y="379" class="t-muted" font-size="8" text-anchor="middle">重放 · 条件写认领 job</text>
         </g>
 
         <g id="node-cloudFn" data-node-id="cloudFn" data-node-label="云端推进函数" tabindex="0" role="button" aria-label="聚焦云端推进函数，提交与事件均可唤醒, 云端后端（cloud） › 入口与承载进程" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="提交与事件均可唤醒" data-node-context="云端后端（cloud） › 入口与承载进程">
@@ -1367,9 +1367,9 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="192" y="223" width="30" height="14" rx="3" class="c-mask"/>
           <text x="207" y="233" class="t-edge-emphasis" font-size="8" text-anchor="middle">run</text>
         </g>
-        <g data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="抢占后派发" data-edge-key="13" data-edge-id="e-step-dispatch">
+        <g data-edge-from="stepOnce" data-edge-to="dispatch" data-edge-label="认领后派发" data-edge-key="13" data-edge-id="e-step-dispatch">
           <rect x="398.7" y="347" width="58" height="14" rx="3" class="c-mask"/>
-          <text x="427.7" y="357" class="t-muted" font-size="8" text-anchor="middle">抢占后派发</text>
+          <text x="427.7" y="357" class="t-muted" font-size="8" text-anchor="middle">认领后派发</text>
         </g>
         <g data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle">
           <rect x="1024.2" y="159" width="77.2" height="14" rx="3" class="c-mask"/>
@@ -1425,4 +1425,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=cc52b89bacf2ee9aee42e866f0a85b8519421b7624a65b28394605513b4fe208 -->
+<!-- gherkai:source-sha256=8b397152e8b55268369687c98d16163916d3dc0592e26f1b0301b2ecaab00cee -->

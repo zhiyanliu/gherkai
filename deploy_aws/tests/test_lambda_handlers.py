@@ -718,14 +718,14 @@ def test_reconciler_noop_for_non_detached_run(cloud_env):
     store = _seed_run(cloud_env["runs"], detached=False)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     state = store.load_run_state("run-1")
-    assert state.jobs["a"].status == Status.PENDING   # 零 claim（CAS 没抢）
+    assert state.jobs["a"].status == Status.PENDING   # 零认领
     assert state.status == Status.PENDING             # 零投影写、零 finalize（仍是 create_run 的初态）
     # 零 launch：launch 真被调过则 tick 的失败补偿会往 events 表写一条 exit 记录（moto 无 task-def，RunTask 必失败）
     assert cloud_env["events"].scan()["Count"] == 0
 
 
 def test_reconciler_ticks_detached_run(cloud_env):
-    """对偶（防「gate 恒真」的假绿）：detached run 照常推进——tick 真实运行、CAS 抢到那个 pending job。"""
+    """对偶（防「gate 恒真」的假绿）：detached run 照常推进——tick 真实运行、认领到那个 pending job。"""
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING
@@ -1084,7 +1084,7 @@ def test_kicker_uses_definition_worker_task_defs(cloud_env):
     _seed_worker_ssm(revision_arn="arn:should-not-be-used:1")
     store = _seed_run(cloud_env["runs"], detached=True)
     reconciler.kicker_handler({"run_id": "run-1"}, None)
-    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 运行到 CAS 抢占
+    assert store.load_run_state("run-1").jobs["a"].status == Status.RUNNING  # 真 tick 运行到认领
 
 
 def test_run_ids_scope_id_containing_hash_is_split_from_the_left():

@@ -9,7 +9,7 @@
 - **提交前必过**：仓库根 `uv run pytest` 与 `engines/midscene` 下 `npm test` 全部通过。人读文本（注释、docstring、文档、用户可见字符串）的措辞标准在 [ADR 0045](./docs/adr/0045-documentation-layering-and-placement.md) 决策六，护栏 `cli/tests/test_code_comments.py`（注释与 docstring）、`test_technical_docs.py`（技术文档）、`test_user_docs.py` / `test_skill.py` / `test_package_readmes.py`（用户文档、skill、包页）、`test_user_facing_messages.py`（用户可见字符串）随 `uv run pytest` 一并执行。单测通过不等于结论正确：结论一旦依赖 mock 之外的真实行为（进程与信号、并发时序、真实 IO 与网络、真 AWS），按 [`CLAUDE.md`](./CLAUDE.md)「代码纪律」把验证升级为真实运行或对抗核查。
 - **commit 信息用中文、按逻辑批次**：一个成块的功能或一轮修正收口、测试通过后再提交，不为每次小改动提交；多行信息用 `git commit -F <文件>`。push 的时机由操作者决定（仓库公开）。
 - **改 code 前先对齐决策**：先确认相关 ADR（[`docs/adr/`](./docs/adr/)）里的契约与不变量；需要新决策时先落 ADR，再写实现。
-- **设计类改动先过独立复核**：新增或反转 ADR、改契约与不变量，以及把待审批事项交人裁定之前，按 [`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md) 做一次独立复核、分歧裁决与闭合确认。用 AI agent 起草方案的，首选请与起草所用模型不同厂商的只读 CLI 做同僚复核（本仓库用 Codex CLI）；没有可用的或决定不采用时，按该文的替代方式做。提交说明里写明复核方式与未采用首选方式的原因（经 PR 提交的也写进 PR 说明）。机制本身不依赖任一工具。
+- **设计类改动先过独立复核**：新增或反转 ADR、改契约与不变量，以及把待审批事项交人裁定之前，按 [`docs/ai-eng/peer-review.md`](./docs/ai-eng/peer-review.md) 做一次独立复核、分歧裁决与闭合确认；成批 code 落地之后也做一次，核对实现是否落实了 ADR 的设计。用 AI agent 起草方案的，首选请与起草所用模型不同厂商的只读 CLI 做同僚复核（本仓库用 Codex CLI）；没有可用的或决定不采用时，按该文的替代方式做。提交说明里写明复核方式与未采用首选方式的原因（经 PR 提交的也写进 PR 说明）。机制本身不依赖任一工具。
 - **改完回头校准文档**：受影响的 ADR、`CONTEXT.md`、各包 `README.md` 与 `DEVELOPMENT.md`、`docs/` 下的页面一并修改。枚举型内容（目录树、选项表、模块清单、护栏清单）靠 `ls` / grep / `--help` 逐条比对差集，不靠通读。
 
 ## 现状与版本线

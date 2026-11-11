@@ -248,7 +248,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
     eng = FakeEngine()
     launcher = CloudLauncher(lambda name: eng, run_id="run-1")
 
-    # tick1：起 a（CAS claim + launch）
+    # tick1：起 a（认领 + launch）
     tick("run-1", meta, log, ddb_run_store, launcher, 1, now_iso="t1")
     assert eng.started == ["a"]
     state = ddb_run_store.load_run_state("run-1")

@@ -69,7 +69,8 @@ _LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at",
 class RunListingIncomplete(RuntimeError):
     """列举 run 时批量读回重试耗尽、仍有 run 没有读回（ADR 0041 决策七「云端实现」）：不给出缺行的清单，调用方按读不到这个后端
     处理（`list-runs` 以退出码 2 结束）。`table` 是 runs 表名，`missing` 是没有完整读回的 run 数：重试耗尽那一批里剩下的，加上
-    因此不再发出的后续各批里的；此前各批已完整读回的不计。"""
+    因此不再发出的后续各批里的；此前各批已完整读回的不计。按页补读时（`limit` 给出）每页单独读回，只计出错的这一页，还没有查到的
+    后续各页不在其内。"""
 
     def __init__(self, table: str, missing: int, retries: int) -> None:
         super().__init__(f"读取运行状态表 {table} 时重试 {retries} 次后仍有 {missing} 个 run 没有读回（通常是读取被限流），"
@@ -278,7 +279,7 @@ class DynamoDBRunStore:
         """CAS：仅当 jobs[scope_id].status == 'pending' 且 run 未收尾才置 'running'（机制四）。CCF → False。
 
         同一条条件写把 run 级置 'running'（ADR 0034 机制三「run 级状态只进不退」条①）：顶层 `#st` 与 `jobs.#sid.#st`
-        路径不重叠、可在同一更新表达式里写。条件不成立的三种原因（已被抢、job 不在 Map 里、run 已收尾）不区分，
+        路径不重叠、可在同一更新表达式里写。条件不成立的三种原因（已被认领、job 不在 Map 里、run 已收尾）不区分，
         都不该由这次认领起 task；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
         随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。
         """
@@ -293,7 +294,7 @@ class DynamoDBRunStore:
                 UpdateExpression=update,
                 ExpressionAttributeNames={"#sid": scope_id, "#st": "status"},
                 ExpressionAttributeValues=values,
-                # 仅当该 job 当前是 pending、run 级未收尾才抢占
+                # 仅当该 job 当前是 pending、run 级未收尾才认领
                 ConditionExpression="jobs.#sid.#st = :pending AND #st IN (:pending, :running)",
             )
             return True
@@ -469,8 +470,12 @@ class DynamoDBRunStore:
     # ---- 列举（ADR 0041 决策七「云端实现」）----
 
     def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
-        """列举（语义见 RunStore port）：按 `statuses` 的给定顺序逐个 Query 状态分区（run_id 降序），收集到的 run_id 先去重，再用
+        """列举（语义见 RunStore port）：按 `statuses` 的给定顺序逐个 Query 状态分区（run_id 降序），run_id 先去重，再用
         `BatchGetItem` 强一致读回每个 run 的 STATE 与 META（同一批请求，不另起读取）。
+
+        `limit` 为 None 时每个分区分页读完，全部 run_id 收齐后一次读回。`limit` 给出时逐个分区按页补读：每页按还差的可读 run 条数
+        取键、读回、解析，凑满 `limit` 条可读的 run 或分区读完即停；其间遇到的无法读取的行照常列出、不占名额，读回时 STATE 已不在的
+        行同样不占名额。前面分区已读回过的 run 不再读回，它在本分区是否占名额按已读回的结果定。
 
         行内容以读回的 STATE 为准、不按状态复筛；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了
         （形态违约、job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 与 `is_detached` 同一判据
@@ -483,15 +488,42 @@ class DynamoDBRunStore:
                                "（配置缺失：起 RunStore 的地方须注入 list_index_name）")
         if limit is not None and limit < 1:
             raise ValueError(f"limit 须为正整数或 None，现为 {limit!r}")
-        run_ids: list[str] = []
+        # 先去重再读回：同一 run 可能在索引传播期间同时出现在新旧两个分区，而 BatchGetItem 的同一请求里出现重复的键，整个请求以
+        # ValidationException 失败
         seen: set[str] = set()
-        for status in dict.fromkeys(statuses):
-            for run_id in self._query_status_partition(status, limit):
-                # 先去重再读回：同一 run 可能在索引传播期间同时出现在新旧两个分区，而 BatchGetItem 的同一请求里出现重复的键，
-                # 整个请求以 ValidationException 失败
-                if run_id not in seen:
-                    seen.add(run_id)
-                    run_ids.append(run_id)
+        if limit is None:
+            run_ids: list[str] = []
+            for status in dict.fromkeys(statuses):
+                start = None
+                while True:
+                    page, start = self._query_index_page(status, None, start)
+                    for run_id in page:
+                        if run_id not in seen:
+                            seen.add(run_id)
+                            run_ids.append(run_id)
+                    if start is None:
+                        break
+            rows = self._read_listing_rows(run_ids)
+        else:
+            listed: dict[str, RunListing] = {}
+            for status in dict.fromkeys(statuses):
+                readable = 0
+                start = None
+                while True:
+                    page, start = self._query_index_page(status, limit - readable, start)
+                    fresh = [run_id for run_id in page if run_id not in seen]
+                    seen.update(fresh)
+                    listed.update((row.run_id, row) for row in self._read_listing_rows(fresh))
+                    readable += sum(1 for run_id in page if run_id in listed and listed[run_id].state is not None)
+                    # 没有下一页即停：一页全是无法读取的行时也在这里结束，不因名额未满而反复查
+                    if readable >= limit or start is None:
+                        break
+            rows = list(listed.values())
+        rows.sort(key=lambda row: row.run_id, reverse=True)
+        return rows
+
+    def _read_listing_rows(self, run_ids: list[str]) -> list[RunListing]:
+        """读回这些 run（须已去重）并解析成列举项，次序同 `run_ids`；STATE 已不在的 run 不出现。`run_ids` 为空时不发请求。"""
         items = self._batch_get_listing_items(run_ids)
         rows: list[RunListing] = []
         for run_id in run_ids:
@@ -508,11 +540,11 @@ class DynamoDBRunStore:
             except ValueError:  # 结构版本不是整数、写端版本不是字符串（DefinitionContractError）：头部解析不了，与本机同读作 None
                 header = None
             rows.append(RunListing(run_id=run_id, state=state, detached=bool(state_item.get("detached")), header=header))
-        rows.sort(key=lambda row: row.run_id, reverse=True)
         return rows
 
-    def _query_status_partition(self, status: Status, limit: int | None) -> list[str]:
-        """按 run_id 降序读一个状态分区里的 run_id：`limit` 给出时取够为止（一页不足且还有下一页时续读），为 None 时分页读完。"""
+    def _query_index_page(self, status: Status, limit: int | None, start: dict | None) -> tuple[list[str], dict | None]:
+        """按 run_id 降序读一个状态分区的一页 run_id：`limit` 给出时这一页至多取这么多条（一页可能更少），`start` 是上一页给出的
+        续读起点。返回这一页的 run_id 与下一页的起点，没有下一页时起点为 None。"""
         kwargs: dict = {
             "IndexName": self._list_index_name,
             "KeyConditionExpression": "#st = :s",
@@ -520,17 +552,13 @@ class DynamoDBRunStore:
             "ExpressionAttributeValues": {":s": status.value},
             "ScanIndexForward": False,
         }
-        run_ids: list[str] = []
-        while True:
-            if limit is not None:
-                kwargs["Limit"] = limit - len(run_ids)
-            resp = self._table.query(**kwargs)
-            run_ids.extend(item["run_id"] for item in resp.get("Items", []))
-            last = resp.get("LastEvaluatedKey")
-            # 没有游标与空字典游标都按已到末页处理：空字典不标明续读的起点，用它续查不能推进分页，不截断时可能反复读同一段而不结束
-            if not last or (limit is not None and len(run_ids) >= limit):
-                return run_ids
-            kwargs["ExclusiveStartKey"] = last
+        if limit is not None:
+            kwargs["Limit"] = limit
+        if start is not None:
+            kwargs["ExclusiveStartKey"] = start
+        resp = self._table.query(**kwargs)
+        # 没有游标与空字典游标都按已到末页处理：空字典不标明续读的起点，用它续查不能推进分页，可能反复读同一段而不结束
+        return [item["run_id"] for item in resp.get("Items", [])], resp.get("LastEvaluatedKey") or None
 
     def _batch_get_listing_items(self, run_ids: list[str]) -> dict[tuple[str, str], dict]:
         """强一致读回这些 run 的 STATE 与 META item，返回 {(run_id, item_type): item}；不在的 item 不出现。

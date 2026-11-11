@@ -61,12 +61,12 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
 1. submit(CLI)：plan → create_run 写 RunMeta+全 pending 到 runs 表 → CLI 退出（run_id 已在手）。
    **只写 runs 表（多行参数正文与设备安装包另写 S3）、不起任何 task**——submit 机器没有任何 ECS 写/执行权限，不碰 ECS RunTask（完整权限面以 [0033](./0033-iac-aws-backend-and-composition-wiring.md)「资源清单」末段的编排进程角色为唯一登记处；preflight 探针见其 preflight 条；冷启动由kicker Lambda 做，见下）。
 1b. runs 表 Stream（**仅 INSERT 且带 `detached` 标记**）→ [kicker Lambda]：新 run 的 **STATE item 落库即触发**
-     （写序契约见下，触发时 definition 必已在库）→ tick 起首批 min(max_concurrency, |jobs|) 个 task（CAS 抢占；
+     （写序契约见下，触发时 definition 必已在库）→ tick 起首批 min(max_concurrency, |jobs|) 个 task（认领；
      max_concurrency 随 definition 到达、与部署侧 cap 取 min，见下机制四）。这是纯事件驱动链的**冷启动**（无此步则无 events/无 STOPPED，
      events Stream 永不触发第一次 reconciler）。kicker复用同一 `reconcile.tick`（四宿主一份：
      submit-local / kicker / reconciler / status 接力）。
      **filter 必须区分写入者（code-health 对抗验证逼出——只 filter INSERT 不够）**：同步 `run --backend
-     cloud` 的 `RunPersistence.begin → create_run` 同样 INSERT runs 表，会误触发 kicker 对同步 run tick（CAS 抢
+     cloud` 的 `RunPersistence.begin → create_run` 同样 INSERT runs 表，会误触发 kicker 对同步 run tick（认领
      job、RunTask）——与同步 schedule 的进程内执行**双开推进器**（重复起 task、真站点重复操作，moto 复现）。
      解法 = **`detached` 由组合根注入、随 create_run 写成 DDB 顶层标记属性**（`submit` 组合根传 detached=True；
      同步 `run` 不传、item 无此属性），kicker 的 event source filter 匹配 `INSERT ∧ NewImage.detached=true`——
@@ -78,10 +78,10 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
      而同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，故它的 worker 事件与 task 停止
      必然打到这两个 handler。**故这两半在 handler 内判**：组合根用 `DynamoDBRunStore.is_detached(run_id)`（只读
      adapter 访问器、读 STATE 顶层标记，**不进 RunState / RunMeta 模型**、访问器留在 adapter——执行环境属性不进 core 的运行态模型；例外：`list-runs` 的列举项把它作为数据字段随端口返回、core 不据它分支，[0041](./0041-agent-facing-cli-affordances.md) 决策七）在动手前分流，非 detached
-     直接 no-op；判据与 kicker filter 同一真源（同一个标记）。两半的具体故障形态：reconciler 抢 claim/RunTask/
+     直接 no-op；判据与 kicker filter 同一真源（同一个标记）。两半的具体故障形态：reconciler 认领/RunTask/
      finalize、与同步 schedule 双开推进器（与上述 kicker 误触发同一形态）；exit-observer 写的 `task_exited` 无 `body` 属性、被同步路径 events Query 读到
      即 `KeyError`（见下机制一）。
-     **本机侧同一标记、同一分流**：`LocalRunStore(detached=True)`（`submit --backend local` 的组合根）在 run_state.json 顶层写 `detached: true`，之后每次写回都保留它（接力者与同步路径的实例不带 detached，重写文件时不能把标记丢掉）；`LocalRunStore.is_detached` 同为 adapter-only 只读访问器。本机的接力宿主是 `status --wait`，它据此只接力 detached run（见下「兜底/接力」条的两道闸）——此前本机没有这个标记，`status --wait` 对前台 `run` 正在执行的 run 也会接力，与进程内 schedule 双开推进器（抢 claim、再起一个 worker）。
+     **本机侧同一标记、同一分流**：`LocalRunStore(detached=True)`（`submit --backend local` 的组合根）在 run_state.json 顶层写 `detached: true`，之后每次写回都保留它（接力者与同步路径的实例不带 detached，重写文件时不能把标记丢掉）；`LocalRunStore.is_detached` 同为 adapter-only 只读访问器。本机的接力宿主是 `status --wait`，它据此只接力 detached run（见下「兜底/接力」条的两道闸）——此前本机没有这个标记，`status --wait` 对前台 `run` 正在执行的 run 也会接力，与进程内 schedule 双开推进器（认领、再起一个 worker）。
      **不变量：标记挂在 `STATE` item 上，且 `create_run` 的写序 `META`→`STATE` 是契约**——kicker 由 STATE 的
      INSERT 触发，故被触发时 META（definition）必已落；若把标记挂 META，kicker 可能在 STATE 落库前就 tick，
      claim/投影全 CCF 空转（`DynamoDBRunStore.create_run` 守此写序）。
@@ -92,7 +92,7 @@ gherkai run <features>    # 原阻塞皮 = 同进程 schedule() 驱动循环（T
 4. events 表变化 → DynamoDB Stream → [reconciler Lambda]（**两道语义闸，都整体 no-op**：先判 detached，非 detached 不碰；再判 run 是否已提交终态，已终态不碰——见下「已收尾的 run 不再推演」）：
      ① 读该 run 全量 events → 纯推演完整 RunState
      ② HWM 条件写落 RunState（挡 stale 覆盖）
-     ③ running<max_concurrency 且有 pending：CAS(pending→running) 抢一个 → RunTask 启下一个（同一条条件写把未收尾的 run 级置 running；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销，见机制三「run 级状态只进不退」条）
+     ③ running<max_concurrency 且有 pending：CAS(pending→running) 认领一个 → RunTask 启下一个（同一条条件写把未收尾的 run 级置 running；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销，见机制三「run 级状态只进不退」条）
      ④ 全 job 终态：同一份 events 快照 → 落各 job 判定真值（ResultStore）→ finalize CAS 写总 status（commit point）
         → 聚合 RunReport（派生、失败隔离；run 级墙钟 = RunState started_at→ended_at，宿主算好传入——**宿主侧取这个数本身也在失败隔离内**：多读一次 RunState 跑在提交点之后（限流/瞬时 5xx/落盘读错都会抛），commit 后失败无人重试，抛出去还会让 events Stream 本批重试耗尽后整批丢弃、连坐同批其它 run 的事件；故失败按缺值走、报告墙钟显「?」。「宿主算好传入」说的是「core 不解析时间戳」，**不是「取数可以裸抛」**）。写序 [0030](./0030-realtime-persistence-seam.md) 决定三：CAS 前失败可重试、CAS 后失败无人重试
      **不变量：已收尾的 run 不再推演——已提交终态的 run，云端推进器整体 no-op**（判在 detached 之后、读 definition
@@ -165,7 +165,7 @@ per-run 进程（观察者+reconciler 三合一）：spawn worker 子进程
 
 **`task_exited` 的判定不设「已见 scope_started」前置**（code-health 对抗验证逼出的精确化）：上表按「有无 task_exited」为一级键——**零事件 + exit==0**（构造期 SIGTERM → flag-only handler 构造完成即 `return 0`，[0024](./0024-worker-core-protocol.md) 设计内行为）与**零事件 + 退出码缺失**（TaskFailedToStart，如镜像拉取失败的 STOPPED 事件无 exitCode，观察者落哨兵）都必须走上表对应分支（两者皆 ERROR），**不得因「没见 scope_started」短路成 PENDING**——PENDING 与已 claim 的 RUNNING 基线单调合并后 job 永停 RUNNING、`plan_next` 既不提议也不 finalize、run 永不收敛（探针复现：4 轮 tick 不推进且 events 不再新增、永不自愈）。回归护栏 `core/tests/test_project.py` 的 exit-without-events 真值表用例。
 
-**launch 失败补偿——「起不来」也是一种进程终止（机制二的推论，code-health 对抗验证逼出）**：CAS 抢占成功后 `launcher.launch(job, claimed_at=…)`（`claimed_at` 与 `try_claim_job` 落库的是同一个时间戳，供云端超时按 claim 起算）可能抛异常（RunTask 放置失败/容量不足/task-def 配错/Popen OSError——其中 task-def 名配错是**确定性触发器**、每 job 必炸），此时 job 已被置 RUNNING 却永无 events、无 task_exited（进程根本没起、平台侧观察者无从观察）——若异常裸穿 tick，job 永停 RUNNING、整批不可恢复 wedge，且三触发源都救不回（「状态全持久、断点续」的可恢复性断言被推翻）；cloud 侧 Stream 重试还会因 job 已 running 而「成功」no-op、掩盖故障。**修法 = launch 的宿主（tick）扮演「起不来」这一时刻的退出观察者**：catch 异常 → `event_log.record_exit(scope_id, 非0哨兵码, reason="起 worker 失败：<异常文本>")` → 下轮重放走「exit≠0 → ERROR」既有谓词收敛终态。reason 与同步路径（`schedule` 起 worker 失败时交给终结函数的退出原因）同句，随退出记录投影进 job message（255 分支的消息把它接在固定前缀之后），RunTask 放置失败的归因、引擎这次装配不出来时给出的指引因此到达使用方；traceback 另由 tick 以 warning 级记日志，供排障。不发明新状态、不加重试（launch 级重试属 job 级重试的既有留口子）、异常不中断本 tick 其余 job（失败隔离，[0026](./0026-schedule-module.md)）。回归护栏 `core/tests/test_reconcile.py::test_launch_failure_does_not_wedge_run` 与 `::test_launch_failure_reason_reaches_job_message`。
+**launch 失败补偿——「起不来」也是一种进程终止（机制二的推论，code-health 对抗验证逼出）**：认领成功后 `launcher.launch(job, claimed_at=…)`（`claimed_at` 与 `try_claim_job` 落库的是同一个时间戳，供云端超时按 claim 起算）可能抛异常（RunTask 放置失败/容量不足/task-def 配错/Popen OSError——其中 task-def 名配错是**确定性触发器**、每 job 必炸），此时 job 已被置 RUNNING 却永无 events、无 task_exited（进程根本没起、平台侧观察者无从观察）——若异常裸穿 tick，job 永停 RUNNING、整批不可恢复 wedge，且三触发源都救不回（「状态全持久、断点续」的可恢复性断言被推翻）；cloud 侧 Stream 重试还会因 job 已 running 而「成功」no-op、掩盖故障。**修法 = launch 的宿主（tick）扮演「起不来」这一时刻的退出观察者**：catch 异常 → `event_log.record_exit(scope_id, 非0哨兵码, reason="起 worker 失败：<异常文本>")` → 下轮重放走「exit≠0 → ERROR」既有谓词收敛终态。reason 与同步路径（`schedule` 起 worker 失败时交给终结函数的退出原因）同句，随退出记录投影进 job message（255 分支的消息把它接在固定前缀之后），RunTask 放置失败的归因、引擎这次装配不出来时给出的指引因此到达使用方；traceback 另由 tick 以 warning 级记日志，供排障。不发明新状态、不加重试（launch 级重试属 job 级重试的既有留口子）、异常不中断本 tick 其余 job（失败隔离，[0026](./0026-schedule-module.md)）。回归护栏 `core/tests/test_reconcile.py::test_launch_failure_does_not_wedge_run` 与 `::test_launch_failure_reason_reaches_job_message`。
 
 **退出码缺失：观察者落哨兵、不留宽限态（修正）**：本 ADR 最初把「STOPPED 但 exitCode 未落值」定义为有界宽限态（投影保守 RUNNING、观察者"短暂重查 DescribeTasks"兜底），根据是 [0024](./0024-worker-core-protocol.md) 记的 `lastStatus==STOPPED` 与 exitCode 落值非原子。**修正理由（code-health 对抗验证发现）**：①补齐退出码在事件驱动下没有第二次机会——ECS 对一个 task 只发一次 STOPPED 事件，观察者无 ECS 权限也不该有（薄 handler），所以宽限态在实装里是**无界**的；②容器根本没跑起来的形态（`stopCode=TaskFailedToStart`：拉不到镜像、缺 secret、放置失败）exitCode **必然**缺失，不是延迟而是永不——按旧表判 RUNNING 即 run 永久 wedge、三触发源都救不回。**决定**：观察者对缺 exitCode 的 STOPPED **一律落非 0 哨兵**（与上条 launch 失败补偿同一常量 `PLATFORM_FAILED_EXIT=255`，core 单点定义）并带 `reason`（`stopCode: stoppedReason`，随 `task_exited` 进事件日志、投影进 job message 让用户看到归因）；终结函数 `finalize_job` 对「有退出记录、非超时、退出码未知」判 ERROR（防御：老版本观察者或未知写者仍写 None 时不 wedge）。STOPPED 事件锚在 `stoppedAt`（已过落值窗口），正常退出必带退出码——实测 H1/H2 见地基实测节；哨兵只在容器没跑过时出现。**真跑坐实（坏镜像 tag 的 detached run）**：task-def 指向不存在的 ECR tag 提交 → STOPPED 事件 `stopCode=TaskFailedToStart`、无 exitCode → 观察者落 255 + reason → reconciler 一轮 tick 判 error 并 finalize，**run 在有界时间内到终态**，jobs/*.json 的 message 带出观察者落的归因「TaskFailedToStart: CannotPullContainerError: … not found」（当时的前缀措辞已改写，现行文案见 `project.finalize_job` 的 255 分支）；同一场景在修正前的实装下 run 永久 RUNNING。**被拒**：给观察者加 DescribeTasks 重查/延迟重试——要加 ECS IAM 与调度机器，服务的却是一个实测从未出现、且对 TaskFailedToStart 无意义（永不落值）的形态。
 
@@ -210,7 +210,7 @@ reconciler 逻辑上是「唯一写者」，**物理上是并发实例**（实�
 **解法 = 两道条件写，各管一类回退，不能只用 HWM**：
 
 - **① HWM 挡 worker 执行事件段内的 stale 覆盖**：`RunState` 带 `high_water_mark`（已处理的 worker 段 max seq）；投影写条件含 `attribute_not_exists OR :hwm >= hwm`，读到更少 worker 事件的 stale 实例写被 `ConditionalCheckFailedException` 挡掉。这管的是「A 读到 seq=10、B 读到 seq=20，A 迟到写覆盖 B」这类**数值 seq 可比**的回退。
-- **② 状态机单调条件写挡终态回退（HWM 挡不住的边界，必须单列）**：`task_exited` 走独立键空间、**不带数值 seq**（机制一），故「被 `scope_done`（末 seq=5）触发的投影」与「被 `task_exited` 触发的投影」携带**相同 HWM(=5)**——`task_exited` 恰是把 job 翻终态的那条事件，单靠 HWM(`5>=5` 成立) **挡不住** stale 的 `scope_done` 投影把已 `passed` 的 job 刷回 `running`。**故 job 状态与 run 总 status 的终态转移另加一道单调状态机条件写**：run 总 status 只在 `status ∈ 非终态集` 时允许写（`ConditionExpression` 断言当前非终态，终态不可被任何后到的写覆盖），且与 job 级同样按生命周期序单调（`pending < running < 终态`：未收尾的 run 级一经写成 running 不退回 pending，机制在下「run 级状态只进不退」条，它也不经条件表达式、而由写表达式省略 run 级实现）；job 状态按生命周期序单调（`pending < running < 终态`：终态不被 running/pending 覆盖，终态之间以本次投影为准；单调约束的是等级、不是字段，同等级之间的覆盖照常发生），落地形态见下「② 的 job 级半边落地形态」段，写入开销的收窄见其后「逐 job 写跳过无效果的 pending 项」段。finalize（run 总 status）同理单独条件写，保证 commit 恰一次、RunReport 触发幂等。
+- **② 状态机单调条件写挡终态回退（HWM 挡不住的边界，必须单列）**：`task_exited` 走独立键空间、**不带数值 seq**（机制一），故「被 `scope_done`（末 seq=5）触发的投影」与「被 `task_exited` 触发的投影」携带**相同 HWM(=5)**——`task_exited` 恰是把 job 翻终态的那条事件，单靠 HWM(`5>=5` 成立) **挡不住** stale 的 `scope_done` 投影把已 `passed` 的 job 刷回 `running`。**故 job 状态与 run 总 status 的终态转移另加一道单调状态机条件写**：run 总 status 只在 `status ∈ 非终态集` 时允许写（`ConditionExpression` 断言当前非终态，终态不可被任何后到的写覆盖），且与 job 级同样按生命周期序单调（`pending < running < 终态`：未收尾的 run 级一经写成 running 不退回 pending，机制在下「run 级状态只进不退」条，它也不经条件表达式、而由写表达式省略 run 级实现）；job 状态按生命周期序单调（`pending < running < 终态`：终态不被 running/pending 覆盖，终态之间以本次投影为准；单调约束的是等级、不是字段，同等级之间的覆盖照常发生），落地形态见下「② 的 job 级半边落地形态」段，写入开销的收窄见其后「逐 job 写跳过无效果的 pending 项」段。finalize（run 总 status）同理单独条件写，保证 commit 恰一次、RunReport 触发幂等。`try_finalize` 不给原因（`message` 为 None）时保留库中已有的原因，两个 adapter 同一规则；现行写者不会在已带原因的运行态上再收尾（原因只随收尾写入，收尾之后条件写不再成立），这条规则守的是两端落库结果一致。
 
 两道条件缺一不可：HWM 管 seq 可比的进度回退，状态机单调管「跨独立键空间事件（task_exited 无 seq）的终态回退」——后者正是 `scope_done`/`task_exited` 这个 finalize 边界的关键守卫。这是 [0030](./0030-realtime-persistence-seam.md)「重议」条预告的「进程外多写者需条件更新」的落地（反向链见本篇 Status 头；0030 的 Status 头与其「重议」条已回指本 ADR）。
 

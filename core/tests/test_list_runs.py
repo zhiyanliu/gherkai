@@ -1,8 +1,8 @@
 """RunStore.list_runs 的单测（ADR 0041 决策七「core 端口」「本机实现」「云端实现」）。
 
 本机侧用真目录造 run；云端侧两套：moto 建带列举 GSI 的 runs 表（分区键 status、排序键 run_id、KEYS_ONLY），测与本机同一批
-行为与读回形状；moto 造不出的情形（Query 一页不足 Limit 却还有下一页、索引尚未跟上导致的重复键与 STATE 已不在、读回的状态已
-不在所请求的分区、未处理键）用只实现列举所需三样的假表测。
+行为与读回形状，无法读取的行不占名额另有两端参数化对拍；moto 造不出的情形（Query 一页不足 Limit 却还有下一页、按页补读的
+逐页续读、索引尚未跟上导致的重复键与 STATE 已不在、读回的状态已不在所请求的分区、未处理键）用只实现列举所需三样的假表测。
 """
 from __future__ import annotations
 
@@ -272,7 +272,7 @@ def test_ddb_list_runs_matches_local_semantics(cloud_runs):
 
 
 def test_ddb_list_runs_projection_keeps_every_run_state_field(listing_table):
-    # 运行态的每个字段都有值：读回的投影少取任何一个属性（结束时刻、run 级消息、高水位、job 的会话与抢占时刻），都与 load_run_state 不等
+    # 运行态的每个字段都有值：读回的投影少取任何一个属性（结束时刻、run 级消息、高水位、job 的会话与认领时刻），都与 load_run_state 不等
     store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
     full = RunState(
         run_id="run-01", status=Status.FAILED,
@@ -348,6 +348,69 @@ def test_explicit_null_schema_version_is_contract_violation_but_missing_key_read
     with pytest.raises(DefinitionContractError, match="schema_version 须为整数"):
         store.peek_definition_header("run-01")
     assert store.peek_definition_header("run-02") == (0, "1.5.0")
+
+
+def _two_ended_store(request, tmp_path: Path, monkeypatch, backend: str):
+    """两端同一组造数手段：返回 (store, 造一个可读的 passed run, 造一个无法读取的 passed run, 云端的调用记录或 None)。
+    无法读取的 run 指 run 级状态认识（仍在 passed 分区里）而 job 状态值本版本不认识；提交记录头部照常写下。云端的调用记录收集每次
+    Query 的 Limit 与每次 BatchGetItem 读回的 run_id。"""
+    bad_jobs = [{"scope_id": "s", "status": "paused"}]
+    if backend == "local":
+        store = LocalRunStore(tmp_path)
+
+        def unreadable(run_id: str) -> None:
+            _make(store, run_id, Status.PASSED)
+            (tmp_path / run_id / "run_state.json").write_text(
+                json.dumps({"run_id": run_id, "status": "passed", "jobs": bad_jobs}), encoding="utf-8")
+
+        return store, lambda run_id: _make(store, run_id, Status.PASSED), unreadable, None
+    table = request.getfixturevalue("listing_table")
+    store = DynamoDBRunStore(table, list_index_name=_LIST_INDEX)
+
+    def unreadable(run_id: str) -> None:
+        _make(store, run_id, Status.PASSED)
+        table.put_item(Item=_state_item(run_id, "passed", jobs={"s": {"status": "paused"}}))
+
+    calls = SimpleNamespace(limits=[], batches=[])
+    real_query, client = table.query, table.meta.client
+    real_batch = client.batch_get_item
+
+    def query(**kwargs):
+        calls.limits.append(kwargs.get("Limit"))
+        return real_query(**kwargs)
+
+    def batch_get_item(*, RequestItems):
+        calls.batches.append(sorted({k["run_id"] for k in RequestItems[_TABLE]["Keys"]}, reverse=True))
+        return real_batch(RequestItems=RequestItems)
+
+    monkeypatch.setattr(table, "query", query)
+    monkeypatch.setattr(client, "batch_get_item", batch_get_item)
+    return store, lambda run_id: _make(store, run_id, Status.PASSED), unreadable, calls
+
+
+@pytest.mark.parametrize("backend", ["local", "ddb"])
+@pytest.mark.parametrize("layout, limit, expected, limits, batches", [
+    # 最新一条无法读取、次新可读：坏行照常列出、不占名额，可读的仍取到一条，更旧的一条不读
+    ("URR", 1, ["r3", "r2"], [1, 1], [["r3"], ["r2"]]),
+    # 连续多条无法读取之后才有可读行：按还差的条数续取，凑满两条可读的即停，最旧的一条不读
+    ("UUURRR", 2, ["r6", "r5", "r4", "r3", "r2"], [2, 2, 1], [["r6", "r5"], ["r4", "r3"], ["r2"]]),
+    # 可读行不足 limit、分区读完：列出全部，只查一次
+    ("UR", 5, ["r2", "r1"], [5], [["r2", "r1"]]),
+])
+def test_list_runs_unreadable_rows_do_not_take_the_limit_on_both_backends(
+        request, tmp_path: Path, monkeypatch, backend, layout, limit, expected, limits, batches):
+    """名额只给可读的 run，两端同一规则（ADR 0041 决策七「本机与云端的不对称」「云端实现」）。layout 自左到右是 run_id 从新到旧，
+    U 是无法读取的行、R 是可读的行。云端取的键数至多为 limit 加上凑满之前遇到的无法读取的行数，每页按还差的条数取键。"""
+    store, readable, unreadable, calls = _two_ended_store(request, tmp_path, monkeypatch, backend)
+    kinds = {f"r{i}": kind for i, kind in enumerate(reversed(layout), start=1)}
+    for run_id, kind in kinds.items():
+        (unreadable if kind == "U" else readable)(run_id)
+    rows = store.list_runs([Status.PASSED], limit=limit)
+    assert _ids(rows) == expected
+    assert all((r.state is None) == (kinds[r.run_id] == "U") and r.header == (1, "1.5.0") for r in rows)
+    if calls is not None:
+        assert calls.limits == limits
+        assert calls.batches == batches
 
 
 def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, monkeypatch):
@@ -486,6 +549,101 @@ def test_ddb_list_runs_continues_short_pages_until_limit(monkeypatch):
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=None)
     assert _ids(rows) == ["r2", "r1", "r0"]
     assert [("Limit" in q) for q in table.queries] == [False, False]  # 不截断：分页读完
+
+
+def _unreadable_item(run_id: str) -> dict:
+    return _state_item(run_id, "passed", jobs={"s": {"status": "paused"}})
+
+
+def test_ddb_list_runs_refills_across_pages_after_unreadable_rows():
+    # 每页只回一条：r5、r4 无法读取，r3、r2、r1 可读，limit=2。逐页读回、解析，名额未满就带着续读起点取下一页
+    items = {(r, "STATE"): _unreadable_item(r) for r in ("r5", "r4")}
+    items.update({(r, "STATE"): _state_item(r, "passed") for r in ("r3", "r2", "r1")})
+    table = _FakeTable({"passed": ["r1", "r2", "r3", "r4", "r5"]}, items, page_size=1)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
+    assert _ids(rows) == ["r5", "r4", "r3", "r2"]
+    assert [q["Limit"] for q in table.queries] == [2, 2, 2, 1]  # 每次按还差的可读条数取键
+    assert [q.get("ExclusiveStartKey") for q in table.queries] == [None, {"offset": 1}, {"offset": 2}, {"offset": 3}]
+    # 读回的 run 数等于 limit 加上途中遇到的无法读取的行数，r1 不读
+    assert [sorted({k["run_id"] for k in b["Keys"]}) for b in table.batches] == [["r5"], ["r4"], ["r3"], ["r2"]]
+
+
+@pytest.mark.parametrize("empty_last_cursor", [False, True])
+def test_ddb_list_runs_stops_when_partition_ends_with_only_unreadable_rows(empty_last_cursor):
+    # 一页全是无法读取的行、没有下一页（游标省略或为空字典）：名额未满也到此为止，只查一次
+    table = _FakeTable({"passed": ["r1", "r2"]}, {(r, "STATE"): _unreadable_item(r) for r in ("r1", "r2")},
+                       empty_last_cursor=empty_last_cursor)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=3)
+    assert _ids(rows) == ["r2", "r1"] and all(r.state is None for r in rows)
+    assert len(table.queries) == 1 and len(table.batches) == 1
+
+
+def test_ddb_list_runs_refill_counts_runs_already_read_in_an_earlier_status():
+    # 索引传播期间 r2 同时在 running 与 passed 分区，读回是可读的 passed：passed 分区里它不再读回，但照样占名额，r1 不查不读
+    table = _FakeTable({"running": ["r2"], "passed": ["r1", "r2"]},
+                       {(r, "STATE"): _state_item(r, "passed") for r in ("r1", "r2")})
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.RUNNING, Status.PASSED], limit=1)
+    assert _ids(rows) == ["r2"]
+    assert [(q["ExpressionAttributeValues"][":s"], q["Limit"]) for q in table.queries] == [("running", 1), ("passed", 1)]
+    [batch] = table.batches
+    assert sorted(k["run_id"] for k in batch["Keys"]) == ["r2", "r2"]
+
+
+def test_ddb_list_runs_refill_skips_rows_whose_state_vanished_before_read_back():
+    # 每页只回一条：r4 在索引里、读回时 STATE 已不在（item 已删，索引尚未跟上），它不列出、也不占名额，按原条数续取下一页
+    table = _FakeTable({"passed": ["r1", "r2", "r3", "r4"]},
+                       {(r, "STATE"): _state_item(r, "passed") for r in ("r1", "r2", "r3")}, page_size=1)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
+    assert _ids(rows) == ["r3", "r2"]
+    assert [q["Limit"] for q in table.queries] == [2, 2, 1]
+    assert [sorted({k["run_id"] for k in b["Keys"]}) for b in table.batches] == [["r4"], ["r3"], ["r2"]]
+
+
+def test_ddb_list_runs_refill_reads_a_partition_of_only_unreadable_rows_to_the_end():
+    # 分区里全是无法读取的行、分成三页：名额一直未满，逐页续读到末页为止，三条都列出
+    table = _FakeTable({"passed": ["r1", "r2", "r3"]}, {(r, "STATE"): _unreadable_item(r) for r in ("r1", "r2", "r3")},
+                       page_size=1)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
+    assert _ids(rows) == ["r3", "r2", "r1"] and all(r.state is None for r in rows)
+    assert [q["Limit"] for q in table.queries] == [2, 2, 2]
+
+
+def test_ddb_list_runs_refill_retries_per_page_and_counts_only_the_failing_page(monkeypatch):
+    """按页补读时每页各自读回：某一页的未处理键在重试次数之内处理完，结果与不重试时相同；某一页重试耗尽时立即停下，报的未读回数
+    只含这一页的 run，此前各页已完整读回的不计，后续各页不再查。"""
+    monkeypatch.setattr(ddb_module, "time", SimpleNamespace(sleep=lambda s: None))
+    retries = ddb_module._BATCH_GET_MAX_RETRIES
+    items = {(r, "STATE"): _state_item(r, "passed") for r in ("r1", "r2", "r3")}
+    items[("r4", "STATE")] = _unreadable_item("r4")
+
+    def table_failing_on(run_id: str, failures: int) -> _FakeTable:
+        # 每页一条，按读回请求里的 run 认出是哪一页：含 run_id 的请求前 failures 次把全部键当作未处理返回
+        table = _FakeTable({"passed": ["r1", "r2", "r3", "r4"]}, items, page_size=1)
+        real = table.meta.client.batch_get_item
+        left = [failures]
+
+        def batch_get_item(*, RequestItems):
+            keys = RequestItems[_TABLE]["Keys"]
+            if left[0] > 0 and any(k["run_id"] == run_id for k in keys):
+                left[0] -= 1
+                table.batches.append(RequestItems[_TABLE])
+                return {"Responses": {_TABLE: []}, "UnprocessedKeys": {_TABLE: {"Keys": keys}}}
+            return real(RequestItems=RequestItems)
+
+        table.meta.client.batch_get_item = batch_get_item
+        return table
+
+    # 第二页（r3）的未处理键在重试次数之内处理完
+    table = table_failing_on("r3", retries)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
+    assert _ids(rows) == ["r4", "r3", "r2"] and rows[0].state is None
+    assert len(table.queries) == 3
+
+    table = table_failing_on("r3", 10**6)
+    with pytest.raises(RunListingIncomplete) as exc:
+        DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
+    assert exc.value.missing == 1
+    assert len(table.queries) == 2  # 第二页重试耗尽：第三页不再查
 
 
 @pytest.mark.parametrize("limit", [None, 5])

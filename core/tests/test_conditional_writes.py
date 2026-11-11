@@ -5,7 +5,7 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 地基实测见 ADR 0034）。
 
 覆盖三机制的正确性核心：
-- 机制四 CAS：pending→running 只成功一次，并发抢占只一个赢。
+- 机制四 CAS：pending→running 只成功一次，并发认领只一个成功。
 - 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
@@ -59,7 +59,7 @@ def test_claim_pending_succeeds_once(run_store):
     assert run_store.try_claim_job("run-1", "a") is True
     state = run_store.load_run_state("run-1")
     assert state.jobs["a"].status == Status.RUNNING
-    # 第二次抢同一个 → 失败（严格并发闸：不会重复 RunTask）
+    # 第二次认领同一个 → 失败（严格并发闸：不会重复 RunTask）
     assert run_store.try_claim_job("run-1", "a") is False
 
 
@@ -73,7 +73,7 @@ def test_claim_nonexistent_job_fails(run_store):
 
 
 def test_claim_two_different_jobs_both_succeed(run_store):
-    """抢两个不同 pending job 各自成功（互不干扰）；run 级已是 running 时再认领另一个 pending job 照样成功。"""
+    """认领两个不同 pending job 各自成功（互不干扰）；run 级已是 running 时再认领另一个 pending job 照样成功。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_claim_job("run-1", "a") is True
@@ -278,7 +278,7 @@ def test_same_hwm_terminal_job_not_regressed(run_store):
 
 
 def test_claimed_running_not_regressed_to_pending_same_hwm(run_store):
-    """机制四护栏：已 CAS claim 的 RUNNING 不被同 HWM 的 pending 视图投影刷回（防 double-launch 窗口重开）。"""
+    """机制四护栏：已认领的 RUNNING 不被同 HWM 的 pending 视图投影刷回（防 double-launch 窗口重开）。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     assert run_store.try_claim_job("run-1", "a") is True  # a: pending→running
@@ -582,7 +582,7 @@ def test_ddb_rejected_scalar_write_issues_no_job_writes(aws, monkeypatch):
 
 
 # ---------- 真 DDB 复验（integration 标记，默认 deselect；需真表 + 真凭证）----------
-# moto 的条件表达式是模拟实现——CAS 抢占的排他性与 job 级单调条件写是**机制三/四的承重面**（ADR 0034），
+# moto 的条件表达式是模拟实现——认领的排他性与 job 级单调条件写是**机制三/四的承重面**（ADR 0034），
 # 绿≠对：这两条在真 DDB 上复验同一语义，只挑「moto 失真就会静默放过」的那两个断言，不复刻全部对拍。
 # 运行：`uv run pytest core/tests -m integration`（真表/真桶名经 AWS_DDB_TABLE / AWS_S3_BUCKET 传，见 tests/README.md）。
 
@@ -603,7 +603,7 @@ def _real_run_id(real_aws, tag: str) -> str:
 
 @pytest.mark.integration
 def test_claim_is_exclusive_on_real_ddb(real_aws):
-    """真 DDB 的机制四 CAS：两个推进器抢同一个 pending job，**恰一个**成功（另一个见条件失败）。
+    """真 DDB 的机制四 CAS：两个推进器认领同一个 pending job，**恰一个**成功（另一个见条件失败）。
 
     两个 store 实例对应两个推进器各持自己的表句柄（对位 per-run 进程与 `status --wait` 接力者同时在推同一 run）。
     赢家是谁不重要、「只有一个」才是承重的：若真 DDB 的条件写放过第二次，就会重复 RunTask、同一 scope 执行两遍。

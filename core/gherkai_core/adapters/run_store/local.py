@@ -264,7 +264,7 @@ class LocalRunStore:
                 return None  # run 已收尾：不再接受新认领
             js = state.jobs.get(scope_id)
             if js is None or js.status != Status.PENDING:
-                return None  # 不存在 / 已非 pending（别人抢了或已运行）→ 不改
+                return None  # 不存在 / 已非 pending（已被别人认领或已运行）→ 不改
             jobs = dict(state.jobs)
             jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
                                       claimed_at=claimed_at)

@@ -68,7 +68,7 @@ def test_first_tick_starts_up_to_concurrency(tmp_path):
 
 
 def test_launch_receives_the_claim_timestamp(tmp_path):
-    """launch 收到的 claimed_at 就是 CAS 抢占落库的那个时间戳（ADR 0034「job timeout」节：预算从 claim 起算，
+    """launch 收到的 claimed_at 就是认领落库的那个时间戳（ADR 0034「job timeout」节：预算从认领起算，
     云端的到点时刻按它取 deadline）——不是 launch 时另取的时刻。"""
     meta, log, store = _setup(tmp_path, "a", "b")
     launcher = FakeLauncher()

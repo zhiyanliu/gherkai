@@ -291,7 +291,7 @@ class EventRecord:
 def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None = None) -> RunState:
     """从某 run 的**全量 events records** 纯推演出 RunState（ADR 0034 reconciler 核心，无 I/O）。
 
-    baseline（可选，当前 RunStore 的 state）：job 态**单调不倒退**的基线。已被 CAS claim 成 RUNNING、但
+    baseline（可选，当前 RunStore 的 state）：job 态**单调不倒退**的基线。已被认领成 RUNNING、但
     worker 还没吐 scope_started 的 job，events 里看不到它、会被算成 PENDING——若无基线，投影写会把它降回
     PENDING、reconciler 下轮又重复 claim/launch（真 bug）。故有基线时：job 的投影态与基线态取**较推进者**
     （pending<running<终态，单调）——events 只推进、claim 的 running 不被降回。无基线（首 tick/纯投影）时全 PENDING 起。

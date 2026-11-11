@@ -2,7 +2,7 @@
 
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
 它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读全量重放 →
-project → 条件写 → plan_next → CAS 抢占起下一个 job / finalize）。tick 幂等 + CAS/HWM 条件写兜底——Stream 按
+project → 条件写 → plan_next → 认领并起下一个 job / finalize）。tick 幂等 + CAS/HWM 条件写兜底——Stream 按
 分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（机制三/四，真 DDB 已验）。
 
 **cloud 组合根（Lambda 装配）**：cold-start 读 env 造 boto3 client + 三 store adapter + FargateEngine + CloudLauncher
@@ -393,7 +393,7 @@ def _build(run_id: str):
     # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——云端后端这个 store 恒是 DDB 实现。
     if not run_store.is_detached(run_id):
         # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
-        # 推进器碰它就是双开推进器（抢 claim/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
+        # 推进器碰它就是双开推进器（认领/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None 表示全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。

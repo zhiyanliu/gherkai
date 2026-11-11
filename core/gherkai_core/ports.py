@@ -11,7 +11,7 @@
 local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 
 **另两个 port 不在本模块**：`EventLog` 与 `Launcher` 定义在 `reconcile.py`、与消费它们的 reconciler 同处——
-两个 port 的推进语义（reconciler 读全量 events 重放、CAS 抢占成功后起一个 job）只服务无状态推进路径，与本模块那批
+两个 port 的推进语义（reconciler 读全量 events 重放、认领成功后起一个 job）只服务无状态推进路径，与本模块那批
 「同步 `run` 也用」的口生命周期不同；`EventLog` 的实装另被同步 `run` 用来落事件流与退出记录（组合根给引擎包一层
 `EventRecordingEngine`，ADR 0042 决策七）、被 `explain` 用来读（本机 `SqliteEventLog`、云端 `DdbEventLog`）
 （ADR 0016「`EventLog` / `Launcher` 两个 port 定义在 `reconcile.py`」条；
@@ -139,11 +139,13 @@ class RunStore(Protocol):
         """列出经这些状态找到的 run，每项带读回的**当前**运行态、detached 标记与提交记录头部，按 run_id 降序、run_id 不重复。
 
         - **找**：云端按 `statuses` 的给定顺序逐个查状态分区（调用方据此安排先查 pending 再查 running）；本机没有分区，逐个 run
-          目录读回后按读回的状态归入。`limit` 为正整数时每个状态至多取 `limit` 条（按 run_id 降序的前 `limit` 条），为 None 时不截断。
+          目录读回后按读回的状态归入。`limit` 为正整数时每个状态取按 run_id 降序的前 `limit` 条可读的 run（云端在分区里补读到
+          凑满或分区读完为止），为 None 时不截断。
         - **不按状态复筛**：返回的是读回时的状态，可能已不在 `statuses` 里（找到之后、读回之前换了状态，或云端索引尚未跟上），
           按所请求状态过滤是调用方的事。复筛会让两次调用之间换状态的 run 在两份结果里都被筛掉。
-        - **无法读取的行**（`RunListing.state` 为 None）没有可用的状态，不参与归入与截取，找到即列出：云端是被查分区里找到、
-          读回解析不了的 run；本机是读回解析不了的全部 run 目录（状态值本版本不认识的 run 本机看得到、云端看不到）。
+        - **无法读取的行**（`RunListing.state` 为 None）没有可用的状态，不参与归入与截取、不占 `limit` 的名额，找到即列出：
+          云端是被查分区里凑满名额之前遇到的、读回解析不了的 run；本机是读回解析不了的全部 run 目录（状态值本版本不认识的 run
+          本机看得到、云端看不到）。
         - **一致性**：云端行内容强一致（读回走强一致读），成员资格最终一致（索引只有最终一致读）：刚换状态的 run 可能短暂仍在旧
           分区、刚建的 run 可能短暂不在任何分区；读回时 run 已不在（运行态缺失）的行跳过。
         - **访问失败照常抛出**（本机目录不可读、云端权限 / 网络 / 索引缺失、批量读回重试耗尽），不给出缺行的清单。本机报告落点
@@ -161,9 +163,9 @@ class RunStore(Protocol):
     # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
     # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
-        """CAS 抢占：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
+        """认领：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
 
-        多个 reconciler 实例并发抢同一 pending job，只有一个 CAS 成功（返回 True）去真 RunTask/spawn，
+        多个 reconciler 实例并发认领同一 pending job，只有一个 CAS 成功（返回 True）去真 RunTask/spawn，
         其余返回 False 跳过——严格 max_concurrency 的并发闸（不靠进程内线程池）。job 不存在/已非 pending/run 已收尾
         （run 级为终态）→ False，三种原因不区分。
         同一条条件写把 run 级置 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功后 run 级即为 RUNNING；

@@ -62,11 +62,13 @@ COLLOQUIAL = re.compile(r"帽子不是人|烧钱|锁步|lockstep|烙进|烙好|�
 # 退役后端简称的「… 档」形态（`cloud 档` / `本机档` …）不在此重列：已由 `COLLOQUIAL` 的量词「档」通则兜住。
 # 一次 run 的「批」义旧名是「本批」「这一批」「整批」三项。同词条 `_Avoid_` 里的「批次」与裸「一批」不进表：
 # 前者在事件流语境下指 DynamoDB Stream 一次投递的事件批、后者有「一组用例 / 一组文件」的正当用法，正则分不出两义。
+# 「认领」的旧名只收带 CAS 的三种写法。裸「抢占」不进表也不进 `_Avoid_`：它另有「打断正在执行的代码」的正当用法，正则分不出两义。
 RETIRED_TERMS_WORDS = (
     "跑法", "抢传", "确定性锚点", "大脑", "穿刺", "骨架验证用例", "版本单旋钮", "无状态跑批", "在跑 run",
     "逃生舱", "供给包", "提交方", "技能包", "建造者 AI", "AI coding agent", "维护者", "部署者",
     "本批", "这一批", "整批",
     "深层链接", "深链", "隧道预热", "设备会话", "真机会话",
+    "CAS 抢占", "CAS claim", "CAS 认领",
 )
 RETIRED_TERMS = re.compile("|".join(re.escape(w) for w in RETIRED_TERMS_WORDS))
 # 注释与 docstring 用的退役表去掉「批」义三词：Lambda 与 Stream 侧的注释里「本批 / 整批」指 DynamoDB Stream 一次投递的

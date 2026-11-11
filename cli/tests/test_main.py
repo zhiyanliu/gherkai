@@ -1469,8 +1469,9 @@ def test_differently_written_same_file_is_deduped_with_a_hint(tmp_path, monkeypa
 
 
 def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
-    """run 级仍 pending 但已有 job 被 claim（running）→ 推进已开始，不提示「可能未启动」。这是 detached 的正常窗口：
-    claim 只动 job、run 级要等下一次投影写；Fargate 拉起期间恒如此（实际运行 submit 后连查三次撞见误报）。"""
+    """run 级仍 pending 但已有 job 为 running 时，推进已开始，不提示「可能未启动」。现行写者写不出这个组合（认领的同一次写
+    即把 run 级置为 running，ADR 0034 机制三「run 级状态只进不退」条）；这条用例守的是提示判据的后半条，它为不采用该规则的
+    写者留下的记录而保留。"""
     from gherkai_core.model import JobState, RunState
     state = RunState(run_id="r", status=Status.PENDING,
                      jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=0)

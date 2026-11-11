@@ -192,7 +192,7 @@ class FargateEngine:
 
         本方法是 run_scope 的前半（PutObject job + RunTask），**不返回事件迭代器、不轮询**——cloud 无状态路径下 worker
         自 PutItem events 到 DDB、退出观察者 Lambda 补 task_exited、reconciler Lambda 从表重放，没有「调用方持续
-        迭代」（对照 run_scope 的 pull 式，同步 run 路径用）。CloudLauncher 在 reconciler CAS 抢占成功后调它。
+        迭代」（对照 run_scope 的 pull 式，同步 run 路径用）。CloudLauncher 在 reconciler 认领成功后调它。
         run_scope 现 delegate 到本方法拿 task_arn，再加事件迭代器（同步路径），保两路径起 task 逻辑单一真源。
         """
         return self._put_job_and_run_task(job)

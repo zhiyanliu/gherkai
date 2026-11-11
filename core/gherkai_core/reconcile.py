@@ -1,7 +1,7 @@
 """reconciler（ADR 0034）：无状态批量运行的推进编排——被事件唤醒、幂等、并发安全。
 
 `tick(run_id, meta)` 一步推进：读库中运行态（已收尾即停止推演）→ 读 EventLog 全量 records → project() 推 RunState →
-条件写落库 → plan_next() 决定动作 → 对每个 start 动作 CAS 抢占成功即经注入的 Launcher 起 job；全终态则 try_finalize。
+条件写落库 → plan_next() 决定动作 → 对每个 start 动作认领成功即经注入的 Launcher 起 job；全终态则 try_finalize。
 结果是 `TickOutcome` 三种之一，宿主据它决定继续推进、生成报告后结束，还是直接结束（ADR 0034 机制三
 「run 级状态只进不退」条④）。
 
@@ -65,9 +65,9 @@ class Launcher(Protocol):
 
     本机后端下起 subprocess worker（事件旁路落 SQLite EventLog + proc.wait 写 task_exited）；
     云端后端下调 ECS RunTask（worker 自 PutItem events + 退出观察者 Lambda 写 task_exited）。
-    reconciler 对「怎么起」无知——只在 CAS 抢占成功后调 launch(job, claimed_at=…)。
+    reconciler 对「怎么起」无知——只在认领成功后调 launch(job, claimed_at=…)。
 
-    claimed_at：本次 CAS 抢占落库的同一个时间戳（`try_claim_job` 写进 `JobState.claimed_at` 的那个值）。job 墙钟预算
+    claimed_at：本次认领落库的同一个时间戳（`try_claim_job` 写进 `JobState.claimed_at` 的那个值）。job 墙钟预算
     从 claim 起算（ADR 0034「job timeout」节「产品语义」段），到点时刻要按它算的实装（云端的一次性 schedule）据此取
     deadline，不另取 launch 时刻；在本进程内计时的实装可以不用它。
     """
@@ -114,7 +114,7 @@ def tick(
     2. 读 EventLog 全量 records → project() 纯推演完整 RunState（含 HWM）。
     3. project_state() HWM 条件写落 RunState（stale 被挡、无害——下轮重读重推，机制三）。
     4. plan_next() → 动作：
-       - start：try_claim_job() CAS 抢占（机制四），成功的那个（本实例）才 launcher.launch(job, claimed_at=now_iso) 真起
+       - start：try_claim_job() 认领（机制四），成功的那个（本实例）才 launcher.launch(job, claimed_at=now_iso) 真起
          （与 claim 落库同一个时间戳，超时到点按它起算）。
        - finalize：先从**同一份** records 快照聚合各 job 判定真值落 result_store（注入时；commit-point 写序，ADR 0030
          决定三 detached 同守），再 try_finalize() 状态机单调条件写（机制三）commit，返回 `FINALIZED`；RunReport 由宿主
@@ -124,7 +124,7 @@ def tick(
     """
     # 基线取当前 RunStore 态，先于读事件：已收尾时省掉全量事件读，判停与本轮推演用的是同一份 baseline。
     # 读序不影响正确性：插在两次读之间的认领只让本轮多提议一次被认领条件挡下的 start，插在两次读之间的事件只让
-    # 本轮推演比 baseline 更新，按生命周期序合并照常。基线让 project 的 job 态单调不倒退（已 CAS claim 成 running
+    # 本轮推演比 baseline 更新，按生命周期序合并照常。基线让 project 的 job 态单调不倒退（已认领成 running
     # 但 worker 还没吐 scope_started 的 job，不被降回 pending → 不重复 launch，机制四）。首 tick 时 STATE 已由 create_run 建。
     baseline = run_store.load_run_state(run_id)
     if baseline is not None and baseline.status in TERMINAL_STATUSES:
@@ -139,11 +139,11 @@ def tick(
 
     for act in actions:
         if act.kind == "start" and act.scope_id is not None:
-            # 先确认 job 存在，再做 CAS 抢占：防御跳过时不会留下一个已抢占成 running 却无人启动的 job。
+            # 先确认 job 存在，再认领：防御跳过时不会留下一个已认领成 running 却无人启动的 job。
             job = job_by_scope.get(act.scope_id)
             if job is None:
                 continue  # plan_next 从 state.jobs 提议、键集是 meta.jobs 的子集，不该发生；防御跳过
-            # CAS 抢占：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
+            # 认领：多实例并发提议同一 pending，只有一个成功（机制四严格并发闸）。
             if run_store.try_claim_job(run_id, act.scope_id, claimed_at=now_iso):
                 try:
                     launcher.launch(job, claimed_at=now_iso)
