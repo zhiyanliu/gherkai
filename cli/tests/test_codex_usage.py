@@ -233,7 +233,7 @@ def test_compaction_is_marked_on_the_round_and_the_root_reading(tmp_path, capsys
     assert report["rounds"][1]["threads"][0]["compactions"] == 1
     assert [t["compactions"] for t in report["threads"]] == [2, 1]
     caveats = report["root_context"]["caveats"]
-    assert any("之后发生了压缩，读数是压缩之前的" in c and "比它小" in c for c in caveats)
+    assert any("之后发生了压缩，读数是压缩之前的" in c for c in caveats)
     assert any("出现过 2 次压缩" in c for c in caveats)
 
     assert codex_usage.main([ROOT, "--sessions-dir", str(tmp_path)]) == 0
@@ -254,11 +254,12 @@ def test_stale_reading_is_marked(tmp_path, capsys, tail, expected):
     assert code == 0
     caveats = reports[0]["root_context"]["caveats"]
     assert any(expected in c for c in caveats), caveats
+    assert not any("更大" in c or "更小" in c or "比它" in c for c in caveats), "只陈述读数缺了什么，不断言方向"
 
 
 def test_history_and_compaction_after_last_call_make_one_consistent_note(tmp_path, capsys):
-    """最近一次调用之后既写入了历史、又发生了压缩：两者对下一次上下文的影响方向相反，读数说明合成一条，只说读数不能用来
-    确定下一次调用的实际上下文，不同时断言「更大」与「更小」，也不把压缩之前的读数说成压缩之后的。"""
+    """最近一次调用之后既写入了历史、又发生了压缩：读数说明合成一条，只说读数是压缩之前的、也不含这些历史，不断言下一次
+    调用的上下文更大或更小，也不把压缩之前的读数说成压缩之后的。"""
     write(tmp_path, f"rollout-2026-01-01T00-00-00-{ROOT}.jsonl", meta(ROOT, ROOT),
           started(TURN1), call(TURN1, 900, 0, 10), tool_output(), COMPACTED, complete(TURN1))
     code, reports, _ = run(capsys, ROOT, "--sessions-dir", str(tmp_path))
@@ -268,7 +269,7 @@ def test_history_and_compaction_after_last_call_make_one_consistent_note(tmp_pat
     caveats = context["caveats"]
     assert sum("最近一次调用之后" in c for c in caveats) == 1
     assert any("又写入了 1 条历史" in c and "并发生了压缩" in c and "无法据此确定" in c for c in caveats)
-    assert not any("比它大" in c or "比它小" in c or "压缩后的上下文" in c for c in caveats)
+    assert not any("更大" in c or "更小" in c or "比它" in c or "压缩后的上下文" in c for c in caveats)
     assert any("出现过 1 次压缩" in c for c in caveats)
 
 
