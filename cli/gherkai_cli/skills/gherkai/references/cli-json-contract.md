@@ -126,7 +126,7 @@
 | `cli_version` | string \| null | 恒有：写出这个 run 的 gherkai 版本，读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null。不为 null 且与顶层 `cli_version` 相同，即由当前版本写出 |
 | `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
 
-清单不带产物落点、任务定义的内容与事件水位：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚换状态或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`，云端后端看不到。
+清单不带产物落点、任务定义的内容与事件水位：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚结束或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`；云端后端只在这个状态值属于未结束的 run 时列为 `unreadable`（前提是写出它的版本沿用同一套索引规则），属于已结束的 run 时看不到。
 
 ## `gherkai explain <run_id> [<scope_id>] --json`
 

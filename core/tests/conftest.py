@@ -54,7 +54,7 @@ def aws(_fake_aws_creds):
     """在 moto mock 下建好 DDB 表 + S3 桶，产出 (boto3 resource/client, 名字) 供云端 adapter 测试注入。
 
     表 schema 按 ADR 0030 决定六：分区键 run_id(S,HASH) + 排序键 item_type(S,RANGE)，GSI 与 `deploy_aws` 的 stack 相同
-    （两个以 `status` 为键的索引与状态分组索引），写入的 STATE item 随之进入各索引，测试可按索引查询核对成员资格。
+    （以 `status` 为键、`run_id` 排序的 `status-run_id-index` 与状态分组索引），写入的 STATE item 随之进入各索引，测试可按索引查询核对成员资格。
     云端 adapter 假定表/桶已存在（建表建桶归 IaC/测试 fixture，非 adapter）。
     """
     import boto3
@@ -74,9 +74,6 @@ def aws(_fake_aws_creds):
                 {"AttributeName": "status_group", "AttributeType": "S"},
             ],
             GlobalSecondaryIndexes=[
-                {"IndexName": "status-index",
-                 "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
-                 "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]}},
                 {"IndexName": "status-run_id-index",
                  "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"},
                                {"AttributeName": "run_id", "KeyType": "RANGE"}],

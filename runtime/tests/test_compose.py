@@ -1347,19 +1347,24 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
 # ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 用 moto 模拟响应 ----
 
 def _moto_runs_table(*, with_list_index: bool):
-    """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的 GSI。"""
+    """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的状态分组索引。
+    另带一个以 status 为分区键的索引，确认判定只看状态分组索引、不被表上别的索引顶替。"""
     import boto3
-    gsis = [{"IndexName": names.RUNS_STATUS_GSI, "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+    gsis = [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI,
+             "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}, {"AttributeName": "run_id", "KeyType": "RANGE"}],
              "Projection": {"ProjectionType": "KEYS_ONLY"}}]
     if with_list_index:
-        gsis.append({"IndexName": names.RUNS_STATUS_RUN_ID_GSI,
-                     "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}, {"AttributeName": "run_id", "KeyType": "RANGE"}],
-                     "Projection": {"ProjectionType": "KEYS_ONLY"}})
+        gsis.append({"IndexName": names.RUNS_STATUS_GROUP_GSI,
+                     "KeySchema": [{"AttributeName": names.STATE_STATUS_GROUP_ATTR, "KeyType": "HASH"},
+                                   {"AttributeName": "run_id", "KeyType": "RANGE"}],
+                     "Projection": {"ProjectionType": "INCLUDE",
+                                    "NonKeyAttributes": [names.STATE_WORKER_TASK_DEF_ARNS_ATTR]}})
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     return ddb.create_table(
         TableName="vfy-runs", BillingMode="PAY_PER_REQUEST",
         KeySchema=[{"AttributeName": "run_id", "KeyType": "HASH"}, {"AttributeName": "item_type", "KeyType": "RANGE"}],
-        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in ("run_id", "item_type", "status")],
+        AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in (
+            "run_id", "item_type", "status", *((names.STATE_STATUS_GROUP_ATTR,) if with_list_index else ()))],
         GlobalSecondaryIndexes=gsis)
 
 
@@ -1375,29 +1380,41 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
     with mock_aws():
         table = _moto_runs_table(with_list_index=with_list_index)
         if not with_list_index:
-            with pytest.raises(compose.RunListIndexUnavailable, match=f"vfy-runs.*{names.RUNS_STATUS_RUN_ID_GSI}"):
+            with pytest.raises(compose.RunListIndexUnavailable, match=f"vfy-runs.*{names.RUNS_STATUS_GROUP_GSI}"):
                 compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
             return
         from gherkai_core.model import Status
 
         store = compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
         assert store.list_runs([Status.PENDING, Status.RUNNING], limit=None) == []  # 注入了索引名：能对它 Query
+        # 注入的是状态分组索引：建一个非终态 run，经 live 分组找得到
+        from gherkai_core.model import RunMeta, RunState
+
+        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=()),
+                         RunState(run_id="r1", status=Status.RUNNING, jobs={}))
+        assert [r.run_id for r in store.list_runs([Status.RUNNING], limit=None)] == ["r1"]
 
 
 @pytest.mark.parametrize("status, ok", [("ACTIVE", True), ("UPDATING", True), ("CREATING", False), ("DELETING", False),
-                                        ("SOMETHING_NEW", False)])
+                                        ("SOMETHING_NEW", False), (None, False)])
 def test_check_run_list_index_lets_active_and_updating_through(status, ok):
-    """判据取自 DescribeTable 的 IndexStatus：ACTIVE 与 UPDATING 放行，回填中、删除中与不认识的状态都拦下。"""
+    """判据取自 DescribeTable 里状态分组索引的 IndexStatus：ACTIVE 与 UPDATING 放行，回填中、删除中、不认识的状态与缺失都拦下
+    （None 表示表上没有它）。表上以 status 为分区键的索引状态与它相反，判定不受影响。"""
     from types import SimpleNamespace
 
+    other = "CREATING" if ok else "ACTIVE"
+
     def describe_table(*, TableName):
-        return {"Table": {"GlobalSecondaryIndexes": [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": status}]}}
+        gsis = [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": other}]
+        if status is not None:
+            gsis.append({"IndexName": names.RUNS_STATUS_GROUP_GSI, "IndexStatus": status})
+        return {"Table": {"GlobalSecondaryIndexes": gsis}}
 
     table = SimpleNamespace(name="t", meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
     if ok:
         compose.check_run_list_index(table)
     else:
-        with pytest.raises(compose.RunListIndexUnavailable):
+        with pytest.raises(compose.RunListIndexUnavailable, match=names.RUNS_STATUS_GROUP_GSI):
             compose.check_run_list_index(table)
 
 

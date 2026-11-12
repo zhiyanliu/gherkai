@@ -21,13 +21,13 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 | AWS 凭证与 region | 凭证走 `--profile` / `AWS_PROFILE`；region 取 `--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > profile 配置 |
 | 每个 account + region 初始化一次 | `gherkai deploy --bootstrap`（账户级动作，不需要 `--vpc`）。未初始化就部署会报错并指回这个选项 |
 
-部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、列出、查看、注册、注销与删除任务定义 revision 并打上与去掉标签、读取运行记录表的状态并查询它的 `status-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
+部署机的凭证要能做云端写操作，范围比只提交 run 的成员大得多：CloudFormation 建改删并读取本 stack；建改删 DynamoDB 表、S3 桶、ECS 集群与任务定义、ECR 仓库、Lambda 与其事件源、EventBridge 规则与调度、VPC / 子网 / 安全组、CloudWatch 日志组；IAM 建角色与策略并 `PassRole`；SSM 读写 `/<prefix>backend/*`；ECR 登录与推送、列出、查看、注册、注销与删除任务定义 revision 并打上与去掉标签、读取运行记录表的状态并查询它的 `status_group-run_id-index` 索引；Device Farm 在 us-west-2 的 `ListProjects`、`GetProject` 与 `CreateProject`（找到已有的设备项目或新建一个）；`sts:GetCallerIdentity`（`--bootstrap` 取账户号）。缺 Device Farm 这三项权限时部署照常完成并给出警告（`--diff` 同样只警告）：后端仍记录着项目 ARN 且未确认项目已被删除时沿用该记录；没有记录，或已确认项目被删除且无法找回或新建时，这套后端不启用设备支持，带设备目标的云端 run 在提交前以退出码 2 结束。用 `gherkai doctor` 可先检查 Node、cdk 与容器引擎三项。
 
 ## 后端包含什么
 
 一套 CloudFormation stack，名字随 `--prefix` 走（前缀 `gherkai-` 对应 stack `BackendStack-gherkai`），因此同一账户可按前缀并存多套环境，例如 `prod-` 与 `stage-`：
 
-- **DynamoDB**：`<prefix>runs`（run 状态，带一个供 `gherkai list-runs` 按状态列出 run 的索引 `status-run_id-index`）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
+- **DynamoDB**：`<prefix>runs`（run 状态，带一个索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
@@ -150,12 +150,6 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 两段窗口里被拒的命令都以退出码 2 结束。窗口一在第 2 步执行完后即恢复，不想动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先把后端升上来；窗口二里可让提交者临时用 `--worker-variant base`。顺序不能倒过来：后端由 CLI 的部署包部署，版本戳的值就是发起该次部署的 CLI 的版本。第 3 步也不能提前到第 2 步之前：镜像标签含 CLI 版本，提前推等于推到一个后端还不识别的版本标签下，`push-worker` 与 `list-workers` 会拒绝并以退出码 2 结束。
 
-**升级后清单索引要先建好**：已部署的后端升级到带 `list-runs` 清单索引的版本（1.5 起）时，第 2 步的 `gherkai deploy` 给运行记录表 `<prefix>runs` 加上索引 `status-run_id-index`，AWS 随后在后台为表里已有的 run 补齐索引。`gherkai deploy` 不等补齐就结束，所以部署完成后的一段时间里 `gherkai list-runs --backend cloud` 以退出码 2 结束并提示索引还在建立，稍后重试即可；`submit`、`status`、`explain` 等命令不用这个索引，不受影响。加索引的这次升级还要承担 [AWS::DynamoDB::Table](https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/aws-resource-dynamodb-table.html) 文档写明的三条限制：
-
-- 索引补齐之前这张表不能再被更新：这段时间里再次执行 `gherkai deploy`，只要这次部署要改运行记录表就会失败，等补齐后再部署。补齐与否可用 `aws dynamodb describe-table --table-name <prefix>runs` 查看这个索引的 `IndexStatus`，变为 `ACTIVE` 即已补齐。
-- 建索引期间 stack 更新失败而回滚时，已经开始建立的索引不会随回滚删除，须先手动删掉再重新部署：`aws dynamodb update-table --table-name <prefix>runs --global-secondary-index-updates '[{"Delete":{"IndexName":"status-run_id-index"}}]'`。索引刚开始建立、还在分配资源的一小段时间里删不了，稍后重试。
-- AWS 建议加索引的那次更新不改其它资源，而 `gherkai deploy` 的升级是整个 stack 一次更新，无法把加索引单独拆成一次；所以这次升级前更要先用 `--diff` 核对变更集。
-
 ## 团队成员需要的最小云端权限
 
 同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
@@ -167,7 +161,7 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时需要 events 表（`<prefix>events`）的 `dynamodb:Query`（`run --backend cloud` 这一级已含，`submit` + `status` 这一级要另加）；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
 
-两级都用 `gherkai list-runs --backend cloud` 列出 run 时，另需运行记录表索引上的 `dynamodb:Query`，资源要写成索引 ARN `arn:aws:dynamodb:<区域>:<账号>:table/<prefix>runs/index/status-run_id-index`（表 ARN 上的 `Query` 授权覆盖不到索引），以及表 ARN 上的 `dynamodb:BatchGetItem`（按 run_id 读回运行状态）；它读表结构用的 `dynamodb:DescribeTable` 与读版本戳用的参数读权限已含在上面两级里。`list-runs` 只读、不需要任何写权限，不用这个命令的成员可以不给这两项。
+两级都用 `gherkai list-runs --backend cloud` 列出 run 时，另需运行记录表索引上的 `dynamodb:Query`，资源要写成索引 ARN `arn:aws:dynamodb:<区域>:<账号>:table/<prefix>runs/index/status_group-run_id-index`（表 ARN 上的 `Query` 授权覆盖不到索引），以及表 ARN 上的 `dynamodb:BatchGetItem`（按 run_id 读回运行状态）；它读表结构用的 `dynamodb:DescribeTable` 与读版本戳用的参数读权限已含在上面两级里。`list-runs` 只读、不需要任何写权限，不用这个命令的成员可以不给这两项。
 
 无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
 

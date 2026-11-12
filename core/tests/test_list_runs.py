@@ -1,8 +1,9 @@
 """RunStore.list_runs 的单测（ADR 0041 决策七「core 端口」「本机实现」「云端实现」）。
 
-本机侧用真目录造 run；云端侧两套：moto 建带列举 GSI 的 runs 表（分区键 status、排序键 run_id、KEYS_ONLY），测与本机同一批
-行为与读回形状，无法读取的行不占名额另有两端参数化对拍；moto 造不出的情形（Query 一页不足 Limit 却还有下一页、按页补读的
-逐页续读、索引尚未跟上导致的重复键与 STATE 已不在、读回的状态已不在所请求的分区、未处理键）用只实现列举所需三样的假表测。
+本机侧用真目录造 run；云端侧两套：moto 建带状态分组索引的 runs 表（分区键 status_group、排序键 run_id、投影 INCLUDE
+worker_task_def_arns，与部署侧同一形态），测与本机同一批行为与读回形状，无法读取的行不占名额、非终态按读回的状态归入另有两端
+参数化对拍；moto 造不出的情形（Query 一页不足 Limit 却还有下一页、按页补读的逐页续读、索引尚未跟上导致的重复键与 STATE 已不在、
+读回的状态已不在所请求的状态、未处理键）用只实现列举所需三样的假表测。
 """
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
 from tests.test_stores import _initial_state
 
-_LIST_INDEX = "status-run_id-index"
+_LIST_INDEX = "status_group-run_id-index"
 _TABLE = "gherkai-runs-listing"
 
 
@@ -216,7 +217,7 @@ def test_local_list_runs_keeps_rows_with_null_message_and_empty_jobs(tmp_path: P
 
 @pytest.fixture
 def listing_table(aws):
-    """moto 下带列举 GSI 的 runs 表（索引名取构造参数同一个常量）。"""
+    """moto 下带状态分组索引的 runs 表（索引名取构造参数同一个常量）。"""
     return aws["ddb"].create_table(
         TableName=_TABLE,
         KeySchema=[
@@ -226,15 +227,15 @@ def listing_table(aws):
         AttributeDefinitions=[
             {"AttributeName": "run_id", "AttributeType": "S"},
             {"AttributeName": "item_type", "AttributeType": "S"},
-            {"AttributeName": "status", "AttributeType": "S"},
+            {"AttributeName": "status_group", "AttributeType": "S"},
         ],
         GlobalSecondaryIndexes=[{
             "IndexName": _LIST_INDEX,
             "KeySchema": [
-                {"AttributeName": "status", "KeyType": "HASH"},
+                {"AttributeName": "status_group", "KeyType": "HASH"},
                 {"AttributeName": "run_id", "KeyType": "RANGE"},
             ],
-            "Projection": {"ProjectionType": "KEYS_ONLY"},
+            "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
         }],
         BillingMode="PAY_PER_REQUEST",
     )
@@ -288,13 +289,12 @@ def test_ddb_list_runs_projection_keeps_every_run_state_field(listing_table):
 
 def test_ddb_list_runs_marks_unparseable_state_and_header(cloud_runs, listing_table):
     # STATE 的 job 状态值本版本不认识；META 的结构版本不是整数
-    listing_table.put_item(Item={"run_id": "run-07", "item_type": "STATE", "status": "passed",
-                                 "jobs": {"s": {"status": "paused"}}})
+    listing_table.put_item(Item=_state_item("run-07", "passed", jobs={"s": {"status": "paused"}}))
     listing_table.put_item(Item={"run_id": "run-07", "item_type": "META", "schema_version": 3, "cli_version": "9.0.0",
                                  "meta_json": "{}"})
-    listing_table.put_item(Item={"run_id": "run-08", "item_type": "STATE", "status": "passed", "jobs": {}})
+    listing_table.put_item(Item=_state_item("run-08", "passed"))
     listing_table.put_item(Item={"run_id": "run-08", "item_type": "META", "schema_version": "x", "meta_json": "{}"})
-    listing_table.put_item(Item={"run_id": "run-09", "item_type": "STATE", "status": "passed", "jobs": {}})  # 没有 META
+    listing_table.put_item(Item=_state_item("run-09", "passed"))  # 没有 META
 
     rows = {r.run_id: r for r in cloud_runs.list_runs([Status.PASSED], limit=None)}
     assert rows["run-07"].state is None and rows["run-07"].header == (3, "9.0.0")
@@ -352,7 +352,7 @@ def test_explicit_null_schema_version_is_contract_violation_but_missing_key_read
 
 def _two_ended_store(request, tmp_path: Path, monkeypatch, backend: str):
     """两端同一组造数手段：返回 (store, 造一个可读的 passed run, 造一个无法读取的 passed run, 云端的调用记录或 None)。
-    无法读取的 run 指 run 级状态认识（仍在 passed 分区里）而 job 状态值本版本不认识；提交记录头部照常写下。云端的调用记录收集每次
+    无法读取的 run 指 run 级状态认识（仍在 passed 分组里）而 job 状态值本版本不认识；提交记录头部照常写下。云端的调用记录收集每次
     Query 的 Limit 与每次 BatchGetItem 读回的 run_id。"""
     bad_jobs = [{"scope_id": "s", "status": "paused"}]
     if backend == "local":
@@ -394,7 +394,7 @@ def _two_ended_store(request, tmp_path: Path, monkeypatch, backend: str):
     ("URR", 1, ["r3", "r2"], [1, 1], [["r3"], ["r2"]]),
     # 连续多条无法读取之后才有可读行：按还差的条数续取，凑满两条可读的即停，最旧的一条不读
     ("UUURRR", 2, ["r6", "r5", "r4", "r3", "r2"], [2, 2, 1], [["r6", "r5"], ["r4", "r3"], ["r2"]]),
-    # 可读行不足 limit、分区读完：列出全部，只查一次
+    # 可读行不足 limit、分组读完：列出全部，只查一次
     ("UR", 5, ["r2", "r1"], [5], [["r2", "r1"]]),
 ])
 def test_list_runs_unreadable_rows_do_not_take_the_limit_on_both_backends(
@@ -411,6 +411,57 @@ def test_list_runs_unreadable_rows_do_not_take_the_limit_on_both_backends(
     if calls is not None:
         assert calls.limits == limits
         assert calls.batches == batches
+
+
+def _non_terminal_store(request, tmp_path: Path, monkeypatch, backend: str):
+    """两端同一组 run：pending 三条、running 两条、passed 一条，run_id 交错。返回 (store, 云端每次 Query 的参数或 None)。"""
+    layout = {"r1": Status.PENDING, "r2": Status.RUNNING, "r3": Status.PASSED, "r4": Status.PENDING,
+              "r5": Status.RUNNING, "r6": Status.PENDING}
+    if backend == "local":
+        store, queries = LocalRunStore(tmp_path), None
+    else:
+        table = request.getfixturevalue("listing_table")
+        store, queries = DynamoDBRunStore(table, list_index_name=_LIST_INDEX), []
+        real_query = table.query
+        monkeypatch.setattr(table, "query", lambda **kw: queries.append(kw) or real_query(**kw))
+    for run_id, status in layout.items():
+        _make(store, run_id, status)
+    return store, queries
+
+
+@pytest.mark.parametrize("backend", ["local", "ddb"])
+@pytest.mark.parametrize("statuses, limit, expected", [
+    ([Status.PENDING], None, [("r6", "pending"), ("r4", "pending"), ("r1", "pending")]),
+    ([Status.RUNNING], None, [("r5", "running"), ("r2", "running")]),
+    ([Status.PENDING, Status.RUNNING], None,
+     [("r6", "pending"), ("r5", "running"), ("r4", "pending"), ("r2", "running"), ("r1", "pending")]),
+    ([Status.RUNNING, Status.PENDING], 1, [("r6", "pending"), ("r5", "running")]),
+    ([Status.PENDING, Status.RUNNING], 2, [("r6", "pending"), ("r5", "running"), ("r4", "pending"), ("r2", "running")]),
+    ([Status.RUNNING], 1, [("r5", "running")]),
+])
+def test_list_runs_non_terminal_statuses_are_told_apart_by_read_back_status_on_both_backends(
+        request, tmp_path: Path, monkeypatch, backend, statuses, limit, expected):
+    """非终态按读回的状态归入所请求的状态，两端结果相同（ADR 0041 决策七「core 端口」的例外、「云端实现」）。云端不论请求的是
+    pending、running 还是两者，查的都是同一个 live 分组，每次 Query 都只按分组属性取键、走状态分组索引。"""
+    store, queries = _non_terminal_store(request, tmp_path, monkeypatch, backend)
+    rows = store.list_runs(statuses, limit=limit)
+    assert [(r.run_id, r.state.status.value) for r in rows] == expected
+    if queries is not None:
+        assert queries and all(q["IndexName"] == _LIST_INDEX and q["KeyConditionExpression"] == "#sg = :g"
+                               and q["ExpressionAttributeNames"] == {"#sg": "status_group"}
+                               and q["ExpressionAttributeValues"] == {":g": "live"} for q in queries)
+        if limit is None:
+            assert len(queries) == 1  # 一个分组、一页读完：两个非终态合成一次查询
+
+
+def test_ddb_list_runs_finds_a_non_terminal_status_unknown_to_this_version_in_live(cloud_runs, listing_table):
+    # 更新的版本写出的、本版本不认识的非终态值，沿用同一分组规则写进 live：云端也找得到，列为无法读取；不认识的终态值在自己的
+    # 分组里，不在任何被查分组之内
+    listing_table.put_item(Item=_state_item("run-07", "paused", status_group="live"))
+    listing_table.put_item(Item=_state_item("run-08", "archived", status_group="archived"))
+    rows = cloud_runs.list_runs([Status.PENDING], limit=None)
+    assert [(r.run_id, r.state is None) for r in rows] == [("run-07", True), ("run-06", False)]
+    assert "run-08" not in _ids(cloud_runs.list_runs(list(Status), limit=None))
 
 
 def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, monkeypatch):
@@ -484,9 +535,9 @@ def test_ddb_list_runs_index_missing_or_not_configured_raises(aws, cloud_runs):
 class _FakeTable:
     """只实现列举用到的三样：`name`、`query`、`meta.client.batch_get_item`。
 
-    partitions：{状态值: [run_id…]}（按 run_id 降序返回）；items：{(run_id, item_type): item}；page_size：每页最多几条
+    partitions：{状态分组: [run_id…]}（按 run_id 降序返回）；items：{(run_id, item_type): item}；page_size：每页最多几条
     （模拟一页不足 Limit 却还有下一页）；unprocessed：前几次 batch_get_item 把全部键当作未处理返回；empty_last_cursor：末页的
-    LastEvaluatedKey 给空字典而不是省略（同样表示没有下一页）。拿空游标再查时按分区开头处理，所以分页不在空游标上结束时会一直
+    LastEvaluatedKey 给空字典而不是省略（同样表示没有下一页）。拿空游标再查时按分组开头处理，所以分页不在空游标上结束时会一直
     重读；`query` 超过 _MAX_QUERIES 次即判定分页没有结束，让这类缺陷以失败而不是挂起暴露。
     """
 
@@ -507,8 +558,10 @@ class _FakeTable:
     def query(self, **kwargs):
         self.queries.append(dict(kwargs))
         assert len(self.queries) <= self._MAX_QUERIES, "分页没有结束"
+        # 查的是状态分组索引，键条件只按分组属性（不按 status）
         assert kwargs["IndexName"] == _LIST_INDEX and kwargs["ScanIndexForward"] is False
-        run_ids = sorted(self._partitions.get(kwargs["ExpressionAttributeValues"][":s"], []), reverse=True)
+        assert kwargs["KeyConditionExpression"] == "#sg = :g" and kwargs["ExpressionAttributeNames"] == {"#sg": "status_group"}
+        run_ids = sorted(self._partitions.get(kwargs["ExpressionAttributeValues"][":g"], []), reverse=True)
         start = kwargs.get("ExclusiveStartKey", {}).get("offset", 0)
         n = min(x for x in (kwargs.get("Limit"), self._page_size, len(run_ids) - start) if x is not None)
         page = run_ids[start:start + n]
@@ -532,7 +585,10 @@ class _FakeTable:
 
 
 def _state_item(run_id: str, status: str, **extra) -> dict:
-    return {"run_id": run_id, "item_type": "STATE", "status": status, "jobs": {}, **extra}
+    """直接写入的 STATE item：状态值本版本认识时由写端同一个派生函数带上分组属性（moto 的索引只收带它的 item），不认识时由调用方
+    在 extra 里给出。"""
+    group = {"status_group": ddb_module.status_group(Status(status))} if status in {s.value for s in Status} else {}
+    return {"run_id": run_id, "item_type": "STATE", "status": status, "jobs": {}, **group, **extra}
 
 
 def test_ddb_list_runs_continues_short_pages_until_limit(monkeypatch):
@@ -544,7 +600,7 @@ def test_ddb_list_runs_continues_short_pages_until_limit(monkeypatch):
     assert [q.get("Limit") for q in table.queries] == [3, 2, 1]
     assert "ExclusiveStartKey" not in table.queries[0] and table.queries[1]["ExclusiveStartKey"] == {"offset": 1}
 
-    table = _FakeTable({"pending": ["r0", "r1", "r2"]},
+    table = _FakeTable({"live": ["r0", "r1", "r2"]},
                        {(f"r{i}", "STATE"): _state_item(f"r{i}", "pending") for i in range(3)}, page_size=2)
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=None)
     assert _ids(rows) == ["r2", "r1", "r0"]
@@ -579,12 +635,13 @@ def test_ddb_list_runs_stops_when_partition_ends_with_only_unreadable_rows(empty
 
 
 def test_ddb_list_runs_refill_counts_runs_already_read_in_an_earlier_status():
-    # 索引传播期间 r2 同时在 running 与 passed 分区，读回是可读的 passed：passed 分区里它不再读回，但照样占名额，r1 不查不读
-    table = _FakeTable({"running": ["r2"], "passed": ["r1", "r2"]},
+    # 索引传播期间 r2 同时在 live 与 passed 分组，读回是可读的 passed：在 live 分组里列出、不计入 running 的名额；passed 分组里
+    # 它不再读回，但照样占名额，r1 不查不读
+    table = _FakeTable({"live": ["r2"], "passed": ["r1", "r2"]},
                        {(r, "STATE"): _state_item(r, "passed") for r in ("r1", "r2")})
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.RUNNING, Status.PASSED], limit=1)
     assert _ids(rows) == ["r2"]
-    assert [(q["ExpressionAttributeValues"][":s"], q["Limit"]) for q in table.queries] == [("running", 1), ("passed", 1)]
+    assert [(q["ExpressionAttributeValues"][":g"], q["Limit"]) for q in table.queries] == [("live", 1), ("passed", 1)]
     [batch] = table.batches
     assert sorted(k["run_id"] for k in batch["Keys"]) == ["r2", "r2"]
 
@@ -600,7 +657,7 @@ def test_ddb_list_runs_refill_skips_rows_whose_state_vanished_before_read_back()
 
 
 def test_ddb_list_runs_refill_reads_a_partition_of_only_unreadable_rows_to_the_end():
-    # 分区里全是无法读取的行、分成三页：名额一直未满，逐页续读到末页为止，三条都列出
+    # 分组里全是无法读取的行、分成三页：名额一直未满，逐页续读到末页为止，三条都列出
     table = _FakeTable({"passed": ["r1", "r2", "r3"]}, {(r, "STATE"): _unreadable_item(r) for r in ("r1", "r2", "r3")},
                        page_size=1)
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PASSED], limit=2)
@@ -648,8 +705,8 @@ def test_ddb_list_runs_refill_retries_per_page_and_counts_only_the_failing_page(
 
 @pytest.mark.parametrize("limit", [None, 5])
 def test_ddb_list_runs_empty_partition_with_empty_cursor_returns_nothing(limit):
-    # 分区没有结果、末页游标还是空字典：返回空清单、只查一次、不发 BatchGetItem
-    table = _FakeTable({"pending": []}, {}, empty_last_cursor=True)
+    # 分组没有结果、末页游标还是空字典：返回空清单、只查一次、不发 BatchGetItem
+    table = _FakeTable({"live": []}, {}, empty_last_cursor=True)
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=limit)
     assert rows == [] and len(table.queries) == 1 and table.batches == []
 
@@ -658,7 +715,7 @@ def test_ddb_list_runs_empty_partition_with_empty_cursor_returns_nothing(limit):
 @pytest.mark.parametrize("page_size, queries", [(2, 2), (None, 1)])
 def test_ddb_list_runs_empty_cursor_ends_pagination(page_size, queries, limit):
     # 末页的游标是空字典：分页到此结束。分两页时只续读一次；一页就有全部结果时不再请求。截不截断都一样
-    table = _FakeTable({"pending": ["r0", "r1", "r2"]},
+    table = _FakeTable({"live": ["r0", "r1", "r2"]},
                        {(f"r{i}", "STATE"): _state_item(f"r{i}", "pending") for i in range(3)},
                        page_size=page_size, empty_last_cursor=True)
     rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=limit)
@@ -668,28 +725,80 @@ def test_ddb_list_runs_empty_cursor_ends_pagination(page_size, queries, limit):
 
 
 def test_ddb_list_runs_dedupes_does_not_refilter_and_skips_vanished_state():
-    # 索引传播期间：r2 同时在 pending 与 running 两个分区；r3 在 pending 分区，读回已是 passed；r1 的 STATE 已不在
+    # 索引传播期间：r2 刚收尾，同时在 live 与 passed 两个分组；r3 在 live 分组，读回已是 passed；r1 的 STATE 已不在
     table = _FakeTable(
-        {"pending": ["r1", "r2", "r3"], "running": ["r2"]},
-        {("r2", "STATE"): _state_item("r2", "running", detached=True),
+        {"live": ["r1", "r2", "r3"], "passed": ["r2"]},
+        {("r2", "STATE"): _state_item("r2", "passed", detached=True),
          ("r3", "STATE"): _state_item("r3", "passed"),
          ("r1", "META"): {"run_id": "r1", "item_type": "META", "schema_version": 1, "cli_version": "1.5.0"}})
-    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING, Status.RUNNING], limit=None)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING, Status.PASSED], limit=None)
     assert _ids(rows) == ["r3", "r2"]
     by_id = {r.run_id: r for r in rows}
-    assert by_id["r3"].state.status == Status.PASSED  # 不按所请求的状态复筛
-    assert by_id["r2"].state.status == Status.RUNNING and by_id["r2"].detached is True
-    assert [q["ExpressionAttributeValues"][":s"] for q in table.queries] == ["pending", "running"]  # 按给定顺序查
+    assert by_id["r3"].state.status == Status.PASSED  # live 分组里读回已到终态：照常列出、不复筛
+    assert by_id["r2"].state.status == Status.PASSED and by_id["r2"].detached is True
+    assert [q["ExpressionAttributeValues"][":g"] for q in table.queries] == ["live", "passed"]
     [batch] = table.batches
     assert sorted(k["run_id"] for k in batch["Keys"]) == ["r1", "r1", "r2", "r2", "r3", "r3"]  # 先去重再读回
-    # 给定顺序与状态值的字典序相反时同样照给定顺序查（不排序、不经集合）
-    table = _FakeTable({"pending": ["r1"], "running": ["r2"]}, {})
-    DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.RUNNING, Status.PENDING], limit=None)
-    assert [q["ExpressionAttributeValues"][":s"] for q in table.queries] == ["running", "pending"]
+
+
+def test_ddb_list_runs_queries_live_once_first_then_ended_groups_in_the_given_order():
+    # 两个非终态合成对 live 分组的一次查询，不论给出几个、排在哪里；终态分组按给出的顺序，不排序、不经集合
+    table = _FakeTable({"live": ["r1"], "failed": ["r2"], "passed": ["r3"]}, {})
+    DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs(
+        [Status.FAILED, Status.RUNNING, Status.PASSED, Status.PENDING], limit=None)
+    assert [q["ExpressionAttributeValues"][":g"] for q in table.queries] == ["live", "failed", "passed"]
+    table = _FakeTable({"failed": ["r2"]}, {})
+    DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.FAILED], limit=3)
+    assert [q["ExpressionAttributeValues"][":g"] for q in table.queries] == ["failed"]  # 没请求非终态：不查 live
+
+
+@pytest.mark.parametrize("limit, limits", [(None, [None]), (1, [1, 1, 1])])
+def test_ddb_list_runs_live_rows_read_back_as_ended_are_listed_without_taking_a_quota(limit, limits):
+    """live 分组里读回已到终态的行（索引尚未跟上收尾）照常列出、不计入任何非终态的名额；读回为未被请求的非终态的行不列出。
+    每页只回一条：r3 读回 running（未被请求），r2 读回 passed，r1 读回 pending，只请求 pending、limit=1 时要读到 r1 才凑满。"""
+    table = _FakeTable({"live": ["r1", "r2", "r3"]},
+                       {("r3", "STATE"): _state_item("r3", "running"), ("r2", "STATE"): _state_item("r2", "passed"),
+                        ("r1", "STATE"): _state_item("r1", "pending")}, page_size=1 if limit else None)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=limit)
+    assert [(r.run_id, r.state.status) for r in rows] == [("r2", Status.PASSED), ("r1", Status.PENDING)]
+    assert [q.get("Limit") for q in table.queries] == limits
+
+
+def test_ddb_list_runs_live_quota_is_per_requested_status_and_rows_past_it_are_not_listed():
+    """两个非终态都请求、limit=1：每页的键数是各状态还差的条数之和；pending 凑满之后的 pending 行不列出（与本机每个状态只取前
+    limit 条一致），running 凑满即停，更旧的一条不查不读。"""
+    states = {"r5": "pending", "r4": "pending", "r3": "running", "r2": "pending", "r1": "running"}
+    table = _FakeTable({"live": list(states)}, {(r, "STATE"): _state_item(r, st) for r, st in states.items()})
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING, Status.RUNNING], limit=1)
+    assert [(r.run_id, r.state.status) for r in rows] == [("r5", Status.PENDING), ("r3", Status.RUNNING)]
+    assert [q["Limit"] for q in table.queries] == [2, 1]
+    assert [sorted({k["run_id"] for k in b["Keys"]}, reverse=True) for b in table.batches] == [["r5", "r4"], ["r3"]]
+
+
+def test_ddb_list_runs_live_unreadable_and_vanished_rows_do_not_take_a_quota():
+    """live 分组按页补读时，无法读取的行照常列出、读回时 STATE 已不在的行跳过，两者都不占所请求非终态的名额：每页只回一条，
+    只请求 pending、limit=1 时要读到 r2 才凑满，r1 不查不读。"""
+    table = _FakeTable({"live": ["r1", "r2", "r3", "r4"]},
+                       {("r4", "STATE"): _state_item("r4", "pending", jobs={"s": {"status": "paused"}}),
+                        ("r2", "STATE"): _state_item("r2", "pending"), ("r1", "STATE"): _state_item("r1", "pending")},
+                       page_size=1)
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING], limit=1)
+    assert [(r.run_id, r.state is None) for r in rows] == [("r4", True), ("r2", False)]
+    assert [q["Limit"] for q in table.queries] == [1, 1, 1]
+
+
+@pytest.mark.parametrize("limit", [None, 1])
+def test_ddb_list_runs_row_found_in_a_requested_ended_group_is_listed_even_if_live_withheld_it(limit):
+    # r1 同时在 live 与 passed 分组（索引尚未跟上），读回为 running：经 live 找到时它是未被请求的非终态、不列出，但它也是经所请求的
+    # passed 分组找到的，不复筛、照常列出；截不截断结果相同，且只读回一次
+    table = _FakeTable({"live": ["r1"], "passed": ["r1"]}, {("r1", "STATE"): _state_item("r1", "running")})
+    rows = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.PENDING, Status.PASSED], limit=limit)
+    assert [(r.run_id, r.state.status) for r in rows] == [("r1", Status.RUNNING)]
+    assert len(table.batches) == 1
 
 
 def test_ddb_list_runs_unknown_run_status_read_back_is_unreadable():
-    table = _FakeTable({"running": ["r1"]}, {("r1", "STATE"): _state_item("r1", "paused")})
+    table = _FakeTable({"live": ["r1"]}, {("r1", "STATE"): _state_item("r1", "paused")})
     [row] = DynamoDBRunStore(table, list_index_name=_LIST_INDEX).list_runs([Status.RUNNING], limit=None)
     assert row.run_id == "r1" and row.state is None and row.header is None
 

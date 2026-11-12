@@ -57,7 +57,7 @@
 |---|---|---|---|---|
 | feature 作者 | `.feature` | `gherkai`；本机跑还要 `gherkai[local]` + `@gherkai/worker-midscene` | 写本身不需要凭证；执行按决策 3 的执行权限梯级取一级 | 不碰 `steps/`；不学任何关键词措辞 |
 | 测试开发 | `steps/*.py` + `steps/*.mts`、定制 worker 镜像 | 同上 + 容器引擎（docker / podman） | 同 feature 作者；**不需要云端写权限**——镜像交给部署方推 | 不改 worker 包内脚手架（改它等于 fork，0037 决策 4） |
-| 部署方 | 后端（CDK）、worker 镜像的推送与注册 | `gherkai[deploy-aws]` + Node ≥22 + 容器引擎 | 独有：CDK 部署本身 + VPC 三态比对读 + ECR 推送域 + ECS task-def 注册 / 退休 + `iam:PassRole` + SSM `/{prefix}backend/*` 读写 + runs 表 Query（含 `status-index`） + Device Farm 项目的列举、查询与建立（0033「设备目标增量」）；执行用例同样按决策 3 的执行权限梯级取一级 | 不拥有镜像构建（那是测试开发的容器工作）；不替提交侧决定并发，只留 cap（[0034](./0034-detached-batch-reconciler.md) 机制四） |
+| 部署方 | 后端（CDK）、worker 镜像的推送与注册 | `gherkai[deploy-aws]` + Node ≥22 + 容器引擎 | 独有：CDK 部署本身 + VPC 三态比对读 + ECR 推送域 + ECS task-def 注册 / 退休 + `iam:PassRole` + SSM `/{prefix}backend/*` 读写 + runs 表 Query（含 `status_group-run_id-index`） + Device Farm 项目的列举、查询与建立（0033「设备目标增量」）；执行用例同样按决策 3 的执行权限梯级取一级 | 不拥有镜像构建（那是测试开发的容器工作）；不替提交侧决定并发，只留 cap（[0034](./0034-detached-batch-reconciler.md) 机制四） |
 | contributor | 工具自身的代码、ADR、发布链 | clone + `uv sync` + `npm ci` | 发布走 CI trusted publishing，个人无需长期发布凭证（0037 决策 8） | 不把 contributor 内容写进使用者面（0039） |
 
 ## 决策 5：术语单一真源与立新角色的门槛

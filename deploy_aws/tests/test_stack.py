@@ -197,35 +197,9 @@ def test_two_ecr_repos():
         t.has_resource_properties("AWS::ECR::Repository", {"RepositoryName": f"gherkai-{engine}-worker"})
 
 
-def test_runs_table_has_the_sparse_status_gsi_for_worker_cleanup():
-    """runs 表按 `status` 的 GSI（ADR 0038 清理时的运行中 run 引用检查）：**投影必须含 `worker_task_def_arns`**。
-
-    过滤表达式 `contains(worker_task_def_arns, :arn)` 作用在**索引投影出的属性**上——不投影则恒不匹配、
-    引用检查静默失效（会删掉运行中 run 手里的 revision，detached run 的剩余 job 全起不来）。
-    稀疏是构造出来的：只有 STATE item 带顶层 `status`。不用 ALL：STATE 的 `jobs` Map 随 job 数增长。
-    """
-    t = _template()
-    t.has_resource_properties("AWS::DynamoDB::Table", {
-        "TableName": "gherkai-runs",
-        "AttributeDefinitions": Match.array_with([{"AttributeName": "status", "AttributeType": "S"}]),
-        "GlobalSecondaryIndexes": Match.array_with([{
-            "IndexName": "status-index",
-            "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
-            "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
-        }]),
-    })
-    # 索引名与属性名都是**跨组件契约**（清理 pass 按它们查）——比字面量，防两侧各改一处
-    from gherkai_deploy_aws import names as _names
-    assert (_names.RUNS_STATUS_GSI, _names.STATE_WORKER_TASK_DEF_ARNS_ATTR) == (
-        "status-index", "worker_task_def_arns")
-
-
-def test_runs_table_has_the_sparse_status_run_id_gsi_for_list_runs():
-    """runs 表按 `status` 分区、`run_id` 排序的 GSI（ADR 0041 决策七「云端实现」）：**排序键 `run_id`、投影 KEYS_ONLY**。
-
-    `list-runs` 对每个状态按 run_id 降序 `Query`、终态部分只取最近 N 条：没有排序键就只能读整个状态分区，终态分区
-    随历史增长、读量无上界。只投影键：GSI 只有最终一致读，状态一律以强一致读回的 STATE 为准；投影 `jobs` 等属性
-    会让每次刷 job 状态都多一次索引写。元素按原样逐字比对，投影里多出任何非键属性都会使断言失败。
+def test_runs_table_keeps_the_status_run_id_gsi_unchanged_until_it_is_removed():
+    """runs 表按 `status` 分区、`run_id` 排序的 GSI（投影 KEYS_ONLY）已没有读者，按 ADR 0030 决定六「形态变更」条单独一次
+    部署删除；在那之前形态不变：DynamoDB 不能修改已有 GSI 的键与投影，改动它们等于删除再新建一个索引。元素按原样逐字比对。
     """
     t = _template()
     t.has_resource_properties("AWS::DynamoDB::Table", {
@@ -243,7 +217,6 @@ def test_runs_table_has_the_sparse_status_run_id_gsi_for_list_runs():
             "Projection": {"ProjectionType": "KEYS_ONLY"},
         }]),
     })
-    # 索引名是**跨组件契约**（compose 把它注入云端 RunStore，`list-runs` 按它查）——比字面量，防两侧各改一处
     assert names.RUNS_STATUS_RUN_ID_GSI == "status-run_id-index"
 
 
@@ -251,8 +224,10 @@ def test_runs_table_has_the_sparse_status_group_gsi():
     """runs 表按状态分组分区、`run_id` 排序的 GSI（ADR 0030 决定六）：**分区键 `status_group`、排序键 `run_id`、投影 INCLUDE
     `worker_task_def_arns`**。
 
-    分区键取分组：`pending` 换到 `running` 时分组不变，索引项在 run 收尾之前一直在 `live` 分组。投影必须含 revision 列表，
-    理由同 status-index（引用检查作用在投影出的属性上）；投影里多出 `status`、`jobs` 等属性都会使逐字比对失败。
+    分区键取分组：`pending` 换到 `running` 时分组不变，索引项在 run 收尾之前一直在 `live` 分组。**投影必须含 revision 列表**：
+    清理的引用快照取的是索引投影出的属性，不投影则引用检查静默失效（会删掉运行中 run 仍在用的 revision，detached run 剩余的
+    job 都起不来）。稀疏是构造出来的：只有 STATE item 带分组属性。不用 ALL：STATE 的 `jobs` Map 随 job 数增长。投影里多出
+    `status`、`jobs` 等属性都会使逐字比对失败。
     """
     t = _template()
     runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
@@ -268,20 +243,23 @@ def test_runs_table_has_the_sparse_status_group_gsi():
         ],
         "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
     }
-    # 索引名、分组属性名与 live 分组值都是**跨组件契约**（写端在 core，清理与 list-runs 按它们查）——比字面量，防两侧各改一处
-    assert (names.RUNS_STATUS_GROUP_GSI, names.STATE_STATUS_GROUP_ATTR, names.STATUS_GROUP_LIVE) == (
-        "status_group-run_id-index", "status_group", "live")
+    # 索引名、分组属性名、live 分组值与 revision 列表属性名都是**跨组件契约**（写端在 core，清理与 list-runs 按它们查）
+    # ——比字面量，防两侧各改一处
+    assert (names.RUNS_STATUS_GROUP_GSI, names.STATE_STATUS_GROUP_ATTR, names.STATUS_GROUP_LIVE,
+            names.STATE_WORKER_TASK_DEF_ARNS_ATTR) == (
+        "status_group-run_id-index", "status_group", "live", "worker_task_def_arns")
 
 
-def test_runs_table_gsis_are_exactly_the_three_indexes():
-    """runs 表的 GSI 恰为上面三个（枚举型护栏）：两个以 `status` 为键的索引与状态分组索引并存，不顺手再加（ADR 0030 决定六；
-    以 `status` 为键的两个按该条「形态变更」逐次删除）。"""
+def test_runs_table_gsis_are_exactly_the_two_indexes():
+    """runs 表的 GSI 恰为上面两个（枚举型护栏）：只有分区键、以 `status` 为键的 `status-index` 已删除，不顺手再加
+    （ADR 0030 决定六；剩下的 `status-run_id-index` 按该条「形态变更」单独一次部署删除）。"""
     t = _template()
     runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
             if res["Properties"]["TableName"] == "gherkai-runs"]
     assert len(runs) == 1
-    assert [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]] == [
-        "status-index", "status-run_id-index", "status_group-run_id-index"]
+    index_names = [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]]
+    assert index_names == ["status-run_id-index", "status_group-run_id-index"]
+    assert "status-index" not in index_names
 
 
 def test_events_table_has_no_gsi():

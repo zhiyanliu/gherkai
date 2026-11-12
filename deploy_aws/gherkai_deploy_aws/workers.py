@@ -461,28 +461,14 @@ class CleanupOutcome:
     kept: tuple[tuple[str, str], ...] = ()
 
 
-def _live_statuses() -> tuple[str, ...]:
-    """引用快照要查的 run 级状态，按生命周期次序（先 `pending` 后 `running`）。
-
-    **显式元组、不由集合运算派生**：run 级状态只进不退，先读前置态的分区，读完之后才换到 `running` 的 run 在随后读
-    `running` 分区时仍被看到（索引换键的间隙除外）；反过来的次序会漏掉恰在两次读之间换态的 run。从集合排序得出的次序随状态值的拼写而变，
-    守不住这一点。新增前置态时 core 的 `_PRE_TERMINAL` 先变，测试把本元组与
-    「`Status` 去掉 `TERMINAL_STATUSES`」对拍，漏改即红——漏掉一个非终态会让这类 run 引用的 revision 被判成没人引用。
-    `gherkai_core` 由本包直接声明同版本（直接 import 就直接声明，ADR 0037 决策 2c）。
-    """
-    from gherkai_core.model import Status
-
-    return (Status.PENDING.value, Status.RUNNING.value)
-
-
 def _reference_index_problem(ddb, table: str) -> str | None:
-    """就绪检查（ADR 0038「不变量」清理 pass 条「引用检查」段②）：引用快照所读索引的 `IndexStatus` 为 `ACTIVE` 才放行。
+    """就绪检查（ADR 0038「不变量」清理 pass 条「引用检查」段②）：引用快照所读的状态分组索引 `IndexStatus` 为 `ACTIVE` 才放行。
 
     返回 None 即就绪；否则返回一句产品语言的原因，调用方据此留下全部候选并警告。缺失、`CREATING`、`UPDATING`、
     `DELETING` 与 `DescribeTable` 本身失败一律不放行：清理误判会让 run 后续的 job 起不来，跳过一趟只是让 revision
     多留到下一趟；也不依靠「`Query` 一个回填中的索引会报错」这一没有实测过的行为。
     """
-    index = names.RUNS_STATUS_GSI
+    index = names.RUNS_STATUS_GROUP_GSI
     try:
         resp = ddb.describe_table(TableName=table)
     except Exception as exc:
@@ -497,36 +483,35 @@ def _reference_index_problem(ddb, table: str) -> str | None:
 def _live_reference_snapshot(ddb, table: str) -> set[str]:
     """引用快照（ADR 0038「不变量」清理 pass 条「引用检查」段③）：未到终态的 run 引用的 revision ARN 全集。
 
-    每趟一次、与候选数无关：按 `_live_statuses()` 的次序逐个 `Query` 状态分区，只取 `worker_task_def_arns`，翻页读完、
-    在内存里求并集。不加过滤：过滤在读取之后才应用、不减少读量（被拒方案「对每个候选 revision 逐个 `Query` 并以
-    `contains` 过滤」）。**走 GSI 的 Query、绝不 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长（被拒方案
-    「清理靠全表 Scan runs 表」）。属性缺失的 item（本机后端 / 旧 definition）不贡献 ARN，语义即「未引用」。
-    任何一页失败即原样抛出，调用方留下全部候选。
+    每趟一次、与候选数无关：对状态分组索引的 `live` 分组做一次 `Query`，只取 `worker_task_def_arns`，按
+    `LastEvaluatedKey` 翻页读完、在内存里求并集。非终态 run 共用这一个分组（分组由 core 的 `status_group` 派生，
+    ADR 0030 决定六），`pending` 换到 `running` 不改变索引键，所以一次查询就覆盖全部非终态，不按状态分区逐个读。
+    不加过滤：过滤在读取之后才应用、不减少读量（被拒方案「对每个候选 revision 逐个 `Query` 并以 `contains` 过滤」）。
+    **走 GSI 的 Query、绝不 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长（被拒方案「清理靠全表 Scan runs 表」）。
+    属性缺失的 item（本机后端 / 旧 definition）不贡献 ARN，语义即「未引用」。任何一页失败即原样抛出，调用方留下全部候选。
     """
     referenced: set[str] = set()
-    for status in _live_statuses():
-        token = None
-        while True:
-            kwargs = {
-                "TableName": table,
-                "IndexName": names.RUNS_STATUS_GSI,
-                "KeyConditionExpression": "#s = :s",
-                # `status` 是 DDB 保留字；`#w` 只为可读（属性名走命名真源、不写字面量）
-                "ExpressionAttributeNames": {"#s": "status", "#w": names.STATE_WORKER_TASK_DEF_ARNS_ATTR},
-                "ExpressionAttributeValues": {":s": {"S": status}},
-                "ProjectionExpression": "#w",
-            }
-            if token:
-                kwargs["ExclusiveStartKey"] = token
-            resp = ddb.query(**kwargs)
-            for item in resp.get("Items") or []:
-                for entry in (item.get(names.STATE_WORKER_TASK_DEF_ARNS_ATTR) or {}).get("L") or []:
-                    if entry.get("S"):
-                        referenced.add(entry["S"])
-            token = resp.get("LastEvaluatedKey")
-            if not token:
-                break
-    return referenced
+    token = None
+    while True:
+        kwargs = {
+            "TableName": table,
+            "IndexName": names.RUNS_STATUS_GROUP_GSI,
+            "KeyConditionExpression": "#g = :g",
+            # 属性名一律走命名真源、不写字面量
+            "ExpressionAttributeNames": {"#g": names.STATE_STATUS_GROUP_ATTR, "#w": names.STATE_WORKER_TASK_DEF_ARNS_ATTR},
+            "ExpressionAttributeValues": {":g": {"S": names.STATUS_GROUP_LIVE}},
+            "ProjectionExpression": "#w",
+        }
+        if token:
+            kwargs["ExclusiveStartKey"] = token
+        resp = ddb.query(**kwargs)
+        for item in resp.get("Items") or []:
+            for entry in (item.get(names.STATE_WORKER_TASK_DEF_ARNS_ATTR) or {}).get("L") or []:
+                if entry.get("S"):
+                    referenced.add(entry["S"])
+        token = resp.get("LastEvaluatedKey")
+        if not token:
+            return referenced
 
 
 def _mapped_arns(ssm, prefix: str) -> set[str]:

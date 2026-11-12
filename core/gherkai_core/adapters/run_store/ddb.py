@@ -14,15 +14,15 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三；`status_group` 是由
   run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
-  清理 pass 的运行中 run 引用检查按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。
 
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
 的字段集取自 `run_state_to_dict`，只是 jobs 的**容器形状**在本 adapter 从 list 特化成 Map（非第二真理源）。
 
-列举（`list_runs`，ADR 0041 决策七「云端实现」）经 runs 表的一个 GSI 找 run_id（分区键 `status`、排序键 `run_id`、投影
-`KEYS_ONLY`，只有 STATE item 带顶层 `status`），再用 `BatchGetItem` 强一致读回 STATE 与 META；索引名由组合根经构造参数注入
+列举（`list_runs`，ADR 0041 决策七「云端实现」）经 runs 表的状态分组索引找 run_id（分区键 `status_group`、排序键 `run_id`，
+只有 STATE item 带分组属性，ADR 0030 决定六），再用 `BatchGetItem` 强一致读回 STATE 与 META；索引名由组合根经构造参数注入
 （命名真源在 runtime，core 不 import 它）。守 ADR 0038 的红线：runs 表随历史单调增长，本 adapter 不 Scan。
 
 建表责任在 IaC/组合根、非本 adapter——adapter 假定表已存在（决定六；测试由 conftest fixture 建表）。
@@ -181,6 +181,12 @@ def _header_from_item(item: dict) -> tuple[int, str | None]:
     return _schema_version_attr(item), item.get("cli_version")
 
 
+def _listed_from_live(row: RunListing, live: Sequence[Status]) -> bool:
+    """经 `live` 分组找到的行是否列出（ADR 0041 决策七「云端实现」）：非终态的 run 属于哪个所请求的状态只由读回的状态判定，
+    读回为未被请求的非终态的不列出；读回已到终态的与无法读取的照常列出、不复筛。"""
+    return row.state is None or row.state.status in TERMINAL_STATUSES or row.state.status in live
+
+
 class DynamoDBRunStore:
     """RunStore 的 DynamoDB 实装（组合根注入 boto3 表资源 + 表名）。行为对拍 LocalRunStore。"""
 
@@ -196,7 +202,7 @@ class DynamoDBRunStore:
         `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
         create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
 
-        list_index_name：列举用的 GSI 名（ADR 0041 决策七；命名真源在 runtime，组合根注入）。只有 `list_runs` 用它；
+        list_index_name：列举用的状态分组索引名（ADR 0041 决策七；命名真源在 runtime，组合根注入）。只有 `list_runs` 用它；
         None（默认）时其余方法照常，调用 `list_runs` 即抛错（装配缺失）。就绪与否由组合根在装配时核，本 adapter 不查。
         """
         require_boto3("DynamoDBRunStore")
@@ -511,57 +517,107 @@ class DynamoDBRunStore:
     # ---- 列举（ADR 0041 决策七「云端实现」）----
 
     def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
-        """列举（语义见 RunStore port）：按 `statuses` 的给定顺序逐个 Query 状态分区（run_id 降序），run_id 先去重，再用
-        `BatchGetItem` 强一致读回每个 run 的 STATE 与 META（同一批请求，不另起读取）。
+        """列举（语义见 RunStore port）：按状态分组 Query 索引（run_id 降序），run_id 先去重，再用 `BatchGetItem` 强一致读回每个
+        run 的 STATE 与 META（同一批请求，不另起读取）。
 
-        `limit` 为 None 时每个分区分页读完，全部 run_id 收齐后一次读回。`limit` 给出时逐个分区按页补读：每页按还差的可读 run 条数
-        取键、读回、解析，凑满 `limit` 条可读的 run 或分区读完即停；其间遇到的无法读取的行照常列出、不占名额，读回时 STATE 已不在的
-        行同样不占名额。前面分区已读回过的 run 不再读回，它在本分区是否占名额按已读回的结果定。
+        分组由 `status_group` 从所请求的状态算出：所请求的非终态都落在 `live` 分组，只查一次、最先查；所请求的终态各查同名的分组，
+        按 `statuses` 的给定顺序。先查 `live` 与 CLI 两次调用的次序同一依据（ADR 0041 决策七「CLI 的合并」）：正常生命周期里
+        run 只从 `live` 分组走向终态分组，先查 `live` 才不会漏掉两次查询之间收尾的 run。
 
-        行内容以读回的 STATE 为准、不按状态复筛；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了
-        （形态违约、job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 与 `is_detached` 同一判据
-        （STATE 顶层标记）；头部与 `peek_definition_header` 同一读法，META 不在或头部解析不了（含写端版本不是字符串，如数值属性读回的
-        Decimal）为 None。Query 与读回的 AWS 错误原样抛出（索引缺失时 Query 以 ValidationException 失败）；读回的未处理键重试
-        耗尽抛 `RunListingIncomplete`。
+        经 `live` 分组找到的行按读回的状态判定是否列出（端口「不按状态复筛」的例外）：读回为所请求的非终态的列出，读回为未被请求的
+        非终态的不列出，读回已到终态的与无法读取的照常列出、不复筛。经所请求的终态分组找到的行不复筛，照常列出。
+
+        `limit` 为 None 时每个分组分页读完，全部 run_id 收齐后一次读回。`limit` 给出时逐个分组按页补读：每页按还差的可读 run 条数
+        取键、读回、解析，凑满或分组读完即停；其间遇到的无法读取的行照常列出、不占名额，读回时 STATE 已不在的行同样不占名额。
+        `live` 分组按所请求的各非终态分别计名额：读回状态为某个所请求非终态的可读行计入该状态，该状态已凑满之后的同状态行不列出
+        （与本机每个状态只取前 `limit` 条一致），读回已到终态的行列出、不计入任何非终态的名额；每页取的键数是各状态还差的条数之和，
+        各状态都凑满或分组读完即停。终态分组里，前面分组已读回过的 run 不再读回，它在本分组是否占名额按已读回的结果定。
+
+        行内容以读回的 STATE 为准；索引里有键而 STATE 已不在的行跳过（item 已删，索引尚未跟上）。STATE 解析不了（形态违约、run 级或
+        job 状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出；detached 与 `is_detached` 同一判据（STATE 顶层标记）；
+        头部与 `peek_definition_header` 同一读法，META 不在或头部解析不了（含写端版本不是字符串，如数值属性读回的 Decimal）为 None。
+        Query 与读回的 AWS 错误原样抛出（索引缺失时 Query 以 ValidationException 失败）；读回的未处理键重试耗尽抛
+        `RunListingIncomplete`。
         """
         if self._list_index_name is None:
             raise RuntimeError("本进程的 RunStore 没有配置列举 run 用的索引名，列不出 run"
                                "（配置缺失：起 RunStore 的地方须注入 list_index_name）")
         if limit is not None and limit < 1:
             raise ValueError(f"limit 须为正整数或 None，现为 {limit!r}")
-        # 先去重再读回：同一 run 可能在索引传播期间同时出现在新旧两个分区，而 BatchGetItem 的同一请求里出现重复的键，整个请求以
-        # ValidationException 失败
-        seen: set[str] = set()
+        wanted = list(dict.fromkeys(statuses))
+        live = [s for s in wanted if status_group(s) == _STATUS_GROUP_LIVE]
+        ended_groups = [status_group(s) for s in wanted if status_group(s) != _STATUS_GROUP_LIVE]
         if limit is None:
-            run_ids: list[str] = []
-            for status in dict.fromkeys(statuses):
-                start = None
-                while True:
-                    page, start = self._query_index_page(status, None, start)
-                    for run_id in page:
-                        if run_id not in seen:
-                            seen.add(run_id)
-                            run_ids.append(run_id)
-                    if start is None:
-                        break
-            rows = self._read_listing_rows(run_ids)
+            rows = self._list_unbounded(live, ended_groups)
         else:
-            listed: dict[str, RunListing] = {}
-            for status in dict.fromkeys(statuses):
-                readable = 0
-                start = None
-                while True:
-                    page, start = self._query_index_page(status, limit - readable, start)
-                    fresh = [run_id for run_id in page if run_id not in seen]
-                    seen.update(fresh)
-                    listed.update((row.run_id, row) for row in self._read_listing_rows(fresh))
-                    readable += sum(1 for run_id in page if run_id in listed and listed[run_id].state is not None)
-                    # 没有下一页即停：一页全是无法读取的行时也在这里结束，不因名额未满而反复查
-                    if readable >= limit or start is None:
-                        break
-            rows = list(listed.values())
+            rows = self._list_bounded(live, ended_groups, limit)
         rows.sort(key=lambda row: row.run_id, reverse=True)
         return rows
+
+    def _list_unbounded(self, live: list[Status], ended_groups: list[str]) -> list[RunListing]:
+        """`limit` 为 None 的列举：各分组分页读完，run_id 去重后一次读回，经 `live` 分组找到的行按 `_listed_from_live` 判定。"""
+        from_live = self._query_whole_group(_STATUS_GROUP_LIVE) if live else []
+        from_ended = [run_id for group in ended_groups for run_id in self._query_whole_group(group)]
+        via_ended = set(from_ended)
+        # 先去重再读回：同一 run 可能在索引传播期间同时出现在新旧两个分组，而 BatchGetItem 的同一请求里出现重复的键，整个请求以
+        # ValidationException 失败
+        rows = self._read_listing_rows(list(dict.fromkeys(from_live + from_ended)))
+        return [row for row in rows if row.run_id in via_ended or _listed_from_live(row, live)]
+
+    def _list_bounded(self, live: list[Status], ended_groups: list[str], limit: int) -> list[RunListing]:
+        """`limit` 给出的列举：逐个分组按页补读（名额规则见 `list_runs`）。"""
+        seen: set[str] = set()  # 已读回过的 run_id（去重理由同 `_list_unbounded`）
+        read: dict[str, RunListing] = {}  # 已读回的行；STATE 已不在的不在其中
+        listed: dict[str, RunListing] = {}
+
+        def read_page(group: str, want: int, start: dict | None) -> tuple[list[str], dict | None]:
+            page, start = self._query_index_page(group, want, start)
+            fresh = [run_id for run_id in page if run_id not in seen]
+            seen.update(fresh)
+            read.update((row.run_id, row) for row in self._read_listing_rows(fresh))
+            return page, start
+
+        if live:
+            counted = dict.fromkeys(live, 0)  # 各所请求非终态已凑到的可读条数
+            start = None
+            while True:
+                page, start = read_page(_STATUS_GROUP_LIVE, sum(limit - n for n in counted.values()), start)
+                for run_id in page:
+                    row = read.get(run_id)
+                    if row is None or not _listed_from_live(row, live):
+                        continue
+                    if row.state is not None and row.state.status in counted:
+                        if counted[row.state.status] >= limit:
+                            continue  # 该状态已凑满：这一行排在它的前 limit 条之后，不列出
+                        counted[row.state.status] += 1
+                    listed[run_id] = row
+                # 没有下一页即停：一页全是无法读取的行时也在这里结束，不因名额未满而反复查
+                if start is None or all(n >= limit for n in counted.values()):
+                    break
+        for group in ended_groups:
+            readable = 0
+            start = None
+            while True:
+                page, start = read_page(group, limit - readable, start)
+                for run_id in page:
+                    row = read.get(run_id)
+                    if row is None:
+                        continue
+                    listed[run_id] = row  # 经所请求的终态分组找到：不复筛，经 live 分组找到而未列出的这里同样列出
+                    readable += row.state is not None
+                if readable >= limit or start is None:
+                    break
+        return list(listed.values())
+
+    def _query_whole_group(self, group: str) -> list[str]:
+        """分页读完一个分组的 run_id（run_id 降序）。"""
+        run_ids: list[str] = []
+        start = None
+        while True:
+            page, start = self._query_index_page(group, None, start)
+            run_ids.extend(page)
+            if start is None:
+                return run_ids
 
     def _read_listing_rows(self, run_ids: list[str]) -> list[RunListing]:
         """读回这些 run（须已去重）并解析成列举项，次序同 `run_ids`；STATE 已不在的 run 不出现。`run_ids` 为空时不发请求。"""
@@ -583,14 +639,14 @@ class DynamoDBRunStore:
             rows.append(RunListing(run_id=run_id, state=state, detached=bool(state_item.get("detached")), header=header))
         return rows
 
-    def _query_index_page(self, status: Status, limit: int | None, start: dict | None) -> tuple[list[str], dict | None]:
-        """按 run_id 降序读一个状态分区的一页 run_id：`limit` 给出时这一页至多取这么多条（一页可能更少），`start` 是上一页给出的
+    def _query_index_page(self, group: str, limit: int | None, start: dict | None) -> tuple[list[str], dict | None]:
+        """按 run_id 降序读一个状态分组的一页 run_id：`limit` 给出时这一页至多取这么多条（一页可能更少），`start` 是上一页给出的
         续读起点。返回这一页的 run_id 与下一页的起点，没有下一页时起点为 None。"""
         kwargs: dict = {
             "IndexName": self._list_index_name,
-            "KeyConditionExpression": "#st = :s",
-            "ExpressionAttributeNames": {"#st": "status"},  # status 是 DDB 保留字
-            "ExpressionAttributeValues": {":s": status.value},
+            "KeyConditionExpression": "#sg = :g",
+            "ExpressionAttributeNames": {"#sg": _STATUS_GROUP_ATTR},
+            "ExpressionAttributeValues": {":g": group},
             "ScanIndexForward": False,
         }
         if limit is not None:

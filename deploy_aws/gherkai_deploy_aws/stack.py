@@ -1,10 +1,9 @@
 """BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore，带三个稀疏 GSI：按 status 分区的 status-index 供 worker revision 清理时的
-  引用检查，ADR 0038；按 status 分区、以 run_id 排序的 status-run_id-index 供 list-runs 按状态取 run_id，ADR 0041 决策七；
-  按状态分组分区、以 run_id 排序的 status_group-run_id-index 由 ADR 0030 决定六定为两者共用，写端已写出它的分区键，
-  两者改读它之前仍读前两个索引）
+- DynamoDB：{prefix}runs（控制面/RunStore，带两个稀疏 GSI：按状态分组分区、以 run_id 排序的 status_group-run_id-index
+  供 worker revision 清理的引用检查（ADR 0038）与 list-runs（ADR 0041 决策七）共用，ADR 0030 决定六；按 status 分区、
+  以 run_id 排序的 status-run_id-index 已没有读者，按 ADR 0030 决定六「形态变更」条删除）
   + {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片；设备目标的安装包在桶根下
   apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
@@ -193,32 +192,9 @@ class BackendStack(Stack):
             stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
         )
-        # **按 `status` 的稀疏 GSI**（ADR 0038「不变量·清理 pass」）：worker revision 清理时的运行中 run 引用检查要查
-        # 「有没有未到终态的 run 还引用这个 revision」，走 `Query` 非终态状态 + `contains` 过滤。
-        # - **稀疏是构造出来的**：只有 STATE item 带顶层 `status`（META item 没有），故索引里天然只有 STATE。
-        # - **projection 取 INCLUDE `worker_task_def_arns`**：过滤表达式 `contains(worker_task_def_arns, :arn)`
-        #   作用在**索引投影出的属性**上，不投影则恒不匹配、引用检查静默失效（会删掉运行中 run 手里的 revision）。
-        #   不用 ALL：runs 表 STATE 的 `jobs` Map 随 job 数增长，全投影等于给每个 run 存第二份。
-        # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
-        #   （ADR 0038 被拒方案「清理靠全表 Scan runs 表」）。
-        self._runs_table.add_global_secondary_index(
-            index_name=names.RUNS_STATUS_GSI,
-            partition_key=dynamodb.Attribute(name="status", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.INCLUDE,
-            non_key_attributes=[names.STATE_WORKER_TASK_DEF_ARNS_ATTR],
-        )
-        # **按 `status` 分区、`run_id` 排序的稀疏 GSI**（ADR 0041 决策七，schema 登记在 ADR 0030 决定六）：`list-runs`
-        # 对每个所请求的状态 `Query` run_id 降序（终态部分取最近 N 条），索引只用来找 run_id，状态与 job 计数一律以
-        # `BatchGetItem`（强一致）读回的 STATE 为准。稀疏性与上面的 status-index 相同。
-        # - **不复用 status-index**：它只有分区键，按状态读出的是整个状态分区，终态分区随历史增长、读量无上界；给它加
-        #   排序键要替换索引（DynamoDB 不能修改已有 GSI 的键），且它的投影服务于清理 pass，与本索引只要键的需求不同。
-        # - **projection 取 KEYS_ONLY**：GSI 只有最终一致读，从索引直接出状态会与紧接着的 `status` 读到的不同；只投影键，
-        #   只改 job 级状态的写入不产生索引写，索引项的存储可忽略。
-        # - **升级已部署的后端**：DynamoDB 在后台为已有的 STATE item 回填，索引 `ACTIVE` 之前不能 `Query`；CloudFormation
-        #   发起建索引后不等回填完成，所以 deploy 结束时索引可能仍在回填（由 `list-runs` 按 `DescribeTable` 的索引状态拦下）。
-        #   另有 `AWS::DynamoDB::Table` 文档写明的三条限制：索引 `ACTIVE` 之前这张表不能再被更新；建索引期间 stack 回滚
-        #   不会删除已发起的索引，须手动删掉再部署；文档建议加索引的那次更新不改其它资源，而 deploy 的升级是整个 stack
-        #   一次更新，无法把加索引单独拆成一次。
+        # **按 `status` 分区、`run_id` 排序的稀疏 GSI**（投影 KEYS_ONLY，schema 登记在 ADR 0030 决定六）：已没有读者，
+        # `list-runs` 与清理都读下面的状态分组索引。按 ADR 0030 决定六「形态变更」条单独一次部署删除：CloudFormation
+        # 一次更新只能新增或删除一个 GSI。
         self._runs_table.add_global_secondary_index(
             index_name=names.RUNS_STATUS_RUN_ID_GSI,
             partition_key=dynamodb.Attribute(name="status", type=dynamodb.AttributeType.STRING),
@@ -227,14 +203,15 @@ class BackendStack(Stack):
         )
         # **按状态分组分区、`run_id` 排序的稀疏 GSI**（ADR 0030 决定六「runs 表只有一个 GSI」条）：按该条的设计，worker revision
         # 清理的引用检查读 `live` 分组、取各 run 的 `worker_task_def_arns`，`list-runs` 读 `live` 分组与各终态分组，两者共用这一个索引。
-        # 分组属性由 `DynamoDBRunStore` 在每一处写 run 级 `status` 的同一次写里派生写出（写入规则见 core 的 `status_group`），
-        # 只有 STATE item 带它，稀疏由此构造。
+        # - **稀疏是构造出来的**：分组属性由 `DynamoDBRunStore` 在每一处写 run 级 `status` 的同一次写里派生写出（写入规则见
+        #   core 的 `status_group`），只有 STATE item 带它（META item 没有），故索引里只有 STATE。
         # - **分区键取分组而非 `status`**：`pending` 换到 `running` 时分组仍是 `live`、是同值写，索引键不变、不产生索引写，
         #   索引项在 run 收尾之前一直在 `live` 分组，清理的快照不会因换键的传播间隙漏掉在用的 run。
-        # - **projection 取 INCLUDE `worker_task_def_arns`**：理由同上面的 status-index（过滤与取并集作用在投影出的属性上）；
-        #   不投影 `status` 与 `jobs`，只改它们的写不产生索引写。
-        # - 两个使用方改读这个索引之前，仍分别读上面两个以 `status` 为键的索引；改读之后，那两个索引按 ADR 0030 决定六
-        #   「形态变更」条逐次删除。
+        # - **projection 取 INCLUDE `worker_task_def_arns`**：清理的快照取的是索引投影出的属性，不投影则查询结果里没有
+        #   revision 列表、引用检查静默失效（会删掉运行中 run 仍在用的 revision）。不用 ALL：STATE 的 `jobs` Map 随 job 数
+        #   增长，全投影等于给每个 run 存第二份；不投影 `status` 与 `jobs`，只改它们的写不产生索引写。
+        # - **必须有索引、不能 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长，Scan 成本无上界
+        #   （ADR 0038 被拒方案「清理靠全表 Scan runs 表」）。
         self._runs_table.add_global_secondary_index(
             index_name=names.RUNS_STATUS_GROUP_GSI,
             partition_key=dynamodb.Attribute(name=names.STATE_STATUS_GROUP_ATTR, type=dynamodb.AttributeType.STRING),

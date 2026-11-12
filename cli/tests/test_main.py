@@ -3919,9 +3919,10 @@ def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=
     def make_table(table, *, region, profile):
         def describe_table(*, TableName):
             calls.append(("describe", TableName))
-            gsis = [{"IndexName": _nm.RUNS_STATUS_GSI, "IndexStatus": "ACTIVE"}]
+            # 表上另有一个以 status 为分区键的索引、恒为 ACTIVE：就绪判定只看状态分组索引，缺它时不被这个索引顶替
+            gsis = [{"IndexName": _nm.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": "ACTIVE"}]
             if index_status is not None:
-                gsis.append({"IndexName": _nm.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": index_status})
+                gsis.append({"IndexName": _nm.RUNS_STATUS_GROUP_GSI, "IndexStatus": index_status})
             return {"Table": {"TableName": TableName, "GlobalSecondaryIndexes": gsis}}
         return SimpleNamespace(name=table, meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
 
@@ -3948,14 +3949,14 @@ _TERMINAL_VALUES = ["passed", "failed", "error", "skipped", "aborted"]
 
 
 def test_list_runs_cloud_checks_skew_then_index_then_lists_ongoing_before_finished(tmp_path, monkeypatch, capsys):
-    """调用顺序：版本 skew 闸 → DescribeTable 判索引就绪 → 装配注入索引名 → 先非终态（不截断，pending 在前）后终态（截 N）；
+    """调用顺序：版本 skew 闸 → DescribeTable 判索引就绪 → 装配注入状态分组索引名 → 先非终态（不截断）后终态（截 N）；
     --report-dir 在云端被忽略、不报错；--json 顶层是前缀、region、解析后的表名与当前版本。"""
     from gherkai_runtime import names as _nm
 
     calls = _cloud_list_runs_env(monkeypatch, tmp_path)
     doc = _list_runs_json(capsys, "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--report-dir", "whatever")
     table = _nm.default_name("vfy-", _nm.BASE_RUNS_TABLE)
-    assert calls == [("skew", "vfy-"), ("describe", table), ("store", table, _nm.RUNS_STATUS_RUN_ID_GSI),
+    assert calls == [("skew", "vfy-"), ("describe", table), ("store", table, _nm.RUNS_STATUS_GROUP_GSI),
                      ("list", ["pending", "running"], None), ("list", _TERMINAL_VALUES, 20)]
     assert doc == {"backend": "cloud", "prefix": "vfy-", "region": "us-east-1", "ddb_table": table, "cli_version": _LR_CLI,
                    "runs": []}
@@ -4010,7 +4011,7 @@ def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(ind
     calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status)
     rc = m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
     cap = capsys.readouterr()
-    assert rc == 2 and cap.out == "" and needle in cap.err and "status-run_id-index" in cap.err
+    assert rc == 2 and cap.out == "" and needle in cap.err and "status_group-run_id-index" in cap.err
     assert [c[0] for c in calls] == ["skew", "describe"]
 
 

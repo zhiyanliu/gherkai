@@ -64,7 +64,7 @@ def _presentation_is_environment_independent(monkeypatch):
 
 def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1024") -> dict[str, str]:
     """把「`gherkai deploy` 已经运行过一次」的后端摆出来：ECR repo ×2 + 模板 revision ×2（SSM worker-template）
-    + 版本戳 + runs 表（带 status GSI）。返回 {engine: 模板 revision ARN}。
+    + 版本戳 + runs 表（带状态分组索引）。返回 {engine: 模板 revision ARN}。
 
     `cpu` 供「deploy 改了模板」那组测试造出**第二个**模板 revision。
     """
@@ -101,10 +101,12 @@ def seed_backend(aws: workers.Aws, *, stamp: str | None = VERSION, cpu: str = "1
                        {"AttributeName": "item_type", "KeyType": "RANGE"}],
             AttributeDefinitions=[{"AttributeName": "run_id", "AttributeType": "S"},
                                   {"AttributeName": "item_type", "AttributeType": "S"},
-                                  {"AttributeName": "status", "AttributeType": "S"}],
+                                  {"AttributeName": names.STATE_STATUS_GROUP_ATTR, "AttributeType": "S"}],
+            # 键与投影取 BackendStack 状态分组索引的形态（test_stack 逐字比对那一侧）
             GlobalSecondaryIndexes=[{
-                "IndexName": names.RUNS_STATUS_GSI,
-                "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+                "IndexName": names.RUNS_STATUS_GROUP_GSI,
+                "KeySchema": [{"AttributeName": names.STATE_STATUS_GROUP_ATTR, "KeyType": "HASH"},
+                              {"AttributeName": "run_id", "KeyType": "RANGE"}],
                 "Projection": {"ProjectionType": "INCLUDE",
                                "NonKeyAttributes": [names.STATE_WORKER_TASK_DEF_ARNS_ATTR]},
             }],
@@ -330,34 +332,41 @@ INDEX_MISSING = "（索引不存在）"
 
 
 class HookedDdb:
-    """DynamoDB client 的钩子壳：记下每次调用与 `Query` 的状态分区；`index_status` 改写 `DescribeTable` 里引用快照所读
-    索引的 `IndexStatus`（`INDEX_MISSING` 即把它从结果里拿掉），`describe_error` / `query_error` 让对应调用抛错。"""
+    """DynamoDB client 的钩子壳：记下每次调用与每次 `Query` 的（索引名、分区键值）；`index_status` 改写 `DescribeTable` 里
+    状态分组索引的 `IndexStatus`（`INDEX_MISSING` 即把它从结果里拿掉），`gsis` 把 `DescribeTable` 的索引清单整个换掉，
+    `describe_error` / `query_error` 让对应调用抛错，`page_size` 给每次 `Query` 加上 `Limit`、逼出翻页。"""
 
-    def __init__(self, inner, *, index_status=None, describe_error=None, query_error=None):
+    def __init__(self, inner, *, index_status=None, gsis=None, describe_error=None, query_error=None, page_size=None):
         self._inner = inner
-        self.index_status, self.describe_error, self.query_error = index_status, describe_error, query_error
+        self.index_status, self.gsis = index_status, gsis
+        self.describe_error, self.query_error, self.page_size = describe_error, query_error, page_size
         self.calls: list[str] = []
-        self.queried: list[str] = []
+        self.queried: list[tuple[str, str]] = []
 
     def describe_table(self, **kw):
         self.calls.append("describe_table")
         if self.describe_error is not None:
             raise self.describe_error
         resp = self._inner.describe_table(**kw)
+        if self.gsis is not None:
+            resp["Table"]["GlobalSecondaryIndexes"] = self.gsis
         gsis = resp["Table"].get("GlobalSecondaryIndexes") or []
         if self.index_status == INDEX_MISSING:
-            resp["Table"]["GlobalSecondaryIndexes"] = [g for g in gsis if g["IndexName"] != names.RUNS_STATUS_GSI]
+            resp["Table"]["GlobalSecondaryIndexes"] = [g for g in gsis if g["IndexName"] != names.RUNS_STATUS_GROUP_GSI]
         elif self.index_status is not None:
             for g in gsis:
-                if g["IndexName"] == names.RUNS_STATUS_GSI:
+                if g["IndexName"] == names.RUNS_STATUS_GROUP_GSI:
                     g["IndexStatus"] = self.index_status
         return resp
 
     def query(self, **kw):
         self.calls.append("query")
-        self.queried.append(kw["ExpressionAttributeValues"][":s"]["S"])
+        [value] = kw["ExpressionAttributeValues"].values()
+        self.queried.append((kw.get("IndexName"), value["S"]))
         if self.query_error is not None:
             raise self.query_error
+        if self.page_size is not None:
+            kw = {**kw, "Limit": self.page_size}
         return self._inner.query(**kw)
 
     def __getattr__(self, item):
@@ -1110,8 +1119,13 @@ def _unmapped_retired(aws, templates, *, retired_at: datetime, variant: str = "l
 
 
 def _put_state(aws, run_id: str, status: str, arns: list[str]):
+    """一个 run 的 STATE item：分组属性取 core 写端的同一个派生函数，与 `DynamoDBRunStore` 写出的形态一致。"""
+    from gherkai_core.adapters.run_store.ddb import status_group
+    from gherkai_core.model import Status
+
     aws.ddb.put_item(TableName=names.default_name(PREFIX, names.BASE_RUNS_TABLE), Item={
         "run_id": {"S": run_id}, "item_type": {"S": "STATE"}, "status": {"S": status},
+        names.STATE_STATUS_GROUP_ATTR: {"S": status_group(Status(status))},
         names.STATE_WORKER_TASK_DEF_ARNS_ATTR: {"L": [{"S": a} for a in arns]},
     })
 
@@ -1123,14 +1137,6 @@ def _write_mapping_to(aws, arn: str, *, variant: str = "late"):
         Value=json.dumps({"template_arn": "arn:tpl", "revision_arn": arn, "digest": "sha256:" + "0" * 64,
                           "pushed_at": NOW.isoformat()}),
         Type="String", Overwrite=True)
-
-
-def test_live_statuses_are_the_non_terminal_statuses_in_lifecycle_order():
-    """引用快照按显式的生命周期次序查非终态分区；与 core 的「`Status` 去掉终态」对拍，新增前置态时漏改即红。"""
-    from gherkai_core.model import TERMINAL_STATUSES, Status
-
-    assert workers._live_statuses() == ("pending", "running")
-    assert set(workers._live_statuses()) == {s.value for s in set(Status) - set(TERMINAL_STATUSES)}
 
 
 def test_cleanup_keeps_within_the_quiet_period(aws):
@@ -1167,7 +1173,7 @@ def test_cleanup_removes_retired_at_from_a_revision_that_is_still_mapped(aws):
 @pytest.mark.parametrize("status", ["pending", "running"])
 def test_cleanup_keeps_when_a_live_run_references_it(aws, status):
     """引用快照里有它（STATE 顶层 `worker_task_def_arns`，run 未到终态）→ 留着。detached run 逐 job 起 task，删早了剩余
-    job 全起不来。两个非终态分区都要查到。"""
+    job 全起不来。两个非终态都在 `live` 分组里。"""
     templates = seed_backend(aws)
     arn = _unmapped_retired(aws, templates, retired_at=NOW)
     _put_state(aws, "r1", status, [arn])
@@ -1177,12 +1183,70 @@ def test_cleanup_keeps_when_a_live_run_references_it(aws, status):
 
 
 def test_cleanup_deletes_when_the_referencing_run_is_terminal(aws):
-    """同一份数据、run 已到终态（passed）→ 不在非终态分区里，引用快照不含它。"""
+    """同一份数据、run 已到终态（passed）→ 不在 `live` 分组里，引用快照不含它。"""
     templates = seed_backend(aws)
     arn = _unmapped_retired(aws, templates, retired_at=NOW)
     _put_state(aws, "r1", "passed", [arn])
     outcome, _ = _cleanup(aws, NOW + timedelta(hours=2))
     assert outcome.deleted == (arn,), outcome
+
+
+def test_one_query_reads_both_a_pending_and_a_running_run(aws):
+    """`pending` 与 `running` 的 run 在同一次 `Query`（状态分组索引的 `live` 分组）里被读到：两个各被一个 run 引用的成熟
+    候选都留下，整趟只查一次，不按状态分区逐个读（ADR 0038「引用检查」段③）。"""
+    templates = seed_backend(aws)
+    pending_ref = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3), variant="a", digest="sha256:" + "1" * 64)
+    running_ref = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3), variant="b", digest="sha256:" + "2" * 64)
+    _put_state(aws, "r1", "pending", [pending_ref])
+    _put_state(aws, "r2", "running", [running_ref])
+    ddb = HookedDdb(aws.ddb)
+    outcome, _ = _cleanup(aws, NOW, ddb=ddb)
+    assert outcome.deleted == ()
+    assert {a for a, why in outcome.kept if "未到终态" in why} == {pending_ref, running_ref}, outcome
+    assert ddb.queried == [(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)]
+
+
+def test_snapshot_reads_every_page_of_the_live_group_and_leaves_out_finished_runs(aws):
+    """快照按 `LastEvaluatedKey` 翻页读完 `live` 分组、取 `worker_task_def_arns` 的并集；已收尾的 run（各终态）不在快照里，
+    不带 revision 列表的 run 不贡献 ARN。"""
+    from gherkai_core.model import TERMINAL_STATUSES
+
+    seed_backend(aws)
+    table = names.default_name(PREFIX, names.BASE_RUNS_TABLE)
+    _put_state(aws, "r-live-1", "pending", ["arn:a", "arn:b"])
+    _put_state(aws, "r-live-2", "running", ["arn:b", "arn:c"])
+    _put_state(aws, "r-live-3", "running", ["arn:d"])
+    _put_state(aws, "r-live-4", "pending", [])
+    for i, status in enumerate(sorted(s.value for s in TERMINAL_STATUSES)):
+        _put_state(aws, f"r-done-{i}", status, [f"arn:done-{status}"])
+    ddb = HookedDdb(aws.ddb, page_size=1)
+    assert workers._live_reference_snapshot(ddb, table) == {"arn:a", "arn:b", "arn:c", "arn:d"}
+    assert len(ddb.queried) > 1 and set(ddb.queried) == {(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)}
+
+
+def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws):
+    """跨组件：core 的 `DynamoDBRunStore` 真写端写出的 STATE 被真快照读到。建 run 后、换到 `running` 后都在 `live` 分组里，
+    收尾之后不在；META item 与不带 revision 的 run 不贡献 ARN（ADR 0038「不变量」清理 pass 条「引用检查」段③）。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.model import JobState, RunMeta, RunState, Status
+
+    seed_backend(aws)
+    table = names.default_name(PREFIX, names.BASE_RUNS_TABLE)
+    store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
+
+    def create(run_id: str, worker_task_defs: dict[str, str] | None) -> None:
+        meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(), worker_task_defs=worker_task_defs)
+        state = RunState(run_id=run_id, status=Status.PENDING,
+                         jobs={"a.feature:3": JobState(scope_id="a.feature:3", status=Status.PENDING)})
+        store.create_run(meta, state)
+
+    create("run-01", {"novaact": "arn:shared", "midscene": "arn:shared"})
+    create("run-02", None)
+    assert workers._live_reference_snapshot(aws.ddb, table) == {"arn:shared"}
+    store.update_job_state("run-01", JobState(scope_id="a.feature:3", status=Status.RUNNING))
+    assert workers._live_reference_snapshot(aws.ddb, table) == {"arn:shared"}
+    store.finalize_run("run-01", Status.PASSED, "2026-09-08T00:10:00Z")
+    assert workers._live_reference_snapshot(aws.ddb, table) == set()
 
 
 def test_cleanup_backfills_retired_at_on_an_orphan_with_a_value_after_reading_the_mappings(aws):
@@ -1312,7 +1376,7 @@ def test_final_check_skips_a_candidate_that_changed_and_continues_with_the_other
 
 @pytest.mark.parametrize("index_status", [INDEX_MISSING, "CREATING", "UPDATING", "DELETING", "describe_fails"])
 def test_readiness_check_only_lets_an_active_index_through(aws, index_status):
-    """就绪检查：引用快照所读索引的 `IndexStatus` 为 `ACTIVE` 才继续；缺失、`CREATING`、`UPDATING`、`DELETING` 或
+    """就绪检查：状态分组索引的 `IndexStatus` 为 `ACTIVE` 才继续；缺失、`CREATING`、`UPDATING`、`DELETING` 或
     `DescribeTable` 本身失败，全部候选留下、打一行警告、不 `Query`（ADR 0038「引用检查」段②）。"""
     templates = seed_backend(aws)
     arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
@@ -1330,7 +1394,20 @@ def test_readiness_check_with_an_active_index_proceeds_to_one_snapshot(aws):
     ddb = HookedDdb(aws.ddb)
     outcome, _ = _cleanup(aws, NOW, ddb=ddb)
     assert outcome.deleted == (arn,)
-    assert ddb.calls == ["describe_table", "query", "query"] and ddb.queried == ["pending", "running"]
+    assert ddb.calls == ["describe_table", "query"]
+    assert ddb.queried == [(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)]
+
+
+def test_readiness_check_looks_at_the_status_group_index_only(aws):
+    """就绪检查看的是状态分组索引：表上别的索引都为 `ACTIVE`、唯独它不在时，全部候选留下、不 `Query`，警告点名它。"""
+    templates = seed_backend(aws)
+    arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
+    ddb = HookedDdb(aws.ddb, gsis=[{"IndexName": "status-index", "IndexStatus": "ACTIVE"},
+                                   {"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": "ACTIVE"}])
+    outcome, text = _cleanup(aws, NOW, ddb=ddb)
+    assert outcome.deleted == () and arn in _revisions(aws, "novaact")
+    assert "query" not in ddb.calls
+    assert names.RUNS_STATUS_GROUP_GSI in text and "这次没有回收旧的 revision" in text
 
 
 def test_snapshot_query_failure_keeps_every_candidate_but_still_rereads_for_backfills(aws):
@@ -1367,7 +1444,7 @@ def test_snapshot_read_volume_does_not_grow_with_the_number_of_candidates(aws):
     three = HookedDdb(aws.ddb)
     outcome, _ = _cleanup(aws, NOW, ddb=three)
     assert len(outcome.deleted) == 3
-    assert three.calls.count("query") == one.calls.count("query") == len(workers._live_statuses())
+    assert three.calls.count("query") == one.calls.count("query") == 1
 
 
 def test_cleanup_skips_the_whole_pass_when_the_mappings_cannot_be_listed(aws):

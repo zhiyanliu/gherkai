@@ -84,8 +84,6 @@ gherkai submit features/x.feature --backend cloud --prefix gherkai- --worker-var
 
 不想动本机安装的部署方可用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升后端。
 
-升级到带 `list-runs` 清单索引的版本（1.5 起）时，第 2 步给运行记录表加索引，AWS 在部署后为已有的 run 补齐索引、`gherkai deploy` 不等它：这段时间 `list-runs --backend cloud` 以退出码 2 结束、说索引还在建立，稍后重试即可，其它命令不受影响。补齐之前这张表不能再被更新，别让人为此重新部署；建索引期间部署失败回滚时索引不会随之删除，须由人手动删掉再部署（命令见用户指南云端后端页的「版本与升级」）。
-
 ## 6 多环境与清理
 
 - 多环境靠 `--prefix`：`prod-` / `stage-` 各一套后端，互不影响；所有 cloud 命令带同一个 prefix。

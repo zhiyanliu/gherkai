@@ -1153,13 +1153,15 @@ _RUN_LIST_INDEX_OTHER = ("云端后端的 run 清单索引当前不能查询（�
 def check_run_list_index(ddb_table) -> None:
     """`list-runs` 的索引就绪检查（ADR 0041 决策七「索引就绪判据」）：取该表的 DescribeTable 结果判，不解析 Query 的报错文本。
 
+    检查对象是列举所读的状态分组索引（`names.RUNS_STATUS_GROUP_GSI`），表上其它索引的状态不影响判定。
     缺失、`CREATING`（为已有 STATE item 回填中）、`DELETING` 与其它未知状态抛 `RunListIndexUnavailable`；`ACTIVE` 与
-    `UPDATING` 放行。只由 `build_cloud_run_list_store` 调用，不并入 run / submit 共用的 `preflight_cloud_resources`：
+    `UPDATING` 放行。worker revision 清理对同一索引另做检查、只放行 `ACTIVE`，比这里严（理由见 ADR 0038「不变量」清理
+    pass 条），不是两处不一致。只由 `build_cloud_run_list_store` 调用，不并入 run / submit 共用的 `preflight_cloud_resources`：
     那些命令不用这个索引，不能因它缺失或回填而被拦。DescribeTable 的 AWS 异常（表不存在、无权限、凭证）原样抛出，由调用方
     按读不到这个后端归到退出码 2。`ddb_table` 是 boto3 的 `dynamodb.Table` 资源，经它的 client 发请求、与读数据同一份会话。
     """
     desc = ddb_table.meta.client.describe_table(TableName=ddb_table.name)["Table"]
-    index = _names.RUNS_STATUS_RUN_ID_GSI
+    index = _names.RUNS_STATUS_GROUP_GSI
     status = next((g.get("IndexStatus") for g in desc.get("GlobalSecondaryIndexes") or ()
                    if g.get("IndexName") == index), None)
     if status in ("ACTIVE", "UPDATING"):
@@ -1181,7 +1183,7 @@ def build_cloud_run_list_store(*, table: str, region: str | None = None, profile
     if ddb_table is None:
         ddb_table = _make_ddb_table(table, region=region, profile=profile)
     check_run_list_index(ddb_table)
-    return DynamoDBRunStore(ddb_table, list_index_name=_names.RUNS_STATUS_RUN_ID_GSI)
+    return DynamoDBRunStore(ddb_table, list_index_name=_names.RUNS_STATUS_GROUP_GSI)
 
 
 def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str | None = None) -> bytes:
@@ -1596,8 +1598,8 @@ def describe_revision_or_none_if_unlisted(ecs, revision_arn: str, **kwargs) -> d
     描述失败时按错误码分流，不解析报错文本。本实现仅在描述返回 `ClientException` 时列举核对：这个错误码泛指请求本身
     有问题（ECS 的说明里也包括调用方对动作或资源没有权限），单凭它分不出「资源不在」与其它客户端错误。从未注册过
     的 revision 在真实 ECS 上返回这个错误码；真实账户的一次观察中，发起删除后仍能描述该 revision，
-    返回状态为 `DELETE_IN_PROGRESS`，由调用方按状态判为不可用，不经过这里的列举（ADR 0038 实测项 11）；它最终消失之后的
-    返回没有核到。
+    返回状态为 `DELETE_IN_PROGRESS`，由调用方按状态判为不可用，不经过这里的列举（ADR 0038 实测项 11）；它最终消失之后
+    描述返回这个错误码，与从未注册过的相同。
     若返回其他错误，则原样抛出，该次调用不会修复这条映射（推送与重派生不会注册新的 revision 替换它）。核对时列出它所在 family 的 ACTIVE revision：列举
     成功且其中没有这个 ARN 即返回 None，调用方按本次未确认可用处理。返回 None 不证明 revision 已被注销或删除：刚注册的 revision 可能尚未出现在列举结果里，这时推送与
     重派生可能额外注册一个 revision，提交侧可能暂时拒绝提交。列举成功且其中有它，说明描述失败另有原因，原错误原样

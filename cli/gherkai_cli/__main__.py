@@ -2283,9 +2283,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
 # ============================================================================
 
 _LIST_RUNS_DEFAULT_LIMIT = 20
-# 非终态按 pending 再 running 的顺序查：run 只从 pending 走向 running，先查 pending 才不会漏掉两次分区查询之间转态的 run。
-# 「只从 pending 走向 running」对未收尾的 run 由写级保证：认领、投影与前台 job 写都不把 run 级写回 pending
-# （ADR 0034 机制三「run 级状态只进不退」条，前提是全部写者都采用该条）
+# 非终态的两个状态在云端共用一个状态分组、一次查询读出，pending 与 running 只由读回的状态区分，两者之间没有查询次序
 _LIST_RUNS_NON_TERMINAL = (Status.PENDING, Status.RUNNING)
 # 终态集取 core 真源，顺序固定为 Status 的声明序（不另行枚举，新增终态自动进清单）
 _LIST_RUNS_TERMINAL = tuple(s for s in Status if s in TERMINAL_STATUSES)
@@ -2307,8 +2305,9 @@ def _merge_run_listings(run_store, wanted: frozenset, *, limit: int) -> list:
 
     先非终态（`limit=None`）、后终态（`limit=limit`），`wanted` 只含一侧的状态时只做那一次调用。端口不按状态复筛，所以这里
     按 `wanted` 过滤**读回的**状态；按 run_id 去重，两份都有时保留后一次读回的那份（运行态只向终态推进，后读的不会更旧）；
-    读回的状态是终态的部分按 run_id 降序截前 `limit` 条，最后整体按 run_id 降序。这一顺序收窄了「两次调用之间换状态、或云端
-    索引尚未跟上，run 在两份结果里都不出现」的窗口。无法读取的行（`state` 为 None）没有可用的状态，不参与过滤与截取、找到即列出。
+    读回的状态是终态的部分按 run_id 降序截前 `limit` 条，最后整体按 run_id 降序。先非终态的依据：正常生命周期里 run 只从非终态
+    的分组走向终态分组（收尾的那次写同时改分组），先查非终态才不会漏掉两次调用之间收尾的 run；这一顺序收窄了「两次调用之间换状态、
+    或云端索引尚未跟上，run 在两份结果里都不出现」的窗口。无法读取的行（`state` 为 None）没有可用的状态，不参与过滤与截取、找到即列出。
     """
     found: dict = {}
     for part, part_limit in ((_LIST_RUNS_NON_TERMINAL, None), (_LIST_RUNS_TERMINAL, limit)):

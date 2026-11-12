@@ -201,7 +201,7 @@ gherkai list-runs --limit 50 --json > runs.json
 - **`--json`**：一个 JSON 文档，顶层是所查的落点（`backend`；本机另有 `report_dir`，云端另有 `prefix`、`region`、`ddb_table`）与执行这次清单的 gherkai 版本 `cli_version`，加上 `runs` 数组；每项的 `cli_version` 是写出这个 run 的版本（读不到为 `null`），不为 `null` 且与顶层的相同，即由当前版本写出。清单为空时 `runs` 是空数组，不打人读提示。字段见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
 - **只读**：不推进任何 run、不启动任务。判定仍对具体的 run 用 `status --wait` 取；退出码见上「退出码」一节。
 - **不在清单里的**：`run --no-report` 的执行不留运行记录，两个后端的清单里都没有它。
-- **云端后端下刚变化的 run**：状态、时刻与 job 数总是读取那一刻的值；刚提交或刚改变状态的 run 偶尔会在一次清单里缺席，稍后再列即可看到。后端刚升级时清单所用的索引可能还在建立，这段时间 `list-runs --backend cloud` 以退出码 2 结束，见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+- **云端后端下刚变化的 run**：状态、时刻与 job 数总是读取那一刻的值；刚提交或刚结束的 run 偶尔会在一次清单里缺席，稍后再列即可看到。
 
 ## 看失败原因：`explain`
 
