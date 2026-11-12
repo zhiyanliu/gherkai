@@ -200,7 +200,7 @@ def test_digest_not_in_ecr_is_a_miss(aws):
 
 
 def test_deleted_revision_is_a_miss(aws):
-    """映射里的 revision 根本不可 Describe（已删除 / 不存在，ECS 回 ClientException）→ miss。"""
+    """映射里的 revision 根本不可 Describe（不存在；真实 ECS 对从未注册过的 revision 返回 ClientException，ADR 0038 实测项 11）→ miss。"""
     recs = _seed(aws, variant="base")
     rec = dict(recs["novaact"], revision_arn="arn:aws:ecs:us-east-1:123456789012:task-definition/gone:9")
     tag = names.image_tag(_VERSION, "base")
@@ -358,8 +358,9 @@ def test_client_exception_on_a_revision_missing_from_the_active_list_is_a_miss(a
 
 
 def test_revision_deleted_by_cleanup_is_a_miss(aws):
-    """映射所指的 revision 已被注销并删除（清理回收之后的形态）：描述报 `ClientException`，本次 ACTIVE 列举未发现它
-    → miss，提示推送。"""
+    """映射所指的 revision 已被注销并删除（清理回收之后的形态）：moto 下描述报 `ClientException`，本次 ACTIVE 列举
+    未发现它 → miss，提示推送。真实 ECS 在删除完成之前描述成功、状态为 `DELETE_IN_PROGRESS`，那时由状态判为不可用；这条
+    用例守的是描述报 `ClientException` 之后的列举这一支（ADR 0038 实测项 11）。"""
     recs = _seed(aws, variant="base")
     arn = recs["novaact"]["revision_arn"]
     aws["ecs"].deregister_task_definition(taskDefinition=arn)

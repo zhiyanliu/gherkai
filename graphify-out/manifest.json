@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1794455537.9428513,
-    "ast_hash": "cf9ff9185ebf5ab2b8329a21c14e8ff8",
+    "mtime": 1794457174.2638443,
+    "ast_hash": "49deb7490a5dc93cbab126218e7e61ef",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794455843.7557435,
-    "ast_hash": "bd0cce687041d5e637308aece08fb38e",
+    "mtime": 1794457880.0528247,
+    "ast_hash": "a353a246f877831549c4e724fbd45c7e",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1794455947.251768,
-    "ast_hash": "028bdba5e1af6817f260d9ce56d3ee0d",
+    "mtime": 1794457880.0518813,
+    "ast_hash": "f71323ca3373a490a78802b86a79f29b",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1025,8 +1025,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_worker_variant.py": {
-    "mtime": 1794455910.4686894,
-    "ast_hash": "793eed0127d4f319a087d3536bed2511",
+    "mtime": 1794457880.0531003,
+    "ast_hash": "26dd7f82256fb60116fbb32d57db9c52",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_container.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794455366.4757893,
-    "ast_hash": "1e369557de24279042eccf262cb4b696",
+    "mtime": 1794457880.05333,
+    "ast_hash": "f1cf6308d53e4da7f066c85bac2f6768",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794455563.8885717,
-    "ast_hash": "591089ca9778ada063fb3ca4b71ea7b6",
+    "mtime": 1794457188.7886114,
+    "ast_hash": "5c8f5544d83e229d987a2dc555a5bd93",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1410,8 +1410,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1794455563.889202,
-    "ast_hash": "af19712f57dddaa958f6f2e289ae97a2",
+    "mtime": 1794457462.1487784,
+    "ast_hash": "ed15c5f1b3112981a80c4019bbfe3dc2",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {

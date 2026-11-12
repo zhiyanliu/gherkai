@@ -1582,7 +1582,8 @@ def _make_ecr_client(*, region, profile):
 def _aws_error_code(e: BaseException) -> str | None:
     """botocore `ClientError` 的错误码（`e.response["Error"]["Code"]`）；不是 ClientError（含 `BotoCoreError`）或取不到 → None。
 
-    各读侧据它把「资源不在」与「凭证 / 权限 / 网络坏了」分开：前者翻成带指引的 miss，后者原样冒泡给入口前端。
+    各读侧据它给读失败分流：表明资源不在的错误（ECS 的 revision 改按本次未确认可用判定，见
+    `describe_revision_or_none_if_unlisted`）翻成带指引的 miss，凭证 / 权限 / 网络等其余错误原样冒泡给入口前端。
     """
     err = getattr(e, "response", None)
     return (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
@@ -1592,18 +1593,21 @@ def describe_revision_or_none_if_unlisted(ecs, revision_arn: str, **kwargs) -> d
     """`DescribeTaskDefinition` 的完整响应；描述返回 `ClientException` 且本次 ACTIVE 列举未发现该 ARN 时返回 None
     （ADR 0038「缺失的判定口径」）。
 
-    描述失败时按错误码分流，不解析报错文本。只有错误码为 `ClientException` 时才列举核对：ECS 对已删除的 revision
-    回这个码，而它泛指请求本身有问题（ECS 的说明里也包括调用方对动作或资源没有权限），单凭错误码分不出「资源不在」与
-    其它客户端错误。这时列出它所在 family 的 ACTIVE revision：列举成功且其中没有这个 ARN 即返回 None，调用方按本次
-    未确认可用处理。返回 None 不证明 revision 已被注销或删除：刚注册的 revision 可能尚未出现在列举结果里，这时推送与
+    描述失败时按错误码分流，不解析报错文本。本实现仅在描述返回 `ClientException` 时列举核对：这个错误码泛指请求本身
+    有问题（ECS 的说明里也包括调用方对动作或资源没有权限），单凭它分不出「资源不在」与其它客户端错误。从未注册过
+    的 revision 在真实 ECS 上返回这个错误码；已发起删除的 revision 在删除完成之前描述成功、状态为
+    `DELETE_IN_PROGRESS`，由调用方按状态判为不可用，不经过这里的列举（ADR 0038 实测项 11）；删除完成之后的返回没有核到。
+    若返回其他错误，则原样抛出，该次调用不会修复这条映射（推送与重派生不会注册新的 revision 替换它）。核对时列出它所在 family 的 ACTIVE revision：列举
+    成功且其中没有这个 ARN 即返回 None，调用方按本次未确认可用处理。返回 None 不证明 revision 已被注销或删除：刚注册的 revision 可能尚未出现在列举结果里，这时推送与
     重派生可能额外注册一个 revision，提交侧可能暂时拒绝提交。列举成功且其中有它，说明描述失败另有原因，原错误原样
     抛出；列举本身失败，抛出列举的错误。其余错误（访问被拒、限流、服务端错误、网络错误，以及不是 botocore 的异常）
     含义明确，原样抛出、不发列举请求：列举只在确有歧义时发生，描述被拒时调用方看到的是缺描述权限，不会被随后一次
     列举的结果盖住。`revision_arn` 不是完整的任务定义 revision ARN 时同样原样抛出原错误、不列举。描述成功时不判状态，
     由调用方读 `status`。
     提交侧的 variant 解析与 push-worker、重派生的跳过判据和注册之后的再读共用这一个判据（`kwargs` 原样转给描述请求，
-    如 `include=["TAGS"]`）。列举需要 `ecs:ListTaskDefinitions`，只在描述报 `ClientException` 时才发出；这个动作在
-    IAM 里不支持资源级限制与条件键，只能授在全部资源上，用到它的条件因此限定在这里。
+    如 `include=["TAGS"]`）。列举需要 `ecs:ListTaskDefinitions`，只在描述报 `ClientException` 时才发出。这个动作与
+    `ecs:DescribeTaskDefinition` 都不支持资源级权限，`Resource` 必须为 `"*"`；仍可使用适用的 IAM 全局条件键，例如
+    `aws:RequestedRegion`。IAM 条件无法表达「描述报这个错误码之后才列举」，这一限定因此由这里的代码控制。
     """
     try:
         return ecs.describe_task_definition(taskDefinition=revision_arn, **kwargs)
@@ -1745,9 +1749,10 @@ def resolve_worker_variant(
     `variant=None` → 取部署级默认指针（缺失即抛，提示运行 `gherkai deploy`）。tag 由 `names.image_tag`
     单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（从源码直接运行）时
     无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
-    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS 描述报 `ClientException` 且本次
-    列举该 family 的 ACTIVE revision 未发现它（见 `describe_revision_or_none_if_unlisted`；这个错误码分不出资源不在与其它
-    客户端错误，故只在它出现时列举核对，描述的其余错误不列举、原样抛出；未列出按本次未确认可用处理，不证明已被注销或
+    **AWS 读失败按以下规则分流；其中 ECS 的「本次未确认可用」不等于确认资源不存在**。算 miss 的：SSM
+    `ParameterNotFound`（见 `_ssm_get`）、ECS 描述报 `ClientException` 且本次列举该 family 的 ACTIVE revision 未发现它
+    （见 `describe_revision_or_none_if_unlisted`；这个错误码分不出资源不在与其它客户端错误，故只在它出现时列举核对，
+    描述的其余错误不列举、原样抛出；未列出按本次未确认可用处理，不证明已被注销或
     删除，刚注册、尚未出现在列举结果里的 revision 也会在这里暂时被拒）、ECR `ImageNotFoundException` /
     `RepositoryNotFoundException`。权限不足、限流、网络等其余 botocore 异常原样抛，由入口前端按「凭证 / region / 权限」
     诊断——翻成 miss 会把缺只读权限（ADR 0038 提交者的 `ecr:DescribeImages` / `ecs:DescribeTaskDefinition` /
