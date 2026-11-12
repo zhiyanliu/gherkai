@@ -1154,11 +1154,11 @@ def check_run_list_index(ddb_table) -> None:
     """`list-runs` 的索引就绪检查（ADR 0041 决策七「索引就绪判据」）：取该表的 DescribeTable 结果判，不解析 Query 的报错文本。
 
     检查对象是列举所读的状态分组索引（`names.RUNS_STATUS_GROUP_GSI`），表上其它索引的状态不影响判定。
-    缺失、`CREATING`（为已有 STATE item 回填中）、`DELETING` 与其它未知状态抛 `RunListIndexUnavailable`；`ACTIVE` 与
+    缺失、`CREATING`（索引建立中）、`DELETING` 与其它未知状态抛 `RunListIndexUnavailable`；`ACTIVE` 与
     `UPDATING` 放行。worker revision 清理对同一索引另做检查、只放行 `ACTIVE`，比这里严（理由见 ADR 0038「不变量」清理
     pass 条），不是两处不一致。只由 `build_cloud_run_list_store` 调用，不并入 run / submit 共用的 `preflight_cloud_resources`：
-    那些命令不用这个索引，不能因它缺失或回填而被拦。DescribeTable 的 AWS 异常（表不存在、无权限、凭证）原样抛出，由调用方
-    按读不到这个后端归到退出码 2。`ddb_table` 是 boto3 的 `dynamodb.Table` 资源，经它的 client 发请求、与读数据同一份会话。
+    那些命令不用这个索引，不能因它缺失或尚未建立完成而被拦。DescribeTable 的 AWS 异常（表不存在、无权限、凭证）原样抛出，
+    由调用方按读不到这个后端归到退出码 2。`ddb_table` 是 boto3 的 `dynamodb.Table` 资源，经它的 client 发请求、与读数据同一份会话。
     """
     desc = ddb_table.meta.client.describe_table(TableName=ddb_table.name)["Table"]
     index = _names.RUNS_STATUS_GROUP_GSI

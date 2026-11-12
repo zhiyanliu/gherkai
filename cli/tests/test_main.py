@@ -3898,9 +3898,11 @@ def _listing(run_id: str, status, *, detached: bool = True, header=(1, _LR_CLI),
     return RunListing(run_id=run_id, state=state, detached=detached, header=header)
 
 
-def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=None, list_error=None, skew_rc=None):
-    """把云端 list-runs 的 AWS 边界换成替身，返回记录调用顺序的列表。parts：状态元组 → 该次端口调用返回的列举项，值为异常时
-    该次调用抛出它（只让某一次调用失败）；list_error：每次调用都抛出的异常。"""
+def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", index_list=True, parts=None, list_error=None,
+                         skew_rc=None):
+    """把云端 list-runs 的 AWS 边界换成替身，返回记录调用顺序的列表。index_status：状态分组索引的状态，None 表示表上没有
+    这个索引；index_list=False 时 DescribeTable 的响应里没有索引清单这个字段（表上没有任何索引）。parts：状态元组 → 该次
+    端口调用返回的列举项，值为异常时该次调用抛出它（只让某一次调用失败）；list_error：每次调用都抛出的异常。"""
     from types import SimpleNamespace
 
     from gherkai_core.adapters.run_store import ddb as _ddb
@@ -3919,11 +3921,12 @@ def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=
     def make_table(table, *, region, profile):
         def describe_table(*, TableName):
             calls.append(("describe", TableName))
-            if index_status is None:
+            if not index_list:
                 return {"Table": {"TableName": TableName}}
-            # 清单里排在前面的另一个索引恒为 ACTIVE：就绪判定只看状态分组索引，它未就绪时不被这个索引顶替
-            gsis = [{"IndexName": "other-index", "IndexStatus": "ACTIVE"},
-                    {"IndexName": _nm.RUNS_STATUS_GROUP_GSI, "IndexStatus": index_status}]
+            # 清单里排在前面的另一个索引恒为 ACTIVE：就绪判定只看状态分组索引，它缺失或未就绪时不被这个索引顶替
+            gsis = [{"IndexName": "other-index", "IndexStatus": "ACTIVE"}]
+            if index_status is not None:
+                gsis.append({"IndexName": _nm.RUNS_STATUS_GROUP_GSI, "IndexStatus": index_status})
             return {"Table": {"TableName": TableName, "GlobalSecondaryIndexes": gsis}}
         return SimpleNamespace(name=table, meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
 
@@ -4006,14 +4009,16 @@ def test_list_runs_cloud_limit_does_not_cut_ongoing_runs(tmp_path, monkeypatch, 
         "20261110T120000Z-a", "20261110T110000Z-b", "20261110T100000Z-c", "20261110T090000Z-d"]
 
 
-@pytest.mark.parametrize("index_status, needles", [
-    (None, ("还没有 run 清单索引",)),
-    ("CREATING", ("还在建立", "请部署方检查索引的建立进度")),
-    ("DELETING", ("正在被删除",)),
-])
-def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, needles, tmp_path, monkeypatch,
-                                                                             capsys):
-    calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status)
+@pytest.mark.parametrize("index_status, index_list, needles", [
+    (None, False, ("还没有 run 清单索引",)),  # 响应里没有索引清单
+    (None, True, ("还没有 run 清单索引",)),  # 表上只有另一个 ACTIVE 的索引
+    ("CREATING", True, ("还在建立", "请部署方检查索引的建立进度")),
+    ("DELETING", True, ("正在被删除",)),
+], ids=["no-index-list", "only-other-index-active", "creating", "deleting"])
+def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, index_list, needles, tmp_path,
+                                                                             monkeypatch, capsys):
+    """索引缺失或未就绪：退出码 2、提示点名索引，不装配 store、不发查询。"""
+    calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status, index_list=index_list)
     rc = m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == "" and "status_group-run_id-index" in cap.err

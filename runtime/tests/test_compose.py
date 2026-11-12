@@ -1393,28 +1393,41 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
         assert [r.run_id for r in store.list_runs([Status.RUNNING], limit=None)] == ["r1"]
 
 
-@pytest.mark.parametrize("status, ok", [("ACTIVE", True), ("UPDATING", True), ("CREATING", False), ("DELETING", False),
-                                        ("SOMETHING_NEW", False), (None, False)])
-def test_check_run_list_index_lets_active_and_updating_through(status, ok):
-    """判据取自 DescribeTable 里状态分组索引的 IndexStatus：ACTIVE 与 UPDATING 放行，回填中、删除中、不认识的状态与缺失都拦下
-    （None 表示表上没有任何索引，DescribeTable 的响应里也就没有索引清单）。其余情形清单里排在前面的另一个索引状态与它相反，
-    判定只看状态分组索引、不被它顶替。"""
+def _describe_only_table(table_desc):
+    """只有 DescribeTable 的 runs 表替身：describe 结果恒为 {"Table": table_desc}。"""
     from types import SimpleNamespace
 
-    other = "CREATING" if ok else "ACTIVE"
-
     def describe_table(*, TableName):
-        if status is None:
-            return {"Table": {}}
-        return {"Table": {"GlobalSecondaryIndexes": [{"IndexName": "other-index", "IndexStatus": other},
-                                                     {"IndexName": names.RUNS_STATUS_GROUP_GSI, "IndexStatus": status}]}}
+        return {"Table": table_desc}
 
-    table = SimpleNamespace(name="t", meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
+    return SimpleNamespace(name="t", meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
+
+
+@pytest.mark.parametrize("status, ok", [("ACTIVE", True), ("UPDATING", True), ("CREATING", False), ("DELETING", False),
+                                        ("SOMETHING_NEW", False)])
+def test_check_run_list_index_lets_active_and_updating_through(status, ok):
+    """判据取自 DescribeTable 里状态分组索引的 IndexStatus：ACTIVE 与 UPDATING 放行，建立中、删除中与不认识的状态都拦下。
+    清单里排在前面的另一个索引状态与它相反，判定只看状态分组索引、不被它顶替。索引缺失的情形见下一个用例。"""
+    other = "CREATING" if ok else "ACTIVE"
+    table = _describe_only_table({"GlobalSecondaryIndexes": [
+        {"IndexName": "other-index", "IndexStatus": other},
+        {"IndexName": names.RUNS_STATUS_GROUP_GSI, "IndexStatus": status}]})
     if ok:
         compose.check_run_list_index(table)
     else:
         with pytest.raises(compose.RunListIndexUnavailable, match=names.RUNS_STATUS_GROUP_GSI):
             compose.check_run_list_index(table)
+
+
+@pytest.mark.parametrize("table_desc", [
+    {},  # 表上没有任何索引：DescribeTable 的响应里没有索引清单这个字段
+    {"GlobalSecondaryIndexes": [{"IndexName": "other-index", "IndexStatus": "ACTIVE"}]},  # 只有另一个 ACTIVE 的索引
+], ids=["no-index-list", "only-other-index-active"])
+def test_check_run_list_index_reports_missing_index_even_when_another_index_is_active(table_desc):
+    """状态分组索引不在表上时一律按缺失报告，表上另有 ACTIVE 的索引也不能顶替它放行。"""
+    with pytest.raises(compose.RunListIndexUnavailable, match="还没有 run 清单索引") as exc:
+        compose.check_run_list_index(_describe_only_table(table_desc))
+    assert names.RUNS_STATUS_GROUP_GSI in str(exc.value)
 
 
 def test_run_list_locations_are_the_single_source_of_the_list_runs_top_level_keys(tmp_path, monkeypatch):

@@ -466,7 +466,7 @@ def _reference_index_problem(ddb, table: str) -> str | None:
 
     返回 None 即就绪；否则返回一句产品语言的原因，调用方据此留下全部候选并警告。缺失、`CREATING`、`UPDATING`、
     `DELETING` 与 `DescribeTable` 本身失败一律不放行：清理误判会让 run 后续的 job 起不来，跳过一趟只是让 revision
-    多留到下一趟；也不依靠「`Query` 一个回填中的索引会报错」这一没有实测过的行为。
+    多留到下一趟；也不依靠「`Query` 一个建立中的索引会报错」这一没有实测过的行为。
     """
     index = names.RUNS_STATUS_GROUP_GSI
     try:

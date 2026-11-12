@@ -229,7 +229,7 @@ def test_runs_table_has_the_sparse_status_group_gsi():
 
 def test_runs_table_has_exactly_the_status_group_gsi():
     """runs 表恰有上面一个 GSI（枚举型护栏，ADR 0030 决定六「runs 表只有一个 GSI」条）：以 `status` 为分区键的两个旧索引
-    `status-index` 与 `status-run_id-index` 都已删除，不顺手再加。没有索引以 `status` 为键，属性定义里也就没有 `status`。"""
+    `status-index` 与 `status-run_id-index` 都已从部署模板删除，不顺手再加。没有索引以 `status` 为键，属性定义里也就没有 `status`。"""
     t = _template()
     runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
             if res["Properties"]["TableName"] == "gherkai-runs"]
