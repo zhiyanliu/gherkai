@@ -108,8 +108,8 @@ def _project_running(store, meta):
 @pytest.mark.parametrize("write", [_claim, _job_write, _project_running], ids=["claim", "job-write", "projection"])
 @pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
 def test_writes_landing_running_set_live(table, store, write, drop):
-    """认领、前台 job 写与把 run 级写成 running 的投影在同一次写里写 `live`。库中已是 `live` 时是同值写；写之前缺分组属性的
-    记录由这次写补上（这一情形才能区分「写了分组」与「没碰分组」）。"""
+    """认领、前台 job 写与把 run 级写成 running 的投影写 `live`。库中已是 `live` 时是同值写；写之前缺分组属性的记录由这次写
+    补上（这一情形才能区分「写了分组」与「没碰分组」）。两者落在同一条更新请求里由下面的请求断言守。"""
     meta = _meta()
     store.create_run(meta, _initial(meta))
     if drop:
@@ -122,7 +122,8 @@ def test_writes_landing_running_set_live(table, store, write, drop):
 @pytest.mark.parametrize("status", _TERMINAL)
 @pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
 def test_terminal_writes_set_the_terminal_group(table, store, status, drop):
-    """`try_finalize` 与 `finalize_run` 在写终态的同一次写里把分组改为该终态的值（缺分组属性的记录同样补上）。"""
+    """`try_finalize` 与 `finalize_run` 把分组改为该终态的值（缺分组属性的记录同样补上；与终态落在同一条更新请求里由下面的
+    请求断言守）。"""
     for run_id, finalize in (("run-1", store.try_finalize), ("run-2", store.finalize_run)):
         meta = _meta(run_id)
         store.create_run(meta, _initial(meta))
@@ -131,6 +132,59 @@ def test_terminal_writes_set_the_terminal_group(table, store, status, drop):
         result = finalize(run_id, status, "2026-11-12T01:00:00Z")
         assert result in (True, None)
         assert _raw(table, run_id)["status_group"] == status.value
+
+
+def _record_updates(table, monkeypatch) -> list[dict]:
+    """记下发往表的每条 `update_item` 请求的参数（同 test_conditional_writes 的记录手法），请求照常执行。"""
+    calls: list[dict] = []
+    real = table.update_item
+
+    def recording(**kwargs):
+        calls.append(kwargs)
+        return real(**kwargs)
+
+    monkeypatch.setattr(table, "update_item", recording)
+    return calls
+
+
+def _top_level_sets(request: dict) -> dict[str, str]:
+    """一条 `update_item` 请求在 item 顶层 SET 的属性 → 写入值（占位名与占位值都已解析；`jobs.<id>.status` 这类嵌套路径
+    不算顶层）。本模块的更新表达式只用 SET、各赋值的右侧都是单个占位值，按逗号切分即可。"""
+    expr = request["UpdateExpression"].strip()
+    assert expr.startswith("SET "), expr
+    names = request.get("ExpressionAttributeNames") or {}
+    values = request.get("ExpressionAttributeValues") or {}
+    out: dict[str, str] = {}
+    for part in expr[len("SET "):].split(","):
+        target, _, value = (p.strip() for p in part.partition("="))
+        if "." not in target:
+            out[names.get(target, target)] = values.get(value, value)
+    return out
+
+
+def _try_finalize_failed(store, meta):
+    assert store.try_finalize(meta.run_id, Status.FAILED, "2026-11-12T01:00:00Z") is True
+
+
+def _finalize_run_failed(store, meta):
+    store.finalize_run(meta.run_id, Status.FAILED, "2026-11-12T01:00:00Z")
+
+
+@pytest.mark.parametrize("write, status", [
+    (_claim, "running"), (_job_write, "running"), (_project_running, "running"),
+    (_try_finalize_failed, "failed"), (_finalize_run_failed, "failed"),
+], ids=["claim", "job-write", "projection", "try-finalize", "finalize-run"])
+def test_run_status_and_group_are_set_in_the_same_update_request(table, store, monkeypatch, write, status):
+    """写 run 级 `status` 的更新路径把分组写在同一条更新请求里：这次写发出的请求中，在顶层写 `status` 或 `status_group` 的
+    恰有一条，两者都在其中、取值对应。只看写之后的属性照不出这一点：把一次写拆成先写 `status`、再另发一条写 `status_group`，
+    最终属性相同，中间却有一刻两者不对应。"""
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    calls = _record_updates(table, monkeypatch)
+    write(store, meta)
+    touching = [sets for sets in map(_top_level_sets, calls) if {"status", "status_group"} & sets.keys()]
+    assert len(touching) == 1, calls
+    assert touching[0]["status"] == status and touching[0]["status_group"] == _expected_group(status), touching[0]
 
 
 def test_finalize_run_overwriting_a_terminal_status_moves_the_group(table, store):

@@ -266,14 +266,18 @@ class HookedEcs:
     - `on_describe(kw, n)`：第 n 次 describe（按 ARN 分别计数，从 1 计）之前调用，可改动 moto 里的状态或抛错。
     - `on_register(arn, n)`：第 n 次注册成功之后调用。
     - `untag_error`：`UntagResource` 一律抛这个异常。
+    - `list_error`：`ListTaskDefinitions` 一律抛这个异常。
+    - `tagged` 记下每次 `TagResource` 请求的 ARN（请求发出即记，不论成败）。
     """
 
-    def __init__(self, inner, *, registered_at=None, on_describe=None, on_register=None, untag_error=None):
+    def __init__(self, inner, *, registered_at=None, on_describe=None, on_register=None, untag_error=None,
+                 list_error=None):
         self._inner = inner
         self.registered_at, self.on_describe, self.on_register = registered_at, on_describe, on_register
-        self.untag_error = untag_error
+        self.untag_error, self.list_error = untag_error, list_error
         self.describes: dict[str, int] = {}
         self.registered: list[str] = []
+        self.tagged: list[str] = []
         self.untagged: list[str] = []
         self.deregistered: list[str] = []
 
@@ -295,6 +299,15 @@ class HookedEcs:
         if self.on_register:
             self.on_register(arn, len(self.registered))
         return resp
+
+    def tag_resource(self, **kw):
+        self.tagged.append(kw["resourceArn"])
+        return self._inner.tag_resource(**kw)
+
+    def list_task_definitions(self, **kw):
+        if self.list_error is not None:
+            raise self.list_error
+        return self._inner.list_task_definitions(**kw)
 
     def untag_resource(self, **kw):
         self.untagged.append(kw["resourceArn"])
@@ -750,6 +763,93 @@ def test_skip_branch_read_failure_other_than_not_found_fails_the_command(aws):
     assert _revisions(aws, "novaact") == before
 
 
+def _deny_describe_of(arn: str, code: str = "ClientException"):
+    """`on_describe` 钩子：描述 `arn` 一律抛 `code`（ECS 对权限问题也可能回 `ClientException`）。"""
+    def deny(kw, n):
+        if kw["taskDefinition"] == arn:
+            raise _client_error(code)
+    return deny
+
+
+def test_skip_branch_client_exception_on_a_revision_still_listed_as_active_fails_the_command(aws):
+    """描述映射所指的 revision 报 `ClientException`，但它仍在 family 的 ACTIVE revision 里：描述失败另有原因（如权限），
+    原错误原样抛出、命令失败，不当成已删除去新注册、替换映射（ADR 0038「缺失的判定口径」）。"""
+    seed_backend(aws)
+    digest = "sha256:" + "d" * 64
+    _push(aws, FakeContainer(digests=[digest]))
+    arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    before = _revisions(aws, "novaact")
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=HookedEcs(aws.ecs, on_describe=_deny_describe_of(arn)),
+                                 ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
+    assert rc == 2 and "ClientException" in text, text
+    assert _revisions(aws, "novaact") == before and _mapping(aws, "novaact", "login")["revision_arn"] == arn
+
+
+def test_skip_branch_fails_the_command_when_listing_cannot_confirm_the_revision_is_gone(aws):
+    """描述失败、列举 ACTIVE revision 也失败：无法确认它已不在，列举的错误抛出、命令失败，不新注册。"""
+    seed_backend(aws)
+    digest = "sha256:" + "d" * 64
+    _push(aws, FakeContainer(digests=[digest]))
+    arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    before = _revisions(aws, "novaact")
+    ecs = HookedEcs(aws.ecs, on_describe=_deny_describe_of(arn), list_error=_client_error("AccessDeniedException"))
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
+    assert rc == 2 and "AccessDeniedException" in text, text
+    assert ecs.registered == [] and _revisions(aws, "novaact") == before
+
+
+class _Deleted:
+    """摆出「revision 已被删除」：注销它（于是列举 ACTIVE revision 不再有它），并让经 `hook` 的描述报 `ClientException`。
+
+    不调 moto 的 `DeleteTaskDefinitions`：moto 删掉 family 里编号最大的 revision 之后，下一次注册会重用这个编号、
+    得到同一个 ARN，真实 ECS 不重用编号。
+    """
+
+    def __init__(self, aws):
+        self._aws = aws
+        self.arns: set[str] = set()
+
+    def delete(self, arn: str) -> None:
+        self._aws.ecs.deregister_task_definition(taskDefinition=arn)
+        self.arns.add(arn)
+
+    def hook(self, kw, n):
+        if kw["taskDefinition"] in self.arns:
+            raise _client_error("ClientException")
+
+
+def test_skip_branch_treats_a_deleted_revision_as_a_missing_mapping(aws):
+    """二元组一致、映射所指的 revision 已被删除（描述报 `ClientException`，列举确认它不在 ACTIVE revision 里）：按映射缺失
+    处理，新注册一个替换映射，不给已删除的那个打 tag。"""
+    seed_backend(aws)
+    digest = "sha256:" + "d" * 64
+    _push(aws, FakeContainer(digests=[digest]))
+    gone = _mapping(aws, "novaact", "login")["revision_arn"]
+    deleted = _Deleted(aws)
+    deleted.delete(gone)
+    ecs = HookedEcs(aws.ecs, on_describe=deleted.hook)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
+    assert rc == 0, text
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == ecs.registered[0] != gone
+    assert "已不可用" in text and gone not in ecs.tagged
+
+
+def test_digest_change_does_not_tag_a_replaced_revision_that_is_no_longer_active(aws):
+    """改 digest 重推、映射所指的旧 revision 已注销：替换映射之后不对它发打标请求（已不是 ACTIVE 的不打，ADR 0038
+    「注册与回收的竞争」段其三），也不打印打标失败的警告。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "1" * 64]))
+    old = _mapping(aws, "novaact", "login")["revision_arn"]
+    aws.ecs.deregister_task_definition(taskDefinition=old)
+    ecs = HookedEcs(aws.ecs)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
+                     FakeContainer(digests=["sha256:" + "2" * 64]))
+    assert rc == 0, text
+    assert _mapping(aws, "novaact", "login")["revision_arn"] != old
+    assert old not in ecs.tagged, ecs.tagged
+    assert "记录退休时刻失败" not in text
+
+
 def _tag_on_register(aws, *, times: int):
     """新注册的前 `times` 个 revision 在注册之后、再读之前被打上 `gherkai:retired-at`（模拟恰有一趟清理给它补打）。"""
     def on_register(arn, n):
@@ -781,6 +881,74 @@ def test_reread_failing_twice_fails_the_command_without_touching_the_mapping(aws
                      FakeContainer(digests=["sha256:" + "2" * 64]))
     assert rc == 2 and "请重新执行" in text and len(ecs.registered) == 2
     assert _mapping(aws, "novaact", "login") == before
+
+
+def _ecs_deleting_on_register(aws, *, times: int) -> HookedEcs:
+    """新注册的前 `times` 个 revision 在注册之后、再读之前被删除（模拟一趟清理已把它回收）。"""
+    deleted = _Deleted(aws)
+
+    def on_register(arn, n):
+        if n <= times:
+            deleted.delete(arn)
+
+    return HookedEcs(aws.ecs, on_register=on_register, on_describe=deleted.hook)
+
+
+def test_reread_finding_the_new_revision_deleted_registers_again(aws):
+    """写映射之前的再读发现刚注册的 revision 已被删除：与带着 tag、已不是 ACTIVE 一样重新注册一个，写进映射的是第二个
+    （ADR 0038 步 6），不让命令以读取错误结束。"""
+    seed_backend(aws)
+    ecs = _ecs_deleting_on_register(aws, times=1)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer())
+    assert rc == 0, text
+    first, second = ecs.registered
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == second
+    assert first not in _revisions(aws, "novaact")
+
+
+def test_reread_finding_both_new_revisions_deleted_fails_the_command(aws):
+    """连续两次注册的 revision 在再读时都已被删除：命令失败并提示重新执行，映射不改动。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "1" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    ecs = _ecs_deleting_on_register(aws, times=2)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
+                     FakeContainer(digests=["sha256:" + "2" * 64]))
+    assert rc == 2 and "请重新执行" in text and len(ecs.registered) == 2, text
+    assert _mapping(aws, "novaact", "login") == before
+
+
+def test_new_revision_reclaimed_by_real_cleanup_passes_before_the_reread_is_registered_again(aws):
+    """两趟真实的清理 pass 在注册与再读之间回收刚注册的 revision：第一趟按孤儿补打 `gherkai:retired-at`，时钟推进过静默期
+    之后第二趟注销并删除它；推送继续时再读确认它已不在，重新注册一个并写进映射。
+
+    moto 删掉 family 里编号最大的 revision 之后，下一次注册重用这个编号、得到同一个 ARN（真实 ECS 不重用编号），所以这里
+    按注册次数与映射所指 revision 的状态断言，不比较两次注册的 ARN。"""
+    seed_backend(aws)
+    t = [NOW]
+    clock = lambda: t[0]  # noqa: E731
+    cleaner = HookedEcs(aws.ecs, registered_at=NOW - timedelta(minutes=10))
+    passes: list[workers.CleanupOutcome] = []
+
+    def reclaim(arn, n):
+        if n != 1:
+            return
+        passes.append(_cleanup(aws, clock, ecs=cleaner)[0])
+        assert names.TAG_RETIRED_AT in _tags(aws, arn)
+        t[0] += workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1)
+        passes.append(_cleanup(aws, clock, ecs=cleaner)[0])
+        assert arn in passes[-1].deleted
+
+    ecs = HookedEcs(aws.ecs, on_register=reclaim)
+    out, text = _out()
+    rc = workers.push_worker("acme:img", engine="novaact", variant="login", set_default=False, cli_version=VERSION,
+                             prefix=PREFIX, container=FakeContainer(),
+                             aws=workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), clock=clock, out=out)
+    assert rc == 0, text()
+    assert len(passes) == 2 and len(ecs.registered) == 2
+    mapped = _mapping(aws, "novaact", "login")["revision_arn"]
+    assert mapped == ecs.registered[1] and mapped in _revisions(aws, "novaact")
+    assert names.TAG_RETIRED_AT not in _tags(aws, mapped)
 
 
 def test_writing_the_mapping_is_followed_by_removing_retired_at_from_the_new_revision(aws):
@@ -1435,6 +1603,24 @@ def test_rederive_reregisters_when_the_mapped_revision_is_no_longer_active(aws):
         (before["digest"], before["pushed_at"], before["template_arn"])
     assert names.TAG_RETIRED_AT not in _tags(aws, before["revision_arn"])
     assert "已不可用" in text()
+
+
+def test_rederive_with_a_changed_template_does_not_tag_a_replaced_revision_that_is_no_longer_active(aws):
+    """deploy 改了模板、映射所指的旧 revision 已注销：重派生替换映射之后不对它发打标请求，输出也不说它已标记待清理。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "3" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    aws.ecs.deregister_task_definition(taskDefinition=before["revision_arn"])
+    new_templates = seed_backend(aws, cpu="2048")
+    ecs = HookedEcs(aws.ecs)
+    out, text = _out()
+    [result] = workers.rederive_variants(prefix=PREFIX, engines=("novaact",), version=VERSION,
+                                         aws=workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
+                                         clock=_at(NOW), out=out)
+    assert _mapping(aws, "novaact", "login")["template_arn"] == new_templates["novaact"]
+    assert result.revision_arn != before["revision_arn"]
+    assert before["revision_arn"] not in ecs.tagged, ecs.tagged
+    assert "运行配置已按本次部署更新" in text() and "已标记待清理" not in text()
 
 
 def test_rederive_skip_removes_a_stale_retired_at_and_does_not_read_the_template(aws):

@@ -272,6 +272,104 @@ def test_network_error_on_ecr_is_not_a_miss(aws):
                                        backend_version=_VERSION, **clients)
 
 
+class _FailingEcs:
+    """moto 的 ecs client：描述一律抛 `describe_error`；`list_error` 非 None 时列举也抛它，否则列举照常转发。"""
+
+    def __init__(self, inner, *, describe_error: Exception, list_error: Exception | None = None):
+        self._inner, self._describe_error, self._list_error = inner, describe_error, list_error
+
+    def describe_task_definition(self, **_kw):
+        raise self._describe_error
+
+    def list_task_definitions(self, **kw):
+        if self._list_error is not None:
+            raise self._list_error
+        return self._inner.list_task_definitions(**kw)
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def test_client_exception_on_a_revision_still_listed_as_active_is_not_a_miss(aws):
+    """描述报 `ClientException`、而这个 revision 仍在 family 的 ACTIVE revision 里：ECS 对权限问题也可能回这个码，
+    描述失败另有原因，原错误原样抛出，不翻成「请推送该 variant」的 miss（ADR 0038「缺失的判定口径」）。"""
+    from botocore.exceptions import ClientError
+
+    _seed(aws, variant="base")
+    clients = {**aws, "ecs": _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException",
+                                                                                  "DescribeTaskDefinition"))}
+    with pytest.raises(ClientError) as e:
+        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
+                                       backend_version=_VERSION, **clients)
+    assert not isinstance(e.value, compose.WorkerVariantError)
+    assert e.value.response["Error"]["Code"] == "ClientException"
+
+
+def test_listing_failure_after_a_describe_failure_is_not_a_miss(aws):
+    """描述失败、列举 ACTIVE revision 也失败：无法确认 revision 已不在，抛出列举的错误，不翻成 miss。"""
+    from botocore.exceptions import ClientError
+
+    _seed(aws, variant="base")
+    clients = {**aws, "ecs": _FailingEcs(
+        aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"),
+        list_error=_client_error("AccessDeniedException", "ListTaskDefinitions"))}
+    with pytest.raises(ClientError) as e:
+        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
+                                       backend_version=_VERSION, **clients)
+    assert not isinstance(e.value, compose.WorkerVariantError)
+    assert e.value.response["Error"]["Code"] == "AccessDeniedException"
+
+
+def test_revision_deleted_by_cleanup_is_a_miss(aws):
+    """映射所指的 revision 已被注销并删除（清理回收之后的形态）：描述报 `ClientException`，列举确认它不在 ACTIVE revision
+    里 → miss，提示推送。"""
+    recs = _seed(aws, variant="base")
+    arn = recs["novaact"]["revision_arn"]
+    aws["ecs"].deregister_task_definition(taskDefinition=arn)
+    aws["ecs"].delete_task_definitions(taskDefinitions=[arn])
+    with pytest.raises(compose.WorkerVariantError) as e:
+        _resolve(aws)
+    assert "不可 Describe" in str(e.value) and arn in str(e.value)
+
+
+class _PagedListing:
+    """描述一律报 `ClientException`；列举按 `pages` 分页返回（最后一页不带 `nextToken`），记下每次列举请求的参数。"""
+
+    def __init__(self, pages: list[list[str]]):
+        self._pages, self.requests = pages, []
+
+    def describe_task_definition(self, **_kw):
+        raise _client_error("ClientException", "DescribeTaskDefinition")
+
+    def list_task_definitions(self, **kw):
+        self.requests.append(kw)
+        index = int(kw.get("nextToken") or 0)
+        resp = {"taskDefinitionArns": self._pages[index]}
+        if index + 1 < len(self._pages):
+            resp["nextToken"] = str(index + 1)
+        return resp
+
+
+_FAMILY_ARN = "arn:aws:ecs:us-east-1:123456789012:task-definition/gherkai-novaact-worker"
+
+
+def test_listing_is_read_past_the_first_page_before_a_revision_counts_as_gone():
+    """列举分页时读完全部页才下结论：这个 revision 在第二页里即原错误抛出，不当成已删除；各页都没有才返回 None。
+    同前缀的另一个 family 的 revision 不算（按完整 ARN 比较）。"""
+    from botocore.exceptions import ClientError
+
+    target = f"{_FAMILY_ARN}:7"
+    ecs = _PagedListing([[f"{_FAMILY_ARN}-x:7", f"{_FAMILY_ARN}:5"], [target]])
+    with pytest.raises(ClientError):
+        compose.describe_revision_unless_gone(ecs, target)
+    assert [r.get("nextToken") for r in ecs.requests] == [None, "1"]
+    assert all(r["familyPrefix"] == "gherkai-novaact-worker" and r["status"] == "ACTIVE" for r in ecs.requests)
+
+    ecs = _PagedListing([[f"{_FAMILY_ARN}-x:7", f"{_FAMILY_ARN}:5"], [f"{_FAMILY_ARN}:6"]])
+    assert compose.describe_revision_unless_gone(ecs, target) is None
+    assert len(ecs.requests) == 2
+
+
 def test_one_engine_missing_fails_whole_resolution(aws):
     """一个 run 一个 variant 名、某引擎缺该 variant 即严格失败（ADR 0038）——不给「另一引擎凑合运行」的静默路径。"""
     _seed(aws, variant="base", engines=("novaact",))

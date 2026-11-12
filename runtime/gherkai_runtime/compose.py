@@ -1587,6 +1587,50 @@ def _aws_error_code(e: BaseException) -> str | None:
     return (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
 
 
+def describe_revision_unless_gone(ecs, revision_arn: str, **kwargs) -> dict | None:
+    """`DescribeTaskDefinition` 的完整响应；只在确认这个 revision 已不是 ACTIVE 时返回 None（ADR 0038「缺失的判定口径」）。
+
+    描述失败时不凭错误码或报错文本判断：ECS 对已删除的 revision 回 `ClientException`，这个错误码也可能表示权限问题。
+    改为列出它所在 family 的 ACTIVE revision 核对：列举成功且其中没有这个 ARN 即返回 None（它已删除、已注销或从未存在，
+    都不能再起新 task）；列举成功且其中有它，说明描述失败另有原因，原错误原样抛出；列举本身失败，抛出列举的错误。
+    不是 botocore 异常的、ARN 解析不出 family 的，原样抛出、不列举。描述成功时不判状态，由调用方读 `status`。
+    提交侧的 variant 解析与 push-worker、重派生的跳过判据和注册之后的再读共用这一个判据（`kwargs` 原样转给描述请求，
+    如 `include=["TAGS"]`）。列举需要 `ecs:ListTaskDefinitions`，只在描述失败时才发出。
+    """
+    try:
+        return ecs.describe_task_definition(taskDefinition=revision_arn, **kwargs)
+    except Exception as exc:
+        family = _task_def_family_of(revision_arn)
+        if not is_botocore_error(exc) or family is None or _listed_as_active(ecs, family, revision_arn):
+            raise
+        return None
+
+
+def _task_def_family_of(revision_arn: str) -> str | None:
+    """`arn:aws:ecs:<region>:<account>:task-definition/<family>:<revision>` → family；不是这种完整形态 → None。"""
+    _, sep, resource = revision_arn.partition(":task-definition/")
+    family, colon, revision = resource.rpartition(":")
+    return family if sep and colon and family and revision.isdigit() else None
+
+
+def _listed_as_active(ecs, family: str, revision_arn: str) -> bool:
+    """`ListTaskDefinitions(familyPrefix=family, status=ACTIVE)` 翻页读完，`revision_arn` 在其中吗？
+
+    `familyPrefix` 是前缀匹配，按完整 ARN 逐字比较即可排除同前缀的其它 family。列举失败原样抛出。
+    """
+    token = None
+    while True:
+        kwargs = {"familyPrefix": family, "status": "ACTIVE"}
+        if token:
+            kwargs["nextToken"] = token
+        resp = ecs.list_task_definitions(**kwargs)
+        if revision_arn in (resp.get("taskDefinitionArns") or []):
+            return True
+        token = resp.get("nextToken")
+        if not token:
+            return False
+
+
 def _ssm_get(ssm, path: str) -> str | None:
     """读一个 SSM String 参数 → 值（strip 后空串视作缺失）；**`ParameterNotFound` → None，其余异常照抛**。
 
@@ -1686,10 +1730,11 @@ def resolve_worker_variant(
     `variant=None` → 取部署级默认指针（缺失即抛，提示运行 `gherkai deploy`）。tag 由 `names.image_tag`
     单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（从源码直接运行）时
     无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
-    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS `ClientException`（revision
-    不可 Describe）、ECR `ImageNotFoundException` / `RepositoryNotFoundException`。权限不足、限流、网络等其余 botocore 异常
+    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS 描述失败且列举该 family 的
+    ACTIVE revision 确认其中没有它（见 `describe_revision_unless_gone`；`ClientException` 也可能表示权限问题，不凭错误码判）、
+    ECR `ImageNotFoundException` / `RepositoryNotFoundException`。权限不足、限流、网络等其余 botocore 异常
     原样抛，由入口前端按「凭证 / region / 权限」诊断——翻成 miss 会把缺只读权限（ADR 0038 提交者的 `ecr:DescribeImages` /
-    `ecs:DescribeTaskDefinition`）的提交者引去重推镜像、原地绕圈。
+    `ecs:DescribeTaskDefinition` / `ecs:ListTaskDefinitions`）的提交者引去重推镜像、原地绕圈。
     句柄可注入（测试/复用同一 session）；未注入则惰性建。
     """
     if not cli_version:
@@ -1720,12 +1765,10 @@ def resolve_worker_variant(
         if rec is None:
             raise _miss(engine, "SSM 里没有这个（引擎，variant）的镜像映射")
         revision_arn, digest = rec["revision_arn"], rec["digest"]
-        try:
-            td = ecs.describe_task_definition(taskDefinition=revision_arn)
-        except Exception as e:
-            if _aws_error_code(e) == "ClientException":  # ECS 对不存在 / 已删除的 revision 回这个码；其余错误原样抛
-                raise _miss(engine, f"task-def revision {revision_arn} 已不可 Describe（可能已被清理删除）") from e
-            raise
+        td = describe_revision_unless_gone(ecs, revision_arn)  # 确认已不是 ACTIVE 才返回 None，其余读失败原样抛
+        if td is None:
+            raise _miss(engine, f"task-def revision {revision_arn} 已不可 Describe，"
+                                f"也不在该 family 的 ACTIVE revision 里（可能已被清理删除）")
         if (td.get("taskDefinition", {}).get("status") or "").upper() != "ACTIVE":
             raise _miss(engine, f"task-def revision {revision_arn} 不是 ACTIVE（已退休/注销，不能再起新 task）")
         repo = _names.ecr_repo_name(prefix, engine)

@@ -1624,7 +1624,7 @@ def _cmd_submit(args) -> int:
     - **local**：setsid fork per-run 进程执行 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
     - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
       （runs Stream INSERT→kicker 起首批→events Stream→reconciler→…→finalize），**提交完真关机也能运行到结束**。
-      CLI 不留本机进程；submit 机器没有任何 ECS 写或执行权限（只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition，
+      CLI 不留本机进程；submit 机器没有任何 ECS 写或执行权限（只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition / ListTaskDefinitions，
       完整权限面见 `_submit_cloud` 里 create_run 前的注释）。
     退出码表示提交成功与否（非 run 判定；判定由 status 查）。
     """
