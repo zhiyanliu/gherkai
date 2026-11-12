@@ -128,7 +128,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 用 `gherkai explain <run_id> --backend cloud` 看 job 的 `message` 与证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
 | `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端在 1.4.0 之前部署（那时的部署不写版本戳），之后没有升级过；它会丢掉这类 run 的设备目标或会话预热设置，结果可能被误判为通过 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`；之后 `doctor --backend cloud` 的 `backend.devices.project` 行应显示项目 ARN |
-| `list-runs --backend cloud` 以退出码 2 结束，`云端后端的 run 清单索引还在建立，暂时不能列出 run。…` | AWS 还在为运行记录表建立清单所用的索引 | 稍后重试；其它命令不受影响。长时间仍是这样时，请部署方用当前版本的 `gherkai deploy` 重新部署后端 |
+| `list-runs --backend cloud` 以退出码 2 结束，`云端后端的 run 清单索引还在建立，暂时不能列出 run。…` | AWS 还在为运行记录表建立清单所用的索引 | 稍后重试；其它命令不受影响。长时间仍是这样时，请部署方检查索引的建立进度 |
 | `list-runs --backend cloud` 以退出码 2 结束，`云端后端还没有 run 清单索引，不能列出 run。…`，或说索引 `正在被删除` | 这个后端还没有用当前版本部署，或索引被删除了 | 请部署方用当前版本的 `gherkai deploy` 重新部署后端 |
 | `list-runs --backend cloud` 以退出码 2 结束，`读取运行状态表 … 时重试 … 次后仍有 … 个 run 没有读回（通常是读取被限流）` | 读回运行状态时被限流，为免给出缺行的清单，这次没有列出 | 稍后重试 |
 | `list-runs --backend cloud 读不到运行状态表 …（表、索引、凭证、region 或权限）：…` | 表不存在（`--prefix`、`--ddb-table` 或 region 不对），或凭证缺列出 run 所需的权限 | 先按上面「资源缺失」一行核对前缀与 region；权限缺的是索引上的 `dynamodb:Query` 与表上的 `dynamodb:BatchGetItem`，见[云端后端](./cloud-backend.md)「团队成员需要的最小云端权限」 |

@@ -104,7 +104,7 @@
 | `status` / `explain` 以退出码 2 结束、说提交记录由更新或更早版本写出 | 记录格式与本机 CLI 不一致 | 更新版本写出的就升级本机 CLI；更早版本写出的就按消息换用那个版本查看，或用当前版本重新提交；同一个报告目录不要混用 1.4 与 1.5 的 CLI |
 | `list-runs` 某行状态列是「无法读取（可能由其它版本写出），用 status 查看」 | 这个 run 的运行状态记录无法解析，可能由另一个版本写出，也可能已损坏 | 照提示对这个 run_id 用 `status`；格式不一致时，按上方「提交记录由更新或更早版本写出」一行处理 |
 | `list-runs` 某行「版本」列的版本与表格上方点明的当前版本不同 | 这个 run 由另一个版本的 gherkai 写出。版本列显示「未知」是读不到写出它的版本；表格上方没有那一行、所有行都不带 `*` 是当前版本取不到，这时不能据此判断 | 对这个 run_id 用 `status`；格式不一致时，按上方「提交记录由更新或更早版本写出」一行处理 |
-| `list-runs --backend cloud` 以退出码 2 结束、说 run 清单索引「还在建立」 | AWS 还在为运行状态表建立清单所用的索引 | 稍后重试；长时间仍是这样时，交部署方用当前版本的 `gherkai deploy` 重新部署（你不自己运行） |
+| `list-runs --backend cloud` 以退出码 2 结束、说 run 清单索引「还在建立」 | AWS 还在为运行状态表建立清单所用的索引 | 稍后重试；长时间仍是这样时，请部署方检查索引的建立进度 |
 | `list-runs --backend cloud` 以退出码 2 结束、说「还没有 run 清单索引」或索引「正在被删除」 | 后端还没有用当前版本部署，或索引被删 | 交部署方用当前版本的 `gherkai deploy` 重新部署（你不自己运行） |
 | `list-runs --backend cloud` 以退出码 2 结束、说重试后仍有 run 没有读回 | 读取被限流 | 稍后重试 |
 | `list-runs --backend cloud` 以退出码 2 结束、说读不到运行状态表 | 前缀、表名或 region 不对，或凭证缺索引上的 `dynamodb:Query`、表上的 `dynamodb:BatchGetItem` | 先核对 `--prefix` / `--region`；缺权限就交人补（清单见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 「团队成员需要的最小云端权限」一节） |

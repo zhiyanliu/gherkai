@@ -27,7 +27,7 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 
 一套 CloudFormation stack，名字随 `--prefix` 走（前缀 `gherkai-` 对应 stack `BackendStack-gherkai`），因此同一账户可按前缀并存多套环境，例如 `prod-` 与 `stage-`：
 
-- **DynamoDB**：`<prefix>runs`（run 状态，带一个索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
+- **DynamoDB**：`<prefix>runs`（run 状态，带有索引 `status_group-run_id-index`：`gherkai list-runs` 用它列出 run，清理用它确认旧的 worker 任务定义 revision 不再被未结束的 run 使用）与 `<prefix>events`（执行事件，带 TTL 自动过期），两张表按请求计费。
 - **S3**：`<prefix>artifacts`（判定结果、报告、引擎产物，以及设备目标的安装包；派给 worker 的输入对象 7 天自动过期，`apps/` 下的安装包 14 天自动过期，复用与保留规则见 [`configuration.md`](./configuration.md)）。
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。

@@ -575,8 +575,8 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/ports.py": {
-    "mtime": 1794460732.4864995,
-    "ast_hash": "1e065ad73ac2cbb3ce5e758bc682d824",
+    "mtime": 1794462437.3413582,
+    "ast_hash": "b3bda90d598284cd7cde5ff9672bbf21",
     "semantic_hash": ""
   },
   "core/gherkai_core/project.py": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794459893.6261554,
-    "ast_hash": "a65b23386dc1176bf22111a570fcf6e0",
+    "mtime": 1794462437.3406107,
+    "ast_hash": "88882f63c2fe0734e44e79b4235010a7",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1225,8 +1225,8 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skills/gherkai/references/setup-and-diagnosis.md": {
-    "mtime": 1794460039.2659652,
-    "ast_hash": "bdd43a7c75f73af1624cd1269a8d4ab0",
+    "mtime": 1794462437.341114,
+    "ast_hash": "c87835e6a22c238ebd2e2b105a40d113",
     "semantic_hash": ""
   },
   "skills/gherkai-evals/evals.json": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
-    "mtime": 1794460108.652941,
-    "ast_hash": "49e105819965395a98c3ea6dc4d10991",
+    "mtime": 1794462437.341875,
+    "ast_hash": "0528ddaacd364a530c00f5db51f591c9",
     "semantic_hash": ""
   },
   "docs/internals/deterministic-step-lifecycle.md": {
@@ -1410,8 +1410,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1794460039.2645793,
-    "ast_hash": "06204f46c22314c99eff97093acc8cce",
+    "mtime": 1794462437.3416328,
+    "ast_hash": "3e11854b7e3822722cc24c69713b98c9",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {
@@ -1435,8 +1435,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/troubleshooting.md": {
-    "mtime": 1794460039.265737,
-    "ast_hash": "328832b1f11f96e941e509abb62594f4",
+    "mtime": 1794462437.3409793,
+    "ast_hash": "318004df5f719ec9865932fb579b0ebe",
     "semantic_hash": ""
   },
   "docs/user-guide/writing-deterministic-steps.md": {

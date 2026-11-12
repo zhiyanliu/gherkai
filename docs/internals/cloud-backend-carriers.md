@@ -52,7 +52,7 @@
 
 **①→② 之间的提交会被拒绝，这是预期行为**：提交侧五个 cloud 入口（`run` / `submit` / `status` / `list-runs` / `explain`）都先经过 `compose.check_backend_skew`，CLI 新于后端 → `SKEW_BLOCK` → 退出码 2、**无放行口**；② 执行完即恢复。不希望改动本机安装的部署方可以用 `uvx --from 'gherkai[deploy-aws]==X.Y.Z' gherkai deploy` 先升级后端。
 
-**② 结束时新加的 GSI 可能仍在回填**：给已有的 runs 表加索引（如 `status_group-run_id-index`）时，DynamoDB 在后台为已有的 STATE item 回填，CloudFormation 发起建索引后不等回填完成就继续更新。回填期间（`DescribeTable` 里该索引的 `IndexStatus` 为 `CREATING`）`list-runs` 以退出码 2 结束并说明须等索引就绪，清理跳过这一趟、不注销任何 revision；`run` / `submit` 等命令不用这个索引，不受影响。索引 `ACTIVE` 之前这张表也不能再被更新，这段时间里再次执行要改 runs 表的 `gherkai deploy` 会失败。权威：[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策七「更早的索引形态」与「索引就绪判据」条，清理一侧见 [ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」清理 pass 条。
+**② 结束时新加的 GSI 可能仍在回填**：给已有的 runs 表加索引（如 `status_group-run_id-index`）时，DynamoDB 在后台为已有且带 `status_group` 属性的 STATE item 回填，CloudFormation 发起建索引后不等回填完成就继续更新。回填期间（`DescribeTable` 里该索引的 `IndexStatus` 为 `CREATING`）`list-runs` 以退出码 2 结束并说明须等索引就绪，清理跳过这一趟、不注销任何 revision；`run` / `submit` 等命令不用这个索引，不受影响。索引 `ACTIVE` 之前这张表也不能再被更新，这段时间里再次执行要改 runs 表的 `gherkai deploy` 会失败。权威：[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策七「更早的索引形态」与「索引就绪判据」条，清理一侧见 [ADR 0038](../adr/0038-worker-image-delivery.md)「不变量」清理 pass 条。
 
 **③ 不能提前到 ② 之前**：镜像 tag 含 CLI 版本（`names.image_tag`），提前推送等于推入一个后端尚不解析的版本命名空间。`push-worker` / `list-workers` 各自带同一道 skew 闸（`workers._skew_gate`）拦截此情形：CLI 新于后端时以退出码 2 结束，并输出一行以「不提供放行选项的原因：」开头的说明。`gherkai deploy` 的四步不做这道前置（理由见 ADR 0038「命令族」节 `push-worker` 与 `list-workers` 的前置条）。
 
