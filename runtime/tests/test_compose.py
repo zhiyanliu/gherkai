@@ -1347,25 +1347,23 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
 # ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 用 moto 模拟响应 ----
 
 def _moto_runs_table(*, with_list_index: bool):
-    """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的状态分组索引。
-    另带一个以 status 为分区键的索引，确认判定只看状态分组索引、不被表上别的索引顶替。"""
+    """moto 下建一张 runs 表（主键 run_id 与 item_type，与部署侧的键结构相同）：with_list_index 决定有没有列举用的状态分组索引，
+    没有时表上不带任何索引。"""
     import boto3
-    gsis = [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI,
-             "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}, {"AttributeName": "run_id", "KeyType": "RANGE"}],
-             "Projection": {"ProjectionType": "KEYS_ONLY"}}]
+    index_args = {}
     if with_list_index:
-        gsis.append({"IndexName": names.RUNS_STATUS_GROUP_GSI,
-                     "KeySchema": [{"AttributeName": names.STATE_STATUS_GROUP_ATTR, "KeyType": "HASH"},
-                                   {"AttributeName": "run_id", "KeyType": "RANGE"}],
-                     "Projection": {"ProjectionType": "INCLUDE",
-                                    "NonKeyAttributes": [names.STATE_WORKER_TASK_DEF_ARNS_ATTR]}})
+        index_args["GlobalSecondaryIndexes"] = [{
+            "IndexName": names.RUNS_STATUS_GROUP_GSI,
+            "KeySchema": [{"AttributeName": names.STATE_STATUS_GROUP_ATTR, "KeyType": "HASH"},
+                          {"AttributeName": "run_id", "KeyType": "RANGE"}],
+            "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": [names.STATE_WORKER_TASK_DEF_ARNS_ATTR]}}]
     ddb = boto3.resource("dynamodb", region_name="us-east-1")
     return ddb.create_table(
         TableName="vfy-runs", BillingMode="PAY_PER_REQUEST",
         KeySchema=[{"AttributeName": "run_id", "KeyType": "HASH"}, {"AttributeName": "item_type", "KeyType": "RANGE"}],
         AttributeDefinitions=[{"AttributeName": a, "AttributeType": "S"} for a in (
-            "run_id", "item_type", "status", *((names.STATE_STATUS_GROUP_ATTR,) if with_list_index else ()))],
-        GlobalSecondaryIndexes=gsis)
+            "run_id", "item_type", *((names.STATE_STATUS_GROUP_ATTR,) if with_list_index else ()))],
+        **index_args)
 
 
 @pytest.mark.parametrize("with_list_index", [True, False])
@@ -1399,16 +1397,17 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
                                         ("SOMETHING_NEW", False), (None, False)])
 def test_check_run_list_index_lets_active_and_updating_through(status, ok):
     """判据取自 DescribeTable 里状态分组索引的 IndexStatus：ACTIVE 与 UPDATING 放行，回填中、删除中、不认识的状态与缺失都拦下
-    （None 表示表上没有它）。表上以 status 为分区键的索引状态与它相反，判定不受影响。"""
+    （None 表示表上没有任何索引，DescribeTable 的响应里也就没有索引清单）。其余情形清单里排在前面的另一个索引状态与它相反，
+    判定只看状态分组索引、不被它顶替。"""
     from types import SimpleNamespace
 
     other = "CREATING" if ok else "ACTIVE"
 
     def describe_table(*, TableName):
-        gsis = [{"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": other}]
-        if status is not None:
-            gsis.append({"IndexName": names.RUNS_STATUS_GROUP_GSI, "IndexStatus": status})
-        return {"Table": {"GlobalSecondaryIndexes": gsis}}
+        if status is None:
+            return {"Table": {}}
+        return {"Table": {"GlobalSecondaryIndexes": [{"IndexName": "other-index", "IndexStatus": other},
+                                                     {"IndexName": names.RUNS_STATUS_GROUP_GSI, "IndexStatus": status}]}}
 
     table = SimpleNamespace(name="t", meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
     if ok:

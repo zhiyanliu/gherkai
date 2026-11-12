@@ -180,9 +180,6 @@ TAG_RETIRED_AT = "gherkai:retired-at"
 # runs 表 STATE item 的顶层属性名：本 run 用到的 worker task-def revision ARN 列表（清理 pass 的运行中 run
 # 引用检查按它判定，沿用 ADR 0034 `detached` 顶层标记先例）。
 STATE_WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
-# runs 表按 `status` 分区、`run_id` 排序的稀疏 GSI 名（同样只索引 STATE item，投影只有键）：已没有读者，`list-runs`
-# 与清理都读下面的 RUNS_STATUS_GROUP_GSI；它仍在 stack 的模板里，按 ADR 0030 决定六「形态变更」条单独一次部署删除。
-RUNS_STATUS_RUN_ID_GSI = "status-run_id-index"
 # runs 表 STATE item 的顶层属性名：由 run 级 `status` 派生的状态分组（非终态取 STATUS_GROUP_LIVE，终态取该终态的状态值；
 # 写端与派生函数在 `gherkai_core.adapters.run_store.ddb.status_group`，ADR 0030 决定六）。
 STATE_STATUS_GROUP_ATTR = "status_group"

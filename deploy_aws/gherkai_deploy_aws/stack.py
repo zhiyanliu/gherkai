@@ -1,9 +1,8 @@
 """BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore，带两个稀疏 GSI：按状态分组分区、以 run_id 排序的 status_group-run_id-index
-  供 worker revision 清理的引用检查（ADR 0038）与 list-runs（ADR 0041 决策七）共用，ADR 0030 决定六；按 status 分区、
-  以 run_id 排序的 status-run_id-index 已没有读者，按 ADR 0030 决定六「形态变更」条删除）
+- DynamoDB：{prefix}runs（控制面/RunStore，只带一个稀疏 GSI：按状态分组分区、以 run_id 排序的 status_group-run_id-index，
+  供 worker revision 清理的引用检查（ADR 0038）与 list-runs（ADR 0041 决策七）共用，ADR 0030 决定六）
   + {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片；设备目标的安装包在桶根下
   apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
@@ -192,16 +191,7 @@ class BackendStack(Stack):
             stream=dynamodb.StreamViewType.NEW_IMAGE,  # ADR 0034：INSERT 触发 kicker Lambda 冷启动
             removal_policy=RemovalPolicy.RETAIN,  # 保留数据、防误删（stack 销毁不带走表）
         )
-        # **按 `status` 分区、`run_id` 排序的稀疏 GSI**（投影 KEYS_ONLY，schema 登记在 ADR 0030 决定六）：已没有读者，
-        # `list-runs` 与清理都读下面的状态分组索引。按 ADR 0030 决定六「形态变更」条单独一次部署删除：CloudFormation
-        # 一次更新只能新增或删除一个 GSI。
-        self._runs_table.add_global_secondary_index(
-            index_name=names.RUNS_STATUS_RUN_ID_GSI,
-            partition_key=dynamodb.Attribute(name="status", type=dynamodb.AttributeType.STRING),
-            sort_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
-            projection_type=dynamodb.ProjectionType.KEYS_ONLY,
-        )
-        # **按状态分组分区、`run_id` 排序的稀疏 GSI**（ADR 0030 决定六「runs 表只有一个 GSI」条）：按该条的设计，worker revision
+        # **按状态分组分区、`run_id` 排序的稀疏 GSI，runs 表唯一的索引**（ADR 0030 决定六「runs 表只有一个 GSI」条）：worker revision
         # 清理的引用检查读 `live` 分组、取各 run 的 `worker_task_def_arns`，`list-runs` 读 `live` 分组与各终态分组，两者共用这一个索引。
         # - **稀疏是构造出来的**：分组属性由 `DynamoDBRunStore` 在每一处写 run 级 `status` 的同一次写里派生写出（写入规则见
         #   core 的 `status_group`），只有 STATE item 带它（META item 没有），故索引里只有 STATE。

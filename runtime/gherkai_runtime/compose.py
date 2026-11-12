@@ -1141,8 +1141,8 @@ class RunListIndexUnavailable(RuntimeError):
 _RUN_LIST_INDEX_NOT_READY = {
     None: ("云端后端还没有 run 清单索引，不能列出 run。请部署方用当前版本重新执行 gherkai deploy。"
            "（表 {table}，索引 {index}）"),
-    "CREATING": ("云端后端的 run 清单索引还在建立，暂时不能列出 run。这是部署或升级后端之后的一次性过程，"
-                 "请稍后重试。（表 {table}，索引 {index}）"),
+    "CREATING": ("云端后端的 run 清单索引还在建立，暂时不能列出 run。请稍后重试；长时间仍是这样时，"
+                 "请部署方检查索引的建立进度。（表 {table}，索引 {index}）"),
     "DELETING": ("云端后端的 run 清单索引正在被删除，不能列出 run。请部署方用当前版本重新执行 gherkai deploy。"
                  "（表 {table}，索引 {index}）"),
 }

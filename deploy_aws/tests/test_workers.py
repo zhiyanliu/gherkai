@@ -1402,8 +1402,7 @@ def test_readiness_check_looks_at_the_status_group_index_only(aws):
     """就绪检查看的是状态分组索引：表上别的索引都为 `ACTIVE`、唯独它不在时，全部候选留下、不 `Query`，警告点名它。"""
     templates = seed_backend(aws)
     arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
-    ddb = HookedDdb(aws.ddb, gsis=[{"IndexName": "status-index", "IndexStatus": "ACTIVE"},
-                                   {"IndexName": names.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": "ACTIVE"}])
+    ddb = HookedDdb(aws.ddb, gsis=[{"IndexName": "other-index", "IndexStatus": "ACTIVE"}])
     outcome, text = _cleanup(aws, NOW, ddb=ddb)
     assert outcome.deleted == () and arn in _revisions(aws, "novaact")
     assert "query" not in ddb.calls

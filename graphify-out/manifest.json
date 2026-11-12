@@ -10,8 +10,8 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1794459065.0247586,
-    "ast_hash": "61b1db6b03c8200a37eff2f47a3a63ba",
+    "mtime": 1794467508.3793318,
+    "ast_hash": "c8c0ccb18bd5c07354c659ded2a30021",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -30,8 +30,8 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "core/tests/conftest.py": {
-    "mtime": 1794458878.547655,
-    "ast_hash": "1aa0b65328e1c82d0377282d4af11b13",
+    "mtime": 1794466529.9068763,
+    "ast_hash": "085d050f07baaa7bd275d65df7dae475",
     "semantic_hash": ""
   },
   "core/tests/fake_engine.py": {
@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1794459688.765623,
-    "ast_hash": "5bc3dbf1a8a4207050d974317e3b0fb9",
+    "mtime": 1794466698.0235326,
+    "ast_hash": "15ebdd77eb24001d227759056e0ee5cc",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1794459995.4121926,
-    "ast_hash": "50360aa23dfcd7af51036c87e2158388",
+    "mtime": 1794466787.0443633,
+    "ast_hash": "dfbe548d26a63483c7e64000c0470cf3",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -435,13 +435,13 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1794383027.422376,
-    "ast_hash": "412b817278f717f4c1379a5ec3aeb8b9",
+    "mtime": 1794466672.6723194,
+    "ast_hash": "cf334ed4f537f27ff0d51eb8f61728cd",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794461532.8836405,
-    "ast_hash": "781d7339e0f2bbded174636f046e6921",
+    "mtime": 1794467523.3469365,
+    "ast_hash": "bb2217d87d141c3497f0af8a7fcbc6b6",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -540,7 +540,7 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/run_store/ddb.py": {
-    "mtime": 1794460722.5563993,
+    "mtime": 1794467039.2991264,
     "ast_hash": "304210557ec23b485e9fd65e6bbeebf2",
     "semantic_hash": ""
   },
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1794461532.8840694,
-    "ast_hash": "fb3a2df7d70608f8136c8347191e30eb",
+    "mtime": 1794467673.7921548,
+    "ast_hash": "a6f8e1ab959c745dba7c5d00ce63d8ed",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -630,8 +630,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/names.py": {
-    "mtime": 1794460453.8427541,
-    "ast_hash": "7bed939f658fee0789730fe5e6c99244",
+    "mtime": 1794466451.5640635,
+    "ast_hash": "35c3103d5421846299d16a93ceefd9a3",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel.py": {
@@ -650,8 +650,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_compose.py": {
-    "mtime": 1794459036.4116008,
-    "ast_hash": "8127facf8ebc3ad27089a2cf9532a15c",
+    "mtime": 1794467501.0522215,
+    "ast_hash": "8547735b6442ce5e601777d32f3fcaa8",
     "semantic_hash": ""
   },
   "runtime/tests/test_detached_launcher.py": {
@@ -910,8 +910,8 @@
     "semantic_hash": "d41d8cd98f00b204e9800998ecf8427e"
   },
   "deploy_aws/pyproject.toml": {
-    "mtime": 1794126778.545532,
-    "ast_hash": "886ae140bc8e429b987e7590a47ad079",
+    "mtime": 1794466645.0283902,
+    "ast_hash": "26198b95062dd6b12de366eced244352",
     "semantic_hash": ""
   },
   "deploy_aws/README.md": {
@@ -960,13 +960,13 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/names.py": {
-    "mtime": 1794459207.8212373,
-    "ast_hash": "1b7be5881be34219703a3514feed0a66",
+    "mtime": 1794466451.7281578,
+    "ast_hash": "2c6e19c1a6d3cd2565ed99ad7b3ffdcb",
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/stack.py": {
-    "mtime": 1794459047.5916126,
-    "ast_hash": "b14b3b7c19c40cb24474ba235a9e10e4",
+    "mtime": 1794467635.879149,
+    "ast_hash": "7eb68b10702b859d37fc9233c029722b",
     "semantic_hash": ""
   },
   "deploy_aws/tests/synth_fixture.py": {
@@ -985,8 +985,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_stack.py": {
-    "mtime": 1794458785.279293,
-    "ast_hash": "8d63785db6c05af583d16c703f42964f",
+    "mtime": 1794466492.1692815,
+    "ast_hash": "1dd558554bc8eab51da486effb62727f",
     "semantic_hash": ""
   },
   ".github/workflows/README.md": {
@@ -1015,7 +1015,7 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1794460754.2087374,
+    "mtime": 1794467644.5896301,
     "ast_hash": "0c57ab87d1f4b8761648d8e4ef6f2886",
     "semantic_hash": ""
   },
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794460584.9636598,
-    "ast_hash": "47dd6dbb70ba6541b38b970b7b2a1b71",
+    "mtime": 1794466516.5300536,
+    "ast_hash": "16522f77e48e1a448b8c6082c0253323",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1055,8 +1055,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
-    "mtime": 1794460149.390539,
-    "ast_hash": "2bf80e627c7bee558f39b123df8416b4",
+    "mtime": 1794466827.9316971,
+    "ast_hash": "603952690c49d655aca9ea8955866f49",
     "semantic_hash": ""
   },
   "engines/midscene/DEVELOPMENT.md": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794462437.3406107,
-    "ast_hash": "88882f63c2fe0734e44e79b4235010a7",
+    "mtime": 1794466758.6028335,
+    "ast_hash": "aa73ad1ac16cf5645c278fdaefa7f4ba",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1385,8 +1385,8 @@
     "semantic_hash": ""
   },
   "docs/internals/cloud-backend-carriers.md": {
-    "mtime": 1794462437.341875,
-    "ast_hash": "0528ddaacd364a530c00f5db51f591c9",
+    "mtime": 1794466827.9319148,
+    "ast_hash": "bbcc699274aa4d500d6d595900d7ed94",
     "semantic_hash": ""
   },
   "docs/internals/deterministic-step-lifecycle.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794461532.8844295,
-    "ast_hash": "f6eb9ebed17f65258a8541ec522d41c7",
+    "mtime": 1794467613.2180502,
+    "ast_hash": "3ce6d896d79ad6f097ff9b4bb9acc724",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

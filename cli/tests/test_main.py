@@ -3919,10 +3919,11 @@ def _cloud_list_runs_env(monkeypatch, tmp_path, *, index_status="ACTIVE", parts=
     def make_table(table, *, region, profile):
         def describe_table(*, TableName):
             calls.append(("describe", TableName))
-            # 表上另有一个以 status 为分区键的索引、恒为 ACTIVE：就绪判定只看状态分组索引，缺它时不被这个索引顶替
-            gsis = [{"IndexName": _nm.RUNS_STATUS_RUN_ID_GSI, "IndexStatus": "ACTIVE"}]
-            if index_status is not None:
-                gsis.append({"IndexName": _nm.RUNS_STATUS_GROUP_GSI, "IndexStatus": index_status})
+            if index_status is None:
+                return {"Table": {"TableName": TableName}}
+            # 清单里排在前面的另一个索引恒为 ACTIVE：就绪判定只看状态分组索引，它未就绪时不被这个索引顶替
+            gsis = [{"IndexName": "other-index", "IndexStatus": "ACTIVE"},
+                    {"IndexName": _nm.RUNS_STATUS_GROUP_GSI, "IndexStatus": index_status}]
             return {"Table": {"TableName": TableName, "GlobalSecondaryIndexes": gsis}}
         return SimpleNamespace(name=table, meta=SimpleNamespace(client=SimpleNamespace(describe_table=describe_table)))
 
@@ -4005,13 +4006,18 @@ def test_list_runs_cloud_limit_does_not_cut_ongoing_runs(tmp_path, monkeypatch, 
         "20261110T120000Z-a", "20261110T110000Z-b", "20261110T100000Z-c", "20261110T090000Z-d"]
 
 
-@pytest.mark.parametrize("index_status, needle", [(None, "还没有 run 清单索引"), ("CREATING", "还在建立"),
-                                                  ("DELETING", "正在被删除")])
-def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, needle, tmp_path, monkeypatch, capsys):
+@pytest.mark.parametrize("index_status, needles", [
+    (None, ("还没有 run 清单索引",)),
+    ("CREATING", ("还在建立", "请部署方检查索引的建立进度")),
+    ("DELETING", ("正在被删除",)),
+])
+def test_list_runs_cloud_index_missing_or_not_ready_exits_2_before_any_query(index_status, needles, tmp_path, monkeypatch,
+                                                                             capsys):
     calls = _cloud_list_runs_env(monkeypatch, tmp_path, index_status=index_status)
     rc = m.main(["list-runs", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1", "--json"])
     cap = capsys.readouterr()
-    assert rc == 2 and cap.out == "" and needle in cap.err and "status_group-run_id-index" in cap.err
+    assert rc == 2 and cap.out == "" and "status_group-run_id-index" in cap.err
+    assert all(n in cap.err for n in needles)
     assert [c[0] for c in calls] == ["skew", "describe"]
 
 

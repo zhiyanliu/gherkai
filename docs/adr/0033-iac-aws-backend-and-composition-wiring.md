@@ -17,7 +17,7 @@
 一套 CDK stack（可按 prefix 多实例化，见「两层命名」）建：
 
 **DynamoDB（2 张表，均 `PAY_PER_REQUEST`；schema 权威源为 `deploy_aws/gherkai_deploy_aws/stack.py`；合成测试见 `deploy_aws/tests/test_stack.py`，RunStore 共用测试表见 `core/tests/conftest.py`）：**
-1. `{prefix}runs`（控制面 / RunStore，已有 adapter，本 ADR 纳入统一 IaC）：PK=`run_id`(S)、SK=`item_type`(S，值 `META`/`STATE`）。当前有两个只索引 STATE item 的稀疏 GSI：按 `status_group` 分区的 `status_group-run_id-index` 供 worker revision 清理（[0038](./0038-worker-image-delivery.md)）与 `list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）共同读取；按 `status` 分区的旧索引 `status-run_id-index` 已没有读者，删除待实装。原先供清理读的 `status-index` 已删除。键、投影与过渡形态见 [0030](./0030-realtime-persistence-seam.md) 决定六。
+1. `{prefix}runs`（控制面 / RunStore，已有 adapter，本 ADR 纳入统一 IaC）：PK=`run_id`(S)、SK=`item_type`(S，值 `META`/`STATE`）。只有一个只索引 STATE item 的稀疏 GSI：按 `status_group` 分区的 `status_group-run_id-index`，供 worker revision 清理（[0038](./0038-worker-image-delivery.md)）与 `list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）共同读取。按 `status` 分区的两个旧索引 `status-index`（原供清理读）与 `status-run_id-index`（原供 `list-runs` 读）都已删除。键与投影见 [0030](./0030-realtime-persistence-seam.md) 决定六。
 2. `{prefix}events`（events-out，本 ADR 新增）：PK=`pk`(S，值 `run_id#scope_id`)、SK=`seq`(N)；非键属性 `body`(S) 不进 AttributeDefinitions。**独立于 runs 表、绝不合表**（[0024](./0024-worker-core-protocol.md)：两种访问模式——runs 点读/单元素刷、events 大量追加+范围 Query；合表会踩 run_id 热分区、破 [0030](./0030-realtime-persistence-seam.md) 单写者不变量）。
 
 **S3（1 个桶）：**

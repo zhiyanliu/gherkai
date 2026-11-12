@@ -197,29 +197,6 @@ def test_two_ecr_repos():
         t.has_resource_properties("AWS::ECR::Repository", {"RepositoryName": f"gherkai-{engine}-worker"})
 
 
-def test_runs_table_keeps_the_status_run_id_gsi_unchanged_until_it_is_removed():
-    """runs 表按 `status` 分区、`run_id` 排序的 GSI（投影 KEYS_ONLY）已没有读者，按 ADR 0030 决定六「形态变更」条单独一次
-    部署删除；在那之前形态不变：DynamoDB 不能修改已有 GSI 的键与投影，改动它们等于删除再新建一个索引。元素按原样逐字比对。
-    """
-    t = _template()
-    t.has_resource_properties("AWS::DynamoDB::Table", {
-        "TableName": "gherkai-runs",
-        "AttributeDefinitions": Match.array_with([
-            {"AttributeName": "run_id", "AttributeType": "S"},
-            {"AttributeName": "status", "AttributeType": "S"},
-        ]),
-        "GlobalSecondaryIndexes": Match.array_with([{
-            "IndexName": "status-run_id-index",
-            "KeySchema": [
-                {"AttributeName": "status", "KeyType": "HASH"},
-                {"AttributeName": "run_id", "KeyType": "RANGE"},
-            ],
-            "Projection": {"ProjectionType": "KEYS_ONLY"},
-        }]),
-    })
-    assert names.RUNS_STATUS_RUN_ID_GSI == "status-run_id-index"
-
-
 def test_runs_table_has_the_sparse_status_group_gsi():
     """runs 表按状态分组分区、`run_id` 排序的 GSI（ADR 0030 决定六）：**分区键 `status_group`、排序键 `run_id`、投影 INCLUDE
     `worker_task_def_arns`**。
@@ -250,16 +227,17 @@ def test_runs_table_has_the_sparse_status_group_gsi():
         "status_group-run_id-index", "status_group", "live", "worker_task_def_arns")
 
 
-def test_runs_table_gsis_are_exactly_the_two_indexes():
-    """runs 表的 GSI 恰为上面两个（枚举型护栏）：只有分区键、以 `status` 为键的 `status-index` 已删除，不顺手再加
-    （ADR 0030 决定六；剩下的 `status-run_id-index` 按该条「形态变更」单独一次部署删除）。"""
+def test_runs_table_has_exactly_the_status_group_gsi():
+    """runs 表恰有上面一个 GSI（枚举型护栏，ADR 0030 决定六「runs 表只有一个 GSI」条）：以 `status` 为分区键的两个旧索引
+    `status-index` 与 `status-run_id-index` 都已删除，不顺手再加。没有索引以 `status` 为键，属性定义里也就没有 `status`。"""
     t = _template()
     runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
             if res["Properties"]["TableName"] == "gherkai-runs"]
     assert len(runs) == 1
     index_names = [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]]
-    assert index_names == ["status-run_id-index", "status_group-run_id-index"]
-    assert "status-index" not in index_names
+    assert index_names == ["status_group-run_id-index"]
+    assert "status-index" not in index_names and "status-run_id-index" not in index_names
+    assert sorted(a["AttributeName"] for a in runs[0]["AttributeDefinitions"]) == ["item_type", "run_id", "status_group"]
 
 
 def test_events_table_has_no_gsi():
