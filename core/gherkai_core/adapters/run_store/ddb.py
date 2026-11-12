@@ -9,9 +9,10 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
-- **STATE item**：`{run_id, item_type='STATE', status, started_at?, ended_at?, high_water_mark?, message?,
+- **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
   jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
-  数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三），另有两个
+  数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三；`status_group` 是由
+  run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查按它 Query + `contains`）——两者都是「DDB 侧要查得动」才摊到顶层的。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
@@ -34,7 +35,7 @@ from collections.abc import Sequence
 
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
-from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
+from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.serialize import (
     require_definition_schema,
     require_listing_header,
@@ -54,6 +55,33 @@ _STATE = "STATE"  # item_type 取值：运行态 item
 # **写端在此、读端的命名真源在 `gherkai_runtime.names.STATE_WORKER_TASK_DEF_ARNS_ATTR`**：core 是窄腰下层、
 # 不 import 组合根共享层，故字面量两处各有；漂移由 runtime 侧的对拍测试挡（那里能同时 import 两边）。
 _WORKER_TASK_DEF_ARNS_ATTR = "worker_task_def_arns"
+
+# STATE item 顶层属性：状态分组，runs 表状态分组索引的分区键（ADR 0030 决定六「runs 表只有一个 GSI」条）。META item 不带它，
+# 索引的稀疏由此构造。写端在此、读端的命名真源在 `gherkai_runtime.names`（`STATE_STATUS_GROUP_ATTR`、`STATUS_GROUP_LIVE`），
+# 字面量两处各有的理由与漂移护栏同上条。
+_STATUS_GROUP_ATTR = "status_group"
+_STATUS_GROUP_LIVE = "live"  # 非终态共用的分组值；不与任何 Status 值相同，终态分组取终态的状态值
+
+
+def status_group(status: Status) -> str:
+    """run 级状态 → 状态分组（ADR 0030 决定六）：非终态取 `live`，终态取该终态的状态值。
+
+    写入规则：每一处写 run 级 `status` 的地方都由本函数从这次写入的 `status` 算出分组、写在同一次写里（put_item 经
+    `_state_scalars`，update_item 经 `_run_status_assignment`）；不写 run 级 `status` 的写（全 pending 的投影、只写 job 的写）
+    不碰分组属性，写之前缺它的记录写之后仍缺。分组只服务这个索引；本机后端没有索引，不写它。
+    """
+    return status.value if status in TERMINAL_STATUSES else _STATUS_GROUP_LIVE
+
+
+def _run_status_assignment(status: Status) -> tuple[str, dict, dict]:
+    """update_item 里写 run 级 `status` 的 SET 片段，连同由它派生的状态分组（同一次写，写入规则见 `status_group`）。
+
+    返回（片段, ExpressionAttributeNames, ExpressionAttributeValues），调用方并入各自的表达式；`#st` 与条件里的 `#st` 同指
+    `status`，占位值名 `:rst` / `:rsg` 不与各调用方条件里的占位值重名。"""
+    return ("#st = :rst, #sg = :rsg",
+            {"#st": "status", "#sg": _STATUS_GROUP_ATTR},
+            {":rst": status.value, ":rsg": status_group(status)})
+
 
 # 列举的读回（ADR 0041 决策七「云端实现」）：BatchGetItem 每次请求至多 100 个键（DynamoDB 服务限额）；返回的未处理键带退避
 # 重试、次数有界，首次重试前等 _BATCH_GET_BACKOFF_S 秒、之后每次翻倍。
@@ -115,8 +143,9 @@ def _job_state_from_item(scope_id: str, m: dict) -> JobState:
 
 
 def _state_scalars(state: RunState) -> dict:
-    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止 + hwm，对齐 serialize.run_state_to_dict）。"""
-    d: dict = {"status": state.status.value}
+    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止 + hwm，对齐 serialize.run_state_to_dict），另加由 status
+    派生的状态分组（不在 serialize 里：它只服务 DDB 的索引，写入规则见 `status_group`）。"""
+    d: dict = {"status": state.status.value, _STATUS_GROUP_ATTR: status_group(state.status)}
     if state.started_at is not None:
         d["started_at"] = state.started_at
     if state.ended_at is not None:
@@ -217,20 +246,22 @@ class DynamoDBRunStore:
         ConditionExpression 复刻 local「未 create 就报错」——捕 ConditionalCheckFailedException 转 FileNotFoundError。
 
         **写入的 job 态不是 pending 时连同 run 级一起写**（ADR 0034 机制三「run 级状态只进不退」条③）：第一次写
-        `SET jobs.#sid = :js, #st = :running`，条件是 STATE 存在且 run 级为 pending 或 running；条件不成立（run 已收尾，
-        或 STATE 不存在）时再写一次、只写 job，条件只剩 STATE 存在，仍不成立即报错。已收尾的 run 上 job 照写、run 级不变。
-        正常路径一次写，第二次只在已收尾或 STATE 不存在时发生。写入 pending 时只写 job。
+        `SET jobs.#sid = :js` 加上把 run 级写成 running（连同状态分组，见 `status_group`），条件是 STATE 存在且 run 级为
+        pending 或 running；条件不成立（run 已收尾，或 STATE 不存在）时再写一次、只写 job，条件只剩 STATE 存在，仍不成立即报错。
+        已收尾的 run 上 job 照写、run 级与状态分组都不变。正常路径一次写，第二次只在已收尾或 STATE 不存在时发生。写入 pending
+        时只写 job。
         """
         ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
         if job_state.status != Status.PENDING:
+            run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
             try:
                 self._table.update_item(
                     Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                    UpdateExpression="SET jobs.#sid = :js, #st = :running",
-                    ExpressionAttributeNames={"#sid": job_state.scope_id, "#st": "status"},  # status 是 DDB 保留字
+                    UpdateExpression="SET jobs.#sid = :js, " + run_set,
+                    ExpressionAttributeNames={"#sid": job_state.scope_id, **run_names},  # status 是 DDB 保留字
                     ExpressionAttributeValues={
                         ":js": _job_state_to_item(job_state),
-                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
+                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value, **run_values,
                     },
                     ConditionExpression="attribute_exists(run_id) AND #st IN (:pending, :running)",
                 )
@@ -249,13 +280,15 @@ class DynamoDBRunStore:
             raise FileNotFoundError(f"update_job_state：STATE 不存在（须先 create_run）：{run_id}") from e
 
     def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
-        """commit point：写总 status + ended_at（各 job 态此前已刷）。STATE 不存在则报错。"""
+        """commit point：写总 status（连同状态分组，见 `status_group`）+ ended_at（各 job 态此前已刷）。STATE 不存在则报错。
+        条件只要求 STATE 存在，已有终态照样覆盖，分组随之改为新终态的值。"""
+        run_set, run_names, run_values = _run_status_assignment(status)
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET #st = :s, ended_at = :e",
-                ExpressionAttributeNames={"#st": "status"},  # status 是 DDB 保留字
-                ExpressionAttributeValues={":s": status.value, ":e": ended_at},
+                UpdateExpression="SET " + run_set + ", ended_at = :e",
+                ExpressionAttributeNames=run_names,  # status 是 DDB 保留字
+                ExpressionAttributeValues={**run_values, ":e": ended_at},
                 ConditionExpression="attribute_exists(run_id)",
             )
         except self._table.meta.client.exceptions.ConditionalCheckFailedException as e:
@@ -281,10 +314,12 @@ class DynamoDBRunStore:
         同一条条件写把 run 级置 'running'（ADR 0034 机制三「run 级状态只进不退」条①）：顶层 `#st` 与 `jobs.#sid.#st`
         路径不重叠、可在同一更新表达式里写。条件不成立的三种原因（已被认领、job 不在 Map 里、run 已收尾）不区分，
         都不该由这次认领起 task；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
-        随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。
+        随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。run 级连同状态分组一起写
+        （见 `status_group`）：条件保证写之前 run 级非终态，库中分组本来就是 live，这次是同值写。
         """
-        update = "SET jobs.#sid.#st = :running, #st = :running"
-        values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value}
+        run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
+        update = "SET jobs.#sid.#st = :running, " + run_set
+        values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value, **run_values}
         if claimed_at is not None:
             update += ", jobs.#sid.claimed_at = :ca"
             values[":ca"] = claimed_at
@@ -292,7 +327,7 @@ class DynamoDBRunStore:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                 UpdateExpression=update,
-                ExpressionAttributeNames={"#sid": scope_id, "#st": "status"},
+                ExpressionAttributeNames={"#sid": scope_id, **run_names},
                 ExpressionAttributeValues=values,
                 # 仅当该 job 当前是 pending、run 级未收尾才认领
                 ConditionExpression="jobs.#sid.#st = :pending AND #st IN (:pending, :running)",
@@ -334,21 +369,25 @@ class DynamoDBRunStore:
         # run 级 status 按投影里的 job 态定（全 pending → 不写，否则 running）；传入的 run 级值在有 job
         # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
         # 才碰它们），判据只看投影——与 local 同一规则、可对拍。
-        writes_run_status = projected_run_status(state.jobs) == Status.RUNNING
+        # 写 run 级时连同状态分组（见 `status_group`）；全 pending 不写 run 级，分组也不碰
+        update, names, values = "SET high_water_mark = :h", {"#st": "status"}, {
+            ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        if projected_run_status(state.jobs) == Status.RUNNING:
+            run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
+            update += ", " + run_set
+            names.update(run_names)
+            values.update(run_values)
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression=("SET #st = :running, high_water_mark = :h" if writes_run_status
-                                  else "SET high_water_mark = :h"),
+                UpdateExpression=update,
                 # (库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态 → 允许；否则 CCF（stale / 已 finalize）
                 ConditionExpression=(
                     "(attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
                     "AND #st IN (:pending, :running)"
                 ),
-                ExpressionAttributeNames={"#st": "status"},
-                ExpressionAttributeValues={
-                    ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
-                },
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=values,
             )
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
@@ -390,10 +429,12 @@ class DynamoDBRunStore:
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
         """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。
-        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。"""
-        update = "SET #st = :s, ended_at = :e"
-        names = {"#st": "status"}  # status 是 DDB 保留字；message 走 names 以防同类
-        values = {":s": status.value, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
+        状态分组同样在这次写里改为该终态的值（见 `status_group`）。"""
+        run_set, run_names, run_values = _run_status_assignment(status)
+        update = "SET " + run_set + ", ended_at = :e"
+        names = dict(run_names)  # status 是 DDB 保留字；message 走 names 以防同类
+        values = {**run_values, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
         if message is not None:
             update += ", #msg = :m"
             names["#msg"] = "message"

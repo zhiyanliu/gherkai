@@ -88,3 +88,15 @@ def test_state_worker_task_def_arns_attr_matches_ddb_writer():
     from gherkai_core.adapters.run_store import ddb
 
     assert names.STATE_WORKER_TASK_DEF_ARNS_ATTR == ddb._WORKER_TASK_DEF_ARNS_ATTR
+
+
+def test_status_group_names_match_ddb_writer():
+    """状态分组的属性名与 live 分组值：`names` 的读端常量与 `DynamoDBRunStore` 的写端逐字一致（ADR 0030 决定六；清理与
+    `list-runs` 按它们查状态分组索引）。live 值经写端的派生函数取，两个非终态都落在它上，终态各自取状态值、不与它相同。"""
+    from gherkai_core.adapters.run_store import ddb
+    from gherkai_core.model import TERMINAL_STATUSES, Status
+
+    assert names.STATE_STATUS_GROUP_ATTR == ddb._STATUS_GROUP_ATTR
+    assert {ddb.status_group(Status.PENDING), ddb.status_group(Status.RUNNING)} == {names.STATUS_GROUP_LIVE}
+    assert {ddb.status_group(s) for s in TERMINAL_STATUSES} == {s.value for s in TERMINAL_STATUSES}
+    assert names.STATUS_GROUP_LIVE not in {s.value for s in Status}

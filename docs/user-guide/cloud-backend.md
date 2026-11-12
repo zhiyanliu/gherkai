@@ -129,9 +129,8 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 1. `== 基础镜像同步 novaact：ghcr.io/zhiyanliu/gherkai-worker-novaact:<版本> ==` —— 把当前版本的官方基础镜像拉下来、推成你 ECR 里的 `<版本>-base`。两个引擎各一段。
 2. `已保留默认 worker 镜像 variant common（部署不改动已有的默认设置）` —— 默认指针已存在，部署不动它，它记录的是团队的选择。首次部署这里是 `默认 worker 镜像 variant 初始化为 base（官方基础镜像，未定制）`。
-3. `<engine>/<variant>：已有按本次配置与同一镜像注册的 <family>:<n>（上次部署可能在注册之后中断），直接复用，不再重复注册` —— 上次部署在注册新 revision 之后中断时，同一 variant 的更新行（下一项）之前先出现这一行，本次沿用那次注册的 revision。
-4. `<engine>/<variant> 的 worker 运行配置已按本次部署更新为 <family>:<n>（旧配置 <family>:<m> 已标记待清理）` —— 本次部署改了任务定义模板（如 `--stop-timeout`），已有 variant 按记录的镜像重新派生一份 revision。模板没变时这里是 `各 variant 的 worker 运行配置已是最新，无需更新`。
-5. `清理：回收 N 个 revision（…）` —— 顺带回收了已退休且无人引用的旧 revision，没有可回收的就不打印。
+3. `<engine>/<variant> 的 worker 运行配置已按本次部署更新为 <family>:<n>（旧配置 <family>:<m> 已标记待清理）` —— 本次部署改了任务定义模板（如 `--stop-timeout`），已有 variant 按记录的镜像重新派生一份 revision。模板没变时这里是 `各 variant 的 worker 运行配置已是最新，无需更新`。
+4. `清理：回收 N 个 revision（…）` —— 顺带回收了已退休且无人引用的旧 revision，没有可回收的就不打印。
 
 ## 版本与升级
 

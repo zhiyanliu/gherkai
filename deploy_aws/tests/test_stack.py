@@ -247,13 +247,41 @@ def test_runs_table_has_the_sparse_status_run_id_gsi_for_list_runs():
     assert names.RUNS_STATUS_RUN_ID_GSI == "status-run_id-index"
 
 
-def test_runs_table_gsis_are_exactly_the_two_status_indexes():
-    """runs 表的 GSI 恰为上面两个（枚举型护栏）：两者用途与投影各不相同，不合并、也不顺手再加（ADR 0030 决定六）。"""
+def test_runs_table_has_the_sparse_status_group_gsi():
+    """runs 表按状态分组分区、`run_id` 排序的 GSI（ADR 0030 决定六）：**分区键 `status_group`、排序键 `run_id`、投影 INCLUDE
+    `worker_task_def_arns`**。
+
+    分区键取分组：`pending` 换到 `running` 时分组不变，索引项在 run 收尾之前一直在 `live` 分组。投影必须含 revision 列表，
+    理由同 status-index（引用检查作用在投影出的属性上）；投影里多出 `status`、`jobs` 等属性都会使逐字比对失败。
+    """
     t = _template()
     runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
             if res["Properties"]["TableName"] == "gherkai-runs"]
     assert len(runs) == 1
-    assert [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]] == ["status-index", "status-run_id-index"]
+    assert {"AttributeName": "status_group", "AttributeType": "S"} in runs[0]["AttributeDefinitions"]
+    [gsi] = [g for g in runs[0]["GlobalSecondaryIndexes"] if g["IndexName"] == "status_group-run_id-index"]
+    assert gsi == {
+        "IndexName": "status_group-run_id-index",
+        "KeySchema": [
+            {"AttributeName": "status_group", "KeyType": "HASH"},
+            {"AttributeName": "run_id", "KeyType": "RANGE"},
+        ],
+        "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]},
+    }
+    # 索引名、分组属性名与 live 分组值都是**跨组件契约**（写端在 core，清理与 list-runs 按它们查）——比字面量，防两侧各改一处
+    assert (names.RUNS_STATUS_GROUP_GSI, names.STATE_STATUS_GROUP_ATTR, names.STATUS_GROUP_LIVE) == (
+        "status_group-run_id-index", "status_group", "live")
+
+
+def test_runs_table_gsis_are_exactly_the_three_indexes():
+    """runs 表的 GSI 恰为上面三个（枚举型护栏）：两个以 `status` 为键的索引与状态分组索引并存，不顺手再加（ADR 0030 决定六；
+    以 `status` 为键的两个按该条「形态变更」逐次删除）。"""
+    t = _template()
+    runs = [res["Properties"] for res in t.find_resources("AWS::DynamoDB::Table").values()
+            if res["Properties"]["TableName"] == "gherkai-runs"]
+    assert len(runs) == 1
+    assert [g["IndexName"] for g in runs[0]["GlobalSecondaryIndexes"]] == [
+        "status-index", "status-run_id-index", "status_group-run_id-index"]
 
 
 def test_events_table_has_no_gsi():

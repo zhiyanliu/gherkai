@@ -468,9 +468,9 @@ def test_ddb_list_runs_index_missing_or_not_configured_raises(aws, cloud_runs):
 
     with pytest.raises(RuntimeError, match="索引名"):
         DynamoDBRunStore(aws["ddb"].Table(_TABLE)).list_runs([Status.PASSED], limit=None)
-    # 表上没有这个索引（如 conftest 的基础表）：Query 的 AWS 错误原样抛出，由调用方按读不到这个后端处理
+    # 表上没有这个索引：Query 的 AWS 错误原样抛出，由调用方按读不到这个后端处理
     with pytest.raises(ClientError):
-        DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), list_index_name=_LIST_INDEX).list_runs(
+        DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), list_index_name="no-such-index").list_runs(
             [Status.PASSED], limit=None)
     with pytest.raises(ValueError):
         cloud_runs.list_runs([Status.PASSED], limit=0)

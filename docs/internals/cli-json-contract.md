@@ -257,4 +257,4 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `engines` | 按引擎名分组的对象，每个引擎一项（下面各行是它的子键） |
 | `engines.<engine>.family` / `ecr_repo` | task-def family 与 ECR 仓库名 |
 | `engines.<engine>.variants[]` | `variant`、`tag`（`<版本>-<variant>`）、`digest`、`pushed_at`、`revision_arn`、`template_arn` |
-| `engines.<engine>.pending_cleanup[]` | 待清理 revision：`revision_arn`、`reason`（`retired` / `orphan`）、`variant`、`retired_at`、`registered_at`、`still_mapped`（布尔，每条都带：该 revision 是否仍被某个版本的映射引用；为 `true` 时清理不会删它，为 `false` 不表示下次清理就删，退休满静默期、没有未到终态的 run 引用两个条件照样要满足；孤儿恒为 `false`） |
+| `engines.<engine>.pending_cleanup[]` | 待清理 revision，只列不被任何版本的映射引用的那些（仍被某个映射引用的是在用的 revision，不列）：`revision_arn`、`reason`、`variant`、`retired_at`、`registered_at`。`reason` 取 `retired` 或 `orphan`：`retired` 表示已记下退休时刻，`retired_at` 即这个时刻，从它起满静默期、且没有未到终态的 run 引用之后，清理回收它；`orphan` 表示还没有记下退休时刻（`retired_at` 为 null），下一次清理先给它记下，此后列为 `retired`。`registered_at` 是注册时刻，取不到时为 null |

@@ -10,14 +10,18 @@
 task-def **revision**（从 deploy 登记的**模板** revision 复制、镜像栏换成 `repo@sha256:<digest>`）。run 起
 task 时用的是 revision（不可变快照），故重推同名 variant 不会把运行中的 run 换掉镜像。
 
-## 三条正确性支点（改这个文件前先读）
+## 正确性支点（改这个文件前先读）
 
 - **digest 只在推送后取，且要按仓库挑**：见 `container` 模块头两条事实。
-- **幂等靠每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重、孤儿 revision
-  按血缘 tags 复用；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断后重新运行收敛，不堆垃圾 revision。
-- **删 revision 前有三个前置条件**：退休满 `RETIRE_QUIET_PERIOD`、无未到终态的 run 引用，且不再被任何版本的
-  `worker-image/*` 映射引用（已退休但仍被映射引用的留着，删了会让那条映射悬空；孤儿按定义不在任何映射里）
-  （`cleanup_pass`）。
+- **幂等靠每步先查再做**：`RegisterTaskDefinition` 不幂等，故以（模板 ARN、digest）二元组查重，且只在映射所指的
+  revision 仍为 ACTIVE 时跳过注册；SSM 写是覆盖语义；ECR push 同 digest 天然无操作。中断在注册与写映射之间时，
+  重新执行会再注册一个，不从 family 里复用未被映射的 revision（ADR 0038 被拒方案「孤儿复用」），上次注册的那个
+  由清理 pass 在静默期之后回收。于是一个 revision 进入映射只有一条路：发起注册的那条命令把它写进自己那条映射。
+- **`gherkai:retired-at` 表示 revision 从何时起不被任何映射引用，静默期一律从它起算**：替换映射的一步在写映射
+  之后现读时钟打，清理 pass 给缺这个 tag 的孤儿补打；仍在映射里的由写映射一方与清理 pass 摘除（ADR 0038「不变量」
+  清理 pass 条「候选与静默期起点」「打 tag 与写映射的交错」两段）。时刻一律经注入的时钟函数现读，不用命令开始时的时刻。
+- **删 revision 前**：不在任何版本的 `worker-image/*` 映射里、tag 满 `RETIRE_QUIET_PERIOD`、runs 表索引就绪且引用快照里
+  没有未到终态的 run 引用它，且注销之前的映射重读与最后核对都通过（`cleanup_pass`）。
   `DeregisterTaskDefinition` 让 revision 再也起不了新 task（且注销后最多 10 分钟才生效），detached run 逐 job
   起 task——删早了剩余 job 全起不来（ADR 0038 被拒方案「重派生/重推后立即删旧 revision」）。
 
@@ -267,10 +271,6 @@ class RevisionInfo:
         """带血缘 tags 吗？—— **模板 revision 与任何手工注册的 revision 都没有**，故它们永不进清理候选。"""
         return bool(self.tags.get(names.TAG_VARIANT) and self.tags.get(names.TAG_DIGEST))
 
-    @property
-    def retired_at(self) -> datetime | None:
-        return _parse_ts(self.tags.get(names.TAG_RETIRED_AT))
-
 
 def _describe_revision(ecs, arn: str) -> tuple[dict, dict[str, str]]:
     """`DescribeTaskDefinition(include=["TAGS"])` → (taskDefinition, tags dict)。"""
@@ -354,108 +354,219 @@ def _register_revision(ecs, *, template_arn: str, engine: str, image_ref: str, d
     return resp["taskDefinition"]["taskDefinitionArn"]
 
 
-def _retire(ecs, arn: str, *, now: datetime, out) -> None:
-    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，删归清理 pass 的三个前置条件）。
+def _utc_now() -> datetime:
+    """缺省的时钟函数（本机时钟，aware UTC）。打 tag 的时刻一律经可注入的时钟函数现读，测试据此守时刻的先后。"""
+    return datetime.now(timezone.utc)
 
-    打不上（revision 已被删/无权限）→ 警告不拦：映射已经指向新 revision，旧的下一次 pass 会以**孤儿**
-    身份（不在任何映射里 + 带血缘 tags）被同样处置，退休时刻取其 `registeredAt`。
+
+def _tag_retired_at(ecs, arn: str, *, clock) -> None:
+    """给 `arn` 打 `gherkai:retired-at`，值在紧邻 `TagResource` 请求之前现读时钟（ADR 0038「不变量」清理 pass 条
+    「时钟（实装要求）」段）：读时钟与发出请求之间不插入其它远程调用。异常原样抛给调用方。"""
+    value = clock().isoformat()
+    ecs.tag_resource(resourceArn=arn, tags=[{"key": names.TAG_RETIRED_AT, "value": value}])
+
+
+def _untag_retired_at(ecs, arn: str) -> None:
+    """无条件摘除 `arn` 上的 `gherkai:retired-at`（不先读它带不带；对不带的 revision 摘除预期成功返回、不改变它，
+    ADR 0038 步 7 与实测项 10）。异常原样抛给调用方。"""
+    ecs.untag_resource(resourceArn=arn, tagKeys=[names.TAG_RETIRED_AT])
+
+
+def _clear_retired_at_after_mapping(ecs, arn: str, *, out) -> None:
+    """写映射的一方摘除自己写进映射的 revision 上的 `gherkai:retired-at`：步 7 与重派生写映射成功之后、步 5 与重派生的
+    跳过分支确认 ACTIVE 之后（ADR 0038「不变量」清理 pass 条「打 tag 与写映射的交错」段）。失败只警告：之后的清理 pass
+    见到「仍在映射里却带着这个 tag」会再摘一次。"""
+    try:
+        _untag_retired_at(ecs, arn)
+    except Exception as exc:
+        out(f"警告：未能去掉在用 revision {_short_arn(arn)} 上的退休时刻（{exc}）。"
+            f"不影响本次结果，之后 push-worker 或 gherkai deploy 末尾的清理会再去掉它。")
+
+
+def _retire(ecs, arn: str, *, clock, out) -> None:
+    """给被替换的旧 revision 打 `gherkai:retired-at`（**本次不删**，回收归清理 pass）。只在写映射成功之后调用，
+    时刻在紧邻打 tag 的请求之前现读，于是值不早于它离开这条映射（ADR 0038 步 8）。
+
+    打不上（无权限、限流等）只警告：回收不依赖这一步打上，它已不在映射里，之后的清理 pass 按孤儿给它补打、
+    从补打的时刻起算静默期。
     """
     try:
-        ecs.tag_resource(resourceArn=arn, tags=[{"key": names.TAG_RETIRED_AT, "value": now.isoformat()}])
+        _tag_retired_at(ecs, arn, clock=clock)
     except Exception as exc:
-        out(f"警告：给旧 revision 打退休 tag 失败（{arn}）：{exc}\n"
-            f"     不拦——它已不在映射里，下次 push-worker / deploy 末尾的清理会按孤儿回收它。")
+        out(f"警告：给被替换的旧 revision 记录退休时刻失败（{arn}）：{exc}\n"
+            f"     不影响本次结果：它已不在映射里，之后的清理会补记退休时刻，满 {_hours(RETIRE_QUIET_PERIOD)}后回收。")
+
+
+def _is_active(ecs, arn: str) -> bool:
+    """映射所指的 revision 仍为 ACTIVE 吗？（ADR 0038 步 5 与重派生的跳过判据。）
+
+    只有资源不在才算「不是 ACTIVE」：`DescribeTaskDefinition` 报 `ClientException`（revision 已不可 Describe）即 False；
+    权限不足、限流、网络等其余读失败原样抛出、命令失败，与提交侧 preflight「缺失的判定口径」同一判据——翻成缺失会让
+    缺只读权限的部署方每次都新注册一个 revision。
+    """
+    try:
+        resp = ecs.describe_task_definition(taskDefinition=arn)
+    except Exception as exc:
+        if _error_code(exc) == "ClientException":
+            return False
+        raise
+    return (resp.get("taskDefinition") or {}).get("status") == "ACTIVE"
+
+
+def _register_unretired(ecs, *, template_arn: str, engine: str, image_ref: str, digest: str,
+                        variant: str, version: str) -> str:
+    """注册一个 revision，并在写映射之前再读一次：仍为 ACTIVE 且不带 `gherkai:retired-at` 才返回它的 ARN（ADR 0038 步 6）。
+
+    不满足即重新注册一个、同样再读；第二次仍不满足时抛 `WorkerCommandError`。这只在注册之后长时间停留、或恰有一趟
+    清理在注册之后读映射并给它补打时出现；被补打的那个从未进入映射，满静默期后由清理照常回收。再读只看到那一刻的
+    状态，其余交错由写映射之后的摘除与清理的最后核对处理（ADR 0038「不变量」清理 pass 条「注册与回收的竞争」段）。
+    """
+    for _attempt in range(2):
+        arn = _register_revision(ecs, template_arn=template_arn, engine=engine, image_ref=image_ref,
+                                 digest=digest, variant=variant, version=version)
+        td, tags = _describe_revision(ecs, arn)
+        if td.get("status") == "ACTIVE" and names.TAG_RETIRED_AT not in tags:
+            return arn
+    raise WorkerCommandError(
+        f"刚注册的 {engine}/{variant} revision 在写入映射之前已被标记为待清理或已被注销，连续两次都是如此，"
+        f"映射没有改动。通常是这条命令在注册之后停留过久，或恰与另一处的清理同时执行；请重新执行这条命令。"
+    )
 
 
 # ---------------------------------------------------------------------------
-# 清理 pass（ADR 0038「不变量·清理 pass」）：静默期 + 运行中 run 引用 + 映射引用三项检查，机会式、无定时任务
+# 清理 pass（ADR 0038「不变量」清理 pass 条）：映射引用 + 静默期 + 运行中 run 引用，机会式、无定时任务
 # ---------------------------------------------------------------------------
 
 @dataclass(frozen=True)
 class CleanupOutcome:
     """一次 pass 的结果：删掉的 revision + 留到下次的（ARN、原因）。**生产调用点（push-worker / deploy 末步）
-    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言这三个前置条件（静默期、运行中 run 引用、映射引用）的判定，
-    不必去解析打印文本。`list-workers` 不走这里——它是只读命令，待清理/孤儿由 `_pending_cleanup` 现扫 family
-    产出机读行、文本渲染在 `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
+    只看 pass 自己打的输出、丢弃本返回值**；它存在是为让测试直接断言各道判定，不必去解析打印文本。
+    `list-workers` 不走这里——它是只读命令，待清理条目由 `_pending_cleanup` 现扫 family 产出机读行、文本渲染在
+    `list_workers`（ADR 0038：清理 pass 机会式、由 push-worker/deploy 触发，无定时任务）。
     """
 
     deleted: tuple[str, ...] = ()
     kept: tuple[tuple[str, str], ...] = ()
 
 
-def _non_terminal_statuses() -> list[str]:
-    """未到终态的 run 级 status 全集（`Status` - `TERMINAL_STATUSES`，至少含 `pending`）。
+def _live_statuses() -> tuple[str, ...]:
+    """引用快照要查的 run 级状态，按生命周期次序（先 `pending` 后 `running`）。
 
-    **从 core 的枚举派生、不在此写死名单**：新增前置态时（ADR 0031 的 `_PRE_TERMINAL` 是那处的真源）引用检查
-    自动覆盖；写死会让新态的 run 被清理误判成「没人引用」。`gherkai_core` 由本包直接声明同版本
-    （直接 import 就直接声明，ADR 0037 决策 2c）。
+    **显式元组、不由集合运算派生**：run 级状态只进不退，先读前置态的分区，读完之后才换到 `running` 的 run 在随后读
+    `running` 分区时仍被看到（索引换键的间隙除外）；反过来的次序会漏掉恰在两次读之间换态的 run。从集合排序得出的次序随状态值的拼写而变，
+    守不住这一点。新增前置态时 core 的 `_PRE_TERMINAL` 先变，测试把本元组与
+    「`Status` 去掉 `TERMINAL_STATUSES`」对拍，漏改即红——漏掉一个非终态会让这类 run 引用的 revision 被判成没人引用。
+    `gherkai_core` 由本包直接声明同版本（直接 import 就直接声明，ADR 0037 决策 2c）。
     """
-    from gherkai_core.model import TERMINAL_STATUSES, Status
+    from gherkai_core.model import Status
 
-    return sorted(s.value for s in set(Status) - set(TERMINAL_STATUSES))
+    return (Status.PENDING.value, Status.RUNNING.value)
 
 
-def _referenced_by_live_run(ddb, table: str, arn: str) -> bool:
-    """有未到终态的 run 引用这个 revision 吗？—— **走 status GSI 的 Query + `contains` 过滤，绝不 Scan**。
+def _reference_index_problem(ddb, table: str) -> str | None:
+    """就绪检查（ADR 0038「不变量」清理 pass 条「引用检查」段②）：引用快照所读索引的 `IndexStatus` 为 `ACTIVE` 才放行。
 
-    访问路径定死（ADR 0038 不变量）：run 用到的 revision ARN 在 `create_run` 时同时写成 STATE item 的顶层属性
-    `worker_task_def_arns`（list），runs 表按 `status` 建稀疏 GSI（只有 STATE 带顶层 status）。
-    runs 表 `RETAIN`、无 TTL、随历史单调增长——Scan 成本无上界（被拒方案「清理靠全表 Scan runs 表」）。
-    属性缺失的 item（本机后端 / 旧 definition）`contains` 天然不匹配，语义即「未引用」。
+    返回 None 即就绪；否则返回一句产品语言的原因，调用方据此留下全部候选并警告。缺失、`CREATING`、`UPDATING`、
+    `DELETING` 与 `DescribeTable` 本身失败一律不放行：清理误判会让 run 后续的 job 起不来，跳过一趟只是让 revision
+    多留到下一趟；也不依靠「`Query` 一个回填中的索引会报错」这一没有实测过的行为。
     """
-    for status in _non_terminal_statuses():
+    index = names.RUNS_STATUS_GSI
+    try:
+        resp = ddb.describe_table(TableName=table)
+    except Exception as exc:
+        return f"读取运行记录表 {table} 的状态失败（{exc}）"
+    for gsi in (resp.get("Table") or {}).get("GlobalSecondaryIndexes") or []:
+        if gsi.get("IndexName") == index:
+            status = gsi.get("IndexStatus")
+            return None if status == "ACTIVE" else f"运行记录表的索引 {index} 尚未就绪（当前状态 {status or '未知'}）"
+    return f"运行记录表上没有索引 {index}"
+
+
+def _live_reference_snapshot(ddb, table: str) -> set[str]:
+    """引用快照（ADR 0038「不变量」清理 pass 条「引用检查」段③）：未到终态的 run 引用的 revision ARN 全集。
+
+    每趟一次、与候选数无关：按 `_live_statuses()` 的次序逐个 `Query` 状态分区，只取 `worker_task_def_arns`，翻页读完、
+    在内存里求并集。不加过滤：过滤在读取之后才应用、不减少读量（被拒方案「对每个候选 revision 逐个 `Query` 并以
+    `contains` 过滤」）。**走 GSI 的 Query、绝不 Scan**：runs 表 `RETAIN`、无 TTL、随历史单调增长（被拒方案
+    「清理靠全表 Scan runs 表」）。属性缺失的 item（本机后端 / 旧 definition）不贡献 ARN，语义即「未引用」。
+    任何一页失败即原样抛出，调用方留下全部候选。
+    """
+    referenced: set[str] = set()
+    for status in _live_statuses():
         token = None
         while True:
             kwargs = {
                 "TableName": table,
                 "IndexName": names.RUNS_STATUS_GSI,
                 "KeyConditionExpression": "#s = :s",
-                "FilterExpression": "contains(#w, :arn)",
                 # `status` 是 DDB 保留字；`#w` 只为可读（属性名走命名真源、不写字面量）
                 "ExpressionAttributeNames": {"#s": "status", "#w": names.STATE_WORKER_TASK_DEF_ARNS_ATTR},
-                "ExpressionAttributeValues": {":s": {"S": status}, ":arn": {"S": arn}},
-                "ProjectionExpression": "run_id",  # 只要「有没有」，不搬 STATE 正文
+                "ExpressionAttributeValues": {":s": {"S": status}},
+                "ProjectionExpression": "#w",
             }
             if token:
                 kwargs["ExclusiveStartKey"] = token
             resp = ddb.query(**kwargs)
-            if resp.get("Items"):
-                return True
+            for item in resp.get("Items") or []:
+                for entry in (item.get(names.STATE_WORKER_TASK_DEF_ARNS_ATTR) or {}).get("L") or []:
+                    if entry.get("S"):
+                        referenced.add(entry["S"])
             token = resp.get("LastEvaluatedKey")
             if not token:
                 break
-    return False
+    return referenced
 
 
-def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=print) -> CleanupOutcome:
-    """回收退休/孤儿 revision（**机会式**：`push-worker` 末步与 `gherkai deploy` 第四步末各执行一次）。
+def _mapped_arns(ssm, prefix: str) -> set[str]:
+    """全部版本、全部引擎的 `worker-image/*` 映射所引用的 revision ARN 集合（枚举失败原样抛出）。"""
+    return {a for _e, _t, raw in _iter_image_params(ssm, prefix) for a in _mapped_arn(raw)}
 
-    候选两类（ADR 0038）：
-    - **已退休**：带 `gherkai:retired-at`（被重推/重派生替换掉的那些）。
-    - **孤儿**：带血缘 tags、ACTIVE、却不在 SSM **任何版本**的 `worker-image/*` 映射里 —— 覆盖「上次中断在
-      注册与写 SSM 之间」与「两人并发推同名 variant，先写者的映射被顶掉」。退休时刻取其 `registeredAt`。
-      **旧版本 variant 的 revision 仍在映射里、不是孤儿**（其回收归 `delete-worker`）。
-    删的三个前置条件：退休满 `RETIRE_QUIET_PERIOD`、无未到终态的 run 引用，**且** 不再被任何版本的
-    `worker-image/*` 映射引用（孤儿按定义满足这一条）；任一不满足 → 留到下次 pass
-    （长期无人 push/deploy 时会滞留，无害：ACTIVE 但无人引用）。
 
-    **不抛**：清理是收尾动作，失败不该把一次成功的 push/deploy 变成失败。读不全映射、列不出 family 时打警告并
-    留给下次 pass；单个 revision 回收失败只记进 `kept`（不打印），其中注销前就失败的下次 pass 会重试，已注销、
+def _skip_reclaim_warning(reason: str) -> str:
+    return (f"警告：{reason}，无法确认哪些旧的 worker revision 仍在使用，这次没有回收旧的 revision；"
+            f"下次 push-worker 或 gherkai deploy 会再试。")
+
+
+@dataclass(frozen=True)
+class _Mature:
+    """成熟候选：判定成熟时读到的 `gherkai:retired-at` 原值随身带着，供注销之前的最后核对逐字比较。"""
+
+    arn: str
+    retired_at_raw: str
+
+
+def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, clock=None, out=print) -> CleanupOutcome:
+    """回收不被任何映射引用的 revision（**机会式**：`push-worker` 末步与 `gherkai deploy` 第四步末各执行一次）。
+
+    次序按 ADR 0038「不变量」清理 pass 条的「候选与静默期起点」与「引用检查」两段：
+    1. 读映射之前记下时刻 t1，读全部版本的映射；读不全即整趟放弃（见下）。
+    2. 逐引擎列 family，对每个带血缘 tags 的 ACTIVE revision 分类：在任一映射里的不是候选，带着 `gherkai:retired-at`
+       就摘掉；不在映射里、还没有这个 tag 的，`registeredAt` 早于 t1 才补打（值在紧邻请求之前现读）、本趟留下，
+       取不到或不早于 t1 的本趟不打；tag 满 `RETIRE_QUIET_PERIOD` 的是成熟候选，未满的留下。
+    3. 没有成熟候选就不读 runs 表；有则先做就绪检查，再取一次引用快照。
+    4. 本趟补打过或有成熟候选时重读一次映射：补打过的已在映射里即摘掉；成熟候选已在映射里的不注销、摘掉 tag。
+    5. 其余成熟候选逐个最后核对：tag 与判定成熟时逐字相同、仍为 ACTIVE，才紧接着注销并删除。
+
+    **不抛**：清理是收尾动作，失败不该把一次成功的 push/deploy 变成失败。就绪检查、快照或重读失败时全部候选留下并
+    打一行警告；单个 revision 注销或删除失败只记进 `kept`（不打印），其中注销前就失败的下次 pass 会重试，已注销、
     删除未完成的则不会再被扫到。
     """
-    # **枚举映射失败就整趟放弃**（不是「当作没有映射继续」）：孤儿判据是「不在任何映射里」，读不全映射会把
-    # 别人在用的 revision 全判成孤儿；真实 ECS 的 `registeredAt` 是过去时刻，静默期这一条拦不住它们。
-    # 少执行一次机会式 pass 无害（滞留的 revision ACTIVE 但无人引用），错删运行中 run 的 revision 是事故。
+    clock = clock or _utc_now
+    # t1：开始读映射之前的本机时刻，只用于「registeredAt 早于 t1 才补打」这道附加条件（ADR 0038「打 tag 与写映射的交错」段末）。
+    t1 = clock()
+    # **枚举映射失败就整趟放弃**（不是「当作没有映射继续」）：候选判据是「不在任何映射里」，读不全映射会把
+    # 别人在用的 revision 全判成孤儿并补打，一小时后的下一趟就会批量回收。
     try:
-        referenced_by_ssm = {m for _e, _t, raw in _iter_image_params(ssm, prefix)
-                             for m in _mapped_arn(raw)}
+        mapped = _mapped_arns(ssm, prefix)
     except Exception as exc:
         out(f"警告：读不全 worker 镜像映射（{exc}）——本次跳过清理"
             f"（读不全就分不清哪些还在用，宁可不清也不误删）。")
         return CleanupOutcome()
-    runs_table = names.default_name(prefix, names.BASE_RUNS_TABLE)
-    deleted: list[str] = []
+    # 静默期的比较用读完映射之后现读的时刻：不晚于实际时刻，算出的已过时长不会偏大。
+    now = clock()
     kept: list[tuple[str, str]] = []
+    tagged: list[str] = []          # 本趟补打过的（含 TagResource 报错的：报错不说明服务端没有打上）
+    mature: list[_Mature] = []
     for engine in engines:
         family = names.task_def_name(prefix, engine)
         try:
@@ -464,45 +575,137 @@ def cleanup_pass(*, prefix: str, engines, ssm, ecs, ddb, now: datetime, out=prin
             out(f"警告：清理旧 revision 时列不出 {family} 的 revision：{exc}（留到下次清理）")
             continue
         for rev in revisions:
-            retired_at, reason = rev.retired_at, "已退休"
-            if retired_at is not None and rev.arn in referenced_by_ssm:
-                # 退休 tag 只说明「某次替换判它下岗」；若任何版本的某个映射仍指着它（历史上曾被另一 variant 或另一版本共用），
-                # 删了就让那条映射悬空——留着，直到映射也不再引用。**前置条件之一，与运行中 run 引用并列。**
-                kept.append((rev.arn, "已退休，但仍被某个 worker-image 映射引用"))
+            if not rev.has_lineage:
+                continue  # 模板 / 手工注册的 revision 永不进候选
+            raw = rev.tags.get(names.TAG_RETIRED_AT)
+            if rev.arn in mapped:
+                if raw is not None:
+                    # 仍在映射里却带着 tag：交错或早先版本留下的共用，一律摘掉（失败留到下一趟）
+                    _try_untag(ecs, rev.arn)
                 continue
+            retired_at = _parse_ts(raw)
             if retired_at is None:
-                if not rev.has_lineage or rev.arn in referenced_by_ssm:
-                    continue  # 模板/手工 revision，或仍被某版本的映射引用 → 不是候选
-                # 孤儿：退休时刻 := registeredAt。取不到（真实 ECS 恒有；moto 不返回）→ 当作「此刻退休」，
-                # 于是本次必然未满静默期、留到下次 pass —— 宁可滞留也不早删。
-                retired_at, reason = rev.registered_at or now, "孤儿"
-            if now - retired_at < RETIRE_QUIET_PERIOD:
-                kept.append((rev.arn, f"{reason}，未满 {_hours(RETIRE_QUIET_PERIOD)} 静默期"))
-                continue
-            # 注销之后 revision 即为 INACTIVE，而 `scan_family` 只列 ACTIVE：删除这一步没完成的，后续 pass 不会再扫到它
-            # （起不了新 task、不产生费用，只是残留）。故原因串要分清「注销前就失败、下次 pass 重试」与「已注销、
-            # 删除未完成」，后者不能写成会重试的样子。
-            deregistered = False
-            try:
-                if _referenced_by_live_run(ddb, runs_table, rev.arn):
-                    kept.append((rev.arn, f"{reason}，仍有未到终态的 run 引用"))
+                # 还没有 tag（读不懂的值同样按没有处理，补打只会把起点推后，偏保守）
+                if rev.registered_at is None or rev.registered_at >= t1:
+                    kept.append((rev.arn, "未被映射引用，注册时刻取不到或不早于本次读取映射，本次不记录退休时刻"))
                     continue
-                ecs.deregister_task_definition(taskDefinition=rev.arn)
-                deregistered = True
-                resp = ecs.delete_task_definitions(taskDefinitions=[rev.arn])
+                tagged.append(rev.arn)
+                try:
+                    _tag_retired_at(ecs, rev.arn, clock=clock)
+                except Exception as exc:
+                    kept.append((rev.arn, f"未被映射引用，记录退休时刻失败：{exc}"))
+                    continue
+                kept.append((rev.arn, "未被映射引用，本次记录退休时刻，满静默期之后回收"))
+                continue
+            if now - retired_at < RETIRE_QUIET_PERIOD:
+                kept.append((rev.arn, f"已退休，未满 {_hours(RETIRE_QUIET_PERIOD)} 静默期"))
+                continue
+            mature.append(_Mature(arn=rev.arn, retired_at_raw=raw))
+    if not mature and not tagged:
+        return CleanupOutcome(kept=tuple(kept))
+
+    runs_table = names.default_name(prefix, names.BASE_RUNS_TABLE)
+    referenced: set[str] | None = None   # None 即就绪检查或快照没有通过：全部成熟候选留下
+    if mature:
+        problem = _reference_index_problem(ddb, runs_table)
+        if problem is None:
+            try:
+                referenced = _live_reference_snapshot(ddb, runs_table)
             except Exception as exc:
-                why = "已注销、删除未完成" if deregistered else "本次回收失败"
-                kept.append((rev.arn, f"{reason}，{why}：{exc}"))
-                continue
-            # 批量 API 的逐项失败放在 `failures` 里、不抛异常——不读它就会把没删掉的也算成回收
-            failures = resp.get("failures") or []
-            if failures:
-                kept.append((rev.arn, f"{reason}，已注销、删除未完成：{_failure_text(failures)}"))
-                continue
-            deleted.append(rev.arn)
+                problem = f"查询运行记录表失败（{exc}）"
+        if problem is not None:
+            out(_skip_reclaim_warning(problem))
+
+    # 映射重读：补打与快照都完成之后、注销之前，两件事共用这一次读（ADR 0038「候选与静默期起点」段的「重读」）
+    try:
+        mapped_again = _mapped_arns(ssm, prefix)
+    except Exception as exc:
+        # 重读失败：本趟补打的全部摘掉（下一趟重打，回收晚一趟），成熟候选全部留下
+        for arn in tagged:
+            _try_untag(ecs, arn)
+        kept.extend((m.arn, "已退休，重新读取映射失败") for m in mature)
+        if mature or tagged:
+            out(_skip_reclaim_warning(f"重新读取 worker 镜像映射失败（{exc}）"))
+        return CleanupOutcome(kept=tuple(kept))
+    for arn in tagged:
+        if arn in mapped_again:
+            _try_untag(ecs, arn)
+    # 成熟候选已在映射里的不注销、摘掉 tag：与就绪检查和快照的结果无关，任何一趟见到「仍在映射里却带着这个 tag」都摘
+    unmapped: list[_Mature] = []
+    for cand in mature:
+        if cand.arn in mapped_again:
+            _try_untag(ecs, cand.arn)
+            kept.append((cand.arn, "已退休，但已重新被映射引用"))
+        else:
+            unmapped.append(cand)
+    if referenced is None:
+        kept.extend((m.arn, "已退休，本次无法确认是否仍有未到终态的 run 引用") for m in unmapped)
+        return CleanupOutcome(kept=tuple(kept))
+
+    deleted: list[str] = []
+    for cand in unmapped:
+        if cand.arn in referenced:
+            kept.append((cand.arn, "已退休，仍有未到终态的 run 引用"))
+            continue
+        changed = _final_check(ecs, cand, out=out)
+        if changed is not None:
+            kept.append((cand.arn, f"已退休，{changed}"))
+            continue
+        # 最后核对与注销请求之间不插入其它远程调用（ADR 0038「引用检查」段⑤）。注销之后 revision 即为 INACTIVE，
+        # 而 `scan_family` 只列 ACTIVE：删除这一步没完成的，后续 pass 不会再扫到它（起不了新 task、不产生费用，
+        # 只是残留）。故原因串要分清「注销前就失败、下次 pass 重试」与「已注销、删除未完成」。
+        deregistered = False
+        try:
+            ecs.deregister_task_definition(taskDefinition=cand.arn)
+            deregistered = True
+            resp = ecs.delete_task_definitions(taskDefinitions=[cand.arn])
+        except Exception as exc:
+            why = "已注销、删除未完成" if deregistered else "本次回收失败"
+            kept.append((cand.arn, f"已退休，{why}：{exc}"))
+            continue
+        # 批量 API 的逐项失败放在 `failures` 里、不抛异常——不读它就会把没删掉的也算成回收
+        failures = resp.get("failures") or []
+        if failures:
+            kept.append((cand.arn, f"已退休，已注销、删除未完成：{_failure_text(failures)}"))
+            continue
+        deleted.append(cand.arn)
     if deleted:
         out(f"清理：回收 {len(deleted)} 个 revision（" + "、".join(_short_arn(a) for a in deleted) + "）")
     return CleanupOutcome(deleted=tuple(deleted), kept=tuple(kept))
+
+
+def _final_check(ecs, cand: _Mature, *, out) -> str | None:
+    """注销之前的最后核对（ADR 0038「不变量」清理 pass 条「引用检查」段⑤）：再读一次，`gherkai:retired-at` 与判定成熟时
+    逐字相同、且仍为 ACTIVE 才返回 None（放行注销）；否则打印一行警告、返回写进 `kept` 的原因。
+
+    它只看得到核对时刻已可见的改动：替换的一步给共用 revision 写入新时刻、或补打的一趟摘掉自己的 tag，在核对之前可见时
+    这一趟不注销；核对之后的改动不在它能识别的范围内（残余风险的总括）。
+    """
+    short = _short_arn(cand.arn)
+    try:
+        td, tags = _describe_revision(ecs, cand.arn)
+    except Exception as exc:
+        out(f"警告：读取 {short} 的当前状态失败（{exc}），这次不回收它；之后的清理会重新判断。")
+        return f"注销之前读取失败：{exc}"
+    current = tags.get(names.TAG_RETIRED_AT)
+    if current is None:
+        detail = "退休时刻已被去掉"
+    elif current != cand.retired_at_raw:
+        detail = "退休时刻已改变"
+    elif td.get("status") != "ACTIVE":
+        detail = "已不是 ACTIVE"
+    else:
+        return None
+    out(f"警告：{short} 在这次清理期间有变化（{detail}），这次不回收它；之后的清理会按届时的状态重新判断。")
+    return f"注销之前核对时{detail}"
+
+
+def _try_untag(ecs, arn: str) -> None:
+    """清理 pass 内的摘除：失败不打印、留到下一趟（ADR 0038「候选与静默期起点」段：「失败留到下一趟」）。"""
+    try:
+        _untag_retired_at(ecs, arn)
+    except Exception:
+        pass
 
 
 def _mapped_arn(raw: str):
@@ -610,7 +813,7 @@ def _template_arn(aws: Aws, *, prefix: str, engine: str) -> str:
 
 
 def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: str,
-              container, aws: Aws, now: datetime, out) -> PushOutcome:
+              container, aws: Aws, clock, out) -> PushOutcome:
     """ADR 0038「push-worker 流程」步 2-8 的实现（步 1 的版本 skew 前置在 `push_worker` 里；deploy 的基础镜像同步
     与重派生共用本函数 / `_register_revision`，故这里**不做**任何 skew 判断）。"""
     try:
@@ -660,78 +863,55 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
         out(f"tag {tag} 原已存在：原 digest {names.short_digest(previous_digest)} → 新 digest {names.short_digest(digest)}"
             f"（重推同名 variant 放行；运行中 run 手里的旧 revision 按 digest 指着旧镜像层、不受影响）")
 
-    # 步 5：查重（模板 ARN、digest）二元组
+    # 步 5：查重。只在（模板 ARN、digest）二元组一致**且**映射所指的 revision 仍为 ACTIVE 时跳过注册；其余一律新注册，
+    # 不从 family 里复用未被映射的 revision（ADR 0038 步 5 与被拒方案「孤儿复用」）
     mapping = read_mapping(aws.ssm, prefix=prefix, engine=engine, tag=tag, version=version)
+    old_inactive = False
     if mapping and mapping.template_arn == template_arn and mapping.digest == digest:
-        out(f"{engine}/{variant}：映射已是（当前模板，本 digest）→ 跳过注册，沿用 {_short_arn(mapping.revision_arn)}")
-        return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
-                           revision_arn=mapping.revision_arn)
-    reuse = _find_reusable(aws.ecs, prefix=prefix, engine=engine, variant=variant, version=version,
-                           template_arn=template_arn, digest=digest)
-    if reuse is not None:
-        revision_arn = reuse
-        out(f"{engine}/{variant}：family 里已有本版本、本 variant 同（模板，digest）且未退休的 revision "
-            f"{_short_arn(revision_arn)} → 复用（上次中断在注册与写 SSM 之间留下的孤儿）")
-    else:
-        # 步 6：从模板注册新 revision（镜像栏按 digest 引用）
-        revision_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
-                                          image_ref=f"{repo_uri}@{digest}", digest=digest,
-                                          variant=variant, version=version)
+        if _is_active(aws.ecs, mapping.revision_arn):
+            # 跳过分支不经过步 7：此前某次交错留下的 tag 在这里就摘，不等到命令末尾的清理
+            _clear_retired_at_after_mapping(aws.ecs, mapping.revision_arn, out=out)
+            out(f"{engine}/{variant}：映射已指向用当前模板与本 digest 注册的 {_short_arn(mapping.revision_arn)}，跳过注册")
+            return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
+                               revision_arn=mapping.revision_arn)
+        old_inactive = True
+        out(f"{engine}/{variant}：映射所指的 {_short_arn(mapping.revision_arn)} 已不可用（已注销或已删除），重新注册一个")
 
-    # 步 7：写映射（覆盖语义）
-    _put_ssm(aws.ssm, _mapping_path(prefix, engine, tag),
-             _record_json(template_arn=template_arn, revision_arn=revision_arn,
-                          digest=digest, pushed_at=now.isoformat()))
-
-    # 步 8：退休被替换的旧 revision（不删；删归清理 pass）——`_retire` 有副作用（真打 retired-at tag）并自己打印
-    old = mapping.revision_arn if mapping else None
-    if old and old != revision_arn:
-        _retire(aws.ecs, old, now=now, out=out)
+    # 步 6：从模板注册新 revision（镜像栏按 digest 引用），写映射之前再读一次
+    revision_arn = _register_unretired(aws.ecs, template_arn=template_arn, engine=engine,
+                                       image_ref=f"{repo_uri}@{digest}", digest=digest,
+                                       variant=variant, version=version)
+    _write_mapping_and_retire(aws, prefix=prefix, engine=engine, tag=tag, template_arn=template_arn,
+                              revision_arn=revision_arn, digest=digest, pushed_at=clock().isoformat(),
+                              replaced=None if old_inactive or mapping is None else mapping.revision_arn,
+                              clock=clock, out=out)
     return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
                        revision_arn=revision_arn)
 
 
-def _find_reusable(ecs, *, prefix: str, engine: str, variant: str, version: str, template_arn: str,
-                   digest: str) -> str | None:
-    """push 路径的孤儿复用（ADR 0038 步 5）：现扫一次 family，判据见 `_pick_reusable`。"""
-    return _pick_reusable(scan_family(ecs, names.task_def_name(prefix, engine)),
-                          variant=variant, version=version, template_arn=template_arn, digest=digest)
+def _write_mapping_and_retire(aws: Aws, *, prefix: str, engine: str, tag: str, template_arn: str, revision_arn: str,
+                              digest: str, pushed_at: str, replaced: str | None, clock, out) -> None:
+    """步 7 与步 8（push-worker 与重派生共用）：写映射 → 立即摘除写进映射的 revision 上的 `gherkai:retired-at` →
+    给被替换的旧 revision 打 tag。
 
-
-def _pick_reusable(revisions, *, variant: str, version: str, template_arn: str, digest: str) -> str | None:
-    """`revisions`（`scan_family` 的结果，均为 ACTIVE）里有没有**本版本、本 variant** 同（模板 ARN、digest）、
-    **未退休**的 revision → 其 ARN。push-worker 步 5 与 deploy 重派生共用这一份判据，免得两套写法漂移；
-    `version` 是本次的 CLI 版本，与注册时写进 `gherkai:version` 的是同一个值。
-
-    **限定同 variant**：复用的语义是「捡回上次中断留下的自己的孤儿」，不是「凡 digest 相同就共用」。实际运行中遇到过：
-    variant B 推的镜像 digest 恰与 A 相同，复用了 A 正在用的 revision → 之后 A 换 digest 重推会把它退休、
-    满静默期被清理，B 的映射悬空。每个 variant 自己一个 revision（ECR 层共享、多一条 task-def 而已），
-    退休与清理才能按 variant 独立判。
-    **限定同版本**（同一理由推广到每个（版本，variant）一个 revision）：模板与版本无关（镜像栏是 `:latest` 占位、
-    没有版本 env），升级后模板没改时模板 ARN 不变，新版本推同一份镜像就与旧版本同名 variant 的（模板 ARN、digest）
-    一致；不比版本会复用旧版本映射着的 revision，两个版本的映射共用它。之后任一方替换映射把它退休，另一版本的
-    映射仍引用它，清理 pass 因映射引用这一条一直留着它，`list-workers` 却列为待清理。同一版本下中断后重新执行时，
-    孤儿带的版本与本次相同，这一条不影响那种复用。它只阻止新产生的共用：映射已指向共用 revision 且二元组一致时，
-    `_push_one` 在调用本判据之前就跳过注册，已有的共用不在这里拆开。
-    为何不复用已退休的：退休 tag 说的是「有人决定它下岗」，复用它等于把它从清理 pass 手里抢回来、语义混乱；
-    重新注册一个干净的 revision 更便宜（ECR 镜像层一个字节不动）。
+    `replaced` 为 None 即没有要退休的旧 revision（映射原本缺失，或所指的 revision 已不是 ACTIVE：已不是 ACTIVE 的不打，
+    ADR 0038「不变量」清理 pass 条「注册与回收的竞争」段其三）。打 tag 的时刻在写映射成功之后、紧邻请求之前现读，
+    于是不早于旧 revision 离开这条映射（同条「时钟（实装要求）」段）。
     """
-    for rev in revisions:
-        if (rev.tags.get(names.TAG_TEMPLATE) == template_arn
-                and rev.tags.get(names.TAG_DIGEST) == digest
-                and rev.tags.get(names.TAG_VARIANT) == variant
-                and rev.tags.get(names.TAG_VERSION) == version
-                and not rev.tags.get(names.TAG_RETIRED_AT)):
-            return rev.arn
-    return None
+    _put_ssm(aws.ssm, _mapping_path(prefix, engine, tag),
+             _record_json(template_arn=template_arn, revision_arn=revision_arn, digest=digest, pushed_at=pushed_at))
+    _clear_retired_at_after_mapping(aws.ecs, revision_arn, out=out)
+    if replaced and replaced != revision_arn:
+        _retire(aws.ecs, replaced, clock=clock, out=out)
 
 
 def push_worker(image: str, *, engine: str, variant: str, set_default: bool = False,
                 cli_version: str | None, prefix: str, region=None, profile=None, container,
-                aws: Aws | None = None, now: datetime | None = None, out=print) -> int:
+                aws: Aws | None = None, clock=None, out=print) -> int:
     """`gherkai deploy push-worker <本地镜像> --engine <e> --variant <v> [--set-default]` → 退出码。
 
     八步见 ADR 0038「push-worker 流程」。**一次一个引擎**（两引擎镜像本就分别 build，被拒方案「一次收两个引擎」）。
+    `clock` 是时钟函数（缺省本机时钟）：推送时间与退休时刻在用到的那一刻现读，不用命令开始时的时刻。
     """
     from gherkai_runtime import compose
 
@@ -739,7 +919,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
         aws = _connect(region=region, profile=profile, out=out)
         if aws is None:
             return EXIT_PRECONDITION
-    now = now or datetime.now(timezone.utc)
+    clock = clock or _utc_now
 
     # 步 1 的版本 skew 前置（ADR 0038「push-worker 与 list-workers 的前置」，沿用 0037 决策 7 三态、无放行口）
     blocked = _skew_gate(compose, prefix=prefix, cli_version=cli_version, ssm=aws.ssm, out=out)
@@ -753,7 +933,7 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
 
     try:
         result = _push_one(image, engine=engine, variant=variant, prefix=prefix, version=str(cli_version),
-                           container=container, aws=aws, now=now, out=out)
+                           container=container, aws=aws, clock=clock, out=out)
         if set_default:
             _set_default(aws, prefix=prefix, variant=variant, version=str(cli_version),
                          engine=engine, out=out)
@@ -763,11 +943,11 @@ def push_worker(image: str, *, engine: str, variant: str, set_default: bool = Fa
     except Exception as exc:  # 凭证/权限/region/网络：对部署方是「先修凭证」，与前置同一类、不该抛 traceback
         out(f"AWS 调用失败：{exc}\n需要部署方权限（向 worker 镜像 ECR 仓库推送所需的 ecr:BatchCheckLayerAvailability/"
             f"InitiateLayerUpload/UploadLayerPart/CompleteLayerUpload/PutImage，另需 ecr:GetAuthorizationToken/DescribeImages、"
-            f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource、iam:PassRole、"
-            f"SSM 读写 /{prefix}backend/*、runs 表 Query），以及可用的凭证/region。")
+            f"ecs:RegisterTaskDefinition/ListTaskDefinitions/DescribeTaskDefinition/TagResource/UntagResource、"
+            f"iam:PassRole、SSM 读写 /{prefix}backend/*、运行记录表的 DescribeTable 与索引 Query），以及可用的凭证/region。")
         return EXIT_PRECONDITION
     cleanup_pass(prefix=prefix, engines=names.ENGINES, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb,
-                 now=now, out=out)
+                 clock=clock, out=out)
     out(f"\n✓ {engine} / variant {result.variant}\n"
         f"  tag       {result.tag}\n"
         f"  digest    {result.digest}\n"
@@ -825,7 +1005,7 @@ def _set_default(aws: Aws, *, prefix: str, variant: str, version: str, engine: s
 # `gherkai deploy` 的 worker 镜像四步（第 1 步是 stack 资源；后三步 + 清理在这里）
 # ---------------------------------------------------------------------------
 
-def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: datetime, out) -> list[PushOutcome]:
+def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, clock, out) -> list[PushOutcome]:
     """第 2 步：从 GHCR 拉当前版本基础镜像、走 push-worker 同一条内部路径推成 `<版本>-base`。
 
     **非纯发行版（`.dev`/`.post`/本地段）没有 GHCR 基础镜像**——那些版本由 tag 之后的 commit 派生、不可能发布
@@ -853,7 +1033,7 @@ def sync_base(*, prefix: str, engines, version: str, container, aws: Aws, now: d
                 f"等镜像发布完成后再 `gherkai deploy`（幂等收敛）。"
             ) from exc
         results.append(_push_one(ref, engine=engine, variant=BASE_VARIANT, prefix=prefix, version=version,
-                                 container=container, aws=aws, now=now, out=out))
+                                 container=container, aws=aws, clock=clock, out=out))
     return results
 
 
@@ -869,11 +1049,14 @@ def init_default_pointer(*, prefix: str, aws: Aws, out) -> str:
     return BASE_VARIANT
 
 
-def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: datetime, out) -> list[PushOutcome]:
-    """第 4 步：模板换了就用**新模板 + 已记录的 digest** 重注册各 variant 的 revision（镜像一个字节不动）。
+def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, clock, out) -> list[PushOutcome]:
+    """第 4 步：用**当前模板 + 映射里记录的 digest** 重注册需要更新的 variant 的 revision（镜像一个字节不动）。
 
     为何必须（ADR 0038 被拒方案「deploy 改模板后不重派生既有 variant」）：revision 是不可变快照、无继承——
-    deploy 调了 cpu / stopTimeout 后，旧 variant 会一直以旧配置运行直到有人想起来重推。按模板 ARN 判定、幂等。
+    deploy 调了 cpu / stopTimeout 后，旧 variant 会一直以旧配置运行直到有人想起来重推。幂等。
+    跳过的判据同 push-worker 步 5：映射记录的模板 ARN 与当前模板一致、且所指 revision 仍为 ACTIVE 才跳过，并在确认之后
+    摘一次 `gherkai:retired-at`；所指 revision 已不是 ACTIVE 时按映射缺失处理、新注册，且不给它打 tag。**不在 family 里
+    匹配已有的 revision**（被拒方案「孤儿复用」）：中断在注册与写映射之间时，重新执行再注册一批，前一批由清理回收。
     `pushed_at` **保留原值**：它记的是镜像推上去的时刻，重派生没碰镜像。
     """
     results: list[PushOutcome] = []
@@ -882,33 +1065,30 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, now: date
     params = list(_iter_image_params(aws.ssm, prefix))
     for engine in engines:
         template_arn = _template_arn(aws, prefix=prefix, engine=engine)
-        stale = [m for m in current_version_mappings(params, engine=engine, version=version)
-                 if m.template_arn != template_arn]
-        if not stale:
-            continue
-        # repo URI 只依赖（模板，引擎）——两者都是下面这个循环的不变量，故**每引擎算一次**：放进循环会让
-        # 待重派生的每个 variant 多打一次模板 describe。整个引擎无事可做时连这一次也不打。
-        repo_uri = _repo_uri_from_template(aws.ecs, template_arn=template_arn, engine=engine)
-        # 孤儿复用同 push-worker 步 5（ADR 0038「不变量·幂等」）：上次 deploy 若中断在「注册新 revision」与
-        # 「写映射」之间，映射里仍是旧模板，不复用就会再注册一个、把上一个变成垃圾 revision。family 每引擎只扫
-        # 一次（扫描要 describe 全部 revision），逐 variant 在内存里按同一判据匹配。
-        revisions = scan_family(aws.ecs, names.task_def_name(prefix, engine))
-        for mapping in stale:
-            new_arn = _pick_reusable(revisions, variant=mapping.variant, version=version,
-                                     template_arn=template_arn, digest=mapping.digest)
-            if new_arn is not None:
-                out(f"{engine}/{mapping.variant}：已有按本次配置与同一镜像注册的 {_short_arn(new_arn)}"
-                    f"（上次部署可能在注册之后中断），直接复用，不再重复注册")
+        # repo URI 只依赖（模板，引擎），故**每引擎至多算一次**、到第一个需要注册的 variant 才算：放进循环会让
+        # 待重派生的每个 variant 多打一次模板 describe，整个引擎无事可做时连这一次也不打。
+        repo_uri: str | None = None
+        for mapping in current_version_mappings(params, engine=engine, version=version):
+            old_inactive = False
+            if mapping.template_arn == template_arn:
+                if _is_active(aws.ecs, mapping.revision_arn):
+                    _clear_retired_at_after_mapping(aws.ecs, mapping.revision_arn, out=out)
+                    continue
+                old_inactive = True
+            if repo_uri is None:
+                repo_uri = _repo_uri_from_template(aws.ecs, template_arn=template_arn, engine=engine)
+            new_arn = _register_unretired(aws.ecs, template_arn=template_arn, engine=engine,
+                                          image_ref=f"{repo_uri}@{mapping.digest}", digest=mapping.digest,
+                                          variant=mapping.variant, version=version)
+            _write_mapping_and_retire(aws, prefix=prefix, engine=engine, tag=mapping.tag, template_arn=template_arn,
+                                      revision_arn=new_arn, digest=mapping.digest, pushed_at=mapping.pushed_at,
+                                      replaced=None if old_inactive else mapping.revision_arn, clock=clock, out=out)
+            if old_inactive:
+                out(f"{engine}/{mapping.variant} 原用的 worker 运行配置 {_short_arn(mapping.revision_arn)} 已不可用"
+                    f"（已注销或已删除），已按记录的镜像重新注册为 {_short_arn(new_arn)}")
             else:
-                new_arn = _register_revision(aws.ecs, template_arn=template_arn, engine=engine,
-                                             image_ref=f"{repo_uri}@{mapping.digest}", digest=mapping.digest,
-                                             variant=mapping.variant, version=version)
-            _put_ssm(aws.ssm, _mapping_path(prefix, engine, mapping.tag),
-                     _record_json(template_arn=template_arn, revision_arn=new_arn,
-                                  digest=mapping.digest, pushed_at=mapping.pushed_at))
-            _retire(aws.ecs, mapping.revision_arn, now=now, out=out)
-            out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新为 {_short_arn(new_arn)}"
-                f"（旧配置 {_short_arn(mapping.revision_arn)} 已标记待清理）")
+                out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新为 {_short_arn(new_arn)}"
+                    f"（旧配置 {_short_arn(mapping.revision_arn)} 已标记待清理）")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,
                                        digest=mapping.digest, revision_arn=new_arn))
     if not results:
@@ -936,7 +1116,7 @@ def _repo_uri_from_template(ecs, *, template_arn: str, engine: str) -> str:
 
 
 def run_deploy_steps(*, prefix: str, version: str, container, engines=None, region=None, profile=None,
-                     aws: Aws | None = None, now: datetime | None = None, out=print) -> int:
+                     aws: Aws | None = None, clock=None, out=print) -> int:
     """`gherkai deploy` 的 worker 镜像第 2/3/4 步 + 清理 pass（第 1 步是 stack 资源、随 cdk 事务）。
 
     **不做版本 skew 前置**（ADR 0038）：deploy 本身就是改戳的动作——前置在 cdk 前会把自己拦死、在 cdk 后恒真。
@@ -951,7 +1131,7 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
             # 账户已被改动，退出码 2（即什么都没发生）会误导。
             out("stack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
             return EXIT_FAILED
-    now = now or datetime.now(timezone.utc)
+    clock = clock or _utc_now
     engines = tuple(engines or names.ENGINES)
 
     # 容器引擎只有第 2 步（同步基础镜像 pull/push）用；非纯发行版本步会整步跳过（见 `sync_base`），此时不探活——
@@ -965,13 +1145,13 @@ def run_deploy_steps(*, prefix: str, version: str, container, engines=None, regi
             return EXIT_FAILED
     try:
         sync_base(prefix=prefix, engines=engines, version=version, container=container,
-                  aws=aws, now=now, out=out)
+                  aws=aws, clock=clock, out=out)
         init_default_pointer(prefix=prefix, aws=aws, out=out)
-        rederive_variants(prefix=prefix, engines=engines, version=version, aws=aws, now=now, out=out)
+        rederive_variants(prefix=prefix, engines=engines, version=version, aws=aws, clock=clock, out=out)
     except Exception as exc:  # 含 AWS 侧异常：cdk 已改过账户，一律归「四步失败」这一类、不抛 traceback
         out(f"{exc}\nstack 已生效；worker 镜像步骤未完成——重新运行 `gherkai deploy` 幂等收敛。")
         return EXIT_FAILED
-    cleanup_pass(prefix=prefix, engines=engines, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb, now=now, out=out)
+    cleanup_pass(prefix=prefix, engines=engines, ssm=aws.ssm, ecs=aws.ecs, ddb=aws.ddb, clock=clock, out=out)
     return EXIT_OK
 
 
@@ -1037,10 +1217,8 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
         # 待清理条目分已退休与孤儿两类、字段不同，不构成同结构的清单，按 ADR 0047 保持逐行输出、不手工对齐列。
         for item in info["pending_cleanup"]:
             if item["reason"] == "retired":
-                # 映射引用只是清理的前置条件之一：解除引用之后，静默期与未到终态的 run 引用照样要满足，故不写成单一的解锁条件
-                still_mapped = "；仍被某个版本的映射引用，解除引用后仍须满足其他清理条件" if item["still_mapped"] else ""
                 out(f"  待清理 {_short_arn(item['revision_arn'])}  已退休 {item['retired_at']}"
-                    f"（variant {item['variant']}）{still_mapped}")
+                    f"（variant {item['variant']}）")
             else:
                 out(f"  待清理 {_short_arn(item['revision_arn'])}  孤儿：无任何版本的映射引用"
                     f"（variant {item['variant']}，注册于 {item['registered_at'] or '?'}）")
@@ -1048,26 +1226,24 @@ def list_workers(*, prefix: str, cli_version: str | None, engines=None, region=N
 
 
 def _pending_cleanup(aws: Aws, *, family: str, mapped: set) -> list[dict]:
-    """已退休（带 retired-at）与孤儿（带血缘 tags、不在任何版本的映射里）——清理 pass 的候选，列出来才可解释
-    「为什么 family 里 revision 比 variant 多」。`mapped` 是全部版本映射引用的 revision ARN 集合（调用方算一次）。
-    机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at, still_mapped}；文本渲染在 list_workers。
+    """待清理条目：带血缘 tags、不在任何版本的映射里的 ACTIVE revision，判据与清理 pass 的候选判据是同一份
+    （`mapped` 是全部版本映射引用的 revision ARN 集合，调用方算一次）。列出来才可解释「为什么 family 里 revision
+    比 variant 多」。机读行 {revision_arn, reason: retired|orphan, variant, retired_at, registered_at}；文本渲染在 list_workers。
 
-    `still_mapped` 与清理 pass 的映射引用前置条件是同一份判据（ARN 在 `mapped` 里），每条都带、各条键集相同；
-    孤儿按定义不在任何映射里，恒为 False。它只回答这一个条件：True 时清理 pass 不会删它，False 不等于下次 pass
-    就删（静默期与未到终态的 run 引用照样要满足）。`reason` 仍是 retired / orphan 闭集，说的是条目为何成了清理
-    候选，不把「哪个前置条件此刻阻止回收」混进同一个枚举。"""
+    `reason` 是 retired / orphan 闭集（ADR 0038「命令族」节 list-workers 条）：带 `gherkai:retired-at` 的为 retired，
+    `retired_at` 即静默期的起点，替换映射时打上的与清理 pass 补打的不区分；还没有这个 tag 的为 orphan（`retired_at`
+    为 null），下一趟清理给它补打。仍在某个映射里的 revision 不列，即使它带着 `retired-at`：那是下一趟清理会摘掉的
+    tag，它是在用的 revision。"""
     items: list[dict] = []
     for rev in scan_family(aws.ecs, family):
+        if not rev.has_lineage or rev.arn in mapped:
+            continue
         # registered_at 是 datetime → 转 ISO 串：doc 要能 json.dumps（真 AWS 返 registeredAt，moto 不返——单测照不出）
         reg = rev.registered_at.isoformat() if rev.registered_at else None
-        still_mapped = rev.arn in mapped
-        if rev.tags.get(names.TAG_RETIRED_AT):
-            items.append({"revision_arn": rev.arn, "reason": "retired", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": rev.tags[names.TAG_RETIRED_AT], "registered_at": reg,
-                          "still_mapped": still_mapped})
-        elif rev.has_lineage and not still_mapped:
-            items.append({"revision_arn": rev.arn, "reason": "orphan", "variant": rev.tags.get(names.TAG_VARIANT, "?"),
-                          "retired_at": None, "registered_at": reg, "still_mapped": False})
+        retired_at = rev.tags.get(names.TAG_RETIRED_AT) or None
+        items.append({"revision_arn": rev.arn, "reason": "retired" if retired_at else "orphan",
+                      "variant": rev.tags.get(names.TAG_VARIANT, "?"), "retired_at": retired_at,
+                      "registered_at": reg})
     return items
 
 

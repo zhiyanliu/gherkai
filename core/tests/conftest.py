@@ -23,6 +23,8 @@ from moto import mock_aws
 
 _TABLE_NAME = "gherkai-runs"   # RunStore 表（分区键 run_id + 排序键 item_type=META|STATE）
 _BUCKET_NAME = "gherkai-artifacts"  # ResultStore/ReportStore 对象桶
+# 状态分组索引名：core 的测试不 import 组合根共享层，名字写死在此；与命名真源的一致由 deploy_aws 的 stack 测试比字面量守
+STATUS_GROUP_INDEX = "status_group-run_id-index"
 
 # 集成测试读的环境变量名（真表/真桶名由你建好后经它们传入；没设 → 集成测试 skip）
 _IT_TABLE_ENV = "AWS_DDB_TABLE"
@@ -51,8 +53,9 @@ def _fake_aws_creds(request, monkeypatch):
 def aws(_fake_aws_creds):
     """在 moto mock 下建好 DDB 表 + S3 桶，产出 (boto3 resource/client, 名字) 供云端 adapter 测试注入。
 
-    表 schema 按 ADR 0030 决定六：分区键 run_id(S,HASH) + 排序键 item_type(S,RANGE)。云端 adapter 假定表/桶
-    已存在（建表建桶归 IaC/测试 fixture，非 adapter）。
+    表 schema 按 ADR 0030 决定六：分区键 run_id(S,HASH) + 排序键 item_type(S,RANGE)，GSI 与 `deploy_aws` 的 stack 相同
+    （两个以 `status` 为键的索引与状态分组索引），写入的 STATE item 随之进入各索引，测试可按索引查询核对成员资格。
+    云端 adapter 假定表/桶已存在（建表建桶归 IaC/测试 fixture，非 adapter）。
     """
     import boto3
 
@@ -67,6 +70,21 @@ def aws(_fake_aws_creds):
             AttributeDefinitions=[
                 {"AttributeName": "run_id", "AttributeType": "S"},
                 {"AttributeName": "item_type", "AttributeType": "S"},
+                {"AttributeName": "status", "AttributeType": "S"},
+                {"AttributeName": "status_group", "AttributeType": "S"},
+            ],
+            GlobalSecondaryIndexes=[
+                {"IndexName": "status-index",
+                 "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"}],
+                 "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]}},
+                {"IndexName": "status-run_id-index",
+                 "KeySchema": [{"AttributeName": "status", "KeyType": "HASH"},
+                               {"AttributeName": "run_id", "KeyType": "RANGE"}],
+                 "Projection": {"ProjectionType": "KEYS_ONLY"}},
+                {"IndexName": STATUS_GROUP_INDEX,
+                 "KeySchema": [{"AttributeName": "status_group", "KeyType": "HASH"},
+                               {"AttributeName": "run_id", "KeyType": "RANGE"}],
+                 "Projection": {"ProjectionType": "INCLUDE", "NonKeyAttributes": ["worker_task_def_arns"]}},
             ],
             BillingMode="PAY_PER_REQUEST",
         )

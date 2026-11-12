@@ -1,8 +1,10 @@
 """BackendStack（ADR 0033）：`--backend cloud` 需要的全部 AWS 资源。
 
 一套 stack 建齐（可按 prefix 多实例化，多环境 prod-/stage-）：
-- DynamoDB：{prefix}runs（控制面/RunStore，带两个按 status 分区的稀疏 GSI：status-index 供 worker revision 清理时的
-  引用检查，ADR 0038；status-run_id-index 以 run_id 排序，供 list-runs 按状态取 run_id，ADR 0041 决策七）
+- DynamoDB：{prefix}runs（控制面/RunStore，带三个稀疏 GSI：按 status 分区的 status-index 供 worker revision 清理时的
+  引用检查，ADR 0038；按 status 分区、以 run_id 排序的 status-run_id-index 供 list-runs 按状态取 run_id，ADR 0041 决策七；
+  按状态分组分区、以 run_id 排序的 status_group-run_id-index 由 ADR 0030 决定六定为两者共用，写端已写出它的分区键，
+  两者改读它之前仍读前两个索引）
   + {prefix}events（events-out，开 expires_at TTL）；两表均开 Stream（NEW_IMAGE）供事件驱动链
 - S3：{prefix}artifacts（Result/Report/offload/job-in/artifact-upload，按 prefix key 分片；设备目标的安装包在桶根下
   apps/）+ lifecycle 规则 expire-job-in（按对象 tag gherkai=job-in 7 天过期）与 expire-apps（按对象 tag gherkai=app
@@ -222,6 +224,23 @@ class BackendStack(Stack):
             partition_key=dynamodb.Attribute(name="status", type=dynamodb.AttributeType.STRING),
             sort_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.KEYS_ONLY,
+        )
+        # **按状态分组分区、`run_id` 排序的稀疏 GSI**（ADR 0030 决定六「runs 表只有一个 GSI」条）：按该条的设计，worker revision
+        # 清理的引用检查读 `live` 分组、取各 run 的 `worker_task_def_arns`，`list-runs` 读 `live` 分组与各终态分组，两者共用这一个索引。
+        # 分组属性由 `DynamoDBRunStore` 在每一处写 run 级 `status` 的同一次写里派生写出（写入规则见 core 的 `status_group`），
+        # 只有 STATE item 带它，稀疏由此构造。
+        # - **分区键取分组而非 `status`**：`pending` 换到 `running` 时分组仍是 `live`、是同值写，索引键不变、不产生索引写，
+        #   索引项在 run 收尾之前一直在 `live` 分组，清理的快照不会因换键的传播间隙漏掉在用的 run。
+        # - **projection 取 INCLUDE `worker_task_def_arns`**：理由同上面的 status-index（过滤与取并集作用在投影出的属性上）；
+        #   不投影 `status` 与 `jobs`，只改它们的写不产生索引写。
+        # - 两个使用方改读这个索引之前，仍分别读上面两个以 `status` 为键的索引；改读之后，那两个索引按 ADR 0030 决定六
+        #   「形态变更」条逐次删除。
+        self._runs_table.add_global_secondary_index(
+            index_name=names.RUNS_STATUS_GROUP_GSI,
+            partition_key=dynamodb.Attribute(name=names.STATE_STATUS_GROUP_ATTR, type=dynamodb.AttributeType.STRING),
+            sort_key=dynamodb.Attribute(name="run_id", type=dynamodb.AttributeType.STRING),
+            projection_type=dynamodb.ProjectionType.INCLUDE,
+            non_key_attributes=[names.STATE_WORKER_TASK_DEF_ARNS_ATTR],
         )
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。

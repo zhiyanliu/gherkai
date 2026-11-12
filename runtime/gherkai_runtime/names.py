@@ -187,6 +187,14 @@ RUNS_STATUS_GSI = "status-index"
 # 不与 RUNS_STATUS_GSI 合并：那个索引没有排序键、取不到有界的「最近 N 条」，给它加排序键要替换索引（DynamoDB
 # 不能修改已有 GSI 的键）；两者的投影需求也不同，那个要投影 `worker_task_def_arns` 供清理 pass 判定，这个只要键。
 RUNS_STATUS_RUN_ID_GSI = "status-run_id-index"
+# runs 表 STATE item 的顶层属性名：由 run 级 `status` 派生的状态分组（非终态取 STATUS_GROUP_LIVE，终态取该终态的状态值；
+# 写端与派生函数在 `gherkai_core.adapters.run_store.ddb.status_group`，ADR 0030 决定六）。
+STATE_STATUS_GROUP_ATTR = "status_group"
+STATUS_GROUP_LIVE = "live"
+# runs 表按状态分组分区、`run_id` 排序的稀疏 GSI 名（只有 STATE item 带分组属性，投影 INCLUDE `worker_task_def_arns`）：
+# 按设计 worker revision 清理的引用检查读 live 分组，`list-runs` 读 live 分组与各终态分组，两者共用（ADR 0030 决定六、
+# ADR 0038「不变量」清理 pass 条、ADR 0041 决策七）；两者改读它之前仍分别读 RUNS_STATUS_GSI 与 RUNS_STATUS_RUN_ID_GSI。
+RUNS_STATUS_GROUP_GSI = "status_group-run_id-index"
 
 
 def image_tag(version: str, variant: str) -> str:

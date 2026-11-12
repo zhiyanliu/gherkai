@@ -524,8 +524,9 @@ def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch)
 
 
 def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
-    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级，条件同时判 job 仍 pending 与 run 未收尾
-    （ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的运行态分不出「一次写」与「先写 job、再写 run 级」。"""
+    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级（连同状态分组，ADR 0030 决定六），条件同时判
+    job 仍 pending 与 run 未收尾（ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的运行态分不出「一次写」与「先写
+    job、再写 run 级」。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
     store.create_run(meta, _initial(meta))
@@ -533,7 +534,9 @@ def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
     assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
     assert len(calls) == 1
     update = calls[0]["UpdateExpression"].replace(" ", "")
-    assert "jobs.#sid.#st=:running" in update and ",#st=:running" in update
+    values, attr_names = calls[0]["ExpressionAttributeValues"], calls[0]["ExpressionAttributeNames"]
+    assert "jobs.#sid.#st=:running" in update and ",#st=:rst" in update and values[":rst"] == "running"
+    assert "#sg=:rsg" in update and attr_names["#sg"] == "status_group" and values[":rsg"] == "live"
     condition = calls[0]["ConditionExpression"].replace(" ", "")
     assert "jobs.#sid.#st=:pending" in condition and "#stIN(:pending,:running)" in condition
 
