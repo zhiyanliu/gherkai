@@ -1595,8 +1595,9 @@ def describe_revision_or_none_if_unlisted(ecs, revision_arn: str, **kwargs) -> d
 
     描述失败时按错误码分流，不解析报错文本。本实现仅在描述返回 `ClientException` 时列举核对：这个错误码泛指请求本身
     有问题（ECS 的说明里也包括调用方对动作或资源没有权限），单凭它分不出「资源不在」与其它客户端错误。从未注册过
-    的 revision 在真实 ECS 上返回这个错误码；已发起删除的 revision 在删除完成之前描述成功、状态为
-    `DELETE_IN_PROGRESS`，由调用方按状态判为不可用，不经过这里的列举（ADR 0038 实测项 11）；删除完成之后的返回没有核到。
+    的 revision 在真实 ECS 上返回这个错误码；真实账户的一次观察中，发起删除后仍能描述该 revision，
+    返回状态为 `DELETE_IN_PROGRESS`，由调用方按状态判为不可用，不经过这里的列举（ADR 0038 实测项 11）；它最终消失之后的
+    返回没有核到。
     若返回其他错误，则原样抛出，该次调用不会修复这条映射（推送与重派生不会注册新的 revision 替换它）。核对时列出它所在 family 的 ACTIVE revision：列举
     成功且其中没有这个 ARN 即返回 None，调用方按本次未确认可用处理。返回 None 不证明 revision 已被注销或删除：刚注册的 revision 可能尚未出现在列举结果里，这时推送与
     重派生可能额外注册一个 revision，提交侧可能暂时拒绝提交。列举成功且其中有它，说明描述失败另有原因，原错误原样

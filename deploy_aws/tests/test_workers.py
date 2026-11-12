@@ -802,7 +802,7 @@ def test_skip_branch_fails_the_command_when_listing_cannot_confirm_the_revision_
 
 class _Deleted:
     """摆出「revision 已被删除」：注销它（于是列举 ACTIVE revision 不再有它），并让经 `hook` 的描述报 `ClientException`
-    （moto 对已删除的 revision 的形态；真实 ECS 在删除完成之前描述成功、状态为 `DELETE_IN_PROGRESS`，这里摆出的是列举这一支，见 ADR 0038 实测项 11）。
+    （moto 对已删除的 revision 的形态；真实账户的一次观察中，发起删除后仍能描述该 revision、返回状态为 `DELETE_IN_PROGRESS`，这里摆出的是列举这一支，见 ADR 0038 实测项 11）。
 
     不调 moto 的 `DeleteTaskDefinitions`：moto 删掉 family 里编号最大的 revision 之后，下一次注册会重用这个编号、
     得到同一个 ARN，真实 ECS 不重用编号。

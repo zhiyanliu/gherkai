@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794457880.0528247,
-    "ast_hash": "a353a246f877831549c4e724fbd45c7e",
+    "mtime": 1794458307.0299883,
+    "ast_hash": "2862d84513d2dac2a45b2417e5b2c5bb",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1794457880.0518813,
-    "ast_hash": "f71323ca3373a490a78802b86a79f29b",
+    "mtime": 1794458307.030341,
+    "ast_hash": "141af2eb0879e80b0ae714d0b64c093b",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1025,8 +1025,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_worker_variant.py": {
-    "mtime": 1794457880.0531003,
-    "ast_hash": "26dd7f82256fb60116fbb32d57db9c52",
+    "mtime": 1794458307.0304694,
+    "ast_hash": "483250d587306b760882e7d60831c950",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_container.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794457880.05333,
-    "ast_hash": "f1cf6308d53e4da7f066c85bac2f6768",
+    "mtime": 1794458307.0306776,
+    "ast_hash": "510aaf11854d8bd00cf56d24bf59005b",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
