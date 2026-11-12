@@ -400,8 +400,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0033-iac-aws-backend-and-composition-wiring.md": {
-    "mtime": 1794451459.235931,
-    "ast_hash": "bbc21192976532ff524d397c68ef71f3",
+    "mtime": 1794454125.998007,
+    "ast_hash": "8be495bc347b265b32f5b1a11271a0e1",
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794451354.9439385,
-    "ast_hash": "49694f49a28614c87ab908dc0e0b11c0",
+    "mtime": 1794454109.8795857,
+    "ast_hash": "7c778a1af62711ac14070fe0d122de8d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -620,8 +620,8 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/compose.py": {
-    "mtime": 1794452877.909532,
-    "ast_hash": "04732710b6c1056f0a8377dba973d1d7",
+    "mtime": 1794454551.4986706,
+    "ast_hash": "bec183a8493e22cb09d0899711f1b2d3",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1794452928.8998861,
-    "ast_hash": "e75b6dd58bf30e9d0f18daddadc62dfe",
+    "mtime": 1794453847.7529376,
+    "ast_hash": "5adbab5afb647dddb5217848c9f893f2",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1025,8 +1025,8 @@
     "semantic_hash": ""
   },
   "runtime/tests/test_worker_variant.py": {
-    "mtime": 1794452865.8174496,
-    "ast_hash": "6af95f78be5c39a982cc382ecd623842",
+    "mtime": 1794453932.0130339,
+    "ast_hash": "4327a122cf5f915236534f776b7b3308",
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_container.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794452913.2796323,
-    "ast_hash": "70c311bd51cadaa003bcb9410b981fc3",
+    "mtime": 1794453965.3579454,
+    "ast_hash": "c6be77b677815cd89cdfae39a6be496f",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794451634.1901243,
-    "ast_hash": "a92bea16268aef74567c1219d79f9617",
+    "mtime": 1794454613.5936007,
+    "ast_hash": "96bab1f212014ed4edc93dcbd442bed9",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1410,8 +1410,8 @@
     "semantic_hash": ""
   },
   "docs/user-guide/cloud-backend.md": {
-    "mtime": 1794451496.1899407,
-    "ast_hash": "c96541f224357017b1ecb25906641363",
+    "mtime": 1794454613.5937932,
+    "ast_hash": "2dcfc19dcb3e9fbd48c8572e7b8f4939",
     "semantic_hash": ""
   },
   "docs/user-guide/configuration.md": {

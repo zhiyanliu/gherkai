@@ -267,7 +267,8 @@ class HookedEcs:
     - `on_register(arn, n)`：第 n 次注册成功之后调用。
     - `untag_error`：`UntagResource` 一律抛这个异常。
     - `list_error`：`ListTaskDefinitions` 一律抛这个异常。
-    - `tagged` 记下每次 `TagResource` 请求的 ARN（请求发出即记，不论成败）。
+    - `tagged` 记下每次 `TagResource` 请求的 ARN，`listed` 记下每次 `ListTaskDefinitions` 请求的参数（请求发出即记，
+      不论成败）。
     """
 
     def __init__(self, inner, *, registered_at=None, on_describe=None, on_register=None, untag_error=None,
@@ -278,6 +279,7 @@ class HookedEcs:
         self.describes: dict[str, int] = {}
         self.registered: list[str] = []
         self.tagged: list[str] = []
+        self.listed: list[dict] = []
         self.untagged: list[str] = []
         self.deregistered: list[str] = []
 
@@ -305,6 +307,7 @@ class HookedEcs:
         return self._inner.tag_resource(**kw)
 
     def list_task_definitions(self, **kw):
+        self.listed.append(kw)
         if self.list_error is not None:
             raise self.list_error
         return self._inner.list_task_definitions(**kw)
@@ -745,24 +748,6 @@ def test_skip_branch_removes_a_stale_retired_at_from_the_mapped_revision(aws):
     assert names.TAG_RETIRED_AT not in _tags(aws, arn)
 
 
-def test_skip_branch_read_failure_other_than_not_found_fails_the_command(aws):
-    """跳过判据只把「资源不在」当缺失：读映射所指 revision 时的权限错误原样抛出、命令失败，不新注册（与提交侧 preflight 同一判据）。"""
-    seed_backend(aws)
-    digest = "sha256:" + "d" * 64
-    _push(aws, FakeContainer(digests=[digest]))
-    arn = _mapping(aws, "novaact", "login")["revision_arn"]
-    before = _revisions(aws, "novaact")
-
-    def deny(kw, n):
-        if kw["taskDefinition"] == arn:
-            raise _client_error("AccessDeniedException")
-
-    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=HookedEcs(aws.ecs, on_describe=deny), ecr=aws.ecr, ddb=aws.ddb),
-                     FakeContainer(digests=[digest]))
-    assert rc == 2 and "AccessDeniedException" in text
-    assert _revisions(aws, "novaact") == before
-
-
 def _deny_describe_of(arn: str, code: str = "ClientException"):
     """`on_describe` 钩子：描述 `arn` 一律抛 `code`（ECS 对权限问题也可能回 `ClientException`）。"""
     def deny(kw, n):
@@ -771,22 +756,39 @@ def _deny_describe_of(arn: str, code: str = "ClientException"):
     return deny
 
 
-def test_skip_branch_client_exception_on_a_revision_still_listed_as_active_fails_the_command(aws):
-    """描述映射所指的 revision 报 `ClientException`，但它仍在 family 的 ACTIVE revision 里：描述失败另有原因（如权限），
-    原错误原样抛出、命令失败，不当成已删除去新注册、替换映射（ADR 0038「缺失的判定口径」）。"""
+@pytest.mark.parametrize("code", ["AccessDeniedException", "ThrottlingException"])
+def test_skip_branch_read_failure_other_than_client_exception_fails_the_command_without_listing(aws, code):
+    """跳过判据只把「资源不在」当缺失：读映射所指 revision 时报访问被拒或限流，错误含义明确，原样抛出、命令失败，
+    不发列举请求、不新注册（与提交侧 preflight 同一判据）。"""
     seed_backend(aws)
     digest = "sha256:" + "d" * 64
     _push(aws, FakeContainer(digests=[digest]))
     arn = _mapping(aws, "novaact", "login")["revision_arn"]
     before = _revisions(aws, "novaact")
-    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=HookedEcs(aws.ecs, on_describe=_deny_describe_of(arn)),
-                                 ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
+    ecs = HookedEcs(aws.ecs, on_describe=_deny_describe_of(arn, code))
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
+    assert rc == 2 and code in text, text
+    assert ecs.listed == [] and ecs.registered == []
+    assert _revisions(aws, "novaact") == before
+
+
+def test_skip_branch_client_exception_on_a_revision_still_listed_as_active_fails_the_command(aws):
+    """描述映射所指的 revision 报 `ClientException`，但它仍在 family 的 ACTIVE revision 里：描述失败另有原因（如权限），
+    列举核对之后原错误原样抛出、命令失败，不当成已删除去新注册、替换映射（ADR 0038「缺失的判定口径」）。"""
+    seed_backend(aws)
+    digest = "sha256:" + "d" * 64
+    _push(aws, FakeContainer(digests=[digest]))
+    arn = _mapping(aws, "novaact", "login")["revision_arn"]
+    before = _revisions(aws, "novaact")
+    ecs = HookedEcs(aws.ecs, on_describe=_deny_describe_of(arn))
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
     assert rc == 2 and "ClientException" in text, text
+    assert len(ecs.listed) == 1 and ecs.registered == []
     assert _revisions(aws, "novaact") == before and _mapping(aws, "novaact", "login")["revision_arn"] == arn
 
 
 def test_skip_branch_fails_the_command_when_listing_cannot_confirm_the_revision_is_gone(aws):
-    """描述失败、列举 ACTIVE revision 也失败：无法确认它已不在，列举的错误抛出、命令失败，不新注册。"""
+    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无法确认它已不在，列举的错误抛出、命令失败，不新注册。"""
     seed_backend(aws)
     digest = "sha256:" + "d" * 64
     _push(aws, FakeContainer(digests=[digest]))

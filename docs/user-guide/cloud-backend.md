@@ -160,7 +160,7 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
 
-- **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages`、`ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions`（读不到任务定义 revision 时用它确认 revision 是否已被删除）。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
+- **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages`、`ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions`（只在读取任务定义 revision 返回 `ClientException` 时用它确认 revision 是否已被删除：ECS 对资源不存在与另一些请求错误（包括某些权限问题）返回的是同一个错误码，单看错误码无法区分；读取被拒、被限流等其它错误不会用到它）。ECS 不支持把 `ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions` 限定到具体资源或附加条件，策略里只能授在全部资源（`"Resource": "*"`）上。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
 - **`run --backend cloud`**：运行记录表读写、events 表（`<prefix>events`）的 `dynamodb:Query`（逐 scope 读取执行事件）、同样的只读检查、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
 无论哪一级，提交带设备目标或 `@app` 的 scope 时，都另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。

@@ -273,15 +273,18 @@ def test_network_error_on_ecr_is_not_a_miss(aws):
 
 
 class _FailingEcs:
-    """moto 的 ecs client：描述一律抛 `describe_error`；`list_error` 非 None 时列举也抛它，否则列举照常转发。"""
+    """moto 的 ecs client：描述一律抛 `describe_error`；`list_error` 非 None 时列举也抛它，否则列举照常转发。
+    `listed` 记下每次列举请求的参数（请求发出即记，不论成败）。"""
 
     def __init__(self, inner, *, describe_error: Exception, list_error: Exception | None = None):
         self._inner, self._describe_error, self._list_error = inner, describe_error, list_error
+        self.listed: list[dict] = []
 
     def describe_task_definition(self, **_kw):
         raise self._describe_error
 
     def list_task_definitions(self, **kw):
+        self.listed.append(kw)
         if self._list_error is not None:
             raise self._list_error
         return self._inner.list_task_definitions(**kw)
@@ -290,34 +293,68 @@ class _FailingEcs:
         return getattr(self._inner, name)
 
 
+def _resolve_with_ecs(aws, ecs):
+    return compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
+                                          backend_version=_VERSION, ssm=aws["ssm"], ecs=ecs, ecr=aws["ecr"])
+
+
+def _describe_error(kind: str) -> Exception:
+    """描述请求的几类错误：三种带错误码的 `ClientError`，与一个连不上端点的 `BotoCoreError`（没有错误码）。"""
+    from botocore.exceptions import EndpointConnectionError
+
+    if kind == "network":
+        return EndpointConnectionError(endpoint_url="https://ecs.us-east-1.amazonaws.com")
+    return _client_error(kind, "DescribeTaskDefinition")
+
+
+@pytest.mark.parametrize("kind", ["AccessDeniedException", "ThrottlingException", "ServerException", "network"])
+def test_describe_errors_other_than_client_exception_are_raised_without_listing(aws, kind):
+    """描述报访问被拒、限流、服务端错误或连不上端点：错误含义明确，原错误原样抛出，不发列举请求。描述被拒时提交者看到的
+    是缺描述权限，不会被随后一次列举的结果盖住（ADR 0038「缺失的判定口径」）。"""
+    _seed(aws, variant="base")
+    describe_error = _describe_error(kind)
+    ecs = _FailingEcs(aws["ecs"], describe_error=describe_error)
+    with pytest.raises(type(describe_error)) as e:
+        _resolve_with_ecs(aws, ecs)
+    assert e.value is describe_error
+    assert ecs.listed == []
+
+
 def test_client_exception_on_a_revision_still_listed_as_active_is_not_a_miss(aws):
-    """描述报 `ClientException`、而这个 revision 仍在 family 的 ACTIVE revision 里：ECS 对权限问题也可能回这个码，
-    描述失败另有原因，原错误原样抛出，不翻成「请推送该 variant」的 miss（ADR 0038「缺失的判定口径」）。"""
-    from botocore.exceptions import ClientError
-
+    """描述报 `ClientException`、而这个 revision 仍在 family 的 ACTIVE revision 里：这个码也可能表示权限等其它客户端
+    错误，描述失败另有原因，列举核对之后原错误原样抛出，不翻成「请推送该 variant」的 miss（ADR 0038「缺失的判定口径」）。"""
     _seed(aws, variant="base")
-    clients = {**aws, "ecs": _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException",
-                                                                                  "DescribeTaskDefinition"))}
-    with pytest.raises(ClientError) as e:
-        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
-                                       backend_version=_VERSION, **clients)
-    assert not isinstance(e.value, compose.WorkerVariantError)
-    assert e.value.response["Error"]["Code"] == "ClientException"
+    describe_error = _client_error("ClientException", "DescribeTaskDefinition")
+    ecs = _FailingEcs(aws["ecs"], describe_error=describe_error)
+    with pytest.raises(type(describe_error)) as e:
+        _resolve_with_ecs(aws, ecs)
+    assert e.value is describe_error
+    family = names.task_def_name(_PREFIX, "novaact")
+    assert [(r["familyPrefix"], r["status"]) for r in ecs.listed] == [(family, "ACTIVE")]
 
 
-def test_listing_failure_after_a_describe_failure_is_not_a_miss(aws):
-    """描述失败、列举 ACTIVE revision 也失败：无法确认 revision 已不在，抛出列举的错误，不翻成 miss。"""
-    from botocore.exceptions import ClientError
-
+def test_listing_failure_after_a_describe_client_exception_is_not_a_miss(aws):
+    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无法确认 revision 已不在，抛出列举的错误，不翻成 miss。"""
     _seed(aws, variant="base")
-    clients = {**aws, "ecs": _FailingEcs(
-        aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"),
-        list_error=_client_error("AccessDeniedException", "ListTaskDefinitions"))}
-    with pytest.raises(ClientError) as e:
-        compose.resolve_worker_variant(prefix=_PREFIX, variant=None, engines=["novaact"], cli_version=_VERSION,
-                                       backend_version=_VERSION, **clients)
-    assert not isinstance(e.value, compose.WorkerVariantError)
-    assert e.value.response["Error"]["Code"] == "AccessDeniedException"
+    list_error = _client_error("AccessDeniedException", "ListTaskDefinitions")
+    ecs = _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"),
+                      list_error=list_error)
+    with pytest.raises(type(list_error)) as e:
+        _resolve_with_ecs(aws, ecs)
+    assert e.value is list_error
+    assert len(ecs.listed) == 1
+
+
+def test_client_exception_on_a_revision_missing_from_the_active_list_is_a_miss(aws):
+    """描述报 `ClientException`、列举成功而其中没有这个 revision（已注销，描述也读不到）：判为不可用，提示推送。"""
+    recs = _seed(aws, variant="base")
+    arn = recs["novaact"]["revision_arn"]
+    aws["ecs"].deregister_task_definition(taskDefinition=arn)
+    ecs = _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"))
+    with pytest.raises(compose.WorkerVariantError) as e:
+        _resolve_with_ecs(aws, ecs)
+    assert "不可 Describe" in str(e.value) and arn in str(e.value)
+    assert len(ecs.listed) == 1
 
 
 def test_revision_deleted_by_cleanup_is_a_miss(aws):

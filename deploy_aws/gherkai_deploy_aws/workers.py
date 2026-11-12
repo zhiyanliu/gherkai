@@ -404,10 +404,10 @@ def _retire(ecs, arn: str, *, clock, out) -> None:
 def _is_active(ecs, arn: str) -> bool:
     """映射所指的 revision 仍为 ACTIVE 吗？（ADR 0038 步 5、重派生的跳过判据，与替换之前判断旧 revision 要不要打 tag。）
 
-    只在确认它已不是 ACTIVE 时返回 False：描述成功且状态不是 ACTIVE，或描述失败、而列举该 family 的 ACTIVE revision
-    确认其中没有它（`compose.describe_revision_unless_gone`，与提交侧 preflight「缺失的判定口径」同一判据）。无法确认的
-    读失败（权限不足、限流、网络，列举本身失败）原样抛出、命令失败——翻成缺失会让缺只读权限的部署方每次都新注册一个
-    revision。
+    只在确认它已不是 ACTIVE 时返回 False：描述成功且状态不是 ACTIVE，或描述报 `ClientException`、而列举该 family 的
+    ACTIVE revision 确认其中没有它（`compose.describe_revision_unless_gone`，与提交侧 preflight「缺失的判定口径」同一判据）。
+    无法确认的读失败（描述报其余错误，如权限不足、限流、网络，这时不列举；列举本身失败）原样抛出、命令失败——翻成缺失会让
+    缺只读权限的部署方每次都新注册一个 revision。
     """
     from gherkai_runtime import compose
 
