@@ -730,7 +730,7 @@ def test_skip_branch_requires_the_mapped_revision_to_be_active(aws):
     rc, text = _push(aws, FakeContainer(digests=[digest]))
     assert rc == 0, text
     fresh = _mapping(aws, "novaact", "login")["revision_arn"]
-    assert fresh != dangling and "跳过注册" not in text and "已不可用" in text
+    assert fresh != dangling and "跳过注册" not in text and "未能确认" in text
     assert names.TAG_RETIRED_AT not in _tags(aws, dangling)
 
 
@@ -788,7 +788,7 @@ def test_skip_branch_client_exception_on_a_revision_still_listed_as_active_fails
 
 
 def test_skip_branch_fails_the_command_when_listing_cannot_confirm_the_revision_is_gone(aws):
-    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无法确认它已不在，列举的错误抛出、命令失败，不新注册。"""
+    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无从核对它是否仍被列出，列举的错误抛出、命令失败，不新注册。"""
     seed_backend(aws)
     digest = "sha256:" + "d" * 64
     _push(aws, FakeContainer(digests=[digest]))
@@ -821,7 +821,7 @@ class _Deleted:
 
 
 def test_skip_branch_treats_a_deleted_revision_as_a_missing_mapping(aws):
-    """二元组一致、映射所指的 revision 已被删除（描述报 `ClientException`，列举确认它不在 ACTIVE revision 里）：按映射缺失
+    """二元组一致、映射所指的 revision 已被删除（描述报 `ClientException`，本次 ACTIVE 列举未发现它）：按映射缺失
     处理，新注册一个替换映射，不给已删除的那个打 tag。"""
     seed_backend(aws)
     digest = "sha256:" + "d" * 64
@@ -833,7 +833,7 @@ def test_skip_branch_treats_a_deleted_revision_as_a_missing_mapping(aws):
     rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer(digests=[digest]))
     assert rc == 0, text
     assert _mapping(aws, "novaact", "login")["revision_arn"] == ecs.registered[0] != gone
-    assert "已不可用" in text and gone not in ecs.tagged
+    assert "未能确认" in text and gone not in ecs.tagged
 
 
 def test_digest_change_does_not_tag_a_replaced_revision_that_is_no_longer_active(aws):
@@ -881,7 +881,7 @@ def test_reread_failing_twice_fails_the_command_without_touching_the_mapping(aws
     ecs = HookedEcs(aws.ecs, on_register=_tag_on_register(aws, times=2))
     rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
                      FakeContainer(digests=["sha256:" + "2" * 64]))
-    assert rc == 2 and "请重新执行" in text and len(ecs.registered) == 2
+    assert rc == 2 and "请稍后重新执行这条命令" in text and len(ecs.registered) == 2
     assert _mapping(aws, "novaact", "login") == before
 
 
@@ -916,13 +916,63 @@ def test_reread_finding_both_new_revisions_deleted_fails_the_command(aws):
     ecs = _ecs_deleting_on_register(aws, times=2)
     rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
                      FakeContainer(digests=["sha256:" + "2" * 64]))
-    assert rc == 2 and "请重新执行" in text and len(ecs.registered) == 2, text
+    assert rc == 2 and "请稍后重新执行这条命令" in text and len(ecs.registered) == 2, text
     assert _mapping(aws, "novaact", "login") == before
+
+
+class _UnlistedEcs(HookedEcs):
+    """摆出「刚注册的 revision 尚未在查询结果中可见」：新注册的前 `times` 个 revision 实际为 ACTIVE，但经本壳的描述报
+    `ClientException`，列举 ACTIVE revision 的结果里也没有它。直接经 moto 读取仍看得到它的真实状态。"""
+
+    def __init__(self, inner, *, times: int):
+        self.hidden: set[str] = set()
+
+        def hide(arn, n):
+            if n <= times:
+                self.hidden.add(arn)
+
+        def deny(kw, n):
+            if kw["taskDefinition"] in self.hidden:
+                raise _client_error("ClientException")
+
+        super().__init__(inner, on_register=hide, on_describe=deny)
+
+    def list_task_definitions(self, **kw):
+        resp = super().list_task_definitions(**kw)
+        return {**resp, "taskDefinitionArns": [a for a in resp["taskDefinitionArns"] if a not in self.hidden]}
+
+
+def test_reread_not_yet_listing_the_new_revision_registers_a_second_one(aws):
+    """再读时刚注册的 revision 描述报 `ClientException`、ACTIVE 列举暂时还没有它：按本次未确认可用处理，再注册一个并把
+    第二个写进映射。第一个实际仍为 ACTIVE（未列出不证明它已被注销或删除），只是多出一条从未被映射引用的 revision。"""
+    seed_backend(aws)
+    ecs = _UnlistedEcs(aws.ecs, times=1)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer())
+    assert rc == 0, text
+    first, second = ecs.registered
+    assert first != second and _mapping(aws, "novaact", "login")["revision_arn"] == second
+    assert {first, second} <= set(_revisions(aws, "novaact"))
+
+
+def test_reread_not_yet_listing_either_new_revision_fails_the_command(aws):
+    """连续两次再读都未在 ACTIVE 列举里发现刚注册的 revision：命令失败、映射不改动，提示说明它可能尚未可见、请稍后重新
+    执行；两个 revision 实际都仍为 ACTIVE。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "1" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    ecs = _UnlistedEcs(aws.ecs, times=2)
+    rc, text = _push(workers.Aws(ssm=aws.ssm, ecs=ecs, ecr=aws.ecr, ddb=aws.ddb),
+                     FakeContainer(digests=["sha256:" + "2" * 64]))
+    assert rc == 2 and len(ecs.registered) == 2, text
+    assert ("连续两次未能确认刚注册的 novaact/login revision 可用且未被标记为待清理，映射没有改动。"
+            "revision 可能已被标记为待清理、已注销或已删除，也可能尚未在查询结果中可见；请稍后重新执行这条命令。") in text
+    assert _mapping(aws, "novaact", "login") == before
+    assert set(ecs.registered) <= set(_revisions(aws, "novaact"))
 
 
 def test_new_revision_reclaimed_by_real_cleanup_passes_before_the_reread_is_registered_again(aws):
     """两趟真实的清理 pass 在注册与再读之间回收刚注册的 revision：第一趟按孤儿补打 `gherkai:retired-at`，时钟推进过静默期
-    之后第二趟注销并删除它；推送继续时再读确认它已不在，重新注册一个并写进映射。
+    之后第二趟注销并删除它；推送继续时再读未在 ACTIVE 列举里发现它，重新注册一个并写进映射。
 
     moto 删掉 family 里编号最大的 revision 之后，下一次注册重用这个编号、得到同一个 ARN（真实 ECS 不重用编号），所以这里
     按注册次数与映射所指 revision 的状态断言，不比较两次注册的 ARN。"""
@@ -1604,7 +1654,7 @@ def test_rederive_reregisters_when_the_mapped_revision_is_no_longer_active(aws):
     assert (after["digest"], after["pushed_at"], after["template_arn"]) == \
         (before["digest"], before["pushed_at"], before["template_arn"])
     assert names.TAG_RETIRED_AT not in _tags(aws, before["revision_arn"])
-    assert "已不可用" in text()
+    assert "未能确认" in text()
 
 
 def test_rederive_with_a_changed_template_does_not_tag_a_replaced_revision_that_is_no_longer_active(aws):

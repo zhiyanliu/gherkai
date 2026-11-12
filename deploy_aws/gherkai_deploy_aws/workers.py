@@ -404,14 +404,16 @@ def _retire(ecs, arn: str, *, clock, out) -> None:
 def _is_active(ecs, arn: str) -> bool:
     """映射所指的 revision 仍为 ACTIVE 吗？（ADR 0038 步 5、重派生的跳过判据，与替换之前判断旧 revision 要不要打 tag。）
 
-    只在确认它已不是 ACTIVE 时返回 False：描述成功且状态不是 ACTIVE，或描述报 `ClientException`、而列举该 family 的
-    ACTIVE revision 确认其中没有它（`compose.describe_revision_unless_gone`，与提交侧 preflight「缺失的判定口径」同一判据）。
-    无法确认的读失败（描述报其余错误，如权限不足、限流、网络，这时不列举；列举本身失败）原样抛出、命令失败——翻成缺失会让
-    缺只读权限的部署方每次都新注册一个 revision。
+    返回 False 的只有两种情形：描述成功且状态不是 ACTIVE；或描述报 `ClientException`、而本次列举该 family 的 ACTIVE
+    revision 未发现它（`compose.describe_revision_or_none_if_unlisted`，与提交侧 preflight「缺失的判定口径」同一判据），
+    这时按本次未确认可用处理。后者不证明 revision 已被注销或删除：它若只是尚未出现在列举结果里，调用方会多注册一个
+    revision，被替换的这个不打 tag，之后由清理 pass 按孤儿补打、满静默期后回收。其余读失败（描述报其余错误，如权限不足、
+    限流、网络，这时不列举；描述报 `ClientException` 而它仍被列出；列举本身失败）原样抛出、命令失败——翻成缺失会让缺
+    只读权限的部署方每次都新注册一个 revision。
     """
     from gherkai_runtime import compose
 
-    resp = compose.describe_revision_unless_gone(ecs, arn)
+    resp = compose.describe_revision_or_none_if_unlisted(ecs, arn)
     return resp is not None and (resp.get("taskDefinition") or {}).get("status") == "ACTIVE"
 
 
@@ -419,26 +421,27 @@ def _register_unretired(ecs, *, template_arn: str, engine: str, image_ref: str, 
                         variant: str, version: str) -> str:
     """注册一个 revision，并在写映射之前再读一次：仍为 ACTIVE 且不带 `gherkai:retired-at` 才返回它的 ARN（ADR 0038 步 6）。
 
-    不满足即重新注册一个、同样再读；第二次仍不满足时抛 `WorkerCommandError`。「不满足」含带着这个 tag、已不是 ACTIVE，
-    以及已被删除（判据同 `_is_active`：确认它已不在 ACTIVE revision 里）；无法确认的读失败原样抛出。这只在注册之后
-    长时间停留、或恰有一趟清理在注册之后读映射并给它补打时出现；被补打的那个从未进入映射，满静默期后由清理照常回收。
-    再读只看到那一刻的状态，其余交错由写映射之后的摘除与清理的最后核对处理（ADR 0038「不变量」清理 pass 条「注册与
-    回收的竞争」段）。
+    不满足即重新注册一个、同样再读；第二次仍不满足时抛 `WorkerCommandError`（至多重新注册一次）。「不满足」含带着这个
+    tag、已不是 ACTIVE，以及未确认可用（判据同 `_is_active`：描述报 `ClientException` 且本次 ACTIVE 列举未发现它，这不
+    证明它已被注销或删除）；其余读失败原样抛出。出现的情形包括注册之后长时间停留、恰有一趟清理在注册之后读映射并给它
+    补打，以及刚注册的 revision 尚未出现在查询结果里（这时会额外注册一个 revision）；被补打或额外注册的那个从未进入
+    映射，满静默期后由清理照常回收。再读只看到那一刻的状态，其余交错由写映射之后的摘除与清理的最后核对处理（ADR 0038
+    「不变量」清理 pass 条「注册与回收的竞争」段）。
     """
     from gherkai_runtime import compose
 
     for _attempt in range(2):
         arn = _register_revision(ecs, template_arn=template_arn, engine=engine, image_ref=image_ref,
                                  digest=digest, variant=variant, version=version)
-        resp = compose.describe_revision_unless_gone(ecs, arn, include=["TAGS"])
+        resp = compose.describe_revision_or_none_if_unlisted(ecs, arn, include=["TAGS"])
         if resp is None:
             continue
         td, tags = _split_described(resp)
         if td.get("status") == "ACTIVE" and names.TAG_RETIRED_AT not in tags:
             return arn
     raise WorkerCommandError(
-        f"刚注册的 {engine}/{variant} revision 在写入映射之前已被标记为待清理、已被注销或已被删除，连续两次都是如此，"
-        f"映射没有改动。通常是这条命令在注册之后停留过久，或恰与另一处的清理同时执行；请重新执行这条命令。"
+        f"连续两次未能确认刚注册的 {engine}/{variant} revision 可用且未被标记为待清理，映射没有改动。"
+        f"revision 可能已被标记为待清理、已注销或已删除，也可能尚未在查询结果中可见；请稍后重新执行这条命令。"
     )
 
 
@@ -875,8 +878,8 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
     # 步 5：查重。只在（模板 ARN、digest）二元组一致**且**映射所指的 revision 仍为 ACTIVE 时跳过注册；其余一律新注册，
     # 不从 family 里复用未被映射的 revision（ADR 0038 步 5 与被拒方案「孤儿复用」）
     mapping = read_mapping(aws.ssm, prefix=prefix, engine=engine, tag=tag, version=version)
-    # 映射所指的 revision 是否仍为 ACTIVE：既是跳过的条件之一，也决定新注册之后要不要给它打 tag——已不是 ACTIVE 的
-    # 不打（ADR 0038「不变量」清理 pass 条「注册与回收的竞争」段其三），二元组不一致的分支同样如此
+    # 映射所指的 revision 是否仍为 ACTIVE：既是跳过的条件之一，也决定新注册之后要不要给它打 tag——未确认仍为 ACTIVE
+    # 的不打（ADR 0038「不变量」清理 pass 条「注册与回收的竞争」段其三），二元组不一致的分支同样如此
     old_active = mapping is not None and _is_active(aws.ecs, mapping.revision_arn)
     if mapping and mapping.template_arn == template_arn and mapping.digest == digest:
         if old_active:
@@ -885,7 +888,8 @@ def _push_one(image: str, *, engine: str, variant: str, prefix: str, version: st
             out(f"{engine}/{variant}：映射已指向用当前模板与本 digest 注册的 {_short_arn(mapping.revision_arn)}，跳过注册")
             return PushOutcome(engine=engine, variant=variant, tag=tag, digest=digest,
                                revision_arn=mapping.revision_arn)
-        out(f"{engine}/{variant}：映射所指的 {_short_arn(mapping.revision_arn)} 已不可用（已注销或已删除），重新注册一个")
+        out(f"{engine}/{variant}：未能确认映射所指的 {_short_arn(mapping.revision_arn)} 仍可用"
+            f"（可能已注销或已删除），重新注册一个")
 
     # 步 6：从模板注册新 revision（镜像栏按 digest 引用），写映射之前再读一次
     revision_arn = _register_unretired(aws.ecs, template_arn=template_arn, engine=engine,
@@ -904,7 +908,7 @@ def _write_mapping_and_retire(aws: Aws, *, prefix: str, engine: str, tag: str, t
     """步 7 与步 8（push-worker 与重派生共用）：写映射 → 立即摘除写进映射的 revision 上的 `gherkai:retired-at` →
     给被替换的旧 revision 打 tag。
 
-    `replaced` 为 None 即没有要退休的旧 revision（映射原本缺失，或所指的 revision 已不是 ACTIVE：已不是 ACTIVE 的不打，
+    `replaced` 为 None 即没有要退休的旧 revision（映射原本缺失，或未确认所指的 revision 仍为 ACTIVE：这样的不打，
     ADR 0038「不变量」清理 pass 条「注册与回收的竞争」段其三）。打 tag 的时刻在写映射成功之后、紧邻请求之前现读，
     于是不早于旧 revision 离开这条映射（同条「时钟（实装要求）」段）。
     """
@@ -1065,7 +1069,7 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, clock, ou
     为何必须（ADR 0038 被拒方案「deploy 改模板后不重派生既有 variant」）：revision 是不可变快照、无继承——
     deploy 调了 cpu / stopTimeout 后，旧 variant 会一直以旧配置运行直到有人想起来重推。幂等。
     跳过的判据同 push-worker 步 5：映射记录的模板 ARN 与当前模板一致、且所指 revision 仍为 ACTIVE 才跳过，并在确认之后
-    摘一次 `gherkai:retired-at`；所指 revision 已不是 ACTIVE 时按映射缺失处理、新注册，且不给它打 tag。**不在 family 里
+    摘一次 `gherkai:retired-at`；未能确认所指 revision 仍为 ACTIVE 时按映射缺失处理、新注册，且不给它打 tag。**不在 family 里
     匹配已有的 revision**（被拒方案「孤儿复用」）：中断在注册与写映射之间时，重新执行再注册一批，前一批由清理回收。
     `pushed_at` **保留原值**：它记的是镜像推上去的时刻，重派生没碰镜像。
     """
@@ -1079,7 +1083,7 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, clock, ou
         # 待重派生的每个 variant 多打一次模板 describe，整个引擎无事可做时连这一次也不打。
         repo_uri: str | None = None
         for mapping in current_version_mappings(params, engine=engine, version=version):
-            # 同 push-worker 步 5：既是跳过的条件之一，也决定替换之后要不要给旧 revision 打 tag（已不是 ACTIVE 的不打）
+            # 同 push-worker 步 5：既是跳过的条件之一，也决定替换之后要不要给旧 revision 打 tag（未确认仍为 ACTIVE 的不打）
             old_active = _is_active(aws.ecs, mapping.revision_arn)
             if mapping.template_arn == template_arn and old_active:
                 _clear_retired_at_after_mapping(aws.ecs, mapping.revision_arn, out=out)
@@ -1096,8 +1100,8 @@ def rederive_variants(*, prefix: str, engines, version: str, aws: Aws, clock, ou
                 out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新为 {_short_arn(new_arn)}"
                     f"（旧配置 {_short_arn(mapping.revision_arn)} 已标记待清理）")
             elif mapping.template_arn == template_arn:
-                out(f"{engine}/{mapping.variant} 原用的 worker 运行配置 {_short_arn(mapping.revision_arn)} 已不可用"
-                    f"（已注销或已删除），已按记录的镜像重新注册为 {_short_arn(new_arn)}")
+                out(f"{engine}/{mapping.variant} 原用的 worker 运行配置 {_short_arn(mapping.revision_arn)} 未能确认仍可用"
+                    f"（可能已注销或已删除），已按记录的镜像重新注册为 {_short_arn(new_arn)}")
             else:
                 out(f"{engine}/{mapping.variant} 的 worker 运行配置已按本次部署更新为 {_short_arn(new_arn)}")
             results.append(PushOutcome(engine=engine, variant=mapping.variant, tag=mapping.tag,

@@ -12,6 +12,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import secrets
 import shlex
 import shutil
@@ -1587,16 +1588,19 @@ def _aws_error_code(e: BaseException) -> str | None:
     return (err or {}).get("Error", {}).get("Code") if isinstance(err, dict) else None
 
 
-def describe_revision_unless_gone(ecs, revision_arn: str, **kwargs) -> dict | None:
-    """`DescribeTaskDefinition` 的完整响应；只在确认这个 revision 已不是 ACTIVE 时返回 None（ADR 0038「缺失的判定口径」）。
+def describe_revision_or_none_if_unlisted(ecs, revision_arn: str, **kwargs) -> dict | None:
+    """`DescribeTaskDefinition` 的完整响应；描述返回 `ClientException` 且本次 ACTIVE 列举未发现该 ARN 时返回 None
+    （ADR 0038「缺失的判定口径」）。
 
     描述失败时按错误码分流，不解析报错文本。只有错误码为 `ClientException` 时才列举核对：ECS 对已删除的 revision
     回这个码，而它泛指请求本身有问题（ECS 的说明里也包括调用方对动作或资源没有权限），单凭错误码分不出「资源不在」与
-    其它客户端错误。这时列出它所在 family 的 ACTIVE revision：列举成功且其中没有这个 ARN 即返回 None（它已删除、
-    已注销或从未存在，都不能再起新 task）；列举成功且其中有它，说明描述失败另有原因，原错误原样抛出；列举本身失败，
-    抛出列举的错误。其余错误（访问被拒、限流、服务端错误、网络错误，以及不是 botocore 的异常）含义明确，原样抛出、
-    不发列举请求：列举只在确有歧义时发生，描述被拒时调用方看到的是缺描述权限，不会被随后一次列举的结果盖住。
-    ARN 解析不出 family 的同样原样抛出、不列举。描述成功时不判状态，由调用方读 `status`。
+    其它客户端错误。这时列出它所在 family 的 ACTIVE revision：列举成功且其中没有这个 ARN 即返回 None，调用方按本次
+    未确认可用处理。返回 None 不证明 revision 已被注销或删除：刚注册的 revision 可能尚未出现在列举结果里，这时推送与
+    重派生可能额外注册一个 revision，提交侧可能暂时拒绝提交。列举成功且其中有它，说明描述失败另有原因，原错误原样
+    抛出；列举本身失败，抛出列举的错误。其余错误（访问被拒、限流、服务端错误、网络错误，以及不是 botocore 的异常）
+    含义明确，原样抛出、不发列举请求：列举只在确有歧义时发生，描述被拒时调用方看到的是缺描述权限，不会被随后一次
+    列举的结果盖住。`revision_arn` 不是完整的任务定义 revision ARN 时同样原样抛出原错误、不列举。描述成功时不判状态，
+    由调用方读 `status`。
     提交侧的 variant 解析与 push-worker、重派生的跳过判据和注册之后的再读共用这一个判据（`kwargs` 原样转给描述请求，
     如 `include=["TAGS"]`）。列举需要 `ecs:ListTaskDefinitions`，只在描述报 `ClientException` 时才发出；这个动作在
     IAM 里不支持资源级限制与条件键，只能授在全部资源上，用到它的条件因此限定在这里。
@@ -1612,11 +1616,16 @@ def describe_revision_unless_gone(ecs, revision_arn: str, **kwargs) -> dict | No
         return None
 
 
+# 完整的任务定义 revision ARN：`arn:<分区>:ecs:<区域>:<账号>:task-definition/<family>:<编号>`。family 的字符集按 ECS 的
+# 命名规则（字母、数字、连字符、下划线）。
+_TASK_DEF_REVISION_ARN = re.compile(
+    r"arn:[a-z][a-z0-9-]*:ecs:[a-z0-9-]+:\d+:task-definition/(?P<family>[A-Za-z0-9_-]+):\d+")
+
+
 def _task_def_family_of(revision_arn: str) -> str | None:
-    """`arn:aws:ecs:<region>:<account>:task-definition/<family>:<revision>` → family；不是这种完整形态 → None。"""
-    _, sep, resource = revision_arn.partition(":task-definition/")
-    family, colon, revision = resource.rpartition(":")
-    return family if sep and colon and family and revision.isdigit() else None
+    """完整的任务定义 revision ARN → family；整串不符合这一形态（只有后缀像、前面残缺的也算）→ None。"""
+    m = _TASK_DEF_REVISION_ARN.fullmatch(revision_arn)
+    return m.group("family") if m else None
 
 
 def _listed_as_active(ecs, family: str, revision_arn: str) -> bool:
@@ -1736,9 +1745,10 @@ def resolve_worker_variant(
     `variant=None` → 取部署级默认指针（缺失即抛，提示运行 `gherkai deploy`）。tag 由 `names.image_tag`
     单点拼（推送方与本函数同一个函数，键不会两边算法不同而对不上）；`cli_version` 取不到（从源码直接运行）时
     无从拼 tag，也抛——fail-loud 好过静默解析成别的版本。
-    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS 描述报 `ClientException` 且列举
-    该 family 的 ACTIVE revision 确认其中没有它（见 `describe_revision_unless_gone`；这个错误码分不出资源不在与其它客户端
-    错误，故只在它出现时列举核对，描述的其余错误不列举、原样抛出）、ECR `ImageNotFoundException` /
+    **AWS 读失败里只有「资源不在」算 miss**：SSM `ParameterNotFound`（见 `_ssm_get`）、ECS 描述报 `ClientException` 且本次
+    列举该 family 的 ACTIVE revision 未发现它（见 `describe_revision_or_none_if_unlisted`；这个错误码分不出资源不在与其它
+    客户端错误，故只在它出现时列举核对，描述的其余错误不列举、原样抛出；未列出按本次未确认可用处理，不证明已被注销或
+    删除，刚注册、尚未出现在列举结果里的 revision 也会在这里暂时被拒）、ECR `ImageNotFoundException` /
     `RepositoryNotFoundException`。权限不足、限流、网络等其余 botocore 异常原样抛，由入口前端按「凭证 / region / 权限」
     诊断——翻成 miss 会把缺只读权限（ADR 0038 提交者的 `ecr:DescribeImages` / `ecs:DescribeTaskDefinition` /
     `ecs:ListTaskDefinitions`）的提交者引去重推镜像、原地绕圈。
@@ -1772,10 +1782,12 @@ def resolve_worker_variant(
         if rec is None:
             raise _miss(engine, "SSM 里没有这个（引擎，variant）的镜像映射")
         revision_arn, digest = rec["revision_arn"], rec["digest"]
-        td = describe_revision_unless_gone(ecs, revision_arn)  # 确认已不是 ACTIVE 才返回 None，其余读失败原样抛
+        # 描述返回 ClientException 且本次 ACTIVE 列举未发现它才返回 None（未确认可用），其余读失败原样抛
+        td = describe_revision_or_none_if_unlisted(ecs, revision_arn)
         if td is None:
-            raise _miss(engine, f"task-def revision {revision_arn} 已不可 Describe，"
-                                f"也不在该 family 的 ACTIVE revision 里（可能已被清理删除）")
+            raise _miss(engine, f"未能确认 task-def revision {revision_arn} 可用：读取它失败，该 family 当前列出的 "
+                                f"ACTIVE revision 里也没有它，可能已被清理删除，也可能刚注册、尚未出现在查询结果里；"
+                                f"刚推送过的请稍后重新提交")
         if (td.get("taskDefinition", {}).get("status") or "").upper() != "ACTIVE":
             raise _miss(engine, f"task-def revision {revision_arn} 不是 ACTIVE（已退休/注销，不能再起新 task）")
         repo = _names.ecr_repo_name(prefix, engine)

@@ -208,7 +208,7 @@ def test_deleted_revision_is_a_miss(aws):
                              Value=json.dumps(rec), Type="String", Overwrite=True)
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws)
-    assert "不可 Describe" in str(e.value)
+    assert "未能确认" in str(e.value)
 
 
 def test_missing_ecr_repository_is_a_miss(aws):
@@ -334,7 +334,7 @@ def test_client_exception_on_a_revision_still_listed_as_active_is_not_a_miss(aws
 
 
 def test_listing_failure_after_a_describe_client_exception_is_not_a_miss(aws):
-    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无法确认 revision 已不在，抛出列举的错误，不翻成 miss。"""
+    """描述报 `ClientException`、列举 ACTIVE revision 被拒：无从核对 revision 是否仍被列出，抛出列举的错误，不翻成 miss。"""
     _seed(aws, variant="base")
     list_error = _client_error("AccessDeniedException", "ListTaskDefinitions")
     ecs = _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"),
@@ -346,27 +346,27 @@ def test_listing_failure_after_a_describe_client_exception_is_not_a_miss(aws):
 
 
 def test_client_exception_on_a_revision_missing_from_the_active_list_is_a_miss(aws):
-    """描述报 `ClientException`、列举成功而其中没有这个 revision（已注销，描述也读不到）：判为不可用，提示推送。"""
+    """描述报 `ClientException`、列举成功而其中没有这个 revision（已注销，描述也读不到）：按未确认可用判为 miss，提示推送。"""
     recs = _seed(aws, variant="base")
     arn = recs["novaact"]["revision_arn"]
     aws["ecs"].deregister_task_definition(taskDefinition=arn)
     ecs = _FailingEcs(aws["ecs"], describe_error=_client_error("ClientException", "DescribeTaskDefinition"))
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve_with_ecs(aws, ecs)
-    assert "不可 Describe" in str(e.value) and arn in str(e.value)
+    assert "未能确认" in str(e.value) and arn in str(e.value)
     assert len(ecs.listed) == 1
 
 
 def test_revision_deleted_by_cleanup_is_a_miss(aws):
-    """映射所指的 revision 已被注销并删除（清理回收之后的形态）：描述报 `ClientException`，列举确认它不在 ACTIVE revision
-    里 → miss，提示推送。"""
+    """映射所指的 revision 已被注销并删除（清理回收之后的形态）：描述报 `ClientException`，本次 ACTIVE 列举未发现它
+    → miss，提示推送。"""
     recs = _seed(aws, variant="base")
     arn = recs["novaact"]["revision_arn"]
     aws["ecs"].deregister_task_definition(taskDefinition=arn)
     aws["ecs"].delete_task_definitions(taskDefinitions=[arn])
     with pytest.raises(compose.WorkerVariantError) as e:
         _resolve(aws)
-    assert "不可 Describe" in str(e.value) and arn in str(e.value)
+    assert "未能确认" in str(e.value) and arn in str(e.value)
 
 
 class _PagedListing:
@@ -390,21 +390,57 @@ class _PagedListing:
 _FAMILY_ARN = "arn:aws:ecs:us-east-1:123456789012:task-definition/gherkai-novaact-worker"
 
 
-def test_listing_is_read_past_the_first_page_before_a_revision_counts_as_gone():
-    """列举分页时读完全部页才下结论：这个 revision 在第二页里即原错误抛出，不当成已删除；各页都没有才返回 None。
+def test_listing_is_read_past_the_first_page_before_a_revision_counts_as_unlisted():
+    """列举分页时读完全部页才下结论：这个 revision 在第二页里即原错误抛出，不当成未列出；各页都没有才返回 None。
     同前缀的另一个 family 的 revision 不算（按完整 ARN 比较）。"""
     from botocore.exceptions import ClientError
 
     target = f"{_FAMILY_ARN}:7"
     ecs = _PagedListing([[f"{_FAMILY_ARN}-x:7", f"{_FAMILY_ARN}:5"], [target]])
     with pytest.raises(ClientError):
-        compose.describe_revision_unless_gone(ecs, target)
+        compose.describe_revision_or_none_if_unlisted(ecs, target)
     assert [r.get("nextToken") for r in ecs.requests] == [None, "1"]
     assert all(r["familyPrefix"] == "gherkai-novaact-worker" and r["status"] == "ACTIVE" for r in ecs.requests)
 
     ecs = _PagedListing([[f"{_FAMILY_ARN}-x:7", f"{_FAMILY_ARN}:5"], [f"{_FAMILY_ARN}:6"]])
-    assert compose.describe_revision_unless_gone(ecs, target) is None
+    assert compose.describe_revision_or_none_if_unlisted(ecs, target) is None
     assert len(ecs.requests) == 2
+
+
+@pytest.mark.parametrize("arn", [
+    "not-an-arn:task-definition/f:7",
+    "arn:aws:ecs:us-east-1:123456789012:task-definition/f",
+    "arn:aws:ecs::123456789012:task-definition/f:7",
+    "arn:aws:s3:us-east-1:123456789012:task-definition/f:7",
+    "x" + _FAMILY_ARN + ":7",
+])
+def test_malformed_revision_arn_is_not_listed_and_the_describe_error_is_raised(arn):
+    """映射里的 revision ARN 不是完整的任务定义 revision ARN（如被手工改坏，只有后缀像）：描述报 `ClientException` 时不列举，
+    原错误原样抛出，不返回 None。"""
+    from botocore.exceptions import ClientError
+
+    ecs = _PagedListing([[]])
+    with pytest.raises(ClientError):
+        compose.describe_revision_or_none_if_unlisted(ecs, arn)
+    assert ecs.requests == []
+
+
+@pytest.mark.parametrize(("arn", "family"), [
+    ("arn:aws-cn:ecs:cn-north-1:123456789012:task-definition/gherkai-novaact-worker:3", "gherkai-novaact-worker"),
+    ("arn:aws-us-gov:ecs:us-gov-west-1:123456789012:task-definition/Team_a-b_worker:12", "Team_a-b_worker"),
+])
+def test_well_formed_revision_arn_in_other_partitions_is_listed(arn, family):
+    """其它分区（`aws-cn`、`aws-us-gov`）与 family 名里带连字符、下划线的完整 ARN 照常列举核对：按它的 family 列 ACTIVE
+    revision，未列出返回 None，仍被列出时原错误抛出。"""
+    from botocore.exceptions import ClientError
+
+    ecs = _PagedListing([[]])
+    assert compose.describe_revision_or_none_if_unlisted(ecs, arn) is None
+    assert [r["familyPrefix"] for r in ecs.requests] == [family]
+
+    ecs = _PagedListing([[arn]])
+    with pytest.raises(ClientError):
+        compose.describe_revision_or_none_if_unlisted(ecs, arn)
 
 
 def test_one_engine_missing_fails_whole_resolution(aws):
