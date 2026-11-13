@@ -13,8 +13,10 @@ moto 的两处已知偏差（顺手记下，别当成实现问题）：
 """
 from __future__ import annotations
 
+import contextlib
 import json
 import re
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -267,22 +269,25 @@ class HookedEcs:
       取值是一个时刻，或 `{arn: 时刻}`（不在表里的 ARN 不补）。
     - `on_describe(kw, n)`：第 n 次 describe（按 ARN 分别计数，从 1 计）之前调用，可改动 moto 里的状态或抛错。
     - `on_register(arn, n)`：第 n 次注册成功之后调用。
+    - `after_tag(arn)`：每次 `TagResource` 成功返回之后调用。
     - `untag_error`：`UntagResource` 一律抛这个异常。
     - `list_error`：`ListTaskDefinitions` 一律抛这个异常。
     - `tagged` 记下每次 `TagResource` 请求的 ARN，`listed` 记下每次 `ListTaskDefinitions` 请求的参数（请求发出即记，
-      不论成败）。
+      不论成败）；`untag_failed` 记下底层 `UntagResource` 报错的 ARN（`untag_error` 注入的不算）。
     """
 
-    def __init__(self, inner, *, registered_at=None, on_describe=None, on_register=None, untag_error=None,
-                 list_error=None):
+    def __init__(self, inner, *, registered_at=None, on_describe=None, on_register=None, after_tag=None,
+                 untag_error=None, list_error=None):
         self._inner = inner
         self.registered_at, self.on_describe, self.on_register = registered_at, on_describe, on_register
+        self.after_tag = after_tag
         self.untag_error, self.list_error = untag_error, list_error
         self.describes: dict[str, int] = {}
         self.registered: list[str] = []
         self.tagged: list[str] = []
         self.listed: list[dict] = []
         self.untagged: list[str] = []
+        self.untag_failed: list[str] = []
         self.deregistered: list[str] = []
 
     def describe_task_definition(self, **kw):
@@ -306,7 +311,10 @@ class HookedEcs:
 
     def tag_resource(self, **kw):
         self.tagged.append(kw["resourceArn"])
-        return self._inner.tag_resource(**kw)
+        resp = self._inner.tag_resource(**kw)
+        if self.after_tag:
+            self.after_tag(kw["resourceArn"])
+        return resp
 
     def list_task_definitions(self, **kw):
         self.listed.append(kw)
@@ -318,7 +326,11 @@ class HookedEcs:
         self.untagged.append(kw["resourceArn"])
         if self.untag_error is not None:
             raise self.untag_error
-        return self._inner.untag_resource(**kw)
+        try:
+            return self._inner.untag_resource(**kw)
+        except Exception:
+            self.untag_failed.append(kw["resourceArn"])
+            raise
 
     def deregister_task_definition(self, **kw):
         self.deregistered.append(kw["taskDefinition"])
@@ -334,12 +346,15 @@ INDEX_MISSING = "（索引不存在）"
 class HookedDdb:
     """DynamoDB client 的钩子壳：记下每次调用与每次 `Query` 的（索引名、分区键值）；`index_status` 改写 `DescribeTable` 里
     状态分组索引的 `IndexStatus`（`INDEX_MISSING` 即把它从结果里拿掉），`gsis` 把 `DescribeTable` 的索引清单整个换掉，
-    `describe_error` / `query_error` 让对应调用抛错，`page_size` 给每次 `Query` 加上 `Limit`、逼出翻页。"""
+    `describe_error` / `query_error` 让对应调用抛错，`page_size` 给每次 `Query` 加上 `Limit`、逼出翻页，
+    `after_query(resp)` 在每次 `Query` 成功返回之后调用（收到这一页的结果）。"""
 
-    def __init__(self, inner, *, index_status=None, gsis=None, describe_error=None, query_error=None, page_size=None):
+    def __init__(self, inner, *, index_status=None, gsis=None, describe_error=None, query_error=None, page_size=None,
+                 after_query=None):
         self._inner = inner
         self.index_status, self.gsis = index_status, gsis
         self.describe_error, self.query_error, self.page_size = describe_error, query_error, page_size
+        self.after_query = after_query
         self.calls: list[str] = []
         self.queried: list[tuple[str, str]] = []
 
@@ -367,7 +382,10 @@ class HookedDdb:
             raise self.query_error
         if self.page_size is not None:
             kw = {**kw, "Limit": self.page_size}
-        return self._inner.query(**kw)
+        resp = self._inner.query(**kw)
+        if self.after_query:
+            self.after_query(resp)
+        return resp
 
     def __getattr__(self, item):
         self.calls.append(item)
@@ -1249,6 +1267,56 @@ def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws
     assert workers._live_reference_snapshot(aws.ddb, table) == set()
 
 
+@pytest.mark.parametrize("finalize", ["try_finalize", "finalize_run"])
+def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclaims_it_after_the_run_finishes(
+        aws, finalize):
+    """同一个 run 先拦下、收尾之后再回收（ADR 0038 实测项 9 前半，「引用检查」段③④与「为什么一次快照就够」段其三）。
+    run 由 core 的 `DynamoDBRunStore` 真写端建立并推进，清理每一趟都经状态分组索引的 `live` 分组取一次快照。串起的步骤：
+
+    1. 一个不在任何映射里、`gherkai:retired-at` 早已满静默期的 revision R；写端建一个引用 R 的 run，run 级为 `pending`。
+    2. 一趟清理：R 是成熟候选，快照里有它，留下，原因是有未到终态的 run 引用；不发注销请求，R 仍为 ACTIVE、tag 不变。
+    3. 写端把一个 job 写成 `running`，run 级随同一次写换到 `running`；再一趟清理同样留下 R。
+    4. 写端以一条终态写收尾（`try_finalize` 与 `finalize_run` 各走一遍），run 离开 `live` 分组；下一趟清理回收 R。
+
+    守的是：两个非终态都经同一个分组拦下同一个 revision，run 收尾之后的下一趟不再被它拦下。每一趟只查 `live` 分组一次。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.model import JobState, RunMeta, RunState, Status
+
+    templates = seed_backend(aws)
+    arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
+    retired_raw = _tags(aws, arn)[names.TAG_RETIRED_AT]
+    table = names.default_name(PREFIX, names.BASE_RUNS_TABLE)
+    store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
+    scope = "a.feature:3"
+    store.create_run(
+        RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(), worker_task_defs={"novaact": arn}),
+        RunState(run_id="run-01", status=Status.PENDING, jobs={scope: JobState(scope_id=scope, status=Status.PENDING)}))
+
+    def one_pass(at: datetime):
+        ecs, ddb = HookedEcs(aws.ecs), HookedDdb(aws.ddb)
+        outcome, _ = _cleanup(aws, at, ecs=ecs, ddb=ddb)
+        assert ddb.queried == SNAPSHOT_DONE, ddb.queried
+        return outcome, ecs
+
+    for i, status in enumerate((Status.PENDING, Status.RUNNING)):
+        if status == Status.RUNNING:
+            store.update_job_state("run-01", JobState(scope_id=scope, status=Status.RUNNING))
+        assert store.load_run_state("run-01").status == status
+        outcome, ecs = one_pass(NOW + timedelta(minutes=i))
+        assert outcome.deleted == () and ecs.deregistered == [], (status, outcome)
+        assert any(a == arn and "仍有未到终态的 run 引用" in why for a, why in outcome.kept), (status, outcome)
+        assert arn in _revisions(aws, "novaact") and _tags(aws, arn)[names.TAG_RETIRED_AT] == retired_raw
+
+    if finalize == "try_finalize":
+        assert store.try_finalize("run-01", Status.PASSED, "2026-09-08T12:05:00Z") is True
+    else:
+        store.finalize_run("run-01", Status.PASSED, "2026-09-08T12:05:00Z")
+    assert store.load_run_state("run-01").status == Status.PASSED
+    outcome, ecs = one_pass(NOW + timedelta(minutes=10))
+    assert outcome.deleted == (arn,) and ecs.deregistered == [arn], outcome
+    assert arn not in _revisions(aws, "novaact")
+
+
 def test_cleanup_backfills_retired_at_on_an_orphan_with_a_value_after_reading_the_mappings(aws):
     """不在任何映射里、还没有 `gherkai:retired-at`、`registeredAt` 早于本趟读映射的时刻 → 补打、本趟留下。补打的值不早于
     读完映射的时刻：读映射之前已过了很久（命令开始时刻早得多）时，值仍取补打那一刻（ADR 0038「时钟（实装要求）」段）。"""
@@ -1372,6 +1440,482 @@ def test_final_check_skips_a_candidate_that_changed_and_continues_with_the_other
     assert changed not in outcome.deleted and changed not in ecs.deregistered
     assert outcome.deleted == (other,), outcome
     assert workers._short_arn(changed) in text and "这次不回收它" in text
+
+
+def _after_mapping_reread(ecs: HookedEcs, ddb: HookedDdb, arn: str, act, seen: list):
+    """`after_enumeration` 钩子：这一趟的映射重读（第二轮映射枚举）取回最后一页之后、最后核对之前执行 `act()`。
+
+    位置以映射重读为锚、不以最后核对的那次 describe 为锚：去掉最后核对的实现里同一位置照样存在，用例才会在
+    「不注销」的断言上失败，而不是因为停不到预定位置。那一刻对 `arn` 已发出的 describe 次数（1 即只有列 family 那一次，
+    最后核对还没发生）与快照的 `Query` 记进 `seen`，由用例断言（钩子里抛出的断言会被当成重读失败吞掉）。"""
+    def after_enumeration(n):
+        if n == 2:
+            seen.append((ecs.describes.get(arn, 0), list(ddb.queried)))
+            act()
+    return after_enumeration
+
+
+SNAPSHOT_DONE = [(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)]   # 这一趟的引用快照已完成
+
+
+def _final_check_pass(aws, arn: str, change: str, *, at: datetime, value: datetime | None = None):
+    """一趟在快照与映射重读之后、最后核对之前被改动了候选 tag 的清理 → (outcome, text, ecs)：`rewritten` 改写为
+    `value`，`removed` 摘掉。断言改动确实落在这个位置。"""
+    def act():
+        if change == "rewritten":
+            _retire_now(aws, arn, value)
+        else:
+            aws.ecs.untag_resource(resourceArn=arn, tagKeys=[names.TAG_RETIRED_AT])
+
+    ecs, ddb, seen = HookedEcs(aws.ecs), HookedDdb(aws.ddb), []
+    ssm = HookedSsm(aws.ssm, after_enumeration=_after_mapping_reread(ecs, ddb, arn, act, seen))
+    outcome, text = _cleanup(aws, at, ssm=ssm, ecs=ecs, ddb=ddb)
+    assert seen == [(1, SNAPSHOT_DONE)], seen
+    return outcome, text, ecs
+
+
+def test_candidate_whose_retired_at_is_rewritten_before_the_final_check_is_judged_again_by_the_new_value(aws):
+    """成熟候选的 `gherkai:retired-at` 在快照与映射重读之后、最后核对之前被改写为新值：这一趟不注销；之后各趟按新值重新
+    判定，新值未满静默期即留下，满了才回收（ADR 0038「引用检查」段⑤与实测项 10「注销之前的最后核对」）。串起的步骤：
+
+    1. 一个不在任何映射里、tag 早已满静默期的 revision R，被一趟清理收为成熟候选；这一趟做完就绪检查、快照与映射重读之后，
+       最后核对之前 R 的 tag 被改写为这一趟的时刻。
+    2. 这一趟：最后核对读到的值与判定成熟时不同，不发注销请求，R 仍为 ACTIVE、带着新值。
+    3. 新值之后未满静默期的一趟：按新值判为未满，留下，不发注销请求。
+    4. 新值满静默期之后的一趟：回收 R。
+
+    守的是：最后核对比较的是 tag 的值，不只是 tag 在不在；被跳过的候选之后按届时的值重新判定，不沿用这一趟的旧值。"""
+    templates = seed_backend(aws)
+    arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
+    outcome, text, ecs = _final_check_pass(aws, arn, "rewritten", at=NOW, value=NOW)
+    assert arn not in ecs.deregistered and arn not in outcome.deleted
+    assert any(a == arn and "退休时刻已改变" in why for a, why in outcome.kept), outcome
+    assert workers._short_arn(arn) in text and "这次不回收它" in text
+    assert arn in _revisions(aws, "novaact") and _tags(aws, arn)[names.TAG_RETIRED_AT] == NOW.isoformat()
+
+    ecs = HookedEcs(aws.ecs)
+    outcome, _ = _cleanup(aws, NOW + workers.RETIRE_QUIET_PERIOD - timedelta(minutes=1), ecs=ecs)
+    assert outcome.deleted == () and ecs.deregistered == []
+    assert any(a == arn and "静默期" in why for a, why in outcome.kept), outcome
+    assert arn in _revisions(aws, "novaact")
+
+    outcome, _ = _cleanup(aws, NOW + workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1))
+    assert outcome.deleted == (arn,), outcome
+    assert arn not in _revisions(aws, "novaact")
+
+
+def test_candidate_whose_retired_at_is_removed_before_the_final_check_is_backfilled_and_reclaimed_later(aws):
+    """成熟候选的 `gherkai:retired-at` 在快照与映射重读之后、最后核对之前被摘掉：这一趟不注销；下一趟按「不在映射、无 tag」
+    处理，补打、留下，再满静默期才回收（ADR 0038「引用检查」段⑤与「候选与静默期起点」段）。串起的步骤：
+
+    1. 一个不在任何映射里、tag 早已满静默期的 revision R，被一趟清理收为成熟候选；这一趟做完就绪检查、快照与映射重读之后，
+       最后核对之前 R 的 tag 被摘掉。
+    2. 这一趟：最后核对读到 tag 已不在，不发注销请求，R 仍为 ACTIVE、不带 tag。
+    3. 下一趟：R 不在任何映射里、没有 tag、注册时刻早于本趟读映射的时刻，补打（值为本趟的时刻）、本趟留下。
+    4. 补打之后未满静默期的一趟：留下，不发注销请求。
+    5. 补打满静默期之后的一趟：回收 R。
+
+    守的是：被摘掉 tag 的候选只会从更晚的补打时刻重新起算，回收推迟、不提前。真实 ECS 返回的 `registeredAt` 是真实时刻、
+    晚于注入的时钟，补打那一趟起的描述按注入的时钟覆盖这个字段（moto 不返回它）。"""
+    templates = seed_backend(aws)
+    arn = _unmapped_retired(aws, templates, retired_at=NOW - timedelta(hours=3))
+    outcome, text, ecs = _final_check_pass(aws, arn, "removed", at=NOW)
+    assert arn not in ecs.deregistered and arn not in outcome.deleted
+    assert any(a == arn and "退休时刻已被去掉" in why for a, why in outcome.kept), outcome
+    assert workers._short_arn(arn) in text and "这次不回收它" in text
+    assert arn in _revisions(aws, "novaact") and names.TAG_RETIRED_AT not in _tags(aws, arn)
+
+    cleaner = HookedEcs(aws.ecs, registered_at=NOW - timedelta(days=1))
+    backfilled_at = NOW + timedelta(minutes=10)
+    outcome, _ = _cleanup(aws, backfilled_at, ecs=cleaner)
+    assert outcome.deleted == () and cleaner.tagged == [arn], cleaner.tagged
+    assert _tags(aws, arn)[names.TAG_RETIRED_AT] == backfilled_at.isoformat()
+    assert any(a == arn and "本次记录退休时刻" in why for a, why in outcome.kept), outcome
+
+    outcome, _ = _cleanup(aws, backfilled_at + workers.RETIRE_QUIET_PERIOD - timedelta(minutes=1), ecs=cleaner)
+    assert outcome.deleted == () and cleaner.deregistered == []
+    assert any(a == arn and "静默期" in why for a, why in outcome.kept), outcome
+
+    outcome, _ = _cleanup(aws, backfilled_at + workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1), ecs=cleaner)
+    assert outcome.deleted == (arn,), outcome
+    assert arn not in _revisions(aws, "novaact")
+
+
+class _Party:
+    """在独立线程里执行交错中的一方（一条推送或一趟清理），并把它停在钩子回调里的预定位置：钩子在那一方的线程里调用
+    `hold()`，主线程 `release_until_done()` 放行并等它结束、取回返回值（它抛出的异常在主线程原样抛出）。一方可以依次停在
+    几个位置：`release_until_held()` 放行它，并等它停在下一个位置；`release_until_done()` 之后它不再停留，余下的 `hold()`
+    直接返回。
+
+    次序为何确定：主线程启动或放行一方之后，等到它停在预定位置（`start_until_held()` / `release_until_held()`）或结束
+    （`release_until_done()`）才往下走，停住的一方在被放行之前不发出任何调用。于是任一时刻至多一方在执行，各方 AWS 调用
+    的先后完全由主线程启动与放行的先后决定，与线程调度无关。没有停在预定位置就结束的，主线程立即报错，不等超时；
+    `abort()` 让仍停着的一方从停点抛错，并等它执行到结束（见 `_parties`；被测代码可能接住这个错误、照常做完其余步骤），
+    所以用例结束之后不再有调用发出。超时取得宽，是因为真实账户上第一次 DynamoDB 调用要等建表，这期间其余各方一直停着。"""
+
+    TIMEOUT = 1800.0   # 秒
+
+    def __init__(self, name: str, target):
+        self.name, self._target = name, target
+        self.result = None
+        self.error: BaseException | None = None
+        self._cond = threading.Condition()
+        self._holds = 0          # 已停留的次数
+        self._releases = 0       # 已放行的次数
+        self._free = False       # `release_until_done()` 之后不再停留
+        self._finished = False
+        self._aborted = False
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+
+    def _run(self):
+        try:
+            self.result = self._target()
+        except BaseException as exc:  # noqa: BLE001  交给主线程原样抛出
+            self.error = exc
+        finally:
+            with self._cond:
+                self._finished = True
+                self._cond.notify_all()
+
+    def hold(self) -> None:
+        with self._cond:
+            if self._free and not self._aborted:
+                return
+            self._holds += 1
+            n = self._holds
+            self._cond.notify_all()
+            if not self._cond.wait_for(lambda: self._releases >= n or self._free or self._aborted, self.TIMEOUT):
+                raise RuntimeError(f"{self.name}：停留超时，没有被放行")
+            if self._aborted:
+                raise RuntimeError(f"{self.name}：用例已中止")
+
+    def _until_held(self, n: int) -> None:
+        with self._cond:
+            settled = self._cond.wait_for(lambda: self._holds >= n or self._finished, self.TIMEOUT)
+            held = self._holds >= n
+        assert settled, f"{self.name} 超时仍未停在预定位置"
+        if not held:
+            raise AssertionError(f"{self.name} 没有停在预定位置就结束了：error={self.error!r} result={self.result!r}")
+
+    def start_until_held(self) -> None:
+        self._thread.start()
+        self._until_held(1)
+
+    def release_until_held(self) -> None:
+        with self._cond:
+            self._releases += 1
+            n = self._releases + 1
+            self._cond.notify_all()
+        self._until_held(n)
+
+    def release_until_done(self):
+        with self._cond:
+            self._releases += 1
+            self._free = True
+            self._cond.notify_all()
+        self._thread.join(self.TIMEOUT)
+        assert not self._thread.is_alive(), f"{self.name} 放行之后没有结束"
+        if self.error is not None:
+            raise self.error
+        return self.result
+
+    def abort(self) -> None:
+        if self._thread.is_alive():
+            with self._cond:
+                self._aborted = True
+                self._cond.notify_all()
+            self._thread.join(self.TIMEOUT)
+
+
+@contextlib.contextmanager
+def _parties(*parties: _Party):
+    """用例结束时（含断言失败）让仍停着的各方抛错结束。"""
+    try:
+        yield parties
+    finally:
+        for party in parties:
+            party.abort()
+
+
+def test_final_check_keeps_a_revision_a_push_wrote_after_the_backfilling_pass_removed_its_tag(aws):
+    """「摘掉自己补打的 tag 放行推送」的交错（ADR 0038「注册与回收的竞争」段其二、残余风险⑥(b)，实测项 10 同名一条）。
+    三方各在一个线程里，按协议位置依次启动与放行（次序为何确定见 `_Party`）：
+
+    1. 推送 Q 注册 R（步 6），停在写映射之前的再读之前（注册请求返回之后、对 R 的第一次 describe 之前）。
+    2. 清理 P0 读映射（R 不在其中），补打 R（值 v0），停在映射重读之前（第二轮映射枚举之前）。
+    3. 时钟越过 v0 之后的静默期，清理 P1 把 R 收为成熟候选，做完就绪检查、快照与映射重读（R 仍不在映射里），停在最后核对
+       之前（映射重读取回最后一页之后，位置的取法见 `_after_mapping_reread`）。
+    4. 放行 P0：映射重读失败，按协议摘掉本趟补打的 tag，R 不再带 tag。
+    5. 放行 Q：再读看到 R 为 ACTIVE、不带 tag，不重新注册，把 R 写进映射。
+    6. 放行 P1：最后核对读到 tag 已不在，不发注销请求。
+
+    守的是：P1 凭 v0 收下的候选已被写进映射，注销之前的最后核对拦下它，R 仍在映射里、仍为 ACTIVE。真实 ECS 返回的
+    `registeredAt` 是真实时刻、晚于注入的时钟，P0 的描述按注入的时钟覆盖这个字段（moto 不返回它）。"""
+    seed_backend(aws)
+    backfilled_at = NOW + timedelta(minutes=1)
+    matured_at = backfilled_at + workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1)
+
+    q_ecs = HookedEcs(aws.ecs, on_register=lambda arn, n: q.hold() if n == 1 else None)
+    q = _Party("推送 Q", lambda: _push(workers.Aws(ssm=aws.ssm, ecs=q_ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer()))
+
+    def p0_reread(n):
+        if n == 2:
+            p0.hold()
+            raise RuntimeError("Throttling")
+
+    p0_ssm, p0_ecs = HookedSsm(aws.ssm, before_enumeration=p0_reread), HookedEcs(aws.ecs, registered_at=NOW)
+    p0 = _Party("清理 P0", lambda: _cleanup(aws, backfilled_at, ssm=p0_ssm, ecs=p0_ecs))
+
+    p1_ecs, p1_ddb, p1_seen = HookedEcs(aws.ecs), HookedDdb(aws.ddb), []
+    p1_ssm = HookedSsm(aws.ssm, after_enumeration=lambda n: _after_mapping_reread(
+        p1_ecs, p1_ddb, q_ecs.registered[0], p1.hold, p1_seen)(n))
+    p1 = _Party("清理 P1", lambda: _cleanup(aws, matured_at, ssm=p1_ssm, ecs=p1_ecs, ddb=p1_ddb))
+
+    with _parties(q, p0, p1):
+        q.start_until_held()
+        [r] = q_ecs.registered
+        assert q_ecs.describes.get(r, 0) == 0, "推送应停在对 R 的再读之前"
+
+        p0.start_until_held()
+        assert p0_ssm.enumerations == 2 and p0_ecs.tagged == [r]
+        assert _tags(aws, r)[names.TAG_RETIRED_AT] == backfilled_at.isoformat()
+
+        p1.start_until_held()
+        assert p1_seen == [(1, SNAPSHOT_DONE)], "P1 应已完成快照与映射重读、尚未做最后核对"
+        assert p1_ecs.deregistered == []
+        with pytest.raises(aws.ssm.exceptions.ParameterNotFound):
+            _mapping(aws, "novaact", "login")
+
+        p0_outcome, p0_text = p0.release_until_done()
+        assert p0_outcome.deleted == () and p0_ecs.untagged == [r]
+        assert "重新读取 worker 镜像映射失败" in p0_text
+        assert names.TAG_RETIRED_AT not in _tags(aws, r)
+
+        rc, q_text = q.release_until_done()
+        assert rc == 0, q_text
+        assert q_ecs.registered == [r], "再读看到 ACTIVE、不带 tag，不应重新注册"
+        assert _mapping(aws, "novaact", "login")["revision_arn"] == r
+
+        p1_outcome, p1_text = p1.release_until_done()
+    assert r not in p1_ecs.deregistered and p1_outcome.deleted == ()
+    assert any(a == r and "退休时刻已被去掉" in why for a, why in p1_outcome.kept), p1_outcome
+    assert workers._short_arn(r) in p1_text and "这次不回收它" in p1_text
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == r and r in _revisions(aws, "novaact")
+
+
+def test_final_check_keeps_a_shared_revision_whose_last_mapping_is_replaced_while_the_pass_holds_the_old_value(aws):
+    """早先版本留下的共用 revision、最后一条映射被替换的交错（ADR 0038「引用检查」段⑤其一、残余风险①(d)，实测项 10
+    同名一条）。替换的一方与清理各在一个线程里，按协议位置依次启动与放行（次序为何确定见 `_Party`）：
+
+    1. 摆出共用：旧版本推送注册 R，当前版本同名 variant 的映射也指向 R。当前版本换 digest 重推，替换的一步给 R 打上
+       t0（远早于静默期）；这条推送在末尾的清理之前失败返回（写默认指针失败），之后也没有一趟清理摘掉这个 tag。此时只剩
+       旧版本那条映射引用 R。
+    2. 旧版本换 digest 重推 Q：注册 R3，把旧版本的映射替换为 R3（写映射成功），停在给 R 打 tag 之前（这次 `put_parameter`
+       返回之后）。
+    3. 清理 P 读映射（R 已不在其中），按 t0 把 R 收为成熟候选，做完就绪检查、快照与映射重读，停在最后核对之前（映射重读
+       取回最后一页之后，位置的取法见 `_after_mapping_reread`）。
+    4. 放行 Q：替换的一步给 R 写入新时刻，Q 正常结束。
+    5. 放行 P：最后核对读到的值已不是 t0，不发注销请求。
+
+    守的是：清理凭旧值收下的候选，替换的一步在最后核对之前写入新时刻时不被注销，R 之后从新时刻起算静默期。"""
+    seed_backend(aws)
+    shared = _share_with_old_version(aws, "sha256:" + "4" * 64)
+    t0 = NOW - timedelta(hours=3)
+    rc, text = _push(workers.Aws(ssm=_failing_default_pointer_put(aws), ecs=aws.ecs, ecr=aws.ecr, ddb=aws.ddb),
+                     FakeContainer(digests=["sha256:" + "9" * 64]), set_default=True, now=t0)
+    assert rc == 2, text
+    assert _mapping(aws, "novaact", "login")["revision_arn"] != shared
+    assert _mapping(aws, "novaact", "login", version=OLD_VERSION)["revision_arn"] == shared
+    assert _tags(aws, shared)[names.TAG_RETIRED_AT] == t0.isoformat()
+
+    replaced_at = NOW + timedelta(minutes=1)
+    old_mapping = names.ssm_path(PREFIX, names.worker_image_key("novaact", names.image_tag(OLD_VERSION, "login")))
+    q_ssm = HookedSsm(aws.ssm, after_put=lambda kw: q.hold() if kw["Name"] == old_mapping else None)
+    q_ecs = HookedEcs(aws.ecs)
+    q = _Party("替换 Q", lambda: _push(workers.Aws(ssm=q_ssm, ecs=q_ecs, ecr=aws.ecr, ddb=aws.ddb),
+                                     FakeContainer(digests=["sha256:" + "8" * 64]), version=OLD_VERSION,
+                                     now=replaced_at))
+
+    p_ecs, p_ddb, p_seen = HookedEcs(aws.ecs), HookedDdb(aws.ddb), []
+    p_ssm = HookedSsm(aws.ssm, after_enumeration=_after_mapping_reread(p_ecs, p_ddb, shared, lambda: p.hold(), p_seen))
+    p = _Party("清理 P", lambda: _cleanup(aws, NOW, ssm=p_ssm, ecs=p_ecs, ddb=p_ddb))
+
+    with _parties(q, p):
+        q.start_until_held()
+        [r3] = q_ecs.registered
+        assert _mapping(aws, "novaact", "login", version=OLD_VERSION)["revision_arn"] == r3
+        assert q_ecs.tagged == [], "Q 应停在给 R 打 tag 之前"
+
+        p.start_until_held()
+        assert p_seen == [(1, SNAPSHOT_DONE)], "P 应已完成快照与映射重读、尚未做最后核对"
+        assert p_ecs.deregistered == []
+        assert _tags(aws, shared)[names.TAG_RETIRED_AT] == t0.isoformat()
+
+        rc, q_text = q.release_until_done()
+        assert rc == 0, q_text
+        assert q_ecs.tagged == [shared]
+        assert _tags(aws, shared)[names.TAG_RETIRED_AT] == replaced_at.isoformat()
+
+        p_outcome, p_text = p.release_until_done()
+    assert shared not in p_ecs.deregistered and p_outcome.deleted == ()
+    assert any(a == shared and "退休时刻已改变" in why for a, why in p_outcome.kept), p_outcome
+    assert workers._short_arn(shared) in p_text and "这次不回收它" in p_text
+    assert shared in _revisions(aws, "novaact")
+    assert _tags(aws, shared)[names.TAG_RETIRED_AT] == replaced_at.isoformat()
+
+
+def _held_push(aws):
+    """一条在三个位置停留的推送 Q（novaact/login，映射原本缺失）→ (Q, Q 的 ECS 钩子壳, Q 的 SSM 钩子壳)：
+    ① 写映射之前的再读之后、写映射（这条映射的 `put_parameter`）之前；② 写映射返回之后、写映射一方的立即摘除之前；
+    ③ 立即摘除之后、命令末尾的清理开始读映射之前。三处都以 Q 自己的调用为锚：①② 是这条映射的写请求前后，③ 是
+    Q 第一次枚举映射（步 1 到步 8 只点读 SSM，不枚举）。"""
+    path = names.ssm_path(PREFIX, names.worker_image_key("novaact", names.image_tag(VERSION, "login")))
+    q_ecs = HookedEcs(aws.ecs)
+    q_ssm = HookedSsm(aws.ssm, before_put=lambda kw: q.hold() if kw["Name"] == path else None,
+                      after_put=lambda kw: q.hold() if kw["Name"] == path else None,
+                      before_enumeration=lambda n: q.hold() if n == 1 else None)
+    q = _Party("推送 Q", lambda: _push(workers.Aws(ssm=q_ssm, ecs=q_ecs, ecr=aws.ecr, ddb=aws.ddb), FakeContainer()))
+    return q, q_ecs, q_ssm
+
+
+def _start_held_push(aws, q, q_ecs) -> str:
+    """启动 Q 到位置①，断言它确已注册 R、做完写映射之前的再读（对 R 的 describe 恰一次，那时 R 不带 tag）、尚未写映射。"""
+    q.start_until_held()
+    [r] = q_ecs.registered
+    assert q_ecs.describes.get(r) == 1, "推送应停在对 R 的再读之后"
+    assert names.TAG_RETIRED_AT not in _tags(aws, r)
+    with pytest.raises(aws.ssm.exceptions.ParameterNotFound):
+        _mapping(aws, "novaact", "login")
+    return r
+
+
+@pytest.mark.parametrize("order", ["pass_removes_first", "push_removes_first"])
+def test_reread_removes_the_backfilled_tag_of_a_revision_a_held_push_writes_into_its_mapping(aws, order):
+    """「打 tag 与写映射的交错」里 tw 落在 r1 与 r3 之间的那种次序，由真实的推送写映射（ADR 0038「打 tag 与写映射的交错」段、
+    「候选与静默期起点」段的「重读」，实测项 10「交错」一条）。推送与清理各在一个线程里，按协议位置依次启动与放行（次序为何
+    确定见 `_Party`，推送的三个停留位置见 `_held_push`）：
+
+    1. 推送 Q 注册 R（步 6），做完写映射之前的再读（R 为 ACTIVE、不带 tag），停在写映射之前。
+    2. 清理 P 读映射（R 不在其中），按注册时刻早于本趟读映射的时刻给 R 补打（值为本趟的时刻），停在补打返回之后、
+       映射重读之前。
+    3. 放行 Q 写映射（步 7），停在写映射返回之后、它自己的立即摘除之前：R 已在映射里，仍带着 P 补打的 tag。
+    4. 两种次序：
+       - `pass_removes_first`：先放行 P，P 的重读看到 R 已在映射里，当场摘掉；这时 Q 还没有摘，R 已不带 tag，摘除出自 P。
+         再放行 Q 做完立即摘除（对已不带 tag 的 R 再摘一次）。
+       - `push_removes_first`：先放行 Q 做完立即摘除、停在它末尾的清理之前，R 已不带 tag；再放行 P，P 的重读同样看到
+         R 在映射里，对已不带 tag 的 R 再摘一次，照常成功。
+    5. 放行 Q 做完末尾的清理。
+
+    两种次序里 P 都不发注销请求，Q 末尾的清理也不发。守的是：补打之后、重读之前被写进映射的 revision，由补打的那一趟在重读
+    之后当场摘掉，不依赖写映射一方的摘除；写映射一方的立即摘除在命令末尾的清理之前完成。最终 R 在映射里、为 ACTIVE、
+    不带 tag。真实 ECS 返回的 `registeredAt` 是真实时刻、晚于注入的时钟，P 的描述按注入的时钟覆盖这个字段（moto 不返回它）。"""
+    seed_backend(aws)
+    backfilled_at = NOW + timedelta(minutes=1)
+    q, q_ecs, q_ssm = _held_push(aws)
+    p_ecs = HookedEcs(aws.ecs, registered_at=NOW, after_tag=lambda arn: p.hold() if arn in q_ecs.registered else None)
+    p_ssm = HookedSsm(aws.ssm)
+    p = _Party("清理 P", lambda: _cleanup(aws, backfilled_at, ssm=p_ssm, ecs=p_ecs))
+
+    with _parties(q, p):
+        r = _start_held_push(aws, q, q_ecs)
+
+        p.start_until_held()
+        assert p_ecs.tagged == [r] and p_ssm.enumerations == 1, "P 应停在补打之后、映射重读之前"
+        assert _tags(aws, r)[names.TAG_RETIRED_AT] == backfilled_at.isoformat()
+
+        q.release_until_held()
+        assert _mapping(aws, "novaact", "login")["revision_arn"] == r
+        assert q_ecs.untagged == [], "Q 应停在它自己的摘除之前"
+        assert _tags(aws, r)[names.TAG_RETIRED_AT] == backfilled_at.isoformat()
+
+        if order == "pass_removes_first":
+            p_outcome, _ = p.release_until_done()
+            assert p_ecs.untagged == [r] and p_ecs.untag_failed == [] and p_ssm.enumerations == 2
+            assert q_ecs.untagged == [], "这时 Q 还没有摘，摘除出自 P 的重读"
+            assert names.TAG_RETIRED_AT not in _tags(aws, r)
+            q.release_until_held()
+            assert q_ecs.untagged == [r] and q_ecs.untag_failed == [] and q_ssm.enumerations == 1
+        else:
+            q.release_until_held()
+            assert q_ecs.untagged == [r] and q_ecs.untag_failed == [] and q_ssm.enumerations == 1
+            assert names.TAG_RETIRED_AT not in _tags(aws, r), "Q 写映射之后、末尾的清理之前已摘掉"
+            assert p_ecs.untagged == []
+            p_outcome, _ = p.release_until_done()
+            assert p_ecs.untagged == [r] and p_ecs.untag_failed == [] and p_ssm.enumerations == 2
+
+        rc, q_text = q.release_until_done()
+    assert rc == 0, q_text
+    assert q_ecs.registered == [r]
+    assert p_outcome.deleted == () and p_ecs.deregistered == [] and q_ecs.deregistered == [], p_outcome
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == r and r in _revisions(aws, "novaact")
+    assert names.TAG_RETIRED_AT not in _tags(aws, r)
+
+
+@pytest.mark.parametrize("matured_by", ["manual_tag", "earlier_backfill"])
+def test_reread_keeps_a_mature_candidate_that_a_held_push_writes_into_its_mapping_after_the_snapshot(aws, matured_by):
+    """注销之前的映射重读拦下成熟候选，由真实的推送写映射（ADR 0038「注册与回收的竞争」段其二的映射重读、「候选与静默期
+    起点」段的「重读」，实测项 10「注销之前的重读」一条）。推送与清理各在一个线程里，按协议位置依次启动与放行（次序为何
+    确定见 `_Party`，推送的三个停留位置见 `_held_push`）：
+
+    1. 推送 Q 注册 R（步 6），做完写映射之前的再读（R 为 ACTIVE、不带 tag），停在写映射之前。
+    2. R 在再读之后带上一个已满静默期的 `gherkai:retired-at`：`manual_tag` 手工打一个早于此刻 3 小时的值；
+       `earlier_backfill` 由一趟完整的清理 P0 按注册时刻补打（值为 P0 的时刻），清理 P 的时刻取补打之后满静默期。
+    3. 清理 P 读映射（R 不在其中），把 R 收为成熟候选，做完就绪检查与快照（快照里没有 R），停在快照最后一页返回之后、
+       映射重读之前。
+    4. 放行 Q 写映射（步 7），停在写映射返回之后、它自己的立即摘除之前：R 已在映射里，仍带着那个 tag。
+    5. 放行 P：重读看到 R 已在映射里，不注销、摘掉 tag，也不对 R 做最后核对；这时 Q 还没有摘，摘除出自 P。
+    6. 放行 Q 做完立即摘除与末尾的清理。
+
+    守的是：快照之后、重读之前被写进映射的成熟候选，注销之前的映射重读把它留下并摘掉 tag，不依赖最后核对，也不依赖写映射
+    一方的摘除。最终 R 在映射里、为 ACTIVE、不带 tag。`earlier_backfill` 里 P0 的描述按注入的时钟覆盖 `registeredAt`
+    （真实 ECS 返回的是真实时刻、晚于注入的时钟；moto 不返回它）。"""
+    seed_backend(aws)
+    if matured_by == "manual_tag":
+        retired_raw, matured_at = (NOW - timedelta(hours=3)).isoformat(), NOW
+    else:
+        retired_raw, matured_at = NOW.isoformat(), NOW + workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1)
+    q, q_ecs, q_ssm = _held_push(aws)
+    p_ecs, p_ssm = HookedEcs(aws.ecs), HookedSsm(aws.ssm)
+    p_ddb = HookedDdb(aws.ddb, after_query=lambda resp: p.hold() if not resp.get("LastEvaluatedKey") else None)
+    p = _Party("清理 P", lambda: _cleanup(aws, matured_at, ssm=p_ssm, ecs=p_ecs, ddb=p_ddb))
+
+    with _parties(q, p):
+        r = _start_held_push(aws, q, q_ecs)
+
+        if matured_by == "manual_tag":
+            _retire_now(aws, r, NOW - timedelta(hours=3))
+        else:
+            p0_ecs = HookedEcs(aws.ecs, registered_at=NOW - timedelta(days=1))
+            p0_outcome, _ = _cleanup(aws, NOW, ecs=p0_ecs)
+            assert p0_ecs.tagged == [r] and p0_ecs.untagged == [] and p0_outcome.deleted == (), p0_outcome
+        assert _tags(aws, r)[names.TAG_RETIRED_AT] == retired_raw
+
+        p.start_until_held()
+        assert p_ddb.queried == SNAPSHOT_DONE and p_ssm.enumerations == 1, "P 应停在快照之后、映射重读之前"
+        assert p_ddb.calls == ["describe_table", "query"], "P 应先做就绪检查、再取快照"
+        assert p_ecs.describes.get(r) == 1 and p_ecs.untagged == [] and p_ecs.deregistered == []
+
+        q.release_until_held()
+        assert _mapping(aws, "novaact", "login")["revision_arn"] == r
+        assert q_ecs.untagged == [], "Q 应停在它自己的摘除之前"
+        assert _tags(aws, r)[names.TAG_RETIRED_AT] == retired_raw
+
+        p_outcome, _ = p.release_until_done()
+        assert r not in p_ecs.deregistered and p_outcome.deleted == (), p_outcome
+        assert p_ecs.untagged == [r] and p_ecs.untag_failed == []
+        assert p_ssm.enumerations == 2
+        assert p_ecs.describes.get(r) == 1, "已在映射里的候选不再做最后核对"
+        assert any(a == r and "重新被映射引用" in why for a, why in p_outcome.kept), p_outcome
+        assert q_ecs.untagged == [], "这时 Q 还没有摘，摘除出自 P 的重读"
+        assert names.TAG_RETIRED_AT not in _tags(aws, r) and r in _revisions(aws, "novaact")
+
+        q.release_until_held()
+        assert q_ecs.untagged == [r] and q_ecs.untag_failed == []
+        rc, q_text = q.release_until_done()
+    assert rc == 0, q_text
+    assert q_ecs.registered == [r] and q_ecs.deregistered == []
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == r and r in _revisions(aws, "novaact")
+    assert names.TAG_RETIRED_AT not in _tags(aws, r)
 
 
 @pytest.mark.parametrize("index_status", [INDEX_MISSING, "CREATING", "UPDATING", "DELETING", "describe_fails"])
@@ -1714,6 +2258,62 @@ def test_interrupted_rederive_registers_again_when_executed_again(aws):
                                          aws=aws, clock=_at(NOW), out=out)
     assert result.revision_arn not in left and _mapping(aws, "novaact", "login")["revision_arn"] == result.revision_arn
     assert "复用" not in text()
+
+
+def test_revision_left_by_an_interrupted_rederive_is_backfilled_and_reclaimed_after_the_quiet_period(aws):
+    """重派生中断在注册与写映射之间、重新执行之后，上次注册的那一批从未进入映射，由之后的清理补打、满静默期后回收
+    （ADR 0038 deploy 第 4 步与「候选与静默期起点」段）。串起的步骤：
+
+    1. deploy 改了模板，重派生为 login 注册 R1，写映射时中断：映射仍指向原 revision R0，R1 不带 `gherkai:retired-at`。
+    2. 重新执行重派生：新注册 R2 写进映射，给 R0 打 tag；R1 不被沿用，重派生也不给它打 tag。
+    3. 之后的一趟清理：R1 不在任何映射里、没有 tag、注册时刻早于本趟读映射的时刻，补打（值为本趟的时刻）、本趟留下。
+    4. 补打之后未满静默期的一趟：R1 留下，不发注销请求；R0 按替换时打的值先到期、被回收。
+    5. 补打满静默期之后的一趟：R1 被回收，R2 仍在映射里、仍为 ACTIVE。
+
+    守的是：中断留下的那一批经清理的补打进入回收，静默期从补打的时刻起算。真实 ECS 返回的 `registeredAt` 是真实时刻、
+    晚于注入的时钟，清理一侧的描述按注入的时钟覆盖这个字段（moto 不返回它）。"""
+    seed_backend(aws)
+    _push(aws, FakeContainer(digests=["sha256:" + "3" * 64]))
+    before = _mapping(aws, "novaact", "login")
+    seed_backend(aws, cpu="2048")
+    interrupted = HookedEcs(aws.ecs)
+    broken = workers.Aws(ssm=_failing_mapping_put(aws), ecs=interrupted, ecr=aws.ecr, ddb=aws.ddb)
+    with pytest.raises(RuntimeError, match="模拟中断"):
+        workers.rederive_variants(prefix=PREFIX, engines=("novaact",), version=VERSION, aws=broken,
+                                  clock=_at(NOW), out=lambda *a: None)
+    [left] = interrupted.registered
+    assert _mapping(aws, "novaact", "login") == before
+    assert names.TAG_RETIRED_AT not in _tags(aws, left)
+
+    rederived_at = NOW + timedelta(minutes=5)
+    again = HookedEcs(aws.ecs)
+    out, text = _out()
+    [result] = workers.rederive_variants(prefix=PREFIX, engines=("novaact",), version=VERSION,
+                                         aws=workers.Aws(ssm=aws.ssm, ecs=again, ecr=aws.ecr, ddb=aws.ddb),
+                                         clock=_at(rederived_at), out=out)
+    assert again.registered == [result.revision_arn] and result.revision_arn != left
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == result.revision_arn
+    assert again.tagged == [before["revision_arn"]], again.tagged
+    assert _tags(aws, before["revision_arn"])[names.TAG_RETIRED_AT] == rederived_at.isoformat()
+    assert names.TAG_RETIRED_AT not in _tags(aws, left) and left in _revisions(aws, "novaact")
+
+    cleaner = HookedEcs(aws.ecs, registered_at=NOW)
+    backfilled_at = NOW + timedelta(minutes=10)
+    outcome, _ = _cleanup(aws, backfilled_at, ecs=cleaner)
+    assert outcome.deleted == () and cleaner.tagged == [left], cleaner.tagged
+    assert _tags(aws, left)[names.TAG_RETIRED_AT] == backfilled_at.isoformat()
+    assert any(a == left and "本次记录退休时刻" in why for a, why in outcome.kept), outcome
+
+    outcome, _ = _cleanup(aws, backfilled_at + workers.RETIRE_QUIET_PERIOD - timedelta(minutes=1), ecs=cleaner)
+    assert left not in cleaner.deregistered and left in _revisions(aws, "novaact")
+    assert any(a == left and "静默期" in why for a, why in outcome.kept), outcome
+    assert outcome.deleted == (before["revision_arn"],), outcome
+
+    outcome, _ = _cleanup(aws, backfilled_at + workers.RETIRE_QUIET_PERIOD + timedelta(minutes=1), ecs=cleaner)
+    assert outcome.deleted == (left,), outcome
+    assert left not in _revisions(aws, "novaact")
+    assert _mapping(aws, "novaact", "login")["revision_arn"] == result.revision_arn
+    assert result.revision_arn in _revisions(aws, "novaact")
 
 
 def test_rederive_reregisters_when_the_mapped_revision_is_no_longer_active(aws):

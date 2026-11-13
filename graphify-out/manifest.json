@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794533131.989309,
-    "ast_hash": "a5d73f200ffc83a3fa88f08a9934dd4a",
+    "mtime": 1794537397.696965,
+    "ast_hash": "7fca8273fcbe8220c77fbbcd09491957",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794466516.5300536,
-    "ast_hash": "16522f77e48e1a448b8c6082c0253323",
+    "mtime": 1794535795.8097663,
+    "ast_hash": "9e27d1a0b825a31dbdbaba819a86891f",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794477373.385164,
-    "ast_hash": "e4903b0be87b7f9cf2d8524e04b3629e",
+    "mtime": 1794537092.8186815,
+    "ast_hash": "8daaa65376cbf3c126a8915667d0038b",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
