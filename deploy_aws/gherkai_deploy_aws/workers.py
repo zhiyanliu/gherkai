@@ -371,8 +371,8 @@ def _tag_retired_at(ecs, arn: str, *, clock) -> None:
 
 
 def _untag_retired_at(ecs, arn: str) -> None:
-    """无条件摘除 `arn` 上的 `gherkai:retired-at`（不先读它带不带；对不带的 revision 摘除预期成功返回、不改变它，
-    ADR 0038 步 7 与实测项 10）。异常原样抛给调用方。"""
+    """无条件摘除 `arn` 上的 `gherkai:retired-at`（不先读它带不带；对不带的 revision 摘除成功返回、不改变它，真实账户上
+    核过，ADR 0038 步 7 与实测项 11）。异常原样抛给调用方。"""
     ecs.untag_resource(resourceArn=arn, tagKeys=[names.TAG_RETIRED_AT])
 
 

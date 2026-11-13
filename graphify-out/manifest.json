@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1794469016.7460778,
-    "ast_hash": "36f49020c415420f06867158734fb4de",
+    "mtime": 1794533483.7468557,
+    "ast_hash": "a17a57f01cf7e0d1cc9dac35dd32b7fe",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794459956.2969484,
-    "ast_hash": "7d257e63800731acb4e7335b979f9fb6",
+    "mtime": 1794477351.0214825,
+    "ast_hash": "b4ecda59b6bf08594770937cc69a5c45",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794469016.7471583,
-    "ast_hash": "1b54958a79b6a06459b2cb0b7fc5085b",
+    "mtime": 1794533131.989309,
+    "ast_hash": "a5d73f200ffc83a3fa88f08a9934dd4a",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -1015,8 +1015,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/gherkai_deploy_aws/workers.py": {
-    "mtime": 1794469016.7477412,
-    "ast_hash": "3879d7e89bdcf6173b8b4e4920969fd5",
+    "mtime": 1794477358.8066807,
+    "ast_hash": "188585678043d985bac8ebc26c462663",
     "semantic_hash": ""
   },
   "runtime/tests/test_names_worker.py": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794469016.7474947,
-    "ast_hash": "8a29091fc6bc37f167a3c0dcc0c6adb5",
+    "mtime": 1794477287.0295422,
+    "ast_hash": "20cffaf263094eadeceb97b9c4e31fca",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794470105.737571,
-    "ast_hash": "7b119023d43532010576a594f1726053",
+    "mtime": 1794477373.385164,
+    "ast_hash": "e4903b0be87b7f9cf2d8524e04b3629e",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
