@@ -385,8 +385,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1794533483.7468557,
-    "ast_hash": "a17a57f01cf7e0d1cc9dac35dd32b7fe",
+    "mtime": 1794538783.3966336,
+    "ast_hash": "c35b3cf9c9434af34d1ca7071939ed52",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -405,8 +405,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1794477351.0214825,
-    "ast_hash": "b4ecda59b6bf08594770937cc69a5c45",
+    "mtime": 1794538794.3467402,
+    "ast_hash": "5815e55961a435bd81883b311b35d678",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -440,8 +440,8 @@
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
-    "mtime": 1794537397.696965,
-    "ast_hash": "7fca8273fcbe8220c77fbbcd09491957",
+    "mtime": 1794539892.917569,
+    "ast_hash": "be98bfd2faa0491da4e3641cd4cc4542",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__init__.py": {
@@ -1035,8 +1035,8 @@
     "semantic_hash": ""
   },
   "deploy_aws/tests/test_workers.py": {
-    "mtime": 1794535795.8097663,
-    "ast_hash": "9e27d1a0b825a31dbdbaba819a86891f",
+    "mtime": 1794539344.190998,
+    "ast_hash": "a8eec9c94d84995e17b27a3b93a839f4",
     "semantic_hash": ""
   },
   "cli/tests/test_user_facing_messages.py": {
@@ -1115,8 +1115,8 @@
     "semantic_hash": "b0a2b5dd030bc0c16720a0326bb04f58"
   },
   "docs/adr/0041-agent-facing-cli-affordances.md": {
-    "mtime": 1794477287.0295422,
-    "ast_hash": "20cffaf263094eadeceb97b9c4e31fca",
+    "mtime": 1794538783.397326,
+    "ast_hash": "6bd850d677737266a773d8a44dabc34f",
     "semantic_hash": ""
   },
   "cli/tests/test_cli_json_contract.py": {
@@ -1325,8 +1325,8 @@
     "semantic_hash": ""
   },
   "CHANGELOG.md": {
-    "mtime": 1794460074.7139282,
-    "ast_hash": "d9b4609de9a2c2c5d92c46b06f78487e",
+    "mtime": 1794538912.5420458,
+    "ast_hash": "99ec88f193e987f188cc22096acdd2f4",
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
@@ -1895,8 +1895,8 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794537092.8186815,
-    "ast_hash": "8daaa65376cbf3c126a8915667d0038b",
+    "mtime": 1794539497.5473704,
+    "ast_hash": "78dba415e023c70f1b4496b2fb2c0cbc",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {

@@ -3,8 +3,8 @@
 **证据边界**：AWS 侧全走 moto（SSM/ECS/ECR/DynamoDB），容器引擎走假替身 —— 验的是**编排**（步序、幂等查重、
 血缘 tags、退休 tag 的打与摘、清理的各道判定与交错、SSM 记录形状）。交错用钩子壳（`HookedSsm` / `HookedEcs` /
 `HookedDdb`）摆到确定的位置上；它们验的是本模块的次序与判据，AWS 侧的可见性与次序（ADR 0038 实测项 10）不在其内。**mock 不出来的两类**另处交代：容器引擎的真实行为在
-`test_container.py` 的真 docker 那三条；真 ECR push / RunTask 拉起注册出来的 revision 需要真账号，本机无凭证、
-**未验**（ADR 0038「实测项」6 的后半段仍挂着）。
+`test_container.py` 的真 docker 那三条；本文件默认不验证真 ECR 推送或 RunTask 拉起 revision；已完成的真实环境验证及
+尚未覆盖的镜像形态见 ADR 0038 实测项 6。协议用例对真实账户执行的结果与适配边界见实测项 9、10。
 
 moto 的两处已知偏差（顺手记下，别当成实现问题）：
 - `DescribeTaskDefinition` **不返回 `registeredAt`** → 清理在 moto 下不给孤儿补打 `gherkai:retired-at`（取不到即本趟不打）。
@@ -17,6 +17,7 @@ import contextlib
 import json
 import re
 import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -1541,22 +1542,47 @@ def test_candidate_whose_retired_at_is_removed_before_the_final_check_is_backfil
     assert arn not in _revisions(aws, "novaact")
 
 
+class _PartyStopped(BaseException):
+    """停在预定位置的一方被中止，或停留超时：从 `hold()` 抛出，让那一方从停点直接退出、不再执行其余步骤。
+
+    继承 `BaseException` 而不是 `Exception`：被测代码对 AWS 调用失败有宽泛的 `except Exception`，继承 `Exception` 的
+    异常会被它接住，那一方随后照常执行其余步骤、继续发出调用。被测的 `gherkai_deploy_aws.workers` 里没有接住
+    `BaseException` 的处理，也没有 `finally` 块。"""
+
+
+_PARTY_THREADS: list[threading.Thread] = []   # 启动过的参与方线程，供 `lingering_party_threads()` 查询
+
+
+def lingering_party_threads() -> list[threading.Thread]:
+    """仍然存活的参与方线程。正常收尾时为空；对真实账户执行这些用例的装置在收尾时查询它，不为空即说明有一方中止之后
+    仍可能发出调用，装置应终止整个执行进程，而不是继续执行后续用例或清理资源。"""
+    _PARTY_THREADS[:] = [t for t in _PARTY_THREADS if t.is_alive()]
+    return list(_PARTY_THREADS)
+
+
 class _Party:
     """在独立线程里执行交错中的一方（一条推送或一趟清理），并把它停在钩子回调里的预定位置：钩子在那一方的线程里调用
     `hold()`，主线程 `release_until_done()` 放行并等它结束、取回返回值（它抛出的异常在主线程原样抛出）。一方可以依次停在
     几个位置：`release_until_held()` 放行它，并等它停在下一个位置；`release_until_done()` 之后它不再停留，余下的 `hold()`
-    直接返回。
+    直接返回（中止之后除外，见下）。
 
-    次序为何确定：主线程启动或放行一方之后，等到它停在预定位置（`start_until_held()` / `release_until_held()`）或结束
-    （`release_until_done()`）才往下走，停住的一方在被放行之前不发出任何调用。于是任一时刻至多一方在执行，各方 AWS 调用
-    的先后完全由主线程启动与放行的先后决定，与线程调度无关。没有停在预定位置就结束的，主线程立即报错，不等超时；
-    `abort()` 让仍停着的一方从停点抛错，并等它执行到结束（见 `_parties`；被测代码可能接住这个错误、照常做完其余步骤），
-    所以用例结束之后不再有调用发出。超时取得宽，是因为真实账户上第一次 DynamoDB 调用要等建表，这期间其余各方一直停着。"""
+    次序为何确定（适用于没有超时、没有中止的执行）：主线程启动或放行一方之后，等到它停在预定位置（`start_until_held()` /
+    `release_until_held()`）或结束（`release_until_done()`）才往下走，停住的一方在被放行之前不发出任何调用。于是任一时刻
+    至多一方在执行，各方 AWS 调用的先后完全由主线程启动与放行的先后决定，与线程调度无关。没有停在预定位置就结束的，
+    主线程立即报错，不等超时。
+
+    超时与中止：停留超过 `timeout` 仍未被放行的一方，从停点抛出 `_PartyStopped` 退出；用例结束时（含断言失败）
+    `_parties` 中止各方，停着的一方同样从停点抛出 `_PartyStopped` 退出，不再发出后续调用。中止那一刻仍在执行、没有停着的
+    一方（只在主线程等它超时之后才会出现）在下一个停点退出，没有下一个停点的执行到结束。`_parties` 等待之后仍有存活的
+    线程，用例以错误失败，错误信息写明是哪一方，`lingering_party_threads()` 也能查到它。
+
+    超时取得宽，是因为真实账户上第一次 DynamoDB 调用要等建表，这期间其余各方一直停着；测试本辅助的用例传入小的
+    `timeout`。"""
 
     TIMEOUT = 1800.0   # 秒
 
-    def __init__(self, name: str, target):
-        self.name, self._target = name, target
+    def __init__(self, name: str, target, *, timeout: float = TIMEOUT):
+        self.name, self._target, self.timeout = name, target, timeout
         self.result = None
         self.error: BaseException | None = None
         self._cond = threading.Condition()
@@ -1579,25 +1605,28 @@ class _Party:
 
     def hold(self) -> None:
         with self._cond:
-            if self._free and not self._aborted:
+            if self._aborted:
+                raise _PartyStopped(f"{self.name}：用例已中止")
+            if self._free:
                 return
             self._holds += 1
             n = self._holds
             self._cond.notify_all()
-            if not self._cond.wait_for(lambda: self._releases >= n or self._free or self._aborted, self.TIMEOUT):
-                raise RuntimeError(f"{self.name}：停留超时，没有被放行")
+            if not self._cond.wait_for(lambda: self._releases >= n or self._free or self._aborted, self.timeout):
+                raise _PartyStopped(f"{self.name}：停留超时，没有被放行")
             if self._aborted:
-                raise RuntimeError(f"{self.name}：用例已中止")
+                raise _PartyStopped(f"{self.name}：用例已中止")
 
     def _until_held(self, n: int) -> None:
         with self._cond:
-            settled = self._cond.wait_for(lambda: self._holds >= n or self._finished, self.TIMEOUT)
+            settled = self._cond.wait_for(lambda: self._holds >= n or self._finished, self.timeout)
             held = self._holds >= n
         assert settled, f"{self.name} 超时仍未停在预定位置"
         if not held:
             raise AssertionError(f"{self.name} 没有停在预定位置就结束了：error={self.error!r} result={self.result!r}")
 
     def start_until_held(self) -> None:
+        _PARTY_THREADS.append(self._thread)
         self._thread.start()
         self._until_held(1)
 
@@ -1613,28 +1642,113 @@ class _Party:
             self._releases += 1
             self._free = True
             self._cond.notify_all()
-        self._thread.join(self.TIMEOUT)
+        self._thread.join(self.timeout)
         assert not self._thread.is_alive(), f"{self.name} 放行之后没有结束"
         if self.error is not None:
             raise self.error
         return self.result
 
-    def abort(self) -> None:
-        if self._thread.is_alive():
-            with self._cond:
-                self._aborted = True
-                self._cond.notify_all()
-            self._thread.join(self.TIMEOUT)
+    def signal_abort(self) -> None:
+        with self._cond:
+            self._aborted = True
+            self._cond.notify_all()
 
 
 @contextlib.contextmanager
 def _parties(*parties: _Party):
-    """用例结束时（含断言失败）让仍停着的各方抛错结束。"""
+    """用例结束时（含断言失败）中止各方：先通知全部参与方，再在共同的期限内统一等待，之后仍有存活的线程即让用例失败。"""
     try:
         yield parties
     finally:
         for party in parties:
-            party.abort()
+            party.signal_abort()
+        deadline = time.monotonic() + max(party.timeout for party in parties)
+        for party in parties:
+            if party._thread.is_alive():   # 尚未启动的一方不必等待
+                party._thread.join(max(0.0, deadline - time.monotonic()))
+        alive = [party.name for party in parties if party._thread.is_alive()]
+        if alive:
+            raise AssertionError(f"中止之后仍未结束的参与方：{'、'.join(alive)}；它们之后仍可能发出调用")
+
+
+def _party_under_broad_except(calls: list, *, timeout: float) -> _Party:
+    """一方：停点处的调用被生产代码那样的 `try/except Exception` 包着，停点之后与 `except` 之后各记一次后续调用。"""
+    def target():
+        try:
+            calls.append("停点之前")
+            party.hold()
+            calls.append("停点之后")
+        except Exception:
+            calls.append("接住异常之后")
+        calls.append("其余步骤")
+    party = _Party("一方", target, timeout=timeout)
+    return party
+
+
+def test_aborted_party_held_under_a_broad_except_issues_no_further_call_and_has_ended():
+    calls: list[str] = []
+    party = _party_under_broad_except(calls, timeout=5.0)
+    with pytest.raises(AssertionError, match="用例中的断言失败"):
+        with _parties(party):
+            party.start_until_held()
+            raise AssertionError("用例中的断言失败")
+    assert calls == ["停点之前"], calls
+    assert not party._thread.is_alive()
+    assert isinstance(party.error, _PartyStopped) and "用例已中止" in str(party.error)
+    assert party._thread not in lingering_party_threads()
+
+
+def test_hold_timeout_does_not_let_a_party_under_a_broad_except_go_on():
+    calls: list[str] = []
+    party = _party_under_broad_except(calls, timeout=0.2)
+    with _parties(party):
+        party.start_until_held()
+        party._thread.join(5.0)
+        assert not party._thread.is_alive(), "停留超时之后应已结束"
+        assert calls == ["停点之前"], calls
+        assert isinstance(party.error, _PartyStopped) and "停留超时" in str(party.error)
+
+
+def test_party_still_running_when_aborted_exits_at_its_next_hold_even_after_release():
+    """`release_until_done()` 之后 `hold()` 本应直接返回；中止之后仍在执行的一方到下一个停点就退出，不再执行其余步骤。"""
+    calls: list[str] = []
+    gate = threading.Event()
+
+    def target():
+        try:
+            party.hold()
+            gate.wait(5.0)          # 放行之后的一段慢步骤，主线程等它超时
+            calls.append("下一个停点之前")
+            party.hold()
+            calls.append("下一个停点之后")
+        except Exception:
+            calls.append("接住异常之后")
+        calls.append("其余步骤")
+    party = _Party("一方", target, timeout=0.2)
+    with _parties(party):
+        party.start_until_held()
+        with pytest.raises(AssertionError, match="放行之后没有结束"):
+            party.release_until_done()
+        party.signal_abort()
+        gate.set()
+        party._thread.join(5.0)
+        assert not party._thread.is_alive()
+        assert calls == ["下一个停点之前"], calls
+        assert isinstance(party.error, _PartyStopped) and "用例已中止" in str(party.error)
+
+
+def test_parties_fails_the_test_when_a_party_is_still_alive_after_the_wait():
+    gate = threading.Event()
+    stuck = _Party("不响应的一方", lambda: gate.wait(10.0), timeout=0.2)   # 不经停点，中止对它不起作用
+    try:
+        with pytest.raises(AssertionError, match="中止之后仍未结束的参与方：不响应的一方"):
+            with _parties(stuck):
+                stuck.start_until_held()
+        assert stuck._thread in lingering_party_threads()
+    finally:
+        gate.set()
+        stuck._thread.join(5.0)
+    assert stuck._thread not in lingering_party_threads()
 
 
 def test_final_check_keeps_a_revision_a_push_wrote_after_the_backfilling_pass_removed_its_tag(aws):

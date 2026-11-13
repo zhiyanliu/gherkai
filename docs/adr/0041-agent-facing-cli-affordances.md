@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七（`list-runs`）已实装：本机与原索引上的云端实测项已真实执行、结论内联在该条。决策七已改用与 worker revision 清理共用的状态分组索引 `status_group-run_id-index`（写端、索引与 `list-runs` 的读法均已实装，[0030](./0030-realtime-persistence-seam.md) 决定六）；原先所读的 `status-run_id-index` 已从部署模板删除，部署模板里 runs 表只定义状态分组索引（0030 决定六）；状态分组索引上的云端实测已在表上只有这个索引的部署出的后端上执行、结论内联在该条「实测项」（终态历史多于 N 条的情形没有出现过）。
+> **Status:** Partially-superseded-by [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）—— 五项均已实装并有护栏；agent skill（0043）以本 ADR 的命令面为教学对象。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七（`list-runs`）已实装：本机与原索引上的云端实测项已真实执行、结论内联在该条。决策七已改用与 worker revision 清理共用的状态分组索引 `status_group-run_id-index`（写端、索引与 `list-runs` 的读法均已实装，[0030](./0030-realtime-persistence-seam.md) 决定六）；原先所读的 `status-run_id-index` 已从部署模板删除，部署模板里 runs 表只定义状态分组索引（0030 决定六）；状态分组索引上的云端实测已在表上只有这个索引的部署出的后端上执行、结论内联在该条「实测项」（缺省 N＝20 下的截取与每页满 20 项时的索引读量未实测；`--limit 1/2` 的截取已核）。
 
 ## 背景与问题
 
@@ -78,7 +78,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 ### 七、列出 run：`list-runs`
 
-本条已实装。本机实测、当时所读的 `status-run_id-index`（已从部署模板删除）上的云端实测与状态分组索引上的云端实测都已完成，见本条末「实测项」；终态历史多于 N 条的情形没有在真实后端上出现过。
+本条已实装。本机实测、当时所读的 `status-run_id-index`（已从部署模板删除）上的云端实测与状态分组索引上的云端实测都已完成，见本条末「实测项」；缺省 N＝20 下的截取与每页满 20 项时的索引读量未实测；`--limit 1/2` 的截取已核。
 
 - **缺口**：`status` 与 `explain` 都要先有 run_id，此前没有任何命令回答「这个后端里有哪些 run」。找不回 run_id 时（换了终端、提交时没记下、接手别人提交的 run），只能到 DynamoDB 控制台翻 runs 表，或去 ECS、Device Farm 看执行资源，而执行资源对应的是 task 与远程访问会话，不是 run。
 - **命令形态**：`gherkai list-runs [--backend local|cloud] [--report-dir DIR] [--prefix P] [--region R] [--profile NAME] [--ddb-table NAME] [--config FILE] [--status S]… [--limit N] [--json]`。按决策六的三项定位参数选定**一个**后端，旗标名与取值来源（含项目配置文件那一层，[0053](./0053-project-config-file.md)）与 `status` 相同，`--ddb-table` 与 `status` 同义。不跨后端、不跨报告落点搜，理由同决策六：每个后端只持有自己的 run 记录，把多处的清单合在一起会把不同落点里同名的 run 混为一谈。命令只读、零副作用（不接力推进、不起 task），机器只需读权限；云端后端与 `status` 一样，先经版本 skew 闸（[0037](./0037-distribution-and-packaging.md) 决策 7）再读任何云端资源。云端后端下 `--report-dir`（在云端是报告前缀）与清单无关，给了也忽略、不报错：清单不读报告，而使用者常把 `status` / `explain` 的整组定位参数原样复制过来。
