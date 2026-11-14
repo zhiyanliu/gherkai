@@ -26,10 +26,10 @@ def _meta(run_id: str = "run-1", *scope_ids: str) -> RunMeta:
     ids = scope_ids or ("a", "b")
     jobs = tuple(
         Job(scope_id=s, scope_name=s, engine="novaact",
-            scenarios=(Scenario(id=f"{s}:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+            scenarios=(Scenario(id=f"{s}:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),), timeout_s=300.0)
         for s in ids
     )
-    return RunMeta(run_id=run_id, created_at="2026-07-19T00:00:00Z", jobs=jobs)
+    return RunMeta(run_id=run_id, created_at="2026-07-19T00:00:00Z", jobs=jobs, deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _initial(meta: RunMeta, hwm: int | None = None) -> RunState:

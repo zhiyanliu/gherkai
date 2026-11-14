@@ -21,13 +21,13 @@ from gherkai_core.persist import RunPersistence
 
 def _meta(run_id: str, scope_ids: list[str]) -> RunMeta:
     jobs = tuple(
-        Job(scope_id=s, scope_name=s, engine="midscene", scenarios=()) for s in scope_ids
+        Job(scope_id=s, scope_name=s, engine="midscene", scenarios=(), timeout_s=300.0) for s in scope_ids
     )
-    return RunMeta(run_id=run_id, created_at="t0", jobs=jobs)
+    return RunMeta(run_id=run_id, created_at="t0", jobs=jobs, deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _jr(scope_id: str, status: Status = Status.PASSED, session_id: str | None = None) -> JobResult:
-    return JobResult(job=Job(scope_id=scope_id, scope_name=scope_id, engine="midscene", scenarios=()),
+    return JobResult(job=Job(scope_id=scope_id, scope_name=scope_id, engine="midscene", scenarios=(), timeout_s=300.0),
                      status=status, session_id=session_id)
 
 

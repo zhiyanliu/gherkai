@@ -1,6 +1,6 @@
 # schedule 模块：job 间并发调度 + 失败隔离 + 优雅终止
 
-> **Status:** Partially-superseded-by 0034, 0051 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3），同步 `run` 路径仍用 schedule 的驱动循环；「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下「优雅终止」段与「现在做 / 留口子」段的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写本篇复述的三处，均已原位改写：未见 `scope_done` 时的判定收进两条归约路径共用的终结函数（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」，首次仲裁时 deadline 已过即取 timeout；「job 级乐观归约的内容完整前置」条的内容完整前置与拒绝假绿不变）；事件集加 `session_opened` / `session_closed`；job 级网络重试门槛由双条件改为三条件（加「job 目标不是设备」，见 [0028](./0028-transient-network-ssl-resilience.md)）。其余条文不变。
+> **Status:** Partially-superseded-by 0034, 0051, 0054 —— 纯 reducer 红线仍守（副作用仍在 adapter/组合根、core 不 import boto3），同步 `run` 路径仍用 schedule 的驱动循环；「上云只换 adapter、schedule 一行不改」对**异步 submit（CLI 脱离）路径**不成立、被 [0034](./0034-detached-batch-reconciler.md) 纠正（见下「优雅终止」段与「现在做 / 留口子」段的 ⚠️ 注）：该路径把同步驱动循环解体为无状态事件驱动 reconciler、抽出纯 `project`/`plan_next`。[0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写本篇复述的三处，均已原位改写：未见 `scope_done` 时的判定收进两条归约路径共用的终结函数（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」，首次仲裁时 deadline 已过即取 timeout；「job 级乐观归约的内容完整前置」条的内容完整前置与拒绝假绿不变）；事件集加 `session_opened` / `session_closed`；job 级网络重试门槛由双条件改为三条件（加「job 目标不是设备」，见 [0028](./0028-transient-network-ssl-resilience.md)）。[0054](./0054-settle-leftover-foreground-runs.md) 决策十改写调度契约里墙钟预算的一处，已原位改写：`Job.timeout_s` 恒为有限正数，每个 job 都有截止时刻，不再有「空预算即不超时」。其余条文不变。
 
 核心库把 plan 产出的 **job 列表**（[0025](./0025-plan-module-feature-to-jobs.md)）实际跑起来的模块：决定哪些 job 并行、控并发、起 worker、收流式事件、隔离失败、超时兜底。它兑现 [0016](./0016-execution-architecture-core-lib-run-model.md)/[0019](./0019-feature-tags-scope-and-engine.md) 留给核心库的「scope 串/并行调度、会话共享」。它是 v1.0 核心三模块的最后一块（协议 [0024](./0024-worker-core-protocol.md) → plan [0025](./0025-plan-module-feature-to-jobs.md) → schedule 本 ADR）。
 
@@ -57,7 +57,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 超时兜底
 
-- `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；null=不超时）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 持续计费。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
+- `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；恒为有限正数，每个 job 都有截止时刻，没有「不超时」，见 [0054](./0054-settle-leftover-foreground-runs.md) 决策十）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 持续计费。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
 - **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 

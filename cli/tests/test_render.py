@@ -21,9 +21,9 @@ from gherkai_cli import render
 
 
 def _sample_run() -> RunResult:
-    job = Job(scope_id="features/demo.feature:6", scope_name="demo", engine="midscene", scenarios=())
+    job = Job(scope_id="features/demo.feature:6", scope_name="demo", engine="midscene", scenarios=(), timeout_s=300.0)
     return RunResult(
-        run_meta=RunMeta(run_id="20260629-test01", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="20260629-test01", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.PASSED,
         duration_ms=12000.0,
         total_tokens=10573,
@@ -73,9 +73,9 @@ def test_render_text_shows_step_level_report_refs():
     # 回归：Nova trajectory 挂 step 级 report_refs（下沉，ADR 0027）——文本汇总必须打 step 级，
     # 否则 Nova 报告静默漏掉（曾漏打过；一个 step 可多个 trajectory）。
     from gherkai_core.model import StepResult
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     run = RunResult(
-        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.PASSED,
         jobs=[JobResult(job=job, status=Status.PASSED, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.PASSED, steps=[
@@ -96,9 +96,9 @@ def test_render_text_annotates_shortcircuited_step():
     # 连锁失败旁注（ADR 0031 决定六）：被 scope 内短路的 step（shortcircuited=True，status=skipped）加旁注
     # "因前置 step error 被跳过"；上游 error 步本身不加。判据读 shortcircuited 布尔（不再按 status 顺序猜）。
     from gherkai_core.model import StepResult
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     run = RunResult(
-        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.ERROR,
         jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
@@ -128,9 +128,9 @@ def test_index_html_shortcircuit_note_matches_cli_wording():
 
     from gherkai_core.adapters.report_store.local import render_index_html
 
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     run = RunResult(
-        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.ERROR,
         jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
@@ -151,9 +151,9 @@ def test_index_html_scope_skipped_note_matches_cli_wording():
 
     from gherkai_core.adapters.report_store.local import render_index_html
 
-    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), timeout_s=300.0)
     run = RunResult(
-        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.ERROR,
         jobs=[JobResult(job=job, status=Status.ERROR, error_type="session_lost", message="设备没了", scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.SKIPPED, steps=[
@@ -172,13 +172,13 @@ def test_run_tree_shows_device_metering_and_unconfirmed_sessions():
     """设备 job（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数、未确认停止的会话名、结果未知的创建尝试单独标；桌面 job 不出这些行。"""
     from gherkai_core.model import SessionRecord
 
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=())
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(), timeout_s=300.0)
     sessions = [SessionRecord(session_id="arn:a", name="n-a", origin="created", release="confirmed", observed_s=90.0),
                 SessionRecord(session_id="arn:b", name="n-b", origin="created", release="unconfirmed", observed_s=None),
                 SessionRecord(session_id=None, name="n-c", origin="attempted", release="unconfirmed")]
     jr = JobResult(job=job, status=Status.ERROR, error_type="release_failed", message="m", sessions=sessions,
                    device_observed_s=90.0, device_observed_missing=1)
-    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr],
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.ERROR, jobs=[jr],
                     device_observed_s=90.0, device_observed_missing=1)
     txt = render.render_text(run)
     assert "设备占用时长合计: 90.0s（另有 1 个会话缺计量）" in txt
@@ -192,7 +192,7 @@ def test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synth
     from gherkai_core.model import Scenario, SessionRecord, Step
 
     sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"), Step(1, "Then", "b")))
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,), timeout_s=300.0)
     jr = JobResult(job=job, status=Status.ERROR, error_type="precheck_failed", message="设备不支持", session_id=None,
                    sessions=[SessionRecord(session_id=None, name="n-t", origin="attempted", release="unconfirmed")],
                    device_observed_s=0.0, device_observed_missing=0,
@@ -217,7 +217,7 @@ def test_explain_prints_verdict_line_for_error_with_error_type_regardless_of_rec
     from gherkai_core.model import Scenario, Step
 
     sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"),))
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,), timeout_s=300.0)
     recorded = [ScenarioResult(scenario_id="d:0", status=Status.PASSED, steps=[StepResult(index=0, status=Status.PASSED)])]
 
     def text(jr):
@@ -242,7 +242,7 @@ def test_explain_lists_job_report_refs_under_scope_line_even_with_step_records()
     from gherkai_core.model import Scenario, Step
 
     sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"),))
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,), timeout_s=300.0)
     ref = ReportRef(kind="report", ref=ResourceUri("file:///x/report.html"), label="Midscene report")
     for status in (Status.FAILED, Status.PASSED):
         jr = JobResult(job=job, status=status, report_refs=(ref,),
@@ -266,13 +266,13 @@ def test_device_header_lines_show_device_and_console_link():
     from gherkai_core.model import SessionRecord
 
     arn = "arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-1/00000"
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=())
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(), timeout_s=300.0)
     sessions = [SessionRecord(session_id="arn:aws:devicefarm:us-west-2:123456789012:session:proj-1/sess-0/00000", name="n0", origin="created",
                               release="confirmed", observed_s=1.0, device={"platform": "android", "model": "Pixel 8"}),
                 SessionRecord(session_id=arn, name="n1", origin="created", release="confirmed", observed_s=2.0,
                               device={"platform": "ios", "model": "iPhone 15", "osVersion": "17.5", "unit": "u-1"})]
     jr = JobResult(job=job, status=Status.PASSED, session_id=arn, sessions=sessions, device_observed_s=3.0, device_observed_missing=0)
-    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.PASSED, jobs=[jr])
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.PASSED, jobs=[jr])
     url = "https://us-west-2.console.aws.amazon.com/devicefarm/home?region=us-west-2#/mobile/projects/proj-1/sessions/sess-1"
     txt = render.render_text(run)
     assert "设备: ios iPhone 15 17.5 （u-1）" in txt and f"设备控制台: {url}" in txt  # 取代表会话（session_id）那条的 device，不取首条
@@ -290,7 +290,7 @@ def test_device_header_lines_show_device_and_console_link():
     # 代表会话已定而它没有 device：不借别的会话的机型（否则旧机型配新会话的链接）
     bare = JobResult(job=job, status=Status.PASSED, session_id=arn, device_observed_s=3.0, device_observed_missing=0,
                      sessions=[sessions[0], SessionRecord(session_id=arn, name="n1", origin="created", release="confirmed", observed_s=2.0)])
-    bare_run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.PASSED, jobs=[bare])
+    bare_run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.PASSED, jobs=[bare])
     assert "设备:" not in render.render_text(bare_run) and f"设备控制台: {url}" in render.render_text(bare_run)
     bare_doc = render.explain_to_dict(run_id="r", status="passed", results=[bare], evidence_reader=lambda refs: (None, "no_ref"))
     assert "device:" not in render.render_explain_text(bare_doc) and "console_url" in bare_doc["scopes"][0]
@@ -312,7 +312,7 @@ def test_explain_renders_device_evidence_fields_and_extraction_failure():
     from gherkai_core.model import ReportRef, Scenario, SessionRecord, Step
 
     sc = Scenario(id="d:0", name="n", steps=(Step(0, "Given", "a"), Step(1, "Then", "b"), Step(2, "Then", "c")))
-    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,))
+    job = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=(sc,), timeout_s=300.0)
     jr = JobResult(job=job, status=Status.FAILED, device_observed_s=1.0, device_observed_missing=0,
                    sessions=[SessionRecord(session_id="arn:x", name="n", origin="created", release="confirmed", observed_s=1.0)],
                    scenarios=[ScenarioResult(scenario_id="d:0", status=Status.FAILED, steps=[
@@ -353,14 +353,14 @@ def test_desktop_job_with_sessions_lists_sessions_without_device_hints():
     from gherkai_core.model import Scenario, SessionRecord, Step
 
     sc = Scenario(id="w:0", name="n", steps=(Step(0, "Then", "a"),))
-    job = Job(scope_id="w", scope_name="w", engine="novaact", scenarios=(sc,))
+    job = Job(scope_id="w", scope_name="w", engine="novaact", scenarios=(sc,), timeout_s=300.0)
     sessions = [SessionRecord(session_id="bs-ok", name="bs-ok", origin="created", release="confirmed"),
                 SessionRecord(session_id="bs-left", name="bs-left", origin="created", release="unconfirmed"),
                 SessionRecord(session_id=None, name="gherkai:r:ab12:2:w", origin="attempted", release="unconfirmed")]
     jr = JobResult(job=job, status=Status.ERROR, error_type="release_failed", message="m", session_id="bs-left", sessions=sessions,
                    scenarios=[ScenarioResult(scenario_id="w:0", status=Status.FAILED,
                                              steps=[StepResult(index=0, status=Status.FAILED)])])  # 缺证据指针
-    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr])
+    run = RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.ERROR, jobs=[jr])
     txt = render.render_text(run)
     assert "未确认停止的会话: bs-left" in txt and f"{render._ATTEMPTED_LABEL}: gherkai:r:ab12:2:w" in txt
     assert "设备占用时长" not in txt and "设备:" not in txt and "设备控制台" not in txt
@@ -393,9 +393,9 @@ def test_render_text_no_annotation_on_plain_failed():
     # 反向护栏（ADR 0031 决定六）：普通 failed（shortcircuited=False，含"error 后的 failed"）不加旁注——
     # 判据迁到 shortcircuited 后，只有真被短路的 step 才加旁注，避免误伤正常业务失败。
     from gherkai_core.model import StepResult
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     run = RunResult(
-        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)),
+        run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
         status=Status.ERROR,
         jobs=[JobResult(job=job, status=Status.ERROR, scenarios=[
             ScenarioResult(scenario_id="s:0", status=Status.ERROR, steps=[
@@ -491,12 +491,12 @@ def test_render_run_state_shows_ended_at_when_terminal():
 def test_render_text_shows_reason_for_fail_fast_states():
     """skipped/aborted 的 error_type 恒 None（ADR 0031 决定一）——「为什么没执行」只在 message，人读文本必须显；
     且 error_type 为 None 时不打裸 "None:" 前缀。"""
-    jobs = [Job(scope_id=s, scope_name=s, engine="novaact", scenarios=[]) for s in ("checkout", "login")]
+    jobs = [Job(scope_id=s, scope_name=s, engine="novaact", scenarios=[], timeout_s=300.0) for s in ("checkout", "login")]
     a = JobResult(job=jobs[0], status=Status.SKIPPED)
     a.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
     b = JobResult(job=jobs[1], status=Status.ABORTED)
     b.message = "fail-fast：其他 job 失败，本 job 被中止"
-    meta = RunMeta(run_id="r1", created_at="2026-01-01T00:00:00Z", jobs=tuple(jobs))
+    meta = RunMeta(run_id="r1", created_at="2026-01-01T00:00:00Z", jobs=tuple(jobs), deadline_at="2026-01-01T01:00:00+00:00")
     out = render.render_text(RunResult(run_meta=meta, status=Status.ERROR, jobs=[a, b]))
     assert "未启动" in out and "本 job 被中止" in out
     assert "None:" not in out
@@ -504,13 +504,13 @@ def test_render_text_shows_reason_for_fail_fast_states():
 
 def test_render_text_step_reason_line_is_single_line_and_only_when_present():
     """step 级原因行（ADR 0042 决策三）：failed/error step 下附「原因: …」，多行/多余空白折叠成一行；passed 步不显。"""
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     jr = JobResult(job=job, status=Status.ERROR, scenarios=[ScenarioResult(scenario_id="s:1", status=Status.ERROR, steps=[
         StepResult(index=0, status=Status.PASSED, duration_ms=10.0),
         StepResult(index=1, status=Status.ERROR, error_type="timeout", duration_ms=20.0,
                    message="ActTimeoutError: 超时\n  at foo\n\n  at bar"),
     ])])
-    out = render.render_text(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.ERROR, jobs=[jr]))
+    out = render.render_text(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.ERROR, jobs=[jr]))
     lines = out.splitlines()
     reason = [ln for ln in lines if "原因: " in ln]          # 树形渲染：只断言内容（ADR 0047）
     assert len(reason) == 1 and reason[0].endswith("原因: ActTimeoutError: 超时 at foo at bar")
@@ -520,10 +520,10 @@ def test_render_text_step_reason_line_is_single_line_and_only_when_present():
 
 def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
     """job 行有分类、message 为 None → 只显分类 `(worker_crashed)`，不打 `(worker_crashed: None)`——与报告页 index.html 判法一致。"""
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=[])
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=[], timeout_s=300.0)
     jr = JobResult(job=job, status=Status.ERROR)
     jr.error_type = "worker_crashed"
-    meta = RunMeta(run_id="r", created_at="2026-01-01T00:00:00Z", jobs=(job,))
+    meta = RunMeta(run_id="r", created_at="2026-01-01T00:00:00Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     out = render.render_text(RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr]))
     assert "(worker_crashed)" in out and "None" not in out
 
@@ -532,12 +532,12 @@ def test_job_line_with_error_type_but_no_message_has_no_orphan_colon():
 def test_run_tree_attaches_reason_and_refs_under_their_step():
     """层级归属（ADR 0047）：原因与产物地址挂在所属 step 下，不挂到 scenario 或 job。"""
     from gherkai_core.model import ReportRef
-    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=())
+    job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0)
     st1 = StepResult(index=1, status=Status.FAILED, duration_ms=5.0, message="断言未过",
                      report_refs=[ReportRef(kind="evidence", ref="file:///e.json")])
     jr = JobResult(job=job, status=Status.FAILED, scenarios=[ScenarioResult(scenario_id="s:1", status=Status.FAILED, steps=[
         StepResult(index=0, status=Status.PASSED, duration_ms=1.0), st1])])
-    root = render.run_tree(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,)), status=Status.FAILED, jobs=[jr]))
+    root = render.run_tree(RunResult(run_meta=RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), status=Status.FAILED, jobs=[jr]))
     step1 = root.find("step 1: ")
     assert step1 is not None
     labels = [str(c.label) for c in step1.children]

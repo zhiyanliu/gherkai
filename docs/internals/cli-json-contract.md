@@ -62,7 +62,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true 表示上游 step error 后被跳过、未执行（此时 status 为 skipped）；status 为 skipped 而此值为 false 表示 worker 报告 scope 级 error 后这一步从未执行，由本工具补记 |
 
-`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 1；`status` / `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
+`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status` / `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN；local 后端 null）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则 null）、`session_warmup_url`（`--expose-local` 下本次 run 的会话预热地址，输出时令牌参数的值已替换为 `***`；无则 null）、`jobs[]`：
 
@@ -71,7 +71,7 @@
 | `scope_id` / `scope_name` | string | 机器键 / 人可读名（`@scope:` 原值或 scenario 标题） |
 | `engine` | `novaact` / `midscene` | 该 scope 的引擎 |
 | `assertion_votes` | int | AI 断言投票次数 |
-| `timeout_s` | number \| null | job 墙钟预算秒；不超时为 `null`，`--default-job-timeout <=0` 即此形态（只对桌面目标；设备目标始终有值） |
+| `timeout_s` | number | job 墙钟预算秒，恒有值、不超过 7200；`--default-job-timeout <=0` 时取 7200 |
 | `target` | object | 测试目标（桌面网页也写出 `desktop` / `web`）：`device`（`desktop` / `android` / `ios`）、`ui_kind`（`web` / `app`）；`ui_kind` 为 `app` 时另带 `app`（`alias`、`bucket`、`key`、`sha256`、`app_id`：安装包在 S3 的完整位置与包名或 bundle id；`plan --json` 里只有 `alias` 与 `app_id`，安装包在 `run` / `submit` 时才上传，位置三项恒省略） |
 | `device_request` | object \| null | 设备目标的设备请求，桌面目标为 `null`：`provider`（当前只有 `aws-device-farm`）、`device_arn` 或 `os_version`（二选一）、`billing_method`（`METERED` / `UNMETERED`）、`project_arn`、`acquire_timeout_s`；`plan --json` 里恒为 `null`（plan 不解析设备请求） |
 | `scenarios[]` | array | `id`、`name`、`steps[]`：`index`、`keyword`（Given/When/Then）、`text`、`argument`（多行参数：`kind` 为 `docString` 时带 `content`，为 `dataTable` 时带 `rows`；无则省略） |

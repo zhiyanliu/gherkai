@@ -28,7 +28,7 @@ from tests.test_schedule import _IncClock, _job, _passing_events, _rm
 def test_new_states_round_trip():
     # Status(str,Enum) 接受新字符串，JobResult round-trip 自动支持——补单测护住，免回归
     for st in (Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING):
-        job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=())
+        job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), timeout_s=300.0)
         back = job_result_from_dict(job_result_to_dict(JobResult(job=job, status=st)))
         assert back.status == st
 

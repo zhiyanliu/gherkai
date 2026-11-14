@@ -14,7 +14,7 @@ INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=4242, local_origin
                           warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 
 
-def _job(scope_id: str, timeout_s: float | None) -> Job:
+def _job(scope_id: str, timeout_s: float) -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{scope_id}:1", name="sc",
                                    steps=(Step(0, "Given", '"http://localhost:3000/a"'),)),))
@@ -92,17 +92,6 @@ def test_ttl_scales_past_the_old_fixed_hour():
     否则守护会在 run 尚未结束时拆隧道，剩余 job 以「AI 报导航失败」的假失败告终（ADR 0035 决策 3）。"""
     jobs = [_job(f"s{i}", 300.0) for i in range(12)]
     assert tunnel_host.compute_watch_ttl_s(jobs) > 3600.0
-
-
-def test_ttl_gives_unbounded_jobs_an_explicit_ceiling():
-    """`--default-job-timeout <=0`（执行侧不超时）→ job.timeout_s=None：TTL 仍须有限（否则泄漏兜底失效）；
-    每 job 余量对这样的 job 照样计入。"""
-    ttl = tunnel_host.compute_watch_ttl_s([_job("a", None), _job("b", None)],
-                                          startup_margin_s=0.0, per_job_margin_s=0.0,
-                                          unbounded_job_budget_s=1000.0)
-    assert ttl == 2000.0
-    assert tunnel_host.compute_watch_ttl_s([_job("a", None)], startup_margin_s=0.0, per_job_margin_s=210.0,
-                                           unbounded_job_budget_s=1000.0) == 1210.0
 
 
 def test_ttl_empty_definition_is_just_the_margin():

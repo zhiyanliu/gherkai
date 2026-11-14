@@ -208,8 +208,8 @@ def test_offload_round_trip_real(real_aws):
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空cell")))),
             Step(1, "Then", "看", StepArgument(kind="docString", content="多行\n正文\ns3://像指针的正文")),
         )),
-    ))
-    meta = RunMeta(run_id=rid, created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id=rid, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     store.create_run(meta, RunState(run_id=rid, status=Status.PENDING, jobs={}))  # 空 Map jobs 真表可存
 
     got = store.load_run_meta(rid)
@@ -271,13 +271,13 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
         Scenario(id="s:1", name="sc", steps=(
             Step(0, "Given", "巨型正文", StepArgument(kind="docString", content=huge)),
         )),
-    ))
+    ), timeout_s=300.0)
 
     # 分支 A：不挂 offloader → put_item META（500KB）先于 STATE，撞 400KB 抛 ValidationException（无 STATE 残留）
     rid_a = _uniq("offload-A-nooffload")
     real_aws["cleanup_run_id"](rid_a)
     store_a = _ddb_store(real_aws)  # offloader=None
-    meta_a = RunMeta(run_id=rid_a, created_at="t", jobs=(job,))
+    meta_a = RunMeta(run_id=rid_a, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     with pytest.raises(ClientError) as exc:
         store_a.create_run(meta_a, RunState(run_id=rid_a, status=Status.PENDING, jobs={}))
     assert _is_ddb_too_large(exc), f"无 offload 时 500KB META 应撞 400KB，实际 {exc.value}"
@@ -287,7 +287,7 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
     real_aws["cleanup_run_id"](rid_b)
     real_aws["cleanup_prefix"](f"{rid_b}/args/")
     store_b = _ddb_store(real_aws, offloader=_offloader(real_aws))
-    meta_b = RunMeta(run_id=rid_b, created_at="t", jobs=(job,))
+    meta_b = RunMeta(run_id=rid_b, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     store_b.create_run(meta_b, RunState(run_id=rid_b, status=Status.PENDING, jobs={}))  # 不再撞限
 
     # 强断言：读原始 META item，证正文确实搬走（含 content_ref / s3://）且 META 远 <400KB（非仅"写成功"）

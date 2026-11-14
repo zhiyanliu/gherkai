@@ -12,7 +12,7 @@ from gherkai_core.model import Job, Scenario, Step
 
 def _job(scope_id: str) -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="novaact",
-               scenarios=(Scenario(id=f"{scope_id}:1", name="s", steps=(Step(index=0, keyword="When", text="x"),)),))
+               scenarios=(Scenario(id=f"{scope_id}:1", name="s", steps=(Step(index=0, keyword="When", text="x"),)),), timeout_s=300.0)
 
 
 class _StubHandle:

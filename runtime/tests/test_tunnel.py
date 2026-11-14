@@ -131,7 +131,7 @@ def _job_with(text: str, argument: StepArgument | None = None) -> Job:
         scope_id="s", scope_name="s", engine="midscene",
         scenarios=(Scenario(id="s:1", name="sc", steps=(
             Step(0, "Given", text, argument=argument),
-        )),),
+        )),), timeout_s=300.0,
     )
 
 

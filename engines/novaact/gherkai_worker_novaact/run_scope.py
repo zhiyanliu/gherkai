@@ -809,7 +809,8 @@ BROWSER_SESSION_TIMEOUT_MAX_S = 28800
 
 
 def browser_session_timeout_s(timeout_s) -> int | None:
-    """job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 None（不传、保持服务默认）。"""
+    """job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 None（不传、保持服务默认）；
+    core 不再产出空预算，这个分支为协议仍允许的取值保留（ADR 0054 决策十）。"""
     if timeout_s is None:
         return None
     value = math.ceil(float(timeout_s)) + BROWSER_SESSION_TIMEOUT_MARGIN_S

@@ -41,7 +41,7 @@ from gherkai_core.project import (
 from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 
 
-def _job(n_scenarios: int = 3, timeout_s: float | None = 60.0) -> Job:
+def _job(n_scenarios: int = 3, timeout_s: float = 60.0) -> Job:
     scs = tuple(Scenario(id=f"s:{i}", name=f"sc{i}", steps=(Step(0, "Given", "a"), Step(1, "Then", "b"))) for i in range(n_scenarios))
     return Job(scope_id="s", scope_name="s", engine="midscene", scenarios=scs, timeout_s=timeout_s)
 
@@ -88,7 +88,7 @@ _HINT = "〈按目标给出的释放提示〉"  # 占位：期望消息里含该
 @pytest.mark.parametrize("kw, status, error_type, in_message", [
     # 行 1：timeout 优先于一切（含 U 非空与非零退出）
     (dict(stop_reason="timeout", exit_code=137, sessions=[_unconfirmed()]), Status.ERROR, "timeout", "job 超时（预算 60s，已中止）"),
-    (dict(stop_reason="timeout", job=_job(timeout_s=None), scope_done=None), Status.ERROR, "timeout", "job 超时（已中止）"),
+    (dict(stop_reason="timeout", scope_done=None), Status.ERROR, "timeout", "job 超时（预算 60s，已中止）"),
     (dict(stop_reason="timeout", exit_code=1), Status.ERROR, "timeout", "job 超时"),  # scope_done 已到但非零退出：不算内容完整
     # 行 2：abort → ABORTED、归因为空（优先于非零退出）；U 非空不改判定、只追加提示
     (dict(stop_reason="abort", exit_code=1), Status.ABORTED, None, "fail-fast"),

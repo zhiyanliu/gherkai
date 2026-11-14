@@ -55,7 +55,7 @@ def target_rejections(jobs, caps: dict) -> list[str]:
             )
             continue
         limit = compose.target_session_limit(supported, t.device)
-        if limit is not None and j.timeout_s is not None and j.timeout_s > limit:
+        if limit is not None and j.timeout_s > limit:
             out.append(
                 f"scope {j.scope_id!r} 的 job 墙钟预算 {j.timeout_s:g} 秒超过了引擎 {j.engine} 在{label}上的会话上限 {limit:g} 秒："
                 f"请调低这个 scope 的 @timeout 或 --default-job-timeout。"

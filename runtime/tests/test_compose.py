@@ -1388,7 +1388,7 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
         # 注入的是状态分组索引：建一个非终态 run，经 live 分组找得到
         from gherkai_core.model import RunMeta, RunState
 
-        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=()),
+        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=(), deadline_at="2026-01-01T01:00:00+00:00"),
                          RunState(run_id="r1", status=Status.RUNNING, jobs={}))
         assert [r.run_id for r in store.list_runs([Status.RUNNING], limit=None)] == ["r1"]
 
@@ -2009,10 +2009,10 @@ def test_run_requires_backend_stamp_predicate():
     scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
     desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=300.0)
     device = Job(scope_id="a", scope_name="a", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
-    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,))) is False
-    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop, device))) is True
+    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,), deadline_at="2026-01-01T01:00:00+00:00")) is False
+    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop, device), deadline_at="2026-01-01T01:00:00+00:00")) is True
     assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,),
-                                                      session_warmup_url="https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T")) is True
+                                                      session_warmup_url="https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T", deadline_at="2026-01-01T01:00:00+00:00")) is True
 
 
 def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env_cmd, fresh_caps_cache):

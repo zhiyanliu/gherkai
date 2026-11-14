@@ -8,10 +8,10 @@
 - engine：scope 内缺省用 config.default_engine；任一 scenario 标了则全 scope 继承；多个不同值报错。
 - device / app（ADR 0048 决策 2）：@device:android|ios 与 @app:<别名> 按 engine 同样的三条规则归约到 scope；不标即桌面网页；
   @device 取值不在 android / ios 之内、@app 用在桌面、别名不在 config.apps 里或缺本平台条目 → 报错。
-- timeout（ADR 0034「job timeout」节、0051 决策 2）：任一 scenario 标了 @timeout:N 则全 scope 继承；否则用显式给出的
+- timeout（ADR 0034「job timeout」节、0051 决策 2、0054 决策十）：任一 scenario 标了 @timeout:N 则全 scope 继承；否则用显式给出的
   config.default_job_timeout_s；都没有则按目标补缺省（桌面 default_desktop_job_timeout_s、设备 default_device_job_timeout_s）；
-  显式非正值只让非设备 scope 不超时，设备 scope 落到设备缺省；设备 scope 的 tag 或显式正值低于 min_device_job_timeout_s → 报错；
-  同 scope 多个不同值 / 非有限正数 → 报错（tag 语义权威在 ADR 0019）。
+  显式非正值对任何目标都取产品上限 MAX_JOB_TIMEOUT_S；tag 或显式正值超过上限 → 报错，设备 scope 的 tag 或显式正值低于
+  min_device_job_timeout_s → 报错；同 scope 多个不同值 / 非有限正数 → 报错（tag 语义权威在 ADR 0019）。产出的预算恒为有限正数。
 - 一个 scenario 多个不同 @scope 值（feature 级传播 + scenario 级）→ 报错（与 engine 冲突对称）。
 - id 派生：有 @scope 用其值；无标用 scenario 的 id/标题；两者共用一个 scope_id 命名空间（下游主键），
   @scope 的值撞上某条未标 scenario 的 id → 报错（撞 id 意味着静默丢结果，与裸 `@scope:` 同立场）。
@@ -27,6 +27,7 @@ from gherkai_core.model import (
     DEFAULT_ACQUIRE_TIMEOUT_S,
     DEFAULT_DESKTOP_JOB_TIMEOUT_S,
     DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    MAX_JOB_TIMEOUT_S,
     MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
     AppRef,
     Job,
@@ -59,8 +60,8 @@ class PlanConfig:
     # AI 断言投票次数缺省（ADR 0014）：无 per-scope 覆盖时所有 job 用它。默认 1（不抖动检测）。
     # 与 default_engine 对称——未来可由 @votes: tag per-scope 覆盖（留口子，现不实现）。
     default_assertion_votes: int = 1
-    # 显式给出的 --default-job-timeout（ADR 0019 @timeout / ADR 0034「job timeout」节）：None 表示**未指定**（按目标补缺省），
-    # 非正值表示「非设备 scope 不超时」（设备 scope 仍取设备缺省），正值对设备 scope 要过下限校验。
+    # 显式给出的 --default-job-timeout（ADR 0019 @timeout / ADR 0034「job timeout」节 / ADR 0054 决策十）：None 表示**未指定**
+    # （按目标补缺省），非正值对任何目标都表示取产品上限 MAX_JOB_TIMEOUT_S，正值要过上限校验、对设备 scope 还要过下限校验。
     default_job_timeout_s: float | None = None
     # 按目标的缺省与下限（ADR 0034「job timeout」节、0051 决策 2）：CLI 按获取预算算出传入；这里的缺省按内建获取预算推出，
     # 让直接构造 PlanConfig 的调用方（测试、工具）不必都传，数值与 CLI 引用同一组 core 常量。目标缺省自身不过下限校验。
@@ -164,17 +165,19 @@ def _resolve_target(scope_id: str, members: list[ParsedScenario], apps: dict[str
     return Target(device=device, ui_kind="app", app=AppRef(alias=alias, app_id=app_id))
 
 
-def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanConfig, target: Target) -> float | None:
-    """解析一个 scope 的 job 墙钟预算（ADR 0019 @timeout；覆盖与校验顺序归 ADR 0034「job timeout」节、0051 决策 2）。
+def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanConfig, target: Target) -> float:
+    """解析一个 scope 的 job 墙钟预算（ADR 0019 @timeout；覆盖与校验顺序归 ADR 0034「job timeout」节、0051 决策 2、0054 决策十）。
 
     ① 按来源取值：任一成员标了 @timeout:N 则全 scope 继承；否则用显式给出的 config.default_job_timeout_s；都没有则按目标补缺省
-    （桌面 default_desktop_job_timeout_s，设备 default_device_job_timeout_s）。② 显式非正值只表示「非设备 scope 不超时」，设备
-    scope 在这一步落到设备缺省、不报错（设备 scope 不存在不超时）。③ 下限只校验 tag 与显式正值：设备 scope 低于
-    min_device_job_timeout_s 报错，消息说明可能还没拿到设备就被判超时；目标缺省自身不校验。
+    （桌面 default_desktop_job_timeout_s，设备 default_device_job_timeout_s）。② 显式非正值对任何目标都表示取产品上限
+    MAX_JOB_TIMEOUT_S，不报错、不再校验。③ tag 与显式正值解析出的有效预算要过两道校验：设备 scope 低于 min_device_job_timeout_s
+    报错，消息说明可能还没拿到设备就被判超时；任何目标超过 MAX_JOB_TIMEOUT_S 报错。目标缺省自身不校验；被 tag 盖住、没有生效的
+    显式缺省也不校验。返回值恒为有限正数（没有「不超时」）。
     多个不同 tag 值 → FeatureContractError（同 scope 一个预算）。N 必须是**有限**正数（非数字 / <=0 / nan / inf →
-    FeatureContractError——「标了 tag 但想不超时」不成立，删 tag 走缺省即可）。nan/inf 须显式拒：`float()` 收它们
+    FeatureContractError——标了 tag 就得给出预算，想走缺省就删 tag）。nan/inf 须显式拒：`float()` 收它们
     （`float("nan")`/`"inf"`/`"1e400"` 都不抛），而下游推进器一律用 `>` 比较 deadline，nan/inf 会让超时保护静默失效。
     """
+    cap = MAX_JOB_TIMEOUT_S
     raws: list[str] = []
     for m in members:
         for v in _values_with_prefix(m.tags, _TIMEOUT_PREFIX, m.scenario.id):
@@ -186,6 +189,7 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
             f"同一 scope 只能有一个 job 墙钟预算，拒绝运行。"
         )
     is_device = not target.is_desktop
+    explicit = config.default_job_timeout_s
     if raws:
         raw = raws[0]
         try:
@@ -196,31 +200,23 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
             raise FeatureContractError(
                 f"scope {scope_id!r} 的 @timeout:{raw} 须为正数秒。要走缺省预算就删掉这个 tag：删掉后由 --default-job-timeout（给了的话）"
                 f"或目标缺省接替（桌面 {config.default_desktop_job_timeout_s:g} 秒、设备 {config.default_device_job_timeout_s:g} 秒）；"
-                f"桌面 scope 可用 --default-job-timeout 0 关闭超时，设备 scope 不能关闭。"
+                f"要用最长的预算就标 @timeout:{cap:g}。"
             )
         source = f"@timeout:{raw}"
     else:
-        explicit = config.default_job_timeout_s
         if explicit is None:
             return config.default_device_job_timeout_s if is_device else config.default_desktop_job_timeout_s
         if not math.isfinite(explicit):
-            raise FeatureContractError(f"--default-job-timeout 须为有限数，收到 {explicit!r}；要关闭桌面 scope 的超时给 0。")
+            raise FeatureContractError(f"--default-job-timeout 须为有限数，收到 {explicit!r}；要用最长的预算（{cap:g} 秒）给 0。")
         if explicit <= 0:
-            return config.default_device_job_timeout_s if is_device else None
+            return cap
         n = explicit
         source = f"--default-job-timeout {explicit:g}"
     if is_device and n < config.min_device_job_timeout_s:
         floor, fallback = config.min_device_job_timeout_s, config.default_device_job_timeout_s
         if raws:
-            # 改法要看删掉 tag 后真正接替的是谁：显式 --default-job-timeout 也低于下限时「删 tag」走不通，须一并调它
-            explicit = config.default_job_timeout_s
-            if explicit is not None and math.isfinite(explicit) and 0 < explicit < floor:
-                alt = (f"或去掉这个 tag 并把 --default-job-timeout 调到至少 {floor:g} 秒或不给它（设备 scope 走缺省 {fallback:g} 秒；"
-                       f"现在给的 {explicit:g} 秒同样低于下限）")
-            elif explicit is not None and math.isfinite(explicit) and explicit >= floor:
-                alt = f"或去掉这个 tag、改由 --default-job-timeout {explicit:g} 秒接替"
-            else:
-                alt = f"或去掉这个 tag、让设备 scope 走缺省（{fallback:g} 秒）"
+            # 改法要看删掉 tag 后真正接替的是谁：显式 --default-job-timeout 也通不过校验时「删 tag」走不通，须一并调它
+            alt = _fallback_after_tag_removed(explicit, floor=floor, fallback=fallback, cap=cap)
             fix = f"请把 @timeout 调到至少 {floor:g} 秒，{alt}。"
         else:
             fix = (f"请把 --default-job-timeout 调到至少 {floor:g} 秒或不给它（设备 scope 走缺省 {fallback:g} 秒）；"
@@ -229,7 +225,39 @@ def _resolve_timeout(scope_id: str, members: list[ParsedScenario], config: PlanC
             f"scope {scope_id!r} 的 job 墙钟预算 {n:g} 秒（来自 {source}）低于设备目标的下限 {floor:g} 秒："
             f"获取设备就可能用掉大部分预算，还没开始执行就会被判超时。{fix}"
         )
+    if n > cap:
+        if raws:
+            floor = config.min_device_job_timeout_s if is_device else None
+            fallback = config.default_device_job_timeout_s if is_device else config.default_desktop_job_timeout_s
+            alt = _fallback_after_tag_removed(explicit, floor=floor, fallback=fallback, cap=cap)
+            fix = f"请把 @timeout 调到不超过 {cap:g} 秒，{alt}。"
+        else:
+            fix = (f"请把 --default-job-timeout 调到不超过 {cap:g} 秒，给 0 即取这个上限；"
+                   f"只想改这个 scope 就在它的场景上标 @timeout:N，N 不超过 {cap:g}。")
+        raise FeatureContractError(
+            f"scope {scope_id!r} 的 job 墙钟预算 {n:g} 秒（来自 {source}）超过了上限 {cap:g} 秒（一个 job 最长运行 {cap / 3600:g} 小时）。{fix}"
+        )
     return n
+
+
+def _fallback_after_tag_removed(explicit: float | None, *, floor: float | None, fallback: float, cap: float) -> str:
+    """预算来自 @timeout 而通不过校验时，「去掉这个 tag」那半句改法：去掉之后由谁接替，取决于显式给出的 --default-job-timeout
+    （没给走目标缺省；给的不是有限数时删了 tag 会被它拒；给 0 或负数取上限；正值要同样过下限与上限，过不了就得一并调它）。
+    floor 为 None 表示桌面目标、没有下限。"""
+    if explicit is None:
+        return f"或去掉这个 tag、让这个 scope 走目标缺省（{fallback:g} 秒）"
+    if not math.isfinite(explicit):
+        return (f"或去掉这个 tag 并把 --default-job-timeout 改为有限数或不给它（走目标缺省 {fallback:g} 秒；"
+                f"现在给的 {explicit!r} 不是有限数）")
+    if explicit <= 0:
+        return f"或去掉这个 tag、改由 --default-job-timeout {explicit:g} 取上限 {cap:g} 秒"
+    if floor is not None and explicit < floor:
+        return (f"或去掉这个 tag 并把 --default-job-timeout 调到至少 {floor:g} 秒或不给它（设备 scope 走缺省 {fallback:g} 秒；"
+                f"现在给的 {explicit:g} 秒同样低于下限）")
+    if explicit > cap:
+        return (f"或去掉这个 tag 并把 --default-job-timeout 调到不超过 {cap:g} 秒或不给它（走目标缺省 {fallback:g} 秒；"
+                f"现在给的 {explicit:g} 秒同样超过上限）")
+    return f"或去掉这个 tag、改由 --default-job-timeout {explicit:g} 秒接替"
 
 
 def plan(features: list[FeatureSource], config: PlanConfig, *,

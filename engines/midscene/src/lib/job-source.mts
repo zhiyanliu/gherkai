@@ -29,7 +29,7 @@ export interface Job {
   engine: string;
   scenarios: unknown[];
   assertionVotes: number;
-  timeoutS: number | null;      // job 墙钟预算（秒），只在两处读：建会话前与目标的 max_session_s 比较作自检（ADR 0051 决策 2），以及桌面实现据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；worker 不据此计时、不自停；不超时为 null
+  timeoutS: number | null;      // job 墙钟预算（秒），只在两处读：建会话前与目标的 max_session_s 比较作自检（ADR 0051 决策 2），以及桌面实现据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；worker 不据此计时、不自停；协议允许为 null（协议不升版），core 不再产出空值（ADR 0054 决策十）
   target: JobTargetShape;       // 桌面也写 desktop/web（ADR 0048 决策 3）
   deviceRequest: JobDeviceRequest | null;
 }

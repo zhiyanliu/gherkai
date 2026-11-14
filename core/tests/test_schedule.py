@@ -43,7 +43,7 @@ class _IncClock:
         return self.t
 
 
-def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float | None = None,
+def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float = 7200.0,
          device: str = "desktop") -> Job:
     scenarios = tuple(
         Scenario(id=f"{scope_id}:{i}", name=f"sc{i}", steps=(Step(0, "When", "做事"),))
@@ -57,7 +57,7 @@ def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
     """测试用：把 Job[] 包成 RunMeta（definition）喂 schedule（ADR 0016）。"""
-    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs))
+    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _passing_events(scope_id: str, scenario_id: str) -> list:
@@ -361,7 +361,7 @@ def _full_timed_events(scope_id: str, scenario_id: str, n_steps: int = 2) -> lis
 
 def test_three_level_durations():
     # 递增 clock（每事件到达 +1.0s）+ 完整 started/done 流 → core 算出三级时长。
-    # 无超时（Job.timeout_s=None）时 core 每事件只读 1 次 clock，时长可预期且层级嵌套。
+    # 预算取上限 7200 秒、远不会到点，时长可预期且层级嵌套。
     engine = FakeEngine({"sc": _full_timed_events("sc", "sc:0", n_steps=2)})
     result = schedule(
         _rm([_job("sc")]), FakeResolver(engine), CollectSink(),
@@ -935,7 +935,7 @@ def test_fail_fast_stops_running_workers_from_main_thread_without_heartbeat():
     victim 卡在等停里看不到 abort_flag）。那一刻 deadline 未过的 victim 记 ABORTED，已过的记 timeout。"""
     import time
 
-    def run(scope: str, timeout_s: float | None, crash_delay_s: float):
+    def run(scope: str, timeout_s: float, crash_delay_s: float):
         crash_now = threading.Event()
 
         def crash_gen(job):
@@ -956,7 +956,7 @@ def test_fail_fast_stops_running_workers_from_main_thread_without_heartbeat():
         assert time.monotonic() - t0 < crash_delay_s + 3.0  # 没等到 FakeEngine 的 5 秒等停超时：停止请求由主线程当场发出
         return next(jr for jr in res.jobs if jr.scope_id == scope)
 
-    jr = run("v", timeout_s=None, crash_delay_s=0.0)
+    jr = run("v", timeout_s=7200.0, crash_delay_s=0.0)
     assert (jr.status, jr.error_type) == (Status.ABORTED, None)
     jr = run("w", timeout_s=0.3, crash_delay_s=0.8)  # 实时钟：crash job 崩时 victim 的 deadline 已过 → _stop_all 当场落定 timeout
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
@@ -1171,8 +1171,8 @@ def test_drain_bound_counts_from_stop_request_not_after_blocking_stop():
     assert clock.n - clock.n_at_stop <= 4, clock.n - clock.n_at_stop
 
 
-def test_drain_bound_applies_without_deadline_under_fail_fast():
-    """没有 deadline 的 job 被 fail-fast 中止后卡死不退出：排空上界同样起作用（靠心跳醒来），不挂死，判 ABORTED。"""
+def test_drain_bound_applies_before_deadline_under_fail_fast():
+    """deadline 远未到的 job 被 fail-fast 中止后卡死不退出：排空上界同样起作用（靠心跳醒来），不挂死，判 ABORTED。"""
     import time
 
     class _Clock:

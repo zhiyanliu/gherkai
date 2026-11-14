@@ -67,6 +67,11 @@ MAX_ACQUIRE_TIMEOUT_S = 3600.0
 DEFAULT_DESKTOP_JOB_TIMEOUT_S = 300.0
 DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S = 900.0
 MIN_DEVICE_JOB_TIMEOUT_EXTRA_S = 180.0
+# job 墙钟预算的产品上限（ADR 0054 决策十）：对所有目标是同一个数。计划阶段解析出的有效预算超过它即拒绝，`--default-job-timeout`
+# 给 0 或负数时取它。引擎与平台各自的限制留在引擎，core 不抄；两者的关系（本上限不大于任何引擎对任何目标能支持的最长预算）由
+# cli/tests/test_job_timeout_cap.py 与 Midscene 侧的 job-timeout-cap.test.mts 守住。设备预算的下限最大为获取预算上界加
+# MIN_DEVICE_JOB_TIMEOUT_EXTRA_S，即 3780 秒，在本上限之内。
+MAX_JOB_TIMEOUT_S = 7200.0
 # 合法的 (device, ui_kind) 组合（ADR 0048 决策 1）：桌面只有网页，不为桌面应用预留空位。
 VALID_TARGETS: frozenset[tuple[str, str]] = frozenset({
     ("desktop", "web"), ("android", "web"), ("android", "app"), ("ios", "web"), ("ios", "app"),
@@ -130,11 +135,11 @@ class Job:
     # 默认 1（不抖动检测，结果/日志最直观）；调高（如 3/5）才启用抖动治理。组合根经 --assertion-votes 设。
     assertion_votes: int = 1
     # job 墙钟预算秒（ADR 0034「job timeout」节）：@timeout:N tag、显式给出的 --default-job-timeout，或 plan 层按目标补的缺省
-    # （数值见上方 DEFAULT_DESKTOP_JOB_TIMEOUT_S 等三个常量）；None 表示不超时，只有非设备 scope 可取（设备 scope 恒为有限正数，ADR 0048 决策 3 /
-    # 0051 决策 2）。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；worker 只在两处读它：建会话前
-    # 与能力自述的 max_session_s 比较作自检，以及桌面 worker 据它设定浏览器会话的服务端存活上限（ADR 0024 泄漏兜底条）；
-    # 不计时、不自停。
-    timeout_s: float | None = None
+    # （数值见上方 DEFAULT_DESKTOP_JOB_TIMEOUT_S 等常量）。恒为有限正数、不大于 MAX_JOB_TIMEOUT_S，没有「不超时」（ADR 0054
+    # 决策十），故没有缺省值、构造时必须以关键字给出。载体是 definition（timeout 是「要运行什么」的预算约束），推进器各自 enforce；
+    # worker 只在两处读它：建会话前与能力自述的 max_session_s 比较作自检，以及桌面 worker 据它设定浏览器会话的服务端存活上限
+    # （ADR 0024 泄漏兜底条）；不计时、不自停。worker 协议里这个键仍允许为空（协议不升版），只是 core 不再产出空值。
+    timeout_s: float = field(kw_only=True)
     # 测试目标（ADR 0048）：由 @device / @app 归约，缺省桌面网页；现有构造点不受影响。
     target: Target = Target()
     # 设备请求（ADR 0048 决策 3）：plan 形态为 None（不访问任何 AWS 服务）；run / submit 在组合根填入。非桌面目标当且仅当它存在
@@ -522,13 +527,17 @@ class RunResult:
 class RunMeta:
     """一次 run 的 **definition**（前置身份，执行前由 plan 产出 + 组合根生成确定，不从 RunResult 反推）。
 
-    含「要运行什么」的全部：run_id + created_at + 完整 Job 列表（Job 含 scope/engine/scenarios/steps）。
+    含「要运行什么」的全部：run_id + created_at + 完整 Job 列表（Job 含 scope/engine/scenarios/steps）+ 运行期限。
     **不含 status/判定**（那是执行后才有，属控制面运行态 RunState / 数据面 ResultStore）。
     """
 
     run_id: str  # 组合根生成（RunReport 主键 / 未来 RunStore PK）
     created_at: str  # 组合根生成的时间戳（core 不取时钟）
     jobs: tuple[Job, ...]  # 这次运行哪些 job（完整 definition，来自 plan 产出）
+    # 运行期限（ADR 0054 决策二）：UTC 的 ISO 时刻，组合根建 run 时由 created_at、各 job 的墙钟预算与停止宽限推出
+    # （算式在 gherkai_runtime.deadline），之后不变。它是这个 run 的规则，所有执行方都要遵守、所有读者都看得到；每个 job 都有有限的
+    # 预算，所以每个 run 都有期限，没有空值。读 definition 时核它是带时区的 ISO 时刻（serialize.run_meta_from_dict），不是即定义违约。
+    deadline_at: str
     # 浏览器 context 级额外请求头（ADR 0035 决策 4，如 ngrok-skip-browser-warning）：组合根填充、engine
     # adapter 注 env、worker setExtraHTTPHeaders 消费——core 只搬运不消费语义。tuple pairs 保 frozen 惯例；
     # None 表示无（默认路径零变化）。载体是 definition：cloud detached 下要跨进程到 Lambda 重建 engine，必须随 META 持久化。

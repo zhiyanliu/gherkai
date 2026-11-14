@@ -55,6 +55,9 @@
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
+- `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
+  `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取
+  `CLOUD_PER_JOB_TAIL_S`（与 `tunnel_host.CLOUD_PER_JOB_MARGIN_S` 同值）；一次性余量 `STARTUP_MARGIN_S` 为 900 秒
 - `devicefarm.py` —— 部署与诊断用的 Device Farm 客户端（ADR 0051 决策 10「调用归属」「项目」、决策 6）：`project_name`（项目名 `{prefix}devices`）/ `read_project_arn`（从后端区域的 SSM 读项目 ARN，ssm client 由调用方注入）/ `resolve_or_create_project`（供 `deploy` 在 cdk 之前找回或建立项目；记录的项目已不存在时经 `warn` 回调立即发出警告）/ `verify_project`（供 `diff` 用 GetProject 只读核对 SSM 记录的项目：存在为 True，NotFound 为 False，不按名称列举、不建立）/ `list_open_sessions`（供 `doctor` 列出未到 COMPLETED 的会话）/ `is_access_denied`（provider 判定读 SSM 失败是否为无权限，与本模块共用一份错误码集合）；无权限归为 `DeviceFarmAccessDenied`（记录的项目已不存在而找回或新建又被拒时带 `stored_project_missing`）、同名项目多于一个归为 `AmbiguousProject`，其余 botocore 异常原样抛出。Python 侧唯一构造 devicefarm 客户端的地方，区域恒为 `names.DEVICE_FARM_REGION`（构造点、区域与延迟导入的护栏在 `tests/test_devicefarm_client_placement.py`）；不创建、不停止会话（护栏在 `tests/test_devicefarm.py`）
 - `app_upload.py` —— 安装包上传到 S3 应用前缀（ADR 0051 决策 9）：按内容哈希定键、managed 桶打标签与按保留承诺同键刷新、本机应用桶只做存在性复用；s3 client 由调用方注入
 - `names.py` —— 资源命名真源（零依赖；`deploy_aws/gherkai_deploy_aws/names.py` 直接 re-export 后再加 provider 特有常量，
@@ -67,7 +70,7 @@
 - `tunnel_host.py` —— 隧道**宿主**编排（ADR 0035 决策 3）：启动隧道 + 映射 definition + 隧道模式下恒同时给出的额外请求头（`TUNNEL_EXTRA_HTTP_HEADERS`）与会话预热地址
   （`TunnelInfo.warmup_url`，经 `TunnelSetup.info` 取得）；cloud submit 守护进程的轮询循环与其 TTL 算法（`compute_watch_ttl_s` 按 definition 计算：
   一次性余量 `CLOUD_STARTUP_MARGIN_S`（900 秒）加 Σ(各 job 预算 + 每 job 余量 `CLOUD_PER_JOB_MARGIN_S`)，每 job 余量 210 秒由 Scheduler 触发精度 60 秒、
-  Fargate 停止宽限上限 120 秒与事件链尾延迟约 30 秒组成，最后一项是经验值、不是硬上界；执行侧不超时的 job 按 `UNBOUNDED_JOB_BUDGET_S` 记账）
+  Fargate 停止宽限上限 120 秒与事件链尾延迟约 30 秒组成，最后一项是经验值、不是硬上界；每个 job 都有有限的墙钟预算，所以 TTL 恒有限）
 - `textui.py` —— 人读输出的呈现件（ADR 0047）：`render_table` / `render_tree` / `TreeNode` / `status_text` / `styled` / `plain`
   与 re-export 的 `Text`；框线、宽度（终端宽度或不折行的名义宽度）、哪些列可折行、颜色开关（`use_color`：环境变量 `NO_COLOR` /
   `FORCE_COLOR` / `TERM=dumb` 的判定取自 `gherkai_core.termcolor`、与 worker 日志前缀共用一份，本模块再看标准输出是否为终端）与状态色映射 `STATUS_STYLE` 都由本模块提供；cli 与部署 provider 只经本模块使用 rich

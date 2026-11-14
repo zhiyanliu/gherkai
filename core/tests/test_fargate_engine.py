@@ -28,7 +28,7 @@ def _job(scope_id: str = "browse") -> Job:
     return Job(
         scope_id=scope_id, scope_name=scope_id, engine="novaact",
         scenarios=(Scenario(id="sc:0", name="s", steps=(Step(index=0, keyword="When", text='"做事"'),)),),
-        assertion_votes=1,
+        assertion_votes=1, timeout_s=300.0,
     )
 
 
@@ -887,7 +887,7 @@ def _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls: int):
         job_s3=("b", "jobs-in/"), events_table_name="events", container_name="worker",
         artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.0, null_exit_grace_polls=null_exit_grace_polls,
     )
-    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),)), lambda _engine: eng, lambda _event: None,
+    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),), deadline_at="2026-01-01T01:00:00+00:00"), lambda _engine: eng, lambda _event: None,
                    opts=ScheduleOpts(max_concurrency=1))
     return res.jobs[0]
 

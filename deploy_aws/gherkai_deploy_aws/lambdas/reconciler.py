@@ -172,7 +172,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
     running 或退出记录已在时照常 no-op、不等待；仍 running 时按 claimed_at 加 Job.timeout_s 复查——已到直接处置；未到且剩余
     不超过等待上界（`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到 deadline，重读 job 状态与退出记录、仍需处置才往下；
     剩余超过上界时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
-    缺 claimed_at 或预算时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调本函数，复查直接通过。
+    缺 claimed_at 或运行定义里没有这个 job 时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调本函数，复查直接通过。
     wait_budget_fn：返回本次调用还能用于等待的秒数（kicker 按 Lambda 剩余时间给出），**临睡前才调用**——复查前的两次读取
     也在消耗本次调用的时间，提前采样会把慢读取的耗时算进可等的额度、挤占处置与 tick 的预留；None 表示只受固定上界约束；
     now_fn / sleep_fn：时钟与等待，供测试注入。
@@ -211,7 +211,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
     if noop:
         return noop
     job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
-    if claimed_at and job is not None and job.timeout_s:
+    if claimed_at and job is not None:
         deadline = compose.parse_iso(claimed_at) + _dt.timedelta(seconds=job.timeout_s)
         remaining = (deadline - now_fn()).total_seconds()
         if remaining > 0:
@@ -270,7 +270,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
             # 不抢着写：退出记录由 exit_observer 收到 STOPPED 事件时落（本函数 docstring「正在停止」那路）
             print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等它的退出事件到达再收尾")
             return "noop-stopping"
-        budget = f"{job.timeout_s:g}" if job is not None and job.timeout_s else "?"
+        budget = f"{job.timeout_s:g}" if job is not None else "?"
         ecs.stop_task(cluster=cluster, task=arn,
                       reason=f"{TIMEOUT_STOP_SENTINEL}: scope exceeded {budget}s budget")
         print(f"timeout-stop: run={run_id} scope={scope_id} task={arn}")
@@ -295,7 +295,7 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
     now = _dt.datetime.now(_dt.timezone.utc)  # 纯时间差比较、不落库（落库的时间戳一律 compose.now_iso）
     for sid, js in state.jobs.items():
         job = job_by_scope.get(sid)
-        if js.status != Status.RUNNING or not js.claimed_at or job is None or not job.timeout_s:
+        if js.status != Status.RUNNING or not js.claimed_at or job is None:
             continue
         elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
         if elapsed > job.timeout_s + _DEFENSIVE_TIMEOUT_MARGIN_S:
@@ -438,7 +438,7 @@ def _build(run_id: str):
         ecs=boto3.client("ecs", region_name=region), s3=s3, ddb_events_table=events_table,
     )
     # job timeout 到点触发器（ADR 0034「job timeout」节）：env 齐才装配（KICKER_ARN/SCHEDULER_ROLE_ARN 由
-    # IaC 注入）；缺 → None，CloudLauncher 对有预算的 job 打降级日志（tick 防御扫仍兜）。
+    # IaC 注入）；缺 → None，CloudLauncher 每次 launch 打降级日志（tick 防御扫仍兜）。
     timeout_watch = None
     kicker_arn = os.environ.get("KICKER_ARN")
     scheduler_role_arn = os.environ.get("SCHEDULER_ROLE_ARN")

@@ -18,7 +18,7 @@ _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
 
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
-    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs))
+    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _engine(mode: str) -> SubprocessEngine:
@@ -27,7 +27,7 @@ def _engine(mode: str) -> SubprocessEngine:
     return SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
 
 
-def _job(scope_id: str = "s", timeout_s: float | None = None) -> Job:
+def _job(scope_id: str = "s", timeout_s: float = 7200.0) -> Job:
     return Job(
         scope_id=scope_id, scope_name=scope_id, engine="novaact", timeout_s=timeout_s,
         scenarios=(
@@ -157,7 +157,7 @@ def test_silent_worker_timeout_fires_via_heartbeat():
 # ---- 停止与收尾的真子进程护栏（ADR 0034 机制二：首次仲裁、内容完整后不再仲裁、停止后有界消费）----
 
 
-def _mode_job(scope_id: str, mode: str, timeout_s: float | None = None) -> Job:
+def _mode_job(scope_id: str, mode: str, timeout_s: float = 7200.0) -> Job:
     j = _job(scope_id, timeout_s=timeout_s)
     return Job(scope_id=j.scope_id, scope_name=f"mode:{mode}", engine=j.engine, scenarios=j.scenarios, timeout_s=timeout_s)
 
@@ -416,7 +416,7 @@ def test_large_job_and_noisy_worker_do_not_deadlock():
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
     big = Step(0, "Given", "大参数", argument=StepArgument(kind="docString", content="y" * 300_000))
     job = Job(scope_id="s", scope_name="s", engine="novaact",
-              scenarios=(Scenario(id="s:0", name="sc", steps=(big, Step(1, "When", "搜索"), Step(2, "Then", "进入页面"))),))
+              scenarios=(Scenario(id="s:0", name="sc", steps=(big, Step(1, "When", "搜索"), Step(2, "Then", "进入页面"))),), timeout_s=300.0)
     _handle, events = engine.run_scope(job)
     types = [e.type for e in events]
     assert types[0] == "scope_started" and types[-1] == "scope_done" and types.count("step_done") == 3

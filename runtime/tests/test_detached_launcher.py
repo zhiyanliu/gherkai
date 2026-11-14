@@ -30,16 +30,16 @@ def _echo_resolver(mode: str):
     return lambda _name: engine
 
 
-def _job(sid: str, timeout_s: float | None = None) -> Job:
+def _job(sid: str, timeout_s: float = 600.0) -> Job:  # 运行定义里的预算恒为有限正数（ADR 0054 决策十）
     return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{sid}:0", name="sc", steps=(
                    Step(0, "Given", '"https://x"'), Step(1, "When", "搜索"), Step(2, "Then", "进入"),
                )),))
 
 
-def _setup(tmp_path, mode, *sids, timeout_s: float | None = None):
+def _setup(tmp_path, mode, *sids, timeout_s: float = 600.0):
     meta = RunMeta(run_id="run-1", created_at="t0",
-                   jobs=tuple(_job(s, timeout_s=timeout_s) for s in sids))
+                   jobs=tuple(_job(s, timeout_s=timeout_s) for s in sids), deadline_at="2026-01-01T01:00:00+00:00")
     log = SqliteEventLog(tmp_path / "events.db")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
@@ -191,7 +191,7 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
             written.append((run_id, result, created_at))
 
     # 真时钟（非 _now 常量）：要让两端时间戳都可解析，否则墙钟本来就是 None、本例空过
-    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),))
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
     log = SqliteEventLog(tmp_path / "events.db")
     inner = LocalRunStore(tmp_path)
     inner.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
@@ -344,7 +344,7 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
     from gherkai_runtime.detached import build_local_reconcile
 
     # 造最小 run 落盘（build_local_reconcile 要 load_run_meta 读回）
-    meta = RunMeta(run_id="run-r", created_at="t0", jobs=(_job("a"),))
+    meta = RunMeta(run_id="run-r", created_at="t0", jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-r", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -385,7 +385,7 @@ def test_build_local_reconcile_goes_through_resolve_aws_identity(tmp_path, monke
 
 def _seed_for_build(tmp_path, run_id: str, *, max_concurrency: int | None):
     """落一个最小 run（单 pending job）供 build_local_reconcile 读回，meta 的 max_concurrency 按参数。"""
-    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency)
+    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency, deadline_at="2026-01-01T01:00:00+00:00")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id=run_id, status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -439,7 +439,7 @@ def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeyp
     """
     from gherkai_runtime.detached import build_local_reconcile
 
-    meta = RunMeta(run_id="run-s", created_at="t0", jobs=(_job("a"),), steps_dir="/abs/user/steps")
+    meta = RunMeta(run_id="run-s", created_at="t0", jobs=(_job("a"),), steps_dir="/abs/user/steps", deadline_at="2026-01-01T01:00:00+00:00")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-s", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -496,7 +496,7 @@ def test_run_state_timestamps_share_one_format(tmp_path):
     """
     from gherkai_runtime import compose
 
-    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),))
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
     log = SqliteEventLog(tmp_path / "events.db")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
@@ -542,7 +542,7 @@ def test_build_local_reconcile_reads_session_warmup_url_back_from_definition(tmp
 
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
     meta = RunMeta(run_id="run-w", created_at="t0", jobs=(_job("a"),),
-                   extra_http_headers=(("ngrok-skip-browser-warning", "1"),), session_warmup_url=url)
+                   extra_http_headers=(("ngrok-skip-browser-warning", "1"),), session_warmup_url=url, deadline_at="2026-01-01T01:00:00+00:00")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-w", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},

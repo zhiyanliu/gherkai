@@ -55,8 +55,8 @@ def validate_job_definition(job: Job) -> None:
             raise DefinitionContractError(f"{where} 的设备请求缺 billing_method")
         if not _is_positive_number(dr.acquire_timeout_s):
             raise DefinitionContractError(f"{where} 的设备请求 acquire_timeout_s 须为有限正数（现为 {dr.acquire_timeout_s!r}）")
+    # 每个 job 都有有限的墙钟预算（ADR 0054 决策十）：空预算与非正、非有限值一样是定义违约。不在这里核产品上限：上限是计划阶段的
+    # 取值规则，读端只核「是有限正数」这一结构性质。
     ts = job.timeout_s
-    if ts is not None and not _is_positive_number(ts):
-        raise DefinitionContractError(f"{where} 的墙钟预算须为有限正数或不设（现为 {ts!r}）")
-    if not t.is_desktop and ts is None:
-        raise DefinitionContractError(f"{where} 是设备目标却没有墙钟预算（设备 scope 不存在「不超时」）")
+    if not _is_positive_number(ts):
+        raise DefinitionContractError(f"{where} 的墙钟预算须为有限正数（现为 {ts!r}）")

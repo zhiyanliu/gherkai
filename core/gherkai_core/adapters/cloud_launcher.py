@@ -36,30 +36,30 @@ class CloudLauncher:
         # job timeout 的到点触发器（ADR 0034「job timeout」节的云端后端一侧，组合根注入；实现是 EventBridge Scheduler
         # one-time schedule，见 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py）。协议：arm(run_id, scope_id, timeout_s, claimed_at)，
         # 实装按 claimed_at 加 timeout_s 取到点时刻（预算从 claim 起算，arm 晚于 claim 的间隔不推后到点）。None 表示未装配
-        # （旧部署/无 env）——有预算的 job 降级为 tick 防御扫 + status --wait，打日志。
+        # （旧部署/无 env）——job 的超时降级为 tick 防御扫 + status --wait，打日志。
         self._timeout_watch = timeout_watch
 
     def launch(self, job: Job, *, claimed_at: str) -> None:
         # 武装**先于**起 task（ADR 0034「job timeout」节）：start_scope 失败时 tick 会补偿 record_exit(PLATFORM_FAILED_EXIT)，
         # 但若补偿也失败（双失败）、job 永停 RUNNING——先建的 schedule 到点仍能收敛（「永 running」的最后
         # 兜底不因 launch 失败缺位）；失败 launch 留下的 schedule 到点走 no-op/直接收敛并自动删，零残留。
-        if job.timeout_s:
-            if self._timeout_watch is None:
+        # 每个 job 都有有限的墙钟预算（ADR 0054 决策十），所以每次 launch 都武装。
+        if self._timeout_watch is None:
+            logger.warning(
+                "这个 job 没有超时看护：后端未启用定时能力（后端版本较旧时会这样，重新部署后端即可启用）"
+                "——scope=%s 预算 %ss；超时仍由后台巡检兜底收敛，只是不如到点准时",
+                job.scope_id, job.timeout_s)
+        else:
+            # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
+            # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
+            try:
+                self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s, claimed_at)
+            except Exception:
                 logger.warning(
-                    "这个 job 没有超时看护：后端未启用定时能力（后端版本较旧时会这样，重新部署后端即可启用）"
-                    "——scope=%s 预算 %ss；超时仍由后台巡检兜底收敛，只是不如到点准时",
-                    job.scope_id, job.timeout_s)
-            else:
-                # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
-                # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
-                try:
-                    self._timeout_watch.arm(self._run_id, job.scope_id, job.timeout_s, claimed_at)
-                except Exception:
-                    logger.warning(
-                        "这个 job 的超时看护没能设置好（不影响本次启动）：run=%s scope=%s"
-                        "——超时改由后台巡检兜底收敛；若反复出现，按日志中的错误信息检查后端配置"
-                        "（常见原因是定时权限不足）",
-                        self._run_id, job.scope_id, exc_info=True)
+                    "这个 job 的超时看护没能设置好（不影响本次启动）：run=%s scope=%s"
+                    "——超时改由后台巡检兜底收敛；若反复出现，按日志中的错误信息检查后端配置"
+                    "（常见原因是定时权限不足）",
+                    self._run_id, job.scope_id, exc_info=True)
         # fire-and-forget：按 engine 取 FargateEngine、start_scope 起 task 就返回。task_arn 不在此保留——
         # reconciler 靠 events 表（worker PutItem）+ task_exited（退出观察者 Lambda 写）推进，不靠 launcher 轮询。
         # 异常冒泡（不兜）——tick 靠它触发 launch 失败补偿（record_exit 哨兵 PLATFORM_FAILED_EXIT）。

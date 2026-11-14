@@ -26,12 +26,12 @@ from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, Tas
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
     sc = Scenario(id=f"{scope_id}:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),))
-    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=(sc,))
+    return Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=(sc,), timeout_s=300.0)
 
 
 def _meta(*scope_ids: str) -> RunMeta:
     return RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z",
-                   jobs=tuple(_job(s) for s in scope_ids))
+                   jobs=tuple(_job(s) for s in scope_ids), deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _ev(scope_id: str, seq: int, event, ts: float = 0.0) -> EventRecord:
@@ -491,7 +491,7 @@ def test_recover_from_events_returns_scenarios_absent_from_the_verdict_with_thei
     from gherkai_core.model import ReportRef, StepDone, StepStarted, ScenarioStarted, Votes
     steps = tuple(Step(index=i, keyword="When", text=f"s{i}") for i in range(3))
     job = Job(scope_id="a", scope_name="a", engine="novaact", scenarios=(
-        Scenario(id="a:A", name="A", steps=steps), Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)))
+        Scenario(id="a:A", name="A", steps=steps), Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)), timeout_s=300.0)
     ref = ReportRef(kind="evidence", ref="file:///tmp/ev-b1.json", label="evidence")
     recs = [
         _ev("a", 1, ScopeStarted(scope_id="a", session_id="s")),
@@ -527,7 +527,7 @@ def test_recover_from_events_ignores_scenarios_synthesized_after_scope_error():
     from gherkai_core.model import StepDone, StepStarted, ScenarioStarted
     steps = (Step(index=0, keyword="When", text="x"), Step(index=1, keyword="Then", text="y"))
     job = Job(scope_id="a", scope_name="a", engine="midscene", scenarios=(
-        Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)))
+        Scenario(id="a:B", name="B", steps=steps), Scenario(id="a:C", name="C", steps=steps)), timeout_s=300.0)
     recs = [
         _ev("a", 1, ScopeStarted(scope_id="a")),
         _ev("a", 2, ScenarioStarted(scenario_id="a:B")),

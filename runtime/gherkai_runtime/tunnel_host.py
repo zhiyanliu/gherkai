@@ -45,9 +45,6 @@ CLOUD_STARTUP_MARGIN_S = 900.0
 #      故算出的 TTL 是按任务量估算的上限、不是保证，`--tunnel-ttl` 保留为显式覆盖项。
 # 合计 210 秒。在预算内结束的 job 只有第 ③ 段，按 210 秒记账是高估，偏在安全的一侧。
 CLOUD_PER_JOB_MARGIN_S = 60.0 + float(compose.FARGATE_STOP_TIMEOUT_MAX_S) + 30.0
-# 无 job 预算（`--default-job-timeout <=0` 且未标 `@timeout`，即执行侧不超时）时的 TTL 记账上限。
-# **只用于算 TTL，不是执行超时**：TTL 必须有限（否则泄漏兜底失效），故给不超时的 job 记一个明确上界。
-UNBOUNDED_JOB_BUDGET_S = 3600.0
 
 
 @dataclass(frozen=True)
@@ -75,7 +72,6 @@ def start_tunnel_for_jobs(jobs, *, local_origin: str, provider: str = "ngrok") -
 def compute_watch_ttl_s(
     jobs, *, startup_margin_s: float = CLOUD_STARTUP_MARGIN_S,
     per_job_margin_s: float = CLOUD_PER_JOB_MARGIN_S,
-    unbounded_job_budget_s: float = UNBOUNDED_JOB_BUDGET_S,
 ) -> float:
     """按 definition 算 cloud submit 隧道守护的 TTL 秒数：一次性余量 + Σ(各 job 预算 + 每 job 余量)。
 
@@ -85,11 +81,9 @@ def compute_watch_ttl_s(
     **求和而非取 max**：并发 >1 时各 job 部分重叠、真实墙钟 < 各预算之和，故串行总预算对**任何**并发取值
     都是保守上界（并发随 definition 走、cloud 再受部署侧 cap 钳制，ADR 0034 机制四——此处不必知道取值）。
     高估无害：TTL 偏长即隧道多留一会儿（run 终态照常提前拆）；反向（低估）才会造出假失败。
-    无预算（执行侧不超时）的 job 按 `unbounded_job_budget_s` 记账——TTL 必须有限；每 job 余量照样计入。
+    每个 job 都有有限的墙钟预算（ADR 0054 决策十），所以 TTL 恒有限，不需要给哪个 job 另记一个上界。
     """
-    return startup_margin_s + sum(
-        (j.timeout_s if j.timeout_s else unbounded_job_budget_s) + per_job_margin_s for j in jobs
-    )
+    return startup_margin_s + sum(j.timeout_s + per_job_margin_s for j in jobs)
 
 
 def watch_run_and_stop_tunnel(

@@ -36,7 +36,7 @@ def _job_def(scope_id: str, scope_name: str, engine: str) -> Job:
                 Step(1, "When", "搜索 OpenAI"),
             )),
         ),
-        assertion_votes=3,  # 非默认值：护住 serialize round-trip 不丢该字段
+        assertion_votes=3, timeout_s=300.0,  # 非默认值：护住 serialize round-trip 不丢该字段
     )
 
 
@@ -44,7 +44,7 @@ def _sample_run(run_id: str = "20260629-abc") -> RunResult:
     j0 = _job_def("features/wiki.feature:6", "wiki", "midscene")  # 含 /:，测不透明 id 编码
     j1 = _job_def("登录场景", "登录场景", "novaact")              # 中文 scope_id，测可逆编码
     return RunResult(
-        run_meta=RunMeta(run_id=run_id, created_at="2026-06-29T00:00:00Z", jobs=(j0, j1)),
+        run_meta=RunMeta(run_id=run_id, created_at="2026-06-29T00:00:00Z", jobs=(j0, j1), deadline_at="2026-06-29T02:15:00+00:00"),
         status=Status.FAILED,
         duration_ms=12000.0,
         total_tokens=10573,
@@ -298,13 +298,18 @@ def test_update_job_state_before_create_raises(tmp_path: Path):
 
 
 def test_job_timeout_s_round_trip():
-    # Job.timeout_s（ADR 0034「job timeout」节）：键恒在（键集固定，ADR 0037 决策 7）；None 落 null、读回 None；非 None 往返不丢
+    # Job.timeout_s（ADR 0034「job timeout」节）：键恒在（键集固定，ADR 0037 决策 7），值恒为有限正数、往返不丢；
+    # 落盘的 null 是定义违约，桌面 job 也一样（ADR 0054 决策十：不再有「不超时」）
+    from gherkai_core.errors import DefinitionContractError
     from gherkai_core.serialize import job_from_dict, job_to_dict
     j = _job_def("s", "s", "midscene")
-    assert job_to_dict(j)["timeout_s"] is None
-    assert job_from_dict(job_to_dict(j)).timeout_s is None
     jt = Job(scope_id="t", scope_name="t", engine="midscene", scenarios=j.scenarios, timeout_s=90.0)
+    assert job_to_dict(jt)["timeout_s"] == 90.0
     assert job_from_dict(job_to_dict(jt)).timeout_s == 90.0
+    d = job_to_dict(jt)
+    d["timeout_s"] = None
+    with pytest.raises(DefinitionContractError, match="墙钟预算须为有限正数"):
+        job_from_dict(d)
 
 
 def test_job_target_and_device_request_round_trip_and_fixed_keys():
@@ -339,12 +344,12 @@ def test_job_target_and_device_request_round_trip_and_fixed_keys():
     (lambda d: d["device_request"].update(project_arn=""), "缺 project_arn"),
     (lambda d: d["device_request"].update(acquire_timeout_s=0), "有限正数"),
     (lambda d: d["target"].update(ui_kind="app"), "必须带应用条目"),
-    (lambda d: d.update(timeout_s=None), "设备 scope 不存在"),
+    (lambda d: d.update(timeout_s=None), "墙钟预算须为有限正数"),
     (lambda d: d.pop("timeout_s"), "缺键 timeout_s"),
 ])
 def test_job_from_dict_rejects_malformed_device_definitions(patch, match):
     """推进器读 definition 时的结构校验（ADR 0048 决策 3）：非桌面却缺设备请求、ARN 与版本同给或同缺、project_arn 为空、
-    预算非有限正数、应用目标缺应用条目、设备 scope 无墙钟预算，都拒绝。"""
+    预算非有限正数、应用目标缺应用条目、没有墙钟预算，都拒绝。"""
     from gherkai_core.errors import DefinitionContractError
     from gherkai_core.model import DeviceFarmRequest, Target
     from gherkai_core.serialize import job_from_dict, job_to_dict
@@ -388,7 +393,8 @@ def test_validate_definition_rejects_each_incomplete_app_field(field, bad):
 
 @pytest.mark.parametrize("over, match", [
     (dict(device_request=None), "非桌面目标当且仅当带设备请求"),
-    (dict(timeout_s=None), "设备 scope 不存在"),
+    (dict(timeout_s=None), "墙钟预算须为有限正数"),
+    (dict(timeout_s=0), "墙钟预算须为有限正数"),
     (dict(timeout_s=float("inf")), "有限正数"),
     (dict(timeout_s=10 ** 400), "有限正数"),  # 超出 float 范围的整数：不是 OverflowError 漏出去
 ])
@@ -436,8 +442,8 @@ def test_validate_definition_rejects_desktop_with_device_request_or_app_and_web_
     j = _job_def("s", "s", "midscene")
     app = AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")
     cases = [
-        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED")), "非桌面目标当且仅当带设备请求"),
-        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, target=Target(device="desktop", ui_kind="app", app=app)), "不是合法组合"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED"), timeout_s=300.0), "非桌面目标当且仅当带设备请求"),
+        (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, target=Target(device="desktop", ui_kind="app", app=app), timeout_s=300.0), "不是合法组合"),
         (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="web", app=app),
              device_request=DeviceFarmRequest(project_arn="p", os_version="15", billing_method="METERED")), "为网页时不得带"),
         (Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios, timeout_s=900.0, target=Target(device="android", ui_kind="app", app=None),
@@ -482,7 +488,7 @@ def test_job_to_dict_keeps_target_for_illegal_desktop_app_so_read_side_can_rejec
 
     j = _job_def("s", "s", "midscene")
     bad = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=j.scenarios,
-              target=Target(device="desktop", ui_kind="app", app=AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")))
+              target=Target(device="desktop", ui_kind="app", app=AppRef(alias="a", app_id="b", bucket="c", key="d", sha256="e")), timeout_s=300.0)
     d = job_to_dict(bad)
     assert "target" in d
     with pytest.raises(DefinitionContractError, match="不是合法组合"):
@@ -632,23 +638,27 @@ def test_definition_schema_version_is_written_and_read_end_accepts_only_its_own(
     from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION, run_meta_from_dict, run_meta_to_dict
 
     d = run_meta_to_dict(_sample_run("v").run_meta)
-    assert d["schema_version"] == DEFINITION_SCHEMA_VERSION == 1 and d["cli_version"] is None
+    assert d["schema_version"] == DEFINITION_SCHEMA_VERSION == 2 and d["cli_version"] is None
     assert run_meta_from_dict(d).run_id == "v"
     with pytest.raises(UnsupportedDefinitionSchema) as ei:
         run_meta_from_dict({k: v for k, v in d.items() if k != "schema_version"})
-    assert (ei.value.found, ei.value.supported, ei.value.cli_version) == (0, 1, None)
+    assert (ei.value.found, ei.value.supported, ei.value.cli_version) == (0, 2, None)
     with pytest.raises(UnsupportedDefinitionSchema) as ei:
-        run_meta_from_dict({**d, "schema_version": 2, "cli_version": "9.9.0"})
-    assert ei.value.found == 2 and ei.value.cli_version == "9.9.0" and "9.9.0" in str(ei.value)
+        run_meta_from_dict({**d, "schema_version": 3, "cli_version": "9.9.0"})
+    assert ei.value.found == 3 and ei.value.cli_version == "9.9.0" and "9.9.0" in str(ei.value)
+    # 版本 1 的记录（没有运行期限、预算可为空）同样拒读，不为它留兼容分支（ADR 0054 决策二）
+    with pytest.raises(UnsupportedDefinitionSchema) as ei:
+        run_meta_from_dict({**d, "schema_version": 1})
+    assert (ei.value.found, ei.value.supported) == (1, 2)
     for bad in ("1", 1.0, True, None):
         with pytest.raises(DefinitionContractError, match="schema_version 须为整数"):
             run_meta_from_dict({**d, "schema_version": bad})
     with pytest.raises(UnsupportedDefinitionSchema):
-        run_meta_from_dict({"schema_version": 2})  # 版本不符先于缺键
+        run_meta_from_dict({"schema_version": 3})  # 版本不符先于缺键
 
 
-@pytest.mark.parametrize("key", ["cli_version", "run_id", "created_at", "jobs", "extra_http_headers", "max_concurrency", "steps_dir",
-                                 "worker_variant", "worker_task_defs", "session_warmup_url"])
+@pytest.mark.parametrize("key", ["cli_version", "run_id", "created_at", "deadline_at", "jobs", "extra_http_headers", "max_concurrency",
+                                 "steps_dir", "worker_variant", "worker_task_defs", "session_warmup_url"])
 def test_definition_run_level_keys_are_all_required(key):
     """键集固定：run 级任一键缺失都是定义违约（不再用缺省值兜），值可为 null。"""
     from gherkai_core.errors import DefinitionContractError
@@ -695,13 +705,39 @@ def test_run_meta_cli_version_and_session_warmup_url_round_trip():
     assert run_meta_from_dict(d2) == meta2
 
 
+def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: Path):
+    """运行期限（ADR 0054 决策二）是 definition 的固定键：原样写出、原样读回，本机落盘的 run_meta.json 里同样带着它。"""
+    from gherkai_core.model import run_state_from_result
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    r = _sample_run("dl")
+    d = run_meta_to_dict(r.run_meta)
+    assert d["deadline_at"] == "2026-06-29T02:15:00+00:00"
+    assert run_meta_from_dict(d) == r.run_meta
+    assert run_meta_from_dict({**d, "deadline_at": "2026-06-29T10:15:00+08:00"}).deadline_at == "2026-06-29T10:15:00+08:00"  # 原样读回、不改写
+    store = LocalRunStore(tmp_path)
+    store.create_run(r.run_meta, run_state_from_result(r))
+    assert json.loads((tmp_path / "dl" / "run_meta.json").read_text(encoding="utf-8"))["deadline_at"] == r.run_meta.deadline_at
+    assert store.load_run_meta("dl").deadline_at == r.run_meta.deadline_at
+
+
+
+@pytest.mark.parametrize("bad", [None, "", "not-a-time", "2026-06-29T02:15:00", 1767229200, ["2026-06-29T02:15:00+00:00"]])
+def test_run_meta_deadline_at_must_be_a_timezone_aware_iso_time(bad):
+    """每个 run 都有期限（ADR 0054 决策二）：null、读不出时刻的值、不带时区的时刻都是定义违约，在读 definition 时拒绝，
+    执行方拿到的期限恒可比较。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
+    d = run_meta_to_dict(_sample_run("dl").run_meta)
+    with pytest.raises(DefinitionContractError, match="deadline_at 须为带时区的 ISO 时刻"):
+        run_meta_from_dict({**d, "deadline_at": bad})
+
 def test_report_from_dict_is_gated_by_definition_schema():
     """RunReport / manifest 经 run_meta_from_dict 读 definition，同受结构版本闸（读端只认当前版本，不分读的是哪种文件）。"""
     from gherkai_core.errors import UnsupportedDefinitionSchema
     from gherkai_core.serialize import from_dict, to_dict
 
     doc = to_dict(_sample_run("rep"))
-    doc["run_meta"]["schema_version"] = 2
+    doc["run_meta"]["schema_version"] = 3
     with pytest.raises(UnsupportedDefinitionSchema):
         from_dict(doc)
 
@@ -714,13 +750,13 @@ def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Pat
     r = _sample_run("pk")
     store = LocalRunStore(tmp_path)
     store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
-    assert store.peek_definition_header("pk") == (1, "1.5.0")
+    assert store.peek_definition_header("pk") == (2, "1.5.0")
     assert store.peek_definition_header("nope") is None
     path = tmp_path / "pk" / "run_meta.json"
     d = json.loads(path.read_text(encoding="utf-8"))
-    d["schema_version"] = 2
+    d["schema_version"] = 3
     path.write_text(json.dumps(d), encoding="utf-8")
-    assert store.peek_definition_header("pk") == (2, "1.5.0")  # 只读头、不按本版本解释正文
+    assert store.peek_definition_header("pk") == (3, "1.5.0")  # 只读头、不按本版本解释正文
     with pytest.raises(UnsupportedDefinitionSchema):
         store.load_run_meta("pk")
 

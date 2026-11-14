@@ -1254,7 +1254,7 @@ def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws
     store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
 
     def create(run_id: str, worker_task_defs: dict[str, str] | None) -> None:
-        meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(), worker_task_defs=worker_task_defs)
+        meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(), worker_task_defs=worker_task_defs, deadline_at="2026-01-01T01:00:00+00:00")
         state = RunState(run_id=run_id, status=Status.PENDING,
                          jobs={"a.feature:3": JobState(scope_id="a.feature:3", status=Status.PENDING)})
         store.create_run(meta, state)
@@ -1290,7 +1290,7 @@ def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclai
     store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
     scope = "a.feature:3"
     store.create_run(
-        RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(), worker_task_defs={"novaact": arn}),
+        RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(), worker_task_defs={"novaact": arn}, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-01", status=Status.PENDING, jobs={scope: JobState(scope_id=scope, status=Status.PENDING)}))
 
     def one_pass(at: datetime):

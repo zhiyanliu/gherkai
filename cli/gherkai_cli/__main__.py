@@ -22,6 +22,7 @@ from gherkai_runtime.textui import DIM, render_table, styled
 from gherkai_core.model import (
     DEFAULT_DESKTOP_JOB_TIMEOUT_S,
     DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
+    MAX_JOB_TIMEOUT_S,
     MIN_DEVICE_JOB_TIMEOUT_EXTRA_S,
     TERMINAL_STATUSES,
     Event,
@@ -137,12 +138,13 @@ _STEPS_DIR_HELP_RUN_SUBMIT = (
 )
 
 # `--default-job-timeout` 的公共 help：run / plan / submit 三处共用这一段措辞，单点维护；plan 在其后追加它自己的半句。
-# 三个数引用 core 的常量，与 _load_and_plan 传给 plan 层的缺省与下限同源（数值与覆盖顺序见 ADR 0034「job timeout」节、0051 决策 2）。
+# 各个数引用 core 的常量，与 _load_and_plan 传给 plan 层的缺省、下限以及 plan 层的上限同源（数值与覆盖顺序见 ADR 0034「job timeout」节、
+# 0051 决策 2、0054 决策十）。
 _DEFAULT_JOB_TIMEOUT_HELP = (
     "未标 @timeout 的 scope 用的 job 墙钟预算秒（不给时按测试目标取缺省："
     f"桌面 {DEFAULT_DESKTOP_JOB_TIMEOUT_S:g} 秒，设备为获取预算加 {DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S:g} 秒；"
-    "给 <=0 只让桌面 scope 不超时，设备 scope 仍取缺省；"
-    f"给正值时设备 scope 不得低于获取预算加 {MIN_DEVICE_JOB_TIMEOUT_EXTRA_S:g} 秒）；"
+    f"给 <=0 对任何目标都取上限 {MAX_JOB_TIMEOUT_S:g} 秒；"
+    f"给正值时不得超过 {MAX_JOB_TIMEOUT_S:g} 秒，设备 scope 还不得低于获取预算加 {MIN_DEVICE_JOB_TIMEOUT_EXTRA_S:g} 秒）；"
     "标了 @timeout:N 的按 tag 走"
 )
 
@@ -1246,7 +1248,7 @@ def _load_and_plan(args) -> "list | int":
             default_engine=args.default_engine,
             default_assertion_votes=args.assertion_votes,
             # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope 按 tag 走；未标的用显式给出的
-            # --default-job-timeout（None 即「未指定」，plan 层按目标补缺省；<=0 只让非设备 scope 不超时，三态原样传入、不在这里归一）。
+            # --default-job-timeout（None 即「未指定」，plan 层按目标补缺省；<=0 对任何目标取上限，三态原样传入、不在这里归一）。
             # 载体在 definition（Job.timeout_s），三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
             default_job_timeout_s=args.default_job_timeout,
             default_desktop_job_timeout_s=DEFAULT_DESKTOP_JOB_TIMEOUT_S,
@@ -1511,22 +1513,51 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     return prepared
 
 
-def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None", warmup_url: "str | None") -> RunMeta:
-    """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + run 级执行参数。
+def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None", warmup_url: "str | None", *,
+                    per_job_tail_s: float) -> RunMeta:
+    """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + 运行期限 + run 级执行参数。
 
     `run` 与 `submit` 共用（六个字段曾各抄一份）；run_id 在此生成，调用方从 `run_meta.run_id` 取回。
     `steps_dir` 在云端后端恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
     注入的额外请求头（ADR 0035 决策 4），空表归一成 None；`warmup_url` 是隧道的会话预热地址（ADR 0051 决策 13），
     与额外请求头在隧道模式下恒成对出现、不经隧道都为 None。
+    `per_job_tail_s` 是运行期限算式里的每 job 尾段（ADR 0054 决策二）：调用方按后端与停止宽限取值（`_per_job_tail_s`），期限由
+    这里生成的创建时刻与各 job 的墙钟预算一并推出（`deadline.compute_deadline_at`），`--no-report` 的 run 同样带它。
     """
+    from gherkai_runtime import deadline
+
+    created_at = compose.now_iso()
     return RunMeta(
-        run_id=compose.new_run_id(), created_at=compose.now_iso(), jobs=tuple(jobs),
+        run_id=compose.new_run_id(), created_at=created_at, jobs=tuple(jobs),
+        deadline_at=deadline.compute_deadline_at(created_at, jobs, per_job_tail_s=per_job_tail_s),
         extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
         max_concurrency=args.max_concurrency,
         steps_dir=steps_dir,
         cli_version=_installed_version(),  # 写端版本只记不比（ADR 0037 决策 7）；未装成包为 None
         session_warmup_url=warmup_url,
     )
+
+
+def _per_job_tail_s(backend: str, grace_s: float) -> float:
+    """运行期限算式里的每 job 尾段（ADR 0054 决策二）：云端后端取固定的 210 秒，本机后端取 `2 × G + 10` 秒。G 由调用方给出：前台 `run`
+    是这次调用解析出的停止宽限，本机 `submit` 是这个 run 用到的各引擎自报宽限里最大的一个（`_local_submit_grace`）；云端不用它。"""
+    from gherkai_runtime import deadline
+
+    return deadline.CLOUD_PER_JOB_TAIL_S if backend == "cloud" else deadline.local_per_job_tail_s(grace_s)
+
+
+def _local_submit_grace(jobs) -> "float | int":
+    """本机 `submit` 的停止宽限 G（只用于算运行期限）：没有 run 级的 `--grace`，后台推进按各 job 所属引擎的自报宽限停止 worker，
+    期限取这个 run 用到的各引擎里最大的一个。正常路径上运行前检查已问过能力自述，这里命中进程内缓存；查不到时与 `run` 同样以
+    退出码 2 结束（返回 2），不回落猜的常量。"""
+    grace = 0.0
+    for engine in sorted({j.engine for j in jobs}):
+        try:
+            grace = max(grace, compose.engine_min_grace(engine))
+        except (ValueError, RuntimeError) as e:  # 版本不一致的 worker 不认该入口 / 起不来 / 输出不合契约
+            _progress(f"引擎 {engine} 的 worker 自述失败，拒绝提交：{e}")
+            return 2
+    return grace
 
 
 def _cmd_plan(args) -> int:
@@ -1649,10 +1680,16 @@ def _cmd_submit(args) -> int:
         identity = _aws_identity(args)
         if isinstance(identity, int):
             return identity
+        # 运行期限要用的停止宽限（ADR 0054 决策二）：只依赖 jobs 用到的引擎，排在上传安装包与起隧道之前，查不到能力自述时零副作用地拒绝
+        grace = _local_submit_grace(jobs)
+        if isinstance(grace, int):
+            return grace
         # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前
         jobs = _complete_local_definition(args, prepped)
         if isinstance(jobs, int):
             return jobs
+    else:
+        grace = 0.0  # 云端的每 job 尾段是固定值，不用停止宽限
 
     # --expose-local：起隧道 + 映射 jobs（ADR 0035）。submit 的隧道生命周期交给后台宿主
     # （本机后端是 per-run 进程、云端后端是隧道守护进程）；分流失败（preflight/落库不过）时在此拆掉防泄漏。
@@ -1662,7 +1699,8 @@ def _cmd_submit(args) -> int:
     jobs, tunnel_headers, tunnel_info = tunneled
 
     run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers,
-                               tunnel_info.warmup_url if tunnel_info is not None else None)  # steps_dir 与预热地址随 definition 到达宿主
+                               tunnel_info.warmup_url if tunnel_info is not None else None,  # steps_dir 与预热地址随 definition 到达宿主
+                               per_job_tail_s=_per_job_tail_s(args.backend, grace))
     run_id = run_meta.run_id
     from gherkai_core.model import JobState, RunState
     initial = RunState(
@@ -2868,7 +2906,9 @@ def _cmd_run(args) -> int:
 
     # 3) 组合根：构造 RunMeta（definition 先于执行，ADR 0016/0027；与 submit 同一份，见 _build_run_meta）
     #    + 注入具体引擎 resolver（core 引擎无关）
-    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers, tunnel_info.warmup_url if tunnel_info is not None else None)
+    #    运行期限（ADR 0054 决策二）在这里随 definition 一并定下：本机后端的每 job 尾段取上面 2a 解析出的停止宽限，`--no-report` 同样带期限
+    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers, tunnel_info.warmup_url if tunnel_info is not None else None,
+                               per_job_tail_s=_per_job_tail_s(args.backend, grace))
     run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
     worker_log_fh = None  # --quiet（本机后端）时打开的 worker 日志句柄，见 build_engines 处
@@ -3067,7 +3107,7 @@ def _cmd_run(args) -> int:
         f"default_job_timeout={'按目标缺省' if args.default_job_timeout is None else f'{args.default_job_timeout:g}s'} ..."
     )
 
-    # 5) schedule：执行 RunMeta（definition）→ RunResult（timeout<=0 → 不超时）。
+    # 5) schedule：执行 RunMeta（definition）→ RunResult（各 job 恒有墙钟预算）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
     #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开始执行，落库回调（on_event/on_job_complete）中途抛 botocore
     #    异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退出码 1（error 级）。

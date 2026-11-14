@@ -27,13 +27,13 @@ def _uri_to_path(uri: str) -> Path:
 
 def _jr(scope_id: str, engine: str, **kw) -> JobResult:
     """测试 helper：JobResult 持有 Job（definition）+ 判定字段。"""
-    job = Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=())
+    job = Job(scope_id=scope_id, scope_name=scope_id, engine=engine, scenarios=(), timeout_s=300.0)
     return JobResult(job=job, **kw)
 
 
 def _rr(run_id: str, jobs: list[JobResult], **kw) -> RunResult:
     """测试 helper：RunResult 由 RunMeta(definition) 与判定 jobs 合成。run_meta.jobs 取自各 jr.job。"""
-    meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs))
+    meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs), deadline_at="2026-01-01T01:00:00+00:00")
     return RunResult(run_meta=meta, jobs=jobs, **kw)
 
 
@@ -393,7 +393,7 @@ def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
     store = LocalReportStore(tmp_path)
     jr = _jr("checkout", "novaact", status=Status.SKIPPED)
     jr.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
-    meta = RunMeta(run_id="r-ff", created_at="2026-06-29T00:00:00Z", jobs=(jr.job,))
+    meta = RunMeta(run_id="r-ff", created_at="2026-06-29T00:00:00Z", jobs=(jr.job,), deadline_at="2026-01-01T01:00:00+00:00")
     run = RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr])
     html = _uri_to_path(store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")).read_text(encoding="utf-8")
     assert '<span class="note">fail-fast：本次运行已中止，未启动（worker 未 spawn）</span>' in html

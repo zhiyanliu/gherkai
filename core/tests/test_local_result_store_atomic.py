@@ -40,7 +40,7 @@ _SCOPE = "features/checkout.feature:12"
 
 def _big_job_result(tick: int) -> JobResult:
     """~几十 KB 的 JobResult（6 scenario × 8 step + 每 step 的 evidence ref 与失败原文），给读者足够撞窗机会。"""
-    job = Job(scope_id=_SCOPE, scope_name="结账", engine="novaact", scenarios=())
+    job = Job(scope_id=_SCOPE, scope_name="结账", engine="novaact", scenarios=(), timeout_s=300.0)
     scenarios = [
         ScenarioResult(
             scenario_id=f"下单-{si}",

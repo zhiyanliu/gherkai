@@ -536,7 +536,7 @@ def finalize_job(
     job 相同，只有提示那一句按目标给（ADR 0051 决策 4）。
     两条归约路径只负责准备输入，判定逻辑不写第二份。"""
     unconfirmed = unconfirmed_sessions(sessions)
-    budget = f"（预算 {job.timeout_s:g}s，已中止）" if job.timeout_s else "（已中止）"
+    budget = f"（预算 {job.timeout_s:g}s，已中止）"  # 每个 job 都有有限的墙钟预算（ADR 0054 决策十）
     content_complete = exited and exit_code == 0 and scope_done is not None
     if stop_reason == "timeout" and not content_complete:
         status, error_type, message = Status.ERROR, "timeout", f"job 超时{budget}"

@@ -173,7 +173,8 @@ export interface DesktopSurfaceHooks {
 // 余量盖住超时催停后的收尾。三个数与 Nova 桌面 worker 同值，由 engines/fixtures/browser-session-timeout.json 对拍。
 export const BROWSER_SESSION_TIMEOUT = { marginS: 120, minS: 60, maxS: 28800 } as const;
 
-/** job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 null（不传、保持服务默认）。 */
+/** job 的墙钟预算（秒，可为小数）→ 会话超时秒数：向上取整加余量、夹在服务允许的区间；预算为空时返回 null（不传、保持服务默认）；
+ *  core 不再产出空预算，这个分支为协议仍允许的取值保留（ADR 0054 决策十）。 */
 export function browserSessionTimeoutS(timeoutS: number | null | undefined): number | null {
   if (timeoutS === null || timeoutS === undefined) return null;
   const value = Math.ceil(timeoutS) + BROWSER_SESSION_TIMEOUT.marginS;

@@ -27,7 +27,7 @@ _TABLE = "gherkai-runs-listing"
 
 
 def _meta(run_id: str, cli_version: str | None = "1.5.0") -> RunMeta:
-    return RunMeta(run_id=run_id, created_at="2026-07-01T00:00:00Z", jobs=(), cli_version=cli_version)
+    return RunMeta(run_id=run_id, created_at="2026-07-01T00:00:00Z", jobs=(), cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _make(store, run_id: str, status: Status, *, cli_version: str | None = "1.5.0") -> None:
@@ -66,7 +66,7 @@ def test_local_list_runs_non_terminal_unbounded_with_detached_and_header(local_r
     by_id = {r.run_id: r for r in rows}
     assert by_id["run-05"].state.status == Status.RUNNING and by_id["run-05"].detached is True
     assert by_id["run-06"].state.status == Status.PENDING and by_id["run-06"].detached is False
-    assert by_id["run-06"].header == (1, "1.5.0")
+    assert by_id["run-06"].header == (2, "1.5.0")
     assert by_id["run-06"].state.started_at == "2026-07-01T00:00:00Z"  # 读回的是完整运行态
 
 
@@ -75,7 +75,7 @@ def test_local_list_runs_limit_is_per_status_and_result_is_run_id_descending(loc
     # passed 有 01/02/04 三条，limit=2 取 run_id 最大的两条；failed 只有 03；合起来整体降序
     assert _ids(store.list_runs([Status.PASSED, Status.FAILED], limit=2)) == ["run-04", "run-03", "run-02"]
     assert _ids(store.list_runs([Status.PASSED, Status.FAILED], limit=None)) == ["run-04", "run-03", "run-02", "run-01"]
-    assert store.list_runs([Status.PASSED], limit=None)[-1].header == (1, "1.4.0")  # 写出版本照读、不过结构版本闸
+    assert store.list_runs([Status.PASSED], limit=None)[-1].header == (2, "1.4.0")  # 写出版本照读、不过结构版本闸
     # 重复给出的状态不产生重复行
     assert _ids(store.list_runs([Status.PASSED, Status.PASSED], limit=1)) == ["run-04"]
     assert store.list_runs([], limit=None) == []
@@ -125,7 +125,7 @@ def test_local_list_runs_lists_wrongly_typed_state_fields_as_unreadable(tmp_path
     state = {"run_id": "run-01", "status": "passed", "started_at": "2026-07-01T00:00:00Z", "jobs": [], **bad}
     (tmp_path / "run-01" / "run_state.json").write_text(json.dumps(state), encoding="utf-8")
     [row] = store.list_runs([Status.PASSED], limit=None)
-    assert row.state is None and row.header == (1, "1.5.0")
+    assert row.state is None and row.header == (2, "1.5.0")
     # 无法读取的行不参与状态归入：只请求非终态时它同样列出
     assert _ids(store.list_runs([Status.PENDING], limit=None)) == ["run-01"]
 
@@ -261,13 +261,13 @@ def test_ddb_list_runs_matches_local_semantics(cloud_runs):
     assert _ids(rows) == ["run-06", "run-05"]
     by_id = {r.run_id: r for r in rows}
     assert by_id["run-05"].state.status == Status.RUNNING and by_id["run-05"].detached is True
-    assert by_id["run-06"].detached is False and by_id["run-06"].header == (1, "1.5.0")
+    assert by_id["run-06"].detached is False and by_id["run-06"].header == (2, "1.5.0")
     assert by_id["run-06"].state == _initial_state("run-06", ["a.feature:3"])  # 读回与 load_run_state 同一转换
     assert by_id["run-06"].state == store.load_run_state("run-06")
 
     assert _ids(store.list_runs([Status.PASSED, Status.FAILED], limit=2)) == ["run-04", "run-03", "run-02"]
     assert _ids(store.list_runs([Status.PASSED, Status.FAILED], limit=None)) == ["run-04", "run-03", "run-02", "run-01"]
-    assert store.list_runs([Status.PASSED], limit=None)[-1].header == (1, "1.4.0")
+    assert store.list_runs([Status.PASSED], limit=None)[-1].header == (2, "1.4.0")
     assert _ids(store.list_runs([Status.PASSED, Status.PASSED], limit=1)) == ["run-04"]
     assert store.list_runs([], limit=None) == []
 
@@ -407,7 +407,7 @@ def test_list_runs_unreadable_rows_do_not_take_the_limit_on_both_backends(
         (unreadable if kind == "U" else readable)(run_id)
     rows = store.list_runs([Status.PASSED], limit=limit)
     assert _ids(rows) == expected
-    assert all((r.state is None) == (kinds[r.run_id] == "U") and r.header == (1, "1.5.0") for r in rows)
+    assert all((r.state is None) == (kinds[r.run_id] == "U") and r.header == (2, "1.5.0") for r in rows)
     if calls is not None:
         assert calls.limits == limits
         assert calls.batches == batches
@@ -479,7 +479,7 @@ def test_ddb_list_runs_batches_reads_and_projects_away_meta_json(listing_table, 
     monkeypatch.setattr(client, "batch_get_item", spy)
     rows = store.list_runs([Status.PENDING], limit=None)
     assert _ids(rows) == [f"run-{i:03d}" for i in reversed(range(60))]
-    assert all(r.header == (1, "1.5.0") for r in rows)
+    assert all(r.header == (2, "1.5.0") for r in rows)
     # 120 个键分两批（每批至多 100），每个 run 的 STATE 与 META 在同一批
     assert [len(r["Keys"]) for r in requests] == [100, 20]
     for r in requests:

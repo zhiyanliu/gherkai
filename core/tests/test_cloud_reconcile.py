@@ -14,13 +14,13 @@ from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Statu
 from gherkai_core.project import project
 
 
-def _job(sid: str, timeout_s: float | None = None) -> Job:
+def _job(sid: str, timeout_s: float = 7200.0) -> Job:
     return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=timeout_s,
                scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),))
 
 
 def _meta(*sids: str) -> RunMeta:
-    return RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids))
+    return RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids), deadline_at="2026-01-01T01:00:00+00:00")
 
 
 @pytest.fixture
@@ -147,7 +147,7 @@ class _FakeStartEngine:
 
 
 def test_cloud_launcher_arms_timeout_watch():
-    """job.timeout_s 非 None → launch 后 arm(run_id, scope_id, timeout_s, claimed_at)（ADR 0034「job timeout」节的云端后端
+    """每个 job 都有墙钟预算 → launch 后 arm(run_id, scope_id, timeout_s, claimed_at)（ADR 0034「job timeout」节的云端后端
     一侧）；claimed_at 原样转交，到点时刻按 claim 起算、不按 arm 时刻。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
 
@@ -156,15 +156,6 @@ def test_cloud_launcher_arms_timeout_watch():
         _job("a", timeout_s=60.0), claimed_at=_CLAIMED)
     assert eng.started == ["a"]
     assert watch.armed == [("run-1", "a", 60.0, _CLAIMED)]
-
-
-def test_cloud_launcher_no_arm_without_timeout():
-    """无预算（timeout_s=None）→ 不建 schedule（idle 零成本：不为不超时的 job 造任何云资源）。"""
-    from gherkai_core.adapters.cloud_launcher import CloudLauncher
-
-    eng, watch = _FakeStartEngine(), _RecorderWatch()
-    CloudLauncher(lambda name: eng, run_id="run-1", timeout_watch=watch).launch(_job("a"), claimed_at=_CLAIMED)
-    assert eng.started == ["a"] and watch.armed == []
 
 
 def test_cloud_launcher_arms_before_start_scope():

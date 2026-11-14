@@ -5,7 +5,8 @@
 
 表 schema（决定六）：单表、分区键字段 `run_id` + 排序键字段 `item_type`（取值 `'META'`/`'STATE'`）——
 RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区键下一次 Query 可原子捞回该 run 全部）：
-- **META item**：`{run_id, item_type='META', meta_json=<json.dumps(run_meta_to_dict)>}`。RunMeta 是 definition，
+- **META item**：`{run_id, item_type='META', schema_version, cli_version, deadline_at, meta_json=<json.dumps(run_meta_to_dict)>}`
+  （三个顶层属性是 meta_json 里同名键的摊出副本，见 `create_run`）。RunMeta 是 definition，
   **write-once（create_run）/ read-whole（load_run_meta）**，从不单元素更新——故整体存 JSON 字符串最简、
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
@@ -226,9 +227,11 @@ class DynamoDBRunStore:
             "run_id": meta.run_id,
             _ITEM_TYPE_ATTR: _META,
             # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 与 list-runs 用投影只取这两个值、不解析 meta_json、
-            # 不触发卸载正文的 S3 取回；值与 meta_json 里的同名键恒同（同一份 meta_dict）。
+            # 不触发卸载正文的 S3 取回；运行期限同样摊出（ADR 0054 决策二），读它的一方不必取回整份 definition。三者的值与 meta_json
+            # 里的同名键恒同（同一份 meta_dict）。
             "schema_version": meta_dict["schema_version"],
             "cli_version": meta_dict["cli_version"],
+            "deadline_at": meta_dict["deadline_at"],
             "meta_json": json.dumps(meta_dict, ensure_ascii=False),
         })
         self._table.put_item(Item={

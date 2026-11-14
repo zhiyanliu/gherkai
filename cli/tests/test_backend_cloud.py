@@ -48,7 +48,7 @@ def _fake_schedule_factory():
 
 # ---- fake boto3 句柄：记录关键调用，不连真 AWS ----
 # 云端 status / explain 读运行态之前先读 META 顶层的结构版本（ADR 0037 决策 7）：假 table 对 META 键给本版本的头
-_META_HEADER = {"Item": {"run_id": "r1", "item_type": "META", "schema_version": 1, "cli_version": "1.5.0"}}
+_META_HEADER = {"Item": {"run_id": "r1", "item_type": "META", "schema_version": 2, "cli_version": "1.5.0"}}
 
 
 class _FakeTable:
@@ -1386,3 +1386,30 @@ def test_status_cloud_json_includes_artifact_locations(monkeypatch, capsys):
     assert doc["artifacts"]["report_index"] == "s3://gherkai-artifacts/reports/r1/index.html"
     assert doc["artifacts"]["jobs_dir"] == "s3://gherkai-artifacts/reports/r1/jobs/"
     assert doc["artifacts"]["run_meta"] == "ddb://gherkai-runs/r1#META"
+
+
+# ---- 运行期限进 definition（ADR 0054 决策二）：云端后端的每 job 尾段固定 210 秒，不看停止宽限 ----
+def _deadline_offset_s(meta: dict) -> float:
+    from datetime import datetime
+    return (datetime.fromisoformat(meta["deadline_at"]) - datetime.fromisoformat(meta["created_at"])).total_seconds()
+
+
+def test_cloud_run_and_submit_write_deadline_with_the_cloud_per_job_tail(tmp_path, monkeypatch, capsys):
+    """云端的 run 与 submit：期限是创建时刻加 900 秒、再加各 job 的预算与 210 秒之和，两个 job 各算一份；META 条目另把它摊成顶层属性。"""
+    record: list = []
+    _, made, _ = _patch_cloud_handles(monkeypatch, record)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    rc = m.main(["run", str(_two_engine_feature(tmp_path)), "--backend", "cloud", "--default-job-timeout", "600",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    assert rc == 0
+    meta = _definition(made["ddb_tables"][0])
+    assert _deadline_offset_s(meta) == 900 + 2 * (600 + 210)
+    [item] = [it for it in made["ddb_tables"][0].puts if it.get("item_type") == "META"]
+    assert item["deadline_at"] == meta["deadline_at"]
+
+    record2: list = []
+    _, made2, _ = _patch_cloud_handles(monkeypatch, record2)
+    rc = m.main(["submit", str(_two_engine_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
+    assert rc == 0
+    assert _deadline_offset_s(_definition(made2["ddb_tables"][0])) == 900 + 2 * (300 + 210)  # 桌面缺省预算 300

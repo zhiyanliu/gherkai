@@ -12,7 +12,7 @@ DEVICE_TARGETS = [{"device": "desktop", "ui_kinds": ["web"]}, {"device": "androi
 
 def test_desktop_job_passes_and_missing_target_is_a_version_mismatch():
     assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": 300}, rs.WORKER_TARGETS) is None
-    assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}, rs.WORKER_TARGETS) is None  # 不超时写 null
+    assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": None}, rs.WORKER_TARGETS) is None  # 预算为空：协议允许，core 不再产出
     msg = precheck_target({"scope": {"id": "s"}}, rs.WORKER_TARGETS)  # 键集固定：缺 target 不再当桌面
     assert msg is not None and "没有带测试目标" in msg and "同一版本" in msg
 
@@ -52,7 +52,7 @@ def test_timeout_over_session_limit_is_rejected_and_within_passes():
     assert over is not None and "墙钟预算 9000 秒超过了 Android 网页的会话上限 8000 秒" in over and "--default-job-timeout" in over
     assert "预算 1500.5 秒" in precheck_target({"target": {"device": "android", "uiKind": "web"}, "timeoutS": 1500.5}, [{"device": "android", "ui_kinds": ["web"], "max_session_s": 10}])
     assert precheck_target({"target": {"device": "android", "uiKind": "web"}, "timeoutS": 8000}, DEVICE_TARGETS) is None
-    assert precheck_target({"target": {"device": "android", "uiKind": "web"}}, DEVICE_TARGETS) is None  # 没带预算（不超时）不比较
+    assert precheck_target({"target": {"device": "android", "uiKind": "web"}}, DEVICE_TARGETS) is None  # 没带预算不比较
     assert precheck_target({"target": {"device": "desktop", "uiKind": "web"}, "timeoutS": 10 ** 9}, DEVICE_TARGETS) is None  # 桌面无上限
 
 

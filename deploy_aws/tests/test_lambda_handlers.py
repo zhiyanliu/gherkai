@@ -250,7 +250,7 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
     """构造 _handle_timeout 需要的 built 元组（真 LocalRunStore + SqliteEventLog，meta 带 timeout 预算）。"""
     job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
-    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,))
+    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(
         run_id="run-1", status=Status.RUNNING,
@@ -699,7 +699,7 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
     `extra_http_headers` / `session_warmup_url` 是隧道模式随 definition 走的两个值（ADR 0035 决策 4、ADR 0051 决策 13）。"""
     store = DynamoDBRunStore(runs_table, detached=detached)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
-              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     if worker_task_defs is _SENTINEL:
         worker_task_defs = {"novaact": _WORKER_REV}
     store.create_run(
@@ -707,7 +707,7 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
                 worker_variant="base" if worker_task_defs else None,
                 worker_task_defs=worker_task_defs,
                 extra_http_headers=tuple(extra_http_headers.items()) if extra_http_headers else None,
-                session_warmup_url=session_warmup_url),
+                session_warmup_url=session_warmup_url, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
     return store
@@ -746,10 +746,10 @@ def test_build_wires_arg_offloader_so_step_argument_bodies_read_back(cloud_env):
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s",
                                   steps=(Step(0, "Given", "x",
-                                              argument=StepArgument(kind="docString", content=body)),)),))
+                                              argument=StepArgument(kind="docString", content=body)),)),), timeout_s=300.0)
     store.create_run(
         RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_variant="base",
-                worker_task_defs={"novaact": _WORKER_REV}),
+                worker_task_defs={"novaact": _WORKER_REV}, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                  started_at="t0"))
 
@@ -790,9 +790,9 @@ def _seed_finished_run(cloud_env, *, status=Status.PASSED):
 
     store = DynamoDBRunStore(cloud_env["runs"], detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
-              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     store.create_run(
-        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}),
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-1", status=status, jobs={"a": JobState("a", status)},
                  started_at="2026-09-01T00:00:00+00:00", ended_at="2026-09-01T00:03:00+00:00"))
     DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)  # 不带 expires_at：退出记录永不过期
@@ -857,9 +857,9 @@ def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkey
     # 让 run 一 tick 就 done：job 已 CAS 成 running、events 表已有它的退出记录 → 本 tick 推成终态 → finalize
     store = DynamoDBRunStore(cloud_env["runs"], detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
-              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     store.create_run(
-        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}),
+        RunMeta(run_id="run-1", created_at="t0", jobs=(job,), worker_task_defs={"novaact": _WORKER_REV}, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-1", status=Status.RUNNING,
                  jobs={"a": JobState("a", Status.RUNNING, claimed_at="2026-09-01T00:00:00+00:00")},
                  started_at="2026-09-01T00:00:00+00:00"))
@@ -1069,10 +1069,10 @@ def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_
     s_long = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="v" * 5000))
     reconciler._load_definition(s_long, "r")
     assert len(s_long.message) < 300 and "v" * 41 not in s_long.message and "v" * 40 in s_long.message
-    s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=()))
+    s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=(), deadline_at="2026-01-01T01:00:00+00:00"))
     assert reconciler._load_definition(s3, "r") is None and s3.finalized == [("r", Status.ERROR)]
     assert "worker 镜像版本" in s3.message
-    ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"})
+    ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"}, deadline_at="2026-01-01T01:00:00+00:00")
     s4 = _Store(meta=ok)
     assert reconciler._load_definition(s4, "r") is ok and s4.finalized == []
     s5 = _Store(meta=None)

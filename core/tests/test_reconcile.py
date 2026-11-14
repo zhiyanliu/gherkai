@@ -29,11 +29,11 @@ class FakeLauncher:
 
 def _job(sid: str) -> Job:
     return Job(scope_id=sid, scope_name=sid, engine="novaact",
-               scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),))
+               scenarios=(Scenario(id=f"{sid}:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
 
 
 def _meta(*sids: str) -> RunMeta:
-    return RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids))
+    return RunMeta(run_id="run-1", created_at="t0", jobs=tuple(_job(s) for s in sids), deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _setup(tmp_path, *sids: str):

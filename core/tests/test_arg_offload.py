@@ -40,8 +40,8 @@ def test_offload_round_trip_byte_exact(ddb_run_store_offload):
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空cell")))),
             Step(1, "Then", "看结果", StepArgument(kind="docString", content="多行\n内容\ns3://像指针的正文")),
         )),
-    ))
-    meta = RunMeta(run_id="off", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="off", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="off", status=Status.PENDING, jobs={}))
 
     got = ddb_run_store_offload.load_run_meta("off")
@@ -58,8 +58,8 @@ def test_meta_json_holds_pointers_not_payload(ddb_run_store_offload, aws):
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("a", "b"),))),
             Step(1, "Then", "看", StepArgument(kind="docString", content="独一无二的正文标记X")),
         )),
-    ))
-    meta = RunMeta(run_id="ptr", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="ptr", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="ptr", status=Status.PENDING, jobs={}))
 
     m = _meta_json(aws, "ptr")
@@ -87,8 +87,8 @@ def test_docstring_starting_with_s3_scheme_survives(ddb_run_store_offload):
         Scenario(id="s:1", name="sc", steps=(
             Step(0, "Given", "正文即指针样", StepArgument(kind="docString", content=tricky)),
         )),
-    ))
-    meta = RunMeta(run_id="tricky", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="tricky", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="tricky", status=Status.PENDING, jobs={}))
 
     got = ddb_run_store_offload.load_run_meta("tricky")
@@ -102,8 +102,8 @@ def test_multiple_docstrings_same_scenario_no_collision(ddb_run_store_offload):
             Step(0, "Given", "第一段", StepArgument(kind="docString", content="正文AAA")),
             Step(1, "Then", "第二段", StepArgument(kind="docString", content="正文BBB")),
         )),
-    ))
-    meta = RunMeta(run_id="multi", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="multi", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="multi", status=Status.PENDING, jobs={}))
 
     got = ddb_run_store_offload.load_run_meta("multi")
@@ -116,8 +116,8 @@ def test_multiple_docstrings_same_scenario_no_collision(ddb_run_store_offload):
 def test_no_argument_run_offload_is_inert(ddb_run_store_offload, aws):
     job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(
         Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "无参数步骤"),)),
-    ))
-    meta = RunMeta(run_id="noarg", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="noarg", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="noarg", status=Status.PENDING, jobs={}))
 
     got = ddb_run_store_offload.load_run_meta("noarg")
@@ -143,8 +143,8 @@ def test_restore_uses_uri_not_current_prefix(aws):
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空")))),
             Step(1, "Then", "看", StepArgument(kind="docString", content="多行\n正文X")),
         )),
-    ))
-    meta = RunMeta(run_id="xp", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="xp", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
 
     offloaded = writer.offload(run_meta_to_dict(meta), "xp")   # 指针带 writer/ 前缀
     restored = run_meta_from_dict(reader.restore(offloaded, "xp"))  # 读端 prefix 不同，仍应还原
@@ -167,8 +167,8 @@ def test_reader_without_offloader_fails_loud_on_offloaded_meta(ddb_run_store_off
         Scenario(id="s:1", name="sc", steps=(
             Step(0, "Then", "看", StepArgument(kind="docString", content="会被 offload 的正文")),
         )),
-    ))
-    meta = RunMeta(run_id="noofl", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="noofl", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store_offload.create_run(meta, RunState(run_id="noofl", status=Status.PENDING, jobs={}))
 
     reader = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))  # 没注入 offloader 的读者（错误装配）
@@ -188,8 +188,8 @@ def test_reader_without_offloader_not_fooled_by_content_ref_as_text(aws):
             Step(0, "Then", "看", StepArgument(kind="docString", content="content_ref")),
             Step(1, "When", "填", StepArgument(kind="dataTable", rows=(("rows_ref", "content_ref"),))),
         )),
-    ))
-    meta = RunMeta(run_id="inline", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="inline", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     store = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))  # 无 offloader：写读两侧都内联
     store.create_run(meta, RunState(run_id="inline", status=Status.PENDING, jobs={}))
 

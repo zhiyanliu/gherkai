@@ -44,8 +44,8 @@ class SubprocessLauncher:
     退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
-    同时 enforce job timeout（ADR 0034「job timeout」节的本机后端一侧）：job.timeout_s 非 None 时起 deadline
-    timer——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理、不持续计费），worker 退出后
+    同时 enforce job timeout（ADR 0034「job timeout」节的本机后端一侧）：按 job.timeout_s 起 deadline timer（每个 job 都有
+    有限的预算，ADR 0054 决策十）——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理、不持续计费），worker 退出后
     _pump 的 record_exit 带上标志，project 按归因链收敛 ERROR+timeout。
 
     **绑死 SubprocessEngine（不是任意 `Engine`）**：launch 用 `run_scope(job, raw_sink=...)` 拿原始事件行，
@@ -81,22 +81,20 @@ class SubprocessLauncher:
         # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
         # tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）前提是「进程没起、平台观察者无从观察」，那时留下的是
         # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件通道 fd。
-        grace = self._min_grace_fn(job.engine) if job.timeout_s else None
+        grace = self._min_grace_fn(job.engine)
         handle, events = engine.run_scope(job, raw_sink=raw_sink)
-        timer: threading.Timer | None = None
         timed_out = threading.Event()
-        if job.timeout_s:
 
-            def _on_deadline() -> None:
-                timed_out.set()  # 先置标志再 stop：_pump 的 record_exit 必见（归因链时序）
-                try:
-                    handle.stop(grace)  # 协作停（SIGTERM→grace→SIGKILL 兜底，adapter 既有语义）
-                except Exception:
-                    pass  # stop 失败（如进程恰已退）→ 交给 _pump 的 wait 收敛
+        def _on_deadline() -> None:
+            timed_out.set()  # 先置标志再 stop：_pump 的 record_exit 必见（归因链时序）
+            try:
+                handle.stop(grace)  # 协作停（SIGTERM→grace→SIGKILL 兜底，adapter 既有语义）
+            except Exception:
+                pass  # stop 失败（如进程恰已退）→ 交给 _pump 的 wait 收敛
 
-            timer = threading.Timer(job.timeout_s, _on_deadline)
-            timer.daemon = True
-            timer.start()
+        timer = threading.Timer(job.timeout_s, _on_deadline)
+        timer.daemon = True
+        timer.start()
         # 不持线程引用：daemon 线程无人 join（循环何时结束由 tick 的结果决定，正常收尾时每 job 都有
         # _pump 写的退出记录），存下来只会随 job 数单调增长。
         threading.Thread(
@@ -104,7 +102,7 @@ class SubprocessLauncher:
             name=f"launcher-{scope_id}",
         ).start()
 
-    def _pump(self, scope_id: str, handle, events, timer: threading.Timer | None,
+    def _pump(self, scope_id: str, handle, events, timer: threading.Timer,
               timed_out: threading.Event) -> None:
         """驱动一个 worker 的 fd3 事件流直到结束（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
 
@@ -120,8 +118,7 @@ class SubprocessLauncher:
         except Exception:
             pass  # worker 异常退出——exitcode 由下面 wait() 拿，经 task_exited 让 project 判 error
         finally:
-            if timer is not None:
-                timer.cancel()  # 正常退出取消 deadline（已触发的 cancel 无害）
+            timer.cancel()  # 正常退出取消 deadline（已触发的 cancel 无害）
             try:
                 exit_code = handle.wait()
             except Exception:
@@ -212,8 +209,8 @@ def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_
         if js.status != Status.RUNNING or sid in launcher.owned_scopes:
             continue
         job = job_by_scope.get(sid)
-        if job is None or not job.timeout_s or not js.claimed_at:
-            continue  # 无预算/无起算点（旧数据）→ 不处置（除超时外无权臆断他人 claim 的死活）
+        if job is None or not js.claimed_at:
+            continue  # 运行定义里没有这个 job，或没有起算点 → 不处置（除超时外无权臆断他人 claim 的死活）
         if now is None:
             now = compose.parse_iso(now_iso)
         elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()

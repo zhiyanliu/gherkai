@@ -161,7 +161,8 @@ def _sample_run_result() -> M.RunResult:
     ios_jr = _mk(M.JobResult, job=ios_job, status=M.Status.PASSED, scenarios=[ios_sr], session_id="arn:i", duration_ms=9.0,
                  sessions=[_mk(M.SessionRecord, session_id="arn:i", name="n-i", origin="created", release="confirmed",
                                observed_s=5.0)], device_observed_s=5.0, device_observed_missing=0)
-    meta = _mk(M.RunMeta, run_id="r", created_at="t", jobs=(job, dev_job, ios_job), max_concurrency=2, steps_dir="/p/steps",
+    meta = _mk(M.RunMeta, run_id="r", created_at="t", deadline_at="2026-01-01T01:00:00+00:00", jobs=(job, dev_job, ios_job),
+               max_concurrency=2, steps_dir="/p/steps",
                worker_variant="base", worker_task_defs={"novaact": "arn"}, extra_http_headers=(("X-Test", "y"),))
     return _mk(M.RunResult, run_meta=meta, status=M.Status.ERROR, jobs=[jr, dev_jr, ios_jr], duration_ms=30.0,
                total_time_worked_s=3.5, total_tokens=120, device_observed_s=15.0, device_observed_missing=1)

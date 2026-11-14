@@ -211,7 +211,9 @@ def test_plan_shows_target_and_device_session_count(tmp_path, capsys):
 def test_default_job_timeout_sentinel_explicit_and_non_finite(tmp_path, capsys):
     feat = _write_feature(tmp_path)
     assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "0"]) == 0
-    assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] is None  # 显式非正：桌面 scope 不超时（键恒在、值 null）
+    assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] == 7200.0  # 显式非正：取产品上限（不再有「不超时」）
+    assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "7201"]) == 2  # 有效预算超过上限：计划阶段拒绝
+    assert "超过了上限 7200 秒" in capsys.readouterr().err
     assert m.main(["plan", str(feat), "--json", "--default-job-timeout", "120"]) == 0
     assert json.loads(capsys.readouterr().out)["jobs"][0]["timeout_s"] == 120.0  # 显式 120 与内建缺省可区分
     for bad in ("nan", "inf", "1e400", "abc"):  # 归一化只接受有限数（nan / inf 会让超时保护静默失效）
@@ -619,12 +621,70 @@ def test_run_engine_self_describe_failure_refuses_to_run(tmp_path, monkeypatch, 
     assert "worker 自述失败，拒绝运行" in err and "novaact" in err
 
 
-def test_run_timeout_nonpositive_maps_to_none(tmp_path, monkeypatch, capsys):
-    # --default-job-timeout <=0 → Job.timeout_s=None（不超时），是有逻辑的转换，护住它
+def test_run_timeout_nonpositive_maps_to_product_cap(tmp_path, monkeypatch, capsys):
+    # --default-job-timeout <=0 → Job.timeout_s 取产品上限 7200（ADR 0054 决策十），是有逻辑的转换，护住它
     box = {}
     monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
     m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--default-job-timeout", "0"])
-    assert all(j.timeout_s is None for j in box["run_meta"].jobs)
+    assert box["run_meta"].jobs and all(j.timeout_s == 7200.0 for j in box["run_meta"].jobs)
+
+
+def _deadline_offset_s(meta) -> float:
+    from datetime import datetime
+    return (datetime.fromisoformat(meta.deadline_at) - datetime.fromisoformat(meta.created_at)).total_seconds()
+
+
+def test_run_writes_deadline_from_the_resolved_grace_even_with_no_report(tmp_path, monkeypatch, capsys):
+    """前台 run 的运行期限（ADR 0054 决策二）：本机后端的每 job 尾段取这次调用解析出的停止宽限 G，2G + 10 秒；
+    `--no-report` 不落任何记录，definition 里同样带期限（执行方要用它）。不给 --grace 时 G 跟随引擎自报的下限。"""
+    from gherkai_core.schedule import ScheduleOpts
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--default-job-timeout", "600", "--grace", "200"]) == 0
+    assert _deadline_offset_s(box["run_meta"]) == 900 + 600 + 2 * 200 + 10
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report"]) == 0
+    [job] = box["run_meta"].jobs
+    grace = max(FAKE_MIN_GRACE_S[job.engine], ScheduleOpts.grace_period_s)
+    assert _deadline_offset_s(box["run_meta"]) == 900 + 300 + 2 * grace + 10
+
+
+def test_local_submit_deadline_takes_the_largest_engine_grace(tmp_path, monkeypatch):
+    """本机 submit 没有 run 级的停止宽限：期限取这个 run 用到的各引擎自报宽限里最大的一个，每个 job 都按它算尾段。"""
+    import subprocess
+
+    from gherkai_core.serialize import run_meta_from_dict
+
+    class _FakeProc:
+        pid = 1
+
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两个引擎都在本机（运行前检查要找到 worker）
+    feat = tmp_path / "two.feature"
+    feat.write_text("Feature: F\n  @scope:a @engine:novaact\n  Scenario: s1\n    When \"做 A\"\n"
+                    "  @scope:b @engine:midscene\n  Scenario: s2\n    When \"做 B\"\n", encoding="utf-8")
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(feat), "--report-dir", str(reports)]) == 0
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    meta = run_meta_from_dict(json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8")))
+    grace = max(FAKE_MIN_GRACE_S.values())
+    assert _deadline_offset_s(meta) == 900 + 2 * (300 + 2 * grace + 10)
+
+
+def test_local_submit_exits_2_when_engine_grace_cannot_be_read(tmp_path, monkeypatch, capsys):
+    """本机 submit 取不到引擎自报宽限时与 run 一样拒绝：退出码 2、不 fork、不落库。"""
+    import subprocess
+
+    forked = []
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd))
+
+    def boom(engine):
+        raise RuntimeError("worker 起不来")
+
+    monkeypatch.setattr(m.compose, "engine_min_grace", boom)
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 2
+    assert forked == [] and not reports.exists()
+    assert "worker 自述失败，拒绝提交" in capsys.readouterr().err
 
 
 # ---- #8 畸形 feature → 友好诊断、以退出码 2 结束、无 traceback ----
@@ -2516,7 +2576,7 @@ def _explain_job(*, scope_id="features/login.feature:6"):
     s2 = (Step(0, "Given", '"https://app.example.com/login"'), Step(1, "Then", "页面提示「账户已锁定」"))
     return Job(scope_id=scope_id, scope_name="登录", engine="novaact",
                scenarios=(Scenario(id="features/login.feature:12", name="密码错误时不放行", steps=s1),
-                          Scenario(id="features/login.feature:20", name="锁定账户提示", steps=s2)))
+                          Scenario(id="features/login.feature:20", name="锁定账户提示", steps=s2)), timeout_s=300.0)
 
 
 def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, job_only=False,
@@ -2565,7 +2625,7 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
                    report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
     st = run_status or (S.ABORTED if job_only else S.FAILED)
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
-    run_store.save_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,)),
+    run_store.save_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
                        RunState(run_id=run_id, status=st, jobs={job.scope_id: JobState(job.scope_id, st)},
                                 started_at="t0", ended_at="t9" if st in m.TERMINAL_STATUSES else None))
     if with_results:
@@ -3221,7 +3281,7 @@ def test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact():
     from gherkai_cli import render
     j1 = _explain_job(scope_id="a.feature:6")
     j2 = Job(scope_id="b.feature:6", scope_name="b", engine="novaact",  # 与 a 无共同 scenario → 筛 :12 时整个未命中
-             scenarios=(Scenario(id="features/other.feature:5", name="其它", steps=(Step(0, "Given", "x"),)),))
+             scenarios=(Scenario(id="features/other.feature:5", name="其它", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
     jr1 = JobResult(job=j1, status=S.FAILED, scenarios=[ScenarioResult(
         scenario_id="features/login.feature:12", status=S.FAILED,
         steps=[StepResult(index=0, status=S.PASSED), StepResult(index=1, status=S.FAILED, message="x")])])
@@ -3611,7 +3671,7 @@ def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: boo
 
     jobs = {f"f.feature:{i}": JobState(f"f.feature:{i}", s) for i, s in enumerate(job_statuses)}
     LocalRunStore(root, detached=detached).create_run(
-        RunMeta(run_id=run_id, created_at=started_at, jobs=(), cli_version=cli_version),
+        RunMeta(run_id=run_id, created_at=started_at, jobs=(), cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id=run_id, status=status, jobs=jobs, started_at=started_at, ended_at=ended_at, message=message))
 
 

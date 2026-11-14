@@ -200,7 +200,7 @@ def test_timeout_absent_and_unspecified_default_falls_back_by_target():
     assert jobs[0].timeout_s == 300.0 and jobs[0].target == Target()
 
 
-# ---- 按目标解析 timeout 的真值表（ADR 0034「job timeout」节 ①②③；0051 决策 2；0025「timeout 解析」）----
+# ---- 按目标解析 timeout 的真值表（ADR 0034「job timeout」节 ①②③；0051 决策 2；0054 决策十；0025「timeout 解析」）----
 DEVICE_SCOPE = 'Feature: F\n  @scope:d @device:android\n  Scenario: a\n    When "x"\n'
 DESKTOP_SCOPE = 'Feature: F\n  @scope:w\n  Scenario: a\n    When "x"\n'
 
@@ -214,10 +214,12 @@ def _cfg(**kw) -> PlanConfig:
 @pytest.mark.parametrize("text, cfg, expected", [
     (DESKTOP_SCOPE, _cfg(), 300.0),                                        # 未指定 + 桌面 → 桌面缺省
     (DEVICE_SCOPE, _cfg(), 1500.0),                                        # 未指定 + 设备 → 设备缺省（获取预算加 900）
-    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=0.0), None),               # 显式 0 + 桌面 → 不超时
-    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=-5.0), None),              # 显式负值 + 桌面 → 不超时
-    (DEVICE_SCOPE, _cfg(default_job_timeout_s=0.0), 1500.0),              # 显式 0 + 设备 → 设备缺省、不报错（设备 scope 不存在不超时）
-    (DEVICE_SCOPE, _cfg(default_job_timeout_s=-5.0), 1500.0),
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=0.0), 7200.0),             # 显式 0 + 桌面 → 产品上限（不再有「不超时」）
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=-5.0), 7200.0),            # 显式负值 + 桌面 → 产品上限
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=0.0), 7200.0),              # 显式 0 + 设备 → 同样取上限，一个写法一种含义
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=-5.0), 7200.0),
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=7200.0), 7200.0),          # 显式值等于上限 → 通过
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=7200.0), 7200.0),
     (DESKTOP_SCOPE, _cfg(default_job_timeout_s=300.0), 300.0),            # 显式 300 与内建 300 可区分：都给 300
     (DEVICE_SCOPE, _cfg(default_job_timeout_s=780.0), 780.0),             # 显式值等于下限 → 通过
     (DEVICE_SCOPE, _cfg(default_job_timeout_s=900.0), 900.0),
@@ -255,11 +257,68 @@ def test_device_timeout_below_floor_advice_follows_the_other_source():
     assert "改由 --default-job-timeout 900 秒接替" in str(ei.value)
     with pytest.raises(FeatureContractError) as ei:
         _plan(tagged, cfg=_cfg())
-    assert "让设备 scope 走缺省（1500 秒）" in str(ei.value)
+    assert "让这个 scope 走目标缺省（1500 秒）" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=0.0))  # 删 tag 后由给 0 取到的上限接替
+    assert "改由 --default-job-timeout 0 取上限 7200 秒" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=8000.0))  # 删 tag 后接替的显式值同样通不过（超过上限）
+    assert "调到不超过 7200 秒或不给它" in str(ei.value) and "8000 秒同样超过上限" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=float("nan")))  # 删 tag 后接替的显式值不是有限数，同样会被拒
+    assert "改为有限数或不给它" in str(ei.value) and "走目标缺省（" not in str(ei.value)
     with pytest.raises(FeatureContractError) as ei:
         _plan(DEVICE_SCOPE, cfg=_cfg(default_job_timeout_s=300.0))
     msg = str(ei.value)
     assert "来自 --default-job-timeout 300" in msg and "调到至少 780 秒或不给它" in msg and "@timeout:780" in msg
+
+
+def test_product_cap_is_one_number_in_core():
+    """产品上限是 core 的一个常数、对所有目标相同（ADR 0054 决策十）；设备预算的下限最大为获取预算上界加 180 秒，在上限之内。"""
+    from gherkai_core.model import MAX_ACQUIRE_TIMEOUT_S, MAX_JOB_TIMEOUT_S, MIN_DEVICE_JOB_TIMEOUT_EXTRA_S
+    assert MAX_JOB_TIMEOUT_S == 7200.0
+    assert MAX_ACQUIRE_TIMEOUT_S + MIN_DEVICE_JOB_TIMEOUT_EXTRA_S <= MAX_JOB_TIMEOUT_S
+
+
+@pytest.mark.parametrize("text, cfg, source", [
+    ('Feature: F\n  @scope:w @timeout:7201\n  Scenario: a\n    When "x"\n', _cfg(), "@timeout:7201"),              # 桌面 tag
+    ('Feature: F\n  @scope:d @device:android @timeout:7201\n  Scenario: a\n    When "x"\n', _cfg(), "@timeout:7201"),  # 设备 tag
+    (DESKTOP_SCOPE, _cfg(default_job_timeout_s=7201.0), "--default-job-timeout 7201"),                           # 桌面显式值
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=7201.0), "--default-job-timeout 7201"),                            # 设备显式值
+    (DEVICE_SCOPE, _cfg(default_job_timeout_s=8880.0), "--default-job-timeout 8880"),                            # 原先设备可到 8880
+])
+def test_effective_budget_above_product_cap_errors(text, cfg, source):
+    """有效预算超过产品上限即拒（ADR 0054 决策十）：tag 与显式正值、桌面与设备同一处理。"""
+    with pytest.raises(FeatureContractError, match="超过了上限 7200 秒") as ei:
+        _plan(text, cfg=cfg)
+    msg = str(ei.value)
+    assert f"来自 {source}" in msg and "一个 job 最长运行 2 小时" in msg
+
+
+def test_product_cap_advice_follows_the_source():
+    """超过上限的改法按来源给：tag 超限时说清删掉 tag 后由谁接替；显式值超限时提示给 0 即取上限。"""
+    tagged = 'Feature: F\n  @scope:w @timeout:9000\n  Scenario: a\n    When "x"\n'
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg())
+    assert "请把 @timeout 调到不超过 7200 秒" in str(ei.value) and "走目标缺省（300 秒）" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(tagged, cfg=_cfg(default_job_timeout_s=600.0))
+    assert "改由 --default-job-timeout 600 秒接替" in str(ei.value)
+    with pytest.raises(FeatureContractError) as ei:
+        _plan(DESKTOP_SCOPE, cfg=_cfg(default_job_timeout_s=9000.0))
+    assert "调到不超过 7200 秒，给 0 即取这个上限" in str(ei.value)
+
+
+def test_unused_explicit_default_is_not_checked_against_the_cap():
+    """被 @timeout 盖住、没有生效的缺省值不检查（ADR 0054 决策十）：tag 照常通过，没有 tag 的 scope 才因超限被拒。"""
+    tagged = 'Feature: F\n  @scope:w @timeout:1500\n  Scenario: a\n    When "x"\n'
+    [job] = _plan(tagged, cfg=_cfg(default_job_timeout_s=9000.0))
+    assert job.timeout_s == 1500.0
+    [job] = _plan('Feature: F\n  @scope:d @device:android @timeout:1500\n  Scenario: a\n    When "x"\n',
+                  cfg=_cfg(default_job_timeout_s=9000.0))
+    assert job.timeout_s == 1500.0
+    with pytest.raises(FeatureContractError, match="超过了上限"):
+        _plan(tagged + '  @scope:other\n  Scenario: b\n    When "y"\n', cfg=_cfg(default_job_timeout_s=9000.0))
 
 
 def test_device_default_itself_is_not_checked_against_floor():
@@ -370,12 +429,13 @@ def test_timeout_conflict_errors():
 
 
 def test_timeout_invalid_values_error():
-    # 非数字 / 非正数都拒（「标了 tag 但想不超时」不成立——删 tag 走缺省）
+    # 非数字 / 非正数都拒（标了 tag 就得给出预算——想走缺省就删 tag）
     with pytest.raises(FeatureContractError, match="不是数字"):
         _plan('Feature: F\n  @scope:x @timeout:abc\n  Scenario: a\n    When "x"\n')
     with pytest.raises(FeatureContractError, match="正数") as ei:
         _plan('Feature: F\n  @scope:x @timeout:0\n  Scenario: a\n    When "x"\n')
     assert "--default-job-timeout（给了的话）" in str(ei.value) and "桌面 300 秒、设备 1500 秒" in str(ei.value)  # 删 tag 后谁接替说全
+    assert "要用最长的预算就标 @timeout:7200" in str(ei.value)
 
 
 @pytest.mark.parametrize("raw", ["nan", "inf", "1e400"])  # 1e400 溢出成 inf

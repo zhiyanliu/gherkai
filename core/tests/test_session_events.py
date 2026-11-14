@@ -122,7 +122,7 @@ def test_worker_exit_error_carries_exit_code_and_network_is_a_subclass():
 
 def _job(scope_id: str = "s") -> Job:
     return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene",
-               scenarios=(Scenario(id=f"{scope_id}:1", name="n", steps=(Step(0, "Given", "x"),)),))
+               scenarios=(Scenario(id=f"{scope_id}:1", name="n", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
 
 
 def test_device_job_round_trips_sessions_and_metering_and_desktop_job_omits_them():
@@ -175,7 +175,7 @@ def test_device_job_without_sessions_still_writes_both_metering_keys_and_empty_s
 
 
 def test_run_result_run_level_metering_keys_follow_the_same_omit_rule():
-    meta = RunMeta(run_id="r", created_at="t", jobs=(_job("a"), _job("b")))
+    meta = RunMeta(run_id="r", created_at="t", jobs=(_job("a"), _job("b")), deadline_at="2026-01-01T01:00:00+00:00")
     desktop_run = RunResult(run_meta=meta, status=Status.PASSED, jobs=[JobResult(job=_job("a"), status=Status.PASSED)])
     assert not {"device_observed_s", "device_observed_missing"} & set(to_dict(desktop_run))
     device_run = RunResult(run_meta=meta, status=Status.ERROR, device_observed_s=25.5, device_observed_missing=1,

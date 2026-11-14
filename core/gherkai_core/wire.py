@@ -84,8 +84,8 @@ def job_to_json(job: Job) -> dict:
     """Job → JSON dict（喂 worker stdin，ADR 0024 输入形状）。
 
     键集固定（ADR 0024「协议版本与 job 行的固定键集」、0048 决策 3）：`schemaVersion` 恒写；`timeoutS` 供 worker 建会话前与
-    max_session_s 比较作自检、桌面 worker 另据它设定浏览器会话的服务端存活上限，不超时写 null；`target` 桌面也写
-    desktop/web；`deviceRequest` 非设备 job 写 null。
+    max_session_s 比较作自检、桌面 worker 另据它设定浏览器会话的服务端存活上限；协议仍允许它为 null（不为去掉这个取值升协议版本），
+    core 产出的 job 恒有预算（ADR 0054 决策十）；`target` 桌面也写 desktop/web；`deviceRequest` 非设备 job 写 null。
     字段集合由 Python 到 TS 的往返测试守（engines/fixtures/job-lines.json）。
     """
     return {

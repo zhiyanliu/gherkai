@@ -20,6 +20,8 @@ cost 只含 engine 报的原生量、不折美元（ADR 0024）；report_refs �
 """
 from __future__ import annotations
 
+from datetime import datetime
+
 from gherkai_core.model import (
     AppRef,
     DeviceFarmRequest,
@@ -92,8 +94,9 @@ def _scenario_def_from_dict(d: dict) -> Scenario:
 
 # definition 的结构版本（ADR 0037 决策 7）：同一结构版本下 definition 的**键集固定、不适用的值写 null**；读端只认当前这一个版本
 # （缺键读作 0，与任何不等于它的值一律按版本不符拒绝），不为旧版本留分支或缺省——结构变化一律靶在这一个整数比较上。
-# 读端据此可以要求每个键都在（缺键是定义违约、不是「用缺省值」）。1.5 写出的第一个版本是 1。
-DEFINITION_SCHEMA_VERSION = 1
+# 读端据此可以要求每个键都在（缺键是定义违约、不是「用缺省值」）。1.5 写出的第一个版本是 1；版本 2 加了运行期限 `deadline_at`，
+# 并把 job 的墙钟预算收为恒有值（ADR 0054 决策二、十），读端不为版本 1 留分支。
+DEFINITION_SCHEMA_VERSION = 2
 
 
 def definition_schema_version(d: dict) -> int:
@@ -125,7 +128,7 @@ def _require(d: dict, key: str, what: str):
 
 
 def job_to_dict(job: Job) -> dict:
-    """Job(definition) → dict（双向，RunMeta 落盘）。键集固定（ADR 0037 决策 7）：timeout_s 不超时写 null、target 桌面也写
+    """Job(definition) → dict（双向，RunMeta 落盘）。键集固定（ADR 0037 决策 7）：timeout_s 恒为正数（ADR 0054 决策十）、target 桌面也写
     desktop/web、device_request 非设备 job 写 null。"""
     return {
         "scope_id": job.scope_id,
@@ -133,7 +136,7 @@ def job_to_dict(job: Job) -> dict:
         "engine": job.engine,
         "scenarios": [_scenario_def_to_dict(sc) for sc in job.scenarios],
         "assertion_votes": job.assertion_votes,
-        "timeout_s": job.timeout_s,  # None 表示不超时（只对桌面 scope；ADR 0034「job timeout」节）
+        "timeout_s": job.timeout_s,  # 恒为有限正数；读端把 null 当定义违约（validate_job_definition）
         "target": _target_to_dict(job.target),  # ADR 0048 决策 3
         "device_request": _device_request_to_dict(job.device_request) if job.device_request is not None else None,
     }
@@ -425,6 +428,7 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
         "cli_version": meta.cli_version,  # 只记不比（ADR 0037 决策 7）
         "run_id": meta.run_id,
         "created_at": meta.created_at,
+        "deadline_at": meta.deadline_at,  # 运行期限（ADR 0054 决策二）；云端另摊成 META 条目的顶层属性
         "jobs": [job_to_dict(j) for j in meta.jobs],
         # extra_http_headers（ADR 0035 决策 4）：落盘存 dict 形式（可读）、**键序在写端规范化**（sorted）——规范化归写端、读端原样
         # 保序，from_dict 才是 to_dict 的忠实逆。判真而非 `is not None`：空表与 None 语义合一（都是「不注入额外头」），一律写 null，
@@ -438,6 +442,20 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
     }
 
 
+def _deadline_at_from_dict(d: dict) -> str:
+    """读运行期限（ADR 0054 决策二）：键必须在，值必须是带时区的 ISO 时刻。每个 run 都有期限，没有「不适用写 null」的情形，
+    null 与读不出时刻的值都是定义违约，与空预算同一处理；在读 definition 这一处拒绝，执行方拿到的期限恒可比较。"""
+    v = _require(d, "deadline_at", "run_meta")
+    try:
+        ok = isinstance(v, str) and datetime.fromisoformat(v).tzinfo is not None
+    except ValueError:
+        ok = False
+    if not ok:
+        from gherkai_core.errors import DefinitionContractError
+        raise DefinitionContractError(f"definition 里 run_meta 的 deadline_at 须为带时区的 ISO 时刻（现为 {v!r}）")
+    return v
+
+
 def run_meta_from_dict(d: dict) -> RunMeta:
     """dict → RunMeta。第一步核结构版本（不等于本读端支持的即抛 UnsupportedDefinitionSchema），其后每个键都必须在（缺键是定义违约）。"""
     require_definition_schema(d)
@@ -446,6 +464,7 @@ def run_meta_from_dict(d: dict) -> RunMeta:
     return RunMeta(
         run_id=_require(d, "run_id", "run_meta"),
         created_at=_require(d, "created_at", "run_meta"),
+        deadline_at=_deadline_at_from_dict(d),
         jobs=tuple(job_from_dict(j) for j in _require(d, "jobs", "run_meta")),
         extra_http_headers=tuple(hdrs.items()) if hdrs else None,  # 原样保序（键序已由写端规范化）；null 与空表都读回 None
         max_concurrency=_require(d, "max_concurrency", "run_meta"),

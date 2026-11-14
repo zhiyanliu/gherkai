@@ -81,8 +81,8 @@ def test_records_feed_project_to_terminal(tmp_path):
 
     meta = RunMeta(run_id="r", created_at="t", jobs=(
         Job(scope_id="a", scope_name="a", engine="novaact",
-            scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),)),
-    ))
+            scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0),
+    ), deadline_at="2026-01-01T01:00:00+00:00")
     state = project(meta, log.records())
     assert state.jobs["a"].status == Status.PASSED
     assert state.jobs["a"].session_id == "s"

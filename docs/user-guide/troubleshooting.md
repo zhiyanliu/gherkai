@@ -85,7 +85,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
-| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒） | 给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取预算加 180 秒，否则在开始执行前就以退出码 2 被拒；也可以把长流程拆成多个 scope |
+| job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒） | 给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取预算加 180 秒，否则在开始执行前就以退出码 2 被拒；预算最长 7200 秒（`--default-job-timeout 0` 即取这个值），超过同样被拒；也可以把长流程拆成多个 scope |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 让每条 AI 断言判三次、取多数，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |

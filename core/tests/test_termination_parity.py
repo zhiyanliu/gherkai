@@ -37,7 +37,7 @@ SCOPE = "dev"
 _DEVICE = dict(target=Target(device="android", ui_kind="web"), device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
 
 
-def _job(timeout_s: float | None = None, device: str = "android") -> Job:
+def _job(timeout_s: float = 7200.0, device: str = "android") -> Job:
     scs = tuple(Scenario(id=f"{SCOPE}:{i}", name=f"sc{i}", steps=(Step(0, "Given", "a"),)) for i in range(2))
     target = {} if device == "desktop" else _DEVICE
     return Job(scope_id=SCOPE, scope_name=SCOPE, engine="midscene", scenarios=scs, timeout_s=timeout_s, **target)
@@ -65,7 +65,7 @@ class Row:
     tail: list              # 停止后 worker 仍发出的收尾事件（同步路径经 tail_after_stop；无状态路径追加进 events 段）
     exit_code: int | None   # worker 退出码（同步路径由 FakeEngine 抛 WorkerExitError；无状态路径写进 TaskExited）
     timed_out: bool = False  # 推进器超时处置（同步路径靠 fake clock 过 deadline；无状态路径 TaskExited.timed_out）
-    timeout_s: float | None = None
+    timeout_s: float = 7200.0
     crash: bool = False     # 事件发完后 worker 以非退出码异常终止（同步路径 FakeEngine 抛 RuntimeError；无状态路径退出码 None）
     device: str = "android"  # job 的目标：desktop 的行是 AgentCore 浏览器会话（name 与 sessionId 都是会话 id，不带计量）
 
@@ -141,7 +141,7 @@ def _sync(row: Row):
         engine.behaviors[SCOPE] = list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]
     if row.crash:
         engine.crash_after = {SCOPE: len(engine.behaviors[SCOPE])}  # 全部事件发完后抛 RuntimeError（退出码未知）
-    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,)), FakeResolver(engine), CollectSink(),
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.05, grace_period_s=1.0))
     return res.jobs[0]
 
@@ -152,7 +152,7 @@ def _stateless(row: Row):
     records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
     records.append(EventRecord(scope_id=SCOPE, kind="exit",
                                exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, timed_out=row.timed_out)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,)), records)
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), records)
     return res.jobs[0]
 
 
@@ -228,7 +228,7 @@ def _sync_late_stop(row: Row, stop_bound_s: float | None):
                         exit_code={SCOPE: row.exit_code} if row.exit_code else {}, tail_delay_s=0.2, on_stop=clock.on_stop)
     if row.crash:
         engine.crash_after = {SCOPE: len(main)}
-    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,)), FakeResolver(engine), CollectSink(),
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0,
                                      stop_bound_s=stop_bound_s))
     return res.jobs[0]
@@ -277,7 +277,7 @@ def test_in_flight_job_state_agrees(tmp_path, events, expected):
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.persist import RunPersistence
 
-    meta = RunMeta(run_id="r", created_at="", jobs=(_job(),))
+    meta = RunMeta(run_id="r", created_at="", jobs=(_job(),), deadline_at="2026-01-01T01:00:00+00:00")
     run_store = LocalRunStore(tmp_path)
     persistence = RunPersistence("r", run_store, LocalResultStore(tmp_path))
     persistence.begin(meta, started_at="t0")
@@ -298,7 +298,7 @@ def test_crash_row_sync_side_really_exits_with_unknown_code():
     归因改为 release_failed）且消息是 worker 异常（若 FakeEngine 没在事件发完后崩溃，同步侧会以退出码 0 结束、消息变成
     「没有报完这次运行的结果」，对拍只是碰巧相等）。"""
     row = next(r for r in MATRIX if r.name == "接力者直接落 timed_out（退出码未知）")
-    plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=None, crash=True, device=row.device)
+    plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=7200.0, crash=True, device=row.device)
     jr = _sync(plain)
     assert (jr.status, jr.error_type) == (Status.ERROR, "release_failed") and "worker 异常：" in jr.message  # a 未确认 → 归因改 release_failed，原因保留
 
@@ -309,9 +309,9 @@ def test_stateless_run_level_device_metering():
     row = next(r for r in MATRIX if r.name == "完整成功的设备 job")
     job = _job(row.timeout_s)
     other = Job(scope_id="dev2", scope_name="dev2", engine="midscene",
-                scenarios=(Scenario(id="dev2:0", name="sc0", steps=(Step(0, "Given", "a"),)),), **_DEVICE)
+                scenarios=(Scenario(id="dev2:0", name="sc0", steps=(Step(0, "Given", "a"),)),), timeout_s=row.timeout_s, **_DEVICE)
     desktop = Job(scope_id="web", scope_name="web", engine="novaact",
-                  scenarios=(Scenario(id="web:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
+                  scenarios=(Scenario(id="web:0", name="sc0", steps=(Step(0, "Given", "a"),)),), timeout_s=300.0)
     other_events = [SessionOpened(scope_id="dev2", name="b", origin="created", session_id="arn:b"),
                     SessionOpened(scope_id="dev2", name="c", origin="discovered", session_id="arn:c"),
                     ScopeStarted(scope_id="dev2", session_id="arn:b"),
@@ -328,7 +328,7 @@ def test_stateless_run_level_device_metering():
     for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
         records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
         records.append(EventRecord(scope_id=scope, kind="exit", exited=TaskExited(scope_id=scope, exit_code=0)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop)), records)
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at="2026-01-01T01:00:00+00:00"), records)
     by = {jr.scope_id: jr for jr in res.jobs}
     assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
     assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)

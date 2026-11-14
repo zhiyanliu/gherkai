@@ -73,8 +73,8 @@ def _heartbeat_wrap(events, poll_interval_s):
     纯 `Iterator[Event]`（不渗实现细节）。事件正常流动时 q.get 即时返回、永不注入心跳——故 fake-clock 单测的
     clock 读取序列不变（reader 线程只搬事件、绝不读 clock）。
 
-    poll_interval_s<=0 时退化为直接转发内层（不起线程）。job 没有 deadline 时也起心跳：fail-fast 的中止与停止后的排空上界
-    （ADR 0034「停止后继续有界消费」）同样要靠心跳醒来检查，不只服务超时。
+    poll_interval_s<=0 时退化为直接转发内层（不起线程）。心跳不只服务超时：fail-fast 的中止与停止后的排空上界
+    （ADR 0034「停止后继续有界消费」）同样要靠心跳醒来检查。
     """
     if poll_interval_s <= 0:
         yield from events
@@ -204,7 +204,7 @@ class _Worker:
         # 内容完整（scope_done 已到且干净退出）后不再仲裁：判定已成，停止原因不改写它（ADR 0034 机制二「内容完整后不再仲裁」）。
         self._stop_reason = "none"
         self._stop_lock = threading.Lock()
-        self._deadline: float | None = None
+        self._deadline: float | None = None  # run() 开始时设定；None 只表示本 job 尚未开始执行（预算恒有值，ADR 0054 决策十）
         self._finished = False  # 已返回 JobResult 的 worker 不再被 _stop_all 改写
         self._content_complete = False  # 已收到 scope_done（非零退出时回落为 False）：decide_stop 对它不再落定
         self._stop_requested_at: float | None = None  # 首次向 worker 发停止请求的时刻；排空上界从这里起算，stop() 自身的阻塞计入其中
@@ -245,8 +245,9 @@ class _Worker:
         """
         # deadline 跨 attempt 共享（ADR 0028）：覆盖所有 attempt 之和，重试不重置——否则 N 次重试
         # 各拿一整份 timeout、绕过超时上限。run 级算一次，所有 _run_once 共用。
-        # 预算载体在 definition（Job.timeout_s，@timeout tag 或组合根缺省填充——ADR 0034「job timeout」节）。
-        deadline = (self.opts.clock() + self.job.timeout_s) if self.job.timeout_s else None
+        # 预算载体在 definition（Job.timeout_s，@timeout tag 或组合根缺省填充——ADR 0034「job timeout」节），恒为有限正数
+        # （ADR 0054 决策十），所以每个 job 都有 deadline。
+        deadline = self.opts.clock() + self.job.timeout_s
         self._deadline = deadline
         last: JobResult | None = None
         try:
@@ -281,10 +282,10 @@ class _Worker:
             with self._stop_lock:
                 self._finished = True
 
-    def _run_once(self, deadline: float | None, previous: JobResult | None = None) -> tuple[JobResult, bool, bool]:
+    def _run_once(self, deadline: float, previous: JobResult | None = None) -> tuple[JobResult, bool, bool]:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)。
 
-        deadline：run 级共享的超时截止（None 表示不超时）；跨 attempt 不重置（ADR 0028）。previous 是上一次 attempt 的判定
+        deadline：本 job 跨 attempt 共享的超时截止，跨 attempt 不重置（ADR 0028）。previous 是上一次 attempt 的判定
         （只在重试时有）：起 worker 前发现 run 已被中止（fail-fast 或使用方中断），就保留它、不把已经运行过一次的 job 记成「未启动」。
         判定与归因只由终结函数给出（ADR 0034 机制二）：本方法只准备输入——stop_reason（首次仲裁落定）、退出信息
         （EOF 为 0 / WorkerExitError 取其码与 reason / 其它异常为未知）、scope_done 事实、scenario 判定集、会话记录。
@@ -329,7 +330,7 @@ class _Worker:
             self.handle, raw_events = engine.run_scope(job)
         except Exception as e:  # 起 worker 失败（spawn 失败等）：「起不来」也是一种进程终止（ADR 0034 机制二 launch 失败补偿的同步版），
             # 以退出码未知进共用的终结流程——已过 deadline 或 run 已被中止（fail-fast 或使用方中断）的照常按首次仲裁落定，不绕过
-            if (deadline is not None and self.opts.clock() > deadline) or self.abort_flag.is_set():
+            if self.opts.clock() > deadline or self.abort_flag.is_set():
                 self.decide_stop()
             term = finalize_job(
                 abort_cause=self.abort_flag.cause or "fail-fast",
@@ -364,7 +365,7 @@ class _Worker:
                 if drain_deadline is not None and clock() > drain_deadline:
                     break
                 if self._stop_requested_at is None:
-                    deadline_passed = deadline is not None and clock() > deadline
+                    deadline_passed = clock() > deadline
                     if scope_done is None:
                         # 事件间检查：超时或 run 中止（fail-fast 或使用方中断）时首次仲裁落定并优雅停 worker（ADR 0026 / 0034
                         # 机制二）；触发决定的这条事件本身照常处理（下面不 return），之后继续消费直到 EOF 或排空上界。
@@ -431,7 +432,7 @@ class _Worker:
             # 不能让超时预算被建连退避绕过（ADR 0028 竞态防护，归入同一仲裁规则）。内容完整（带 scope_done 的干净退出）不再回判：判定已成。
             # 仲裁在发停止请求**之前**：停止请求会阻塞到宽限到点，先停再仲裁会把停止前已成立的 abort 改写成 timeout。
             # 事件流已正常结束（EOF 或拿到退出码）时这里只落定、下面不跟停止请求：worker 已经退出。
-            if (deadline is not None and clock() > deadline) or self.abort_flag.is_set():
+            if clock() > deadline or self.abort_flag.is_set():
                 self.decide_stop(stop=False)
         # 终结处不无条件再阻塞（ADR 0034 机制二「停止调用自身也有界」条）：只在事件流没有正常结束时补发停止请求。事件流已到 EOF 或
         # 已拿到退出码说明 worker 已经退出，再发一次不改变任何事实，只会在控制面迟缓时（云端即再发一次 StopTask）把 job 的结束再推迟

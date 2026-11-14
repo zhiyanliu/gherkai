@@ -6,6 +6,8 @@ Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造
 """
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from gherkai_core.model import JobState, Status, run_state_from_result
@@ -49,8 +51,8 @@ def test_run_meta_deep_argument_round_trip(ddb_run_store):
             Step(0, "When", "填表", StepArgument(kind="dataTable", rows=(("k", "v"), ("", "空cell")))),
             Step(1, "Then", "看结果", StepArgument(kind="docString", content="多行\n内容\ns3://像指针的正文")),
         )),
-    ))
-    meta = RunMeta(run_id="deep", created_at="t", jobs=(job,))
+    ), timeout_s=300.0)
+    meta = RunMeta(run_id="deep", created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
     ddb_run_store.create_run(meta, RunState(run_id="deep", status=Status.PENDING, jobs={}))
 
     got = ddb_run_store.load_run_meta("deep")
@@ -133,8 +135,8 @@ def test_detached_flag_on_state_item(aws):
 
     def _mk(run_id):
         job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(
-            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),))
-        meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,))
+            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
+        meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00")
         state = RunState(run_id=run_id, status=Status.PENDING,
                          jobs={"s": JobState("s", Status.PENDING)}, started_at="t")
         return meta, state
@@ -174,9 +176,9 @@ def test_worker_task_def_arns_on_state_item(aws):
 
     def _mk(run_id, worker_task_defs=None):
         job = Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(
-            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+            Scenario(id="s:1", name="sc", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
         meta = RunMeta(run_id=run_id, created_at="t", jobs=(job,),
-                       worker_task_defs=worker_task_defs)
+                       worker_task_defs=worker_task_defs, deadline_at="2026-01-01T01:00:00+00:00")
         state = RunState(run_id=run_id, status=Status.PENDING,
                          jobs={"s": JobState("s", Status.PENDING)}, started_at="t")
         return meta, state
@@ -209,10 +211,13 @@ def test_meta_item_carries_schema_header_top_level_and_peek_reads_only_it(ddb_ru
     from gherkai_core.errors import UnsupportedDefinitionSchema
     r = _sample_run("hdr")
     ddb_run_store.save_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
-    assert ddb_run_store.peek_definition_header("hdr") == (1, "1.5.0")
+    assert ddb_run_store.peek_definition_header("hdr") == (2, "1.5.0")
     assert ddb_run_store.peek_definition_header("nope") is None
     raw = ddb_run_store._table.get_item(Key={"run_id": "hdr", "item_type": "META"})["Item"]
-    assert int(raw["schema_version"]) == 1 and raw["cli_version"] == "1.5.0"   # 顶层属性与 meta_json 同值
+    assert int(raw["schema_version"]) == 2 and raw["cli_version"] == "1.5.0"   # 顶层属性与 meta_json 同值
+    # 运行期限同样摊成顶层属性（ADR 0054 决策二），值与 meta_json 里的同名键恒同，读回的 definition 也带着它
+    assert raw["deadline_at"] == json.loads(raw["meta_json"])["deadline_at"] == r.run_meta.deadline_at
+    assert ddb_run_store.load_run_meta("hdr").deadline_at == r.run_meta.deadline_at
     # 没有顶层属性的 META（早于结构版本号的写端）：读头得 (0, None)，整读按版本不符拒绝
     ddb_run_store._table.put_item(Item={"run_id": "old", "item_type": "META",
                                         "meta_json": '{"run_id": "old", "created_at": "", "jobs": []}'})
@@ -246,13 +251,13 @@ def test_load_run_meta_checks_schema_before_restoring_offloaded_arguments(ddb_ru
     """版本核对先于参数还原：别的版本写出的 META 不该先在还原遍历里抛 KeyError（那会绕过读端按版本不合的处置）。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
 
-    ddb_run_store_offload._table.put_item(Item={"run_id": "future", "item_type": "META", "schema_version": 2,
-                                                "meta_json": '{"schema_version": 2, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+    ddb_run_store_offload._table.put_item(Item={"run_id": "future", "item_type": "META", "schema_version": 3,
+                                                "meta_json": '{"schema_version": 3, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
     with pytest.raises(UnsupportedDefinitionSchema):
         ddb_run_store_offload.load_run_meta("future")
     # 同版本下还原遍历撞到的形状错归定义违约，不漏 KeyError
-    ddb_run_store_offload._table.put_item(Item={"run_id": "malformed", "item_type": "META", "schema_version": 1,
-                                                "meta_json": '{"schema_version": 1, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
+    ddb_run_store_offload._table.put_item(Item={"run_id": "malformed", "item_type": "META", "schema_version": 2,
+                                                "meta_json": '{"schema_version": 2, "jobs": [{"scenarios": [{"steps": [{"argument": {"kind": "docString", "content_ref": "s3://b/k"}}]}]}]}'})
     with pytest.raises(DefinitionContractError):
         ddb_run_store_offload.load_run_meta("malformed")
 
@@ -261,8 +266,8 @@ def test_load_run_meta_lets_fetch_failures_through_untranslated(ddb_run_store_of
     """S3 取回失败不是定义违约（ADR 0037 决策 7 的读端边界）：指针指向不存在的桶时原样抛 botocore 异常——可重试的故障不该被读端永久标成 error。"""
     from botocore.exceptions import ClientError
 
-    ddb_run_store_offload._table.put_item(Item={"run_id": "gone", "item_type": "META", "schema_version": 1,
-                                                "meta_json": '{"schema_version": 1, "jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": '
+    ddb_run_store_offload._table.put_item(Item={"run_id": "gone", "item_type": "META", "schema_version": 2,
+                                                "meta_json": '{"schema_version": 2, "jobs": [{"scope_id": "s", "scenarios": [{"id": "sc", "steps": '
                                                              '[{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://no-such-bucket-gherkai-x/k"}}]}]}]}'})
     with pytest.raises(ClientError):
         ddb_run_store_offload.load_run_meta("gone")

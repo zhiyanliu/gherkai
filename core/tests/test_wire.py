@@ -34,7 +34,7 @@ def test_job_to_json_shape():
                     Step(2, "Then", "进入词条页"),
                 ),
             ),
-        ),
+        ), timeout_s=300.0,
     )
     d = job_to_json(job)
     assert d["scope"] == {"id": "login", "name": "login"}
@@ -53,7 +53,8 @@ def test_job_to_json_key_set_is_fixed_and_carries_schema_version():
     from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION
 
     fixed = {"schemaVersion", "scope", "engine", "scenarios", "assertionVotes", "timeoutS", "target", "deviceRequest"}
-    d = job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=()))
+    # 协议仍允许预算为空（协议不升版，ADR 0054 决策十）：core 不再产出空值，这里显式构造一个来核协议形态
+    d = job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=None))
     assert set(d) == fixed and d["schemaVersion"] == PROTOCOL_SCHEMA_VERSION == 2
     assert d["timeoutS"] is None and d["target"] == {"device": "desktop", "uiKind": "web"} and d["deviceRequest"] is None
     assert job_to_json(Job(scope_id="s", scope_name="s", engine="novaact", scenarios=(), timeout_s=300.0))["timeoutS"] == 300.0
@@ -66,7 +67,8 @@ def _device_jobs() -> dict[str, Job]:
     steps = (Step(0, "Given", "https://x/"), Step(1, "Then", "看到标题"))
     scs = (Scenario(id="f.feature:3", name="s", steps=steps),)
     return {
-        "desktop": Job(scope_id="web", scope_name="web", engine="novaact", scenarios=scs, assertion_votes=1),
+        # 桌面样本的预算为空：协议仍允许、规范样本保留这一形态（ADR 0054 决策十），core 自己不再产出
+        "desktop": Job(scope_id="web", scope_name="web", engine="novaact", scenarios=scs, assertion_votes=1, timeout_s=None),
         "android_web": Job(scope_id="aw", scope_name="aw", engine="midscene", scenarios=scs, assertion_votes=3, timeout_s=1500.0,
                            target=Target(device="android", ui_kind="web"),
                            device_request=DeviceFarmRequest(project_arn="arn:aws:devicefarm:us-west-2:123456789012:project:p",
@@ -107,7 +109,7 @@ def test_job_lines_golden_matches_fixture_shared_with_midscene():
 
 def test_job_to_json_assertion_votes_passthrough():
     # assertionVotes 原样透传进协议（组合根设的非默认值，worker 据此执行 N 次取多数票）
-    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), assertion_votes=5)
+    job = Job(scope_id="s", scope_name="s", engine="midscene", scenarios=(), assertion_votes=5, timeout_s=300.0)
     assert job_to_json(job)["assertionVotes"] == 5
 
 
@@ -119,7 +121,7 @@ def test_job_argument_serialization():
                 Step(0, "Given", "表", StepArgument(kind="dataTable", rows=(("h1", "h2"), ("a", "b")))),
                 Step(1, "Given", "文档", StepArgument(kind="docString", content="行1\n行2")),
             )),
-        ),
+        ), timeout_s=300.0,
     )
     d = job_to_json(job)
     steps = d["scenarios"][0]["steps"]

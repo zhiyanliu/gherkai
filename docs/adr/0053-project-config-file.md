@@ -31,7 +31,7 @@
 - 对每个可配置项，按上述顺序取第一个给出的值。没有对应环境变量的项，跳过该层。
 - 配置文件排在环境变量之后，是因为环境变量是「本次调用的临时覆盖」的惯用载体（CI 矩阵、单次排障），文件是项目的稳定基线；反过来排会让 CI 里的环境变量被入库文件静默覆盖。
 - region 因此依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件的 `region`、AWS profile 配置里的 region，前者优先；gherkai 仍不自行补默认 region。
-- **`default-job-timeout` 的最后一层不是固定值**：选项或配置文件给出的值都算「显式给出」（本项没有环境变量层）；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验，设备 scope 不存在「不超时」）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，`@timeout` tag 自身的语义归 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
+- **`default-job-timeout` 的最后一层不是固定值**：选项或配置文件给出的值都算「显式给出」（本项没有环境变量层）；都没有给时由 plan 层按 scope 的目标补缺省（桌面 300 秒；设备 scope 为获取预算加执行余量，显式值另受下限校验；任何目标都没有「不超时」，显式值不超过产品上限 7200 秒，[0054](./0054-settle-leftover-foreground-runs.md) 决策十）。覆盖与校验顺序归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，`@timeout` tag 自身的语义归 [0019](./0019-feature-tags-scope-and-engine.md) `@timeout` 节，缺省数值归 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2。
 - **路径类值相对配置文件所在目录解析**（`steps-dir`、`[apps]` 里的 `file`，以及本机后端下的 `report-dir`）。`steps-dir` 解析成绝对路径后写进 definition；`file` 解析成绝对路径后用于上传，definition 里记的是上传后的 S3 位置（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）；本机后端的 `report-dir` 决定报告与判定明细的落点，不进 definition。选项与环境变量里的路径仍相对当前目录，与现有行为一致。这样无论在项目哪一级目录执行，同一份文件给出同一组路径。**云端后端下 `report-dir` 不是路径**：它是产物桶内的键前缀，原样使用、不做绝对化，并与推进器 Lambda 的 `REPORT_DIR` 核对一致（[0033](./0033-iac-aws-backend-and-composition-wiring.md)、[0034](./0034-detached-batch-reconciler.md)），与选项、环境变量给出时同一形态。
 
 ### 3. 节与键

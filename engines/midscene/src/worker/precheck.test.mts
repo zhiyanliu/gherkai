@@ -14,7 +14,7 @@ const DESKTOP_ONLY_TARGETS = [{ device: "desktop", ui_kinds: ["web"] }];
 
 test("桌面 job 对真实 WORKER_TARGETS 通过；缺 target 不再当桌面、按版本不一致拒绝", () => {
   assert.equal(precheckTarget({ target: { device: "desktop", uiKind: "web" }, timeoutS: 300 }, WORKER_TARGETS), null);
-  assert.equal(precheckTarget({ target: { device: "desktop", uiKind: "web" }, timeoutS: null }, WORKER_TARGETS), null);  // 不超时写 null
+  assert.equal(precheckTarget({ target: { device: "desktop", uiKind: "web" }, timeoutS: null }, WORKER_TARGETS), null);  // 预算为空：协议允许，core 不再产出
   const msg = precheckTarget({}, WORKER_TARGETS);
   assert.ok(msg !== null && msg.includes("没有带测试目标") && msg.includes("同一版本"));
 });
