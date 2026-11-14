@@ -92,6 +92,7 @@ uv run pytest -q deploy_aws/tests   # stack 合成断言 + Provider + Lambda ass
 
 - `tests/synth_fixture.py`：`BackendStack` 与模板的共用构造（带上命令实际传入的 CDK 特性开关与版本戳 context），由 `test_stack.py` 与 `test_lambda_asset.py` 共用，避免两处在「version context 必给」这类前置条件上漂移；每次调用都重新合成一次。
 - worker 镜像族分两层：`tests/test_workers.py` 用 moto（SSM/ECS/ECR/DDB）+ 假容器引擎验**编排**（步序、幂等查重、血缘 tags、清理的三个前置条件）；`tests/test_container.py` 末尾三条用**真 docker** 验 mock 覆盖不到的引擎事实（未推送镜像的 `RepoDigests` 按引擎报告的镜像存储分两种形态断言：overlay2 存储下为空，containerd 镜像存储下构建与 `tag` 之后就有条目；arm64 镜像被架构判据拒绝），无 docker 时自动 skip。
+- `tests/test_workers.py` 的同一批用例可经 [`tools/workers_real_aws/`](../tools/workers_real_aws/README.md) 的装置原样对真实账户执行：moto 不校验的注册约束、删除之后的描述、`registeredAt` 与读后可见性在那里才看得到，装置的适配、证据边界与执行命令见该目录的 README。改了 `test_workers.py` 的夹具、模块全局或用例名之后，先执行装置的 moto 自检；`cli/tests/test_workers_real_aws.py` 断言装置收集到的用例与直接执行测试文件的相同、全部通过，在 moto 上执行一遍真实账户模式的代码路径与补充用例，并在测试文件的临时副本里注入用例，核对断言失败、执行异常、收尾失败与被打断、参与方线程残留、预期失败判定的边界与同前缀残留都不被装置吞掉；另在 `gherkai_deploy_aws/workers.py` 的副本里把复制模板的那一行变异成漏带执行角色，核对装置不替被测代码补回它（改了那一行，自检会提示同步变异）。装置在每条用例对账户的清理之前查询 `test_workers.py` 的模块级 `lingering_party_threads()`，有残留即跳过清理并终止会话；改这个名字要同步改装置（`tools/workers_real_aws/harness.py` 的 `_lingering_now`），否则装置视为没有残留。装置还按名字包装 `seed_backend` 来判别种子模板，改它的名字时装置在载入时即报错。
 - **真 ECR push / RunTask 拉起已注册的 revision / VPC 取值比对与 skew 比对的真账户一侧不在单测里**：按「绿≠对」，这些结论依赖被 mock 掉的真实行为，改动这些路径时按 CLAUDE.md「代码纪律」升级到真实运行。
 
 ## 设计文档

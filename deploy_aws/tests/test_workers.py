@@ -1554,8 +1554,9 @@ _PARTY_THREADS: list[threading.Thread] = []   # 启动过的参与方线程，�
 
 
 def lingering_party_threads() -> list[threading.Thread]:
-    """仍然存活的参与方线程。正常收尾时为空；对真实账户执行这些用例的装置在收尾时查询它，不为空即说明有一方中止之后
-    仍可能发出调用，装置应终止整个执行进程，而不是继续执行后续用例或清理资源。"""
+    """仍然存活的参与方线程。正常收尾时为空；对真实账户执行这些用例的装置（`tools/workers_real_aws/`）在每条用例对账户
+    的清理之前查询它，不为空即说明有一方中止之后仍可能发出调用：装置记下这一点，跳过这条用例的清理（那一方可能在清理
+    期间恢复执行、重新写入资源），并终止整个会话，不再执行后续用例，资源留给进程退出之后的清扫。"""
     _PARTY_THREADS[:] = [t for t in _PARTY_THREADS if t.is_alive()]
     return list(_PARTY_THREADS)
 
@@ -2518,8 +2519,9 @@ def test_list_workers_output_shape(aws):
     body = text()
     assert rc == 0, body
     assert f"prefix {PREFIX}" in body and f"版本 {VERSION}" in body and "默认 variant login" in body
-    assert "== novaact（family gherkai-novaact-worker" in body and "== midscene（" in body
-    for expected in ("base", "login", "1.4.0-login", "sha256:666666666666", "gherkai-novaact-worker:"):
+    family = names.task_def_name(PREFIX, "novaact")
+    assert f"== novaact（family {family}" in body and "== midscene（" in body
+    for expected in ("base", "login", "1.4.0-login", "sha256:666666666666", f"{family}:"):
         assert expected in body, expected
     assert "（本版本还没有任何 variant" in body, "midscene 没推过 → 明说，别留空白"
 
