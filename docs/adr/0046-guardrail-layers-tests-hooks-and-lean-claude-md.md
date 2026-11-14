@@ -1,6 +1,6 @@
 # 0046. contributor 护栏三层：测试兜底、hook 写完即查、CLAUDE.md 只留判据
 
-> **Status:** Accepted（2026-09-20）—— 把 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节、[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八与 CLAUDE.md 文档纪律里能逐行判定的规则统一收进同一份规则源（用户可见字符串字面量的禁词表按 0039 护栏节仍单独存于 `cli/tests/test_user_facing_messages.py`，只由测试层执行），并给 Claude Code 加两道 hook；规则的内容仍各归原 ADR，本 ADR 只定「怎么执行」。
+> **Status:** Accepted（2026-09-20）—— 把 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节、[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八与 CLAUDE.md 文档纪律里能逐行判定的规则统一收进同一份规则源（用户可见字符串字面量的禁词表按 0039 护栏节仍单独存于 `cli/tests/test_user_facing_messages.py`，只由测试层执行），并给 Claude Code 加两道 hook；规则的内容仍各归原 ADR，本 ADR 只定「怎么执行」。2026-11-14 增补决策 6：方法文档里的规则绑定到使用时刻，同僚复核加一道复核轮闸门。
 
 ## 背景与问题
 
@@ -27,6 +27,12 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
    - 脚本自身出错不阻断：两道 hook 只在 `doc_rules_check.py` 退出码为 1（有命中）时阻断，其余非零退出码（脚本自身出错为 2）一律不阻断，并把工具的错误输出经 `hookSpecificOutput.additionalContext` 作为提示回给 agent，让它知道这次改动或提交未经检查。工具问题不该把编辑卡死，也不该在 agent 不知情时被当成检查已通过。两道 hook 都保留工具的 stderr、不丢弃；`doc_rules_check.py` 把自身的一切故障（git 调用失败、规则模块出错、指定的路径不存在、无法识别的选项等）都归为退出码 2：Python 未捕获异常的默认退出码是 1，与「有命中」是同一个退出码，hook 会阻断、却只给出空的命中列表（据向规则模块注入异常的实测），丢弃 stderr 时连故障原因也看不到。
 4. **人类 contributor**：同一份脚本给一个可选的 git pre-commit（`tools/git-hooks/pre-commit`，`git config core.hooksPath tools/git-hooks` 启用）；不启用的仍由 CI 兜底。它在提交用的 index 就位之后运行，是提交之前唯一能保证提交内容本身经过检查的一层（`git commit --no-verify` 跳过它时除外），启用后 agent 在该 clone 里的提交同样经过它。git hook 不随仓库分发、不会自动启用，故只能 opt-in，不能替代第一层。
 5. **第三层：CLAUDE.md 只留判据与指针**。凡已被第一、二层机械化的条目，CLAUDE.md 里精化为「判据一句 + 护栏 / hook 指针」，不再复述枚举；留在 CLAUDE.md 里作正向要求的只剩机器判不了的判断型规则——读者比例定压缩方向、绿≠对的证据边界、接口诚实优先于改动规模、AWS 免费的适用期、「改完 code 回头校准文档」的差集习惯。判据：一条规则若能写成「某文件某行命中某正则即错」，它就不该只活在 CLAUDE.md 里。
+6. **方法文档里的规则绑定到使用时刻**。前五条管逐行可判的文本规则；`docs/ai-eng/` 下各篇方法文档里的规则是另一类：要在某个时刻执行的做法。它们同样不能只靠正向提示。
+   - **判据**：要在某个时刻执行的规则，由那个时刻必经的东西带进上下文：入口命令、skill，或挂在那个动作上的 hook。「细则见某文档」的指针不算入口。按需读取的文档在上下文压缩之后不在上下文里，压缩摘要留下的转述又让 agent 以为自己知道流程，不去重读。
+   - **各篇的入口**：`code-health-review.md` 与 `doc-health-review.md` 各有同名命令（`.claude/commands/`），`diagram-authoring.md` 有 skill `doc-diagram`（`.claude/skills/doc-diagram/`），三者的入口都只写「先读这篇并照做」，每次使用都重读。`peer-review.md` 不同：复核由 agent 在长任务中途自己反复发起，没有人敲命令的那一刻，所以挂 hook（下条），另在 CLAUDE.md 独立复核一条里留判据与读取时机。新增方法文档时先定它的入口。
+   - **复核轮闸门** `.claude/hooks/review-round-gate.sh`（PreToolUse，Bash 之前）：命令文本里有 `codex exec`、简报经 `<` 从文件读入时读这份简报。不带 `resume` 的轮次（首轮与全新上下文的轮次）须有一行顶格、以 1 到 6 个 `#` 加空格开头、含「基准」的标题（只认这一种写法：缩进的标题、`#` 后面用制表符的标题与下划线式标题不算）；带 `resume` 的续接轮须有一行含「趋势」与数字（各轮基准之内的意见条数）。缺即 `exit 2` 阻断这次调用，提示指向 `docs/ai-eng/peer-review.md` 第三、四节，并要求上下文压缩之后没有读过它的先读。这两项是让复核循环能停下来的东西：基准给出有界的终点；趋势让作者每轮把各轮的意见条数列出来，也让复核者看得见，多一方看趋势。
+   - **判断不了即放行**：命令里没有 `codex exec`、简报不是经 `<` 从文件读入、文件读不到、简报里既没有「复核」也没有「闭合」（不是复核简报）、切词失败，一律放行；脚本自身出错同前两道 hook，放行并经 `hookSpecificOutput.additionalContext` 提示。闸门防的是忘记，不防有意绕过，所以不为认出更多写法加识别逻辑（盲区见下节）。先在 shell 里筛一次：整份 hook 输入里没有字面 `codex exec` 时不启动 python；别的字段（如调用说明）里提到这两个词时会启动一次，再由 python 按命令文本判断后放行。
+   - **证据**（据一次长会话的记录回查）：`peer-review.md` 写成之后会话发生过一次上下文压缩，其后 agent 送了 12 轮复核，没有一次打开这篇文档，CLAUDE.md 里指向它的指针一直在上下文里。对照同一会话里绑定在具体时刻的动作：CLAUDE.md 的「提交前先更新图谱」，54 次提交里 49 次照做，其间压缩 3 次。那 12 轮里有一批改动复核了六轮没有收敛（约 38 条意见，每轮旧意见闭合、新意见多数落在上一轮的修正上），六份简报都没有写基准，是 owner 凭体感指出的。当时的细则里也还没有「闭合相对基准」「看趋势」这些规则，所以修的是两处：细则补规则（`peer-review.md` 第三、四节），再把细则绑定到使用时刻（本条）。
 
 **加一条规则的顺序**：先在规则所属的 ADR 立决策（口吻 → 0045 决策六；术语 → 0045 决策八；产品文案 → 0039），再在 `_doc_rules.py` 加规则或扩扫描面——测试与 hook 自动接上，不另配；最后看 CLAUDE.md 对应条能否因此精化。操作细节在 CONTRIBUTING.md「护栏三层」段（人读的技术文档，contributor 的入口）。
 
@@ -41,6 +47,8 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 - 定义禁词表与讨论这些词本身的文件（`cli/tests/_doc_rules.py` 的 `SELF_FILES`：各护栏测试与两个工具脚本）整份不扫，其注释与 docstring 的措辞靠复盘时人工检查。
 - 「本批 / 这一批 / 整批」在 Lambda 与 Stream 侧注释里指事件批，注释层的退役表去掉这三个词，Run 义的残留交 code-health 复盘人判。
 - 判断型规则不进护栏，也不装作能进。
+- 复核轮闸门（决策 6）只覆盖经 Codex CLI 发起的复核，即 `peer-review.md` 档一的现行实现：Codex 不可用、改用本家模型的子代理复核（档二）时没有对应的 hook，只剩 CLAUDE.md 独立复核一条里的判据；换别的同僚工具时要按新工具的调用形态另挂。
+- 复核轮闸门检查有没有，不检查对不对：有「基准」标题不等于基准定得合适（由复核者质疑，`peer-review.md` 第三节），有「趋势」一行不等于作者据此做了判断，裁决与熔断仍是判断型规则。下列写法它认不出，放行：命令经包装脚本或别名发起、`bash -c '…'` 引号里的调用、简报经 heredoc 或管道给出、简报用相对路径而命令执行时的目录不是项目根、路径里带 `~` 或变量（闸门不做展开，读不到即放行）；全新上下文的闭合轮缺「趋势」也不检查。反过来有一种误拦：`codex exec` 两个词作为别的命令的未加引号的参数或出现在注释里，同一条命令又经 `<` 读入一份提到复核而没有基准标题的文件。这种写法罕见，加引号即可通过，不为它加命令位置的识别。
 
 ## 被拒方案（护栏）
 
@@ -50,6 +58,10 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 - **hook 只提醒不阻断**：与正向提示同一失败形态——被滚过去。阻断式的前提是低误报与只报改动行，两者本 ADR 都做了。
 - **hook 全文件扫**：改一行报出全文件历史命中，一次清扫进行中会刷屏；改动行判据用 `git diff -U0 HEAD` 直接给出、零成本。
 - **规则散在各测试文件里各写一份**：hook 与测试会漂；`_doc_rules.py` 已是既有护栏的单一事实源，扩它而不是复制。
+- **方法规则只靠 CLAUDE.md 里的指针**：决策 6 的证据，指针在上下文里 12 轮没有带来一次重读。
+- **上下文压缩之后提醒重读方法文档**（在压缩之后触发的 hook 往上下文里加一段提示）：对各篇方法文档都有效，但仍是提醒，与上面「hook 只提醒不阻断」同一失败形态；另三篇已有每次使用都重读的入口，它实际只补同僚复核一篇。
+- **闸门检查「压缩之后有没有读过细则」**（解析会话记录）：最贴近问题本身，但会话记录的内部格式不是 Claude Code 的稳定接口，长会话的记录也很大；检查简报是检查送出这一刻的产物，不依赖工具的内部格式。
+- **每份简报都要求基准与趋势两项**：续接轮的复核者上下文里已有基准，首轮没有趋势可言，都强求只会得到「同上」「首轮」这类应付的行。
 - **把新护栏做成 CLAUDE.md 里更长的清单**：那是把执行机制写回散文；护栏名单归 CONTRIBUTING.md「护栏三层」段，CLAUDE.md 只给一个指针。
 
 ## 与既有 ADR 的关系
@@ -61,4 +73,5 @@ CLAUDE.md 里的多数纪律是**正向要求**：「写人读文本前按决策
 ## 对既有文档与 code 的影响
 
 - 新增：`tools/doc_rules_check.py`、`.claude/hooks/wording-guard.sh`、`.claude/hooks/commit-gate.sh`、`tools/git-hooks/pre-commit`、`cli/tests/test_code_comments.py`、`test_technical_docs.py`、`test_adr_hygiene.py`、`test_context_glossary.py`；`.claude/settings.json` 挂两道新 hook。
+- 决策 6 新增：`.claude/hooks/review-round-gate.sh`（`.claude/settings.json` 挂在 Bash 之前、`commit-gate.sh` 之后）、`cli/tests/test_review_round_gate.py`；`docs/ai-eng/peer-review.md` 第三节立简报的两处固定标记、第五节记闸门；CLAUDE.md 独立复核一条加判据、读取时机与 hook 指针；CONTRIBUTING 补「复核轮闸门」段。
 - CLAUDE.md：Status 头、journey、悬空指针、文件名、三分类、严格词表、commit 七条各精化为判据 + 护栏指针；CONTRIBUTING 补「护栏三层」段（操作手册）、开发环境里的 opt-in git hook 与工具表两行；CONTEXT 立「护栏」词条。

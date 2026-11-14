@@ -18,3 +18,4 @@
 ## hooks
 
 - `hooks/commit-gate.sh` 读 stdin 里的工具调用 JSON，空输入按「没有 git commit」放行：`< /dev/null` 只能让它结束，不能用来核对改动；验证 hook 行为要提供含 `tool_input.command`（且含字面 `git commit`）的 JSON 并结束输入。
+- `hooks/review-round-gate.sh` 只对命令文本里有字面 `codex exec` 的 Bash 调用做事，读经 `<` 给出的简报文件；被它拦下时先读 `docs/ai-eng/peer-review.md` 第三、四节，再给简报补上「基准」标题或「趋势」一行，不要改写命令形态绕开它。验证它的行为同样要提供含 `tool_input.command` 的 JSON 并结束输入。

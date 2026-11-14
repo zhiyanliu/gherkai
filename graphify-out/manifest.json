@@ -300,9 +300,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794648137.1125119,
-    "seen": 1794648242.3085701,
-    "ast_hash": "66065d08bdf4e249fde85b03996b2ccf",
+    "mtime": 1794648974.5410342,
+    "seen": 1794650326.025362,
+    "ast_hash": "e3a308b7734208df326a01a491d7c630",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1596,9 +1596,9 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794647332.6216903,
-    "seen": 1794647585.0747032,
-    "ast_hash": "9713dbed173d625af11745a108f94780",
+    "mtime": 1794650194.1434464,
+    "seen": 1794650326.025363,
+    "ast_hash": "df93a793eb93853ad47b3f99e0dcca60",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -2004,9 +2004,9 @@
     "semantic_hash": ""
   },
   ".claude/settings.json": {
-    "mtime": 1789874973.933686,
-    "seen": 1794647585.0745442,
-    "ast_hash": "1600c66dec71a16dc74478a8dfbb6750",
+    "mtime": 1794649473.4613335,
+    "seen": 1794650326.025183,
+    "ast_hash": "3da3b61fb44dd3b4c8736569e49d1f79",
     "semantic_hash": ""
   },
   "docs/ai-eng/diagram-authoring.md": {
@@ -2058,9 +2058,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1794215285.0118582,
-    "seen": 1794647585.074728,
-    "ast_hash": "12f71ff31695141fd6fdecf1a26cfe37",
+    "mtime": 1794650194.143052,
+    "seen": 1794650326.025392,
+    "ast_hash": "5363c0a14eb9e0518ce8ebed8a644150",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
@@ -2472,9 +2472,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794648137.1125119,
-    "seen": 1794648242.308568,
-    "ast_hash": "66065d08bdf4e249fde85b03996b2ccf",
+    "mtime": 1794648974.5410342,
+    "seen": 1794650326.0253608,
+    "ast_hash": "e3a308b7734208df326a01a491d7c630",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/tunnel-warmup.test.mts": {
@@ -2874,15 +2874,15 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/peer-review.md": {
-    "mtime": 1794647874.492284,
-    "seen": 1794648242.3086069,
-    "ast_hash": "8a86fd1574184df269f6546952974817",
+    "mtime": 1794650194.1432564,
+    "seen": 1794650326.025399,
+    "ast_hash": "900042804a261eecd856a8863130b3f8",
     "semantic_hash": ""
   },
   ".claude/README.md": {
-    "mtime": 1794214453.399258,
-    "seen": 1794647585.074698,
-    "ast_hash": "1763b3792d98b9e2c51a7d2cef396d20",
+    "mtime": 1794648974.5409298,
+    "seen": 1794650326.025358,
+    "ast_hash": "fb8d1fd297326a621789d7a873ec93fb",
     "semantic_hash": ""
   },
   "core/tests/test_list_runs.py": {
@@ -2949,6 +2949,18 @@
     "mtime": 1794647332.6218314,
     "seen": 1794647585.074751,
     "ast_hash": "062cf559e45fdd9e8df5d6557c2670e6",
+    "semantic_hash": ""
+  },
+  ".claude/hooks/review-round-gate.sh": {
+    "mtime": 1794650194.1436832,
+    "seen": 1794650326.025179,
+    "ast_hash": "d49489aa5e59f55f48e419a7ccfb9c9b",
+    "semantic_hash": ""
+  },
+  "cli/tests/test_review_round_gate.py": {
+    "mtime": 1794649485.0399375,
+    "seen": 1794650326.025207,
+    "ast_hash": "72e5fa46e1cdafb9e721c9e3ef1fd6f1",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
