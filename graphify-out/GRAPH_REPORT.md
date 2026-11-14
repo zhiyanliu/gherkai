@@ -1,17 +1,17 @@
 # Graph Report - yaozhou  (2026-11-14)
 
 ## Corpus Check
-- 475 files · ~970,009 words
+- 475 files · ~970,606 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 31 file(s) not represented in the graph (top: (none) 17, .feature 7, .xml 6)
 
 ## Summary
-- 11756 nodes · 27290 edges · 462 communities (305 shown, 157 thin omitted)
+- 11758 nodes · 27292 edges · 484 communities (321 shown, 163 thin omitted)
 - Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 2372 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `5984ecfc`
+- Built from commit: `9a738949`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -31,11 +31,11 @@
 - main
 - _run_step
 - ScopeDone
-- device_selection.py
+- Provider
 - test_stack.py
 - test_evidence.py
 - test_deploy_cmd.py
-- test_container.py
+- ContainerError
 - re
 - test_codex_usage.py
 - Status
@@ -52,7 +52,7 @@
 - test_lifecycle_states.py
 - test_worker_variant.py
 - query_capabilities
-- LocalRunStore
+- test_detached_launcher.py
 - test_tunnel_cli.py
 - SqliteEventLog
 - gherkai agent skill 主文
@@ -63,8 +63,8 @@
 - test_drain_bound_applies_without_deadline_under_fail_fast
 - Job
 - test_status_group.py
-- _stopped_detail
-- ScopeStarted
+- _argv
+- test_drain_bound_applies_without_deadline_under_fail_fast
 - _RecUploader
 - skill_install.py
 - test_tunnel_host.py
@@ -74,11 +74,11 @@
 - test_interrupt_model.py
 - appium.mts
 - textui.py
-- _AbortFlag
+- test_provider.py
 - guard.test.mts
 - cli.py
-- test_provider.py
-- StepResult
+- _parse
+- JobResult
 - manifest.json
 - evidence.mts
 - test_artifact_upload.py
@@ -87,7 +87,7 @@
 - report_store/local.py
 - log
 - _role_statements
-- wire.py
+- scan
 - main
 - 03-midscene-grounding.ts
 - gherkai 变更记录 (CHANGELOG)
@@ -97,7 +97,7 @@
 - ../lib/tunnel-warmup.mjs
 - test_cloud_reconcile.py
 - use_color
-- deploy.py
+- _cmd_doctor
 - test_compose.py
 - core/tests/conftest.py
 - resolve_or_create_project
@@ -113,7 +113,7 @@
 - gherkai_deploy_aws/names.py
 - Video Material Files
 - _patch_skew
-- _FakeNovaAct
+- driven
 - BackendStack
 - EventSink
 - 决策
@@ -124,7 +124,7 @@
 - 决策
 - interface.mts
 - test_precheck.py
-- redact_secrets
+- _session
 - app.mts
 - codex_usage.py
 - Diagram Build Script
@@ -133,17 +133,17 @@
 - evidence.test.mts
 - .goto
 - with
-- web-context.mts
+- _retire_now
 - test_lambda_asset.py
-- Event Wallclock Analysis
-- test_stderr_redaction.py
+- events_wallclock.py
+- run_scope.py
 - tunnel.py
 - test_skill.py
 - test_devicefarm.py
 - run-scope.test.mts
 - check_dist_metadata.py
-- _fake_gherkai
-- run_scope.py
+- test_ddb_capacity.py
+- test_argument.py
 - probe.mts
 - Media Conversion Verification
 - package.json
@@ -154,7 +154,7 @@
 - DynamoDB Events Transport ADR
 - json
 - 决策
-- test_ddb_capacity.py
+- _report_lines
 - _atomic.py
 - test_skill_deploy_tokens.py
 - Provider
@@ -171,9 +171,9 @@
 - config.py
 - _FakeTable
 - ref_node_assert
-- build_cloud_stores
+- _fake_store_ctors
 - world
-- minimax_narration.py
+- cdk
 - test_definition_schema.py
 - container_name
 - stopTimeout=120 / grace 预算校准
@@ -182,11 +182,11 @@
 - job-source.mts
 - read-points.test.mts
 - Cooperative Stop Design
-- ADR 0027: run 报告归集索引
+- record
 - doc_rules_check.py
 - test_devicefarm_client_placement.py
 - adapters.contract.test.mts
-- run_evals.py
+- test_doc_rules_check.py
 - Engine Port & Job Planning
 - Scope Tag Parsing
 - model.py
@@ -196,30 +196,30 @@
 - Worker Termination Contract
 - Package URL Links
 - _make_devicefarm_client
-- .waitRunning
+- gherkai_runtime/names.py
 - session.mts
 - DeviceSurface
-- test_tunnel.py
-- _stream_record
+- render_traffic_policy
+- test_run_ids_scope_id_containing_hash_is_split_from_the_left
 - test_lambda_handlers.py
 - _ClientError
 - workers_real_aws/conftest.py
-- parametrize
+- _FailingEcs
 - test_project.py
 - test_current_version_mappings_filters_one_engine_and_version_out_of_a_shared_enumeration
 - Gherkin Parse Seam
 - exerciseSession
-- CloudTarget
+- resolve_cloud_target
 - test_subprocess_engine.py
 - ProcessEvents
 - Commit Gate Script
 - Derived Sync Script
 - Wording Guard Script
-- _StampSsm
+- ssm_path
 - test_safe_point_upload.py
 - Architecture Diagrams
 - Slide Frame SSIM Checks
-- parametrize
+- SubprocessWorkerHandle
 - JobSource
 - env
 - redact_secrets
@@ -234,13 +234,13 @@
 - no-device-deps.test.mts
 - _render_status
 - Artifact Uploader Component
-- project.py
+- ScopeStarted
 - precheck.mts
-- check_version_skew
+- test_container.py
 - Index Wait Script
 - gherkai Workspace Root
 - _StubEcs
-- pathlib
+- app_upload.py
 - xcuitest.test.mts
 - Execution Backend
 - Feature Files
@@ -256,14 +256,14 @@
 - surface-desktop.mts
 - probe.test.mts
 - MatchInputError
-- ReportRef
+- _FakeResult
 - bin.mts
 - _gap_engine
 - e2e_harness.py
 - jobs
-- _wire_capture
+- describe_revision_or_none_if_unlisted
 - agentcore-sigv4.mts
-- _explain_emit
+- LazyDdb
 - Bundled JetBrains Mono WOFF2 Subsets
 - xcuitest.mts
 - _Recorder
@@ -273,16 +273,16 @@
 - npm
 - warmup.mts
 - ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）
-- model.py
+- test_reconcile.py
 - appium.test.mts
 - test_retired_at_of_the_replaced_revision_is_read_after_the_mapping_write
 - runScope
 - deterministic.py
-- pipe_results
+- test_release_notes.py
 - RunResult
 - gherkai_runtime/__init__.py
 - DeterministicKeywordMismatch
-- DeviceFarmSessionBlock
+- test_real_tag_to_ecr_ref_without_push_per_image_store
 - test_s3_report_store.py
 - FargateWorkerHandle
 - _timeout_wait_budget_s
@@ -294,13 +294,13 @@
 - _Page
 - materialize.py
 - _all_option_dests
-- test_interrupt_process.py
+- watch_run_and_stop_tunnel
 - AppiumInterface
 - test_technical_docs.py
 - image-gate
 - include
 - Budget
-- _delayed_stopped_ecs
+- _Worker
 - DriverAdapter
 - deterministic_steps.py
 - error-text.mts
@@ -309,38 +309,38 @@
 - TargetSurface
 - _FakeSink
 - test_plan_target_check_degrades_when_capabilities_unavailable
-- test_list_workers_json_keys_match_contract_doc
-- classifyCallFailure
-- _Sink
+- test_drain_bound_counts_from_stop_request_not_after_blocking_stop
+- reconcile.tick（推进器共享入口）
+- _BucketRegionObserver
 - test_context_glossary.py
 - device/surface.test.mts
-- _events_table_actions
-- _FakeBrowserClient
+- _FakeSink
+- ImageInfo
 - image_token_probe：截图缩放后的图片 token 探针
 - ./deterministic.mjs
 - EventBridgeTimeoutWatch
 - reconciler.py
 - verify_project
 - _index_ast_lines
-- _SeqEcs
+- test_access_errors_are_not_misses
 - _interrupt_prompt
 - parent-watchdog.mts
 - test_await_exit_code_transient_missing_then_stopped_reads_code
 - test_worker_subnets_single_source_across_ssm_and_lambda_env
 - JobState
-- build_engines
+- device_reprobe 使用说明（Midscene 设备模块的真机重新探测）
 - AdapterRegistry
 - severity 数值序（_STATUS_SEVERITY）
-- test_run_status_agrees_between_schedule_and_project_full
+- ecs_task_timing.py
 - compose.py
 - jobs
-- _FakeEcs
+- TaskProbe
 - test_session_events_reject_unknown_enums_and_missing_pairing_key
-- Spy
-- deviceFarmApi
+- container.py
+- _cmd_list_runs
 - register
 - test_workflow_status_update_failure_on_exit_does_not_change_the_exit_code
-- _DeterministicCtx
+- ._collect
 - node
 - _Party
 - build
@@ -358,7 +358,7 @@
 - DeviceFinalizer
 - diffAgainstFixture
 - FargateEngine
-- _cmd_plan
+- _add_device_flags
 - test_account_check_only_swallows_credential_and_network_failures
 - GuardFactory
 - S3 Key Mirrors Local Run Tree
@@ -371,7 +371,7 @@
 - _finite_float
 - match
 - _positive_int
-- __getattr__
+- _put_state
 - ADR-0026
 - DeterministicCtx
 - listRegistry
@@ -381,11 +381,14 @@
 - AddressAttempt
 - AgentFactory
 - ./deterministic.steps.mjs
+- _RaisingSink
 - APP_LOCATION_MISSING_MESSAGE
 - APP_PREPARE_TIMEOUT_MESSAGE
 - ConnectOutcome
 - ConnectRequest
+- map_origin_in_jobs
 - Fargate/ECS RunTask 执行后端
+- _stub_get_not_found
 - DeviceChoice
 - DeviceParts
 - DevicePartsEnv
@@ -449,22 +452,40 @@
 - QUEUE_DRAIN_EXIT_MS
 - Scenario
 - ScopeIo
-- .listAllDevices
+- .enqueue
 - ScopeSeam
 - ShutdownDeps
 - Step
 - WORKER_TARGETS
+- test_randomly_corrupted_prefixes_are_refused
+- ADR 0023: Nova Act acting 锁 Python
+- 独立复核与同僚复核 — 工作约定
+- .from_env
+- test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_finalize
+- digest_for_repo
 - test_handle_timeout_finds_stopped_target_on_second_page
 - surface.mts
 - test_build_reuses_its_own_handles_and_builds_no_new_client
 - test_tick_runs_branches_on_tick_outcome
+- _runs_stream_record
 - test_final_drain_paginates_across_last_evaluated_key
-- patch-package 补丁 @cucumber+cucumber+13.0.0
+- stop_tunnel
+- aws
+- _build_selector
+- _color_env_independent
+- platform_exit_reason
+- _advancer_stmts
 - review-round-gate.sh
 - test_artifact_lines_report_write_failure_falls_back_to_a_note
-- tunnel.py（--expose-local 隧道 provider）
-- RunState 物化读视图
-- 产品文案护栏（AST 扫禁词表）
+- browser_session_timeout_s
+- _Calls
+- .calls
+- _parser_nodes
+- cloud_env
+- test_workflow_guard_passes_the_real_exception_to_the_sdk
+- test_the_pipe_setups_really_exercise_the_failure_paths
+- test_run_ids_keeps_modify_and_records_without_event_name
+- _utf8
 - 判定的计算路径：从单次投票到退出码
 
 ## God Nodes (most connected - your core abstractions)
@@ -484,11 +505,11 @@
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/ports.py
 - `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunMeta`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunResult`  [INFERRED]
-  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `compute_watch_ttl_s()`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → runtime/gherkai_runtime/tunnel_host.py
 - `三、发起进程标识：放运行态记录的顶层` --references--> `RunListing`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `对既有文档与 code 的影响` --references--> `RunListing`  [INFERRED]
+- `三、发起进程标识：放运行态记录的顶层` --references--> `RunMeta`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
 
 ## Import Cycles
@@ -542,7 +563,7 @@
 - **Execution runtime behaviour diagram family** — docs_diagrams_execution_cloud_cascade, docs_diagrams_execution_detached_gates, docs_diagrams_execution_timeout_chain [INFERRED 0.70]
 - **agent 驾驭面：机读输出 + 证据 + 教材 + 文案纪律** — docs_adr_0041_agent_facing_cli_affordances_json_contract, docs_adr_0042_step_evidence_and_explain_explain, docs_adr_0043_agent_skill_for_driving_gherkai_derived_copy, docs_adr_0039_user_facing_surfaces_no_internal_references_message_guardrail [INFERRED 0.80]
 
-## Communities (462 total, 157 thin omitted)
+## Communities (484 total, 163 thin omitted)
 
 ### Community 0 - "guard.mts"
 Cohesion: 0.05
@@ -553,8 +574,8 @@ Cohesion: 0.03
 Nodes (64): _fake_schedule_factory(), _FakeS3, _patch_cloud_handles(), fake_resolve_variant(), _spy_run_meta(), _stub_revision(), test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(), test_cloud_artifacts_are_s3_and_ddb_uris() (+56 more)
 
 ### Community 2 - "gherkai_runtime/names.py"
-Cohesion: 0.07
-Nodes (21): default_name(), device_farm_interactive_endpoint_resource(), device_farm_session_arn_prefix(), ecr_repo_name(), job_timeout_schedule_prefix(), _match_device_farm_project_arn(), prefix_max_len(), short_digest() (+13 more)
+Cohesion: 0.11
+Nodes (12): device_farm_interactive_endpoint_resource(), device_farm_session_arn_prefix(), _match_device_farm_project_arn(), validate_device_farm_project_arn(), test_derivations_refuse_malformed_arn(), test_interactive_endpoint_resource_is_the_fixed_literal_in_the_project_account(), test_pending_placeholder_is_plainly_not_an_arn(), test_session_prefix_covers_own_sessions_only() (+4 more)
 
 ### Community 3 - "stderr-outlets.test.mts"
 Cohesion: 0.06
@@ -562,147 +583,147 @@ Nodes (65): ALIAS_ASSIGNMENTS, Bindings, bindingsOf(), CONSOLE_STDERR, DECLARATI
 
 ### Community 4 - "HookedEcs"
 Cohesion: 0.04
-Nodes (50): _after_mapping_reread(), after_enumeration(), aws(), _aws_env(), _change_on_final_check(), on_describe(), _cleanup(), _final_check_pass() (+42 more)
+Nodes (60): _after_mapping_reread(), _cleanup(), _deny_describe_of(), _failing_mapping_put(), _final_check_pass(), _held_push(), HookedDdb, HookedEcs (+52 more)
 
 ### Community 6 - "test_schedule.py"
 Cohesion: 0.07
-Nodes (76): schedule(), ScheduleOpts, CollectSink, FakeEngine, FakeResolver, test_fail_fast_inflight_job_is_aborted(), test_fail_fast_queued_job_is_skipped(), test_network_error_during_timeout_is_timeout_not_aborted() (+68 more)
+Nodes (79): schedule(), ScheduleOpts, CollectSink, FakeEngine, FakeResolver, test_fail_fast_inflight_job_is_aborted(), stop_hook(), test_fail_fast_queued_job_is_skipped() (+71 more)
 
 ### Community 7 - "JobState"
 Cohesion: 0.03
-Nodes (95): _device_keys_for_explain(), explain_to_dict(), S3ResultStore, DefinitionContractError, UnsupportedDefinitionSchema, AppRef, DeviceFarmRequest, JobResult (+87 more)
+Nodes (72): _atomic_write_json(), LocalRunStore, mutate(), DefinitionContractError, UnsupportedDefinitionSchema, AppRef, DeviceFarmRequest, run_state_from_result() (+64 more)
 
 ### Community 8 - "test_workers.py"
-Cohesion: 0.04
-Nodes (83): _at(), _deny_describe_of(), _failing_mapping_put(), FakeContainer, _held_push(), _mapping(), _out(), _push() (+75 more)
+Cohesion: 0.05
+Nodes (55): _at(), _documented_keys(), FakeContainer, _out(), _push(), _sections(), seed_backend(), Spy (+47 more)
 
 ### Community 9 - "pytest"
-Cohesion: 0.08
-Nodes (42): FeatureContractError, _cfg(), _plan(), test_assertion_votes_default_is_one(), test_background_prepended(), test_bare_tag_without_value_errors_with_location(), test_datatable_and_docstring_argument(), test_default_timeout_must_be_finite() (+34 more)
+Cohesion: 0.10
+Nodes (36): _cfg(), _plan(), test_assertion_votes_default_is_one(), test_background_prepended(), test_bare_tag_without_value_errors_with_location(), test_datatable_and_docstring_argument(), test_default_timeout_must_be_finite(), test_device_and_app_tag_violations_error() (+28 more)
 
 ### Community 10 - "workers.py"
 Cohesion: 0.03
-Nodes (64): Aws, cleanup_pass(), CleanupOutcome, _clear_retired_at_after_mapping(), _connect(), current_version_mappings(), _describe_revision(), _ecr_login() (+56 more)
+Nodes (62): Aws, cleanup_pass(), CleanupOutcome, _clear_retired_at_after_mapping(), _connect(), current_version_mappings(), _describe_revision(), _ecr_login() (+54 more)
 
 ### Community 11 - "test_main.py"
 Cohesion: 0.02
-Nodes (97): _assert_identity_error(), _capturing_schedule(), _cloud_list_runs_env(), make_table(), fake_schedule(), _interrupting_schedule_factory(), _listing(), _miss() (+89 more)
+Nodes (85): _assert_identity_error(), _capturing_schedule(), fake_schedule(), _interrupting_schedule_factory(), _miss(), _no_such_profile_env(), _plan_names(), _spy_build_engines() (+77 more)
 
 ### Community 12 - "main"
 Cohesion: 0.04
 Nodes (44): main(), test_default_engine_flag_has_choices(), test_device_target_rejected_by_plan_and_preflight_when_engine_lacks_target(), test_explain_cloud_blocks_on_version_skew_before_any_cloud_read(), test_help_hides_internal_entry_points(), test_malformed_feature_friendly_diagnostic(), test_plan_annotates_deterministic_hits(), fake_match() (+36 more)
 
 ### Community 13 - "_run_step"
-Cohesion: 0.06
-Nodes (43): _classify_act_error(), _run_step(), _ActBoom, _done(), _FakeNova, _FakeResult, _Meta, _NavErrorNova (+35 more)
+Cohesion: 0.07
+Nodes (39): _classify_act_error(), _cost_from_result(), _run_step(), _done(), _FakeNova, _step(), test_act_non_network_is_engine_error(), test_act_transient_network_is_network_error() (+31 more)
 
 ### Community 14 - "ScopeDone"
-Cohesion: 0.07
-Nodes (45): progress_sink(), format_event(), test_format_event_omits_scope_id(), test_format_event_single_vote_hides_tally(), test_format_event_step_done_with_votes_and_cost(), Cost, ScenarioDone, ScenarioStarted (+37 more)
+Cohesion: 0.06
+Nodes (53): progress_sink(), format_event(), test_format_event_omits_scope_id(), test_format_event_single_vote_hides_tally(), test_format_event_step_done_with_votes_and_cost(), Cost, ScenarioDone, ScenarioStarted (+45 more)
 
-### Community 15 - "device_selection.py"
-Cohesion: 0.07
-Nodes (19): ProjectConfig, account_of(), acquire_timeout_for(), _arn_kind(), billing_method_for(), check_device_arn(), check_project_arn(), DeviceSelection (+11 more)
+### Community 15 - "Provider"
+Cohesion: 0.06
+Nodes (17): Provider, test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(), test_app_command_uses_current_interpreter_and_module(), test_bootstrap_needs_no_vpc_and_never_loads_the_app(), test_bootstrap_without_resolvable_region_exits_2(), test_contributed_flag_surface_is_exactly_the_provider_specific_set(), test_delete_worker_is_a_documented_placeholder(), test_generated_cdk_json_carries_app_and_feature_flags_verbatim() (+9 more)
 
 ### Community 16 - "test_stack.py"
 Cohesion: 0.06
-Nodes (49): make_template(), _ssm_params(), test_advancer_roles_hold_no_ssm_read(), test_artifacts_bucket_job_in_lifecycle(), test_artifacts_bucket_private(), test_ecr_repos_have_no_lifecycle_rules_and_are_retained(), test_ecs_stopped_eventbridge_rule(), test_events_stream_mapping_filters_out_ttl_removes() (+41 more)
+Nodes (48): make_template(), _ssm_params(), test_advancer_roles_hold_no_ssm_read(), test_artifacts_bucket_job_in_lifecycle(), test_artifacts_bucket_private(), test_ecr_repos_have_no_lifecycle_rules_and_are_retained(), test_ecs_stopped_eventbridge_rule(), test_events_stream_mapping_filters_out_ttl_removes() (+40 more)
 
 ### Community 17 - "test_evidence.py"
-Cohesion: 0.08
-Nodes (31): _get_uploader(), _done(), _Nova, _NovaRaisesAfterFirstVote, _picks(), _Result, _Sink, _synthetic() (+23 more)
+Cohesion: 0.06
+Nodes (37): scenario_key(), _get_uploader(), _done(), _Nova, _NovaRaisesAfterFirstVote, _picks(), _Result, _Sink (+29 more)
 
 ### Community 18 - "test_deploy_cmd.py"
 Cohesion: 0.06
 Nodes (25): _FakeEP, _patch_eps(), _StubProvider, test_cli_does_not_import_aws_cdk(), test_cli_version_is_handed_to_provider(), test_command_face_flags_reach_provider(), test_dispatch_maps_command_face_to_provider_method(), test_entry_point_class_gets_instantiated() (+17 more)
 
-### Community 19 - "test_container.py"
-Cohesion: 0.04
-Nodes (35): ensure(), flaky(), ContainerEngine, ContainerError, digest_for_repo(), ImageInfo, resolve_container_engine(), _tail() (+27 more)
+### Community 19 - "ContainerError"
+Cohesion: 0.10
+Nodes (4): ContainerEngine, ContainerError, _tail(), test_probe_reports_missing_binary_without_raising()
 
 ### Community 20 - "re"
-Cohesion: 0.05
-Nodes (30): changelog_unreleased(), skill_markdown_files(), _claimed_flags(), _documented_keys(), test_exclusive_claims_are_true(), test_key_shaped_tokens_are_documented_keys(), _absolute(), _default_model_claims() (+22 more)
+Cohesion: 0.07
+Nodes (22): _absolute(), _default_model_claims(), _default_model_ids(), _link_targets(), walk(), _rel(), test_changelog_uses_absolute_links_only(), test_default_model_ids_match_the_engine_constants() (+14 more)
 
 ### Community 21 - "test_codex_usage.py"
-Cohesion: 0.05
-Nodes (42): call(), complete(), meta(), run(), started(), test_compaction_is_marked_on_the_round_and_the_root_reading(), test_continuation_segment_is_part_of_the_root_thread(), test_default_scope_covers_active_and_archived_sessions() (+34 more)
+Cohesion: 0.14
+Nodes (20): call(), complete(), meta(), run(), started(), test_compaction_is_marked_on_the_round_and_the_root_reading(), test_continuation_segment_is_part_of_the_root_thread(), test_default_scope_covers_active_and_archived_sessions() (+12 more)
 
 ### Community 22 - "Status"
-Cohesion: 0.03
-Nodes (75): DynamoDBRunStore, read_page(), _header_from_item(), _job_state_from_item(), _job_state_to_item(), _listed_from_live(), _run_state_from_item(), _run_status_assignment() (+67 more)
+Cohesion: 0.04
+Nodes (70): DynamoDBRunStore, read_page(), _header_from_item(), _job_state_from_item(), _listed_from_live(), _run_state_from_item(), RunListingIncomplete, _schema_version_attr() (+62 more)
 
 ### Community 23 - "S3StepArgumentOffloader"
-Cohesion: 0.07
+Cohesion: 0.08
 Nodes (7): require_boto3(), has_pointers(), _iter_arguments(), _ref(), S3StepArgumentOffloader, _shape_error(), test_restore_translates_argument_and_pointer_shape_errors_into_contract_errors()
 
 ### Community 24 - "ArtifactUploader"
-Cohesion: 0.09
-Nodes (10): ArtifactUploader, _extra_args(), test_bucket_without_logs_dir_fails_loud(), test_from_env_enabled_when_bucket_set(), test_from_env_noop_when_no_bucket(), test_noop_preserves_bare_path_no_symlink_resolve(), test_noop_reports_file_uri_and_no_delete(), test_noop_uploader_enqueue_and_drain_are_immediate() (+2 more)
+Cohesion: 0.14
+Nodes (6): ArtifactUploader, _extra_args(), test_noop_preserves_bare_path_no_symlink_resolve(), test_noop_reports_file_uri_and_no_delete(), test_ref_for_noop_reports_same_file_uri_as_report_ref(), test_s3_client_has_bounded_timeouts_and_no_retry()
 
 ### Community 25 - "ensure_workflow_definition"
-Cohesion: 0.09
+Cohesion: 0.10
 Nodes (15): ensure_workflow_definition(), main(), _fmt_seconds(), run(), _time_worked_s(), _FakeNovaActClient, exceptions, ConflictException (+7 more)
 
 ### Community 26 - "test_explain_cloud_recovers_from_events_table_and_reports_missing_permission"
-Cohesion: 0.08
-Nodes (8): _explain_cloud_stores(), load_all(), _recording_build_local_stores(), fake_build(), test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(), test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(), test_realtime_commit_point_write_order(), _two_scope_feature()
+Cohesion: 0.11
+Nodes (7): _explain_cloud_stores(), load_all(), test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(), test_explain_cloud_reads_evidence_from_s3(), test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(), records(), jr()
 
 ### Community 27 - "gherkai_cli/__main__.py"
 Cohesion: 0.03
-Nodes (66): progress(), _aws_identity(), _build_run_meta(), _cloud_skew_gate(), _cloud_target(), _cloud_worker_variant_gate(), _cmd_doctor(), add() (+58 more)
+Nodes (73): progress(), unspecified_message(), _available_step_targets(), _aws_identity(), _build_run_meta(), _cloud_skew_gate(), _cloud_target(), _cloud_worker_variant_gate() (+65 more)
 
 ### Community 28 - "evidence.py"
-Cohesion: 0.06
-Nodes (31): act_evidence(), _actions(), ActRecord, _calls(), _decode_data_url(), _kwargs(), read_trajectory(), scenario_key() (+23 more)
+Cohesion: 0.07
+Nodes (27): act_evidence(), _actions(), ActRecord, _calls(), _decode_data_url(), _kwargs(), read_trajectory(), select_screenshots() (+19 more)
 
 ### Community 29 - "CONTRIBUTING（contributor 入口）"
-Cohesion: 0.08
-Nodes (53): CLAUDE.md（项目约定）, Bash 工具, Claude Code 在本仓库的操作要点, hooks, Workflow（多子代理编排）, _doc_rules.py（逐行可判规则与扫描面的唯一源）, test_skill.py（skill 产品面与真值护栏）, test_user_docs.py（用户文档与图源护栏） (+45 more)
+Cohesion: 0.10
+Nodes (47): CLAUDE.md（项目约定）, Bash 工具, Claude Code 在本仓库的操作要点, hooks, Workflow（多子代理编排）, _doc_rules.py（逐行可判规则与扫描面的唯一源）, test_skill.py（skill 产品面与真值护栏）, test_user_docs.py（用户文档与图源护栏） (+39 more)
 
 ### Community 30 - "device_reprobe.mts"
 Cohesion: 0.05
 Nodes (27): Attempt, Browser, CALL_ORDER, Captured, CaseResult, CaseStatus, ContractCase, ContractFixture (+19 more)
 
 ### Community 31 - "test_workers_real_aws.py"
-Cohesion: 0.06
-Nodes (53): _env(), _injected_mirror(), _insert_positions(), _load_module(), _names(), _outcomes(), _phases_by_case(), _probe_residue() (+45 more)
+Cohesion: 0.11
+Nodes (31): _env(), _injected_mirror(), _names(), _outcomes(), _phases_by_case(), _probe_residue(), _pytest(), _rows() (+23 more)
 
 ### Community 32 - "_cloud_list_runs_env"
-Cohesion: 0.07
-Nodes (22): test_list_runs_json_keys_are_documented(), _fake_old_worker(), _list_runs_json(), _seed_listing_fixture(), _seed_raw_run_state(), _seed_run(), _table_row(), test_list_runs_cloud_checks_skew_then_index_then_lists_ongoing_before_finished() (+14 more)
+Cohesion: 0.04
+Nodes (35): test_list_runs_json_keys_are_documented(), _cloud_list_runs_env(), make_table(), _fake_old_worker(), _list_runs_json(), _listing(), _recording_build_local_stores(), fake_build() (+27 more)
 
 ### Community 33 - "test_lifecycle_states.py"
-Cohesion: 0.05
-Nodes (31): WorkerExitError, WorkerNetworkError, severity(), _aggregate(), raise_for_worker_exit(), FakeWorkerHandle, test_raise_for_worker_exit_maps_codes_with_fargate_label(), _NetRaiseEngine (+23 more)
+Cohesion: 0.07
+Nodes (18): severity(), _aggregate(), FakeWorkerHandle, _NetRaiseEngine, test_aggregate_all_aborted_is_aborted(), test_aggregate_all_skipped_no_error_is_skipped_not_passed(), test_aggregate_empty_verdict_set_precedence(), test_aggregate_fail_fast_shapes_stay_error() (+10 more)
 
 ### Community 34 - "test_worker_variant.py"
-Cohesion: 0.04
-Nodes (44): ssm_path(), worker_image_key(), worker_template_key(), test_ssm_path_contains_prefix(), test_worker_ssm_keys(), aws(), _client_error(), _describe_error() (+36 more)
+Cohesion: 0.09
+Nodes (20): _push_image(), _resolve(), _seed(), test_deleted_revision_is_a_miss(), test_engine_absent_from_mapping_gets_throwing_placeholder(), test_explicit_variant_ignores_default_pointer(), test_inactive_revision_is_a_miss(), test_invalid_variant_name_rejected_at_tag_layer() (+12 more)
 
 ### Community 35 - "query_capabilities"
 Cohesion: 0.05
-Nodes (32): engine_min_grace(), match_deterministic(), query_capabilities(), _caps_json(), _fake_caps_proc(), test_ask_worker_cwd_not_a_directory_is_unavailable(), test_ask_worker_no_payload_entry_does_not_inherit_stdin(), test_ask_worker_non_executable_override_is_unavailable() (+24 more)
+Nodes (33): _ask_worker(), engine_min_grace(), match_deterministic(), query_capabilities(), _caps_json(), _fake_caps_proc(), test_ask_worker_cwd_not_a_directory_is_unavailable(), test_ask_worker_no_payload_entry_does_not_inherit_stdin() (+25 more)
 
-### Community 36 - "LocalRunStore"
+### Community 36 - "test_detached_launcher.py"
 Cohesion: 0.04
-Nodes (33): _atomic_write_json(), LocalRunStore, mutate(), run_state_from_result(), run_state_from_dict(), run_state_to_dict(), _big_state(), test_concurrent_reader_never_sees_torn_run_state() (+25 more)
+Nodes (40): now_iso(), parse_iso(), run_duration_ms(), build_local_reconcile(), cleanup_tunnel(), drive_local_reconcile(), _paths(), _recover_timed_out_claims() (+32 more)
 
 ### Community 37 - "test_tunnel_cli.py"
-Cohesion: 0.05
-Nodes (33): _patch_cloud_commit(), _patch_cloud_gates(), _patch_tunnel(), _stops(), test_expose_local_rejects_non_origin_value_at_entry_before_starting_tunnel(), test_expose_local_rejects_worker_without_session_warmup_before_starting_tunnel(), test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(), fake_schedule() (+25 more)
+Cohesion: 0.06
+Nodes (28): _patch_cloud_commit(), _patch_cloud_gates(), _patch_tunnel(), _stops(), test_expose_local_rejects_non_origin_value_at_entry_before_starting_tunnel(), test_expose_local_rejects_worker_without_session_warmup_before_starting_tunnel(), test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(), test_plan_expose_local_annotates_not_replaces() (+20 more)
 
 ### Community 38 - "SqliteEventLog"
-Cohesion: 0.03
-Nodes (30): EventRecordingEngine, _ExitRecorder, make_raw_sink(), raw_sink(), _recording_events(), _RecordingHandle, SqliteEventLog, _join_pumps() (+22 more)
+Cohesion: 0.04
+Nodes (26): EventRecordingEngine, _ExitRecorder, make_raw_sink(), raw_sink(), _recording_events(), SqliteEventLog, _job(), _StubEngine (+18 more)
 
 ### Community 39 - "gherkai agent skill 主文"
 Cohesion: 0.14
 Nodes (19): skill 参考：云端后端分工与 variant 交付, skill 参考：确定性 step 的写法, skill 参考：引擎选择与确定性 step 模板, skill 参考：环境就位与排障, gherkai agent skill 主文, AI 断言 (AI assertion), 基础镜像 / variant / 默认指针, 部署方 (deployer) (+11 more)
 
 ### Community 40 - "test_app_upload.py"
-Cohesion: 0.06
-Nodes (25): app_object_key(), AppLocation, AppUploadError, _BucketRegionObserver, ensure_app_object(), _error_code(), _events(), reuse_window() (+17 more)
+Cohesion: 0.15
+Nodes (14): AppLocation, ensure_app_object(), _file(), _observer_gone(), _S3, _S3Redirecting, test_403_on_head_is_a_permission_error_and_other_errors_propagate(), test_ensure_app_object_returns_the_last_signing_region_and_unregisters_on_every_path() (+6 more)
 
 ### Community 41 - "ddb_capacity.py"
 Cohesion: 0.06
@@ -710,59 +731,59 @@ Nodes (25): _capacity_entries(), _cell(), _check_target(), _create_and_write(), 
 
 ### Community 42 - "_explain_run"
 Cohesion: 0.05
-Nodes (29): _events_db_with_unfinished_scenario(), _evidence_fixture(), _explain(), _explain_job(), _explain_run(), test_explain_all_expands_passed_and_full_drops_the_text_budget(), test_explain_degrades_when_event_reduction_fails(), test_explain_detached_run_without_job_files_exits_0_with_one_hint() (+21 more)
+Nodes (28): _events_db_with_unfinished_scenario(), _evidence_fixture(), _explain(), _explain_run(), test_explain_all_expands_passed_and_full_drops_the_text_budget(), test_explain_degrades_when_event_reduction_fails(), test_explain_detached_run_without_job_files_exits_0_with_one_hint(), test_explain_filter_to_unrecorded_step_does_not_fake_job_verdict_block() (+20 more)
 
 ### Community 43 - "test_user_steps.py"
 Cohesion: 0.06
-Nodes (31): test_eval_assets_exist_only_under_repo_root_skills(), _ensure_ns_package(), _is_step_file(), load_user_steps(), _module_name(), UserStepsError, _clean_env(), _isolate() (+23 more)
+Nodes (29): _is_step_file(), load_user_steps(), _module_name(), UserStepsError, _clean_env(), _isolate(), _step_file(), test_broken_file_does_not_leave_half_module_in_sys_modules() (+21 more)
 
 ### Community 44 - "test_drain_bound_applies_without_deadline_under_fail_fast"
-Cohesion: 0.07
-Nodes (14): resolver(), test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt(), test_generic_exception_arbitrates_before_blocking_stop(), test_non_clean_exit_after_complete_content_is_re_arbitrated(), __call__(), gen(), test_re_arbitration_after_worker_exit_sends_no_stop(), gen() (+6 more)
+Cohesion: 0.04
+Nodes (26): WorkerExitError, resolver(), test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt(), resolver(), test_generic_exception_arbitrates_before_blocking_stop(), test_non_clean_exit_after_complete_content_is_re_arbitrated(), __call__(), gen() (+18 more)
 
 ### Community 45 - "Job"
 Cohesion: 0.03
-Nodes (81): render_explain_text(), render_run_state(), test_complete_definition_entry_points_run_the_pre_write_check(), test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact(), test_plan_json_app_entry_is_exactly_alias_and_app_id(), test_target_rejections_flag_timeout_over_session_limit(), test_validate_definition_rejects_plan_form_device_job_before_writing(), test_explain_carries_sessions_and_metering_and_skips_evidence_note_for_synthesized_skipped() (+73 more)
+Nodes (72): _explain_job(), test_explain_to_dict_drops_unmatched_scopes_and_keeps_job_fact(), test_plan_json_app_entry_is_exactly_alias_and_app_id(), test_target_rejections_flag_timeout_over_session_limit(), test_validate_definition_rejects_plan_form_device_job_before_writing(), Job, RunMeta, Scenario (+64 more)
 
 ### Community 46 - "test_status_group.py"
-Cohesion: 0.09
-Nodes (25): _assert_corresponds(), _drop_group(), _expected_group(), _finalize_run_failed(), _initial(), _job_write(), _meta(), _pending_job_write() (+17 more)
+Cohesion: 0.06
+Nodes (31): _job_state_to_item(), _run_status_assignment(), test_realtime_write_lifecycle(), test_session_id_none_omitted_and_roundtrips(), test_started_ended_omit_when_none_round_trip(), test_update_and_finalize_before_create_raise(), _assert_corresponds(), _drop_group() (+23 more)
 
-### Community 47 - "_stopped_detail"
-Cohesion: 0.12
-Nodes (9): _stopped_detail(), test_exit_from_task_is_shared_by_observer_and_timeout_handler(), test_exit_observer_records_exit_for_detached_run(), test_exit_observer_skips_non_detached_run(), test_extract_missing_exitcode_becomes_platform_sentinel_with_reason(), test_extract_missing_exitcode_without_any_reason_still_gets_sentinel(), test_extract_nonzero_exit(), test_extract_run_scope_exit() (+1 more)
+### Community 47 - "_argv"
+Cohesion: 0.07
+Nodes (25): _argv(), _context_pairs(), _deploy(), _record_target_resolutions(), test_deploy_passes_require_approval_through(), test_deploy_reports_a_created_project_and_relays_the_resolution_warning(), test_deploy_reports_a_found_same_named_project(), test_deploy_resolves_the_project_after_the_vpc_guard_and_before_cdk() (+17 more)
 
-### Community 48 - "ScopeStarted"
-Cohesion: 0.04
-Nodes (16): ScopeStarted, _StopWindowClock, test_drain_bound_applies_without_deadline_under_fail_fast(), crash_gen(), test_drain_bound_counts_from_stop_request_not_after_blocking_stop(), test_drain_bound_ends_consumption_when_worker_hangs_after_stop(), __init__(), test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_finalize() (+8 more)
+### Community 48 - "test_drain_bound_applies_without_deadline_under_fail_fast"
+Cohesion: 0.08
+Nodes (13): test_abort_decided_before_deadline_stays_aborted_when_deadline_passes_during_tail(), crash_gen(), test_abort_then_clean_eof_is_aborted_not_passed(), crash_gen(), test_attempted_session_without_arn_plus_abort_stays_aborted_and_lists_the_attempt(), crash_gen(), test_drain_bound_applies_without_deadline_under_fail_fast(), crash_gen() (+5 more)
 
 ### Community 49 - "_RecUploader"
 Cohesion: 0.05
 Nodes (15): _drain_evidence_uploads(), _FakeBrowserClient, _FakeCm, _FakeNovaAct, _install_browser_client(), main_fakes(), _RecUploader, test_drain_logs_one_line_when_not_fully_drained() (+7 more)
 
 ### Community 50 - "skill_install.py"
-Cohesion: 0.17
-Nodes (8): _agents(), _append_pointer(), _ask_pointer(), _converge(), install(), _is_ours(), _packaged_skill_dir(), _print_skill()
+Cohesion: 0.15
+Nodes (9): _cmd_skill_install(), _agents(), _append_pointer(), _ask_pointer(), _converge(), install(), _is_ours(), _packaged_skill_dir() (+1 more)
 
 ### Community 51 - "test_tunnel_host.py"
-Cohesion: 0.06
-Nodes (21): 二、运行期限：进运行定义，所有执行方都遵守, compute_watch_ttl_s(), start_tunnel_for_jobs(), TunnelSetup, watch_run_and_stop_tunnel(), _patch_run_store(), _state(), test_start_tunnel_for_jobs_maps_and_injects_headers() (+13 more)
+Cohesion: 0.11
+Nodes (12): compute_watch_ttl_s(), start_tunnel_for_jobs(), TunnelSetup, _job(), test_start_tunnel_for_jobs_maps_and_injects_headers(), test_start_tunnel_for_jobs_propagates_tunnel_error(), test_ttl_default_margins_follow_the_documented_formula(), test_ttl_empty_definition_is_just_the_margin() (+4 more)
 
 ### Community 52 - "_verb_call"
-Cohesion: 0.06
-Nodes (20): ssm_device_farm_project_path(), _assert_record_read_hint(), _cli_version_verb_call(), _record_target_resolutions(), test_deploy_unreadable_project_record_exits_2_without_resolving(), test_diff_exits_2_when_verifying_the_recorded_project_fails_otherwise(), test_malformed_project_record_exits_2_and_names_the_parameter(), test_missing_cli_version_exits_2_without_cdk_or_aws() (+12 more)
+Cohesion: 0.09
+Nodes (14): ssm_device_farm_project_path(), _assert_record_read_hint(), _cli_version_verb_call(), test_deploy_other_device_farm_errors_exit_1_without_guessing(), test_deploy_unreadable_project_record_exits_2_without_resolving(), test_diff_exits_2_when_verifying_the_recorded_project_fails_otherwise(), test_malformed_project_record_exits_2_and_names_the_parameter(), test_missing_cli_version_exits_2_without_cdk_or_aws() (+6 more)
 
 ### Community 53 - "_fake_locator"
-Cohesion: 0.04
-Nodes (43): fake(), _cloud_backend_ok(), _doctor_cloud_json(), _doctor_devices_cloud(), _every_row_checked(), _fake_locator(), _no_provider(), _provider_with_doctor() (+35 more)
+Cohesion: 0.03
+Nodes (45): fake(), _cloud_backend_ok(), _doctor_cloud_json(), _doctor_devices_cloud(), _every_row_checked(), _fake_locator(), _no_provider(), _provider_with_doctor() (+37 more)
 
 ### Community 54 - "argparse"
-Cohesion: 0.10
-Nodes (24): main(), render(), section(), skill_install_tag_problems(), codex_args(), _fail(), has_mark(), main() (+16 more)
+Cohesion: 0.06
+Nodes (34): _node_major(), _vpc_flag(), _clean_env(), test_broken_steps_dir_makes_capabilities_exit_nonzero(), test_capabilities_shape_and_min_grace_from_injected_act_timeout(), test_default_min_grace_covers_act_timeout_default(), test_list_deterministic_flag_no_longer_recognized(), test_min_grace_tracks_both_env_knobs() (+26 more)
 
 ### Community 55 - "test_interrupt_model.py"
 Cohesion: 0.04
-Nodes (42): _aggregate(), _backoff_interrupted(), _emit_scenario_done_unless_stopped(), _on_signal(), _pid_alive(), _run_scenario(), _start_parent_watchdog(), _watch_parent() (+34 more)
+Nodes (39): _aggregate(), _backoff_interrupted(), _emit_scenario_done_unless_stopped(), _on_signal(), _pid_alive(), _run_scenario(), _start_parent_watchdog(), _watch_parent() (+31 more)
 
 ### Community 56 - "appium.mts"
 Cohesion: 0.05
@@ -770,23 +791,27 @@ Nodes (30): AppiumConnectorOptions, AppiumSessionArgs, AUTOMATION_NAMES, BROWSER
 
 ### Community 57 - "textui.py"
 Cohesion: 0.10
-Nodes (17): _as_text(), _console(), output_width(), plain(), render_table(), render_tree(), walk(), _stdout_is_tty() (+9 more)
+Nodes (15): _as_text(), _console(), output_width(), plain(), render_table(), walk(), _stdout_is_tty(), use_color() (+7 more)
+
+### Community 58 - "test_provider.py"
+Cohesion: 0.07
+Nodes (24): classify_vpc_state(), vpc_spec_matches(), _app_context_keys(), _ctx(), _parse_destroy(), _target(), test_build_context_does_no_io(), test_build_context_requires_the_project_to_be_decided_by_the_caller() (+16 more)
 
 ### Community 59 - "guard.test.mts"
 Cohesion: 0.06
 Nodes (17): adapterWith(), codeError(), FakeElement, FakeExec, FakeServer, fakeWebDriver(), Harness, harness() (+9 more)
 
 ### Community 60 - "cli.py"
-Cohesion: 0.04
-Nodes (24): cdk_command(), check_cdk(), check_node(), classify_vpc_state(), _error_code(), _has_aws_credentials(), _is_credential_error(), _make_cfn_client() (+16 more)
+Cohesion: 0.06
+Nodes (13): _error_code(), _has_aws_credentials(), _is_credential_error(), _make_cfn_client(), _make_hint_clients(), _make_ssm_client(), _read_stored_vpc_spec(), _ssm_read_failure_hint() (+5 more)
 
-### Community 61 - "test_provider.py"
-Cohesion: 0.04
-Nodes (68): _AbsentEngine, _app_context_keys(), _argv(), _context_pairs(), _ctx(), _deploy(), _guard(), _parse() (+60 more)
+### Community 61 - "_parse"
+Cohesion: 0.07
+Nodes (27): _AbsentEngine, _guard(), _parse(), _stub_backend(), test_asset_dir_env_points_into_the_work_dir(), test_bare_deploy_still_parses_with_subverbs_present(), test_cdk_runs_in_the_work_dir_which_holds_the_generated_cdk_json(), test_deploy_blocked_by_vpc_guard_never_invokes_cdk() (+19 more)
 
-### Community 62 - "StepResult"
-Cohesion: 0.08
-Nodes (30): render_text(), fake_schedule(), fake_schedule(), fake_schedule(), fake_schedule(), _sample_run(), test_desktop_job_with_sessions_lists_sessions_without_device_hints(), test_device_header_lines_show_device_and_console_link() (+22 more)
+### Community 62 - "JobResult"
+Cohesion: 0.03
+Nodes (74): _device_keys_for_explain(), explain_to_dict(), render_explain_text(), render_text(), fake_schedule(), fake_schedule(), fake_schedule(), fake_schedule() (+66 more)
 
 ### Community 64 - "manifest.json"
 Cohesion: 0.06
@@ -797,36 +822,36 @@ Cohesion: 0.07
 Nodes (36): actionsOf(), buildEvidence(), BuildEvidenceInput, controlItemOf(), deviceKeysOf(), ENGINE, errorTextOf(), EVIDENCE_KIND (+28 more)
 
 ### Community 66 - "test_artifact_upload.py"
-Cohesion: 0.08
-Nodes (23): _Calls, _shots(), test_concurrent_report_ref_and_queue_share_uploaded_set(), test_content_type_suffix_match_is_case_insensitive(), test_drain_is_bounded_returns_false_while_item_in_flight(), test_drain_timeout_abandons_queue_silently(), test_enqueue_uploads_in_background_with_same_key_as_ref_for(), test_evidence_screenshot_and_json_content_types() (+15 more)
+Cohesion: 0.09
+Nodes (22): _shots(), test_concurrent_report_ref_and_queue_share_uploaded_set(), test_content_type_suffix_match_is_case_insensitive(), test_drain_is_bounded_returns_false_while_item_in_flight(), test_drain_timeout_abandons_queue_silently(), test_enqueue_uploads_in_background_with_same_key_as_ref_for(), test_evidence_screenshot_and_json_content_types(), test_flush_failure_swallowed_but_dir_kept() (+14 more)
 
 ### Community 67 - "_doc_rules.py"
-Cohesion: 0.05
-Nodes (36): ai_side_docs(), all_markdown(), classify(), code_comment_files(), comment_blocks(), comment_prose_lines(), comment_units(), _consecutive_runs() (+28 more)
+Cohesion: 0.07
+Nodes (23): ai_side_docs(), all_markdown(), changelog_unreleased(), classify(), clean_flag(), CommandSpan, comment_blocks(), comment_prose_lines() (+15 more)
 
 ### Community 68 - "_is_transient_network"
-Cohesion: 0.12
+Cohesion: 0.11
 Nodes (26): _is_transient_client_error(), _is_transient_network(), _client_error(), _target_closed(), test_agentcore_permanent_wrapping_chain_not_transient(), test_agentcore_startfailed_wrapping_chain_is_transient(), test_client_error_5xx_status_is_transient(), test_client_error_throttling_is_transient() (+18 more)
 
 ### Community 69 - "report_store/local.py"
-Cohesion: 0.08
-Nodes (10): test_console_url_only_for_session_arns(), collect_report_index(), _fmt_ms(), local_path_from_uri(), _reason_html(), _relative_href(), render_index_html(), console_url() (+2 more)
+Cohesion: 0.10
+Nodes (9): test_run_tree_attaches_reason_and_refs_under_their_step(), collect_report_index(), _fmt_ms(), _reason_html(), render_index_html(), ReportRef, ResourceUri, _ref_from_dict() (+1 more)
 
 ### Community 70 - "log"
 Cohesion: 0.06
-Nodes (13): browser_session_timeout_s(), _BrowserSession, _run(), _enqueue_evidence_shots(), log(), _run_session(), _StartUnresolved, stop_session_within_budget() (+5 more)
+Nodes (13): _attach_evidence(), _BrowserSession, _run(), _emit_step_done(), _enqueue_evidence_shots(), log(), _run_session(), _StartUnresolved (+5 more)
 
 ### Community 71 - "_role_statements"
-Cohesion: 0.08
-Nodes (18): _advancer_stmts(), _all_actions(), _as_list(), _bucket_lifecycle_rules(), _role_statements(), _statements_with(), _task_role_wildcard_actions(), test_artifacts_bucket_lifecycle_rules_are_exactly_job_in_and_apps() (+10 more)
-
-### Community 72 - "wire.py"
 Cohesion: 0.07
-Nodes (36): records(), _argument_to_json(), _cost_from_json(), _device_request_to_json(), event_from_json(), event_from_line(), job_to_json(), _scenario_to_json() (+28 more)
+Nodes (20): _all_actions(), _as_list(), _bucket_lifecycle_rules(), _events_table_actions(), _role_statements(), _statements_with(), _task_role_wildcard_actions(), test_advancer_events_table_face_is_read_plus_putitem() (+12 more)
+
+### Community 72 - "scan"
+Cohesion: 0.08
+Nodes (19): code_comment_files(), _js_comment_raw_lines(), scan(), add(), apply(), test_machine_coordinate_is_caught_inside_js_comments(), _load_guard_cli(), _rel() (+11 more)
 
 ### Community 73 - "main"
 Cohesion: 0.08
-Nodes (43): main(), session_request_name(), test_sigterm_and_sigint_both_installed_as_flag_only(), _assert_paired(), _closed(), _job(), _opened(), _session_events() (+35 more)
+Nodes (44): main(), session_request_name(), test_sigterm_and_sigint_both_installed_as_flag_only(), _assert_paired(), _closed(), _job(), _opened(), _session_events() (+36 more)
 
 ### Community 74 - "03-midscene-grounding.ts"
 Cohesion: 0.06
@@ -834,15 +859,15 @@ Nodes (33): ADR-0010, ADR-0012, @aws-sdk/client-bedrock-agentcore@^3.1074.0, ope
 
 ### Community 75 - "gherkai 变更记录 (CHANGELOG)"
 Cohesion: 0.09
-Nodes (28): gherkai destroy, 停止宽限下限由引擎 worker 报告, --max-concurrency 默认值 4, Midscene 默认模型 us.openai.gpt-5.6-terra, Nova Act 固定模型版本 nova-act-v1.0, gherkai deploy push-worker / list-workers, rich 渲染的人读输出, AI step（默认执行路径） (+20 more)
+Nodes (30): gherkai 变更记录 (CHANGELOG), gherkai destroy, --expose-local 隧道模式, 停止宽限下限由引擎 worker 报告, --max-concurrency 默认值 4, Midscene 默认模型 us.openai.gpt-5.6-terra, Nova Act 固定模型版本 nova-act-v1.0, gherkai deploy push-worker / list-workers (+22 more)
 
 ### Community 77 - "plan"
-Cohesion: 0.11
-Nodes (18): parse_feature(), ParsedScenario, _step_keyword(), FeatureSource, plan(), PlanConfig, _resolve_engine(), _resolve_target() (+10 more)
+Cohesion: 0.08
+Nodes (26): FeatureContractError, parse_feature(), ParsedScenario, _scenario_line_and_example_line(), _step_keyword(), FeatureSource, plan(), PlanConfig (+18 more)
 
 ### Community 78 - "test_tunnel.py"
-Cohesion: 0.09
-Nodes (14): NgrokTunnel, TunnelInfo, warmup_url_for(), _fake_popen_writing_log(), popen(), test_ngrok_binary_missing_reports_install_hint(), test_ngrok_policy_file_lives_until_ready_then_removed(), popen() (+6 more)
+Cohesion: 0.08
+Nodes (18): make_tunnel(), NgrokTunnel, TunnelError, _fake_popen_writing_log(), popen(), boom(), test_edge_contract_constants_match_the_cross_language_fixture(), test_make_tunnel_unknown_provider() (+10 more)
 
 ### Community 79 - "../lib/tunnel-warmup.mjs"
 Cohesion: 0.09
@@ -850,35 +875,35 @@ Nodes (24): EXTRA_HTTP_HEADERS_ENV, INCOMPLETE_DEFINITION_MESSAGE, leaveWarmupPa
 
 ### Community 80 - "test_cloud_reconcile.py"
 Cohesion: 0.05
-Nodes (26): CloudLauncher, DdbEventLog, events_pk(), _FakeStartEngine, _job(), _meta(), _passed_worker_events(), _put_worker_event() (+18 more)
+Nodes (26): CloudLauncher, DdbEventLog, events_pk(), _FakeStartEngine, _meta(), _passed_worker_events(), _put_worker_event(), _RecorderWatch (+18 more)
 
 ### Community 81 - "use_color"
 Cohesion: 0.16
 Nodes (11): color_env_override(), stream_is_tty(), use_color(), _clean_env(), _Pipe, test_broken_stream_counts_as_not_tty(), test_force_color_enables_on_pipe(), test_no_color_non_empty_wins_over_tty() (+3 more)
 
-### Community 83 - "deploy.py"
-Cohesion: 0.09
-Nodes (9): add_parsers(), _add_provider_flag(), provider_entry_points(), resolve_provider(), _cmd_deploy(), _cmd_destroy(), _deploy_provider(), _peek_deploy_provider() (+1 more)
+### Community 83 - "_cmd_doctor"
+Cohesion: 0.06
+Nodes (19): add_parsers(), _add_provider_flag(), provider_entry_points(), resolve_provider(), _cmd_doctor(), add(), _cmd_list_deterministic(), target_cell() (+11 more)
 
 ### Community 84 - "test_compose.py"
-Cohesion: 0.03
-Nodes (64): preflight_cloud_resources(), prune_empty_dirs(), resolve_aws_identity(), resolve_cloud_target(), resolve_region(), resolve_worker_cmd(), _clear_aws_env(), _FakeDdbClient (+56 more)
+Cohesion: 0.02
+Nodes (113): documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总）, 恢复现场, 移动真机支持（1.5）：实施进度总纲, 遗留项, build_engines(), _env(), _inject_aws(), check_backend_skew() (+105 more)
 
 ### Community 85 - "core/tests/conftest.py"
 Cohesion: 0.13
 Nodes (9): arg_offloader(), aws(), ddb_run_store(), ddb_run_store_offload(), _fake_aws_creds(), fargate(), real_aws(), s3_report_store() (+1 more)
 
 ### Community 86 - "resolve_or_create_project"
-Cohesion: 0.14
-Nodes (18): project_name(), ProjectResolution, resolve_or_create_project(), _assert_warning(), _enter(), _project(), _stub_get_not_found(), _stub_list_pages() (+10 more)
+Cohesion: 0.18
+Nodes (15): project_name(), ProjectResolution, resolve_or_create_project(), _assert_warning(), _enter(), _project(), _stub_list_pages(), test_access_denied_on_any_project_call_is_classified() (+7 more)
 
 ### Community 87 - "决策"
-Cohesion: 0.05
-Nodes (36): 0051. 远程访问会话生命周期与应用分发, 10. 区域、项目与权限, 11. 安全：端点脱敏与数据保留, 12. 命令的真实上界与结果未知, 13. 隧道鉴权：令牌换 cookie，worker 预热一次，桌面、Android、iOS 一条路, 14. 前提：国内消费级应用的线上包会自行退出, 1. 一个 scope 一个远程访问会话，scenario 之间不复位, 2. 时间预算：会话预算从创建起算，获取预算从 worker 开始准备设备起算，job 墙钟沿用 0034 (+28 more)
+Cohesion: 0.09
+Nodes (21): 10. 区域、项目与权限, 11. 安全：端点脱敏与数据保留, 12. 命令的真实上界与结果未知, 13. 隧道鉴权：令牌换 cookie，worker 预热一次，桌面、Android、iOS 一条路, 14. 前提：国内消费级应用的线上包会自行退出, 1. 一个 scope 一个远程访问会话，scenario 之间不复位, 2. 时间预算：会话预算从创建起算，获取预算从 worker 开始准备设备起算，job 墙钟沿用 0034, 3. 设备解析、创建与孤儿防护 (+13 more)
 
 ### Community 88 - "test_tunnel_warmup.py"
-Cohesion: 0.06
-Nodes (23): _clock(), driven(), stub(), _FakeCm, _FakePage, _Sink, test_denied_and_auth_required_are_deterministic_rejections_without_retry(), test_error_marker_retries_then_ready() (+15 more)
+Cohesion: 0.05
+Nodes (32): _clock(), stub(), _FakePage, _stop_fails(), _stop_is_set(), test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_both_layers_released(), test_connect_failure_with_stop_and_no_session_exits_0(), test_denied_and_auth_required_are_deterministic_rejections_without_retry() (+24 more)
 
 ### Community 89 - "README Video Specs"
 Cohesion: 0.08
@@ -906,11 +931,11 @@ Nodes (64): _build_parser(), _tunnel_providers(), apply_project_config(), config
 
 ### Community 95 - "test_adr_hygiene.py"
 Cohesion: 0.11
-Nodes (17): _adrs(), _rel(), _status_line(), _superseders(), test_adr_has_standard_status_head(), test_ai_side_docs_avoid_coined_compounds(), test_ai_side_docs_take_only_tracked_skills(), test_bare_wp_rule_shape() (+9 more)
+Nodes (17): prose_lines(), _adrs(), _rel(), _status_line(), _superseders(), test_adr_has_standard_status_head(), test_ai_side_docs_avoid_coined_compounds(), test_ai_side_docs_take_only_tracked_skills() (+9 more)
 
 ### Community 96 - "gherkai_deploy_aws/names.py"
-Cohesion: 0.09
-Nodes (8): main(), ssm_subnets_path(), ssm_version_path(), ssm_worker_template_path(), stack_name(), test_device_farm_and_app_names_are_reexported_from_runtime(), test_ssm_device_farm_project_path_is_the_shared_key(), test_version_context_is_required()
+Cohesion: 0.11
+Nodes (6): main(), ssm_version_path(), stack_name(), test_device_farm_and_app_names_are_reexported_from_runtime(), test_ssm_device_farm_project_path_is_the_shared_key(), test_version_context_is_required()
 
 ### Community 97 - "Video Material Files"
 Cohesion: 0.09
@@ -920,17 +945,17 @@ Nodes (22): bytes, sha256, files, chapters.md, gherkai-value-method-v12-material
 Cohesion: 0.05
 Nodes (11): _patch_skew(), test_status_cloud_exits_2_when_the_definition_header_read_hits_an_aws_error(), test_status_cloud_exits_2_when_the_first_state_read_hits_an_aws_error(), test_status_cloud_json_includes_artifact_locations(), test_status_cloud_pending_hint_offers_relay_only_for_detached_runs_and_stays_quiet_when_the_marker_is_unreadable(), test_status_cloud_terminal_prints_s3_and_ddb_locations(), test_status_wait_cloud_exits_2_when_a_poll_read_hits_an_aws_error_midway(), test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read() (+3 more)
 
-### Community 99 - "_FakeNovaAct"
-Cohesion: 0.09
-Nodes (13): _FakeNovaAct, _stop_fails(), _stop_is_set(), test_connect_failure_with_stop_and_no_session_exits_0(), test_novaact_gets_only_the_cdp_endpoint_and_headers_without_browser_auth(), nova_factory(), test_release_failure_of_the_agentcore_session_after_connect_failure_is_not_a_connect_failure(), nova_factory() (+5 more)
+### Community 99 - "driven"
+Cohesion: 0.08
+Nodes (7): driven(), _FakeBrowserClient, _FakeCm, _FakeNovaAct, _Sink, test_novaact_gets_only_the_cdp_endpoint_and_headers_without_browser_auth(), nova_factory()
 
 ### Community 100 - "BackendStack"
-Cohesion: 0.07
-Nodes (5): ssm_security_groups_path(), BackendStack, BackendStack._worker_subnet_ids, test_missing_dependency_fails_loud_naming_it(), test_source_lookup_handles_both_packages_and_single_file_modules()
+Cohesion: 0.06
+Nodes (7): ssm_security_groups_path(), ssm_subnets_path(), BackendStack, BackendStack._build_lambda_asset, BackendStack._worker_subnet_ids, test_missing_dependency_fails_loud_naming_it(), test_source_lookup_handles_both_packages_and_single_file_modules()
 
 ### Community 101 - "EventSink"
-Cohesion: 0.15
-Nodes (13): EventSink, _emit_step_done(), test_ddb_mode_missing_run_or_scope_id_fails_loud(), test_ddb_state_binds_target_table_name(), test_ddb_state_putitem(), test_emit_flushes_each_event(), test_emit_masks_tunnel_credentials_in_serialized_line(), test_emit_preserves_chinese_ensure_ascii_false() (+5 more)
+Cohesion: 0.18
+Nodes (12): EventSink, test_ddb_mode_missing_run_or_scope_id_fails_loud(), test_ddb_state_binds_target_table_name(), test_ddb_state_putitem(), test_emit_flushes_each_event(), test_emit_masks_tunnel_credentials_in_serialized_line(), test_emit_preserves_chinese_ensure_ascii_false(), test_emit_writes_jsonline_to_injected_fd() (+4 more)
 
 ### Community 102 - "决策"
 Cohesion: 0.13
@@ -949,8 +974,8 @@ Cohesion: 0.23
 Nodes (16): _brief(), env(), _record(), _run(), test_brief_bytes_are_passed_unchanged(), test_exit_code_is_passed_through(), test_first_round_call_form_stdin_log_and_output(), test_first_round_passes_model_and_effort() (+8 more)
 
 ### Community 106 - "决策"
-Cohesion: 0.08
-Nodes (21): 0049. worker 能力自述增键：`targets`、step 级 `targets` 与 `max_session_s`, 1. 增键不升协议版本，在既有版本上增键, 2. 顶层 `targets` 必有；step 级缺键即「只在 desktop / web 上有实现」, 3. step 实际可用目标是句柄声明与 worker `targets` 的交集, 4. `max_session_s`：目标的单次会话上限，由 worker 从自己的常量算出, 5. `min_grace_s` 保持顶层单值, 6. 各消费点的呈现, 7. 云端 worker 在建会话前按自己的 `targets` 自检 (+13 more)
+Cohesion: 0.10
+Nodes (19): 0049. worker 能力自述增键：`targets`、step 级 `targets` 与 `max_session_s`, 1. 增键不升协议版本，在既有版本上增键, 2. 顶层 `targets` 必有；step 级缺键即「只在 desktop / web 上有实现」, 3. step 实际可用目标是句柄声明与 worker `targets` 的交集, 4. `max_session_s`：目标的单次会话上限，由 worker 从自己的常量算出, 5. `min_grace_s` 保持顶层单值, 6. 各消费点的呈现, 7. 云端 worker 在建会话前按自己的 `targets` 自检 (+11 more)
 
 ### Community 107 - "决策"
 Cohesion: 0.12
@@ -964,9 +989,9 @@ Nodes (35): AdapterEntry, adapterRegistry(), AppiumInterfaceConfig, autoDismissK
 Cohesion: 0.10
 Nodes (17): _num(), precheck_job(), precheck_schema(), precheck_target(), _spaced(), supported_label(), target_label(), _capabilities() (+9 more)
 
-### Community 110 - "redact_secrets"
-Cohesion: 0.15
-Nodes (7): _log(), redact_secrets(), test_json_field_boundary_is_not_crossed(), test_none_passes_through(), test_redact_secrets_cases(), test_serialized_json_line_stays_valid_and_loses_credentials(), test_uploader_log_redacts_before_writing_stderr()
+### Community 110 - "_session"
+Cohesion: 0.09
+Nodes (18): _load_module(), _session(), _summary_of(), test_an_invalid_settle_or_observation_count_is_refused_before_collection(), test_summarize_does_not_let_a_later_session_hide_an_unfinished_teardown(), test_summarize_judges_each_session_by_its_own_mode(), test_summarize_keeps_complete_objects_before_a_half_written_one(), test_summarize_keeps_complete_objects_that_lost_their_newline() (+10 more)
 
 ### Community 111 - "app.mts"
 Cohesion: 0.08
@@ -990,59 +1015,59 @@ Nodes (21): build(), DESKTOP_SNAP, DEVICE_AI_SNAP, dumpAgent(), exec(), fileRef(
 
 ### Community 117 - ".goto"
 Cohesion: 0.08
-Nodes (17): _Resp, test_base_exception_from_the_inner_release_still_releases_the_agentcore_session(), __exit__(), test_failing_to_leave_the_warmup_page_only_logs(), goto(), test_release_failure_after_stopped_warmup_exits_1_without_reconnecting(), __exit__(), goto() (+9 more)
+Nodes (16): _Resp, goto(), test_base_exception_from_the_inner_release_still_releases_the_agentcore_session(), __exit__(), test_release_failure_after_stopped_warmup_exits_1_without_reconnecting(), __exit__(), goto(), test_release_failure_after_warmup_rejection_exits_1_without_reconnecting() (+8 more)
 
 ### Community 118 - "with"
 Cohesion: 0.06
 Nodes (33): with, body_path, build-args, cache, cache-dependency-glob, cache-dependency-path, context, enable-cache (+25 more)
 
-### Community 119 - "web-context.mts"
-Cohesion: 0.16
-Nodes (14): contextNameOf(), contextNames(), LocateDeps, locateError(), locateFailure(), locateWebContext(), ADR-0039, ADR-0050 (+6 more)
+### Community 119 - "_retire_now"
+Cohesion: 0.07
+Nodes (19): after_enumeration(), aws(), _aws_env(), _change_on_final_check(), on_describe(), _ecs_deleting_on_register(), _fail_default_pointer(), _failing_default_pointer_put() (+11 more)
 
 ### Community 120 - "test_lambda_asset.py"
 Cohesion: 0.12
-Nodes (11): BackendStack._build_lambda_asset, make_stack(), asset_dir(), _fake_installed_sources(), _patch_sources(), test_asset_imports_with_only_stdlib_beside_it(), test_asset_not_written_into_the_installed_package(), test_declared_dependencies_land_in_the_right_shape() (+3 more)
+Nodes (10): make_stack(), asset_dir(), _fake_installed_sources(), _patch_sources(), test_asset_imports_with_only_stdlib_beside_it(), test_asset_not_written_into_the_installed_package(), test_declared_dependencies_land_in_the_right_shape(), test_falls_back_to_tempdir_without_env() (+2 more)
 
-### Community 121 - "Event Wallclock Analysis"
-Cohesion: 0.09
-Nodes (20): emit(), main(), _on_sigterm(), capture(), _delta_s(), _describe(), _ecs(), _iso() (+12 more)
+### Community 121 - "events_wallclock.py"
+Cohesion: 0.18
+Nodes (10): _acts_from_scope(), analyze(), _emit_epoch(), main(), _percentile(), _print_human(), _query_by_pk(), _scan_by_run_id() (+2 more)
 
-### Community 122 - "test_stderr_redaction.py"
-Cohesion: 0.06
-Nodes (26): _redacting_excepthook(), _assert_redacted(), _import_bindings(), _package_sources(), _plain(), _sample(), _scan_stderr(), _stderr_violations() (+18 more)
+### Community 122 - "run_scope.py"
+Cohesion: 0.02
+Nodes (51): expected_rows(), matrix_rows(), test_matrix_lists_exactly_the_two_engines(), test_matrix_rows_for_novaact_match_the_worker_self_description(), test_matrix_target_names_are_the_product_labels(), emit(), main(), _on_sigterm() (+43 more)
 
 ### Community 123 - "tunnel.py"
-Cohesion: 0.13
-Nodes (5): _gen_secret(), _remove_quietly(), stop_tunnel(), test_ngrok_agent_detaches_from_cli_process_group(), test_stop_tunnel_idempotent_on_dead_pid()
+Cohesion: 0.11
+Nodes (12): 0051. 远程访问会话生命周期与应用分发, 实测依据, 背景与问题, 被拒方案（护栏）, 边界与互链, _gen_secret(), normalize_origin(), _reject() (+4 more)
 
 ### Community 124 - "test_skill.py"
 Cohesion: 0.05
-Nodes (32): bare_flags(), clean_flag(), CommandSpan, extract_command_spans(), is_placeholder(), prose_lines(), _all_command_spans(), _allowed_flags() (+24 more)
+Nodes (33): bare_flags(), is_placeholder(), skill_markdown_files(), _all_command_spans(), _allowed_flags(), _claimed_flags(), _documented_keys(), _fixture_files() (+25 more)
 
 ### Community 125 - "test_devicefarm.py"
-Cohesion: 0.13
-Nodes (11): list_open_sessions(), OpenSession, _session(), test_list_open_sessions_access_denied_is_classified(), test_list_open_sessions_drops_completed_and_keeps_queued_states(), test_list_open_sessions_empty_project(), test_list_open_sessions_other_errors_propagate(), test_module_never_creates_or_stops_sessions() (+3 more)
+Cohesion: 0.17
+Nodes (8): list_open_sessions(), OpenSession, _session(), test_list_open_sessions_access_denied_is_classified(), test_list_open_sessions_drops_completed_and_keeps_queued_states(), test_list_open_sessions_empty_project(), test_list_open_sessions_other_errors_propagate(), test_module_never_creates_or_stops_sessions()
 
 ### Community 126 - "run-scope.test.mts"
 Cohesion: 0.04
 Nodes (39): abortableAgent(), ANDROID_WEB, DESKTOP, desktopFactory(), desktopHooks(), desktopSeam(), deviceSeam(), econnreset() (+31 more)
 
 ### Community 127 - "check_dist_metadata.py"
-Cohesion: 0.19
+Cohesion: 0.18
 Nodes (8): check_skill_payload(), fail(), main(), member_dist_names(), normalize(), sdist_whitelists(), skill_source_files(), wheel_metadata()
 
-### Community 128 - "_fake_gherkai"
-Cohesion: 0.13
-Nodes (11): _fake_gherkai(), _paths(), test_a_failed_request_with_a_table_name_that_is_not_a_string_still_appears_in_the_text_report(), fake_main(), test_a_report_path_taken_while_the_command_runs_is_not_overwritten(), test_a_report_that_cannot_be_written_changes_nothing_and_does_not_stop_the_other(), test_an_existing_report_file_is_removed_before_the_command_runs(), test_main_returns_the_command_result_and_writes_both_reports_without_touching_stdout_or_stderr() (+3 more)
-
-### Community 129 - "run_scope.py"
+### Community 128 - "test_ddb_capacity.py"
 Cohesion: 0.05
-Nodes (24): _act_record(), _argument_text(), _attach_evidence(), _clean_cell(), _collect_traj(), _cost_from_result(), _instruction(), _no_artifacts() (+16 more)
+Nodes (29): _assert_usage_error(), _fake_gherkai(), fake_main(), _paths(), _seed(), test_a_caller_that_asks_for_consumed_capacity_keeps_its_own_setting_and_response(), test_a_failed_request_with_a_table_name_that_is_not_a_string_still_appears_in_the_text_report(), fake_main() (+21 more)
+
+### Community 129 - "test_argument.py"
+Cohesion: 0.15
+Nodes (14): _argument_text(), _clean_cell(), _instruction(), _unquote(), test_cell_with_newline_flattened(), test_cell_with_pipe_escaped(), test_datatable_empty_rows(), test_datatable_to_markdown() (+6 more)
 
 ### Community 130 - "probe.mts"
-Cohesion: 0.06
-Nodes (39): defaultDeviceParts(), applicationLongEdge(), AttemptFailure, ensureNative(), execScreenshot(), firstApplication(), log(), lostOutcome() (+31 more)
+Cohesion: 0.12
+Nodes (28): defaultDeviceParts(), applicationLongEdge(), AttemptFailure, ensureNative(), execScreenshot(), firstApplication(), log(), lostOutcome() (+20 more)
 
 ### Community 131 - "Media Conversion Verification"
 Cohesion: 0.14
@@ -1053,48 +1078,48 @@ Cohesion: 0.05
 Nodes (53): bin, gherkai-worker-midscene, dependencies, @aws-crypto/sha256-js@^5.2.0, @aws-sdk/client-device-farm@^3.1150.0, @aws-sdk/client-dynamodb@^3.1081.0, @aws-sdk/client-s3@^3.1074.0, @aws-sdk/credential-providers@^3.1074.0 (+45 more)
 
 ### Community 133 - "finalize.test.mts"
-Cohesion: 0.08
-Nodes (13): acquireWithOrphan(), Call, CHOICE, connectionReset(), Emitted, FakeClock, FakeFarm, Handler (+5 more)
+Cohesion: 0.06
+Nodes (25): deleteAppiumSession(), emit(), emitAttempted(), finalizeOnce(), ADR-0051, ADR-0052, observedSeconds(), RELEASE_RETRY_DELAY_MS (+17 more)
 
 ### Community 134 - "ADR 0042: step 证据与 explain"
-Cohesion: 0.06
-Nodes (58): ADR 0001: 范围限于英文 UI, 概念：非英文应用用 @engine:midscene 路由, 概念：Nova Act 中文词语级文本匹配短板, ADR 0002: Midscene 不由 GPT-5.5 驱动, 概念：只认响应 body、不认 HTTP 状态码, 概念：Midscene 仅走 chat-completions 接口, ADR 0003: VL 模型选型, ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock (+50 more)
+Cohesion: 0.07
+Nodes (76): ADR 0001: 范围限于英文 UI, 概念：非英文应用用 @engine:midscene 路由, 概念：Nova Act 中文词语级文本匹配短板, ADR 0002: Midscene 不由 GPT-5.5 驱动, 概念：只认响应 body、不认 HTTP 状态码, 概念：Midscene 仅走 chat-completions 接口, ADR 0003: VL 模型选型, ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock (+68 more)
 
 ### Community 135 - "summarize.py"
-Cohesion: 0.09
-Nodes (16): collect(), main(), BadLine, _complete_objects(), load(), main(), _parse_line(), _scan_string() (+8 more)
+Cohesion: 0.10
+Nodes (14): BadLine, _complete_objects(), load(), main(), _parse_line(), _scan_string(), _sessions(), _short() (+6 more)
 
 ### Community 136 - "tunnel_warmup.py"
-Cohesion: 0.07
-Nodes (17): _leave_warmup_page(), _one_line(), _wait_for_marker(), warmup_session(), WarmupFailure, WarmupStopped, _error_text(), _one_line() (+9 more)
+Cohesion: 0.10
+Nodes (13): _leave_warmup_page(), _one_line(), _wait_for_marker(), warmup_session(), WarmupFailure, WarmupStopped, _error_text(), _one_line() (+5 more)
 
 ### Community 137 - "DynamoDB Events Transport ADR"
 Cohesion: 0.18
 Nodes (13): DynamoDB 共享 events 表作 events-out 传输, EventSink（可注入事件出口）, events 表键设计 PK=run_id#scope_id, SK=seq, events item TTL 自动过期（7 天 expires_at）, 读一致性（流式期 EC 游标 + 终读强一致）, 被拒方案：DynamoDB Streams（同步 run 语境）, 被拒方案：MSK（Kafka）, 被拒方案：SQS FIFO per-run 队列 (+5 more)
 
 ### Community 138 - "json"
-Cohesion: 0.09
-Nodes (22): _gate(), _python_stub(), _run(), test_block_message_points_to_the_sending_tool_and_the_guide(), test_direct_call_at_the_start_is_blocked(), test_empty_or_malformed_input_passes(), test_every_hook_script_is_registered(), test_missing_python_passes_silently() (+14 more)
+Cohesion: 0.07
+Nodes (26): _gate(), _python_stub(), _run(), test_block_message_points_to_the_sending_tool_and_the_guide(), test_direct_call_at_the_start_is_blocked(), test_empty_or_malformed_input_passes(), test_every_hook_script_is_registered(), test_missing_python_passes_silently() (+18 more)
 
 ### Community 139 - "决策"
 Cohesion: 0.17
 Nodes (12): 0053. 项目配置文件 gherkai.toml, 1. 文件定位：只有运行侧 CLI 读它，读出的值解析成具体值随 Job 走, 2. 取值顺序：选项、环境变量、配置文件、内建默认依次优先, 3. 节与键, 4. 设备选择要求显式，筛选的挑选规则确定, 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件, 6. 护栏, 决策 (+4 more)
 
-### Community 140 - "test_ddb_capacity.py"
-Cohesion: 0.08
-Nodes (10): _report_lines(), test_a_gsi_query_with_total_reports_its_units_as_unsplit_not_as_the_table(), test_a_malformed_request_still_gets_the_sdk_validation_error(), test_a_request_whose_response_has_no_consumed_capacity_is_marked_and_not_counted_as_zero(), test_a_response_with_some_index_detail_but_no_table_entry_reports_the_rest_as_unsplit(), test_a_write_with_total_that_also_writes_an_index_reports_its_units_as_unsplit(), test_requests_from_other_threads_and_separately_built_sessions_are_recorded(), test_the_pipe_setups_really_exercise_the_failure_paths() (+2 more)
+### Community 140 - "_report_lines"
+Cohesion: 0.29
+Nodes (4): _report_lines(), test_a_gsi_query_with_total_reports_its_units_as_unsplit_not_as_the_table(), test_a_response_with_some_index_detail_but_no_table_entry_reports_the_rest_as_unsplit(), test_a_write_with_total_that_also_writes_an_index_reports_its_units_as_unsplit()
 
 ### Community 141 - "_atomic.py"
-Cohesion: 0.14
-Nodes (9): atomic_write_json(), atomic_write_text(), ResultStore adapters (local / s3), _page(), test_concurrent_reader_never_sees_empty_or_truncated_text(), test_failed_replace_leaves_no_tmp_behind(), test_json_round_trip_and_default_mode_readable_by_others(), test_mode_can_be_narrowed() (+1 more)
+Cohesion: 0.13
+Nodes (10): atomic_write_json(), atomic_write_text(), ReportStore adapters (local / s3), ResultStore adapters (local / s3), _page(), test_concurrent_reader_never_sees_empty_or_truncated_text(), test_failed_replace_leaves_no_tmp_behind(), test_json_round_trip_and_default_mode_readable_by_others() (+2 more)
 
 ### Community 142 - "test_skill_deploy_tokens.py"
 Cohesion: 0.18
 Nodes (6): _build(), _deploy_spans(), _nodes(), walk(), test_deploy_flags_are_attached_to_the_right_subverb(), test_provider_only_flag_table_is_backed_by_the_real_parser()
 
 ### Community 143 - "Provider"
-Cohesion: 0.04
-Nodes (17): readonly_flag_conflict(), _make_sts_client(), Provider, test_a_bad_profile_exits_2_at_the_entry_not_a_traceback(), test_app_command_uses_current_interpreter_and_module(), test_bootstrap_without_resolvable_region_exits_2(), test_contributed_flag_surface_is_exactly_the_provider_specific_set(), test_delete_worker_is_a_documented_placeholder() (+9 more)
+Cohesion: 0.05
+Nodes (8): readonly_flag_conflict(), cdk_command(), check_cdk(), check_node(), _make_sts_client(), test_cdk_command_prefers_path_cdk_then_npx(), test_node_too_old_is_rejected(), test_unparseable_node_version_does_not_block()
 
 ### Community 144 - "Stateless Run Core Model"
 Cohesion: 0.21
@@ -1113,8 +1138,8 @@ Cohesion: 0.06
 Nodes (23): _assigned_names(), _docstring_node_ids(), _mts_emphasis_hits(), _mts_files(), _python_emphasis_hits(), _python_files(), _scan_mts(), _scan_python() (+15 more)
 
 ### Community 148 - "render.py"
-Cohesion: 0.05
-Nodes (35): _add_act(), _add_device_evidence(), _add_step(), _arg_hint(), _cost_bits(), device_header_lines(), device_session_count(), _dispatch_hint() (+27 more)
+Cohesion: 0.04
+Nodes (43): selection_label(), selection_to_dict(), _add_act(), _add_device_evidence(), _add_step(), _arg_hint(), _cost_bits(), device_header_lines() (+35 more)
 
 ### Community 149 - "session.test.mts"
 Cohesion: 0.08
@@ -1125,44 +1150,44 @@ Cohesion: 0.20
 Nodes (10): 0050. 确定性 step 多句柄注册与测试分层, 1. 注册面：handler 位置按句柄种类分键, 3. 测试分层, 4. 写作方法（进 user guide 与 agent skill）, 5. 延后：确定性 step SDK, 决策, 实测依据, 背景与问题 (+2 more)
 
 ### Community 151 - "_Deleted"
-Cohesion: 0.09
-Nodes (11): _client_error(), _Deleted, deny(), _ecs_deleting_on_register(), on_register(), _UnlistedEcs, deny(), 与 moto 不同的地方 (+3 more)
+Cohesion: 0.14
+Nodes (6): _client_error(), _Deleted, deny(), _UnlistedEcs, deny(), 结果相同、分支不同
 
 ### Community 152 - "test_cli_json_contract.py"
-Cohesion: 0.09
-Nodes (20): build_device_request(), _assert_check_names_documented(), _assert_documented(), _assert_list_runs_value_types(), _device_selections(), _documented_keys(), _mk(), _plan_form() (+12 more)
+Cohesion: 0.05
+Nodes (30): account_of(), acquire_timeout_for(), _arn_kind(), build_device_request(), check_device_arn(), check_project_arn(), DeviceSelection, DeviceSelectionError (+22 more)
 
 ### Community 153 - "deploy"
 Cohesion: 0.07
 Nodes (26): concurrency, cancel-in-progress, group, environment, if, permissions, runs-on, steps (+18 more)
 
 ### Community 154 - "config.py"
-Cohesion: 0.12
-Nodes (19): AppPlatformConfig, _apps_section(), _billing_method(), ConfigError, DevicePlatformConfig, _devices_section(), DevicesConfig, load_project_config() (+11 more)
+Cohesion: 0.08
+Nodes (24): AppPlatformConfig, _apps_section(), _billing_method(), ConfigError, DevicePlatformConfig, _devices_section(), DevicesConfig, load_project_config() (+16 more)
 
 ### Community 156 - "ref_node_assert"
 Cohesion: 0.03
 Nodes (54): crossRegionStore(), FAKE_CREDS, LOC, ADR-0050, ADR-0051, ADR-0052, offlineClient(), regionalClient() (+46 more)
 
-### Community 157 - "build_cloud_stores"
-Cohesion: 0.05
-Nodes (23): table(), build_cloud_event_log(), build_cloud_stores(), make_artifacts(), build_fargate_engines(), make_artifacts(), cloud_artifact_locations(), local_artifact_locations() (+15 more)
+### Community 157 - "_fake_store_ctors"
+Cohesion: 0.17
+Nodes (6): table(), make_artifacts(), _fake_store_ctors(), _rec(), test_build_cloud_stores_builds_handles_when_not_injected(), test_build_cloud_stores_uses_injected_handles_without_building_clients()
 
 ### Community 158 - "world"
-Cohesion: 0.11
-Nodes (9): _Client, _Cm, _Nova, __exit__(), test_stop_signal_after_start_but_before_scope_started_pairs_the_session_without_scope_started(), nova_factory(), world(), _World (+1 more)
+Cohesion: 0.06
+Nodes (13): _DeterministicCtx, _check_wire_shape(), _Client, _Cm, _Nova, _Sink, __exit__(), broken_on_scope_started() (+5 more)
 
-### Community 159 - "minimax_narration.py"
-Cohesion: 0.13
-Nodes (11): NoRedirect, APIError, download_subtitles(), main(), NoRedirect, page_numbers(), post(), save_json() (+3 more)
+### Community 159 - "cdk"
+Cohesion: 0.07
+Nodes (7): cdk(), _clean_aws_env(), _DeviceFarmStub, df(), _FakeEngine, _Ssm, test_missing_cdk_stops_deploy_before_any_aws_read()
 
 ### Community 160 - "test_definition_schema.py"
 Cohesion: 0.14
 Nodes (11): _rewrite_schema(), _seed_local_run(), test_cloud_status_and_explain_peek_meta_header_before_state(), test_cloud_status_and_explain_report_header_contract_violation_with_exit_2(), test_fresh_run_writes_current_schema_and_status_explain_read_it(), test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(), test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback(), test_newer_schema_exits_2_naming_writer_and_upgrade() (+3 more)
 
 ### Community 161 - "container_name"
-Cohesion: 0.07
-Nodes (14): events_table(), describe_tasks(), _leg(), _engine(), read_task_def_stop_timeout(), _UnavailableEngine, _worker_container_stop_timeout(), container_name() (+6 more)
+Cohesion: 0.09
+Nodes (13): events_table(), _leg(), _engine(), read_task_def_stop_timeout(), _UnavailableEngine, _worker_container_stop_timeout(), container_name(), _StopTimeoutEcs (+5 more)
 
 ### Community 162 - "stopTimeout=120 / grace 预算校准"
 Cohesion: 0.15
@@ -1173,8 +1198,8 @@ Cohesion: 0.28
 Nodes (8): GRAPHIFY_API_TIMEOUT, GRAPHIFY_BEDROCK_MODEL, GRAPHIFY_LLM_TEMPERATURE, GRAPHIFY_MAX_OUTPUT_TOKENS, PYTHONHASHSEED, graphify_refresh.sh script, step(), usage()
 
 ### Community 164 - "uiautomator2.mts"
-Cohesion: 0.09
-Nodes (20): ANDROID_KEYCODES, APP_DID_NOT_HANDLE_ADDRESS_MESSAGE, CHROME_PACKAGE, CLEAR_INPUT_KEY_PRESSES, createUiAutomator2Adapter(), DEFAULT_SCROLL_PERCENT, extractAndroidControls(), FOREGROUND_NOT_APP_MESSAGE (+12 more)
+Cohesion: 0.06
+Nodes (34): ANDROID_KEYCODES, APP_DID_NOT_HANDLE_ADDRESS_MESSAGE, CHROME_PACKAGE, CLEAR_INPUT_KEY_PRESSES, createUiAutomator2Adapter(), DEFAULT_SCROLL_PERCENT, extractAndroidControls(), FOREGROUND_NOT_APP_MESSAGE (+26 more)
 
 ### Community 165 - "job-source.mts"
 Cohesion: 0.13
@@ -1188,13 +1213,13 @@ Nodes (43): ASSIGNMENT_OPERATORS, capabilitiesReads(), COMPARISON_OPERATORS, dec
 Cohesion: 0.25
 Nodes (8): 建连早期误报 engine_error 根治, handler 内零 I/O（只置标志 + 记信号号）, 安全点按「单元完成度」判定丢弃, Nova worker flag-only 协作式停止, 被拒方案：asyncio 化消除 greenlet, 被拒方案：handler raise _Terminated 穿透 with, 泄漏兜底：AgentCore 原生 session TTL, SIGINT（Ctrl-C）纳入 flag-only handler
 
-### Community 168 - "ADR 0027: run 报告归集索引"
-Cohesion: 0.33
-Nodes (6): 输出契约：流式 JSON Lines 事件流, reportRefs 不透明产物引用, status 三态 passed/failed/error（wire 只传三态）, step_skipped 独立事件（scope 内短路）, 三通道分离传输（EVENTS_FD / stdout / stderr）, 事件三级 started/done 对齐
+### Community 168 - "record"
+Cohesion: 0.11
+Nodes (12): AdaptedEcs, after_each_test(), aws(), _has_residue(), _latch_lingering(), _lingering_now(), _precheck_residue(), _purge_recorded() (+4 more)
 
 ### Community 169 - "doc_rules_check.py"
-Cohesion: 0.27
-Nodes (6): _changed_lines(), _git(), _names(), _staged_targets(), _uncommitted_targets(), _working_tree_targets()
+Cohesion: 0.24
+Nodes (7): _changed_lines(), _git(), main(), _names(), _staged_targets(), _uncommitted_targets(), _working_tree_targets()
 
 ### Community 170 - "test_devicefarm_client_placement.py"
 Cohesion: 0.17
@@ -1204,9 +1229,9 @@ Nodes (10): _imports_devicefarm_module(), _is_devicefarm_client_call(), _product
 Cohesion: 0.07
 Nodes (24): ADAPTERS, ContractCase, ContractFixture, FIXTURES, flatten(), FOREGROUND_POLL, guarded(), HIDE_METHODS (+16 more)
 
-### Community 172 - "run_evals.py"
-Cohesion: 0.17
-Nodes (13): collect_outputs(), fail(), load_evals(), main(), worker(), materialize(), parse_events(), pollution_metrics() (+5 more)
+### Community 172 - "test_doc_rules_check.py"
+Cohesion: 0.11
+Nodes (13): gate(), run(), _git(), git_repo(), _load_guard_cli(), test_commit_gate_blocks_on_hits_and_reports_tool_failures(), test_commit_gate_picks_the_scan_by_command_form(), test_missing_path_exits_2_even_outside_every_scan_face() (+5 more)
 
 ### Community 173 - "Engine Port & Job Planning"
 Cohesion: 0.33
@@ -1217,8 +1242,8 @@ Cohesion: 0.29
 Nodes (7): engine 解析（scope 级）, id 派生（scopeId / scenarioId 关联键）, 一个 scenario 多个 @scope 值 → 报错, scope seam（tag 分组 + engine 校验）, scope 全局命名空间（跨文件合并，撞名 warning）, timeout 解析（@timeout:N → Job.timeoutS）, uri 互异契约（重复 uri → 报错）
 
 ### Community 175 - "model.py"
-Cohesion: 0.05
-Nodes (25): _run_schedule(), LocalResultStore, RunPersistence, ReportStore, ResultStore, RunStore, test_job_result_file_stays_readable_by_others(), _jr() (+17 more)
+Cohesion: 0.03
+Nodes (35): _run_schedule(), RunPersistence, Engine, EngineResolver, JobSink, ReportStore, ResultStore, RunStore (+27 more)
 
 ### Community 176 - "test_package_readmes.py"
 Cohesion: 0.13
@@ -1244,45 +1269,41 @@ Nodes (6): package_urls, package-core-link, package-deploy-link, package-midscen
 Cohesion: 0.18
 Nodes (5): _make_devicefarm_client(), df(), _isolated_aws_env(), ssm(), test_client_region_is_device_farm_region_regardless_of_backend_region()
 
-### Community 182 - ".waitRunning"
-Cohesion: 0.24
-Nodes (3): DeviceFarmApi, isStopped(), minutesOf()
+### Community 182 - "gherkai_runtime/names.py"
+Cohesion: 0.11
+Nodes (12): ssm_worker_template_path(), ecr_repo_name(), job_timeout_schedule_prefix(), prefix_max_len(), short_digest(), task_def_name(), worker_image_key(), worker_template_key() (+4 more)
 
 ### Community 183 - "session.mts"
-Cohesion: 0.08
-Nodes (32): APPIUM_SERVER_MAJOR_VERSION, AUTH_ERROR_NAMES, availabilityRank(), CallBound, CallFailure, closestVersion(), compareVersions(), CreateResult (+24 more)
+Cohesion: 0.05
+Nodes (45): APPIUM_SERVER_MAJOR_VERSION, AUTH_ERROR_NAMES, availabilityRank(), CallBound, CallFailure, classifyCallFailure(), classifyCreateFailure(), closestVersion() (+37 more)
 
 ### Community 184 - "DeviceSurface"
 Cohesion: 0.15
 Nodes (3): createDeviceSurface(), DeviceSurface, writePageSourceFile()
 
-### Community 185 - "test_tunnel.py"
-Cohesion: 0.08
-Nodes (22): make_tunnel(), map_origin_in_jobs(), sub(), normalize_origin(), _reject(), render_traffic_policy(), replace_origin(), TunnelError (+14 more)
-
-### Community 186 - "_stream_record"
-Cohesion: 0.11
-Nodes (11): _stream_record(), test_reconciler_noop_for_non_detached_run(), test_reconciler_ticks_detached_run(), test_reconciler_writes_timestamps_in_compose_clock_format(), test_run_ids_dedup_multi_scope_same_run(), test_run_ids_keeps_modify_and_records_without_event_name(), test_run_ids_multi_run(), test_run_ids_scope_id_containing_hash_is_split_from_the_left() (+3 more)
+### Community 185 - "render_traffic_policy"
+Cohesion: 0.12
+Nodes (8): sub(), render_traffic_policy(), replace_origin(), test_normalize_origin_accepts_origins_and_drops_one_trailing_slash(), test_replace_origin_boundaries(), test_traffic_policy_has_four_rules_cookie_spec_and_markers(), test_traffic_policy_parses_as_yaml_with_rule_order_statuses_and_gate_semantics(), test_warmup_page_script_classifies_only_401_as_denied()
 
 ### Community 187 - "test_lambda_handlers.py"
-Cohesion: 0.05
-Nodes (22): cloud_env(), _report_bytes(), _runs_stream_record(), test_build_cap_defaults_to_one_when_env_absent(), test_build_clamps_meta_max_concurrency_to_cap(), test_build_defaults_to_one_when_meta_missing(), test_build_reads_session_warmup_url_back_into_worker_env(), test_build_takes_meta_max_concurrency_under_cap() (+14 more)
+Cohesion: 0.04
+Nodes (28): _stopped_detail(), test_build_cap_defaults_to_one_when_env_absent(), test_build_clamps_meta_max_concurrency_to_cap(), test_build_defaults_to_one_when_meta_missing(), test_build_reads_session_warmup_url_back_into_worker_env(), test_build_takes_meta_max_concurrency_under_cap(), test_build_without_tunnel_injects_no_warmup_env(), test_exit_from_task_is_shared_by_observer_and_timeout_handler() (+20 more)
 
 ### Community 188 - "_ClientError"
-Cohesion: 0.07
-Nodes (11): _botocore_like(), _Cfn, _ClientError, _DeviceFarmStub, df(), _Ssm, test_guard_unexpected_read_error_exits_2_not_traceback(), boom() (+3 more)
+Cohesion: 0.12
+Nodes (7): _botocore_like(), _Cfn, _ClientError, test_deploy_relays_the_not_found_warning_even_when_resolution_then_fails(), test_guard_unexpected_read_error_exits_2_not_traceback(), boom(), test_synth_only_treats_a_credential_lookup_error_as_having_credentials()
 
 ### Community 189 - "workers_real_aws/conftest.py"
 Cohesion: 0.11
 Nodes (15): env_region(), _parse(), _problem_line(), problems(), pytest_configure(), pytest_runtest_logreport(), pytest_runtest_makereport(), pytest_runtest_protocol() (+7 more)
 
-### Community 190 - "parametrize"
-Cohesion: 0.08
-Nodes (13): documenting 清单（ADR 0048 到 0053 第 7 类内容的汇总）, 恢复现场, 移动真机支持（1.5）：实施进度总纲, 遗留项, check_run_list_index(), RunListIndexUnavailable, WorkerNotFoundError, WorkerSelfDescribeError (+5 more)
+### Community 190 - "_FailingEcs"
+Cohesion: 0.13
+Nodes (8): _client_error(), _describe_error(), _FailingEcs, _resolve_with_ecs(), test_client_exception_on_a_revision_missing_from_the_active_list_is_a_miss(), test_client_exception_on_a_revision_still_listed_as_active_is_not_a_miss(), test_describe_errors_other_than_client_exception_are_raised_without_listing(), test_listing_failure_after_a_describe_client_exception_is_not_a_miss()
 
 ### Community 191 - "test_project.py"
-Cohesion: 0.05
-Nodes (49): mutate(), StepStarted, Action, _lifecycle_rank(), NonTerminalSnapshot, plan_next(), project(), project_full() (+41 more)
+Cohesion: 0.03
+Nodes (76): mutate(), StepStarted, Action, apply_device_metering(), device_metering(), EventRecord, finalize_job(), _find_session() (+68 more)
 
 ### Community 193 - "Gherkin Parse Seam"
 Cohesion: 0.50
@@ -1292,13 +1313,17 @@ Nodes (4): gherkin-official 第三方库 seam, keyword 判不出 → fail-fast�
 Cohesion: 0.14
 Nodes (22): collapse(), CommandRecorder, contextOf(), diffIsClean(), exerciseSession(), failureLine(), fakeDriver(), finishCase() (+14 more)
 
-### Community 196 - "test_subprocess_engine.py"
-Cohesion: 0.06
-Nodes (46): _pump_log(), _reset_scope_colors(), _scope_color(), SubprocessEngine, _assert_process_gone(), _color_env_independent(), _engine(), _grandchild_pid() (+38 more)
+### Community 195 - "resolve_cloud_target"
+Cohesion: 0.09
+Nodes (16): CloudTarget, resolve_aws_identity(), resolve_cloud_target(), default_name(), _clear_aws_env(), test_default_name_prefix_original_concat(), test_resolve_aws_identity_config_profile_after_env(), test_resolve_aws_identity_flag_wins_over_env() (+8 more)
 
-### Community 201 - "_StampSsm"
-Cohesion: 0.15
-Nodes (11): check_backend_skew(), read_backend_version(), _client_error(), _StampSsm, test_check_backend_skew_missing_stamp_warns_not_raises(), test_check_backend_skew_propagates_read_errors(), test_check_backend_skew_reads_stamp_then_judges(), test_read_backend_version_blank_value_is_none() (+3 more)
+### Community 196 - "test_subprocess_engine.py"
+Cohesion: 0.05
+Nodes (51): _pump_log(), _read_events(), _scope_color(), SubprocessEngine, WorkerNetworkError, raise_for_worker_exit(), test_raise_for_worker_exit_maps_codes_with_fargate_label(), test_worker_exit_error_carries_exit_code_and_network_is_a_subclass() (+43 more)
+
+### Community 201 - "ssm_path"
+Cohesion: 0.09
+Nodes (15): _aws_error_code(), _make_ecr_client(), _make_ssm_client(), _no_default_pointer_error(), read_backend_version(), read_device_farm_project(), read_worker_default(), _read_worker_image_record() (+7 more)
 
 ### Community 202 - "test_safe_point_upload.py"
 Cohesion: 0.18
@@ -1312,12 +1337,12 @@ Nodes (3): 云端交付与 worker 身份拓扑交互图, gherkai 架构图发布
 Cohesion: 0.67
 Nodes (3): slide_area_ssim_checks, at_31_seconds, first_frame
 
-### Community 205 - "parametrize"
+### Community 205 - "SubprocessWorkerHandle"
 Cohesion: 0.14
-Nodes (8): _assert_usage_error(), test_a_report_target_that_is_not_a_plain_file_is_rejected_before_the_command_runs(), test_a_usage_error_ends_before_the_command_runs(), test_an_empty_last_evaluated_key_means_there_is_no_next_page(), test_an_existing_report_that_cannot_be_removed_is_a_usage_error_and_the_command_does_not_run(), test_table_names_of_any_shape_render_on_a_single_line_of_the_text_report(), test_the_command_streams_and_exit_code_are_the_same_with_and_without_the_tool(), test_two_paths_that_name_the_same_file_through_an_alias_are_a_usage_error()
+Nodes (3): _RecordingHandle, _join_pumps(), SubprocessWorkerHandle
 
 ### Community 206 - "JobSource"
-Cohesion: 0.16
+Cohesion: 0.18
 Nodes (7): JobSource, test_empty_s3_uri_treated_as_unset(), test_read_parses_first_line_json_from_stdin(), test_read_takes_only_first_line_not_eof(), test_s3_state_getobject(), test_s3_uri_must_be_s3_scheme(), test_s3_uri_without_key_fails_loud()
 
 ### Community 207 - "env"
@@ -1329,56 +1354,60 @@ Cohesion: 0.14
 Nodes (9): redact_deep(), redact_secrets(), test_fixture_covers_all_three_rules(), test_json_field_boundary_is_not_crossed(), test_none_passes_through(), test_redact_deep_recurses_values_and_leaves_keys_and_non_strings(), test_redact_deep_scalars(), test_redact_secrets_cases() (+1 more)
 
 ### Community 210 - "test_names_worker.py"
-Cohesion: 0.14
-Nodes (9): image_tag(), test_image_tag_normalizes_epoch(), test_image_tag_normalizes_local_version_segment(), test_image_tag_plain_release(), test_image_tag_rejects_invalid_variant(), test_image_tag_rejects_overlong_tag(), test_image_tag_rejects_version_with_illegal_leading_char(), test_state_worker_task_def_arns_attr_matches_ddb_writer() (+1 more)
+Cohesion: 0.13
+Nodes (10): image_tag(), test_image_tag_normalizes_epoch(), test_image_tag_normalizes_local_version_segment(), test_image_tag_plain_release(), test_image_tag_rejects_invalid_variant(), test_image_tag_rejects_overlong_tag(), test_image_tag_rejects_version_with_illegal_leading_char(), test_state_worker_task_def_arns_attr_matches_ddb_writer() (+2 more)
 
 ### Community 211 - "test_fargate_engine.py"
-Cohesion: 0.13
-Nodes (18): TaskProbe, _await_engine(), _engine_with_fake_ecs(), _stopped_resp(), test_await_exit_code_early_settle_keys_on_stop_code_not_reason_text(), test_await_exit_code_missing_task_beyond_grace_raises(), test_await_exit_code_null_beyond_grace_settles_as_platform_sentinel_with_reason(), test_await_exit_code_null_beyond_grace_without_any_reason_uses_fallback() (+10 more)
+Cohesion: 0.12
+Nodes (18): _await_engine(), _SeqEcs, _spy_run_task_env(), _stopped_resp(), test_await_exit_code_early_settle_keys_on_stop_code_not_reason_text(), test_await_exit_code_null_beyond_grace_settles_as_platform_sentinel_with_reason(), test_await_exit_code_null_beyond_grace_without_any_reason_uses_fallback(), test_await_exit_code_null_then_nonzero_landed_preserved() (+10 more)
 
 ### Community 213 - "artifact-upload.mts"
 Cohesion: 0.12
 Nodes (16): CONTENT_TYPES, contentTypeFor(), DEVICE_SESSION_BASENAME, ADR-0016, ADR-0024, ADR-0028, ADR-0029, ADR-0032 (+8 more)
 
 ### Community 214 - "决策"
-Cohesion: 0.15
-Nodes (13): 0054. 运行期限与遗留前台 run 的收尾：每个 run 遵守由 job 预算推出的期限，终态不可变、执行方服从记录，settle-runs 把发起进程已不在的 run 记为已结束, 一、定位与范围, 七、触发面, 五、run 级终态不可变，执行方服从记录, 八、发起进程标识怎么取, 六、处置：run 级 `error` 加说明，job 保持原样, 决策, 四、判定：owner 最初定的两条 (+5 more)
+Cohesion: 0.13
+Nodes (15): 0054. 运行期限与遗留前台 run 的收尾：每个 run 遵守由 job 预算推出的期限，终态不可变、执行方服从记录，settle-runs 把发起进程已不在的 run 记为已结束, 一、定位与范围, 七、触发面, 九、云端由后端兜底：到期把 run 记为已结束，run 一结束就停掉它的 task, 五、run 级终态不可变，执行方服从记录, 八、发起进程标识怎么取, 六、处置：run 级 `error` 加说明，job 保持原样, 决策 (+7 more)
 
 ### Community 217 - "CONTRIBUTING.md: contributor 指南"
 Cohesion: 0.18
 Nodes (16): /code-health-review 入口, /doc-health-review 入口, CLAUDE.md: 项目约定（沟通/文档/代码纪律/工作方式）, doc-diagram 项目级 skill, 执行核心库窄腰 (core-library narrow waist), CONTEXT.md: 领域术语表, 护栏 (guardrail), 版本真源 (single version source) (+8 more)
 
 ### Community 218 - "harness.py"
-Cohesion: 0.04
-Nodes (45): AdaptedEcs, after_each_test(), aws(), _aws_env(), _batch_put(), _client_config(), _conftest(), _delete_repo() (+37 more)
+Cohesion: 0.08
+Nodes (27): _aws_env(), _batch_put(), _client_config(), _conftest(), _delete_repo(), _delete_ssm(), _delete_table(), _error_code() (+19 more)
 
 ### Community 219 - "no-device-deps.test.mts"
 Cohesion: 0.06
 Nodes (28): busyBackoffMs(), flushTree(), mkLogDir(), mkShots(), ADR-0029, ADR-0039, ADR-0042, ADR-0051 (+20 more)
 
 ### Community 220 - "_render_status"
-Cohesion: 0.17
-Nodes (9): _args(), _mk_state(), test_render_status_json_no_hint(), test_render_status_pending_hints_wait(), test_render_status_running_no_hint(), test_render_status_shows_run_level_message_in_text_and_json(), test_render_status_terminal_no_hint_and_exitcode(), test_render_status_terminal_prints_artifact_locations() (+1 more)
+Cohesion: 0.19
+Nodes (10): _render_status(), _args(), _mk_state(), test_render_status_json_no_hint(), test_render_status_pending_hints_wait(), test_render_status_running_no_hint(), test_render_status_shows_run_level_message_in_text_and_json(), test_render_status_terminal_no_hint_and_exitcode() (+2 more)
 
 ### Community 221 - "Artifact Uploader Component"
-Cohesion: 0.23
-Nodes (12): Act-Boundary Pre-upload, ARTIFACT_S3_BUCKET / ARTIFACT_S3_PREFIX Injection, Artifact Uploader Component, uploader.flush_and_cleanup(dir), Accepted Residual Un-uploaded Artifacts, Scenario-Boundary Log Pre-upload (Midscene only), Midscene uploader.snapshotLogs(logDir, seen, budgetMs), Midscene uploader.snapshotReport(path) (+4 more)
+Cohesion: 0.09
+Nodes (29): 引擎特有量不进 model（act_count）, JobResult 持有 Job、engine 经 property delegate, href 相对化（local 相对 / cloud 恒等 ref）, manifest.json（薄信封 + 扁平 report_index）, 被拒方案：materialize 式产物拷贝, 不透明搬运铁律（model/wire/schedule 永不解引用 ref）, ReportRef {kind, ref, label}, ReportStore.write（整 run 一次写） (+21 more)
 
-### Community 222 - "project.py"
-Cohesion: 0.03
-Nodes (73): test_format_event_renders_session_events_without_endpoints(), RunStore adapters (local / ddb), SessionClosed, SessionOpened, SessionRecord, StepSkipped, Engine, EngineResolver (+65 more)
+### Community 222 - "ScopeStarted"
+Cohesion: 0.06
+Nodes (43): test_format_event_renders_session_events_without_endpoints(), ScopeDone, ScopeStarted, SessionClosed, SessionOpened, reduce_event(), representative_session(), Timing (+35 more)
 
 ### Community 223 - "precheck.mts"
 Cohesion: 0.21
 Nodes (12): DEVICE_LABEL, ADR-0024, ADR-0049, ADR-0051, precheckJob(), precheckSchema(), precheckTarget(), spaced() (+4 more)
 
-### Community 224 - "check_version_skew"
-Cohesion: 0.12
-Nodes (10): check_version_skew(), test_skew_block_when_cli_newer_names_both_exits(), test_skew_cli_version_is_mandatory_no_runtime_fallback(), test_skew_compares_release_segment_only(), test_skew_missing_stamp_blocks_when_run_requires_it(), test_skew_ok_same_release_is_silent(), test_skew_skip_when_either_side_impure(), test_skew_skip_when_own_version_unknown() (+2 more)
+### Community 224 - "test_container.py"
+Cohesion: 0.18
+Nodes (12): _docker_ok(), _Fake, _inspect_spec(), test_default_is_docker(), test_inspect_multi_platform_index_with_amd64_content_matches(), test_inspect_multi_platform_index_without_amd64_content_is_rejected_not_an_error(), test_inspect_other_failure_raises(), test_inspect_parses_os_arch_and_repo_digests() (+4 more)
 
-### Community 228 - "pathlib"
-Cohesion: 0.21
-Nodes (5): expected_rows(), matrix_rows(), test_matrix_lists_exactly_the_two_engines(), test_matrix_rows_for_novaact_match_the_worker_self_description(), test_matrix_target_names_are_the_product_labels()
+### Community 227 - "_StubEcs"
+Cohesion: 0.12
+Nodes (6): _mature_stub(), _StubEcs, test_cleanup_deletes_a_mature_candidate_on_the_stub(), test_cleanup_does_not_count_a_per_item_delete_failure_as_reclaimed(), test_cleanup_reports_a_delete_error_after_deregister_as_not_retryable(), test_cleanup_reports_a_deregister_error_as_retryable()
+
+### Community 228 - "app_upload.py"
+Cohesion: 0.12
+Nodes (7): app_object_key(), AppUploadError, _error_code(), _events(), reuse_window(), sha256_of_file(), _upload()
 
 ### Community 229 - "xcuitest.test.mts"
 Cohesion: 0.16
@@ -1393,8 +1422,8 @@ Cohesion: 0.14
 Nodes (14): AGENTCORE_SESSION_NAME_MAX, DEVICE_FARM_SESSION_NAME_MAX, encode(), encodedUnits(), ADR-0024, ADR-0037, ADR-0051, RFC-3986 (+6 more)
 
 ### Community 241 - "test_both_reports_come_from_the_same_snapshot_even_when_a_request_completes_after_the_command_returns"
-Cohesion: 0.25
-Nodes (5): ddb(), test_both_reports_come_from_the_same_snapshot_even_when_a_request_completes_after_the_command_returns(), fake_main(), hold(), unwritable_dir()
+Cohesion: 0.15
+Nodes (9): ddb(), pipe_results(), direct(), wrapped(), _spawn(), test_both_reports_come_from_the_same_snapshot_even_when_a_request_completes_after_the_command_returns(), fake_main(), hold() (+1 more)
 
 ### Community 242 - "surface-desktop.mts"
 Cohesion: 0.07
@@ -1404,37 +1433,37 @@ Nodes (28): desktopSeam(), AWS_TRANSIENT_NAMES, AWS_TRANSIENT_STATUS, BROWSER_CL
 Cohesion: 0.12
 Nodes (6): fakeSession(), HERE, ADR-0052, probeWith(), Script, Step
 
-### Community 245 - "ReportRef"
-Cohesion: 0.29
-Nodes (4): test_explain_cloud_reads_evidence_from_s3(), ReportRef, _ref_from_dict(), _report_refs_from_json()
+### Community 245 - "_FakeResult"
+Cohesion: 0.12
+Nodes (5): _ActBoom, _FakeResult, _Meta, _NavErrorNova, act_get()
 
 ### Community 246 - "bin.mts"
 Cohesion: 0.10
 Nodes (15): fromSource, hookSpec, ADR-0024, ADR-0028, ADR-0037, ADR-0051, ADR-0037, engineRequire (+7 more)
 
 ### Community 247 - "_gap_engine"
-Cohesion: 0.11
-Nodes (12): _ev_item(), _gap_engine(), _MissingThenStoppedEcs, _RoundsTable, test_final_drain_logs_real_holes_under_consistent_read(), query(), test_read_events_gap_beyond_grace_is_skipped_with_warning(), query() (+4 more)
+Cohesion: 0.08
+Nodes (15): _delayed_stopped_ecs(), describe_tasks(), _ev_item(), _gap_engine(), _MissingThenStoppedEcs, _RoundsTable, test_final_drain_logs_real_holes_under_consistent_read(), query() (+7 more)
 
 ### Community 248 - "e2e_harness.py"
-Cohesion: 0.16
-Nodes (11): ADR 0025 @scope: tag 分组, ADR 0032 Fargate 中断丢失量级与真容器 grace 校准, --interrupt 中断时机矩阵, e2e_harness.py（opt-in 手动端到端验证脚本）, harness 报告判读要点（sample_valid 先于 n_lost）, run(), do_kill(), _watchdog() (+3 more)
+Cohesion: 0.13
+Nodes (12): job_to_line(), ADR 0025 @scope: tag 分组, ADR 0032 Fargate 中断丢失量级与真容器 grace 校准, scrubbed_environ(), e2e_harness.py（opt-in 手动端到端验证脚本）, harness 报告判读要点（sample_valid 先于 n_lost）, run(), do_kill() (+4 more)
 
 ### Community 249 - "jobs"
 Cohesion: 0.14
 Nodes (13): concurrency, cancel-in-progress, group, env, NODE_VERSION, PYTHON_VERSION, UV_VERSION, jobs (+5 more)
 
-### Community 250 - "_wire_capture"
-Cohesion: 0.29
-Nodes (5): fake_main(), _seed(), test_a_caller_that_asks_for_consumed_capacity_keeps_its_own_setting_and_response(), test_adds_the_parameter_records_each_request_and_leaves_the_response_as_the_caller_expects(), _wire_capture()
+### Community 250 - "describe_revision_or_none_if_unlisted"
+Cohesion: 0.14
+Nodes (7): describe_revision_or_none_if_unlisted(), _listed_as_active(), _task_def_family_of(), _PagedListing, test_listing_is_read_past_the_first_page_before_a_revision_counts_as_unlisted(), test_malformed_revision_arn_is_not_listed_and_the_describe_error_is_raised(), test_well_formed_revision_arn_in_other_partitions_is_listed()
 
 ### Community 251 - "agentcore-sigv4.mts"
 Cohesion: 0.17
 Nodes (14): main(), bedrockCompatBody(), DEFAULT_MODEL, getBaseUrl(), getRegion(), MODEL, MODEL_FAMILY_PATTERNS, modelSigner_() (+6 more)
 
-### Community 252 - "_explain_emit"
-Cohesion: 0.14
-Nodes (8): recover(), read_bytes(), _explain_emit(), _explain_empty(), _explain_read_evidence(), _explain_recover(), _explain_scenario_matches(), _needs_recovery()
+### Community 252 - "LazyDdb"
+Cohesion: 0.17
+Nodes (3): LazyDdb, call(), wait_table_active()
 
 ### Community 253 - "Bundled JetBrains Mono WOFF2 Subsets"
 Cohesion: 0.27
@@ -1445,8 +1474,8 @@ Cohesion: 0.06
 Nodes (34): ACCESSORY_DISMISS_BUTTON_QUERY, ACCESSORY_TOOLBAR_MAX_GAP, adjacentAbove(), CLEAR_INPUT_BACKSPACES, createXcuitestAdapter(), DEEP_LINK_UNSUPPORTED_MESSAGE, DISMISS_CONTROL_AMBIGUOUS_MESSAGE, DISMISS_CONTROL_VANISHED_MESSAGE (+26 more)
 
 ### Community 255 - "_Recorder"
-Cohesion: 0.07
-Nodes (15): context_cache_path(), _cache_env(), cdk(), _CdkWritingContext, _clean_aws_env(), _FakeEngine, _Recorder, test_cdk_returncode_is_passed_through() (+7 more)
+Cohesion: 0.11
+Nodes (11): context_cache_path(), _cache_env(), _CdkWritingContext, _Recorder, test_cdk_returncode_is_passed_through(), test_context_cache_is_per_prefix(), test_context_cache_is_saved_after_the_run_and_seeded_into_the_next_fresh_work_dir(), test_context_cache_survives_a_failed_cdk_run() (+3 more)
 
 ### Community 256 - "项目约定"
 Cohesion: 0.29
@@ -1469,20 +1498,20 @@ Cohesion: 0.08
 Nodes (26): attempt(), AttemptResult, createDeviceWarmup(), DeviceWarmupDeps, findWarmupMarker(), leaveWarmupPage(), MARKER_ORDER, ADR-0028 (+18 more)
 
 ### Community 261 - "ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）"
-Cohesion: 0.06
-Nodes (51): ADR 0016: 执行架构与核心库 run 模型, ADR 0019: feature tags、scope 与 engine, ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）, 墙钟时长归约（step/scenario/scope/run duration_ms）, EngineResolver（按 job.engine 解析 Engine）, 失败隔离 / failFast 旋钮, 优雅终止：schedule 只调 handle.stop(grace), _heartbeat_wrap（静默 worker 心跳注入） (+43 more)
+Cohesion: 0.05
+Nodes (56): assertion_votes 配置（--assertion-votes N，默认 N=1）, ADR 0016: 执行架构与核心库 run 模型, ADR 0019: feature tags、scope 与 engine, URL 形态自动分流（导航不写死动词）, assertionVotes 投票次数, 成本信封：engine 只报原生量、core 只合计, 失败/超时的 step 同样带 cost, 深模块、小接口的协议分层原则 (+48 more)
 
-### Community 262 - "model.py"
-Cohesion: 0.02
-Nodes (65): event_log adapters (sqlite / ddb), ReportStore adapters (local / s3), WorkerHandle, EventLog, finalize_report(), Launcher, tick(), TickOutcome (+57 more)
+### Community 262 - "test_reconcile.py"
+Cohesion: 0.05
+Nodes (34): event_log adapters (sqlite / ddb), EventLog, finalize_report(), Launcher, tick(), TickOutcome, BoomLauncher, _done_events() (+26 more)
 
 ### Community 263 - "appium.test.mts"
 Cohesion: 0.07
 Nodes (19): webdriverio@10.0.2, ACQUIRE_TIMED_OUT, ANDROID_APP, budgetOf(), connector(), connectWith(), FakeClient, fakeWdio() (+11 more)
 
 ### Community 264 - "test_retired_at_of_the_replaced_revision_is_read_after_the_mapping_write"
-Cohesion: 0.12
-Nodes (9): Clock, _fail_default_pointer(), _failing_default_pointer_put(), before_put(), test_retired_at_of_the_replaced_revision_is_read_after_the_mapping_write(), after_put(), test_writing_the_mapping_is_followed_by_removing_retired_at_from_the_new_revision(), before_put() (+1 more)
+Cohesion: 0.19
+Nodes (4): Clock, before_put(), test_retired_at_of_the_replaced_revision_is_read_after_the_mapping_write(), after_put()
 
 ### Community 265 - "runScope"
 Cohesion: 0.09
@@ -1492,25 +1521,21 @@ Nodes (21): 1. 链路一句话, 2. 签名契约：五条决定成败的细节, 3
 Cohesion: 0.04
 Nodes (42): clear(), _closed_set(), deterministic(), register(), _Entry, Handles, Hit, _hits() (+34 more)
 
-### Community 267 - "pipe_results"
-Cohesion: 0.40
-Nodes (4): pipe_results(), direct(), wrapped(), _spawn()
+### Community 267 - "test_release_notes.py"
+Cohesion: 0.21
+Nodes (9): _check(), _mod(), test_cli_check_exit_codes(), test_render_pins_links_to_the_tag(), test_repo_changelog_has_every_released_tag_and_unreleased(), test_repo_readme_pins_skill_install_to_changelog_top_version(), test_section_extracts_exactly_one_version(), test_section_missing_or_empty_is_an_error() (+1 more)
 
 ### Community 268 - "RunResult"
-Cohesion: 0.20
-Nodes (24): LocalReportStore, ResourceUri, _jr(), _rr(), _run_with_refs(), test_empty_report_refs_still_valid_index(), test_file_uri_with_remote_host_kept_as_ref(), test_href_falls_back_absolute_for_artifact_outside_run_tree() (+16 more)
+Cohesion: 0.19
+Nodes (25): LocalReportStore, ScenarioResult, _jr(), _rr(), test_empty_report_refs_still_valid_index(), test_file_uri_with_remote_host_kept_as_ref(), test_href_falls_back_absolute_for_artifact_outside_run_tree(), test_href_relativized_for_artifact_in_run_tree() (+17 more)
 
-### Community 271 - "DeviceFarmSessionBlock"
-Cohesion: 0.22
-Nodes (4): createDeviceFarmSessions(), deviceArnRejectedMessage(), DeviceFarmSessionBlock, SessionRegistry
+### Community 271 - "test_real_tag_to_ecr_ref_without_push_per_image_store"
+Cohesion: 0.15
+Nodes (6): _containerd_image_store(), never_pushed_image(), _repo_of(), test_real_arm64_image_is_rejected_by_the_platform_gate(), test_real_never_pushed_image_repo_digests_follow_the_image_store(), test_real_tag_to_ecr_ref_without_push_per_image_store()
 
 ### Community 272 - "test_s3_report_store.py"
-Cohesion: 0.21
-Nodes (9): S3ReportStore, _read_manifest(), _read_s3(), test_empty_report_refs_still_valid_index(), test_index_html_links_and_summary(), test_manifest_shape(), test_prefix_lands_under_prefix(), test_s3_href_not_relativized_kept_as_ref() (+1 more)
-
-### Community 274 - "_timeout_wait_budget_s"
-Cohesion: 0.40
-Nodes (3): _timeout_wait_budget_s(), test_kicker_bounds_the_timeout_wait_by_the_remaining_invocation_time(), get_remaining_time_in_millis()
+Cohesion: 0.15
+Nodes (13): S3ReportStore, StepResult, synthesize_skipped(), _run_with_refs(), _read_manifest(), _read_s3(), test_empty_report_refs_still_valid_index(), test_index_html_links_and_summary() (+5 more)
 
 ### Community 275 - "ci.yml"
 Cohesion: 0.18
@@ -1529,20 +1554,20 @@ Cohesion: 0.12
 Nodes (10): 7. Midscene 复用边界, AppiumInterface, createAppiumInterface(), DeviceAdapter, dismissKeyboardDescription(), isNoDismissControlError(), keyboardNotDismissedMessage(), keyboardNotHiddenLogLine() (+2 more)
 
 ### Community 281 - "_Page"
-Cohesion: 0.17
-Nodes (6): _Page, _Resp, goto(), goto(), test_agentcore_release_failure_after_warmup_rejection_or_stop_exits_1_with_both_layers_released(), goto()
+Cohesion: 0.22
+Nodes (4): _Page, _Resp, goto(), goto()
 
 ### Community 282 - "materialize.py"
-Cohesion: 0.15
-Nodes (21): assert_no_installed_skill(), assert_prepared(), assert_stage_isolated(), _cli_main_digest(), copy_fixture(), fail(), integrity_check(), main() (+13 more)
+Cohesion: 0.08
+Nodes (35): _heartbeat_wrap(), assert_no_installed_skill(), assert_prepared(), assert_stage_isolated(), _cli_main_digest(), copy_fixture(), fail(), integrity_check() (+27 more)
 
-### Community 284 - "test_interrupt_process.py"
-Cohesion: 0.24
-Nodes (3): _spawn_and_wait_ready(), test_worker_cooperative_stop_on_signal(), test_worker_runs_until_signaled()
+### Community 284 - "watch_run_and_stop_tunnel"
+Cohesion: 0.17
+Nodes (8): watch_run_and_stop_tunnel(), _patch_run_store(), _state(), test_watch_stops_tunnel_even_when_store_assembly_fails(), test_watch_stops_tunnel_on_terminal_state(), test_watch_stops_tunnel_when_stop_signal_interrupts_polling(), test_watch_ttl_fallback_when_run_never_settles(), mono()
 
 ### Community 286 - "test_technical_docs.py"
-Cohesion: 0.33
-Nodes (4): technical_docs(), _rel(), test_scan_face_is_not_empty(), test_technical_doc_uses_written_register()
+Cohesion: 0.36
+Nodes (3): _rel(), test_scan_face_is_not_empty(), test_technical_doc_uses_written_register()
 
 ### Community 287 - "image-gate"
 Cohesion: 0.20
@@ -1551,10 +1576,6 @@ Nodes (10): name, needs, runs-on, strategy, artifact, engine, image-gate, includ
 ### Community 288 - "include"
 Cohesion: 0.22
 Nodes (10): strategy, strategy, artifact, context, engine, index, package, include (+2 more)
-
-### Community 290 - "_delayed_stopped_ecs"
-Cohesion: 0.22
-Nodes (4): _delayed_stopped_ecs(), describe_tasks(), test_read_events_gap_within_grace_waits_and_fills_in_order(), test_read_events_scope_done_waits_for_stopped_before_reading_exit()
 
 ### Community 293 - "error-text.mts"
 Cohesion: 0.29
@@ -1568,17 +1589,17 @@ Nodes (9): steps, ENGINE, steps, steps, steps, env, name, run (+1 more)
 Cohesion: 0.25
 Nodes (3): test_plan_shows_device_target_and_session_count_when_engine_supports_it(), no_match(), test_plan_target_check_degrades_when_capabilities_unavailable()
 
-### Community 299 - "test_list_workers_json_keys_match_contract_doc"
-Cohesion: 0.29
-Nodes (4): _documented_keys(), _sections(), test_list_workers_json_keys_match_contract_doc(), leaf_keys()
+### Community 299 - "test_drain_bound_counts_from_stop_request_not_after_blocking_stop"
+Cohesion: 0.15
+Nodes (3): _StopWindowClock, test_drain_bound_counts_from_stop_request_not_after_blocking_stop(), __init__()
 
-### Community 300 - "classifyCallFailure"
-Cohesion: 0.67
-Nodes (3): classifyCallFailure(), classifyCreateFailure(), serverErrorStatus()
+### Community 300 - "reconcile.tick（推进器共享入口）"
+Cohesion: 0.17
+Nodes (13): 机制四：CAS(pending→running) 控严格并发, events 表（append-only 真值日志）, 退出观察者（ECS STOPPED → task_exited）, job timeout（两层声明 → definition 载体 → 三路 enforce）, kicker Lambda（冷启动推进器）, plan_next（纯决策：该启哪些 pending、是否 finalize）, project（纯归约：events + baseline → RunState）, status --wait 接力推进 (+5 more)
 
-### Community 301 - "_Sink"
-Cohesion: 0.29
-Nodes (3): _check_wire_shape(), _Sink, broken_on_scope_started()
+### Community 301 - "_BucketRegionObserver"
+Cohesion: 0.15
+Nodes (4): _BucketRegionObserver, _ClientError, _Request, test_bucket_region_observer_records_the_signing_region_of_the_last_request()
 
 ### Community 302 - "test_context_glossary.py"
 Cohesion: 0.47
@@ -1586,11 +1607,15 @@ Nodes (3): _entries(), test_each_entry_is_term_definition_and_avoid_words(), tes
 
 ### Community 303 - "device/surface.test.mts"
 Cohesion: 0.04
-Nodes (32): deleteAppiumSession(), emit(), emitAttempted(), finalizeOnce(), ADR-0051, ADR-0052, observedSeconds(), RELEASE_RETRY_DELAY_MS (+24 more)
+Nodes (31): ADR-0052, ADR-0051, ADR-0052, APP_PREPARE_TIMEOUT, HANGING_VARIANTS, harness(), HarnessOptions, LOST_BEFORE_START (+23 more)
 
-### Community 304 - "_events_table_actions"
-Cohesion: 0.33
-Nodes (3): _events_table_actions(), test_advancer_events_table_face_is_read_plus_putitem(), test_exit_observer_can_only_putitem_on_events_table()
+### Community 304 - "_FakeSink"
+Cohesion: 0.17
+Nodes (3): captured(), _FakeSink, _reset_stop()
+
+### Community 305 - "ImageInfo"
+Cohesion: 0.20
+Nodes (4): ImageInfo, test_inspect_missing_image_is_not_an_error(), test_target_platform_judgement(), inspect()
 
 ### Community 306 - "image_token_probe：截图缩放后的图片 token 探针"
 Cohesion: 0.50
@@ -1601,16 +1626,20 @@ Cohesion: 0.04
 Nodes (43): ADR-0025, BUILTIN_KINDS, BuiltinKind, DeterministicAssertion, DeterministicHandler, DeterministicHandlers, DeterministicMeta, Device (+35 more)
 
 ### Community 309 - "reconciler.py"
-Cohesion: 0.10
-Nodes (13): _event_log(), _extract(), handler(), _is_detached(), exit_from_task(), _handle_timeout(), _check(), handler() (+5 more)
+Cohesion: 0.09
+Nodes (15): _event_log(), _extract(), handler(), _is_detached(), exit_from_task(), _handle_timeout(), handler(), kicker_handler() (+7 more)
 
 ### Community 310 - "verify_project"
-Cohesion: 0.25
-Nodes (5): verify_project(), test_verify_project_access_denied_is_classified(), test_verify_project_existing_project_is_true(), test_verify_project_not_found_is_false_without_listing_or_creating(), test_verify_project_other_client_errors_propagate_unchanged()
+Cohesion: 0.17
+Nodes (7): verify_project(), test_network_error_propagates_without_listing(), test_verify_project_access_denied_is_classified(), test_verify_project_existing_project_is_true(), test_verify_project_network_error_propagates(), test_verify_project_other_client_errors_propagate_unchanged(), _UnreachableClient
 
 ### Community 311 - "_index_ast_lines"
 Cohesion: 0.67
 Nodes (3): _index_ast_lines(), record(), record_children()
+
+### Community 312 - "test_access_errors_are_not_misses"
+Cohesion: 0.18
+Nodes (5): is_botocore_error(), test_is_botocore_error_classifies(), _Failing, test_access_errors_are_not_misses(), test_network_error_on_ecr_is_not_a_miss()
 
 ### Community 313 - "_interrupt_prompt"
 Cohesion: 0.40
@@ -1621,24 +1650,40 @@ Cohesion: 0.29
 Nodes (6): ADR-0024, ownerPidFromEnv(), PARENT_PID_ENV, PARENT_POLL_MS, ParentWatchdogDeps, startParentWatchdog()
 
 ### Community 317 - "JobState"
-Cohesion: 0.04
-Nodes (49): test_render_status_pending_run_with_claimed_job_does_not_hint(), JobState, _ddb_store_counting_updates(), _initial(), _meta(), _real_run_id(), _real_store(), run_store() (+41 more)
+Cohesion: 0.03
+Nodes (75): render_run_state(), test_render_status_pending_run_with_claimed_job_does_not_hint(), test_render_run_state_lists_jobs_and_session_lineage(), test_render_run_state_shows_ended_at_when_terminal(), RunStore adapters (local / ddb), JobState, RunState, _ddb_store() (+67 more)
 
-### Community 318 - "build_engines"
-Cohesion: 0.04
-Nodes (38): _ask_worker(), build_engines(), _env(), _inject_aws(), build_local_event_log(), cloud_run_list_location(), events_db_path(), load_feature() (+30 more)
+### Community 318 - "device_reprobe 使用说明（Midscene 设备模块的真机重新探测）"
+Cohesion: 0.18
+Nodes (10): device_reprobe 使用说明（Midscene 设备模块的真机重新探测）, 判读, 前置条件, 定位与适用场景, 离线自检（`--offline`）, 类型检查, 耗时判读, 调用 (+2 more)
 
 ### Community 320 - "severity 数值序（_STATUS_SEVERITY）"
-Cohesion: 0.38
-Nodes (7): 退出码基于 run 级 severity, _NON_VERDICT 与 _aggregate 入口过滤, severity 数值序（_STATUS_SEVERITY）, Status.ABORTED（core 派生态）, Status.PENDING / RUNNING（生命周期前置态）, Status.SKIPPED（core 派生态）, TERMINAL_STATUSES（终态真源，取补定义）
+Cohesion: 0.32
+Nodes (8): 退出码基于 run 级 severity, _NON_VERDICT 与 _aggregate 入口过滤, severity 数值序（_STATUS_SEVERITY）, Status.ABORTED（core 派生态）, Status.PENDING / RUNNING（生命周期前置态）, Status.SKIPPED（core 派生态）, step 级短路：step_skipped 事件 + shortcircuited 布尔, TERMINAL_STATUSES（终态真源，取补定义）
+
+### Community 321 - "ecs_task_timing.py"
+Cohesion: 0.29
+Nodes (7): capture(), _delta_s(), _describe(), _ecs(), _iso(), main(), _print_human()
 
 ### Community 322 - "compose.py"
-Cohesion: 0.03
-Nodes (46): _aws_error_code(), cloud_stop_bound_s(), _default_targets(), describe_revision_or_none_if_unlisted(), _find_worker_spec(), is_botocore_error(), _is_finite_number(), is_pure_release() (+38 more)
+Cohesion: 0.02
+Nodes (53): build_cloud_event_log(), build_cloud_run_list_store(), build_fargate_engines(), build_local_event_log(), cloud_artifact_locations(), cloud_run_list_location(), cloud_stop_bound_s(), _default_targets() (+45 more)
 
 ### Community 323 - "jobs"
 Cohesion: 0.29
 Nodes (7): name, runs-on, jobs, build-smoke, python, name, runs-on
+
+### Community 324 - "TaskProbe"
+Cohesion: 0.15
+Nodes (9): TaskProbe, _engine_with_fake_ecs(), _FakeEcs, test_await_exit_code_missing_task_beyond_grace_raises(), test_probe_task_missing_is_a_third_state_not_running(), test_probe_task_not_stopped(), test_probe_task_stopped_but_exit_code_null(), test_probe_task_stopped_reads_stop_code_and_reason() (+1 more)
+
+### Community 326 - "container.py"
+Cohesion: 0.31
+Nodes (4): resolve_container_engine(), UnsupportedContainerEngine, test_env_selects_engine_and_flag_wins(), test_unsupported_engine_is_rejected_not_silently_downgraded()
+
+### Community 328 - "_cmd_list_runs"
+Cohesion: 0.25
+Nodes (4): _cmd_list_runs(), _emit_run_list(), _merge_run_listings(), _run_noun()
 
 ### Community 329 - "register"
 Cohesion: 0.33
@@ -1649,8 +1694,8 @@ Cohesion: 0.33
 Nodes (6): run, node, defaults, name, runs-on, working-directory
 
 ### Community 333 - "_Party"
-Cohesion: 0.10
-Nodes (10): lingering_party_threads(), _parties(), _Party, _party_under_broad_except(), target(), _PartyStopped, test_aborted_party_held_under_a_broad_except_issues_no_further_call_and_has_ended(), test_hold_timeout_does_not_let_a_party_under_a_broad_except_go_on() (+2 more)
+Cohesion: 0.07
+Nodes (21): lingering_party_threads(), _parties(), _Party, _party_under_broad_except(), target(), _PartyStopped, test_aborted_party_held_under_a_broad_except_issues_no_further_call_and_has_ended(), test_hold_timeout_does_not_let_a_party_under_a_broad_except_go_on() (+13 more)
 
 ### Community 334 - "build"
 Cohesion: 0.33
@@ -1661,8 +1706,8 @@ Cohesion: 0.33
 Nodes (6): name, needs, permissions, runs-on, images, packages
 
 ### Community 336 - "_engine"
-Cohesion: 0.09
-Nodes (30): _engine(), _job(), _put_event(), _put_exit_item(), _spy_run_task_env(), _stopped_ecs(), test_handle_stop_calls_stop_task(), test_read_events_ignores_exit_item_alongside_worker_events() (+22 more)
+Cohesion: 0.10
+Nodes (25): _engine(), _job(), _put_event(), _put_exit_item(), _stopped_ecs(), describe_tasks(), test_handle_stop_calls_stop_task(), test_read_events_ignores_exit_item_alongside_worker_events() (+17 more)
 
 ### Community 337 - ".attempt"
 Cohesion: 0.47
@@ -1673,8 +1718,8 @@ Cohesion: 0.40
 Nodes (5): skill 参考：CLI --json 字段契约, 派生视图 (derived view), 机读输出契约 (machine-readable output contract), Run 数据模型 (run data model), 判定真值 (verdict truth)
 
 ### Community 339 - "ADR 0024: worker–core 协议"
-Cohesion: 0.08
-Nodes (103): cli/DEVELOPMENT.md, cli 包 contributor 文档, gherkai 命令行发行包入口页, agent skill (gherkai skill), 无状态批量运行 (stateless batch execution), core 包 contributor 文档, core 测试说明（单测 + 集成测试）, gherkai-deploy-aws contributor 手册 (+95 more)
+Cohesion: 0.09
+Nodes (78): cli/DEVELOPMENT.md, cli 包 contributor 文档, gherkai 命令行发行包入口页, agent skill (gherkai skill), 无状态批量运行 (stateless batch execution), core 包 contributor 文档, core 测试说明（单测 + 集成测试）, gherkai-deploy-aws contributor 手册 (+70 more)
 
 ### Community 340 - "render_skill_contract.py"
 Cohesion: 0.21
@@ -1692,13 +1737,9 @@ Nodes (5): on, pull_request, push, workflow_dispatch, branches
 Cohesion: 0.60
 Nodes (5): diffAgainstFixture(), flatten(), formOf(), isCapabilityUnavailable(), unavailableCaseCheck()
 
-### Community 348 - "FargateEngine"
-Cohesion: 0.14
-Nodes (4): FargateEngine, platform_exit_reason(), test_artifact_injection_kwargs_are_mandatory(), test_platform_exit_reason_joins_stop_code_and_reason_with_fallback()
-
-### Community 349 - "_cmd_plan"
-Cohesion: 0.07
-Nodes (19): platform_label(), unspecified_message(), _add_config_flag(), _add_device_flags(), _add_selection_flags(), _available_step_targets(), _build_selector(), _scenario_hit() (+11 more)
+### Community 349 - "_add_device_flags"
+Cohesion: 0.25
+Nodes (4): platform_label(), _add_config_flag(), _add_device_flags(), _add_selection_flags()
 
 ### Community 353 - "S3 Key Mirrors Local Run Tree"
 Cohesion: 0.50
@@ -1712,6 +1753,10 @@ Nodes (3): 2. handler 上下文：七个字段与一条不变量, WebdriverApp, 
 Cohesion: 0.22
 Nodes (7): DeterministicConflict, DeterministicKeywordMismatch, isMatchItem(), match(), matchBatch(), MatchInputError, scan()
 
+### Community 364 - "_put_state"
+Cohesion: 0.25
+Nodes (4): _put_state(), test_cleanup_deletes_when_the_referencing_run_is_terminal(), test_one_query_reads_both_a_pending_and_a_running_run(), test_snapshot_reads_every_page_of_the_live_group_and_leaves_out_finished_runs()
+
 ### Community 372 - "read_project_arn"
 Cohesion: 0.33
 Nodes (4): read_project_arn(), test_read_project_arn_missing_parameter_is_none(), test_read_project_arn_other_errors_propagate(), test_read_project_arn_returns_stored_value()
@@ -1720,21 +1765,53 @@ Nodes (4): read_project_arn(), test_read_project_arn_missing_parameter_is_none()
 Cohesion: 0.07
 Nodes (21): ADR-0053, ADDRESS_PATTERN, DeviceNavigate, ADR-0020, ADR-0022, ADR-0036, ADR-0037, ADR-0048 (+13 more)
 
+### Community 376 - "_RaisingSink"
+Cohesion: 0.25
+Nodes (3): _RaisingSink, test_error_text_prefers_sdk_message_and_is_single_line(), __init__()
+
+### Community 381 - "map_origin_in_jobs"
+Cohesion: 0.36
+Nodes (6): map_origin_in_jobs(), _job_with(), test_map_leaves_other_jobs_and_original_untouched(), test_map_replaces_docstring_and_datatable_cells_independently(), test_map_replaces_step_text_prefix(), test_map_with_trailing_slash_origin_still_maps_paths()
+
 ### Community 382 - "Fargate/ECS RunTask 执行后端"
 Cohesion: 0.50
 Nodes (4): AgentCore Runtime（被否的执行面选项）, 批处理 workload shape 判据, Fargate/ECS RunTask 执行后端, 翻盘条件：workload 变长驻服务
 
+### Community 383 - "_stub_get_not_found"
+Cohesion: 0.25
+Nodes (4): _stub_get_not_found(), test_access_denied_after_the_stored_project_vanished_is_flagged(), test_not_found_warning_is_emitted_before_listing_fails(), test_verify_project_not_found_is_false_without_listing_or_creating()
+
 ### Community 414 - "_StderrScan"
-Cohesion: 0.10
-Nodes (8): _calls_redact(), _is_sys_module(), _is_writer(), _Outlet, _qualified(), _StderrScan, _sys_member(), _writes_fd2()
+Cohesion: 0.09
+Nodes (8): _calls_redact(), _import_bindings(), _is_sys_module(), _is_writer(), _qualified(), _StderrScan, _sys_member(), _writes_fd2()
 
 ### Community 422 - "devicefarm.py"
-Cohesion: 0.14
+Cohesion: 0.15
 Nodes (6): AmbiguousProject, DeviceFarmAccessDenied, _error_code(), is_access_denied(), _project_exists(), _raise_classified()
 
 ### Community 432 - "ADR 0043: 随 CLI 发行的 agent skill"
-Cohesion: 0.05
-Nodes (43): gherkai agent skill 包, 机制四：CAS(pending→running) 控严格并发, events 表（append-only 真值日志）, 退出观察者（ECS STOPPED → task_exited）, job timeout（两层声明 → definition 载体 → 三路 enforce）, kicker Lambda（冷启动推进器）, plan_next（纯决策：该启哪些 pending、是否 finalize）, project（纯归约：events + baseline → RunState） (+35 more)
+Cohesion: 0.07
+Nodes (33): gherkai agent skill 包, RunMeta.extra_http_headers（额外请求头注入）, 隧道凭据脱敏（剥 URL userinfo）, URL 映射（job 组装时替换 origin 前缀）, worker --capabilities 自述入口, CLI list-deterministic --engine, 注册面元数据（description / example 必填）, CI 发布链与占名（tag 触发全链） (+25 more)
+
+### Community 453 - "test_randomly_corrupted_prefixes_are_refused"
+Cohesion: 0.33
+Nodes (4): _insert_positions(), _sample_texts(), test_every_proper_prefix_of_a_valid_record_counts_as_unfinished(), test_randomly_corrupted_prefixes_are_refused()
+
+### Community 454 - "ADR 0023: Nova Act acting 锁 Python"
+Cohesion: 0.40
+Nodes (6): 薄 worker 子进程（一次调用=一个 scope=一个 job）, 两个引擎都作为子进程 worker、核心语言自由选 Python, Nova Act REST API = 客户端驱动的工具调用循环, ADR 0023: Nova Act acting 锁 Python, Python nova-act SDK 的 Playwright/CDP 客户端循环, 全 TS 核心路径（被证伪关闭）
+
+### Community 455 - "独立复核与同僚复核 — 工作约定"
+Cohesion: 0.33
+Nodes (6): 一、功能约束与触发点, 三、简报怎么写（两档通用）, 二、两档实现与选档, 五、实现示例：Codex CLI, 四、分歧裁决与闭合, 独立复核与同僚复核 — 工作约定
+
+### Community 456 - ".from_env"
+Cohesion: 0.33
+Nodes (3): test_bucket_without_logs_dir_fails_loud(), test_from_env_enabled_when_bucket_set(), test_from_env_noop_when_no_bucket()
+
+### Community 459 - "digest_for_repo"
+Cohesion: 0.40
+Nodes (3): digest_for_repo(), test_digest_none_when_repo_absent_or_empty(), test_digest_picked_by_repo_not_first_entry()
 
 ### Community 460 - "test_handle_timeout_finds_stopped_target_on_second_page"
 Cohesion: 0.33
@@ -1752,17 +1829,25 @@ Nodes (3): test_build_reuses_its_own_handles_and_builds_no_new_client(), test_ti
 Cohesion: 0.33
 Nodes (3): _StateStub, _stub_tick_runs_host(), test_tick_runs_branches_on_tick_outcome()
 
+### Community 464 - "_runs_stream_record"
+Cohesion: 0.40
+Nodes (3): _runs_stream_record(), test_starter_run_ids_both_sources(), test_starter_run_ids_from_runs_stream()
+
 ### Community 465 - "test_final_drain_paginates_across_last_evaluated_key"
 Cohesion: 0.50
 Nodes (3): test_final_drain_paginates_across_last_evaluated_key(), _line(), query()
 
-### Community 468 - "patch-package 补丁 @cucumber+cucumber+13.0.0"
+### Community 466 - "stop_tunnel"
 Cohesion: 0.40
-Nodes (5): 默认 AI 判断的裸 When/Then step, 补丁的保守回退策略, patch-package 补丁 @cucumber+cucumber+13.0.0, 精确 pin cucumber 13.0.0 的版本约束, B1 退役清单（cucumber 入口 + 补丁 + bdd conftest）
+Nodes (3): stop_tunnel(), test_ngrok_agent_detaches_from_cli_process_group(), test_stop_tunnel_idempotent_on_dead_pid()
+
+### Community 468 - "_build_selector"
+Cohesion: 0.67
+Nodes (3): _build_selector(), _scenario_hit(), select()
 
 ### Community 614 - "判定的计算路径：从单次投票到退出码"
-Cohesion: 0.08
-Nodes (53): gherkai 变更记录 (CHANGELOG), --expose-local 隧道模式, gherkai-deploy-aws README (AWS 部署 provider), 判定模型：job 结果图, 判定模型：四层归约图, detached 标记（后台 run 分界线）, 同一条事件流的四条物理通道, events 表的两个键空间（seq 段与退出记录） (+45 more)
+Cohesion: 0.11
+Nodes (43): gherkai-deploy-aws README (AWS 部署 provider), detached 标记（后台 run 分界线）, 同一条事件流的四条物理通道, events 表的两个键空间（seq 段与退出记录）, exit-observer Lambda（退出观察）, job 超时预算（三路同形态 enforce）, kicker Lambda（冷启动器）, reconciler Lambda（主推进器） (+35 more)
 
 ## Ambiguous Edges - Review These
 - `终止契约（core 请求 worker 优雅停止）` → `step 顺序 = 书写顺序，keyword 只决定派发`  [AMBIGUOUS]
@@ -1784,14 +1869,14 @@ Nodes (53): gherkai 变更记录 (CHANGELOG), --expose-local 隧道模式, gherk
 
 ## Knowledge Gaps
 - **496 isolated node(s):** `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector`, `CapabilityProbe`, `DeviceFinalizer` (+491 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 5310 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **157 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 5312 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+- **163 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `Midscene 引擎开发笔记（contributor）` connect `ADR 0024: worker–core 协议` to `判定的计算路径：从单次投票到退出码`, `ADR 0042: step 证据与 explain`, `bin.mts`, `决策`, `CONTRIBUTING（contributor 入口）`?**
-  _High betweenness centrality (0.257) - this node is a cross-community bridge._
+- **Why does `Midscene 引擎开发笔记（contributor）` connect `ADR 0042: step 证据与 explain` to `ADR 0026: schedule 模块（job 间并发调度 + 失败隔离 + 优雅终止）`, `判定的计算路径：从单次投票到退出码`, `ADR 0024: worker–core 协议`, `bin.mts`, `CONTRIBUTING（contributor 入口）`, `device_reprobe 使用说明（Midscene 设备模块的真机重新探测）`?**
+  _High betweenness centrality (0.238) - this node is a cross-community bridge._
 - **Are the 497 inferred relationships involving `Status` (e.g. with `_build_parser()` and `_cmd_list_runs()`) actually correct?**
   _`Status` has 497 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector` to the rest of the system?**
@@ -1799,7 +1884,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `guard.mts` be split into smaller, more focused modules?**
   _Cohesion score 0.0539906103286385 - nodes in this community are weakly interconnected._
 - **Why does `tsx` connect `package.json` to `bin.mts`?**
-  _High betweenness centrality (0.140) - this node is a cross-community bridge._
+  _High betweenness centrality (0.137) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

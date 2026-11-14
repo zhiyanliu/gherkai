@@ -1596,9 +1596,9 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794653461.107727,
-    "seen": 1794655020.171242,
-    "ast_hash": "3f9c39283b8aa1f7270d4490b514c3b8",
+    "mtime": 1794669115.974673,
+    "seen": 1794671499.834516,
+    "ast_hash": "a9bd3a9ea4d31dfe7e496945ee25dc8b",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -2274,9 +2274,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794669004.8627343,
-    "seen": 1794669009.845831,
-    "ast_hash": "6d4e6b966c178fad7201c7bab6a62ff5",
+    "mtime": 1794671484.9220057,
+    "seen": 1794671499.834558,
+    "ast_hash": "0e10bd2f8b14fb93d21856e788d353cf",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0054-settle-leftover-foreground-runs.md": {
-    "mtime": 1794668930.7719831,
-    "seen": 1794669009.8458219,
-    "ast_hash": "096521a6f3b0c4bb3db86e1020de074a",
+    "mtime": 1794671122.049241,
+    "seen": 1794671499.834549,
+    "ast_hash": "aa89d24d7836d810a09e3841fbb0ad9f",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
