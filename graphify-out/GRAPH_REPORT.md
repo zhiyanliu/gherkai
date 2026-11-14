@@ -1,17 +1,17 @@
 # Graph Report - yaozhou  (2026-11-15)
 
 ## Corpus Check
-- 480 files · ~976,943 words
+- 480 files · ~977,155 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 31 file(s) not represented in the graph (top: (none) 17, .feature 7, .xml 6)
 
 ## Summary
-- 11932 nodes · 27631 edges · 510 communities (331 shown, 179 thin omitted)
+- 11932 nodes · 27633 edges · 509 communities (331 shown, 178 thin omitted)
 - Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 2338 edges (avg confidence: 0.9)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a0587aca`
+- Built from commit: `3ed73a07`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -346,7 +346,7 @@
 - images
 - _engine
 - .attempt
-- skill 参考：CLI --json 字段契约
+- reconcile.tick（推进器共享入口）
 - ADR 0024: worker–core 协议
 - pathlib
 - _FakeSchedulerClient
@@ -501,7 +501,6 @@
 - test_create_run_on_an_existing_run_fails_and_changes_nothing
 - tunnel.py（--expose-local 隧道 provider）
 - 成本信封：engine 只报原生量、core 只合计
-- 产品文案护栏（AST 扫禁词表）
 - deviceFarmApi
 - StepClassification
 - RunState 物化读视图
@@ -523,14 +522,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `五、run 级终态不可变，执行方服从记录` --references--> `RunStore`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/ports.py
-- `恢复现场` --references--> `_status_cmd()`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → cli/gherkai_cli/__main__.py
-- `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` --references--> `ScopeDone`  [INFERRED]
-  docs/adr/0051-device-session-lifecycle-and-app-distribution.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunMeta`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
 - `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunResult`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `对既有文档与 code 的影响` --references--> `RunResult`  [INFERRED]
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunState`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `compute_watch_ttl_s()`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → runtime/gherkai_runtime/tunnel_host.py
 
 ## Import Cycles
 - None detected.
@@ -583,7 +582,7 @@
 - **Execution runtime behaviour diagram family** — docs_diagrams_execution_cloud_cascade, docs_diagrams_execution_detached_gates, docs_diagrams_execution_timeout_chain [INFERRED 0.70]
 - **agent 驾驭面：机读输出 + 证据 + 教材 + 文案纪律** — docs_adr_0041_agent_facing_cli_affordances_json_contract, docs_adr_0042_step_evidence_and_explain_explain, docs_adr_0043_agent_skill_for_driving_gherkai_derived_copy, docs_adr_0039_user_facing_surfaces_no_internal_references_message_guardrail [INFERRED 0.80]
 
-## Communities (510 total, 179 thin omitted)
+## Communities (509 total, 178 thin omitted)
 
 ### Community 0 - "guard.mts"
 Cohesion: 0.05
@@ -1378,8 +1377,8 @@ Cohesion: 0.11
 Nodes (18): 0054. 运行期限与遗留前台 run 的收尾：每个 run 遵守由 job 预算推出的期限，终态不可变、执行方服从记录，settle-runs 把发起进程已不在的 run 记为已结束, 一、定位与范围, 七、触发面, 三、发起进程标识：放运行态记录的顶层, 九、云端由后端兜底：到期把 run 记为已结束，run 一结束就停掉它的 task, 二、运行期限：进运行定义，所有执行方都遵守, 五、run 级终态不可变，执行方服从记录, 八、发起进程标识怎么取 (+10 more)
 
 ### Community 217 - "CONTRIBUTING.md: contributor 指南"
-Cohesion: 0.18
-Nodes (16): /code-health-review 入口, /doc-health-review 入口, CLAUDE.md: 项目约定（沟通/文档/代码纪律/工作方式）, doc-diagram 项目级 skill, 执行核心库窄腰 (core-library narrow waist), CONTEXT.md: 领域术语表, 护栏 (guardrail), 版本真源 (single version source) (+8 more)
+Cohesion: 0.11
+Nodes (25): /code-health-review 入口, /doc-health-review 入口, CLAUDE.md: 项目约定（沟通/文档/代码纪律/工作方式）, doc-diagram 项目级 skill, cli 包 contributor 文档, skill 参考：CLI --json 字段契约, gherkai 命令行发行包入口页, agent skill (gherkai skill) (+17 more)
 
 ### Community 218 - "harness.py"
 Cohesion: 0.11
@@ -1733,13 +1732,13 @@ Nodes (24): _engine(), _job(), _put_event(), _put_exit_item(), _stopped_ecs(), t
 Cohesion: 0.47
 Nodes (3): Lifecycle, probeFacts(), valueOf()
 
-### Community 338 - "skill 参考：CLI --json 字段契约"
-Cohesion: 0.40
-Nodes (5): skill 参考：CLI --json 字段契约, 派生视图 (derived view), 机读输出契约 (machine-readable output contract), Run 数据模型 (run data model), 判定真值 (verdict truth)
+### Community 338 - "reconcile.tick（推进器共享入口）"
+Cohesion: 0.20
+Nodes (11): 机制四：CAS(pending→running) 控严格并发, events 表（append-only 真值日志）, 退出观察者（ECS STOPPED → task_exited）, job timeout（两层声明 → definition 载体 → 三路 enforce）, kicker Lambda（冷启动推进器）, plan_next（纯决策：该启哪些 pending、是否 finalize）, project（纯归约：events + baseline → RunState）, status --wait 接力推进 (+3 more)
 
 ### Community 339 - "ADR 0024: worker–core 协议"
-Cohesion: 0.08
-Nodes (108): cli/DEVELOPMENT.md, cli 包 contributor 文档, gherkai 命令行发行包入口页, agent skill (gherkai skill), 无状态批量运行 (stateless batch execution), core 包 contributor 文档, core 测试说明（单测 + 集成测试）, gherkai-deploy-aws contributor 手册 (+100 more)
+Cohesion: 0.09
+Nodes (102): cli/DEVELOPMENT.md, core 包 contributor 文档, core 测试说明（单测 + 集成测试）, gherkai-deploy-aws contributor 手册, ADR 0002: Midscene 不由 GPT-5.5 驱动, 概念：只认响应 body、不认 HTTP 状态码, 概念：Midscene 仅走 chat-completions 接口, ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock (+94 more)
 
 ### Community 340 - "pathlib"
 Cohesion: 0.09
@@ -1810,8 +1809,8 @@ Cohesion: 0.15
 Nodes (6): AmbiguousProject, DeviceFarmAccessDenied, _error_code(), is_access_denied(), _project_exists(), _raise_classified()
 
 ### Community 432 - "ADR 0043: 随 CLI 发行的 agent skill"
-Cohesion: 0.05
-Nodes (46): gherkai agent skill 包, 机制四：CAS(pending→running) 控严格并发, events 表（append-only 真值日志）, 退出观察者（ECS STOPPED → task_exited）, job timeout（两层声明 → definition 载体 → 三路 enforce）, kicker Lambda（冷启动推进器）, plan_next（纯决策：该启哪些 pending、是否 finalize）, project（纯归约：events + baseline → RunState） (+38 more)
+Cohesion: 0.06
+Nodes (39): gherkai agent skill 包, RunMeta.extra_http_headers（额外请求头注入）, 隧道凭据脱敏（剥 URL userinfo）, URL 映射（job 组装时替换 origin 前缀）, worker --capabilities 自述入口, CLI list-deterministic --engine, 注册面元数据（description / example 必填）, CI 发布链与占名（tag 触发全链） (+31 more)
 
 ### Community 453 - "test_randomly_corrupted_prefixes_are_refused"
 Cohesion: 0.33
@@ -1930,13 +1929,13 @@ Nodes (50): gherkai-deploy-aws README (AWS 部署 provider), 判定模型：job 
 ## Knowledge Gaps
 - **498 isolated node(s):** `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector`, `CapabilityProbe`, `DeviceFinalizer` (+493 more)
   These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 5392 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
-- **179 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **178 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Midscene 引擎开发笔记（contributor）` connect `ADR 0024: worker–core 协议` to `判定的计算路径：从单次投票到退出码`, `ADR 0012: planning 复用视觉模型、不引独立文本规划器`, `bin.mts`, `CONTRIBUTING（contributor 入口）`, `device_reprobe 使用说明（Midscene 设备模块的真机重新探测）`?**
-  _High betweenness centrality (0.224) - this node is a cross-community bridge._
+  _High betweenness centrality (0.243) - this node is a cross-community bridge._
 - **Are the 522 inferred relationships involving `Status` (e.g. with `_build_parser()` and `_cmd_list_runs()`) actually correct?**
   _`Status` has 522 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector` to the rest of the system?**
@@ -1944,7 +1943,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `guard.mts` be split into smaller, more focused modules?**
   _Cohesion score 0.0539906103286385 - nodes in this community are weakly interconnected._
 - **Why does `tsx` connect `package.json` to `bin.mts`?**
-  _High betweenness centrality (0.104) - this node is a cross-community bridge._
+  _High betweenness centrality (0.120) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._

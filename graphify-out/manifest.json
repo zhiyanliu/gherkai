@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0054-settle-leftover-foreground-runs.md": {
-    "mtime": 1794687260.2726488,
-    "seen": 1794687746.3507268,
-    "ast_hash": "ae642aef8a82fccc32208a7e067d977c",
+    "mtime": 1794689513.6780393,
+    "seen": 1794689692.2240598,
+    "ast_hash": "6deface070699a5f02348ccfe26cc80c",
     "semantic_hash": ""
   },
   "cli/tests/test_job_timeout_cap.py": {
