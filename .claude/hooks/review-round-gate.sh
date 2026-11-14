@@ -5,6 +5,8 @@
 # 怎样算开头：一个锚定在命令文本开头的正则，允许前导空白、一个左括号、nohup，然后是 `codex` 或以 `/codex` 结尾的路径（路径只由字母、数字与 `_ . / ~ + -` 组成），
 # 后接一个空格与 `exec`。只认这一种写法，因为它是送出复核轮的习惯写法；别的位置（cd 或环境变量赋值之后、别的命令之后、
 # 引号、heredoc 与注释里）在执行之前从命令文本认不准，认不准就不认、一律放行。不切词，不读任何文件。
+# 查看帮助不拦：`codex exec` 或 `codex exec resume` 后面在同一行上紧跟 `--help` 或 `-h` 的调用不会送出任何东西
+# （隔着换行的不算：换行之后是另一条命令）。
 # 其余放行：命令文本里没有字面 `codex exec`（整份输入里都没有时不启动 python）、PATH 里没有 python3、输入 JSON 为空或
 # 不合法；脚本自身出错也放行，经 additionalContext 提示这次调用未经检查。
 # 已知盲区：不在开头的直接调用、经包装脚本或别名的调用；只在 Claude Code 里生效。设计理由见 ADR 0046 决策 6。
@@ -14,7 +16,7 @@ case "$input" in *"codex exec"*) ;; *) exit 0 ;; esac  # 整份输入里没有�
 command -v python3 >/dev/null 2>&1 || exit 0
 IFS= read -r -d '' gate_py <<'PY' || true
 import json, re, sys
-DIRECT = re.compile(r"""\s*\(?\s*(?:nohup\s+)?(?:[\w./~+-]*/)?codex exec(?=\s|\Z)""")
+DIRECT = re.compile(r"""\s*\(?\s*(?:nohup\s+)?(?:[\w./~+-]*/)?codex exec(?=\s|\Z)(?!(?:[ \t]+resume)?[ \t]+(?:--help|-h)(?=\s|\Z|[;|&)]))""")
 try:
     command = json.load(sys.stdin)["tool_input"]["command"]
 except Exception:

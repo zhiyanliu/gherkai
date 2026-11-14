@@ -2058,9 +2058,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1794654244.004988,
-    "seen": 1794655020.171272,
-    "ast_hash": "3e160ed0d7f5f31be173df98b72fef2e",
+    "mtime": 1794666262.3376844,
+    "seen": 1794666841.579071,
+    "ast_hash": "f66d41146adf256d3b81a122abcfb5b7",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
@@ -2952,15 +2952,15 @@
     "semantic_hash": ""
   },
   ".claude/hooks/review-round-gate.sh": {
-    "mtime": 1794654681.5961022,
-    "seen": 1794655020.17105,
-    "ast_hash": "2a3594b8ecb48f70864022c957350fc9",
+    "mtime": 1794666707.2900605,
+    "seen": 1794666841.578848,
+    "ast_hash": "b8d48acf812d766b1079638a1540b70d",
     "semantic_hash": ""
   },
   "cli/tests/test_review_round_gate.py": {
-    "mtime": 1794654673.066286,
-    "seen": 1794655020.171081,
-    "ast_hash": "013831ddd48c213795c912723196f3be",
+    "mtime": 1794666696.4527826,
+    "seen": 1794666841.578878,
+    "ast_hash": "c9fa9cfdae6e9cd330ee774cb1e5dda2",
     "semantic_hash": ""
   },
   "cli/tests/test_codex_review.py": {
@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0054-settle-leftover-foreground-runs.md": {
-    "mtime": 1794653850.6987803,
-    "seen": 1794655020.171276,
-    "ast_hash": "1790d5fe494b16fac187656ee7503ed4",
+    "mtime": 1794666810.265599,
+    "seen": 1794666841.579075,
+    "ast_hash": "0a246376b8e24d93b095f1859847215b",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {

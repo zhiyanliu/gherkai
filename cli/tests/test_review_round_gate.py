@@ -35,13 +35,18 @@ def _run(command: str, project: Path, **extra) -> subprocess.CompletedProcess:
     'codex exec resume abc -c sandbox_mode="read-only" -o out - < brief.md > log 2>&1; cat out',
     "codex exec",                                          # exec 之后是文本结束
     "codex exec\n",
-    "  codex exec --help",
+    "  codex exec -s read-only -",
     "\ncodex exec -",
     "( nohup codex exec -s read-only -o out - < brief.md > log 2>&1 & )",
     "(codex exec - < brief.md)",
     "  ( nohup codex exec - < brief.md > log 2>&1 & )",   # 左括号前有空白
     "nohup codex exec - < brief.md &",
     "/usr/local/bin/codex exec - < brief.md",
+    "codex exec -m x --help",                              # 只有紧跟在后面的 --help 才算查看帮助
+    "(codex exec\n--help) < brief.md",                     # 换行之后的 --help 是另一条命令，前面那条照样送出
+    "codex exec\nresume --help",
+    "codex exec resume\n--help",
+    "codex exec --helpful - < brief.md",                   # 不是 --help
     "~/bin/codex exec -",
     "( nohup /opt/codex/bin/codex exec -o out - < brief.md > log 2>&1 & )",
 ])
@@ -59,6 +64,11 @@ def test_direct_call_at_the_start_is_blocked(tmp_path, command):
     "echo hi\ncodex exec - < brief.md",
     "echo;/usr/local/bin/codex exec -",
     "true&&/usr/local/bin/codex exec -",
+    "codex exec --help",                                 # 查看帮助不是送出复核轮
+    "codex exec -h",
+    "codex exec resume --help",
+    "( nohup /opt/homebrew/bin/codex exec --help | head -20 )",
+    "codex exec --help; echo done",
     "#/usr/local/bin/codex exec --help",                 # 注释：井号不是路径里的字符
     "CODEX=/usr/local/bin/codex exec printf EXECUTED",   # 环境变量赋值后由 shell 的 exec 执行别的程序
     "cat|/usr/local/bin/codex exec -",
