@@ -300,9 +300,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794648974.5410342,
-    "seen": 1794650326.025362,
-    "ast_hash": "e3a308b7734208df326a01a491d7c630",
+    "mtime": 1794653461.1079326,
+    "seen": 1794655020.171241,
+    "ast_hash": "cc300c88dcb695da229909d564794a87",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1596,9 +1596,9 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794650194.1434464,
-    "seen": 1794650326.025363,
-    "ast_hash": "df93a793eb93853ad47b3f99e0dcca60",
+    "mtime": 1794653461.107727,
+    "seen": 1794655020.171242,
+    "ast_hash": "3f9c39283b8aa1f7270d4490b514c3b8",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -2058,9 +2058,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1794650194.143052,
-    "seen": 1794650326.025392,
-    "ast_hash": "5363c0a14eb9e0518ce8ebed8a644150",
+    "mtime": 1794654244.004988,
+    "seen": 1794655020.171272,
+    "ast_hash": "3e160ed0d7f5f31be173df98b72fef2e",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
@@ -2472,9 +2472,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794648974.5410342,
-    "seen": 1794650326.0253608,
-    "ast_hash": "e3a308b7734208df326a01a491d7c630",
+    "mtime": 1794653461.1079326,
+    "seen": 1794655020.1712399,
+    "ast_hash": "cc300c88dcb695da229909d564794a87",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/tunnel-warmup.test.mts": {
@@ -2874,15 +2874,15 @@
     "semantic_hash": ""
   },
   "docs/ai-eng/peer-review.md": {
-    "mtime": 1794650194.1432564,
-    "seen": 1794650326.025399,
-    "ast_hash": "900042804a261eecd856a8863130b3f8",
+    "mtime": 1794653461.107076,
+    "seen": 1794655020.1712792,
+    "ast_hash": "f306339c89eab4e44c0dceb545cd968a",
     "semantic_hash": ""
   },
   ".claude/README.md": {
-    "mtime": 1794648974.5409298,
-    "seen": 1794650326.025358,
-    "ast_hash": "fb8d1fd297326a621789d7a873ec93fb",
+    "mtime": 1794653461.1078107,
+    "seen": 1794655020.1712372,
+    "ast_hash": "813455de0609ed709f1cd943d6cf0d6e",
     "semantic_hash": ""
   },
   "core/tests/test_list_runs.py": {
@@ -2952,15 +2952,33 @@
     "semantic_hash": ""
   },
   ".claude/hooks/review-round-gate.sh": {
-    "mtime": 1794650194.1436832,
-    "seen": 1794650326.025179,
-    "ast_hash": "d49489aa5e59f55f48e419a7ccfb9c9b",
+    "mtime": 1794654681.5961022,
+    "seen": 1794655020.17105,
+    "ast_hash": "2a3594b8ecb48f70864022c957350fc9",
     "semantic_hash": ""
   },
   "cli/tests/test_review_round_gate.py": {
-    "mtime": 1794649485.0399375,
-    "seen": 1794650326.025207,
-    "ast_hash": "72e5fa46e1cdafb9e721c9e3ef1fd6f1",
+    "mtime": 1794654673.066286,
+    "seen": 1794655020.171081,
+    "ast_hash": "013831ddd48c213795c912723196f3be",
+    "semantic_hash": ""
+  },
+  "cli/tests/test_codex_review.py": {
+    "mtime": 1794654673.066595,
+    "seen": 1794655020.1710742,
+    "ast_hash": "10ae7f795fa1dc2024fc11bbc33efc9c",
+    "semantic_hash": ""
+  },
+  "tools/codex_review.py": {
+    "mtime": 1794654683.8573706,
+    "seen": 1794655020.171228,
+    "ast_hash": "0c857b0f1fc7ce44d34dde0b344fa17a",
+    "semantic_hash": ""
+  },
+  "docs/adr/0054-settle-leftover-foreground-runs.md": {
+    "mtime": 1794653850.6987803,
+    "seen": 1794655020.171276,
+    "ast_hash": "1790d5fe494b16fac187656ee7503ed4",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
