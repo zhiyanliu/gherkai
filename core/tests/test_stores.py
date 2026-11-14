@@ -149,11 +149,11 @@ def test_result_store_single_job_file_is_self_contained():
     assert jr2.scope_name == "wiki" and jr2.engine == "midscene"
 
 
-# ---- LocalRunStore：save(meta,state) → load_run_meta/load_run_state 往返 ----
-def test_run_store_save_load(tmp_path: Path):
+# ---- LocalRunStore：create_run(meta,state) → load_run_meta/load_run_state 往返 ----
+def test_run_store_create_load(tmp_path: Path):
     store = LocalRunStore(tmp_path / "runs")
     r = _sample_run("run-1")
-    store.save_run(r.run_meta, run_state_from_result(r))
+    store.create_run(r.run_meta, run_state_from_result(r))
     run_dir = tmp_path / "runs" / "run-1"
     assert (run_dir / "run_meta.json").exists()
     assert (run_dir / "run_state.json").exists()
@@ -177,7 +177,7 @@ def test_run_store_load_missing_returns_none(tmp_path: Path):
 
 
 def test_run_state_timestamps_round_trip(tmp_path: Path):
-    # started_at/ended_at 非 None 时也须经 save/load 完整保留（不止测 None 态）。
+    # started_at/ended_at 非 None 时也须经 create/load 完整保留（不止测 None 态）。
     # run_state_from_result 只投影运行态、不填起止（ADR 0016），故直接造带时间戳的 RunState 测落盘往返。
     store = LocalRunStore(tmp_path / "runs")
     meta = _sample_run("run-ts").run_meta
@@ -186,7 +186,7 @@ def test_run_state_timestamps_round_trip(tmp_path: Path):
         jobs={"features/wiki.feature:6": JobState(scope_id="features/wiki.feature:6", status=Status.PASSED, session_id="sess-1")},
         started_at="2026-06-29T00:00:00Z", ended_at="2026-06-29T00:05:00Z",
     )
-    store.save_run(meta, state)
+    store.create_run(meta, state)
     got = store.load_run_state("run-ts")
     assert got is not None
     assert got.started_at == "2026-06-29T00:00:00Z"
@@ -200,7 +200,7 @@ def test_run_state_omits_null_timestamps(tmp_path: Path):
     # 噪音。round-trip 仍还原回 None。
     store = LocalRunStore(tmp_path / "runs")
     r = _sample_run("run-null")  # run_state_from_result 不填起止 → None
-    store.save_run(r.run_meta, run_state_from_result(r))
+    store.create_run(r.run_meta, run_state_from_result(r))
     raw = json.loads((tmp_path / "runs" / "run-null" / "run_state.json").read_text("utf-8"))
     assert "started_at" not in raw and "ended_at" not in raw  # 键缺席，非 null
     got = store.load_run_state("run-null")
@@ -238,7 +238,7 @@ def test_result_store_scope_id_not_path_traversal(tmp_path: Path):
     assert store.load_job_result("run-3", "a/b/c:9").scope_id == "a/b/c:9"
 
 
-# ---- RunStore 实时写三段（ADR 0030）：create_run → update_job_state×N → finalize_run ----
+# ---- RunStore 生命周期写（ADR 0030）：create_run → update_job_state×N → try_finalize ----
 def _initial_state(run_id: str, scope_ids: list[str]) -> RunState:
     """run 开始时的初始态：各 job 摆 pending、总 pending、起止未填。"""
     return RunState(
@@ -277,8 +277,8 @@ def test_realtime_write_lifecycle(tmp_path: Path):
     assert s2.jobs["features/wiki.feature:6"].status == Status.PASSED
     assert s2.jobs["登录场景"].status == Status.FAILED
 
-    # 4) finalize（commit point）：写总 status + ended_at；各 job 态保留
-    store.finalize_run("rt-run", Status.FAILED, "2026-07-01T00:05:00Z")
+    # 4) 收尾（commit point）：条件写总 status + ended_at；各 job 态保留
+    assert store.try_finalize("rt-run", Status.FAILED, "2026-07-01T00:05:00Z") is True
     final = store.load_run_state("rt-run")
     assert final is not None
     assert final.status == Status.FAILED
@@ -288,13 +288,12 @@ def test_realtime_write_lifecycle(tmp_path: Path):
 
 
 def test_update_job_state_before_create_raises(tmp_path: Path):
-    # 未 create_run 就 update/finalize → 报错（须先建初始态，不静默吞）
-    import pytest
+    # 未 create_run 就 update → 报错（须先建初始态，不静默吞）；收尾写不成、不臆造运行态
     store = LocalRunStore(tmp_path / "runs")
     with pytest.raises(FileNotFoundError):
         store.update_job_state("nope", JobState("s", Status.RUNNING))
-    with pytest.raises(FileNotFoundError):
-        store.finalize_run("nope", Status.PASSED, "t")
+    assert store.try_finalize("nope", Status.PASSED, "t") is False
+    assert not (tmp_path / "runs" / "nope").exists()
 
 
 def test_job_timeout_s_round_trip():
@@ -770,7 +769,7 @@ def test_job_state_claimed_at_round_trip(tmp_path: Path):
         sid0: JobState(sid0, Status.RUNNING, claimed_at="2026-08-13T00:00:00Z"),
         sid1: JobState(sid1, Status.PENDING),
     })
-    store.save_run(meta, state)
+    store.create_run(meta, state)
     got = store.load_run_state("ca-run")
     assert got.jobs[sid0].claimed_at == "2026-08-13T00:00:00Z"
     assert got.jobs[sid1].claimed_at is None
@@ -787,7 +786,7 @@ def test_run_state_jobs_map_round_trip(tmp_path: Path):
             "登录场景": JobState("登录场景", Status.PASSED),
         },
     )
-    store.save_run(meta, state)
+    store.create_run(meta, state)
     # 落盘 JSON 仍是 list（向后兼容）
     raw = json.loads((tmp_path / "runs" / "map-run" / "run_state.json").read_text("utf-8"))
     assert isinstance(raw["jobs"], list) and len(raw["jobs"]) == 2
@@ -843,52 +842,77 @@ def test_run_state_message_is_omitted_when_none_and_round_trips_when_set():
     assert run_state_from_dict(d).message == told.message
 
 
-def test_local_run_store_detached_marker_is_written_by_submit_and_kept_by_every_rewrite(tmp_path: Path):
-    """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）：submit 的组合根传 detached=True，create_run 写出的 run_state.json
-    带顶层 `detached: true`；不带 detached 的实例经同步路径的 update_job_state / finalize_run 重写文件时保留它（条件写三方见下一条）；
-    同步 run 的实例不写、`is_detached` 为 False；记录不存在也为 False。标记不进 RunState 模型（读回的对象上没有它）。"""
-    from gherkai_core.model import JobState
+def test_run_state_claim_count_is_always_written_and_missing_reads_as_zero():
+    """认领计数（ADR 0054 决策二）写端恒写：为 0 时同样出键（不按 omit-when-None 省掉），非零值原样往返；读端缺键读作 0。"""
+    from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
 
+    fresh = RunState(run_id="r", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)})
+    assert run_state_to_dict(fresh)["claim_count"] == 0
+    claimed = RunState(run_id="r", status=Status.RUNNING, jobs={"a": JobState("a", Status.RUNNING)}, claim_count=3)
+    assert run_state_from_dict(run_state_to_dict(claimed)).claim_count == 3
+    d = run_state_to_dict(claimed)
+    del d["claim_count"]
+    assert run_state_from_dict(d).claim_count == 0
+
+
+def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
+    """`RUN_STATE_KEYS`（本机写入口据它分出附加键）与 RunState 的字段集、与每个字段都有值时 run_state_to_dict 的产物键集都相等：
+    模型或序列化加了键而这个集合没跟上时，这里先失败。"""
+    import dataclasses
+
+    from gherkai_core.serialize import RUN_STATE_KEYS, run_state_to_dict
+
+    full = RunState(run_id="r", status=Status.ERROR, jobs={"a": JobState("a", Status.ERROR, session_id="s", claimed_at="t")},
+                    started_at="t0", ended_at="t1", high_water_mark=4, message="m", claim_count=2)
+    assert all(getattr(full, f.name) not in (None, 0) for f in dataclasses.fields(RunState)), "前提：每个字段都有非空值"
+    assert set(run_state_to_dict(full)) == RUN_STATE_KEYS
+    assert {f.name for f in dataclasses.fields(RunState)} == RUN_STATE_KEYS
+
+
+def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path):
+    """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
+    create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写、`is_detached` 为 False，记录不存在也为 False。
+    之后的写不逐个补回它（ADR 0054 决策三末段）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
+    run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进 RunState 模型。"""
     r = _sample_run("run-d")
-    initial = run_state_from_result(r)
-    LocalRunStore(tmp_path / "runs", detached=True).create_run(r.run_meta, initial)
+    LocalRunStore(tmp_path / "runs", detached=True).create_run(r.run_meta, run_state_from_result(r))
     path = tmp_path / "runs" / "run-d" / "run_state.json"
     assert json.loads(path.read_text("utf-8"))["detached"] is True
     relay = LocalRunStore(tmp_path / "runs")  # 接力者：不带 detached
     assert relay.is_detached("run-d") is True
     relay.update_job_state("run-d", JobState(scope_id="features/wiki.feature:6", status=Status.RUNNING))
     assert json.loads(path.read_text("utf-8"))["detached"] is True
-    assert relay.try_claim_job("run-d", "登录场景") is False  # 已非 pending，不写（条件写成功时的保留由下一条守）
-    relay.finalize_run("run-d", Status.FAILED, "2026-06-29T00:10:00Z")
-    assert json.loads(path.read_text("utf-8"))["detached"] is True
     assert not hasattr(relay.load_run_state("run-d"), "detached")
+
+    meta = _sample_run("run-s").run_meta
     sync = LocalRunStore(tmp_path / "runs")
-    sync.create_run(_sample_run("run-s").run_meta, run_state_from_result(_sample_run("run-s")))
-    assert "detached" not in json.loads((tmp_path / "runs" / "run-s" / "run_state.json").read_text("utf-8"))
+    sync.create_run(meta, _initial_state("run-s", [j.scope_id for j in meta.jobs]))
+    sync_path = tmp_path / "runs" / "run-s" / "run_state.json"
+    assert "detached" not in json.loads(sync_path.read_text("utf-8"))
     assert sync.is_detached("run-s") is False and sync.is_detached("no-such-run") is False
+    submit_instance = LocalRunStore(tmp_path / "runs", detached=True)
+    submit_instance.update_job_state("run-s", JobState(scope_id=meta.jobs[0].scope_id, status=Status.RUNNING))
+    assert submit_instance.try_claim_job("run-s", meta.jobs[1].scope_id) is True
+    assert submit_instance.try_finalize("run-s", Status.ERROR, "2026-06-29T00:10:00Z") is True
+    assert "detached" not in json.loads(sync_path.read_text("utf-8"))
 
 
-def test_local_run_store_detached_marker_survives_the_three_conditional_writes_of_a_relay(tmp_path: Path):
-    """接力者与 per-run 进程只经条件写三方（try_claim_job / project_state / try_finalize，都走 _locked_rmw）重写 run_state.json，
-    且它们的实例不带 detached：三次成功写回后标记都还在（若 _locked_rmw 绕过 _write_state 直接落盘，标记会在第一次 claim 后消失、
-    之后 status --wait 把这个 run 当成前台 run 只等不接力）。写路径读旧标记失败不吞错：损坏的文件让写回抛出，而不是悄悄去掉标记。"""
-    from gherkai_core.model import JobState, RunState
-
+def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Path):
+    """写路径读不出旧文件不吞错：run_state.json 损坏时四个写入口都抛出、文件原样不动，不会把损坏的文件当成「没有附加键」覆盖掉
+    （那样后台执行标记会被悄悄去掉，status --wait 从此把这个后台 run 当成前台 run 只等不接力）；读路径保守地读作没有标记。"""
     meta = _sample_run("run-p").run_meta
     sid = meta.jobs[0].scope_id
-    pending = RunState(run_id="run-p", status=Status.PENDING, jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in meta.jobs})
-    LocalRunStore(tmp_path / "runs", detached=True).create_run(meta, pending)
+    LocalRunStore(tmp_path / "runs", detached=True).create_run(meta, _initial_state("run-p", [j.scope_id for j in meta.jobs]))
     path = tmp_path / "runs" / "run-p" / "run_state.json"
-    relay = LocalRunStore(tmp_path / "runs")
-    assert relay.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z") is True
-    assert json.loads(path.read_text("utf-8"))["detached"] is True
-    running = RunState(run_id="run-p", status=Status.RUNNING, high_water_mark=1,
-                       jobs={**pending.jobs, sid: JobState(scope_id=sid, status=Status.RUNNING, session_id="s1")})
-    assert relay.project_state("run-p", running) is True
-    assert json.loads(path.read_text("utf-8"))["detached"] is True
-    assert relay.try_finalize("run-p", Status.FAILED, "2026-06-29T00:10:00Z") is True
-    assert json.loads(path.read_text("utf-8"))["detached"] is True and relay.is_detached("run-p") is True
     path.write_text("{not json", encoding="utf-8")
+    relay = LocalRunStore(tmp_path / "runs")
     assert relay.is_detached("run-p") is False  # 读路径保守
-    with pytest.raises(ValueError):
-        relay._write_state(running)  # 写路径不吞：不会把损坏文件当「没有标记」覆盖掉
+    running = RunState(run_id="run-p", status=Status.RUNNING, high_water_mark=1,
+                       jobs={sid: JobState(scope_id=sid, status=Status.RUNNING, session_id="s1")})
+    for write in (lambda: relay.update_job_state("run-p", JobState(scope_id=sid, status=Status.RUNNING)),
+                  lambda: relay.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z"),
+                  lambda: relay.project_state("run-p", running),
+                  lambda: relay.try_finalize("run-p", Status.FAILED, "2026-06-29T00:10:00Z")):
+        with pytest.raises(ValueError):
+            write()
+        assert path.read_text(encoding="utf-8") == "{not json"

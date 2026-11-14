@@ -15,7 +15,7 @@
 姊妹页分工（本页只讲字段）：字段背后的判定语义（四层归约 / 状态 / 退出码）见 [`verdict-model.md`](./verdict-model.md)；`artifacts` 各键指向的落点与证据见 [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；字段何时具备内容（推进链与落地时机）见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
 通则：`--json` 下 **stdout 只有一个 JSON 文档**，诊断与进度一律输出到 stderr；`null` 表示「无此值」（如无成本、未落值），
-省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置 / 读取失败路径 stdout 可为空、诊断输出在 stderr，因此**须先按退出码分流，再解析 stdout**。
+省略键表示「此形态下不存在」（各节注明）。退出码非 0 的前置 / 读取失败路径 stdout 可为空、诊断输出在 stderr；`run` 以退出码 1 结束时 stdout 也可能为空（见下方 `run` 一节末段）。因此**须先按退出码分流，stdout 非空时再解析**。
 退出码含义见 `docs/user-guide/running-and-results.md`「退出码」。
 
 ## `gherkai run … --json`
@@ -85,6 +85,8 @@
 | `report_index` | RunReport `index.html`；报告写失败被隔离时**省略** |
 | `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现；cloud 后端 worker 在云端执行、日志进 CloudWatch，此键不出现 |
 
+本次执行结束之前这个 run 已被记为已结束（运行态记录里的 run 级状态已是终态）时，本次执行不覆盖那条记录、不生成报告，stdout 没有输出，说明在 stderr，退出码为 1（处理过使用方中断时仍为 130 或 143）。已得出的 job 判定照常写入，记录用 `status --json` 读取。
+
 ## `gherkai plan … --json`
 
 | 键 | 类型 | 含义 |
@@ -111,6 +113,7 @@
 | `status` | `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted` | run 级（job 级的 `skipped` / `aborted` 不上浮到 run 级；`aborted` 只来自被使用方中断的同步 `run`；`skipped` 只在全部 job 都没有执行、又没有被中断时出现，现行的执行方式不产生这样的 run，读取方按可能的取值处理即可）。未到终态时，只要有 job 离开 `pending`（被认领、开始执行或已有判定），run 级即为 `running`、不再回到 `pending`；所以 run 级为 `pending` 表示还没有 job 离开 `pending`。反过来不成立：run 级为 `running` 时 job 仍可能全为 `pending`，要查看各 job 当前记录的状态，读 `jobs[]` |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
+| `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
 | `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，仅在终态后有内容 |
@@ -140,7 +143,7 @@
 | `cli_version` | string \| null | 恒有：写出这个 run 的 gherkai 版本，读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null。不为 null 且与顶层 `cli_version` 相同，即由当前版本写出 |
 | `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
 
-清单不带产物落点、任务定义的内容与事件水位：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚结束或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`；云端后端只在这个状态值属于未结束的 run 时列为 `unreadable`（前提是写出它的版本沿用同一套索引规则），属于已结束的 run 时看不到。
+清单不带产物落点、任务定义的内容、事件水位与认领计数：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚结束或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`；云端后端只在这个状态值属于未结束的 run 时列为 `unreadable`（前提是写出它的版本沿用同一套索引规则），属于已结束的 run 时看不到。
 
 ## `gherkai explain <run_id> [<scope_id>] --json`
 

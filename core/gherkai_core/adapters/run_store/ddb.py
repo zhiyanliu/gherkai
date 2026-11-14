@@ -11,11 +11,14 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
-  jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；`high_water_mark` 只在无状态批量运行的投影写时有值，是本 item 唯一的
-  数值属性——投影写的 ConditionExpression 按它做数值守卫、读回 Decimal 转 int，见 ADR 0034 机制三；`status_group` 是由
+  claim_count, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；
+  `high_water_mark` 与 `claim_count` 是本 item 的两个数值属性，读回 Decimal 转 int——前者只在无状态批量运行的投影写时有值，投影写的
+  ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
+  见 ADR 0054 决策二；`status_group` 是由
   run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
+  这类顶层附加属性只在 create_run 时写下；之后的写全是 update_item，不提及的属性原样保留。
   jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。
 
@@ -91,8 +94,8 @@ _BATCH_GET_MAX_RETRIES = 5
 _BATCH_GET_BACKOFF_S = 0.05
 # 读回只取运行态、detached 标记与头部要用的属性：META 的 meta_json 可达数百 KB，整批拖回会让单次响应超出大小上限、变成更多
 # 未处理键；worker_task_def_arns 只服务清理的引用检查。投影只减少传回的数据，读量仍按整个 item 计。
-_LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at", "high_water_mark", "message", "jobs",
-                  "detached", "schema_version", "cli_version")
+_LISTING_ATTRS = ("run_id", _ITEM_TYPE_ATTR, "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count",
+                  "jobs", "detached", "schema_version", "cli_version")
 
 
 class RunListingIncomplete(RuntimeError):
@@ -144,7 +147,8 @@ def _job_state_from_item(scope_id: str, m: dict) -> JobState:
 
 
 def _state_scalars(state: RunState) -> dict:
-    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止 + hwm，对齐 serialize.run_state_to_dict），另加由 status
+    """RunState 顶层标量 → DDB 属性（status + omit-when-None 的起止、hwm 与 message + 恒写的认领计数，对齐
+    serialize.run_state_to_dict），另加由 status
     派生的状态分组（不在 serialize 里：它只服务 DDB 的索引，写入规则见 `status_group`）。"""
     d: dict = {"status": state.status.value, _STATUS_GROUP_ATTR: status_group(state.status)}
     if state.started_at is not None:
@@ -155,6 +159,7 @@ def _state_scalars(state: RunState) -> dict:
         d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态批量运行投影写时有）
     if state.message is not None:
         d["message"] = state.message  # run 级消息（ADR 0037 决策 7）
+    d["claim_count"] = state.claim_count  # 认领计数（ADR 0054 决策二）：恒写，数值属性
     return d
 
 
@@ -171,9 +176,10 @@ def _run_state_from_item(item: dict) -> RunState:
         jobs=jobs,
         started_at=item.get("started_at"),
         ended_at=item.get("ended_at"),
-        # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径 / 旧数据向后兼容）
+        # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径不做投影写）
         high_water_mark=int(hwm) if hwm is not None else None,
         message=item.get("message"),
+        claim_count=int(item.get("claim_count", 0)),  # Decimal → int；缺属性读作 0（同 serialize 的读端）
     )
 
 
@@ -212,30 +218,56 @@ class DynamoDBRunStore:
         self._detached = detached
         self._list_index_name = list_index_name
 
-    # ---- 实时写三段（ADR 0030 决定六）----
+    # ---- 生命周期写入口（ADR 0030 决定六）----
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item。
+        """run 开始：写 META（definition，JSON 字符串）+ STATE（初始运行态，jobs 原生 Map）两 item，只在 run 不存在时成立。
 
         **写序 META→STATE 是契约**（ADR 0034）：kicker 由 STATE 的 INSERT 触发（detached 标记在 STATE 上），
-        触发时 META 必已在——若标 META，kicker 可能在 STATE 落库前 tick、claim/投影全 CCF 空转。"""
+        触发时 META 必已在——若标 META，kicker 可能在 STATE 落库前 tick、claim/投影全 CCF 空转。
+
+        **建 run 是条件写**（ADR 0054 决策五）：已存在即抛 FileExistsError，不改任何东西。两道检查：
+        1. 卸载 step 参数正文之前，以强一致读确认这个 run_id 下 META 与 STATE 都不存在（只取主键，不拖回 meta_json），任一已在
+           即失败——已卸载到 S3 的正文不被重写。读用 GetItem，与 `status` 读运行态同一个动作。
+        2. 两次 put 都带「条目不存在」的条件，任一被挡即失败。
+        已知边界：第 1 道检查的读与第 2 道检查的写之间另一方建了同一个 run_id 时，条目仍只有一方写成（第 2 道检查挡住），
+        但 S3 里的正文可能已被本方重写。run_id 由发起进程新生成、带随机尾，这个窗口不另设机制防护。"""
+        run_id = meta.run_id
+        for item_type in (_META, _STATE):
+            resp = self._table.get_item(
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: item_type},
+                ConsistentRead=True,
+                ProjectionExpression="#rid",
+                ExpressionAttributeNames={"#rid": "run_id"},
+            )
+            if "Item" in resp:
+                raise FileExistsError(f"run {run_id} 已存在，不重新建立")
         meta_dict = run_meta_to_dict(meta)
         if self._arg_offloader is not None:
             # docString/dataTable 正文搬 S3、META 只留指针（解 DDB 400KB 限，ADR 0030 决定六）
-            meta_dict = self._arg_offloader.offload(meta_dict, meta.run_id)
-        self._table.put_item(Item={
+            meta_dict = self._arg_offloader.offload(meta_dict, run_id)
+        ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
+        try:
+            self._table.put_item(Item={
+                "run_id": run_id,
+                _ITEM_TYPE_ATTR: _META,
+                # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 与 list-runs 用投影只取这两个值、不解析
+                # meta_json、不触发卸载正文的 S3 取回；运行期限同样摊出（ADR 0054 决策二），读它的一方不必取回整份 definition。
+                # 三者的值与 meta_json 里的同名键恒同（同一份 meta_dict）。
+                "schema_version": meta_dict["schema_version"],
+                "cli_version": meta_dict["cli_version"],
+                "deadline_at": meta_dict["deadline_at"],
+                "meta_json": json.dumps(meta_dict, ensure_ascii=False),
+            }, ConditionExpression="attribute_not_exists(run_id)")
+            self._table.put_item(Item=self._state_item(meta, initial_state),
+                                 ConditionExpression="attribute_not_exists(run_id)")
+        except ccf as e:
+            raise FileExistsError(f"run {run_id} 已存在，不重新建立") from e
+
+    def _state_item(self, meta: RunMeta, initial_state: RunState) -> dict:
+        """create_run 的 STATE item：初始运行态原样写入，另带只在建 run 时写下的顶层标记。"""
+        return {
             "run_id": meta.run_id,
-            _ITEM_TYPE_ATTR: _META,
-            # 结构版本与写端版本摊成顶层属性（ADR 0037 决策 7）：status / explain 与 list-runs 用投影只取这两个值、不解析 meta_json、
-            # 不触发卸载正文的 S3 取回；运行期限同样摊出（ADR 0054 决策二），读它的一方不必取回整份 definition。三者的值与 meta_json
-            # 里的同名键恒同（同一份 meta_dict）。
-            "schema_version": meta_dict["schema_version"],
-            "cli_version": meta_dict["cli_version"],
-            "deadline_at": meta_dict["deadline_at"],
-            "meta_json": json.dumps(meta_dict, ensure_ascii=False),
-        })
-        self._table.put_item(Item={
-            "run_id": initial_state.run_id,
             _ITEM_TYPE_ATTR: _STATE,
             **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT（ADR 0034）
             # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— 本机后端与旧 definition
@@ -246,7 +278,7 @@ class DynamoDBRunStore:
                if meta.worker_task_defs else {}),
             **_state_scalars(initial_state),
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
-        })
+        }
 
     def update_job_state(self, run_id: str, job_state: JobState) -> None:
         """按 scope_id 单元素刷 STATE.jobs（SET jobs.#sid=:js）。STATE 不存在则报错（须先 create_run）。
@@ -288,21 +320,6 @@ class DynamoDBRunStore:
         except ccf as e:
             raise FileNotFoundError(f"update_job_state：STATE 不存在（须先 create_run）：{run_id}") from e
 
-    def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
-        """commit point：写总 status（连同状态分组，见 `status_group`）+ ended_at（各 job 态此前已刷）。STATE 不存在则报错。
-        条件只要求 STATE 存在，已有终态照样覆盖，分组随之改为新终态的值。"""
-        run_set, run_names, run_values = _run_status_assignment(status)
-        try:
-            self._table.update_item(
-                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET " + run_set + ", ended_at = :e",
-                ExpressionAttributeNames=run_names,  # status 是 DDB 保留字
-                ExpressionAttributeValues={**run_values, ":e": ended_at},
-                ConditionExpression="attribute_exists(run_id)",
-            )
-        except self._table.meta.client.exceptions.ConditionalCheckFailedException as e:
-            raise FileNotFoundError(f"finalize_run：STATE 不存在（须先 create_run）：{run_id}") from e
-
     def preflight(self) -> None:
         """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→以退出码 2 结束）。
 
@@ -311,8 +328,8 @@ class DynamoDBRunStore:
         """
         self._table.load()
 
-    # ---- 无状态批量运行的条件写三方（ADR 0034）----
-    # DDB 原生 ConditionExpression 做原子 CAS——比 local 的 fcntl 文件锁更强（DDB 单 item 写天然原子、
+    # ---- 条件写（ADR 0034 机制三/四、ADR 0054 决策二/五）----
+    # DDB 原生 ConditionExpression 做原子 CAS——对位 local 的 fcntl 文件锁（DDB 单 item 写天然原子、
     # 无需外部锁）。真 DDB 条件写行为由 ADR 0034 地基实测坐实（真 DDB 上 stale HWM 写被 CCF 挡、同 hwm 重复写
     # 幂等）；仓库内单测是 moto、与 local 逐条对拍（core/tests/test_conditional_writes.py）。
     # CCF=ConditionalCheckFailedException。
@@ -325,10 +342,11 @@ class DynamoDBRunStore:
         都不该由这次认领起 task；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
         随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。run 级连同状态分组一起写
         （见 `status_group`）：条件保证写之前 run 级非终态，库中分组本来就是 live，这次是同值写。
+        认领计数在同一条写里加一（ADR 0054 决策二）：缺属性按 0 起算（`if_not_exists`，与读端缺键读作 0、local 的读改写对拍）。
         """
         run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
-        update = "SET jobs.#sid.#st = :running, " + run_set
-        values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value, **run_values}
+        update = "SET jobs.#sid.#st = :running, " + run_set + ", #cc = if_not_exists(#cc, :zero) + :one"
+        values = {":running": Status.RUNNING.value, ":pending": Status.PENDING.value, ":zero": 0, ":one": 1, **run_values}
         if claimed_at is not None:
             update += ", jobs.#sid.claimed_at = :ca"
             values[":ca"] = claimed_at
@@ -336,7 +354,7 @@ class DynamoDBRunStore:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                 UpdateExpression=update,
-                ExpressionAttributeNames={"#sid": scope_id, **run_names},
+                ExpressionAttributeNames={"#sid": scope_id, "#cc": "claim_count", **run_names},
                 ExpressionAttributeValues=values,
                 # 仅当该 job 当前是 pending、run 级未收尾才认领
                 ConditionExpression="jobs.#sid.#st = :pending AND #st IN (:pending, :running)",
@@ -436,35 +454,41 @@ class DynamoDBRunStore:
                 continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
         return True
 
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
-        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态 → False。
-        message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
-        状态分组同样在这次写里改为该终态的值（见 `status_group`）。"""
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
+                     expected_claim_count: int | None = None) -> bool:
+        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态或 STATE 不存在
+        → False。message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
+        状态分组同样在这次写里改为该终态的值（见 `status_group`）。
+
+        expected_claim_count（ADR 0054 决策二「认领计数」段）给出时进条件表达式：库中认领计数等于它才写。期望为 0 时缺属性同样
+        成立（与读端缺属性读作 0、local 的锁内重读对拍）。为 None 时条件不提计数。"""
         run_set, run_names, run_values = _run_status_assignment(status)
         update = "SET " + run_set + ", ended_at = :e"
         names = dict(run_names)  # status 是 DDB 保留字；message 走 names 以防同类
         values = {**run_values, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        condition = "#st IN (:pending, :running)"  # 仅非终态可迁；已终态 → CCF（幂等）
         if message is not None:
             update += ", #msg = :m"
             names["#msg"] = "message"
             values[":m"] = message
+        if expected_claim_count is not None:
+            names["#cc"] = "claim_count"
+            values[":ecc"] = expected_claim_count
+            if expected_claim_count == 0:
+                condition += " AND (attribute_not_exists(#cc) OR #cc = :ecc)"
+            else:
+                condition += " AND #cc = :ecc"
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                 UpdateExpression=update,
                 ExpressionAttributeNames=names,
                 ExpressionAttributeValues=values,
-                ConditionExpression="#st IN (:pending, :running)",  # 仅非终态可迁；已终态 → CCF（幂等）
+                ConditionExpression=condition,
             )
             return True
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
-
-    # ---- 一次性写便捷方法（保留，对拍 local）----
-
-    def save_run(self, meta: RunMeta, state: RunState) -> None:
-        """一次性写完整态（即 create_run 的两 item 一起 put；语义同 local save_run）。"""
-        self.create_run(meta, state)
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
         """读回 definition（从 META item 的 meta_json）；不存在返回 None。"""

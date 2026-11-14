@@ -42,14 +42,15 @@ def _big_state(run_id: str, n_jobs: int, tick: int) -> RunState:
 def test_concurrent_reader_never_sees_torn_run_state(tmp_path):
     store = LocalRunStore(tmp_path)
     run_id = "run-atomic"
-    store._write_state(_big_state(run_id, 2000, 0))  # 先落一份，让读者从第一拍就有文件可读
     state_path = tmp_path / run_id / "run_state.json"
+    state_path.parent.mkdir()
+    store._write_state(state_path, _big_state(run_id, 2000, 0), {})  # 先落一份，让读者从第一拍就有文件可读
     stop = tmp_path / "stop"
     reader = subprocess.Popen([sys.executable, "-c", _READER, str(state_path), str(stop)],
                               stdout=subprocess.PIPE, text=True)
     try:
         for tick in range(1, 200):
-            store._write_state(_big_state(run_id, 2000, tick))  # ~200KB/次，给读者足够多的撞窗机会
+            store._write_state(state_path, _big_state(run_id, 2000, tick), {})  # ~200KB/次，给读者足够多的撞窗机会
     finally:
         stop.touch()
         out, _ = reader.communicate(timeout=30)

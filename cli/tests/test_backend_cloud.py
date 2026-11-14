@@ -106,7 +106,7 @@ def _stub_revision(engine: str) -> str:
 
 
 def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok", ""),
-                         variant_err=None, resolved_variant="base", stop_timeouts=None):
+                         variant_err=None, resolved_variant="base", stop_timeouts=None, table_cls=None):
     """patch store 钩子 + preflight（默认放行）+ 版本 skew 闸 + worker variant 闸（都默认放行）返回记录调用的
     fake（不连真 AWS）。
 
@@ -122,7 +122,8 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下的情形。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。
     `stop_timeouts` 是引擎到 worker container `stopTimeout` 的映射，填进假 resolution 的 `stop_timeout_s`（缺省或
-    未列出的引擎为 None，即「没设或找不到该 container」）。
+    未列出的引擎为 None，即「没设或找不到该 container」）。`table_cls` 换掉假 DDB table 的类（缺省 `_FakeTable`），
+    造出的实例同样记进 `made["ddb_tables"]`。
     """
     fake_s3 = _FakeS3(record)
     made = {"ddb_tables": [], "s3_clients": [], "fargate": [], "variant": []}
@@ -130,7 +131,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
 
     def fake_make_ddb(table, *, region, profile):
         record.append(("make", "ddb_table", table, region, profile))
-        t = _FakeTable(record)
+        t = (table_cls or _FakeTable)(record)
         made["ddb_tables"].append(t)
         return t
 
@@ -424,6 +425,102 @@ def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
                  "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
     assert rc == 1
     assert "运行期落库失败" in capsys.readouterr().err
+
+
+# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）→ 退出码 1 ----
+class _EndedElsewhereTable(_FakeTable):
+    """假 DDB table：`end_elsewhere` 之后，STATE 上以「run 级为 pending 或 running」为条件的写一律被挡
+    （ConditionalCheckFailed，同真表上 run 级已是终态时的行为），强一致读 STATE 得到别处记下的终态；之前与 `_FakeTable` 相同。
+    `updates` 留下每次 update_item 的入参与是否被挡。"""
+
+    def __init__(self, record):
+        super().__init__(record)
+        self.ended: dict | None = None
+        self.updates: list[tuple[dict, bool]] = []
+        self.read_fails_after_end = False  # 置 True：被记为已结束之后，对 STATE 的读抛 botocore 的 ClientError
+
+    def end_elsewhere(self, run_id: str, *, status: Status, message: str, ended_at: str) -> None:
+        from gherkai_core.adapters.run_store.ddb import status_group
+
+        self.ended = {"run_id": run_id, "item_type": "STATE", "status": status.value, "status_group": status_group(status),
+                      "ended_at": ended_at, "message": message, "claim_count": 0, "jobs": {}}
+
+    def update_item(self, **kw):
+        super().update_item(**kw)
+        refused = self.ended is not None and "#st IN (:pending, :running)" in kw.get("ConditionExpression", "")
+        self.updates.append((kw, refused))
+        if refused:
+            raise self.meta.client.exceptions.ConditionalCheckFailedException()
+
+    def get_item(self, **kw):
+        resp = super().get_item(**kw)
+        if self.ended is not None and kw["Key"]["item_type"] == "STATE":
+            if self.read_fails_after_end:
+                from botocore.exceptions import ClientError
+                raise ClientError({"Error": {"Code": "InternalServerError", "Message": "boom"}}, "GetItem")
+            return {"Item": dict(self.ended)}
+        return resp
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
+def test_cloud_run_keeps_the_recorded_end_when_the_run_was_ended_elsewhere(tmp_path, monkeypatch, capsys, flags):
+    """云端后端：执行中途 run 被别处记为 error 并带说明。收尾的条件写被挡，CLI 不再写别的、不写报告，stdout 什么都不输出，
+    stderr 说明记录里的状态与原因、给出判定明细的落点；退出码 1。"""
+    from test_main import _ENDED_AT, _ENDED_REASON, _schedule_ended_elsewhere, _two_scope_feature
+
+    record: list = []
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record, table_cls=_EndedElsewhereTable)
+    s3_keys: list[str] = []
+    monkeypatch.setattr(fake_s3, "put_object", lambda **kw: s3_keys.append(kw["Key"]))
+
+    def end_it(run_id: str) -> None:
+        made["ddb_tables"][0].end_elsewhere(run_id, status=Status.ERROR, message=_ENDED_REASON, ended_at=_ENDED_AT)
+
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet", *flags])
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert cap.out == ""
+    [table] = made["ddb_tables"]
+    run_id = table.ended["run_id"]
+    assert (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
+            f"记录里的状态为 error，原因：{_ENDED_REASON}。\n") in cap.err
+    jobs_dir = m.compose.cloud_artifact_locations(bucket="B", report_prefix="reports", table="T", run_id=run_id)["jobs_dir"]
+    assert f"判定明细: {jobs_dir}" in cap.err
+    assert "Traceback" not in cap.err
+    # 收尾写只有一次、被挡，且是对 runs 表的最后一次写；S3 上只写了两个 job 的判定明细，没有报告
+    finalize = [i for i, (kw, _) in enumerate(table.updates) if "ended_at" in kw["UpdateExpression"]]
+    assert finalize == [len(table.updates) - 1] and table.updates[-1][1] is True
+    assert sorted(k.rsplit("/", 1)[-1] for k in s3_keys) == ["a.json", "b.json"], s3_keys
+
+
+def test_cloud_run_ended_elsewhere_exits_by_signal_even_when_the_record_cannot_be_read_back(tmp_path, monkeypatch, capsys):
+    """处理过使用方中断、收尾的条件写被挡、随后读回运行态又失败：仍走同一个出口，退出码按信号取（SIGTERM 为 143），
+    说明照常给出并写明记录没有读出来，判定明细的落点照常给出；没有未归类的异常。"""
+    import signal as _signal
+
+    from test_main import _ENDED_AT, _ENDED_REASON, _schedule_ended_elsewhere, _two_scope_feature
+
+    record: list = []
+    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record, table_cls=_EndedElsewhereTable)
+    monkeypatch.setattr(fake_s3, "put_object", lambda **kw: None)
+
+    def end_it(run_id: str) -> None:
+        table = made["ddb_tables"][0]
+        table.end_elsewhere(run_id, status=Status.ERROR, message=_ENDED_REASON, ended_at=_ENDED_AT)
+        table.read_fails_after_end = True
+
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it, signum=_signal.SIGTERM))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    cap = capsys.readouterr()
+    assert rc == 143
+    assert cap.out == ""
+    run_id = made["ddb_tables"][0].ended["run_id"]
+    assert (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
+            "记录里的状态这一次没有读出来。\n") in cap.err
+    assert "判定明细: " in cap.err and "Traceback" not in cap.err
 
 
 # ---- cloud 走 FargateEngine（决策 A，ADR 0016/0033）----

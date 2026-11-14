@@ -1264,20 +1264,18 @@ def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws
     assert workers._live_reference_snapshot(aws.ddb, table) == {"arn:shared"}
     store.update_job_state("run-01", JobState(scope_id="a.feature:3", status=Status.RUNNING))
     assert workers._live_reference_snapshot(aws.ddb, table) == {"arn:shared"}
-    store.finalize_run("run-01", Status.PASSED, "2026-09-08T00:10:00Z")
+    assert store.try_finalize("run-01", Status.PASSED, "2026-09-08T00:10:00Z") is True
     assert workers._live_reference_snapshot(aws.ddb, table) == set()
 
 
-@pytest.mark.parametrize("finalize", ["try_finalize", "finalize_run"])
-def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclaims_it_after_the_run_finishes(
-        aws, finalize):
+def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclaims_it_after_the_run_finishes(aws):
     """同一个 run 先拦下、收尾之后再回收（ADR 0038 实测项 9 前半，「引用检查」段③④与「为什么一次快照就够」段其三）。
     run 由 core 的 `DynamoDBRunStore` 真写端建立并推进，清理每一趟都经状态分组索引的 `live` 分组取一次快照。串起的步骤：
 
     1. 一个不在任何映射里、`gherkai:retired-at` 早已满静默期的 revision R；写端建一个引用 R 的 run，run 级为 `pending`。
     2. 一趟清理：R 是成熟候选，快照里有它，留下，原因是有未到终态的 run 引用；不发注销请求，R 仍为 ACTIVE、tag 不变。
     3. 写端把一个 job 写成 `running`，run 级随同一次写换到 `running`；再一趟清理同样留下 R。
-    4. 写端以一条终态写收尾（`try_finalize` 与 `finalize_run` 各走一遍），run 离开 `live` 分组；下一趟清理回收 R。
+    4. 写端以收尾的条件写（`try_finalize`）写下终态，run 离开 `live` 分组；下一趟清理回收 R。
 
     守的是：两个非终态都经同一个分组拦下同一个 revision，run 收尾之后的下一趟不再被它拦下。每一趟只查 `live` 分组一次。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
@@ -1308,10 +1306,7 @@ def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclai
         assert any(a == arn and "仍有未到终态的 run 引用" in why for a, why in outcome.kept), (status, outcome)
         assert arn in _revisions(aws, "novaact") and _tags(aws, arn)[names.TAG_RETIRED_AT] == retired_raw
 
-    if finalize == "try_finalize":
-        assert store.try_finalize("run-01", Status.PASSED, "2026-09-08T12:05:00Z") is True
-    else:
-        store.finalize_run("run-01", Status.PASSED, "2026-09-08T12:05:00Z")
+    assert store.try_finalize("run-01", Status.PASSED, "2026-09-08T12:05:00Z") is True
     assert store.load_run_state("run-01").status == Status.PASSED
     outcome, ecs = one_pass(NOW + timedelta(minutes=10))
     assert outcome.deleted == (arn,) and ecs.deregistered == [arn], outcome

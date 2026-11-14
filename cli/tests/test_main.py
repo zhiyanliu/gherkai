@@ -708,7 +708,9 @@ def _recording_build_local_stores(calls: list):
         def preflight(self): calls.append(("run", "preflight", None))
         def create_run(self, meta, initial_state): calls.append(("run", "create_run", None))
         def update_job_state(self, run_id, js): calls.append(("run", "update_job_state", js.scope_id))
-        def finalize_run(self, run_id, status, ended_at): calls.append(("run", "finalize_run", None))
+        def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
+            calls.append(("run", "try_finalize", None))
+            return True
 
     class FakeResultStore:
         def preflight(self): calls.append(("result", "preflight", None))
@@ -763,9 +765,9 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     last_preflight = max(i for i, (s, mth) in enumerate(methods) if mth == "preflight")
     assert last_preflight < create_idx
     assert sum(1 for (s, mth) in methods if mth == "preflight") == 3
-    # ② commit point：finalize_run 在所有 save_job_result 之后（数据面先、控制面摘要后）
+    # ② commit point：收尾的条件写 try_finalize 在所有 save_job_result 之后（数据面先、控制面摘要后）
     last_save = max(i for i, (s, mth) in enumerate(methods) if mth == "save_job_result")
-    finalize_idx = methods.index(("run", "finalize_run"))
+    finalize_idx = methods.index(("run", "try_finalize"))
     assert finalize_idx > last_save
     # ③ 每 job 一次 save_job_result（两个 scope 即两次），且与终态刷 update_job_state 配对
     saves = [scope for (s, mth, scope) in calls if mth == "save_job_result"]
@@ -777,6 +779,100 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
         assert ui > si
     # ⑤ ReportStore.write 最后（派生、永远最后）
     assert methods[-1] == ("report", "write")
+
+
+# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）----
+
+_ENDED_AT = "2026-11-15T00:00:00+00:00"
+_ENDED_REASON = "发起它的 gherkai run 进程已退出（已记为已结束）"
+
+
+def _schedule_ended_elsewhere(end_it, *, signum=None):
+    """假 schedule：第一个 job 完成之后调 end_it(run_id)，模拟另一个写入方在本次执行进行中把这个 run 记为已结束，余下的 job
+    照常执行并完成。给了 signum 时另像真 schedule 一样处理一次使用方中断（向本进程发信号、回调 on_interrupt(1)），判定不变。"""
+    import signal as _signal
+
+    inner = _fake_schedule_factory()
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        if signum is not None:
+            _signal.raise_signal(signum)
+            opts.on_interrupt(1)
+        ended: list[str] = []
+
+        def on_complete(jr):
+            on_job_complete(jr)
+            if not ended:
+                ended.append(jr.scope_id)
+                end_it(run_meta.run_id)
+
+        return inner(run_meta, engines, sink, opts, on_job_complete=on_complete, on_event=on_event)
+
+    return fake_schedule
+
+
+def _end_locally(reports: Path):
+    """另一个写入方：同一个报告目录上的 run store 以收尾的条件写记下 error 与 run 级说明（与发起进程用的是同一个写入口）。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    def end_it(run_id: str) -> None:
+        assert LocalRunStore(reports).try_finalize(run_id, Status.ERROR, _ENDED_AT, message=_ENDED_REASON) is True
+
+    return end_it
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
+def test_run_keeps_the_recorded_end_when_the_run_was_ended_elsewhere(tmp_path, monkeypatch, capsys, flags):
+    """本机后端：执行中途 run 被别处记为 error 并带说明。run 结束时不覆盖这条记录、不生成报告，各 job 的判定照常写入；
+    stdout 什么都不输出（汇总与 JSON 的 run 级状态从本次结果得出，会与记录矛盾），stderr 说明记录里的状态与原因、给出
+    判定明细的落点；退出码 1。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    reports = tmp_path / "reports"
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(_end_locally(reports)))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports), *flags])
+    cap = capsys.readouterr()
+    assert rc == 1
+    assert cap.out == ""
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    run_id = run_dir.name
+    assert (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
+            f"记录里的状态为 error，原因：{_ENDED_REASON}。\n") in cap.err
+    assert f"判定明细: {compose.local_artifact_locations(str(reports), run_id)['jobs_dir']}" in cap.err
+    assert "Traceback" not in cap.err
+    # 记录不变：run 级是别处写下的终态、说明与结束时刻；两个 job 的判定都已写入（运行态与判定明细），报告没有生成
+    state = LocalRunStore(reports).load_run_state(run_id)
+    assert (state.status, state.message, state.ended_at) == (Status.ERROR, _ENDED_REASON, _ENDED_AT)
+    assert {sid: js.status for sid, js in state.jobs.items()} == {"a": Status.PASSED, "b": Status.PASSED}
+    _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
+    assert sorted(jr.scope_id for jr in result_store.load_all(run_id)) == ["a", "b"]
+    assert not (run_dir / "index.html").exists()
+
+
+def test_run_ended_elsewhere_without_a_run_level_reason_names_only_the_recorded_status(tmp_path, monkeypatch, capsys):
+    """别处收尾时没有写 run 级说明：说明里只给记录里的状态，不留一个空的「原因」。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    reports = tmp_path / "reports"
+
+    def end_it(run_id: str) -> None:
+        assert LocalRunStore(reports).try_finalize(run_id, Status.FAILED, _ENDED_AT) is True
+
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it))
+    assert m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports), "--quiet"]) == 1
+    err = capsys.readouterr().err
+    assert "已得出的判定已写入。记录里的状态为 failed。\n" in err and "原因" not in err
+
+
+def test_run_ended_elsewhere_after_an_interrupt_exits_by_signal(tmp_path, monkeypatch, capsys):
+    """处理过使用方中断、收尾时又发现 run 已被别处记为已结束：退出码仍按信号取（与中断的规则一致），说明照常给出。"""
+    import signal as _signal
+
+    reports = tmp_path / "reports"
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(_end_locally(reports), signum=_signal.SIGTERM))
+    assert m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports)]) == 143
+    cap = capsys.readouterr()
+    assert cap.out == "" and "在本次执行结束之前已被记为已结束" in cap.err
 
 
 def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
@@ -2625,9 +2721,14 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
                    report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
     st = run_status or (S.ABORTED if job_only else S.FAILED)
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
-    run_store.save_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
-                       RunState(run_id=run_id, status=st, jobs={job.scope_id: JobState(job.scope_id, st)},
-                                started_at="t0", ended_at="t9" if st in m.TERMINAL_STATUSES else None))
+    # 运行态经写入口得到：建 run（全 pending）→ 写 job 态（非 pending 时 run 级随之为 running）→ 终态时以条件写收尾
+    run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
+                         RunState(run_id=run_id, status=S.PENDING, jobs={job.scope_id: JobState(job.scope_id, S.PENDING)},
+                                  started_at="t0"))
+    if st != S.PENDING:
+        run_store.update_job_state(run_id, JobState(job.scope_id, st))
+    if st in m.TERMINAL_STATUSES:
+        assert run_store.try_finalize(run_id, st, "t9")
     if with_results:
         result_store.save_job_result(run_id, jr)
     return root, run_id

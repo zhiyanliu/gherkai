@@ -109,24 +109,49 @@ class RunStore(Protocol):
     definition（run_id/created_at/执行哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
     执行后产生。判定明细真值在 ResultStore（不在此）。local adapter 是 LocalRunStore（落 run_meta.json + run_state.json）。
 
-    实时写（ADR 0030）：run 生命周期按三段落库——create_run（开始：写 definition + 初始全 pending 态）→
-    update_job_state（每 job 开始运行/完成：按 scope_id 刷单个 JobState）→ finalize_run（commit point：写总 status + ended_at）。
-    save_run 保留作「一次性写完整态」便捷方法（可由 create_run+finalize 组合）。
+    生命周期（ADR 0030）：create_run（开始：写 definition + 初始全 pending 态）→ update_job_state（每 job 开始运行/完成：按
+    scope_id 刷单个 JobState）→ try_finalize（commit point：以条件写落定总 status + ended_at）。前台执行（同步 `run`）与后台推进
+    （reconciler）用同一组写入口，后台推进另用 try_claim_job 与 project_state。
+
+    **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
+    之外，还有后台推进的多个实例与接力者），本机 adapter 在文件锁内读改写、云端 adapter 的每一次写都带条件。这不是事务保证：
+    create_run 分两次写（definition 在前、运行态在后），云端的 project_state 先写标量、再逐 job 写；中间态对读的一方可见，
+    中途失败时已写成的部分留在库里。**run 级终态不可变**
+    （ADR 0054 决策五）：run 级状态只从 pending 到 running 再到终态，到了终态任何写入口都不再改它；没有无条件改写终态或整份
+    重写运行态的入口。
     """
 
-    # —— 实时写三段（ADR 0030，同步 run 路径；单进程内 RunPersistence._lock 串行，调用方不需要条件写）——
-    def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...
+    # —— 生命周期写入口 ——
+    def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
+        """写 definition 与初始运行态，只在这个 run 还不存在时成立（ADR 0054 决策五）：run 已存在则抛 FileExistsError、
+        不改任何东西（本机的判据是 run 目录里已有运行态文件，云端是 META 或 STATE 条目已在）。初始运行态原样写入，新建的
+        运行态各 job 为 pending、认领计数为 0。
+        """
+        ...
+
     def update_job_state(self, run_id: str, job_state: JobState) -> None:
         """按 scope_id 写单个 job 的运行态；运行态不存在则抛 FileNotFoundError（须先 create_run）。
 
         写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变
         （ADR 0034 机制三「run 级状态只进不退」条③）。写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
+        认领计数、HWM、起止时刻与 run 级 message 不变。
         """
         ...
 
-    def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None: ...
-    # —— 一次性写便捷方法（保留）——
-    def save_run(self, meta: RunMeta, state: RunState) -> None: ...
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
+                     expected_claim_count: int | None = None) -> bool:
+        """收尾（commit point）：仅当 run 总 status 当前为非终态（pending/running）才写终态与 ended_at，成功 True（机制三）。
+
+        所有写入方共用这一个收尾入口（前台执行者与后台推进）：已是终态 → False，库中值不变，保证 commit
+        恰一次（多实例同时见全终态、只有一个写成功、触发一次 RunReport 聚合）。运行态不存在同样 → False，两种原因不区分。
+        message 是 run 级消息（ADR 0037 决策 7）：不经任何 job 就把 run 置为终态时的原因，与终态同一次写入；
+        正常收尾不给；为 None 时不写这一项，库中值原样保留。
+
+        expected_claim_count（ADR 0054 决策二「认领计数」段）：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
+        没有新的认领；不等 → False、不写。为 None 时不判计数。认领计数本身不变。
+        """
+        ...
+
     def load_run_meta(self, run_id: str) -> RunMeta | None: ...
     def load_run_state(self, run_id: str) -> RunState | None: ...
     # —— definition 的结构版本与写端版本（ADR 0037 决策 7）：status / explain 在读任何别的东西之前先核它，只取这两个值、
@@ -148,8 +173,8 @@ class RunStore(Protocol):
         - **无法读取的行**（`RunListing.state` 为 None）没有可用的状态，不参与归入与截取、不占 `limit` 的名额，找到即列出：
           云端是被查分组里凑满名额之前遇到的、读回解析不了的 run；本机是读回解析不了的全部 run 目录（状态值本版本不认识的 run
           本机都看得到；云端只看得到非终态的那些，前提是写出它的版本沿用同一分组规则）。
-        - **一致性**：云端行内容强一致（读回走强一致读），成员资格最终一致（索引只有最终一致读）：刚收尾或终态被改写的 run 可能
-          短暂仍在旧分组、刚建的 run 可能短暂不在任何分组；读回时 run 已不在（运行态缺失）的行跳过。
+        - **一致性**：云端行内容强一致（读回走强一致读），成员资格最终一致（索引只有最终一致读）：刚收尾的 run 可能短暂仍在
+          非终态的分组、刚建的 run 可能短暂不在任何分组；读回时 run 已不在（运行态缺失）的行跳过。
         - **访问失败照常抛出**（本机目录不可读、云端权限 / 网络 / 索引缺失、批量读回重试耗尽），不给出缺行的清单。本机报告落点
           目录不存在时返回空列表。
 
@@ -161,9 +186,8 @@ class RunStore(Protocol):
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
 
-    # —— 无状态批量运行的条件写三方（ADR 0034；reconciler 跨进程/跨实例并发调用，靠条件写而非进程内锁）——
-    # 与上面「实时写三段」并存、职责不同：那三段假定单编排进程内锁串行；这三方假定并发多写者、
-    # 每个方法自身是原子条件写、返回是否成功让调用方（reconciler）据此决定要不要 RunTask/收尾。
+    # —— 认领与投影（ADR 0034；后台推进跨进程/跨实例并发调用）——
+    # 返回是否写成，调用方（reconciler）据此决定要不要起 worker。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """认领：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
 
@@ -172,6 +196,7 @@ class RunStore(Protocol):
         （run 级为终态）→ False，三种原因不区分。
         同一条条件写把 run 级置 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功后 run 级即为 RUNNING；
         run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
+        认领成功时同一次写把认领计数加一（ADR 0054 决策二「认领计数」段）；认领失败不改它。
 
         claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
         （ADR 0034「job timeout」节：local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
@@ -181,7 +206,8 @@ class RunStore(Protocol):
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写投影：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
 
-        写入的只有 HWM、run 级 status（按下段规则）与各 job 态；state 上的 started_at、ended_at、message 不用，库中值原样保留。
+        写入的只有 HWM、run 级 status（按下段规则）与各 job 态；state 上的 started_at、ended_at、message、认领计数不用，
+        库中值原样保留。
         stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
         state.high_water_mark 为 None 按 0 处理，守卫与落库都用 0（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
         不该走到这里。库中 run 级已是终态时同样被挡（返回 False）。
@@ -189,16 +215,6 @@ class RunStore(Protocol):
         传入的 run 级 status 不落库：投影里任一 job 已离开 PENDING 时 run 级写 RUNNING，全 job 仍 PENDING 时不写 run 级、
         保留库中值，因而不会把认领写成的 RUNNING 改回 PENDING（取值规则见 `project.projected_run_status`，ADR 0034
         机制三「run 级状态只进不退」条②）。各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）。
-        """
-        ...
-
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
-        """状态机单调条件写：仅当 run 总 status 当前为非终态（pending/running）才写终态，成功 True（机制三）。
-
-        挡「已 finalize 的 run 被 stale 投影刷回」+ 保 commit 恰一次（多实例同时见全终态、只有一个写成功、
-        触发一次 RunReport 聚合）。已是终态 → False（幂等：别人已 finalize）。
-        message 是 run 级消息（ADR 0037 决策 7）：推进器不经任何 job 就把 run 置为终态时的原因，与终态同一次写入；
-        正常收尾不给；为 None 时不写这一项，库中值原样保留。
         """
         ...
 

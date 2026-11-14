@@ -215,8 +215,9 @@ def test_plan_json_keys_are_documented():
 def test_status_json_keys_are_documented():
     st = M.RunState(run_id="r", status=M.Status.PASSED,
                     jobs={"a": M.JobState("a", M.Status.PASSED, session_id="s", claimed_at="t")},
-                    started_at="t0", ended_at="t9", high_water_mark=3)
+                    started_at="t0", ended_at="t9", high_water_mark=3, claim_count=1)
     doc = run_state_to_dict(st)
+    assert doc["claim_count"] == 1  # 诊断用的认领计数随运行态输出
     doc["artifacts"] = compose.cloud_artifact_locations(bucket="b", report_prefix="reports", table="t", run_id="r")
     _assert_documented(doc, section="status")
     # 云端推进链不经任何 job 就把 run 置为 error 时的形态：run 级 `message`，job 仍是未认领的 pending

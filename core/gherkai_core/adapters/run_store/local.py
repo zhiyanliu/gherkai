@@ -12,23 +12,30 @@
   **控制面投影摘要**（供 exit-code / 未来的轮询式恢复执行 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
   投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
 
+**写入口全部在同一把 fcntl 文件锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：create_run、update_job_state、
+try_claim_job、project_state、try_finalize 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方（前台执行者、后台推进进程、
+`status --wait` 接力）不靠调用方串行。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
+
+**顶层附加键整体保留**（ADR 0054 决策三末段）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
+如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
+
 **克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明 serialize 之外的字段**。
-已落地（ADR 0030 决定四/六）：起止时刻（started_at/ended_at）、实时写三段（create_run / update_job_state /
-finalize_run）+ 读回面（load_run_state，`status` 与 tick 的 baseline 都靠它）、DDB 实装（同包 `ddb.py`）。
 仍有意 defer：jobId、恢复执行/部分重新执行的 attempt 维度（ADR 0030「留口子」）——待真实需求逼出再加。
-落点与 LocalReportStore 对齐（同 `<root>/<run_id>/`）：run_meta.json + run_state.json。
+落点与 LocalReportStore 对齐（同 `<root>/<run_id>/`）：run_meta.json + run_state.json（锁文件 `.runstate.lock` 同目录）。
 """
 from __future__ import annotations
 
 import json
 import stat
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.serialize import (
+    RUN_STATE_KEYS,
     definition_schema_version,
     require_listing_header,
     require_listing_state,
@@ -38,42 +45,72 @@ from gherkai_core.serialize import (
     run_state_to_dict,
 )
 
+_STATE_FILE = "run_state.json"
+_META_FILE = "run_meta.json"
+# 锁一个专用文件、不锁 json 本身：原子写是 tmp 加 rename，锁在被替换掉的 inode 上就护不住下一次读改写
+_LOCK_FILE = ".runstate.lock"
 
 
 def _atomic_write_json(path: Path, obj) -> None:
     """控制面文件（run_meta.json / run_state.json）的原子写。
 
-    并发读者真实存在（ADR 0030 决定三/0034）：per-run 推进进程在 `_locked_rmw` 里写 run_state.json 时，
-    `gherkai status` / 接力进程**无锁**读同一文件（读面不持 `.runstate.lock`，只写面互斥）。原子性的实现与
-    其余两面的读者见 `gherkai_core.adapters._atomic`。
+    并发读者真实存在（ADR 0030 决定三/0034）：写入方在文件锁内写 run_state.json 时，`gherkai status` / 接力进程**无锁**读
+    同一文件（读面不持 `.runstate.lock`，只写面互斥）。原子性的实现与其余两面的读者见 `gherkai_core.adapters._atomic`。
 
     权限收在 0600：控制面只被本机同 uid 的进程消费（`status` / 接力 / 同步 run 自己），无跨用户/跨容器读需求——
     对外可读的是数据面 jobs/*.json 与报告产物，不是这两个文件。
     """
     atomic_write_json(path, obj, mode=0o600)
 
+
+def _extras(raw: dict) -> dict:
+    """run_state.json 顶层里不属于 RunState 模型的键（附加键），原样取出供写回时带上。"""
+    return {k: v for k, v in raw.items() if k not in RUN_STATE_KEYS}
+
+
 class LocalRunStore:
     """RunStore 的本地文件实现（组合根注入；DDB 实装见同包 `ddb.py`）。
 
     detached（ADR 0034）：本组合根是否「无状态批量运行的 submit」——True 则 create_run 写出的 run_state.json 带顶层
-    `detached: true` 标记，之后每次写回都保留它（接力者与同步路径的实例不带 detached，重写时不能把它丢掉）。标记是执行环境
-    属性、不进 RunState 模型；读它只经 `is_detached`（对位 `DynamoDBRunStore.is_detached`）。
+    `detached: true` 标记。标记是执行环境属性、不进 RunState 模型；之后的写回由「顶层附加键整体保留」承担（接力者与同步路径
+    的实例不带 detached，它们的写不会丢掉标记，带 detached 的实例也不会给别的 run 补上标记）。读它只经 `is_detached`
+    （对位 `DynamoDBRunStore.is_detached`）。
     """
 
     def __init__(self, root: str | Path, *, detached: bool = False) -> None:
         self._root = Path(root)
         self._detached = detached
 
-    def _write_state(self, state: RunState) -> None:
-        run_dir = self._root / state.run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        path = run_dir / "run_state.json"
-        d = run_state_to_dict(state)
-        # 写路径读旧标记**不吞错**：这里一旦读失败就静默去掉标记，之后再也加不回来，run 会被 status --wait 当成前台 run、只等不接力；
-        # 同一段 RMW 前面的 load_run_state 碰到同样的错误也是抛出，两边口径一致
-        if self._detached or self._marker_in(path):
-            d["detached"] = True
-        _atomic_write_json(path, d)
+    def _state_path(self, run_id: str) -> Path:
+        return self._root / run_id / _STATE_FILE
+
+    @staticmethod
+    @contextmanager
+    def _run_lock(run_dir: Path) -> Iterator[None]:
+        """持 run 目录下锁文件的排他 fcntl 锁（跨进程互斥；同一进程里各自打开的描述符之间同样互斥）。run 目录须已存在。"""
+        import fcntl
+
+        with open(run_dir / _LOCK_FILE, "w") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+
+    @staticmethod
+    def _read_raw(path: Path) -> dict | None:
+        """读 run_state.json 原文为 dict；文件不存在（含 run 目录不在、同名的不是目录）返回 None。内容损坏照常抛出（写路径
+        不吞错：读不出就不写，不会把损坏的文件当成「没有附加键」覆盖掉）。"""
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (FileNotFoundError, NotADirectoryError):
+            return None
+        return json.loads(text)
+
+    @staticmethod
+    def _write_state(path: Path, state: RunState, extras: dict) -> None:
+        """写回 run_state.json：附加键在前、模型键在后（同名时模型键为准；附加键本来就不与模型键同名）。只在持锁时调用。"""
+        _atomic_write_json(path, {**extras, **run_state_to_dict(state)})
 
     @staticmethod
     def _marker_in(path: Path) -> bool:
@@ -89,62 +126,71 @@ class LocalRunStore:
         文件缺失、读不出或没有标记 → False（读路径保守：读不出标记就当不可接力）。
         """
         try:
-            return self._marker_in(self._root / run_id / "run_state.json")
+            return self._marker_in(self._state_path(run_id))
         except (OSError, ValueError):
             return False
 
-    def save_run(self, meta: RunMeta, state: RunState) -> None:
-        """落 <root>/<run_id>/{run_meta.json, run_state.json}（一次性写完整态，写面）。"""
-        run_dir = self._root / meta.run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        _atomic_write_json(run_dir / "run_meta.json", run_meta_to_dict(meta))
-        self._write_state(state)
+    # ---- 写入口：全部在文件锁内读改写 ----
 
-    # ---- 实时写三段（ADR 0030）----
-    # 注：update_job_state / finalize_run 是「读 run_state.json → 改 → 写回」的 read-modify-write，
-    # **非自身线程安全**——依赖调用方串行（RunPersistence 的单一 store 锁，ADR 0030 决定三）。本地小文件，RMW 开销可忽略。
+    def _locked_rmw(self, run_id: str, mutate) -> bool | None:
+        """在 run_state.json 上做跨进程原子读改写：持文件锁 → 读原文 → mutate(state) → (新 state | None) → 写回。
+
+        返回 True 表示写成；False 表示 mutate 返回 None（条件不成立），不写；None 表示运行态不存在，不写。条件写入口把后两种
+        都当作写不成，update_job_state 把 None 翻成 FileNotFoundError。写回时带上读到的附加键。"""
+        path = self._state_path(run_id)
+        if not path.exists():
+            return None  # run 目录可能也不在：不为一次不存在的写建锁文件
+        with self._run_lock(path.parent):
+            raw = self._read_raw(path)
+            if raw is None:
+                return None
+            new_state = mutate(run_state_from_dict(raw))
+            if new_state is None:
+                return False
+            self._write_state(path, new_state, _extras(raw))
+            return True
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json，各 job 一般为 pending）。
-        语义同 save_run，但意图是「生命周期起点」（与 finalize_run 配对）。"""
-        self.save_run(meta, initial_state)
+        """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json），只在 run 目录里还没有运行态时成立。
+
+        判据与两个文件的写在同一把文件锁内（ADR 0054 决策五）：运行态已在 → 抛 FileExistsError，两个文件都不碰。只有
+        run_meta.json、没有运行态的目录（建 run 在两次写之间中断）照常建。写序同云端：definition 在前、运行态在后，运行态一出现，
+        definition 必已在。后台执行标记只在这里写下。"""
+        run_dir = self._root / meta.run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        path = run_dir / _STATE_FILE
+        with self._run_lock(run_dir):
+            if path.exists():
+                raise FileExistsError(f"run {meta.run_id} 已存在，不重新建立")
+            _atomic_write_json(run_dir / _META_FILE, run_meta_to_dict(meta))
+            self._write_state(path, initial_state, {"detached": True} if self._detached else {})
 
     def update_job_state(self, run_id: str, job_state: JobState) -> None:
         """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
 
         写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（ADR 0034 机制三「run 级状态只进不退」
-        条③，对拍 DDB 的带条件写与只写 job 的回退）；run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。"""
-        state = self.load_run_state(run_id)
-        if state is None:
+        条③，对拍 DDB 的带条件写与只写 job 的回退）；run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。
+        读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。"""
+        def mutate(state: RunState) -> RunState:
+            jobs = dict(state.jobs)
+            jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
+            status = state.status
+            if job_state.status != Status.PENDING and status in (Status.PENDING, Status.RUNNING):
+                status = Status.RUNNING
+            return replace(state, status=status, jobs=jobs)  # 其余字段原样保留（含 run 级 message 与认领计数）
+        if self._locked_rmw(run_id, mutate) is None:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
-        jobs = dict(state.jobs)
-        jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
-        status = state.status
-        if job_state.status != Status.PENDING and status in (Status.PENDING, Status.RUNNING):
-            status = Status.RUNNING
-        self._write_state(replace(state, status=status, jobs=jobs))  # 其余字段原样保留（含 run 级 message）；用 replace 而不是逐字段重建，新字段不会被漏掉
-
-    def finalize_run(self, run_id: str, status: Status, ended_at: str) -> None:
-        """commit point：写总 status + ended_at（各 job 态此前已由 update_job_state 刷过）。"""
-        state = self.load_run_state(run_id)
-        if state is None:
-            raise FileNotFoundError(f"finalize_run：run_state 不存在（须先 create_run）：{run_id}")
-        # ended_at 直传（不写 `or None`）：签名是 str、finalize 语义就是落一个具体 ended_at；
-        # 用 falsy 兜会把合法空串静默吞成 None（omit-when-None 后键消失，已 finalize 的 run 看似未 finalize）。
-        self._write_state(
-            replace(state, status=status, ended_at=ended_at)  # 其余字段原样保留
-        )
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
         """读回 definition（RunMeta）；不存在返回 None。"""
-        path = self._root / run_id / "run_meta.json"
+        path = self._root / run_id / _META_FILE
         if not path.exists():
             return None
         return run_meta_from_dict(json.loads(path.read_text(encoding="utf-8")))
 
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
         """只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。"""
-        path = self._root / run_id / "run_meta.json"
+        path = self._root / run_id / _META_FILE
         if not path.exists():
             return None
         d = json.loads(path.read_text(encoding="utf-8"))
@@ -152,10 +198,8 @@ class LocalRunStore:
 
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（RunState）；不存在返回 None。"""
-        path = self._root / run_id / "run_state.json"
-        if not path.exists():
-            return None
-        return run_state_from_dict(json.loads(path.read_text(encoding="utf-8")))
+        raw = self._read_raw(self._state_path(run_id))
+        return None if raw is None else run_state_from_dict(raw)
 
     def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
         """列举（语义见 RunStore port；本机做法见 ADR 0041 决策七「本机实现」）：列报告落点下的子目录（目录名即 run_id），逐个读
@@ -187,7 +231,7 @@ class LocalRunStore:
             if not stat.S_ISDIR(mode):
                 continue
             try:
-                raw = (entry / "run_state.json").read_bytes()
+                raw = (entry / _STATE_FILE).read_bytes()
             except (FileNotFoundError, IsADirectoryError):
                 continue
             d = None
@@ -224,41 +268,13 @@ class LocalRunStore:
     def preflight(self) -> None:
         """探活 no-op（ADR 0030 决定七）：本地文件后端无「表不存在」问题，目录随写随建。"""
 
-    # ---- 无状态批量运行的条件写三方（ADR 0034）----
-    # 与上面 update_job_state/finalize_run（同步 run 路径、依赖 RunPersistence 进程内锁）并存、职责不同：
-    # 无状态批量运行下多进程并发写（per-run 进程 + status --wait 接力），进程内锁跨不了进程边界，故这三方
-    # 用 **fcntl 文件锁**（跨进程互斥）把「读 run_state.json → 判条件 → 写回」整段串成原子 RMW。
-    # local 落地即校验条件写逻辑（单测），cloud DDB 用条件表达式复刻同一语义。
-
-    def _locked_rmw(self, run_id: str, mutate) -> bool:
-        """在 run_state.json 上做跨进程原子 read-modify-write：持文件锁 → 读 state → mutate(state)→
-        (新 state | None)；None 表示条件不满足、不写并返回 False；否则写回、返回 True。state 不存在 → False。"""
-        import fcntl
-
-        path = self._root / run_id / "run_state.json"
-        if not path.exists():
-            return False
-        # 锁一个专用 .lock 文件（不锁 json 本身，避免 truncate/rename 与锁交互的坑）；跨进程互斥。
-        lock_path = self._root / run_id / ".runstate.lock"
-        with open(lock_path, "w") as lf:
-            fcntl.flock(lf, fcntl.LOCK_EX)
-            try:
-                state = self.load_run_state(run_id)
-                if state is None:
-                    return False
-                new_state = mutate(state)
-                if new_state is None:
-                    return False
-                self._write_state(new_state)
-                return True
-            finally:
-                fcntl.flock(lf, fcntl.LOCK_UN)
+    # ---- 条件写（ADR 0034 机制三/四、ADR 0054 决策二/五）：同样走 _locked_rmw，cloud DDB 用条件表达式复刻同一语义 ----
 
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """CAS：仅当 jobs[scope_id] 当前 PENDING 且 run 未收尾才置 RUNNING（机制四）；随写 claimed_at（timeout 起算点）。
 
-        同一次锁内写回把 run 级置为 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：run 已收尾后不再接受新认领，
-        条件不成立（job 不存在、已非 pending、run 已收尾）一律返回 False、不写。HWM 不变。"""
+        同一次锁内写回把 run 级置为 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）并把认领计数加一（ADR 0054 决策二）：
+        run 已收尾后不再接受新认领，条件不成立（job 不存在、已非 pending、run 已收尾）一律返回 False、不写。HWM 不变。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
                 return None  # run 已收尾：不再接受新认领
@@ -268,15 +284,16 @@ class LocalRunStore:
             jobs = dict(state.jobs)
             jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
                                       claimed_at=claimed_at)
-            # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid 与顶层 status 对拍
-            return replace(state, status=Status.RUNNING, jobs=jobs)
-        return self._locked_rmw(run_id, mutate)
+            # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid、顶层 status 与认领计数对拍
+            return replace(state, status=Status.RUNNING, jobs=jobs, claim_count=state.claim_count + 1)
+        return self._locked_rmw(run_id, mutate) is True
 
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写投影：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。只写 HWM、run 级与 jobs，传入的
-        started_at、ended_at、message 不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍，ADR 0034 机制三「两端对拍口径」）。
+        started_at、ended_at、message、认领计数不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍，ADR 0034 机制三「两端
+        对拍口径」）。
 
-        **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是 finalize 的 commit point
+        **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是收尾的 commit point
         专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
         （与 ddb adapter 共用一份）：它给出 pending（投影里全 job 仍 pending）时保留库中 run 级，认领或此前投影已写成的
         running 不被拿着旧 baseline 的投影改回 pending（ADR 0034 机制三「run 级状态只进不退」条②）。
@@ -314,17 +331,21 @@ class LocalRunStore:
             # run 级 status 按投影里的 job 态定（全 pending → 保留库中值，否则 running）；传入的 run 级值在有 job
             # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。库中值此处必为 pending 或 running。
             status = Status.RUNNING if projected_run_status(state.jobs) == Status.RUNNING else cur.status
-            # 只写 HWM、run 级与 jobs，其余字段（started_at、ended_at、message）保留库中值，与 DDB 只 SET 这几项对拍；
+            # 只写 HWM、run 级与 jobs，其余字段（started_at、ended_at、message、认领计数）保留库中值，与 DDB 只 SET 这几项对拍；
             # HWM 为 None 时按 0 落库，同 DDB
             return replace(cur, status=status, jobs=jobs, high_water_mark=new_hwm)
-        return self._locked_rmw(run_id, mutate)
+        return self._locked_rmw(run_id, mutate) is True
 
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None) -> bool:
+    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
+                     expected_claim_count: int | None = None) -> bool:
         """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入；
-        为 None 时不动库中值（对拍 DDB 不提及该属性）。"""
+        为 None 时不动库中值（对拍 DDB 不提及该属性）。expected_claim_count 给出时另要求锁内重读到的认领计数等于它
+        （ADR 0054 决策二「认领计数」段），为 None 时不判。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
-                return None  # 已终态：别人已 finalize → 幂等跳过
+                return None  # 已终态：别人已收尾 → 不覆盖
+            if expected_claim_count is not None and state.claim_count != expected_claim_count:
+                return None  # 读到运行态之后又有新的认领 → 放弃这次收尾
             return replace(state, status=status, ended_at=ended_at,
                            message=state.message if message is None else message)
-        return self._locked_rmw(run_id, mutate)
+        return self._locked_rmw(run_id, mutate) is True

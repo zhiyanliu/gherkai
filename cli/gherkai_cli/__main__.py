@@ -32,7 +32,7 @@ from gherkai_core.model import (
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
-from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
+from gherkai_core.errors import DefinitionContractError, RunAlreadyEnded, UnsupportedDefinitionSchema
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 from gherkai_core.schedule import ScheduleOpts, schedule
 
@@ -3154,12 +3154,19 @@ def _cmd_run(args) -> int:
             worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
 
     # 6) commit point（ADR 0030 决定三）：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩
-    #    finalize（写总 status + ended_at）+ 归集 ReportStore（派生、永远最后）。「finalize 一落即 run 已提交」。
+    #    收尾的条件写（总 status + ended_at）+ 归集 ReportStore（派生、永远最后）。收尾写一旦写成，run 即已提交。
     #    artifacts 落点指针由 compose 的 make_artifacts 按 backend URI 化组装（local file:// / cloud s3://+ddb://）。
+    #    收尾写不成（ADR 0054 决策五「执行方服从记录」）：本次执行结束之前，这个 run 已被别处记为已结束。已有的终态不覆盖、
+    #    报告不生成（persistence.finalize 抛 RunAlreadyEnded），各 job 的判定此前已逐个写入；出口见下方 `ended_elsewhere` 分支。
     artifacts: dict[str, str] = {}
+    ended_elsewhere: RunAlreadyEnded | None = None
     if persistence:
-        index = persistence.finalize(result, ended_at=compose.now_iso())
-        artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
+        try:
+            index = persistence.finalize(result, ended_at=compose.now_iso())
+        except RunAlreadyEnded as e:
+            ended_elsewhere = e
+        else:
+            artifacts = make_artifacts(run_id, index)  # report_index=None（report 写失败被隔离）时该键省略
     if worker_log_fh is not None:
         artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
 
@@ -3171,6 +3178,18 @@ def _cmd_run(args) -> int:
     # local 模式不清（产物就该留本地当最终落点）。
     if args.backend == "cloud":
         compose.prune_empty_dirs(report_root / run_id)
+
+    if ended_elsewhere is not None:
+        # 记录里的终态为准：汇总与 --json 文档都从本次执行的结果得出，run 级状态会与已提交的终态矛盾，所以 stdout 不输出，
+        # 说明与判定明细的落点走 stderr。退出码非零（ADR 0054 决策五）：取 1，与判定失败同一个退出码；处理过使用方中断时
+        # 仍按信号取，与本函数末尾的规则一致。
+        _progress(_ended_elsewhere_notice(run_id, ended_elsewhere.recorded))
+        _progress(f"判定明细: {make_artifacts(run_id, None)['jobs_dir']}")
+        if worker_log_fh is not None:
+            _progress(f"worker 日志: {artifacts['worker_log']}")
+        if interrupt.acted and interrupt.signum is not None:
+            return 128 + interrupt.signum
+        return 1
 
     # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
     #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
@@ -3193,6 +3212,17 @@ def _cmd_run(args) -> int:
     # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
     return 0 if result.status == Status.PASSED else 1
+
+
+def _ended_elsewhere_notice(run_id: str, recorded) -> str:
+    """`run` 收尾写不成时的终端说明（ADR 0054 决策五）：本次执行没有覆盖已有的记录、已得出的判定已写入，以及记录里的状态与
+    run 级原因（有才给）。recorded 是收尾写不成之后读回的运行态；那次读回失败时为 None，说明里改为写明记录没有读出来。"""
+    head = (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；"
+            "已得出的判定已写入。")
+    if recorded is None:
+        return head + "记录里的状态这一次没有读出来。"
+    reason = f"，原因：{recorded.message}" if recorded.message else ""
+    return head + f"记录里的状态为 {recorded.status.value}{reason}。"
 
 
 def _interrupt_prompt(level: int, *, cloud: bool, grace: float) -> str:

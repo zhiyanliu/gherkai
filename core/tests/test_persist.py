@@ -1,7 +1,8 @@
 """RunPersistence 应用服务直测（ADR 0030）：脱离 cli/schedule，用 fake store 直接验 core 层不变量。
 
 四刀审计发现 RunPersistence 此前零直接单测（只经 cli 端到端间接覆盖）。这里把它的核心契约钉到 core 层：
-commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 的无报告路径 + 报告失败隔离 / begin 初始投影 / aborted 血缘保留。
+commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 的无报告路径 + 报告失败隔离 + 收尾写不成时不覆盖、不写报告 /
+begin 初始投影 / aborted 血缘保留。
 """
 from __future__ import annotations
 
@@ -31,15 +32,22 @@ def _jr(scope_id: str, status: Status = Status.PASSED, session_id: str | None = 
                      status=status, session_id=session_id)
 
 
-def _recording():
-    """fake RunStore/ResultStore/ReportStore 共享一个有序 calls log：(store, method, scope_or_None)。"""
+def _recording(*, finalize_lands: bool = True, recorded=None):
+    """fake RunStore/ResultStore/ReportStore 共享一个有序 calls log：(store, method, scope_or_None)。
+
+    finalize_lands：fake 的 try_finalize 是否写成；写不成时 load_run_state 读回 `recorded`。"""
     calls: list = []
 
     class FakeRunStore:
         def preflight(self): calls.append(("run", "preflight", None))
         def create_run(self, meta, initial_state): calls.append(("run", "create_run", initial_state))
         def update_job_state(self, run_id, js): calls.append(("run", "update_job_state", js))
-        def finalize_run(self, run_id, status, ended_at): calls.append(("run", "finalize_run", (status, ended_at)))
+        def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
+            calls.append(("run", "try_finalize", (status, ended_at, message, expected_claim_count)))
+            return finalize_lands
+        def load_run_state(self, run_id):
+            calls.append(("run", "load_run_state", None))
+            return recorded
 
     class FakeResultStore:
         def preflight(self): calls.append(("result", "preflight", None))
@@ -80,14 +88,14 @@ def test_on_event_runs_only_on_scope_started():
     assert updates[0].scope_id == "a" and updates[0].status == Status.RUNNING and updates[0].session_id == "s1"
 
 
-# ---- 决定二/三：finalize 的无报告路径——report_store=None 返回 None、仍 finalize_run、不崩 ----
+# ---- 决定二/三：finalize 的无报告路径——report_store=None 返回 None、仍写收尾、不崩 ----
 def test_finalize_without_report_store_returns_none():
     calls, run, result, _ = _recording()
     p = RunPersistence("r", run, result, report_store=None)  # WebUI/cron 前端可能不注入 report
     rr = RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")])
     ret = p.finalize(rr, ended_at="t9")
     assert ret is None
-    assert ("run", "finalize_run", (Status.PASSED, "t9")) in calls
+    assert ("run", "try_finalize", (Status.PASSED, "t9", None, None)) in calls  # 前台收尾不带 run 级消息、不判认领计数
     assert not any(m == "write" for (s, m, _) in calls)  # 没 report_store → 不调 write
 
 
@@ -97,13 +105,13 @@ def test_finalize_with_report_store_returns_uri():
     rr = RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")])
     ret = p.finalize(rr, ended_at="t9")
     assert ret == "file:///fake/r/index.html"
-    # finalize_run 先、ReportStore.write 后（派生视图永远最后）
+    # 收尾写先、ReportStore.write 后（派生视图永远最后）
     methods = [m for (s, m, _) in calls]
-    assert methods.index("finalize_run") < methods.index("write")
+    assert methods.index("try_finalize") < methods.index("write")
 
 
 def test_finalize_isolates_report_write_failure(tmp_path):
-    # ReportStore.write 失败不击穿已 commit 的 run——commit point（finalize_run）已落、
+    # ReportStore.write 失败不击穿已 commit 的 run——commit point（收尾写）已落、
     # 判定真值在 ResultStore 安然无恙，故 write 抛异常被隔离：finalize 返回 None、不冒泡（报告可重建）。
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.adapters.result_store.local import LocalResultStore
@@ -120,11 +128,74 @@ def test_finalize_isolates_report_write_failure(tmp_path):
     # 不抛、返回 None（run 已 commit，对外输出/退出码不被派生视图写失败拖垮）
     ret = p.finalize(rr, ended_at="t9")
     assert ret is None
-    # commit point 仍落了：run_state 终态是 PASSED 加 ended_at（finalize_run 不在隔离范围内）
+    # commit point 仍落了：run_state 终态是 PASSED 加 ended_at（收尾写不在隔离范围内）
     state = run_store.load_run_state("r")
     assert state is not None and state.status == Status.PASSED and state.ended_at == "t9"
     # 核心不变量：ReportStore.write 抛异常被隔离、run 照常 commit（返回 None + 控制面终态已落），
     # 不抛出击穿。（曾断言 _report_error 留痕，该字段生产端无人消费、已删，见代码 review N7。）
+
+
+# ---- ADR 0054 决策五：收尾写不成（run 级已是终态）时不覆盖、不写报告，抛 RunAlreadyEnded ----
+def test_finalize_on_a_run_ended_elsewhere_keeps_the_record_and_writes_no_report(tmp_path):
+    """本次执行结束之前别处已把 run 记为已结束（带 run 级说明）：finalize 不覆盖已有的终态、ended_at 与说明，不生成报告，
+    抛 RunAlreadyEnded 并带读回的运行态；本次已得出的 job 判定此前已写入，不受影响。用真 LocalRunStore，条件写的判定在 adapter 里。"""
+    import pytest
+
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.errors import RunAlreadyEnded
+
+    calls, _, _, report = _recording()
+    run_store, result_store = LocalRunStore(tmp_path), LocalResultStore(tmp_path)
+    p = RunPersistence("r", run_store, result_store, report)
+    meta = _meta("r", ["a", "b"])
+    p.begin(meta, started_at="t0")
+    p.on_job_complete(_jr("a", Status.PASSED))
+    assert run_store.try_finalize("r", Status.ERROR, "t5", message="已超过允许运行的时间（已记为已结束）") is True
+
+    with pytest.raises(RunAlreadyEnded) as exc:
+        p.finalize(RunResult(run_meta=meta, status=Status.PASSED, jobs=[_jr("a"), _jr("b")]), ended_at="t9")
+    assert exc.value.run_id == "r"
+    assert (exc.value.recorded.status, exc.value.recorded.message) == (Status.ERROR, "已超过允许运行的时间（已记为已结束）")
+    state = run_store.load_run_state("r")
+    assert (state.status, state.ended_at, state.message) == (Status.ERROR, "t5", "已超过允许运行的时间（已记为已结束）")
+    assert not any(m == "write" for (_, m, _) in calls)  # 报告不生成
+    assert [jr.scope_id for jr in result_store.load_all("r")] == ["a"]  # 已写入的判定原样在
+
+
+def test_finalize_refused_without_a_run_state_is_not_reported_as_ended():
+    """收尾写不成而读回发现运行态不存在：不说成「已被记为已结束」，抛 FileNotFoundError；报告同样不生成。"""
+    import pytest
+
+    calls, run, result, report = _recording(finalize_lands=False, recorded=None)
+    p = RunPersistence("r", run, result, report)
+    with pytest.raises(FileNotFoundError):
+        p.finalize(RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")]), ended_at="t9")
+    assert [m for (_, m, _) in calls] == ["try_finalize", "load_run_state"]
+
+
+def test_finalize_refused_and_the_read_back_fails_still_reports_ended_elsewhere():
+    """收尾写不成之后的那次读回本身失败（如云端的读取报错）：仍抛 RunAlreadyEnded，recorded 为 None、读回的异常是它的起因。
+    调用方因此走同一个出口（说明、按信号取的退出码），不会因为多出的这次读得到一个未归类的异常。报告同样不生成。"""
+    import pytest
+
+    from gherkai_core.errors import RunAlreadyEnded
+
+    calls, run, result, report = _recording(finalize_lands=False)
+    boom = RuntimeError("读取失败")
+
+    def failing_read(run_id):
+        calls.append(("run", "load_run_state", None))
+        raise boom
+
+    run.load_run_state = failing_read
+    p = RunPersistence("r", run, result, report)
+    with pytest.raises(RunAlreadyEnded) as exc:
+        p.finalize(RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")]), ended_at="t9")
+    assert exc.value.recorded is None and exc.value.run_id == "r"
+    assert exc.value.__cause__ is boom
+    assert "（" not in str(exc.value)  # 没有读到状态：消息里不留一对空括号
+    assert [m for (_, m, _) in calls] == ["try_finalize", "load_run_state"]  # 报告没有写
 
 
 # ---- 决定二：begin 写初始全 pending 态，jobs Map 与 run_meta 对齐 ----

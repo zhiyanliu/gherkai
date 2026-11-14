@@ -46,8 +46,9 @@ def _offloader(real_aws):
 
 # ---- DynamoDBRunStore：真 DDB 的生命周期 + 真语义边界 ----
 def test_ddb_run_store_lifecycle_real(real_aws):
-    """真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ finalize_run → 读回。
-    覆盖真语义：空 Map jobs 能存、SET jobs.#sid 单元素刷、finalize 无条件 SET status(保留字)/ended_at、含 /:中文 scope_id。"""
+    """真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ try_finalize → 读回。
+    覆盖真语义：空 Map jobs 能存、SET jobs.#sid 单元素刷、收尾的条件写 SET status(保留字)/ended_at、含 /:中文 scope_id；
+    对已有的 run 再建被条件挡下。"""
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-life")
     real_aws["cleanup_run_id"](rid)  # 登记清理
@@ -73,10 +74,12 @@ def test_ddb_run_store_lifecycle_real(real_aws):
     assert mid.jobs[scope_ids[1]].status == Status.PENDING  # 没被污染
     assert mid.status == Status.RUNNING  # job 离开 pending 的同一次写把 run 级推进为 running（ADR 0034 机制三）
 
-    # 各自完成 + finalize（真 DDB 保留字 status/ended_at 的 SET）
+    # 各自完成 + 收尾（真 DDB 保留字 status/ended_at 的 SET）
     store.update_job_state(rid, JobState(scope_ids[0], Status.PASSED, session_id="sess-real"))
     store.update_job_state(rid, JobState(scope_ids[1], Status.FAILED))
-    store.finalize_run(rid, Status.FAILED, "2026-07-01T00:05:00Z")
+    assert store.try_finalize(rid, Status.FAILED, "2026-07-01T00:05:00Z") is True
+    with pytest.raises(FileExistsError):
+        store.create_run(meta, RunState(run_id=rid, status=Status.PENDING, jobs={}))
 
     final = store.load_run_state(rid)
     assert final.status == Status.FAILED and final.ended_at == "2026-07-01T00:05:00Z"
@@ -87,13 +90,14 @@ def test_ddb_run_store_lifecycle_real(real_aws):
 
 
 def test_ddb_update_before_create_raises_real(real_aws):
-    """真 DDB：未 create 就 update/finalize → ConditionalCheckFailedException 转 FileNotFoundError（对拍 local 报错语义）。"""
+    """真 DDB：未 create 就 update → ConditionalCheckFailedException 转 FileNotFoundError（对拍 local 报错语义）；收尾写
+    不成、不臆造 STATE。"""
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-nocreate")  # 从不 create，无需登记清理（没写入）
     with pytest.raises(FileNotFoundError):
         store.update_job_state(rid, JobState("s", Status.RUNNING))
-    with pytest.raises(FileNotFoundError):
-        store.finalize_run(rid, Status.PASSED, "t")
+    assert store.try_finalize(rid, Status.PASSED, "t") is False
+    assert store.load_run_state(rid) is None
 
 
 def _real_run(store, real_aws, tag: str):
@@ -302,12 +306,12 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
 
 
 def test_ddb_empty_string_scalar_and_map_entry_real(real_aws):
-    """真 DDB（2026）空串行为的回归基线：finalize 写 ended_at=""（顶层标量 SET）、update 写 session_id=""
+    """真 DDB（2026）空串行为的回归基线：收尾写 ended_at=""（顶层标量 SET）、update 写 session_id=""
     （原生 Map entry 内空串）被接受、读回仍 ""。区分 ""-存（空串）与 None-omit（键消失）两条真代码路径。
 
     空串是 DDB 史上最著名的 moto/真分叉源。现代真 DDB（2020 后）已放行非 key String 空串，故此测在真 AWS 上
     会通过——它是「把当前真语义固化成回归基线」的 pin 测试（moto 对空串一律 ACCEPT、不能作权威）。
-    与 test_ddb_session_id_none_omitted_real（None-omit）互补：`if session_id is not None` vs finalize 无条件 SET ended_at。
+    与 test_ddb_session_id_none_omitted_real（None-omit）互补：`if session_id is not None` vs 收尾时恒 SET ended_at。
     """
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-emptystr")
@@ -318,7 +322,7 @@ def test_ddb_empty_string_scalar_and_map_entry_real(real_aws):
     store.create_run(meta, RunState(run_id=rid, status=Status.PENDING,
                                     jobs={sid: JobState(sid, Status.PENDING)}))
     store.update_job_state(rid, JobState(sid, Status.PASSED, session_id=""))  # 空串 Map entry
-    store.finalize_run(rid, Status.PASSED, ended_at="")                        # 空串顶层标量
+    assert store.try_finalize(rid, Status.PASSED, ended_at="") is True        # 空串顶层标量
     # 注：若未来真 DDB 意外改回拒空串，此断言会红——届时改断 pytest.raises 并更新 README 分叉说明。
     final = store.load_run_state(rid)
     assert final.ended_at == ""                       # 空串顶层标量存/读回

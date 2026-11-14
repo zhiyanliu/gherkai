@@ -273,14 +273,15 @@ def test_ddb_list_runs_matches_local_semantics(cloud_runs):
 
 
 def test_ddb_list_runs_projection_keeps_every_run_state_field(listing_table):
-    # 运行态的每个字段都有值：读回的投影少取任何一个属性（结束时刻、run 级消息、高水位、job 的会话与认领时刻），都与 load_run_state 不等
+    # 运行态的每个字段都有值：读回的投影少取任何一个属性（结束时刻、run 级消息、高水位、认领计数、job 的会话与认领时刻），都与
+    # load_run_state 不等
     store = DynamoDBRunStore(listing_table, list_index_name=_LIST_INDEX)
     full = RunState(
         run_id="run-01", status=Status.FAILED,
         jobs={"a.feature:3": JobState(scope_id="a.feature:3", status=Status.FAILED, session_id="sess-1",
                                       claimed_at="2026-07-01T00:00:01Z")},
         started_at="2026-07-01T00:00:00Z", ended_at="2026-07-01T00:05:00Z", high_water_mark=7,
-        message="worker 启动失败")
+        message="worker 启动失败", claim_count=3)
     store.create_run(_meta("run-01"), full)
     [row] = store.list_runs([Status.FAILED], limit=None)
     assert row.state == full

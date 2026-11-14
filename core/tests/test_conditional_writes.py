@@ -1,4 +1,5 @@
-"""RunStore 无状态批量运行条件写对拍测试（ADR 0034 机制三/机制四）：try_claim_job / project_state / try_finalize。
+"""RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策二/三/五）：create_run / update_job_state / try_claim_job /
+project_state / try_finalize。
 
 **local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
 moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列在文件末（integration 标记，需真凭证才运行；
@@ -11,6 +12,10 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
 - 机制三「run 级状态只进不退」条：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
   运行态不变、前台 job 写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
+- 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
+- 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0；收尾写可带期望的计数（ADR 0054 决策二）。
+- 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0054 决策三末段）。
+本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
 """
 from __future__ import annotations
 
@@ -524,9 +529,9 @@ def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch)
 
 
 def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
-    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级（连同状态分组，ADR 0030 决定六），条件同时判
-    job 仍 pending 与 run 未收尾（ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的运行态分不出「一次写」与「先写
-    job、再写 run 级」。"""
+    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级（连同状态分组，ADR 0030 决定六）并把认领计数加一
+    （ADR 0054 决策二），条件同时判 job 仍 pending 与 run 未收尾（ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的
+    运行态分不出「一次写」与「先写 job、再写 run 级与计数」。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
     store.create_run(meta, _initial(meta))
@@ -537,8 +542,33 @@ def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
     values, attr_names = calls[0]["ExpressionAttributeValues"], calls[0]["ExpressionAttributeNames"]
     assert "jobs.#sid.#st=:running" in update and ",#st=:rst" in update and values[":rst"] == "running"
     assert "#sg=:rsg" in update and attr_names["#sg"] == "status_group" and values[":rsg"] == "live"
+    assert "#cc=if_not_exists(#cc,:zero)+:one" in update and attr_names["#cc"] == "claim_count"
+    assert (values[":zero"], values[":one"]) == (0, 1)
     condition = calls[0]["ConditionExpression"].replace(" ", "")
     assert "jobs.#sid.#st=:pending" in condition and "#stIN(:pending,:running)" in condition
+
+
+def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, monkeypatch):
+    """DDB 侧带期望认领计数的收尾只发一次 update_item，计数的判定在条件表达式里（ADR 0054 决策二），不是先读再写；
+    不给期望计数时条件里不提计数。"""
+    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    assert store.try_claim_job("run-1", "a") is True
+    calls.clear()
+    assert store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=2) is False
+    assert store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=1) is True
+    assert len(calls) == 2
+    for call in calls:
+        condition = call["ConditionExpression"].replace(" ", "")
+        assert "#cc=:ecc" in condition and call["ExpressionAttributeNames"]["#cc"] == "claim_count"
+    assert [c["ExpressionAttributeValues"][":ecc"] for c in calls] == [2, 1]
+
+    meta2 = _meta("run-2")
+    store.create_run(meta2, _initial(meta2))
+    calls.clear()
+    assert store.try_finalize("run-2", Status.PASSED, "t1") is True
+    assert "claim_count" not in calls[0]["ExpressionAttributeNames"].values()
 
 
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
@@ -686,3 +716,194 @@ def test_finalized_run_keeps_message_against_later_projection_and_claim(run_stor
     assert (state.status, state.ended_at, state.message) == (Status.ERROR, "t1", "原因")
     run_store.try_claim_job("run-1", "a", claimed_at="c1")
     assert run_store.load_run_state("run-1").message == "原因"
+
+
+# ---------- 建 run 只在 run 不存在时成立（ADR 0054 决策五）----------
+
+def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
+    """对已有的 run 再建抛 FileExistsError：definition 与运行态都不变——不论再建时给的 definition、初始运行态是否不同，
+    也不论这个 run 已推进到哪一步（这里已认领、已收尾）。没有整份重写运行态的入口，终态不会被一次建 run 改回 pending。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    meta_before, state_before = run_store.load_run_meta("run-1"), run_store.load_run_state("run-1")
+
+    other = _meta("run-1", "x")
+    with pytest.raises(FileExistsError):
+        run_store.create_run(other, _initial(other))
+    assert run_store.load_run_meta("run-1") == meta_before
+    assert run_store.load_run_state("run-1") == state_before
+
+
+# ---------- 认领计数（ADR 0054 决策二「认领计数」段）----------
+
+def test_claim_count_starts_at_zero_and_counts_successful_claims_only(run_store):
+    """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已收尾）都不改它。"""
+    meta = _meta("run-1", "a", "b", "c")
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.load_run_state("run-1").claim_count == 0
+    assert run_store.try_claim_job("run-1", "a") is True
+    assert run_store.try_claim_job("run-1", "b") is True
+    assert run_store.load_run_state("run-1").claim_count == 2
+    assert run_store.try_claim_job("run-1", "a") is False  # 已非 pending
+    assert run_store.try_claim_job("run-1", "ghost") is False  # 不在 definition 里
+    assert run_store.load_run_state("run-1").claim_count == 2
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1") is True
+    assert run_store.try_claim_job("run-1", "c") is False  # run 已收尾
+    assert run_store.load_run_state("run-1").claim_count == 2
+
+
+def test_claim_count_is_left_alone_by_the_other_write_entries(run_store):
+    """job 写、投影写（传入的运行态带着别的计数）与收尾写都不改认领计数：它只由认领写。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a") is True
+    run_store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a"))
+    run_store.update_job_state("run-1", JobState("b", Status.PASSED))
+    carried = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=3, claim_count=99,
+                       jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.PASSED)})
+    assert run_store.project_state("run-1", carried) is True
+    assert run_store.load_run_state("run-1").claim_count == 1
+    assert run_store.try_finalize("run-1", Status.PASSED, "t1") is True
+    assert run_store.load_run_state("run-1").claim_count == 1
+
+
+@pytest.fixture
+def raw_run_store(request, tmp_path, aws):
+    """对拍用的 adapter，连同改写库中原始记录的两个手段（附加键、删掉认领计数），两端各一套。
+
+    产出 (store, set_extra(run_id, key, value), get_extra(run_id, key), drop_claim_count(run_id))。本机直接改 run_state.json 的
+    顶层键，云端直接改 STATE item 的顶层属性：附加键只能这样造（模型里没有它），缺认领计数的记录同样只能这样造（写端恒写）。
+    """
+    import json
+
+    if request.param == "local":
+        from gherkai_core.adapters.run_store.local import LocalRunStore
+
+        def path(run_id):
+            return tmp_path / run_id / "run_state.json"
+
+        def edit(run_id, change):
+            d = json.loads(path(run_id).read_text(encoding="utf-8"))
+            change(d)
+            path(run_id).write_text(json.dumps(d), encoding="utf-8")
+
+        return (LocalRunStore(tmp_path),
+                lambda run_id, key, value: edit(run_id, lambda d: d.__setitem__(key, value)),
+                lambda run_id, key: json.loads(path(run_id).read_text(encoding="utf-8")).get(key),
+                lambda run_id: edit(run_id, lambda d: d.pop("claim_count")))
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    table = aws["ddb"].Table(aws["table_name"])
+
+    def key_of(run_id):
+        return {"run_id": run_id, "item_type": "STATE"}
+
+    return (DynamoDBRunStore(table),
+            lambda run_id, key, value: table.update_item(Key=key_of(run_id), UpdateExpression="SET #k = :v",
+                                                         ExpressionAttributeNames={"#k": key},
+                                                         ExpressionAttributeValues={":v": value}),
+            lambda run_id, key: table.get_item(Key=key_of(run_id), ConsistentRead=True)["Item"].get(key),
+            lambda run_id: table.update_item(Key=key_of(run_id), UpdateExpression="REMOVE claim_count"))
+
+
+_both = pytest.mark.parametrize("raw_run_store", ["local", "ddb"], indirect=True)
+
+
+@_both
+def test_missing_claim_count_reads_as_zero_and_claims_count_from_it(raw_run_store):
+    """缺认领计数的记录读作 0，认领从 0 起算得 1；期望计数为 0 的收尾写在缺键的记录上成立（两端同一口径）。"""
+    store, _set, get_extra, drop_claim_count = raw_run_store
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    assert get_extra("run-1", "claim_count") == 0, "前提：写端恒写认领计数"
+    drop_claim_count("run-1")
+    assert get_extra("run-1", "claim_count") is None
+    assert store.load_run_state("run-1").claim_count == 0
+    assert store.try_claim_job("run-1", "a") is True
+    assert store.load_run_state("run-1").claim_count == 1
+
+    meta2 = _meta("run-2")
+    store.create_run(meta2, _initial(meta2))
+    drop_claim_count("run-2")
+    assert store.try_finalize("run-2", Status.ERROR, "t1", expected_claim_count=1) is False
+    assert store.try_finalize("run-2", Status.ERROR, "t1", expected_claim_count=0) is True
+
+
+def test_finalize_with_expected_claim_count_lands_only_on_an_equal_count(run_store):
+    """收尾写带期望的认领计数时，只在库中计数等于它时写成；不等时不写、运行态整份不变。不给时不判计数，与原行为相同。
+    run 已收尾时即使计数相等也写不成。"""
+    meta = _meta("run-1", "a", "b", "c")
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a") is True
+    before = run_store.load_run_state("run-1")
+    assert before.claim_count == 1
+    for stale in (0, 2):
+        assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="m", expected_claim_count=stale) is False
+        assert run_store.load_run_state("run-1") == before
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="m", expected_claim_count=1) is True
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at, got.message, got.claim_count) == (Status.ERROR, "t1", "m", 1)
+    assert run_store.try_finalize("run-1", Status.PASSED, "t2", expected_claim_count=1) is False
+
+    meta2 = _meta("run-2")
+    run_store.create_run(meta2, _initial(meta2))
+    assert run_store.try_claim_job("run-2", "a") is True
+    assert run_store.try_claim_job("run-2", "b") is True
+    assert run_store.try_finalize("run-2", Status.PASSED, "t1") is True  # 不给期望计数：计数为 2 也照常写成
+
+
+def test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_after_the_read(run_store):
+    """到期收尾的竞态（ADR 0054 决策二第 3 条的提交条件）：一方读到运行态（计数 n）之后另一方的认领落下，前者以 n 为条件的收尾
+    被挡、run 不结束，新认领的 job 仍是 running；以新读到的计数重试才写成。"""
+    meta = _meta("run-1", "a", "b")
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a") is True
+    seen = run_store.load_run_state("run-1")
+    assert run_store.try_claim_job("run-1", "b", claimed_at="2026-08-13T01:02:03Z") is True  # 另一方的认领落在读之后
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=seen.claim_count) is False
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.RUNNING and got.jobs["b"] == JobState("b", Status.RUNNING, claimed_at="2026-08-13T01:02:03Z")
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=got.claim_count) is True
+
+
+# ---------- 顶层附加键整体保留（ADR 0054 决策三末段）----------
+
+_LAUNCHER = {"pid_namespace": "ns-1", "pid": 4242, "start_time": "123456", "host": "dev-box"}
+
+
+def _job_write(store):
+    store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a"))
+    assert store.load_run_state("run-1").jobs["a"].session_id == "sess-a"
+
+
+def _claim(store):
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+
+
+def _project(store):
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=2,
+                         jobs={"a": JobState("a", Status.RUNNING, session_id="sess-a"), "b": JobState("b", Status.PENDING)})
+    assert store.project_state("run-1", projected) is True
+
+
+def _finalize(store):
+    assert store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+
+
+@_both
+@pytest.mark.parametrize("write", [_job_write, _claim, _project, _finalize],
+                         ids=["update_job_state", "try_claim_job", "project_state", "try_finalize"])
+def test_each_write_entry_keeps_top_level_extras(raw_run_store, write):
+    """运行态记录顶层不属于 RunState 模型的键（这里是一个发起进程标识形态的对象与后台执行标记）经每个写入口原样保留：
+    本机在锁内读到的文件里整体带回，云端 update_item 本来就不碰未提及的属性。每个写入口都确认写成，免得保留是因为没写。"""
+    store, set_extra, get_extra, _drop = raw_run_store
+    meta = _meta()
+    store.create_run(meta, _initial(meta, hwm=0))
+    set_extra("run-1", "launcher", _LAUNCHER)
+    set_extra("run-1", "detached", True)
+    write(store)
+    assert get_extra("run-1", "launcher") == _LAUNCHER
+    assert get_extra("run-1", "detached") is True
+    assert not hasattr(store.load_run_state("run-1"), "launcher")  # 附加键不进模型

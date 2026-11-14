@@ -138,7 +138,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 
 归纳：**部署方命令之外，表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**（`deploy` / `destroy` 的 1 不表判定，表示账户可能已被改动）；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
 
-`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读落库态：落库态在实时写下可能仍未到终态，`--no-report` 时也不落库）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
+`run` 表判定的退出码取 `schedule` 返回的内存 `RunResult.status`（必为终态，不回读落库态：落库态在实时写下可能仍未到终态，`--no-report` 时也不落库）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；收尾时发现 run 在本次执行结束之前已被别处记为已结束的 `run` 也例外：不覆盖已有终态，以 1 结束、不按本次判定（处理过中断时仍为 130 或 143）；`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 
 **CI 应接哪一条**：
 
@@ -147,7 +147,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 - `explain` 不能作判定门，它只渲染证据；不带 `--wait` 的 `status` 也不能作判定门，未达终态时它的退出码是 0。
 - 分界线是**是否已真正开始执行**：开始执行前的全部问题（feature 读不到、写法或参数不合法、worker 定位不到、凭证/region/资源/版本不对）以退出码 `2` 结束；开始执行之后的结论用退出码 `0` 或 `1` 表达。给使用者的口径见 `docs/user-guide/running-and-results.md`「退出码」；`--json` 下**先按退出码分流再解析** stdout。
 
-> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定五（退出码基于 run 级判定 + 数据源）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)「命令形态」（退出码语义分层：`submit` 表提交、判定归 `status --wait`）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 只看必修项的 0/2）、[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策四（`explain` 只 0/2、不重复表判定）；code：`cli/gherkai_cli/__main__.py` 各 `_cmd_*` 的 return 与 `_render_status`。
+> 权威：[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定五（退出码基于 run 级判定 + 数据源）、[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策五（收尾写不成时 `run` 的退出码）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)「命令形态」（退出码语义分层：`submit` 表提交、判定归 `status --wait`）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md) 决策四（`doctor` 只看必修项的 0/2）、[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策四（`explain` 只 0/2、不重复表判定）；code：`cli/gherkai_cli/__main__.py` 各 `_cmd_*` 的 return 与 `_render_status`。
 
 ## 6. 延伸阅读
 

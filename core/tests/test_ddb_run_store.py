@@ -1,6 +1,6 @@
 """DynamoDBRunStore 对拍测试（ADR 0030 决定六）：与 LocalRunStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
-对拍的是**后端无关的行为契约**（save/load round-trip、实时写生命周期、Map 单元素刷、未 create 报错、
+对拍的是**后端无关的行为契约**（create/load round-trip、实时写生命周期、Map 单元素刷、未 create 报错、
 omit-null 时间戳）——即 test_stores.py 里 LocalRunStore 那批。物理落点断言（文件存在/JSON 是 list）是
 Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造数据。
 """
@@ -14,10 +14,10 @@ from gherkai_core.model import JobState, Status, run_state_from_result
 from tests.test_stores import _initial_state, _sample_run
 
 
-# ---- save/load round-trip（对拍 test_run_store_save_load）----
-def test_save_load_round_trip(ddb_run_store):
+# ---- create/load round-trip（对拍 test_run_store_create_load）----
+def test_create_load_round_trip(ddb_run_store):
     r = _sample_run("run-1")
-    ddb_run_store.save_run(r.run_meta, run_state_from_result(r))
+    ddb_run_store.create_run(r.run_meta, run_state_from_result(r))
 
     # definition 读回
     meta = ddb_run_store.load_run_meta("run-1")
@@ -89,8 +89,8 @@ def test_realtime_write_lifecycle(ddb_run_store):
     assert s2.jobs["features/wiki.feature:6"].status == Status.PASSED
     assert s2.jobs["登录场景"].status == Status.FAILED
 
-    # 4) finalize（commit point）：写总 status + ended_at，各 job 态保留
-    ddb_run_store.finalize_run("rt-run", Status.FAILED, "2026-07-01T00:05:00Z")
+    # 4) 收尾（commit point）：条件写总 status + ended_at，各 job 态保留
+    assert ddb_run_store.try_finalize("rt-run", Status.FAILED, "2026-07-01T00:05:00Z") is True
     final = ddb_run_store.load_run_state("rt-run")
     assert final.status == Status.FAILED
     assert final.ended_at == "2026-07-01T00:05:00Z"
@@ -98,12 +98,12 @@ def test_realtime_write_lifecycle(ddb_run_store):
     assert final.jobs["features/wiki.feature:6"].status == Status.PASSED  # 没被 finalize 覆盖
 
 
-def test_update_and_finalize_before_create_raise(ddb_run_store):
-    # 未 create_run 就 update/finalize → 报错（对拍 local：ConditionExpression 命中 → FileNotFoundError）
+def test_update_before_create_raises_and_finalize_writes_nothing(ddb_run_store):
+    # 未 create_run 就 update → 报错（对拍 local：ConditionExpression 命中 → FileNotFoundError）；收尾写不成、不臆造 STATE
     with pytest.raises(FileNotFoundError):
         ddb_run_store.update_job_state("nope", JobState("s", Status.RUNNING))
-    with pytest.raises(FileNotFoundError):
-        ddb_run_store.finalize_run("nope", Status.PASSED, "t")
+    assert ddb_run_store.try_finalize("nope", Status.PASSED, "t") is False
+    assert ddb_run_store.load_run_state("nope") is None
 
 
 def test_session_id_none_omitted_and_roundtrips(ddb_run_store):
@@ -122,8 +122,8 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
     ddb_run_store.create_run(meta, _initial_state("ts-run", ["s"]))
     got = ddb_run_store.load_run_state("ts-run")
     assert got.started_at == "2026-07-01T00:00:00Z" and got.ended_at is None
-    # finalize 后 ended 出现
-    ddb_run_store.finalize_run("ts-run", Status.PASSED, "2026-07-01T01:00:00Z")
+    # 收尾后 ended 出现
+    assert ddb_run_store.try_finalize("ts-run", Status.PASSED, "2026-07-01T01:00:00Z") is True
     got2 = ddb_run_store.load_run_state("ts-run")
     assert got2.ended_at == "2026-07-01T01:00:00Z"
 
@@ -210,7 +210,7 @@ def test_meta_item_carries_schema_header_top_level_and_peek_reads_only_it(ddb_ru
 
     from gherkai_core.errors import UnsupportedDefinitionSchema
     r = _sample_run("hdr")
-    ddb_run_store.save_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
+    ddb_run_store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
     assert ddb_run_store.peek_definition_header("hdr") == (2, "1.5.0")
     assert ddb_run_store.peek_definition_header("nope") is None
     raw = ddb_run_store._table.get_item(Key={"run_id": "hdr", "item_type": "META"})["Item"]
@@ -271,3 +271,137 @@ def test_load_run_meta_lets_fetch_failures_through_untranslated(ddb_run_store_of
                                                              '[{"index": 0, "argument": {"kind": "docString", "content_ref": "s3://no-such-bucket-gherkai-x/k"}}]}]}]}'})
     with pytest.raises(ClientError):
         ddb_run_store_offload.load_run_meta("gone")
+
+
+# ---- 建 run 只在 run 不存在时成立（ADR 0054 决策五）：两个条目与已卸载的正文都不被重写 ----
+def _doc_meta(run_id: str, content: str, *, extra_scope: bool = False):
+    """带 docString 的 definition：挂 offloader 时正文卸载到 S3。同一 run_id 下换 content 再建，若被重写，同一 key 的正文就会变；
+    extra_scope 再多一个 scope，若被重写会多出一个对象。"""
+    from gherkai_core.model import Job, RunMeta, RunState, Scenario, Step, StepArgument
+
+    def job(scope_id):
+        return Job(scope_id=scope_id, scope_name=scope_id, engine="midscene", timeout_s=300.0, scenarios=(
+            Scenario(id=f"{scope_id}:1", name="sc", steps=(
+                Step(0, "Then", "看结果", StepArgument(kind="docString", content=content)),)),))
+    jobs = (job("s"), job("t")) if extra_scope else (job("s"),)
+    meta = RunMeta(run_id=run_id, created_at="t", jobs=jobs, deadline_at="2026-01-01T01:00:00+00:00")
+    state = RunState(run_id=run_id, status=Status.PENDING, started_at="t",
+                     jobs={j.scope_id: JobState(j.scope_id, Status.PENDING) for j in jobs})
+    return meta, state
+
+
+def _snapshot(aws, run_id: str) -> tuple[dict | None, dict | None, dict[str, bytes]]:
+    """库中原样：META item、STATE item 与桶里全部对象（key → 正文）。"""
+    table = aws["ddb"].Table(aws["table_name"])
+    items = tuple(table.get_item(Key={"run_id": run_id, "item_type": t}, ConsistentRead=True).get("Item")
+                  for t in ("META", "STATE"))
+    s3 = aws["s3"]
+    objects = {o["Key"]: s3.get_object(Bucket=aws["bucket"], Key=o["Key"])["Body"].read()
+               for o in s3.list_objects_v2(Bucket=aws["bucket"]).get("Contents", [])}
+    return items[0], items[1], objects
+
+
+def test_create_run_on_existing_run_rewrites_neither_item_nor_offloaded_content(aws, ddb_run_store_offload):
+    """对已有的 run 再建：抛 FileExistsError，META、STATE 与已卸载到 S3 的正文都不变，也不多出对象。再建时给的 definition
+    正文不同、scope 更多，被重写就一定看得出来。"""
+    meta, state = _doc_meta("dup", "第一版正文")
+    ddb_run_store_offload.create_run(meta, state)
+    assert ddb_run_store_offload.try_claim_job("dup", "s") is True
+    before = _snapshot(aws, "dup")
+    assert before[0] is not None and before[1] is not None and len(before[2]) == 1, "前提：两个条目与一个卸载对象都在"
+
+    meta2, state2 = _doc_meta("dup", "第二版正文", extra_scope=True)
+    with pytest.raises(FileExistsError):
+        ddb_run_store_offload.create_run(meta2, state2)
+    assert _snapshot(aws, "dup") == before
+    assert ddb_run_store_offload.load_run_meta("dup").jobs[0].scenarios[0].steps[0].argument.content == "第一版正文"
+
+
+@pytest.mark.parametrize("present", ["META", "STATE"])
+def test_create_run_fails_when_either_item_already_exists(aws, ddb_run_store_offload, present):
+    """只有 META 或只有 STATE 在（建 run 在两次写之间中断，或另一个写入方只写了其中一条）同样算已存在：失败、已在的那条不变、
+    缺的那条仍缺、不卸载任何正文。"""
+    table = aws["ddb"].Table(aws["table_name"])
+    meta, state = _doc_meta("half", "正文")
+    ddb_run_store_offload.create_run(meta, state)
+    table.delete_item(Key={"run_id": "half", "item_type": "STATE" if present == "META" else "META"})
+    for o in aws["s3"].list_objects_v2(Bucket=aws["bucket"]).get("Contents", []):
+        aws["s3"].delete_object(Bucket=aws["bucket"], Key=o["Key"])
+    before = _snapshot(aws, "half")
+
+    with pytest.raises(FileExistsError):
+        ddb_run_store_offload.create_run(*_doc_meta("half", "另一份正文"))
+    assert _snapshot(aws, "half") == before
+    assert before[2] == {}
+
+
+def test_create_run_reads_strongly_consistently_before_offloading(aws, ddb_run_store_offload, monkeypatch):
+    """存在性检查在卸载正文之前、且是强一致读：两次读（META、STATE）都排在第一次 S3 写之前，都带 ConsistentRead。"""
+    order: list[str] = []
+    table = ddb_run_store_offload._table
+    real_get, real_put = table.get_item, aws["s3"].put_object
+
+    def get_item(**kwargs):
+        order.append(f"get {kwargs['Key']['item_type']} consistent={kwargs.get('ConsistentRead')}")
+        return real_get(**kwargs)
+
+    def put_object(**kwargs):
+        order.append("s3 put")
+        return real_put(**kwargs)
+
+    monkeypatch.setattr(table, "get_item", get_item)
+    monkeypatch.setattr(aws["s3"], "put_object", put_object)
+    ddb_run_store_offload.create_run(*_doc_meta("ord", "正文"))
+    assert order == ["get META consistent=True", "get STATE consistent=True", "s3 put"]
+
+
+def test_create_run_puts_are_conditional_when_another_writer_lands_after_the_check(aws, ddb_run_store_offload, monkeypatch):
+    """检查与写之间另一方建了同一个 run_id（这里让检查读不到已有的条目来造出这个窗口）：两次 put 的「条目不存在」条件挡下本方，
+    抛 FileExistsError，META 与 STATE 仍是先建的那一方的内容。这个窗口里 S3 正文可能已被本方重写，属已知边界、不断言。"""
+    meta, state = _doc_meta("race", "先到的正文")
+    ddb_run_store_offload.create_run(meta, state)
+    table = aws["ddb"].Table(aws["table_name"])
+    meta_before, state_before = (table.get_item(Key={"run_id": "race", "item_type": t}, ConsistentRead=True)["Item"]
+                                 for t in ("META", "STATE"))
+
+    monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
+    with pytest.raises(FileExistsError):
+        ddb_run_store_offload.create_run(*_doc_meta("race", "后到的正文", extra_scope=True))
+    monkeypatch.undo()
+    assert table.get_item(Key={"run_id": "race", "item_type": "META"}, ConsistentRead=True)["Item"] == meta_before
+    assert table.get_item(Key={"run_id": "race", "item_type": "STATE"}, ConsistentRead=True)["Item"] == state_before
+
+
+def test_create_run_state_put_is_conditional_on_its_own(aws, ddb_run_store_offload, monkeypatch):
+    """STATE 那一次写自己带「条目不存在」的条件：让检查读不到已有的条目、META 又不在（META 的写因此成立），本方走到第二次写，
+    已有的 STATE 挡下它，抛 FileExistsError，STATE 仍是原来的内容（含已有的认领）。上一条用例在 META 的写上就被挡下，
+    走不到这一次写。"""
+    meta, state = _doc_meta("race2", "先到的正文")
+    ddb_run_store_offload.create_run(meta, state)
+    assert ddb_run_store_offload.try_claim_job("race2", "s") is True
+    table = aws["ddb"].Table(aws["table_name"])
+    table.delete_item(Key={"run_id": "race2", "item_type": "META"})
+    state_before = table.get_item(Key={"run_id": "race2", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+
+    puts: list[str] = []
+    real_put = ddb_run_store_offload._table.put_item
+
+    def put_item(**kwargs):
+        puts.append(kwargs["Item"]["item_type"])
+        return real_put(**kwargs)
+
+    monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
+    monkeypatch.setattr(ddb_run_store_offload._table, "put_item", put_item)
+    with pytest.raises(FileExistsError):
+        ddb_run_store_offload.create_run(*_doc_meta("race2", "后到的正文", extra_scope=True))
+    monkeypatch.undo()
+    assert puts == ["META", "STATE"], "前提：这一次确实走到了 STATE 的写"
+    assert table.get_item(Key={"run_id": "race2", "item_type": "STATE"}, ConsistentRead=True)["Item"] == state_before
+
+
+def test_create_run_writes_claim_count_zero_on_the_state_item(aws, ddb_run_store):
+    """STATE item 写下认领计数 0（写端恒写，数值属性）。"""
+    meta, state = _doc_meta("cc", "正文")
+    ddb_run_store.create_run(meta, state)
+    item = aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": "cc", "item_type": "STATE"}, ConsistentRead=True)["Item"]
+    assert item["claim_count"] == 0

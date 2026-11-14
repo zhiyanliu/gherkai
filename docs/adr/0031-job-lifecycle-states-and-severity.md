@@ -1,6 +1,6 @@
 # job 生命周期态：skipped / aborted + severity 数值序
 
-> **Status:** Partially-superseded-by 0034, 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的改写如下：生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态在该路径真实喂入 `_aggregate`（决定三的**决策**不变、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。
+> **Status:** Partially-superseded-by 0034, 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的改写如下：生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态在该路径真实喂入 `_aggregate`（决定三的**决策**不变、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。[0054](./0054-settle-leftover-foreground-runs.md) 决策五给决定五加一处退出码例外，已原位改写、已实装：前台 `run` 收尾写不成（本次执行结束之前 run 已被别处记为已结束）时退出码取 1、不按本次判定，处理过使用方中断时仍按信号取。
 
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
@@ -151,7 +151,7 @@ skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker
 cli 退出码从「`status.value == 'passed'` 才 0」改为**基于 run 级 severity**（`run.status == PASSED → 0，否则 1`）。
 
 - **数据源**：退出码读 **schedule 返回的 `RunResult.status`（内存终值，必是终态）**，不回读 RunStore 落库态（后者实时写下可能停在 pending/running，且 `--no-report` 时根本没落库）。**⚠️ 此「读内存终值」限同步 `run` 路径**：[0034](./0034-detached-batch-reconciler.md) 无状态批量运行下 CLI 脱离、不再有「schedule 返回的内存 RunResult」——`submit` 退出码=**提交成功与否**（0=已提交、run_id 已返回），判定退出码由 `status --wait` **读回 `RunState`** 给出。这不违背本条「不回读实时落库态」的初衷：`status --wait` 读的是**轮询到终态后**的 `RunState`（reconciler 已 finalize、必是终态），非本条所拒的「实时写下可能停在 pending/running 的落库态」。退出码语义分层详见 [0034](./0034-detached-batch-reconciler.md)「命令形态」。
-- 当前结果不变：fail-fast 下含 aborted/skipped 的 run 必伴随 error → run=error → 退 1（CI 红）。aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，退非 0 正确。使用方中断已被处理的 run 例外：退出码按信号取 130（SIGINT）或 143（SIGTERM），不按 severity；有 job 记 aborted 或 skipped 时 run 级 status 记 aborted（决定三的例外）。
+- 当前结果不变：fail-fast 下含 aborted/skipped 的 run 必伴随 error → run=error → 退 1（CI 红）。aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，退非 0 正确。使用方中断已被处理的 run 例外：退出码按信号取 130（SIGINT）或 143（SIGTERM），不按 severity；有 job 记 aborted 或 skipped 时 run 级 status 记 aborted（决定三的例外）。收尾写不成的同步 `run` 也例外（[0054](./0054-settle-leftover-foreground-runs.md) 决策五）：本次执行结束之前 run 已被别处记为已结束时，不覆盖已有终态，退出码取 1、不按本次判定；处理过使用方中断时仍按信号取。
 - 改成基于 severity 而非字符串相等，**对未来新态更稳健、可读性更好**（判断点收敛到一处）。
 
 ## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔

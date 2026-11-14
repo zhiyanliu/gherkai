@@ -8,18 +8,20 @@
 都在 core、由组合根组合。schedule 一行不碰 store——它经 on_event / on_job_complete 两个回调把事件/JobResult
 喂给本服务（sink 只供进度显示，不经本服务；ADR 0026/0030）。
 
-commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.finalize 最后写。
-「finalize 一落，就表示 run 已提交、判定就绪」。
+commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.try_finalize 最后写。
+「收尾写一落，就表示 run 已提交、判定就绪」。收尾与别的写入方用同一个条件写（ADR 0054 决策五）：run 级已是终态时
+不覆盖它，抛 `RunAlreadyEnded`。
 
-并发不变量（ADR 0030 决定三）：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 on_event，
-在 schedule 的 sink_lock **之外** fire，故落库 RMW 不堵别的 worker 的进度显示）、job 终态刷在 **主线程**
-（经 on_job_complete，在 schedule 等待 job 完成的循环里串行调用）。local adapter 的 update_job_state 是整文件 read-modify-write、
-非自身线程安全，而 on_event 不受 sink_lock 保护——故本服务**自持一把锁**，所有写 store 的入口都走它。
+并发：两条写 RunStore 的路径——RUNNING 中间态刷在 **worker 线程**（经 on_event，在 schedule 的 sink_lock **之外** fire，
+故落库不堵别的 worker 的进度显示）、job 终态刷在 **主线程**（经 on_job_complete，在 schedule 等待 job 完成的循环里串行调用）。
+RunStore 的每个写入口对并发的别的写入方都是安全的（本机在文件锁内读改写，云端的每一次写都带条件），跨进程的别的写入方由它们挡住；本服务
+**自持一把锁**另有两个用处：护住进程内记下的代表会话（`_session`，读改写跨线程），并让同一进程里的写按调用次序依次落库。
 """
 from __future__ import annotations
 
 import threading
 
+from gherkai_core.errors import RunAlreadyEnded
 from gherkai_core.model import (
     Event,
     JobResult,
@@ -40,6 +42,8 @@ class RunPersistence:
 
     生命周期：begin（run 开始）→ on_event（运行中刷 RUNNING）+ on_job_complete（job 完成落终态）→ finalize（commit point）。
     注入点：on_event → schedule 的 on_event（sink_lock 外）；on_job_complete → schedule 的 on_job_complete（主线程）。
+    begin 在 run 已存在时失败（RunStore.create_run 抛 FileExistsError，什么都不改）；finalize 在 run 已被别处记为已结束时
+    抛 `RunAlreadyEnded`。
     """
 
     def __init__(
@@ -124,16 +128,29 @@ class RunPersistence:
     def finalize(self, result: RunResult, *, ended_at: str) -> str | None:
         """run 结束（schedule 返回后）：commit point。
 
-        写总 status + ended_at（finalize_run 就是 commit point，它一落 run 即已提交、判定就绪）；
+        以 `try_finalize` 条件写总 status + ended_at（这次写就是 commit point，它一落 run 即已提交、判定就绪）；
         再归集 ReportStore（派生视图、永远最后、从终值 RunResult 派生）。返回 ReportStore.write 的 ResourceUri。
+
+        **写不成时不覆盖、不写报告**（ADR 0054 决策五）：run 级已是终态，说明本次执行结束之前别处已把它记为已结束；已有的终态
+        对所有写入方不可变，报告从本次结果派生、会与记录矛盾，所以都不写，抛 `RunAlreadyEnded`（带读回的运行态）。各 job 的判定
+        此前已由 on_job_complete 逐个写入，不受影响。条件写不区分「已是终态」与「运行态不存在」，写不成之后读回一次来分辨：
+        运行态不存在抛 FileNotFoundError（begin 之后不该发生）。这次读回本身失败时仍抛 `RunAlreadyEnded`（`recorded` 为 None、
+        读回的异常作为它的起因）：收尾没有写成这个结论不靠读回，调用方照同一个出口结束，不因为多出的这次读另有一条失败路径。
 
         **ReportStore.write 的失败被隔离**（ADR 0030 决定三：报告是派生只读视图、可重建、永不作判定源）——
         它若抛异常（磁盘满/路径不可写等），**不反向击穿已 commit 的 run**：commit point 已落、判定真值在
         ResultStore 安然无恙，故吞掉 write 异常、返回 None（报告可后续从 RunResult 重建），让调用方照常输出汇总/退出码。
-        finalize_run 本身**不**在此 try 内——它是 commit point，失败必须冒泡（控制面没落是真问题）。
+        收尾写本身**不**在此 try 内——它是 commit point，失败必须冒泡（控制面没落是真问题）。
         """
         with self._lock:
-            self._run_store.finalize_run(self._run_id, result.status, ended_at)
+            if not self._run_store.try_finalize(self._run_id, result.status, ended_at):
+                try:
+                    recorded = self._run_store.load_run_state(self._run_id)
+                except Exception as e:
+                    raise RunAlreadyEnded(self._run_id, None) from e
+                if recorded is None:
+                    raise FileNotFoundError(f"run {self._run_id} 的运行状态不存在，无法记下结果")
+                raise RunAlreadyEnded(self._run_id, recorded)
             if self._report_store is None:
                 return None
             try:
