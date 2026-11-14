@@ -2274,9 +2274,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794540347.9653764,
-    "seen": 1794647585.074739,
-    "ast_hash": "4a5b36b61d0eb8ca1123693b40bca2c2",
+    "mtime": 1794669004.8627343,
+    "seen": 1794669009.845831,
+    "ast_hash": "6d4e6b966c178fad7201c7bab6a62ff5",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2976,9 +2976,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0054-settle-leftover-foreground-runs.md": {
-    "mtime": 1794666810.265599,
-    "seen": 1794666841.579075,
-    "ast_hash": "0a246376b8e24d93b095f1859847215b",
+    "mtime": 1794668930.7719831,
+    "seen": 1794669009.8458219,
+    "ast_hash": "096521a6f3b0c4bb3db86e1020de074a",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {

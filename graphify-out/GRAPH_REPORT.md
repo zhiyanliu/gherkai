@@ -1,17 +1,17 @@
 # Graph Report - yaozhou  (2026-11-14)
 
 ## Corpus Check
-- 475 files · ~969,647 words
+- 475 files · ~970,009 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 31 file(s) not represented in the graph (top: (none) 17, .feature 7, .xml 6)
 
 ## Summary
-- 11756 nodes · 27284 edges · 462 communities (305 shown, 157 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 2370 edges (avg confidence: 0.91)
+- 11756 nodes · 27290 edges · 462 communities (305 shown, 157 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 2372 edges (avg confidence: 0.91)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `08350b3e`
+- Built from commit: `5984ecfc`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -474,22 +474,22 @@
 4. `RunState` - 130 edges
 5. `schedule()` - 129 edges
 6. `RunMeta` - 125 edges
-7. `JobResult` - 121 edges
-8. `JobState` - 121 edges
+7. `JobState` - 121 edges
+8. `JobResult` - 121 edges
 9. `CollectSink` - 110 edges
 10. `FakeEngine` - 107 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `五、run 级终态不可变：所有写入方都只在未结束时写终态` --references--> `RunStore`  [INFERRED]
+- `五、run 级终态不可变，执行方服从记录` --references--> `RunStore`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/ports.py
 - `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunMeta`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunResult`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
 - `三、发起进程标识：放运行态记录的顶层` --references--> `RunListing`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `0051. 远程访问会话生命周期与应用分发` --references--> `TunnelInfo`  [INFERRED]
-  docs/adr/0051-device-session-lifecycle-and-app-distribution.md → runtime/gherkai_runtime/tunnel.py
-- `证据边界` --references--> `ResourceNotFoundException`  [INFERRED]
-  tools/workers_real_aws/README.md → engines/novaact/tests/test_workflow_setup.py
+- `对既有文档与 code 的影响` --references--> `RunListing`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -630,7 +630,7 @@ Nodes (42): call(), complete(), meta(), run(), started(), test_compaction_is_mar
 
 ### Community 22 - "Status"
 Cohesion: 0.03
-Nodes (76): DynamoDBRunStore, read_page(), _header_from_item(), _job_state_from_item(), _job_state_to_item(), _listed_from_live(), _run_state_from_item(), _run_status_assignment() (+68 more)
+Nodes (75): DynamoDBRunStore, read_page(), _header_from_item(), _job_state_from_item(), _job_state_to_item(), _listed_from_live(), _run_state_from_item(), _run_status_assignment() (+67 more)
 
 ### Community 23 - "S3StepArgumentOffloader"
 Cohesion: 0.07
@@ -1218,7 +1218,7 @@ Nodes (7): engine 解析（scope 级）, id 派生（scopeId / scenarioId 关联
 
 ### Community 175 - "model.py"
 Cohesion: 0.05
-Nodes (24): _run_schedule(), LocalResultStore, RunPersistence, ReportStore, ResultStore, RunStore, test_job_result_file_stays_readable_by_others(), _jr() (+16 more)
+Nodes (25): _run_schedule(), LocalResultStore, RunPersistence, ReportStore, ResultStore, RunStore, test_job_result_file_stays_readable_by_others(), _jr() (+17 more)
 
 ### Community 176 - "test_package_readmes.py"
 Cohesion: 0.13
@@ -1342,7 +1342,7 @@ Nodes (16): CONTENT_TYPES, contentTypeFor(), DEVICE_SESSION_BASENAME, ADR-0016, 
 
 ### Community 214 - "决策"
 Cohesion: 0.15
-Nodes (13): 0054. 运行期限与遗留前台 run 的收尾：每个 run 遵守由 job 预算推出的期限，终态不可变，settle-runs 把发起进程已不在的 run 记为已结束, 一、定位与范围, 七、触发面, 五、run 级终态不可变：所有写入方都只在未结束时写终态, 八、发起进程标识怎么取, 六、处置：run 级 `error` 加说明，job 保持原样, 决策, 四、判定：owner 最初定的两条 (+5 more)
+Nodes (13): 0054. 运行期限与遗留前台 run 的收尾：每个 run 遵守由 job 预算推出的期限，终态不可变、执行方服从记录，settle-runs 把发起进程已不在的 run 记为已结束, 一、定位与范围, 七、触发面, 五、run 级终态不可变，执行方服从记录, 八、发起进程标识怎么取, 六、处置：run 级 `error` 加说明，job 保持原样, 决策, 四、判定：owner 最初定的两条 (+5 more)
 
 ### Community 217 - "CONTRIBUTING.md: contributor 指南"
 Cohesion: 0.18
@@ -1784,14 +1784,14 @@ Nodes (53): gherkai 变更记录 (CHANGELOG), --expose-local 隧道模式, gherk
 
 ## Knowledge Gaps
 - **496 isolated node(s):** `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector`, `CapabilityProbe`, `DeviceFinalizer` (+491 more)
-  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 5311 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
+  These have ≤1 connection - possible missing edges or undocumented components. (Counts symbols only; 5310 node(s) total have ≤1 connection when file, concept and rationale nodes are included.)
 - **157 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Midscene 引擎开发笔记（contributor）` connect `ADR 0024: worker–core 协议` to `判定的计算路径：从单次投票到退出码`, `ADR 0042: step 证据与 explain`, `bin.mts`, `决策`, `CONTRIBUTING（contributor 入口）`?**
-  _High betweenness centrality (0.212) - this node is a cross-community bridge._
+  _High betweenness centrality (0.257) - this node is a cross-community bridge._
 - **Are the 497 inferred relationships involving `Status` (e.g. with `_build_parser()` and `_cmd_list_runs()`) actually correct?**
   _`Status` has 497 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector` to the rest of the system?**
@@ -1799,7 +1799,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `guard.mts` be split into smaller, more focused modules?**
   _Cohesion score 0.0539906103286385 - nodes in this community are weakly interconnected._
 - **Why does `tsx` connect `package.json` to `bin.mts`?**
-  _High betweenness centrality (0.099) - this node is a cross-community bridge._
+  _High betweenness centrality (0.140) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
