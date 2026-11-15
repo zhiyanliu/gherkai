@@ -161,6 +161,10 @@ _Avoid_: 维护者（指发布侧时写「发布方」）
 contributor 中持有发布权限的一侧：打 tag 触发发布链并维护它，发行包与基础镜像由此发到 PyPI、npm 与 GHCR。不是使用方角色；定制镜像（variant）的推送与注册归部署方（见 ADR 0040）。
 _Avoid_: 维护者、maintainer
 
+**owner**:
+contributor 中对产品取舍与已定决策的变更有决定权的一侧；contributor 侧 AI agent 的待批项交它定。沿用英文、不设中文正名（见 ADR 0040）。
+_Avoid_: 项目负责人、维护者
+
 **feature 作者 (feature author，同义 QA)**:
 只写 `.feature` 文件、不写任何代码的帽子；写作本身不需要任何凭证，写法靠用例预检验证。要执行用例，按执行权限梯级取一级（见 ADR 0040）。
 

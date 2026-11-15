@@ -90,7 +90,7 @@ def test_direct_call_at_the_start_is_blocked(tmp_path, command):
     "/usr/local/bin/mycodex exec -",
     "codex execute",                                       # exec 之后不是空白
     "codex exec-x",
-    "uv run python tools/codex_review.py --brief brief.md --out out.md",
+    "uv run python tools/codex_review.py --round first --brief brief.md --out out.md",
 ])
 def test_other_forms_pass(tmp_path, command):
     proc = _run(command, tmp_path)
@@ -102,8 +102,9 @@ def test_block_message_points_to_the_sending_tool_and_the_guide(tmp_path):
     proc = _run("codex exec -o out - < brief.md", tmp_path)
     assert proc.returncode == 2
     assert "复核轮经 tools/codex_review.py 送出，它在执行时检查简报并固定只读沙箱" in proc.stderr
-    assert "uv run python tools/codex_review.py --brief <简报> --out <输出文件> [--model" in proc.stderr
-    assert "uv run python tools/codex_review.py --brief <简报> --out <输出文件> --resume <会话 id>" in proc.stderr
+    assert "uv run python tools/codex_review.py --round first --brief <简报> --out <输出文件> [--model" in proc.stderr
+    assert ("uv run python tools/codex_review.py --round followup --brief <简报> --out <输出文件> [--resume <会话 id>]"
+            in proc.stderr)
     assert "docs/ai-eng/peer-review.md 第三、四节" in proc.stderr and "上下文压缩之后" in proc.stderr
 
 

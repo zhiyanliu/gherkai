@@ -1,6 +1,6 @@
 # 0040. 使用方角色模型与术语
 
-> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
+> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」；2026-11-15 决策 1 的 contributor 一行增「owner」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
 
 ## 背景与问题
 
@@ -25,7 +25,7 @@
 | 写 `.feature` | **feature 作者** | 同义 **QA**（「QA 零代码」口号与既有文档保留，含义等同） | 只写自然语言、零代码；产物 = `.feature`，验证用 `plan`（不需要凭证）。要执行，按决策 3 的执行权限梯级取一级 |
 | 写确定性 step | **测试开发** | 弃用 test engineer / test-engineer；「developer」只在指「被测应用的开发者」时用 | 使用方项目 `steps/`（两引擎各一份、模式对称）；本机 local 验证；build 定制 worker 镜像 |
 | 改云端环境 | **部署方** | 弃用 部署者 | `gherkai deploy` / `gherkai deploy push-worker`；唯一因帽子本身就需要云端写权限的帽子（执行所需权限按决策 3 另算） |
-| 开发 gherkai 本身 | **contributor** | 「发布方」专指发布 / GHCR 基础镜像的一方 | clone 仓库、读根 `CONTRIBUTING.md` |
+| 开发 gherkai 本身 | **contributor** | 「发布方」专指发布 / GHCR 基础镜像的一方；「owner」专指 contributor 中对产品取舍与已定决策的变更有决定权的一方 | clone 仓库、读根 `CONTRIBUTING.md` |
 
 **「使用方」= 前三顶的统称**（用 gherkai 做测试的团队），与 contributor 相对——0039 的「使用者向 / contributor 向」即此分界。**「提交者」不是帽子，是权限类别**：决策 3 的执行权限梯级里两级云端组合的权限持有者（人或机器身份都行），0033 / 0038 的权限登记用它。
 
@@ -90,5 +90,5 @@
 ## 影响
 
 - 用户文档（0045 决策一 / 二 归位后）：`getting-started.md`「按角色选安装形态」表承载帽子与安装形态，并以产品语言写「一个人可以同时承担多个角色」（隐喻「帽子不是人」按 0045 决策六不进使用者面）；`running-and-results.md`「两个独立的选择」节承载执行权限梯级表（决策 3 的派生视图，不带 ADR 编号），角色表的「需要什么凭证」列指向它。
-- CONTEXT.md：加「角色与权限」节的词条组（使用方 vs contributor、发布方、四顶帽子、执行权限梯级、提交者、两侧 AI agent 及使用者侧 / contributor 侧两条），指向本 ADR。
+- CONTEXT.md：加「角色与权限」节的词条组（使用方 vs contributor、发布方、owner、四顶帽子、执行权限梯级、提交者、两侧 AI agent 及使用者侧 / contributor 侧两条），指向本 ADR。
 - 0020「角色边界」节、0038「默认画像」句：加指向本 ADR 的指针；术语按决策 1。
