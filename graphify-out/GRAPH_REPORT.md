@@ -1,17 +1,17 @@
 # Graph Report - yaozhou  (2026-11-15)
 
 ## Corpus Check
-- 483 files · ~989,589 words
+- 483 files · ~989,716 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 31 file(s) not represented in the graph (top: (none) 17, .feature 7, .xml 6)
 
 ## Summary
-- 12256 nodes · 28738 edges · 516 communities (345 shown, 171 thin omitted)
-- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 2520 edges (avg confidence: 0.9)
+- 12256 nodes · 28739 edges · 516 communities (345 shown, 171 thin omitted)
+- Extraction: 91% EXTRACTED · 9% INFERRED · 0% AMBIGUOUS · INFERRED: 2521 edges (avg confidence: 0.9)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6bcb78e3`
+- Built from commit: `3a52a10f`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -526,14 +526,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `五、run 级终态不可变，执行方服从记录` --references--> `RunStore`  [INFERRED]
   docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/ports.py
-- `恢复现场` --references--> `_status_cmd()`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → cli/gherkai_cli/__main__.py
-- `恢复现场` --references--> `RunResult`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → core/gherkai_core/model.py
-- `恢复现场` --references--> `run_verdict()`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → core/gherkai_core/project.py
-- `恢复现场` --references--> `instant_from_iso()`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → core/gherkai_core/serialize.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunResult`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `plan_next()`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/project.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `compute_watch_ttl_s()`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → runtime/gherkai_runtime/tunnel_host.py
+- `三、发起进程标识：放运行态记录的顶层` --references--> `RunListing`  [INFERRED]
+  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
 
 ## Import Cycles
 - None detected.
@@ -1995,7 +1995,7 @@ Nodes (82): gherkai 变更记录 (CHANGELOG), --expose-local 隧道模式, CLAUD
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Midscene 引擎开发笔记（contributor）` connect `ADR 0024: worker–core 协议` to `ADR 0003: Midscene grounding 用 Qwen3-VL on Bedrock`, `Midscene 引擎开发笔记（contributor）`, `判定的计算路径：从单次投票到退出码`, `bin.mts`, `device_reprobe 使用说明（Midscene 设备模块的真机重新探测）`?**
-  _High betweenness centrality (0.248) - this node is a cross-community bridge._
+  _High betweenness centrality (0.203) - this node is a cross-community bridge._
 - **Are the 581 inferred relationships involving `Status` (e.g. with `_build_parser()` and `_cmd_list_runs()`) actually correct?**
   _`Status` has 581 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector` to the rest of the system?**
@@ -2003,7 +2003,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `guard.mts` be split into smaller, more focused modules?**
   _Cohesion score 0.0539906103286385 - nodes in this community are weakly interconnected._
 - **Why does `tsx` connect `package.json` to `bin.mts`?**
-  _High betweenness centrality (0.128) - this node is a cross-community bridge._
+  _High betweenness centrality (0.101) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
