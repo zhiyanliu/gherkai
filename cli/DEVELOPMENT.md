@@ -79,9 +79,13 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 ## 实时落库
 
 `run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
-run 开始即写 definition 与初始全 pending 态，每个 scope 开始执行时写入 RUNNING、完成即落该 scope 判定真值，
-最后 `finalize` 以条件写落定总状态（commit point）。run 级在此之前已被别处记为终态时，`finalize` 不覆盖它、不写报告，
-`run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。`--no-report` 时跳过整条落库（零落盘运行路径）。
+run 开始即写 definition 与初始全 pending 态，每个 scope 起 worker 之前先认领（`RunPersistence` 作为 `ScheduleOpts.record` 注入，
+认领时刻随认领写下），开始执行时写入 RUNNING、完成即落该 scope 判定真值，最后 `finalize` 以条件写落定总状态与 run 级说明（commit point）。
+调度循环的墙钟注入 `compose.now`，与写时间戳的 `compose.now_iso` 同一个读取点；过了运行期限减 60 秒不再启动 job，没有启动的 scope
+不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」（ADR 0054 决策二）。run 级在此之前已被别处记为终态时
+（认领被拒、job 状态写得知 run 已结束，调度循环随即停手），`finalize` 不覆盖它、不写报告，
+`run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。`--no-report` 时跳过整条落库（零落盘运行路径），
+只注入墙钟、不认领，运行期限照样生效。
 
 落到哪由 `--backend` 决定：默认 `local`（文件落 `--report-dir`）；`--backend cloud` 让组合根改注入 DynamoDB/S3
 adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真值与报告落 S3（表/桶需预先建好，由 `gherkai deploy` 供给）。
@@ -97,6 +101,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 - `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + step 级 gherkai evidence：每个 AI step 各一份，设备目标上失败或出错的确定性 step 与导航 step 也各一份；设备目标另有 scope 级 `device_session` 诊断文件 device-session.json）。判定、时长、成本**不在此**：须以
   `run_id` 到 `ResultStore`（`jobs/*.json`）取判定真值；`index.html` 才含判定明细。
 - `index.html` —— 判定明细树 + 每个报告产物（Midscene html / Nova trajectory / step evidence）一行链接，链接打开的是**原样**文件。
+  摘要带 run 级说明（有才给），运行定义里有、判定清单里没有的 scope 列在判定明细末尾、标为「没有执行」，与文本汇总同一句。
   RunReport 只索引与链接、**不解析融合**产物内容；新引擎上报任意 `kind` 都无需改动 core（ADR 0027）。
 - index 链接指向产物**原位**（local 为相对链接：产物就在 `reports/<run_id>/` 树内、目录可整体移动；cloud 为 `s3://`）。
 

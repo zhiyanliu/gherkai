@@ -20,7 +20,7 @@ cost 只含 engine 报的原生量、不折美元（ADR 0024）；report_refs �
 """
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from gherkai_core.model import (
     AppRef,
@@ -386,6 +386,7 @@ def to_dict(result: RunResult) -> dict:
         "run_id": result.run_id,         # 便利：消费端/manifest 直读（经 property，真值在 run_meta）
         "run_meta": run_meta_to_dict(result.run_meta),
         "status": result.status.value,
+        "message": result.message,  # run 级说明（ADR 0054 决策二）：键恒在，没有时为 null
         "duration_ms": result.duration_ms,
         "total_tokens": result.total_tokens,
         "total_time_worked_s": result.total_time_worked_s,
@@ -406,6 +407,7 @@ def from_dict(d: dict) -> RunResult:
     return RunResult(
         run_meta=run_meta,
         status=Status(d["status"]),
+        message=d.get("message"),
         jobs=[job_result_from_dict(j, job=job_by_scope.get(j["scope_id"])) for j in d.get("jobs", [])],
         total_tokens=d.get("total_tokens"),
         total_time_worked_s=d.get("total_time_worked_s"),
@@ -442,17 +444,36 @@ def run_meta_to_dict(meta: RunMeta) -> dict:
     }
 
 
+def instant_from_iso(v) -> datetime:
+    """记录里的时刻（ISO 串）→ 带时区的 datetime，墙钟时刻在 core 里的类型（见 `run_deadline` 模块头）。
+
+    不是字符串、读不出时刻或不带时区都抛 ValueError：不带时区的时刻在别的机器上比较会差出时区偏移，与带时区的 datetime 比较时
+    Python 也只会抛 TypeError。读运行期限的定义校验与执行方比较时刻共用这一处解析，不各写一份。"""
+    if not isinstance(v, str):
+        raise ValueError(f"时刻须为 ISO 字符串，现为 {v!r}")
+    t = datetime.fromisoformat(v)
+    if t.tzinfo is None:
+        raise ValueError(f"时刻须带时区，现为 {v!r}")
+    return t
+
+
+def instant_to_iso(t: datetime) -> str:
+    """带时区的 datetime → 记录里的写法：UTC 的 ISO 串，与组合根写时间戳的形态（`compose.now_iso`）相同，同一份运行态里的各个时刻
+    不会混两种写法。不带时区即抛 ValueError（无从换算成 UTC）。"""
+    if t.tzinfo is None:
+        raise ValueError(f"时刻须带时区，现为 {t!r}")
+    return t.astimezone(timezone.utc).isoformat()
+
+
 def _deadline_at_from_dict(d: dict) -> str:
     """读运行期限（ADR 0054 决策二）：键必须在，值必须是带时区的 ISO 时刻。每个 run 都有期限，没有「不适用写 null」的情形，
     null 与读不出时刻的值都是定义违约，与空预算同一处理；在读 definition 这一处拒绝，执行方拿到的期限恒可比较。"""
     v = _require(d, "deadline_at", "run_meta")
     try:
-        ok = isinstance(v, str) and datetime.fromisoformat(v).tzinfo is not None
+        instant_from_iso(v)
     except ValueError:
-        ok = False
-    if not ok:
         from gherkai_core.errors import DefinitionContractError
-        raise DefinitionContractError(f"definition 里 run_meta 的 deadline_at 须为带时区的 ISO 时刻（现为 {v!r}）")
+        raise DefinitionContractError(f"definition 里 run_meta 的 deadline_at 须为带时区的 ISO 时刻（现为 {v!r}）") from None
     return v
 
 

@@ -6,6 +6,9 @@
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
+另有调度循环用的回调与能力类型（EngineResolver / Sink / JobSink / RunRecord），同样由组合根注入；RunRecord 的实现是 core 自己的落库服务
+`persist.RunPersistence`，不是 adapter。
+
 禁止：port 内部 env-sniff 自选实现（Midscene GlobalConfigManager 反模式）。adapter 一律组合根注入。
 接口先定（逼清边界）；四个 port 的 local + 云端 adapter 均已实装（RunStore: local/ddb、Result/ReportStore:
 local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
@@ -22,6 +25,7 @@ local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Iterator, Protocol, Sequence
 
 from gherkai_core.model import (
@@ -96,6 +100,27 @@ class JobSink(Protocol):
     def __call__(self, job: JobResult) -> None: ...
 
 
+# RunRecord：调度循环服从这次 run 的记录所用的三项能力（ADR 0054 决策五「执行方服从记录」）。schedule 不碰 store（ADR 0030
+# 决定一），有记录的执行由组合根注入落库服务（`RunPersistence` 实现本协议），没有记录的执行（`run --no-report`、测试）不注入。
+class RunRecord(Protocol):
+    def claim(self, scope_id: str, claimed_at: datetime) -> bool:
+        """认领一个 job：只在 run 级未结束、这个 job 仍为 pending 时成立，认领时刻随认领写进运行态。每个 job 只在第一次起 worker
+        之前调一次，claimed_at 是调用方在这次调用之前取的墙钟。返回 False 即认领被拒，调用方按「run 已被别处记为已结束」处理。
+        存储不可达等失败照常抛出，调用方按运行期落库失败处理。"""
+        ...
+
+    def still_open(self) -> bool:
+        """读一次 run 级状态：pending 或 running 时为 True，已是终态为 False。job 级重试重新起 worker 之前调用（重试不再认领）。
+        读取失败照常抛出。"""
+        ...
+
+    def ended_elsewhere(self) -> bool:
+        """停手信号：是否已发现这个 run 被别处记为已结束。认领被拒、`still_open` 读到终态、写 job 状态时得知 run 级已结束，三处的
+        发现都汇到这里，成立之后不再撤销。写 job 状态时的发现要在那次落库回调返回之前成立：调度循环在回调返回之后当场读它，据此
+        确定中止来源的先后。只读进程内的标记、不碰存储，调用方可以频繁轮询。"""
+        ...
+
+
 # ============================================================================
 # 状态/结果/报告 port（ADR 0016 三层切分）。local adapter 均已建：RunStore 落 RunMeta(definition)+
 # RunState(运行态)；ResultStore 落 JobResult(判定真值)；ReportStore 归集 RunReport(0027)。控制面的 jobId
@@ -111,7 +136,7 @@ class RunStore(Protocol):
 
     生命周期（ADR 0030）：create_run（开始：写 definition + 初始全 pending 态）→ update_job_state（每 job 开始运行/完成：按
     scope_id 刷单个 JobState）→ try_finalize（commit point：以条件写落定总 status + ended_at）。前台执行（同步 `run`）与后台推进
-    （reconciler）用同一组写入口，后台推进另用 try_claim_job 与 project_state。
+    （reconciler）用同一组写入口；两者起 worker 之前都先经 try_claim_job 认领（前台每个 job 只认领一次，ADR 0054 决策五），后台推进另用 project_state。
 
     **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
     之外，还有后台推进的多个实例与接力者），本机 adapter 在文件锁内读改写、云端 adapter 的每一次写都带条件。这不是事务保证：
@@ -129,12 +154,16 @@ class RunStore(Protocol):
         """
         ...
 
-    def update_job_state(self, run_id: str, job_state: JobState) -> None:
+    def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 写单个 job 的运行态；运行态不存在则抛 FileNotFoundError（须先 create_run）。
 
         写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变
         （ADR 0034 机制三「run 级状态只进不退」条③）。写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
         认领计数、HWM、起止时刻与 run 级 message 不变。
+
+        返回 run 级在这次写时是否仍未结束（ADR 0054 决策五）：True 表示 job 落下的那一刻 run 级为 pending 或 running，False 表示
+        run 级已是终态、这次只写了 job。对写入的任何 job 态（含 PENDING）都按写的那一刻如实给出，不是写前另读一次的结果。前台执行者
+        据 False 得知 run 已被别处记为已结束、停止启动新的 job；不关心的调用方可以忽略。
         """
         ...
 
@@ -144,8 +173,9 @@ class RunStore(Protocol):
 
         所有写入方共用这一个收尾入口（前台执行者与后台推进）：已是终态 → False，库中值不变，保证 commit
         恰一次（多实例同时见全终态、只有一个写成功、触发一次 RunReport 聚合）。运行态不存在同样 → False，两种原因不区分。
-        message 是 run 级消息（ADR 0037 决策 7）：不经任何 job 就把 run 置为终态时的原因，与终态同一次写入；
-        正常收尾不给；为 None 时不写这一项，库中值原样保留。
+        message 是 run 级消息（ADR 0037 决策 7）：没有任何 job 能承载的原因，与终态同一次写入——推进器不经任何 job 就把 run
+        置为终态时的原因，或执行方按运行期限收尾时的「已超过允许运行的时间」（ADR 0054 决策二第 3 条）；按各 job 判定聚合的
+        收尾不给；为 None 时不写这一项，库中值原样保留。
 
         expected_claim_count（ADR 0054 决策二「认领计数」段）：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
         没有新的认领；不等 → False、不写。为 None 时不判计数。认领计数本身不变。
@@ -186,8 +216,8 @@ class RunStore(Protocol):
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
 
-    # —— 认领与投影（ADR 0034；后台推进跨进程/跨实例并发调用）——
-    # 返回是否写成，调用方（reconciler）据此决定要不要起 worker。
+    # —— 认领与投影（ADR 0034；认领由前台执行者与后台推进共用，后台推进跨进程/跨实例并发调用）——
+    # 返回是否写成，调用方（前台的落库服务、后台的 reconciler）据此决定要不要起 worker。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """认领：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
 

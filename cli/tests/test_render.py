@@ -168,6 +168,53 @@ def test_index_html_scope_skipped_note_matches_cli_wording():
     assert tree.count(render._SCOPE_SKIPPED_NOTE) == 2 and render._SHORTCIRCUIT_NOTE not in tree
 
 
+def _deadline_run() -> RunResult:
+    """按运行期限收尾的 run（ADR 0054 决策二）：a 被期限截断（error / timeout）、b 因 fail-fast 记 skipped（有判定）、c 没有启动
+    （运行定义里有、判定清单里没有），run 级 error 加说明。三个 job 按定义次序 c、a、b 写进运行定义，看没有判定的排在哪里。"""
+    from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    a, b, c = (Job(scope_id=s, scope_name=s, engine="novaact", scenarios=(), timeout_s=300.0) for s in ("a", "b", "c"))
+    ja = JobResult(job=a, status=Status.ERROR, error_type="timeout", message=DEADLINE_TIMEOUT_MESSAGE)
+    jb = JobResult(job=b, status=Status.SKIPPED, message="fail-fast：本次运行已中止，未启动（worker 未 spawn）")
+    meta = RunMeta(run_id="r", created_at="", jobs=(c, a, b), deadline_at="2026-01-01T01:00:00+00:00")
+    return RunResult(run_meta=meta, status=Status.ERROR, message=RUN_DEADLINE_PASSED_MESSAGE, jobs=[ja, jb])
+
+
+def test_run_tree_shows_run_message_and_marks_jobs_without_verdict_as_not_run():
+    """run 级说明紧跟总状态；运行定义里有、判定清单里没有的 job 排在有判定的之后，只写「没有执行」、不写状态词。
+    skipped 的 job 照旧显示状态与它自己的原因，不被标成没有执行。没有 run 级说明的 run 没有说明这一行。"""
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    root = render.run_tree(_deadline_run())
+    labels = [str(n.label) for n in root.children]
+    assert labels[0] == f"说明: {RUN_DEADLINE_PASSED_MESSAGE}"
+    assert labels[-1] == f"job 'c': {render._NOT_RUN_LABEL}"
+    assert [lb.split(":")[0] for lb in labels if lb.startswith("job ")] == ["job 'a'", "job 'b'", "job 'c'"]
+    job_b = next(lb for lb in labels if lb.startswith("job 'b'"))
+    assert "skipped" in job_b and "未启动" in job_b and render._NOT_RUN_LABEL not in job_b
+    assert not root.find("'c': pending") and not root.find("'c': skipped")
+    assert not any(str(n.label).startswith("说明") for n in render.run_tree(_sample_run()).children)
+
+
+def test_index_html_shows_run_message_and_not_run_label_matching_cli_wording():
+    """报告入口页（两个 ReportStore 共用的渲染）：摘要里有 run 级说明；没有判定的 job 以同一句「没有执行」标注、排在有判定的之后，
+    标题注明另有几个没有执行。「没有执行」在 core 与 cli 各有一份字面量，由本条逐字锁定。"""
+    import html as html_mod
+
+    from gherkai_core.adapters.report_store.local import render_index_html
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    page = html_mod.unescape(render_index_html({"run_id": "r", "created_at": "", "report_index": []}, _deadline_run()))
+    assert f"<div>说明: {RUN_DEADLINE_PASSED_MESSAGE}</div>" in page
+    label = f"<code>c</code> <b>{render._NOT_RUN_LABEL}</b>"
+    assert page.count(label) == 1 and page.index("<code>b</code>") < page.index(label)
+    assert f"判定明细（2 job，另有 1 job {render._NOT_RUN_LABEL}）" in page
+    assert f"<code>b</code> <b>{render._NOT_RUN_LABEL}</b>" not in page and "<code>b</code> <b>skipped</b>" in page
+    plain = html_mod.unescape(render_index_html({"run_id": "r", "created_at": "", "report_index": []}, _sample_run()))
+    assert "说明:" not in plain and render._NOT_RUN_LABEL not in plain
+
+
 def test_run_tree_shows_device_metering_and_unconfirmed_sessions():
     """设备 job（ADR 0051 决策 7；0034 机制二 U 集）：设备占用时长与缺计量会话数、未确认停止的会话名、结果未知的创建尝试单独标；桌面 job 不出这些行。"""
     from gherkai_core.model import SessionRecord

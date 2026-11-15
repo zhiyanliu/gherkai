@@ -1,6 +1,6 @@
 # RunReport：跨引擎归集索引（不融合原生产物内容）
 
-> **Status:** Partially-superseded-by 0042 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）
+> **Status:** Partially-superseded-by 0042, 0054 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）[0054](./0054-settle-leftover-foreground-runs.md) 决策二以加法扩展「index.html 形态」：摘要带 run 级说明，运行定义里有、判定清单里没有的 job 列在判定明细末尾、标为没有执行；已原位改写、已实装。
 
 兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
@@ -121,8 +121,8 @@ class ReportStore(Protocol):
 
 纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。**两大块**（皆从内存 `RunResult` 渲染）：
 
-- 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）。
-- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type 与失败原因原文 message（[0042](./0042-step-evidence-and-explain.md) 决策三）/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。scope 级 error 后合成的 skipped（`shortcircuited=False`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）另显「未执行（scope 级错误，原因见 job 判定）」旁注。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。
+- 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）；`RunResult.message` 有值时紧跟一行 run 级说明（没有任何 job 能承载的原因，如「已超过允许运行的时间」，[0054](./0054-settle-leftover-foreground-runs.md) 决策二）。
+- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type 与失败原因原文 message（[0042](./0042-step-evidence-and-explain.md) 决策三）/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。scope 级 error 后合成的 skipped（`shortcircuited=False`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）另显「未执行（scope 级错误，原因见 job 判定）」旁注。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。**没有判定的 job**（运行定义里有、`RunResult.jobs` 里没有，即 `RunResult.jobs_without_verdict`：已过停止启动的时刻、或发现 run 已被别处记为已结束而没有启动，[0054](./0054-settle-leftover-foreground-runs.md) 决策二）排在有判定的之后、按运行定义的次序，每个只有 scope 与「没有执行」标注、圆点用兜底灰，原因在摘要的 run 级说明；标题注明另有几个没有执行。它与 skipped（有判定、原因在 job 自己的说明）、与 step 行的「未执行」旁注（scope 级错误后合成的 skipped）是三回事，措辞分开；「没有执行」与 cli 文本汇总同一句，两包各一份字面量，由 cli 侧测试逐字锁定（同短路旁注的做法）。
 - **② 报告产物导航清单（引擎原生产物 + gherkai evidence，[0042](./0042-step-evidence-and-explain.md)）**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
 - **①②双向锚点关联**：①里挂了产物的节点行尾加 📎（同节点多产物显 📎×N、链到首条）链到②对应条目，②每条加 ↑ 链回所属树节点；关联键 = 产物挂载层级的 `(scope_id, scenario_id, step_index)` 三元组，锚点 id 纯 ASCII（`node-jN-sN-tN` 用 job/scenario 的位置序号 + step 自身 index，`ref-N` 用在 `report_index` 里的序号）——`scope_id` 可含中文/冒号，不能直接进 `#fragment`；落点 `:target` 高亮 + 平滑滚动。平铺清单表达不了「产物属于哪个 job/scenario/step」，借①的树结构补上。仍守本节「无外链 JS/CSS、单文件」：只用同文件内 fragment 链接 + 内联 CSS，零 JS。
 - 上色用内联 `<style>`。

@@ -18,10 +18,11 @@ from gherkai_core.model import (
     severity,
 )
 from gherkai_core.model import Job, JobResult
-from gherkai_core.schedule import ScheduleOpts, _aggregate, schedule
+from gherkai_core.project import _aggregate
+from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver, FakeWorkerHandle
-from tests.test_schedule import _IncClock, _job, _passing_events, _rm
+from tests.test_schedule import _FakeTime, _job, _passing_events, _rm
 
 
 # ---- serialize round-trip 覆盖新态（ADR 0031 touch-point）----
@@ -318,11 +319,12 @@ def test_network_error_during_timeout_is_timeout_not_aborted():
     # 竞态：单 job，worker 在建连退避里以网络故障退出码退出，但此刻墙钟已过 deadline → 走 timeout 分支 → error+timeout（非 aborted、非 network_error）
     gate = threading.Event(); gate.set()  # 立刻放行：victim 一进来就抛网络故障
     engine = _NetRaiseEngine(gate)
-    # _IncClock 每读 +10s，job_timeout=5 → schedule 内首次读 clock 建 deadline≈10，网络块重判 clock()>deadline 必真
-    clock = _IncClock(10.0)
+    # 单调时钟每读前进 10 秒（首事件的时长归约读一次），job_timeout=5 → 认领时刻约为 10 秒、截止时刻约为 15 秒，网络故障退出后的回判时
+    # 墙钟已到 20 秒，必判超时
+    ft = _FakeTime(step=10.0)
     result = schedule(
         _rm([_job("victim", timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
-        opts=ScheduleOpts(clock=clock, network_retry=0),
+        opts=ft.opts(network_retry=0),
     )
     victim_jr = result.jobs[0]
     assert victim_jr.status == Status.ERROR

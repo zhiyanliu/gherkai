@@ -174,8 +174,9 @@ class Status(str, Enum):
     """判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
 
     worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
-    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；aborted 还作为使用方中断已被处理且有 job 记为 aborted 或 skipped 的 run 的
-      run 级 status（ADR 0031 决定三的例外）。
+    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；发现 run 已被别处记为已结束时被停下的 job 同样记
+      aborted（ADR 0054 决策二）。aborted 还作为被外部停下的 run 的 run 级 status：使用方中断已被处理且有 job 记为 aborted 或 skipped，或已发现
+      run 被别处记为已结束（ADR 0031 决定三的例外，规则见 `project.run_verdict`）。
     - pending/running：实时写的 job 与 run 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
       不进 JobResult.status（终态判定只会是 passed/failed/error/skipped/aborted）、不参与 severity 比较。
     """
@@ -184,9 +185,11 @@ class Status(str, Enum):
     FAILED = "failed"  # 断言投票没过，即测试发现了问题
     ERROR = "error"  # 引擎抛异常，即测试未能运行完成
     SKIPPED = "skipped"  # core 派生终态：整批中止（fail-fast 或使用方中断）时 worker 从未 spawn。没执行/没花钱/可直接重新运行（ADR 0031）
-    ABORTED = "aborted"  # core 派生终态：主动中止（fail-fast 或使用方中断）时执行到一半被停止。有副作用/有现场可查（ADR 0031）
-    PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）
-    RUNNING = "running"  # 前置态：worker 起了、收到 scope_started 或非 attempted 的 session_opened 后刷（ADR 0030/0031/0051）
+    ABORTED = "aborted"  # core 派生终态：主动中止（fail-fast、使用方中断或发现 run 已被别处结束）时执行到一半被停止。有副作用/有现场可查（ADR 0031）
+    PENDING = "pending"  # 前置态：run 开始 create_run 时占位（ADR 0030/0031）；没有启动、不产出判定的 job 一直停在这里（ADR 0054 决策二）
+    # 前置态：认领时写下（起 worker 之前，ADR 0034/0054）；前台执行收到 scope_started 或非 attempted 的 session_opened 后再刷一次，
+    # 带上会话血缘（ADR 0030/0031/0051）
+    RUNNING = "running"
 
 
 # severity 数值序（ADR 0031 决定二）：**仅用于终态**的比较/排序/单调聚合。
@@ -498,14 +501,24 @@ class RunResult:
 
     RunResult 是 schedule 对事件流的归约终值；sink 收的是同一事件流的原始流式视图（ADR 0026）。
 
+    jobs 只装有判定的 job（判定只有终态，ADR 0031 决定一·补）。因已过停止启动的时刻、或发现 run 已被别处记为已结束而没有启动的
+    job 不产出判定、不在其中，它们是 run_meta.jobs 与 jobs 的差（ADR 0054 决策二）；因 fail-fast 或使用方中断而没有启动的 job
+    记为 skipped，在其中。schedule 返回的 RunResult，status 与 message 是 run 级的裁决（`project.run_verdict`），不只是各 job 判定的
+    聚合；后台的推进步骤尚未接入这个裁决，`project.project_full` 的 status 取各 job 判定的聚合、message 为空。
+
     成本（ADR 0024）：core 不算、不折美元——只各自合计 engine 报的**原生量**
     （token 用量 / agent 工作时长）。哪个有值取决于哪些引擎报了它（Nova 报时长、Midscene 报 token）；
     美元折算交给消费者（用自己 AWS 账户的真实费率）。None 表示无任何引擎报这个量。
     """
 
     run_meta: RunMeta  # 这次 run 的 definition（run_id/created_at/jobs；执行前确定，不从结果反推）
-    status: Status  # 总判定：任一 job error→error；任一 failed→failed；全 passed→passed
+    # 总判定：各 job 判定的聚合（任一 error→error；任一 failed→failed；全 passed→passed）；schedule 的产出另有聚合之外的例外
+    # （使用方中断、发现 run 已被别处记为已结束、已过停止启动的时刻而有 job 没有启动，见 `project.run_verdict`）
+    status: Status
     jobs: list[JobResult] = field(default_factory=list)
+    # run 级说明（ADR 0054 决策二）：没有任何 job 能承载的原因，如「已超过允许运行的时间」；与记录里运行态的 run 级 message
+    # 同义。没有时为 None（序列化恒写这个键，值为 null）。
+    message: str | None = None
     total_tokens: int | None = None  # 跨 job 的 token 合计（None 表示无引擎报 token）
     total_time_worked_s: float | None = None  # 跨 job 的 agent 工作时长合计（None 表示无引擎报时长）
     duration_ms: float | None = None  # 整个 run 的墙钟时长（schedule 整体包住；含并发，不等于各 scope 时长之和）
@@ -516,6 +529,14 @@ class RunResult:
     @property
     def run_id(self) -> str:
         return self.run_meta.run_id
+
+    @property
+    def jobs_without_verdict(self) -> tuple[Job, ...]:
+        """运行定义里有、判定清单里没有的 job，按运行定义的次序（ADR 0054 决策二）：已过停止启动的时刻、或发现 run 已被别处
+        记为已结束而没有启动，不产出判定。run 的文本汇总与报告入口页把它们标为没有执行；机读输出不另列这份清单，它就是
+        run_meta.jobs 与 jobs 的差。"""
+        decided = {jr.scope_id for jr in self.jobs}
+        return tuple(j for j in self.run_meta.jobs if j.scope_id not in decided)
 
 
 # ============================================================================
@@ -610,10 +631,11 @@ class RunState:
     # 挡 stale 实例的 lost-update（把 passed 刷回 running）。仅无状态路径（submit/reconciler）用；同步 run
     # 路径不做投影写，此字段留 None（不参与、不落盘键）。
     high_water_mark: int | None = None
-    # run 级消息（ADR 0037 决策 7）：只在推进器**不经任何 job 就把 run 置为终态**时有值（提交记录的结构版本不是本后端认的、定义违约、
-    # 缺 worker 镜像版本），随 try_finalize 的同一次条件写落库，让 `status` 看得见原因（团队成员未必有 CloudWatch 的读权限）。
-    # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain），这里只给「没有任何 job 能承载」的原因；
-    # 同步 run 不写（失败有自己的退出码与输出）。omit-when-None（同 started_at）。
+    # run 级消息（ADR 0037 决策 7）：只给「没有任何 job 能承载」的原因，随 try_finalize 的同一次条件写落库，让 `status` 看得见原因
+    # （团队成员未必有 CloudWatch 的读权限）。写入方：推进器**不经任何 job 就把 run 置为终态**时（提交记录的结构版本不是本后端认的、
+    # 定义违约、缺 worker 镜像版本）；前台执行按运行期限收尾、有 job 没有启动时（「已超过允许运行的时间」，与 RunResult.message
+    # 同一份，ADR 0054 决策二第 3 条）。
+    # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain）。omit-when-None（同 started_at）。
     message: str | None = None
     # 认领计数（ADR 0054 决策二「认领计数」段）：这个 run 上认领成功的次数。建 run 时为 0，每次 try_claim_job 成功时在同一次原子写里
     # 加一，认领失败与其它写入口都不改它。到期收尾写以「库中计数等于读到的值」为条件，判定自读到运行态以来没有新的认领。

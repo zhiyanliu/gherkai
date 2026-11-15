@@ -294,6 +294,34 @@ def test_cloud_run_passes_stop_bound_from_resolved_stop_timeouts(tmp_path, monke
     assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s
 
 
+def test_cloud_run_injects_the_wall_clock_and_the_record_like_the_local_backend(tmp_path, monkeypatch, capsys):
+    """`--backend cloud` 与本机后端同一接法（ADR 0054 决策二、五）：调度循环的墙钟是组合根的 `compose.now`；有记录时，认领经这次 run
+    的落库服务写进云端的运行状态表，认领时刻随同一次条件写落下；`--backend cloud --no-report` 只注入墙钟、没有记录。"""
+    from gherkai_core.persist import RunPersistence
+    from gherkai_core.serialize import instant_from_iso
+
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [], table_cls=_EndedElsewhereTable)
+    box, inner = {}, _fake_schedule_factory()
+
+    def capturing(run_meta, engines, sink, opts=None, **kw):
+        box["opts"] = opts
+        if opts.record is not None:
+            box["claimed"] = opts.record.claim(run_meta.jobs[0].scope_id, m.compose.now())
+        return inner(run_meta, engines, sink, opts=opts, **kw)
+
+    monkeypatch.setattr(m, "schedule", capturing)
+    cloud = ["--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"]
+    assert m.main(["run", str(_write_feature(tmp_path)), *cloud]) == 0
+    assert box["opts"].wall_clock is m.compose.now and isinstance(box["opts"].record, RunPersistence)
+    assert box["claimed"] is True
+    [table] = made["ddb_tables"]
+    claims = [kw for kw, _refused in table.updates if "claim_count" in kw["ExpressionAttributeNames"].values()]
+    assert len(claims) == 1 and instant_from_iso(claims[0]["ExpressionAttributeValues"][":ca"]).tzinfo is not None
+    box.clear()
+    assert m.main(["run", str(_write_feature(tmp_path)), *cloud, "--no-report"]) == 0
+    assert box["opts"].wall_clock is m.compose.now and box["opts"].record is None and "claimed" not in box
+
+
 # ---- 两层命名（ADR 0033）：prefix 批量推导默认名 + 单资源覆盖 ----
 def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
     # 不给 --ddb-table/--s3-bucket/--events-table/--cluster：全走 prefix 推导（默认 gherkai-）。
@@ -430,8 +458,8 @@ def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
 # ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）→ 退出码 1 ----
 class _EndedElsewhereTable(_FakeTable):
     """假 DDB table：`end_elsewhere` 之后，STATE 上以「run 级为 pending 或 running」为条件的写一律被挡
-    （ConditionalCheckFailed，同真表上 run 级已是终态时的行为），强一致读 STATE 得到别处记下的终态；之前与 `_FakeTable` 相同。
-    `updates` 留下每次 update_item 的入参与是否被挡。"""
+    （ConditionalCheckFailed，同真表上 run 级已是终态时的行为），以「run 级已是终态」为条件的写（job 状态写的第二次写）照常写成，
+    强一致读 STATE 得到别处记下的终态；之前与 `_FakeTable` 相同。`updates` 留下每次 update_item 的入参与是否被挡。"""
 
     def __init__(self, record):
         super().__init__(record)
@@ -447,7 +475,9 @@ class _EndedElsewhereTable(_FakeTable):
 
     def update_item(self, **kw):
         super().update_item(**kw)
-        refused = self.ended is not None and "#st IN (:pending, :running)" in kw.get("ConditionExpression", "")
+        condition = kw.get("ConditionExpression", "")
+        requires_open = "#st IN (:pending, :running)" in condition and "NOT (#st IN (:pending, :running))" not in condition
+        refused = self.ended is not None and requires_open
         self.updates.append((kw, refused))
         if refused:
             raise self.meta.client.exceptions.ConditionalCheckFailedException()

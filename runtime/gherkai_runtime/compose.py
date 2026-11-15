@@ -27,6 +27,7 @@ from pathlib import Path
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
+from gherkai_core.serialize import instant_to_iso
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一取值点** `nova_act_timeout_s()`，注入 worker 的
@@ -116,18 +117,28 @@ def new_run_id() -> str:
     另保证不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id
     依赖这一点（scope_id 是用户文本、可能含 `#`），改格式时不得引入 `#`。
     """
-    ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    ts = now().strftime("%Y%m%dT%H%M%SZ")
     return f"{ts}-{secrets.token_hex(3)}"
 
 
+def now() -> datetime:
+    """**唯一的墙钟读取点**（组合根取时钟、core 不取，ADR 0027）：当前时刻，带时区的 UTC datetime。
+
+    前台 `run` 把它作为调度循环的墙钟注入（`ScheduleOpts.wall_clock`，ADR 0054 决策二）：认领时刻、job 的截止时刻与停止启动的
+    时刻都按它比较；记录里的时间戳由 `now_iso` 从它写出。两者是同一个读取点，调度循环比较用的时刻与落库的时刻不会出自两个时钟。
+    """
+    return datetime.now(timezone.utc)
+
+
 def now_iso() -> str:
-    """**唯一的墙钟读取点**（组合根取时钟、core 不取，ADR 0027）：RunState/RunMeta 的一切时间戳走它。
+    """`now()` 的记录写法：RunState/RunMeta 的一切时间戳走它（写法本身是 `serialize.instant_to_iso`，落库服务写认领时刻也用它，
+    同一份运行态里的时刻只有一种写法）。
 
     三个宿主（cli 前台 run / local per-run 进程 / 推进器 Lambda）全调本函数——曾各写一份 `_now_iso`、
     两种 ISO 格式（`isoformat()` 带微秒+`+00:00` vs `strftime` 的 `…Z`），同一份 RunState 内 started_at 与
     claimed_at/ended_at 格式不同，`status --json` 的机读消费者要兼容两种（ADR 0016「组合根取时钟」）。
     """
-    return datetime.now(timezone.utc).isoformat()
+    return instant_to_iso(now())
 
 
 def parse_iso(ts: str) -> datetime:

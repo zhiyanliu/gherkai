@@ -1,8 +1,9 @@
-"""RunPersistence 应用服务直测（ADR 0030）：脱离 cli/schedule，用 fake store 直接验 core 层不变量。
+"""RunPersistence 应用服务直测（ADR 0030）：用 fake store 或本机 store 直接验 core 层不变量。
 
 四刀审计发现 RunPersistence 此前零直接单测（只经 cli 端到端间接覆盖）。这里把它的核心契约钉到 core 层：
 commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 的无报告路径 + 报告失败隔离 + 收尾写不成时不覆盖、不写报告 /
-begin 初始投影 / aborted 血缘保留。
+begin 初始投影 / aborted 血缘保留 / 认领与认领时刻的保留、重试之前的读、三处发现汇成的停手信号、收尾带 run 级说明（ADR 0054 决策五）。
+末尾两条经 schedule 走完整的前台路径，验运行期限收尾与「发现 run 已被别处结束之后不会写下 passed」。
 """
 from __future__ import annotations
 
@@ -18,13 +19,14 @@ from gherkai_core.model import (
     Votes,
 )
 from gherkai_core.persist import RunPersistence
+from tests.fake_engine import FAR_DEADLINE
 
 
 def _meta(run_id: str, scope_ids: list[str]) -> RunMeta:
     jobs = tuple(
         Job(scope_id=s, scope_name=s, engine="midscene", scenarios=(), timeout_s=300.0) for s in scope_ids
     )
-    return RunMeta(run_id=run_id, created_at="t0", jobs=jobs, deadline_at="2026-01-01T01:00:00+00:00")
+    return RunMeta(run_id=run_id, created_at="t0", jobs=jobs, deadline_at=FAR_DEADLINE)
 
 
 def _jr(scope_id: str, status: Status = Status.PASSED, session_id: str | None = None) -> JobResult:
@@ -32,16 +34,22 @@ def _jr(scope_id: str, status: Status = Status.PASSED, session_id: str | None = 
                      status=status, session_id=session_id)
 
 
-def _recording(*, finalize_lands: bool = True, recorded=None):
+def _recording(*, finalize_lands: bool = True, recorded=None, run_open_at_job_write: bool = True, claim_lands: bool = True):
     """fake RunStore/ResultStore/ReportStore 共享一个有序 calls log：(store, method, scope_or_None)。
 
-    finalize_lands：fake 的 try_finalize 是否写成；写不成时 load_run_state 读回 `recorded`。"""
+    finalize_lands：fake 的 try_finalize 是否写成；写不成时 load_run_state 读回 `recorded`。run_open_at_job_write：update_job_state 报告的
+    「这次写时 run 级是否仍未结束」。claim_lands：try_claim_job 是否写成（参数里的认领时刻记进 calls）。"""
     calls: list = []
 
     class FakeRunStore:
         def preflight(self): calls.append(("run", "preflight", None))
         def create_run(self, meta, initial_state): calls.append(("run", "create_run", initial_state))
-        def update_job_state(self, run_id, js): calls.append(("run", "update_job_state", js))
+        def update_job_state(self, run_id, js):
+            calls.append(("run", "update_job_state", js))
+            return run_open_at_job_write
+        def try_claim_job(self, run_id, scope_id, *, claimed_at=None):
+            calls.append(("run", "try_claim_job", (scope_id, claimed_at)))
+            return claim_lands
         def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
             calls.append(("run", "try_finalize", (status, ended_at, message, expected_claim_count)))
             return finalize_lands
@@ -95,7 +103,7 @@ def test_finalize_without_report_store_returns_none():
     rr = RunResult(run_meta=_meta("r", ["a"]), status=Status.PASSED, jobs=[_jr("a")])
     ret = p.finalize(rr, ended_at="t9")
     assert ret is None
-    assert ("run", "try_finalize", (Status.PASSED, "t9", None, None)) in calls  # 前台收尾不带 run 级消息、不判认领计数
+    assert ("run", "try_finalize", (Status.PASSED, "t9", None, None)) in calls  # RunResult 没有 run 级说明时不写、不判认领计数
     assert not any(m == "write" for (s, m, _) in calls)  # 没 report_store → 不调 write
 
 
@@ -334,3 +342,155 @@ def test_on_event_only_attempted_sessions_write_nothing():
     p = RunPersistence("r", run, result, report)
     p.on_event(SessionOpened(scope_id="a", name="T", origin="attempted"))
     assert [m for (_, m, _) in calls if m == "update_job_state"] == []
+
+
+# ---- ADR 0054 决策五：落库服务向调度循环提供认领、重试之前的读与停手信号；认领时刻在此后的写里保留 ----
+
+from datetime import datetime, timezone  # noqa: E402
+
+import pytest  # noqa: E402
+
+from gherkai_core.serialize import instant_to_iso  # noqa: E402
+
+_CLAIMED = datetime(2030, 1, 1, 8, 0, 0, tzinfo=timezone.utc)
+
+
+def _local(tmp_path, scope_ids=("s",)):
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    run_store, result_store = LocalRunStore(tmp_path), LocalResultStore(tmp_path)
+    p = RunPersistence("r", run_store, result_store)
+    meta = _meta("r", list(scope_ids))
+    p.begin(meta, started_at="t0")
+    return p, run_store, result_store, meta
+
+
+def test_claim_writes_the_claim_time_and_later_job_writes_keep_it(tmp_path):
+    """认领写成：job 置为 running、认领计数加一、认领时刻按记录的写法（UTC 的 ISO 串）落库；此后开始执行与结束两次 job 状态写都带上它
+    （adapter 是整项替换，不带就会被抹掉），代表会话照常保留。"""
+    p, run_store, _, _ = _local(tmp_path)
+    assert p.claim("s", _CLAIMED) is True
+    state = run_store.load_run_state("r")
+    assert (state.status, state.claim_count) == (Status.RUNNING, 1)
+    assert (state.jobs["s"].status, state.jobs["s"].claimed_at) == (Status.RUNNING, instant_to_iso(_CLAIMED))
+    p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
+    js = run_store.load_run_state("r").jobs["s"]
+    assert (js.status, js.session_id, js.claimed_at) == (Status.RUNNING, "sess-1", instant_to_iso(_CLAIMED))
+    p.on_job_complete(_jr("s", Status.PASSED))
+    js = run_store.load_run_state("r").jobs["s"]
+    assert (js.status, js.session_id, js.claimed_at) == (Status.PASSED, "sess-1", instant_to_iso(_CLAIMED))
+    assert p.ended_elsewhere() is False
+
+
+def test_claim_rejected_after_the_run_ended_elsewhere_raises_the_stop_signal(tmp_path):
+    """别处已把 run 记为已结束：认领被拒、job 不变（保持 pending、没有认领时刻），停手信号成立。"""
+    p, run_store, _, _ = _local(tmp_path)
+    assert run_store.try_finalize("r", Status.ERROR, "t5", message="已超过允许运行的时间（已记为已结束）") is True
+    assert p.claim("s", _CLAIMED) is False
+    assert p.ended_elsewhere() is True
+    js = run_store.load_run_state("r").jobs["s"]
+    assert (js.status, js.claimed_at) == (Status.PENDING, None)
+
+
+@pytest.mark.parametrize("write", ["on_event", "on_job_complete"])
+def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_path, write):
+    """写 job 状态时 RunStore 报告 run 级已是终态（只写了 job）：开始执行与结束两处的写都发出停手信号；终态不被改回 running。"""
+    p, run_store, _, _ = _local(tmp_path)
+    assert p.claim("s", _CLAIMED) is True
+    assert run_store.try_finalize("r", Status.ERROR, "t5") is True
+    assert p.ended_elsewhere() is False  # 只有写或读的时候才发现
+    if write == "on_event":
+        p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
+    else:
+        p.on_job_complete(_jr("s", Status.ABORTED))
+    assert p.ended_elsewhere() is True
+    assert run_store.load_run_state("r").status == Status.ERROR
+
+
+def test_still_open_reads_the_run_level_status_and_raises_the_signal_on_terminal(tmp_path):
+    """重试之前的读：run 级未结束为 True、不发信号；已是终态为 False 并发出停手信号。"""
+    p, run_store, _, _ = _local(tmp_path)
+    assert p.still_open() is True and p.ended_elsewhere() is False
+    assert run_store.try_finalize("r", Status.ERROR, "t5") is True
+    assert p.still_open() is False and p.ended_elsewhere() is True
+
+
+def test_still_open_without_a_run_state_is_an_error_not_a_verdict():
+    """读回发现运行态不存在（begin 之后不该发生）：抛 FileNotFoundError，按运行期落库失败处理，不当作「run 已结束」。"""
+    calls, run, result, report = _recording(recorded=None)
+    p = RunPersistence("r", run, result, report)
+    with pytest.raises(FileNotFoundError):
+        p.still_open()
+    assert p.ended_elsewhere() is False
+
+
+def test_finalize_writes_the_run_level_message_without_a_claim_count_condition():
+    """收尾把 RunResult 的 run 级说明随条件写写入，不带认领计数的条件（前台执行是这个 run 唯一的认领方，收尾在线程池排空之后）。"""
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    calls, run, result, report = _recording()
+    p = RunPersistence("r", run, result, report)
+    rr = RunResult(run_meta=_meta("r", ["a", "b"]), status=Status.ERROR, message=RUN_DEADLINE_PASSED_MESSAGE, jobs=[_jr("a")])
+    p.finalize(rr, ended_at="t9")
+    assert ("run", "try_finalize", (Status.ERROR, "t9", RUN_DEADLINE_PASSED_MESSAGE, None)) in calls
+
+
+def test_deadline_finalize_leaves_unstarted_jobs_pending_without_a_verdict(tmp_path):
+    """经 schedule 的前台执行越过停止启动的时刻（真 LocalRunStore）：已执行的 job 落判定明细并保留认领时刻；没有启动的 job 不落判定
+    明细、运行态保持 pending、没有认领时刻；run 级以条件写落定 error 加「已超过允许运行的时间」。写的次序不变：判定明细先于 run 级终态。"""
+    from datetime import timedelta
+
+    from gherkai_core.model import ScenarioDone, ScenarioStarted, ScopeDone
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+    from gherkai_core.schedule import ScheduleOpts, schedule
+    from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+
+    t = {"s": 0.0}
+    base = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    p, run_store, result_store, _ = _local(tmp_path, ("a", "b"))
+    meta = RunMeta(run_id="r", created_at="t0", jobs=_meta("r", ["a", "b"]).jobs,
+                   deadline_at=(base + timedelta(seconds=1000)).isoformat())
+
+    class _Sink(CollectSink):  # a 的内容一完整，墙钟就越过停止启动的时刻（期限减 60 秒）
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            if isinstance(event, ScopeDone):
+                t["s"] = 950.0
+
+    def events(sid):
+        return [ScopeStarted(scope_id=sid, session_id=f"sess-{sid}"), ScenarioStarted(scenario_id=f"{sid}:0"),
+                ScenarioDone(scenario_id=f"{sid}:0", status=Status.PASSED), ScopeDone(scope_id=sid)]
+
+    engine = FakeEngine({"a": events("a"), "b": events("b")})
+    res = schedule(meta, FakeResolver(engine), _Sink(),
+                   opts=ScheduleOpts(max_concurrency=1, wall_clock=lambda: base + timedelta(seconds=t["s"]), record=p),
+                   on_job_complete=p.on_job_complete, on_event=p.on_event)
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    p.finalize(res, ended_at="t9")
+    state = run_store.load_run_state("r")
+    assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, "t9", 1)
+    assert (state.jobs["a"].status, state.jobs["a"].claimed_at) == (Status.PASSED, instant_to_iso(base))
+    assert (state.jobs["b"].status, state.jobs["b"].claimed_at) == (Status.PENDING, None)
+    assert [jr.scope_id for jr in result_store.load_all("r")] == ["a"]
+    assert "b" not in engine.run_count
+
+
+def test_found_ended_but_finalize_lands_writes_aborted_not_passed():
+    """写 job 状态时得知 run 级已结束，收尾照样走条件写；万一它写成了（记录其实没有结束，属于不该发生的不一致），写下的 run 级结果是
+    aborted、不是 passed——哪怕全部 job 都通过了。"""
+    from gherkai_core.model import ScenarioDone, ScenarioStarted, ScopeDone
+    from gherkai_core.schedule import ScheduleOpts, schedule
+    from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+
+    calls, run, result, report = _recording(run_open_at_job_write=False)  # 每次 job 状态写都报告 run 级已结束，收尾写却写成
+    p = RunPersistence("r", run, result, report)
+    meta = _meta("r", ["a"])
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0"),
+                               ScenarioDone(scenario_id="a:0", status=Status.PASSED), ScopeDone(scope_id="a")]})
+    res = schedule(meta, FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1, record=p),
+                   on_job_complete=p.on_job_complete, on_event=p.on_event)
+    assert [jr.status for jr in res.jobs] == [Status.PASSED]
+    p.finalize(res, ended_at="t9")
+    finalized = [args for (_, m, args) in calls if m == "try_finalize"]
+    assert finalized == [(Status.ABORTED, "t9", None, None)]

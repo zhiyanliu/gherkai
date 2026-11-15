@@ -12,13 +12,13 @@ from pathlib import Path
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step, StepArgument
 from gherkai_core.schedule import schedule, ScheduleOpts
-from tests.fake_engine import CollectSink
+from tests.fake_engine import FAR_DEADLINE, CollectSink
 
 _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
 
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
-    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at="2026-01-01T01:00:00+00:00")
+    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at=FAR_DEADLINE)
 
 
 def _engine(mode: str) -> SubprocessEngine:
@@ -681,3 +681,104 @@ def test_positive_grace_stop_kills_deaf_grandchild_when_leader_already_exited(tm
     worker_pid = _grandchild_pid(pid_file)
     handle.stop(1.0)
     assert _wait_dead(worker_pid), "组长退出后孙进程仍应在宽限到期后被结束"
+
+
+# ---- 运行期限与这次 run 的记录（ADR 0054 决策二、五）：真子进程在期限时刻被停、发现 run 已被别处结束时被停 ----
+
+def test_real_worker_is_stopped_at_the_run_deadline_and_the_queued_job_never_starts(tmp_path):
+    """期限落在执行中途：运行中的真 worker 在期限时刻收到停止请求（SIGTERM）退出，判 error、类型为超时、说明是期限那一句；排队中的
+    job 已过停止启动的时刻，从未 spawn、不产出判定；run 级是 error 加「已超过允许运行的时间」。墙钟是系统墙钟加一个偏移，worker
+    进入执行之后把偏移拨快 60 秒，让「执行中途到期」在一两秒内发生，其余（子进程、信号、心跳醒来、事件流结束）都是真的。"""
+    import os
+    from datetime import datetime, timedelta, timezone
+
+    from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    pid_file = tmp_path / "pids"
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "hang", "WORKER_PID_FILE": str(pid_file)})
+    offset = {"s": 0.0}
+
+    def wall() -> datetime:
+        return datetime.now(timezone.utc) + timedelta(seconds=offset["s"])
+
+    class _Sink(CollectSink):
+        def __call__(self, ev):
+            super().__call__(ev)
+            if ev.type == "scenario_started":
+                offset["s"] = 60.0  # worker 已在执行：墙钟拨到离期限约一秒
+
+    start = datetime.now(timezone.utc)
+    meta = RunMeta(run_id="r", created_at="", jobs=(_job("s1"), _job("s2")),
+                   deadline_at=(start + timedelta(seconds=61.5)).isoformat())  # 起 s1 时离停止启动的时刻还有 1.5 秒
+    seen: list = []
+    t0 = time.monotonic()
+    result = schedule(meta, lambda name: engine, _Sink(), on_job_complete=seen.append,
+                      opts=ScheduleOpts(max_concurrency=1, grace_period_s=5.0, heartbeat_interval_s=0.2, wall_clock=wall))
+    elapsed = time.monotonic() - t0
+    assert [jr.scope_id for jr in result.jobs] == ["s1"] and [jr.scope_id for jr in seen] == ["s1"]
+    s1 = result.jobs[0]
+    assert (s1.status, s1.error_type, s1.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    assert (result.status, result.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    pids = _wait_pids(pid_file, 1)
+    assert len(pids) == 1, pids  # s2 的 worker 从未 spawn
+    _assert_process_gone(pids[0])
+    assert elapsed < 10.0, elapsed  # 在期限时刻停下，没有等 s1 自己的 7200 秒预算
+
+
+def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path):
+    """前台执行期间另一个进程把 run 记为已结束（条件写，真本机 store 与文件锁）：发起进程下一次写 job 状态时得知 run 级已结束，停手信号
+    经等待循环读到，两个运行中的真 worker 收到停止请求退出、记 aborted（「这个 run 已被记为已结束」）；收尾写被已有的终态挡下，记录里
+    仍是另一方写的 error 与说明，各 job 的判定照常写入、认领时刻保留。"""
+    import os
+    import subprocess
+
+    import pytest
+
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.errors import RunAlreadyEnded
+    from gherkai_core.persist import RunPersistence
+    from gherkai_core.project import ENDED_ELSEWHERE_ABORT_MESSAGE
+
+    root = tmp_path / "reports"
+    pid_file = tmp_path / "pids"
+    engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "hang", "WORKER_PID_FILE": str(pid_file)})
+    run_store = LocalRunStore(root)
+    persistence = RunPersistence("r", run_store, LocalResultStore(root))
+    meta = _rm([_job("a"), _job("b")], run_id="r")
+    persistence.begin(meta, started_at="t0")
+    started: list[str] = []
+    settle = ("import sys\nfrom gherkai_core.adapters.run_store.local import LocalRunStore\nfrom gherkai_core.model import Status\n"
+              "print(LocalRunStore(sys.argv[1]).try_finalize('r', Status.ERROR, 't5', message='m'))")
+    settled: list[str] = []
+
+    class _Sink(CollectSink):
+        def __call__(self, ev):
+            super().__call__(ev)
+            if isinstance(ev, ScopeStarted):
+                started.append(ev.scope_id)
+                if len(started) == 2:  # 两个 worker 都在执行：另一个进程把 run 记为已结束，随后这条事件的 job 状态写才落下
+                    out = subprocess.run([sys.executable, "-c", settle, str(root)], capture_output=True, text=True, timeout=30)
+                    settled.append(out.stdout.strip())
+
+    t0 = time.monotonic()
+    result = schedule(meta, lambda name: engine, _Sink(), on_job_complete=persistence.on_job_complete, on_event=persistence.on_event,
+                      opts=ScheduleOpts(max_concurrency=2, grace_period_s=5.0, heartbeat_interval_s=0.2, interrupt_poll_s=0.1,
+                                        record=persistence))
+    elapsed = time.monotonic() - t0
+    assert settled == ["True"]
+    assert [(jr.scope_id, jr.status, jr.message) for jr in result.jobs] == [
+        ("a", Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE), ("b", Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)]
+    assert result.status == Status.ABORTED and persistence.ended_elsewhere()
+    with pytest.raises(RunAlreadyEnded):
+        persistence.finalize(result, ended_at="t9")
+    state = run_store.load_run_state("r")
+    assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ERROR, "m", "t5", 2)
+    assert {sid: js.status for sid, js in state.jobs.items()} == {"a": Status.ABORTED, "b": Status.ABORTED}
+    assert all(js.claimed_at is not None for js in state.jobs.values())
+    pids = _wait_pids(pid_file, 2)
+    assert len(pids) == 2, pids
+    for pid in pids:
+        _assert_process_gone(pid)
+    assert elapsed < 15.0, elapsed  # 没有等两个 job 各自的 7200 秒预算

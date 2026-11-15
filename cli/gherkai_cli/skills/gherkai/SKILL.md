@@ -14,7 +14,7 @@ gherkai 把 Gherkin `.feature` 里的每一步交给云端浏览器里的 AI 引
 | 写用例、运行、判定、读证据、收窄后重新运行（最高频） | 本文正文全部 |
 | 选引擎、被测 UI 不是英文、确定性 step 的最小模板与契约、证据字段两引擎为何填得不一样、设备目标（Android / iOS 真机） | `references/engines.md` |
 | 写好确定性 step 的代码：该不该写、等待与判定、失败消息、判定逻辑与注册分离、本地单测、改一条在用的 step | `references/deterministic-steps.md` |
-| 装不上、`doctor` 有红、凭证 / region、ngrok、版本不一致导致退出码 2 | `references/setup-and-diagnosis.md` |
+| 装不上、`doctor` 有红、凭证 / region、ngrok、版本不一致导致退出码 2、超过允许运行的时间 | `references/setup-and-diagnosis.md` |
 | 云端后端：部署交人、variant 镜像、`push-worker`、升级顺序、多环境、清理 | `references/cloud-backend.md` |
 | CI 接 `--json` 与退出码、字段含义、产物落点 | `references/cli-json-contract.md` |
 
@@ -83,7 +83,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 9 失败汇报模板
 
-向人汇报每条没过的用例时用固定小结构，让人一眼能定夺。汇报是给人的：别提「按 skill 第几节」「见 references/…」这类你自己的读物，直接给内容。先认失败落在哪一层：**有某一步判 failed / error** 时用步级模板；**没有任何一步判否、只有 job 级的 error / aborted / skipped**（超时、起 worker 失败、网络、被 `--fail-fast` 或中断信号中止，或中止前根本没启动）时用 job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
+向人汇报每条没过的用例时用固定小结构。汇报是给人的：别提「按 skill 第几节」「见 references/…」这类你自己的读物，直接给内容。先认失败落在哪一层：**有某一步判 failed / error** 时用步级模板；**没有任何一步判否、只有 job 级的 error / aborted / skipped**（超时、起 worker 失败、网络、被 `--fail-fast` 或中断信号中止，或中止前根本没启动）时用 job 级模板。硬套错的那个会逼你编出不存在的步号与模型证据。
 
 步级：
 

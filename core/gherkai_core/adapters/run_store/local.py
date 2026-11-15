@@ -165,21 +165,27 @@ class LocalRunStore:
             _atomic_write_json(run_dir / _META_FILE, run_meta_to_dict(meta))
             self._write_state(path, initial_state, {"detached": True} if self._detached else {})
 
-    def update_job_state(self, run_id: str, job_state: JobState) -> None:
+    def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
 
         写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（ADR 0034 机制三「run 级状态只进不退」
         条③，对拍 DDB 的带条件写与只写 job 的回退）；run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。
-        读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。"""
+        读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。
+        返回 run 级在这次写时是否仍未结束：判据取锁内读到的 run 级，与写在同一次读改写里（ADR 0054 决策五）。"""
+        open_at_write: list[bool] = []
+
         def mutate(state: RunState) -> RunState:
             jobs = dict(state.jobs)
             jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
             status = state.status
-            if job_state.status != Status.PENDING and status in (Status.PENDING, Status.RUNNING):
+            still_open = status in (Status.PENDING, Status.RUNNING)
+            open_at_write.append(still_open)
+            if job_state.status != Status.PENDING and still_open:
                 status = Status.RUNNING
             return replace(state, status=status, jobs=jobs)  # 其余字段原样保留（含 run 级 message 与认领计数）
         if self._locked_rmw(run_id, mutate) is None:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
+        return open_at_write[0]
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
         """读回 definition（RunMeta）；不存在返回 None。"""

@@ -1,6 +1,6 @@
 # 网络/SSL 瞬时错误的鲁棒性：两层重试 + network_error 分类（务实加固，非 enterprise resilience）
 
-> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 在六处作加法扩展并改写了被扩展的原句（多为设备目标；预热失败的传递与会话血缘窗口两处桌面同样适用）：「决定」总纲表（设备 worker 的退避不套用 4 次尝试、设备 job 不进 core 重试）、硬约束（Device Farm 的 Create 不可重放；只读原语的传输层重试例外，出处是 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）、core 层重试门槛（双条件改三条件）、关键不变量（预热失败与设备 worker 不用退出码 80）、会话血缘窗口（桌面与设备都发 `session_opened`，见 0051 决策 4）、worker 层退避；其余条文不变。
+> **Status:** Partially-superseded-by 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 在六处作加法扩展并改写了被扩展的原句（多为设备目标；预热失败的传递与会话血缘窗口两处桌面同样适用）：「决定」总纲表（设备 worker 的退避不套用 4 次尝试、设备 job 不进 core 重试）、硬约束（Device Farm 的 Create 不可重放；只读原语的传输层重试例外，出处是 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）、core 层重试门槛（双条件改三条件）、关键不变量（预热失败与设备 worker 不用退出码 80）、会话血缘窗口（桌面与设备都发 `session_opened`，见 0051 决策 4）、worker 层退避。[0054](./0054-settle-leftover-foreground-runs.md) 决策二、五改写「core 层 job 重试」一节的两处，已原位改写、已实装：过了重试门槛还要过重试之前的检查（已过停止启动的时刻、已发现 run 被别处记为已结束、run 已中止、重新起 worker 之前读一次 run 级状态），命中即保留上一次的判定并注明原因；共享的截止时刻改为认领时算出、以运行期限封顶。其余条文不变。
 
 实测中 worker 建连（开 AgentCore 会话 / SigV4 握手 / CDP 连接）常遇 `ssl.SSLEOFError`（UNEXPECTED_EOF）
 等**网络瞬时故障**——一次抖动就让已产生费用的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。
@@ -111,8 +111,9 @@ worker **按白名单匹配具体瞬时异常类型**,不用宽基类兜底:
   仅 `retry_sleep` 本身可注入以便单测）。
 - 重试门槛**三条件 AND**:`error_type == "network_error"` AND **本次零 `step_done`**（`saw_step=False`,证明会话未起、act 没跑、无副作用）AND **job 目标不是设备**（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2：设备 worker 在获取预算内手写退避、不使用退出码 80，core 重新拉起 worker 会重付取设备开销）。
 - **fail_fast / timeout 优先级高于 network 重试**:它们已主动中止 job,不再重跑。
-- `schedule._Worker.run` 包重试循环,`_run_once` 返回 `(JobResult, is_network, saw_step)`;对 schedule 主循环透明（先跑完所有 attempt 得终值,再交 fail_fast 判定）。
-- `Job.timeout_s` deadline **跨 attempt 不重置**（覆盖所有 attempt 之和,否则重试绕过超时）。预算载体在 definition（`@timeout:N` tag 或 `--default-job-timeout` 定值,见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节）。设了预算的 CI 须满足 `Job.timeout_s > (network_retry+1) × (worker 退避预算 + 单次建连时间)`。
+- **重试之前的检查**（[0054](./0054-settle-leftover-foreground-runs.md) 决策二「上一次尝试已经结束、正在等待重试的 job」一条）：过了门槛还要按序查已过停止启动的时刻（运行期限减 60 秒）、已发现 run 被别处记为已结束、run 已因 fail-fast 或使用方中断而中止，最后在重新起 worker 之前读一次 run 级状态（重试不再认领，第一次起 worker 之前的那次认领只做一次）。命中即不再重试，保留上一次的判定并在说明后注明没有再重试及最先命中的原因，运行态随这个判定落定。不读存储的三项在退避之前也查一次，命中就不必再等退避。
+- `schedule._Worker.run` 包重试循环,`_run_once` 返回 `(JobResult, is_network, saw_step)`，第一次 attempt 没有启动、不产出判定时返回 None;对 schedule 主循环透明（先跑完所有 attempt 得终值,再交 fail_fast 判定）。
+- job 的截止时刻**跨 attempt 不重置**（覆盖所有 attempt 之和,否则重试绕过超时）：认领时由认领时刻加 `Job.timeout_s` 算出、以运行期限封顶（[0054](./0054-settle-leftover-foreground-runs.md) 决策二第 2 条），退避消耗的墙钟计入其中。预算载体在 definition（`@timeout:N` tag 或 `--default-job-timeout` 定值,见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节）。设了预算的 CI 须满足 `Job.timeout_s > (network_retry+1) × (worker 退避预算 + 单次建连时间)`。
 
 ## 现在做 / 留口子
 

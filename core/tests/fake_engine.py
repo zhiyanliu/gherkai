@@ -11,6 +11,10 @@ from typing import Callable, Iterator
 from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.model import Event, Job
 
+# 运行期限规则不介入的用例统一用的期限：远在任何真实时刻与假墙钟之后，缺省的系统墙钟下照常启动每个 job、截止时刻由 job 自己的
+# 预算决定。测期限本身的用例注入假墙钟并给出贴近它的期限（ADR 0054 决策二）。
+FAR_DEADLINE = "2999-01-01T00:00:00+00:00"
+
 
 class FakeWorkerHandle:
     def __init__(self, on_stop: Callable[[], None] | None = None) -> None:

@@ -122,6 +122,25 @@ def test_serialize_round_trip_deep_equal_dict():
     assert d1 == d2
 
 
+def test_run_level_message_key_is_always_present_and_round_trips():
+    """RunResult 的 run 级说明（ADR 0054 决策二）：字典形态顶层恒有 `message` 键，没有说明时为 null；有说明时原文往返，
+    没有判定的 job 不进 `jobs`（它们是 run_meta.jobs 与 jobs 的差）。"""
+    from dataclasses import replace
+    r = _sample_run()
+    d = to_dict(r)
+    assert "message" in d and d["message"] is None
+    assert from_dict(d).message is None
+    ended = replace(r, status=Status.ERROR, message="已超过允许运行的时间", jobs=r.jobs[:1])
+    d2 = to_dict(ended)
+    assert d2["message"] == "已超过允许运行的时间"
+    assert [j["scope_id"] for j in d2["jobs"]] == ["features/wiki.feature:6"]
+    assert len(d2["run_meta"]["jobs"]) == 2
+    back = from_dict(d2)
+    assert (back.status, back.message, [jr.scope_id for jr in back.jobs]) == (Status.ERROR, "已超过允许运行的时间",
+                                                                             ["features/wiki.feature:6"])
+    assert to_dict(back) == d2
+
+
 def test_aggregate_to_dict_normalized_no_def_duplication():
     # 聚合视图 normalize（ADR 0016）：definition 只在 run_meta.jobs[] 出现一份；
     # jobs[] 只背判定、不嵌 job def（防同一批 Job 在一个 dict 里序列化两份的冗余回归）。

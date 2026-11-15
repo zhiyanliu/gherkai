@@ -7,6 +7,7 @@ project_full（EventRecord 加 TaskExited），逐项比较判定、归因、消
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -29,7 +30,7 @@ from gherkai_core.model import (
 from gherkai_core.project import DESKTOP_RELEASE_FAILED_HINT, DEVICE_RELEASE_FAILED_HINT, EventRecord, TaskExited, project, project_full
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_to_dict
-from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+from tests.fake_engine import FAR_DEADLINE, CollectSink, FakeEngine, FakeResolver
 
 SCOPE = "dev"
 
@@ -114,35 +115,50 @@ MATRIX = [
 
 
 class _Clock:
-    """fake clock：事件处理到第 k 次读时钟后跳过 deadline（模拟超时处置）。"""
+    """假时间：单调时钟每读前进 1 ms，墙钟读同一份时间、不前进；sink 收到第 jump_after 条事件后一次性越过截止时刻（模拟超时处置），
+    之后慢走（排空上界不该被假时钟立刻耗尽）。触发点按事件数认，不按时钟被读的次数推算。"""
+
+    T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)
 
     def __init__(self, jump_after: int | None):
         self.t = 0.0
-        self.n = 0
         self.jump_after = jump_after
+        self.seen = 0
 
     def __call__(self) -> float:
-        self.n += 1
-        if self.jump_after is not None and self.n == self.jump_after + 1:
-            self.t += 1000.0  # 一次性越过 deadline，之后慢走（排空上界不该被假时钟立刻耗尽）
-        else:
-            self.t += 0.001
+        self.t += 0.001
         return self.t
+
+    def wall(self) -> datetime:
+        return self.T0 + timedelta(seconds=self.t)
+
+    def sink(self) -> CollectSink:
+        clock = self
+
+        class _Sink(CollectSink):
+            def __call__(self, event) -> None:
+                super().__call__(event)
+                clock.seen += 1
+                if clock.jump_after is not None and clock.seen == clock.jump_after:
+                    clock.t += 1000.0
+
+        return _Sink()
 
 
 def _sync(row: Row):
     job = _job(row.timeout_s, row.device)
     engine = FakeEngine({SCOPE: list(row.events)}, tail_after_stop={SCOPE: list(row.tail)} if row.tail else {},
                         exit_code={SCOPE: row.exit_code} if row.exit_code else {})
-    # 超时：让时钟在处理完全部主流事件后越过 deadline（下一次事件间检查即判超时，之后排空 tail）
-    clock = _Clock(jump_after=(len(row.events) * 2 + 2) if row.timed_out else None)
+    # 超时：处理完全部主流事件后越过截止时刻（下一次事件间检查即判超时，之后排空 tail）
+    clock = _Clock(jump_after=len(row.events) if row.timed_out else None)
     if row.timed_out:
         # 主流事件走完后再追加一条心跳可见的事件，使超时检查有机会发生：用 tail 之前的一条无害事件
         engine.behaviors[SCOPE] = list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]
     if row.crash:
         engine.crash_after = {SCOPE: len(engine.behaviors[SCOPE])}  # 全部事件发完后抛 RuntimeError（退出码未知）
-    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.05, grace_period_s=1.0))
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.sink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.05,
+                                     grace_period_s=1.0))
     return res.jobs[0]
 
 
@@ -152,7 +168,7 @@ def _stateless(row: Row):
     records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
     records.append(EventRecord(scope_id=SCOPE, kind="exit",
                                exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, timed_out=row.timed_out)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), records)
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), records)
     return res.jobs[0]
 
 
@@ -214,6 +230,9 @@ class _LateStopClock:
     def __call__(self) -> float:
         return self.frozen if self.frozen is not None else self.inner()
 
+    def wall(self) -> datetime:
+        return _Clock.T0 + timedelta(seconds=self.frozen) if self.frozen is not None else self.inner.wall()
+
     def on_stop(self, scope_id: str) -> None:  # FakeEngine 的 on_stop 钩子：停止请求时刻已经记下
         if self.frozen is None:
             self.frozen = self.inner.t + self.WINDOW_S
@@ -222,15 +241,15 @@ class _LateStopClock:
 def _sync_late_stop(row: Row, stop_bound_s: float | None):
     """超时行的同步路径，收尾改为停止请求后 20 秒才到（事件序列与 _sync 相同，与 _stateless 同源）。"""
     job = _job(row.timeout_s, row.device)
-    clock = _LateStopClock(jump_after=len(row.events) * 2 + 2)
+    clock = _LateStopClock(jump_after=len(row.events))
     main = list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]
     engine = FakeEngine({SCOPE: main}, tail_after_stop={SCOPE: list(row.tail)},  # 发完事件后活着等停，收尾隔一会儿才到
                         exit_code={SCOPE: row.exit_code} if row.exit_code else {}, tail_delay_s=0.2, on_stop=clock.on_stop)
     if row.crash:
         engine.crash_after = {SCOPE: len(main)}
-    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0,
-                                     stop_bound_s=stop_bound_s))
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.inner.sink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
+                                     grace_period_s=1.0, stop_bound_s=stop_bound_s))
     return res.jobs[0]
 
 
@@ -277,7 +296,7 @@ def test_in_flight_job_state_agrees(tmp_path, events, expected):
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.persist import RunPersistence
 
-    meta = RunMeta(run_id="r", created_at="", jobs=(_job(),), deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id="r", created_at="", jobs=(_job(),), deadline_at=FAR_DEADLINE)
     run_store = LocalRunStore(tmp_path)
     persistence = RunPersistence("r", run_store, LocalResultStore(tmp_path))
     persistence.begin(meta, started_at="t0")
@@ -328,7 +347,7 @@ def test_stateless_run_level_device_metering():
     for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
         records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
         records.append(EventRecord(scope_id=scope, kind="exit", exited=TaskExited(scope_id=scope, exit_code=0)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at="2026-01-01T01:00:00+00:00"), records)
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at=FAR_DEADLINE), records)
     by = {jr.scope_id: jr for jr in res.jobs}
     assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
     assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)
@@ -383,3 +402,71 @@ def test_matrix_covers_expected_verdicts():
     net_lost = by["桌面建连重试耗尽且有会话未确认"]
     assert (net_lost.status, net_lost.error_type) == (Status.ERROR, "release_failed") and "退出码 80" in net_lost.message
     assert DESKTOP_RELEASE_FAILED_HINT in net_lost.message and "未确认停止的会话：s-2" in net_lost.message
+
+
+# 前台路径的两句新说明（ADR 0054 决策二）：被期限截断的 job、发现 run 已被别处结束而被中止的 job，判定都由前台与后台共用的终结函数给出。
+# 同步路径交给终结函数的是哪个截止时刻起作用（timeout_cause）、哪个中止来源（abort_cause），判定原样取它的返回。
+
+class _EndedRecord:
+    """ScheduleOpts.record 的替身：认领都成立、run 级未结束；停手信号在收到第一条事件之后成立（模拟写 job 状态时得知 run 级已结束）。"""
+
+    def __init__(self):
+        import threading
+        self.ended = threading.Event()
+
+    def claim(self, scope_id, claimed_at):
+        return True
+
+    def still_open(self):
+        return True
+
+    def ended_elsewhere(self):
+        return self.ended.is_set()
+
+
+@pytest.mark.parametrize("cause", ["deadline", "ended-elsewhere"])
+def test_sync_path_new_verdicts_come_from_the_shared_finalize(monkeypatch, cause):
+    import gherkai_core.project as project_mod
+    import gherkai_core.schedule as schedule_mod
+    from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE, ENDED_ELSEWHERE_ABORT_MESSAGE
+
+    row = next(r for r in MATRIX if r.name == "scenario 中途超时加停止后 session_closed")
+    calls: list[tuple[dict, object]] = []
+
+    def spy(**kw):
+        term = project_mod.finalize_job(**kw)
+        calls.append((kw, term))
+        return term
+
+    monkeypatch.setattr(schedule_mod, "finalize_job", spy)
+    job = _job(7200.0, row.device)  # 预算远长于期限：deadline 情形起作用的是期限
+    clock = _Clock(jump_after=len(row.events) if cause == "deadline" else None)
+    record = _EndedRecord()
+    sink = clock.sink()
+    if cause == "ended-elsewhere":
+        inner = sink
+
+        class _Sink(CollectSink):
+            def __call__(self, event) -> None:
+                inner(event)
+                record.ended.set()
+
+        sink = _Sink()
+    engine = FakeEngine({SCOPE: list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]},
+                        tail_after_stop={SCOPE: list(row.tail)})
+    meta = RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=(_Clock.T0 + timedelta(seconds=100)).isoformat())
+    res = schedule(meta, FakeResolver(engine), sink,
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
+                                     grace_period_s=1.0, record=record, interrupt_poll_s=0.02))
+    jr = res.jobs[0]
+    kw, term = calls[-1]
+    assert (jr.status, jr.error_type, jr.message) == (term.status, term.error_type, term.message)
+    again = project_mod.finalize_job(**kw)  # 同一组输入直接调用共用的终结函数：同一结论
+    assert (again.status, again.error_type, again.message) == (jr.status, jr.error_type, jr.message)
+    if cause == "deadline":
+        assert (kw["stop_reason"], kw["timeout_cause"]) == ("timeout", "deadline")
+        assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    else:
+        assert (kw["stop_reason"], kw["abort_cause"]) == ("abort", "ended-elsewhere")
+        assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert [s.release for s in jr.sessions] == ["confirmed"]  # 停止后到达的收尾照常归约

@@ -51,7 +51,8 @@
     `stop_timeout_s` 按同一 container 名认、读的是同一个量）/ `cloud_stop_bound_s`（云端同步 run 的停止后等待预算，作
     `ScheduleOpts.stop_bound_s` 传入 schedule：本 run 用到的各引擎 worker container 的 `stopTimeout` 取最大，没设的按 Fargate 平台上限
     `FARGATE_STOP_TIMEOUT_MAX_S`（120 秒）计，再加 ECS 记下 STOPPED 那段滞后的经验余量 `ECS_STOPPED_LAG_MARGIN_S`（20 秒）；core 的排空余量不在其中，
-    本机后端不调用它；ADR 0034 机制二）/ `new_run_id`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟）/
+    本机后端不调用它；ADR 0034 机制二）/ `new_run_id`·`now`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
+    唯一的墙钟读取点，前台 `run` 把它作为调度循环的墙钟注入，`now_iso` 是它的记录写法）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写

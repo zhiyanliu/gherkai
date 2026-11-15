@@ -1,10 +1,12 @@
-"""schedule 模块测试（ADR 0026）：并发归约 + 失败隔离 + fail-fast + 超时 + 优雅停。
+"""schedule 模块测试（ADR 0026）：并发归约 + 失败隔离 + fail-fast + 超时 + 优雅停 + 运行期限与这次 run 的记录（ADR 0054）。
 
-用内存假 Engine（不起子进程）+ fake clock（不真等墙钟），验证 schedule 逻辑。
+用内存假 Engine（不起子进程）+ 假时间（不真等），验证 schedule 逻辑。job 的截止时刻按墙钟比较、排空与时长按单调时钟计，测超时的用例
+用 `_FakeTime` 同时注入两者，在确定的时点推进时间（事件触发、钩子或每读前进），不数时钟被读了几次。
 """
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -28,7 +30,7 @@ from gherkai_core.model import (
     Votes,
 )
 from gherkai_core.schedule import ScheduleOpts, schedule
-from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
+from tests.fake_engine import FAR_DEADLINE, CollectSink, FakeEngine, FakeResolver
 
 
 class _IncClock:
@@ -41,6 +43,53 @@ class _IncClock:
     def __call__(self) -> float:
         self.t += self.step
         return self.t
+
+
+_T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)  # 假墙钟的零点（远早于 FAR_DEADLINE）
+
+
+class _FakeTime:
+    """一份假时间、两个读法：mono() 注入 ScheduleOpts.clock，每读一次前进 step 秒；wall() 注入 ScheduleOpts.wall_clock，读同一份时间、
+    不前进。jump(s) 让时间立即前进 s 秒；n 是单调时钟被读的次数。用 opts(...) 构造同时注入两个时钟的 ScheduleOpts。"""
+
+    def __init__(self, step: float = 0.001) -> None:
+        self.t = 0.0
+        self.step = step
+        self.n = 0
+
+    def mono(self) -> float:
+        self.n += 1
+        self.t += self.step
+        return self.t
+
+    def wall(self) -> datetime:
+        return _T0 + timedelta(seconds=self.t)
+
+    def jump(self, seconds: float) -> None:
+        self.t += seconds
+
+    def at(self, seconds: float) -> str:
+        """假墙钟零点之后 seconds 秒的时刻（记录里的写法），用来给 RunMeta 一个贴近假时间的期限。"""
+        return (_T0 + timedelta(seconds=seconds)).isoformat()
+
+    def opts(self, **kw) -> ScheduleOpts:
+        return ScheduleOpts(clock=self.mono, wall_clock=self.wall, **kw)
+
+
+class _JumpSink(CollectSink):
+    """sink 见到 trigger 类型的事件时让假时间前进 seconds 秒：sink 在 worker 的事件循环里、这条事件的检查之后被调，所以下一次检查
+    （下一条事件或心跳）看到的是越过截止时刻的时间。触发点按事件认，不按时钟被读的次数推算。"""
+
+    def __init__(self, time: _FakeTime, trigger: type, seconds: float = 1000.0):
+        super().__init__()
+        self.time, self.trigger, self.seconds = time, trigger, seconds
+        self.fired = False
+
+    def __call__(self, event) -> None:
+        super().__call__(event)
+        if isinstance(event, self.trigger) and not self.fired:
+            self.fired = True
+            self.time.jump(self.seconds)
 
 
 def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_s: float = 7200.0,
@@ -57,7 +106,7 @@ def _job(scope_id: str, engine: str = "midscene", n_scenarios: int = 1, timeout_
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
     """测试用：把 Job[] 包成 RunMeta（definition）喂 schedule（ADR 0016）。"""
-    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at="2026-01-01T01:00:00+00:00")
+    return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at=FAR_DEADLINE)
 
 
 def _passing_events(scope_id: str, scenario_id: str) -> list:
@@ -180,14 +229,10 @@ def test_no_fail_fast_lets_others_finish():
 
 # ---- 超时（fake clock）：job 运行太久 → stop + error:timeout ----
 def test_timeout_with_fake_clock():
-    # fake clock：每次被读 +10s。job_timeout=5s → 第一次事件间检查就超时
-    ticks = {"t": 0.0}
+    # 假时间：单调时钟每被读一次前进 10 秒（每个事件的时长归约读一次），job 预算 5 秒 → 第一个事件处理完之后的那次事件间检查就超时
+    ft = _FakeTime(step=10.0)
 
-    def fake_clock():
-        ticks["t"] += 10.0
-        return ticks["t"]
-
-    # 慢流：多个事件，每个事件触发一次 clock 推进
+    # 慢流：多个事件，每个事件推进一次时间
     long_events = [ScenarioStarted(scenario_id="slow:0")]
     for i in range(5):
         long_events.append(StepDone(scenario_id="slow:0", step_index=i, status=Status.PASSED, votes=Votes(3, 3)))
@@ -197,10 +242,11 @@ def test_timeout_with_fake_clock():
     engine = FakeEngine({"slow": long_events})
     result = schedule(
         _rm(jobs), FakeResolver(engine), CollectSink(),
-        opts=ScheduleOpts(grace_period_s=2.0, clock=fake_clock),
+        opts=ft.opts(grace_period_s=2.0),
     )
     assert result.status == Status.ERROR
     assert result.jobs[0].error_type == "timeout"
+    assert result.jobs[0].message == "job 超时（预算 5s，已中止）"  # 被自己的预算截断：原有的超时说明
     # 超时后 stop 被调，且传了 grace_period
     assert engine.handles["slow"].stopped
     assert engine.handles["slow"].stop_grace == 2.0
@@ -557,15 +603,16 @@ def test_non_network_crash_not_retried():
 
 
 def test_network_retry_deadline_not_reset_across_attempts():
-    # job timeout 跨 attempt 不重置（ADR 0028）：用 _IncClock 让时间每次读 +1s，
-    # timeout_s=2 → 第一次 attempt 建连崩、重试时 clock 已过 deadline → 记 timeout（不再无限重试）
+    # job timeout 跨 attempt 不重置（ADR 0028）：截止时刻在认领时算出（认领时刻加预算），重试共享。退避消耗的时间计入墙钟
+    # （假 sleep 让假时间前进退避的秒数），timeout_s=2.5 → 第一次退避 2 秒后仍在截止时刻之前、第二次退避 4 秒后已过 → 记 timeout
+    # （不再无限重试）
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
-    clock = _IncClock(1.0)
-    result = schedule(_rm([_job("n", timeout_s=2.0)]), FakeResolver(engine), CollectSink(),
-                      opts=ScheduleOpts(network_retry=5, clock=clock, retry_sleep=_NOSLEEP))
-    # deadline 跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
-    assert result.status == Status.ERROR
-    assert engine.run_count["n"] < 6  # 没用满 5 次重试（被共享 deadline 截断）
+    ft = _FakeTime()
+    result = schedule(_rm([_job("n", timeout_s=2.5)]), FakeResolver(engine), CollectSink(),
+                      opts=ft.opts(network_retry=5, retry_sleep=ft.jump))
+    # 截止时刻跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
+    assert (result.status, result.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert engine.run_count["n"] == 3  # 没用满 5 次重试（被共享的截止时刻截断）
 
 
 # ---- on_job_complete 回调（ADR 0030 实时写接缝）----
@@ -814,14 +861,10 @@ def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
               ScopeStarted(scope_id=scope, session_id="arn:n"), ScenarioStarted(scenario_id="d:0")]
     tail = [SessionClosed(scope_id=scope, name="n", release="confirmed", session_id="arn:n", observed_s=3.0)]
     engine = FakeEngine({scope: events}, tail_after_stop={scope: tail})
-
-    class _Clock:  # 第 7 次读时一次性越过 deadline（事件处理约每条读两次时钟），之后慢走——排空上界（grace 加余量）不该被假时钟立刻耗尽
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1; self.t += 1000.0 if self.n == 7 else 0.001; return self.t
-
-    res = schedule(_rm([_job(scope, timeout_s=5.0, device="android")]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    # 处理完 scenario_started 后时间一次性越过截止时刻，之后慢走——排空上界（grace 加余量）不该被假时间立刻耗尽
+    ft = _FakeTime()
+    res = schedule(_rm([_job(scope, timeout_s=5.0, device="android")]), FakeResolver(engine), _JumpSink(ft, ScenarioStarted),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
     assert [s.release for s in jr.sessions] == ["confirmed"] and (jr.device_observed_s, jr.device_observed_missing) == (3.0, 0)
@@ -836,14 +879,7 @@ def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
     from gherkai_core.errors import WorkerExitError
 
     def run(scope: str, behavior, *, deadline_passed: bool, set_flag: bool):
-        class _Clock:
-            def __init__(self): self.n = 0
-            def __call__(self):  # 前两次读（run 起点、deadline 基点）为 0；之后一律在 deadline 之后、慢走（别把排空上界也耗尽）
-                self.n += 1
-                if not deadline_passed:
-                    return self.n * 0.001
-                return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
-
+        ft = _FakeTime()  # 认领时刻在零点附近；deadline 情形在 worker 起来之后越过截止时刻，之后慢走（别把排空上界也耗尽）
         captured = {}
         orig = sch._Worker.__init__
 
@@ -851,7 +887,9 @@ def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
             orig(self, *a, **kw)
             captured["w"] = self
 
-        def gen(job):  # worker 已 spawn、首事件前把 fail-fast 标志置位（模拟其他 job 恰在此刻失败）
+        def gen(job):  # worker 已 spawn、首事件前：先越过截止时刻，再把 fail-fast 标志置位（模拟其他 job 恰在此刻失败）
+            if deadline_passed:
+                ft.jump(1000.0)
             if set_flag:
                 captured["w"].abort_flag.set()
             return behavior(job)
@@ -859,7 +897,7 @@ def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
         sch._Worker.__init__ = spy
         try:
             res = schedule(_rm([_job(scope, timeout_s=1.0)]), FakeResolver(FakeEngine({scope: gen})), CollectSink(),
-                           opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+                           opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
         finally:
             sch._Worker.__init__ = orig
         return res.jobs[0]
@@ -886,18 +924,14 @@ def test_drain_bound_ends_consumption_when_worker_hangs_after_stop():
     import time
 
     scope = "h"
-
-    class _Clock:  # 第 5 次读（第二条事件的事件间检查）越过 deadline；之后每次读前进 1 秒，排空上界（1 加 5 秒）几次心跳内到点
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1
-            self.t += 1000.0 if self.n == 5 else (1.0 if self.n > 5 else 0.001)
-            return self.t
-
-    engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope})
+    # 处理完 scope_started 后越过截止时刻（第二条事件的事件间检查即落定超时）；停止请求之后单调时钟每读前进 1 秒，排空上界（1 加 5 秒）
+    # 几次心跳内到点
+    ft = _FakeTime()
+    engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope},
+                        on_stop=lambda _s: setattr(ft, "step", 1.0))
     t0 = time.monotonic()
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeStarted),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     assert time.monotonic() - t0 < 3.0  # 不等真实的 6 秒、也不永远等
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and engine.handles[scope].stopped
@@ -907,16 +941,10 @@ def test_deadline_after_scope_done_hurries_exit_but_keeps_verdict():
     """内容完整后不再仲裁（ADR 0034 机制二）：scope_done 已到、worker 收尾期间 deadline 到点 → 只催停（发停止请求），判定仍按内容（PASSED）。"""
     scope = "p"
     events = _passing_events(scope, "p:0")  # 末尾带 scope_done
-    n = len(events)
-
-    class _Clock:  # 事件各读两次时钟；全部处理完后的第一次心跳检查（第 2n+3 次读）越过 deadline
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1; self.t += 1000.0 if self.n == 2 * n + 3 else 0.001; return self.t
-
+    ft = _FakeTime()  # 处理完 scope_done 后越过截止时刻：之后的第一次心跳检查看到它
     engine = FakeEngine({scope: events}, tail_after_stop={scope: []})  # 发完事件后活着等停（模拟释放阶段拖过预算）
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeDone),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.PASSED, None) and engine.handles[scope].stopped
 
@@ -1034,22 +1062,21 @@ def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_fin
     res = schedule(_rm([_job("y")]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
     assert (res.jobs[0].status, res.jobs[0].error_type, res.jobs[0].message) == (Status.ERROR, "engine_error", "起 worker 失败：spawn 失败")
 
-    class _Clock:  # run 起点与 deadline 基点为 0，之后一律在 deadline 之后
-        def __init__(self): self.n = 0
-        def __call__(self): self.n += 1; return 0.0 if self.n <= 2 else 1000.0
+    ft = _FakeTime()
 
-    res = schedule(_rm([_job("z", timeout_s=1.0)]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1, clock=_Clock()))
+    class SlowBoom:  # 起 worker 的调用拖过了截止时刻才失败（认领在调用之前，截止时刻已定）
+        def run_scope(self, job):
+            ft.jump(1000.0)
+            raise OSError("spawn 失败")
+
+    res = schedule(_rm([_job("z", timeout_s=1.0)]), FakeResolver(SlowBoom()), CollectSink(), opts=ft.opts(max_concurrency=1))
     assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
 
 
 def test_stop_all_decides_for_every_worker_before_any_blocking_stop():
     """fail-fast 批量中止：先对全部运行中的 worker 落定停止原因、再发停止请求。真 stop() 会阻塞到宽限到点，边落定边停会让前一个 worker
     消耗的宽限把后一个的仲裁推到它的 deadline 之后、把本该的 ABORTED 记成 timeout。这里让假 stop() 把假时钟推过所有 deadline。"""
-    class _Clock:
-        def __init__(self): self.t = 0.0
-        def __call__(self): self.t += 0.001; return self.t
-
-    clock = _Clock()
+    clock = _FakeTime()
     seen = {"v1": threading.Event(), "v2": threading.Event()}
 
     def crash_gen(job):
@@ -1065,9 +1092,9 @@ def test_stop_all_decides_for_every_worker_before_any_blocking_stop():
     engine = FakeEngine({"v1": [ScopeStarted(scope_id="v1")], "v2": [ScopeStarted(scope_id="v2")], "c": crash_gen},
                         on_event=on_event, tail_after_stop={"v1": [], "v2": []},
                         # 模拟 victim 的 stop() 阻塞消耗的宽限：越过所有 deadline（crash job 自己收尾的 stop 不算，它发生在批量中止之前）
-                        on_stop=lambda scope: scope.startswith("v") and setattr(clock, "t", clock.t + 1000.0))
+                        on_stop=lambda scope: scope.startswith("v") and clock.jump(1000.0))
     res = schedule(_rm([_job("v1", timeout_s=50.0), _job("v2", timeout_s=50.0), _job("c")]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=3, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0, clock=clock))
+                   opts=clock.opts(max_concurrency=3, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0))
     by = {jr.scope_id: (jr.status, jr.error_type) for jr in res.jobs}
     assert by["v1"] == (Status.ABORTED, None) and by["v2"] == (Status.ABORTED, None), by
 
@@ -1076,11 +1103,7 @@ def test_generic_exception_arbitrates_before_blocking_stop():
     """普通异常分支先按首次仲裁落定、再发停止请求：停止前已成立的 abort 不被停止期间越过的 deadline 改成 timeout。"""
     import gherkai_core.schedule as sch
 
-    class _Clock:
-        def __init__(self): self.t = 0.0
-        def __call__(self): self.t += 0.001; return self.t
-
-    clock = _Clock()
+    clock = _FakeTime()
     captured = {}
     orig = sch._Worker.__init__
 
@@ -1092,11 +1115,11 @@ def test_generic_exception_arbitrates_before_blocking_stop():
         captured["w"].abort_flag.set()
         raise RuntimeError("解析失败")
 
-    engine = FakeEngine({"x": gen}, on_stop=lambda scope: setattr(clock, "t", clock.t + 1000.0))
+    engine = FakeEngine({"x": gen}, on_stop=lambda scope: clock.jump(1000.0))
     sch._Worker.__init__ = spy
     try:
         res = schedule(_rm([_job("x", timeout_s=50.0)]), FakeResolver(engine), CollectSink(),
-                       opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0, clock=clock))
+                       opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
     jr = res.jobs[0]
@@ -1107,18 +1130,11 @@ def test_hang_after_hurry_exit_is_timeout_like_stateless_path():
     """内容完整后催停、worker 却卡死不退出：排空上界到点按「退出码未知」回判——deadline 已过记 timeout，与无状态路径的 timed_out 记录一致。"""
     scope = "p"
     events = _passing_events(scope, "p:0")
-    n = len(events)
-
-    class _Clock:
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1
-            self.t += 1000.0 if self.n == 2 * n + 3 else (1.0 if self.n > 2 * n + 3 else 0.001)
-            return self.t
-
-    engine = FakeEngine({scope: events}, hang_after_stop={scope})
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+    # 处理完 scope_done 后越过截止时刻（下一次心跳检查即催收尾）；停止请求之后单调时钟每读前进 1 秒，排空上界几次心跳内到点
+    ft = _FakeTime()
+    engine = FakeEngine({scope: events}, hang_after_stop={scope}, on_stop=lambda _s: setattr(ft, "step", 1.0))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeDone),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
 
 
@@ -1149,26 +1165,20 @@ def test_drain_bound_counts_from_stop_request_not_after_blocking_stop():
     """排空上界从停止请求时刻起算：真 stop() 阻塞消耗的宽限不再额外加进上界。假 stop() 把时钟推进很多，正确实现随后第一次心跳检查就到点；
     若从 stop() 返回后起算，还要再等满宽限加余量（多读六次以上时钟）。"""
     scope = "h"
-
-    class _Clock:
-        def __init__(self): self.n = 0; self.t = 0.0; self.n_at_stop = None
-        def __call__(self):
-            self.n += 1
-            self.t += 1000.0 if self.n == 5 else (1.0 if self.n > 5 else 0.001)
-            return self.t
-
-    clock = _Clock()
+    ft = _FakeTime()  # 处理完 scope_started 后越过截止时刻；停止请求之后单调时钟每读前进 1 秒
+    n_at_stop: list[int] = []
 
     def on_stop(scope_id):
-        clock.t += 100.0  # 模拟 stop() 阻塞消耗的时间（远超宽限加余量）
-        if clock.n_at_stop is None:
-            clock.n_at_stop = clock.n
+        ft.jump(100.0)  # 模拟 stop() 阻塞消耗的时间（远超宽限加余量）
+        ft.step = 1.0
+        if not n_at_stop:
+            n_at_stop.append(ft.n)
 
     engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope}, on_stop=on_stop)
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.05, grace_period_s=1.0))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeStarted),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
-    assert clock.n - clock.n_at_stop <= 4, clock.n - clock.n_at_stop
+    assert ft.n - n_at_stop[0] <= 4, ft.n - n_at_stop[0]
 
 
 def test_drain_bound_applies_before_deadline_under_fail_fast():
@@ -1206,41 +1216,26 @@ def test_drain_bound_applies_before_deadline_under_fail_fast():
 
 # ---- 停止后等待预算 stop_bound_s（ADR 0034 机制二「停止后继续有界消费完整事件流」）：排空上界取首次停止请求时刻加等待预算、再加余量 ----
 
-class _StopWindowClock:
-    """停止前每次读前进 1 ms；sink 见到触发事件后，下一次读一次性越过 deadline；发出停止请求后时钟停在请求时刻加 window 秒。
+class _StopWindowTime(_FakeTime):
+    """停止前每次读单调时钟前进 1 ms；发出停止请求后时间停在请求时刻加 window 秒（两个读法都停在那里）。越过截止时刻由 `_JumpSink` 触发。
 
     停在一个固定时刻，把「停止后的收尾在请求后 window 秒到达」写成确定的时序：之后每次排空检查读到的都是这个时刻，
     收尾落在排空上界之内还是之外只由取法决定，与心跳次数无关。"""
 
     def __init__(self, window: float):
-        self.t = 0.0
+        super().__init__()
         self.window = window
-        self.jump = False
         self.frozen: float | None = None
 
-    def __call__(self) -> float:
-        if self.frozen is not None:
-            return self.frozen
-        self.t += 1000.0 if self.jump else 0.001
-        self.jump = False
-        return self.t
+    def mono(self) -> float:
+        return self.frozen if self.frozen is not None else super().mono()
+
+    def wall(self) -> datetime:
+        return _T0 + timedelta(seconds=self.frozen) if self.frozen is not None else super().wall()
 
     def on_stop(self, scope_id: str) -> None:  # FakeEngine 的 on_stop 钩子：handle.stop() 被调时，停止请求时刻已经记下
         if self.frozen is None:
             self.frozen = self.t + self.window
-
-
-class _TriggerSink(CollectSink):
-    """收到 trigger 类型的事件时让时钟在下一次读越过 deadline（触发点按事件认，不按读时钟的次数推算）。"""
-
-    def __init__(self, clock: _StopWindowClock, trigger: type):
-        super().__init__()
-        self.clock, self.trigger = clock, trigger
-
-    def __call__(self, event) -> None:
-        super().__call__(event)
-        if isinstance(event, self.trigger):
-            self.clock.jump = True
 
 
 @pytest.mark.parametrize("grace, stop_bound, eof_in_bound", [
@@ -1253,12 +1248,11 @@ def test_stop_bound_sets_drain_window_for_eof_after_hurry_exit(grace, stop_bound
     """内容完整后 deadline 才到（催收尾）、EOF 在停止请求后 20 秒到达：在排空上界之内即干净退出、判 PASSED；在上界之外则退出信息
     未知、内容完整被回落，按首次仲裁判 ERROR timeout——云端只取 grace 时同一组事实会与无状态路径的 PASSED 不一致。"""
     scope = "p"
-    clock = _StopWindowClock(window=20.0)
+    clock = _StopWindowTime(window=20.0)
     engine = FakeEngine({scope: _passing_events(scope, "p:0")}, tail_after_stop={scope: []}, tail_delay_s=0.2,
                         on_stop=clock.on_stop)  # 发完事件后活着等停，收到停止请求后过一会儿才 EOF
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScopeDone),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=grace,
-                                     stop_bound_s=stop_bound))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScopeDone),
+                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace, stop_bound_s=stop_bound))
     jr = res.jobs[0]
     assert engine.handles[scope].stopped and clock.frozen is not None  # 确实走了催收尾、时钟停在请求后 20 秒
     expected = (Status.PASSED, None) if eof_in_bound else (Status.ERROR, "timeout")
@@ -1275,14 +1269,13 @@ def test_stop_bound_lets_late_session_closed_be_reduced(stop_bound, closed_in_bo
     from gherkai_core.model import SessionClosed, SessionOpened
 
     scope = "n"
-    clock = _StopWindowClock(window=20.0)
+    clock = _StopWindowTime(window=20.0)
     events = [SessionOpened(scope_id=scope, name="s-1", origin="created", session_id="s-1"),
               ScopeStarted(scope_id=scope, session_id="s-1"), ScenarioStarted(scenario_id="n:0")]
     tail = [SessionClosed(scope_id=scope, name="s-1", release="confirmed", session_id="s-1")]
     engine = FakeEngine({scope: events}, tail_after_stop={scope: tail}, tail_delay_s=0.2, on_stop=clock.on_stop)
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScenarioStarted),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0,
-                                     stop_bound_s=stop_bound))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScenarioStarted),
+                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, stop_bound_s=stop_bound))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
     if closed_in_bound:
@@ -1322,25 +1315,21 @@ def test_re_arbitration_after_worker_exit_sends_no_stop(monkeypatch, trigger, ex
 
     monkeypatch.setattr(sch._Worker, "__init__", spy)
 
-    def gen(job):  # worker 已 spawn、首事件之前：abort 情形在此置中止标志（模拟其他 job 恰在此刻失败），随后零事件即退出
+    ft = _FakeTime()  # abort 情形慢走、不越过截止时刻
+
+    def gen(job):  # worker 已 spawn、首事件之前：deadline 情形越过截止时刻，abort 情形置中止标志（模拟其他 job 恰在此刻失败），随后零事件即退出
+        if trigger == "deadline":
+            ft.jump(1000.0)
         if trigger == "abort":
             captured["w"].abort_flag.set()
         if exit_kind == "exit_code":
             raise WorkerExitError(80, "fake 建连失败")
         return iter([])
 
-    class _Clock:  # deadline 情形：前两次读（run 起点、deadline 基点）为 0，之后一律在 deadline 之后；abort 情形慢走、不越过 deadline
-        def __init__(self): self.n = 0
-        def __call__(self):
-            self.n += 1
-            if trigger == "abort":
-                return self.n * 0.001
-            return 0.0 if self.n <= 2 else 1000.0 + self.n * 0.001
-
     engine = FakeEngine({"s": gen})
     # 关掉心跳：零事件的事件流直接结束，循环里的事件间检查一次也不执行，停止原因只能由终结前的回判落定
     res = schedule(_rm([_job("s", timeout_s=1.0)]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0, grace_period_s=1.0))
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0, grace_period_s=1.0))
     jr = res.jobs[0]
     expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
     assert (jr.status, jr.error_type) == expected
@@ -1350,11 +1339,11 @@ def test_re_arbitration_after_worker_exit_sends_no_stop(monkeypatch, trigger, ex
 def test_exit_code_after_stop_request_is_not_followed_by_another_stop():
     """事件循环里作出停止决定后，worker 收尾并以非零退出码退出（已拿到退出码）：终结处不补发，停止请求只有作出决定时的那一次。"""
     scope = "e"
-    clock = _StopWindowClock(window=0.5)  # 收尾在请求后 0.5 秒结束，落在排空上界（1 加 5 秒）之内
+    clock = _StopWindowTime(window=0.5)  # 收尾在请求后 0.5 秒结束，落在排空上界（1 加 5 秒）之内
     engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="e:0")]},
                         tail_after_stop={scope: []}, exit_code={scope: 1}, on_stop=clock.on_stop)
-    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _TriggerSink(clock, ScenarioStarted),
-                   opts=ScheduleOpts(max_concurrency=1, clock=clock, heartbeat_interval_s=0.02, grace_period_s=1.0))
+    res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScenarioStarted),
+                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
     assert len(engine.handles[scope].stop_graces) == 1
@@ -1370,7 +1359,6 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
 
     scope = "p"
     events = _passing_events(scope, "p:0")
-    n = len(events)
     captured = {}
     orig = sch._Worker.__init__
 
@@ -1378,13 +1366,7 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
         orig(self, *a, **kw)
         captured["w"] = self
 
-    class _Clock:  # deadline 触发：全部事件处理完后的下一次读越过 deadline
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1
-            self.t += 1000.0 if (trigger == "deadline" and self.n == 2 * n + 3) else 0.001
-            return self.t
-
+    ft = _FakeTime()
     done = threading.Event()
 
     class _Sink(CollectSink):
@@ -1396,6 +1378,8 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
     def gen(job):
         yield from events
         done.wait(5)
+        if trigger == "deadline":
+            ft.jump(1000.0)  # 全部事件处理完之后越过截止时刻
         if trigger == "abort":
             captured["w"].abort_flag.set()
         if exit_kind == "sigkill":
@@ -1407,7 +1391,7 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
     sch._Worker.__init__ = spy
     try:
         res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(FakeEngine({scope: gen})), _Sink(),
-                       opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+                       opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
     jr = res.jobs[0]
@@ -1426,7 +1410,6 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
     scope = "d"
     events = [SessionOpened(scope_id=scope, name="n", origin="created", session_id="arn:n"),
               ScopeDone(scope_id=scope, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")]
-    n = len(events)
     captured = {}
     orig = sch._Worker.__init__
 
@@ -1434,13 +1417,7 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
         orig(self, *a, **kw)
         captured["w"] = self
 
-    class _Clock:
-        def __init__(self): self.n = 0; self.t = 0.0
-        def __call__(self):
-            self.n += 1
-            self.t += 1000.0 if (trigger == "deadline" and self.n == 2 * n + 3) else 0.001
-            return self.t
-
+    ft = _FakeTime()
     done = threading.Event()
 
     class _Sink(CollectSink):
@@ -1452,6 +1429,8 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
     def gen(job):
         yield from events
         done.wait(5)
+        if trigger == "deadline":
+            ft.jump(1000.0)  # 全部事件处理完之后越过截止时刻
         if trigger == "abort":
             captured["w"].abort_flag.set()
         raise WorkerExitError(1, "x")
@@ -1459,7 +1438,7 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
     sch._Worker.__init__ = spy
     try:
         res = schedule(_rm([_job(scope, n_scenarios=2, timeout_s=5.0)]), FakeResolver(FakeEngine({scope: gen})), _Sink(),
-                       opts=ScheduleOpts(max_concurrency=1, clock=_Clock(), heartbeat_interval_s=0.05, grace_period_s=1.0))
+                       opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
     jr = res.jobs[0]
@@ -1693,9 +1672,9 @@ def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
 
 
 def test_user_interrupt_with_passed_and_aborted_marks_run_aborted():
-    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由 schedule 的中断例外记 aborted
+    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由裁决函数的中断例外记 aborted
     （ADR 0031 决定三的例外）。这条例外只在同步路径上有：无状态路径不作中止决定，推不出 job 级 aborted。"""
-    from gherkai_core.schedule import _aggregate
+    from gherkai_core.project import _aggregate
 
     a_started, b_done = threading.Event(), threading.Event()
 
@@ -1859,3 +1838,855 @@ def test_interrupt_after_all_jobs_done_but_unconsumed_is_not_acted_on():
                       on_job_complete=on_job_complete)
     assert result.status == Status.PASSED
     assert levels == []
+
+
+# ---- 运行期限与这次 run 的记录（ADR 0054 决策二、五）：墙钟截止时刻、起 worker 与重试之前的检查次序、第三种中止来源、run 级裁决 ----
+
+from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE, ENDED_ELSEWHERE_ABORT_MESSAGE  # noqa: E402
+from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE  # noqa: E402
+
+
+class _FakeRecord:
+    """注入 ScheduleOpts.record 的假记录（落库服务的替身）：claim 对 reject 里的 scope 拒绝并发出停手信号，记下每次认领与认领时刻；
+    still_open 返回 open_ 并计数，读到「已结束」同样发出停手信号；ended 是停手信号本身，测试也可以直接置位它（模拟写 job 状态时得知
+    run 级已结束）。claim_error / read_error 给出时对应调用抛出它（模拟存储不可达）。signals=False 时认领被拒与读到「已结束」不汇进
+    停手信号，用来确认调度循环自己记下这两处发现、不依赖记录一侧。"""
+
+    def __init__(self, *, reject=(), open_: bool = True, claim_error: BaseException | None = None,
+                 read_error: BaseException | None = None, signals: bool = True):
+        self.claims: list[tuple[str, datetime]] = []
+        self.reads = 0
+        self.reject = set(reject)
+        self.open_ = open_
+        self.claim_error = claim_error
+        self.read_error = read_error
+        self.signals = signals
+        self.ended = threading.Event()
+
+    def claim(self, scope_id: str, claimed_at: datetime) -> bool:
+        if self.claim_error is not None and scope_id in self.reject:
+            raise self.claim_error
+        self.claims.append((scope_id, claimed_at))
+        if scope_id in self.reject:
+            if self.signals:
+                self.ended.set()
+            return False
+        return True
+
+    def still_open(self) -> bool:
+        self.reads += 1
+        if self.read_error is not None:
+            raise self.read_error
+        if not self.open_ and self.signals:
+            self.ended.set()
+        return self.open_
+
+    def ended_elsewhere(self) -> bool:
+        return self.ended.is_set()
+
+
+def _rm_at(jobs: list[Job], deadline_at: str) -> RunMeta:
+    return RunMeta(run_id="test-run", created_at="", jobs=tuple(jobs), deadline_at=deadline_at)
+
+
+def test_job_budget_is_judged_on_the_wall_clock_not_the_monotonic_one():
+    """job 的截止时刻按墙钟比较（ADR 0054 决策二第 2 条）：单调时钟一动不动（发起机器休眠时单调时钟不走），墙钟越过认领时刻加预算，
+    job 照样按自己的预算超时、说明是原有的预算那一句。"""
+    ft = _FakeTime(step=0.0)
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]}, tail_after_stop={"a": []})
+    res = schedule(_rm([_job("a", timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScenarioStarted, seconds=6.0),
+                   opts=ScheduleOpts(clock=lambda: 0.0, wall_clock=ft.wall, max_concurrency=1, heartbeat_interval_s=0.02,
+                                     grace_period_s=1.0))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", "job 超时（预算 5s，已中止）")
+
+
+@pytest.mark.parametrize("deadline_s, budget_s, expected", [
+    (99.5, 100.0, DEADLINE_TIMEOUT_MESSAGE),  # 期限早于认领时刻加预算：被期限截断
+    (100.0, 100.0, "job 超时（预算 100s，已中止）"),  # 两者相等：算 job 自己的预算到点
+    (100.5, 100.0, "job 超时（预算 100s，已中止）"),
+])
+def test_cutoff_is_the_earlier_of_budget_and_run_deadline(deadline_s, budget_s, expected):
+    """截止时刻取认领时刻加预算与运行期限中较早的一个，相等时算预算（ADR 0054 决策二第 2 条）；被期限截断的 job 是 error、类型为超时，
+    说明是期限那一句。全部 job 都有判定时 run 级照常聚合、不带到期说明（第 4 条）。"""
+    ft = _FakeTime(step=0.0)  # 认领时刻恰为假墙钟零点
+    record = _FakeRecord()
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]}, tail_after_stop={"a": []})
+    res = schedule(_rm_at([_job("a", timeout_s=budget_s)], ft.at(deadline_s)), FakeResolver(engine), _JumpSink(ft, ScenarioStarted),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record))
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", expected)
+    assert record.claims == [("a", _T0)]  # 认领时刻就是起 worker 之前读到的墙钟
+    assert (res.status, res.message) == (Status.ERROR, None)
+
+
+@pytest.mark.parametrize("deadline_s, starts", [(60.0, True), (59.999, False)])
+def test_stop_start_boundary_is_strictly_after_deadline_minus_lead(deadline_s, starts):
+    """停止启动的时刻是期限减 60 秒，「已过」取严格晚于：恰在那一刻仍启动，晚一点即不启动。"""
+    ft = _FakeTime(step=0.0)
+    engine = FakeEngine({"a": _passing_events("a", "a:0")})
+    res = schedule(_rm_at([_job("a")], ft.at(deadline_s)), FakeResolver(engine), CollectSink(), opts=ft.opts(max_concurrency=1))
+    assert ("a" in engine.run_count) is starts
+    assert [jr.status for jr in res.jobs] == ([Status.PASSED] if starts else [])
+
+
+def test_past_stop_start_starts_nothing_and_the_run_is_an_error_with_a_run_level_message():
+    """一开始就已过停止启动的时刻：不认领、不起 worker、不产出判定（不回调 on_job_complete），RunResult 的 job 清单为空；run 级是 error
+    加「已超过允许运行的时间」（ADR 0054 决策二第 1、3 条）。设备 job 全部没有启动时设备计量两项为 0、不省键。"""
+    ft = _FakeTime()
+    record = _FakeRecord()
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "d": _passing_events("d", "d:0")})
+    seen: list = []
+    res = schedule(_rm_at([_job("a"), _job("d", device="android")], ft.at(30.0)), FakeResolver(engine), CollectSink(),
+                   opts=ft.opts(max_concurrency=2, record=record), on_job_complete=seen.append)
+    assert engine.run_count == {} and record.claims == [] and seen == [] and res.jobs == []
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
+
+
+def test_queued_job_after_stop_start_has_no_verdict_and_the_finished_one_keeps_its_own():
+    """执行中途越过停止启动的时刻：已在执行、内容完整的 job 保留它的判定；排队中的 job 不启动、不产出判定，run 级按到期收尾。"""
+    ft = _FakeTime()
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
+    seen: list = []
+    res = schedule(_rm_at([_job("a"), _job("b")], ft.at(1000.0)), FakeResolver(engine), _JumpSink(ft, ScopeDone, seconds=950.0),
+                   opts=ft.opts(max_concurrency=1), on_job_complete=seen.append)
+    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("a", Status.PASSED)]
+    assert [jr.scope_id for jr in seen] == ["a"] and "b" not in engine.run_count
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+
+
+def test_running_job_is_stopped_at_the_run_deadline_and_queued_job_stays_without_verdict():
+    """到了运行期限，执行中的 job 的截止时刻已到（以期限封顶），走超时流程：error、类型为超时、说明是期限那一句；之后排队中的 job
+    已过停止启动的时刻，不启动。开着 fail-fast 也一样：被期限截断的 job 触发中止，但排队中的 job 不因此改记 skipped。"""
+    ft = _FakeTime()
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")], "b": _passing_events("b", "b:0")},
+                        tail_after_stop={"a": []})
+    seen: list = []
+    res = schedule(_rm_at([_job("a"), _job("b")], ft.at(1000.0)), FakeResolver(engine), _JumpSink(ft, ScenarioStarted, seconds=1001.0),
+                   opts=ft.opts(max_concurrency=1, fail_fast=True, heartbeat_interval_s=0.02, grace_period_s=1.0),
+                   on_job_complete=seen.append)
+    a = res.jobs[0]
+    assert [jr.scope_id for jr in res.jobs] == ["a"] and [jr.scope_id for jr in seen] == ["a"]
+    assert (a.status, a.error_type, a.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    assert engine.handles["a"].stopped and "b" not in engine.run_count
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+
+
+def test_stop_start_once_observed_is_kept_after_a_clock_rollback():
+    """停止启动一经成立不撤销：墙钟先返回已过停止启动的时刻，之后回拨到更早的时刻。看到已过的那次检查拦下 b；回拨之后排队的 c 也不
+    启动；收尾按记下的事实判断、不重读墙钟：run 级是 error 加「已超过允许运行的时间」，没有启动的 job 不在判定清单里。"""
+    t = {"s": 0.0}
+
+    def wall() -> datetime:
+        now = _T0 + timedelta(seconds=t["s"])
+        if t["s"] >= 950.0:
+            t["s"] = 0.0  # 返回已过停止启动的时刻的只有这一次读，之后墙钟回拨到期限之前很远
+        return now
+
+    class _Sink(CollectSink):  # a 的内容一完整，墙钟就越过停止启动的时刻（期限减 60 秒）
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            if isinstance(event, ScopeDone):
+                t["s"] = 950.0
+
+    engine = FakeEngine({sid: _passing_events(sid, f"{sid}:0") for sid in ("a", "b", "c")})
+    res = schedule(_rm_at([_job("a"), _job("b"), _job("c")], (_T0 + timedelta(seconds=1000)).isoformat()), FakeResolver(engine),
+                   _Sink(), opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, wall_clock=wall))
+    assert t["s"] == 0.0  # 已过的时刻确实被读到过、墙钟随后回拨
+    assert [jr.scope_id for jr in res.jobs] == ["a"] and set(engine.run_count) == {"a"}
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+
+
+def test_job_cutoff_once_observed_is_kept_after_a_clock_rollback():
+    """job 的截止时刻一经观察到已过就不撤销：事件间检查读到已过本 job 的截止时刻（认领时刻加预算 10 秒），随后的首次仲裁读到回拨
+    之后的墙钟。job 仍记超时、说明是预算那一句，不落成中止：没有开 fail-fast，也没有任何中止来源。"""
+    state = {"armed": False, "fired": False}
+
+    def wall() -> datetime:
+        if state["armed"] and not state["fired"]:
+            state["fired"] = True
+            return _T0 + timedelta(seconds=20)  # 只有这一次读越过截止时刻，之后墙钟回拨到认领时刻
+        return _T0
+
+    class _Sink(CollectSink):  # 第一个事件处理完之后，下一次事件间检查读墙钟时越过截止时刻
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            if isinstance(event, ScopeStarted):
+                state["armed"] = True
+
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0"),
+                               ScenarioDone(scenario_id="a:0", status=Status.PASSED), ScopeDone(scope_id="a")]},
+                        tail_after_stop={"a": []})
+    res = schedule(_rm([_job("a", timeout_s=10.0)]), FakeResolver(engine), _Sink(),
+                   opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, wall_clock=wall, grace_period_s=1.0))
+    assert state["fired"]  # 已过的时刻确实被读到过、墙钟随后回拨
+    jr = res.jobs[0]
+    assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", "job 超时（预算 10s，已中止）")
+    assert res.status == Status.ERROR
+
+
+def test_claim_rejected_means_ended_elsewhere_and_later_jobs_are_not_claimed():
+    """认领被拒即发现 run 已被别处记为已结束：这个 job 不启动，之后的 job 在认领之前就被「已发现」那一项拦下，不再认领；都不产出判定，
+    run 级是 aborted、没有说明。"""
+    record = _FakeRecord(reject={"a"})
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
+    seen: list = []
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, record=record), on_job_complete=seen.append)
+    assert [sid for sid, _ in record.claims] == ["a"] and engine.run_count == {} and seen == [] and res.jobs == []
+    assert (res.status, res.message) == (Status.ABORTED, None)
+
+
+def test_scheduler_keeps_its_own_discoveries_without_the_record_signal():
+    """认领被拒、重试之前读到 run 级终态是调度循环自己看到的发现，当场记下、不等记录一侧把它们汇进停手信号：认领被拒之后的 job 不再
+    认领、不启动；读到终态的重试注明 run 已被记为已结束；两种情形 run 级都是 aborted。"""
+    record = _FakeRecord(reject={"a"}, signals=False)
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, record=record))
+    assert [sid for sid, _ in record.claims] == ["a"] and res.jobs == [] and res.status == Status.ABORTED
+    assert not record.ended.is_set()  # 记录一侧确实没有给信号
+
+    record = _FakeRecord(open_=False, signals=False)
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0]})
+    res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=_NOSLEEP, record=record))
+    assert record.reads == 1 and res.jobs[0].message.endswith("；这个 run 已被记为已结束：未再重试")
+    assert res.status == Status.ABORTED
+
+
+def test_no_claim_when_the_run_is_already_aborted():
+    """认领排在各项检查之后、紧贴起 worker：run 已因 fail-fast 中止时排队的 job 记 SKIPPED、不认领（已过停止启动的时刻也不认领，见上面
+    「一开始就已过停止启动的时刻」那一条）。"""
+    record = _FakeRecord()
+    engine = FakeEngine({"crash": _passing_events("crash", "crash:0"), "q": _passing_events("q", "q:0")}, crash_after={"crash": 0})
+    res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record))
+    assert [sid for sid, _ in record.claims] == ["crash"]
+    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR), ("q", Status.SKIPPED)]
+
+
+def test_ended_elsewhere_check_precedes_abort_for_queued_jobs():
+    """排队中的 job 起 worker 之前，「已发现 run 被别处结束」排在「run 已中止」之前：两者都成立时它不启动、不产出判定，不记 skipped。
+    这里 crash job 崩溃之前（同一个 worker 线程里）停手信号已成立，随后它的 error 触发 fail-fast。"""
+    record = _FakeRecord()
+
+    def crash_gen(job):
+        record.ended.set()  # 写 job 状态时得知 run 级已结束
+        raise RuntimeError("崩")
+        yield  # 使它成为生成器函数：第一次取事件时才执行上面两行
+
+    engine = FakeEngine({"crash": crash_gen, "q": _passing_events("q", "q:0")})
+    res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record, interrupt_poll_s=5.0))
+    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR)]
+    assert "q" not in engine.run_count and [sid for sid, _ in record.claims] == ["crash"]
+    assert res.status == Status.ABORTED  # 发现 run 已被别处结束：不按仅有的判定聚合
+
+
+def test_queued_job_is_not_skipped_when_the_abort_source_is_ended_elsewhere(monkeypatch):
+    """读停手信号得到「未发现」之后、看中止标志之前，另一个线程以 ended-elsewhere 登记了中止标志：run 是被别处结束、不是因 fail-fast
+    中止，排队中的 job 按「已发现 run 被别处结束」处理，不认领、不启动、不产出判定，不记成 skipped。这里直接构造这个状态：中止标志已以
+    ended-elsewhere 置位，停手信号的读取返回 False。"""
+    import gherkai_core.schedule as sch
+
+    monkeypatch.setattr(sch._EndedElsewhere, "seen", lambda self: False)
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        self.abort_flag.set("ended-elsewhere")
+
+    monkeypatch.setattr(sch._Worker, "__init__", spy)
+    record = _FakeRecord()
+    engine = FakeEngine({"q": _passing_events("q", "q:0")})
+    seen: list = []
+    res = schedule(_rm([_job("q")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, record=record), on_job_complete=seen.append)
+    assert res.jobs == [] and seen == [] and engine.run_count == {} and record.claims == []
+
+
+def test_claim_rejected_concurrently_does_not_turn_the_other_queued_job_into_skipped(monkeypatch):
+    """两个 job 并发起步，a 的认领被拒：b 恰在读完停手信号（未发现）之后、看中止标志之前碰上 a 登记 ended-elsewhere。b 同样按「已发现
+    run 被别处结束」处理，不认领、不启动、不产出判定，不被记成 skipped。钩子把这个交错固定下来：a 的认领等 b 读完停手信号才被拒，b 读完
+    之后等 a 登记完再往下走。"""
+    import gherkai_core.schedule as sch
+
+    who = threading.local()
+    b_read, a_noted = threading.Event(), threading.Event()
+    orig_run, orig_seen, orig_note = sch._Worker.run, sch._EndedElsewhere.seen, sch._EndedElsewhere.note
+
+    def run(self):
+        who.scope = self.job.scope_id
+        return orig_run(self)
+
+    def seen(self):
+        found = orig_seen(self)
+        if getattr(who, "scope", None) == "b" and not found and not b_read.is_set():
+            b_read.set()
+            a_noted.wait(5.0)
+        return found
+
+    def note(self):
+        orig_note(self)
+        if getattr(who, "scope", None) == "a":
+            a_noted.set()
+
+    monkeypatch.setattr(sch._Worker, "run", run)
+    monkeypatch.setattr(sch._EndedElsewhere, "seen", seen)
+    monkeypatch.setattr(sch._EndedElsewhere, "note", note)
+    record = _FakeRecord(reject={"a"})
+    orig_claim = record.claim
+
+    def claim(scope_id, claimed_at):
+        if scope_id == "a":
+            b_read.wait(5.0)
+        return orig_claim(scope_id, claimed_at)
+
+    record.claim = claim
+    engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
+    done: list = []
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, record=record), on_job_complete=done.append)
+    assert b_read.is_set() and a_noted.is_set()  # 交错确实发生
+    assert res.jobs == [] and done == [] and engine.run_count == {} and [sid for sid, _ in record.claims] == ["a"]
+    assert res.status == Status.ABORTED
+
+
+def test_skipped_job_is_not_changed_back_when_the_run_is_found_ended_later():
+    """已经记为 skipped 的 job 不因后来成立的原因改回：fail-fast 之后排队的 job 记 SKIPPED 并已落库，随后才发现 run 已被别处结束，
+    它在结果里仍是 SKIPPED。"""
+    record = _FakeRecord()
+    engine = FakeEngine({"crash": _passing_events("crash", "crash:0"), "q": _passing_events("q", "q:0")}, crash_after={"crash": 0})
+    seen: dict[str, Status] = {}
+
+    def on_job_complete(jr):
+        seen[jr.scope_id] = jr.status
+        if jr.scope_id == "q":
+            record.ended.set()  # 写 q 的终态时得知 run 级已结束
+
+    res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record, interrupt_poll_s=0.02),
+                   on_job_complete=on_job_complete)
+    assert seen == {"crash": Status.ERROR, "q": Status.SKIPPED}
+    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR), ("q", Status.SKIPPED)]
+    assert res.status == Status.ABORTED
+
+
+def test_stop_signal_is_polled_with_the_interrupt_cadence_and_stops_running_jobs():
+    """停手信号（写 job 状态时得知 run 级已结束）由等待循环按使用方中断的节拍读取：这里没有注入 interrupt、worker 也没有心跳（卡在等停
+    里看不到中止标志），仍由主线程当场落定并发停止请求；运行中的 job 记 aborted、说明是「这个 run 已被记为已结束」，排队的不启动。"""
+    import time
+
+    record = _FakeRecord()
+
+    class _Sink(CollectSink):
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            if isinstance(event, ScopeStarted):
+                record.ended.set()
+
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a")], "b": _passing_events("b", "b:0")}, tail_after_stop={"a": []})
+    t0 = time.monotonic()
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), _Sink(),
+                   opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, grace_period_s=1.0, record=record,
+                                     interrupt_poll_s=0.02))
+    assert time.monotonic() - t0 < 3.0  # 没等到假 worker 的 5 秒等停超时
+    a = res.jobs[0]
+    assert [jr.scope_id for jr in res.jobs] == ["a"] and "b" not in engine.run_count
+    assert (a.status, a.error_type, a.message) == (Status.ABORTED, None, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert res.status == Status.ABORTED
+
+
+def test_claim_rejected_for_one_job_stops_the_other_running_job():
+    """认领被拒（另一个 job 起 worker 之前）同样停下运行中的 job：worker 线程当场记下，运行中的 job 在下一次事件间检查按首次仲裁记 aborted。"""
+    record = _FakeRecord(reject={"b"})
+    a_running = threading.Event()
+
+    def a_gen(job):
+        yield ScopeStarted(scope_id="a")
+        a_running.set()
+
+    engine = FakeEngine({"a": a_gen, "b": _passing_events("b", "b:0")}, tail_after_stop={"a": []})
+    orig_claim = record.claim  # b 的认领在 a 已经运行之后才发生
+
+    def claim(scope_id, claimed_at):
+        if scope_id == "b":
+            a_running.wait(5.0)
+        return orig_claim(scope_id, claimed_at)
+
+    record.claim = claim
+    res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record))
+    assert [jr.scope_id for jr in res.jobs] == ["a"] and "b" not in engine.run_count
+    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+
+
+def test_fail_fast_first_then_ended_elsewhere_keeps_the_fail_fast_message():
+    """运行中的 job 的停止原因按首次仲裁落定一次、中止的说明取最先成立的来源：fail-fast 先成立、随后才发现 run 已被别处结束（在 victim
+    已被落定、发出停止请求之后），说明仍是 fail-fast 那一句；run 级按发现 run 已被别处结束记 aborted。"""
+    record = _FakeRecord()
+    crash_now = threading.Event()
+
+    def crash_gen(job):
+        yield ScenarioStarted(scenario_id="c:0")
+        crash_now.wait(5)
+        raise RuntimeError("崩")
+
+    def on_event(scope_id, i):
+        if scope_id == "v":
+            crash_now.set()  # v 已运行：让 crash job 崩，fail-fast 先成立
+
+    def on_stop(scope_id):
+        if scope_id == "v":
+            record.ended.set()
+
+    engine = FakeEngine({"v": [ScopeStarted(scope_id="v")], "c": crash_gen}, on_event=on_event, on_stop=on_stop,
+                        tail_after_stop={"v": []})
+    res = schedule(_rm([_job("v"), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.02, grace_period_s=1.0,
+                                     record=record, interrupt_poll_s=0.02))
+    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    assert (v.status, v.message) == (Status.ABORTED, "fail-fast：其他 job 失败，本 job 被中止")
+    assert res.status == Status.ABORTED
+
+
+def test_ended_elsewhere_first_then_interrupt_keeps_the_ended_message():
+    """反过来：先发现 run 已被别处结束、运行中的 job 已被落定之后使用方才中断（收尾期间），说明仍是「这个 run 已被记为已结束」那一句。"""
+    record = _FakeRecord()
+
+    class _Sink(CollectSink):
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            record.ended.set()  # 写 job 状态时得知 run 级已结束
+
+    engine = FakeEngine({"a": _RUNNING_HALF}, tail_after_stop={"a": []}, tail_delay_s=0.3)  # 收尾拖 0.3 秒，期间中断到达
+
+    def interrupt() -> int:
+        h = engine.handles.get("a")
+        return 1 if h is not None and h.stopped else 0
+
+    levels: list[int] = []
+    res = schedule(_rm([_job("a")]), FakeResolver(engine), _Sink(),
+                   opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append, interrupt_poll_s=0.02,
+                                     record=record))
+    assert levels == [1]
+    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert res.status == Status.ABORTED
+
+
+def test_interrupt_then_ended_elsewhere_keeps_the_interrupt_message():
+    """使用方中断先成立、随后才发现 run 已被别处结束：运行中的 job 的说明仍是中断那一句，run 级 aborted。"""
+    record = _FakeRecord()
+    engine = FakeEngine({"a": _RUNNING_HALF}, tail_after_stop={"a": []}, on_stop=lambda _s: record.ended.set())
+    levels: list[int] = []
+    res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, interrupt=lambda: 1 if "a" in engine.handles else 0,
+                                     on_interrupt=levels.append, interrupt_poll_s=0.02, record=record))
+    assert levels == [1]
+    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
+    assert res.status == Status.ABORTED
+
+
+def test_ended_found_in_a_persistence_callback_before_an_interrupt_keeps_the_ended_message():
+    """落库服务在一次落库回调里发现 run 已结束，使用方中断在这之后才到，两者都早于等待循环的下一次轮询：中止的说明取最先登记的来源，
+    被停的 job 记「这个 run 已被记为已结束」。那次回调一直等到中断被处置之后才返回，所以这里看的是等待循环的次序：同一次轮询里先读
+    停手信号、再处理中断。"""
+    record = _FakeRecord()
+    handled = threading.Event()
+
+    def on_event(event):
+        if isinstance(event, ScopeStarted):
+            record.ended.set()  # 写 job 状态时得知 run 级已结束
+            handled.wait(5.0)
+
+    levels: list[int] = []
+
+    def on_interrupt(level: int) -> None:
+        levels.append(level)
+        handled.set()
+
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]}, tail_after_stop={"a": []})
+    res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, interrupt=lambda: 1 if record.ended.is_set() else 0,
+                                     on_interrupt=on_interrupt, interrupt_poll_s=0.02, grace_period_s=1.0, record=record),
+                   on_event=on_event)
+    assert levels == [1]
+    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert res.status == Status.ABORTED
+
+
+def test_interrupt_registered_before_ended_is_found_in_a_persistence_callback_keeps_the_interrupt_message():
+    """反过来：中断先被轮询登记，之后才在一次落库回调里发现 run 已结束：说明是中断那一句，后登记的来源不改写先登记的。"""
+    record = _FakeRecord()
+    interrupted = threading.Event()  # 中断已登记、停止请求已发出
+
+    def on_event(event):
+        if interrupted.is_set():
+            record.ended.set()  # 收尾事件的那次写 job 状态时得知 run 级已结束
+
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]},
+                        tail_after_stop={"a": [ScenarioDone(scenario_id="a:0", status=Status.PASSED)]},
+                        on_stop=lambda _s: interrupted.set())
+    levels: list[int] = []
+    res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, interrupt=lambda: 1 if "a" in engine.handles else 0,
+                                     on_interrupt=levels.append, interrupt_poll_s=0.02, grace_period_s=1.0, record=record),
+                   on_event=on_event)
+    assert levels == [1] and record.ended.is_set()
+    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
+
+
+def test_ended_found_in_on_event_is_registered_before_a_later_fail_fast():
+    """落库服务在 v 的一次落库回调里发现 run 已结束，随后 c 才得出 error 判定（fail-fast 在判定得出时登记），两者都早于等待循环的下一次
+    轮询：发现在那次回调返回之后当场登记、先于 fail-fast，v 的说明是「这个 run 已被记为已结束」。c 在发现之前已报出 scope 级 error，
+    判定不受后来的中止影响；关掉心跳，事件逐个取出：c 的事件流等 v 的那次回调返回、v 取下一个事件时才结束。"""
+    record = _FakeRecord()
+    c_reported, v_moved_on = threading.Event(), threading.Event()
+
+    def on_event(event):
+        if isinstance(event, ScopeStarted) and event.scope_id == "v":
+            c_reported.wait(5.0)
+            record.ended.set()  # 写 v 的 job 状态时得知 run 级已结束
+
+    def engine_on_event(scope_id, i):
+        if scope_id == "v" and i == 1:  # v 的第二个事件产出时，第一个事件的落库回调已经返回
+            v_moved_on.set()
+
+    def c_gen(job):
+        yield ScopeDone(scope_id="c", status=Status.ERROR, error_type="engine_error", message="未就绪")
+        c_reported.set()  # c 的事件循环已处理完 scope 级 error、来取下一个事件
+        v_moved_on.wait(5.0)
+
+    engine = FakeEngine({"v": [ScopeStarted(scope_id="v"), ScenarioStarted(scenario_id="v:0")], "c": c_gen},
+                        on_event=engine_on_event, tail_after_stop={"v": []})
+    res = schedule(_rm([_job("v"), _job("c")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0,
+                                     record=record, interrupt_poll_s=5.0),
+                   on_event=on_event)
+    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.jobs}
+    assert statuses["v"] == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert statuses["c"][0] == Status.ERROR
+    assert res.status == Status.ABORTED
+
+
+def test_ended_found_in_on_job_complete_is_registered_before_a_later_fail_fast(monkeypatch):
+    """p、q 同批交给等待循环：落库服务在写其中第一个的终态时发现 run 已结束；第二个的落库回调一直等到 c 得出 error、以 fail-fast 登记
+    之后才返回，这都早于等待循环的下一次轮询。发现在第一次回调返回之后当场登记、先于 fail-fast，被停下的 v 的说明是「这个 run 已被记为
+    已结束」。c 在发现之前已报出 scope 级 error，判定不受后来的中止影响；关掉心跳、不接 on_event，回调之间没有别处读停手信号。"""
+    import time
+
+    import gherkai_core.schedule as sch
+
+    record = _FakeRecord()
+    v_started, c_reported, c_go, c_registered = (threading.Event() for _ in range(4))
+    calls: list[str] = []
+    orig_run, orig_wait = sch._Worker.run, sch._wait_futures
+
+    def run(self):
+        try:
+            return orig_run(self)
+        finally:
+            if self.job.scope_id == "c":
+                c_registered.set()  # c 的判定已得出，fail-fast 在返回之前已登记
+
+    def wait(fs, timeout=None, return_when=sch.FIRST_COMPLETED):
+        done, rest = orig_wait(fs, timeout=timeout, return_when=return_when)
+        if done and not calls:  # 第一次有 job 完成时等到 p、q 都完成，两者同批交出（c 与 v 此刻都仍在运行）
+            end = time.monotonic() + 5.0
+            while sum(f.done() for f in fs) < 2 and time.monotonic() < end:
+                time.sleep(0.005)
+            done = {f for f in fs if f.done()}
+            rest = set(fs) - done
+        return done, rest
+
+    def on_job_complete(jr):
+        calls.append(jr.scope_id)
+        if len(calls) == 1:
+            v_started.wait(5.0)
+            c_reported.wait(5.0)
+            record.ended.set()  # 写这个 job 的终态时得知 run 级已结束
+        elif len(calls) == 2:
+            c_go.set()
+            c_registered.wait(5.0)
+
+    def c_gen(job):
+        yield ScopeDone(scope_id="c", status=Status.ERROR, error_type="engine_error", message="未就绪")
+        c_reported.set()  # c 的事件循环已处理完 scope 级 error、来取下一个事件
+        c_go.wait(5.0)
+
+    def engine_on_event(scope_id, i):
+        if scope_id == "v" and i == 0:  # v 已通过起 worker 之前的检查、认领并起了 worker
+            v_started.set()
+
+    monkeypatch.setattr(sch._Worker, "run", run)
+    monkeypatch.setattr(sch, "_wait_futures", wait)
+    engine = FakeEngine({"p": _passing_events("p", "p:0"), "q": _passing_events("q", "q:0"), "c": c_gen,
+                         "v": [ScopeStarted(scope_id="v"), ScenarioStarted(scenario_id="v:0")]},
+                        on_event=engine_on_event, tail_after_stop={"v": []})
+    res = schedule(_rm([_job("p"), _job("q"), _job("c"), _job("v")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=4, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0,
+                                     record=record, interrupt_poll_s=5.0),
+                   on_job_complete=on_job_complete)
+    assert sorted(calls[:2]) == ["p", "q"] and c_registered.is_set()  # 交错确实发生
+    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.jobs}
+    assert statuses["v"] == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert statuses["c"][0] == Status.ERROR and statuses["p"][0] == statuses["q"][0] == Status.PASSED
+    assert res.status == Status.ABORTED
+
+
+def test_abort_flag_records_only_the_first_cause_under_concurrent_set():
+    """并发的两次登记只有第一次记下来源：判空与赋值之间插不进另一次登记。这里让第一次登记读到「尚无来源」之后停一下，给第二个线程插进来
+    的机会；它只能等第一次登记完成，读到已有的来源，不再赋值。"""
+    import time
+
+    import gherkai_core.schedule as sch
+
+    first_read = threading.Event()
+    assigned: list[str] = []
+
+    class _Probe(sch._AbortFlag):
+        @property
+        def cause(self):
+            value = self.__dict__.get("_probe_cause")
+            if value is None and threading.current_thread().name == "first":
+                first_read.set()
+                time.sleep(0.2)  # 第二个线程此刻若能进来，会同样读到「尚无来源」
+            return value
+
+        @cause.setter
+        def cause(self, value):
+            self.__dict__["_probe_cause"] = value
+            if value is not None:
+                assigned.append(value)
+
+    flag = _Probe()
+    first = threading.Thread(target=flag.set, args=("fail-fast",), name="first")
+    second = threading.Thread(target=lambda: (first_read.wait(5.0), flag.set("interrupt")), name="second")
+    first.start()
+    second.start()
+    first.join(5.0)
+    second.join(5.0)
+    assert assigned == ["fail-fast"] and flag.cause == "fail-fast" and flag.is_set()
+
+
+def test_deadline_passed_at_the_moment_of_decision_wins_over_ended_elsewhere():
+    """做出停止决定的那一刻截止时刻已过即为超时：墙钟越过期限的同时发现 run 已被别处结束，运行中的 job 记超时（期限那一句），不记中止。"""
+    ft = _FakeTime()
+    record = _FakeRecord()
+
+    class _Sink(CollectSink):
+        def __call__(self, event) -> None:
+            super().__call__(event)
+            if isinstance(event, ScenarioStarted):
+                ft.jump(1001.0)
+                record.ended.set()
+
+    engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]}, tail_after_stop={"a": []})
+    res = schedule(_rm_at([_job("a")], ft.at(1000.0)), FakeResolver(engine), _Sink(),
+                   opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record,
+                                interrupt_poll_s=0.02))
+    a = res.jobs[0]
+    assert (a.status, a.error_type, a.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+
+
+def test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted():
+    """使用方中断之后、排队中的 job 起 worker 之前已过停止启动的时刻：它不启动、不产出判定（不记 skipped）；run 级是 error 加到期说明，
+    优先于中断的 aborted（ADR 0054 决策二「run 级只要有 job 保持 pending」一段；退出码仍按信号取，由组合根给）。"""
+    ft = _FakeTime()
+    engine = FakeEngine({"a": _RUNNING_HALF, "b": _WHOLE_PASS}, tail_after_stop={"a": []},
+                        on_stop=lambda scope: scope == "a" and ft.jump(950.0))  # 中断停下 a 期间墙钟越过停止启动的时刻
+    levels: list[int] = []
+    res = schedule(_rm_at([_job("a"), _job("b")], ft.at(1000.0)), FakeResolver(engine), CollectSink(),
+                   opts=ft.opts(max_concurrency=1, interrupt=lambda: 1 if "a" in engine.handles else 0,
+                                on_interrupt=levels.append, interrupt_poll_s=0.02))
+    assert levels == [1] and "b" not in engine.run_count
+    assert [(jr.scope_id, jr.status, jr.message) for jr in res.jobs] == [("a", Status.ABORTED, "收到中断信号：本 job 被中止")]
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+
+
+def test_claim_failure_is_a_persistence_failure():
+    """认领本身失败（存储不可达）按运行期落库失败处理：异常原样冒泡出 schedule()，冒泡前停掉运行中的 worker，失败的 job 不产出判定。"""
+    boom = OSError("存储不可达")
+    record = _FakeRecord(reject={"b"}, claim_error=boom)
+    a_running = threading.Event()
+
+    def a_gen(job):
+        yield ScopeStarted(scope_id="a")
+        a_running.set()
+
+    engine = FakeEngine({"a": a_gen, "b": _passing_events("b", "b:0")}, tail_after_stop={"a": []})
+    orig_claim = record.claim
+
+    def claim(scope_id, claimed_at):
+        if scope_id == "b":
+            a_running.wait(5.0)
+        return orig_claim(scope_id, claimed_at)
+
+    record.claim = claim
+    seen: list = []
+    with pytest.raises(OSError) as exc:
+        schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=2, heartbeat_interval_s=0, grace_period_s=1.0, record=record),
+                 on_job_complete=seen.append)
+    assert exc.value is boom
+    assert engine.handles["a"].stopped and "b" not in engine.run_count and all(jr.scope_id != "b" for jr in seen)
+
+
+# ---- 重试之前的检查（ADR 0054 决策二「上一次尝试已经结束、正在等待重试的 job」一条）：产品的 run 不开 job 级重试，规则在调度层核 ----
+
+_NOT_RETRIED_DEADLINE = "这个 run 已接近或超过允许运行的时间：未再重试"
+_NOT_RETRIED_ENDED = "这个 run 已被记为已结束：未再重试"
+_NOT_RETRIED_FAIL_FAST = "fail-fast：其他 job 失败，未再重试"
+_NOT_RETRIED_INTERRUPT = "收到中断信号：未再重试"
+
+
+@pytest.mark.parametrize("hold, expected, reads", [
+    ({"deadline", "ended", "abort", "closed"}, _NOT_RETRIED_DEADLINE, 0),
+    ({"ended", "abort", "closed"}, _NOT_RETRIED_ENDED, 0),
+    ({"abort", "closed"}, _NOT_RETRIED_FAIL_FAST, 0),
+    ({"interrupt", "closed"}, _NOT_RETRIED_INTERRUPT, 0),
+    ({"closed"}, _NOT_RETRIED_ENDED, 1),
+])
+def test_retry_checks_run_in_order_and_note_the_first_hit(monkeypatch, hold, expected, reads):
+    """退避期间成立的停止原因按次序检查、取最先命中的一条：已过停止启动的时刻；已发现 run 被别处结束；run 已中止（说明按中止来源区分
+    fail-fast 与使用方中断）；读到 run 级已是终态。命中即不再重试，保留上一次的 network_error 判定并注明原因，运行态随这个判定落定
+    （经 on_job_complete）；前三项命中时不读存储。重试不再认领：认领只在第一次起 worker 之前做一次。"""
+    import gherkai_core.schedule as sch
+
+    ft = _FakeTime()
+    record = _FakeRecord()
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    monkeypatch.setattr(sch._Worker, "__init__", spy)
+
+    def backoff(_s):  # 上一次尝试已经结束、正在等待重试时，这些原因同时成立
+        if "deadline" in hold:
+            ft.jump(950.0)
+        if "ended" in hold:
+            record.ended.set()
+        if "abort" in hold:
+            captured["w"].abort_flag.set("fail-fast")
+        if "interrupt" in hold:
+            captured["w"].abort_flag.set("interrupt")
+        if "closed" in hold:
+            record.open_ = False
+
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0]})
+    seen: list = []
+    res = schedule(_rm_at([_job("n")], ft.at(1000.0)), FakeResolver(engine), CollectSink(),
+                   opts=ft.opts(max_concurrency=1, network_retry=1, retry_sleep=backoff, record=record),
+                   on_job_complete=seen.append)
+    jr = res.jobs[0]
+    assert engine.run_count["n"] == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
+    assert jr.message.endswith("；" + expected), jr.message
+    assert [x.message for x in seen] == [jr.message]
+    assert record.reads == reads and [sid for sid, _ in record.claims] == ["n"]
+
+
+def test_retry_proceeds_after_one_read_without_claiming_again():
+    """检查都不命中时照常重试：重新起 worker 之前读一次 run 级状态、不再认领，截止时刻沿用第一次认领时算出的那个。"""
+    record = _FakeRecord()
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0, 0]})
+    res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=_NOSLEEP, record=record))
+    assert engine.run_count["n"] == 3 and res.jobs[0].status == Status.PASSED
+    assert record.reads == 2 and [sid for sid, _ in record.claims] == ["n"]
+
+
+def test_retry_refused_before_backoff_when_already_ended_elsewhere():
+    """上一次尝试结束时 run 已被别处结束（这次尝试期间写 job 状态时得知）：不必等退避，直接保留判定并注明原因，也不读存储。"""
+    record = _FakeRecord()
+    sleeps: list[float] = []
+
+    def gen(job):
+        record.ended.set()
+        return iter([])
+
+    engine = FakeEngine({"n": gen}, network_crash_after={"n": [0]})
+    res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=sleeps.append, record=record,
+                                     interrupt_poll_s=5.0))  # 主线程这期间不轮询：这次尝试的判定只由 worker 自己给出
+    jr = res.jobs[0]
+    assert sleeps == [] and record.reads == 0 and engine.run_count["n"] == 1
+    assert jr.error_type == "network_error" and jr.message.endswith("；" + _NOT_RETRIED_ENDED)
+
+
+def test_retry_note_follows_an_ended_elsewhere_abort_source(monkeypatch):
+    """等待重试的 job 碰上同一个交错：退避期间另一个线程以 ended-elsewhere 登记了中止标志，而停手信号的读取返回 False。重新启动之前的
+    检查注明的是 run 已被记为已结束，不是 fail-fast；中止标志那一项已命中，不再读存储。"""
+    import gherkai_core.schedule as sch
+
+    monkeypatch.setattr(sch._EndedElsewhere, "seen", lambda self: False)
+    captured = {}
+    orig = sch._Worker.__init__
+
+    def spy(self, *a, **kw):
+        orig(self, *a, **kw)
+        captured["w"] = self
+
+    monkeypatch.setattr(sch._Worker, "__init__", spy)
+    record = _FakeRecord()
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0]})
+    res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=1, network_retry=1, record=record,
+                                     retry_sleep=lambda _s: captured["w"].abort_flag.set("ended-elsewhere")))
+    jr = res.jobs[0]
+    assert engine.run_count["n"] == 1 and jr.error_type == "network_error"
+    assert jr.message.endswith("；" + _NOT_RETRIED_ENDED), jr.message
+    assert record.reads == 0
+
+
+def test_retry_is_not_restarted_after_a_clock_rollback_once_stop_start_was_observed(monkeypatch):
+    """停止启动一经成立不撤销，对等待重试的 job 同样成立：n 退避期间，排队的 b 的检查读到已过停止启动的时刻、没有启动；随后墙钟回拨到
+    更早的时刻，n 重新启动之前的检查仍按已过处理，不再重试、注明原因。run 级是 error 加「已超过允许运行的时间」。"""
+    import gherkai_core.schedule as sch
+
+    t = {"s": 0.0}
+    in_backoff, b_done = threading.Event(), threading.Event()
+    orig_run = sch._Worker.run
+
+    def run(self):
+        if self.job.scope_id != "b":
+            return orig_run(self)
+        in_backoff.wait(5.0)  # b 在 n 等待重试期间才起步
+        try:
+            return orig_run(self)
+        finally:
+            b_done.set()
+
+    def backoff(_s):
+        t["s"] = 950.0  # 越过停止启动的时刻（期限减 60 秒）
+        in_backoff.set()
+        b_done.wait(5.0)
+        t["s"] = 10.0  # b 的检查已经看到已过，墙钟随后回拨
+
+    monkeypatch.setattr(sch._Worker, "run", run)
+    engine = FakeEngine({"n": _passing_events("n", "n:0"), "b": _passing_events("b", "b:0")}, network_crash_after={"n": [0]})
+    res = schedule(_rm_at([_job("n"), _job("b")], (_T0 + timedelta(seconds=1000)).isoformat()), FakeResolver(engine), CollectSink(),
+                   opts=ScheduleOpts(max_concurrency=2, network_retry=1, retry_sleep=backoff,
+                                     wall_clock=lambda: _T0 + timedelta(seconds=t["s"])))
+    assert b_done.is_set() and engine.run_count == {"n": 1}
+    n = res.jobs[0]
+    assert [jr.scope_id for jr in res.jobs] == ["n"] and n.error_type == "network_error"
+    assert n.message.endswith("；" + _NOT_RETRIED_DEADLINE), n.message
+    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+
+
+def test_retry_read_failure_is_a_persistence_failure():
+    """重试之前那次读本身失败（存储不可达）按运行期落库失败处理：异常原样冒泡出 schedule()，不再重试、不产出判定。"""
+    boom = OSError("存储不可达")
+    record = _FakeRecord(read_error=boom)
+    engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0]})
+    seen: list = []
+    with pytest.raises(OSError) as exc:
+        schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=_NOSLEEP, record=record),
+                 on_job_complete=seen.append)
+    assert exc.value is boom and engine.run_count["n"] == 1 and seen == []

@@ -28,8 +28,10 @@ from gherkai_core.model import (
     Target,
 )
 from gherkai_core.project import (
+    DEADLINE_TIMEOUT_MESSAGE,
     DESKTOP_RELEASE_FAILED_HINT,
     DEVICE_RELEASE_FAILED_HINT,
+    ENDED_ELSEWHERE_ABORT_MESSAGE,
     Timing,
     apply_device_metering,
     device_metering,
@@ -146,6 +148,51 @@ def test_not_exited_is_running_or_pending():
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False,
                 saw_session_opened=True).status == Status.RUNNING  # 只见过非 attempted 的 session_opened（取设备期间）也算 RUNNING
     assert _fin(exited=False, exit_code=None, scope_done=None, scenario_status={}, saw_scope_started=False).status == Status.PENDING
+
+
+def test_timeout_message_follows_the_cutoff_that_applied():
+    """超时的说明按起作用的截止时刻给（ADR 0054 决策二第 2 条）：job 自己的预算是原有那一句，run 的期限是另一句；判定与归因相同，
+    都是 error 与 timeout。缺省取预算，现有调用点不传这一项时结果与原先相同。"""
+    budget = _fin(stop_reason="timeout", scope_done=None)
+    assert budget == _fin(stop_reason="timeout", scope_done=None, timeout_cause="budget")
+    assert (budget.status, budget.error_type, budget.message) == (Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")
+    deadline = _fin(stop_reason="timeout", scope_done=None, timeout_cause="deadline")
+    assert (deadline.status, deadline.error_type) == (Status.ERROR, "timeout")
+    assert deadline.message == DEADLINE_TIMEOUT_MESSAGE == "这个 run 已超过允许运行的时间，job 被中止"
+
+
+@pytest.mark.parametrize("device", ["android", "desktop"])
+def test_deadline_timeout_keeps_the_other_rules_of_the_table(device):
+    """被期限截断与被预算截断走真值表的同一行：内容已经完整的 job 不改判；未确认的会话照样追加释放提示、归因仍是 timeout。"""
+    job = _on(_job(), device)
+    assert _fin(job=job, stop_reason="timeout", timeout_cause="deadline") == _fin(job=job)  # 干净退出且有 scope_done
+    term = _fin(job=job, stop_reason="timeout", timeout_cause="deadline", exit_code=137, sessions=[_unconfirmed()])
+    hint = DESKTOP_RELEASE_FAILED_HINT if device == "desktop" else DEVICE_RELEASE_FAILED_HINT
+    assert (term.status, term.error_type) == (Status.ERROR, "timeout")
+    assert term.message.startswith(DEADLINE_TIMEOUT_MESSAGE + "；") and hint in term.message
+
+
+@pytest.mark.parametrize("cause, message", [
+    ("fail-fast", "fail-fast：其他 job 失败，本 job 被中止"),
+    ("interrupt", "收到中断信号：本 job 被中止"),
+    ("ended-elsewhere", "这个 run 已被记为已结束，job 被中止"),
+])
+def test_abort_message_follows_its_source(cause, message):
+    """三种中止来源走同一行：aborted、归因为空，只有说明按来源给（ADR 0054 决策二：发现 run 已被别处记为已结束是第三种来源）；
+    内容已经完整的 job 不改判。缺省来源是 fail-fast。"""
+    term = _fin(stop_reason="abort", exit_code=1, abort_cause=cause)
+    assert (term.status, term.error_type, term.message) == (Status.ABORTED, None, message)
+    assert _fin(stop_reason="abort", abort_cause=cause) == _fin()
+    assert ENDED_ELSEWHERE_ABORT_MESSAGE == "这个 run 已被记为已结束，job 被中止"
+    assert _fin(stop_reason="abort", exit_code=1) == _fin(stop_reason="abort", exit_code=1, abort_cause="fail-fast")
+
+
+def test_unknown_causes_are_rejected():
+    """来源与截止时刻只取给定的几个值：调用方传错时报错，不悄悄落到某一句说明上。"""
+    with pytest.raises(ValueError, match="timeout_cause"):
+        _fin(stop_reason="timeout", scope_done=None, timeout_cause="run")
+    with pytest.raises(KeyError):
+        _fin(stop_reason="abort", exit_code=1, abort_cause="settled")
 
 
 def test_network_exit_message_is_not_duplicated_and_reason_only_appends():

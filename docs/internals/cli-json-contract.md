@@ -25,11 +25,12 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | 本次 run 的 id（可排序时间戳前缀 + 随机后缀） |
-| `status` | `passed` / `failed` / `error` / `aborted` | run 级判定：任一 job 为 error 则 error；任一为 failed 则 failed；否则 passed。job 级的 `skipped` / `aborted` 不参与 run 级聚合；唯一例外是同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `skipped` 或 `aborted` 时，run 级直接记 `aborted`（判定不完整，不按仅有的判定聚合） |
+| `status` | `passed` / `failed` / `error` / `aborted` | run 级判定：任一 job 为 error 则 error；任一为 failed 则 failed；否则 passed。job 级的 `skipped` / `aborted` 不参与 run 级聚合。两种例外不按仅有的判定聚合，按此次序取先成立的一种：这个 run 已超过允许运行的时间而有 job 没有执行时记 `error`，原因在 `message`（全部执行了的 job 都通过时也是如此）；同步 `run` 被使用方中断（Ctrl-C 或 SIGTERM）且有 job 记 `skipped` 或 `aborted` 时记 `aborted`（判定不完整） |
+| `message` | string \| null | run 级说明：没有任何 job 能承载的原因，键恒在，没有时为 null。当前只有一种取值「已超过允许运行的时间」：离 `run_meta.deadline_at` 不到 60 秒时不再启动 job，到了 `deadline_at` 执行中的 job 被停下，这时仍有 job 没有执行。`run_meta.jobs` 里有而 `jobs` 里没有的 scope 没有执行（没有判定，运行状态里保持 `pending`），只在 run 级 `message` 有值时出现；不另设一份清单，取两者的差即得 |
 | `duration_ms` | number \| null | run 级墙钟（含并发，不等于各 job 之和） |
 | `total_tokens` / `total_time_worked_s` | number \| null | 跨 job 的引擎原生量合计（Midscene 上报 tokens、Nova 上报 agent 工作秒）；无引擎上报时为 null，**不折算为美元** |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅当 run 含设备目标 job 时出现：各设备 job 的 `device_observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话总数（不计入合计；`attempted` 的尝试两键都不计） |
-| `jobs[]` | array | 每个 job（即一个 scope）的判定，见下 |
+| `jobs[]` | array | 每个有判定的 job（即一个 scope）的判定，见下；没有执行的 scope 不在其中（见 `message`） |
 | `run_meta` | object | 本次 run 的 definition（提交时固定），见下 |
 | `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 后端 `--no-report --quiet` 仍保留 `worker_log` 一个键） |
 
@@ -44,7 +45,7 @@
 | `session_id` | string \| null | 云端浏览器会话 id（血缘；两个引擎都是 AgentCore 浏览器会话 id，可与 worker 日志对应；Nova Act 的轨迹目录按另一种会话 id 命名，worker 日志里有两者的对应行）；设备目标为 Device Farm 远程访问会话的 ARN |
 | `sessions[]` | array \| 省略 | 本 job 开过或尝试过的每个会话一项：设备目标是 Device Farm 远程访问会话，桌面目标是 AgentCore 浏览器会话（两个引擎的桌面 worker 都报出会话的建立与停止）；没有会话记录的桌面 job 省略此键。每项含 `session_id`（结果未知的创建尝试为 null）、`name`（会话名；桌面目标与 `session_id` 相同，结果未知的创建尝试为这次请求携带的会话名）、`origin`（`created` / `discovered` / `attempted`；桌面目标没有 `discovered`）、`release`（`confirmed` / `unconfirmed`）、`observed_s`（worker 观察到的占用秒数，缺则 null；桌面目标恒为 null）、`provider_minutes`（服务商回报的 `{total, metered, unmetered}` 快照，缺则 null；桌面目标恒为 null）、`device`（worker 原样报出的设备描述，形如 `{platform, model, osVersion, unit}`、对本工具不透明，缺则 null；桌面目标恒为 null；文本输出的「设备」一行与报告页的设备描述由代表会话的这一项派生） |
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅设备目标（桌面 job 带会话记录时同样省略）：本 job 各会话 `observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话数（不计入合计；`attempted` 的尝试两键都不计，逐条见 `sessions[]`） |
-| `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`release_failed` 表示有会话未能确认停止（设备目标与桌面目标都可能出现），`message` 列出会话名，并按目标说明到哪里核对 |
+| `error_type` | string \| null | job 级归因（如 `timeout`、`precheck_failed`、`acquire_timeout`、`session_lost`、`release_failed`）；skipped/aborted 恒 null、原因在 `message`。`timeout` 的 `message` 分两种：job 自己的墙钟预算到点（「job 超时（预算 Ns，已中止）」），或这个 run 已超过允许运行的时间（「这个 run 已超过允许运行的时间，job 被中止」）。`release_failed` 表示有会话未能确认停止（设备目标与桌面目标都可能出现），`message` 列出会话名，并按目标说明到哪里核对 |
 | `message` | string \| null | job 级未达 passed 的原因原文（超时、未启动、fail-fast 或使用方中断导致的中止、worker 异常退出等）；passed 时为 null。**`message` 在本契约里恒表原因**：只出现在非 passed 态上，job 级与 step 级同义 |
 | `report_refs[]` | array | job 级原生产物指针：`kind`（`summary` / `report`；设备目标另有 `device_session`，见 `explain` 一节）、`ref`（`file://` 或 `s3://` URI）、`label` |
 | `scenarios[]` | array | 见下 |
@@ -62,7 +63,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true 表示上游 step error 后被跳过、未执行（此时 status 为 skipped）；status 为 skipped 而此值为 false 表示 worker 报告 scope 级 error 后这一步从未执行，由本工具补记 |
 
-`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status` / `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
+`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status` / `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变；执行到期时的表现见顶层 `message`）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN；local 后端 null）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则 null）、`session_warmup_url`（`--expose-local` 下本次 run 的会话预热地址，输出时令牌参数的值已替换为 `***`；无则 null）、`jobs[]`：
 
@@ -114,8 +115,8 @@
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已投影的事件水位（诊断用）；仅经推进器投影写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
-| `message` | string \| 省略 | run 级原因，只在云端推进链**不经任何 job** 就把 run 置为 `error` 时出现（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
-| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被推进器认领的时刻，超时起算点；未认领时**省略**） |
+| `message` | string \| 省略 | run 级原因，没有任何 job 能承载时才有，run 级恒为 `error`：云端推进链**不经任何 job** 就把 run 置为 `error`（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；或这个 run 已超过允许运行的时间、仍有 job 没有执行（「已超过允许运行的时间」，前台 `run` 收尾时写下，与 `run --json` 顶层的 `message` 同一句），这些 job 保持 `pending`。job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
+| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，仅在终态后有内容 |
 
 ## `gherkai list-runs --json`

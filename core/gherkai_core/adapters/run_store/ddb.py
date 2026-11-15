@@ -280,45 +280,50 @@ class DynamoDBRunStore:
             "jobs": {sid: _job_state_to_item(js) for sid, js in initial_state.jobs.items()},
         }
 
-    def update_job_state(self, run_id: str, job_state: JobState) -> None:
+    def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 单元素刷 STATE.jobs（SET jobs.#sid=:js）。STATE 不存在则报错（须先 create_run）。
 
         #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）；
         ConditionExpression 复刻 local「未 create 就报错」——捕 ConditionalCheckFailedException 转 FileNotFoundError。
 
-        **写入的 job 态不是 pending 时连同 run 级一起写**（ADR 0034 机制三「run 级状态只进不退」条③）：第一次写
-        `SET jobs.#sid = :js` 加上把 run 级写成 running（连同状态分组，见 `status_group`），条件是 STATE 存在且 run 级为
-        pending 或 running；条件不成立（run 已收尾，或 STATE 不存在）时再写一次、只写 job，条件只剩 STATE 存在，仍不成立即报错。
-        已收尾的 run 上 job 照写、run 级与状态分组都不变。正常路径一次写，第二次只在已收尾或 STATE 不存在时发生。写入 pending
-        时只写 job。
+        **两次写，各带互斥的 run 级条件**（ADR 0034 机制三「run 级状态只进不退」条③；ADR 0054 决策五）：第一次写的条件是 STATE
+        存在且 run 级为 pending 或 running，写入的 job 态不是 pending 时连同把 run 级写成 running（连同状态分组，见
+        `status_group`），是 pending 时只写 job；成立即返回 True。条件不成立（run 已收尾，或 STATE 不存在）时再写一次、只写 job，
+        条件是 STATE 存在且 run 级已是终态；成立即返回 False，仍不成立即报 STATE 不存在。返回值因而是写的那一刻的 run 级，由条件
+        写本身给出、不另读：True 只在第一次写的条件成立时出现，False 只在第二次写的条件成立时出现。已收尾的 run 上 job 照写、run 级
+        与状态分组都不变。正常路径一次写，第二次只在已收尾或 STATE 不存在时发生。
+
+        第二次写要求 run 级已是终态，而不只要求 STATE 存在：第一次写因 STATE 不存在失败之后、第二次写之前若并发 create_run 建出全
+        pending 的 STATE，第二次写同样不成立、照常报 STATE 不存在，与 local「运行态不存在即报错」一致，不会把 job 写进一个 run 级仍
+        为 pending 的新记录并报告 run 已结束。
         """
         ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
+        key = {"run_id": run_id, _ITEM_TYPE_ATTR: _STATE}
+        names = {"#sid": job_state.scope_id, "#st": "status"}  # status 是 DDB 保留字
+        values = {":js": _job_state_to_item(job_state), ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        update = "SET jobs.#sid = :js"
+        first_update, first_names, first_values = update, names, values
         if job_state.status != Status.PENDING:
             run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
-            try:
-                self._table.update_item(
-                    Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                    UpdateExpression="SET jobs.#sid = :js, " + run_set,
-                    ExpressionAttributeNames={"#sid": job_state.scope_id, **run_names},  # status 是 DDB 保留字
-                    ExpressionAttributeValues={
-                        ":js": _job_state_to_item(job_state),
-                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value, **run_values,
-                    },
-                    ConditionExpression="attribute_exists(run_id) AND #st IN (:pending, :running)",
-                )
-                return
-            except ccf:
-                pass  # run 已收尾或 STATE 不存在：下面只写 job，STATE 不存在时由它报错
+            first_update = f"{update}, {run_set}"
+            first_names, first_values = {**names, **run_names}, {**values, **run_values}
         try:
             self._table.update_item(
-                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression="SET jobs.#sid = :js",
-                ExpressionAttributeNames={"#sid": job_state.scope_id},
-                ExpressionAttributeValues={":js": _job_state_to_item(job_state)},
-                ConditionExpression="attribute_exists(run_id)",
+                Key=key, UpdateExpression=first_update,
+                ExpressionAttributeNames=first_names, ExpressionAttributeValues=first_values,
+                ConditionExpression="attribute_exists(run_id) AND #st IN (:pending, :running)",
+            )
+            return True
+        except ccf:
+            pass  # run 已收尾或 STATE 不存在：下面只写 job，STATE 不存在时由它报错
+        try:
+            self._table.update_item(
+                Key=key, UpdateExpression=update, ExpressionAttributeNames=names, ExpressionAttributeValues=values,
+                ConditionExpression="attribute_exists(run_id) AND NOT (#st IN (:pending, :running))",
             )
         except ccf as e:
             raise FileNotFoundError(f"update_job_state：STATE 不存在（须先 create_run）：{run_id}") from e
+        return False
 
     def preflight(self) -> None:
         """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→以退出码 2 结束）。

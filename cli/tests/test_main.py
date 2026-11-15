@@ -875,6 +875,204 @@ def test_run_ended_elsewhere_after_an_interrupt_exits_by_signal(tmp_path, monkey
     assert cap.out == "" and "在本次执行结束之前已被记为已结束" in cap.err
 
 
+# ---- 前台执行遵守运行期限、服从记录（ADR 0054 决策二、五）：组合根的注入与到期收尾的输出 ----
+
+def test_run_injects_the_wall_clock_and_the_record_into_schedule(tmp_path, monkeypatch, capsys):
+    """前台 run 交给调度循环的墙钟是组合根写时间戳的同一个读取点 `compose.now`；有记录时，认领、重试之前的读与停手信号由这次
+    run 的落库服务提供，`--no-report` 没有记录、只注入墙钟。"""
+    from gherkai_core.persist import RunPersistence
+
+    box = {}
+    monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")]) == 0
+    assert box["opts"].wall_clock is compose.now
+    assert isinstance(box["opts"].record, RunPersistence)
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report"]) == 0
+    assert box["opts"].wall_clock is compose.now and box["opts"].record is None
+
+
+class _WallClock:
+    """可拨的墙钟，替换组合根的 `compose.now`：建 run 的时刻（从而运行期限）、认领时刻与各次比较都取它。"""
+
+    def __init__(self, start):
+        self.t = start
+
+    def __call__(self):
+        return self.t
+
+
+class _StopHandle:
+    def __init__(self) -> None:
+        import threading
+
+        self.stopped = threading.Event()
+
+    def stop(self, grace_period_s: float) -> None:
+        self.stopped.set()
+
+
+class _ScriptedEngine:
+    """进程内的假引擎：scope_id → script(job, handle) 给出事件流。`started` 记下被起过的 scope；没有脚本的 scope 被起即抛
+    KeyError（按起 worker 失败记 error），用例据此看出不该启动的 job 是否被启动了。"""
+
+    def __init__(self, scripts) -> None:
+        self.scripts = scripts
+        self.started: list[str] = []
+
+    def run_scope(self, job):
+        self.started.append(job.scope_id)
+        handle = _StopHandle()
+        return handle, self.scripts[job.scope_id](job, handle)
+
+
+def _real_schedule_with(monkeypatch, engine, *, before=None):
+    """真 schedule、假引擎：两个引擎名都解析到 engine。before(run_meta) 在调度开始之前调用（拨墙钟或记下 run_id）。"""
+    real = m.schedule
+    monkeypatch.setattr(m.compose, "build_engines", lambda **kw: {"novaact": engine, "midscene": engine})
+
+    def wrapped(run_meta, *a, **kw):
+        if before is not None:
+            before(run_meta)
+        return real(run_meta, *a, **kw)
+
+    monkeypatch.setattr(m, "schedule", wrapped)
+
+
+_T0 = __import__("datetime").datetime(2026, 11, 15, tzinfo=__import__("datetime").timezone.utc)
+
+
+def _deadline_mid_run(monkeypatch):
+    """两个 scope（a、b）、并发 1，执行中途到达运行期限。期限是建 run 的时刻加 900 秒、再加两个 job 各自的预算 300 秒与尾段
+    2 × 150 + 10 秒，即 T0 + 2120 秒（停止宽限取假 worker 自报的 150 秒）。调度开始时墙钟拨到 T0 + 1900：认领 a 的时刻加预算晚于期限，
+    a 的截止时刻就是期限；a 起来之后墙钟越过期限，a 按超时停下，b 起 worker 之前已过停止启动的时刻（期限减 60 秒），不启动。
+    返回（墙钟，引擎）。"""
+    from datetime import timedelta
+
+    from gherkai_core.model import ScenarioStarted, ScopeStarted
+
+    clock = _WallClock(_T0)
+    monkeypatch.setattr(m.compose, "now", clock)
+
+    def script_a(job, handle):
+        yield ScopeStarted(scope_id=job.scope_id)
+        clock.t = _T0 + timedelta(seconds=2121)
+        yield ScenarioStarted(scenario_id=job.scenarios[0].id)  # 越过期限之后的第一个事件：调度循环据此停下 a
+        handle.stopped.wait(5)
+
+    engine = _ScriptedEngine({"a": script_a})
+    _real_schedule_with(monkeypatch, engine, before=lambda meta: setattr(clock, "t", _T0 + timedelta(seconds=1900)))
+    return clock, engine
+
+
+@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
+def test_run_past_the_deadline_ends_as_error_with_the_run_message(tmp_path, monkeypatch, capsys, flags):
+    """执行中途到达运行期限（真 schedule、真本机存储）：执行中的 job 按超时停下、说明是期限那一句，排队的 job 不启动；run 级记 error
+    并带 run 级说明，记录、报告与 stdout 都是这一份，退出码 1。没有启动的 job 运行态保持 pending、没有判定明细；文本汇总与报告把它
+    标为没有执行，`--json` 只在 jobs 里少了它。认领时刻随认领写下，之后两次 job 状态写都保留它。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+    from gherkai_core.serialize import instant_to_iso
+    from datetime import timedelta
+
+    _clock, engine = _deadline_mid_run(monkeypatch)
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports), "--max-concurrency", "1", *flags])
+    cap = capsys.readouterr()
+    assert rc == 1 and engine.started == ["a"], cap.err
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    state = LocalRunStore(reports).load_run_state(run_dir.name)
+    assert (state.status, state.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert {sid: js.status for sid, js in state.jobs.items()} == {"a": Status.ERROR, "b": Status.PENDING}
+    assert state.jobs["a"].claimed_at == instant_to_iso(_T0 + timedelta(seconds=1900)) and state.jobs["b"].claimed_at is None
+    assert state.claim_count == 1
+    _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
+    [jr] = result_store.load_all(run_dir.name)
+    assert (jr.scope_id, jr.status, jr.error_type, jr.message) == ("a", Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    page = (run_dir / "index.html").read_text(encoding="utf-8")
+    assert f"说明: {RUN_DEADLINE_PASSED_MESSAGE}" in page and "<code>b</code> <b>没有执行</b>" in page
+    if flags:
+        doc = json.loads(cap.out)
+        assert (doc["status"], doc["message"]) == ("error", RUN_DEADLINE_PASSED_MESSAGE)
+        assert [j["scope_id"] for j in doc["jobs"]] == ["a"] and [j["scope_id"] for j in doc["run_meta"]["jobs"]] == ["a", "b"]
+        assert doc["run_meta"]["deadline_at"] == instant_to_iso(_T0 + timedelta(seconds=2120))
+    else:
+        assert "总状态: error" in cap.out and f"说明: {RUN_DEADLINE_PASSED_MESSAGE}" in cap.out
+        assert f"job 'a': error  (timeout: {DEADLINE_TIMEOUT_MESSAGE})" in cap.out and "job 'b': 没有执行" in cap.out
+    assert "报告: " in cap.err
+
+
+def test_run_no_report_obeys_the_deadline_and_shows_it_only_in_the_result(tmp_path, monkeypatch, capsys):
+    """`--no-report` 没有记录、没有认领：同样在期限停下执行中的 job、不启动排队的 job，到期只体现在结果上（run 级 error 加说明），
+    什么都不落盘，退出码 1。"""
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    _clock, engine = _deadline_mid_run(monkeypatch)
+    monkeypatch.setattr(m.compose, "build_local_stores", lambda **kw: pytest.fail("--no-report 不该装配任何 store"))
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--no-report", "--report-dir", str(reports),
+                 "--max-concurrency", "1", "--json"])
+    doc = json.loads(capsys.readouterr().out)
+    assert rc == 1 and engine.started == ["a"] and not reports.exists()
+    assert (doc["status"], doc["message"]) == ("error", RUN_DEADLINE_PASSED_MESSAGE) and "artifacts" not in doc
+    assert [(j["scope_id"], j["error_type"]) for j in doc["jobs"]] == [("a", "timeout")]
+
+
+def test_run_past_the_deadline_after_an_interrupt_exits_by_signal(tmp_path, monkeypatch, capsys):
+    """到期收尾的 run 处理过使用方中断：run 级照样是 error 加说明（记录与输出都是这一份），退出码按信号取。"""
+    import signal as _signal
+
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        _signal.raise_signal(_signal.SIGINT)
+        assert opts.interrupt() == 1
+        opts.on_interrupt(1)
+        first = JobResult(job=run_meta.jobs[0], status=Status.ERROR, error_type="timeout")
+        on_job_complete(first)
+        return RunResult(run_meta=run_meta, status=Status.ERROR, message=RUN_DEADLINE_PASSED_MESSAGE, jobs=[first])
+
+    monkeypatch.setattr(m, "schedule", fake_schedule)
+    reports = tmp_path / "reports"
+    assert m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports)]) == 130
+    out = capsys.readouterr().out
+    assert f"说明: {RUN_DEADLINE_PASSED_MESSAGE}" in out and "job 'b': 没有执行" in out
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    state = LocalRunStore(reports).load_run_state(run_dir.name)
+    assert (state.status, state.message, state.jobs["b"].status) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, Status.PENDING)
+
+
+def test_run_stops_when_another_writer_ends_the_run_mid_execution(tmp_path, monkeypatch, capsys):
+    """真 schedule、真本机存储：a 执行中另一个写入方把 run 记为已结束。a 的下一次 job 状态写得知 run 级已结束，调度循环停下 a（记
+    aborted、说明是 run 已被记为已结束那一句），b 不启动、运行态保持 pending；收尾不覆盖记录、不生成报告，stdout 为空，退出码 1。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.model import ScopeStarted
+    from gherkai_core.project import ENDED_ELSEWHERE_ABORT_MESSAGE
+
+    reports = tmp_path / "reports"
+    box = {}
+
+    def script_a(job, handle):
+        assert LocalRunStore(reports).try_finalize(box["run_id"], Status.ERROR, _ENDED_AT, message=_ENDED_REASON) is True
+        yield ScopeStarted(scope_id=job.scope_id)  # 这次 job 状态写落在 run 已结束之后
+        handle.stopped.wait(5)
+
+    engine = _ScriptedEngine({"a": script_a})
+    _real_schedule_with(monkeypatch, engine, before=lambda meta: box.update(run_id=meta.run_id))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports), "--max-concurrency", "1", "--json"])
+    cap = capsys.readouterr()
+    assert rc == 1 and cap.out == "" and engine.started == ["a"], cap.err
+    assert "在本次执行结束之前已被记为已结束" in cap.err
+    state = LocalRunStore(reports).load_run_state(box["run_id"])
+    assert (state.status, state.message, state.ended_at) == (Status.ERROR, _ENDED_REASON, _ENDED_AT)
+    assert {sid: js.status for sid, js in state.jobs.items()} == {"a": Status.ABORTED, "b": Status.PENDING}
+    _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
+    [jr] = result_store.load_all(box["run_id"])
+    assert (jr.scope_id, jr.status, jr.message) == ("a", Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert not (reports / box["run_id"] / "index.html").exists()
+
+
 def test_no_report_skips_persistence_entirely(tmp_path, monkeypatch, capsys):
     # --no-report：persistence=None，store 装配一次都不该被调（零落盘运行路径）
     constructed = {"n": 0}

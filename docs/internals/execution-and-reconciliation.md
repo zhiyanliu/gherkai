@@ -6,7 +6,7 @@
 
 gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
-- **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线，在一个循环内完成启动 worker、消费事件流、判定超时、收集结果。按 Ctrl-C 或向 CLI 发 SIGTERM 时，CLI 的信号处理器只记下中断，`schedule` 轮询到后走与 fail-fast 同一条停止路径：首次中断请求全部 worker 协作停止（local 向 worker 的进程组发 SIGTERM、宽限到期再 SIGKILL；cloud 发 StopTask，宽限由部署配置决定），再次中断时 local 改用零宽限、cloud 只是重发 StopTask；照常收集结果后 run 记 aborted、以 130 / 143 结束（[ADR 0024](../adr/0024-worker-core-protocol.md) 终止契约「使用方中断」条）。CLI 进程被直接结束（如 `kill -9`）时，local 的 worker 定期核验所属进程是否存活，发现它已退出即按收到 SIGTERM 收尾并释放会话（同一 ADR「父进程消失视同停止信号」条）；cloud 的 worker 不做这项核验，已在运行的 Fargate task 没有调用方发起 StopTask，会运行至结束并持续计费。
+- **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线，在一个循环内完成启动 worker、消费事件流、判定超时、收集结果。按 Ctrl-C 或向 CLI 发 SIGTERM 时，CLI 的信号处理器只记下中断，`schedule` 轮询到后走与 fail-fast 同一条停止路径：首次中断请求全部 worker 协作停止（local 向 worker 的进程组发 SIGTERM、宽限到期再 SIGKILL；cloud 发 StopTask，宽限由部署配置决定），再次中断时 local 改用零宽限、cloud 只是重发 StopTask；照常收集结果后 run 记 aborted、以 130 / 143 结束（[ADR 0024](../adr/0024-worker-core-protocol.md) 终止契约「使用方中断」条）。它遵守运行期限：过了期限减 60 秒不再启动 job，到期限时停下运行中的 worker；起 worker 之前先认领，发现这个 run 已被别处记为已结束就停手（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二、五）。CLI 进程被直接结束（如 `kill -9`）时，local 的 worker 定期核验所属进程是否存活，发现它已退出即按收到 SIGTERM 收尾并释放会话（同一 ADR「父进程消失视同停止信号」条）；cloud 的 worker 不做这项核验，已在运行的 Fargate task 没有调用方发起 StopTask，会运行至结束并持续计费。
 - **无状态驱动（`submit` + `status`，下称后台/后台运行）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：全量重放事件 → 推算 RunState 并条件写落库 → 推算当前应执行的动作 → 认领并启动下一个 job。**任何宿主都可以调用它推进一步**：它不保存自身状态、不假设上一步由谁推进，这是「无状态」的含义。
 
 不论哪种驱动，worker 与 `core` 之间的回传只有两类：**事件流**（`scope_started`/`step_done`/… 的逐条事件）与**进程退出信号**（退出码由父进程或平台观察得到，不由 worker 上报；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定要求两者同时成立：事件内容完整且进程干净终止，缺一即不判通过（防假绿）。两种驱动的本质差别在于**有没有在线的接收方**：前台有在线接收方，`schedule` 全程在线、收到事件即处理，退出信号由 Engine adapter 当场观察；后台没有常驻接收方，事件流被持久化、退出信号也被转写成 `task_exited` 记入同一份日志，于是任何宿主都能仅凭重放这份日志推进（各组合的物理通道见 §5）。
@@ -34,10 +34,11 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 ```
 plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
-  ├─ 按并发闸启动 worker(每 scope 一个)
+  ├─ 按并发闸取 job：已过停止启动的时刻(期限减 60 秒)或已发现 run 被别处结束 → 不启动、不产出判定；否则认领(记认领时刻)后启动 worker(每 scope 一个)
   ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（桌面 job 在浏览器会话建好后、建连之前发，设备 job 在取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成落判定(RunPersistence)；本机后端下事件原始行与退出记录同时落 events.db（--no-report 不写；云端 run 的事件由 worker 直接写 events 表）
-  ├─ 静默停滞由心跳检出、超出 job 超时预算即停 → handle.stop(local=SIGTERM→宽限→SIGKILL;cloud=StopTask)
-  └─ 全部收敛 → finalize(终态一次落定)+ RunReport
+  ├─ 静默停滞由心跳检出；墙钟到截止时刻(认领时刻加 job 预算，以运行期限封顶)即停 → handle.stop(local=SIGTERM→宽限→SIGKILL;cloud=StopTask)
+  ├─ 认领被拒、重试之前读到终态或写 job 状态时得知 run 已被别处记为已结束 → 停手：运行中的 worker 按首次仲裁停下(截止时刻已过记超时，否则记 aborted；内容已完整的保留判定)，排队的不再启动
+  └─ 全部收敛 → finalize(条件写落定终态；已过停止启动的时刻而有 job 没有启动时为 error 加 run 级说明)+ RunReport
 ```
 
 local 与 cloud 在这条路径上的差别**只在 Engine adapter**：
@@ -134,7 +135,7 @@ PK = run_id#scope_id
 
 | 路径         | 到点机制                                                                                                                                                                                                          | 停止方式                                                                                                                                                                                             |
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 前台 `run`   | schedule 循环内计时到点（deadline）                                                                                                                                                                               | 本机后端下是 `handle.stop(grace)`（SIGTERM→宽限→SIGKILL）；云端后端下是 `StopTask`（宽限由 task-def `stopTimeout` 决定、不逐次传入——上限与取舍见 [ADR 0032](../adr/0032-fargate-execution-environment.md) 结论 4） |
+| 前台 `run`   | schedule 循环内按墙钟比较截止时刻：认领时刻加预算，与运行期限取较早的一个（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二）                                                                   | 本机后端下是 `handle.stop(grace)`（SIGTERM→宽限→SIGKILL）；云端后端下是 `StopTask`（宽限由 task-def `stopTimeout` 决定、不逐次传入——上限与取舍见 [ADR 0032](../adr/0032-fargate-execution-environment.md) 结论 4） |
 | local submit | per-run 进程的 launcher 在启动 worker 子进程时装配的到点计时器（`threading.Timer`，存在于 owner 进程内）；该进程若中断，计时随之丢失——接力者改按库里的 `claimed_at` 起算、每轮推进时复查是否超出预算（+固定余量） | 本进程启动的 job：`handle.stop(grace)`（协作式停止，同前台 local，grace 取引擎最小宽限）；接力恢复的他人 job：worker 已随 fd3 断管退出、无 handle 可停，直接记一条 `timed_out` 退出记录收敛          |
 | cloud submit | 启动 task 时为该 job **设置一个一次性到点定时器**（EventBridge Scheduler one-time；与 §4b exit-observer 的 EventBridge **rule** 同名不同物：那是事件总线订阅，这是独立定时服务）                                  | 到点由 kicker 处置，整条链见下图；另有任意 `tick` 的防御扫描作为双保险                                                                                                                               |
 

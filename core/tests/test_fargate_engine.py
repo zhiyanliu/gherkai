@@ -19,6 +19,7 @@ from gherkai_core.adapters.fargate_engine import EXIT_SK, FargateEngine, Fargate
 from gherkai_core.errors import WorkerExitError, WorkerNetworkError
 from gherkai_core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
 from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
+from tests.fake_engine import FAR_DEADLINE
 
 
 _RUN_ID = "20260707T120000Z-abc123"
@@ -887,7 +888,7 @@ def _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls: int):
         job_s3=("b", "jobs-in/"), events_table_name="events", container_name="worker",
         artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.0, null_exit_grace_polls=null_exit_grace_polls,
     )
-    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),), deadline_at="2026-01-01T01:00:00+00:00"), lambda _engine: eng, lambda _event: None,
+    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),), deadline_at=FAR_DEADLINE), lambda _engine: eng, lambda _event: None,
                    opts=ScheduleOpts(max_concurrency=1))
     return res.jobs[0]
 

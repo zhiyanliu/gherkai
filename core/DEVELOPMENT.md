@@ -17,6 +17,7 @@
 - [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行 core 侧拆分（project 纯归约投影 + reconcile 推进编排 + event_log 持久事件通道）
 - [0048](../docs/adr/0048-test-targets-device-and-ui-kind.md) 测试目标模型（Target / `@device` / `@app`、定义层校验）
 - [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话生命周期（会话事件、终结四阶段、设备计量与 evidence）
+- [0054](../docs/adr/0054-settle-leftover-foreground-runs.md) 运行期限与遗留前台 run 的收尾（期限规则 `run_deadline`、run 级裁决、run 级终态不可变、执行方先认领再启动）
 
 ## 模块
 
@@ -26,14 +27,15 @@ core/gherkai_core/
 ├── parse.py      ← .feature → 领域模型（基于 gherkin-official Compiler；该库封装在此 seam 之后）
 ├── scope.py      ← tag 分组 + engine / 测试目标 / timeout 校验 → Job[]；对外 plan(features, config, *, select=None) -> Job[]（select 是 `--scope/--tags/--scenario` 的筛选谓词，筛选只缩小要运行的范围、不增不改，ADR 0041 决策一）
 ├── target.py     ← 测试目标的定义层结构校验 validate_job_definition：字段成对、非空、类型与合法组合；组合根写 definition 之前与推进器读 definition 时各校验一次，违约时抛 DefinitionContractError（ADR 0048 决策 3）
-├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）
+├── serialize.py  ← 领域模型↔dict 的单一序列化真理源（store adapter 复用，ADR 0016/0027）；记录里的时刻（ISO 串）与带时区 datetime 之间的唯一一份解析与写法 instant_from_iso / instant_to_iso
 ├── wire.py       ← Job→JSON（core 发给 worker）与 JSON→0024 事件（worker 发回 core）的单向线序列化 + 退出码约定 EX_WORKER_NETWORK/raise_for_worker_exit（两 Engine adapter 共用一份，ADR 0024/0028）；worker↔core 协议的实装处
 ├── errors.py     ← core 类型化异常：WorkerExitError（worker 非零退出，带原退出码；云端任务取不到退出码时带平台侧哨兵 255 与归因 reason，ADR 0024「exitCode 落值延迟」条）及其子类 WorkerNetworkError（network_error 重试分类，ADR 0028）；另有三个 ValueError 子类：UnsupportedDefinitionSchema（definition 结构版本不符，ADR 0037 决策 7）/ DefinitionContractError（definition 结构违约，ADR 0048 决策 3）/ FeatureContractError（feature 写法与配置违约，parse/scope 共用，ADR 0019/0025）；以及 RuntimeError 子类 RunAlreadyEnded（前台收尾时 run 已被别处记为已结束，带读回的运行态、读回失败时为空，ADR 0054 决策五）
-├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunStore / ResultStore / ReportStore 接口（组合根注入）；**另两个 port（`EventLog` / `Launcher`）定义在 `reconcile.py`**，只服务无状态推进路径（ADR 0034），清点注入面时须同时查看两处，理由见 `ports.py` 模块头
-├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停）
-├── project.py    ← 无状态批量运行纯归约投影（ADR 0034）：project(meta, records)→RunState + project_full(meta, records)→RunResult（终值判定/报告用）+ plan_next(state, max_concurrency)→actions + reduce_event 与 finalize_job（终结函数与真值表，ADR 0034 机制二；与 schedule 共用同一份归约与终结判定）+ projected_run_status（投影写应记录的 run 级 status，两 RunStore adapter 共用）
+├── ports.py      ← Engine / WorkerHandle / EngineResolver / Sink / JobSink / RunRecord / RunStore / ResultStore / ReportStore 接口（组合根注入；RunRecord 是调度循环服从记录的认领、重试之前的读与停手信号，ADR 0054 决策五）；**另两个 port（`EventLog` / `Launcher`）定义在 `reconcile.py`**，只服务无状态推进路径（ADR 0034），清点注入面时须同时查看两处，理由见 `ports.py` 模块头
+├── schedule.py   ← schedule(run_meta, engines, sink, opts, on_job_complete?, on_event?) -> RunResult（同步 run：并发/隔离/超时/优雅停；墙钟与 RunRecord 经 ScheduleOpts 注入，遵守运行期限、起 worker 之前先认领、发现 run 已被别处结束即停手，run 级经 project.run_verdict，ADR 0054 决策二、五）
+├── project.py    ← 无状态批量运行纯归约投影（ADR 0034）：project(meta, records)→RunState + project_full(meta, records)→RunResult（终值判定/报告用）+ plan_next(state, max_concurrency)→actions + reduce_event 与 finalize_job（终结函数与真值表，ADR 0034 机制二；与 schedule 共用同一份归约与终结判定）+ run_verdict（run 级裁决：包住聚合，加上使用方中断、运行期限与 run 已被别处记为已结束三种例外，ADR 0054 决策二）与 run_totals（run 级合计）+ projected_run_status（投影写应记录的 run 级 status，两 RunStore adapter 共用）
+├── run_deadline.py ← 运行期限的规则（ADR 0054 决策二）：停止启动的提前量 60 秒、是否已过停止启动的时刻与期限、job 截止时刻（认领时刻加预算与期限取较早者）与 run 级到期说明；墙钟时刻在 core 里是带时区的 datetime。期限的算式在 runtime 的 `gherkai_runtime.deadline`
 ├── reconcile.py  ← 无状态批量运行推进编排（ADR 0034）：`EventLog` / `Launcher` 两个 port 在此定义（与消费它们的推进器同处）+ tick(run_id, meta, event_log, run_store, launcher, max_concurrency, *, now_iso, result_store=None) -> TickOutcome（继续推进 / 本轮走完收尾分支 / 读到既有终态，宿主据此决定是否继续与是否写报告，ADR 0034 机制三「run 级状态只进不退」条④）：先读运行态、已收尾即停止推演；幂等、多触发源、CAS/HWM 条件写；启动 job 经注入的 Launcher（core 不 import boto3）；finalize 分支在 CAS 前写入判定真值（ADR 0030 决定三写序）+ finalize_report(...)（tick 返回本轮走完收尾分支后写 RunReport，cloud Lambda/local per-run 两宿主共用）
-├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）；收尾用 try_finalize，run 级已是终态时不覆盖、不写报告、抛 RunAlreadyEnded（ADR 0054 决策五）
+├── persist.py    ← RunPersistence：编排 Store ports 随进度实时落库（commit-point 写序，ADR 0030）；实现 RunRecord（认领并记住认领时刻、此后的 job 状态写带上它，重试之前的读，三处发现汇成的停手信号）；收尾用 try_finalize 带 run 级说明，run 级已是终态时不覆盖、不写报告、抛 RunAlreadyEnded（ADR 0054 决策五）
 ├── redact.py     ← 凭据脱敏三条规则（URL userinfo、封闭名单的签名类查询参数与隧道令牌、Device Farm 端点的路径令牌；worker 日志转发、事件解码、CLI 出口共用，ADR 0035 决策 5）；用例与两个 worker 的同文实现共用 `engines/fixtures/redaction-cases.json`
 ├── termcolor.py  ← 终端颜色开关的统一策略（`NO_COLOR` / `FORCE_COLOR` / `TERM=dumb` / 目标流是否终端）；worker 日志前缀与 runtime 的 textui 共用，ADR 0047
 ├── device_session.py ← 远程访问会话的呈现辅助：一行设备描述、会话 ARN 对应的 Device Farm 控制台链接；纯函数，报告入口页与 cli 的 render 共用（ADR 0051 决策 8）
@@ -45,7 +47,7 @@ core/gherkai_core/
     ├── event_log/recording.py      ← 原始事件行记录器（ADR 0042 决策七）：make_raw_sink（一个 scope 的逐行落库回调，runtime 的 SubprocessLauncher 与同步 run 共用）+ EventRecordingEngine（组合根为同步 run 的 SubprocessEngine 加一层包装，把事件行与退出记录旁路落 SqliteEventLog，Engine port 形状不变、schedule 不知情）
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（boto3 缺失时给出可读报错，ADR 0016 窄腰）
     ├── _atomic.py                  ← 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace` + 显式 mode）：run_state.json / jobs/*.json / 报告三面都有真实并发读者，truncate-then-write 会使读者读到空文件
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ create_run 只在 run 不存在时成立、run 级终态不可变、本机全部写入口在同一把文件锁内且顶层附加键整体保留、认领计数，ADR 0054 决策二/三/五；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 条件写 try_claim_job/project_state/try_finalize，ADR 0034；+ create_run 只在 run 不存在时成立、run 级终态不可变、update_job_state 返回 run 级在这次写时是否仍未结束、本机全部写入口在同一把文件锁内且顶层附加键整体保留、认领计数，ADR 0054 决策二/三/五；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```

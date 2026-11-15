@@ -3087,7 +3087,8 @@ def _cmd_run(args) -> int:
     # 实时写（ADR 0030）：sink 始终是纯进度（不再装饰落库）；落库走两个旁路注入——
     #   on_event（sink_lock 外，收 ScopeStarted 或非 attempted 的 SessionOpened 即把该 job 刷成 RUNNING 并记会话血缘（ADR 0051 决策 4），
     #   不阻塞别的 worker 的进度显示）
-    #   on_job_complete（主线程，每 job 完成落数据面+控制面终态）。--no-report（persistence=None）则零落盘运行、两者皆 None。
+    #   on_job_complete（主线程，每 job 完成落数据面+控制面终态）。--no-report（persistence=None）则零落盘运行、两者皆 None，
+    #   ScheduleOpts.record 同为 None（见下 _run_schedule）。
     on_event = persistence.on_event if persistence else None
     on_job_complete = persistence.on_job_complete if persistence else None
 
@@ -3107,10 +3108,11 @@ def _cmd_run(args) -> int:
         f"default_job_timeout={'按目标缺省' if args.default_job_timeout is None else f'{args.default_job_timeout:g}s'} ..."
     )
 
-    # 5) schedule：执行 RunMeta（definition）→ RunResult（各 job 恒有墙钟预算）。
-    #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）。
-    #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开始执行，落库回调（on_event/on_job_complete）中途抛 botocore
-    #    异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退出码 1（error 级）。
+    # 5) schedule：执行 RunMeta（definition）→ RunResult（各 job 恒有墙钟预算，运行期限封顶，ADR 0054 决策二）。
+    #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）；起 worker 之前经 record 认领。
+    #    过了期限减提前量即不再启动 job：RunResult 的 run 级是 error 加说明，没有启动的 job 不在判定清单里，下面照常输出与生成报告。
+    #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开始执行，落库回调（on_event/on_job_complete）、认领或重试之前的读中途抛
+    #    botocore 异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退出码 1（error 级）。
     #    单一 schedule 调用点 + 条件 try（不复制两份，避免回调/opts 透传漂移）。
     # 使用方中断（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只置标志（零 I/O），schedule 轮询它；
     # 首次中断协作停止全部 worker（释放会话），再次中断强制结束。提示语在主线程由 on_interrupt 打出，退出码按信号取 128 加信号号。
@@ -3131,6 +3133,11 @@ def _cmd_run(args) -> int:
                 stop_bound_s=stop_bound,  # 停止后等待预算，排空上界取它加余量；None（本机后端）表示取 grace（ADR 0034 机制二）
                 interrupt=interrupt.level,
                 on_interrupt=_on_interrupt,
+                # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，两个后端相同，
+                # `--no-report` 也注入（没有记录照样遵守期限）
+                wall_clock=compose.now,
+                # 服从记录（ADR 0054 决策五）：落库服务提供认领、重试之前的读与停手信号；`--no-report` 没有记录，不认领、不读
+                record=persistence,
             ),
             on_job_complete=on_job_complete,
             on_event=on_event,

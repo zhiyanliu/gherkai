@@ -189,6 +189,24 @@ def test_run_json_keys_are_documented():
     _assert_documented(doc, section="run", ignore={"X-Test", "novaact"}, opaque={"provider_minutes", "device"})
 
 
+def test_run_json_top_level_message_is_always_present_and_documented_as_run_level():
+    """run 级 `message`（ADR 0054 决策二）：顶层键恒在，没有时为 null；按运行期限收尾的 run 带说明，`run_meta.jobs` 与 `jobs` 的差就是
+    没有执行的 scope。契约页按键名逐节对照，而 run 一节早已写过 job 级的 `message`，只靠差集照不出顶层这一行漏写：这里另核顶层表里
+    有 `message` 一行，并写明那个差只在 run 级 `message` 有值时出现。"""
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    result = _sample_run_result()
+    assert "message" in render.to_dict(result) and render.to_dict(result)["message"] is None
+    ended = dataclasses.replace(result, message=RUN_DEADLINE_PASSED_MESSAGE, jobs=result.jobs[:2])
+    doc = render.to_dict(ended)
+    assert doc["message"] == RUN_DEADLINE_PASSED_MESSAGE
+    assert {j["scope_id"] for j in doc["run_meta"]["jobs"]} - {j["scope_id"] for j in doc["jobs"]} == {"i.feature:3"}
+    top_level = _sections()["run"].partition("`jobs[]` 每项")[0]  # run 一节里 RunResult 顶层那张表
+    row = next((ln for ln in top_level.splitlines() if ln.startswith("| `message` |")), None)
+    assert row is not None, "契约页 run 一节的顶层表没有 `message` 一行"
+    assert "`run_meta.jobs` 里有而 `jobs` 里没有的 scope 没有执行" in row and "只在 run 级 `message` 有值时出现" in row
+
+
 def _plan_form(job: M.Job) -> M.Job:
     """definition 形态 → plan 形态：plan 不解析设备请求（恒 null），应用条目只有别名与包名（安装包在 run / submit 时才上传）。"""
     app = job.target.app

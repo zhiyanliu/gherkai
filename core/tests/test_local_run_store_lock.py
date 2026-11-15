@@ -32,10 +32,11 @@ while not go.exists():
     time.sleep(0.001)
 run_id, role = a["run_id"], a["role"]
 if role == "update":
+    returns = []
     for k in range(a["times"]):
-        store.update_job_state(run_id, JobState(scope_id=a["scope_id"], status=Status.RUNNING,
-                                                session_id="%s-%d" % (a["scope_id"], k)))
-    print("done")
+        returns.append(store.update_job_state(run_id, JobState(scope_id=a["scope_id"], status=Status.RUNNING,
+                                                               session_id="%s-%d" % (a["scope_id"], k))))
+    print(json.dumps(returns))
 elif role == "claim":
     results, seen = [], []
     for sid in a["scope_ids"]:
@@ -179,7 +180,10 @@ def test_concurrent_job_writes_and_claims_in_separate_processes_lose_no_update(t
 
 def test_terminal_status_survives_job_writes_racing_a_finalize_in_another_process(tmp_path: Path):
     """另一个进程在前台 job 写持续进行时把 run 记为已结束：结束后 run 级仍是那次收尾写下的终态、ended_at 与说明，没有被一次读在
-    终态之前、写在终态之后的 job 写改回 running；收尾之后的 job 写照常落下（只写 job）。"""
+    终态之前、写在终态之后的 job 写改回 running；收尾之后的 job 写照常落下（只写 job）。
+
+    每次 job 写的返回值（run 级在这次写时是否仍未结束，ADR 0054 决策五）与锁内的次序一致：每个写入进程先得到若干 True、之后一直是
+    False，不会在 False 之后又得到 True；收尾进程写成之后才读到的那次 job 写之后的写都是 False；至少有一个写入进程两种都得到过。"""
     updated = [f"u{i}" for i in range(3)]
     times = 300
     store = LocalRunStore(tmp_path / "runs")
@@ -195,3 +199,13 @@ def test_terminal_status_survives_job_writes_racing_a_finalize_in_another_proces
     assert (state.status, state.ended_at, state.message) == (Status.ERROR, "2026-11-15T01:00:00Z", "ended elsewhere")
     for sid in updated:
         assert state.jobs[sid].session_id == f"{sid}-{times - 1}"
+
+    returns = {sid: json.loads(out) for sid, out in zip(updated, outs[:-1])}
+    for sid, got in returns.items():
+        assert len(got) == times
+        still_open = got.index(False) if False in got else times
+        assert got == [True] * still_open + [False] * (times - still_open), (sid, got)
+        seen = finalized["seen"][sid]  # 收尾写成之后读到的这个 job 的最后一次写；之后的写都落在收尾之后
+        after = 0 if seen is None else int(seen.rsplit("-", 1)[1]) + 1
+        assert all(r is False for r in got[after:]), (sid, seen, got)
+    assert any(True in got and False in got for got in returns.values()), returns

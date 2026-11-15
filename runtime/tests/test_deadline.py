@@ -45,6 +45,21 @@ def test_deadline_is_written_in_the_same_form_as_created_at():
     assert deadline.compute_deadline_at("2026-11-15T16:00:00+08:00", [], per_job_tail_s=210.0) == "2026-11-15T08:15:00+00:00"
 
 
+def test_record_instants_read_by_the_core_rules_round_trip_in_the_same_form():
+    """组合根写下的时刻（创建时刻、算出的期限）经 core 的解析与写法往返不变：执行方比较的是同一个时刻，认领时刻写回记录时与
+    `now_iso` 同一写法。"""
+    from gherkai_core.model import RunMeta
+    from gherkai_core.run_deadline import deadline_of
+    from gherkai_core.serialize import instant_from_iso, instant_to_iso
+
+    created = compose.now_iso()
+    got = deadline.compute_deadline_at(created, [_job("a", 300.0)], per_job_tail_s=210.0)
+    for written in (created, got):
+        assert instant_to_iso(instant_from_iso(written)) == written
+    meta = RunMeta(run_id="r", created_at=created, jobs=(_job("a", 300.0),), deadline_at=got)
+    assert (deadline_of(meta) - instant_from_iso(created)).total_seconds() == 1410.0
+
+
 def test_created_at_without_timezone_is_rejected():
     with pytest.raises(ValueError, match="须带时区"):
         deadline.compute_deadline_at("2026-11-15T08:00:00", [_job("a", 300.0)], per_job_tail_s=210.0)

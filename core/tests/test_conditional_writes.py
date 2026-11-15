@@ -13,6 +13,8 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三「run 级状态只进不退」条：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
   运行态不变、前台 job 写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
 - 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
+- `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（job 照写），对
+  写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束（ADR 0054 决策五）。
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0；收尾写可带期望的计数（ADR 0054 决策二）。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0054 决策三末段）。
 本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
@@ -189,6 +191,41 @@ def test_job_write_before_create_raises(run_store):
         run_store.update_job_state("nope", JobState("a", Status.RUNNING))
     with pytest.raises(FileNotFoundError):
         run_store.update_job_state("nope", JobState("a", Status.PENDING))
+
+
+_ANY_JOB_STATUS = [Status.PENDING, Status.RUNNING, Status.PASSED, Status.ERROR, Status.SKIPPED]
+
+
+@pytest.mark.parametrize("job_status", _ANY_JOB_STATUS)
+def test_job_write_reports_the_run_still_open(run_store, job_status):
+    """update_job_state 返回 run 级在这次写时是否仍未结束（ADR 0054 决策五）：run 级为 pending 与为 running 时都返回 True，
+    对写入的任何 job 态都是；落库结果与不看返回值时相同。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.update_job_state("run-1", JobState("a", job_status)) is True  # run 级 pending
+    assert run_store.try_claim_job("run-1", "b") is True  # run 级 running
+    assert run_store.update_job_state("run-1", JobState("a", job_status, session_id="sess-a")) is True
+    got = run_store.load_run_state("run-1")
+    assert got.status == Status.RUNNING
+    assert got.jobs["a"] == JobState("a", job_status, session_id="sess-a")
+
+
+@pytest.mark.parametrize("job_status", _ANY_JOB_STATUS)
+def test_job_write_on_a_finalized_run_reports_it_ended(run_store, job_status):
+    """run 级已是终态时 update_job_state 返回 False：job 照写，run 级、ended_at、message 与认领计数都不变（前台执行者据此得知
+    run 已被别处记为已结束）。对写入的任何 job 态都如实，写入 pending 也是。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-11-15T08:00:00+00:00") is True
+    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="已超过允许运行的时间（已记为已结束）") is True
+    before = run_store.load_run_state("run-1")
+    written = JobState("a", job_status, claimed_at="2026-11-15T08:00:00+00:00")
+    assert run_store.update_job_state("run-1", written) is False
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at, got.message, got.claim_count) == (
+        Status.ERROR, "t1", "已超过允许运行的时间（已记为已结束）", before.claim_count)
+    assert got.jobs["a"] == written
+    assert got.jobs["b"] == before.jobs["b"]
 
 
 def test_claim_writes_claimed_at(run_store):
@@ -573,8 +610,8 @@ def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, mo
 
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
     """DDB 侧 `update_job_state` 的写入次数（ADR 0034 机制三「run 级状态只进不退」条③）：run 未收尾时一次（写 pending、
-    写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级的条件写被挡，再只写 job），STATE 不存在时
-    同样两次后报错。"""
+    写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级条件的写被挡，再只写 job），STATE 不存在时
+    同样两次后报错。写入 pending 与写入别的 job 态走同样的两次写（ADR 0054 决策五：返回值由条件写本身给出）。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
     store.create_run(meta, _initial(meta))
@@ -586,15 +623,47 @@ def test_ddb_job_write_update_item_counts(aws, monkeypatch):
     assert counts == [1, 1, 1]
 
     assert store.try_finalize("run-1", Status.FAILED, "t1") is True
-    calls.clear()
-    store.update_job_state("run-1", JobState("a", Status.ERROR))
-    assert len(calls) == 2
-    assert store.load_run_state("run-1").jobs["a"].status == Status.ERROR
+    for js in (JobState("a", Status.ERROR), JobState("b", Status.PENDING)):
+        calls.clear()
+        store.update_job_state("run-1", js)
+        assert len(calls) == 2
+        assert store.load_run_state("run-1").jobs[js.scope_id].status == js.status
 
-    calls.clear()
+    for js in (JobState("a", Status.RUNNING), JobState("a", Status.PENDING)):
+        calls.clear()
+        with pytest.raises(FileNotFoundError):
+            store.update_job_state("nope", js)
+        assert len(calls) == 2
+
+
+def test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes(aws, monkeypatch):
+    """DDB 侧第二次写（只写 job）要求 run 级已是终态，而不只要求 STATE 存在：第一次写因 STATE 不存在被挡之后、第二次写之前并发建出
+    全 pending 的 run 时，第二次写同样被挡、照常报 STATE 不存在，job 不落进新记录，也不会报告一个仍为 pending 的 run 已结束；与本机
+    「运行态不存在即报错」一致（ADR 0054 决策五：返回值对任何写入都如实）。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    table = aws["ddb"].Table(aws["table_name"])
+    store = DynamoDBRunStore(table)
+    ccf = table.meta.client.exceptions.ConditionalCheckFailedException
+    meta = _meta("run-race")
+    real_update_item = table.update_item
+    created = []
+
+    def update_item_creating_the_run_after_the_first_rejection(**kwargs):
+        try:
+            return real_update_item(**kwargs)
+        except ccf:
+            if not created:  # 第一次写被挡之后、第二次写之前，另一个写入方建出这个 run
+                created.append(True)
+                DynamoDBRunStore(table).create_run(meta, _initial(meta))
+            raise
+
+    monkeypatch.setattr(table, "update_item", update_item_creating_the_run_after_the_first_rejection)
     with pytest.raises(FileNotFoundError):
-        store.update_job_state("nope", JobState("a", Status.RUNNING))
-    assert len(calls) == 2
+        store.update_job_state("run-race", JobState("a", Status.RUNNING))
+    assert created == [True]
+    got = store.load_run_state("run-race")
+    assert got.status == Status.PENDING
+    assert got.jobs["a"] == JobState("a", Status.PENDING)
 
 
 def test_ddb_rejected_scalar_write_issues_no_job_writes(aws, monkeypatch):

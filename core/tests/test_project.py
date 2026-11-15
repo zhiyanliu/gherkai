@@ -5,10 +5,13 @@ reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此�
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from gherkai_core.model import (
     Cost,
+    DeviceFarmRequest,
     Job,
     JobResult,
     RunMeta,
@@ -19,9 +22,12 @@ from gherkai_core.model import (
     Status,
     Step,
     StepDone,
+    Target,
 )
-from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited, plan_next, project, project_full,
-                                  recover_from_events, run_totals)
+from gherkai_core.project import (PLATFORM_FAILED_EXIT, Action, EventRecord, RunVerdict, TaskExited, apply_device_metering,
+                                  plan_next, project, project_full, recover_from_events, run_totals, run_verdict)
+from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+from tests.fake_engine import FAR_DEADLINE
 
 
 def _job(scope_id: str, engine: str = "novaact") -> Job:
@@ -31,7 +37,7 @@ def _job(scope_id: str, engine: str = "novaact") -> Job:
 
 def _meta(*scope_ids: str) -> RunMeta:
     return RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z",
-                   jobs=tuple(_job(s) for s in scope_ids), deadline_at="2026-01-01T01:00:00+00:00")
+                   jobs=tuple(_job(s) for s in scope_ids), deadline_at=FAR_DEADLINE)
 
 
 def _ev(scope_id: str, seq: int, event, ts: float = 0.0) -> EventRecord:
@@ -323,23 +329,130 @@ def test_run_totals_agree_between_schedule_and_project_full():
     assert totals(sync) == totals(stateless) == (1500, 0.0, None, None)
 
 
-def test_run_totals_keeps_separate_missing_rules_for_cost_and_device_metering():
-    """run_totals 的两组键各守各的缺失语义：成本原生量只合计报了的 job、全无值才为 None、报了 0 照记 0；设备计量按设备 job
-    成对合计，任一键有值即为设备 job、其另一键缺失按 0 计入，没有设备 job 时两键都是 None。"""
-    def jr(scope: str, **kw) -> JobResult:
-        return JobResult(job=_job(scope), status=Status.PASSED, **kw)
+def _device_job(scope_id: str) -> Job:
+    return replace(_job(scope_id), target=Target(device="android", ui_kind="web"),
+                   device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
 
-    assert run_totals([]) == {"total_tokens": None, "total_time_worked_s": None,
-                              "device_observed_s": None, "device_observed_missing": None}
-    zero = run_totals([jr("a"), jr("b", total_tokens=0, total_time_worked_s=0.0)])  # 报了 0 不是没报
+
+def test_run_totals_keeps_separate_missing_rules_for_cost_and_device_metering():
+    """run_totals 的两组键各守各的缺失语义：成本原生量只合计报了的 job、全无值才为 None、报了 0 照记 0；设备计量对设备 job
+    成对合计，某一键缺失按 0 计入，运行定义里没有设备 job 时两键都是 None。"""
+    def jr(job: Job, **kw) -> JobResult:
+        return JobResult(job=job, status=Status.PASSED, **kw)
+
+    assert run_totals([], jobs=()) == {"total_tokens": None, "total_time_worked_s": None,
+                                       "device_observed_s": None, "device_observed_missing": None}
+    a, b, c = _job("a"), _job("b"), _job("c")
+    zero = run_totals([jr(a), jr(b, total_tokens=0, total_time_worked_s=0.0)], jobs=(a, b))  # 报了 0 不是没报
     assert zero == {"total_tokens": 0, "total_time_worked_s": 0.0, "device_observed_s": None, "device_observed_missing": None}
-    mixed = run_totals([jr("a"), jr("b", total_tokens=0), jr("c", total_tokens=7, total_time_worked_s=1.5)])
+    mixed = run_totals([jr(a), jr(b, total_tokens=0), jr(c, total_tokens=7, total_time_worked_s=1.5)], jobs=(a, b, c))
     assert (mixed["total_tokens"], mixed["total_time_worked_s"]) == (7, 1.5)
-    one_key = run_totals([jr("d1", device_observed_s=3.0), jr("web")])  # 设备 job 缺的那一键按 0 计入，不是 None
+    d1, d2, web = _device_job("d1"), _device_job("d2"), _job("web")
+    one_key = run_totals([jr(d1, device_observed_s=3.0), jr(web)], jobs=(d1, web))  # 设备 job 缺的那一键按 0 计入，不是 None
     assert (one_key["device_observed_s"], one_key["device_observed_missing"]) == (3.0, 0)
-    device = run_totals([jr("d1", device_observed_s=3.0), jr("d2", device_observed_missing=2), jr("web")])
+    device = run_totals([jr(d1, device_observed_s=3.0), jr(d2, device_observed_missing=2), jr(web)], jobs=(d1, d2, web))
     assert (device["device_observed_s"], device["device_observed_missing"]) == (3.0, 2)
     assert (device["total_tokens"], device["total_time_worked_s"]) == (None, None)
+
+
+def test_run_totals_device_keys_follow_the_definition_when_the_verdict_list_is_incomplete():
+    """判定清单不全时（有 job 没有启动），设备计量两键是否出现按运行定义里有没有设备 job 判断（ADR 0054 决策二）：设备 job 全部
+    没有启动时两键都是 0、不省键；运行定义里没有设备 job 时仍是 None。成本两键不受影响。"""
+    d1, web = _device_job("d1"), _job("web")
+    only_web = run_totals([JobResult(job=web, status=Status.PASSED, total_tokens=5)], jobs=(d1, web))
+    assert only_web == {"total_tokens": 5, "total_time_worked_s": None, "device_observed_s": 0.0, "device_observed_missing": 0}
+    assert isinstance(only_web["device_observed_s"], float)
+    nothing_started = run_totals([], jobs=(d1,))
+    assert (nothing_started["device_observed_s"], nothing_started["device_observed_missing"]) == (0.0, 0)
+    desktop_only = run_totals([], jobs=(web,))
+    assert (desktop_only["device_observed_s"], desktop_only["device_observed_missing"]) == (None, None)
+
+
+def test_run_totals_with_a_complete_verdict_list_matches_the_metered_job_results():
+    """判定清单完整时，按运行定义判出现与否和按判定里设备计量两键是否有值判，结果相同：设备 job 的判定由终结流程填上两键，
+    桌面 job 的保持 None。两条归约路径产出的 JobResult 都经同一个填法（apply_device_metering）。"""
+    d1, web = _device_job("d1"), _job("web")
+    results = [JobResult(job=d1, status=Status.PASSED, sessions=[]), JobResult(job=web, status=Status.PASSED)]
+    for r in results:
+        apply_device_metering(r)
+    assert (results[0].device_observed_s, results[0].device_observed_missing) == (0.0, 0)
+    assert (results[1].device_observed_s, results[1].device_observed_missing) == (None, None)
+    got = run_totals(results, jobs=(d1, web))
+    assert (got["device_observed_s"], got["device_observed_missing"]) == (0.0, 0)
+    assert run_totals(results[1:], jobs=(web,))["device_observed_s"] is None
+
+
+# ---------- run 级裁决（ADR 0054 决策二）----------
+
+def _decided(job: Job, status: Status) -> JobResult:
+    return JobResult(job=job, status=status)
+
+
+def _verdict(results, jobs, *, past_stop_start=False, interrupted=False, ended_elsewhere=False):
+    return run_verdict(results, jobs, past_stop_start=past_stop_start, interrupted=interrupted, ended_elsewhere=ended_elsewhere)
+
+
+@pytest.mark.parametrize("statuses, expected", [
+    ((Status.PASSED, Status.PASSED), Status.PASSED),
+    ((Status.PASSED, Status.FAILED), Status.FAILED),
+    ((Status.FAILED, Status.ERROR), Status.ERROR),
+    ((Status.ERROR, Status.SKIPPED), Status.ERROR),  # fail-fast 的形态：skipped 不进聚合，run 级由 error 定
+    ((Status.ERROR, Status.ABORTED, Status.SKIPPED), Status.ERROR),
+    ((), Status.PASSED),  # 零个 job 的 run（不加筛选时可达）：沿用聚合对空输入的值
+])
+def test_run_verdict_without_exceptions_is_the_aggregate(statuses, expected):
+    """全部 job 都有判定、没有中断也没有发现被别处结束时，run 级就是聚合的值，没有说明；已过停止启动的时刻也一样（决策二第 4 条：
+    没有未启动的 job 就照常聚合，不管当前时刻是否已过期限）。"""
+    jobs = tuple(_job(f"j{i}") for i in range(len(statuses)))
+    results = [_decided(j, s) for j, s in zip(jobs, statuses)]
+    assert _verdict(results, jobs) == RunVerdict(expected, None)
+    assert _verdict(results, jobs, past_stop_start=True) == RunVerdict(expected, None)
+
+
+def test_run_verdict_past_stop_start_with_unstarted_jobs_is_an_error_with_the_run_message():
+    """已过停止启动的时刻而有 job 没有判定：run 级 error，说明是「已超过允许运行的时间」。已启动的 job 全部通过时聚合会给 passed，
+    这一条不能靠聚合；它优先于使用方中断的 aborted，发现被别处结束时同样如此。"""
+    a, b, c = _job("a"), _job("b"), _job("c")
+    started = [_decided(a, Status.PASSED), _decided(b, Status.PASSED)]
+    expected = RunVerdict(Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert RUN_DEADLINE_PASSED_MESSAGE == "已超过允许运行的时间"
+    assert _verdict(started, (a, b, c), past_stop_start=True) == expected
+    assert _verdict(started, (a, b, c), past_stop_start=True, interrupted=True) == expected
+    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.SKIPPED)], (a, b, c),
+                    past_stop_start=True, interrupted=True) == expected
+    assert _verdict(started, (a, b, c), past_stop_start=True, ended_elsewhere=True) == expected
+    assert _verdict([], (a, b, c), past_stop_start=True) == expected  # 一个 job 都没有启动
+
+
+def test_run_verdict_interrupt_exception_is_kept():
+    """使用方中断的例外收进裁决函数，规则不变：处理过中断、且有 job 被中止或没有启动（skipped），run 级 aborted；判定已完整的
+    （中断到达时没有 job 被停下）照常聚合；没有中断时 skipped 与 aborted 不改变聚合。"""
+    a, b = _job("a"), _job("b")
+    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.PASSED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
+    assert _verdict([_decided(a, Status.SKIPPED), _decided(b, Status.SKIPPED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
+    assert _verdict([_decided(a, Status.FAILED), _decided(b, Status.SKIPPED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
+    assert _verdict([_decided(a, Status.PASSED), _decided(b, Status.FAILED)], (a, b), interrupted=True) == RunVerdict(Status.FAILED)
+    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.PASSED)], (a, b)) == RunVerdict(Status.PASSED)
+
+
+@pytest.mark.parametrize("statuses", [
+    (Status.PASSED, Status.PASSED),
+    (Status.PASSED, Status.ABORTED),
+    (Status.FAILED, Status.ERROR),
+])
+def test_run_verdict_after_the_run_was_ended_elsewhere_is_never_passed(statuses):
+    """发现 run 已被别处记为已结束之后，这次执行的 run 级结果本不成为记录；万一写成了也不能是 passed：一律记 aborted、没有说明。"""
+    a, b = _job("a"), _job("b")
+    results = [_decided(a, statuses[0]), _decided(b, statuses[1])]
+    assert _verdict(results, (a, b), ended_elsewhere=True) == RunVerdict(Status.ABORTED)
+    assert _verdict(results[:1], (a, b), ended_elsewhere=True) == RunVerdict(Status.ABORTED)  # 另一个 job 没有启动
+
+
+def test_run_verdict_with_an_unstarted_job_is_never_passed_even_without_a_stated_cause():
+    """有 job 没有判定而调用方没有给出原因（不该发生）时同样不判 passed：这一条在函数内成立，不依赖调用方传对标记。"""
+    a, b = _job("a"), _job("b")
+    assert _verdict([_decided(a, Status.PASSED)], (a, b)) == RunVerdict(Status.ABORTED)
+    assert _verdict([], (a, b)) == RunVerdict(Status.ABORTED)
 
 
 def test_stateless_path_cannot_yield_aborted_job():
@@ -359,6 +472,15 @@ def test_project_full_without_any_record_is_passed():
     full = project_full(_meta("a", "b"), [])
     assert full.jobs == []
     assert full.status == Status.PASSED
+
+
+def test_project_full_device_keys_follow_the_definition():
+    """project_full 的设备计量两键同样按运行定义判出现与否：设备 job 没有记录（未纳入判定）时两键为 0，不省键。"""
+    meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(_device_job("d"), _job("w")),
+                   deadline_at=FAR_DEADLINE)
+    full = project_full(meta, _passed_events("w") + [_exit("w", 0)])
+    assert [jr.scope_id for jr in full.jobs] == ["w"]
+    assert (full.device_observed_s, full.device_observed_missing) == (0.0, 0)
 
 
 # ---------- plan_next（机制四）----------

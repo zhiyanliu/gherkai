@@ -70,6 +70,11 @@ _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
 # scope 级 error 后合成的 skipped（status=skipped 且 shortcircuited=False，ADR 0051 决策 4 / 0031 决定六）：这一步没执行，
 # 原因在 job 判定（被测对象未就绪或会话丢失）。报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
 _SCOPE_SKIPPED_NOTE = "未执行（scope 级错误，原因见 job 判定）"
+# 运行定义里有、判定清单里没有的 job（`RunResult.jobs_without_verdict`，ADR 0054 决策二）：已过停止启动的时刻、或发现 run 已被别处
+# 记为已结束而没有启动，没有判定，原因在 run 级说明。它不是 skipped（skipped 是因 fail-fast 或使用方中断而未启动、有判定，原因在
+# job 的 message），也不是 step 行的「未执行」旁注（scope 级错误之后合成的 skipped），所以 job 行上只写这个标注、不写状态词。
+# 报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
+_NOT_RUN_LABEL = "没有执行"
 _ATTEMPTED_LABEL = "结果未知的创建尝试"
 
 
@@ -122,7 +127,8 @@ def session_lines(jr: JobResult) -> list[str]:
 
 
 def render_text(result: RunResult) -> str:
-    """RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。
+    """RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。有 run 级说明时紧跟总状态给出，
+    运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行（ADR 0054 决策二）。
 
     面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
     但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
@@ -134,6 +140,8 @@ def render_text(result: RunResult) -> str:
 def run_tree(result: RunResult) -> TreeNode:
     """run 汇总的树（`render_text` 的结构；测试按节点归属断言，不按排版）。"""
     root = TreeNode(Text.assemble("运行结果  总状态: ", status_text(result.status.value)))
+    if result.message:  # run 级说明（ADR 0054 决策二）：没有任何 job 能承载的原因（如已超过允许运行的时间），紧跟总状态
+        root.add(f"说明: {_one_line(result.message)}")
     if result.duration_ms is not None:
         root.add(f"总墙钟时长: {_ms(result.duration_ms)}")
     cost_bits = _cost_bits(result.total_tokens, result.total_time_worked_s)
@@ -187,6 +195,9 @@ def run_tree(result: RunResult) -> TreeNode:
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
             jn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
+    # 没有判定的 job 排在有判定的之后、按运行定义的次序（ADR 0054 决策二）：只有 scope 与标注，原因已在上面的 run 级说明里
+    for job in result.jobs_without_verdict:
+        root.add(Text.assemble(f"job {job.scope_id!r}: ", styled(_NOT_RUN_LABEL, "yellow")))
     return root
 
 
