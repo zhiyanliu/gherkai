@@ -308,18 +308,20 @@ def scan_family(ecs, family: str) -> list[RevisionInfo]:
 
 
 def _parse_ts(value) -> datetime | None:
-    """tag 里的 ISO 串 / boto3 回来的 datetime → aware UTC datetime；空或读不懂 → None。"""
+    """tag 里的 ISO 串 / boto3 回来的 datetime → aware datetime；空、读不懂或不带时区的串 → None。
+
+    串经 `serialize.instant_from_iso` 读（记录里的时刻只有这一处解析）：本包写进 tag 与映射的时刻都出自带时区的时钟，不带时区的串
+    不是本包写的，与读不懂的值同样按没有处理。boto3 回来的 datetime 不是解析出的值，缺时区时按 UTC 补上（AWS 返回的时刻是 UTC）。"""
     if value is None or value == "":
         return None
     if isinstance(value, datetime):
         return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
-    from gherkai_runtime import compose
+    from gherkai_core.serialize import instant_from_iso
 
     try:
-        parsed = compose.parse_iso(str(value))
+        return instant_from_iso(str(value))
     except ValueError:
         return None
-    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
 
 
 def _lineage_tags(*, variant: str, version: str, digest: str, template_arn: str) -> list[dict[str, str]]:
@@ -1252,7 +1254,7 @@ def _pushed_at_human(iso: str | None) -> str:
     机读形态（`--json`）仍是完整的 ISO 串；缺值给 `-`；解析不了的原样返回、不抛。"""
     if not iso:
         return "-"
-    dt = _parse_ts(iso)  # 与 tag 时刻同一个解析入口；不带时区的按 UTC 读
+    dt = _parse_ts(iso)  # 与 tag 时刻同一个解析入口；不带时区的与读不懂的同样原样返回
     return iso if dt is None else dt.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 

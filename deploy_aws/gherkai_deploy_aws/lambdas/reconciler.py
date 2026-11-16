@@ -32,10 +32,10 @@ def _run_ids_from_stream(event) -> set[str]:
     """从 DDB Stream records 提取涉及的 run_id 集（PK=run_id#scope_id，取 # 前段）。去重——一个 batch 可能多条同 run。
 
     **REMOVE 记录跳过**：events 表开 TTL（`expires_at`，两引擎的 event sink 写 emit+7d），TTL 过期删除同样进
-    Stream、同样带 Keys。它不携带任何新信息，却会让本 handler 对一个早已收尾的 run 重新运行一次全量重放——那时
-    worker 事件已被删、只剩不带 `expires_at`（永不过期）的退出记录，推演出的每个 job 都成 error 并按 ADR 0030
-    决定三的写序覆盖 ResultStore 里的判定真值。用 `.get` 只排除 REMOVE、**不做 INSERT 白名单**：events 表虽只
-    PutItem，同键重写（超时处置直写的退出记录被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY。
+    Stream、同样带 Keys。它不携带任何新信息，本道跳过它、不为它推进一次；推进方本次读到终态即返回（`_build` 的
+    语义闸与 tick 的判停，各道防护各挡哪些触发见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条）。
+    用 `.get` 只排除 REMOVE、**不做 INSERT 白名单**：events 表虽只 PutItem，同键重写（超时处置补写的退出记录
+    被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY。
     IaC 侧的事件源 filter 同样滤掉 REMOVE（见 `stack.py` events 表的 `DynamoEventSource`）——那道要重新部署
     才生效，本道不依赖部署。语义闸另有一道在 `_build`（已终态的 run 整体 no-op），挡迟到重投/手工重放。
     """
@@ -58,19 +58,51 @@ def _run_ids_from_stream(event) -> set[str]:
 
 # StopTask reason 里的超时哨兵串：经 STOPPED 事件 detail.stoppedReason 原样出现（现成通道、零新键空间），
 # exit_observer 见它 → task_exited(timed_out=True) → 归因链收敛 ERROR+timeout。哨兵串的比对封在 `exit_from_task`
-# 里，观察者 Lambda 与超时处置经该函数共用（都不各自 import 本常量）。
+# 里，观察者 Lambda 与超时处置经该函数共用（都不各自 import 本常量）。reason 的其余部分按起作用的截止时刻分别写
+# （`_stop_reason`），只给看 ECS 控制台的人读；归因不读它，job 的说明由投影按认领时刻、预算与期限重算。
 TIMEOUT_STOP_SENTINEL = "gherkai-job-timeout"
 
+# 日志里对起作用的那个截止时刻的说法：job 自己的墙钟预算到点，还是 run 的期限封顶（ADR 0054 决策二第 2 条）。
+_CUTOFF_BY_TEXT = {"budget": "job 的墙钟预算用尽", "deadline": "run 已到允许运行的时间"}
 
-def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
-    """ECS task 对象 → 退出记录三元组 (exit_code, timed_out, reason)。**观察者与超时处置共用**（ADR 0034 机制二）。
+
+def _job_cutoff(meta, job, claimed_at):
+    """由运行态里的认领时刻、job 预算与运行期限重算这个 job 的截止时刻（`run_deadline.job_cutoff`，与推进步骤认领时算的、交给定时
+    触发的是同一个算法，以期限封顶）。运行定义里没有这个 job，或认领时刻缺失、读不出、不带时区时返回 None——各调用点按各自现有的
+    「缺认领时刻」分支处理。"""
+    from gherkai_core.run_deadline import deadline_of, job_cutoff
+    from gherkai_core.serialize import instant_from_iso
+
+    if job is None:
+        return None
+    try:
+        claimed = instant_from_iso(claimed_at)
+    except ValueError:
+        return None
+    return job_cutoff(claimed, job.timeout_s, deadline_of(meta))
+
+
+def _stop_reason(job, cutoff) -> str:
+    """StopTask 的 reason：哨兵串在前（`exit_from_task` 靠它归因），后面说明是哪一个截止时刻到了。重算不出截止时刻时（缺认领时刻）
+    只说到了时间上限。"""
+    if cutoff is None:
+        return f"{TIMEOUT_STOP_SENTINEL}: scope reached its time limit"
+    if cutoff.by == "deadline":
+        return f"{TIMEOUT_STOP_SENTINEL}: run deadline {cutoff.at.isoformat()} reached"
+    return f"{TIMEOUT_STOP_SENTINEL}: scope exceeded {job.timeout_s:g}s budget"
+
+
+def exit_from_task(task: dict) -> tuple[int, bool, str | None, _dt.datetime | None]:
+    """ECS task 对象 → 退出记录四元组 (exit_code, timed_out, reason, exited_at)。**观察者与超时处置共用**（ADR 0034 机制二）。
 
     STOPPED 事件的 `detail` 与 `DescribeTasks` 的 `tasks[i]` 是同一个 Task 形状，故同一 task 两边算出同一内容、
     PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
     exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
     + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。哨兵与归因串的拼法都住 core
     （`platform_exit_reason`，同步路径的 FargateEngine 共用同一份，ADR 0024「exitCode 落值延迟」条）。timed_out：stoppedReason
-    含本模块 StopTask 时写入的哨兵串（「job timeout」节归因链）。
+    含本模块 StopTask 时写入的哨兵串，即发过超时的停止请求（「job timeout」节归因链）。exited_at：task 的执行停止时刻，见
+    `_task_stopped_at`。只记事实：是否已过截止时刻由投影判断，观察者读不到运行态与运行定义，也不需要读（ADR 0054 决策二后台推进条
+    「截止时刻与说明」）。
     """
     from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
 
@@ -85,7 +117,32 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None]:
     if exit_code is None:
         exit_code = PLATFORM_FAILED_EXIT
         reason = platform_exit_reason(task.get("stopCode"), stopped_reason)
-    return exit_code, timed_out, reason
+    return exit_code, timed_out, reason, _task_stopped_at(task)
+
+
+def _task_stopped_at(task: dict) -> _dt.datetime | None:
+    """task 对象里的执行停止时刻（带时区）：`executionStoppedAt`（容器实际停下的时刻），没有时取 `stoppedAt`（ECS 记下 task 已停止的
+    时刻，晚于前者，中间是平台的清理开销），都没有或读不出时为 None（退出记录不带退出时刻）。
+
+    两种来源给出两种形态，分开处理：
+    - STOPPED 事件的 detail 里是 ISO 串（带 `Z`）。串一律经 core 的 `serialize.instant_from_iso` 解析，与记录里的时刻同一处严格解析：
+      不带时区或读不出的串当作这个字段没有值，按上面的次序取下一个字段。不补成 UTC：串里没写时区，补哪个时区都是猜。
+    - boto3 的 DescribeTasks 回来的是 datetime（botocore 由纪元秒换算而来，带时区）。这是平台对象的归一化：不带时区的 datetime 按 UTC，
+      带时区的保持原样。
+    同一个时刻在两种形态下得到同一个值，写进退出记录的 ISO 串也就相同（同键先后写入内容不变）。读不出时不抛：观察者只有这一次机会
+    写下退出记录，宁可缺退出时刻也不丢整条记录。"""
+    from gherkai_core.serialize import instant_from_iso
+
+    for key in ("executionStoppedAt", "stoppedAt"):
+        value = task.get(key)
+        if isinstance(value, _dt.datetime):
+            return value.replace(tzinfo=_dt.timezone.utc) if value.tzinfo is None else value
+        if isinstance(value, str):
+            try:
+                return instant_from_iso(value)
+            except ValueError:
+                continue
+    return None
 
 
 def _task_scope_id(task: dict) -> str | None:
@@ -100,25 +157,32 @@ def _task_scope_id(task: dict) -> str | None:
 _DESCRIBE_TASKS_MAX = 100
 
 # 防御扫（claimed_at ②）的判定余量秒：Scheduler one-time schedule 是主机制，扫是双保险。余量是经验值：覆盖主机制的调度
-# 精度分量（Scheduler 在 deadline 所在那一分钟内偏晚触发，不到 60 秒）加一次处置的常态耗时（异步 invoke 的排队、列 task、
+# 精度分量（Scheduler 在截止时刻所在那一分钟内偏晚触发，不到 60 秒）加一次处置的常态耗时（异步 invoke 的排队、列 task、
 # 停 task，秒级、没有硬上界），让主机制在常态下先于扫处置、也避开与在途的 STOPPED→exit_observer 链形成竞态；不是上界。
-# 非正确性参数：两者先后颠倒也无害（处置幂等，复查 deadline 与退出记录后才动手）。
+# 非正确性参数：两者先后颠倒也无害（处置幂等，复查截止时刻与退出记录后才动手）。
 _DEFENSIVE_TIMEOUT_MARGIN_S = 120.0
 
-# 到点处置复查 deadline 时的等待上界秒（ADR 0034「job timeout」节「到点不早于 deadline」条②）：Scheduler 只承诺
-# 60 秒精度，按文档精度触发时离 deadline 至多约 59 秒；剩余超过它说明触发早于文档精度，此时不等待、不处置。
+# 到点处置复查截止时刻时的等待上界秒（ADR 0034「job timeout」节「到点不早于 deadline」条②）：Scheduler 只承诺
+# 60 秒精度，按文档精度触发时离截止时刻至多约 59 秒；剩余超过它说明触发早于文档精度，此时不等待、不处置。醒来之后重读时钟
+# 仍未到而接着等时，一次处置里各次等待之和同样不超过它。
 _TIMEOUT_EARLY_WAIT_MAX_S = 60.0
 
-# 等到 deadline 之后本次调用还要完成的工作所留的秒数：处置（ListTasks 翻页、DescribeTasks、StopTask）与随后的一次 tick
+# 每次等待的下限（秒）。「已到」指读到的墙钟严格晚于截止时刻（与本机启动器的检查、收尾投影比较退出时刻的取法相同）：恰好等于时
+# 剩余为零，只差不到一秒时剩余很小，按剩余时长等待都可能让循环空转。所以每次至少等这个固定量，同样计入等待额度：墙钟不前进时
+# （测试注入的时钟、出故障的系统时钟）不论它停在哪里，至多约 60 次就用完额度、按不处置返回；每次醒来都要重读 job 状态与退出
+# 记录，次数必须有界。代价是停止最多晚不到一秒，与分钟精度的定时触发相比可以忽略；它只会让停止更晚，不会提前。
+_TIMEOUT_TIE_WAIT_S = 1.0
+
+# 等到截止时刻之后本次调用还要完成的工作所留的秒数：处置（ListTasks 翻页、DescribeTasks、StopTask）与随后的一次 tick
 # （读写 runs/events 表，可能起下一个 task）。kicker 用 Lambda 剩余时间减去它作为本次可等待的上界，免得等完被超时截断。
 _TIMEOUT_HANDLING_RESERVE_S = 30.0
 
 
 class EventBridgeTimeoutWatch:
-    """job timeout 的云端到点触发器（ADR 0034「job timeout」节）：CloudLauncher 起 task 后 arm 一个
-    EventBridge Scheduler **one-time schedule**（at 取 deadline，即 claimed_at 加 timeout、带秒；ActionAfterCompletion=DELETE
-    到点自动删——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
-    Scheduler 只承诺分钟精度、可能早于 deadline 触发，「不早于 deadline」由处置侧复查保证（`_handle_timeout`），不靠 at 的秒数。
+    """job 截止时刻的云端到点触发器（ADR 0034「job timeout」节；`cloud_launcher.TimeoutWatch` 的实现）：CloudLauncher 起 task 前 arm 一个
+    EventBridge Scheduler **one-time schedule**（at 取 core 传来的截止时刻，即认领时刻加预算、以运行期限封顶，带秒；
+    ActionAfterCompletion=DELETE 到点自动删——无常驻轮询、idle 零成本）→ 到点 invoke kicker（payload {"run_id","timeout_scope"}）走超时处置。
+    Scheduler 只承诺分钟精度、可能早于截止时刻触发，「不早于截止时刻」由处置侧复查保证（`_handle_timeout`），不靠 at 的秒数。
 
     schedule 名是 `names.job_timeout_schedule_prefix(prefix)` + sha1(run_id#scope_id) 的前 `names.JOB_TIMEOUT_DIGEST_LEN`
     位：确定性（重复 arm 幂等，ConflictException 视作已武装）、合法字符集（scope_id 可含中文/路径，不能直接入名）、≤64 字符
@@ -140,18 +204,17 @@ class EventBridgeTimeoutWatch:
         digest = hashlib.sha1(f"{run_id}#{scope_id}".encode("utf-8")).hexdigest()[:names.JOB_TIMEOUT_DIGEST_LEN]
         return f"{names.job_timeout_schedule_prefix(self._prefix)}{digest}"
 
-    def arm(self, run_id: str, scope_id: str, timeout_s: float, claimed_at: str) -> None:
+    def arm(self, run_id: str, scope_id: str, at: _dt.datetime) -> None:
         import json
-        from gherkai_runtime import compose
 
-        # 到点时刻取 deadline 本身：claim 时刻加预算（与到点复查、防御扫同一算法），arm 晚于 claim 的间隔不推后到点。
-        at = compose.parse_iso(claimed_at).astimezone(_dt.timezone.utc) + _dt.timedelta(seconds=timeout_s)
+        # 到点时刻就是截止时刻本身（tick 认领时算好，与到点复查、防御扫同一算法），arm 晚于认领的间隔不推后到点。
+        at_utc = at.astimezone(_dt.timezone.utc)
         try:
             self._client.create_schedule(
                 Name=self.schedule_name(run_id, scope_id),
-                # at() 表达式不带时区后缀（Scheduler 默认 UTC）、只收到秒，小数秒截去。带秒而不取整到分钟：触发早于 deadline
+                # at() 表达式不带时区后缀（Scheduler 默认 UTC）、只收到秒，小数秒截去。带秒而不取整到分钟：触发早于截止时刻
                 # 的部分由处置侧复查补足，取整只会把取整与调度精度引入的推迟分量翻倍，异步投递与处置耗时另计（ADR 0034「job timeout」节被拒方案）。
-                ScheduleExpression=f"at({at.strftime('%Y-%m-%dT%H:%M:%S')})",
+                ScheduleExpression=f"at({at_utc.strftime('%Y-%m-%dT%H:%M:%S')})",
                 FlexibleTimeWindow={"Mode": "OFF"},
                 ActionAfterCompletion="DELETE",  # 到点触发即自动删（IAM 需随附 scheduler:DeleteSchedule）
                 Target={
@@ -166,34 +229,40 @@ class EventBridgeTimeoutWatch:
 
 def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_budget_fn=None,
                     now_fn=None, sleep_fn=None) -> str:
-    """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 且 deadline 已到才动手。
+    """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 且截止时刻已到才动手。
 
-    **先复查 deadline**（该节「到点不早于 deadline」条②）：Scheduler 只承诺分钟精度，触发可能早于 deadline。job 已不在
-    running 或退出记录已在时照常 no-op、不等待；仍 running 时按 claimed_at 加 Job.timeout_s 复查——已到直接处置；未到且剩余
-    不超过等待上界（`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到 deadline，重读 job 状态与退出记录、仍需处置才往下；
-    剩余超过上界时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
-    缺 claimed_at 或运行定义里没有这个 job 时无从复查，按已到处理。防御扫只对超出预算加余量的 job 调本函数，复查直接通过。
+    **先复查截止时刻**（该节「到点不早于 deadline」条②）：Scheduler 只承诺分钟精度，触发可能早于截止时刻。job 已不在
+    running 或退出记录已在时照常 no-op、不等待；仍 running 时由运行态里的认领时刻、Job.timeout_s 与运行期限重算截止时刻
+    （`_job_cutoff`，以期限封顶，ADR 0054 决策二后台推进条「截止时刻与说明」）复查——已到直接处置；未到且剩余不超过等待额度
+    （`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到截止时刻，重读 job 状态与退出记录、仍需处置才往下；
+    剩余超过额度时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
+    「已到」指读到的墙钟严格晚于截止时刻，与本机启动器的检查、收尾投影比较退出时刻的取法相同；恰好等于截止时刻算没到，按
+    `_TIMEOUT_TIE_WAIT_S` 再等一次。醒来之后重新读墙钟：还没到（等待期间系统时钟被回拨，或恰好读到截止时刻）就在同一份额度内
+    接着等，各次等待之和不超过额度；额度用完仍没到的同样返回 skip-early。发出停止之前因此必须有一次读到已过截止时刻（同一条
+    「截止时刻与说明」）。
+    认领时刻缺失、读不出或运行定义里没有这个 job 时无从复查，按已到处理。防御扫只对过了截止时刻加余量的 job 调本函数，复查直接通过。
     wait_budget_fn：返回本次调用还能用于等待的秒数（kicker 按 Lambda 剩余时间给出），**临睡前才调用**——复查前的两次读取
     也在消耗本次调用的时间，提前采样会把慢读取的耗时算进可等的额度、挤占处置与 tick 的预留；None 表示只受固定上界约束；
-    now_fn / sleep_fn：时钟与等待，供测试注入。
+    now_fn / sleep_fn：时钟与等待，供测试注入；时钟缺省取组合根唯一的墙钟读取点 `compose.now`。
 
     处置：ListTasks(startedBy=run_id) **同时列 RUNNING 与 STOPPED**（后者 ECS 保留约 1h）→ DescribeTasks 按 overrides
     env SCOPE_ID 匹配 → 按 task 状态三路：
-    - 运行中 → StopTask(reason 含哨兵) → STOPPED 事件 → exit_observer 记 task_exited(timed_out=True)（stop 后让观察链
-      自然收敛，保住单一真源）；
+    - 运行中 → StopTask(reason 含哨兵，其余部分按起作用的是预算还是期限分别写，`_stop_reason`) → STOPPED 事件 → exit_observer
+      记 task_exited(timed_out=True)（stop 后让观察链自然收敛，保住单一真源）；
     - **正在停止**（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不动、等观察者。曾只列 RUNNING、把它判成
       「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout；
     - **已 STOPPED 却无退出记录**（STOPPED 事件丢投）→ 用与观察者同一提取函数 `exit_from_task` 从 task 对象落真退出
-      记录（同内容同键、幂等），不臆造 timed_out。
-    两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 直接 record_exit(timed_out=True) 收敛——对位 local 接力恢复，
-    观察链已断时直接写是唯一收敛路径。返回处置结果串（日志/测试断言用）。
+      记录（同内容同键、幂等，含 task 的执行停止时刻），不臆造 timed_out：task 在截止时刻之后自己异常退出的，由投影按退出时刻判为超时。
+    两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 补写一条判为超时的未知退出收敛（`record_timed_out_if_absent`）——对位 local
+    接力恢复，观察链已断时补写是唯一收敛路径。补写只在还没有退出记录时成立：观察者恰在上面的点查之后、补写之前落下真实的退出记录时
+    补写不成立，按退出记录已在返回。返回处置结果串（日志/测试断言用）。
     """
     import boto3
     from gherkai_core.model import Status
     from gherkai_runtime import compose
 
     meta, event_log, run_store, *_ = built
-    now_fn = now_fn or (lambda: _dt.datetime.now(_dt.timezone.utc))  # 纯时间差比较、不落库（同防御扫）
+    now_fn = now_fn or compose.now
     sleep_fn = sleep_fn or time.sleep
 
     def _check() -> tuple[str | None, str | None]:
@@ -211,23 +280,46 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
     if noop:
         return noop
     job = next((j for j in meta.jobs if j.scope_id == scope_id), None)
-    if claimed_at and job is not None:
-        deadline = compose.parse_iso(claimed_at) + _dt.timedelta(seconds=job.timeout_s)
-        remaining = (deadline - now_fn()).total_seconds()
-        if remaining > 0:
-            budget = wait_budget_fn() if wait_budget_fn is not None else None  # 临睡前采样：此前的读取已花掉的时间不再算进额度
-            cap = _TIMEOUT_EARLY_WAIT_MAX_S if budget is None else min(_TIMEOUT_EARLY_WAIT_MAX_S, budget)
-            if remaining > cap:
-                why = ("早于定时服务承诺的触发精度" if remaining > _TIMEOUT_EARLY_WAIT_MAX_S
-                       else f"本次调用剩余的时间只够等 {max(cap, 0):.0f} 秒")
-                print(f"timeout-skip: run={run_id} scope={scope_id} 离预算用尽还有 {remaining:.0f} 秒，{why}"
-                      " → 本次不停止，超出预算后由之后的推进检查收尾")
+    cutoff = _job_cutoff(meta, job, claimed_at)
+    if cutoff is not None:
+        # 发出停止之前必须有一次读到已过截止时刻（墙钟严格晚于截止时刻）：每次醒来都重读墙钟，等待期间时钟被回拨或恰好读到截止
+        # 时刻时还没到，就在这次调用的等待额度内接着等。额度在第一次临睡前定下（固定上界与本次调用还能等的秒数取小），之后各次等待
+        # 的总和不超过它；累计按请求等待的秒数，不按墙钟之差，墙钟正是可能被调整的那个量。
+        now = now_fn()
+        cap: float | None = None
+        waited = 0.0
+        while not now > cutoff.at:
+            remaining = (cutoff.at - now).total_seconds()
+            tie = remaining <= 0  # 恰好读到截止时刻（只用来选日志里的说法）
+            wait = max(remaining, _TIMEOUT_TIE_WAIT_S)  # 每次至少等固定量，见常量注释
+            if cap is None:
+                budget = wait_budget_fn() if wait_budget_fn is not None else None  # 临睡前采样：此前的读取已花掉的时间不再算进额度
+                cap = _TIMEOUT_EARLY_WAIT_MAX_S if budget is None else min(_TIMEOUT_EARLY_WAIT_MAX_S, budget)
+            if waited + wait > cap:
+                if waited > 0:
+                    cause = "读到的恰好是截止时刻" if tie else "等待期间系统时钟被回拨"
+                    why = f"已等过 {waited:.0f} 秒仍未到（{cause}），本次调用的等待额度只剩 {max(cap - waited, 0):.0f} 秒"
+                elif remaining > _TIMEOUT_EARLY_WAIT_MAX_S:
+                    why = "早于定时服务承诺的触发精度"
+                else:
+                    why = f"本次调用剩余的时间只够等 {max(cap, 0):.0f} 秒"
+                by = _CUTOFF_BY_TEXT[cutoff.by]
+                where = f"读到的时刻恰好是截止时刻（{by}）" if tie else f"离截止时刻（{by}）还有 {remaining:.0f} 秒"
+                print(f"timeout-skip: run={run_id} scope={scope_id} {where}，{why} → 本次不停止，过了截止时刻后由之后的推进检查收尾")
                 return "skip-early"
-            print(f"timeout-wait: run={run_id} scope={scope_id} 定时触发早于预算用尽 {remaining:.1f} 秒 → 等到那时再处置")
-            sleep_fn(remaining)
+            if tie:
+                print(f"timeout-wait: run={run_id} scope={scope_id} 读到的时刻恰好是截止时刻、还没有过 → 再等 {wait:g} 秒")
+            elif waited > 0:
+                print(f"timeout-wait: run={run_id} scope={scope_id} 等待之后读到的时刻仍早于截止时刻 {remaining:.1f} 秒"
+                      "（等待期间系统时钟被回拨）→ 接着等")
+            else:
+                print(f"timeout-wait: run={run_id} scope={scope_id} 定时触发早于截止时刻 {remaining:.1f} 秒 → 等到那时再处置")
+            sleep_fn(wait)
+            waited += wait
             noop, _ = _check()  # 等待期间 job 自行结束或退出记录已到 → 照常 no-op
             if noop:
                 return noop
+            now = now_fn()
     ecs = ecs_client if ecs_client is not None else boto3.client(
         "ecs", region_name=os.environ.get("REGION") or os.environ.get("AWS_REGION"))
     cluster = os.environ["CLUSTER"]
@@ -262,28 +354,31 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
         arn = target["taskArn"]
         if target.get("lastStatus") == "STOPPED":
             # 已停但观察者没写（STOPPED 事件丢投）：从 task 对象落真退出记录——与观察者同一算法、同键幂等
-            exit_code, timed_out, reason = exit_from_task(target)
-            event_log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)
+            exit_code, timed_out, reason, exited_at = exit_from_task(target)
+            event_log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason, exited_at=exited_at)
             print(f"timeout-converge: run={run_id} scope={scope_id} task={arn} 已 STOPPED 无退出记录 → 按 DescribeTasks 落 exit={exit_code}")
             return "converged-from-describe"
         if target.get("desiredStatus") == "STOPPED":
             # 不抢着写：退出记录由 exit_observer 收到 STOPPED 事件时落（本函数 docstring「正在停止」那路）
             print(f"timeout-noop: run={run_id} scope={scope_id} task={arn} 正在停止 → 等它的退出事件到达再收尾")
             return "noop-stopping"
-        budget = f"{job.timeout_s:g}" if job is not None else "?"
-        ecs.stop_task(cluster=cluster, task=arn,
-                      reason=f"{TIMEOUT_STOP_SENTINEL}: scope exceeded {budget}s budget")
-        print(f"timeout-stop: run={run_id} scope={scope_id} task={arn}")
+        ecs.stop_task(cluster=cluster, task=arn, reason=_stop_reason(job, cutoff))
+        why = _CUTOFF_BY_TEXT[cutoff.by] if cutoff is not None else "截止时刻无从复查，按已到处理"
+        print(f"timeout-stop: run={run_id} scope={scope_id} task={arn}（{why}）")
         return "stopped"
-    event_log.record_exit(scope_id, None, timed_out=True)
+    if not event_log.record_timed_out_if_absent(scope_id):
+        # 列 task 期间观察者写下了真实的退出记录：让既有链收敛，不盖掉它
+        print(f"timeout-noop: run={run_id} scope={scope_id} 找不到这个 task，但它的退出记录刚刚写下 → 按那条记录收尾")
+        return "noop-exit-in-flight"
     print(f"timeout-converge: run={run_id} scope={scope_id} 找不到这个 task、也没有它的退出记录 → 直接按超时结案")
     return "converged-directly"
 
 
 def _scan_overdue_timeouts(run_id: str, built) -> None:
-    """防御性超时扫（ADR 0034「job timeout」节 claimed_at ②，Scheduler 的双保险）：任何 tick 顺带对
-    RUNNING 且 now-claimed_at > timeout+余量 的 job 走同一超时处置——CreateSchedule 失败/schedule 丢失时，
-    后续任何事件触发的 tick 都能补救。纯静默 job（无事件→无 tick）的主保障仍是 Scheduler 到点 invoke。"""
+    """防御性超时扫（ADR 0034「job timeout」节 claimed_at ②，Scheduler 的双保险）：任何 tick 顺带对 RUNNING 且当前时刻已过
+    截止时刻加余量的 job 走同一超时处置——CreateSchedule 失败/schedule 丢失时，后续任何事件触发的 tick 都能补救。截止时刻由运行态里的
+    认领时刻、预算与期限重算（`_job_cutoff`，与定时触发同一个算法、以期限封顶）；认领时刻缺失或读不出的 job 不碰（无起算点不臆断）。
+    纯静默 job（无事件→无 tick）的主保障仍是 Scheduler 到点 invoke。"""
     from gherkai_core.model import Status
     from gherkai_runtime import compose
 
@@ -292,14 +387,17 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
     if state is None:
         return
     job_by_scope = {j.scope_id: j for j in meta.jobs}
-    now = _dt.datetime.now(_dt.timezone.utc)  # 纯时间差比较、不落库（落库的时间戳一律 compose.now_iso）
+    now = compose.now()
     for sid, js in state.jobs.items():
-        job = job_by_scope.get(sid)
-        if js.status != Status.RUNNING or not js.claimed_at or job is None:
+        if js.status != Status.RUNNING:
             continue
-        elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
-        if elapsed > job.timeout_s + _DEFENSIVE_TIMEOUT_MARGIN_S:
-            print(f"defensive-timeout: run={run_id} scope={sid} elapsed={elapsed:.0f}s > 预算 {job.timeout_s}s+余量")
+        cutoff = _job_cutoff(meta, job_by_scope.get(sid), js.claimed_at)
+        if cutoff is None:
+            continue
+        overdue = (now - cutoff.at).total_seconds()
+        if overdue > _DEFENSIVE_TIMEOUT_MARGIN_S:
+            print(f"defensive-timeout: run={run_id} scope={sid} 已过截止时刻（{_CUTOFF_BY_TEXT[cutoff.by]}）{overdue:.0f} 秒，"
+                  f"超过余量 {_DEFENSIVE_TIMEOUT_MARGIN_S:.0f} 秒")
             _handle_timeout(run_id, sid, built)
 
 
@@ -399,12 +497,13 @@ def _build(run_id: str):
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
         print(f"skip: run {run_id} 不是 submit 提交到后台执行的 run（同步的 `run --backend cloud` 由发起它的命令自己推进）")
         return None
-    # **已收尾的 run 不再推演**：run 到终态时判定真值与报告都已落库，再 tick 一次只会拿「此刻还剩下的事件」
-    # 重算一遍并覆盖写（ADR 0030 决定三的写序无条件执行）——events 表开 TTL，7 天后 worker 事件已被删、只剩
-    # 永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，把权威的判定真值静默销毁。触发面不只
-    # TTL 的 REMOVE（那道已在 `_run_ids_from_stream` 与 IaC filter 挡）：迟到重投、手工重放同一批 Stream 记录、
-    # 超时到点触发器的 payload 都落到这里——后者与 ADR 0034「到点时 job 已终态 → 处置 no-op」一致，且 run
-    # 终态的前提就是每个 job 都已有退出记录或已判超时，不会漏 StopTask。
+    # **已收尾的 run 不再推演**：已收尾的 run 若被重放推演，会拿「此刻还剩下的事件」重算一遍并覆盖写（ADR 0030 决定三的写序
+    # 无条件执行）——events 表开 TTL，7 天后 worker 事件已被删、只剩永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，
+    # 把权威的判定真值静默销毁。触发面不只 TTL 的 REMOVE（那道已在 `_run_ids_from_stream` 与 IaC filter 挡）：迟到重投、
+    # 手工重放同一批 Stream 记录、
+    # 超时到点触发器的 payload 都落到这里——后者读到终态时不做超时处置（与 ADR 0034「job timeout」节
+    # 「到点时 job 已终态 → tick no-op」一致；这一跳过与 StopTask 的关系及两种例外见 ADR 0034 端到端流程 cloud 一节
+    # 「已收尾的 run 不再推演」条）。
     # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——finalize_report 只有
     # 本 Lambda 与 detached 宿主两个调用点、本就没有独立的重生成命令，而事件过期后重 tick 只会生成错报告。
     # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。tick 自身也先读运行态、
@@ -481,15 +580,15 @@ def _run_ids_from_runs_stream(event) -> set[str]:
 def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
     """对每个 run tick 一步，按结果分支。reconciler（events Stream）与 kicker（runs Stream）共用。
 
-    tick 的三种结果（`TickOutcome`，ADR 0034 机制三「run 级状态只进不退」条④）：本轮走完收尾分支 → 写 RunReport；
-    读到既有终态 → 不写报告、不做超时扫（run 已在装配的语义闸之后被别的推进器收尾）；继续推进 → 防御性超时扫。
+    tick 的三种结果（`TickOutcome`，ADR 0034 机制三「run 级状态只进不退」条④）：这一方写成收尾 → 用 tick 交还的结果写 RunReport；
+    run 已结束而终态不是这一方写成的 → 不写报告、不做超时扫；继续推进 → 防御性超时扫。
 
     prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
     （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
     """
     from gherkai_core.reconcile import TickOutcome, tick
-    from gherkai_runtime import compose  # 时钟走 compose.now_iso 单一真源（同 local/前台两宿主，格式不漂移）
+    from gherkai_runtime import compose  # 时钟走 compose.now 单一读取点（同 local/前台两宿主，格式不漂移）
 
     prebuilt = prebuilt or {}
     for run_id in run_ids:
@@ -501,11 +600,11 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
         # 判定真值由 tick 在 finalize CAS 之前落 rstore（ADR 0030 决定三写序）；聚合异常原样抛出 → 本次 invocation 失败 →
         # events Stream 事件源重试本批（commit 之后再失败就没人重试了）。
-        outcome = tick(run_id, meta, event_log, run_store, launcher, mc, now_iso=compose.now_iso(), result_store=rstore)
-        if outcome is TickOutcome.ALREADY_TERMINAL:
-            # 装配时的语义闸之后、tick 读运行态之前，别的推进器已收尾：与那道闸同一处置，判定真值与报告都不改写
+        outcome = tick(run_id, meta, event_log, run_store, launcher, mc, clock=compose.now, result_store=rstore)
+        if outcome.outcome is TickOutcome.ENDED:
+            # 装配时的语义闸之后别的推进器已收尾（tick 读运行态之前，或这一方的收尾写之前）：与那道闸同一处置，报告不改写
             print(f"{label}: run {run_id} 已结束，不再改写它的结果")
-        elif outcome is TickOutcome.FINALIZED:
+        elif outcome.outcome is TickOutcome.COMMITTED:
             # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
             from gherkai_core.reconcile import finalize_report
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
@@ -517,8 +616,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
             except Exception:
                 duration_ms = None
-            finalize_report(run_id, meta, event_log, pstore, compose.now_iso(),
-                            run_duration_ms=duration_ms)
+            finalize_report(outcome.result, pstore, compose.now_iso(), run_duration_ms=duration_ms)
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")

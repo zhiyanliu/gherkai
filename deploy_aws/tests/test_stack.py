@@ -831,8 +831,8 @@ def test_stream_event_source_mapping_to_reconciler():
 
 
 def test_events_stream_mapping_filters_out_ttl_removes():
-    """events 表的事件源 filter 必须排除 REMOVE：events 开 TTL，过期删除同样进 Stream，会让 reconciler 对一个
-    早已收尾的 run 拿「此刻还剩下的事件」重算并覆盖判定真值。
+    """events 表的事件源 filter 必须排除 REMOVE：events 开 TTL，过期删除同样进 Stream、不带新信息，本道不让它们
+    触发推进（推进方本次读到终态即返回；各道防护各挡哪些触发见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条）。
 
     形态必须是 `anything-but REMOVE`、**不是** INSERT 白名单：events 虽只 PutItem，同键重写（超时处置直写的退出
     记录被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY，白名单会把这类携带新归因的写入静默滤掉。

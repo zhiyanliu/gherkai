@@ -44,13 +44,13 @@ def test_has_exit_single_scope(tmp_path):
     log = _log(tmp_path)
     log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
     assert log.has_exit("a") is False
-    log.record_exit("a", None)  # exit_code=None（退出码未知，超时直写形态）也算「退出记录已在」
+    log.record_exit("a", None)  # exit_code=None（退出码未知，如启动失败补偿）也算「退出记录已在」
     assert log.has_exit("a") is True
     assert log.has_exit("b") is False
 
 
 def test_exit_code_none_stored(tmp_path):
-    """exit_code=None（退出码未知，仅超时处置直写时出现）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034 机制二「退出码缺失」条）。"""
+    """exit_code=None（退出码未知：启动失败补偿、补写的未知退出等）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034 机制二「退出码缺失」条）。"""
     log = _log(tmp_path)
     log.record_exit("a", None)
     exits = [r for r in log.records() if r.kind == "exit"]
@@ -99,6 +99,43 @@ def test_record_exit_reason_roundtrip(tmp_path):
     assert exits["b"].reason is None
 
 
+def test_record_exit_exited_at_roundtrip(tmp_path):
+    """退出时刻（带时区）随退出记录落库、读回为同一时刻；记录里写成 UTC 的 ISO 串（serialize.instant_to_iso）。不传则 None。"""
+    import contextlib
+    import sqlite3
+    from datetime import datetime, timedelta, timezone
+
+    log = _log(tmp_path)
+    at = datetime(2026, 7, 19, 8, 0, 1, 250000, tzinfo=timezone(timedelta(hours=8)))
+    log.record_exit("a", 3, exited_at=at)
+    log.record_exit("b", 0)
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert exits["a"].exited_at == at and exits["a"].exited_at.utcoffset() == timedelta(0)
+    assert exits["b"].exited_at is None
+    with contextlib.closing(sqlite3.connect(tmp_path / "events.db")) as conn:
+        stored = dict(conn.execute("SELECT scope_id, exited_at FROM exits"))
+    assert stored == {"a": "2026-07-19T00:00:01.250000+00:00", "b": None}
+
+
+def test_record_timed_out_if_absent_writes_only_when_there_is_no_exit_record(tmp_path):
+    """补写判为超时的未知退出（ADR 0054 决策二「本机接力」条）：还没有退出记录时写成（退出码未知、带超时标志、不带退出时刻），返回
+    True；已有退出记录时不写、不报错，返回 False，原记录原样保留。之后到达的真实退出照旧经 record_exit 覆盖补写的那一条。"""
+    from datetime import datetime, timezone
+
+    log = _log(tmp_path)
+    at = datetime(2026, 7, 19, tzinfo=timezone.utc)
+    log.record_exit("seen", 0, exited_at=at)
+    assert log.record_timed_out_if_absent("seen") is False
+    assert log.record_timed_out_if_absent("lost") is True
+    assert log.record_timed_out_if_absent("lost") is False  # 已有补写的那一条
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert (exits["seen"].exit_code, exits["seen"].timed_out, exits["seen"].exited_at) == (0, False, at)
+    assert (exits["lost"].exit_code, exits["lost"].timed_out, exits["lost"].exited_at) == (None, True, None)
+    log.record_exit("lost", 0, exited_at=at)  # 补写之后才到的真实退出
+    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
+    assert (exits["lost"].exit_code, exits["lost"].timed_out, exits["lost"].exited_at) == (0, False, at)
+
+
 def test_records_reads_events_and_exits_from_one_snapshot(tmp_path, monkeypatch):
     """records() 的两表在同一读事务内读取：读 events 期间另一连接提交了末尾事件与退出记录，结果里两者要么都在、要么都不在。
 
@@ -138,6 +175,7 @@ def test_every_call_closes_its_connection(tmp_path):
         log = _log(tmp_path)
         log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
         log.record_exit("a", 0)
+        log.record_timed_out_if_absent("a")
         log.has_exit("a")
         log.records()
         log.max_seq("a")

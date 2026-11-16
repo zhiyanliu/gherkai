@@ -101,9 +101,9 @@
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
-| `message` | string \| 省略 | run 级原因，没有任何 job 能承载时才有，run 级恒为 `error`：云端推进链**不经任何 job** 就把 run 置为 `error`（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；或这个 run 已超过允许运行的时间、仍有 job 没有执行（「已超过允许运行的时间」，前台 `run` 收尾时写下，与 `run --json` 顶层的 `message` 同一句），这些 job 保持 `pending`。job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
+| `message` | string \| 省略 | run 级原因，没有任何 job 能承载时才有，run 级恒为 `error`：云端推进链**不经任何 job** 就把 run 置为 `error`（提交记录的结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）；或这个 run 已超过允许运行的时间、仍有 job 没有执行（「已超过允许运行的时间」，前台 `run` 收尾时与 `submit` 提交的 run 在后台推进到期收尾时写下，与 `run --json` 顶层的 `message` 同一句），这些 job 保持 `pending`。job 级原因不在这里，看 `run --json` / `explain --json` 里 job 与 step 的 `message` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**） |
-| `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，仅在终态后有内容 |
+| `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在前台 `run` 里每个 job 完成即写入，`submit` 提交的 run 在收尾时才写入、收尾之前没有，run 还没结束时也可能已有 |
 
 ## `gherkai list-runs --json`
 

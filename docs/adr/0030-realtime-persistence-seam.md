@@ -142,9 +142,9 @@ run 结束（schedule 返回后）:
 中途崩会留下「说 passed 但详细结果没齐」的假象）。前台执行者与后台推进用同一个收尾条件写，run 级终态一经写下，对所有写入方
 都不再变（[0054](./0054-settle-leftover-foreground-runs.md) 决策五）。**例外：带 run 级说明的 `error`**（`RunState.message` 有值）表示这个
 run 没有运行完成，有的 job 可能没有判定——按运行期限收尾时没有启动的 job 保持 pending、不落判定明细（0054 决策二第 3 条、决策六），
-推进器在运行定义不可用时不经任何 job 收尾也属此类；它之前已结束的 job 的判定照样先于终态落库。凭「run 级终态」取产物的读者对这类终态按「可能不全」处理。
+推进器在运行定义不可用时不经任何 job 收尾也属此类，这一写不落任何判定明细（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」）；到期收尾时，此前已结束的 job 的判定照样先于终态落库。凭「run 级终态」取产物的读者对这类终态按「可能不全」处理。
 
-**detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态批量运行的 commit point 同样是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的 finalize 分支内、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上）。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态、events 不再变化、没有下一次触发，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。真跑坐实：cloud detached run 收尾后 S3 `reports/<run_id>/` 下 jobs/*.json（判定真值）与 index.html/manifest.json（派生）齐全、reconciler 日志 `done + finalized` 无异常。
+**detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态批量运行的 commit point 同样是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的收尾分支内（全部 job 已结束的收尾与到期收尾都是，[0054](./0054-settle-leftover-foreground-runs.md) 决策二）、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上），只由 CAS 写成的一方写，直接用 `tick` 交还的这一轮结果生成、不再另读事件重算（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④）。后台收尾的步骤、必要契约与已获接受的边界见 0034 该条的「收尾各步的先后与之后会不会变」。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态，此后到达的事件与触发只让推进方读到终态即停、不再重做收尾，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。真跑坐实：cloud detached run 收尾后 S3 `reports/<run_id>/` 下 jobs/*.json（判定真值）与 index.html/manifest.json（派生）齐全、reconciler 日志 `done + finalized` 无异常。
 
 > **两条写 RunStore 的路径并发写同一个 run**（实装关键）：认领与 RUNNING 中间态刷在 **worker 线程**（认领在起 worker 之前；RUNNING 经 `on_event`，在
 > `sink_lock` **之外**调）；job 终态刷 + 收尾在 **主线程**（经 on_job_complete，在主线程等待 job 完成的循环里串行）。这是**两个不同
@@ -187,8 +187,10 @@ run 没有运行完成，有的 job 可能没有判定——按运行期限收�
 > 权限**按面显式声明、不随环境 umask 漂移**：控制面 0600（只本机同 uid 的进程消费），数据面与报告 0644
 > （消费者是 CI / 人 / 静态 server，产物可读性是契约的一部分）。
 > **两条被接受的代价**：① **不做 fsync**——本层防的是并发读者看到中间态，不是掉电后的持久性（那要 fsync
-> 文件 + 目录，成本进每次收尾）；② **写面仍无跨进程互斥**——靠原子替换而非锁，故两个**推进器**各写一遍同一份
-> `jobs/*.json` / 报告仍无害（内容由同一份事件快照派生、可重建）。文件锁只护控制面：建 run 时「运行态是否已在」的判断与
+> 文件 + 目录，成本进每次收尾）；② **写面仍无跨进程互斥**——靠原子替换而非锁：两个**推进器**竞争收尾时先后写同一个
+> `jobs/*.json`，读者读到的总是某一方写完的整份文件，后写的盖掉先写的（竞争收尾的边界见
+> [0054](./0054-settle-leftover-foreground-runs.md)「边界与已知局限」以「多个推进方竞争收尾时」开头的一条）；
+> 报告只由写成收尾的一方写一次，它写在终态之后，原子替换让读到终态即去读报告的读者不会读到写了一半的文件。文件锁只护控制面：建 run 时「运行态是否已在」的判断与
 > `run_meta.json`、`run_state.json` 的写，以及此后 `run_state.json` 的每一次读改写（全部写入口，见上并发不变量）。
 
 ## 决定四：RunStore 按生命周期分三个写入口：建 run、逐 job、收尾

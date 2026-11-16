@@ -10,14 +10,25 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 from gherkai_core.adapters.event_log import SqliteEventLog
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
+from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 from gherkai_runtime.detached import SubprocessLauncher, run_reconcile_loop
+
+# 运行期限规则不介入的用例统一用的期限：远在任何真实时刻与假墙钟之后
+_FAR = "2999-01-01T00:00:00+00:00"
 
 # echo_worker：core 的测试 fixture（真 worker 的假替身，吐 ADR 0024 事件到 fd3）
 _ECHO = str(Path(__file__).resolve().parents[2] / "core" / "tests" / "fixtures" / "echo_worker.py")
@@ -37,33 +48,47 @@ def _job(sid: str, timeout_s: float = 600.0) -> Job:  # 运行定义里的预算
                )),))
 
 
-def _setup(tmp_path, mode, *sids, timeout_s: float = 600.0):
+# 注入确定性墙钟（避免真时钟；这里固定即可，期限远在其后）。固定的墙钟下截止时刻永远不到，用例里的 worker 都自行结束
+def _now():
+    return datetime(2026, 7, 19, tzinfo=timezone.utc)
+
+
+def _one_hour_later():
+    return datetime(2026, 7, 19, 1, tzinfo=timezone.utc)
+
+
+def _wait_until(predicate, timeout_s: float = 10.0) -> None:
+    """轮询到 predicate 成立；超时即让用例失败，不挂住。"""
+    deadline = time.monotonic() + timeout_s
+    while not predicate():
+        assert time.monotonic() < deadline, "等待的条件没有出现"
+        time.sleep(0.01)
+
+
+def _setup(tmp_path, mode, *sids, timeout_s: float = 600.0, clock=_now, deadline_at: str = _FAR):
+    """建一个 run 与它的启动器。clock 是启动器的截止时刻检查读的墙钟，用例须把同一个时钟交给推进循环（组合根两处注入的也是同一个
+    读取点）：截止时刻由推进循环取的认领时刻算出，两处时钟不同就比较不出意义。"""
     meta = RunMeta(run_id="run-1", created_at="t0",
-                   jobs=tuple(_job(s, timeout_s=timeout_s) for s in sids), deadline_at="2026-01-01T01:00:00+00:00")
+                   jobs=tuple(_job(s, timeout_s=timeout_s) for s in sids), deadline_at=deadline_at)
     log = SqliteEventLog(tmp_path / "events.db")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
                                     jobs={s: JobState(s, Status.PENDING) for s in sids},
                                     started_at="t0", high_water_mark=0))
     # 测试显式给短 grace（echo_worker 收 SIGTERM 即协作退）；生产由组合根注 compose.engine_min_grace，参数无缺省
-    launcher = SubprocessLauncher(_echo_resolver(mode), log, min_grace_fn=lambda _engine: 1.0)
+    launcher = SubprocessLauncher(_echo_resolver(mode), log, min_grace_fn=lambda _engine: 1.0, clock=clock)
     return meta, log, store, launcher
-
-
-# 注入确定性 now（避免真时钟；loop 只需单调即可，这里固定即可，tick 不依赖时间差）
-def _now():
-    return "2026-07-19T00:00:00Z"
 
 
 def test_single_job_passes_end_to_end(tmp_path):
     """真 spawn echo_worker(pass) → 事件落 SQLite → reconcile loop 推进到 passed 终态。"""
     meta, log, store, launcher = _setup(tmp_path, "pass", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now)
+                       poll_interval_s=0.05, clock=_now)
     state = store.load_run_state("run-1")
     assert state.status == Status.PASSED
     assert state.jobs["a"].status == Status.PASSED
-    assert state.ended_at == "2026-07-19T00:00:00Z"
+    assert state.ended_at == "2026-07-19T00:00:00+00:00"
     # 事件真落了 SQLite（scope_started + 各 step_done + scope_done）
     recs = log.records()
     assert any(r.kind == "event" for r in recs)
@@ -74,7 +99,7 @@ def test_two_jobs_concurrency_one(tmp_path):
     """max_concurrency=1：两 job 串行推进、都 passed。验 loop 起完一个再起下一个。"""
     meta, log, store, launcher = _setup(tmp_path, "pass", "a", "b")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now)
+                       poll_interval_s=0.05, clock=_now)
     state = store.load_run_state("run-1")
     assert state.status == Status.PASSED
     assert state.jobs["a"].status == Status.PASSED
@@ -83,45 +108,47 @@ def test_two_jobs_concurrency_one(tmp_path):
 
 def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
     """job timeout local enforce 真实运行（ADR 0034「job timeout」节）：silent worker 卡死不吐新事件、不自退——
-    launcher 的 deadline timer 到点协作停（SIGTERM→echo 干净地以退出码 0 退出）→ task_exited(timed_out=True)
+    launcher 的截止时刻检查按墙钟到点协作停（SIGTERM→echo 干净地以退出码 0 退出）→ task_exited(timed_out=True)
     → project 判 ERROR + error_type=timeout。**协作停后退出码 0 也不误判 passed**（timed_out 短路内容判定）。"""
     from gherkai_core.project import project_full
+    from gherkai_runtime import compose
 
-    meta, log, store, launcher = _setup(tmp_path, "silent", "a", timeout_s=0.5)
+    meta, log, store, launcher = _setup(tmp_path, "silent", "a", timeout_s=0.5, clock=compose.now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now)
+                       poll_interval_s=0.05, clock=compose.now)
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     assert state.jobs["a"].status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.timed_out is True
-    jr = project_full(meta, log.records()).jobs[0]
+    claimed = {"a": instant_from_iso(state.jobs["a"].claimed_at)}
+    assert exits[0].exited.exited_at > claimed["a"]  # 启动器记下它看到 worker 退出的那一刻（同一个注入的墙钟）
+    jr = project_full(meta, log.records(), claimed_at=claimed, past_stop_start=False).jobs[0]
     assert jr.error_type == "timeout"  # 归因链端到端（真进程边界）
     assert jr.session_id == "echo-sess"  # 血缘仍从 scope_started 捕获（超时不丢会话线索）
 
 
 def test_relay_recovers_foreign_timed_out_claim(tmp_path):
     """接力恢复（ADR 0034「job timeout」节 claimed_at ①）：他人 claim 的 RUNNING job（owner 进程已死、
-    无 handle 无观察链）超预算 → loop 防御扫直接 record_exit(timed_out=True) 收敛 ERROR，run 不永久 wedge。"""
-    meta, log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0)
+    无 handle 无观察链）过了截止时刻加 10 秒 → loop 防御扫补写一条判为超时的未知退出（不带退出时刻）收敛 ERROR，run 不永久 wedge。"""
+    meta, log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0, clock=_one_hour_later)
     # 模拟死 owner 遗留态：a 已被 claim（claimed_at 一小时前）、无退出记录、本 launcher 没起过它
     assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00Z") is True
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=lambda: "2026-07-19T01:00:00Z")
+                       poll_interval_s=0.05, clock=_one_hour_later)
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]
     assert len(exits) == 1 and exits[0].exited.timed_out is True
     assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（「码未知」分支被 timed_out 归因短路）
+    assert exits[0].exited.exited_at is None  # 也没有可观察的退出时刻
 
 
 def test_grace_query_failure_never_spawns_a_worker(tmp_path):
     """grace 下限现在要 spawn 一次 worker 自述才能取得、**会抛**（ADR 0024「引擎自报下限」：旧 worker 不认入口 /
     定位不到 / 答非契约）——launch 必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
-    tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）以「进程没起」为前提，那时留下的是没人读 fd3、没人 wait、
+    tick 的 launch 失败补偿（退出码未知的退出记录）以「进程没起」为前提，那时留下的是没人读 fd3、没人 wait、
     没人 stop 的孤儿 worker（真会话真计费）。这里钉：min_grace_fn 抛 → run_scope 零调用、job 经补偿收敛 ERROR。"""
-    from gherkai_core.project import PLATFORM_FAILED_EXIT
-
     meta, log, store, _ = _setup(tmp_path, "pass", "a", timeout_s=60.0)
     spawned: list[str] = []
     real_engine = _echo_resolver("pass")("novaact")
@@ -134,21 +161,22 @@ def test_grace_query_failure_never_spawns_a_worker(tmp_path):
     def _old_worker(_engine: str) -> float:
         raise RuntimeError("引擎 novaact 的能力自述超时")  # 旧 worker 不认 --capabilities 的真实形态之一
 
-    launcher = SubprocessLauncher(lambda _name: _Spy(), log, min_grace_fn=_old_worker)
+    launcher = SubprocessLauncher(lambda _name: _Spy(), log, min_grace_fn=_old_worker, clock=_now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now)
+                       poll_interval_s=0.05, clock=_now)
     assert spawned == []  # 下限取不到 → 一个 worker 都没起（无孤儿）
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]
-    assert len(exits) == 1 and exits[0].exited.exit_code == PLATFORM_FAILED_EXIT
+    assert len(exits) == 1 and exits[0].exited.exit_code is None
+    assert exits[0].exited.reason == "起 worker 失败：引擎 novaact 的能力自述超时"
 
 
 def test_crash_worker_finalizes_error(tmp_path):
     """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → run finalize error（机制二真实运行）。"""
     meta, log, store, launcher = _setup(tmp_path, "crash", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now)
+                       poll_interval_s=0.05, clock=_now)
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     # task_exited 记了真实非 0 退出码
@@ -191,18 +219,18 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
             written.append((run_id, result, created_at))
 
     # 真时钟（非 _now 常量）：要让两端时间戳都可解析，否则墙钟本来就是 None、本例空过
-    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at=_FAR)
     log = SqliteEventLog(tmp_path / "events.db")
     inner = LocalRunStore(tmp_path)
     inner.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
                                     started_at=compose.now_iso(), high_water_mark=0))
-    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0, clock=compose.now)
     store = _FailsOnTerminalRead(inner)
 
     # 不抛是第一件要钉的事（退回「实参里直接取数」的写法即 OSError 原样抛出）
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=compose.now_iso,
+                       poll_interval_s=0.05, clock=compose.now,
                        report_store=_RecordingReportStore())
 
     assert store.raised == 1                    # 失败确实落在取墙钟那次读上
@@ -247,20 +275,20 @@ def test_loop_ends_on_finalized_run_with_pending_jobs_without_report(tmp_path):
     assert inner.try_finalize("run-1", Status.ERROR, "2026-07-19T00:00:00Z", message="definition 不可用") is True
     before = inner.load_run_state("run-1")
     spawned: list[str] = []
-    launcher = SubprocessLauncher(lambda _name: spawned.append(_name), log, min_grace_fn=lambda _engine: 1.0)
+    launcher = SubprocessLauncher(lambda _name: spawned.append(_name), log, min_grace_fn=lambda _engine: 1.0, clock=_now)
     store, reports = _BoundedReads(inner, limit=20), _RecordingReports()
 
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=2,
-                       poll_interval_s=0.01, now_iso_fn=_now, report_store=reports)
+                       poll_interval_s=0.01, clock=_now, report_store=reports)
 
     assert store.reads == 1            # 一轮即停
     assert spawned == [] and reports.written == []
     assert inner.load_run_state("run-1") == before
 
 
-def test_loop_writes_report_when_its_commit_is_lost(tmp_path):
-    """本轮走完收尾分支但 try_finalize 写输（并发推进器先提交）：循环仍按收尾处理，写一次报告后退出；
-    库中终态是先提交的那一份（ADR 0034 机制三「run 级状态只进不退」条④）。"""
+def test_loop_ends_without_report_when_its_commit_is_lost(tmp_path):
+    """收尾写写不成（并发推进器先提交）：循环照样结束，但不写报告——报告只由写成的一方生成（ADR 0054 决策二后台推进条「收尾与
+    报告」）；库中终态是先提交的那一份（ADR 0034 机制三「run 级状态只进不退」条④）。"""
 
     class _LosesCommit:
         def __init__(self, inner) -> None:
@@ -270,17 +298,18 @@ def test_loop_writes_report_when_its_commit_is_lost(tmp_path):
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
-        def try_finalize(self, run_id, status, ended_at, *, message=None):
+        def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
             self._inner.try_finalize(run_id, status, "other")  # 另一推进器先提交
-            self.results.append(self._inner.try_finalize(run_id, status, ended_at, message=message))
+            self.results.append(self._inner.try_finalize(run_id, status, ended_at, message=message,
+                                                         expected_claim_count=expected_claim_count))
             return self.results[-1]
 
     meta, log, inner, launcher = _setup(tmp_path, "pass", "a")
     store, reports = _LosesCommit(inner), _RecordingReports()
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now, report_store=reports)
+                       poll_interval_s=0.05, clock=_now, report_store=reports)
     assert store.results == [False]
-    assert reports.written == ["run-1"]
+    assert reports.written == []
     state = inner.load_run_state("run-1")
     assert state.status == Status.PASSED and state.ended_at == "other"
 
@@ -292,14 +321,14 @@ def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path):
     meta, log, store, launcher = _setup(tmp_path, "pass", "a")
     first = _RecordingReports()
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=_now, report_store=first)
+                       poll_interval_s=0.05, clock=_now, report_store=first)
     assert first.written == ["run-1"]
     before = store.load_run_state("run-1")
     assert before.status == Status.PASSED
 
     again, bounded = _RecordingReports(), _BoundedReads(store, limit=20)
     run_reconcile_loop("run-1", meta, log, bounded, launcher, max_concurrency=1,
-                       poll_interval_s=0.01, now_iso_fn=lambda: "2026-07-19T01:00:00Z", report_store=again)
+                       poll_interval_s=0.01, clock=_one_hour_later, report_store=again)
 
     assert bounded.reads == 1          # 一轮即停
 
@@ -344,7 +373,7 @@ def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeyp
     from gherkai_runtime.detached import build_local_reconcile
 
     # 造最小 run 落盘（build_local_reconcile 要 load_run_meta 读回）
-    meta = RunMeta(run_id="run-r", created_at="t0", jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id="run-r", created_at="t0", jobs=(_job("a"),), deadline_at=_FAR)
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-r", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -385,7 +414,7 @@ def test_build_local_reconcile_goes_through_resolve_aws_identity(tmp_path, monke
 
 def _seed_for_build(tmp_path, run_id: str, *, max_concurrency: int | None):
     """落一个最小 run（单 pending job）供 build_local_reconcile 读回，meta 的 max_concurrency 按参数。"""
-    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency, deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency, deadline_at=_FAR)
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id=run_id, status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -439,7 +468,7 @@ def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeyp
     """
     from gherkai_runtime.detached import build_local_reconcile
 
-    meta = RunMeta(run_id="run-s", created_at="t0", jobs=(_job("a"),), steps_dir="/abs/user/steps", deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id="run-s", created_at="t0", jobs=(_job("a"),), steps_dir="/abs/user/steps", deadline_at=_FAR)
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-s", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -496,21 +525,21 @@ def test_run_state_timestamps_share_one_format(tmp_path):
     """
     from gherkai_runtime import compose
 
-    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at="2026-01-01T01:00:00+00:00")
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at=_FAR)
     log = SqliteEventLog(tmp_path / "events.db")
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
                                     started_at=compose.now_iso(), high_water_mark=0))
-    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0)
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0, clock=compose.now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, now_iso_fn=compose.now_iso)
+                       poll_interval_s=0.05, clock=compose.now)
     state = store.load_run_state("run-1")
     stamps = {"created_at": meta.created_at, "started_at": state.started_at,
               "ended_at": state.ended_at, "claimed_at": state.jobs["a"].claimed_at}
     assert all(stamps.values()), stamps  # 三个写者都真写了（否则断言空转）
     for name, ts in stamps.items():
-        assert ts == compose.parse_iso(ts).isoformat(), f"{name}={ts} 与 compose.now_iso 格式不同"
+        assert ts == instant_from_iso(ts).isoformat(), f"{name}={ts} 与 compose.now_iso 格式不同"
 
 
 def test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel(tmp_path, monkeypatch):
@@ -542,7 +571,7 @@ def test_build_local_reconcile_reads_session_warmup_url_back_from_definition(tmp
 
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
     meta = RunMeta(run_id="run-w", created_at="t0", jobs=(_job("a"),),
-                   extra_http_headers=(("ngrok-skip-browser-warning", "1"),), session_warmup_url=url, deadline_at="2026-01-01T01:00:00+00:00")
+                   extra_http_headers=(("ngrok-skip-browser-warning", "1"),), session_warmup_url=url, deadline_at=_FAR)
     store = LocalRunStore(tmp_path)
     store.create_run(meta, RunState(run_id="run-w", status=Status.PENDING,
                                     jobs={"a": JobState("a", Status.PENDING)},
@@ -555,3 +584,435 @@ def test_build_local_reconcile_reads_session_warmup_url_back_from_definition(tmp
         env = launcher._resolver(engine)._env
         assert env["GHERKAI_SESSION_WARMUP_URL"] == url, engine
         assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}', engine
+
+
+# ---------- 后台推进的到期处理（ADR 0054 决策二后台推进条、本机接力条，实测项 10）----------
+
+
+class _FastClock:
+    """真实时间按倍数走的墙钟：从 start 起，真实的 1 秒算作 factor 秒。推进循环、启动器的截止时刻检查与前台的调度循环读同一种
+    时钟，期限可以落在几秒之内，停止启动的提前量（60 秒）仍按规则生效。"""
+
+    def __init__(self, start: datetime, factor: float) -> None:
+        self._start, self._factor, self._t0 = start, factor, time.monotonic()
+
+    def __call__(self) -> datetime:
+        return self._start + timedelta(seconds=(time.monotonic() - self._t0) * self._factor)
+
+
+class _CapturingReports:
+    """记下每次写报告用的 RunResult。"""
+
+    def __init__(self) -> None:
+        self.results: list = []
+
+    def write(self, run_id, result, *, created_at):
+        self.results.append(result)
+
+
+def _verdict(result) -> tuple:
+    """报告由它生成的那几项：run 级状态与说明、各 job 的状态、错误类型与说明、没有执行的 scope。"""
+    return (result.status, result.message,
+            [(jr.scope_id, jr.status, jr.error_type, jr.message) for jr in result.jobs],
+            [j.scope_id for j in result.jobs_without_verdict])
+
+
+def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(tmp_path):
+    """本机推进进程到期（实测项 10 前半、13 的本机一对）：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
+    上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记为超时、说明是
+    期限那一句；b 保持 pending、没有判定明细；run 级 error 加到期说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种
+    时钟），报告内容逐项相同。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.schedule import ScheduleOpts, schedule
+
+    start = datetime(2026, 7, 19, tzinfo=timezone.utc)
+    deadline_at = instant_to_iso(start + timedelta(seconds=120))  # 真实 2 秒后到期，1 秒后过停止启动的时刻
+    clock = _FastClock(start, 60.0)
+    meta, log, store, launcher = _setup(tmp_path, "silent", "a", "b", timeout_s=7200.0, clock=clock,
+                                        deadline_at=deadline_at)
+    reports = _CapturingReports()
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1, poll_interval_s=0.05, clock=clock,
+                       result_store=LocalResultStore(tmp_path), report_store=reports)
+
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.PENDING)
+    exits = [r for r in log.records() if r.kind == "exit"]
+    assert [(r.scope_id, r.exited.timed_out) for r in exits] == [("a", True)]  # 推进进程到点停下的 a；b 从没启动
+    assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == ["a.json"]  # b 没有判定明细
+    [background] = reports.results
+    assert _verdict(background) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE,
+                                    [("a", Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)], ["b"])
+
+    foreground = schedule(meta, _echo_resolver("silent"), lambda _event: None,
+                          opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=_FastClock(start, 60.0),
+                                            heartbeat_interval_s=0.05))
+    assert _verdict(foreground) == _verdict(background)
+
+
+def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_jobs(tmp_path, monkeypatch):
+    """推进进程已不在、过了期限之后的一次 `status --wait` 接力（实测项 10 后半）：经两者共用的入口推进，a 是原推进进程认领、观察链
+    已断的 job，b 没有启动过。a 的预算让它自己的截止时刻还在半小时之后，截止时刻由期限（一小时之前）封顶，接力方按封顶后的时刻判，
+    墙钟早已过了它加 10 秒，第一轮即补写超时；b 不认领、不启动；run 以到期说明结束，报告由接力方生成。组合根照真实装配，只把引擎换成
+    记录启动的替身、停止宽限的查询换成固定值（误启动 job 时启动调用落到替身上、被记下）。"""
+    import json
+
+    from gherkai_core.serialize import job_result_from_dict
+    from gherkai_runtime import compose, detached
+
+    now = compose.now()
+    meta = RunMeta(run_id="run-x", created_at=instant_to_iso(now - timedelta(hours=3)),
+                   jobs=(_job("a", timeout_s=7200.0), _job("b", timeout_s=7200.0)),
+                   deadline_at=instant_to_iso(now - timedelta(hours=1)))
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-x", status=Status.RUNNING,
+                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")},
+                                    started_at=meta.created_at, high_water_mark=0))
+    assert store.try_claim_job("run-x", "a", claimed_at=instant_to_iso(now - timedelta(minutes=90))) is True
+    log = SqliteEventLog(compose.events_db_path(str(tmp_path), "run-x"))
+    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a","sessionId":"echo-sess"}', 1.0)  # 原 worker 留下的
+
+    spawned: list[str] = []
+
+    class _Spy:
+        def run_scope(self, job, **kw):
+            spawned.append(job.scope_id)
+            raise AssertionError("到期之后不应启动任何 job")
+
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    monkeypatch.setattr(compose, "build_engines", lambda **kw: {"novaact": _Spy()})
+    monkeypatch.setattr(compose, "engine_min_grace", lambda _engine: 5.0)
+    relay = threading.Thread(target=detached.drive_local_reconcile, args=(str(tmp_path), "run-x", 1),
+                             kwargs={"poll_interval_s": 0.01}, daemon=True)
+    relay.start()
+    relay.join(timeout=20)
+
+    assert not relay.is_alive(), "接力没有结束"
+    assert spawned == []
+    state = LocalRunStore(tmp_path).load_run_state("run-x")
+    assert (state.status, state.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.PENDING)
+    [exit_rec] = [r for r in log.records() if r.kind == "exit"]
+    assert (exit_rec.scope_id, exit_rec.exited.exit_code, exit_rec.exited.timed_out) == ("a", None, True)
+    assert (tmp_path / "run-x" / "manifest.json").exists() and (tmp_path / "run-x" / "index.html").exists()
+    assert sorted(p.name for p in (tmp_path / "run-x" / "jobs").iterdir()) == ["a.json"]
+    jr = job_result_from_dict(json.loads((tmp_path / "run-x" / "jobs" / "a.json").read_text(encoding="utf-8")))
+    assert (jr.error_type, jr.message) == ("timeout", DEADLINE_TIMEOUT_MESSAGE)  # 起作用的是期限
+
+
+class _RecordsExits:
+    """代理真 EventLog：记下经它写的每条退出记录（接力方写没写、写了什么），其余原样转发。两个写入口都记：观察到的退出记为
+    (scope_id, 退出码, 关键字参数)，补写的未知退出记为 (scope_id, "timed-out-if-absent", 是否写成)。"""
+
+    def __init__(self, inner) -> None:
+        self._inner, self.exits = inner, []
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def record_exit(self, scope_id, exit_code, **kw):
+        self.exits.append((scope_id, exit_code, kw))
+        return self._inner.record_exit(scope_id, exit_code, **kw)
+
+    def record_timed_out_if_absent(self, scope_id):
+        written = self._inner.record_timed_out_if_absent(scope_id)
+        self.exits.append((scope_id, "timed-out-if-absent", written))
+        return written
+
+
+# ---------- 启动器记下退出时刻、接力的判定条件与条件补写（ADR 0054 决策二后台推进条、本机接力条）----------
+
+
+class _SettableClock:
+    """只在用例改它时才变的墙钟。"""
+
+    def __init__(self, now: datetime) -> None:
+        self.now = now
+
+    def __call__(self) -> datetime:
+        return self.now
+
+
+class _ParkedChecks:
+    """由用例掌握启动器检查线程的到点决定：第一次决定照常做，做完置 first_done；之后的每一次在进入决定之前停住、置 parked，等用例
+    置 go 才做，做完置 later_done。decisions 依次记下每一次决定的结果（True 是到点、要停）。install 换掉启动器为每个 job 建的互斥
+    对象，只换外面这一层，看到退出与到点决定本身照旧由被测的实现做。"""
+
+    def __init__(self) -> None:
+        self.first_done, self.parked, self.go, self.later_done = (threading.Event() for _ in range(4))
+        self.decisions: list[bool] = []
+
+    def install(self, monkeypatch) -> None:
+        from gherkai_runtime import detached
+
+        checks = self
+
+        class _Probed(detached._ExitOrCutoff):
+            def stop_due(self) -> bool:
+                later = checks.first_done.is_set()
+                if later:
+                    checks.parked.set()
+                    checks.go.wait(30)
+                due = super().stop_due()
+                checks.decisions.append(due)
+                (checks.later_done if later else checks.first_done).set()
+                return due
+
+        monkeypatch.setattr(detached, "_ExitOrCutoff", _Probed)
+
+
+def _by_thread(*, check, pump, other):
+    """按读墙钟的线程返回时刻的墙钟：启动器给 job a 起的检查线程读 check()，推进线程（看到 a 退出时读退出时刻）读 pump()，
+    其余（推进循环取认领时刻与收尾时刻）读 other。"""
+
+    def clock() -> datetime:
+        name = threading.current_thread().name
+        if name == "cutoff-a":
+            return check()
+        if name == "launcher-a":
+            return pump()
+        return other
+
+    return clock
+
+
+def _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path) -> threading.Thread:
+    """在后台线程里推进 run-1 到结束（并发上限 1），报告记进 reports。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+
+    loop = threading.Thread(target=run_reconcile_loop, args=("run-1", meta, log, store, launcher, 1), daemon=True,
+                            kwargs={"poll_interval_s": 0.02, "clock": clock, "report_store": reports,
+                                    "result_store": LocalResultStore(tmp_path)})
+    loop.start()
+    return loop
+
+
+def test_worker_exiting_on_its_own_after_its_cutoff_gets_the_foreground_verdict(tmp_path, monkeypatch):
+    """worker 在截止时刻之后、启动器下一次到点决定之前自己异常退出（真进程，实测项 24 的本机一侧）：启动器只记事实，退出记录不带超时
+    标志、带它看到 worker 退出的那一刻；收尾投影按退出时刻晚于截止时刻判为超时，判定、错误类型与说明和前台同一情形相同（前台在终结
+    之前对内容不完整的 job 再查一次截止时刻）。先后由事件确立：检查线程的第一次到点决定做完（读到的是截止之前的时刻）之后才拨过截止
+    时刻、建让 worker 崩溃的文件；此后的到点决定停在进入之前，直到推进结束才放行，所以 worker 退出之前没有第二次决定，退出码保持 worker
+    自己的 3，超时只能来自投影对退出时刻的判断。"""
+    from gherkai_core.model import ScenarioStarted
+    from gherkai_core.schedule import ScheduleOpts, schedule
+
+    start = datetime(2026, 7, 19, tzinfo=timezone.utc)
+    past_cutoff = start + timedelta(seconds=61)  # 预算 60 秒，认领时刻即 start
+
+    checks = _ParkedChecks()
+    checks.install(monkeypatch)
+    bg_gate = tmp_path / "bg-crash-now"
+    monkeypatch.setenv("WORKER_CRASH_AFTER_FILE", str(bg_gate))
+    bg_clock = _SettableClock(start)
+    meta, log, store, launcher = _setup(tmp_path, "crash", "a", timeout_s=60.0, clock=bg_clock)
+    reports = _CapturingReports()
+    loop = _run_in_thread(meta, log, store, launcher, bg_clock, reports, tmp_path)
+    try:
+        assert checks.first_done.wait(10), "检查线程没有做第一次到点决定"
+        assert checks.decisions == [False]  # 读到的是截止之前的时刻（worker 还在等那个文件，没有退出）
+        bg_clock.now = past_cutoff
+        bg_gate.touch()
+        loop.join(timeout=20)
+    finally:
+        checks.go.set()
+    assert not loop.is_alive(), "推进没有结束"
+    [exit_rec] = [r for r in log.records() if r.kind == "exit"]
+    assert (exit_rec.exited.exit_code, exit_rec.exited.timed_out, exit_rec.exited.exited_at) == (3, False, past_cutoff)
+    [background] = reports.results
+
+    fg_gate = tmp_path / "fg-crash-now"
+    monkeypatch.setenv("WORKER_CRASH_AFTER_FILE", str(fg_gate))
+    fg_clock, started, out = _SettableClock(start), threading.Event(), {}
+
+    def sink(event) -> None:
+        if isinstance(event, ScenarioStarted):
+            started.set()
+
+    def run_foreground() -> None:
+        out["result"] = schedule(meta, _echo_resolver("crash"), sink,
+                                 opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=fg_clock,
+                                                   heartbeat_interval_s=0.05))
+
+    foreground = threading.Thread(target=run_foreground, daemon=True)
+    foreground.start()
+    assert started.wait(10)
+    fg_clock.now = past_cutoff
+    fg_gate.touch()
+    foreground.join(timeout=20)
+    assert not foreground.is_alive(), "前台没有结束"
+
+    expected = (Status.ERROR, None, [("a", Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")], [])
+    assert _verdict(background) == expected
+    assert _verdict(out["result"]) == expected
+
+
+def test_an_exit_seen_before_the_cutoff_decision_keeps_the_verdict_the_foreground_gives(tmp_path, monkeypatch):
+    """看到 worker 退出与到点决定互斥，推进线程先看到退出的一种先后（ADR 0054 决策二后台推进条「截止时刻与说明」）。worker 在截止时刻
+    之前自己以 3 退出；推进线程读到的退出时刻是截止前 1 秒，读完停在看到退出的中途；这时放行检查线程的下一次到点决定，它若读墙钟会
+    读到截止后 1 秒。互斥时这次决定要等推进线程做完，随后看到已经退出，不再读墙钟、不置超时标志、不停止：退出记录是 (3, 不带标志,
+    截止前 1 秒)，后台给这个 job 的状态、错误类型与说明与前台在截止时刻之前看到同样的退出时相同。不互斥时检查线程在这个间隔里置上
+    标志，记录被判为超时。检查线程的第一次决定在 worker 退出之前做完（截止之前），第二次停在进入决定之前，由用例在推进线程停住之后
+    放行，先后因此固定。"""
+    from gherkai_core.schedule import ScheduleOpts, schedule
+
+    start = datetime(2026, 7, 19, tzinfo=timezone.utc)
+    cutoff = start + timedelta(seconds=60)  # 预算 60 秒，认领时刻即 start
+    pump_paused, release_pump = threading.Event(), threading.Event()
+
+    def pump_reads_exit_time() -> datetime:
+        pump_paused.set()
+        release_pump.wait(30)
+        return cutoff - timedelta(seconds=1)
+
+    clock = _by_thread(check=lambda: cutoff + timedelta(seconds=1) if pump_paused.is_set() else start,
+                       pump=pump_reads_exit_time, other=start)
+    checks = _ParkedChecks()
+    checks.install(monkeypatch)
+    gate = tmp_path / "crash-now"
+    monkeypatch.setenv("WORKER_CRASH_AFTER_FILE", str(gate))
+    meta, log, store, launcher = _setup(tmp_path, "crash", "a", timeout_s=60.0, clock=clock)
+    reports = _CapturingReports()
+    loop = _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path)
+    try:
+        assert checks.parked.wait(10), "检查线程的第二次到点决定没有停住"
+        gate.touch()  # worker 自己以 3 退出
+        assert pump_paused.wait(10), "推进线程没有读退出时刻"
+        checks.go.set()
+        assert not checks.later_done.wait(0.5), "推进线程看到退出的中途，检查线程做成了到点决定"
+    finally:
+        release_pump.set()
+        checks.go.set()
+    loop.join(timeout=20)
+    assert not loop.is_alive(), "推进没有结束"
+    assert checks.later_done.wait(10)
+    assert checks.decisions == [False, False]
+    [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
+    assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (3, False, cutoff - timedelta(seconds=1))
+    [background] = reports.results
+    assert [jr.error_type for jr in background.jobs] == ["engine_error"]
+
+    foreground = schedule(meta, _echo_resolver("crash"), lambda _event: None,  # 那个文件已在：worker 报出 scenario_started 即崩
+                          opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=lambda: start,
+                                            heartbeat_interval_s=0.05))
+    assert _verdict(foreground) == _verdict(background)
+
+
+def test_a_cutoff_decided_before_the_exit_marks_the_exit_as_timed_out(tmp_path, monkeypatch):
+    """反过来的先后：检查线程先做到点决定（读到截止后 1 秒），置上超时标志、要发停止请求；停止请求挡在发出之前，worker 随后自己以 3
+    退出，推进线程看到退出时读到截止后 2 秒。退出记录带超时标志、退出时刻是推进线程读的那一刻，判为超时。停止请求在互斥之外发：它被
+    挡住期间推进线程照常看到退出、写下退出记录。"""
+    start = datetime(2026, 7, 19, tzinfo=timezone.utc)
+    cutoff = start + timedelta(seconds=60)  # 预算 60 秒，认领时刻即 start
+    clock = _by_thread(check=lambda: cutoff + timedelta(seconds=1), pump=lambda: cutoff + timedelta(seconds=2),
+                       other=start)
+    stop_entered, release_stop = threading.Event(), threading.Event()
+    real_engine = _echo_resolver("crash")("novaact")
+
+    class _HeldStop:
+        """worker 句柄的代理：停止请求先挡住，用例放行之后才发给 worker。"""
+
+        def __init__(self, inner) -> None:
+            self._inner = inner
+
+        def wait(self, *args):
+            return self._inner.wait(*args)
+
+        def stop(self, grace_period_s):
+            stop_entered.set()
+            release_stop.wait(30)
+            return self._inner.stop(grace_period_s)
+
+    class _Engine:
+        def run_scope(self, job, **kw):
+            handle, events = real_engine.run_scope(job, **kw)
+            return _HeldStop(handle), events
+
+    gate = tmp_path / "crash-now"
+    monkeypatch.setenv("WORKER_CRASH_AFTER_FILE", str(gate))
+    meta, log, store, _ = _setup(tmp_path, "crash", "a", timeout_s=60.0, clock=clock)
+    launcher = SubprocessLauncher(lambda _name: _Engine(), log, min_grace_fn=lambda _engine: 1.0, clock=clock)
+    reports = _CapturingReports()
+    loop = _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path)
+    try:
+        assert stop_entered.wait(10), "检查线程没有决定停止"
+        gate.touch()  # worker 自己以 3 退出，停止请求还没有发出
+        _wait_until(lambda: any(r.kind == "exit" for r in log.records()))
+    finally:
+        release_stop.set()
+    loop.join(timeout=20)
+    assert not loop.is_alive(), "推进没有结束"
+    [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
+    assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (3, True, cutoff + timedelta(seconds=2))
+    [background] = reports.results
+    assert _verdict(background) == (Status.ERROR, None,
+                                    [("a", Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")], [])
+
+
+def test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write(tmp_path):
+    """补写不覆盖已观察到的退出（实测项 25 的本机一侧）：接力方点查过「还没有退出记录」之后、补写之前，原推进进程写下了 a 的真实
+    退出记录与此前的事件（这里在点查返回之前写下）。补写是条件写、不成立，留下的是真实的那一条，a 保留完整的判定、run 按内容通过。
+    墙钟早已过了 a 的截止时刻加 10 秒，第一轮即点查退出记录。"""
+    meta, inner_log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0, clock=_one_hour_later)
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00+00:00") is True
+    real_exit_at = datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc)
+
+    class _RealExitLandsAfterTheCheck(_RecordsExits):
+        def has_exit(self, scope_id):
+            seen = self._inner.has_exit(scope_id)
+            if not seen:  # 原推进进程恰在这时写下 worker 的事件与它观察到的退出
+                self._inner.append_event(scope_id, 1, '{"type":"scope_started","scopeId":"a","sessionId":"s"}', 1.0)
+                self._inner.append_event(scope_id, 2, '{"type":"scenario_done","scenarioId":"a:0","status":"passed"}', 2.0)
+                self._inner.append_event(scope_id, 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
+                self._inner.record_exit(scope_id, 0, exited_at=real_exit_at)
+            return seen
+
+    log = _RealExitLandsAfterTheCheck(inner_log)
+    run_reconcile_loop("run-1", meta, log, _BoundedReads(store, limit=200), launcher, max_concurrency=1,
+                       poll_interval_s=0.001, clock=_one_hour_later)
+
+    assert log.exits == [("a", "timed-out-if-absent", False)]  # 补写确实发出了，只是没有写成
+    [exit_rec] = [r.exited for r in inner_log.records() if r.kind == "exit"]
+    assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (0, False, real_exit_at)
+    state = store.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status) == (Status.PASSED, Status.PASSED)
+
+
+def _foreign_claims(tmp_path, claims: dict[str, str | None], *, deadline_at: str = _FAR):
+    """建一个 run，claims 里的每个 job 都由别的推进方认领（本进程的启动器没有起过它）、认领时刻取给定的值，都没有退出记录；预算
+    60 秒。返回的事件库记下接力方经它写的每条退出记录。"""
+    meta, log, store, launcher = _setup(tmp_path, "pass", *claims, timeout_s=60.0, deadline_at=deadline_at)
+    for sid, claimed_at in claims.items():
+        assert store.try_claim_job("run-1", sid, claimed_at=claimed_at) is True
+    return meta, _RecordsExits(log), store, launcher
+
+
+@pytest.mark.parametrize("deadline_at, cutoff", [
+    (_FAR, datetime(2026, 7, 19, 0, 1, tzinfo=timezone.utc)),
+    ("2026-07-19T00:00:30+00:00", datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc)),
+], ids=["budget", "capped-by-deadline"])
+def test_relay_writes_only_once_the_wall_clock_is_strictly_past_the_cutoff_plus_ten_seconds(tmp_path, deadline_at, cutoff):
+    """接力判超时的判定条件：墙钟严格晚于截止时刻加 10 秒、仍没有退出记录时才补写。截止时刻与认领方同一个算法：认领时刻加预算
+    （60 秒），期限更早时以期限封顶、按封顶后的时刻判。恰在截止时刻、恰在截止时刻加 10 秒时都不写，再晚一微秒即写。"""
+    from gherkai_runtime import detached
+
+    meta, log, store, launcher = _foreign_claims(tmp_path, {"a": "2026-07-19T00:00:00+00:00"}, deadline_at=deadline_at)
+    boundary = cutoff + timedelta(seconds=10)
+    for now in (cutoff, boundary):
+        detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes, now=now)
+    assert log.exits == []
+    detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes,
+                                       now=boundary + timedelta(microseconds=1))
+    assert log.exits == [("a", "timed-out-if-absent", True)]
+
+
+def test_relay_leaves_its_own_jobs_and_jobs_without_a_readable_claim_time(tmp_path):
+    """接力方不处置的两类执行中 job，墙钟都已远过截止时刻加 10 秒：本进程的启动器手里的 job（它的截止时刻检查在管），与认领时刻
+    缺失、不是时刻或不带时区的 job（没有起算点）。同一轮里认领时刻正常的别人的 job 照常补写，说明这一轮确实判过。"""
+    from gherkai_runtime import detached
+
+    claimed = "2026-07-19T00:00:00+00:00"
+    meta, log, store, launcher = _foreign_claims(tmp_path, {
+        "own": claimed, "missing": None, "garbled": "认领时刻", "naive": "2026-07-19T00:00:00", "lost": claimed})
+    launcher.owned_scopes.add("own")
+    detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes, now=_one_hour_later())
+    assert log.exits == [("lost", "timed-out-if-absent", True)]

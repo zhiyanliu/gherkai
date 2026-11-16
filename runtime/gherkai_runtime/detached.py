@@ -3,8 +3,10 @@
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四认领成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
   在独立线程里读它的 fd3 事件流旁路落 SqliteEventLog（赋 worker 段单调 seq）、worker 退出后 `handle.wait()`
-  拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）。worker 不改、对 SQLite 无知（0034）。
-- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退。
+  拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）；另按墙钟检查这个 job 的截止时刻，到点停 worker。
+  worker 不改、对 SQLite 无知（0034）。
+- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退；`status --wait` 接力走同一个循环，
+  另把别人认领、观察链已断的 job 判为超时（`_recover_timed_out_claims`）。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
@@ -14,6 +16,8 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Collection
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable
 
@@ -22,31 +26,82 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.reconcile import TickOutcome, finalize_report, tick
+from gherkai_core.run_deadline import deadline_of, job_cutoff
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
 
-# 接力恢复的判定余量秒（ADR 0034「job timeout」节 claimed_at ①）：超预算这么久才认定 owner 已死。
-# 本余量**只挡时钟抖动与轮询粒度**：起算点 claimed_at 是 claim 时的墙钟、owner 的 deadline timer 起于其后的
-# launch，且本判据每 poll_interval 才查一次。**不覆盖**活 owner 的 stop→协作退收尾——SIGTERM 是 flag-only、
-# 只在 act 边界被检测（in-flight act 要有界返回才退），之后还有会话释放与证据有界排空，故引擎 grace 下限本身
-# 就取到数十秒级（各引擎 worker 经自述入口 `--capabilities` 自报、compose.engine_min_grace 只查询聚合；今值
-# midscene 63.5s（桌面与设备两条收尾路径取较大者，桌面一条为 31s）/ Nova 150s），远大于本余量。
-# 所以活 owner 场景多半是本记录先落、随后被真退出记录覆盖：靠「后到覆盖、归因不变」收敛
-# （同带 timed_out=True、record_exit 是 INSERT OR REPLACE 同 key），**不靠本余量抢先**。故本值是非正确性参数，
-# 调大调小只影响 owner 真死时的恢复延迟。
+# 推进进程检查执行中 job 截止时刻的间隔（秒）：每个执行中的 job 一个检查线程，按这个间隔读一次墙钟。它只决定到点之后最多晚多少
+# 发出停止请求，不进任何记录；超时的归因与说明由认领时刻、预算与期限重算，与检查的早晚无关。
+_CUTOFF_CHECK_INTERVAL_S = 0.25
+
+# 接力判超时的固定余量（秒，ADR 0034「job timeout」节 claimed_at ①，ADR 0054 决策二「本机接力」条）：墙钟严格晚于截止时刻加这么多、
+# 仍没有退出记录时，接力方补写一条判为超时的未知退出。余量只挡认领方与接力方各自的检查间隔与时钟抖动，比各引擎的停止宽限期短（各引擎
+# 自报的值都在数十秒以上），不覆盖认领方到点催停之后 worker 的协作收尾：认领方还在、worker 仍在停止宽限期内收尾时，接力方先写下这一条，
+# 认领方随后写下的真实退出记录覆盖它；run 若在补写与真实退出之间收尾，这次收尾按超时提交，run 级的结果与报告就此定下。调大这个值换不来「不抢先」，只推迟认领方真
+# 不在时的收敛；判定条件的改法已定（按认领方的进程是否还在来判，ADR 0054 决策二「本机接力的改法」），尚未实装。
 _RECOVERY_MARGIN_S = 10.0
+
+
+class _ExitOrCutoff:
+    """一个 job 的「看到 worker 退出」与「到点决定」之间的互斥（ADR 0054 决策二后台推进条「截止时刻与说明」）。
+
+    推进线程看到退出（读退出时刻、标记已退出、读超时标志）与检查线程的一次到点决定（确认还没有看到退出、读墙钟、已过截止时刻就置
+    超时标志）各在同一把锁下一次做完，先后只有一种：推进线程先看到退出的，检查线程之后不再置标志，退出记录带的是看到退出那一刻的
+    标志；检查线程先决定的，标志已经置上，退出时刻是推进线程随后读的那一刻。不互斥时，检查线程可以落在推进线程读过退出时刻、还没
+    标记已退出的间隔里置上标志，记录成了「退出时刻不晚于截止时刻、却带超时标志」，投影判为超时，而前台在截止时刻之前看到同样的退出
+    判的是 worker 自己的错误。
+
+    锁内只读墙钟与改标志：等进程、发停止请求（会等到停止宽限到点）、写退出记录都在锁外，停止请求发出之后推进线程照常看到退出。
+    每个 job 一个实例，不同 job 之间互不阻塞。
+    """
+
+    def __init__(self, clock: Callable[[], datetime], cutoff_at: datetime) -> None:
+        self._clock = clock
+        self._cutoff_at = cutoff_at
+        self._lock = threading.Lock()
+        self._exited = threading.Event()
+        self._timed_out = False
+
+    def see_exit(self) -> tuple[datetime, bool]:
+        """推进线程看到 worker 退出：读退出时刻、标记已退出、读超时标志，返回 (退出时刻, 超时标志)。"""
+        with self._lock:
+            exited_at = self._clock()
+            self._exited.set()
+            return exited_at, self._timed_out
+
+    def stop_due(self) -> bool:
+        """检查线程的一次到点决定：还没有看到退出、且墙钟严格晚于截止时刻时置超时标志并返回 True，停止请求由调用方在锁外发出；
+        已经看到退出（不再读墙钟）或还没到点时返回 False。"""
+        with self._lock:
+            if self._exited.is_set() or not self._clock() > self._cutoff_at:
+                return False
+            self._timed_out = True
+            return True
+
+    def wait_for_exit(self, timeout_s: float) -> bool:
+        """至多等 timeout_s 秒，推进线程看到退出即返回 True。"""
+        return self._exited.wait(timeout_s)
 
 
 class SubprocessLauncher:
     """local Launcher（ADR 0034 机制四回调 + 机制二退出观察者）。
 
-    launch(job, claimed_at=…)：起 worker（resolver 按 engine 选 SubprocessEngine）→ 后台线程消费 fd3 事件流落 SQLite +
+    launch(job, cutoff_at=…)：起 worker（resolver 按 engine 选 SubprocessEngine）→ 后台线程消费 fd3 事件流落 SQLite +
     退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
-    同时 enforce job timeout（ADR 0034「job timeout」节的本机后端一侧）：按 job.timeout_s 起 deadline timer（每个 job 都有
-    有限的预算，ADR 0054 决策十）——到点先置 timed_out 标志再 handle.stop(engine grace)（协作停，保会话清理、不持续计费），worker 退出后
-    _pump 的 record_exit 带上标志，project 按归因链收敛 ERROR+timeout。
+    同时 enforce 截止时刻（ADR 0034「job timeout」节的本机后端一侧，ADR 0054 决策二后台推进条「截止时刻与说明」）：cutoff_at 是
+    tick 在认领时算好的截止时刻（认领时刻加 job 预算，以运行期限封顶）。每个执行中的 job 一个检查线程，按短间隔读注入的墙钟，过了
+    cutoff_at 即先置 timed_out 标志再 handle.stop(引擎停止宽限期)（协作停，保会话清理、不持续计费）；停止在检查线程里等完，不阻塞
+    推进循环。worker 退出后 _pump 的 record_exit 带上标志与它看到退出的那一刻（退出时刻，读同一个注入的墙钟），project 按归因链
+    收敛 ERROR+timeout，说明由运行态里的认领时刻、预算与期限重算是哪一个起了作用。看到退出与到点决定经 `_ExitOrCutoff` 互斥，
+    已经看到退出之后检查线程不再置标志。启动器只记这两项事实、不比较截止时刻：worker 在截止时刻之后、下一次检查之前自己退出时，
+    退出记录不带标志，由投影按退出时刻晚于截止时刻判为超时，与前台终结之前的那次检查、云端
+    后台的退出记录是同一个判断（内容完整的照旧不改判，由终结函数保证；ADR 0054 决策二后台推进条「截止时刻与说明」）。按墙钟而不按
+    单调时钟：截止时刻由认领时刻这个墙钟时刻算出，单调时钟在系统休眠时不走，合盖之后醒来的推进进程按墙钟才知道已经过了截止时刻
+    （ADR 0054 决策二「检查用墙钟」一段）。检查一直持续到 worker 进程退出，不止到事件流结束：关了事件通道却不退出的 worker 过了截止
+    时刻同样被停下。
 
     **绑死 SubprocessEngine（不是任意 `Engine`）**：launch 用 `run_scope(job, raw_sink=...)` 拿原始事件行，
     而 `raw_sink` 是 SubprocessEngine 的扩展形参、**不在 Engine port 契约里**（ADR 0034「Engine port 演进」）。
@@ -54,22 +109,21 @@ class SubprocessLauncher:
     """
 
     def __init__(self, resolver: Callable[[str], SubprocessEngine], event_log: SqliteEventLog, *,
-                 min_grace_fn: Callable[[str], float]) -> None:
+                 min_grace_fn: Callable[[str], float], clock: Callable[[], datetime]) -> None:
         self._resolver = resolver
         self._event_log = event_log
         # engine→grace 下限，**必传**（组合根传 compose.engine_min_grace；测试传显式 fake）：timeout stop 用它当协作停
         # 宽限（grace 小于引擎自报的收尾下限时，worker 可能在释放会话或保存产物之前被强制终止，ADR 0024 grace 硬约束——
         # 超时停止也不豁免）。不留缺省：任何回落值都必然低于引擎下限（如 Nova 150s），漏注入宁可在构造期抛 TypeError，
-        # 别让超时停止静默变成强制终止、丢掉会话清理（同 run_reconcile_loop 的 now_iso_fn 立场）。
+        # 别让超时停止静默变成强制终止、丢掉会话清理（同 run_reconcile_loop 的 clock 立场）。
         self._min_grace_fn = min_grace_fn
-        # 本 launcher 起过的 scope（run_reconcile_loop 的接力恢复扫豁免它们——自家 job 的 deadline 有 timer 在管）
+        # 截止时刻检查与退出时刻读的墙钟，**必传**（组合根传 `compose.now`，与推进循环注入 tick 的是同一个读取点；测试传假墙钟），返回
+        # 带时区的 datetime：截止时刻由同一个读取点取的认领时刻算出，检查与投影比较的才是同一个时钟。
+        self._clock = clock
+        # 本 launcher 起过的 scope（run_reconcile_loop 的接力恢复扫豁免它们——自家 job 的截止时刻有检查线程在管）
         self.owned_scopes: set[str] = set()
 
-    def launch(self, job: Job, *, claimed_at: str) -> None:
-        # claimed_at 不参与计时：deadline timer 按本进程的单调时钟、在 worker 启动之后起算。claim 与 launch 同在本进程的
-        # 同一轮 tick 里，timer 晚于 claim 的只是查询宽限下限与启动 worker 的耗时，偏差只让到点略晚、不会提前；按 claimed_at
-        # 换算成墙钟差反而引入墙钟跳变的风险。接力恢复的判定另按库里的 claimed_at 起算（`_recover_timed_out_claims`）。
-        del claimed_at
+    def launch(self, job: Job, *, cutoff_at: datetime) -> None:
         scope_id = job.scope_id
         self.owned_scopes.add(scope_id)
         engine: SubprocessEngine = self._resolver(job.engine)
@@ -79,38 +133,46 @@ class SubprocessLauncher:
 
         # grace 下限要 spawn 一次 worker 自述才能取得（ADR 0024「引擎自报下限」）、**会抛**（旧 worker 不认入口 /
         # 定位不到 / 答非契约）——故必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
-        # tick 的 launch 失败补偿（PLATFORM_FAILED_EXIT）前提是「进程没起、平台观察者无从观察」，那时留下的是
+        # tick 的 launch 失败补偿（退出码未知的退出记录）前提是「进程没起、平台观察者无从观察」，那时留下的是
         # 没人读 fd3、没人 wait、没人 stop 的孤儿 worker（真会话真计费）+ 泄漏的事件通道 fd。
         grace = self._min_grace_fn(job.engine)
         handle, events = engine.run_scope(job, raw_sink=raw_sink)
-        timed_out = threading.Event()
-
-        def _on_deadline() -> None:
-            timed_out.set()  # 先置标志再 stop：_pump 的 record_exit 必见（归因链时序）
-            try:
-                handle.stop(grace)  # 协作停（SIGTERM→grace→SIGKILL 兜底，adapter 既有语义）
-            except Exception:
-                pass  # stop 失败（如进程恰已退）→ 交给 _pump 的 wait 收敛
-
-        timer = threading.Timer(job.timeout_s, _on_deadline)
-        timer.daemon = True
-        timer.start()
+        watch = _ExitOrCutoff(self._clock, cutoff_at)
         # 不持线程引用：daemon 线程无人 join（循环何时结束由 tick 的结果决定，正常收尾时每 job 都有
         # _pump 写的退出记录），存下来只会随 job 数单调增长。
         threading.Thread(
-            target=self._pump, args=(scope_id, handle, events, timer, timed_out), daemon=True,
+            target=self._watch_cutoff, args=(handle, watch, grace), daemon=True,
+            name=f"cutoff-{scope_id}",
+        ).start()
+        threading.Thread(
+            target=self._pump, args=(scope_id, handle, events, watch), daemon=True,
             name=f"launcher-{scope_id}",
         ).start()
 
-    def _pump(self, scope_id: str, handle, events, timer: threading.Timer,
-              timed_out: threading.Event) -> None:
+    def _watch_cutoff(self, handle, watch: _ExitOrCutoff, grace: float) -> None:
+        """一个 job 的截止时刻检查：推进线程看到 worker 退出之前，每隔 `_CUTOFF_CHECK_INTERVAL_S` 做一次到点决定，墙钟严格晚于截止
+        时刻即停它，只停一次；已经看到退出的不再决定、直接结束。先查再等：启动调用本身拖过了截止时刻时，启动之后立即停。"""
+        while not watch.stop_due():  # 到点时标志已在决定里置上：_pump 之后看到的退出必带它（归因链时序）
+            if watch.wait_for_exit(_CUTOFF_CHECK_INTERVAL_S):
+                return
+        try:
+            handle.stop(grace)  # 协作停（SIGTERM→grace→SIGKILL 兜底，adapter 既有语义）；在互斥之外发，等宽限期间 _pump 照常看到退出
+        except Exception:
+            pass  # stop 失败（如进程恰已退）→ 交给 _pump 的 wait 收敛
+
+    def _pump(self, scope_id: str, handle, events, watch: _ExitOrCutoff) -> None:
         """驱动一个 worker 的 fd3 事件流直到结束（落库在 raw_sink 里做）；结束后 handle.wait() 拿 exitcode 写 task_exited。
 
         迭代 events 只为驱动 fd3 读（每行触发 raw_sink 落库）——迭代产出的 Event 本身丢弃（我们要的是原始行、
         已落库）。异常（含 _read_events 对非零退出码抛的 WorkerExitError：自行异常退出的正码与被信号强杀的负码
         都抛，网络故障码抛其子类 WorkerNetworkError；也含事件行解析失败的 ValueError）吞掉：下面 handle.wait()
         拿真实 exitcode 写 task_exited，让 project 据「两件都要」判终态（机制二）。无论如何都写退出记录——
-        否则该 job 永远 RUNNING、reconciler 卡住不收尾。
+        否则该 job 永远 RUNNING、reconciler 卡住不收尾。worker 退出之后才结束截止时刻检查（见类 docstring）。
+
+        退出记录带两项事实：超时标志（检查线程已经到点决定停止），与退出时刻（拿到退出码之后读一次注入的墙钟，即推进进程看到 worker
+        退出的那一刻；wait 拿不到退出码时同样记这一刻）。两项与标记已退出在 `_ExitOrCutoff.see_exit` 里一次读完，与检查线程的到点决定
+        互斥。不在这里比较截止时刻：worker 在截止时刻之后、检查线程下一次到点决定之前自己退出（如异常退出）时，由投影按退出时刻判为
+        超时（类 docstring）。
         """
         try:
             for _event in events:
@@ -118,13 +180,14 @@ class SubprocessLauncher:
         except Exception:
             pass  # worker 异常退出——exitcode 由下面 wait() 拿，经 task_exited 让 project 判 error
         finally:
-            timer.cancel()  # 正常退出取消 deadline（已触发的 cancel 无害）
             try:
                 exit_code = handle.wait()
             except Exception:
                 # 拿不到退出码 → None（有退出记录却无码 → 投影判 ERROR，**不是**宽限态；ADR 0034 机制二「退出码缺失」条）
                 exit_code = None
-            self._event_log.record_exit(scope_id, exit_code, timed_out=timed_out.is_set())
+            # 看到退出：结束截止时刻检查（检查已经决定的停止照常记为超时），落库在互斥之外
+            exited_at, timed_out = watch.see_exit()
+            self._event_log.record_exit(scope_id, exit_code, timed_out=timed_out, exited_at=exited_at)
 
 
 def run_reconcile_loop(
@@ -135,33 +198,35 @@ def run_reconcile_loop(
     launcher: SubprocessLauncher,
     max_concurrency: int,
     *,
-    now_iso_fn: Callable[[], str],
+    clock: Callable[[], datetime],
     poll_interval_s: float = 0.5,
     result_store=None,
     report_store=None,
 ) -> None:
     """per-run 进程的推进循环：反复 tick 直到 run 收尾（ADR 0034 local 主力触发源）。
 
-    now_iso_fn：**必传**的时间源（组合根传 `compose.now_iso`；测试传 fake 保确定性）——曾有个 strftime 的
-    `…Z` 回落分支，漏传即让同一份 RunState 混两种时间戳格式（见 `compose.now_iso` docstring），故不留缺省。
+    clock：**必传**的墙钟（组合根传 `compose.now`；测试传 fake 保确定性），返回带时区的 datetime。tick 经它取时刻，接力判超时按它
+    判断截止时刻是否已到，这里写进报告的时刻经 `serialize.instant_to_iso` 从它写出，同一份 RunState 里只有一种时间戳写法，故不留
+    缺省。launcher 的截止时刻检查读的是它构造时注入的墙钟，组合根两处传的是同一个读取点。
     tick 幂等——崩了 status --wait 可接力（状态全持久）。循环按 tick 的结果分支（batch shape：运行结束即停、不常驻）：
-    - `TickOutcome.FINALIZED`（本轮走完收尾分支）：写 RunReport 后退出；
-    - `TickOutcome.ALREADY_TERMINAL`（读到既有终态）：不写报告、直接退出。按此刻的事件重写会覆盖已有报告；
-      带着 pending job 收尾的 run 在这里结束，循环不依赖「每个 job 都会到终态」（ADR 0034 机制三
-      「run 级状态只进不退」条④）；
+    - `TickOutcome.COMMITTED`（这一方写成收尾）：用 tick 交还的结果写 RunReport 后退出；
+    - `TickOutcome.ENDED`（run 已结束、终态不是这一方写成的）：不写报告、直接退出。带着 pending job 收尾的 run 在这里结束，
+      循环不依赖「每个 job 都会到终态」（ADR 0034 机制三「run 级状态只进不退」条④）；
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
-    退出后由调用方照常拆隧道（`drive_local_reconcile`）。
+    退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
+    认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后按到期收尾，不
+    启动任何 job（ADR 0054 决策二「本机后台 run 的推进进程已不在时」条）。
 
-    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在 finalize CAS **之前**落（注入给 tick，
-    ADR 0030 决定三写序）；RunReport（index/manifest）在本轮走完收尾分支后由 `finalize_report` 写（派生、失败隔离）。
-    两者都幂等（从 events 重放、覆盖写同 key）——并发推进器都走完收尾分支时各写一次无害。注入 None（测试）则跳过。
+    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在收尾的条件写**之前**落（注入给 tick，
+    ADR 0030 决定三写序）；RunReport（index/manifest）在这一方写成收尾之后由 `finalize_report` 写（派生、失败隔离）。
+    注入 None（测试）则跳过。
     """
     while True:
         outcome = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
-                       now_iso=now_iso_fn(), result_store=result_store)
-        if outcome is TickOutcome.ALREADY_TERMINAL:
+                       clock=clock, result_store=result_store)
+        if outcome.outcome is TickOutcome.ENDED:
             return
-        if outcome is TickOutcome.FINALIZED:
+        if outcome.outcome is TickOutcome.COMMITTED:
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
             # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
@@ -172,10 +237,9 @@ def run_reconcile_loop(
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
             except Exception:
                 duration_ms = None
-            finalize_report(run_id, meta, event_log, report_store, now_iso_fn(),
-                            run_duration_ms=duration_ms)
+            finalize_report(outcome.result, report_store, instant_to_iso(clock()), run_duration_ms=duration_ms)
             return
-        _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso_fn())
+        _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher.owned_scopes, now=clock())
         time.sleep(poll_interval_s)
 
 
@@ -186,37 +250,49 @@ def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *,
     meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
         report_dir, run_id, max_concurrency, region=region, profile=profile)
     run_reconcile_loop(run_id, meta, log, store, launcher, mc, poll_interval_s=poll_interval_s,
-                       now_iso_fn=compose.now_iso, result_store=rstore, report_store=pstore)
+                       clock=compose.now, result_store=rstore, report_store=pstore)
     cleanup_tunnel(report_dir, run_id)  # 隧道收尾（有 tunnel.json 才动作，ADR 0035）；接力者同样兜底拆
 
 
-def _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher, now_iso: str) -> None:
-    """接力恢复 deadline（ADR 0034「job timeout」节 claimed_at ①）：**他人 claim、本进程无 handle** 的
-    RUNNING job 超预算（claimed_at 起算）且无退出记录 → 观察链已死（deadline timer 随 owner 进程丢、
-    worker 因 fd3 断管随之早亡）→ 直接 record_exit(timed_out=True) 收敛，防 run 永久 wedge。
+def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, owned_scopes: Collection[str], *,
+                              now: datetime) -> None:
+    """接力判超时（ADR 0034「job timeout」节 claimed_at ①，ADR 0054 决策二「本机接力」条）：**他人认领、本进程无 handle** 的
+    RUNNING job，墙钟严格晚于它的截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录时，按观察链已断处理（截止时刻检查随认领方进程丢失，
+    worker 因 fd3 断管随之早亡），补写一条判为超时的未知退出收敛，防止 run 一直停在未结束。now 是这一轮的墙钟。
 
-    自家 job（launcher.owned_scopes）不扫——launch 时的 timer 在管、且要给足协作停 grace。
-    与被拒方案「超时时由处置者直接写 task_exited」不冲突：那条拒的是**有活观察链时**绕过它；此处观察链
-    已死、直接写是唯一收敛路径。若 owner 其实尚活（余量误判）：其 timer 同一 deadline 早已触发、真退出
-    记录同带 timed_out=True，后到覆盖本记录归因不变（INSERT OR REPLACE 同 key）。
+    截止时刻由运行态里的认领时刻、job 预算与期限经 `run_deadline.job_cutoff` 算出，与认领方是同一个算法（以期限封顶）。补写经
+    `record_timed_out_if_absent`，是条件写：只在这个 job 还没有退出记录时写入，认领方恰在接力方点查之后、补写之前落下的真实退出记录
+    不被盖掉（点查只是省掉一次写）；补写之后才到的真实退出照旧覆盖补写的那一条（INSERT OR REPLACE 同 key）。
+
+    这个判定条件保证不了不抢先：认领方还在、到点催停之后 worker 仍在停止宽限期内收尾时，接力方照样补写，run 若在补写与真实退出之间
+    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`，ADR 0054「边界与已知局限」）。改法已定、尚未实装：按认领方的进程是否还在来判
+    （ADR 0054 决策二「本机接力的改法」）。
+
+    自家 job（owned_scopes）不扫：launch 时的截止时刻检查在管、且要给足协作停宽限。认领时刻缺失、读不出或不带时区的 job 不处置
+    （除超时外无权臆断他人认领的死活）。与被拒方案「超时时由处置者直接写 task_exited」不冲突：那条拒的是**有活观察链时**绕过它；
+    这里按观察链已断处理，补写是唯一的收敛路径。
     """
     state = run_store.load_run_state(run_id)
     if state is None:
         return
     job_by_scope = {j.scope_id: j for j in meta.jobs}
-    now = None  # 有候选才解析（多数 tick 一个候选都没有）
+    deadline = deadline_of(meta)
+    margin = timedelta(seconds=_RECOVERY_MARGIN_S)
     for sid, js in state.jobs.items():
-        if js.status != Status.RUNNING or sid in launcher.owned_scopes:
+        if js.status != Status.RUNNING or sid in owned_scopes:
             continue
         job = job_by_scope.get(sid)
-        if job is None or not js.claimed_at:
-            continue  # 运行定义里没有这个 job，或没有起算点 → 不处置（除超时外无权臆断他人 claim 的死活）
-        if now is None:
-            now = compose.parse_iso(now_iso)
-        elapsed = (now - compose.parse_iso(js.claimed_at)).total_seconds()
-        # 廉价过滤都过了才点查退出记录（has_exit 主键点查，对位 cloud `_handle_timeout`）——别为判一个 scope 重放整 run 的 events
-        if elapsed > job.timeout_s + _RECOVERY_MARGIN_S and not event_log.has_exit(sid):
-            event_log.record_exit(sid, None, timed_out=True)  # exit_code=None：无观察到的退出码，诚实留空
+        if job is None:
+            continue  # 运行定义里没有这个 job，不处置
+        try:
+            claimed_at = instant_from_iso(js.claimed_at)
+        except ValueError:
+            continue  # 没有起算点，不处置
+        cutoff = job_cutoff(claimed_at, job.timeout_s, deadline).at
+        # 廉价过滤都过了才点查退出记录（has_exit 主键点查，对位 cloud `_handle_timeout`），不为判一个 scope 重放整个 run 的事件。
+        # 补写本身是条件写：点查之后才落下的真实退出记录不被盖掉
+        if now > cutoff + margin and not event_log.has_exit(sid):
+            event_log.record_timed_out_if_absent(sid)  # 退出码未知：无观察到的退出码，诚实留空；也没有可观察的退出时刻
 
 
 # ============================================================================
@@ -278,7 +354,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         run_id=meta.run_id,
     )
     resolver = compose.make_resolver(engines)
-    launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace)
+    launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace, clock=compose.now)
     # ResultStore + ReportStore（收尾聚合用，落点与 RunStore 同 <report_dir>/<run_id>/，对齐同步 run 路径）
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.report_store.local import LocalReportStore

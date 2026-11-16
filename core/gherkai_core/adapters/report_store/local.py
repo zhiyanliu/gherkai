@@ -94,9 +94,8 @@ class LocalReportStore:
             "created_at": created_at,
             "report_index": index_entries,
         }
-        # 两个文件都**原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：同一份报告允许被两个推进器
-        # 各写一遍（派生视图、可重建，ADR 0027），而人/CI 会在第一个写者退出后立刻读——非原子写会让第二遍的
-        # truncate 窗口把读者撞成空 manifest / 空白页。
+        # 两个文件都**原子写**（tmp+rename，见 `gherkai_core.adapters._atomic`）：报告写在 run 级终态写成之后，读到终态的
+        # 人/CI 会立刻来读——非原子写会让读者撞上 truncate 窗口、读到空 manifest / 空白页。
         atomic_write_json(run_dir / "manifest.json", manifest)
 
         # index.html 摘要直接用内存 result（不从 manifest 取——manifest 已不含 result）

@@ -1,6 +1,6 @@
 """LocalResultStore 写面的原子性（ADR 0042 决策四 / 0034）：`explain` 被允许在 run 运行到一半时读
 jobs/<scope>.json（另一个进程），而写者可能正在重写同一文件——同步 run 逐 job 写，无状态批量运行下两个推进器
-（per-run 进程 + `status --wait` 接力）又会各写一遍全部 jobs/*.json，写面无跨进程锁。写必须 tmp+rename，
+（per-run 进程 + `status --wait` 接力）竞争收尾时又会先后各写一遍 jobs/*.json，写面无跨进程锁。写必须 tmp+rename，
 读者绝不能看到空/半截 JSON（撞上就是 explain 的裸 traceback）。
 
 真起子进程读、不 mock（绿≠对：进程间文件可见性是 mock 之外的真实行为）。对照实验（同一读者 + `write_text`

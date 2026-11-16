@@ -1,6 +1,8 @@
 """双路径对拍（ADR 0034 机制二「双路径对拍是实施护栏」）：同一组事件矩阵分别输入同步 schedule（FakeEngine）与无状态
-project_full（EventRecord 加 TaskExited），逐项比较判定、归因、消息、明细、sessions[] 与计量键，以及两条路径交给终结函数的
-见过 scope_started / session_opened 两个布尔。含 abort 的行只经同步路径。矩阵以设备 job 为主，另有几行桌面 job：桌面 worker 也成对
+project_full（EventRecord 加 TaskExited，认领时刻取同步路径认领时的假墙钟），逐项比较判定、归因、消息、明细、sessions[] 与计量键，
+以及两条路径交给终结函数的见过 scope_started / session_opened 两个布尔。超时行另在运行期限截断时对拍一遍（两句超时说明都由共用的
+终结函数给出）；起 worker 失败与到期收尾两种情形另以无状态路径的推进步骤 tick 对拍（ADR 0054 决策二后台推进条）；worker 在截止时刻
+前后自己退出的几种情形，无状态路径的退出记录只带退出时刻、不带超时标志（同一条的「截止时刻与说明」）。含 abort 的行只经同步路径。矩阵以设备 job 为主，另有几行桌面 job：桌面 worker 也成对
 发会话事件，配对与释放判定与设备同一条，计量两键与释放提示按目标给（ADR 0051 决策 4、7）。
 未退出时的 job 态另有一组对拍：同步路径的实时落库（RunPersistence）与无状态路径的 project() 投影逐项比较 status 与 session_id。
 """
@@ -27,7 +29,8 @@ from gherkai_core.model import (
     StepDone,
     Target,
 )
-from gherkai_core.project import DESKTOP_RELEASE_FAILED_HINT, DEVICE_RELEASE_FAILED_HINT, EventRecord, TaskExited, project, project_full
+from gherkai_core.project import (DEADLINE_TIMEOUT_MESSAGE, DESKTOP_RELEASE_FAILED_HINT, DEVICE_RELEASE_FAILED_HINT, EventRecord,
+                                  TaskExited, project, project_full)
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_to_dict
 from tests.fake_engine import FAR_DEADLINE, CollectSink, FakeEngine, FakeResolver
@@ -145,7 +148,7 @@ class _Clock:
         return _Sink()
 
 
-def _sync(row: Row):
+def _sync(row: Row, deadline_at: str = FAR_DEADLINE):
     job = _job(row.timeout_s, row.device)
     engine = FakeEngine({SCOPE: list(row.events)}, tail_after_stop={SCOPE: list(row.tail)} if row.tail else {},
                         exit_code={SCOPE: row.exit_code} if row.exit_code else {})
@@ -156,19 +159,21 @@ def _sync(row: Row):
         engine.behaviors[SCOPE] = list(row.events) + [ScenarioStarted(scenario_id=f"{SCOPE}:1")]
     if row.crash:
         engine.crash_after = {SCOPE: len(engine.behaviors[SCOPE])}  # 全部事件发完后抛 RuntimeError（退出码未知）
-    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.sink(),
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at), FakeResolver(engine), clock.sink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.05,
                                      grace_period_s=1.0))
     return res.jobs[0]
 
 
-def _stateless(row: Row):
+def _stateless(row: Row, deadline_at: str = FAR_DEADLINE):
     job = _job(row.timeout_s, row.device)
     events = list(row.events) + ([ScenarioStarted(scenario_id=f"{SCOPE}:1")] if row.timed_out else []) + list(row.tail)
     records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(events)]
     records.append(EventRecord(scope_id=SCOPE, kind="exit",
                                exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, timed_out=row.timed_out)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), records)
+    # 认领时刻取同步路径认领时的假墙钟（零点起、只差几毫秒），超时时起作用的截止时刻两边由同一组值算出
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at), records,
+                       claimed_at={SCOPE: _Clock.T0}, past_stop_start=False)
     return res.jobs[0]
 
 
@@ -347,7 +352,8 @@ def test_stateless_run_level_device_metering():
     for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
         records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
         records.append(EventRecord(scope_id=scope, kind="exit", exited=TaskExited(scope_id=scope, exit_code=0)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at=FAR_DEADLINE), records)
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at=FAR_DEADLINE), records,
+                       claimed_at={sid: _Clock.T0 for sid in (SCOPE, "dev2", "web")}, past_stop_start=False)
     by = {jr.scope_id: jr for jr in res.jobs}
     assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
     assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)
@@ -470,3 +476,196 @@ def test_sync_path_new_verdicts_come_from_the_shared_finalize(monkeypatch, cause
         assert (kw["stop_reason"], kw["abort_cause"]) == ("abort", "ended-elsewhere")
         assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, ENDED_ELSEWHERE_ABORT_MESSAGE)
     assert [s.release for s in jr.sessions] == ["confirmed"]  # 停止后到达的收尾照常归约
+
+
+# ---------- 后台路径与前台同一结论（ADR 0054 决策二后台推进条、实测项 13）----------
+
+_NEAR = (_Clock.T0 + timedelta(seconds=100)).isoformat()  # 运行期限：同步路径的假墙钟越过截止时刻时它已过
+
+
+@pytest.mark.parametrize("row", _TIMED_OUT, ids=[r.name for r in _TIMED_OUT])
+def test_paths_agree_when_the_run_deadline_cuts_the_job(row: Row):
+    """被运行期限截断的 job（预算远长于期限）：同步路径在认领时算出起作用的是期限，无状态路径由认领时刻、预算与期限重算出同一个结论，
+    两边的判定、归因与说明逐项相同；被截断而内容不完整的 job 的说明是期限那一句。"""
+    long = Row(row.name, row.events, row.tail, row.exit_code, timed_out=True, timeout_s=7200.0, crash=row.crash, device=row.device)
+    a, b = _comparable(_sync(long, _NEAR)), _comparable(_stateless(long, _NEAR))
+    assert a == b, f"\n同步：{a}\n无状态：{b}"
+    if b["error_type"] == "timeout":
+        assert b["message"].startswith(DEADLINE_TIMEOUT_MESSAGE)
+
+
+# worker 在截止时刻前后自己退出（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 24）：同步路径在终结之前对内容不完整的 job
+# 再查一次截止时刻；无状态路径的退出记录与本机启动器、云端观察者写的同一形态——不带超时标志、只带退出时刻，由收尾投影按它是否晚于
+# 截止时刻判断。预算 5 秒；同步路径的假墙钟在最后一条事件之后越过截止时刻（after_cutoff）或一直停在它之前。同步路径不包心跳：最后
+# 一条事件之后紧接着就是 worker 的退出，中间没有事件间检查，也就不会先发出停止请求。
+
+@dataclass
+class SelfExit:
+    name: str
+    events: list
+    exit_code: int
+    after_cutoff: bool
+    expected: tuple  # (status, error_type)
+
+
+_DESKTOP_RUN = [_opened("s-1", sid="s-1"), ScopeStarted(scope_id=SCOPE, session_id="s-1"), *_passed_scenario(0)]
+SELF_EXITS = [
+    SelfExit("截止时刻之后以非零退出码自行退出", [*_DESKTOP_RUN, _closed("s-1", observed_s=None, sid="s-1")], 3, True,
+             (Status.ERROR, "timeout")),
+    SelfExit("截止时刻之前以非零退出码自行退出", [*_DESKTOP_RUN, _closed("s-1", observed_s=None, sid="s-1")], 3, False,
+             (Status.ERROR, "engine_error")),
+    SelfExit("截止时刻之后以非零退出码自行退出且会话未确认", list(_DESKTOP_RUN), 3, True, (Status.ERROR, "timeout")),
+    SelfExit("内容完整而退出时刻晚于截止时刻", [*_DESKTOP_RUN, *_passed_scenario(1), _closed("s-1", observed_s=None, sid="s-1"),
+                                            ScopeDone(scope_id=SCOPE)], 0, True, (Status.PASSED, None)),
+]
+
+
+def _sync_self_exit(row: SelfExit):
+    job = _job(5.0, "desktop")
+    engine = FakeEngine({SCOPE: list(row.events)}, exit_code={SCOPE: row.exit_code} if row.exit_code else {})
+    clock = _Clock(jump_after=len(row.events) if row.after_cutoff else None)
+    res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.sink(),
+                   opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0,
+                                     grace_period_s=1.0))
+    assert not engine.handles[SCOPE].stopped  # worker 是自己退出的：同步路径没有发出过停止请求
+    return res.jobs[0]
+
+
+def _stateless_self_exit(row: SelfExit):
+    job = _job(5.0, "desktop")
+    records = [EventRecord(scope_id=SCOPE, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(row.events)]
+    exited_at = _Clock.T0 + timedelta(seconds=1000.0 if row.after_cutoff else 1.0)
+    records.append(EventRecord(scope_id=SCOPE, kind="exit",
+                               exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, exited_at=exited_at)))
+    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), records,
+                       claimed_at={SCOPE: _Clock.T0}, past_stop_start=False)
+    return res.jobs[0]
+
+
+@pytest.mark.parametrize("row", SELF_EXITS, ids=[r.name for r in SELF_EXITS])
+def test_paths_agree_when_the_worker_exits_on_its_own_around_its_cutoff(row: SelfExit):
+    """worker 在截止时刻之后、停止请求发出之前自己以非零退出码退出：两条路径都记超时（说明是预算那一句）；在截止时刻之前这样退出时
+    都按退出码归因；内容完整的不因退出时刻晚于截止时刻而改判。判定、归因、说明与明细逐项相同。"""
+    a, b = _comparable(_sync_self_exit(row)), _comparable(_stateless_self_exit(row))
+    assert a == b, f"\n同步：{a}\n无状态：{b}"
+    assert (Status(b["status"]), b["error_type"]) == row.expected
+    if row.expected[1] == "timeout":
+        assert b["message"].startswith("job 超时（预算 5s，已中止）")
+
+
+def _boom_sync(deadline_at: str, timeout_s: float, *, slow: bool):
+    """同步路径起 worker 失败；slow 时起 worker 的调用拖过截止时刻才失败。"""
+    job = _job(timeout_s, "desktop")
+    clock = _Clock(jump_after=None)
+
+    class Boom:
+        def run_scope(self, job):
+            if slow:
+                clock.t += 1000.0
+            raise OSError("spawn 失败")
+
+    meta = RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at)
+    return schedule(meta, FakeResolver(Boom()), CollectSink(),
+                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, grace_period_s=1.0))
+
+
+def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool):
+    """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮收尾；slow 时启动调用拖过截止时刻才失败。返回收尾结果与补写的
+    退出记录。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.model import JobState, RunState
+    from gherkai_core.reconcile import TickOutcome, tick
+
+    job = _job(timeout_s, "desktop")
+    meta = RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at)
+    store, log = LocalRunStore(tmp_path), SqliteEventLog(tmp_path / "e.db")
+    store.create_run(meta, RunState(run_id="r", status=Status.PENDING, jobs={SCOPE: JobState(SCOPE, Status.PENDING)},
+                                    started_at="t0", high_water_mark=0))
+    now = {"t": 0.0}
+
+    class Boom:
+        def launch(self, job, *, cutoff_at):
+            if slow:
+                now["t"] += 1000.0
+            raise OSError("spawn 失败")
+
+    def clock():
+        return _Clock.T0 + timedelta(seconds=now["t"])
+
+    assert tick("r", meta, log, store, Boom(), 1, clock=clock).outcome is TickOutcome.CONTINUE
+    done = tick("r", meta, log, store, Boom(), 1, clock=clock)
+    assert done.outcome is TickOutcome.COMMITTED
+    [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
+    return done.result, exit_rec
+
+
+@pytest.mark.parametrize("deadline_at, timeout_s, slow, message", [
+    (FAR_DEADLINE, 5.0, False, "起 worker 失败：spawn 失败"),
+    (FAR_DEADLINE, 5.0, True, "job 超时（预算 5s，已中止）"),
+    (_NEAR, 5.0, True, "job 超时（预算 5s，已中止）"),
+    (_NEAR, 7200.0, True, DEADLINE_TIMEOUT_MESSAGE),
+], ids=["起不来", "拖过预算才失败", "拖过预算才失败且期限更晚", "拖过期限才失败"])
+def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, message):
+    """起 worker 失败的 job（ADR 0054 决策二后台推进条「时刻」）：推进步骤补写的退出记录与前台交给终结函数的输入相同——退出码未知、带
+    启动失败的原因。补写只记失败的那一刻作退出时刻、不带超时标志，收尾投影按它是否晚于截止时刻判断，与前台起 worker 失败的分支是
+    同一个判断——两条路径的判定、归因与说明逐项相同。"""
+    sync = _boom_sync(deadline_at, timeout_s, slow=slow)
+    stateless, exit_rec = _boom_stateless(tmp_path, deadline_at, timeout_s, slow=slow)
+    assert (exit_rec.exit_code, exit_rec.timed_out) == (None, False)
+    assert exit_rec.exited_at == _Clock.T0 + timedelta(seconds=1000.0 if slow else 0.0)
+    a, b = _comparable(sync.jobs[0]), _comparable(stateless.jobs[0])
+    assert a == b, f"\n同步：{a}\n无状态：{b}"
+    assert (b["status"], b["message"]) == ("error", message)
+    assert (sync.status, sync.message) == (stateless.status, stateless.message) == (Status.ERROR, None)
+
+
+def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
+    """到期收尾（ADR 0054 决策二第 3 条、实测项 13）：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
+    同一个 run 级状态与说明、同一组判定（b 不在其中、没有执行），后台的运行态里 b 保持 pending。"""
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.model import JobState, RunState
+    from gherkai_core.reconcile import TickOutcome, tick
+    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+
+    def job(sid):
+        return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=7200.0,
+                   scenarios=(Scenario(id=f"{sid}:0", name="sc0", steps=(Step(0, "Given", "a"),)),))
+
+    meta = RunMeta(run_id="r", created_at="", jobs=(job("a"), job("b")), deadline_at=_NEAR)
+    a_events = [ScopeStarted(scope_id="a", session_id="s"), ScenarioDone(scenario_id="a:0", status=Status.PASSED),
+                ScopeDone(scope_id="a")]
+    clock = _Clock(jump_after=len(a_events))  # a 的最后一条事件之后越过停止启动的时刻
+    sync = schedule(meta, FakeResolver(FakeEngine({"a": a_events})), clock.sink(),
+                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
+                                      grace_period_s=1.0))
+
+    store, log = LocalRunStore(tmp_path), SqliteEventLog(tmp_path / "e.db")
+    store.create_run(meta, RunState(run_id="r", status=Status.PENDING, high_water_mark=0, started_at="t0",
+                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")}))
+    now = {"t": 0.0}
+
+    class Launcher:
+        def launch(self, job, *, cutoff_at):
+            pass
+
+    def wall():
+        return _Clock.T0 + timedelta(seconds=now["t"])
+
+    tick("r", meta, log, store, Launcher(), 1, clock=wall)  # 认领并启动 a
+    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a","sessionId":"s"}', 1.0)
+    log.append_event("a", 2, '{"type":"scenario_done","scenarioId":"a:0","status":"passed"}', 2.0)
+    log.append_event("a", 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
+    log.record_exit("a", 0)
+    now["t"] = 1000.0
+    done = tick("r", meta, log, store, Launcher(), 1, clock=wall)
+
+    assert done.outcome is TickOutcome.COMMITTED
+    background = done.result
+    assert (sync.status, sync.message) == (background.status, background.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert [(jr.scope_id, jr.status) for jr in sync.jobs] == [(jr.scope_id, jr.status) for jr in background.jobs] \
+        == [("a", Status.PASSED)]
+    assert [j.scope_id for j in sync.jobs_without_verdict] == [j.scope_id for j in background.jobs_without_verdict] == ["b"]
+    state = store.load_run_state("r")
+    assert (state.status, state.message, state.jobs["b"].status) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, Status.PENDING)

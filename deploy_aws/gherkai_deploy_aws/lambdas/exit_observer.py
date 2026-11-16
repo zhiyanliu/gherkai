@@ -3,8 +3,9 @@
 EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、本 cluster）触发本 handler。
 它是**平台侧外部观察者**——worker 崩了/被 SIGKILL 也照发（进程干净终止只有平台看得见，机制二）。职责极薄：
 从 STOPPED event 拿 run_id/scope_id（RunTask 注入的 env 原样在 detail.overrides，已由实际运行抓到的事件证实）+ exitCode
-（detail.containers[].exitCode，实际运行抓到的 4 个事件都带，含 SIGKILL=137）→ DdbEventLog.record_exit 写 task_exited
-（保留高位 SK 独立键空间）。写完即返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
+（detail.containers[].exitCode，实际运行抓到的 4 个事件都带，含 SIGKILL=137）与执行停止时刻 → DdbEventLog.record_exit 写
+task_exited（保留高位 SK 独立键空间）。只记 task 对象里的事实，不读运行态与运行定义、不判断是否已过截止时刻（由投影判断）。写完即
+返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
 **只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
 `_is_detached`；不变量与故障形态见 ADR 0034 端到端 cloud 1b 与机制一）。
 
@@ -23,10 +24,11 @@ AWS_REGION（Lambda runtime 自带）。
 from __future__ import annotations
 
 import os
+from datetime import datetime
 
 
-def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, str | None]:
-    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason)。
+def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, str | None, datetime | None]:
+    """从 STOPPED event 的 detail 拿 (run_id, scope_id, exit_code, timed_out, reason, exited_at)。
 
     run_id/scope_id：RunTask 注入的 env 原样在 detail.overrides.containerOverrides[].environment（已由实际运行抓到的事件证实）。
     exit_code：`exit_from_task` 从 detail.containers[] 取**首个带 exitCode 的**（worker 是 essential 单容器，无需按名匹配）；
@@ -34,6 +36,8 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
     （用户可见归因）；带码时 reason=None（worker 自己的日志才是归因源）。
     timed_out：detail.stoppedReason 含超时哨兵（reconciler 的超时处置 StopTask(reason) 原样出现在此，
     ADR 0034「job timeout」节归因链）→ task_exited 带 timed_out=True。
+    exited_at：detail 里的执行停止时刻（`executionStoppedAt`，缺则 `stoppedAt`）。观察者只看 task 对象、只记事实，task 在截止时刻
+    之后自己退出时是否按超时处理由投影按这个时刻判断。
     """
     from reconciler import exit_from_task  # 与超时处置的「已 STOPPED 无退出记录」分支同一算法（同键幂等）
 
@@ -44,8 +48,8 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
                 run_id = e.get("value")
             elif e.get("name") == "SCOPE_ID":
                 scope_id = e.get("value")
-    exit_code, timed_out, reason = exit_from_task(detail)
-    return run_id, scope_id, exit_code, timed_out, reason
+    exit_code, timed_out, reason, exited_at = exit_from_task(detail)
+    return run_id, scope_id, exit_code, timed_out, reason, exited_at
 
 
 def _is_detached(run_id: str) -> bool:
@@ -76,8 +80,10 @@ def _event_log(run_id: str, scope_id: str):
 
 def handler(event, context):
     """EventBridge ECS STOPPED 事件入口。写本 task 的 task_exited。"""
+    from gherkai_core.serialize import instant_to_iso
+
     detail = event.get("detail", {})
-    run_id, scope_id, exit_code, timed_out, reason = _extract(detail)
+    run_id, scope_id, exit_code, timed_out, reason, exited_at = _extract(detail)
     if not run_id or not scope_id:
         # 非 gherkai 起的 task（同 cluster 别的负载）或 env 缺失 → 忽略（rule 已按 cluster 过滤，此为双保险）
         print(f"exit_observer: 跳过（缺 run_id/scope_id）taskArn={detail.get('taskArn')}")
@@ -87,8 +93,9 @@ def handler(event, context):
         print(f"exit_observer: 跳过（run {run_id} 不是 submit 提交到后台执行的 run；同步的 `run --backend cloud` 由发起它的命令自己观察退出）")
         return {"skipped": True, "reason": "not-detached"}
     log = _event_log(run_id, scope_id)
-    log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason)
+    log.record_exit(scope_id, exit_code, timed_out=timed_out, reason=reason, exited_at=exited_at)
+    exited_iso = instant_to_iso(exited_at) if exited_at is not None else None  # 返回值要能序列化成 JSON，写成记录里的同一种写法
     print(f"exit_observer: task_exited run={run_id} scope={scope_id} exit={exit_code} timed_out={timed_out}"
-          + (f" reason={reason!r}" if reason else ""))
+          f" exited_at={exited_iso}" + (f" reason={reason!r}" if reason else ""))
     return {"ok": True, "run_id": run_id, "scope_id": scope_id, "exit_code": exit_code, "timed_out": timed_out,
-            "reason": reason}
+            "reason": reason, "exited_at": exited_iso}

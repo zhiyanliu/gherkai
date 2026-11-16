@@ -27,7 +27,7 @@ from pathlib import Path
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
-from gherkai_core.serialize import instant_to_iso
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一取值点** `nova_act_timeout_s()`，注入 worker 的
@@ -141,22 +141,14 @@ def now_iso() -> str:
     return instant_to_iso(now())
 
 
-def parse_iso(ts: str) -> datetime:
-    """`now_iso()` 的逆（两宿主共用一份）：解析回 aware datetime，供 claimed_at 超时判定做时间差。
-
-    容 `…Z` 后缀（历史落盘的旧格式，`fromisoformat` 在 3.10 不认它）——读侧宽容，写侧只出 `now_iso()` 一种。
-    """
-    return datetime.fromisoformat(ts.replace("Z", "+00:00"))
-
-
 def run_duration_ms(state) -> float | None:
     """detached run 的 run 级墙钟（毫秒），取 RunState `ended_at` 减 `started_at`（提交落库到 finalize commit，含排队/起容器；
-    ADR 0024「三级执行时长」detached 条）。两端任一缺或解析不了 → None（报告显「?」——派生指标，绝不让收尾因它失败）。
-    宿主在 finalize_report 前调，算好传给 core。"""
+    ADR 0024「三级执行时长」detached 条）。两端任一缺、解析不了或不带时区 → None（报告显「?」——派生指标，绝不让收尾因它失败）。
+    记录里的时刻经 `serialize.instant_from_iso` 读（`now_iso()` 的逆，core 里唯一的解析处）。宿主在 finalize_report 前调，算好传给 core。"""
     if state is None or not getattr(state, "started_at", None) or not getattr(state, "ended_at", None):
         return None
     try:
-        return (parse_iso(state.ended_at) - parse_iso(state.started_at)).total_seconds() * 1000.0
+        return (instant_from_iso(state.ended_at) - instant_from_iso(state.started_at)).total_seconds() * 1000.0
     except ValueError:
         return None
 

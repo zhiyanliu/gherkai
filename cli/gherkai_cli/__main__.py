@@ -2083,9 +2083,10 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
 
     state 已确认非 None（调用方先查）。wait_hint 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、
     cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。locations 是该 run 的产物落点（compose 单点拼，
-    与 `run` 结束时打的同一份）：人读方式下终态才打那三行——报告/判定明细在 finalize 才落，未终态打了是空指针。
-    --json 机读：RunState 键形状不变，另**附加** `artifacts`（约定落点、无论终态都给，终态后才真有内容，ADR 0041 决策三）；
-    人读提示一律不打（pending 提示的触发条件见下方注释）。
+    与 `run` 结束时打的同一份）：人读方式下只在终态输出那三行——报告在 run 结束之后才生成，未终态时输出的报告位置指向还不存在的文件。
+    --json 机读：RunState 键形状不变，另**附加** `artifacts`（约定落点、无论终态都给，ADR 0041 决策三）；落点上有没有内容不由它表达，
+    各键何时有内容以 CLI `--json` 契约页的字段表为准（出处登记见 ADR 0034 机制三「run 级状态只进不退」条④「收尾各步的先后与
+    之后会不会变」）。人读提示一律不打（pending 提示的触发条件见下方注释）。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
     relay_available：零参回调，答「--wait 对这个 run 能不能接力」（detached run 才能，ADR 0034）；只在 pending 提示的触发条件
     成立时才调（云端是一次点查）。None 当 True（旧调用方）。
@@ -2093,7 +2094,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
     if args.json:
         from gherkai_core.serialize import run_state_to_dict
         doc = run_state_to_dict(state)
-        doc["artifacts"] = locations  # 附加键（ADR 0041 决策三）：RunState 部分形状不变；位置是约定落点、终态才真有
+        doc["artifacts"] = locations  # 附加键（ADR 0041 决策三）：RunState 部分形状不变；位置是约定落点，有没有内容见本函数 docstring
         print(json.dumps(doc, ensure_ascii=False, indent=2))
     else:
         print(render.render_run_state(state))
@@ -2582,7 +2583,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     else:
         results = result_store.load_all(run_id)
     if not results:
-        # detached run（submit）全 job 终态才一次性落判定明细，未终态时零文件；终态却零文件属异常但同样只是「没得渲染」
+        # detached run（submit）的判定明细由收尾的那一轮保存（ADR 0034 机制三「run 级状态只进不退」条④的步骤）；终态而零文件
+        # 也是正常结果（例子见同一条的「不经推进步骤的收尾」），同样只是「没得渲染」
         return _explain_empty(args, state, hint=(not_landed if state.status not in TERMINAL_STATUSES
                                                 else "本 run 没有任何 job 的判定明细"))
 
@@ -2623,7 +2625,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
         print(json.dumps(doc, ensure_ascii=False, indent=2))
         return 0
     if state.status not in TERMINAL_STATUSES:
-        # 同步 run 中途可见已完成的 job（逐 job 落盘）——说清「这只是已完成部分」，免得读者以为剩下的没执行
+        # run 未结束也能读到已完成的 job：同步 run 逐 job 落盘；后台 run 一次收尾尝试落下判定明细之后 run 仍未结束时（条件写没写成，
+        # 或在条件写之前失败、中断）也读得到——说清「这只是已完成部分」，免得读者以为剩下的没执行
         _progress("run 仍在运行，以下为已完成部分")
     print(render.render_explain_text(doc, expand_passed=expand_passed, full=args.full))
     return 0

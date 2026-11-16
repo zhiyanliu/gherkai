@@ -1834,7 +1834,7 @@ def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
 
 
 def test_render_status_terminal_prints_artifact_locations(capsys):
-    """终态时对标 `run` 结束的三行：报告 / 运行元信息 / 判定明细（S3 或本地路径可直接复制）；未终态不打（产物还没落）。"""
+    """终态时对标 `run` 结束的三行：报告 / 运行元信息 / 判定明细（S3 或本地路径可直接复制）；未终态不打（报告还没生成）。"""
     m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x", locations=_LOCS)
     err = capsys.readouterr().err
     assert "报告: file:///tmp/x/r/index.html" in err and "判定明细: file:///tmp/x/r/jobs" in err
@@ -3107,7 +3107,7 @@ def test_explain_unknown_run_and_scope_exit_2(tmp_path, capsys):
 
 
 def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, capsys):
-    """detached run 未终态时零判定明细（全 job 终态才一次性落）→ 退出码 0 + 一行提示；--json 不打提示、
+    """detached run 进入收尾之前零判定明细（收尾尝试里才落）→ 退出码 0 + 一行提示；--json 不打提示、
     stdout 仍只有一个文档（机读侧靠顶层 status 自明）。"""
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)

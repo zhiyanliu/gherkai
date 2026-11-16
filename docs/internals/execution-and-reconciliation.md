@@ -7,7 +7,7 @@
 gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 - **同步驱动（`run`，下称前台）**：CLI 进程内的 `schedule()`（`core/gherkai_core/schedule.py`）全程在线，在一个循环内完成启动 worker、消费事件流、判定超时、收集结果。按 Ctrl-C 或向 CLI 发 SIGTERM 时，CLI 的信号处理器只记下中断，`schedule` 轮询到后走与 fail-fast 同一条停止路径：首次中断请求全部 worker 协作停止（local 向 worker 的进程组发 SIGTERM、宽限到期再 SIGKILL；cloud 发 StopTask，宽限由部署配置决定），再次中断时 local 改用零宽限、cloud 只是重发 StopTask；照常收集结果后 run 记 aborted、以 130 / 143 结束（[ADR 0024](../adr/0024-worker-core-protocol.md) 终止契约「使用方中断」条）。它遵守运行期限：过了期限减 60 秒不再启动 job，到期限时停下运行中的 worker；起 worker 之前先认领，发现这个 run 已被别处记为已结束就停手（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二、五）。CLI 进程被直接结束（如 `kill -9`）时，local 的 worker 定期核验所属进程是否存活，发现它已退出即按收到 SIGTERM 收尾并释放会话（同一 ADR「父进程消失视同停止信号」条）；cloud 的 worker 不做这项核验，已在运行的 Fargate task 没有调用方发起 StopTask，会运行至结束并持续计费。
-- **无状态驱动（`submit` + `status`，下称后台/后台运行）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：全量重放事件 → 推算 RunState 并条件写落库 → 推算当前应执行的动作 → 认领并启动下一个 job。**任何宿主都可以调用它推进一步**：它不保存自身状态、不假设上一步由谁推进，这是「无状态」的含义。
+- **无状态驱动（`submit` + `status`，下称后台/后台运行）**：没有常驻的「调度进程」。核心是一个**纯编排步骤 `reconcile.tick`**（`core/gherkai_core/reconcile.py`；判定与决策是 `gherkai_core.project` 的纯函数，副作用全经注入的 EventLog/RunStore/Launcher）：全量重放事件 → 推算 RunState 并条件写落库 → 推算当前应执行的动作 → 认领并启动下一个 job。**任何宿主都可以调用它推进一步**：它不保存自身状态、不假设上一步由谁推进，这是「无状态」的含义。它同样遵守运行期限：时刻经宿主注入的时钟取，每一轮按当前时刻判断，过了期限减 60 秒不再认领，认领时算出的截止时刻以期限封顶、随启动交给启动器；已过停止启动的时刻、没有执行中的 job 而余下的 job 都没有启动时，以带认领计数的条件写到期收尾（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二）。
 
 不论哪种驱动，worker 与 `core` 之间的回传只有两类：**事件流**（`scope_started`/`step_done`/… 的逐条事件）与**进程退出信号**（退出码由父进程或平台观察得到，不由 worker 上报；[ADR 0024](../adr/0024-worker-core-protocol.md) 协议）。判定要求两者同时成立：事件内容完整且进程干净终止，缺一即不判通过（防假绿）。两种驱动的本质差别在于**有没有在线的接收方**：前台有在线接收方，`schedule` 全程在线、收到事件即处理，退出信号由 Engine adapter 当场观察；后台没有常驻接收方，事件流被持久化、退出信号也被转写成 `task_exited` 记入同一份日志，于是任何宿主都能仅凭重放这份日志推进（各组合的物理通道见 §5）。
 
@@ -57,11 +57,12 @@ local 与 cloud 在这条路径上的差别**只在 Engine adapter**：
 ```
 submit:plan → 落 definition + 全 pending 初始态 → fork per-run 推进进程(setsid 脱离 CLI)→ CLI 返回 run_id
 per-run 进程:run_reconcile_loop 循环调用 tick
-  ├─ tick 认领到 PENDING job → SubprocessLauncher 启动本机 worker
+  ├─ tick 认领到 PENDING job(未过停止启动的时刻才认领) → SubprocessLauncher 启动本机 worker,收下这个 job 的截止时刻
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
+  ├─ 每个执行中的 job 一个检查线程按墙钟比对截止时刻,到点停 worker(§6)
   ├─ worker 退出 → 本进程 handle.wait() 取 exitcode 写 task_exited(本进程同时担任"平台侧退出观察者")
-  └─ 全 job 终态 → tick 收敛并提交(写序见 §4c) → 拆除临时资源,退出
-status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit 的 run)——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛
+  └─ 全 job 终态,或到期(已过停止启动的时刻、没有执行中的、余下的都没有启动) → tick 收敛并提交(写序见 §4c) → 拆除临时资源,退出
+status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit 的 run)——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛(过了期限才接力的 run 不再启动 job,原进程认领的 job 判超时后收尾,§6)
 ```
 
 要点：推进进程是 **per-run** 的（一个 run 一个，不是常驻守护进程）；`setsid` 使它在 CLI 与终端退出后继续存在；SQLite 里的事件表结构刻意镜像 DDB events 表（保持心智对称）。
@@ -92,10 +93,10 @@ status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit �
 
 收尾一侧决定的是「什么时候能读到什么」：写序、由写序推出的读者保证、已终态 run 在两个后端的重入，以及落地之后由谁读取。
 
-- **收尾的写序**：三段有序，前两段在同一次 `tick` 里：① 各 job 的判定明细（`jobs/*.json`）由本轮 records 聚合落库 → ② `try_finalize`（CAS）落 run 终态，这一步是**提交点**；③ 提交点之后由宿主写入派生的 RunReport（`tick` 报告本轮走完收尾分支之后才写，写失败被隔离，不会回退已提交的 run 终态；`tick` 开头读到 run 已是终态时直接结束，宿主不写报告）。三段均幂等，local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。
-- **由写序推出的读者保证**：**读到终态即判定明细已完整落库**（它在提交点之前落定）；RunReport 则是提交点之后的派生物，「已读到终态、报告文件尚缺」是合法中间态，读者不应把它当判定真源。落点：local 后端下是 `--report-dir/<run_id>/`，cloud 后端下是 S3 桶里的 `<report_dir>/<run_id>/`；cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对，不一致则以退出码 2 结束），否则 run 执行完成后在提交者给出的前缀下找不到结果。
-- **已终态 run 在两个后端的重入**：cloud 后端的云端推进器对已提交终态的 run 整体不动作（§7 里 reconciler 的第二道判）——RunReport 若在提交点之后写入失败，云端不会补写（判定明细不受影响，见上条）；local 后端的 `status --wait` 同守两道判断（只接力 submit 的 run、已终态不接力），已终态的 run 不会被重放改写；两个后端的 `tick` 自身也先读运行态，读到已收尾即停止推演，这一步覆盖宿主判断之后、`tick` 读取运行态之前插入的收尾（读取之后才发生的收尾，本轮仍继续处理），本机推进循环随之退出、不写报告；对前台 `run` 正在执行的 run，它只等待到终态、不接力。
-- **落地之后由谁读取**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键，给出报告 / 判定明细 / 元信息的约定落点，无论是否终态都会给出，终态后才有内容）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这一步为何如此判定」；对 aborted 或 error 且仍有无记录 step 的 job，另从事件流补取已执行完的 step 的记录与证据（[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策七）。两者都受落地时机约束：detached run 的判定明细在提交点一次性落地，未到终态时 `explain` 无可渲染内容，只提示先用 `status --wait`（同步 `run` 逐 job 落库，中途即可读到已完成部分）。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
+- **收尾的写序**：三段有序，前两段在同一次 `tick` 里：① 各 job 的判定明细（`jobs/*.json`）由本轮 records 聚合落库 → ② `try_finalize`（CAS）落 run 终态，这一步是**提交点**；③ 提交点之后由宿主写入派生的 RunReport（只在 `tick` 报告这一方写成提交点之后才写，直接用这一轮落库的判定与 run 级裁决生成，写失败被隔离，不会回退已提交的 run 终态；`tick` 开头读到 run 已是终态，或这一方的提交写写不成、别人已写下终态时，宿主不写报告）。① 可以重做、覆盖同键（竞争收尾的边界见 [ADR 0054](../adr/0054-settle-leftover-foreground-runs.md)「边界与已知局限」以「多个推进方竞争收尾时」开头的一条），② 只有一方写成，③ 只由写成的一方写一次；local per-run 进程与 cloud reconciler 共用 `core` 的同一份收尾逻辑。
+- **由写序推出的读者保证**：**读到终态即写成收尾的那一轮已保存它的各 job 判定**（保存成功之后才提交终态，[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」的 K3；竞争收尾的边界见同一条；带 run 级说明的 `error` 例外，有的 job 可能没有判定明细，见 [ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定三「commit point 的意义」）；RunReport 则是提交点之后的派生物，「已读到终态、报告文件尚缺」是合法状态（一直缺的情形见同一条的「已获接受的边界」），读者不应把它当判定真源。落点：local 后端下是 `--report-dir/<run_id>/`，cloud 后端下是 S3 桶里的 `<report_dir>/<run_id>/`；cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对，不一致则以退出码 2 结束），否则 run 执行完成后在提交者给出的前缀下找不到结果。
+- **已终态 run 在两个后端的重入**：cloud 后端的云端推进器每次调用先读运行态，读到已提交终态即整体不动作（§7 里 reconciler 的第二道判；RunReport 缺失时的处理见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 端到端流程 cloud 一节标着「明确接受的代价」的一句）；local 后端的 `status --wait` 同守两道判断（只接力 submit 的 run、读到已终态不接力）；两个后端的 `tick` 自身也先读运行态，读到已收尾即停止推演，这一步覆盖宿主判断之后、`tick` 读取运行态之前插入的收尾（读取之后才发生的收尾，本轮仍继续处理），本机推进循环随之退出、不写报告；对前台 `run` 正在执行的 run，它只等待到终态、不接力。
+- **落地之后由谁读取**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键，给出报告 / 判定明细 / 元信息的约定落点；各键何时有内容见 [`cli-json-contract.md`](./cli-json-contract.md) 的字段表）；`explain` 读**已落库的判定明细**（step 级失败原因与 `kind=evidence` 的证据指针），回答「这一步为何如此判定」；对 aborted 或 error 且仍有无记录 step 的 job，另从事件流补取已执行完的 step 的记录与证据（[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策七）。两者都受落地时机约束：detached run 的判定明细由收尾的那一轮在条件写 run 级终态之前保存（收尾的步骤、必要契约与已获接受的边界见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」；同步 `run` 逐 job 落库，中途即可读到已完成部分）；`explain` 在各种落地情形下给哪句提示见 [ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策四。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 最后一条不对称（**能否中途终止**）：cloud 的 `--wait` 检测到停滞时只是调起 kicker（fire-and-forget），调起后随时可以离开，云端链会自行执行至结束；local 的 `--wait` 接力者与 per-run 进程执行同一段幂等推进、可以并存，per-run 进程仍在时退出接力者无影响；per-run 进程已终止时接力者**才是唯一推进器**，终止它 run 即就地停止（已 claim job 的计时也随进程一起丢失，由下一次接力恢复）。根因是主推进器的位置不同（云端 Lambda 与本机进程）。
 
@@ -123,7 +124,7 @@ PK = run_id#scope_id
 
 两类 item 按 `item_type` 属性区分（事件本体不带此属性），高位常数与属性名的真源在 `fargate_engine` 的 schema 常量。读端按形态各自处理：前台读端（`FargateEngine`）按段界排除 exit 记录；无状态读端（`DdbEventLog.records()`）读整个 PK、按 `item_type` 分流后交给重放；超时处置路径只需判断某个 scope 是否已退出，用 `has_exit` 做单点查询。
 
-**退出观察者三对位**（谁观察到 worker 终止）：前台由 Engine adapter 自行观察（subprocess 的 `proc.wait` / Fargate 的 `DescribeTasks`）；local `submit` 下是 per-run 进程的 `handle.wait()`；cloud `submit` 下是 exit-observer Lambda。另有一个例外情形：worker 根本未启动（`launch` 抛异常）时不存在平台侧观察者，由 `tick` 自行补一条非 0 哨兵退出记录，下一轮按「退出码非零 → error」收敛；若不补写，该 job 已被认领为 RUNNING 却永不会有事件与退出记录，整个 run 停滞。
+**退出观察者三对位**（谁观察到 worker 终止）：前台由 Engine adapter 自行观察（subprocess 的 `proc.wait` / Fargate 的 `DescribeTasks`）；local `submit` 下是 per-run 进程的 `handle.wait()`；cloud `submit` 下是 exit-observer Lambda。另有一个例外情形：worker 根本未启动（`launch` 抛异常）时不存在平台侧观察者，由 `tick` 自行补一条退出码未知、带「起 worker 失败」原因的退出记录，并记下失败的那一刻作退出时刻（它晚于这个 job 的截止时刻时收尾投影按超时处理，与前台起 worker 失败的处理相同，见 §6），下一轮按「有退出记录、退出码未知 → error」收敛；若不补写，该 job 已被认领为 RUNNING 却永不会有事件与退出记录，整个 run 停滞。
 
 **诊断的落点**（事件流之外的另一条通道）：worker 的 stdout（引擎 SDK 噪声）与 stderr（worker 自身的诊断）默认带 `[worker <scope>:out|err]` 前缀透传到**推进器进程的 stderr**，落点随推进器而变：前台 `run` 直接输出到终端；本机 `run --quiet` 改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），结束时只输出一行路径；cloud 后端 worker 在云端执行，日志在该 task 的 CloudWatch 日志组，无此文件；local `submit` 的 per-run 推进进程自身的 stdout/stderr 落 `<report-dir>/<run_id>/reconcile.log`，worker 的透传行同落其中。判定归因只写入 `jobs/*.json` 的 `message`。
 
@@ -131,21 +132,23 @@ PK = run_id#scope_id
 
 ## 6. `job` 超时预算（timeout）：三路形态相同的 enforce
 
-每个 `job` 有超时预算，按**墙钟**（真实流逝时间）计。声明方式为 `@timeout:N` tag 或 `--default-job-timeout`，两者都没给时由 plan 按测试目标补缺省（任何目标都有上限 7200 秒、不能关闭超时，设备 scope 另有下限），定值随 definition 落在 `Job.timeout_s`（ADR/CONTEXT 里称「job 墙钟预算」）；取值、覆盖与校验顺序见 [ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节与 [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 2。三条执行路径**各自落实同一形态的 enforce**（enforce 即 ADR 与 code 对这一形态的用词）：超时 → 停止 worker → 归因 `error + timeout`。
+每个 `job` 有超时预算，按**墙钟**（真实流逝时间）计。声明方式为 `@timeout:N` tag 或 `--default-job-timeout`，两者都没给时由 plan 按测试目标补缺省（任何目标都有上限 7200 秒、不能关闭超时，设备 scope 另有下限），定值随 definition 落在 `Job.timeout_s`（ADR/CONTEXT 里称「job 墙钟预算」）；取值、覆盖与校验顺序见 [ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节与 [ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md) 决策 2。三条执行路径**各自落实同一形态的 enforce**（enforce 即 ADR 与 code 对这一形态的用词）：超时 → 停止 worker → 归因 `error + timeout`。三条路径的截止时刻取法相同：认领时刻加预算，与运行期限取较早的一个，都按墙钟比较；起作用的是哪一个只决定说明（被期限截断的是「这个 run 已超过允许运行的时间，job 被中止」），后台路径不把它记进退出记录，收尾投影时由认领时刻、预算与期限重算（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二）。
 
 | 路径         | 到点机制                                                                                                                                                                                                          | 停止方式                                                                                                                                                                                             |
 |--------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 前台 `run`   | schedule 循环内按墙钟比较截止时刻：认领时刻加预算，与运行期限取较早的一个（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二）                                                                   | 本机后端下是 `handle.stop(grace)`（SIGTERM→宽限→SIGKILL）；云端后端下是 `StopTask`（宽限由 task-def `stopTimeout` 决定、不逐次传入——上限与取舍见 [ADR 0032](../adr/0032-fargate-execution-environment.md) 结论 4） |
-| local submit | per-run 进程的 launcher 在启动 worker 子进程时装配的到点计时器（`threading.Timer`，存在于 owner 进程内）；该进程若中断，计时随之丢失——接力者改按库里的 `claimed_at` 起算、每轮推进时复查是否超出预算（+固定余量） | 本进程启动的 job：`handle.stop(grace)`（协作式停止，同前台 local，grace 取引擎最小宽限）；接力恢复的他人 job：worker 已随 fd3 断管退出、无 handle 可停，直接记一条 `timed_out` 退出记录收敛          |
-| cloud submit | 启动 task 时为该 job **设置一个一次性到点定时器**（EventBridge Scheduler one-time；与 §4b exit-observer 的 EventBridge **rule** 同名不同物：那是事件总线订阅，这是独立定时服务）                                  | 到点由 kicker 处置，整条链见下图；另有任意 `tick` 的防御扫描作为双保险                                                                                                                               |
+| local submit | 截止时刻由 `tick` 在认领时算出（认领时刻加预算，与运行期限取较早的一个）、随启动交给 launcher；per-run 进程为每个执行中的 job 起一个检查线程，每 0.25 秒读一次墙钟（与 `tick` 取认领时刻同一个读取点），过了截止时刻即停，检查持续到 worker 进程退出；worker 在截止时刻之后、下一次检查之前自行退出的，退出记录不带超时标志，收尾投影按它的退出时刻判为超时（见本节表后一段）。该进程若中断，检查随之丢失——接力者按库里的 `claimed_at` 按同一算法重算截止时刻，每轮推进时按墙钟查看别人认领的 job，墙钟严格晚于截止时刻加 10 秒仍无退出记录即判超时。这个条件保证不了不抢先：原进程还在、它停下的 worker 仍在停止宽限内收尾时，接力者同样会补写，run 若在补写与真实退出之间收尾，这次收尾按超时提交，run 级的结果与报告就此定下；改法已定、尚未实装（[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二「本机接力的改法」） | 本进程启动的 job：`handle.stop(grace)`（协作式停止，同前台 local，grace 取引擎最小宽限）；接力恢复的他人 job：接力者手里没有它的 handle、不停止它，也不核实认领方或 worker 是否已经退出；只要墙钟严格晚于截止时刻加 10 秒、仍没有退出记录，就补写一条结果未知、带 `timed_out` 的退出记录收敛（只在还没有退出记录时写入，见本节表后一段） |
+| cloud submit | 启动 task 之前为该 job **设置一个一次性到点定时器**，到点时刻就是 `tick` 交来的截止时刻（EventBridge Scheduler one-time；与 §4b exit-observer 的 EventBridge **rule** 同名不同物：那是事件总线订阅，这是独立定时服务）                                  | 到点由 kicker 处置，整条链见下图；另有任意 `tick` 的防御扫描作为双保险                                                                                                                               |
+
+后台两路的退出记录只记事实，是否按超时处理在收尾投影里判断一次，规则对两路相同。退出记录带两项：超时标志（`timed_out`，发过超时的停止请求，或接力者、云端处置补写未知退出时已判为超时）与退出时刻（`exited_at`：本机是推进进程看到 worker 退出的那一刻，云端是 task 的执行停止时刻，起 worker 失败时是失败的那一刻；补写的未知退出没有这一项）。投影时带超时标志、或退出时刻晚于由 `claimed_at`、预算与期限算出的截止时刻的，都按超时处理，内容已完整（干净退出且发了 `scope_done`）的照旧不改判。这样 worker 在截止时刻之后、停止请求发出之前自己异常退出时，前台、本机后台与云端后台的判定相同；云端的退出观察者只看得到 task 对象、读不到截止时刻，所以判断放在投影里、不放在写入方。接力者与云端处置补写的未知退出只在这个 job 还没有退出记录时写入（判断与写入是同一次条件写），恰在它查过之后才落下的真实退出记录不会被盖掉；补写之后才到的真实退出照常覆盖补写的那一条。云端处置查到已停止的 task 时写的不是未知退出，而是从 task 对象取得的真实退出（退出时刻取 task 的执行停止时刻，与退出观察者同一算法），与退出观察者的写入一样照常覆盖同一条记录。
 
 cloud 路径的超时处置是一条多跳链，时序如下图。这里的「定时器」（ADR/code 里称 arm 一个 one-time schedule，中文记作「武装」）是 per-(run,scope) 的短生命周期资源：schedule 名为 `{prefix}job-timeout-<sha1(run_id#scope_id) 摘要>`（前缀取 `gherkai_runtime.names` 这一命名真源，IaC 的 IAM 资源域同源推导），到点触发后即自动删除，因此控制台中通常看不到它。
 
-![云端超时 enforce 链：启动 task 时设置的一次性定时器到点调起 kicker，停止 worker 后由 exit-observer 写成带超时标记的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
+![云端超时 enforce 链：启动 task 时设置的一次性定时器到点调起 kicker，停止 worker 后由 exit-observer 写成带超时标志的退出记录，回到既有链收敛](../diagrams/execution-timeout-chain.svg)
 
-图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻为 `claimed_at`（领取该 job 的时刻）加上该 job 的墙钟预算，与防御扫描同一起算点，设置定时器晚于领取的那段间隔不推后到点。定时服务只承诺分钟精度，可能早于这一刻触发，因此到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录，再按 `claimed_at` 复查预算是否已用尽**：已用尽则执行停止；未用尽且相差不超过一分钟则等到预算用尽的时刻，重新确认后才执行停止；相差超过一分钟则本次不停止，交给防御扫描（取舍见 [ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节「到点不早于 deadline」条）。重复到点、定时器与防御扫描同时命中均无害。`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止。停止之后**记为什么状态**（超时归因落在哪一类、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
+图注：本图只画云端这一路「如何停止 worker」，另两路的到点机制与停止方式见上表；定时器的到点时刻为这个 job 的截止时刻：`claimed_at`（领取该 job 的时刻）加上该 job 的墙钟预算，与运行期限取较早的一个（由 `tick` 在领取时算好），与防御扫描同一算法，设置定时器晚于领取的那段间隔不推后到点。定时服务只承诺分钟精度，可能早于这一刻触发，因此到点的一方**先确认这个 job 仍为 RUNNING 且没有退出记录，再由 `claimed_at`、预算与期限重算截止时刻、复查是否已到**（读到的时刻严格晚于截止时刻才算已到）：已到则执行停止；未到且相差不超过一分钟则等到截止时刻（每次至少等 1 秒），重新确认 job 状态并重读时钟后才执行停止（等待期间时钟被回拨、或读到的恰好是截止时刻而仍未到时，在这次调用的等待额度（至多一分钟，各次等待合计）内接着等，额度用完仍未到则本次不停止）；相差超过一分钟则本次不停止，交给防御扫描（取舍见 [ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节「到点不早于 deadline」条）。重复到点、定时器与防御扫描同时命中均无害。防御扫描在截止时刻之外另加固定余量。`StopTask` 的 reason 里带一个哨兵串，exit-observer 据此把这条退出记录标记为超时停止；哨兵串之后按起作用的是预算还是期限分别写，只供在 ECS 控制台查看。停止之后**记为什么状态**（超时归因落在哪一类、与 fail-fast 共用哪个字段、按什么优先级判定）见 [`verdict-model.md`](./verdict-model.md) §3c（归因优先级图）。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节（取舍/归因链/防御扫）、[ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（`@timeout:` tag）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md)（决策 2：设备 scope 的缺省墙钟与下限）。
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「job timeout」节（取舍/归因链/防御扫）、[ADR 0054](../adr/0054-settle-leftover-foreground-runs.md) 决策二后台推进条「截止时刻与说明」（退出时刻与投影判断）、[ADR 0019](../adr/0019-feature-tags-scope-and-engine.md)（`@timeout:` tag）、[ADR 0051](../adr/0051-device-session-lifecycle-and-app-distribution.md)（决策 2：设备 scope 的缺省墙钟与下限）。
 
 ## 7. 云端 Lambda 为何不介入前台 run
 

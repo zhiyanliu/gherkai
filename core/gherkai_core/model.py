@@ -503,8 +503,8 @@ class RunResult:
 
     jobs 只装有判定的 job（判定只有终态，ADR 0031 决定一·补）。因已过停止启动的时刻、或发现 run 已被别处记为已结束而没有启动的
     job 不产出判定、不在其中，它们是 run_meta.jobs 与 jobs 的差（ADR 0054 决策二）；因 fail-fast 或使用方中断而没有启动的 job
-    记为 skipped，在其中。schedule 返回的 RunResult，status 与 message 是 run 级的裁决（`project.run_verdict`），不只是各 job 判定的
-    聚合；后台的推进步骤尚未接入这个裁决，`project.project_full` 的 status 取各 job 判定的聚合、message 为空。
+    记为 skipped，在其中。status 与 message 是 run 级的裁决（`project.run_verdict`），不只是各 job 判定的聚合：前台 schedule
+    返回的与后台 `project.project_full` 给出的 RunResult 出自同一个裁决函数。
 
     成本（ADR 0024）：core 不算、不折美元——只各自合计 engine 报的**原生量**
     （token 用量 / agent 工作时长）。哪个有值取决于哪些引擎报了它（Nova 报时长、Midscene 报 token）；
@@ -512,8 +512,8 @@ class RunResult:
     """
 
     run_meta: RunMeta  # 这次 run 的 definition（run_id/created_at/jobs；执行前确定，不从结果反推）
-    # 总判定：各 job 判定的聚合（任一 error→error；任一 failed→failed；全 passed→passed）；schedule 的产出另有聚合之外的例外
-    # （使用方中断、发现 run 已被别处记为已结束、已过停止启动的时刻而有 job 没有启动，见 `project.run_verdict`）
+    # 总判定：各 job 判定的聚合（任一 error→error；任一 failed→failed；全 passed→passed）；另有聚合之外的例外（使用方中断、发现
+    # run 已被别处记为已结束、已过停止启动的时刻而有 job 没有启动，见 `project.run_verdict`），前台与后台相同
     status: Status
     jobs: list[JobResult] = field(default_factory=list)
     # run 级说明（ADR 0054 决策二）：没有任何 job 能承载的原因，如「已超过允许运行的时间」；与记录里运行态的 run 级 message
@@ -604,7 +604,8 @@ class JobState:
     status: Status
     session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
     # claim（CAS pending→running）时刻 ISO 串（ADR 0034「job timeout」节 claimed_at）：local 接力恢复
-    # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）。
+    # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）；后台收尾时由它与预算、期限重算超时的
+    # 说明（ADR 0054 决策二第 2 条），所以有记录的 job 缺它时推进步骤不收尾。
     claimed_at: str | None = None
 
 
@@ -633,8 +634,8 @@ class RunState:
     high_water_mark: int | None = None
     # run 级消息（ADR 0037 决策 7）：只给「没有任何 job 能承载」的原因，随 try_finalize 的同一次条件写落库，让 `status` 看得见原因
     # （团队成员未必有 CloudWatch 的读权限）。写入方：推进器**不经任何 job 就把 run 置为终态**时（提交记录的结构版本不是本后端认的、
-    # 定义违约、缺 worker 镜像版本）；前台执行按运行期限收尾、有 job 没有启动时（「已超过允许运行的时间」，与 RunResult.message
-    # 同一份，ADR 0054 决策二第 3 条）。
+    # 定义违约、缺 worker 镜像版本）；执行方（前台执行与后台的推进步骤）按运行期限收尾、有 job 没有启动时（「已超过允许运行的时间」，
+    # 与 RunResult.message 同一份，ADR 0054 决策二第 3 条）。
     # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain）。omit-when-None（同 started_at）。
     message: str | None = None
     # 认领计数（ADR 0054 决策二「认领计数」段）：这个 run 上认领成功的次数。建 run 时为 0，每次 try_claim_job 成功时在同一次原子写里

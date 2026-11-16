@@ -51,11 +51,18 @@
     `stop_timeout_s` 按同一 container 名认、读的是同一个量）/ `cloud_stop_bound_s`（云端同步 run 的停止后等待预算，作
     `ScheduleOpts.stop_bound_s` 传入 schedule：本 run 用到的各引擎 worker container 的 `stopTimeout` 取最大，没设的按 Fargate 平台上限
     `FARGATE_STOP_TIMEOUT_MAX_S`（120 秒）计，再加 ECS 记下 STOPPED 那段滞后的经验余量 `ECS_STOPPED_LAG_MARGIN_S`（20 秒）；core 的排空余量不在其中，
-    本机后端不调用它；ADR 0034 机制二）/ `new_run_id`·`now`·`now_iso`·`parse_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
-    唯一的墙钟读取点，前台 `run` 把它作为调度循环的墙钟注入，`now_iso` 是它的记录写法）/
+    本机后端不调用它；ADR 0034 机制二）/ `new_run_id`·`now`·`now_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
+    唯一的墙钟读取点，前台 `run` 把它作为调度循环的墙钟注入，`now_iso` 是它的记录写法；读回记录里的时刻用 core 的
+    `serialize.instant_from_iso`）/
     `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
-- `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher` + `run_reconcile_loop`（per-run 推进循环）+
-  `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 超时 claim 回收 + 隧道事实文件的读写
+- `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
+  每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
+  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时用交还的结果写报告）+
+  `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
+  截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
+  还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写，改法已定、尚未实装，见 ADR 0054 决策二「本机接力的
+  改法」）+ 隧道事实文件的读写。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
+  worker 在截止时刻之后自己退出时是否按超时处理由 core 的收尾投影判断
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
   `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取
   `CLOUD_PER_JOB_TAIL_S`（与 `tunnel_host.CLOUD_PER_JOB_MARGIN_S` 同值）；一次性余量 `STARTUP_MARGIN_S` 为 900 秒

@@ -11,9 +11,12 @@ events 表（FargateEngine 已实际运行过），本类只是**读**它们 + �
   但 scope_id 集合从 definition 已知，逐个 Query 即可、无需 GSI。
 - **task_exited 独立键空间**（机制一）：DDB SK 是 NUMBER、不能用字符串前缀 `exit#`，故用**保留高位数值 SK**
   （`EXIT_SK`）——worker seq 从 1 递增、远不到它，故退出记录不入 worker 连续 seq 段、不参与断号检测（机制一等价落地）。
-  用属性 `item_type='exit'` + `exit_code` 承载。键字段名/`EXIT_SK` 等 schema 常量单一事实源在 `fargate_engine`（见下 import）。
+  用属性 `item_type='exit'` + `exit_code` 承载，另有可选的 `timed_out`、`reason`、`exited_at`（退出时刻，UTC 的 ISO 串），没有值时
+  不写这个属性。键字段名/`EXIT_SK` 等 schema 常量单一事实源在 `fargate_engine`（见下 import）。
 """
 from __future__ import annotations
+
+from datetime import datetime
 
 from gherkai_core.adapters._boto import require_boto3
 # events 表 schema 单一事实源在 fargate_engine（键字段名 + task_exited 独立键空间常量 + PK 拼法）——
@@ -29,7 +32,12 @@ from gherkai_core.adapters.fargate_engine import (
     events_pk,
 )
 from gherkai_core.project import EventRecord, TaskExited
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_core.wire import event_from_line
+
+# 退出时刻属性名：只在退出记录（`EXIT_SK`）上出现，读写都在本模块，与同在退出记录上的 `timed_out`、`reason` 同样不进 fargate_engine
+# 的 schema 常量（同步路径的读端不读退出记录）
+_EXITED_AT_ATTR = "exited_at"
 
 # events 表 TTL（[0033] 决定：events 是进度脚手架、只留 7 天）——写端（worker 的 EventSink）给每条 event item
 # 写 `expires_at = emit 时刻 + 本值`，故读端反解 emit 墙钟为 `expires_at - 本值`（见 _emit_ts）。
@@ -65,12 +73,14 @@ class DdbEventLog:
                 for it in resp.get("Items", []):
                     if it.get(ITEM_TYPE_ATTR) == EXIT_ITEM_TYPE:
                         ec = it.get(EXIT_CODE_ATTR)
+                        at = it.get(_EXITED_AT_ATTR)
                         recs.append(EventRecord(
                             scope_id=scope_id, kind="exit",
                             exited=TaskExited(scope_id=scope_id,
                                               exit_code=int(ec) if ec is not None else None,
                                               timed_out=bool(it.get("timed_out", False)),
-                                              reason=it.get("reason")),
+                                              reason=it.get("reason"),
+                                              exited_at=instant_from_iso(at) if at is not None else None),
                         ))
                     else:
                         recs.append(EventRecord(
@@ -110,13 +120,15 @@ class DdbEventLog:
         return got.get("Item") is not None
 
     def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
-                    reason: str | None = None) -> None:
+                    reason: str | None = None, exited_at: datetime | None = None) -> None:
         """退出观察者 Lambda 调：写 task_exited 到保留高位 SK（独立键空间，机制一）。INSERT 幂等（覆盖同键）。
 
-        exit_code：观察者缺 exitCode 时应落 `PLATFORM_FAILED_EXIT` 哨兵而非 None（机制二「退出码缺失」条）；None 仅
-        超时处置直写（timed_out=True）时出现。timed_out：STOPPED 事件 stoppedReason 含超时哨兵（ADR 0034「job timeout」节
-        归因链）；reason：平台侧归因串（`stopCode: stoppedReason`），随哨兵一起带。云端 tick 的 launch 失败补偿也经这里
-        写 reason（「起 worker 失败：异常文本」，同样配哨兵退出码）。两者 omit-when-empty。"""
+        exit_code：观察者缺 exitCode 时应落 `PLATFORM_FAILED_EXIT` 哨兵而非 None（机制二「退出码缺失」条）；None 只在
+        tick 的 launch 失败补偿与补写的未知退出（`record_timed_out_if_absent`）时出现。timed_out：STOPPED 事件 stoppedReason 含
+        超时哨兵（ADR 0034「job timeout」节归因链），即发过超时的停止请求；reason：平台侧归因串（`stopCode: stoppedReason`），随
+        哨兵一起带。云端 tick 的 launch 失败补偿也经这里写 reason（「起 worker 失败：异常文本」，退出码未知，与前台起 worker 失败同一组
+        输入）。exited_at：退出时刻（带时区）。观察者与超时处置写 task 对象里的执行停止时刻（同一个 task 两处取到同一个值，同键先后
+        写入内容不变），launch 失败补偿写失败的那一刻。写入方只记事实，是否已过截止时刻由投影判断。可选的三项都 omit-when-empty。"""
         item = {
             PK_ATTR: events_pk(self._run_id, scope_id),
             SK_ATTR: EXIT_SK,
@@ -128,4 +140,26 @@ class DdbEventLog:
             item["timed_out"] = True
         if reason:
             item["reason"] = reason
+        if exited_at is not None:
+            item[_EXITED_AT_ATTR] = instant_to_iso(exited_at)
         self._table.put_item(Item=item)
+
+    def record_timed_out_if_absent(self, scope_id: str) -> bool:
+        """补写判为超时的未知退出（不带退出码与退出时刻，带 `timed_out`），只在这个 scope 还没有退出记录时写入：PutItem 带
+        `attribute_not_exists` 条件，「没有」的判断与写入是同一次条件写。条件不成立（退出记录已在）时不报错、返回 False；写成返回 True。
+        云端超时处置找不到 task 时用它（对位 `SqliteEventLog.record_timed_out_if_absent`）：观察者恰在处置方查过之后、写入之前落下
+        真实的退出记录时，补写不成立，观察到的退出不被盖掉（ADR 0054 决策二「本机接力」条）。"""
+        try:
+            self._table.put_item(
+                Item={
+                    PK_ATTR: events_pk(self._run_id, scope_id),
+                    SK_ATTR: EXIT_SK,
+                    ITEM_TYPE_ATTR: EXIT_ITEM_TYPE,
+                    "timed_out": True,
+                },
+                ConditionExpression="attribute_not_exists(#pk)",
+                ExpressionAttributeNames={"#pk": PK_ATTR},
+            )
+        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+            return False
+        return True

@@ -1,6 +1,6 @@
 # job 生命周期态：skipped / aborted + severity 数值序
 
-> **Status:** Partially-superseded-by 0034, 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的改写如下：生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态在该路径真实喂入 `_aggregate`（决定三的**决策**不变、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。[0054](./0054-settle-leftover-foreground-runs.md) 决策五给决定五加一处退出码例外，已原位改写、已实装：前台 `run` 收尾写不成（本次执行结束之前 run 已被别处记为已结束）时退出码取 1、不按本次判定，处理过使用方中断时仍按信号取。0054 决策二、五另改写决定一、决定一·补与决定三，已原位改写，前台一侧已实装：`aborted` 多一种来源（发现 run 已被别处记为已结束）；没有启动、不产出判定的 job 停在 `pending`，不进 `RunResult` 的 job 清单；run 级聚合之外的例外不再只有使用方中断，由前台与后台共用的裁决函数 `project.run_verdict` 给出（已过停止启动的时刻而有 job 没有启动记 `error` 加 run 级说明，优先于中断的 `aborted`；发现 run 已被别处结束记 `aborted`）。
+> **Status:** Partially-superseded-by 0034, 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的改写如下：生命周期态/severity/短路语义等**结论均不变**；变的是两处实现细节立场：① 决定五「退出码读内存 `RunResult` 终值」对**异步 submit（CLI 脱离）路径**不适用（脱离后无内存终值，判定退出码由 `status --wait` 读回终态 `RunState` 给出），见下决定五数据源的 ⚠️ 注；② 决定三的「`_aggregate` 只算一次 / 前置态过滤只是前向口子」被反转——无状态投影每轮 tick 全量重放调 `_aggregate`，前置态在该路径真实喂入 `_aggregate`（决定三的**决策**不变、非被推翻）。两处均见 [0034](./0034-detached-batch-reconciler.md)。[0054](./0054-settle-leftover-foreground-runs.md) 决策五给决定五加一处退出码例外，已原位改写、已实装：前台 `run` 收尾写不成（本次执行结束之前 run 已被别处记为已结束）时退出码取 1、不按本次判定，处理过使用方中断时仍按信号取。0054 决策二、五另改写决定一、决定一·补与决定三，已原位改写，前台与后台的推进步骤都已实装：`aborted` 多一种来源（发现 run 已被别处记为已结束）；没有启动、不产出判定的 job 停在 `pending`，不进 `RunResult` 的 job 清单；run 级聚合之外的例外不再只有使用方中断，由前台与后台共用的裁决函数 `project.run_verdict` 给出（已过停止启动的时刻而有 job 没有启动记 `error` 加 run 级说明，优先于中断的 `aborted`；发现 run 已被别处结束记 `aborted`）。
 
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
@@ -59,7 +59,7 @@ class Status(str, Enum):
 
 实时写（[0030](./0030-realtime-persistence-seam.md)）需要两个**前置态**表示「还没出判定」：`pending`（run 开始时 `create_run` 把每个 job 摆这态；没有启动、不产出判定的 job——已过停止启动的时刻、发现 run 已被别处结束——一直停在这态，[0054](./0054-settle-leftover-foreground-runs.md) 决策二）
 / `running`（认领时写下，前台与后台都先认领再起 worker；前台在收到 `scope_started` 后再刷一次、带上血缘；在此之前收到非 attempted 的 `session_opened` 即刷（桌面与设备 job 都在 `scope_started` 之前发它），[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）。它们是 job 与 run 的生命周期前置态（`JobState.status` / 进而 `RunState`）、
-绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。**不变量的强制点 = `project_full`**（detached 收尾聚合，[0034](./0034-detached-batch-reconciler.md)）：收尾快照里任一 job 仍非终态即抛、本轮不落任何判定真值（归约中间态用 JobResult 作载体不算违背——只有落库/上 wire 的那份受约束）；同步 run 路径由 schedule 的归约器天然只产终态，没有启动的 job 不产出 JobResult、不进 `RunResult` 的 job 清单（它们是 `run_meta.jobs` 与 `jobs` 的差）。
+绝不进 `JobResult.status`（JobResult 是终态判定，只会是 passed/failed/error/skipped/aborted）、绝不进 wire。**不变量的强制点 = `project_full`**（detached 收尾聚合，[0034](./0034-detached-batch-reconciler.md)）：收尾快照里任一有记录的 job 仍非终态即抛、本轮不落任何判定真值（没有记录、即没有启动的 job 不产出 JobResult）（归约中间态用 JobResult 作载体不算违背——只有落库/上 wire 的那份受约束）；同步 run 路径由 schedule 的归约器天然只产终态，没有启动的 job 不产出 JobResult、不进 `RunResult` 的 job 清单（它们是 `run_meta.jobs` 与 `jobs` 的差）。
 
 **承载方式**：加进同一个 `Status` enum（`PENDING="pending"` / `RUNNING="running"`），理由同 skipped/aborted（统一类型、serialize/render 单点识别）。
 但与判定状态有**本质区别**——它们是**生命周期前置态、不是判定结论**：
@@ -99,14 +99,14 @@ run 级（聚合用）：
 
 ## 决定三：`_aggregate` 入口过滤 skipped/aborted，空判定集不判 passed（run 级只看已出判定的 job，空判定集的处置钉在函数内）
 
-run 级聚合（`core.project._aggregate`，同步/无状态两路共用一份；同步路径经裁决函数 `project.run_verdict` 调用）改成：**入口先滤掉 skipped/aborted（连同前置态，即 `_NON_VERDICT`），判定集非空时走原三态 max 逻辑；判定集为空而输入非空时不判 passed**，按 aborted、skipped、running、pending 的顺序取输入里第一个出现的态（见下「空判定集规则」条）。全部 job 被中止或没有启动的 run 不被记成 passed，这一点在函数内成立，不依赖「fail-fast 产生的 skipped/aborted 必伴随 error」这类调用方条件。
+run 级聚合（`core.project._aggregate`，同步/无状态两路共用一份；两路收尾都经裁决函数 `project.run_verdict` 调用，无状态投影 `project` 每轮直接调用）改成：**入口先滤掉 skipped/aborted（连同前置态，即 `_NON_VERDICT`），判定集非空时走原三态 max 逻辑；判定集为空而输入非空时不判 passed**，按 aborted、skipped、running、pending 的顺序取输入里第一个出现的态（见下「空判定集规则」条）。全部 job 被中止或没有启动的 run 不被记成 passed，这一点在函数内成立，不依赖「fail-fast 产生的 skipped/aborted 必伴随 error」这类调用方条件。
 
-聚合之外的例外不在 `_aggregate` 里，由裁决函数 `project.run_verdict` 包住它给出（[0054](./0054-settle-leftover-foreground-runs.md) 决策二）。它供前台与后台共用：前台（`schedule`）已接入，后台的推进步骤尚未接入，仍以无状态投影算出的 run 级状态收尾。按序取第一条成立的：
+聚合之外的例外不在 `_aggregate` 里，由裁决函数 `project.run_verdict` 包住它给出（[0054](./0054-settle-leftover-foreground-runs.md) 决策二）。它供前台与后台共用：前台（`schedule`）在返回 `RunResult` 时调它，后台的推进步骤经 `project_full` 调它，两条路径收尾时写下的 run 级状态与说明都出自这里。按序取第一条成立的：
 1. 已过停止启动的时刻（运行期限减 60 秒）而有 job 没有判定（没有启动）：run 级记 `error` 并带 run 级说明「已超过允许运行的时间」。run 的时间用完不是哪一个 job 的原因，也不替没有执行的 job 下结论；全部已启动的 job 都通过时聚合会给 passed，所以不能靠聚合。它优先于下一条的 `aborted`，退出码仍按信号取（决定五）。
 2. 被外部停下的 run 记 `aborted`、不按仅有的几个判定聚合（判定不完整）：被使用方中断且有 job 记 aborted 或 skipped（或有 job 没有判定）；已发现 run 被别处记为已结束（这次执行的 run 级结果本不成为记录，万一收尾写成了也不能是 passed）。中断这条在两种情形下承重：① 有 job 被中止、其余 job 已出判定，判定集非空，`_aggregate` 按已有判定聚合（如 aborted 与 passed 并存时为 passed）；② 全部 job 都没有启动，`_aggregate` 按空判定集规则给 skipped，而被中断的 run 应记 aborted。全部 job 都被中止时 `_aggregate` 本身即给 aborted，与例外一致，两者在此情形互为保险。fail-fast 不走这一条，它必伴随 error，run 级由 `_aggregate` 判 error（[0024](./0024-worker-core-protocol.md) 终止契约「使用方中断」条）。有 job 没有判定而不属于第 1 条的，函数同样给 `aborted`，「有 job 没有判定的 run 不会得到 passed」由函数自身保证。
 3. 其余按 `_aggregate`。全部 job 都有判定时不论是否已过期限都照常聚合（被期限截断的 job 自身是 error）。
 
-使用方中断与发现 run 已被别处结束只在同步路径（`schedule`）出现，无状态路径不作中止决定，接入之后调用时两者都取否。
+使用方中断与发现 run 已被别处结束只在同步路径（`schedule`）出现，无状态路径不作中止决定，调用时两者都取否；它的「已过停止启动的时刻」取推进步骤这一轮按当前时刻的判断。
 
 ```python
 # 入口过滤名单：终态判定之外的态（skipped/aborted 派生态 + pending/running 前置态）都不进 run 级判定集
@@ -133,12 +133,12 @@ def _aggregate(statuses):
   全 aborted 得 `aborted`，未来引入**非-fail-fast 的 skip**（如主动 `--skip`）时，全 skipped 的 run 不会再被判 `passed`（退出码语义见「重议」首条）。
   fail-fast 来源的 skipped/aborted 必伴随同批 error、判定集非空、run 级已是 error，不受此规则影响；使用方中断等见上「聚合之外的例外」段。
   **空输入仍判 `passed`**，只是函数层兜底：CLI 入口对零 scenario 批（筛选后为空或不加筛选）以退出码 2 拒绝，不会产生零个 job 的 run（[0041](./0041-agent-facing-cli-affordances.md) 决策一）。
-  函数不依赖这项拒绝：无状态路径下零个 job 的 `project`，以及 `project_full` 在所有 job 都没有记录时的防御分支，仍按空输入处理。保留终态的理由：无状态路径在没有 pending 与 running 时
-  把 `_aggregate` 的值交给 `finalize` 写入，返回前置态会让零个 job 的无状态 run 永远停在非终态。
+  函数不依赖这项拒绝：无状态路径下零个 job 的 `project` 与 `project_full`（经 `run_verdict`）仍按空输入处理。保留终态的理由：无状态路径在没有 pending 与 running 时
+  经 `run_verdict` 把 `_aggregate` 的值交给收尾写入，返回前置态会让零个 job 的无状态 run 永远停在非终态。
 - **scenario 内归约路径不改**（喂进去的全是 worker 三态，永不含 skipped/aborted；scenario 判定集为空的情形由终结函数先判 error，见 [0034](./0034-detached-batch-reconciler.md) 机制二，过滤与空判定集规则在这条路径都不生效）。
 - **合成的 scenario 级 SKIPPED 不喂给 `_aggregate`**（决定一）：它只进 JobResult 的明细，不进 scenario 判定集；该 job 的判定来自 [0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」（`scope_done.status = error` 在无主动停止、退出码 0 时判 ERROR，归因见真值表），不经 scenario 归约。`_NON_VERDICT` 含 SKIPPED 是第二道保险，真正的保证是「压根不喂进去」，与决定六对 step 级 SKIPPED 的处理同一取向。
 - **两路调用者、两种喂入**（[0034](./0034-detached-batch-reconciler.md) 落地后的现状）：`_aggregate` 被 ① 同步 `schedule` 归约 `RunResult` 时调一次
-  （喂进的全是终态、不含前置态）② 无状态投影 `project`/`project_full` 调（`project` 每轮 tick 调、真实喂入前置态）
+  （喂进的全是终态、不含前置态）② 无状态投影 `project`/`project_full` 调（`project` 每轮 tick 调、真实喂入前置态；`project_full` 经 `run_verdict` 调）
   两路复用**同一份**——同一过滤名单/severity 表使两路收敛到同一终值（这正是当年留口子的意图）。落库的 `RunState.status`
   也不再「由 `finalize` 一次写定」：执行期间认领、投影写与前台的 job 写都会推进 run 级 status（钳在 `pending`/`running`、只进不退——run 级终态是
   `finalize` 这个 commit point 的专属，[0030](./0030-realtime-persistence-seam.md) / [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条），终态仍由 `finalize` 一次落定。

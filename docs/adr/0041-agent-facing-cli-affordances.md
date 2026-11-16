@@ -37,7 +37,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 - `list-engines --json`：每引擎 `{engine, available, cmd, cwd, source, hint}`。
 - `deploy list-workers --json`：`{prefix, version, default_variant, engines: {<engine>: {family, ecr_repo, variants: […], pending_cleanup: […]}}}`。
-- `status --json`：在 RunState 之外**附加** `artifacts`（与 `run --json` 同键：`run_meta` / `run_state` / `jobs_dir` / `report_index`），位置由 compose 单点拼、始终给出（是否已写成看 status 是否终态）。RunState 部分形状不变（加法兼容）。
+- `status --json`：在 RunState 之外**附加** `artifacts`（与 `run --json` 同键：`run_meta` / `run_state` / `jobs_dir` / `report_index`），位置由 compose 单点拼、始终给出；落点上有没有内容不由这个键表达，也不能只凭 status 是否终态推断；各键何时有内容以 [`docs/internals/cli-json-contract.md`](../internals/cli-json-contract.md)「`status --json`」一节 `artifacts` 一行为准（出处登记见 [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」）。RunState 部分形状不变（加法兼容）。
 - `explain --json`：判定树 + 每步 evidence 合成的排障视图，形状见 [0042](./0042-step-evidence-and-explain.md) 决策四。
 - `list-runs --json`：一个后端里的 run 清单，形状见决策七。
 - 原则：stdout 只放数据、诊断走 stderr、`--json` 下不打人读提示（沿用既有）。

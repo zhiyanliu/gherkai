@@ -14,9 +14,10 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from gherkai_core.model import Job
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 from gherkai_runtime.tunnel_host import CLOUD_PER_JOB_MARGIN_S
 
@@ -35,9 +36,8 @@ def compute_deadline_at(created_at: str, jobs: Iterable[Job], *, per_job_tail_s:
     """按上面的算式得出运行期限，返回与 `created_at` 同一写法的 UTC ISO 时刻（`compose.now_iso` 的形态）。
 
     `created_at` 须是带时区的 ISO 时刻，否则抛 ValueError：不带时区的时刻在别的机器上比较会差出时区偏移。各 job 的墙钟预算恒为
-    有限正数（运行定义的契约，ADR 0054 决策十），这里不再核。"""
-    start = datetime.fromisoformat(created_at)
-    if start.tzinfo is None:
-        raise ValueError(f"created_at 须带时区：{created_at!r}")
+    有限正数（运行定义的契约，ADR 0054 决策十），这里不再核。读与写都经 `serialize` 的那一处（`instant_from_iso` / `instant_to_iso`），
+    不另写一份解析。"""
+    start = instant_from_iso(created_at)
     total_s = STARTUP_MARGIN_S + sum(job.timeout_s + per_job_tail_s for job in jobs)
-    return (start + timedelta(seconds=total_s)).astimezone(timezone.utc).isoformat()
+    return instant_to_iso(start + timedelta(seconds=total_s))
