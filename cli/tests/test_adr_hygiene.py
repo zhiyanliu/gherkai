@@ -7,6 +7,7 @@
 - 长期文档与 AI 侧文档不指向具体的 journey 文件（仓库路径与相对路径两种写法）、不写裸 WP 编号（悬空指针红线），两条规则的形态
   另有正反例单测；AI 侧文档也不用决策六形态②的自造复合词，它的扫描面含已入库的项目 skill 与 skill 评测的 grader 提示（按 git 清单取）。
 - 全仓已跟踪的 markdown（含 journey 与工具说明，扫原文含行内代码）不写本机坐标，即个人目录下的绝对路径与本地 clone 目录名；规则形态另有正反例单测，TS / JS 注释里反引号包着的路径另有一条单测。
+- `CLAUDE.md` 引入 `.claude/README.md` 的那一行符合 ADR 0046 决策 7 的写法约束，形态另有正反例单测。
 规则与扫描面在 `_doc_rules`；同一束由 hook 在写完即查（ADR 0046）。
 """
 from __future__ import annotations
@@ -25,6 +26,10 @@ NUMBERED = re.compile(r"^\d{4}-[a-z0-9]+(?:-[a-z0-9]+)*\.md$")
 KEBAB = re.compile(r"^[a-z0-9]+(?:[.-][a-z0-9]+)*\.(md|json|svg|html|png|pptx|mp4|srt|zip)$")
 # 约定俗成的全大写入口文件（CLAUDE.md 文档纪律「文档文件名」条的唯一例外）。
 UPPER_OK = {"README.md", "REFERENCES.md"}
+# CLAUDE.md 引入 `.claude/README.md` 那一行的写法约束，定义与依据在 ADR 0046 决策 7。本正则与约束逐项对应：`@` 在行首或紧跟一个
+# 空格，路径之后直接是行尾；每一段反引号包着的内容在匹配之前换成一个反引号（`_imports_tool_notes`），写在反引号里的、路径之后
+# 紧跟一段反引号内容的都不符合。本检查通过不证明文件已被载入。
+TOOL_NOTES_IMPORT = re.compile(r"(?:^| )@\.claude/README\.md$")
 
 
 def _rel(p: Path) -> str:
@@ -217,3 +222,32 @@ def test_machine_coordinate_is_caught_inside_js_comments(tmp_path):
     hits = [(line_no, label) for line_no, label, _ in scan("code", f)]
     assert sorted(ln for ln, label in hits if label.startswith("本机坐标")) == [2, 3]
 
+
+def _imports_tool_notes(line: str) -> bool:
+    return bool(TOOL_NOTES_IMPORT.search(re.sub(r"`[^`]*`", "`", line)))
+
+
+def test_claude_md_import_line_follows_the_writing_constraint():
+    """CLAUDE.md 里恰有一行按写法约束引入 `.claude/README.md`，被引入的文件在仓库里。"""
+    lines = (REPO / "CLAUDE.md").read_text(encoding="utf-8").splitlines()
+    hits = [line for line in lines if _imports_tool_notes(line)]
+    assert len(hits) == 1, f"CLAUDE.md 里按写法约束引入 .claude/README.md 的行应恰有一行，实际 {len(hits)} 行（`@` 在行首或紧跟一个空格，路径之后直接是行尾）"
+    assert (REPO / ".claude" / "README.md").is_file()
+
+
+@pytest.mark.parametrize(("text", "hit"), [
+    ("- 要点随本文加载：见 @.claude/README.md", True),
+    ("@.claude/README.md", True),                       # 单独成行
+    ("- 要点随本文加载： @.claude/README.md", True),
+    ("- 要点随本文加载：@.claude/README.md", False),      # `@` 紧跟在全角冒号之后
+    ("- 要点见 @.claude/README.md。", False),             # 路径之后不是行尾
+    ("- 要点见 @.claude/README.md 后续说明", False),
+    ("- 要点见 @.claude/README.md ", False),             # 行尾多一个空格
+    ("- 要点见\t@.claude/README.md", False),             # `@` 前是制表符，不是空格
+    ("- 引入写法是 `@.claude/README.md`", False),         # 写在反引号里
+    ("- 要点见 @.claude/README.md`补充`", False),        # 路径之后紧跟一段反引号内容
+    ("- 见 .claude/README.md", False),
+])
+def test_tool_notes_import_rule_shape(text: str, hit: bool):
+    """写法约束的正反例：`@` 在行首或紧跟一个空格、路径之后直接是行尾才符合；紧跟标点或制表符、路径之后还有字符、写在反引号里都不符合。"""
+    assert _imports_tool_notes(text) is hit, text

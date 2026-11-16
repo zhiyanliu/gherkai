@@ -15,6 +15,10 @@
 - 带中文的 Python 源码不经 heredoc 传给 `python3 -`（出现过「Non-UTF-8 code」）：先写成文件再执行。
 - 改文件与 `git commit` 分成两次调用：提交闸门在整条命令执行之前运行，同一条命令里先改后提交，它扫不到新内容。手动核对改动用 `uv run python tools/doc_rules_check.py --uncommitted`（暂存区用 `--staged`），按它的退出码决定是否提交。
 
+## 记忆文件
+
+- `CLAUDE.md` 引入本文的那一行按 ADR 0046 决策 7 的写法约束写：实测 `@` 紧跟在全角冒号之后时本文没有被载入，也没有提示。改过那一行之后起一个无交互的子会话，问它上下文里有没有本文的内容；测试只查写法，不证明已载入。
+
 ## hooks
 
 - 在 `.claude/settings.json` 新登记的 hook 下个会话才生效，当前会话里验证不到它。

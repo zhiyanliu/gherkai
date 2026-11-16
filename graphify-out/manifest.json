@@ -300,9 +300,9 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794753181.9471455,
-    "seen": 1794756559.79437,
-    "ast_hash": "89d4395e15d7f3d305a36b4f0a47d8c4",
+    "mtime": 1794800420.4791026,
+    "seen": 1794801066.514285,
+    "ast_hash": "7f43a933357b1816244527b80ad8d6ee",
     "semantic_hash": ""
   },
   "CONTEXT.md": {
@@ -1596,9 +1596,9 @@
     "semantic_hash": ""
   },
   "CONTRIBUTING.md": {
-    "mtime": 1794733290.6874447,
-    "seen": 1794756559.7943711,
-    "ast_hash": "79b0a8ce5512cfbf86721b5412505586",
+    "mtime": 1794800498.8485713,
+    "seen": 1794801066.514286,
+    "ast_hash": "24d6b7181bc69279ce0b4175850bb0dc",
     "semantic_hash": ""
   },
   "docs/README.md": {
@@ -2034,9 +2034,9 @@
     "semantic_hash": "68252ee02a81952e2bf1b49cc1361338"
   },
   "cli/tests/test_adr_hygiene.py": {
-    "mtime": 1793862233.802306,
-    "seen": 1794647585.074559,
-    "ast_hash": "b55db65e009fcdf11d61586d2fabc968",
+    "mtime": 1794800933.9014602,
+    "seen": 1794801066.514113,
+    "ast_hash": "1ebd9a5bdf3c1ea1c11b26dd4a61f8e7",
     "semantic_hash": ""
   },
   "cli/tests/test_context_glossary.py": {
@@ -2058,9 +2058,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0046-guardrail-layers-tests-hooks-and-lean-claude-md.md": {
-    "mtime": 1794753181.946982,
-    "seen": 1794756559.794401,
-    "ast_hash": "739ea9d699fb90162bb58fda14190077",
+    "mtime": 1794800914.3728957,
+    "seen": 1794801066.514315,
+    "ast_hash": "fa723d2ed21a4478850874038f405f6c",
     "semantic_hash": ""
   },
   ".claude/hooks/commit-gate.sh": {
@@ -2274,9 +2274,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794799788.9221082,
-    "seen": 1794799820.720598,
-    "ast_hash": "eb1caa7f700985e17c804a746ca056bc",
+    "mtime": 1794800526.1184077,
+    "seen": 1794801066.514328,
+    "ast_hash": "b5a663d40b71fa56b72783e98c563caa",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2472,9 +2472,9 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794753181.9471455,
-    "seen": 1794756559.794369,
-    "ast_hash": "89d4395e15d7f3d305a36b4f0a47d8c4",
+    "mtime": 1794800420.4791026,
+    "seen": 1794801066.5142841,
+    "ast_hash": "7f43a933357b1816244527b80ad8d6ee",
     "semantic_hash": ""
   },
   "engines/midscene/src/worker/tunnel-warmup.test.mts": {
@@ -2880,9 +2880,9 @@
     "semantic_hash": ""
   },
   ".claude/README.md": {
-    "mtime": 1794757092.5336242,
-    "seen": 1794759019.339833,
-    "ast_hash": "db61b26fc048d87d2d4e5e485d13222f",
+    "mtime": 1794800914.3730373,
+    "seen": 1794801066.514281,
+    "ast_hash": "88234fd2a0b1ccfbced86f4ddd415ee7",
     "semantic_hash": ""
   },
   "core/tests/test_list_runs.py": {
