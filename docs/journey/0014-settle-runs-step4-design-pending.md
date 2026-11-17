@@ -50,7 +50,7 @@ Linux 上「核对发起进程是否还在」这一处，连续五轮在修正�
 2. `list-runs` 的读量：不作承诺。owner 的意见是没有人需要这个承诺，写了才引出口径是否准确的争论。实测项 6 改写成做法上的约束（列举不为期限与发起进程标识逐个 run 多读一次），不谈读量变不变。
 3. 对使用者可见的各处取法：
    - 同意：`claim_count` 作诊断键；前台收尾写不成时的出口；到期的 run 级 `error` 优先于使用方中断的 `aborted`；被期限截断的 job 用另一句说明（预算那一句留给 job 自己的预算先到的情形）；`run --no-report` 遵守期限；前台 job 的超时改按墙钟；`status` 不带 `--wait` 也给判定提示；agent 可以自己执行 `settle-runs`；提示里的 `status` 命令带 `--ddb-table` 与 `--region`、不带 `--profile`；`explain` 点名没有判定的 scope 时说明并以退出码 0 结束（scope 名不在这个 run 里的仍报未找到、退出码 2）。
-   - 改定：到期时未启动的 job 要进 `run --json` 的 `jobs[]`，并且不拿 `pending` 当终态。取法与落点见 [0013](./0013-mobile-devices-implementation.md)「六步之外已定的后续批次」第 2 项；被收尾的 run 里停在 `running` 的 job 怎样显示，放进这一步的设计一起定。
+   - 改定：到期时未启动的 job 要进 `run --json` 的 `jobs[]`。它们在输出里的状态，2026-11-15 定的是不拿 `pending` 当终态，2026-11-16 再改定为状态值与记录一致、在描述性的位置加说明；被收尾的 run 里停在 `running` 的 job 同样处理。取法与落点见 [0013](./0013-mobile-devices-implementation.md)「六步之外已定的后续批次」第 2 项。
 
 次序上的变化（2026-11-16）：补丁里与发起进程标识的取法、核对有关的段落（决策三、八）随「本机接力的改法」提前应用与实装，见 [0013](./0013-mobile-devices-implementation.md)「六步之外已定的后续批次」第 1 项；其余段落（判定与处置、`settle-runs`、`status --wait`、`list-runs`）仍在第 4 步。
 

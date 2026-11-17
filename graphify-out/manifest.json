@@ -2274,9 +2274,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794802338.1488264,
-    "seen": 1794802616.975751,
-    "ast_hash": "878e738b14435eeb9c8df6da6a5ca371",
+    "mtime": 1794910540.18385,
+    "seen": 1794910545.773751,
+    "ast_hash": "0e9ff255953056cc33544f76a6118bc1",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -2880,9 +2880,9 @@
     "semantic_hash": ""
   },
   ".claude/README.md": {
-    "mtime": 1794800914.3730373,
-    "seen": 1794801066.514281,
-    "ast_hash": "88234fd2a0b1ccfbced86f4ddd415ee7",
+    "mtime": 1794910540.1821191,
+    "seen": 1794910545.7737012,
+    "ast_hash": "ae195f0a0115900c886f240265d7cfb7",
     "semantic_hash": ""
   },
   "core/tests/test_list_runs.py": {
@@ -3024,9 +3024,15 @@
     "semantic_hash": ""
   },
   "docs/journey/0014-settle-runs-step4-design-pending.md": {
-    "mtime": 1794760629.5136821,
-    "seen": 1794761643.6437912,
-    "ast_hash": "d1b517426509f061cdad18a1ab2cf17d",
+    "mtime": 1794804098.425578,
+    "seen": 1794910545.773752,
+    "ast_hash": "0e60cbea989aa5d088571796cc670ceb",
+    "semantic_hash": ""
+  },
+  "docs/journey/0016-run-ownership-and-status-projection-alignment.md": {
+    "mtime": 1794910540.1839852,
+    "seen": 1794910545.7737532,
+    "ast_hash": "e1dd213078ff1cb3ba89f6eea9c45c86",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
