@@ -1,6 +1,6 @@
 # plan 模块：`.feature` → job 列表（解析 + scope 分组）
 
-> **Status:** Partially-superseded-by 0054 —— [0054](./0054-settle-leftover-foreground-runs.md) 决策十改写本篇的墙钟预算解析规则与对应的测试契约，均已原位改写：`--default-job-timeout` 的非正值对任何目标都取产品上限 7200 秒（原为非设备 scope 不超时、设备 scope 取设备缺省），tag 或显式正值解析出的有效预算超过上限即报错，本模块产出的预算恒为有限正数、不再有空预算。其余条文不变。
+> **Status:** Partially-superseded-by 0054 —— [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十改写本篇的墙钟预算解析规则与对应的测试契约，均已原位改写：`--default-job-timeout` 的非正值对任何目标都取产品上限 7200 秒（原为非设备 scope 不超时、设备 scope 取设备缺省），tag 或显式正值解析出的有效预算超过上限即报错，本模块产出的预算恒为有限正数、不再有空预算。其余条文不变。
 
 核心库把一组 `.feature` 变成可调度的 **job 列表**的模块。它兑现 [0019](./0019-feature-tags-scope-and-engine.md)/[0016](./0016-execution-architecture-core-lib-run-model.md) 一直 defer 到核心库的「scope 分组 + engine 冲突校验 + Gherkin 解析」。输出的 Job 正是 [0024](./0024-worker-core-protocol.md) worker↔core 协议的输入形状。调度（scope 间串/并行、会话共享）另立 `schedule` 模块，见 [0026](./0026-schedule-module.md)，以本模块输出为输入。**本模块承担用例预检的解析与校验那半**（另一半的派发标注由 worker 自述提供、匹配语义不进 core，见 [0036](./0036-deterministic-capability-discovery.md)）：不执行用例、不连云端、不调模型，故零费用、不需云端凭证、可反复运行。它与执行前预检（preflight，对所选执行后端做只读就位检查，见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）是两件事，也不是「照原样模拟执行一遍」的 dry-run。
 
@@ -79,7 +79,7 @@ Job = {
 ### timeout 解析（scope 级，规则同 [0019](./0019-feature-tags-scope-and-engine.md)）
 
 本模块兑现 job 墙钟预算（`@timeout:N`）解析的校验实现，与 engine 解析同构；tag 语义权威在 [0019](./0019-feature-tags-scope-and-engine.md)、两层设计取舍与三路 enforce 在 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，本模块只解析定值、填进 `Job.timeoutS`：
-- 整 scope 未标 `@timeout` → 用显式给出的 `config.defaultJobTimeout`；显式值缺失时按目标补缺省：桌面 scope 取 `config.defaultDesktopJobTimeout`、设备 scope 取 `config.defaultDeviceJobTimeout`；显式值非正时对任何目标都取产品上限 `MAX_JOB_TIMEOUT_S`（7200 秒）、不报错（没有「不超时」，[0054](./0054-settle-leftover-foreground-runs.md) 决策十）；
+- 整 scope 未标 `@timeout` → 用显式给出的 `config.defaultJobTimeout`；显式值缺失时按目标补缺省：桌面 scope 取 `config.defaultDesktopJobTimeout`、设备 scope 取 `config.defaultDeviceJobTimeout`；显式值非正时对任何目标都取产品上限 `MAX_JOB_TIMEOUT_S`（7200 秒）、不报错（没有「不超时」，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十）；
 - 设备 scope 的 tag 或显式正值低于 `config.minDeviceJobTimeout` → 报错（可能还没拿到设备就被判超时）；任何目标的 tag 或显式正值超过 `MAX_JOB_TIMEOUT_S` → 报错（上限是 core 常量，对所有目标同一个数，不经 config 传入）；被检查的是按取值次序解析出的有效预算，被 tag 盖住的显式缺省不检查；目标缺省自身不校验。三个缺省数值由 CLI 算出传入，覆盖顺序与数值归 [0034](./0034-detached-batch-reconciler.md)「job timeout」节与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，本模块不复述；
 - scope 内任一 scenario 标了 → 全 scope 继承；
 - 同 scope 多个不同 `@timeout` 值 → 报错拒运行（一个 job = 一个预算，同 engine 冲突先例）；

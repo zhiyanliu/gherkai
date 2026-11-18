@@ -1,6 +1,6 @@
 # `.feature` 用 Gherkin tag 声明 scope 与 engine（G1/G2）
 
-> **Status:** Partially-superseded-by 0022, 0048, 0054 —— 语义 tag 的集合由 [0048](./0048-test-targets-device-and-ui-kind.md) 加入 `@device:` 与 `@app:` 两个后不再是「三个」，但本篇定下的三条 tag 规则（声明、继承、冲突）原样适用于新 tag；`@scope:` 与 `@engine:` 的**语义不变**（仍是当前权威；`@scope:` 的共享对象在 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1 下澄清为「被测对象的会话与操作状态」、全部目标适用且 scenario 之间不自动复位）；`@timeout:` 随 [0034](./0034-detached-batch-reconciler.md) 加入本体系，声明与冲突规则不变，其缺省与下限随 0051 按目标区分，取值的上限由 [0054](./0054-settle-leftover-foreground-runs.md) 决策十定为产品上限 7200 秒（超过即报错；同一决策把本篇复述的 `--default-job-timeout` 非正值含义改为对任何目标都取这个上限、不再有不超时），均已原位改写（见下）；其读取/路由/调度实现从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；核心库「调度实现」由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
+> **Status:** Partially-superseded-by 0022, 0048, 0054 —— 语义 tag 的集合由 [0048](./0048-test-targets-device-and-ui-kind.md) 加入 `@device:` 与 `@app:` 两个后不再是「三个」，但本篇定下的三条 tag 规则（声明、继承、冲突）原样适用于新 tag；`@scope:` 与 `@engine:` 的**语义不变**（仍是当前权威；`@scope:` 的共享对象在 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 1 下澄清为「被测对象的会话与操作状态」、全部目标适用且 scenario 之间不自动复位）；`@timeout:` 随 [0034](./0034-detached-batch-reconciler.md) 加入本体系，声明与冲突规则不变，其缺省与下限随 0051 按目标区分，取值的上限由 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十定为产品上限 7200 秒（超过即报错；同一决策把本篇复述的 `--default-job-timeout` 非正值含义改为对任何目标都取这个上限、不再有不超时），均已原位改写（见下）；其读取/路由/调度实现从「两套 runner 各自方言（cucumber `--tags` 过滤 / pytest-bdd conftest 把带值 tag 转 marker + skip）」统一为「核心库解析 tag + 调度层据 tag 分组/选引擎」。下文「已验证」段描述的两套 runner 消费机制是 v0.x 形态；核心库「调度实现」由 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 落地。
 
 QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：会话作用域（scope，G1）、引擎选择（engine，G2）与 job 墙钟预算（timeout，随 [0034](./0034-detached-batch-reconciler.md) 加入）。配置走结构化 tag、测试意图走自然语言 step——各司其职。
 
@@ -27,7 +27,7 @@ QA 在 `.feature` 里用 **Gherkin 原生 tag** 声明三类配置元信息：�
 - **双引擎交叉验证 = v1.0 不做**（降级，见下「双引擎的真实价值」）。`@engine:` 在 v1.0 只做**选引擎**（单引擎默认），不内建交叉。
 
 ### `@timeout:<N>`（job 墙钟预算——tag 体系的第三个成员，随 [0034](./0034-detached-batch-reconciler.md)「job timeout」节加入）
-- 语义同为 **scope 级属性**：本 scope（=job）最多允许跑 N 秒（墙钟，从推进器 claim 起算、含启动开销）。N 须 >0（声明预算，0/负值无意义 → FeatureContractError），且不超过产品上限 7200 秒（超过 → FeatureContractError，[0054](./0054-settle-leftover-foreground-runs.md) 决策十）。
+- 语义同为 **scope 级属性**：本 scope（=job）最多允许跑 N 秒（墙钟，从推进器 claim 起算、含启动开销）。N 须 >0（声明预算，0/负值无意义 → FeatureContractError），且不超过产品上限 7200 秒（超过 → FeatureContractError，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十）。
 - 声明/冲突**完全复刻 `@engine:` 的两条**：任一 scenario 标了即整 scope 生效；同 scope 声明不一致 → FeatureContractError（不静默取某个）。**缺省按目标**：未标 → 显式给出的 `--default-job-timeout`（命令行选项或配置文件 `[common]` 的 `default-job-timeout`；本项没有环境变量层）；都没给 → 目标缺省（桌面 scope 300 秒；设备 scope 为获取预算加 900 秒）。`--default-job-timeout` 的非正值对任何目标都表示取产品上限 7200 秒，不再有「不超时」；tag 或显式正值超过上限 → FeatureContractError，设备 scope 的 tag 或显式正值低于获取预算加 180 秒 → FeatureContractError（可能还没拿到设备就被判超时）。覆盖与校验的顺序、两层、命名、载体=definition、三路 enforce 见 [0034](./0034-detached-batch-reconciler.md)「job timeout」节，设备 scope 的缺省墙钟与下限见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，此处只定 tag 语义。
 
 ## 示例

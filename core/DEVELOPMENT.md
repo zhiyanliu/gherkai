@@ -17,7 +17,7 @@
 - [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行 core 侧拆分（project 纯归约投影 + reconcile 推进编排 + event_log 持久事件通道）
 - [0048](../docs/adr/0048-test-targets-device-and-ui-kind.md) 测试目标模型（Target / `@device` / `@app`、定义层校验）
 - [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话生命周期（会话事件、终结四阶段、设备计量与 evidence）
-- [0054](../docs/adr/0054-settle-leftover-foreground-runs.md) 运行期限与遗留前台 run 的收尾（期限规则 `run_deadline`、run 级裁决、run 级终态不可变、执行方先认领再启动）
+- [0054](../docs/adr/0054-run-deadline-lifetime-lock-and-settling.md) 运行期限与遗留前台 run 的收尾（期限规则 `run_deadline`、run 级裁决、run 级终态不可变、执行方先认领再启动）
 
 ## 模块
 

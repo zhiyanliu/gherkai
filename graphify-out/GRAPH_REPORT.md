@@ -1,7 +1,7 @@
 # Graph Report - yaozhou  (2026-11-18)
 
 ## Corpus Check
-- 486 files · ~1,009,221 words
+- 486 files · ~1,009,222 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 31 file(s) not represented in the graph (top: (none) 17, .feature 7, .xml 6)
 
@@ -11,7 +11,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `55a8c631`
+- Built from commit: `939a339c`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -514,14 +514,14 @@
 ## Surprising Connections (you probably didn't know these)
 - `七、被期限截断的 job 记 `aborted`` --references--> `job_cutoff()`  [INFERRED]
   docs/journey/0017-run-ownership-design-draft.md → core/gherkai_core/run_deadline.py
-- `十一、`settle-runs` 与查看命令的提示` --references--> `past_deadline()`  [INFERRED]
-  docs/journey/0017-run-ownership-design-draft.md → core/gherkai_core/run_deadline.py
+- `0051. 远程访问会话生命周期与应用分发` --references--> `TunnelInfo`  [INFERRED]
+  docs/adr/0051-device-session-lifecycle-and-app-distribution.md → runtime/gherkai_runtime/tunnel.py
+- `4. 事件契约：`scope_started` 是执行就绪，会话血缘与计量走 `session_opened` / `session_closed`，执行前失败走 `scope_done` 的 scope 级判定` --references--> `ScopeDone`  [INFERRED]
+  docs/adr/0051-device-session-lifecycle-and-app-distribution.md → core/gherkai_core/model.py
 - `二、运行期限：进运行定义，所有执行方都遵守` --references--> `RunResult`  [INFERRED]
-  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `对既有文档与 code 的影响` --references--> `RunResult`  [INFERRED]
-  docs/adr/0054-settle-leftover-foreground-runs.md → core/gherkai_core/model.py
-- `恢复现场` --references--> `RunResult`  [INFERRED]
-  docs/journey/0013-mobile-devices-implementation.md → core/gherkai_core/model.py
+  docs/adr/0054-run-deadline-lifetime-lock-and-settling.md → core/gherkai_core/model.py
+- `二、运行期限：进运行定义，所有执行方都遵守` --references--> `plan_next()`  [INFERRED]
+  docs/adr/0054-run-deadline-lifetime-lock-and-settling.md → core/gherkai_core/project.py
 
 ## Import Cycles
 - None detected.
@@ -1947,7 +1947,7 @@ Nodes (102): cli/DEVELOPMENT.md, cli 包 contributor 文档, gherkai 命令行�
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `Midscene 引擎开发笔记（contributor）` connect `判定的计算路径：从单次投票到退出码` to `ADR 0044: 引擎模型选择与覆盖`, `决策`, `bin.mts`, `User Guide 入口`, `CONTRIBUTING（contributor 入口）`?**
-  _High betweenness centrality (0.217) - this node is a cross-community bridge._
+  _High betweenness centrality (0.253) - this node is a cross-community bridge._
 - **Are the 412 inferred relationships involving `Status` (e.g. with `_cmd_list_runs()` and `explain_to_dict()`) actually correct?**
   _`Status` has 412 INFERRED edges - model-reasoned connections that need verification._
 - **What connects `DeviceWarmup`, `AdapterRegistry`, `AppiumConnector` to the rest of the system?**
@@ -1955,7 +1955,7 @@ _Questions this graph is uniquely positioned to answer:_
 - **Should `guard.mts` be split into smaller, more focused modules?**
   _Cohesion score 0.0539906103286385 - nodes in this community are weakly interconnected._
 - **Why does `tsx` connect `package.json` to `bin.mts`?**
-  _High betweenness centrality (0.126) - this node is a cross-community bridge._
+  _High betweenness centrality (0.139) - this node is a cross-community bridge._
 
 ### Low-confidence Hints
 _AMBIGUOUS edges — the extractor was unsure. Verify before acting on these._
