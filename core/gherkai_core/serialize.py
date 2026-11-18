@@ -513,7 +513,7 @@ def run_state_to_dict(state: RunState) -> dict:
         d["high_water_mark"] = state.high_water_mark
     if state.message is not None:  # run 级消息（ADR 0037 决策 7）：只在推进器不经任何 job 就终结 run 时有；omit-when-None
         d["message"] = state.message
-    d["claim_count"] = state.claim_count  # 认领计数（ADR 0054 决策二）：恒写，建 run 时即为 0
+    d["claim_count"] = state.claim_count  # 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）：恒写，建 run 时即为 0
     # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。
     # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
@@ -533,7 +533,7 @@ def run_state_from_dict(d: dict) -> RunState:
         ended_at=d.get("ended_at"),
         high_water_mark=d.get("high_water_mark"),  # 向后兼容：旧落盘无此键 → None（ADR 0034 机制三）
         message=d.get("message"),
-        claim_count=d.get("claim_count", 0),  # 缺键读作 0（ADR 0054 决策二）
+        claim_count=d.get("claim_count", 0),  # 缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）
         jobs={
             j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]),
                                     session_id=j.get("session_id"), claimed_at=j.get("claimed_at"))
@@ -543,7 +543,7 @@ def run_state_from_dict(d: dict) -> RunState:
 
 
 # run_state.json 里属于 RunState 模型的顶层键：上面两个函数读写的就是这些键，单一事实源在此。本机 run store 的每个写入口把文件里
-# 不在这个集合里的顶层键（建 run 时写下的附加键，如后台执行标记）原样带回（ADR 0054 决策三末段）。模型加键时同步加在这里：漏加的
+# 不在这个集合里的顶层键（建 run 时写下的附加键，如后台执行标记）原样带回（ADR 0030 决定四「local 的顶层附加键整体保留」）。模型加键时同步加在这里：漏加的
 # 键取值为空、不落键时，文件里的旧值会被当成附加键带回。测试比对这个集合与 run_state_to_dict 的产物。
 RUN_STATE_KEYS = frozenset({
     "run_id", "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count", "jobs"})

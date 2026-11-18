@@ -436,7 +436,7 @@ def test_worker_subnets_single_source_across_ssm_and_lambda_env():
 
 
 def test_task_role_has_events_putitem_not_runs():
-    # task role 最小权限：events 表 PutItem，**不给 runs 表**（worker 绝不碰 RunState，ADR 0024/0030 单写者）。
+    # task role 最小权限：events 表 PutItem，**不给 runs 表**（worker 绝不碰 RunState，ADR 0024；RunState 的写入方见 ADR 0034「数据模型三件套」）。
     t = _template()
     # events 表 PutItem 出现在某个 policy（两个引擎 task role 都有）
     t.has_resource_properties("AWS::IAM::Policy", {
@@ -450,7 +450,7 @@ def test_task_role_has_events_putitem_not_runs():
         },
     })
     # **负向护栏（契约的关键一半）**：没有任何 policy statement 的 Resource 指向 runs 表——worker 绝不碰 RunState
-    # （单写者，ADR 0024/0030）。遍历所有 IAM policy 的所有 statement，断言无一 Resource 命中 gherkai-runs。
+    # （ADR 0024；RunState 的写入方见 ADR 0034「数据模型三件套」）。遍历所有 IAM policy 的所有 statement，断言无一 Resource 命中 gherkai-runs。
     # （光验 events PutItem「存在」是假护栏：误加 runs 表写权限时子集匹配仍绿。）
     for policy in t.find_resources("AWS::IAM::Policy").values():
         for stmt in policy["Properties"]["PolicyDocument"]["Statement"]:
@@ -899,8 +899,8 @@ def test_reconcile_lambdas_share_per_run_concurrency_cap():
 
 
 def test_exit_observer_can_read_runs_table_only():
-    """退出观察者写 task_exited 前要判 run 是否 detached（ADR 0034 端到端 cloud 1b 的 handler 侧分流）→
-    须能**读** runs 表；且只读——观察者绝不写 RunState（ADR 0030 单写者）。
+    """退出观察者写 task_exited 前要判 run 是否 detached（handler 侧分流）→
+    须能**读** runs 表；且只读——观察者绝不写 RunState（RunState 的写入方见 ADR 0034「数据模型三件套」）。
     """
     t = _template()
     role_policies = [p["Properties"] for p in t.find_resources("AWS::IAM::Policy").values()

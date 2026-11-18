@@ -1,6 +1,6 @@
 # 0053. 项目配置文件 gherkai.toml
 
-> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的用户面规则。
+> **Status:** Accepted（2026-10-15）——项目级配置文件 `gherkai.toml` 的定位、取值顺序、节与键，以及设备选择的用户面规则。这一篇描述的设计有一部分尚未实装，code 跟上之前实际行为以 code 为准。
 
 ## 背景与问题
 
@@ -12,15 +12,15 @@
 - **应用清单**：`@app:<别名>` 里的别名要对应到一个本地安装包与它的包名或 bundle id，且同一别名在 Android 与 iOS 上是两个不同的文件。这是结构化数据，环境变量表达不了。
 - **本机后端的设备资源**：本机后端驱动真机时没有部署产生的 SSM 参数可读，Device Farm 项目 ARN 与放安装包的 S3 桶要由使用方给出。
 
-这些值属于**项目**（与 feature 文件一起入库、团队共享），而不是某一次调用。同时它们必须对所有启动 worker 的宿主一致：同步 `run`、本机无状态批量运行的 per-run 进程与 `status --wait` 接力者、云端 Fargate 与 detached Lambda（[0034](./0034-detached-batch-reconciler.md)）——后两者看不到使用方机器上的任何文件。
+这些值属于**项目**（与 feature 文件一起入库、团队共享），而不是某一次调用。同时它们必须对所有启动 worker 的宿主一致：本机前台 `run` 的进程、本机的后台推进进程、云端的推进 Lambda（[0034](./0034-detached-batch-reconciler.md)）——后者与它在 Fargate 上起的 worker 都看不到使用方机器上的任何文件。
 
 ## 决策
 
 ### 1. 文件定位：只有运行侧 CLI 读它，读出的值解析成具体值随 Job 走
 
 - 文件名 `gherkai.toml`。查找规则：`--config PATH`、环境变量 `GHERKAI_CONFIG`、当前目录下的 `gherkai.toml` 依次优先。缺省位置不存在不算错（等同于没有配置文件）；显式给出的路径不存在、或文件不是合法 TOML，以退出码 2 结束并点名文件与出错位置。
-- **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`、`list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
-- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，三个本机宿主（各自 CWD 不同）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
+- **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`、`list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）、`settle-runs`（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
+- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，两个本机宿主（前台 `run` 的进程与后台推进进程）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
 - 解析用 Python 标准库 `tomllib`（CLI 要求 Python 3.13 起），零新增依赖；CLI 只读不写，不提供 `config set` 一类改写命令。
 - `doctor` 显示本次加载的配置文件绝对路径，或「未使用配置文件」，便于排查「我改的配置为什么没生效」。
 
@@ -64,9 +64,10 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 ```
 
 - **`[common]` 与 `[cloud]` 的键与选项同词**：键名是选项长名去掉前导 `--`、连字符保留（`--default-engine` 对应 `default-engine`）。值经与 argparse 同一套类型与取值范围校验，按 TOML 的原生类型直接校验、不经字符串：整数选项只接受 TOML 整数（浮点不截断、与命令行上给 4.7 同拒），浮点选项与自定义校验接受 TOML 整数或浮点，数字选项不接受文本（TOML 里 `"4"` 是文本），布尔一律拒绝；非法值的报错形态与在命令行上给错一致，内建类型的失败给产品语言的理由。某个键对当前命令不适用（如 `grace` 之于 `plan`）时忽略，因为配置文件是项目级的、各命令只取自己有的那几项。`[devices]` 的键不受同词规则约束：命令行上设备选项平铺、要带平台或服务前缀，配置文件里有节层级、不需要前缀，对应关系见决策 4 与决策 6 的映射表。
-- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`list-runs` 的 `--status` 与 `--limit`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
+- **可配置的只是「环境型」选项**：后端与资源名、引擎与 step 目录、投票与预算、并发、隧道、variant 一类每个项目基本固定的值。**按次选择型选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`explain` 的 `--all` 与 `--full`、`run` 的 `--fail-fast` 与 `--no-report`、`list-deterministic` 的 `--engine`、`list-runs` 的 `--status` 与 `--limit`、`settle-runs` 的 `--dry-run`、`--config` 本身以及位置参数。判据：只影响本次的范围、输出形态、中止方式、落盘取舍或查询对象的选项，都属按次选择型。把它们写进文件，会让某次调用的范围、输出或中止语义在不显眼处改变（如 `--fail-fast` 入库后其余 job 会被悄悄跳过，`--no-report` 入库后报告悄悄缺失），排查成本远高于每次多输入一个选项。`submit` 的 `--tunnel-ttl` 属环境型，与隧道一类同样可配置。
 - **未知键以退出码 2 结束**，点名文件、节与键名。拼错的键若被静默忽略，表现是「配置没生效」，比直接报错更难发现（与 [0036](./0036-deterministic-capability-discovery.md) 对自述契约 fail-loud 同一取向）。
 - **只对本机后端起作用的 `[common]` 键（如 `grace`）在 `--backend cloud` 下不生效、只提示一句**，与 `project-arn` / `app-bucket` 同一形态；命令行上显式给出仍按 [0024](./0024-worker-core-protocol.md) 拒绝。
+- **`[common]` 的 `backend` 设为 `cloud` 时，`run` 与命令行给出 `--backend cloud` 时相同**：以退出码 2 结束并指向 `submit`（云端后端只支持 `submit`，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。这样的项目每次 `run` 都要显式给出 `--backend local`（选项优先于配置文件，决策 2）。理由见被拒方案「配置文件设为云端时 `run` 忽略这个值」。
 - **`[devices]`**：每个平台一张子表 `[devices.android]` / `[devices.ios]`，二选一给出 `arn`（指定一台设备）或 `os-version`（平台加系统版本的族匹配，必须写成 TOML 字符串——写成数字会被解析成浮点，以退出码 2 结束并提示加引号），两者都给以退出码 2 结束。`billing-method` 内建默认 `METERED`，可在平台子表里覆盖（不计量槽位按平台购买）；月用量足够大时 `UNMETERED`（不计量槽位）更便宜，取舍见实测依据。`acquire-timeout-s` 的默认值与上界见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 2，超出预算记 `acquire_timeout`（处置语义同在 0051）。
 - **`project-arn` 与 `app-bucket` 只供本机后端**：云端后端的 Device Farm 项目由 `gherkai deploy` 建立、ARN 存 SSM，安装包放进现有产物桶（项目与 SSM 见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10，产物桶见决策 9）。`--backend cloud` 下文件里给了这两项，提示一句「云端后端使用部署时建立的项目与产物桶，本项不生效」、不拦截，与 [0037](./0037-distribution-and-packaging.md) 决策 4 对云端 `--steps-dir` 的处理同一形态。两项是与账号、区域绑定的资源名，不是凭据：团队共用同一个账号时可以入库共享；项目要在多个账号或环境中执行时，改用 `GHERKAI_DEVICE_FARM_PROJECT_ARN` / `GHERKAI_APP_BUCKET` 按环境给出，入库值会被环境变量覆盖（决策 2）。本机后端下 `project-arn` 里的账号与当前凭证所属账号不一致时，CLI 在提交前警告并点名两个账号，不拦截。`app-bucket` 的区域可以与当前区域配置不同：worker 由存在性检查解析桶的区域并按它预签名（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9），CLI 上传安装包时发现两者不同会提示一句、不拦截。
 - **`[apps]`**：每个别名一张子表，按平台各给一个条目：`file`（本地安装包，相对配置文件目录）加 `package`（Android）或 `bundle-id`（iOS），两者都必须显式给出；其中应用标识（`package` 或 `bundle-id`）是 worker 启停应用、采样应用状态与 DeepLink 命令的参数，不进 Appium 能力集（理由见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 9）。`@app` 引用的别名不在 `[apps]` 里、或该别名缺少 scope 所在平台的条目，按 [0048](./0048-test-targets-device-and-ui-kind.md) 报 FeatureContractError；`plan` 同样报错，因为它只读本地文件、不违背零 AWS。安装包的上传（按内容哈希放进桶）发生在 `run` / `submit`，`plan` 只核对文件存在。
@@ -87,8 +88,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 
 ### 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件
 
-- 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。`NOVA_ACT_TIMEOUT_S` 不在这条链上：它的单一真值在组合根（[0024](./0024-worker-core-protocol.md)「组合根持引擎特定的值」条），由起 worker 的那一侧从自己的环境变量读出后显式注入 worker（本机 spawn 与能力自述查询经子进程 env，云端经 RunTask overrides、盖过镜像 `ENV`；detached 云端提交由推进器 Lambda 起任务，取缺省 120），写进 variant 镜像的 `ENV` 不生效。配置文件不收这些键，`NOVA_ACT_TIMEOUT_S` 也不收。
-- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含 per-run 进程与 `status --wait` 接力者）、前台 Fargate（同步 run 的 RunTask）、detached Lambda 与能力自述四个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的「四个注入面就是四个会漂的地方」；配置文件不重新打开该决定。`NOVA_ACT_TIMEOUT_S` 不收另有一层理由：它的真值由起 worker 的那一侧自己持有——本机后端与云端前台 `run` 是 CLI 进程的环境变量，云端后台 `submit` 由推进器 Lambda 在发 RunTask 时注入，注入的值取自同一个组合根读数，而推进器 Lambda 的运行环境里没有这个变量，所以恒为代码缺省 120——detached 云端运行下这个值当前不可配。将来若要可配，走 definition 固化（CLI 定值、写进 run definition、推进器只读，与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2 的设备请求同一取向），不走部署期给推进器 Lambda 设环境变量：那会让同一个值在前台与后台两条路各有真源、随部署而不随 run 变。配置文件只有 CLI 读。若配置文件收它，按决策 1 的惯例就得把值固化进 definition，让推进器 Lambda 与 `status --wait` 接力者读回同一个值，等于新开一条跨宿主的传递通道，还要定它与宿主环境变量谁优先；收益只是少设一个环境变量。
+- 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。`NOVA_ACT_TIMEOUT_S` 不在这条链上：它的单一真值在组合根（[0024](./0024-worker-core-protocol.md)「组合根持引擎特定的值」条），由起 worker 的那一侧从自己的环境变量读出后显式注入 worker（本机 spawn 与能力自述查询经子进程 env；云端由推进器 Lambda 起任务，经 RunTask overrides 注入、盖过镜像 `ENV`，取缺省 120），写进 variant 镜像的 `ENV` 不生效。配置文件不收这些键，`NOVA_ACT_TIMEOUT_S` 也不收。
+- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含后台推进进程）、推进器 Lambda 与能力自述这几个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的问题：每个注入面都是一个会漂的地方；配置文件不重新打开该决定。`NOVA_ACT_TIMEOUT_S` 不收另有一层理由：它的真值由起 worker 的那一侧自己持有——本机后端是 CLI 进程的环境变量，云端由推进器 Lambda 在发 RunTask 时注入，注入的值取自同一个组合根读数，而推进器 Lambda 的运行环境里没有这个变量，所以恒为代码缺省 120——云端运行下这个值当前不可配。将来若要可配，走 definition 固化（CLI 定值、写进 run definition、推进器只读，与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2 的设备请求同一取向），不走部署期给推进器 Lambda 设环境变量：那会让同一个值在本机与云端两条路各有真源、随部署而不随 run 变。配置文件只有 CLI 读。若配置文件收它，按决策 1 的惯例就得把值固化进 definition，让推进器 Lambda 与本机后台推进进程读回同一个值，等于新开一条跨宿主的传递通道，还要定它与宿主环境变量谁优先；收益只是少设一个环境变量。
 - 配置文件也不收凭证与密钥：AWS 凭证走默认凭证链，`NGROK_AUTHTOKEN` 留在环境变量或 ngrok 自己的配置。`gherkai.toml` 预期入库，密钥进去即泄漏。
 
 ### 6. 护栏
@@ -97,7 +98,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **云端 `report-dir` 不绝对化**：测试覆盖云端后端加配置文件 `report-dir` 的情形，断言交给前置检查与存储的值与文件里的原值逐字相同。
 - **设备段的形态**：测试覆盖平台子表 `arn` 与 `os-version` 二选一（都给以退出码 2 结束；平台有设备 scope 而任何来源都没有给出选择时，`run` / `submit` 以退出码 2 结束、`plan` 只警告，见决策 4）、`os-version` 写成 TOML 数字时的退出码 2 与加引号提示、`billing-method` 的平台覆盖、以及本机后端下 `project-arn` 账号与当前凭证账号不一致的告警文本；解析结果断言为 Job 里的具名设备请求（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。
 - **路径基准**：测试覆盖在子目录执行、`--config` 指向别处两种情形，断言 definition 里的路径以配置文件目录为基准。
-- **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成，`status --wait` 接力者在另一 CWD 下得到与提交时相同的设备与应用值。
+- **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成，后台推进进程在另一 CWD 下得到与提交时相同的设备与应用值。
 
 ## 实测依据
 
@@ -123,6 +124,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **YAML 或 JSON**：YAML 需新增依赖且隐式类型转换易出错（`NO` 变布尔、版本号 `18.10` 变浮点）；JSON 不能写注释。TOML 由标准库直接读取，Python 使用方也熟悉 `pyproject.toml`。
 - **配置文件承载引擎模型等 worker 侧覆盖项**：见决策 5，等于以另一种形态重新引入 [0044](./0044-engine-model-selection-and-override.md) 已拒的多注入面。
 - **静默忽略未知键**：拼错的键表现为「配置没生效」，比报错更难排查。
+- **配置文件设为云端时 `run` 忽略这个值**（提示一句后在本机执行）：「配置写的后端」对 `run` 与 `submit` 含义不一致，其余命令仍按配置查云端、查不到这个 run。
 
 ## 边界与互链
 
@@ -133,4 +135,4 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - [0052](./0052-appium-interface-adapter-and-platform-differences.md)：重规划上限等驱动侧固定规则及其覆盖方式。
 - [0044](./0044-engine-model-selection-and-override.md)：worker 侧覆盖项的覆盖链，本 ADR 不改变它。
 - [0037](./0037-distribution-and-packaging.md) 决策 4：「解析在组合根、随 definition 持久化」的先例，本 ADR 把它推广到全部配置项。
-- [0034](./0034-detached-batch-reconciler.md)：本机无状态批量运行的三个宿主与 detached 后端，决定了配置值必须随 definition 走。
+- [0034](./0034-detached-batch-reconciler.md)：本机的前台与后台推进器、云端的推进 Lambda，决定了配置值必须随 definition 走。

@@ -145,7 +145,7 @@ def test_run_ids_scope_with_colon_not_hash():
     assert reconciler._run_ids_from_stream(event) == {"20260719T04Z-abc"}
 
 
-# ---------- 启动器 _run_ids_from_runs_stream（两种 event 源，ADR 0034 status --wait 接力 bug 回归）----------
+# ---------- 启动器 _run_ids_from_runs_stream（两种 event 源，ADR 0034「重议闸门」首条）----------
 
 def _runs_stream_record(run_id):
     return {"dynamodb": {"Keys": {"run_id": {"S": run_id}, "item_type": {"S": "META"}}}}
@@ -875,7 +875,7 @@ def test_tick_runs_writes_the_report_from_the_committed_tick_result(monkeypatch)
     assert reports[0][0] is committed and reports[0][1] == "PSTORE"
 
 
-# ---------- 只推进 detached run（ADR 0034 端到端 cloud 1b 的 handler 侧分流）----------
+# ---------- 只推进 detached run（handler 侧分流）----------
 # 同步 `run --backend cloud` 与 detached 共用同一张 events 表、同一个 cluster，而 events item / STOPPED 事件里
 # 没有 detached 标记（标记只在 runs 表 STATE item 上）→ Stream/rule 层滤不掉，两个 handler 必须自己判。
 # 这组用 moto 内存表运行真 handler（含真 tick/真 CAS），**正负两面都验**：非 detached 零动作、detached 照常推进
@@ -1386,7 +1386,7 @@ def test_exit_from_task_is_shared_by_observer_and_timeout_handler():
     assert at == _ECS_STOPPED
 
 
-# ---------- 退出时刻（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 23 到 25）----------
+# ---------- 退出时刻（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 10 到 12）----------
 # 退出记录带 task 的执行停止时刻，是否已过截止时刻由收尾投影判断。同一个时刻在两种来源里形态不同：STOPPED 事件的 detail 里是 ISO 串，
 # DescribeTasks 的应答经 botocore 解析之后是带本机时区的 datetime（ECS 的 JSON 协议里传的是纪元秒）。下面几条的 job 在 10:00:00 被
 # 认领、预算 300 秒，截止时刻是 10:05:00。
@@ -1428,7 +1428,7 @@ def _described(detail: dict) -> dict:
 
 
 def test_exit_from_task_reads_one_exit_time_from_the_event_and_from_describe_tasks():
-    """实测项 23 的本地一半：同一个已停止的 task，从 STOPPED 事件与从 DescribeTasks 取到同一个退出时刻（执行停止时刻），写进记录的
+    """实测项 10 的本地一半：同一个已停止的 task，从 STOPPED 事件与从 DescribeTasks 取到同一个退出时刻（执行停止时刻），写进记录的
     ISO 串也相同。不带时区的 datetime（SDK 返回的对象）按 UTC；没有执行停止时刻时取 ECS 记下停止的时刻；都没有或读不出时不带退出时刻。"""
     from gherkai_core.serialize import instant_to_iso
 
@@ -1469,7 +1469,7 @@ def _exit_item(cloud_env) -> dict:
 
 
 def test_late_observer_rewrites_the_exit_record_from_describe_tasks_unchanged(cloud_env):
-    """实测项 23 的本地一半（moto）：STOPPED 事件迟到时，超时处置先从 DescribeTasks 的 task 对象写下退出记录，观察者随后从事件写同一
+    """实测项 10 的本地一半（moto）：STOPPED 事件迟到时，超时处置先从 DescribeTasks 的 task 对象写下退出记录，观察者随后从事件写同一
     条记录，写入前后内容相同（含退出时刻）。"""
     _claimed_detached_run(cloud_env)
     detail = _detail_with_times(3)
@@ -1500,7 +1500,7 @@ _JUDGED_ENGINE_ERROR = ("error", "engine_error", "worker 非正常退出（退�
 ], ids=["after-the-cutoff", "before-the-cutoff", "naive-execution-time-falls-back-to-stopped-at"])
 def test_task_exiting_on_its_own_is_judged_by_its_exit_time_through_the_real_tick(cloud_env, execution_stopped, stopped,
                                                                                   expected):
-    """实测项 24 的本地一半（moto，真实的观察者与推进 Lambda）：task 在截止时刻之后、停止请求发出之前自己以 3 退出，STOPPED 事件里
+    """实测项 11 的本地一半（moto，真实的观察者与推进 Lambda）：task 在截止时刻之后、停止请求发出之前自己以 3 退出，STOPPED 事件里
     没有超时哨兵，观察者只记退出码与执行停止时刻；收尾投影按退出时刻晚于截止时刻判为超时，说明是预算那一句，与前台同一情形相同。
     在截止时刻之前这样退出时按退出码归因。执行停止时刻读不出（不带时区）时按 ECS 记下停止的时刻判断。"""
     import json
@@ -1526,7 +1526,7 @@ def test_task_exiting_on_its_own_is_judged_by_its_exit_time_through_the_real_tic
 
 
 def test_timeout_handling_keeps_an_exit_record_written_while_it_lists_tasks(cloud_env):
-    """实测项 25 的云端一侧（moto）：超时处置点查过「还没有退出记录」之后、补写之前，观察者写下了真实的退出记录（这里在列 task
+    """实测项 12（moto）：超时处置点查过「还没有退出记录」之后、补写之前，观察者写下了真实的退出记录（这里在列 task
     期间写下，两个列表里都已找不到这个 task）。补写是条件写、不成立，留下的是真实的那一条，处置按退出记录已在返回。"""
     _claimed_detached_run(cloud_env)
     detail = _detail_with_times(3)

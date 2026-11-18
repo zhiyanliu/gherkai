@@ -148,7 +148,7 @@ class DdbEventLog:
         """补写判为超时的未知退出（不带退出码与退出时刻，带 `timed_out`），只在这个 scope 还没有退出记录时写入：PutItem 带
         `attribute_not_exists` 条件，「没有」的判断与写入是同一次条件写。条件不成立（退出记录已在）时不报错、返回 False；写成返回 True。
         云端超时处置找不到 task 时用它（对位 `SqliteEventLog.record_timed_out_if_absent`）：观察者恰在处置方查过之后、写入之前落下
-        真实的退出记录时，补写不成立，观察到的退出不被盖掉（ADR 0054 决策二「本机接力」条）。"""
+        真实的退出记录时，补写不成立，观察到的退出不被盖掉（ADR 0034「job timeout」节「`timed_out` 归因链」）。"""
         try:
             self._table.put_item(
                 Item={

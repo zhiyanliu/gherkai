@@ -118,7 +118,7 @@ def test_record_exit_exited_at_roundtrip(tmp_path):
 
 
 def test_record_timed_out_if_absent_writes_only_when_there_is_no_exit_record(tmp_path):
-    """补写判为超时的未知退出（ADR 0054 决策二「本机接力」条）：还没有退出记录时写成（退出码未知、带超时标志、不带退出时刻），返回
+    """补写判为超时的未知退出：还没有退出记录时写成（退出码未知、带超时标志、不带退出时刻），返回
     True；已有退出记录时不写、不报错，返回 False，原记录原样保留。之后到达的真实退出照旧经 record_exit 覆盖补写的那一条。"""
     from datetime import datetime, timezone
 

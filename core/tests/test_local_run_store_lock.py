@@ -1,4 +1,4 @@
-"""LocalRunStore 写入口的互斥与条件建 run（ADR 0030 决定三、ADR 0054 决策三/五），真起子进程、不 mock。
+"""LocalRunStore 写入口的互斥与条件建 run（ADR 0030 决定三、ADR 0054 决策五），真起子进程、不 mock。
 
 本机的五个写入口（create_run、update_job_state、try_claim_job、project_state、try_finalize）都在 run 目录下同一把 fcntl 文件锁内
 读改写。锁跨进程是否真的互斥、读改写之间是否真的没有别的写插进来，是 mock 之外的真实行为（绿≠对），所以并发的结论用多个真实

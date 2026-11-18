@@ -1,14 +1,14 @@
 # 实时写存储接缝：per-job 完成回调 + RunPersistence 应用服务 + RunStore 增量 port
 
-> **Status:** Partially-superseded-by 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 以加法扩展改写决定二、三里 `on_event` 的触发事件与血缘规则：收到 origin 不是 `attempted` 的 `session_opened` 即把 job 刷成 RUNNING 并带 session_id，`scope_started` 到达时改写为执行会话的 id，任何写入（含终态写）都不以 None 覆盖已有的 session_id；接缝形态、commit-point 写序、单一 store 锁不变。[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五改写决定三、四、六，决策二与决策三末段另改写决定四，已原位改写、已实装：提交点改为与后台推进相同的条件写 `try_finalize`（run 级已是终态时不覆盖、不写报告）；`RunStore` 端口删去 `finalize_run` 与 `save_run`，`create_run` 只在 run 不存在时成立；`try_finalize` 带可选的期望认领计数（决策二）；`update_job_state` 返回 run 级在这次写时是否仍未结束，前台执行者据它得知 run 已被别处记为已结束；本机 `run_state.json` 的顶层附加键在每个写入口之后原样保留（决策三末段）；本机 adapter 的全部写入口在同一把文件锁内完成，store 的正确性不再靠 `RunPersistence` 的进程内锁（这把锁保留，护住进程内记下的代表会话，并让同一进程的写依次落库）；由改写终态带来的索引写随之不再有。0054 决策二、五另改写决定一、二、三的接缝与写序，已原位改写、已实装（前台 `run` 的组合根注入 `compose.now` 作墙钟、注入落库服务作记录，两个后端相同）：`RunPersistence` 向调度循环提供认领、重试之前的读与停手信号（实现 `ports.RunRecord`，经 `ScheduleOpts.record` 注入，schedule 仍不碰 store），记住认领时刻并在此后的 job 状态写里带上，收尾写带上 `RunResult` 的 run 级说明；带说明的 run 级 `error` 是「读到终态即判定齐全」的例外（有的 job 没有启动）；决定四的接口真值注里认领 `try_claim_job` 改为前后台共用，决定七里 run 已开始执行之后的落库失败多出认领与重试之前的读。本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态批量运行，reconciler 直写 RunState）落地：`RunState` 投影带 `high_water_mark` 条件写、finalize 单独条件写（见下「重议」条反向链）。决定六的 runs 表索引改为单一状态分组索引 `status_group-run_id-index`：写端（core 的 DynamoDB RunStore 写出 `status_group`）、索引的定义与两个读者（worker revision 清理、`list-runs`）都已实装，以 `status` 为键的两个旧索引 `status-index` 与 `status-run_id-index` 都已从部署模板删除；该索引上的实测已在部署出的后端与真实账户上完成（[0038](./0038-worker-image-delivery.md) 实测项 8、9 与 [0041](./0041-agent-facing-cli-affordances.md) 决策七「实测项」；`list-runs` 缺省 N＝20 下的截取与每页满 20 项时的索引读量未实测；`--limit 1/2` 的截取已核），改用它的那次索引迁移的部署实测记在决定六「形态变更」条。
+> **Status:** Partially-superseded-by 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 以加法扩展改写决定二、三里 `on_event` 的触发事件与血缘规则：收到 origin 不是 `attempted` 的 `session_opened` 即把 job 刷成 RUNNING 并带 session_id，`scope_started` 到达时改写为执行会话的 id，任何写入（含终态写）都不以 None 覆盖已有的 session_id；接缝形态、写序、单一 store 锁不变。[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五（终态不可变、执行方服从记录）落在本篇的决定一、二与决定四：落库服务向调度循环提供认领、重试之前的读与停手信号（实现 `ports.RunRecord`，经 `ScheduleOpts.record` 注入，schedule 仍不碰 store；决定一、二）；建 run 只在 run 不存在时成立，端口不提供整份重写与无条件改写终态的入口，本机全部写入口在同一把锁内（决定四）。本 ADR「重议」条预告的「编排进程外的多写者 → 需 owner/lease + 条件更新、另立 ADR」已由 [0034](./0034-detached-batch-reconciler.md)（无状态批量运行，reconciler 直写 RunState）落地：`RunState` 的写带条件，不用租约（见下「重议」条反向链）。决定六的 runs 表索引改为单一状态分组索引 `status_group-run_id-index`：写端（core 的 DynamoDB RunStore 写出 `status_group`）、索引的定义与两个读者（worker revision 清理、`list-runs`）都已实装，以 `status` 为键的两个旧索引 `status-index` 与 `status-run_id-index` 都已从部署模板删除；该索引上的实测已在部署出的后端与真实账户上完成（[0038](./0038-worker-image-delivery.md) 实测项 8、9 与 [0041](./0041-agent-facing-cli-affordances.md) 决策七「实测项」；`list-runs` 缺省 N＝20 下的截取与每页满 20 项时的索引读量未实测；`--limit 1/2` 的截取已核），改用它的那次索引迁移的部署实测记在决定六「形态变更」条。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 把「一次 run 的判定/状态**随进度实时落库**」做成正交接缝：执行编排（`schedule`，[0026](./0026-schedule-module.md)）只管跑、
 不碰存储；存储编排（新 `core/gherkai_core/persist.py` 的 `RunPersistence`）依赖 Store ports、由组合根注入具体 adapter。
 这是云端（DDB/S3）落库的前置（见决定六）。
 
-**定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」。
-job 生命周期态（`skipped`/`aborted`/`pending`/`running`）的定义与 severity 归属全在 [0031](./0031-job-lifecycle-states-and-severity.md)，本篇只用它们描述时序；
-DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态）。
+**定位**：本 ADR 解决「**怎么把实时落库接进来而不污染 reducer / 不让每个组合根各写一遍**」，以及落库按什么写序提交、状态以哪份记录为准（决定三）。
+job 生命周期态（`skipped`/`aborted`/`pending`/`running`）的定义与 severity 归属、run 状态的取法与结束写全在 [0031](./0031-job-lifecycle-states-and-severity.md)（决定一、决定三），本篇只用它们描述时序；
+DDB 的并发一致性（Map<scope_id> 按 key 定位、条件更新）见下「决定六」（云端 adapter 落库形态），重叠推进下各记录的先后见 [0034](./0034-detached-batch-reconciler.md) 机制三。
 
 ## 背景：v1.0 是「跑完一次性写」，零实时
 
@@ -46,7 +46,7 @@ def schedule(run_meta, engines, sink, opts=None,
 
 - **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 用例、`--no-report` 路径都不必造 no-op 传进去。
 - **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...`/`on_event=...` 保自说明。
-- on_job_complete fire 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。没有启动、不产出判定的 job（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）不回调 on_job_complete。
+- on_job_complete fire 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。没有启动的 job 不回调 on_job_complete，它们由结束写结束（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）。
 
 ### 服从记录的三项能力：`ScheduleOpts.record`，不是给 schedule 注入 store
 
@@ -62,11 +62,11 @@ class RunRecord(Protocol):
 
 - **与方案 B 的区别**：schedule 拿到的是三个语义动作，不是 store；写序、几个 store、写失败怎么办仍全在 `RunPersistence`。认领时刻由 schedule 从注入的墙钟取、交给 `claim`，同一个值既写进记录、又算 job 的截止时刻。
 - **放进 `opts` 而不另设参数**：三项要么一起有（有记录的执行）、要么一起没有（`--no-report`、单测），合成一个可为空的注入对象；与 `interrupt` 同类（组合根注入、schedule 轮询），已有两个回调的签名不变。
-- **失败语义**：认领或读取本身失败（存储不可达）照常抛出，按运行期落库失败处理（与回调抛异常同一条止血路径，见决定三末「回调异常的停机止血」）。
+- **失败语义**：认领或读取本身失败（存储不可达）照常抛出，按运行期落库失败处理（与回调抛异常同一条止血路径，见决定三「回调异常的停机止血」）。
 
 ## 决定二：落库编排收进 `core/gherkai_core/persist.py` 的 `RunPersistence` 应用服务，组合根只注入 adapter
 
-「实时写怎么落」（commit-point 写序、RUNNING 中间态、按 scope_id 增量刷 job 态）**对 cli / WebUI / 未来 cron 完全一致，只有注入的 store adapter 不同**。
+「实时写怎么落」（逐 job 的提交点、RUNNING 中间态、按 scope_id 增量刷 job 态）**对 cli / WebUI / 未来 cron 完全一致，只有注入的 store adapter 不同**。
 让每个组合根各写一遍 → 必漂移。故收成一处 core 应用服务（依赖 Store **ports**、不含具体 adapter、不含 reducer 逻辑）：
 
 ```python
@@ -78,8 +78,8 @@ class RunPersistence:
     def still_open(self): ...                             # RunRecord：重试之前读一次 run 级状态；终态即发停手信号
     def ended_elsewhere(self): ...                        # RunRecord：停手信号
     def on_event(self, event): ...                        # 注入 schedule.on_event：收 ScopeStarted / SessionOpened→刷 RUNNING+血缘+认领时刻（sink_lock 外）
-    def on_job_complete(self, jr): ...                    # 每 job：先 save_job_result，后 update_job_state（按 scope_id 刷该 job 终态，带认领时刻）
-    def finalize(self, result, *, ended_at): ...          # commit point：try_finalize（条件写，带 run 级说明）→ ReportStore.write
+    def on_job_complete(self, jr): ...                    # 每 job：生成标识、先 save_job_result 存下这一份，再 update_job_state 写该 job 终态并点名它（带认领时刻）
+    def finalize(self, result, *, ended_at): ...          # 有未结束的 job 时做结束写；本进程的写使 run 成为终态时，从记录生成报告（ReportStore.write）
 ```
 
 组合根（任意皮）就只剩注入 + 三调用，**逻辑零重复、只换 adapter**：
@@ -93,68 +93,79 @@ result = schedule(run_meta, resolver, progress_sink, ScheduleOpts(..., wall_cloc
 persistence.finalize(result, ended_at=now)
 ```
 
-> **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，不再让 persistence 装饰 sink——
-> 理由是并发不变量，见决定三末「为何 RUNNING 走 on_event 而非装饰 sink」注。
+> **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，persistence 不装饰 sink——
+> 理由是并发不变量，见决定三「为何 RUNNING 走 on_event 而非装饰 sink」注。
 
 **架构对位**：`schedule` 编排**执行**（Engine port），`RunPersistence` 编排**存储**（Store ports），两者平级、都在 core、由组合根组合。
 schedule 仍一行不碰 store。这兑现「调 adapter 落库是默认行为、不是每个 client 自己拼」。
 
-## 决定三：commit-point 写序——数据面先、控制面摘要后
+## 决定三：逐 job 的提交点：明细先存、终态写点名它，状态以运行态为准
 
-实时写时序（一次 run）：
+落库按 job 逐个提交。由执行结果结束的 job 先存判定明细、再写终态，终态写在这个 job 的记录里点名那一份明细；run 的状态在同一次写里随之写下（取法见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三），run 一到终态，运行态的任何写都不成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。run 要结束而仍有未结束的 job 时，由结束写结束（各来路见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）。job 与 run 的状态以运行态为准，判定明细对 scenario、step 与归因负责。前台执行者与后台推进同守这一写序；别处写它时引用本节，不另写概括。
+
+实时写时序（一次前台 run）：
 
 ```
 run 开始（schedule 之前）:
-  RunPersistence.begin → RunStore.create_run(meta, 初始 RunState[所有 job=PENDING, 总=PENDING, started_at=now])
+  RunPersistence.begin → RunStore.create_run(meta, 初始 RunState[所有 job=PENDING, run=PENDING, started_at=now])
        └ definition 先落，满足「提交即返回 runId」（[0027](./0027-runreport-aggregation-index.md)）
-       └ 只在这个 run 还不存在时成立，已存在即抛 FileExistsError、不改任何东西（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）
+       └ 只在这个 run 还不存在时成立，已存在即抛 FileExistsError、不改任何东西（决定四）
 
 每个 job 第一次起 worker 之前（RunRecord.claim；worker 线程，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）:
-  RunStore.try_claim_job(run_id, scope_id, claimed_at=认领时刻)  ← 只在 run 级未结束、job 仍 pending 时成立；认领时刻记在落库服务里
-       └ 被拒 = run 已被别处记为已结束 → 停手信号；job 不启动
+  RunStore.try_claim_job(run_id, scope_id, claimed_at=认领时刻)  ← 只在 run 未结束、job 仍 pending 时成立；认领时刻记在落库服务里
+       └ 被拒 = run 已被别处结束 → 停手信号；job 不启动
   重试重新起 worker 之前（RunRecord.still_open）: RunStore.load_run_state → 读到终态同样发停手信号
-
-每个产出判定的 job 完成（on_job_complete 串行 fire 已归约的 jr；没有启动的 job 不 fire、不落判定明细、运行态保持 PENDING）:
-  ① ResultStore.save_job_result(run_id, jr)             ← 数据面判定真值【先】写
-  ② RunStore.update_job_state(run_id, job_state)         ← 控制面 job 态【后】刷（单写者一次写定该 job 终态，[0031](./0031-job-lifecycle-states-and-severity.md)；带认领时刻）
 
 job 进行中（on_event 收 ScopeStarted，或 origin 不是 attempted 的 SessionOpened（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的加法扩展）；worker 线程、**sink_lock 之外**）:
   RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id, claimed_at))  ← RUNNING 中间态 + 血缘随首事件即落（session_id 按代表会话规则：scope_started 的值一经取到即锁定，此前取最近一条非 attempted 的 session_opened；任何写入都不以 None 覆盖已有值，终态写也守此规则）
 
-  （写入的 job 态非 PENDING 时——RUNNING 或从 PENDING 直接到终态——同一次写把未收尾的 run 级推进为 RUNNING，
-   run 已收尾则只写 job；规则、DDB 的条件写与回退见 [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条。
-   两次 job 态写都整项替换，落库服务带上记住的认领时刻，不让它被抹掉；写返回「run 级已结束」即发停手信号）
+每个由执行结果结束的 job（on_job_complete 串行 fire 已归约的 jr）:
+  ① 生成一个随机标识，ResultStore.save_job_result 存下带这个标识的一份明细   ← 明细【先】存；失败见下「保存明细失败」
+  ② RunStore.update_job_state(run_id, 终态 JobState，带认领时刻与这个标识)    ← 终态【后】写，并点名那一份明细
 
-run 结束（schedule 返回后）:
-  RunStore.try_finalize(run_id, result.status, ended_at, message=result.message)  ← commit point：条件写，只在 run 级为 pending/running 时写成；不带认领计数的条件（前台是唯一的认领方、收尾在线程池排空之后）
-  ReportStore.write(...)                                  ← 派生视图永远最后；**其失败被隔离、不击穿已 commit 的 run**
-  （收尾写不成：run 级已是终态，即本次执行结束之前别处已把它记为已结束——不覆盖、不写报告，抛 RunAlreadyEnded，
-   [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）
+  （两种 job 态写都在同一次写里按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法写 run 状态；都整项替换，
+   落库服务带上记住的认领时刻，不让它被抹掉；写不成即 run 已被别处结束，发停手信号）
+
+run 结束（schedule 返回后，RunPersistence.finalize）:
+  仍有未结束的 job（到期、fail-fast 或使用方中断时没有启动的）→ 结束写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）
+  使 run 成为终态的那次写是本进程写成的 → 从记录生成报告：ReportStore.write（生成方与时机见 [0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节）
+       └ **其失败被隔离、不击穿已到终态的 run**
+  （本次执行结束之前别处已把 run 结束：不覆盖、不生成报告，抛 RunAlreadyEnded，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）
 ```
 
-> **ReportStore.write 失败隔离**：收尾写（commit point）一落，判定真值已在 ResultStore 安然无恙；其后的
-> ReportStore.write（派生只读视图）若抛异常（磁盘满等），**不冒泡、不反向击穿已 commit 的 run**——finalize 吞掉它、
-> 返回 None（报告可后续从 RunResult 重建）。否则一个「可重建的报告」写失败会让整个 run 裸 traceback 退出、
-> CI 拿不到判定输出。收尾写本身**不**在隔离范围内（控制面没落=真问题，必须冒泡；写不成时的 `RunAlreadyEnded` 同样冒泡，由调用方说明）。
+> **ReportStore.write 失败隔离**：使 run 成为终态的那次写一落，各 job 的状态与被点名的明细都已在记录里；其后的
+> ReportStore.write（派生只读视图）若抛异常（磁盘满等），**不冒泡、不反向击穿已到终态的 run**——finalize 吞掉它、
+> 返回 None。否则一个派生视图写失败会让整个 run 裸 traceback 退出、CI 拿不到判定输出。终态写与结束写本身**不**在
+> 隔离范围内（控制面没落是真问题，必须冒泡；run 已被别处结束时的 `RunAlreadyEnded` 同样冒泡，由调用方说明）。
 
-**commit point 的意义**：数据面（ResultStore 各 job）先逐个落 → 最后才写 RunStore 终态 status。
-「看到 RunStore 终态」即**保证**「所有 job 判定真值已落」。这修正了 v1.0 cli 现在的反序（先写控制面摘要、后写数据面，
-中途崩会留下「说 passed 但详细结果没齐」的假象）。前台执行者与后台推进用同一个收尾条件写，run 级终态一经写下，对所有写入方
-都不再变（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。**例外：带 run 级说明的 `error`**（`RunState.message` 有值）表示这个
-run 没有运行完成，有的 job 可能没有判定——按运行期限收尾时没有启动的 job 保持 pending、不落判定明细（0054 决策二第 3 条、决策六），
-推进器在运行定义不可用时不经任何 job 收尾也属此类，这一写不落任何判定明细（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」）；到期收尾时，此前已结束的 job 的判定照样先于终态落库。凭「run 级终态」取产物的读者对这类终态按「可能不全」处理。
+**commit point 的意义**：由执行结果结束的 job，保存明细成功之后才写终态，所以读到这类 job 的终态时它点名的明细已在。依赖方：`explain` 与报告。执行方在存明细与写终态之间中断时，留下的那一份没被点名、不被读（下「点名」条）。由结束写结束的 job 没有执行结果，结束写不写明细、不点名（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）；`explain` 怎样给出这类 job 见 [0042](./0042-step-evidence-and-explain.md) 决策四、决策七。
 
-**detached 路径同守（[0034](./0034-detached-batch-reconciler.md)）**：无状态批量运行的 commit point 同样是 `try_finalize`（CAS）。判定真值（ResultStore 各 job）在 `tick` 的收尾分支内（全部 job 已结束的收尾与到期收尾都是，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）、CAS **之前**、从本 tick 已读的**同一份** records 快照聚合落库；RunReport 在 CAS 之后由宿主写、失败隔离（同上），只由 CAS 写成的一方写，直接用 `tick` 交还的这一轮结果生成、不再另读事件重算（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④）。后台收尾的步骤、必要契约与已获接受的边界见 0034 该条的「收尾各步的先后与之后会不会变」。写在 CAS 之前还多一层理由：commit 之前的失败让本轮 tick 失败、被触发源重试（cloud events Stream 事件源重试 / local per-run 或 `status --wait` 接力再 tick）；commit 之后的失败**无人重试**——run 已终态，此后到达的事件与触发只让推进方读到终态即停、不再重做收尾，「说 passed 但 jobs/*.json 没齐」在 detached 下是永久的（曾如此实装：先 CAS 再在 tick 之外补聚合，code-health 对抗验证发现）。真跑坐实：cloud detached run 收尾后 S3 `reports/<run_id>/` 下 jobs/*.json（判定真值）与 index.html/manifest.json（派生）齐全、reconciler 日志 `done + finalized` 无异常。
+**状态的权威是运行态，输出里的状态就是记录里的状态**：`run` 的汇总与 `--json`、`status`、`list-runs`、`explain`、报告里 job 与 run 的状态都取运行态，不在读取时另派生；判定明细对 scenario、step 与归因负责，由执行结果结束的 job 的说明也在明细里。明细不是状态的来源与判定接口，给脚本读状态的入口是 `status --json`（[0041](./0041-agent-facing-cli-affordances.md) 决策三）。理由：job 的终态只在运行态里写一次，由结束写结束的 job 没有明细，明细的写又不带条件（下「点名」条），只有运行态对每个 job 都有且分出了先后。被拒：**读取时派生状态**（停在 `pending`、`running` 的 job 加说明另给一个状态）：输出与记录各一套，每个读者都要复刻同一条派生。
+
+**点名：job 的终态点名它的那一份明细**。每次保存明细，写入方生成一个随机的标识，明细存成带这个标识的一份，同一个 job 可以有多份、互不覆盖，本机推进器对同一次保存的重试（下「保存明细失败」条）用同一个标识。记下 job 终态的那次条件写（条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②）在这个 job 的记录里同时写下这个标识，即点名，点名随终态只写一次、此后的写原样保留；由结束写结束的 job 不点名。读者只认被点名的那一份：`explain`、报告与其余读回明细的各处都先从运行态取 job 的清单与各自点名的标识，再读那一份，不列举目录或前缀；没被点名的明细不读、不列、不清理。`status --json` 怎样带这个标识、机器读结果的入口见 [0041](./0041-agent-facing-cli-affordances.md) 决策三；明细的落点本机见下「local 三个写面」框，S3 见决定六。理由：明细的写不带条件、可能有多份，只有记下终态的那次写分出了先后，由它点名，输出与记录一致就延伸到 scenario、step 与归因，明细的写也不必另带条件。代价：读明细的一方要先读运行态（跨用户的读者读不到运行态，分不出哪一份被点名，见下「读取权限」）；每个 job 的记录多出标识的长度，单条运行态记录容纳的 job 数相应减少（[0034](./0034-detached-batch-reconciler.md) 机制三②的样本与实测）。
+
+- 被拒：**接受明细与终态不对应**（明细每个 job 一份、后写的覆盖先写的）：由执行结果结束的 job，只在云端重叠时 `explain` 与报告配的明细可能出自没写成终态的那一次；由结束写结束的 job，残留明细里的 scenario 与 step 照样当作它的判定列出（如 `aborted` 配全部通过的 step），而不是标为取自事件流。
+- 被拒：**为由结束写结束的 job 补写明细**（写成结束写的一方补写一份只有状态与说明的明细）：补写在结束写之后，run 已是终态、运行态的任何写都不成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），这份明细无从被点名，读者不认。
+
+**被点名的那一份就是写成终态的那一方存的**：job 的终态至多写成一次（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补），写成的一方点名的是自己存下的那一份，与终态出自同一个执行结果（写不成而重读再算时沿用这一份，改用别的结果先另存一份）；云端两次调用重叠、本机期限加 300 秒的 run 处置抢先、推进器恢复之后迟落下的保存，都只多出没被点名的明细（执行方得知 run 已结束之后不存明细，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。依赖方：`explain` 与报告不把没被采用的结果当成结果展示。由此**报告里的判定由记录确定**：run 到终态之后运行态与被点名的明细都不变，报告里的状态、scenario、step 与归因不随生成的时机变化。依赖方：只由一方生成一次的报告（[0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节）与 `status`、`explain` 一致。
+
+**保存明细失败**：保存失败时这个 job 这次不写终态。云端由流的重试或之后的触发再做；本机两种推进器（前台的 `run` 进程与后台推进进程）按指数退避重试 3 次（间隔 1、2、4 秒，同一个标识），仍失败即放弃，推进器退出（前台 `run` 以非零退出码结束），执行中的 job（含同一轮已存下明细的）留在 `running`，之后被 run 处置为「执行这个 run 的 gherkai 进程已退出」那一句（说明表在 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节，处置见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策七）：描述属实，只是没有说明为什么退出（前台终端里另有存储错误），结果丢失。一时的失败（重试成功之前没有被处置）照常记下，三种组合相同（[0054](./0054-run-deadline-lifetime-lock-and-settling.md)「边界与已知局限」的「三种组合的对照」表）。
+
+- 被拒：**保存明细失败时一直重试**（直到写成，或 run 被处置、推进器读到终态停手）：存储一直写不进时不保证 run 结束：执行中的 job 留在 `running`（执行方自己到期只在没有执行中的 job 时做，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条），推进器仍持锁（前台即 `run` 不退出），只剩期限加 300 秒的 run 处置（磁盘满时它的写同样写不进），本机没有人查看时一直不结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）。
+- 被拒：**保存明细失败即退出、不重试**：一次临时的写入失败就丢掉已经得出的结果（重试用完之后的情形），云端同一情形由流的重试记下真实结果。
+
+**后台推进同守**（[0034](./0034-detached-batch-reconciler.md)）：本机后台推进进程与云端 Lambda 同样逐 job 先存明细、再写终态并点名（一次写可记多个 job，各点名各自的一份），明细与终态出自这一轮读到的同一份事件快照（本机的快照不变量见 0034 local 一节）。后台的结束写只在它的来路成立时做（执行方自己到期、运行定义不可用，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节），报告的生成方与前台相同（[0027](./0027-runreport-aggregation-index.md)）。明细写在终态之前还因为：终态之前的失败让这个 job 这次不写终态，云端由流的重试或之后的触发再做，本机按上「保存明细失败」条处理；终态之后的失败无人重试——job 的终态只写一次，此后到达的结果不被采用（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补），缺的明细就永久缺失。
 
 > **两条写 RunStore 的路径并发写同一个 run**（实装关键）：认领与 RUNNING 中间态刷在 **worker 线程**（认领在起 worker 之前；RUNNING 经 `on_event`，在
-> `sink_lock` **之外**调）；job 终态刷 + 收尾在 **主线程**（经 on_job_complete，在主线程等待 job 完成的循环里串行）。这是**两个不同
+> `sink_lock` **之外**调）；job 终态刷在 **主线程**（经 on_job_complete，在主线程等待 job 完成的循环里串行），结束写在 schedule 返回之后。这是**两个不同
 > 线程**写同一个 RunStore；local adapter 的写是「读 run_state→改→写回」的整文件 read-modify-write，两次读改写不互斥就会互相覆盖、丢更新。
 > **不变量：RunStore 的每个写入口对并发的别的写入方都是安全的，正确性不靠调用方串行**（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五：
-> run 级终态对所有写入方不可变，端口不假定同一个 run 只有一个写入方）。local adapter 的全部写入口（`create_run`、`update_job_state`、
-> `try_claim_job`、`project_state`、`try_finalize`）在 run 目录下同一把 fcntl 文件锁内读改写，跨进程与进程内多线程都互斥；
-> DDB adapter 的每一次写都带条件（决定六）。这不是事务保证：`create_run` 分两次写（definition 在前、运行态在后），DDB 的
+> run 到终态之后运行态的任何写都不成立，端口不假定同一个 run 只有一个写入方）。local adapter 的全部写入口（`create_run`、`update_job_state`、
+> `try_claim_job`、`project_state`、结束写）在 run 目录下同一把 `flock` 短锁（`.runstate.lock`）内读改写，按锁内读到的整份运行态计算，跨进程与进程内多线程都互斥；
+> 这把短锁同样要求报告目录在本机文件系统上（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四）。DDB adapter 的每一次写都带条件（决定六；重叠推进下各写的条件见
+> [0034](./0034-detached-batch-reconciler.md) 机制三）。这不是事务保证：`create_run` 分两次写（definition 在前、运行态在后），DDB 的
 > `project_state` 先写标量、再逐 job 写；中间态对读的一方可见，中途失败时已写成的部分留在库里。
-> `RunPersistence` 仍持一把进程内锁、认领、on_event 与 on_job_complete 路径都走它，
+> `RunPersistence` 另持一把进程内锁，认领、on_event 与 on_job_complete 路径都走它，
 > 用处是护住进程内记下的代表会话与认领时刻（`_session`、`_claimed_at`，读改写跨线程），并让同一进程里的写按调用次序依次落库；
 > 停手信号是线程安全的事件标志，读它不取锁。
 >
@@ -163,9 +174,9 @@ run 没有运行完成，有的 job 可能没有判定——按运行期限收�
 > 显示都堵在 `sink_lock` 后。故 schedule 另开一个 `on_event` 旁路观察者、在 `sink_lock` 之外 fire；落库的互斥由 store 写入口
 > 自身与 `RunPersistence` 的锁保证，与进度显示解耦。
 >
-> **⚠️ 此把进程内锁只在「单编排进程」拓扑成立**（同步 `run`）：[0034](./0034-detached-batch-reconciler.md) 无状态批量运行下 reconciler 是**跨进程/跨 Lambda 的并发实例**（DDB Stream 按 PK 分片触发多实例，实测并发度 2），进程内 `_lock` 不复存在——改由 `RunState` 的 `high_water_mark` 条件写跨实例挡 stale 覆盖（「我处理到的 seq ≥ 库中 seq 才写」）、finalize 单独条件写保 commit 恰一次。这是本 ADR「重议」条预告的落地（见下）。
+> **进程内锁只护一个进程**：本机的 run 任何时刻至多一个推进器（[0034](./0034-detached-batch-reconciler.md)「推进器与触发源」），跨进程的互斥靠上面的文件锁；云端允许多次 Lambda 调用重叠推进同一个 run（DDB Stream 按 PK 分片触发多实例，实测并发度 2），进程内锁对它们不起作用，重叠下各写的先后由条件写给出（[0034](./0034-detached-batch-reconciler.md) 机制三）。这是本 ADR「重议」条预告的落地（见下）。
 
-> **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满），schedule **在异常
+> **回调异常的停机止血**（实装关键）：on_job_complete 在主线程 fire，若它抛异常（如落库磁盘满，保存明细按上「保存明细失败」重试用尽之后），schedule **在异常
 > 冒泡前先 stop 所有在跑 worker**（`_stop_all()`：置 `abort_flag`，先对在跑 worker 全部落定停止原因，再各起线程并行发停止请求）再重抛。否则异常跳出 `with ThreadPoolExecutor`，
 > `shutdown(wait=True)` 会等所有在跑 worker 自然跑完——真 AgentCore 会话持续计费。异常仍冒泡（落库失败=真问题、要暴露），
 > 只是先掐掉在跑会话。
@@ -173,44 +184,53 @@ run 没有运行完成，有的 job 可能没有判定——按运行期限收�
 > `engine_error` 写进结果），先停掉本 worker 再原样重抛；异常在主线程取该 job 结果（`future.result()`）时再次抛出，与 on_job_complete
 > 共用同一个 `except BaseException`，同样先 `_stop_all()` 再重抛。
 
-> **写序的失败语义（残留风险，本地接受）**：若 `save_job_result` 成功但 `update_job_state` 失败，
-> run_state 落后于 jobs/——但 **jobs/*.json 是判定唯一权威、run_state 是可重建摘要**（依据 [0016](./0016-execution-architecture-core-lib-run-model.md)
-> 三层切分=数据面是判定真值唯一权威；该「以 jobs 为准、可由 load_all 重建」的失败语义现写在 `run_store/local.py` 顶部注释），
-> 消费端读判定走 `ResultStore.load_all` 兜底。收尾写没落 = run 未提交、可由 load_all 重建。
-> 真事务（DDB `TransactWriteItems`）**不用**——规模化跑批会撞它的 100 项/4MB 上限，commit-point 写序把原子性需求降到 DDB 天然原子的单 item。
+> **写序的失败语义**：保存明细成功而写终态失败时，这个 job 没有终态，存下的那一份没被点名、不被读（上「点名」条）；写终态的失败照常抛出，
+> 按上「回调异常的停机止血」先停掉在跑的 worker。运行态是 job 与 run 状态的权威，不能由明细或事件重建：被采用的结果只有写进运行态的终态
+> （[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补），明细只认被点名的那一份，由结束写结束的 job 没有明细。
+> 真事务（DDB `TransactWriteItems`）**不用**——规模化跑批会撞它的 100 项/4MB 上限，逐 job 的提交点把原子性需求降到 DDB 天然原子的单 item：
+> 明细的写不带条件，用哪一份由终态写点名。
 
 > **local 三个写面一律原子写**（同目录 tmp + `os.replace`，共享助手 `core/gherkai_core/adapters/_atomic.py`）：
-> 控制面 `run_meta.json` / `run_state.json`、数据面 `jobs/*.json`、报告面 `manifest.json` + `index.html`。
-> 三面各有**设计内的**跨进程并发读者（无锁读 run_state 的 `status` 与接力进程；run 跑到一半读已完成 job 的
-> `explain`，[0042](./0042-step-evidence-and-explain.md) 决策四；第一个写者退出后即读报告的人/CI），
+> 控制面 `run_meta.json` / `run_state.json`、数据面判定明细（`jobs/` 下各文件）、报告面 `manifest.json` + `index.html`。
+> 三面各有**设计内的**跨进程并发读者（无锁读 run_state 的 `status`、`list-runs` 与处置方；run 跑到一半读已完成 job 的
+> `explain`，[0042](./0042-step-evidence-and-explain.md) 决策四；报告写成后即读它的人/CI），
 > 而 `write_text` 是 truncate 再写——两步之间的读者会拿到空文件或前半截、`json.loads` 直接炸。
+> **本机判定明细的落点**：`<report-dir>/<run_id>/jobs/` 下每次保存一个文件，文件名带这次保存的标识（上「点名」条）；
+> 它的存放形态不是对外的约定（[0041](./0041-agent-facing-cli-affordances.md) 决策三）。
 > 权限**按面显式声明、不随环境 umask 漂移**：控制面 0600（只本机同 uid 的进程消费），数据面与报告 0644
 > （消费者是 CI / 人 / 静态 server，产物可读性是契约的一部分）。
+> **读取权限**：`status` 先读运行定义的版本头（[0037](./0037-distribution-and-packaging.md) 决策 7），本机运行定义（含隧道访问令牌，
+> [0035](./0035-local-app-testing-via-tunnel.md) 决策 5、[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13）与运行态都是 `0600`、明细是 `0644`，
+> 所以以别的用户身份读报告目录的 CI 只能以同一用户执行 `status --json`，放宽要连运行定义一起、令牌随之可读。云端要有 runs 表的读权限（令牌也在这张表里）。
 > **两条被接受的代价**：① **不做 fsync**——本层防的是并发读者看到中间态，不是掉电后的持久性（那要 fsync
-> 文件 + 目录，成本进每次收尾）；② **写面仍无跨进程互斥**——靠原子替换而非锁：两个**推进器**竞争收尾时先后写同一个
-> `jobs/*.json`，读者读到的总是某一方写完的整份文件，后写的盖掉先写的（竞争收尾的边界见
-> [0054](./0054-run-deadline-lifetime-lock-and-settling.md)「边界与已知局限」以「多个推进方竞争收尾时」开头的一条）；
-> 报告只由写成收尾的一方写一次，它写在终态之后，原子替换让读到终态即去读报告的读者不会读到写了一半的文件。文件锁只护控制面：建 run 时「运行态是否已在」的判断与
+> 文件 + 目录，成本进每一次写）；② **写面无跨进程互斥**——靠原子替换而非锁：明细每次保存是带标识的另一个文件，
+> 同一个 job 的多份互不覆盖、用哪一份由终态点名（上「点名」条）；报告只由使 run 成为终态的那次写的写入方写一次
+> （[0027](./0027-runreport-aggregation-index.md)），它写在终态之后，原子替换让读到终态即去读报告的读者不会读到写了一半的文件。文件锁只护控制面：建 run 时「运行态是否已在」的判断与
 > `run_meta.json`、`run_state.json` 的写，以及此后 `run_state.json` 的每一次读改写（全部写入口，见上并发不变量）。
 
-## 决定四：RunStore 按生命周期分三个写入口：建 run、逐 job、收尾
+**实测项**（实装时以真实进程或环境核）：
+
+1. 保存失败：本机两种推进器各注入一次明细写入失败，重试之后照常记下、点名的是重试所用的标识、进程不退出；一直注入失败时重试 3 次之后进程退出，执行中的 job 留在 `running`，`status --wait` 按说明表（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）「锁拿到了」一行处置。
+2. 点名：云端两次调用重叠、各存一份同一个 job 的明细时，`explain` 与报告取到的是写成终态那一方的；本机两种推进器各在存下明细之后、写下终态之前被 SIGKILL，随后被处置时，`explain` 与报告不出现那份明细，`explain` 从事件流补取已执行的 step。
+
+## 决定四：RunStore 按生命周期分三个写入口：建 run、逐 job、结束写
 
 ```python
 class RunStore(Protocol):
     # —— 生命周期写入口 ——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None: ...      # run 开始：写 definition + 初始全 PENDING 态；只在 run 不存在时成立，已存在抛 FileExistsError、不改任何东西
-    def update_job_state(self, run_id: str, job_state: JobState) -> bool: ...       # 单 job 实时刷（按 scope_id 定位）；job 态非 PENDING 时连带把未收尾的 run 级推进为 RUNNING；返回 run 级在这次写时是否仍未结束
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *,
-                     message: str | None = None, expected_claim_count: int | None = None) -> bool: ...  # commit point：只在 run 级非终态时写聚合 status + ended_at
+    def update_job_state(self, run_id: str, job_state: JobState) -> bool: ...       # 单 job 写（按 scope_id 定位）：执行中或终态（终态带点名的标识）；同一次写按取法写 run 状态；终态只写一次；run 已结束时写不成；返回 run 在这次写之前是否仍未结束
+    # 结束写：run 未结束时把每个未结束的 job 写成终态并各带说明，run 随之成为终态（语义见 0031 决定三「结束写」小节）；
+    #         只在 run 未结束时写成，返回是否写成；方法名与参数形态以 ports.py 为准
     def load_run_meta(...); def load_run_state(...)                                 # 读回
 ```
 
-**接口真值以 `core/gherkai_core/ports.py` 为准**——上块只列生命周期写入口与读回，不是 `RunStore` 的完整现状：另有 `preflight`（探活，见下决定七）、认领 `try_claim_job`（后台推进与前台执行共用，前台经 `RunPersistence.claim`，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）与后台推进用的投影 `project_state`（[0034](./0034-detached-batch-reconciler.md)）、只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7），以及按状态列出 run、每项返回 `RunListing` 的只读 `list_runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。收尾入口 `try_finalize` 由 0034 引入，前台执行者与后台推进共用（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）；`message` 是 run 级消息（0037 决策 7），`expected_claim_count` 是到期收尾判「读到运行态以来没有新的认领」用的条件（0054 决策二）。
+**接口真值以 `core/gherkai_core/ports.py` 为准**——上块只列生命周期写入口与读回，不是 `RunStore` 的完整现状：另有 `preflight`（探活，见下决定七）、认领 `try_claim_job`（后台推进与前台执行共用，前台经 `RunPersistence.claim`，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）与后台推进用的投影 `project_state`（两者的条件见 [0034](./0034-detached-batch-reconciler.md) 机制三）、只取 definition 结构版本与写端版本的 `peek_definition_header`（[0037](./0037-distribution-and-packaging.md) 决策 7），以及按状态列出 run、每项返回 `RunListing` 的只读 `list_runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。结束写由前台执行者、后台推进与处置方共用：前台在 schedule 返回后仍有未结束的 job 时做（决定三），各来路见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节；run 级说明（结束的原因）随它写下。运行态里的认领计数只作诊断键（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条①）；云端记下 job 终态的写与结束写以写入序号为条件（[0034](./0034-detached-batch-reconciler.md) 机制三②，属性见决定六）。
 
-- **端口没有整份重写与无条件收尾的入口**（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）：曾有一次性写完整态的 `save_run` 与无条件写终态的 `finalize_run`，前者对已有的 run 再调用即回到初始状态或任意状态，后者覆盖已有的终态，与「run 级终态对所有写入方不可变」不相容，两者都已删除。测试需要的初始状态经 `create_run` 加各条件写得到。被拒：保留它们作测试便捷方法——端口上有的方法生产 code 就能调，终态不可变就只剩调用约定在守。
-- `create_run` 只在这个 run 还不存在时成立：local adapter 的判据是 run 目录里还没有 `run_state.json`，判断与两个文件的写（`run_meta.json` 在前、`run_state.json` 在后）在同一把文件锁内完成；只有 `run_meta.json`、没有运行态的目录（建 run 在两次写之间中断）照常建。DDB adapter 见决定六。
-- `update_job_state` 按 **scope_id 定位单个 job**：local adapter 是「读 run_state→改该 scope_id→写回」的 read-modify-write（在文件锁内完成，与其它写入口互斥，见决定三的并发不变量）；DDB adapter 用 `SET jobs.#sid=:js`（Map 按 key 路径整 entry 刷——调用方一次给全量 JobState；投影写另按逐属性刷，见下决定六）。写入的 job 态非 PENDING 时，同一次写连带把未收尾的 run 级推进为 RUNNING：local 在同一次读改写里判 run 级未收尾才改；DDB 带条件 `#st IN (pending, running)` 连同 run 级一起写，条件不成立再只写 job（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条）。返回值是 run 级在这次写时是否仍未结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）：local 取锁内读到的 run 级，DDB 取两次写里写成的是哪一次（只写 job 的那一次以 run 级已是终态为条件），写入 PENDING 时同样如实；前台执行者据 False 得知 run 已被别处记为已结束而停手，别的调用方可以不看。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
-- **local 的顶层附加键整体保留**（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三末段）：`run_state.json` 里不属于 `RunState` 模型的顶层键（如后台执行标记 `detached`）只在 `create_run` 时写下，此后每个写入口从锁内读到的原文里把它们原样带回，不逐个补回；模型的键集在 `serialize.RUN_STATE_KEYS` 一处登记。DDB 的写在建 run 之后全是 `update_item`，不提及的属性本来就原样保留。
+- **端口不提供整份重写与无条件改写终态的入口**：一次性写完整态的入口对已有的 run 再调用即回到初始状态或任意状态，无条件写终态的入口覆盖已有的终态，两者都与 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五的终态不可变不相容。测试需要的初始状态经 `create_run` 加各条件写得到。被拒：在端口上提供它们作测试便捷方法——端口上有的方法生产 code 就能调，终态不可变就只剩调用约定在守。
+- `create_run` 只在这个 run 还不存在时成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）：local adapter 的判据是 run 目录里还没有 `run_state.json`，判断与两个文件的写（`run_meta.json` 在前、`run_state.json` 在后）在同一把文件锁内完成；只有 `run_meta.json`、没有运行态的目录（建 run 在两次写之间中断）照常建。本机建 run 的一方在调用 `create_run` 之前已持有这个 run 目录的生命期锁（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三）。DDB adapter 见决定六。
+- `update_job_state` 按 **scope_id 定位单个 job**，写它的执行中或终态，终态带点名的标识（决定三）：同一次写按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法写 run 状态；job 的终态只写一次（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补）；run 已结束时写不成（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。local adapter 是「读 run_state→改该 scope_id→按锁内读到的整份运行态算 run 状态→写回」的 read-modify-write（在文件锁内完成，与其它写入口互斥，见决定三的并发不变量）；DDB adapter 记下 job 终态的写法与条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②。返回值是 run 在这次写之前是否仍未结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），local 取锁内读到的 run 状态；前台执行者据 False 得知 run 已被别处结束而停手，别的调用方可以不看。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
+- **local 的顶层附加键整体保留**：`run_state.json` 里不属于 `RunState` 模型的顶层键（如后台执行标记 `detached`）只在 `create_run` 时写下，此后每个写入口从锁内读到的原文里把它们原样带回，不逐个补回：逐个补回时，漏补一个键就静默丢失。模型的键集在 `serialize.RUN_STATE_KEYS` 一处登记。DDB 的写在建 run 之后全是 `update_item`，不提及的属性本来就原样保留。
 
 ## 决定五：`RunState.jobs` 改 Map<scope_id> 形状（core model 一次到位）
 
@@ -221,7 +241,7 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - **core model 一次到位、已落地**（不留到 DDB 阶段），落点 + 两条**防回归护栏**（原改造中两个会静默出错的陷阱）：
   - `model.RunState.jobs`：`dict[str, JobState]`（原 `tuple[JobState,...]`）。
   - `serialize.run_state_to_dict`：**护栏**——必须 `state.jobs.values()` 迭代；直接 `for js in state.jobs` 拿到的是 dict 的 **key（字符串）**、`js.scope_id` 静默 AttributeError。
-  - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`（[0034](./0034-detached-batch-reconciler.md) 后每条另带 omit-when-None 的 `claimed_at`）、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
+  - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`（[0034](./0034-detached-batch-reconciler.md) 后每条另带 omit-when-None 的 `claimed_at`；点名的标识同样 omit-when-None（决定三））、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
   - `run_state_from_result`：投影出 dict 而非 tuple。
   - **`core/tests/test_stores.py`**：**护栏**——RunState 的消费方按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`），**不用整数下标**（dict 不支持，会 TypeError）。
   - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、不是 RunState 消费点；本决策期 cli 也只**写**（经 `run_state_from_result` 投影，该函数现只剩测试在用）、从不**读** `RunState.jobs`——故改造期真正会被打破的是上面的 serialize 迭代与 test_stores 下标。**此后 cli 已成为 `RunState.jobs` 的读者**（[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`cli/gherkai_cli/__main__.py` 的 `_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`）——两处都按 key 遍历/取值，Map 形状原生支持。）
@@ -236,26 +256,27 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 - **为何分两 item（而非合成一个）**：`update_job_state` 高频只碰 STATE、与 RunMeta 深树（可触 400KB）大小解耦——合一则每次刷一个 job 状态都要重写整个含 definition 深树的 item，WCU 爆炸且更易撞 400KB；offload 只作用 META、边界干净；`load_run_meta`/`load_run_state` 各自独立取（轮询进度高频读小 STATE，不必带上大 definition）。
 - **为何同一张表（而非两张表）—— DDB single-table design（AWS 官方推荐）**：两 item 同属一个 run、共享 `run_id`，同分区键下一次 `Query`（按 run_id）即可一次捞回该 run 的两个 item（同分区访问的便利；强一致读保证的是每个 item 的最新值，不保证多 item 的快照）；两张表则丢掉同分区访问、运维翻倍（两套容量/IAM/备份/监控）。未来加 attempt（续跑，见「留口子」）/ per-scope 维度只需在同 `run_id` 下加新 `item_type` 值、同表零改。**多表是 RDBMS 范式直觉**——搬到 DDB 会丢分区局部性、放大成本。
 - **排序键字段名用 `item_type` 而非 DDB 圈惯用缩写 `sk`**：`item_type` 自描述其真实语义（区分同一 run 的 definition/运行态 item），避免 `sk` 被误读成 scenario/step key 或 DDB secondary index。
-- 读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。events 表的**投影读**（`DdbEventLog.records()`，reconcile/finalize 的输入）同理强一致：finalize 前刚写的尾事件（终读 drain、退出观察者的 `task_exited`）必须立即可见，最终一致读漏尾会把已完成 job 投成仍在跑；2× RRU 相对 run 级读量可忽略。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
+- 读用 `ConsistentRead=True`（RunStore 是控制面小记录，强一致的 commit-point 正确性收益 >> RCU 成本）。events 表的**投影读**（`DdbEventLog.records()`，推进步骤的输入）同理强一致：刚写的尾事件（终读 drain、退出观察者的 `task_exited`）必须立即可见，最终一致读漏尾会把已完成 job 投成仍在跑；2× RRU 相对 run 级读量可忽略。**建表责任在 IaC/组合根、非 adapter**——adapter 假定表已存在（同 [0016](./0016-execution-architecture-core-lib-run-model.md) 窄腰：adapter 不持 schema/IAM 建表权知识）。
 - **建 run 是条件写**（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）：META 与 STATE 两次 put 都带「条目不存在」的条件，写序 META 在前、STATE 在后（kicker 由 STATE 的新建触发，见 0034）；卸载 step 参数正文之前先以强一致 `GetItem` 确认这个 run_id 下两个条目都不存在。任一已在即抛 FileExistsError，不改任何东西，已卸载的正文也不被重写；先读与写之间的竞争窗口见 0054「边界与已知局限」。
+- **STATE item 带写入序号**：一个数值属性，运行态的每次写都把它加一；记下 job 终态的写与结束写以它为条件，用法与理由见 [0034](./0034-detached-batch-reconciler.md) 机制三②。
 - **形态变更**：变更表或索引的形态之前，按 [0037](./0037-distribution-and-packaging.md) 决策 7「后端形态变更的迁移口径」评估（默认先设计在线迁移，需要暂停使用的升级是例外，要在 ADR 与 CHANGELOG 里写明）。
   - **改用状态分组索引的那次索引迁移的实测**（项目自己的开发后端，产品还没有使用者，在暂停使用的前提下迁移一次；起点 runs 表一百余个 item，`status-index` 与 `status-run_id-index` 都为 `ACTIVE`）：已有 GSI 的键不能原地修改，CloudFormation 一次更新只能新增或删除一个 GSI，因此新增一个、删除两个至少需要三次部署。三次部署依次新增 `status_group-run_id-index`（写端随这次上线）、删除 `status-index`（两个读者随这次切到新索引）、删除 `status-run_id-index`（并去掉 `status` 的属性定义），每次 CloudFormation 对 runs 表都只增或删一个索引，三次都成功、没有回滚。新增：部署报完成时新索引仍为 `CREATING`，约十分钟后转为 `ACTIVE`，期间两个旧索引一直是 `ACTIVE`——部署完成不等于索引就绪；另一张写有 300 条 STATE 的表上以 `UpdateTable` 新增同一索引约 17 分钟转为 `ACTIVE`（[0038](./0038-worker-image-delivery.md) 实测项 9），不对回填时长作承诺。删除：部署报完成后几分钟内第一次读 `DescribeTable`，被删的索引已不在、表为 `ACTIVE`（没有观察到 `DELETING` 持续多久）；最后一次之后属性定义只剩 `item_type`、`run_id`、`status_group`，索引只剩 `status_group-run_id-index`。次序取先增后删、写端随新增索引的那次部署上线：每一步都为两个读者各保留可用的索引；写端若晚于新索引的读者上线，切换之前建的 run 没有分组属性、切换之后对清理不可见。被拒的两种次序：先删一个旧索引、再以它的名字重建成新形态，同样三次部署，而从第一次部署到新索引 `ACTIVE` 之间那个读者不可用；把写端与新增索引拆成两次部署（共四次），只为符合文档「加索引的那次更新不改其它资源」的建议，换来多一个过渡阶段与随之多出的一组代码与后端错配的组合，它避开的后果（那次部署回滚后新索引留在表上、不在模板里，须手动删除后重试）可由 `DescribeTable` 发现、可恢复，不涉及 run 数据与清理的正确性。
   - **这次没有核、将来再改索引形态时仍须先核或按保守假设操作的**：①新增的索引 `ACTIVE` 之前就执行下一次改这张表的部署时，CloudFormation 的失败与回滚形态（文档写明这期间不能再更新这张表，见 [0041](./0041-agent-facing-cli-affordances.md) 决策七「更早的索引形态」；保守做法：以 `DescribeTable` 确认 `ACTIVE` 之后再部署）；②删除索引的那次部署在删除发起之后因别的资源失败而回滚的形态（保守做法：回滚之后等 `DescribeTable` 的索引集合与各索引状态稳定、stack 回到可更新的状态再重试；回滚中若重建了被删的索引，按新增处理，等它 `ACTIVE`）；③一个索引 `DELETING` 期间能否删除另一个（保守做法：等前一个从 `DescribeTable` 里消失再删下一个）。
-- **runs 表只有一个 GSI `status_group-run_id-index`，两条访问路径共用（写端、索引定义与两个读者已实装）**：分区键 `status_group`、排序键 `run_id`、投影 INCLUDE `worker_task_def_arns`。`status_group` 是 STATE item 的顶层派生属性：run 级状态为非终态时取常量 `live`，为终态时取该终态的状态值；只有 STATE item 带它（META item 没有，稀疏由此构造）。**写入规则：每一处写 `status` 的地方，`status_group` 都由同一个派生函数（core 里一处）从这次写入的 `status` 算出，写在同一次写里**，没有例外：`create_run` 按传入初始状态的 `status` 算出，正常建 run 时初始状态为 `pending`，得 `live`，调用方传入已到终态的初始状态时得该终态值，不写死 `live`；终态写（`try_finalize`，前台与后台共用）在写终态的同一次 `update_item` 里写成该终态值；认领、投影与前台 job 写把 run 级写成 `running` 时一并写 `live`，它们的条件保证写之前 run 级是非终态，库中值本来就是 `live`（早于本形态写出、缺分组属性的除外，见下），这次是同值写，索引键不变、不产生索引写（依据：DynamoDB 官方的 GSI 写入规则明确，索引写按这次写入实际改变的属性判定，同值写没有改变键的值，按此不写索引；[0034](./0034-detached-batch-reconciler.md) 机制三实测项 6 在以 `status` 为键的索引上对索引键属性的同值写测得为 0；新索引上已实测：这三条把 run 级从 `pending` 换到 `running` 的写对它都计 0，同一张表上以 `status` 为键的索引对它们各计 2，[0038](./0038-worker-image-delivery.md) 实测项 8）。早于本形态写出、还没有 `status_group` 的 STATE（两个来源：从更早的索引形态迁移而来的后端上、改用状态分组索引之前写出的记录——产品不提供这种迁移的路径，[0041](./0041-agent-facing-cli-affordances.md) 决策七「更早的索引形态」；以及旧版 CLI 向已是状态分组索引的后端写出的记录，[0038](./0038-worker-image-delivery.md) 清理 pass 条的残余风险），只有经写 run 级 `status` 的写入（认领、把 run 级写成 `running` 的投影与前台 job 写、终态写）才补上分组属性：补上的那次写计一次索引写（把项放进索引），从此进入对应的分组。不写 run 级 `status` 的写不碰它，也就不补：全 pending 的投影只写事件进度（`high_water_mark`），写入 `pending` 的前台 job 写只写该 job，已收尾的 run 上前台 job 写的回退写同样只写 job。不变量因此分两半，由覆盖全部写路径的不变量测试守：写 run 级 `status` 的路径在写之后建立 `status_group` 与 `status` 的对应（等于由 `status` 推出的分组），含 `create_run` 传入终态初始状态的情形；其余路径保持已有的对应（写之前对应成立，写之后仍成立；写之前缺分组属性的，写之后仍缺）。两个使用方：worker revision 清理的引用检查读 `live` 分组，取其中各 run 的 `worker_task_def_arns` 求并集（[0038](./0038-worker-image-delivery.md)「清理 pass」条）；`list-runs` 读 `live` 分组取全部非终态 run 的 run_id，按各终态分组取最近 N 条（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。GSI 的读只有最终一致，所以 `list-runs` 只从索引取 run_id，状态与 job 计数以 `BatchGetItem`（`ConsistentRead=True`）读回的 STATE item 为准，与上条「读用强一致」一致；清理不读回，理由见 0038 该条。索引不改变「不 Scan runs 表」的约束（表 `RETAIN`、无 TTL，[0038](./0038-worker-image-delivery.md)）。
-  - **为何按状态分组、不按状态**：GSI 的分区键每换一次值，索引要删旧项、写新项，计两个写单位（DynamoDB 的 GSI 写入计费规则，[0034](./0034-detached-batch-reconciler.md) 机制三实测项 6 测得每个索引 2.0），而且删旧项与写新项哪个先可见没有承诺，两者之间可能有一段两个分区都查不到的间隙。run 级状态从 `pending` 换到 `running` 时，以 `status` 为键的索引在这两点上都付代价，而两个使用方都不需要区分这两个非终态：清理只问「还没收尾的 run 引用了哪些 revision」，`list-runs` 的非终态部分本来就整段列出、状态以读回为准。改用分组后，换到 `running` 时 `status_group` 仍是 `live`（同值写），`status` 既不是这个索引的键、也不在投影里，索引不计写，索引项在 run 收尾之前一直在 `live` 分组：`pending` 到 `running` 换键造成的间隙随之不再存在。另一条依赖不变：新建 run 的索引项要在清理的静默期之内（约 1 小时）可见，GSI 的传播没有承诺上界，这条依赖在以 `status` 为键的旧索引上本来就有，本设计没有新增（0038「清理 pass」条边界情形 (b)）。正常生命周期下，一个 run 的索引写由此只剩建 run 一次与收尾换分组两次（直接以终态建 run 的例外见下「运行成本前后对照」）。终态各自成组是因为 `list-runs` 的 `--status` 按终态逐个取最近 N 条、每个终态各自计名额（0041 决策七「云端实现」），合成一个「已结束」分组就得读回之后再按状态筛，名额与读量都失去上界。
+- **runs 表只有一个 GSI `status_group-run_id-index`，两条访问路径共用（写端、索引定义与两个读者已实装）**：分区键 `status_group`、排序键 `run_id`、投影 INCLUDE `worker_task_def_arns`。`status_group` 是 STATE item 的顶层派生属性：run 级状态为非终态时取常量 `live`，为终态时取该终态的状态值；只有 STATE item 带它（META item 没有，稀疏由此构造）。**写入规则：每一处写 `status` 的地方，`status_group` 都由同一个派生函数（core 里一处）从这次写入的 `status` 算出，写在同一次写里**，没有例外：`create_run` 按传入初始状态的 `status` 算出，建 run 时初始状态为 `pending`，得 `live`；使 run 成为终态的写（记下最后一个未结束 job 的终态的那次写，或结束写，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三）在同一次 `update_item` 里写成该终态值；认领、投影与 job 状态写把 run 级写成 `running` 时一并写 `live`，它们的条件保证写之前 run 级是非终态，库中值本来就是 `live`（早于本形态写出、缺分组属性的除外，见下），这次是同值写，索引键不变、不产生索引写（依据：DynamoDB 官方的 GSI 写入规则明确，索引写按这次写入实际改变的属性判定，同值写没有改变键的值，按此不写索引；[0034](./0034-detached-batch-reconciler.md) 机制三实测项 6 在以 `status` 为键的索引上对索引键属性的同值写测得为 0；新索引上已实测：这三条把 run 级从 `pending` 换到 `running` 的写对它都计 0，同一张表上以 `status` 为键的索引对它们各计 2，[0038](./0038-worker-image-delivery.md) 实测项 8）。早于本形态写出、还没有 `status_group` 的 STATE（两个来源：从更早的索引形态迁移而来的后端上、改用状态分组索引之前写出的记录——产品不提供这种迁移的路径，[0041](./0041-agent-facing-cli-affordances.md) 决策七「更早的索引形态」；以及旧版 CLI 向已是状态分组索引的后端写出的记录，[0038](./0038-worker-image-delivery.md) 清理 pass 条的残余风险），只有经写 run 级 `status` 的写入（认领、把 run 级写成 `running` 的投影与 job 状态写、使 run 成为终态的写）才补上分组属性：补上的那次写计一次索引写（把项放进索引），从此进入对应的分组。不写 run 级 `status` 的写不碰它，也就不补：全 pending 的投影只写事件进度（`high_water_mark`）。不变量因此分两半，由覆盖全部写路径的不变量测试守：写 run 级 `status` 的路径在写之后建立 `status_group` 与 `status` 的对应（等于由 `status` 推出的分组）；其余路径保持已有的对应（写之前对应成立，写之后仍成立；写之前缺分组属性的，写之后仍缺）。两个使用方：worker revision 清理的引用检查读 `live` 分组，取其中各 run 的 `worker_task_def_arns` 求并集（[0038](./0038-worker-image-delivery.md)「清理 pass」条）；`list-runs` 读 `live` 分组取全部非终态 run 的 run_id，按各终态分组取最近 N 条（[0041](./0041-agent-facing-cli-affordances.md) 决策七）。GSI 的读只有最终一致，所以 `list-runs` 只从索引取 run_id，状态与 job 计数以 `BatchGetItem`（`ConsistentRead=True`）读回的 STATE item 为准，与上条「读用强一致」一致；清理不读回，理由见 0038 该条。索引不改变「不 Scan runs 表」的约束（表 `RETAIN`、无 TTL，[0038](./0038-worker-image-delivery.md)）。
+  - **为何按状态分组、不按状态**：GSI 的分区键每换一次值，索引要删旧项、写新项，计两个写单位（DynamoDB 的 GSI 写入计费规则，[0034](./0034-detached-batch-reconciler.md) 机制三实测项 6 测得每个索引 2.0），而且删旧项与写新项哪个先可见没有承诺，两者之间可能有一段两个分区都查不到的间隙。run 级状态从 `pending` 换到 `running` 时，以 `status` 为键的索引在这两点上都付代价，而两个使用方都不需要区分这两个非终态：清理只问「还没收尾的 run 引用了哪些 revision」，`list-runs` 的非终态部分本来就整段列出、状态以读回为准。改用分组后，换到 `running` 时 `status_group` 仍是 `live`（同值写），`status` 既不是这个索引的键、也不在投影里，索引不计写，索引项在 run 收尾之前一直在 `live` 分组：`pending` 到 `running` 换键造成的间隙随之不再存在。另一条依赖不变：新建 run 的索引项要在清理的静默期之内（约 1 小时）可见，GSI 的传播没有承诺上界，这条依赖在以 `status` 为键的旧索引上本来就有，本设计没有新增（0038「清理 pass」条边界情形 (b)）。一个 run 的索引写由此只剩建 run 一次与收尾换分组两次。终态各自成组是因为 `list-runs` 的 `--status` 按终态逐个取最近 N 条、每个终态各自计名额（0041 决策七「云端实现」），合成一个「已结束」分组就得读回之后再按状态筛，名额与读量都失去上界。
   - **为何一个索引、而不是各管一条路径**：两条路径对键的需求（分区值在 run 存活期间不变，带 `run_id` 排序键以取有界的最近 N 条）可以由同一个索引同时满足，差别只剩清理要的 revision 列表投影，由 `list-runs` 读到的每个索引项多带这个列表承担（读量增量见 0041 决策七状态分组索引的「代价」段）。两个索引意味着每个 run 的每次分组变化在两处各付一次索引写，且两处索引的定义各自维护。
-  - **运行成本前后对照**（每个索引项小于 1 KB，一次索引操作计 1 个写单位）：以下按正常生命周期计，即以 `pending` 建 run、只收尾一次。一个经过 `running` 再收尾的 run，此前两个以 `status` 为键的索引（`status-index` 与 `status-run_id-index`）共计 10 个索引写单位，单一状态分组索引为 3；没有经过 `running` 就收尾的 run，由 6 降到 3。正常生命周期之外只有一种：调用方直接以终态创建的 run 只计建 run 那一次，不经过 `live` 分组。run 级终态对所有写入方不可变、`create_run` 只在 run 不存在时成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），没有把已收尾的 run 改成另一个终态、或整体覆盖已有 STATE 的写，也就没有由它们带来的换分组索引写。索引存储约等于此前 `status-index` 一份（终态 run 的项也带 revision 列表），`status-run_id-index` 那一份不再有。
+  - **运行成本前后对照**（每个索引项小于 1 KB，一次索引操作计 1 个写单位）：run 以 `pending` 建、只收尾一次。一个经过 `running` 再收尾的 run，此前两个以 `status` 为键的索引（`status-index` 与 `status-run_id-index`）共计 10 个索引写单位，单一状态分组索引为 3；没有经过 `running` 就收尾的 run，由 6 降到 3。run 一到终态，运行态的任何写都不成立，`create_run` 只在 run 不存在时成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），没有把已收尾的 run 改成另一个终态、或整体覆盖已有 STATE 的写，也就没有由它们带来的换分组索引写。索引存储约等于此前 `status-index` 一份（终态 run 的项也带 revision 列表），`status-run_id-index` 那一份不再有。
   - **旧索引定义已删除**：以 `status` 为分区键的 `status-index`（投影 INCLUDE `worker_task_def_arns`，原由清理读）与 `status-run_id-index`（排序键 `run_id`，投影 KEYS_ONLY，原由 `list-runs` 读）都已从部署模板删除，模板里只有 `status_group-run_id-index`。CloudFormation 一次更新只能新增或删除一个 GSI，新增一个、删除两个各占一次部署。
   - **被拒**：①**维持两个以 `status` 为键的索引，只给清理加复查**：每个 run 10 个索引写单位不变；换键与间隙都还在，趟内复查之后漏检要求间隙长于一次分区读取加等待时长，余量只有秒级，远小于静默期给新建 run 留的约 1 小时。②**合并成一个以 `status` 为分区键、带 `run_id` 排序键、投影 revision 列表的索引**：索引写降到每个 run 5，但 `pending` 到 `running` 的换键与间隙都还在，清理仍要靠复查，余量同①；部署次数与本方案相同。③**只留 KEYS_ONLY 的 `status-run_id-index`，清理取 run_id 后以强一致读回 STATE 判断引用**：只需一次部署；换键与间隙都还在，清理另加跨趟确认标记，漏检要求同一个间隙持续不少于两趟的间隔 T。T 取到约 1 小时时，它对传播上界的依赖与本方案的静默期（新建 run 的索引项须在约 1 小时内可见，两种方案都有）同一量级，区别在余量大小、不在有无。被拒的依据是其余几项：运行成本上，每趟清理要强一致读回全部非终态 run 的整个 STATE（含随 job 数增长的 `jobs` Map），读量按 item 大小计、投影不减少读量，每个 run 5 个索引写单位；协议上，多一个 revision 级的确认标记，回收多等一趟；对传播上界的依赖余量取决于 T，T 取小了余量随之变小。④**另立一个稀疏的存活标记索引（建 run 时写、收尾时删，分区键在 run 存活期间不变）供清理，保留 `status-run_id-index` 供 `list-runs`**：清理侧同样没有 `pending` 到 `running` 的换键间隙，但表上是两个索引、每个 run 7 个索引写单位；存活标记与 `status` 是「非终态」的两份表示，漏写标记的方向会让清理看不见在用的 run，而这种违约在别处没有任何表现（`list-runs` 照常可用），只能靠测试发现。本方案的状态分组同样是派生属性，但让清理看不见在用 run 的那个方向（非终态 run 不在 `live` 分组）同样让它从 `list-runs` 的非终态部分消失，违约在使用中即可被发现；反方向（收尾时没有改分组，STATE 已到终态却留在 `live` 分组）对清理偏保守，代价是 `live` 分组的读量随之增长、它引用的 revision 不被回收；`list-runs` 的默认清单按读回的状态仍显示它的真实终态，只有单查该终态（`--status <该终态>`）时它不在所查的分组里而缺席，不易察觉。
 
-**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：`update_job_state` 按 scope_id 单元素刷整 entry（`SET jobs.#sid=:js`，调用方给全量、对拍 local 的整 entry 替换；job 态非 PENDING 时同一次写连带 run 级，见上决定四）；**投影写（`project_state`）逐属性**（`SET jobs.#sid.<attr>=…`：未提及的 `session_id`/`claimed_at` 由 update_item 天然保留——对拍 local 的「投影缺字段回填库中值」兜底；曾整 entry 覆盖，不带 baseline 的投影会抹掉只由 claim 落库的 `claimed_at`）。blob 无法单元素刷、退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update 须复刻 local「报错」语义（条件写），收尾在 STATE 不存在时与 local 同样返回 False；session_id=None 沿用 omit-when-None（不写该键、读回得 None）；run 级 `message`（[0037](./0037-distribution-and-packaging.md) 决策 7：推进器不经任何 job 就终结 run 时的原因）同样 omit-when-None，随 `try_finalize` 的同一次条件写落 STATE item。
+**RunState.jobs 落 DDB 用原生 Map（M 型）、非 JSON blob**：认领按 scope_id 单元素写（[0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条①）；记下 job 终态的写与结束写对 `jobs` 整体替换、以写入序号为条件（[0034](./0034-detached-batch-reconciler.md) 机制三②）；每个 job 条目另带点名的标识（未点名时省键，决定三）；**投影写（`project_state`）逐属性**（`SET jobs.#sid.<attr>=…`：未提及的 `session_id`/`claimed_at` 由 update_item 天然保留——对拍 local 的「投影缺字段回填库中值」兜底；整 entry 覆盖时，不带 baseline 的投影会抹掉只由 claim 落库的 `claimed_at`）。blob 无法单元素刷，认领与投影都退化成整 item RMW、违背决定四/五。**字段仍源于 serialize（单一真理源），只是 jobs 的容器形状在 adapter 层从 list 特化成 Map**——这是「DDB adapter 对 jobs 容器的落库层特化」，非第二真理源。**RunStore 侧无 float**（RunMeta/RunState 全 str/int/Status，float 只在 JobResult/RunResult→ResultStore），故原生 Map 无 float→Decimal 顾虑。未 create 就 update 须复刻 local「报错」语义（条件写），结束写在 STATE 不存在时与 local 同样返回 False；session_id=None 沿用 omit-when-None（不写该键、读回得 None）；run 级 `message`（结束的原因，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）同样 omit-when-None，随结束写的同一次条件写落 STATE item。
 
-**ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每 job 一 S3 对象，key = `<prefix>/<run_id>/jobs/<quote(scope_id)>.json`（`quote` 编码——scope_id 含 `/`:中文原样嵌会让 `load_all` 的 prefix 反解歧义）。**赌 CI 按 run_id+scope_id 键取判定**；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
+**ResultStore 后端 = S3**（坐实 [0016](./0016-execution-architecture-core-lib-run-model.md) 原「待定」）：每次保存明细一个 S3 对象，键在 `<prefix>/<run_id>/jobs/` 之下、带这次保存的标识（决定三「点名」条），同一个 job 的多份互不覆盖。读者先从运行态取 job 的清单与各自点名的标识，再按键取那一份，不列举前缀（决定三）；将来若需跨 scope 查询/过滤，加 DDB 索引层（加法不返工）。
 
 **StepArgument offload —— docString/dataTable 存 S3 指针**（`DynamoDBRunStore` 内部钩子，解 DDB 400KB 限）：RunMeta 深树里**只有 docString/dataTable 两类 argument** 换 S3 指针，其余 JSON 照常在 DDB META item。
 - **位置区分、非值探测**（关键决策）：offload 后 argument dict 出现 `content_ref`/`rows_ref`（原 `content`/`rows` 键**缺席**），读端按「哪个键在」分支——**绝不**靠「值是不是 s3 协议开头」猜内联/指针（值 sniff 脆：docString 正文本身可能以该前缀开头）。
 - **S3 key 含 step_index**：`<run_id>/args/<quote(scope_id)>/<quote(scenario_id)>/<step_index>/<kind>.json`——否则同 scenario 多 docString 撞 key、静默串值。
-- **对 core 透明**：offload/fetch 是 `DynamoDBRunStore` 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`/`try_finalize`/`load_run_state` 零 S3 依赖（RunState 无 argument）。
+- **对 core 透明**：offload/fetch 是 `DynamoDBRunStore` 内部对 `serialize` 产物的加工（写端 to_dict 后换指针、读端交 serialize 前消解回内联），serialize/model 零感知；只挂 RunMeta 写/读路径，`update_job_state`、结束写与 `load_run_state` 零 S3 依赖（RunState 无 argument）。
 - **offloader 是可选注入的协作者**（组合根抉择）：`DynamoDBRunStore` 收一个可选 offloader，`None`（默认）→ argument 原样内联进 `meta_json`（小 run / 单测省一层 S3、少一个桶依赖）；注入 → 搬 S3。读端按「`content_ref`/`rows_ref` 键在不在」分支消解——**不依赖当前是否配了 offloader**，故「配了 offloader 的 store 读无 offloader 写的旧 run」天然兼容（无 `_ref` 键 = 内联，直接透传）。
 - 粒度「一律 offload」（无 size 阈值）；size 阈值是未来的纯加法优化，不预置。
 
@@ -263,26 +284,25 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
 
 ## 决定七：cli 接线 cloud 后端（offloader 生产默认挂载 + 失败退出码分层）
 
-cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 的 `build_local_stores`/`build_cloud_stores`、两种 boto3 句柄、单桶复用 report-dir、`--region`/`--profile`、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节。这里记三条与实时写落库形态强相关的决策：
+cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 的 `build_local_stores`/`build_cloud_stores`、两种 boto3 句柄、单桶复用 report-dir、`--region`/`--profile`、artifacts URI 化）见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节；`run` 只有本机后端（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。这里记三条与实时写落库形态强相关的决策：
 
 **offloader 生产默认挂载、不做可选关闭 flag**：cloud 后端下 `S3StepArgumentOffloader` 默认挂（复用同一 `--s3-bucket`）。DDB 400KB 是协议**硬限**、不是调优空间——决定六把 offloader 设成「可选注入（`None`→内联）」是为 **core 单测省一层 S3 + 旧 run 兼容**，**不是给生产用户选「要不要正确」**。不引入 `--no-offload`：真出现「明确不带大 argument、想省一次 S3 往返」再纯加法加。**trade-off**：牺牲「小 run 省一次 S3 往返」换「大 docString/dataTable 不静默撞 400KB 崩」。
 
-**Store port 增 `preflight()`——begin 前探活，配置错一律 begin 退 2（体验+实现统一）**：三个 Store port（Run/Result/Report）各加 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`：探活失败抛的 botocore 异常由 cli 的 `need_cloud` gated except 接住 → 退 2。
+**Store port 有 `preflight()`，begin 之前探活**：三个 Store port（Run/Result/Report）各有 `preflight() -> None`——DDB 探表（`describe_table`/一次条件读）、S3 探桶（`head_bucket`），**local adapter 是 no-op**（本地无「桶/表不存在」问题）。`RunPersistence.begin` 在 `create_run` **之前**调三个 store 的 `preflight()`。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。`run` 只装配本机 adapter；云端后端的 `submit` 在建 run 之前另做资源 preflight（[0033](./0033-iac-aws-backend-and-composition-wiring.md) preflight 条）。
 
-**为何从「不做主动预检」反转为「做 preflight」**：早先图省一次往返、以 `begin` 的真实写为天然预检点，但那留了个**不一致**——桶名打错时，有 offload 内容的 run（offloader 在 begin 写 S3）会 begin 退 2、无 offload 内容的 run 拖到运行期首个 `save_job_result` 才 S3 报错退 1，**同一个「桶名错」因是否有大 argument 分裂成退 2/退 1**。加 `preflight()` 后：桶/表不存在或无访问权**一律在 begin 探活时暴露→退 2**（不管有无 offload 内容），消除该分裂。**权衡**：begin 多几次探活往返（DDB describe + S3 head×2），但 begin 早于起 worker、不产生引擎费用，几百 ms 可忽略——换体验+实现统一，值得。preflight 归 Store 自己（各后端最懂怎么探活、内聚），不外泄到组合根。
-
-**cloud 失败退出码分层——切分线 = run 是否已真正开跑**（对齐现有 `0 passed / 1 failed|error / 2 配置错` 约定，全走 stderr、绝不裸 traceback）：
-- **退 2（还没开跑就拒绝，与 `assertion_votes<1` 同类）**：（曾有「缺 table/bucket：入口显式校验非空」一项；[0033](./0033-iac-aws-backend-and-composition-wiring.md) 两层命名后表/桶恒有 `--prefix` 推导的默认名、不会为空，此项不再出现）；缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；`begin()` 的 `preflight()` 或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。preflight 是主动探活点，兜住「纯 S3 桶名错也在 begin 暴露」。
-- **退 1（run 已开跑，error 级）**：`schedule()` 运行期内 `on_event`/`on_job_complete`、认领或重试之前的读（`RunRecord.claim` / `still_open`，见决定一「服从记录的三项能力」）抛 botocore 异常（跑到一半 DDB/S3 挂，如桶被删）。决定三已定 `on_event` 或 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛（`on_event` 的异常不产生判定），故会冒泡出 `schedule()`；cli 在 `need_cloud` 时给单一 `schedule()` 调用点包一层 `except (ClientError, BotoCoreError)`（**不复制两份调用**，避免回调/opts 透传漂移弄坏参数映射测试）。这是运行期兜底——preflight 只保证 begin 那刻可达，长 job 中途桶被删仍会在此退 1。
+**失败退出码分层——切分线 = run 是否已开始执行**（退出码的取值见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定五；全走 stderr）：
+- **退 2（还没开始执行就拒绝，与 `assertion_votes<1` 同类，一句诊断、不打回溯）**：缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；云端 `submit` 的资源 preflight 不过或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。
+- **非零（run 已开始执行，只有本机 `run`）**：`schedule()` 运行期内 `on_event`/`on_job_complete`、认领或重试之前的读（`RunRecord.claim` / `still_open`，见决定一「服从记录的三项能力」）抛出存储异常（如磁盘写不进；保存明细先按决定三「保存明细失败」重试）。决定三已定 `on_event` 或 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛（`on_event` 的异常不产生判定），故会冒泡出 `schedule()`，`run` 以非零退出码结束、终端里有存储错误；执行中的 job 留在 `running`，之后被 run 处置（决定三「保存明细失败」）。
 
 ## 现在做 / 留口子
 
-- **决定一~五（实时写接缝，已落地）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/gherkai_core/persist.py` 的
+- **决定一~五（实时写接缝）**：`JobSink` port + `schedule.on_job_complete`/`on_event`；`core/gherkai_core/persist.py` 的
   `RunPersistence`（单一 store 锁）；RunStore 生命周期写入口的 local adapter（全部写入口在同一把文件锁内，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）；`RunState.jobs` 改 Map；cli 接 `RunPersistence`（含 RUNNING 中间态）。
-- **决定六（云端 adapter）— 已实装**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader`，落库形态如上，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
-- **决定七（cli 接线 cloud）— 已实装**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节）+ preflight 探活反转（begin 前探表/桶，配置错一律退 2）+ offloader 生产默认挂载 + 失败退出码分层（退 2 未开跑 / 退 1 运行期）。真跑通 local↔cloud 端到端。
-- **留口子不做 → 多写者（已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，机制（`high_water_mark` 条件写 + finalize 单独条件写）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
+- **决定六（云端 adapter）**：`DynamoDBRunStore` + `S3ResultStore` + `S3ReportStore` + `S3StepArgumentOffloader` 四个 adapter 已实装，moto 全程 mock 单测、行为对拍 local——坐实「换后端 core 不动」。组合根接线见决定七。
+- **决定七（cli 接线 cloud）**：`--backend {local,cloud}` 组合根装配（两后端下沉 `compose`，详见 [0016](./0016-execution-architecture-core-lib-run-model.md)「cli `--backend {local,cloud}`」节）+ Store 的 preflight 探活 + offloader 生产默认挂载 + 失败退出码分层（退出码 2 为未开始执行，非零为本机运行期）。
+- **留口子不做 → 多写者（已在 [0034](./0034-detached-batch-reconciler.md) 落地）**：无状态批量运行下 reconciler 跨进程/跨 Lambda 并发直写 `RunState`，机制（条件写，[0034](./0034-detached-batch-reconciler.md) 机制三）见下「重议」条。续跑/部分重跑的 attempt 维度仍留口子（0034 未涉及）。
 
 ## 重议
 
-- ~~若未来「编排进程外的写者」出现……需 owner/lease + 条件更新，另立 ADR~~ **→ 已落地为 [0034](./0034-detached-batch-reconciler.md)**（无状态批量运行：CLI 脱离后 reconciler（Lambda/per-run 进程）替代编排进程、直接从 events 表推演并写 `RunState`，正是「编排进程外的多写者」）。落地方案比当初预告的「owner/lease」更轻：**用 `high_water_mark` 条件写**（`RunState` 带已处理 max seq，写时 `:hwm >= 库中 hwm` 才成功，stale 实例的写被 `ConditionalCheckFailedException` 挡）+ finalize 单独条件写（状态机非终态→终态），无需 lease 租约。真 DDB 实测挡住了 stale 快照把 `passed` 刷回 `running` 的 lost-update（[0034](./0034-detached-batch-reconciler.md) 机制三 + 地基实测）。
+- ~~若未来「编排进程外的写者」出现……需 owner/lease + 条件更新，另立 ADR~~ **→ 已落地为 [0034](./0034-detached-batch-reconciler.md)**（无状态批量运行：CLI 脱离后 reconciler（Lambda/后台推进进程）替代编排进程、直接从 events 表推演并写 `RunState`，正是「编排进程外的多写者」）。落地方案比当初预告的「owner/lease」更轻：**用 `high_water_mark` 条件写**（`RunState` 带已处理 max seq，写时 `:hwm >= 库中 hwm` 才成功，stale 实例的写被 `ConditionalCheckFailedException` 挡）+ 记下 job 终态的写与结束写以写入序号为条件（[0034](./0034-detached-batch-reconciler.md) 机制三②），无需 lease 租约。真 DDB 实测挡住了 stale 快照把 `passed` 刷回 `running` 的 lost-update（[0034](./0034-detached-batch-reconciler.md) 机制三 + 地基实测）。
+- **没被点名的明细占用的存储成为实际问题**时：再议清理（决定三「点名」条：没被点名的明细不读、不列、不清理）。

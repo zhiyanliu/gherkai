@@ -60,8 +60,8 @@
   （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时用交还的结果写报告）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
   截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
-  还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写，改法已定、尚未实装，见 ADR 0054 决策二「本机接力的
-  改法」）+ 隧道事实文件的读写。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
+  还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写；现行设计里管它的进程不在了的 run 不续、
+  由别的一方结束，这段接力随实装删除，见 ADR 0054 决策六）+ 隧道事实文件的读写。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
   worker 在截止时刻之后自己退出时是否按超时处理由 core 的收尾投影判断
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
   `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取

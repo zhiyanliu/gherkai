@@ -42,7 +42,7 @@
 
 ### 四、根 README = 门面 + 30 秒上手，agent 路径优先
 
-顺序：一段定位（这是什么、给谁、跑在哪） → 价值与方法（内嵌讲解视频，加一条指向演示文稿与配套资料的链接） → 安装 → **上手两条路，agent 先**（`gherkai skill install` + 「告诉 agent 你要测什么」；然后才是手敲 CLI 的最小命令序列：用例预检 → 运行 → 读失败证据） → 精简架构图（什么跑在哪、费用从哪来） → 「判定由谁做出」披露节（[0044](./0044-engine-model-selection-and-override.md)）→ 文档去哪读（指 `docs/README.md`）→ 注意 → 许可证。完整架构图、四种组合（执行方式 × 执行后端）的细节、写法、CI 集成全部链到 user guide 或 internals；注意事项只留费用与首次验证两条，其余链走。价值与方法节排在安装之前：讲解视频回答「为什么值得用」，对首次来访的人比文档表里的一行链接更直接（被拒：删掉这一节、只在文档表里留链接，换来的只是与本决策原先没有这一节的顺序对齐，丢掉门面上最直观的价值说明）。
+顺序：一段定位（这是什么、给谁、跑在哪） → 价值与方法（内嵌讲解视频，加一条指向演示文稿与配套资料的链接） → 安装 → **上手两条路，agent 先**（`gherkai skill install` + 「告诉 agent 你要测什么」；然后才是手敲 CLI 的最小命令序列：用例预检 → 运行 → 读失败证据） → 精简架构图（什么跑在哪、费用从哪来） → 「判定由谁做出」披露节（[0044](./0044-engine-model-selection-and-override.md)）→ 文档去哪读（指 `docs/README.md`）→ 注意 → 许可证。完整架构图、执行方式与执行后端的三种组合的细节、写法、CI 集成全部链到 user guide 或 internals；注意事项只留费用与首次验证两条，其余链走。价值与方法节排在安装之前：讲解视频回答「为什么值得用」，对首次来访的人比文档表里的一行链接更直接（被拒：删掉这一节、只在文档表里留链接，换来的只是与本决策原先没有这一节的顺序对齐，丢掉门面上最直观的价值说明）。
 
 ### 五、每版 changelog，Release 正文与链接钉 tag
 
@@ -76,7 +76,7 @@
 - **作图方法单列**：怎么一次画对（类型选择、内容规则、布局清单、archify 技法、自检）记在 [`docs/ai-eng/diagram-authoring.md`](../ai-eng/diagram-authoring.md)，入口是项目级 skill `.claude/skills/doc-diagram/`——决策与方法分家，同 doc-health 那套（ADR 定规则、`docs/ai-eng/` 记方法、`.claude/` 做入口）。
 - **三段流程，只有第一段需要智能**：① 作者化——AI 按 archify schema 写 `docs/diagrams/<name>.json`（图源）；② 渲染——`archify deliver` 把 JSON 确定性地渲成可交互 HTML（纯 CLI、无 LLM，带 SHA-256 回执）；③ 导出——headless Chrome 从 HTML 点导出得到 `<name>.svg`（正文以 markdown 图片语法嵌入，双主题、字体内嵌）。②③ 由 `tools/build_diagrams.mjs` 一条命令完成。导出时在 SVG 末尾追加一行图源 sha256 指纹注释；护栏 `cli/tests/test_user_docs.py` 逐张比对指纹与 JSON，「改了图源没重导」在 CI 里就红（mtime 在 git checkout 后无意义，故用内容指纹）；本机 hook `.claude/hooks/sync-derived.sh` 用同一指纹在编辑时刻提醒（ADR 0043 决策四的同一套 hook）。
 - **入库什么**：每张图 **JSON + SVG 同 commit**——JSON 是唯一可读源（审稿核事实、护栏扫禁词、确定性重生成都靠它，没有它改图只能让 LLM 重新作者化、布局每次都变）；SVG 是 markdown 唯一可靠的嵌入形态（GitHub 打开仓库内 `.html` 只显示源码、raw 域以纯文本返回、内联 `<svg>` / `<script>` 会被消毒，只有 `<img>` 指向仓库内 `.svg` 可靠，字形丢失时退回 PNG）。**HTML 只对发布到 Pages 的图入库**（每张约 800 KB，作为交互版是产物本身、不入库就没法发布；其余图的 HTML 只是导出 SVG 的中间物，`.gitignore` 排除、白名单放行）。发布 = 三个动作同 commit：`.gitignore` 加白名单行、`index.html` 加链接、HTML 入库；护栏断言入库的每个 HTML 都在 `index.html` 里有链接。
-- **哪些图发布交互版**：读者需要「聚焦一格、追一条路径」的大图，首批两张——执行与推进全景（四组合叠加）、云端交付与 worker 身份拓扑。小图不发布：缩放聚焦对 7 到 12 个节点的图没有收益。
+- **哪些图发布交互版**：读者需要「聚焦一格、追一条路径」的大图，首批两张——执行与推进全景（三种组合叠加）、云端交付与 worker 身份拓扑。小图不发布：缩放聚焦对 7 到 12 个节点的图没有收益。
 - **GitHub Pages 只发布 `docs/diagrams/`**，经 `.github/workflows/pages.yml` 原样上传该目录（`index.html` + 已入库的 HTML + SVG），只在默认分支上部署，不依赖任何外部构建。不把整个仓库树站点化：ADR / CONTEXT 是给 contributor 侧 AI agent 读的，不该多出一个仓库外入口；markdown 文档在 GitHub 上直接读。
 - **导出脚本化的脆弱点**：`tools/build_diagrams.mjs` 用 Playwright（复用 engines/midscene 的依赖）驱动本机 Chrome 打开 HTML、点导出菜单项、接住下载并核对 viewer 的导出回执，依赖 viewer 内部结构（`button[data-format]`、`data-last-export-*`），archify 升级后可能失效——接受：脚本响亮失败、对照新版 HTML 改两处即可，换来「十几张图一条命令重生成」。
 - 读者是 agent 的页面（user-guide / README）：图是给人的，图旁的文字必须自足——被图替代的只是「摊开的散文」，结论句与指针保留；agent 需要图的结构时读同名 JSON。

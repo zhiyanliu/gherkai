@@ -1,6 +1,6 @@
 # 0040. 使用方角色模型与术语
 
-> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」；2026-11-15 决策 1 的 contributor 一行增「owner」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
+> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」；2026-11-15 决策 1 的 contributor 一行增「owner」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景与问题
 
@@ -16,7 +16,7 @@
 
 本地开发时同一个人常在写被测应用代码与对应的 step 代码之间切换，build 完自己推——**角色重合是常态、不是例外**。
 
-把「用 plan / run / submit / status」这类执行动作写进某顶帽子的定义，等于把执行权限挂在帽子上；而「跑」是每顶帽子都做、CI 机器也做的事，且两种执行方式（`run` / `submit`）权限不同——故执行单独成轴（决策 3）。
+把「用 plan / run / submit / status」这类执行动作写进某顶帽子的定义，等于把执行权限挂在帽子上；而「跑」是每顶帽子都做、CI 机器也做的事，且执行方式与执行后端的不同组合要的权限不同——故执行单独成轴（决策 3）。
 
 ## 决策 1：四顶帽子与正名
 
@@ -27,7 +27,7 @@
 | 改云端环境 | **部署方** | 弃用 部署者 | `gherkai deploy` / `gherkai deploy push-worker`；唯一因帽子本身就需要云端写权限的帽子（执行所需权限按决策 3 另算） |
 | 开发 gherkai 本身 | **contributor** | 「发布方」专指发布 / GHCR 基础镜像的一方；「owner」专指 contributor 中对产品取舍与已定决策的变更有决定权的一方 | clone 仓库、读根 `CONTRIBUTING.md` |
 
-**「使用方」= 前三顶的统称**（用 gherkai 做测试的团队），与 contributor 相对——0039 的「使用者向 / contributor 向」即此分界。**「提交者」不是帽子，是权限类别**：决策 3 的执行权限梯级里两级云端组合的权限持有者（人或机器身份都行），0033 / 0038 的权限登记用它。
+**「使用方」= 前三顶的统称**（用 gherkai 做测试的团队），与 contributor 相对——0039 的「使用者向 / contributor 向」即此分界。**「提交者」不是帽子，是权限类别**：决策 3 的执行权限梯级里云端一级的权限持有者（人或机器身份都行），0033 / 0038 的权限登记用它。
 
 ## 决策 2：帽子不是人
 
@@ -36,20 +36,19 @@
 - **合帽零摩擦**：一个人戴全时不需要在角色间「切换身份」——同一台机器、同一套凭证、同一条命令链（`run` → `push-worker` → `submit`）走得通。
 - **拆帽有现成边界**：团队分工时权限 / 安装 / 产物按帽子切开即可、不需要新设计。所以 extras 与权限登记必须按帽子切（已是）；新增功能在设计时要说清落在哪顶帽子上。
 
-## 决策 3：执行是正交轴——执行权限梯级
+## 决策 3：执行方式与执行后端的三种组合——执行权限梯级
 
-「产出什么」由帽子回答，「怎么跑」是另一根轴：执行方式（`run` / `submit`）× 执行后端（`--backend local` / `cloud`）两个独立的选择（使用者视图见 `docs/user-guide/running-and-results.md`）。权限挂在这根轴上、不挂在帽子上，因为跑是每顶帽子都做的事，机器身份也做。按 0033 的登记分四级，下表大体从轻到重排——但**各级不构成逐级累加的阶梯**（两级云端所需权限互不包含，本机组合要的又是另一套凭证）：
+「产出什么」由帽子回答，「怎么跑」是另一根轴：执行方式（`run` / `submit`）与执行后端（`--backend local` / `cloud`）有三种组合，云端后端只有后台（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A；使用者视图见 `docs/user-guide/running-and-results.md`）。权限挂在这根轴上、不挂在帽子上，因为跑是每顶帽子都做的事，机器身份也做。按 0033 的登记，三种组合按所需权限分成本机与云端两级，加上不需要凭证的 `plan`，下表大体从轻到重排——但**各级不构成逐级累加的阶梯**（云端与本机要的是两套不同的凭证）：
 
-| 组合（执行方式 × 执行后端） | 需要什么（登记处 = 0033「资源清单」末段） | 费用记到 |
+| 组合（执行方式与执行后端） | 需要什么（登记处 = 0033「资源清单」末段） | 费用记到 |
 |---|---|---|
 | `plan` | 无凭证；装了 worker 才有确定性 step 标注（[0036](./0036-deterministic-capability-discovery.md) 决策 4 的 best-effort） | 无 |
 | `run` / `submit` `--backend local` | 本机 AWS 凭证（Bedrock 模型 / AgentCore Browser / Nova Act 服务）+ 要用到的引擎 worker | 自己 |
-| `submit` / `status --wait` `--backend cloud` | 最小云端权限：runs 表读写 + 只读探活 + `ssm:GetParameter`（`/{prefix}backend/*`：版本戳、variant 映射与默认指针）+ `lambda:GetFunction` / `InvokeFunction` + variant 解析只读（0038）+ 报告桶 `s3:PutObject`（feature 含 DataTable / DocString 时，提交即把正文搬 S3，[0030](./0030-realtime-persistence-seam.md) 决定六）；**无任何 ECS 写**——起 task 全走 Lambda 执行角色 | 部署方 |
-| `run --backend cloud`（同步） | 另一套云端权限（**不含**上一级的 `lambda:GetFunction` / `InvokeFunction`）：`ecs:RunTask` / `StopTask` / `DescribeTasks` + `iam:PassRole` + `dynamodb:Query` / `PutItem` + 报告桶 `s3:PutObject` 与 `s3:PutObjectTagging`（此级恒需：进程内起 task、自己上传 job 并打 `gherkai=job-in` 标签供 lifecycle 过期、自己推进）+ 同一套只读探活 + `ssm:GetParameter`（`/{prefix}backend/*`：版本戳、variant 映射与默认指针，不给 `--subnet` / `--security-group` 时另读 subnet / sg）+ variant 解析只读（0038） | 部署方 |
+| `submit` / `status --wait` / `settle-runs` `--backend cloud` | 最小云端权限：runs 表读写（含 run 处置的条件写）+ 只读探活 + `ssm:GetParameter`（`/{prefix}backend/*`：版本戳、variant 映射与默认指针）+ `lambda:GetFunction`（提交前探推进链上的 Lambda）+ variant 解析只读（0038）+ 报告桶 `s3:PutObject`（feature 含 DataTable / DocString 时，提交即把正文搬 S3，[0030](./0030-realtime-persistence-seam.md) 决定六）；run 处置（`status --wait`、`settle-runs`，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）另需报告桶的 `s3:GetObject`（运行定义卸载到 S3 的正文与判定明细）与报告前缀的 `s3:PutObject`（写报告）；**无任何 ECS 写**——起 task 全走 Lambda 执行角色 | 部署方 |
 
-设备目标（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）在各级上的权限增量登记在 0033「设备目标增量」段与 task role 权限表的设备目标各行：提交侧多应用前缀 `apps/` 的读、写、分段上传中止与带前缀条件的 `s3:ListBucket`（云端后端写进产物桶并另需 `s3:PutObjectTagging`，本机后端写进使用方配置的应用桶），`doctor` 多一项列举远程访问会话的只读权限；本机后端驱动真机时 worker 在本机执行，本机凭证另需 task role 权限表里设备目标各行的全部权限。四级划分与「权限挂在执行轴上、不挂在帽子上」不变。
+设备目标（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 10）在各级上的权限增量登记在 0033「设备目标增量」段与 task role 权限表的设备目标各行：提交侧多应用前缀 `apps/` 的读、写、分段上传中止与带前缀条件的 `s3:ListBucket`（云端后端写进产物桶并另需 `s3:PutObjectTagging`，本机后端写进使用方配置的应用桶），`doctor` 多一项列举远程访问会话的只读权限；本机后端驱动真机时 worker 在本机执行，本机凭证另需 task role 权限表里设备目标各行的全部权限。三种组合的分级与「权限挂在执行轴上、不挂在帽子上」不变。
 
-两条推论：**detached 提交不需要任何 ECS 写权限**（起 task 全走 Lambda 执行角色），CI 与低权限机器应走 `submit`——这是 [0034](./0034-detached-batch-reconciler.md)「最小权限」的角色化表述；**CI 不是帽子**，是「无帽子、持有一级执行权限的机器身份」。feature 作者的写作本身不需要任何凭证，「QA 零代码」因此更纯：零代码、零凭证即可写与 `plan`。
+两条推论：**云端执行不需要任何 ECS 写权限**（云端只经 `submit`，起 task 全走 Lambda 执行角色），CI 与低权限机器持云端一级即可——这是 [0034](./0034-detached-batch-reconciler.md)「最小权限」的角色化表述；**CI 不是帽子**，是「无帽子、持有一级执行权限的机器身份」。feature 作者的写作本身不需要任何凭证，「QA 零代码」因此更纯：零代码、零凭证即可写与 `plan`。
 
 ## 决策 4：边界矩阵
 

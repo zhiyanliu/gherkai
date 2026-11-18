@@ -560,7 +560,7 @@ def test_probe_task_stopped_with_exit_code():
 
 
 def test_probe_task_stopped_but_exit_code_null():
-    # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null，ADR 0024「exitCode 落值延迟」）
+    # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null）
     # → (stopped=True, exit_code=None)：**两事实各自命名、不揉进单值**；调用方 _await_exit_code 据此有界多等几拍等落值、别当异常。
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
     assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=None)
@@ -570,7 +570,7 @@ def test_probe_task_stopped_but_exit_code_null():
 
 
 def test_probe_task_stopped_reads_stop_code_and_reason():
-    """已 STOPPED 时一并取 task 级 stopCode 与 stoppedReason（ADR 0024「exitCode 落值延迟」条）：取不到退出码时据此提前落定、拼归因。"""
+    """已 STOPPED 时一并取 task 级 stopCode 与 stoppedReason：取不到退出码时据此提前落定、拼归因。"""
     eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "stopCode": "TaskFailedToStart",
                                             "stoppedReason": "CannotPullContainerError: image not found",
                                             "containers": [{"name": "worker"}]}]})
@@ -590,7 +590,7 @@ def test_raise_for_worker_exit_maps_codes_with_fargate_label():
         raise_for_worker_exit(1, code_label="exitCode")   # 其余正非零
 
 
-# ---- _await_exit_code 对「STOPPED 但 exitCode 尚 null」的有界宽限（ADR 0024「exitCode 落值延迟」）----
+# ---- _await_exit_code 对「STOPPED 但 exitCode 尚 null」的有界宽限----
 class _SeqEcs:
     """按序返回 describe_tasks 响应的假 ecs（模拟 STOPPED 翻转后 exitCode 落值时序）。"""
     def __init__(self, responses):
@@ -632,7 +632,7 @@ def test_await_exit_code_waits_out_null_then_reads_landed_code():
 
 def test_await_exit_code_null_beyond_grace_settles_as_platform_sentinel_with_reason():
     """STOPPED 但 exitCode 恒 null 超过宽限拍数、stopCode 不是启动失败（容器真没报码，非落值延迟）→ 照常等满宽限后落平台侧哨兵 255，
-    reason 是 `stopCode: stoppedReason`（与退出观察者落的内容相同，ADR 0024「exitCode 落值延迟」条），不无限轮询。"""
+    reason 是 `stopCode: stoppedReason`（与退出观察者落的内容相同），不无限轮询。"""
     resp = _stopped_resp(None, stop_code="EssentialContainerExited", stopped_reason="Essential container in task exited")
     eng = _await_engine([resp] * 50, grace_polls=3)
     with pytest.raises(WorkerExitError) as ei:
@@ -761,7 +761,7 @@ def test_final_drain_logs_real_holes_under_consistent_read(caplog):
 
 def test_probe_task_missing_is_a_third_state_not_running():
     """DescribeTasks 空 tasks + failures MISSING → missing=True（不是「未 STOPPED」）：ECS 最终一致下 RunTask 刚返回可短暂
-    查不到；持续 MISSING 则 task 已不在 ECS，再等永远等不到 STOPPED（ADR 0024「exitCode 落值延迟」条第三态）。"""
+    查不到；持续 MISSING 则 task 已不在 ECS，再等永远等不到 STOPPED。"""
     eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
     assert eng._probe_task("arn") == TaskProbe(stopped=False, exit_code=None, missing=True)
 
@@ -794,7 +794,7 @@ def test_await_exit_code_transient_missing_then_stopped_reads_code():
     assert eng._await_exit_code("arn") == 0
 
 
-# ---- _read_events 的 MISSING 分支（ADR 0024「exitCode 落值延迟」条第三态）：有界抛 / 瞬时恢复 / 有进展即断连续 ----
+# ---- _read_events 的 MISSING 分支：有界抛 / 瞬时恢复 / 有进展即断连续 ----
 
 class _MissingThenStoppedEcs:
     """前 missing_calls 次 describe → MISSING，之后 STOPPED exit 0。"""
@@ -852,7 +852,7 @@ def test_read_events_progress_resets_missing_count():
     assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
 
 
-# ---- 同步 run --backend cloud 下取不到退出码：schedule 经 FargateEngine 把 ECS 的归因写进 job message（ADR 0024「exitCode 落值延迟」条）----
+# ---- 同步 run --backend cloud 下取不到退出码：schedule 经 FargateEngine 把 ECS 的归因写进 job message----
 
 class _NoExitCodeEcs:
     """run_task 起一个 task；describe_tasks 恒返回 STOPPED、container 无 exitCode，带给定的 stopCode / stoppedReason。"""

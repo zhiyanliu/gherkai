@@ -57,12 +57,12 @@ EXIT_ITEM_TYPE = "exit"     # item_type 取值：退出记录（worker 事件 it
 EXIT_CODE_ATTR = "exit_code"
 
 # ECS 的 stopCode 取值之一：task 没能开始运行（拉不到镜像、缺 secret、放置失败），容器的 exitCode 永不落值。
-# 同步路径据此不等落值宽限、立即落平台侧哨兵（ADR 0024「exitCode 落值延迟」条）；只按这个结构化字段判，不看 stoppedReason 的文本。
+# 同步路径据此不等落值宽限、立即落平台侧哨兵；只按这个结构化字段判，不看 stoppedReason 的文本。
 TASK_FAILED_TO_START = "TaskFailedToStart"
 
 
 class TaskProbe(NamedTuple):
-    """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（ADR 0024「exitCode 落值延迟」；前两个见下、第三个 `missing` 见倒数第二段），
+    """一次 DescribeTasks 探测的结果——**三个正交事实各自命名**（前两个见下、第三个 `missing` 见倒数第二段），
     另带 ECS 对停止的归因两项（见最后一段）：
 
     - `stopped`：task 是否已到 STOPPED 终态。
@@ -75,7 +75,7 @@ class TaskProbe(NamedTuple):
 
     第三个正交事实 `missing`：DescribeTasks **查不到这个 task**（空 `tasks` + `failures[].reason=MISSING`）——不是「未 STOPPED」。
     ECS API 最终一致，RunTask 刚返回时可能短暂 MISSING（有界多等 `missing_task_grace_polls`）；持续 MISSING 表示 task 已不在
-    ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常（ADR 0024「exitCode 落值延迟」条）。
+    ECS（已停超 1h 被清 / 被删 / ARN 错），再轮询永远等不到 STOPPED，调用方抛可归因异常。
 
     `stop_code` 与 `stopped_reason`：task 级的 `stopCode` 与 `stoppedReason`，只在 `stopped` 为真时取（未 STOPPED 或 missing 时为
     None）。用途有二：`stop_code` 为 `TaskFailedToStart` 时 exitCode 永不落值、不必等宽限；取不到退出码而落平台侧哨兵时，两项拼成
@@ -161,8 +161,8 @@ class FargateEngine:
         poll_interval_s: float = 0.5,
         gap_grace_s: float = EC_GAP_GRACE_S,  # 流式期断号宽限（ADR 0024「读一致性」，见模块常量注释）
         missing_task_grace_polls: int = 20,  # DescribeTasks 连续 MISSING 的有界宽限拍数（ECS API 最终一致，RunTask 刚返回可短暂查不到；
-                                   # 20×0.5s≈10s）——超限表示 task 已不在 ECS，抛而非无上界轮询（ADR 0024「exitCode 落值延迟」条）
-        null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数（ADR 0024「exitCode 落值延迟」）——
+                                   # 20×0.5s≈10s）——超限表示 task 已不在 ECS，抛而非无上界轮询
+        null_exit_grace_polls: int = 5,  # STOPPED 但 exitCode 尚 null 时的有界宽限拍数——
                                    # 多等这么多拍等落值，超限才落平台侧哨兵 255 加归因（防把落值延迟误报 error）；stopCode 为
                                    # TaskFailedToStart 时不等这段。5×0.5s≈2.5s，远大于落值瞬时窗口。
     ) -> None:
@@ -353,15 +353,15 @@ class FargateEngine:
                     # task 已 STOPPED。终读强一致 Query 从 last_seq+1 读全（含停在断号处未消费的部分；补最终一致还没看到的
                     # 末尾 PutItem，ADR 0024 读一致性条）——终读里的断号即真洞、只记警告。
                     yield from self._final_drain(pk, last_seq)
-                    # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限与取不到退出码时的平台侧哨兵（ADR 0024
-                    # 「exitCode 落值延迟」）——与 scope_done 路径复用同一读码逻辑。把这次已 STOPPED 的探测结果交进去当第一拍，
+                    # 拿确定退出码：_await_exit_code 处理「exitCode 尚 null」的有界宽限与取不到退出码时的平台侧哨兵，
+                    # 与 scope_done 路径复用同一读码逻辑。把这次已 STOPPED 的探测结果交进去当第一拍，
                     # 不再多调一次 DescribeTasks（落值了即刻返回，撞上落值延迟窗口才继续轮询）。
                     raise_for_worker_exit(self._await_exit_code(task_arn, probe), code_label="exitCode")
                     return
                 time.sleep(self._poll)  # task 仍在运行、暂无新事件 → 等一个轮询周期再拉（延迟 vs 读放大，ADR 0024）
 
     def _count_missing(self, task_arn: str, missing_polls: int) -> int:
-        """DescribeTasks 查不到 task 的有界宽限计数：超 `missing_task_grace_polls` 即抛（ADR 0024「exitCode 落值延迟」条第三态）。
+        """DescribeTasks 查不到 task 的有界宽限计数：超 `missing_task_grace_polls` 即抛。
 
         与 RunTask 放置失败同一口径抛 RuntimeError（schedule 记 error、可归因），不让 `_read_events`/`_await_exit_code` 落进
         无上界轮询——曾把空 tasks 压成「未 STOPPED」，task 被 ECS 清掉后 scope 永远等不到终态。"""
@@ -407,7 +407,7 @@ class FargateEngine:
             kwargs["ExclusiveStartKey"] = last_key  # 续下一页（>1MB 尾部才触发）
 
     def _probe_task(self, task_arn: str) -> TaskProbe:
-        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe（ADR 0024「exitCode 落值延迟」）。
+        """DescribeTasks 探一次 task 终态 + 退出码，返回 TaskProbe。
 
         未 STOPPED → (False, None)；已 STOPPED 但 exitCode 尚 null（缺 container 亦然）→ (True, None)；
         已 STOPPED 且落值 → (True, int)；**查不到 task** → (False, None, missing=True)。stopped 与 exit_code 非原子（见 TaskProbe），
@@ -436,7 +436,7 @@ class FargateEngine:
         兜底唤醒（同主循环兜底路径的 sleep 轮询；task 可见时不会真无限——worker 已在退出路径、很快 STOPPED；MISSING 那一格
         另由下述有界宽限兜住）。
 
-        **STOPPED 但 exitCode 尚 null**（ADR 0024「exitCode 落值延迟」）：不立即当异常（否则把干净退出误报 error），
+        **STOPPED 但 exitCode 尚 null**：不立即当异常（否则把干净退出误报 error），
         **有界**多等 `_null_exit_grace_polls` 拍等落值；超限仍 null 才落定（容器真被强杀/没报码，非落值延迟）。只有已识别的启动失败
         提前落定：`stopCode` 为 `TaskFailedToStart` 时 exitCode 永不落值，见到即落定、不空等宽限拍。落定即**直接抛**
         `WorkerExitError`：退出码取平台侧哨兵 `PLATFORM_FAILED_EXIT`（255），`reason` 取 `stopCode: stoppedReason`

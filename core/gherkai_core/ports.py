@@ -173,11 +173,11 @@ class RunStore(Protocol):
 
         所有写入方共用这一个收尾入口（前台执行者与后台推进）：已是终态 → False，库中值不变，保证 commit
         恰一次（多实例同时见全终态、只有一个写成功、触发一次 RunReport 聚合）。运行态不存在同样 → False，两种原因不区分。
-        message 是 run 级消息（ADR 0037 决策 7）：没有任何 job 能承载的原因，与终态同一次写入——推进器不经任何 job 就把 run
+        message 是 run 级消息：没有任何 job 能承载的原因，与终态同一次写入——推进器不经任何 job 就把 run
         置为终态时的原因，或执行方按运行期限收尾时的「已超过允许运行的时间」（ADR 0054 决策二第 3 条）；按各 job 判定聚合的
         收尾不给；为 None 时不写这一项，库中值原样保留。
 
-        expected_claim_count（ADR 0054 决策二「认领计数」段）：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
+        expected_claim_count：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
         没有新的认领；不等 → False、不写。为 None 时不判计数。认领计数本身不变。
         """
         ...
@@ -226,7 +226,7 @@ class RunStore(Protocol):
         （run 级为终态）→ False，三种原因不区分。
         同一条条件写把 run 级置 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功后 run 级即为 RUNNING；
         run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
-        认领成功时同一次写把认领计数加一（ADR 0054 决策二「认领计数」段）；认领失败不改它。
+        认领成功时同一次写把认领计数加一（ADR 0034 机制三「run 级状态只进不退」条①）；认领失败不改它。
 
         claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
         （ADR 0034「job timeout」节：local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。

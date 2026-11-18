@@ -763,7 +763,7 @@ def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
 
 def test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached(monkeypatch, capsys):
     """同步 `run --backend cloud` 的 run（STATE 没有 detached 标记）上执行 status --wait：只轮询等待、一次都不 invoke kicker
-    （kicker 对它本就整体 no-op，invoke 只是空转；接力只对 submit 的 run，ADR 0034 两道闸的 cloud 侧），提示一句，等到终态按判定给退出码。"""
+    （kicker 对它本就整体 no-op，invoke 只是空转；接力只对 submit 的 run），提示一句，等到终态按判定给退出码。"""
     reads = {"n": 0}
 
     class _Table:

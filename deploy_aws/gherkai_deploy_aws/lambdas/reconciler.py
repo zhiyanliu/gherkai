@@ -99,7 +99,7 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None, _dt.datetime | No
     PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
     exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
     + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。哨兵与归因串的拼法都住 core
-    （`platform_exit_reason`，同步路径的 FargateEngine 共用同一份，ADR 0024「exitCode 落值延迟」条）。timed_out：stoppedReason
+    （`platform_exit_reason`，同步路径的 FargateEngine 共用同一份）。timed_out：stoppedReason
     含本模块 StopTask 时写入的哨兵串，即发过超时的停止请求（「job timeout」节归因链）。exited_at：task 的执行停止时刻，见
     `_task_stopped_at`。只记事实：是否已过截止时刻由投影判断，观察者读不到运行态与运行定义，也不需要读（ADR 0054 决策二后台推进条
     「截止时刻与说明」）。
@@ -490,7 +490,7 @@ def _build(run_id: str):
         ddb_table=runs_table, s3=s3)
     # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——云端后端这个 store 恒是 DDB 实现。
     if not run_store.is_detached(run_id):
-        # 只推进 detached run（ADR 0034 端到端 cloud 1b）：同步 `run --backend cloud` 由进程内 schedule 推进，
+        # 只推进 detached run：同步 `run --backend cloud` 由进程内 schedule 推进，
         # 推进器碰它就是双开推进器（认领/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None 表示全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
@@ -645,7 +645,7 @@ def kicker_handler(event, context):
     与 reconciler 的分工：kicker 负责「让 run 动起来」（冷启动第一脚 + 卡住时补 kickoff），reconciler 负责
     「推着走」（events Stream 持续推进）。
 
-    第三触发源（ADR 0034「job timeout」节）：EventBridge Scheduler 的到点 invoke，payload
+    到点触发（ADR 0034「job timeout」节）：EventBridge Scheduler 的到点 invoke，payload
     `{"run_id","timeout_scope"}`——先超时处置（仍 running 且 deadline 已到才 StopTask/收敛，触发早于 deadline 时先等到
     deadline），再照常 tick（处置用的组合根经 prebuilt 交给 tick 复用，同一 run 只装配一次）。等待上界在临睡前按本次
     调用的剩余时间算（复查的读取之后），见 `_timeout_wait_budget_s`。

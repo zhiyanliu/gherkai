@@ -129,7 +129,7 @@ def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
 
 
 def test_relay_recovers_foreign_timed_out_claim(tmp_path):
-    """接力恢复（ADR 0034「job timeout」节 claimed_at ①）：他人 claim 的 RUNNING job（owner 进程已死、
+    """接力恢复：他人 claim 的 RUNNING job（owner 进程已死、
     无 handle 无观察链）过了截止时刻加 10 秒 → loop 防御扫补写一条判为超时的未知退出（不带退出时刻）收敛 ERROR，run 不永久 wedge。"""
     meta, log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0, clock=_one_hour_later)
     # 模拟死 owner 遗留态：a 已被 claim（claimed_at 一小时前）、无退出记录、本 launcher 没起过它
@@ -586,7 +586,7 @@ def test_build_local_reconcile_reads_session_warmup_url_back_from_definition(tmp
         assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}', engine
 
 
-# ---------- 后台推进的到期处理（ADR 0054 决策二后台推进条、本机接力条，实测项 10）----------
+# ---------- 后台推进的到期处理（ADR 0054 决策二后台推进条，实测项 2）----------
 
 
 class _FastClock:
@@ -618,7 +618,7 @@ def _verdict(result) -> tuple:
 
 
 def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(tmp_path):
-    """本机推进进程到期（实测项 10 前半、13 的本机一对）：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
+    """本机推进进程到期（实测项 2、4 的本机一对）：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
     上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记为超时、说明是
     期限那一句；b 保持 pending、没有判定明细；run 级 error 加到期说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种
     时钟），报告内容逐项相同。"""
@@ -651,7 +651,7 @@ def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(
 
 
 def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_jobs(tmp_path, monkeypatch):
-    """推进进程已不在、过了期限之后的一次 `status --wait` 接力（实测项 10 后半）：经两者共用的入口推进，a 是原推进进程认领、观察链
+    """推进进程已不在、过了期限之后的一次 `status --wait` 接力：经两者共用的入口推进，a 是原推进进程认领、观察链
     已断的 job，b 没有启动过。a 的预算让它自己的截止时刻还在半小时之后，截止时刻由期限（一小时之前）封顶，接力方按封顶后的时刻判，
     墙钟早已过了它加 10 秒，第一轮即补写超时；b 不认领、不启动；run 以到期说明结束，报告由接力方生成。组合根照真实装配，只把引擎换成
     记录启动的替身、停止宽限的查询换成固定值（误启动 job 时启动调用落到替身上、被记下）。"""
@@ -720,7 +720,7 @@ class _RecordsExits:
         return written
 
 
-# ---------- 启动器记下退出时刻、接力的判定条件与条件补写（ADR 0054 决策二后台推进条、本机接力条）----------
+# ---------- 启动器记下退出时刻、接力的判定条件与条件补写（ADR 0054 决策二后台推进条）----------
 
 
 class _SettableClock:
@@ -788,7 +788,7 @@ def _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path) -> thre
 
 
 def test_worker_exiting_on_its_own_after_its_cutoff_gets_the_foreground_verdict(tmp_path, monkeypatch):
-    """worker 在截止时刻之后、启动器下一次到点决定之前自己异常退出（真进程，实测项 24 的本机一侧）：启动器只记事实，退出记录不带超时
+    """worker 在截止时刻之后、启动器下一次到点决定之前自己异常退出（真进程，实测项 11 的本机一侧）：启动器只记事实，退出记录不带超时
     标志、带它看到 worker 退出的那一刻；收尾投影按退出时刻晚于截止时刻判为超时，判定、错误类型与说明和前台同一情形相同（前台在终结
     之前对内容不完整的 job 再查一次截止时刻）。先后由事件确立：检查线程的第一次到点决定做完（读到的是截止之前的时刻）之后才拨过截止
     时刻、建让 worker 崩溃的文件；此后的到点决定停在进入之前，直到推进结束才放行，所以 worker 退出之前没有第二次决定，退出码保持 worker
@@ -949,7 +949,7 @@ def test_a_cutoff_decided_before_the_exit_marks_the_exit_as_timed_out(tmp_path, 
 
 
 def test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write(tmp_path):
-    """补写不覆盖已观察到的退出（实测项 25 的本机一侧）：接力方点查过「还没有退出记录」之后、补写之前，原推进进程写下了 a 的真实
+    """补写不覆盖已观察到的退出：接力方点查过「还没有退出记录」之后、补写之前，原推进进程写下了 a 的真实
     退出记录与此前的事件（这里在点查返回之前写下）。补写是条件写、不成立，留下的是真实的那一条，a 保留完整的判定、run 按内容通过。
     墙钟早已过了 a 的截止时刻加 10 秒，第一轮即点查退出记录。"""
     meta, inner_log, store, launcher = _setup(tmp_path, "pass", "a", timeout_s=60.0, clock=_one_hour_later)

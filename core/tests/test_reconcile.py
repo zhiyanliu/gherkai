@@ -493,7 +493,7 @@ def test_report_follows_the_committing_round_when_two_advancers_read_different_s
     """两个推进方读到不同的快照、竞争收尾（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读事件之前，
     A 走完一轮并写成收尾；B 随后按自己的快照走到收尾，条件写写不成。只断言必须成立的正面性质：A 写成、带它这一轮的结果；B 返回不带
     结果的 ENDED；run 级的状态、说明与结束时刻是 A 写下的；用 A 交还的结果生成的报告是 A 的判定。B 落下的判定明细与 A 的谁留在
-    存储里不在断言之内（ADR 0054「边界与已知局限」以「多个推进方竞争收尾时」开头的一条）。"""
+    存储里不在断言之内（ADR 0034 机制三开头的「判定明细」一条）。"""
     meta, log_a, store = _setup(tmp_path, "a")
     tick("run-1", meta, log_a, store, FakeLauncher(), max_concurrency=1, clock=Clock())  # 认领并启动 a
     _done_events(log_a, "a")  # A 读到的快照：完整的结果，判 passed
@@ -668,7 +668,7 @@ class _ClaimLandsAfterRead(SqliteEventLog):
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path):
-    """到期收尾与认领并发（实测项 16，本机）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的收尾写
+    """到期收尾与认领并发（本机）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的收尾写
     被认领计数的条件挡下，重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running。"""
     meta, _, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
     plain = SqliteEventLog(tmp_path / "e.db")

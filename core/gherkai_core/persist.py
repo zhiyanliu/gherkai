@@ -159,7 +159,7 @@ class RunPersistence:
         """每个产出判定的 job 完成（在主线程等待 job 完成的循环里串行调用）：commit-point 写序——数据面先、控制面 job 态后。
 
         skipped 的 job 从没 event 流过，但仍经此落库（否则 ResultStore 缺该 scope 文件、CI 读单 scope 落空）。没有启动、不产出判定的
-        job（已过停止启动的时刻、发现 run 已被别处结束）schedule 不回调，判定明细里没有它、运行态保持 pending（ADR 0054 决策二）。
+        job（已过停止启动的时刻、发现 run 已被别处结束）schedule 不回调，判定明细里没有它、运行态保持 pending。
         """
         with self._lock:
             self._result_store.save_job_result(self._run_id, jr)  # 数据面判定真值【先】
@@ -174,7 +174,7 @@ class RunPersistence:
 
         以 `try_finalize` 条件写总 status、run 级说明（RunResult.message，没有时不写）与 ended_at（这次写就是 commit point，它一落 run
         即已提交、判定就绪）；再归集 ReportStore（派生视图、永远最后、从终值 RunResult 派生）。返回 ReportStore.write 的 ResourceUri。
-        不带认领计数的条件（ADR 0054 决策二「各执行方的落实」前台一条）：发起进程是这个 run 唯一的认领方，认领在工作线程里同步完成，
+        不带认领计数的条件：发起进程是这个 run 唯一的认领方，认领在工作线程里同步完成，
         收尾发生在线程池排空之后，没有在途的认领。
 
         **写不成时不覆盖、不写报告**（ADR 0054 决策五）：run 级已是终态，说明本次执行结束之前别处已把它记为已结束；已有的终态

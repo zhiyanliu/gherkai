@@ -35,11 +35,11 @@ from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头�
 # 发出停止请求，不进任何记录；超时的归因与说明由认领时刻、预算与期限重算，与检查的早晚无关。
 _CUTOFF_CHECK_INTERVAL_S = 0.25
 
-# 接力判超时的固定余量（秒，ADR 0034「job timeout」节 claimed_at ①，ADR 0054 决策二「本机接力」条）：墙钟严格晚于截止时刻加这么多、
+# 接力判超时的固定余量（秒）：墙钟严格晚于截止时刻加这么多、
 # 仍没有退出记录时，接力方补写一条判为超时的未知退出。余量只挡认领方与接力方各自的检查间隔与时钟抖动，比各引擎的停止宽限期短（各引擎
 # 自报的值都在数十秒以上），不覆盖认领方到点催停之后 worker 的协作收尾：认领方还在、worker 仍在停止宽限期内收尾时，接力方先写下这一条，
 # 认领方随后写下的真实退出记录覆盖它；run 若在补写与真实退出之间收尾，这次收尾按超时提交，run 级的结果与报告就此定下。调大这个值换不来「不抢先」，只推迟认领方真
-# 不在时的收敛；判定条件的改法已定（按认领方的进程是否还在来判，ADR 0054 决策二「本机接力的改法」），尚未实装。
+# 不在时的收敛；判定条件的改法已定（按认领方的进程是否还在来判），尚未实装。
 _RECOVERY_MARGIN_S = 10.0
 
 
@@ -203,7 +203,7 @@ def run_reconcile_loop(
     result_store=None,
     report_store=None,
 ) -> None:
-    """per-run 进程的推进循环：反复 tick 直到 run 收尾（ADR 0034 local 主力触发源）。
+    """per-run 进程的推进循环：反复 tick 直到 run 收尾（ADR 0034「推进器与触发源」第 1 条）。
 
     clock：**必传**的墙钟（组合根传 `compose.now`；测试传 fake 保确定性），返回带时区的 datetime。tick 经它取时刻，接力判超时按它
     判断截止时刻是否已到，这里写进报告的时刻经 `serialize.instant_to_iso` 从它写出，同一份 RunState 里只有一种时间戳写法，故不留
@@ -215,7 +215,7 @@ def run_reconcile_loop(
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
     退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
     认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后按到期收尾，不
-    启动任何 job（ADR 0054 决策二「本机后台 run 的推进进程已不在时」条）。
+    启动任何 job。
 
     result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在收尾的条件写**之前**落（注入给 tick，
     ADR 0030 决定三写序）；RunReport（index/manifest）在这一方写成收尾之后由 `finalize_report` 写（派生、失败隔离）。
@@ -256,7 +256,7 @@ def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *,
 
 def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, owned_scopes: Collection[str], *,
                               now: datetime) -> None:
-    """接力判超时（ADR 0034「job timeout」节 claimed_at ①，ADR 0054 决策二「本机接力」条）：**他人认领、本进程无 handle** 的
+    """接力判超时：**他人认领、本进程无 handle** 的
     RUNNING job，墙钟严格晚于它的截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录时，按观察链已断处理（截止时刻检查随认领方进程丢失，
     worker 因 fd3 断管随之早亡），补写一条判为超时的未知退出收敛，防止 run 一直停在未结束。now 是这一轮的墙钟。
 
@@ -265,8 +265,7 @@ def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, 
     不被盖掉（点查只是省掉一次写）；补写之后才到的真实退出照旧覆盖补写的那一条（INSERT OR REPLACE 同 key）。
 
     这个判定条件保证不了不抢先：认领方还在、到点催停之后 worker 仍在停止宽限期内收尾时，接力方照样补写，run 若在补写与真实退出之间
-    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`，ADR 0054「边界与已知局限」）。改法已定、尚未实装：按认领方的进程是否还在来判
-    （ADR 0054 决策二「本机接力的改法」）。
+    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`）。改法已定、尚未实装：按认领方的进程是否还在来判。
 
     自家 job（owned_scopes）不扫：launch 时的截止时刻检查在管、且要给足协作停宽限。认领时刻缺失、读不出或不带时区的 job 不处置
     （除超时外无权臆断他人认领的死活）。与被拒方案「超时时由处置者直接写 task_exited」不冲突：那条拒的是**有活观察链时**绕过它；

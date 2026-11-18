@@ -109,7 +109,7 @@ class SqliteEventLog:
         """补写判为超时的未知退出（退出码未知、带超时标志、不带退出时刻），只在这个 scope 还没有退出记录时写入：INSERT OR IGNORE 在
         主键上一次完成「没有」的判断与写入，与别的写入方由 SQLite 的写锁串行。已有记录时不写，返回 False；写成返回 True。
         `status --wait` 接力判超时时用它（对位 `DdbEventLog.record_timed_out_if_absent`）：原推进进程恰在接力方查过之后、写入之前落下
-        真实的退出记录时，补写不成立，观察到的退出不被盖掉（ADR 0054 决策二「本机接力」条）。"""
+        真实的退出记录时，补写不成立，观察到的退出不被盖掉。"""
         with self._connect() as conn:
             cur = conn.execute(
                 "INSERT OR IGNORE INTO exits (scope_id, exit_code, timed_out, reason, exited_at) VALUES (?, NULL, 1, NULL, NULL)",

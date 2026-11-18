@@ -478,7 +478,7 @@ def test_sync_path_new_verdicts_come_from_the_shared_finalize(monkeypatch, cause
     assert [s.release for s in jr.sessions] == ["confirmed"]  # 停止后到达的收尾照常归约
 
 
-# ---------- 后台路径与前台同一结论（ADR 0054 决策二后台推进条、实测项 13）----------
+# ---------- 后台路径与前台同一结论（ADR 0054 决策二后台推进条、实测项 4）----------
 
 _NEAR = (_Clock.T0 + timedelta(seconds=100)).isoformat()  # 运行期限：同步路径的假墙钟越过截止时刻时它已过
 
@@ -494,7 +494,7 @@ def test_paths_agree_when_the_run_deadline_cuts_the_job(row: Row):
         assert b["message"].startswith(DEADLINE_TIMEOUT_MESSAGE)
 
 
-# worker 在截止时刻前后自己退出（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 24）：同步路径在终结之前对内容不完整的 job
+# worker 在截止时刻前后自己退出（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 11）：同步路径在终结之前对内容不完整的 job
 # 再查一次截止时刻；无状态路径的退出记录与本机启动器、云端观察者写的同一形态——不带超时标志、只带退出时刻，由收尾投影按它是否晚于
 # 截止时刻判断。预算 5 秒；同步路径的假墙钟在最后一条事件之后越过截止时刻（after_cutoff）或一直停在它之前。同步路径不包心跳：最后
 # 一条事件之后紧接着就是 worker 的退出，中间没有事件间检查，也就不会先发出停止请求。
@@ -621,7 +621,7 @@ def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path,
 
 
 def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
-    """到期收尾（ADR 0054 决策二第 3 条、实测项 13）：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
+    """到期收尾（ADR 0054 决策二第 3 条、实测项 4）：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
     同一个 run 级状态与说明、同一组判定（b 不在其中、没有执行），后台的运行态里 b 保持 pending。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore

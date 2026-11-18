@@ -862,7 +862,7 @@ def test_run_state_message_is_omitted_when_none_and_round_trips_when_set():
 
 
 def test_run_state_claim_count_is_always_written_and_missing_reads_as_zero():
-    """认领计数（ADR 0054 决策二）写端恒写：为 0 时同样出键（不按 omit-when-None 省掉），非零值原样往返；读端缺键读作 0。"""
+    """认领计数（ADR 0034 机制三「run 级状态只进不退」条①）写端恒写：为 0 时同样出键（不按 omit-when-None 省掉），非零值原样往返；读端缺键读作 0。"""
     from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
 
     fresh = RunState(run_id="r", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)})
@@ -891,7 +891,7 @@ def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
 def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path):
     """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
     create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写、`is_detached` 为 False，记录不存在也为 False。
-    之后的写不逐个补回它（ADR 0054 决策三末段）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
+    之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
     run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进 RunState 模型。"""
     r = _sample_run("run-d")
     LocalRunStore(tmp_path / "runs", detached=True).create_run(r.run_meta, run_state_from_result(r))

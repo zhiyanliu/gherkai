@@ -40,7 +40,7 @@
 
 ## 被拒 / 留口子
 
-- **run 级 `--model <engine>=<id>`，随 definition 持久化、各宿主注入**（`--steps-dir` 的先例，[0037](./0037-distribution-and-packaging.md) 决策 4）——让云端使用方不必烙镜像。留口子不做：等 A/B 数据与真实需求；本机 spawn / 前台 Fargate / detached Lambda / 能力自述四个注入面就是四个会漂的地方。
+- **run 级 `--model <engine>=<id>`，随 definition 持久化、各宿主注入**（`--steps-dir` 的先例，[0037](./0037-distribution-and-packaging.md) 决策 4）——让云端使用方不必烙镜像。留口子不做：等 A/B 数据与真实需求；本机 spawn / 推进器 Lambda / 能力自述三个注入面就是三个会漂的地方。
 - **在 gherkai 侧为各家模型写适配**——Midscene 已有 family 适配器，复刻即第二事实源；Nova 侧只有一个服务，无此需求。
 - **Midscene 无 family 的视觉模型**（Amazon Nova Lite / Pro、Claude、Gemma 3、Mistral）——要自写适配器，违背薄 worker（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md)）。
 - **单一 family 硬编码**（旧态 `MIDSCENE_USE_QWEN3_VL: "true"`）——被推断表 + 显式覆盖替代。

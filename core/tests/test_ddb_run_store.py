@@ -152,7 +152,7 @@ def test_detached_flag_on_state_item(aws):
     item = table.get_item(Key={"run_id": "sync-1", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert "detached" not in item  # 属性缺席 → Stream filter 不命中 → kicker 不触发
 
-    # 只读访问器（推进器 handler 侧分流用它,ADR 0034 端到端 cloud 1b）:读同一个标记,未知 run 保守判 False
+    # 只读访问器（推进器 handler 侧分流用它）:读同一个标记,未知 run 保守判 False
     reader = DynamoDBRunStore(table)
     assert reader.is_detached("det-1") is True
     assert reader.is_detached("sync-1") is False

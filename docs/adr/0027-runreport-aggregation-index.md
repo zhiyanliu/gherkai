@@ -1,6 +1,6 @@
 # RunReport：跨引擎归集索引（不融合原生产物内容）
 
-> **Status:** Partially-superseded-by 0042, 0054 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二以加法扩展「index.html 形态」：摘要带 run 级说明，运行定义里有、判定清单里没有的 job 列在判定明细末尾、标为没有执行；已原位改写、已实装。
+> **Status:** Partially-superseded-by 0042, 0054 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）[0054](./0054-run-deadline-lifetime-lock-and-settling.md)：「index.html 形态」的摘要带 run 级说明，已实装。这一篇描述的设计有一部分尚未实装，code 跟上之前实际行为以 code 为准。
 
 兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
@@ -10,8 +10,8 @@
 
 **RunReport 不试图解析/重渲染这些产物**——那等于给每个引擎写一个 HTML 解析器，既脆又把 core 锁死到具体引擎。RunReport 是一份**跨引擎、跨产物的统一目录 + 导航入口**：
 
-- **`manifest.json`** —— 机器可读（CI / WebUI 消费）：**薄信封**（schema_version/run_id/created_at）+ 一份扁平的报告产物清单（report_index，每条指向哪个 scope·scenario、哪个引擎、什么 kind、产物在哪）。**不内嵌判定/时长/成本**——那是 `RunResult` 真值、靠 `run_id` 软引用到 `ResultStore` 取（详见下「manifest.json 形态」）。
-- **`index.html`** —— 人可导航：一个最小的单文件入口，判定明细树（判定/时长/成本从内存 `RunResult` 渲染）+ 每个产物一行链接，点开看**原样的**原生产物。
+- **`manifest.json`** —— 机器可读（CI / WebUI 消费）：**薄信封**（schema_version/run_id/created_at）+ 一份扁平的报告产物清单（report_index，每条指向哪个 scope·scenario、哪个引擎、什么 kind、产物在哪）。**不内嵌判定/时长/成本**——它们在记录里（状态在运行态，明细在各 job 被点名的那一份，[0030](./0030-realtime-persistence-seam.md) 决定三），manifest 靠 `run_id` 软引用那次 run（详见下「manifest.json 形态」）。
+- **`index.html`** —— 人可导航：一个最小的单文件入口，判定明细树（判定/时长/成本从记录渲染，见下「ReportStore 接口：整 run 一次写」）+ 每个产物一行链接，点开看**原样的**原生产物。
 
 原生产物保持原样（各引擎自己最懂怎么呈现），RunReport 只**索引/链接**它们。
 
@@ -52,11 +52,12 @@ RunReport 要按引擎标注每条产物。`JobResult` 须能就地拿到 `engin
 ```python
 class ReportStore(Protocol):
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
-        """从 RunResult 归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
+        """从记录生成：result 由记录组装（job 与 run 的状态取运行态，各 job 的明细取被点名的那一份，ADR 0030 决定三），
+        归集出 <report_root>/<run_id>/{manifest.json, index.html}，返回 index.html 的 ResourceUri。
 
         读 result 的 report_refs + 各级 status/时长/成本 + step 级 votes/error_type·message/shortcircuited，
         渲染成「判定明细树 + 产物导航」的**人看视图**（明细树见下「index.html 形态」）；
-        **但不拿 status 当 CI 判定源**（判定真值在 RunResult/ResultStore，index.html 只是派生人看视图）。
+        **但不拿 status 当 CI 判定源**（状态以运行态为准、脚本读状态用 status --json，index.html 只是派生人看视图）。
         """
     def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：云端探桶、local no-op
 ```
@@ -72,7 +73,8 @@ class ReportStore(Protocol):
 > - `href` 是**正交的另一件事、且不受铁律约束**：它是 core 为 `index.html` 导航自算的链接，本就允许 core 生成/改写（「算一个链接」是 ReportStore 的本分）。local 把 `href` 相对化（指向产物在 run 树内原位，如 `nova-trajectories/<Nova Act 会话 id>/act_<act id>_<指令片段>.html`）→ 报告目录整拷到别的机器链接不断；cloud 下 `s3://` 全局可寻址、无相对必要，`href==ref`。
 > - `LocalReportStore` → `S3ReportStore` 只换「manifest+index 这些 **core 派生数据**落哪 / 返回的 URI scheme / `href` 相对化策略」，core 不动、且复用同一份 `render_index_html` 与 `collect_report_index`（单一渲染真理源）。（注意区分：`S3ReportStore` 是把 **RunReport 自身**（manifest/index.html）写到 S3，与「worker 把自己的产物上传 S3」是两回事。）
 
-- **`write` 失败被隔离、不击穿已 commit 的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、可重建、永不作判定源**——故 `RunPersistence.finalize` 在 commit point（收尾的条件写 `try_finalize`，判定真值已落 ResultStore）之后才调 `ReportStore.write`（收尾写不成、run 级已是终态时不写报告，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个「可重建的报告」写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。（无状态批量运行路径同守此序：RunReport 由推进器在 `try_finalize` CAS **之后**经 `reconcile.finalize_report` 写、同一失败隔离，见 [0030](./0030-realtime-persistence-seam.md) 决定三与 [0034](./0034-detached-batch-reconciler.md)）
+- **报告由谁、在何时、从什么生成**：使 run 成为终态的那次写的写入方（执行方或处置方）在这次写之后从记录（运行态加各 job 被点名的明细）生成，没写成的一方不生成。被处置的本机后台 run 由此照常有明细与报告：明细由后台推进进程在各 job 结束时写下并点名，报告由处置方生成。这是做法：写入方在生成之前中断则没有报告；事件里有结果而运行态还没有终态的 job 见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策七。报告里的判定由记录确定，不随生成的时机变化（[0030](./0030-realtime-persistence-seam.md) 决定三）。
+- **`write` 失败被隔离、不击穿已结束的 run**（实时写接缝，[0030](./0030-realtime-persistence-seam.md)）：RunReport 是**纯派生只读视图、永不作判定源**——故写入方在使 run 成为终态的那次写之后才调 `ReportStore.write`，且把 write 的异常隔离（吞掉+**不留痕**+返回 None——曾设的 `_report_error` 留痕字段已按悬空字段判据删，见 [0016](./0016-execution-architecture-core-lib-run-model.md)「`finalize()` 返回 None」条），不让一个派生视图的写失败把整个 run 拖成裸 traceback 退出、CI 拿不到判定输出。前台执行、后台推进与处置方同守此序与同一失败隔离（[0030](./0030-realtime-persistence-seam.md) 决定三）。
 
 > **被拒方案：不做「materialize」式的产物拷贝**（别重新进坑）。曾有过一个 opt-in「把产物按字节拷进 `<run_id>/artifacts/` 求自包含」的开关，已否决——报告自包含由 `href` 相对化零成本达成（产物本就在 run 树内），而拷贝是「拷一份已在树里的东西」的纯磁盘放大；云端用 `s3://` 绝对链接（全局可寻址、拷/分享不断），拷贝亦零收益。**取舍**：报告「半可移植」——`index.html`/`manifest.json` 相对 `href` 可整目录搬走，`jobs/*.json` 的 `ref` 保持绝对（判定真值/provenance）拷机器后其产物链接仍断；跨机器分享用 `index.html` 或 `--backend cloud`（全在 S3）即可，不为此付全量拷贝代价。
 
@@ -94,16 +96,16 @@ class ReportStore(Protocol):
 - **cloud（S3）**：`href` 恒 = `ref`（`s3://` 全局可寻址、无相对必要）。
 - **只按 scheme 分支（`file://` 相对、其余 identity），绝不按 `kind` 分支**——后者才是铁律点名禁止的。为算相对 href 而 `urlparse` 解析 `ref` 字符串**不越铁律**：铁律「禁止解析」的宾语是产物**内容**（HTML/trajectory 字节），非 `ref` 指针串；「算一个链接」本就要读 `ref`。
 
-**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘）、`ResultStore`=数据面（判定真值唯一权威）、`ReportStore`=**纯派生只读导航视图**（可从 `RunResult` 完全重建、永不作 CI 判定源）。
+**职责边界（三 port 正交，[0016](./0016-execution-architecture-core-lib-run-model.md)）**：`RunStore`=控制面（definition `RunMeta` + 运行态 `RunState`：status/血缘；job 与 run 状态的权威）、`ResultStore`=数据面（对 scenario、step 与归因负责；每次保存一份、带标识，用哪一份由 job 的终态点名）、`ReportStore`=**纯派生只读导航视图**（从记录生成、永不作 CI 判定源；脚本读状态用 `status --json`）。状态的权威与点名见 [0030](./0030-realtime-persistence-seam.md) 决定三。
 
 ## manifest.json 形态
 
-**纯派生导航视图：薄信封 + 扁平 report_index，不内嵌 result 真值副本**。判定真值由 `ResultStore` 持有（数据面，每 job 落 `jobs/<quote(scope_id)>.json`：本机文件，或 S3 上 `<prefix>/<run_id>/` 下同一相对路径的对象，[0030](./0030-realtime-persistence-seam.md) 决定六），运行态/身份由 `RunStore` 持有（`run_meta.json` + `run_state.json`，或 DynamoDB runs 表里同一 `run_id` 下的 `META` / `STATE` 两个 item，[0016](./0016-execution-architecture-core-lib-run-model.md)、[0030](./0030-realtime-persistence-seam.md) 决定六）；manifest 靠 **`run_id` 软引用**那次 run——CI 要判定就拿 run_id 找 `ResultStore`。这样 report 是真·派生品（可删可重建、永不作判定源），无真值冗余、无一致性风险。
+**纯派生导航视图：薄信封 + 扁平 report_index，不内嵌 result 真值副本**。判定明细由 `ResultStore` 持有（数据面，每次保存一份、带写入方生成的标识，用哪一份由 job 的终态点名；存放形态见 [0030](./0030-realtime-persistence-seam.md) 决定三与决定六，不是对外的约定），运行态/身份由 `RunStore` 持有（`run_meta.json` + `run_state.json`，或 DynamoDB runs 表里同一 `run_id` 下的 `META` / `STATE` 两个 item，[0016](./0016-execution-architecture-core-lib-run-model.md)、[0030](./0030-realtime-persistence-seam.md) 决定六；job 与 run 的状态以运行态为准）；manifest 靠 **`run_id` 软引用**那次 run——CI 要状态用 `status --json`、要明细用 `explain --json`（[0041](./0041-agent-facing-cli-affordances.md) 决策三）。这样 report 是真·派生品（可删、永不作判定源），无真值冗余、无一致性风险。
 
 ```jsonc
 {
   "schema_version": 1,
-  "run_id": "...",               // 软引用那次 run；完整判定真值在 ResultStore（jobs/*.json），按此 id 取
+  "run_id": "...",               // 软引用那次 run；状态在运行态，明细取各 job 被点名的那一份（经 status / explain 的 --json），按此 id 取
   "created_at": "...",           // 组合根生成的时间戳（字符串，由调用方传入）
   "report_index": [              // 扁平投影，便于 CI/WebUI 直接遍历
     { "scope_id": "...", "scenario_id": "..."|null, "step_index": N|null, "engine": "...", "kind": "...",
@@ -112,17 +114,17 @@ class ReportStore(Protocol):
 }
 ```
 
-- `report_index` 从内存 `RunResult` 树一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
-- **每条只含 `href`（导航链接），不含 `ref`**（曾有 `ref` 字段，随 materialize 一并移除）。理由：① manifest 是**纯派生导航视图**，`href` 承担全部导航语义、无人读 `ref`（index.html 渲染只用 `href`；全仓无生产代码回读 manifest.json）；② 若保留 `ref`，`href` 相对化后 `ref` 因铁律必须留绝对（不能相对化它）→ 变成一条**无人读却泄漏机器路径的绝对 `file://`**。删 `ref` 既消冗余又消泄漏。**原始不透明指针 `ref` 的权威落盘处收敛到 `jobs/*.json`（ResultStore 判定真值）+ 内存 `RunResult`**——未来 WebUI/CI 要原始指针应去 ResultStore 取（判定真值），不向派生 report 视图要，这反而强化了三层分层。（这是 manifest schema 契约变更，本仓无 in-repo 消费者故低风险，仍记为契约变更防漂移。）
-- index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type·message/shortcircuited 旁注）**直接用内存 `RunResult`** 渲染，不从 manifest 读（manifest 已不含 result）。
+- `report_index` 从 `write` 收到的 `RunResult` 树（由记录组装，见上「ReportStore 接口：整 run 一次写」）一次投影（含全部 report_refs 三级，**不走逐条 append**）；**粒度由 `scenario_id`/`step_index` 是否为 null 表达**：`scenario_id=null` = scope 级；`scenario_id` 非空且 `step_index=null` = scenario 级；两者都非空 = step 级（同 scenario 多 trajectory 靠 step_index 区分）。
+- **每条只含 `href`（导航链接），不含 `ref`**（曾有 `ref` 字段，随 materialize 一并移除）。理由：① manifest 是**纯派生导航视图**，`href` 承担全部导航语义、无人读 `ref`（index.html 渲染只用 `href`；全仓无生产代码回读 manifest.json）；② 若保留 `ref`，`href` 相对化后 `ref` 因铁律必须留绝对（不能相对化它）→ 变成一条**无人读却泄漏机器路径的绝对 `file://`**。删 `ref` 既消冗余又消泄漏。**原始不透明指针 `ref` 的权威落盘处收敛到判定明细（ResultStore，取被点名的那一份）+ 内存 `RunResult`**——未来 WebUI/CI 要原始指针应取被点名的那一份明细（经 `explain --json`），不向派生 report 视图要，这反而强化了三层分层。（这是 manifest schema 契约变更，本仓无 in-repo 消费者故低风险，仍记为契约变更防漂移。）
+- index.html 的 run 摘要 + 整棵判定明细树（job→scenario→step，各级上色 + step 级 votes/error_type·message/shortcircuited 旁注）**直接用 `write` 收到的 `RunResult`**（由记录组装）渲染，不从 manifest 读（manifest 不含 result）。
 - **manifest 不内嵌 `to_dict(result)`**（曾考虑、否决）：那会让派生视图承载判定真值副本（与 `ResultStore`/`RunStore` 冗余）；改为软引用 run_id 消除冗余。`serialize` 仍是单一序列化真理源（cli `--json` 与各 store 共用），只是不塞进 manifest。
 
 ## index.html 形态
 
-纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。**两大块**（皆从内存 `RunResult` 渲染）：
+纯 Python 字符串拼装 + `html.escape()`，**无模板引擎、无外链 JS/CSS、单文件**（对齐 `wire.py`「手写映射、显式稳定」与 core「薄编排层无重型依赖」）。**两大块**（皆从 `write` 收到的 `RunResult` 渲染，它由记录组装）：
 
-- 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）；`RunResult.message` 有值时紧跟一行 run 级说明（没有任何 job 能承载的原因，如「已超过允许运行的时间」，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）。
-- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type 与失败原因原文 message（[0042](./0042-step-evidence-and-explain.md) 决策三）/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。scope 级 error 后合成的 skipped（`shortcircuited=False`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）另显「未执行（scope 级错误，原因见 job 判定）」旁注。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（判定真值在 ResultStore）。**没有判定的 job**（运行定义里有、`RunResult.jobs` 里没有，即 `RunResult.jobs_without_verdict`：已过停止启动的时刻、或发现 run 已被别处记为已结束而没有启动，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）排在有判定的之后、按运行定义的次序，每个只有 scope 与「没有执行」标注、圆点用兜底灰，原因在摘要的 run 级说明；标题注明另有几个没有执行。它与 skipped（有判定、原因在 job 自己的说明）、与 step 行的「未执行」旁注（scope 级错误后合成的 skipped）是三回事，措辞分开；「没有执行」与 cli 文本汇总同一句，两包各一份字面量，由 cli 侧测试逐字锁定（同短路旁注的做法）。
+- 顶部一行 run 摘要（run_id + 总 status + duration + 原生量成本）；`RunResult.message` 有值时紧跟一行 run 级说明（结束的原因，由结束写写下，如「已超过允许运行的时间」，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）。
+- **① 判定明细树**：job→scenario→step，逐级上色（含派生态 skipped/aborted、前置态 pending/running 各自配色，非兜底灰，见 [0031](./0031-job-lifecycle-states-and-severity.md)）+ step 级 status/votes tally/error_type 与失败原因原文 message（[0042](./0042-step-evidence-and-explain.md) 决策三）/时长。**被 scope 内短路的 step 显 `skipped` 态 + 读 `shortcircuited` 布尔加「⚠ 因前置 step error 被跳过」旁注**（连锁失败旁注，判据是 shortcircuited 而非「按 status 顺序猜」，见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）。scope 级 error 后合成的 skipped（`shortcircuited=False`，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）另显「未执行（scope 级错误，原因见 job 判定）」旁注。让纯确定性 run（无原生产物）也一眼看懂结果。**但不拿它当 CI 判定源**（状态以运行态为准，脚本读状态用 `status --json`）。**由结束写结束的 job**（没有执行结果、没有被点名的明细，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）排在由执行结果结束的 job 之后、按运行定义的次序，每个按运行态显示状态（配色同各状态）与 job 的说明，没有明细树。它与 step 行的「未执行」旁注（scope 级错误后合成的 skipped）是两回事，措辞分开。
 - **② 报告产物导航清单（引擎原生产物 + gherkai evidence，[0042](./0042-step-evidence-and-explain.md)）**：每条 report_ref 一行——job.status 上色 + scope_id（+ scenario_id/step[N] 表粒度）+ engine + `[kind]` + 指向 `href` 的 `<a>`（`label` 或回落 `kind` 作锚文本）。`href` 由 `make_href` 算（local 相对 / cloud 恒等 ref，见上「href 相对化」）。
 - **①②双向锚点关联**：①里挂了产物的节点行尾加 📎（同节点多产物显 📎×N、链到首条）链到②对应条目，②每条加 ↑ 链回所属树节点；关联键 = 产物挂载层级的 `(scope_id, scenario_id, step_index)` 三元组，锚点 id 纯 ASCII（`node-jN-sN-tN` 用 job/scenario 的位置序号 + step 自身 index，`ref-N` 用在 `report_index` 里的序号）——`scope_id` 可含中文/冒号，不能直接进 `#fragment`；落点 `:target` 高亮 + 平滑滚动。平铺清单表达不了「产物属于哪个 job/scenario/step」，借①的树结构补上。仍守本节「无外链 JS/CSS、单文件」：只用同文件内 fragment 链接 + 内联 CSS，零 JS。
 - 上色用内联 `<style>`。

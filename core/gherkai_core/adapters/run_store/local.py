@@ -16,7 +16,7 @@
 try_claim_job、project_state、try_finalize 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方（前台执行者、后台推进进程、
 `status --wait` 接力）不靠调用方串行。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
 
-**顶层附加键整体保留**（ADR 0054 决策三末段）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
+**顶层附加键整体保留**（ADR 0030 决定四「local 的顶层附加键整体保留」）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
 如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
 
 **克制（ADR 0016）**：只忠实持久化已成形的 RunMeta/RunState（复用 serialize），**不发明 serialize 之外的字段**。
@@ -279,7 +279,7 @@ class LocalRunStore:
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """CAS：仅当 jobs[scope_id] 当前 PENDING 且 run 未收尾才置 RUNNING（机制四）；随写 claimed_at（timeout 起算点）。
 
-        同一次锁内写回把 run 级置为 RUNNING（ADR 0034 机制三「run 级状态只进不退」条①）并把认领计数加一（ADR 0054 决策二）：
+        同一次锁内写回把 run 级置为 RUNNING 并把认领计数加一（ADR 0034 机制三「run 级状态只进不退」条①）：
         run 已收尾后不再接受新认领，条件不成立（job 不存在、已非 pending、run 已收尾）一律返回 False、不写。HWM 不变。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
@@ -345,8 +345,8 @@ class LocalRunStore:
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
                      expected_claim_count: int | None = None) -> bool:
         """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入；
-        为 None 时不动库中值（对拍 DDB 不提及该属性）。expected_claim_count 给出时另要求锁内重读到的认领计数等于它
-        （ADR 0054 决策二「认领计数」段），为 None 时不判。"""
+        为 None 时不动库中值（对拍 DDB 不提及该属性）。expected_claim_count 给出时另要求锁内重读到的认领计数等于它，
+        为 None 时不判。"""
         def mutate(state: RunState):
             if state.status not in (Status.PENDING, Status.RUNNING):
                 return None  # 已终态：别人已收尾 → 不覆盖

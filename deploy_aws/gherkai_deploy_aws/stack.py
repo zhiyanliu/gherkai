@@ -389,7 +389,7 @@ class BackendStack(Stack):
         events_table = names.default_name(pfx, names.BASE_EVENTS_TABLE)
         bucket = names.default_name(pfx, names.BASE_BUCKET)
 
-        # 两个引擎共享：events 表 PutItem（**只 events 表、不给 runs 表**——worker 绝不碰 RunState，ADR 0024/0030 单写者）
+        # 两个引擎共享：events 表 PutItem（**只 events 表、不给 runs 表**——worker 绝不碰 RunState，ADR 0024；RunState 的写入方见 ADR 0034「数据模型三件套」）
         role.add_to_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem"],
             resources=[f"arn:aws:dynamodb:{region}:{acct}:table/{events_table}"],
@@ -597,8 +597,8 @@ class BackendStack(Stack):
         Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。**复用同步 cloud run 的资源**（runs/events
         表、桶、cluster、task-def、task/execution role）——reconciler 起 worker task 与同步路径同一套
         （compose.build_fargate_engines 单一真源，见本包 lambdas/reconciler.py）。故三个 handler 都得自己分辨
-        「这个 run 归谁推进」：exit-observer/reconciler 在 handler 里判 detached（触发面滤不掉，ADR 0034
-        端到端 cloud 1b），kicker 靠 Stream filter 滤（见下）——两者判据同一个标记。
+        「这个 run 归谁推进」：exit-observer/reconciler 在 handler 里判 detached（触发面滤不掉），kicker 靠
+        Stream filter 滤（见下）——两者判据同一个标记。
         """
         cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
         code = lambda_.Code.from_asset(self._build_lambda_asset())
@@ -636,8 +636,8 @@ class BackendStack(Stack):
         # 复刻一遍，表名一改即静默漂移。
         exit_observer.add_to_role_policy(iam.PolicyStatement(
             actions=["dynamodb:PutItem"], resources=[self._events_table.table_arn]))
-        # runs 表**只读**：写前判 run 是否 detached（同 cluster 的同步 cloud run 也触发本 Lambda，ADR 0034
-        # 端到端 cloud 1b 的 handler 侧分流）。观察者绝不写 runs 表（RunState 单写者，ADR 0030）。
+        # runs 表**只读**：写前判 run 是否 detached（同 cluster 的同步 cloud run 也触发本 Lambda）。
+        # 观察者绝不写 runs 表（RunState 的写入方见 ADR 0034「数据模型三件套」）。
         self._runs_table.grant_read_data(exit_observer)
         # EventBridge rule：本 cluster 的 ECS Task STOPPED → 退出观察者。event pattern 按 cluster 过滤（不误触别的负载）。
         events.Rule(

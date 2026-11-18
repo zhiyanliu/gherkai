@@ -349,7 +349,7 @@ class _Worker:
 
     def run(self) -> JobResult | None:
         """运行一个 job，含网络瞬时故障的选择性重试（ADR 0028）。返回 None 表示这个 job 没有启动、不产出判定：起 worker 之前已过
-        停止启动的时刻，或已发现 run 被别处记为已结束（含认领被拒），运行态保持 pending（ADR 0054 决策二）。
+        停止启动的时刻，或已发现 run 被别处记为已结束（含认领被拒），运行态保持 pending。
 
         重试门槛（三条件 AND，绝不放宽）：① 本次以 network_error 失败（worker 建连失败、
         重试耗尽）② 「会话未起」指本次零 step_done（证明 act 没执行、无副作用、不重复计费）③ job 目标不是设备（设备 worker
@@ -551,7 +551,7 @@ class _Worker:
             else:
                 exited, exit_code = True, 0  # 事件流自然 EOF：worker 干净退出（adapter 对非零退出码抛 WorkerExitError）
         except WorkerExitError as e:  # worker 以非零退出码结束（含网络故障的 80、被信号强杀的负码，ADR 0034 机制二）
-            # 只取两个有类型的字段（ADR 0024「exitCode 落值延迟」条）：退出码，与 adapter 落平台侧哨兵时写入的归因 reason（ECS 的
+            # 只取两个有类型的字段：退出码，与 adapter 落平台侧哨兵时写入的归因 reason（ECS 的
             # stopCode 与 stoppedReason 拼成，worker 自报的码不带、为 None）。reason 是 adapter 从结构化字段取得的值，不是解析文本；
             # 异常消息不进 exit_reason，消息由终结函数按码给出、有 reason 时接在后面。
             exited, exit_code, exit_reason = True, e.exit_code, e.reason
@@ -768,7 +768,7 @@ def schedule(
     order = {job.scope_id: i for i, job in enumerate(jobs)}
     job_results.sort(key=lambda jr: order.get(jr.scope_id, 0))
 
-    # run 级裁决（ADR 0054 决策二）：聚合之外的例外——已过停止启动的时刻而有 job 没有启动（error 加 run 级说明，优先于使用方中断）、
+    # run 级裁决：聚合之外的例外——已过停止启动的时刻而有 job 没有启动（error 加 run 级说明，优先于使用方中断）、
     # 使用方中断与发现 run 已被别处结束（aborted）——都在裁决函数里，这里只交出事实。是否已过停止启动的时刻取执行期间各次检查记下的
     # 事实、不再读墙钟：系统时钟回拨不会抹掉已经发生的停止启动
     verdict = run_verdict(

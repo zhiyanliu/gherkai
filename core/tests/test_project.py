@@ -169,7 +169,7 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
 
 
 def test_platform_exit_reason_joins_stop_code_and_reason_with_fallback():
-    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用，ADR 0024「exitCode 落值延迟」条）：
+    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用，ADR 0034 机制二「退出码缺失」条）：
     两项齐全用「: 」相连，缺一项只用另一项，两项都缺（或为空串）时取固定兜底句、绝不为空。"""
     from gherkai_core.project import platform_exit_reason
 
@@ -389,7 +389,7 @@ def test_run_totals_with_a_complete_verdict_list_matches_the_metered_job_results
     assert run_totals(results[1:], jobs=(web,))["device_observed_s"] is None
 
 
-# ---------- run 级裁决（ADR 0054 决策二）----------
+# ---------- run 级裁决 ----------
 
 def _decided(job: Job, status: Status) -> JobResult:
     return JobResult(job=job, status=status)
@@ -475,7 +475,7 @@ def test_stateless_path_cannot_yield_aborted_job():
 
 
 def test_project_full_run_level_comes_from_the_shared_verdict():
-    """project_full 的 run 级状态与说明由前台共用的 run_verdict 给出（ADR 0054 决策二）：没有记录的 job 不臆造明细、不在判定清单里；
+    """project_full 的 run 级状态与说明由前台共用的 run_verdict 给出：没有记录的 job 不臆造明细、不在判定清单里；
     已过停止启动的时刻而有 job 没有判定是 error 加「已超过允许运行的时间」（已启动的 job 全部通过也一样，聚合在这里会给 passed）；
     全部 job 都有判定时照常聚合，不管是否已过期限；有 job 没有判定而不是因为到期（不该发生）时记 aborted，不判 passed。"""
     a_done = _passed_events("a") + [_exit("a", 0)]
@@ -645,7 +645,7 @@ def test_plan_next_past_stop_start_waits_for_running_jobs():
 
 def test_plan_next_past_stop_start_does_not_expire_while_a_recorded_job_is_still_pending():
     """有记录而投影仍为 pending 的 job（别的推进方刚认领、worker 只发出了结果未知的建会话尝试）说明已经有人启动了它：已过停止启动的
-    时刻时这一轮不到期收尾、继续推进（ADR 0054 决策二后台推进条「决策」）。「未启动」只指事件流里没有任何记录的 job。"""
+    时刻时这一轮不到期收尾、继续推进。「未启动」只指事件流里没有任何记录的 job。"""
     from gherkai_core.model import SessionOpened
 
     attempted = [EventRecord(scope_id="b", kind="event", seq=1, event=SessionOpened(scope_id="b", name="t", origin="attempted"),

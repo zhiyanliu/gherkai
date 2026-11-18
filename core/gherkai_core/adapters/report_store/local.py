@@ -203,7 +203,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     两块内容（ADR 0027/0016）：
     ① 判定明细（job→scenario→step，status/时长/sessionId）——直接从内存 RunResult 渲染，让纯确定性
        run（无原生产物）也一眼看懂结果（判定真值仍以 ResultStore 的 jobs/*.json 为准，本页只是人看视图）。运行定义里有、
-       判定清单里没有的 job 排在末尾、标为没有执行；run 级说明在顶部摘要里（ADR 0054 决策二）。
+       判定清单里没有的 job 排在末尾、标为没有执行；run 级说明在顶部摘要里。
     ② 报告产物导航——report_index 的扁平投影，链接指向引擎原样产物与 gherkai 自有的 step 级 evidence（本页对二者都只
        链接、不解析内容；evidence 的解引用只在 CLI explain，ADR 0042 决策五）。
     """
@@ -341,7 +341,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
             f'<div class="jobmeta">{" · ".join(meta_bits)}</div></div>'
             f'{scen_html}</div>'
         )
-    # 没有判定的 job（运行定义里有、判定清单里没有，ADR 0054 决策二）：排在有判定的之后、按运行定义的次序，只有 scope 与「没有执行」
+    # 没有判定的 job（运行定义里有、判定清单里没有）：排在有判定的之后、按运行定义的次序，只有 scope 与「没有执行」
     # 标注，原因在摘要里的 run 级说明。它不是 skipped（有判定、原因在 job 的说明），所以不写状态词、圆点用兜底灰。
     # 「没有执行」与 cli 文本渲染的标注措辞相同（那边是 `gherkai_cli.render._NOT_RUN_LABEL`，core 不能 import cli），由 cli 侧的
     # test_index_html_shows_run_message_and_not_run_label_matching_cli_wording 逐字锁定。
@@ -354,7 +354,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     jobs_heading = f"判定明细（{len(result.jobs)} job）"
     if not_run:
         jobs_heading = f"判定明细（{len(result.jobs)} job，另有 {len(not_run)} job 没有执行）"
-    # run 级说明（ADR 0054 决策二）：没有任何 job 能承载的原因，放在摘要里紧跟总状态
+    # run 级说明：没有任何 job 能承载的原因，放在摘要里紧跟总状态
     message_html = f'\n  <div>说明: {esc(result.message)}</div>' if result.message else ""
 
     # ② 报告产物导航（report_index 扁平投影）——每条带 id=ref-{seq} 锚点 + ↑ 链回判定明细树里所属节点，

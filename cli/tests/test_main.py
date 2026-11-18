@@ -3338,7 +3338,7 @@ def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_pat
 
 def test_status_wait_on_a_foreground_run_only_waits_and_never_relays(tmp_path, monkeypatch, capsys):
     """前台 `run` 正在执行的 run（没有 detached 标记）上执行 status --wait：不接力推进（接力者会与前台进程双开推进器、再起一个 worker），
-    只轮询等它到终态，提示一句，再按判定给退出码（ADR 0034 两道闸的第一道；第二道是终态）。"""
+    只轮询等它到终态，提示一句，再按判定给退出码（两道闸的第一道；第二道是终态）。"""
     import time as _time
     root, run_id = _explain_run(tmp_path)  # 终态 failed
     path = root / run_id / "run_state.json"

@@ -1540,7 +1540,7 @@ def test_sigkill_negative_exit_code_is_error_not_clean():
 
 
 def test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not():
-    """WorkerExitError 上有类型的 reason 作为退出原因交给终结函数（ADR 0024「exitCode 落值延迟」条：同步云端路径取不到退出码时，
+    """WorkerExitError 上有类型的 reason 作为退出原因交给终结函数（同步云端路径取不到退出码时，
     adapter 落平台侧哨兵 255 并在 reason 带 ECS 归因）；异常消息文本不当归因，不带 reason 时 job message 里也不出现它。"""
     from gherkai_core.errors import WorkerExitError
     from gherkai_core.project import PLATFORM_FAILED_EXIT
@@ -1622,7 +1622,7 @@ def test_device_job_spawn_failure_still_carries_metering_keys():
     assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
 
 
-# ---- 使用方中断（ADR 0024 终止契约「使用方中断」条；ADR 0031 决定三的例外）----
+# ---- 使用方中断（ADR 0024 终止契约「使用方中断」条）----
 
 def _interrupt_sequence(levels):
     """按轮询次数给出中断级别：第 i 次轮询返回 levels[min(i, len(levels) - 1)]。返回 (回调, 轮询计数列表)。"""
@@ -1672,8 +1672,8 @@ def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
 
 
 def test_user_interrupt_with_passed_and_aborted_marks_run_aborted():
-    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由裁决函数的中断例外记 aborted
-    （ADR 0031 决定三的例外）。这条例外只在同步路径上有：无状态路径不作中止决定，推不出 job 级 aborted。"""
+    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由裁决函数的中断例外记 aborted。
+    这条例外只在同步路径上有：无状态路径不作中止决定，推不出 job 级 aborted。"""
     from gherkai_core.project import _aggregate
 
     a_started, b_done = threading.Event(), threading.Event()
@@ -2493,7 +2493,7 @@ def test_deadline_passed_at_the_moment_of_decision_wins_over_ended_elsewhere():
 
 def test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted():
     """使用方中断之后、排队中的 job 起 worker 之前已过停止启动的时刻：它不启动、不产出判定（不记 skipped）；run 级是 error 加到期说明，
-    优先于中断的 aborted（ADR 0054 决策二「run 级只要有 job 保持 pending」一段；退出码仍按信号取，由组合根给）。"""
+    优先于中断的 aborted（退出码仍按信号取，由组合根给）。"""
     ft = _FakeTime()
     engine = FakeEngine({"a": _RUNNING_HALF, "b": _WHOLE_PASS}, tail_after_stop={"a": []},
                         on_stop=lambda scope: scope == "a" and ft.jump(950.0))  # 中断停下 a 期间墙钟越过停止启动的时刻

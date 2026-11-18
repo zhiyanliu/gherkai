@@ -974,7 +974,7 @@ def resolve_region(explicit_region: str | None, profile: str | None, *, config_r
     **profile config 回落是关键**：Nova worker 的 AgentCore `validate_region` 要求显式合法 region 字符串、不查 boto
     默认链/profile config——若不在此把 profile 里的 region 落实成字符串，只在 profile 里配了 region 的使用方下 worker region=None 会
     `InvalidRegionError` 崩。用 `boto3.Session(profile).region_name` 读 profile config 的 region（探针证实：有则返回、
-    无则 None）。boto3 惰性 import（仅前三级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
+    无则 None）。boto3 惰性 import（仅前四级都 miss 时才触发）——**缺 boto3（纯 local 未装 aws extra）也不硬依赖**：
     catch ImportError → 返回 None（等价于「无 region」，与真无 region 同走 fail-loud），保住「纯 local 路径绝不
     依赖 boto3」不变量（否则纯 local + 无 region env 的使用方执行时会撞未捕获 ImportError，而非优雅 fail-loud）。
     真无 region（全 miss / 或缺 boto3 读不到 profile config）→ 返回 None，即 fail-loud（worker 报错、不硬编码 east，对齐 store 宽容边界）。

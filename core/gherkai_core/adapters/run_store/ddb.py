@@ -11,10 +11,10 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
-  claim_count, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入，ADR 0037 决策 7；
+  claim_count, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级消息、只在推进器不经任何 job 就终结 run 时随 try_finalize 写入；
   `high_water_mark` 与 `claim_count` 是本 item 的两个数值属性，读回 Decimal 转 int——前者只在无状态批量运行的投影写时有值，投影写的
   ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
-  见 ADR 0054 决策二；`status_group` 是由
+  见 ADR 0034 机制三「run 级状态只进不退」条①；`status_group` 是由
   run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
   **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
@@ -159,7 +159,7 @@ def _state_scalars(state: RunState) -> dict:
         d["high_water_mark"] = state.high_water_mark  # ADR 0034 机制三（数值属性；无状态批量运行投影写时有）
     if state.message is not None:
         d["message"] = state.message  # run 级消息（ADR 0037 决策 7）
-    d["claim_count"] = state.claim_count  # 认领计数（ADR 0054 决策二）：恒写，数值属性
+    d["claim_count"] = state.claim_count  # 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）：恒写，数值属性
     return d
 
 
@@ -347,7 +347,7 @@ class DynamoDBRunStore:
         都不该由这次认领起 task；run 已收尾后不再接受新认领，此前已成功的认领不由此撤销。HWM 不变。
         随写 claimed_at（timeout 起算点，ADR 0034「job timeout」节）——与 status 同一条原子条件写。run 级连同状态分组一起写
         （见 `status_group`）：条件保证写之前 run 级非终态，库中分组本来就是 live，这次是同值写。
-        认领计数在同一条写里加一（ADR 0054 决策二）：缺属性按 0 起算（`if_not_exists`，与读端缺键读作 0、local 的读改写对拍）。
+        认领计数在同一条写里加一（ADR 0034 机制三「run 级状态只进不退」条①）：缺属性按 0 起算（`if_not_exists`，与读端缺键读作 0、local 的读改写对拍）。
         """
         run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
         update = "SET jobs.#sid.#st = :running, " + run_set + ", #cc = if_not_exists(#cc, :zero) + :one"
@@ -465,7 +465,7 @@ class DynamoDBRunStore:
         → False。message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
         状态分组同样在这次写里改为该终态的值（见 `status_group`）。
 
-        expected_claim_count（ADR 0054 决策二「认领计数」段）给出时进条件表达式：库中认领计数等于它才写。期望为 0 时缺属性同样
+        expected_claim_count 给出时进条件表达式：库中认领计数等于它才写。期望为 0 时缺属性同样
         成立（与读端缺属性读作 0、local 的锁内重读对拍）。为 None 时条件不提计数。"""
         run_set, run_names, run_values = _run_status_assignment(status)
         update = "SET " + run_set + ", ended_at = :e"
@@ -722,7 +722,7 @@ class DynamoDBRunStore:
         """STATE item 上有没有 `detached` 标记（ADR 0034）：True 表示无状态批量运行的 submit 建的 run。
 
         **adapter-only 只读访问器、不在 RunStore port 上**——detached 是执行环境属性、不进 core 模型
-        （ADR 0034 「filter 必须区分写入者」条），只有云端推进器组合根需要它做「只推进 detached run」的
+        （ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」），只有云端推进器组合根需要它做「只推进 detached run」的
         分流：同步 `run --backend cloud` 由进程内 schedule 推进，推进器碰它即双开推进器。
         STATE 缺失 → False（保守不推进；`create_run` 的写序 META→STATE 保证 detached run 被触发时 STATE 已在）。
         ProjectionExpression 只取标记（不拖回可能很大的 jobs Map）；`#d` 走 names 以防 DDB 保留字。

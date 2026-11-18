@@ -7,7 +7,7 @@
 ADR 0054 决策二后台推进条）。
 
 **无状态 + 幂等**：所有调度态在 EventLog / RunStore（持久），进程内不留。谁调 tick、何时调、并发调都安全
-（CAS + HWM 条件写兜底，机制三/四）——三触发源（cloud Stream / local per-run 进程 / status --wait 接力）
+（CAS + HWM 条件写兜底，机制三/四）——各触发源（cloud Stream / local per-run 进程 / status --wait 接力）
 共用这一个 tick。「是否已过停止启动的时刻」同样不记：每一轮按当前时刻判断（ADR 0054 决策二后台推进条「不记已过停止启动」）。
 
 **时刻只经注入的时钟取**：tick 自己不读系统时钟，宿主注入与前台同一个读取点（组合根的 `compose.now`），返回带时区的 datetime；
@@ -86,7 +86,7 @@ class EventLog(Protocol):
 
     # 补写判为超时的未知退出（退出码未知、带超时标志、不带退出时刻），只在这个 scope 还没有退出记录时写入：「没有」的判断与写入是
     # 同一次条件写，已有记录时不写、不报错，返回 False（别的写入方已经写了，观察到的退出不被盖掉）；写成返回 True。之后到达的真实
-    # 退出照旧经 `record_exit` 覆盖这一条（ADR 0054 决策二「本机接力」条）。
+    # 退出照旧经 `record_exit` 覆盖这一条（ADR 0034「job timeout」节「`timed_out` 归因链」）。
     def record_timed_out_if_absent(self, scope_id: str) -> bool: ...
 
 
@@ -245,9 +245,9 @@ def _finalize(run_id: str, meta: RunMeta, records: list, baseline: RunState | No
     ② 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），project_full 逐 job 落
        ResultStore；它对有记录而非终态的 job 抛（ADR 0031 不变量守卫）——异常不在本 tick 内捕获、原样抛出，让触发源重试；绝不先
        CAS 再补（CAS 之后无人重试，产物缺失即永久）。保存覆盖同 key、不带条件，保存抛错同样原样抛出、这一轮不条件写（ADR 0034
-       机制三「run 级状态只进不退」条④ K3）；竞争收尾的边界见 ADR 0054「边界与已知局限」以「多个推进方竞争收尾时」开头的一条。
+       机制三「run 级状态只进不退」条④ K3）。
     ③ try_finalize 条件写 run 级终态：状态与说明取 project_full 的 run 级裁决（`project.run_verdict`，与前台同一个函数）。到期收尾
-       另带这一轮读到的认领计数作条件（ADR 0054 决策二「认领计数」段）：读到之后另一个推进方的认领落下时写不成。
+       另带这一轮读到的认领计数作条件：读到之后另一个推进方的认领落下时写不成。
        全部 job 已结束的收尾不带：没有未启动的 job 就不会再有认领。
     ④ 写成即 `COMMITTED`，带着这份结果供宿主生成报告。写不成时重读一次运行态：已是终态说明别人已经收尾，返回 `ENDED`；仍未结束
        （到期收尾时说明读取之后有了新的认领）返回 `CONTINUE`，新认领的 job 照常在它的截止时刻被停下。没写成的一方不生成报告：

@@ -1,4 +1,4 @@
-"""RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策二/三/五）：create_run / update_job_state / try_claim_job /
+"""RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策二/五、ADR 0030 决定四）：create_run / update_job_state / try_claim_job /
 project_state / try_finalize。
 
 **local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
@@ -15,8 +15,8 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
 - `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（job 照写），对
   写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束（ADR 0054 决策五）。
-- 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0；收尾写可带期望的计数（ADR 0054 决策二）。
-- 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0054 决策三末段）。
+- 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）；收尾写可带期望的计数。
+- 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
 """
 from __future__ import annotations
@@ -566,8 +566,8 @@ def test_ddb_projection_writes_scalar_once_plus_unskipped_jobs(aws, monkeypatch)
 
 
 def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
-    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级（连同状态分组，ADR 0030 决定六）并把认领计数加一
-    （ADR 0054 决策二），条件同时判 job 仍 pending 与 run 未收尾（ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的
+    """DDB 侧认领只发一次 update_item，同一条更新表达式里同时置 job 与 run 级（连同状态分组，ADR 0030 决定六）并把认领计数加一，
+    条件同时判 job 仍 pending 与 run 未收尾（ADR 0034 机制三「run 级状态只进不退」条①）。只看调用结束后的
     运行态分不出「一次写」与「先写 job、再写 run 级与计数」。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
@@ -586,7 +586,7 @@ def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
 
 
 def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, monkeypatch):
-    """DDB 侧带期望认领计数的收尾只发一次 update_item，计数的判定在条件表达式里（ADR 0054 决策二），不是先读再写；
+    """DDB 侧带期望认领计数的收尾只发一次 update_item，计数的判定在条件表达式里，不是先读再写；
     不给期望计数时条件里不提计数。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
@@ -805,7 +805,7 @@ def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
     assert run_store.load_run_state("run-1") == state_before
 
 
-# ---------- 认领计数（ADR 0054 决策二「认领计数」段）----------
+# ---------- 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）----------
 
 def test_claim_count_starts_at_zero_and_counts_successful_claims_only(run_store):
     """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已收尾）都不改它。"""
@@ -924,7 +924,7 @@ def test_finalize_with_expected_claim_count_lands_only_on_an_equal_count(run_sto
 
 
 def test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_after_the_read(run_store):
-    """到期收尾的竞态（ADR 0054 决策二第 3 条的提交条件）：一方读到运行态（计数 n）之后另一方的认领落下，前者以 n 为条件的收尾
+    """到期收尾的竞态：一方读到运行态（计数 n）之后另一方的认领落下，前者以 n 为条件的收尾
     被挡、run 不结束，新认领的 job 仍是 running；以新读到的计数重试才写成。"""
     meta = _meta("run-1", "a", "b")
     run_store.create_run(meta, _initial(meta))
@@ -937,7 +937,7 @@ def test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_af
     assert run_store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=got.claim_count) is True
 
 
-# ---------- 顶层附加键整体保留（ADR 0054 决策三末段）----------
+# ---------- 顶层附加键整体保留（ADR 0030 决定四「local 的顶层附加键整体保留」）----------
 
 _LAUNCHER = {"pid_namespace": "ns-1", "pid": 4242, "start_time": "123456", "host": "dev-box"}
 

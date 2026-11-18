@@ -1229,7 +1229,7 @@ def _load_and_plan(args) -> "list | int":
             features.append(src)
     except (OSError, UnicodeDecodeError) as e:
         # 不止「文件不存在」：给了目录（IsADirectoryError）/ 无读权限 / 非 UTF-8 编码同属「没开始执行就被拒」
-        # 的输入问题，一律以退出码 2 结束（退出码分层见 ADR 0030 决定七「cloud 失败退出码分层」），
+        # 的输入问题，一律以退出码 2 结束（退出码分层见 ADR 0030 决定七「失败退出码分层」），
         # 不让它们以 traceback 形态逃出。
         _progress(f"读 feature 失败：{e}")
         return 2
@@ -2120,7 +2120,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
 def _cmd_status(args) -> int:
     """[无状态批量运行] 查 run 进度/结果。
 
-    - local：读文件 RunState；--wait 则本机接力 tick 到终态（三触发源之一，per-run 崩了人来查也能续、须运行到底）。
+    - local：读文件 RunState；--wait 则本机接力 tick 到终态（per-run 崩了人来查也能续、须运行到底）。
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（kickoff 一次即可，之后由云端链自行接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
@@ -2165,7 +2165,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
         _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
 
-    # --wait 的两道闸与云端推进器同构（ADR 0034）：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
+    # --wait 的两道闸与云端推进器同构：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
     # 推进器（认领、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
     if args.wait and state.status not in TERMINAL_STATUSES:
         if run_store.is_detached(args.run_id):
@@ -2214,7 +2214,7 @@ def _wait_local_terminal(run_store, run_id: str, *, poll_interval_s: float = 1.0
 
 def _status_cloud(args, interrupted: dict | None = None) -> int:
     """cloud status：读 DDB RunState 渲染。--wait 则无感接力兜底——**检测卡住才** invoke kicker Lambda 做 kickoff
-    + 重读，直到终态（ADR 0034 三触发源之一）。
+    + 重读，直到终态。
 
     **接力 invoke kicker（非本机 tick）保 status 机器零 ECS 权限**：起 task 走 Lambda 的角色（有 RunTask/PassRole），
     status 机器只需 `lambda:InvokeFunction`。kicker 名 `{prefix}kicker` 从 --prefix 确定性推理（compose 单一命名
@@ -2259,7 +2259,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
         state = run_store.load_run_state(args.run_id)
         relay = False
         if args.wait and state is not None and state.status not in TERMINAL_STATUSES:
-            # 只对 detached run 接力（ADR 0034 两道闸的本机侧同构）：同步 `run --backend cloud` 由进程内 schedule 推进，kicker
+            # 只对 detached run 接力：同步 `run --backend cloud` 由进程内 schedule 推进，kicker
             # 对它本就整体 no-op，invoke 只是空转；--wait 对它退化为只等待
             relay = run_store.is_detached(args.run_id)
             if not relay:
@@ -2268,7 +2268,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
                 interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE  # 云端两种 run 都在原处继续：detached 由云端链、同步 run 由它的前台进程
         if args.wait:
             # 接力循环：轮询到终态；**只在检测到「卡住」时才 invoke kicker 做 kickoff**（不是每轮都 invoke：正常推进时云端链
-            # 自行运行，kickoff 只会 no-op、多出一次无效调用，与 ADR 0034 三触发源 cloud 侧的零空转一致）。「卡住」指状态连续
+            # 自行运行，kickoff 只会 no-op、多出一次无效调用，与 cloud 侧的零空转一致）。「卡住」指状态连续
             # _STALL_KICK 轮无变化（记 (status, hwm) 快照比对）。检测纯本地内存比较、零额外 AWS 调用/权限。
             _STALL_KICK = 3  # 连续 3 轮（约 9s）状态不变即判为卡住、invoke 一次（覆盖冷启动丢投卡 pending / 中途丢投卡 running）
             lam = None

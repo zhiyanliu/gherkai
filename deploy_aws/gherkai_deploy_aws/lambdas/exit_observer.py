@@ -7,7 +7,7 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 task_exited（保留高位 SK 独立键空间）。只记 task 对象里的事实，不读运行态与运行定义、不判断是否已过截止时刻（由投影判断）。写完即
 返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
 **只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
-`_is_detached`；不变量与故障形态见 ADR 0034 端到端 cloud 1b 与机制一）。
+`_is_detached`；不变量与故障形态见 ADR 0034 机制一）。
 
 **缺 exitCode → 落哨兵（机制二「退出码缺失」条）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口），正常退出
 必带退出码（实际运行抓到的 4 个事件都如此）；缺退出码表示容器没能开始运行（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者

@@ -228,7 +228,7 @@ def synthesize_skipped(result: JobResult, timing: Timing) -> None:
 
 # 平台侧退出哨兵（ADR 0034 机制二「退出码缺失」推论）：task 已停止、平台却没有给出 worker 退出码的两种形态都落它——①观察者收到
 # STOPPED 却缺 exitCode（容器没能开始运行，如拉不到镜像；云端 tick 按观察者同一提取函数补写时同样）；②同步 `run --backend cloud`
-# 下 task 已 STOPPED 却始终取不到 exitCode（ADR 0024「exitCode 落值延迟」条）。
+# 下 task 已 STOPPED 却始终取不到 exitCode。
 # 推进步骤起 job 失败时不落它：那时 worker 根本没有启动，补偿写退出码未知加启动失败的原因，与前台起 worker 失败交给终结函数的输入相同
 # （ADR 0054 决策二后台推进条「时刻」），两条路径对同一个启动异常给出同一句说明。
 # 非 0 即走「退出码非零 → ERROR」既有谓词；终结函数只在消息里按它给出平台侧归因的说法，判定不看具体值。选 255 避开 worker 真实语义码
@@ -239,7 +239,7 @@ PLATFORM_FAILED_EXIT = 255
 
 def platform_exit_reason(stop_code: str | None, stopped_reason: str | None) -> str:
     """ECS 没给出退出码时随 `PLATFORM_FAILED_EXIT` 一起落的归因串：`stopCode: stoppedReason`，缺一项只用另一项，两项都缺时用固定的
-    兜底句（ADR 0024「exitCode 落值延迟」条、ADR 0034 机制二「退出码缺失」条）。
+    兜底句（ADR 0034 机制二「退出码缺失」条）。
 
     唯一一份拼法：退出观察者与云端 tick 的补写（经 provider 包的同一提取函数）、同步路径的 `FargateEngine` 都调它，同一故障在同步与
     无状态两条路径下得到逐字相同的归因（各拼一份即两处漂移，理由同哨兵常量）。"""
@@ -787,7 +787,7 @@ def _aggregate(statuses: list[Status]) -> Status:
 
 @dataclass(frozen=True)
 class RunVerdict:
-    """run 级的裁决：状态与 run 级说明。说明只在没有任何 job 能承载原因时有值（ADR 0054 决策六，与运行态的 run 级 message 同义）。"""
+    """run 级的裁决：状态与 run 级说明。说明只在没有任何 job 能承载原因时有值（与运行态的 run 级 message 同义）。"""
 
     status: Status
     message: str | None = None
@@ -801,7 +801,7 @@ def run_verdict(
     interrupted: bool,
     ended_elsewhere: bool,
 ) -> RunVerdict:
-    """run 级裁决（唯一一份，前台与后台共用，ADR 0054 决策二）：包住 `_aggregate`，加上聚合之外的例外，按序取第一条成立的。前台的
+    """run 级裁决（唯一一份，前台与后台共用）：包住 `_aggregate`，加上聚合之外的例外，按序取第一条成立的。前台的
     `schedule` 在返回 RunResult 时调它，后台经 `project_full` 调它，两条路径收尾时写下的 run 级状态与说明都出自这里。
 
     job_results 是有判定的 job（判定只有终态），jobs 是运行定义里的全部 job，「没有判定的 job」即两者的差：已过停止启动的时刻、
@@ -811,8 +811,8 @@ def run_verdict(
     1. 已过停止启动的时刻（past_stop_start：前台取执行期间的检查是否观察到过它，一经观察到即成立、不因系统时钟回拨撤销，收尾时
        不再读墙钟；后台取推进步骤这一轮的判断；判断本身是 `run_deadline.past_stop_start`）、而有 job 没有判定：error，说明是
        `RUN_DEADLINE_PASSED_MESSAGE`。run 的时间用完不是哪一个 job 的原因，也不替没有执行的 job 下结论；全部已启动的 job 都通过时
-       聚合会得出 passed，所以不能靠聚合。优先于使用方中断的 aborted（ADR 0054 决策二「run 级只要有 job 保持 pending」一段）。
-    2. 被外部停下的 run 记 aborted、无说明，不按仅有的判定聚合（ADR 0031 决定三的例外）。成立条件有三种：
+       聚合会得出 passed，所以不能靠聚合。优先于使用方中断的 aborted。
+    2. 被外部停下的 run 记 aborted、无说明，不按仅有的判定聚合。成立条件有三种：
        - 处理过使用方中断（interrupted），且有 job 记为 aborted 或 skipped、或有 job 没有判定。已有 job 出了判定时（aborted 与
          passed 并存）聚合给 passed，全部 job 都没有启动时它给 skipped，被中断的 run 在两种情形下都应记 aborted。fail-fast 不走
          这里：它必伴随 error，run 级由聚合判 error。
