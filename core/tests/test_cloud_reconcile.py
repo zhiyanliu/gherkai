@@ -302,7 +302,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
 
 def test_ddb_event_log_queries_with_consistent_read():
     """records() 是 reconcile 的投影输入：finalize 前 _final_drain / 退出观察者刚写的尾事件必须**立即**可读
-    （ADR 0030 决定四），最终一致读可能漏尾事件、把已完成 job 投成仍在运行——故 Query 必带 ConsistentRead。"""
+    （ADR 0030 决定六），最终一致读可能漏尾事件、把已完成 job 投成仍在运行——故 Query 必带 ConsistentRead。"""
     class _Rec:
         def __init__(self):
             self.calls = []
@@ -361,7 +361,7 @@ def test_expiry_commits_on_ddb(events_table, ddb_run_store):
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table, ddb_run_store):
-    """到期收尾与认领并发（ADR 0054 实测项 7，云端的条件表达式）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——
+    """到期收尾与认领并发（云端的条件表达式）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——
     前者的收尾写被认领计数的条件挡下，重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running。与本机的同名
     用例对拍。"""
     from gherkai_core.reconcile import TickOutcome, TickResult, tick

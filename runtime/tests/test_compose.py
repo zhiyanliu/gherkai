@@ -1522,7 +1522,7 @@ def test_preflight_missing_task_def_names_prefix():
 
 
 def test_preflight_missing_chain_lambda_names_prefix():
-    # detached 链三 Lambda 任一缺即提交成功但 run 永不推进/收敛 → 挡在提交前（ADR 0033）
+    # detached 链三 Lambda 任一缺即提交成功而 run 不按正常的链推进 → 挡在提交前（ADR 0033）
     err = compose.preflight_cloud_resources(
         prefix="g-", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
         lambda_fns=["g-kicker", "g-reconciler", "g-exit-observer"],

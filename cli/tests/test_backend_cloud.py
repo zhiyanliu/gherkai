@@ -670,7 +670,7 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
 
 def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monkeypatch, capsys):
     """submit cloud 的 preflight 除表/桶/cluster 外还探：本 run 用到引擎的 task-def + 事件驱动链三 Lambda
-    （任一缺就会提交成功但 run 永不推进/收敛，须挡在提交前）。"""
+    （任一缺就会提交成功而 run 不按正常的链推进，须挡在提交前）。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.delenv("AWS_DDB_TABLE", raising=False)

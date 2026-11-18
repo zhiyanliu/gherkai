@@ -664,7 +664,7 @@ def test_definition_schema_version_is_written_and_read_end_accepts_only_its_own(
     with pytest.raises(UnsupportedDefinitionSchema) as ei:
         run_meta_from_dict({**d, "schema_version": 3, "cli_version": "9.9.0"})
     assert ei.value.found == 3 and ei.value.cli_version == "9.9.0" and "9.9.0" in str(ei.value)
-    # 版本 1 的记录（没有运行期限、预算可为空）同样拒读，不为它留兼容分支（ADR 0054 决策二）
+    # 版本 1 的记录（没有运行期限、预算可为空）同样拒读：读端只认当前的结构版本（ADR 0037 决策 7）
     with pytest.raises(UnsupportedDefinitionSchema) as ei:
         run_meta_from_dict({**d, "schema_version": 1})
     assert (ei.value.found, ei.value.supported) == (1, 2)

@@ -840,7 +840,7 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
 
     **`pending` 的含义是「不写 run 级」**：两个 RunStore adapter 拿到 `pending` 时都保留库中 run 级原值（`create_run` 落的
     `pending`，或此前某次认领、投影写下的 `running`），只有 `running` 才落库。这样认领之后、拿着认领之前读到的 baseline
-    写出的全 pending 投影不会把 run 级改回 `pending`（ADR 0034 机制三「run 级状态只进不退」条②）。
+    写出的全 pending 投影不会把 run 级改回 `pending`。
 
     **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的值，只要有一个 job 出了判定就是终态（一个 job
     已 passed、其余还 pending 的 run 得到 `passed`），只有还没有 job 出判定时才是前置态；提前落 run 级终态会被 `try_finalize`

@@ -1887,7 +1887,7 @@ def preflight_cloud_resources(
     探**执行必需**（events 表 + cluster + 桶 + `task_defs`——本 run 用到引擎的 task-def）恒探；**runs 表仅落库
     需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交，ADR 0016 决策 A：`--no-report
     --backend cloud` 仍在 Fargate 上运行、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
-    驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功但 run 永不推进/收敛，挡在提交前
+    驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功而 run 不按正常的链推进，挡在提交前
     （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
     S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？」。

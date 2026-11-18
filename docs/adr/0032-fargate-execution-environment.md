@@ -1,6 +1,6 @@
 # Fargate 执行环境：容器盘停即销毁逼出的中断丢失、grace、安全点提前上传
 
-> **Status:** Accepted —— `FargateEngine` 执行 adapter 已实装（job-in 走 S3、events-out 走 DDB events 表）；**组合根接线 + IaC 归 [0033](./0033-iac-aws-backend-and-composition-wiring.md)**（已编码+真部署）；**grace/stopTimeout + 中断韧性已真容器标定**（4 次真跑 Nova×3+Midscene×1，见下「真容器校准结论」）。**决策 A（[0016](./0016-execution-architecture-core-lib-run-model.md)）下 Fargate = `--backend cloud` 的执行实态、非可选增强**。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度的安全点提前上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（由注入驱动、不绑执行环境、已在 subprocess 预演环境实现，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
+> **Status:** Accepted —— `FargateEngine` 执行 adapter 已实装（job-in 走 S3、events-out 走 DDB events 表）；**组合根接线 + IaC 归 [0033](./0033-iac-aws-backend-and-composition-wiring.md)**；**grace/stopTimeout + 中断韧性已真容器标定**（4 次真跑 Nova×3+Midscene×1，见下「真容器校准结论」）。**决策 A（[0016](./0016-execution-architecture-core-lib-run-model.md)）下 Fargate = `--backend cloud` 的执行实态、非可选增强**。本 ADR 收「Fargate/ECS 执行环境**特有**」的问题：容器盘停即销毁的 artifact 中断丢失、grace/stopTimeout 预算、act 粒度的安全点提前上传。上传机制本身见 [0029](./0029-engine-artifacts-to-s3.md)（由注入驱动、不绑执行环境、已在 subprocess 预演环境实现，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B）；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」；为何倾向 Fargate 见 [0017](./0017-cloud-execution-fargate-over-runtime.md)。
 
 ## 定位：只收「执行环境特有」的一条边
 

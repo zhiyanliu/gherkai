@@ -2583,8 +2583,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     else:
         results = result_store.load_all(run_id)
     if not results:
-        # detached run（submit）的判定明细由收尾的那一轮保存（ADR 0034 机制三「run 级状态只进不退」条④的步骤）；终态而零文件
-        # 也是正常结果（例子见同一条的「不经推进步骤的收尾」），同样只是「没得渲染」
+        # detached run（submit）的判定明细由收尾的那一轮保存；终态而零文件
+        # 也是正常结果（例子见 ADR 0034 机制三的「不经推进步骤的收尾」），同样只是「没得渲染」
         return _explain_empty(args, state, hint=(not_landed if state.status not in TERMINAL_STATUSES
                                                 else "本 run 没有任何 job 的判定明细"))
 

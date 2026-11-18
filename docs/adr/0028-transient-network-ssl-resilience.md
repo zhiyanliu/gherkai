@@ -1,6 +1,6 @@
 # 网络/SSL 瞬时错误的鲁棒性：两层重试 + network_error 分类（务实加固，非 enterprise resilience）
 
-> **Status:** Partially-superseded-by 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 在六处作加法扩展并改写了被扩展的原句（多为设备目标；预热失败的传递与会话血缘窗口两处桌面同样适用）：「决定」总纲表（设备 worker 的退避不套用 4 次尝试、设备 job 不进 core 重试）、硬约束（Device Farm 的 Create 不可重放；只读原语的传输层重试例外，出处是 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）、core 层重试门槛（双条件改三条件）、关键不变量（预热失败与设备 worker 不用退出码 80）、会话血缘窗口（桌面与设备都发 `session_opened`，见 0051 决策 4）、worker 层退避。[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 的运行期限（决策二）与执行方服从记录（决策五）在「core 层 job 重试」一节以现行表述写下：过了重试门槛还要过重试之前的检查（已过停止启动的时刻、已发现 run 被别处记为已结束、run 已中止、重新起 worker 之前读一次 run 级状态）；已过停止启动的时刻或 run 已中止时保留上一次的判定并注明原因，发现 run 已被别处结束时不写终态、不存明细；共享的截止时刻在认领时算出、以运行期限封顶。其余条文不变。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 在六处作加法扩展并改写了被扩展的原句（多为设备目标；预热失败的传递与会话血缘窗口两处桌面同样适用）：「决定」总纲表（设备 worker 的退避不套用 4 次尝试、设备 job 不进 core 重试）、硬约束（Device Farm 的 Create 不可重放；只读原语的传输层重试例外，出处是 [0052](./0052-appium-interface-adapter-and-platform-differences.md) 决策 6）、core 层重试门槛（双条件改三条件）、关键不变量（预热失败与设备 worker 不用退出码 80）、会话血缘窗口（桌面与设备都发 `session_opened`，见 0051 决策 4）、worker 层退避；其余条文不变。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 实测中 worker 建连（开 AgentCore 会话 / SigV4 握手 / CDP 连接）常遇 `ssl.SSLEOFError`（UNEXPECTED_EOF）
 等**网络瞬时故障**——一次抖动就让已产生费用的 job 直接废（worker returncode=1 → core 记 engine_error，零重试）。

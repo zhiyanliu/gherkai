@@ -1,6 +1,6 @@
 # job 与 run 的状态：skipped / aborted、severity 数值序，run 的状态只由 job 的终态算出
 
-> **Status:** Partially-superseded-by 0034, 0051, 0054 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的无状态批量运行使有记录的 run 的退出码读记录里的 run 状态（决定五）。[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 的运行期限与 run 处置在正文以现行表述写下：被 run 的期限截断的 job 记 `aborted`（决定一）；执行方到期与处置都以结束写结束 run（决定三「结束写」）；前台 `run` 在本次执行结束之前已被别处结束时退出码取 1，处理过使用方中断时仍按信号取（决定五）。这一篇描述的设计有一部分尚未实装，code 跟上之前实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0034, 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 引入 scope 级 error 后做五处加法：决定一加 scenario 级合成 SKIPPED 与在途明细的显式规则，决定一·补加「非 attempted 的 `session_opened` 也刷 running」，决定三加「合成的 scenario 级 SKIPPED 不进 `_aggregate`」，决定四加 `scope_done` 携带的 scope 级 `status`，决定六加 `shortcircuited=False` 的 step 级 SKIPPED。[0034](./0034-detached-batch-reconciler.md) 的无状态批量运行使有记录的 run 的退出码读记录里的 run 状态（决定五）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 给 `Status` 加两个 **core 派生态**——`skipped`（排队没起）与 `aborted`（跑一半被掐）——并定义一套
 **severity 数值序**，解决「`'error' < 'failed'` 字母序与严重度反向」的坑、并把 fail-fast 中止的 job 从
@@ -101,9 +101,9 @@ run 级：不按 severity 比较，按决定三的取法
 
 run 的状态若与 job 的状态分开写——在某一刻汇总、单独写一次，或在 job 之外直接结束 run（到期、处置、读不到运行定义）——记录里就会出现「run 已结束而 job 仍是 `pending` 或 `running`」「job 全部通过而 run 是 `error`」，只能靠 run 级说明解释记录。所以 run 的状态只由 job 的状态算出；一个仍有未结束 job 的 run 要结束，由结束写先把这些 job 写成终态（下「结束写」小节）。
 
-**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。记录里不会出现零个 job 的 run：建 run 的入口拒绝零个 scenario 的批次（[0041](./0041-agent-facing-cli-affordances.md) 决策一）。
+**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。零个 job 的 run 按取法为 `passed`。
 
-- **run 的状态字段没有自己的写入逻辑**：每次改变 job 状态的写在同一次写里按取法写 run 状态（云端连同状态分组），使 run 成为终态的那次写同时写下结束时刻。这些写入口见 [0030](./0030-realtime-persistence-seam.md) 决定四；取法要看全部 job，每次写都要按整份运行态计算，存储怎样做到见 [0034](./0034-detached-batch-reconciler.md) 机制三②。run 到终态之后运行态的任何写都不成立，规则、理由与依赖方见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五。
+- **run 的状态字段没有自己的写入逻辑**：每次改变 job 状态的写在同一次写里按取法写 run 状态（云端连同状态分组），使 run 成为终态的那次写同时写下结束时刻。这些写入口见 [0030](./0030-realtime-persistence-seam.md) 决定四；取法要看全部 job，各写入口怎样在同一次写里按取法写出 run 状态见 [0034](./0034-detached-batch-reconciler.md) 机制三②。run 到终态之后运行态的任何写都不成立，规则、理由与依赖方见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五。
 - **scenario 判定到 job 判定的归约是另一条路径**：终结函数内容完整那一行按 scenario 判定取最重（任一 `error` 为 `error`，否则任一 `failed` 为 `failed`，否则 `passed`，即 `_aggregate`），喂进去的全是 worker 三态，永不含 skipped/aborted；scenario 判定集为空的情形由终结函数先判 error，见 [0034](./0034-detached-batch-reconciler.md) 机制二。
 - **合成的 scenario 级 SKIPPED 不喂给 `_aggregate`**（决定一）：它只进 JobResult 的明细，不进 scenario 判定集；该 job 的判定来自 [0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」（`scope_done.status = error` 在无主动停止、退出码 0 时判 ERROR，归因见真值表），不经 scenario 归约。保证是「压根不喂进去」，与决定六对 step 级 SKIPPED 的处理同一取向。
 - **被拒方案**：①处置只写 run 级、job 保持原样；②到期时未启动的 job 保持 `pending`、run 级另记 `error` 加说明；③按原因区分到期与中断的 run 级优先序；④run 级在 job 之外单独写一次终态。四者都让 run 与 job 的终态分开写，记录要另靠说明解释，正是本决定开头的问题。

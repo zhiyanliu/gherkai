@@ -1,12 +1,10 @@
 """LocalResultStore（ADR 0016 数据面）：每 job 的判定结果追加落盘成单独 JSON。
 
-数据面（追加为主）：一次 run 的每个 JobResult 落 `<root>/<run_id>/jobs/<encoded_scope_id>.json`，
-供 CI 读单 scope 判定真值。与 RunStore（控制面：run_meta.json + run_state.json）互补——数据面按 job 追加，
+数据面（追加为主）：一次 run 的每个 JobResult 落 `<root>/<run_id>/jobs/<encoded_scope_id>.json`。
+与 RunStore（控制面：run_meta.json + run_state.json）互补——数据面按 job 追加，
 单 job 文件自包含（嵌完整 Job def）。**两个写者、两种时序**：同步 `run` 由 `persist.RunPersistence.on_job_complete`
 每 job 完成即落、不等整 run 结束（ADR 0030 决定一/三）；detached / 无状态批量运行由 `reconcile.tick` 的 finalize 分支在
-commit（CAS）**之前**从同一份 events 快照落下有记录的各 job（ADR 0034 数据模型三件套表 / 0030 决定三「后台推进同守」；
-收尾的步骤见 ADR 0034 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」，`explain` 据本目录给的提示见
-ADR 0042 决策四）。
+commit（CAS）**之前**从同一份 events 快照一次落下有记录的各 job。
 
 **克制（ADR 0016）**：只忠实落已成形的 `JobResult`（复用 serialize.job_result_to_dict / job_result_from_dict），
 不发明 ADR 有意 defer 的数据面新字段。
@@ -52,7 +50,7 @@ class LocalResultStore:
         return job_result_from_dict(json.loads(path.read_text(encoding="utf-8")))
 
     def load_all(self, run_id: str) -> list[JobResult]:
-        """读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。"""
+        """读回某 run 的全部 JobResult。无则空 list。"""
         jobs_dir = self._root / run_id / "jobs"
         if not jobs_dir.is_dir():
             return []

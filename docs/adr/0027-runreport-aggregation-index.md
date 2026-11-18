@@ -1,6 +1,6 @@
 # RunReport：跨引擎归集索引（不融合原生产物内容）
 
-> **Status:** Partially-superseded-by 0042, 0054 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）[0054](./0054-run-deadline-lifetime-lock-and-settling.md)：「index.html 形态」的摘要带 run 级说明，已实装。这一篇描述的设计有一部分尚未实装，code 跟上之前实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0042 —— 归集索引语义/形态/扩展性契约与不透明搬运铁律不变；「消费端只当 URI 用、不 stat / open」一条由 [0042](./0042-step-evidence-and-explain.md) **按层收窄**（`model / wire / schedule / ReportStore` 永不解引用不变，皮层 `explain` / `read_resource` 只对 `kind == "evidence"` 的自有 schema 解引用），留口子「trajectory 内部结构化提取」亦由其落地（位置在 worker）。（正文两处已就地改写并反向链。）这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 兑现 [0016](./0016-execution-architecture-core-lib-run-model.md) 一直 deferred 的「报告统一」。本 ADR 定 **RunReport 的语义、形态与扩展性契约**，并落地 `ReportStore` 的 local adapter。
 
@@ -164,7 +164,7 @@ URL、断言了什么」都不落痕（只有 pass/fail 进 result 树）。大�
 
 ## 现在做 / 留口子
 
-- **现在做**：本 ADR 上述全部决策均已实装（单测 + 两引擎真 e2e 覆盖）。
+- **现在做**：已实装的是 `ReportRef` 的 `kind` / `ref` / `label` 三元组；`run_id` 落进 `RunMeta`、由组合根生成；`JobResult` 经持有的 `Job` 取 `engine`；`LocalReportStore` 写出 `manifest.json` 与 `index.html`；两个引擎的产物归位到 run 目录（Nova `NOVA_LOGS_DIR`、Midscene `MIDSCENE_RUN_DIR`）及各自的 report_refs（Midscene `kind=report` 在 scope 级，Nova `kind=trajectory` 在 step 级、`kind=summary` 在 scope 级）；cli 默认生成 RunReport（`--no-report` 跳过、`--report-dir` 指定落点）；`href` 相对化（local 相对、cloud 等于 `ref`）。验证有单测与两个引擎的真实端到端执行。
 - **留口子不实现**：
   - **确定性 step 产物可观测性**：让 `@deterministic` handler 可选地产一个轻量产物（当时 URL / 截图 / 检查描述），使纯确定性用例的 RunReport 也有内容可看。判定真值在 result 树已够；产物可观测另开一轮（与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 确定性 step 设计一并演进）。**与 [0036](./0036-deterministic-capability-discovery.md) 的划界**：0036 解决的是「**跑前**知道有哪些确定性 step」（注册表自述 → `list-deterministic` / `plan` 派发标注），本口子要的是「**跑后**看见那一步实际做了什么」（运行期产物）——同源于确定性 step 的不可观测，但非同一件事，0036 落地后本口子照旧敞着。设备目标上判为 failed / error 的确定性与导航 step 已产一份只含界面快照（地址、控件摘要、原始控件树）的 evidence（[0042](./0042-step-evidence-and-explain.md) 决策一的设备例外，[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 8），由 worker 采集、不经 handler；本口子要的 handler 自产产物在两类目标上都仍未实现，跑后完全看不到产物的仍是桌面目标的确定性 step 与设备上 passed 的确定性 step。
   - 按 `kind` 的富渲染（`<video>`/`<iframe>`，皮层将来做）。trajectory 内部结构化提取已由 [0042](./0042-step-evidence-and-explain.md) 落地——位置在 **worker**（引擎知识的唯一住处）、产物是 gherkai 自有 schema 的 `kind=evidence`，core 仍不解析任何产物。

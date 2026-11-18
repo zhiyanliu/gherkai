@@ -339,7 +339,7 @@ _Avoid_: 命令行窄腰、框架
 _Avoid_: Ports 层、Ports & adapters、六边形架构、持久化层、DAO
 
 **执行引擎 port (engine port)**:
-核心库之下真正执行一个 scope 的接缝，由组合根注入具体实现：本机后端起一个本地进程，云端后端起一个容器任务，核心的调度逻辑不因此改变。它与 AI 引擎共用「引擎」这个名字，指的却是接缝本身——核心永不引入引擎的代码，只经它把一个 scope 交出去（见 ADR 0016）。
+核心库之下在前台执行一个 scope 的接缝，由组合根注入具体实现，只有本机后端：核心经它起一个本地 worker 进程；后台推进起 job 走另一组注入接口，云端后端只走这一路。它与 AI 引擎共用「引擎」这个名字，指的却是接缝本身，核心永不引入引擎的代码（见 ADR 0034）。
 
 **每 scope 一个 worker 进程 + 薄 worker (one worker process per scope / thin worker)**:
 核心为每个 scope 起恰好一个 worker 进程，由它串行承载该 scope 的全部 scenario，两侧后端都是这同一形态。worker 薄在只按核心派发的 step 调用引擎、不解析用例文本，执行途中以流式事件回报进展与结果（见 ADR 0016）。

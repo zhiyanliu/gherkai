@@ -374,7 +374,7 @@ class DynamoDBRunStore:
         **run 级 status 只写 running、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住 try_finalize）。
         取值规则见 `projected_run_status`（与 local adapter 共用一份）：它给出 running 时标量写带上 run 级；给出 pending
         （投影里全 job 仍 pending）时更新表达式省略 run 级、只写 HWM，库中 run 级原样保留，认领或此前投影已写成的 running
-        不被拿着旧 baseline 的投影改回 pending（ADR 0034 机制三「run 级状态只进不退」条②）。条件双守不变：
+        不被拿着旧 baseline 的投影改回 pending。条件双守不变：
         HWM 挡 stale + status 挡「已 finalize 被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级，
         所以 finalize 插在两阶段之间时，后续逐 job 写不会把终态改回 running。
 
@@ -453,7 +453,7 @@ class DynamoDBRunStore:
                     UpdateExpression="SET " + ", ".join(sets),
                     ExpressionAttributeNames={"#sid": sid, "#jst": "status"},
                     ExpressionAttributeValues=vals,
-                    ConditionExpression=cond,  # 三分支一律带条件（ADR 0034 机制三②「非更推进态」的单元素条件写）
+                    ConditionExpression=cond,  # 三分支一律带条件（ADR 0034 机制三「② 的 job 级半边落地形态」段的逐 job 条件写）
                 )
             except self._table.meta.client.exceptions.ConditionalCheckFailedException:
                 continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退

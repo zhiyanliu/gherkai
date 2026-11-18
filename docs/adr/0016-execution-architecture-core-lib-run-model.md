@@ -1,6 +1,6 @@
 # 执行架构：核心库（窄腰）+ Run 数据模型 + 留好状态存储的口子
 
-> **Status:** Partially-superseded-by 0034/0037 ——（本 ADR 亦与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 一并部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)：反转其「不设统一编排入口/两套 runner 各自加载」操作立场。）核心架构（窄腰/注入/数据模型/三层切分）及 (a) 类后端替换「加 adapter+换注入、核心不动」仍成立（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已证）；仅「无状态化=核心不动」对**无状态批量运行**的前瞻断言被 [0034](./0034-detached-batch-reconciler.md) 纠正为分层两真值（详见下「这样上云…」处的 ⚠️ 分层注；版本切分 v1.1 行与「现在不做」条回指该注）。**[0037](./0037-distribution-and-packaging.md)（随 v1.4.0 首发）反转三处**：下「cli `--backend {local,cloud}`」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」；「工程布局」树 `cli/` 行的「gherkai/core 作 path 依赖」；工程布局的目录/发行名/import 名重排（旧 import 名 `core` / `gherkai` / `cli`；现行三名对照见下「工程布局」节「三名分离」条）。**上述三处已随 0037 的发行重组校准——正文即当前实装态。**分层/窄腰/注入红线/决策 A-C 不动。这一篇描述的设计有一部分尚未实装，code 跟上之前实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0034/0037 ——（本 ADR 亦与 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 一并部分取代 [0006](./0006-form-a-two-subprojects-no-orchestrator.md)：反转其「不设统一编排入口/两套 runner 各自加载」操作立场。）核心架构（窄腰/注入/数据模型/三层切分）及 (a) 类后端替换「加 adapter+换注入、核心不动」仍成立（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已证）；仅「无状态化=核心不动」对**无状态批量运行**的前瞻断言被 [0034](./0034-detached-batch-reconciler.md) 纠正为分层两真值（详见下「这样上云…」处的 ⚠️ 分层注；版本切分 v1.1 行与「现在不做」条回指该注）。**[0037](./0037-distribution-and-packaging.md)（随 v1.4.0 首发）反转三处**：下「cli `--backend {local,cloud}`」节 `build_cloud_stores` 条的「cli 主依赖不含 boto3，走 `cli[aws]→core[aws]` extra」；「工程布局」树 `cli/` 行的「gherkai/core 作 path 依赖」；工程布局的目录/发行名/import 名重排（旧 import 名 `core` / `gherkai` / `cli`；现行三名对照见下「工程布局」节「三名分离」条）。**上述三处的正文已随 0037 的发行重组校准。**分层/窄腰/注入红线/决策 A-C 不动。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 界定 v0.x/v1.0 起、并向云端无缝演进的执行架构。本 ADR 是多轮形态讨论的总成，约束 lib 的设计，确保本地与云端、CLI 与 WebUI 不埋返工雷。
 
@@ -98,7 +98,7 @@ core/gherkai_core/
 ├── ports.py                 ← 接口定义（Engine / WorkerHandle / EngineResolver / Sink / JobSink（0030）/ RunStore / ResultStore / ReportStore）
 └── adapters/
     ├── subprocess_engine.py              ← Engine 实装：单个参数化 adapter（spawn node / python 皆可）
-    ├── fargate_engine.py                 ← Engine 云端实装（job-in 走 S3、events-out 走 DDB events 表）（0024/0032/0033）
+    ├── fargate_engine.py                 ← 云端执行 adapter `FargateEngine`：只有 `start_scope`（job-in 走 S3、events-out 走 DDB events 表），不实装 `Engine` port，经 `cloud_launcher.py` 接入后台推进（0024/0032/0033；边界见 0034「Engine port 演进」节）
     ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）（0027；s3 见 0030）
     ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）（0030）
     ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）（0030）
@@ -120,11 +120,11 @@ core/gherkai_core/
 
 这样上云、WebUI 接入都成了"加 adapter + 组合根换注入"，核心与接口不动。**⚠️ 但「无状态化」是例外、须分层看**（[0034](./0034-detached-batch-reconciler.md) 纠正）：**(a) store/engine 后端替换**（local↔DDB/S3、subprocess↔Fargate）= 注入、核心不动（[0033](./0033-iac-aws-backend-and-composition-wiring.md) 已证）；**(b) 无状态提交-收集**（CLI 提交即走、事件驱动 reconciler）= **驱动模型演进**（同步 ThreadPool 循环解体为无状态 tick、抽纯 `project`/`plan_next`、FargateEngine 增出 `start_scope` fire-and-forget 形状、严格并发从进程内线程池迁到 store CAS）——**核心与接口要动**，非「只加 adapter」。已作为 v1.2 实装真跑通（[0034](./0034-detached-batch-reconciler.md)，见下版本切分 v1.2.0）。
 
-### cli `--backend {local,cloud}`：组合根按开关注入 store + 执行引擎（兑现「换 adapter 核心不动」）
+### cli `--backend {local,cloud}`：组合根按开关注入 store 与执行 adapter（兑现「换 adapter 核心不动」）
 
 云端 store adapter（DDB/S3，[0030](./0030-realtime-persistence-seam.md) 决定六）落地后，cli 加 `--backend {local,cloud}`（默认 `local`；`submit`/`status` 有，`run` 也收它但只有本机后端（决策 A），读判定的 `explain` 也有（[0042](./0042-step-evidence-and-explain.md) 决策四）、`doctor` 也收它但只切换查哪些检查项、不注入 store（[0041](./0041-agent-facing-cli-affordances.md) 决策四），`list-runs` 与 `settle-runs` 也收它、与 `status` 同样按三项定位参数选定后端（[0041](./0041-agent-facing-cli-affordances.md) 决策六）——`submit` 与 `status` 的 backend 须一致，见 [0034](./0034-detached-batch-reconciler.md)；`plan` 纯本地不落库、不加）在组合根按开关选注入哪套 adapter。`RunPersistence`/`schedule` 只认 Store **port**，local↔cloud 切换**零改** core——这正是本 ADR「选实现=组合根注入」的第一次真实兑现。
 
-**单一开关换齐存储三层 + 执行引擎、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，**执行引擎随之是 `FargateEngine`**（由推进器 Lambda 一侧的组合根装配，见下「决策 A」与「cloud 配置来源 + 落点语义」条）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
+**单一开关换齐存储三层与执行、第一版不开混搭**：`--backend cloud` 一次把 RunStore→DDB、ResultStore/ReportStore→S3（+ 挂 offloader）三层存储全换，执行随之在 Fargate 上：推进器 Lambda 一侧的组合根装配 `FargateEngine`，经 `CloudLauncher` 接入后台推进，不经同步 `run` 所用的 `Engine` port（见下「决策 A」与「cloud 配置来源 + 落点语义」条；边界见 [0034](./0034-detached-batch-reconciler.md)「Engine port 演进」节）。理由：三层存储后端不对等（上文已证不存在 `S3RunStore`/`DDBReportStore`），无有意义的混搭矩阵；「Local store + Fargate worker」是 **store⊥worker 正交轴**（上文「worker 产物 ⊥ store」）、是**组合根内部/e2e 可拼的矩阵、非用户 CLI 旋钮**，不需要 `--run-backend`/`--result-backend` 拆开（那是提前盖机器 + 组合爆炸测试负担）。
 
 #### 决策 A：`--backend cloud` = 存储上云 + Fargate 执行（单一选项，不暴露正交）
 

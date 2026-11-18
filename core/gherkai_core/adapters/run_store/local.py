@@ -296,13 +296,12 @@ class LocalRunStore:
 
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写投影：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。只写 HWM、run 级与 jobs，传入的
-        started_at、ended_at、message、认领计数不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍，ADR 0034 机制三「两端
-        对拍口径」）。
+        started_at、ended_at、message、认领计数不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍）。
 
         **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是收尾的 commit point
         专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
         （与 ddb adapter 共用一份）：它给出 pending（投影里全 job 仍 pending）时保留库中 run 级，认领或此前投影已写成的
-        running 不被拿着旧 baseline 的投影改回 pending（ADR 0034 机制三「run 级状态只进不退」条②）。
+        running 不被拿着旧 baseline 的投影改回 pending。
         已 finalize（库中 status 已终态）→ 挡。
 
         **各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②的 job 级半边）**：task_exited 走独立
