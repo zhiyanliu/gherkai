@@ -531,7 +531,7 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     assert box["run_meta"].max_concurrency == 3
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
     assert o.min_grace_s == FAKE_MIN_GRACE_S["novaact"]
-    # 本机后端不传停止后等待预算：None 表示 schedule 取 grace（ADR 0034 机制二「停止后继续有界消费完整事件流」条）
+    # 本机后端不传停止后等待预算：None 表示 schedule 取 grace
     assert o.stop_bound_s is None
 
 
@@ -699,7 +699,7 @@ def test_malformed_feature_friendly_diagnostic(tmp_path, monkeypatch, capsys):
         assert "语法错误" in err and "Traceback" not in err  # 友好诊断、非 Python traceback
 
 
-# ---- 第四刀：实时写 commit-point 写序（ADR 0030）----
+# ---- 第四刀：实时写 commit-point 写序 ----
 # 用 fake store 记录调用序（共享一个有序 log），注入真 RunPersistence 编排——测真实写序、非 mock 行为。
 # 注入点是 patch compose.build_local_stores（ADR 0016：local 装配下沉 compose 后的注入锚，取代旧的 m.Local*）。
 def _recording_build_local_stores(calls: list):
@@ -781,7 +781,7 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     assert methods[-1] == ("report", "write")
 
 
-# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）----
+# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束 ----
 
 _ENDED_AT = "2026-11-15T00:00:00+00:00"
 _ENDED_REASON = "发起它的 gherkai run 进程已退出（已记为已结束）"
@@ -875,7 +875,7 @@ def test_run_ended_elsewhere_after_an_interrupt_exits_by_signal(tmp_path, monkey
     assert cap.out == "" and "在本次执行结束之前已被记为已结束" in cap.err
 
 
-# ---- 前台执行遵守运行期限、服从记录（ADR 0054 决策二、五）：组合根的注入与到期收尾的输出 ----
+# ---- 前台执行遵守运行期限、服从记录：组合根的注入与到期收尾的输出 ----
 
 def test_run_injects_the_wall_clock_and_the_record_into_schedule(tmp_path, monkeypatch, capsys):
     """前台 run 交给调度循环的墙钟是组合根写时间戳的同一个读取点 `compose.now`；有记录时，认领、重试之前的读与停手信号由这次
@@ -1181,7 +1181,7 @@ def test_report_run_passes_absolute_artifact_dirs_and_no_flag(tmp_path, monkeypa
     assert box["no_artifacts"] is False
 
 
-# ---- _render_status：local/cloud 共享的渲染+提示+退出码（ADR 0034，两路一致）----
+# ---- _render_status：local/cloud 共享的渲染+提示+退出码（两路一致）----
 def _mk_state(status):
     from gherkai_core.model import RunState, JobState
     return RunState(run_id="r", status=status,
@@ -1580,7 +1580,7 @@ def test_run_steps_dir_flag_resolves_absolute_and_persists(tmp_path, monkeypatch
     ②写进 definition（`RunMeta.steps_dir`）。
 
     绝对化：worker 是 cwd 与 CLI 不同的子进程；随 definition 走：本机后台推进/接力宿主的 CWD 与提交进程
-    不同（ADR 0034），只有读回同一个值三宿主才用同一套确定性 step、判定才可复现。
+    不同，只有读回同一个值三宿主才用同一套确定性 step、判定才可复现。
     """
     steps = tmp_path / "mysteps"
     steps.mkdir()
@@ -1645,7 +1645,7 @@ def test_steps_dir_explicit_but_missing_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
     """submit 侧同 run：解析一次写进 definition——per-run 进程/接力者从 definition 读回（**不**收 flag，
-    也不重解析 `./steps`），三宿主才一致（ADR 0037 决策 4）。"""
+    也不重解析 `./steps`），三宿主才一致。"""
     import subprocess
 
     class _FakeProc:
@@ -3320,7 +3320,7 @@ def test_explain_recovered_steps_is_a_job_level_count_so_filtering_does_not_brin
 
 
 def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_path, monkeypatch):
-    """本机 submit 建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有（ADR 0034）。"""
+    """本机 submit 建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有。"""
     import subprocess
 
     monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
@@ -3957,7 +3957,7 @@ def test_tunnel_watch_turns_stop_signals_into_exit_that_still_stops_the_tunnel(s
     assert "收到停止信号，隧道已拆 run=r1 pid=4242" in capsys.readouterr().out
 
 
-# ---- list-runs（ADR 0041 决策七）----
+# ---- list-runs ----
 
 _LR_CLI = "1.5.0"  # 用例里本 CLI 的版本（哪些 run 由当前版本写出，以它为比对对象）
 

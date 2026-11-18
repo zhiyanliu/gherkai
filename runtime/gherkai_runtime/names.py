@@ -14,7 +14,7 @@ BASE_RUNS_TABLE = "runs"
 BASE_EVENTS_TABLE = "events"
 BASE_BUCKET = "artifacts"
 BASE_CLUSTER = "cluster"
-# 无状态批量运行 kicker（踢启器）Lambda 基名（ADR 0034）：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
+# 无状态批量运行 kicker（踢启器）Lambda 基名：CDK 建 `{prefix}kicker`（stack.py 用同名），cli status
 # --wait 据 --prefix 推理出它 invoke 接力 kickoff（Lambda 名单一真源、cli↔IaC 同源）。
 BASE_KICKER_LAMBDA = "kicker"
 BASE_RECONCILER_LAMBDA = "reconciler"
@@ -29,7 +29,7 @@ SCHEDULE_NAME_MAX_LEN = 64
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
-# 后端 SSM 参数的相对键（全路径为 `ssm_path(prefix, 键)`；参数族真值表见 ADR 0038「SSM 参数与命名真源」、0037 决策 6）。
+# 后端 SSM 参数的相对键（全路径为 `ssm_path(prefix, 键)`）。
 # 调用点一律引常量、不写裸字面量——推送方/解析方/IaC/Lambda 拼的必须是同一个键。
 BACKEND_VERSION_KEY = "version"        # 后端版本戳（stack 资源随部署事务写；提交侧 skew 比对读）
 DEVICE_FARM_PROJECT_KEY = "device-farm-project"  # 云端 Device Farm 项目 ARN（deploy 找回或建立后写，ADR 0051 决策 10；提交侧填设备请求时读）
@@ -87,7 +87,7 @@ def job_timeout_schedule_prefix(prefix: str) -> str:
 
     **含尾部 `-`**：通配/摘要就从这里起——推进器据它建 schedule 名、IaC 据它拼 IAM 资源域
     `schedule/default/{此前缀}*`，两侧同源。任一侧单独改名 → CreateSchedule 被 IAM 拒（best-effort
-    只打日志），job timeout 静默降级为防御扫、纯静默 job 彻底失去超时保护（ADR 0034「job timeout」节）。
+    只打日志），job timeout 静默降级为防御扫、纯静默 job 彻底失去超时保护。
     """
     return f"{default_name(prefix, BASE_JOB_TIMEOUT_SCHEDULE)}-"
 
@@ -104,7 +104,7 @@ def prefix_max_len() -> int:
 def ssm_path(prefix: str, key: str) -> str:
     """`/{prefix}backend/<key>`：本部署**全部** SSM 参数的路径构造单点（网络 subnets/security-groups、
     version/vpc、device-farm-project、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
-    cli 已知 prefix 直接拼路径读、无循环依赖（ADR 0033）；参数族清单见 ADR 0038「SSM 参数与命名真源」。"""
+    cli 已知 prefix 直接拼路径读、无循环依赖（ADR 0033）。"""
     return f"/{prefix}backend/{key}"
 
 

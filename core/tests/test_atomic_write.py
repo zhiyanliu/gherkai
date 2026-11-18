@@ -63,7 +63,7 @@ def test_concurrent_reader_never_sees_empty_or_truncated_text(tmp_path):
 
 
 def test_json_round_trip_and_default_mode_readable_by_others(tmp_path):
-    """默认权限给 group/other 读：判定真值与报告产物的消费者是 CI/人/静态 server（ADR 0034 / 0027），
+    """默认权限给 group/other 读：判定真值与报告产物的消费者是 CI/人/静态 server，
     而 tmp 文件本身是 0600——不显式 chmod 就会静默变 owner-only。"""
     path = tmp_path / "manifest.json"
     atomic_write_json(path, {"schema_version": 1, "中文": ["a", 2]})
@@ -86,7 +86,7 @@ def test_target_name_at_name_max_still_writable(tmp_path):
     per-scope 结果文件名由 scope_id percent-encode 而来（scope_id 是不透明标识符、显式允许中文，
     每字 9 字符，ADR 0025「id 派生」），落点名会顶到上限。tmp 名若在完整目标名后再接随机段与后缀，
     「非原子写时写得进」的落点会在建 tmp 时就 ENAMETOOLONG——而这条落盘路径上抛异常会掀掉整个 run
-    （结果落盘失败即停全部 worker 并重抛，ADR 0030）。
+    （结果落盘失败即停全部 worker 并重抛）。
     """
     name_max = os.pathconf(str(tmp_path), "PC_NAME_MAX")
     path = tmp_path / ("x" * (name_max - len(".json")) + ".json")

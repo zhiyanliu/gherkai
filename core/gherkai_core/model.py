@@ -174,7 +174,7 @@ class Status(str, Enum):
     """判定状态（ADR 0024 三态）+ core 派生态/前置态（ADR 0031）。
 
     worker 经 wire 只报前三态（passed/failed/error，ADR 0024）；后四态是 **core 内态、永不进 wire**：
-    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**（ADR 0031 决定一）；发现 run 已被别处记为已结束时被停下的 job 同样记
+    - skipped/aborted：由 fail-fast 或使用方中断产生的 job 级**终态**；发现 run 已被别处记为已结束时被停下的 job 同样记
       aborted（ADR 0054 决策二）。aborted 还作为被外部停下的 run 的 run 级 status：使用方中断已被处理且有 job 记为 aborted 或 skipped，或已发现
       run 被别处记为已结束（规则见 `project.run_verdict`）。
     - pending/running：实时写的 job 与 run 级**生命周期前置态**（ADR 0031 决定一·补），只活在 JobState/RunState，
@@ -203,10 +203,10 @@ _STATUS_SEVERITY: dict[Status, int] = {
     Status.ABORTED: 3,  # 最重：有现场，最该被人看
 }
 
-# run 级聚合的过滤名单（ADR 0031 决定三）：终态判定之外的态都不进 run 级聚合。
-# 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断已被处理且有 job 记为 aborted 或 skipped 时在聚合之外另记 run 级 aborted，见 ADR 0031 决定三）
+# run 级聚合的过滤名单：终态判定之外的态都不进 run 级聚合。
+# 含 skipped/aborted（派生终态、单写者；仅 fail-fast 来源必伴随 error，使用方中断已被处理且有 job 记为 aborted 或 skipped 时在聚合之外另记 run 级 aborted）
 # + pending/running（前置态）。
-# 两路共用（ADR 0031 决定三 / 0034）：schedule 喂的都是终态，名单滤掉其中的 skipped/aborted；project 的无状态投影
+# 两路共用：schedule 喂的都是终态，名单滤掉其中的 skipped/aborted；project 的无状态投影
 # 还真实喂入 pending/running（未起或正在运行的 job）。滤后的判定集非空时按它归约，前置态与 skipped/aborted 不影响结果；
 # 判定集为空时 _aggregate 不判 passed，按 aborted、skipped、running、pending 的顺序取输入里第一个出现的态。
 _NON_VERDICT: frozenset[Status] = frozenset(
@@ -569,7 +569,7 @@ class RunMeta:
     max_concurrency: int | None = None
     # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）解析成绝对路径后填这里
     # （取值顺序见该决策，配置文件那一层见 ADR 0053 决策 2），所有起 worker 的宿主（同步 run / local
-    # per-run 进程 / status --wait 接力者）从 definition 读回、经 env 注给 worker——三宿主 CWD 各不相同（ADR 0034），
+    # per-run 进程 / status --wait 接力者）从 definition 读回、经 env 注给 worker——三宿主 CWD 各不相同，
     # 只有随 definition 走才对三者一致，且「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费
     # （约定逻辑在组合根）。None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
@@ -603,9 +603,9 @@ class JobState:
     scope_id: str
     status: Status
     session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
-    # claim（CAS pending→running）时刻 ISO 串（ADR 0034「job timeout」节 claimed_at）：local 接力恢复
+    # claim（CAS pending→running）时刻 ISO 串：local 接力恢复
     # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）；后台收尾时由它与预算、期限重算超时的
-    # 说明（ADR 0054 决策二第 2 条），所以有记录的 job 缺它时推进步骤不收尾。
+    # 说明，所以有记录的 job 缺它时推进步骤不收尾。
     claimed_at: str | None = None
 
 
@@ -614,7 +614,7 @@ class RunState:
     """一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。
 
     与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。实时写下随进度增量更新
-    （ADR 0030：create_run 写初始全 pending → 每 job 完成/开始执行时刷 jobs[scope_id] → try_finalize 以条件写落定总 status）。
+    （create_run 写初始全 pending → 每 job 完成/开始执行时刷 jobs[scope_id] → try_finalize 以条件写落定总 status）。
     started_at/ended_at 实时写下按生命周期出现（create_run 填 started、收尾填 ended）。
 
     **jobs 是 Map（scope_id → JobState），非 list**（ADR 0030 决定五）：实时按单个 job 刷状态需「按 scope_id

@@ -1,4 +1,4 @@
-"""cli --backend cloud 接线层测试（ADR 0016「cli backend 选择」/ 0030 决定七 / 0033 IaC+接线）。
+"""cli --backend cloud 接线层测试。
 
 **只验接线，不引 moto、不连真 AWS**：adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
 做法——patch `compose._make_ddb_table`/`_make_s3_client`（store 句柄）+ `preflight_cloud_resources`（探活）
@@ -6,11 +6,11 @@
 - backend=cloud 构造了正确 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂；
 - **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
 - **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix；
-- **cloud 走 FargateEngine（决策 A）**：cloud 走 build_fargate_engines（非 build_engines）；
+- **cloud 走 FargateEngine**：cloud 走 build_fargate_engines（非 build_engines）；
 - 缺 boto3 → 退出码 2；运行期 botocore 异常 → 退出码 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
-- **三道闸的次序与退出码（ADR 0037 决策 7 / 0038）**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
-  前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落，解析结果进 definition 与 build_fargate_engines。
+- **三道闸的次序与退出码**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
+  前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落（ADR 0037 决策 7 / 0038）；解析结果进 definition 与 build_fargate_engines。
 """
 from __future__ import annotations
 
@@ -219,7 +219,7 @@ def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
 
 
 def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, capsys):
-    """云端后端**拒绝**显式 `--grace`（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+    """云端后端**拒绝**显式 `--grace`：那个值到不了任何机制面（Fargate 侧真实宽限
     是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了一道
     会话泄漏防护——与 `--report-dir` 撞云端产物前缀即以退出码 2 结束的判法一致：入口不许配无效值。
 
@@ -276,7 +276,7 @@ def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, 
     ({"midscene": 30}, 120 + 20.0),  # novaact 没设 stopTimeout（或找不到该 container）：按 Fargate 平台上限 120 秒计
 ], ids=["max-of-set", "unset-takes-platform-max"])
 def test_cloud_run_passes_stop_bound_from_resolved_stop_timeouts(tmp_path, monkeypatch, capsys, stop_timeouts, expected):
-    """云端同步 run 的停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：取 variant 解析带回的各引擎
+    """云端同步 run 的停止后等待预算：取 variant 解析带回的各引擎
     worker container `stopTimeout` 的最大值加滞后余量，作 `stop_bound_s` 传给 schedule；运行期 grace 仍回落默认值、
     与它互不影响（Fargate 句柄忽略运行期 grace，停止后的等待预算不取 grace）。"""
     _patch_cloud_handles(monkeypatch, [], stop_timeouts=stop_timeouts)
@@ -295,7 +295,7 @@ def test_cloud_run_passes_stop_bound_from_resolved_stop_timeouts(tmp_path, monke
 
 
 def test_cloud_run_injects_the_wall_clock_and_the_record_like_the_local_backend(tmp_path, monkeypatch, capsys):
-    """`--backend cloud` 与本机后端同一接法（ADR 0054 决策二、五）：调度循环的墙钟是组合根的 `compose.now`；有记录时，认领经这次 run
+    """`--backend cloud` 与本机后端同一接法：调度循环的墙钟是组合根的 `compose.now`；有记录时，认领经这次 run
     的落库服务写进云端的运行状态表，认领时刻随同一次条件写落下；`--backend cloud --no-report` 只注入墙钟、没有记录。"""
     from gherkai_core.persist import RunPersistence
     from gherkai_core.serialize import instant_from_iso
@@ -455,7 +455,7 @@ def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
     assert "运行期落库失败" in capsys.readouterr().err
 
 
-# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）→ 退出码 1 ----
+# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束 → 退出码 1 ----
 class _EndedElsewhereTable(_FakeTable):
     """假 DDB table：`end_elsewhere` 之后，STATE 上以「run 级为 pending 或 running」为条件的写一律被挡
     （ConditionalCheckFailed，同真表上 run 级已是终态时的行为），以「run 级已是终态」为条件的写（job 状态写的第二次写）照常写成，
@@ -553,9 +553,9 @@ def test_cloud_run_ended_elsewhere_exits_by_signal_even_when_the_record_cannot_b
     assert "判定明细: " in cap.err and "Traceback" not in cap.err
 
 
-# ---- cloud 走 FargateEngine（决策 A，ADR 0016/0033）----
+# ---- cloud 走 FargateEngine ----
 def test_cloud_wires_fargate_engines(tmp_path, monkeypatch, capsys):
-    # cloud 走 build_fargate_engines（非 build_engines）——决策 A 落到 CLI。验注入的参数正确。
+    # cloud 走 build_fargate_engines（非 build_engines）。验注入的参数正确。
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -599,7 +599,7 @@ def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
     assert box["fargate"] == 0  # local 从不造 FargateEngine
 
 
-# ---- cloud + --no-report：不落库（跳过 store）但**仍 Fargate 执行**（report 与执行正交，ADR 0016 决策 A）----
+# ---- cloud + --no-report：不落库（跳过 store）但**仍 Fargate 执行**（report 与执行正交）----
 def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsys):
     # --no-report 只关不落库、**不碰在哪执行**：--backend cloud --no-report 仍在 Fargate 运行，只是不生成 report。
     record: list = []
@@ -610,7 +610,7 @@ def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsy
     assert rc == 0
     # 落库轴：不构造任何 store 钩子（need_cloud=False，零落盘运行路径）
     assert not any(r[0] == "make" for r in record)
-    # 执行轴：仍走 Fargate（决策 A：cloud 走 Fargate，与 report 正交）
+    # 执行轴：仍走 Fargate（cloud 走 Fargate，与 report 正交）
     assert len(made["fargate"]) == 1, "--no-report --backend cloud 仍应 Fargate 执行"
     # preflight 探执行资源（events/cluster/桶）但 runs_table=None（不落库、不探 runs 表）
     assert preflight_calls[0]["runs_table"] is None
@@ -666,7 +666,7 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
     assert box.get("artifact_s3") is None  # local 不注入
 
 
-# ---- submit/status cloud 的 preflight/fail-fast 接线（ADR 0033 preflight 条）----
+# ---- submit/status cloud 的 preflight/fail-fast 接线 ----
 
 def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monkeypatch, capsys):
     """submit cloud 的 preflight 除表/桶/cluster 外还探：本 run 用到引擎的 task-def + 事件驱动链三 Lambda
@@ -736,7 +736,7 @@ def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
 
 def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
     """--wait 接力 invoke 的 kicker 不存在（ResourceNotFound）→ 点名 prefix 并以退出码 2 结束，不再吞掉死等
-    （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞掉、下一个卡住窗口再 invoke——ADR 0033 preflight 条）。"""
+    （接力对象缺失时轮询永不终止；其他 AWS 瞬时错仍吞掉、下一个卡住窗口再 invoke）。"""
     from botocore.exceptions import ClientError
 
     class _PendingTable:
@@ -1200,7 +1200,7 @@ def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, c
     assert "/gherkai-backend/version" in capsys.readouterr().err
 
 
-# ---- worker 镜像 variant 闸接线（ADR 0038「运行时与 preflight」）----
+# ---- worker 镜像 variant 闸接线 ----
 # 解析本体（读 SSM 映射 / revision ACTIVE / ECR digest 存在）在 runtime 的 compose 测试里验；这里只验前端：
 # 次序（skew → 资源 preflight → variant）、退出码 2、解析结果进 definition 与 build_fargate_engines、打印与静音。
 
@@ -1498,7 +1498,7 @@ def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
 
 
 def test_status_cloud_json_includes_artifact_locations(monkeypatch, capsys):
-    """status --json 附加 artifacts（ADR 0041 决策三）：RunState 部分形状不变，多一个键给报告/判定明细/元信息位置。"""
+    """status --json 附加 artifacts：RunState 部分形状不变，多一个键给报告/判定明细/元信息位置。"""
     class _PassedTable:
         def get_item(self, **kw):
             if kw["Key"]["item_type"] == "META":

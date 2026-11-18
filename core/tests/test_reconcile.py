@@ -1,4 +1,4 @@
-"""reconciler tick 测试（ADR 0034、ADR 0054 决策二后台推进条）：推进编排 + 幂等 + CAS 起 job + 收尾 + 到期处理。
+"""reconciler tick 测试：推进编排 + 幂等 + CAS 起 job + 收尾 + 到期处理。
 
 用真 SqliteEventLog + LocalRunStore + fake Launcher（记录被 launch 的 job，不起真进程）与注入的假墙钟验证 tick 逻辑：
 - 首 tick 从全 pending 起首批（≤max_concurrency），每次认领前另取一次时刻作认领时刻，截止时刻随 launch 交出；
@@ -240,7 +240,7 @@ def test_tick_on_finalized_run_with_pending_jobs_reads_existing_terminal(tmp_pat
 
 def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path):
     """收尾写写不成（并发推进器在本轮读 baseline 之后先提交了终态）：重读到终态，返回 ENDED、不带结果，宿主不生成报告；判定真值照落
-    （写序不变）；库中终态是先提交的那一份（ADR 0054 决策二后台推进条「收尾与报告」）。"""
+    （写序不变）；库中终态是先提交的那一份。"""
 
     class _LosesCommit(LocalRunStore):
         def __init__(self, root) -> None:
@@ -384,7 +384,7 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
     assert state.status == Status.ERROR  # 任一 error → run error（ADR 0031 决定三）
 
 
-# ---------- commit-point 写序（ADR 0030 决定三 detached 同守）：判定真值先落、CAS 后 ----------
+# ---------- commit-point 写序：判定真值先落、CAS 后 ----------
 
 class _RecordingResultStore:
     def __init__(self, seq: list, fail: bool = False) -> None:
@@ -408,7 +408,7 @@ class _OrderRecordingRunStore(LocalRunStore):
 
 
 def test_finalize_writes_verdicts_before_commit_point(tmp_path):
-    """全 done 的 tick：ResultStore 各 job 判定真值**先**落，再 try_finalize（ADR 0030 决定三写序）——看到终态即
+    """全 done 的 tick：ResultStore 各 job 判定真值**先**落，再 try_finalize——看到终态即
     保证 jobs/*.json 已齐；反序在 detached 下崩在中间就是永久缺失（无人重试）。"""
     seq: list = []
     meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq))
@@ -440,7 +440,7 @@ def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path
 
 
 def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path):
-    """前一个 job 的判定已保存、后一个 job 的保存失败（ADR 0034 机制三「run 级状态只进不退」条④ K3）：异常原样抛出，这一轮没有发出
+    """前一个 job 的判定已保存、后一个 job 的保存失败：异常原样抛出，这一轮没有发出
     收尾的条件写，run 仍未结束；重试的一轮保存完全部判定之后才提交。"""
 
     class _FailsOnSecondSave(_RecordingResultStore):
@@ -464,7 +464,7 @@ def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path):
     assert store.load_run_state("run-1").status == Status.PASSED
 
 
-# ---------- 报告（ADR 0054 决策二后台推进条「收尾与报告」）----------
+# ---------- 报告 ----------
 
 class _Report:
     def __init__(self) -> None:
@@ -490,10 +490,10 @@ def test_report_comes_from_the_committed_result_not_from_a_second_read_of_the_ev
 
 
 def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path):
-    """两个推进方读到不同的快照、竞争收尾（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读事件之前，
+    """两个推进方读到不同的快照、竞争收尾。固定先后：B 读完运行态、读事件之前，
     A 走完一轮并写成收尾；B 随后按自己的快照走到收尾，条件写写不成。只断言必须成立的正面性质：A 写成、带它这一轮的结果；B 返回不带
     结果的 ENDED；run 级的状态、说明与结束时刻是 A 写下的；用 A 交还的结果生成的报告是 A 的判定。B 落下的判定明细与 A 的谁留在
-    存储里不在断言之内（ADR 0034 机制三开头的「判定明细」一条）。"""
+    存储里不在断言之内。"""
     meta, log_a, store = _setup(tmp_path, "a")
     tick("run-1", meta, log_a, store, FakeLauncher(), max_concurrency=1, clock=Clock())  # 认领并启动 a
     _done_events(log_a, "a")  # A 读到的快照：完整的结果，判 passed
@@ -540,7 +540,7 @@ def test_report_write_failure_is_isolated():
     finalize_report(result, None, "t")
 
 
-# ---------- 到期处理（ADR 0054 决策二后台推进条）----------
+# ---------- 到期处理 ----------
 
 def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
     """已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动：不认领、不启动，到期收尾——已结束的 job 落判定明细，run 级以条件写
@@ -564,7 +564,7 @@ def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
 
 
 def test_all_done_after_the_deadline_aggregates_without_the_claim_count_condition(tmp_path):
-    """没有执行中的、也没有未启动的 job：照常按各 job 的判定聚合收尾，不管是否已过期限（ADR 0054 决策二第 4 条）；收尾写不带认领计数
+    """没有执行中的、也没有未启动的 job：照常按各 job 的判定聚合收尾，不管是否已过期限；收尾写不带认领计数
     的条件：没有未启动的 job 就不会再有认领。"""
     meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1))

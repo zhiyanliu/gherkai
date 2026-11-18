@@ -151,7 +151,7 @@ def test_not_exited_is_running_or_pending():
 
 
 def test_timeout_message_follows_the_cutoff_that_applied():
-    """超时的说明按起作用的截止时刻给（ADR 0054 决策二第 2 条）：job 自己的预算是原有那一句，run 的期限是另一句；判定与归因相同，
+    """超时的说明按起作用的截止时刻给：job 自己的预算是原有那一句，run 的期限是另一句；判定与归因相同，
     都是 error 与 timeout。这一项没有缺省值：漏传即报错，不悄悄落到预算那一句。"""
     budget = _fin(stop_reason="timeout", scope_done=None, timeout_cause="budget")
     assert (budget.status, budget.error_type, budget.message) == (Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")

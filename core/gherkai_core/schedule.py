@@ -15,7 +15,7 @@ job 间并行（maxConcurrency 上限）、失败隔离（默认）/ fail-fast�
   同样一经观察到已过即不撤销（见 `_Worker._past_cutoff`）。
 - 单调时钟（opts.clock）只管不进记录的时长：停止请求时刻与排空上界、各级时长。
 
-起 worker 之前按序检查（ADR 0054 决策二「一次前台执行可能因三种原因停下」一段）：已过停止启动的时刻、或已发现 run 被别处记为已结束，
+起 worker 之前按序检查：已过停止启动的时刻、或已发现 run 被别处记为已结束，
 就不启动、不产出判定；否则 run 已中止（fail-fast 或使用方中断）的记 SKIPPED；都不成立才认领并起 worker。重试之前是同一次序，最后一步
 换成读一次 run 级状态，命中即保留上一次的判定。两处共用 `_Worker._hold` 一份判断。
 
@@ -128,12 +128,12 @@ def _heartbeat_wrap(events, poll_interval_s):
             raise payload  # 透传内层异常（schedule 的 except WorkerExitError/Exception 据此分类）
         else:  # done：内层正常迭代完（adapter 的事件流自然终止，engine 无关，ADR 0024/0026）——
                # subprocess 是管道 EOF+proc.wait returncode 0；Fargate 无论走 scope_done 主判还是 STOPPED 兜底，都
-               # 等 DescribeTasks STOPPED 读 exitCode（与 subprocess 无条件 proc.wait() 同构，ADR 0024「事件流结束信号」），
+               # 等 DescribeTasks STOPPED 读 exitCode（与 subprocess 无条件 proc.wait() 同构），
                # 其中非零退出码（含被信号强杀的负码）经 wire.raise_for_worker_exit 走上面的 exc 分支、唯 exit==0 落此 done。
             return
 
 
-# 停止后继续消费事件流的排空上界余量（秒，ADR 0034 机制二「停止后继续有界消费完整事件流」）：发出停止请求后最多再等「停止后等待
+# 停止后继续消费事件流的排空上界余量（秒）：发出停止请求后最多再等「停止后等待
 # 预算」加这段余量（从请求时刻起算，stop() 自身的阻塞计入其中、不另加），让 worker 收到停止请求后走完收尾（桌面与设备的会话都发
 # session_closed，要在这段里到达才能算进未确认集），之后不再等。等待预算取 ScheduleOpts.stop_bound_s，未给时取 grace_period_s。
 # 余量住 core、两个后端共用：组合根只报引擎侧的等待预算，不含余量。
@@ -142,7 +142,7 @@ DRAIN_MARGIN_S = 5.0
 # 起 worker 之前与重试之前的检查命中的那一项（`_Worker._hold`）：已过停止启动的时刻（deadline），其余三项与中止来源（AbortCause）同名。
 _Hold = Literal["deadline", "ended-elsewhere", "fail-fast", "interrupt"]
 
-# 排队中的 job 因 run 已中止而记 SKIPPED 时的说明，按中止来源区分（ADR 0031）。
+# 排队中的 job 因 run 已中止而记 SKIPPED 时的说明，按中止来源区分。
 _SKIPPED = {
     "fail-fast": "fail-fast：本次运行已中止，未启动（worker 未 spawn）",
     "interrupt": "收到中断信号：本次运行已中止，未启动（worker 未 spawn）",
@@ -168,7 +168,7 @@ class ScheduleOpts:
     # 能力自述报出自己的下限，组合根按 run 取最大值传入）——core 只校验「传入 grace ≥ 声明下限」这个引擎无关的关系，
     # 保 core 纯 reducer/引擎无知（ADR 0016/0026）。默认 0.0 表示无下限（不破现有直接构造 ScheduleOpts 的调用方）。
     min_grace_s: float = 0.0
-    # 停止后等待预算（秒，引擎无关的纯数，ADR 0034 机制二「停止后继续有界消费完整事件流」）：调用方愿意为该引擎从发出停止请求
+    # 停止后等待预算（秒，引擎无关的纯数）：调用方愿意为该引擎从发出停止请求
     # 等到事件流结束的时长，属于客户端侧的取值、不是平台保证，不含余量；排空上界取首次停止请求时刻加它、再加 DRAIN_MARGIN_S。
     # None 表示取 grace_period_s（本机句柄发 SIGTERM、等 grace、再 SIGKILL，grace 盖住这一段）；云端同步 run 由组合根按部署侧的
     # 容器停止宽限加经验余量算好传入（Fargate 句柄忽略运行期 grace）。给了值须为有限正数，schedule 起 worker 前校验；
@@ -419,7 +419,7 @@ class _Worker:
         """单次执行 job。返回 (JobResult, 是否 network_error, 是否 emit 过 step_done)；没有启动、不产出判定时返回 None。
 
         previous 是上一次 attempt 的判定（只在重试时有）：重新起 worker 之前的检查命中时保留它、注明没有再重试，不把已经运行过一次的
-        job 记成「未启动」。第一次 attempt 起 worker 之前按序检查（`_hold`，ADR 0054 决策二）：已过停止启动的时刻或已发现 run 被别处
+        job 记成「未启动」。第一次 attempt 起 worker 之前按序检查（`_hold`）：已过停止启动的时刻或已发现 run 被别处
         结束即不启动、不产出判定 → run 已因 fail-fast 或使用方中断而中止记 SKIPPED → 取墙钟作认领时刻并认领（有记录时；认领被拒即发现
         run 已被别处结束、不启动）→ 由认领时刻算出截止时刻。认领紧贴起 worker，免得留下已认领却没有执行的 job；认领本身失败（存储
         不可达）照常抛出。
@@ -455,7 +455,7 @@ class _Worker:
             if hold in ("deadline", "ended-elsewhere"):
                 return None  # 不启动、不产出判定：运行态保持 pending，原因由 run 级裁决给出
             if hold is not None:
-                # run 已因 fail-fast 或使用方中断而中止：worker 从未 spawn → SKIPPED（没执行/没花钱/可直接重新运行，ADR 0031），非 error
+                # run 已因 fail-fast 或使用方中断而中止：worker 从未 spawn → SKIPPED（没执行/没花钱/可直接重新运行），非 error
                 result.status = Status.SKIPPED
                 result.error_type = None
                 result.message = _SKIPPED[hold]
@@ -614,7 +614,7 @@ class _Worker:
                 pass  # stop 兜底失败不应掩盖原始结果
 
     def _force(self) -> None:
-        """使用方再次中断（ADR 0024 终止契约）：零宽限的停止请求——子进程 adapter 即对 worker 的进程组发 SIGKILL，Fargate adapter 再发一次
+        """使用方再次中断：零宽限的停止请求——子进程 adapter 即对 worker 的进程组发 SIGKILL，Fargate adapter 再发一次
         StopTask。先记下请求：句柄尚未返回（起 worker 中）的 worker 在句柄返回后的首次停止即用零宽限。停止原因此前已由 _stop_all 落定为
         abort，这里不改判定。"""
         self._force_requested.set()
@@ -661,7 +661,7 @@ def schedule(
             f"停止宽限 grace={opts.grace_period_s}s 非法：须 > 0 且 ≥ {opts.min_grace_s}s"
             "（宽限短于声明的最短收尾宽限时，worker 可能在释放会话或保存产物之前被强制终止）"
         )
-    # 停止后等待预算（ADR 0034 机制二）：给了值须为有限正数，与 grace 同处校验、同样在起任何 worker 之前。inf 会让停止后的排空永不
+    # 停止后等待预算：给了值须为有限正数，与 grace 同处校验、同样在起任何 worker 之前。inf 会让停止后的排空永不
     # 到点，卡住的 worker 就拖住整个 run；与 grace 之间不设大小关系（云端的等待预算与运行期 grace 是两个量）。
     # 契约型异常：值只由组合根算好传入，使用者的输入到不了这里。
     if opts.stop_bound_s is not None and not (_math.isfinite(opts.stop_bound_s) and opts.stop_bound_s > 0):

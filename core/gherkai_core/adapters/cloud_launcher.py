@@ -61,7 +61,7 @@ class CloudLauncher:
                 "——scope=%s 截止时刻 %s；超时仍由后台巡检兜底收敛，只是不如到点准时",
                 job.scope_id, cutoff_at.isoformat())
         else:
-            # best-effort（ADR 0034「job timeout」节边界）：武装失败不阻塞 launch——保护降级为
+            # best-effort：武装失败不阻塞 launch——保护降级为
             # tick 防御扫（claimed_at ②）+ status --wait，只打日志。
             try:
                 self._timeout_watch.arm(self._run_id, job.scope_id, cutoff_at)

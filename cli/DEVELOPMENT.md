@@ -82,7 +82,7 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 run 开始即写 definition 与初始全 pending 态，每个 scope 起 worker 之前先认领（`RunPersistence` 作为 `ScheduleOpts.record` 注入，
 认领时刻随认领写下），开始执行时写入 RUNNING、完成即落该 scope 判定真值，最后 `finalize` 以条件写落定总状态与 run 级说明（commit point）。
 调度循环的墙钟注入 `compose.now`，与写时间戳的 `compose.now_iso` 同一个读取点；过了运行期限减 60 秒不再启动 job，没有启动的 scope
-不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」（ADR 0054 决策二）。run 级在此之前已被别处记为终态时
+不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」。run 级在此之前已被别处记为终态时
 （认领被拒、job 状态写得知 run 已结束，调度循环随即停手），`finalize` 不覆盖它、不写报告，
 `run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。`--no-report` 时跳过整条落库（零落盘运行路径），
 只注入墙钟、不认领，运行期限照样生效。
@@ -117,7 +117,7 @@ adapter、复用同一条 `RunPersistence`，把状态落 DynamoDB、判定真�
 
 `run` 要求 CLI 全程在线（网断或关机即中止）；`submit` 提交完就走：local 由脱离 CLI 的 per-run 进程推进，
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机；带 `--expose-local` 时例外，隧道由本机的守护进程持有，本机须保持开机联网到 run 终态，ADR 0035 决策 3）。
-`status --wait` 是三个推进触发源之一（查询者到来即接力），保证「推进即使中断、也能被查询者续到底」（ADR 0034）。
+`status --wait` 是三个推进触发源之一（查询者到来即接力），保证「推进即使中断、也能被查询者续到底」。
 
 `submit` **有意不接受** `--subnet`/`--security-group`：cloud submit 不起 task、也不读网络参数：它写 runs 表，
 对 SSM 只读版本戳与 variant 映射（带设备 scope 时另读 Device Farm 项目参数），对 ECS 与 ECR 只做只读调用（preflight 探活与 variant 解析），带应用 scope 时另把安装包写进产物桶的 `apps/` 前缀（完整权限面登记在 ADR 0033「编排进程角色」段与「设备目标增量」段）；Fargate 网络由 IaC 注入 reconciler/kicker Lambda 的 env，在 `submit` 上声明这两个 flag 恒不生效。
@@ -135,7 +135,7 @@ cloud 失败分层的切分线是 run 是否已真正开始执行：启动 worke
 **preflight 次序是有意如此：版本 skew → 资源存在性 → variant 解析。** skew 的修复动作（`gherkai deploy`）同时补齐
 资源，也是重推镜像的前置；反过来先报「表不存在」或「variant 未推送」，只会导致一轮无效的 `--prefix` 排查或一轮无效的镜像推送。
 
-## 版本 skew 六态（ADR 0037 决策 7）
+## 版本 skew 六态
 
 deploy 会把自身版本写成后端的版本戳；五个 cloud 入口（`run`/`submit`/`status`/`list-runs`/`explain`）**先于执行前预检与任何云端读**与它比对（`doctor --backend cloud` 另把它作为一个自检项读取）：
 

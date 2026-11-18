@@ -1,4 +1,4 @@
-"""DynamoDBRunStore 的状态分组属性（ADR 0030 决定六「runs 表只有一个 GSI」条的写入规则）。
+"""DynamoDBRunStore 的状态分组属性。
 
 不变量分两半：写 run 级 `status` 的路径在写之后建立 `status_group` 与 `status` 的对应（非终态为 `live`，终态为该终态的
 状态值），含 `create_run` 传入终态初始状态的情形；不写 run 级 `status` 的路径（全 pending 的投影、只写 job 的

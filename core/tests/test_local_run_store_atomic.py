@@ -1,4 +1,4 @@
-"""LocalRunStore 写面的原子性（ADR 0030 决定四 / 0034）：per-run 推进进程写 run_state.json 的同时，
+"""LocalRunStore 写面的原子性：per-run 推进进程写 run_state.json 的同时，
 `gherkai status` / 接力进程无锁读它——写必须 tmp+rename，读者绝不能看到半截/空 JSON。
 
 真起子进程读、不 mock（绿≠对：进程间文件可见性是 mock 之外的真实行为）。对照实验（同一读者 + `write_text`

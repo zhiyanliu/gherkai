@@ -124,7 +124,7 @@ def test_manifest_shape(tmp_path: Path):
     assert m["run_id"] == "20260629-abc123"
     assert m["created_at"] == "2026-06-29T00:00:00Z"
     assert "tool" not in m  # 不硬编码不确定的产品名进对外契约（删，无聚合多工具需求）
-    # manifest 是纯派生视图：不内嵌 result 真值副本（靠 run_id 软引用，判定真值在 ResultStore，ADR 0027/0016）
+    # manifest 是纯派生视图：不内嵌 result 真值副本（靠 run_id 软引用，判定真值在 ResultStore）
     assert "result" not in m
     # report_index 扁平投影：scope 级（scenario_id=None）report + step 级 trajectory 各一条（ADR 0027）
     idx = m["report_index"]
@@ -388,8 +388,8 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
 
 
 def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
-    """skipped/aborted 的 error_type 恒 None、原因只在 message（ADR 0031 决定一）→ index 也得显；用中性 note 色而非
-    err 红（决定二：颜色跟 status 走，没运行不等于出错）。与 render_text 的口径对齐。"""
+    """skipped/aborted 的 error_type 恒 None、原因只在 message → index 也得显；用中性 note 色而非
+    err 红（ADR 0031 决定二：颜色跟 status 走，没运行不等于出错）。与 render_text 的口径对齐。"""
     store = LocalReportStore(tmp_path)
     jr = _jr("checkout", "novaact", status=Status.SKIPPED)
     jr.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"

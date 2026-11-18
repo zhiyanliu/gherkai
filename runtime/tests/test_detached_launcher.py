@@ -267,7 +267,7 @@ class _BoundedReads:
 
 def test_loop_ends_on_finalized_run_with_pending_jobs_without_report(tmp_path):
     """已收尾（error）而 job 仍 pending 的 run（definition 不可用时的收尾形态）：本机推进循环在有限轮内退出，
-    不起 worker、不写报告、不改运行态（ADR 0034 机制三「run 级状态只进不退」条④）。
+    不起 worker、不写报告、不改运行态。
 
     不判停时，认领被「run 未收尾」条件挡下、plan_next 每轮都提议 start，循环永不结束，随后的拆隧道也一直不执行。
     这里用读次数上限把「不结束」变成有界失败。"""
@@ -338,7 +338,7 @@ def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path):
 
 def test_drive_local_reconcile_tears_down_tunnel_for_an_already_terminal_run(tmp_path, monkeypatch):
     """`status --wait` 接力与 per-run 进程共用的入口：run 已收尾（error、job 仍 pending）时推进结束、照常拆隧道，
-    不写报告（ADR 0034 机制三「run 级状态只进不退」条④）。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
+    不写报告。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
     import threading
 
     from gherkai_runtime import compose, detached
@@ -422,7 +422,7 @@ def _seed_for_build(tmp_path, run_id: str, *, max_concurrency: int | None):
 
 
 def test_build_local_reconcile_prefers_meta_max_concurrency(tmp_path):
-    """并发上限以 definition 为准（ADR 0034 机制四）：入参 flag 与 meta 冲突时用 meta——`status --wait` 接力者
+    """并发上限以 definition 为准：入参 flag 与 meta 冲突时用 meta（ADR 0034 机制四）——`status --wait` 接力者
     的 flag 值可能与 submit 时不同，接力不该悄悄改这个 run 的并行度。"""
     from gherkai_runtime.detached import build_local_reconcile
 
@@ -462,9 +462,9 @@ def test_build_local_reconcile_injects_run_id_to_both_engines(tmp_path, monkeypa
 
 
 def test_build_local_reconcile_reads_steps_dir_from_definition(tmp_path, monkeypatch):
-    """使用方 step 目录随 definition 走（ADR 0037 决策 4）：宿主从 RunStore 读回 meta.steps_dir、
-    经 env 注给 worker，**绝不重解析 `./steps`**——per-run 进程与 `status --wait` 接力者的 CWD 与提交进程
-    各不相同（ADR 0034），重解析会让同一个 run 在三个宿主下用到不同的确定性 step 集、判定不可复现。
+    """使用方 step 目录随 definition 走：宿主从 RunStore 读回 meta.steps_dir、
+    经 env 注给 worker，**绝不重解析 `./steps`**（ADR 0037 决策 4）——per-run 进程与 `status --wait` 接力者的 CWD 与提交进程
+    各不相同，重解析会让同一个 run 在三个宿主下用到不同的确定性 step 集、判定不可复现。
     """
     from gherkai_runtime.detached import build_local_reconcile
 
@@ -497,7 +497,7 @@ def test_build_local_reconcile_no_steps_dir_when_definition_has_none(tmp_path, m
 
 
 def test_build_local_reconcile_host_env_steps_dir_does_not_leak(tmp_path, monkeypatch):
-    """接力者 shell 的 GHERKAI_STEPS_DIR **不得**越过 definition（ADR 0037 决策 4：宿主一律从 definition 读回）。
+    """接力者 shell 的 GHERKAI_STEPS_DIR **不得**越过 definition（宿主一律从 definition 读回）。
 
     与 `test_build_local_reconcile_no_steps_dir_when_definition_has_none` 的区别正是漏检面：那条先 delenv 该 env，
     恰好绕开继承路径。真实形态是提交时没有确定性 step
@@ -618,7 +618,7 @@ def _verdict(result) -> tuple:
 
 
 def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(tmp_path):
-    """本机推进进程到期（实测项 2、4 的本机一对）：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
+    """本机推进进程到期：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
     上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记为超时、说明是
     期限那一句；b 保持 pending、没有判定明细；run 级 error 加到期说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种
     时钟），报告内容逐项相同。"""
@@ -720,7 +720,7 @@ class _RecordsExits:
         return written
 
 
-# ---------- 启动器记下退出时刻、接力的判定条件与条件补写（ADR 0054 决策二后台推进条）----------
+# ---------- 启动器记下退出时刻（ADR 0054 决策二后台推进条）、接力的判定条件与条件补写 ----------
 
 
 class _SettableClock:

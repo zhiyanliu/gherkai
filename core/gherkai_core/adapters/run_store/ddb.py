@@ -16,10 +16,10 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
   见 ADR 0034 机制三「run 级状态只进不退」条①；`status_group` 是由
   run 级 `status` 派生的状态分组、状态分组索引的分区键，写入规则见 `status_group`），另有两个
-  **可选顶层标记**：`detached`（ADR 0034，kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
+  **可选顶层标记**：`detached`（kicker 的 Stream filter 认它）与 `worker_task_def_arns`（ADR 0038，
   清理 pass 的运行中 run 引用检查经状态分组索引读 `live` 分组里各 run 的这个属性）——两者都是「DDB 侧要查得动」才摊到顶层的。
   这类顶层附加属性只在 create_run 时写下；之后的写全是 update_item，不提及的属性原样保留。
-  jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷（决定六）；其 entry 全是 str（无 float），
+  jobs **必须原生 Map** 才能 `SET jobs.#sid=:js` 按 scope_id 单元素刷；其 entry 全是 str（无 float），
   原生 Map 无 Decimal 顾虑。
 
 字段仍源于 `serialize`（单一真理源）：META 直接 `json.dumps(run_meta_to_dict)`；STATE 的标量 + jobs 各 entry
@@ -205,7 +205,7 @@ class DynamoDBRunStore:
         docString/dataTable 正文搬 S3、META item 只留指针（解 DDB 400KB 限）；None（默认）则 argument
         原样内联进 meta_json（小 run / 单测省一层 S3）。只挂 RunMeta 写/读路径，RunState 无 argument、不涉及。
 
-        detached（ADR 0034）：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
+        detached：本组合根是否「无状态批量运行的 submit」——True 则 create_run 的 STATE item 带
         `detached=true` 顶层标记，kicker Lambda 的 Stream filter 只认它（同步 `run --backend cloud` 的
         create_run 无此标记、不触发 kicker——否则双开推进器、重复起 task）。执行环境属性、不进 core 模型。
 
@@ -269,7 +269,7 @@ class DynamoDBRunStore:
         return {
             "run_id": meta.run_id,
             _ITEM_TYPE_ATTR: _STATE,
-            **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT（ADR 0034）
+            **({"detached": True} if self._detached else {}),  # kicker filter 只认带此标记的 INSERT
             # worker revision ARN 摊平进 STATE（ADR 0038）：omit-when-None/空 —— 本机后端与旧 definition
             # 无此值时不落属性（清理 pass 的 `contains` 过滤对缺属性的 item 天然不匹配，语义即「未引用」）。
             # 值取 definition 的 worker_task_defs，**去重后排序**成 list：属性只服务「有没有引用某 ARN」的
@@ -286,7 +286,7 @@ class DynamoDBRunStore:
         #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）；
         ConditionExpression 复刻 local「未 create 就报错」——捕 ConditionalCheckFailedException 转 FileNotFoundError。
 
-        **两次写，各带互斥的 run 级条件**（ADR 0034 机制三「run 级状态只进不退」条③；ADR 0054 决策五）：第一次写的条件是 STATE
+        **两次写，各带互斥的 run 级条件**：第一次写的条件是 STATE
         存在且 run 级为 pending 或 running，写入的 job 态不是 pending 时连同把 run 级写成 running（连同状态分组，见
         `status_group`），是 pending 时只写 job；成立即返回 True。条件不成立（run 已收尾，或 STATE 不存在）时再写一次、只写 job，
         条件是 STATE 存在且 run 级已是终态；成立即返回 False，仍不成立即报 STATE 不存在。返回值因而是写的那一刻的 run 级，由条件
@@ -333,7 +333,7 @@ class DynamoDBRunStore:
         """
         self._table.load()
 
-    # ---- 条件写（ADR 0034 机制三/四、ADR 0054 决策二/五）----
+    # ---- 条件写（ADR 0034 机制三/四、ADR 0054 决策五）----
     # DDB 原生 ConditionExpression 做原子 CAS——对位 local 的 fcntl 文件锁（DDB 单 item 写天然原子、
     # 无需外部锁）。真 DDB 条件写行为由 ADR 0034 地基实测坐实（真 DDB 上 stale HWM 写被 CCF 挡、同 hwm 重复写
     # 幂等）；仓库内单测是 moto、与 local 逐条对拍（core/tests/test_conditional_writes.py）。
@@ -371,14 +371,14 @@ class DynamoDBRunStore:
     def project_state(self, run_id: str, state: RunState) -> bool:
         """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 → False。
 
-        **run 级 status 只写 running、不落终态**（ADR 0030：终态是 finalize 专属；投影提前落终态会挡住 try_finalize）。
+        **run 级 status 只写 running、不落终态**（终态是 finalize 专属；投影提前落终态会挡住 try_finalize）。
         取值规则见 `projected_run_status`（与 local adapter 共用一份）：它给出 running 时标量写带上 run 级；给出 pending
         （投影里全 job 仍 pending）时更新表达式省略 run 级、只写 HWM，库中 run 级原样保留，认领或此前投影已写成的 running
         不被拿着旧 baseline 的投影改回 pending。条件双守不变：
         HWM 挡 stale + status 挡「已 finalize 被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级，
         所以 finalize 插在两阶段之间时，后续逐 job 写不会把终态改回 running。
 
-        **各 job 态逐 job 单调条件写（机制三②的 job 级半边，对拍 local 的逐 job 合并）**：task_exited 无数值
+        **各 job 态逐 job 单调条件写（对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
         DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
         stale 返 False），再对每个 job（无效果的 pending 项除外，见末段）**逐属性** `SET jobs.#sid.status/.session_id/.claimed_at`
@@ -423,7 +423,7 @@ class DynamoDBRunStore:
             )
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
-        # 机制三② job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 的 rank
+        # job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 的 rank
         # 不高于本次投影才写（同 rank 允许覆盖——running 刷 running 幂等、终态间以本次投影为准）。
         for sid, js in state.jobs.items():
             if js.status == Status.PENDING and js.session_id is None and js.claimed_at is None:
@@ -453,7 +453,7 @@ class DynamoDBRunStore:
                     UpdateExpression="SET " + ", ".join(sets),
                     ExpressionAttributeNames={"#sid": sid, "#jst": "status"},
                     ExpressionAttributeValues=vals,
-                    ConditionExpression=cond,  # 三分支一律带条件（ADR 0034 机制三「② 的 job 级半边落地形态」段的逐 job 条件写）
+                    ConditionExpression=cond,  # 三分支一律带条件
                 )
             except self._table.meta.client.exceptions.ConditionalCheckFailedException:
                 continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
@@ -461,7 +461,7 @@ class DynamoDBRunStore:
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
                      expected_claim_count: int | None = None) -> bool:
-        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（机制三，commit 恰一次）。CCF → 已终态或 STATE 不存在
+        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（commit 恰一次）。CCF → 已终态或 STATE 不存在
         → False。message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
         状态分组同样在这次写里改为该终态的值（见 `status_group`）。
 
@@ -538,7 +538,7 @@ class DynamoDBRunStore:
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。
 
-        ConsistentRead=True：commit-point「finalize 后立刻读」的强一致（决定六）。
+        ConsistentRead=True：commit-point「finalize 后立刻读」的强一致。
         """
         resp = self._table.get_item(Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE}, ConsistentRead=True)
         item = resp.get("Item")

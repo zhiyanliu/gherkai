@@ -142,8 +142,8 @@ def now_iso() -> str:
 
 
 def run_duration_ms(state) -> float | None:
-    """detached run 的 run 级墙钟（毫秒），取 RunState `ended_at` 减 `started_at`（提交落库到 finalize commit，含排队/起容器；
-    ADR 0024「三级执行时长」detached 条）。两端任一缺、解析不了或不带时区 → None（报告显「?」——派生指标，绝不让收尾因它失败）。
+    """detached run 的 run 级墙钟（毫秒），取 RunState `ended_at` 减 `started_at`（提交落库到 finalize commit，含排队/起容器）。
+    两端任一缺、解析不了或不带时区 → None（报告显「?」——派生指标，绝不让收尾因它失败）。
     记录里的时刻经 `serialize.instant_from_iso` 读（`now_iso()` 的逆，core 里唯一的解析处）。宿主在 finalize_report 前调，算好传给 core。"""
     if state is None or not getattr(state, "started_at", None) or not getattr(state, "ended_at", None):
         return None
@@ -431,7 +431,7 @@ def build_engines(
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
     **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析在提交侧（取值顺序见该决策，
     配置文件那一层见 ADR 0053 决策 2）、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析
-    `./steps`**（三个宿主 CWD 各不相同，重解析必分叉，ADR 0034）。None 表示无使用方 step（worker 只有内建脚手架）——
+    `./steps`**（三个宿主 CWD 各不相同，重解析必分叉）。None 表示无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
     run_id（ADR 0024「run_id + scope_id 注入 worker」条）：本 run 的 id，经 env `RUN_ID` 注给**两个** worker（与云端 RunTask overrides
@@ -1116,7 +1116,7 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
     # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
-    # 同步 run 不传 → 不触发（否则双开推进器，ADR 0034）。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
+    # 同步 run 不传 → 不触发（否则双开推进器）。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
     # 那条路径先过索引就绪检查；这里返回的 store 调 list_runs 即按装配缺失报错，不会绕过检查直接 Query。
     run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
@@ -1225,7 +1225,7 @@ def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str 
 
 
 # ============================================================================
-# Fargate 执行接线（ADR 0033 / 0016 决策 A/C）：--backend cloud 时用 FargateEngine 替代 SubprocessEngine。
+# Fargate 执行接线：--backend cloud 时用 FargateEngine 替代 SubprocessEngine。
 # boto3 句柄钩子抽出供测试 monkeypatch（同 store 侧 _make_* 惯例）；import boto3 惰性收在钩子内。
 # ============================================================================
 def _make_ecs_client(*, region, profile):
@@ -1250,15 +1250,15 @@ def probe_aws_identity(*, region, profile) -> dict:
 
 
 def _make_lambda_client(*, region, profile):
-    """boto3 lambda client（cloud status --wait 接力 invoke kicker Lambda 做 kickoff，ADR 0034）。"""
+    """boto3 lambda client（cloud status --wait 接力 invoke kicker Lambda 做 kickoff）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("lambda")
 
 
 def _read_ssm_list(ssm, path: str) -> list[str]:
-    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读，ADR 0033）。
+    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读）。
 
-    **空值 fail-fast（低频加固，ADR 0033）**：正常路径 CDK 一定写非空（subnet 取自 `vpc.public_subnets or
+    **空值 fail-fast（低频加固）**：正常路径 CDK 一定写非空（subnet 取自 `vpc.public_subnets or
     private_subnets`、sg 写本 stack 新建的 worker 安全组 `WorkerSg` 的 id，均非空），故空值**几乎不可达**——只可能
     来自配置异常（参数被改空 / 值为空串）。
     但若不拦，空列表会一路传到 `awsvpcConfiguration` 的 subnets/securityGroups、拖到 **RunTask 才失败**且错误
@@ -1279,7 +1279,7 @@ def resolve_network(
     *, prefix: str, subnets: list[str] | None, security_groups: list[str] | None,
     assign_public_ip: str = "ENABLED", region=None, profile=None, ssm=None,
 ) -> dict:
-    """Fargate awsvpcConfiguration（ADR 0033）：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK 写的生成 ID）；
+    """Fargate awsvpcConfiguration：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK 写的生成 ID）；
     给了则用字面覆盖。ssm client 可注入（测试）；未注入且需读时惰性建。返回 FargateEngine 的 network_config 形状。"""
     if subnets is None or security_groups is None:
         if ssm is None:
@@ -1302,7 +1302,7 @@ def build_fargate_engines(
 ) -> dict[str, Engine]:
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
 
-    `--backend cloud` 用它替代 build_engines——决策 A（cloud 即 Fargate 执行）从设计落到 CLI 的动作点。
+    `--backend cloud` 用它替代 build_engines——「cloud 即 Fargate 执行」从设计落到 CLI 的动作点。
     boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
 
     **`worker_task_defs`（引擎 → task-def **revision** ARN）必给、无缺省**（ADR 0038 不变量「运行时只用
@@ -1355,7 +1355,7 @@ def build_fargate_engines(
     )
     if session_warmup_url:  # 会话预热地址随 definition 读回、经 RunTask overrides 进容器 env（ADR 0051 决策 13；0035 决策 5 明确不脱敏的一处）
         headers_env = {**headers_env, "GHERKAI_SESSION_WARMUP_URL": session_warmup_url}
-    if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传（ADR 0037 决策 3）
+    if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传
         headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故云端后端必须显式注，
@@ -1848,7 +1848,7 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
     return _worker_container_stop_timeout(td, engine)
 
 
-# 云端同步 run 的停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：调用方愿意从发出停止请求起、为
+# 云端同步 run 的停止后等待预算：调用方愿意从发出停止请求起、为
 # FargateEngine 的事件流结束等多久，属于客户端侧的取值、不是平台保证。取法覆盖两段——容器的停止宽限（task-def 期 stopTimeout，
 # FargateWorkerHandle.stop 只发 StopTask、忽略运行期 grace），加 ECS 记下 STOPPED 的控制面滞后（FargateEngine 无论读到
 # scope_done 还是发现 task 已停，都要等 DescribeTasks 报 STOPPED、读到 exitCode 才结束事件流）。
@@ -1863,7 +1863,7 @@ ECS_STOPPED_LAG_MARGIN_S = 20.0
 
 
 def cloud_stop_bound_s(resolutions: Iterable[WorkerResolution]) -> float:
-    """云端同步 run 的停止后等待预算（秒），作 `ScheduleOpts.stop_bound_s` 传入 schedule（ADR 0034 机制二）。
+    """云端同步 run 的停止后等待预算（秒），作 `ScheduleOpts.stop_bound_s` 传入 schedule。
 
     取本 run 用到的各引擎 worker container `stopTimeout` 的最大值（run 级单值，与 grace 按 run 取最大一致），没设或找不到
     该 container 的引擎按 `FARGATE_STOP_TIMEOUT_MAX_S` 计，再加 `ECS_STOPPED_LAG_MARGIN_S`。只报引擎侧的事实、不含 core 的
@@ -1885,7 +1885,7 @@ def preflight_cloud_resources(
     CDK 没部署」。
 
     探**执行必需**（events 表 + cluster + 桶 + `task_defs`——本 run 用到引擎的 task-def）恒探；**runs 表仅落库
-    需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交，ADR 0016 决策 A：`--no-report
+    需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交：`--no-report
     --backend cloud` 仍在 Fargate 上运行、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
     驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功而 run 不按正常的链推进，挡在提交前
     （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、

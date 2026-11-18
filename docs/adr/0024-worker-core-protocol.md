@@ -219,7 +219,7 @@ core 的 `schedule`/汇总逻辑应能用一个**假 worker**（in-memory adapte
 
 ## 远程传输演进（Fargate：事件模型与线格式活、pipe 传输死）
 
-> 本节钉的是**已想清、不会变**的边界（哪些 survive、哪些必改）。events-out 焊死到 DynamoDB events 表（worker PutItem，非 SQS/MSK/CloudWatch——见下「DynamoDB 作 events-out 传输」+ 三方案被拒护栏）。云端后端只有 `submit`（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）：起 task 在 `FargateEngine` adapter（`core/gherkai_core/adapters/fargate_engine.py`，job-in 走 S3、只有 `start_scope`，[0034](./0034-detached-batch-reconciler.md)「Engine port 演进」节），由推进器 Lambda 一侧的组合根 `compose.build_fargate_engines` 装配（IaC 与真部署验证见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）；停 task 与退出码见下表「停 / 退出码」行。产物→S3 是**正交的另一条边**，见 [0029](./0029-engine-artifacts-to-s3.md)。
+> 本节钉的是**已想清、不会变**的边界（哪些 survive、哪些必改）。events-out 焊死到 DynamoDB events 表（worker PutItem，非 SQS/MSK/CloudWatch——见下「DynamoDB 作 events-out 传输」与「被拒方案护栏」）。云端后端只有 `submit`（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）：起 task 在 `FargateEngine` adapter（`core/gherkai_core/adapters/fargate_engine.py`，job-in 走 S3、只有 `start_scope`，[0034](./0034-detached-batch-reconciler.md)「Engine port 演进」节），由推进器 Lambda 一侧的组合根 `compose.build_fargate_engines` 装配（IaC 与真部署验证见 [0033](./0033-iac-aws-backend-and-composition-wiring.md)）；停 task 与退出码见下表「停 / 退出码」行。产物→S3 是**正交的另一条边**，见 [0029](./0029-engine-artifacts-to-s3.md)。
 
 当前传输是**OS 管道**：core 是 worker 父进程，job 写 worker stdin、事件读 worker 的 `EVENTS_FD` fd、退出码经 `proc.wait()`。搬到 Fargate（[0017](./0017-cloud-execution-fargate-over-runtime.md)），core 不再是 worker 父进程，**管道语义（父子进程 / fd 继承 / EOF / stdin）全无对等物**。核实（AWS 文档 + 本仓 code，2026-07）的结论分两层：
 

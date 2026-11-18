@@ -2,7 +2,7 @@
 
 四刀审计发现 RunPersistence 此前零直接单测（只经 cli 端到端间接覆盖）。这里把它的核心契约钉到 core 层：
 commit-point 写序 / on_event 只对 ScopeStarted 刷 RUNNING / finalize 的无报告路径 + 报告失败隔离 + 收尾写不成时不覆盖、不写报告 /
-begin 初始投影 / aborted 血缘保留 / 认领与认领时刻的保留、重试之前的读、三处发现汇成的停手信号、收尾带 run 级说明（ADR 0054 决策五）。
+begin 初始投影 / aborted 血缘保留 / 认领与认领时刻的保留、重试之前的读、三处发现汇成的停手信号（ADR 0054 决策五）、收尾带 run 级说明。
 末尾两条经 schedule 走完整的前台路径，验运行期限收尾与「发现 run 已被别处结束之后不会写下 passed」。
 """
 from __future__ import annotations
@@ -80,7 +80,7 @@ def test_on_job_complete_saves_result_before_job_state():
     assert methods == [("result", "save_job_result"), ("run", "update_job_state")]
 
 
-# ---- 决定三：on_event 旁路观察者只对 ScopeStarted 刷 RUNNING（反向不变量）----
+# ---- on_event 旁路观察者只对 ScopeStarted 刷 RUNNING（反向不变量）----
 def test_on_event_runs_only_on_scope_started():
     # on_event 不再装饰/转发 sink（进度转发是 schedule 的 progress_sink 的事）——它只是事件观察者：
     # 仅 ScopeStarted 触发一次 RUNNING 刷（带血缘），其余事件零落库（否则每个 step 都刷，就成了 RMW 风暴）。
@@ -96,7 +96,7 @@ def test_on_event_runs_only_on_scope_started():
     assert updates[0].scope_id == "a" and updates[0].status == Status.RUNNING and updates[0].session_id == "s1"
 
 
-# ---- 决定二/三：finalize 的无报告路径——report_store=None 返回 None、仍写收尾、不崩 ----
+# ---- finalize 的无报告路径——report_store=None 返回 None、仍写收尾、不崩 ----
 def test_finalize_without_report_store_returns_none():
     calls, run, result, _ = _recording()
     p = RunPersistence("r", run, result, report_store=None)  # WebUI/cron 前端可能不注入 report
@@ -260,7 +260,7 @@ def test_aborted_with_none_session_does_not_resurrect_but_documents_edge():
 
 
 def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
-    """锁定「两面分离」（ADR 0016 三层切分 + 0030）——提交者实测会困惑的点：
+    """锁定「两面分离」——提交者实测会困惑的点：
     job 处于 RUNNING 时，控制面 run_state.json 显示 running，但数据面 jobs/<scope>.json **还不存在**；
     只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
     数据面存的是判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件就表示判定已就绪」。"""
@@ -294,7 +294,7 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
 
 
 def test_run_status_advances_when_first_job_leaves_pending(tmp_path):
-    """前台 run 的 run 级状态（ADR 0034 机制三「run 级状态只进不退」条③）：begin 后为 pending；第一个 job 离开 pending 的那一次写
+    """前台 run 的 run 级状态：begin 后为 pending；第一个 job 离开 pending 的那一次写
     之后为 running，哪怕那一次是从 pending 直接写成终态（SKIPPED 的 job 不经 RUNNING）；finalize 落定终态。RunPersistence
     不另记「是否第一次」，推进由 RunStore 的 job 写自身保证。"""
     from gherkai_core.adapters.run_store.local import LocalRunStore

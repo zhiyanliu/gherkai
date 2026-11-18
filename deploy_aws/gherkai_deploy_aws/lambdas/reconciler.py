@@ -3,7 +3,7 @@
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
 它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读全量重放 →
 project → 条件写 → plan_next → 认领并起下一个 job / finalize）。tick 幂等 + CAS/HWM 条件写兜底——Stream 按
-分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（机制三/四，真 DDB 已验）。
+分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（真 DDB 已验）。
 
 **cloud 组合根（Lambda 装配）**：cold-start 读 env 造 boto3 client + 三 store adapter + FargateEngine + CloudLauncher
 注入纯 reconcile.tick——**是组合根注入、非 ports 内部 env-sniff 全局单例**（[0016] 禁的 GlobalConfigManager 反模式，
@@ -17,8 +17,8 @@ min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 en
 配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 
 **worker 镜像用哪个 task-def revision 不经 env**（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）：
-只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 把 run 标 error、不推进
-（ADR 0037 决策 7 不留兼容分支）。**推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未推过该 tag，拉镜像会拖到
+只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 把 run 标 error、不推进。
+**推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未推过该 tag，拉镜像会拖到
 Fargate 启动期才失败（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
 """
 from __future__ import annotations
@@ -33,7 +33,7 @@ def _run_ids_from_stream(event) -> set[str]:
 
     **REMOVE 记录跳过**：events 表开 TTL（`expires_at`，两引擎的 event sink 写 emit+7d），TTL 过期删除同样进
     Stream、同样带 Keys。它不携带任何新信息，本道跳过它、不为它推进一次；推进方本次读到终态即返回（`_build` 的
-    语义闸与 tick 的判停，各道防护各挡哪些触发见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条）。
+    语义闸与 tick 的判停）。
     用 `.get` 只排除 REMOVE、**不做 INSERT 白名单**：events 表虽只 PutItem，同键重写（超时处置补写的退出记录
     被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY。
     IaC 侧的事件源 filter 同样滤掉 REMOVE（见 `stack.py` events 表的 `DynamoEventSource`）——那道要重新部署
@@ -231,8 +231,8 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
                     now_fn=None, sleep_fn=None) -> str:
     """超时处置（ADR 0034「job timeout」节的云端后端一侧）：仍 running 且截止时刻已到才动手。
 
-    **先复查截止时刻**（该节「到点不早于 deadline」条②）：Scheduler 只承诺分钟精度，触发可能早于截止时刻。job 已不在
-    running 或退出记录已在时照常 no-op、不等待；仍 running 时由运行态里的认领时刻、Job.timeout_s 与运行期限重算截止时刻
+    **先复查截止时刻**：Scheduler 只承诺分钟精度，触发可能早于截止时刻。job 已不在 running 或退出记录已在时照常 no-op、
+    不等待（该节「到点不早于 deadline」条②）；仍 running 时由运行态里的认领时刻、Job.timeout_s 与运行期限重算截止时刻
     （`_job_cutoff`，以期限封顶，ADR 0054 决策二后台推进条「截止时刻与说明」）复查——已到直接处置；未到且剩余不超过等待额度
     （`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到截止时刻，重读 job 状态与退出记录、仍需处置才往下；
     剩余超过额度时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
@@ -402,7 +402,7 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
 
 
 def _load_definition(run_store, run_id: str):
-    """读 definition（ADR 0037 决策 7 的云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
+    """读 definition（云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
     **不推进该 run、记一条诊断并把 run 标为 error、原因写进运行态的 run 级 message**——重放投影没有退出码可交给使用方，只「不推进」会让
     run 永停 RUNNING（ADR 0034 对无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态，message 让 `status` 看得见原因
     （团队成员未必有 CloudWatch 的读权限）。message 是产品语言的整句、长度有界（说清谁写的、两边各第几版、怎么办）；契约异常的原文
@@ -497,13 +497,12 @@ def _build(run_id: str):
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
         print(f"skip: run {run_id} 不是 submit 提交到后台执行的 run（同步的 `run --backend cloud` 由发起它的命令自己推进）")
         return None
-    # **已收尾的 run 不再推演**：已收尾的 run 若被重放推演，会拿「此刻还剩下的事件」重算一遍并覆盖写（ADR 0030 决定三的写序
-    # 无条件执行）——events 表开 TTL，7 天后 worker 事件已被删、只剩永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，
+    # **已收尾的 run 不再推演**：已收尾的 run 若被重放推演，会拿「此刻还剩下的事件」重算一遍并覆盖写（写序无条件执行）
+    # ——events 表开 TTL，7 天后 worker 事件已被删、只剩永不过期的退出记录，重算结果是「每个 job 都 error、零 scenario」，
     # 把权威的判定真值静默销毁。触发面不只 TTL 的 REMOVE（那道已在 `_run_ids_from_stream` 与 IaC filter 挡）：迟到重投、
     # 手工重放同一批 Stream 记录、
     # 超时到点触发器的 payload 都落到这里——后者读到终态时不做超时处置（与 ADR 0034「job timeout」节
-    # 「到点时 job 已终态 → tick no-op」一致；这一跳过与 StopTask 的关系及两种例外见 ADR 0034 端到端流程 cloud 一节
-    # 「已收尾的 run 不再推演」条）。
+    # 「到点时 job 已终态 → tick no-op」一致）。
     # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——finalize_report 只有
     # 本 Lambda 与 detached 宿主两个调用点、本就没有独立的重生成命令，而事件过期后重 tick 只会生成错报告。
     # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。tick 自身也先读运行态、
@@ -513,7 +512,7 @@ def _build(run_id: str):
     if state is not None and state.status in TERMINAL_STATUSES:
         print(f"skip: run {run_id} 已结束，不再改写它的结果")
         return None
-    meta = _load_definition(run_store, run_id)  # 结构版本闸与定义违约 → 标 error、不推进（ADR 0037 决策 7）
+    meta = _load_definition(run_store, run_id)  # 结构版本闸与定义违约 → 标 error、不推进
     if meta is None:
         return None
     scope_ids = [j.scope_id for j in meta.jobs]
@@ -561,7 +560,7 @@ def _run_ids_from_runs_stream(event) -> set[str]:
     """提取 kicker 要 tick 的 run_id 集。两种 event 源（kicker 同时服务两者）：
 
     ① runs 表 Stream（冷启动主路径）：`Records[].dynamodb.Keys.run_id`（runs 表 PK=run_id，非复合、直接取）。
-    ② 直接 invoke 的 kickoff（cloud `status --wait` 接力兜底，ADR 0034）：payload `{"run_id": "..."}`——
+    ② 直接 invoke 的 kickoff（cloud `status --wait` 接力兜底）：payload `{"run_id": "..."}`——
        Stream 丢投卡 pending 时 status --wait 绕过 Stream 直接 invoke kicker，故须认此格式（否则空转、救不了）。
        job timeout 的 Scheduler 到点 invoke（payload 另带 `timeout_scope`，kicker_handler 先行处置）也走
        此形状——到点 invoke 本身即一次强制 tick（顺带兜事件丢投，ADR 0034「job timeout」节）。
@@ -580,7 +579,7 @@ def _run_ids_from_runs_stream(event) -> set[str]:
 def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
     """对每个 run tick 一步，按结果分支。reconciler（events Stream）与 kicker（runs Stream）共用。
 
-    tick 的三种结果（`TickOutcome`，ADR 0034 机制三「run 级状态只进不退」条④）：这一方写成收尾 → 用 tick 交还的结果写 RunReport；
+    tick 的三种结果（`TickOutcome`）：这一方写成收尾 → 用 tick 交还的结果写 RunReport；
     run 已结束而终态不是这一方写成的 → 不写报告、不做超时扫；继续推进 → 防御性超时扫。
 
     prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
@@ -598,7 +597,7 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
-        # 判定真值由 tick 在 finalize CAS 之前落 rstore（ADR 0030 决定三写序）；聚合异常原样抛出 → 本次 invocation 失败 →
+        # 判定真值由 tick 在 finalize CAS 之前落 rstore；聚合异常原样抛出 → 本次 invocation 失败 →
         # events Stream 事件源重试本批（commit 之后再失败就没人重试了）。
         outcome = tick(run_id, meta, event_log, run_store, launcher, mc, clock=compose.now, result_store=rstore)
         if outcome.outcome is TickOutcome.ENDED:
@@ -641,7 +640,7 @@ def kicker_handler(event, context):
 
     与 reconciler 共用 tick（起首批就是 tick 的 CAS start 分支）——四宿主一份 tick（submit-local / kicker /
     reconciler / status 接力）。kicker **只被 runs Stream 的 INSERT 触发**（filter 在 IaC 配），故 reconciler
-    之后写 runs 表（MODIFY）不触发它——无自触发放大（ADR 0034 被拒方案「runs Stream 触发 reconciler」）。
+    之后写 runs 表（MODIFY）不触发它——无自触发放大。
     与 reconciler 的分工：kicker 负责「让 run 动起来」（冷启动第一脚 + 卡住时补 kickoff），reconciler 负责
     「推着走」（events Stream 持续推进）。
 

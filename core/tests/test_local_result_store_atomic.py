@@ -1,4 +1,4 @@
-"""LocalResultStore 写面的原子性（ADR 0042 决策四 / 0034）：`explain` 被允许在 run 运行到一半时读
+"""LocalResultStore 写面的原子性：`explain` 被允许在 run 运行到一半时读
 jobs/<scope>.json（另一个进程），而写者可能正在重写同一文件——同步 run 逐 job 写，无状态批量运行下两个推进器
 （per-run 进程 + `status --wait` 接力）竞争收尾时又会先后各写一遍 jobs/*.json，写面无跨进程锁。写必须 tmp+rename，
 读者绝不能看到空/半截 JSON（撞上就是 explain 的裸 traceback）。
@@ -95,7 +95,7 @@ def test_concurrent_reader_never_sees_torn_job_result(tmp_path):
 
 
 def test_job_result_file_stays_readable_by_others(tmp_path):
-    """判定真值的消费者是 CI/人（ADR 0034 表）：原子写用的临时文件是 0600，落盘后必须仍是可被别的用户读的权限。"""
+    """判定真值的消费者是 CI/人：原子写用的临时文件是 0600，落盘后必须仍是可被别的用户读的权限。"""
     store = LocalResultStore(tmp_path / "runs")
     store.save_job_result("run-perm", _big_job_result(0))
     path = next(iter((tmp_path / "runs" / "run-perm" / "jobs").glob("*.json")))

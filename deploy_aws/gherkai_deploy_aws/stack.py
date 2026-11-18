@@ -10,7 +10,7 @@
 - ECS：{prefix}cluster + 2 task-def（novaact/midscene，各自镜像/task role）
 - ECR：2 repo（承各 variant 的 worker 镜像；由 `gherkai deploy push-worker` 推，synth 不触发 docker build；
   **无 lifecycle 规则**，见 _one_task_def）
-- Lambda/事件驱动链（ADR 0034，见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
+- Lambda/事件驱动链（见 _reconcile_lambdas）：{prefix}exit-observer / {prefix}reconciler /
   {prefix}kicker 三 Function + EventBridge rule {prefix}ecs-stopped + 两表 Stream 的 event source mapping
   （两条都带 filter：events 表那条排除 TTL 过期删除（anything-but REMOVE），kicker 那条只收 INSERT 且带
   detached 标记的）
@@ -112,7 +112,7 @@ class BackendStack(Stack):
         """container stopTimeout（秒）：`-c stop_timeout=N` 覆盖，默认 120s。
 
         grace 真容器校准的**唯一落点**（`FargateWorkerHandle.stop` 忽略运行期 grace 参数，真实宽限由 task-def
-        期这个常量决定，见 ADR 0024/0032）。做成 context 可配是为迭代试不同 grace 值免改 code。
+        期这个常量决定）。做成 context 可配是为迭代试不同 grace 值免改 code。
         **synth 期 fail-fast**：Fargate 硬上限 120s，>120 部署期必被 ECS 拒——早报错、点明是 Fargate 限制而非笔误。
         （Nova grace 下限 150s>120s 的冲突正卡在这条硬上限上，解法见 ADR 0032「真容器校准结论」节第 4 条。）
         """
@@ -179,9 +179,9 @@ class BackendStack(Stack):
     # ---- DynamoDB ×2 + S3 ×1（ADR 0033 资源清单；schema 权威源在此，core/tests/conftest.py 的 moto fixture 只按各测试需要局部复刻键 schema）----
     def _storage(self) -> None:
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
-        # **开 Stream（NEW_IMAGE，ADR 0034）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
+        # **开 Stream（NEW_IMAGE）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
         # 冷启动（起首批 task）。kicker 只被 INSERT 触发（filter 在 event source mapping），故 reconciler 之后写
-        # runs 表（MODIFY：project_state/finalize）不触发 kicker——无自触发放大（ADR 0034 被拒方案）。
+        # runs 表（MODIFY：project_state/finalize）不触发 kicker——无自触发放大。
         self._runs_table = dynamodb.Table(
             self, "RunsTable",
             table_name=names.default_name(self.prefix, names.BASE_RUNS_TABLE),
@@ -212,7 +212,7 @@ class BackendStack(Stack):
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。
         # **开 Stream（NEW_IMAGE，ADR 0034）**：worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发
-        # reconciler Lambda 推进（无状态批量运行的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询，ADR 0024）。
+        # reconciler Lambda 推进（无状态批量运行的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询）。
         self._events_table = dynamodb.Table(
             self, "EventsTable",
             table_name=names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
@@ -516,7 +516,7 @@ class BackendStack(Stack):
             conditions={"StringLike": {"s3:prefix": [f"{names.APP_OBJECT_PREFIX}*"]}},
         ))
 
-    # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读，ADR 0033）----
+    # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读）----
     def _ssm_network(self, vpc: ec2.IVpc) -> None:
         # subnet 选取走 _worker_subnet_ids（与两个推进器 Lambda 的 SUBNETS env 同源）。
         # assignPublicIp="ENABLED"（`compose.resolve_network` 缺省、推进器 Lambda 的 ASSIGN_PUBLIC_IP 缺省）与公有子网
@@ -586,10 +586,10 @@ class BackendStack(Stack):
 
     # ---- 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + DDB Stream ----
     def _reconcile_lambdas(self, vpc: ec2.IVpc) -> None:
-        """事件驱动推进链（ADR 0034 端到端 cloud 流程）：
+        """事件驱动推进链：
 
-        - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（机制二）。
-        - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合（机制三/四）。
+        - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（ADR 0034 机制二）。
+        - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合。
         - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
           直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
           timeout_scope，先做超时处置再 tick，见下『job timeout 到点触发器』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
@@ -629,7 +629,7 @@ class BackendStack(Stack):
             timeout=Duration.seconds(30),
             environment=common_env,
         )
-        # events 表**只 PutItem**：events 是 append-only 的判定真值日志（ADR 0034 写模型），观察者只追加
+        # events 表**只 PutItem**：events 是 append-only 的判定真值日志，观察者只追加
         # task_exited、不该能改/删（ADR 0033 资源清单「exit-observer 只需 events 表写（PutItem）」）。故不用
         # CDK 的 grant_write_data——它连带 BatchWriteItem/UpdateItem/DeleteItem/DescribeTable。
         # 资源用 `table_arn`（同 stack 内、表在 `_storage` 里先建）而非按名拼 ARN：拼串把「名→ARN」的推导又
@@ -724,13 +724,13 @@ class BackendStack(Stack):
         ))
         kicker = self._advancer_function(
             "KickerFn",
-            function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff（ADR 0034）
+            function_name=kicker_name,  # 真同源（gherkai_runtime.names）——cli status --wait 据 --prefix 推理出它 invoke kickoff
             handler="reconciler.kicker_handler",  # 同一 reconciler.py、不同入口
             code=code, environment=advancer_env,
             task_def_arns=task_def_arns, timeout_schedule_arns=timeout_schedule_arns,
             scheduler_role=scheduler_role,
         )
-        # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter，ADR 0034）：
+        # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter）：
         # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
         #   误触发 kicker 会双开推进器（重复起 task）；submit 组合根写 STATE 时带 detached=true，同步 run 不带，

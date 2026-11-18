@@ -1,4 +1,4 @@
-"""FargateEngine adapter 单测（ADR 0024「DynamoDB 作 events-out」）。
+"""FargateEngine adapter 单测。
 
 **证据边界分流（CLAUDE.md「绿≠对」；moto ECS 状态机失真已实测确认，见 conftest.fargate docstring）**：
 - **moto 忠实、用 `fargate` fixture 测**：run_scope 调对 RunTask（env 注入 JOB_S3_URI/events 表/run_id/scope_id）+
@@ -684,7 +684,7 @@ def test_await_exit_code_null_then_nonzero_landed_preserved():
     assert eng._await_exit_code("arn") == 137
 
 
-# ---- 流式期断号（ADR 0024「读一致性」）：游标只越过连续前缀 + 有界宽限 + 终读记洞 ----
+# ---- 流式期断号：游标只越过连续前缀 + 有界宽限 + 终读记洞 ----
 
 def _gap_engine(events_table, ecs, gap_grace_s: float, missing_grace_polls: int = 20) -> FargateEngine:
     """裸构造：只装 _read_events 路径要用的属性（不起 RunTask）。"""
@@ -842,7 +842,7 @@ def test_read_events_transient_missing_then_events_and_stopped():
 
 def test_read_events_progress_resets_missing_count():
     """「连续 MISSING」的连续性被有进展的轮次打断：事件/空轮交替、空轮都探到 MISSING，累计 3 次但从不连续 2 次，
-    宽限 1 拍也不该抛（曾只在探到非 MISSING 时归零、有进展的轮次不归零——累计口径与 ADR 0024「连续」不符）。"""
+    宽限 1 拍也不该抛（曾只在探到非 MISSING 时归零、有进展的轮次不归零——累计口径与「连续」不符）。"""
     rounds = [[_ev_item(1, {"type": "scope_started", "scopeId": "browse"})], [],
               [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0})], [],
               [_ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})], [],

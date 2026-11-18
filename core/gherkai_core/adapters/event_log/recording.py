@@ -4,7 +4,7 @@
 （组合根给引擎包一层 EventRecordingEngine，Engine port 形状不变、schedule 不知情）。存原始行、读回复用 wire.event_from_line，
 零新序列化；seq 按到达序在该 scope 内单调递增，从库里已有的 max_seq 续号（同一 scope 重试或继续运行时幂等）；emit_ts 取到达时刻。
 
-同步 run 的记录器也写**退出记录**（ADR 0034 机制二「两件都要」）：事件流自然结束或 worker 以非零退出码结束时按退出码写一条，被 schedule
+同步 run 的记录器也写**退出记录**：事件流自然结束或 worker 以非零退出码结束时按退出码写一条，被 schedule
 主动停止（stop）时在停止完成后写——这样同步 run 的 events.db 与 detached 的形态相同（事件加退出记录），`status --wait` 的接力推进与
 `explain` 的补取读到的是完整的事件流，不会把一个已结束的 job 当成仍在运行。
 """

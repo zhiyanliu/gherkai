@@ -50,8 +50,8 @@ from gherkai_core.model import (
 class WorkerHandle(Protocol):
     """一个正在运行的 worker 的句柄（schedule 持有，用于 stop）。
 
-    不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部（ADR 0026）：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace）；
-    Fargate `StopTask`（忽略运行期 grace 入参，宽限由 task-def 期 `stopTimeout` 定，ADR 0024「终止契约」）。
+    不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace）；
+    Fargate `StopTask`（忽略运行期 grace 入参，宽限由 task-def 期 `stopTimeout` 定）。
     """
 
     def stop(self, grace_period_s: float) -> None:
@@ -60,7 +60,7 @@ class WorkerHandle(Protocol):
 
 
 class Engine(Protocol):
-    """执行引擎 port（ADR 0016）。
+    """执行引擎 port。
 
     schedule 经此起 worker；adapter 形状一致（spawn node 子进程 / spawn python 子进程 / Fargate task），schedule 对引擎无知。
     """
@@ -76,8 +76,8 @@ class Engine(Protocol):
         不进端口契约，也不必每个 adapter 各实现一遍。
 
         **本签名即全部契约**：`SubprocessEngine.run_scope` 另有 `raw_sink`（原始事件行旁路，供无状态路径把
-        未解析的行落持久 events sink）——那是**该 adapter 的扩展形参、不在 port 契约内**（ADR 0034「Engine port
-        演进」；`FargateEngine.run_scope` 不接受它）。要它的调用方须把类型收窄到具体 adapter（local 无状态
+        未解析的行落持久 events sink）——那是**该 adapter 的扩展形参、不在 port 契约内**（`FargateEngine.run_scope`
+        不接受它）。要它的调用方须把类型收窄到具体 adapter（local 无状态
         路径的 `SubprocessLauncher` 即如此），别经 `Engine` 标注调它——那样换 adapter 只在运行时 TypeError。
         """
         ...
@@ -134,7 +134,7 @@ class RunStore(Protocol):
     definition（run_id/created_at/执行哪些 job）执行前确定；运行态（总 status/各 job status/血缘/起止）
     执行后产生。判定明细真值在 ResultStore（不在此）。local adapter 是 LocalRunStore（落 run_meta.json + run_state.json）。
 
-    生命周期（ADR 0030）：create_run（开始：写 definition + 初始全 pending 态）→ update_job_state（每 job 开始运行/完成：按
+    生命周期：create_run（开始：写 definition + 初始全 pending 态）→ update_job_state（每 job 开始运行/完成：按
     scope_id 刷单个 JobState）→ try_finalize（commit point：以条件写落定总 status + ended_at）。前台执行（同步 `run`）与后台推进
     （reconciler）用同一组写入口；两者起 worker 之前都先经 try_claim_job 认领（前台每个 job 只认领一次，ADR 0054 决策五），后台推进另用 project_state。
 
@@ -157,11 +157,11 @@ class RunStore(Protocol):
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 写单个 job 的运行态；运行态不存在则抛 FileNotFoundError（须先 create_run）。
 
-        写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变
-        （ADR 0034 机制三「run 级状态只进不退」条③）。写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
+        写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变。
+        写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
         认领计数、HWM、起止时刻与 run 级 message 不变。
 
-        返回 run 级在这次写时是否仍未结束（ADR 0054 决策五）：True 表示 job 落下的那一刻 run 级为 pending 或 running，False 表示
+        返回 run 级在这次写时是否仍未结束：True 表示 job 落下的那一刻 run 级为 pending 或 running，False 表示
         run 级已是终态、这次只写了 job。对写入的任何 job 态（含 PENDING）都按写的那一刻如实给出，不是写前另读一次的结果。前台执行者
         据 False 得知 run 已被别处记为已结束、停止启动新的 job；不关心的调用方可以忽略。
         """
@@ -169,12 +169,12 @@ class RunStore(Protocol):
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
                      expected_claim_count: int | None = None) -> bool:
-        """收尾（commit point）：仅当 run 总 status 当前为非终态（pending/running）才写终态与 ended_at，成功 True（机制三）。
+        """收尾（commit point）：仅当 run 总 status 当前为非终态（pending/running）才写终态与 ended_at，成功 True。
 
         所有写入方共用这一个收尾入口（前台执行者与后台推进）：已是终态 → False，库中值不变，保证 commit
         恰一次（多实例同时见全终态、只有一个写成功、触发一次 RunReport 聚合）。运行态不存在同样 → False，两种原因不区分。
         message 是 run 级消息：没有任何 job 能承载的原因，与终态同一次写入——推进器不经任何 job 就把 run
-        置为终态时的原因，或执行方按运行期限收尾时的「已超过允许运行的时间」（ADR 0054 决策二第 3 条）；按各 job 判定聚合的
+        置为终态时的原因，或执行方按运行期限收尾时的「已超过允许运行的时间」；按各 job 判定聚合的
         收尾不给；为 None 时不写这一项，库中值原样保留。
 
         expected_claim_count：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
@@ -216,7 +216,7 @@ class RunStore(Protocol):
     #    local adapter no-op（本地无「表不存在」问题）。RunPersistence.begin 在 create_run 前调。——
     def preflight(self) -> None: ...
 
-    # —— 认领与投影（ADR 0034；认领由前台执行者与后台推进共用，后台推进跨进程/跨实例并发调用）——
+    # —— 认领与投影（认领由前台执行者与后台推进共用，后台推进跨进程/跨实例并发调用）——
     # 返回是否写成，调用方（前台的落库服务、后台的 reconciler）据此决定要不要起 worker。
     def try_claim_job(self, run_id: str, scope_id: str, *, claimed_at: str | None = None) -> bool:
         """认领：仅当该 job 当前是 PENDING 且 run 未收尾才置 RUNNING，成功返回 True（机制四）。
@@ -229,7 +229,7 @@ class RunStore(Protocol):
         认领成功时同一次写把认领计数加一（ADR 0034 机制三「run 级状态只进不退」条①）；认领失败不改它。
 
         claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
-        （ADR 0034「job timeout」节：local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
+        （local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
         """
         ...
 
@@ -243,14 +243,14 @@ class RunStore(Protocol):
         不该走到这里。库中 run 级已是终态时同样被挡（返回 False）。
 
         传入的 run 级 status 不落库：投影里任一 job 已离开 PENDING 时 run 级写 RUNNING，全 job 仍 PENDING 时不写 run 级、
-        保留库中值，因而不会把认领写成的 RUNNING 改回 PENDING（取值规则见 `project.projected_run_status`，ADR 0034
-        机制三「run 级状态只进不退」条②）。各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）。
+        保留库中值，因而不会把认领写成的 RUNNING 改回 PENDING（取值规则见 `project.projected_run_status`）。
+        各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）。
         """
         ...
 
 
 class ResultStore(Protocol):
-    """数据面：每 job（即 scope）判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它，ADR 0016）。
+    """数据面：每 job（即 scope）判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它）。
 
     local adapter 是 LocalResultStore（每 job 落 <root>/<run_id>/jobs/<encoded_scope_id>.json）。
     """

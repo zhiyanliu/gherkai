@@ -1074,7 +1074,7 @@ def test_task_def_and_container_name():
 
 
 def test_ssm_path_contains_prefix():
-    # SSM 路径含 prefix（cli 已知 prefix 拼路径读 subnet/sg，无循环——ADR 0033）
+    # SSM 路径含 prefix（cli 已知 prefix 拼路径读 subnet/sg，无循环）
     assert names.ssm_path("prod-", "subnets") == "/prod-backend/subnets"
     assert names.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
 
@@ -1167,7 +1167,7 @@ def test_is_botocore_error_classifies():
     assert not compose.is_botocore_error(ValueError("不是云端故障"))
 
 
-# ---- resolve_network（ADR 0033）：subnet/sg 覆盖 or 读 SSM ----
+# ---- resolve_network：subnet/sg 覆盖 or 读 SSM ----
 def test_resolve_network_explicit_overrides_skip_ssm():
     # 显式给 subnet/sg → 不读 SSM（ssm 注入一个一调用就抛异常的哨兵，验它没被调）
     class _BoomSsm:
@@ -1212,7 +1212,7 @@ def test_resolve_network_partial_override_reads_only_missing():
 
 
 def test_resolve_network_empty_ssm_fails_fast():
-    # 空值 fail-fast（低频加固，ADR 0033）：SSM 参数空（值空串 → split 过滤后 []）→ 就地报错点名路径，
+    # 空值 fail-fast（低频加固）：SSM 参数空（值空串 → split 过滤后 []）→ 就地报错点名路径，
     # 不把空列表传到 awsvpcConfiguration、拖到 RunTask 才失败。空串 / 纯逗号 两种空形态都拦。
     import pytest
 
@@ -1727,7 +1727,7 @@ def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
         "arn:td:7", engine="novaact", ecs=_StopTimeoutEcs([{"name": "other", "stopTimeout": 90}])) is None
 
 
-# ---- 云端同步 run 的停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：stopTimeout 随 variant 解析带回 ----
+# ---- 云端同步 run 的停止后等待预算：stopTimeout 随 variant 解析带回 ----
 
 class _VariantAws:
     """variant 解析要读的三个面（SSM 映射、ECS revision、ECR 镜像）的最小假替身：每个引擎的 revision 都 ACTIVE、镜像都在，

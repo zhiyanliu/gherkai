@@ -90,7 +90,7 @@ def _add_device_flags(p: argparse.ArgumentParser, *, project: bool) -> None:
 
 
 def _add_config_flag(p: argparse.ArgumentParser) -> None:
-    """八个读项目配置文件的子命令共用（名单是 `settings.CONFIG_COMMANDS`，ADR 0053 决策 1）。"""
+    """八个读项目配置文件的子命令共用（名单是 `settings.CONFIG_COMMANDS`）。"""
     p.add_argument("--config", default=None, metavar="FILE",
                    help="项目配置文件 gherkai.toml 的路径（不给时依次找环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml；"
                         "都没有就不用配置文件）。取值顺序：命令行选项 > 环境变量 > 配置文件 > 内建默认")
@@ -319,7 +319,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     run.add_argument("--steps-dir", default=None, metavar="DIR", help=_STEPS_DIR_HELP_RUN_SUBMIT)
     _add_device_flags(run, project=True)
-    # 执行后端（ADR 0016 决策 A / 0033 / 0030 决定七）：local 在本机起 worker、落文件（默认）；cloud 在 Fargate 执行、
+    # 执行后端：local 在本机起 worker、落文件（默认）；cloud 在 Fargate 执行、
     # 状态落 DDB、结果与报告落 S3。plan 纯本地、不连 AWS，不收此 flag。
     run.add_argument(
         "--backend", choices=["local", "cloud"], default=None,
@@ -470,7 +470,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--report-dir", default=None, metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与产生这个 run 的 run 或 submit 一致；终态时据此打印报告与判定明细位置")
     # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
-    # 保 status 机器零 ECS 权限（ADR 0034）。help 里只讲提交者看得见的差别。
+    # 保 status 机器零 ECS 权限。help 里只讲提交者看得见的差别。
     st.add_argument("--wait", action="store_true",
                     help="轮询到 run 达终态再返回，并按判定给退出码。对 submit 提交的 run 还会接力推进（local 在本机接着把它推到底；"
                          "cloud 检测卡住即触发云端接力）；对正在前台 run 的 run 只等待、不接力")
@@ -1756,7 +1756,7 @@ def _submit_local(args, run_id: str, run_meta, initial, *, identity: "tuple[str 
     report_root = Path(args.report_dir).resolve()
     run_store, _rs, _rp, _mk = compose.build_local_stores(
         report_dir=str(report_root),
-        detached=True,  # run_state.json 带 detached 标记 → status --wait 认它可接力（同步 run 不带，ADR 0034；对位云端 STATE 的标记）
+        detached=True,  # run_state.json 带 detached 标记 → status --wait 认它可接力（同步 run 不带；对位云端 STATE 的标记）
     )
     run_store.create_run(run_meta, initial)
     SqliteEventLog(compose.events_db_path(report_root, run_id))  # 建库（schema），per-run/status/explain 共用（路径单点）
@@ -1989,7 +1989,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     # preflight（events 表/cluster/桶/runs 表 + 本 run 用到引擎的 task-def + 事件驱动链三 Lambda + 推进器
     # REPORT_DIR 与 --report-dir 一致性）——配置错在提交前暴露、以退出码 2 结束。链上任一 Lambda 缺就会提交成功但 run 永不
     # 推进/收敛（kicker 缺则卡 pending、reconciler 缺则无人接力、exit-observer 缺则退出信号断链）；前缀不一致则
-    # 运行结束但结果落在提交者没指定的前缀下。都必须挡在提交前（ADR 0033 preflight 条）。探针全只读，权限收窄不破。
+    # 运行结束但结果落在提交者没指定的前缀下（ADR 0033 preflight 条）。都必须挡在提交前。探针全只读，权限收窄不破。
     try:
         err = compose.preflight_cloud_resources(
             prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
@@ -2030,7 +2030,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     run_store, _rs, _rp, _mk = compose.build_cloud_stores(
         table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
         region=target.region, profile=target.profile,
-        detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动（同步 run 不带，ADR 0034）
+        detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动（同步 run 不带）
     )
     try:
         run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
@@ -2088,7 +2088,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
     各键何时有内容以 CLI `--json` 契约页的字段表为准（出处登记见 ADR 0034 机制三「run 级状态只进不退」条④「收尾各步的先后与
     之后会不会变」）。人读提示一律不打（pending 提示的触发条件见下方注释）。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
-    relay_available：零参回调，答「--wait 对这个 run 能不能接力」（detached run 才能，ADR 0034）；只在 pending 提示的触发条件
+    relay_available：零参回调，答「--wait 对这个 run 能不能接力」（detached run 才能）；只在 pending 提示的触发条件
     成立时才调（云端是一次点查）。None 当 True（旧调用方）。
     """
     if args.json:
@@ -2125,7 +2125,7 @@ def _cmd_status(args) -> int:
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
     --wait 的等待或接力被 Ctrl-C 打断：按进入的分支打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端
-    （ADR 0030 决定七、0039）。各分支进入等待前把自己的说明放进 interrupted["notice"]。
+    （ADR 0039）。各分支进入等待前把自己的说明放进 interrupted["notice"]。
     """
     interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE}
     try:
@@ -2289,7 +2289,7 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
                     except Exception as e:
                         if not compose.is_botocore_error(e):
                             raise  # 非 AWS 错才抛
-                        # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast（ADR 0033 preflight 条）。
+                        # kicker 不存在 → 接力对象缺失，轮询死等无意义：点名 prefix fail-fast。
                         # 其他 AWS 错误（限流/瞬时/无权限）仍吞掉：不致命，下一个卡住窗口再 invoke，或由云端链自行推进。
                         if getattr(e, "response", {}).get("Error", {}).get("Code") == "ResourceNotFoundException":
                             _progress(f"status --wait 接力失败：接力 Lambda {kicker_fn}（用 --prefix={target.prefix!r} 拼出）"
@@ -2563,7 +2563,7 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     None 表示本路径不提供补取（测试用）。
 
     带 `scope_id` 时只 `load_job_result`（云端是一次 GetObject），不带才 `load_all`（云端还需列举对象权限）
-    ——权限面按需求最小化，见 ADR 0042 决策四「云端权限面」。
+    ——权限面按需求最小化。
 
     `wait_hint` 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、cloud 用 --backend cloud
     --prefix），取法同 `_render_status`：本函数两路共用，定位信息只有调用方手里有（cloud 的 prefix 已解析、
@@ -2675,7 +2675,7 @@ def _explain_cloud(args) -> int:
     """cloud explain：DDB 读 run 运行态、S3 读判定明细与证据。
 
     次序同 `_status_cloud`：`_cloud_target`（纯字符串推导与本机 profile 配置读取、不连 AWS）→ 版本 skew 闸门（先于任何云端读，
-    ADR 0037 决策 7）→ 装 store。权限面与 status 不同（ADR 0042 决策四）：同样要版本戳读 + runs 表 GetItem，
+    ADR 0037 决策 7）→ 装 store。权限面与 status 不同：同样要版本戳读 + runs 表 GetItem，
     另需该桶的读对象权限（判定明细与证据），不带 scope_id 时还需列举对象；不需要 status --wait 的 Lambda 调用权限。
     """
     target = _cloud_target(args, runs_table=args.ddb_table, **_config_layers(args))
@@ -2742,8 +2742,8 @@ def _explain_cloud(args) -> int:
 
 
 def _definition_contract_message(e: DefinitionContractError) -> str:
-    """本机读端（`status` / `explain` 读头、`status --wait` 与 per-run 进程接力）读到同版本下形态违约的提交记录时的一句（ADR 0037 决策 7
-    的 CLI 读端）：CLI 有退出码可交给使用方，故不像云端推进器那样把 run 标 error、写 run 级消息，直接以退出码 2 结束并说明。"""
+    """本机读端（`status` / `explain` 读头、`status --wait` 与 per-run 进程接力）读到同版本下形态违约的提交记录时的一句：
+    CLI 有退出码可交给使用方，故不像云端推进器那样把 run 标 error、写 run 级消息，直接以退出码 2 结束并说明。"""
     return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
 
 
@@ -2762,7 +2762,7 @@ def _cmd_reconcile(args) -> int:
     try:
         detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
                                        region=args.region, profile=args.profile)
-    except UnsupportedDefinitionSchema as e:  # 整读 definition 时结构版本不符（ADR 0037 决策 7）：同一句、退出码 2
+    except UnsupportedDefinitionSchema as e:  # 整读 definition 时结构版本不符：同一句、退出码 2
         _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
         return 2
     except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json）：同一句、退出码 2
@@ -2824,7 +2824,7 @@ def _cmd_run(args) -> int:
     #     `FargateWorkerHandle.stop` 忽略运行期 grace（真实宽限是 task-def 期 stopTimeout，`doctor --backend cloud`
     #     的 worker.grace 行专门比对它），而提交机器本就不必装 worker 运行时（ADR 0037 决策 3「云端后端不查本机
     #     定位链」，见 _preflight_worker_runtimes）——在此查会把只用云端后端的提交者按本机环境无理由挡住。
-    #     **云端后端还要拒绝显式 `--grace`**（同条 ADR）：那个后端没有它的作用面，配了无效值就在入口拒，别让提交者
+    #     **云端后端还要拒绝显式 `--grace`**：那个后端没有它的作用面，配了无效值就在入口拒，别让提交者
     #     以为设了一道防护——真正的云端宽限在部署侧（`gherkai deploy --stop-timeout`）。配置文件里的 grace 在云端由配置层
     #     跳过、只提示（settings.LOCAL_ONLY_OPTIONS，ADR 0053 决策 3），故到这里的非 None 值只会来自命令行。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退出码 2「没开始执行就被拒」）。core 侧还有 enforce
@@ -2832,7 +2832,7 @@ def _cmd_run(args) -> int:
     #     **必须排在起隧道 / cloud 探资源 / persistence.begin 之前**：只依赖 jobs（云端后端连 worker 都不问），
     #     早拒才真「零副作用」——否则配置错也已起 ngrok、产生云端调用费用、并落下永不 finalize 的半成品 run 记录。
     if args.backend == "cloud" and args.grace is not None:
-        # 云端后端**拒绝**显式 --grace（ADR 0024「引擎自报下限」条）：那个值到不了任何机制面（Fargate 侧真实宽限
+        # 云端后端**拒绝**显式 --grace：那个值到不了任何机制面（Fargate 侧真实宽限
         # 是 task-def 期 stopTimeout，`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让提交者以为设了
         # 一道会话泄漏防护——与 `--report-dir` 撞云端产物前缀即以退出码 2 结束的判法一致：入口不许配无效值。
         _progress("--grace 在云端不生效：云端的停止宽限由部署侧的 gherkai deploy --stop-timeout 决定"
@@ -2868,15 +2868,15 @@ def _cmd_run(args) -> int:
     #    云端后端 min_grace=0 → 回落 ScheduleOpts 默认，反正 Fargate 侧忽略运行期 grace，见上 2a）。
     #    回落的 grace 只用于 handle.stop：云端停止后的等待预算不取它，由 3a 按已解析 revision 的 stopTimeout 算出 stop_bound。
     grace = args.grace if args.grace is not None else max(min_grace, ScheduleOpts.grace_period_s)
-    # 停止后等待预算（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：本机后端不传（None 表示 schedule 取 grace，本机句柄
+    # 停止后等待预算：本机后端不传（None 表示 schedule 取 grace，本机句柄
     # 等满 grace 即强杀、进程退出就是事件流结束）；云端后端在 3a 解析完 worker variant 后按部署侧的容器停止宽限加经验余量算好再传。
     stop_bound: float | None = None
     # 目标解析（compose.resolve_cloud_target 一次吐 prefix + 各资源终名 + region/profile，ADR 0033 两层命名）。
     # **本机后端也解析**：region/profile 两路都要（本机发起的 AWS 调用与 subprocess worker 都用），云资源名多算几个纯字符串、不用即弃。
     # 排在本机后端填 definition 与起隧道之前：profile 名不存在时由 _cloud_target 在这里以退出码 2 结束，不上传、不起隧道。
-    # region/profile 是「正确的非对称」（ADR 0016 决策 C）：
+    # region/profile 是「正确的非对称」：
     # - profile：解析链见 compose.resolve_aws_identity。仅 subprocess worker 注入（继承本机 ~/.aws、profile 合法）；
-    #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role）。
+    #   **Fargate 绝不注入**（容器无 ~/.aws、用 task role，注入不存在的 profile 名会 ProfileNotFound 盖过 task role；ADR 0016 决策 C）。
     # - region：解析链落实成**具体字符串**（见 compose.resolve_region）。profile config 回落是关键：AgentCore
     #   validate_region 不吃 profile config、要显式 region 字符串，不落实则 profile-only 下 worker InvalidRegionError
     #   崩。落实后 subprocess env + FargateEngine overrides + store 三处同源、消除分叉。
@@ -2933,18 +2933,18 @@ def _cmd_run(args) -> int:
     # 产物 S3 落点：cloud（Fargate）由 build_fargate_engines 内部按 (bucket, <report_dir>/<run_id>/) 自算注入；
     # local（subprocess）CLI 恒不注入（worker 报 file://、不上传）——「subprocess+注入 S3 落点」是内部预演路径
     # （ADR 0016 决策 B / 0029），由 tools/e2e_harness.py 自拼 worker env 直起 worker 实现，不经 CLI/compose。
-    cloud_fargate: dict | None = None  # cloud 分支置值（ADR 0033）：Fargate 执行配置，供 build_fargate_engines；None 表示走 subprocess
-    # 3a) 执行轴（ADR 0016 决策 A / 0033）：--backend cloud 即 Fargate 执行，**与 report 正交**——`--no-report` 只关
+    cloud_fargate: dict | None = None  # cloud 分支置值：Fargate 执行配置，供 build_fargate_engines；None 表示走 subprocess
+    # 3a) 执行轴：--backend cloud 即 Fargate 执行，**与 report 正交**——`--no-report` 只关
     #     不落库、不碰「在哪执行」。故 cloud 的 Fargate 执行配置解析在 do_report **之外**：`--no-report --backend cloud`
     #     仍在 Fargate 运行，只是不生成 report。cloud_fargate 置值表示下面 resolver 用 FargateEngine（否则 SubprocessEngine）。
     if args.backend == "cloud":
-        # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
+        # 版本 skew 先于资源 preflight；戳一并拿回，供下面的 variant 解析
         skew_rc, backend_version = _cloud_skew_gate(target, requires_stamp=compose.run_requires_backend_stamp(run_meta))
         if skew_rc is not None:
             return skew_rc
         # preflight 执行必需资源（events 表 + cluster + 本 run 用到引擎的 task-def；桶也必需，job-in 与产物上传执行时
         # 都要用它）——fail-fast 点名 prefix。runs 表仅落库需要，故只在 do_report 时探（见 3b begin 探活）；此处
-        # 不探 runs 表（--no-report 下用不到）。不探 Lambda——同步 run 进程内推进、不依赖事件驱动链（ADR 0033）。
+        # 不探 runs 表（--no-report 下用不到）。不探 Lambda——同步 run 进程内推进、不依赖事件驱动链。
         try:
             err = compose.preflight_cloud_resources(
                 prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
@@ -2959,7 +2959,7 @@ def _cmd_run(args) -> int:
         if err:
             _progress(err)
             return 2
-        # worker 镜像 variant 解析（ADR 0038）：**在资源 preflight 之后**（次序理由见 _cloud_worker_variant_gate）。
+        # worker 镜像 variant 解析：**在资源 preflight 之后**（次序理由见 _cloud_worker_variant_gate）。
         # 同步 run 的 FargateEngine 也一律照 definition 里的显式 revision 起 task（不用 family 取最新）。
         resolutions = _cloud_worker_variant_gate(
             args, target, sorted({j.engine for j in jobs}), backend_version=backend_version)
@@ -2993,10 +2993,10 @@ def _cmd_run(args) -> int:
                          # 引擎 → 显式 revision ARN（ADR 0038 不变量：永不用 family 取最新）
                          "worker_task_defs": worker_meta["worker_task_defs"] or {}}
 
-    # 3b) 落库轴（ADR 0030）：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
+    # 3b) 落库轴：组合根按 --backend 注入 local/cloud 两套 store adapter，RunPersistence 负责「随进度落库」
     #     的统一编排（commit-point 写序 / RUNNING 中间态 / 按 scope_id 增量刷）。--no-report 则不落库（零落盘运行路径）：
     #     persistence=None，schedule 不接回调、零落盘——**但执行仍按 3a 的 backend 走**（report 与执行正交）。
-    #     **need_cloud gated**（ADR 0030 决定七）：云端 store 校验/import/异常只在 do_report and backend==cloud 时生效。
+    #     **need_cloud gated**：云端 store 校验/import/异常只在 do_report and backend==cloud 时生效。
     need_cloud = do_report and args.backend == "cloud"
     persistence: RunPersistence | None = None
     make_artifacts = None  # compose 返回的 artifacts 落点组装器（按 backend URI 化）
@@ -3028,17 +3028,17 @@ def _cmd_run(args) -> int:
             raise
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
-    # **决策 A 落到 CLI（ADR 0016/0033）**：cloud 走 FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
+    # cloud 走 FargateEngine（云执行，产物落点内部自算）；否则 SubprocessEngine（本地，不注入 S3 落点）。
     # cloud_fargate 在 3a 的 `backend=='cloud'` 分支**无条件置值**（与 do_report 正交）——故
     # `--backend cloud --no-report` 仍走 Fargate（cloud_fargate 非 None），只是不落库、不生成 report。
-    # `--no-report` 的零落盘运行路径只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释 + ADR 0016 决策 A）。
+    # `--no-report` 的零落盘运行路径只作用于 store 轴（persistence=None、不构造三个 store），绝不改执行环境（见 3a 注释）。
     if cloud_fargate is not None:
         engines = compose.build_fargate_engines(
-            no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
+            no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物
             run_id=run_id, cluster=cloud_fargate["cluster"],
             events_table=cloud_fargate["events_table"], bucket=cloud_fargate["bucket"],
             report_dir=args.report_dir, network_config=cloud_fargate["network_config"],
-            # 每引擎的显式 task-def revision ARN（ADR 0038）：preflight 解析出的那一批，与写进 definition 的同源
+            # 每引擎的显式 task-def revision ARN：preflight 解析出的那一批，与写进 definition 的同源
             worker_task_defs=cloud_fargate["worker_task_defs"],
             region=target.region, profile=target.profile,
             extra_http_headers=tunnel_headers,  # 隧道模式的额外请求头（ADR 0035 决策 4；None 表示不注入）
@@ -3114,7 +3114,7 @@ def _cmd_run(args) -> int:
     # 5) schedule：执行 RunMeta（definition）→ RunResult（各 job 恒有墙钟预算，运行期限封顶，ADR 0054 决策二）。
     #    job 一完成即经 on_job_complete 实时落库（数据面判定真值先写，ADR 0030）；起 worker 之前经 record 认领。
     #    过了期限减提前量即不再启动 job：RunResult 的 run 级是 error 加说明，没有启动的 job 不在判定清单里，下面照常输出与生成报告。
-    #    **cloud 运行期兜底（ADR 0030 决定七）**：run 已开始执行，落库回调（on_event/on_job_complete）、认领或重试之前的读中途抛
+    #    **cloud 运行期兜底**：run 已开始执行，落库回调（on_event/on_job_complete）、认领或重试之前的读中途抛
     #    botocore 异常（如桶被删）——schedule 会先 stop 所有 worker 再冒泡；need_cloud 时接住归到退出码 1（error 级）。
     #    单一 schedule 调用点 + 条件 try（不复制两份，避免回调/opts 透传漂移）。
     # 使用方中断（ADR 0024 终止契约「使用方中断」条）：SIGINT / SIGTERM 的处理器只置标志（零 I/O），schedule 轮询它；
@@ -3133,7 +3133,7 @@ def _cmd_run(args) -> int:
                 fail_fast=args.fail_fast,
                 grace_period_s=grace,
                 min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
-                stop_bound_s=stop_bound,  # 停止后等待预算，排空上界取它加余量；None（本机后端）表示取 grace（ADR 0034 机制二）
+                stop_bound_s=stop_bound,  # 停止后等待预算，排空上界取它加余量；None（本机后端）表示取 grace
                 interrupt=interrupt.level,
                 on_interrupt=_on_interrupt,
                 # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，两个后端相同，
@@ -3163,7 +3163,7 @@ def _cmd_run(args) -> int:
         if worker_log_fh is not None:
             worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
 
-    # 6) commit point（ADR 0030 决定三）：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩
+    # 6) commit point：各 job 判定真值已由 on_job_complete 逐个流式落；此处只剩
     #    收尾的条件写（总 status + ended_at）+ 归集 ReportStore（派生、永远最后）。收尾写一旦写成，run 即已提交。
     #    artifacts 落点指针由 compose 的 make_artifacts 按 backend URI 化组装（local file:// / cloud s3://+ddb://）。
     #    收尾写不成（ADR 0054 决策五「执行方服从记录」）：本次执行结束之前，这个 run 已被别处记为已结束。已有的终态不覆盖、
@@ -3219,7 +3219,7 @@ def _cmd_run(args) -> int:
     # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何判定，按判定给退出码。
     if interrupt.acted and interrupt.signum is not None:
         return 128 + interrupt.signum
-    # 退出码基于 run 级 status（ADR 0031 决定五）：读 schedule 返回的内存终值（必是终态，不回读落库态）。
+    # 退出码基于 run 级 status：读 schedule 返回的内存终值（必是终态，不回读落库态）。
     # PASSED→0，其余（failed/error，含必伴随 error 的 skipped/aborted 批次）→1。对未来新态稳健。
     return 0 if result.status == Status.PASSED else 1
 
@@ -3236,7 +3236,7 @@ def _ended_elsewhere_notice(run_id: str, recorded) -> str:
 
 
 def _interrupt_prompt(level: int, *, cloud: bool, grace: float) -> str:
-    """使用方中断的两级提示（ADR 0024 终止契约「使用方中断」条）。本机后端：首次协作停止、再次整组强杀；云端后端：worker 是 Fargate 任务，
+    """使用方中断的两级提示。本机后端：首次协作停止、再次整组强杀（ADR 0024 终止契约「使用方中断」条）；云端后端：worker 是 Fargate 任务，
     停止宽限由部署配置决定、运行期的宽限参数不生效，再次中断只是重发停止请求，不能缩短等待。两种后端的第二级都提醒到控制台核对会话。"""
     console = "会话可能未释放，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）"
     if level == 1:

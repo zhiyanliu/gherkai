@@ -7,7 +7,7 @@ EventBridge rule（detail-type='ECS Task State Change'、lastStatus=STOPPED、�
 task_exited（保留高位 SK 独立键空间）。只记 task 对象里的事实，不读运行态与运行定义、不判断是否已过截止时刻（由投影判断）。写完即
 返回——reconciler Lambda 由 events 表 Stream 变化触发、接力推进。
 **只为 detached run 写**：同 cluster 的同步 `run --backend cloud` 的 task 同样触发本 handler，写前分流（见
-`_is_detached`；不变量与故障形态见 ADR 0034 机制一）。
+`_is_detached`）。
 
 **缺 exitCode → 落哨兵（机制二「退出码缺失」条）**：STOPPED 事件锚在 stoppedAt（已过 exitCode 落值窗口），正常退出
 必带退出码（实际运行抓到的 4 个事件都如此）；缺退出码表示容器没能开始运行（stopCode=TaskFailedToStart：拉不到镜像/缺 secret/放置失败），且本事件是观察者
@@ -53,11 +53,11 @@ def _extract(detail: dict) -> tuple[str | None, str | None, int | None, bool, st
 
 
 def _is_detached(run_id: str) -> bool:
-    """本 run 是否由云端推进器管（ADR 0034 端到端 cloud 1b：`detached` 标记在 runs 表 STATE item 上）。
+    """本 run 是否由云端推进器管（`detached` 标记在 runs 表 STATE item 上）。
 
     EventBridge rule 只按 cluster+STOPPED 过滤，而同步 `run --backend cloud` 的 task 与 detached 共用一个
     cluster、必触发本 handler——但同步路径不用 `DdbEventLog`，给它写 `task_exited` 既无人消费、还会让它的
-    events Query 读端撞上「无 `body` 属性的 item」（机制一）。故写前分流，判据与 kicker 的 Stream filter 同源。
+    events Query 读端撞上「无 `body` 属性的 item」。故写前分流，判据与 kicker 的 Stream filter 同源。
     """
     import boto3
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore

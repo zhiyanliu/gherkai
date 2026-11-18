@@ -1,4 +1,4 @@
-"""S3ResultStore 对拍测试（ADR 0030 决定六 / 0016）：与 LocalResultStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
+"""S3ResultStore 对拍测试：与 LocalResultStore 同一批行为断言，moto mock、不产生真实 AWS 费用。
 
 对拍后端无关的行为契约（save/load/load_all round-trip、自包含、scope_id 不透明编码不撞名/不逃逸）——
 即 test_stores.py 里 LocalResultStore 那批。物理落点断言（文件系统 glob）是 local 专属、换成 S3 的 list/key 断言。
@@ -79,7 +79,7 @@ def test_prefix_isolates_runs(aws):
 
 def test_load_all_paginates_beyond_1000(s3_result_store):
     # 回归守护：list_objects_v2 单页硬上限 1000，一次 run 可 >1000 scope。load_all 必须翻页收全部，
-    # 否则静默截断丢判定真值——ResultStore 是判定真值唯一权威（ADR 0016）、CI 据 load_all 判退出码，
+    # 否则静默截断丢判定真值——ResultStore 是判定真值唯一权威、CI 据 load_all 判退出码，
     # 截断会让本该红的 run 误判全绿。对拍 LocalResultStore.load_all（glob 无上限）。
     n = 1200  # 跨过 1000 单页边界
     for i in range(n):

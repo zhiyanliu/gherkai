@@ -82,7 +82,7 @@ def test_no_records_job_is_pending():
     """definition 里的 job 没有任何 record → PENDING（还没起）。"""
     state = project(_meta("a"), [])
     assert state.jobs["a"].status == Status.PENDING
-    assert state.status == Status.PENDING  # 判定集为空时不判 passed（ADR 0031 决定三）：全部 pending 的 run 级值是 pending
+    assert state.status == Status.PENDING  # 判定集为空时不判 passed：全部 pending 的 run 级值是 pending
 
 
 def test_scope_started_but_no_exit_is_running():
@@ -169,7 +169,7 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
 
 
 def test_platform_exit_reason_joins_stop_code_and_reason_with_fallback():
-    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用，ADR 0034 机制二「退出码缺失」条）：
+    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用）：
     两项齐全用「: 」相连，缺一项只用另一项，两项都缺（或为空串）时取固定兜底句、绝不为空。"""
     from gherkai_core.project import platform_exit_reason
 
@@ -257,7 +257,7 @@ def test_projected_run_status_pending_only_while_all_jobs_pending():
     assert projected_run_status(_jobs(Status.PENDING, Status.PENDING)) == Status.PENDING
     assert projected_run_status(_jobs(Status.PENDING, Status.RUNNING)) == Status.RUNNING
     assert projected_run_status(_jobs(Status.PASSED, Status.PENDING)) == Status.RUNNING
-    # 全终态也只到 running：run 级终态是 try_finalize 这个 commit point 专属（ADR 0030）
+    # 全终态也只到 running：run 级终态是 try_finalize 这个 commit point 专属
     assert projected_run_status(_jobs(Status.PASSED, Status.FAILED)) == Status.RUNNING
 
 
@@ -273,7 +273,7 @@ def test_projected_run_status_ignores_aggregate_value_from_project():
 
 
 def test_project_run_status_before_any_verdict_is_pre_terminal():
-    """还没有 job 出判定时，project() 的 run 级 status 是前置态（ADR 0031 决定三的空判定集规则）：
+    """还没有 job 出判定时，project() 的 run 级 status 是前置态：
     全部 pending 得 pending；pending 与 running 并存得 running。与投影写落库的取值一致，但投影写不依赖它。"""
     from gherkai_core.project import projected_run_status
 
@@ -493,7 +493,7 @@ def test_project_full_run_level_comes_from_the_shared_verdict():
 
 
 def test_project_full_timeout_message_is_recomputed_from_the_claim_time():
-    """后台被截断的 job 的说明由认领时刻、预算与期限重算是哪一个截止时刻起作用（ADR 0054 决策二第 2 条），与前台同一个算法：认领时刻
+    """后台被截断的 job 的说明由认领时刻、预算与期限重算是哪一个截止时刻起作用，与前台同一个算法：认领时刻
     加预算早于期限是预算那一句，晚于期限是期限那一句，两者相等算预算到点。判定与归因不受影响，都是 error 与 timeout。"""
     deadline = _CLAIMED + timedelta(seconds=300)  # _job 的预算是 300 秒
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", None)]
@@ -610,7 +610,7 @@ def test_plan_next_respects_running_slots():
 
 
 def test_plan_next_finalize_when_all_terminal():
-    """所有 job 达终态（无 pending/running）→ 提议 finalize，不论是否已过停止启动的时刻（ADR 0054 决策二第 4 条）。"""
+    """所有 job 达终态（无 pending/running）→ 提议 finalize，不论是否已过停止启动的时刻。"""
     recs = _passed_events("a") + [_exit("a", 0)]
     assert _plan(_meta("a"), recs) == [Action(kind="finalize")]
     assert _plan(_meta("a"), recs, past_stop_start=True) == [Action(kind="finalize")]
@@ -624,7 +624,7 @@ def test_plan_next_not_finalize_while_running():
 
 
 def test_plan_next_past_stop_start_never_proposes_a_start():
-    """已过停止启动的时刻（ADR 0054 决策二第 1、3 条）：不再提议 start；没有执行中的 job、余下的 job 都没有任何记录 → 到期收尾。
+    """已过停止启动的时刻（ADR 0054 决策二第 1 条）：不再提议 start；没有执行中的 job、余下的 job 都没有任何记录 → 到期收尾。
     一个 job 都没有启动时同样到期收尾。"""
     done = _passed_events("a") + [_exit("a", 0)]
     assert _plan(_meta("a", "b", "c"), done, past_stop_start=True) == [Action(kind="finalize_expired")]
@@ -707,7 +707,7 @@ def test_exit_none_without_events_is_error_not_pending_nor_running():
 
 
 def test_project_full_refuses_non_terminal_snapshot():
-    """ADR 0031 决定一·补的强制点：收尾快照里 job 仍 running（只见 scope_started）→ 抛、一份判定都不落，
+    """收尾快照里 job 仍 running（只见 scope_started）→ 抛、一份判定都不落，
     绝不把前置态写进 jobs/*.json。"""
     import pytest
     from gherkai_core.project import NonTerminalSnapshot

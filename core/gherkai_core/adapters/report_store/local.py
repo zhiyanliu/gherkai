@@ -3,7 +3,7 @@
 产出 <report_root>/<run_id>/{manifest.json, index.html}：
 - manifest.json 是薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
   **不内嵌 result 真值副本**——靠 run_id 软引用那次 run，判定真值由 ResultStore 持有（report 是纯派生视图、
-  可删可重建、永不作判定源，ADR 0027/0016）。
+  可删可重建、永不作判定源）。
 - index.html 是最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。摘要直接用内存 RunResult。
 
 不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接」，绝不解析/重写/抽内容、不按 kind 分支。
@@ -86,7 +86,7 @@ class LocalReportStore:
 
         # manifest 是**纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
         # 判定真值由 ResultStore（local 的 jobs/*.json 或 S3ResultStore 里结构相同的 key）持有，运行态/身份由 RunStore
-        # （local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有（三层切分，ADR 0016）。这样 RunReport 是真·派生品（可删可重建、
+        # （local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有。这样 RunReport 是真·派生品（可删可重建、
         # 永不作判定源），无真值冗余、无一致性风险。CI 要判定 → 用 run_id 找 ResultStore。
         manifest = {
             "schema_version": SCHEMA_VERSION,
@@ -182,8 +182,8 @@ def _reason_html(error_type: str | None, message: str | None) -> str:
 
     两分支口径同 render_text（有分类 → err 红字带分类 `error_type: message`；无分类 → 中性 note；空 message
     两侧规则一致——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
-    fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message（ADR 0031 决定一）→ 用
-    中性 note 色显出来，不复用 err 红（决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
+    fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message → 用
+    中性 note 色显出来，不复用 err 红（ADR 0031 决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
     （ADR 0042 决策三）走同一函数，故两处样式不再靠人肉同步（曾各抄一份、空 message 的处置已分叉过）。
     """
     esc = html.escape
@@ -200,7 +200,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
 
     manifest 提供 run_id/created_at/report_index；result（内存 RunResult）提供判定明细 + 摘要。
 
-    两块内容（ADR 0027/0016）：
+    两块内容：
     ① 判定明细（job→scenario→step，status/时长/sessionId）——直接从内存 RunResult 渲染，让纯确定性
        run（无原生产物）也一眼看懂结果（判定真值仍以 ResultStore 的 jobs/*.json 为准，本页只是人看视图）。运行定义里有、
        判定清单里没有的 job 排在末尾、标为没有执行；run 级说明在顶部摘要里。

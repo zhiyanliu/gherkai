@@ -39,7 +39,7 @@ _CUTOFF_CHECK_INTERVAL_S = 0.25
 # 仍没有退出记录时，接力方补写一条判为超时的未知退出。余量只挡认领方与接力方各自的检查间隔与时钟抖动，比各引擎的停止宽限期短（各引擎
 # 自报的值都在数十秒以上），不覆盖认领方到点催停之后 worker 的协作收尾：认领方还在、worker 仍在停止宽限期内收尾时，接力方先写下这一条，
 # 认领方随后写下的真实退出记录覆盖它；run 若在补写与真实退出之间收尾，这次收尾按超时提交，run 级的结果与报告就此定下。调大这个值换不来「不抢先」，只推迟认领方真
-# 不在时的收敛；判定条件的改法已定（按认领方的进程是否还在来判），尚未实装。
+# 不在时的收敛。
 _RECOVERY_MARGIN_S = 10.0
 
 
@@ -91,8 +91,8 @@ class SubprocessLauncher:
     退出后写 task_exited。非阻塞返回（reconciler 继续 tick，不等 worker 运行结束——那是 fire-and-forget，事件
     异步落 SQLite、下轮 tick 从 SQLite 重放看到进展）。
 
-    同时 enforce 截止时刻（ADR 0034「job timeout」节的本机后端一侧，ADR 0054 决策二后台推进条「截止时刻与说明」）：cutoff_at 是
-    tick 在认领时算好的截止时刻（认领时刻加 job 预算，以运行期限封顶）。每个执行中的 job 一个检查线程，按短间隔读注入的墙钟，过了
+    同时 enforce 截止时刻：cutoff_at 是 tick 在认领时算好的截止时刻（认领时刻加 job 预算，以运行期限封顶）。
+    每个执行中的 job 一个检查线程，按短间隔读注入的墙钟，过了
     cutoff_at 即先置 timed_out 标志再 handle.stop(引擎停止宽限期)（协作停，保会话清理、不持续计费）；停止在检查线程里等完，不阻塞
     推进循环。worker 退出后 _pump 的 record_exit 带上标志与它看到退出的那一刻（退出时刻，读同一个注入的墙钟），project 按归因链
     收敛 ERROR+timeout，说明由运行态里的认领时刻、预算与期限重算是哪一个起了作用。看到退出与到点决定经 `_ExitOrCutoff` 互斥，
@@ -211,14 +211,14 @@ def run_reconcile_loop(
     tick 幂等——崩了 status --wait 可接力（状态全持久）。循环按 tick 的结果分支（batch shape：运行结束即停、不常驻）：
     - `TickOutcome.COMMITTED`（这一方写成收尾）：用 tick 交还的结果写 RunReport 后退出；
     - `TickOutcome.ENDED`（run 已结束、终态不是这一方写成的）：不写报告、直接退出。带着 pending job 收尾的 run 在这里结束，
-      循环不依赖「每个 job 都会到终态」（ADR 0034 机制三「run 级状态只进不退」条④）；
+      循环不依赖「每个 job 都会到终态」；
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
     退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
     认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后按到期收尾，不
     启动任何 job。
 
-    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在收尾的条件写**之前**落（注入给 tick，
-    ADR 0030 决定三写序）；RunReport（index/manifest）在这一方写成收尾之后由 `finalize_report` 写（派生、失败隔离）。
+    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在收尾的条件写**之前**落（注入给 tick）；
+    RunReport（index/manifest）在这一方写成收尾之后由 `finalize_report` 写（派生、失败隔离）。
     注入 None（测试）则跳过。
     """
     while True:
@@ -229,7 +229,7 @@ def run_reconcile_loop(
         if outcome.outcome is TickOutcome.COMMITTED:
             # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
-            # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试（ADR 0030 决定三），抛出去会让
+            # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试，抛出去会让
             # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
             # 后才执行，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
             # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧做法相同）。
@@ -245,7 +245,7 @@ def run_reconcile_loop(
 
 def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *, region=None, profile=None,
                           poll_interval_s: float = 0.5) -> None:
-    """local 推进的**唯一入口**（ADR 0034 三宿主同一套机制）：装配 → tick 到 run 收尾 → 拆隧道。per-run 进程与
+    """local 推进的**唯一入口**：装配 → tick 到 run 收尾 → 拆隧道。per-run 进程与
     `status --wait` 接力都调这里——曾在 cli 两处逐字复写这三句装配，改一处漏一处就让接力者与 per-run 行为分叉。"""
     meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
         report_dir, run_id, max_concurrency, region=region, profile=profile)
@@ -265,11 +265,10 @@ def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, 
     不被盖掉（点查只是省掉一次写）；补写之后才到的真实退出照旧覆盖补写的那一条（INSERT OR REPLACE 同 key）。
 
     这个判定条件保证不了不抢先：认领方还在、到点催停之后 worker 仍在停止宽限期内收尾时，接力方照样补写，run 若在补写与真实退出之间
-    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`）。改法已定、尚未实装：按认领方的进程是否还在来判。
+    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`）。
 
     自家 job（owned_scopes）不扫：launch 时的截止时刻检查在管、且要给足协作停宽限。认领时刻缺失、读不出或不带时区的 job 不处置
-    （除超时外无权臆断他人认领的死活）。与被拒方案「超时时由处置者直接写 task_exited」不冲突：那条拒的是**有活观察链时**绕过它；
-    这里按观察链已断处理，补写是唯一的收敛路径。
+    （除超时外无权臆断他人认领的死活）。这里按观察链已断处理，补写是唯一的收敛路径。
     """
     state = run_store.load_run_state(run_id)
     if state is None:
@@ -345,7 +344,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
         session_warmup_url=meta.session_warmup_url,  # 会话预热地址同理随 definition 走（ADR 0051 决策 13）
         # 使用方 step 目录同理随 definition 走（ADR 0037 决策 4）：**读回、绝不在此重解析 `./steps`**——
-        # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同（ADR 0034），
+        # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同，
         # 重解析必让同一个 run 在三个宿主下用到不同的确定性 step 集，判定不可复现。
         steps_dir=meta.steps_dir,
         # 本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条）：经 env RUN_ID 注给 worker，编码会话名的 run 段

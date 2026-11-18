@@ -1,4 +1,4 @@
-"""RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策二/五、ADR 0030 决定四）：create_run / update_job_state / try_claim_job /
+"""RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策五、ADR 0030 决定四）：create_run / update_job_state / try_claim_job /
 project_state / try_finalize。
 
 **local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
@@ -10,11 +10,11 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
-- 机制三「run 级状态只进不退」条：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
+- run 级状态只进不退：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
   运行态不变、前台 job 写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
 - 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
 - `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（job 照写），对
-  写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束（ADR 0054 决策五）。
+  写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束。
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）；收尾写可带期望的计数。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
@@ -104,7 +104,7 @@ def test_claim_advances_run_status_in_the_same_write(run_store):
 
 def test_claim_rejected_on_finalized_run_leaves_state_unchanged(run_store):
     """已收尾（error、job 仍 pending）的 run 上认领返回 False，整份运行态不变：run 级、ended_at、message、job 态与 claimed_at
-    （条①：run 已收尾后不再接受新认领；推进器在 definition 不可用时带着 pending 的 job 收尾为 error，不能被认领复活）。"""
+    （run 已收尾后不再接受新认领；推进器在 definition 不可用时带着 pending 的 job 收尾为 error，不能被认领复活）。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
@@ -121,7 +121,7 @@ def test_claim_rejected_on_finalized_run_leaves_state_unchanged(run_store):
 
 def test_finalize_with_pending_jobs_succeeds(run_store):
     """收尾不要求 job 全为终态：run 级 pending（零认领）与 running（已认领一个）两种起点上，带着 pending 的 job 都能收尾，
-    job 态原样保留（被拒方案「给 finalize 加『全部 job 须终态』」守此）。"""
+    job 态原样保留。"""
     meta = _meta("run-1")
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_finalize("run-1", Status.ERROR, "t1") is True
@@ -153,7 +153,7 @@ def test_all_pending_projection_after_claim_keeps_run_running(run_store, hwm):
 
 @pytest.mark.parametrize("job_status", [Status.RUNNING, Status.PASSED, Status.SKIPPED, Status.ERROR])
 def test_job_write_leaving_pending_advances_run_status(run_store, job_status):
-    """前台 job 写离开 pending 时 run 级为 running（条③）：判据是写入的 job 态非 pending，从 pending 直接写终态（SKIPPED 的
+    """前台 job 写离开 pending 时 run 级为 running：判据是写入的 job 态非 pending，从 pending 直接写终态（SKIPPED 的
     job、起 worker 失败的 job）同样推进；另一个 job 不受影响。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
@@ -175,7 +175,7 @@ def test_pending_job_write_leaves_run_status(run_store):
 
 
 def test_job_write_on_finalized_run_lands_job_only(run_store):
-    """已收尾的 run 上写 job：job 照写，run 级、ended_at 与 message 不变（条③：run 级的保护不改变 job 写落不落库）。"""
+    """已收尾的 run 上写 job：job 照写，run 级、ended_at 与 message 不变（run 级的保护不改变 job 写落不落库）。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
@@ -377,7 +377,7 @@ def test_finalize_without_message_keeps_stored_message(run_store):
 def test_projection_keeps_pending_while_no_job_started(run_store):
     """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：全 pending 的投影不写 run 级，库中
     还没有 job 被认领时 run 级仍是 `create_run` 落的 **pending**（status 如实反映「未启动」，ADR 0034 机制三「run 级状态只进
-    不退」条②）。project 的 run 级 status 此时也是 pending（ADR 0031 决定三：判定集为空不判 passed），但落库取值只按 job 态定，
+    不退」条②）。project 的 run 级 status 此时也是 pending（判定集为空不判 passed），但落库取值只按 job 态定，
     不依赖它。
     """
     from gherkai_core.project import project
@@ -394,7 +394,7 @@ def test_projection_keeps_pending_while_no_job_started(run_store):
 
 def test_projection_clamps_terminal_aggregate_of_running_run(run_store):
     """喂**真 project() 产物**验钳制仍承重：a 已 passed、b 仍 pending 时 project 的 run 级 status 已是终态 passed，
-    投影写必须钳成 running；否则紧接的 try_finalize 会被投影自己写的终态挡成 False（ADR 0030 commit point）。"""
+    投影写必须钳成 running；否则紧接的 try_finalize 会被投影自己写的终态挡成 False。"""
     from gherkai_core.model import ScenarioDone, ScopeDone, ScopeStarted
     from gherkai_core.project import EventRecord, TaskExited, project
 
@@ -429,7 +429,7 @@ def test_projection_lands_running_once_any_job_advanced(run_store):
 
 def test_projection_never_lands_terminal_run_status(run_store):
     """全 job 已终态（project 聚合出 PASSED）时投影仍只落 running——run 级终态是 try_finalize 的 commit
-    point 专属（ADR 0030）：若投影提前落终态，紧接的 try_finalize 会被自己写的终态挡成 False。"""
+    point 专属：若投影提前落终态，紧接的 try_finalize 会被自己写的终态挡成 False。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     all_done = RunState(run_id="run-1", status=Status.PASSED,  # 手搓：模拟 project 的终态聚合值
@@ -609,9 +609,9 @@ def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, mo
 
 
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
-    """DDB 侧 `update_job_state` 的写入次数（ADR 0034 机制三「run 级状态只进不退」条③）：run 未收尾时一次（写 pending、
+    """DDB 侧 `update_job_state` 的写入次数：run 未收尾时一次（写 pending、
     写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级条件的写被挡，再只写 job），STATE 不存在时
-    同样两次后报错。写入 pending 与写入别的 job 态走同样的两次写（ADR 0054 决策五：返回值由条件写本身给出）。"""
+    同样两次后报错。写入 pending 与写入别的 job 态走同样的两次写（返回值由条件写本身给出）。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
     store.create_run(meta, _initial(meta))
@@ -639,7 +639,7 @@ def test_ddb_job_write_update_item_counts(aws, monkeypatch):
 def test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes(aws, monkeypatch):
     """DDB 侧第二次写（只写 job）要求 run 级已是终态，而不只要求 STATE 存在：第一次写因 STATE 不存在被挡之后、第二次写之前并发建出
     全 pending 的 run 时，第二次写同样被挡、照常报 STATE 不存在，job 不落进新记录，也不会报告一个仍为 pending 的 run 已结束；与本机
-    「运行态不存在即报错」一致（ADR 0054 决策五：返回值对任何写入都如实）。"""
+    「运行态不存在即报错」一致（返回值对任何写入都如实）。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     table = aws["ddb"].Table(aws["table_name"])
     store = DynamoDBRunStore(table)
@@ -755,7 +755,7 @@ def test_stale_projection_never_regresses_terminal_job_on_real_ddb(real_aws):
 
 
 def test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise(run_store):
-    """run 级消息（ADR 0037 决策 7）：随 try_finalize 同一次写入、读回原文；不给时读回 None（不写键）；已终态的 run 再带消息 finalize
+    """run 级消息：随 try_finalize 同一次写入、读回原文；不给时读回 None（不写键）；已终态的 run 再带消息 finalize
     被挡，库里的消息不变。两 adapter 同语义。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))

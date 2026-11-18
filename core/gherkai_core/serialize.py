@@ -386,7 +386,7 @@ def to_dict(result: RunResult) -> dict:
         "run_id": result.run_id,         # 便利：消费端/manifest 直读（经 property，真值在 run_meta）
         "run_meta": run_meta_to_dict(result.run_meta),
         "status": result.status.value,
-        "message": result.message,  # run 级说明（ADR 0054 决策二）：键恒在，没有时为 null
+        "message": result.message,  # run 级说明：键恒在，没有时为 null
         "duration_ms": result.duration_ms,
         "total_tokens": result.total_tokens,
         "total_time_worked_s": result.total_time_worked_s,
@@ -511,7 +511,7 @@ def run_state_to_dict(state: RunState) -> dict:
     # omit-when-None（同 started_at/ended_at）——旧 run_state.json 无此键、from_dict .get 容忍，round-trip 不破。
     if state.high_water_mark is not None:
         d["high_water_mark"] = state.high_water_mark
-    if state.message is not None:  # run 级消息（ADR 0037 决策 7）：只在推进器不经任何 job 就终结 run 时有；omit-when-None
+    if state.message is not None:  # run 级消息：只在推进器不经任何 job 就终结 run 时有；omit-when-None
         d["message"] = state.message
     d["claim_count"] = state.claim_count  # 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）：恒写，建 run 时即为 0
     # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。

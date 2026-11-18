@@ -18,7 +18,7 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
 
 并发：detached 下 per-run 进程写、reconciler 读（同进程内两职责）；`status --wait` 接力者在另一进程里同样启动 worker、写同一文件
 （事件、退出记录、为观察链已断的他人 claim 补写的超时退出记录），它不探测 per-run 进程是否存活、可能与之同时推进——同一 job
-只被一方 claim（LocalRunStore 跨进程文件锁下的 CAS），两个进程的写由 WAL 写锁串行（ADR 0034「端到端流程」的 local 节）；
+只被一方 claim（LocalRunStore 跨进程文件锁下的 CAS），两个进程的写由 WAL 写锁串行；
 explain 在另一进程只读。同步 run 下 schedule 的各 worker 读线程各持一个 scope 的闭包写（每条一次连接加一次提交，SQLite 文件锁
 串行）。SQLite WAL 模式 + 短事务，多读少写足够。`records()` 的两表在同一读事务内读取，保证一份快照：WAL 下自动提交模式每条
 SELECT 各取一个快照，分两次读可能读到某 scope 的退出记录、却漏掉在它之前提交的末尾事件（如 scope_done），投影会把它判成 ERROR。

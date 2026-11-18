@@ -16,7 +16,7 @@ from gherkai_cli.console import progress
 # 取同一常量避免漂移。
 DEFAULT_MAX_CONCURRENCY = 4
 
-# ---- 项目配置文件 gherkai.toml（ADR 0053）：八个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----
+# ---- 项目配置文件 gherkai.toml：八个运行侧命令读它，合成进「选项 > 环境变量 > 配置文件 > 内建默认」----
 CONFIG_COMMANDS = ("run", "plan", "submit", "status", "explain", "doctor", "list-deterministic", "list-runs")
 # 按次选择型选项（ADR 0053 决策 3 的排除名单，用 argparse 的 dest 名）：只影响本次的范围、输出形态、中止方式、落盘取舍或
 # 查询对象，不进配置文件——写进文件会让某次调用的范围或中止语义在不显眼处改变。护栏 test_project_config 从 argparse 差集
@@ -34,9 +34,9 @@ ENV_LAYER_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "region", "pr
 # （GHERKAI_*），解析在设备请求解析那一步、不经本节的同词规则
 DEVICE_OPTIONS = {"android_device_arn": ("devices.android", "arn"), "ios_device_arn": ("devices.ios", "arn"),
                    "device_farm_project_arn": ("devices", "project-arn"), "app_bucket": ("devices", "app-bucket")}
-# 只对本机后端起作用的 [common] 键 → --backend cloud 下不写进 args、不做校验，只在 run / submit 上提示一句（ADR 0053 决策 3，
-# 与 project-arn / app-bucket 同一形态：同一份项目文件要同时服务本机与云端，用不到的值不拦）。命令行上显式给出的值不受影响、
-# 仍由入口拒绝（ADR 0024「引擎自报下限」条）。值是提示里的理由（产品语言）。steps-dir 同属本机专用，但有环境变量层，
+# 只对本机后端起作用的 [common] 键 → --backend cloud 下不写进 args、不做校验，只在 run / submit 上提示一句
+# （与 project-arn / app-bucket 同一形态：同一份项目文件要同时服务本机与云端，用不到的值不拦）。命令行上显式给出的值不受影响、
+# 仍由入口拒绝。值是提示里的理由（产品语言）。steps-dir 同属本机专用，但有环境变量层，
 # 它的提示在 steps 目录解析那一步。
 LOCAL_ONLY_OPTIONS = {"grace": "grace 只对本机运行起作用，云端 worker 的停止宽限由部署时的 gherkai deploy --stop-timeout 决定"}
 LOCAL_ONLY_NOTICE_COMMANDS = ("run", "submit")
@@ -120,7 +120,7 @@ def convert_config_value(action, raw, *, section: str, key: str, path):
 
 
 def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
-    """parse_args 之后、分派之前：读项目配置文件并合成取值顺序（ADR 0053 决策 1、2、3）。返回 2（配置文件不可用）或 None。
+    """parse_args 之后、分派之前：读项目配置文件并合成取值顺序（ADR 0053 决策 2、3）。返回 2（配置文件不可用）或 None。
 
     只对八个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值已在 definition 里，或由提交侧按解析后的值经
     argv 传入）、`deploy` / `destroy` / `skill` / `list-engines` 不读。

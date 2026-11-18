@@ -59,7 +59,7 @@ def test_pending_running_have_no_severity():
 
 
 def test_non_verdict_filter_set():
-    # 过滤名单是派生终态加前置态（ADR 0031 决定三）
+    # 过滤名单是派生终态加前置态
     assert _NON_VERDICT == frozenset(
         {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
     )
@@ -85,7 +85,7 @@ def test_terminal_and_non_verdict_are_two_different_cuts():
     assert TERMINAL_STATUSES != frozenset(Status) - _NON_VERDICT
 
 
-# ---- _aggregate 入口过滤（ADR 0031 决定三）----
+# ---- _aggregate 入口过滤 ----
 def test_aggregate_filters_non_verdict():
     # 判定集非空时只看判定：error 仍穿透（一个 error 加一组非判定态 → error）
     assert _aggregate([Status.PASSED, Status.SKIPPED, Status.ERROR, Status.RUNNING]) == Status.ERROR
@@ -96,7 +96,7 @@ def test_aggregate_filters_non_verdict():
 
 
 def test_aggregate_all_skipped_no_error_is_skipped_not_passed():
-    # 判定集为空时不判 passed（ADR 0031 决定三）：全部 skipped 且没有 error → skipped，
+    # 判定集为空时不判 passed：全部 skipped 且没有 error → skipped，
     # 不依赖「fail-fast 产生的 skipped 必定伴随 error」这条调用方条件
     assert _aggregate([Status.SKIPPED, Status.SKIPPED]) == Status.SKIPPED
 
@@ -232,15 +232,15 @@ def test_severity_full_chain():
 
 
 def test_aggregate_running_does_not_pollute_clean_pass():
-    # 干净的 [PASSED, RUNNING]：running 被滤掉、不把结果带偏 → PASSED（ADR 0031 决定三）
+    # 干净的 [PASSED, RUNNING]：running 被滤掉、不把结果带偏 → PASSED
     assert _aggregate([Status.PASSED, Status.RUNNING]) == Status.PASSED
     # 空输入仍判 passed：零个 job 的 run 可达（没有 scenario 的 .feature），而且无状态路径要在 finalize 时写入终态
     assert _aggregate([]) == Status.PASSED
 
 
-# ---- WorkerNetworkError 竞态块按 abort_flag 拆分（ADR 0031 决定一，最易回归的坑）----
+# ---- WorkerNetworkError 竞态块按 abort_flag 拆分（最易回归的坑）----
 # schedule.py 的 except WorkerNetworkError 块有三子分支：abort_flag→ABORTED / 超时→error+timeout / else→network_error。
-# 这是 ADR 用整段文字警告的坑（超时与 fail-fast 两条路径都会主动停 worker，故网络块的回填判据取 abort_flag）。现有 network 测试只命中
+# 超时与 fail-fast 两条路径都会主动停 worker，故网络块的回填判据取 abort_flag。现有 network 测试只命中
 # else 分支，timeout 测试命中的是事件循环里的 deadline 而非 network 块里的重判——故专门复现这两条竞态子分支。
 from gherkai_core.errors import WorkerNetworkError  # noqa: E402
 

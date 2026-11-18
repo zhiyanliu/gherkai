@@ -149,7 +149,7 @@ def test_ddb_stale_all_pending_projection_keeps_run_running_real(real_aws, hwm):
 
 
 def test_ddb_job_write_on_finalized_run_lands_job_only_real(real_aws):
-    """真 DDB 上已收尾的 run 再收到前台 job 写（条③）：带 run 级的条件写被挡，回退的只写 job 那一次落库，run 级终态、
+    """真 DDB 上已收尾的 run 再收到前台 job 写：带 run 级的条件写被挡，回退的只写 job 那一次落库，run 级终态、
     结束时刻不变。"""
     store = _ddb_store(real_aws)
     rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-latejob")

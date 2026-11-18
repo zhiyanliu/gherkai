@@ -1,4 +1,4 @@
-"""S3ResultStore（ADR 0030 决定六 / 0016 三层选型）：ResultStore port 的 S3 实装。
+"""S3ResultStore：ResultStore port 的 S3 实装。
 
 数据面判定真值——每个 job（即 scope）一个 S3 对象。对拍 `LocalResultStore` 行为（save/load/load_all round-trip、
 scope_id 不透明编码），只把落点从本地文件换成 S3 对象。**云端 adapter，需 boto3**（`gherkai-core[aws]` extra，缺它
@@ -62,7 +62,7 @@ class S3ResultStore:
         """读回某 run 的全部 JobResult（CI 遍历用）。无则空 list。
 
         **必须翻页**：list_objects_v2 单页硬上限 1000 key，一次 run 可 >1000 scope。只读单页会静默截断、
-        丢判定真值——而 ResultStore 是判定真值唯一权威（ADR 0016）、CI 据此判退出码，截断会让本该红的 run
+        丢判定真值——而 ResultStore 是判定真值唯一权威、CI 据此判退出码，截断会让本该红的 run
         误判全绿。故用 paginator 收全部页（对拍 LocalResultStore.load_all 的 glob 无上限语义）。
         按 key 排序保稳定输出（对拍 local 的 sorted glob）。
         """

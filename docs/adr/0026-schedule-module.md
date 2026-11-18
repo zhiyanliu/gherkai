@@ -63,7 +63,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 ### 超时兜底
 
 - `Job.timeout_s`（per-job 墙钟预算，由 `@timeout:N` tag / `--default-job-timeout` 声明，见 [0019](./0019-feature-tags-scope-and-engine.md)/[0034](./0034-detached-batch-reconciler.md)；恒为有限正数，每个 job 都有截止时刻，没有「不超时」，见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策十）：防一个 job 卡死（AI 死循环 / 网络挂）永久占用并发槽位 + 持续计费。超时 → 优雅终止该 worker（走下文终止契约：停止请求→宽限→强杀）、记 `status:error` + `errorType:timeout`（[0024](./0024-worker-core-protocol.md) status 三态 + 规范化 errorType）。
-- **截止时刻与运行期限**：job 的截止时刻由认领时刻、`Job.timeout_s` 与 `RunMeta.deadline_at` 按墙钟算出（`run_deadline.job_cutoff`，算法见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 2 条）；到点的 job 记什么见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一（由前台与后台共用的终结函数给出）。过了停止启动的时刻（0054 决策二第 1 条）就不再启动 job、也不再重试；到期后的首次仲裁与「内容完整不改判」照旧。
+- **截止时刻与运行期限**：job 的截止时刻由认领时刻、`Job.timeout_s` 与 `RunMeta.deadline_at` 按墙钟算出（`run_deadline.job_cutoff`，算法见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 2 条）；到点的 job 记什么见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一（由前台与后台共用的终结函数给出）。过了停止启动的时刻（0054 决策二第 1 条）就不再启动 job、也不再重试；到期后的首次仲裁与「内容完整不改判」和 job 自己的预算到点时相同（0034 机制二）。
 - 引擎 SDK 各自也有超时（Midscene/Nova Act 都有），但那只覆盖「引擎调用内」卡住；**进程层面卡死（非引擎调用内）只有 schedule 能兜**，故 schedule 这层超时是必要的外层保险。
 
 ### 起 worker 与重试之前的检查：服从运行期限与这次 run 的记录（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二、五）

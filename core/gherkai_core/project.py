@@ -226,8 +226,8 @@ def synthesize_skipped(result: JobResult, timing: Timing) -> None:
 # ============================================================================
 
 
-# 平台侧退出哨兵（ADR 0034 机制二「退出码缺失」推论）：task 已停止、平台却没有给出 worker 退出码的两种形态都落它——①观察者收到
-# STOPPED 却缺 exitCode（容器没能开始运行，如拉不到镜像；云端 tick 按观察者同一提取函数补写时同样）；②同步 `run --backend cloud`
+# 平台侧退出哨兵：task 已停止、平台却没有给出 worker 退出码的两种形态都落它——①观察者收到 STOPPED 却缺 exitCode（容器没能开始
+# 运行，如拉不到镜像；云端 tick 按观察者同一提取函数补写时同样；ADR 0034 机制二「退出码缺失」推论）；②同步 `run --backend cloud`
 # 下 task 已 STOPPED 却始终取不到 exitCode。
 # 推进步骤起 job 失败时不落它：那时 worker 根本没有启动，补偿写退出码未知加启动失败的原因，与前台起 worker 失败交给终结函数的输入相同
 # （ADR 0054 决策二后台推进条「时刻」），两条路径对同一个启动异常给出同一句说明。
@@ -274,7 +274,7 @@ class TaskExited:
 
     scope_id: str
     exit_code: int | None = None
-    # 超时标志（ADR 0034「job timeout」节归因链）：发过超时的停止请求，或补写时已判为超时。本机启动器在检查线程到点发过停止时
+    # 超时标志：发过超时的停止请求，或补写时已判为超时（ADR 0034「job timeout」节归因链）。本机启动器在检查线程到点发过停止时
     # 带上；云端由 StopTask 的 reason 经 STOPPED 事件 detail.stoppedReason 的哨兵串还原；接力方与云端 tick 补写的未知退出带上。
     # 「退出时已过截止时刻」不由它表示，见 exited_at。
     timed_out: bool = False
@@ -655,10 +655,10 @@ def finalize_job(
 
 
 class NonTerminalSnapshot(RuntimeError):
-    """收尾快照里有 job 有记录而仍非终态（ADR 0031 决定一·补：JobResult.status 只许终态，强制点在 project_full）。
+    """收尾快照里有 job 有记录而仍非终态（JobResult.status 只许终态，强制点在 project_full）。
 
-    正常情况下不会发生：tick 只在 plan_next 提议收尾时才聚合，提议的前提是没有执行中的 job、有记录的 job 都已结束（ADR 0054 决策二
-    后台推进条「决策」）。发生了就说明本次读到的 events 快照落后于判定依据（或写者违约），本轮不落任何判定真值、让触发源重试——绝不把
+    正常情况下不会发生：tick 只在 plan_next 提议收尾时才聚合，提议的前提是没有执行中的 job、有记录的 job 都已结束。
+    发生了就说明本次读到的 events 快照落后于判定依据（或写者违约），本轮不落任何判定真值、让触发源重试——绝不把
     running/pending 写进 jobs/*.json。"""
 
 
@@ -669,15 +669,15 @@ def project_full(
     claimed_at: Mapping[str, datetime],
     past_stop_start: bool,
 ) -> RunResult:
-    """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细与 run 级裁决，ADR 0034）——收尾用。
+    """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细与 run 级裁决）——收尾用。
 
     与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别在保留完整明细
-    （scenarios/steps/cost/report_refs）与给出超时的说明、run 级裁决。tick 在收尾的条件写**之前**用它落 ResultStore（判定真值，
-    ADR 0030 决定三写序），条件写写成之后宿主用同一份结果生成 RunReport（ADR 0054 决策二后台推进条「收尾与报告」）。
+    （scenarios/steps/cost/report_refs）与给出超时的说明、run 级裁决。tick 在收尾的条件写**之前**用它落 ResultStore（判定真值），
+    条件写写成之后宿主用同一份结果生成 RunReport。
 
     - **判定只装有记录的 job**：事件流里没有任何记录的 job（没有启动，或已过停止启动的时刻而不再启动）不臆造明细、不进
       RunResult.jobs，它们是 run_meta.jobs 与 jobs 的差，与同步路径因到期或发现 run 已被别处结束而没有启动的 job 同一形态（ADR 0054
-      决策二）。**守 ADR 0031 不变量**：有记录的 job 非终态即抛 NonTerminalSnapshot、一份判定都不落（前置态绝不进 jobs/*.json）。
+      决策二）。**守不变量**：有记录的 job 非终态即抛 NonTerminalSnapshot、一份判定都不落（前置态绝不进 jobs/*.json）。
     - **截止时刻由认领时刻重算**（ADR 0054 决策二第 2 条与后台推进条「截止时刻与说明」）：claimed_at 给出每个有记录的 job 的认领
       时刻（取自这一轮读到的运行态），与它的预算、运行期限经 `run_deadline.job_cutoff` 算出截止时刻与起作用的那一方；与同步路径在
       认领时算出的是同一个算法、同一组输入，退出记录里不另记。截止时刻用于判断这次退出是否按超时处理（退出记录带超时标志，或退出
@@ -757,11 +757,11 @@ def _lifecycle_rank(status: Status) -> int:
 
 
 def _aggregate(statuses: list[Status]) -> Status:
-    """状态归约（唯一一份，schedule 与本模块两条路径共用，ADR 0031 决定三、ADR 0034「不复制归约逻辑」）。
+    """状态归约（唯一一份，schedule 与本模块两条路径共用，ADR 0034「不复制归约逻辑」）。
 
     先滤掉 _NON_VERDICT（skipped、aborted 两个派生态与 pending、running 两个前置态），只看已出判定的态：
     判定集非空时，有 error 判 error，否则有 failed 判 failed，否则判 passed。
-    判定集为空而输入非空时不判 passed（ADR 0031 决定三）：输入里有 aborted 判 aborted，否则有 skipped 判 skipped，
+    判定集为空而输入非空时不判 passed：输入里有 aborted 判 aborted，否则有 skipped 判 skipped，
     否则有 running 判 running，否则（全部 pending）判 pending。全部 job 被中止或没有启动的 run 因此不会记成 passed，
     这一点在函数内成立，不依赖「fail-fast 产生的 skipped 必定伴随一个 error」这类调用方条件；无状态投影里还没有任何
     job 出判定的 run 得到前置态，不得到终态。
@@ -822,7 +822,7 @@ def run_verdict(
        - 有 job 没有判定而不属于第 1 条。正常的调用方到不了这里（没有判定只有上面两种原因），这一条让「有 job 没有判定的 run 不会
          得到 passed」在函数内成立，不依赖调用方传对标记。
     3. 其余：`_aggregate` 对各 job 判定的值，无说明。全部 job 都有判定时，不论当前时刻是否已过期限都照常聚合（被期限截断的 job
-       自身是 error，聚合自然得出 error），ADR 0054 决策二第 4 条。
+       自身是 error，聚合自然得出 error）。
 
     后台推进没有使用方中断，读到 run 级终态时直接停止推演、不走到裁决，所以它的 interrupted 与 ended_elsewhere 都取 False。"""
     decided = {jr.scope_id for jr in job_results}
@@ -836,7 +836,7 @@ def run_verdict(
 
 
 def projected_run_status(jobs: dict[str, JobState]) -> Status:
-    """投影写对 run 级 status 的取值（ADR 0034 机制三）：投影里全 job 仍 pending → `pending`，否则 `running`。
+    """投影写对 run 级 status 的取值：投影里全 job 仍 pending → `pending`，否则 `running`。
 
     **`pending` 的含义是「不写 run 级」**：两个 RunStore adapter 拿到 `pending` 时都保留库中 run 级原值（`create_run` 落的
     `pending`，或此前某次认领、投影写下的 `running`），只有 `running` 才落库。这样认领之后、拿着认领之前读到的 baseline
@@ -844,7 +844,7 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
 
     **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的值，只要有一个 job 出了判定就是终态（一个 job
     已 passed、其余还 pending 的 run 得到 `passed`），只有还没有 job 出判定时才是前置态；提前落 run 级终态会被 `try_finalize`
-    的单调条件写认成「已 finalize」而挡住 commit point（ADR 0030），run 永远 finalize 不了。故 `_aggregate` 对空判定集
+    的单调条件写认成「已 finalize」而挡住 commit point，run 永远 finalize 不了。故 `_aggregate` 对空判定集
     给出前置态之后，这条钳制仍然需要：运行中的 run 只要有 job 出了判定，`_aggregate` 的值就不能原样落库。
 
     **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
@@ -859,7 +859,7 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
 
 
 # ============================================================================
-# plan_next（ADR 0034 机制四、ADR 0054 决策二）：纯决策——该启哪些 pending / 是否收尾
+# plan_next：纯决策——该启哪些 pending（ADR 0034 机制四）/ 是否收尾
 # ============================================================================
 
 
@@ -871,8 +871,8 @@ class Action:
     """reconciler 的建议动作（ADR 0034）——纯数据，adapter 侧据此做副作用（CAS/RunTask/收尾）。
 
     kind='start'：建议启这个 scope_id 的 job（adapter 侧 CAS pending→running 成功才真 RunTask/spawn）；
-    kind='finalize'：没有执行中的 job、也没有未启动的 job，按各 job 的判定收尾（ADR 0054 决策二第 4 条，不论是否已过期限）；
-    kind='finalize_expired'：已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动，到期收尾（第 3 条）：run 级记为 error
+    kind='finalize'：没有执行中的 job、也没有未启动的 job，按各 job 的判定收尾（不论是否已过期限）；
+    kind='finalize_expired'：已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动，到期收尾：run 级记为 error
     加说明，收尾写另以「读到运行态以来没有新的认领」为条件。两种收尾的条件写都保 commit 恰一次。
     """
 
@@ -881,7 +881,7 @@ class Action:
 
 
 def plan_next(state: RunState, max_concurrency: int, *, past_stop_start: bool, recorded: Collection[str]) -> list[Action]:
-    """据当前 RunState 提议下一步动作（ADR 0034 机制四、ADR 0054 决策二，纯函数、无副作用）。
+    """据当前 RunState 提议下一步动作（ADR 0034 机制四，纯函数、无副作用）。
 
     past_stop_start：当前时刻是否已过停止启动的时刻（推进步骤由这一轮取的时刻判断，`run_deadline.past_stop_start`）。
     recorded：事件流里有任何记录的 scope。「未启动」的 job 是投影为 pending 而没有任何记录的 job；有记录而投影仍为 pending 的 job

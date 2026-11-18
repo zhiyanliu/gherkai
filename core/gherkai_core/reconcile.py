@@ -3,11 +3,10 @@
 `tick(run_id, meta, …, clock=…)` 一步推进：取时刻 → 读库中运行态（已收尾即停止推演）→ 读 EventLog 全量 records → project()
 推 RunState → 条件写落库 → plan_next() 决定动作 → 对每个 start 动作重取时刻、未过停止启动的时刻才认领，认领成功即算出截止时刻、
 经注入的 Launcher 起 job；收尾动作（全部 job 已结束，或已过停止启动的时刻而余下的 job 都没有启动）先落判定明细、再条件写 run 级
-终态。结果是 `TickResult`，宿主据它决定继续推进、生成报告后结束，还是直接结束（ADR 0034 机制三「run 级状态只进不退」条④，
-ADR 0054 决策二后台推进条）。
+终态。结果是 `TickResult`，宿主据它决定继续推进、生成报告后结束，还是直接结束（ADR 0034 机制三「run 级状态只进不退」条④）。
 
 **无状态 + 幂等**：所有调度态在 EventLog / RunStore（持久），进程内不留。谁调 tick、何时调、并发调都安全
-（CAS + HWM 条件写兜底，机制三/四）——各触发源（cloud Stream / local per-run 进程 / status --wait 接力）
+（CAS + HWM 条件写兜底）——各触发源（cloud Stream / local per-run 进程 / status --wait 接力）
 共用这一个 tick。「是否已过停止启动的时刻」同样不记：每一轮按当前时刻判断（ADR 0054 决策二后台推进条「不记已过停止启动」）。
 
 **时刻只经注入的时钟取**：tick 自己不读系统时钟，宿主注入与前台同一个读取点（组合根的 `compose.now`），返回带时区的 datetime；
@@ -36,7 +35,7 @@ logger = logging.getLogger("gherkai_core.reconcile")
 
 
 class TickOutcome(enum.Enum):
-    """一次 `tick` 的结果（ADR 0034 机制三「run 级状态只进不退」条④，ADR 0054 决策二后台推进条「收尾与报告」）。
+    """一次 `tick` 的结果（ADR 0034 机制三「run 级状态只进不退」条④）。
 
     后两种都让宿主结束对这个 run 的推进（本机的推进循环与 status --wait 退出，云端这一次调用正常返回）；只有 `COMMITTED` 让宿主
     生成 RunReport。
@@ -109,7 +108,7 @@ def finalize_report(result: RunResult, report_store, created_at: str, *, run_dur
     """收尾之后写 RunReport（派生视图，**永远最后**；ADR 0030 决定三 / 0034「数据模型三件套」RunReport 行与
     「端到端流程」cloud 第 4 步 ④）。宿主只在 tick 返回 `TickOutcome.COMMITTED` 后调，result 是那次的 `TickResult.result`。
 
-    报告直接由推进步骤这一轮的结果生成，不再另读一次事件重算（ADR 0054 决策二后台推进条「收尾与报告」）：重算用的事件可能已经变了
+    报告直接由推进步骤这一轮的结果生成，不再另读一次事件重算：重算用的事件可能已经变了
     （接力方补写的未知退出之后又被真实的退出码覆盖），得出的结果会与提交的终态不同。判定真值（ResultStore 各 job）不在此写，它在
     tick 的收尾分支、条件写之前落（写序见 `tick`）。写失败隔离：判定真值在 commit 之前已落库，不让派生视图击穿已提交终态的 run。
     run_duration_ms：run 级墙钟（RunState started_at→ended_at），宿主算好传入（ADR 0024「三级执行时长」detached 条）；缺则报告墙钟显「?」。
@@ -143,7 +142,7 @@ def tick(
       启动调用有耗时，沿用会让靠后的 job 少拿到预算；
     - 启动调用失败时再取一次，作补写的退出记录的退出时刻（是否已过截止时刻由投影判断）。
 
-    幂等：可反复调、并发调。步骤（ADR 0034 端到端流程、ADR 0054 决策二）：
+    幂等：可反复调、并发调。步骤：
     1. 读库中运行态作 baseline；run 级已是终态即返回 `ENDED`，不读事件、不投影、不认领、不落判定真值
        （ADR 0034 机制三「run 级状态只进不退」条④）。
     2. 读 EventLog 全量 records → project() 纯推演完整 RunState（含 HWM）。
@@ -218,7 +217,7 @@ def _launch(run_id: str, job: Job, launcher: Launcher, event_log: EventLog, cloc
 
 
 def _claim_times(baseline: RunState | None, recorded: Collection[str]) -> dict[str, datetime] | None:
-    """快照检查（ADR 0054 决策二后台推进条「快照」）：每个有记录的 job 在这一轮读到的运行态里都带认领时刻时，返回它们的认领时刻；
+    """快照检查：每个有记录的 job 在这一轮读到的运行态里都带认领时刻时，返回它们的认领时刻；
     有一个不带（或读不出、不带时区），或这一轮读不到运行态，返回 None。
 
     推进步骤先读运行态、后读事件，手里的运行态可能比事件旧：有记录的 job 不带认领时刻，说明它是在这一轮读运行态之后才被认领的，
@@ -242,10 +241,9 @@ def _finalize(run_id: str, meta: RunMeta, records: list, baseline: RunState | No
     """收尾分支（plan_next 给出 finalize 或 finalize_expired 时）。写的次序不变：判定明细、run 级终态、报告（报告由宿主写）。
 
     ① 快照检查（`_claim_times`）不过即按继续推进处理；读不到运行态的一轮同样不收尾，到期收尾也就不做。
-    ② 判定真值先落（ADR 0030 决定三写序）：用本 tick 已读的 records（与 state 同一快照，不再读一次），project_full 逐 job 落
-       ResultStore；它对有记录而非终态的 job 抛（ADR 0031 不变量守卫）——异常不在本 tick 内捕获、原样抛出，让触发源重试；绝不先
-       CAS 再补（CAS 之后无人重试，产物缺失即永久）。保存覆盖同 key、不带条件，保存抛错同样原样抛出、这一轮不条件写（ADR 0034
-       机制三「run 级状态只进不退」条④ K3）。
+    ② 判定真值先落：用本 tick 已读的 records（与 state 同一快照，不再读一次），project_full 逐 job 落
+       ResultStore；它对有记录而非终态的 job 抛——异常不在本 tick 内捕获、原样抛出，让触发源重试；绝不先
+       CAS 再补（CAS 之后无人重试，产物缺失即永久）。保存覆盖同 key、不带条件，保存抛错同样原样抛出、这一轮不条件写。
     ③ try_finalize 条件写 run 级终态：状态与说明取 project_full 的 run 级裁决（`project.run_verdict`，与前台同一个函数）。到期收尾
        另带这一轮读到的认领计数作条件：读到之后另一个推进方的认领落下时写不成。
        全部 job 已结束的收尾不带：没有未启动的 job 就不会再有认领。

@@ -9,7 +9,7 @@
 喂给本服务（sink 只供进度显示，不经本服务；ADR 0026/0030），并经本服务实现的 `RunRecord` 认领 job、在重试之前读 run 级状态、
 轮询停手信号（ADR 0054 决策五「执行方服从记录」）。
 
-commit-point 写序（ADR 0030 决定三）：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.try_finalize 最后写。
+commit-point 写序：数据面 ResultStore 先逐 job 落 → 控制面 RunStore.try_finalize 最后写。
 「收尾写一落，就表示 run 已提交、判定就绪」。收尾与别的写入方用同一个条件写（ADR 0054 决策五）：run 级已是终态时
 不覆盖它，抛 `RunAlreadyEnded`。
 
@@ -82,7 +82,7 @@ class RunPersistence:
         满足 ADR 0027「提交即返回 runId」——definition 必先于批量运行存在。各 job 摆 PENDING、总 PENDING、
         started_at 填、ended_at 缺席（finalize 时填）。
 
-        **create_run 前先 preflight（ADR 0030 决定七）**：探底层可达（云端探表/桶，local no-op）。桶/表名错
+        **create_run 前先 preflight**：探底层可达（云端探表/桶，local no-op）。桶/表名错
         一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退出码 2——消除「桶名错因是否有 offload
         内容分裂成退出码 2 还是退出码 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
         """
@@ -177,7 +177,7 @@ class RunPersistence:
         不带认领计数的条件：发起进程是这个 run 唯一的认领方，认领在工作线程里同步完成，
         收尾发生在线程池排空之后，没有在途的认领。
 
-        **写不成时不覆盖、不写报告**（ADR 0054 决策五）：run 级已是终态，说明本次执行结束之前别处已把它记为已结束；已有的终态
+        **写不成时不覆盖、不写报告**：run 级已是终态，说明本次执行结束之前别处已把它记为已结束；已有的终态
         对所有写入方不可变，报告从本次结果派生、会与记录矛盾，所以都不写，抛 `RunAlreadyEnded`（带读回的运行态）。各 job 的判定
         此前已由 on_job_complete 逐个写入，不受影响。条件写不区分「已是终态」与「运行态不存在」，写不成之后读回一次来分辨：
         运行态不存在抛 FileNotFoundError（begin 之后不该发生）。这次读回本身失败时仍抛 `RunAlreadyEnded`（`recorded` 为 None、
@@ -185,7 +185,7 @@ class RunPersistence:
         已发现 run 被别处结束之后收尾照样走这个条件写：正常情形下它被已有的终态挡下；万一写成了（记录其实没有结束，属于不该发生的
         不一致），写下的是 run 级裁决对这种情形给出的 aborted，不会是 passed（见 `project.run_verdict`）。
 
-        **ReportStore.write 的失败被隔离**（ADR 0030 决定三：报告是派生只读视图、可重建、永不作判定源）——
+        **ReportStore.write 的失败被隔离**（报告是派生只读视图、可重建、永不作判定源）——
         它若抛异常（磁盘满/路径不可写等），**不反向击穿已 commit 的 run**：commit point 已落、判定真值在
         ResultStore 安然无恙，故吞掉 write 异常、返回 None（报告可后续从 RunResult 重建），让调用方照常输出汇总/退出码。
         收尾写本身**不**在此 try 内——它是 commit point，失败必须冒泡（控制面没落是真问题）。

@@ -70,7 +70,7 @@ _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
 # scope 级 error 后合成的 skipped（status=skipped 且 shortcircuited=False，ADR 0051 决策 4 / 0031 决定六）：这一步没执行，
 # 原因在 job 判定（被测对象未就绪或会话丢失）。报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
 _SCOPE_SKIPPED_NOTE = "未执行（scope 级错误，原因见 job 判定）"
-# 运行定义里有、判定清单里没有的 job（`RunResult.jobs_without_verdict`，ADR 0054 决策二）：已过停止启动的时刻、或发现 run 已被别处
+# 运行定义里有、判定清单里没有的 job（`RunResult.jobs_without_verdict`）：已过停止启动的时刻、或发现 run 已被别处
 # 记为已结束而没有启动，没有判定，原因在 run 级说明。它不是 skipped（skipped 是因 fail-fast 或使用方中断而未启动、有判定，原因在
 # job 的 message），也不是 step 行的「未执行」旁注（scope 级错误之后合成的 skipped），所以 job 行上只写这个标注、不写状态词。
 # 报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
@@ -128,7 +128,7 @@ def session_lines(jr: JobResult) -> list[str]:
 
 def render_text(result: RunResult) -> str:
     """RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。有 run 级说明时紧跟总状态给出，
-    运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行（ADR 0054 决策二）。
+    运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行。
 
     面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
     但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
@@ -140,7 +140,7 @@ def render_text(result: RunResult) -> str:
 def run_tree(result: RunResult) -> TreeNode:
     """run 汇总的树（`render_text` 的结构；测试按节点归属断言，不按排版）。"""
     root = TreeNode(Text.assemble("运行结果  总状态: ", status_text(result.status.value)))
-    if result.message:  # run 级说明（ADR 0054 决策二）：没有任何 job 能承载的原因（如已超过允许运行的时间），紧跟总状态
+    if result.message:  # run 级说明：没有任何 job 能承载的原因（如已超过允许运行的时间），紧跟总状态
         root.add(f"说明: {_one_line(result.message)}")
     if result.duration_ms is not None:
         root.add(f"总墙钟时长: {_ms(result.duration_ms)}")
@@ -156,7 +156,7 @@ def run_tree(result: RunResult) -> TreeNode:
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
         cost_str = f"  [{', '.join(jbits)}]" if jbits else ""
         # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没执行」
-        # 只在 message 里（ADR 0031 决定一），故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
+        # 只在 message 里，故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
         if jr.error_type:
             err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页判法一致）
         else:
@@ -195,7 +195,7 @@ def run_tree(result: RunResult) -> TreeNode:
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
             jn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
-    # 没有判定的 job 排在有判定的之后、按运行定义的次序（ADR 0054 决策二）：只有 scope 与标注，原因已在上面的 run 级说明里
+    # 没有判定的 job 排在有判定的之后、按运行定义的次序：只有 scope 与标注，原因已在上面的 run 级说明里
     for job in result.jobs_without_verdict:
         root.add(Text.assemble(f"job {job.scope_id!r}: ", styled(_NOT_RUN_LABEL, "yellow")))
     return root
@@ -207,7 +207,7 @@ def render_run_state(state: RunState) -> str:
     local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是前端的事，故住这里而非产品本体层。
     """
     lines = [f"run {state.run_id}: {state.status.value}"]
-    if state.message:  # run 级消息（ADR 0037 决策 7）：推进器不经任何 job 就终结 run 时的原因，紧跟状态行
+    if state.message:  # run 级消息：推进器不经任何 job 就终结 run 时的原因，紧跟状态行
         lines.append(f"message={state.message}")
     if state.jobs:  # job 清单是同构表（ADR 0047）；无会话血缘的 job 该格显示 -
         lines.append(render_table(["scope_id", "状态", "session"],
@@ -217,7 +217,7 @@ def render_run_state(state: RunState) -> str:
     return "\n".join(lines)
 
 
-# ---- run 清单（list-runs，ADR 0041 决策七「人读形态」「机读形态」「写出版本的标记」）----
+# ---- run 清单（list-runs，ADR 0041 决策七「写出版本的标记」）----
 
 # 非终态且没有后台执行标记的行：前台 run 的进程被强制结束或宿主失联后留下的 run 不会再到终态，status --wait 对它只等待、
 # 不接力（与 status --wait 的同一判据：detached 标记）
@@ -286,7 +286,7 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
     job 列是 job 总数；各 job 的状态与 run 的状态不全相同时，括注各状态的个数（全相同时状态列已经说明，不重复）。
     版本列恒给出写出这个 run 的版本（读不到为「未知」），当前版本写出的在版本串后加 ` *`，表格上方一行图例点明当前版本
     （同 `deploy list-workers` 标默认 variant 的写法）。提示列放 run 级 `message` 与前台执行遗留的提示，
-    没有任何一行有提示时整列不出现；job 级的原因不在运行态里，清单不列，用 `explain` 看（ADR 0041 决策七）。
+    没有任何一行有提示时整列不出现；job 级的原因不在运行态里，清单不列，用 `explain` 看。
     运行态解析失败的行只有 run_id 与版本列有值。空清单由调用方打一行落点提示，不经这里。"""
     rows = []
     for item in items:

@@ -873,7 +873,7 @@ def test_runs_table_has_stream_for_kicker():
 
 
 def test_kicker_mapping_insert_filter():
-    # kicker的 event source mapping 带 INSERT-only filter（防 reconciler 写 runs 表 MODIFY 自触发放大，ADR 0034）。
+    # kicker的 event source mapping 带 INSERT-only filter（防 reconciler 写 runs 表 MODIFY 自触发放大）。
     t = _template()
     mappings = t.find_resources("AWS::Lambda::EventSourceMapping")
     insert_filtered = []

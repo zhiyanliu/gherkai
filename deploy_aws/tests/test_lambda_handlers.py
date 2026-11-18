@@ -122,7 +122,7 @@ def test_run_ids_multi_run():
 
 def test_run_ids_skips_ttl_remove_records():
     """events 表 TTL 过期删除同样进 Stream（带 Keys 的 REMOVE 记录）→ 必须不算 run：它不携带新信息，不为它推进一次
-    （推进方本次读到终态即返回；各道防护各挡哪些触发见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条）。"""
+    （推进方本次读到终态即返回）。"""
     removed = dict(_stream_record("run-1#a"), eventName="REMOVE")
     assert reconciler._run_ids_from_stream({"Records": [removed]}) == set()
     # 混批：同批里的正常写入照常推进（别退化成「整批丢弃」）
@@ -854,8 +854,7 @@ def test_tick_runs_branches_on_tick_outcome(monkeypatch):
 
 
 def test_tick_runs_writes_the_report_from_the_committed_tick_result(monkeypatch):
-    """这一方写成收尾时，_tick_runs 交给报告收尾的是 tick 交还的那一份结果与这个 run 的报告落点（ADR 0034 机制三「run 级状态只进
-    不退」条④ K2），不另读事件重算。"""
+    """这一方写成收尾时，_tick_runs 交给报告收尾的是 tick 交还的那一份结果与这个 run 的报告落点，不另读事件重算。"""
     import gherkai_core.reconcile as _cr
     from gherkai_runtime import compose as _compose
 
@@ -1019,7 +1018,7 @@ def test_build_reuses_its_own_handles_and_builds_no_new_client(cloud_env, monkey
     assert built[0].run_id == "run-1"   # META 真读回来了（装配可用，不是「钩子没执行因为整条路都没走」）
 
 
-# ---------- 已收尾的 run 再被触发时 handler 整体 no-op（判定真值销毁的第二道闸，ADR 0030 决定三 / 0034）----------
+# ---------- 已收尾的 run 再被触发时 handler 整体 no-op（判定真值销毁的第二道闸）----------
 
 def _seed_finished_run(cloud_env, *, status=Status.PASSED):
     """造「run 已收尾 + events 表只剩永不过期的退出记录」的形态，即 worker 事件被 TTL 删掉约 7 天后的真实样子，
@@ -1076,8 +1075,7 @@ def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
 
 def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
     """超时到点触发器的 payload 打到一个已收尾的 run（预算点前后运行结束的常态）→ 不处置、不改写
-    （ADR 0034「job timeout」节「到点时 job 已终态 → tick no-op」；这一跳过与 StopTask 的关系及两种例外见 ADR 0034
-    端到端流程 cloud 一节「已收尾的 run 不再推演」条）。"""
+    （ADR 0034「job timeout」节「到点时 job 已终态 → tick no-op」）。"""
     _store, s3 = _seed_finished_run(cloud_env)
     before = _report_bytes(s3)
     out = reconciler.kicker_handler({"run_id": "run-1", "timeout_scope": "a"}, None)

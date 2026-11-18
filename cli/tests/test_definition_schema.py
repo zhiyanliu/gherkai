@@ -1,4 +1,4 @@
-"""definition 结构版本闸门（ADR 0037 决策 7）在 CLI 的接线：status / explain / 本机接力读任何别的东西之前先核结构版本，
+"""definition 结构版本闸门在 CLI 的接线：status / explain / 本机接力读任何别的东西之前先核结构版本，
 不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性。另有缺戳例外的接线：带设备目标或会话预热地址的
 run 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
 from __future__ import annotations
@@ -141,7 +141,7 @@ def test_schema_gate_runs_before_the_state_file_is_parsed(tmp_path, monkeypatch,
 @pytest.mark.parametrize("argv_head", [["status", "--wait"], ["_reconcile"]], ids=["status-wait", "reconcile-entry"])
 def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback(tmp_path, monkeypatch, capsys, argv_head):
     """本机接力宿主读到同版本下形态违约的提交记录（这里真的从 run_meta.json 删掉一个 job 的 target 键）：CLI 读端有退出码可交，
-    以退出码 2 结束并说明，不是裸 traceback，也不像云端推进器那样把 run 标 error（ADR 0037 决策 7）。"""
+    以退出码 2 结束并说明，不是裸 traceback，也不像云端推进器那样把 run 标 error。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
     path = reports / run_id / "run_meta.json"
     d = json.loads(path.read_text(encoding="utf-8"))
@@ -165,7 +165,7 @@ def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback
 @pytest.mark.parametrize("argv_head", [["status"], ["status", "--wait"], ["explain"]], ids=["status", "status-wait", "explain"])
 def test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(tmp_path, monkeypatch, capsys, argv_head):
     """读头阶段的形态违约（结构版本字段不是整数）：三个本机读端都以退出码 2 结束并说明，不是裸异常；运行态不被改动、不写 run 级消息
-    （本机读端有退出码可交，ADR 0037 决策 7）。"""
+    （本机读端有退出码可交）。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
     _rewrite_schema(reports, run_id, True)
     before = (reports / run_id / "run_state.json").read_text(encoding="utf-8")

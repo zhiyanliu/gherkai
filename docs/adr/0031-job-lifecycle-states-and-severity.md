@@ -114,10 +114,10 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
 
 - **结束写**是一次条件写：run 未结束时，把每个未结束的 job 写成终态并各带一句说明，运行态里是 `pending` 的（从未认领，因而没有启动）记 `skipped`，是 `running` 的（已认领而没有结果）记 `aborted`；run 状态按上面的取法随之成为终态，run 级写下结束的原因与结束时刻。判断只看运行态，不读事件。端口上的入口见 [0030](./0030-realtime-persistence-seam.md) 决定四，云端写的条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②。
 - **来路**：各来路的条件写在各自的定义处，写法只此一种。
-  - 执行方自己到期：已过停止启动的时刻、没有执行中的 job，余下的都没有启动（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条）。
+  - 执行方自己到期（条件见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条）。
   - 前台的 fail-fast 与使用方中断：执行中的 job 停下、各自得出结果之后，余下没有启动的（[0026](./0026-schedule-module.md)「失败隔离」、[0024](./0024-worker-core-protocol.md) 终止契约「使用方中断」条）。
   - 处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策六、七）。
-  - 云端后端到期（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九）。
+  - 云端后端到期（怎样结束见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 1 条，含前提）。
   - 以后的取消（条件在取消的设计里定）。
 - **运行定义不可用时**（云端推进器读不到可用的运行定义；本机后台推进进程同样处理），同一种写，但每个未结束的 job 记 `error`：这些 job 不是被中途结束，是没法执行；run 随之为 `error`。读不到的几种原因见 [0037](./0037-distribution-and-packaging.md) 决策 7；云端与本机后台在这种情形下得到同一结果，由 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 实测项的「对照」一组核对。
 - **结束写不写判定明细、不点名**：由结束写结束的 job 没有执行结果，状态与说明只在运行态里（明细与点名见 [0030](./0030-realtime-persistence-seam.md) 决定三）。`explain` 怎样给出这类 job 见 [0042](./0042-step-evidence-and-explain.md) 决策四、决策七，报告怎样显示见 [0027](./0027-runreport-aggregation-index.md)「index.html 形态」。

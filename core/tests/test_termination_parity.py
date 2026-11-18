@@ -218,9 +218,9 @@ def test_sync_and_stateless_paths_feed_finalize_the_same_flags(monkeypatch, row:
     assert seen["sync"][-1] == seen["stateless"][-1], f"\n同步：{seen['sync']}\n无状态：{seen['stateless']}"
 
 
-# 停止后的收尾晚于 grace 加余量（ADR 0034 机制二「停止后继续有界消费完整事件流」条）：Fargate 上从发出停止请求到事件流结束要经过
+# 停止后的收尾晚于 grace 加余量：Fargate 上从发出停止请求到事件流结束要经过
 # 容器停止宽限与 ECS 记下 STOPPED 的滞后，远超运行期 grace。同步路径按组合根注入的停止后等待预算排空，同一组事实与无状态路径的结论仍一致；
-# 排空上界只取 grace 加 5 秒时，同步路径丢掉晚到的收尾，与无状态路径分歧（该条理由段记下的两个后果）。
+# 排空上界只取 grace 加 5 秒时，同步路径丢掉晚到的收尾，与无状态路径分歧。
 
 class _LateStopClock:
     """与 _Clock 相同地越过 deadline；发出停止请求后停在请求时刻加 20 秒：停止后的收尾事件与 EOF 都在这个时刻到达，
@@ -621,7 +621,7 @@ def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path,
 
 
 def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
-    """到期收尾（ADR 0054 决策二第 3 条、实测项 4）：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
+    """到期收尾：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
     同一个 run 级状态与说明、同一组判定（b 不在其中、没有执行），后台的运行态里 b 保持 pending。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore

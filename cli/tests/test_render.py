@@ -169,7 +169,7 @@ def test_index_html_scope_skipped_note_matches_cli_wording():
 
 
 def _deadline_run() -> RunResult:
-    """按运行期限收尾的 run（ADR 0054 决策二）：a 被期限截断（error / timeout）、b 因 fail-fast 记 skipped（有判定）、c 没有启动
+    """按运行期限收尾的 run：a 被期限截断（error / timeout）、b 因 fail-fast 记 skipped（有判定）、c 没有启动
     （运行定义里有、判定清单里没有），run 级 error 加说明。三个 job 按定义次序 c、a、b 写进运行定义，看没有判定的排在哪里。"""
     from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
     from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE

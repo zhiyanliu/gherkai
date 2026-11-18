@@ -655,7 +655,7 @@ def test_on_job_complete_streams_not_batched():
 
 
 def test_on_job_complete_fires_for_skipped_job():
-    # 关键（ADR 0030/0031）：skipped 的 job 从没 event 流过，但仍必须经回调落库
+    # 关键：skipped 的 job 从没 event 流过，但仍必须经回调落库
     # （否则 ResultStore 缺该 scope 的文件、CI 读单 scope 落空）。
     jobs = [_job("crash"), _job("queued")]
     engine = FakeEngine({"crash": _passing_events("crash", "crash:0"),
@@ -717,7 +717,7 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
 
 
 def test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers():
-    """on_event（实时落库）在运行期抛异常时冒泡出 schedule()，类型与对象都不变（ADR 0030 决定七：组合根据此以退出码 1 报运行期
+    """on_event（实时落库）在运行期抛异常时冒泡出 schedule()，类型与对象都不变（组合根据此以退出码 1 报运行期
     落库失败）；它不进「worker 异常」分支，故不给这个 job 产生 engine_error 判定；冒泡前本 worker 与其余运行中的 worker 都收到停止请求。"""
 
     class _StoreDown(Exception):
@@ -1214,7 +1214,7 @@ def test_drain_bound_applies_before_deadline_under_fail_fast():
     assert (v.status, v.error_type) == (Status.ABORTED, None)
 
 
-# ---- 停止后等待预算 stop_bound_s（ADR 0034 机制二「停止后继续有界消费完整事件流」）：排空上界取首次停止请求时刻加等待预算、再加余量 ----
+# ---- 停止后等待预算 stop_bound_s：排空上界取首次停止请求时刻加等待预算、再加余量 ----
 
 class _StopWindowTime(_FakeTime):
     """停止前每次读单调时钟前进 1 ms；发出停止请求后时间停在请求时刻加 window 秒（两个读法都停在那里）。越过截止时刻由 `_JumpSink` 触发。
@@ -1592,7 +1592,7 @@ def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs()
 
 
 def test_device_job_skipped_before_spawn_still_carries_metering_keys():
-    """未启动记 SKIPPED 的设备 job 也成对带计量两键（ADR 0051 决策 7：只按目标判，没有会话记录时为 0.0 与 0），run 级两键随之出现；
+    """未启动记 SKIPPED 的设备 job 也成对带计量两键（只按目标判，没有会话记录时为 0.0 与 0），run 级两键随之出现；
     同一路径上的桌面 job 两键保持 None。"""
     engine = FakeEngine({"crash": _passing_events("crash", "crash:0")}, crash_after={"crash": 0})
     res = schedule(_rm([_job("crash"), _job("dev", device="android"), _job("desk")]), FakeResolver(engine), CollectSink(),
@@ -1931,8 +1931,8 @@ def test_stop_start_boundary_is_strictly_after_deadline_minus_lead(deadline_s, s
 
 
 def test_past_stop_start_starts_nothing_and_the_run_is_an_error_with_a_run_level_message():
-    """一开始就已过停止启动的时刻：不认领、不起 worker、不产出判定（不回调 on_job_complete），RunResult 的 job 清单为空；run 级是 error
-    加「已超过允许运行的时间」（ADR 0054 决策二第 1、3 条）。设备 job 全部没有启动时设备计量两项为 0、不省键。"""
+    """一开始就已过停止启动的时刻（ADR 0054 决策二第 1 条）：不认领、不起 worker、不产出判定（不回调 on_job_complete），RunResult
+    的 job 清单为空；run 级是 error 加「已超过允许运行的时间」。设备 job 全部没有启动时设备计量两项为 0、不省键。"""
     ft = _FakeTime()
     record = _FakeRecord()
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "d": _passing_events("d", "d:0")})

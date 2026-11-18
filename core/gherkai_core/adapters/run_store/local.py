@@ -54,7 +54,7 @@ _LOCK_FILE = ".runstate.lock"
 def _atomic_write_json(path: Path, obj) -> None:
     """控制面文件（run_meta.json / run_state.json）的原子写。
 
-    并发读者真实存在（ADR 0030 决定三/0034）：写入方在文件锁内写 run_state.json 时，`gherkai status` / 接力进程**无锁**读
+    并发读者真实存在（ADR 0030 决定三）：写入方在文件锁内写 run_state.json 时，`gherkai status` / 接力进程**无锁**读
     同一文件（读面不持 `.runstate.lock`，只写面互斥）。原子性的实现与其余两面的读者见 `gherkai_core.adapters._atomic`。
 
     权限收在 0600：控制面只被本机同 uid 的进程消费（`status` / 接力 / 同步 run 自己），无跨用户/跨容器读需求——
@@ -168,8 +168,8 @@ class LocalRunStore:
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
 
-        写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（ADR 0034 机制三「run 级状态只进不退」
-        条③，对拍 DDB 的带条件写与只写 job 的回退）；run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。
+        写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（对拍 DDB 的带条件写与只写 job 的回退）；
+        run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。
         读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。
         返回 run 级在这次写时是否仍未结束：判据取锁内读到的 run 级，与写在同一次读改写里（ADR 0054 决策五）。"""
         open_at_write: list[bool] = []
@@ -298,7 +298,7 @@ class LocalRunStore:
         """HWM 条件写投影：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。只写 HWM、run 级与 jobs，传入的
         started_at、ended_at、message、认领计数不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍）。
 
-        **run 级 status 只写 running、不落终态**（ADR 0030：run 级终态是收尾的 commit point
+        **run 级 status 只写 running、不落终态**（run 级终态是收尾的 commit point
         专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
         （与 ddb adapter 共用一份）：它给出 pending（投影里全 job 仍 pending）时保留库中 run 级，认领或此前投影已写成的
         running 不被拿着旧 baseline 的投影改回 pending。
@@ -317,8 +317,8 @@ class LocalRunStore:
             if new_hwm < cur_hwm:
                 return None  # stale：读到的 events 比库里记录的少 → 挡（机制三①）
             if cur.status not in (Status.PENDING, Status.RUNNING):
-                return None  # 已 finalize 终态：不被投影刷回（机制三 finalize 单调的对偶保护）
-            # 机制三② job 级：逐 job 与库中现态取较推进者（同 rank 取新值——终态间以本次投影为准）
+                return None  # 已 finalize 终态：不被投影刷回
+            # 逐 job 与库中现态取较推进者（同 rank 取新值——终态间以本次投影为准）
             jobs: dict[str, JobState] = dict(cur.jobs)  # 从库中现态出发：投影没带的 job 原样保留
             for sid, js in state.jobs.items():
                 cur_js = cur.jobs.get(sid)
@@ -343,7 +343,7 @@ class LocalRunStore:
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
                      expected_claim_count: int | None = None) -> bool:
-        """状态机单调条件写：仅当当前总 status 为非终态才写终态（机制三，commit 恰一次）。message 随终态同一次写入；
+        """状态机单调条件写：仅当当前总 status 为非终态才写终态（commit 恰一次）。message 随终态同一次写入；
         为 None 时不动库中值（对拍 DDB 不提及该属性）。expected_claim_count 给出时另要求锁内重读到的认领计数等于它，
         为 None 时不判。"""
         def mutate(state: RunState):

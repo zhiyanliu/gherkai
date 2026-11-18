@@ -19,7 +19,7 @@ from test_main import _fake_locator, _fake_schedule_factory, _no_provider
 FEATURE = 'Feature: F\n  Scenario: a\n    When "做事"\n'
 DEVICE_FEATURE = '@device:android\nFeature: F\n  Scenario: a\n    When "做事"\n'
 
-# ADR 0053 决策 3 的三份名单，在测试里显式列出：新增选项必须有意识地归入其中一类（决策 6「键集差集」）
+# 三份名单，在测试里显式列出：新增选项必须有意识地归入其中一类（决策 6「键集差集」）
 PER_CALL = {"--scope", "--tags", "--scenario", "--step", "--json", "--quiet", "--wait", "--all", "--full",
             "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config"}
 COMMON = {"--default-engine", "--assertion-votes", "--max-concurrency", "--default-job-timeout", "--grace", "--expose-local",
@@ -244,7 +244,7 @@ _GRACE_NOTICE = "[common] grace 本次未生效"
     (["status", "r", "--backend", "cloud"], "[common]\ngrace = 300\n", None, False),             # 只在运行与提交两个命令上提示
 ])
 def test_config_grace_only_applies_to_local_backend(tmp_path, monkeypatch, capsys, argv, body, applied, notice):
-    """[common] grace 只对本机后端起作用（ADR 0053 决策 3）：--backend cloud 下配置层跳过、不写进 args，run / submit 上提示一句，
+    """[common] grace 只对本机后端起作用：--backend cloud 下配置层跳过、不写进 args，run / submit 上提示一句，
     不以退出码 2 结束；本机后端照常取文件里的值。"""
     monkeypatch.chdir(tmp_path)
     _toml(tmp_path, body)
@@ -899,7 +899,7 @@ def test_cloud_run_uploads_installer_into_artifacts_bucket(tmp_path, monkeypatch
 
 
 def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch):
-    """ADR 0053 决策 6「宿主不读文件」：提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
+    """提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
     宿主代码结构上也不引用 CLI 的配置模块。"""
     import inspect
     import subprocess
