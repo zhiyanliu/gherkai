@@ -300,8 +300,8 @@
     "semantic_hash": ""
   },
   "CLAUDE.md": {
-    "mtime": 1794800420.4791026,
-    "seen": 1794801066.514285,
+    "mtime": 1794989853.7367659,
+    "seen": 1794994067.4167428,
     "ast_hash": "7f43a933357b1816244527b80ad8d6ee",
     "semantic_hash": ""
   },
@@ -2472,8 +2472,8 @@
     "semantic_hash": ""
   },
   "AGENTS.md": {
-    "mtime": 1794800420.4791026,
-    "seen": 1794801066.5142841,
+    "mtime": 1794989853.7367659,
+    "seen": 1794994067.4167418,
     "ast_hash": "7f43a933357b1816244527b80ad8d6ee",
     "semantic_hash": ""
   },
@@ -3030,9 +3030,21 @@
     "semantic_hash": ""
   },
   "docs/journey/0016-run-ownership-and-status-projection-alignment.md": {
-    "mtime": 1794985386.4903405,
-    "seen": 1794985389.1454878,
-    "ast_hash": "cd88725f588ec98f806ff792a4c063e1",
+    "mtime": 1794994043.5896325,
+    "seen": 1794994067.416787,
+    "ast_hash": "04cbd7e7a402d05361bccb4befe499ec",
+    "semantic_hash": ""
+  },
+  "docs/journey/0017-run-ownership-design-draft.md": {
+    "mtime": 1794994043.539442,
+    "seen": 1794994067.4167879,
+    "ast_hash": "7583c5059c4c5ca7c4105323e05f18d8",
+    "semantic_hash": ""
+  },
+  "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
+    "mtime": 1794994043.540037,
+    "seen": 1794994067.416789,
+    "ast_hash": "19841826db2b84ff8d7c57fbd94216f0",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
