@@ -2,6 +2,9 @@
 
 用内存假 Engine（不起子进程）+ 假时间（不真等），验证 schedule 逻辑。job 的截止时刻按墙钟比较、排空与时长按单调时钟计，测超时的用例
 用 `_FakeTime` 同时注入两者，在确定的时点推进时间（事件触发、钩子或每读前进），不数时钟被读了几次。
+
+schedule 返回执行事实（`Execution`：判出结果的 job、余下的 job 不再启动的来源、墙钟时长），不给 run 的状态。断言 run 级状态、说明、
+合计与没有启动的 job 记成什么的用例经 `_summary`：没有记录的执行按同一套规则在内存里给出的 run 结果（`run --no-report` 同一条路径）。
 """
 from __future__ import annotations
 
@@ -29,7 +32,10 @@ from gherkai_core.model import (
     Target,
     Votes,
 )
-from gherkai_core.schedule import ScheduleOpts, schedule
+from gherkai_core.model import RunResult
+from gherkai_core.persist import result_without_record
+from gherkai_core.run_status import RUN_ENDINGS
+from gherkai_core.schedule import Execution, ScheduleOpts, schedule
 from tests.fake_engine import FAR_DEADLINE, CollectSink, FakeEngine, FakeResolver
 
 
@@ -46,6 +52,16 @@ class _IncClock:
 
 
 _T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)  # 假墙钟的零点（远早于 FAR_DEADLINE）
+
+
+def _summary(ex: Execution) -> RunResult:
+    """没有记录的执行在内存里按同一套规则给出的 run 结果：判出结果的 job 记终态，余下的 job 按 ex.stopped_by 这条来路的结束写结束。"""
+    return result_without_record(ex, ended_at=_T0.isoformat())
+
+
+def _outcome(ex: Execution, scope_id: str):
+    """run 结果里某个 job 的那一项（状态取运行态，有判定明细的另带明细）。"""
+    return next(o for o in _summary(ex).jobs if o.scope_id == scope_id)
 
 
 class _FakeTime:
@@ -138,9 +154,9 @@ def test_all_pass():
     })
     sink = CollectSink()
     result = schedule(_rm(jobs), FakeResolver(engine), sink)
-    assert result.status == Status.PASSED
-    assert len(result.jobs) == 2
-    assert all(jr.status == Status.PASSED for jr in result.jobs)
+    assert _summary(result).status == Status.PASSED
+    assert len(result.results) == 2
+    assert all(jr.status == Status.PASSED for jr in result.results)
     # sink 收到所有事件（2 job × 4 事件，含 scope_done）
     assert len(sink.events) == 8
 
@@ -150,9 +166,9 @@ def test_assertion_failed_is_failed_not_error():
     jobs = [_job("a")]
     engine = FakeEngine({"a": _failing_events("a", "a:0")})
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink())
-    assert result.status == Status.FAILED
-    assert result.jobs[0].status == Status.FAILED
-    assert result.jobs[0].scenarios[0].status == Status.FAILED
+    assert _summary(result).status == Status.FAILED
+    assert result.results[0].status == Status.FAILED
+    assert result.results[0].scenarios[0].status == Status.FAILED
 
 
 # ---- 失败隔离（默认）：一个 job 崩(error)，其余照常运行 ----
@@ -167,12 +183,12 @@ def test_failure_isolation_default():
     )
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink())
     # 默认隔离：crash → error，ok 照样 passed
-    crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
-    ok_jr = next(jr for jr in result.jobs if jr.scope_id == "ok")
+    crash_jr = next(jr for jr in result.results if jr.scope_id == "crash")
+    ok_jr = next(jr for jr in result.results if jr.scope_id == "ok")
     assert crash_jr.status == Status.ERROR
     assert crash_jr.error_type == "engine_error"
     assert ok_jr.status == Status.PASSED  # 未受牵连
-    assert result.status == Status.ERROR  # 总状态：有 error
+    assert _summary(result).status == Status.ERROR  # 总状态：有 error
 
 
 # ---- fail-fast：一个 job 崩 → run 判 ERROR（中止生效）----
@@ -200,16 +216,17 @@ def test_fail_fast_batch_errors():
         _rm(jobs), FakeResolver(engine), CollectSink(),
         opts=ScheduleOpts(max_concurrency=2, fail_fast=True),
     )
-    assert result.status == Status.ERROR  # 确定性：run 判错
-    crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
+    assert _summary(result).status == Status.ERROR  # 确定性：run 判错
+    crash_jr = next(jr for jr in result.results if jr.scope_id == "crash")
     assert crash_jr.status == Status.ERROR
-    # 被牵连的 slow：协作式中止下结局依时序（已完成 passed / 运行到一半 aborted / 排队没起 skipped 都合法），
+    # 被牵连的 slow：协作式中止下结局依时序（已完成 passed / 运行到一半 aborted / 排队没起、由结束写记 skipped 都合法），
     # 但**绝不该是 error**——被牵连中止不是自身故障（ADR 0031；精确的 skipped/aborted 复现见 test_lifecycle_states）。
     # 注：PASSED 只在「见到 scope_done（真正完成）」时可达——运行到一半被掐、流 EOF 无 scope_done 必 ABORTED
     # （内容完整前置，0026），此断言不再可能掩盖「部分完成聚合成 PASSED」的假绿。
-    slow_jr = next(jr for jr in result.jobs if jr.scope_id == "slow")
-    assert slow_jr.status in (Status.PASSED, Status.ABORTED, Status.SKIPPED)
-    assert slow_jr.status != Status.ERROR
+    slow = _outcome(result, "slow")
+    assert slow.status in (Status.PASSED, Status.ABORTED, Status.SKIPPED)
+    if slow.detail is None:  # 没有启动：不在执行事实里，来路是 fail-fast
+        assert slow.status == Status.SKIPPED and result.stopped_by == "fail-fast"
 
 
 # ---- fail-fast 关闭（默认隔离）对照：crash 崩但 slow 运行结束 → ERROR 但 slow passed ----
@@ -223,7 +240,7 @@ def test_no_fail_fast_lets_others_finish():
         crash_after={"crash": 0},
     )
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(fail_fast=False))
-    ok_jr = next(jr for jr in result.jobs if jr.scope_id == "ok")
+    ok_jr = next(jr for jr in result.results if jr.scope_id == "ok")
     assert ok_jr.status == Status.PASSED  # 隔离：ok 运行结束
 
 
@@ -244,9 +261,9 @@ def test_timeout_with_fake_clock():
         _rm(jobs), FakeResolver(engine), CollectSink(),
         opts=ft.opts(grace_period_s=2.0),
     )
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "timeout"
-    assert result.jobs[0].message == "job 超时（预算 5s，已中止）"  # 被自己的预算截断：原有的超时说明
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "timeout"
+    assert result.results[0].message == "job 超时（预算 5s，已中止）"  # 被自己的预算截断：原有的超时说明
     # 超时后 stop 被调，且传了 grace_period
     assert engine.handles["slow"].stopped
     assert engine.handles["slow"].stop_grace == 2.0
@@ -268,8 +285,8 @@ def test_engine_start_failure():
 
     jobs = [_job("a", engine="boom_engine"), _job("b", engine="good")]
     result = schedule(_rm(jobs), resolver, CollectSink())
-    a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
-    b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
+    a_jr = next(jr for jr in result.results if jr.scope_id == "a")
+    b_jr = next(jr for jr in result.results if jr.scope_id == "b")
     assert a_jr.status == Status.ERROR
     assert "起 worker 失败" in a_jr.message
     assert b_jr.status == Status.PASSED  # 隔离：b 不受 a 影响
@@ -284,7 +301,7 @@ def test_output_order_stable():
         "m": _passing_events("m", "m:0"),
     })
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink())
-    assert [jr.scope_id for jr in result.jobs] == ["z", "a", "m"]
+    assert [jr.scope_id for jr in result.results] == ["z", "a", "m"]
 
 
 # ---- cost 归约：core 只各自合计 engine 报的原生量（tokens / time_worked_s），不算美元 ----
@@ -319,33 +336,33 @@ def test_time_worked_aggregation_step_to_job_to_run():
         "b": _events_with_time("b:0", [5.0]),         # scope b 合计 5.0s
     })
     result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink())
-    a_jr = next(jr for jr in result.jobs if jr.scope_id == "a")
-    b_jr = next(jr for jr in result.jobs if jr.scope_id == "b")
+    a_jr = next(jr for jr in result.results if jr.scope_id == "a")
+    b_jr = next(jr for jr in result.results if jr.scope_id == "b")
     assert abs(a_jr.total_time_worked_s - 12.0) < 1e-9
     assert abs(b_jr.total_time_worked_s - 5.0) < 1e-9
-    assert abs(result.total_time_worked_s - 17.0) < 1e-9  # run 级跨 scope 合计
-    assert result.total_tokens is None  # Nova 引擎不报 token
+    assert abs(_summary(result).total_time_worked_s - 17.0) < 1e-9  # run 级跨 scope 合计
+    assert _summary(result).total_tokens is None  # Nova 引擎不报 token
 
 
 def test_token_aggregation():
     # Midscene 形态：tokens 累加
     engine = FakeEngine({"m": _events_with_tokens("m:0", [1000, 500])})
     result = schedule(_rm([_job("m")]), FakeResolver(engine), CollectSink())
-    m_jr = result.jobs[0]
+    m_jr = result.results[0]
     assert m_jr.total_tokens == 1500
     assert m_jr.total_time_worked_s is None  # Midscene 不报时长
-    assert result.total_tokens == 1500
-    assert result.total_time_worked_s is None
+    assert _summary(result).total_tokens == 1500
+    assert _summary(result).total_time_worked_s is None
 
 
 def test_cost_none_when_no_cost_data():
     # 无 cost 的事件流 → 两个原生量合计都保持 None（不假装 0）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())
-    assert result.jobs[0].total_tokens is None
-    assert result.jobs[0].total_time_worked_s is None
-    assert result.total_tokens is None
-    assert result.total_time_worked_s is None
+    assert result.results[0].total_tokens is None
+    assert result.results[0].total_time_worked_s is None
+    assert _summary(result).total_tokens is None
+    assert _summary(result).total_time_worked_s is None
 
 
 def test_mixed_legs_each_native_metric_aggregated_separately():
@@ -355,13 +372,13 @@ def test_mixed_legs_each_native_metric_aggregated_separately():
         "mid": _events_with_tokens("mid:0", [2000]),
     })
     result = schedule(_rm([_job("nova"), _job("mid")]), FakeResolver(engine), CollectSink())
-    nova_jr = next(jr for jr in result.jobs if jr.scope_id == "nova")
-    mid_jr = next(jr for jr in result.jobs if jr.scope_id == "mid")
+    nova_jr = next(jr for jr in result.results if jr.scope_id == "nova")
+    mid_jr = next(jr for jr in result.results if jr.scope_id == "mid")
     assert abs(nova_jr.total_time_worked_s - 9.0) < 1e-9 and nova_jr.total_tokens is None
     assert mid_jr.total_tokens == 2000 and mid_jr.total_time_worked_s is None
     # run 级：两个原生量各自合计，都不被静默漏掉
-    assert abs(result.total_time_worked_s - 9.0) < 1e-9
-    assert result.total_tokens == 2000
+    assert abs(_summary(result).total_time_worked_s - 9.0) < 1e-9
+    assert _summary(result).total_tokens == 2000
 
 
 def test_failed_and_error_steps_cost_still_aggregated():
@@ -378,10 +395,10 @@ def test_failed_and_error_steps_cost_still_aggregated():
     ]
     engine = FakeEngine({"x": events})
     result = schedule(_rm([_job("x")]), FakeResolver(engine), CollectSink())
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert jr.status == Status.ERROR        # 状态如实反映失败
     assert jr.total_tokens == 2000          # 但失败步消耗的 token 仍计入（1200+800）
-    assert result.total_tokens == 2000
+    assert _summary(result).total_tokens == 2000
 
 
 # ---- 并发上限：max_concurrency=1 → 串行，仍全部运行完成 ----
@@ -389,8 +406,8 @@ def test_serial_concurrency_one():
     jobs = [_job(f"j{i}") for i in range(5)]
     engine = FakeEngine({f"j{i}": _passing_events(f"j{i}", f"j{i}:0") for i in range(5)})
     result = schedule(_rm(jobs), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
-    assert result.status == Status.PASSED
-    assert len(result.jobs) == 5
+    assert _summary(result).status == Status.PASSED
+    assert len(result.results) == 5
 
 
 # ---- 三级执行时长：core 基于 started/done 事件到达时间戳算（ADR 0024）----
@@ -413,7 +430,7 @@ def test_three_level_durations():
         _rm([_job("sc")]), FakeResolver(engine), CollectSink(),
         opts=ScheduleOpts(clock=_IncClock(1.0)),  # 单位秒；core 乘 1000 → ms
     )
-    jr = result.jobs[0]
+    jr = result.results[0]
     sr = jr.scenarios[0]
     # 每个 step 有时长，且 > 0
     assert len(sr.steps) == 2
@@ -432,7 +449,7 @@ def test_durations_none_without_started_events():
     # 旧式事件流（无 started 事件）→ 时长字段为 None（不报错、不假装）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})  # 无 ScopeStarted/StepStarted
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(clock=_IncClock()))
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert jr.duration_ms is None                      # 无 scope_started
     assert jr.scenarios[0].steps == [] or all(
         s.duration_ms is None for s in jr.scenarios[0].steps
@@ -450,7 +467,7 @@ def test_scope_report_refs_reduced():
     ]
     engine = FakeEngine({"m": events})
     result = schedule(_rm([_job("m")]), FakeResolver(engine), CollectSink())
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert len(jr.report_refs) == 1
     assert jr.report_refs[0].kind == "report"
     assert jr.report_refs[0].ref == "file:///midscene_run/report/x.html"
@@ -470,11 +487,11 @@ def test_step_report_refs_reduced():
     ]
     engine = FakeEngine({"n": events})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    steps = result.jobs[0].scenarios[0].steps
+    steps = result.results[0].scenarios[0].steps
     # step 0 挂两个 trajectory、原样搬入不聚合到 scenario 级
     assert len(steps[0].report_refs) == 2 and steps[0].report_refs[0].kind == "trajectory"
     assert steps[1].report_refs == ()  # 无产物步为空
-    assert result.jobs[0].scenarios[0].report_refs == ()  # 不再聚合到 scenario 级
+    assert result.results[0].scenarios[0].report_refs == ()  # 不再聚合到 scenario 级
 
 
 # ---- scope 内短路：StepSkipped 归约进 StepResult(SKIPPED, shortcircuited=True)（ADR 0031 决定六）----
@@ -492,7 +509,7 @@ def test_step_skipped_reduced_to_skipped_shortcircuited():
     ]
     engine = FakeEngine({"n": events})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    steps = result.jobs[0].scenarios[0].steps
+    steps = result.results[0].scenarios[0].steps
     assert len(steps) == 3
     # step 0：实际执行产生的 error
     assert steps[0].status == Status.ERROR and steps[0].shortcircuited is False
@@ -516,9 +533,9 @@ def test_step_skipped_does_not_pollute_scenario_or_run_status():
     ]
     engine = FakeEngine({"n": events})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    assert result.jobs[0].scenarios[0].status == Status.ERROR  # scenario 判定是 error（未被 skipped 影响）
-    assert result.jobs[0].status == Status.ERROR               # job 判定是 error
-    assert result.status == Status.ERROR                        # run 判定是 error
+    assert result.results[0].scenarios[0].status == Status.ERROR  # scenario 判定是 error（未被 skipped 影响）
+    assert result.results[0].status == Status.ERROR               # job 判定是 error
+    assert _summary(result).status == Status.ERROR                        # run 判定是 error
 
 
 def test_step_skipped_without_scenario_done_still_recorded():
@@ -535,7 +552,7 @@ def test_step_skipped_without_scenario_done_still_recorded():
     ]
     engine = FakeEngine({"n": events})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    steps = result.jobs[0].scenarios[0].steps
+    steps = result.results[0].scenarios[0].steps
     assert [s.status for s in steps] == [Status.ERROR, Status.SKIPPED]
     assert steps[1].shortcircuited is True
 
@@ -554,7 +571,7 @@ def test_network_error_retried_then_succeeds():
     )
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
     assert engine.run_count["n"] == 3  # 起了 3 次 worker（2 次重试）
 
 
@@ -563,8 +580,8 @@ def test_network_error_exhausted_is_network_error():
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "network_error"
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "network_error"
     assert engine.run_count["n"] == 3  # network_retry=2 → 总 3 次
 
 
@@ -578,8 +595,8 @@ def test_network_error_not_retried_when_session_started():
     engine = FakeEngine({"n": events}, network_crash_after={"n": 2})  # 第2个事件后崩（已过 step_done）
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "network_error"
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "network_error"
     assert engine.run_count["n"] == 1  # 会话已起 → 不重试，只运行 1 次
 
 
@@ -587,8 +604,8 @@ def test_network_retry_default_off():
     # 默认 network_retry=0 → 网络崩不重试，记 network_error
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": 0})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink())
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "network_error"
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "network_error"
     assert engine.run_count["n"] == 1  # 默认不重试
 
 
@@ -597,8 +614,8 @@ def test_non_network_crash_not_retried():
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, crash_after={"n": 0})
     result = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(network_retry=2, retry_sleep=_NOSLEEP))
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "engine_error"
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "engine_error"
     assert engine.run_count["n"] == 1  # engine_error 不重试
 
 
@@ -611,7 +628,7 @@ def test_network_retry_deadline_not_reset_across_attempts():
     result = schedule(_rm([_job("n", timeout_s=2.5)]), FakeResolver(engine), CollectSink(),
                       opts=ft.opts(network_retry=5, retry_sleep=ft.jump))
     # 截止时刻跨 attempt 共享：几次 attempt 后墙钟超 2s → 转 timeout，不会用满 network_retry=5
-    assert (result.status, result.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert (_summary(result).status, result.results[0].error_type) == (Status.ERROR, "timeout")
     assert engine.run_count["n"] == 3  # 没用满 5 次重试（被共享的截止时刻截断）
 
 
@@ -633,7 +650,7 @@ def test_on_job_complete_default_none_is_noop():
     # 不传回调（默认 None）：行为与从前完全一致（无回调路径，保纯 reducer）
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())  # 不传 on_job_complete
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
 
 
 def test_on_job_complete_streams_not_batched():
@@ -654,20 +671,22 @@ def test_on_job_complete_streams_not_batched():
     assert len(order) == 2
 
 
-def test_on_job_complete_fires_for_skipped_job():
-    # 关键：skipped 的 job 从没 event 流过，但仍必须经回调落库
-    # （否则 ResultStore 缺该 scope 的文件、CI 读单 scope 落空）。
+def test_on_job_complete_is_not_fired_for_a_job_that_never_started():
+    # 没有启动的 job 没有执行结果：不回调、不存明细，执行事实里也没有它；余下的 job 不再启动的来源随执行事实交出，由收尾的结束写把它
+    # 记 skipped（ADR 0031 决定三「结束写」小节；ADR 0030 决定三）。
     jobs = [_job("crash"), _job("queued")]
     engine = FakeEngine({"crash": _passing_events("crash", "crash:0"),
                          "queued": _passing_events("queued", "queued:0")},
                         crash_after={"crash": 0})
     seen: dict[str, Status] = {}
-    schedule(_rm(jobs), FakeResolver(engine), CollectSink(),
-             opts=ScheduleOpts(max_concurrency=1, fail_fast=True),
-             on_job_complete=lambda jr: seen.__setitem__(jr.scope_id, jr.status))
-    # 两个 job 都回调了——含从未 spawn 的 skipped job
-    assert seen.get("crash") == Status.ERROR
-    assert seen.get("queued") == Status.SKIPPED
+    ex = schedule(_rm(jobs), FakeResolver(engine), CollectSink(),
+                  opts=ScheduleOpts(max_concurrency=1, fail_fast=True),
+                  on_job_complete=lambda jr: seen.__setitem__(jr.scope_id, jr.status))
+    assert seen == {"crash": Status.ERROR}
+    assert [jr.scope_id for jr in ex.results] == ["crash"] and ex.stopped_by == "fail-fast"
+    queued = _outcome(ex, "queued")
+    assert (queued.status, queued.state.message, queued.detail) == (
+        Status.SKIPPED, RUN_ENDINGS["fail-fast"].skipped_message, None)
 
 
 def test_on_job_complete_exception_propagates_not_swallowed():
@@ -777,14 +796,14 @@ def test_grace_at_or_above_min_grace_ok():
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(grace_period_s=180.0, min_grace_s=180.0))
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
 
 
 def test_default_opts_no_min_grace_backcompat():
     # 默认 min_grace_s=0.0 → 不破直接构造 ScheduleOpts 的调用方（默认 grace 5.0 > 0 且 ≥ 0，放行）。
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     result = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink())
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
 
 
 # ---- 内容完整前置（ADR 0024/0026）：EOF 无 scope_done 不落归约终态,按来源分流 ----
@@ -803,10 +822,10 @@ def test_partial_completion_without_scope_done_not_passed():
     ]
     engine = FakeEngine({"p": partial})
     result = schedule(_rm([_job("p")]), FakeResolver(engine), CollectSink())
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert jr.status == Status.ERROR
     assert jr.error_type == "engine_error"
-    assert result.status == Status.ERROR
+    assert _summary(result).status == Status.ERROR
 
 
 def test_abort_then_clean_eof_is_aborted_not_passed():
@@ -843,7 +862,7 @@ def test_abort_then_clean_eof_is_aborted_not_passed():
     sink = CollectSink()
     result = schedule(_rm([_job("c"), _job("v")]), FakeResolver(engine), sink,
                       opts=ScheduleOpts(max_concurrency=2, fail_fast=True))
-    v_jr = next(jr for jr in result.jobs if jr.scope_id == "v")
+    v_jr = next(jr for jr in result.results if jr.scope_id == "v")
     # victim 结局依时序：真正完成（见 scope_done）→ PASSED 合法；被掐（EOF 无 scope_done）→ ABORTED。
     # 关键断言：绝不 ERROR（被牵连非自身故障）；PASSED 当且仅当 sink 真收到 v 的 scope_done（内容完整）。
     assert v_jr.status in (Status.PASSED, Status.ABORTED)
@@ -866,7 +885,7 @@ def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
     ft = _FakeTime()
     res = schedule(_rm([_job(scope, timeout_s=5.0, device="android")]), FakeResolver(engine), _JumpSink(ft, ScenarioStarted),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout")
     assert [s.release for s in jr.sessions] == ["confirmed"] and (jr.device_observed_s, jr.device_observed_missing) == (3.0, 0)
     assert "未能确认停止" not in (jr.message or "")
@@ -875,7 +894,7 @@ def test_tail_events_after_stop_are_still_reduced_and_release_confirmed():
 
 def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
     """首次仲裁：那一刻 deadline 已过就取 timeout，即使 abort_flag 也已置位——事件分支、WorkerExitError 分支、EOF 分支都一样；
-    deadline 未过时同样的置位则判 abort（ABORTED）。abort_flag 在 worker 已 spawn、首事件之前置位（起 worker 前置位会得 SKIPPED）。"""
+    deadline 未过时同样的置位则判 abort（ABORTED）。abort_flag 在 worker 已 spawn、首事件之前置位（起 worker 前置位则不启动）。"""
     import gherkai_core.schedule as sch
     from gherkai_core.errors import WorkerExitError
 
@@ -901,7 +920,7 @@ def test_timeout_wins_over_abort_when_deadline_already_passed_on_every_branch():
                            opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
         finally:
             sch._Worker.__init__ = orig
-        return res.jobs[0]
+        return res.results[0]
 
     def events(job):  # 事件分支：首事件到达时检查（内容不完整——没有 scope_done）
         return iter([ScopeStarted(scope_id="s"), ScenarioStarted(scenario_id="s:0")])
@@ -934,7 +953,7 @@ def test_drain_bound_ends_consumption_when_worker_hangs_after_stop():
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeStarted),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     assert time.monotonic() - t0 < 3.0  # 不等真实的 6 秒、也不永远等
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and engine.handles[scope].stopped
 
 
@@ -946,7 +965,7 @@ def test_deadline_after_scope_done_hurries_exit_but_keeps_verdict():
     engine = FakeEngine({scope: events}, tail_after_stop={scope: []})  # 发完事件后活着等停（模拟释放阶段拖过预算）
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeDone),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.PASSED, None) and engine.handles[scope].stopped
 
 
@@ -955,8 +974,8 @@ def test_fail_fast_does_not_preempt_network_retry():
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")}, network_crash_after={"a": [0]})
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, fail_fast=True, network_retry=1, retry_sleep=lambda s: None))
-    assert engine.run_count["a"] == 2 and res.status == Status.PASSED
-    assert [jr.status for jr in res.jobs] == [Status.PASSED, Status.PASSED]
+    assert engine.run_count["a"] == 2 and _summary(res).status == Status.PASSED
+    assert [jr.status for jr in res.results] == [Status.PASSED, Status.PASSED]
 
 
 def test_fail_fast_stops_running_workers_from_main_thread_without_heartbeat():
@@ -983,7 +1002,7 @@ def test_fail_fast_stops_running_workers_from_main_thread_without_heartbeat():
         res = schedule(_rm([_job(scope, timeout_s=timeout_s), _job("c")]), FakeResolver(engine), CollectSink(),
                        opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0))
         assert time.monotonic() - t0 < crash_delay_s + 3.0  # 没等到 FakeEngine 的 5 秒等停超时：停止请求由主线程当场发出
-        return next(jr for jr in res.jobs if jr.scope_id == scope)
+        return next(jr for jr in res.results if jr.scope_id == scope)
 
     jr = run("v", timeout_s=7200.0, crash_delay_s=0.0)
     assert (jr.status, jr.error_type) == (Status.ABORTED, None)
@@ -1012,7 +1031,7 @@ def test_abort_decided_before_deadline_stays_aborted_when_deadline_passes_during
                         on_event=on_event, tail_after_stop={"v": tail}, tail_delay_s=0.6)
     res = schedule(_rm([_job("v", timeout_s=0.3), _job("c")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    v = next(jr for jr in res.results if jr.scope_id == "v")
     assert (v.status, v.error_type) == (Status.ABORTED, None)
     assert [s.release for s in v.sessions] == ["confirmed"] and "未能确认停止" not in (v.message or "")
 
@@ -1039,7 +1058,7 @@ def test_attempted_session_without_arn_plus_abort_stays_aborted_and_lists_the_at
                         on_event=on_event, tail_after_stop={"v": tail}, tail_delay_s=0.6)
     res = schedule(_rm([_job("v", timeout_s=5.0, device="android"), _job("c")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    v = next(jr for jr in res.results if jr.scope_id == "v")
     assert (v.status, v.error_type) == (Status.ABORTED, None)
     assert v.session_id is None
     assert [(x.origin, x.release, x.session_id) for x in v.sessions] == [("attempted", "unconfirmed", None)]
@@ -1052,7 +1071,7 @@ def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_fin
     消息保留「起 worker 失败」，已过 deadline 的按首次仲裁记 timeout。"""
     engine = FakeEngine({"x": [ScopeStarted(scope_id="x"), ScenarioStarted(scenario_id="x:0")]}, crash_after={"x": 1})
     res = schedule(_rm([_job("x")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and jr.message.startswith("worker 异常：")
     assert engine.handles["x"].stopped
 
@@ -1061,7 +1080,7 @@ def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_fin
             raise OSError("spawn 失败")
 
     res = schedule(_rm([_job("y")]), FakeResolver(Boom()), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
-    assert (res.jobs[0].status, res.jobs[0].error_type, res.jobs[0].message) == (Status.ERROR, "engine_error", "起 worker 失败：spawn 失败")
+    assert (res.results[0].status, res.results[0].error_type, res.results[0].message) == (Status.ERROR, "engine_error", "起 worker 失败：spawn 失败")
 
     ft = _FakeTime()
 
@@ -1071,7 +1090,7 @@ def test_generic_exception_still_stops_worker_and_spawn_failure_goes_through_fin
             raise OSError("spawn 失败")
 
     res = schedule(_rm([_job("z", timeout_s=1.0)]), FakeResolver(SlowBoom()), CollectSink(), opts=ft.opts(max_concurrency=1))
-    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert (res.results[0].status, res.results[0].error_type) == (Status.ERROR, "timeout")
 
 
 def test_stop_all_decides_for_every_worker_before_any_blocking_stop():
@@ -1096,7 +1115,7 @@ def test_stop_all_decides_for_every_worker_before_any_blocking_stop():
                         on_stop=lambda scope: scope.startswith("v") and clock.jump(1000.0))
     res = schedule(_rm([_job("v1", timeout_s=50.0), _job("v2", timeout_s=50.0), _job("c")]), FakeResolver(engine), CollectSink(),
                    opts=clock.opts(max_concurrency=3, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0))
-    by = {jr.scope_id: (jr.status, jr.error_type) for jr in res.jobs}
+    by = {jr.scope_id: (jr.status, jr.error_type) for jr in res.results}
     assert by["v1"] == (Status.ABORTED, None) and by["v2"] == (Status.ABORTED, None), by
 
 
@@ -1123,7 +1142,7 @@ def test_generic_exception_arbitrates_before_blocking_stop():
                        opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ABORTED, None) and engine.handles["x"].stopped
 
 
@@ -1136,11 +1155,11 @@ def test_hang_after_hurry_exit_is_timeout_like_stateless_path():
     engine = FakeEngine({scope: events}, hang_after_stop={scope}, on_stop=lambda _s: setattr(ft, "step", 1.0))
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeDone),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert (res.results[0].status, res.results[0].error_type) == (Status.ERROR, "timeout")
 
 
-def test_fail_fast_during_retry_backoff_keeps_network_error_not_skipped():
-    """退避期间 run 被 fail-fast 中止：不再重试，但已经运行过一次的 job 保留上次的 network_error 判定（不记成「未启动」的 SKIPPED）。"""
+def test_fail_fast_during_retry_backoff_keeps_the_network_error_of_the_attempt_that_ran():
+    """退避期间 run 被 fail-fast 中止：不再重试，但已经运行过一次的 job 保留上次的 network_error 判定（不当作没有启动）。"""
     import gherkai_core.schedule as sch
 
     captured = {}
@@ -1157,7 +1176,7 @@ def test_fail_fast_during_retry_backoff_keeps_network_error_not_skipped():
                        opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: captured["w"].abort_flag.set()))
     finally:
         sch._Worker.__init__ = orig
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert engine.run_count["a"] == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
     assert "未再重试" in jr.message
 
@@ -1178,7 +1197,7 @@ def test_drain_bound_counts_from_stop_request_not_after_blocking_stop():
     engine = FakeEngine({scope: [ScopeStarted(scope_id=scope), ScenarioStarted(scenario_id="h:0")]}, hang_after_stop={scope}, on_stop=on_stop)
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScopeStarted),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
-    assert (res.jobs[0].status, res.jobs[0].error_type) == (Status.ERROR, "timeout")
+    assert (res.results[0].status, res.results[0].error_type) == (Status.ERROR, "timeout")
     assert ft.n - n_at_stop[0] <= 4, ft.n - n_at_stop[0]
 
 
@@ -1211,7 +1230,7 @@ def test_drain_bound_applies_before_deadline_under_fail_fast():
     res = schedule(_rm([_job("v"), _job("c")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.05, grace_period_s=1.0, clock=clock))
     assert time.monotonic() - t0 < 3.0
-    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    v = next(jr for jr in res.results if jr.scope_id == "v")
     assert (v.status, v.error_type) == (Status.ABORTED, None)
 
 
@@ -1252,7 +1271,7 @@ def test_grace_sets_drain_window_for_eof_after_hurry_exit(grace, eof_in_bound):
                         on_stop=clock.on_stop)  # 发完事件后活着等停，收到停止请求后过一会儿才 EOF
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScopeDone),
                    opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert engine.handles[scope].stopped and clock.frozen is not None  # 确实走了催收尾、时钟停在请求后 20 秒
     expected = (Status.PASSED, None) if eof_in_bound else (Status.ERROR, "timeout")
     assert (jr.status, jr.error_type) == expected
@@ -1275,7 +1294,7 @@ def test_grace_lets_late_session_closed_be_reduced(grace, closed_in_bound):
     engine = FakeEngine({scope: events}, tail_after_stop={scope: tail}, tail_delay_s=0.2, on_stop=clock.on_stop)
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScenarioStarted),
                    opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
     if closed_in_bound:
         assert [s.release for s in jr.sessions] == ["confirmed"]
@@ -1320,7 +1339,7 @@ def test_re_arbitration_after_worker_exit_sends_no_stop(monkeypatch, trigger, ex
     # 关掉心跳：零事件的事件流直接结束，循环里的事件间检查一次也不执行，停止原因只能由终结前的回判落定
     res = schedule(_rm([_job("s", timeout_s=1.0)]), FakeResolver(engine), CollectSink(),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0, grace_period_s=1.0))
-    jr = res.jobs[0]
+    jr = res.results[0]
     expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
     assert (jr.status, jr.error_type) == expected
     assert not engine.handles["s"].stopped
@@ -1334,7 +1353,7 @@ def test_exit_code_after_stop_request_is_not_followed_by_another_stop():
                         tail_after_stop={scope: []}, exit_code={scope: 1}, on_stop=clock.on_stop)
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScenarioStarted),
                    opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
     assert len(engine.handles[scope].stop_graces) == 1
 
@@ -1384,7 +1403,7 @@ def test_non_clean_exit_after_complete_content_is_re_arbitrated(exit_kind, trigg
                        opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
-    jr = res.jobs[0]
+    jr = res.results[0]
     expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
     assert (jr.status, jr.error_type) == expected, jr.message
 
@@ -1431,7 +1450,7 @@ def test_synthesized_details_survive_sync_path_timeout_and_abort(trigger):
                        opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.05, grace_period_s=1.0))
     finally:
         sch._Worker.__init__ = orig
-    jr = res.jobs[0]
+    jr = res.results[0]
     expected = (Status.ERROR, "timeout") if trigger == "deadline" else (Status.ABORTED, None)
     assert (jr.status, jr.error_type) == expected, jr.message
     assert [sr.status for sr in jr.scenarios] == [Status.SKIPPED, Status.SKIPPED]
@@ -1471,7 +1490,7 @@ def test_fail_fast_between_check_and_spawn_on_retry_aborts_the_attempt():
     finally:
         sch._Worker.__init__ = orig
     elapsed = time.monotonic() - t0
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert engine.run_count["a"] == 2 and (jr.status, jr.error_type) == (Status.ABORTED, None), (jr.status, jr.error_type, jr.message)
     assert engine.handles["a"].stopped
     # 新 handle 是被 spawn 之后的停止请求停下的：假 worker 没收到停止请求会等满 5 秒才自然 EOF（之后收尾的幂等停也会把 stopped 置位），
@@ -1485,7 +1504,7 @@ def test_device_job_network_error_is_not_retried():
         engine = FakeEngine({"a": _passing_events("a", "a:0")}, network_crash_after={"a": [0]})
         res = schedule(_rm([_job("a", device=device)]), FakeResolver(engine), CollectSink(),
                        opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: None))
-        return engine.run_count["a"], res.jobs[0]
+        return engine.run_count["a"], res.results[0]
 
     n, jr = run("desktop")
     assert n == 2 and jr.status == Status.PASSED
@@ -1511,7 +1530,7 @@ def test_desktop_network_error_retry_follows_session_release():
         engine = FakeEngine({"a": lambda job: iter(next(attempts))}, network_crash_after={"a": [2]})
         res = schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(),
                        opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=lambda s: None))
-        return engine.run_count["a"], res.jobs[0]
+        return engine.run_count["a"], res.results[0]
 
     n, jr = run("confirmed")
     assert n == 2 and (jr.status, jr.error_type) == (Status.PASSED, None) and jr.session_id == "s-2"
@@ -1525,7 +1544,7 @@ def test_sigkill_negative_exit_code_is_error_not_clean():
     """被信号强杀（负退出码）不再按干净退出处理（ADR 0034 机制二）：零事件、exit -9 → ERROR engine_error，消息带退出码。"""
     engine = FakeEngine({"k": []}, exit_code={"k": -9})
     res = schedule(_rm([_job("k")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and "退出码 -9" in jr.message
 
 
@@ -1540,7 +1559,7 @@ def test_worker_exit_error_text_does_not_reach_job_message():
 
     res = schedule(_rm([_job("s"), _job("n")]), FakeResolver(FakeEngine({"s": exits(255), "n": exits(3)})), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2))
-    by = {jr.scope_id: jr for jr in res.jobs}
+    by = {jr.scope_id: jr for jr in res.results}
     for sid, code in (("s", 255), ("n", 3)):
         assert (by[sid].status, by[sid].error_type) == (Status.ERROR, "engine_error")
         assert f"退出码 {code}" in by[sid].message and "异常消息文本" not in by[sid].message
@@ -1551,7 +1570,7 @@ def test_scope_done_after_nonzero_exit_is_error_and_zero_scenario_scope_done_is_
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "z": [ScopeStarted(scope_id="z"), ScopeDone(scope_id="z")]},
                         exit_code={"a": 1})
     res = schedule(_rm([_job("a"), _job("z")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=2))
-    by = {jr.scope_id: jr for jr in res.jobs}
+    by = {jr.scope_id: jr for jr in res.results}
     assert (by["a"].status, by["a"].error_type) == (Status.ERROR, "engine_error") and "退出码 1" in by["a"].message
     assert (by["z"].status, by["z"].error_type) == (Status.ERROR, "engine_error") and "未报告任何 scenario 判定" in by["z"].message
 
@@ -1568,27 +1587,26 @@ def test_run_level_device_metering_sums_device_jobs_and_omits_for_desktop_runs()
     engine = FakeEngine({"d1": dev("d1", 10.0), "d2": dev("d2", None), "desk": dev("desk", None)})
     res = schedule(_rm([_job("d1", device="android"), _job("d2", device="ios"), _job("desk")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=3))
-    assert (res.device_observed_s, res.device_observed_missing) == (10.0, 1)
-    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
+    assert (_summary(res).device_observed_s, _summary(res).device_observed_missing) == (10.0, 1)
+    desk = next(jr for jr in res.results if jr.scope_id == "desk")
     assert (desk.device_observed_s, desk.device_observed_missing) == (None, None)
     assert desk.status == Status.PASSED and [s.release for s in desk.sessions] == ["confirmed"]
     only_desk = schedule(_rm([_job("desk")]), FakeResolver(FakeEngine({"desk": _passing_events("desk", "desk:0")})), CollectSink(),
                          opts=ScheduleOpts(max_concurrency=1))
-    assert (only_desk.device_observed_s, only_desk.device_observed_missing) == (None, None)
+    assert (_summary(only_desk).device_observed_s, _summary(only_desk).device_observed_missing) == (None, None)
 
 
-def test_device_job_skipped_before_spawn_still_carries_metering_keys():
-    """未启动记 SKIPPED 的设备 job 也成对带计量两键（只按目标判，没有会话记录时为 0.0 与 0），run 级两键随之出现；
-    同一路径上的桌面 job 两键保持 None。"""
+def test_device_job_that_never_started_has_no_detail_and_the_run_level_metering_keys_stay():
+    """没有启动的设备 job 没有判定明细，也就没有 job 级的计量两键；run 级两键按运行定义里有设备 job 照常给出（合计 0.0、缺计量 0），
+    不按有明细的 job 判断（ADR 0051 决策 7；ADR 0031 决定三「结束写」小节）。"""
     engine = FakeEngine({"crash": _passing_events("crash", "crash:0")}, crash_after={"crash": 0})
     res = schedule(_rm([_job("crash"), _job("dev", device="android"), _job("desk")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, fail_fast=True))
-    dev = next(jr for jr in res.jobs if jr.scope_id == "dev")
-    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
-    assert dev.status == Status.SKIPPED and dev.sessions == []
-    assert (dev.device_observed_s, dev.device_observed_missing) == (0.0, 0)
-    assert desk.status == Status.SKIPPED and (desk.device_observed_s, desk.device_observed_missing) == (None, None)
-    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
+    assert [jr.scope_id for jr in res.results] == ["crash"] and res.stopped_by == "fail-fast"
+    summary = _summary(res)
+    assert {o.scope_id: (o.status, o.detail) for o in summary.jobs if o.scope_id != "crash"} == {
+        "dev": (Status.SKIPPED, None), "desk": (Status.SKIPPED, None)}
+    assert (summary.device_observed_s, summary.device_observed_missing) == (0.0, 0)
 
 
 def test_device_job_spawn_failure_still_carries_metering_keys():
@@ -1600,12 +1618,12 @@ def test_device_job_spawn_failure_still_carries_metering_keys():
 
     res = schedule(_rm([_job("dev", device="ios"), _job("desk")]), FakeResolver(Boom()), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1))
-    dev = next(jr for jr in res.jobs if jr.scope_id == "dev")
-    desk = next(jr for jr in res.jobs if jr.scope_id == "desk")
+    dev = next(jr for jr in res.results if jr.scope_id == "dev")
+    desk = next(jr for jr in res.results if jr.scope_id == "desk")
     assert (dev.status, dev.message) == (Status.ERROR, "起 worker 失败：spawn 失败") and dev.sessions == []
     assert (dev.device_observed_s, dev.device_observed_missing) == (0.0, 0)
     assert desk.status == Status.ERROR and (desk.device_observed_s, desk.device_observed_missing) == (None, None)
-    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
+    assert (_summary(res).device_observed_s, _summary(res).device_observed_missing) == (0.0, 0)
 
 
 # ---- 使用方中断（ADR 0024 终止契约「使用方中断」条）----
@@ -1634,22 +1652,22 @@ _WHOLE_PASS = [
 
 
 def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
-    """首次中断（级别 1）走与 fail-fast 同一条路：运行中 worker 被协作停止、按 abort 判 ABORTED；排队中的 job 记 SKIPPED；
-    run 级 status 记 aborted（判定不完整，不按仅有的判定聚合）；on_interrupt(1) 恰被调一次。"""
+    """首次中断（级别 1）走与 fail-fast 同一条路：运行中 worker 被协作停止、按 abort 判 ABORTED；排队中的 job 不启动、不在执行事实里，
+    余下的 job 不再启动的来源是 interrupt，由结束写记 skipped 并带中断的说明；run 按取法记 aborted；on_interrupt(1) 恰被调一次。"""
     engine = FakeEngine({"a": _RUNNING_HALF, "b": _WHOLE_PASS}, tail_after_stop={"a": []})
     interrupt, polls = _interrupt_sequence([0, 1])  # 第一次轮询还没中断，之后一直是 1
     levels: list[int] = []
     result = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
                                         interrupt_poll_s=0.05))
-    a = next(jr for jr in result.jobs if jr.scope_id == "a")
-    b = next(jr for jr in result.jobs if jr.scope_id == "b")
-    assert a.status == Status.ABORTED  # 有现场、被掐断
-    assert b.status == Status.SKIPPED  # worker 从未起
-    # 判定消息按来源区分（真机演练实测：此前两处都写成 fail-fast 的文案）
+    (a,) = result.results
+    assert a.scope_id == "a" and a.status == Status.ABORTED  # 有现场、被掐断
+    assert result.stopped_by == "interrupt" and "b" not in engine.run_count  # worker 从未起
+    # 说明按来源区分（真机演练实测：此前两处都写成 fail-fast 的文案）
     assert a.message == "收到中断信号：本 job 被中止" and a.error_type is None
-    assert b.message == "收到中断信号：本次运行已中止，未启动（worker 未 spawn）"
-    assert result.status == Status.ABORTED
+    b = _outcome(result, "b")
+    assert (b.status, b.state.message) == (Status.SKIPPED, "收到中断信号，本 job 没有启动")
+    assert (_summary(result).status, _summary(result).message) == (Status.ABORTED, "收到中断信号，余下的 job 不再启动")
     assert levels == [1]
     assert len(polls) >= 2
     h = engine.handles["a"]
@@ -1658,10 +1676,8 @@ def test_user_interrupt_level1_stops_running_skips_queued_marks_run_aborted():
 
 
 def test_user_interrupt_with_passed_and_aborted_marks_run_aborted():
-    """中断时已有 job 出了判定（b 已 passed、a 被中止）：判定集非空，_aggregate 给 passed；run 级由裁决函数的中断例外记 aborted。
-    这条例外只在同步路径上有：无状态路径不作中止决定，推不出 job 级 aborted。"""
-    from gherkai_core.project import _aggregate
-
+    """中断时已有 job 出了判定（b 已 passed、a 被中止）：两个 job 都有结果、不需要结束写，run 按取法记 aborted（没有 error 与 failed、
+    有 aborted），不是 passed；余下的 job 不再启动的来源照样记下 interrupt。"""
     a_started, b_done = threading.Event(), threading.Event()
 
     def a_gen(_job):
@@ -1678,18 +1694,17 @@ def test_user_interrupt_with_passed_and_aborted_marks_run_aborted():
                       opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: 1 if b_done.is_set() else 0,
                                         on_interrupt=levels.append, interrupt_poll_s=0.05),
                       on_job_complete=lambda jr: b_done.set() if jr.scope_id == "b" else None)
-    statuses = {jr.scope_id: jr.status for jr in result.jobs}
+    statuses = {jr.scope_id: jr.status for jr in result.results}
     assert statuses == {"a": Status.ABORTED, "b": Status.PASSED}
-    assert _aggregate(list(statuses.values())) == Status.PASSED  # 只看判定的归约给 passed：例外不可省
-    assert result.status == Status.ABORTED
+    assert result.stopped_by == "interrupt"
+    assert _summary(result).status == Status.ABORTED
     assert levels == [1]
 
 
-def test_zero_job_run_is_passed():
-    """零个 job 的 run 可达（不加筛选时，没有 scenario 的 .feature 经 plan 得到零个 job）：_aggregate 收到空输入，run 级 passed。"""
+def test_zero_job_run_has_no_results_and_no_stop_source():
+    """零个 job 的 run：执行事实里没有结果，也没有余下的 job 不再启动的来源。"""
     result = schedule(_rm([]), FakeResolver(FakeEngine({})), CollectSink())
-    assert result.jobs == []
-    assert result.status == Status.PASSED
+    assert (result.results, result.stopped_by) == ((), None)
 
 
 def test_user_interrupt_level2_forces_running_worker_with_zero_grace():
@@ -1706,8 +1721,8 @@ def test_user_interrupt_level2_forces_running_worker_with_zero_grace():
     assert levels == [1, 2]
     h = engine.handles["a"]
     assert 0.0 in h.stop_graces and any(g > 0 for g in h.stop_graces)  # 协作停止的宽限之外多了一次零宽限的强制
-    assert result.jobs[0].status == Status.ABORTED
-    assert result.status == Status.ABORTED
+    assert result.results[0].status == Status.ABORTED
+    assert _summary(result).status == Status.ABORTED
 
 
 def test_user_interrupt_level_only_rises_once_per_level():
@@ -1731,7 +1746,7 @@ def test_interrupt_arriving_after_all_jobs_done_is_not_acted_on():
     result = schedule(_rm([_job("b")]), FakeResolver(engine), CollectSink(),
                       opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
                                         interrupt_poll_s=5.0))
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
     assert levels == []
     assert polls == []  # pending 已空，不再轮询
 
@@ -1740,7 +1755,7 @@ def test_no_interrupt_callback_keeps_passed_run_passed():
     """不注入 interrupt：等待循环与此前相同，正常 run 仍 PASSED（回归护栏）。"""
     engine = FakeEngine({"b": _WHOLE_PASS})
     result = schedule(_rm([_job("b")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
 
 
 _WHOLE_PASS_A = [
@@ -1795,8 +1810,8 @@ def test_force_requested_before_handle_returns_is_honored():
     assert levels == [1, 2]
     h = engine.handles["a"]
     assert h.stop_graces and all(g == 0.0 for g in h.stop_graces)  # 句柄返回后的停止全部零宽限
-    assert result.jobs[0].status == Status.ABORTED
-    assert result.status == Status.ABORTED
+    assert result.results[0].status == Status.ABORTED
+    assert _summary(result).status == Status.ABORTED
 
 
 def test_interrupt_after_all_jobs_done_but_unconsumed_is_not_acted_on():
@@ -1822,14 +1837,15 @@ def test_interrupt_after_all_jobs_done_but_unconsumed_is_not_acted_on():
                       opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: 1, on_interrupt=levels.append,
                                         interrupt_poll_s=0.05),
                       on_job_complete=on_job_complete)
-    assert result.status == Status.PASSED
+    assert _summary(result).status == Status.PASSED
     assert levels == []
 
 
 # ---- 运行期限与这次 run 的记录（ADR 0054 决策二、五）：墙钟截止时刻、起 worker 与重试之前的检查次序、第三种中止来源、run 级裁决 ----
 
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE, ENDED_ELSEWHERE_ABORT_MESSAGE  # noqa: E402
-from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE  # noqa: E402
+
+_DEADLINE_ENDING = RUN_ENDINGS["deadline"]  # 到期的结束写：run 级说明与没有启动的 job 的说明
 
 
 class _FakeRecord:
@@ -1883,27 +1899,32 @@ def test_job_budget_is_judged_on_the_wall_clock_not_the_monotonic_one():
     res = schedule(_rm([_job("a", timeout_s=5.0)]), FakeResolver(engine), _JumpSink(ft, ScenarioStarted, seconds=6.0),
                    opts=ScheduleOpts(clock=lambda: 0.0, wall_clock=ft.wall, max_concurrency=1, heartbeat_interval_s=0.02,
                                      grace_period_s=1.0))
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", "job 超时（预算 5s，已中止）")
 
 
+_BUDGET_100 = (Status.ERROR, "timeout", "job 超时（预算 100s，已中止）")
+
+
 @pytest.mark.parametrize("deadline_s, budget_s, expected", [
-    (99.5, 100.0, DEADLINE_TIMEOUT_MESSAGE),  # 期限早于认领时刻加预算：被期限截断
-    (100.0, 100.0, "job 超时（预算 100s，已中止）"),  # 两者相等：算 job 自己的预算到点
-    (100.5, 100.0, "job 超时（预算 100s，已中止）"),
+    (99.5, 100.0, (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)),  # 期限早于认领时刻加预算：被期限截断
+    (100.0, 100.0, _BUDGET_100),  # 两者相等：算 job 自己的预算到点
+    (100.5, 100.0, _BUDGET_100),
 ])
 def test_cutoff_is_the_earlier_of_budget_and_run_deadline(deadline_s, budget_s, expected):
-    """截止时刻取认领时刻加预算与运行期限中较早的一个，相等时算预算（ADR 0054 决策二第 2 条）；被期限截断的 job 是 error、类型为超时，
-    说明是期限那一句。全部 job 都有判定时 run 级照常聚合、不带到期说明（第 4 条）。"""
+    """截止时刻取认领时刻加预算与运行期限中较早的一个，相等时算预算（ADR 0054 决策二第 2 条）；被期限截断的 job 记 aborted、没有归因，
+    说明是期限那一句，被自己的预算截断的记 error 加 timeout（ADR 0031 决定一）。全部 job 都有结果时不做结束写，run 的状态按取法、
+    不带到期说明（第 4 条）。"""
     ft = _FakeTime(step=0.0)  # 认领时刻恰为假墙钟零点
     record = _FakeRecord()
     engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")]}, tail_after_stop={"a": []})
     res = schedule(_rm_at([_job("a", timeout_s=budget_s)], ft.at(deadline_s)), FakeResolver(engine), _JumpSink(ft, ScenarioStarted),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record))
-    jr = res.jobs[0]
-    assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", expected)
+    jr = res.results[0]
+    assert (jr.status, jr.error_type, jr.message) == expected
     assert record.claims == [("a", _T0)]  # 认领时刻就是起 worker 之前读到的墙钟
-    assert (res.status, res.message) == (Status.ERROR, None)
+    assert res.stopped_by is None
+    assert (_summary(res).status, _summary(res).message) == (expected[0], None)
 
 
 @pytest.mark.parametrize("deadline_s, starts", [(60.0, True), (59.999, False)])
@@ -1913,38 +1934,46 @@ def test_stop_start_boundary_is_strictly_after_deadline_minus_lead(deadline_s, s
     engine = FakeEngine({"a": _passing_events("a", "a:0")})
     res = schedule(_rm_at([_job("a")], ft.at(deadline_s)), FakeResolver(engine), CollectSink(), opts=ft.opts(max_concurrency=1))
     assert ("a" in engine.run_count) is starts
-    assert [jr.status for jr in res.jobs] == ([Status.PASSED] if starts else [])
+    assert [jr.status for jr in res.results] == ([Status.PASSED] if starts else [])
 
 
-def test_past_stop_start_starts_nothing_and_the_run_is_an_error_with_a_run_level_message():
-    """一开始就已过停止启动的时刻（ADR 0054 决策二第 1 条）：不认领、不起 worker、不产出判定（不回调 on_job_complete），RunResult
-    的 job 清单为空；run 级是 error 加「已超过允许运行的时间」。设备 job 全部没有启动时设备计量两项为 0、不省键。"""
+def test_past_stop_start_starts_nothing_and_the_run_ends_with_the_deadline_ending():
+    """一开始就已过停止启动的时刻（ADR 0054 决策二第 1 条）：不认领、不起 worker、不产出判定（不回调 on_job_complete），执行事实里
+    没有结果，来路是 deadline；到期的结束写把每个 job 记 skipped 并带到期的说明，run 按取法记 aborted、run 级说明是「已超过允许运行的
+    时间」（第 3 条）。设备 job 全部没有启动时设备计量两项为 0、不省键。"""
     ft = _FakeTime()
     record = _FakeRecord()
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "d": _passing_events("d", "d:0")})
     seen: list = []
     res = schedule(_rm_at([_job("a"), _job("d", device="android")], ft.at(30.0)), FakeResolver(engine), CollectSink(),
                    opts=ft.opts(max_concurrency=2, record=record), on_job_complete=seen.append)
-    assert engine.run_count == {} and record.claims == [] and seen == [] and res.jobs == []
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert (res.device_observed_s, res.device_observed_missing) == (0.0, 0)
+    assert engine.run_count == {} and record.claims == [] and seen == [] and res.results == ()
+    assert res.stopped_by == "deadline"
+    summary = _summary(res)
+    assert (summary.status, summary.message) == (Status.ABORTED, _DEADLINE_ENDING.run_message)
+    assert [(o.status, o.state.message) for o in summary.jobs] == [(Status.SKIPPED, _DEADLINE_ENDING.skipped_message)] * 2
+    assert (summary.device_observed_s, summary.device_observed_missing) == (0.0, 0)
 
 
 def test_queued_job_after_stop_start_has_no_verdict_and_the_finished_one_keeps_its_own():
-    """执行中途越过停止启动的时刻：已在执行、内容完整的 job 保留它的判定；排队中的 job 不启动、不产出判定，run 级按到期收尾。"""
+    """执行中途越过停止启动的时刻：已在执行、内容完整的 job 保留它的判定；排队中的 job 不启动、不产出判定，由到期的结束写记 skipped，
+    run 按取法记 aborted 并带到期的说明。"""
     ft = _FakeTime()
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
     seen: list = []
     res = schedule(_rm_at([_job("a"), _job("b")], ft.at(1000.0)), FakeResolver(engine), _JumpSink(ft, ScopeDone, seconds=950.0),
                    opts=ft.opts(max_concurrency=1), on_job_complete=seen.append)
-    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("a", Status.PASSED)]
+    assert [(jr.scope_id, jr.status) for jr in res.results] == [("a", Status.PASSED)]
     assert [jr.scope_id for jr in seen] == ["a"] and "b" not in engine.run_count
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert res.stopped_by == "deadline"
+    assert (_outcome(res, "b").status, _outcome(res, "b").state.message) == (Status.SKIPPED, _DEADLINE_ENDING.skipped_message)
+    assert (_summary(res).status, _summary(res).message) == (Status.ABORTED, _DEADLINE_ENDING.run_message)
 
 
 def test_running_job_is_stopped_at_the_run_deadline_and_queued_job_stays_without_verdict():
-    """到了运行期限，执行中的 job 的截止时刻已到（以期限封顶），走超时流程：error、类型为超时、说明是期限那一句；之后排队中的 job
-    已过停止启动的时刻，不启动。开着 fail-fast 也一样：被期限截断的 job 触发中止，但排队中的 job 不因此改记 skipped。"""
+    """到了运行期限，执行中的 job 的截止时刻已到（以期限封顶），走到点停止：内容不完整，记 aborted、没有归因、说明是期限那一句；之后
+    排队中的 job 已过停止启动的时刻，不启动。开着 fail-fast 也一样：被期限截断不是这个 job 自己出错，不触发 fail-fast，来路是
+    deadline，到期的结束写把排队的 job 记 skipped。"""
     ft = _FakeTime()
     engine = FakeEngine({"a": [ScopeStarted(scope_id="a"), ScenarioStarted(scenario_id="a:0")], "b": _passing_events("b", "b:0")},
                         tail_after_stop={"a": []})
@@ -1952,16 +1981,18 @@ def test_running_job_is_stopped_at_the_run_deadline_and_queued_job_stays_without
     res = schedule(_rm_at([_job("a"), _job("b")], ft.at(1000.0)), FakeResolver(engine), _JumpSink(ft, ScenarioStarted, seconds=1001.0),
                    opts=ft.opts(max_concurrency=1, fail_fast=True, heartbeat_interval_s=0.02, grace_period_s=1.0),
                    on_job_complete=seen.append)
-    a = res.jobs[0]
-    assert [jr.scope_id for jr in res.jobs] == ["a"] and [jr.scope_id for jr in seen] == ["a"]
-    assert (a.status, a.error_type, a.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    a = res.results[0]
+    assert [jr.scope_id for jr in res.results] == ["a"] and [jr.scope_id for jr in seen] == ["a"]
+    assert (a.status, a.error_type, a.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
     assert engine.handles["a"].stopped and "b" not in engine.run_count
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert res.stopped_by == "deadline"
+    assert (_outcome(res, "b").status, _outcome(res, "b").state.message) == (Status.SKIPPED, _DEADLINE_ENDING.skipped_message)
+    assert (_summary(res).status, _summary(res).message) == (Status.ABORTED, _DEADLINE_ENDING.run_message)
 
 
 def test_stop_start_once_observed_is_kept_after_a_clock_rollback():
     """停止启动一经成立不撤销：墙钟先返回已过停止启动的时刻，之后回拨到更早的时刻。看到已过的那次检查拦下 b；回拨之后排队的 c 也不
-    启动；收尾按记下的事实判断、不重读墙钟：run 级是 error 加「已超过允许运行的时间」，没有启动的 job 不在判定清单里。"""
+    启动；来路取记下的事实、不重读墙钟：deadline，到期的结束写给 run 带上「已超过允许运行的时间」，没有启动的 job 不在执行事实里。"""
     t = {"s": 0.0}
 
     def wall() -> datetime:
@@ -1980,8 +2011,9 @@ def test_stop_start_once_observed_is_kept_after_a_clock_rollback():
     res = schedule(_rm_at([_job("a"), _job("b"), _job("c")], (_T0 + timedelta(seconds=1000)).isoformat()), FakeResolver(engine),
                    _Sink(), opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, wall_clock=wall))
     assert t["s"] == 0.0  # 已过的时刻确实被读到过、墙钟随后回拨
-    assert [jr.scope_id for jr in res.jobs] == ["a"] and set(engine.run_count) == {"a"}
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert [jr.scope_id for jr in res.results] == ["a"] and set(engine.run_count) == {"a"}
+    assert res.stopped_by == "deadline"
+    assert (_summary(res).status, _summary(res).message) == (Status.ABORTED, _DEADLINE_ENDING.run_message)
 
 
 def test_job_cutoff_once_observed_is_kept_after_a_clock_rollback():
@@ -2007,55 +2039,56 @@ def test_job_cutoff_once_observed_is_kept_after_a_clock_rollback():
     res = schedule(_rm([_job("a", timeout_s=10.0)]), FakeResolver(engine), _Sink(),
                    opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, wall_clock=wall, grace_period_s=1.0))
     assert state["fired"]  # 已过的时刻确实被读到过、墙钟随后回拨
-    jr = res.jobs[0]
+    jr = res.results[0]
     assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", "job 超时（预算 10s，已中止）")
-    assert res.status == Status.ERROR
+    assert _summary(res).status == Status.ERROR
 
 
 def test_claim_rejected_means_ended_elsewhere_and_later_jobs_are_not_claimed():
     """认领被拒即发现 run 已被别处记为已结束：这个 job 不启动，之后的 job 在认领之前就被「已发现」那一项拦下，不再认领；都不产出判定，
-    run 级是 aborted、没有说明。"""
+    余下的 job 不再启动的来源是 ended-elsewhere（记录已是终态，落库服务不做结束写）。"""
     record = _FakeRecord(reject={"a"})
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
     seen: list = []
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, record=record), on_job_complete=seen.append)
-    assert [sid for sid, _ in record.claims] == ["a"] and engine.run_count == {} and seen == [] and res.jobs == []
-    assert (res.status, res.message) == (Status.ABORTED, None)
+    assert [sid for sid, _ in record.claims] == ["a"] and engine.run_count == {} and seen == [] and res.results == ()
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_scheduler_keeps_its_own_discoveries_without_the_record_signal():
     """认领被拒、重试之前读到 run 级终态是调度循环自己看到的发现，当场记下、不等记录一侧把它们汇进停手信号：认领被拒之后的 job 不再
-    认领、不启动；读到终态的重试注明 run 已被记为已结束；两种情形 run 级都是 aborted。"""
+    认领、不启动；读到终态的重试不再进行，这一次的结果不被采用；两种情形来源都是 ended-elsewhere。"""
     record = _FakeRecord(reject={"a"}, signals=False)
     engine = FakeEngine({"a": _passing_events("a", "a:0"), "b": _passing_events("b", "b:0")})
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, record=record))
-    assert [sid for sid, _ in record.claims] == ["a"] and res.jobs == [] and res.status == Status.ABORTED
+    assert [sid for sid, _ in record.claims] == ["a"] and res.results == () and res.stopped_by == "ended-elsewhere"
     assert not record.ended.is_set()  # 记录一侧确实没有给信号
 
     record = _FakeRecord(open_=False, signals=False)
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0]})
     res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=_NOSLEEP, record=record))
-    assert record.reads == 1 and res.jobs[0].message.endswith("；这个 run 已被记为已结束：未再重试")
-    assert res.status == Status.ABORTED
+    assert record.reads == 1 and engine.run_count["n"] == 1
+    assert (res.results, res.stopped_by) == ((), "ended-elsewhere")
 
 
 def test_no_claim_when_the_run_is_already_aborted():
-    """认领排在各项检查之后、紧贴起 worker：run 已因 fail-fast 中止时排队的 job 记 SKIPPED、不认领（已过停止启动的时刻也不认领，见上面
-    「一开始就已过停止启动的时刻」那一条）。"""
+    """认领排在各项检查之后、紧贴起 worker：run 已因 fail-fast 中止时排队的 job 不认领、不启动，来源是 fail-fast（已过停止启动的时刻
+    也不认领，见上面「一开始就已过停止启动的时刻」那一条）。"""
     record = _FakeRecord()
     engine = FakeEngine({"crash": _passing_events("crash", "crash:0"), "q": _passing_events("q", "q:0")}, crash_after={"crash": 0})
     res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record))
     assert [sid for sid, _ in record.claims] == ["crash"]
-    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR), ("q", Status.SKIPPED)]
+    assert [(jr.scope_id, jr.status) for jr in res.results] == [("crash", Status.ERROR)] and res.stopped_by == "fail-fast"
 
 
 def test_ended_elsewhere_check_precedes_abort_for_queued_jobs():
-    """排队中的 job 起 worker 之前，「已发现 run 被别处结束」排在「run 已中止」之前：两者都成立时它不启动、不产出判定，不记 skipped。
-    这里 crash job 崩溃之前（同一个 worker 线程里）停手信号已成立，随后它的 error 触发 fail-fast。"""
+    """排队中的 job 起 worker 之前，「已发现 run 被别处结束」排在「run 已中止」之前、也在认领之前：两者都成立时它不认领、不启动。
+    这里 crash job 崩溃之前（同一个 worker 线程里）停手信号已成立，随后它的 error 在判定得出时登记 fail-fast；调度循环这时还没有读停手
+    信号，余下的 job 不再启动的来源取最先登记的 fail-fast。记录已被别处结束时落库服务按停手信号收尾、不做结束写。"""
     record = _FakeRecord()
 
     def crash_gen(job):
@@ -2066,15 +2099,14 @@ def test_ended_elsewhere_check_precedes_abort_for_queued_jobs():
     engine = FakeEngine({"crash": crash_gen, "q": _passing_events("q", "q:0")})
     res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record, interrupt_poll_s=5.0))
-    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR)]
+    assert [(jr.scope_id, jr.status) for jr in res.results] == [("crash", Status.ERROR)]
     assert "q" not in engine.run_count and [sid for sid, _ in record.claims] == ["crash"]
-    assert res.status == Status.ABORTED  # 发现 run 已被别处结束：不按仅有的判定聚合
+    assert res.stopped_by == "fail-fast"
 
 
-def test_queued_job_is_not_skipped_when_the_abort_source_is_ended_elsewhere(monkeypatch):
-    """读停手信号得到「未发现」之后、看中止标志之前，另一个线程以 ended-elsewhere 登记了中止标志：run 是被别处结束、不是因 fail-fast
-    中止，排队中的 job 按「已发现 run 被别处结束」处理，不认领、不启动、不产出判定，不记成 skipped。这里直接构造这个状态：中止标志已以
-    ended-elsewhere 置位，停手信号的读取返回 False。"""
+def test_queued_job_is_not_claimed_when_the_abort_source_is_ended_elsewhere(monkeypatch):
+    """读停手信号得到「未发现」之后、看中止标志之前，另一个线程以 ended-elsewhere 登记了中止标志：排队中的 job 不认领、不启动、不产出
+    判定，来源是 ended-elsewhere。这里直接构造这个状态：中止标志已以 ended-elsewhere 置位，停手信号的读取返回 False。"""
     import gherkai_core.schedule as sch
 
     monkeypatch.setattr(sch._EndedElsewhere, "seen", lambda self: False)
@@ -2090,13 +2122,13 @@ def test_queued_job_is_not_skipped_when_the_abort_source_is_ended_elsewhere(monk
     seen: list = []
     res = schedule(_rm([_job("q")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, record=record), on_job_complete=seen.append)
-    assert res.jobs == [] and seen == [] and engine.run_count == {} and record.claims == []
+    assert res.results == () and seen == [] and engine.run_count == {} and record.claims == []
+    assert res.stopped_by == "ended-elsewhere"
 
 
-def test_claim_rejected_concurrently_does_not_turn_the_other_queued_job_into_skipped(monkeypatch):
-    """两个 job 并发起步，a 的认领被拒：b 恰在读完停手信号（未发现）之后、看中止标志之前碰上 a 登记 ended-elsewhere。b 同样按「已发现
-    run 被别处结束」处理，不认领、不启动、不产出判定，不被记成 skipped。钩子把这个交错固定下来：a 的认领等 b 读完停手信号才被拒，b 读完
-    之后等 a 登记完再往下走。"""
+def test_claim_rejected_concurrently_keeps_the_other_queued_job_unclaimed(monkeypatch):
+    """两个 job 并发起步，a 的认领被拒：b 恰在读完停手信号（未发现）之后、看中止标志之前碰上 a 登记 ended-elsewhere。b 同样不认领、
+    不启动、不产出判定，来源是 ended-elsewhere。钩子把这个交错固定下来：a 的认领等 b 读完停手信号才被拒，b 读完之后等 a 登记完再往下走。"""
     import gherkai_core.schedule as sch
 
     who = threading.local()
@@ -2136,28 +2168,8 @@ def test_claim_rejected_concurrently_does_not_turn_the_other_queued_job_into_ski
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, record=record), on_job_complete=done.append)
     assert b_read.is_set() and a_noted.is_set()  # 交错确实发生
-    assert res.jobs == [] and done == [] and engine.run_count == {} and [sid for sid, _ in record.claims] == ["a"]
-    assert res.status == Status.ABORTED
-
-
-def test_skipped_job_is_not_changed_back_when_the_run_is_found_ended_later():
-    """已经记为 skipped 的 job 不因后来成立的原因改回：fail-fast 之后排队的 job 记 SKIPPED 并已落库，随后才发现 run 已被别处结束，
-    它在结果里仍是 SKIPPED。"""
-    record = _FakeRecord()
-    engine = FakeEngine({"crash": _passing_events("crash", "crash:0"), "q": _passing_events("q", "q:0")}, crash_after={"crash": 0})
-    seen: dict[str, Status] = {}
-
-    def on_job_complete(jr):
-        seen[jr.scope_id] = jr.status
-        if jr.scope_id == "q":
-            record.ended.set()  # 写 q 的终态时得知 run 级已结束
-
-    res = schedule(_rm([_job("crash"), _job("q")]), FakeResolver(engine), CollectSink(),
-                   opts=ScheduleOpts(max_concurrency=1, fail_fast=True, record=record, interrupt_poll_s=0.02),
-                   on_job_complete=on_job_complete)
-    assert seen == {"crash": Status.ERROR, "q": Status.SKIPPED}
-    assert [(jr.scope_id, jr.status) for jr in res.jobs] == [("crash", Status.ERROR), ("q", Status.SKIPPED)]
-    assert res.status == Status.ABORTED
+    assert res.results == () and done == [] and engine.run_count == {} and [sid for sid, _ in record.claims] == ["a"]
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_stop_signal_is_polled_with_the_interrupt_cadence_and_stops_running_jobs():
@@ -2179,10 +2191,10 @@ def test_stop_signal_is_polled_with_the_interrupt_cadence_and_stops_running_jobs
                    opts=ScheduleOpts(max_concurrency=1, heartbeat_interval_s=0, grace_period_s=1.0, record=record,
                                      interrupt_poll_s=0.02))
     assert time.monotonic() - t0 < 3.0  # 没等到假 worker 的 5 秒等停超时
-    a = res.jobs[0]
-    assert [jr.scope_id for jr in res.jobs] == ["a"] and "b" not in engine.run_count
+    a = res.results[0]
+    assert [jr.scope_id for jr in res.results] == ["a"] and "b" not in engine.run_count
     assert (a.status, a.error_type, a.message) == (Status.ABORTED, None, ENDED_ELSEWHERE_ABORT_MESSAGE)
-    assert res.status == Status.ABORTED
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_claim_rejected_for_one_job_stops_the_other_running_job():
@@ -2205,13 +2217,13 @@ def test_claim_rejected_for_one_job_stops_the_other_running_job():
     record.claim = claim
     res = schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record))
-    assert [jr.scope_id for jr in res.jobs] == ["a"] and "b" not in engine.run_count
-    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert [jr.scope_id for jr in res.results] == ["a"] and "b" not in engine.run_count
+    assert (res.results[0].status, res.results[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
 
 
 def test_fail_fast_first_then_ended_elsewhere_keeps_the_fail_fast_message():
     """运行中的 job 的停止原因按首次仲裁落定一次、中止的说明取最先成立的来源：fail-fast 先成立、随后才发现 run 已被别处结束（在 victim
-    已被落定、发出停止请求之后），说明仍是 fail-fast 那一句；run 级按发现 run 已被别处结束记 aborted。"""
+    已被落定、发出停止请求之后），说明仍是 fail-fast 那一句，余下的 job 不再启动的来源也是 fail-fast。"""
     record = _FakeRecord()
     crash_now = threading.Event()
 
@@ -2233,9 +2245,9 @@ def test_fail_fast_first_then_ended_elsewhere_keeps_the_fail_fast_message():
     res = schedule(_rm([_job("v"), _job("c")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0.02, grace_period_s=1.0,
                                      record=record, interrupt_poll_s=0.02))
-    v = next(jr for jr in res.jobs if jr.scope_id == "v")
+    v = next(jr for jr in res.results if jr.scope_id == "v")
     assert (v.status, v.message) == (Status.ABORTED, "fail-fast：其他 job 失败，本 job 被中止")
-    assert res.status == Status.ABORTED
+    assert res.stopped_by == "fail-fast"
 
 
 def test_ended_elsewhere_first_then_interrupt_keeps_the_ended_message():
@@ -2258,12 +2270,12 @@ def test_ended_elsewhere_first_then_interrupt_keeps_the_ended_message():
                    opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append, interrupt_poll_s=0.02,
                                      record=record))
     assert levels == [1]
-    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
-    assert res.status == Status.ABORTED
+    assert (res.results[0].status, res.results[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_interrupt_then_ended_elsewhere_keeps_the_interrupt_message():
-    """使用方中断先成立、随后才发现 run 已被别处结束：运行中的 job 的说明仍是中断那一句，run 级 aborted。"""
+    """使用方中断先成立、随后才发现 run 已被别处结束：运行中的 job 的说明仍是中断那一句，来源也是 interrupt。"""
     record = _FakeRecord()
     engine = FakeEngine({"a": _RUNNING_HALF}, tail_after_stop={"a": []}, on_stop=lambda _s: record.ended.set())
     levels: list[int] = []
@@ -2271,8 +2283,8 @@ def test_interrupt_then_ended_elsewhere_keeps_the_interrupt_message():
                    opts=ScheduleOpts(max_concurrency=1, interrupt=lambda: 1 if "a" in engine.handles else 0,
                                      on_interrupt=levels.append, interrupt_poll_s=0.02, record=record))
     assert levels == [1]
-    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
-    assert res.status == Status.ABORTED
+    assert (res.results[0].status, res.results[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
+    assert res.stopped_by == "interrupt"
 
 
 def test_ended_found_in_a_persistence_callback_before_an_interrupt_keeps_the_ended_message():
@@ -2299,8 +2311,8 @@ def test_ended_found_in_a_persistence_callback_before_an_interrupt_keeps_the_end
                                      on_interrupt=on_interrupt, interrupt_poll_s=0.02, grace_period_s=1.0, record=record),
                    on_event=on_event)
     assert levels == [1]
-    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
-    assert res.status == Status.ABORTED
+    assert (res.results[0].status, res.results[0].message) == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_interrupt_registered_before_ended_is_found_in_a_persistence_callback_keeps_the_interrupt_message():
@@ -2321,7 +2333,8 @@ def test_interrupt_registered_before_ended_is_found_in_a_persistence_callback_ke
                                      on_interrupt=levels.append, interrupt_poll_s=0.02, grace_period_s=1.0, record=record),
                    on_event=on_event)
     assert levels == [1] and record.ended.is_set()
-    assert (res.jobs[0].status, res.jobs[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
+    assert (res.results[0].status, res.results[0].message) == (Status.ABORTED, "收到中断信号：本 job 被中止")
+    assert res.stopped_by == "interrupt"
 
 
 def test_ended_found_in_on_event_is_registered_before_a_later_fail_fast():
@@ -2351,10 +2364,10 @@ def test_ended_found_in_on_event_is_registered_before_a_later_fail_fast():
                    opts=ScheduleOpts(max_concurrency=2, fail_fast=True, heartbeat_interval_s=0, grace_period_s=1.0,
                                      record=record, interrupt_poll_s=5.0),
                    on_event=on_event)
-    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.jobs}
+    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.results}
     assert statuses["v"] == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
     assert statuses["c"][0] == Status.ERROR
-    assert res.status == Status.ABORTED
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_ended_found_in_on_job_complete_is_registered_before_a_later_fail_fast(monkeypatch):
@@ -2416,10 +2429,10 @@ def test_ended_found_in_on_job_complete_is_registered_before_a_later_fail_fast(m
                                      record=record, interrupt_poll_s=5.0),
                    on_job_complete=on_job_complete)
     assert sorted(calls[:2]) == ["p", "q"] and c_registered.is_set()  # 交错确实发生
-    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.jobs}
+    statuses = {jr.scope_id: (jr.status, jr.message) for jr in res.results}
     assert statuses["v"] == (Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)
     assert statuses["c"][0] == Status.ERROR and statuses["p"][0] == statuses["q"][0] == Status.PASSED
-    assert res.status == Status.ABORTED
+    assert res.stopped_by == "ended-elsewhere"
 
 
 def test_abort_flag_records_only_the_first_cause_under_concurrent_set():
@@ -2447,7 +2460,8 @@ def test_abort_flag_records_only_the_first_cause_under_concurrent_set():
             if value is not None:
                 assigned.append(value)
 
-    flag = _Probe()
+    ledger = sch._StartsStopped()
+    flag = _Probe(ledger)
     first = threading.Thread(target=flag.set, args=("fail-fast",), name="first")
     second = threading.Thread(target=lambda: (first_read.wait(5.0), flag.set("interrupt")), name="second")
     first.start()
@@ -2455,10 +2469,12 @@ def test_abort_flag_records_only_the_first_cause_under_concurrent_set():
     first.join(5.0)
     second.join(5.0)
     assert assigned == ["fail-fast"] and flag.cause == "fail-fast" and flag.is_set()
+    assert ledger.first == "fail-fast"  # 余下的 job 不再启动的来源同样只记第一次
 
 
 def test_deadline_passed_at_the_moment_of_decision_wins_over_ended_elsewhere():
-    """做出停止决定的那一刻截止时刻已过即为超时：墙钟越过期限的同时发现 run 已被别处结束，运行中的 job 记超时（期限那一句），不记中止。"""
+    """做出停止决定的那一刻截止时刻已过即为到点：墙钟越过期限的同时发现 run 已被别处结束，运行中的 job 按期限截断记（aborted、期限
+    那一句），不记「这个 run 已被记为已结束」那一句。"""
     ft = _FakeTime()
     record = _FakeRecord()
 
@@ -2473,13 +2489,13 @@ def test_deadline_passed_at_the_moment_of_decision_wins_over_ended_elsewhere():
     res = schedule(_rm_at([_job("a")], ft.at(1000.0)), FakeResolver(engine), _Sink(),
                    opts=ft.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, record=record,
                                 interrupt_poll_s=0.02))
-    a = res.jobs[0]
-    assert (a.status, a.error_type, a.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+    a = res.results[0]
+    assert (a.status, a.error_type, a.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
 
 
-def test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted():
-    """使用方中断之后、排队中的 job 起 worker 之前已过停止启动的时刻：它不启动、不产出判定（不记 skipped）；run 级是 error 加到期说明，
-    优先于中断的 aborted（退出码仍按信号取，由组合根给）。"""
+def test_interrupt_then_past_stop_start_ends_the_run_by_the_interrupt():
+    """使用方中断之后、排队中的 job 起 worker 之前已过停止启动的时刻：它不启动、不产出判定；余下的 job 不再启动的来源取最先登记的
+    interrupt，结束写把它记 skipped、带中断的说明，run 级说明也是中断那一句（退出码按信号取，由组合根给）。"""
     ft = _FakeTime()
     engine = FakeEngine({"a": _RUNNING_HALF, "b": _WHOLE_PASS}, tail_after_stop={"a": []},
                         on_stop=lambda scope: scope == "a" and ft.jump(950.0))  # 中断停下 a 期间墙钟越过停止启动的时刻
@@ -2488,8 +2504,67 @@ def test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted():
                    opts=ft.opts(max_concurrency=1, interrupt=lambda: 1 if "a" in engine.handles else 0,
                                 on_interrupt=levels.append, interrupt_poll_s=0.02))
     assert levels == [1] and "b" not in engine.run_count
-    assert [(jr.scope_id, jr.status, jr.message) for jr in res.jobs] == [("a", Status.ABORTED, "收到中断信号：本 job 被中止")]
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert [(jr.scope_id, jr.status, jr.message) for jr in res.results] == [("a", Status.ABORTED, "收到中断信号：本 job 被中止")]
+    assert res.stopped_by == "interrupt"
+    assert (_outcome(res, "b").status, _outcome(res, "b").state.message) == (Status.SKIPPED, RUN_ENDINGS["interrupt"].skipped_message)
+    assert (_summary(res).status, _summary(res).message) == (Status.ABORTED, RUN_ENDINGS["interrupt"].run_message)
+
+
+def test_fail_fast_registered_before_stop_start_is_the_stop_source(monkeypatch):
+    """余下的 job 不再启动的来源取最先登记的一条：fail-fast 在判定得出时登记之后，排队的 q 起 worker 之前的检查才观察到已过停止启动的
+    时刻。q 因停止启动而不启动，来源仍是 fail-fast：结束写把 q 记 skipped、带 fail-fast 的说明，run 有 error 即记 error。"""
+    import gherkai_core.schedule as sch
+
+    ft = _FakeTime()
+    orig_set = sch._AbortFlag.set
+
+    def set_then_pass_stop_start(self, cause="fail-fast"):  # fail-fast 一登记，墙钟就越过停止启动的时刻（期限减 60 秒）
+        orig_set(self, cause)
+        ft.jump(950.0)
+
+    monkeypatch.setattr(sch._AbortFlag, "set", set_then_pass_stop_start)
+    engine = FakeEngine({"crash": _passing_events("crash", "crash:0"), "q": _passing_events("q", "q:0")}, crash_after={"crash": 0})
+    res = schedule(_rm_at([_job("crash"), _job("q")], ft.at(1000.0)), FakeResolver(engine), CollectSink(),
+                   opts=ft.opts(max_concurrency=1, fail_fast=True))
+    assert [(jr.scope_id, jr.status) for jr in res.results] == [("crash", Status.ERROR)] and "q" not in engine.run_count
+    assert res.stopped_by == "fail-fast"
+    q = _outcome(res, "q")
+    assert (q.status, q.state.message) == (Status.SKIPPED, RUN_ENDINGS["fail-fast"].skipped_message)
+    assert (_summary(res).status, _summary(res).message) == (Status.ERROR, RUN_ENDINGS["fail-fast"].run_message)
+
+
+def test_stop_start_observed_before_fail_fast_is_the_stop_source(monkeypatch):
+    """反过来：排队的 c 起 worker 之前的检查先观察到已过停止启动的时刻、登记 deadline，此后执行中的 a 才出错、登记 fail-fast。来源是
+    deadline：结束写把 c 记 skipped、带到期的说明，run 有 error 即记 error、带到期的 run 级说明。"""
+    import gherkai_core.schedule as sch
+
+    ft = _FakeTime()
+    observed = threading.Event()
+    orig_check = sch._StopStart.check
+
+    def check(self):
+        hit = orig_check(self)
+        if hit:
+            observed.set()
+        return hit
+
+    monkeypatch.setattr(sch._StopStart, "check", check)
+
+    def a_gen(job):  # 等 c 的检查观察到停止启动之后才出错
+        yield ScopeStarted(scope_id="a")
+        observed.wait(5.0)
+        raise RuntimeError("崩")
+
+    engine = FakeEngine({"a": a_gen, "b": _passing_events("b", "b:0"), "c": _passing_events("c", "c:0")})
+    res = schedule(_rm_at([_job("a"), _job("b"), _job("c")], ft.at(1000.0)), FakeResolver(engine),
+                   _JumpSink(ft, ScopeDone, seconds=950.0),  # b 的内容一完整，墙钟就越过停止启动的时刻
+                   opts=ft.opts(max_concurrency=2, fail_fast=True))
+    assert observed.is_set() and "c" not in engine.run_count
+    assert {jr.scope_id: jr.status for jr in res.results} == {"a": Status.ERROR, "b": Status.PASSED}
+    assert res.stopped_by == "deadline"
+    c = _outcome(res, "c")
+    assert (c.status, c.state.message) == (Status.SKIPPED, _DEADLINE_ENDING.skipped_message)
+    assert (_summary(res).status, _summary(res).message) == (Status.ERROR, _DEADLINE_ENDING.run_message)
 
 
 def test_claim_failure_is_a_persistence_failure():
@@ -2523,22 +2598,22 @@ def test_claim_failure_is_a_persistence_failure():
 # ---- 重试之前的检查（ADR 0054 决策二「上一次尝试已经结束、正在等待重试的 job」一条）：产品的 run 不开 job 级重试，规则在调度层核 ----
 
 _NOT_RETRIED_DEADLINE = "这个 run 已接近或超过允许运行的时间：未再重试"
-_NOT_RETRIED_ENDED = "这个 run 已被记为已结束：未再重试"
 _NOT_RETRIED_FAIL_FAST = "fail-fast：其他 job 失败，未再重试"
 _NOT_RETRIED_INTERRUPT = "收到中断信号：未再重试"
 
 
 @pytest.mark.parametrize("hold, expected, reads", [
     ({"deadline", "ended", "abort", "closed"}, _NOT_RETRIED_DEADLINE, 0),
-    ({"ended", "abort", "closed"}, _NOT_RETRIED_ENDED, 0),
+    ({"ended", "abort", "closed"}, None, 0),
     ({"abort", "closed"}, _NOT_RETRIED_FAIL_FAST, 0),
     ({"interrupt", "closed"}, _NOT_RETRIED_INTERRUPT, 0),
-    ({"closed"}, _NOT_RETRIED_ENDED, 1),
+    ({"closed"}, None, 1),
 ])
 def test_retry_checks_run_in_order_and_note_the_first_hit(monkeypatch, hold, expected, reads):
     """退避期间成立的停止原因按次序检查、取最先命中的一条：已过停止启动的时刻；已发现 run 被别处结束；run 已中止（说明按中止来源区分
-    fail-fast 与使用方中断）；读到 run 级已是终态。命中即不再重试，保留上一次的 network_error 判定并注明原因，运行态随这个判定落定
-    （经 on_job_complete）；前三项命中时不读存储。重试不再认领：认领只在第一次起 worker 之前做一次。"""
+    fail-fast 与使用方中断）；读到 run 级已是终态。命中即不再重试。命中已过停止启动或 run 已中止时保留上一次的 network_error 判定并
+    注明原因，经 on_job_complete 作为终态写下；命中「已发现 run 被别处结束」（含读到终态）时这一次的结果不被采用：不进执行事实、
+    不回调（expected 为 None，ADR 0054 决策五）。前三项命中时不读存储。重试不再认领：认领只在第一次起 worker 之前做一次。"""
     import gherkai_core.schedule as sch
 
     ft = _FakeTime()
@@ -2569,11 +2644,15 @@ def test_retry_checks_run_in_order_and_note_the_first_hit(monkeypatch, hold, exp
     res = schedule(_rm_at([_job("n")], ft.at(1000.0)), FakeResolver(engine), CollectSink(),
                    opts=ft.opts(max_concurrency=1, network_retry=1, retry_sleep=backoff, record=record),
                    on_job_complete=seen.append)
-    jr = res.jobs[0]
-    assert engine.run_count["n"] == 1 and (jr.status, jr.error_type) == (Status.ERROR, "network_error")
+    assert engine.run_count["n"] == 1
+    assert record.reads == reads and [sid for sid, _ in record.claims] == ["n"]
+    if expected is None:
+        assert res.results == () and seen == []
+        return
+    (jr,) = res.results
+    assert (jr.status, jr.error_type) == (Status.ERROR, "network_error")
     assert jr.message.endswith("；" + expected), jr.message
     assert [x.message for x in seen] == [jr.message]
-    assert record.reads == reads and [sid for sid, _ in record.claims] == ["n"]
 
 
 def test_retry_proceeds_after_one_read_without_claiming_again():
@@ -2582,12 +2661,12 @@ def test_retry_proceeds_after_one_read_without_claiming_again():
     engine = FakeEngine({"n": _passing_events("n", "n:0")}, network_crash_after={"n": [0, 0]})
     res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, network_retry=2, retry_sleep=_NOSLEEP, record=record))
-    assert engine.run_count["n"] == 3 and res.jobs[0].status == Status.PASSED
+    assert engine.run_count["n"] == 3 and res.results[0].status == Status.PASSED
     assert record.reads == 2 and [sid for sid, _ in record.claims] == ["n"]
 
 
-def test_retry_refused_before_backoff_when_already_ended_elsewhere():
-    """上一次尝试结束时 run 已被别处结束（这次尝试期间写 job 状态时得知）：不必等退避，直接保留判定并注明原因，也不读存储。"""
+def test_retry_found_ended_before_backoff_drops_the_result_without_waiting():
+    """上一次尝试结束时 run 已被别处结束（这次尝试期间写 job 状态时得知）：不必等退避、不读存储，这一次的结果不被采用，不进执行事实。"""
     record = _FakeRecord()
     sleeps: list[float] = []
 
@@ -2599,14 +2678,13 @@ def test_retry_refused_before_backoff_when_already_ended_elsewhere():
     res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, network_retry=1, retry_sleep=sleeps.append, record=record,
                                      interrupt_poll_s=5.0))  # 主线程这期间不轮询：这次尝试的判定只由 worker 自己给出
-    jr = res.jobs[0]
     assert sleeps == [] and record.reads == 0 and engine.run_count["n"] == 1
-    assert jr.error_type == "network_error" and jr.message.endswith("；" + _NOT_RETRIED_ENDED)
+    assert (res.results, res.stopped_by) == ((), "ended-elsewhere")
 
 
-def test_retry_note_follows_an_ended_elsewhere_abort_source(monkeypatch):
+def test_retry_drops_the_result_when_the_abort_source_is_ended_elsewhere(monkeypatch):
     """等待重试的 job 碰上同一个交错：退避期间另一个线程以 ended-elsewhere 登记了中止标志，而停手信号的读取返回 False。重新启动之前的
-    检查注明的是 run 已被记为已结束，不是 fail-fast；中止标志那一项已命中，不再读存储。"""
+    检查按「已发现 run 被别处结束」处理，不按 fail-fast：这一次的结果不被采用；中止标志那一项已命中，不再读存储。"""
     import gherkai_core.schedule as sch
 
     monkeypatch.setattr(sch._EndedElsewhere, "seen", lambda self: False)
@@ -2623,15 +2701,14 @@ def test_retry_note_follows_an_ended_elsewhere_abort_source(monkeypatch):
     res = schedule(_rm([_job("n")]), FakeResolver(engine), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=1, network_retry=1, record=record,
                                      retry_sleep=lambda _s: captured["w"].abort_flag.set("ended-elsewhere")))
-    jr = res.jobs[0]
-    assert engine.run_count["n"] == 1 and jr.error_type == "network_error"
-    assert jr.message.endswith("；" + _NOT_RETRIED_ENDED), jr.message
-    assert record.reads == 0
+    assert engine.run_count["n"] == 1 and record.reads == 0
+    assert (res.results, res.stopped_by) == ((), "ended-elsewhere")
 
 
 def test_retry_is_not_restarted_after_a_clock_rollback_once_stop_start_was_observed(monkeypatch):
     """停止启动一经成立不撤销，对等待重试的 job 同样成立：n 退避期间，排队的 b 的检查读到已过停止启动的时刻、没有启动；随后墙钟回拨到
-    更早的时刻，n 重新启动之前的检查仍按已过处理，不再重试、注明原因。run 级是 error 加「已超过允许运行的时间」。"""
+    更早的时刻，n 重新启动之前的检查仍按已过处理，不再重试、注明原因。来路是 deadline：到期的结束写记下 b，run 有 error 即记 error，
+    带「已超过允许运行的时间」。"""
     import gherkai_core.schedule as sch
 
     t = {"s": 0.0}
@@ -2659,10 +2736,11 @@ def test_retry_is_not_restarted_after_a_clock_rollback_once_stop_start_was_obser
                    opts=ScheduleOpts(max_concurrency=2, network_retry=1, retry_sleep=backoff,
                                      wall_clock=lambda: _T0 + timedelta(seconds=t["s"])))
     assert b_done.is_set() and engine.run_count == {"n": 1}
-    n = res.jobs[0]
-    assert [jr.scope_id for jr in res.jobs] == ["n"] and n.error_type == "network_error"
+    n = res.results[0]
+    assert [jr.scope_id for jr in res.results] == ["n"] and n.error_type == "network_error"
     assert n.message.endswith("；" + _NOT_RETRIED_DEADLINE), n.message
-    assert (res.status, res.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert res.stopped_by == "deadline" and _outcome(res, "b").status == Status.SKIPPED
+    assert (_summary(res).status, _summary(res).message) == (Status.ERROR, _DEADLINE_ENDING.run_message)
 
 
 def test_retry_read_failure_is_a_persistence_failure():

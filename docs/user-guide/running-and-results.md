@@ -83,7 +83,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs` 与 `explain` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
-提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；超过允许运行的时间而有 job 没有执行的 run 同样有这一行（见下「允许运行的时间」）。只有这两类 run 有这一行，job 自身的失败原因看 `explain`。
+提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；因超过允许运行的时间、`--fail-fast` 或中断而有 job 没有启动的 run 同样有这一行，说明余下的 job 为什么没有启动（见下「允许运行的时间」与「退出码」）。只有这几类 run 有这一行，job 自身的失败原因看 `explain`。
 
 ## 常用选项（`run` / `submit`）
 
@@ -106,7 +106,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 | `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行 |
 | `--default-job-timeout S` | 按目标 | job 墙钟预算，单位为秒。不给时桌面 scope 为 300 秒，设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 对任何目标都取最长的 7200 秒（2 小时）；给正值时不得超过 7200 秒，设备 scope 还不得低于获取预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
 | `--grace S` | 自动 | 仅 `run`：中止时留给 worker 收尾的秒数，收尾包括释放会话（桌面目标是云端浏览器会话，设备目标是远程访问会话）与保存产物；不给则按这个 run 用到的引擎自报的最短收尾宽限推导。比这个宽限更短时，worker 可能在释放会话或保存产物之前被强制终止，没释放的会话继续计费，所以给出更小的值时命令在开始执行前以退出码 2 结束。云端后端的停止宽限在部署时定，写在 `gherkai.toml` 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
-| `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
+| `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job：执行中的记 `aborted`，还没有启动的记 `skipped`，run 记 `error` |
 
 单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止这个 run。
 
@@ -117,12 +117,12 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 前台 `run`（`--no-report` 同样）与 `submit` 提交的后台 run 都遵守这个时刻：
 
 - 离这个时刻不到 60 秒时，不再启动新的 job。
-- 正在执行的 job 的截止时刻取它自己的预算到点与这个时刻中较早的一个。被这个时刻截断的 job 判 `error`、归因 `timeout`，说明是「这个 run 已超过允许运行的时间，job 被中止」；自己的预算不晚于这个时刻到点的，仍是原来的超时说明「job 超时（预算 …s，已中止）」，运行期间休眠过时多是这种（见下）。截止时刻之后、被停下之前就自己异常退出的 job 同样判超时；已经报完全部结果、只是收尾越过截止时刻的 job 保留原有判定。
-- 这时仍有 job 没有执行的 run，总状态记 `error`，`run` 的文本汇总与报告首页在总状态下给出说明「已超过允许运行的时间」，没有执行的 job 列在最后、标为「没有执行」；`status` 的 `message` 行与 `status --json` 的 `message` 键是同一句。这些 job 没有判定、不写判定明细，运行状态里保持 `pending`；`run --json` 顶层的 `message` 是同一句说明，`jobs` 里没有这些 job。重新运行时用 `--scope` 只选它们与归因 `timeout` 的 job（两种超时说明都算）。全部 job 都执行了的 run 照常按各 job 的判定给总状态，不带这句说明。
+- 正在执行的 job 的截止时刻取它自己的预算到点与这个时刻中较早的一个（两者相同时算预算到点）。被这个时刻截断的 job 记 `aborted`、没有归因，说明是「这个 run 已超过允许运行的时间，job 被中止」：run 的时间用完不是这个 job 自己出错，它也不触发 `--fail-fast`。自己的预算不晚于这个时刻到点的，仍判 `error`、归因 `timeout`，说明是「job 超时（预算 …s，已中止）」，运行期间休眠过时多是这种（见下）。截止时刻之后、被停下之前就自己异常退出的 job 同样按到点处理；已经报完全部结果、只是收尾越过截止时刻的 job 保留原有判定。
+- 这时仍有 job 没有启动的 run，在正在执行的 job 都结束之后结束：没有启动的 job 记 `skipped`，说明是「这个 run 已超过允许运行的时间，job 没有启动」，它们没有判定明细；run 级写下说明「已超过允许运行的时间」，`run` 的文本汇总与报告首页在总状态下给出这句，并把这些 job 连同各自的说明列在有判定明细的 job 之后。`status` 的 `message` 行、`status --json` 与 `run --json` 顶层的 `message` 都是同一句；`run --json` 的 `jobs` 按提交的次序列出全部 job，这些 job 只带 `scope_id`、`status` 与 `message`。总状态按各 job 的状态得出：有 job 出错为 `error`，否则有用例失败为 `failed`，否则为 `aborted`（这个 run 没有执行完）。重新运行时用 `--scope` 只选 `skipped` 与 `aborted` 的 job，以及归因 `timeout` 的 job。全部 job 都启动了的 run 不带这句说明，总状态同样按各 job 的状态给出。
 
 后台 run 由推进它的一方执行这些规则：
 
-- `submit --backend local`：本机的后台进程在截止时刻停下正在执行的 job，它们结束之后收尾。这个进程已不在时（被结束、机器重启过），过了这个时刻之后执行一次 `status --wait`：它不再启动任何 job，把原进程启动、过了截止时刻 10 秒仍没有留下结束记录的 job 判为超时，然后收尾。`status --wait` 分不清原进程是已经不在、还是正在停下这个 job：原进程还在、它停下的 worker 收尾超过这 10 秒时，同时执行的 `status --wait` 同样会把这个 job 判为超时。收尾时读到的记录里已经有 worker 随后报完的结果，这个 job 才按它判定；收尾读取记录之后才到达的结果，这次收尾不采用。run 结束之后，run 的总状态不再改变；这个 job 的判定明细仍可能被另一次收尾改写，这时它可能与报告里这个 job 的判定不同。
+- `submit --backend local`：本机的后台进程在截止时刻停下正在执行的 job，它们结束之后收尾。这个进程已不在时（被结束、机器重启过），过了这个时刻之后执行一次 `status --wait`：它不再启动任何 job，把原进程启动、过了截止时刻 10 秒仍没有留下结束记录的 job 按到点处理（被这个时刻截断的记 `aborted`，预算先到点的判超时），然后收尾。`status --wait` 分不清原进程是已经不在、还是正在停下这个 job：原进程还在、它停下的 worker 收尾超过这 10 秒时，同时执行的 `status --wait` 同样会把这个 job 按到点处理。收尾时读到的记录里已经有 worker 随后报完的结果，这个 job 才按它判定；收尾读取记录之后才到达的结果，这次收尾不采用。run 结束之后，run 的总状态不再改变；这个 job 的判定明细仍可能被另一次收尾改写，这时它可能与报告里这个 job 的判定不同。
 - `submit --backend cloud`：每个 job 在云端的到点停止以这个时刻封顶，后端在截止时刻之后停下正在执行的 job（定时服务只承诺分钟精度，停下的时刻会略晚于截止时刻），到期之后的收尾由它们被停下而引出。某个 job 在截止时刻没能被停下、又一直没有任何输出时，后端没有别的东西去推进这个 run，用 `status --wait` 接力即可。
 
 job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前台 `run` 与后台 run 相同：前台 `run` 与 `submit --backend local` 运行期间你的机器休眠过的，休眠的时长同样计入。
@@ -146,9 +146,9 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或超过允许运行的时间而有 job 没有执行 | 开始执行前的配置或可达性问题；给出了云端后端（`run` 只在本机后端执行，云端后端用 `submit --backend cloud`） |
+| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或有 job 被中止、没有启动（`--fail-fast`、超过允许运行的时间）；这个 run 在本次执行结束之前已被别处记为已结束（这时不输出汇总，见下） | 开始执行前的配置或可达性问题；给出了云端后端（`run` 只在本机后端执行，云端后端用 `submit --backend cloud`） |
 | `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
-| `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或前台 `run` 被中断、run 级判定记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错 |
+| `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或有 job 被中止、没有启动，run 级记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
 | `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
 | `list-runs` | 读到清单了吗 | 读到了；清单为空、或其中有无法读取的行，同样以退出码 0 结束 | — | 参数不合法（`--limit` 不是正整数、`--status` 不是 run 的状态值）、本机报告落点目录不可读、云端读不到（region 或凭证、运行记录表不存在或无权限、清单索引缺失或还在建立、读取被限流后重试仍未读全）、CLI 与后端版本不匹配 |
@@ -158,7 +158,9 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
 | `skill install` | agent skill 装上了吗 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录、目标目录里已有不是本命令装的内容、包内 agent skill 缺失、写入失败 |
 
-前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；退出码为 130（Ctrl-C）或 143（SIGTERM），与各 job 的判定无关；有 job 记为 aborted 或 skipped 时，run 级判定记 `aborted`（同时超过了允许运行的时间而有 job 没有执行时记 `error`，见上「允许运行的时间」）。给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾。
+前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；退出码为 130（Ctrl-C）或 143（SIGTERM），与各 job 的判定无关。执行中被停下的 job 记 `aborted`（说明「收到中断信号：本 job 被中止」），还没有启动的 job 记 `skipped`（说明「收到中断信号，本 job 没有启动」，没有判定明细），run 级写下说明「收到中断信号，余下的 job 不再启动」；总状态按各 job 的状态得出：有 job 出错为 `error`，否则有用例失败为 `failed`，否则为 `aborted`。中断之前已经超过允许运行的时间、或已因 `--fail-fast` 不再启动 job 的，说明取先发生的那一种。给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾。
+
+前台 `run` 还有两种情形不输出汇总（`--json` 时 stdout 为空），说明在标准错误：这个 run 在本次执行结束之前已被别处记为已结束，本次执行不覆盖那条记录、不生成报告，在这之后得出的结果也不写进记录，以退出码 1 结束；运行期间写不进或读不出这个 run 的运行记录（磁盘已满、报告目录没有写权限等），执行中的 job 被停下，说明写明记录在哪里、怎样查看，以非零退出码结束，这时执行中的 job 在记录里仍为 `running`；结果已全部写进记录、只是输出汇总之前读回记录失败时，说明写明记录已是这个 run 的最终状态、不必重新执行，这时也不生成报告。两种情形都用 `gherkai status <run_id>` 查看记录，处理过中断时退出码仍为 130 或 143。
 
 分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。这条命令若只是在等待（所等的 run 由前台 `run` 推进），或这个 run 在云端后端，停止它不影响 run 的推进；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
@@ -170,15 +172,15 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 reports/<run_id>/
 ├─ index.html          可点开的报告入口：判定明细树 + 每条产物一行链接
 ├─ manifest.json       机读的产物清单
-├─ jobs/               每个 job 一份判定明细，文件名由 `scope_id` 编码而来（未标 `@scope` 的用例，`scope_id` 就是 `<文件>:<行号>`） —— 判定的权威在这里
+├─ jobs/               每个启动过、得出了结果的 job 一份判定明细，文件名由 `scope_id` 编码而来（未标 `@scope` 的用例，`scope_id` 就是 `<文件>:<行号>`） —— scenario 与 step 的结果和原因在这里；没有启动的 job 没有
 ├─ run_meta.json       这个 run 提交了什么（run_id、并发、每个 job 的用例原文与预算）
-├─ run_state.json      运行到哪了
+├─ run_state.json      运行到哪了：run 与各 job 的状态以这里为准
 ├─ nova-trajectories/  Nova Act 引擎的轨迹与会话汇总，以及每步的 AI 证据与截图
 ├─ midscene-run/       Midscene 引擎的报告与截图，以及每步的 AI 证据；log/ai-config.log 记录这次实际用的模型
 └─ worker.log          仅 `run --quiet` 且在本机运行时
 ```
 
-同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。判定以 `jobs/` 下的明细或退出码为准，不要以 `index.html` 为准：它是可以重建的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
+同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。状态以退出码与 `status --json`（读的是 `run_state.json`）为准，scenario 与 step 的明细用 `explain` 看，不要以 `index.html` 为准：它是由这些记录生成的展示视图。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
 设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录、从获取设备到释放各阶段的时刻，以及执行前失败的原因与释放时是否有会话未能确认停止）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，存放在 us-west-2（与运行用的 region 无关），到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；gherkai 不删除任何会话。要留得更久，自己从控制台或 API 归档；要提前删除，在 Device Farm 控制台删除对应的会话，或执行 `aws devicefarm delete-remote-access-session --region us-west-2 --arn <会话 ARN>`（只能删除已结束的会话），删除后报告与 `explain` 里指向这个会话的控制台链接随之失效。录像会录下设备屏幕上显示的全部内容，在被测应用里登录请使用专用的测试账号。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
 
@@ -231,7 +233,8 @@ gherkai explain "$RUN_ID" --all --full --json > evidence.json
 - 默认展开状态为失败、出错、被跳过的步；通过的步只列一行。
 - `--step N` 点名的那一步连通过也展开，须与 `--scenario` 同给；`--all` 让通过的步也展开。
 - 文本形态是摘要：每次 AI 调用只显示最后一段推理与它的截图地址，`--full` 逐帧全文，`--json` 内嵌完整证据。
-- job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时还没上报完成记录的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
+- 没有启动的 job（`--fail-fast`、中断或超过允许运行的时间之后余下的，状态是 `skipped`）没有判定明细：点名它时（`gherkai explain "$RUN_ID" <scope_id>`）给出运行状态里的状态与说明，退出码为 0。
+- job 被中止或出错时（按了 Ctrl-C、超时、fail-fast、超过允许运行的时间、worker 被外部停止），没执行完的用例没有判定，但其中已执行完的步 `explain` 仍能显示并带出证据：这些步从这个 run 的事件记录补取，行尾标「记录取自事件流」，所属用例标「未完成」；被中止时还没上报完成记录的那一步没有记录。补不到（例如这个 run 由不写事件记录的旧版本执行）时在该 job 下写明原因。
 - `explain` 的退出码从不表示判定结果，用例失败它照样以退出码 0 结束。`submit` 提交的 run 在收尾之前还没有判定明细，这时它提示先用 `status --wait`；`run` 还在执行时，它显示已完成的 job，并提示这只是已完成的部分；`submit` 提交的 run 一次收尾没有完成而 run 仍未结束时（例如到期收尾的同时又有 job 被安排执行，或收尾中途出错、中断），已写出的判定明细同样照常显示，带同一句提示。
 - 哪一步没有 AI 证据（确定性 step 本就不产，设备目标上只有判为 passed 的确定性与导航 step 不产；或抽取当时失败了），它会明说，并给出该步其它产物的链接。
 - 设备目标上，判为 failed / error 的确定性与导航 step 也有证据（没有 AI 调用，`acts` 为空）。设备的证据多几项：这一步的执行方式 `step_kind`（`ai` / `deterministic` / `navigation`）；step 结束时的页面地址 `url`，取不到时 `url_missing` 说明原因（设备不提供网页上下文、应用目标没有地址、读取超时或出错）；判为 failed / error 的 step 另有控件摘要 `controls`（每个控件的类型、id、文本与无障碍标识，条数有上限、超出时注明截断）与原始控件树文件 `page_source`（只给地址，超过大小上限时截断并以 `page_source_truncated` 注明）。设备 job 另有一条 `device_session` 链接，指向上面的 `device-session.json`，`explain` 只给链接、不解析它。地址读取与控件采集按 step 累加计入 job 墙钟预算。

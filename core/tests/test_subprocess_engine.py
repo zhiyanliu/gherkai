@@ -10,8 +10,9 @@ import time
 from pathlib import Path
 
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
-from gherkai_core.model import Job, RunMeta, Scenario, ScopeDone, ScopeStarted, Status, Step, StepArgument
-from gherkai_core.schedule import schedule, ScheduleOpts
+from gherkai_core.model import Job, RunMeta, RunResult, Scenario, ScopeDone, ScopeStarted, Status, Step, StepArgument
+from gherkai_core.persist import result_without_record
+from gherkai_core.schedule import Execution, schedule, ScheduleOpts
 from tests.fake_engine import FAR_DEADLINE, CollectSink
 
 _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
@@ -19,6 +20,11 @@ _WORKER = str(Path(__file__).parent / "fixtures" / "echo_worker.py")
 
 def _rm(jobs: list[Job], run_id: str = "test-run") -> RunMeta:
     return RunMeta(run_id=run_id, created_at="", jobs=tuple(jobs), deadline_at=FAR_DEADLINE)
+
+
+def _summary(ex: Execution) -> RunResult:
+    """没有记录的执行在内存里按同一套规则给出的 run 结果（`run --no-report` 同一条路径），断言 run 级状态与说明时用。"""
+    return result_without_record(ex, ended_at="2030-01-01T00:00:00+00:00")
 
 
 def _engine(mode: str) -> SubprocessEngine:
@@ -62,18 +68,18 @@ def test_adapter_roundtrip_pass():
 def test_adapter_with_schedule_pass():
     engine = _engine("pass")
     result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink())
-    assert result.status == Status.PASSED
-    assert result.jobs[0].status == Status.PASSED
-    assert result.jobs[0].session_id == "echo-sess"
+    assert _summary(result).status == Status.PASSED
+    assert result.results[0].status == Status.PASSED
+    assert result.results[0].session_id == "echo-sess"
 
 
 # ---- worker 崩（非零退出）→ schedule 记 error ----
 def test_adapter_crash_is_error():
     engine = _engine("crash")
     result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink())
-    assert result.status == Status.ERROR
-    assert result.jobs[0].status == Status.ERROR
-    assert result.jobs[0].error_type == "engine_error"
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].status == Status.ERROR
+    assert result.results[0].error_type == "engine_error"
 
 
 # ---- worker 以 EX_WORKER_NETWORK(80) 退出 → adapter 翻 WorkerNetworkError → schedule 记 network_error ----
@@ -97,8 +103,8 @@ def test_adapter_network_error_with_schedule_classified_and_retried():
     # 经 schedule：记 network_error；开 network_retry=1 → 真重新 spawn worker（净跨进程验证）
     result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(network_retry=1, retry_sleep=lambda _s: None))
-    assert result.status == Status.ERROR
-    assert result.jobs[0].error_type == "network_error"  # exit 80 → 真 seam → network_error
+    assert _summary(result).status == Status.ERROR
+    assert result.results[0].error_type == "network_error"  # exit 80 → 真 seam → network_error
 
 
 # ---- worker 卡死 → SIGTERM 停止（adapter handle.stop 直接测）----
@@ -149,8 +155,8 @@ def test_silent_worker_timeout_fires_via_heartbeat():
         opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2),
     )
     elapsed = time.monotonic() - t0
-    assert result.jobs[0].status == Status.ERROR
-    assert result.jobs[0].error_type == "timeout"  # 超时分类（非 engine_error）
+    assert result.results[0].status == Status.ERROR
+    assert result.results[0].error_type == "timeout"  # 超时分类（非 engine_error）
     assert elapsed < 15.0, f"超时应靠心跳准时触发，实际耗时 {elapsed:.1f}s（疑似退回阻塞死等）"
 
 
@@ -225,7 +231,7 @@ def test_fail_fast_stops_multiple_deaf_victims_in_parallel(tmp_path):
                       opts=ScheduleOpts(max_concurrency=3, fail_fast=True, grace_period_s=grace, heartbeat_interval_s=0))
     for t in watchers:
         t.join(timeout=5.0)
-    by = {jr.scope_id: jr for jr in result.jobs}
+    by = {jr.scope_id: jr for jr in result.results}
     assert (by["c"].status, by["c"].error_type) == (Status.ERROR, "engine_error")
     assert (by["v1"].status, by["v1"].error_type) == (Status.ABORTED, None) and (by["v2"].status, by["v2"].error_type) == (Status.ABORTED, None)
     assert len(stop_phase_start) == 1 and set(deaths) == {"v1", "v2"}, deaths
@@ -320,7 +326,7 @@ def test_done_then_deaf_fdholder_hits_drain_bound_and_is_judged_timeout(tmp_path
         result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
                           opts=ScheduleOpts(grace_period_s=grace, heartbeat_interval_s=0.2))
         elapsed = time.monotonic() - t0
-        jr = result.jobs[0]
+        jr = result.results[0]
         assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
         assert grace + DRAIN_MARGIN_S <= elapsed < grace + DRAIN_MARGIN_S + 8.0, elapsed  # 等到了排空上界、之后不再等
         pids = _wait_pids(pid_file, 2)
@@ -342,7 +348,7 @@ def test_done_then_deaf_worker_is_killed_after_hurry_exit_and_judged_timeout(tmp
     result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(grace_period_s=0.5, heartbeat_interval_s=0.2))
     elapsed = time.monotonic() - t0
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout"), (jr.status, jr.error_type, jr.message)
     assert [sr.status for sr in jr.scenarios] == [Status.PASSED]  # 内容已完整的明细保留
     # 走的是 SIGKILL 后管道 EOF 的路，不是排空上界兜底：耗时远小于 deadline 加宽限加余量，且 worker 进程已被回收
@@ -357,7 +363,7 @@ def test_done_then_slow_worker_keeps_content_verdict_despite_deadline():
     result = schedule(_rm([_job("s", timeout_s=1.0)]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2))
     elapsed = time.monotonic() - t0
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert (jr.status, jr.error_type) == (Status.PASSED, None), (jr.status, jr.error_type, jr.message)
     assert elapsed < 10.0, elapsed
 
@@ -371,7 +377,7 @@ def test_bad_event_line_stops_the_still_running_worker(tmp_path):
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env=env)
     result = schedule(_rm([_job("s")]), lambda name: engine, CollectSink(),
                       opts=ScheduleOpts(grace_period_s=5.0, heartbeat_interval_s=0.2))
-    jr = result.jobs[0]
+    jr = result.results[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and jr.message.startswith("worker 异常：")
     pid = int(pid_file.read_text().split()[0])
     deadline = time.monotonic() + 5.0
@@ -393,8 +399,8 @@ def test_session_id_captured_from_scope_started_on_timeout():
         opts=ScheduleOpts(grace_period_s=5.0),
     )
     # silent worker 超时被杀、从未 emit scope_done——但 session_id 已随 scope_started 落到 result（ADR 0028）
-    assert result.jobs[0].status == Status.ERROR
-    assert result.jobs[0].session_id == "echo-sess", "超时路径下 session_id 应仍从 scope_started 捕获到"
+    assert result.results[0].status == Status.ERROR
+    assert result.results[0].session_id == "echo-sess", "超时路径下 session_id 应仍从 scope_started 捕获到"
 
 
 # ---- 同条直接验证：scope_started 事件本身带 sessionId（协议层，不经超时）----
@@ -686,14 +692,15 @@ def test_positive_grace_stop_kills_deaf_grandchild_when_leader_already_exited(tm
 # ---- 运行期限与这次 run 的记录（ADR 0054 决策二、五）：真子进程在期限时刻被停、发现 run 已被别处结束时被停 ----
 
 def test_real_worker_is_stopped_at_the_run_deadline_and_the_queued_job_never_starts(tmp_path):
-    """期限落在执行中途：运行中的真 worker 在期限时刻收到停止请求（SIGTERM）退出，判 error、类型为超时、说明是期限那一句；排队中的
-    job 已过停止启动的时刻，从未 spawn、不产出判定；run 级是 error 加「已超过允许运行的时间」。墙钟是系统墙钟加一个偏移，worker
-    进入执行之后把偏移拨快 60 秒，让「执行中途到期」在一两秒内发生，其余（子进程、信号、心跳醒来、事件流结束）都是真的。"""
+    """期限落在执行中途：运行中的真 worker 在期限时刻收到停止请求（SIGTERM）退出，内容不完整，记 aborted、没有归因、说明是期限那一句；
+    排队中的 job 已过停止启动的时刻，从未 spawn、不产出判定，来路是 deadline，到期的结束写记下它；run 按取法记 aborted、带「已超过允许
+    运行的时间」。墙钟是系统墙钟加一个偏移，worker 进入执行之后把偏移拨快 60 秒，让「执行中途到期」在一两秒内发生，其余（子进程、
+    信号、心跳醒来、事件流结束）都是真的。"""
     import os
     from datetime import datetime, timedelta, timezone
 
     from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+    from gherkai_core.run_status import RUN_ENDINGS
 
     pid_file = tmp_path / "pids"
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "hang", "WORKER_PID_FILE": str(pid_file)})
@@ -716,10 +723,11 @@ def test_real_worker_is_stopped_at_the_run_deadline_and_the_queued_job_never_sta
     result = schedule(meta, lambda name: engine, _Sink(), on_job_complete=seen.append,
                       opts=ScheduleOpts(max_concurrency=1, grace_period_s=5.0, heartbeat_interval_s=0.2, wall_clock=wall))
     elapsed = time.monotonic() - t0
-    assert [jr.scope_id for jr in result.jobs] == ["s1"] and [jr.scope_id for jr in seen] == ["s1"]
-    s1 = result.jobs[0]
-    assert (s1.status, s1.error_type, s1.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
-    assert (result.status, result.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
+    assert [jr.scope_id for jr in result.results] == ["s1"] and [jr.scope_id for jr in seen] == ["s1"]
+    s1 = result.results[0]
+    assert (s1.status, s1.error_type, s1.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
+    assert result.stopped_by == "deadline"
+    assert (_summary(result).status, _summary(result).message) == (Status.ABORTED, RUN_ENDINGS["deadline"].run_message)
     pids = _wait_pids(pid_file, 1)
     assert len(pids) == 1, pids  # s2 的 worker 从未 spawn
     _assert_process_gone(pids[0])
@@ -727,9 +735,10 @@ def test_real_worker_is_stopped_at_the_run_deadline_and_the_queued_job_never_sta
 
 
 def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path):
-    """前台执行期间另一个进程把 run 记为已结束（条件写，真本机 store 与文件锁）：发起进程下一次写 job 状态时得知 run 级已结束，停手信号
-    经等待循环读到，两个运行中的真 worker 收到停止请求退出、记 aborted（「这个 run 已被记为已结束」）；收尾写被已有的终态挡下，记录里
-    仍是另一方写的 error 与说明，各 job 的判定照常写入、认领时刻保留。"""
+    """前台执行期间另一个进程以结束写把 run 记为已结束（处置的那一行，真本机 store 与文件锁）：发起进程下一次写 job 状态时得知 run 级
+    已结束，停手信号经等待循环读到，两个运行中的真 worker 收到停止请求退出、在执行事实里记 aborted（「这个 run 已被记为已结束」）。
+    此后前台不存明细、不写终态，收尾不做结束写、抛 RunAlreadyEnded：记录保持那次结束写的结果（两个 job 记 aborted、带处置的说明），
+    认领时刻保留，没有判定明细文件。"""
     import os
     import subprocess
 
@@ -740,17 +749,19 @@ def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path
     from gherkai_core.errors import RunAlreadyEnded
     from gherkai_core.persist import RunPersistence
     from gherkai_core.project import ENDED_ELSEWHERE_ABORT_MESSAGE
+    from gherkai_core.run_status import RUN_ENDINGS
 
     root = tmp_path / "reports"
     pid_file = tmp_path / "pids"
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "hang", "WORKER_PID_FILE": str(pid_file)})
     run_store = LocalRunStore(root)
-    persistence = RunPersistence("r", run_store, LocalResultStore(root))
+    result_store = LocalResultStore(root)
+    persistence = RunPersistence("r", run_store, result_store)
     meta = _rm([_job("a"), _job("b")], run_id="r")
     persistence.begin(meta, started_at="t0")
     started: list[str] = []
-    settle = ("import sys\nfrom gherkai_core.adapters.run_store.local import LocalRunStore\nfrom gherkai_core.model import Status\n"
-              "print(LocalRunStore(sys.argv[1]).try_finalize('r', Status.ERROR, 't5', message='m'))")
+    settle = ("import sys\nfrom gherkai_core.adapters.run_store.local import LocalRunStore\nfrom gherkai_core.run_status import RUN_ENDINGS\n"
+              "print(LocalRunStore(sys.argv[1]).end_run('r', RUN_ENDINGS['settle-advancer-exited'], ended_at='t5'))")
     settled: list[str] = []
 
     class _Sink(CollectSink):
@@ -768,15 +779,18 @@ def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path
                                         record=persistence))
     elapsed = time.monotonic() - t0
     assert settled == ["True"]
-    assert [(jr.scope_id, jr.status, jr.message) for jr in result.jobs] == [
+    assert [(jr.scope_id, jr.status, jr.message) for jr in result.results] == [
         ("a", Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE), ("b", Status.ABORTED, ENDED_ELSEWHERE_ABORT_MESSAGE)]
-    assert result.status == Status.ABORTED and persistence.ended_elsewhere()
+    assert result.stopped_by == "ended-elsewhere" and persistence.ended_elsewhere()
     with pytest.raises(RunAlreadyEnded):
-        persistence.finalize(result, ended_at="t9")
+        persistence.finalize(result)
+    settled = RUN_ENDINGS["settle-advancer-exited"]
     state = run_store.load_run_state("r")
-    assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ERROR, "m", "t5", 2)
-    assert {sid: js.status for sid, js in state.jobs.items()} == {"a": Status.ABORTED, "b": Status.ABORTED}
+    assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ABORTED, settled.run_message, "t5", 2)
+    assert {sid: (js.status, js.message) for sid, js in state.jobs.items()} == {
+        "a": (Status.ABORTED, settled.aborted_message), "b": (Status.ABORTED, settled.aborted_message)}
     assert all(js.claimed_at is not None for js in state.jobs.values())
+    assert result_store.load_all("r") == []  # 得知 run 已结束之后不存明细
     pids = _wait_pids(pid_file, 2)
     assert len(pids) == 2, pids
     for pid in pids:

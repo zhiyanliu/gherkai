@@ -37,7 +37,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 - `list-engines --json`：每引擎 `{engine, available, cmd, cwd, source, hint}`。
 - `deploy list-workers --json`：`{prefix, version, default_variant, engines: {<engine>: {family, ecr_repo, variants: […], pending_cleanup: […]}}}`。
-- `run --json`：`jobs[]` 列出运行定义里的全部 job，状态与由结束写结束的 job 的说明取运行态；被点名的附上那一份明细的各键，没有的不带。
+- `run --json`：`jobs[]` 按运行定义的次序列出全部 job，状态与由结束写结束的 job 的说明取运行态；被点名的附上那一份明细的各键，没有的不带（由结束写结束的 job 只有 `scope_id`、`status` 与 `message`）；顶层的 run 级 `status` 与 `message` 同样取运行态。出自从记录组装的同一份结果（[0027](./0027-runreport-aggregation-index.md)「RunResult 的组装只有一处」条），`run --no-report` 按同一套规则在内存里组装。
 - `status --json`：在 RunState 之外**附加** `artifacts`（与 `run --json` 同键：`run_meta` / `run_state` / `jobs_dir` / `report_index`），位置由 compose 单点拼、始终给出；落点上有没有内容不由这个键表达，也不能只凭 status 是否终态推断；各键何时有内容以 [`docs/internals/cli-json-contract.md`](../internals/cli-json-contract.md)「`status --json`」一节 `artifacts` 一行为准（出处登记见 [0034](./0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」）。`jobs[]` 每项带这个 job 的终态点名的明细标识（[0030](./0030-realtime-persistence-seam.md) 决定三；未点名时按运行态的惯例省键）；顶层另带运行期限 `deadline_at`（取自提交记录，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二），不另给由它推出的键。RunState 部分只做加法（加法兼容）。
 - `explain --json`：判定树 + 每步 evidence 合成的排障视图，形状见 [0042](./0042-step-evidence-and-explain.md) 决策四。
 - `list-runs --json`：一个后端里的 run 清单，形状见决策七。

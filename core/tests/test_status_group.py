@@ -2,7 +2,7 @@
 
 不变量分两半：写 run 级 `status` 的路径在写之后建立 `status_group` 与 `status` 的对应（非终态为 `live`，终态为该终态的
 状态值），含 `create_run` 传入终态初始状态的情形，以及带结果的 job 终态写 `commit_job_states` 与结束写 `end_run`；不写 run 级
-`status` 的路径（全 pending 的投影、只写 job 的写）保持已有的对应，写之前缺分组属性的记录写之后仍缺。断言直接读 STATE item 的原始属性：分组属性不进 `RunState`，经
+`status` 的路径（全 pending 的投影、写不成的执行中写）保持已有的对应，写之前缺分组属性的记录写之后仍缺。断言直接读 STATE item 的原始属性：分组属性不进 `RunState`，经
 `load_run_state` 看不到它。期望值在本文件按上述规则独立写出，不调用被测的派生函数。
 
 本机后端没有索引、不写分组属性，所以这里只有 DynamoDB 一侧。
@@ -291,15 +291,16 @@ def _project_all_pending(store, meta):
     assert store.project_state(meta.run_id, _projection(meta, 2)) is True
 
 
-def _pending_job_write(store, meta):
-    store.update_job_state(meta.run_id, JobState(scope_id="b", status=Status.PENDING, session_id="s-2"))
+def _job_write_outside_the_run(store, meta):
+    assert store.update_job_state(meta.run_id, JobState(scope_id="ghost", status=Status.RUNNING, session_id="s-2")) is True
 
 
-@pytest.mark.parametrize("write", [_project_all_pending, _pending_job_write], ids=["all-pending-projection",
-                                                                                   "pending-job-write"])
+@pytest.mark.parametrize("write", [_project_all_pending, _job_write_outside_the_run],
+                         ids=["all-pending-projection", "rejected-job-write"])
 @pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
 def test_writes_not_touching_run_status_leave_the_group(table, store, write, drop):
-    """全 pending 的投影只写事件进度、写入 pending 的 job 写只写该 job：两者都不碰分组属性，库中的 `live` 保持，缺的仍缺。"""
+    """全 pending 的投影只写事件进度、写不成的执行中写（运行态里没有这个 job）什么都不写：两者都不碰分组属性，库中的 `live` 保持，
+    缺的仍缺。"""
     meta = _meta()
     store.create_run(meta, _initial(meta))
     if drop:
@@ -314,15 +315,15 @@ def test_writes_not_touching_run_status_leave_the_group(table, store, write, dro
 
 @pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
 def test_job_write_on_a_finalized_run_leaves_the_group(table, store, drop):
-    """已收尾的 run 上前台 job 写的回退写只写 job：run 级与分组都不变，缺的仍缺。"""
+    """已收尾的 run 上前台的执行中写写不成：job、run 级与分组都不变，缺的仍缺。"""
     meta = _meta()
     store.create_run(meta, _initial(meta))
     assert store.try_finalize("run-1", Status.PASSED, "2026-11-12T01:00:00Z") is True
     if drop:
         _drop_group(table)
-    store.update_job_state("run-1", JobState(scope_id="a", status=Status.FAILED, session_id="s-1"))
+    assert store.update_job_state("run-1", JobState(scope_id="a", status=Status.RUNNING, session_id="s-1")) is False
     item = _raw(table)
-    assert item["jobs"]["a"]["status"] == "failed" and item["status"] == "passed"
+    assert item["jobs"]["a"]["status"] == "pending" and item["status"] == "passed"
     assert item.get("status_group") == (None if drop else "passed")
 
 
@@ -334,7 +335,7 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
     if op == 0:
         store.try_claim_job(meta.run_id, sid, claimed_at="2026-11-12T00:00:01Z")
     elif op == 1:
-        store.update_job_state(meta.run_id, JobState(scope_id=sid, status=rng.choice(list(Status))))
+        store.update_job_state(meta.run_id, JobState(scope_id=sid, status=Status.RUNNING, session_id=rng.choice([None, "s-1"])))
     elif op == 2:
         hwm[0] += rng.choice([-1, 0, 1, 2])  # 含过期的投影（被条件挡下）
         statuses = {j.scope_id: rng.choice([Status.PENDING, Status.RUNNING, *_TERMINAL]) for j in meta.jobs}
@@ -356,7 +357,7 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
 
 
 def test_group_corresponds_to_status_after_every_write_of_a_random_sequence(table, store):
-    """由写 run 级 `status` 的路径建立的记录，经任意写序列（认领、各状态的 job 写、含全 pending 与过期的投影、收尾写、终态写、
+    """由写 run 级 `status` 的路径建立的记录，经任意写序列（认领、执行中的写、含全 pending 与过期的投影、收尾写、终态写、
     各条来路的结束写、对已有 run 的重建），每次写之后都满足「分组为 `live` 当且仅当状态非终态」，终态时分组等于状态值。种子固定，
     失败可复现。"""
     rng = random.Random(20261112)

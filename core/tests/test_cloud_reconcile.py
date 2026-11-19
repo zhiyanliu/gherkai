@@ -407,23 +407,25 @@ def _expiry_setup(events_table, ddb_run_store):
 
 
 def test_expiry_commits_on_ddb(events_table, ddb_run_store):
-    """云端后端上的到期收尾：不认领 b，run 级以带认领计数的条件写收尾为 error 加说明，b 保持 pending（与本机对拍）。"""
+    """云端后端上的到期收尾：不认领 b，到期的结束写把 b 记 skipped 并带到期的说明，run 按取法记 aborted、带「已超过允许运行的时间」；
+    交还的判定明细只有有记录的 a（与本机对拍）。"""
     from gherkai_core.reconcile import TickOutcome, tick
-    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+    from gherkai_core.run_status import RUN_ENDINGS
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)
     log = DdbEventLog(events_table, "run-1", ["a", "b"])
     done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=41))
-    assert done.outcome is TickOutcome.COMMITTED
+    assert done.outcome is TickOutcome.COMMITTED and [jr.scope_id for jr in done.details] == ["a"]
+    ending = RUN_ENDINGS["deadline"]
     state = ddb_run_store.load_run_state("run-1")
-    assert (state.status, state.message, state.jobs["a"].status, state.jobs["b"].status) == (
-        Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, Status.PASSED, Status.PENDING)
+    assert (state.status, state.message, state.jobs["a"].status, state.jobs["b"].status, state.jobs["b"].message) == (
+        Status.ABORTED, ending.run_message, Status.PASSED, Status.SKIPPED, ending.skipped_message)
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table, ddb_run_store):
-    """到期收尾与认领并发（云端的条件表达式）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——
-    前者的收尾写被认领计数的条件挡下，重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running。与本机的同名
-    用例对拍。"""
+    """到期收尾与认领并发（云端的条件写）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的结束写
+    按写下时的运行态判断（以写入序号为条件、不成立即重读再算），那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；
+    run 没有结束、新认领的 job 仍是 running。与本机的同名用例对拍。"""
     from gherkai_core.reconcile import TickOutcome, TickResult, tick
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)

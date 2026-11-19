@@ -81,12 +81,17 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 
 `run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
 run 开始即写 definition 与初始全 pending 态，每个 scope 起 worker 之前先认领（`RunPersistence` 作为 `ScheduleOpts.record` 注入，
-认领时刻随认领写下），开始执行时写入 RUNNING、完成即落该 scope 判定真值，最后 `finalize` 以条件写落定总状态与 run 级说明（commit point）。
-调度循环的墙钟注入 `compose.now`，与写时间戳的 `compose.now_iso` 同一个读取点；过了运行期限减 60 秒不再启动 job，没有启动的 scope
-不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」。run 级在此之前已被别处记为终态时
-（认领被拒、job 状态写得知 run 已结束，调度循环随即停手），`finalize` 不覆盖它、不写报告，
-`run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。`--no-report` 时跳过整条落库（零落盘运行路径），
-只注入墙钟、不认领，运行期限照样生效。
+认领时刻随认领写下），开始执行时写入 RUNNING，完成即先存该 scope 的判定明细、再以终态写记下它的终态（逐 job 的提交点）。
+调度循环的墙钟注入 `compose.now`，与写时间戳的 `compose.now_iso` 同一个读取点，`RunPersistence` 取结束时刻也用它（`clock=compose.now`）。
+`schedule` 返回执行事实 `Execution`（判出结果的 job、余下的 job 不再启动的来源、整体墙钟），不给 run 级状态。过了运行期限减 60 秒、
+fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finalize(execution)` 在本进程的终态写没有使 run 成为终态时按那条来路做
+结束写，把它们记为 skipped 并写下 run 级说明（ADR 0054 决策二第 1、3 条；ADR 0031 决定三「结束写」小节），本进程使 run 成为终态之后
+读一次运行态、从记录组装 `RunResult`，文本汇总、`--json`、退出码与报告都出自它。run 级在此之前已被别处记为终态时
+（认领被拒、job 状态写得知 run 已结束，调度循环随即停手，此后不存明细、不写终态），`finalize` 不覆盖它、不写报告，抛 `RunAlreadyEnded`，
+`run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。运行期读写运行记录失败
+（存明细、写运行态、收尾时读回运行态）时同样不输出汇总，stderr 给一句说明（发生了什么、记录在哪里、怎么办）、不打回溯，以非零退出码结束。
+`--no-report` 时跳过整条落库（零落盘运行路径），只注入墙钟、不认领，运行期限照样生效；汇总由 `result_without_record(execution)`
+按同一组作用在内存里算出。
 
 `run` 只有本机后端（ADR 0016 决策 A），文件落 `--report-dir`，三个 Store adapter 由 `compose.build_local_stores` 装配。
 云端的 DynamoDB/S3 adapter 由 `submit --backend cloud` 与查询命令经 `compose.build_cloud_stores` 装配（表/桶需预先建好，由 `gherkai deploy` 供给），
@@ -99,10 +104,11 @@ run 开始即写 definition 与初始全 pending 态，每个 scope 起 worker �
 
 ### RunReport 内部
 
-- `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + step 级 gherkai evidence：每个 AI step 各一份，设备目标上失败或出错的确定性 step 与导航 step 也各一份；设备目标另有 scope 级 `device_session` 诊断文件 device-session.json）。判定、时长、成本**不在此**：须以
-  `run_id` 到 `ResultStore`（`jobs/*.json`）取判定真值；`index.html` 才含判定明细。
+- `manifest.json` —— 薄信封（run_id 等）+ 报告产物的扁平清单（引擎原生产物 + step 级 gherkai evidence：每个 AI step 各一份，设备目标上失败或出错的确定性 step 与导航 step 也各一份；设备目标另有 scope 级 `device_session` 诊断文件 device-session.json）。判定、时长、成本**不在此**：
+  状态以 `run_id` 经 `status --json` 读运行态，scenario 与 step 的明细经 `explain --json` 读；`index.html` 才含判定明细。
 - `index.html` —— 判定明细树 + 每个报告产物（Midscene html / Nova trajectory / step evidence）一行链接，链接打开的是**原样**文件。
-  摘要带 run 级说明（有才给），运行定义里有、判定清单里没有的 scope 列在判定明细末尾、标为「没有执行」，与文本汇总同一句。
+  渲染的是从记录组装的 `RunResult`：摘要带 run 级说明（有才给），job 的状态取运行态；没有判定明细的 job（由结束写结束）排在有明细的
+  之后、按运行定义的次序，只显示状态与运行态里的说明、没有明细树，与文本汇总同一规则。
   RunReport 只索引与链接、**不解析融合**产物内容；新引擎上报任意 `kind` 都无需改动 core（ADR 0027）。
 - index 链接指向产物**原位**（local 为相对链接：产物就在 `reports/<run_id>/` 树内、目录可整体移动；cloud 为 `s3://`）。
 
@@ -129,7 +135,7 @@ local 无此上限（worker 运行在发起 run 的本机、以本机凭证计�
 
 ## 退出码分层的切分线
 
-失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此）；开始执行之后的失败只在本机 `run` 出现，以非零退出码结束（ADR 0030 决定七）。
+失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
 「提交 + 判定」由此被拆开（ADR 0034）。执行前的配置错（投票次数、筛选值、读 feature、plan）以退出码 `2` 结束，这一判定只在 `_load_and_plan` 一处：`_cmd_plan` 直接调用，`_cmd_run` 与 `_cmd_submit` 经共享前置 `_plan_and_preflight` 调用；各写一份必然漂移。
 

@@ -1,11 +1,14 @@
 """run 的状态只由 job 的终态算出（ADR 0031 决定三）：取法、结束写的说明表，以及两种使 job 成为终态的写对运行态的作用。
 
-- `run_status_of`：run 状态的取法（ADR 0031 决定三「取法」）。前台的 `schedule` 与后台的 `project.project_full` 现在仍经
-  `project.run_verdict` 取 run 级状态，规则与这里不同；它们迁到这里之后 `run_verdict` 删去。
+- `run_status_of`：run 状态的取法（ADR 0031 决定三「取法」）。两个 RunStore adapter 的每个写入口都在同一次写里按它写 run 状态，后台
+  每一轮的无状态投影（`project.project`）同样按它给出 run 级值；scenario 判定到 job 判定的归约是另一条路径（`project._aggregate`）。
 - `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
   `definition_unavailable_ending` 带上读不到定义的原因。
 - `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
   的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
+- `state_without_record`：没有记录的执行（`run --no-report`）按同一组作用在内存里算出的运行态（ADR 0031 决定五「数据源」）。
+- `StopSource`：前台执行里余下的 job 不再启动的来源，作结束写的来路（ADR 0031 决定三「结束写」小节「一次结束写只带一行说明」条）。
+- `check_running_write`：执行中的写（`RunStore.update_job_state`）的参数校验，两个 adapter 共用。
 
 说明文字只是描述，这里与 adapter 都不解释它（ADR 0031 决定一「状态是一切计算的唯一依据」条）：写成与否、job 与 run 记成什么，都不看
 说明有没有、是什么；结束写成立与否只看运行态与 `RunEnding` 的两个结构字段 `ends_running_jobs`、`definition_unavailable`。说明表一行的
@@ -20,7 +23,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Literal
 
-from gherkai_core.model import TERMINAL_STATUSES, JobState, RunState, Status
+from gherkai_core.model import TERMINAL_STATUSES, JobResult, JobState, RunMeta, RunState, Status
 
 
 def run_status_of(job_statuses: Iterable[Status]) -> Status:
@@ -85,8 +88,13 @@ class RunEnding:
 
 
 # 说明表的来路：执行方自己到期、fail-fast、使用方中断、处置的两行（锁拿到了，即执行这个 run 的进程已退出；已过期限加 300 秒，含云端
-# 后端到期）。前三个与调度循环的中止来源、起 worker 之前的检查项同名（`project.AbortCause`、`schedule._Hold`）。
+# 后端到期）。前三个与 `StopSource` 里的同名，也与调度循环的中止来源（`project.AbortCause`）同名。
 EndingRoute = Literal["deadline", "fail-fast", "interrupt", "settle-advancer-exited", "settle-past-deadline"]
+
+# 前台执行里余下的 job 不再启动的来源（起 worker 与重试之前的检查项）：已过停止启动的时刻（deadline）、run 因 fail-fast 或使用方中断
+# 而中止，或已发现 run 被别处记为已结束（ended-elsewhere）。调度循环记下最先登记的那一条交给落库服务；前三条是说明表里的来路，作结束
+# 写的说明（ADR 0031 决定三「结束写」小节「一次结束写只带一行说明」条），ended-elsewhere 时记录已是终态，不做结束写。
+StopSource = Literal["deadline", "fail-fast", "interrupt", "ended-elsewhere"]
 
 _PAST_DEADLINE = "已超过允许运行的时间"
 _PAST_DEADLINE_NOT_STARTED = "这个 run 已超过允许运行的时间，job 没有启动"
@@ -203,3 +211,51 @@ def commit_applied(state: RunState, job_states: Sequence[JobState], *,
     if status in TERMINAL_STATUSES:
         return replace(state, status=status, jobs=jobs, ended_at=ended_at), CommitOutcome.ENDED_RUN
     return replace(state, status=status, jobs=jobs), CommitOutcome.OPEN
+
+
+def check_running_write(job_state: JobState) -> None:
+    """执行中的写（`RunStore.update_job_state`）的参数校验：写入的 job 态只能是 running，否则抛 ValueError、不写（ADR 0030 决定四）。
+    pending 只由建 run 写下，终态由终态写与结束写写下；与 `commit_applied` 对非终态抛错对称。"""
+    if job_state.status != Status.RUNNING:
+        raise ValueError(f"执行中的写只记 running，job {job_state.scope_id} 的状态是 {job_state.status.value}")
+
+
+# ============================================================================
+# 没有记录的执行：按同一组作用在内存里算出运行态（ADR 0031 决定五「数据源」）
+# ============================================================================
+
+
+def ending_of_stop(stopped_by: StopSource | None) -> RunEnding:
+    """前台执行结束时仍有没有结束的 job：给出结束它们的那一行结束写（`RUN_ENDINGS` 里与 stopped_by 同名的一行）。有记录的收尾
+    （`persist.RunPersistence.finalize`）与没有记录时的内存计算（`state_without_record`）共用这一处。
+
+    stopped_by 为空（余下的 job 没有结束的来路）或为 ended-elsewhere（已被别处结束的 run 不由这次执行结束）时，执行事实与「仍有 job
+    没有结束」不相容，抛 ValueError。零个 job 的 run 属于前一种：没有任何一次写能使它结束（命令行入口拒绝零个 scenario 的批次）。"""
+    if stopped_by is None or stopped_by == "ended-elsewhere":
+        raise ValueError(f"仍有没有结束的 job，而这次执行没有给出可用于结束它们的来路（{stopped_by!r}）")
+    return RUN_ENDINGS[stopped_by]
+
+
+def state_without_record(meta: RunMeta, results: Sequence[JobResult], stopped_by: StopSource | None, *,
+                         ended_at: str) -> RunState:
+    """没有记录的执行（`run --no-report`）的运行态：与有记录时两个写入口对运行态的作用相同，在内存里依次算出。
+
+    从全部 job 为 pending 的初始运行态出发：先把 results（判出结果的 job）经 `commit_applied` 记为终态；run 还没到终态时，余下的 job
+    由 stopped_by 这条来路的结束写结束（`ending_applied`）。这时没有执行中的 job，结束写恒成立。会话取明细里的；没有认领写，认领时刻
+    为空。
+
+    参数错误抛 ValueError：仍有 job 没有结果而 stopped_by 给不出结束它们的来路（`ending_of_stop`，与有记录时同一处检查）；results
+    不满足 `commit_applied` 的要求（不是终态、重复、不在运行定义里）。"""
+    state = RunState(run_id=meta.run_id, status=Status.PENDING,
+                     jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in meta.jobs})
+    if results:
+        committed, _outcome = commit_applied(
+            state, [JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id) for jr in results],
+            ended_at=ended_at)
+        assert committed is not None  # 初始运行态未结束，终态写总能写成
+        state = committed
+    if state.status not in TERMINAL_STATUSES:
+        ended = ending_applied(state, ending_of_stop(stopped_by), ended_at=ended_at)
+        assert ended is not None  # 未结束、没有 running 的 job，结束写总能成立
+        state = ended
+    return state

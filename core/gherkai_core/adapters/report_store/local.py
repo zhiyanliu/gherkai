@@ -4,7 +4,8 @@
 - manifest.json 是薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
   **不内嵌 result 真值副本**——靠 run_id 软引用那次 run，判定真值由 ResultStore 持有（report 是纯派生视图、
   可删可重建、永不作判定源）。
-- index.html 是最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。摘要直接用内存 RunResult。
+- index.html 是最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。
+  摘要与判定明细树取 write 收到的 RunResult（由记录组装：状态取运行态，有判定明细的 job 附上明细）。
 
 不透明搬运（ADR 0027）：对 ReportRef 只「算一个链接」，绝不解析/重写/抽内容、不按 kind 分支。
 href 是 core 自算的导航链接（不受不透明铁律约束，铁律圈的是 ref）：local 把落在 run 树内的
@@ -30,11 +31,12 @@ SCHEMA_VERSION = 1
 
 
 def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], str]) -> list[dict]:
-    """遍历 result 树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
+    """遍历 result 里各 job 的判定明细树，把每个 ReportRef 投影成一条扁平 index 项（三级，ADR 0027）——**local/s3 共享的单一真理源**。
+    由结束写结束的 job 没有判定明细，也就没有产物。
 
     粒度由 scenario_id/step_index 是否为 None 表达：都为 None 即 scope 级；仅 step_index 为 None 即 scenario 级；
     两者都非 None 即 step 级（Nova trajectory、两引擎 evidence；同 scenario 多条靠 step_index 区分）。
-    遍历顺序（每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
+    遍历顺序（按运行定义的次序，每 job：scope 级 report_refs → 各 scenario 级 → 各 step 级）两 adapter 必须一致，故抽此共享函数。
 
     href（导航链接）由 make_href(rr) 回调注入：Local 把 run 树内 file:// 产物相对化，其余情形 href 等于 ref；S3 版 href 恒等于 ref。
     **注意**：投影只产 href（导航用），不产 ref——原始 ref 的权威落盘处是 jobs/*.json（ResultStore 判定真值）
@@ -53,7 +55,7 @@ def collect_report_index(result: RunResult, *, make_href: Callable[[ReportRef], 
             "label": rr.label,
         }
 
-    for jr in result.jobs:
+    for jr in result.details:
         for rr in jr.report_refs:  # scope 级（Midscene report / Nova session summary / 设备 device_session）
             entries.append(_entry(jr.scope_id, None, None, jr.engine, rr))
         for sr in jr.scenarios:
@@ -182,8 +184,9 @@ def _reason_html(error_type: str | None, message: str | None) -> str:
 
     两分支口径同 render_text（有分类 → err 红字带分类 `error_type: message`；无分类 → 中性 note；空 message
     两侧规则一致——只显分类、不留吊着的冒号，`gherkai_cli.render` 的 job 行与此处一致）；
-    fail-fast 派生态（skipped/aborted）error_type 恒 None、原因只在 message → 用
-    中性 note 色显出来，不复用 err 红（ADR 0031 决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
+    被中止的 job（aborted）error_type 恒 None、原因只在明细的 message，由结束写结束的 job（skipped / aborted）没有明细、原因是运行态
+    里的 job 级说明，都没有分类 → 用中性 note 色显出来，不复用 err 红（ADR 0031 决定一，及决定三「结束写」小节（说明按来路取）；
+    ADR 0031 决定二：颜色跟 status 走，别把未运行染成出错）。step 级失败原因原文
     （ADR 0042 决策三）走同一函数，故两处样式不再靠人肉同步（曾各抄一份、空 message 的处置已分叉过）。
     """
     esc = html.escape
@@ -198,12 +201,12 @@ def _reason_html(error_type: str | None, message: str | None) -> str:
 def render_index_html(manifest: dict, result: RunResult) -> str:
     """渲染入口页——**local/s3 共享的渲染真理源**（公开名：同包 `s3.py` 是第二个消费者，两 adapter 出一致的入口页）。
 
-    manifest 提供 run_id/created_at/report_index；result（内存 RunResult）提供判定明细 + 摘要。
+    manifest 提供 run_id/created_at/report_index；result（write 收到的 RunResult，由记录组装）提供状态、判定明细与摘要。
 
-    两块内容：
-    ① 判定明细（job→scenario→step，status/时长/sessionId）——直接从内存 RunResult 渲染，让纯确定性
-       run（无原生产物）也一眼看懂结果（判定真值仍以 ResultStore 的 jobs/*.json 为准，本页只是人看视图）。运行定义里有、
-       判定清单里没有的 job 排在末尾、标为没有执行；run 级说明在顶部摘要里。
+    两块内容（ADR 0027「index.html 形态」）：
+    ① 判定明细（job→scenario→step，status/时长/sessionId）——从 result 渲染，让纯确定性 run（无原生产物）也一眼看懂结果（本页只是
+       人看视图，状态以运行态为准）。各 job 与 run 的状态取运行态；有判定明细的 job 按运行定义的次序在前、各有一棵树；由结束写结束的
+       job 没有判定明细，按运行定义的次序排在后面，只显示运行态里的状态与 job 级说明。run 级说明在顶部摘要里。
     ② 报告产物导航——report_index 的扁平投影，链接指向引擎原样产物与 gherkai 自有的 step 级 evidence（本页对二者都只
        链接、不解析内容；evidence 的解引用只在 CLI explain，ADR 0042 决策五）。
     """
@@ -211,6 +214,8 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     run_id = manifest["run_id"]
     status = result.status.value
     color = _STATUS_COLOR.get(status, "#57606a")
+    detailed = [o for o in result.jobs if o.detail is not None]  # 有判定明细的 job，按运行定义的次序
+    without_detail = [o for o in result.jobs if o.detail is None]  # 由结束写结束的 job
 
     # 判定明细树 ↔ 原生产物列表的**结构关联**（锚点双向链接）：产物列表是平铺的，但判定明细树有 job→scenario→
     # step 层级；用锚点把每条产物和它所属的树节点互相链上，读者点 📎 从树跳到产物、点 ↑ 从产物跳回树节点。
@@ -218,7 +223,7 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
     # node_anchor：把三元组编成 html-safe 的稳定 id（不含任意 UTF-8——scope_id 可能是中文/带 : 的路径，直接进
     # id/#fragment 容易出问题，故用层级前缀 + 在 report_index 里的序号，纯 ASCII、稳定、两边一致）。
     def _node_anchor(scope_id: str, scenario_id, step_index) -> str:
-        # 用该节点在 result.jobs 里的位置编号（job i / scenario j / step k），纯 ASCII、确定性、树与列表共用同一算法。
+        # 用该节点在有明细的 job 里的位置编号（job i / scenario j / step k），纯 ASCII、确定性、树与列表共用同一算法。
         ji = _job_pos.get(scope_id)
         if ji is None:
             return ""
@@ -231,11 +236,11 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
             return f"node-j{ji}-s{si}"
         return f"node-j{ji}-s{si}-t{step_index}"
 
-    _job_pos = {jr.scope_id: i for i, jr in enumerate(result.jobs)}
+    _job_pos = {o.scope_id: i for i, o in enumerate(detailed)}
     _scen_pos: dict[tuple, int] = {}
-    for jr in result.jobs:
-        for j, sr in enumerate(jr.scenarios):
-            _scen_pos[(jr.scope_id, sr.scenario_id)] = j
+    for o in detailed:
+        for j, sr in enumerate(o.detail.scenarios):
+            _scen_pos[(o.scope_id, sr.scenario_id)] = j
 
     # 每个树节点挂了哪些产物（按 report_index 序号）：树里据此渲染 📎（可多个）链到列表锚点 ref-{seq}。
     _node_refs: dict[str, list[int]] = {}
@@ -260,12 +265,14 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
         cost_bits.append(f"{result.total_time_worked_s:.1f}s agent-time")
     cost = " · ".join(cost_bits) if cost_bits else "—"
 
-    # ① 判定明细：job → scenario → step 树（从内存 RunResult 渲染）
+    # ① 判定明细：job → scenario → step 树（job 的状态取运行态，树取判定明细）
     def _dot(st: str) -> str:
         return f'<span class="dot" style="background:{_STATUS_COLOR.get(st, "#57606a")}"></span>'
 
     job_blocks = []
-    for jr in result.jobs:
+    for o in detailed:
+        jr = o.detail
+        state_word = o.state.status.value  # job 的状态取运行态
         jbits = []
         if jr.total_tokens is not None:
             jbits.append(f"{jr.total_tokens} tokens")
@@ -336,30 +343,28 @@ def render_index_html(manifest: dict, result: RunResult) -> str:
         job_anchor = _node_anchor(jr.scope_id, None, None)
         job_blocks.append(
             f'<div class="job" id="{job_anchor}">'
-            f'<div class="jobhd">{_dot(jr.status.value)}'
-            f'<code>{esc(jr.scope_id)}</code> <b>{esc(jr.status.value)}</b>{err}{_paperclips(job_anchor)}'
+            f'<div class="jobhd">{_dot(state_word)}'
+            f'<code>{esc(jr.scope_id)}</code> <b>{esc(state_word)}</b>{err}{_paperclips(job_anchor)}'
             f'<div class="jobmeta">{" · ".join(meta_bits)}</div></div>'
             f'{scen_html}</div>'
         )
-    # 没有判定的 job（运行定义里有、判定清单里没有）：排在有判定的之后、按运行定义的次序，只有 scope 与「没有执行」
-    # 标注，原因在摘要里的 run 级说明。它不是 skipped（有判定、原因在 job 的说明），所以不写状态词、圆点用兜底灰。
-    # 「没有执行」与 cli 文本渲染的标注措辞相同（那边是 `gherkai_cli.render._NOT_RUN_LABEL`，core 不能 import cli），由 cli 侧的
-    # test_index_html_shows_run_message_and_not_run_label_matching_cli_wording 逐字锁定。
-    not_run = result.jobs_without_verdict
+    # 由结束写结束的 job：没有执行结果、没有判定明细，排在有明细的之后、按运行定义的次序。每个一行：圆点按运行态的状态上色、写状态词，
+    # 原因是运行态里的 job 级说明（说明按结束写的来路取），没有明细树、也没有产物（ADR 0027「index.html 形态」）。
     job_blocks.extend(
-        f'<div class="job"><div class="jobhd">{_dot("")}<code>{esc(j.scope_id)}</code> <b>没有执行</b></div></div>'
-        for j in not_run
+        f'<div class="job"><div class="jobhd">{_dot(o.state.status.value)}<code>{esc(o.scope_id)}</code> '
+        f'<b>{esc(o.state.status.value)}</b>{_reason_html(None, o.state.message)}</div></div>'
+        for o in without_detail
     )
     jobs_html = "\n".join(job_blocks) if job_blocks else '<p class="empty">本次 run 无 job。</p>'
-    jobs_heading = f"判定明细（{len(result.jobs)} job）"
-    if not_run:
-        jobs_heading = f"判定明细（{len(result.jobs)} job，另有 {len(not_run)} job 没有执行）"
-    # run 级说明：没有任何 job 能承载的原因，放在摘要里紧跟总状态
+    jobs_heading = f"判定明细（{len(detailed)} job）"
+    if without_detail:
+        jobs_heading = f"判定明细（{len(detailed)} job，另有 {len(without_detail)} job 没有判定明细）"
+    # run 级说明：结束的原因（由结束写写下），放在摘要里紧跟总状态
     message_html = f'\n  <div>说明: {esc(result.message)}</div>' if result.message else ""
 
     # ② 报告产物导航（report_index 扁平投影）——每条带 id=ref-{seq} 锚点 + ↑ 链回判定明细树里所属节点，
-    # 与树节点行尾的 📎 构成双向关联：读者一眼知道这个产物属于哪个 job/scenario/step（结构由树表达，见上）。
-    job_status = {j.scope_id: j.status.value for j in result.jobs}
+    # 与树节点行尾的 📎 构成双向关联：读者一眼知道这个产物属于哪个 job/scenario/step（结构由树表达，见上）。圆点按运行态的状态上色。
+    job_status = {o.scope_id: o.state.status.value for o in result.jobs}
     rows = []
     for seq, e in enumerate(manifest["report_index"]):
         anchor = e.get("label") or e["kind"]

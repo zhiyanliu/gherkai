@@ -875,7 +875,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="1" x="48" y="250" width="904" height="124" rx="10" class="c-lane" stroke-width="1"/>
 
-        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="2" x="48" y="400" width="904" height="160" rx="10" class="c-lane" stroke-width="1"/>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="segment" data-composition-frame-id="2" x="48" y="400" width="904" height="196" rx="10" class="c-lane" stroke-width="1"/>
 
         <!-- Lifelines -->
         <path d="M 123 142 L 123 604" class="a-default" stroke-width="0.8" stroke-dasharray="3,7"/>
@@ -945,12 +945,13 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         </g>
         </g>
 
-        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="写入唤醒推进 → 该 job 归因为超时失败" data-edge-key="5" data-edge-id="m-settle">
+        <g data-edge-from="events" data-edge-to="reconciler" data-edge-label="唤醒推进 → 记该 job" data-edge-key="5" data-edge-id="m-settle">
           <path data-composition-edge-from="events" data-composition-edge-to="reconciler" data-composition-edge-id="m-settle" data-composition-points="750.8,530;892,530" d="M 750.8 530 L 892 530" class="a-dashed" data-animate="edge" style="--step: 5;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <g>
-          <rect x="696.6" y="510" width="249.6" height="18" rx="3" class="c-mask"/>
-          <text x="821.4" y="520" class="t-edge-dashed" font-size="11" text-anchor="middle">写入唤醒推进 → 该 job 归因为超时失败</text>
+          <rect x="752.7" y="510" width="137.39999999999998" height="18" rx="3" class="c-mask"/>
+          <text x="821.4000000000001" y="520" class="t-edge-dashed" font-size="11" text-anchor="middle">唤醒推进 → 记该 job</text>
         </g>
+        <text x="762.8" y="548" class="t-muted" font-size="7"><tspan x="762.8" dy="0">按截止时刻记：预算到点为超时</tspan><tspan x="762.8" dy="11">失败，被运行期限截断为被中止</tspan></text>
         </g>
 
         <!-- Segment Labels -->
@@ -1061,4 +1062,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=a6a26fae54fbb083a5e18453c057bb960759b46cf52415bcdcef4949f3d36392 -->
+<!-- gherkai:source-sha256=c7b5e067d7d8dedf60d76c7e07f3fa0c5f7d6a8fec1630af16543b24b1873c9d -->

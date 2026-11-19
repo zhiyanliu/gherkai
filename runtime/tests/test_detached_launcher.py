@@ -21,8 +21,9 @@ from gherkai_core.adapters.event_log import SqliteEventLog
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.persist import result_without_record
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 from gherkai_runtime.detached import SubprocessLauncher, run_reconcile_loop
@@ -123,7 +124,7 @@ def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
     assert len(exits) == 1 and exits[0].exited.timed_out is True
     claimed = {"a": instant_from_iso(state.jobs["a"].claimed_at)}
     assert exits[0].exited.exited_at > claimed["a"]  # 启动器记下它看到 worker 退出的那一刻（同一个注入的墙钟）
-    jr = project_full(meta, log.records(), claimed_at=claimed, past_stop_start=False).jobs[0]
+    [jr] = project_full(meta, log.records(), claimed_at=claimed)
     assert jr.error_type == "timeout"  # 归因链端到端（真进程边界）
     assert jr.session_id == "echo-sess"  # 血缘仍从 scope_started 捕获（超时不丢会话线索）
 
@@ -184,19 +185,47 @@ def test_crash_worker_finalizes_error(tmp_path):
     assert len(exits) == 1 and exits[0].exited.exit_code != 0
 
 
-def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
-    """run 级墙钟取数失败不得影响报告收尾（ADR 0030 决定三：commit point 之后的失败无人重试）。
+def test_report_is_generated_from_the_record_after_the_commit(tmp_path):
+    """这一方的写使 run 成为终态之后，推进循环从记录生成报告、只生成一次（ADR 0034 机制三「run 级状态只进不退」条④）：报告里
+    run 与 job 的状态就是记录里的运行态，判定明细是 tick 这一轮交还的那一份，run 级墙钟由运行态的开始与结束时刻算出。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.project import run_duration_ms
+    from gherkai_runtime import compose
 
-    墙钟是派生指标，取它要在 finalize commit **之后**多读一次 RunState——落盘读会因 IO 错/文件写坏抛。
-    裸抛出去意味着判定已 commit、报告没落，且 `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、
-    隧道留在公网。故按缺值走：循环正常返回、报告照写、报告里的 run 级墙钟为 None（渲染成「?」）。
-    cloud 推进侧做法相同，两宿主各一条护栏。
+    # 真时钟（非 _now 常量）：开始与结束两个时刻都要能解析，墙钟才有值
+    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"), _job("b")), deadline_at=_FAR)
+    log = SqliteEventLog(tmp_path / "events.db")
+    store = LocalRunStore(tmp_path)
+    store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
+                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")},
+                                    started_at=compose.now_iso(), high_water_mark=0))
+    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0, clock=compose.now)
+    reports = _CapturingReports()
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=2, poll_interval_s=0.05, clock=compose.now,
+                       result_store=LocalResultStore(tmp_path), report_store=reports)
+
+    recorded = store.load_run_state("run-1")
+    [result] = reports.results
+    assert result.run_id == "run-1"
+    assert result.state == recorded and result.status == Status.PASSED  # 状态取记录
+    assert [o.scope_id for o in result.jobs] == ["a", "b"]  # 按运行定义的次序列出全部 job
+    assert [(d.scope_id, d.status) for d in result.details] == [("a", Status.PASSED), ("b", Status.PASSED)]
+    assert result.duration_ms is not None and result.duration_ms == run_duration_ms(recorded)
+
+
+def test_loop_ends_normally_when_the_record_read_for_the_report_fails(tmp_path):
+    """为生成报告而读运行态的那一次失败，不击穿已到终态的 run（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034 机制三
+    「run 级状态只进不退」条④）。
+
+    这次读发生在这一方的终态写**之后**，落盘读会因 IO 错、文件写坏而抛。原样抛出去意味着 run 已到终态、报告没有生成，而且
+    `drive_local_reconcile` 的拆隧道那步（在本函数返回后才执行）被跳过、隧道留在公网。所以循环正常返回；报告从记录组装，读不到
+    记录就不生成；终态写本身不受影响。云端推进侧做法相同，两个宿主各一条护栏。
     """
     from gherkai_core.model import TERMINAL_STATUSES
     from gherkai_runtime import compose
 
     class _FailsOnTerminalRead:
-        """代理真 RunStore：run 已终态时的 load_run_state（即取墙钟那次）抛 OSError，其余原样转发。"""
+        """代理真 RunStore：run 已终态时的 load_run_state（即为生成报告而读的那次）抛 OSError，其余原样转发。"""
 
         def __init__(self, inner):
             self._inner = inner
@@ -212,33 +241,16 @@ def test_report_still_written_when_the_run_duration_read_fails(tmp_path):
                 raise OSError("run_state.json 读坏了")
             return state
 
-    written = []
+    meta, log, inner, launcher = _setup(tmp_path, "pass", "a")
+    store, reports = _FailsOnTerminalRead(inner), _CapturingReports()
 
-    class _RecordingReportStore:
-        def write(self, run_id, result, *, created_at):
-            written.append((run_id, result, created_at))
-
-    # 真时钟（非 _now 常量）：要让两端时间戳都可解析，否则墙钟本来就是 None、本例空过
-    meta = RunMeta(run_id="run-1", created_at=compose.now_iso(), jobs=(_job("a"),), deadline_at=_FAR)
-    log = SqliteEventLog(tmp_path / "events.db")
-    inner = LocalRunStore(tmp_path)
-    inner.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
-                                    jobs={"a": JobState("a", Status.PENDING)},
-                                    started_at=compose.now_iso(), high_water_mark=0))
-    launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0, clock=compose.now)
-    store = _FailsOnTerminalRead(inner)
-
-    # 不抛是第一件要钉的事（退回「实参里直接取数」的写法即 OSError 原样抛出）
+    # 不抛是第一件要钉的事（把这次读挪出失败隔离即 OSError 原样抛出）
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=compose.now,
-                       report_store=_RecordingReportStore())
+                       poll_interval_s=0.05, clock=_now, report_store=reports)
 
-    assert store.raised == 1                    # 失败确实落在取墙钟那次读上
-    assert len(written) == 1                    # 报告仍写（判定已 commit，报告不能被派生指标带走）
-    assert written[0][1].duration_ms is None     # 墙钟按缺值走
-    assert inner.load_run_state("run-1").status == Status.PASSED  # commit 本身不受影响
-    # 数据本身够算出墙钟，None 只因那次读失败——否则本例分不清「隔离生效」与「本来就没值」
-    assert compose.run_duration_ms(inner.load_run_state("run-1")) is not None
+    assert store.raised == 1                    # 失败确实落在为生成报告而读的那一次上
+    assert reports.results == []                # 读不到记录就不生成报告
+    assert inner.load_run_state("run-1").status == Status.PASSED  # 终态写本身不受影响
 
 
 class _RecordingReports:
@@ -287,28 +299,27 @@ def test_loop_ends_on_finalized_run_with_pending_jobs_without_report(tmp_path):
 
 
 def test_loop_ends_without_report_when_its_commit_is_lost(tmp_path):
-    """收尾写写不成（并发推进器先提交）：循环照样结束，但不写报告——报告只由写成的一方生成（ADR 0054 决策二后台推进条「收尾与
-    报告」）；库中终态是先提交的那一份（ADR 0034 机制三「run 级状态只进不退」条④）。"""
+    """终态写写不成（并发推进器先写下了同样的终态，run 已结束）：循环照样结束，但不写报告——报告只由使 run 成为终态的一方生成
+    （ADR 0054 决策二后台推进条「收尾与报告」）；库中终态是先写下的那一份（ADR 0034 机制三「run 级状态只进不退」条④）。"""
 
     class _LosesCommit:
         def __init__(self, inner) -> None:
             self._inner = inner
-            self.results: list[bool] = []
+            self.results: list[CommitOutcome] = []
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
 
-        def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
-            self._inner.try_finalize(run_id, status, "other")  # 另一推进器先提交
-            self.results.append(self._inner.try_finalize(run_id, status, ended_at, message=message,
-                                                         expected_claim_count=expected_claim_count))
+        def commit_job_states(self, run_id, job_states, *, ended_at):
+            self._inner.commit_job_states(run_id, job_states, ended_at="other")  # 另一推进器先写下
+            self.results.append(self._inner.commit_job_states(run_id, job_states, ended_at=ended_at))
             return self.results[-1]
 
     meta, log, inner, launcher = _setup(tmp_path, "pass", "a")
     store, reports = _LosesCommit(inner), _RecordingReports()
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, clock=_now, report_store=reports)
-    assert store.results == [False]
+    assert store.results == [CommitOutcome.ALREADY_ENDED]
     assert reports.written == []
     state = inner.load_run_state("run-1")
     assert state.status == Status.PASSED and state.ended_at == "other"
@@ -611,20 +622,27 @@ class _CapturingReports:
 
 
 def _verdict(result) -> tuple:
-    """报告由它生成的那几项：run 级状态与说明、各 job 的状态、错误类型与说明、没有执行的 scope。"""
+    """报告由它生成的那几项：run 级状态与说明；按运行定义的次序，各 job 的状态与 job 级说明（取运行态），有判定明细的另带明细里
+    的错误类型与说明，由结束写结束的 job 没有明细、记为 None。"""
     return (result.status, result.message,
-            [(jr.scope_id, jr.status, jr.error_type, jr.message) for jr in result.jobs],
-            [j.scope_id for j in result.jobs_without_verdict])
+            [(o.scope_id, o.status, o.state.message,
+              None if o.detail is None else (o.detail.error_type, o.detail.message)) for o in result.jobs])
+
+
+def _foreground_result(execution):
+    """前台同一情形的 run 结果：调度循环交回的执行事实按与记录相同的取法在内存里组装（与 `run --no-report` 同一条路）。"""
+    return result_without_record(execution, ended_at="2026-07-19T00:00:00+00:00")
 
 
 def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(tmp_path):
-    """本机推进进程到期：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因并发
-    上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记为超时、说明是
-    期限那一句；b 保持 pending、没有判定明细；run 级 error 加到期说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种
-    时钟），报告内容逐项相同。"""
+    """本机推进进程到期（ADR 0054 实测项 2、4 的本机一对）：a 在停止启动之前被认领、它的预算远长于期限，截止时刻因此是期限；b 因
+    并发上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记 aborted、
+    说明是期限那一句、没有错误类型；b 由结束写记 skipped、带到期的说明、没有判定明细；run 状态按取法为 aborted、带 run 级的到期
+    说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种时钟），按同一套取法得到的结果逐项相同。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.schedule import ScheduleOpts, schedule
 
+    ending = RUN_ENDINGS["deadline"]
     start = datetime(2026, 7, 19, tzinfo=timezone.utc)
     deadline_at = instant_to_iso(start + timedelta(seconds=120))  # 真实 2 秒后到期，1 秒后过停止启动的时刻
     clock = _FastClock(start, 60.0)
@@ -635,26 +653,29 @@ def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(
                        result_store=LocalResultStore(tmp_path), report_store=reports)
 
     state = store.load_run_state("run-1")
-    assert (state.status, state.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.PENDING)
+    assert (state.status, state.message) == (Status.ABORTED, ending.run_message)
+    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ABORTED, Status.SKIPPED)
+    assert state.jobs["b"].message == ending.skipped_message
     exits = [r for r in log.records() if r.kind == "exit"]
     assert [(r.scope_id, r.exited.timed_out) for r in exits] == [("a", True)]  # 推进进程到点停下的 a；b 从没启动
     assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == ["a.json"]  # b 没有判定明细
     [background] = reports.results
-    assert _verdict(background) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE,
-                                    [("a", Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)], ["b"])
+    assert _verdict(background) == (Status.ABORTED, ending.run_message,
+                                    [("a", Status.ABORTED, None, (None, DEADLINE_TIMEOUT_MESSAGE)),
+                                     ("b", Status.SKIPPED, ending.skipped_message, None)])
 
-    foreground = schedule(meta, _echo_resolver("silent"), lambda _event: None,
-                          opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=_FastClock(start, 60.0),
-                                            heartbeat_interval_s=0.05))
-    assert _verdict(foreground) == _verdict(background)
+    execution = schedule(meta, _echo_resolver("silent"), lambda _event: None,
+                         opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=_FastClock(start, 60.0),
+                                           heartbeat_interval_s=0.05))
+    assert _verdict(_foreground_result(execution)) == _verdict(background)
 
 
 def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_jobs(tmp_path, monkeypatch):
     """推进进程已不在、过了期限之后的一次 `status --wait` 接力：经两者共用的入口推进，a 是原推进进程认领、观察链
     已断的 job，b 没有启动过。a 的预算让它自己的截止时刻还在半小时之后，截止时刻由期限（一小时之前）封顶，接力方按封顶后的时刻判，
-    墙钟早已过了它加 10 秒，第一轮即补写超时；b 不认领、不启动；run 以到期说明结束，报告由接力方生成。组合根照真实装配，只把引擎换成
-    记录启动的替身、停止宽限的查询换成固定值（误启动 job 时启动调用落到替身上、被记下）。"""
+    墙钟早已过了它加 10 秒，第一轮即补写超时，a 因此记 aborted、说明是期限那一句；b 不认领、不启动，由到期的结束写记 skipped；run
+    状态按取法为 aborted、带到期说明，报告由接力方生成。组合根照真实装配，只把引擎换成记录启动的替身、停止宽限的查询换成固定值
+    （误启动 job 时启动调用落到替身上、被记下）。"""
     import json
 
     from gherkai_core.serialize import job_result_from_dict
@@ -689,15 +710,17 @@ def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_j
 
     assert not relay.is_alive(), "接力没有结束"
     assert spawned == []
+    ending = RUN_ENDINGS["deadline"]
     state = LocalRunStore(tmp_path).load_run_state("run-x")
-    assert (state.status, state.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.PENDING)
+    assert (state.status, state.message) == (Status.ABORTED, ending.run_message)
+    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ABORTED, Status.SKIPPED)
+    assert state.jobs["b"].message == ending.skipped_message
     [exit_rec] = [r for r in log.records() if r.kind == "exit"]
     assert (exit_rec.scope_id, exit_rec.exited.exit_code, exit_rec.exited.timed_out) == ("a", None, True)
     assert (tmp_path / "run-x" / "manifest.json").exists() and (tmp_path / "run-x" / "index.html").exists()
-    assert sorted(p.name for p in (tmp_path / "run-x" / "jobs").iterdir()) == ["a.json"]
+    assert sorted(p.name for p in (tmp_path / "run-x" / "jobs").iterdir()) == ["a.json"]  # b 没有判定明细
     jr = job_result_from_dict(json.loads((tmp_path / "run-x" / "jobs" / "a.json").read_text(encoding="utf-8")))
-    assert (jr.error_type, jr.message) == ("timeout", DEADLINE_TIMEOUT_MESSAGE)  # 起作用的是期限
+    assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)  # 起作用的是期限
 
 
 class _RecordsExits:
@@ -841,9 +864,9 @@ def test_worker_exiting_on_its_own_after_its_cutoff_gets_the_foreground_verdict(
     foreground.join(timeout=20)
     assert not foreground.is_alive(), "前台没有结束"
 
-    expected = (Status.ERROR, None, [("a", Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")], [])
+    expected = (Status.ERROR, None, [("a", Status.ERROR, None, ("timeout", "job 超时（预算 60s，已中止）"))])
     assert _verdict(background) == expected
-    assert _verdict(out["result"]) == expected
+    assert _verdict(_foreground_result(out["result"])) == expected
 
 
 def test_an_exit_seen_before_the_cutoff_decision_keeps_the_verdict_the_foreground_gives(tmp_path, monkeypatch):
@@ -889,12 +912,12 @@ def test_an_exit_seen_before_the_cutoff_decision_keeps_the_verdict_the_foregroun
     [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (3, False, cutoff - timedelta(seconds=1))
     [background] = reports.results
-    assert [jr.error_type for jr in background.jobs] == ["engine_error"]
+    assert [jr.error_type for jr in background.details] == ["engine_error"]
 
-    foreground = schedule(meta, _echo_resolver("crash"), lambda _event: None,  # 那个文件已在：worker 报出 scenario_started 即崩
-                          opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=lambda: start,
-                                            heartbeat_interval_s=0.05))
-    assert _verdict(foreground) == _verdict(background)
+    execution = schedule(meta, _echo_resolver("crash"), lambda _event: None,  # 那个文件已在：worker 报出 scenario_started 即崩
+                         opts=ScheduleOpts(max_concurrency=1, grace_period_s=1.0, wall_clock=lambda: start,
+                                           heartbeat_interval_s=0.05))
+    assert _verdict(_foreground_result(execution)) == _verdict(background)
 
 
 def test_a_cutoff_decided_before_the_exit_marks_the_exit_as_timed_out(tmp_path, monkeypatch):
@@ -945,7 +968,7 @@ def test_a_cutoff_decided_before_the_exit_marks_the_exit_as_timed_out(tmp_path, 
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (3, True, cutoff + timedelta(seconds=2))
     [background] = reports.results
     assert _verdict(background) == (Status.ERROR, None,
-                                    [("a", Status.ERROR, "timeout", "job 超时（预算 60s，已中止）")], [])
+                                    [("a", Status.ERROR, None, ("timeout", "job 超时（预算 60s，已中止）"))])
 
 
 def test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write(tmp_path):

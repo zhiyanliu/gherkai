@@ -1,4 +1,5 @@
-"""RunStore / ResultStore local adapter + serialize round-trip 单测（ADR 0016 三层切分）。"""
+"""RunStore / ResultStore local adapter + serialize 单测（ADR 0016 三层切分）：definition、运行态与判定明细往返；run 的结果
+（RunResult）只有写端，核对 to_dict 的输出形态。"""
 import json
 from pathlib import Path
 
@@ -6,7 +7,7 @@ import pytest
 
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.result_store.local import LocalResultStore
-from gherkai_core.serialize import from_dict, job_result_from_dict, job_result_to_dict, to_dict
+from gherkai_core.serialize import job_result_from_dict, job_result_to_dict, run_meta_from_dict, to_dict
 from gherkai_core.model import (
     Job,
     JobResult,
@@ -22,8 +23,9 @@ from gherkai_core.model import (
     Step,
     StepResult,
     Votes,
-    run_state_from_result,
 )
+from gherkai_core.project import assemble_run_result
+from gherkai_core.run_status import CommitOutcome
 
 
 def _job_def(scope_id: str, scope_name: str, engine: str) -> Job:
@@ -41,15 +43,17 @@ def _job_def(scope_id: str, scope_name: str, engine: str) -> Job:
 
 
 def _sample_run(run_id: str = "20260629-abc") -> RunResult:
+    """两个由执行结果结束的 job（各有判定明细）的 run，经唯一的组装处得到：状态取运行态，明细作附件。"""
     j0 = _job_def("features/wiki.feature:6", "wiki", "midscene")  # 含 /:，测不透明 id 编码
     j1 = _job_def("登录场景", "登录场景", "novaact")              # 中文 scope_id，测可逆编码
-    return RunResult(
-        run_meta=RunMeta(run_id=run_id, created_at="2026-06-29T00:00:00Z", jobs=(j0, j1), deadline_at="2026-06-29T02:15:00+00:00"),
-        status=Status.FAILED,
-        duration_ms=12000.0,
-        total_tokens=10573,
-        total_time_worked_s=58.6,
-        jobs=[
+    meta = RunMeta(run_id=run_id, created_at="2026-06-29T00:00:00Z", jobs=(j0, j1), deadline_at="2026-06-29T02:15:00+00:00")
+    state = RunState(run_id=run_id, status=Status.FAILED, jobs={
+        j0.scope_id: JobState(j0.scope_id, Status.PASSED, session_id="sess-1"),
+        j1.scope_id: JobState(j1.scope_id, Status.FAILED),
+    })
+    return assemble_run_result(
+        meta, state,
+        [
             JobResult(
                 job=j0,
                 status=Status.PASSED,
@@ -81,64 +85,53 @@ def _sample_run(run_id: str = "20260629-abc") -> RunResult:
                 message="没过",
             ),
         ],
+        duration_ms=12000.0,
     )
 
 
-# ---- serialize round-trip：from_dict(to_dict(r)) 字段级等价 ----
-def test_serialize_round_trip():
-    r = _sample_run()
-    r2 = from_dict(to_dict(r))
-    assert r2.run_id == r.run_id
-    assert r2.run_meta.created_at == "2026-06-29T00:00:00Z"
-    assert r2.status == r.status == Status.FAILED
-    assert r2.duration_ms == 12000.0
-    assert r2.total_tokens == 10573 and r2.total_time_worked_s == 58.6
-    assert len(r2.jobs) == 2
-    j0 = r2.jobs[0]
-    assert j0.scope_id == "features/wiki.feature:6" and j0.engine == "midscene"  # 经 property
-    assert j0.scope_name == "wiki"  # 重构补齐的字段（旧版漏抄）
-    assert j0.job.scenarios[0].steps[1].text == "搜索 OpenAI"  # definition 完整重建（护 round-trip）
-    assert j0.job.assertion_votes == 3  # assertion_votes 经 round-trip 不丢
-    assert j0.session_id == "sess-1"
-    assert j0.report_refs[0].kind == "report" and j0.report_refs[0].label == "r"
-    sr = j0.scenarios[0]
-    assert sr.steps[0].report_refs[0].kind == "trajectory"  # step 级 trajectory 经 round-trip 不丢
-    assert sr.report_refs == ()  # 不再聚合到 scenario 级
-    assert sr.steps[1].votes.yes == 3 and sr.steps[1].votes.total == 3
-    assert sr.steps[0].duration_ms == 3000.0
-    # 被短路 step 的 shortcircuited=True 经 round-trip 不丢（ADR 0031 决定六）——
-    # 显式验证非默认值往返，防"序列化漏字段但默认 False 恰好相等"的假绿。
-    assert sr.steps[2].status == Status.SKIPPED and sr.steps[2].shortcircuited is True
-    assert sr.steps[0].shortcircuited is False  # 正常步默认 False 也正确往返
-    j1 = r2.jobs[1]
-    assert j1.scope_id == "登录场景" and j1.error_type == "assertion_failed" and j1.message == "没过"
-
-
-def test_serialize_round_trip_deep_equal_dict():
-    # 更强：to_dict(from_dict(to_dict(r))) == to_dict(r)（dict 层完全一致）
-    r = _sample_run()
-    d1 = to_dict(r)
-    d2 = to_dict(from_dict(d1))
-    assert d1 == d2
-
-
-def test_run_level_message_key_is_always_present_and_round_trips():
-    """RunResult 的 run 级说明：字典形态顶层恒有 `message` 键，没有说明时为 null；有说明时原文往返，
-    没有判定的 job 不进 `jobs`（它们是 run_meta.jobs 与 jobs 的差）。"""
-    from dataclasses import replace
+# ---- serialize：RunResult → dict（只有写端，输出形态）----
+def test_to_dict_carries_the_definition_the_record_state_and_the_details():
+    """to_dict 的输出形态：definition 一份（经 run_meta 读回即原样），run 与 job 的状态取运行态，有判定明细的 job 带明细各键（会话、
+    产物指针、scenario 与 step，含非默认的 votes 与 shortcircuited），原生量由明细合计；整份可原样进出 JSON。"""
     r = _sample_run()
     d = to_dict(r)
-    assert "message" in d and d["message"] is None
-    assert from_dict(d).message is None
-    ended = replace(r, status=Status.ERROR, message="已超过允许运行的时间", jobs=r.jobs[:1])
-    d2 = to_dict(ended)
-    assert d2["message"] == "已超过允许运行的时间"
-    assert [j["scope_id"] for j in d2["jobs"]] == ["features/wiki.feature:6"]
-    assert len(d2["run_meta"]["jobs"]) == 2
-    back = from_dict(d2)
-    assert (back.status, back.message, [jr.scope_id for jr in back.jobs]) == (Status.ERROR, "已超过允许运行的时间",
-                                                                             ["features/wiki.feature:6"])
-    assert to_dict(back) == d2
+    assert d["run_id"] == r.run_id
+    assert run_meta_from_dict(d["run_meta"]) == r.run_meta  # definition 完整（含 steps 与 assertion_votes）
+    assert (d["status"], d["message"], d["duration_ms"]) == ("failed", None, 12000.0)
+    assert (d["total_tokens"], d["total_time_worked_s"]) == (10573, None)  # 只合计报了这个量的明细
+    j0, j1 = d["jobs"]
+    assert (j0["scope_id"], j0["status"], j0["session_id"]) == ("features/wiki.feature:6", "passed", "sess-1")
+    assert j0["report_refs"] == [{"kind": "report", "ref": "file:///x.html", "label": "r"}]
+    sr = j0["scenarios"][0]
+    assert sr["report_refs"] == []  # 不聚合到 scenario 级
+    assert sr["steps"][0]["report_refs"][0]["kind"] == "trajectory" and sr["steps"][0]["duration_ms"] == 3000.0
+    assert sr["steps"][1]["votes"] == {"yes": 3, "total": 3}
+    # 被短路 step 的 shortcircuited=True 写出（ADR 0031 决定六）；正常步写 False
+    assert (sr["steps"][2]["status"], sr["steps"][2]["shortcircuited"]) == ("skipped", True)
+    assert sr["steps"][0]["shortcircuited"] is False
+    assert (j1["scope_id"], j1["status"], j1["error_type"], j1["message"]) == ("登录场景", "failed", "assertion_failed", "没过")
+    assert json.loads(json.dumps(d, ensure_ascii=False)) == d
+
+
+def test_to_dict_lists_every_job_and_takes_statuses_and_messages_from_the_record():
+    """run 级 `message` 键恒在，没有说明时为 null，有时取运行态里的原文；jobs[] 按运行定义的次序列出全部 job：由结束写结束的 job
+    只有 scope_id、status 与运行态里的 job 级说明三个键，有判定明细的 job 的 status 也取运行态（ADR 0031 决定三「结束写」小节；
+    ADR 0041 决策三）。"""
+    r = _sample_run()
+    assert "message" in to_dict(r) and to_dict(r)["message"] is None
+    j0, j1 = r.run_meta.jobs
+    state = RunState(run_id=r.run_id, status=Status.ABORTED, message="已超过允许运行的时间", jobs={
+        j0.scope_id: JobState(j0.scope_id, Status.ABORTED, session_id="sess-1"),  # 与明细里的 passed 不同：以运行态为准
+        j1.scope_id: JobState(j1.scope_id, Status.SKIPPED, message="这个 run 已超过允许运行的时间，job 没有启动"),
+    })
+    ended = assemble_run_result(r.run_meta, state, r.details[:1], duration_ms=None)
+    d = to_dict(ended)
+    assert (d["status"], d["message"]) == ("aborted", "已超过允许运行的时间")
+    assert [j["scope_id"] for j in d["jobs"]] == [j0.scope_id, j1.scope_id]
+    assert d["jobs"][0]["status"] == "aborted" and "scenarios" in d["jobs"][0]
+    assert d["jobs"][1] == {"scope_id": j1.scope_id, "status": "skipped",
+                            "message": "这个 run 已超过允许运行的时间，job 没有启动"}
+    assert len(d["run_meta"]["jobs"]) == 2
 
 
 def test_aggregate_to_dict_normalized_no_def_duplication():
@@ -150,17 +143,16 @@ def test_aggregate_to_dict_normalized_no_def_duplication():
         assert "job" not in jr_d                         # 判定项不嵌完整 def
         assert "scope_id" in jr_d                         # 唯一保留的顶层 def 字段就是 join key
         assert "scope_name" not in jr_d and "engine" not in jr_d  # 其余 def 冗余已去（def 在 run_meta）
-    # 仍能 round-trip：from_dict 按 scope_id 从 run_meta join 回 def
-    r2 = from_dict(d)
-    assert r2.jobs[0].job.scenarios[0].steps[1].text == "搜索 OpenAI"
-    assert r2.jobs[0].scope_name == "wiki"               # 经 join + property
-    assert r2.jobs[0].engine == "midscene"               # join 后 def 完整（engine 也对）
+    # 消费端按 scope_id 对到 run_meta 里的定义
+    defs = {j.scope_id: j for j in run_meta_from_dict(d["run_meta"]).jobs}
+    assert defs[d["jobs"][0]["scope_id"]].scenarios[0].steps[1].text == "搜索 OpenAI"
+    assert defs[d["jobs"][0]["scope_id"]].engine == "midscene"
 
 
 def test_result_store_single_job_file_is_self_contained():
     # ResultStore 单 job 文件是自包含形态（include_job=True 默认）：嵌完整 def，
     # CI 单独读一个 jobs/<scope_id>.json 不依赖 run_meta 即可重建（与聚合 normalize 形态相对）。
-    jr = _sample_run().jobs[0]
+    jr = _sample_run().details[0]
     d = job_result_to_dict(jr)                            # 默认 include_job=True
     assert "job" in d and "scenarios" in d["job"]         # 自包含：嵌完整 def
     jr2 = job_result_from_dict(d)                          # 不传 job=，从嵌套重建
@@ -168,11 +160,58 @@ def test_result_store_single_job_file_is_self_contained():
     assert jr2.scope_name == "wiki" and jr2.engine == "midscene"
 
 
+def _device_job_result() -> JobResult:
+    """一个设备 job 的判定明细，带样例 run 里没有的各项：会话记录与两个设备计量键、agent 工作时长、scenario 级产物、step 级失败原因
+    与错误类型、job 级错误类型与说明。"""
+    from gherkai_core.model import DeviceFarmRequest, SessionRecord, Target
+
+    base = _job_def("android-web", "android-web", "midscene")
+    job = Job(scope_id=base.scope_id, scope_name=base.scope_name, engine=base.engine, scenarios=base.scenarios,
+              timeout_s=1500.0, target=Target(device="android", ui_kind="web"),
+              device_request=DeviceFarmRequest(project_arn="arn:p", os_version="15", billing_method="METERED"))
+    return JobResult(
+        job=job, status=Status.ERROR, session_id="arn:session-1", total_time_worked_s=42.5, duration_ms=61000.0,
+        error_type="worker_exited", message="worker 退出",
+        report_refs=(ReportRef(kind="report", ref=ResourceUri("s3://b/k/index.html")),),
+        scenarios=[
+            ScenarioResult(
+                scenario_id="android-web", status=Status.ERROR, duration_ms=60000.0,
+                report_refs=(ReportRef(kind="video", ref=ResourceUri("s3://b/k/video.mp4"), label="录像"),),
+                steps=[
+                    StepResult(index=0, status=Status.ERROR, duration_ms=60000.0, votes=Votes(yes=1, total=3),
+                               error_type="element_not_found", message="找不到搜索框",
+                               report_refs=(ReportRef(kind="evidence", ref=ResourceUri("s3://b/k/e0.png")),)),
+                    StepResult(index=1, status=Status.SKIPPED, shortcircuited=True),
+                ],
+            )
+        ],
+        sessions=[SessionRecord(session_id="arn:session-1", name="pixel-8", origin="created", release="confirmed",
+                                observed_s=58.0, provider_minutes={"metered": 1.0},
+                                device={"platform": "android", "model": "Pixel 8"})],
+        device_observed_s=58.0, device_observed_missing=0,
+    )
+
+
+def test_job_result_round_trips_through_both_dict_forms():
+    """判定明细经两种形态往返恒等：自包含形态从嵌入的 definition 重建；不嵌 definition 的形态由调用方给出 definition。样例 run 的每份
+    明细都覆盖（step 的 shortcircuited、votes、step 级产物、各级时长、会话），另一份设备 job 的明细覆盖会话记录、设备计量与各级的
+    错误类型与说明。"""
+    details = [*_sample_run().details, _device_job_result()]
+    steps = [st for jr in details for sr in jr.scenarios for st in sr.steps]
+    # 样本确实带着要核对的各项：缺了哪一项，往返恒等就测不到它
+    assert any(st.shortcircuited for st in steps) and any(st.votes for st in steps) and any(st.report_refs for st in steps)
+    assert any(st.duration_ms is not None for st in steps) and any(jr.session_id for jr in details)
+    assert any(jr.sessions for jr in details) and any(jr.device_observed_s is not None for jr in details)
+    for jr in details:
+        assert job_result_from_dict(job_result_to_dict(jr)) == jr
+        assert job_result_from_dict(job_result_to_dict(jr, include_job=False), job=jr.job) == jr
+
+
 # ---- LocalRunStore：create_run(meta,state) → load_run_meta/load_run_state 往返 ----
 def test_run_store_create_load(tmp_path: Path):
     store = LocalRunStore(tmp_path / "runs")
     r = _sample_run("run-1")
-    store.create_run(r.run_meta, run_state_from_result(r))
+    store.create_run(r.run_meta, r.state)
     run_dir = tmp_path / "runs" / "run-1"
     assert (run_dir / "run_meta.json").exists()
     assert (run_dir / "run_state.json").exists()
@@ -196,8 +235,7 @@ def test_run_store_load_missing_returns_none(tmp_path: Path):
 
 
 def test_run_state_timestamps_round_trip(tmp_path: Path):
-    # started_at/ended_at 非 None 时也须经 create/load 完整保留（不止测 None 态）。
-    # run_state_from_result 只投影运行态、不填起止（ADR 0016），故直接造带时间戳的 RunState 测落盘往返。
+    # started_at/ended_at 非 None 时也须经 create/load 完整保留（不止测 None 态）：直接造带时间戳的 RunState 测落盘往返。
     store = LocalRunStore(tmp_path / "runs")
     meta = _sample_run("run-ts").run_meta
     state = RunState(
@@ -218,8 +256,8 @@ def test_run_state_omits_null_timestamps(tmp_path: Path):
     # ADR 0030）时，落盘 JSON **不写**这两个键（不是写 null）——避免"永远 null 的字段被当 bug"的体验
     # 噪音。round-trip 仍还原回 None。
     store = LocalRunStore(tmp_path / "runs")
-    r = _sample_run("run-null")  # run_state_from_result 不填起止 → None
-    store.create_run(r.run_meta, run_state_from_result(r))
+    r = _sample_run("run-null")  # 样例的运行态不带起止 → None
+    store.create_run(r.run_meta, r.state)
     raw = json.loads((tmp_path / "runs" / "run-null" / "run_state.json").read_text("utf-8"))
     assert "started_at" not in raw and "ended_at" not in raw  # 键缺席，非 null
     got = store.load_run_state("run-null")
@@ -230,7 +268,7 @@ def test_run_state_omits_null_timestamps(tmp_path: Path):
 def test_result_store_save_load_job(tmp_path: Path):
     store = LocalResultStore(tmp_path / "runs")
     r = _sample_run("run-2")
-    for jr in r.jobs:
+    for jr in r.details:
         store.save_job_result("run-2", jr)
     # 含 /:中文 的 scope_id 都安全成文件名（可逆编码、不撞名、不当路径）
     jobs_dir = tmp_path / "runs" / "run-2" / "jobs"
@@ -257,7 +295,7 @@ def test_result_store_scope_id_not_path_traversal(tmp_path: Path):
     assert store.load_job_result("run-3", "a/b/c:9").scope_id == "a/b/c:9"
 
 
-# ---- RunStore 生命周期写：create_run → update_job_state×N → try_finalize ----
+# ---- RunStore 生命周期写：create_run → update_job_state（执行中）→ commit_job_states（终态，最后一个使 run 成为终态；ADR 0030 决定四）----
 def _initial_state(run_id: str, scope_ids: list[str]) -> RunState:
     """run 开始时的初始态：各 job 摆 pending、总 pending、起止未填。"""
     return RunState(
@@ -288,30 +326,36 @@ def test_realtime_write_lifecycle(tmp_path: Path):
     assert mid.jobs["登录场景"].status == Status.PENDING  # 另一个还没动——Map 单元素更新不互相污染
     assert mid.status == Status.RUNNING  # job 离开 pending 时 run 级已是 running（ADR 0034 机制三），终态待 finalize
 
-    # 3) 两个 job 各自完成
-    store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1"))
-    store.update_job_state("rt-run", JobState("登录场景", Status.FAILED))
+    # 3) 第一个 job 完成：终态写记下它，另一个还没结束，run 仍 running、没有结束时刻
+    assert store.commit_job_states("rt-run", [JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1")],
+                                   ended_at="2026-07-01T00:04:00Z") is CommitOutcome.OPEN
     s2 = store.load_run_state("rt-run")
     assert s2 is not None
     assert s2.jobs["features/wiki.feature:6"].status == Status.PASSED
-    assert s2.jobs["登录场景"].status == Status.FAILED
+    assert (s2.status, s2.ended_at) == (Status.RUNNING, None)
 
-    # 4) 收尾（commit point）：条件写总 status + ended_at；各 job 态保留
-    assert store.try_finalize("rt-run", Status.FAILED, "2026-07-01T00:05:00Z") is True
+    # 4) 最后一个 job 完成：这次终态写使 run 成为终态，run 状态按取法写下，同一次写下结束时刻；各 job 态保留
+    assert store.commit_job_states("rt-run", [JobState("登录场景", Status.FAILED)],
+                                   ended_at="2026-07-01T00:05:00Z") is CommitOutcome.ENDED_RUN
     final = store.load_run_state("rt-run")
     assert final is not None
     assert final.status == Status.FAILED
     assert final.ended_at == "2026-07-01T00:05:00Z"
     assert final.started_at == "2026-07-01T00:00:00Z"  # create_run 填的起点保留
-    assert final.jobs["features/wiki.feature:6"].status == Status.PASSED  # job 态没被 finalize 覆盖
+    assert final.jobs["features/wiki.feature:6"] == JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1")
+    assert final.jobs["登录场景"].status == Status.FAILED
 
 
 def test_update_job_state_before_create_raises(tmp_path: Path):
-    # 未 create_run 就 update → 报错（须先建初始态，不静默吞）；收尾写不成、不臆造运行态
+    # 未 create_run 就写 → 执行中的写与终态写报错（须先建初始态，不静默吞）；结束写写不成；都不臆造运行态
+    from gherkai_core.run_status import RUN_ENDINGS
+
     store = LocalRunStore(tmp_path / "runs")
     with pytest.raises(FileNotFoundError):
         store.update_job_state("nope", JobState("s", Status.RUNNING))
-    assert store.try_finalize("nope", Status.PASSED, "t") is False
+    with pytest.raises(FileNotFoundError):
+        store.commit_job_states("nope", [JobState("s", Status.PASSED)], ended_at="t")
+    assert store.end_run("nope", RUN_ENDINGS["deadline"], ended_at="t") is False
     assert not (tmp_path / "runs" / "nope").exists()
 
 
@@ -725,7 +769,6 @@ def test_run_meta_cli_version_and_session_warmup_url_round_trip():
 
 def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: Path):
     """运行期限（ADR 0054 决策二）是 definition 的固定键：原样写出、原样读回，本机落盘的 run_meta.json 里同样带着它。"""
-    from gherkai_core.model import run_state_from_result
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     r = _sample_run("dl")
     d = run_meta_to_dict(r.run_meta)
@@ -733,7 +776,7 @@ def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: 
     assert run_meta_from_dict(d) == r.run_meta
     assert run_meta_from_dict({**d, "deadline_at": "2026-06-29T10:15:00+08:00"}).deadline_at == "2026-06-29T10:15:00+08:00"  # 原样读回、不改写
     store = LocalRunStore(tmp_path)
-    store.create_run(r.run_meta, run_state_from_result(r))
+    store.create_run(r.run_meta, r.state)
     assert json.loads((tmp_path / "dl" / "run_meta.json").read_text(encoding="utf-8"))["deadline_at"] == r.run_meta.deadline_at
     assert store.load_run_meta("dl").deadline_at == r.run_meta.deadline_at
 
@@ -749,25 +792,23 @@ def test_run_meta_deadline_at_must_be_a_timezone_aware_iso_time(bad):
     with pytest.raises(DefinitionContractError, match="deadline_at 须为带时区的 ISO 时刻"):
         run_meta_from_dict({**d, "deadline_at": bad})
 
-def test_report_from_dict_is_gated_by_definition_schema():
-    """RunReport / manifest 经 run_meta_from_dict 读 definition，同受结构版本闸（读端只认当前版本，不分读的是哪种文件）。"""
+def test_report_run_meta_is_gated_by_definition_schema():
+    """RunReport / manifest 里的 definition 经 run_meta_from_dict 读，同受结构版本闸（读端只认当前版本，不分读的是哪种文件）。"""
     from gherkai_core.errors import UnsupportedDefinitionSchema
-    from gherkai_core.serialize import from_dict, to_dict
 
     doc = to_dict(_sample_run("rep"))
     doc["run_meta"]["schema_version"] = 3
     with pytest.raises(UnsupportedDefinitionSchema):
-        from_dict(doc)
+        run_meta_from_dict(doc["run_meta"])
 
 
 def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Path):
     import dataclasses
 
     from gherkai_core.errors import UnsupportedDefinitionSchema
-    from gherkai_core.model import run_state_from_result
     r = _sample_run("pk")
     store = LocalRunStore(tmp_path)
-    store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
+    store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), r.state)
     assert store.peek_definition_header("pk") == (2, "1.5.0")
     assert store.peek_definition_header("nope") is None
     path = tmp_path / "pk" / "run_meta.json"
@@ -840,7 +881,7 @@ def test_run_state_jobs_map_round_trip(tmp_path: Path):
 def test_step_message_survives_round_trip_and_missing_key_is_none():
     """step 级 message 写读两端同批（ADR 0042 决策三）：样例必须带**非默认**的 message——全 None 时
     to_dict/from_dict 往返照不出漏读端（默认值恰好相等的假绿）。缺键取 None（ADR 0031 决定六「判定结果读端对三个明细键的缺省」条）。"""
-    jr = _sample_run().jobs[0]
+    jr = _sample_run().details[0]
     jr.scenarios[0].steps[1] = StepResult(index=1, status=Status.FAILED, error_type="assertion_failed",
                                           message="AI 断言未过多数票（0/1）：搜索 OpenAI")
     d = job_result_to_dict(jr)

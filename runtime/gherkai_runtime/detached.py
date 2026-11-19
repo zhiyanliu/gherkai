@@ -25,7 +25,7 @@ from gherkai_core.adapters.event_log import SqliteEventLog, make_raw_sink
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
-from gherkai_core.reconcile import TickOutcome, finalize_report, tick
+from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
 from gherkai_core.run_deadline import deadline_of, job_cutoff
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_runtime import compose
@@ -94,9 +94,10 @@ class SubprocessLauncher:
     同时 enforce 截止时刻：cutoff_at 是 tick 在认领时算好的截止时刻（认领时刻加 job 预算，以运行期限封顶）。
     每个执行中的 job 一个检查线程，按短间隔读注入的墙钟，过了
     cutoff_at 即先置 timed_out 标志再 handle.stop(引擎停止宽限期)（协作停，保会话清理、不持续计费）；停止在检查线程里等完，不阻塞
-    推进循环。worker 退出后 _pump 的 record_exit 带上标志与它看到退出的那一刻（退出时刻，读同一个注入的墙钟），project 按归因链
-    收敛 ERROR+timeout，说明由运行态里的认领时刻、预算与期限重算是哪一个起了作用。看到退出与到点决定经 `_ExitOrCutoff` 互斥，
-    已经看到退出之后检查线程不再置标志。启动器只记这两项事实、不比较截止时刻：worker 在截止时刻之后、下一次检查之前自己退出时，
+    推进循环。worker 退出后 _pump 的 record_exit 带上标志与它看到退出的那一刻（退出时刻，读同一个注入的墙钟），project 按起作用的
+    截止时刻判：job 的预算到点为 ERROR+timeout，运行期限截断为 ABORTED；起作用的是哪一个由运行态里的认领时刻、预算与期限重算
+    （ADR 0034「job timeout」节执行方式表的 local 后台推进进程一行，ADR 0054 决策二后台推进条「截止时刻与说明」）。看到退出与
+    到点决定经 `_ExitOrCutoff` 互斥，已经看到退出之后检查线程不再置标志。启动器只记这两项事实、不比较截止时刻：worker 在截止时刻之后、下一次检查之前自己退出时，
     退出记录不带标志，由投影按退出时刻晚于截止时刻判为超时，与前台终结之前的那次检查、云端
     后台的退出记录是同一个判断（内容完整的照旧不改判，由终结函数保证；ADR 0054 决策二后台推进条「截止时刻与说明」）。按墙钟而不按
     单调时钟：截止时刻由认领时刻这个墙钟时刻算出，单调时钟在系统休眠时不走，合盖之后醒来的推进进程按墙钟才知道已经过了截止时刻
@@ -209,17 +210,17 @@ def run_reconcile_loop(
     判断截止时刻是否已到，这里写进报告的时刻经 `serialize.instant_to_iso` 从它写出，同一份 RunState 里只有一种时间戳写法，故不留
     缺省。launcher 的截止时刻检查读的是它构造时注入的墙钟，组合根两处传的是同一个读取点。
     tick 幂等——崩了 status --wait 可接力（状态全持久）。循环按 tick 的结果分支（batch shape：运行结束即停、不常驻）：
-    - `TickOutcome.COMMITTED`（这一方写成收尾）：用 tick 交还的结果写 RunReport 后退出；
-    - `TickOutcome.ENDED`（run 已结束、终态不是这一方写成的）：不写报告、直接退出。带着 pending job 收尾的 run 在这里结束，
-      循环不依赖「每个 job 都会到终态」；
+    - `TickOutcome.COMMITTED`（这一方的写使 run 成为终态）：从记录生成 RunReport 后退出；
+    - `TickOutcome.ENDED`（run 已结束、使它成为终态的不是这一方）：不写报告、直接退出。循环只按 run 级的结果结束，不依赖「每个
+      job 都会到终态」（ADR 0034 机制三「run 级状态只进不退」条④）；
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
     退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
-    认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后按到期收尾，不
-    启动任何 job。
+    认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后由到期的结束写结束
+    这个 run，不启动任何 job。
 
-    result_store/report_store（可选）：判定真值（jobs/*.json）由 tick 在收尾的条件写**之前**落（注入给 tick）；
-    RunReport（index/manifest）在这一方写成收尾之后由 `finalize_report` 写（派生、失败隔离）。
-    注入 None（测试）则跳过。
+    result_store/report_store（可选）：判定明细（jobs/*.json）由 tick 在写下这一轮各 job 的终态之前存下（注入给 tick；ADR 0030
+    决定三「后台推进同守」条）；RunReport（index/manifest）在这一方的写使 run 成为终态之后，由 `write_report_from_record` 从记录
+    生成（派生、失败隔离）。注入 None（测试）则跳过。
     """
     while True:
         outcome = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
@@ -227,17 +228,11 @@ def run_reconcile_loop(
         if outcome.outcome is TickOutcome.ENDED:
             return
         if outcome.outcome is TickOutcome.COMMITTED:
-            # 报告收尾走 core 唯一一份（曾在此双写一份、与 deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 漂移风险，已合并）
-            # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
-            # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试，抛出去会让
-            # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
-            # 后才执行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
-            # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧做法相同）。
-            try:
-                duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
-            except Exception:
-                duration_ms = None
-            finalize_report(outcome.result, report_store, instant_to_iso(clock()), run_duration_ms=duration_ms)
+            # 报告从记录生成，入口是 core 唯一的一份，云端推进器 Lambda 调的是同一个。生成在终态写之后、失败无人重试，抛出去会让本进程
+            # 带着未写的报告退出，还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回后才执行）；所以读运行态、
+            # 组装与写报告整段在入口的失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034 机制三「run 级状态只进
+            # 不退」条④）。
+            write_report_from_record(meta, run_store, outcome.details, report_store, created_at=instant_to_iso(clock()))
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher.owned_scopes, now=clock())
         time.sleep(poll_interval_s)

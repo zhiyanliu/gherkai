@@ -2,11 +2,13 @@
 
 用真 SqliteEventLog + LocalRunStore + fake Launcher（记录被 launch 的 job，不起真进程）与注入的假墙钟验证 tick 逻辑：
 - 首 tick 从全 pending 起首批（≤max_concurrency），每次认领前另取一次时刻作认领时刻，截止时刻随 launch 交出；
-- worker 事件落 log 后 tick 推进态、起下一个；全部结束 → 收尾；
+- worker 事件落 log 后 tick 推进态、起下一个；全部结束 → 先存判定明细、再以终态写记下各 job 的终态，run 随之成为终态
+  （ADR 0034 机制三「run 级状态只进不退」条④与 ADR 0054 决策二后台推进条）；
 - 幂等：重复 tick 不重复 launch（CAS 挡）；
-- 已过停止启动的时刻：不认领；没有执行中的 job、余下的都没启动 → 到期收尾，条件写带认领计数；
+- 已过停止启动的时刻：不认领；没有执行中的 job、余下的都没启动 → 到期的结束写，写下时有 running 的 job 即写不成；
 - 同一轮里认领因已过停止启动而没做时重新决策一次；快照里有记录的 job 缺认领时刻时不收尾；
-- 结果三种（TickOutcome）：继续推进 / 这一方写成收尾（带结果）/ run 已结束而不是这一方写成（不带结果）。
+- 结果三种（TickOutcome）：继续推进 / 这一方的写使 run 成为终态（带这一轮的判定明细）/ run 已结束而使它成为终态的不是这一方
+  （不带明细）；报告由宿主经 `write_report_from_record` 从记录生成。
 纯编排逻辑（launch 被 fake、时钟被注入）→ 绿即够；真进程脱离 / SQLite 并发是真实运行边界。
 """
 from __future__ import annotations
@@ -19,8 +21,8 @@ from gherkai_core.adapters.event_log import SqliteEventLog
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-from gherkai_core.reconcile import TickOutcome, TickResult, finalize_report, tick
-from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+from gherkai_core.reconcile import TickOutcome, TickResult, tick, write_report_from_record
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from gherkai_core.serialize import instant_to_iso
 from tests.fake_engine import FAR_DEADLINE
 
@@ -72,11 +74,12 @@ def _meta(*sids: str, deadline_at: str = FAR_DEADLINE) -> RunMeta:
 
 # 期限在 T0 之后 100 秒：停止启动的时刻是 T0+40
 _NEAR = instant_to_iso(_at(100))
+_DEADLINE_ENDING = RUN_ENDINGS["deadline"]  # 到期的结束写：run 级说明与没有启动的 job 的说明
 
 
 def _initial(*sids: str) -> RunState:
     return RunState(run_id="run-1", status=Status.PENDING, jobs={s: JobState(s, Status.PENDING) for s in sids},
-                    started_at="t0", high_water_mark=0)
+                    started_at=_iso(0), high_water_mark=0)
 
 
 def _setup(tmp_path, *sids: str, deadline_at: str = FAR_DEADLINE, store=None):
@@ -148,13 +151,14 @@ def test_tick_starts_next_after_completion(tmp_path):
 
 
 def test_tick_commits_when_all_done(tmp_path):
-    """全部 job 两件都要齐 → 这一方写成收尾：返回 COMMITTED 且带结果，RunStore 落成终态，ended_at 是这一轮读运行态之前取的时刻。"""
+    """全部 job 两件都要齐 → 这一方的终态写使 run 成为终态：返回 COMMITTED 且带这一轮的判定明细，run 的状态按取法写下，ended_at 是
+    这一轮读运行态之前取的时刻。"""
     meta, log, store = _setup(tmp_path, "a")
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock())  # 起 a
     _done_events(log, "a")
     done = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(20))
     assert done.outcome is TickOutcome.COMMITTED
-    assert (done.result.status, done.result.message, [jr.scope_id for jr in done.result.jobs]) == (Status.PASSED, None, ["a"])
+    assert [(jr.scope_id, jr.status) for jr in done.details] == [("a", Status.PASSED)]
     state = store.load_run_state("run-1")
     assert (state.status, state.ended_at, state.message) == (Status.PASSED, _iso(20), None)
 
@@ -184,12 +188,11 @@ def test_tick_after_commit_reads_existing_terminal(tmp_path):
 
 
 class _SpyRunStore(LocalRunStore):
-    """真 LocalRunStore，另记下 tick 发出的写（投影、认领、收尾）与收尾写带的认领计数条件。"""
+    """真 LocalRunStore，另记下 tick 发出的写（投影、认领、终态写、结束写）。"""
 
     def __init__(self, root) -> None:
         super().__init__(root)
         self.writes: list[str] = []
-        self.finalize_counts: list[int | None] = []
 
     def project_state(self, run_id, state):
         self.writes.append("project_state")
@@ -199,10 +202,13 @@ class _SpyRunStore(LocalRunStore):
         self.writes.append("try_claim_job")
         return super().try_claim_job(run_id, scope_id, claimed_at=claimed_at)
 
-    def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
-        self.writes.append("try_finalize")
-        self.finalize_counts.append(expected_claim_count)
-        return super().try_finalize(run_id, status, ended_at, message=message, expected_claim_count=expected_claim_count)
+    def commit_job_states(self, run_id, job_states, *, ended_at):
+        self.writes.append("commit_job_states")
+        return super().commit_job_states(run_id, job_states, ended_at=ended_at)
+
+    def end_run(self, run_id, ending, *, ended_at):
+        self.writes.append("end_run")
+        return super().end_run(run_id, ending, ended_at=ended_at)
 
 
 class _CountingEventLog(SqliteEventLog):
@@ -215,16 +221,16 @@ class _CountingEventLog(SqliteEventLog):
         return super().records()
 
 
-def test_tick_on_finalized_run_with_pending_jobs_reads_existing_terminal(tmp_path):
-    """库中 run 已收尾（error）而 job 仍 pending（definition 不可用时的收尾形态）：tick 返回 ENDED，
+def test_tick_on_an_ended_run_reads_existing_terminal(tmp_path):
+    """库中 run 已结束（这里是处置的结束写，两个 job 都没有启动、记 skipped）：tick 返回 ENDED，
     不读事件、不投影、不认领、不启动、不落判定真值（ADR 0034 机制三「run 级状态只进不退」条④）。
 
-    不判停时，认领被条件挡下、plan_next 每轮都提议 start，tick 每轮都返回 CONTINUE，本机推进循环不会结束。"""
+    不判停时，这一轮照常读事件、推演并走到收尾，落下判定明细之后才被终态写的条件挡下。"""
     meta = _meta("a", "b")
     log = _CountingEventLog(tmp_path / "e.db")
     store = _SpyRunStore(tmp_path)
     store.create_run(meta, _initial("a", "b"))
-    assert store.try_finalize("run-1", Status.ERROR, "t1", message="definition 不可用") is True
+    assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
     store.writes.clear()
     _done_events(log, "a")  # 库里有事件也不读
     before = store.load_run_state("run-1")
@@ -239,18 +245,18 @@ def test_tick_on_finalized_run_with_pending_jobs_reads_existing_terminal(tmp_pat
 
 
 def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path):
-    """收尾写写不成（并发推进器在本轮读 baseline 之后先提交了终态）：重读到终态，返回 ENDED、不带结果，宿主不生成报告；判定真值照落
-    （写序不变）；库中终态是先提交的那一份。"""
+    """终态写写不成（并发推进器在本轮读 baseline 之后先使 run 成为终态）：终态写报告 run 在这次写之前已是终态，返回 ENDED、不带明细、
+    不另读，宿主不生成报告；判定真值照落（写序不变）；库中终态是先写成的那一份（ADR 0034 机制三「run 级状态只进不退」条④第 5 步
+    与同条 K2）。"""
 
     class _LosesCommit(LocalRunStore):
         def __init__(self, root) -> None:
             super().__init__(root)
-            self.results: list[bool] = []
+            self.results: list[CommitOutcome] = []
 
-        def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
-            super().try_finalize(run_id, status, "other")  # 另一推进器先提交
-            self.results.append(super().try_finalize(run_id, status, ended_at, message=message,
-                                                     expected_claim_count=expected_claim_count))
+        def commit_job_states(self, run_id, job_states, *, ended_at):
+            super().commit_job_states(run_id, job_states, ended_at="other")  # 另一推进器先写成
+            self.results.append(super().commit_job_states(run_id, job_states, ended_at=ended_at))
             return self.results[-1]
 
     meta, log, store = _setup(tmp_path, "a", store=_LosesCommit(tmp_path))
@@ -261,7 +267,7 @@ def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path):
     outcome = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(20), result_store=rs)
 
     assert outcome == TickResult(TickOutcome.ENDED)
-    assert store.results == [False]  # 本实例确实写输
+    assert store.results == [CommitOutcome.ALREADY_ENDED]  # 本实例确实写输
     assert [jr.scope_id for jr in rs.saved] == ["a"]
     state = store.load_run_state("run-1")
     assert state.status == Status.PASSED and state.ended_at == "other"
@@ -278,7 +284,7 @@ def test_finalize_inserted_after_baseline_read_continues_then_stops(tmp_path):
             state = super().load_run_state(run_id)
             if self.armed:
                 self.armed = False
-                assert self.try_finalize(run_id, Status.ERROR, "other") is True
+                assert self.end_run(run_id, RUN_ENDINGS["settle-advancer-exited"], ended_at="other") is True
             return state
 
     meta, log, store = _setup(tmp_path, "a", store=_FinalizedRightAfterRead(tmp_path))
@@ -289,7 +295,7 @@ def test_finalize_inserted_after_baseline_read_continues_then_stops(tmp_path):
     assert launcher.launched == []  # 认领被「run 未收尾」条件挡下
     assert tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock()).outcome is TickOutcome.ENDED
     state = store.load_run_state("run-1")
-    assert state.status == Status.ERROR and state.jobs["a"].status == Status.PENDING
+    assert (state.status, state.ended_at, state.jobs["a"].status) == (Status.ABORTED, "other", Status.SKIPPED)
 
 
 # ---------- launch 失败补偿（ADR 0034 机制二推论、ADR 0054 决策二后台推进条「时刻」）----------
@@ -338,17 +344,17 @@ def test_launch_failure_records_unknown_exit_with_the_same_reason_as_the_foregro
     (exit_rec,) = [r.exited for r in log.records() if r.kind == "exit"]
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.reason) == (None, False, "起 worker 失败：boom: a")
     assert exit_rec.exited_at == _at(0)
-    (jr,) = project_full(meta, log.records(), claimed_at=_claimed(store), past_stop_start=False).jobs
+    (jr,) = project_full(meta, log.records(), claimed_at=_claimed(store))
     assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "engine_error", "起 worker 失败：boom: a")
 
 
-@pytest.mark.parametrize("deadline_at, message", [
-    (FAR_DEADLINE, "job 超时（预算 300s，已中止）"),
-    (_NEAR, DEADLINE_TIMEOUT_MESSAGE),
+@pytest.mark.parametrize("deadline_at, expected", [
+    (FAR_DEADLINE, (Status.ERROR, "timeout", "job 超时（预算 300s，已中止）")),
+    (_NEAR, (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)),
 ])
-def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_at, message):
-    """启动调用失败时再取一次时刻，记为退出时刻：补偿只记这个事实、不带超时标志，投影时它晚于这个 job 的截止时刻即按超时处理，与前台
-    起 worker 失败的分支得到同一个判定；说明按起作用的那个截止时刻给（预算或期限）。"""
+def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_at, expected):
+    """启动调用失败时再取一次时刻，记为退出时刻：补偿只记这个事实、不带超时标志，投影时它晚于这个 job 的截止时刻即按到点处理，与前台
+    起 worker 失败的分支得到同一个判定；按起作用的那个截止时刻记：预算是 error 加 timeout，期限是 aborted（ADR 0031 决定一）。"""
     from gherkai_core.project import project_full
 
     meta, log, store = _setup(tmp_path, "a", deadline_at=deadline_at)
@@ -356,8 +362,8 @@ def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_
     tick("run-1", meta, log, store, BoomLauncher(clock, then=1000), max_concurrency=1, clock=clock)
     (exit_rec,) = [r.exited for r in log.records() if r.kind == "exit"]
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (None, False, _at(1000))
-    (jr,) = project_full(meta, log.records(), claimed_at=_claimed(store), past_stop_start=True).jobs
-    assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", message)
+    (jr,) = project_full(meta, log.records(), claimed_at=_claimed(store))
+    assert (jr.status, jr.error_type, jr.message) == expected
 
 
 def test_launch_failure_isolated_other_job_completes(tmp_path):
@@ -384,7 +390,7 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
     assert state.status == Status.ERROR  # 任一 error → run error（ADR 0031 决定三）
 
 
-# ---------- commit-point 写序：判定真值先落、CAS 后 ----------
+# ---------- 写序：判定明细先落、终态写后写（ADR 0030 决定三「后台推进同守」条）----------
 
 class _RecordingResultStore:
     def __init__(self, seq: list, fail: bool = False) -> None:
@@ -402,14 +408,14 @@ class _OrderRecordingRunStore(LocalRunStore):
         super().__init__(root)
         self.seq = seq
 
-    def try_finalize(self, run_id, status, ended_at, *, message=None, expected_claim_count=None):
-        self.seq.append(("finalize", status))
-        return super().try_finalize(run_id, status, ended_at, message=message, expected_claim_count=expected_claim_count)
+    def commit_job_states(self, run_id, job_states, *, ended_at):
+        self.seq.append(("commit", tuple((js.scope_id, js.status) for js in job_states)))
+        return super().commit_job_states(run_id, job_states, ended_at=ended_at)
 
 
 def test_finalize_writes_verdicts_before_commit_point(tmp_path):
-    """全 done 的 tick：ResultStore 各 job 判定真值**先**落，再 try_finalize——看到终态即
-    保证 jobs/*.json 已齐；反序在 detached 下崩在中间就是永久缺失（无人重试）。"""
+    """全 done 的 tick：ResultStore 各 job 判定明细**先**落，再一次终态写记下各 job 的终态（ADR 0030 决定三「后台推进同守」条）——
+    看到终态即保证 jobs/*.json 已齐；反序在 detached 下崩在中间就是永久缺失（无人重试）。"""
     seq: list = []
     meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq))
     rs = _RecordingResultStore(seq)
@@ -418,7 +424,8 @@ def test_finalize_writes_verdicts_before_commit_point(tmp_path):
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(5),
                 result_store=rs).outcome is TickOutcome.COMMITTED
     kinds = [x[0] for x in seq]
-    assert kinds == ["verdict", "verdict", "finalize"], seq
+    assert kinds == ["verdict", "verdict", "commit"], seq
+    assert seq[-1][1] == (("a", Status.PASSED), ("b", Status.PASSED))  # 一次写记下这一轮全部的终态
     assert all(jr.status == Status.PASSED for jr in rs.saved) and store.load_run_state("run-1").status == Status.PASSED
 
 
@@ -440,8 +447,8 @@ def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path
 
 
 def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path):
-    """前一个 job 的判定已保存、后一个 job 的保存失败：异常原样抛出，这一轮没有发出
-    收尾的条件写，run 仍未结束；重试的一轮保存完全部判定之后才提交。"""
+    """前一个 job 的判定已保存、后一个 job 的保存失败：异常原样抛出，这一轮没有发出终态写，run 仍未结束；重试的一轮保存完全部判定之后
+    才写终态（ADR 0034 机制三「run 级状态只进不退」条④ K3）。"""
 
     class _FailsOnSecondSave(_RecordingResultStore):
         def save_job_result(self, run_id, jr):
@@ -456,15 +463,16 @@ def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path):
     with pytest.raises(OSError):
         tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(5),
              result_store=_FailsOnSecondSave(seq))
-    assert [x[0] for x in seq] == ["verdict"]  # 前一个保存了，没有收尾的条件写
+    assert [x[0] for x in seq] == ["verdict"]  # 前一个保存了，没有终态写
     assert store.load_run_state("run-1").status == Status.RUNNING
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(6),
                 result_store=_RecordingResultStore(seq)).outcome is TickOutcome.COMMITTED
-    assert [x[0] for x in seq] == ["verdict", "verdict", "verdict", "finalize"]
+    assert [x[0] for x in seq] == ["verdict", "verdict", "verdict", "commit"]
     assert store.load_run_state("run-1").status == Status.PASSED
 
 
-# ---------- 报告 ----------
+# ---------- 报告：使 run 成为终态的那一方从记录生成，判定明细用这一轮的结果、不另读事件
+# （ADR 0027「ReportStore 接口：整 run 一次写」节；ADR 0034 机制三「run 级状态只进不退」条④ K2）----------
 
 class _Report:
     def __init__(self) -> None:
@@ -474,26 +482,28 @@ class _Report:
         self.written.append((run_id, result, created_at))
 
 
-def test_report_comes_from_the_committed_result_not_from_a_second_read_of_the_events(tmp_path):
-    """报告由写成收尾的那一轮的结果直接生成：之后事件再变（接力方补写的未知退出被真实退出码覆盖之类），报告里的判定仍是提交的那一份；
-    run 级墙钟由宿主算好传入。"""
+def test_report_comes_from_the_record_and_the_committed_details_not_from_a_second_read_of_the_events(tmp_path):
+    """报告从记录组装：状态取运行态，判定明细取写成的那一轮交还的那一份；之后事件再变（接力方补写的未知退出被真实退出码覆盖之类），
+    报告里的判定仍是提交的那一份。run 级墙钟由运行态的起止算出。"""
     meta, log, store = _setup(tmp_path, "a")
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock())
     _done_events(log, "a")
     done = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(5))
     log.record_exit("a", 1)  # 提交之后退出记录被改写：再读一次事件重算会得出 error
     reports = _Report()
-    finalize_report(done.result, reports, "2030-01-01T00:00:06+00:00", run_duration_ms=4200.0)
+    write_report_from_record(meta, store, done.details, reports, created_at="2030-01-01T00:00:06+00:00")
     ((run_id, result, created_at),) = reports.written
-    assert (run_id, result.status, result.jobs[0].status, result.duration_ms) == ("run-1", Status.PASSED, Status.PASSED, 4200.0)
+    assert (run_id, result.status, result.jobs[0].status, result.details[0].status) == (
+        "run-1", Status.PASSED, Status.PASSED, Status.PASSED)
+    assert result.duration_ms == 5000.0  # 运行态的 started_at（T0）到 ended_at（T0+5）
     assert created_at == "2030-01-01T00:00:06+00:00"
 
 
 def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path):
-    """两个推进方读到不同的快照、竞争收尾。固定先后：B 读完运行态、读事件之前，
-    A 走完一轮并写成收尾；B 随后按自己的快照走到收尾，条件写写不成。只断言必须成立的正面性质：A 写成、带它这一轮的结果；B 返回不带
-    结果的 ENDED；run 级的状态、说明与结束时刻是 A 写下的；用 A 交还的结果生成的报告是 A 的判定。B 落下的判定明细与 A 的谁留在
-    存储里不在断言之内。"""
+    """两个推进方读到不同的快照、竞争收尾（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读事件之前，
+    A 走完一轮并写成终态；B 随后按自己的快照走到收尾，终态写报告 run 已结束。只断言必须成立的正面性质：A 写成、带它这一轮的判定明细；
+    B 返回不带明细的 ENDED；run 级的状态、说明与结束时刻是 A 写下的；用 A 交还的明细与记录生成的报告是 A 的判定。B 落下的判定明细与 A 的
+    谁留在存储里不在断言之内。"""
     meta, log_a, store = _setup(tmp_path, "a")
     tick("run-1", meta, log_a, store, FakeLauncher(), max_concurrency=1, clock=Clock())  # 认领并启动 a
     _done_events(log_a, "a")  # A 读到的快照：完整的结果，判 passed
@@ -517,34 +527,57 @@ def test_report_follows_the_committing_round_when_two_advancers_read_different_s
 
     outcome_a = log_b.committed
     assert outcome_a.outcome is TickOutcome.COMMITTED
-    assert (outcome_a.result.status, [jr.status for jr in outcome_a.result.jobs]) == (Status.PASSED, [Status.PASSED])
-    assert outcome_b == TickResult(TickOutcome.ENDED)  # B 读运行态时 run 未结束：走到了收尾、条件写写不成、重读到终态
+    assert [jr.status for jr in outcome_a.details] == [Status.PASSED]
+    assert outcome_b == TickResult(TickOutcome.ENDED)  # B 读运行态时 run 未结束：走到了收尾、终态写报告 run 已结束
     state = store.load_run_state("run-1")
     assert (state.status, state.ended_at, state.message) == (Status.PASSED, _iso(20), None)
     reports = _Report()
-    finalize_report(outcome_a.result, reports, "2030-01-01T00:00:21+00:00")
+    write_report_from_record(meta, store, outcome_a.details, reports, created_at="2030-01-01T00:00:21+00:00")
     ((_run_id, result, _created_at),) = reports.written
-    assert (result.status, [jr.status for jr in result.jobs]) == (Status.PASSED, [Status.PASSED])
+    assert (result.status, [o.status for o in result.jobs], [jr.status for jr in result.details]) == (
+        Status.PASSED, [Status.PASSED], [Status.PASSED])
 
 
-def test_report_write_failure_is_isolated():
-    """派生视图写失败不击穿已提交的终态（ADR 0030 决定三）；没有报告落点时什么都不做。"""
+def test_report_generation_failures_are_isolated(tmp_path):
+    """生成报告的各步都在失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」注）：写报告失败、为组装而读运行态失败、运行态不存在，
+    都不击穿已到终态的 run，也不抛出；没有报告落点时什么都不做、不读运行态。"""
 
     class _Boom:
         def write(self, run_id, result, *, created_at):
             raise OSError("S3 不可达")
 
-    from gherkai_core.model import RunResult
-    result = RunResult(run_meta=_meta("a"), status=Status.PASSED)
-    finalize_report(result, _Boom(), "t")
-    finalize_report(result, None, "t")
+    class _ReadFails(LocalRunStore):
+        def load_run_state(self, run_id):
+            raise OSError("读不回运行态")
+
+    class _Counting(LocalRunStore):
+        reads = 0
+
+        def load_run_state(self, run_id):
+            self.reads += 1
+            return super().load_run_state(run_id)
+
+    meta, log, store = _setup(tmp_path, "a")
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock())
+    _done_events(log, "a")
+    done = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(5))
+
+    write_report_from_record(meta, store, done.details, _Boom(), created_at="t")
+    reports = _Report()
+    write_report_from_record(meta, _ReadFails(tmp_path), done.details, reports, created_at="t")
+    write_report_from_record(meta, LocalRunStore(tmp_path / "elsewhere"), done.details, reports, created_at="t")
+    assert reports.written == []
+    counting = _Counting(tmp_path)
+    write_report_from_record(meta, counting, done.details, None, created_at="t")
+    assert counting.reads == 0
 
 
-# ---------- 到期处理 ----------
+# ---------- 到期处理：到期的结束写把未启动的 job 记 skipped 并带到期的说明，run 随之成为终态
+# （ADR 0054 决策二第 3 条与后台推进条）----------
 
 def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
-    """已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动：不认领、不启动，到期收尾——已结束的 job 落判定明细，run 级以条件写
-    收尾为 error 加「已超过允许运行的时间」，条件带这一轮读到的认领计数；未启动的 job 保持 pending，不在判定清单里。"""
+    """已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动：不认领、不启动，到期收尾——已结束的 job 落判定明细，到期的结束写把
+    未启动的 job 记 skipped 并带到期的说明，run 按取法记 aborted、带「已超过允许运行的时间」；交还的判定明细只有有记录的 job。"""
     meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
     launcher, rs = FakeLauncher(), _RecordingResultStore([])
     tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(0, 1))  # 起 a
@@ -554,24 +587,26 @@ def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
 
     assert launcher.launched == ["a"]  # b 没有被认领、没有启动
     assert done.outcome is TickOutcome.COMMITTED
-    assert (done.result.status, done.result.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert [jr.scope_id for jr in done.result.jobs] == ["a"] and [j.scope_id for j in done.result.jobs_without_verdict] == ["b"]
+    assert [jr.scope_id for jr in done.details] == ["a"]
     assert [jr.scope_id for jr in rs.saved] == ["a"]
-    assert store.finalize_counts == [1]  # 一次认领之后读到的计数
+    assert "end_run" in store.writes and "commit_job_states" not in store.writes
     state = store.load_run_state("run-1")
-    assert (state.status, state.message, state.ended_at) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, _iso(41))
-    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.PASSED, Status.PENDING)
+    assert (state.status, state.message, state.ended_at) == (Status.ABORTED, _DEADLINE_ENDING.run_message, _iso(41))
+    assert (state.jobs["a"].status, state.jobs["b"].status, state.jobs["b"].message) == (
+        Status.PASSED, Status.SKIPPED, _DEADLINE_ENDING.skipped_message)
 
 
-def test_all_done_after_the_deadline_aggregates_without_the_claim_count_condition(tmp_path):
-    """没有执行中的、也没有未启动的 job：照常按各 job 的判定聚合收尾，不管是否已过期限；收尾写不带认领计数
-    的条件：没有未启动的 job 就不会再有认领。"""
+def test_all_done_after_the_deadline_ends_by_the_terminal_write(tmp_path):
+    """没有执行中的、也没有未启动的 job：run 在记下各 job 终态的那次写里随之成为终态，不论是否已过期限，不做结束写、不带到期的说明
+    （ADR 0054 决策二第 4 条）。"""
     meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1))
     _done_events(log, "a")
     done = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(500))
-    assert (done.outcome, done.result.status, done.result.message) == (TickOutcome.COMMITTED, Status.PASSED, None)
-    assert store.finalize_counts == [None]
+    assert done.outcome is TickOutcome.COMMITTED
+    assert "commit_job_states" in store.writes and "end_run" not in store.writes
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.PASSED, None)
 
 
 def test_past_stop_start_with_a_running_job_continues(tmp_path):
@@ -580,28 +615,29 @@ def test_past_stop_start_with_a_running_job_continues(tmp_path):
     launcher = FakeLauncher()
     tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(0, 1))  # 起 a，a 仍在执行
     assert tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(41)) == TickResult(TickOutcome.CONTINUE)
-    assert launcher.launched == ["a"] and "try_finalize" not in store.writes
+    assert launcher.launched == ["a"] and "end_run" not in store.writes and "commit_job_states" not in store.writes
 
 
 def test_claim_refused_by_the_deadline_triggers_one_replan_in_the_same_round(tmp_path):
     """这一轮里有认领因已过停止启动的时刻而没有做（每次认领前重做检查）：同一轮里重新取时刻、重新读取运行态与事件、按已过停止启动再
-    决策一次（ADR 0054 决策二后台推进条「时刻」），满足到期收尾就当场收尾，不留给不会再来的下一轮。收尾时刻取重新读取之前的那一次。"""
+    决策一次（ADR 0054 决策二后台推进条「时刻」），满足到期收尾就当场做结束写，不留给不会再来的下一轮。结束时刻取重新读取之前的
+    那一次。"""
     meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR)
     clock = Clock(0, 50, 51)  # 轮首未过停止启动的时刻（T0+40）；认领前已过；重新读取之前再取一次
 
     done = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=clock)
 
-    assert done.outcome is TickOutcome.COMMITTED
-    assert (done.result.status, done.result.message, done.result.jobs) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, [])
+    assert done.outcome is TickOutcome.COMMITTED and done.details == ()  # 一个 job 都没有启动
     state = store.load_run_state("run-1")
-    assert (state.status, state.ended_at, state.jobs["a"].status) == (Status.ERROR, _iso(51), Status.PENDING)
+    assert (state.status, state.message, state.ended_at, state.jobs["a"].status) == (
+        Status.ABORTED, _DEADLINE_ENDING.run_message, _iso(51), Status.SKIPPED)
     assert clock.reads == 3
 
 
 @pytest.mark.parametrize("launch_fails, outcome", [(False, TickOutcome.CONTINUE), (True, TickOutcome.COMMITTED)])
 def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fails, outcome):
-    """重新决策时这一轮里先前认领成功的 job 计入：它在执行中就不到期收尾、继续推进；它的启动已失败（补写了退出记录）就到期收尾，
-    它的判定在清单里。重新决策只做一次：只多读一次时钟。"""
+    """重新决策时这一轮里先前认领成功的 job 计入：它在执行中就不到期收尾、继续推进；它的启动已失败（补写了退出记录）就做到期的结束写，
+    它的判定明细随结果交还，run 有 error 即记 error。重新决策只做一次：只多读一次时钟。"""
 
     class _Launcher(FakeLauncher):
         def launch(self, job, *, cutoff_at):
@@ -616,12 +652,12 @@ def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fa
     assert done.outcome is outcome and launcher.launched == ["a"]
     assert clock.reads == 4 + (1 if launch_fails else 0)  # 轮首、两次认领前、重新读取前；启动失败时另取一次
     state = store.load_run_state("run-1")
-    assert (state.jobs["a"].claimed_at, state.jobs["b"].status) == (_iso(1), Status.PENDING)
+    assert state.jobs["a"].claimed_at == _iso(1)
     if launch_fails:
-        assert [jr.scope_id for jr in done.result.jobs] == ["a"] and state.status == Status.ERROR
-        assert state.message == RUN_DEADLINE_PASSED_MESSAGE
+        assert [jr.scope_id for jr in done.details] == ["a"]
+        assert (state.status, state.message, state.jobs["b"].status) == (Status.ERROR, _DEADLINE_ENDING.run_message, Status.SKIPPED)
     else:
-        assert state.status == Status.RUNNING
+        assert (state.status, state.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
 
 
 @pytest.mark.parametrize("claimed_at", [None, "t1", "2030-01-01T00:00:00"])
@@ -636,7 +672,7 @@ def test_recorded_job_without_a_claim_time_in_the_snapshot_blocks_the_finalize(t
 
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(5),
                 result_store=rs) == TickResult(TickOutcome.CONTINUE)
-    assert rs.saved == [] and "try_finalize" not in store.writes
+    assert rs.saved == [] and "commit_job_states" not in store.writes
     assert store.load_run_state("run-1").status == Status.RUNNING
 
     control_dir = tmp_path / "control"
@@ -655,11 +691,11 @@ def test_no_expiry_in_a_round_that_cannot_read_the_run_state(tmp_path):
     store = _SpyRunStore(tmp_path)  # 没有建 run：运行态读不到
     outcome = tick("run-1", meta, SqliteEventLog(tmp_path / "e.db"), store, FakeLauncher(), max_concurrency=1, clock=Clock(50))
     assert outcome == TickResult(TickOutcome.CONTINUE)
-    assert "try_finalize" not in store.writes
+    assert "end_run" not in store.writes
 
 
 class _ClaimLandsAfterRead(SqliteEventLog):
-    """读事件时另一个推进方的认领恰好落下：它在本轮读运行态之后、收尾写之前认领了 scope（它的时钟落后，还没过停止启动的时刻）。"""
+    """读事件时另一个推进方的认领恰好落下：它在本轮读运行态之后、结束写之前认领了 scope（它的时钟落后，还没过停止启动的时刻）。"""
 
     def __init__(self, path, store, scope: str) -> None:
         super().__init__(path)
@@ -673,8 +709,8 @@ class _ClaimLandsAfterRead(SqliteEventLog):
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path):
-    """到期收尾与认领并发（本机）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的收尾写
-    被认领计数的条件挡下，重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running。"""
+    """到期收尾与认领并发（本机）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的结束写按写下时的
+    运行态判断，那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running。"""
     meta, _, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
     plain = SqliteEventLog(tmp_path / "e.db")
     tick("run-1", meta, plain, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1))  # 起 a
@@ -685,7 +721,7 @@ def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path):
 
     assert log.landed is True
     assert outcome == TickResult(TickOutcome.CONTINUE)
-    assert store.finalize_counts == [1]  # 收尾写确实发出、带的是读到的计数
+    assert store.writes.count("end_run") == 1  # 结束写确实发出
     state = store.load_run_state("run-1")
     assert (state.status, state.claim_count, state.jobs["b"].status) == (Status.RUNNING, 2, Status.RUNNING)
     assert state.message is None

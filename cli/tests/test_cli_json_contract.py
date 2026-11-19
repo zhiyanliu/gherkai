@@ -14,6 +14,8 @@ import re
 from pathlib import Path
 
 from gherkai_core import model as M
+from gherkai_core.project import assemble_run_result
+from gherkai_core.run_status import RUN_ENDINGS
 from gherkai_core.serialize import run_state_to_dict
 from gherkai_core.target import validate_job_definition
 
@@ -110,11 +112,15 @@ def _device_selections() -> dict:
             "ios": resolve_device_selection("ios", flag_arn=None, env={}, config=_CONFIG)}
 
 
+_FAIL_FAST = RUN_ENDINGS["fail-fast"]  # 样例 run 因 fail-fast 结束：余下没有启动的那个 job 由结束写记 skipped、带说明
+
+
 def _sample_run_result() -> M.RunResult:
     """把所有可选字段都填上（votes/cost/report_refs/argument 两种/extra headers/worker_variant/设备目标…），键才收得全。
 
-    三个 job：桌面网页、Android 应用（应用条目五项齐全、设备请求指定一台）、iOS 网页（设备请求按系统版本挑选）；设备请求由
-    `build_device_request` 从设备选择合成，与 run / submit 的组合根同一条路。"""
+    四个 job：桌面网页、Android 应用（应用条目五项齐全、设备请求指定一台）、iOS 网页（设备请求按系统版本挑选）各有判定明细，
+    第四个桌面 job 没有启动、由结束写记 skipped（没有判定明细）；设备请求由 `build_device_request` 从设备选择合成，与 run / submit
+    的组合根同一条路。结果经真组装函数从运行态与判定明细得出，与前台 `run` 输出 `--json` 时同一条路。"""
     steps = (M.Step(0, "Given", '打开 "https://x"'),
              M.Step(1, "When", "搜索", argument=M.StepArgument(kind="docString", content="c")),
              M.Step(2, "Then", "对吗", argument=M.StepArgument(kind="dataTable", rows=(("a", "b"),))))
@@ -161,11 +167,21 @@ def _sample_run_result() -> M.RunResult:
     ios_jr = _mk(M.JobResult, job=ios_job, status=M.Status.PASSED, scenarios=[ios_sr], session_id="arn:i", duration_ms=9.0,
                  sessions=[_mk(M.SessionRecord, session_id="arn:i", name="n-i", origin="created", release="confirmed",
                                observed_s=5.0)], device_observed_s=5.0, device_observed_missing=0)
-    meta = _mk(M.RunMeta, run_id="r", created_at="t", deadline_at="2026-01-01T01:00:00+00:00", jobs=(job, dev_job, ios_job),
-               max_concurrency=2, steps_dir="/p/steps",
+    unstarted = _mk(M.Job, scope_id="s.feature:3", scope_name="没有启动", engine="midscene",
+                    scenarios=(M.Scenario(id="s.feature:3", name="没有启动", steps=(M.Step(0, "Then", "对吗"),)),),
+                    timeout_s=300.0)
+    meta = _mk(M.RunMeta, run_id="r", created_at="t", deadline_at="2026-01-01T01:00:00+00:00",
+               jobs=(job, dev_job, ios_job, unstarted), max_concurrency=2, steps_dir="/p/steps",
                worker_variant="base", worker_task_defs={"novaact": "arn"}, extra_http_headers=(("X-Test", "y"),))
-    return _mk(M.RunResult, run_meta=meta, status=M.Status.ERROR, jobs=[jr, dev_jr, ios_jr], duration_ms=30.0,
-               total_time_worked_s=3.5, total_tokens=120, device_observed_s=15.0, device_observed_missing=1)
+    claimed = "2026-01-01T00:00:01+00:00"
+    state = M.RunState(
+        run_id="r", status=M.Status.ERROR, started_at="2026-01-01T00:00:00+00:00", ended_at="2026-01-01T00:00:30+00:00",
+        message=_FAIL_FAST.run_message,
+        jobs={"f.feature:3": M.JobState("f.feature:3", M.Status.FAILED, session_id="s", claimed_at=claimed),
+              "d.feature:3": M.JobState("d.feature:3", M.Status.ERROR, session_id=_DF_ARN, claimed_at=claimed),
+              "i.feature:3": M.JobState("i.feature:3", M.Status.PASSED, session_id="arn:i", claimed_at=claimed),
+              "s.feature:3": M.JobState("s.feature:3", M.Status.SKIPPED, message=_FAIL_FAST.skipped_message)})
+    return assemble_run_result(meta, state, [jr, dev_jr, ios_jr], duration_ms=30.0)
 
 
 def test_run_json_keys_are_documented():
@@ -179,6 +195,8 @@ def test_run_json_keys_are_documented():
     assert {"sessions", "device_observed_s", "device_observed_missing"} <= set(dev) and len(dev["sessions"]) == 3
     assert {"device_observed_s", "device_observed_missing"} <= set(doc)
     assert "sessions" not in next(j for j in doc["jobs"] if j["scope_id"] == "f.feature:3")  # 没有会话记录的桌面 job 省键
+    # 正向断言：样例里确实有没有判定明细的 job（由结束写结束），它的那一项也进差集
+    assert next(j for j in doc["jobs"] if j["scope_id"] == "s.feature:3")["status"] == "skipped"
     # 正向断言：definition 里有设备目标的完整形态——应用条目五项、设备请求的两种二选一形态
     defs = {j["scope_id"]: j for j in doc["run_meta"]["jobs"]}
     assert set(defs["d.feature:3"]["target"]["app"]) == {"alias", "app_id", "bucket", "key", "sha256"}
@@ -189,22 +207,38 @@ def test_run_json_keys_are_documented():
     _assert_documented(doc, section="run", ignore={"X-Test", "novaact"}, opaque={"provider_minutes", "device"})
 
 
-def test_run_json_top_level_message_is_always_present_and_documented_as_run_level():
-    """run 级 `message`：顶层键恒在，没有时为 null；按运行期限收尾的 run 带说明，`run_meta.jobs` 与 `jobs` 的差就是
-    没有执行的 scope。契约页按键名逐节对照，而 run 一节早已写过 job 级的 `message`，只靠差集照不出顶层这一行漏写：这里另核顶层表里
-    有 `message` 一行，并写明那个差只在 run 级 `message` 有值时出现。"""
-    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+def _run_top_level_row(key: str) -> str:
+    """契约页 run 一节顶层那张表里 `key` 的那一行。契约页按键名逐节对照，而 run 一节的 job 表也写了 `status`、`message`、`jobs[]` 这些
+    同名键，只靠差集照不出顶层行漏写或写错，这里单取顶层表。"""
+    top_level = _sections()["run"].partition("`jobs[]` 每项")[0]
+    row = next((ln for ln in top_level.splitlines() if ln.startswith(f"| `{key}` |")), None)
+    assert row is not None, f"契约页 run 一节的顶层表没有 `{key}` 一行"
+    return row
 
+
+def test_run_json_top_level_message_is_always_present_and_documented_as_run_level():
+    """run 级 `message`：顶层键恒在，取自运行态，没有时为 null；因 fail-fast 结束、有 job 没有启动的 run 带那一行说明表里的
+    run 级说明（ADR 0031 决定三「结束写」小节，ADR 0041 决策三）。契约页顶层表另核：`message` 一行写明取自运行状态记录、键恒在。"""
     result = _sample_run_result()
-    assert "message" in render.to_dict(result) and render.to_dict(result)["message"] is None
-    ended = dataclasses.replace(result, message=RUN_DEADLINE_PASSED_MESSAGE, jobs=result.jobs[:2])
-    doc = render.to_dict(ended)
-    assert doc["message"] == RUN_DEADLINE_PASSED_MESSAGE
-    assert {j["scope_id"] for j in doc["run_meta"]["jobs"]} - {j["scope_id"] for j in doc["jobs"]} == {"i.feature:3"}
-    top_level = _sections()["run"].partition("`jobs[]` 每项")[0]  # run 一节里 RunResult 顶层那张表
-    row = next((ln for ln in top_level.splitlines() if ln.startswith("| `message` |")), None)
-    assert row is not None, "契约页 run 一节的顶层表没有 `message` 一行"
-    assert "`run_meta.jobs` 里有而 `jobs` 里没有的 scope 没有执行" in row and "只在 run 级 `message` 有值时出现" in row
+    doc = render.to_dict(result)
+    assert doc["message"] == _FAIL_FAST.run_message
+    assert doc["status"] == result.state.status.value  # run 级状态同样取运行态
+    finished = dataclasses.replace(result, state=dataclasses.replace(result.state, message=None))
+    assert "message" in render.to_dict(finished) and render.to_dict(finished)["message"] is None
+    row = _run_top_level_row("message")
+    assert "取自运行状态记录" in row and "键恒在" in row
+
+
+def test_run_json_lists_every_job_in_definition_order_and_jobs_without_detail_carry_three_keys():
+    """`jobs[]` 按运行定义的次序列出全部 job；没有判定明细的 job（由结束写结束）只有 `scope_id`、`status`、`message` 三个键，
+    三者取自运行态。契约页顶层表的 `jobs[]` 一行写明次序，job 表之前的那段写明两种形态。"""
+    doc = render.to_dict(_sample_run_result())
+    assert [j["scope_id"] for j in doc["jobs"]] == [j["scope_id"] for j in doc["run_meta"]["jobs"]]
+    unstarted = next(j for j in doc["jobs"] if j["scope_id"] == "s.feature:3")
+    assert unstarted == {"scope_id": "s.feature:3", "status": "skipped", "message": _FAIL_FAST.skipped_message}
+    assert "按 `run_meta.jobs` 的次序" in _run_top_level_row("jobs[]")
+    shapes = _sections()["run"].partition("`jobs[]` 每项")[2].partition("| 键 |")[0]  # job 表之前讲两种形态的那段
+    assert "只有 `scope_id`、`status` 与 `message` 三个键" in shapes
 
 
 def _plan_form(job: M.Job) -> M.Job:
@@ -244,6 +278,11 @@ def test_status_json_keys_are_documented():
     doc_error = run_state_to_dict(st_error)
     assert "message" in doc_error
     _assert_documented(doc_error, section="status")
+    # 结束写结束的 run：没有启动的 job 带 job 级说明 `jobs[].message`（只由结束写写下）
+    doc_ended = run_state_to_dict(_sample_run_result().state)
+    assert {"scope_id": "s.feature:3", "status": "skipped", "session_id": None,
+            "message": _FAIL_FAST.skipped_message} in doc_ended["jobs"]
+    _assert_documented(doc_ended, section="status")
 
 
 def _assert_list_runs_value_types(doc: dict) -> None:
@@ -407,9 +446,18 @@ def _sample_evidence() -> dict:
 def test_explain_json_keys_are_documented():
     """explain 的样例由**真渲染器**从手搭 JobResult + evidence 夹具生成（否则 evidence 那批键根本不进比对）；桌面与设备 job 各一个，
     设备 job 的 sessions[] 与两个计量键也进差集。"""
-    doc = render.explain_to_dict(run_id="r", status="failed", results=list(_sample_run_result().jobs),
+    doc = render.explain_to_dict(run_id="r", status="failed", results=_sample_run_result().details,
                                  evidence_reader=lambda refs: (_sample_evidence(), None))
     dev = next(s for s in doc["scopes"] if s["scope_id"] == "d.feature:3")
     assert {"sessions", "device_observed_s", "device_observed_missing", "console_url"} <= set(dev) and len(dev["sessions"]) == 3  # 正向断言，防空集变绿
     assert "sessions" not in next(s for s in doc["scopes"] if s["scope_id"] == "f.feature:3")
     _assert_documented(doc, section="explain", opaque={"args", "result", "provider_minutes", "device"})
+
+
+def test_explain_json_for_a_job_without_detail_is_documented():
+    """点名一个已结束而没有判定明细的 job（由结束写结束）时，`scopes[]` 只有这一项、三个键取自运行态；契约页 explain 一节写明这一形态。"""
+    js = _sample_run_result().state.jobs["s.feature:3"]
+    doc = render.explain_without_detail_to_dict(run_id="r", status="error", job_state=js)
+    assert doc["scopes"] == [{"scope_id": "s.feature:3", "status": "skipped", "message": _FAIL_FAST.skipped_message}]
+    _assert_documented(doc, section="explain")
+    assert "只带 `scope_id`、`status` 与 `message` 三个键" in _sections()["explain"]

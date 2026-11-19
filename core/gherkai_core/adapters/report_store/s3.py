@@ -11,7 +11,8 @@
 无相对化必要（不 presign、不做产物拷贝）。故 make_href 恒返 rr.ref。（产物拷贝式 materialize 已否决，
 见 [0027]「被拒方案」——曾计划 S3 版 copy_object 进 artifacts/，因 s3:// 已可移植而零收益。）
 
-复用 LocalReportStore 的渲染真理源（`render_index_html`/`SCHEMA_VERSION`）——不重写、两 adapter 同一份 index 渲染。
+复用 LocalReportStore 的渲染真理源（`render_index_html`/`SCHEMA_VERSION`/`collect_report_index`）——不重写、两 adapter 同一份
+index 渲染与产物投影。
 """
 from __future__ import annotations
 
@@ -36,7 +37,10 @@ class S3ReportStore:
         self._prefix = prefix
 
     def write(self, run_id: str, result: RunResult, *, created_at: str = "") -> ResourceUri:
-        """把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的 s3:// ResourceUri。"""
+        """把 manifest.json + index.html 写到 `s3://bucket/<prefix><run_id>/`，返回 index.html 的 s3:// ResourceUri。
+
+        result 由记录组装（ADR 0027「ReportStore 接口：整 run 一次写」节）：状态取运行态，有判定明细的 job 附上明细，由结束写结束的
+        job 没有明细。报告产物只来自判定明细，入口页的渲染与 Local 共用 `render_index_html`。"""
         base = f"{self._prefix}{run_id}"
         # report_index：复用共享三级投影（与 Local 同一真理源，形状/顺序不再靠人肉同步）。
         # href 恒等于 ref：s3:// 全局可寻址、无相对化必要（见模块 docstring）。

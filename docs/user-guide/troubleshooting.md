@@ -86,7 +86,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒）。前台 `run` 或 `submit --backend local` 运行期间机器休眠过，或执行它的进程被暂停过时，这段时长同样计入预算 | 因休眠或暂停到点的，原样重新运行即可，调大预算没有用。其余情形给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取预算加 180 秒，否则在开始执行前就以退出码 2 被拒；预算最长 7200 秒（`--default-job-timeout 0` 即取这个值），超过同样被拒；也可以把长流程拆成多个 scope |
-| `run` 或 `status` 的总状态是 `error`，说明「已超过允许运行的时间」，有 job 标为「没有执行」或保持 `pending`；或 job 判 `error`、归因 `timeout`，说明是 `这个 run 已超过允许运行的时间，job 被中止` | 这个 run 到了允许运行到的时刻（`run_meta.deadline_at`），见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」。这个时刻按全部 job 的预算串行累加，正常的 run 远在它之前结束；到达它多半是运行期间发起的机器休眠过、执行它的进程被暂停过、某次云端调用长时间没有返回，或 `submit` 的后台推进中断过、过了这个时刻才接力 | 用 `--scope` 只重新运行没有执行的 job 与归因 `timeout` 的 job（不论说明是哪一句：休眠过的 run 里先到点的往往是 job 自己的预算）。机读输出里找它们的办法按命令不同：`run --json` 下没有执行的是 `run_meta.jobs` 里有而 `jobs` 里没有的 scope，归因看 `jobs` 里各 job 的 `error_type`；`status --json` 的 `jobs[]` 列出全部 job，没有执行的状态是 `pending`，那里不带归因，归因用 `gherkai explain <run_id> --json` 里各 scope 的 `error_type` 看。运行期间让机器保持唤醒，后台推进停住时尽早用 `status --wait` 接力（见下「提交后进度停住」）。调大预算只在 job 本身确实需要更长时间时才有用 |
+| `run` 或 `status` 的说明是「已超过允许运行的时间」，有 job 记 `skipped`、说明「这个 run 已超过允许运行的时间，job 没有启动」；或 job 记 `aborted`，说明是 `这个 run 已超过允许运行的时间，job 被中止` | 这个 run 到了允许运行到的时刻（`run_meta.deadline_at`），见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」。这个时刻按全部 job 的预算串行累加，正常的 run 远在它之前结束；到达它多半是运行期间发起的机器休眠过、执行它的进程被暂停过、某次云端调用长时间没有返回，或 `submit` 的后台推进中断过、过了这个时刻才接力。总状态按各 job 的状态得出：有 job 出错为 `error`，否则有用例失败为 `failed`，否则为 `aborted` | 用 `--scope` 只重新运行 `skipped` 与 `aborted` 的 job，以及归因 `timeout` 的 job（休眠过的 run 里先到点的往往是 job 自己的预算，这样的 job 判 `error`、归因 `timeout`）。机读输出里找它们：`run --json` 的 `jobs` 与 `status --json` 的 `jobs[]` 都列出全部 job，按 `status` 挑出 `skipped` 与 `aborted`；归因 `timeout` 的看 `run --json` 里各 job 的 `error_type`，`status --json` 不带归因，用 `gherkai explain <run_id> --json` 里各 scope 的 `error_type` 看。运行期间让机器保持唤醒，后台推进停住时尽早用 `status --wait` 接力（见下「提交后进度停住」）。调大预算只在 job 本身确实需要更长时间时才有用 |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 让每条 AI 断言判三次、取多数，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
@@ -141,7 +141,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 `submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进已经停止：本机后端下是负责推进的后台进程已退出，云端后端下是负责推进的云端后台任务没有继续触发。用与 `submit` 相同的定位参数（`--backend`、`--report-dir`，云端后端还有 `--prefix`）运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态。
 
-过了允许运行的时间才接力的 run，`status --wait` 不再启动任何 job：此前已经启动、没有留下结束记录的 job 判为超时；还有 job 没有执行时，run 以 `error` 加说明「已超过允许运行的时间」结束，这些 job 要重新提交，全部 job 都启动过的，总状态按各 job 的判定给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。
+过了允许运行的时间才接力的 run，`status --wait` 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。
 
 ## 隧道（`--expose-local`）
 

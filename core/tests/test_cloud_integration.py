@@ -16,6 +16,7 @@ import itertools
 import pytest
 
 from gherkai_core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from tests.test_stores import _sample_run
 
 pytestmark = pytest.mark.integration  # 本文件全部用例都是集成测试（默认 deselect）
@@ -46,9 +47,9 @@ def _offloader(real_aws):
 
 # ---- DynamoDBRunStore：真 DDB 的生命周期 + 真语义边界 ----
 def test_ddb_run_store_lifecycle_real(real_aws):
-    """真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING→终态）→ try_finalize → 读回。
-    覆盖真语义：空 Map jobs 能存、SET jobs.#sid 单元素刷、收尾的条件写 SET status(保留字)/ended_at、含 /:中文 scope_id；
-    对已有的 run 再建被条件挡下。"""
+    """真 DDB 上执行完整实时写生命周期：create_run → update_job_state（RUNNING）→ commit_job_states（两个 job 的终态，后一次使
+    run 成为终态）→ 读回。覆盖真语义：空 Map jobs 能存、SET jobs.#sid 单元素刷、以写入序号为条件整体替换 jobs 并 SET
+    status(保留字)/ended_at、含 /:中文 scope_id；对已有的 run 再建被条件挡下。"""
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-life")
     real_aws["cleanup_run_id"](rid)  # 登记清理
@@ -74,29 +75,32 @@ def test_ddb_run_store_lifecycle_real(real_aws):
     assert mid.jobs[scope_ids[1]].status == Status.PENDING  # 没被污染
     assert mid.status == Status.RUNNING  # job 离开 pending 的同一次写把 run 级推进为 running（ADR 0034 机制三）
 
-    # 各自完成 + 收尾（真 DDB 保留字 status/ended_at 的 SET）
-    store.update_job_state(rid, JobState(scope_ids[0], Status.PASSED, session_id="sess-real"))
-    store.update_job_state(rid, JobState(scope_ids[1], Status.FAILED))
-    assert store.try_finalize(rid, Status.FAILED, "2026-07-01T00:05:00Z") is True
+    # 各自完成：终态写，最后一个使 run 成为终态（真 DDB 保留字 status/ended_at 的 SET）
+    assert store.commit_job_states(rid, [JobState(scope_ids[0], Status.PASSED, session_id="sess-real")],
+                                   ended_at="2026-07-01T00:04:00Z") is CommitOutcome.OPEN
+    assert store.commit_job_states(rid, [JobState(scope_ids[1], Status.FAILED)],
+                                   ended_at="2026-07-01T00:05:00Z") is CommitOutcome.ENDED_RUN
     with pytest.raises(FileExistsError):
         store.create_run(meta, RunState(run_id=rid, status=Status.PENDING, jobs={}))
 
     final = store.load_run_state(rid)
     assert final.status == Status.FAILED and final.ended_at == "2026-07-01T00:05:00Z"
     assert final.started_at == "2026-07-01T00:00:00Z"  # create 填的起点保留
-    assert final.jobs[scope_ids[0]].status == Status.PASSED  # 没被 finalize 覆盖
+    assert final.jobs[scope_ids[0]] == JobState(scope_ids[0], Status.PASSED, session_id="sess-real")
     # definition 也读回（META item JSON blob 真往返）
     assert store.load_run_meta(rid).jobs[0].scope_id == scope_ids[0]
 
 
 def test_ddb_update_before_create_raises_real(real_aws):
-    """真 DDB：未 create 就 update → ConditionalCheckFailedException 转 FileNotFoundError（对拍 local 报错语义）；收尾写
-    不成、不臆造 STATE。"""
+    """真 DDB：未 create 就写 → 执行中的写与终态写抛 FileNotFoundError（对拍 local 报错语义；执行中的写的原因取自条件不成立时
+    带回的条目）；结束写写不成；都不臆造 STATE。"""
     store = _ddb_store(real_aws)
     rid = _uniq("ddb-nocreate")  # 从不 create，无需登记清理（没写入）
     with pytest.raises(FileNotFoundError):
         store.update_job_state(rid, JobState("s", Status.RUNNING))
-    assert store.try_finalize(rid, Status.PASSED, "t") is False
+    with pytest.raises(FileNotFoundError):
+        store.commit_job_states(rid, [JobState("s", Status.PASSED)], ended_at="t")
+    assert store.end_run(rid, RUN_ENDINGS["deadline"], ended_at="t") is False
     assert store.load_run_state(rid) is None
 
 
@@ -148,16 +152,23 @@ def test_ddb_stale_all_pending_projection_keeps_run_running_real(real_aws, hwm):
     assert got.jobs[scope_ids[0]].status == Status.RUNNING
 
 
-def test_ddb_job_write_on_finalized_run_lands_job_only_real(real_aws):
-    """真 DDB 上已收尾的 run 再收到前台 job 写：带 run 级的条件写被挡，回退的只写 job 那一次落库，run 级终态、
-    结束时刻不变。"""
+def test_ddb_job_write_on_finalized_run_changes_nothing_real(real_aws):
+    """真 DDB 上已收尾、留有未结束 job 的 run 再收到前台的执行中写：那一次带 run 级条件的写被挡下、返回 False，记录整份不变
+    （ADR 0034 机制三「run 级状态只进不退」条③）；结束写结束的 run 上同样如此。被挡下的原因取自条件不成立时带回的条目
+    （`ReturnValuesOnConditionCheckFailure`），这一参数的真实行为只能在真 DDB 上核对。"""
     store = _ddb_store(real_aws)
     rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-latejob")
     assert store.try_finalize(rid, Status.ERROR, "2026-07-01T00:01:00Z") is True
-    store.update_job_state(rid, JobState(scope_ids[0], Status.PASSED))
-    got = store.load_run_state(rid)
-    assert (got.status, got.ended_at) == (Status.ERROR, "2026-07-01T00:01:00Z")
-    assert got.jobs[scope_ids[0]].status == Status.PASSED and got.jobs[scope_ids[1]].status == Status.PENDING
+    before = store.load_run_state(rid)
+    assert store.update_job_state(rid, JobState(scope_ids[0], Status.RUNNING, session_id="late")) is False
+    assert store.load_run_state(rid) == before
+
+    rid2, _meta2, scope_ids2, _initial2 = _real_run(store, real_aws, "ddb-latejob-ended")
+    assert store.try_claim_job(rid2, scope_ids2[0], claimed_at="2026-07-01T00:00:01Z") is True
+    assert store.end_run(rid2, RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-07-01T00:01:00Z") is True
+    before2 = store.load_run_state(rid2)
+    assert store.update_job_state(rid2, JobState(scope_ids2[0], Status.RUNNING, session_id="late")) is False
+    assert store.load_run_state(rid2) == before2
 
 
 def test_ddb_session_id_none_omitted_real(real_aws):
@@ -168,9 +179,9 @@ def test_ddb_session_id_none_omitted_real(real_aws):
     meta = _sample_run(rid).run_meta
     store.create_run(meta, RunState(run_id=rid, status=Status.PENDING,
                                     jobs={meta.jobs[0].scope_id: JobState(meta.jobs[0].scope_id, Status.PENDING)}))
-    store.update_job_state(rid, JobState(meta.jobs[0].scope_id, Status.ABORTED, session_id=None))
+    assert store.update_job_state(rid, JobState(meta.jobs[0].scope_id, Status.RUNNING, session_id=None)) is True
     js = store.load_run_state(rid).jobs[meta.jobs[0].scope_id]
-    assert js.status == Status.ABORTED and js.session_id is None
+    assert js.status == Status.RUNNING and js.session_id is None
 
 
 # ---- S3ResultStore：真 S3 的 key 编码 + 全量取回 ----
@@ -181,7 +192,7 @@ def test_s3_result_store_round_trip_real(real_aws):
     real_aws["cleanup_prefix"](f"{rid}/")  # 登记清理该 run 的所有对象
 
     run = _sample_run(rid)
-    for jr in run.jobs:
+    for jr in run.details:
         store.save_job_result(rid, jr)
 
     # 单个读回（含 /:）
@@ -248,14 +259,15 @@ def test_ddb_state_item_grows_past_400kb_on_incremental_update_real(real_aws):
     rid = _uniq("ddb-400k-state")
     real_aws["cleanup_run_id"](rid)  # 撞限那次 update 失败、item 停在 <400KB，仍登记兜底清理
 
+    scope_ids = [f"scope-{i:03d}" for i in range(100)]  # 执行中的写只写运行态里已有的 job：建 run 时先放好（每个条目很小）
     store.create_run(rid_meta := _sample_run(rid).run_meta,
-                     RunState(run_id=rid, status=Status.PENDING, jobs={}))  # 空 Map STATE 起步
+                     RunState(run_id=rid, status=Status.PENDING, jobs={sid: JobState(sid, Status.PENDING) for sid in scope_ids}))
     del rid_meta
 
     big = "x" * 30000  # 每个 job entry ~30KB（session_id 放大点）；~14 个即越 400KB
     with pytest.raises(ClientError) as exc:
-        for i in range(100):  # 硬上限防死循环（远早于此就该撞限）
-            store.update_job_state(rid, JobState(f"scope-{i:03d}", Status.PASSED, session_id=big))
+        for sid in scope_ids:  # 硬上限防死循环（远早于此就该撞限）
+            store.update_job_state(rid, JobState(sid, Status.RUNNING, session_id=big))
     assert _is_ddb_too_large(exc), f"应因 STATE item 超 400KB 抛 ValidationException，实际 {exc.value}"
 
 
@@ -306,7 +318,7 @@ def test_offload_unblocks_oversized_docstring_real(real_aws):
 
 
 def test_ddb_empty_string_scalar_and_map_entry_real(real_aws):
-    """真 DDB（2026）空串行为的回归基线：收尾写 ended_at=""（顶层标量 SET）、update 写 session_id=""
+    """真 DDB（2026）空串行为的回归基线：使 run 成为终态的终态写写 ended_at=""（顶层标量 SET）、执行中的写写 session_id=""
     （原生 Map entry 内空串）被接受、读回仍 ""。区分 ""-存（空串）与 None-omit（键消失）两条真代码路径。
 
     空串是 DDB 史上最著名的 moto/真分叉源。现代真 DDB（2020 后）已放行非 key String 空串，故此测在真 AWS 上
@@ -321,8 +333,9 @@ def test_ddb_empty_string_scalar_and_map_entry_real(real_aws):
     sid = meta.jobs[0].scope_id
     store.create_run(meta, RunState(run_id=rid, status=Status.PENDING,
                                     jobs={sid: JobState(sid, Status.PENDING)}))
-    store.update_job_state(rid, JobState(sid, Status.PASSED, session_id=""))  # 空串 Map entry
-    assert store.try_finalize(rid, Status.PASSED, ended_at="") is True        # 空串顶层标量
+    assert store.update_job_state(rid, JobState(sid, Status.RUNNING, session_id="")) is True  # 空串 Map entry
+    # 空串顶层标量；给出的终态不带会话，库中的空串会话保留
+    assert store.commit_job_states(rid, [JobState(sid, Status.PASSED)], ended_at="") is CommitOutcome.ENDED_RUN
     # 注：若未来真 DDB 意外改回拒空串，此断言会红——届时改断 pytest.raises 并更新 README 分叉说明。
     final = store.load_run_state(rid)
     assert final.ended_at == ""                       # 空串顶层标量存/读回

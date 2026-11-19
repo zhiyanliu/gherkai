@@ -5,6 +5,8 @@ ResultStore（JobResult）的落盘都复用这里，不各写一份（避免漂
 手写映射（不靠 dataclasses.asdict/反射）：形状是对外契约（CI/WebUI 消费），须显式、稳定。
 
 往返一致（round-trip）：`X_to_dict` 与 `X_from_dict` 须保持 from_dict(to_dict(x)) == x——有 round-trip 单测护栏。
+run 的结果（RunResult）只有写端 `to_dict`：它是 `run --json` 与报告 manifest 的输出形态，从记录组装、不往回读，读回 run 读的是记录本身
+（运行态与判定明细），所以不设 RunResult 的读端。
 **规范化一律归写端**（读端只忠实还原落盘内容）：这样 to_dict 的产物本身是规范形、往返恒等；反之（读端规范化）
 落盘内容会随内存值的偶然形态漂、且往返把值悄悄变形。带规范化的字段有两个：`RunMeta.extra_http_headers`
 （无序 header 表、tuple 只是 frozen 载体）：写端按键排序 + 空表当 None，故往返保 mapping 恒等、键序落定字典序；
@@ -26,6 +28,7 @@ from gherkai_core.model import (
     AppRef,
     DeviceFarmRequest,
     Job,
+    JobOutcome,
     JobResult,
     JobState,
     ReportRef,
@@ -275,8 +278,8 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
       CI 单独读一个 jobs/<scope_id>.json 不依赖 run_meta 即可拿到完整 def。**不再另抄顶层 scope_id/
       scope_name/engine**——def 已自包含，消费者从 `d["job"]["scope_id"]` 取（唯一真值源、无"读哪个"歧义）。
     - include_job=False（聚合 to_dict(RunResult)）：**不嵌** def——def 唯一地活在同一 dict 的 run_meta.jobs[]
-      里（三层切分：definition 层）；jobs[] 只背判定 + **顶层 `scope_id` 作 join key**（from_dict 按它从
-      run_meta join 回 Job）。这样整 RunResult 序列化时同一批 Job 不出现两份（normalize），又能重建。
+      里（三层切分：definition 层）；jobs[] 的这一项只背判定 + **顶层 `scope_id` 作 join key**（消费端按它对到
+      run_meta.jobs[] 里的定义）。这样整 RunResult 序列化时同一批 Job 不出现两份（normalize）。
 
     即：顶层 scope_id 仅在【聚合形态】出现（join key，结构必需）；【自包含形态】顶层无 def 字段、全在 `job` 里。
     """
@@ -322,11 +325,11 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
 
 
 def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
-    """dict → JobResult（ResultStore 读单 job 复用；也被 from_dict(RunResult) 复用）。
+    """dict → JobResult（ResultStore 读单 job 用）。
 
-    definition 来源（二选一，对应 to_dict 的两种形态）：
+    definition 来源（二选一，对应 job_result_to_dict 的两种形态）：
     - 自包含形态：dict 内嵌 `job` → 直接重建（ResultStore 单 job 文件走这条）。
-    - 聚合形态：dict 无 `job`，由调用方经 `job=` 传入（from_dict(RunResult) 按 scope_id 从 run_meta join）。
+    - 聚合形态：dict 无 `job`，由调用方经 `job=` 传入（按顶层 scope_id 从运行定义里找到的那个 Job）。
     顶层 scope_id 仅在【聚合形态】出现、是 join key（非 def 来源）；【自包含形态】顶层无 def 字段。
     """
     from gherkai_core.model import ScenarioResult  # 局部 import 避免顶层顺序耦合
@@ -376,45 +379,36 @@ def job_result_from_dict(d: dict, *, job: Job | None = None) -> JobResult:
     )
 
 
-def to_dict(result: RunResult) -> dict:
-    """RunResult → 朴素 dict（机器可读：CI / WebUI / manifest 消费）。
+def _job_outcome_to_dict(o: JobOutcome) -> dict:
+    """run 结果里一个 job 的 dict：状态取运行态（ADR 0030 决定三「状态的权威是运行态」条）。有判定明细的项在 scope_id 与 status 之后带
+    明细的其余各键（聚合形态，同 `job_result_to_dict(include_job=False)`）；没有明细的项（由结束写结束的 job）只有 scope_id、status
+    与运行态里的 job 级说明 message 三个键，message 没有时为 null。"""
+    if o.detail is None:
+        return {"scope_id": o.scope_id, "status": o.status.value, "message": o.state.message}
+    d = job_result_to_dict(o.detail, include_job=False)
+    d["status"] = o.status.value  # 键序不变（scope_id、status 在前），值取运行态
+    return d
 
-    normalize（ADR 0016 三层切分）：definition 只在 run_meta.jobs[] 序列化一次；jobs[] 只背判定、
-    经 scope_id 引 def（include_job=False）。同一批 Job 不再出现两份。
+
+def to_dict(result: RunResult) -> dict:
+    """RunResult → 朴素 dict（机器可读：`run --json` 与报告 manifest 消费）。只有写端：它是输出形态，不往回读（见模块头）。
+
+    normalize（ADR 0016 三层切分）：definition 只在 run_meta.jobs[] 序列化一次；jobs[] 按运行定义的次序列出全部 job、经 scope_id
+    引 def。run 级与各 job 的 status 与 message 取运行态；有判定明细的 job 另带明细各键，没有的只带 job 级说明。
     """
     return {
         "run_id": result.run_id,         # 便利：消费端/manifest 直读（经 property，真值在 run_meta）
         "run_meta": run_meta_to_dict(result.run_meta),
         "status": result.status.value,
-        "message": result.message,  # run 级说明：键恒在，没有时为 null
+        "message": result.message,  # run 级说明（结束的原因，取自运行态，ADR 0031 决定三「结束写」小节）：键恒在，没有时为 null
         "duration_ms": result.duration_ms,
         "total_tokens": result.total_tokens,
         "total_time_worked_s": result.total_time_worked_s,
         # 设备计量的 run 级合计（ADR 0051 决策 7）：run 里没有设备 job 时省键
         **({"device_observed_s": result.device_observed_s, "device_observed_missing": result.device_observed_missing}
            if result.device_observed_s is not None or result.device_observed_missing is not None else {}),
-        "jobs": [job_result_to_dict(jr, include_job=False) for jr in result.jobs],
+        "jobs": [_job_outcome_to_dict(o) for o in result.jobs],
     }
-
-
-def from_dict(d: dict) -> RunResult:
-    """朴素 dict → RunResult。与 to_dict 往返一致（round-trip 单测护栏）。
-
-    def 唯一真值在 run_meta.jobs[]；jobs[] 的 JobResult 经 scope_id 从中 join 回 Job（不读嵌套 job）。
-    """
-    run_meta = run_meta_from_dict(d["run_meta"])
-    job_by_scope = {j.scope_id: j for j in run_meta.jobs}  # scope_id → Job（join 表）
-    return RunResult(
-        run_meta=run_meta,
-        status=Status(d["status"]),
-        message=d.get("message"),
-        jobs=[job_result_from_dict(j, job=job_by_scope.get(j["scope_id"])) for j in d.get("jobs", [])],
-        total_tokens=d.get("total_tokens"),
-        total_time_worked_s=d.get("total_time_worked_s"),
-        duration_ms=d.get("duration_ms"),
-        device_observed_s=d.get("device_observed_s"),
-        device_observed_missing=d.get("device_observed_missing"),
-    )
 
 
 # ============================================================================
@@ -498,9 +492,9 @@ def run_meta_from_dict(d: dict) -> RunMeta:
 
 
 def run_state_to_dict(state: RunState) -> dict:
-    # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 下零落盘运行不取时钟、或未来接力推进的部分态）
-    # 写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（即未取时钟）比 null（即取了为空）更诚实；
-    # 有值时（正常 run 经 RunPersistence.begin/finalize 落 started_at/ended_at）键自然出现
+    # started_at/ended_at 用 omit-when-None：无值时（如 --no-report 下在内存里算出的运行态没有开始时刻、或还没结束的 run 没有结束
+    # 时刻）写成永远的 "null" 是噪音（读者会当 bug）。键缺失语义（即未取时钟）比 null（即取了为空）更诚实；
+    # 有值时（建 run 写下 started_at，使 run 成为终态的那次写同时写下 ended_at，ADR 0031 决定三；写序见 ADR 0030 决定三）键自然出现
     # （from_dict 用 .get 容忍缺失，round-trip 不破）。
     d: dict = {"run_id": state.run_id, "status": state.status.value}
     if state.started_at is not None:
@@ -511,7 +505,9 @@ def run_state_to_dict(state: RunState) -> dict:
     # omit-when-None（同 started_at/ended_at）——旧 run_state.json 无此键、from_dict .get 容忍，round-trip 不破。
     if state.high_water_mark is not None:
         d["high_water_mark"] = state.high_water_mark
-    if state.message is not None:  # run 级消息：只在推进器不经任何 job 就终结 run 时有；omit-when-None
+    # run 级说明：结束的原因（ADR 0031 决定三「结束写」小节的说明表；读不到可用运行定义的几种原因见 ADR 0037 决策 7）；
+    # job 都由执行结果结束的 run 没有它。omit-when-None
+    if state.message is not None:
         d["message"] = state.message
     d["claim_count"] = state.claim_count  # 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）：恒写，建 run 时即为 0
     # state.jobs 是 Map（scope_id → JobState，ADR 0030）：落盘 JSON 仍是 list（保 run_state.json 向后兼容）。

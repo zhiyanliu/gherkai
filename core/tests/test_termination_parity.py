@@ -1,7 +1,8 @@
 """双路径对拍（ADR 0034 机制二「双路径对拍是实施护栏」）：同一组事件矩阵分别输入同步 schedule（FakeEngine）与无状态
 project_full（EventRecord 加 TaskExited，认领时刻取同步路径认领时的假墙钟），逐项比较判定、归因、消息、明细、sessions[] 与计量键，
-以及两条路径交给终结函数的见过 scope_started / session_opened 两个布尔。超时行另在运行期限截断时对拍一遍（两句超时说明都由共用的
-终结函数给出）；起 worker 失败与到期收尾两种情形另以无状态路径的推进步骤 tick 对拍（ADR 0054 决策二后台推进条）；worker 在截止时刻
+以及两条路径交给终结函数的见过 scope_started / session_opened 两个布尔。超时行另在运行期限截断时对拍一遍（预算到点记 error 加
+timeout、期限到点记 aborted，两种判定都由共用的终结函数给出）；起 worker 失败与到期收尾两种情形另以无状态路径的推进步骤 tick 对拍，
+run 级的状态与说明对拍没有记录时在内存里算出的运行态与后台写下的记录（ADR 0054 决策二后台推进条）；worker 在截止时刻
 前后自己退出的几种情形，无状态路径的退出记录只带退出时刻、不带超时标志（同一条的「截止时刻与说明」）。含 abort 的行只经同步路径。矩阵以设备 job 为主，另有几行桌面 job：桌面 worker 也成对
 发会话事件，配对与释放判定与设备同一条，计量两键与释放提示按目标给（ADR 0051 决策 4、7）。
 未退出时的 job 态另有一组对拍：同步路径的实时落库（RunPersistence）与无状态路径的 project() 投影逐项比较 status 与 session_id。
@@ -30,7 +31,8 @@ from gherkai_core.model import (
     Target,
 )
 from gherkai_core.project import (DEADLINE_TIMEOUT_MESSAGE, DESKTOP_RELEASE_FAILED_HINT, DEVICE_RELEASE_FAILED_HINT, EventRecord,
-                                  TaskExited, project, project_full)
+                                  TaskExited, assemble_run_result, project, project_full)
+from gherkai_core.run_status import RUN_ENDINGS, state_without_record
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_to_dict
 from tests.fake_engine import FAR_DEADLINE, CollectSink, FakeEngine, FakeResolver
@@ -162,7 +164,7 @@ def _sync(row: Row, deadline_at: str = FAR_DEADLINE):
     res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at), FakeResolver(engine), clock.sink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.05,
                                      grace_period_s=1.0))
-    return res.jobs[0]
+    return res.results[0]
 
 
 def _stateless(row: Row, deadline_at: str = FAR_DEADLINE):
@@ -173,8 +175,8 @@ def _stateless(row: Row, deadline_at: str = FAR_DEADLINE):
                                exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, timed_out=row.timed_out)))
     # 认领时刻取同步路径认领时的假墙钟（零点起、只差几毫秒），超时时起作用的截止时刻两边由同一组值算出
     res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at), records,
-                       claimed_at={SCOPE: _Clock.T0}, past_stop_start=False)
-    return res.jobs[0]
+                       claimed_at={SCOPE: _Clock.T0})
+    return res[0]
 
 
 def _comparable(jr) -> dict:
@@ -256,7 +258,7 @@ def _sync_late_stop(row: Row, grace_s: float = _LateStopClock.GRACE_S):
     res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.inner.sink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
                                      grace_period_s=grace_s))
-    return res.jobs[0]
+    return res.results[0]
 
 
 _TIMED_OUT = [r for r in MATRIX if r.timed_out]
@@ -330,7 +332,7 @@ def test_crash_row_sync_side_really_exits_with_unknown_code():
 
 
 def test_stateless_run_level_device_metering():
-    """无状态路径的 run 级设备计量合计（ADR 0051 决策 7）：多 job 求和、缺计量数相加，与各 job 级一致；桌面 job 不计入，
+    """无状态路径的明细组装出的 run 级设备计量合计（ADR 0051 决策 7）：多 job 求和、缺计量数相加，与各 job 级一致；桌面 job 不计入，
     带成对会话事件的桌面 job 也不计入、自身不出现两键。"""
     row = next(r for r in MATRIX if r.name == "完整成功的设备 job")
     job = _job(row.timeout_s)
@@ -354,9 +356,10 @@ def test_stateless_run_level_device_metering():
     for scope, evs in ((SCOPE, row.events), ("dev2", other_events), ("web", web_events)):
         records += [EventRecord(scope_id=scope, kind="event", seq=i + 1, event=ev, emit_ts=float(i)) for i, ev in enumerate(evs)]
         records.append(EventRecord(scope_id=scope, kind="exit", exited=TaskExited(scope_id=scope, exit_code=0)))
-    res = project_full(RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at=FAR_DEADLINE), records,
-                       claimed_at={sid: _Clock.T0 for sid in (SCOPE, "dev2", "web")}, past_stop_start=False)
-    by = {jr.scope_id: jr for jr in res.jobs}
+    meta = RunMeta(run_id="r", created_at="", jobs=(job, other, desktop), deadline_at=FAR_DEADLINE)
+    details = project_full(meta, records, claimed_at={sid: _Clock.T0 for sid in (SCOPE, "dev2", "web")})
+    res = assemble_run_result(meta, state_without_record(meta, details, None, ended_at="t1"), details, duration_ms=None)
+    by = {jr.scope_id: jr for jr in details}
     assert (by[SCOPE].device_observed_s, by[SCOPE].device_observed_missing) == (12.5, 0)
     assert (by["dev2"].device_observed_s, by["dev2"].device_observed_missing) == (2.5, 1)
     assert (by["web"].device_observed_s, by["web"].device_observed_missing) == (None, None)
@@ -412,8 +415,8 @@ def test_matrix_covers_expected_verdicts():
     assert DESKTOP_RELEASE_FAILED_HINT in net_lost.message and "未确认停止的会话：s-2" in net_lost.message
 
 
-# 前台路径的两句新说明（ADR 0054 决策二）：被期限截断的 job、发现 run 已被别处结束而被中止的 job，判定都由前台与后台共用的终结函数给出。
-# 同步路径交给终结函数的是哪个截止时刻起作用（timeout_cause）、哪个中止来源（abort_cause），判定原样取它的返回。
+# 前台路径的两种中止（ADR 0054 决策二）：被期限截断的 job、发现 run 已被别处结束而被中止的 job，都记 aborted，判定由前台与后台共用的
+# 终结函数给出。同步路径交给终结函数的是哪个截止时刻起作用（timeout_cause）、哪个中止来源（abort_cause），判定原样取它的返回。
 
 class _EndedRecord:
     """ScheduleOpts.record 的替身：认领都成立、run 级未结束；停手信号在收到第一条事件之后成立（模拟写 job 状态时得知 run 级已结束）。"""
@@ -466,14 +469,14 @@ def test_sync_path_new_verdicts_come_from_the_shared_finalize(monkeypatch, cause
     res = schedule(meta, FakeResolver(engine), sink,
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
                                      grace_period_s=1.0, record=record, interrupt_poll_s=0.02))
-    jr = res.jobs[0]
+    jr = res.results[0]
     kw, term = calls[-1]
     assert (jr.status, jr.error_type, jr.message) == (term.status, term.error_type, term.message)
     again = project_mod.finalize_job(**kw)  # 同一组输入直接调用共用的终结函数：同一结论
     assert (again.status, again.error_type, again.message) == (jr.status, jr.error_type, jr.message)
     if cause == "deadline":
         assert (kw["stop_reason"], kw["timeout_cause"]) == ("timeout", "deadline")
-        assert (jr.status, jr.error_type, jr.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
+        assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
     else:
         assert (kw["stop_reason"], kw["abort_cause"]) == ("abort", "ended-elsewhere")
         assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, ENDED_ELSEWHERE_ABORT_MESSAGE)
@@ -488,12 +491,15 @@ _NEAR = (_Clock.T0 + timedelta(seconds=100)).isoformat()  # 运行期限：同�
 @pytest.mark.parametrize("row", _TIMED_OUT, ids=[r.name for r in _TIMED_OUT])
 def test_paths_agree_when_the_run_deadline_cuts_the_job(row: Row):
     """被运行期限截断的 job（预算远长于期限）：同步路径在认领时算出起作用的是期限，无状态路径由认领时刻、预算与期限重算出同一个结论，
-    两边的判定、归因与说明逐项相同；被截断而内容不完整的 job 的说明是期限那一句。"""
+    两边的判定、归因与说明逐项相同；被截断而内容不完整的 job 记 aborted、没有归因，说明是期限那一句；内容完整的不改判。"""
     long = Row(row.name, row.events, row.tail, row.exit_code, timed_out=True, timeout_s=7200.0, crash=row.crash, device=row.device)
     a, b = _comparable(_sync(long, _NEAR)), _comparable(_stateless(long, _NEAR))
     assert a == b, f"\n同步：{a}\n无状态：{b}"
-    if b["error_type"] == "timeout":
-        assert b["message"].startswith(DEADLINE_TIMEOUT_MESSAGE)
+    assert b["error_type"] != "timeout"  # 期限到点不是超时
+    if row.name == "scope 级 error 后超时":
+        assert (b["status"], b["error_type"]) == ("error", "acquire_timeout")  # 内容完整：判定按 worker 报的 scope 级 error
+    else:
+        assert (b["status"], b["error_type"]) == ("aborted", None) and b["message"].startswith(DEADLINE_TIMEOUT_MESSAGE)
 
 
 # worker 在截止时刻前后自己退出（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 11）：同步路径在终结之前对内容不完整的 job
@@ -530,7 +536,7 @@ def _sync_self_exit(row: SelfExit):
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0,
                                      grace_period_s=1.0))
     assert not engine.handles[SCOPE].stopped  # worker 是自己退出的：同步路径没有发出过停止请求
-    return res.jobs[0]
+    return res.results[0]
 
 
 def _stateless_self_exit(row: SelfExit):
@@ -540,8 +546,8 @@ def _stateless_self_exit(row: SelfExit):
     records.append(EventRecord(scope_id=SCOPE, kind="exit",
                                exited=TaskExited(scope_id=SCOPE, exit_code=row.exit_code, exited_at=exited_at)))
     res = project_full(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), records,
-                       claimed_at={SCOPE: _Clock.T0}, past_stop_start=False)
-    return res.jobs[0]
+                       claimed_at={SCOPE: _Clock.T0})
+    return res[0]
 
 
 @pytest.mark.parametrize("row", SELF_EXITS, ids=[r.name for r in SELF_EXITS])
@@ -572,8 +578,8 @@ def _boom_sync(deadline_at: str, timeout_s: float, *, slow: bool):
 
 
 def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool):
-    """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮收尾；slow 时启动调用拖过截止时刻才失败。返回收尾结果与补写的
-    退出记录。"""
+    """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮收尾；slow 时启动调用拖过截止时刻才失败。返回收尾那一轮的判定
+    明细、补写的退出记录与收尾之后的运行态。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import JobState, RunState
@@ -599,37 +605,40 @@ def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool)
     done = tick("r", meta, log, store, Boom(), 1, clock=clock)
     assert done.outcome is TickOutcome.COMMITTED
     [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
-    return done.result, exit_rec
+    return done.details, exit_rec, store.load_run_state("r")
 
 
-@pytest.mark.parametrize("deadline_at, timeout_s, slow, message", [
-    (FAR_DEADLINE, 5.0, False, "起 worker 失败：spawn 失败"),
-    (FAR_DEADLINE, 5.0, True, "job 超时（预算 5s，已中止）"),
-    (_NEAR, 5.0, True, "job 超时（预算 5s，已中止）"),
-    (_NEAR, 7200.0, True, DEADLINE_TIMEOUT_MESSAGE),
+@pytest.mark.parametrize("deadline_at, timeout_s, slow, status, message", [
+    (FAR_DEADLINE, 5.0, False, Status.ERROR, "起 worker 失败：spawn 失败"),
+    (FAR_DEADLINE, 5.0, True, Status.ERROR, "job 超时（预算 5s，已中止）"),
+    (_NEAR, 5.0, True, Status.ERROR, "job 超时（预算 5s，已中止）"),
+    (_NEAR, 7200.0, True, Status.ABORTED, DEADLINE_TIMEOUT_MESSAGE),
 ], ids=["起不来", "拖过预算才失败", "拖过预算才失败且期限更晚", "拖过期限才失败"])
-def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, message):
+def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, status, message):
     """起 worker 失败的 job（ADR 0054 决策二后台推进条「时刻」）：推进步骤补写的退出记录与前台交给终结函数的输入相同——退出码未知、带
     启动失败的原因。补写只记失败的那一刻作退出时刻、不带超时标志，收尾投影按它是否晚于截止时刻判断，与前台起 worker 失败的分支是
-    同一个判断——两条路径的判定、归因与说明逐项相同。"""
+    同一个判断——两条路径的判定、归因与说明逐项相同；拖过期限才失败的记 aborted。run 级两边都按取法由这个 job 的终态算出：前台没有
+    记录时在内存里算出，后台是记下终态的写写下的记录，都没有 run 级说明。"""
     sync = _boom_sync(deadline_at, timeout_s, slow=slow)
-    stateless, exit_rec = _boom_stateless(tmp_path, deadline_at, timeout_s, slow=slow)
+    stateless, exit_rec, recorded = _boom_stateless(tmp_path, deadline_at, timeout_s, slow=slow)
     assert (exit_rec.exit_code, exit_rec.timed_out) == (None, False)
     assert exit_rec.exited_at == _Clock.T0 + timedelta(seconds=1000.0 if slow else 0.0)
-    a, b = _comparable(sync.jobs[0]), _comparable(stateless.jobs[0])
+    a, b = _comparable(sync.results[0]), _comparable(stateless[0])
     assert a == b, f"\n同步：{a}\n无状态：{b}"
-    assert (b["status"], b["message"]) == ("error", message)
-    assert (sync.status, sync.message) == (stateless.status, stateless.message) == (Status.ERROR, None)
+    assert (b["status"], b["message"]) == (status.value, message)
+    foreground = state_without_record(sync.run_meta, sync.results, sync.stopped_by, ended_at="t1")
+    assert (foreground.status, foreground.message) == (recorded.status, recorded.message) == (status, None)
 
 
 def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
-    """到期收尾：a 结束之后已过停止启动的时刻，b 还没有启动。前台的调度循环与后台的推进步骤得到
-    同一个 run 级状态与说明、同一组判定（b 不在其中、没有执行），后台的运行态里 b 保持 pending。"""
+    """到期收尾：a 结束之后已过停止启动的时刻，b 还没有启动。前台没有记录时组装出的结果（`persist.result_without_record`）与后台推进
+    步骤写下的记录一致：a passed、b 由执行方自己到期这条来路的结束写记 skipped 并带说明，run 为 aborted、带 run 级说明；判定明细只有
+    a 的，b 没有（ADR 0054 决策二第 3 条、实测项 4）。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import JobState, RunState
+    from gherkai_core.persist import result_without_record
     from gherkai_core.reconcile import TickOutcome, tick
-    from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
 
     def job(sid):
         return Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=7200.0,
@@ -664,10 +673,12 @@ def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
     done = tick("r", meta, log, store, Launcher(), 1, clock=wall)
 
     assert done.outcome is TickOutcome.COMMITTED
-    background = done.result
-    assert (sync.status, sync.message) == (background.status, background.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert [(jr.scope_id, jr.status) for jr in sync.jobs] == [(jr.scope_id, jr.status) for jr in background.jobs] \
-        == [("a", Status.PASSED)]
-    assert [j.scope_id for j in sync.jobs_without_verdict] == [j.scope_id for j in background.jobs_without_verdict] == ["b"]
-    state = store.load_run_state("r")
-    assert (state.status, state.message, state.jobs["b"].status) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE, Status.PENDING)
+    assert sync.stopped_by == "deadline"
+    foreground = result_without_record(sync, ended_at="t1")
+    recorded = store.load_run_state("r")
+    ending = RUN_ENDINGS["deadline"]
+    assert (foreground.status, foreground.message) == (recorded.status, recorded.message) == (Status.ABORTED, ending.run_message)
+    assert [(o.scope_id, o.status, o.state.message) for o in foreground.jobs] \
+        == [(sid, js.status, js.message) for sid, js in recorded.jobs.items()] \
+        == [("a", Status.PASSED, None), ("b", Status.SKIPPED, ending.skipped_message)]
+    assert [jr.scope_id for jr in foreground.details] == [jr.scope_id for jr in done.details] == ["a"]

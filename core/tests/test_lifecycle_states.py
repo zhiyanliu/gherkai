@@ -1,10 +1,13 @@
-"""job 生命周期态 + severity 单测（ADR 0031）：skipped/aborted/pending/running、severity 序、_aggregate 过滤。
+"""job 生命周期态 + severity 单测（ADR 0031）：skipped/aborted/pending/running、severity 序、scenario 判定到 job 判定的归约。
 
-纯逻辑 + 内存假 Engine（不起子进程），验证 fail-fast 下两类「未正常完成」被正确区分。
+纯逻辑 + 内存假 Engine（不起子进程），验证 fail-fast 下两类「未正常完成」被正确区分：已启动而被中止的 job 由终结函数判 aborted，
+没有启动的 job 不在执行事实里、由结束写记 skipped（这里用没有记录时同一组作用 `run_status.state_without_record` 核对）。
 """
 from __future__ import annotations
 
 import threading
+
+import pytest
 
 from gherkai_core.model import (
     TERMINAL_STATUSES,
@@ -13,12 +16,12 @@ from gherkai_core.model import (
     Status,
     StepDone,
     Votes,
-    _NON_VERDICT,
     _STATUS_SEVERITY,
     severity,
 )
 from gherkai_core.model import Job, JobResult
 from gherkai_core.project import _aggregate
+from gherkai_core.run_status import RUN_ENDINGS, state_without_record
 from gherkai_core.schedule import ScheduleOpts, schedule
 from gherkai_core.serialize import job_result_from_dict, job_result_to_dict
 from tests.fake_engine import CollectSink, FakeEngine, FakeResolver, FakeWorkerHandle
@@ -58,13 +61,6 @@ def test_pending_running_have_no_severity():
             pass
 
 
-def test_non_verdict_filter_set():
-    # 过滤名单是派生终态加前置态
-    assert _NON_VERDICT == frozenset(
-        {Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING}
-    )
-
-
 # ---- 终态真源（ADR 0031 决定一·补末条）----
 def test_terminal_statuses_is_everything_but_the_two_pre_terminal():
     # 锁真源集合：新增终态自动入集（取补定义），只有新增前置态才需改——两条都由本断言看住
@@ -79,49 +75,30 @@ def test_terminal_statuses_equals_severity_table_keys():
     assert TERMINAL_STATUSES == frozenset(_STATUS_SEVERITY)
 
 
-def test_terminal_and_non_verdict_are_two_different_cuts():
-    # 两把刀有意重叠、不可互换：skipped/aborted 是终态但不算 run 级判定结论（别拿 _NON_VERDICT 反推终态）
-    assert {Status.SKIPPED, Status.ABORTED} <= (TERMINAL_STATUSES & _NON_VERDICT)
-    assert TERMINAL_STATUSES != frozenset(Status) - _NON_VERDICT
+# ---- _aggregate：scenario 判定到 job 判定的归约（ADR 0031 决定三「scenario 判定到 job 判定的归约是另一条路径」条）----
+def test_aggregate_reduces_the_three_worker_states():
+    # 只喂 worker 报的三态：有 error 为 error，否则有 failed 为 failed，否则 passed
+    assert _aggregate([Status.PASSED, Status.FAILED, Status.ERROR]) == Status.ERROR
+    assert _aggregate([Status.ERROR, Status.PASSED]) == Status.ERROR
+    assert _aggregate([Status.PASSED, Status.FAILED]) == Status.FAILED
+    assert _aggregate([Status.PASSED, Status.PASSED]) == Status.PASSED
+    assert _aggregate([Status.FAILED]) == Status.FAILED
 
 
-# ---- _aggregate 入口过滤 ----
-def test_aggregate_filters_non_verdict():
-    # 判定集非空时只看判定：error 仍穿透（一个 error 加一组非判定态 → error）
-    assert _aggregate([Status.PASSED, Status.SKIPPED, Status.ERROR, Status.RUNNING]) == Status.ERROR
-    # failed 穿透：passed + failed + skipped → failed
-    assert _aggregate([Status.PASSED, Status.FAILED, Status.SKIPPED]) == Status.FAILED
-    # skipped 与 passed 并存 → passed：skipped 不污染已出的判定
-    assert _aggregate([Status.PASSED, Status.SKIPPED]) == Status.PASSED
+def test_aggregate_rejects_empty_input_and_states_outside_the_three():
+    # 判定集为空的情形终结函数先判 error，走不到这里；core 派生态与前置态不是 scenario 判定。两者都是调用方的错，抛出而不给一个取值
+    with pytest.raises(ValueError):
+        _aggregate([])
+    for extra in (Status.SKIPPED, Status.ABORTED, Status.PENDING, Status.RUNNING):
+        with pytest.raises(ValueError):
+            _aggregate([Status.PASSED, extra])
+        with pytest.raises(ValueError):
+            _aggregate([extra])
 
 
-def test_aggregate_all_skipped_no_error_is_skipped_not_passed():
-    # 判定集为空时不判 passed：全部 skipped 且没有 error → skipped，
-    # 不依赖「fail-fast 产生的 skipped 必定伴随 error」这条调用方条件
-    assert _aggregate([Status.SKIPPED, Status.SKIPPED]) == Status.SKIPPED
-
-
-def test_aggregate_all_aborted_is_aborted():
-    assert _aggregate([Status.ABORTED, Status.ABORTED]) == Status.ABORTED
-
-
-def test_aggregate_empty_verdict_set_precedence():
-    # 判定集为空时按 aborted、skipped、running、pending 的顺序取第一个出现的
-    assert _aggregate([Status.SKIPPED, Status.ABORTED, Status.PENDING]) == Status.ABORTED
-    assert _aggregate([Status.PENDING, Status.SKIPPED, Status.RUNNING]) == Status.SKIPPED
-    assert _aggregate([Status.PENDING, Status.RUNNING]) == Status.RUNNING  # 投影路径：pending 与 running 并存
-    assert _aggregate([Status.PENDING, Status.PENDING]) == Status.PENDING  # 投影路径：全部 pending
-
-
-def test_aggregate_fail_fast_shapes_stay_error():
-    # fail-fast 的 skipped 与 aborted 必伴随触发它的 error：判定集非空、规则不变，run 级仍 error
-    assert _aggregate([Status.ERROR, Status.SKIPPED]) == Status.ERROR
-    assert _aggregate([Status.ERROR, Status.ABORTED, Status.SKIPPED]) == Status.ERROR
-
-
-# ---- fail-fast：排队没起 → SKIPPED（worker 从未 spawn）----
+# ---- fail-fast：排队没起 → 不启动、不进执行事实，由结束写记 SKIPPED（worker 从未 spawn）----
 def test_fail_fast_queued_job_is_skipped():
-    # max_concurrency=1 串行：crash 先运行→崩→set abort_flag→第二个 job 还在排队→启动前命中 abort 检查→SKIPPED
+    # max_concurrency=1 串行：crash 先运行→崩→set abort_flag→第二个 job 还在排队→启动前命中 abort 检查→不启动、留在 pending
     jobs = [_job("crash"), _job("queued")]
     engine = FakeEngine(
         behaviors={
@@ -130,17 +107,21 @@ def test_fail_fast_queued_job_is_skipped():
         },
         crash_after={"crash": 0},  # crash 立刻崩
     )
-    result = schedule(
-        _rm(jobs), FakeResolver(engine), CollectSink(),
+    meta = _rm(jobs)
+    ex = schedule(
+        meta, FakeResolver(engine), CollectSink(),
         opts=ScheduleOpts(max_concurrency=1, fail_fast=True),
     )
-    crash_jr = next(jr for jr in result.jobs if jr.scope_id == "crash")
-    queued_jr = next(jr for jr in result.jobs if jr.scope_id == "queued")
-    assert crash_jr.status == Status.ERROR          # 触发者：自身崩
-    assert queued_jr.status == Status.SKIPPED       # 被牵连、worker 从未 spawn
-    assert queued_jr.error_type is None             # skipped 无错（可直接重新运行）
-    assert engine.run_count.get("queued") is None   # 关键：queued 的 worker 从未被 run_scope（没花钱）
-    assert result.status == Status.ERROR            # run 级仍 error（crash 顶上去），skipped 不污染
+    assert [jr.scope_id for jr in ex.results] == ["crash"]  # queued 没有判出结果、不在执行事实里
+    assert ex.results[0].status == Status.ERROR      # 触发者：自身崩
+    assert ex.stopped_by == "fail-fast"              # 余下的 job 不再启动的来源
+    assert engine.run_count.get("queued") is None    # 关键：queued 的 worker 从未被 run_scope（没花钱）
+    # 由结束写记 skipped（没有记录时同一组作用），说明取 fail-fast 一行；run 级仍 error（crash 顶上去）
+    state = state_without_record(meta, ex.results, ex.stopped_by, ended_at="t1")
+    queued = state.jobs["queued"]
+    assert (queued.status, queued.message, queued.session_id) == (
+        Status.SKIPPED, RUN_ENDINGS["fail-fast"].skipped_message, None)
+    assert state.status == Status.ERROR
 
 
 # 死锁逃生用的宽松超时（秒）：远大于正常执行（~0.01s），仅防「放行信号因逻辑 bug 永不到来」时测试永久挂死。
@@ -205,9 +186,10 @@ def test_fail_fast_inflight_job_is_aborted():
         return orig_stop(self, grace_period_s)
 
     FakeWorkerHandle.stop = stop_hook
+    meta = _rm(jobs)
     try:
-        result = schedule(
-            _rm(jobs), FakeResolver(engine), CollectSink(),
+        ex = schedule(
+            meta, FakeResolver(engine), CollectSink(),
             opts=ScheduleOpts(max_concurrency=2, fail_fast=True, grace_period_s=0.1),
         )
     finally:
@@ -216,12 +198,13 @@ def test_fail_fast_inflight_job_is_aborted():
     # 前置校验：victim 确被真正放行（crashed.set()，即 _stop_all 已 abort_flag.set()），而非死锁逃生超时——
     # 后者意味着「被放行 ⟺ abort_flag 已 set」耦合被超时旁路打破，此时 ABORTED 断言即便偶过也不可信。
     assert engine.gate_released, "victim 未被真正放行（crashed 超时），耦合被打破——测试环境异常，非有效断言"
-    victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
+    victim_jr = next(jr for jr in ex.results if jr.scope_id == "victim")
     assert engine.run_count.get("victim") == 1     # 已 spawn（区别于 skipped 的从未 spawn）
     assert victim_jr.status == Status.ABORTED        # 运行到一半被 fail-fast 掐
     assert victim_jr.error_type is None              # aborted 不带 errorType（不是引擎故障，是被叫停）
     assert victim_jr.status != Status.ERROR          # 关键回归：被牵连中止绝不再记成 error（ADR 0031）
-    assert result.status == Status.ERROR             # run 级仍 error（crash 顶上去），aborted 不进 run 级聚合
+    # run 级仍 error（crash 顶上去）：两个 job 都有结果，run 状态按取法由它们算出
+    assert state_without_record(meta, ex.results, ex.stopped_by, ended_at="t1").status == Status.ERROR
 
 
 # ---- severity 完整传递序（ADR 0031 决定二）：一行锁定全序，抗中间调换回归 ----
@@ -229,13 +212,6 @@ def test_severity_full_chain():
     # 现有 test_severity_* 只验两端极值 + 中间三态；这里锁定完整 5 态传递序
     assert (severity(Status.SKIPPED) < severity(Status.PASSED) < severity(Status.FAILED)
             < severity(Status.ERROR) < severity(Status.ABORTED))
-
-
-def test_aggregate_running_does_not_pollute_clean_pass():
-    # 干净的 [PASSED, RUNNING]：running 被滤掉、不把结果带偏 → PASSED
-    assert _aggregate([Status.PASSED, Status.RUNNING]) == Status.PASSED
-    # 空输入仍判 passed：零个 job 的 run 可达（没有 scenario 的 .feature），而且无状态路径要在 finalize 时写入终态
-    assert _aggregate([]) == Status.PASSED
 
 
 # ---- WorkerNetworkError 竞态块按 abort_flag 拆分（最易回归的坑）----
@@ -269,7 +245,7 @@ class _NetRaiseEngine:
 
     def _gen(self, job):
         if job.scope_id == "crash":
-            # crash 必须等 victim 先进入事件循环（过了启动前 abort 检查）才崩——否则 victim 会被判 SKIPPED 而非 ABORTED
+            # crash 必须等 victim 先进入事件循环（过了启动前 abort 检查）才崩——否则 victim 不会启动、不会被判 ABORTED
             if self._entered is not None:
                 self._entered.wait(timeout=_DEADLOCK_ESCAPE_S)
             raise RuntimeError("crash 崩 → set abort_flag")
@@ -301,7 +277,7 @@ def test_network_error_during_abort_is_aborted_not_network():
 
     FakeWorkerHandle.stop = stop_hook
     try:
-        result = schedule(
+        ex = schedule(
             _rm([_job("crash"), _job("victim")]), FakeResolver(engine), CollectSink(),
             opts=ScheduleOpts(max_concurrency=2, fail_fast=True, grace_period_s=0.1),
         )
@@ -310,7 +286,7 @@ def test_network_error_during_abort_is_aborted_not_network():
     # 前置校验：victim 确被真正放行（gate.set()），而非死锁逃生超时——后者意味着「被放行 ⟺ abort_flag 已 set」
     # 的耦合被超时旁路打破，此时下面的 ABORTED 断言即便偶然通过也不可信。锁定这一条，杜绝超时静默退化。
     assert engine.gate_released, "victim 未被真正放行（gate 超时），耦合被打破——测试环境异常，非有效断言"
-    victim_jr = next(jr for jr in result.jobs if jr.scope_id == "victim")
+    victim_jr = next(jr for jr in ex.results if jr.scope_id == "victim")
     assert victim_jr.status == Status.ABORTED          # abort 分支优先：不记成 network_error
     assert victim_jr.error_type is None                # aborted 不带 errorType
 
@@ -322,10 +298,10 @@ def test_network_error_during_timeout_is_timeout_not_aborted():
     # 单调时钟每读前进 10 秒（首事件的时长归约读一次），job_timeout=5 → 认领时刻约为 10 秒、截止时刻约为 15 秒，网络故障退出后的回判时
     # 墙钟已到 20 秒，必判超时
     ft = _FakeTime(step=10.0)
-    result = schedule(
+    ex = schedule(
         _rm([_job("victim", timeout_s=5.0)]), FakeResolver(engine), CollectSink(),
         opts=ft.opts(network_retry=0),
     )
-    victim_jr = result.jobs[0]
+    victim_jr = ex.results[0]
     assert victim_jr.status == Status.ERROR
     assert victim_jr.error_type == "timeout"           # 超时不被网络故障绕过、不归 aborted

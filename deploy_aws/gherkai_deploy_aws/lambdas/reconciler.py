@@ -502,8 +502,8 @@ def _build(run_id: str):
     # 手工重放同一批 Stream 记录、
     # 超时到点触发器的 payload 都落到这里——后者读到终态时不做超时处置（与 ADR 0034「job timeout」节
     # 「到点时 job 已终态 → tick no-op」一致）。
-    # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——finalize_report 只有
-    # 本 Lambda 与 detached 宿主两个调用点、本就没有独立的重生成命令，而事件过期后重 tick 只会生成错报告。
+    # **明确接受的代价**：从此没有「重 tick 一个已收尾的 run 来补写丢失的报告」这条路——报告只由使 run 成为终态的
+    # 那一方生成（本 Lambda 与 detached 宿主两个调用点），本就没有独立的重生成命令，而事件过期后重 tick 只会推演出错的结果。
     # 判在 `load_run_meta` 之前同上一支的理由：省掉强一致 META 读 + offload 正文的 S3 取回。tick 自身也先读运行态、
     # 已收尾即停止推演，覆盖本闸之后才插入的收尾；本闸保留，是因为它在读 definition 之前，tick 内的判停管不到这一段
     # （ADR 0034 机制三「run 级状态只进不退」条④）。
@@ -578,14 +578,14 @@ def _run_ids_from_runs_stream(event) -> set[str]:
 def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -> dict:
     """对每个 run tick 一步，按结果分支。reconciler（events Stream）与 kicker（runs Stream）共用。
 
-    tick 的三种结果（`TickOutcome`）：这一方写成收尾 → 用 tick 交还的结果写 RunReport；
-    run 已结束而终态不是这一方写成的 → 不写报告、不做超时扫；继续推进 → 防御性超时扫。
+    tick 的三种结果（`TickOutcome`，ADR 0034 机制三「run 级状态只进不退」条④）：这一方的写使 run 成为终态 → 从记录生成
+    RunReport；run 已结束而使它成为终态的不是这一方 → 不写报告、不做超时扫；继续推进 → 防御性超时扫。
 
     prebuilt：本次 invoke 已装配好的组合根（run_id → `_build` 结果，**含 None**，表示该 run 不由云端推进器管），
     有则复用、不重装——超时路径先 `_build` 做处置再落到此处 tick 同一个 run，重装一次是纯重复工作
     （每次 `_build` 造 4 个 boto3 client + 强一致读 META + 可能的 S3 offload 正文还原）。
     """
-    from gherkai_core.reconcile import TickOutcome, tick
+    from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
     from gherkai_runtime import compose  # 时钟走 compose.now 单一读取点（同 local/前台两宿主，格式不漂移）
 
     prebuilt = prebuilt or {}
@@ -596,31 +596,24 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
-        # 判定真值由 tick 在 finalize CAS 之前落 rstore；聚合异常原样抛出 → 本次 invocation 失败 →
-        # events Stream 事件源重试本批（commit 之后再失败就没人重试了）。
+        # 判定明细由 tick 在写下这一轮各 job 的终态之前存进 rstore（ADR 0030 决定三「后台推进同守」条）；存明细或写运行态的异常
+        # 原样抛出 → 本次 invocation 失败 → events Stream 事件源重试本批（终态写之后再失败就没人重试了）。
         outcome = tick(run_id, meta, event_log, run_store, launcher, mc, clock=compose.now, result_store=rstore)
         if outcome.outcome is TickOutcome.ENDED:
-            # 装配时的语义闸之后别的推进器已收尾（tick 读运行态之前，或这一方的收尾写之前）：与那道闸同一处置，报告不改写
+            # 装配时的语义闸之后 run 已被别处结束（tick 读运行态之前，或这一方的终态写、结束写之前）：与那道闸同一处置，报告不改写
             print(f"{label}: run {run_id} 已结束，不再改写它的结果")
         elif outcome.outcome is TickOutcome.COMMITTED:
-            # 报告收尾走 core 唯一一份（曾在此双写、与 runtime/gherkai_runtime/detached.py 漂移风险，已合并）
-            from gherkai_core.reconcile import finalize_report
-            # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——强一致读、会因限流/
-            # 瞬时 5xx 抛，而这一步在 finalize 的 commit point **之后**执行：commit 后的失败无人重试（ADR 0030
-            # 决定三），抛出去还会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，同批其它
-            # run 的事件随之丢失（同下面超时兜底检查的隔离理由）。故整段隔离、失败按缺值走
-            # （ADR 0034「端到端流程」cloud 第 ④ 步把 run 级墙钟划在「派生、失败隔离」那一侧）。
-            try:
-                duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))
-            except Exception:
-                duration_ms = None
-            finalize_report(outcome.result, pstore, compose.now_iso(), run_duration_ms=duration_ms)
+            # 报告从记录生成，入口是 core 唯一的一份，本机后台推进进程调的是同一个。生成在终态写之后执行、失败无人重试，抛出去还会让
+            # 本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，同批其它 run 的事件随之丢失（同下面超时兜底检查的隔离
+            # 理由）；所以读运行态（强一致读，会因限流或瞬时 5xx 抛）、组装与写报告整段在入口的失败隔离之内（ADR 0034「端到端流程」
+            # cloud 第 ④ 步）。
+            write_report_from_record(meta, run_store, outcome.details, pstore, created_at=compose.now_iso())
             print(f"{label}: run {run_id} done + finalized")
         else:
             print(f"{label}: run {run_id} advanced (not done)")
             # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该拖累已经
             # 推进成功的这一步——抛出去会让本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，
-            # 同批其它 run 的事件一并永久丢失（同上面 run 级墙钟的隔离理由）。
+            # 同批其它 run 的事件一并永久丢失（同上面生成报告的隔离理由）。
             try:
                 _scan_overdue_timeouts(run_id, built)
             except Exception as exc:

@@ -8,10 +8,13 @@
 
 ```
 schedule(run_meta: RunMeta, engines: EngineResolver, sink: (event) -> void, opts,
-         on_job_complete?: (JobResult) -> void, on_event?: (event) -> void) -> RunResult
+         on_job_complete?: (JobResult) -> void, on_event?: (event) -> void) -> Execution
    // RunMeta: 一次 run 的 definition（run_id + created_at + jobs: Job[] + 运行期限 deadline_at），组合根执行前生成/组装（ADR 0016/0027/0054）
-   //          schedule 把 run_meta 原样放进 RunResult（合成）+ 归约判定，不自己生成 run_id
-   //          RunResult 的 job 清单只装有判定的 job；run 级状态的取法见 ADR 0031 决定三，没有启动的 job 交给结束写（同篇「结束写」小节）
+   //          schedule 把 run_meta 原样放进 Execution，不自己生成 run_id
+   // Execution: 这次执行观察到的事实——判出结果的 job（JobResult，按运行定义的次序；没有启动的 job，以及重试之前发现 run 已被
+   //          别处结束而不采用的结果，不在其中；落库服务得知 run 已结束之后拒收的结果仍可能在其中，有记录时以记录为准）、
+   //          余下的 job 不再启动的来源（最先登记的那一条）、整体墙钟时长；run 与 job 的状态不在其中，
+   //          有记录时取运行态，没有记录时按同一套规则在内存里算出（ADR 0030 决定二）
    // EngineResolver: (engineName) -> Engine —— 按 job.engine 解析 Engine，schedule 对引擎数/引擎名无知
    // sink: 接收 0024 原始流式事件的回调（pass-through，仅供进度显示；被 sink_lock 串行化）
    // on_job_complete/on_event: 实时写接缝的两个旁路注入点（默认空），落库走它们、不走 sink（ADR 0030）
@@ -36,9 +39,9 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - **注入 `engines`（`EngineResolver`：按 `job.engine` 解析 Engine）而非自己 spawn** → 可测（skill：accept dependencies, don't create them）：测试注入假 Engine（吐预设 JSON Lines，[0024](./0024-worker-core-protocol.md)）即可验调度逻辑，无需真起子进程/真连 AgentCore。**schedule 对引擎数/引擎名无知**——焊死 `{midscene, novaact}` 会让第三个引擎到来即改接口；用 resolver 则只动组合根注入。
 - **注入 `sink`**（`(event) -> void` 回调，仅供 CLI 打印进度）→ schedule 边收边转，不自己决定结果存哪（[0016](./0016-execution-architecture-core-lib-run-model.md) ports）。**实时落库不走 sink**——走 `on_event`（事件旁路，在 sink_lock 外刷 RUNNING 中间态）/ `on_job_complete`（job 完成落判定真值），由组合根的 `RunPersistence` 编排（[0030](./0030-realtime-persistence-seam.md)）。（RunReport 也不走 sink，它由谁、从什么生成见 [0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节。）
-- **`sink` vs `RunResult` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度）；`RunResult` 是 schedule 对**同一事件流的归约终值**（汇总判定，给退出码/CI；有记录时状态以运行态为准，[0030](./0030-realtime-persistence-seam.md) 决定三）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
+- **`sink` vs `Execution` 边界（不是两次独立判定）**：`sink` 收的是 [0024](./0024-worker-core-protocol.md) **原始流式事件**（pass-through，供实时进度）；`Execution` 是 schedule 对**同一事件流的归约终值**（各 job 的判定与余下的 job 不再启动的来源；job 与 run 的状态以运行态为准，[0030](./0030-realtime-persistence-seam.md) 决定三）。同一份事实的两个视图——流式过程 vs 终态归约，非两套判定来源。
 - **注入两个时钟**（`clock` 与 `wallClock`）→ 超时杀 / grace→kill / 期限这几条 schedule 独有难逻辑可用假时间确定性单测，不靠真实等待；schedule 自己不另取时钟。job 的截止时刻按墙钟计、不进记录的时长按单调时钟计（理由与代价见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「检查用墙钟」一段）。
-- **返回 `RunResult`**（机器可读汇总判定，给退出码/CI，[0016](./0016-execution-architecture-core-lib-run-model.md)）。
+- **返回执行事实 `Execution`，不返回 run 的汇总**：run 与 job 的状态以运行态为准（[0030](./0030-realtime-persistence-seam.md) 决定三），没有启动的 job 由落库服务的结束写结束、来路取最先成立的那一条（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）；汇总 `RunResult`（给退出码/CI，[0016](./0016-execution-architecture-core-lib-run-model.md)）由落库服务从运行态组装，`run --no-report` 按同一套规则在内存里组装（[0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节「RunResult 的组装只有一处」条）。理由：汇总由 schedule 给出时，有记录的执行同时有两份 run 状态，读者要分辨以哪份为准；来路写进汇总，汇总就带上一项只对前台执行有意义、读记录得不到的字段。
 - **删除测试**：删掉本模块，「并发控制 + worker 生命周期 + 失败隔离 + 超时兜底」会散进 CLI/WebUI 各写一遍 → 它在挣钱。
 
 ## 核心职责
@@ -72,7 +75,8 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 - **重试之前**同一次序，最后一步换成读一次 run 级状态（`record.still_open`，重试不再认领）；命中即不再重试：已过停止启动的时刻、或已因 fail-fast 或使用方中断而中止时，把上一次的结果作为终态写下并注明最先命中的原因；发现 run 已被别处结束（含这次读到终态）时不写、不存明细（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。不读存储的几项在退避之前也查一次。
 - **第三种中止来源**：认领被拒、重试之前读到终态、写 job 状态时得知 run 级已结束，三处的发现汇成停手信号（`record.ended_elsewhere`）。前两处由 worker 线程当场记下；第三处由调度循环在那次落库回调（`on_event`、`on_job_complete`）返回之后、在同一个线程里当场读进来；等待循环另与使用方中断同一节拍地读，同一次轮询里先读停手信号、再处理中断。成立即像 fail-fast 一样对运行中的 worker 当场落定、发停止请求，此后不存明细、不写终态（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。三种中止来源都登记在 run 的中止标志上，只有第一次登记的来源被记下，中止的说明取它（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二）。认领或读取本身失败按运行期落库失败处理，与回调抛异常相同。
 - **停止启动不撤销**：任何一次检查观察到已过停止启动的时刻即记下，此后起 worker 之前与重试之前的检查都按已过处理，判断是否做到期的结束写也用这个记下的事实、不重读墙钟。
-- **run 级**：run 的状态只由各 job 的终态算出（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三）；schedule 返回之后仍有未结束的 job 时，由落库服务做结束写（[0030](./0030-realtime-persistence-seam.md) 决定三）。
+- **余下的 job 不再启动的来源只登记一处**：停止启动的时刻在第一次被检查观察到时登记，三种中止来源在中止标志第一次登记来源时登记，只记第一次；它随 `Execution` 交给落库服务，作结束写的来路。停止启动不并进中止标志：中止标志一经置位，执行中的 worker 就被停下，而停止启动只拦启动、不停执行中的 job。
+- **run 级**：run 的状态只由各 job 的终态算出（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三）；schedule 返回之后仍有未结束的 job 时，由落库服务以 `Execution` 交来的来路做结束写（[0030](./0030-realtime-persistence-seam.md) 决定三）。
 - **静默 worker 的超时如何触发**：超时检查在「每收一个事件后」做。worker 完全静默（卡在单次操作内、事件通道零输出）时，事件循环会阻塞在读上、检查永不触发（曾致 300s 超时拖到 ~620s）。故 schedule 用 `_heartbeat_wrap`（后台 reader 线程把 adapter 的纯 `Iterator[Event]` 喂进队列，主侧 `queue.get(timeout=heartbeat_interval_s)` 超时即注入存活心跳）让循环周期性醒来查超时——**心跳在 schedule 层做一次、对所有 adapter 通用，Engine port 保持纯 `Iterator[Event]`**（机制细节见 [0028](./0028-transient-network-ssl-resilience.md)）。
 
 ### 网络瞬时故障的 job 级重试（[0028](./0028-transient-network-ssl-resilience.md)）
@@ -92,13 +96,13 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ### 事件归集（status + 原生量成本 + 墙钟时长 三级归约）
 
-- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，九类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`/`session_opened`/`session_closed`（后两类是会话血缘事件，桌面与设备 worker 都成对发出，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成 `RunResult`。
+- 边收 worker 的流式事件（[0024](./0024-worker-core-protocol.md) JSON Lines，九类：`scope_started`/`scenario_started`/`step_started`/`step_done`/`step_skipped`/`scenario_done`/`scope_done`/`session_opened`/`session_closed`（后两类是会话血缘事件，桌面与设备 worker 都成对发出，见 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）；`step_skipped` = scope 内短路，见下 status 归约与 [0031](./0031-job-lifecycle-states-and-severity.md) 决定六）边转给 `sink`；归约成各 job 的 `JobResult`（逐个交给 `on_job_complete`，并随 `Execution` 返回）。
 - 多 worker 并行 → 多路事件流交错，schedule 按 `scopeId`/`scenarioId` 归位（[0024](./0024-worker-core-protocol.md) 标识键）。
 - **status 归约**：scenario → job（任一 error→error / 任一 failed→failed / 全 passed→passed；这只是终结函数 `core.project.finalize_job` 里内容完整那一行——`scope_done.status = error` 取 scope 级判定、零 scenario 判定记 engine_error、有会话未确认停止时改判 error + `release_failed`，真值表见 [0034](./0034-detached-batch-reconciler.md) 机制二与 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4）→ run（取法见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三）。job 级除 worker 三态外，core 还派生 `aborted`（跑一半被掐：fail-fast、使用方中断或被 run 的期限截断，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；没有启动的 job 不产出判定，由结束写记 `skipped`（0031 决定三「结束写」小节）；发现 run 已被别处结束时被停下的 job，结果不写进记录（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。
 - **job 级乐观归约的内容完整前置（[0024](./0024-worker-core-protocol.md)「事件流内容完整与进程终止是两件事、都要」在同步路径的落点；首轮 code-health 对抗验证逼出）**：事件流正常 EOF 后，job 落「scenario 归约终态」**须以见到 `scope_done` 为前提**——worker 被协作停（fail-fast/超时的 `handle.stop`）后按契约**不吐 in-flight 的 scenario_done/scope_done、干净退出**（exit 0），事件流自然 EOF；若不校验内容完整就直落归约，部分完成的 job 会拿「已完成的那几个 scenario」聚合出 PASSED（假绿——判定失真+ABORTED 现场丢失，探针复现：`--default-job-timeout 0` 时任意关停时序 100% 假绿、心跳只在特定时序偶然救回）。**未见 scope_done 时不落乐观终态**：判定由同步与无状态两路共用的终结函数 `core.project.finalize_job` 给出（[0034](./0034-detached-batch-reconciler.md) 机制二「终结函数与真值表」），依据首次仲裁落定的 `stop_reason`：作出停止决定那一刻截止时刻已过即为到点（即使 fail-fast 标志也已置位），起作用的是 job 自己的预算取 error+timeout、是 run 的期限取 ABORTED，否则主动中止（fail-fast、使用方中断或发现 run 已被别处记为已结束）取 ABORTED（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一）；没被主动停止、干净退出却没有 scope_done 的取 error+engine_error（进程报告成功而内容没发完，两者矛盾）。（本篇曾在 EOF 分支先判 `abort_flag` 再判 deadline，与事件分支的次序相反，已由 0034 机制二的首次仲裁规则统一。）
 - **`step_skipped` 归约（scope 内短路，不臆断因果的守法方式，[0031](./0031-job-lifecycle-states-and-severity.md) 决定六）**：worker 上游 step `error` 后短路后续 step、为每个发 `step_skipped`；core 归约成 `StepResult(status=skipped, shortcircuited=True)` 记进 step 明细，**但绝不把它写进 scenario 判定累加器**——scenario/job/run 判定只由那个上游 `error` step 决定，与"后面短路了几步"无关（step 级 skipped 零污染 scenario 归约/severity）。因果（"谁因谁短路"）只存在于 worker 的串行循环，core 作为纯 reducer 物理上看不到、也不臆断——它只忠实归约 worker 发来的 `step_skipped`，把"某步没跑"如实记进 `StepResult`。
-- **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级），再跨 job 求和成 `RunResult.total_tokens`/`total_time_worked_s`（run 级）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。设备 job 另把 `session_closed.observedS` 合计成 job 与 run 级的 `device_observed_s`，`observedS` 缺失的会话计入 `device_observed_missing`（结果未知的创建尝试两者都不计）；两键只按 job 目标是否为设备给出，桌面 job 有会话事件也不出现（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
-- **墙钟时长归约**（性能指标，与成本正交）：core 用注入的单调时钟 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（`RunResult.duration_ms`，schedule 整体包住、含并发）。
+- **成本归约**：core 只各自合计 engine 报的**原生量**——累加 `step_done.cost` 的 `tokens`/`time_worked_s` 成 `JobResult.total_tokens`/`total_time_worked_s`（scope 级）；run 级的 `RunResult.total_tokens`/`total_time_worked_s` 在组装 RunResult 时由各份判定明细求和（[0027](./0027-runreport-aggregation-index.md)「RunResult 的组装只有一处」条）。**core 不折美元**（交消费者），无任何引擎报某量则该量 None、不假装 0（cost 信封见 [0024](./0024-worker-core-protocol.md)）。设备 job 另把 `session_closed.observedS` 合计成 job 与 run 级的 `device_observed_s`，`observedS` 缺失的会话计入 `device_observed_missing`（结果未知的创建尝试两者都不计）；两键只按 job 目标是否为设备给出，桌面 job 有会话事件也不出现（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 7）。
+- **墙钟时长归约**（性能指标，与成本正交）：core 用注入的单调时钟 `clock` 在事件到达时打时间戳，按各级 `*_started`→`*_done` 算 `duration_ms`——step（`StepResult.duration_ms`）、scenario、scope（`JobResult.duration_ms`）、run（schedule 整体包住、含并发，随 `Execution.duration_ms` 交出，组装后即 `RunResult.duration_ms`）。
 
 ## 治理旋钮 = 注入参数 + 保守默认（贯穿原则）
 
@@ -106,7 +110,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 ## 现在做 / 留口子
 
-- **现在做（v1.0）**：上述接口、job 间并发（上限+排队）、失败隔离（默认隔离/可配 fail-fast）、超时兜底、优雅终止（schedule 调 `handle.stop(grace)`；子进程 handle 内 SIGTERM+宽限+SIGKILL）、事件归集成 RunResult（status + 原生量成本 + 墙钟时长 三级归约）；1.5 起加使用方中断：等待 job 完成的循环按短间隔轮询组合根注入的 `interrupt()`，首次走 `_stop_all` 协作停止、再次对运行中 worker 调 `handle.stop(0)` 强制，余下没有启动的 job 由结束写记 skipped，run 的状态按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法得出（见上「status 归约」条，机制与提示语见 [0024](./0024-worker-core-protocol.md) 终止契约）；此后又加上遵守运行期限与这次 run 的记录（见上「起 worker 与重试之前的检查」，[0054](./0054-run-deadline-lifetime-lock-and-settling.md)）。
+- **现在做（v1.0）**：上述接口、job 间并发（上限+排队）、失败隔离（默认隔离/可配 fail-fast）、超时兜底、优雅终止（schedule 调 `handle.stop(grace)`；子进程 handle 内 SIGTERM+宽限+SIGKILL）、事件归集成各 job 的判定（status + 原生量成本 + 墙钟时长 三级归约）；1.5 起加使用方中断：等待 job 完成的循环按短间隔轮询组合根注入的 `interrupt()`，首次走 `_stop_all` 协作停止、再次对运行中 worker 调 `handle.stop(0)` 强制，余下没有启动的 job 由结束写记 skipped，run 的状态按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法得出（见上「status 归约」条，机制与提示语见 [0024](./0024-worker-core-protocol.md) 终止契约）；此后又加上遵守运行期限与这次 run 的记录（见上「起 worker 与重试之前的检查」，[0054](./0054-run-deadline-lifetime-lock-and-settling.md)）。
 - **留口子不实现**：core→worker 控制流（暂停/取消单 scenario/动态调度，等真需求，见 [0024](./0024-worker-core-protocol.md) 终止契约节）；跨 job 的智能调度（按成本/优先级排序，现 FIFO 排队即可）；云端分布式调度不经 schedule（v1.1 Fargate，[0017](./0017-cloud-execution-fargate-over-runtime.md)）：云端后端只支持 `submit`（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A），云端的 run 由 [0034](./0034-detached-batch-reconciler.md) 的推进器推进，schedule 只驱动本机后端的 worker。**⚠️「schedule 一行不改」只覆盖「执行 adapter 替换」、未预见「CLI 脱离」这一步**（[0034](./0034-detached-batch-reconciler.md) v1.2 纠正）：无状态 `submit`（提交即走）要求把 schedule 当前的**同步驱动循环本身**（`ThreadPoolExecutor` 起全部 worker 线程 + `wait(FIRST_COMPLETED)` 收集完成结果 + `abort_flag`/fail-fast `_stop_all` 进程内并发闸）解体——因为 CLI 一退，这个循环没人驱动了。异步路径把它换成**无状态事件驱动 reconciler**（被事件唤醒、读全量 events 重放、CAS 推进），并从 schedule 抽出纯 `project`/`plan_next`（签名见 [0034](./0034-detached-batch-reconciler.md)）供 Lambda 与本机后台推进进程两种宿主复用。**存活的是纯归约器、消失的是同步驱动循环**；纯 reducer 红线仍守（CAS/RunTask/PutItem 副作用仍在 adapter/组合根、core 不 import boto3）。同步 `run` 路径仍用现驱动循环——两种驱动模型按命令并存。故「schedule 一行不改」对无状态批量运行**不成立**，见 [0034](./0034-detached-batch-reconciler.md)。
 
 ## 重议

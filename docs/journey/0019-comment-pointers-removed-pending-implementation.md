@@ -7,7 +7,6 @@
 下面按文件列出每一处：所在的函数、类、测试或文档小节，它当时所括的说法，以及这段 code 跟上目标设计之后应当对应的 ADR 小节。实装批改到某个文件时，把说明改成新行为，并照这里把指针加回去；标「无对应」的是随那段 code 一起删去的。做完一个文件就从这里删掉它的条目。没有去掉的指针是否与所指小节的现文一致，随实装核对，范围与清单在文末「语义一致随实装核对」一节；两部分都清空后本文删除。
 
 - `cli/DEVELOPMENT.md`
-  - 「实时落库」节第一段：过了运行期限减 60 秒不再启动 job，没有启动的 scope 不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」。跟上之后对应 0054 决策二第 1、3 条；0031 决定三「结束写」小节。
   - 「为何拆 submit / status」节第二段：status --wait 是三个推进触发源之一，查询者到来即接力，推进中断后由查询者续到底。跟上之后对应 0034「命令形态」「推进器与触发源」；0054 决策八。
 - `cli/gherkai_cli/__main__.py`
   - _add_config_flag 文档串：读项目配置文件的子命令有八个，名单在 settings.CONFIG_COMMANDS。跟上之后对应 0053 决策 1。
@@ -22,16 +21,7 @@
   - _explain_cloud 文档串：explain 云端的权限面：版本戳读与 runs 表 GetItem，加桶的读对象权限，不带 scope_id 时还要列举对象，不需要 Lambda 调用权限。跟上之后对应 0042 决策四「数据来源」段。
   - _definition_contract_message 文档串：本机读端（含 status --wait 与 per-run 进程接力）读到形态违约时以退出码 2 结束，不像云端推进器那样把 run 标为 error。跟上之后对应 0037 决策 7「definition 结构版本」段（CLI 读端以退出码 2 结束，推进器以结束写 error 变体结束，写法见 0031 决定三「结束写」小节）。
   - _cmd_reconcile，except UnsupportedDefinitionSchema 行注释：per-run 进程整读 definition 时遇到结构版本不符，打同一句说明、以退出码 2 结束。跟上之后对应 0037 决策 7「definition 结构版本」段；0034 机制三④「不经推进步骤的收尾」。
-  - _cmd_run，第 6 步 commit point 注释：各 job 判定已逐个落库，最后只剩收尾的条件写（总 status 与 ended_at），收尾写写成 run 即已提交。跟上之后对应 0030 决定三。
-  - _cmd_run，末尾退出码注释：退出码读 schedule 返回的内存终值、不回读落库态；skipped/aborted 批次必伴随 error。跟上之后对应 0031 决定五「数据源」与「run」条。
-  - _ended_elsewhere_notice 文档串：`run` 收尾写不成时的终端说明里有一句「已得出的判定已写入」。指针已收到「没有覆盖已有的记录」一句旁。跟上之后对应 0054 决策五「执行方得知 run 已结束之后就不存明细」条（这句说明随之改写），整段说明再对应 0054 决策五。
 - `cli/gherkai_cli/render.py`
-  - 模块级常量 _NOT_RUN_LABEL 上方的注释块：运行定义里有、判定清单里没有的 job 是因已过停止启动的时刻或 run 已被别处结束而没有启动的，没有判定，原因在 run 级说明，它不是 skipped。跟上之后对应 0031 决定三「结束写」小节（skipped 的记法与说明表），以及 0027「index.html 形态」（由结束写结束的 job 怎样显示）。
-  - render_text 文档串：运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行。跟上之后对应 0027「index.html 形态」与 0031 决定三「结束写」小节。
-  - run_tree 里 `if result.message` 行的注释：run 级说明是没有任何 job 能承载的原因（如已超过允许运行的时间）。跟上之后对应 0031 决定三「结束写」小节的说明表。
-  - run_tree 里 job 行「说明文字」那段注释：fail-fast 派生态（skipped/aborted）的 JobResult 的 error_type 恒为 None，「为什么没执行」只在 message 里。跟上之后对应 0031 决定一（aborted 没有归因）与决定三「结束写」小节（skipped 的说明在运行态）。
-  - run_tree 末尾遍历 jobs_without_verdict 的循环注释：没有判定的 job 按运行定义的次序排在有判定的之后，只显示 scope 与标注，原因写在 run 级说明里。跟上之后对应 0027「index.html 形态」与 0031 决定三「结束写」小节。
-  - render_run_state 里 `if state.message` 行的注释：run 级消息是推进器不经任何 job 就终结 run 时的原因。跟上之后对应 0037 决策 7「run 级消息的边界」一段与 0031 决定三「结束写」小节。
   - 「run 清单（list-runs …）」节标题注释：下面的 list-runs 渲染就是 0041 决策七的人读形态与机读形态，包括前台执行遗留提示与按 detached 判断。跟上之后对应 0041 决策七「人读形态」「机读形态」。
   - render_run_list 文档串：job 级的原因不在运行态里，清单不列，用 explain 看。跟上之后对应 0041 决策七「人读形态」中「清单不给 job 没通过的原因」一段。
 - `cli/gherkai_cli/settings.py`
@@ -41,15 +31,11 @@
   - 「submit/status cloud 的 preflight/fail-fast 接线」节头注释：submit 与 status 的 preflight/fail-fast 接线（含 status --wait 对 kicker 缺失 fail-fast）。跟上之后对应 0033「preflight fail-fast」节（submit 部分）。
   - test_status_wait_cloud_kicker_missing_fails_fast 文档串：status --wait 接力 invoke 的 kicker 不存在时点名 prefix、退出码 2，其他瞬时错吞掉再 invoke。跟上之后对应 无（status --wait 不调用 kicker）。
   - test_status_cloud_json_includes_artifact_locations 文档串：status --json 附加 artifacts，RunState 部分形状不变，只多一个键给报告、判定明细、元信息的位置。跟上之后对应 0041 决策三 status --json 一条。
-- `cli/tests/test_cli_json_contract.py`
-  - test_run_json_top_level_message_is_always_present_and_documented_as_run_level 文档串：run 级 message 顶层恒在；按期限收尾的 run 带说明，run_meta.jobs 与 jobs 的差就是没有执行的 scope。跟上之后对应 0031 决定三「结束写」小节与 0041 决策三（run --json 的 jobs[]）。
 - `cli/tests/test_definition_schema.py`
   - 模块文档串：status / explain / 本机接力读之前核结构版本、不符退出码 2；带设备目标的 run（run 与 submit）遇无戳后端退出码 2。跟上之后对应 0037 决策 7「definition 结构版本」段与缺戳例外条。
   - test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback 文档串：本机接力宿主（status --wait、_reconcile）读到形态违约以退出码 2 结束，不像云端推进器那样把 run 标 error。跟上之后对应 0037 决策 7「definition 结构版本」段与 0031 决定三「结束写」小节「运行定义不可用时」条。
   - test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched 文档串：三个本机读端读头违约退出码 2、不写 run 级消息，理由是本机读端有退出码可交。跟上之后对应 0037 决策 7「definition 结构版本」段（CLI 读端退出码 2）。
 - `cli/tests/test_main.py`
-  - 「收尾写不成」一节的节头注释：本机 run 执行中被别处结束后收尾写写不成、各 job 判定照常写入、退出码 1。跟上之后对应 0054 决策五「执行方服从记录」。
-  - 「前台执行遵守运行期限、服从记录」一节的节头注释：组合根注入与到期收尾的输出：被期限截断的 job 记 error/timeout、未启动的 job 留 pending、run 级 error 加说明、--json 的 jobs 少了它。跟上之后对应 0054 决策二「各执行方的落实」前台执行条与决策五。
   - test_run_steps_dir_flag_resolves_absolute_and_persists 文档串：本机后台推进/接力宿主的 CWD 与提交进程不同，三宿主读回同一值。跟上之后对应 0037 决策 4「解析在组合根、随 definition 持久化」条。
   - test_submit_local_persists_steps_dir_into_definition 文档串：per-run 进程/接力者从 definition 读回，三宿主一致。跟上之后对应 0037 决策 4 同条。
   - test_local_submit_marks_the_run_detached_and_foreground_run_does_not 文档串：本机 submit 的 run_state.json 带 detached 标记，status --wait 据此接力。跟上之后对应 0034 端到端 cloud 第 1b 步（detached 只作描述）与 0041 决策七。
@@ -59,13 +45,10 @@
 - `cli/tests/test_project_config.py`
   - PER_CALL/COMMON/CLOUD 名单之上的行注释：测试里显式列出的三份名单就是 0053 决策 3 的名单。跟上之后对应 0053 决策 3「可配置的只是环境型选项」条（按次选择型名单），同注释里保留的决策 6「键集差集」。
   - test_local_relay_host_reads_definition_not_the_config_file 文档串：在另一 CWD 下，接力宿主从 definition 读回的设备与应用值仍是提交时的。跟上之后对应 0053 决策 6「宿主不读文件」条（后台推进进程），配合决策 1。
-- `cli/tests/test_render.py`
-  - _deadline_run 文档串：按期限收尾的 run 里，被期限截断的 job 记 error/timeout，没启动的 job 不进判定清单，run 级记 error 并带说明。跟上之后对应 0054 决策二第 2、3 条，配合 0031 决定一与决定三「结束写」小节。
 - `core/DEVELOPMENT.md`
-  - 模块树 persist.py 条：RunPersistence 按 commit-point 写序落库：数据面先，run 级 try_finalize 最后，作为提交点。跟上之后对应 0030 决定二、决定三。
   - 模块树 run_store/{local,ddb}.py 条：RunStore 的条件写是 try_claim_job / project_state / try_finalize。跟上之后对应 0034 机制三；0030 决定四。
-  - 模块树 project.py 条开头：project_full 用于收尾，run 级状态与说明经 run_verdict 得出，报告由它直接生成；plan_next 给出 start / finalize / finalize_expired；run_verdict 是包住聚合、带三种例外的 run 级裁决；projected_run_status 给出投影写应记录的 run 级 status。跟上之后对应 0034「core 拆分」节。
-  - 模块树 reconcile.py 条开头：tick 有多个触发源；满足到期收尾时用带认领计数的条件写收尾；收尾分支在条件写之前写入判定真值，并用 finalize_report 交还的结果写 RunReport。跟上之后对应 0034「core 拆分」节、「推进器与触发源」节与机制三（②与「run 级状态只进不退」条④）。
+  - 模块树 project.py 条开头：project_full 收尾用，只给有记录的 job 的判定明细、不给 run 级状态；plan_next 给出 start / finalize / finalize_expired；assemble_run_result 是从运行态与判定明细组装 RunResult 的唯一一处；projected_run_status 给出投影写应记录的 run 级 status。跟上之后对应 0034「core 拆分」节（project_full 一项已与之一致；plan_next 仍有全部 job 结束时的 finalize 动作，0054 决策二「决策」一项写明推进决策给出的结束动作只有到期的结束写，那个动作去掉之后整条加回）。
+  - 模块树 reconcile.py 条开头：tick 有多个触发源（含 status --wait 接力）；全部 job 都有结果时以一次终态写 commit_job_states 记下它们的终态，满足到期的条件即做结束写 end_run；收尾分支在这两种写之前存下判定明细，宿主经 write_report_from_record 从记录生成 RunReport。跟上之后对应 0034「core 拆分」节、「推进器与触发源」节与机制三（②与「run 级状态只进不退」条④）。
 - `core/gherkai_core/adapters/_atomic.py`
   - 模块文档串「控制面 run_state.json」一条：推进进程在锁内写 run_state.json 时，status 与接力进程无锁读它，这是设计内的读者。跟上之后对应 0030 决定三「local 三个写面一律原子写」框。
   - 模块文档串「权限显式给」段：jobs/*.json 的消费者是 CI 与人。跟上之后对应 0030 决定三「local 三个写面」框（数据面 0644、消费者 CI / 人 / 静态 server）。
@@ -78,8 +61,6 @@
 - `core/gherkai_core/adapters/report_store/local.py`
   - 模块文档串 manifest.json 一条：判定真值由 ResultStore 持有，报告是纯派生视图、可删可重建、永不作判定源。跟上之后对应 ADR 0027「manifest.json 形态」与「职责边界」段；ADR 0016「三层切分」。
   - LocalReportStore.write 内 manifest 注释块第二句：判定真值由 ResultStore（jobs/*.json 或结构相同的 S3 key）持有，运行态与身份由 RunStore 持有。跟上之后对应 ADR 0016「三层切分」；ADR 0030 决定三（点名与状态的权威）。
-  - _reason_html 文档串：skipped/aborted 是 fail-fast 派生态，error_type 恒 None、原因只在 message。跟上之后对应 ADR 0031 决定一，及决定三「结束写」小节（说明按来路取）。
-  - render_index_html 文档串「两块内容」：① 判定明细从内存 RunResult 渲染、判定真值以 jobs/*.json 为准，运行定义里有而判定清单里没有的 job 排在末尾标为没有执行；② 产物导航。跟上之后对应 ADR 0027「index.html 形态」。
 - `core/gherkai_core/adapters/result_store/s3.py`
   - 模块文档串首句：每个 job 一个 S3 对象，键为 <run_id>/jobs/<scope>.json，按 run_id+scope_id 直接取，load_all 列举前缀。跟上之后对应 0030 决定六（ResultStore 后端 = S3）；0016「留口子：核心注入接口」的三层 store 后端选型。
   - S3ResultStore.load_all 文档串：ResultStore 是判定真值的唯一权威，CI 据此判退出码。跟上之后对应 0016「三层切分」数据面判定明细一行；0030 决定三。
@@ -88,43 +69,24 @@
   - 模块文档串「STATE item」条 jobs 必须原生 Map 一句：jobs 须为原生 Map，才能用 `SET jobs.#sid=:js` 按 scope_id 整 entry 单元素刷（update_job_state 的写法）。跟上之后对应 0030 决定六「RunState.jobs 落 DDB 用原生 Map」条。
   - DynamoDBRunStore.__init__ 文档串的 detached 参数：detached 标记让 kicker 的 Stream filter 只认 submit 建的 run，同步 `run --backend cloud` 不触发 kicker，免得双开推进器。跟上之后对应 0034 端到端 cloud 1b「触发过滤不看后台执行标记」。
   - _state_item 里 detached 一行的行注释：kicker filter 只认带 detached 标记的 INSERT。跟上之后对应 0034 端到端 cloud 1b（过滤写法见 0054 决策九）。
-  - update_job_state 文档串首段：写两次：第一次在 run 未收尾时写 job 并把 run 级写成 running；第二次在已收尾的 run 上照写 job、返回 False。跟上之后对应 0034 机制三「run 级状态只进不退」条③。
-  - update_job_state 文档串首段（与上一条同一括注）：已收尾的 run 上 job 照写，run 级与分组不变。跟上之后对应 0054 决策五「终态不可变」。
   - 「条件写」分节头注释：本节条件写含 try_finalize 带期望认领计数的到期收尾条件。跟上之后对应 0054 决策二后台推进条「收尾与报告」与 0034 机制三②。
-  - project_state 文档串第二段：投影只写 running 是因为终态是 finalize 专属，投影落终态会挡住 try_finalize。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
-  - project_state 文档串「各 job 态逐 job 单调条件写」段：两步写：标量一步以 HWM 加 status 双守并写 run 级 running，逐 job 一步按「当前非更推进态」条件写、可写终态。跟上之后对应 0034 机制三「② 的 job 级半边落地形态」段。
-  - project_state 逐 job 循环之前的行注释：按 rank 序逐 job 单调条件写，同 rank 覆盖、终态之间以本次投影为准（投影可写 job 终态）。跟上之后对应 0034 机制三②与「② 的 job 级半边落地形态」段。
+  - project_state 文档串第二段：投影只写 run 级 running、不落终态，理由是 run 级终态只随记下最后一个 job 终态的写或结束写写下，投影提前落终态会使那两次写读到 run 已结束而写不成；run 级在标量一步里写。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
+  - project_state 文档串「各 job 态逐 job 单调条件写」段：两步写：标量一步以 HWM 加 status 双守并写 run 级 running，逐 job 一步按「当前非更推进态」条件写、可写 job 终态（库中已是终态的 job 不被改写，三支都另以 run 未结束为条件）。跟上之后对应 0034 机制三「② 的 job 级半边落地形态」段。
+  - project_state 逐 job 循环之前的行注释：按 rank 序逐 job 单调条件写，仅当库中该 job 未结束、且 rank 不高于本次投影才写，每一支都另以 run 未结束为条件（投影可写 job 终态）。跟上之后对应 0034 机制三②与「② 的 job 级半边落地形态」段。
   - project_state 逐 job update_item 的行注释：终态、running、pending 三个分支都带条件。跟上之后对应 0034 机制三「② 的 job 级半边落地形态」段。
   - try_finalize 文档串首句：收尾是单独的状态机单调条件写，commit 恰一次（可带期望认领计数）。跟上之后对应 0034 机制三②（结束写以写入序号为条件）与 0031 决定三「结束写」小节。
-  - DynamoDBRunStore.load_run_state 文档串：ConsistentRead=True 是为了「finalize 后立刻读」时的强一致，把 finalize 当作 run 的提交点。跟上之后对应 ADR 0030 决定六「读用 ConsistentRead=True」条（commit point 指决定三的逐 job 提交点）。
 - `core/gherkai_core/adapters/run_store/local.py`
-  - LocalRunStore.update_job_state 文档串：写入非 pending 的 job 态且 run 未收尾时把 run 级置为 running；run 已收尾时 job 照写、run 级不变（对拍 DDB 只写 job 的回退）。跟上之后对应 0034 机制三「run 级状态只进不退」条③（取法见 0031 决定三，终态不可变见 0054 决策五）。
-  - LocalRunStore.project_state 文档串「run 级 status 只写 running」一段：投影不落 run 终态，理由是 run 级终态是收尾 commit point 专属，投影提前落终态会挡住 try_finalize。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段（并见 0030 决定三）。
-  - LocalRunStore.project_state 内 mutate 的逐 job 合并行注释：逐 job 与库中现态取较推进者，同 rank 取新值，终态之间以本次投影为准。跟上之后对应 0034 机制三「② 的 job 级半边落地形态」段。
+  - LocalRunStore.project_state 文档串「run 级 status 只写 running」一段：投影不落 run 终态，理由是 run 级终态只随记下最后一个 job 终态的写或结束写写下，投影提前落终态会使那两次写读到 run 已结束而写不成。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段（并见 0030 决定三）。
   - LocalRunStore.try_finalize 文档串：try_finalize 是 run 级终态的单调提交点，恰好提交一次，可另带认领计数条件。跟上之后对应 0031 决定三「结束写」小节与 0034 机制三②（端口入口见 0030 决定四）。
-  - LocalRunStore.project_state 内 mutate 的行注释（`if cur.status not in (Status.PENDING, Status.RUNNING): return None` 一行）：库中 run 已是终态时投影整体不写，理由是它与 finalize 的「状态机单调条件写」成对，起对偶保护作用。跟上之后对应 0054 决策五（run 到终态之后运行态的任何写都不成立）；另可指 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段末「run 已结束时投影写不成立」。
   - _atomic_write_json 文档串第二段：写入方在文件锁内写 run_state.json 时，`gherkai status` 和接力进程不持锁读同一个文件，所以确实有并发读者。跟上之后对应 0030 决定三「local 三个写面一律原子写」框（无锁读者为 status、list-runs 与处置方）；0034 没有对应的一节，因为本机接力已被拒。
 - `core/gherkai_core/model.py`
-  - Status 文档串 skipped/aborted 条：skipped/aborted 是由 fail-fast 或使用方中断产生的 job 级终态。跟上之后对应 0031 决定一（态表与 enum 注释）。
-  - Status.ABORTED 行注释：aborted = 主动中止（fail-fast、使用方中断或发现 run 已被别处结束）时执行到一半被停止。跟上之后对应 0031 决定一 aborted 行。
-  - _NON_VERDICT 上方注释：run 级聚合有一份过滤名单，终态判定之外的态都不进 run 级聚合。跟上之后对应 0031 决定三「取法」（code 跟上后过滤名单本身退役）。
-  - _NON_VERDICT 上方注释：使用方中断已被处理且有 job 记为 aborted 或 skipped 时，在聚合之外另记 run 级 aborted。跟上之后对应 0031 决定三「取法」。
-  - _NON_VERDICT 上方注释：同步与无状态两路共用这份名单，project 的无状态投影还真实喂入 pending/running。跟上之后对应 0031 决定三「取法」；0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
   - RunMeta.steps_dir 字段注释：起 worker 的有三个宿主：同步 run、本机 per-run 进程、status --wait 接力者，三者 CWD 各不相同。跟上之后对应 0037 决策 4（两个宿主从 definition 读回）与 0034「local」一节。
   - JobState.claimed_at 字段注释：claimed_at 有三个用途：本机接力恢复 deadline、云端 tick 防御性超时扫、status 显示时长。跟上之后对应 0034「job timeout」节「JobState.claimed_at」条。
   - JobState.claimed_at 字段注释：后台收尾时由认领时刻、预算与期限重算超时的说明，有记录的 job 缺它时推进步骤不收尾。跟上之后对应 0054 决策二第 2 条与后台推进条「快照」。
-  - RunState 文档串：运行态按 create_run 写全 pending → 逐 job 刷 → try_finalize 以条件写落定总 status。跟上之后对应 0030 决定四；0031 决定三「run 的状态字段没有自己的写入逻辑」条。
 - `core/gherkai_core/persist.py`
-  - 模块文档串「commit-point 写序」段：数据面 ResultStore 先逐 job 落，控制面 RunStore.try_finalize 最后写；收尾写一落，run 即已提交、判定就绪。跟上之后对应 0030 决定三。
   - RunPersistence.begin 文档串「create_run 前先 preflight」段：create_run 之前先 preflight；桶或表名错都在这里暴露，由组合根归到退出码 2，免得有无 offload 内容把同一个错分成退出码 2 与 1。跟上之后对应 0030 决定七「Store port 有 preflight()，begin 之前探活」。
-  - RunPersistence.finalize 文档串「写不成时不覆盖、不写报告」段：收尾条件写写不成时不覆盖、不写报告，理由是报告从本次结果派生，会与记录矛盾。跟上之后对应 0054 决策五「结束时前台执行方不覆盖已有的终态」条，加 0027「ReportStore 接口：整 run 一次写」节。
-  - RunPersistence.finalize 文档串「ReportStore.write 的失败被隔离」段：报告写失败被隔离：commit point 已落、判定真值在 ResultStore，报告可以之后从 RunResult 重建。跟上之后对应 0030 决定三「ReportStore.write 失败隔离」注。
 - `core/gherkai_core/ports.py`
-  - RunStore 文档串「生命周期」段：生命周期是 create_run → update_job_state → try_finalize（commit point，条件写落定总 status 与 ended_at）。跟上之后对应 0030 决定四。
-  - RunStore.update_job_state 文档串：run 已收尾时 job 照写、run 级不变。跟上之后对应 0034 机制三「run 级状态只进不退」条③。
-  - RunStore.update_job_state 文档串：返回 False 表示 run 已是终态，这次只写了 job。跟上之后对应 0054 决策五「执行方服从记录」，配合 0030 决定四。
-  - RunStore.try_finalize 文档串首句：收尾 commit point：run 未终态时以条件写落终态与 ended_at。跟上之后对应 0034 机制三②，配合 0031 决定三「结束写」小节。
-  - RunStore.try_finalize 文档串 message 段：执行方按期限收尾时写 run 级消息「已超过允许运行的时间」，因为这是没有任何 job 能承载的原因。跟上之后对应 0054 决策二第 3 条，配合 0031 决定三「结束写」小节说明表。
+  - RunStore.try_finalize 文档串首句：由调用方给出 run 状态的收尾写，run 未结束时写下给出的终态与 ended_at；只剩云端推进器读不到可用的运行定义时用它。跟上之后对应 无对应：随 try_finalize 一起删去（运行定义不可用时的结束写见 0031 决定三「结束写」小节）。
   - RunStore.try_claim_job 文档串 claimed_at 段：claimed_at 的用途：本机接力恢复 deadline、云端 tick 防御扫、status 显示时长。跟上之后对应 0034「job timeout」节 `JobState.claimed_at` 条。
   - ResultStore 文档串：ResultStore 是判定真值的唯一权威，CI 靠它读判定。跟上之后对应 0016「留口子」ResultStore 条，配合 0030 决定三「状态的权威是运行态」「点名」两条。
   - RunStore「认领与投影」小节的行注释：认领由前台执行者与后台推进共用，后台推进会跨进程、跨实例并发调用。跟上之后对应 0034「推进器与触发源」第 1、2 条（本机只有一个推进器，云端多次调用可以重叠）与机制四；前台用同一种认领见 0034 机制三「run 级状态只进不退」条①。
@@ -133,66 +95,31 @@
   - TaskExited.timed_out 字段注释：超时标志的来源含接力方补写的未知退出。跟上之后对应 0034「job timeout」节「timed_out 归因链」条。
   - NonTerminalSnapshot 文档串首句：JobResult 只许终态，强制点在 project_full（收尾聚合时整轮一份都不落）。跟上之后对应 0031 决定一·补「不变量的强制点在保存一个 job 的明细之前」。
   - NonTerminalSnapshot 文档串第二段：tick 只在 plan_next 提议收尾（没有执行中的 job、有记录的都已结束）时才聚合。跟上之后对应 0054 决策二后台推进条「快照」与 0030 决定三（逐 job 写序）。
-  - project_full 文档串首句：project_full 给出含 run 级裁决的完整 RunResult，收尾用。跟上之后对应 0034「core 拆分」节 project_full 一行。
-  - project_full 文档串第一段：tick 在收尾的条件写之前一次落下各 job 的判定明细。跟上之后对应 0030 决定三「后台推进同守」条。
-  - project_full 文档串第一段：收尾写成之后宿主用同一份 RunResult 生成报告。跟上之后对应 0054 决策二后台推进条「收尾与报告」与 0027「ReportStore 接口：整 run 一次写」。
-  - project_full 文档串「判定只装有记录的 job」条：有记录的 job 非终态即抛 NonTerminalSnapshot、一份判定都不落。跟上之后对应 0031 决定一·补。
-  - _aggregate 文档串首句：状态归约先滤掉 _NON_VERDICT，只看已出判定的态。跟上之后对应 0031 决定三「取法」。
-  - _aggregate 文档串空判定集一句：判定集为空而输入非空时按 aborted、skipped、running、pending 的次序取。跟上之后对应 0031 决定三「取法」。
-  - run_verdict 文档串第 3 条：全部 job 都有判定时照常聚合，被期限截断的 job 自身是 error。跟上之后对应 0054 决策二第 4 条与 0031 决定三。
   - projected_run_status 文档串首句：投影写传入的 run 级取值：全 pending 为 pending（表示不写 run 级），否则 running。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
-  - projected_run_status 文档串第二段：run 级终态由 try_finalize 这个 commit point 一次落定，提前落终态会挡住它。跟上之后对应 0030 决定三、决定四。
   - plan_next 分节注释：plan_next 决定该启哪些 pending 与是否收尾（全部结束或到期）。跟上之后对应 0054 决策二后台推进条「决策」与 0034「core 拆分」节 plan_next 一行。
   - Action 文档串 kind='finalize' 一行：没有执行中、也没有未启动的 job 时有一个按各 job 判定收尾的动作。跟上之后对应 无对应动作；终态的落下见 0054 决策二第 4 条与 0031 决定三。
-  - Action 文档串 kind='finalize_expired' 一行：到期收尾时 run 级记为 error 加说明。跟上之后对应 0054 决策二第 3 条与 0031 决定三「结束写」小节。
   - plan_next 文档串首句：plan_next 提议的动作含按判定收尾的 finalize。跟上之后对应 0054 决策二后台推进条「决策」。
 - `core/gherkai_core/reconcile.py`
-  - 模块文档串第一段（tick 流程概述），与条④同一括注：tick 的流程，含「收尾动作（全部 job 已结束，或已过停止启动而余下都没启动）先落判定明细、再条件写 run 级终态」。跟上之后对应 0054 决策二后台推进条（「决策」「收尾与报告」两项）。
+  - 模块文档串第一段（tick 流程概述），与条④同一括注：tick 的流程，含「收尾动作先落判定明细，再使 run 成为终态：全部 job 已结束时以终态写记下各 job 的终态，已过停止启动而余下的 job 都没有启动时做到期的结束写」。跟上之后对应 0054 决策二后台推进条（「决策」「收尾与报告」两项）。
   - 模块文档串「无状态 + 幂等」段：谁调、何时调、并发调 tick 都安全，由 CAS + HWM 条件写兜底，各触发源（cloud Stream / local per-run / status --wait 接力）共用 tick。跟上之后对应 0034「推进器与触发源」与机制三、机制四。
-  - TickOutcome 文档串首行（与条④同一括注）：tick 的三种结果（收尾的条件写写成、写不成后重读）。跟上之后对应 0054 决策二后台推进条「收尾与报告」（保留的 0034 机制三④照旧）。
-  - finalize_report 文档串第二段：报告直接由推进步骤这一轮的结果生成，不另读一次事件重算。跟上之后对应 0054 决策二后台推进条「收尾与报告」与 0027「ReportStore 接口：整 run 一次写」节。
-  - tick 文档串「步骤」列表的引导句：步骤 1 至 5，其中第 4 步的收尾分 finalize 与 finalize_expired 两种动作（快照检查、判定真值先落、条件写 run 级终态、写不成重读一次）。跟上之后对应 0034「端到端流程」cloud 第 4 步与 0054 决策二后台推进条。
+  - TickOutcome 文档串首行（与条④同一括注）：tick 的三种结果（这一方的写使 run 成为终态，写的是终态写或到期的结束写；到期的结束写没写成时重读）。跟上之后对应 0054 决策二后台推进条「收尾与报告」（保留的 0034 机制三④照旧）。
+  - tick 文档串「步骤」列表的引导句：步骤 1 至 5，其中第 4 步的收尾分 finalize 与 finalize_expired 两种动作（快照检查、判定真值先落，再以终态写（全部 job 已结束）或到期的结束写使 run 成为终态，到期的结束写没写成时重读一次）。跟上之后对应 0034「端到端流程」cloud 第 4 步与 0054 决策二后台推进条。
   - _claim_times 文档串：有一个有记录的 job 不带认领时刻就整轮不收尾（返回 None），理由是回落会让旧运行态的推进方覆盖别人已写对的明细。跟上之后对应 0054 决策二后台推进条「快照」。
-  - _finalize 文档串第 ② 项：收尾时用本轮 records 由 project_full 逐 job 落 ResultStore，之后才条件写 run 级终态。跟上之后对应 0030 决定三。
-  - _finalize 文档串第 ② 项：project_full 对有记录而非终态的 job 抛出。跟上之后对应 0031 决定一·补「不变量的强制点」。
-  - _finalize 文档串第 ② 项末句：明细保存覆盖同 key、不带条件，保存抛错时这一轮不做 run 级条件写。跟上之后对应 0034 机制三「run 级状态只进不退」条④ K3 与 0030 决定三「点名」「保存明细失败」。
-- `core/gherkai_core/schedule.py`
-  - 模块文档串「起 worker 之前按序检查」一段：已过停止启动或已发现 run 被别处结束就不启动、不产出判定；run 已因 fail-fast 或中断中止的记 SKIPPED。跟上之后对应 ADR 0054 决策二「一次前台执行可能因三种原因停下」一段；ADR 0026「起 worker 与重试之前的检查」。
-  - _SKIPPED 上方注释：排队中的 job 因 run 已中止而记 SKIPPED 时的说明按中止来源区分。跟上之后对应 ADR 0031 决定三「结束写」小节的说明表。
-  - _Worker._run_once 文档串：第一次 attempt 起 worker 之前按序检查：已过停止启动或已发现 run 被别处结束即不启动，run 已因 fail-fast 或中断中止记 SKIPPED，再认领。跟上之后对应 ADR 0054 决策二「一次前台执行可能因三种原因停下」一段。
-  - _Worker._run_once 中 `if hold is not None:` 分支的行注释：run 已因 fail-fast 或使用方中断而中止时，worker 从未 spawn，schedule 当场把这个 job 记 SKIPPED，不记 error。跟上之后对应 0031 决定三「结束写：结束一个未结束的 run」小节（fail-fast 与使用方中断这条来路），以及 touch points 的 schedule.py 条。
-- `core/gherkai_core/serialize.py`
-  - to_dict 里 message 键的行尾注释：run 级说明在 run --json 里键恒在，没有时为 null。跟上之后对应 ADR 0031 决定三「结束写」小节（run 级说明只由结束写写下）。
-  - run_state_to_dict 里 message 的行尾注释：run 级消息只在推进器不经任何 job 就终结 run 时才有。跟上之后对应 ADR 0037 决策 7「definition 结构版本」段，以及 0031 决定三「结束写」小节的说明表。
-  - run_state_to_dict 开头注释：正常 run 经 RunPersistence.begin/finalize 落 started_at/ended_at。跟上之后对应 0031 决定三（使 run 成为终态的那次写同时写结束时刻）；0030 决定三的写序。
+  - _finalize 文档串第 ② 项末句：明细保存覆盖同 key、不带条件，保存抛错时这一轮不写终态。0034 机制三「run 级状态只进不退」条④ K3 已加回；跟上之后再对应 0030 决定三「点名」「保存明细失败」。
 - `core/tests/test_atomic_write.py`
   - test_json_round_trip_and_default_mode_readable_by_others 文档串：判定真值与报告产物的消费者是 CI/人/静态 server。跟上之后对应 0030 决定三「local 三个写面一律原子写」框里的权限条（数据面与报告 0644，消费者是 CI / 人 / 静态 server）。
   - test_target_name_at_name_max_still_writable 文档串：结果落盘失败即停全部 worker 并重抛。跟上之后对应 0030 决定三「保存明细失败」与「回调异常的停机止血」。
-- `core/tests/test_cloud_integration.py`
-  - test_ddb_job_write_on_finalized_run_lands_job_only_real 文档串：已收尾的 run 再收到前台 job 写时，带 run 级的条件写被挡，回退只写 job，那一次落库。跟上之后对应 0034 机制三「run 级状态只进不退」条③。
 - `core/tests/test_conditional_writes.py`
   - 模块文档串首行：本文件对拍的写入口包括带期望认领计数的收尾写（到期收尾的竞态）。跟上之后对应 0054 决策二后台推进条「收尾与报告」，加 0034 机制三②。
-  - 模块文档串「run 级状态只进不退」一条：其中一项是：已收尾的 run 上，前台 job 写照样落库，run 级不变。跟上之后对应 0034 机制三「run 级状态只进不退」条③。
-  - 模块文档串「update_job_state 返回…」一条：run 已是终态时返回 False、job 照写；DDB 侧有第二次只写 job 的写。跟上之后对应 0054 决策五，加 0034 机制三③。
   - test_claim_rejected_on_finalized_run_leaves_state_unchanged 文档串：run 已收尾后不再接受新认领；推进器在 definition 不可用时带着 pending 的 job 收尾为 error，这样的 run 不能被认领复活。跟上之后对应 0034 机制三「run 级状态只进不退」条①。
   - test_finalize_with_pending_jobs_succeeds 文档串：收尾不要求 job 全为终态，带着 pending 的 job 也能收尾。跟上之后对应 0031 决定三「结束写」小节。
-  - test_job_write_on_finalized_run_lands_job_only 文档串：run 级的保护不改变 job 写落不落库：已收尾的 run 上 job 照写。跟上之后对应 0034 机制三「run 级状态只进不退」条③，加 0054 决策五。
-  - test_projection_keeps_pending_while_no_job_started 文档串：project 的 run 级 status 为 pending，因为判定集为空不判 passed。跟上之后对应 0031 决定三。
-  - test_projection_clamps_terminal_aggregate_of_running_run 文档串：投影写必须钳成 running，否则投影自己写下的终态会挡住紧接的 try_finalize 这个提交点。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
-  - test_projection_never_lands_terminal_run_status 文档串：run 级终态专属于 try_finalize 这个 commit point。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
-  - test_ddb_job_write_update_item_counts 文档串：run 已收尾时 update_job_state 发两次写：带 run 级条件的那次被挡，再写一次只写 job。跟上之后对应 0034 机制三③与「两端对拍口径」条。
-  - test_ddb_job_write_update_item_counts 文档串末句：写入 pending 与写入别的 job 态走同样的两次写。跟上之后对应 0054 决策五。
-  - test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes 文档串：DDB 第二次写（只写 job）要求 run 级已是终态，返回值如实。跟上之后对应 0054 决策五，加 0034 机制三③。
+  - test_projection_clamps_the_terminal_run_status_from_project 文档串（原 test_projection_clamps_terminal_aggregate_of_running_run）：投影写钳成 running，投影自己写下的 run 级终态会挡住紧接的终态写与结束写。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
+  - test_projection_never_lands_terminal_run_status 文档串：全 job 已终态时投影仍只落 running，run 级终态只随记下最后一个 job 终态的写或结束写写下，投影提前落终态会使紧接的终态写返回 ALREADY_ENDED。跟上之后对应 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段。
   - test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise 文档串：run 级消息随 try_finalize 同一次写入。跟上之后对应 0037 决策 7「run 级消息」条，加 0031 决定三「结束写」小节。
-  - test_job_write_leaving_pending_advances_run_status 文档串：前台 job 写离开 pending 时 run 级为 running；判据是写入的 job 态非 pending，从 pending 直接写终态（SKIPPED 的 job、起 worker 失败的 job）同样推进。跟上之后对应 ADR 0034 机制三「run 级状态只进不退」条③（前台 update_job_state：非 pending 的写连同 run 状态一起写；起 worker 的 job 先经条①认领）。
   - 「认领计数」节头：这一节的用例里有两个验证以期望的认领计数限制收尾（test_finalize_with_expected_claim_count_lands_only_on_an_equal_count、test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_after_the_read），另一个在缺键的记录上验证同一条件。节头的指针已去掉，改放在只验证初值与递增的那个用例上。跟上之后对应 0034 机制三「run 级状态只进不退」条①（计数只作诊断，不作任何写的条件）；以计数为条件的用例随 expected_claim_count 一起删去，结束写的条件见 0034 机制三②。
 - `core/tests/test_ddb_run_store.py`
   - test_detached_flag_on_state_item 文档串：STATE item 上的 detached=true 标记供 kicker 的流过滤使用，同步 run 不落。跟上之后对应 ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」；ADR 0033 资源清单第 13 条。
 - `core/tests/test_lifecycle_states.py`
-  - test_non_verdict_filter_set：过滤名单 _NON_VERDICT 是派生终态加前置态。跟上之后对应 实装后过滤名单退场，对应 0031 决定三「取法」。
-  - 「_aggregate 入口过滤」节标题注释：_aggregate 在入口滤掉非判定态之后再聚合。跟上之后对应 0031 决定三「scenario 判定到 job 判定的归约是另一条路径」条。
-  - test_aggregate_all_skipped_no_error_is_skipped_not_passed：判定集为空时不判 passed：全部 skipped 且没有 error 时结果为 skipped。跟上之后对应 0031 决定三「取法」。
-  - test_aggregate_running_does_not_pollute_clean_pass：[PASSED, RUNNING] 里的 running 被滤掉，结果为 PASSED。跟上之后对应 0031 决定三「取法」。
   - 「WorkerNetworkError 竞态块按 abort_flag 拆分」节标题注释：网络故障块按 abort_flag 拆成三支：abort_flag→ABORTED、超时→error+timeout、其余→network_error。跟上之后对应 0031 决定一「aborted 来自主动中止与 run 的期限，不来自 job 自己的预算」注，以及 0034 机制二「终结函数与真值表」。
   - 「WorkerNetworkError 竞态块按 abort_flag 拆分」节标题下的行注释块：超时与 fail-fast 两条路径都会主动停 worker，所以网络块的回填判据取 abort_flag，并说这正是 ADR 警告的做法。跟上之后对应 0031 决定一「aborted 来自主动中止与 run 的期限，不来自 job 自己的预算」注（按 stop_reason 判定；到点时再按预算还是期限分别记 error+timeout 或 aborted），以及 0031 touch points 里 schedule.py 那一条。
 - `core/tests/test_local_result_store_atomic.py`
@@ -201,49 +128,24 @@
 - `core/tests/test_local_run_store_atomic.py`
   - 模块文档串首行：LocalRunStore 原子写，推进进程写 run_state.json 时 status 与接力进程无锁读它。跟上之后对应 0030 决定三「local 三个写面一律原子写」框。
 - `core/tests/test_persist.py`
-  - 模块文档串（指针从行末移到「三处发现汇成的停手信号」之后）：收尾带 run 级说明。跟上之后对应 「收尾带 run 级说明」对应 0031 决定三「结束写」小节（0054 决策二末段）。
-  - test_finalize_without_report_store_returns_none 上方的分节注释：finalize 的无报告路径仍写收尾（每次都调 try_finalize）。跟上之后对应 0030 决定二（RunPersistence.finalize 一行）与决定三「run 结束」。
   - test_running_phase_has_no_data_plane_file_until_complete 文档串：两面分离：jobs/<scope>.json 只在 job 完成时落，「jobs/ 里出现文件就表示判定已就绪」，数据面存判定真值。跟上之后对应 0016「三层切分」与 0030 决定三「点名」。
-  - test_run_status_advances_when_first_job_leaves_pending 文档串：第一个 job 离开 pending 的写之后 run 为 running，含从 pending 直接写成终态的 SKIPPED job，finalize 落定终态。跟上之后对应 0034 机制三「run 级状态只进不退」条③。
-  - test_on_event_runs_only_on_scope_started 上方的分节注释：on_event 旁路观察者只对 ScopeStarted 刷 RUNNING（反向不变量）。跟上之后对应 0030 决定三「实时写时序」的「job 进行中」条（注释改成「ScopeStarted 或 origin 不是 attempted 的 SessionOpened 才刷 RUNNING、其余事件不落库」之后再加回）。
 - `core/tests/test_project.py`
-  - test_no_records_job_is_pending 行注释：判定集为空时不判 passed，全部 pending 的 run 级值是 pending。跟上之后对应 0031 决定三「取法」。
-  - test_projected_run_status_pending_only_while_all_jobs_pending 行注释：run 级终态只能由 try_finalize 这个提交点写下。跟上之后对应 0030 决定四；0034 机制三「投影写的 run 状态」段。
-  - test_project_run_status_before_any_verdict_is_pre_terminal 文档串：还没有 job 出判定时 project() 的 run 级 status 是前置态。跟上之后对应 0031 决定三「取法」。
-  - test_project_full_timeout_message_is_recomputed_from_the_claim_time 文档串：后台重算起作用的截止时刻只决定说明，预算与期限两种截断都判 error 加 timeout。跟上之后对应 0054 决策二第 2 条；0034 机制二「终结函数与真值表」。
+  - test_projected_run_status_pending_only_while_all_jobs_pending 行注释：投影不写 run 级终态。0030 决定四已加回；跟上之后再对应 0034 机制三「投影写的 run 状态」段（投影钳在 running 实装之后）。
   - test_plan_next_finalize_when_all_terminal 文档串：所有 job 达终态时推进决策提议 finalize 动作，不论是否已过停止启动的时刻。跟上之后对应 0054 决策二第 4 条与后台推进条「决策」。
   - test_plan_next_past_stop_start_never_proposes_a_start 文档串：已过停止启动的时刻、没有执行中的 job、余下的 job 在事件流里都没有记录时到期收尾。跟上之后对应 0054 决策二第 3 条与后台推进条「决策」。
   - test_project_full_refuses_non_terminal_snapshot 文档串：不变量的强制点在收尾快照：有 job 仍 running 即抛，一份判定都不落。跟上之后对应 0031 决定一·补「不变量的强制点」。
 - `core/tests/test_reconcile.py`
-  - 模块文档串首行：tick 编排：全部结束即收尾，到期收尾的条件写带认领计数。跟上之后对应 0034 机制三「run 级状态只进不退」条④与 0054 决策二后台推进条。
-  - test_finalize_writes_verdicts_before_commit_point 文档串：全 done 的 tick 先存各 job 判定真值、再做一次 try_finalize。跟上之后对应 0030 决定三「后台推进同守」条。
-  - 「报告」一节的节头注释：报告由写成收尾那一轮的结果直接生成，不另读事件。跟上之后对应 0027「ReportStore 接口：整 run 一次写」节与 0034 机制三④ K2。
-  - test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots 文档串：两个推进方竞争收尾，用 A 交还的结果生成的报告是 A 的判定。跟上之后对应 0034 机制三④ K1、K2。
-  - 同上文档串末句：B 与 A 的判定明细谁留在存储里不在断言之内（同一 job 只留一份）。跟上之后对应 0034 机制三「判定明细」条与 0030 决定三「点名」条。
-  - 「到期处理」一节的节头注释：到期处理：未启动 job 保持 pending，run 级以带认领计数的条件写收尾为 error 加说明。跟上之后对应 0054 决策二第 3 条与后台推进条。
-  - test_all_done_after_the_deadline_aggregates_without_the_claim_count_condition 文档串：没有执行中也没有未启动的 job 时照常聚合收尾，收尾写不带认领计数条件。跟上之后对应 0054 决策二第 4 条。
-  - test_commit_lost_to_another_advancer_ends_without_a_result 文档串：全部 job 结束后单独的收尾写写不成，重读到终态返回 ENDED、不生成报告；判定真值照落；库中终态是先提交的那一份。跟上之后对应 0034 机制三条④（终态写写不成、重读到别人写下的终态即返回 ENDED）与同条 K2（只有收到 COMMITTED 的宿主生成报告）。
-  - test_later_verdict_write_failure_leaves_the_run_uncommitted 文档串：前一个 job 的判定已存、后一个存失败：这一轮不发收尾的条件写、run 仍未结束；重试一轮把全部判定存完之后才提交。跟上之后对应 0034 机制三条④ K3，以及 0030 决定三「保存明细失败」「后台推进同守」。
-  - 「commit-point 写序：判定真值先落、CAS 后」节头：后台推进的写序是判定真值先落、条件写后。跟上之后对应 0030 决定三「后台推进同守」。
+  - test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots 文档串末句：B 落下的判定明细与 A 的谁留在存储里不在断言之内（同一 job 只留一份）。跟上之后对应 0034 机制三「判定明细」条与 0030 决定三「点名」条。
+  - test_later_verdict_write_failure_leaves_the_run_uncommitted 文档串：前一个 job 的判定已存、后一个存失败：这一轮不写终态、run 仍未结束；重试一轮把全部判定存完之后才写终态。0034 机制三条④ K3 已加回；跟上之后再对应 0030 决定三「保存明细失败」「后台推进同守」（保存失败的退避重试与逐 job 写序实装之后）。
 - `core/tests/test_report_store.py`
   - test_manifest_shape 里 `"result" not in m` 上方的行注释：manifest 靠 run_id 软引用，判定真值在 ResultStore。跟上之后对应 0027「manifest.json 形态」节与 0016「三层切分」节。
-  - test_index_shows_fail_fast_reason_in_neutral_note_not_error_red 文档串：skipped / aborted 的 JobResult error_type 恒为 None，原因只在 message，index 要显示它。跟上之后对应 0031 决定一（skipped 的产生处）与 0027「index.html 形态」里由结束写结束的 job 一条。
 - `core/tests/test_s3_result_store.py`
   - 模块文档串首行：S3ResultStore 与 LocalResultStore 对拍 save/load/load_all round-trip 与按 scope_id 编码的键。跟上之后对应 0030 决定六「ResultStore 后端 = S3」条。
   - test_load_all_paginates_beyond_1000 行注释：ResultStore 是判定真值唯一权威、CI 据 load_all 判退出码。跟上之后对应 0016「三层切分」节（数据面判定明细一行）。
-- `core/tests/test_schedule.py`
-  - test_on_job_complete_fires_for_skipped_job 行注释：skipped 的 job 没有事件，也必须经回调把判定落进 ResultStore。跟上之后对应 0031 决定三「结束写」小节；0030 决定三。
-  - test_device_job_skipped_before_spawn_still_carries_metering_keys 文档串：未启动、记为 SKIPPED 的设备 job 也有 JobResult，成对带计量两键。跟上之后对应 0051 决策 7；0031 决定三「结束写」小节。
 - `core/tests/test_status_group.py`
   - 模块文档串首句：不变量分两半，包括 create_run 传入终态初始状态的情形，以及「只写 job 的写」保持原有对应。跟上之后对应 0030 决定六「runs 表只有一个 GSI」条写入规则。
 - `core/tests/test_stores.py`
-  - test_run_level_message_key_is_always_present_and_round_trips 文档串：run 级说明（到期的 error 加说明）；没有判定的 job 不进 jobs，它们是 run_meta.jobs 与 jobs 的差。跟上之后对应 0031 决定三「结束写」小节；0041 决策三。
-  - 「RunStore 生命周期写」分节行注释：生命周期写是 create_run → update_job_state×N → try_finalize。跟上之后对应 0030 决定四。
   - test_run_meta_steps_dir_round_trip 文档串：steps_dir 随 definition 走，理由是三个 local 宿主（同步 run / per-run 进程 / status --wait 接力者）CWD 各不相同。跟上之后对应 0037 决策 4。
-- `core/tests/test_terminal.py`
-  - test_timeout_message_follows_the_cutoff_that_applied 文档串：预算截断与期限截断只是说明不同，判定与归因都是 error 与 timeout。跟上之后对应 0054 决策二第 2 条；0034 机制二「终结函数与真值表」；0031 决定一。
-- `core/tests/test_termination_parity.py`
-  - test_expiry_agrees_between_the_foreground_and_the_advancer 文档串：到期收尾时前台与后台得到同一个 run 级状态与说明，b 不在判定里、没有执行，后台运行态里 b 保持 pending。跟上之后对应 ADR 0054 决策二第 3 条、实测项 4。
 - `deploy_aws/DEVELOPMENT.md`
   - 「事件驱动推进」节「Event source mappings」条（events 表 Stream 的 REMOVE 过滤）：TTL 过期删除的 REMOVE 记录不触发推进，推进方读到终态即返回，各道防护挡哪些触发写在那一条。跟上之后对应 REMOVE 过滤对应 0033「资源清单」第 13 条与「events 表开 TTL」条护栏②；读到终态之后的处理对应 0034 端到端 cloud「已收尾的 run 不再推演」条。
 - `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
@@ -259,8 +161,6 @@
   - _build「已收尾的 run 不再推演」注释：到点 payload 遇到已收尾的 run 整体跳过，与 StopTask 的关系有两种例外。跟上之后对应 0034 端到端 cloud 第 4 步与 0054 决策九第 2 条。
   - _build 中 _load_definition 调用行尾注释：结构版本闸与定义违约 → 标 error、不推进。跟上之后对应 0037 决策 7 与 0031 决定三「结束写」小节。
   - _run_ids_from_runs_stream 文档串 ②：直接 invoke 的 kickoff 是 cloud status --wait 的接力兜底。跟上之后对应 0034「重议闸门」首条（kicker 认的两种 event 源，Scheduler 定时触发走直接调用的载荷）。
-  - _tick_runs 文档串：这一方写成收尾时用 tick 交还的结果写 RunReport；run 已结束时不写报告、不做超时扫。跟上之后对应 0034 机制三「run 级状态只进不退」条④。
-  - _tick_runs 循环内注释：判定明细由 tick 在 finalize CAS 之前统一落。跟上之后对应 0030 决定三「后台推进同守」条。
   - kicker_handler 文档串：kicker 只被 runs Stream 的 INSERT 触发，reconciler 之后写 runs 表不触发它。跟上之后对应 0034 被拒方案「runs 表 Stream 直接触发 reconciler」与 0054 决策九。
 - `deploy_aws/gherkai_deploy_aws/stack.py`
   - 模块文档串资源清单的「Lambda/事件驱动链」一条：三个 Function、EventBridge 规则与两表 Stream 的映射，kicker 那条 filter 只收 INSERT 且带 detached 标记。跟上之后对应 0033 资源清单 12–15、0034 端到端 cloud 1b、0054 决策九。
@@ -274,22 +174,16 @@
   - events 表 Stream 事件源上方注释：过期删除不触发推进，推进方本次读到终态即返回。跟上之后对应 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条（遇到终态只清扫仍在执行的 task）；0054 决策九。
 - `deploy_aws/tests/test_lambda_handlers.py`
   - test_run_ids_skips_ttl_remove_records 文档串：events 表 TTL 删除的 REMOVE 记录不算 run、不为它推进一次。跟上之后对应 0033「资源清单」第 13 条与「events 表开 TTL」条护栏②。
-  - test_tick_runs_writes_the_report_from_the_committed_tick_result 文档串：写成收尾的一方把 tick 交还的那一份结果交给报告收尾，不另读事件重算。跟上之后对应 0034 机制三「run 级状态只进不退」条④ K2，与 0027「ReportStore 接口：整 run 一次写」节。
+  - test_tick_runs_writes_the_report_from_the_committed_tick_result 文档串：使 run 成为终态的一方把 tick 交还的判定明细交给报告入口，状态从记录读。0034 机制三「run 级状态只进不退」条④ K2 已加回；跟上之后再对应 0027「ReportStore 接口：整 run 一次写」节（报告按点名读明细之后）。
   - 「已收尾的 run 再被触发时 handler 整体 no-op」节标题注释：已收尾的 run 再被触发时两个 handler 整体 no-op，作为判定真值不被销毁的第二道闸。跟上之后对应 0034 端到端 cloud「已收尾的 run 不再推演」条与 0054 决策九第 2 条。
   - test_timeout_payload_on_a_finished_run_is_a_noop 文档串：超时触发打到已收尾的 run 时跳过，跳过与 StopTask 的关系及两种漏发 StopTask 的例外。跟上之后对应 0034 端到端 cloud「已收尾的 run 不再推演」条与 0054 决策九第 2 条。
 - `deploy_aws/tests/test_stack.py`
   - test_kicker_mapping_insert_filter 行注释：kicker 的 event source mapping 只有一条 INSERT 过滤。跟上之后对应 0033 资源清单第 13 条，配合 0054 决策九第 1、2 条。
 - `runtime/gherkai_runtime/compose.py`
-  - run_duration_ms 文档串：detached run 的 run 级墙钟取提交落库到 finalize commit。跟上之后对应 0024「输出」节「三级执行时长」detached 条。
   - build_engines 文档串 steps_dir 段：三个宿主（含 status --wait 接力者）CWD 各不相同，重解析必分叉。跟上之后对应 0037 决策 4（与 0034 local 一节）。
   - build_cloud_stores 内 detached 参数的行注释：detached 标记触发 kicker 冷启动，同步 run 不带标记即不触发，否则双开推进器。跟上之后对应 0034「端到端流程」cloud 1b「触发过滤不看后台执行标记」。
   - _make_lambda_client 文档串：cloud status --wait 接力 invoke kicker Lambda 做 kickoff。跟上之后对应 目标设计里没有这一用途（0034「推进器与触发源」第 2 条写的是相反做法）；这个 client 若另有用途，按那时的用途指。
 - `runtime/gherkai_runtime/detached.py`
-  - SubprocessLauncher 文档串「同时 enforce 截止时刻」段：本机按截止时刻停 worker，project 一律收敛为 ERROR+timeout，只在说明里区分是预算还是期限。跟上之后对应 0034「job timeout」节执行方式表的 local 后台推进进程一行。
-  - SubprocessLauncher 文档串「同时 enforce 截止时刻」段：同上：超时一律记 ERROR+timeout，期限截断只体现在说明里。跟上之后对应 0054 决策二后台推进条「截止时刻与说明」。
-  - run_reconcile_loop 文档串 TickOutcome.ENDED 条：带着 pending job 收尾的 run 在这里结束，循环不依赖每个 job 都到终态。跟上之后对应 0034 机制三「run 级状态只进不退」条④。
-  - run_reconcile_loop 文档串 result_store/report_store 段：判定真值由 tick 在收尾条件写之前一起落。跟上之后对应 0030 决定三「后台推进同守」条。
-  - run_reconcile_loop 里 COMMITTED 分支的行注释：这一步在 finalize 的 commit point 之后，commit 之后的失败没人重试。跟上之后对应 0030 决定三「ReportStore.write 失败隔离」框。
   - drive_local_reconcile 文档串：这里是本机推进的唯一入口，per-run 进程和 status --wait 接力都调它。跟上之后对应 0034 端到端 cloud 1b「三个宿主一份」与 local 节。
   - build_local_reconcile 中 steps_dir 的行注释：本函数有两个宿主：per-run 进程和 status --wait 接力者，两者的 CWD 都和提交进程不同。跟上之后对应 0034「local（对称，无 ECS/Lambda）」节，配合同处保留的 0037 决策 4。
   - _recover_timed_out_claims 文档串最后一段：接力方判超时、补写未知退出与这条被拒方案不冲突，因为那条拒的是有活观察链时绕过它。跟上之后对应 目标设计里没有本函数（0034 被拒方案「本机接力，及其改法」）；这件事归 run 处置：0054 决策六（处置条件）、决策七（处置做什么），入口见 0054 决策八。
@@ -309,7 +203,6 @@
   - test_build_local_reconcile_reads_steps_dir_from_definition 文档串：per-run 进程与 status --wait 接力者的 CWD 与提交进程各不相同。跟上之后对应 0034「端到端流程」local 节（0037 决策 4 引它说明后台推进进程与提交 CLI 各是组合根）。
   - test_build_local_reconcile_host_env_steps_dir_does_not_leak 文档串：接力者是从 definition 读回 steps_dir 的宿主之一，它的 shell env 不得越过 definition。跟上之后对应 0037 决策 4（宿主建注入 env 时先抹掉组合根拥有的键）。
   - 「启动器记下退出时刻、接力的判定条件与条件补写」分节注释：本组覆盖接力的判定条件与条件补写。跟上之后对应 0054 决策二后台推进条「截止时刻与说明」。
-  - test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground 文档串首句（「后台推进的到期处理」分节下）：本机推进进程到期时，被期限截断的 a 记为超时、说明是期限那一句；没有启动的 b 保持 pending、没有判定明细；run 级记 error 加到期说明，报告生成。跟上之后对应 0054「实测项」第 2 条（本机后台 run 到期）与第 4 条（三种组合一致）：断言改成 a 为 aborted、b 由结束写记 skipped、run 状态按 0031 决定三取之后，可以把「（实测项 2、4 的本机一对）」加回去。
 
 ## 语义一致随实装核对：范围与清单
 

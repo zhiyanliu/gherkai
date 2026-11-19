@@ -1,4 +1,5 @@
-"""gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next。
+"""gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next，
+收尾用的判定明细（project_full），以及从记录组装 run 的结果（assemble_run_result、run_duration_ms）。
 
 纯逻辑、无 I/O、无 mock 外真实行为 → 绿即够（CLAUDE.md「绿≠对·别过度」：mock 内逻辑结论绿即足）。
 reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是推进编排的真实运行边界。
@@ -15,7 +16,9 @@ from gherkai_core.model import (
     DeviceFarmRequest,
     Job,
     JobResult,
+    JobState,
     RunMeta,
+    RunState,
     Scenario,
     ScenarioDone,
     ScopeDone,
@@ -25,10 +28,10 @@ from gherkai_core.model import (
     StepDone,
     Target,
 )
-from gherkai_core.project import (DEADLINE_TIMEOUT_MESSAGE, PLATFORM_FAILED_EXIT, Action, EventRecord, RunVerdict, TaskExited,
-                                  apply_device_metering, plan_next, project, project_full, recover_from_events, run_totals,
-                                  run_verdict)
-from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE
+from gherkai_core.project import (DEADLINE_TIMEOUT_MESSAGE, PLATFORM_FAILED_EXIT, Action, EventRecord, TaskExited,
+                                  apply_device_metering, assemble_run_result, plan_next, project, project_full,
+                                  recover_from_events, run_duration_ms, run_totals)
+from gherkai_core.run_status import RUN_ENDINGS, run_status_of, state_without_record
 from tests.fake_engine import FAR_DEADLINE
 
 
@@ -69,11 +72,11 @@ def _timeout_exit(scope_id: str, code: int | None) -> EventRecord:
 _CLAIMED = datetime(2030, 1, 1, tzinfo=timezone.utc)
 
 
-def _full(meta: RunMeta, records, *, past_stop_start: bool = False, claimed_at=None):
+def _full(meta: RunMeta, records, *, claimed_at=None) -> list[JobResult]:
     """project_full，给每个有记录的 job 一个认领时刻（调用方 tick 的快照检查保证它们都在）。"""
     if claimed_at is None:
         claimed_at = {r.scope_id: _CLAIMED for r in records}
-    return project_full(meta, records, claimed_at=claimed_at, past_stop_start=past_stop_start)
+    return project_full(meta, records, claimed_at=claimed_at)
 
 
 # ---------- 「两件都要」谓词（机制二）----------
@@ -82,7 +85,7 @@ def test_no_records_job_is_pending():
     """definition 里的 job 没有任何 record → PENDING（还没起）。"""
     state = project(_meta("a"), [])
     assert state.jobs["a"].status == Status.PENDING
-    assert state.status == Status.PENDING  # 判定集为空时不判 passed：全部 pending 的 run 级值是 pending
+    assert state.status == Status.PENDING  # 取法：全部 job 为 pending 时 run 为 pending（ADR 0031 决定三「取法」）
 
 
 def test_scope_started_but_no_exit_is_running():
@@ -151,7 +154,7 @@ def test_exit_code_none_is_error_not_running():
     state = project(_meta("a"), recs)
     assert state.jobs["a"].status == Status.ERROR
     result = _full(_meta("a"), recs)
-    assert "退出码未知" in (result.jobs[0].message or "")
+    assert "退出码未知" in (result[0].message or "")
 
 
 def test_platform_sentinel_exit_surfaces_reason_in_message():
@@ -160,12 +163,12 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
                         reason="TaskFailedToStart: CannotPullContainerError: not found")
     recs = [EventRecord(scope_id="a", kind="exit", exited=exited)]  # 零事件：容器根本没起
     result = _full(_meta("a"), recs)
-    jr = result.jobs[0]
+    jr = result[0]
     assert jr.status == Status.ERROR
     assert "CannotPullContainerError" in jr.message and "未能启动" in jr.message
     # 哨兵不带原因（本机 worker 真以 255 退出）→ 指向 worker 日志或部署侧日志，不留空 message
     result2 = _full(_meta("a"), [_exit("a", PLATFORM_FAILED_EXIT)])
-    assert "部署侧日志" in result2.jobs[0].message
+    assert "部署侧日志" in result2[0].message
 
 
 def test_platform_exit_reason_joins_stop_code_and_reason_with_fallback():
@@ -196,7 +199,7 @@ def test_timed_out_attribution_error_type_timeout():
     也以超时为根因、覆盖 reduce 期归因。"""
     recs = _passed_events("a") + [_timeout_exit("a", 137)]
     result = _full(_meta("a"), recs)
-    jr = result.jobs[0]
+    jr = result[0]
     assert jr.status == Status.ERROR
     assert jr.error_type == "timeout"
     assert "超时" in (jr.message or "")
@@ -206,7 +209,7 @@ def test_error_without_reduce_message_gets_default_attribution():
     """worker 起来即崩（非 0 退出、零事件）→ message 不再全空——补默认归因指向 worker 日志
     （detached 实际运行教训：error 无任何线索、只能手工复刻排障）。"""
     recs = [_exit("a", 1)]  # 零事件 + exit 1
-    jr = _full(_meta("a"), recs).jobs[0]
+    jr = _full(_meta("a"), recs)[0]
     assert jr.status == Status.ERROR
     assert jr.message is not None and "退出码 1" in jr.message
 
@@ -214,7 +217,7 @@ def test_error_without_reduce_message_gets_default_attribution():
 def test_error_clean_exit_incomplete_content_gets_attribution():
     """exit 0 但无 scope_done（矛盾形态）→ 同样有归因文本（不留空白 error）。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _exit("a", 0)]
-    jr = _full(_meta("a"), recs).jobs[0]
+    jr = _full(_meta("a"), recs)[0]
     assert jr.status == Status.ERROR
     assert jr.message is not None and "没有报完" in jr.message
 
@@ -247,8 +250,7 @@ def test_out_of_order_records_reduced_by_seq():
 # ---------- 投影写的 run 级 status（机制三，两 RunStore adapter 共用同一规则）----------
 
 def test_projected_run_status_pending_only_while_all_jobs_pending():
-    """全 job pending → pending（两个 adapter 据此不写 run 级）；任一 job 推进 → running；恒非终态（终态归 finalize）。"""
-    from gherkai_core.model import JobState
+    """全 job pending → pending（两个 adapter 据此不写 run 级）；任一 job 推进 → running；恒非终态。"""
     from gherkai_core.project import projected_run_status
 
     def _jobs(*statuses):
@@ -257,24 +259,26 @@ def test_projected_run_status_pending_only_while_all_jobs_pending():
     assert projected_run_status(_jobs(Status.PENDING, Status.PENDING)) == Status.PENDING
     assert projected_run_status(_jobs(Status.PENDING, Status.RUNNING)) == Status.RUNNING
     assert projected_run_status(_jobs(Status.PASSED, Status.PENDING)) == Status.RUNNING
-    # 全终态也只到 running：run 级终态是 try_finalize 这个 commit point 专属
+    # 全终态也只到 running：run 级终态只随记下最后一个 job 终态的写或结束写写下（ADR 0030 决定四）
     assert projected_run_status(_jobs(Status.PASSED, Status.FAILED)) == Status.RUNNING
 
 
-def test_projected_run_status_ignores_aggregate_value_from_project():
-    """判据只看 job 态：运行中的 run 只要有一个 job 出了判定，project() 的 run 级 status 就是终态（a 已 passed、b 仍 pending
-    时为 passed），投影写仍得 running——守「投影写不能原样落传入的 run 级值」。"""
+def test_projected_run_status_ignores_the_run_status_from_project():
+    """判据只看 job 态：全部 job 都结束时 project() 的 run 级 status 按取法已是终态，投影写仍得 running——守「投影写不能原样落传入的
+    run 级值」。还有 job 未结束时 project() 的值本来就是前置态。"""
     from gherkai_core.project import projected_run_status
 
-    state = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)])
-    assert state.jobs["b"].status == Status.PENDING
-    assert state.status == Status.PASSED  # 前提：运行中的 run 的聚合值已是终态
-    assert projected_run_status(state.jobs) == Status.RUNNING
+    done = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)] + _passed_events("b") + [_exit("b", 0)])
+    assert done.status == Status.PASSED  # 前提：全部 job 都结束，取法给出终态
+    assert projected_run_status(done.jobs) == Status.RUNNING
+    half = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)])
+    assert (half.jobs["b"].status, half.status) == (Status.PENDING, Status.RUNNING)  # a 已结束、b 仍 pending：取法给出 running
+    assert projected_run_status(half.jobs) == Status.RUNNING
 
 
-def test_project_run_status_before_any_verdict_is_pre_terminal():
-    """还没有 job 出判定时，project() 的 run 级 status 是前置态：
-    全部 pending 得 pending；pending 与 running 并存得 running。与投影写落库的取值一致，但投影写不依赖它。"""
+def test_project_run_status_follows_the_rule():
+    """project() 的 run 级 status 按取法给出（ADR 0031 决定三「取法」）：有 job 未结束时是前置态，全部 pending 得 pending，
+    否则得 running；全部结束时按 error、failed、aborted 或 skipped、passed 的次序取。与投影写落库的取值一致，但投影写不依赖它。"""
     from gherkai_core.project import projected_run_status
 
     all_pending = project(_meta("a", "b"), [])
@@ -285,6 +289,9 @@ def test_project_run_status_before_any_verdict_is_pre_terminal():
     assert (mixed.jobs["a"].status, mixed.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
     assert mixed.status == Status.RUNNING
     assert projected_run_status(mixed.jobs) == Status.RUNNING
+
+    failed = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0), _exit("b", 3)])
+    assert (failed.jobs["b"].status, failed.status) == (Status.ERROR, Status.ERROR)
 
 
 def _scope_events(scope_id: str, outcome: str) -> list:
@@ -301,7 +308,8 @@ def _scope_events(scope_id: str, outcome: str) -> list:
     (("failed", "error"), Status.ERROR),
 ])
 def test_run_status_agrees_between_schedule_and_project_full(outcomes, expected):
-    """两条路径共用同一个 _aggregate：同一组 job 事件分别经同步 schedule 与无状态 project_full，run 级 status 相同。"""
+    """同一组 job 事件分别经同步 schedule 与无状态 project_full，各 job 的判定相同；run 级 status 两边都按同一个取法从 job 的终态
+    算出：前台没有记录时经 state_without_record，后台记下终态的写在 adapter 里按 run_status_of。"""
     from gherkai_core.schedule import ScheduleOpts, schedule
     from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
 
@@ -311,13 +319,15 @@ def test_run_status_agrees_between_schedule_and_project_full(outcomes, expected)
     sync = schedule(meta, FakeResolver(FakeEngine(streams)), CollectSink(), opts=ScheduleOpts(max_concurrency=1))
     recs = [_ev(s, i + 1, ev) for s in scopes for i, ev in enumerate(streams[s])] + [_exit(s, 0) for s in scopes]
     stateless = _full(meta, recs)
-    assert [jr.status for jr in sync.jobs] == [jr.status for jr in stateless.jobs] == [Status(o) for o in outcomes]
-    assert sync.status == stateless.status == expected
+    assert [jr.status for jr in sync.results] == [jr.status for jr in stateless] == [Status(o) for o in outcomes]
+    assert sync.stopped_by is None
+    foreground = state_without_record(meta, sync.results, sync.stopped_by, ended_at="t1").status
+    assert foreground == run_status_of(jr.status for jr in stateless) == expected
 
 
 def test_run_totals_agree_between_schedule_and_project_full():
-    """两条路径共用同一个 run_totals：同一组带成本的 job 事件分别经同步 schedule 与无状态 project_full，run 级四个合计键相同。
-    token 跨 job 求和；只有一个 job 报了工作时长且报的是 0，run 级照记 0、不当作没报；桌面 run 没有设备计量两键。"""
+    """两条路径的明细交给同一处组装（assemble_run_result），run 级四个合计键相同。token 跨 job 求和；只有一个 job 报了工作时长且报的
+    是 0，run 级照记 0、不当作没报；桌面 run 没有设备计量两键。"""
     from gherkai_core.schedule import ScheduleOpts, schedule
     from tests.fake_engine import CollectSink, FakeEngine, FakeResolver
 
@@ -331,9 +341,10 @@ def test_run_totals_agree_between_schedule_and_project_full():
     recs = [_ev(s, i + 1, ev) for s in costs for i, ev in enumerate(streams[s])] + [_exit(s, 0) for s in costs]
     stateless = _full(meta, recs)
 
-    def totals(r):
+    def totals(details):
+        r = assemble_run_result(meta, state_without_record(meta, details, None, ended_at="t1"), details, duration_ms=None)
         return (r.total_tokens, r.total_time_worked_s, r.device_observed_s, r.device_observed_missing)
-    assert totals(sync) == totals(stateless) == (1500, 0.0, None, None)
+    assert totals(sync.results) == totals(stateless) == (1500, 0.0, None, None)
 
 
 def _device_job(scope_id: str) -> Job:
@@ -389,125 +400,39 @@ def test_run_totals_with_a_complete_verdict_list_matches_the_metered_job_results
     assert run_totals(results[1:], jobs=(web,))["device_observed_s"] is None
 
 
-# ---------- run 级裁决 ----------
+# ---------- 被期限截断的 job（ADR 0054 决策二第 2 条、ADR 0031 决定一）----------
 
-def _decided(job: Job, status: Status) -> JobResult:
-    return JobResult(job=job, status=status)
-
-
-def _verdict(results, jobs, *, past_stop_start=False, interrupted=False, ended_elsewhere=False):
-    return run_verdict(results, jobs, past_stop_start=past_stop_start, interrupted=interrupted, ended_elsewhere=ended_elsewhere)
-
-
-@pytest.mark.parametrize("statuses, expected", [
-    ((Status.PASSED, Status.PASSED), Status.PASSED),
-    ((Status.PASSED, Status.FAILED), Status.FAILED),
-    ((Status.FAILED, Status.ERROR), Status.ERROR),
-    ((Status.ERROR, Status.SKIPPED), Status.ERROR),  # fail-fast 的形态：skipped 不进聚合，run 级由 error 定
-    ((Status.ERROR, Status.ABORTED, Status.SKIPPED), Status.ERROR),
-    ((), Status.PASSED),  # 零个 job 的 run（不加筛选时可达）：沿用聚合对空输入的值
-])
-def test_run_verdict_without_exceptions_is_the_aggregate(statuses, expected):
-    """全部 job 都有判定、没有中断也没有发现被别处结束时，run 级就是聚合的值，没有说明；已过停止启动的时刻也一样（决策二第 4 条：
-    没有未启动的 job 就照常聚合，不管当前时刻是否已过期限）。"""
-    jobs = tuple(_job(f"j{i}") for i in range(len(statuses)))
-    results = [_decided(j, s) for j, s in zip(jobs, statuses)]
-    assert _verdict(results, jobs) == RunVerdict(expected, None)
-    assert _verdict(results, jobs, past_stop_start=True) == RunVerdict(expected, None)
-
-
-def test_run_verdict_past_stop_start_with_unstarted_jobs_is_an_error_with_the_run_message():
-    """已过停止启动的时刻而有 job 没有判定：run 级 error，说明是「已超过允许运行的时间」。已启动的 job 全部通过时聚合会给 passed，
-    这一条不能靠聚合；它优先于使用方中断的 aborted，发现被别处结束时同样如此。"""
-    a, b, c = _job("a"), _job("b"), _job("c")
-    started = [_decided(a, Status.PASSED), _decided(b, Status.PASSED)]
-    expected = RunVerdict(Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert RUN_DEADLINE_PASSED_MESSAGE == "已超过允许运行的时间"
-    assert _verdict(started, (a, b, c), past_stop_start=True) == expected
-    assert _verdict(started, (a, b, c), past_stop_start=True, interrupted=True) == expected
-    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.SKIPPED)], (a, b, c),
-                    past_stop_start=True, interrupted=True) == expected
-    assert _verdict(started, (a, b, c), past_stop_start=True, ended_elsewhere=True) == expected
-    assert _verdict([], (a, b, c), past_stop_start=True) == expected  # 一个 job 都没有启动
-
-
-def test_run_verdict_interrupt_exception_is_kept():
-    """使用方中断的例外收进裁决函数，规则不变：处理过中断、且有 job 被中止或没有启动（skipped），run 级 aborted；判定已完整的
-    （中断到达时没有 job 被停下）照常聚合；没有中断时 skipped 与 aborted 不改变聚合。"""
-    a, b = _job("a"), _job("b")
-    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.PASSED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
-    assert _verdict([_decided(a, Status.SKIPPED), _decided(b, Status.SKIPPED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
-    assert _verdict([_decided(a, Status.FAILED), _decided(b, Status.SKIPPED)], (a, b), interrupted=True) == RunVerdict(Status.ABORTED)
-    assert _verdict([_decided(a, Status.PASSED), _decided(b, Status.FAILED)], (a, b), interrupted=True) == RunVerdict(Status.FAILED)
-    assert _verdict([_decided(a, Status.ABORTED), _decided(b, Status.PASSED)], (a, b)) == RunVerdict(Status.PASSED)
-
-
-@pytest.mark.parametrize("statuses", [
-    (Status.PASSED, Status.PASSED),
-    (Status.PASSED, Status.ABORTED),
-    (Status.FAILED, Status.ERROR),
-])
-def test_run_verdict_after_the_run_was_ended_elsewhere_is_never_passed(statuses):
-    """发现 run 已被别处记为已结束之后，这次执行的 run 级结果本不成为记录；万一写成了也不能是 passed：一律记 aborted、没有说明。"""
-    a, b = _job("a"), _job("b")
-    results = [_decided(a, statuses[0]), _decided(b, statuses[1])]
-    assert _verdict(results, (a, b), ended_elsewhere=True) == RunVerdict(Status.ABORTED)
-    assert _verdict(results[:1], (a, b), ended_elsewhere=True) == RunVerdict(Status.ABORTED)  # 另一个 job 没有启动
-
-
-def test_run_verdict_with_an_unstarted_job_is_never_passed_even_without_a_stated_cause():
-    """有 job 没有判定而调用方没有给出原因（不该发生）时同样不判 passed：这一条在函数内成立，不依赖调用方传对标记。"""
-    a, b = _job("a"), _job("b")
-    assert _verdict([_decided(a, Status.PASSED)], (a, b)) == RunVerdict(Status.ABORTED)
-    assert _verdict([], (a, b)) == RunVerdict(Status.ABORTED)
-
-
-def test_stateless_path_cannot_yield_aborted_job():
-    """无状态路径不作中止决定：推进器停掉的 job 只带 timed_out，判 error 与 timeout，不判 aborted。故使用方中断的 run 级 aborted
-    例外只在同步路径上有：project_full 的 run 级经 run_verdict 给出、不传中断，全部 job 都有判定时就是聚合的值。"""
+def test_stateless_path_yields_aborted_only_for_a_job_cut_by_the_run_deadline():
+    """无状态路径不作中止决定：推进器停掉的 job 只带超时标志。被自己的预算截断时判 error 加 timeout；被 run 的期限截断（预算之内
+    期限先到）时判 aborted、没有归因，说明是期限那一句——run 的时间用完不是这个 job 自己出错。内容完整的 job 不受影响。"""
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", 143)] \
         + _passed_events("b") + [_exit("b", 0)]
-    full = _full(_meta("a", "b"), recs)
-    a = next(jr for jr in full.jobs if jr.scope_id == "a")
-    assert (a.status, a.error_type) == (Status.ERROR, "timeout")
-    assert all(jr.status not in (Status.ABORTED, Status.SKIPPED) for jr in full.jobs)
-    assert full.status == Status.ERROR
-
-
-def test_project_full_run_level_comes_from_the_shared_verdict():
-    """project_full 的 run 级状态与说明由前台共用的 run_verdict 给出：没有记录的 job 不臆造明细、不在判定清单里；
-    已过停止启动的时刻而有 job 没有判定是 error 加「已超过允许运行的时间」（已启动的 job 全部通过也一样，聚合在这里会给 passed）；
-    全部 job 都有判定时照常聚合，不管是否已过期限；有 job 没有判定而不是因为到期（不该发生）时记 aborted，不判 passed。"""
-    a_done = _passed_events("a") + [_exit("a", 0)]
-    expired = _full(_meta("a", "b"), a_done, past_stop_start=True)
-    assert [jr.scope_id for jr in expired.jobs] == ["a"] and expired.jobs[0].status == Status.PASSED
-    assert (expired.status, expired.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    assert [j.scope_id for j in expired.jobs_without_verdict] == ["b"]
-    nothing = _full(_meta("a", "b"), [], past_stop_start=True)
-    assert nothing.jobs == [] and (nothing.status, nothing.message) == (Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    complete = _full(_meta("a"), a_done, past_stop_start=True)
-    assert (complete.status, complete.message) == (Status.PASSED, None)
-    undecided = _full(_meta("a", "b"), a_done)
-    assert (undecided.status, undecided.message) == (Status.ABORTED, None)
-    assert _full(_meta(), []).status == Status.PASSED  # 零个 job 的 run：沿用聚合对空输入的值
+    by_budget = {jr.scope_id: jr for jr in _full(_meta("a", "b"), recs)}
+    assert (by_budget["a"].status, by_budget["a"].error_type) == (Status.ERROR, "timeout")
+    near = replace(_meta("a", "b"), deadline_at=(_CLAIMED + timedelta(seconds=100)).isoformat())  # 预算 300 秒，期限先到
+    by_deadline = {jr.scope_id: jr for jr in _full(near, recs)}
+    a = by_deadline["a"]
+    assert (a.status, a.error_type, a.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
+    assert by_deadline["b"].status == Status.PASSED
 
 
 def test_project_full_timeout_message_is_recomputed_from_the_claim_time():
-    """后台被截断的 job 的说明由认领时刻、预算与期限重算是哪一个截止时刻起作用，与前台同一个算法：认领时刻
-    加预算早于期限是预算那一句，晚于期限是期限那一句，两者相等算预算到点。判定与归因不受影响，都是 error 与 timeout。"""
+    """后台被截断的 job 由认领时刻、预算与期限重算是哪一个截止时刻起作用，与前台同一个算法（ADR 0054 决策二第 2 条；判定见
+    ADR 0034 机制二「终结函数与真值表」）：认领时刻加预算早于期限是预算到点，记 error 加 timeout；晚于期限是期限到点，记 aborted、
+    没有归因，说明是期限那一句；两者相等算预算到点。"""
     deadline = _CLAIMED + timedelta(seconds=300)  # _job 的预算是 300 秒
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s")), _timeout_exit("a", None)]
 
     def jr(claimed: datetime, deadline_at: datetime):
         meta = replace(_meta("a"), deadline_at=deadline_at.isoformat())
-        return _full(meta, recs, claimed_at={"a": claimed}).jobs[0]
+        return _full(meta, recs, claimed_at={"a": claimed})[0]
 
     by_budget = jr(_CLAIMED, deadline + timedelta(seconds=1))
     by_deadline = jr(_CLAIMED + timedelta(seconds=1), deadline)
     tie = jr(_CLAIMED, deadline)
     assert (by_budget.status, by_budget.error_type, by_budget.message) == (Status.ERROR, "timeout", "job 超时（预算 300s，已中止）")
-    assert (by_deadline.status, by_deadline.error_type, by_deadline.message) == (Status.ERROR, "timeout", DEADLINE_TIMEOUT_MESSAGE)
-    assert tie.message == by_budget.message
+    assert (by_deadline.status, by_deadline.error_type, by_deadline.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
+    assert (tie.status, tie.error_type, tie.message) == (by_budget.status, by_budget.error_type, by_budget.message)
 
 
 def _exited_at(scope_id: str, code: int | None, at: datetime, *, reason: str | None = None) -> EventRecord:
@@ -523,7 +448,7 @@ def test_project_full_judges_an_exit_after_the_cutoff_as_timeout():
     started = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
 
     def jr(recs):
-        return _full(_meta("a"), recs).jobs[0]
+        return _full(_meta("a"), recs)[0]
 
     late = jr(started + [_exited_at("a", 3, cutoff + timedelta(microseconds=1))])
     on_time = jr(started + [_exited_at("a", 3, cutoff)])
@@ -572,16 +497,19 @@ def test_project_full_requires_the_claim_time_of_every_recorded_job():
     recs = _passed_events("a") + [_exit("a", 0)]
     with pytest.raises(ValueError, match="认领时刻"):
         _full(_meta("a", "b"), recs, claimed_at={"b": _CLAIMED})
-    assert [jr.scope_id for jr in _full(_meta("a", "b"), recs, claimed_at={"a": _CLAIMED}).jobs] == ["a"]
+    assert [jr.scope_id for jr in _full(_meta("a", "b"), recs, claimed_at={"a": _CLAIMED})] == ["a"]
 
 
-def test_project_full_device_keys_follow_the_definition():
-    """project_full 的设备计量两键同样按运行定义判出现与否：设备 job 没有记录（未纳入判定）时两键为 0，不省键。"""
+def test_assembled_device_keys_follow_the_definition_when_the_device_job_has_no_detail():
+    """后台到期收尾：设备 job 没有记录、project_full 不给它明细，由结束写记 skipped；组装出的 run 结果的设备计量两键按运行定义判
+    出现与否，两键为 0、不省键。"""
     meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(_device_job("d"), _job("w")),
                    deadline_at=FAR_DEADLINE)
     full = _full(meta, _passed_events("w") + [_exit("w", 0)])
-    assert [jr.scope_id for jr in full.jobs] == ["w"]
-    assert (full.device_observed_s, full.device_observed_missing) == (0.0, 0)
+    assert [jr.scope_id for jr in full] == ["w"]
+    result = assemble_run_result(meta, state_without_record(meta, full, "deadline", ended_at="t1"), full, duration_ms=None)
+    assert result.jobs[0].status == Status.SKIPPED and result.jobs[0].detail is None
+    assert (result.device_observed_s, result.device_observed_missing) == (0.0, 0)
 
 
 # ---------- plan_next（机制四）----------
@@ -716,10 +644,56 @@ def test_project_full_refuses_non_terminal_snapshot():
         _full(_meta("a"), recs)
 
 
-def test_project_full_leaves_the_run_duration_to_the_host():
-    """run 级墙钟是 RunState started_at→ended_at，宿主生成报告时补（ADR 0024「三级执行时长」detached 条），project_full 不给。"""
-    recs = _passed_events("a") + [_exit("a", 0)]
-    assert _full(_meta("a"), recs).duration_ms is None
+def test_run_duration_ms_from_run_state_timestamps():
+    """后台的 run 级墙钟由运行态的起止算出（ADR 0024「三级执行时长」）：两端都在时为差值；还没结束、没有运行态、时刻读不出或不带
+    时区时为 None（报告显示「?」，不让生成报告因它失败）。"""
+    def st(started_at, ended_at=None):
+        return RunState(run_id="r", status=Status.PASSED, jobs={}, high_water_mark=0, started_at=started_at, ended_at=ended_at)
+
+    assert run_duration_ms(st("2026-09-09T09:40:38.625792+00:00", "2026-09-09T09:42:53.215060+00:00")) == pytest.approx(134589.268)
+    assert run_duration_ms(st("2026-09-09T09:40:38+00:00")) is None  # 还没结束
+    assert run_duration_ms(None) is None
+    assert run_duration_ms(st("t0", "t9")) is None  # 读不出
+    assert run_duration_ms(st("2026-09-09T09:40:38", "2026-09-09T09:42:53")) is None  # 不带时区
+
+
+# ---------- 从记录组装 run 的结果（唯一一处）----------
+
+def _detail(job: Job, status: Status, **kw) -> JobResult:
+    return JobResult(job=job, status=status, **kw)
+
+
+def test_assemble_run_result_lists_every_job_with_its_record_state_and_optional_detail():
+    """按运行定义逐个列出 job：状态与 job 级说明取运行态（明细里的状态不作数），由执行结果结束的 job 附上它的明细，由结束写结束的
+    job 没有明细；run 级状态与说明取运行态；原生量只由明细合计；墙钟由调用方给出。"""
+    meta = _meta("a", "b", "c")
+    a, b, c = meta.jobs
+    details = [_detail(b, Status.PASSED, total_tokens=7), _detail(a, Status.PASSED, total_tokens=5)]  # 次序与运行定义不同
+    state = RunState(run_id="run-1", status=Status.ERROR, message="有 job 出错，余下的 job 不再启动（fail-fast）", jobs={
+        "a": JobState("a", Status.PASSED, session_id="s-a"),
+        "b": JobState("b", Status.ERROR),  # 运行态与明细不一致时以运行态为准
+        "c": JobState("c", Status.SKIPPED, message="fail-fast：其他 job 出错，本 job 没有启动"),
+    })
+    result = assemble_run_result(meta, state, details, duration_ms=12.5)
+    assert [o.scope_id for o in result.jobs] == ["a", "b", "c"]
+    assert [o.status for o in result.jobs] == [Status.PASSED, Status.ERROR, Status.SKIPPED]
+    assert [o.detail for o in result.jobs] == [details[1], details[0], None]
+    assert result.jobs[2].state.message == "fail-fast：其他 job 出错，本 job 没有启动"
+    assert result.details == [details[1], details[0]]  # 按运行定义的次序
+    assert (result.status, result.message, result.state) == (Status.ERROR, state.message, state)
+    assert (result.duration_ms, result.total_tokens, result.total_time_worked_s) == (12.5, 12, None)
+    assert (result.device_observed_s, result.device_observed_missing) == (None, None)
+
+
+def test_assemble_run_result_ignores_details_outside_the_definition_and_requires_every_job_in_the_state():
+    """不在运行定义里的明细不出现；运行定义里的 job 不在运行态里时抛 ValueError（运行态与运行定义不对应）。"""
+    meta = _meta("a")
+    ghost = _detail(_job("ghost"), Status.PASSED, total_tokens=99)
+    state = RunState(run_id="run-1", status=Status.ABORTED, jobs={"a": JobState("a", Status.SKIPPED)})
+    result = assemble_run_result(meta, state, [ghost], duration_ms=None)
+    assert [(o.scope_id, o.detail) for o in result.jobs] == [("a", None)] and result.total_tokens is None
+    with pytest.raises(ValueError, match="运行态里没有"):
+        assemble_run_result(_meta("a", "b"), state, [], duration_ms=None)
 
 
 def test_step_done_message_is_kept_in_step_result():
@@ -735,7 +709,7 @@ def test_step_done_message_is_kept_in_step_result():
         _exit("a", 0),
     ]
     result = _full(_meta("a"), recs)
-    st = result.jobs[0].scenarios[0].steps[0]
+    st = result[0].scenarios[0].steps[0]
     assert st.status == Status.FAILED and st.message == "AI 断言未过多数票（0/1）：x"
 
 

@@ -9,15 +9,18 @@ from gherkai_core.adapters.report_store.local import LocalReportStore
 from gherkai_core.model import (
     Job,
     JobResult,
+    JobState,
     ReportRef,
     ResourceUri,
     RunMeta,
     RunResult,
+    RunState,
     ScenarioResult,
     Status,
     StepResult,
     Votes,
 )
+from gherkai_core.project import assemble_run_result
 
 
 def _uri_to_path(uri: str) -> Path:
@@ -31,10 +34,18 @@ def _jr(scope_id: str, engine: str, **kw) -> JobResult:
     return JobResult(job=job, **kw)
 
 
-def _rr(run_id: str, jobs: list[JobResult], **kw) -> RunResult:
-    """测试 helper：RunResult 由 RunMeta(definition) 与判定 jobs 合成。run_meta.jobs 取自各 jr.job。"""
-    meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs), deadline_at="2026-01-01T01:00:00+00:00")
-    return RunResult(run_meta=meta, jobs=jobs, **kw)
+def _rr(run_id: str, jobs: list[JobResult], *, status: Status, duration_ms: float | None = None, message: str | None = None,
+        without_detail: tuple[tuple[str, Status, str | None], ...] = ()) -> RunResult:
+    """测试 helper：与生产同一处组装 RunResult（`project.assemble_run_result`）。jobs 是有判定明细的 job，运行态里它们的状态取明细的
+    状态；without_detail 是由结束写结束的 job，每项 (scope_id, 状态, job 级说明)，排在运行定义的末尾。status 与 message 是运行态的 run 级
+    状态与说明；原生量合计由明细求和。"""
+    ended = tuple(Job(scope_id=sid, scope_name=sid, engine="novaact", scenarios=(), timeout_s=300.0) for sid, _, _ in without_detail)
+    meta = RunMeta(run_id=run_id, created_at="", jobs=tuple(jr.job for jr in jobs) + ended,
+                   deadline_at="2026-01-01T01:00:00+00:00")
+    states = {jr.scope_id: JobState(jr.scope_id, jr.status) for jr in jobs}
+    states.update({sid: JobState(sid, st, message=msg) for sid, st, msg in without_detail})
+    state = RunState(run_id=run_id, status=status, jobs=states, message=message)
+    return assemble_run_result(meta, state, jobs, duration_ms=duration_ms)
 
 
 _RUN_ID = "20260629-abc123"
@@ -75,7 +86,6 @@ def _run_with_refs(tmp: Path) -> RunResult:
         ],
         status=Status.PASSED,
         duration_ms=12000.0,
-        total_tokens=10573,
     )
 
 
@@ -388,16 +398,42 @@ def test_empty_report_refs_still_valid_index(tmp_path: Path):
 
 
 def test_index_shows_fail_fast_reason_in_neutral_note_not_error_red(tmp_path):
-    """skipped/aborted 的 error_type 恒 None、原因只在 message → index 也得显；用中性 note 色而非
-    err 红（ADR 0031 决定二：颜色跟 status 走，没运行不等于出错）。与 render_text 的口径对齐。"""
+    """由结束写结束的 job（这里是 fail-fast 之后没有启动、记 skipped 的）没有判定明细，原因是运行态里的 job 级说明 → index 也得显；用中性
+    note 色而非 err 红（ADR 0031 决定一；ADR 0027「index.html 形态」里由结束写结束的 job 一条；颜色跟 status 走，没运行不等于出错）。
+    与 render_text 的口径对齐。"""
     store = LocalReportStore(tmp_path)
-    jr = _jr("checkout", "novaact", status=Status.SKIPPED)
-    jr.message = "fail-fast：本次运行已中止，未启动（worker 未 spawn）"
-    meta = RunMeta(run_id="r-ff", created_at="2026-06-29T00:00:00Z", jobs=(jr.job,), deadline_at="2026-01-01T01:00:00+00:00")
-    run = RunResult(run_meta=meta, status=Status.ERROR, jobs=[jr])
+    reason = "fail-fast：其他 job 出错，本 job 没有启动"
+    run = _rr("r-ff", [], status=Status.ABORTED, message="有 job 出错，余下的 job 不再启动（fail-fast）",
+              without_detail=(("checkout", Status.SKIPPED, reason),))
     html = _uri_to_path(store.write(run.run_id, run, created_at="2026-06-29T00:00:00Z")).read_text(encoding="utf-8")
-    assert '<span class="note">fail-fast：本次运行已中止，未启动（worker 未 spawn）</span>' in html
+    assert f'<span class="note">{reason}</span>' in html
     assert 'class="err"' not in html
+
+
+def test_index_lists_jobs_ended_without_detail_after_the_detailed_ones_without_a_tree(tmp_path):
+    """有判定明细的 job 在前（按运行定义的次序，各有一棵树、状态取运行态）；由结束写结束的 job 排在后面（这里在运行定义里 b 排在 a 之前），
+    按运行定义的次序，每个一行：
+    圆点按运行态的状态上色、写状态词与 job 级说明，没有树、没有锚点与 📎；标题另计没有判定明细的 job 数（ADR 0027「index.html 形态」）。"""
+    detailed = _jr("a", "novaact", status=Status.PASSED, scenarios=[ScenarioResult(scenario_id="a:0", status=Status.PASSED)])
+    ended = {"b": (Status.SKIPPED, "执行这个 run 的 gherkai 进程已退出，job 没有启动（已记为已结束）"),
+             "c": (Status.ABORTED, "执行这个 run 的 gherkai 进程已退出，job 没有结果（已记为已结束）")}
+    jobs = (Job(scope_id="b", scope_name="b", engine="novaact", scenarios=(), timeout_s=300.0), detailed.job,
+            Job(scope_id="c", scope_name="c", engine="novaact", scenarios=(), timeout_s=300.0))
+    meta = RunMeta(run_id="order", created_at="", jobs=jobs, deadline_at="2026-01-01T01:00:00+00:00")
+    # 运行态里 a 的状态与明细里的不同：页面以运行态为准
+    states = {"a": JobState("a", Status.ERROR), **{sid: JobState(sid, st, message=msg) for sid, (st, msg) in ended.items()}}
+    run = assemble_run_result(meta, RunState(run_id="order", status=Status.ERROR, jobs=states,
+                                             message="执行这个 run 的 gherkai 进程已退出（已记为已结束）"),
+                              [detailed], duration_ms=None)
+    txt = _uri_to_path(LocalReportStore(tmp_path).write(run.run_id, run)).read_text(encoding="utf-8")
+    assert "判定明细（1 job，另有 2 job 没有判定明细）" in txt
+    assert txt.index("<code>a</code>") < txt.index("<code>b</code>") < txt.index("<code>c</code>")
+    assert '<code>a</code> <b>error</b>' in txt  # 状态取运行态，不取明细里的 passed
+    assert 'id="node-j0"' in txt and 'id="node-j1"' not in txt  # 只有有明细的 job 有锚点与树
+    b_row = txt[txt.index("<code>b</code>"):txt.index("<code>c</code>")]
+    assert "<b>skipped</b>" in b_row and "没有启动（已记为已结束）" in b_row and "📎" not in b_row and "scns" not in b_row
+    assert 'style="background:#8c959f"' in txt and 'style="background:#8250df"' in txt  # skipped 与 aborted 各按状态上色
+    assert "执行这个 run 的 gherkai 进程已退出（已记为已结束）" in txt  # run 级说明在摘要里
 
 
 def test_index_html_step_reason_follows_job_style_and_has_no_orphan_css_class(tmp_path):

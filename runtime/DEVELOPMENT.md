@@ -46,13 +46,13 @@
     `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `read_backend_version`
     （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`；失败抛 `WorkerVariantError`，消息本身是给使用方看的整句）/
     `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/ `read_task_def_stop_timeout`（doctor cloud 侧读该 revision 上
-    worker container 的 `stopTimeout`，作 grace 下限比对的对照值；没设或 task-def 里找不到该 container 时为 None）/ `new_run_id`·`now`·`now_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
+    worker container 的 `stopTimeout`，作 grace 下限比对的对照值；没设或 task-def 里找不到该 container 时为 None）/ `new_run_id`·`now`·`now_iso`（run_id 与时钟：`now` 是
     唯一的墙钟读取点，前台 `run` 把它作为调度循环的墙钟注入，`now_iso` 是它的记录写法；读回记录里的时刻用 core 的
     `serialize.instant_from_iso`）/
     `load_feature`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
-  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时用交还的结果写报告）+
+  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时经 core 的 `reconcile.write_report_from_record` 从记录生成报告，读运行态与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
   截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
   还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写；现行设计里管它的进程不在了的 run 不续、

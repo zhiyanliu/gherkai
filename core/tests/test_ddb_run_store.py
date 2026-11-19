@@ -10,14 +10,15 @@ import json
 
 import pytest
 
-from gherkai_core.model import JobState, Status, run_state_from_result
+from gherkai_core.model import JobState, Status
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from tests.test_stores import _initial_state, _sample_run
 
 
 # ---- create/load round-trip（对拍 test_run_store_create_load）----
 def test_create_load_round_trip(ddb_run_store):
     r = _sample_run("run-1")
-    ddb_run_store.create_run(r.run_meta, run_state_from_result(r))
+    ddb_run_store.create_run(r.run_meta, r.state)
 
     # definition 读回
     meta = ddb_run_store.load_run_meta("run-1")
@@ -80,29 +81,35 @@ def test_realtime_write_lifecycle(ddb_run_store):
     assert mid.jobs["features/wiki.feature:6"].status == Status.RUNNING
     assert mid.jobs["features/wiki.feature:6"].session_id == "sess-1"
     assert mid.jobs["登录场景"].status == Status.PENDING   # 另一个没动
-    assert mid.status == Status.RUNNING                      # job 离开 pending 时 run 级已是 running，终态待 finalize
+    assert mid.status == Status.RUNNING                      # job 记为 running 时 run 级随之为 running
 
-    # 3) 两个 job 各自完成
-    ddb_run_store.update_job_state("rt-run", JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1"))
-    ddb_run_store.update_job_state("rt-run", JobState("登录场景", Status.FAILED))
+    # 3) 第一个 job 完成：终态写记下它，run 仍 running、没有结束时刻
+    assert ddb_run_store.commit_job_states(
+        "rt-run", [JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1")],
+        ended_at="2026-07-01T00:04:00Z") is CommitOutcome.OPEN
     s2 = ddb_run_store.load_run_state("rt-run")
     assert s2.jobs["features/wiki.feature:6"].status == Status.PASSED
-    assert s2.jobs["登录场景"].status == Status.FAILED
+    assert (s2.status, s2.ended_at) == (Status.RUNNING, None)
 
-    # 4) 收尾（commit point）：条件写总 status + ended_at，各 job 态保留
-    assert ddb_run_store.try_finalize("rt-run", Status.FAILED, "2026-07-01T00:05:00Z") is True
+    # 4) 最后一个 job 完成：这次终态写使 run 成为终态，run 状态按取法写下，同一次写下结束时刻；各 job 态保留
+    assert ddb_run_store.commit_job_states("rt-run", [JobState("登录场景", Status.FAILED)],
+                                           ended_at="2026-07-01T00:05:00Z") is CommitOutcome.ENDED_RUN
     final = ddb_run_store.load_run_state("rt-run")
     assert final.status == Status.FAILED
     assert final.ended_at == "2026-07-01T00:05:00Z"
     assert final.started_at == "2026-07-01T00:00:00Z"  # create_run 填的起点保留
-    assert final.jobs["features/wiki.feature:6"].status == Status.PASSED  # 没被 finalize 覆盖
+    assert final.jobs["features/wiki.feature:6"] == JobState("features/wiki.feature:6", Status.PASSED, session_id="sess-1")
+    assert final.jobs["登录场景"].status == Status.FAILED
 
 
-def test_update_before_create_raises_and_finalize_writes_nothing(ddb_run_store):
-    # 未 create_run 就 update → 报错（对拍 local：ConditionExpression 命中 → FileNotFoundError）；收尾写不成、不臆造 STATE
+def test_writes_before_create_raise_or_write_nothing(ddb_run_store):
+    # 未 create_run 就写 → 执行中的写与终态写报错（对拍 local：条件不成立且带回的条目为空 → FileNotFoundError）；结束写写不成；
+    # 都不臆造 STATE
     with pytest.raises(FileNotFoundError):
         ddb_run_store.update_job_state("nope", JobState("s", Status.RUNNING))
-    assert ddb_run_store.try_finalize("nope", Status.PASSED, "t") is False
+    with pytest.raises(FileNotFoundError):
+        ddb_run_store.commit_job_states("nope", [JobState("s", Status.PASSED)], ended_at="t")
+    assert ddb_run_store.end_run("nope", RUN_ENDINGS["deadline"], ended_at="t") is False
     assert ddb_run_store.load_run_state("nope") is None
 
 
@@ -110,9 +117,9 @@ def test_session_id_none_omitted_and_roundtrips(ddb_run_store):
     # session_id=None：omit-when-None（不写该键），读回仍 None（对拍 local/serialize 语义）
     meta = _sample_run("s-run").run_meta
     ddb_run_store.create_run(meta, _initial_state("s-run", ["features/wiki.feature:6", "登录场景"]))
-    ddb_run_store.update_job_state("s-run", JobState("登录场景", Status.ABORTED, session_id=None))
+    assert ddb_run_store.update_job_state("s-run", JobState("登录场景", Status.RUNNING, session_id=None)) is True
     js = ddb_run_store.load_run_state("s-run").jobs["登录场景"]
-    assert js.status == Status.ABORTED and js.session_id is None
+    assert js.status == Status.RUNNING and js.session_id is None
 
 
 def test_started_ended_omit_when_none_round_trip(ddb_run_store):
@@ -122,8 +129,9 @@ def test_started_ended_omit_when_none_round_trip(ddb_run_store):
     ddb_run_store.create_run(meta, _initial_state("ts-run", ["s"]))
     got = ddb_run_store.load_run_state("ts-run")
     assert got.started_at == "2026-07-01T00:00:00Z" and got.ended_at is None
-    # 收尾后 ended 出现
-    assert ddb_run_store.try_finalize("ts-run", Status.PASSED, "2026-07-01T01:00:00Z") is True
+    # 使 run 成为终态的那次写之后 ended 出现
+    assert ddb_run_store.commit_job_states("ts-run", [JobState("s", Status.PASSED)],
+                                           ended_at="2026-07-01T01:00:00Z") is CommitOutcome.ENDED_RUN
     got2 = ddb_run_store.load_run_state("ts-run")
     assert got2.ended_at == "2026-07-01T01:00:00Z"
 
@@ -210,7 +218,7 @@ def test_meta_item_carries_schema_header_top_level_and_peek_reads_only_it(ddb_ru
 
     from gherkai_core.errors import UnsupportedDefinitionSchema
     r = _sample_run("hdr")
-    ddb_run_store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), run_state_from_result(r))
+    ddb_run_store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), r.state)
     assert ddb_run_store.peek_definition_header("hdr") == (2, "1.5.0")
     assert ddb_run_store.peek_definition_header("nope") is None
     raw = ddb_run_store._table.get_item(Key={"run_id": "hdr", "item_type": "META"})["Item"]

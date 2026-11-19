@@ -41,7 +41,7 @@ from collections.abc import Sequence
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
-from gherkai_core.run_status import CommitOutcome, RunEnding, commit_applied, ending_applied
+from gherkai_core.run_status import CommitOutcome, RunEnding, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
     require_definition_schema,
     require_listing_header,
@@ -73,7 +73,7 @@ def status_group(status: Status) -> str:
     """run 级状态 → 状态分组（ADR 0030 决定六）：非终态取 `live`，终态取该终态的状态值。
 
     写入规则：每一处写 run 级 `status` 的地方都由本函数从这次写入的 `status` 算出分组、写在同一次写里（put_item 经
-    `_state_scalars`，update_item 经 `_run_status_assignment`）；不写 run 级 `status` 的写（全 pending 的投影、只写 job 的写）
+    `_state_scalars`，update_item 经 `_run_status_assignment`）；不写 run 级 `status` 的写（全 pending 的投影、投影的逐 job 写）
     不碰分组属性，写之前缺它的记录写之后仍缺。分组只服务这个索引；本机后端没有索引，不写它。
     """
     return status.value if status in TERMINAL_STATUSES else _STATUS_GROUP_LIVE
@@ -332,47 +332,36 @@ class DynamoDBRunStore:
         }
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """按 scope_id 单元素刷 STATE.jobs（SET jobs.#sid=:js）。STATE 不存在则报错（须先 create_run）。
+        """执行中的写（语义见 RunStore port）：按 scope_id 整项替换 STATE.jobs 里的一个条目（SET jobs.#sid=:js），只发**一次**
+        update_item。写入的不是 running 即抛 ValueError（`run_status.check_running_write`），不发写。
 
-        #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）；
-        ConditionExpression 复刻 local「未 create 就报错」——捕 ConditionalCheckFailedException 转 FileNotFoundError。
+        #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）。
 
-        **库中这个 job 已是终态时不写**（终态只写一次，ADR 0031 决定一·补）：每次写的条件都含「这个 job 不在 Map 里，或它的状态是
-        pending 或 running」，与写在同一次 update_item 里判断，不先读后写。
-
-        **至多两次写，各带互斥的 run 级条件**：第一次写的条件是 STATE 存在、run 级为 pending 或 running、这个 job 未结束，写入的
-        job 态不是 pending 时连同把 run 级写成 running（连同状态分组，见 `status_group`），是 pending 时只写 job；成立即返回 True。
+        **条件与写在同一次 update_item 里，不先读后写**（ADR 0034 机制三「run 级状态只进不退」条③）：STATE 存在、run 级为 pending
+        或 running（run 到终态之后不再接受写，ADR 0054 决策五）、这个 job 在 Map 里且为 pending 或 running（不臆造 job；终态只写
+        一次，ADR 0031 决定一·补）。写成时同一次写把 run
+        级写成 running（连同状态分组，见 `status_group`）：写下的 job 是 running、run 未结束，按取法 run 即为 running（ADR 0031
+        决定三）。
         条件不成立时这次写带回条件判断那一刻的 STATE（`ReturnValuesOnConditionCheckFailure`），据它分辨原因，不另读：
-        - 没有带回条目：STATE 不存在，报错。
-        - run 级为 pending 或 running：不成立的只能是这个 job 已结束，不写，返回 True。
-        - run 级已是终态、这个 job 也已结束：不写，返回 False。
-        - run 级已是终态、这个 job 未结束（run 经 try_finalize 结束时 job 原样留下）：再写一次、只写 job，条件是 STATE 存在、run 级
-          已是终态、这个 job 未结束；返回 False。这次写不成立时只能是这个 job 在两次写之间被别的写记为终态（终态的 run 级不再变），
-          同样返回 False。
-        返回值因而是条件判断那一刻的 run 级，由条件写本身给出；已收尾的 run 上 run 级与状态分组都不变。正常路径一次写，第二次只在 run
-        已收尾而这个 job 未结束时发生。
-
-        写成的写都把写入序号加一（见 `_write_seq_increment`）。
+        - 没有带回条目：STATE 不存在，抛 FileNotFoundError。
+        - run 级已是终态：返回 False。
+        - 否则（这个 job 已是终态，或不在 Map 里）：不写，返回 True。
+        返回值因而是条件判断那一刻 run 是否仍未结束，由条件写本身给出。写成时写入序号加一（见 `_write_seq_increment`）。
         """
+        check_running_write(job_state)
         ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
-        key = {"run_id": run_id, _ITEM_TYPE_ATTR: _STATE}
-        sid = job_state.scope_id
+        run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
         seq_set, seq_names, seq_values = _write_seq_increment()
-        names = {"#sid": sid, "#st": "status", **seq_names}  # status 是 DDB 保留字；jobs.#sid.#st 与 run 级同名，共用占位名
-        values = {":js": _job_state_to_item(job_state), ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
-                  **seq_values}
-        update = f"SET jobs.#sid = :js, {seq_set}"
-        job_open = "(attribute_not_exists(jobs.#sid) OR jobs.#sid.#st IN (:pending, :running))"
-        first_update, first_names, first_values = update, names, values
-        if job_state.status != Status.PENDING:
-            run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
-            first_update = f"{update}, {run_set}"
-            first_names, first_values = {**names, **run_names}, {**values, **run_values}
         try:
             self._table.update_item(
-                Key=key, UpdateExpression=first_update,
-                ExpressionAttributeNames=first_names, ExpressionAttributeValues=first_values,
-                ConditionExpression=f"attribute_exists(run_id) AND #st IN (:pending, :running) AND {job_open}",
+                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
+                UpdateExpression=f"SET jobs.#sid = :js, {run_set}, {seq_set}",
+                # status 是 DDB 保留字；jobs.#sid.#st 与 run 级同名，共用占位名
+                ExpressionAttributeNames={"#sid": job_state.scope_id, **run_names, **seq_names},
+                ExpressionAttributeValues={":js": _job_state_to_item(job_state), ":pending": Status.PENDING.value,
+                                           ":running": Status.RUNNING.value, **run_values, **seq_values},
+                ConditionExpression=("attribute_exists(run_id) AND #st IN (:pending, :running) "
+                                     "AND jobs.#sid.#st IN (:pending, :running)"),
                 ReturnValuesOnConditionCheckFailure="ALL_OLD",
             )
             return True
@@ -380,20 +369,7 @@ class DynamoDBRunStore:
             seen_item = _item_at_failed_condition(e)
         if seen_item is None:
             raise FileNotFoundError(f"update_job_state：STATE 不存在（须先 create_run）：{run_id}")
-        seen = _run_state_from_item(seen_item)
-        if seen.status not in TERMINAL_STATUSES:
-            return True  # run 未结束，挡下这次写的是这个 job 已结束
-        current = seen.jobs.get(sid)
-        if current is not None and current.status in TERMINAL_STATUSES:
-            return False
-        try:
-            self._table.update_item(
-                Key=key, UpdateExpression=update, ExpressionAttributeNames=names, ExpressionAttributeValues=values,
-                ConditionExpression=f"attribute_exists(run_id) AND NOT (#st IN (:pending, :running)) AND {job_open}",
-            )
-        except ccf:
-            pass  # 这个 job 在两次写之间被记为终态：不改写它
-        return False
+        return _run_state_from_item(seen_item).status not in TERMINAL_STATUSES
 
     def preflight(self) -> None:
         """探活（ADR 0030 决定七）：begin 前探表可达，表不存在/无权限即抛（cli 接住→以退出码 2 结束）。
@@ -442,20 +418,22 @@ class DynamoDBRunStore:
             return False
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中未 finalize) 才写（机制三①）。CCF → stale/已终态 → False。
+        """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中 run 未结束) 才写（机制三①）。CCF → stale/已终态 → False。
 
-        **run 级 status 只写 running、不落终态**（终态是 finalize 专属；投影提前落终态会挡住 try_finalize）。
+        **run 级 status 只写 running、不落终态**（run 级终态只随记下最后一个 job 终态的写或结束写写下；投影提前落终态，那两次写会
+        读到 run 已结束而写不成）。
         取值规则见 `projected_run_status`（与 local adapter 共用一份）：它给出 running 时标量写带上 run 级；给出 pending
         （投影里全 job 仍 pending）时更新表达式省略 run 级、只写 HWM，库中 run 级原样保留，认领或此前投影已写成的 running
         不被拿着旧 baseline 的投影改回 pending。条件双守不变：
-        HWM 挡 stale + status 挡「已 finalize 被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级，
-        所以 finalize 插在两阶段之间时，后续逐 job 写不会把终态改回 running。
+        HWM 挡 stale + status 挡「已结束被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级。
 
         **各 job 态逐 job 单调条件写（对拍 local 的逐 job 合并）**：task_exited 无数值
         seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
         DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
         stale 返 False），再对每个 job（无效果的 pending 项除外，见末段）**逐属性** `SET jobs.#sid.status/.session_id/.claimed_at`
-        + 「当前非更推进态」的单元素条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。
+        + 「当前非更推进态」的单元素条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。库中已是终态的 job
+        不被改写（终态只写一次，ADR 0031 决定一·补）：写终态与写 running 的两支都以库中这个 job 为 pending 或 running 为条件；三支都
+        另以 run 未结束为条件，所以终态写或结束写落在标量一步与逐 job 写之间时，余下的逐 job 写都写不成（ADR 0054 决策五）。
         逐属性而非整 entry：update_item 不碰未提及属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job
         落库、事件推演不出）天然保留——对拍 local 的「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。
         两步非原子，但每步各自条件守卫、次序（先标量后 jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job
@@ -499,23 +477,21 @@ class DynamoDBRunStore:
             )
         except self._table.meta.client.exceptions.ConditionalCheckFailedException:
             return False
-        # job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 的 rank
-        # 不高于本次投影才写（同 rank 允许覆盖——running 刷 running 幂等、终态间以本次投影为准）。
+        # job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 未结束、且 rank 不高于本次投影才写
+        # （running 刷 running 取本次投影的值；库中已是终态的不改）。每一支都另以 run 未结束为条件（#jst 同指 run 级的 status）。
+        run_open = "#jst IN (:pending, :running)"
         for sid, js in state.jobs.items():
             if js.status == Status.PENDING and js.session_id is None and js.claimed_at is None:
                 continue  # 无效果的 pending 项不发写（等价性论证见 docstring 末段）
             new_rank = _lifecycle_rank(js.status)
             try:
-                if new_rank >= 2:
-                    # 写终态：库中任何态都可被终态覆盖（终态 rank 最高）。但 job 必须已在 Map 里——逐属性 SET 的父路径
-                    # 不存在会 ValidationException（穿出即整 tick 失败），而「投影带 definition 外的 scope」本就不该发生
-                    # （project 侧同样忽略、不臆造 job）→ attribute_exists 把它转成 CCF、与 local 同样静默跳过。
-                    cond, vals = "attribute_exists(jobs.#sid)", {}
-                elif new_rank == 1:
-                    cond, vals = "jobs.#sid.#jst IN (:pending, :running)", {
-                        ":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+                if new_rank >= 1:
+                    # 写 running 或终态：库中这个 job 须为 pending 或 running。job 不在 Map 里时条件同样不成立（不臆造 job，与
+                    # local 同样静默跳过；逐属性 SET 的父路径不存在会 ValidationException，条件先把它挡成 CCF）
+                    cond = f"jobs.#sid.#jst IN (:pending, :running) AND {run_open}"
                 else:
-                    cond, vals = "jobs.#sid.#jst = :pending", {":pending": Status.PENDING.value}
+                    cond = f"jobs.#sid.#jst = :pending AND {run_open}"
+                vals = {":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
                 sets = ["jobs.#sid.#jst = :st", seq_set]
                 vals[":st"] = js.status.value
                 vals.update(seq_values)
@@ -533,7 +509,7 @@ class DynamoDBRunStore:
                     ConditionExpression=cond,  # 三分支一律带条件
                 )
             except self._table.meta.client.exceptions.ConditionalCheckFailedException:
-                continue  # 库中该 job 已更推进（终态/已 claim）→ 保留库中态，不回退
+                continue  # 库中该 job 已结束或更推进（已 claim），或 run 已结束 → 保留库中态，不回退
         return True
 
     def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
@@ -545,7 +521,7 @@ class DynamoDBRunStore:
         expected_claim_count 给出时进条件表达式：库中认领计数等于它才写。期望为 0 时缺属性同样
         成立（与读端缺属性读作 0、local 的锁内重读对拍）。为 None 时条件不提计数。写入序号在这次写里加一（见 `_write_seq_increment`）。
 
-        调用方迁到 `end_run` 与 `commit_job_states` 之后本入口删去：ADR 0030 决定四的写入口里没有它。"""
+        调用方见 `RunStore.try_finalize`；ADR 0030 决定四的写入口里没有它。"""
         run_set, run_names, run_values = _run_status_assignment(status)
         seq_set, seq_names, seq_values = _write_seq_increment()
         update = "SET " + run_set + ", ended_at = :e, " + seq_set
@@ -715,7 +691,8 @@ class DynamoDBRunStore:
     def load_run_state(self, run_id: str) -> RunState | None:
         """读回运行态（从 STATE item，jobs 原生 Map → dict[scope_id, JobState]）；不存在返回 None。
 
-        ConsistentRead=True：commit-point「finalize 后立刻读」的强一致。
+        ConsistentRead=True（ADR 0030 决定六「读用 ConsistentRead=True」条）：使 run 成为终态的那次写之后立刻读（组装 run 的结果、
+        生成报告）要读到这次写。
         """
         item = self._read_state_item(run_id)
         if item is None:

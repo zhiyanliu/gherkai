@@ -41,7 +41,7 @@ class JobSink(Protocol):
 # core/gherkai_core/schedule.py —— 两个旁路注入点，都默认 None
 def schedule(run_meta, engines, sink, opts=None,
              on_job_complete: JobSink | None = None,   # job 完成 fire 已归约 JobResult（主线程串行）
-             on_event: Sink | None = None) -> RunResult: ...  # 每事件 fire（sink_lock 之外，实时刷 RUNNING 用）
+             on_event: Sink | None = None) -> Execution: ...  # 每事件 fire（sink_lock 之外，实时刷 RUNNING 用）；返回执行事实（ADR 0026「接口」）
 ```
 
 - **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 用例、`--no-report` 路径都不必造 no-op 传进去。
@@ -72,25 +72,29 @@ class RunRecord(Protocol):
 ```python
 # core/gherkai_core/persist.py —— 编排 Store ports；不在 schedule 里、不碰执行 reducer
 class RunPersistence:
-    def __init__(self, run_id, run_store, result_store, report_store=None): ...
+    def __init__(self, run_id, run_store, result_store, report_store=None, *, clock=system_wall_clock): ...  # 结束时刻经 clock 取
     def begin(self, run_meta, *, started_at): ...        # create_run(meta, 初始全 PENDING 的 RunState)
     def claim(self, scope_id, claimed_at): ...            # RunRecord：try_claim_job 带认领时刻，记住它；被拒即发停手信号
     def still_open(self): ...                             # RunRecord：重试之前读一次 run 级状态；终态即发停手信号
     def ended_elsewhere(self): ...                        # RunRecord：停手信号
     def on_event(self, event): ...                        # 注入 schedule.on_event：收 ScopeStarted / SessionOpened→刷 RUNNING+血缘+认领时刻（sink_lock 外）
     def on_job_complete(self, jr): ...                    # 每 job：生成标识、先 save_job_result 存下这一份，再 commit_job_states 写该 job 终态并点名它（带认领时刻）
-    def finalize(self, result, *, ended_at): ...          # 有未结束的 job 时做结束写；本进程的写使 run 成为终态时，从记录生成报告（ReportStore.write）
+    def finalize(self, execution): ...                    # 有未结束的 job 时按 execution 交来的来路做结束写；本进程的写使 run 成为终态时，
+                                                          # 读一次运行态、组装 RunResult，从记录生成报告（ReportStore.write）；返回 RunResult 与报告位置
 ```
+
+- **`clock` 是组合根注入的墙钟**，可选、缺省取系统墙钟；组合根注入调度循环用的同一个读取点（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「各执行方的落实」）。终态写与结束写要写下结束时刻（决定四「结束时刻由调用方给」条），而 `on_job_complete` 的签名里没有时刻，所以由落库服务自己经它取。
+- **没有记录的执行（`run --no-report`）不经落库服务**：`persist.result_without_record(execution, ended_at=…)` 从全部 `pending` 的初始运行态出发，按终态写与结束写对运行态的作用（`run_status.commit_applied`、`ending_applied`，决定四「两个使 job 成为终态的写入口」条）在内存里算出运行态，经同一处组装成 RunResult（[0027](./0027-runreport-aggregation-index.md)「RunResult 的组装只有一处」条）。理由：内存路径与两个 adapter 用同一组作用函数，没有记录的执行与有记录的执行在同样的经过下得出同样的状态（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「第 3、4 条的结果按同一套规则在内存里给出」，[0031](./0031-job-lifecycle-states-and-severity.md) 决定五「数据源」条）。
 
 组合根（任意皮）就只剩注入 + 三调用，**逻辑零重复、只换 adapter**：
 
 ```python
-persistence = RunPersistence(run_id, run_store, result_store, report_store)   # ← 唯一差异：哪套 adapter
+persistence = RunPersistence(run_id, run_store, result_store, report_store, clock=compose.now)   # ← 唯一差异：哪套 adapter
 persistence.begin(run_meta, started_at=now)
-result = schedule(run_meta, resolver, progress_sink, ScheduleOpts(..., wall_clock=compose.now, record=persistence),
-                  on_job_complete=persistence.on_job_complete,   # job 完成落终态（主线程）
-                  on_event=persistence.on_event)                 # 收 ScopeStarted / SessionOpened 刷 RUNNING（旁路观察者，sink_lock 外）
-persistence.finalize(result, ended_at=now)
+execution = schedule(run_meta, resolver, progress_sink, ScheduleOpts(..., wall_clock=compose.now, record=persistence),
+                     on_job_complete=persistence.on_job_complete,   # job 完成落终态（主线程）
+                     on_event=persistence.on_event)                 # 收 ScopeStarted / SessionOpened 刷 RUNNING（旁路观察者，sink_lock 外）
+finalized = persistence.finalize(execution)   # 汇总、--json、退出码与报告都出自 finalized 里的 RunResult
 ```
 
 > **注**：sink（进度显示）与 on_event（实时落 RUNNING）是**两个独立注入点**，persistence 不装饰 sink——
@@ -119,7 +123,8 @@ run 开始（schedule 之前）:
 job 进行中（on_event 收 ScopeStarted，或 origin 不是 attempted 的 SessionOpened（[0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的加法扩展）；worker 线程、**sink_lock 之外**）:
   RunStore.update_job_state(run_id, JobState(scope_id, RUNNING, session_id, claimed_at))  ← RUNNING 中间态 + 血缘随首事件即落（session_id 按代表会话规则：scope_started 的值一经取到即锁定，此前取最近一条非 attempted 的 session_opened；任何写入都不以 None 覆盖已有值，终态写也守此规则）
 
-每个由执行结果结束的 job（on_job_complete 串行 fire 已归约的 jr）:
+每个由执行结果结束的 job（on_job_complete 串行 fire 已归约的 jr；jr 不是终态即抛，[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补的强制点）:
+  （停手信号已成立 → 下面两步都不做：不存明细、不写终态，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）
   ① 生成一个随机标识，ResultStore.save_job_result 存下带这个标识的一份明细   ← 明细【先】存；失败见下「保存明细失败」
   ② RunStore.commit_job_states(run_id, [终态 JobState，带认领时刻与这个标识], ended_at=…)  ← 终态【后】写，并点名那一份明细
 
@@ -128,17 +133,23 @@ job 进行中（on_event 收 ScopeStarted，或 origin 不是 attempted 的 Sess
    会话与认领时刻不被空值覆盖；返回 run 已结束即 run 已被别处结束，发停手信号；终态写返回 ENDED_RUN 即本进程这次写使 run 成为
    终态，决定四）
 
-run 结束（schedule 返回后，RunPersistence.finalize）:
-  仍有未结束的 job（到期、fail-fast 或使用方中断时没有启动的）→ 结束写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）
-  使 run 成为终态的那次写是本进程写成的 → 从记录生成报告：ReportStore.write（生成方与时机见 [0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节）
-       └ **其失败被隔离、不击穿已到终态的 run**
+run 结束（schedule 返回后，RunPersistence.finalize(execution)）:
+  本进程的终态写已使 run 成为终态（返回 ENDED_RUN）→ 不再写
+  否则仍有未结束的 job（到期、fail-fast 或使用方中断时没有启动的）→ 结束写，来路取 schedule 交来的那一条（Execution，
+       [0026](./0026-schedule-module.md)「起 worker 与重试之前的检查」；说明表见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）
+  使 run 成为终态的那次写是本进程写成的 → 读一次运行态，组装 RunResult（汇总、--json、退出码与报告都出自它，
+       [0027](./0027-runreport-aggregation-index.md)「RunResult 的组装只有一处」条）→ ReportStore.write（生成方与时机见 [0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节）
+       └ **ReportStore.write 的失败被隔离、不击穿已到终态的 run**
   （本次执行结束之前别处已把 run 结束：不覆盖、不生成报告，抛 RunAlreadyEnded，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）
 ```
 
 > **ReportStore.write 失败隔离**：使 run 成为终态的那次写一落，各 job 的状态与被点名的明细都已在记录里；其后的
 > ReportStore.write（派生只读视图）若抛异常（磁盘满等），**不冒泡、不反向击穿已到终态的 run**——finalize 吞掉它、
-> 返回 None。否则一个派生视图写失败会让整个 run 裸 traceback 退出、CI 拿不到判定输出。终态写与结束写本身**不**在
+> 返回的报告位置为 None。否则一个派生视图写失败会让整个 run 裸 traceback 退出、CI 拿不到判定输出。终态写与结束写本身**不**在
 > 隔离范围内（控制面没落是真问题，必须冒泡；run 已被别处结束时的 `RunAlreadyEnded` 同样冒泡，由调用方说明）。
+> 为组装而读运行态的那一次同样不在隔离范围内：前台的输出与退出码取自它（[0031](./0031-job-lifecycle-states-and-severity.md) 决定五），
+> 这次读失败按运行期落库失败处理（决定七）、不生成报告；后台推进与处置只为生成报告而读，那一次在隔离之内
+> （[0034](./0034-detached-batch-reconciler.md) 机制三④）。
 
 **commit point 的意义**：由执行结果结束的 job，保存明细成功之后才写终态，所以读到这类 job 的终态时它点名的明细已在。依赖方：`explain` 与报告。执行方在存明细与写终态之间中断时，留下的那一份没被点名、不被读（下「点名」条）。由结束写结束的 job 没有执行结果，结束写不写明细、不点名（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）；`explain` 怎样给出这类 job 见 [0042](./0042-step-evidence-and-explain.md) 决策四、决策七。
 
@@ -232,7 +243,7 @@ class RunStore(Protocol):
 
 - **端口不提供整份重写与无条件改写终态的入口**：一次性写完整态的入口对已有的 run 再调用即回到初始状态或任意状态，无条件写终态的入口覆盖已有的终态，两者都与 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五的终态不可变不相容。测试需要的初始状态经 `create_run` 加各条件写得到。被拒：在端口上提供它们作测试便捷方法——端口上有的方法生产 code 就能调，终态不可变就只剩调用约定在守。
 - `create_run` 只在这个 run 还不存在时成立（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）：local adapter 的判据是 run 目录里还没有 `run_state.json`，判断与两个文件的写（`run_meta.json` 在前、`run_state.json` 在后）在同一把文件锁内完成；只有 `run_meta.json`、没有运行态的目录（建 run 在两次写之间中断）照常建。本机建 run 的一方在调用 `create_run` 之前已持有这个 run 目录的生命期锁（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三）。DDB adapter 见决定六。
-- `update_job_state` 按 **scope_id 定位单个 job**，写它执行中的状态：认领之后的 `running` 与血缘（决定三的 RUNNING 中间态）；终态由 `commit_job_states` 写。同一次写按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法写 run 状态；库中已是终态的 job 不被改写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补），这一条件与写在同一次条件写里判断：local 在文件锁内，DDB 把「这个 job 不在 Map 里，或为 `pending`、`running`」写进同一次 `update_item` 的条件，不先读后写；run 已结束时写不成（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。理由：执行中的写来自已开始的执行（认领之后的事件），迟到的一次可能落在这个 job 的终态之后；不加这一条件，它把终态改回 `running`，此后又能记下第二个终态，「终态只写一次」只剩调用方的次序在守。local adapter 是「读 run_state→改该 scope_id→按锁内读到的整份运行态算 run 状态→写回」的 read-modify-write（在文件锁内完成，与其它写入口互斥，见决定三的并发不变量）。返回值是 run 在这次写时是否仍未结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），local 取锁内读到的 run 状态；前台执行者据 False 得知 run 已被别处结束而停手。库中这个 job 已是终态而没有写时，返回值同样只看 run：job 已由别的写记下终态不说明 run 已结束，不是停手的理由，所以不另设一种返回值；DDB 从条件不成立时这次写带回的条目（`ReturnValuesOnConditionCheckFailure`）分辨是 run 已结束、这个 job 已结束还是 STATE 不存在，不另读。执行中的写不会使 run 成为终态，所以一个布尔值就够。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
+- `update_job_state` 按 **scope_id 定位单个 job**，写它执行中的状态：认领之后的 `running` 与血缘（决定三的 RUNNING 中间态）；终态由 `commit_job_states` 写。写入的 job 态只能是 `running`，否则是参数错误（与 `commit_job_states` 对非终态的参数报错对称）；job 不在这个 run 的运行态里时不写（不臆造 job，与认领、投影相同：worker 报出运行定义以外的 scope_id 时，写进去的 `running` 项会让这个 run 永远到不了终态）。同一次写按 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三的取法写 run 状态；库中已是终态的 job 不被改写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补），这一条件与写在同一次条件写里判断：local 在文件锁内，DDB 把「这个 job 在 Map 里且为 `pending` 或 `running`」写进同一次 `update_item` 的条件，不先读后写；run 已结束时写不成（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），只发这一次写、不另写 job。理由：执行中的写来自已开始的执行（认领之后的事件），迟到的一次可能落在这个 job 的终态之后；不加这一条件，它把终态改回 `running`，此后又能记下第二个终态，「终态只写一次」只剩调用方的次序在守。local adapter 是「读 run_state→改该 scope_id→按锁内读到的整份运行态算 run 状态→写回」的 read-modify-write（在文件锁内完成，与其它写入口互斥，见决定三的并发不变量）。返回值是 run 在这次写时是否仍未结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），local 取锁内读到的 run 状态；前台执行者据 False 得知 run 已被别处结束而停手。库中这个 job 已是终态或不在运行态里而没有写时，返回值同样只看 run：这两种情形都不说明 run 已结束，不是停手的理由，所以不另设一种返回值；DDB 从条件不成立时这次写带回的条目（`ReturnValuesOnConditionCheckFailure`）分辨是 run 已结束、这个 job 已结束或不在 Map 里，还是 STATE 不存在，不另读。执行中的写不会使 run 成为终态，所以一个布尔值就够。这要求 `RunState.jobs` 用 **Map<scope_id> 形状**（见决定五）。
 - `commit_job_states` 把**一个或多个**由执行结果结束的 job 记为终态，终态带点名的标识（决定三）：库中已是终态的 job 不被改写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定一·补）；其余给出的 job 与库中的条目按字段合并（下「终态写的字段合并」条）；同一次写按取法写 run 状态，这次写使 run 成为终态时同一次写下结束时刻；run 已结束时写不成（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。local 在文件锁内按整份运行态计算；DDB 记下 job 终态的写法与条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②。一次写可记多个 job：后台推进一轮里可能有多个 job 得出结果（决定三「后台推进同守」），云端每次写都按整个 STATE 条目计费（[0034](./0034-detached-batch-reconciler.md) 机制三「逐 job 写跳过无效果的 pending 项」段）。
   - **返回三种结果之一**：写成而 run 仍未结束（`OPEN`，给出的 job 里已是终态的不被改写）、写成并且这次写使 run 成为终态（`ENDED_RUN`）、没有写成（`ALREADY_ENDED`：run 在这次写之前已结束，运行态不变）。理由：报告只由使 run 成为终态的那次写的写入方生成（[0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」节），run 成为终态只发生一次，所以谁的终态写返回 `ENDED_RUN`、或谁的结束写写成，谁生成报告；前台执行者据 `ALREADY_ENDED` 得知 run 已被别处结束而停手。被拒：**返回「这次写之前 run 是否仍未结束」的布尔值**，由调用方推断是不是自己这次写使 run 成为终态：写后读回分不出终态是谁写下的（读回之前别的写入方可能已写下最后一个 job 的终态），记住自己写下终态的 job 集合在云端多次调用重叠推进时不知道别的调用写了什么。
   - **终态写的字段合并**：状态取调用方给出的终态。认领时刻以库中的为准：认领那次写是它的来源（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），库中没有时（没有认领过的 job）取调用方给出的。会话取调用方给出的：它是产出这个结果的那次执行的代表会话，与终态、被点名的明细出自同一个执行结果（决定三「被点名的那一份」条）；调用方没有给出时保留库中的，不以空值覆盖（决定三）。job 级说明不由终态写写下：它只由结束写写下（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节），由执行结果结束的 job 的说明在判定明细里（决定三）；库中的原样保留，调用方给出的不写下。合并定义在 `run_status.commit_applied`（下「两个使 job 成为终态的写入口」条），按写的那一刻库中的条目做：local 是锁内读到的，DDB 是每次重读到的。理由：调用方准备参数与写成之间，别的写可能为同一个 job 写下会话（执行中的写、投影）或认领时刻（认领）；DDB 的写被写入序号挡下、重读再算时同样如此（[0034](./0034-detached-batch-reconciler.md) 机制三②）。被拒：**整项替换、由调用方带上认领时刻与会话**：调用方手里的值是它准备参数那一刻的，晚于那一刻写下的值被抹成空；重读再算也保不住，替换用的仍是调用方的参数。
@@ -251,9 +262,8 @@ Map 形状下 `update_job_state` 各 scope 互不干扰、天然支持单元素�
   - `model.RunState.jobs`：`dict[str, JobState]`（原 `tuple[JobState,...]`）。
   - `serialize.run_state_to_dict`：**护栏**——必须 `state.jobs.values()` 迭代；直接 `for js in state.jobs` 拿到的是 dict 的 **key（字符串）**、`js.scope_id` 静默 AttributeError。
   - `serialize.run_state_from_dict`：决定**落盘 JSON 形状**——本 ADR 选 **JSON 仍落 `list[{scope_id,status,session_id}]`（[0034](./0034-detached-batch-reconciler.md) 后每条另带 omit-when-None 的 `claimed_at`；点名的标识同样 omit-when-None（决定三）；job 级说明 `message` 同样 omit-when-None，只由结束写写下，[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节，状态投影与认领原样保留它）、仅内存模型是 Map**（读回时 `{js.scope_id: js}` 重建），保 `run_state.json` 向后兼容、不动既有文件格式；DDB adapter 才在落库层用真 map item。
-  - `run_state_from_result`：投影出 dict 而非 tuple。
   - **`core/tests/test_stores.py`**：**护栏**——RunState 的消费方按 scope_id 取（如 `state.jobs["features/wiki.feature:6"]`），**不用整数下标**（dict 不支持，会 TypeError）。
-  - （**澄清**：`report_store/local.py` 的 index.html 渲染的是 `RunResult.jobs`、不是 RunState 消费点；本决策期 cli 也只**写**（经 `run_state_from_result` 投影，该函数现只剩测试在用）、从不**读** `RunState.jobs`——故改造期真正会被打破的是上面的 serialize 迭代与 test_stores 下标。**此后 cli 已成为 `RunState.jobs` 的读者**（[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`cli/gherkai_cli/__main__.py` 的 `_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`）——两处都按 key 遍历/取值，Map 形状原生支持。）
+  - （**澄清**：`RunState.jobs` 的读者都按 key 遍历或取值，Map 形状原生支持：从记录组装 RunResult 的 `project.assemble_run_result` 按运行定义里的 scope_id 取 `state.jobs[scope_id]`（[0027](./0027-runreport-aggregation-index.md)「RunResult 的组装只有一处」条），index.html 与 cli 的文本汇总读的是组装结果；[0034](./0034-detached-batch-reconciler.md) 的 `status`：`cli/gherkai_cli/render.py` 的 `render_run_state` 遍历 `state.jobs.items()`、`cli/gherkai_cli/__main__.py` 的 `_render_status` 的「所有 job 仍 pending」诊断遍历 `state.jobs.values()`。）
 - skipped 的 job 也要进 Map（它是 definition 的一部分，缺了会让 RunState 的 job 集与 RunMeta.jobs 对不齐）。各新态的 `session_id` 取值规则见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定一；aborted 留 `session_id`（有现场可查）正是 Map 形状的受益场景。
 
 ## 决定六：云端 adapter 的落库形态（DDB/S3）
@@ -303,7 +313,7 @@ cli `--backend {local,cloud}` 的组合根装配（两后端都下沉 `compose` 
 
 **失败退出码分层——切分线 = run 是否已开始执行**（退出码的取值见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定五；全走 stderr）：
 - **退 2（还没开始执行就拒绝，与 `assertion_votes<1` 同类，一句诊断、不打回溯）**：缺 boto3（`build_cloud_stores` 的惰性 `import boto3` 抛 ImportError，cli 的 gated except 接住 → 退 2；发行包 `gherkai` 已硬依赖 `gherkai-runtime[aws]`、自带 boto3，装库层 extra 只是库消费者的事，见 [0037](./0037-distribution-and-packaging.md) 决策 2c）；云端 `submit` 的资源 preflight 不过或 `create_run` 抛 botocore 异常（表/桶不存在、无权限、凭证/region 缺）。
-- **非零（run 已开始执行，只有本机 `run`）**：`schedule()` 运行期内 `on_event`/`on_job_complete`、认领或重试之前的读（`RunRecord.claim` / `still_open`，见决定一「服从记录的三项能力」）抛出存储异常（如磁盘写不进；保存明细先按决定三「保存明细失败」重试）。决定三已定 `on_event` 或 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛（`on_event` 的异常不产生判定），故会冒泡出 `schedule()`，`run` 以非零退出码结束、终端里有存储错误；执行中的 job 留在 `running`，被处置时怎样记见决定三「保存明细失败」条。
+- **非零（run 已开始执行，只有本机 `run`）**：运行期间保存明细、写运行态或读回运行态失败。一是 `schedule()` 运行期内 `on_event`/`on_job_complete`、认领或重试之前的读（`RunRecord.claim` / `still_open`，见决定一「服从记录的三项能力」）抛出存储异常（如磁盘写不进；保存明细先按决定三「保存明细失败」重试）：决定三已定 `on_event` 或 `on_job_complete` 抛异常时 schedule 先 stop 所有 worker 再重抛（`on_event` 的异常不产生判定），故会冒泡出 `schedule()`；二是 schedule 返回之后落库服务的结束写，或为组装 RunResult 而读运行态的那一次失败（决定三「ReportStore.write 失败隔离」注）。`run` 以非零退出码结束、终端里有存储错误：给一句产品语言的说明（发生了什么、记录在哪里、可以怎么办），不打回溯（[0039](./0039-user-facing-surfaces-no-internal-references.md)），处理过使用方中断时仍按信号取 130 或 143（[0031](./0031-job-lifecycle-states-and-severity.md) 决定五）；第一种情形里执行中的 job 留在 `running`，被处置时怎样记见决定三「保存明细失败」条。说明按记录是否已是终态分两种：本进程的写已使 run 成为终态（为组装而读的那一次失败）时记录已完整，说明指向 `status`、写明不必重新执行，免得使用方为一次读失败重付一次执行；其余情形说明执行已停止、排除存储问题之后重新执行。落库服务对外给出「本进程的写是否已使 run 成为终态」这项事实，组合根据它选说明。退出码只承诺非零、不另设一个专门的值：这次执行没有输出汇总，脚本按非零分流，记录用 `status` 读。
 
 ## 现在做 / 留口子
 

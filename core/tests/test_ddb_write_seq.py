@@ -1,13 +1,13 @@
 """DynamoDBRunStore 的写入序号与以它为条件的两个写入口（ADR 0030 决定六「STATE item 带写入序号」条、ADR 0034 机制三②）。
 
 两个 adapter 共有的语义在 test_ending_and_commit_writes.py 对拍；这里只有 DynamoDB 一侧才有的性质：
-- 写入序号：建 run 写 0；每一次写成的 update_item 恰好加一（认领、执行中的 job 写与它的回退写、投影的标量一步与每一次逐 job 写、
+- 写入序号：建 run 写 0；每一次写成的 update_item 恰好加一（认领、执行中的 job 写、投影的标量一步与每一次逐 job 写、
   try_finalize、终态写、结束写），条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数。
 - 读与写之间插入另一方的写：被测的一方读到 STATE 之后、发出写之前，另一个写入方（各持自己的表对象）落下认领、执行中的写、投影、
   终态写或结束写；被测的写被序号的条件挡下，重读之后按新的运行态得出正确结果，对方刚写的内容不被整体替换盖掉。被测方给出的那个
   job 上，对方写下的认领时刻留下；对方写下的会话在被测方没有给出会话时留下，给出了即取被测方的。先后靠包住被测表对象的
   update_item 固定下来，不靠线程竞争。
-- 执行中的写（`update_job_state`）被挡下时由这次写带回的条目分辨原因，不另读。
+- 执行中的写（`update_job_state`）只发一次写，被挡下时由这次写带回的条目分辨原因，不另读。
 - 写入次数：两个写入口没有并发的写时只发一次 update_item，run 已结束或结束写不成立时不发写；重读再算的次数用尽时抛错、不改记录。
 - jobs Map 的条目没有 job 级说明时省键，由结束写结束的条目带说明表的那一句（读原始 STATE，不经 load_run_state）。
 - 整体替换只改它该改的属性。状态分组随这两个写入口的变化在 test_status_group.py。
@@ -118,11 +118,6 @@ def _job_write(store, meta):
     assert store.update_job_state(meta.run_id, JobState("a", Status.RUNNING, session_id="sess-a")) is True
 
 
-def _job_write_on_an_ended_run(store, meta):
-    assert store.try_finalize(meta.run_id, Status.ERROR, "t0") is True
-    assert store.update_job_state(meta.run_id, JobState("a", Status.PASSED)) is False  # 第一次写被挡、回退写写成
-
-
 def _project(store, meta):
     projected = RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=2, jobs={
         "a": JobState("a", Status.RUNNING, session_id="sess-a"), "b": JobState("b", Status.PASSED),
@@ -144,9 +139,9 @@ def _end(store, meta):
     assert store.end_run(meta.run_id, RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
 
 
-@pytest.mark.parametrize("write", [_claim, _job_write, _job_write_on_an_ended_run, _project, _finalize, _commit, _end],
-                         ids=["try_claim_job", "update_job_state", "update_job_state-ended", "project_state",
-                              "try_finalize", "commit_job_states", "end_run"])
+@pytest.mark.parametrize("write", [_claim, _job_write, _project, _finalize, _commit, _end],
+                         ids=["try_claim_job", "update_job_state", "project_state", "try_finalize", "commit_job_states",
+                              "end_run"])
 def test_each_landed_update_increments_the_write_seq_once(table, store, monkeypatch, write):
     """每个写入口之后，写入序号的增量等于这期间写成的 update_item 请求数：每一次写成的写恰好加一，被条件挡下的写不改它。"""
     meta = _create(store)
@@ -158,7 +153,7 @@ def test_each_landed_update_increments_the_write_seq_once(table, store, monkeypa
 
 
 def test_rejected_writes_leave_the_write_seq(table, store):
-    """条件不成立的写不改写入序号：认领已不是 pending 的 job、过期的投影、对已结束的 run 收尾、终态写与结束写。"""
+    """条件不成立的写不改写入序号：认领已不是 pending 的 job、过期的投影、对已结束的 run 收尾、执行中的写、终态写与结束写。"""
     meta = _create(store, ("a", "b"), hwm=5)
     _claim(store, meta)
     seq = _seq(table)
@@ -171,6 +166,7 @@ def test_rejected_writes_leave_the_write_seq(table, store):
     assert store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at=_ENDED) is True
     seq = _seq(table)
     assert store.try_finalize("run-1", Status.PASSED, "t2") is False
+    assert store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="late")) is False
     assert store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at="t2") is CommitOutcome.ALREADY_ENDED
     assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t2") is False
     assert _seq(table) == seq
@@ -182,7 +178,7 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
     if op == 0:
         store.try_claim_job(meta.run_id, sid, claimed_at=_CLAIMED)
     elif op == 1:
-        store.update_job_state(meta.run_id, JobState(sid, rng.choice([Status.PENDING, Status.RUNNING])))
+        store.update_job_state(meta.run_id, JobState(sid, Status.RUNNING, session_id=rng.choice([None, "s1", "s2"])))
     elif op == 2:
         hwm[0] += rng.choice([-1, 0, 1])  # 含过期的投影（被条件挡下）
         statuses = {j.scope_id: rng.choice([Status.PENDING, Status.RUNNING, *_TERMINAL]) for j in meta.jobs}
@@ -456,8 +452,8 @@ def test_replacement_on_a_record_without_write_seq_is_still_conditional(table, s
 # ---------- 执行中的写：被挡下的原因取自这次写带回的条目 ----------
 
 def test_job_write_tells_why_it_was_rejected_from_the_rejected_write_itself(table, store, monkeypatch):
-    """`update_job_state` 被挡下时不另读：run 未结束而 a 已是终态时只有被挡下的那一次写，a 不变、返回 True；run 经 try_finalize 结束、
-    b 仍执行中时，被挡下之后再写一次只写 b、返回 False；a 已是终态时在已结束的 run 上同样只有被挡下的那一次写、返回 False。"""
+    """`update_job_state` 被挡下时不另读、不再写：run 未结束而 a 已是终态、或 job 不在 Map 里时只有被挡下的那一次写，记录不变、返回
+    True；run 已结束时（b 仍执行中，或 a 已是终态）同样只有被挡下的那一次写，记录不变、返回 False。"""
     meta = _create(store, ("a", "b"))
     _claim(store, meta)
     assert store.try_claim_job("run-1", "b", claimed_at=_CLAIMED) is True
@@ -467,17 +463,19 @@ def test_job_write_tells_why_it_was_rejected_from_the_rejected_write_itself(tabl
     assert store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="late")) is True
     assert log == ["write-rejected"]
     assert store.load_run_state("run-1").jobs["a"] == _done("a", Status.PASSED)
+    log.clear()
+    assert store.update_job_state("run-1", JobState("ghost", Status.RUNNING)) is True
+    assert log == ["write-rejected"]
+    assert set(store.load_run_state("run-1").jobs) == {"a", "b"}
 
     assert store.try_finalize("run-1", Status.ERROR, "t1") is True
-    log.clear()
-    assert store.update_job_state("run-1", JobState("b", Status.PASSED, session_id="sess-b")) is False
-    assert log == ["write-rejected", "write-ok"]
-    log.clear()
-    assert store.update_job_state("run-1", JobState("a", Status.RUNNING)) is False
-    assert log == ["write-rejected"]
-    got = store.load_run_state("run-1")
-    assert (got.jobs["a"], got.jobs["b"], got.status) == (
-        _done("a", Status.PASSED), JobState("b", Status.PASSED, session_id="sess-b"), Status.ERROR)
+    before = store.load_run_state("run-1")
+    for js in (JobState("b", Status.RUNNING, session_id="sess-b"), JobState("a", Status.RUNNING)):
+        log.clear()
+        assert store.update_job_state("run-1", js) is False
+        assert log == ["write-rejected"]
+    assert store.load_run_state("run-1") == before
+    assert (before.jobs["a"], before.jobs["b"].status) == (_done("a", Status.PASSED), Status.RUNNING)
 
 
 # ---------- 写入次数 ----------

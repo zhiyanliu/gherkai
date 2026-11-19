@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from typing import get_args
 
 import pytest
@@ -15,7 +16,6 @@ from gherkai_core.model import (
     Job,
     JobResult,
     RunMeta,
-    RunResult,
     Scenario,
     ScopeDone,
     SessionClosed,
@@ -23,8 +23,11 @@ from gherkai_core.model import (
     SessionRecord,
     Status,
     Step,
+    Target,
 )
-from gherkai_core.serialize import from_dict, job_result_from_dict, job_result_to_dict, to_dict
+from gherkai_core.project import assemble_run_result
+from gherkai_core.run_status import state_without_record
+from gherkai_core.serialize import job_result_from_dict, job_result_to_dict, to_dict
 from gherkai_core.wire import event_from_json, event_from_line, raise_for_worker_exit
 
 
@@ -174,15 +177,25 @@ def test_device_job_without_sessions_still_writes_both_metering_keys_and_empty_s
     assert back.sessions == [] and (back.device_observed_s, back.device_observed_missing) == (0.0, 0)
 
 
+def _assembled(meta: RunMeta, details: list[JobResult]):
+    """前台没有记录时的组装路径：运行态按两个写入口的作用在内存里算出，再经唯一的组装处得到 RunResult。"""
+    state = state_without_record(meta, details, None, ended_at="2026-01-01T00:10:00+00:00")
+    return assemble_run_result(meta, state, details, duration_ms=None)
+
+
 def test_run_result_run_level_metering_keys_follow_the_same_omit_rule():
-    meta = RunMeta(run_id="r", created_at="t", jobs=(_job("a"), _job("b")), deadline_at="2026-01-01T01:00:00+00:00")
-    desktop_run = RunResult(run_meta=meta, status=Status.PASSED, jobs=[JobResult(job=_job("a"), status=Status.PASSED)])
+    """run 级的两个设备计量键按运行定义里有没有设备 job 出现（ADR 0051 决策 7）。RunResult 只有写端，断言 to_dict 与它的 JSON。"""
+    desk = _job("a")
+    desktop_meta = RunMeta(run_id="r", created_at="t", jobs=(desk,), deadline_at="2026-01-01T01:00:00+00:00")
+    desktop_run = _assembled(desktop_meta, [JobResult(job=desk, status=Status.PASSED)])
     assert not {"device_observed_s", "device_observed_missing"} & set(to_dict(desktop_run))
-    device_run = RunResult(run_meta=meta, status=Status.ERROR, device_observed_s=25.5, device_observed_missing=1,
-                           jobs=[JobResult(job=_job("b"), status=Status.ERROR, sessions=[
-                               SessionRecord(session_id="arn:x", name="n", origin="created", release="confirmed", observed_s=25.5)],
-                               device_observed_s=25.5, device_observed_missing=1)])
-    d = to_dict(device_run)
+    dev = replace(_job("b"), target=Target(device="android", ui_kind="web"))
+    device_meta = RunMeta(run_id="r", created_at="t", jobs=(desk, dev), deadline_at="2026-01-01T01:00:00+00:00")
+    device_run = _assembled(device_meta, [
+        JobResult(job=desk, status=Status.PASSED),
+        JobResult(job=dev, status=Status.ERROR, sessions=[
+            SessionRecord(session_id="arn:x", name="n", origin="created", release="confirmed", observed_s=25.5)],
+            device_observed_s=25.5, device_observed_missing=1)])
+    d = json.loads(json.dumps(to_dict(device_run)))
     assert d["device_observed_s"] == 25.5 and d["device_observed_missing"] == 1
-    back = from_dict(json.loads(json.dumps(d)))
-    assert back.device_observed_s == 25.5 and back.device_observed_missing == 1 and back.jobs[0].sessions[0].name == "n"
+    assert [j["scope_id"] for j in d["jobs"]] == ["a", "b"] and d["jobs"][1]["sessions"][0]["name"] == "n"

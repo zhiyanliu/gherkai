@@ -813,15 +813,13 @@ def test_tick_runs_isolates_defensive_scan_failure(monkeypatch, capsys):
 
 
 def _stub_tick_runs_host(monkeypatch, outcome):
-    """把 _tick_runs 的三个外部动作换成记录：tick 返回给定结果，记下报告收尾与防御性超时扫是否被调。"""
+    """把 _tick_runs 的三个外部动作换成记录：tick 返回给定结果，记下报告生成与防御性超时扫是否被调。"""
     import gherkai_core.reconcile as _cr
-    from gherkai_runtime import compose as _compose
 
     calls: list[str] = []
     monkeypatch.setattr(reconciler, "_build", lambda rid: ("BUILT",) * 7)
     monkeypatch.setattr(_cr, "tick", lambda *a, **kw: outcome)
-    monkeypatch.setattr(_cr, "finalize_report", lambda *a, **kw: calls.append("report"))
-    monkeypatch.setattr(_compose, "run_duration_ms", lambda state: None)
+    monkeypatch.setattr(_cr, "write_report_from_record", lambda *a, **kw: calls.append("report"))
     monkeypatch.setattr(reconciler, "_scan_overdue_timeouts", lambda rid, built: calls.append("scan"))
     return calls
 
@@ -835,13 +833,10 @@ def test_tick_runs_branches_on_tick_outcome(monkeypatch):
     """_tick_runs 按 tick 的三种结果分支（ADR 0034 机制三「run 级状态只进不退」条④）。"""
     import gherkai_core.reconcile as _cr
 
-    from gherkai_core.model import RunMeta, RunResult
-
-    committed = RunResult(run_meta=RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2999-01-01T00:00:00+00:00"),
-                          status=Status.PASSED)
     cases = [
-        (_cr.TickResult(_cr.TickOutcome.COMMITTED, committed), ["report"]),  # 这一方写成收尾：写报告、不做超时扫
-        (_cr.TickResult(_cr.TickOutcome.ENDED), []),      # run 已结束而不是这一方写成：既不写报告、也不做超时扫
+        # 这一方的写使 run 成为终态：生成报告、不做超时扫（到期而一个 job 都没有启动时，交回的判定明细可以为空）
+        (_cr.TickResult(_cr.TickOutcome.COMMITTED, details=()), ["report"]),
+        (_cr.TickResult(_cr.TickOutcome.ENDED), []),      # run 已结束而不是这一方使它结束：既不写报告、也不做超时扫
         (_cr.TickResult(_cr.TickOutcome.CONTINUE), ["scan"]),  # 继续推进：只做防御性超时扫
     ]
     for outcome, expected in cases:
@@ -854,24 +849,29 @@ def test_tick_runs_branches_on_tick_outcome(monkeypatch):
 
 
 def test_tick_runs_writes_the_report_from_the_committed_tick_result(monkeypatch):
-    """这一方写成收尾时，_tick_runs 交给报告收尾的是 tick 交还的那一份结果与这个 run 的报告落点，不另读事件重算。"""
+    """这一方的写使 run 成为终态时，报告由这一方生成（ADR 0034 机制三「run 级状态只进不退」条④ K2）：_tick_runs 把这个 run 的
+    运行定义、RunStore、tick 交还的那一份判定明细与这个 run 的报告落点交给从记录生成报告的入口，状态由入口读运行态取得，不另读事件
+    重算；生成的时刻取组合根的墙钟。"""
     import gherkai_core.reconcile as _cr
-    from gherkai_runtime import compose as _compose
+    from gherkai_core.model import JobResult
+    from gherkai_core.serialize import instant_from_iso
 
-    from gherkai_core.model import RunMeta, RunResult
-
-    committed = RunResult(run_meta=RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2999-01-01T00:00:00+00:00"),
-                          status=Status.FAILED)
+    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(), deadline_at="2999-01-01T00:00:00+00:00")
+    job = Job(scope_id="a", scope_name="a", engine="novaact", scenarios=(), timeout_s=300.0)
+    details = (JobResult(job=job, status=Status.FAILED),)
+    run_store = _StateStub()
     reports: list = []
-    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: _cr.TickResult(_cr.TickOutcome.COMMITTED, committed))
-    monkeypatch.setattr(_cr, "finalize_report", lambda result, store, created_at, **kw: reports.append((result, store)))
-    monkeypatch.setattr(_compose, "run_duration_ms", lambda state: None)
+    monkeypatch.setattr(_cr, "tick", lambda *a, **kw: _cr.TickResult(_cr.TickOutcome.COMMITTED, details=details))
+    monkeypatch.setattr(_cr, "write_report_from_record",
+                        lambda *a, **kw: reports.append((a, kw)))
     monkeypatch.setattr(reconciler, "_scan_overdue_timeouts",
-                        lambda rid, built: pytest.fail("写成收尾时不做防御性超时扫"))
-    built = ("META", "LOG", _StateStub(), "LAUNCHER", 1, "RSTORE", "PSTORE")
+                        lambda rid, built: pytest.fail("这一方使 run 成为终态时不做防御性超时扫"))
+    built = (meta, "LOG", run_store, "LAUNCHER", 1, "RSTORE", "PSTORE")
     reconciler._tick_runs({"run-1"}, "reconciler", prebuilt={"run-1": built})
-    assert len(reports) == 1
-    assert reports[0][0] is committed and reports[0][1] == "PSTORE"
+    [(args, kwargs)] = reports
+    assert args[0] is meta and args[1] is run_store and args[2] is details and args[3] == "PSTORE"
+    assert set(kwargs) == {"created_at"}
+    instant_from_iso(kwargs["created_at"])  # 记录写法的时刻（带时区），解析不了即抛
 
 
 # ---------- 只推进 detached run（handler 侧分流）----------
@@ -1082,16 +1082,16 @@ def test_timeout_payload_on_a_finished_run_is_a_noop(cloud_env):
     assert out["ok"] and _report_bytes(s3) == before
 
 
-# ---------- commit point 之后的取数不许击穿已 commit 的 run（ADR 0030 决定三 / 0034 收尾）----------
+# ---------- 终态写之后为生成报告而读记录，失败不许击穿已到终态的 run（ADR 0030 决定三 / 0034 收尾）----------
 
-def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkeypatch):
-    """run 级墙钟只是报告里的派生指标（缺则显「?」），取它要在 finalize **之后**多读一次 RunState——那次强一致读
-    抛（DDB 限流 / 瞬时 5xx）不许冒泡：commit 之后的失败无人重试，且在云端会让 events Stream 本批重试耗尽后整批
-    丢弃，同批其它 run 的事件随之丢失。断言 handler 正常返回、报告照写、墙钟按缺值走。
+def test_handler_returns_normally_when_the_record_read_for_the_report_fails(cloud_env, monkeypatch):
+    """报告从记录组装，为生成而读 RunState 的那一次在这一方的终态写**之后**——那次强一致读抛（DDB 限流 / 瞬时 5xx）不许冒泡：
+    终态写之后的失败无人重试，且在云端会让 events Stream 本批重试耗尽后整批丢弃，同批其它 run 的事件随之丢失（ADR 0034
+    「端到端流程」cloud 第 ④ 步）。断言 handler 正常返回；判定明细与终态已落；读不到记录就不生成报告。
     """
-    import gherkai_core.reconcile as core_reconcile
+    import boto3
 
-    # 让 run 一 tick 就 done：job 已 CAS 成 running、events 表已有它的退出记录 → 本 tick 推成终态 → finalize
+    # 让 run 一 tick 就 done：job 已 CAS 成 running、events 表已有它的退出记录 → 本 tick 推成终态 → 终态写
     store = DynamoDBRunStore(cloud_env["runs"], detached=True)
     job = Job(scope_id="a", scope_name="a", engine="novaact",
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),), timeout_s=300.0)
@@ -1103,40 +1103,35 @@ def test_report_still_written_when_the_run_duration_read_fails(cloud_env, monkey
     from gherkai_core.adapters.event_log import DdbEventLog
     DdbEventLog(cloud_env["events"], "run-1", ["a"]).record_exit("a", 0)
 
-    # 只让 finalize **之后**的那次读抛（finalize 之前的读是 tick 的正常输入，抛了就不是本用例要验的路径）
-    real_load, real_finalize = DynamoDBRunStore.load_run_state, DynamoDBRunStore.try_finalize
-    committed: list[bool] = []
+    # 只让终态写**之后**的那次读抛（终态写之前的读是 tick 的正常输入，抛了就不是本用例要验的路径）
+    real_load, real_commit = DynamoDBRunStore.load_run_state, DynamoDBRunStore.commit_job_states
+    committed: list = []
+    raised: list[str] = []
 
     def load(self, run_id):
         if committed:
+            raised.append(run_id)
             raise RuntimeError("DDB 限流")
         return real_load(self, run_id)
 
-    def try_finalize(self, *a, **kw):
-        out = real_finalize(self, *a, **kw)
-        committed.append(True)
+    def commit_job_states(self, *a, **kw):
+        out = real_commit(self, *a, **kw)
+        committed.append(out)
         return out
 
     monkeypatch.setattr(DynamoDBRunStore, "load_run_state", load)
-    monkeypatch.setattr(DynamoDBRunStore, "try_finalize", try_finalize)
-
-    seen: dict = {}
-    real_report = core_reconcile.finalize_report
-
-    def spy(*a, **kw):
-        seen.update(kw)
-        return real_report(*a, **kw)
-
-    monkeypatch.setattr(core_reconcile, "finalize_report", spy)
+    monkeypatch.setattr(DynamoDBRunStore, "commit_job_states", commit_job_states)
 
     out = reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
 
     assert out == {"ok": True, "runs": ["run-1"]}       # 不抛 → Stream 本批不重试、不整批丢弃
-    assert committed, "run 未到 finalize，断言会空转"
-    assert seen.get("run_duration_ms") is None          # 取数失败按缺值走（报告墙钟显「?」）
-    import boto3
+    assert len(committed) == 1, "run 没有走到终态写，断言会空转"
+    assert raised == ["run-1"]                          # 失败确实落在为生成报告而读的那一次上
+    assert real_load(store, "run-1").status == Status.ERROR  # 终态已落（exit=0 无 scope_done → error）
     s3 = boto3.client("s3", region_name="us-east-1")
-    assert s3.get_object(Bucket=_BUCKET, Key="reports/run-1/index.html")["Body"].read()  # 报告仍被写出
+    assert s3.get_object(Bucket=_BUCKET, Key="reports/run-1/jobs/a.json")["Body"].read()  # 判定明细在终态写之前已落
+    listed = s3.list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/index.html").get("Contents", [])
+    assert listed == []                                 # 读不到记录就不生成报告
 
 
 # ---------- 并发上限取 min(meta, 部署侧 cap)（ADR 0034 机制四）----------

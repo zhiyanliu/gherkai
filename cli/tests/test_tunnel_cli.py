@@ -12,7 +12,8 @@ from pathlib import Path
 import pytest
 
 import gherkai_cli.__main__ as m
-from gherkai_core.model import JobResult, RunResult, Status
+from gherkai_core.model import JobResult, Status
+from gherkai_core.schedule import Execution
 from gherkai_runtime import tunnel as gtunnel
 
 INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
@@ -44,7 +45,7 @@ def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch):
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta
         results = [JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]
-        return RunResult(run_meta=run_meta, status=Status.PASSED, jobs=results)
+        return Execution(run_meta=run_meta, results=tuple(results), stopped_by=None, duration_ms=0.0)
 
     monkeypatch.setattr(m, "schedule", fake_schedule)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report",
@@ -72,8 +73,8 @@ def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch):
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta
-        return RunResult(run_meta=run_meta, status=Status.PASSED,
-                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
+                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
 
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
     monkeypatch.setattr(m, "schedule", fake_schedule)
@@ -105,8 +106,8 @@ def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta
-        return RunResult(run_meta=run_meta, status=Status.PASSED,
-                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
+                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
 
     monkeypatch.setattr(m, "schedule", fake_schedule)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
@@ -169,7 +170,7 @@ def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, mon
             results.append(jr)
             if on_job_complete is not None:
                 on_job_complete(jr)
-        return RunResult(run_meta=run_meta, status=Status.FAILED, jobs=results)
+        return Execution(run_meta=run_meta, results=tuple(results), stopped_by=None, duration_ms=0.0)
 
     monkeypatch.setattr(m, "schedule", fake_schedule)
     report_dir = tmp_path / "reports"
@@ -282,8 +283,8 @@ def test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(tmp_path,
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta
-        return RunResult(run_meta=run_meta, status=Status.PASSED,
-                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
+        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
+                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
 
     monkeypatch.setattr(m, "schedule", fake_schedule)
     assert m.main(["run", str(feat), "--no-report", "--expose-local", "http://localhost:3000/"]) == 0

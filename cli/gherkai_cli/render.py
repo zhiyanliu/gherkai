@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timezone
 
-from gherkai_core.model import TERMINAL_STATUSES, Event, Job, JobResult, RunListing, RunResult, RunState, SessionRecord, Status
+from gherkai_core.model import TERMINAL_STATUSES, Event, Job, JobResult, JobState, RunListing, RunResult, RunState, SessionRecord, Status
 from gherkai_core.redact import redact_deep
 from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tree, status_text, styled  # rich 只经 textui 进来（ADR 0047 渲染面单点）
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
@@ -70,11 +70,6 @@ _SHORTCIRCUIT_NOTE = "⚠ 因前置 step error 被跳过（未执行）"
 # scope 级 error 后合成的 skipped（status=skipped 且 shortcircuited=False，ADR 0051 决策 4 / 0031 决定六）：这一步没执行，
 # 原因在 job 判定（被测对象未就绪或会话丢失）。报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
 _SCOPE_SKIPPED_NOTE = "未执行（scope 级错误，原因见 job 判定）"
-# 运行定义里有、判定清单里没有的 job（`RunResult.jobs_without_verdict`）：已过停止启动的时刻、或发现 run 已被别处
-# 记为已结束而没有启动，没有判定，原因在 run 级说明。它不是 skipped（skipped 是因 fail-fast 或使用方中断而未启动、有判定，原因在
-# job 的 message），也不是 step 行的「未执行」旁注（scope 级错误之后合成的 skipped），所以 job 行上只写这个标注、不写状态词。
-# 报告入口页有同一句字面量（core 不能 import cli），由 test_render 逐字锁定。
-_NOT_RUN_LABEL = "没有执行"
 _ATTEMPTED_LABEL = "结果未知的创建尝试"
 
 
@@ -127,8 +122,9 @@ def session_lines(jr: JobResult) -> list[str]:
 
 
 def render_text(result: RunResult) -> str:
-    """RunResult → 人看的判定汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。有 run 级说明时紧跟总状态给出，
-    运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行。
+    """从记录组装的 RunResult → 人看的汇总树（job → scenario → step，带时长、成本与报告指针；ADR 0047）。run 与 job 的状态取运行态
+    （ADR 0030 决定三），有 run 级说明时紧跟总状态给出；有判定明细的 job 按运行定义的次序列出明细树，由结束写结束的 job（没有判定明细）
+    排在其后，各一行给出状态与运行态里的说明（与报告入口页同一规则，ADR 0027「index.html 形态」；说明表见 ADR 0031 决定三「结束写」小节）。
 
     面向人的文本模式：用自然的词、不用变量名式术语（RunResult/sessionId/step[0] 这类）；
     但 job/scenario/step/scope 是领域概念（feature 作者写 feature、看 plan 都在用），保留原词。JSON 模式（to_dict）是
@@ -140,7 +136,7 @@ def render_text(result: RunResult) -> str:
 def run_tree(result: RunResult) -> TreeNode:
     """run 汇总的树（`render_text` 的结构；测试按节点归属断言，不按排版）。"""
     root = TreeNode(Text.assemble("运行结果  总状态: ", status_text(result.status.value)))
-    if result.message:  # run 级说明：没有任何 job 能承载的原因（如已超过允许运行的时间），紧跟总状态
+    if result.message:  # run 级说明：结束写写下的结束原因（ADR 0031 决定三「结束写」小节的说明表），紧跟总状态
         root.add(f"说明: {_one_line(result.message)}")
     if result.duration_ms is not None:
         root.add(f"总墙钟时长: {_ms(result.duration_ms)}")
@@ -152,16 +148,19 @@ def run_tree(result: RunResult) -> TreeNode:
         root.add(f"设备占用时长合计: {_ms((result.device_observed_s or 0.0) * 1000.0)}"
                  + (f"（另有 {missing} 个会话缺计量）" if missing else ""))
 
-    for jr in result.jobs:
+    for outcome in result.jobs:
+        jr = outcome.detail
+        if jr is None:  # 由结束写结束的 job 在下面列出
+            continue
         jbits = _cost_bits(jr.total_tokens, jr.total_time_worked_s)
         cost_str = f"  [{', '.join(jbits)}]" if jbits else ""
-        # 说明文字：error 类带分类前缀；fail-fast 派生态（skipped/aborted）的 error_type 恒 None、「为什么没执行」
-        # 只在 message 里，故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。
+        # 说明文字取判定明细：error 类带分类前缀；被中止的 job（aborted）没有归因（ADR 0031 决定一），原因只在 message 里，
+        # 故无分类时也显 message——否则人读视图只剩一个光秃的态、原因得改用 --json。状态取运行态。
         if jr.error_type:
             err = f"  ({jr.error_type}: {jr.message})" if jr.message else f"  ({jr.error_type})"  # 空 message 不留吊着的冒号（与报告页判法一致）
         else:
             err = f"  ({jr.message})" if jr.message else ""
-        jn = root.add(Text.assemble(f"job {jr.scope_id!r}: ", status_text(jr.status.value), styled(cost_str, DIM), err))
+        jn = root.add(Text.assemble(f"job {jr.scope_id!r}: ", status_text(outcome.status.value), styled(cost_str, DIM), err))
         if jr.duration_ms is not None:
             jn.add(f"scope 墙钟: {_ms(jr.duration_ms)}")
         for sr in jr.scenarios:
@@ -195,19 +194,25 @@ def run_tree(result: RunResult) -> TreeNode:
         # scope 级原生报告产物（Midscene report.html 挂这层，来自 scope_done）
         for rr in jr.report_refs:
             jn.add(styled(f"report（{rr.label or rr.kind}）: {rr.ref}", DIM))
-    # 没有判定的 job 排在有判定的之后、按运行定义的次序：只有 scope 与标注，原因已在上面的 run 级说明里
-    for job in result.jobs_without_verdict:
-        root.add(Text.assemble(f"job {job.scope_id!r}: ", styled(_NOT_RUN_LABEL, "yellow")))
+    # 由结束写结束的 job（没有启动，或 run 被结束时没有结果）排在有判定明细的之后、按运行定义的次序：没有明细树，状态与说明都取
+    # 运行态（ADR 0027「index.html 形态」，说明表见 ADR 0031 决定三「结束写」小节）
+    for outcome in result.jobs:
+        if outcome.detail is not None:
+            continue
+        note = f"  ({_one_line(outcome.state.message)})" if outcome.state.message else ""
+        root.add(Text.assemble(f"job {outcome.scope_id!r}: ", status_text(outcome.status.value), note))
     return root
 
 
 def render_run_state(state: RunState) -> str:
-    """`status` 的 RunState 人读渲染（轻量；权威判定明细读 jobs/*.json 或 --json）。
+    """`status` 的 RunState 人读渲染（轻量；机读用 `status --json`，判定明细用 `explain` 看，ADR 0041 决策三）。
 
     local/cloud 两路共用一份（保两路一致，ADR 0034）——渲染是前端的事，故住这里而非产品本体层。
     """
     lines = [f"run {state.run_id}: {state.status.value}"]
-    if state.message:  # run 级消息：推进器不经任何 job 就终结 run 时的原因，紧跟状态行
+    # run 级消息：结束这个 run 的原因（各来路的句子见 ADR 0031 决定三「结束写」小节的说明表，边界见 ADR 0037 决策 7「run 级消息的边界」
+    # 一段），紧跟状态行
+    if state.message:
         lines.append(f"message={state.message}")
     if state.jobs:  # job 清单是同构表（ADR 0047）；无会话血缘的 job 该格显示 -
         lines.append(render_table(["scope_id", "状态", "session"],
@@ -467,6 +472,8 @@ _THOUGHT_BUDGET = 800                            # 单段推理文本的字符�
 # 中止 job 的提示语：只在需要从事件流补取却补不到时打，后接原因（ADR 0042 决策七）
 _ABORTED_PARTIAL_HINT = "本 job 被中止，无法从事件流补取已执行 step 的记录与证据"  # 后接原因（ADR 0042 决策七）
 _FROM_EVENTS = "（记录取自事件流）"
+# 已结束而没有判定明细的 job（由结束写结束）的 scope 节点下的一句：没有 step 记录与证据可看，状态与说明出自运行记录
+_NO_DETAIL = "没有判定明细，状态与说明取自运行记录"
 _UNFINISHED = "未完成"
 _EVIDENCE_MISSING_TEXT = {
     "no_ref": "无 AI 证据",
@@ -598,6 +605,20 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
             scope_doc["console_url"] = url
         scopes.append(scope_doc)
     return redact_deep({"run_id": run_id, "status": status, "scopes": scopes})  # 预热地址的令牌与证据里的签名类参数可能出现：整份脱敏（ADR 0035 决策 5）
+
+
+def explain_without_detail_to_dict(*, run_id: str, status: str | None, job_state: JobState) -> dict:
+    """点名的 job 已结束而没有判定明细时的 explain 文档（由结束写结束的 job，ADR 0031 决定三「结束写」小节）：`scopes[]` 只有这一项，
+    只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取运行态（没有说明时 `message` 为 null）；没有 scenario、step 与证据，
+    与 `run --json` 的 `jobs[]` 里没有明细的项形状相同。"""
+    scope = {"scope_id": job_state.scope_id, "status": job_state.status.value, "message": job_state.message}
+    return redact_deep({"run_id": run_id, "status": status, "scopes": [scope]})
+
+
+def _has_detail(scope: dict) -> bool:
+    """explain 文档里的一个 scope 是否出自判定明细：出自明细的带 scenario 骨架，没有明细的只有运行态里的三个键
+    （见 `explain_without_detail_to_dict`）。"""
+    return "scenarios" in scope
 
 
 def _device_keys_for_explain(jr: JobResult) -> dict:
@@ -779,6 +800,12 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
     """explain 文本形态的树（`render_explain_text` 的结构）。"""
     root = TreeNode(Text.assemble(f"run {doc['run_id']}  status=", status_text(doc["status"])))
     for sc in doc["scopes"]:
+        if not _has_detail(sc):  # 已结束而没有判定明细的 job：只有运行态里的状态与说明
+            scn = root.add(Text.assemble(f"scope {sc['scope_id']}  status=", status_text(sc["status"])))
+            if sc["message"]:
+                scn.add(f"message: {_one_line(sc['message'])}")
+            scn.add(styled(_NO_DETAIL, DIM))
+            continue
         sess = f"  session={sc['session_id']}" if sc["session_id"] else ""
         scn = root.add(Text.assemble(f"scope {sc['scope_id']}  engine={sc['engine']}  status=", status_text(sc["status"]), sess))
         for rr in sc["report_refs"]:
@@ -815,4 +842,4 @@ def explain_tree(doc: dict, *, expand_passed: bool = False, full: bool = False) 
 
 # to_dict 已移入 gherkai_core.serialize（单一真理源，cli 与 manifest 共用），从那里 re-export。
 __all__ = ["format_event", "render_text", "render_run_state", "render_plan_text", "plan_to_dict", "to_dict",
-           "explain_to_dict", "render_explain_text", "explain_step_expands"]
+           "explain_to_dict", "explain_without_detail_to_dict", "render_explain_text", "explain_step_expands"]

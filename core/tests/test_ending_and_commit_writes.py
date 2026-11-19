@@ -7,7 +7,9 @@
   aborted 一格不出现）在有 running 的 job 时不写；run 已结束、记录不存在时返回 False、不改任何东西；同一个 run 两次结束写只有第一次写成。
 - 终态写：三种返回值各自的情形，一次写记多个 job，已是终态的 job 不被改写，run 已结束时写不成、运行态不变，使 run 成为终态的那次写
   带上结束时刻，参数不合要求时不写；给出的 job 与库中的条目按字段合并（会话、认领时刻、job 级说明各自的规则）。
-- 终态只写一次：执行中的写（update_job_state）不改写已结束的 job，run 未结束与已由结束写结束两种情形都是。
+- 终态只写一次：执行中的写（update_job_state）不改写已结束的 job，run 未结束与已由结束写结束两种情形都是；投影不改写终态写与结束写
+  记下的终态，云端在投影的标量一步与逐 job 写之间落下结束写时同样如此。执行中的写也不臆造运行态里没有的 job。
+- 没有记录的执行在内存里算出的运行态（`run_status.state_without_record`）与两个写入口按同一组执行事实写下的记录相同。
 - 先后：在调用方读运行态与它的写之间插入另一方的写（认领、执行中的写、投影、处置的结束写、另一方的终态写），按固定次序构造，不靠
   线程竞争。
 - job 级说明：投影与认领保留库中的说明。
@@ -18,8 +20,8 @@ from __future__ import annotations
 
 import pytest
 
-from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
-from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending
+from gherkai_core.model import Job, JobResult, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending, state_without_record
 
 _T0 = "2026-11-19T00:00:00Z"
 _CLAIMED = "2026-11-19T00:01:00Z"
@@ -440,17 +442,111 @@ def test_a_late_running_write_does_not_reopen_a_committed_job(run_store):
     assert (got.jobs["a"], got.status, got.ended_at) == (first, Status.PASSED, _ENDED)
 
 
-@pytest.mark.parametrize("scope_id", ["a", "b"], ids=["aborted", "skipped"])
-@pytest.mark.parametrize("written", [Status.RUNNING, Status.PENDING, Status.PASSED])
-def test_a_job_write_after_an_end_run_changes_nothing(run_store, scope_id, written):
-    """run 由处置的结束写结束之后（a 记 aborted、b 记 skipped，各带说明），对其中一个 job 的迟到写返回 False，运行态整份不变。"""
+@pytest.mark.parametrize("scope_id", ["a", "b", "ghost"], ids=["aborted", "skipped", "outside-the-run"])
+def test_a_job_write_after_an_end_run_changes_nothing(run_store, scope_id):
+    """run 由处置的结束写结束之后（a 记 aborted、b 记 skipped，各带说明），迟到的执行中写返回 False（run 已结束），运行态整份不变；
+    写的是运行态里没有的 job 时同样如此（返回值只看 run）。"""
     _create(run_store, ("a", "b"))
     _claim(run_store, "a", session="sess-a")
     assert run_store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at=_ENDED) is True
     before = run_store.load_run_state("run-1")
 
-    assert run_store.update_job_state("run-1", JobState(scope_id, written, session_id="late", claimed_at=_CLAIMED)) is False
+    late = JobState(scope_id, Status.RUNNING, session_id="late", claimed_at=_CLAIMED)
+    assert run_store.update_job_state("run-1", late) is False
     assert run_store.load_run_state("run-1") == before
+
+
+@pytest.mark.parametrize("claimed", [False, True], ids=["run-pending", "run-running"])
+def test_a_job_write_for_a_job_outside_the_run_writes_nothing(run_store, claimed):
+    """执行中的写不臆造 job：运行态里没有的 scope 不写，运行态整份不变（运行定义以外的 running 项会让 run 永远到不了终态）；run 仍未
+    结束，返回 True。"""
+    _create(run_store, ("a", "b"))
+    if claimed:
+        _claim(run_store, "a")
+    before = run_store.load_run_state("run-1")
+    assert run_store.update_job_state("run-1", JobState("ghost", Status.RUNNING, session_id="s")) is True
+    assert run_store.load_run_state("run-1") == before
+
+
+# ---------- 终态只写一次：投影不改写终态写与结束写记下的终态 ----------
+
+@pytest.mark.parametrize("hwm", [1, 2], ids=["same_hwm", "higher_hwm"])
+def test_projection_does_not_rewrite_a_terminal_job_written_by_a_commit(run_store, hwm):
+    """run 未结束时 a 的终态由终态写记下之后，投影把 a 算成另一个终态（同级、另一个会话），HWM 相同或更高也不改写它；同一次投影里
+    执行中的 b 照常写下新的会话。"""
+    _create(run_store, ("a", "b"), hwm=0)
+    _claim(run_store, "a")
+    _claim(run_store, "b")
+    first = _done("a", Status.PASSED, session="first")
+    assert run_store.commit_job_states("run-1", [first], ended_at="never") is CommitOutcome.OPEN
+    seeded = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=1,
+                      jobs={"a": JobState("a", Status.PASSED, session_id="first"), "b": JobState("b", Status.RUNNING)})
+    assert run_store.project_state("run-1", seeded) is True
+
+    later = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=hwm,
+                     jobs={"a": JobState("a", Status.ERROR, session_id="other"),
+                           "b": JobState("b", Status.RUNNING, session_id="sess-b")})
+    assert run_store.project_state("run-1", later) is True
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"] == first
+    assert got.jobs["b"] == JobState("b", Status.RUNNING, session_id="sess-b", claimed_at=_CLAIMED)
+    assert got.status == Status.RUNNING
+
+
+def test_projection_does_not_rewrite_jobs_ended_by_an_end_run_landing_after_its_scalar_step(aws, monkeypatch):
+    """云端的投影分两步：标量一步写成之后、逐 job 写发出之前，另一方以处置的结束写结束这个 run（a、b 都还是 running，记 aborted 并带
+    说明）。余下的逐 job 写——把 a 写成终态、给 b 写新会话——都以 run 未结束、库中 job 未结束为条件，写不成；记录保持那次结束写的结果。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    table = aws["ddb"].Table(aws["table_name"])
+    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    _create(store, ("a", "b"), hwm=0)
+    _claim(store, "a", session="sess-a")
+    _claim(store, "b", session="sess-b")
+    real_update = table.update_item
+    calls: list[dict] = []
+    ended = None
+
+    def update_item(**kwargs):
+        nonlocal ended
+        calls.append(kwargs)  # 记下发出的每一次写，被条件挡下的也算
+        resp = real_update(**kwargs)
+        if len(calls) == 1:  # 标量一步写成之后、逐 job 写发出之前
+            assert other.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
+            ended = other.load_run_state("run-1")
+        return resp
+
+    monkeypatch.setattr(table, "update_item", update_item)
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=5,
+                         jobs={"a": JobState("a", Status.PASSED, session_id="sess-a"),
+                               "b": JobState("b", Status.RUNNING, session_id="sess-new")})
+    assert store.project_state("run-1", projected) is True
+    assert len(calls) == 3, "前提：标量一步之后两个 job 各发了一次逐 job 写"
+    got = store.load_run_state("run-1")
+    assert ended is not None and got.jobs == ended.jobs
+    ending = RUN_ENDINGS["settle-advancer-exited"]
+    assert got.jobs["a"] == JobState("a", Status.ABORTED, session_id="sess-a", claimed_at=_CLAIMED,
+                                     message=ending.aborted_message)
+    assert got.jobs["b"] == JobState("b", Status.ABORTED, session_id="sess-b", claimed_at=_CLAIMED,
+                                     message=ending.aborted_message)
+    assert (got.status, got.message, got.ended_at) == (Status.ABORTED, ending.run_message, _ENDED)
+
+
+# ---------- 没有记录的执行：内存里算出的运行态与记录相同 ----------
+
+@pytest.mark.parametrize("route, first", [("deadline", Status.PASSED), ("fail-fast", Status.ERROR),
+                                          ("interrupt", Status.ABORTED)])
+def test_state_without_record_matches_the_record_written_by_the_two_entries(run_store, route, first):
+    """同一组执行事实（a 判出结果，b、c 没有启动，余下的 job 不再启动的来源是 route）：有记录时经终态写与结束写写下的运行态，与没有
+    记录时在内存里算出的相同（两边都没有开始时刻与认领写）。"""
+    meta = _meta("run-1", ("a", "b", "c"))
+    run_store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING,
+                                        jobs={j.scope_id: JobState(j.scope_id, Status.PENDING) for j in meta.jobs}))
+    assert run_store.commit_job_states("run-1", [JobState("a", first, session_id="s-a")],
+                                       ended_at=_ENDED) is CommitOutcome.OPEN
+    assert run_store.end_run("run-1", RUN_ENDINGS[route], ended_at=_ENDED) is True
+    results = [JobResult(job=meta.jobs[0], status=first, session_id="s-a")]
+    assert state_without_record(meta, results, route, ended_at=_ENDED) == run_store.load_run_state("run-1")
 
 
 # ---------- job 级说明：别的写原样保留 ----------

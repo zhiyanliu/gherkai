@@ -62,9 +62,10 @@ class DefinitionContractError(ValueError):
 class RunAlreadyEnded(RuntimeError):
     """前台执行收尾时 run 级已是终态：本次执行结束之前，别处已把这个 run 记为已结束（ADR 0054 决策五「执行方服从记录」）。
 
-    `RunPersistence.finalize` 的收尾条件写没有写成时抛出：已有的终态不被覆盖，报告也不生成（报告从本次执行的结果派生，会与
-    记录里的终态矛盾）。本次执行已得出的各 job 判定此前已逐个写入。`recorded` 是收尾写不成之后读回的运行态，调用方据它说明
-    记录里的状态与原因（run 级 `message`）；这次读回失败时为 None，结论不变，只是说明里给不出记录的状态。
+    `RunPersistence.finalize` 在两种情形下抛出：收尾时停手信号已经成立（执行中已发现 run 被别处结束），或收尾的结束写被已有的终态
+    挡下。已有的终态不被覆盖，报告也不生成（报告只由使 run 成为终态的那次写的写入方生成）。得知 run 已结束之后，本次执行不再存判定
+    明细、也不再写终态，结果以记录为准。`recorded` 是得知之后读回的运行态，调用方据它说明记录里的状态与原因（run 级 `message`）；
+    这次读回失败时为 None，结论不变，只是说明里给不出记录的状态。
     """
 
     def __init__(self, run_id: str, recorded: RunState | None) -> None:

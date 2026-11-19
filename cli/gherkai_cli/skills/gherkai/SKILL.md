@@ -76,7 +76,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 
 ## 8 退出码分流
 
-- `run`：正常结束的退出码即判定。0 全通过；1 已运行但有失败或出错；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、给了云端后端）。处理了中断时以 130 / 143 结束，不表示判定。
+- `run`：正常结束的退出码即判定。0 全通过；1 已运行但不是全部通过；2 无法运行（feature 读不到、参数不合法、worker 没装、steps 加载失败、给了云端后端）。处理了中断时以 130 / 143 结束，不表示判定。
 - `status`：**只有读到终态才表判定**（通过时退出码 0、其余终态 1）；未到终态一律以退出码 0 结束、只表示查到了。要判定必须 `status --wait`，它同时是接力：后台推进卡住时由这条命令续到底。退出码 2 表示查不到这个 run，或这个 run 的提交记录格式与本机 CLI 不一致（处置见 `references/setup-and-diagnosis.md` 第 7 节）；cloud 后端还包括云端读不到、CLI 与后端版本不匹配。
 - `submit` / `plan` / `list-runs` / `explain` / `doctor`：只表做成没做成（退出码 0 或 2）。`explain` 哪怕用例全红也以退出码 0 结束，`list-runs` 清单为空也是 0。
 - CI 接 `run` 的退出码，或 `submit` 之后接 `status --wait` 的退出码；别接 `submit`、`explain` 的。

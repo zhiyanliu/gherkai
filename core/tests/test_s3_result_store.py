@@ -14,7 +14,7 @@ from tests.test_stores import _job_def, _sample_run
 # ---- save/load/load_all round-trip（对拍 test_result_store_save_load_job）----
 def test_save_load_round_trip(s3_result_store, aws):
     r = _sample_run("run-2")
-    for jr in r.jobs:
+    for jr in r.details:
         s3_result_store.save_job_result("run-2", jr)
 
     # 含 /:中文 的 scope_id 都成一个 S3 对象（每 job 一个）

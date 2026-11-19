@@ -8,9 +8,8 @@
 - definition 唯一真值在 run_meta.json。jobs/*.json 内嵌的 job def 是其**自包含副本**——非独立维护的第二真值、
   不会漂移（两处都序列化同一次 plan 产出的同一个 Job 对象，共用 serialize.job_to_dict）。嵌它是为让 CI 读
   单 scope 不依赖 run_meta（上云对象存储按 key 取单 job 同理）。
-- **判定真值的唯一权威是 jobs/*.json（数据面 ResultStore）**。run_state.json 的 status / 各 job status 是
-  **控制面投影摘要**（供 exit-code / 未来的轮询式恢复执行 / WebUI 进度），与 jobs/*.json 同源（均从同一 RunResult
-  投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
+- **run 与各 job 的状态以 run_state.json 为准**（ADR 0030 决定三「状态的权威是运行态」条）：退出码、`status` 与 run 的汇总都读它。
+  jobs/*.json（数据面 ResultStore）是由执行结果结束的 job 的判定明细，对 scenario、step 与归因负责；由结束写结束的 job 没有明细。
 
 **写入口全部在同一把 fcntl 文件锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：create_run、update_job_state、
 try_claim_job、project_state、try_finalize、commit_job_states、end_run 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方
@@ -34,7 +33,14 @@ from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
-from gherkai_core.run_status import CommitOutcome, RunEnding, commit_applied, ending_applied
+from gherkai_core.run_status import (
+    CommitOutcome,
+    RunEnding,
+    check_running_write,
+    commit_applied,
+    ending_applied,
+    run_status_of,
+)
 from gherkai_core.serialize import (
     RUN_STATE_KEYS,
     definition_schema_version,
@@ -167,26 +173,29 @@ class LocalRunStore:
             self._write_state(path, initial_state, {"detached": True} if self._detached else {})
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
+        """执行中的写（语义见 RunStore port）：按 scope_id 整项替换单个 job 的条目。run_state.json 不存在则报错（须先 create_run）；
+        写入的不是 running 即抛 ValueError（`run_status.check_running_write`），文件不被改动。
 
-        锁内读到的这个 job 已是终态时不写（终态只写一次，ADR 0031 决定一·补）；不在 Map 里的 job 照常写入。
-        写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（对拍 DDB 的带条件写与只写 job 的回退）；
-        run 已收尾时只写 job、run 级不变。写入 pending 时只写 job。
-        读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。
-        返回 run 级在这次写时是否仍未结束：判据取锁内读到的 run 级，与写在同一次读改写里（ADR 0054 决策五）；job 已是终态而没有写时
-        同样按它给出。"""
+        锁内读到 run 已结束、这个 job 不在 Map 里或已是终态时都不写：run 到终态之后不再接受任何写（ADR 0054 决策五），不臆造 job，
+        终态只写一次（ADR 0031 决定一·补）。写成时 run 状态按锁内读到的整份运行态经取法算出（ADR 0031 决定三），与 job 在同一次读改写里
+        写下（ADR 0034 机制三「run 级状态只进不退」条③）。读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写
+        改回 running（ADR 0054 决策五）。
+        返回 run 在这次写时是否仍未结束：判据取锁内读到的 run 状态，与写在同一次读改写里（ADR 0054 决策五）；job 不在 Map 里或已是终态
+        而没有写时同样按它给出。"""
+        check_running_write(job_state)
         open_at_write: list[bool] = []
 
         def mutate(state: RunState) -> RunState | None:
-            still_open = state.status in (Status.PENDING, Status.RUNNING)
+            still_open = state.status not in TERMINAL_STATUSES
             open_at_write.append(still_open)
+            if not still_open:
+                return None  # run 已结束：不再接受写
             current = state.jobs.get(job_state.scope_id)
-            if current is not None and current.status in TERMINAL_STATUSES:
-                return None  # 库中这个 job 已结束：不被执行中的写改写
-            jobs = dict(state.jobs)
-            jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
-            status = Status.RUNNING if job_state.status != Status.PENDING and still_open else state.status
-            return replace(state, status=status, jobs=jobs)  # 其余字段原样保留（含 run 级 message 与认领计数）
+            if current is None or current.status in TERMINAL_STATUSES:
+                return None  # 不在运行态里的 job 不臆造；已结束的 job 不被执行中的写改写
+            jobs = {**state.jobs, job_state.scope_id: job_state}  # Map 定位：各 scope 互不干扰
+            # run 状态按取法写下；其余字段原样保留（含 run 级 message 与认领计数）
+            return replace(state, status=run_status_of(js.status for js in jobs.values()), jobs=jobs)
         if self._locked_rmw(run_id, mutate) is None:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")
         return open_at_write[0]
@@ -301,17 +310,17 @@ class LocalRunStore:
         """HWM 条件写投影：仅当传入 hwm ≥ 库中 hwm 才写（机制三①，挡 stale 覆盖）。只写 HWM、run 级与 jobs，传入的
         started_at、ended_at、message、认领计数不用，库中值原样保留（与 DDB 的标量写只写 HWM 与 run 级对拍）。
 
-        **run 级 status 只写 running、不落终态**（run 级终态是收尾的 commit point
-        专属；若投影提前落终态，try_finalize 会被自己刚写的终态挡住）。取值规则见 `projected_run_status`
+        **run 级 status 只写 running、不落终态**（run 级终态只随记下最后一个 job 终态的写或结束写写下；若投影提前落终态，那两次写
+        会读到 run 已结束而写不成）。取值规则见 `projected_run_status`
         （与 ddb adapter 共用一份）：它给出 pending（投影里全 job 仍 pending）时保留库中 run 级，认领或此前投影已写成的
         running 不被拿着旧 baseline 的投影改回 pending。
-        已 finalize（库中 status 已终态）→ 挡。
+        库中 run 已是终态 → 挡。
 
         **各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②的 job 级半边）**：task_exited 走独立
         键空间、不带数值 seq，「被 scope_done 触发」与「被 task_exited 触发」的投影可携带相同 HWM——
         ① 挡不住 stale 实例把已终态的 job 刷回 running（并发实例对某 scope 视图旧、对另一 scope 视图新时
-        HWM 相等）。逐 job 取较推进者：终态不被 running/pending 覆盖、running 不被 pending 覆盖（防已
-        claim 被刷回 → 重复 launch，机制四）。"""
+        HWM 相等）。逐 job 取较推进者：库中已是终态的 job 不被改动（终态只写一次，同一等级的终态之间也不以投影为准，与终态写、结束写
+        写下的终态同守一条，ADR 0031 决定一·补）、running 不被 pending 覆盖（防已 claim 被刷回 → 重复 launch，机制四）。"""
         from gherkai_core.project import _lifecycle_rank, projected_run_status
 
         def mutate(cur: RunState):
@@ -319,16 +328,17 @@ class LocalRunStore:
             new_hwm = state.high_water_mark or 0
             if new_hwm < cur_hwm:
                 return None  # stale：读到的 events 比库里记录的少 → 挡（机制三①）
-            if cur.status not in (Status.PENDING, Status.RUNNING):
-                return None  # 已 finalize 终态：不被投影刷回
-            # 逐 job 与库中现态取较推进者（同 rank 取新值——终态间以本次投影为准）
+            if cur.status in TERMINAL_STATUSES:
+                return None  # run 已结束：运行态不再接受写（ADR 0054 决策五）
+            # 逐 job 与库中现态取较推进者；库中已是终态的不改，同为 running 时取本次投影的值
+            # （ADR 0034 机制三「② 的 job 级半边落地形态」段）
             jobs: dict[str, JobState] = dict(cur.jobs)  # 从库中现态出发：投影没带的 job 原样保留
             for sid, js in state.jobs.items():
                 cur_js = cur.jobs.get(sid)
                 if cur_js is None:
                     continue  # definition 外的 scope（不该发生：project 只吐 meta.jobs 的键）→ 不臆造，与 DDB 的 CCF 跳过对拍
-                if _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
-                    jobs[sid] = cur_js  # 库中更推进（已终态/已 claim）→ 保留，不回退
+                if cur_js.status in TERMINAL_STATUSES or _lifecycle_rank(cur_js.status) > _lifecycle_rank(js.status):
+                    jobs[sid] = cur_js  # 库中已结束或更推进（已 claim）→ 保留，不回退
                 else:
                     # 血缘/claim 时刻不丢：投影缺的字段回填库中值（claimed_at 只由 try_claim_job 落、
                     # 事件推演不出——正常经 project 的 baseline 带回，此处兜没带 baseline 的投影）。job 级说明只由结束写写下，

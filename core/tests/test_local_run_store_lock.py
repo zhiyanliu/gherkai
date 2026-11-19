@@ -16,6 +16,7 @@ from pathlib import Path
 
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_core.run_status import RUN_ENDINGS
 
 _TIMEOUT_S = 120
 
@@ -43,9 +44,10 @@ elif role == "claim":
         results.append(store.try_claim_job(run_id, sid, claimed_at="2026-11-15T00:00:00Z"))
         seen.append({k: js.session_id for k, js in store.load_run_state(run_id).jobs.items()})
     print(json.dumps({"results": results, "first": seen[0], "last": seen[-1]}))
-elif role == "finalize":
+elif role == "end":
+    from gherkai_core.run_status import RUN_ENDINGS
     time.sleep(a["delay"])
-    ok = store.try_finalize(run_id, Status.ERROR, "2026-11-15T01:00:00Z", message="ended elsewhere")
+    ok = store.end_run(run_id, RUN_ENDINGS[a["route"]], ended_at="2026-11-15T01:00:00Z")
     print(json.dumps({"ok": ok, "seen": {k: js.session_id for k, js in store.load_run_state(run_id).jobs.items()}}))
 elif role == "create":
     job = Job(scope_id="s", scope_name="s", engine="midscene", timeout_s=300.0,
@@ -178,34 +180,40 @@ def test_concurrent_job_writes_and_claims_in_separate_processes_lose_no_update(t
     assert store.is_detached("r") is True
 
 
-def test_terminal_status_survives_job_writes_racing_a_finalize_in_another_process(tmp_path: Path):
-    """另一个进程在前台 job 写持续进行时把 run 记为已结束：结束后 run 级仍是那次收尾写下的终态、ended_at 与说明，没有被一次读在
-    终态之前、写在终态之后的 job 写改回 running；收尾之后的 job 写照常落下（只写 job）。
+def test_terminal_status_survives_job_writes_racing_an_end_write_in_another_process(tmp_path: Path):
+    """另一个进程在前台 job 写持续进行时以结束写把 run 记为已结束：结束后运行态仍是那次结束写写下的结果（run 级终态、ended_at 与
+    说明，执行中的 job 记 aborted、还没写过的 job 记 skipped，各带那一行的说明），没有被一次读在终态之前、写在终态之后的 job 写改回
+    running；结束之后的 job 写不再落下，各 job 的会话停在结束写写成时的那一次。
 
     每次 job 写的返回值（run 级在这次写时是否仍未结束，ADR 0054 决策五）与锁内的次序一致：每个写入进程先得到若干 True、之后一直是
-    False，不会在 False 之后又得到 True；收尾进程写成之后才读到的那次 job 写之后的写都是 False；至少有一个写入进程两种都得到过。"""
+    False，不会在 False 之后又得到 True；结束写写成之后才读到的那次 job 写之后的写都是 False；至少有一个写入进程两种都得到过。"""
     updated = [f"u{i}" for i in range(3)]
     times = 300
+    route = "settle-advancer-exited"
+    ending = RUN_ENDINGS[route]
     store = LocalRunStore(tmp_path / "runs")
     store.create_run(_meta("r", updated), _pending("r", updated))
 
     outs = _run_together(tmp_path, [{"role": "update", "run_id": "r", "scope_id": sid, "times": times} for sid in updated]
-                         + [{"role": "finalize", "run_id": "r", "delay": 0.05}])
-    finalized = json.loads(outs[-1])
-    assert finalized["ok"] is True
-    # 用例确实形成了交错：收尾写成的那一刻还有 job 写没有落完
-    assert any(finalized["seen"][sid] != f"{sid}-{times - 1}" for sid in updated), finalized
+                         + [{"role": "end", "run_id": "r", "delay": 0.05, "route": route}])
+    ended = json.loads(outs[-1])
+    assert ended["ok"] is True
+    # 用例确实形成了交错：结束写写成的那一刻还有 job 写没有落完
+    assert any(ended["seen"][sid] != f"{sid}-{times - 1}" for sid in updated), ended
     state = store.load_run_state("r")
-    assert (state.status, state.ended_at, state.message) == (Status.ERROR, "2026-11-15T01:00:00Z", "ended elsewhere")
+    assert (state.status, state.ended_at, state.message) == (Status.ABORTED, "2026-11-15T01:00:00Z", ending.run_message)
     for sid in updated:
-        assert state.jobs[sid].session_id == f"{sid}-{times - 1}"
+        seen = ended["seen"][sid]
+        expected = (Status.ABORTED, ending.aborted_message) if seen is not None else (Status.SKIPPED, ending.skipped_message)
+        assert (state.jobs[sid].status, state.jobs[sid].message) == expected, state.jobs[sid]
+        assert state.jobs[sid].session_id == seen
 
     returns = {sid: json.loads(out) for sid, out in zip(updated, outs[:-1])}
     for sid, got in returns.items():
         assert len(got) == times
         still_open = got.index(False) if False in got else times
         assert got == [True] * still_open + [False] * (times - still_open), (sid, got)
-        seen = finalized["seen"][sid]  # 收尾写成之后读到的这个 job 的最后一次写；之后的写都落在收尾之后
+        seen = ended["seen"][sid]  # 结束写写成之后读到的这个 job 的最后一次写；之后的写都落在结束写之后
         after = 0 if seen is None else int(seen.rsplit("-", 1)[1]) + 1
         assert all(r is False for r in got[after:]), (sid, seen, got)
     assert any(True in got and False in got for got in returns.values()), returns

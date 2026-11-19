@@ -11,7 +11,7 @@ schedule 沿事件流实时喂；reconciler 从持久 events 全量重放喂。�
 """
 from __future__ import annotations
 
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Literal
@@ -20,6 +20,7 @@ from gherkai_core.model import (
     TERMINAL_STATUSES,
     Event,
     Job,
+    JobOutcome,
     JobResult,
     JobState,
     RunMeta,
@@ -38,9 +39,9 @@ from gherkai_core.model import (
     StepResult,
     StepSkipped,
     StepStarted,
-    _NON_VERDICT,
 )
-from gherkai_core.run_deadline import RUN_DEADLINE_PASSED_MESSAGE, JobCutoff, TimeoutCause, deadline_of, job_cutoff
+from gherkai_core.run_deadline import JobCutoff, TimeoutCause, deadline_of, job_cutoff
+from gherkai_core.run_status import run_status_of
 from gherkai_core.serialize import instant_from_iso
 from gherkai_core.wire import EX_WORKER_NETWORK
 
@@ -316,14 +317,14 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
        有退出记录时进程终止本身即终态信号（stop_reason 为 timeout / abort 且内容不完整 → 对应终态；退出码非零或未知 → ERROR；
        exit==0 且见 scope_done → scope 级 error 或 scenario 归约终态；exit==0 无 scope_done（含零事件）→ ERROR）；无退出记录时
        见 scope_started 或非 attempted 的 session_opened → RUNNING、否则 PENDING（只有 attempted 的 session_opened 仍为 PENDING）。
-    3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（_aggregate 的值：任一 job 出了判定即为终态，
-       还没有 job 出判定时为前置态；投影写不落它，见 projected_run_status）+
+    3. 聚合成 RunState：各 JobState（scope_id→status/session_id）+ run 总 status（取法 `run_status.run_status_of` 的值：全部 job
+       都结束时为终态，否则为前置态；投影写不落它，见 projected_run_status）+
        high_water_mark（所有 scope 的 worker 段 max seq，机制三条件写用）。
 
     只吐状态、不碰 store、不决定"启不启下一个"（那是 plan_next + adapter 的事）。是否按超时处理与 `project_full` 同一条规则：
-    基线里这个 job 的认领时刻读得出时，由它、预算与期限算出截止时刻，退出时刻晚于它的退出按超时处理；读不出（没有基线、还没认领、
-    或时刻不合法）时只看退出记录的超时标志。运行态只记各 job 的状态、不记说明，有退出记录而内容不完整的 job 不论是否按超时处理都是
-    error，这条规则在这里不改变状态，只是让两处投影交给终结函数的输入一致；说明在 `project_full` 里按同一组输入给出。
+    基线里这个 job 的认领时刻读得出时，由它、预算与期限算出截止时刻与起作用的那一方，退出时刻晚于截止时刻的退出按超时处理；读不出
+    （没有基线、还没认领、或时刻不合法）时只看退出记录的超时标志，起作用的一方按预算处理。被预算截断与被期限截断的 job 状态不同
+    （error 与 aborted，见 `finalize_job`），所以这条规则在这里同样决定状态，两处投影交给终结函数的输入一致。
     """
     by_scope: dict[str, list[EventRecord]] = {}
     for r in records:
@@ -345,7 +346,7 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
             continue  # record 指向 definition 外的 scope（不该发生）——忽略，不臆造 job
         prior = jobs_state.get(scope_id)
         cutoff = _cutoff_from_claim(meta, job, prior.claimed_at if prior is not None else None)
-        # 共用归约（与 project_full 单一真源）。这里只取状态、会话与 HWM，说明随即丢弃；读不出认领时刻时说明按预算那一句，不影响状态
+        # 共用归约（与 project_full 单一真源）。这里只取状态、会话与 HWM，说明随即丢弃；读不出认领时刻时起作用的一方按预算处理
         result, status, max_seq = _reduce_scope(job, recs, timeout_cause=cutoff.by if cutoff is not None else "budget",
                                                 cutoff_at=cutoff.at if cutoff is not None else None)
         hwm = max(hwm, max_seq)
@@ -361,7 +362,7 @@ def project(meta: RunMeta, records: list[EventRecord], baseline: RunState | None
             claimed_at=prior.claimed_at if prior else None,
         )
 
-    run_status = _aggregate([js.status for js in jobs_state.values()])
+    run_status = run_status_of(js.status for js in jobs_state.values())
     return RunState(
         run_id=meta.run_id,
         status=run_status,
@@ -438,7 +439,8 @@ def _reduce_scope(job: Job, recs: list[EventRecord], *, timeout_cause: TimeoutCa
     算出，见 `project_full`）。是否已过截止时刻只在这里判断一次（ADR 0054 决策二后台推进条「截止时刻与说明」）：退出记录带超时标志，
     或它的退出时刻严格晚于 cutoff_at，都按超时交给终结函数（内容完整的不改判由终结函数保证），与前台终结之前对内容不完整的 job 再查
     一次截止时刻是同一个判断；没有退出时刻的退出记录只看超时标志。cutoff_at 为 None 只来自每轮的无状态投影读不出认领时刻的 job，
-    那时同样只看超时标志。timeout_cause 只决定超时的说明。返回 (完整 JobResult, 派生 status, 该 scope 的 worker 段 max seq)。
+    那时同样只看超时标志。timeout_cause 决定按超时交来的 job 走终结函数的预算一行还是期限一行（error 加 timeout，或 aborted）。
+    返回 (完整 JobResult, 派生 status, 该 scope 的 worker 段 max seq)。
     JobResult.status 会被派生 status 覆盖（reduce 期只累积 scenario 明细，最终 job 态由 finalize_job 的真值表定，机制二）。
     """
     evs = _sorted_events(recs)
@@ -550,7 +552,8 @@ def apply_device_metering(result: JobResult) -> None:
 # ended-elsewhere（发现这个 run 已被别处记为已结束，ADR 0054 决策二、五）。三者走同一条首次仲裁，只有 job 的说明按来源区分。
 AbortCause = Literal["fail-fast", "interrupt", "ended-elsewhere"]
 
-# 被 run 的期限截断的 job 的说明（ADR 0054 决策二第 2 条）；被自己的预算截断的仍是「job 超时（预算 Ns，已中止）」。
+# 被 run 的期限截断、内容不完整的 job 的说明（ADR 0054 决策二第 2 条）：这样的 job 记 aborted、没有归因（ADR 0031 决定一「aborted
+# 来自主动中止与 run 的期限，不来自 job 自己的预算」注）；被自己的预算截断的是 error 加 timeout，说明是「job 超时（预算 Ns，已中止）」。
 DEADLINE_TIMEOUT_MESSAGE = "这个 run 已超过允许运行的时间，job 被中止"
 # 因发现 run 已被别处记为已结束而被中止的 job 的说明（ADR 0054 决策二「一次前台执行可能因三种原因停下」一段）。
 ENDED_ELSEWHERE_ABORT_MESSAGE = "这个 run 已被记为已结束，job 被中止"
@@ -583,10 +586,11 @@ def finalize_job(
     且 exit_code 为 None 即退出码未知）；是否见到 scope_done 及其 status / errorType / message；scenario 判定集；会话记录
     （未确认集 U 由此算出）。exit_reason 是平台侧归因或异常文本，只进消息。saw_session_opened 只计 origin 不是 attempted 的
     session_opened：只有结果未知的创建尝试时未退出行判 PENDING（ADR 0051 决策 4）。abort_cause 是作出 abort 决定的来源（取值见
-    `AbortCause`），timeout_cause 是超时时起作用的那个截止时刻——budget（job 自己的墙钟预算）或 deadline（run 的期限，ADR 0054
-    决策二第 2 条；由 `run_deadline.job_cutoff` 算出）。两者都只进消息、不进判定：超时的 job 不论哪一个截止时刻起作用都是 error、
-    类型为 timeout。timeout_cause 没有缺省值：两条路径都由认领时刻、预算与期限算出它（同步路径在认领时算，无状态路径在
-    `project_full` 里由运行态里的认领时刻重算），不靠缺省值落到预算那一句。无状态路径不作 abort 决定，abort_cause 用缺省值。
+    `AbortCause`，只进消息），timeout_cause 是超时时起作用的那个截止时刻——budget（job 自己的墙钟预算）或 deadline（run 的期限，
+    ADR 0054 决策二第 2 条；由 `run_deadline.job_cutoff` 算出）。它决定内容不完整的超时 job 的判定：被预算截断的是 error、类型为
+    timeout；被期限截断的是 aborted、没有归因，run 的时间用完不是这个 job 自己出错（ADR 0031 决定一「aborted 来自主动中止与 run 的
+    期限，不来自 job 自己的预算」注）。timeout_cause 没有缺省值：两条路径都由认领时刻、预算与期限算出它（同步路径在认领时算，
+    无状态路径由运行态里的认领时刻重算），不靠缺省值落到预算那一行。无状态路径不作 abort 决定，abort_cause 用缺省值。
     内容完整（干净退出且发了 scope_done）后停止原因不再改写判定：判定已成，收尾拖过预算只改变推进器是否催停，不改结论——
     同步路径收到 scope_done 后不再落定停止原因，无状态路径按超时交来的退出（带超时标志或退出时刻晚于截止时刻）遇到它同样不改判，
     两条路径由这里同一条件保证；
@@ -597,13 +601,13 @@ def finalize_job(
     unconfirmed = unconfirmed_sessions(sessions)
     content_complete = exited and exit_code == 0 and scope_done is not None
     if stop_reason == "timeout" and not content_complete:
-        if timeout_cause == "deadline":
-            message = DEADLINE_TIMEOUT_MESSAGE
-        elif timeout_cause == "budget":
-            message = f"job 超时（预算 {job.timeout_s:g}s，已中止）"  # 每个 job 都有有限的墙钟预算（ADR 0054 决策十）
+        if timeout_cause == "budget":
+            # 每个 job 都有有限的墙钟预算（ADR 0054 决策十）
+            status, error_type, message = Status.ERROR, "timeout", f"job 超时（预算 {job.timeout_s:g}s，已中止）"
+        elif timeout_cause == "deadline":
+            status, error_type, message = Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE
         else:
             raise ValueError(f"timeout_cause 须为 budget 或 deadline，现为 {timeout_cause!r}")
-        status, error_type = Status.ERROR, "timeout"
     elif stop_reason == "abort" and not content_complete:
         status, error_type, message = Status.ABORTED, None, _ABORT_MESSAGES[abort_cause]
     elif not exited:
@@ -667,27 +671,22 @@ def project_full(
     records: list[EventRecord],
     *,
     claimed_at: Mapping[str, datetime],
-    past_stop_start: bool,
-) -> RunResult:
-    """从全量 records 推演出**完整 RunResult**（含各 JobResult 明细与 run 级裁决）——收尾用。
+) -> list[JobResult]:
+    """从全量 records 推演出有记录的各 job 的**完整判定明细**（JobResult），按运行定义的次序——收尾用（ADR 0034「core 拆分」节）。
 
     与 `project`（轻量 RunState、供实时投影写/plan_next）共用 `_reduce_scope` 归约；差别在保留完整明细
-    （scenarios/steps/cost/report_refs）与给出超时的说明、run 级裁决。tick 在收尾的条件写**之前**用它落 ResultStore（判定真值），
-    条件写写成之后宿主用同一份结果生成 RunReport。
+    （scenarios/steps/cost/report_refs）与给出超时的说明。tick 在记下 job 终态的写**之前**用它落 ResultStore（判定真值；ADR 0030 决定三「后台推进同守」条）；
+    run 的状态与说明不在这里给出，由记下终态的写按取法写下（ADR 0031 决定三），报告由使 run 成为终态的那次写的写入方从记录组装
+    （`assemble_run_result`；ADR 0054 决策二后台推进条「收尾与报告」）。
 
-    - **判定只装有记录的 job**：事件流里没有任何记录的 job（没有启动，或已过停止启动的时刻而不再启动）不臆造明细、不进
-      RunResult.jobs，它们是 run_meta.jobs 与 jobs 的差，与同步路径因到期或发现 run 已被别处结束而没有启动的 job 同一形态（ADR 0054
-      决策二）。**守不变量**：有记录的 job 非终态即抛 NonTerminalSnapshot、一份判定都不落（前置态绝不进 jobs/*.json）。
+    - **明细只装有记录的 job**：事件流里没有任何记录的 job（没有启动，或已过停止启动的时刻而不再启动）不臆造明细、不在返回值里；
+      它们由结束写结束，没有明细（ADR 0031 决定三「结束写」小节）。**守不变量**：有记录的 job 非终态即抛 NonTerminalSnapshot、
+      一份判定都不落（前置态绝不进 jobs/*.json，ADR 0031 决定一·补）。
     - **截止时刻由认领时刻重算**（ADR 0054 决策二第 2 条与后台推进条「截止时刻与说明」）：claimed_at 给出每个有记录的 job 的认领
       时刻（取自这一轮读到的运行态），与它的预算、运行期限经 `run_deadline.job_cutoff` 算出截止时刻与起作用的那一方；与同步路径在
       认领时算出的是同一个算法、同一组输入，退出记录里不另记。截止时刻用于判断这次退出是否按超时处理（退出记录带超时标志，或退出
-      时刻晚于它，见 `_reduce_scope`），起作用的那一方决定超时的说明。有记录的 job 不在 claimed_at 里即抛 ValueError：调用方要先
-      确认快照里每个有记录的 job 都带认领时刻（tick 的快照检查），这里不回落到预算那一句。
-    - **run 级的状态与说明由 `run_verdict` 给出**，与同步路径同一个裁决函数：past_stop_start 是这一轮是否已过停止启动的时刻，
-      无状态路径没有使用方中断、也不会在读到 run 级终态之后走到这里，另两项恒为 False。已过停止启动的时刻、有 job 没有判定时是
-      error 加 `RUN_DEADLINE_PASSED_MESSAGE`；全部 job 都有判定时照常聚合。此处是收尾、非投影，可落终态，与 project_state 的钳制
-      不同。
-    - run 级 duration_ms 为空：它是 RunState started_at→ended_at，宿主生成报告时补（ADR 0024「三级执行时长」detached 条）。
+      时刻晚于它，见 `_reduce_scope`），起作用的那一方决定超时的 job 记 error 加 timeout 还是 aborted。有记录的 job 不在 claimed_at
+      里即抛 ValueError：调用方要先确认快照里每个有记录的 job 都带认领时刻（tick 的快照检查），这里不回落到预算那一行。
     """
     by_scope: dict[str, list[EventRecord]] = {}
     for r in records:
@@ -708,28 +707,60 @@ def project_full(
             raise NonTerminalSnapshot(
                 f"收尾聚合读到 job {job.scope_id!r} 仍为 {status.value}：本次事件快照尚未到终态，本轮不落判定、等重放")
         job_results.append(jr)
+    return job_results
 
-    verdict = run_verdict(job_results, meta.jobs, past_stop_start=past_stop_start, interrupted=False, ended_elsewhere=False)
-    return RunResult(
-        run_meta=meta,
-        status=verdict.status,
-        message=verdict.message,
-        jobs=job_results,
-        **run_totals(job_results, jobs=meta.jobs),
-    )
+
+# ============================================================================
+# run 的结果从记录组装（唯一一处）：前台的汇总、--json、退出码与报告，后台生成的报告都经这里
+# ============================================================================
+
+
+def assemble_run_result(meta: RunMeta, state: RunState, details: Iterable[JobResult], *,
+                        duration_ms: float | None) -> RunResult:
+    """从记录组装 run 的结果：运行态加判定明细（ADR 0030 决定三「状态的权威是运行态」条）。
+
+    按运行定义逐个列出 job：状态与 job 级说明取 state 里的这一项，由执行结果结束的 job 附上 details 里同一 scope 的那一份明细；
+    details 里没有它的 job（由结束写结束的，或还没有结束的）不带明细。run 级状态与说明取 state，原生量与设备计量由各份明细合计（`run_totals`，设备两键
+    按运行定义判断出现与否）。details 里不在运行定义里的 scope 不出现；同一 scope 出现多份时取最后一份。duration_ms 由调用方给出：
+    前台是调度循环整体包住的墙钟，后台由运行态的起止算出（`run_duration_ms`）。
+
+    运行定义里的 job 不在 state 里即抛 ValueError（运行态与运行定义不对应）。"""
+    by_scope = {jr.scope_id: jr for jr in details}
+    outcomes: list[JobOutcome] = []
+    for job in meta.jobs:
+        js = state.jobs.get(job.scope_id)
+        if js is None:
+            raise ValueError(f"run {meta.run_id} 的运行态里没有 job {job.scope_id!r}")
+        outcomes.append(JobOutcome(job=job, state=js, detail=by_scope.get(job.scope_id)))
+    attached = [o.detail for o in outcomes if o.detail is not None]
+    return RunResult(run_meta=meta, state=state, jobs=outcomes, duration_ms=duration_ms,
+                     **run_totals(attached, jobs=meta.jobs))
+
+
+def run_duration_ms(state: RunState | None) -> float | None:
+    """run 级墙钟（毫秒），取运行态的 `ended_at` 减 `started_at`（建 run 到使 run 成为终态的那次写，含排队与起 worker）。
+
+    后台生成报告时用它（ADR 0024「三级执行时长」）；前台用调度循环整体包住的墙钟。没有运行态、两端任一缺、读不出或不带时区时为
+    None（报告显示「?」：派生指标，不让生成报告因它失败）。记录里的时刻经 `serialize.instant_from_iso` 读。"""
+    if state is None or not state.started_at or not state.ended_at:
+        return None
+    try:
+        return (instant_from_iso(state.ended_at) - instant_from_iso(state.started_at)).total_seconds() * 1000.0
+    except ValueError:
+        return None
 
 
 def run_totals(job_results: list[JobResult], *, jobs: Sequence[Job]) -> dict:
-    """RunResult 的 run 级合计四键（唯一一份，同步 schedule 与无状态 project_full 共用，ADR 0034「不复制归约逻辑」）。
+    """RunResult 的 run 级合计四键（唯一一份，只经 `assemble_run_result` 调用，ADR 0034「不复制归约逻辑」）。
 
-    jobs 是运行定义里的全部 job（`RunMeta.jobs`），job_results 是其中有判定的那些。加新的原生量字段（ADR 0024「成本信封」扩展条）
+    jobs 是运行定义里的全部 job（`RunMeta.jobs`），job_results 是其中有判定明细的那些。加新的原生量字段（ADR 0024「成本信封」扩展条）
     只改这里。两组键的缺失语义不同，各自保留、不套同一条求和规则：
     - total_tokens 与 total_time_worked_s 各自跨 job 求和，只合计报了这个量的 job：没有任何 job 报时为 None（不假装 0），
       报了 0 照记 0（ADR 0024）。
-    - device_observed_s 与 device_observed_missing 是设备计量（ADR 0051 决策 7），对有判定的设备 job 成对合计，某一键缺失按 0 计入。
-      两键出现与否按运行定义里有没有设备目标的 job 判断，不按判定清单（ADR 0054 决策二）：判定清单可能不全（有 job 没有启动），
-      设备 job 全部没有启动时两键都是 0、不省键；运行定义里没有设备 job 时两键都是 None（序列化省键）。判定清单完整时，有判定的
-      设备 job 恰是运行定义里的设备 job，两种判法结果相同。
+    - device_observed_s 与 device_observed_missing 是设备计量（ADR 0051 决策 7），对有明细的设备 job 成对合计，某一键缺失按 0 计入。
+      两键出现与否按运行定义里有没有设备目标的 job 判断，不按明细清单（ADR 0054 决策二）：明细清单可能不全（由结束写结束的 job
+      没有明细），设备 job 全部没有启动时两键都是 0、不省键；运行定义里没有设备 job 时两键都是 None（序列化省键）。每个 job 都有明细
+      时，有明细的设备 job 恰是运行定义里的设备 job，两种判法结果相同。
     """
     tok = [jr.total_tokens for jr in job_results if jr.total_tokens is not None]
     tw = [jr.total_time_worked_s for jr in job_results if jr.total_time_worked_s is not None]
@@ -757,83 +788,22 @@ def _lifecycle_rank(status: Status) -> int:
 
 
 def _aggregate(statuses: list[Status]) -> Status:
-    """状态归约（唯一一份，schedule 与本模块两条路径共用，ADR 0034「不复制归约逻辑」）。
+    """scenario 判定到 job 判定的归约（ADR 0031 决定三「scenario 判定到 job 判定的归约是另一条路径」条）：有 error 判 error，
+    否则有 failed 判 failed，否则判 passed。
 
-    先滤掉 _NON_VERDICT（skipped、aborted 两个派生态与 pending、running 两个前置态），只看已出判定的态：
-    判定集非空时，有 error 判 error，否则有 failed 判 failed，否则判 passed。
-    判定集为空而输入非空时不判 passed：输入里有 aborted 判 aborted，否则有 skipped 判 skipped，
-    否则有 running 判 running，否则（全部 pending）判 pending。全部 job 被中止或没有启动的 run 因此不会记成 passed，
-    这一点在函数内成立，不依赖「fail-fast 产生的 skipped 必定伴随一个 error」这类调用方条件；无状态投影里还没有任何
-    job 出判定的 run 得到前置态，不得到终态。
-    空输入仍判 passed，只作函数层兜底：CLI 入口对零 scenario 批（筛空或不加筛选）以退出码 2 拒绝（ADR 0041 决策一）；
-    无状态路径下仍可能遇到空输入：旧版本 CLI 提交的零个 job 的 run（运行定义里有 job 而都没有判定时，`run_verdict` 不走到聚合）。
-    这里保留终态：无状态路径在没有 pending 与 running 时经 `run_verdict` 把本函数的值交给收尾写入，返回前置态会让零个 job 的 run
-    永远停在非终态。
-    scenario 级归约（finalize_job）只喂 worker 报的三态，且判定集为空的情形在那里另判 error，过滤与空判定集规则都不生效。
-    """
-    verdicts = [s for s in statuses if s not in _NON_VERDICT]
-    if any(s == Status.ERROR for s in verdicts):
+    只在终结函数内容完整那一行用（`finalize_job`），喂进去的全是 worker 报的三态；scenario 判定集为空的情形在那里先判 error。所以
+    输入为空、或出现三态以外的值即抛 ValueError：那是调用方的错，不在这里给出一个取值。run 状态的取法是另一回事，见
+    `run_status.run_status_of`。"""
+    if not statuses:
+        raise ValueError("scenario 判定集为空：终结函数应先把它判为 error")
+    unexpected = [s for s in statuses if s not in (Status.PASSED, Status.FAILED, Status.ERROR)]
+    if unexpected:
+        raise ValueError(f"scenario 判定只有 passed、failed、error 三态，现有 {[s.value for s in unexpected]}")
+    if Status.ERROR in statuses:
         return Status.ERROR
-    if any(s == Status.FAILED for s in verdicts):
+    if Status.FAILED in statuses:
         return Status.FAILED
-    if verdicts or not statuses:
-        return Status.PASSED
-    # 判定集为空：输入全在 _NON_VERDICT 里，按 aborted、skipped、running 的顺序取第一个出现的，剩下的只能全是 pending
-    for s in (Status.ABORTED, Status.SKIPPED, Status.RUNNING):
-        if s in statuses:
-            return s
-    return Status.PENDING
-
-
-@dataclass(frozen=True)
-class RunVerdict:
-    """run 级的裁决：状态与 run 级说明。说明只在没有任何 job 能承载原因时有值（与运行态的 run 级 message 同义）。"""
-
-    status: Status
-    message: str | None = None
-
-
-def run_verdict(
-    job_results: Sequence[JobResult],
-    jobs: Sequence[Job],
-    *,
-    past_stop_start: bool,
-    interrupted: bool,
-    ended_elsewhere: bool,
-) -> RunVerdict:
-    """run 级裁决（前台与后台共用）：包住 `_aggregate`，加上聚合之外的例外，按序取第一条成立的。前台的
-    `schedule` 在返回 RunResult 时调它，后台经 `project_full` 调它，两条路径收尾时写下的 run 级状态与说明都出自这里。
-    ADR 0031 决定三的取法是 `run_status.run_status_of`，规则与这里不同；两条路径迁过去之后本函数删去。
-
-    job_results 是有判定的 job（判定只有终态），jobs 是运行定义里的全部 job，「没有判定的 job」即两者的差：已过停止启动的时刻、
-    或发现 run 已被别处记为已结束时没有启动的 job，它们的运行态保持 pending、不产出判定。因 fail-fast 或使用方中断而没有启动的
-    job 记为 skipped，有判定。
-
-    1. 已过停止启动的时刻（past_stop_start：前台取执行期间的检查是否观察到过它，一经观察到即成立、不因系统时钟回拨撤销，收尾时
-       不再读墙钟；后台取推进步骤这一轮的判断；判断本身是 `run_deadline.past_stop_start`）、而有 job 没有判定：error，说明是
-       `RUN_DEADLINE_PASSED_MESSAGE`。run 的时间用完不是哪一个 job 的原因，也不替没有执行的 job 下结论；全部已启动的 job 都通过时
-       聚合会得出 passed，所以不能靠聚合。优先于使用方中断的 aborted。
-    2. 被外部停下的 run 记 aborted、无说明，不按仅有的判定聚合。成立条件有三种：
-       - 处理过使用方中断（interrupted），且有 job 记为 aborted 或 skipped、或有 job 没有判定。已有 job 出了判定时（aborted 与
-         passed 并存）聚合给 passed，全部 job 都没有启动时它给 skipped，被中断的 run 在两种情形下都应记 aborted。fail-fast 不走
-         这里：它必伴随 error，run 级由聚合判 error。
-       - 已发现 run 被别处记为已结束（ended_elsewhere：认领被拒、重试之前读到终态，或写 job 状态时得知 run 级已结束）。这次执行
-         的 run 级结果本不成为记录：收尾的条件写被已有的终态挡下；万一写成了（记录其实没有结束，属于不该发生的不一致），写下的也不能
-         是 passed——发现之后执行已中止，各 job 的判定不代表这个 run 的结果。
-       - 有 job 没有判定而不属于第 1 条。正常的调用方到不了这里（没有判定只有上面两种原因），这一条让「有 job 没有判定的 run 不会
-         得到 passed」在函数内成立，不依赖调用方传对标记。
-    3. 其余：`_aggregate` 对各 job 判定的值，无说明。全部 job 都有判定时，不论当前时刻是否已过期限都照常聚合（被期限截断的 job
-       自身是 error，聚合自然得出 error）。
-
-    后台推进没有使用方中断，读到 run 级终态时直接停止推演、不走到裁决，所以它的 interrupted 与 ended_elsewhere 都取 False。"""
-    decided = {jr.scope_id for jr in job_results}
-    undecided = any(j.scope_id not in decided for j in jobs)
-    if past_stop_start and undecided:
-        return RunVerdict(Status.ERROR, RUN_DEADLINE_PASSED_MESSAGE)
-    stopped_short = undecided or any(jr.status in (Status.ABORTED, Status.SKIPPED) for jr in job_results)
-    if ended_elsewhere or undecided or (interrupted and stopped_short):
-        return RunVerdict(Status.ABORTED)
-    return RunVerdict(_aggregate([jr.status for jr in job_results]))
+    return Status.PASSED
 
 
 def projected_run_status(jobs: dict[str, JobState]) -> Status:
@@ -843,16 +813,15 @@ def projected_run_status(jobs: dict[str, JobState]) -> Status:
     `pending`，或此前某次认领、投影写下的 `running`），只有 `running` 才落库。这样认领之后、拿着认领之前读到的 baseline
     写出的全 pending 投影不会把 run 级改回 `pending`。
 
-    **投影不能落 `project` 算出的 run 级 status**——那是 `_aggregate` 的值，只要有一个 job 出了判定就是终态（一个 job
-    已 passed、其余还 pending 的 run 得到 `passed`），只有还没有 job 出判定时才是前置态；提前落 run 级终态会被 `try_finalize`
-    的单调条件写认成「已 finalize」而挡住 commit point，run 永远 finalize 不了。故 `_aggregate` 对空判定集
-    给出前置态之后，这条钳制仍然需要：运行中的 run 只要有 job 出了判定，`_aggregate` 的值就不能原样落库。
+    **投影不能落 `project` 算出的 run 级 status**——那是取法（`run_status.run_status_of`）的值，全部 job 都结束时即为终态；投影
+    提前落下 run 级终态，记下 job 终态的写（`commit_job_states`）与结束写（`end_run`）就读到 run 已结束而写不成，run 的终态与报告
+    不再由收尾那一步写下（ADR 0030 决定三、决定四）。
 
     **判据只看传入的 job 态、不读库、不看传入的 run 级值**：两个 RunStore adapter 须落同一规则，而 DDB 侧
     标量条件写发生在 per-job 条件写之前（那一刻库中 job 态还没更新、读它无意义），判据依赖库就没法对拍。
     并发实例可能拿着认领之前读到的 baseline 投影，所以「投影里全 pending」不证明库中没有 job 已被认领；run 级是否
     已离开 `pending` 由认领与前台 job 写在同一次写里保证，投影在这种情形下不写 run 级、也就不会撤销它。两端取值都是
-    非终态，commit point 的专属性不受影响。
+    非终态，收尾那一步的写不受影响。
     """
     if all(js.status == Status.PENDING for js in jobs.values()):
         return Status.PENDING
@@ -873,8 +842,10 @@ class Action:
 
     kind='start'：建议启这个 scope_id 的 job（adapter 侧 CAS pending→running 成功才真 RunTask/spawn）；
     kind='finalize'：没有执行中的 job、也没有未启动的 job，按各 job 的判定收尾（不论是否已过期限）；
-    kind='finalize_expired'：已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动，到期收尾：run 级记为 error
-    加说明，收尾写另以「读到运行态以来没有新的认领」为条件。两种收尾的条件写都保 commit 恰一次。
+    kind='finalize_expired'：已过停止启动的时刻、没有执行中的 job、余下的 job 都没有启动，到期收尾：以执行方自己到期这条来路的结束写
+    把没有启动的 job 记为 skipped，run 状态按取法随之成为终态，run 级带说明（ADR 0054 决策二第 3 条与 ADR 0031 决定三「结束写」
+    小节）；结束写另以写下时没有 running 的 job 为条件，读运行态之后才落下的认领挡住它。两种收尾的写都只在 run 未结束时写成，run 的
+    终态只写下一次。
     """
 
     kind: ActionKind

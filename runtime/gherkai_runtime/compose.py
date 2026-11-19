@@ -27,7 +27,7 @@ from pathlib import Path
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
-from gherkai_core.serialize import instant_from_iso, instant_to_iso
+from gherkai_core.serialize import instant_to_iso
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一取值点** `nova_act_timeout_s()`，注入 worker 的
@@ -139,18 +139,6 @@ def now_iso() -> str:
     claimed_at/ended_at 格式不同，`status --json` 的机读消费者要兼容两种（ADR 0016「组合根取时钟」）。
     """
     return instant_to_iso(now())
-
-
-def run_duration_ms(state) -> float | None:
-    """detached run 的 run 级墙钟（毫秒），取 RunState `ended_at` 减 `started_at`（提交落库到 finalize commit，含排队/起容器）。
-    两端任一缺、解析不了或不带时区 → None（报告显「?」——派生指标，绝不让收尾因它失败）。
-    记录里的时刻经 `serialize.instant_from_iso` 读（`now_iso()` 的逆，core 里唯一的解析处）。宿主在 finalize_report 前调，算好传给 core。"""
-    if state is None or not getattr(state, "started_at", None) or not getattr(state, "ended_at", None):
-        return None
-    try:
-        return (instant_from_iso(state.ended_at) - instant_from_iso(state.started_at)).total_seconds() * 1000.0
-    except ValueError:
-        return None
 
 
 # ============================================================================
