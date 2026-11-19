@@ -1,6 +1,6 @@
 # 0052. Appium 界面适配与平台差异处理
 
-> **Status:** Accepted（2026-10-15）——定 Midscene worker 在设备目标上的界面适配、平台差异的分层、能力探测与网页上下文身份、超时分层表、命令守卫与结果未知的处置、会话预热的执行；界面接缝的桌面实现是原有桌面代码的搬移，桌面路径除 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 4 的会话事件（及其带来的会话名与 `release_failed` 判定）、决策 5 的终结事件门控（停止信号之后不再发 step、scenario 与 scope 级事件）与主流程让位（含中止在途的 act）外行为不变。
+> **Status:** Accepted（2026-10-15）
 
 ## 背景与问题
 

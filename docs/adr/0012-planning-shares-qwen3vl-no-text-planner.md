@@ -1,6 +1,6 @@
 # Planning 角色用 Qwen3-VL 兼任，不引入独立纯文本 planner
 
-> **Status:** Partially-superseded-by 0044 ——结论存：不设独立 planner 槽、由引擎模型兼任与两集合不相交的理由；立场变：兼任者不再是 Qwen3-VL、现值由 [0044](./0044-engine-model-selection-and-override.md) 定；「何时重议」第一条已于 2026-09 满足并重新评估，结论仍是不拆。
+> **Status:** Partially-superseded-by 0044 ——结论存：不设独立 planner 槽、由引擎模型兼任与两集合不相交的理由；立场变：兼任者不再是 Qwen3-VL、现值由 [0044](./0044-engine-model-selection-and-override.md) 定。
 
 Midscene 的 planning（把高层意图拆解成动作步骤）角色，**继续用与 grounding 相同的引擎模型**（成文时为 Qwen3-VL，现值见 [0044](./0044-engine-model-selection-and-override.md)），不配置独立的 `MIDSCENE_PLANNING_MODEL_*`。
 

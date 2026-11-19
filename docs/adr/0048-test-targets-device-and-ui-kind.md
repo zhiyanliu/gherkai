@@ -1,6 +1,6 @@
 # 0048. 测试目标：设备与界面类型两个维度、`@device` 与 `@app` 标签、core 的执行前预检
 
-> **Status:** Accepted（2026-10-15）——1.5 移动真机支持的入口篇：定义测试目标模型与 core 一侧的全部改动，部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）；worker 能力自述、确定性 step 句柄、远程访问会话、Appium 适配、项目配置文件分别见 0049 到 0053。
+> **Status:** Accepted（2026-10-15）——部分取代 [0019](./0019-feature-tags-scope-and-engine.md) 的「三个语义 tag」表述（tag 体系扩为五个）。
 
 ## 背景与问题
 
@@ -12,6 +12,8 @@
 - core 对 step 语义无知（[0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 红线），目标信息只能来自结构化声明，不能从 step 文本推断；
 - 引擎与确定性 step 对目标的支持是参差的（Nova Act 驱动的是 Playwright 浏览器，没有设备路径；一条确定性 step 可能只写了桌面实现），不支持时要在花钱之前、以清楚的方式拒绝或标注；
 - 云端与后台推进的 job 不在 CLI 进程里执行，设备选择这类取值必须随 job 走。
+
+本篇是 1.5 移动真机支持的入口篇，定义测试目标模型与 core 一侧的全部改动。
 
 ## 决策
 

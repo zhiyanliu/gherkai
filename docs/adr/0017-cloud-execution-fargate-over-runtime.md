@@ -1,8 +1,10 @@
 # 云端执行倾向 Fargate/ECS 而非 AgentCore Runtime（批处理 shape-fit）
 
-> **Status:** Accepted —— 倾向已落地为实态：Fargate/ECS 就是 `--backend cloud` 的执行实现（`FargateEngine` + CDK 工程：v1.1 时为顶层独立工程 `iac_aws_backend/`，[0037](./0037-distribution-and-packaging.md) 后收编进发行包 `gherkai-deploy-aws`（`deploy_aws/`）、经 `gherkai deploy` 部署，真部署真跑；见 [0032](./0032-fargate-execution-environment.md)/[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。本 ADR 保留为**选型理由**（判据、诚实修正、翻盘条件）。
+> **Status:** Accepted
 
-当执行面搬上云（v1.x+，见 [0016](./0016-execution-architecture-core-lib-run-model.md)），**倾向 Fargate/ECS（ECS RunTask）而非 AgentCore Runtime**。这是**倾向性结论**，上云时以实测复核为准——非现在锁死。（此句为上云前的原始表述，保留作决策史；已按此倾向落地，见 Status 头与下「何时坐实」的演进注。）**本 ADR 说的「上云」只指执行进程这一级**：AgentCore 浏览器会话（[0011](./0011-agentcore-browser-system-default-vs-custom.md)）与 Android / iOS 设备所用的 Device Farm 远程访问会话（[0051](./0051-device-session-lifecycle-and-app-distribution.md)）同样恒在云端，本机后端亦然——该后端同样要本机 AWS 凭证（[0040](./0040-consumer-role-model-and-terminology.md) 决策 3 的执行权限梯级）；会话在云与执行进程在云是两级相互独立的上云，云端后端下两级皆在云、但仍是两件事（本机后端只有会话那一级在云）。
+当执行面搬上云（v1.x+，见 [0016](./0016-execution-architecture-core-lib-run-model.md)），**倾向 Fargate/ECS（ECS RunTask）而非 AgentCore Runtime**。这是**倾向性结论**，上云时以实测复核为准——非现在锁死。（此句为上云前的原始表述，保留作决策史；已按此倾向落地，见下「何时坐实」的演进注。）**本 ADR 说的「上云」只指执行进程这一级**：AgentCore 浏览器会话（[0011](./0011-agentcore-browser-system-default-vs-custom.md)）与 Android / iOS 设备所用的 Device Farm 远程访问会话（[0051](./0051-device-session-lifecycle-and-app-distribution.md)）同样恒在云端，本机后端亦然——该后端同样要本机 AWS 凭证（[0040](./0040-consumer-role-model-and-terminology.md) 决策 3 的执行权限梯级）；会话在云与执行进程在云是两级相互独立的上云，云端后端下两级皆在云、但仍是两件事（本机后端只有会话那一级在云）。
+
+本 ADR 保留为**选型理由**（判据、诚实修正、翻盘条件）。
 
 ## 决定性理由：workload shape 是批处理
 
@@ -30,6 +32,6 @@ Runtime 成为更优选，当且仅当 **workload 从批处理变成长驻服务
 
 ## 何时坐实
 
-> **已落地（v1.1 云端执行）**：Fargate/ECS 即 `--backend cloud` 的执行实态（见 Status 头与 [0032](./0032-fargate-execution-environment.md)/[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。**A/B 实测未做**——直接按上「workload shape 是批处理」判据落地，故「诚实修正」里成本那条『孰优只能实测』至今未量化。上「翻盘条件」仍适用：shape 变成长驻服务时重估。下述原计划保留作决策史。
+> **已落地（v1.1 云端执行）**：Fargate/ECS 即 `--backend cloud` 的执行实态（见 [0032](./0032-fargate-execution-environment.md)/[0033](./0033-iac-aws-backend-and-composition-wiring.md)）。**A/B 实测未做**——直接按上「workload shape 是批处理」判据落地，故「诚实修正」里成本那条『孰优只能实测』至今未量化。上「翻盘条件」仍适用：shape 变成长驻服务时重估。下述原计划保留作决策史。
 
 上云时（v1.x），先用真实用例 A/B 实测 Fargate 与（若仍疑）Runtime 的成本/冷启动/会话保活，再最终敲定。`run_scope` 的执行实现是可替换的（[0016](./0016-execution-architecture-core-lib-run-model.md)），故即便选错也能换——这降低了本决策的下注风险。

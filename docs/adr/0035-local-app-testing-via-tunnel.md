@@ -1,6 +1,6 @@
 # 0035. 本地应用测试：自动隧道把开发机上的被测应用暴露给云端浏览器
 
-> **Status:** Partially-superseded-by 0051 —— 决策 4 的「凭据内嵌地址」被 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13 改为「令牌换 cookie、worker 预热一次」（iOS Safari 不采用地址内嵌凭据，设备浏览器也没有注入请求头的通道，统一后桌面与设备一条路）；随之改写的还有决策 1 的 `TunnelInfo` 形态与服务商能力要求、决策 2 的匹配规则（由子串替换精化为带边界的识别）、决策 5 的脱敏规则与「明确不脱敏」清单、「边界与不变量」里「core 对隧道无知」一条（加了 worker 的预热导航）并新增 definition 完整性不变量；其余决策不变。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0051 —— 决策 4 的「凭据内嵌地址」被 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 决策 13 改为「令牌换 cookie、worker 预热一次」；随之改写的还有决策 1 的 `TunnelInfo` 形态与服务商能力要求、决策 2 的匹配规则（由子串替换精化为带边界的识别）、决策 5 的脱敏规则与「明确不脱敏」清单、「边界与不变量」里「core 对隧道无知」一条（加了 worker 的预热导航）并新增 definition 完整性不变量；其余决策不变。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景与问题
 

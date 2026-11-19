@@ -1,6 +1,6 @@
 # engine artifact→S3：worker 上传、由组合根注入的 S3 落点驱动（注入驱动、worker 对执行环境无知）
 
-> **Status:** Accepted —— 决策已定：上传由组合根注入的 S3 落点配置驱动、worker 对"我在哪跑"无知（**机制上由注入驱动、非 env-sniff**，[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 C）。面向用户 `--backend cloud` = Fargate 执行（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A），强制注入 S3 落点；`subprocess + 注入 S3 落点` 降为 e2e_harness/开发**内部预演**（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 B），上传能力按「第一期实现定论」节**已在该预演环境实现并验证**。**Fargate 执行环境特有的**中断丢失/grace/安全点提前上传见 [0032](./0032-fargate-execution-environment.md)；远程事件传输见 [0024](./0024-worker-core-protocol.md)「远程传输演进」。
+> **Status:** Accepted
 
 ## 本 ADR 只管一件事：engine 产物怎么到 S3（执行环境/传输层剥离）
 

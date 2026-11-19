@@ -1,6 +1,6 @@
 # 0036. 确定性能力暴露：worker 自述注册表，CLI 按引擎查询
 
-> **Status:** Partially-superseded-by 0050 —— 决策 1 的注册面签名由 [0050](./0050-deterministic-step-handles-and-testing.md) 扩成按句柄种类分键的多实现形态（单函数写法原样兼容），元数据加可选 `keywords`；其余结论不变，以下是追加而非取代：`plan` 标注降级的例外与 `--steps-dir` 查询面由 [0037](./0037-distribution-and-packaging.md) 决策 4 追加；能力自述对象的顶层 `targets`、会话预热支持键与条目级 `targets`，以及 `list-deterministic` 的目标列、plan 的按目标核对、Midscene `min_grace_s` 取桌面与设备两条收尾路径各自之和的较大者由 [0049](./0049-worker-capabilities-targets-keys.md) 追加；`--steps-dir` 取值链里的项目配置文件一层由 [0053](./0053-project-config-file.md) 决策 2 追加；清单从独立 flag 并入能力自述对象，见「5.」—— 清单查询（`list-deterministic`）、plan 命中标注与能力自述均已实现。
+> **Status:** Partially-superseded-by 0050 —— 决策 1 的注册面签名由 [0050](./0050-deterministic-step-handles-and-testing.md) 扩成按句柄种类分键的多实现形态（单函数写法原样兼容），元数据加可选 `keywords`；其余结论不变，以下是追加而非取代：`plan` 标注降级的例外与 `--steps-dir` 查询面由 [0037](./0037-distribution-and-packaging.md) 决策 4 追加；能力自述对象的顶层 `targets`、会话预热支持键与条目级 `targets`，以及 `list-deterministic` 的目标列、plan 的按目标核对、Midscene `min_grace_s` 取桌面与设备两条收尾路径各自之和的较大者由 [0049](./0049-worker-capabilities-targets-keys.md) 追加；`--steps-dir` 取值链里的项目配置文件一层由 [0053](./0053-project-config-file.md) 决策 2 追加。
 
 ## 背景与问题
 

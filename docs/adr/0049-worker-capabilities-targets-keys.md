@@ -1,6 +1,6 @@
 # 0049. worker 能力自述增键：`targets`、step 级 `targets` 与 `max_session_s`
 
-> **Status:** Accepted（2026-10-15）——在 [0036](./0036-deterministic-capability-discovery.md) 决策 5 的能力自述对象上增键，增键本身不递增 `schema_version`（1.5 的协议版本后来因探测条目形状变化递增为 2，见 [0024](./0024-worker-core-protocol.md)「协议版本与 job 行的固定键集」条）；测试目标的声明与拒绝规则归 [0048](./0048-test-targets-device-and-ui-kind.md)。决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 随 0051 的修订增加 step 级 `requires` 与会话预热支持键。
+> **Status:** Accepted（2026-10-15）——决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 随 0051 的修订增加 step 级 `requires` 与会话预热支持键。
 
 ## 背景与问题
 

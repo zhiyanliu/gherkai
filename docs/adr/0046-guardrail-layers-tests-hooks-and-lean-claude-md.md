@@ -1,6 +1,6 @@
 # 0046. contributor 护栏三层：测试兜底、hook 写完即查、CLAUDE.md 只留判据
 
-> **Status:** Accepted（2026-09-20）—— 把 [0039](./0039-user-facing-surfaces-no-internal-references.md) 护栏节、[0045](./0045-documentation-layering-and-placement.md) 决策六 / 八与 CLAUDE.md 文档纪律里能逐行判定的规则统一收进同一份规则源（用户可见字符串字面量的禁词表按 0039 护栏节仍单独存于 `cli/tests/test_user_facing_messages.py`，只由测试层执行），并给 Claude Code 加两道 hook；规则的内容仍各归原 ADR，本 ADR 只定「怎么执行」。2026-11-14 增补决策 6：方法文档里的规则绑定到使用时刻，同僚复核加一道复核轮闸门。2026-11-15 增补决策 6：轮次由作者声明，后续轮另查上轮流程处置与解除依据，送出时附上请复核者先读熔断各条的固定一段。2026-11-15 增补决策 7：Claude Code 工具行为的要点随 CLAUDE.md 加载。
+> **Status:** Accepted（2026-09-20）
 
 ## 背景与问题
 

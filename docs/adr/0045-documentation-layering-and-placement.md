@@ -1,6 +1,6 @@
 # 0045. 文档分层与归位：按读者三分类、目录归位、包页面降为入口页、每版 changelog、按类别定口吻
 
-> **Status:** Accepted（2026-09-17）—— 本 ADR 是 CLAUDE.md 文档纪律「文档按读者三分类归位，口吻随类别变」条的决策与理由所在；反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」（0039 Status 头已同步）；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变；另反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的 changelog 锚点（范围限该子句，0037 Status 头已同步）。
+> **Status:** Accepted（2026-09-17）—— 反转 [0039](./0039-user-facing-surfaces-no-internal-references.md) 面二「各包 README = 完整操作手册」为「入口页」；skill 与文档的关系维持 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策四不变；另反转 [0037](./0037-distribution-and-packaging.md) 决策 8 ④ 的 changelog 锚点（范围限该子句）。
 
 ## 背景与问题
 

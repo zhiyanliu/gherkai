@@ -1,6 +1,6 @@
 # 0043. 驾驭 gherkai 的 agent skill：住 CLI 包内、随 wheel 发行、内容单份、引用文档为确定性转换的副本
 
-> **Status:** Accepted（2026-09-14）—— 护栏见 `cli/tests/test_skill.py` 等；评测结论内联在「验证」节：前五轮是 with-skill 对 baseline 的两臂对标（三次四模型对标 + 三轮污染样本作废的来历）与触发率前后对照，第七轮起对照臂改为旧版 skill 快照（第七轮四模型，第八、九轮三模型），另有 v1.4.2 / v1.4.3 两次发版验证；影响面列出的反向链已逐处落地，[0041](./0041-agent-facing-cli-affordances.md) Status 头已改 Partially-superseded-by 本 ADR。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Accepted（2026-09-14）—— [0041](./0041-agent-facing-cli-affordances.md) Status 头已改 Partially-superseded-by 本 ADR。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景
 

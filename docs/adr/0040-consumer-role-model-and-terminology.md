@@ -1,6 +1,6 @@
 # 0040. 使用方角色模型与术语
 
-> **Status:** Accepted（2026-09-09；2026-09-18 增决策 6「两侧 AI agent 是执行者、不立新帽子」；2026-11-15 决策 1 的 contributor 一行增「owner」）—— 术语面已落（全仓「test engineer」统一为「测试开发」）；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Accepted（2026-09-09）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景与问题
 
@@ -61,7 +61,7 @@
 
 ## 决策 5：术语单一真源与立新角色的门槛
 
-- 本 ADR 是角色名与边界的单一真源；派生视图（清单见 Status 头）改这里再改那里。
+- 本 ADR 是角色名与边界的单一真源；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
 - **立新角色的门槛 = 有独立权限边界或独立产物**。「只提交不写 feature 的人」「只看结果的人」是 feature 作者的子集、不另立；「提交者」维持为权限类别，不升格为帽子。
 - 长期文档与 code 注释用正名；产品面文案里的角色词按 0039 说人话（「部署方」「写 step 的人」可用，不出现帽子矩阵与决策号）。
 

@@ -1,6 +1,6 @@
 # 0039. 用户可见面不带内部指代：产品文案与文档分层
 
-> **Status:** Partially-superseded-by 0045 ——面二里「各包 README = 完整操作手册」被 [0045](./0045-documentation-layering-and-placement.md) 决策三反转为「入口页」（叙事归 `docs/user-guide/`）；面二的读者二分（使用者向 / contributor 向）亦被 0045 决策一的读者三分类取代；changelog 与 Release 正文的载体、各包 `[project.urls] Changelog` URL 随 0045 决策五改。面一（产品文案零内部指代）不变；两条护栏仍在，扫描面已随 0045 决策五 / 六 / 八扩（Release footer 模板、口头语表、退役旧名表）。原文：Accepted（2026-09-09）—— 两面均已实装并有护栏：产品文案面（`cli/tests/test_user_facing_messages.py`）、文档面（`cli/tests/test_package_readmes.py`；随包发行的 agent skill 那一层另由 `cli/tests/test_skill.py` 扫）。本 ADR 是 CLAUDE.md 代码纪律「产品面文案不带内部指代」与文档纪律「README / DEVELOPMENT 分层」两条约定的决策与理由所在；约定文件只留规则与指针。
+> **Status:** Partially-superseded-by 0045 ——面二里「各包 README = 完整操作手册」被 [0045](./0045-documentation-layering-and-placement.md) 决策三反转为「入口页」（叙事归 `docs/user-guide/`）；面二的读者二分（使用者向 / contributor 向）亦被 0045 决策一的读者三分类取代；changelog 与 Release 正文的载体、各包 `[project.urls] Changelog` URL 随 0045 决策五改。面一（产品文案零内部指代）不变；两条护栏仍在，扫描面已随 0045 决策五 / 六 / 八扩（Release footer 模板、口头语表、退役旧名表）。原文：Accepted（2026-09-09）。
 
 ## 背景与问题
 
