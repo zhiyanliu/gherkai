@@ -223,7 +223,10 @@ def test_run_with_cloud_backend_and_submit_only_flags_still_points_to_submit(tmp
     ["run", "--backend=cloud", "--json"],
     ["run", "--backend", "cloud", "--prefix=stage-", "--json"],
     ["run", "--backend", "local", "--backend", "cloud"],
-], ids=["no-feature", "no-feature-json", "equals-form", "submit-only-flag-equals-form", "last-backend-wins"])
+    ["run", "--back", "cloud", "--json"],
+    ["run", "--backend", "local", "--back=cloud"],
+], ids=["no-feature", "no-feature-json", "equals-form", "submit-only-flag-equals-form", "last-backend-wins",
+        "abbreviated-option", "abbreviated-option-overrides-earlier-local"])
 def test_run_with_cloud_backend_points_to_submit_even_when_other_arguments_are_wrong(monkeypatch, capsys, argv):
     """云端后端下 run 一律先给那句指向 submit 的说明：没有给 feature、选项写成等号形式、带着 submit 才有的参数时都一样，
     不被「缺少 features」「不认识的参数」这类解析报错盖过；退出码 2，标准输出为空，不做任何检查。"""
@@ -237,6 +240,18 @@ def test_run_with_cloud_backend_points_to_submit_even_when_other_arguments_are_w
     assert "gherkai run 只在本机执行" in cap.err and "gherkai submit --backend cloud" in cap.err
     assert "required" not in cap.err and "unrecognized arguments" not in cap.err
     assert record == [] and preflight_calls == [] and made["variant"] == []
+
+
+@pytest.mark.parametrize("override", [["--back", "local"], ["--back=local"], ["--backend", "local"]],
+                         ids=["abbreviated", "abbreviated-equals-form", "full-name"])
+def test_run_whose_last_backend_is_local_is_not_turned_away(tmp_path, monkeypatch, capsys, override):
+    """对偶：命令行先给 cloud、后面又给 local（含参数解析接受的缩写写法）时，生效的后端是 local，run 照常进入本机路径，
+    不给那句指向 submit 的说明。这里用一个不存在的 feature 让本机路径在入口校验处停下。"""
+    monkeypatch.chdir(tmp_path)
+    rc = m.main(["run", "missing.feature", "--backend", "cloud", *override, "--json"])
+    cap = capsys.readouterr()
+    assert "gherkai submit --backend cloud" not in cap.err
+    assert rc == 2 and "missing.feature" in cap.err
 
 
 def test_run_help_is_available_with_cloud_backend_on_the_command_line(capsys):

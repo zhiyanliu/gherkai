@@ -262,7 +262,10 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     sub = p.add_subparsers(dest="command")
 
     run = sub.add_parser("run", help="运行一个或多个 .feature")
-    run.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
+    # features 在解析这一步不设必填：缺少时由 main 在看过后端之后报出（见 main）。这样「run 给出云端后端即指向 submit」只按参数解析
+    # 得到的后端判断，选项的写法、缩写、重复给出时取哪一次都由参数解析一处解释。
+    run.add_argument("features", nargs="*", type=Path, help="一个或多个 .feature 路径（至少一个）")
+    p.run_parser = run
     _add_config_flag(run)
     run.add_argument(
         "--default-engine", choices=sorted(_names.ENGINES), default=None,
@@ -3067,32 +3070,14 @@ def _interrupt_prompt(level: int, *, grace: float) -> str:
 def _run_cloud_backend_message(args) -> str:
     """`run` 给出云端后端时的一句（ADR 0016 决策 A「云端后端只支持 submit」；配置文件给出时与命令行相同，ADR 0053 决策 3）：
     说明 run 只在本机执行、云端后端经 submit 提交；后端由配置文件给出时另说怎样在本机执行（选项优先于配置文件）。
-    调用处：`_cmd_run` 入口（配置文件给出云端后端时走到这里），以及 `main` 在完整解析之前与之后各一处（命令行给出云端后端时，
-    那时还没有合成配置文件，来源恒为命令行）。"""
+    两处调用：`main` 在参数解析之后（命令行给出云端后端时；那时还没有合成配置文件，来源恒为命令行），以及 `_cmd_run` 入口
+    （配置文件给出云端后端时）。"""
     origin = _option_origin(args, "backend")
     msg = (f"gherkai run 只在本机执行，不支持云端后端（{origin} 给出的是 cloud）：要在云端后端执行，"
            "请用 gherkai submit --backend cloud 提交，再用 gherkai status <run_id> --backend cloud --wait 等待结果")
     if "backend" in getattr(args, "config_filled", set()):
         msg += "；要在本机执行，给 --backend local（命令行选项优先于配置文件）"
     return msg + "。"
-
-
-def _run_names_cloud_backend(argv: list[str]) -> bool:
-    """命令行是否是 `run` 且 `--backend` 给出 cloud（`--backend cloud` 与 `--backend=cloud` 两种写法，重复给出时取最后一次）。
-    在完整解析之前窥一眼：云端后端下 run 一律先说明改用 submit（ADR 0016 决策 A「云端后端只支持 submit」），不让缺 feature、
-    submit 才有的参数这类别的参数错误先报出来。只认完整的选项名，别的写法交回完整解析。"""
-    if not argv or argv[0] != "run":
-        return False
-    backend = None
-    rest = argv[1:]
-    for i, a in enumerate(rest):
-        if a == "--":
-            break
-        if a == "--backend" and i + 1 < len(rest):
-            backend = rest[i + 1]
-        elif a.startswith("--backend="):
-            backend = a.split("=", 1)[1]
-    return backend == "cloud"
 
 
 class _InterruptState:
@@ -3200,22 +3185,21 @@ def main(argv: list[str] | None = None) -> int:
     if provider_err is not None and not any(a in ("-h", "--help") for a in argv):
         _progress(provider_err)
         return 2
-    # run 在命令行上给出 cloud：先于完整解析说明 run 只在本机执行、云端后端经 submit 提交，这样缺 feature 或带着 submit 才有的
-    # 参数时也是这一句（--help 例外，帮助恒可用）。
-    if _run_names_cloud_backend(argv) and not any(a in ("-h", "--help") for a in argv):
-        _progress(_run_cloud_backend_message(argparse.Namespace()))
-        return 2
     args, unknown = parser.parse_known_args(argv)
+    # run 在命令行上给出 cloud：先说明 run 只在本机执行、云端后端经 submit 提交（ADR 0016 决策 A「云端后端只支持 submit」），排在
+    # 「不认识的参数」与「缺少 features」之前：照 submit 的写法在 run 上带着云端参数、或还没有给 feature 时，看到的也是这一句。
+    # 后端取参数解析得到的值，这里不另行扫描命令行。
+    if args.command == "run" and args.backend == "cloud":
+        _progress(_run_cloud_backend_message(args))
+        return 2
     if unknown:
-        # run 在命令行上给出 cloud 时，同给的参数里常有 submit 才有的云端参数（--prefix、--worker-variant 等）：先说明 run 只在本机
-        # 执行、云端后端经 submit 提交（ADR 0016 决策 A），不让 argparse 报出的「unrecognized arguments」盖过这句。
-        if args.command == "run" and args.backend == "cloud":
-            _progress(_run_cloud_backend_message(args))
-            return 2
-        args = parser.parse_args(argv)  # 其余情形由 argparse 报出不认识的参数，并以退出码 2 结束
+        args = parser.parse_args(argv)  # 由 argparse 报出不认识的参数，并以退出码 2 结束
     bad = _apply_project_config(args, parser)  # 项目配置文件合成进取值顺序（ADR 0053）；不可用即以退出码 2 结束
     if bad is not None:
         return bad
+    # run 缺少 features：配置文件给出云端后端时留给 _cmd_run 入口先指向 submit，其余情形在这里照参数解析的惯例报出、以退出码 2 结束。
+    if args.command == "run" and not args.features and args.backend != "cloud":
+        parser.run_parser.error("the following arguments are required: features")
 
     if args.command == "list-deterministic":
         return _cmd_list_deterministic(args)
