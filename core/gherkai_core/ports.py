@@ -162,15 +162,19 @@ class RunStore(Protocol):
         ...
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
-        """按 scope_id 写单个 job 的运行态；运行态不存在则抛 FileNotFoundError（须先 create_run）。
+        """按 scope_id 写单个 job 的运行态（整项替换这个 job 的条目）；运行态不存在则抛 FileNotFoundError（须先 create_run）。
 
-        写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；run 已收尾时 job 照写、run 级不变。
-        写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
+        只在库中这个 job 还没有结束时写成：库中已是终态的 job 不被它改写（终态只写一次，ADR 0031 决定一·补；ADR 0030 决定四），判断与
+        写在同一次条件写里，本机在文件锁内，云端在同一次 update_item 的条件里。
+        写入的 job 态不是 PENDING 时，同一次写把未收尾的 run 级推进为 RUNNING；写入 PENDING 时只写 job。调用方不需要记「是否第一次」。
+        run 已收尾时同样只写 job、run 级不变：它只对库中未结束的 job 写成，经 end_run 或 commit_job_states 结束的 run 里 job 都已是终态，
+        这次写不改任何东西，只有经 try_finalize 结束、留有未结束 job 的 run 上它写成。
         认领计数、HWM、起止时刻与 run 级 message 不变。
 
-        返回 run 级在这次写时是否仍未结束：True 表示 job 落下的那一刻 run 级为 pending 或 running，False 表示
-        run 级已是终态、这次只写了 job。对写入的任何 job 态（含 PENDING）都按写的那一刻如实给出，不是写前另读一次的结果。前台执行者
-        据 False 得知 run 已被别处记为已结束、停止启动新的 job；不关心的调用方可以忽略。
+        返回 run 级在这次写时是否仍未结束：True 表示这次写的那一刻 run 级为 pending 或 running，False 表示 run 级已是终态。job 是否写成
+        不影响返回值：库中这个 job 已是终态而没有写时，返回值同样是那一刻 run 级的状态，run 仍未结束即为 True。对写入的任何 job 态（含
+        PENDING）都按写的那一刻如实给出，不是写前另读一次的结果。前台执行者据 False 得知 run 已被别处记为已结束、停止启动新的 job；
+        job 已由别的写记下终态不是停手的理由。不关心的调用方可以忽略。
         """
         ...
 
@@ -192,17 +196,19 @@ class RunStore(Protocol):
     def commit_job_states(self, run_id: str, job_states: Sequence[JobState], *, ended_at: str) -> CommitOutcome:
         """带结果的 job 终态写：把一个或多个由执行结果结束的 job 记为终态，一次条件写（ADR 0030 决定四）。
 
-        - **作用**：给出的每个 job 整项替换库中的条目（会话与认领时刻由调用方带上）；库中已是终态的 job 不被改写（终态只写一次，
-          ADR 0031 决定一·补）。同一次写里按取法写 run 状态（ADR 0031 决定三）；这次写使 run 成为终态时，同一次写下 ended_at
-          （ISO 串，调用方经注入的时钟取，adapter 不取时钟）。认领计数、HWM、开始时刻与 run 级说明不变。作用的定义是
-          `run_status.commit_applied`，两个 adapter 都按它算出要写下的运行态。
+        - **作用**：库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补）；其余给出的 job 与库中的条目按字段合并（ADR 0030
+          决定四）：状态取给出的终态；认领时刻以库中的为准，库中没有时取给出的；会话取给出的，没有给出时保留库中的，不以空值覆盖；
+          job 级说明只由结束写写下，给出的不写下。合并按写的那一刻库中的条目做：调用方准备参数之后别的写为这个 job 写下的认领时刻
+          留下，写下的会话只在给出的 job 没有会话时留下，两者都不被空值覆盖。同一次写里按取法写 run 状态（ADR 0031 决定三）；
+          这次写使 run 成为终态时，同一次写下 ended_at（ISO 串，调用方经注入的时钟取，adapter 不取时钟）。认领计数、HWM、开始时刻与
+          run 级说明不变。作用的定义是 `run_status.commit_applied`，两个 adapter 都按它算出要写下的运行态。
         - **条件**：run 未结束（ADR 0054 决策五）。判断只看写的那一刻的运行态：本机在文件锁内读、判断、写，云端以写入序号等于读到的
           值为条件整体替换 jobs、条件不成立即重读再算（ADR 0034 机制三②）；云端重读的次数有上限，用尽即抛错、不写（ADR 0030 决定六
           「STATE item 带写入序号」条），调用方按写不进运行态处理。
         - **返回**：`CommitOutcome.OPEN`（写成，run 仍未结束）、`ENDED_RUN`（写成，这次写使 run 成为终态）、`ALREADY_ENDED`（run 在
           这次写之前已是终态，运行态不变）。run 成为终态只发生一次，返回 ENDED_RUN 的写入方生成报告，不靠写后读回推断。
-        - **参数错误**：job_states 为空、scope_id 重复、某个 job 不是终态、带了 job 级说明（只由结束写写下）、或不在这个 run 的运行态
-          里，都抛 ValueError、不写任何东西。运行态不存在抛 FileNotFoundError（须先 create_run）。
+        - **参数错误**：job_states 为空、scope_id 重复、某个 job 不是终态、或不在这个 run 的运行态里，都抛 ValueError、不写任何东西。
+          运行态不存在抛 FileNotFoundError（须先 create_run）。
 
         它取代 update_job_state 写终态的用法，调用方迁过来之后 update_job_state 只写执行中的 job。
         """
@@ -221,7 +227,8 @@ class RunStore(Protocol):
         - **返回**：是否写成。run 已结束、条件不成立、运行态不存在，都返回 False、不改任何东西。写成即这次写使 run 成为终态，写成的一方
           生成报告。
 
-        说明文字只是描述，adapter 不解释它，条件只看运行态与 ending 的结构字段。它取代 try_finalize，调用方迁过来之后 try_finalize 删去。
+        说明文字只是描述，adapter 不解释它：写成与否、各 job 记成什么只看运行态与 ending 的结构字段，不看说明有没有、是什么（说明表
+        一行的形态由 `RunEnding` 构造时校验）。它取代 try_finalize，调用方迁过来之后 try_finalize 删去。
         """
         ...
 

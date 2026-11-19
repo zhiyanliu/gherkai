@@ -7,8 +7,9 @@
 - `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
   的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
 
-说明文字只是描述：这里与 adapter 都不解释它，任何判断都不看它（ADR 0031 决定一「状态是一切计算的唯一依据」条）；结束写成立与否只看
-运行态与 `RunEnding` 的两个结构字段 `ends_running_jobs`、`definition_unavailable`。
+说明文字只是描述，这里与 adapter 都不解释它（ADR 0031 决定一「状态是一切计算的唯一依据」条）：写成与否、job 与 run 记成什么，都不看
+说明有没有、是什么；结束写成立与否只看运行态与 `RunEnding` 的两个结构字段 `ends_running_jobs`、`definition_unavailable`。说明表一行的
+形态校验（`RunEnding` 构造时核对哪几格带说明）是参数的校验，不在其内。
 本模块是纯函数、无 I/O、不取时钟：结束时刻由调用方给出。
 """
 from __future__ import annotations
@@ -55,7 +56,7 @@ class RunEnding:
       两行、运行定义不可用的变体）把 running 的 job 一并结束。
     - definition_unavailable：运行定义不可用的变体。每个未结束的 job 记 error，说明同 run 级。
 
-    说明（只是描述，写进运行态，不参与任何判断）：
+    说明（只是描述，写进运行态；结束写成立与否、各 job 记成什么都不看它们）：
     - run_message：run 级说明，写进运行态的 run 级 message。
     - skipped_message：运行态里是 pending 的 job 记 skipped 时带的说明。
     - aborted_message：运行态里是 running 的 job 记 aborted 时带的说明。
@@ -157,14 +158,28 @@ class CommitOutcome(str, Enum):
     ALREADY_ENDED = "already_ended"  # 没有写成：run 在这次写之前已是终态，运行态不变
 
 
+def _committed(current: JobState, given: JobState) -> JobState:
+    """终态写记下的 job 条目：库中未结束的条目 current 与调用方给出的终态 given 按字段合并（ADR 0030 决定四）。
+
+    - 状态取 given 的终态。
+    - 认领时刻取库中的：认领那次写是它的来源；库中没有时取 given 的。
+    - 会话取 given 的：它是产出这个结果的那次执行的会话；given 没有时保留库中的，不以空值覆盖。
+    - job 级说明保留库中的：它只由结束写写下，given 带的不写下。
+    合并的依据是读到的这份条目（本机在锁内读，云端每次重读之后重算）。调用方准备参数之后、写成之前别的写为这个 job 写下的认领时刻因此
+    留下；那段时间里写下的会话只在 given 没有会话时留下，given 带了会话即取 given 的。两者都不被空值覆盖。"""
+    return replace(current, status=given.status,
+                   session_id=given.session_id if given.session_id is not None else current.session_id,
+                   claimed_at=current.claimed_at if current.claimed_at is not None else given.claimed_at)
+
+
 def commit_applied(state: RunState, job_states: Sequence[JobState], *,
                    ended_at: str) -> tuple[RunState | None, CommitOutcome]:
     """带结果的 job 终态写对一份运行态的作用：返回要写下的运行态（没有写成时为 None）与这次写的结果。
 
-    给出的每个 job 都要是终态、不带 job 级说明（说明只由结束写写下，由执行结果结束的 job 的说明在判定明细里），scope_id 不重复、都在
-    这份运行态的 job 里，至少一个；不满足即抛 ValueError、不写任何东西。run 已是终态时没有写成（ALREADY_ENDED）。否则给出的 job 整项
-    替换库中的条目（会话与认领时刻由调用方带上），库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补）；run 状态按取法
-    随之写下，成为终态时同一次写下结束时刻（ENDED_RUN），否则为 OPEN。HWM、认领计数、开始时刻与 run 级说明不变。"""
+    给出的每个 job 都要是终态，scope_id 不重复、都在这份运行态的 job 里，至少一个；不满足即抛 ValueError、不写任何东西。run 已是终态时
+    没有写成（ALREADY_ENDED）。否则库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补），其余给出的 job 按 `_committed`
+    的字段规则与库中的条目合并（ADR 0030 决定四）；run 状态按取法随之写下，成为终态时同一次写下结束时刻（ENDED_RUN），否则为 OPEN。
+    HWM、认领计数、开始时刻与 run 级说明不变。"""
     job_states = tuple(job_states)
     if not job_states:
         raise ValueError("终态写至少要给出一个 job")
@@ -175,16 +190,15 @@ def commit_applied(state: RunState, job_states: Sequence[JobState], *,
         seen.add(js.scope_id)
         if js.status not in TERMINAL_STATUSES:
             raise ValueError(f"终态写只记终态，job {js.scope_id} 的状态是 {js.status.value}")
-        if js.message is not None:
-            raise ValueError(f"终态写不带 job 级说明（只由结束写写下），job {js.scope_id} 带了说明")
         if js.scope_id not in state.jobs:
             raise ValueError(f"job {js.scope_id} 不在 run {state.run_id} 的运行态里")
     if state.status in TERMINAL_STATUSES:
         return None, CommitOutcome.ALREADY_ENDED
     jobs = dict(state.jobs)
     for js in job_states:
-        if state.jobs[js.scope_id].status not in TERMINAL_STATUSES:
-            jobs[js.scope_id] = js
+        current = state.jobs[js.scope_id]
+        if current.status not in TERMINAL_STATUSES:
+            jobs[js.scope_id] = _committed(current, js)
     status = run_status_of(js.status for js in jobs.values())
     if status in TERMINAL_STATUSES:
         return replace(state, status=status, jobs=jobs, ended_at=ended_at), CommitOutcome.ENDED_RUN

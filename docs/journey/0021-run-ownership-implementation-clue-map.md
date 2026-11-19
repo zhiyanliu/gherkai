@@ -105,7 +105,7 @@
 
 新入口与现有入口混用时的先后约束（第 1 步落地时，独立复核在两个 adapter 上用探针复现了三个反例，第 1 步按约定不改这些入口）：
 - 反例：①`update_job_state` 在 run 已结束时的回退写照写 job：处置的 `end_run` 把 a 记成 aborted、带说明之后，前台对 a 写 running 返回 False，记录里 a 却成了 running，说明被整项替换抹掉，run 仍是 aborted。②DDB `project_state` 的标量一步与逐 job 写之间落下处置的 `end_run`：逐 job 写对投影里的终态只以 `attribute_exists(jobs.#sid)` 为条件，把结束写记下的 aborted 改成 passed，说明却留着结束写的那一句。③两个 adapter 的 `project_state` 在 run 未结束时用投影里的终态覆盖 `commit_job_states` 已写下的终态（同级取新值，local 的逐 job 合并同样），违反终态只写一次。
-- 约束：任何调用方开始用 `end_run` 或 `commit_job_states` 之前，或与它同批：`update_job_state` 去掉 run 已结束时的回退写，并以库中 job 未结束为条件（状态-5）；`project_state` 的逐 job 写都以库中 job 为 pending 或 running 为条件，本机合并时不替换库中已是终态的 job。后一条比状态-6 的「钳在 running」弱，与后台仍经投影写终态、再 try_finalize 的旧路径相容，所以要从状态-6 提到第 2 步，钳在 running 仍随第 3 步。前台迁到 `commit_job_states` 与 `update_job_state` 新语义同批。到期的结束写自带「写下时没有 running 的 job」的条件，大体躲开②；处置的两行与运行定义不可用的变体躲不开，处置一块排在这些之后。
+- 约束：任何调用方开始用 `end_run` 或 `commit_job_states` 之前，或与它同批：`update_job_state` 去掉 run 已结束时的回退写（状态-5；「以库中 job 未结束为条件」已随第 1 步的复核修正落下，反例①随之不再成立，回退写只剩经 try_finalize 结束的 run 上还写得成）；`project_state` 的逐 job 写都以库中 job 为 pending 或 running 为条件，本机合并时不替换库中已是终态的 job。后一条比状态-6 的「钳在 running」弱，与后台仍经投影写终态、再 try_finalize 的旧路径相容，所以要从状态-6 提到第 2 步，钳在 running 仍随第 3 步。前台迁到 `commit_job_states` 与 `update_job_state` 新语义同批。到期的结束写自带「写下时没有 running 的 job」的条件，大体躲开②；处置的两行与运行定义不可用的变体躲不开，处置一块排在这些之后。
 - 待定（交主会话，云端一批之前定）：结束写给每个未结束的 job 写一句说明，云端 STATE 在必须写成的那一次写上变大，job 很多的 run 建得成、推进得了，结束写却可能超出单条记录的大小上限（DynamoDB 抛的不是条件不成立，异常从 `end_run` 冒出，没有一方能结束这个 run）。ADR 0034 机制三②已记下这项代价与实测项；处理办法要定：计划阶段按 job 数设上限并给出提示，或缩短每个 job 存下的内容（不能违反「说明只是描述」，也不能在读取时另派生状态）。是否先撞上 META 的大小上限，取决于运行定义的大小，没有核。
 
 ### 线索没有覆盖的改动点

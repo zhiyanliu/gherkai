@@ -70,7 +70,7 @@ class Status(str, Enum):
 
 - **不进 severity 表、不参与任何 severity 比较**（severity 只给终态排序用，见决定二）。
 - **run 级按决定三的取法对待它们**：有 job 未结束时 run 是前置态，前置态不参与终态之间的取舍。
-- **job 的状态只前进，终态只写一次**：job 生命周期是 `pending → running → 终态(passed/failed/error/…)` 的**单向推进**；终态只写一次，迟到的结果（终态之后才到的退出记录与事件）不被采用。存储怎样保证见 [0034](./0034-detached-batch-reconciler.md) 机制三②。
+- **job 的状态只前进，终态只写一次**：job 生命周期是 `pending → running → 终态(passed/failed/error/…)` 的**单向推进**；终态只写一次，迟到的结果（终态之后才到的退出记录与事件）不被采用。存储怎样保证见 [0034](./0034-detached-batch-reconciler.md) 机制三②；执行中的写同样不改写已是终态的 job（[0030](./0030-realtime-persistence-seam.md) 决定四）。
   这条「只前进」是**生命周期推进**意义上的，与决定二的 severity 数值序是**两套不同的序**，不可混用。
 - `_STATUS_COLOR` / index.html 给 pending/running 上「进行中」色（两者**共用同一个蓝**、报告里无需区分——pending 当前到不了 report，只为未来 RunState 视图兜底），别走兜底灰。
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
@@ -101,7 +101,7 @@ run 级：不按 severity 比较，按决定三的取法
 
 run 的状态若与 job 的状态分开写——在某一刻汇总、单独写一次，或在 job 之外直接结束 run（到期、处置、读不到运行定义）——记录里就会出现「run 已结束而 job 仍是 `pending` 或 `running`」「job 全部通过而 run 是 `error`」，只能靠 run 级说明解释记录。所以 run 的状态只由 job 的状态算出；一个仍有未结束 job 的 run 要结束，由结束写先把这些 job 写成终态（下「结束写」小节）。
 
-**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。零个 job 的 run 按取法为 `passed`。
+**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。零个 job 的 run 按取法为 `passed`；记录里不出现这样的 run：命令行入口以退出码 2 拒绝零个 scenario 的批次（[0041](./0041-agent-facing-cli-affordances.md) 决策一），所以不会有建 run 时记为 `pending`、按取法却是 `passed` 的记录，端口不为它另设拒绝。
 
 - **run 的状态字段没有自己的写入逻辑**：每次改变 job 状态的写在同一次写里按取法写 run 状态（云端连同状态分组），使 run 成为终态的那次写同时写下结束时刻。这些写入口见 [0030](./0030-realtime-persistence-seam.md) 决定四；取法要看全部 job，各写入口怎样在同一次写里按取法写出 run 状态见 [0034](./0034-detached-batch-reconciler.md) 机制三②。run 到终态之后运行态的任何写都不成立，规则、理由与依赖方见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五。
 - **scenario 判定到 job 判定的归约是另一条路径**：终结函数内容完整那一行按 scenario 判定取最重（任一 `error` 为 `error`，否则任一 `failed` 为 `failed`，否则 `passed`，即 `_aggregate`），喂进去的全是 worker 三态，永不含 skipped/aborted；scenario 判定集为空的情形由终结函数先判 error，见 [0034](./0034-detached-batch-reconciler.md) 机制二。
@@ -133,7 +133,7 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
 | 处置：已过期限加 300 秒（含云端后端到期） | 已超过允许运行的时间 | 这个 run 已超过允许运行的时间，job 没有启动 | 这个 run 已超过允许运行的时间，job 没有结果 |
 | 运行定义不可用 | 读不到定义的原因（[0037](./0037-distribution-and-packaging.md) 决策 7 的几句） | 未结束的 job 都记 `error`，说明同 run 级 | 同左 |
 
-处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。说明表的各句在 core 里只有一处（`run_status.RUN_ENDINGS`），运行定义不可用那一行由调用方带入读不到定义的原因（`run_status.definition_unavailable_ending`）；说明只是描述，结束写与任何判断都不看它（决定一「状态是一切计算的唯一依据」条）。
+处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。说明表的各句在 core 里只有一处（`run_status.RUN_ENDINGS`），运行定义不可用那一行由调用方带入读不到定义的原因（`run_status.definition_unavailable_ending`）；说明只是描述（决定一「状态是一切计算的唯一依据」条）：结束写成立与否、job 与 run 记成什么，都不看说明有没有、是什么。参数形态的校验不在此列：说明表一行构造时核对哪几格带说明，与它的结构字段相符（`run_status.RunEnding`），这是对参数的约束，不改变任何判定。
 
 - **一次结束写只带一行说明，多条来路先后成立时取最先成立的那条**：例如前台已因 fail-fast 中止、或先收到使用方中断，之后又过了停止启动的时刻，结束写取 fail-fast 或使用方中断那一行。理由：最先成立的来路已经使余下的 job 不再启动，之后成立的来路不改变哪些 job 没有启动；这与中止的说明取最先成立的来源（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「一次前台执行可能因三种原因停下」一段）是同一条原则。处置的两个条件在同一次判断里成立、没有先后，按上一段取「锁拿到了」那一行。
 - **执行方自己到期、fail-fast、使用方中断这三条来路不结束执行中的 job，结束写另以没有 `running` 的 job 为条件**：这三条来路的条件本来就要求执行中的 job 都已结束（执行方自己到期见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条；fail-fast 与使用方中断是执行中的 job 停下、各自得出结果之后），说明表里它们的 `aborted` 一格因此不出现，也不为表里不出现的情形另造说明。条件按结束写写下时的运行态判断：写下时仍是 `running` 的 job（例如读运行态之后才落下、还没有结果的认领）不会被这次结束写记成 `aborted`，云端重叠推进时这样的 run 按继续推进处理（0054 决策二后台推进条「收尾与报告」）；条件不成立时结束写不写、返回未写成。理由：条件要在写下的那一刻成立，而调用方不经手写入序号（[0030](./0030-realtime-persistence-seam.md) 决定六「STATE item 带写入序号」条），所以条件随这次写一起判断。结束不结束执行中的 job 是说明表每一行的结构属性，在 core 里是 `run_status.RunEnding.ends_running_jobs`，与说明分开：结束写成立与否不看哪一句说明给没给出。处置的两行与运行定义不可用的变体结束执行中的 job，不带这个条件。

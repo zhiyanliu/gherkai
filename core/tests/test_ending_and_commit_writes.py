@@ -6,8 +6,10 @@
   按取法成为终态，run 级说明与结束时刻同一次写下；运行定义不可用的变体把未结束的 job 都记 error；不结束执行中 job 的来路（说明表里
   aborted 一格不出现）在有 running 的 job 时不写；run 已结束、记录不存在时返回 False、不改任何东西；同一个 run 两次结束写只有第一次写成。
 - 终态写：三种返回值各自的情形，一次写记多个 job，已是终态的 job 不被改写，run 已结束时写不成、运行态不变，使 run 成为终态的那次写
-  带上结束时刻，参数不合要求时不写。
-- 先后：在调用方读运行态与它的写之间插入另一方的写（认领、处置的结束写、另一方的终态写），按固定次序构造，不靠线程竞争。
+  带上结束时刻，参数不合要求时不写；给出的 job 与库中的条目按字段合并（会话、认领时刻、job 级说明各自的规则）。
+- 终态只写一次：执行中的写（update_job_state）不改写已结束的 job，run 未结束与已由结束写结束两种情形都是。
+- 先后：在调用方读运行态与它的写之间插入另一方的写（认领、执行中的写、投影、处置的结束写、另一方的终态写），按固定次序构造，不靠
+  线程竞争。
 - job 级说明：投影与认领保留库中的说明。
 本机写入口在同一把文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py；这里的两个写入口与其余写入口共用同一个锁内
 读改写的路径。云端的写入序号、插在 adapter 自己的读与写之间的写、写入次数与重读的次数上限见 test_ddb_write_seq.py。
@@ -212,7 +214,7 @@ def test_end_run_by_deadline_lands_when_a_claim_after_the_read_already_has_its_r
 # ---------- 带结果的 job 终态写 commit_job_states ----------
 
 def test_commit_returns_open_while_other_jobs_are_unfinished(run_store):
-    """还有 job 未结束时终态写写成、返回 OPEN：job 记为终态（整项替换为给出的值），run 状态按取法为 running，不写结束时刻。"""
+    """还有 job 未结束时终态写写成、返回 OPEN：job 记为给出的终态，run 状态按取法为 running，不写结束时刻。"""
     _create(run_store, ("a", "b"), hwm=2)
     _claim(run_store, "a", session="sess-a")
     _claim(run_store, "b")
@@ -341,11 +343,10 @@ def test_end_run_after_the_last_commit_ended_the_run_does_not_land(run_store):
     ([_done("a", Status.PASSED), _done("a", Status.FAILED)], "不止一次"),
     ([_done("a", Status.RUNNING)], "只记终态"),
     ([_done("a", Status.PENDING)], "只记终态"),
-    ([JobState("a", Status.PASSED, message="说明")], "job 级说明"),
     ([_done("ghost", Status.PASSED)], "不在"),
 ])
 def test_commit_rejects_bad_arguments_without_writing(run_store, job_states, match):
-    """参数不合要求（空、scope_id 重复、不是终态、带了 job 级说明、不在这个 run 里）抛 ValueError，运行态整份不变。"""
+    """参数不合要求（空、scope_id 重复、不是终态、不在这个 run 里）抛 ValueError，运行态整份不变。"""
     _create(run_store, ("a", "b"))
     _claim(run_store, "a")
     before = run_store.load_run_state("run-1")
@@ -360,6 +361,96 @@ def test_commit_without_a_record_raises_file_not_found(run_store):
     with pytest.raises(FileNotFoundError):
         run_store.commit_job_states("ghost", [_done("a", Status.PASSED)], ended_at=_ENDED)
     assert run_store.load_run_state("ghost") is None
+
+
+# ---------- 终态写的字段合并 ----------
+
+def _session_by_job_write(store):
+    """另一方认领 a，再以执行中的写给它写下会话。"""
+    _claim(store, "a", session="sess-new")
+
+
+def _session_by_projection(store):
+    """另一方认领 a，再由投影给它写下会话（投影不带认领时刻）。"""
+    _claim(store, "a")
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=1, jobs={
+        "a": JobState("a", Status.RUNNING, session_id="sess-new"), "b": JobState("b", Status.PENDING)})
+    assert store.project_state("run-1", projected) is True
+
+
+@pytest.mark.parametrize(("own_session", "kept_session"), [(None, "sess-new"), ("sess-result", "sess-result")],
+                         ids=["no-session-given", "own-session-given"])
+@pytest.mark.parametrize("other_write", [_session_by_job_write, _session_by_projection],
+                         ids=["update_job_state", "project_state"])
+def test_commit_merges_the_session_and_claim_time_written_after_the_caller_prepared_it(run_store, other_write,
+                                                                                       own_session, kept_session):
+    """调用方读到 a 仍 pending、按读到的条目准备好终态参数（没有认领时刻；会话为空，或是产出这个结果的那次执行的会话）之后，另一方
+    认领 a（写下认领时刻）并写下会话；终态写之后 a 是给出的终态，认领时刻是另一方写下的。会话在参数没有会话时是另一方写下的、不被
+    空值覆盖，参数带了会话时取参数的。"""
+    _create(run_store, ("a", "b"), hwm=0)
+    seen = run_store.load_run_state("run-1").jobs["a"]
+    assert (seen.session_id, seen.claimed_at) == (None, None), "前提：参数按读到的 pending 条目准备"
+    prepared = JobState("a", Status.PASSED, session_id=own_session, claimed_at=seen.claimed_at)
+    other_write(run_store)  # 落在准备参数之后、终态写之前
+
+    assert run_store.commit_job_states("run-1", [prepared], ended_at="never") is CommitOutcome.OPEN
+    assert run_store.load_run_state("run-1").jobs["a"] == JobState(
+        "a", Status.PASSED, session_id=kept_session, claimed_at=_CLAIMED)
+
+
+def test_commit_takes_the_given_session_and_the_recorded_claim_time(run_store):
+    """库中与给出的都有值时，会话取给出的（产出这个结果的那次执行的会话），认领时刻取库中的（认领写下的）；库中没有认领时刻时取给出的。
+    给出的 job 级说明不写下。"""
+    _create(run_store, ("a", "b", "c"))
+    _claim(run_store, "a", session="sess-recorded")
+    given_claim = "2026-11-19T00:09:00Z"
+
+    assert run_store.commit_job_states("run-1", [
+        JobState("a", Status.FAILED, session_id="sess-result", claimed_at=given_claim, message="给出的说明"),
+        JobState("b", Status.ERROR, claimed_at=given_claim),
+    ], ended_at="never") is CommitOutcome.OPEN
+
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"] == JobState("a", Status.FAILED, session_id="sess-result", claimed_at=_CLAIMED)
+    assert got.jobs["b"] == JobState("b", Status.ERROR, claimed_at=given_claim)
+
+
+# ---------- 终态只写一次：执行中的写不重开已结束的 job ----------
+
+def test_a_late_running_write_does_not_reopen_a_committed_job(run_store):
+    """run 未结束时，a 的终态记下之后，迟到的执行中写（running、另一个会话与认领时刻）返回 True（run 仍未结束），a 不变；此后再给 a 记
+    终态同样不改动它；b 记下终态之后，run 按 a 的第一个终态与 b 的终态为 passed。"""
+    _create(run_store, ("a", "b"))
+    _claim(run_store, "a")
+    _claim(run_store, "b")
+    first = JobState("a", Status.PASSED, session_id="first", claimed_at=_CLAIMED)
+    assert run_store.commit_job_states("run-1", [first], ended_at="never") is CommitOutcome.OPEN
+
+    late = JobState("a", Status.RUNNING, session_id="late", claimed_at="2026-11-19T00:05:00Z")
+    assert run_store.update_job_state("run-1", late) is True
+    got = run_store.load_run_state("run-1")
+    assert (got.jobs["a"], got.status) == (first, Status.RUNNING)
+
+    second = JobState("a", Status.ERROR, session_id="second", claimed_at="2026-11-19T00:06:00Z")
+    assert run_store.commit_job_states("run-1", [second], ended_at="never") is CommitOutcome.OPEN
+    assert run_store.load_run_state("run-1").jobs["a"] == first
+
+    assert run_store.commit_job_states("run-1", [_done("b", Status.PASSED)], ended_at=_ENDED) is CommitOutcome.ENDED_RUN
+    got = run_store.load_run_state("run-1")
+    assert (got.jobs["a"], got.status, got.ended_at) == (first, Status.PASSED, _ENDED)
+
+
+@pytest.mark.parametrize("scope_id", ["a", "b"], ids=["aborted", "skipped"])
+@pytest.mark.parametrize("written", [Status.RUNNING, Status.PENDING, Status.PASSED])
+def test_a_job_write_after_an_end_run_changes_nothing(run_store, scope_id, written):
+    """run 由处置的结束写结束之后（a 记 aborted、b 记 skipped，各带说明），对其中一个 job 的迟到写返回 False，运行态整份不变。"""
+    _create(run_store, ("a", "b"))
+    _claim(run_store, "a", session="sess-a")
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at=_ENDED) is True
+    before = run_store.load_run_state("run-1")
+
+    assert run_store.update_job_state("run-1", JobState(scope_id, written, session_id="late", claimed_at=_CLAIMED)) is False
+    assert run_store.load_run_state("run-1") == before
 
 
 # ---------- job 级说明：别的写原样保留 ----------

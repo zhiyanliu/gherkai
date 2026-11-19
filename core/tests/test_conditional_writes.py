@@ -11,10 +11,11 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
 - run 级状态只进不退：认领与前台 `update_job_state` 离开 pending 时 run 级为 running、已收尾的 run 上认领被挡且
-  运行态不变、前台 job 写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
+  运行态不变、前台对未结束 job 的写照落而 run 级不变、全 pending 的旧投影不把 run 级改回 pending（DDB 侧另断言 `update_job_state` 的写入次数）。
 - 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
-- `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（job 照写），对
-  写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束。
+- `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（库中未结束的 job
+  照写），对写入的任何 job 态都如实；库中已是终态的 job 不被它改写，返回值照样如实；DDB 侧因 STATE 不存在被挡之后并发建出的新记录
+  不收到这次写，也不会让它报告 run 已结束。
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）；收尾写可带期望的计数。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经各个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 结束写 `end_run` 与带结果的 job 终态写 `commit_job_states` 的语义对拍在 test_ending_and_commit_writes.py。
@@ -26,7 +27,7 @@ import itertools
 
 import pytest
 
-from gherkai_core.model import JobState, RunMeta, RunState, Status
+from gherkai_core.model import TERMINAL_STATUSES, JobState, RunMeta, RunState, Status
 
 
 def _meta(run_id: str = "run-1", *scope_ids: str) -> RunMeta:
@@ -200,7 +201,8 @@ _ANY_JOB_STATUS = [Status.PENDING, Status.RUNNING, Status.PASSED, Status.ERROR, 
 @pytest.mark.parametrize("job_status", _ANY_JOB_STATUS)
 def test_job_write_reports_the_run_still_open(run_store, job_status):
     """update_job_state 返回 run 级在这次写时是否仍未结束（ADR 0054 决策五）：run 级为 pending 与为 running 时都返回 True，
-    对写入的任何 job 态都是；落库结果与不看返回值时相同。"""
+    对写入的任何 job 态都是；落库结果与不看返回值时相同。第一次写已把 a 记为终态时，第二次写不改写它（终态只写一次），返回值照样
+    是 True。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.update_job_state("run-1", JobState("a", job_status)) is True  # run 级 pending
@@ -208,7 +210,10 @@ def test_job_write_reports_the_run_still_open(run_store, job_status):
     assert run_store.update_job_state("run-1", JobState("a", job_status, session_id="sess-a")) is True
     got = run_store.load_run_state("run-1")
     assert got.status == Status.RUNNING
-    assert got.jobs["a"] == JobState("a", job_status, session_id="sess-a")
+    if job_status in TERMINAL_STATUSES:
+        assert got.jobs["a"] == JobState("a", job_status)
+    else:
+        assert got.jobs["a"] == JobState("a", job_status, session_id="sess-a")
 
 
 @pytest.mark.parametrize("job_status", _ANY_JOB_STATUS)
@@ -610,37 +615,43 @@ def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, mo
 
 
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
-    """DDB 侧 `update_job_state` 的写入次数：run 未收尾时一次（写 pending、
-    写离开 pending、run 级已是 running 时再写都是一次），已收尾时两次（带 run 级条件的写被挡，再只写 job），STATE 不存在时
-    同样两次后报错。写入 pending 与写入别的 job 态走同样的两次写（返回值由条件写本身给出）。"""
+    """DDB 侧 `update_job_state` 的写入次数：run 未收尾时一次（写 pending、写离开 pending、run 级已是 running 时再写都是一次；库中
+    这个 job 已是终态时这一次被挡下，不再写）；已收尾时，库中这个 job 未结束为两次（带 run 级条件的写被挡，再只写 job），已是终态为
+    一次；STATE 不存在时一次之后报错。被挡下的原因由这次写带回的条目分辨，不另读。"""
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
     meta = _meta()
     store.create_run(meta, _initial(meta))
     counts = []
-    for js in (JobState("a", Status.PENDING), JobState("a", Status.RUNNING), JobState("b", Status.PASSED)):
+    for js in (JobState("a", Status.PENDING), JobState("a", Status.RUNNING), JobState("b", Status.PASSED),
+               JobState("b", Status.RUNNING)):
         calls.clear()
-        store.update_job_state("run-1", js)
+        assert store.update_job_state("run-1", js) is True
         counts.append(len(calls))
-    assert counts == [1, 1, 1]
+    assert counts == [1, 1, 1, 1]
+    assert store.load_run_state("run-1").jobs["b"].status == Status.PASSED
 
     assert store.try_finalize("run-1", Status.FAILED, "t1") is True
-    for js in (JobState("a", Status.ERROR), JobState("b", Status.PENDING)):
+    calls.clear()
+    assert store.update_job_state("run-1", JobState("a", Status.ERROR)) is False
+    assert len(calls) == 2
+    for js in (JobState("a", Status.PENDING), JobState("b", Status.PENDING)):
         calls.clear()
-        store.update_job_state("run-1", js)
-        assert len(calls) == 2
-        assert store.load_run_state("run-1").jobs[js.scope_id].status == js.status
+        assert store.update_job_state("run-1", js) is False
+        assert len(calls) == 1
+    got = store.load_run_state("run-1")
+    assert (got.jobs["a"].status, got.jobs["b"].status) == (Status.ERROR, Status.PASSED)
 
     for js in (JobState("a", Status.RUNNING), JobState("a", Status.PENDING)):
         calls.clear()
         with pytest.raises(FileNotFoundError):
             store.update_job_state("nope", js)
-        assert len(calls) == 2
+        assert len(calls) == 1
 
 
-def test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes(aws, monkeypatch):
-    """DDB 侧第二次写（只写 job）要求 run 级已是终态，而不只要求 STATE 存在：第一次写因 STATE 不存在被挡之后、第二次写之前并发建出
-    全 pending 的 run 时，第二次写同样被挡、照常报 STATE 不存在，job 不落进新记录，也不会报告一个仍为 pending 的 run 已结束；与本机
-    「运行态不存在即报错」一致（返回值对任何写入都如实）。"""
+def test_ddb_job_write_reports_a_missing_state_even_if_the_run_is_created_after_the_rejection(aws, monkeypatch):
+    """DDB 侧第一次写因 STATE 不存在被挡下时即报 STATE 不存在：原因取自这次写带回的条目（条件判断那一刻没有条目），被挡之后并发建出
+    全 pending 的 run 也不改变它，job 不落进新记录，也不会报告一个仍为 pending 的 run 已结束；与本机「运行态不存在即报错」一致（返回值
+    对任何写入都如实）。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     table = aws["ddb"].Table(aws["table_name"])
     store = DynamoDBRunStore(table)
@@ -653,7 +664,7 @@ def test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_wr
         try:
             return real_update_item(**kwargs)
         except ccf:
-            if not created:  # 第一次写被挡之后、第二次写之前，另一个写入方建出这个 run
+            if not created:  # 第一次写被挡之后，另一个写入方建出这个 run
                 created.append(True)
                 DynamoDBRunStore(table).create_run(meta, _initial(meta))
             raise

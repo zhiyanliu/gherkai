@@ -33,7 +33,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
-from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
+from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, commit_applied, ending_applied
 from gherkai_core.serialize import (
     RUN_STATE_KEYS,
@@ -169,20 +169,23 @@ class LocalRunStore:
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """按 scope_id 刷单个 job 的运行态（Map upsert）。run_state.json 不存在则报错（须先 create_run）。
 
+        锁内读到的这个 job 已是终态时不写（终态只写一次，ADR 0031 决定一·补）；不在 Map 里的 job 照常写入。
         写入的 job 态不是 pending 且 run 未收尾时，同一次读改写把 run 级置为 running（对拍 DDB 的带条件写与只写 job 的回退）；
-        run 已收尾时 job 照写、run 级不变。写入 pending 时只写 job。
+        run 已收尾时只写 job、run 级不变。写入 pending 时只写 job。
         读改写在文件锁内，与别的写入口互斥：已落下的终态不会被一次读在终态之前的写改回 running（ADR 0054 决策五）。
-        返回 run 级在这次写时是否仍未结束：判据取锁内读到的 run 级，与写在同一次读改写里（ADR 0054 决策五）。"""
+        返回 run 级在这次写时是否仍未结束：判据取锁内读到的 run 级，与写在同一次读改写里（ADR 0054 决策五）；job 已是终态而没有写时
+        同样按它给出。"""
         open_at_write: list[bool] = []
 
-        def mutate(state: RunState) -> RunState:
+        def mutate(state: RunState) -> RunState | None:
+            still_open = state.status in (Status.PENDING, Status.RUNNING)
+            open_at_write.append(still_open)
+            current = state.jobs.get(job_state.scope_id)
+            if current is not None and current.status in TERMINAL_STATUSES:
+                return None  # 库中这个 job 已结束：不被执行中的写改写
             jobs = dict(state.jobs)
             jobs[job_state.scope_id] = job_state  # Map 定位：各 scope 互不干扰
-            status = state.status
-            still_open = status in (Status.PENDING, Status.RUNNING)
-            open_at_write.append(still_open)
-            if job_state.status != Status.PENDING and still_open:
-                status = Status.RUNNING
+            status = Status.RUNNING if job_state.status != Status.PENDING and still_open else state.status
             return replace(state, status=status, jobs=jobs)  # 其余字段原样保留（含 run 级 message 与认领计数）
         if self._locked_rmw(run_id, mutate) is None:
             raise FileNotFoundError(f"update_job_state：run_state 不存在（须先 create_run）：{run_id}")

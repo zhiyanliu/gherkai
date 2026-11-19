@@ -3,9 +3,11 @@
 两个 adapter 共有的语义在 test_ending_and_commit_writes.py 对拍；这里只有 DynamoDB 一侧才有的性质：
 - 写入序号：建 run 写 0；每一次写成的 update_item 恰好加一（认领、执行中的 job 写与它的回退写、投影的标量一步与每一次逐 job 写、
   try_finalize、终态写、结束写），条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数。
-- 读与写之间插入另一方的写：被测的一方读到 STATE 之后、发出写之前，另一个写入方（各持自己的表对象）落下认领、投影、终态写或
-  结束写；被测的写被序号的条件挡下，重读之后按新的运行态得出正确结果，对方刚写的内容不被整体替换盖掉。先后靠包住被测表对象的
+- 读与写之间插入另一方的写：被测的一方读到 STATE 之后、发出写之前，另一个写入方（各持自己的表对象）落下认领、执行中的写、投影、
+  终态写或结束写；被测的写被序号的条件挡下，重读之后按新的运行态得出正确结果，对方刚写的内容不被整体替换盖掉。被测方给出的那个
+  job 上，对方写下的认领时刻留下；对方写下的会话在被测方没有给出会话时留下，给出了即取被测方的。先后靠包住被测表对象的
   update_item 固定下来，不靠线程竞争。
+- 执行中的写（`update_job_state`）被挡下时由这次写带回的条目分辨原因，不另读。
 - 写入次数：两个写入口没有并发的写时只发一次 update_item，run 已结束或结束写不成立时不发写；重读再算的次数用尽时抛错、不改记录。
 - jobs Map 的条目没有 job 级说明时省键，由结束写结束的条目带说明表的那一句（读原始 STATE，不经 load_run_state）。
 - 整体替换只改它该改的属性。状态分组随这两个写入口的变化在 test_status_group.py。
@@ -245,6 +247,74 @@ def test_commit_keeps_a_session_written_by_a_projection_between_its_read_and_wri
     assert (got.jobs["a"].status, got.high_water_mark) == (Status.FAILED, 7)
 
 
+def _session_by_job_write(other):
+    assert other.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="new-session",
+                                                    claimed_at=_CLAIMED)) is True
+
+
+def _session_by_projection(other):
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=3, jobs={
+        "a": JobState("a", Status.RUNNING, session_id="new-session"), "b": JobState("b", Status.PENDING),
+        "c": JobState("c", Status.PENDING)})
+    assert other.project_state("run-1", projected) is True
+
+
+@pytest.mark.parametrize("other_write", [_session_by_job_write, _session_by_projection],
+                         ids=["update_job_state", "project_state"])
+def test_commit_keeps_a_session_of_its_own_job_written_between_its_read_and_write(table, store, other, monkeypatch,
+                                                                                   other_write):
+    """终态写读到 a 还没有会话之后，另一方为 a 写下会话（执行中的写，或投影）：被测的写被序号的条件挡下，重读之后按库中的条目合并，
+    a 是给出的终态、带着另一方写下的会话；给出的参数没有会话，不以空值覆盖它。"""
+    meta = _create(store)
+    _claim(store, meta)
+    log = _record(table, monkeypatch, before_write=[lambda: other_write(other)])
+
+    assert store.commit_job_states("run-1", [JobState("a", Status.PASSED, claimed_at=_CLAIMED)],
+                                   ended_at=_ENDED) is CommitOutcome.OPEN
+
+    assert log == ["read", "other", "write-rejected", "read", "write-ok"]
+    assert store.load_run_state("run-1").jobs["a"] == JobState("a", Status.PASSED, session_id="new-session",
+                                                               claimed_at=_CLAIMED)
+
+
+def test_commit_keeps_a_claim_time_of_its_own_job_written_between_its_read_and_write(table, store, other, monkeypatch):
+    """终态写读到 a 仍 pending 之后另一方认领 a：被测的写被挡下，重读之后合并，a 是给出的终态，认领时刻是认领写下的（给出的参数
+    没有），认领计数为 1。"""
+    _create(store)
+    log = _record(table, monkeypatch,
+                  before_write=[lambda: other.try_claim_job("run-1", "a", claimed_at="2026-11-19T00:02:00Z")])
+
+    assert store.commit_job_states("run-1", [JobState("a", Status.ERROR)], ended_at=_ENDED) is CommitOutcome.OPEN
+
+    assert log == ["read", "other", "write-rejected", "read", "write-ok"]
+    got = store.load_run_state("run-1")
+    assert got.jobs["a"] == JobState("a", Status.ERROR, claimed_at="2026-11-19T00:02:00Z")
+    assert got.claim_count == 1
+
+
+def test_commit_after_a_rejection_takes_its_own_session_and_the_recorded_claim_time(table, store, other, monkeypatch):
+    """终态写读到 a 仍 pending 之后，另一方认领 a 并为它写下会话：被测的写被挡下，重读之后合并。参数带着产出这个结果的那次执行的会话
+    与另一个认领时刻：a 的会话取参数的，认领时刻是认领写下的，认领计数为 1。"""
+    _create(store)
+    claimed = "2026-11-19T00:02:00Z"
+
+    def claim_and_write_a_session():
+        assert other.try_claim_job("run-1", "a", claimed_at=claimed) is True
+        assert other.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="new-session",
+                                                        claimed_at=claimed)) is True
+
+    log = _record(table, monkeypatch, before_write=[claim_and_write_a_session])
+
+    assert store.commit_job_states("run-1", [JobState("a", Status.PASSED, session_id="sess-result",
+                                                      claimed_at="2026-11-19T00:09:00Z")],
+                                   ended_at=_ENDED) is CommitOutcome.OPEN
+
+    assert log == ["read", "other", "write-rejected", "read", "write-ok"]
+    got = store.load_run_state("run-1")
+    assert got.jobs["a"] == JobState("a", Status.PASSED, session_id="sess-result", claimed_at=claimed)
+    assert got.claim_count == 1
+
+
 def test_two_commits_each_reading_the_other_job_unfinished_end_the_run_once(table, store, other, monkeypatch):
     """两方各记一个 job 的终态、都读到对方的 job 未结束（ADR 0034 机制三②的理由一段）：另一方先写成、得 OPEN；被测方的写被挡下，重读
     之后两个 job 都已结束，它的写使 run 成为终态、得 ENDED_RUN。不会留下「全部 job 已结束、run 仍为 running」，也不丢另一方的终态。"""
@@ -381,6 +451,33 @@ def test_replacement_on_a_record_without_write_seq_is_still_conditional(table, s
     got = store.load_run_state("run-1")
     assert (got.jobs["a"].status, got.jobs["b"].status) == (Status.PASSED, Status.RUNNING)
     assert _seq(table) == 2
+
+
+# ---------- 执行中的写：被挡下的原因取自这次写带回的条目 ----------
+
+def test_job_write_tells_why_it_was_rejected_from_the_rejected_write_itself(table, store, monkeypatch):
+    """`update_job_state` 被挡下时不另读：run 未结束而 a 已是终态时只有被挡下的那一次写，a 不变、返回 True；run 经 try_finalize 结束、
+    b 仍执行中时，被挡下之后再写一次只写 b、返回 False；a 已是终态时在已结束的 run 上同样只有被挡下的那一次写、返回 False。"""
+    meta = _create(store, ("a", "b"))
+    _claim(store, meta)
+    assert store.try_claim_job("run-1", "b", claimed_at=_CLAIMED) is True
+    assert store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at="never") is CommitOutcome.OPEN
+    log = _record(table, monkeypatch)
+
+    assert store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="late")) is True
+    assert log == ["write-rejected"]
+    assert store.load_run_state("run-1").jobs["a"] == _done("a", Status.PASSED)
+
+    assert store.try_finalize("run-1", Status.ERROR, "t1") is True
+    log.clear()
+    assert store.update_job_state("run-1", JobState("b", Status.PASSED, session_id="sess-b")) is False
+    assert log == ["write-rejected", "write-ok"]
+    log.clear()
+    assert store.update_job_state("run-1", JobState("a", Status.RUNNING)) is False
+    assert log == ["write-rejected"]
+    got = store.load_run_state("run-1")
+    assert (got.jobs["a"], got.jobs["b"], got.status) == (
+        _done("a", Status.PASSED), JobState("b", Status.PASSED, session_id="sess-b"), Status.ERROR)
 
 
 # ---------- 写入次数 ----------

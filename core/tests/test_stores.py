@@ -916,12 +916,14 @@ def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path:
     之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
     run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进 RunState 模型。"""
     r = _sample_run("run-d")
-    LocalRunStore(tmp_path / "runs", detached=True).create_run(r.run_meta, run_state_from_result(r))
+    LocalRunStore(tmp_path / "runs", detached=True).create_run(
+        r.run_meta, _initial_state("run-d", [j.scope_id for j in r.run_meta.jobs]))
     path = tmp_path / "runs" / "run-d" / "run_state.json"
     assert json.loads(path.read_text("utf-8"))["detached"] is True
     relay = LocalRunStore(tmp_path / "runs")  # 接力者：不带 detached
     assert relay.is_detached("run-d") is True
     relay.update_job_state("run-d", JobState(scope_id="features/wiki.feature:6", status=Status.RUNNING))
+    assert relay.load_run_state("run-d").jobs["features/wiki.feature:6"].status == Status.RUNNING  # 前提：这次写写成了
     assert json.loads(path.read_text("utf-8"))["detached"] is True
     assert not hasattr(relay.load_run_state("run-d"), "detached")
 

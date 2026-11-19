@@ -627,7 +627,8 @@ def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fa
 @pytest.mark.parametrize("claimed_at", [None, "t1", "2030-01-01T00:00:00"])
 def test_recorded_job_without_a_claim_time_in_the_snapshot_blocks_the_finalize(tmp_path, claimed_at):
     """快照检查（ADR 0054 决策二后台推进条「快照」）：有记录的 job 在这一轮读到的运行态里不带认领时刻（缺、读不出、不带时区），说明
-    手里的运行态比事件旧：不落判定明细、不收尾，按继续推进处理；没有「按预算说明」的回落。读到带认领时刻的运行态之后照常收尾。"""
+    手里的运行态比事件旧：不落判定明细、不收尾，按继续推进处理；没有「按预算说明」的回落。对照：同样的事件、运行态里带认领时刻的
+    run 照常收尾。"""
     meta, log, store = _setup(tmp_path, "a", store=_SpyRunStore(tmp_path))
     store.update_job_state("run-1", JobState("a", Status.RUNNING, claimed_at=claimed_at))
     _done_events(log, "a")
@@ -638,7 +639,11 @@ def test_recorded_job_without_a_claim_time_in_the_snapshot_blocks_the_finalize(t
     assert rs.saved == [] and "try_finalize" not in store.writes
     assert store.load_run_state("run-1").status == Status.RUNNING
 
-    store.update_job_state("run-1", JobState("a", Status.PASSED, claimed_at=_iso(0)))
+    control_dir = tmp_path / "control"
+    control_dir.mkdir()
+    meta, log, store = _setup(control_dir, "a", store=_SpyRunStore(control_dir))
+    store.update_job_state("run-1", JobState("a", Status.RUNNING, claimed_at=_iso(0)))
+    _done_events(log, "a")
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(6),
                 result_store=rs).outcome is TickOutcome.COMMITTED
     assert [jr.scope_id for jr in rs.saved] == ["a"]

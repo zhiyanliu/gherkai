@@ -48,7 +48,7 @@ core/gherkai_core/
     ├── event_log/recording.py      ← 原始事件行记录器（ADR 0042 决策七）：make_raw_sink（一个 scope 的逐行落库回调，runtime 的 SubprocessLauncher 与同步 run 共用）+ EventRecordingEngine（组合根为同步 run 的 SubprocessEngine 加一层包装，把事件行与退出记录旁路落 SqliteEventLog，Engine port 形状不变、schedule 不知情）
     ├── _boto.py                    ← 云端 adapter 共享的 boto3 依赖守卫（boto3 缺失时给出可读报错，ADR 0016 窄腰）
     ├── _atomic.py                  ← 本地 adapter 共享的原子落盘（同目录 tmp + `os.replace` + 显式 mode）：run_state.json / jobs/*.json / 报告三面都有真实并发读者，truncate-then-write 会使读者读到空文件
-    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 条件写 try_claim_job/project_state/try_finalize；+ 终态写 commit_job_states 与结束写 end_run，对运行态的作用取自 run_status，DDB 以写入序号为条件整体替换 jobs、STATE 的每一次写都把写入序号加一，ADR 0030 决定四、决定六；+ create_run 只在 run 不存在时成立、run 级终态不可变、update_job_state 返回 run 级在这次写时是否仍未结束、本机全部写入口在同一把文件锁内，ADR 0054 决策五；+ 本机顶层附加键整体保留，ADR 0030 决定四；+ 认领计数，ADR 0034 机制三「run 级状态只进不退」条①；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
+    ├── run_store/{local,ddb}.py    ← RunStore：本地文件 + DynamoDB（+ arg_offload.py：StepArgument→S3 指针，规避 DDB 400KB 限；+ 条件写 try_claim_job/project_state/try_finalize；+ 终态写 commit_job_states 与结束写 end_run，对运行态的作用取自 run_status，DDB 以写入序号为条件整体替换 jobs、STATE 的每一次写都把写入序号加一，ADR 0030 决定四、决定六；+ create_run 只在 run 不存在时成立、run 级终态不可变、update_job_state 返回 run 级在这次写时是否仍未结束、本机全部写入口在同一把文件锁内，ADR 0054 决策五；+ update_job_state 不改写库中已是终态的 job、终态写与库中条目按字段合并，ADR 0030 决定四；+ 本机顶层附加键整体保留，ADR 0030 决定四；+ 认领计数，ADR 0034 机制三「run 级状态只进不退」条①；+ STATE 顶层 worker_task_def_arns，供清理 pass 的「运行中 run 引用检查」使用，ADR 0038）
     ├── result_store/{local,s3}.py  ← ResultStore：本地文件 + S3（每 job 一对象）
     └── report_store/{local,s3}.py  ← ReportStore：本地文件 + S3（manifest+index）
 ```
