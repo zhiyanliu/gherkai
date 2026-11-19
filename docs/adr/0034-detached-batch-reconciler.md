@@ -46,15 +46,15 @@ gherkai run <features>            # 阻塞皮：同进程 schedule() 驱动循�
 |---|---|
 | `run` | 建 run、认领、job 的执行中与终态、自己到期与 fail-fast、使用方中断时的结束写、报告 |
 | `run --no-report` | 不写记录、不拿锁，同一套规则在内存里给出结果 |
-| `submit --backend local` | 启动后台推进进程，由它建 run 并推进；自己不拿锁、不建 run、不推进，转述它回报的结果（次序与回报见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3） |
+| `submit --backend local` | 启动后台推进进程，由它建 run 并推进；自己不拿锁、不建 run、不推进，转述它回报的结果（次序与回报见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」里「本机 `submit`」一条） |
 | `submit --backend cloud` | 建 run；不推进 |
-| 本机后台推进进程、云端 Lambda（`kicker`、`reconciler`） | 本机后台推进进程另拿锁、建 run（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三）；认领、job 的执行中与终态、自己到期的结束写、报告；云端退出观察者只写退出记录，后端到期结束属于处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 1 条） |
+| 本机后台推进进程、云端 Lambda（`kicker`、`reconciler`） | 本机后台推进进程另拿锁、建 run（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三「谁在何时拿」）；认领、job 的执行中与终态、自己到期的结束写、报告；云端退出观察者只写退出记录，后端到期结束属于处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 1 条） |
 | `status --wait`、`settle-runs` | 处置条件成立时做结束写与报告；不认领、不启动、不投影 |
 | `list-runs`、不带 `--wait` 的 `status`、`explain` | 只读，不碰锁 |
 
 报告只由使 run 成为终态的写入方生成（[0027](./0027-runreport-aggregation-index.md)「ReportStore 接口：整 run 一次写」）。结束写见 [0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节，处置的条件与入口见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策六、八，锁见 0054 决策三。`run` 只有本机后端，云端后端只支持 `submit`（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。
 
-- **`submit`**：云端为 plan → `create_run` 写 RunMeta 与全 pending → 打印 run_id → 退出，只写 runs 表（feature 带多行参数或设备安装包时另写 S3）、不起 task，冷启动交 kicker Lambda（见下 cloud 端到端流程）。本机为 plan 与补全运行定义 → 以新会话启动后台推进进程、把建 run 所需的输入交给它 → 后台推进进程建 run（写 RunMeta 与全 pending）、回报结果 → `submit` 输出结果并退出；这个 run 从建立到结束都由那个后台推进进程推进（见下 local 一节）。给了 `--expose-local` 时两种后端各在哪一步起隧道，见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3。
+- **`submit`**：云端为 plan → `create_run` 写 RunMeta 与全 pending → 打印 run_id → 退出，只写 runs 表（feature 带多行参数或设备安装包时另写 S3）、不起 task，冷启动交 kicker Lambda（见下 cloud 端到端流程）。本机为 plan 与补全运行定义 → 以新会话启动后台推进进程、把建 run 所需的输入交给它 → 后台推进进程建 run（写 RunMeta 与全 pending）、回报结果 → `submit` 输出结果并退出；这个 run 从建立到结束都由那个后台推进进程推进（见下 local 一节）。给了 `--expose-local` 时两种后端各在哪一步起隧道，见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」。
 - **不带 `--wait` 的 `status`**：读 RunState 渲染一次（**纯只读、零副作用、不碰锁、不 tick**——保「查看」无惊讶 + 只需读权限）；提示只看记录与期限（写法同 `list-runs`，[0041](./0041-agent-facing-cli-affordances.md) 决策七）。**local/cloud 两路此渲染+提示+退出码逻辑经共享函数（`_render_status`）同一份实现、行为一致**，只命令示例按后端异（local 用 `--report-dir` / cloud 用 `--backend cloud --prefix`；查询命令的定位参数须与产生 run 的命令一致，规则与理由归 [0041](./0041-agent-facing-cli-affordances.md) 决策六）。
 - **带 `--wait` 的 `status`**：轮询到终态；只盯到终态、处置条件成立时处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八），不认领、不推进，云端也不调用 kicker（见下「推进器与触发源」）。
 - **`list-runs`**：列出一个后端里的 run（全部非终态 run 与最近 N 条终态 run），状态只从 RunState 读、零副作用；定位旗标与 status 相同，设计见 [0041](./0041-agent-facing-cli-affordances.md) 决策七。
@@ -120,14 +120,12 @@ gherkai run <features>            # 阻塞皮：同进程 schedule() 驱动循�
 
 ```
 submit(CLI)：plan 与补全运行定义 → 以新会话（setsid）启动后台推进进程，经它的标准输入交给它建 run 所需的输入、另给一条回报管道 → 等到回报 → 输出结果并退出
-   （建成：stdout 只有 run_id、退出码 0；没有建成：报出原因、以回报里的退出码结束）
-后台推进进程（持生命期锁；观察者+reconciler 合一）：取创建时刻 ·（给了 --expose-local 时）起隧道 · 生成运行定义
-   · 建 run（先过边界检查、取锁）· 建事件库 · 回报结果并关闭管道 · spawn worker 子进程
+后台推进进程（观察者+reconciler 合一）：建 run 并回报（各步的次序见 0035 决策 3「本机 submit」一条）· spawn worker 子进程
    · 读 worker 的 fd3 事件流、旁路落本地持久 events sink（SQLite，替易失 FD3 pipe）
    · proc.wait() 拿 exitcode 写 task_exited · 按墙钟检查各 job 的截止时刻、到点停 worker · 推演写本地 RunState · 启下一个 · tick 返回 `COMMITTED` 或 `ENDED` 即退出（机制三「run 级状态只进不退」条④）
 ```
 
-本机 `submit` 提交的 run 从建立到结束都在后台推进进程这一个进程里，它从建 run 起持有生命期锁到退出，与前台执行 `run` 的进程步骤与次序相同（谁在何时拿锁见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三「生命期锁：加在 run 目录上」）。回报的内容，以及 `submit` 或后台推进进程在回报之前、之后退出时各怎样，见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3。
+本机 `submit` 提交的 run 从建立到结束都在后台推进进程这一个进程里，与前台执行 `run` 的进程步骤与次序相同；它在哪一步取生命期锁、持有到何时，见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三「谁在何时拿」。后台推进进程在建 run 之前之后各做哪几步、回报的内容、`submit` 的输出与退出码，以及 `submit` 或后台推进进程在回报之前、之后退出时各怎样，见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」里「本机 `submit`」一条。
 
 **同一份 core 推演代码，两个宿主（Lambda / 后台推进进程）各注入自己的 adapter**——local/cloud 对称落到 events 通道：两侧 reconciler 都从持久 events 重放推演，**唯一差别是存储介质**（DDB 表 vs 本地 SQLite）+ **谁把 worker 事件写进该存储**（cloud=worker 自己 PutItem，[0024](./0024-worker-core-protocol.md)；local=后台推进进程读 worker fd3 后旁路落 SQLite）。
 
@@ -139,7 +137,7 @@ submit(CLI)：plan 与补全运行定义 → 以新会话（setsid）启动后�
 
 ## 推进器与触发源
 
-1. **本机后端的 run 任何时刻至多一个推进器**：前台是执行 `run` 的进程，后台是 `submit` 启动的后台推进进程，都持有它的生命期锁，从建 run 起持有到进程退出（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三）。认领、启动 job、写 job 的执行中与终态只由它做，结束写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）由它或处置方做。本机 worker 是推进器的子进程，生死系在它身上。
+1. **本机后端的 run 任何时刻至多一个推进器**：前台是执行 `run` 的进程，后台是 `submit` 启动的后台推进进程，都持有它的生命期锁（何时取、持有到何时见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三「谁在何时拿」）。认领、启动 job、写 job 的执行中与终态只由它做，结束写（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）由它或处置方做。本机 worker 是推进器的子进程，生死系在它身上。
 2. **云端允许多次 Lambda 调用重叠推进同一个 run**。入口有两个：`kicker`（runs 表流与定时触发）与 `reconciler`（events 表流），每一步写带条件（机制三）。`status --wait` 不调用 `kicker`：唤醒推进的只有流与定时触发，它只盯到终态、处置条件成立时处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）。不把推进入口收成一个、也不按 run 串行排队（见被拒方案）。
 3. **推进器中断时**：本机推进器的进程退出之后，这个 run 不续，只能由处置方结束（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策六、七；本机没有常驻的处置方，见 0054 决策八）；云端一次调用失败时，流的重试与之后的触发可以接着推进；推进链断开的 run 怎样结束见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 1 条（含前提）。
 
