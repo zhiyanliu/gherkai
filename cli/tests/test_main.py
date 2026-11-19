@@ -966,6 +966,61 @@ def test_run_ended_elsewhere_before_any_job_result_names_no_detail_location(tmp_
     assert "判定明细: " not in cap.err and "Traceback" not in cap.err
 
 
+@pytest.mark.parametrize("signum, expected", [(None, 1), ("SIGTERM", 143)], ids=["no-interrupt", "after-sigterm"])
+def test_run_ended_elsewhere_exit_survives_a_failing_look_at_the_details_directory(tmp_path, monkeypatch, capsys, signum,
+                                                                                    expected):
+    """run 被别处结束的出口里，看判定明细的目录在不在的那一次探测失败（目录已不可访问）：只是少打「判定明细」一行，说明照常给出，
+    不打回溯；退出码仍是 1，调度循环处理过 SIGTERM 时仍是 143。"""
+    import signal as _signal
+
+    reports = tmp_path / "reports"
+    end_locally = _end_locally(reports)
+    real_is_dir = Path.is_dir
+
+    def failing_is_dir(self):
+        if self.name == "jobs":
+            raise PermissionError(13, "Permission denied")
+        return real_is_dir(self)
+
+    def end_it(run_id: str) -> None:
+        end_locally(run_id)
+        monkeypatch.setattr(Path, "is_dir", failing_is_dir)  # 之后对明细目录的探测失败
+
+    monkeypatch.setattr(m, "schedule",
+                        _schedule_ended_elsewhere(end_it, signum=getattr(_signal, signum) if signum else None))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == expected and cap.out == ""
+    assert "在本次执行结束之前已被记为已结束" in cap.err
+    assert "判定明细: " not in cap.err and "Traceback" not in cap.err
+
+
+def test_interrupt_arriving_during_the_wrap_up_does_not_cut_the_output_short(tmp_path, monkeypatch, capsys):
+    """`schedule` 返回之后、收尾期间才到的 SIGINT：只置标志的处理器仍在，这次中断不打断结束写、读回运行态、生成报告与输出；全部 job
+    已完成，调度循环没有处置过中断，退出码按 run 的状态取。命令结束之后信号的处置恢复原状。"""
+    import signal as _signal
+
+    from gherkai_core.persist import RunPersistence
+
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    real_finalize = RunPersistence.finalize
+
+    def finalize_after_a_late_interrupt(self, execution):
+        _signal.raise_signal(_signal.SIGINT)
+        return real_finalize(self, execution)
+
+    monkeypatch.setattr(RunPersistence, "finalize", finalize_after_a_late_interrupt)
+    before = _signal.getsignal(_signal.SIGINT)
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports), "--json"])
+    cap = capsys.readouterr()
+    assert rc == 0
+    assert json.loads(cap.out)["status"] == "passed"
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    assert (run_dir / "index.html").exists()
+    assert _signal.getsignal(_signal.SIGINT) is before
+
+
 # ---- 前台执行遵守运行期限、服从记录：组合根的注入与到期结束的输出 ----
 # 到期时被期限截断的 job 记 aborted，没有启动的 job 由结束写记 skipped 并带到期的说明，run 随之为 aborted（ADR 0054 决策二「各执行方
 # 的落实」前台执行条）；run 被别处结束时服从记录（ADR 0054 决策五）。

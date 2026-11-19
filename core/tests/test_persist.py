@@ -376,6 +376,57 @@ def test_terminal_write_that_finds_the_run_ended_raises_the_stop_signal_and_fina
     assert _methods(calls) == ["save_job_result", "commit_job_states", "load_run_state"]
 
 
+@pytest.mark.parametrize("how", ["claim", "still_open", "running_write", "terminal_write"])
+def test_the_stop_signal_is_published_inside_the_store_lock(how):
+    """得知 run 已被别处结束的那次存储操作与停手信号的发布在落库服务的同一把锁内完成（四条途径都是）：on_job_complete 也在这把锁内
+    先看信号、再存明细，所以信号发布之后才取到锁的回调不会再存一份明细。"""
+    ended = RunState(run_id="r", status=Status.ABORTED, jobs={"a": JobState(scope_id="a", status=Status.ABORTED)})
+    calls, run, result, report = _recording(claim_lands=False, recorded=ended, run_open_at_job_write=False,
+                                            commit=CommitOutcome.ALREADY_ENDED)
+    p = RunPersistence("r", run, result, report)
+    held: list[bool] = []
+    publish = p._ended.set
+
+    def recording_publish():
+        held.append(p._lock.locked())
+        publish()
+
+    p._ended.set = recording_publish
+    if how == "claim":
+        assert p.claim("a", _CLAIMED) is False
+    elif how == "still_open":
+        assert p.still_open() is False
+    elif how == "running_write":
+        p.on_event(ScopeStarted(scope_id="a"))
+    else:
+        p.on_job_complete(_jr("a"))
+    assert held == [True] and p.ended_elsewhere() is True
+
+
+def test_a_result_handed_over_while_the_claim_is_being_refused_is_not_saved():
+    """下一个 job 的认领正被拒（那次认领写还没有返回）时，主线程把上一个 job 的结果交给落库服务：它要等认领那一步连同停手信号的发布
+    做完才取到锁，随后看到信号，不存明细、不写终态。"""
+    import threading as _th
+
+    calls, run, result, report = _recording(claim_lands=False)
+    p = RunPersistence("r", run, result, report)
+    handed: list[_th.Thread] = []
+    refuse = run.try_claim_job
+
+    def refusing_claim(run_id, scope_id, *, claimed_at=None):
+        t = _th.Thread(target=lambda: p.on_job_complete(_jr("a")))
+        handed.append(t)
+        t.start()
+        t.join(0.3)  # 结果在认领写返回之前交来：它应当停在锁上，这里等不到它结束
+        return refuse(run_id, scope_id, claimed_at=claimed_at)
+
+    run.try_claim_job = refusing_claim
+    assert p.claim("b", _CLAIMED) is False
+    handed[0].join(5.0)
+    assert not handed[0].is_alive()
+    assert _methods(calls) == ["try_claim_job"]  # 没有 save_job_result，也没有 commit_job_states
+
+
 def test_finalize_after_the_stop_signal_still_reports_ended_elsewhere_when_the_run_state_is_gone():
     """停手信号成立之后收尾读回发现运行态不存在：run 已被别处结束这个结论来自之前被拒的那次写，不靠读回，仍抛 RunAlreadyEnded
     （recorded 为 None），调用方走同一个出口。"""

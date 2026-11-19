@@ -1841,6 +1841,80 @@ def test_interrupt_after_all_jobs_done_but_unconsumed_is_not_acted_on():
     assert levels == []
 
 
+def test_interrupt_read_after_the_last_job_finished_is_not_acted_on(monkeypatch):
+    """调度循环看过「还有 job 没完成」之后、读到中断之前，最后一个 job 完成，中断在它完成之后才到：不处置。先后这样固定：job 停在
+    门闩上，第一次读中断级别的回调放行它、等全部 future 完成之后才报告中断。循环先读中断级别、再看有没有未完成的 job，所以这次
+    中断不被处置：on_interrupt 不被调，余下的 job 不再启动的来源为空，结果照常通过。"""
+    import concurrent.futures as _cf
+    import threading as _th
+
+    import gherkai_core.schedule as schedule_module
+
+    release = _th.Event()
+    futures: set = set()
+    real_wait = schedule_module._wait_futures
+
+    def recording_wait(pending, **kw):
+        futures.update(pending)
+        return real_wait(pending, **kw)
+
+    monkeypatch.setattr(schedule_module, "_wait_futures", recording_wait)
+
+    def b_gen(_job):
+        release.wait(5.0)
+        yield from _WHOLE_PASS
+
+    reported: list[bool] = []
+
+    def interrupt() -> int:
+        release.set()
+        _cf.wait(futures, timeout=5.0)
+        reported.append(all(f.done() for f in futures))
+        return 1
+
+    levels: list[int] = []
+    result = schedule(_rm([_job("b")]), FakeResolver(FakeEngine({"b": b_gen})), CollectSink(),
+                      opts=ScheduleOpts(max_concurrency=1, interrupt=interrupt, on_interrupt=levels.append,
+                                        interrupt_poll_s=0.05))
+    assert reported == [True]  # 报告中断的那一刻全部 future 已完成
+    assert levels == [] and result.stopped_by is None
+    assert _summary(result).status == Status.PASSED
+
+
+def test_stop_start_checks_run_one_at_a_time_so_a_clock_set_back_cannot_reopen_starts():
+    """停止启动的时刻一经观察到就记下：一次检查读墙钟、登记来源与记下在同一把锁内完成。先后这样固定：第一次检查登记来源时，另一个
+    线程开始第二次检查，这时墙钟已被回拨到停止启动的时刻之前。第二次检查要等第一次做完，随后按已过处理、不再读墙钟。"""
+    import threading as _th
+    from datetime import timedelta as _td
+
+    from gherkai_core.schedule import _StartsStopped, _StopStart
+
+    deadline = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    reads: list[None] = []
+
+    def wall_clock() -> datetime:
+        reads.append(None)
+        return deadline if len(reads) == 1 else deadline - _td(hours=1)  # 第一次读已过期限，之后都被回拨
+
+    ledger = _StartsStopped()
+    stop = _StopStart(wall_clock, deadline, ledger)
+    second: list[bool] = []
+    threads: list[_th.Thread] = []
+    real_note = ledger.note
+
+    def note(source):
+        real_note(source)
+        t = _th.Thread(target=lambda: second.append(stop.check()))
+        threads.append(t)
+        t.start()
+        t.join(0.3)  # 第二次检查在登记之后、记下之前开始：它应当停在锁上，这里等不到它结束
+
+    ledger.note = note
+    assert stop.check() is True
+    threads[0].join(5.0)
+    assert second == [True] and len(reads) == 1 and ledger.first == "deadline"
+
+
 # ---- 运行期限与这次 run 的记录（ADR 0054 决策二、五）：墙钟截止时刻、起 worker 与重试之前的检查次序、第三种中止来源、run 级裁决 ----
 
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE, ENDED_ELSEWHERE_ABORT_MESSAGE  # noqa: E402

@@ -46,7 +46,7 @@ def schedule(run_meta, engines, sink, opts=None,
 
 - **`default=None` 的语义是「逃生舱」**：正常路径（产品 / 组合根）**永远接** persistence；只有「单测 / `--no-report` 显式弃权 / 纯内存实验」才不接。None 让纯 reducer 不被一个正交关注点绑死——`test_schedule.py` 用例、`--no-report` 路径都不必造 no-op 传进去。
 - **不是 keyword-only**（普通参数 + 默认 None），但**调用点用关键字写** `on_job_complete=...`/`on_event=...` 保自说明。
-- on_job_complete fire 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。没有启动的 job 不回调 on_job_complete，它们由结束写结束（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）。
+- on_job_complete fire 在主线程等待 job 完成的循环（`wait(FIRST_COMPLETED)`）里串行；on_event 在 worker 线程、`sink_lock` **之外** fire（与 sink 分离，见决定三并发不变量）——两者写 store 都经 `RunPersistence` 的单一锁串行。得知 run 已被别处结束的那次存储操作（认领、重试之前的读、两种 job 状态写）与停手信号的发布在这把锁内完成，on_job_complete 在同一把锁内先看信号、再存明细：信号发布之后才取到锁的回调不再存明细（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五）。没有启动的 job 不回调 on_job_complete，它们由结束写结束（[0031](./0031-job-lifecycle-states-and-severity.md) 决定三「结束写」小节）。
 
 ### 服从记录的三项能力：`ScheduleOpts.record`，不是给 schedule 注入 store
 

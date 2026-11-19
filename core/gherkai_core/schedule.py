@@ -260,15 +260,17 @@ class _StopStart:
         self._wall_clock = wall_clock
         self._deadline = deadline
         self._ledger = ledger
-        self._reached = threading.Event()
+        self._lock = threading.Lock()
+        self._reached = False
 
     def check(self) -> bool:
-        """检查一次：尚未记下时读一次墙钟判断，成立即登记并记下（先登记、后记下：看到已记下的检查，那一刻登记处里已有一条来源）；
-        已经记下时不再读墙钟、直接成立。"""
-        if not self._reached.is_set() and past_stop_start(self._wall_clock(), self._deadline):
-            self._ledger.note("deadline")
-            self._reached.set()
-        return self._reached.is_set()
+        """检查一次：尚未记下时读一次墙钟判断，成立即登记并记下；已经记下时不再读墙钟、直接成立。读墙钟、登记与记下在同一把锁内
+        完成，各线程的检查因此逐个进行：一次检查观察到成立之后，后面的每一次检查都按已过处理，登记处里也已有一条来源。"""
+        with self._lock:
+            if not self._reached and past_stop_start(self._wall_clock(), self._deadline):
+                self._ledger.note("deadline")
+                self._reached = True
+            return self._reached
 
 
 class _EndedElsewhere:
@@ -765,6 +767,9 @@ def schedule(
                     _stop_all()
             # 只在仍有**未完成**的 job 时处置中断与停手信号：全部 job 已完成（含已完成、尚未消费的）后才到的没有可停的 worker、判定已
             # 完整，不处置；组合根据 on_interrupt 是否被调过决定退出码，停手信号由落库服务自己记着、收尾时照样算数。
+            # 中断级别先取快照、再看有没有未完成的 job：读到中断而此后仍有 job 未完成，这次中断就先于那个 job 的完成到达；反过来
+            # 先看完成、后读中断，会把全部 job 完成之后才到的中断当作要处置的。
+            level = opts.interrupt() if (opts.interrupt is not None and pending) else 0
             if any(not f.done() for f in pending):
                 # 停手信号（ADR 0054 决策五）先于使用方中断读：中止来源以最先登记的为准，上一次轮询之后成立的停手信号在这里登记，中断
                 # 按轮询到它的这一刻登记（ADR 0054 决策二）。认领被拒、重试之前读到终态在 worker 线程里已当场登记，写 job 状态时的发现
@@ -772,18 +777,16 @@ def schedule(
                 if not ended_handled and ended.seen():
                     ended_handled = True
                     _stop_all("ended-elsewhere")
-                if opts.interrupt is not None:
-                    level = opts.interrupt()
-                    if level >= 1 and interrupt_level < 1:
-                        interrupt_level = 1
-                        _stop_all("interrupt")  # 协作停止：与 fail-fast 同一条路（运行中 worker 落定 abort、排队 job 不启动），消息按来源区分
-                        if opts.on_interrupt is not None:
-                            opts.on_interrupt(1)
-                    if level >= 2 and interrupt_level < 2:
-                        interrupt_level = 2
-                        _force_all()
-                        if opts.on_interrupt is not None:
-                            opts.on_interrupt(2)
+                if level >= 1 and interrupt_level < 1:
+                    interrupt_level = 1
+                    _stop_all("interrupt")  # 协作停止：与 fail-fast 同一条路（运行中 worker 落定 abort、排队 job 不启动），消息按来源区分
+                    if opts.on_interrupt is not None:
+                        opts.on_interrupt(1)
+                if level >= 2 and interrupt_level < 2:
+                    interrupt_level = 2
+                    _force_all()
+                    if opts.on_interrupt is not None:
+                        opts.on_interrupt(2)
     run_duration_ms = (opts.clock() - run_start) * 1000.0
 
     # 按 jobs 输入顺序排列结果，避免并发完成顺序影响输出

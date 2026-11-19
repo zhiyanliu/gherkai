@@ -2990,105 +2990,114 @@ def _cmd_run(args) -> int:
         interrupt.acted = True
         _progress(_interrupt_prompt(level, grace=grace))
 
+    # 处理器从这里装到命令结束（收尾与输出也在其内）：`schedule` 返回之后才到的中断只记标志，不打断结束写、读回运行态、生成报告
+    # 与输出汇总，退出码仍只看调度循环是否处置过中断（ADR 0024 终止契约「使用方中断」条）。
     previous_handlers = interrupt.install()
-    store_failure: OSError | None = None  # 运行期读写本机运行记录的失败（见 _store_failure_notice）
-    execution = None
     try:
-        execution = schedule(
-            run_meta, resolver, progress_sink,
-            ScheduleOpts(
-                max_concurrency=args.max_concurrency,
-                fail_fast=args.fail_fast,
-                # 停止宽限，也是停止后的等待预算：本机句柄等满它即强杀，进程退出就是事件流结束
-                # （ADR 0034 机制二「停止后继续有界消费完整事件流」条）
-                grace_period_s=grace,
-                min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
-                interrupt=interrupt.level,
-                on_interrupt=_on_interrupt,
-                # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，
-                # `--no-report` 也注入（没有记录照样遵守期限）
-                wall_clock=compose.now,
-                # 服从记录（ADR 0054 决策五）：落库服务提供认领、重试之前的读与停手信号；`--no-report` 没有记录，不认领、不读
-                record=persistence,
-            ),
-            on_job_complete=on_job_complete,
-            on_event=on_event,
-        )
-    except OSError as e:
-        if persistence is None:  # 没有记录的执行不读写运行记录：这里的 OSError 另有来源，原样抛出
-            raise
-        store_failure = e
+        store_failure: OSError | None = None  # 运行期读写本机运行记录的失败（见 _store_failure_notice）
+        execution = None
+        try:
+            execution = schedule(
+                run_meta, resolver, progress_sink,
+                ScheduleOpts(
+                    max_concurrency=args.max_concurrency,
+                    fail_fast=args.fail_fast,
+                    # 停止宽限，也是停止后的等待预算：本机句柄等满它即强杀，进程退出就是事件流结束
+                    # （ADR 0034 机制二「停止后继续有界消费完整事件流」条）
+                    grace_period_s=grace,
+                    min_grace_s=min_grace,  # core enforce grace ≥ 此下限（引擎无关关系，ADR 0024）
+                    interrupt=interrupt.level,
+                    on_interrupt=_on_interrupt,
+                    # 运行期限与 job 截止时刻按墙钟比较（ADR 0054 决策二）：注入组合根写时间戳的同一个读取点，
+                    # `--no-report` 也注入（没有记录照样遵守期限）
+                    wall_clock=compose.now,
+                    # 服从记录（ADR 0054 决策五）：落库服务提供认领、重试之前的读与停手信号；`--no-report` 没有记录，不认领、不读
+                    record=persistence,
+                ),
+                on_job_complete=on_job_complete,
+                on_event=on_event,
+            )
+        except OSError as e:
+            if persistence is None:  # 没有记录的执行不读写运行记录：这里的 OSError 另有来源，原样抛出
+                raise
+            store_failure = e
+        finally:
+            if worker_log_fh is not None:
+                worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
+
+        # 6) run 结束（ADR 0030 决定三）：各 job 的终态已由 on_job_complete 逐个写下（明细先存、终态后写并随之写 run 状态）。
+        #    finalize 在本进程的终态写没有使 run 成为终态时做结束写（来路取 schedule 交来的那一条，没有启动的 job 记 skipped），
+        #    再读一次运行态、从记录组装 RunResult，最后生成报告（派生视图，写失败被隔离）。汇总、--json、退出码与报告都出自这份组装
+        #    结果；为组装而读运行态的那一次不在报告的失败隔离之内，读失败与其它运行期落库失败同一出口。
+        #    `--no-report` 没有记录：按同一套规则在内存里算出运行态，经同一处组装。
+        #    artifacts 落点指针由 compose 的 make_artifacts 组装（file:// URI）。
+        #    本次执行结束之前这个 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）：已有的终态不覆盖、报告不生成，
+        #    finalize 抛 RunAlreadyEnded；出口见下方 `ended_elsewhere` 分支。
+        artifacts: dict[str, str] = {}
+        ended_elsewhere: RunAlreadyEnded | None = None
+        result = None
+        if store_failure is None:
+            if persistence:
+                try:
+                    finalized = persistence.finalize(execution)
+                except RunAlreadyEnded as e:
+                    ended_elsewhere = e
+                except OSError as e:
+                    store_failure = e
+                else:
+                    result = finalized.result
+                    artifacts = make_artifacts(run_id, finalized.report_index)  # report_index=None（report 写失败被隔离）时该键省略
+            else:
+                result = result_without_record(execution, ended_at=compose.now_iso())
+        if worker_log_fh is not None:
+            artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
+
+        if store_failure is not None:
+            # 运行期落库失败（ADR 0030 决定七「失败退出码分层」）：stdout 不输出，stderr 一句说明（发生了什么、记录在哪里、怎么办），
+            # 不打回溯。本进程已使 run 成为终态时记录已完整，说明改为不必重新执行。退出码取 1；处理过使用方中断时仍按信号取，与本函数
+            # 末尾的规则一致。
+            _progress(_store_failure_notice(run_id, store_failure, report_dir=args.report_dir,
+                                            run_ended=persistence.ended_run))
+            if worker_log_fh is not None:
+                _progress(f"worker 日志: {artifacts['worker_log']}")
+            return interrupt.exit_code(otherwise=1)
+
+        if ended_elsewhere is not None:
+            # run 由别处结束，结果以记录为准、用 status 读；本次执行看到的只是其中一部分，所以不输出汇总与 --json 文档
+            # （ADR 0054 决策五），说明与判定明细的落点走 stderr。退出码取 1，处理过使用方中断时仍按信号取（ADR 0031 决定五「run」条）。
+            _progress(_ended_elsewhere_notice(run_id, ended_elsewhere.recorded))
+            # 得知之前没有 job 判出结果时，明细目录还没有建出来，不指向不存在的位置。这次探测只决定要不要多打一行：探测本身失败
+            # （例如目录已不可访问）按没有处理，不让它盖掉上面的说明与退出码
+            try:
+                has_details = (Path(args.report_dir) / run_id / "jobs").is_dir()
+            except OSError:
+                has_details = False
+            if has_details:
+                _progress(f"判定明细: {make_artifacts(run_id, None)['jobs_dir']}")
+            if worker_log_fh is not None:
+                _progress(f"worker 日志: {artifacts['worker_log']}")
+            return interrupt.exit_code(otherwise=1)
+
+        # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
+        #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
+        if use_json:
+            out = redact_deep(render.to_dict(result))  # 定义里的预热地址带令牌、证据里的地址可能带签名类参数：展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
+            if artifacts:
+                out["artifacts"] = artifacts
+            print(json.dumps(out, ensure_ascii=False, indent=2))
+        else:
+            print(render.render_text(result))
+        if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
+            _print_artifact_lines(artifacts)  # 与 `status` 终态同一份（含 report_index 缺席时的回落文案）
+        if worker_log_fh is not None:
+            _progress(f"worker 日志: {artifacts['worker_log']}")
+
+        # 退出码取自 run 的状态（ADR 0031 决定五「数据源」与「run」条）：有记录时是上面从记录组装出的 run 状态，`--no-report` 是在内存里
+        # 按同一套规则算出的；passed 为 0，其余终态为 1。使用方中断的 run 按信号取（SIGINT 130、SIGTERM 143），汇总与产物指针照常已输出；
+        # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何结果，按 run 的状态给退出码。
+        return interrupt.exit_code(otherwise=0 if result.status == Status.PASSED else 1)
     finally:
         interrupt.restore(previous_handlers)
-        if worker_log_fh is not None:
-            worker_log_fh.close()  # 任何路径都关（异常/提前 return 也不留句柄）；下面只读它的路径
-
-    # 6) run 结束（ADR 0030 决定三）：各 job 的终态已由 on_job_complete 逐个写下（明细先存、终态后写并随之写 run 状态）。
-    #    finalize 在本进程的终态写没有使 run 成为终态时做结束写（来路取 schedule 交来的那一条，没有启动的 job 记 skipped），
-    #    再读一次运行态、从记录组装 RunResult，最后生成报告（派生视图，写失败被隔离）。汇总、--json、退出码与报告都出自这份组装
-    #    结果；为组装而读运行态的那一次不在报告的失败隔离之内，读失败与其它运行期落库失败同一出口。
-    #    `--no-report` 没有记录：按同一套规则在内存里算出运行态，经同一处组装。
-    #    artifacts 落点指针由 compose 的 make_artifacts 组装（file:// URI）。
-    #    本次执行结束之前这个 run 已被别处记为已结束（ADR 0054 决策五「执行方服从记录」）：已有的终态不覆盖、报告不生成，
-    #    finalize 抛 RunAlreadyEnded；出口见下方 `ended_elsewhere` 分支。
-    artifacts: dict[str, str] = {}
-    ended_elsewhere: RunAlreadyEnded | None = None
-    result = None
-    if store_failure is None:
-        if persistence:
-            try:
-                finalized = persistence.finalize(execution)
-            except RunAlreadyEnded as e:
-                ended_elsewhere = e
-            except OSError as e:
-                store_failure = e
-            else:
-                result = finalized.result
-                artifacts = make_artifacts(run_id, finalized.report_index)  # report_index=None（report 写失败被隔离）时该键省略
-        else:
-            result = result_without_record(execution, ended_at=compose.now_iso())
-    if worker_log_fh is not None:
-        artifacts = {**artifacts, "worker_log": worker_log_path.as_uri()}  # --quiet 落盘的 worker 日志位置
-
-    if store_failure is not None:
-        # 运行期落库失败（ADR 0030 决定七「失败退出码分层」）：stdout 不输出，stderr 一句说明（发生了什么、记录在哪里、怎么办），
-        # 不打回溯。本进程已使 run 成为终态时记录已完整，说明改为不必重新执行。退出码取 1；处理过使用方中断时仍按信号取，与本函数
-        # 末尾的规则一致。
-        _progress(_store_failure_notice(run_id, store_failure, report_dir=args.report_dir,
-                                        run_ended=persistence.ended_run))
-        if worker_log_fh is not None:
-            _progress(f"worker 日志: {artifacts['worker_log']}")
-        return interrupt.exit_code(otherwise=1)
-
-    if ended_elsewhere is not None:
-        # run 由别处结束，结果以记录为准、用 status 读；本次执行看到的只是其中一部分，所以不输出汇总与 --json 文档
-        # （ADR 0054 决策五），说明与判定明细的落点走 stderr。退出码取 1，处理过使用方中断时仍按信号取（ADR 0031 决定五「run」条）。
-        _progress(_ended_elsewhere_notice(run_id, ended_elsewhere.recorded))
-        jobs_dir = Path(args.report_dir) / run_id / "jobs"
-        if jobs_dir.is_dir():  # 得知之前没有 job 判出结果时，这个目录还没有建出来，不指向不存在的位置
-            _progress(f"判定明细: {make_artifacts(run_id, None)['jobs_dir']}")
-        if worker_log_fh is not None:
-            _progress(f"worker 日志: {artifacts['worker_log']}")
-        return interrupt.exit_code(otherwise=1)
-
-    # 7) 核心产出 → stdout（--json：单一 JSON 文档，把产物落点折进同一对象保可解析；否则人看文本汇总）。
-    #    产物落点提示属诊断 → stderr（不论模式），不污染被重定向的 stdout 主输出。
-    if use_json:
-        out = redact_deep(render.to_dict(result))  # 定义里的预热地址带令牌、证据里的地址可能带签名类参数：展示层脱敏、落盘的 run_meta 不动（ADR 0035 决策 5）
-        if artifacts:
-            out["artifacts"] = artifacts
-        print(json.dumps(out, ensure_ascii=False, indent=2))
-    else:
-        print(render.render_text(result))
-    if "run_meta" in artifacts:  # 落过库才有这三行（--quiet --no-report 时 artifacts 只有 worker_log）
-        _print_artifact_lines(artifacts)  # 与 `status` 终态同一份（含 report_index 缺席时的回落文案）
-    if worker_log_fh is not None:
-        _progress(f"worker 日志: {artifacts['worker_log']}")
-
-    # 退出码取自 run 的状态（ADR 0031 决定五「数据源」与「run」条）：有记录时是上面从记录组装出的 run 状态，`--no-report` 是在内存里
-    # 按同一套规则算出的；passed 为 0，其余终态为 1。使用方中断的 run 按信号取（SIGINT 130、SIGTERM 143），汇总与产物指针照常已输出；
-    # 以 schedule 是否处置过为准：全部 job 完成后才到的中断没有改变任何结果，按 run 的状态给退出码。
-    return interrupt.exit_code(otherwise=0 if result.status == Status.PASSED else 1)
 
 
 def _ended_elsewhere_notice(run_id: str, recorded) -> str:

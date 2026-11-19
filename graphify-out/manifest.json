@@ -12,9 +12,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
-    "mtime": 1795115821.1985474,
-    "seen": 1795116934.500559,
-    "ast_hash": "60d58533402107d3fe0ddb53864ab35f",
+    "mtime": 1795118142.7806742,
+    "seen": 1795118785.326406,
+    "ast_hash": "e415960bdfb29bcd8ddf0de6943e810e",
     "semantic_hash": ""
   },
   "cli/tests/test_render.py": {
@@ -102,9 +102,9 @@
     "semantic_hash": ""
   },
   "core/tests/test_persist.py": {
-    "mtime": 1795115773.7939801,
-    "seen": 1795116934.500597,
-    "ast_hash": "c020d37c5656cb0e947625d29bc04751",
+    "mtime": 1795118072.1638126,
+    "seen": 1795118785.326447,
+    "ast_hash": "ba55327f515a4d8a14a83815595fc319",
     "semantic_hash": ""
   },
   "core/tests/test_plan.py": {
@@ -144,9 +144,9 @@
     "semantic_hash": ""
   },
   "core/tests/test_schedule.py": {
-    "mtime": 1795108108.3547175,
-    "seen": 1795116934.500602,
-    "ast_hash": "24e76312eb9c8bd728fa57abd983e8d1",
+    "mtime": 1795118072.163657,
+    "seen": 1795118785.326452,
+    "ast_hash": "a76750d02dbf16f2ba0b8e503a588cf4",
     "semantic_hash": ""
   },
   "core/tests/test_sqlite_event_log.py": {
@@ -438,9 +438,9 @@
     "semantic_hash": "01bc939adc6973eaad56c15f4fdbedb6"
   },
   "docs/adr/0024-worker-core-protocol.md": {
-    "mtime": 1795107526.21778,
-    "seen": 1795116934.500753,
-    "ast_hash": "e589e2e43f222bb6ba4c876ca78c0aeb",
+    "mtime": 1795118436.3116038,
+    "seen": 1795118785.326607,
+    "ast_hash": "073854701315b87219df4c0936a558d8",
     "semantic_hash": ""
   },
   "docs/adr/0026-schedule-module.md": {
@@ -462,9 +462,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0030-realtime-persistence-seam.md": {
-    "mtime": 1795114614.3254294,
-    "seen": 1795116934.5007548,
-    "ast_hash": "1c647aa8a3b695d9691f4fce0663f977",
+    "mtime": 1795117988.2549083,
+    "seen": 1795118785.3266098,
+    "ast_hash": "1bcc478e2c51d9c72081c63371091e72",
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
@@ -540,9 +540,9 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1795115861.2418535,
-    "seen": 1795116934.5005429,
-    "ast_hash": "c85d2ce19aeda8b84b297e8134f36adc",
+    "mtime": 1795117927.7817297,
+    "seen": 1795118785.326388,
+    "ast_hash": "6d17ee063c84aa851a538ddf807e79c0",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -684,9 +684,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/persist.py": {
-    "mtime": 1795115440.4703372,
-    "seen": 1795116934.500579,
-    "ast_hash": "fd31db5443eb953e222029ae94cc7221",
+    "mtime": 1795118112.403067,
+    "seen": 1795118785.326427,
+    "ast_hash": "34488a7444b6feb0300f924c5a0fdabb",
     "semantic_hash": ""
   },
   "core/gherkai_core/ports.py": {
@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/schedule.py": {
-    "mtime": 1795115424.8200476,
-    "seen": 1795116934.500583,
-    "ast_hash": "588b7a309eea36bf502fa902badaab90",
+    "mtime": 1795118112.401021,
+    "seen": 1795118785.326431,
+    "ast_hash": "f5cec13c6292e9cf51b693e5b08fba0a",
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
@@ -3018,9 +3018,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795116394.1199515,
-    "seen": 1795116934.500777,
-    "ast_hash": "9ecb2fe8d4add1b114c0b4f4ae316f67",
+    "mtime": 1795118779.07018,
+    "seen": 1795118785.326633,
+    "ast_hash": "f8c22ddf500552a9109368b231cd7497",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {

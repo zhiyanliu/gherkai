@@ -70,7 +70,9 @@ class RunPersistence:
     抛 `RunAlreadyEnded`。
 
     停手信号（ended_elsewhere）汇集三处发现：认领被拒、重试之前读到 run 级终态、写 job 状态时 RunStore 报告 run 级已结束（on_event 的
-    执行中写返回 False，on_job_complete 的终态写返回 ALREADY_ENDED）。成立之后不撤销。
+    执行中写返回 False，on_job_complete 的终态写返回 ALREADY_ENDED）。成立之后不撤销。得知 run 已结束的那次存储操作与信号的发布在
+    本服务的同一把锁内完成，on_job_complete 也在这把锁内先看信号、再存明细：任何一次操作得知之后，此后才取到锁的 on_job_complete
+    都不再存明细（ADR 0054 决策五「执行方得知 run 已结束之后就不存明细」条）。
 
     clock：组合根注入的墙钟（返回带时区的 datetime，与调度循环同一个读取点），终态写与结束写的结束时刻、报告的生成时刻经它取；缺省取
     系统墙钟。
@@ -131,27 +133,30 @@ class RunPersistence:
 
     def claim(self, scope_id: str, claimed_at: datetime) -> bool:
         """认领一个 job（`RunRecord.claim`，在 worker 线程里、起 worker 之前调用）：经 `RunStore.try_claim_job` 的条件写把它从 pending
-        置为 running，认领时刻按记录的写法（UTC 的 ISO 串，与组合根写时间戳同一形态）随这次写落库并记下。被拒即发出停手信号、返回
-        False：前台执行时这个 job 只会在这里被认领一次，被拒的原因只能是 run 级已是终态。写入失败照常抛出。"""
+        置为 running，认领时刻按记录的写法（UTC 的 ISO 串，与组合根写时间戳同一形态）随这次写落库并记下。被拒即发出停手信号（在同
+        一把锁内，见类文档串）、返回 False：前台执行时这个 job 只会在这里被认领一次，被拒的原因只能是 run 级已是终态。写入失败照常
+        抛出。"""
         claimed_iso = instant_to_iso(claimed_at)
         with self._lock:
             claimed = self._run_store.try_claim_job(self._run_id, scope_id, claimed_at=claimed_iso)
             if claimed:
                 self._claimed_at[scope_id] = claimed_iso
-        if not claimed:
-            self._ended.set()
+            else:
+                self._ended.set()
         return claimed
 
     def still_open(self) -> bool:
         """读一次 run 级状态（`RunRecord.still_open`，job 级重试重新起 worker 之前调用）：pending 或 running 返回 True；已是终态即发出
-        停手信号、返回 False。运行态不存在（begin 之后不该发生）抛 FileNotFoundError，读取失败照常抛出。"""
-        state = self._run_store.load_run_state(self._run_id)
-        if state is None:
-            raise FileNotFoundError(f"run {self._run_id} 的运行状态不存在，无法确认它是否已结束")
-        if state.status in (Status.PENDING, Status.RUNNING):
-            return True
-        self._ended.set()
-        return False
+        停手信号（读与发布在同一把锁内，见类文档串）、返回 False。运行态不存在（begin 之后不该发生）抛 FileNotFoundError，读取失败
+        照常抛出。"""
+        with self._lock:
+            state = self._run_store.load_run_state(self._run_id)
+            if state is None:
+                raise FileNotFoundError(f"run {self._run_id} 的运行状态不存在，无法确认它是否已结束")
+            if state.status in (Status.PENDING, Status.RUNNING):
+                return True
+            self._ended.set()
+            return False
 
     def ended_elsewhere(self) -> bool:
         """停手信号（`RunRecord.ended_elsewhere`）：是否已发现这个 run 被别处记为已结束。只读进程内的标记。"""
