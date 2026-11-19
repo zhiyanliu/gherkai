@@ -19,6 +19,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Literal
 
 from gherkai_core.model import RunMeta
+from gherkai_core.run_status import RUN_ENDINGS
 from gherkai_core.serialize import instant_from_iso
 
 # 停止启动的提前量（秒）：当前时刻已过 deadline_at 减去它，就不再启动新的 job，同一个 job 的重试也不再启动。从发出启动到 job
@@ -26,8 +27,8 @@ from gherkai_core.serialize import instant_from_iso
 STOP_START_LEAD_S = 60.0
 
 # 执行方自己到期收尾时的 run 级说明：已过停止启动的时刻、没有执行中的 job、仍有没有启动的 job 时，run 级记为 error 并带这句。
-# run 的时间用完不是哪一个 job 的原因，所以写在 run 级，不写进任何 job 的判定。
-RUN_DEADLINE_PASSED_MESSAGE = "已超过允许运行的时间"
+# run 的时间用完不是哪一个 job 的原因，所以写在 run 级，不写进任何 job 的判定。句子取自结束写的说明表（「执行方自己到期」一行）。
+RUN_DEADLINE_PASSED_MESSAGE = RUN_ENDINGS["deadline"].run_message
 
 # 执行中的 job 被截断时起作用的是哪一个时刻：job 自己的墙钟预算（budget），还是 run 的期限（deadline）。终结函数据它给出超时的说明。
 TimeoutCause = Literal["budget", "deadline"]

@@ -7,7 +7,7 @@
 被误记成 `error` 区分出来。run 的状态不单独定：它只由各 job 的终态按一条取法算出，一个仍有未结束 job 的 run 只经结束写成为终态（决定三）；退出码取自 run 的状态（决定五）。
 
 **定位**：本 ADR 是判定**数据模型**的扩展，是 [0024](./0024-worker-core-protocol.md)「status 三态」的延伸。
-它怎么被实时落库（`update_job_state`，job 的终态只写一次）见 [0030](./0030-realtime-persistence-seam.md)；detached 路径防态倒退用的是生命周期推进序（`project._lifecycle_rank`，pending<running<终态），见 [0034](./0034-detached-batch-reconciler.md)。
+它怎么被实时落库（终态写 `commit_job_states`，job 的终态只写一次）见 [0030](./0030-realtime-persistence-seam.md)；detached 路径防态倒退用的是生命周期推进序（`project._lifecycle_rank`，pending<running<终态），见 [0034](./0034-detached-batch-reconciler.md)。
 
 ## 背景：三态不够用，fail-fast 把两类「没跑成」都污染成 error
 
@@ -112,7 +112,7 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
 
 结束一个仍有未结束 job 的 run 只有这一种写法；job 都由执行结果结束时，run 在最后一个 job 的终态写里随之成为终态（见上「run 的状态字段没有自己的写入逻辑」条）。
 
-- **结束写**是一次条件写：run 未结束时，把每个未结束的 job 写成终态并各带一句说明，运行态里是 `pending` 的（从未认领，因而没有启动）记 `skipped`，是 `running` 的（已认领而没有结果）记 `aborted`；run 状态按上面的取法随之成为终态，run 级写下结束的原因与结束时刻。判断只看运行态，不读事件。端口上的入口见 [0030](./0030-realtime-persistence-seam.md) 决定四，云端写的条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②。
+- **结束写**是一次条件写：run 未结束时，把每个未结束的 job 写成终态并各带一句说明，运行态里是 `pending` 的（从未认领，因而没有启动）记 `skipped`，是 `running` 的（已认领而没有结果）记 `aborted`；run 状态按上面的取法随之成为终态，run 级写下结束的原因与结束时刻（结束时刻由调用方给）。判断只看运行态，不读事件。端口上的入口是 `RunStore.end_run`（[0030](./0030-realtime-persistence-seam.md) 决定四），云端写的条件见 [0034](./0034-detached-batch-reconciler.md) 机制三②。
 - **来路**：各来路的条件写在各自的定义处，写法只此一种。
   - 执行方自己到期（条件见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条）。
   - 前台的 fail-fast 与使用方中断：执行中的 job 停下、各自得出结果之后，余下没有启动的（[0026](./0026-schedule-module.md)「失败隔离」、[0024](./0024-worker-core-protocol.md) 终止契约「使用方中断」条）。
@@ -133,8 +133,10 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
 | 处置：已过期限加 300 秒（含云端后端到期） | 已超过允许运行的时间 | 这个 run 已超过允许运行的时间，job 没有启动 | 这个 run 已超过允许运行的时间，job 没有结果 |
 | 运行定义不可用 | 读不到定义的原因（[0037](./0037-distribution-and-packaging.md) 决策 7 的几句） | 未结束的 job 都记 `error`，说明同 run 级 | 同左 |
 
-处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。
+处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。说明表的各句在 core 里只有一处（`run_status.RUN_ENDINGS`），运行定义不可用那一行由调用方带入读不到定义的原因（`run_status.definition_unavailable_ending`）；说明只是描述，结束写与任何判断都不看它（决定一「状态是一切计算的唯一依据」条）。
 
+- **一次结束写只带一行说明，多条来路先后成立时取最先成立的那条**：例如前台已因 fail-fast 中止、或先收到使用方中断，之后又过了停止启动的时刻，结束写取 fail-fast 或使用方中断那一行。理由：最先成立的来路已经使余下的 job 不再启动，之后成立的来路不改变哪些 job 没有启动；这与中止的说明取最先成立的来源（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「一次前台执行可能因三种原因停下」一段）是同一条原则。处置的两个条件在同一次判断里成立、没有先后，按上一段取「锁拿到了」那一行。
+- **执行方自己到期、fail-fast、使用方中断这三条来路不结束执行中的 job，结束写另以没有 `running` 的 job 为条件**：这三条来路的条件本来就要求执行中的 job 都已结束（执行方自己到期见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条；fail-fast 与使用方中断是执行中的 job 停下、各自得出结果之后），说明表里它们的 `aborted` 一格因此不出现，也不为表里不出现的情形另造说明。条件按结束写写下时的运行态判断：写下时仍是 `running` 的 job（例如读运行态之后才落下、还没有结果的认领）不会被这次结束写记成 `aborted`，云端重叠推进时这样的 run 按继续推进处理（0054 决策二后台推进条「收尾与报告」）；条件不成立时结束写不写、返回未写成。理由：条件要在写下的那一刻成立，而调用方不经手写入序号（[0030](./0030-realtime-persistence-seam.md) 决定六「STATE item 带写入序号」条），所以条件随这次写一起判断。结束不结束执行中的 job 是说明表每一行的结构属性，在 core 里是 `run_status.RunEnding.ends_running_jobs`，与说明分开：结束写成立与否不看哪一句说明给没给出。处置的两行与运行定义不可用的变体结束执行中的 job，不带这个条件。
 - **理由**：所有来路一种写法，「run 已结束」与「每个 job 都已结束」同时成立。
 - **被拒方案：到期时把未启动的 job 记 `error`**：run 的时间用完不是这些 job 的原因。`error` 表示 job 自己没能执行完，记它会让跨 run 统计与 CI 归因把被牵连的 job 算成自身出错（本篇背景）；借用启动失败的补偿来记，错误类型与说明也都对不上。没有启动的 job 记 `skipped`：没执行、没花钱、可以直接重跑。运行定义不可用的变体记 `error` 不在此列：那些 job 是没法执行，不是没轮到。
 
@@ -204,7 +206,8 @@ skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker
 
 - `core/gherkai_core/model.py`：`Status` 的 SKIPPED/ABORTED（判定派生态）+ PENDING/RUNNING（前置态；注释标明 core 内态、非 wire）；`_STATUS_SEVERITY`（仅终态）+ `severity()` 比较辅助；`TERMINAL_STATUSES`（终态真源，取补于 `_PRE_TERMINAL`，决定一·补末条）；`StepSkipped` 事件（frozen dataclass `scenario_id`/`step_index`，无 status/votes/cost）入 `Event` Union + `StepResult.shortcircuited`（正交布尔，决定六）。
 - `core/gherkai_core/schedule.py`：job 级的赋态点——起 worker 前已过停止启动的时刻、已发现 run 被别处结束，或 `abort_flag` 已因 fail-fast 或使用方中断置位 → 不启动，job 留在 pending，由结束写结束（决定三「结束写」；发现 run 已被别处结束时记录已是终态、不写）；事件循环中因 `abort_flag` 作出停止决定 → 首次仲裁落定 `stop_reason = abort`，再调 `project.finalize_job` 按真值表在内容不完整时判 ABORTED（不论退出形态；`abort_flag` 只记下第一次登记的来源 fail-fast / interrupt / ended-elsewhere，它决定消息措辞）；到点分支落定 `stop_reason = timeout`，终结函数按起作用的截止时刻判：预算为 `error`+`errorType=timeout`，期限为 `aborted`（判定看该 job 停止决定那一刻落定的 `stop_reason`，判据与理由见决定一「aborted 来自主动中止与 run 的期限，不来自 job 自己的预算」注）。
-- `core/gherkai_core/project.py`：`finalize_job`（终结函数：`stop_reason = abort` 且内容不完整 → ABORTED，`stop_reason = timeout` 且内容不完整按起作用的截止时刻分两行，[0034](./0034-detached-batch-reconciler.md) 机制二）；`_aggregate`（scenario 判定到 job 判定的三态取最重，只在终结函数内容完整那一行用，决定三）；run 状态的取法（决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；收到 `scope_done.status = error` 后合成 scenario 级 SKIPPED 与 `shortcircuited=False` 的 step 级 SKIPPED（决定一、决定六，合成态不进 `_aggregate`）。
+- `core/gherkai_core/run_status.py`：`run_status_of`（run 状态的取法，决定三）；`RunEnding`、`RUN_ENDINGS` 与 `definition_unavailable_ending`（结束写的说明表，决定三「结束写」小节）；`ending_applied` 与 `commit_applied`（结束写与带结果的 job 终态写对运行态的作用，两个 RunStore adapter 共用；端口入口 `RunStore.end_run` 与 `RunStore.commit_job_states` 见 [0030](./0030-realtime-persistence-seam.md) 决定四）。`model.JobState.message` 是 job 级说明，只由结束写写下。
+- `core/gherkai_core/project.py`：`finalize_job`（终结函数：`stop_reason = abort` 且内容不完整 → ABORTED，`stop_reason = timeout` 且内容不完整按起作用的截止时刻分两行，[0034](./0034-detached-batch-reconciler.md) 机制二）；`_aggregate`（scenario 判定到 job 判定的三态取最重，只在终结函数内容完整那一行用，决定三）；`reduce_event` 的 `StepSkipped` 分支 → 暂存 `StepResult(status=SKIPPED, shortcircuited=True)`，**绝不写 `scenario_status`**（被短路 step 无 `step_started`，`duration_ms` 恒 None——没跑=无墙钟）；收到 `scope_done.status = error` 后合成 scenario 级 SKIPPED 与 `shortcircuited=False` 的 step 级 SKIPPED（决定一、决定六，合成态不进 `_aggregate`）。
 - `core/gherkai_core/wire.py`：`event_from_json` 的 `step_skipped` 分支（加法，不碰 step_done 三态解析）；`step_done` 与 `scenario_done` 的 `status` 只接受 `passed` / `failed` / `error` 三态（决定四），其余取值与缺键按 worker 违约抛 `ValueError`；`scope_done` 的可选 `status` / `errorType` / `message`（决定四，`status` 只接受 `error`）。
 - `core/gherkai_core/serialize.py`：JobResult/RunResult 链路靠 `Status(str,Enum)` 天然 round-trip 新值；StepResult to/from_dict 的 `shortcircuited`（写端始终写出；读端缺键取 False，与 `message`、step 的 `report_refs` 同一读法，依据与边界见决定六「判定结果读端对三个明细键的缺省」条）。（**注**：`RunState` 链路的 `run_state_to/from_dict` 归 [0030](./0030-realtime-persistence-seam.md) 决定五的落点清单，非本 enum 的落点。）
 - `core/gherkai_core/adapters/report_store/local.py`：`_STATUS_COLOR`（每态各一色 + 兜底灰 `#57606a`；着色意图见决定二「视觉映射」）；index.html 的连锁失败旁注读 `shortcircuited`。

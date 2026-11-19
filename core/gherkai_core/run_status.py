@@ -1,0 +1,191 @@
+"""run 的状态只由 job 的终态算出（ADR 0031 决定三）：取法、结束写的说明表，以及两种使 job 成为终态的写对运行态的作用。
+
+- `run_status_of`：run 状态的取法（ADR 0031 决定三「取法」）。前台的 `schedule` 与后台的 `project.project_full` 现在仍经
+  `project.run_verdict` 取 run 级状态，规则与这里不同；它们迁到这里之后 `run_verdict` 删去。
+- `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
+  `definition_unavailable_ending` 带上读不到定义的原因。
+- `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
+  的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
+
+说明文字只是描述：这里与 adapter 都不解释它，任何判断都不看它（ADR 0031 决定一「状态是一切计算的唯一依据」条）；结束写成立与否只看
+运行态与 `RunEnding` 的两个结构字段 `ends_running_jobs`、`definition_unavailable`。
+本模块是纯函数、无 I/O、不取时钟：结束时刻由调用方给出。
+"""
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, replace
+from enum import Enum
+from types import MappingProxyType
+from typing import Literal
+
+from gherkai_core.model import TERMINAL_STATUSES, JobState, RunState, Status
+
+
+def run_status_of(job_statuses: Iterable[Status]) -> Status:
+    """run 状态的取法（ADR 0031 决定三「取法」）。
+
+    有 job 未结束时，全部是 pending 为 pending，否则为 running。全部结束时按序取第一条成立的：有 error 则 error；否则有 failed 则
+    failed；否则有 aborted 或 skipped 则 aborted（这个 run 没有执行完）；否则 passed。零个 job 的 run 为 passed。结果是终态，当且仅当
+    每个 job 都是终态。"""
+    statuses = list(job_statuses)
+    if any(s not in TERMINAL_STATUSES for s in statuses):
+        return Status.PENDING if all(s == Status.PENDING for s in statuses) else Status.RUNNING
+    if Status.ERROR in statuses:
+        return Status.ERROR
+    if Status.FAILED in statuses:
+        return Status.FAILED
+    if Status.ABORTED in statuses or Status.SKIPPED in statuses:
+        return Status.ABORTED
+    return Status.PASSED
+
+
+# ============================================================================
+# 结束写的说明表（ADR 0031 决定三「结束写」小节）
+# ============================================================================
+
+
+@dataclass(frozen=True)
+class RunEnding:
+    """说明表的一行：一次结束写写下的说明，以及这条来路结束什么样的 run。
+
+    结构字段（结束写成立与否、各 job 记成什么，只由它们与运行态决定）：
+    - ends_running_jobs：这条来路是否结束有执行中 job 的 run。为 False 的来路（执行方自己到期、fail-fast、使用方中断）的条件本来就
+      要求执行中的 job 都已结束（ADR 0031 决定三「结束写」小节），运行态里有 running 的 job 时结束写不成立；为 True 的来路（处置的
+      两行、运行定义不可用的变体）把 running 的 job 一并结束。
+    - definition_unavailable：运行定义不可用的变体。每个未结束的 job 记 error，说明同 run 级。
+
+    说明（只是描述，写进运行态，不参与任何判断）：
+    - run_message：run 级说明，写进运行态的 run 级 message。
+    - skipped_message：运行态里是 pending 的 job 记 skipped 时带的说明。
+    - aborted_message：运行态里是 running 的 job 记 aborted 时带的说明。
+
+    形态只有三种，构造时不符即抛 ValueError：不结束执行中 job 的来路带 skipped_message、不带 aborted_message（说明表里这一格「不
+    出现」）；结束执行中 job 的来路两句都带；运行定义不可用的变体 ends_running_jobs 为 True、两句都不带。
+    """
+
+    run_message: str
+    skipped_message: str | None = None
+    aborted_message: str | None = None
+    ends_running_jobs: bool = False
+    definition_unavailable: bool = False
+
+    def __post_init__(self) -> None:
+        if self.definition_unavailable:
+            if self.skipped_message is not None or self.aborted_message is not None:
+                raise ValueError("运行定义不可用的结束写只带 run 级说明：未结束的 job 都记 error，说明同 run 级")
+            if not self.ends_running_jobs:
+                raise ValueError("运行定义不可用的结束写把执行中的 job 一并记 error，ends_running_jobs 须为 True")
+            return
+        if self.skipped_message is None:
+            raise ValueError("结束写要带 pending 的 job 记 skipped 时的说明")
+        if self.ends_running_jobs != (self.aborted_message is not None):
+            raise ValueError("结束执行中 job 的来路要带 running 的 job 记 aborted 时的说明，不结束它们的来路不带")
+
+
+# 说明表的来路：执行方自己到期、fail-fast、使用方中断、处置的两行（锁拿到了，即执行这个 run 的进程已退出；已过期限加 300 秒，含云端
+# 后端到期）。前三个与调度循环的中止来源、起 worker 之前的检查项同名（`project.AbortCause`、`schedule._Hold`）。
+EndingRoute = Literal["deadline", "fail-fast", "interrupt", "settle-advancer-exited", "settle-past-deadline"]
+
+_PAST_DEADLINE = "已超过允许运行的时间"
+_PAST_DEADLINE_NOT_STARTED = "这个 run 已超过允许运行的时间，job 没有启动"
+_PAST_DEADLINE_NO_RESULT = "这个 run 已超过允许运行的时间，job 没有结果"
+_ADVANCER_EXITED = "执行这个 run 的 gherkai 进程已退出"
+
+
+def _settled(run_message: str, skipped_message: str, aborted_message: str) -> RunEnding:
+    """处置的一行：结束执行中的 job，各句末尾另加「（已记为已结束）」。"""
+    suffix = "（已记为已结束）"
+    return RunEnding(run_message + suffix, skipped_message + suffix, aborted_message + suffix, ends_running_jobs=True)
+
+
+RUN_ENDINGS: Mapping[EndingRoute, RunEnding] = MappingProxyType({
+    "deadline": RunEnding(_PAST_DEADLINE, _PAST_DEADLINE_NOT_STARTED),
+    "fail-fast": RunEnding("有 job 出错，余下的 job 不再启动（fail-fast）", "fail-fast：其他 job 出错，本 job 没有启动"),
+    "interrupt": RunEnding("收到中断信号，余下的 job 不再启动", "收到中断信号，本 job 没有启动"),
+    "settle-advancer-exited": _settled(_ADVANCER_EXITED, f"{_ADVANCER_EXITED}，job 没有启动",
+                                       f"{_ADVANCER_EXITED}，job 没有结果"),
+    "settle-past-deadline": _settled(_PAST_DEADLINE, _PAST_DEADLINE_NOT_STARTED, _PAST_DEADLINE_NO_RESULT),
+})
+
+
+def definition_unavailable_ending(reason: str) -> RunEnding:
+    """运行定义不可用时的结束写：reason 是读不到定义的原因（ADR 0037 决策 7 的几句），既是 run 级说明，也是每个未结束的 job 的说明。
+    执行中的 job 同样记 error。"""
+    return RunEnding(reason, ends_running_jobs=True, definition_unavailable=True)
+
+
+# ============================================================================
+# 两种使 job 成为终态的写对运行态的作用（RunStore 的 end_run 与 commit_job_states 共用）
+# ============================================================================
+
+
+def ending_applied(state: RunState, ending: RunEnding, *, ended_at: str) -> RunState | None:
+    """结束写对一份运行态的作用：返回要写下的运行态；结束写不成立时返回 None。
+
+    不成立的情形：run 已是终态；或这条来路不结束执行中的 job（`ending.ends_running_jobs` 为 False）而运行态里有 running 的 job。
+    成立时，每个未结束的 job 写成终态并带一句说明：pending 的记 skipped、running 的记 aborted；运行定义不可用的变体都记 error、说明同
+    run 级。会话与认领时刻原样保留，已是终态的 job 不变。run 状态按取法随之成为终态，同一次写下 run 级说明与结束时刻；HWM、认领计数与
+    开始时刻不变。判断只看这份运行态与 ending 的结构字段，不看说明：不读事件，不涉及判定明细。"""
+    if state.status in TERMINAL_STATUSES:
+        return None
+    if not ending.ends_running_jobs and any(js.status == Status.RUNNING for js in state.jobs.values()):
+        return None
+    jobs: dict[str, JobState] = {}
+    for sid, js in state.jobs.items():
+        if js.status in TERMINAL_STATUSES:
+            jobs[sid] = js
+        elif ending.definition_unavailable:
+            jobs[sid] = replace(js, status=Status.ERROR, message=ending.run_message)
+        elif js.status == Status.PENDING:
+            jobs[sid] = replace(js, status=Status.SKIPPED, message=ending.skipped_message)
+        else:  # running：到这里 ending.ends_running_jobs 为 True，构造时已保证带 aborted 的说明
+            jobs[sid] = replace(js, status=Status.ABORTED, message=ending.aborted_message)
+    return replace(state, status=run_status_of(js.status for js in jobs.values()), jobs=jobs,
+                   ended_at=ended_at, message=ending.run_message)
+
+
+class CommitOutcome(str, Enum):
+    """带结果的 job 终态写的结果（`RunStore.commit_job_states` 的返回值）。
+
+    run 成为终态只发生一次，使它成为终态的那次写的写入方生成报告（ADR 0027「ReportStore 接口：整 run 一次写」节），所以调用方要从这次
+    写本身分出三种结果，不靠写后读回推断。
+    """
+
+    OPEN = "open"  # 写成，run 在这次写之后仍未结束（给出的 job 里已是终态的不被改写）
+    ENDED_RUN = "ended_run"  # 写成，这次写使 run 成为终态
+    ALREADY_ENDED = "already_ended"  # 没有写成：run 在这次写之前已是终态，运行态不变
+
+
+def commit_applied(state: RunState, job_states: Sequence[JobState], *,
+                   ended_at: str) -> tuple[RunState | None, CommitOutcome]:
+    """带结果的 job 终态写对一份运行态的作用：返回要写下的运行态（没有写成时为 None）与这次写的结果。
+
+    给出的每个 job 都要是终态、不带 job 级说明（说明只由结束写写下，由执行结果结束的 job 的说明在判定明细里），scope_id 不重复、都在
+    这份运行态的 job 里，至少一个；不满足即抛 ValueError、不写任何东西。run 已是终态时没有写成（ALREADY_ENDED）。否则给出的 job 整项
+    替换库中的条目（会话与认领时刻由调用方带上），库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补）；run 状态按取法
+    随之写下，成为终态时同一次写下结束时刻（ENDED_RUN），否则为 OPEN。HWM、认领计数、开始时刻与 run 级说明不变。"""
+    job_states = tuple(job_states)
+    if not job_states:
+        raise ValueError("终态写至少要给出一个 job")
+    seen: set[str] = set()
+    for js in job_states:
+        if js.scope_id in seen:
+            raise ValueError(f"终态写里 job {js.scope_id} 出现了不止一次")
+        seen.add(js.scope_id)
+        if js.status not in TERMINAL_STATUSES:
+            raise ValueError(f"终态写只记终态，job {js.scope_id} 的状态是 {js.status.value}")
+        if js.message is not None:
+            raise ValueError(f"终态写不带 job 级说明（只由结束写写下），job {js.scope_id} 带了说明")
+        if js.scope_id not in state.jobs:
+            raise ValueError(f"job {js.scope_id} 不在 run {state.run_id} 的运行态里")
+    if state.status in TERMINAL_STATUSES:
+        return None, CommitOutcome.ALREADY_ENDED
+    jobs = dict(state.jobs)
+    for js in job_states:
+        if state.jobs[js.scope_id].status not in TERMINAL_STATUSES:
+            jobs[js.scope_id] = js
+    status = run_status_of(js.status for js in jobs.values())
+    if status in TERMINAL_STATUSES:
+        return replace(state, status=status, jobs=jobs, ended_at=ended_at), CommitOutcome.ENDED_RUN
+    return replace(state, status=status, jobs=jobs), CommitOutcome.OPEN

@@ -794,6 +794,28 @@ def test_job_state_claimed_at_round_trip(tmp_path: Path):
     assert got.jobs[sid1].claimed_at is None
 
 
+def test_job_state_message_round_trips_and_is_omitted_when_none(tmp_path: Path):
+    """job 级说明（ADR 0030 决定五）：有值时落进 job 条目、读回不丢；没有时 job 条目里不出现这个键、读回为 None。经 serialize 与本机
+    run_state.json 两层核对。"""
+    from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
+    meta = _sample_run("msg-run").run_meta
+    sid0, sid1 = meta.jobs[0].scope_id, meta.jobs[1].scope_id
+    state = RunState(run_id="msg-run", status=Status.ABORTED, ended_at="2026-11-19T02:00:00Z", message="run 级说明", jobs={
+        sid0: JobState(sid0, Status.SKIPPED, message="这个 run 已超过允许运行的时间，job 没有启动"),
+        sid1: JobState(sid1, Status.PASSED, session_id="s1", claimed_at="2026-11-19T00:00:00Z"),
+    })
+    entries = {e["scope_id"]: e for e in run_state_to_dict(state)["jobs"]}
+    assert entries[sid0]["message"] == "这个 run 已超过允许运行的时间，job 没有启动"
+    assert "message" not in entries[sid1]
+    assert run_state_from_dict(run_state_to_dict(state)) == state
+
+    store = LocalRunStore(tmp_path / "runs")
+    store.create_run(meta, state)
+    raw = json.loads((tmp_path / "runs" / "msg-run" / "run_state.json").read_text("utf-8"))
+    assert {e["scope_id"]: "message" in e for e in raw["jobs"]} == {sid0: True, sid1: False}
+    assert store.load_run_state("msg-run") == state
+
+
 def test_run_state_jobs_map_round_trip(tmp_path: Path):
     # RunState.jobs 是 Map（ADR 0030）：内存 dict → 落盘 list JSON → 读回仍是等价 Map
     store = LocalRunStore(tmp_path / "runs")

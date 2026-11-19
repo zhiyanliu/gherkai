@@ -41,6 +41,7 @@ from gherkai_core.model import (
     RunState,
     Status,
 )
+from gherkai_core.run_status import CommitOutcome, RunEnding
 
 
 # ============================================================================
@@ -140,6 +141,10 @@ class RunStore(Protocol):
     scope_id 刷单个 JobState）→ try_finalize（commit point：以条件写落定总 status + ended_at）。前台执行（同步 `run`）与后台推进
     （reconciler）用同一组写入口；两者起 worker 之前都先经 try_claim_job 认领（前台每个 job 只认领一次，ADR 0054 决策五），后台推进另用 project_state。
 
+    run 的状态只由 job 的终态算出（ADR 0031 决定三）的两个写入口：commit_job_states（把由执行结果结束的 job 记为终态，run 状态按取法
+    随之写下）与 end_run（结束写：把未结束的 job 写成终态，run 随之成为终态）。它们取代 try_finalize 与 update_job_state 写终态的用法，
+    调用方迁到这两个入口之后，try_finalize 删去，update_job_state 只写执行中的 job（ADR 0030 决定四）。
+
     **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
     之外，还有后台推进的多个实例与接力者），本机 adapter 在文件锁内读改写、云端 adapter 的每一次写都带条件。这不是事务保证：
     create_run 分两次写（definition 在前、运行态在后），云端的 project_state 先写标量、再逐 job 写；中间态对读的一方可见，
@@ -181,6 +186,42 @@ class RunStore(Protocol):
 
         expected_claim_count：给出时另要求库中的认领计数等于它，判定自调用方读到运行态以来
         没有新的认领；不等 → False、不写。为 None 时不判计数。认领计数本身不变。
+        """
+        ...
+
+    def commit_job_states(self, run_id: str, job_states: Sequence[JobState], *, ended_at: str) -> CommitOutcome:
+        """带结果的 job 终态写：把一个或多个由执行结果结束的 job 记为终态，一次条件写（ADR 0030 决定四）。
+
+        - **作用**：给出的每个 job 整项替换库中的条目（会话与认领时刻由调用方带上）；库中已是终态的 job 不被改写（终态只写一次，
+          ADR 0031 决定一·补）。同一次写里按取法写 run 状态（ADR 0031 决定三）；这次写使 run 成为终态时，同一次写下 ended_at
+          （ISO 串，调用方经注入的时钟取，adapter 不取时钟）。认领计数、HWM、开始时刻与 run 级说明不变。作用的定义是
+          `run_status.commit_applied`，两个 adapter 都按它算出要写下的运行态。
+        - **条件**：run 未结束（ADR 0054 决策五）。判断只看写的那一刻的运行态：本机在文件锁内读、判断、写，云端以写入序号等于读到的
+          值为条件整体替换 jobs、条件不成立即重读再算（ADR 0034 机制三②）；云端重读的次数有上限，用尽即抛错、不写（ADR 0030 决定六
+          「STATE item 带写入序号」条），调用方按写不进运行态处理。
+        - **返回**：`CommitOutcome.OPEN`（写成，run 仍未结束）、`ENDED_RUN`（写成，这次写使 run 成为终态）、`ALREADY_ENDED`（run 在
+          这次写之前已是终态，运行态不变）。run 成为终态只发生一次，返回 ENDED_RUN 的写入方生成报告，不靠写后读回推断。
+        - **参数错误**：job_states 为空、scope_id 重复、某个 job 不是终态、带了 job 级说明（只由结束写写下）、或不在这个 run 的运行态
+          里，都抛 ValueError、不写任何东西。运行态不存在抛 FileNotFoundError（须先 create_run）。
+
+        它取代 update_job_state 写终态的用法，调用方迁过来之后 update_job_state 只写执行中的 job。
+        """
+        ...
+
+    def end_run(self, run_id: str, ending: RunEnding, *, ended_at: str) -> bool:
+        """结束写：结束一个仍有未结束 job 的 run，一次条件写（ADR 0031 决定三「结束写」小节，ADR 0030 决定四）。
+
+        - **作用**：运行态里是 pending 的 job 记 skipped、running 的记 aborted，各带 ending 给的一句说明；运行定义不可用的变体
+          （`ending.definition_unavailable`）把每个未结束的 job 记 error、说明同 run 级。会话与认领时刻原样保留，已是终态的 job 不变。
+          run 状态按取法随之成为终态，同一次写下 run 级说明（`ending.run_message`）与 ended_at（ISO 串，调用方给出）。认领计数、HWM
+          与开始时刻不变。判断只看运行态：不读事件，不写判定明细、不点名。作用的定义是 `run_status.ending_applied`。
+        - **条件**：run 未结束；不结束执行中 job 的来路（`ending.ends_running_jobs` 为 False：执行方自己到期、fail-fast、使用方中断）
+          另要求运行态里没有 running 的 job。两项都按写下时的运行态判断：本机在文件锁内判断，云端以写入序号等于读到的值为条件、条件
+          不成立即重读再算，重读的次数用尽时同终态写一样抛错、不写。
+        - **返回**：是否写成。run 已结束、条件不成立、运行态不存在，都返回 False、不改任何东西。写成即这次写使 run 成为终态，写成的一方
+          生成报告。
+
+        说明文字只是描述，adapter 不解释它，条件只看运行态与 ending 的结构字段。它取代 try_finalize，调用方迁过来之后 try_finalize 删去。
         """
         ...
 

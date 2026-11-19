@@ -801,8 +801,9 @@ def run_verdict(
     interrupted: bool,
     ended_elsewhere: bool,
 ) -> RunVerdict:
-    """run 级裁决（唯一一份，前台与后台共用）：包住 `_aggregate`，加上聚合之外的例外，按序取第一条成立的。前台的
+    """run 级裁决（前台与后台共用）：包住 `_aggregate`，加上聚合之外的例外，按序取第一条成立的。前台的
     `schedule` 在返回 RunResult 时调它，后台经 `project_full` 调它，两条路径收尾时写下的 run 级状态与说明都出自这里。
+    ADR 0031 决定三的取法是 `run_status.run_status_of`，规则与这里不同；两条路径迁过去之后本函数删去。
 
     job_results 是有判定的 job（判定只有终态），jobs 是运行定义里的全部 job，「没有判定的 job」即两者的差：已过停止启动的时刻、
     或发现 run 已被别处记为已结束时没有启动的 job，它们的运行态保持 pending、不产出判定。因 fail-fast 或使用方中断而没有启动的

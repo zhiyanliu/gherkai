@@ -16,7 +16,8 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - `update_job_state` 返回 run 级在这次写时是否仍未结束：run 级为 pending 或 running 时 True、已是终态时 False（job 照写），对
   写入的任何 job 态都如实；DDB 侧第一次写被挡后并发建出的新记录不会让第二次写报告 run 已结束。
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）；收尾写可带期望的计数。
-- 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经四个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
+- 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经各个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
+结束写 `end_run` 与带结果的 job 终态写 `commit_job_states` 的语义对拍在 test_ending_and_commit_writes.py。
 本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
 """
 from __future__ import annotations
@@ -962,9 +963,22 @@ def _finalize(store):
     assert store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
 
 
+def _commit(store):
+    from gherkai_core.run_status import CommitOutcome
+    assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    assert store.commit_job_states("run-1", [JobState("a", Status.PASSED, claimed_at="2026-08-13T01:02:03Z")],
+                                   ended_at="t1") is CommitOutcome.OPEN
+
+
+def _end(store):
+    from gherkai_core.run_status import RUN_ENDINGS
+    assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
+
+
 @_both
-@pytest.mark.parametrize("write", [_job_write, _claim, _project, _finalize],
-                         ids=["update_job_state", "try_claim_job", "project_state", "try_finalize"])
+@pytest.mark.parametrize("write", [_job_write, _claim, _project, _finalize, _commit, _end],
+                         ids=["update_job_state", "try_claim_job", "project_state", "try_finalize", "commit_job_states",
+                              "end_run"])
 def test_each_write_entry_keeps_top_level_extras(raw_run_store, write):
     """运行态记录顶层不属于 RunState 模型的键（这里是一个发起进程标识形态的对象与后台执行标记）经每个写入口原样保留：
     本机在锁内读到的文件里整体带回，云端 update_item 本来就不碰未提及的属性。每个写入口都确认写成，免得保留是因为没写。"""

@@ -607,6 +607,10 @@ class JobState:
     # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）；后台收尾时由它与预算、期限重算超时的
     # 说明，所以有记录的 job 缺它时推进步骤不收尾。
     claimed_at: str | None = None
+    # job 级说明：只由结束写写下（ADR 0031 决定三「结束写」小节，取值见 `run_status.RUN_ENDINGS`），由结束写结束的 job 没有判定明细，
+    # 它的说明只在这里；由执行结果结束的 job 不带它，说明在判定明细里。只是描述，任何判断都不看它（ADR 0031 决定一「状态是一切计算的
+    # 唯一依据」条）。没有时为 None，落盘省键。
+    message: str | None = None
 
 
 @dataclass(frozen=True)
@@ -632,7 +636,8 @@ class RunState:
     # 挡 stale 实例的 lost-update（把 passed 刷回 running）。仅无状态路径（submit/reconciler）用；同步 run
     # 路径不做投影写，此字段留 None（不参与、不落盘键）。
     high_water_mark: int | None = None
-    # run 级消息：只给「没有任何 job 能承载」的原因，随 try_finalize 的同一次条件写落库，让 `status` 看得见原因
+    # run 级消息：只给「没有任何 job 能承载」的原因，随 try_finalize 或结束写（`RunStore.end_run`，句子取自
+    # `run_status.RUN_ENDINGS`）的同一次条件写落库，让 `status` 看得见原因
     # （团队成员未必有 CloudWatch 的读权限）。写入方：推进器**不经任何 job 就把 run 置为终态**时（提交记录的结构版本不是本后端认的、
     # 定义违约、缺 worker 镜像版本）；执行方（前台执行与后台的推进步骤）按运行期限收尾、有 job 没有启动时（「已超过允许运行的时间」，
     # 与 RunResult.message 同一份，ADR 0054 决策二第 3 条）。

@@ -518,7 +518,8 @@ def run_state_to_dict(state: RunState) -> dict:
     # 必须 .values() 迭代——直接 `for js in state.jobs` 会迭代 dict 的 key（str）、js.scope_id 即 AttributeError。
     d["jobs"] = [
         {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id,
-         **({"claimed_at": js.claimed_at} if js.claimed_at is not None else {})}  # omit-when-None（ADR 0034 job timeout）
+         **({"claimed_at": js.claimed_at} if js.claimed_at is not None else {}),  # omit-when-None（ADR 0034 job timeout）
+         **({"message": js.message} if js.message is not None else {})}  # job 级说明，omit-when-None（ADR 0030 决定五）
         for js in state.jobs.values()
     ]
     return d
@@ -536,7 +537,8 @@ def run_state_from_dict(d: dict) -> RunState:
         claim_count=d.get("claim_count", 0),  # 缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）
         jobs={
             j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]),
-                                    session_id=j.get("session_id"), claimed_at=j.get("claimed_at"))
+                                    session_id=j.get("session_id"), claimed_at=j.get("claimed_at"),
+                                    message=j.get("message"))
             for j in d.get("jobs", [])
         },
     )

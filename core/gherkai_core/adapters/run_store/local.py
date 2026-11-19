@@ -13,8 +13,8 @@
   投影，不双写漂移）。要权威判定读 jobs/*.json；要快速总览/轮询读 run_state.json。
 
 **写入口全部在同一把 fcntl 文件锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：create_run、update_job_state、
-try_claim_job、project_state、try_finalize 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方（前台执行者、后台推进进程、
-`status --wait` 接力）不靠调用方串行。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
+try_claim_job、project_state、try_finalize、commit_job_states、end_run 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方
+（前台执行者、后台推进进程、`status --wait` 接力）不靠调用方串行。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
 
 **顶层附加键整体保留**（ADR 0030 决定四「local 的顶层附加键整体保留」）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
 如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
@@ -34,6 +34,7 @@ from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
 from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
+from gherkai_core.run_status import CommitOutcome, RunEnding, commit_applied, ending_applied
 from gherkai_core.serialize import (
     RUN_STATE_KEYS,
     definition_schema_version,
@@ -288,8 +289,7 @@ class LocalRunStore:
             if js is None or js.status != Status.PENDING:
                 return None  # 不存在 / 已非 pending（已被别人认领或已运行）→ 不改
             jobs = dict(state.jobs)
-            jobs[scope_id] = JobState(scope_id=scope_id, status=Status.RUNNING, session_id=js.session_id,
-                                      claimed_at=claimed_at)
+            jobs[scope_id] = replace(js, status=Status.RUNNING, claimed_at=claimed_at)  # 会话与 job 级说明原样保留
             # 其余字段原样保留（含 run 级 message），与 DDB 只 SET jobs.#sid、顶层 status 与认领计数对拍
             return replace(state, status=Status.RUNNING, jobs=jobs, claim_count=state.claim_count + 1)
         return self._locked_rmw(run_id, mutate) is True
@@ -328,9 +328,10 @@ class LocalRunStore:
                     jobs[sid] = cur_js  # 库中更推进（已终态/已 claim）→ 保留，不回退
                 else:
                     # 血缘/claim 时刻不丢：投影缺的字段回填库中值（claimed_at 只由 try_claim_job 落、
-                    # 事件推演不出——正常经 project 的 baseline 带回，此处兜没带 baseline 的投影）
-                    jobs[sid] = JobState(
-                        scope_id=sid, status=js.status,
+                    # 事件推演不出——正常经 project 的 baseline 带回，此处兜没带 baseline 的投影）。job 级说明只由结束写写下，
+                    # 投影不带它，库中值原样保留
+                    jobs[sid] = replace(
+                        cur_js, status=js.status,
                         session_id=js.session_id or cur_js.session_id,
                         claimed_at=js.claimed_at or cur_js.claimed_at)
             # run 级 status 按投影里的 job 态定（全 pending → 保留库中值，否则 running）；传入的 run 级值在有 job
@@ -354,3 +355,26 @@ class LocalRunStore:
             return replace(state, status=status, ended_at=ended_at,
                            message=state.message if message is None else message)
         return self._locked_rmw(run_id, mutate) is True
+
+    # ---- run 的状态只由 job 的终态算出（ADR 0031 决定三）：两个写入口的作用由 run_status 给出，这里只负责锁与落盘 ----
+
+    def commit_job_states(self, run_id: str, job_states: Sequence[JobState], *, ended_at: str) -> CommitOutcome:
+        """带结果的 job 终态写（语义见 RunStore port）：持文件锁读运行态，按 `run_status.commit_applied` 算出这次写的作用与结果，
+        写成时原子写回，run 已结束时不写。判断用的是锁内读到的整份运行态（ADR 0034 机制三②），同一把锁挡住别的写入口插在读与写之间。
+        运行态不存在抛 FileNotFoundError；参数不合要求时 commit_applied 抛 ValueError，文件不被改动。"""
+        job_states = tuple(job_states)
+        outcome: list[CommitOutcome] = []
+
+        def mutate(state: RunState) -> RunState | None:
+            new_state, result = commit_applied(state, job_states, ended_at=ended_at)
+            outcome.append(result)
+            return new_state
+        if self._locked_rmw(run_id, mutate) is None:
+            raise FileNotFoundError(f"commit_job_states：run_state 不存在（须先 create_run）：{run_id}")
+        return outcome[0]
+
+    def end_run(self, run_id: str, ending: RunEnding, *, ended_at: str) -> bool:
+        """结束写（语义见 RunStore port）：持文件锁读运行态，按 `run_status.ending_applied` 算出要写下的运行态，成立时原子写回。
+        run 已结束、条件不成立（不结束执行中 job 的来路，即 `ending.ends_running_jobs` 为 False，遇到 running 的 job）、运行态不存在，
+        都返回 False、不写。"""
+        return self._locked_rmw(run_id, lambda state: ending_applied(state, ending, ended_at=ended_at)) is True
