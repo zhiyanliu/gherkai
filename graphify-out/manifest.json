@@ -306,9 +306,9 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1795071271.310361,
-    "seen": 1795072840.688401,
-    "ast_hash": "b0269ce0e7870a7d11eeafe5f9edf0a1",
+    "mtime": 1795074872.9840555,
+    "seen": 1795077150.863778,
+    "ast_hash": "c4fc4e7663b37f6e3c4fe88c5b1ca6e5",
     "semantic_hash": ""
   },
   "README.md": {
@@ -384,9 +384,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0011-agentcore-browser-system-default-vs-custom.md": {
-    "mtime": 1795071437.5672224,
-    "seen": 1795072840.6884139,
-    "ast_hash": "de68e26f0edd83fe4209b11bf855cba9",
+    "mtime": 1795074029.5813227,
+    "seen": 1795077150.8637922,
+    "ast_hash": "0941a19679ff64eb6e8a8be429092dc7",
     "semantic_hash": ""
   },
   "docs/adr/0012-planning-shares-qwen3vl-no-text-planner.md": {
@@ -414,9 +414,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1795071210.6871455,
-    "seen": 1795072840.688416,
-    "ast_hash": "1756e9da909f0917d11448f410848ea9",
+    "mtime": 1795074092.6774275,
+    "seen": 1795077150.8637938,
+    "ast_hash": "81607ae47cec2d09efa6b8f4685dfa26",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -468,9 +468,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1795071035.8876085,
-    "seen": 1795072840.688423,
-    "ast_hash": "b6b5e7bb1e8bf46cf504203bfb37385f",
+    "mtime": 1795075643.2165513,
+    "seen": 1795077150.863801,
+    "ast_hash": "602617a7561287e864500ff83130f662",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
@@ -486,9 +486,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1795071233.7207155,
-    "seen": 1795072840.688425,
-    "ast_hash": "3cba3c76973cc2c2c569c13306a0e4a4",
+    "mtime": 1795075112.4225862,
+    "seen": 1795077150.863803,
+    "ast_hash": "1f65bdb0000f25105cf56d508bffa078",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -504,9 +504,9 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1795072570.601693,
-    "seen": 1795072840.688425,
-    "ast_hash": "d1632b7f77db80510058f853fb91b888",
+    "mtime": 1795074898.7031925,
+    "seen": 1795077150.863803,
+    "ast_hash": "c98fee8334a827bf587fa63257601bb9",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -522,9 +522,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1795071847.425817,
-    "seen": 1795072840.688426,
-    "ast_hash": "4e78083e7b25feeb3739cecbf1316fcf",
+    "mtime": 1795074872.645618,
+    "seen": 1795077150.8638039,
+    "ast_hash": "42c36170745e274f60d3d4c3bf325e34",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -1398,9 +1398,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1795071977.6660542,
-    "seen": 1795072840.688429,
-    "ast_hash": "a1078603a433155e75a15dfc0c2b6d60",
+    "mtime": 1795074113.931315,
+    "seen": 1795077150.863807,
+    "ast_hash": "05f77338afc476804a34e433e7f205bb",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -2256,9 +2256,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1795071977.3005276,
-    "seen": 1795072840.688433,
-    "ast_hash": "2bc29884f5ba16a7543a0fd51193b2a9",
+    "mtime": 1795075112.423212,
+    "seen": 1795077150.863811,
+    "ast_hash": "8f1ab34798cb0b82fcc8eb6a3d57f292",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -2268,15 +2268,15 @@
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1795071438.2754595,
-    "seen": 1795072840.688434,
-    "ast_hash": "a865e7f01d7237164945cde4b6ae0856",
+    "mtime": 1795074100.533364,
+    "seen": 1795077150.8638122,
+    "ast_hash": "b3fa2eccd2f3daf96156bfe17c4e962e",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
-    "mtime": 1794994178.4111238,
-    "seen": 1794994201.978645,
-    "ast_hash": "a98548c26d773cee51b9428a858330ff",
+    "mtime": 1795077144.7188518,
+    "seen": 1795077150.8638248,
+    "ast_hash": "136a4b100bf3c884faf16831d055280d",
     "semantic_hash": ""
   },
   "features/steps/url_matches.mts": {
@@ -3017,34 +3017,16 @@
     "ast_hash": "541d267e9476fa6df7c923270cdc18e2",
     "semantic_hash": ""
   },
-  "docs/journey/0014-settle-runs-step4-design-pending.md": {
-    "mtime": 1794994178.411755,
-    "seen": 1794994201.978645,
-    "ast_hash": "0e60cbea989aa5d088571796cc670ceb",
-    "semantic_hash": ""
-  },
-  "docs/journey/0016-run-ownership-and-status-projection-alignment.md": {
-    "mtime": 1794994043.5896325,
-    "seen": 1794994067.416787,
-    "ast_hash": "04cbd7e7a402d05361bccb4befe499ec",
-    "semantic_hash": ""
-  },
-  "docs/journey/0017-run-ownership-design-draft.md": {
-    "mtime": 1795070573.2861547,
-    "seen": 1795072840.688447,
-    "ast_hash": "1cc3fd22bbfab4fbc45d26e2b5a85908",
-    "semantic_hash": ""
-  },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795070793.689488,
-    "seen": 1795072840.688448,
-    "ast_hash": "74e4b1dda8f0d5f63258f43c17229ea5",
+    "mtime": 1795077085.189955,
+    "seen": 1795077150.8638248,
+    "ast_hash": "bee2c753fb8523438c377b89c73fcace",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {
-    "mtime": 1795071661.1795444,
-    "seen": 1795072840.688434,
-    "ast_hash": "e08ddcf0979c4aacd8745d4996ce9e39",
+    "mtime": 1795075112.4228468,
+    "seen": 1795077150.8638122,
+    "ast_hash": "337ad37ebc0cfad0c1bbea7fa9749c86",
     "semantic_hash": ""
   },
   "docs/journey/0019-comment-pointers-removed-pending-implementation.md": {
