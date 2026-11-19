@@ -6,9 +6,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_backend_cloud.py": {
-    "mtime": 1795092612.439705,
-    "seen": 1795093708.3784032,
-    "ast_hash": "3e10af5946121951d0c71176f0af6a26",
+    "mtime": 1795094261.7942731,
+    "seen": 1795094362.1873941,
+    "ast_hash": "ab652a993efb1ff7773548565c4b8686",
     "semantic_hash": ""
   },
   "cli/tests/test_main.py": {
@@ -540,9 +540,9 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1795092579.3945382,
-    "seen": 1795093708.3783941,
-    "ast_hash": "2b12c96f356c67b27564bd8dd212011d",
+    "mtime": 1795094261.794042,
+    "seen": 1795094362.187386,
+    "ast_hash": "ca65e8d9214f442dd3ef8abf4909edbd",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {

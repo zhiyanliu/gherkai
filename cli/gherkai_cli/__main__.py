@@ -3067,13 +3067,32 @@ def _interrupt_prompt(level: int, *, grace: float) -> str:
 def _run_cloud_backend_message(args) -> str:
     """`run` 给出云端后端时的一句（ADR 0016 决策 A「云端后端只支持 submit」；配置文件给出时与命令行相同，ADR 0053 决策 3）：
     说明 run 只在本机执行、云端后端经 submit 提交；后端由配置文件给出时另说怎样在本机执行（选项优先于配置文件）。
-    两处调用：`_cmd_run` 入口，以及 `main` 在命令行同给了 run 不认识的参数时（那时还没有合成配置文件，来源恒为命令行）。"""
+    调用处：`_cmd_run` 入口（配置文件给出云端后端时走到这里），以及 `main` 在完整解析之前与之后各一处（命令行给出云端后端时，
+    那时还没有合成配置文件，来源恒为命令行）。"""
     origin = _option_origin(args, "backend")
     msg = (f"gherkai run 只在本机执行，不支持云端后端（{origin} 给出的是 cloud）：要在云端后端执行，"
            "请用 gherkai submit --backend cloud 提交，再用 gherkai status <run_id> --backend cloud --wait 等待结果")
     if "backend" in getattr(args, "config_filled", set()):
         msg += "；要在本机执行，给 --backend local（命令行选项优先于配置文件）"
     return msg + "。"
+
+
+def _run_names_cloud_backend(argv: list[str]) -> bool:
+    """命令行是否是 `run` 且 `--backend` 给出 cloud（`--backend cloud` 与 `--backend=cloud` 两种写法，重复给出时取最后一次）。
+    在完整解析之前窥一眼：云端后端下 run 一律先说明改用 submit（ADR 0016 决策 A「云端后端只支持 submit」），不让缺 feature、
+    submit 才有的参数这类别的参数错误先报出来。只认完整的选项名，别的写法交回完整解析。"""
+    if not argv or argv[0] != "run":
+        return False
+    backend = None
+    rest = argv[1:]
+    for i, a in enumerate(rest):
+        if a == "--":
+            break
+        if a == "--backend" and i + 1 < len(rest):
+            backend = rest[i + 1]
+        elif a.startswith("--backend="):
+            backend = a.split("=", 1)[1]
+    return backend == "cloud"
 
 
 class _InterruptState:
@@ -3180,6 +3199,11 @@ def main(argv: list[str] | None = None) -> int:
     # 降级的帮助自己在 epilog 里交代原因（provider_err 只在子命令是 deploy/destroy 时才非 None）。
     if provider_err is not None and not any(a in ("-h", "--help") for a in argv):
         _progress(provider_err)
+        return 2
+    # run 在命令行上给出 cloud：先于完整解析说明 run 只在本机执行、云端后端经 submit 提交，这样缺 feature 或带着 submit 才有的
+    # 参数时也是这一句（--help 例外，帮助恒可用）。
+    if _run_names_cloud_backend(argv) and not any(a in ("-h", "--help") for a in argv):
+        _progress(_run_cloud_backend_message(argparse.Namespace()))
         return 2
     args, unknown = parser.parse_known_args(argv)
     if unknown:

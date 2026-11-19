@@ -217,6 +217,45 @@ def test_run_with_cloud_backend_and_submit_only_flags_still_points_to_submit(tmp
     assert record == [] and preflight_calls == [] and made["variant"] == []
 
 
+@pytest.mark.parametrize("argv", [
+    ["run", "--backend", "cloud"],
+    ["run", "--backend", "cloud", "--json"],
+    ["run", "--backend=cloud", "--json"],
+    ["run", "--backend", "cloud", "--prefix=stage-", "--json"],
+    ["run", "--backend", "local", "--backend", "cloud"],
+], ids=["no-feature", "no-feature-json", "equals-form", "submit-only-flag-equals-form", "last-backend-wins"])
+def test_run_with_cloud_backend_points_to_submit_even_when_other_arguments_are_wrong(monkeypatch, capsys, argv):
+    """云端后端下 run 一律先给那句指向 submit 的说明：没有给 feature、选项写成等号形式、带着 submit 才有的参数时都一样，
+    不被「缺少 features」「不认识的参数」这类解析报错盖过；退出码 2，标准输出为空，不做任何检查。"""
+    record: list = []
+    _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    _forbid_run_steps(monkeypatch)
+    rc = m.main(argv)
+    assert rc == 2
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "gherkai run 只在本机执行" in cap.err and "gherkai submit --backend cloud" in cap.err
+    assert "required" not in cap.err and "unrecognized arguments" not in cap.err
+    assert record == [] and preflight_calls == [] and made["variant"] == []
+
+
+def test_run_help_is_available_with_cloud_backend_on_the_command_line(capsys):
+    """对偶：同给 --help 时照常打印帮助、退出码 0，不被那句拒绝拦下。"""
+    with pytest.raises(SystemExit) as ei:
+        m.main(["run", "--backend", "cloud", "--help"])
+    assert ei.value.code == 0
+    assert "usage:" in capsys.readouterr().out
+
+
+def test_run_without_a_feature_on_the_local_backend_is_reported_by_argument_parsing(capsys):
+    """对偶：本机后端下没有给 feature，仍由命令行解析报出缺少参数、退出码 2，不改说成「改用 submit」。"""
+    with pytest.raises(SystemExit) as ei:
+        m.main(["run", "--backend", "local"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "features" in err and "gherkai submit --backend cloud" not in err
+
+
 def test_run_without_cloud_backend_reports_submit_only_flags_as_unrecognized(tmp_path, capsys):
     """对偶：没有给出云端后端时，run 不认识的参数照常由命令行解析报出、退出码 2，不改说成「改用 submit」。"""
     with pytest.raises(SystemExit) as ei:
