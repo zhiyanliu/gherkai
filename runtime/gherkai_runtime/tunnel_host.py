@@ -25,7 +25,7 @@ from gherkai_runtime import tunnel as _tunnel
 # 致命），带任意值的该头即绕过；付费户带着无害（服务端忽略）→ 不做付费检测、隧道模式下恒注入。
 TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 
-# —— cloud submit 隧道守护 TTL 的记账常量（ADR 0035 决策 3 的「TTL 兜底自杀」与「余量兜什么」）——
+# —— cloud submit 隧道守护 TTL 的记账常量 ——
 # TTL 只是**防 ngrok 进程泄漏的上界**，宁长不宜短：短于 run 实际预算时守护会在 run 尚未结束时拆隧道，
 # 剩余 job 在被测应用不可达下继续运行、以「AI 报导航失败」的假失败告终（兜底机制反成失败源）。
 # job.timeout_s 从 claim 起算、已含 RunTask 与拉镜像/挂 ENI（ADR 0034「job timeout」节），预算之外的耗时分下面两部分。

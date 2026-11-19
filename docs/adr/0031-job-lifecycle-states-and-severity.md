@@ -74,7 +74,7 @@ class Status(str, Enum):
   这条「只前进」是**生命周期推进**意义上的，与决定二的 severity 数值序是**两套不同的序**，不可混用。
 - `_STATUS_COLOR` / index.html 给 pending/running 上「进行中」色（两者**共用同一个蓝**、报告里无需区分——pending 当前到不了 report，只为未来 RunState 视图兜底），别走兜底灰。
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
-  凡「等到终态 / 是否已终态」的消费方（CLI `status --wait` 轮询、`status` 退出码判定、`explain` 的「判定明细尚未落地」判断、隧道守护的拆除判据、云端推进器 Lambda 的「已收尾 run 不再推演」跳过判据（`lambdas/reconciler.py`）、worker 清理 pass 的「未终态 run 仍引用」检查、`status` 文本输出只在终态打印产物位置、`explain` 的「run 仍在运行，以下为已完成部分」提示、保存明细之前的非终态即抛（见上「不变量的强制点」）——真值集即 `grep -rn TERMINAL_STATUSES`）一律引它，
+  凡「等到终态 / 是否已终态」的消费方（CLI `status --wait` 轮询、`status` 退出码判定、`explain` 的「判定明细尚未落地」判断、隧道守护进程的退出判据、云端推进器 Lambda 的「已收尾 run 不再推演」跳过判据（`lambdas/reconciler.py`）、worker 清理 pass 的「未终态 run 仍引用」检查、`status` 文本输出只在终态打印产物位置、`explain` 的「run 仍在运行，以下为已完成部分」提示、保存明细之前的非终态即抛（见上「不变量的强制点」）——真值集即 `grep -rn TERMINAL_STATUSES`）一律引它，
   **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
   隧道守护只能等满 TTL 才拆，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
   才需动（届时决定三的取法同批核对）。`TERMINAL_STATUSES` 恒等于 `_STATUS_SEVERITY` 的键集（决定二：severity 只给终态定义）。
@@ -156,7 +156,7 @@ skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker
 - **`status`**（不带 `--wait`）：未结束或 `passed` 为 0、其余终态为 1。
 - **`submit`**：退出码表示提交成功与否、不表示判定：已提交（run_id 已返回）为 0；判定由 `status --wait` 给出。
 - **`settle-runs`**：执行完成为 0（含一个都没处理），跳过（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）不改变退出码；用法错误、后端不可达、给出的 run 不存在、报告目录不过边界检查（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四）、写入失败为 2。
-- **退出码 2**：开始执行之前的问题与查不到 run。另有三类，各在定义处写全：边界检查不过（`run`、`submit`、等待中的 `status --wait`、`settle-runs`，`settle-runs` 指报告目录，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四）；锁已被持有、锁不可用（只对建 run 的一方，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三）；`run` 给出云端后端（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。
+- **退出码 2**：开始执行之前的问题与查不到 run。另有四类，各在定义处写全：边界检查不过（`run`、`submit`、等待中的 `status --wait`、`settle-runs`，`settle-runs` 指报告目录，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四）；锁已被持有、锁不可用（只对建 run 的一方，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三；建 run 的一方是本机 `submit` 启动的后台推进进程时，它不建 run，经回报由 `submit` 以退出码 2 结束）；本机后台推进进程在回报之前退出（由 `submit` 给出，这时 run 可能已经建成，[0035](./0035-local-app-testing-via-tunnel.md) 决策 3）；`run` 给出云端后端（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。
 - 非 `passed` 的终态都以 1 结束：fail-fast 下 run 必为 `error`（aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，CI 红）；记 `aborted` 的 run 没有执行完（决定三）。两者都不是可以放行的结论。
 
 ## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔

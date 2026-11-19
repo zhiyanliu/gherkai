@@ -231,7 +231,7 @@ def run_reconcile_loop(
             # run 级墙钟是**派生指标**（缺则报告里显「?」），取它要多读一次 RunState——落盘读会因 IO 错/文件写坏抛，
             # 而这一步发生在 finalize 的 commit point **之后**：commit 后的失败无人重试，抛出去会让
             # 本进程带着未写的报告退出、还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回
-            # 后才执行，ADR 0035「拆除时机」表 local `submit` 行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
+            # 后才执行）。故整段隔离、失败按缺值走（ADR 0034 收尾节把
             # run 级墙钟划在「派生、失败隔离」那一侧；cloud 推进侧做法相同）。
             try:
                 duration_ms = compose.run_duration_ms(run_store.load_run_state(run_id))

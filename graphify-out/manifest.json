@@ -306,9 +306,9 @@
     "semantic_hash": ""
   },
   "CONTEXT.md": {
-    "mtime": 1795023684.168788,
-    "seen": 1795027433.6863942,
-    "ast_hash": "d27ae1632b554873f2707f04bb0f9095",
+    "mtime": 1795071271.310361,
+    "seen": 1795072840.688401,
+    "ast_hash": "b0269ce0e7870a7d11eeafe5f9edf0a1",
     "semantic_hash": ""
   },
   "README.md": {
@@ -384,9 +384,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0011-agentcore-browser-system-default-vs-custom.md": {
-    "mtime": 1793783561.5463657,
-    "seen": 1794647585.0747142,
-    "ast_hash": "ba5d291431c4aaf256b66631fbebef49",
+    "mtime": 1795071437.5672224,
+    "seen": 1795072840.6884139,
+    "ast_hash": "de68e26f0edd83fe4209b11bf855cba9",
     "semantic_hash": ""
   },
   "docs/adr/0012-planning-shares-qwen3vl-no-text-planner.md": {
@@ -414,9 +414,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0016-execution-architecture-core-lib-run-model.md": {
-    "mtime": 1795023507.204535,
-    "seen": 1795027433.686409,
-    "ast_hash": "6b1f2917a53e7e1c08bb219a738cbd6b",
+    "mtime": 1795071210.6871455,
+    "seen": 1795072840.688416,
+    "ast_hash": "1756e9da909f0917d11448f410848ea9",
     "semantic_hash": ""
   },
   "docs/adr/0021-local-cucumber-patch-step-keyword-disambiguation.md": {
@@ -468,9 +468,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0031-job-lifecycle-states-and-severity.md": {
-    "mtime": 1795023520.1102343,
-    "seen": 1795027433.686416,
-    "ast_hash": "8f22fce1f18287eb905479e3dc64bdaa",
+    "mtime": 1795071035.8876085,
+    "seen": 1795072840.688423,
+    "ast_hash": "b6b5e7bb1e8bf46cf504203bfb37385f",
     "semantic_hash": ""
   },
   "docs/adr/0032-fargate-execution-environment.md": {
@@ -486,9 +486,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0034-detached-batch-reconciler.md": {
-    "mtime": 1795054504.9293945,
-    "seen": 1795054948.467652,
-    "ast_hash": "b76df926541441171626d75719a19886",
+    "mtime": 1795071233.7207155,
+    "seen": 1795072840.688425,
+    "ast_hash": "3cba3c76973cc2c2c569c13306a0e4a4",
     "semantic_hash": ""
   },
   "engines/midscene/README.md": {
@@ -504,9 +504,9 @@
     "semantic_hash": "2d10a8c1c6e7f072eb3e330554f1fe5a"
   },
   "docs/adr/0035-local-app-testing-via-tunnel.md": {
-    "mtime": 1795019191.2203124,
-    "seen": 1795021148.0631838,
-    "ast_hash": "6eb3537035068b622c3c2564a94b5f1d",
+    "mtime": 1795072570.601693,
+    "seen": 1795072840.688425,
+    "ast_hash": "d1632b7f77db80510058f853fb91b888",
     "semantic_hash": ""
   },
   "cli/tests/test_tunnel_cli.py": {
@@ -522,9 +522,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0037-distribution-and-packaging.md": {
-    "mtime": 1795020590.7214584,
-    "seen": 1795021148.063185,
-    "ast_hash": "cfb5c6d5194060fd5fed243e455e7d26",
+    "mtime": 1795071847.425817,
+    "seen": 1795072840.688426,
+    "ast_hash": "4e78083e7b25feeb3739cecbf1316fcf",
     "semantic_hash": ""
   },
   "docs/adr/0038-worker-image-delivery.md": {
@@ -750,9 +750,9 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/detached.py": {
-    "mtime": 1795026021.5087142,
-    "seen": 1795027433.686368,
-    "ast_hash": "0b8277b7f6a3fbec779e0c2c0827e1eb",
+    "mtime": 1795072570.6014845,
+    "seen": 1795072840.688375,
+    "ast_hash": "813839af81a35a922c219b003474cb34",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/names.py": {
@@ -768,9 +768,9 @@
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/tunnel_host.py": {
-    "mtime": 1794675364.1162698,
-    "seen": 1794678549.208621,
-    "ast_hash": "f3dfbd1ba16c06c6f9733b4f77fac026",
+    "mtime": 1795072570.6011553,
+    "seen": 1795072840.6883771,
+    "ast_hash": "ebb72705266b661a119fe33be15e6802",
     "semantic_hash": ""
   },
   "runtime/pyproject.toml": {
@@ -1398,9 +1398,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0043-agent-skill-for-driving-gherkai.md": {
-    "mtime": 1795018849.0949144,
-    "seen": 1795021148.063188,
-    "ast_hash": "cec1ffa5269e7918692cdffe5da9b90f",
+    "mtime": 1795071977.6660542,
+    "seen": 1795072840.688429,
+    "ast_hash": "a1078603a433155e75a15dfc0c2b6d60",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/skill_install.py": {
@@ -2256,9 +2256,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0051-device-session-lifecycle-and-app-distribution.md": {
-    "mtime": 1795008320.6571748,
-    "seen": 1795016242.446395,
-    "ast_hash": "61589bedc7259a11d325e719bfc3c83b",
+    "mtime": 1795071977.3005276,
+    "seen": 1795072840.688433,
+    "ast_hash": "2bc29884f5ba16a7543a0fd51193b2a9",
     "semantic_hash": ""
   },
   "docs/adr/0052-appium-interface-adapter-and-platform-differences.md": {
@@ -2268,9 +2268,9 @@
     "semantic_hash": ""
   },
   "docs/adr/0053-project-config-file.md": {
-    "mtime": 1795026811.6174116,
-    "seen": 1795027433.6864278,
-    "ast_hash": "386d44da1f20d01f1b6dcf1f7d3cd80e",
+    "mtime": 1795071438.2754595,
+    "seen": 1795072840.688434,
+    "ast_hash": "a865e7f01d7237164945cde4b6ae0856",
     "semantic_hash": ""
   },
   "docs/journey/0013-mobile-devices-implementation.md": {
@@ -3030,27 +3030,27 @@
     "semantic_hash": ""
   },
   "docs/journey/0017-run-ownership-design-draft.md": {
-    "mtime": 1795054848.4394393,
-    "seen": 1795054948.467673,
-    "ast_hash": "7c687d766706ee9fc4ed6476c1fd1065",
+    "mtime": 1795070573.2861547,
+    "seen": 1795072840.688447,
+    "ast_hash": "1cc3fd22bbfab4fbc45d26e2b5a85908",
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795054941.8416498,
-    "seen": 1795054948.467674,
-    "ast_hash": "7bbd6a545bcaa0f61665bb44c9f0fedb",
+    "mtime": 1795070793.689488,
+    "seen": 1795072840.688448,
+    "ast_hash": "74e4b1dda8f0d5f63258f43c17229ea5",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {
-    "mtime": 1795054504.928813,
-    "seen": 1795054948.467662,
-    "ast_hash": "63a3674f5e9f46696180e88fc1b84c0c",
+    "mtime": 1795071661.1795444,
+    "seen": 1795072840.688434,
+    "ast_hash": "e08ddcf0979c4aacd8745d4996ce9e39",
     "semantic_hash": ""
   },
   "docs/journey/0019-comment-pointers-removed-pending-implementation.md": {
-    "mtime": 1795053727.7798152,
-    "seen": 1795054948.467674,
-    "ast_hash": "365aac88626c24248bbfa3d88f43ca79",
+    "mtime": 1795072570.6021578,
+    "seen": 1795072840.688448,
+    "ast_hash": "45f59221400c7f0c8f282d7c95be0b9c",
     "semantic_hash": ""
   },
   "engines/midscene/package-lock.json": {
