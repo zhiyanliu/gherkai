@@ -1,6 +1,6 @@
 # 0050. 确定性 step 多句柄注册与测试分层
 
-> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。
+> **Status:** Accepted（2026-10-15）——部分取代 [0036](./0036-deterministic-capability-discovery.md) 决策 1 的注册面签名（handler 位置从单个函数改为按句柄种类分键，单函数写法保持有效），扩展 [0022](./0022-bdd-runner-retired-core-parses-thin-worker.md) 的注册表；匹配语义、元数据必填、角色边界不变。决策 1、2、4 随 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 的修订同日改写。决策 1、2 于 2026-10-26 随导航规则修订（[0020](./0020-step-phrasing-default-ai-deterministic-scaffold.md) 第 2、3 条，[0048](./0048-test-targets-device-and-ui-kind.md) 决策 7）就地改写。
 
 ## 背景与问题
 

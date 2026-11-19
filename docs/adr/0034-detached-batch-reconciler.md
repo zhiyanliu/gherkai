@@ -1,6 +1,6 @@
 # 无状态批量运行：CLI 提交 → 事件驱动推进 → 轮询收集（CQRS + reconciler）
 
-> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写三处：机制二 `exit==0` 一行（先看 `scope_done.status` 与 scenario 判定集，终结判定收进两条归约路径共用的终结函数与真值表）、「job timeout」节的 worker 消费条与 `--default-job-timeout` 的 flag 承诺（worker 建会话前读墙钟预算作自检；设备 scope 有目标缺省与下限）、停止后的事件消费（停止后仍有界归约完整事件流）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已标 Partially-superseded-by 本 ADR）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0051 —— [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写三处：机制二 `exit==0` 一行（先看 `scope_done.status` 与 scenario 判定集，终结判定收进两条归约路径共用的终结函数与真值表）、「job timeout」节的 worker 消费条与 `--default-job-timeout` 的 flag 承诺（worker 建会话前读墙钟预算作自检；设备 scope 有目标缺省与下限）、停止后的事件消费（停止后仍有界归约完整事件流）。纠正 [0016](./0016-execution-architecture-core-lib-run-model.md)「无状态化=加 adapter+换注入、核心不动」对本能力的过强断言（见下「对 0016 的纠正」；0016/0024/0026/0031 已标 Partially-superseded-by 本 ADR，0030 标其「重议」条已由本 ADR 落地）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 同步 `run` 是**「CLI 阻塞跑一批」**：组合根同进程 `schedule()` 持 `ThreadPoolExecutor`、以 `wait(FIRST_COMPLETED)` 逐个收集完成的 job、全批完成才返回。本 ADR 落地的产品项（曾是产品线唯一未做项、非加固）= **「CLI 提交完就走、异步收集」**（[0016](./0016-execution-architecture-core-lib-run-model.md) v1.2 已完成 + [0017](./0017-cloud-execution-fargate-over-runtime.md) batch shape）——新增 `submit`/`status` 命令、同步 `run` 保留不变。本 ADR 定这套无状态批量运行的架构、数据模型、并发/写序不变量与被拒方案护栏。
 

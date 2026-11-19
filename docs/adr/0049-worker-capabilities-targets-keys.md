@@ -1,6 +1,6 @@
 # 0049. worker 能力自述增键：`targets`、step 级 `targets` 与 `max_session_s`
 
-> **Status:** Accepted（2026-10-15）——决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 随 0051 的修订增加 step 级 `requires` 与会话预热支持键。
+> **Status:** Accepted（2026-10-15）——在 [0036](./0036-deterministic-capability-discovery.md) 决策 5 的能力自述对象上增键；决策 4、5、7 的收尾与传递条文由 [0051](./0051-device-session-lifecycle-and-app-distribution.md) 改写；决策 1、2 随 0051 的修订增加 step 级 `requires` 与会话预热支持键。
 
 ## 背景与问题
 

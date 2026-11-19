@@ -1,6 +1,6 @@
 # 0038. worker 镜像交付：基础镜像、variant 与推送注册
 
-> **Status:** Accepted（2026-09-09）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Accepted（2026-09-09）—— runs 表 GSI（现为状态分组索引，[0030](./0030-realtime-persistence-seam.md) 决定六）；曾有的默认指针兼容路径已随 [0037](./0037-distribution-and-packaging.md) 决策 7 撤除。[0033](./0033-iac-aws-backend-and-composition-wiring.md) 的镜像/task-def/ECR/权限表述已加历史注与权限登记。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景与问题
 

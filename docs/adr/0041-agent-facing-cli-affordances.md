@@ -1,6 +1,6 @@
 # 0041. 面向 AI agent 驾驭的 CLI 能力：scenario 筛选、静默落盘、JSON 覆盖补齐、doctor 自检、JSON 契约
 
-> **Status:** Partially-superseded-by 0043 —— [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
+> **Status:** Partially-superseded-by 0043 —— [0043](./0043-agent-skill-for-driving-gherkai.md)（2026-09-14；范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转为「确定性转换副本随 CLI 发行」，决策一-四与决策五其余部分不变）。原 Accepted（2026-09-10）。本 ADR「重议闸门」失败证据机读化一条已由 [0042](./0042-step-evidence-and-explain.md)（step 级 evidence + `explain`）落地，五项决策不变。决策七已改用与 worker revision 清理共用的状态分组索引 `status_group-run_id-index`（[0030](./0030-realtime-persistence-seam.md) 决定六）。这一篇描述的设计有一部分尚未实装，code 跟上之前，实际行为以 code 为准。
 
 ## 背景与问题
 

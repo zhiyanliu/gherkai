@@ -146,7 +146,7 @@ Claude 的 plugin marketplace 只覆盖 Claude、仪式更多，现阶段不做�
 
 **文档（反向链逐处列出，Accepted 前逐条核）**
 
-- [0041](./0041-agent-facing-cli-affordances.md)：决策五「skill 只链接它，不复制字段表」改为「唯一手写源仍在 docs、不进发行包；skill 带一份确定性转换的副本随 CLI 发行（为什么不能 link、转换与护栏见 0043 决策四）」；「影响」节那条前向指代改为指向 0043 决策五、删掉工作循环的复述；Status 头两处：「agent skill（另立）」改指 0043；状态改为 `Partially-superseded-by 0043`，限定范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转，决策一-四与决策五其余部分不变。
+- [0041](./0041-agent-facing-cli-affordances.md)：决策五「skill 只链接它，不复制字段表」改为「唯一手写源仍在 docs、不进发行包；skill 带一份确定性转换的副本随 CLI 发行（为什么不能 link、转换与护栏见 0043 决策四）」；「影响」节那条前向指代改为指向 0043 决策五、删掉工作循环的复述；Status 头：状态改为 `Partially-superseded-by 0043`，限定范围 = 决策五「skill 只链接它，不复制字段表」这一子句被反转，决策一-四与决策五其余部分不变。
 - [0037](./0037-distribution-and-packaging.md)（扩展、Status 不动）：「决策总览」CLI 行注「含随 wheel 带的 `skills/gherkai` 包数据（0043）」、末行不分发枚举加根 `skills/`（评测资产）；「工程布局」树的 `cli/` 行注 `gherkai_cli/skills/gherkai/`，树下的不分发枚举注根 `skills/gherkai-evals/`。
 - [0039](./0039-user-facing-surfaces-no-internal-references.md)（扩展、Status 不动）：面二表新增一行（`cli/gherkai_cli/skills/gherkai/**`；去向 = 随 CLI wheel 发行、由 `skill install` 拷进使用方项目 / agent 目录；链接只用绝对 URL），并把表前「四层只差去向与链接形态」改为不数数的说法（表已含 Release 正文一行，钉数字必再漂）；「护栏」节补 `cli/tests/test_skill.py` 这只 markdown 扫描器。
 - [0016](./0016-execution-architecture-core-lib-run-model.md)（扩展、Status 不动）：v1.4.0 完成线里「claude/ai skills 暴露」一项改为工具中立措辞并补权威指针到本 ADR。
