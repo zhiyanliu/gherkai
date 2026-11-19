@@ -418,10 +418,17 @@
 
 写回这一步对注释里的 ADR 指针只保证机械可核的一项：指针里的条名，写回之前的 ADR 里有、现在没有的为 0。指针所括的说法与所指小节的现文是否一致，owner 定为随实装核对（现在落的是设计，code 跟上时把注释改成一致）。在那之前，下面清单里的文件可能仍有注释把现在 code 的行为归给已经改成目标设计的小节；另一家模型三轮各指出 3、3、4 处，都已改，上面的列表含其中去掉指针的各处。
 
-责任范围固定为写回时带有指向这次改过的 22 篇 ADR 的指针的 151 个文件（0016、0024、0026、0027、0028、0030、0031、0032、0033、0034、0035、0037、0038、0040、0041、0042、0043、0044、0045、0051、0053、0054）：
+责任范围是 `core/`、`cli/`、`runtime/`、`deploy_aws/`、`tools/`、`engines/` 与 `CONTRIBUTING.md` 里，写回时或现在带有指向这次改过的 22 篇 ADR 的指针的全部文件，共 277 个（0016、0024、0026、0027、0028、0030、0031、0032、0033、0034、0035、0037、0038、0040、0041、0042、0043、0044、0045、0051、0053、0054；指针按「ADR 加篇号」、指向 `docs/adr/` 的链接与接在它们后面的篇号列举来认）。分两组列出：
+
+- 写回时做过一次全量核对的 151 个（按「另一家模型核落到位」里的规则逐个注释块读过，上面的列表是那次去掉的指针）。
+- 没有核过的 126 个：`engines/` 下的 worker 与它们的测试，以及其余目录里不是 `.py`、`.md` 的文件（配置、镜像定义、脚本）。那次核对的分批没有收它们。
+
+两组适用同一套做法：
 
 - 每个实装批核它改到的文件：其中指向这 22 篇的指针逐个对所指小节的现文，核过的文件从清单里删去。
-- 全部实装批之后对清单做一次差集：剩下的文件（实装不需要改的 code 文件、各包技术文档）另作一批核完。清单清空后本节删除。
+- 全部实装批之后对清单做一次差集：剩下的文件（实装不需要改的）另作一批核完。清单清空后本节删除。
+
+### 写回时核过一遍的（151）
 
 （仓库根）（1）：
 
@@ -594,3 +601,149 @@ tools（9）：
 - `tools/events_wallclock.py`
 - `tools/render_skill_contract.py`
 - `tools/workers_real_aws/README.md`
+
+### 没有核过的（126）
+
+cli（2）：
+
+- `cli/.gitignore`
+- `cli/pyproject.toml`
+
+core（1）：
+
+- `core/pyproject.toml`
+
+deploy_aws（1）：
+
+- `deploy_aws/pyproject.toml`
+
+engines（118）：
+
+- `engines/fixtures/browser-session-timeout.json`
+- `engines/fixtures/job-lines.json`
+- `engines/fixtures/one-line-text-cases.json`
+- `engines/fixtures/redaction-cases.json`
+- `engines/fixtures/tunnel-warmup.json`
+- `engines/midscene/Dockerfile`
+- `engines/midscene/spikes/01-model-sigv4.ts`
+- `engines/midscene/spikes/02-agentcore-cdp.ts`
+- `engines/midscene/spikes/03-midscene-grounding.ts`
+- `engines/midscene/spikes/04-planning-probe.ts`
+- `engines/midscene/spikes/05-negative-assertions.ts`
+- `engines/midscene/src/bin.mts`
+- `engines/midscene/src/device/adapters/adapters.contract.test.mts`
+- `engines/midscene/src/device/adapters/uiautomator2.mts`
+- `engines/midscene/src/device/adapters/xcuitest.mts`
+- `engines/midscene/src/device/app.mts`
+- `engines/midscene/src/device/app.test.mts`
+- `engines/midscene/src/device/appium.mts`
+- `engines/midscene/src/device/appium.test.mts`
+- `engines/midscene/src/device/device-session.mts`
+- `engines/midscene/src/device/finalize.mts`
+- `engines/midscene/src/device/finalize.test.mts`
+- `engines/midscene/src/device/guard.mts`
+- `engines/midscene/src/device/guard.test.mts`
+- `engines/midscene/src/device/interface.mts`
+- `engines/midscene/src/device/limits.mts`
+- `engines/midscene/src/device/limits.test.mts`
+- `engines/midscene/src/device/parts.mts`
+- `engines/midscene/src/device/read-points.test.mts`
+- `engines/midscene/src/device/session-name.mts`
+- `engines/midscene/src/device/session-name.test.mts`
+- `engines/midscene/src/device/session.mts`
+- `engines/midscene/src/device/session.test.mts`
+- `engines/midscene/src/device/surface.mts`
+- `engines/midscene/src/device/surface.test.mts`
+- `engines/midscene/src/device/warmup.mts`
+- `engines/midscene/src/device/warmup.test.mts`
+- `engines/midscene/src/device/wdio-log.mts`
+- `engines/midscene/src/device/wdio-log.test.mts`
+- `engines/midscene/src/index.mts`
+- `engines/midscene/src/lib/agentcore-sigv4.mts`
+- `engines/midscene/src/lib/artifact-upload.mts`
+- `engines/midscene/src/lib/error-text.mts`
+- `engines/midscene/src/lib/event-sink.mts`
+- `engines/midscene/src/lib/job-source.mts`
+- `engines/midscene/src/lib/parent-watchdog.mts`
+- `engines/midscene/src/lib/precheck.mts`
+- `engines/midscene/src/lib/redact.mts`
+- `engines/midscene/src/lib/tunnel-warmup.mts`
+- `engines/midscene/src/resolve-hook.mts`
+- `engines/midscene/src/worker/agentcore-sigv4.test.mts`
+- `engines/midscene/src/worker/argument.mts`
+- `engines/midscene/src/worker/argument.test.mts`
+- `engines/midscene/src/worker/artifact-upload.test.mts`
+- `engines/midscene/src/worker/browser-session-timeout.test.mts`
+- `engines/midscene/src/worker/deterministic.mts`
+- `engines/midscene/src/worker/deterministic.steps.mts`
+- `engines/midscene/src/worker/error-text.test.mts`
+- `engines/midscene/src/worker/event-sink.test.mts`
+- `engines/midscene/src/worker/evidence.mts`
+- `engines/midscene/src/worker/evidence.test.mts`
+- `engines/midscene/src/worker/job-source.test.mts`
+- `engines/midscene/src/worker/job-timeout-cap.test.mts`
+- `engines/midscene/src/worker/no-artifacts.test.mts`
+- `engines/midscene/src/worker/no-device-deps.test.mts`
+- `engines/midscene/src/worker/parent-watchdog.test.mts`
+- `engines/midscene/src/worker/precheck.test.mts`
+- `engines/midscene/src/worker/redact.test.mts`
+- `engines/midscene/src/worker/run-scope.mts`
+- `engines/midscene/src/worker/run-scope.test.mts`
+- `engines/midscene/src/worker/stderr-outlets.test.mts`
+- `engines/midscene/src/worker/surface-desktop.mts`
+- `engines/midscene/src/worker/surface.mts`
+- `engines/midscene/src/worker/surface.test.mts`
+- `engines/midscene/src/worker/tunnel-warmup.test.mts`
+- `engines/midscene/src/worker/user-steps.mts`
+- `engines/midscene/src/worker/user-steps.test.mts`
+- `engines/midscene/tsconfig.json`
+- `engines/novaact/Dockerfile`
+- `engines/novaact/gherkai_worker_novaact/__init__.py`
+- `engines/novaact/gherkai_worker_novaact/__main__.py`
+- `engines/novaact/gherkai_worker_novaact/deterministic.py`
+- `engines/novaact/gherkai_worker_novaact/deterministic_steps.py`
+- `engines/novaact/gherkai_worker_novaact/evidence.py`
+- `engines/novaact/gherkai_worker_novaact/lib/__init__.py`
+- `engines/novaact/gherkai_worker_novaact/lib/artifact_upload.py`
+- `engines/novaact/gherkai_worker_novaact/lib/constants.py`
+- `engines/novaact/gherkai_worker_novaact/lib/event_sink.py`
+- `engines/novaact/gherkai_worker_novaact/lib/job_source.py`
+- `engines/novaact/gherkai_worker_novaact/lib/precheck.py`
+- `engines/novaact/gherkai_worker_novaact/lib/redact.py`
+- `engines/novaact/gherkai_worker_novaact/lib/tunnel_warmup.py`
+- `engines/novaact/gherkai_worker_novaact/lib/workflow_setup.py`
+- `engines/novaact/gherkai_worker_novaact/run_scope.py`
+- `engines/novaact/gherkai_worker_novaact/user_steps.py`
+- `engines/novaact/pyproject.toml`
+- `engines/novaact/spikes/wikipedia_benchmark.py`
+- `engines/novaact/tests/fixtures/interrupt_worker.py`
+- `engines/novaact/tests/test_argument.py`
+- `engines/novaact/tests/test_artifact_upload.py`
+- `engines/novaact/tests/test_capabilities.py`
+- `engines/novaact/tests/test_deterministic.py`
+- `engines/novaact/tests/test_event_sink.py`
+- `engines/novaact/tests/test_evidence.py`
+- `engines/novaact/tests/test_interrupt_model.py`
+- `engines/novaact/tests/test_interrupt_process.py`
+- `engines/novaact/tests/test_job_source.py`
+- `engines/novaact/tests/test_no_artifacts.py`
+- `engines/novaact/tests/test_one_line.py`
+- `engines/novaact/tests/test_precheck.py`
+- `engines/novaact/tests/test_redact.py`
+- `engines/novaact/tests/test_run_step.py`
+- `engines/novaact/tests/test_session_events.py`
+- `engines/novaact/tests/test_stderr_redaction.py`
+- `engines/novaact/tests/test_transient_network.py`
+- `engines/novaact/tests/test_tunnel_warmup.py`
+- `engines/novaact/tests/test_user_steps.py`
+- `engines/novaact/tests/test_workflow_setup.py`
+
+runtime（1）：
+
+- `runtime/pyproject.toml`
+
+tools（3）：
+
+- `tools/device_reprobe.mts`
+- `tools/git-hooks/pre-commit`
+- `tools/presentations/production.md`
