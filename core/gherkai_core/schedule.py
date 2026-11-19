@@ -771,8 +771,8 @@ def schedule(
             # 先看完成、后读中断，会把全部 job 完成之后才到的中断当作要处置的。
             level = opts.interrupt() if (opts.interrupt is not None and pending) else 0
             if any(not f.done() for f in pending):
-                # 停手信号（ADR 0054 决策五）先于使用方中断读：中止来源以最先登记的为准，上一次轮询之后成立的停手信号在这里登记，中断
-                # 按轮询到它的这一刻登记（ADR 0054 决策二）。认领被拒、重试之前读到终态在 worker 线程里已当场登记，写 job 状态时的发现
+                # 停手信号（ADR 0054 决策五）先于使用方中断处置：中止来源以最先登记的为准，上一次轮询之后成立的停手信号在这里先登记，
+                # 上面取到的中断级别随后才登记（ADR 0054 决策二）。认领被拒、重试之前读到终态在 worker 线程里已当场登记，写 job 状态时的发现
                 # 在落库回调返回之后已登记，这里是兜底并负责停下运行中的 worker：对它们按首次仲裁落定并发停止请求，排队中的 job 不再启动
                 if not ended_handled and ended.seen():
                     ended_handled = True

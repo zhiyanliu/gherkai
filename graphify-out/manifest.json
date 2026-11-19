@@ -708,9 +708,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/schedule.py": {
-    "mtime": 1795118112.401021,
-    "seen": 1795118785.326431,
-    "ast_hash": "f5cec13c6292e9cf51b693e5b08fba0a",
+    "mtime": 1795119468.0945709,
+    "seen": 1795119493.2193038,
+    "ast_hash": "1913fe5ea81cad3a9fc49c8206c5cec3",
     "semantic_hash": ""
   },
   "core/gherkai_core/scope.py": {
@@ -3018,15 +3018,15 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795118779.07018,
-    "seen": 1795118785.326633,
-    "ast_hash": "f8c22ddf500552a9109368b231cd7497",
+    "mtime": 1795119468.0954607,
+    "seen": 1795119493.2194922,
+    "ast_hash": "12f89e2d35c4833ecf1d24ae5cb0d59b",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {
-    "mtime": 1795107777.758369,
-    "seen": 1795116934.500767,
-    "ast_hash": "d8aa1a995829d8e9a40197abf06d738a",
+    "mtime": 1795119468.0951345,
+    "seen": 1795119493.2194822,
+    "ast_hash": "7d30d017f53ab829efadb794408160a3",
     "semantic_hash": ""
   },
   "docs/journey/0019-comment-pointers-removed-pending-implementation.md": {
