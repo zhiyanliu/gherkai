@@ -31,7 +31,7 @@ TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 # job.timeout_s 从 claim 起算、已含 RunTask 与拉镜像/挂 ENI（ADR 0034「job timeout」节），预算之外的耗时分下面两部分。
 #
 # 一次性余量（每个 run 一份，与 job 数无关）：submit 只写 runs 表，之后还有 Stream INSERT 投递 → kicker Lambda
-# 冷启动才轮到首次 claim，末尾还有 finalize。取 900s。
+# 冷启动才轮到首次 claim，末尾还有最后一个 job 的终态写与生成报告。取 900s。
 CLOUD_STARTUP_MARGIN_S = 900.0
 # 每 job 余量（每个 job 一份，随 job 数线性累加）：job 用尽预算后被停止时，预算点之后还有三段耗时，并发为 1 时逐个
 # job 串行累加，与 job 数成正比，不随 job 数变化的常数余量覆盖不了。

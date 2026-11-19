@@ -1624,7 +1624,7 @@ def _cmd_submit(args) -> int:
 
     - **local**：setsid fork per-run 进程执行 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
     - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
-      （runs Stream INSERT→kicker 起首批→events Stream→reconciler→…→finalize），**提交完真关机也能运行到结束**。
+      （runs Stream INSERT→kicker 起首批→events Stream→reconciler 逐个写下 job 的终态，直到 run 结束），**提交完真关机也能运行到结束**。
       CLI 不留本机进程；submit 机器没有任何 ECS 写或执行权限（只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition / ListTaskDefinitions，
       完整权限面见 `_submit_cloud` 里 create_run 前的注释）。
     退出码表示提交成功与否（非 run 判定；判定由 status 查）。
@@ -1941,7 +1941,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
     无棒可交、不调）。本函数各道闸的退出码 2 都在 fork 之前，`_cmd_submit` 侧「未交棒即拆」自然涵盖它们。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
-    events Stream → reconciler 接管（补起后续 / finalize）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
+    events Stream → reconciler 接管（补起后续、写下各 job 的终态）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
     「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
     """
     # events 表/cluster 名不收 flag、一律按 prefix 推（判据见 _build_parser 里 submit 的 flag 面注释）：
@@ -2148,7 +2148,9 @@ def _cmd_status_body(args, interrupted: dict) -> int:
             try:
                 detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
                                                region=region, profile=profile)
-            except DefinitionContractError as e:  # 结构版本不合已由上面的版本闸拦下；形态违约在这里（同 _cmd_reconcile）
+            except DefinitionContractError as e:
+                # 结构版本不合已由上面的版本闸拦下；形态违约在这里。接力不是这个 run 的推进器：读不懂可能只是本机的版本不同，原来的
+                # 后台推进进程可能仍在正常推进，所以只打印同一句、以退出码 2 结束，不写运行态（后台推进进程的处理见 `_cmd_reconcile`）
                 _progress(_definition_contract_message(e))
                 return 2
         else:
@@ -2557,21 +2559,24 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
         if jr is None:
             js = state.jobs.get(args.scope_id)
             if state.status in TERMINAL_STATUSES and js is not None and js.status in TERMINAL_STATUSES:
-                # run 已结束、这个 job 已结束而没有判定明细：只会是由结束写结束的 job（没有启动，或 run 被结束时没有结果）——前台每个
-                # job 先存明细、再写终态，后台的明细在使 run 成为终态的那一轮之前存下。它的状态与说明只在运行态里（ADR 0031 决定三
-                # 「结束写」小节），按运行态给出，不报「未找到 scope」。run 未结束时不走这里：后台推进的投影可能已把 job 写成终态，
-                # 明细要到收尾的那一轮才存下，仍按「尚未落地」提示
+                # run 已结束、这个 job 已结束而没有判定明细：只会是由结束写结束的 job（没有启动，或 run 被结束时没有结果）——前台与
+                # 后台都是每个 job 得出结果时先存明细、再写终态。它的状态与说明只在运行态里（ADR 0031 决定三「结束写」小节），按运行态
+                # 给出，不报「未找到 scope」
                 return _explain_without_detail(args, state, js)
+            if js is not None and js.status not in TERMINAL_STATUSES:
+                # 这个 job 在运行态里还没有结束，它的判定明细要到它得出结果、写下终态之前才存下：按「尚未落地」提示、退出码 0，不论
+                # 别的 job 是否已有明细（ADR 0042 决策四「未终态的 run」段）
+                return _explain_empty(args, state, hint=not_landed)
+            # 走到这里的只有运行态里没有这个 job 的情形（run 未结束时已结束的 job 都已有明细）：建 run 时运行态即列出全部 job，
+            # 只会是 scope 写错
             available = [r.scope_id for r in result_store.load_all(run_id)]
-            if not available and state.status not in TERMINAL_STATUSES:
-                return _explain_empty(args, state, hint=not_landed)  # 不是 scope 写错，是还没落地
             _progress(f"未找到 scope：{args.scope_id}（本 run 已落地的 scope：{'、'.join(available) or '无'}）")
             return 2
         results = [jr]
     else:
         results = result_store.load_all(run_id)
     if not results:
-        # detached run（submit）的判定明细由收尾的那一轮保存；终态而零文件
+        # 判定明细在每个 job 得出结果时存下，run 未结束而零文件即还没有 job 得出结果；终态而零文件
         # 也是正常结果（例子见 ADR 0034 机制三的「不经推进步骤的收尾」），同样只是「没得渲染」
         return _explain_empty(args, state, hint=(not_landed if state.status not in TERMINAL_STATUSES
                                                 else "本 run 没有任何 job 的判定明细"))
@@ -2613,8 +2618,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
         print(json.dumps(doc, ensure_ascii=False, indent=2))
         return 0
     if state.status not in TERMINAL_STATUSES:
-        # run 未结束也能读到已完成的 job：同步 run 逐 job 落盘；后台 run 一次收尾尝试落下判定明细之后 run 仍未结束时（条件写没写成，
-        # 或在条件写之前失败、中断）也读得到——说清「这只是已完成部分」，免得读者以为剩下的没执行
+        # run 未结束也能读到已完成的 job：前台与后台都在每个 job 得出结果时存下它的判定明细——说清「这只是已完成部分」，免得读者
+        # 以为剩下的没执行
         _progress("run 仍在运行，以下为已完成部分")
     print(render.render_explain_text(doc, expand_passed=expand_passed, full=args.full))
     return 0
@@ -2730,30 +2735,51 @@ def _explain_cloud(args) -> int:
 
 
 def _definition_contract_message(e: DefinitionContractError) -> str:
-    """本机读端（`status` / `explain` 读头、`status --wait` 与 per-run 进程接力）读到同版本下形态违约的提交记录时的一句：
-    CLI 有退出码可交给使用方，故不像云端推进器那样把 run 标 error、写 run 级消息，直接以退出码 2 结束并说明。"""
+    """本机读到同版本下形态违约的提交记录时打印的一句（ADR 0037 决策 7「definition 结构版本」段）。读到它的有 `status` / `explain`
+    读头、`status --wait` 接力与后台推进进程：读端与接力有退出码可交给使用方，打印这句、以退出码 2 结束，不写运行态；后台推进进程是
+    这个 run 的推进器，先以结束写的 error 变体结束 run（与云端推进器同一写法，见 ADR 0031 决定三「结束写」小节），再打印这句、以退出码
+    2 结束。"""
     return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
 
 
 def _cmd_reconcile(args) -> int:
     """per-run 进程入口（submit setsid fork 它，非使用方直接调）：执行 reconcile loop 到 run 收尾自退（ADR 0034）。
 
+    读不到可用的运行定义时（结构版本不合、同版本下形态违约），本进程作为这个 run 的推进器，以结束写的 error 变体结束它：每个未结束的
+    job 记 error，原因写进 run 级说明；随后拆隧道（与正常结束同一步），打印说明、以退出码 2 结束。`status --wait` 接力读不到运行定义时
+    不写（见 `_cmd_status_body`）。
+
     **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
     `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉
     （ADR 0037 决策 4）。
     """
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, schema_mismatch_reason
     from gherkai_runtime import detached
 
     if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
         return 2
     report_root = Path(args.report_dir).resolve()
+
+    def end_for_unusable_definition(reason: str) -> None:
+        # 结束写失败（锁或文件不可用）时照样拆隧道：本进程随后带着异常退出，不再推进这个 run
+        try:
+            ended = detached.end_run_for_unusable_definition(str(report_root), args.run_id, reason)
+        finally:
+            detached.cleanup_tunnel(str(report_root), args.run_id)
+        if ended:  # 下面那句诊断是读端共用的，它不说这个 run 已被结束：这里补上（写进 reconcile.log）
+            _progress(f"run {args.run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。")
+
     try:
         detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
                                        region=args.region, profile=args.profile)
-    except UnsupportedDefinitionSchema as e:  # 整读 definition 时结构版本不符：同一句、退出码 2
+    except UnsupportedDefinitionSchema as e:
+        # 整读 definition 时结构版本不符：以结束写的 error 变体结束 run，打同一句、退出码 2（ADR 0037 决策 7「definition 结构版本」段，
+        # ADR 0034 机制三「不经推进步骤的收尾」条）
+        end_for_unusable_definition(schema_mismatch_reason(e.found, e.supported, e.cli_version))
         _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
         return 2
-    except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json）：同一句、退出码 2
+    except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json）：同上
+        end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
         _progress(_definition_contract_message(e))
         return 2
     return 0

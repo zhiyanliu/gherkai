@@ -272,11 +272,12 @@ def test_status_json_keys_are_documented():
     assert doc["claim_count"] == 1  # 诊断用的认领计数随运行态输出
     doc["artifacts"] = compose.cloud_artifact_locations(bucket="b", report_prefix="reports", table="t", run_id="r")
     _assert_documented(doc, section="status")
-    # 云端推进链不经任何 job 就把 run 置为 error 时的形态：run 级 `message`，job 仍是未认领的 pending
-    st_error = M.RunState(run_id="r", status=M.Status.ERROR, jobs={"a": M.JobState("a", M.Status.PENDING)},
+    # 推进器读不到可用的运行定义、以结束写的 error 变体结束 run 时的形态：run 级 `message`，未结束的 job 记 error、带同一句 job 级
+    # 说明 `jobs[].message`
+    st_error = M.RunState(run_id="r", status=M.Status.ERROR, jobs={"a": M.JobState("a", M.Status.ERROR, message="m")},
                           started_at="t0", ended_at="t1", high_water_mark=0, message="m")
     doc_error = run_state_to_dict(st_error)
-    assert "message" in doc_error
+    assert "message" in doc_error and doc_error["jobs"][0]["message"] == "m"
     _assert_documented(doc_error, section="status")
     # 结束写结束的 run：没有启动的 job 带 job 级说明 `jobs[].message`（只由结束写写下）
     doc_ended = run_state_to_dict(_sample_run_result().state)

@@ -1,7 +1,7 @@
 """双路径对拍（ADR 0034 机制二「双路径对拍是实施护栏」）：同一组事件矩阵分别输入同步 schedule（FakeEngine）与无状态
 project_full（EventRecord 加 TaskExited，认领时刻取同步路径认领时的假墙钟），逐项比较判定、归因、消息、明细、sessions[] 与计量键，
 以及两条路径交给终结函数的见过 scope_started / session_opened 两个布尔。超时行另在运行期限截断时对拍一遍（预算到点记 error 加
-timeout、期限到点记 aborted，两种判定都由共用的终结函数给出）；起 worker 失败与到期收尾两种情形另以无状态路径的推进步骤 tick 对拍，
+timeout、期限到点记 aborted，两种判定都由共用的终结函数给出）；起 worker 失败与到期的结束写两种情形另以无状态路径的推进步骤 tick 对拍，
 run 级的状态与说明对拍没有记录时在内存里算出的运行态与后台写下的记录（ADR 0054 决策二后台推进条）；worker 在截止时刻
 前后自己退出的几种情形，无状态路径的退出记录只带退出时刻、不带超时标志（同一条的「截止时刻与说明」）。含 abort 的行只经同步路径。矩阵以设备 job 为主，另有几行桌面 job：桌面 worker 也成对
 发会话事件，配对与释放判定与设备同一条，计量两键与释放提示按目标给（ADR 0051 决策 4、7）。
@@ -503,7 +503,7 @@ def test_paths_agree_when_the_run_deadline_cuts_the_job(row: Row):
 
 
 # worker 在截止时刻前后自己退出（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 11）：同步路径在终结之前对内容不完整的 job
-# 再查一次截止时刻；无状态路径的退出记录与本机启动器、云端观察者写的同一形态——不带超时标志、只带退出时刻，由收尾投影按它是否晚于
+# 再查一次截止时刻；无状态路径的退出记录与本机启动器、云端观察者写的同一形态——不带超时标志、只带退出时刻，由投影按它是否晚于
 # 截止时刻判断。预算 5 秒；同步路径的假墙钟在最后一条事件之后越过截止时刻（after_cutoff）或一直停在它之前。同步路径不包心跳：最后
 # 一条事件之后紧接着就是 worker 的退出，中间没有事件间检查，也就不会先发出停止请求。
 
@@ -578,8 +578,8 @@ def _boom_sync(deadline_at: str, timeout_s: float, *, slow: bool):
 
 
 def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool):
-    """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮收尾；slow 时启动调用拖过截止时刻才失败。返回收尾那一轮的判定
-    明细、补写的退出记录与收尾之后的运行态。"""
+    """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮以终态写记下这个 job，run 随之成为终态；slow 时启动调用拖过截止时刻
+    才失败。返回那一轮交还的判定明细、补写的退出记录与 run 成为终态之后的运行态。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import JobState, RunState
@@ -616,7 +616,7 @@ def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool)
 ], ids=["起不来", "拖过预算才失败", "拖过预算才失败且期限更晚", "拖过期限才失败"])
 def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, status, message):
     """起 worker 失败的 job（ADR 0054 决策二后台推进条「时刻」）：推进步骤补写的退出记录与前台交给终结函数的输入相同——退出码未知、带
-    启动失败的原因。补写只记失败的那一刻作退出时刻、不带超时标志，收尾投影按它是否晚于截止时刻判断，与前台起 worker 失败的分支是
+    启动失败的原因。补写只记失败的那一刻作退出时刻、不带超时标志，投影按它是否晚于截止时刻判断，与前台起 worker 失败的分支是
     同一个判断——两条路径的判定、归因与说明逐项相同；拖过期限才失败的记 aborted。run 级两边都按取法由这个 job 的终态算出：前台没有
     记录时在内存里算出，后台是记下终态的写写下的记录，都没有 run 级说明。"""
     sync = _boom_sync(deadline_at, timeout_s, slow=slow)
@@ -631,7 +631,7 @@ def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path,
 
 
 def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
-    """到期收尾：a 结束之后已过停止启动的时刻，b 还没有启动。前台没有记录时组装出的结果（`persist.result_without_record`）与后台推进
+    """到期：a 结束之后已过停止启动的时刻，b 还没有启动。前台没有记录时组装出的结果（`persist.result_without_record`）与后台推进
     步骤写下的记录一致：a passed、b 由执行方自己到期这条来路的结束写记 skipped 并带说明，run 为 aborted、带 run 级说明；判定明细只有
     a 的，b 没有（ADR 0054 决策二第 3 条、实测项 4）。"""
     from gherkai_core.adapters.event_log import SqliteEventLog

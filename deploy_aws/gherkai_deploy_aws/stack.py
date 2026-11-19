@@ -184,7 +184,7 @@ class BackendStack(Stack):
         # runs 表（控制面/RunStore）：PK=run_id(S) / SK=item_type(S，值 META/STATE）。
         # **开 Stream（NEW_IMAGE）**：submit 的 create_run 写 definition（INSERT）→ 触发 kicker Lambda
         # 冷启动（起首批 task）。kicker 只被 INSERT 触发（filter 在 event source mapping），故 reconciler 之后写
-        # runs 表（MODIFY：project_state/finalize）不触发 kicker——无自触发放大。
+        # runs 表（MODIFY：投影、认领、终态写与结束写）不触发 kicker——无自触发放大。
         self._runs_table = dynamodb.Table(
             self, "RunsTable",
             table_name=names.default_name(self.prefix, names.BASE_RUNS_TABLE),
@@ -575,7 +575,8 @@ class BackendStack(Stack):
         """事件驱动推进链：
 
         - **退出观察者 Lambda**：EventBridge ECS Task STOPPED 事件（本 cluster）触发 → 写 task_exited（ADR 0034 机制二）。
-        - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进 + finalize 聚合。
+        - **reconciler Lambda**：events 表 Stream 触发 → reconcile.tick 推进：写下这一轮已有结果的 job 的终态，认领并起下一个
+          job 或做到期的结束写，使 run 成为终态的那一次生成报告（ADR 0034 机制三「④ tick 的完成语义」、机制四）。
         - **kicker Lambda**：runs 表 Stream 的 INSERT 触发（submit 写 definition，冷启动起首批）+ cli status --wait
           直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
           timeout_scope，先做超时处置再 tick，见下『job timeout 到点触发器』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
@@ -668,7 +669,7 @@ class BackendStack(Stack):
             f"arn:aws:ecs:{self.region}:{self.account}:task-definition/{names.task_def_name(self.prefix, e)}:*"
             for e in names.ENGINES
         ]
-        # ② reconciler Lambda（重；读全量重放 + 起 task + finalize 聚合）与 ③ kicker（踢启器）Lambda 是**同一套装配**
+        # ② reconciler Lambda（重；读全量重放、起 task、写终态与生成报告）与 ③ kicker（踢启器）Lambda 是**同一套装配**
         #    （env + 表/桶 grant + 起 task/停 task/超时 schedule 全套策略），只差入口 handler 与触发源——分工：kicker「让 run
         #    动起来」（runs 表 Stream INSERT 冷启动 + status --wait kickoff）/ reconciler「推着走」（events 表 Stream）。
         #    两侧 env 与权限面**必须同**（kicker 起首批、reconciler 续起，权限/并发不一致就会「首批能起、续起失败」），
@@ -716,7 +717,7 @@ class BackendStack(Stack):
             scheduler_role=scheduler_role,
         )
         # runs 表 Stream → kicker，**INSERT 且 NewImage.detached=true**（filter）：
-        # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（project_state/finalize）不触发——无自触发放大。
+        # - 仅 INSERT：reconciler 之后写 runs 表的 MODIFY（投影、认领、终态写与结束写）不触发——无自触发放大。
         # - 仅 detached 标记：同步 `run --backend cloud` 的 create_run 同样 INSERT、但由进程内 schedule 推进，
         #   误触发 kicker 会双开推进器（重复起 task）；submit 组合根写 STATE 时带 detached=true，同步 run 不带，
         #   Stream 层直接滤掉（零 Lambda 调用）。detached 是 BOOL 属性（DDB Stream NewImage 形态 {"BOOL": true}）。

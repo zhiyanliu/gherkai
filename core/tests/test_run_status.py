@@ -1,5 +1,6 @@
-"""run 状态的取法与结束写的说明表（ADR 0031 决定三「取法」与「结束写」小节）：纯函数与常量，不经存储。另有没有记录的执行在内存里
-算出的运行态（`state_without_record`，ADR 0031 决定五「数据源」）与执行中的写的参数校验（`check_running_write`）。
+"""run 状态的取法与结束写的说明表（ADR 0031 决定三「取法」与「结束写」小节）：纯函数与常量，不经存储。另有读不到可用的运行定义时的
+几种原因（ADR 0037 决策 7），没有记录的执行在内存里算出的运行态（`state_without_record`，ADR 0031 决定五「数据源」）与执行中的写的参数
+校验（`check_running_write`）。
 
 两个写入口对运行态的作用（`ending_applied`、`commit_applied`）经两个 RunStore adapter 核对，见 test_ending_and_commit_writes.py。
 """
@@ -14,6 +15,7 @@ from gherkai_core.run_status import (
     check_running_write,
     definition_unavailable_ending,
     run_status_of,
+    schema_mismatch_reason,
     state_without_record,
 )
 
@@ -94,6 +96,24 @@ def test_definition_unavailable_ending_carries_only_the_reason():
     ending = definition_unavailable_ending("原因")
     assert (ending.run_message, ending.skipped_message, ending.aborted_message) == ("原因", None, None)
     assert (ending.ends_running_jobs, ending.definition_unavailable) == (True, True)
+
+
+def test_schema_mismatch_reason_names_the_writer_both_versions_and_the_way_out():
+    """结构版本不合的原因按记录比推进器新或旧分两句：都点名写出记录的版本与两边各第几版；记录更新时请部署方升级后端或用后端版本重新
+    提交，记录更旧时请升级提交侧之后重新提交。写端版本没有记下时说「版本未知」。"""
+    newer = schema_mismatch_reason(2, 1, "9.9.0")
+    assert newer.startswith("提交记录由更新版本的 gherkai 9.9.0 写出") and "第 2 版" in newer and "第 1 版" in newer
+    assert "把后端升级" in newer and "重新提交" in newer
+    older = schema_mismatch_reason(0, 1, "1.4.9")
+    assert older.startswith("提交记录由更早版本的 gherkai 1.4.9 写出") and "第 0 版" in older
+    assert "升级到后端的版本后重新提交" in older
+    assert schema_mismatch_reason(2, 1, None).startswith("提交记录由更新版本的 gherkai（版本未知）")
+
+
+def test_schema_mismatch_reason_stays_bounded_whatever_the_recorded_writer_version():
+    """写端版本来自提交记录、不受信：截到 40 个字符再拼进句子，损坏成超长文本也不会把运行态里的说明撑大。"""
+    reason = schema_mismatch_reason(2, 1, "v" * 5000)
+    assert len(reason) < 300 and "v" * 40 in reason and "v" * 41 not in reason
 
 
 @pytest.mark.parametrize("kwargs", [

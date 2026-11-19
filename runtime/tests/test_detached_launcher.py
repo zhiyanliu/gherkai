@@ -23,7 +23,7 @@ from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.persist import result_without_record
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 
 from gherkai_runtime.detached import SubprocessLauncher, run_reconcile_loop
@@ -174,7 +174,7 @@ def test_grace_query_failure_never_spawns_a_worker(tmp_path):
 
 
 def test_crash_worker_finalizes_error(tmp_path):
-    """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → run finalize error（机制二真实运行）。"""
+    """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → 终态写记下 error，run 随之为 error（机制二真实运行）。"""
     meta, log, store, launcher = _setup(tmp_path, "crash", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
                        poll_interval_s=0.05, clock=_now)
@@ -187,7 +187,8 @@ def test_crash_worker_finalizes_error(tmp_path):
 
 def test_report_is_generated_from_the_record_after_the_commit(tmp_path):
     """这一方的写使 run 成为终态之后，推进循环从记录生成报告、只生成一次（ADR 0034 机制三「run 级状态只进不退」条④）：报告里
-    run 与 job 的状态就是记录里的运行态，判定明细是 tick 这一轮交还的那一份，run 级墙钟由运行态的开始与结束时刻算出。"""
+    run 与 job 的状态就是记录里的运行态，两个 job 都带判定明细（使 run 成为终态的那一轮交给终态写的用 tick 交回的那一份，较早轮次
+    写下终态的从判定存储读回；两个 job 在哪一轮得出结果随真实进程的时序而定），run 级墙钟由运行态的开始与结束时刻算出。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.project import run_duration_ms
     from gherkai_runtime import compose
@@ -277,15 +278,16 @@ class _BoundedReads:
         return self._inner.load_run_state(run_id)
 
 
-def test_loop_ends_on_finalized_run_with_pending_jobs_without_report(tmp_path):
-    """已收尾（error）而 job 仍 pending 的 run（definition 不可用时的收尾形态）：本机推进循环在有限轮内退出，
-    不起 worker、不写报告、不改运行态。
+def test_loop_ends_on_a_run_ended_by_the_definition_unavailable_ending_without_report(tmp_path):
+    """已由运行定义不可用的结束写结束的 run（run 与每个 job 都是 error）：本机推进循环读到既有终态，第一轮即退出，不起 worker、不写
+    报告、不改运行态（ADR 0034 机制三④）。
 
-    不判停时，认领被「run 未收尾」条件挡下、plan_next 每轮都提议 start，循环永不结束，随后的拆隧道也一直不执行。
-    这里用读次数上限把「不结束」变成有界失败。"""
+    不判停时，这个 run 没有 pending 也没有 running 的 job，推进决策没有任何动作，每一轮都返回继续推进，循环永不结束，随后的拆隧道也
+    一直不执行。这里用读次数上限把「不结束」变成有界失败。"""
     meta, log, inner, _ = _setup(tmp_path, "pass", "a", "b")
-    assert inner.try_finalize("run-1", Status.ERROR, "2026-07-19T00:00:00Z", message="definition 不可用") is True
+    assert inner.end_run("run-1", definition_unavailable_ending("提交记录不完整"), ended_at="2026-07-19T00:00:00+00:00") is True
     before = inner.load_run_state("run-1")
+    assert before.status == Status.ERROR and {js.status for js in before.jobs.values()} == {Status.ERROR}  # 构造的前提
     spawned: list[str] = []
     launcher = SubprocessLauncher(lambda _name: spawned.append(_name), log, min_grace_fn=lambda _engine: 1.0, clock=_now)
     store, reports = _BoundedReads(inner, limit=20), _RecordingReports()
@@ -348,15 +350,16 @@ def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path):
 
 
 def test_drive_local_reconcile_tears_down_tunnel_for_an_already_terminal_run(tmp_path, monkeypatch):
-    """`status --wait` 接力与 per-run 进程共用的入口：run 已收尾（error、job 仍 pending）时推进结束、照常拆隧道，
-    不写报告。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
+    """`status --wait` 接力与 per-run 进程共用的入口：run 已由运行定义不可用的结束写结束（run 与 job 都是 error）时推进结束、照常
+    拆隧道，不写报告、不改运行态（ADR 0034 机制三④）。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
     import threading
 
     from gherkai_runtime import compose, detached
     from gherkai_runtime import tunnel as gtunnel
 
     _seed_for_build(tmp_path, "run-t", max_concurrency=1)
-    assert LocalRunStore(tmp_path).try_finalize("run-t", Status.ERROR, "t1", message="definition 不可用") is True
+    assert LocalRunStore(tmp_path).end_run("run-t", definition_unavailable_ending("提交记录不完整"), ended_at="t1") is True
+    before = LocalRunStore(tmp_path).load_run_state("run-t")
     (tmp_path / "run-t" / "tunnel.json").write_text('{"pid": 4343}', encoding="utf-8")
     monkeypatch.setenv("AWS_REGION", "us-test-9")
     env = {**os.environ, "WORKER_MODE": "pass"}
@@ -374,7 +377,8 @@ def test_drive_local_reconcile_tears_down_tunnel_for_an_already_terminal_run(tmp
     assert not worker.is_alive(), "推进循环没有结束"
     assert stopped == [4343] and not (tmp_path / "run-t" / "tunnel.json").exists()
     assert not (tmp_path / "run-t" / "index.html").exists() and not (tmp_path / "run-t" / "manifest.json").exists()
-    assert LocalRunStore(tmp_path).load_run_state("run-t").jobs["a"].status == Status.PENDING
+    assert LocalRunStore(tmp_path).load_run_state("run-t") == before
+    assert before.jobs["a"].status == Status.ERROR
 
 
 def test_build_local_reconcile_resolves_region_like_foreground(tmp_path, monkeypatch):
@@ -812,7 +816,7 @@ def _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path) -> thre
 
 def test_worker_exiting_on_its_own_after_its_cutoff_gets_the_foreground_verdict(tmp_path, monkeypatch):
     """worker 在截止时刻之后、启动器下一次到点决定之前自己异常退出（真进程，实测项 11 的本机一侧）：启动器只记事实，退出记录不带超时
-    标志、带它看到 worker 退出的那一刻；收尾投影按退出时刻晚于截止时刻判为超时，判定、错误类型与说明和前台同一情形相同（前台在终结
+    标志、带它看到 worker 退出的那一刻；投影按退出时刻晚于截止时刻判为超时，判定、错误类型与说明和前台同一情形相同（前台在终结
     之前对内容不完整的 job 再查一次截止时刻）。先后由事件确立：检查线程的第一次到点决定做完（读到的是截止之前的时刻）之后才拨过截止
     时刻、建让 worker 崩溃的文件；此后的到点决定停在进入之前，直到推进结束才放行，所以 worker 退出之前没有第二次决定，退出码保持 worker
     自己的 3，超时只能来自投影对退出时刻的判断。"""
@@ -1039,3 +1043,95 @@ def test_relay_leaves_its_own_jobs_and_jobs_without_a_readable_claim_time(tmp_pa
     launcher.owned_scopes.add("own")
     detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes, now=_one_hour_later())
     assert log.exits == [("lost", "timed-out-if-absent", True)]
+
+
+# ---------- 接力在逐 job 写序下：补写的超时退出成为终态的那一轮、报告读回较早轮次的明细 ----------
+
+
+def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exit_changes_neither(tmp_path):
+    """接力补写的超时退出怎样成为终态：a 由已不在的推进进程认领、早已过了截止时刻加 10 秒，b 也由它认领、还没到截止时刻。第一轮
+    接力方为 a 补写超时的退出记录；下一轮 tick 按这一轮的事件为 a 存下判定明细（预算到点：error 加 timeout），再以终态写记下它，b 仍在
+    执行、run 仍未结束。a 的真实退出（退出码 0、内容完整、退出时刻在截止时刻之前，单看它会判为 passed）与 b 的结果在 a 的终态写落下
+    之后才写进事件库：真实退出覆盖了退出记录，但 a 在运行态里已是终态，之后的轮次不再为它存明细、写终态，记录与存下的明细都不变；b
+    得出结果的那一轮使 run 成为终态，报告里 a 的明细从判定存储读回，b 的用这一轮交回的那一份。全程只有推进循环一个线程，事件在 a 的
+    终态写落下之后、tick 拿到这次写的结果之前写入，先后因此固定。"""
+    import json
+
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.serialize import job_result_from_dict
+
+    meta, log, inner, launcher = _setup(tmp_path, "pass", "a", "b", timeout_s=60.0, clock=_one_hour_later)
+    assert inner.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00+00:00") is True  # 截止 00:01:00，早已过
+    assert inner.try_claim_job("run-1", "b", claimed_at="2026-07-19T00:59:30+00:00") is True  # 截止 01:00:30，还没到
+
+    def finish(scope_id: str, exited_at: datetime) -> None:
+        """原推进进程起的 worker 内容完整地结束、以退出码 0 退出。"""
+        log.append_event(scope_id, 1, f'{{"type":"scope_started","scopeId":"{scope_id}","sessionId":"s-{scope_id}"}}', 1.0)
+        log.append_event(scope_id, 2, f'{{"type":"scenario_done","scenarioId":"{scope_id}:0","status":"passed"}}', 2.0)
+        log.append_event(scope_id, 3, f'{{"type":"scope_done","scopeId":"{scope_id}"}}', 3.0)
+        log.record_exit(scope_id, 0, exited_at=exited_at)
+
+    class _LateResults:
+        """代理真 RunStore：记下每次终态写给出的 job 与结果；第一次终态写落下之后、把结果交回 tick 之前，写下 a 的真实退出与 b 的
+        结果；其余原样转发。"""
+
+        def __init__(self, inner) -> None:
+            self._inner, self.commits = inner, []
+
+        def __getattr__(self, name):
+            return getattr(self._inner, name)
+
+        def commit_job_states(self, run_id, job_states, *, ended_at):
+            outcome = self._inner.commit_job_states(run_id, job_states, ended_at=ended_at)
+            self.commits.append(([js.scope_id for js in job_states], outcome))
+            if len(self.commits) == 1:
+                # a 的退出时刻在它的截止时刻之前：这一条若被重新推演，a 会判为 passed；b 的退出时刻同样在它的截止时刻之前
+                finish("a", datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc))
+                finish("b", _one_hour_later())
+            return outcome
+
+    store, reports = _LateResults(inner), _CapturingReports()
+    run_reconcile_loop("run-1", meta, log, _BoundedReads(store, limit=50), launcher, max_concurrency=2,
+                       poll_interval_s=0.001, clock=_one_hour_later,
+                       result_store=LocalResultStore(tmp_path), report_store=reports)
+
+    assert store.commits == [(["a"], CommitOutcome.OPEN), (["b"], CommitOutcome.ENDED_RUN)]
+    [exit_a] = [r.exited for r in log.records() if r.kind == "exit" and r.scope_id == "a"]
+    assert (exit_a.exit_code, exit_a.timed_out) == (0, False)  # 真实退出确实覆盖了补写的那一条
+    state = inner.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.ERROR, Status.PASSED)
+    saved_a = job_result_from_dict(json.loads((tmp_path / "run-1" / "jobs" / "a.json").read_text(encoding="utf-8")))
+    assert (saved_a.status, saved_a.error_type) == (Status.ERROR, "timeout")
+    [result] = reports.results
+    assert [(d.scope_id, d.status, d.error_type) for d in result.details] == [
+        ("a", Status.ERROR, "timeout"), ("b", Status.PASSED, None)]
+
+
+# ---------- 本机后台推进进程读不到可用的运行定义（与云端推进器同一种结束写）----------
+
+
+def test_end_run_for_unusable_definition_ends_every_unfinished_job_with_the_reason(tmp_path):
+    """读不到可用的运行定义时的结束写（ADR 0031 决定三「结束写」小节「运行定义不可用时」条）：执行中与没有启动的 job 都记 error、
+    说明是给出的原因，认领时刻保留，已结束的 job 不变；run 随之为 error，带同一句 run 级说明与结束时刻。run 已结束、运行态不存在时都
+    没有写成，运行态不变。"""
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON
+    from gherkai_runtime import detached
+
+    _meta, _log, store, _launcher = _setup(tmp_path, "pass", "a", "b", "c")
+    claimed = "2026-07-19T00:00:00+00:00"
+    assert store.try_claim_job("run-1", "a", claimed_at=claimed) is True
+    assert store.try_claim_job("run-1", "c", claimed_at=claimed) is True
+    assert store.commit_job_states("run-1", [JobState("c", Status.PASSED)], ended_at=claimed) == CommitOutcome.OPEN
+
+    reason = DEFINITION_CONTRACT_REASON
+    assert detached.end_run_for_unusable_definition(str(tmp_path), "run-1", reason) is True
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ERROR, reason)
+    assert {sid: (js.status, js.message) for sid, js in state.jobs.items()} == {
+        "a": (Status.ERROR, reason), "b": (Status.ERROR, reason), "c": (Status.PASSED, None)}
+    assert state.jobs["a"].claimed_at == claimed
+    instant_from_iso(state.ended_at)  # 记录写法的时刻，解析不了即抛
+
+    assert detached.end_run_for_unusable_definition(str(tmp_path), "run-1", "另一句") is False
+    assert store.load_run_state("run-1") == state
+    assert detached.end_run_for_unusable_definition(str(tmp_path), "no-such-run", reason) is False

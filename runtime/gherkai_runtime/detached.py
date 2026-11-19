@@ -5,8 +5,9 @@
   在独立线程里读它的 fd3 事件流旁路落 SqliteEventLog（赋 worker 段单调 seq）、worker 退出后 `handle.wait()`
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）；另按墙钟检查这个 job 的截止时刻，到点停 worker。
   worker 不改、对 SQLite 无知（0034）。
-- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退；`status --wait` 接力走同一个循环，
-  另把别人认领、观察链已断的 job 判为超时（`_recover_timed_out_claims`）。
+- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退；读不到可用的运行定义时以结束写的
+  error 变体结束 run（`end_run_for_unusable_definition`）。`status --wait` 接力走同一个循环，另把别人认领、观察链已断的 job 判为
+  超时（`_recover_timed_out_claims`）；它读不到运行定义时不写。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
@@ -27,6 +28,7 @@ from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
 from gherkai_core.run_deadline import deadline_of, job_cutoff
+from gherkai_core.run_status import definition_unavailable_ending
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
@@ -38,8 +40,10 @@ _CUTOFF_CHECK_INTERVAL_S = 0.25
 # 接力判超时的固定余量（秒）：墙钟严格晚于截止时刻加这么多、
 # 仍没有退出记录时，接力方补写一条判为超时的未知退出。余量只挡认领方与接力方各自的检查间隔与时钟抖动，比各引擎的停止宽限期短（各引擎
 # 自报的值都在数十秒以上），不覆盖认领方到点催停之后 worker 的协作收尾：认领方还在、worker 仍在停止宽限期内收尾时，接力方先写下这一条，
-# 认领方随后写下的真实退出记录覆盖它；run 若在补写与真实退出之间收尾，这次收尾按超时提交，run 级的结果与报告就此定下。调大这个值换不来「不抢先」，只推迟认领方真
-# 不在时的收敛。
+# 认领方随后写下的真实退出记录覆盖它；补写之后、真实退出记录写下之前若有一轮 tick（接力方或认领方的）读到这一条，就按超时为这个
+# job 存下判定明细、写下终态，运行态里的这个终态此后不再改变。判定明细按 scope_id 保存：两个推进方重叠、另一方读到的是随后的真实
+# 退出时，它存下的明细会覆盖这一份，与运行态里的终态不一致（由判定明细的点名消除）。调大这个值换不来「不抢先」，只推迟认领方真不在
+# 时的收敛。
 _RECOVERY_MARGIN_S = 10.0
 
 
@@ -215,12 +219,13 @@ def run_reconcile_loop(
       job 都会到终态」（ADR 0034 机制三「run 级状态只进不退」条④）；
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
     退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
-    认领；接力判超时把原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 判为超时，随后由到期的结束写结束
-    这个 run，不启动任何 job。
+    认领；接力判超时为原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 补写超时的退出记录，下一轮 tick
+    先写下这些 job 的终态，没有执行中的 job 之后由到期的结束写结束这个 run，不启动任何 job。
 
-    result_store/report_store（可选）：判定明细（jobs/*.json）由 tick 在写下这一轮各 job 的终态之前存下（注入给 tick；ADR 0030
-    决定三「后台推进同守」条）；RunReport（index/manifest）在这一方的写使 run 成为终态之后，由 `write_report_from_record` 从记录
-    生成（派生、失败隔离）。注入 None（测试）则跳过。
+    result_store/report_store（可选）：判定明细（jobs/*.json）由 tick 在每个 job 得出结果的那一轮、写下它的终态之前存下（注入给
+    tick；ADR 0030 决定三「后台推进同守」条）；RunReport（index/manifest）在这一方的写使 run 成为终态之后，由
+    `write_report_from_record` 从记录生成（派生、失败隔离）：这一次 tick 交给终态写的明细用 tick 交回的那一份，较早轮次写下终态的
+    job 的明细从 result_store 按 scope_id 读回。注入 None（测试）则跳过对应的一步，报告只用 tick 交回的明细。
     """
     while True:
         outcome = tick(run_id, meta, event_log, run_store, launcher, max_concurrency,
@@ -230,9 +235,10 @@ def run_reconcile_loop(
         if outcome.outcome is TickOutcome.COMMITTED:
             # 报告从记录生成，入口是 core 唯一的一份，云端推进器 Lambda 调的是同一个。生成在终态写之后、失败无人重试，抛出去会让本进程
             # 带着未写的报告退出，还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回后才执行）；所以读运行态、
-            # 组装与写报告整段在入口的失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034 机制三「run 级状态只进
-            # 不退」条④）。
-            write_report_from_record(meta, run_store, outcome.details, report_store, created_at=instant_to_iso(clock()))
+            # 读回较早轮次的明细、组装与写报告整段在入口的失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034
+            # 机制三「run 级状态只进不退」条④）。
+            write_report_from_record(meta, run_store, outcome.details, report_store, result_store=result_store,
+                                     created_at=instant_to_iso(clock()))
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher.owned_scopes, now=clock())
         time.sleep(poll_interval_s)
@@ -259,8 +265,9 @@ def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, 
     `record_timed_out_if_absent`，是条件写：只在这个 job 还没有退出记录时写入，认领方恰在接力方点查之后、补写之前落下的真实退出记录
     不被盖掉（点查只是省掉一次写）；补写之后才到的真实退出照旧覆盖补写的那一条（INSERT OR REPLACE 同 key）。
 
-    这个判定条件保证不了不抢先：认领方还在、到点催停之后 worker 仍在停止宽限期内收尾时，接力方照样补写，run 若在补写与真实退出之间
-    收尾，这次收尾按超时提交，run 级的结果与报告就此定下（见 `_RECOVERY_MARGIN_S`）。
+    这个判定条件保证不了不抢先：认领方还在、到点催停之后 worker 仍在停止宽限期内收尾时，接力方照样补写；补写之后、真实退出之前读到它
+    的那一轮 tick 按超时存下这个 job 的判定明细、写下终态，运行态里的终态此后不再改变，明细仍可能被另一个推进方按真实退出存下的那一份
+    覆盖（见 `_RECOVERY_MARGIN_S`）。
 
     自家 job（owned_scopes）不扫：launch 时的截止时刻检查在管、且要给足协作停宽限。认领时刻缺失、读不出或不带时区的 job 不处置
     （除超时外无权臆断他人认领的死活）。这里按观察链已断处理，补写是唯一的收敛路径。
@@ -305,7 +312,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     per-run 进程自包含、不依赖父进程内存（fork 后父可退）：definition 已由 submit 的 create_run 落 RunStore，
     这里 load_run_meta 读回；SqliteEventLog/LocalRunStore 都是文件路径，从 report_dir+run_id 重建即同一份。
     返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
-    （后两个是收尾聚合用的落点，与 RunStore 同 <report_dir>/<run_id>/）。
+    （后两个是判定明细与报告的落点，与 RunStore 同 <report_dir>/<run_id>/）。
     返回的 max_concurrency 优先取 meta（ADR 0034 机制四：随 definition 走），入参只作 meta 缺值时的回落——
     per-run 进程与 `status --wait` 接力者同读 meta，接力者不再拿自己那侧的 flag 值覆盖 submit 时的声明。
     worker cmd 走定位链（ADR 0037 决策 3，不再由仓库结构推导，故本函数不收 repo）；env 覆写对两宿主自然可见
@@ -348,13 +355,24 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace, clock=compose.now)
-    # ResultStore + ReportStore（收尾聚合用，落点与 RunStore 同 <report_dir>/<run_id>/，对齐同步 run 路径）
+    # ResultStore + ReportStore（判定明细与报告，落点与 RunStore 同 <report_dir>/<run_id>/，对齐同步 run 路径）
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.report_store.local import LocalReportStore
     result_store = LocalResultStore(root)
     report_store = LocalReportStore(root)
     effective_mc = meta.max_concurrency if meta.max_concurrency is not None else max_concurrency
     return meta, log, store, launcher, effective_mc, result_store, report_store
+
+
+def end_run_for_unusable_definition(report_dir: str, run_id: str, reason: str) -> bool:
+    """本机后台推进进程读不到可用的运行定义时，以结束写的 error 变体结束这个 run（与云端推进器同一写法，ADR 0037 决策 7，ADR 0031
+    决定三「结束写」小节「运行定义不可用时」条）：每个未结束的 job（含执行中的）记 error，reason 写进 run 级说明与这些 job 的说明；
+    不存明细、不生成报告（报告按运行定义逐个列出 job，读不到运行定义就组装不出）。reason 取 `run_status` 里的几句之一。
+
+    只由 submit 启动的后台推进进程调用：它是这个 run 的推进器。`status --wait` 接力不调用，读不懂运行定义可能只是接力方的版本不同，
+    原来的推进进程可能仍在正常推进。返回是否写成：run 已被别处结束或运行态不存在时没有写成，运行态不变。"""
+    return LocalRunStore(Path(report_dir)).end_run(run_id, definition_unavailable_ending(reason),
+                                                   ended_at=instant_to_iso(compose.now()))
 
 
 # ============================================================================

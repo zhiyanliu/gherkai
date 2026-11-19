@@ -1,6 +1,6 @@
 """LocalRunStore 写入口的互斥与条件建 run（ADR 0030 决定三、ADR 0054 决策五），真起子进程、不 mock。
 
-本机的写入口（create_run、update_job_state、try_claim_job、project_state、try_finalize、commit_job_states、end_run）都在 run 目录下
+本机的写入口（create_run、update_job_state、try_claim_job、project_state、commit_job_states、end_run）都在 run 目录下
 同一把 fcntl 文件锁内读改写，除 create_run 之外都经同一个锁内读改写的路径（`LocalRunStore._locked_rmw`）。锁跨进程是否真的互斥、读改写之间是否真的没有别的写插进来，是 mock 之外的真实行为（绿≠对），所以并发的结论用多个真实
 进程核对：各进程先就绪、再同时放行，各自按角色反复写，结束后检查没有任何一次写丢失、终态没有被改回，并核对这次确实形成了
 交错（否则用例空转）。把锁换成空操作时，三个并发用例在本机每次都失败，失败的形态有：job 写与认领丢失、终态被一次读在终态之前的

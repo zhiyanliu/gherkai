@@ -1,8 +1,9 @@
-"""DynamoDBRunStore 的状态分组属性。
+"""DynamoDBRunStore 的状态分组属性（写入规则见 ADR 0030 决定六「runs 表只有一个 GSI」条）。
 
 不变量分两半：写 run 级 `status` 的路径在写之后建立 `status_group` 与 `status` 的对应（非终态为 `live`，终态为该终态的
 状态值），含 `create_run` 传入终态初始状态的情形，以及带结果的 job 终态写 `commit_job_states` 与结束写 `end_run`；不写 run 级
-`status` 的路径（全 pending 的投影、写不成的执行中写）保持已有的对应，写之前缺分组属性的记录写之后仍缺。断言直接读 STATE item 的原始属性：分组属性不进 `RunState`，经
+`status` 的路径（投影的标量一步、全 pending 的投影、写不成的执行中写）保持已有的对应，写之前缺分组属性的记录写之后仍缺。投影只在
+把 job 写成 running 的那次逐 job 写里写 run 级 `status` 与分组。断言直接读 STATE item 的原始属性：分组属性不进 `RunState`，经
 `load_run_state` 看不到它。期望值在本文件按上述规则独立写出，不调用被测的派生函数。
 
 本机后端没有索引、不写分组属性，所以这里只有 DynamoDB 一侧。
@@ -133,18 +134,6 @@ def test_commit_leaving_the_run_open_sets_live(table, store, drop):
     assert item["status"] == "running" and item["status_group"] == "live"
 
 
-@pytest.mark.parametrize("status", _TERMINAL)
-@pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
-def test_terminal_writes_set_the_terminal_group(table, store, status, drop):
-    """`try_finalize` 把分组改为该终态的值（缺分组属性的记录同样补上；与终态落在同一条更新请求里由下面的请求断言守）。"""
-    meta = _meta()
-    store.create_run(meta, _initial(meta))
-    if drop:
-        _drop_group(table)
-    assert store.try_finalize("run-1", status, "2026-11-12T01:00:00Z") is True
-    assert _raw(table)["status_group"] == status.value
-
-
 # 只有一个 job 的 run：这个 job 的终态 → run 的状态（ADR 0031 决定三的取法，skipped 与 aborted 都使 run 没有执行完）
 _RUN_STATUS_OF_ONE_JOB = {Status.PASSED: "passed", Status.FAILED: "failed", Status.ERROR: "error",
                           Status.SKIPPED: "aborted", Status.ABORTED: "aborted"}
@@ -211,10 +200,6 @@ def _top_level_sets(request: dict) -> dict[str, str]:
     return out
 
 
-def _try_finalize_failed(store, meta):
-    assert store.try_finalize(meta.run_id, Status.FAILED, "2026-11-12T01:00:00Z") is True
-
-
 def _commit_open(store, meta):
     assert store.commit_job_states(meta.run_id, [JobState("a", Status.PASSED)], ended_at="never") is CommitOutcome.OPEN
 
@@ -230,9 +215,8 @@ def _end_run_deadline(store, meta):
 
 @pytest.mark.parametrize("write, status", [
     (_claim, "running"), (_job_write, "running"), (_project_running, "running"),
-    (_try_finalize_failed, "failed"), (_commit_open, "running"), (_commit_ending_failed, "failed"),
-    (_end_run_deadline, "aborted"),
-], ids=["claim", "job-write", "projection", "try-finalize", "commit-open", "commit-ending", "end-run"])
+    (_commit_open, "running"), (_commit_ending_failed, "failed"), (_end_run_deadline, "aborted"),
+], ids=["claim", "job-write", "projection", "commit-open", "commit-ending", "end-run"])
 def test_run_status_and_group_are_set_in_the_same_update_request(table, store, monkeypatch, write, status):
     """写 run 级 `status` 的更新路径把分组写在同一条更新请求里：这次写发出的请求中，在顶层写 `status` 或 `status_group` 的
     恰有一条，两者都在其中、取值对应。只看写之后的属性照不出这一点：把一次写拆成先写 `status`、再另发一条写 `status_group`，
@@ -246,15 +230,16 @@ def test_run_status_and_group_are_set_in_the_same_update_request(table, store, m
     assert touching[0]["status"] == status and touching[0]["status_group"] == _expected_group(status), touching[0]
 
 
-def test_second_finalize_leaves_the_terminal_status_and_group(table, store):
-    """run 级终态不可变（ADR 0054 决策五）：终态之后的收尾写被挡，状态与分组都留在第一次收尾的终态上，不发生终态之间的
-    分组移动。"""
+def test_second_end_run_leaves_the_terminal_status_and_group(table, store):
+    """run 级终态不可变（ADR 0054 决策五）：终态之后的另一次结束写被挡，状态与分组都留在第一次结束写的终态上，不发生终态之间的
+    分组移动（第二次若写成，分组会从 aborted 换到 error）。"""
     meta = _meta()
     store.create_run(meta, _initial(meta))
-    assert store.try_finalize("run-1", Status.PASSED, "2026-11-12T01:00:00Z") is True
-    assert store.try_finalize("run-1", Status.FAILED, "2026-11-12T01:00:01Z") is False
+    assert store.end_run("run-1", RUN_ENDINGS["deadline"], ended_at="2026-11-12T01:00:00Z") is True
+    assert store.end_run("run-1", definition_unavailable_ending("提交记录不完整或形态不对"),
+                         ended_at="2026-11-12T01:00:01Z") is False
     item = _raw(table)
-    assert item["status"] == "passed" and item["status_group"] == "passed"
+    assert item["status"] == "aborted" and item["status_group"] == "aborted"
 
 
 def test_group_changes_only_in_the_write_that_ends_the_run(table, store, monkeypatch):
@@ -313,25 +298,49 @@ def test_writes_not_touching_run_status_leave_the_group(table, store, write, dro
     assert ("status_group" in after) is (not drop)
 
 
-@pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
-def test_job_write_on_a_finalized_run_leaves_the_group(table, store, drop):
-    """已收尾的 run 上前台的执行中写写不成：job、run 级与分组都不变，缺的仍缺。"""
+@pytest.mark.parametrize("projection", [
+    {"a": Status.RUNNING}, {"a": Status.PASSED, "b": Status.FAILED}, {},
+], ids=["one-running", "results", "all-pending"])
+def test_projection_scalar_step_writes_neither_status_nor_group(table, store, monkeypatch, projection):
+    """投影的标量一步（请求里没有 `#sid`）只推进 HWM 与写入序号，不写 run 级 `status` 与 `status_group`；它的条件仍要求 run 未结束。
+    在顶层写 `status` 的只有把 job 写成 running 的那几次逐 job 写，投影里已有结果的 job 同样按 running 写、带上 run 级与 `live`；
+    全 pending 的投影没有这样的写。"""
     meta = _meta()
     store.create_run(meta, _initial(meta))
-    assert store.try_finalize("run-1", Status.PASSED, "2026-11-12T01:00:00Z") is True
+    calls = _record_updates(table, monkeypatch)
+    assert store.project_state("run-1", _projection(meta, 3, **projection)) is True
+    scalar = [c for c in calls if "#sid" not in (c.get("ExpressionAttributeNames") or {})]
+    assert len(scalar) == 1
+    assert {"status", "status_group"}.isdisjoint(_top_level_sets(scalar[0]))
+    assert "#stIN(:pending,:running)" in scalar[0]["ConditionExpression"].replace(" ", "")
+    setting_status = sorted(c["ExpressionAttributeNames"]["#sid"] for c in calls
+                            if {"status", "status_group"} & _top_level_sets(c).keys())
+    assert setting_status == sorted(projection)
+    for c in calls:
+        sets = _top_level_sets(c)
+        if "status" in sets:
+            assert (sets["status"], sets["status_group"]) == ("running", "live")
+
+
+@pytest.mark.parametrize("drop", [False, True], ids=["group-present", "group-missing"])
+def test_job_write_on_a_finalized_run_leaves_the_group(table, store, drop):
+    """已由结束写结束的 run 上前台的执行中写写不成：job、run 级与分组都不变，缺的仍缺。"""
+    meta = _meta()
+    store.create_run(meta, _initial(meta))
+    assert store.end_run("run-1", RUN_ENDINGS["deadline"], ended_at="2026-11-12T01:00:00Z") is True
     if drop:
         _drop_group(table)
     assert store.update_job_state("run-1", JobState(scope_id="a", status=Status.RUNNING, session_id="s-1")) is False
     item = _raw(table)
-    assert item["jobs"]["a"]["status"] == "pending" and item["status"] == "passed"
-    assert item.get("status_group") == (None if drop else "passed")
+    assert item["jobs"]["a"]["status"] == "skipped" and item["status"] == "aborted"
+    assert item.get("status_group") == (None if drop else "aborted")
 
 
 # ---------- 随机写序列的性质 ----------
 
 def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> None:
     sid = rng.choice([j.scope_id for j in meta.jobs])
-    op = rng.randrange(7)
+    op = rng.randrange(6)
     if op == 0:
         store.try_claim_job(meta.run_id, sid, claimed_at="2026-11-12T00:00:01Z")
     elif op == 1:
@@ -343,12 +352,9 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
             statuses = {s: Status.PENDING for s in statuses}  # 全 pending 的投影
         store.project_state(meta.run_id, _projection(meta, hwm[0], **statuses))
     elif op == 3:
-        store.try_finalize(meta.run_id, rng.choice(_TERMINAL), "2026-11-12T01:00:00Z",
-                           message=rng.choice([None, "m"]))
-    elif op == 4:
         store.commit_job_states(meta.run_id, [JobState(scope_id=sid, status=rng.choice(_TERMINAL))],
                                 ended_at="2026-11-12T01:00:00Z")
-    elif op == 5:
+    elif op == 4:
         store.end_run(meta.run_id, RUN_ENDINGS[rng.choice(list(RUN_ENDINGS))], ended_at="2026-11-12T01:00:00Z")
     else:
         state = dataclasses.replace(_initial(meta), status=rng.choice(list(Status)))
@@ -357,9 +363,8 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
 
 
 def test_group_corresponds_to_status_after_every_write_of_a_random_sequence(table, store):
-    """由写 run 级 `status` 的路径建立的记录，经任意写序列（认领、执行中的写、含全 pending 与过期的投影、收尾写、终态写、
-    各条来路的结束写、对已有 run 的重建），每次写之后都满足「分组为 `live` 当且仅当状态非终态」，终态时分组等于状态值。种子固定，
-    失败可复现。"""
+    """由写 run 级 `status` 的路径建立的记录，经任意写序列（认领、执行中的写、含全 pending 与过期的投影、终态写、各条来路的结束写、
+    对已有 run 的重建），每次写之后都满足「分组为 `live` 当且仅当状态非终态」，终态时分组等于状态值。种子固定，失败可复现。"""
     rng = random.Random(20261112)
     for seq in range(40):
         meta = _meta(f"run-{seq:02d}", "a", "b", "c")
@@ -373,8 +378,9 @@ def test_group_corresponds_to_status_after_every_write_of_a_random_sequence(tabl
 
 # ---------- 索引成员资格 ----------
 
-def test_state_items_enter_the_status_group_index_and_move_on_finalize(table, store):
-    """STATE item 按分组进入状态分组索引、带投影的 revision 列表，META item 不进；收尾或结束写之后离开 `live` 分组、进入终态分组。"""
+def test_state_items_enter_the_status_group_index_and_move_when_the_run_ends(table, store):
+    """STATE item 按分组进入状态分组索引、带投影的 revision 列表，META item 不进；结束写之后离开 `live` 分组、进入终态分组（运行定义
+    不可用的变体进 error，到期的结束写进 aborted）。"""
     def members(group: str) -> list[dict]:
         return table.query(IndexName=STATUS_GROUP_INDEX, KeyConditionExpression="status_group = :g",
                            ExpressionAttributeValues={":g": group})["Items"]
@@ -385,7 +391,8 @@ def test_state_items_enter_the_status_group_index_and_move_on_finalize(table, st
     assert live["run_id"] == "run-1" and live["item_type"] == "STATE" and live["worker_task_def_arns"] == _ARNS
     assert "status" not in live and "jobs" not in live  # 投影只有键与 revision 列表
 
-    store.try_finalize("run-1", Status.ERROR, "2026-11-12T01:00:00Z")
+    assert store.end_run("run-1", definition_unavailable_ending("提交记录不完整或形态不对"),
+                         ended_at="2026-11-12T01:00:00Z") is True
     assert members("live") == []
     assert [i["run_id"] for i in members("error")] == ["run-1"]
 

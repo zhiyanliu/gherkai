@@ -2,7 +2,7 @@
 
 两个 adapter 共有的语义在 test_ending_and_commit_writes.py 对拍；这里只有 DynamoDB 一侧才有的性质：
 - 写入序号：建 run 写 0；每一次写成的 update_item 恰好加一（认领、执行中的 job 写、投影的标量一步与每一次逐 job 写、
-  try_finalize、终态写、结束写），条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数。
+  终态写、结束写），条件不成立的写不改它。用写成的请求数作期望值，不按入口逐个写死次数。
 - 读与写之间插入另一方的写：被测的一方读到 STATE 之后、发出写之前，另一个写入方（各持自己的表对象）落下认领、执行中的写、投影、
   终态写或结束写；被测的写被序号的条件挡下，重读之后按新的运行态得出正确结果，对方刚写的内容不被整体替换盖掉。被测方给出的那个
   job 上，对方写下的认领时刻留下；对方写下的会话在被测方没有给出会话时留下，给出了即取被测方的。先后靠包住被测表对象的
@@ -125,10 +125,6 @@ def _project(store, meta):
     assert store.project_state(meta.run_id, projected) is True  # 标量一步加 a、b 各一次逐 job 写，c 跳过
 
 
-def _finalize(store, meta):
-    assert store.try_finalize(meta.run_id, Status.ERROR, "t1", message="原因") is True
-
-
 def _commit(store, meta):
     _claim(store, meta)
     assert store.commit_job_states(meta.run_id, [_done("a", Status.PASSED)], ended_at=_ENDED) is CommitOutcome.OPEN
@@ -139,9 +135,8 @@ def _end(store, meta):
     assert store.end_run(meta.run_id, RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
 
 
-@pytest.mark.parametrize("write", [_claim, _job_write, _project, _finalize, _commit, _end],
-                         ids=["try_claim_job", "update_job_state", "project_state", "try_finalize", "commit_job_states",
-                              "end_run"])
+@pytest.mark.parametrize("write", [_claim, _job_write, _project, _commit, _end],
+                         ids=["try_claim_job", "update_job_state", "project_state", "commit_job_states", "end_run"])
 def test_each_landed_update_increments_the_write_seq_once(table, store, monkeypatch, write):
     """每个写入口之后，写入序号的增量等于这期间写成的 update_item 请求数：每一次写成的写恰好加一，被条件挡下的写不改它。"""
     meta = _create(store)
@@ -153,7 +148,7 @@ def test_each_landed_update_increments_the_write_seq_once(table, store, monkeypa
 
 
 def test_rejected_writes_leave_the_write_seq(table, store):
-    """条件不成立的写不改写入序号：认领已不是 pending 的 job、过期的投影、对已结束的 run 收尾、执行中的写、终态写与结束写。"""
+    """条件不成立的写不改写入序号：认领已不是 pending 的 job、过期的投影，以及 run 已结束之后的执行中的写、终态写与结束写。"""
     meta = _create(store, ("a", "b"), hwm=5)
     _claim(store, meta)
     seq = _seq(table)
@@ -165,7 +160,6 @@ def test_rejected_writes_leave_the_write_seq(table, store):
 
     assert store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at=_ENDED) is True
     seq = _seq(table)
-    assert store.try_finalize("run-1", Status.PASSED, "t2") is False
     assert store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="late")) is False
     assert store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at="t2") is CommitOutcome.ALREADY_ENDED
     assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t2") is False
@@ -174,7 +168,7 @@ def test_rejected_writes_leave_the_write_seq(table, store):
 
 def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> None:
     sid = rng.choice([j.scope_id for j in meta.jobs])
-    op = rng.randrange(6)
+    op = rng.randrange(5)
     if op == 0:
         store.try_claim_job(meta.run_id, sid, claimed_at=_CLAIMED)
     elif op == 1:
@@ -185,15 +179,13 @@ def _random_write(rng: random.Random, store, meta: RunMeta, hwm: list[int]) -> N
         store.project_state(meta.run_id, RunState(run_id=meta.run_id, status=Status.RUNNING, high_water_mark=hwm[0],
                                                   jobs={s: JobState(s, st) for s, st in statuses.items()}))
     elif op == 3:
-        store.try_finalize(meta.run_id, rng.choice(_TERMINAL), _ENDED)
-    elif op == 4:
         store.commit_job_states(meta.run_id, [_done(sid, rng.choice(_TERMINAL))], ended_at=_ENDED)
     else:
         store.end_run(meta.run_id, RUN_ENDINGS[rng.choice(list(RUN_ENDINGS))], ended_at=_ENDED)
 
 
 def test_write_seq_counts_every_landed_update_of_a_random_sequence(table, store, monkeypatch):
-    """经任意写序列（认领、执行中的 job 写、含过期的投影、收尾写、终态写、各条来路的结束写），每次写之后写入序号都等于至此写成的
+    """经任意写序列（认领、执行中的 job 写、含过期的投影、终态写、各条来路的结束写），每次写之后写入序号都等于至此写成的
     update_item 请求数。种子固定，失败可复现。"""
     rng = random.Random(20261119)
     log = _record(table, monkeypatch)
@@ -453,7 +445,8 @@ def test_replacement_on_a_record_without_write_seq_is_still_conditional(table, s
 
 def test_job_write_tells_why_it_was_rejected_from_the_rejected_write_itself(table, store, monkeypatch):
     """`update_job_state` 被挡下时不另读、不再写：run 未结束而 a 已是终态、或 job 不在 Map 里时只有被挡下的那一次写，记录不变、返回
-    True；run 已结束时（b 仍执行中，或 a 已是终态）同样只有被挡下的那一次写，记录不变、返回 False。"""
+    True；run 已结束时（执行中的 b 由结束写记 aborted，a 由终态写结束）同样只有被挡下的那一次写，记录不变、返回 False：这两个 job
+    都已是终态，返回值取的是带回条目里的 run 级状态。"""
     meta = _create(store, ("a", "b"))
     _claim(store, meta)
     assert store.try_claim_job("run-1", "b", claimed_at=_CLAIMED) is True
@@ -468,14 +461,15 @@ def test_job_write_tells_why_it_was_rejected_from_the_rejected_write_itself(tabl
     assert log == ["write-rejected"]
     assert set(store.load_run_state("run-1").jobs) == {"a", "b"}
 
-    assert store.try_finalize("run-1", Status.ERROR, "t1") is True
+    assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
     before = store.load_run_state("run-1")
     for js in (JobState("b", Status.RUNNING, session_id="sess-b"), JobState("a", Status.RUNNING)):
         log.clear()
         assert store.update_job_state("run-1", js) is False
         assert log == ["write-rejected"]
     assert store.load_run_state("run-1") == before
-    assert (before.jobs["a"], before.jobs["b"].status) == (_done("a", Status.PASSED), Status.RUNNING)
+    assert (before.status, before.jobs["a"], before.jobs["b"].status) == (
+        Status.ABORTED, _done("a", Status.PASSED), Status.ABORTED)
 
 
 # ---------- 写入次数 ----------

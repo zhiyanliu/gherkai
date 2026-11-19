@@ -616,8 +616,9 @@ class JobState:
     status: Status
     session_id: str | None = None  # 会话血缘（AgentCore 会话 id 或设备远程访问会话 ARN）
     # claim（CAS pending→running）时刻 ISO 串：local 接力恢复
-    # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）；后台收尾时由它与预算、期限重算超时的
-    # 说明，所以有记录的 job 缺它时推进步骤不收尾。
+    # deadline / cloud tick 防御性超时扫 / status 显示时长。timeout 从此刻起算（含启动开销）；后台推进为这个 job 写终态时由它与预算、
+    # 期限重算超时的说明，所以这一轮读到的运行态里缺它的 job，推进步骤这一轮不为它存明细、不写终态（ADR 0054 决策二第 2 条与后台推进
+    # 条「快照」）。
     claimed_at: str | None = None
     # job 级说明：只由结束写写下（ADR 0031 决定三「结束写」小节，取值见 `run_status.RUN_ENDINGS`），由结束写结束的 job 没有判定明细，
     # 它的说明只在这里；由执行结果结束的 job 不带它，说明在判定明细里。只是描述，任何判断都不看它（ADR 0031 决定一「状态是一切计算的
@@ -652,8 +653,8 @@ class RunState:
     high_water_mark: int | None = None
     # run 级说明：run 结束的原因，随结束写（`RunStore.end_run`，句子取自 `run_status.RUN_ENDINGS`）的同一次条件写落库，让 `status`
     # 看得见原因（团队成员未必有 CloudWatch 的读权限）。写入方：执行方按运行期限、fail-fast 或使用方中断结束仍有 job 没有启动的 run
-    # 时（ADR 0031 决定三「结束写」小节的说明表；RunResult.message 取的就是它）；云端推进器读不到可用的运行定义时（结构版本不是本后端
-    # 认的、定义违约、缺 worker 镜像版本），这几种情形经 try_finalize 写下。job 都由执行结果结束的 run 没有它。
+    # 时（ADR 0031 决定三「结束写」小节的说明表；RunResult.message 取的就是它）；后台推进读不到可用的运行定义时（结构版本不是本后端
+    # 认的、定义违约、缺 worker 镜像版本），这几种情形经运行定义不可用的结束写写下。job 都由执行结果结束的 run 没有它。
     # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain）。omit-when-None（同 started_at）。
     message: str | None = None
     # 认领计数：这个 run 上认领成功的次数。建 run 时为 0，每次 try_claim_job 成功时在同一次原子写里加一，认领失败与其它写入口

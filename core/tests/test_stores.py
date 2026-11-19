@@ -25,7 +25,7 @@ from gherkai_core.model import (
     Votes,
 )
 from gherkai_core.project import assemble_run_result
-from gherkai_core.run_status import CommitOutcome
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 
 
 def _job_def(scope_id: str, scope_name: str, engine: str) -> Job:
@@ -977,13 +977,13 @@ def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path:
     submit_instance = LocalRunStore(tmp_path / "runs", detached=True)
     submit_instance.update_job_state("run-s", JobState(scope_id=meta.jobs[0].scope_id, status=Status.RUNNING))
     assert submit_instance.try_claim_job("run-s", meta.jobs[1].scope_id) is True
-    assert submit_instance.try_finalize("run-s", Status.ERROR, "2026-06-29T00:10:00Z") is True
+    assert submit_instance.end_run("run-s", RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-06-29T00:10:00Z") is True
     assert "detached" not in json.loads(sync_path.read_text("utf-8"))
 
 
 def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Path):
-    """写路径读不出旧文件不吞错：run_state.json 损坏时四个写入口都抛出、文件原样不动，不会把损坏的文件当成「没有附加键」覆盖掉
-    （那样后台执行标记会被悄悄去掉，status --wait 从此把这个后台 run 当成前台 run 只等不接力）；读路径保守地读作没有标记。"""
+    """写路径读不出旧文件不吞错：run_state.json 损坏时建 run 之外的五个写入口都抛出、文件原样不动，不会把损坏的文件当成「没有附加键」
+    覆盖掉（那样后台执行标记会被悄悄去掉，status --wait 从此把这个后台 run 当成前台 run 只等不接力）；读路径保守地读作没有标记。"""
     meta = _sample_run("run-p").run_meta
     sid = meta.jobs[0].scope_id
     LocalRunStore(tmp_path / "runs", detached=True).create_run(meta, _initial_state("run-p", [j.scope_id for j in meta.jobs]))
@@ -996,7 +996,9 @@ def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Pa
     for write in (lambda: relay.update_job_state("run-p", JobState(scope_id=sid, status=Status.RUNNING)),
                   lambda: relay.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z"),
                   lambda: relay.project_state("run-p", running),
-                  lambda: relay.try_finalize("run-p", Status.FAILED, "2026-06-29T00:10:00Z")):
+                  lambda: relay.commit_job_states("run-p", [JobState(scope_id=sid, status=Status.FAILED)],
+                                                  ended_at="2026-06-29T00:10:00Z"),
+                  lambda: relay.end_run("run-p", RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-06-29T00:10:00Z")):
         with pytest.raises(ValueError):
             write()
         assert path.read_text(encoding="utf-8") == "{not json"

@@ -1,5 +1,5 @@
-"""gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM + plan_next，
-收尾用的判定明细（project_full），以及从记录组装 run 的结果（assemble_run_result、run_duration_ms）。
+"""gherkai_core.project 纯投影测试（ADR 0034）：project(records)→RunState 的「两件都要」谓词 + HWM、推进决策 plan_next，
+要写终态的 job 的判定明细（project_full），以及从记录组装 run 的结果（assemble_run_result、run_duration_ms）。
 
 纯逻辑、无 I/O、无 mock 外真实行为 → 绿即够（CLAUDE.md「绿≠对·别过度」：mock 内逻辑结论绿即足）。
 reconciler 的执行编排（Stream 触发/CAS 真写/进程脱离）不在此测——那是推进编排的真实运行边界。
@@ -247,48 +247,21 @@ def test_out_of_order_records_reduced_by_seq():
     assert state.jobs["a"].status == Status.PASSED  # 仍正确归约
 
 
-# ---------- 投影写的 run 级 status（机制三，两 RunStore adapter 共用同一规则）----------
-
-def test_projected_run_status_pending_only_while_all_jobs_pending():
-    """全 job pending → pending（两个 adapter 据此不写 run 级）；任一 job 推进 → running；恒非终态。"""
-    from gherkai_core.project import projected_run_status
-
-    def _jobs(*statuses):
-        return {f"s{i}": JobState(f"s{i}", st) for i, st in enumerate(statuses)}
-
-    assert projected_run_status(_jobs(Status.PENDING, Status.PENDING)) == Status.PENDING
-    assert projected_run_status(_jobs(Status.PENDING, Status.RUNNING)) == Status.RUNNING
-    assert projected_run_status(_jobs(Status.PASSED, Status.PENDING)) == Status.RUNNING
-    # 全终态也只到 running：run 级终态只随记下最后一个 job 终态的写或结束写写下（ADR 0030 决定四）
-    assert projected_run_status(_jobs(Status.PASSED, Status.FAILED)) == Status.RUNNING
-
-
-def test_projected_run_status_ignores_the_run_status_from_project():
-    """判据只看 job 态：全部 job 都结束时 project() 的 run 级 status 按取法已是终态，投影写仍得 running——守「投影写不能原样落传入的
-    run 级值」。还有 job 未结束时 project() 的值本来就是前置态。"""
-    from gherkai_core.project import projected_run_status
-
-    done = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)] + _passed_events("b") + [_exit("b", 0)])
-    assert done.status == Status.PASSED  # 前提：全部 job 都结束，取法给出终态
-    assert projected_run_status(done.jobs) == Status.RUNNING
-    half = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)])
-    assert (half.jobs["b"].status, half.status) == (Status.PENDING, Status.RUNNING)  # a 已结束、b 仍 pending：取法给出 running
-    assert projected_run_status(half.jobs) == Status.RUNNING
-
+# ---------- project() 的 run 级 status ----------
 
 def test_project_run_status_follows_the_rule():
     """project() 的 run 级 status 按取法给出（ADR 0031 决定三「取法」）：有 job 未结束时是前置态，全部 pending 得 pending，
-    否则得 running；全部结束时按 error、failed、aborted 或 skipped、passed 的次序取。与投影写落库的取值一致，但投影写不依赖它。"""
-    from gherkai_core.project import projected_run_status
-
+    否则得 running；全部结束时按 error、failed、aborted 或 skipped、passed 的次序取。投影写不用这个值：RunStore adapter 只在把某个
+    job 写成 running 时写 run 状态（见 `RunStore.project_state`）。"""
     all_pending = project(_meta("a", "b"), [])
     assert all_pending.status == Status.PENDING
-    assert projected_run_status(all_pending.jobs) == Status.PENDING
 
     mixed = project(_meta("a", "b"), [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))])
     assert (mixed.jobs["a"].status, mixed.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
     assert mixed.status == Status.RUNNING
-    assert projected_run_status(mixed.jobs) == Status.RUNNING
+
+    half = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0)])
+    assert (half.jobs["b"].status, half.status) == (Status.PENDING, Status.RUNNING)  # a 已结束、b 仍 pending：取法给出 running
 
     failed = project(_meta("a", "b"), _passed_events("a") + [_exit("a", 0), _exit("b", 3)])
     assert (failed.jobs["b"].status, failed.status) == (Status.ERROR, Status.ERROR)
@@ -442,8 +415,9 @@ def _exited_at(scope_id: str, code: int | None, at: datetime, *, reason: str | N
 
 
 def test_project_full_judges_an_exit_after_the_cutoff_as_timeout():
-    """收尾投影按退出时刻判断是否已过截止时刻（ADR 0054 决策二后台推进条「截止时刻与说明」）：退出时刻严格晚于截止时刻（认领时刻加预算
-    300 秒）的退出与带超时标志的同样按超时交给终结函数；恰在截止时刻或之前退出的按退出码归因；内容完整的不改判。"""
+    """求明细的投影（`project_full`，写终态的那一轮用它）按退出时刻判断是否已过截止时刻（ADR 0054 决策二后台推进条「截止时刻与
+    说明」）：退出时刻严格晚于截止时刻（认领时刻加预算 300 秒）的退出与带超时标志的同样按超时交给终结函数；恰在截止时刻或之前退出的
+    按退出码归因；内容完整的不改判。"""
     cutoff = _CLAIMED + timedelta(seconds=300)
     started = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]
 
@@ -461,7 +435,7 @@ def test_project_full_judges_an_exit_after_the_cutoff_as_timeout():
 
 
 def test_per_round_projection_applies_the_exit_time_rule_when_the_claim_time_is_readable(monkeypatch):
-    """每轮的无状态投影交给终结函数的输入与收尾投影一致：基线里这个 job 的认领时刻读得出时，退出时刻晚于截止时刻的退出按超时交给
+    """每轮的状态投影交给终结函数的输入与求明细的投影一致：基线里这个 job 的认领时刻读得出时，退出时刻晚于截止时刻的退出按超时交给
     终结函数；没有基线、认领时刻缺失或读不出时只看超时标志。运行态只记状态，内容不完整的退出不论哪种都是 error。"""
     import gherkai_core.project as project_mod
     from gherkai_core.model import JobState, RunState
@@ -501,7 +475,7 @@ def test_project_full_requires_the_claim_time_of_every_recorded_job():
 
 
 def test_assembled_device_keys_follow_the_definition_when_the_device_job_has_no_detail():
-    """后台到期收尾：设备 job 没有记录、project_full 不给它明细，由结束写记 skipped；组装出的 run 结果的设备计量两键按运行定义判
+    """后台到期的结束写：设备 job 没有记录、project_full 不给它明细，由结束写记 skipped；组装出的 run 结果的设备计量两键按运行定义判
     出现与否，两键为 0、不省键。"""
     meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(_device_job("d"), _job("w")),
                    deadline_at=FAR_DEADLINE)
@@ -512,77 +486,59 @@ def test_assembled_device_keys_follow_the_definition_when_the_device_job_has_no_
     assert (result.device_observed_s, result.device_observed_missing) == (0.0, 0)
 
 
-# ---------- plan_next（机制四）----------
+# ---------- plan_next（ADR 0054 决策二后台推进条「决策」；ADR 0034 机制四）----------
 
-def _plan(meta: RunMeta, recs, *, max_concurrency: int = 2, past_stop_start: bool = False, baseline=None):
-    """plan_next 的输入取法与 tick 相同：投影出的运行态，加事件流里有记录的 scope。"""
-    return plan_next(project(meta, recs, baseline), max_concurrency, past_stop_start=past_stop_start,
-                     recorded={r.scope_id for r in recs})
+def _state(**statuses: Status) -> RunState:
+    """推进决策的输入：运行态（tick 交给它的是这一轮读到的运行态加上这一轮终态写的作用），job 按给出的次序。"""
+    return RunState(run_id="run-1", status=run_status_of(statuses.values()), high_water_mark=0,
+                    jobs={sid: JobState(sid, st) for sid, st in statuses.items()})
+
+
+def _plan(state: RunState, *, max_concurrency: int = 2, past_stop_start: bool = False):
+    return plan_next(state, max_concurrency, past_stop_start=past_stop_start)
+
+
+_P, _R = Status.PENDING, Status.RUNNING
 
 
 def test_plan_next_starts_up_to_concurrency():
-    """全 pending、max_concurrency=2 → 提议 start 前 2 个。"""
-    actions = _plan(_meta("a", "b", "c"), [])
-    starts = [a.scope_id for a in actions if a.kind == "start"]
-    assert len(starts) == 2
+    """全部 pending、max_concurrency=2：按运行态里的次序提议启动前 2 个。"""
+    assert _plan(_state(a=_P, b=_P, c=_P)) == [Action(kind="start", scope_id="a"), Action(kind="start", scope_id="b")]
 
 
 def test_plan_next_respects_running_slots():
-    """已有 1 个 running、max_concurrency=2 → 只补 1 个 pending。"""
-    recs = [_ev("a", 1, ScopeStarted(scope_id="a"))]  # a 在 running（scope_started 无 scope_done/exit）
-    assert project(_meta("a", "b", "c"), recs).jobs["a"].status == Status.RUNNING
-    actions = _plan(_meta("a", "b", "c"), recs)
-    starts = [a.scope_id for a in actions if a.kind == "start"]
-    assert len(starts) == 1  # 2-1=1 slot
-    assert "a" not in starts  # 不重启 running 的
+    """已有 1 个 running、max_concurrency=2：只补 1 个 pending，不重启 running 的；已结束的 job 不占并发位。"""
+    assert _plan(_state(a=_R, b=_P, c=_P)) == [Action(kind="start", scope_id="b")]
+    assert _plan(_state(a=Status.PASSED, b=_R, c=_P)) == [Action(kind="start", scope_id="c")]
+    assert _plan(_state(a=_R, b=_R, c=_P)) == []
 
 
-def test_plan_next_finalize_when_all_terminal():
-    """所有 job 达终态（无 pending/running）→ 提议 finalize，不论是否已过停止启动的时刻。"""
-    recs = _passed_events("a") + [_exit("a", 0)]
-    assert _plan(_meta("a"), recs) == [Action(kind="finalize")]
-    assert _plan(_meta("a"), recs, past_stop_start=True) == [Action(kind="finalize")]
+def test_plan_next_proposes_nothing_when_no_job_is_pending_or_running():
+    """没有 pending 也没有 running 时不提议任何动作，不论是否已过停止启动的时刻：run 在记下最后一个 job 终态的那次写里随之成为终态，不是一个单独
+    的动作（ADR 0054 决策二第 4 条与后台推进条「决策」）。零个 job 的 run 同样没有任何动作。"""
+    done = _state(a=Status.PASSED, b=Status.ERROR)
+    assert _plan(done) == [] and _plan(done, past_stop_start=True) == []
+    empty = RunState(run_id="run-1", status=Status.PENDING, jobs={}, high_water_mark=0)
+    assert _plan(empty) == [] and _plan(empty, past_stop_start=True) == []
 
 
-def test_plan_next_not_finalize_while_running():
-    """有 running 时不 finalize（即使有别的 pending 也优先补并发、不收尾）。"""
-    recs = [_ev("a", 1, ScopeStarted(scope_id="a"))]
-    actions = _plan(_meta("a", "b"), recs)
-    assert not any(a.kind == "finalize" for a in actions)
+def test_plan_next_never_expires_before_the_stop_start_time():
+    """未过停止启动的时刻时不提议到期的结束写：没有执行中的 job 而仍有 pending 时照常提议 start。"""
+    assert _plan(_state(a=Status.PASSED, b=_P)) == [Action(kind="start", scope_id="b")]
 
 
 def test_plan_next_past_stop_start_never_proposes_a_start():
-    """已过停止启动的时刻（ADR 0054 决策二第 1 条）：不再提议 start；没有执行中的 job、余下的 job 都没有任何记录 → 到期收尾。
-    一个 job 都没有启动时同样到期收尾。"""
-    done = _passed_events("a") + [_exit("a", 0)]
-    assert _plan(_meta("a", "b", "c"), done, past_stop_start=True) == [Action(kind="finalize_expired")]
-    assert _plan(_meta("a", "b"), [], past_stop_start=True) == [Action(kind="finalize_expired")]
+    """已过停止启动的时刻（ADR 0054 决策二第 1 条）：不再提议 start；没有执行中的 job 而仍有 pending 时提议到期的结束写（同条第 3 条与
+    后台推进条「决策」）。一个 job 都没有启动时同样提议它。"""
+    assert _plan(_state(a=Status.PASSED, b=_P, c=_P), past_stop_start=True) == [Action(kind="expire")]
+    assert _plan(_state(a=_P, b=_P), past_stop_start=True) == [Action(kind="expire")]
 
 
 def test_plan_next_past_stop_start_waits_for_running_jobs():
-    """已过停止启动的时刻而还有执行中的 job（事件里见到它在执行，或已被认领、事件还没到）：不收尾、不启动，这一轮继续推进；
-    执行中的 job 由它的截止时刻停下，之后再收尾。"""
-    from gherkai_core.model import JobState, RunState
-
-    running = [_ev("a", 1, ScopeStarted(scope_id="a"))]
-    assert _plan(_meta("a", "b"), running, past_stop_start=True) == []
-    claimed = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=0,
-                       jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)})
-    assert _plan(_meta("a", "b"), [], past_stop_start=True, baseline=claimed) == []
-
-
-def test_plan_next_past_stop_start_does_not_expire_while_a_recorded_job_is_still_pending():
-    """有记录而投影仍为 pending 的 job（别的推进方刚认领、worker 只发出了结果未知的建会话尝试）说明已经有人启动了它：已过停止启动的
-    时刻时这一轮不到期收尾、继续推进。「未启动」只指事件流里没有任何记录的 job。"""
-    from gherkai_core.model import SessionOpened
-
-    attempted = [EventRecord(scope_id="b", kind="event", seq=1, event=SessionOpened(scope_id="b", name="t", origin="attempted"),
-                             emit_ts=1.0)]
-    recs = _passed_events("a") + [_exit("a", 0)] + attempted
-    assert project(_meta("a", "b", "c"), recs).jobs["b"].status == Status.PENDING
-    assert _plan(_meta("a", "b", "c"), recs, past_stop_start=True) == []
-    # 同一快照在没过停止启动的时刻时照常提议 start：pending 的 job 都可提议，认领的条件写挡住已被别人认领的那个
-    assert {a.scope_id for a in _plan(_meta("a", "b", "c"), recs)} == {"b", "c"}
+    """已过停止启动的时刻而还有执行中的 job：不做结束写、不启动，这一轮继续推进；执行中的 job 由它的截止时刻停下，它的退出带来下一轮，
+    那一轮先写下它的终态，再判断是否做结束写。"""
+    assert _plan(_state(a=_R, b=_P), past_stop_start=True) == []
+    assert _plan(_state(a=_R, b=Status.PASSED), past_stop_start=True) == []
 
 
 # ---- exit-without-events 真值表（ADR 0034 机制二：task_exited 判定不设 saw_scope_started 前置）----
@@ -626,7 +582,7 @@ def test_clean_exit_without_events_converges_with_claimed_baseline():
 def test_exit_none_without_events_is_error_not_pending_nor_running():
     """零事件 + 有退出记录却无码 → ERROR（终态），既非 PENDING 也非 RUNNING（ADR 0034 机制二「退出码缺失」条）。
 
-    判 PENDING 会让 plan_next 重复提议 start（与已 claim 基线合并后则永停）；判 RUNNING「等观察者补」同样永停——
+    判 PENDING 时与已 claim 的 RUNNING 基线合并后永停 RUNNING，推进步骤写不下它的终态；判 RUNNING「等观察者补」同样永停——
     STOPPED 事件只来一次。观察者本应落哨兵，此分支是防 wedge 的防御。
     """
     meta = _meta("a")
@@ -635,8 +591,8 @@ def test_exit_none_without_events_is_error_not_pending_nor_running():
 
 
 def test_project_full_refuses_non_terminal_snapshot():
-    """收尾快照里 job 仍 running（只见 scope_started）→ 抛、一份判定都不落，
-    绝不把前置态写进 jobs/*.json。"""
+    """要写终态的 job 在这一份事件快照里仍 running（只见 scope_started）即抛出、一份判定都不落，绝不把前置态写进 jobs/*.json（ADR 0031
+    决定一·补「不变量的强制点在保存一个 job 的明细之前」）。"""
     import pytest
     from gherkai_core.project import NonTerminalSnapshot
     recs = [_ev("a", 1, ScopeStarted(scope_id="a", session_id="s"))]

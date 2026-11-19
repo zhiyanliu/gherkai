@@ -143,9 +143,6 @@ class RunStore(Protocol):
     状态的写入口都在同一次写里按取法写它（ADR 0031 决定三）。前台执行（同步 `run`）与后台推进（reconciler）用同一组写入口；两者起
     worker 之前都先经 try_claim_job 认领（前台每个 job 只认领一次，ADR 0054 决策五），后台推进另用 project_state。
 
-    try_finalize 由调用方给出 run 状态、单独写一次：只有云端推进器读不到可用的运行定义时用它把 run 记为 error（job 态不变）；
-    前台执行与后台推进的收尾经 commit_job_states 与 end_run。
-
     **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
     之外，还有后台推进的多个实例与接力者），本机 adapter 在文件锁内读改写、云端 adapter 的每一次写都带条件。这不是事务保证：
     create_run 分两次写（definition 在前、运行态在后），云端的 project_state 先写标量、再逐 job 写；中间态对读的一方可见，
@@ -177,19 +174,6 @@ class RunStore(Protocol):
         写成。job 已是终态或不在运行态里而没有写时，返回值同样只看 run，run 仍未结束即为 True：job 已由别的写记下终态不说明 run 已
         结束，不是停手的理由。返回值由这次条件写本身给出，不是写前另读一次的结果。前台执行者据 False 得知 run 已被别处记为已结束、停止
         启动新的 job（ADR 0054 决策五「执行方服从记录」）。
-        """
-        ...
-
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
-                     expected_claim_count: int | None = None) -> bool:
-        """由调用方给出 run 状态的收尾写：仅当 run 总 status 当前为非终态（pending/running）时写下调用方给出的终态与 ended_at，写成
-        返回 True；job 态不变。
-
-        run 已是终态时返回 False、库中值不变；运行态不存在同样返回 False，两种原因不区分。message 是 run 级说明，与终态同一次写入，
-        为 None 时不写这一项、库中值原样保留。expected_claim_count：给出时另要求库中的认领计数等于它，不等即返回 False、不写；为 None
-        时不判计数。
-
-        调用方只有一处：云端推进器读不到可用的运行定义时用它把 run 记为 error（见类文档串）。
         """
         ...
 
@@ -282,18 +266,19 @@ class RunStore(Protocol):
         ...
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写投影：仅当 state.high_water_mark ≥ 库中记录的 hwm 才写，成功 True（机制三）。
+        """投影写：把事件推演出的进度写进运行态，以 HWM 为条件（机制三①），写成返回 True。
 
-        写入的只有 HWM、run 级 status（按下段规则）与各 job 态；state 上的 started_at、ended_at、message、认领计数不用，
-        库中值原样保留。
-        stale 实例（读到更少 events、hwm 更小）的写被挡（返回 False），防把已推进的态覆盖回旧态。
-        state.high_water_mark 为 None 按 0 处理，守卫与落库都用 0（最弱守卫：库中 hwm>0 时必被挡）——reconciler 路径恒带 hwm，
-        不该走到这里。库中 run 级已是终态时同样被挡（返回 False）。
-
-        传入的 run 级 status 不落库：投影里任一 job 已离开 PENDING 时 run 级写 RUNNING，全 job 仍 PENDING 时不写 run 级、
-        保留库中值，因而不会把认领写成的 RUNNING 改回 PENDING（取值规则见 `project.projected_run_status`）。
-        各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）：库中已是终态的 job 不被改动（终态只写一次，同一等级的终态也不以
-        投影为准），库中更推进的 job 保留库中值；逐 job 的写同样以 run 未结束为条件。
+        - **条件**：state.high_water_mark 不小于库中的 HWM、且库中 run 未结束才写，否则返回 False：读到更少事件（HWM 更小）的 stale
+          实例的写被挡下，不把已推进的态覆盖回旧态。state.high_water_mark 为 None 按 0 处理，守卫与落库都用 0（最弱守卫：库中 HWM
+          大于 0 时必被挡），后台推进恒带 HWM，不该走到这里。
+        - **job 态不越过 running、不写 job 终态**：投影里已有结果的 job 写成 running，它的终态由终态写（commit_job_states）记下。
+          各 job 态与库中现态按生命周期序逐 job 单调合并（机制三②）：库中已是终态或比投影更推进的 job 不变，不在运行态里的 job 不写
+          （不臆造 job）。写入的只有 HWM、各 job 态与按下一条写的 run 状态；state 上的 run 级 status、started_at、ended_at、message、
+          认领计数不用，库中值原样保留。
+        - **run 状态**（ADR 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」一段与「② 的 job 级半边落地形态」一段，取法见
+          ADR 0031 决定三）：这次写把某个 job 写成 running 时，run 状态随之写成 running；没有 job 被写成 running 时（零个 job、投影里
+          全部 pending、投影里已离开 pending 的 job 在库中都已是终态）不写 run 状态、库中值原样保留。投影写下的 run 状态因而只会是
+          running，认领写下的 running 也不被拿着旧 baseline 的全 pending 投影改回 pending。
         """
         ...
 

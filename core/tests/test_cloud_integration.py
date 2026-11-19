@@ -16,7 +16,7 @@ import itertools
 import pytest
 
 from gherkai_core.model import JobState, RunMeta, RunState, Status
-from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
+from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome, definition_unavailable_ending
 from tests.test_stores import _sample_run
 
 pytestmark = pytest.mark.integration  # 本文件全部用例都是集成测试（默认 deselect）
@@ -117,10 +117,10 @@ def _real_run(store, real_aws, tag: str):
     return rid, meta, scope_ids, initial
 
 
-def test_ddb_claim_advances_run_and_is_rejected_after_finalize_real(real_aws):
-    """真 DDB 上的认领（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功的同一次写把 run 级置为 running；带着 pending 的
-    job 收尾为 error 之后，认领返回 False，run 级、结束时刻、原因、job 态与认领时刻都不变。同一条更新表达式同时写顶层属性
-    与 Map 内路径、条件同时判两处，是真 DDB 的表达式语义，moto 上通过不能替代。"""
+def test_ddb_claim_advances_run_and_is_rejected_after_the_run_ends_real(real_aws):
+    """真 DDB 上的认领（ADR 0034 机制三「run 级状态只进不退」条①）：认领成功的同一次写把 run 级置为 running；运行定义不可用的
+    结束写把 run 与未结束的 job 都记为 error 之后，认领返回 False，run 级、结束时刻、原因、job 态与认领时刻都不变。同一条更新表达式
+    同时写顶层属性与 Map 内路径、条件同时判两处，是真 DDB 的表达式语义，moto 上通过不能替代。"""
     store = _ddb_store(real_aws)
     rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-claim")
     assert store.try_claim_job(rid, scope_ids[0], claimed_at="2026-07-01T00:00:01Z") is True
@@ -129,9 +129,10 @@ def test_ddb_claim_advances_run_and_is_rejected_after_finalize_real(real_aws):
     assert mid.jobs[scope_ids[0]] == JobState(scope_ids[0], Status.RUNNING, claimed_at="2026-07-01T00:00:01Z")
     assert mid.jobs[scope_ids[1]].status == Status.PENDING
 
-    assert store.try_finalize(rid, Status.ERROR, "2026-07-01T00:01:00Z", message="原因") is True
+    assert store.end_run(rid, definition_unavailable_ending("原因"), ended_at="2026-07-01T00:01:00Z") is True
     before = store.load_run_state(rid)
-    assert (before.status, before.jobs[scope_ids[1]].status) == (Status.ERROR, Status.PENDING)
+    assert (before.status, before.message, before.jobs[scope_ids[1]]) == (
+        Status.ERROR, "原因", JobState(scope_ids[1], Status.ERROR, message="原因"))
     assert store.try_claim_job(rid, scope_ids[1], claimed_at="2026-07-01T00:02:00Z") is False
     assert store.load_run_state(rid) == before
 
@@ -153,12 +154,12 @@ def test_ddb_stale_all_pending_projection_keeps_run_running_real(real_aws, hwm):
 
 
 def test_ddb_job_write_on_finalized_run_changes_nothing_real(real_aws):
-    """真 DDB 上已收尾、留有未结束 job 的 run 再收到前台的执行中写：那一次带 run 级条件的写被挡下、返回 False，记录整份不变
-    （ADR 0034 机制三「run 级状态只进不退」条③）；结束写结束的 run 上同样如此。被挡下的原因取自条件不成立时带回的条目
-    （`ReturnValuesOnConditionCheckFailure`），这一参数的真实行为只能在真 DDB 上核对。"""
+    """真 DDB 上由结束写结束的 run 再收到前台的执行中写：那一次带 run 级条件的写被挡下、返回 False，记录整份不变（ADR 0034 机制三
+    「run 级状态只进不退」条③）。两种起点：没有启动过 job（都记 skipped），以及有执行中的 job（记 aborted）。被挡下的原因取自条件不
+    成立时带回的条目（`ReturnValuesOnConditionCheckFailure`），这一参数的真实行为只能在真 DDB 上核对。"""
     store = _ddb_store(real_aws)
     rid, _meta, scope_ids, _initial = _real_run(store, real_aws, "ddb-latejob")
-    assert store.try_finalize(rid, Status.ERROR, "2026-07-01T00:01:00Z") is True
+    assert store.end_run(rid, RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-07-01T00:01:00Z") is True
     before = store.load_run_state(rid)
     assert store.update_job_state(rid, JobState(scope_ids[0], Status.RUNNING, session_id="late")) is False
     assert store.load_run_state(rid) == before

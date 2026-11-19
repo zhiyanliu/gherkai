@@ -101,13 +101,13 @@
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
-| `status` | `pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级。全部 job 都结束时 run 到终态，取值由各 job 的状态得出，取法同 `run --json` 顶层的 `status`（有 job 为 `error` 则 `error`，否则有 `failed` 则 `failed`，否则有 `aborted` 或 `skipped` 则 `aborted`，否则 `passed`）；云端后台读到不能执行的提交记录时为 `error`（见 `message`）。未到终态时，只要有 job 离开 `pending`（被认领、开始执行或已有判定），run 级即为 `running`、不再回到 `pending`；所以 run 级为 `pending` 表示还没有 job 离开 `pending`。反过来不成立：run 级为 `running` 时 job 仍可能全为 `pending`，要查看各 job 当前记录的状态，读 `jobs[]` |
+| `status` | `pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级。全部 job 都结束时 run 到终态，取值由各 job 的状态得出，取法同 `run --json` 顶层的 `status`（有 job 为 `error` 则 `error`，否则有 `failed` 则 `failed`，否则有 `aborted` 或 `skipped` 则 `aborted`，否则 `passed`）；`submit` 提交的 run 在后台读到不能执行的提交记录时为 `error`（见 `message`）。未到终态时，只要有 job 离开 `pending`（被认领、开始执行或已有判定），run 级即为 `running`、不再回到 `pending`；所以 run 级为 `pending` 表示还没有 job 离开 `pending`。反过来不成立：run 级为 `running` 时 job 仍可能全为 `pending`，要查看各 job 当前记录的状态，读 `jobs[]` |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
 | `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
-| `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有两类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；云端推进链读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，各 job 保持原来的状态。job 级原因看 `jobs[].message` 与 `explain --json` |
+| `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有两类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；`submit` 提交的 run 在后台读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，还没有结束的 job 都记 `error`，`jobs[].message` 是同一句。job 级原因看 `jobs[].message` 与 `explain --json` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**）、`message`（没有判定明细的 job 在 run 结束时写下的说明，如「这个 run 已超过允许运行的时间，job 没有启动」；没有时**省略**，其余 job 的原因看 `explain --json`） |
-| `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在前台 `run` 里每个 job 完成即写入，`submit` 提交的 run 在收尾时才写入、收尾之前没有，run 还没结束时也可能已有；没有启动的 job 没有判定明细 |
+| `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在每个 job 得出结果时写入，前台 `run` 与 `submit` 提交的 run 相同，run 还没结束时已结束的 job 即已有；没有启动的 job，以及这个 run 被结束时还没有结果的 job，没有判定明细 |
 
 ## `gherkai list-runs --json`
 
@@ -148,7 +148,7 @@ step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每
 | `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级运行态；未到终态时文档只含已落地的 job |
 | `scopes[]` | array | 每个 job 一项，见下；指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可少于该 run 的 job 数 |
 
-给了 `scope_id`、这个 run 已结束、而这个 job 已结束却没有判定明细（没有启动，或这个 run 被结束时它还没有结果）时，`scopes[]` 只有这一项，只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取自运行状态记录（没有说明时 `message` 为 null），退出码为 0；形状与 `run --json` 的 `jobs[]` 里没有判定明细的项相同。run 未结束时点名的 job 还没有判定明细，按判定明细尚未落地处理（`scopes[]` 为空，退出码为 0），即使运行状态记录里这个 job 已是终态（`submit` 提交的 run，判定明细在 run 结束的那一轮才保存）。
+给了 `scope_id`、这个 run 已结束、而这个 job 已结束却没有判定明细（没有启动，或这个 run 被结束时它还没有结果）时，`scopes[]` 只有这一项，只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取自运行状态记录（没有说明时 `message` 为 null），退出码为 0；形状与 `run --json` 的 `jobs[]` 里没有判定明细的项相同。run 未结束时，点名的 job 已结束即照常给出它的判定明细（判定明细在每个 job 得出结果时写入）；还没有结束的 job 没有判定明细，按判定明细尚未落地处理（`scopes[]` 为空，退出码为 0）。
 
 `scopes[]` 每项包含 `scope_id`、`engine`、`status`、`error_type`、`message`、`session_id`、`sessions[]`（出现条件与形状同 `run --json`）与 `device_observed_s` / `device_observed_missing`（仅设备目标，形状同 `run --json`）、`console_url`（仅当 `session_id` 是 Device Farm 远程访问会话的 ARN 时出现：控制台里该会话页面的链接，录像与日志在那里看）、`report_refs[]`（形状同 `run --json`，
 原样取自判定明细中的指针，不做解析；设备目标另有 `kind=device_session`，指向这个 scope 的设备诊断文件 `device-session.json`（能力探测结论、所用会话与设备、换台记录与各阶段时刻），只给链接、不解析）、`scenarios[]`，另加：

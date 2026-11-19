@@ -11,7 +11,7 @@ RunMeta 与 RunState **分两 item**（同 run_id、item_type 各异；同分区
   且躲开 DDB 原生 Map 对空串/嵌套 list 的挑剔（DataTable rows 常含空 cell）。StepArgument offload（同包 `arg_offload.py`，ADR 0030 决定六）在 `json.dumps`
   **前**对 dict 里的 docString/dataTable 换指针，不需要 META 是原生 Map。
 - **STATE item**：`{run_id, item_type='STATE', status, status_group, started_at?, ended_at?, high_water_mark?, message?,
-  claim_count, write_seq, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级说明，随 try_finalize 或结束写 `end_run` 写入；
+  claim_count, write_seq, jobs=<原生 Map>}`（`?` = omit-when-None；`message` 是 run 级说明，随结束写 `end_run` 写入；
   `high_water_mark` 与 `claim_count` 是本 item 的两个数值属性，读回 Decimal 转 int——前者只在无状态批量运行的投影写时有值，投影写的
   ConditionExpression 按它做数值守卫，见 ADR 0034 机制三；后者是认领计数，create_run 恒写、认领成功时原子加一、缺属性读作 0，
   见 ADR 0034 机制三「run 级状态只进不退」条①；`write_seq` 是写入序号，见 `_write_seq_increment`；`status_group` 是由
@@ -73,8 +73,8 @@ def status_group(status: Status) -> str:
     """run 级状态 → 状态分组（ADR 0030 决定六）：非终态取 `live`，终态取该终态的状态值。
 
     写入规则：每一处写 run 级 `status` 的地方都由本函数从这次写入的 `status` 算出分组、写在同一次写里（put_item 经
-    `_state_scalars`，update_item 经 `_run_status_assignment`）；不写 run 级 `status` 的写（全 pending 的投影、投影的逐 job 写）
-    不碰分组属性，写之前缺它的记录写之后仍缺。分组只服务这个索引；本机后端没有索引，不写它。
+    `_state_scalars`，update_item 经 `_run_status_assignment`）；不写 run 级 `status` 的写不碰分组属性，写之前缺它的记录写之后
+    仍缺，这类写有投影的标量一步，以及投影里 pending 的那些 job 的逐 job 写。分组只服务这个索引；本机后端没有索引，不写它。
     """
     return status.value if status in TERMINAL_STATUSES else _STATUS_GROUP_LIVE
 
@@ -418,28 +418,29 @@ class DynamoDBRunStore:
             return False
 
     def project_state(self, run_id: str, state: RunState) -> bool:
-        """HWM 条件写 STATE：仅当 (传入 hwm ≥ 库中 hwm) 且 (库中 run 未结束) 才写（机制三①）。CCF → stale/已终态 → False。
+        """投影写（语义见 RunStore port）：put_item 表达不了逐 job 的条件，拆成两步，先标量、后逐 job，每一步各自带条件。
 
-        **run 级 status 只写 running、不落终态**（run 级终态只随记下最后一个 job 终态的写或结束写写下；投影提前落终态，那两次写会
-        读到 run 已结束而写不成）。
-        取值规则见 `projected_run_status`（与 local adapter 共用一份）：它给出 running 时标量写带上 run 级；给出 pending
-        （投影里全 job 仍 pending）时更新表达式省略 run 级、只写 HWM，库中 run 级原样保留，认领或此前投影已写成的 running
-        不被拿着旧 baseline 的投影改回 pending。条件双守不变：
-        HWM 挡 stale + status 挡「已结束被刷回」。run 级只在这次带终态守卫的标量写里落，逐 job 阶段不写 run 级。
+        **标量一步只推进 HWM、不写 run 状态**：条件是库中 HWM 不大于这次投影的 HWM（缺属性同样成立）且 run 未结束（机制三①）；条件
+        不成立（stale，或 run 已结束）即返回 False，不发逐 job 写。
 
-        **各 job 态逐 job 单调条件写（对拍 local 的逐 job 合并）**：task_exited 无数值
-        seq，两次投影可携带相同 HWM、①挡不住 job 终态被 stale 投影刷回（还会重开 double-launch 窗口，机制四）。
-        DDB put_item 表达不了 per-key 条件 → 拆两步：先 update_item 条件写标量（HWM+status 双守，CCF 即整体
-        stale 返 False），再对每个 job（无效果的 pending 项除外，见末段）**逐属性** `SET jobs.#sid.status/.session_id/.claimed_at`
-        + 「当前非更推进态」的单元素条件写，被挡的单个 job 静默跳过（库中已更推进，正确态在库、无信息丢失）。库中已是终态的 job
-        不被改写（终态只写一次，ADR 0031 决定一·补）：写终态与写 running 的两支都以库中这个 job 为 pending 或 running 为条件；三支都
-        另以 run 未结束为条件，所以终态写或结束写落在标量一步与逐 job 写之间时，余下的逐 job 写都写不成（ADR 0054 决策五）。
-        逐属性而非整 entry：update_item 不碰未提及属性，投影没带的 session_id/claimed_at（claimed_at 只由 try_claim_job
-        落库、事件推演不出）天然保留——对拍 local 的「投影缺字段回填库中值」兜底，不再依赖调用方总传 baseline。
-        两步非原子，但每步各自条件守卫、次序（先标量后 jobs）保证中间态只会「标量新、job 旧」，等价于一次携带旧 job
-        视图的合法投影，下轮重放收敛。
-        update_item 天然不碰未提及属性——传入的 started_at、ended_at、message 都不写，库中值保留（started_at 由 create_run
-        落；修「put_item 整 item 覆盖把 started_at 抹掉」的对拍不一致，local 同样只写 HWM、run 级与 jobs）。
+        **逐 job 写**（ADR 0034 机制三「② 的 job 级半边落地形态」段）：对每个 job（无效果的 pending 项除外，见末段）**逐属性**
+        `SET jobs.#sid.status/.session_id/.claimed_at`，写下的 job 态不越过 running：投影里已有结果的 job 按 running 写，它的终态只由
+        终态写记下。每一次逐 job 写的条件有三项：库中 HWM 不大于这次投影的 HWM（与标量一步同一道闸）；库中这个 job 不比投影更推进
+        （写 running 时库中为 pending 或 running，写 pending 时库中为 pending）；run 未结束。被挡下的 job 静默跳过，不区分是哪一项挡下
+        的：库中这个 job 已更推进（库中已是终态的 job 不被改写，终态只写一次，ADR 0031 决定一·补）、HWM 已被更高的投影越过、run 已
+        结束（终态写或结束写落在两步之间，ADR 0054 决策五），这次写都不该落下；job 不在 Map 里同样被条件挡下，不臆造 job。逐 job 写也带
+        HWM 的条件，因为标量一步之后、逐 job 的各次写之间，HWM 更高的投影可能完成标量写并写下同一个 job 的新值（如执行中 job 的另一个
+        代表会话），只看等级与 run 未结束会把旧值写回。
+        逐属性而非整个条目：update_item 不碰未提及的属性，投影没带的 session_id 与 claimed_at（claimed_at 只由 try_claim_job 写下、
+        事件推演不出）保留库中值，对拍 local 的「投影缺字段回填库中值」，正确性不依赖调用方总传 baseline。两步非原子，但每步各自带
+        条件，先标量、后 jobs 的次序保证中间态只会是「标量新、job 旧」，等价于一次携带旧 job 视图的合法投影，下一轮投影即收敛。传入的
+        run 级 status、started_at、ended_at、message 都不写，库中值保留（started_at 由 create_run 写下）。
+
+        **run 状态随把 job 写成 running 的那次逐 job 写**（ADR 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段）：这次写同时
+        把 run 状态连同状态分组写成 running（见 `status_group`），条件保证写之前 run 未结束，库中的 run 状态是 pending 或 running。job
+        被投影写成 running 与 run 状态成为 running 出自同一次写，没有 run 级领先于 job 级的中间态。标量一步、投影里 pending 的那些 job
+        的写与被挡下的写都不写 run 状态：没有 job 被写成 running 时库中的 run 状态原样保留（与 local 对拍），认领写下的 running 也不被
+        拿着旧 baseline 的全 pending 投影改回 pending。
 
         **无效果的 pending 项不发写**（ADR 0034 机制三「逐 job 写跳过无效果的 pending 项」段）：投影里 status 为 pending、
         session_id 与 claimed_at 都为空的 job 跳过。这类写只把 status 设为 pending，条件是库中该 job 为 pending：库中为 pending
@@ -448,109 +449,61 @@ class DynamoDBRunStore:
         认领时刻，这次写就可能改变库中值，照常发出。local 不需要同样跳过（锁内整份写回一次，写入次数不随 job 数增长）。
 
         标量一步与每一次逐 job 写都把写入序号加一（见 `_write_seq_increment`）。"""
-        from gherkai_core.project import _lifecycle_rank, projected_run_status
-
         new_hwm = state.high_water_mark or 0
         seq_set, seq_names, seq_values = _write_seq_increment()
-        # run 级 status 按投影里的 job 态定（全 pending → 不写，否则 running）；传入的 run 级值在有 job
-        # 出判定时即为终态聚合值，一律不用（规则与理由见 projected_run_status）。此处读不到库中 job 态（下面 per-job 条件写
-        # 才碰它们），判据只看投影——与 local 同一规则、可对拍。
-        # 写 run 级时连同状态分组（见 `status_group`）；全 pending 不写 run 级，分组也不碰
-        update, names, values = "SET high_water_mark = :h, " + seq_set, {"#st": "status", **seq_names}, {
-            ":h": new_hwm, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value, **seq_values}
-        if projected_run_status(state.jobs) == Status.RUNNING:
-            run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
-            update += ", " + run_set
-            names.update(run_names)
-            values.update(run_values)
+        bounds = {":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
+        # 标量一步与每一次逐 job 写共用的两项条件：库中 HWM 不大于这次投影的 HWM（缺属性同样成立），且 run 未结束
+        hwm_ok = "(attribute_not_exists(high_water_mark) OR high_water_mark <= :h)"
+        run_open = "#st IN (:pending, :running)"
+        ccf = self._table.meta.client.exceptions.ConditionalCheckFailedException
         try:
             self._table.update_item(
                 Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression=update,
-                # (库中无 hwm 或 hwm ≤ 我的) 且 库中 status 仍非终态 → 允许；否则 CCF（stale / 已 finalize）
-                ConditionExpression=(
-                    "(attribute_not_exists(high_water_mark) OR high_water_mark <= :h) "
-                    "AND #st IN (:pending, :running)"
-                ),
-                ExpressionAttributeNames=names,
-                ExpressionAttributeValues=values,
+                UpdateExpression="SET high_water_mark = :h, " + seq_set,  # 只推进 HWM，不写 run 状态与分组
+                ConditionExpression=f"{hwm_ok} AND {run_open}",  # 条件不成立：stale，或 run 已结束
+                ExpressionAttributeNames={"#st": "status", **seq_names},
+                ExpressionAttributeValues={":h": new_hwm, **bounds, **seq_values},
             )
-        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
+        except ccf:
             return False
-        # job 级：逐 job 单调条件写。rank 序 pending(0)<running(1)<终态(2)：仅当库中该 job 未结束、且 rank 不高于本次投影才写
-        # （running 刷 running 取本次投影的值；库中已是终态的不改）。每一支都另以 run 未结束为条件（#jst 同指 run 级的 status）。
-        run_open = "#jst IN (:pending, :running)"
+        # 逐 job 单调条件写（ADR 0034 机制三②与「② 的 job 级半边落地形态」段）：生命周期序 pending < running < 终态，写下的 job 态不越过
+        # running，仅当库中这个 job 不比投影更推进才写（同为 running 时取本次投影的值；库中已是终态的不改）。嵌套路径与顶层的 run 状态
+        # 共用占位名 #st，写法与 try_claim_job 相同
+        run_set, run_names, run_values = _run_status_assignment(Status.RUNNING)
         for sid, js in state.jobs.items():
-            if js.status == Status.PENDING and js.session_id is None and js.claimed_at is None:
+            target = Status.RUNNING if js.status in TERMINAL_STATUSES else js.status  # 投影不越过 running
+            if target == Status.PENDING and js.session_id is None and js.claimed_at is None:
                 continue  # 无效果的 pending 项不发写（等价性论证见 docstring 末段）
-            new_rank = _lifecycle_rank(js.status)
+            sets = ["jobs.#sid.#st = :st", seq_set]
+            names = {"#sid": sid, "#st": "status", **seq_names}
+            values = {":st": target.value, ":h": new_hwm, **bounds, **seq_values}
+            if target == Status.RUNNING:
+                # 库中这个 job 须为 pending 或 running；run 状态与分组随这次写写成 running。job 不在 Map 里时条件同样不成立（不臆造
+                # job，与 local 同样静默跳过；逐属性 SET 的父路径不存在会 ValidationException，条件先把它挡成 CCF）
+                job_cond = "jobs.#sid.#st IN (:pending, :running)"
+                sets.append(run_set)
+                names.update(run_names)
+                values.update(run_values)
+            else:
+                job_cond = "jobs.#sid.#st = :pending"
+            if js.session_id is not None:  # 为 None 即不提及，库中值保留（回填兜底）
+                sets.append("jobs.#sid.session_id = :sess")
+                values[":sess"] = js.session_id
+            if js.claimed_at is not None:
+                sets.append("jobs.#sid.claimed_at = :cat")
+                values[":cat"] = js.claimed_at
             try:
-                if new_rank >= 1:
-                    # 写 running 或终态：库中这个 job 须为 pending 或 running。job 不在 Map 里时条件同样不成立（不臆造 job，与
-                    # local 同样静默跳过；逐属性 SET 的父路径不存在会 ValidationException，条件先把它挡成 CCF）
-                    cond = f"jobs.#sid.#jst IN (:pending, :running) AND {run_open}"
-                else:
-                    cond = f"jobs.#sid.#jst = :pending AND {run_open}"
-                vals = {":pending": Status.PENDING.value, ":running": Status.RUNNING.value}
-                sets = ["jobs.#sid.#jst = :st", seq_set]
-                vals[":st"] = js.status.value
-                vals.update(seq_values)
-                if js.session_id is not None:  # omit-when-None 即不提及，也就是保留库中值（回填兜底）
-                    sets.append("jobs.#sid.session_id = :sess")
-                    vals[":sess"] = js.session_id
-                if js.claimed_at is not None:
-                    sets.append("jobs.#sid.claimed_at = :cat")
-                    vals[":cat"] = js.claimed_at
                 self._table.update_item(
                     Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
                     UpdateExpression="SET " + ", ".join(sets),
-                    ExpressionAttributeNames={"#sid": sid, "#jst": "status", **seq_names},
-                    ExpressionAttributeValues=vals,
-                    ConditionExpression=cond,  # 三分支一律带条件
+                    # 三项条件一律带上（ADR 0034 机制三「② 的 job 级半边落地形态」段）
+                    ConditionExpression=f"{hwm_ok} AND {job_cond} AND {run_open}",
+                    ExpressionAttributeNames=names,
+                    ExpressionAttributeValues=values,
                 )
-            except self._table.meta.client.exceptions.ConditionalCheckFailedException:
-                continue  # 库中该 job 已结束或更推进（已 claim），或 run 已结束 → 保留库中态，不回退
+            except ccf:
+                continue  # 库中这个 job 已结束或更推进、HWM 已被更高的投影越过，或 run 已结束：保留库中值，不回退
         return True
-
-    def try_finalize(self, run_id: str, status: Status, ended_at: str, *, message: str | None = None,
-                     expected_claim_count: int | None = None) -> bool:
-        """状态机单调条件写：仅当总 status 是 pending 或 running 才写终态（commit 恰一次）。CCF → 已终态或 STATE 不存在
-        → False。message（run 级消息，ADR 0037 决策 7）与终态同一次 update_item 写入；None 时不提及该属性、库中值保留（local 对拍）。
-        状态分组同样在这次写里改为该终态的值（见 `status_group`）。
-
-        expected_claim_count 给出时进条件表达式：库中认领计数等于它才写。期望为 0 时缺属性同样
-        成立（与读端缺属性读作 0、local 的锁内重读对拍）。为 None 时条件不提计数。写入序号在这次写里加一（见 `_write_seq_increment`）。
-
-        调用方见 `RunStore.try_finalize`；ADR 0030 决定四的写入口里没有它。"""
-        run_set, run_names, run_values = _run_status_assignment(status)
-        seq_set, seq_names, seq_values = _write_seq_increment()
-        update = "SET " + run_set + ", ended_at = :e, " + seq_set
-        names = {**run_names, **seq_names}  # status 是 DDB 保留字；message 走 names 以防同类
-        values = {**run_values, ":e": ended_at, ":pending": Status.PENDING.value, ":running": Status.RUNNING.value,
-                  **seq_values}
-        condition = "#st IN (:pending, :running)"  # 仅非终态可迁；已终态 → CCF（幂等）
-        if message is not None:
-            update += ", #msg = :m"
-            names["#msg"] = "message"
-            values[":m"] = message
-        if expected_claim_count is not None:
-            names["#cc"] = "claim_count"
-            values[":ecc"] = expected_claim_count
-            if expected_claim_count == 0:
-                condition += " AND (attribute_not_exists(#cc) OR #cc = :ecc)"
-            else:
-                condition += " AND #cc = :ecc"
-        try:
-            self._table.update_item(
-                Key={"run_id": run_id, _ITEM_TYPE_ATTR: _STATE},
-                UpdateExpression=update,
-                ExpressionAttributeNames=names,
-                ExpressionAttributeValues=values,
-                ConditionExpression=condition,
-            )
-            return True
-        except self._table.meta.client.exceptions.ConditionalCheckFailedException:
-            return False
 
     # ---- run 的状态只由 job 的终态算出（ADR 0031 决定三）：两个写入口的作用由 run_status 给出，这里只负责读、写的条件与重试 ----
     # 两者的步骤相同：强一致读 STATE，按 run_status 的纯函数从读到的运行态算出要写下的运行态，再以「写入序号等于读到的值、run 未结束」

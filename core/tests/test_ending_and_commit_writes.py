@@ -495,7 +495,8 @@ def test_projection_does_not_rewrite_a_terminal_job_written_by_a_commit(run_stor
 
 def test_projection_does_not_rewrite_jobs_ended_by_an_end_run_landing_after_its_scalar_step(aws, monkeypatch):
     """云端的投影分两步：标量一步写成之后、逐 job 写发出之前，另一方以处置的结束写结束这个 run（a、b 都还是 running，记 aborted 并带
-    说明）。余下的逐 job 写——把 a 写成终态、给 b 写新会话——都以 run 未结束、库中 job 未结束为条件，写不成；记录保持那次结束写的结果。"""
+    说明）。余下的逐 job 写（投影里已有结果的 a 按 running 写，给 b 写新会话）都以 run 未结束、库中 job 未结束为条件，写不成；记录保持
+    那次结束写的结果。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
     table = aws["ddb"].Table(aws["table_name"])

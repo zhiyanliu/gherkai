@@ -1,5 +1,5 @@
 """RunStore 写入口的对拍测试（ADR 0034 机制三/机制四、ADR 0054 决策五、ADR 0030 决定四）：create_run / update_job_state / try_claim_job /
-project_state / try_finalize。
+project_state。
 
 **local（fcntl 文件锁）与 ddb（moto，条件表达式）运行同一批断言**（parametrize）——保两 adapter 语义一致。
 moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB 复验单列在文件末（integration 标记，需真凭证才运行；
@@ -7,18 +7,20 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 
 覆盖三机制的正确性核心：
 - 机制四 CAS：pending→running 只成功一次，并发认领只一个成功。
-- 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态。
-- 机制三 finalize 单调：已终态不被重复 finalize / 不被刷回。
+- 机制三 HWM：stale（更小 hwm）投影写被挡、不覆盖已推进态；DDB 逐 job 写的 HWM 条件挡住标量一步之后落下的更高 HWM 投影写下的值。
+- 机制三② 投影不越过 running：投影里已有结果的 job 落成 running，终态只由终态写记下；run 状态只随把 job 写成 running 的那次写
+  写成 running，没有 job 被写成 running 时（零个 job、全 pending、只有库中已是终态的 job）保留库中值，DDB 的标量一步不写 run 状态。
 - 机制三②的写入开销：无效果的 pending 项 DDB 不发写，两侧落库结果仍等于投影前库中值（DDB 侧另断言写入次数）。
 - run 级状态只进不退：认领与前台 `update_job_state` 写下 running 时 run 级为 running、已收尾的 run 上认领被挡且
   运行态不变、前台的执行中写在已收尾的 run 上写不成（ADR 0034 机制三「run 级状态只进不退」条③）、全 pending 的旧投影不把 run 级
-  改回 pending（DDB 侧另断言 `update_job_state` 只发一次写）。
+  改回 pending（DDB 侧另断言 `update_job_state` 只发一次写）；run 已结束而 job 仍 pending 的记录（经端口写不出，直接改库造出）上，
+  认领、执行中的写与投影只被 run 级那一项条件挡下，同样写不成。
 - 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
 - `update_job_state` 只写 running（写别的状态是参数错误）；返回 run 在这次写时是否仍未结束（ADR 0054 决策五，加 ADR 0034 机制三
   「run 级状态只进不退」条③）：run 级为 pending 或 running 时 True、已是终态时 False 且运行态不变；DDB 侧因 STATE 不存在被挡之后并发建出的新记录不收到这次写。job 已是终态或不在运行态里时不写、
   返回值照样只看 run，两侧对拍在 test_ending_and_commit_writes.py。
 - 投影不改写库中已是终态的 job，同一等级的终态之间也不以投影为准。
-- 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）；收尾写可带期望的计数。
+- 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经各个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 结束写 `end_run` 与带结果的 job 终态写 `commit_job_states` 的语义对拍在 test_ending_and_commit_writes.py。
 本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
@@ -107,38 +109,24 @@ def test_claim_advances_run_status_in_the_same_write(run_store):
 
 
 def test_claim_rejected_on_finalized_run_leaves_state_unchanged(run_store):
-    """已收尾（error、job 仍 pending）的 run 上认领返回 False，整份运行态不变：run 级、ended_at、message、job 态与 claimed_at
-    （run 已收尾后不再接受新认领；推进器在 definition 不可用时带着 pending 的 job 收尾为 error，不能被认领复活）。"""
+    """运行定义不可用的结束写结束的 run（a 执行中、b 没有启动，两者都记 error、带同一句原因）上认领返回 False，整份运行态不变：
+    run 级、ended_at、run 级说明、job 态、job 级说明与 claimed_at（run 已结束后不再接受新认领，结束写结束的 run 不能被认领复活，
+    ADR 0034 机制三「run 级状态只进不退」条①）。只剩「run 已结束」一项条件挡下认领的情形见
+    test_writes_rejected_by_the_ended_run_alone。"""
+    from gherkai_core.run_status import definition_unavailable_ending
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
-    assert run_store.try_finalize("run-1", Status.ERROR, "2026-08-13T02:00:00Z", message="原因") is True
+    assert run_store.end_run("run-1", definition_unavailable_ending("原因"), ended_at="2026-08-13T02:00:00Z") is True
     before = run_store.load_run_state("run-1")
-    assert (before.status, before.jobs["b"].status) == (Status.ERROR, Status.PENDING), "前提：带着 pending 的 job 收尾"
+    assert (before.status, before.jobs["b"].status) == (Status.ERROR, Status.ERROR), "前提：未结束的 job 都记 error"
     assert run_store.try_claim_job("run-1", "b", claimed_at="2026-08-13T03:00:00Z") is False
     got = run_store.load_run_state("run-1")
     assert got == before
     assert (got.status, got.ended_at, got.message) == (Status.ERROR, "2026-08-13T02:00:00Z", "原因")
-    assert got.jobs["a"] == JobState("a", Status.RUNNING, claimed_at="2026-08-13T01:02:03Z")
-    assert got.jobs["b"] == JobState("b", Status.PENDING)
-
-
-def test_finalize_with_pending_jobs_succeeds(run_store):
-    """收尾不要求 job 全为终态：run 级 pending（零认领）与 running（已认领一个）两种起点上，带着 pending 的 job 都能收尾，
-    job 态原样保留。"""
-    meta = _meta("run-1")
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1") is True
-    got = run_store.load_run_state("run-1")
-    assert got.status == Status.ERROR and {js.status for js in got.jobs.values()} == {Status.PENDING}
-
-    meta2 = _meta("run-2")
-    run_store.create_run(meta2, _initial(meta2))
-    assert run_store.try_claim_job("run-2", "a") is True
-    assert run_store.try_finalize("run-2", Status.ERROR, "t1") is True
-    got = run_store.load_run_state("run-2")
-    assert got.status == Status.ERROR
-    assert (got.jobs["a"].status, got.jobs["b"].status) == (Status.RUNNING, Status.PENDING)
+    assert got.jobs["a"] == JobState("a", Status.ERROR, claimed_at="2026-08-13T01:02:03Z", message="原因")
+    assert got.jobs["b"] == JobState("b", Status.ERROR, message="原因")
 
 
 @pytest.mark.parametrize("hwm", [0, 3], ids=["same_hwm", "higher_hwm"])
@@ -180,13 +168,16 @@ def test_job_write_of_a_state_other_than_running_is_rejected(run_store, job_stat
 
 
 def test_job_write_on_finalized_run_changes_nothing(run_store):
-    """已收尾、留有未结束 job 的 run 上写 job：写不成，运行态整份不变（run 到终态之后不再接受任何写，ADR 0054 决策五；ADR 0034
-    机制三「run 级状态只进不退」条③）。"""
+    """结束写结束的 run（没有启动的 a 记 skipped）上写 job：写不成、返回 False，运行态整份不变（run 到终态之后不再接受任何写，ADR
+    0054 决策五；ADR 0034 机制三「run 级状态只进不退」条③）。经端口结束的 run 里没有未结束的 job，只剩 run 级一项条件挡下这次写的
+    情形见 test_writes_rejected_by_the_ended_run_alone。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
     before = run_store.load_run_state("run-1")
-    assert before.jobs["a"].status == Status.PENDING, "前提：run 已结束而 job 未结束"
+    assert before.jobs["a"].status == Status.SKIPPED, "前提：结束写结束了没有启动的 job"
     assert run_store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a")) is False
     assert run_store.load_run_state("run-1") == before
 
@@ -212,12 +203,15 @@ def test_job_write_reports_the_run_still_open(run_store):
 
 def test_job_write_on_a_finalized_run_reports_it_ended(run_store):
     """run 级已是终态时 update_job_state 返回 False、不写：job、run 级、ended_at、message 与认领计数都不变（前台执行者据此得知
-    run 已被别处记为已结束）。"""
+    run 已被别处记为已结束）。run 由处置的结束写结束，执行中的 a 记 aborted。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_claim_job("run-1", "a", claimed_at="2026-11-15T08:00:00+00:00") is True
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="已超过允许运行的时间（已记为已结束）") is True
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-past-deadline"], ended_at="t1") is True
     before = run_store.load_run_state("run-1")
+    assert (before.status, before.jobs["a"].status, before.claim_count) == (Status.ABORTED, Status.ABORTED, 1)
     written = JobState("a", Status.RUNNING, session_id="sess-a", claimed_at="2026-11-15T08:00:00+00:00")
     assert run_store.update_job_state("run-1", written) is False
     assert run_store.load_run_state("run-1") == before
@@ -266,21 +260,22 @@ def test_project_advances_hwm(run_store):
 
 
 def test_stale_projection_rejected(run_store):
-    """关键（机制三）：先写 hwm=10，再用 stale 快照 hwm=5 投影 → 被挡（False），不覆盖。"""
+    """关键（机制三）：先写 hwm=10，再用 stale 快照 hwm=5 投影：被挡（False），不覆盖。stale 投影给执行中的 a 带的是旧会话，与库中
+    同为 running，只有 HWM 条件挡得住它。"""
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     fresh = RunState(run_id="run-1", status=Status.RUNNING,
-                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.PASSED)},
+                     jobs={"a": JobState("a", Status.RUNNING, session_id="s-new"), "b": JobState("b", Status.RUNNING)},
                      high_water_mark=10)
     assert run_store.project_state("run-1", fresh) is True
     stale = RunState(run_id="run-1", status=Status.RUNNING,
-                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)},
+                     jobs={"a": JobState("a", Status.RUNNING, session_id="s-old"), "b": JobState("b", Status.PENDING)},
                      high_water_mark=5)
     assert run_store.project_state("run-1", stale) is False  # 被 HWM 挡
     # 库里仍是 fresh（hwm=10），未被 stale 覆盖
     got = run_store.load_run_state("run-1")
     assert got.high_water_mark == 10
-    assert got.jobs["a"].status == Status.PASSED
+    assert got.jobs["a"] == JobState("a", Status.RUNNING, session_id="s-new")
 
 
 def test_equal_hwm_projection_allowed(run_store):
@@ -293,19 +288,22 @@ def test_equal_hwm_projection_allowed(run_store):
 
 
 def test_same_hwm_terminal_job_not_regressed(run_store):
-    """关键（机制三②，ADR 0034）：task_exited 无数值 seq → 两投影同 HWM，job 终态不得被 stale 投影刷回。
+    """关键（机制三②，ADR 0034）：task_exited 无数值 seq，两次投影可带相同 HWM，job 终态不得被 stale 投影改回 running。
 
-    场景（对抗验证复现的永久错读模型）：实例 B 见 scope_done+task_exited 写 a=PASSED（hwm=3）；
-    实例 A 对 a 视图旧（只见 scope_started）、对 b 视图新 → 同 hwm=3 投影 a=RUNNING——
-    ① HWM 挡不住（3>=3），必须靠 job 级单调条件写挡。否则 a 被刷回 RUNNING 且若 run 已 finalize
-    则永久错态（run=passed 而 jobs 恒 running）。
+    场景（对抗验证复现的永久错读模型）：实例 B 见 scope_done 与 task_exited，投影（hwm=3）之后以终态写记下 a=PASSED；
+    实例 A 对 a 视图旧（只见 scope_started）、对 b 视图新，以同一 hwm=3 投影 a=RUNNING。
+    ① HWM 挡不住（两者相等），必须靠 job 级单调条件写挡。否则 a 被改回 RUNNING，run 若已结束
+    则永久错态（run 为终态而 job 一直 running）。
     """
+    from gherkai_core.run_status import CommitOutcome
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     fresh = RunState(run_id="run-1", status=Status.RUNNING,
-                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.RUNNING)},
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
                      high_water_mark=3)
     assert run_store.project_state("run-1", fresh) is True
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED)], ended_at="t1") is CommitOutcome.OPEN
     stale = RunState(run_id="run-1", status=Status.RUNNING,
                      jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
                      high_water_mark=3)  # 同 HWM——① 不挡；靠 job 级 ② 挡
@@ -316,13 +314,16 @@ def test_same_hwm_terminal_job_not_regressed(run_store):
 
 @pytest.mark.parametrize("hwm", [3, 4], ids=["same_hwm", "higher_hwm"])
 def test_projection_does_not_rewrite_a_terminal_job(run_store, hwm):
-    """库中已是终态的 job 不被投影改写，同一等级的终态之间也不以投影为准（终态只写一次，ADR 0031 决定一·补）：之后的投影把它算成
-    另一个终态、带另一个会话，HWM 相同或更高，库中仍是先写下的那一份；同一次投影里未结束的 job 照常推进。"""
+    """库中已是终态的 job 不被投影改写（终态只写一次，ADR 0031 决定一·补）：a 的终态由终态写记下（会话是先前投影写下的 s1）之后，
+    投影把它算成另一个终态、带另一个会话，HWM 相同或更高，库中仍是先写下的那一份；同一次投影里未结束的 job 照常推进。"""
+    from gherkai_core.run_status import CommitOutcome
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
     first = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=3,
-                     jobs={"a": JobState("a", Status.PASSED, session_id="s1"), "b": JobState("b", Status.PENDING)})
+                     jobs={"a": JobState("a", Status.RUNNING, session_id="s1"), "b": JobState("b", Status.PENDING)})
     assert run_store.project_state("run-1", first) is True
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED)], ended_at="t1") is CommitOutcome.OPEN
     later = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=hwm,
                      jobs={"a": JobState("a", Status.ERROR, session_id="s2"), "b": JobState("b", Status.RUNNING)})
     assert run_store.project_state("run-1", later) is True
@@ -370,29 +371,14 @@ def test_projection_writes_only_hwm_run_status_and_jobs(run_store):
     assert got.status == Status.RUNNING and got.jobs["a"] == JobState("a", Status.RUNNING, session_id="s1")
 
 
-def test_finalize_without_message_keeps_stored_message(run_store):
-    """try_finalize 不给 message 时不动库中值，给了才覆盖：两个 adapter 同一语义。"""
-    from dataclasses import replace
-
-    meta = _meta()
-    run_store.create_run(meta, replace(_initial(meta), message="库中消息"))
-    assert run_store.try_finalize("run-1", Status.PASSED, "t1") is True
-    got = run_store.load_run_state("run-1")
-    assert (got.status, got.ended_at, got.message) == (Status.PASSED, "t1", "库中消息")
-
-    meta2 = _meta("run-2", "a")
-    run_store.create_run(meta2, replace(_initial(meta2), message="库中消息"))
-    assert run_store.try_finalize("run-2", Status.ERROR, "t1", message="收尾消息") is True
-    assert run_store.load_run_state("run-2").message == "收尾消息"
-
-
 def test_projection_keeps_pending_while_no_job_started(run_store):
-    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 钳制的 pending 半边：全 pending 的投影不写 run 级，库中
+    """喂**真 project() 产物**（非手搓 RunState）验 run 级 status 的 pending 半边：全 pending 的投影不写 run 级，库中
     还没有 job 被认领时 run 级仍是 `create_run` 落的 **pending**（status 如实反映「未启动」，ADR 0034 机制三「run 级状态只进
-    不退」条②）。project 的 run 级 status 此时也是 pending（取法：全部 job 为 pending，ADR 0031 决定三），但落库取值只按 job 态定，
-    不依赖它。
+    不退」条②）。project 的 run 级 status 此时也是 pending（取法：全部 job 为 pending，ADR 0031 决定三），但落库取值只看这次写把
+    哪些 job 写成了 running，不依赖它。投影之后 run 仍未结束，记下全部 job 的终态写使它成为终态。
     """
     from gherkai_core.project import project
+    from gherkai_core.run_status import CommitOutcome
 
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
@@ -401,13 +387,16 @@ def test_projection_keeps_pending_while_no_job_started(run_store):
     assert run_store.project_state("run-1", projected) is True
     got = run_store.load_run_state("run-1")
     assert got.status == Status.PENDING  # 不虚报 running
-    assert run_store.try_finalize("run-1", Status.PASSED, "2026-07-19T02:00:00Z") is True
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED), JobState("b", Status.PASSED)],
+                                       ended_at="2026-07-19T02:00:00Z") is CommitOutcome.ENDED_RUN
+    assert run_store.load_run_state("run-1").status == Status.PASSED
 
 
 def test_projection_clamps_the_terminal_run_status_from_project(run_store):
-    """喂**真 project() 产物**验钳制仍承重：两个 job 都已结束时 project 的 run 级 status 按取法已是终态 passed，投影写必须钳成
-    running；否则紧接的终态写会读到 run 已结束（ALREADY_ENDED），run 的终态与报告不再由收尾写下。钳住之后，收尾的终态写使 run
-    成为终态（ENDED_RUN），已由投影写下终态的 job 不被改写。"""
+    """喂**真 project() 产物**验钳制仍承重（ADR 0034 机制三「投影写的 run 状态按 0031 决定三的取法给出」段）：两个 job 都已结束时
+    project 的 job 态是终态、run 级 status 按取法已是 passed，投影写把两个 job 都写成 running、run 级写成 running；否则紧接的终态写
+    会读到 run 已结束（ALREADY_ENDED），run 的终态与报告不再由终态写写下。随后的终态写记下两个 job 的终态、使 run 成为终态
+    （ENDED_RUN），a 带着投影写下的会话。"""
     from gherkai_core.model import ScenarioDone, ScopeDone, ScopeStarted
     from gherkai_core.project import EventRecord, TaskExited, project
     from gherkai_core.run_status import CommitOutcome
@@ -424,7 +413,9 @@ def test_projection_clamps_the_terminal_run_status_from_project(run_store):
     assert (projected.jobs["a"].status, projected.jobs["b"].status) == (Status.PASSED, Status.PASSED)
     assert projected.status == Status.PASSED, "前提：全部 job 都结束，取法给出终态"
     assert run_store.project_state("run-1", projected) is True
-    assert run_store.load_run_state("run-1").status == Status.RUNNING
+    landed = run_store.load_run_state("run-1")
+    assert landed.status == Status.RUNNING
+    assert {sid: js.status for sid, js in landed.jobs.items()} == {"a": Status.RUNNING, "b": Status.RUNNING}
     outcome = run_store.commit_job_states("run-1", [JobState("a", Status.PASSED), JobState("b", Status.PASSED)],
                                           ended_at="2026-07-19T02:00:00Z")
     assert outcome is CommitOutcome.ENDED_RUN
@@ -449,8 +440,9 @@ def test_projection_lands_running_once_any_job_advanced(run_store):
 
 
 def test_projection_never_lands_terminal_run_status(run_store):
-    """全 job 已终态（传入的 run 级为终态）时投影仍只落 running——run 级终态只随记下最后一个 job 终态的写或结束写写下：若投影提前
-    落终态，紧接的终态写会被它挡成 ALREADY_ENDED。"""
+    """全 job 已终态（传入的 run 级也是终态）时投影把每个 job 写成 running、run 级写成 running（ADR 0034 机制三「投影写的 run 状态按
+    0031 决定三的取法给出」段）：job 与 run 的终态只由终态写写下，若投影提前写下 run 终态，紧接的终态写会被它挡成 ALREADY_ENDED。
+    随后的终态写要记下全部 job 才使 run 成为终态：只记下 b 时 run 仍未结束（OPEN），再记下 a 才得 ENDED_RUN。"""
     from gherkai_core.run_status import CommitOutcome
 
     meta = _meta()
@@ -459,36 +451,82 @@ def test_projection_never_lands_terminal_run_status(run_store):
                         jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.FAILED)},
                         high_water_mark=9)
     assert run_store.project_state("run-1", all_done) is True
-    assert run_store.load_run_state("run-1").status == Status.RUNNING  # 不是 passed/failed
-    assert run_store.commit_job_states("run-1", [JobState("b", Status.FAILED)], ended_at="t1") is CommitOutcome.ENDED_RUN
-    assert run_store.load_run_state("run-1").status == Status.FAILED
+    landed = run_store.load_run_state("run-1")
+    assert landed.status == Status.RUNNING  # 不是 passed/failed
+    assert landed.jobs == {"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)}
+    assert run_store.commit_job_states("run-1", [JobState("b", Status.FAILED)], ended_at="t0") is CommitOutcome.OPEN
+    assert run_store.load_run_state("run-1").status == Status.RUNNING
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED)], ended_at="t1") is CommitOutcome.ENDED_RUN
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at) == (Status.FAILED, "t1")
 
 
-# ---------- 机制三：finalize 单调 ----------
+# ---------- 机制三②：投影不越过 running，run 状态只随把 job 写成 running 的那次写 ----------
 
-def test_finalize_from_nonterminal_succeeds(run_store):
-    """非终态（pending/running）→ finalize 成功写终态。"""
+@pytest.mark.parametrize("result", [Status.PASSED, Status.FAILED, Status.ERROR, Status.SKIPPED, Status.ABORTED])
+def test_projection_lands_a_job_with_a_result_as_running(run_store, result):
+    """投影里已有结果的 job 在两个 adapter 上都落成 running（ADR 0034 机制三「② 的 job 级半边落地形态」段）：库中已认领的 a 带着投影的
+    会话、保留认领时刻；库中仍是 pending 的 b 同样落成 running；run 级为 running，没有结束时刻。终态只由之后的终态写记下。"""
     meta = _meta()
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.try_finalize("run-1", Status.PASSED, "2026-07-19T01:00:00Z") is True
-    state = run_store.load_run_state("run-1")
-    assert state.status == Status.PASSED and state.ended_at == "2026-07-19T01:00:00Z"
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    projected = RunState(run_id="run-1", status=result, high_water_mark=4,
+                         jobs={"a": JobState("a", result, session_id="sess-a"), "b": JobState("b", result)})
+    assert run_store.project_state("run-1", projected) is True
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"] == JobState("a", Status.RUNNING, session_id="sess-a", claimed_at="2026-08-13T01:02:03Z")
+    assert got.jobs["b"] == JobState("b", Status.RUNNING)
+    assert (got.status, got.ended_at, got.high_water_mark) == (Status.RUNNING, None, 4)
 
 
-def test_double_finalize_rejected(run_store):
-    """关键（机制三）：已终态再 finalize → False（commit 恰一次、幂等），不刷回、不重复触发 report。"""
+def _no_jobs(run_store) -> RunState:
+    """零个 job 的 run（建 run 的入口不拒绝它）与它的投影。"""
+    meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(), deadline_at="2026-01-01T01:00:00+00:00")
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    return RunState(run_id="run-1", status=Status.PASSED, jobs={}, high_water_mark=2)
+
+
+def _all_pending_before_any_claim(run_store) -> RunState:
     meta = _meta()
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.try_finalize("run-1", Status.PASSED, "t1") is True
-    # 第二个实例也见全终态、也想 finalize（如写 error）→ 被挡，库里仍是首次的 passed/t1
-    assert run_store.try_finalize("run-1", Status.ERROR, "t2") is False
-    state = run_store.load_run_state("run-1")
-    assert state.status == Status.PASSED and state.ended_at == "t1"
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    return RunState(run_id="run-1", status=Status.PENDING, high_water_mark=2,
+                    jobs={"a": JobState("a", Status.PENDING, session_id="sess-a"), "b": JobState("b", Status.PENDING)})
 
 
-def test_finalize_missing_run_fails(run_store):
-    """未 create 的 run → finalize False（不崩、不臆造）。"""
-    assert run_store.try_finalize("nope", Status.PASSED, "t") is False
+def _all_pending_after_a_claim(run_store) -> RunState:
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
+    return RunState(run_id="run-1", status=Status.PENDING, high_water_mark=2,
+                    jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING, session_id="sess-b")})
+
+
+def _only_jobs_already_terminal(run_store) -> RunState:
+    from gherkai_core.run_status import CommitOutcome
+
+    meta = _meta("run-1", "a", "b", "c")
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    for sid in ("a", "b"):
+        assert run_store.try_claim_job("run-1", sid, claimed_at="2026-08-13T01:02:03Z") is True
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED), JobState("b", Status.FAILED)],
+                                       ended_at="t1") is CommitOutcome.OPEN
+    return RunState(run_id="run-1", status=Status.ERROR, high_water_mark=2,
+                    jobs={"a": JobState("a", Status.ERROR, session_id="other"), "b": JobState("b", Status.RUNNING)})
+
+
+@pytest.mark.parametrize("seed", [_no_jobs, _all_pending_before_any_claim, _all_pending_after_a_claim,
+                                  _only_jobs_already_terminal],
+                         ids=["no-jobs", "all-pending", "all-pending-after-claim", "only-terminal-in-store"])
+def test_projection_writing_no_job_as_running_keeps_the_stored_run_status(run_store, seed):
+    """这次投影没有把任何 job 写成 running 时，run 级与库中原值相同，两个 adapter 对拍：零个 job（取法对空集给出 passed，投影仍不
+    写下终态）、投影里全部 pending（认领之前库中为 pending，认领之后为 running）、投影里已离开 pending 的 job 在库中都已是终态
+    （c 不在投影里、仍为 pending）。投影本身写成，HWM 前进，job 态不变或只多了会话。"""
+    projected = seed(run_store)
+    before = run_store.load_run_state("run-1")
+    assert run_store.project_state("run-1", projected) is True
+    got = run_store.load_run_state("run-1")
+    assert (got.status, got.ended_at, got.high_water_mark) == (before.status, None, 2)
+    assert {sid: js.status for sid, js in got.jobs.items()} == {sid: js.status for sid, js in before.jobs.items()}
 
 
 def test_projection_without_baseline_keeps_stored_lineage(run_store):
@@ -523,20 +561,23 @@ def test_projection_with_unknown_scope_is_ignored_not_invented(run_store):
                          started_at="2026-07-19T00:00:00Z", high_water_mark=1)
     assert run_store.project_state("run-1", projected) is True
     got = run_store.load_run_state("run-1")
-    assert set(got.jobs) == {"a", "b"} and got.jobs["a"].status == Status.PASSED
+    assert set(got.jobs) == {"a", "b"} and got.jobs["a"].status == Status.RUNNING  # 投影不越过 running
 
 
 def test_bare_pending_projection_leaves_stored_job_unchanged(run_store):
     """投影里的 job 为 pending 且无会话、无认领时刻时，库中该 job 原为 pending、已 claim 的 running、终态还是不在 Map 里，
     落库结果都等于投影前库中该 job 的值（不在 Map 里时仍不在）。DDB 对这类 job 不发写、local 照常合并（ADR 0034 机制三
     「逐 job 写跳过无效果的 pending 项」段），两 adapter 对拍。"""
+    from gherkai_core.run_status import CommitOutcome
+
     meta = _meta("run-1", "p", "r", "t")
     run_store.create_run(meta, _initial(meta, hwm=0))
     seeded = RunState(run_id="run-1", status=Status.RUNNING,
                       jobs={"p": JobState("p", Status.PENDING), "r": JobState("r", Status.PENDING),
-                            "t": JobState("t", Status.PASSED, session_id="sess-t")},
+                            "t": JobState("t", Status.RUNNING, session_id="sess-t")},
                       high_water_mark=1)
     assert run_store.project_state("run-1", seeded) is True
+    assert run_store.commit_job_states("run-1", [JobState("t", Status.PASSED)], ended_at="t1") is CommitOutcome.OPEN
     assert run_store.try_claim_job("run-1", "r", claimed_at="2026-08-13T01:02:03Z") is True
     before = run_store.load_run_state("run-1").jobs
     assert {sid: js.status for sid, js in before.items()} == {
@@ -609,34 +650,11 @@ def test_ddb_claim_is_one_write_setting_job_and_run_status(aws, monkeypatch):
     assert "jobs.#sid.#st=:pending" in condition and "#stIN(:pending,:running)" in condition
 
 
-def test_ddb_finalize_with_expected_claim_count_is_one_conditional_write(aws, monkeypatch):
-    """DDB 侧带期望认领计数的收尾只发一次 update_item，计数的判定在条件表达式里，不是先读再写；
-    不给期望计数时条件里不提计数。"""
-    store, calls = _ddb_store_counting_updates(aws, monkeypatch)
-    meta = _meta()
-    store.create_run(meta, _initial(meta))
-    assert store.try_claim_job("run-1", "a") is True
-    calls.clear()
-    assert store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=2) is False
-    assert store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=1) is True
-    assert len(calls) == 2
-    for call in calls:
-        condition = call["ConditionExpression"].replace(" ", "")
-        assert "#cc=:ecc" in condition and call["ExpressionAttributeNames"]["#cc"] == "claim_count"
-    assert [c["ExpressionAttributeValues"][":ecc"] for c in calls] == [2, 1]
-
-    meta2 = _meta("run-2")
-    store.create_run(meta2, _initial(meta2))
-    calls.clear()
-    assert store.try_finalize("run-2", Status.PASSED, "t1") is True
-    assert "claim_count" not in calls[0]["ExpressionAttributeNames"].values()
-
-
 def test_ddb_job_write_update_item_counts(aws, monkeypatch):
     """DDB 侧 `update_job_state` 恒只发一次 update_item（ADR 0034 机制三「run 级状态只进不退」条③与「两端对拍口径」条；ADR 0054
-    决策五）：run 未结束时写成；库中这个 job 已是终态、不在 Map 里时这一次被挡下，不再写；run 已结束时（job 未结束或已结束）这一次被
-    挡下、返回 False，没有只写 job 的第二次写；STATE 不存在时一次之后报错。参数错误不发写。被挡下的原因由这次写带回的条目分辨，
-    不另读。"""
+    决策五）：run 未结束时写成；库中这个 job 已是终态、不在 Map 里时这一次被挡下，不再写；run 已结束时（job 由结束写或由终态写结束）
+    这一次被挡下、返回 False，没有只写 job 的第二次写；STATE 不存在时一次之后报错。参数错误不发写。被挡下的原因由这次写带回的条目
+    分辨，不另读。"""
     from gherkai_core.run_status import CommitOutcome
 
     store, calls = _ddb_store_counting_updates(aws, monkeypatch)
@@ -652,12 +670,15 @@ def test_ddb_job_write_update_item_counts(aws, monkeypatch):
     assert (got.jobs["a"], got.jobs["b"].status, set(got.jobs)) == (
         JobState("a", Status.RUNNING, session_id="s"), Status.PASSED, {"a", "b"})
 
-    assert store.try_finalize("run-1", Status.FAILED, "t1") is True
-    for js in (JobState("a", Status.RUNNING), JobState("b", Status.RUNNING)):  # a 未结束、b 已结束
+    from gherkai_core.run_status import RUN_ENDINGS
+    ending = RUN_ENDINGS["settle-advancer-exited"]
+    assert store.end_run("run-1", ending, ended_at="t1") is True
+    for js in (JobState("a", Status.RUNNING), JobState("b", Status.RUNNING)):  # a 由结束写结束、b 由终态写结束
         calls.clear()
         assert store.update_job_state("run-1", js) is False
         assert len(calls) == 1
-    assert store.load_run_state("run-1").jobs["a"] == JobState("a", Status.RUNNING, session_id="s")
+    assert store.load_run_state("run-1").jobs["a"] == JobState("a", Status.ABORTED, session_id="s",
+                                                               message=ending.aborted_message)
 
     calls.clear()
     with pytest.raises(FileNotFoundError):
@@ -716,6 +737,49 @@ def test_ddb_rejected_scalar_write_issues_no_job_writes(aws, monkeypatch):
     assert len(calls) == 1
 
 
+def test_ddb_job_writes_yield_to_a_higher_projection_landing_after_the_scalar_step(aws, monkeypatch):
+    """逐 job 写的 HWM 条件（ADR 0034 机制三「② 的 job 级半边落地形态」段要求的回归护栏）：一次投影（hwm=3）的标量一步写成之后、逐 job
+    写发出之前，另一方以更高 HWM（5）的投影为执行中的 a 写下另一个代表会话。前者余下的逐 job 写都被 HWM 条件挡下：a 留着后到投影的
+    会话，b 不被写回前者的旧会话，库中 HWM 为 5。逐 job 写若只以等级与 run 未结束为条件，a、b 在库中与投影里同为 running，旧值会被
+    写回。先后由包住被测表对象的 update_item 固定，不靠线程竞争。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    table = aws["ddb"].Table(aws["table_name"])
+    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    meta = _meta()
+    store.create_run(meta, _initial(meta, hwm=0))
+    for sid in ("a", "b"):
+        assert store.try_claim_job("run-1", sid, claimed_at="2026-08-13T01:02:03Z") is True
+    ccf = table.meta.client.exceptions.ConditionalCheckFailedException
+    real_update = table.update_item
+    log: list[str] = []
+
+    def update_item(**kwargs):
+        try:
+            resp = real_update(**kwargs)
+        except ccf:
+            log.append("rejected")
+            raise
+        log.append("landed")
+        if len(log) == 1:  # 被测投影的标量一步写成之后、逐 job 写发出之前
+            newer = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=5,
+                             jobs={"a": JobState("a", Status.RUNNING, session_id="sess-a-new"),
+                                   "b": JobState("b", Status.RUNNING)})
+            assert other.project_state("run-1", newer) is True
+        return resp
+
+    monkeypatch.setattr(table, "update_item", update_item)
+    older = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=3,
+                     jobs={"a": JobState("a", Status.RUNNING, session_id="sess-a-old"),
+                           "b": JobState("b", Status.RUNNING, session_id="sess-b-old")})
+    assert store.project_state("run-1", older) is True  # 标量一步写成即为 True
+    assert log == ["landed", "rejected", "rejected"]
+    got = store.load_run_state("run-1")
+    assert got.high_water_mark == 5
+    assert got.jobs["a"] == JobState("a", Status.RUNNING, session_id="sess-a-new", claimed_at="2026-08-13T01:02:03Z")
+    assert got.jobs["b"] == JobState("b", Status.RUNNING, claimed_at="2026-08-13T01:02:03Z")
+
+
 # ---------- 真 DDB 复验（integration 标记，默认 deselect；需真表 + 真凭证）----------
 # moto 的条件表达式是模拟实现——认领的排他性与 job 级单调条件写是**机制三/四的承重面**（ADR 0034），
 # 绿≠对：这两条在真 DDB 上复验同一语义，只挑「moto 失真就会静默放过」的那两个断言，不复刻全部对拍。
@@ -757,21 +821,24 @@ def test_claim_is_exclusive_on_real_ddb(real_aws):
 
 @pytest.mark.integration
 def test_stale_projection_never_regresses_terminal_job_on_real_ddb(real_aws):
-    """真 DDB 的机制三②：终态 job 不被 stale 投影刷回 running——两道闸各验一遍。
+    """真 DDB 的机制三②：终态写记下的 job 终态不被 stale 投影改回 running，两道闸各验一遍。
 
-    - 同 HWM（task_exited 无数值 seq，两投影 HWM 相等）→ run 级 HWM 闸挡不住，靠 job 级单调条件写挡；
-    - 更小 HWM → run 级 HWM 闸直接挡下整次投影（返回 False）。
-    刷回的后果是永久错态（run=passed 而 job 恒 running），故这两道闸的真 DDB 行为必须实证、不能只信 moto。
+    - 同 HWM（task_exited 无数值 seq，两投影 HWM 相等）：run 级 HWM 闸挡不住，靠 job 级单调条件写挡；
+    - 更小 HWM：run 级 HWM 闸直接挡下整次投影（返回 False）。
+    改回的后果是永久错态（run 为终态而 job 一直 running），故这两道闸的真 DDB 行为必须实证、不能只信 moto。
     """
+    from gherkai_core.run_status import CommitOutcome
+
     rid = _real_run_id(real_aws, "stale")
     store = _real_store(real_aws)
     meta = _meta(rid)
     store.create_run(meta, _initial(meta, hwm=0))
 
     fresh = RunState(run_id=rid, status=Status.RUNNING,
-                     jobs={"a": JobState("a", Status.PASSED), "b": JobState("b", Status.RUNNING)},
+                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
                      high_water_mark=3)
     assert store.project_state(rid, fresh) is True
+    assert store.commit_job_states(rid, [JobState("a", Status.PASSED)], ended_at="t1") is CommitOutcome.OPEN
 
     same_hwm = RunState(run_id=rid, status=Status.RUNNING,
                         jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.RUNNING)},
@@ -787,36 +854,21 @@ def test_stale_projection_never_regresses_terminal_job_on_real_ddb(real_aws):
     assert got.jobs["a"].status == Status.PASSED and got.high_water_mark == 3
 
 
-def test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise(run_store):
-    """run 级消息：随 try_finalize 同一次写入、读回原文；不给时读回 None（不写键）；已终态的 run 再带消息 finalize
-    被挡，库里的消息不变。两 adapter 同语义。"""
-    meta = _meta()
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.load_run_state("run-1").message is None
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="提交记录不能由本后端执行：结构版本 2") is True
-    state = run_store.load_run_state("run-1")
-    assert state.status == Status.ERROR and state.message == "提交记录不能由本后端执行：结构版本 2"
-    assert run_store.try_finalize("run-1", Status.PASSED, "t2", message="别人") is False
-    assert run_store.load_run_state("run-1").message == "提交记录不能由本后端执行：结构版本 2"
-
-    meta2 = _meta("run-2", "a")
-    run_store.create_run(meta2, _initial(meta2))
-    assert run_store.try_finalize("run-2", Status.PASSED, "t1") is True
-    assert run_store.load_run_state("run-2").message is None
-
-
 def test_finalized_run_keeps_message_against_later_projection_and_claim(run_store):
-    """run 级消息的边界护栏：已带消息终结的 run，再来更高 HWM 的投影被挡（status、ended_at、message 全不变）；job 认领也不抹掉消息
-    （local 的读改写与 DDB 的逐属性 SET 对拍）。"""
+    """run 级消息的边界护栏：运行定义不可用的结束写带着原因结束的 run，再来更高 HWM 的投影被挡（运行态整份不变，含 status、ended_at、
+    message）；之后的认领同样被挡，不抹掉消息（local 的读改写与 DDB 的逐属性 SET 对拍）。"""
+    from gherkai_core.run_status import definition_unavailable_ending
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    assert run_store.end_run("run-1", definition_unavailable_ending("原因"), ended_at="t1") is True
+    before = run_store.load_run_state("run-1")
+    assert (before.status, before.ended_at, before.message) == (Status.ERROR, "t1", "原因")
     later = RunState(run_id="run-1", status=Status.RUNNING,
                      jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=5)
     assert run_store.project_state("run-1", later) is False
-    state = run_store.load_run_state("run-1")
-    assert (state.status, state.ended_at, state.message) == (Status.ERROR, "t1", "原因")
-    run_store.try_claim_job("run-1", "a", claimed_at="c1")
+    assert run_store.load_run_state("run-1") == before
+    assert run_store.try_claim_job("run-1", "a", claimed_at="c1") is False
     assert run_store.load_run_state("run-1").message == "原因"
 
 
@@ -824,11 +876,13 @@ def test_finalized_run_keeps_message_against_later_projection_and_claim(run_stor
 
 def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
     """对已有的 run 再建抛 FileExistsError：definition 与运行态都不变——不论再建时给的 definition、初始运行态是否不同，
-    也不论这个 run 已推进到哪一步（这里已认领、已收尾）。没有整份重写运行态的入口，终态不会被一次建 run 改回 pending。"""
+    也不论这个 run 已推进到哪一步（这里已认领、已由结束写结束）。没有整份重写运行态的入口，终态不会被一次建 run 改回 pending。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
     meta = _meta()
     run_store.create_run(meta, _initial(meta))
     assert run_store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
     meta_before, state_before = run_store.load_run_meta("run-1"), run_store.load_run_state("run-1")
 
     other = _meta("run-1", "x")
@@ -838,11 +892,13 @@ def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
     assert run_store.load_run_state("run-1") == state_before
 
 
-# ---------- 认领计数 ----------
+# ---------- 认领计数（ADR 0034 机制三「run 级状态只进不退」条①：只作诊断，不作任何写的条件）----------
 
 def test_claim_count_starts_at_zero_and_counts_successful_claims_only(run_store):
-    """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已收尾）都不改它
+    """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已结束）都不改它
     （ADR 0034 机制三「run 级状态只进不退」条①）。"""
+    from gherkai_core.run_status import RUN_ENDINGS
+
     meta = _meta("run-1", "a", "b", "c")
     run_store.create_run(meta, _initial(meta))
     assert run_store.load_run_state("run-1").claim_count == 0
@@ -852,8 +908,8 @@ def test_claim_count_starts_at_zero_and_counts_successful_claims_only(run_store)
     assert run_store.try_claim_job("run-1", "a") is False  # 已非 pending
     assert run_store.try_claim_job("run-1", "ghost") is False  # 不在 definition 里
     assert run_store.load_run_state("run-1").claim_count == 2
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1") is True
-    assert run_store.try_claim_job("run-1", "c") is False  # run 已收尾
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
+    assert run_store.try_claim_job("run-1", "c") is False  # run 已结束
     assert run_store.load_run_state("run-1").claim_count == 2
 
 
@@ -882,10 +938,11 @@ def test_claim_count_is_left_alone_by_the_other_write_entries(run_store):
 
 @pytest.fixture
 def raw_run_store(request, tmp_path, aws):
-    """对拍用的 adapter，连同改写库中原始记录的两个手段（附加键、删掉认领计数），两端各一套。
+    """对拍用的 adapter，连同改写库中原始记录的两个手段（写顶层键、删掉认领计数），两端各一套。
 
     产出 (store, set_extra(run_id, key, value), get_extra(run_id, key), drop_claim_count(run_id))。本机直接改 run_state.json 的
     顶层键，云端直接改 STATE item 的顶层属性：附加键只能这样造（模型里没有它），缺认领计数的记录同样只能这样造（写端恒写）。
+    set_extra 也能改写模型里的顶层键，用来造出经端口写不出的记录形态（run 已结束而 job 仍 pending）。
     """
     import json
 
@@ -924,7 +981,7 @@ _both = pytest.mark.parametrize("raw_run_store", ["local", "ddb"], indirect=True
 
 @_both
 def test_missing_claim_count_reads_as_zero_and_claims_count_from_it(raw_run_store):
-    """缺认领计数的记录读作 0，认领从 0 起算得 1；期望计数为 0 的收尾写在缺键的记录上成立（两端同一口径）。"""
+    """缺认领计数的记录读作 0，认领从 0 起算得 1（两端同一口径）。"""
     store, _set, get_extra, drop_claim_count = raw_run_store
     meta = _meta()
     store.create_run(meta, _initial(meta))
@@ -935,48 +992,26 @@ def test_missing_claim_count_reads_as_zero_and_claims_count_from_it(raw_run_stor
     assert store.try_claim_job("run-1", "a") is True
     assert store.load_run_state("run-1").claim_count == 1
 
-    meta2 = _meta("run-2")
-    store.create_run(meta2, _initial(meta2))
-    drop_claim_count("run-2")
-    assert store.try_finalize("run-2", Status.ERROR, "t1", expected_claim_count=1) is False
-    assert store.try_finalize("run-2", Status.ERROR, "t1", expected_claim_count=0) is True
 
+# ---------- 只剩「run 未结束」一项条件挡下的写 ----------
 
-def test_finalize_with_expected_claim_count_lands_only_on_an_equal_count(run_store):
-    """收尾写带期望的认领计数时，只在库中计数等于它时写成；不等时不写、运行态整份不变。不给时不判计数，与原行为相同。
-    run 已收尾时即使计数相等也写不成。"""
-    meta = _meta("run-1", "a", "b", "c")
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.try_claim_job("run-1", "a") is True
-    before = run_store.load_run_state("run-1")
-    assert before.claim_count == 1
-    for stale in (0, 2):
-        assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="m", expected_claim_count=stale) is False
-        assert run_store.load_run_state("run-1") == before
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", message="m", expected_claim_count=1) is True
-    got = run_store.load_run_state("run-1")
-    assert (got.status, got.ended_at, got.message, got.claim_count) == (Status.ERROR, "t1", "m", 1)
-    assert run_store.try_finalize("run-1", Status.PASSED, "t2", expected_claim_count=1) is False
-
-    meta2 = _meta("run-2")
-    run_store.create_run(meta2, _initial(meta2))
-    assert run_store.try_claim_job("run-2", "a") is True
-    assert run_store.try_claim_job("run-2", "b") is True
-    assert run_store.try_finalize("run-2", Status.PASSED, "t1") is True  # 不给期望计数：计数为 2 也照常写成
-
-
-def test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_after_the_read(run_store):
-    """到期收尾的竞态：一方读到运行态（计数 n）之后另一方的认领落下，前者以 n 为条件的收尾
-    被挡、run 不结束，新认领的 job 仍是 running；以新读到的计数重试才写成。"""
-    meta = _meta("run-1", "a", "b")
-    run_store.create_run(meta, _initial(meta))
-    assert run_store.try_claim_job("run-1", "a") is True
-    seen = run_store.load_run_state("run-1")
-    assert run_store.try_claim_job("run-1", "b", claimed_at="2026-08-13T01:02:03Z") is True  # 另一方的认领落在读之后
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=seen.claim_count) is False
-    got = run_store.load_run_state("run-1")
-    assert got.status == Status.RUNNING and got.jobs["b"] == JobState("b", Status.RUNNING, claimed_at="2026-08-13T01:02:03Z")
-    assert run_store.try_finalize("run-1", Status.ERROR, "t1", expected_claim_count=got.claim_count) is True
+@_both
+def test_writes_rejected_by_the_ended_run_alone(raw_run_store):
+    """run 级已是终态而 b 仍 pending 的记录（经端口写不出：结束写总会结束未结束的 job，这里直接改库造出）：认领 b、给 b 的执行中写与
+    把 b 写成 running 的投影都写不成，运行态整份不变，认领与执行中写返回 False（ADR 0034 机制三「run 级状态只进不退」条①③，ADR 0054
+    决策五）。job 级的条件此时都成立，挡下这三次写的只有 run 级那一项。"""
+    store, set_extra, _get, _drop = raw_run_store
+    meta = _meta()
+    store.create_run(meta, _initial(meta, hwm=0))
+    set_extra("run-1", "status", Status.ERROR.value)
+    before = store.load_run_state("run-1")
+    assert (before.status, before.jobs["b"].status) == (Status.ERROR, Status.PENDING), "前提：run 已结束而 job 仍 pending"
+    assert store.try_claim_job("run-1", "b", claimed_at="2026-08-13T03:00:00Z") is False
+    assert store.update_job_state("run-1", JobState("b", Status.RUNNING, session_id="late")) is False
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=1,
+                         jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.RUNNING, session_id="late")})
+    assert store.project_state("run-1", projected) is False
+    assert store.load_run_state("run-1") == before
 
 
 # ---------- 顶层附加键整体保留（ADR 0030 决定四「local 的顶层附加键整体保留」）----------
@@ -999,10 +1034,6 @@ def _project(store):
     assert store.project_state("run-1", projected) is True
 
 
-def _finalize(store):
-    assert store.try_finalize("run-1", Status.ERROR, "t1", message="原因") is True
-
-
 def _commit(store):
     from gherkai_core.run_status import CommitOutcome
     assert store.try_claim_job("run-1", "a", claimed_at="2026-08-13T01:02:03Z") is True
@@ -1016,9 +1047,8 @@ def _end(store):
 
 
 @_both
-@pytest.mark.parametrize("write", [_job_write, _claim, _project, _finalize, _commit, _end],
-                         ids=["update_job_state", "try_claim_job", "project_state", "try_finalize", "commit_job_states",
-                              "end_run"])
+@pytest.mark.parametrize("write", [_job_write, _claim, _project, _commit, _end],
+                         ids=["update_job_state", "try_claim_job", "project_state", "commit_job_states", "end_run"])
 def test_each_write_entry_keeps_top_level_extras(raw_run_store, write):
     """运行态记录顶层不属于 RunState 模型的键（这里是一个发起进程标识形态的对象与后台执行标记）经每个写入口原样保留：
     本机在锁内读到的文件里整体带回，云端 update_item 本来就不碰未提及的属性。每个写入口都确认写成，免得保留是因为没写。"""

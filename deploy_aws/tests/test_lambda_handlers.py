@@ -487,7 +487,7 @@ def test_handle_timeout_waits_until_deadline_when_triggered_early(tmp_path, monk
     ("2026-11-08T10:05:00.000001+00:00", []),
 ], ids=["exactly-at-the-cutoff", "one-microsecond-after"])
 def test_handle_timeout_stops_only_after_reading_a_time_strictly_later_than_the_cutoff(tmp_path, monkeypatch, now, slept):
-    """已到指读到的墙钟严格晚于截止时刻，与本机启动器的检查、收尾投影比较退出时刻的取法相同（ADR 0054 决策二「已过」的定义）。触发时
+    """已到指读到的墙钟严格晚于截止时刻，与本机启动器的检查、投影比较退出时刻的取法相同（ADR 0054 决策二「已过」的定义）。触发时
     读到的恰好是截止时刻 10:05:00：不停 task，再等一个固定的短时长，醒来读到晚于截止时刻才停；晚 1 微秒即已到，不等待、直接停。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
@@ -850,8 +850,8 @@ def test_tick_runs_branches_on_tick_outcome(monkeypatch):
 
 def test_tick_runs_writes_the_report_from_the_committed_tick_result(monkeypatch):
     """这一方的写使 run 成为终态时，报告由这一方生成（ADR 0034 机制三「run 级状态只进不退」条④ K2）：_tick_runs 把这个 run 的
-    运行定义、RunStore、tick 交还的那一份判定明细与这个 run 的报告落点交给从记录生成报告的入口，状态由入口读运行态取得，不另读事件
-    重算；生成的时刻取组合根的墙钟。"""
+    运行定义、RunStore、tick 交还的那一份判定明细、这个 run 的报告落点与判定存储交给从记录生成报告的入口，状态由入口读运行态取得，
+    较早轮次写下终态的 job 的明细由入口从判定存储读回，不另读事件重算；生成的时刻取组合根的墙钟。"""
     import gherkai_core.reconcile as _cr
     from gherkai_core.model import JobResult
     from gherkai_core.serialize import instant_from_iso
@@ -870,7 +870,7 @@ def test_tick_runs_writes_the_report_from_the_committed_tick_result(monkeypatch)
     reconciler._tick_runs({"run-1"}, "reconciler", prebuilt={"run-1": built})
     [(args, kwargs)] = reports
     assert args[0] is meta and args[1] is run_store and args[2] is details and args[3] == "PSTORE"
-    assert set(kwargs) == {"created_at"}
+    assert set(kwargs) == {"result_store", "created_at"} and kwargs["result_store"] == "RSTORE"
     instant_from_iso(kwargs["created_at"])  # 记录写法的时刻（带时区），解析不了即抛
 
 
@@ -952,12 +952,12 @@ def _seed_run(runs_table, *, detached: bool, max_concurrency: int | None = None,
 
 
 def test_reconciler_noop_for_non_detached_run(cloud_env):
-    """同步 cloud run 的 events 触发 reconciler → 零 claim / 零 launch / 零 finalize（否则与进程内 schedule 双开）。"""
+    """同步 cloud run 的 events 触发 reconciler → 零 claim / 零 launch / 零终态写（否则与进程内 schedule 双开）。"""
     store = _seed_run(cloud_env["runs"], detached=False)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
     state = store.load_run_state("run-1")
     assert state.jobs["a"].status == Status.PENDING   # 零认领
-    assert state.status == Status.PENDING             # 零投影写、零 finalize（仍是 create_run 的初态）
+    assert state.status == Status.PENDING             # 零投影写、零终态写（仍是 create_run 的初态）
     # 零 launch：launch 真被调过则 tick 的失败补偿会往 events 表写一条 exit 记录（moto 无 task-def，RunTask 必失败）
     assert cloud_env["events"].scan()["Count"] == 0
 
@@ -1069,7 +1069,7 @@ def test_finished_run_gate_keys_on_the_committed_run_status_only(cloud_env):
     store, s3 = _seed_finished_run(cloud_env, status=Status.RUNNING)
     before = _report_bytes(s3)
     reconciler.handler({"Records": [_stream_record("run-1#a")]}, None)
-    assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真实运行到 finalize（exit=0 无 scope_done → error）
+    assert store.load_run_state("run-1").status == Status.ERROR  # 本 tick 真实运行到终态写（exit=0 无 scope_done → error）
     assert _report_bytes(s3) != before                           # 判定真值与报告由本 tick 写出
 
 
@@ -1312,60 +1312,78 @@ def test_build_without_tunnel_injects_no_warmup_env(cloud_env):
     assert "GHERKAI_SESSION_WARMUP_URL" not in env and "GHERKAI_EXTRA_HTTP_HEADERS" not in env
 
 
-def test_build_marks_run_error_when_definition_lacks_worker_task_defs(cloud_env, capsys):
-    """云端 definition 缺 worker_task_defs 是定义违约（ADR 0037 决策 7 不留兼容分支）：不按默认指针解析、不推进，run 标 error 并记诊断。"""
+@pytest.mark.parametrize("claimed", [False, True], ids=["pending-job", "running-job"])
+def test_build_ends_the_run_with_the_error_ending_when_definition_lacks_worker_task_defs(cloud_env, capsys, claimed):
+    """云端 definition 缺 worker_task_defs 是定义违约（ADR 0037 决策 7 不留兼容分支）：不按默认指针解析、不推进，记诊断，以结束写的
+    error 变体结束 run（ADR 0031 决定三「结束写」小节「运行定义不可用时」条）：没有启动的与执行中的 job 都记 error，run 级与 job 级
+    说明都是同一句原因，与本机后台推进进程同一句；这一写不生成报告。"""
+    import boto3
+    from gherkai_core.run_status import NO_WORKER_IMAGES_REASON
+
     _seed_worker_ssm(variant="login", revision_arn="arn:must-not-be-used:9")
     store = _seed_run(cloud_env["runs"], detached=True, worker_task_defs=None)
+    if claimed:
+        assert store.try_claim_job("run-1", "a", claimed_at="2026-09-01T00:00:00+00:00") is True
     assert reconciler._build("run-1") is None
-    assert store.load_run_state("run-1").status == Status.ERROR
+    state = store.load_run_state("run-1")
+    assert (state.status, state.message) == (Status.ERROR, NO_WORKER_IMAGES_REASON)
+    assert (state.jobs["a"].status, state.jobs["a"].message) == (Status.ERROR, NO_WORKER_IMAGES_REASON)
+    assert state.ended_at is not None
     out = capsys.readouterr().out
     assert "不推进、标为 error" in out and "worker-compat" not in out
+    listed = boto3.client("s3", region_name="us-east-1").list_objects_v2(Bucket=_BUCKET, Prefix="reports/run-1/")
+    assert listed.get("Contents", []) == []  # 不存明细、不生成报告
 
 
-def test_load_definition_marks_error_on_schema_or_contract_violation_and_passes_good_ones(capsys):
-    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：标 error（try_finalize ERROR）、记诊断、返回 None；正常 definition 原样返回；
-    不存在的 run 忽略、不标。"""
+def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes_good_ones(capsys):
+    """结构版本不是本后端认的、定义形态违约、缺 worker_task_defs：以结束写的 error 变体结束 run（`end_run` 收到运行定义不可用的变体，
+    原因是 run_status 里的那一句）、记诊断、返回 None；正常 definition 原样返回；不存在的 run 忽略、不写。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
     from gherkai_core.model import RunMeta
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, NO_WORKER_IMAGES_REASON, schema_mismatch_reason
+    from gherkai_core.serialize import instant_from_iso
 
     class _Store:
         def __init__(self, *, exc=None, meta=None):
-            self.exc, self.meta, self.finalized = exc, meta, []
+            self.exc, self.meta, self.ended = exc, meta, []
 
         def load_run_meta(self, run_id):
             if self.exc is not None:
                 raise self.exc
             return self.meta
 
-        def try_finalize(self, run_id, status, ended_at, *, message=None):
-            self.finalized.append((run_id, status))
-            self.message = message
+        def end_run(self, run_id, ending, *, ended_at):
+            instant_from_iso(ended_at)  # 记录写法的时刻，解析不了即抛
+            self.ended.append((run_id, ending.definition_unavailable, ending.ends_running_jobs))
+            self.message = ending.run_message
             return True
 
+    unavailable = [("r", True, True)]
     s = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="9.9.0"))
-    assert reconciler._load_definition(s, "r") is None and s.finalized == [("r", Status.ERROR)]
+    assert reconciler._load_definition(s, "r") is None and s.ended == unavailable
     out = capsys.readouterr().out
     assert "9.9.0" in out and out.startswith("reject: run r ")  # 诊断行按事件种类起前缀，与 skip: / timeout-stop: 同一风格
-    # run 级消息随终态写入、status 可见：产品语言整句（谁写的、两边各第几版、怎么办），不是异常原文
+    # run 级说明随终态写入、status 可见：产品语言整句（谁写的、两边各第几版、怎么办），不是异常原文
+    assert s.message == schema_mismatch_reason(2, 1, "9.9.0")
     assert s.message.startswith("提交记录由更新版本的 gherkai 9.9.0 写出") and "第 2 版" in s.message and "重新提交" in s.message
     s2 = _Store(exc=DefinitionContractError("definition 里的 job 缺键 target"))
-    assert reconciler._load_definition(s2, "r") is None and s2.finalized == [("r", Status.ERROR)]
-    assert s2.message.startswith("提交记录不完整或形态不对") and "缺键 target" not in s2.message  # 契约异常的原文只进诊断行
+    assert reconciler._load_definition(s2, "r") is None and s2.ended == unavailable
+    assert s2.message == DEFINITION_CONTRACT_REASON and "缺键 target" not in s2.message  # 契约异常的原文只进诊断行
     assert "缺键 target" in capsys.readouterr().out
     s_old = _Store(exc=UnsupportedDefinitionSchema(0, 1, cli_version="1.4.9"))
     assert reconciler._load_definition(s_old, "r") is None and s_old.message.startswith("提交记录由更早版本的 gherkai 1.4.9 写出")
-    # 写端版本来自提交记录、不受信：损坏成超长文本也不能把 message 撑大（ADR 0037 决策 7「有界」）
+    # 写端版本来自提交记录、不受信：损坏成超长文本也不能把说明撑大（ADR 0037 决策 7「有界」）
     s_long = _Store(exc=UnsupportedDefinitionSchema(2, 1, cli_version="v" * 5000))
     reconciler._load_definition(s_long, "r")
     assert len(s_long.message) < 300 and "v" * 41 not in s_long.message and "v" * 40 in s_long.message
     s3 = _Store(meta=RunMeta(run_id="r", created_at="t", jobs=(), deadline_at="2999-01-01T00:00:00+00:00"))
-    assert reconciler._load_definition(s3, "r") is None and s3.finalized == [("r", Status.ERROR)]
-    assert "worker 镜像版本" in s3.message
+    assert reconciler._load_definition(s3, "r") is None and s3.ended == unavailable
+    assert s3.message == NO_WORKER_IMAGES_REASON
     ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"}, deadline_at="2999-01-01T00:00:00+00:00")
     s4 = _Store(meta=ok)
-    assert reconciler._load_definition(s4, "r") is ok and s4.finalized == []
+    assert reconciler._load_definition(s4, "r") is ok and s4.ended == []
     s5 = _Store(meta=None)
-    assert reconciler._load_definition(s5, "r") is None and s5.finalized == []
+    assert reconciler._load_definition(s5, "r") is None and s5.ended == []
 
 
 def test_kicker_uses_definition_worker_task_defs(cloud_env):
@@ -1437,7 +1455,7 @@ def test_exit_from_task_is_shared_by_observer_and_timeout_handler():
 
 
 # ---------- 退出时刻（ADR 0054 决策二后台推进条「截止时刻与说明」、实测项 10 到 12）----------
-# 退出记录带 task 的执行停止时刻，是否已过截止时刻由收尾投影判断。同一个时刻在两种来源里形态不同：STOPPED 事件的 detail 里是 ISO 串，
+# 退出记录带 task 的执行停止时刻，是否已过截止时刻由投影判断。同一个时刻在两种来源里形态不同：STOPPED 事件的 detail 里是 ISO 串，
 # DescribeTasks 的应答经 botocore 解析之后是带本机时区的 datetime（ECS 的 JSON 协议里传的是纪元秒）。下面几条的 job 在 10:00:00 被
 # 认领、预算 300 秒，截止时刻是 10:05:00。
 
@@ -1551,7 +1569,7 @@ _JUDGED_ENGINE_ERROR = ("error", "engine_error", "worker 非正常退出（退�
 def test_task_exiting_on_its_own_is_judged_by_its_exit_time_through_the_real_tick(cloud_env, execution_stopped, stopped,
                                                                                   expected):
     """实测项 11 的本地一半（moto，真实的观察者与推进 Lambda）：task 在截止时刻之后、停止请求发出之前自己以 3 退出，STOPPED 事件里
-    没有超时哨兵，观察者只记退出码与执行停止时刻；收尾投影按退出时刻晚于截止时刻判为超时，说明是预算那一句，与前台同一情形相同。
+    没有超时哨兵，观察者只记退出码与执行停止时刻；投影按退出时刻晚于截止时刻判为超时，说明是预算那一句，与前台同一情形相同。
     在截止时刻之前这样退出时按退出码归因。执行停止时刻读不出（不带时区）时按 ECS 记下停止的时刻判断。"""
     import json
     import time

@@ -3171,7 +3171,7 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
     """在 tmp_path/reports 下搭一个 run：run_meta/run_state + 一份 JobResult（+ 真 evidence.json）。
 
     evidence=None → step 2 不挂 evidence ref（no_ref）；evidence_text 给非 JSON 串 → unreadable；
-    with_results=False → 只落 run_meta/run_state（detached run 未 finalize 的零文件形态）；
+    with_results=False → 只落 run_meta/run_state（后台 run 还没有 job 得出结果时的零文件形态）；
     job_only=True → JobResult 有 job 级判定但零 step 记录（worker 没起来/起来就被掐）；
     job 给了就替换默认的 `_explain_job()`（scenario id 与 step 数须与之一致，判定记录照默认那份搭）。
     """
@@ -3429,10 +3429,10 @@ def test_explain_named_scope_ended_without_detail_shows_the_recorded_status(tmp_
     assert rc == 2 and "未找到 scope：c" in err
 
 
-def test_explain_named_scope_ended_by_the_projection_while_the_run_is_running_says_not_landed(tmp_path, capsys):
-    """后台推进的 run 仍为 running、a 已被投影写成终态而判定明细还没有存下（明细在使 run 成为终态的那一轮才存）：点名 a 照旧给
-    「判定明细尚未落地」的提示、退出码 0，`--json` 的 scopes 为空，与不点名时的说法相同；不按运行态给出 a 的状态，免得读者以为
-    这个 job 没有判定明细。"""
+def test_explain_named_scope_still_running_while_the_run_is_running_says_not_landed(tmp_path, capsys):
+    """后台推进的 run 仍为 running、a 已被认领、仍在执行，还没有判定明细（明细在它得出结果的那一轮、写下终态之前才存下）：点名 a 给
+    「判定明细尚未落地」的提示、退出码 0，`--json` 的 scopes 为空，与不点名时的说法相同；不按运行态给出 a 的状态，也不报「未找到
+    scope」。"""
     from gherkai_core.model import RunMeta, RunState
 
     root = tmp_path / "reports"
@@ -3445,11 +3445,8 @@ def test_explain_named_scope_ended_by_the_projection_while_the_run_is_running_sa
                                   jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)}))
     assert run_store.try_claim_job(run_id, "a", claimed_at="2026-09-10T08:06:31+00:00") is True
     assert run_store.try_claim_job(run_id, "b", claimed_at="2026-09-10T08:06:31+00:00") is True
-    assert run_store.project_state(run_id, RunState(
-        run_id=run_id, status=Status.RUNNING, high_water_mark=5,
-        jobs={"a": JobState("a", Status.FAILED), "b": JobState("b", Status.RUNNING)})) is True
     state = run_store.load_run_state(run_id)
-    assert state.status == Status.RUNNING and state.jobs["a"].status == Status.FAILED  # 构造的前提
+    assert state.status == Status.RUNNING and state.jobs["a"].status == Status.RUNNING  # 构造的前提
 
     rc, out, err = _explain(capsys, root, run_id, "a")
     assert rc == 0 and out == "" and "判定明细尚未落地" in err and m.render._NO_DETAIL not in err
@@ -3459,10 +3456,46 @@ def test_explain_named_scope_ended_by_the_projection_while_the_run_is_running_sa
     assert doc["run_id"] == run_id and doc["status"] == "running" and doc["scopes"] == []
     rc, out, err = _explain(capsys, root, run_id)
     assert rc == 0 and out == "" and "判定明细尚未落地" in err
+    rc, _out, err = _explain(capsys, root, run_id, "c")  # 这个 run 里没有的 scope：一份明细都没有时同样以退出码 2 结束
+    assert rc == 2 and "未找到 scope：c" in err
+
+
+def test_explain_named_scope_still_running_after_another_job_landed_says_not_landed(tmp_path, capsys):
+    """run 仍为 running，b 已得出结果（先存明细、再由终态写记下），a 仍在执行：点名 a 给「判定明细尚未落地」的提示、退出码 0，
+    `--json` 的 scopes 为空，不因 b 已有明细而报「未找到 scope」；不点名时照常给出 b 的明细；点名这个 run 里没有的 scope 以退出码 2
+    结束。"""
+    from gherkai_core.model import RunMeta, RunState
+
+    root = tmp_path / "reports"
+    run_id = "20260910T080630Z-9fa264"
+    a, b = _explain_job(scope_id="a"), _explain_job(scope_id="b")
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(a, b),
+                                 deadline_at="2026-09-10T09:06:30+00:00"),
+                         RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
+                                  jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)}))
+    assert run_store.try_claim_job(run_id, "a", claimed_at="2026-09-10T08:06:31+00:00") is True
+    assert run_store.try_claim_job(run_id, "b", claimed_at="2026-09-10T08:06:31+00:00") is True
+    result_store.save_job_result(run_id, JobResult(job=b, status=Status.PASSED))
+    assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED)], ended_at="t5") == CommitOutcome.OPEN
+    state = run_store.load_run_state(run_id)
+    assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (  # 构造的前提
+        Status.RUNNING, Status.RUNNING, Status.PASSED)
+
+    rc, out, err = _explain(capsys, root, run_id, "a")
+    assert rc == 0 and out == "" and "判定明细尚未落地" in err and "未找到 scope" not in err
+    rc, out, err = _explain(capsys, root, run_id, "a", "--json")
+    assert rc == 0 and err == ""
+    doc = json.loads(out)
+    assert doc["run_id"] == run_id and doc["status"] == "running" and doc["scopes"] == []
+    rc, out, err = _explain(capsys, root, run_id)
+    assert rc == 0 and "run 仍在运行，以下为已完成部分" in err and "scope b" in out and "scope a" not in out
+    rc, _out, err = _explain(capsys, root, run_id, "c")
+    assert rc == 2 and "未找到 scope：c（本 run 已落地的 scope：b）" in err
 
 
 def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, capsys):
-    """detached run 进入收尾之前零判定明细（收尾尝试里才落）→ 退出码 0 + 一行提示；--json 不打提示、
+    """detached run 还没有 job 得出结果时零判定明细（明细在每个 job 得出结果时才存下）→ 退出码 0 + 一行提示；--json 不打提示、
     stdout 仍只有一个文档（机读侧靠顶层 status 自明）。"""
     from gherkai_core.model import Status as S
     root, run_id = _explain_run(tmp_path, with_results=False, run_status=S.RUNNING)

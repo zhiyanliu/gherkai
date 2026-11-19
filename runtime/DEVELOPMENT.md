@@ -52,12 +52,13 @@
     `load_feature`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
-  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时经 core 的 `reconcile.write_report_from_record` 从记录生成报告，读运行态与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
+  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告，读运行态与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
+  `end_run_for_unusable_definition`（后台推进进程读不到可用的运行定义时，以结束写的 error 变体结束这个 run，与云端推进器同一写法，句子取 core `run_status` 里的那几句；不存明细、不生成报告，`status --wait` 接力不调它）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
   截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
   还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写；现行设计里管它的进程不在了的 run 不续、
   由别的一方结束，这段接力随实装删除，见 ADR 0054 决策六）+ 隧道事实文件的读写。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
-  worker 在截止时刻之后自己退出时是否按超时处理由 core 的收尾投影判断
+  worker 在截止时刻之后自己退出时是否按超时处理由 core 的投影判断
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
   `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取
   `CLOUD_PER_JOB_TAIL_S`（与 `tunnel_host.CLOUD_PER_JOB_MARGIN_S` 同值）；一次性余量 `STARTUP_MARGIN_S` 为 900 秒

@@ -1,9 +1,12 @@
 """run 的状态只由 job 的终态算出（ADR 0031 决定三）：取法、结束写的说明表，以及两种使 job 成为终态的写对运行态的作用。
 
-- `run_status_of`：run 状态的取法（ADR 0031 决定三「取法」）。两个 RunStore adapter 的每个写入口都在同一次写里按它写 run 状态，后台
-  每一轮的无状态投影（`project.project`）同样按它给出 run 级值；scenario 判定到 job 判定的归约是另一条路径（`project._aggregate`）。
+- `run_status_of`：run 状态的取法（ADR 0031 决定三「取法」）。除投影写之外，两个 RunStore adapter 写下 job 状态的写入口都在同一次写
+  里按它写 run 状态；投影写不按它对整份 jobs 重算，只在把某个 job 写成 running 时写下 running（零个 job 时取法给出 passed，见
+  `RunStore.project_state`）。后台每一轮的无状态推演（`project.project`）同样按它给出 run 级值，推进步骤不把这个值写进记录；scenario
+  判定到 job 判定的归约是另一条路径（`project._aggregate`）。
 - `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
-  `definition_unavailable_ending` 带上读不到定义的原因。
+  `definition_unavailable_ending` 带上读不到定义的原因，几种原因的句子同样只在这里（`schema_mismatch_reason`、
+  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），云端推进器与本机后台推进进程共用。
 - `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
   的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
 - `state_without_record`：没有记录的执行（`run --no-report`）按同一组作用在内存里算出的运行态（ADR 0031 决定五「数据源」）。
@@ -21,7 +24,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from enum import Enum
 from types import MappingProxyType
-from typing import Literal
+from typing import Final, Literal
 
 from gherkai_core.model import TERMINAL_STATUSES, JobResult, JobState, RunMeta, RunState, Status
 
@@ -122,6 +125,26 @@ def definition_unavailable_ending(reason: str) -> RunEnding:
     """运行定义不可用时的结束写：reason 是读不到定义的原因（ADR 0037 决策 7 的几句），既是 run 级说明，也是每个未结束的 job 的说明。
     执行中的 job 同样记 error。"""
     return RunEnding(reason, ends_running_jobs=True, definition_unavailable=True)
+
+
+# 读不到可用的运行定义时的几种原因（ADR 0037 决策 7）：产品语言的整句、长度有界，说清哪里不对与怎么办；契约异常的原文只进推进器的
+# 日志。云端推进器与本机后台推进进程取同一句，两种后台对同一情形给出同一说明。句中的「后端」对本机后端同样成立。
+DEFINITION_CONTRACT_REASON: Final = "提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
+NO_WORKER_IMAGES_REASON: Final = "提交记录没有记 worker 镜像版本，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
+
+
+def schema_mismatch_reason(found: int, supported: int, cli_version: str | None) -> str:
+    """推进器读到结构版本不等于自己认的提交记录时的原因（ADR 0037 决策 7）：谁写的、两边各第几版、怎么办。found 是记录的结构版本，
+    supported 是推进器认的版本，cli_version 是写出记录的命令行工具版本（记录自带，可以为空）。
+
+    与命令行读端对同一事件的说法分开写：命令行的出路是升级本机或用写端版本查看，这里的出路是升级后端或用后端版本重新提交。写端版本
+    来自提交记录、不受信，截到 40 个字符再拼进句子，损坏的值不会把运行态条目撑大。"""
+    by = f"gherkai {str(cli_version)[:40]}" if cli_version else "gherkai（版本未知）"
+    if found > supported:
+        return (f"提交记录由更新版本的 {by} 写出（记录是第 {found} 版，后端只认第 {supported} 版），后端不能执行它；"
+                "请部署方把后端升级到提交侧的版本，或用后端版本的 gherkai 重新提交")
+    return (f"提交记录由更早版本的 {by} 写出（记录是第 {found} 版，后端只认第 {supported} 版），后端不能执行它；"
+            "请把提交侧的 gherkai 升级到后端的版本后重新提交")
 
 
 # ============================================================================

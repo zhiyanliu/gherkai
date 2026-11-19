@@ -1,9 +1,9 @@
 """reconciler Lambda（ADR 0034）：DDB events 表 Stream 变化 → reconcile.tick 推进一步。
 
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
-它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读全量重放 →
-project → 条件写 → plan_next → 认领并起下一个 job / finalize）。tick 幂等 + CAS/HWM 条件写兜底——Stream 按
-分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（真 DDB 已验）。
+它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读运行态与全量重放、
+投影写，为这一轮已有结果的 job 存明细、写终态，再由 plan_next 决定认领并起下一个 job 或做到期的结束写）。tick 幂等 +
+CAS/HWM 条件写兜底——Stream 按分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（真 DDB 已验）。
 
 **cloud 组合根（Lambda 装配）**：cold-start 读 env 造 boto3 client + 三 store adapter + FargateEngine + CloudLauncher
 注入纯 reconcile.tick——**是组合根注入、非 ports 内部 env-sniff 全局单例**（[0016] 禁的 GlobalConfigManager 反模式，
@@ -17,7 +17,8 @@ min，ADR 0034 机制四；数值真源在 IaC 一处，本文件缺省只在 en
 配套）——要改产物落点前缀或走私有子网时才在 IaC 显式给。
 
 **worker 镜像用哪个 task-def revision 不经 env**（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）：
-只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 把 run 标 error、不推进。
+只读 definition 的 `RunMeta.worker_task_defs`；缺该字段的云端 definition 是定义违约，`_load_definition` 以结束写的 error 变体结束
+这个 run、不推进（ADR 0037 决策 7，ADR 0031 决定三「结束写」小节「运行定义不可用时」条）。
 **推进器绝不用模板 revision**——其镜像栏是 `latest` 占位，全新 prefix 上从未推过该 tag，拉镜像会拖到
 Fargate 启动期才失败（ADR 0038 被拒方案）。故本文件不读任何模板 ARN 类 env。
 """
@@ -167,7 +168,7 @@ _DEFENSIVE_TIMEOUT_MARGIN_S = 120.0
 # 仍未到而接着等时，一次处置里各次等待之和同样不超过它。
 _TIMEOUT_EARLY_WAIT_MAX_S = 60.0
 
-# 每次等待的下限（秒）。「已到」指读到的墙钟严格晚于截止时刻（与本机启动器的检查、收尾投影比较退出时刻的取法相同）：恰好等于时
+# 每次等待的下限（秒）。「已到」指读到的墙钟严格晚于截止时刻（与本机启动器的检查、投影比较退出时刻的取法相同）：恰好等于时
 # 剩余为零，只差不到一秒时剩余很小，按剩余时长等待都可能让循环空转。所以每次至少等这个固定量，同样计入等待额度：墙钟不前进时
 # （测试注入的时钟、出故障的系统时钟）不论它停在哪里，至多约 60 次就用完额度、按不处置返回；每次醒来都要重读 job 状态与退出
 # 记录，次数必须有界。代价是停止最多晚不到一秒，与分钟精度的定时触发相比可以忽略；它只会让停止更晚，不会提前。
@@ -236,7 +237,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
     （`_job_cutoff`，以期限封顶，ADR 0054 决策二后台推进条「截止时刻与说明」）复查——已到直接处置；未到且剩余不超过等待额度
     （`_TIMEOUT_EARLY_WAIT_MAX_S` 与本次调用还能等的秒数取小）则等到截止时刻，重读 job 状态与退出记录、仍需处置才往下；
     剩余超过额度时不等待、不处置，打一行诊断、返回 skip-early，保护交给防御扫与 status --wait（宁可不处置也不提前处置）。
-    「已到」指读到的墙钟严格晚于截止时刻，与本机启动器的检查、收尾投影比较退出时刻的取法相同；恰好等于截止时刻算没到，按
+    「已到」指读到的墙钟严格晚于截止时刻，与本机启动器的检查、投影比较退出时刻的取法相同；恰好等于截止时刻算没到，按
     `_TIMEOUT_TIE_WAIT_S` 再等一次。醒来之后重新读墙钟：还没到（等待期间系统时钟被回拨，或恰好读到截止时刻）就在同一份额度内
     接着等，各次等待之和不超过额度；额度用完仍没到的同样返回 skip-early。发出停止之前因此必须有一次读到已过截止时刻（同一条
     「截止时刻与说明」）。
@@ -403,50 +404,48 @@ def _scan_overdue_timeouts(run_id: str, built) -> None:
 
 def _load_definition(run_store, run_id: str):
     """读 definition（云端读端）：结构版本不是本后端认的、或定义形态违约（含云端 definition 缺 worker_task_defs），
-    **不推进该 run、记一条诊断并把 run 标为 error、原因写进运行态的 run 级 message**——重放投影没有退出码可交给使用方，只「不推进」会让
-    run 永停 RUNNING（ADR 0034 对无法收敛的 run 一律反对）；标 error 是唯一能被 `status` 看见的终态，message 让 `status` 看得见原因
-    （团队成员未必有 CloudWatch 的读权限）。message 是产品语言的整句、长度有界（说清谁写的、两边各第几版、怎么办）；契约异常的原文
-    只进 CloudWatch 的诊断行、不进运行态——它带内部字段名与形状描述，是给 contributor 的。不为旧 definition 留兼容路径：
-    worker_task_defs 缺失不再按后端默认指针回落（那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。返回 RunMeta；不存在或已标 error 返回 None。"""
+    **不推进该 run、记一条诊断，以结束写的 error 变体结束它**（ADR 0037 决策 7，ADR 0031 决定三「结束写」小节）：每个未结束的 job
+    （含执行中的）记 error，run 随之为 error，原因同时写进运行态的 run 级说明与这些 job 的说明。重放投影没有退出码可交给使用方，只
+    「不推进」会让 run 一直停在未结束（ADR 0034 对无法收敛的 run 一律反对）；error 是能被 `status` 看见的终态，说明让 `status` 看得见
+    原因（团队成员未必有 CloudWatch 的读权限）。说明是产品语言的整句、长度有界，几种原因的句子在 `run_status`，与本机后台推进进程共用；
+    契约异常的原文只进 CloudWatch 的诊断行、不进运行态——它带内部字段名与形状描述，是给 contributor 的。这一写不存明细、不生成报告：
+    报告按运行定义逐个列出 job，读不到运行定义就组装不出。不为旧 definition 留兼容路径：worker_task_defs 缺失不再按后端默认指针回落
+    （那会让一个 run 内的镜像不再固定，ADR 0038 不变量）。
+
+    返回 RunMeta；definition 不存在或读不到可用的运行定义时返回 None。结束写的返回值不看：没写成只会是 run 已被别处结束或运行态不存在。
+    结束写本身的失败（写入竞争的重读次数用尽、DynamoDB 调用失败）原样抛出、本次调用失败，与装配期其它 AWS 调用失败同一处理。"""
     from gherkai_core.errors import DefinitionContractError, UnsupportedDefinitionSchema
-    from gherkai_core.model import Status
+    from gherkai_core.run_status import (
+        DEFINITION_CONTRACT_REASON,
+        NO_WORKER_IMAGES_REASON,
+        definition_unavailable_ending,
+        schema_mismatch_reason,
+    )
     from gherkai_runtime import compose
 
-    def _mark(message: str, detail: str | None = None):
-        print(f"reject: run {run_id} 不推进、标为 error——{message}" + (f"；诊断：{detail}" if detail else ""))
-        run_store.try_finalize(run_id, Status.ERROR, compose.now_iso(), message=message)
+    def _mark(reason: str, detail: str | None = None):
+        print(f"reject: run {run_id} 不推进、标为 error——{reason}" + (f"；诊断：{detail}" if detail else ""))
+        run_store.end_run(run_id, definition_unavailable_ending(reason), ended_at=compose.now_iso())
         return None
 
     try:
         meta = run_store.load_run_meta(run_id)
     except UnsupportedDefinitionSchema as exc:
-        return _mark(_schema_mismatch_message(exc))
+        return _mark(schema_mismatch_reason(exc.found, exc.supported, exc.cli_version))
     except DefinitionContractError as exc:
-        return _mark("提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交", str(exc))
+        return _mark(DEFINITION_CONTRACT_REASON, str(exc))
     if meta is None:
         return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
     if not meta.worker_task_defs:
-        return _mark("提交记录没有记 worker 镜像版本，后端不能执行它；请用与后端同版本的 gherkai 重新提交")
+        return _mark(NO_WORKER_IMAGES_REASON)
     return meta
-
-
-def _schema_mismatch_message(exc) -> str:
-    """后端读到结构版本不等于自己认的提交记录时写进 run 级 message 的整句（ADR 0037 决策 7）：谁写的、两边各第几版、怎么办。
-    与 CLI 侧同一事件的句子分开写：那边的出路是升级本机或用写端版本查看，这边的出路是升级后端或用后端版本重新提交。"""
-    # 写端版本来自提交记录、不受信：截断再拼，message 才真的有界（损坏的值不能把运行态条目撑大）
-    by = f"gherkai {str(exc.cli_version)[:40]}" if exc.cli_version else "gherkai（版本未知）"
-    if exc.found > exc.supported:
-        return (f"提交记录由更新版本的 {by} 写出（记录是第 {exc.found} 版，后端只认第 {exc.supported} 版），后端不能执行它；"
-                "请部署方把后端升级到提交侧的版本，或用后端版本的 gherkai 重新提交")
-    return (f"提交记录由更早版本的 {by} 写出（记录是第 {exc.found} 版，后端只认第 {exc.supported} 版），后端不能执行它；"
-            "请把提交侧的 gherkai 升级到后端的版本后重新提交")
 
 
 def _build(run_id: str):
     """cloud 组合根：读 env 造 boto3 + 装配（RunStore/EventLog/CloudLauncher + ResultStore/ReportStore）注入。
 
     返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)——同 local
-    build_local_reconcile 的形状，供 tick + finalize 聚合。meta 从 RunStore 读回（definition）。
+    build_local_reconcile 的形状，供 tick 与生成报告使用。meta 从 RunStore 读回（definition）。
     **None 表示本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
     据此整体 no-op。
 
@@ -456,8 +455,9 @@ def _build(run_id: str):
     不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai_runtime（不背 argparse/render）。
 
     **worker task-def revision 只有一条来源**（ADR 0038）：definition 的 `meta.worker_task_defs`（提交侧 preflight 已把 variant
-    解析成各引擎的显式 revision）。缺该字段的云端 definition 是定义违约，由 `_load_definition` 标 error、不推进——不按后端默认指针
-    回落（那会让运行中的 run 中途换 step 集）、不回落 family 最新 ACTIVE、不回落模板 revision（ADR 0037 决策 7 不留兼容分支）。
+    解析成各引擎的显式 revision）。缺该字段的云端 definition 是定义违约，由 `_load_definition` 以结束写的 error 变体结束 run、
+    不推进——不按后端默认指针回落（那会让运行中的 run 中途换 step 集）、不回落 family 最新 ACTIVE、不回落模板 revision（ADR 0037
+    决策 7 不留兼容分支）。
     """
     import boto3
     from gherkai_core.adapters.event_log import DdbEventLog
@@ -490,7 +490,7 @@ def _build(run_id: str):
     # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——云端后端这个 store 恒是 DDB 实现。
     if not run_store.is_detached(run_id):
         # 只推进 detached run：同步 `run --backend cloud` 由进程内 schedule 推进，
-        # 推进器碰它就是双开推进器（认领/RunTask/finalize）。kicker 那扇门由 Stream filter 挡，events 表
+        # 推进器碰它就是双开推进器（认领、RunTask、终态写）。kicker 那扇门由 Stream filter 挡，events 表
         # Stream 这扇门滤不了（events item 无 detached 标记）——同一判据在此判，返回 None 表示全 handler no-op。
         # 判在 load_run_meta **之前**：同步 run 的每条 worker 事件都会触发本 Lambda，先判省掉强一致 META
         # 读 + offload 正文的 S3 取回，且推进器在断定「不该碰」前不读对方 definition（STATE 缺失同落此支）。
@@ -511,7 +511,8 @@ def _build(run_id: str):
     if state is not None and state.status in TERMINAL_STATUSES:
         print(f"skip: run {run_id} 已结束，不再改写它的结果")
         return None
-    meta = _load_definition(run_store, run_id)  # 结构版本闸与定义违约 → 标 error、不推进
+    # 结构版本不合与定义违约时以结束写的 error 变体结束 run、不推进（ADR 0037 决策 7，ADR 0031 决定三「结束写」小节）
+    meta = _load_definition(run_store, run_id)
     if meta is None:
         return None
     scope_ids = [j.scope_id for j in meta.jobs]
@@ -523,7 +524,7 @@ def _build(run_id: str):
         "securityGroups": os.environ["SECURITY_GROUPS"].split(","),
         "assignPublicIp": os.environ.get("ASSIGN_PUBLIC_IP", "ENABLED"),
     }
-    worker_task_defs = dict(meta.worker_task_defs)  # definition 里的显式 revision（ADR 0038 不变量）；缺值已在 _load_definition 标 error
+    worker_task_defs = dict(meta.worker_task_defs)  # definition 里的显式 revision（ADR 0038 不变量）；缺值时 _load_definition 已结束这个 run
     engines = compose.build_fargate_engines(
         run_id=run_id, cluster=os.environ["CLUSTER"],
         events_table=os.environ["EVENTS_TABLE"], bucket=bucket, report_dir=report_dir,
@@ -590,8 +591,9 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
 
     prebuilt = prebuilt or {}
     for run_id in run_ids:
-        # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs）由 _load_definition 把那个 run 标 error、返回 None，
-        # 不在这里抛、不影响同批其它 run；装配期的 AWS 调用失败照常抛出、本次 invocation 失败、events Stream 重试本批。
+        # definition 本身的问题（结构版本不合、定义违约、缺 worker_task_defs）由 _load_definition 以结束写的 error 变体结束
+        # 那个 run、返回 None，不在这里抛、不影响同批其它 run；装配期的 AWS 调用失败（含那次结束写本身的失败）照常抛出、本次
+        # invocation 失败、events Stream 重试本批。
         built = prebuilt[run_id] if run_id in prebuilt else _build(run_id)
         if built is None:
             continue
@@ -606,9 +608,11 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
             # 报告从记录生成，入口是 core 唯一的一份，本机后台推进进程调的是同一个。生成在终态写之后执行、失败无人重试，抛出去还会让
             # 本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，同批其它 run 的事件随之丢失（同下面超时兜底检查的隔离
             # 理由）；所以读运行态（强一致读，会因限流或瞬时 5xx 抛）、组装与写报告整段在入口的失败隔离之内（ADR 0034「端到端流程」
-            # cloud 第 ④ 步）。
-            write_report_from_record(meta, run_store, outcome.details, pstore, created_at=compose.now_iso())
-            print(f"{label}: run {run_id} done + finalized")
+            # cloud 第 ④ 步）。这一次 tick 交给终态写的明细用 tick 交回的那一份，较早轮次写下终态的 job 的明细由入口从 rstore 按
+            # scope_id 读回。
+            write_report_from_record(meta, run_store, outcome.details, pstore, result_store=rstore,
+                                     created_at=compose.now_iso())
+            print(f"{label}: run {run_id} done + committed")
         else:
             print(f"{label}: run {run_id} advanced (not done)")
             # 防御性超时扫（claimed_at ②）是 Scheduler 到点触发器的双保险、best-effort：它失败不该拖累已经

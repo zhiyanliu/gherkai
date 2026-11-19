@@ -322,7 +322,8 @@ def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog)
 _T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)  # 假墙钟（远早于 FAR_DEADLINE）
 
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
-    """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）走通：起 job → 推进 → finalize。"""
+    """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）走通：起 job → 先存明细、再以终态写记下 job 的
+    终态，run 随之成为终态 → 再推进读到既有终态即停。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
     from gherkai_core.reconcile import TickOutcome, tick
 
@@ -350,10 +351,19 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
     _passed_worker_events(events_table, "a")
     log.record_exit("a", 0)
 
-    # tick2：推进到终态 + finalize
-    done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=20))
-    assert done.outcome is TickOutcome.COMMITTED
-    assert ddb_run_store.load_run_state("run-1").status == Status.PASSED
+    # tick2：投影把 a 写成 running（不写终态），终态写记下 a 的 passed，run 随之成为终态
+    saved = []
+
+    class _Results:
+        def save_job_result(self, run_id, jr):
+            saved.append(jr.scope_id)
+
+    done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=20),
+                result_store=_Results())
+    assert done.outcome is TickOutcome.COMMITTED and [jr.scope_id for jr in done.details] == ["a"] and saved == ["a"]
+    state = ddb_run_store.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status, state.jobs["a"].claimed_at) == (
+        Status.PASSED, Status.PASSED, instant_to_iso(_T0))
     # 再 tick：读到既有终态即停，不再推演
     assert tick("run-1", meta, log, ddb_run_store, launcher, 1,
                 clock=lambda: _T0 + timedelta(seconds=30)).outcome is TickOutcome.ENDED
@@ -407,8 +417,9 @@ def _expiry_setup(events_table, ddb_run_store):
 
 
 def test_expiry_commits_on_ddb(events_table, ddb_run_store):
-    """云端后端上的到期收尾：不认领 b，到期的结束写把 b 记 skipped 并带到期的说明，run 按取法记 aborted、带「已超过允许运行的时间」；
-    交还的判定明细只有有记录的 a（与本机对拍）。"""
+    """云端后端上的到期：已过停止启动的时刻，最后一个执行中的 a 在这一轮得出结果，b 还没有启动。同一轮先以终态写记下 a，再做到期的
+    结束写：不认领 b，b 记 skipped 并带到期的说明，run 按取法记 aborted、带「已超过允许运行的时间」；交还的明细带这一轮记下终态的 a
+    （与本机对拍）。"""
     from gherkai_core.reconcile import TickOutcome, tick
     from gherkai_core.run_status import RUN_ENDINGS
 
@@ -423,9 +434,9 @@ def test_expiry_commits_on_ddb(events_table, ddb_run_store):
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table, ddb_run_store):
-    """到期收尾与认领并发（云端的条件写）：一个推进方读到「没有执行中的、仍有未启动的」之后，另一个推进方的认领落下——前者的结束写
+    """到期的结束写与认领并发（云端的条件写）：一个推进器读到「没有执行中的、仍有未启动的」之后，另一个推进器的认领落下——前者的结束写
     按写下时的运行态判断（以写入序号为条件、不成立即重读再算），那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；
-    run 没有结束、新认领的 job 仍是 running。与本机的同名用例对拍。"""
+    run 没有结束、新认领的 job 仍是 running，同一轮得出结果的 a 已由终态写记下。与本机的同名用例对拍。"""
     from gherkai_core.reconcile import TickOutcome, TickResult, tick
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)
@@ -445,4 +456,5 @@ def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table,
     assert log.landed is True
     assert outcome == TickResult(TickOutcome.CONTINUE)
     state = ddb_run_store.load_run_state("run-1")
-    assert (state.status, state.claim_count, state.jobs["b"].status, state.message) == (Status.RUNNING, 2, Status.RUNNING, None)
+    assert (state.status, state.claim_count, state.jobs["a"].status, state.jobs["b"].status, state.message) == (
+        Status.RUNNING, 2, Status.PASSED, Status.RUNNING, None)
