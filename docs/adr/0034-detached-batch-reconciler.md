@@ -289,12 +289,12 @@ submit(CLI) → 拿生命期锁、建 run → 以新会话（setsid）启动后�
 - **实测项**（真实环境执行，均已核）：
   1. 本机前台 `run`（已核）：run 建立后 `list-runs` 读到 run 级 `pending`、job `pending`；第一个 job 离开 pending 后，run 级与 job 同为 `running`，直到结束转为 `passed`。
   2. 前台 `run` 执行中被 SIGKILL。本机（已核）：留下的 run 停在 `running`、job `running`、不带 detached 标记，`list-runs` 按非终态列出，`--status running` 列出它、`--status pending` 为空，`status` 同样显示 `running`。
-  3. 云端 `submit`（已核）：提交一个两 job 的 run，从提交起以强一致读连续读 STATE 直到收尾（约两百次）。第一个 job 被认领的那一次读，run 级已是 `running`，此时 job 带认领时刻而还没有会话（worker 尚未报出事件），另一个 job 仍 `pending`；全程没有读到 run 级 `pending` 而某个 job 已不是 `pending` 的组合；收尾为 `passed`。本机 `submit` 的对应观察：提交后第一次读清单，run 级已是 `running` 而两个 job 一个 `running`、一个仍 `pending`。
+  3. 云端 `submit`（已核）：提交一个两 job 的 run，从提交起以强一致读连续读 STATE 直到收尾（约两百次）。第一个 job 被认领的那一次读，run 级已是 `running`，此时 job 带认领时刻而还没有会话，另一个 job 仍 `pending`；全程没有读到 run 级 `pending` 而某个 job 已不是 `pending` 的组合；收尾为 `passed`。本机 `submit` 的对应观察：提交后第一次读清单，run 级已是 `running` 而两个 job 一个 `running`、一个仍 `pending`。
   4. 终态不被复活（已核）：真 DDB 上对带 pending job 的已收尾（error）run 调认领，返回 False，整份运行态（run 级、结束时刻、原因、job 态与认领时刻）读回与调用前相同。这些断言作为真 DDB 集成用例留在 `core/tests/test_cloud_integration.py`。
   5. 并发旧投影不回退（已核）：真 DDB 上认领之后写全 pending、同 HWM 与更高 HWM 的投影，run 级保持 `running`，HWM 按条件前进，已认领的 job 仍为 `running`（同为集成用例）。
   6. 同值写不产生索引写（已核）。在与 runs 表键结构及两个索引定义相同的按需临时表上以 `ReturnConsumedCapacity=INDEXES` 取每次更新的写入消耗，按「基表／两个索引」记录。
      - 直接构造的三种写形态：只改 jobs（run 级仍为 `pending`）为 1.0／0／0；run 级 `pending` 到 `running` 并改 jobs 为 1.0／2.0／2.0；run 级写同值 `running` 并改 jobs 为 1.0／0／0。
-     - 经 adapter 的真实调用：第一次认领（run 级由 `pending` 换为 `running`）为 1.0／2.0／2.0；run 级已是 `running` 时再认领一个 job、前台 `update_job_state`、全 pending 的投影（只写 HWM）、非全 pending 的投影（标量写同值 `running`，逐 job 写）每次更新都是 1.0／0／0；收尾换值为 1.0／2.0／2.0。
+     - 经 adapter 的真实调用：第一次认领（run 级由 `pending` 换为 `running`）为 1.0／2.0／2.0；run 级已是 `running` 时再认领一个 job、前台 `update_job_state`、全 pending 的投影（只推进 HWM）、非全 pending 的投影（实测时标量写同值 `running`，逐 job 写）每次更新都是 1.0／0／0；收尾换值为 1.0／2.0／2.0。
      - 由此，同值写不产生索引写，换值时每个索引一次删旧项加一次写新项（各 2.0），与上「成本」所依的计费规则一致。
 
 ### 机制四：CAS(pending→running) 控严格并发

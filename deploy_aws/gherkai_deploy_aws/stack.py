@@ -709,7 +709,7 @@ class BackendStack(Stack):
         )
         # events 表 Stream → reconciler（NEW_IMAGE；worker PutItem / task_exited 触发推进）。
         # filter **排除 REMOVE**：events 表开 TTL（见 `_storage` 的 time_to_live_attribute），过期删除同样进
-        # Stream、不带新信息，本道不让它们触发推进；推进方本次读到终态即返回（各道防护各挡哪些触发见 ADR 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条）。
+        # Stream、不带新信息，本道不让它们触发推进；推进方本次读到终态即返回。
         # 用 `anything-but REMOVE` 而非 INSERT 白名单：events 虽只 PutItem，同键重写（超时处置直写的退出记录
         # 被迟到的观察者以真退出码/归因重写）在 Stream 上是 MODIFY，白名单会把这类新归因静默滤掉。
         # Lambda 侧同样跳过 REMOVE（`lambdas/reconciler.py` 的 `_run_ids_from_stream`）——本道要 redeploy 才生效。

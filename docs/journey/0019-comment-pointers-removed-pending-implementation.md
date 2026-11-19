@@ -4,7 +4,7 @@
 
 这次重新设计写回各篇 ADR 之后，code 还没有改。注释、文档串与各包技术文档里有一批 ADR 指针，所括的说法是现在 code 的行为，而所指的小节现在写的是目标设计。按 [0018](./0018-run-ownership-adr-writeback-plan.md)「另一家模型核落到位」里定的规则，这些指针已经去掉，对现在行为的说明保留。
 
-下面按文件列出每一处：所在的函数、类、测试或文档小节，它当时所括的说法，以及这段 code 跟上目标设计之后应当对应的 ADR 小节。实装批改到某个文件时，把说明改成新行为，并照这里把指针加回去；标「无对应」的是随那段 code 一起删去的。做完一个文件就从这里删掉它的条目，全部删完后本文删除。
+下面按文件列出每一处：所在的函数、类、测试或文档小节，它当时所括的说法，以及这段 code 跟上目标设计之后应当对应的 ADR 小节。实装批改到某个文件时，把说明改成新行为，并照这里把指针加回去；标「无对应」的是随那段 code 一起删去的。做完一个文件就从这里删掉它的条目。没有去掉的指针是否与所指小节的现文一致，随实装核对，范围与清单在文末「语义一致随实装核对」一节；两部分都清空后本文删除。
 
 - `cli/DEVELOPMENT.md`
   - 「实时落库」节第一段：过了运行期限减 60 秒不再启动 job，没有启动的 scope 不落判定、保持 pending，run 级记 error 加说明「已超过允许运行的时间」。跟上之后对应 0054 决策二第 1、3 条；0031 决定三「结束写」小节。
@@ -43,6 +43,7 @@
   - _cmd_run，末尾退出码注释：退出码读 schedule 返回的内存终值、不回读落库态；skipped/aborted 批次必伴随 error。跟上之后对应 0031 决定五「数据源」与「run」条。
   - _interrupt_prompt 文档串：两级提示分本机与云端两种后端，云端是 Fargate 任务、再次中断只重发停止请求。跟上之后对应 本机部分是 0024 终止契约「使用方中断」条；云端那一支随 run --backend cloud 以退出码 2 结束而消失。
   - _cmd_run，3b 之后组合根注入引擎 resolver 处，build_fargate_engines 的 worker_task_defs 参数行注释：同步 run 的 FargateEngine 拿到的每引擎显式 task-def revision ARN，就是 run 自己 preflight 解析出、也写进 definition 的那一批。跟上之后对应 run --backend cloud 按 0016 决策 A 以退出码 2 结束，这一段不再存在。对应的装配挪到推进器一侧的组合根，从 definition 读 worker_task_defs，对应 0038「运行时与 preflight」的「选择进 definition」条与 0016 决策 C。
+  - _ended_elsewhere_notice 文档串：`run` 收尾写不成时的终端说明里有一句「已得出的判定已写入」。指针已收到「没有覆盖已有的记录」一句旁。跟上之后对应 0054 决策五「执行方得知 run 已结束之后就不存明细」条（这句说明随之改写），整段说明再对应 0054 决策五。
 - `cli/gherkai_cli/render.py`
   - 模块级常量 _NOT_RUN_LABEL 上方的注释块：运行定义里有、判定清单里没有的 job 是因已过停止启动的时刻或 run 已被别处结束而没有启动的，没有判定，原因在 run 级说明，它不是 skipped。跟上之后对应 0031 决定三「结束写」小节（skipped 的记法与说明表），以及 0027「index.html 形态」（由结束写结束的 job 怎样显示）。
   - render_text 文档串：运行定义里有、判定清单里没有的 job 在末尾逐个标为没有执行。跟上之后对应 0027「index.html 形态」与 0031 决定三「结束写」小节。
@@ -236,6 +237,7 @@
 - `core/gherkai_core/serialize.py`
   - to_dict 里 message 键的行尾注释：run 级说明在 run --json 里键恒在，没有时为 null。跟上之后对应 ADR 0031 决定三「结束写」小节（run 级说明只由结束写写下）。
   - run_state_to_dict 里 message 的行尾注释：run 级消息只在推进器不经任何 job 就终结 run 时才有。跟上之后对应 ADR 0037 决策 7「definition 结构版本」段，以及 0031 决定三「结束写」小节的说明表。
+  - run_state_to_dict 开头注释：正常 run 经 RunPersistence.begin/finalize 落 started_at/ended_at。跟上之后对应 0031 决定三（使 run 成为终态的那次写同时写结束时刻）；0030 决定三的写序。
 - `core/tests/conftest.py`
   - fargate fixture 文档串：FargateEngine 读退出码（_probe_task 与 raise_for_worker_exit）的真实时序已由真容器校准覆盖。跟上之后对应 读退出码的那一套随同步云端路径去掉；仍讲真实时序时对应 0032「真容器校准结论」结论 2。
 - `core/tests/test_atomic_write.py`
@@ -258,6 +260,7 @@
   - test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes 文档串：DDB 第二次写（只写 job）要求 run 级已是终态，返回值如实。跟上之后对应 0054 决策五，加 0034 机制三③。
   - test_finalize_message_lands_with_terminal_status_and_is_absent_otherwise 文档串：run 级消息随 try_finalize 同一次写入。跟上之后对应 0037 决策 7「run 级消息」条，加 0031 决定三「结束写」小节。
   - test_job_write_leaving_pending_advances_run_status 文档串：前台 job 写离开 pending 时 run 级为 running；判据是写入的 job 态非 pending，从 pending 直接写终态（SKIPPED 的 job、起 worker 失败的 job）同样推进。跟上之后对应 ADR 0034 机制三「run 级状态只进不退」条③（前台 update_job_state：非 pending 的写连同 run 状态一起写；起 worker 的 job 先经条①认领）。
+  - 「认领计数」节头：这一节的用例里有两个验证以期望的认领计数限制收尾（test_finalize_with_expected_claim_count_lands_only_on_an_equal_count、test_finalize_conditioned_on_the_read_count_is_blocked_by_a_claim_landing_after_the_read），另一个在缺键的记录上验证同一条件。节头的指针已去掉，改放在只验证初值与递增的那个用例上。跟上之后对应 0034 机制三「run 级状态只进不退」条①（计数只作诊断，不作任何写的条件）；以计数为条件的用例随 expected_claim_count 一起删去，结束写的条件见 0034 机制三②。
 - `core/tests/test_ddb_run_store.py`
   - test_detached_flag_on_state_item 文档串：STATE item 上的 detached=true 标记供 kicker 的流过滤使用，同步 run 不落。跟上之后对应 ADR 0034 端到端 cloud 1b「触发过滤不看后台执行标记」；ADR 0033 资源清单第 13 条。
 - `core/tests/test_fargate_engine.py`
@@ -356,6 +359,7 @@
   - _reconcile_lambdas 里 ExitObserverFn 的 events 表权限注释：events 是 append-only 的判定真值日志。跟上之后对应 0034「核心思想：CQRS + 无状态 reconciler」写模型条。
   - _reconcile_lambdas 里 KickerFn 的 function_name 行注释：cli status --wait 按 prefix 推出 kicker 名并 invoke kickoff。跟上之后对应 目标设计里没有这一调用；kicker 的触发源见 0034「推进器与触发源」第 2 条。
   - _reconcile_lambdas 里 runs 表 Stream → kicker 的注释块：kicker 的 filter 只收 INSERT 且 NewImage.detached=true，用来滤掉同步 run --backend cloud。跟上之后对应 0033 资源清单 13、0054 决策九第 1、2 条、0034 端到端 cloud 1b。
+  - events 表 Stream 事件源上方注释：过期删除不触发推进，推进方本次读到终态即返回。跟上之后对应 0034 端到端流程 cloud 一节「已收尾的 run 不再推演」条（遇到终态只清扫仍在执行的 task）；0054 决策九。
 - `deploy_aws/tests/test_lambda_handlers.py`
   - test_run_ids_skips_ttl_remove_records 文档串：events 表 TTL 删除的 REMOVE 记录不算 run、不为它推进一次。跟上之后对应 0033「资源清单」第 13 条与「events 表开 TTL」条护栏②。
   - test_tick_runs_writes_the_report_from_the_committed_tick_result 文档串：写成收尾的一方把 tick 交还的那一份结果交给报告收尾，不另读事件重算。跟上之后对应 0034 机制三「run 级状态只进不退」条④ K2，与 0027「ReportStore 接口：整 run 一次写」节。
@@ -409,3 +413,184 @@
   - test_build_local_reconcile_host_env_steps_dir_does_not_leak 文档串：接力者是从 definition 读回 steps_dir 的宿主之一，它的 shell env 不得越过 definition。跟上之后对应 0037 决策 4（宿主建注入 env 时先抹掉组合根拥有的键）。
   - 「启动器记下退出时刻、接力的判定条件与条件补写」分节注释：本组覆盖接力的判定条件与条件补写。跟上之后对应 0054 决策二后台推进条「截止时刻与说明」。
   - test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground 文档串首句（「后台推进的到期处理」分节下）：本机推进进程到期时，被期限截断的 a 记为超时、说明是期限那一句；没有启动的 b 保持 pending、没有判定明细；run 级记 error 加到期说明，报告生成。跟上之后对应 0054「实测项」第 2 条（本机后台 run 到期）与第 4 条（三种组合一致）：断言改成 a 为 aborted、b 由结束写记 skipped、run 状态按 0031 决定三取之后，可以把「（实测项 2、4 的本机一对）」加回去。
+
+## 语义一致随实装核对：范围与清单
+
+写回这一步对注释里的 ADR 指针只保证机械可核的一项：指针里的条名，写回之前的 ADR 里有、现在没有的为 0。指针所括的说法与所指小节的现文是否一致，owner 定为随实装核对（现在落的是设计，code 跟上时把注释改成一致）。在那之前，下面清单里的文件可能仍有注释把现在 code 的行为归给已经改成目标设计的小节；另一家模型三轮各指出 3、3、4 处，都已改，上面的列表含其中去掉指针的各处。
+
+责任范围固定为写回时带有指向这次改过的 22 篇 ADR 的指针的 151 个文件（0016、0024、0026、0027、0028、0030、0031、0032、0033、0034、0035、0037、0038、0040、0041、0042、0043、0044、0045、0051、0053、0054）：
+
+- 每个实装批核它改到的文件：其中指向这 22 篇的指针逐个对所指小节的现文，核过的文件从清单里删去。
+- 全部实装批之后对清单做一次差集：剩下的文件（实装不需要改的 code 文件、各包技术文档）另作一批核完。清单清空后本节删除。
+
+（仓库根）（1）：
+
+- `CONTRIBUTING.md`
+
+cli（29）：
+
+- `cli/DEVELOPMENT.md`
+- `cli/gherkai_cli/__init__.py`
+- `cli/gherkai_cli/__main__.py`
+- `cli/gherkai_cli/config.py`
+- `cli/gherkai_cli/deploy.py`
+- `cli/gherkai_cli/device_selection.py`
+- `cli/gherkai_cli/render.py`
+- `cli/gherkai_cli/settings.py`
+- `cli/gherkai_cli/skill_install.py`
+- `cli/gherkai_cli/submission.py`
+- `cli/tests/_doc_rules.py`
+- `cli/tests/conftest.py`
+- `cli/tests/test_backend_cloud.py`
+- `cli/tests/test_cli_json_contract.py`
+- `cli/tests/test_code_comments.py`
+- `cli/tests/test_context_glossary.py`
+- `cli/tests/test_definition_schema.py`
+- `cli/tests/test_deploy_cmd.py`
+- `cli/tests/test_job_timeout_cap.py`
+- `cli/tests/test_main.py`
+- `cli/tests/test_project_config.py`
+- `cli/tests/test_release_notes.py`
+- `cli/tests/test_render.py`
+- `cli/tests/test_skill.py`
+- `cli/tests/test_skill_install.py`
+- `cli/tests/test_technical_docs.py`
+- `cli/tests/test_tunnel_cli.py`
+- `cli/tests/test_user_docs.py`
+- `cli/tests/test_user_facing_messages.py`
+
+core（71）：
+
+- `core/DEVELOPMENT.md`
+- `core/gherkai_core/adapters/__init__.py`
+- `core/gherkai_core/adapters/_atomic.py`
+- `core/gherkai_core/adapters/_boto.py`
+- `core/gherkai_core/adapters/cloud_launcher.py`
+- `core/gherkai_core/adapters/event_log/__init__.py`
+- `core/gherkai_core/adapters/event_log/ddb.py`
+- `core/gherkai_core/adapters/event_log/recording.py`
+- `core/gherkai_core/adapters/event_log/sqlite.py`
+- `core/gherkai_core/adapters/fargate_engine.py`
+- `core/gherkai_core/adapters/report_store/__init__.py`
+- `core/gherkai_core/adapters/report_store/local.py`
+- `core/gherkai_core/adapters/report_store/s3.py`
+- `core/gherkai_core/adapters/result_store/__init__.py`
+- `core/gherkai_core/adapters/result_store/local.py`
+- `core/gherkai_core/adapters/result_store/s3.py`
+- `core/gherkai_core/adapters/run_store/__init__.py`
+- `core/gherkai_core/adapters/run_store/arg_offload.py`
+- `core/gherkai_core/adapters/run_store/ddb.py`
+- `core/gherkai_core/adapters/run_store/local.py`
+- `core/gherkai_core/adapters/subprocess_engine.py`
+- `core/gherkai_core/device_session.py`
+- `core/gherkai_core/errors.py`
+- `core/gherkai_core/model.py`
+- `core/gherkai_core/persist.py`
+- `core/gherkai_core/ports.py`
+- `core/gherkai_core/project.py`
+- `core/gherkai_core/reconcile.py`
+- `core/gherkai_core/redact.py`
+- `core/gherkai_core/run_deadline.py`
+- `core/gherkai_core/schedule.py`
+- `core/gherkai_core/scope.py`
+- `core/gherkai_core/serialize.py`
+- `core/gherkai_core/target.py`
+- `core/gherkai_core/wire.py`
+- `core/tests/README.md`
+- `core/tests/conftest.py`
+- `core/tests/fake_engine.py`
+- `core/tests/fixtures/echo_worker.py`
+- `core/tests/test_arg_offload.py`
+- `core/tests/test_atomic_write.py`
+- `core/tests/test_cloud_infra.py`
+- `core/tests/test_cloud_integration.py`
+- `core/tests/test_cloud_reconcile.py`
+- `core/tests/test_conditional_writes.py`
+- `core/tests/test_ddb_run_store.py`
+- `core/tests/test_event_log_recording.py`
+- `core/tests/test_fargate_engine.py`
+- `core/tests/test_lifecycle_states.py`
+- `core/tests/test_list_runs.py`
+- `core/tests/test_local_result_store_atomic.py`
+- `core/tests/test_local_run_store_atomic.py`
+- `core/tests/test_local_run_store_lock.py`
+- `core/tests/test_persist.py`
+- `core/tests/test_plan.py`
+- `core/tests/test_project.py`
+- `core/tests/test_reconcile.py`
+- `core/tests/test_redact.py`
+- `core/tests/test_report_store.py`
+- `core/tests/test_run_deadline.py`
+- `core/tests/test_s3_report_store.py`
+- `core/tests/test_s3_result_store.py`
+- `core/tests/test_schedule.py`
+- `core/tests/test_session_events.py`
+- `core/tests/test_sqlite_event_log.py`
+- `core/tests/test_status_group.py`
+- `core/tests/test_stores.py`
+- `core/tests/test_subprocess_engine.py`
+- `core/tests/test_terminal.py`
+- `core/tests/test_termination_parity.py`
+- `core/tests/test_wire.py`
+
+deploy_aws（17）：
+
+- `deploy_aws/DEVELOPMENT.md`
+- `deploy_aws/gherkai_deploy_aws/app.py`
+- `deploy_aws/gherkai_deploy_aws/cli.py`
+- `deploy_aws/gherkai_deploy_aws/container.py`
+- `deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py`
+- `deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`
+- `deploy_aws/gherkai_deploy_aws/names.py`
+- `deploy_aws/gherkai_deploy_aws/stack.py`
+- `deploy_aws/gherkai_deploy_aws/workers.py`
+- `deploy_aws/tests/test_container.py`
+- `deploy_aws/tests/test_lambda_asset.py`
+- `deploy_aws/tests/test_lambda_handlers.py`
+- `deploy_aws/tests/test_names.py`
+- `deploy_aws/tests/test_provider.py`
+- `deploy_aws/tests/test_skill_deploy_tokens.py`
+- `deploy_aws/tests/test_stack.py`
+- `deploy_aws/tests/test_workers.py`
+
+engines（2）：
+
+- `engines/midscene/DEVELOPMENT.md`
+- `engines/novaact/DEVELOPMENT.md`
+
+runtime（22）：
+
+- `runtime/DEVELOPMENT.md`
+- `runtime/gherkai_runtime/__init__.py`
+- `runtime/gherkai_runtime/app_upload.py`
+- `runtime/gherkai_runtime/compose.py`
+- `runtime/gherkai_runtime/deadline.py`
+- `runtime/gherkai_runtime/detached.py`
+- `runtime/gherkai_runtime/devicefarm.py`
+- `runtime/gherkai_runtime/names.py`
+- `runtime/gherkai_runtime/textui.py`
+- `runtime/gherkai_runtime/tunnel.py`
+- `runtime/gherkai_runtime/tunnel_host.py`
+- `runtime/tests/test_app_upload.py`
+- `runtime/tests/test_compose.py`
+- `runtime/tests/test_deadline.py`
+- `runtime/tests/test_detached_launcher.py`
+- `runtime/tests/test_devicefarm.py`
+- `runtime/tests/test_devicefarm_client_placement.py`
+- `runtime/tests/test_names_device_farm.py`
+- `runtime/tests/test_names_worker.py`
+- `runtime/tests/test_tunnel.py`
+- `runtime/tests/test_tunnel_host.py`
+- `runtime/tests/test_worker_variant.py`
+
+tools（9）：
+
+- `tools/build_diagrams.mjs`
+- `tools/device_reprobe.md`
+- `tools/doc_rules_check.py`
+- `tools/e2e_harness.md`
+- `tools/e2e_harness.py`
+- `tools/ecs_task_timing.py`
+- `tools/events_wallclock.py`
+- `tools/render_skill_contract.py`
+- `tools/workers_real_aws/README.md`

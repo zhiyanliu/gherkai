@@ -805,10 +805,11 @@ def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
     assert run_store.load_run_state("run-1") == state_before
 
 
-# ---------- 认领计数（ADR 0034 机制三「run 级状态只进不退」条①）----------
+# ---------- 认领计数 ----------
 
 def test_claim_count_starts_at_zero_and_counts_successful_claims_only(run_store):
-    """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已收尾）都不改它。"""
+    """建 run 时为 0；每次认领成功加一；三种认领失败（已非 pending、job 不存在、run 已收尾）都不改它
+    （ADR 0034 机制三「run 级状态只进不退」条①）。"""
     meta = _meta("run-1", "a", "b", "c")
     run_store.create_run(meta, _initial(meta))
     assert run_store.load_run_state("run-1").claim_count == 0
