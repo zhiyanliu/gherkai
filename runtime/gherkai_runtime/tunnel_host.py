@@ -38,7 +38,7 @@ CLOUD_STARTUP_MARGIN_S = 900.0
 #   ① 超时触发的调度精度 60s：job 超时由 EventBridge Scheduler 的一次性 schedule 在 claim + timeout 触发，
 #      Scheduler 的触发精度是 60 秒（关闭 flexible time window 也只保证落在指定时刻所在的那一分钟内）。
 #   ② 停止宽限 120s：StopTask 之后 worker 在 container stopTimeout 的宽限内收尾，按 Fargate 的平台上限
-#      （compose.FARGATE_STOP_TIMEOUT_MAX_S；云端同步 run 的停止后等待预算在 container 没设 stopTimeout 时也取它）记账，
+#      （compose.FARGATE_STOP_TIMEOUT_MAX_S）记账，
 #      对任何 variant 都成立。
 #   ③ 事件链尾延迟 30s：task 停止到退出可被归约、下一个 job 被 claim 之间的固有延迟（ADR 0034 实测每步约 20-30 秒，
 #      瓶颈在 ECS 平台的清理开销）。这一项是经验值，**不是服务的硬上界**：平台降级、Lambda 限流或极大批量时可能超出，

@@ -17,7 +17,7 @@
 - IAM：每引擎一个 task role（最小权限；拿到 Device Farm 项目 ARN 时 Midscene 的另加设备与应用前缀权限，见
   _grant_midscene_devices）+ 共享 execution role + 3 个 Lambda 执行角色 + job timeout 到点触发器的 Scheduler 执行角色
   {prefix}timeout-scheduler
-- VPC + SSM：subnet/sg ID 写进 /{prefix}backend/subnets|security-groups（cli 读）
+- VPC + worker 安全组 WorkerSg：子网与安全组 ID 经环境变量注给两个推进器 Lambda（起 worker task 的只有它们），不写进 SSM
 - SSM 部署戳（**stack 资源、非命令事后 put_parameter**——与部署事务同生死、回滚不留错值，ADR 0037 决策 6）：
   /{prefix}backend/version（版本真源，供 preflight skew 比对，ADR 0037 决策 7）、
   /{prefix}backend/vpc（生效 VPC 取值，供下次 deploy 三态比对）、
@@ -83,9 +83,11 @@ class BackendStack(Stack):
 
         vpc = self._network()    # 同时定 self._vpc_spec（生效 VPC 取值，写进 SSM 供下次 deploy 三态比对）
         self._storage()          # DDB ×2 + S3 ×1
-        self._cluster(vpc)       # {prefix}cluster（RunTask 时 cli 按名指定，task-def 不绑 cluster）
+        self._cluster(vpc)       # {prefix}cluster（RunTask 时推进器按名指定，task-def 不绑 cluster）
         self._task_definitions()  # 2 引擎：ECR + task-def + task role + 模板 revision ARN 写 SSM
-        self._ssm_network(vpc)   # 写 subnet/sg ID 供 cli 读
+        self._worker_security_group(vpc)  # worker task 用的安全组（推进器的 SECURITY_GROUPS env 取它）
+        # 诊断输出（cdk deploy 后打印，便于人工核对提交侧用的 --prefix 与部署一致）
+        CfnOutput(self, "Prefix", value=self.prefix)
         self._ssm_deployment_stamp()  # 写 version / vpc 取值（ADR 0037 决策 6，随事务同生死）
         self._ssm_device_farm()  # 有项目 ARN 时写进 SSM（ADR 0051 决策 10，随事务同生死）
         self._reconcile_lambdas(vpc)  # 无状态批量运行（ADR 0034）：退出观察者 + reconciler + kicker 三 Lambda + EventBridge + Stream
@@ -111,8 +113,9 @@ class BackendStack(Stack):
     def _resolve_stop_timeout(self) -> int:
         """container stopTimeout（秒）：`-c stop_timeout=N` 覆盖，默认 120s。
 
-        grace 真容器校准的**唯一落点**（`FargateWorkerHandle.stop` 忽略运行期 grace 参数，真实宽限由 task-def
-        期这个常量决定）。做成 context 可配是为迭代试不同 grace 值免改 code。
+        grace 真容器校准的**唯一落点**（云端停止 worker 只经推进器发的 `StopTask`，没有运行期 grace 参数，真实宽限由
+        task-def 期这个常量决定，ADR 0024「终止契约」节机制层、ADR 0032「真容器校准结论」第 4 条）。做成 context 可配是为
+        迭代试不同 grace 值免改 code。
         **synth 期 fail-fast**：Fargate 硬上限 120s，>120 部署期必被 ECS 拒——早报错、点明是 Fargate 限制而非笔误。
         （Nova grace 下限 150s>120s 的冲突正卡在这条硬上限上，解法见 ADR 0032「真容器校准结论」节第 4 条。）
         """
@@ -212,7 +215,8 @@ class BackendStack(Stack):
         # events 表（events-out）：PK=pk(S，run_id#scope_id) / SK=seq(N)；body 非键属性不声明。
         # 开 TTL：expires_at（worker 写 now+7d epoch 秒，ADR 0033/0024）自动过期旧事件。
         # **开 Stream（NEW_IMAGE，ADR 0034）**：worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发
-        # reconciler Lambda 推进（无状态批量运行的事件驱动主链；同步 run 路径不消费 Stream，仍走 Query 轮询）。
+        # reconciler Lambda 推进（无状态批量运行的事件驱动主链，ADR 0024「DynamoDB 作 events-out 传输」节「读端由 DynamoDB
+        # Streams 唤醒」条）。
         self._events_table = dynamodb.Table(
             self, "EventsTable",
             table_name=names.default_name(self.prefix, names.BASE_EVENTS_TABLE),
@@ -276,22 +280,20 @@ class BackendStack(Stack):
             self._vpc_spec = "default"
             return ec2.Vpc.from_lookup(self, "BackendVpc", is_default=True)
         # 建新：2-AZ、**零 NAT**（nat_gateways=0）。worker 落公有子网 + 公网 IP 出网，与 _worker_subnet_ids 的
-        # 「公有子网优先」及 assignPublicIp 缺省 ENABLED（`compose.resolve_network` 缺省与推进器 Lambda 的
-        # ASSIGN_PUBLIC_IP 缺省）一致——不建常驻计费的 NAT。**真私有子网隔离（NAT/VPC endpoint 出网）留 backlog**：
-        # 现三种取值均公有子网出网，若未来要私有隔离需同步 _worker_subnet_ids 选私有子网 + 两处 assignPublicIp
-        # 取值改 DISABLED（`compose.resolve_network` 缺省与推进器 Lambda 的 ASSIGN_PUBLIC_IP env，跨组件联动）。
+        # 「公有子网优先」及推进器 Lambda 的 ASSIGN_PUBLIC_IP 缺省 ENABLED 一致——不建常驻计费的 NAT。
+        # **真私有子网隔离（NAT/VPC endpoint 出网）留 backlog**：现三种取值均公有子网出网，若未来要私有隔离需同步
+        # _worker_subnet_ids 选私有子网，并在本 stack 给两个推进器注入 ASSIGN_PUBLIC_IP=DISABLED（assignPublicIp 只有这一处取值）。
         vpc = ec2.Vpc(self, "BackendVpc", max_azs=2, nat_gateways=0)
         # vpc_id 是 CDK token（部署期才有值）——拼进字符串由 CloudFormation 的 Fn::Join 解析，参数落地即真 id。
         self._vpc_spec = f"new:{vpc.vpc_id}"
         return vpc
 
     def _worker_subnet_ids(self, vpc: ec2.IVpc) -> list[str]:
-        """worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033）。
+        """worker task 落哪些 subnet——「优先公有子网、无则回落私有」这条契约的**唯一落点**（ADR 0033「VPC 来源」节）。
 
-        三个消费者必须恒等（都喂同一个 `awsvpcConfiguration`）：SSM `/{prefix}backend/subnets`（cli
-        resolve_network 读）+ reconciler / kicker Lambda 的 `SUBNETS` env（它们起 worker task）。任一处
-        单独改动 → cli 与 Lambda 起的 task 落在不同子网，且只在 RunTask 时才暴露，故收敛在此一处。
-        公有子网配 `assignPublicIp=ENABLED` 出网（零 NAT）；回落私有时需 NAT/VPC endpoint 出网。
+        起 worker task 的只有 reconciler / kicker 两个推进器，两者经 `_advancer_function` 共用同一份 env，其中的
+        `SUBNETS` 由本方法生成：kicker 起的首批与 reconciler 续起的 task 因此落在同一批子网。选取出错只在 RunTask 时才
+        暴露，故收敛在此一处。公有子网配 `assignPublicIp=ENABLED` 出网（零 NAT）；回落私有时需 NAT/VPC endpoint 出网。
         """
         return [s.subnet_id for s in (vpc.public_subnets or vpc.private_subnets)]
 
@@ -356,7 +358,7 @@ class BackendStack(Stack):
             task_role=task_role,
         )
         task_def.add_container(
-            names.container_name(engine),  # **container 名是 {engine}-worker（不带 prefix）**——cli RunTask 逐字匹配（ADR 0033 硬契约）
+            names.container_name(engine),  # **container 名是 {engine}-worker（不带 prefix）**——推进器 RunTask 的 overrides 逐字匹配（ADR 0033 硬契约）
             image=ecs.ContainerImage.from_ecr_repository(repo, tag="latest"),
             logging=ecs.LogDriver.aws_logs(
                 stream_prefix=engine,
@@ -367,8 +369,8 @@ class BackendStack(Stack):
                     removal_policy=RemovalPolicy.DESTROY,  # 日志组可随 stack 销毁（非数据）
                 ),
             ),
-            # 不设 AWS_REGION/AWS_PROFILE（ADR 0033「task-def 不焊 region/凭证」节、ADR 0016 决策 C）：region 每 run
-            # 经 RunTask overrides 注入、凭证靠 task role。
+            # 不设 AWS_REGION/AWS_PROFILE（ADR 0033「task-def 不焊 region/凭证」节、ADR 0016 决策 C）：region 由推进器
+            # 取部署所在区域（本 stack 注给它的 REGION env），经 RunTask overrides 注入；凭证靠 task role。
             stop_timeout=Duration.seconds(self.stop_timeout_s),  # grace 真容器校准（ADR 0032），默认 120s、-c stop_timeout= 覆盖（见 _resolve_stop_timeout）
         )
 
@@ -516,33 +518,17 @@ class BackendStack(Stack):
             conditions={"StringLike": {"s3:prefix": [f"{names.APP_OBJECT_PREFIX}*"]}},
         ))
 
-    # ---- SSM：subnet/sg ID 写进含 prefix 路径（cli resolve_network 读）----
-    def _ssm_network(self, vpc: ec2.IVpc) -> None:
-        # subnet 选取走 _worker_subnet_ids（与两个推进器 Lambda 的 SUBNETS env 同源）。
-        # assignPublicIp="ENABLED"（`compose.resolve_network` 缺省、推进器 Lambda 的 ASSIGN_PUBLIC_IP 缺省）与公有子网
-        # 配套（worker 只出不入连 AgentCore/Bedrock/S3/DDB）。
-        subnet_ids = self._worker_subnet_ids(vpc)
-        # worker task 缺省用的安全组（未给 --security-group 时经 SSM 读到它）：本 stack 新建的 WorkerSg，
-        # 不是 VPC 的 default 安全组；出站全开、入站无——worker 只出不入。
+    # ---- worker 安全组：子网与安全组 ID 只经环境变量注给两个推进器 Lambda，命令行一侧不读（ADR 0033「组合根接线（非 IaC）」
+    #      节「Fargate 配置参数」条与「VPC 来源」节）----
+    def _worker_security_group(self, vpc: ec2.IVpc) -> None:
+        # worker task 用的安全组：本 stack 新建的 WorkerSg，不是 VPC 的 default 安全组；出站全开、入站无——worker 只出不入
+        # （连 AgentCore/Bedrock/S3/DDB），与公有子网、推进器缺省的 assignPublicIp=ENABLED 配套。
         sg = ec2.SecurityGroup(
             self, "WorkerSg", vpc=vpc,
             description=f"{self.prefix}fargate worker sg (egress only)",
             allow_all_outbound=True,
         )
-        self._sg = sg  # 存引用：reconciler Lambda 起 worker task 时用同一 sg（_worker_sg_id）
-        ssm.StringListParameter(
-            self, "SsmSubnets",
-            parameter_name=names.ssm_subnets_path(self.prefix),
-            string_list_value=subnet_ids,
-        )
-        ssm.StringListParameter(
-            self, "SsmSecurityGroups",
-            parameter_name=names.ssm_security_groups_path(self.prefix),
-            string_list_value=[sg.security_group_id],
-        )
-        # 诊断输出（cdk deploy 后打印，便于人工核对 cli --prefix 一致）
-        CfnOutput(self, "Prefix", value=self.prefix)
-        CfnOutput(self, "SubnetsSsmPath", value=names.ssm_subnets_path(self.prefix))
+        self._sg = sg  # 存引用：两个推进器 Lambda 起 worker task 时用同一 sg（_worker_sg_id）
 
     # ---- SSM 部署戳：版本 + 生效 VPC 取值（ADR 0037 决策 6）----
     def _ssm_deployment_stamp(self) -> None:
@@ -594,11 +580,10 @@ class BackendStack(Stack):
           直接 invoke kickoff（卡住救活）→ tick 起首批 task；另由 job timeout 的 Scheduler 到点 invoke（payload 带
           timeout_scope，先做超时处置再 tick，见下『job timeout 到点触发器』）。职责『让 run 动起来』（对 reconciler 的『推着走』）。
 
-        Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。**复用同步 cloud run 的资源**（runs/events
-        表、桶、cluster、task-def、task/execution role）——reconciler 起 worker task 与同步路径同一套
-        （compose.build_fargate_engines 单一真源，见本包 lambdas/reconciler.py）。故三个 handler 都得自己分辨
-        「这个 run 归谁推进」：exit-observer/reconciler 在 handler 里判 detached（触发面滤不掉），kicker 靠
-        Stream filter 滤（见下）——两者判据同一个标记。
+        Lambda 代码打进一个 asset（内容清单见 `_build_lambda_asset`）。三个 Lambda 用本 stack 的 runs/events 表、桶、
+        cluster、task-def 与 task/execution role；起 worker task 的装配只在 compose.build_fargate_engines 一处（调用方是
+        本包 lambdas/reconciler.py 的组合根）。三个 handler 各自分辨「这个 run 归谁推进」：exit-observer/reconciler
+        在 handler 里判 detached（触发面滤不掉），kicker 靠 Stream filter 滤（见下）——两者判据同一个标记。
         """
         cluster_name = names.default_name(self.prefix, names.BASE_CLUSTER)
         code = lambda_.Code.from_asset(self._build_lambda_asset())
@@ -610,7 +595,7 @@ class BackendStack(Stack):
             "PREFIX": self.prefix,
             "REGION": self.region,
         }
-        # 起 worker task 的 subnet（reconciler/kicker 共用一份；与写给 cli 的 SSM 同源——见 _worker_subnet_ids）
+        # 起 worker task 的 subnet（reconciler/kicker 经 advancer_env 共用同一份，选取规则见 _worker_subnet_ids）
         subnets_env = ",".join(self._worker_subnet_ids(vpc))
         # **模板 revision ARN 不注给推进器**（ADR 0038 被拒方案「缺字段时回落模板 revision」）：模板的镜像栏是
         # `latest` 占位、在从未推过 `latest` 的全新 prefix 上根本拉不到，回落它只会把错误拖到 Fargate 启动期。
@@ -874,5 +859,5 @@ class BackendStack(Stack):
 
     @property
     def _worker_sg_id(self) -> str:
-        """worker 安全组 id——_ssm_network 建的 sg。存引用供 reconciler Lambda 起 task 用同一 sg。"""
+        """worker 安全组 id——_worker_security_group 建的 sg。两个推进器 Lambda 的 SECURITY_GROUPS env 都取它，起 task 用同一 sg。"""
         return self._sg.security_group_id

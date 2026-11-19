@@ -1,7 +1,7 @@
 """核心注入接口（ADR 0016，业界称 ports & adapters）：核心的主要注入口在此（另两个见末段），具体 adapter 由组合根注入。
 
 四个 port（关注点拆开，不揉成上帝 module）：
-- Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；adapter 有子进程与 Fargate 两种
+- Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；实装只有子进程 adapter（云端起 task 的 FargateEngine 不走本 port）
 - RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询接力与无状态批量运行的条件写）
 - ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
@@ -10,8 +10,9 @@
 `persist.RunPersistence`，不是 adapter。
 
 禁止：port 内部 env-sniff 自选实现（Midscene GlobalConfigManager 反模式）。adapter 一律组合根注入。
-接口先定（逼清边界）；四个 port 的 local + 云端 adapter 均已实装（RunStore: local/ddb、Result/ReportStore:
-local/s3、Engine: subprocess/fargate），组合根按 `--backend` 注入。
+接口先定（逼清边界）；三个 store port 的 local + 云端 adapter 均已实装（RunStore: local/ddb、Result/ReportStore:
+local/s3），组合根按 `--backend` 注入。Engine 只有子进程实装：同步 `run` 只有本机后端（ADR 0016 决策 A），云端的 task 由推进器经
+`CloudLauncher` 调 `FargateEngine.start_scope` 起（ADR 0034「Engine port 演进」）。
 
 **另两个 port 不在本模块**：`EventLog` 与 `Launcher` 定义在 `reconcile.py`、与消费它们的 reconciler 同处——
 两个 port 的推进语义（reconciler 读全量 events 重放、认领成功后起一个 job）只服务无状态推进路径，与本模块那批
@@ -50,8 +51,8 @@ from gherkai_core.model import (
 class WorkerHandle(Protocol):
     """一个正在运行的 worker 的句柄（schedule 持有，用于 stop）。
 
-    不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace）；
-    Fargate `StopTask`（忽略运行期 grace 入参，宽限由 task-def 期 `stopTimeout` 定）。
+    不暴露进程/信号细节——「怎么停」的机制藏在 adapter 内部（ADR 0026「优雅终止」节）：子进程 SIGTERM→宽限→SIGKILL（真用运行期 grace，
+    ADR 0024「终止契约」节机制层）。
     """
 
     def stop(self, grace_period_s: float) -> None:
@@ -62,7 +63,8 @@ class WorkerHandle(Protocol):
 class Engine(Protocol):
     """执行引擎 port。
 
-    schedule 经此起 worker；adapter 形状一致（spawn node 子进程 / spawn python 子进程 / Fargate task），schedule 对引擎无知。
+    schedule 经此起 worker；实装是单个参数化的 `SubprocessEngine`（spawn node 子进程 / spawn python 子进程，形状一致，ADR 0016
+    「留口子：核心注入接口（ports）」节 Engine 条），schedule 对引擎无知。
     """
 
     def run_scope(self, job: Job) -> tuple[WorkerHandle, Iterator[Event]]:
@@ -76,8 +78,8 @@ class Engine(Protocol):
         不进端口契约，也不必每个 adapter 各实现一遍。
 
         **本签名即全部契约**：`SubprocessEngine.run_scope` 另有 `raw_sink`（原始事件行旁路，供无状态路径把
-        未解析的行落持久 events sink）——那是**该 adapter 的扩展形参、不在 port 契约内**（`FargateEngine.run_scope`
-        不接受它）。要它的调用方须把类型收窄到具体 adapter（local 无状态
+        未解析的行落持久 events sink）——那是**该 adapter 的扩展形参、不在 port 契约内**（ADR 0034「Engine port 演进」节 raw_sink
+        定位条）。要它的调用方须把类型收窄到具体 adapter（local 无状态
         路径的 `SubprocessLauncher` 即如此），别经 `Engine` 标注调它——那样换 adapter 只在运行时 TypeError。
         """
         ...

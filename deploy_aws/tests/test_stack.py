@@ -264,19 +264,7 @@ def test_ecr_repos_have_no_lifecycle_rules_and_are_retained():
         assert res.get("UpdateReplacePolicy") == "Retain", logical
 
 
-def test_ssm_params_with_prefix_path():
-    t = _template()
-    t.has_resource_properties("AWS::SSM::Parameter", {
-        "Name": "/gherkai-backend/subnets", "Type": "StringList",
-    })
-    t.has_resource_properties("AWS::SSM::Parameter", {
-        "Name": "/gherkai-backend/security-groups", "Type": "StringList",
-    })
-
-
 _BASE_SSM_PARAMS = {
-    "/gherkai-backend/subnets",
-    "/gherkai-backend/security-groups",
     "/gherkai-backend/version",
     "/gherkai-backend/vpc",
     "/gherkai-backend/worker-template/novaact",
@@ -285,19 +273,20 @@ _BASE_SSM_PARAMS = {
 
 
 @pytest.mark.parametrize("context", NO_DF_CONTEXTS)
-def test_ssm_parameter_set_without_device_farm_project_is_exactly_six(context):
-    """SSM 参数**全集**锁定（枚举型护栏）：网络 2（subnets/security-groups，cli resolve_network 读）
-    + 部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，ADR 0038 四步第 1 步）。
+def test_ssm_parameter_set_without_device_farm_project_is_exactly_four(context):
+    """SSM 参数**全集**锁定（枚举型护栏）：部署戳 2（version/vpc，ADR 0037 决策 6）+ 模板 revision ARN 2（每引擎一个，
+    ADR 0038 四步第 1 步）。子网与安全组不进 SSM：只经环境变量注给两个推进器（ADR 0033 资源清单第 7 条与「VPC 来源」节）。
     context 不带 Device Farm 项目或带「待建立」占位时，不建项目 ARN 参数（ADR 0037 决策 6：两者等价、都不报错）。
 
-    逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），而这些参数每一个
-    都有一个读侧消费者：漏了只在实际运行中才暴露（cli 连不上网络 / preflight 无戳 / push-worker 找不到模板）。
+    逐条比全集、不只验「存在」——「存在」式断言照不出**漏写**（少一个参数时子集匹配仍绿），也照不出多写（没有读者的参数
+    留在模板里），而这些参数每一个都有一个读侧消费者：漏了只在实际运行中才暴露（preflight 无戳 / 下次 deploy 无从比对 VPC /
+    push-worker 找不到模板）。
     """
     assert set(_ssm_params(_template(context=context))) == _BASE_SSM_PARAMS
 
 
 @pytest.mark.parametrize("prefix", ["gherkai-", "prod-"])
-def test_ssm_parameter_set_with_device_farm_project_is_exactly_seven(prefix):
+def test_ssm_parameter_set_with_device_farm_project_is_exactly_five(prefix):
     """带合法项目 ARN 时恰多出一条 `device-farm-project`，值逐字等于传入的 ARN（ADR 0033 资源清单第 11 条、ADR 0051 决策 10）。
 
     提交侧读它填设备请求、doctor 读它列未结束的会话、下次 deploy 读它核对已有项目、diff / --synth-only / destroy 取它的现值作为
@@ -408,8 +397,8 @@ def test_advancer_roles_hold_no_ssm_read():
 
 
 def _joined_refs(value) -> list[str]:
-    """从模板值（Fn::Join）取出被拼接的资源 Ref 序列。SSM StringList 与 Lambda env 的 Join 形态不同
-    （分隔符一个在 Join 首参、一个夹在片段之间）→ 比 Ref 序列、不比 JSON。字面串（如空列表拼出的 ""）→ []。"""
+    """从模板值（Fn::Join）取出被拼接的资源 Ref 序列：Lambda env 里的逗号分隔串由分隔符夹在片段之间拼成，比 Ref 序列、
+    不比 JSON。字面串（如空列表拼出的 ""）→ []。"""
     if not isinstance(value, dict):
         return []
     if "Ref" in value:  # 单个 token（没走 Join）
@@ -418,21 +407,39 @@ def _joined_refs(value) -> list[str]:
     return [p["Ref"] for p in parts if isinstance(p, dict) and "Ref" in p]
 
 
-def test_worker_subnets_single_source_across_ssm_and_lambda_env():
-    """subnet 选取（公有优先、无则回落私有）只有一处落点 `_worker_subnet_ids`：写给 cli 读的 SSM
-    与 reconciler/kicker 的 `SUBNETS` env 必须**恒等**——三者最终都喂同一个 `awsvpcConfiguration`，
-    漂移只会在 RunTask 时才暴露（cli 与 Lambda 起的 task 落进不同子网）。"""
-    t = _template()
-    ssm = [p["Properties"]["Value"] for p in t.find_resources("AWS::SSM::Parameter").values()
-           if p["Properties"]["Name"] == "/gherkai-backend/subnets"]
-    assert len(ssm) == 1
-    envs = {name: fn["Properties"]["Environment"]["Variables"]["SUBNETS"]
+def _advancer_env(t, key: str) -> dict:
+    """带 `key` 这一项 env 的 Lambda → 该项的模板值。"""
+    return {name: fn["Properties"]["Environment"]["Variables"][key]
             for name, fn in t.find_resources("AWS::Lambda::Function").items()
-            if "SUBNETS" in fn["Properties"].get("Environment", {}).get("Variables", {})}
+            if key in fn["Properties"].get("Environment", {}).get("Variables", {})}
+
+
+def test_both_advancers_get_the_same_non_empty_worker_subnets():
+    """subnet 选取（公有优先、无则回落私有）只有一处落点 `_worker_subnet_ids`，起 worker task 的只有 reconciler / kicker
+    两个推进器：两者的 `SUBNETS` 必须**相同**、由 subnet 资源的 Ref 拼成且不为空（ADR 0033「VPC 来源」节）——kicker 起的首批与
+    reconciler 续起的 task 要落在同一批子网，选取出错只在 RunTask 时才暴露。"""
+    t = _template()
+    envs = _advancer_env(t, "SUBNETS")
     assert len(envs) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 SUBNETS，实际 {sorted(envs)}"
-    assert _joined_refs(ssm[0]), "SSM subnets 应是 subnet 资源 Ref 拼出来的（空表示选取逻辑坏了）"
-    for name, env_val in envs.items():
-        assert _joined_refs(env_val) == _joined_refs(ssm[0]), f"{name} 的 SUBNETS 与 SSM 不同源"
+    refs = {name: _joined_refs(v) for name, v in envs.items()}
+    first = next(iter(refs.values()))
+    assert first, "SUBNETS 应是 subnet 资源 Ref 拼出来的（空表示选取逻辑坏了）"
+    subnets = t.find_resources("AWS::EC2::Subnet")
+    assert set(first) <= set(subnets), f"SUBNETS 引用的不是本 stack 的 subnet 资源：{first}"
+    for name, r in refs.items():
+        assert r == first, f"{name} 的 SUBNETS 与另一个推进器不同"
+
+
+def test_both_advancers_get_the_worker_security_group():
+    """worker 安全组只有本 stack 新建的 WorkerSg 一个来源：两个推进器的 `SECURITY_GROUPS` 都取它的 GroupId（ADR 0033「VPC 来源」节）。"""
+    t = _template()
+    envs = _advancer_env(t, "SECURITY_GROUPS")
+    assert len(envs) == 2, f"应恰有 reconciler/kicker 两个 Lambda 拿 SECURITY_GROUPS，实际 {sorted(envs)}"
+    sgs = t.find_resources("AWS::EC2::SecurityGroup")
+    for name, v in envs.items():
+        target = v.get("Fn::GetAtt") if isinstance(v, dict) else None
+        assert target and target[1] == "GroupId" and target[0] in sgs, f"{name} 的 SECURITY_GROUPS 不是 worker 安全组：{v}"
+    assert len({json.dumps(v, sort_keys=True) for v in envs.values()}) == 1, "两个推进器的 SECURITY_GROUPS 不同"
 
 
 def test_task_role_has_events_putitem_not_runs():
@@ -668,10 +675,8 @@ def test_prefix_switches_whole_set():
         "Family": "prod-novaact-worker",
         "ContainerDefinitions": Match.array_with([Match.object_like({"Name": "novaact-worker"})]),  # 仍不带 prefix
     })
-    t.has_resource_properties("AWS::SSM::Parameter", {"Name": "/prod-backend/subnets"})
     # 部署戳与模板参数同样随 prefix 走（路径全走 names.ssm_path，无遗漏的硬编码 gherkai-）
     assert set(_ssm_params(t)) == {
-        "/prod-backend/subnets", "/prod-backend/security-groups",
         "/prod-backend/version", "/prod-backend/vpc",
         "/prod-backend/worker-template/novaact", "/prod-backend/worker-template/midscene",
     }

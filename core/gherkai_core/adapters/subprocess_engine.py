@@ -239,7 +239,7 @@ def _read_events(
         # 信号（ADR 0034 机制二），一律翻成异常让 schedule 的终结函数按「退出码非零」判。schedule 停止后仍有界消费到 EOF
         # （ADR 0034 机制二「停止后继续有界消费」），故主动停的退出码也经此；两个引擎 worker 收 SIGTERM 后以正码退出
         # （ADR 0051 决策 5 退出码条），负码只来自 SIGKILL。
-        # 码→异常的翻译在 wire（协议级，与 Fargate adapter 共用一份）。
+        # 码→异常的翻译在 wire（协议级、单一事实源，ADR 0028「关键不变量:退出码携带 network 信号」节「退出码 → 异常」条）。
         raise_for_worker_exit(rc, code_label="returncode")
 
 

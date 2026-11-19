@@ -218,15 +218,16 @@ def test_sync_and_stateless_paths_feed_finalize_the_same_flags(monkeypatch, row:
     assert seen["sync"][-1] == seen["stateless"][-1], f"\n同步：{seen['sync']}\n无状态：{seen['stateless']}"
 
 
-# 停止后的收尾晚于 grace 加余量：Fargate 上从发出停止请求到事件流结束要经过
-# 容器停止宽限与 ECS 记下 STOPPED 的滞后，远超运行期 grace。同步路径按组合根注入的停止后等待预算排空，同一组事实与无状态路径的结论仍一致；
-# 排空上界只取 grace 加 5 秒时，同步路径丢掉晚到的收尾，与无状态路径分歧。
+# 停止后的收尾在停止请求之后 20 秒才到（worker 释放会话耗时较长，但仍在 grace 之内）：排空上界取停止请求时刻加 grace 再加余量
+# （ADR 0034 机制二「停止后继续有界消费完整事件流」条），同步路径照常等到收尾与 EOF，同一组事实与无状态路径的结论一致。
+# grace 只取 1 秒时排空上界早于收尾到达，同步路径丢掉晚到的收尾、与无状态路径分歧：这组对照证明上面的时序确实让收尾晚到。
 
 class _LateStopClock:
     """与 _Clock 相同地越过 deadline；发出停止请求后停在请求时刻加 20 秒：停止后的收尾事件与 EOF 都在这个时刻到达，
-    超出 grace 1 秒加 5 秒余量，落在等待预算 30 秒加余量之内。"""
+    落在 grace 30 秒加余量之内。"""
 
     WINDOW_S = 20.0
+    GRACE_S = 30.0
 
     def __init__(self, jump_after: int):
         self.inner = _Clock(jump_after)
@@ -243,7 +244,7 @@ class _LateStopClock:
             self.frozen = self.inner.t + self.WINDOW_S
 
 
-def _sync_late_stop(row: Row, stop_bound_s: float | None):
+def _sync_late_stop(row: Row, grace_s: float = _LateStopClock.GRACE_S):
     """超时行的同步路径，收尾改为停止请求后 20 秒才到（事件序列与 _sync 相同，与 _stateless 同源）。"""
     job = _job(row.timeout_s, row.device)
     clock = _LateStopClock(jump_after=len(row.events))
@@ -254,7 +255,7 @@ def _sync_late_stop(row: Row, stop_bound_s: float | None):
         engine.crash_after = {SCOPE: len(main)}
     res = schedule(RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=FAR_DEADLINE), FakeResolver(engine), clock.inner.sink(),
                    opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
-                                     grace_period_s=1.0, stop_bound_s=stop_bound_s))
+                                     grace_period_s=grace_s))
     return res.jobs[0]
 
 
@@ -266,18 +267,19 @@ _COMPLETE_THEN_DEADLINE = Row("内容完整后 deadline 才到", [_opened("a"), 
 
 
 @pytest.mark.parametrize("row", [*_TIMED_OUT, _COMPLETE_THEN_DEADLINE], ids=[r.name for r in [*_TIMED_OUT, _COMPLETE_THEN_DEADLINE]])
-def test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound(row: Row):
-    a, b = _comparable(_sync_late_stop(row, stop_bound_s=30.0)), _comparable(_stateless(row))
+def test_paths_agree_when_stop_tail_arrives_late_within_grace(row: Row):
+    a, b = _comparable(_sync_late_stop(row)), _comparable(_stateless(row))
     assert a == b, f"\n同步：{a}\n无状态：{b}"
 
 
-def test_grace_only_drain_bound_diverges_under_late_stop_tail():
-    """上一组对拍的时序确实超出 grace 加余量（不是碰巧相等）：不给等待预算时，同步路径复现两个后果——①停止后晚到的 confirmed
-    session_closed 被丢弃，message 多出释放提示；②内容已完整的 job 等不到 EOF，退出码记为未知，判成 ERROR timeout，而无状态路径判 PASSED。"""
+def test_grace_shorter_than_the_late_stop_tail_makes_the_paths_diverge():
+    """上一组对拍的时序确实让收尾晚到（不是即时到达、碰巧一致）：grace 取 1 秒时排空上界是停止请求后 6 秒，早于 20 秒才到的收尾，
+    同步路径复现两个后果——①停止后晚到的 confirmed session_closed 被丢弃，message 多出释放提示；②内容已完整的 job 等不到 EOF，
+    退出码记为未知，判成 ERROR timeout，而无状态路径判 PASSED。"""
     row = next(r for r in MATRIX if r.name == "scenario 中途超时加停止后 session_closed")
-    late = _sync_late_stop(row, stop_bound_s=None)
+    late = _sync_late_stop(row, grace_s=1.0)
     assert DEVICE_RELEASE_FAILED_HINT in late.message and DEVICE_RELEASE_FAILED_HINT not in (_stateless(row).message or "")
-    late = _sync_late_stop(_COMPLETE_THEN_DEADLINE, stop_bound_s=None)
+    late = _sync_late_stop(_COMPLETE_THEN_DEADLINE, grace_s=1.0)
     assert (late.status, late.error_type) == (Status.ERROR, "timeout")
     assert _stateless(_COMPLETE_THEN_DEADLINE).status == Status.PASSED
 

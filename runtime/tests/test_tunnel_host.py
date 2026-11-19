@@ -66,7 +66,7 @@ def test_ttl_sums_job_budgets_plus_margin():
 
 def test_ttl_default_margins_follow_the_documented_formula():
     """缺省取值下 TTL 为 900 + Σ(各 job 预算) + N × 210（ADR 0035 决策 3）：每 job 的 210 秒由调度精度 60、
-    Fargate 停止宽限上限 120、事件链尾延迟 30 组成，停止宽限与云端同步 run 的停止后等待预算同用一个平台上限常量。"""
+    Fargate 停止宽限上限 120、事件链尾延迟 30 组成，停止宽限一段取平台上限常量 compose.FARGATE_STOP_TIMEOUT_MAX_S。"""
     assert tunnel_host.CLOUD_STARTUP_MARGIN_S == 900.0
     assert tunnel_host.CLOUD_PER_JOB_MARGIN_S == 210.0
     assert tunnel_host.CLOUD_PER_JOB_MARGIN_S == 60.0 + compose.FARGATE_STOP_TIMEOUT_MAX_S + 30.0

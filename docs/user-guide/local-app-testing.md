@@ -2,7 +2,7 @@
 
 浏览器运行在云端，访问不到 `http://localhost:3000`。本机 local 与云端 cloud 两个后端在这一点上相同：local 只是把 worker 进程放在你的机器上，浏览器始终在云端，所以两个后端测本机应用都要用 `--expose-local`。
 
-`--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制如下。执行方式与执行后端四种组合的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
+`--expose-local` 的前置、行为、隧道的持有进程、存活时间上限与限制如下。执行方式与执行后端三种组合的选择、结果读法与退出码见 [`running-and-results.md`](./running-and-results.md)；选项与环境变量总表见 [`configuration.md`](./configuration.md)；按症状排障见 [`troubleshooting.md`](./troubleshooting.md)。
 
 ## 工作方式
 
@@ -69,7 +69,7 @@ gherkai plan my_app.feature --expose-local http://localhost:3000
 
 | 组合 | 持有隧道的进程 | 拆除时机 |
 |---|---|---|
-| `run`（`--backend local` 或 `cloud`） | 前台的 CLI 进程 | 命令正常结束、Ctrl-C 或执行期间收到 SIGTERM 时拆 |
+| `run` | 前台的 CLI 进程 | 命令正常结束、Ctrl-C 或执行期间收到 SIGTERM 时拆 |
 | `submit`（默认 `--backend local`） | 本机的后台进程（隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`） | run 到终态即拆；该后台进程异常退出时，由 `gherkai status <run_id> --wait` 接力拆 |
 | `submit --backend cloud` | 本机的隧道守护进程（日志落系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`） | run 到终态即拆；到存活时间上限也拆；守护进程被 `kill`（SIGTERM 或 SIGHUP）结束时也拆 |
 

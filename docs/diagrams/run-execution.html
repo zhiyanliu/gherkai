@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta name="generator" content="archify 3.2.0">
   <meta name="archify-reader-contract" content="declared-wide-v1">
-  <title>执行与推进全景：run / submit × local / cloud</title>
+  <title>执行与推进全景：本机前台、本机后台与云端后台</title>
   <script>
     // Resolve the theme before first paint so light-preference users don't
     // see a dark flash. The toolbar script below re-applies with UI state.
@@ -5194,7 +5194,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
            data-preset-badge-blueprint="蓝图 / 修订 01"
            data-preset-badge-editorial="编辑风格 / 现场笔记">
         <div class="pulse-dot"></div>
-        <h1>执行与推进全景：run / submit × local / cloud</h1>
+        <h1>执行与推进全景：本机前台、本机后台与云端后台</h1>
       </div>
     </div>
 
@@ -5204,7 +5204,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
     <div class="diagram-container" data-detail-level="read"
          data-preset-badge-editorial-plate="ARCHIFY / 图版 04">
       <svg viewBox="0 0 1157 652" data-layout-contract="readable-v2" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="">
-        <title id="archify-diagram-title">执行与推进全景：run / submit × local / cloud</title>
+        <title id="archify-diagram-title">执行与推进全景：本机前台、本机后台与云端后台</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -5254,7 +5254,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / 本机后端（local）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
+        <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / 同一份 core（三种组合共用）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-muted" font-size="10" font-weight="600">03 / 无状态单步推进</text>
@@ -5294,8 +5294,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-edge-role="async" data-composition-points="1062.8,145;1062.8,217" d="M 1062.8 145 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-edge-role="async" data-composition-points="1062.8,465;1062.8,269" d="M 1062.8 465 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-edge-role="branch" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 282 Q 118 290 126 290 L 200 290 Q 208 290 208 298 L 208 359 Q 208 367 216 367 L 224 367" class="a-default" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle" data-edge-role="async" data-composition-points="808.8,465;808.8,289;1062.8,289;1062.8,269" d="M 808.8 465 L 808.8 297 Q 808.8 289 816.8 289 L 1054.8 289 Q 1062.8 289 1062.8 281 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="17" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机后端（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机后端（local） › 入口与承载进程">
@@ -5345,8 +5344,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="1062.8" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
         </g>
 
-        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种组合共用） › 入口与承载进程">
-          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种组合共用） › 入口与承载进程</title>
+        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（三种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（三种组合共用） › 入口与承载进程">
+          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（三种组合共用） › 入口与承载进程</title>
           <rect x="48" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="48" y="217" width="140" height="52" rx="8" class="c-frontend" data-animate="node" style="--step:0" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(54 223) scale(0.6875)">
@@ -5359,8 +5358,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="118" y="255" class="t-muted" font-size="8" text-anchor="middle">解析 · 分组 · 落定义</text>
         </g>
 
-        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>前台在线循环 · 全程在线接收 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>前台在线循环 · 全程在线接收 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="226" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="226" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(232 223) scale(0.6875)">
@@ -5370,8 +5369,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="296" y="255" class="t-muted" font-size="8" text-anchor="middle">全程在线接收</text>
         </g>
 
-        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-mask"/>
           <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-messagebus" data-animate="node" style="--step:2" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(428.4 223) scale(0.6875)">
@@ -5384,8 +5383,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="494.4" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，并发闸门</text>
         </g>
 
-        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>退出观察者 · 观察 worker 终止 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-security" data-animate="node" style="--step:12" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(744.8 223) scale(0.6875)">
@@ -5396,8 +5395,8 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <text data-detail="context" x="808.8" y="255" class="t-muted" font-size="8" text-anchor="middle">观察 worker 终止</text>
         </g>
 
-        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种组合共用） › 重放与收敛">
-          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种组合共用） › 重放与收敛</title>
+        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（三种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（三种组合共用） › 重放与收敛">
+          <title>收敛与提交点 · 一次落定终态 · 同一份 core（三种组合共用） › 重放与收敛</title>
           <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(998.8 223) scale(0.6875)">
@@ -5534,11 +5533,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="114.80000000000001" y="283" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="163" y="293" class="t-muted" font-size="8" text-anchor="middle">submit：落库即返回</text>
         </g>
-        <g data-detail="context" data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle">
-          <rect x="897.1999999999999" y="282" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="935.8" y="292" class="t-edge-dashed" font-size="8" text-anchor="middle">前台：分段轮询</text>
-        </g>
-        <g data-detail="context" data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream">
+        <g data-detail="context" data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="17" data-edge-id="e-table-stream">
           <rect x="911.5999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="935.8" y="481" class="t-edge-dashed" font-size="8" text-anchor="middle">每批写入</text>
         </g>
@@ -5755,10 +5750,10 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
       <div class="card">
         <div class="card-header">
           <div class="card-dot cyan"></div>
-          <h3>同一份 core，四种组合只换注入件</h3>
+          <h3>同一份 core，三种组合只换注入件</h3>
         </div>
         <ul>
-          <li>解析 · 分组（plan 到此为止）· 投影 · 判定：四种组合（执行方式 × 执行后端）共用一份代码</li>
+          <li>解析 · 分组（plan 到此为止）· 投影 · 判定：三种组合（本机前台、本机后台、云端后台）共用一份代码</li>
           <li>差别只在注入件：执行的承载进程、事件读取通道、job 的启动方式、退出观察者</li>
         </ul>
       </div>

@@ -6,6 +6,8 @@
 
 ## `gherkai run … --json`
 
+`run` 只有本机后端：给出 `--backend cloud`（命令行上，或项目配置文件 `[common]` 的 `backend` 为 `cloud`）时在开始执行之前以退出码 2 结束，stdout 没有输出，stderr 说明云端后端的执行经 `gherkai submit --backend cloud`；云端 run 的机读结果用 `status --json` 读取。
+
 顶层由三部分组成：这次运行的判定、`run_meta`（提交时固定的本次运行任务本身）、`artifacts`（落点）。
 
 | 键 | 类型 | 含义 |
@@ -18,7 +20,7 @@
 | `device_observed_s` / `device_observed_missing` | number / int \| 省略 | 仅当 run 含设备目标 job 时出现：各设备 job 的 `device_observed_s` 之和，与 `origin` 为 `created` / `discovered` 而 `observed_s` 为 null 的会话总数（不计入合计；`attempted` 的尝试两键都不计） |
 | `jobs[]` | array | 每个有判定的 job（即一个 scope）的判定，见下；没有执行的 scope 不在其中（见 `message`） |
 | `run_meta` | object | 本次 run 的任务定义（提交时固定），见下 |
-| `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：local 后端 `--no-report --quiet` 仍保留 `worker_log` 一个键） |
+| `artifacts` | object | 产物落点，见下；`--no-report` 时**省略**（例外：`--no-report --quiet` 仍保留 `worker_log` 一个键） |
 
 `jobs[]` 每项：
 
@@ -63,14 +65,14 @@
 | `device_request` | object \| null | 设备目标的设备请求，桌面目标为 `null`：`provider`（当前只有 `aws-device-farm`）、`device_arn` 或 `os_version`（二选一）、`billing_method`（`METERED` / `UNMETERED`）、`project_arn`、`acquire_timeout_s`；`plan --json` 里恒为 `null`（plan 不解析设备请求） |
 | `scenarios[]` | array | `id`、`name`、`steps[]`：`index`、`keyword`（Given/When/Then）、`text`、`argument`（多行参数：`kind` 为 `docString` 时带 `content`，为 `dataTable` 时带 `rows`；无则省略） |
 
-`artifacts`（全 URI；local `file://`，cloud `s3://` + `ddb://`）：
+`artifacts`（全 URI；`run` 只有本机后端，四键都是 `file://`；`status --json` 给云端 run 的同名键时是 `s3://` 与 `ddb://`）：
 
 | 键 | 含义 |
 |---|---|
 | `run_meta` / `run_state` | 任务定义 / 运行态的落点 |
 | `jobs_dir` | 判定明细目录（每 job 一份 JSON，文件名是 URL 编码的 scope_id；形状同前述 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` 定义**（同 `run_meta.jobs[]` 每项的形状）——scope 键取自 `job.scope_id`，单文件自包含、无需读 run_meta） |
 | `report_index` | 报告首页 `index.html`；报告写失败被隔离时**省略** |
-| `worker_log` | worker 日志落点；仅 `--quiet` 且本机执行（`--backend local`）时出现；cloud 后端 worker 在云端执行、日志进 CloudWatch，此键不出现 |
+| `worker_log` | worker 日志落点；仅 `--quiet` 时出现 |
 
 本次执行结束之前这个 run 已被记为已结束（运行态记录里的 run 级状态已是终态）时，本次执行不覆盖那条记录、不生成报告，stdout 没有输出，说明在 stderr，退出码为 1（处理过使用方中断时仍为 130 或 143）。已得出的 job 判定照常写入，记录用 `status --json` 读取。
 

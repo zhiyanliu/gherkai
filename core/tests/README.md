@@ -73,6 +73,6 @@ uv run pytest                           # 仍只运行单测（集成默认 dese
 
 ## 三重保险：`uv run pytest` 永远不连真 AWS
 
-1. **根** `pyproject.toml` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是防挂死的安全网：FargateEngine 会一直轮询到任务进入 STOPPED 状态，测试替身若始终不返回 STOPPED，轮询就不会结束；60 秒后由 pytest-timeout 报错，CI 不会一直挂起）。
+1. **根** `pyproject.toml` 的 `addopts = -m 'not integration' --timeout=60`：`-m 'not integration'` 默认命令 deselect 掉所有集成测试（`--timeout=60` 与连不连 AWS 无关，是防挂死的安全网：schedule 会一直等到 worker 的事件流结束，测试替身的事件流若始终不结束，又没有超时或停止请求把它截断，等待就不会结束；60 秒后由 pytest-timeout 报错，CI 不会一直挂起）。
 2. `real_aws` fixture：没设 `AWS_DDB_TABLE`/`AWS_S3_BUCKET` 环境变量就 `skip`。
 3. `_fake_aws_creds`（autouse）：对**非** integration 标记的测试盖假凭证——单测即便误发网络请求也连不上真 AWS。

@@ -18,7 +18,8 @@ def ensure_workflow_definition(name: str, *, region: str | None = None, descript
     region=None（不再硬编码 us-east-1，ADR 0016 决策 C）→ boto3 nova-act client 走默认链/profile config 解析 region；
     真无 region（全 miss）→ NoRegionError（fail-loud、别静默用错 region）。注：本函数的 nova-act client **会**查 profile config，
     但同 worker 的 AgentCore 那条路径（bedrock-agentcore `BrowserClient` 构造时的 validate_region）**不查**、要显式字符串——故正常路径靠
-    组合根 `resolve_region` 把 region 落实成具体字符串再注入（见 run_scope.py REGION 注释 / ADR 0016 决策 C）。
+    组合根把 region 落实成具体字符串再注入：本机后端经 `resolve_region`，云端容器由推进器注入部署所在区域（见 run_scope.py REGION
+    注释 / ADR 0016 决策 C）。
     """
     client = boto3.client("nova-act", region_name=region)
     try:

@@ -190,7 +190,7 @@ def test_provider_exit_code_is_passed_through(monkeypatch):
 def test_cli_version_is_handed_to_provider(monkeypatch):
     """CLI 把**自己的**版本放进 `args.version` 供 provider 写后端版本戳（ADR 0037 决策 6/7）。
 
-    戳必须是「写任务定义那一方」的版本——run/submit 的 skew 闸拿它比。
+    戳必须是「写任务定义那一方」的版本——云端各入口（submit / status / explain / list-runs）的 skew 闸拿它比（ADR 0037 决策 7「接线」条）。
     """
     prov = _StubProvider()
     _patch_eps(monkeypatch, _FakeEP("aws", prov))

@@ -51,7 +51,7 @@ gherkai run  features/wikipedia_generic.feature       # 运行；结果落在 re
 gherkai explain <run_id>                              # 有用例没过：逐步看问了 AI 什么、AI 看见了什么、截图在哪
 ```
 
-后台运行用 `submit` 提交、`status --wait` 收结果；加 `--backend cloud --prefix <前缀>` 改用团队的云端后端。执行方式与执行后端的四种组合、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。
+后台运行用 `submit` 提交、`status --wait` 收结果；`submit` 加 `--backend cloud --prefix <前缀>` 改用团队的云端后端，云端后端只有后台运行。执行方式与执行后端的三种组合（本机前台 `run`、本机后台 `submit`、云端后台 `submit --backend cloud`）、常用选项与退出码见 [运行测试与查看结果](./docs/user-guide/running-and-results.md)。
 
 ## 它是如何工作的
 
@@ -82,7 +82,7 @@ gherkai 自己不含模型，也不接收任何数据。每个 AI step 的操作
 |-------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------|
 | 安装、前置要求、第一次完整运行                          | [开始使用](./docs/user-guide/getting-started.md)                                                                             |
 | 写 `.feature`、写确定性 step                           | [编写 .feature](./docs/user-guide/writing-features.md) · [编写确定性 step](./docs/user-guide/writing-deterministic-steps.md) |
-| 四种组合、选项、退出码、结果在哪                         | [运行测试与查看结果](./docs/user-guide/running-and-results.md)                                                               |
+| 三种组合、选项、退出码、结果在哪                         | [运行测试与查看结果](./docs/user-guide/running-and-results.md)                                                               |
 | 两个引擎各能在什么目标上运行、默认模型、计价公式         | [引擎能力矩阵](./docs/user-guide/engines.md)                                                                                   |
 | 测只在本机 / 内网可达的应用                           | [测本机或内网里的被测应用](./docs/user-guide/local-app-testing.md)                                                           |
 | 部署与维护团队的云端后端                              | [部署与维护云端后端](./docs/user-guide/cloud-backend.md)                                                                     |

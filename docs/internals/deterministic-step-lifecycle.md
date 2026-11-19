@@ -143,4 +143,4 @@ variant / 默认指针 / revision / digest 这些载体本身（SSM 键、ECR ta
 | `--json` 里 `deterministic` / `list-deterministic` / `doctor` 的字段 | [`cli-json-contract.md`](./cli-json-contract.md) |
 | step 判定怎么算（`failed` vs `error`、votes、短路） | [`verdict-model.md`](./verdict-model.md) |
 | 产物与证据（谁产什么、落在哪、怎么读） | [`artifacts-and-evidence.md`](./artifacts-and-evidence.md) |
-| run / submit × local / cloud 四种组合下谁起 worker、definition 如何随 run 传递 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) |
+| 本机前台、本机后台、云端后台三种组合下谁起 worker、definition 如何随 run 传递 | [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) |

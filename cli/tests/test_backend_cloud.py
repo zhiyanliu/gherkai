@@ -2,15 +2,18 @@
 
 **只验接线，不引 moto、不连真 AWS**：adapter 行为已由 core 包 moto 全覆盖，cli 再测是重复且破窄腰。
 做法——patch `compose._make_ddb_table`/`_make_s3_client`（store 句柄）+ `preflight_cloud_resources`（探活）
-+ `build_fargate_engines`（cloud 执行）返回**记录调用的 fake**，验证：
-- backend=cloud 构造了正确 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂；
-- **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖；
-- **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix；
-- **cloud 走 FargateEngine**：cloud 走 build_fargate_engines（非 build_engines）；
-- 缺 boto3 → 退出码 2；运行期 botocore 异常 → 退出码 1；cloud + --no-report → 跳过一切云端 + 走 subprocess（零落盘运行路径）；
++ `resolve_worker_variant`（variant 解析）返回**记录调用的 fake**，验证：
+- `run` 只有本机后端：给出 cloud 即以退出码 2 结束并指向 submit，此前不做任何检查、不发任何云端调用（ADR 0016 决策 A）；
+- 云端 submit / status / explain 构造了正确的 store adapter：DDB 拿 table 句柄、三个 S3 件套共享同一个 client、offloader 挂
+  （ADR 0016「cli `--backend {local,cloud}`」节）；
+- **prefix 两层命名（ADR 0033）**：--prefix 批量推导默认名（{prefix}runs/artifacts/events/cluster）、单资源 --xxx 覆盖、环境变量兜底；
+- **preflight fail-fast**：资源不存在即以退出码 2 结束 + 错误点名 prefix（ADR 0033「preflight fail-fast」节）；缺 boto3、
+  建 run 撞 AWS 错同样以退出码 2 结束（ADR 0030 决定七「失败退出码分层」）；
+- CLI 一侧不装配 FargateEngine：起 worker task 的是推进器 Lambda（ADR 0016 决策 C），云端 submit 只写提交记录；
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
-  前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落（ADR 0037 决策 7 / 0038）；解析结果进 definition 与 build_fargate_engines。
+  前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落（ADR 0037 决策 7 / 0038）；解析结果进 definition
+  （ADR 0038「运行时与 preflight」的「选择进 definition」条）。
 """
 from __future__ import annotations
 
@@ -18,32 +21,16 @@ import json
 from pathlib import Path
 
 import pytest
-from gherkai_core.model import JobResult, RunResult, ScopeStarted, Status
 
 from gherkai_cli import __main__ as m
+
+from test_main import _fake_schedule_factory
 
 
 def _write_feature(tmp_path: Path) -> Path:
     feat = tmp_path / "demo.feature"
     feat.write_text("Feature: demo\n  Scenario: s\n    When \"做点啥\"\n", encoding="utf-8")
     return feat
-
-
-def _fake_schedule_factory():
-    """不起 worker 的假 schedule：走完 on_event/on_job_complete 实时落库路径（让 adapter 真被调）。"""
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
-        results = []
-        for j in run_meta.jobs:
-            ev = ScopeStarted(scope_id=j.scope_id)
-            sink(ev)
-            if on_event is not None:
-                on_event(ev)
-            jr = JobResult(job=j, status=Status.PASSED)
-            results.append(jr)
-            if on_job_complete is not None:
-                on_job_complete(jr)
-        return RunResult(run_meta=run_meta, status=Status.PASSED, jobs=results)
-    return fake_schedule
 
 
 # ---- fake boto3 句柄：记录关键调用，不连真 AWS ----
@@ -63,24 +50,24 @@ class _FakeTable:
         self.meta = type("Meta", (), {"client": type("C", (), {"exceptions": type("E", (), {
             "ConditionalCheckFailedException": type("CCFE", (Exception,), {})})()})()})()
 
-    def load(self): self._record.append(("ddb", "load"))          # begin 探活
+    def load(self): self._record.append(("ddb", "load"))
     def put_item(self, **kw):
         self._record.append(("ddb", "put_item"))
         self.puts.append(kw.get("Item", {}))
     def update_item(self, **kw): self._record.append(("ddb", "update_item"))
     def get_item(self, **kw):
         self._record.append(("ddb", "get_item"))
-        return {}  # 读回空（begin 只写不读；此处防御）
+        return {}  # 读回空（submit 只写不读；此处防御）
 
 
 class _FakeS3:
-    """假 S3 client：三个件套共享一个；记录 head_bucket（begin 探活）/put_object。"""
+    """假 S3 client：三个件套共享一个；记录 head_bucket / put_object。"""
     def __init__(self, record):
         self._record = record
         self.id = id(self)  # 用于断言「三个件套拿的是同一个 client」
 
     def head_bucket(self, **kw): self._record.append(("s3", "head_bucket"))
-    def put_object(self, **kw): self._record.append(("s3", "put_object"))
+    def put_object(self, **kw): self._record.append(("s3", "put_object", kw.get("Key")))
 
 
 def _patch_skew(monkeypatch, record=None, *, skew=("ok", "")):
@@ -106,7 +93,7 @@ def _stub_revision(engine: str) -> str:
 
 
 def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok", ""),
-                         variant_err=None, resolved_variant="base", stop_timeouts=None, table_cls=None):
+                         variant_err=None, resolved_variant="base"):
     """patch store 钩子 + preflight（默认放行）+ 版本 skew 闸 + worker variant 闸（都默认放行）返回记录调用的
     fake（不连真 AWS）。
 
@@ -121,17 +108,16 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     默认给每个被问到的引擎一条假 resolution（variant 取显式给的 `--worker-variant`，缺省则 `resolved_variant`
     ——模拟「解析到部署级默认指针」）；`variant_err=WorkerVariantError(...)` 改成拦下的情形。调用入参记进
     `made["variant"]`（可验次序、engines 只含本 run 用到的、backend_version 复用同一次读戳）。
-    `stop_timeouts` 是引擎到 worker container `stopTimeout` 的映射，填进假 resolution 的 `stop_timeout_s`（缺省或
-    未列出的引擎为 None，即「没设或找不到该 container」）。`table_cls` 换掉假 DDB table 的类（缺省 `_FakeTable`），
-    造出的实例同样记进 `made["ddb_tables"]`。
+
+    `build_fargate_engines` patch 成一调即失败：CLI 一侧不装配 FargateEngine（ADR 0016 决策 C），哪条路径调了它即红。
     """
     fake_s3 = _FakeS3(record)
-    made = {"ddb_tables": [], "s3_clients": [], "fargate": [], "variant": []}
+    made = {"ddb_tables": [], "s3_clients": [], "variant": []}
     preflight_calls = []
 
     def fake_make_ddb(table, *, region, profile):
         record.append(("make", "ddb_table", table, region, profile))
-        t = (table_cls or _FakeTable)(record)
+        t = _FakeTable(record)
         made["ddb_tables"].append(t)
         return t
 
@@ -144,12 +130,8 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
         preflight_calls.append(kwargs)
         return preflight_err
 
-    def fake_resolve_network(**kwargs):
-        return {"subnets": ["subnet-x"], "securityGroups": ["sg-x"], "assignPublicIp": "ENABLED"}
-
-    def fake_build_fargate(**kwargs):
-        made["fargate"].append(kwargs)
-        return {"novaact": object(), "midscene": object()}  # 假 engine dict（fake_schedule 不真用）
+    def forbidden_fargate(**kwargs):
+        raise AssertionError("CLI 一侧不装配 FargateEngine（起 worker task 的是推进器 Lambda）")
 
     def fake_resolve_variant(**kwargs):
         made["variant"].append(kwargs)
@@ -158,8 +140,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
         effective = kwargs.get("variant") or resolved_variant
         return {
             e: m.compose.WorkerResolution(
-                engine=e, variant=effective, revision_arn=_stub_revision(e),
-                digest=_STUB_DIGEST, stop_timeout_s=(stop_timeouts or {}).get(e))
+                engine=e, variant=effective, revision_arn=_stub_revision(e), digest=_STUB_DIGEST)
             for e in kwargs["engines"]
         }
 
@@ -167,8 +148,7 @@ def _patch_cloud_handles(monkeypatch, record, *, preflight_err=None, skew=("ok",
     monkeypatch.setattr(m.compose, "_make_ddb_table", fake_make_ddb)
     monkeypatch.setattr(m.compose, "_make_s3_client", fake_make_s3)
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", fake_preflight)
-    monkeypatch.setattr(m.compose, "resolve_network", fake_resolve_network)
-    monkeypatch.setattr(m.compose, "build_fargate_engines", fake_build_fargate)
+    monkeypatch.setattr(m.compose, "build_fargate_engines", forbidden_fargate)
     monkeypatch.setattr(m.compose, "resolve_worker_variant", fake_resolve_variant)
     return fake_s3, made, preflight_calls
 
@@ -180,14 +160,111 @@ def _definition(table) -> dict:
     return json.loads(metas[-1]["meta_json"])
 
 
-# ---- backend=cloud 构造正确 store adapter + 参数 + offloader 挂 + S3 client 同一性 ----
-def test_cloud_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
+def _clear_resource_env(monkeypatch) -> None:
+    for var in ("AWS_DDB_TABLE", "AWS_S3_BUCKET", "AWS_RESOURCE_PREFIX"):
+        monkeypatch.delenv(var, raising=False)
+
+
+# ---- run 只有本机后端：给出 cloud 即以退出码 2 结束并指向 submit（ADR 0016 决策 A）----
+
+def _forbid_run_steps(monkeypatch) -> None:
+    """run 给出云端后端时，入口之后的每一步（读 feature、问本机 worker、解析 AWS 身份、建 store、起隧道、调度）一调即失败。"""
+    def forbidden(*a, **k):
+        raise AssertionError("run 给出云端后端时不该走到这一步")
+
+    for name in ("load_feature", "resolve_worker_cmd", "query_capabilities", "engine_min_grace",
+                 "resolve_aws_identity", "resolve_cloud_target", "build_local_stores", "build_cloud_stores", "build_engines"):
+        monkeypatch.setattr(m.compose, name, forbidden)
+    monkeypatch.setattr(m, "schedule", forbidden)
+    monkeypatch.setattr(m, "_setup_tunnel", forbidden)
+
+
+@pytest.mark.parametrize("mode", [[], ["--json"]], ids=["text", "json"])
+def test_run_with_cloud_backend_exits_2_pointing_to_submit_before_any_check(tmp_path, monkeypatch, capsys, mode):
+    """命令行给出 `run --backend cloud`：以退出码 2 结束，说明 run 只在本机执行、云端后端经 `gherkai submit --backend cloud` 提交。
+    拒绝排在一切检查之前：不读 feature、不问本机 worker、不解析 AWS 身份、不起隧道、不落库，一次云端调用都不发。
+    带 --json 时标准输出为空（机读契约：先看退出码，标准输出非空才解析），那句说明只在标准错误。"""
+    record: list = []
+    _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    _forbid_run_steps(monkeypatch)
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--report-dir", str(reports),
+                 "--grace", "300", "--expose-local", "http://localhost:3000", *mode])
+    assert rc == 2
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    err = cap.err
+    assert "gherkai run 只在本机执行" in err and "--backend" in err and "gherkai submit --backend cloud" in err
+    assert "--backend local" not in err   # 后端由命令行给出：不提「用 --backend local 覆盖配置文件」
+    assert "Traceback" not in err
+    assert record == [] and preflight_calls == [] and made["variant"] == []
+    assert not reports.exists()
+
+
+def test_run_with_cloud_backend_and_submit_only_flags_still_points_to_submit(tmp_path, monkeypatch, capsys):
+    """按 submit 的写法在 run 上同给 `--backend cloud` 与 run 没有的云端参数（--prefix、--worker-variant）：仍是那句指向
+    submit 的说明、退出码 2，不被「不认识的参数」的报错盖过，也不做任何检查。"""
+    record: list = []
+    _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    _forbid_run_steps(monkeypatch)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
+                 "--worker-variant", "login", "--json"])
+    assert rc == 2
+    cap = capsys.readouterr()
+    assert cap.out == ""
+    assert "gherkai submit --backend cloud" in cap.err
+    assert "unrecognized arguments" not in cap.err
+    assert record == [] and preflight_calls == [] and made["variant"] == []
+
+
+def test_run_without_cloud_backend_reports_submit_only_flags_as_unrecognized(tmp_path, capsys):
+    """对偶：没有给出云端后端时，run 不认识的参数照常由命令行解析报出、退出码 2，不改说成「改用 submit」。"""
+    with pytest.raises(SystemExit) as ei:
+        m.main(["run", str(_write_feature(tmp_path)), "--prefix", "stage-"])
+    assert ei.value.code == 2
+    err = capsys.readouterr().err
+    assert "unrecognized arguments: --prefix stage-" in err
+    assert "gherkai submit --backend cloud" not in err
+
+
+def test_run_help_describes_only_the_local_backend(capsys):
+    """run 的 --help 与入口拒绝不许漂移：--backend 一项写明云端后端用 submit；只用于云端的参数不出现在 run 上。"""
+    import re
+
+    with pytest.raises(SystemExit):
+        m.main(["run", "--help"])
+    out = re.sub(r"\s+", " ", capsys.readouterr().out)   # argparse 按终端宽度折行，折行处原本是空格
+    assert "gherkai submit --backend cloud" in out
+    for flag in ("--prefix", "--ddb-table", "--s3-bucket", "--worker-variant",
+                 "--events-table", "--cluster", "--subnet", "--security-group", "CloudWatch"):
+        assert flag not in out, flag
+
+
+def test_run_and_submit_do_not_accept_cloud_execution_flags(tmp_path):
+    """事件表、cluster、子网与安全组不在任何子命令上：云端后端只经 submit 执行，这几项取自推进器 Lambda 的环境变量
+    （ADR 0016 决策 C），在提交侧唯一可能的作用是改「提交前检查」探哪个资源，给错值会把「探针指错」伪装成「后端未部署」，
+    故探针一律按 --prefix 推。run 另不收资源名与 variant 参数：run 只有本机后端，它们在本机路径上没有消费方。"""
+    parser = m._build_parser()
+    feat = str(_write_feature(tmp_path))
+    for flag in ("--events-table", "--cluster", "--subnet", "--security-group"):
+        with pytest.raises(SystemExit) as ei:
+            parser.parse_args(["submit", feat, "--backend", "cloud", flag, "whatever"])
+        assert ei.value.code == 2, f"submit 不该认 {flag}"
+    for flag in ("--events-table", "--cluster", "--subnet", "--security-group",
+                 "--prefix", "--ddb-table", "--s3-bucket", "--worker-variant"):
+        with pytest.raises(SystemExit) as ei:
+            parser.parse_args(["run", feat, flag, "whatever"])
+        assert ei.value.code == 2, f"run 不该认 {flag}"
+
+
+# ---- 云端 submit 构造正确 store adapter + 参数 + offloader 挂 + S3 client 同一性 ----
+
+def test_cloud_submit_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
     record: list = []
     fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
 
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet", "--json"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1"])
     assert rc == 0
 
     # 钩子按参数被调：ddb 用表名 T、s3 只造一次（三件套共享）
@@ -196,144 +273,33 @@ def test_cloud_wires_stores_with_correct_handles(tmp_path, monkeypatch, capsys):
     assert ddb_makes == [("make", "ddb_table", "T", "us-east-1", None)]
     assert len(s3_makes) == 1, "S3 client 只该造一次（三个件套共享）"
     assert len(made["s3_clients"]) == 1 and made["s3_clients"][0] is fake_s3
-    # begin 探活：DDB load + S3 head_bucket 都发生了
-    assert ("ddb", "load") in record
-    assert ("s3", "head_bucket") in record
-    # 落库真发生（put_item 写 DDB、put_object 写 S3）——证 store adapter 真拿到可用句柄
+    # 提交记录真写进 DDB——证 store adapter 真拿到可用句柄
     assert ("ddb", "put_item") in record
-    assert ("s3", "put_object") in record
 
 
-def test_cloud_offloader_attached(tmp_path, monkeypatch, capsys):
-    # offloader 挂载验证：含 docString 的 feature，RunMeta 写会触发 offloader put_object 到 args/ 路径。
+def test_cloud_submit_offloader_attached(tmp_path, monkeypatch, capsys):
+    """offloader 挂载：含 docString 的 feature，写提交记录时把正文搬去桶里的 args/ 路径（ADR 0030 决定七「offloader 生产默认挂载」）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     feat = tmp_path / "d.feature"
     feat.write_text('Feature: F\n  Scenario: s\n    When "做" \n      """\n      多行正文\n      """\n', encoding="utf-8")
 
-    rc = m.main(["run", str(feat), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
-                 "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(feat), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
+                 "--region", "us-east-1"])
     assert rc == 0
-    assert ("s3", "put_object") in record
+    keys = [r[2] for r in record if r[:2] == ("s3", "put_object")]
+    assert keys and all("/args/" in k for k in keys), keys
 
 
-def test_cloud_rejects_explicit_grace_at_the_entrance(tmp_path, monkeypatch, capsys):
-    """云端后端**拒绝**显式 `--grace`：那个值到不了任何机制面（Fargate 侧真实宽限
-    是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期 grace），静默接受等于让用户以为设了一道
-    会话泄漏防护——与 `--report-dir` 撞云端产物前缀即以退出码 2 结束的判法一致：入口不许配无效值。
+# ---- 两层命名（ADR 0033）：prefix 批量推导默认名 + 单资源覆盖 + 环境变量兜底 ----
 
-    以退出码 2 结束且**零副作用**：schedule 没被调、一次云端调用（建 client / 探资源 / 解析镜像）都没发出。
-    对照「不给 --grace 照常运行」见 `test_cloud_does_not_ask_local_worker_for_grace_floor`。
-    """
-    record = []
-    _fake_s3, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    called = {"n": 0}
-    monkeypatch.setattr(m, "schedule", lambda *a, **k: called.__setitem__("n", called["n"] + 1))
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T",
-                 "--s3-bucket", "B", "--region", "us-east-1", "--grace", "300", "--quiet"])
-    assert rc == 2
-    assert called["n"] == 0 and record == [] and preflight_calls == [] and made["variant"] == []
-    err = capsys.readouterr().err
-    assert "--grace 在云端不生效" in err and "gherkai deploy --stop-timeout" in err
-    # flag 的自述与入口的拒绝不许漂移：--help 得自己说清「只有本机运行才用它」，否则用户是撞了才知道
-    import pytest
-
-    with pytest.raises(SystemExit):
-        m.main(["run", "--help"])
-    assert "只有本机运行" in capsys.readouterr().out
-
-
-def test_cloud_does_not_ask_local_worker_for_grace_floor(tmp_path, monkeypatch, capsys):
-    """云端后端**不问本机 worker** 要 grace 下限（ADR 0024「引擎自报下限」× ADR 0032 真容器校准结论 4 的两条路径之分）。
-
-    两条前提各自成立：Fargate 侧真实宽限是 task-def 期 `stopTimeout`、`FargateWorkerHandle.stop` 忽略运行期
-    grace（查来的下限对这个后端没有作用面）；提交机器本就不必装 worker 运行时（ADR 0037 决策 3）——在此查等于让
-    「只提交、不在本机执行」的人被本机环境无理由挡住。故 `min_grace_s=0`、grace 回落 `ScheduleOpts` 默认；
-    云端那侧下限够不够，由 `doctor --backend cloud` 的 worker.grace 行比对。
-    """
-    _patch_cloud_handles(monkeypatch, [])
-    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
-        AssertionError("云端后端不该向本机 worker 问下限")))
-    monkeypatch.setattr(m.compose, "resolve_worker_cmd", lambda engine, **kw: (_ for _ in ()).throw(
-        m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))  # 提交机器没有 worker 也照常运行
-    box, inner = {}, _fake_schedule_factory()
-
-    def capturing(run_meta, engines, sink, opts=None, **kw):
-        box["opts"] = opts
-        return inner(run_meta, engines, sink, opts=opts, **kw)
-
-    monkeypatch.setattr(m, "schedule", capturing)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T",
-                 "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 0
-    assert box["opts"].min_grace_s == 0.0
-    assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s
-
-
-@pytest.mark.parametrize("stop_timeouts, expected", [
-    ({"novaact": 90, "midscene": 30}, 90 + 20.0),  # 各引擎取最大，再加 ECS 记下 STOPPED 的滞后余量 20 秒
-    ({"midscene": 30}, 120 + 20.0),  # novaact 没设 stopTimeout（或找不到该 container）：按 Fargate 平台上限 120 秒计
-], ids=["max-of-set", "unset-takes-platform-max"])
-def test_cloud_run_passes_stop_bound_from_resolved_stop_timeouts(tmp_path, monkeypatch, capsys, stop_timeouts, expected):
-    """云端同步 run 的停止后等待预算：取 variant 解析带回的各引擎
-    worker container `stopTimeout` 的最大值加滞后余量，作 `stop_bound_s` 传给 schedule；运行期 grace 仍回落默认值、
-    与它互不影响（Fargate 句柄忽略运行期 grace，停止后的等待预算不取 grace）。"""
-    _patch_cloud_handles(monkeypatch, [], stop_timeouts=stop_timeouts)
-    box, inner = {}, _fake_schedule_factory()
-
-    def capturing(run_meta, engines, sink, opts=None, **kw):
-        box["opts"] = opts
-        return inner(run_meta, engines, sink, opts=opts, **kw)
-
-    monkeypatch.setattr(m, "schedule", capturing)
-    rc = m.main(["run", str(_two_engine_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T",
-                 "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 0
-    assert box["opts"].stop_bound_s == expected
-    assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s
-
-
-def test_cloud_run_injects_the_wall_clock_and_the_record_like_the_local_backend(tmp_path, monkeypatch, capsys):
-    """`--backend cloud` 与本机后端同一接法：调度循环的墙钟是组合根的 `compose.now`；有记录时，认领经这次 run
-    的落库服务写进云端的运行状态表，认领时刻随同一次条件写落下；`--backend cloud --no-report` 只注入墙钟、没有记录。"""
-    from gherkai_core.persist import RunPersistence
-    from gherkai_core.serialize import instant_from_iso
-
-    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [], table_cls=_EndedElsewhereTable)
-    box, inner = {}, _fake_schedule_factory()
-
-    def capturing(run_meta, engines, sink, opts=None, **kw):
-        box["opts"] = opts
-        if opts.record is not None:
-            box["claimed"] = opts.record.claim(run_meta.jobs[0].scope_id, m.compose.now())
-        return inner(run_meta, engines, sink, opts=opts, **kw)
-
-    monkeypatch.setattr(m, "schedule", capturing)
-    cloud = ["--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"]
-    assert m.main(["run", str(_write_feature(tmp_path)), *cloud]) == 0
-    assert box["opts"].wall_clock is m.compose.now and isinstance(box["opts"].record, RunPersistence)
-    assert box["claimed"] is True
-    [table] = made["ddb_tables"]
-    claims = [kw for kw, _refused in table.updates if "claim_count" in kw["ExpressionAttributeNames"].values()]
-    assert len(claims) == 1 and instant_from_iso(claims[0]["ExpressionAttributeValues"][":ca"]).tzinfo is not None
-    box.clear()
-    assert m.main(["run", str(_write_feature(tmp_path)), *cloud, "--no-report"]) == 0
-    assert box["opts"].wall_clock is m.compose.now and box["opts"].record is None and "claimed" not in box
-
-
-# ---- 两层命名（ADR 0033）：prefix 批量推导默认名 + 单资源覆盖 ----
-def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
-    # 不给 --ddb-table/--s3-bucket/--events-table/--cluster：全走 prefix 推导（默认 gherkai-）。
+def test_cloud_submit_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
+    # 不给 --ddb-table/--s3-bucket：全走 prefix 推导（默认 gherkai-）。
     record: list = []
-    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
-    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
-    monkeypatch.delenv("AWS_RESOURCE_PREFIX", raising=False)
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    _clear_resource_env(monkeypatch)
 
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--quiet", "--json"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 0
     # RunStore 表是 gherkai-runs（prefix 默认推导）
     assert ("make", "ddb_table", "gherkai-runs", "us-east-1", None) in record
@@ -344,250 +310,108 @@ def test_cloud_prefix_derives_default_names(tmp_path, monkeypatch, capsys):
     assert pf["events_table"] == "gherkai-events"
     assert pf["bucket"] == "gherkai-artifacts"
     assert pf["cluster"] == "gherkai-cluster"
-    # task-def 按本 run 实际用到的引擎探（feature 未标 @engine → default novaact，ADR 0033 preflight 条）
-    assert pf["task_defs"] == ["gherkai-novaact-worker"]
-    assert pf.get("lambda_fns") is None  # 同步 run 进程内推进、不依赖事件驱动链 → 不探 Lambda
 
 
-def test_cloud_prefix_custom_switches_whole_set(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_prefix_custom_switches_whole_set(tmp_path, monkeypatch, capsys):
     # --prefix prod- 一键切整套默认名（多环境）。
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
-    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    _clear_resource_env(monkeypatch)
 
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
-                 "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
+                 "--region", "us-east-1"])
     assert rc == 0
     pf = preflight_calls[0]
     assert pf["prefix"] == "prod-"
     assert pf["runs_table"] == "prod-runs" and pf["events_table"] == "prod-events"
     assert pf["bucket"] == "prod-artifacts" and pf["cluster"] == "prod-cluster"
+    assert ("make", "ddb_table", "prod-runs", "us-east-1", None) in record
 
 
-def test_cloud_single_resource_override_beats_prefix(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_single_resource_override_beats_prefix(tmp_path, monkeypatch, capsys):
     # 单资源 --xxx 覆盖：给完整终值，prefix 自然不参与（覆盖不走「拼默认名」路径，无特判）。
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
-    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
+    _clear_resource_env(monkeypatch)
 
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
-                 "--ddb-table", "custom-runs", "--events-table", "custom-events",
-                 "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
+                 "--ddb-table", "custom-runs", "--s3-bucket", "custom-artifacts", "--region", "us-east-1"])
     assert rc == 0
     pf = preflight_calls[0]
-    assert pf["runs_table"] == "custom-runs"      # 覆盖，非 prod-runs
-    assert pf["events_table"] == "custom-events"  # 覆盖
-    assert pf["bucket"] == "prod-artifacts"       # 未覆盖 → 仍走 prefix
+    assert pf["runs_table"] == "custom-runs"       # 覆盖，非 prod-runs
+    assert pf["bucket"] == "custom-artifacts"      # 覆盖
+    assert pf["events_table"] == "prod-events"     # 没有覆盖参数 → 仍走 prefix
     assert pf["cluster"] == "prod-cluster"
 
 
-def test_cloud_table_bucket_from_env(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_table_bucket_from_env(tmp_path, monkeypatch, capsys):
     # 环境变量兜底：AWS_DDB_TABLE/AWS_S3_BUCKET 供值时无需 flag（优先级：flag > env > prefix 推导）
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setenv("AWS_DDB_TABLE", "ET")
     monkeypatch.setenv("AWS_S3_BUCKET", "EB")
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 0
     assert ("make", "ddb_table", "ET", "us-east-1", None) in record
+    assert preflight_calls[0]["bucket"] == "EB"
 
 
-def test_cloud_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_missing_boto3_exits_2(tmp_path, monkeypatch, capsys):
     # 缺 boto3：preflight 的 import boto3 抛 ImportError → 退出码 2 + 报错点名 boto3（CLI 只转述 ImportError；
     # 库消费者装 `gherkai-core[aws]` extra 补，ADR 0037 决策 2c 起 CLI 发行包自带）
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    _patch_skew(monkeypatch)
+
     def boom_import(**k):
         raise ImportError("No module named 'boto3'")
+
     monkeypatch.setattr(m.compose, "preflight_cloud_resources", boom_import)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1"])
     assert rc == 2
     assert "boto3" in capsys.readouterr().err
 
 
 # ---- preflight fail-fast：资源不存在 → 退出码 2 + 错误点名 prefix ----
-def test_cloud_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeypatch, capsys):
+
+def test_cloud_submit_preflight_missing_resource_exits_2_names_prefix(tmp_path, monkeypatch, capsys):
     # preflight 返回非 None（某资源不存在）→ 以退出码 2 结束，错误串含 prefix（引导「prefix 配错/CDK 没部署」）。
     record: list = []
     _patch_cloud_handles(monkeypatch, record,
                          preflight_err="--backend cloud 资源缺失：DynamoDB 表 gherkai-events（用 --prefix='gherkai-' 拼出）不存在——是 --prefix 配错、还是后端未部署（gherkai deploy）？")
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "资源缺失" in err and "--prefix" in err and "gherkai deploy" in err
 
 
-# ---- begin 探活失败（store 不可达）→ 退出码 2 ----
-def test_cloud_begin_probe_failure_exits_2(tmp_path, monkeypatch, capsys):
-    # preflight 放行但 begin 的 head_bucket 抛 botocore（如权限）→ 以退出码 2 结束。
+# ---- 写提交记录撞 AWS 错（表不可达）→ 退出码 2 ----
+
+def test_cloud_submit_create_run_aws_error_exits_2(tmp_path, monkeypatch, capsys):
+    # preflight 放行，但写提交记录时 put_item 抛 botocore（如权限）→ 以退出码 2 结束、一句诊断，不打回溯。
     from botocore.exceptions import ClientError
-    record: list = []
-    fake_s3, _, _ = _patch_cloud_handles(monkeypatch, record)
-    def boom_head(**kw):
-        raise ClientError({"Error": {"Code": "403", "Message": "Forbidden"}}, "HeadBucket")
-    monkeypatch.setattr(fake_s3, "head_bucket", boom_head)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 2
-    assert "云端不可达" in capsys.readouterr().err
 
-
-# ---- 运行期 botocore 异常（run 已开始执行）→ 退出码 1 ----
-def test_cloud_runtime_botocore_error_exits_1(tmp_path, monkeypatch, capsys):
-    from botocore.exceptions import ClientError
-    record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-
-    def boom_schedule(run_meta, resolver, sink, opts=None, on_job_complete=None, on_event=None):
-        raise ClientError({"Error": {"Code": "NoSuchBucket", "Message": "gone"}}, "PutObject")
-    monkeypatch.setattr(m, "schedule", boom_schedule)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 1
-    assert "运行期落库失败" in capsys.readouterr().err
-
-
-# ---- 收尾写不成：本次执行结束之前 run 已被别处记为已结束 → 退出码 1 ----
-class _EndedElsewhereTable(_FakeTable):
-    """假 DDB table：`end_elsewhere` 之后，STATE 上以「run 级为 pending 或 running」为条件的写一律被挡
-    （ConditionalCheckFailed，同真表上 run 级已是终态时的行为），以「run 级已是终态」为条件的写（job 状态写的第二次写）照常写成，
-    强一致读 STATE 得到别处记下的终态；之前与 `_FakeTable` 相同。`updates` 留下每次 update_item 的入参与是否被挡。"""
-
-    def __init__(self, record):
-        super().__init__(record)
-        self.ended: dict | None = None
-        self.updates: list[tuple[dict, bool]] = []
-        self.read_fails_after_end = False  # 置 True：被记为已结束之后，对 STATE 的读抛 botocore 的 ClientError
-
-    def end_elsewhere(self, run_id: str, *, status: Status, message: str, ended_at: str) -> None:
-        from gherkai_core.adapters.run_store.ddb import status_group
-
-        self.ended = {"run_id": run_id, "item_type": "STATE", "status": status.value, "status_group": status_group(status),
-                      "ended_at": ended_at, "message": message, "claim_count": 0, "jobs": {}}
-
-    def update_item(self, **kw):
-        super().update_item(**kw)
-        condition = kw.get("ConditionExpression", "")
-        requires_open = "#st IN (:pending, :running)" in condition and "NOT (#st IN (:pending, :running))" not in condition
-        refused = self.ended is not None and requires_open
-        self.updates.append((kw, refused))
-        if refused:
-            raise self.meta.client.exceptions.ConditionalCheckFailedException()
-
-    def get_item(self, **kw):
-        resp = super().get_item(**kw)
-        if self.ended is not None and kw["Key"]["item_type"] == "STATE":
-            if self.read_fails_after_end:
-                from botocore.exceptions import ClientError
-                raise ClientError({"Error": {"Code": "InternalServerError", "Message": "boom"}}, "GetItem")
-            return {"Item": dict(self.ended)}
-        return resp
-
-
-@pytest.mark.parametrize("flags", [[], ["--json"]], ids=["text", "json"])
-def test_cloud_run_keeps_the_recorded_end_when_the_run_was_ended_elsewhere(tmp_path, monkeypatch, capsys, flags):
-    """云端后端：执行中途 run 被别处记为 error 并带说明。收尾的条件写被挡，CLI 不再写别的、不写报告，stdout 什么都不输出，
-    stderr 说明记录里的状态与原因、给出判定明细的落点；退出码 1。"""
-    from test_main import _ENDED_AT, _ENDED_REASON, _schedule_ended_elsewhere, _two_scope_feature
-
-    record: list = []
-    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record, table_cls=_EndedElsewhereTable)
-    s3_keys: list[str] = []
-    monkeypatch.setattr(fake_s3, "put_object", lambda **kw: s3_keys.append(kw["Key"]))
-
-    def end_it(run_id: str) -> None:
-        made["ddb_tables"][0].end_elsewhere(run_id, status=Status.ERROR, message=_ENDED_REASON, ended_at=_ENDED_AT)
-
-    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it))
-    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet", *flags])
-    cap = capsys.readouterr()
-    assert rc == 1
-    assert cap.out == ""
-    [table] = made["ddb_tables"]
-    run_id = table.ended["run_id"]
-    assert (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
-            f"记录里的状态为 error，原因：{_ENDED_REASON}。\n") in cap.err
-    jobs_dir = m.compose.cloud_artifact_locations(bucket="B", report_prefix="reports", table="T", run_id=run_id)["jobs_dir"]
-    assert f"判定明细: {jobs_dir}" in cap.err
-    assert "Traceback" not in cap.err
-    # 收尾写只有一次、被挡，且是对 runs 表的最后一次写；S3 上只写了两个 job 的判定明细，没有报告
-    finalize = [i for i, (kw, _) in enumerate(table.updates) if "ended_at" in kw["UpdateExpression"]]
-    assert finalize == [len(table.updates) - 1] and table.updates[-1][1] is True
-    assert sorted(k.rsplit("/", 1)[-1] for k in s3_keys) == ["a.json", "b.json"], s3_keys
-
-
-def test_cloud_run_ended_elsewhere_exits_by_signal_even_when_the_record_cannot_be_read_back(tmp_path, monkeypatch, capsys):
-    """处理过使用方中断、收尾的条件写被挡、随后读回运行态又失败：仍走同一个出口，退出码按信号取（SIGTERM 为 143），
-    说明照常给出并写明记录没有读出来，判定明细的落点照常给出；没有未归类的异常。"""
-    import signal as _signal
-
-    from test_main import _ENDED_AT, _ENDED_REASON, _schedule_ended_elsewhere, _two_scope_feature
-
-    record: list = []
-    fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record, table_cls=_EndedElsewhereTable)
-    monkeypatch.setattr(fake_s3, "put_object", lambda **kw: None)
-
-    def end_it(run_id: str) -> None:
-        table = made["ddb_tables"][0]
-        table.end_elsewhere(run_id, status=Status.ERROR, message=_ENDED_REASON, ended_at=_ENDED_AT)
-        table.read_fails_after_end = True
-
-    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it, signum=_signal.SIGTERM))
-    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    cap = capsys.readouterr()
-    assert rc == 143
-    assert cap.out == ""
-    run_id = made["ddb_tables"][0].ended["run_id"]
-    assert (f"run {run_id} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
-            "记录里的状态这一次没有读出来。\n") in cap.err
-    assert "判定明细: " in cap.err and "Traceback" not in cap.err
-
-
-# ---- cloud 走 FargateEngine ----
-def test_cloud_wires_fargate_engines(tmp_path, monkeypatch, capsys):
-    # cloud 走 build_fargate_engines（非 build_engines）。验注入的参数正确。
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
-    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "prod-",
-                 "--report-dir", "runs", "--region", "us-west-2", "--quiet"])
-    assert rc == 0
-    assert len(made["fargate"]) == 1, "cloud 应走 build_fargate_engines"
-    fk = made["fargate"][0]
-    assert fk["cluster"] == "prod-cluster"
-    assert fk["events_table"] == "prod-events"
-    assert fk["bucket"] == "prod-artifacts"
-    assert fk["region"] == "us-west-2"
-    assert fk["network_config"]["subnets"] == ["subnet-x"]  # 来自 resolve_network（fake）
+    real_make = m.compose._make_ddb_table
 
+    def make_failing(table, *, region, profile):
+        t = real_make(table, region=region, profile=profile)
 
-def test_cloud_bad_nova_act_timeout_exits_2_before_side_effects(tmp_path, monkeypatch, capsys):
-    # 云端后端不问本机 worker，NOVA_ACT_TIMEOUT_S 写错要在入口以退出码 2 拒绝：build_fargate_engines 只会把 Nova 引擎项
-    # 装成一用即抛的占位项，不拦就会落下一个逐 job 报错的 run。拒绝排在探资源与装配之前，零副作用。
-    record: list = []
-    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    monkeypatch.setattr(m.compose, "_nova_act_timeout_cached", None)  # 别让先前用例缓存的合法值掩盖本例的坏值
-    monkeypatch.setenv("NOVA_ACT_TIMEOUT_S", "120s")
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--default-engine", "novaact",
-                 "--region", "us-west-2", "--quiet"])
+        def boom_put(**kw):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "PutItem")
+
+        t.put_item = boom_put
+        return t
+
+    monkeypatch.setattr(m.compose, "_make_ddb_table", make_failing)
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "NOVA_ACT_TIMEOUT_S" in err and "'120s'" in err and "Traceback" not in err
-    assert made["fargate"] == [] and preflight_calls == []
+    assert "云端不可达" in err and "Traceback" not in err
 
+
+# ---- 本机 run 只走 build_engines（SubprocessEngine），不注入 S3 落点 ----
 
 def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
     # local 不走 build_fargate_engines（走 build_engines/SubprocessEngine）。
@@ -597,57 +421,6 @@ def test_local_uses_subprocess_not_fargate(tmp_path, monkeypatch, capsys):
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
     assert rc == 0
     assert box["fargate"] == 0  # local 从不造 FargateEngine
-
-
-# ---- cloud + --no-report：不落库（跳过 store）但**仍 Fargate 执行**（report 与执行正交）----
-def test_cloud_no_report_still_fargate_but_no_store(tmp_path, monkeypatch, capsys):
-    # --no-report 只关不落库、**不碰在哪执行**：--backend cloud --no-report 仍在 Fargate 运行，只是不生成 report。
-    record: list = []
-    _, made, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--no-report",
-                 "--region", "us-east-1", "--quiet"])
-    assert rc == 0
-    # 落库轴：不构造任何 store 钩子（need_cloud=False，零落盘运行路径）
-    assert not any(r[0] == "make" for r in record)
-    # 执行轴：仍走 Fargate（cloud 走 Fargate，与 report 正交）
-    assert len(made["fargate"]) == 1, "--no-report --backend cloud 仍应 Fargate 执行"
-    # preflight 探执行资源（events/cluster/桶）但 runs_table=None（不落库、不探 runs 表）
-    assert preflight_calls[0]["runs_table"] is None
-    assert preflight_calls[0]["events_table"] == "gherkai-events"
-
-
-# ---- artifacts cloud 下是 s3://+ddb:// 形态 ----
-def test_cloud_artifacts_are_s3_and_ddb_uris(tmp_path, monkeypatch, capsys):
-    record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--report-dir", "runs",
-                 "--region", "us-east-1", "--json"])
-    assert rc == 0
-    doc = json.loads(capsys.readouterr().out)
-    art = doc["artifacts"]
-    assert art["jobs_dir"].startswith("s3://B/runs/") and art["jobs_dir"].endswith("/jobs/")
-    assert art["run_meta"].startswith("ddb://T/") and art["run_meta"].endswith("#META")
-    assert art["run_state"].endswith("#STATE")
-    assert art["report_index"].startswith("s3://B/")
-
-
-# ---- cloud 把产物 S3 上传落点（artifact_s3）注入 worker（ADR 0029 第一期接线）----
-def test_cloud_injects_artifact_s3_to_fargate(tmp_path, monkeypatch):
-    # cloud 下 artifact_s3 经 build_fargate_engines 的 job_s3（bucket+prefix）到 worker——ADR 0029/0033。
-    # （build_fargate_engines 内部据 bucket+report_dir+run_id 拼 job_s3；此处验 bucket 传对、report_dir 传对。）
-    record: list = []
-    _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--s3-bucket", "mybkt", "--report-dir", "runs",
-                 "--region", "us-east-1", "--quiet", "--json"])
-    assert rc == 0
-    fk = made["fargate"][0]
-    assert fk["bucket"] == "mybkt"
-    assert fk["report_dir"] == "runs"
 
 
 def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
@@ -666,6 +439,27 @@ def test_local_does_not_inject_artifact_s3(tmp_path, monkeypatch):
     assert box.get("artifact_s3") is None  # local 不注入
 
 
+# ---- artifacts cloud 下是 s3://+ddb:// 形态 ----
+
+def test_status_cloud_artifacts_follow_the_given_table_bucket_and_report_dir(monkeypatch, capsys):
+    """status --json 的 artifacts 按给出的表名、桶名（环境变量）与 --report-dir 前缀拼：s3:// 报告与判定明细、ddb:// 元信息。"""
+    class _PassedTable:
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "passed", "jobs": {}}}
+
+    _patch_skew(monkeypatch)
+    monkeypatch.setenv("AWS_S3_BUCKET", "B")
+    monkeypatch.setattr(m.compose, "_make_ddb_table", lambda table, *, region, profile: _PassedTable())
+    assert m.main(["status", "r1", "--backend", "cloud", "--ddb-table", "T", "--report-dir", "runs",
+                   "--region", "us-east-1", "--json"]) == 0
+    art = json.loads(capsys.readouterr().out)["artifacts"]
+    assert art["jobs_dir"] == "s3://B/runs/r1/jobs/"
+    assert art["run_meta"] == "ddb://T/r1#META" and art["run_state"] == "ddb://T/r1#STATE"
+    assert art["report_index"] == "s3://B/runs/r1/index.html"
+
+
 # ---- submit/status cloud 的 preflight/fail-fast 接线 ----
 
 def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monkeypatch, capsys):
@@ -673,9 +467,7 @@ def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monke
     （任一缺就会提交成功而 run 不按正常的链推进，须挡在提交前）。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.delenv("AWS_DDB_TABLE", raising=False)
-    monkeypatch.delenv("AWS_S3_BUCKET", raising=False)
-    monkeypatch.delenv("AWS_RESOURCE_PREFIX", raising=False)
+    _clear_resource_env(monkeypatch)
 
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 0
@@ -686,26 +478,8 @@ def test_submit_cloud_preflight_probes_taskdefs_and_lambda_chain(tmp_path, monke
     assert pf["report_dir"] == "reports"
 
 
-def test_submit_does_not_accept_events_table_or_cluster(tmp_path):
-    """submit 不认 --events-table / --cluster（argparse 以退出码 2 结束），同它不认 --subnet/--security-group：
-
-    这两个名字真正的读者是云端推进链（从自己的 env 取），提交侧给了对这个 run 的执行零影响——唯一作用是
-    改「提交前检查」探哪个资源，给错值会把「探针指错」伪装成「后端未部署」。故探针一律按 --prefix 推。
-    同步 `run` 侧仍收（那边在本机组装 Fargate 执行配置，这两个名字真参与执行）。
-    """
-    import pytest
-
-    for flag in ("--events-table", "--cluster"):
-        with pytest.raises(SystemExit) as ei:
-            m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", flag, "whatever"])
-        assert ei.value.code == 2, f"submit 不该认 {flag}"
-    ns = m._build_parser().parse_args(["run", "x.feature", "--backend", "cloud",
-                                       "--events-table", "e", "--cluster", "c"])
-    assert (ns.events_table, ns.cluster) == ("e", "c")
-
-
 def test_submit_cloud_preflight_probes_prefix_derived_names(tmp_path, monkeypatch, capsys):
-    """submit 的 events 表/cluster 探针名一律按 --prefix 推（无 flag 可覆盖，见上一条）。"""
+    """submit 的 events 表/cluster 探针名一律按 --prefix 推（无 flag 可覆盖，见 test_run_and_submit_do_not_accept_cloud_execution_flags）。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
@@ -731,7 +505,7 @@ def test_submit_cloud_preflight_failure_exits_2(tmp_path, monkeypatch, capsys):
     _patch_cloud_handles(monkeypatch, record, preflight_err="Lambda 函数 gherkai-kicker 不存在——…")
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 2
-    assert not [r for r in record if r[0] == "table"]  # 没碰 runs 表（挡在 create_run 前）
+    assert not [r for r in record if r[0] == "ddb"]  # 没碰 runs 表（挡在 create_run 前）
 
 
 def test_status_wait_cloud_kicker_missing_fails_fast(monkeypatch, capsys):
@@ -1027,59 +801,53 @@ def _spy_run_meta(monkeypatch):
     return box
 
 
-def test_cloud_run_does_not_consult_local_worker_chain(tmp_path, monkeypatch, capsys):
-    """云端后端**不查本机 worker 定位链**（ADR 0037 决策 3 的 miss preflight 只管 local 执行）。
+def test_cloud_submit_does_not_consult_local_worker(tmp_path, monkeypatch, capsys):
+    """云端 submit **不查本机 worker**：不走定位链（ADR 0037 决策 3 的 miss preflight 只管本机执行），也不向本机 worker 问停止宽限下限。
 
-    cloud 的 worker 在 Fargate 容器里运行（镜像/task-def 由 cloud preflight 探），提交机器压根不必装 worker
-    运行时——若在此也 preflight，纯 cloud 用户会被本机环境无理由挡住。
+    cloud 的 worker 在 Fargate 容器里运行（镜像/task-def 由 cloud preflight 探），停止宽限是 task-def 的 stopTimeout、
+    够不够由 `doctor --backend cloud` 的 worker.grace 行比对；提交机器压根不必装 worker 运行时——若在此也查，
+    纯 cloud 用户会被本机环境无理由挡住。
     """
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.setattr(m.compose, "resolve_worker_cmd",
                         lambda engine, **kw: (_ for _ in ()).throw(
                             m.compose.WorkerNotFoundError(engine, "本机没装 worker 运行时")))
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 0
+    monkeypatch.setattr(m.compose, "query_capabilities", lambda engine, **kw: (_ for _ in ()).throw(
+        AssertionError("云端后端不该向本机 worker 问能力自述")))
+    monkeypatch.setattr(m.compose, "engine_min_grace", lambda engine: (_ for _ in ()).throw(
+        AssertionError("云端后端不该向本机 worker 问停止宽限下限")))
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
                  "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0
 
 
-def test_cloud_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_omits_steps_dir_and_warns_when_given(tmp_path, monkeypatch, capsys):
     """云端后端：definition **不写** steps_dir（本机路径对云端 worker 无意义——steps 构建在定制镜像里，
-    ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（run 照常运行，只是这个 flag 无效）。"""
+    ADR 0037 决策 4 / 0038）；用户显式给了 `--steps-dir` 则**警告不拦**（照常提交，只是这个 flag 无效）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     steps = tmp_path / "steps"
     steps.mkdir()
     box = _spy_run_meta(monkeypatch)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--steps-dir", str(steps),
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--steps-dir", str(steps),
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0                     # 警告不拦
     assert box["steps_dir"] is None    # definition 不带该字段（serialize 侧 omit-when-None）
     assert "--steps-dir 不生效" in capsys.readouterr().err
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--steps-dir", str(steps),
-                 "--ddb-table", "T", "--region", "us-east-1"])
-    assert rc == 0
-    assert box["steps_dir"] is None
-    assert "--steps-dir 不生效" in capsys.readouterr().err
 
 
-def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys):
+def test_cloud_submit_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys):
     """默认 `./steps` 恰好存在时云端后端也不写、且**不警告**——用户没主动要什么，警告是噪声
     （警告只针对显式给了 --steps-dir 的「你以为生效了」误解）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
     (tmp_path / "steps").mkdir()
     monkeypatch.chdir(tmp_path)
     box = _spy_run_meta(monkeypatch)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0 and box["steps_dir"] is None
     assert "--steps-dir" not in capsys.readouterr().err
 
@@ -1088,8 +856,8 @@ def test_cloud_ignores_default_steps_dir_silently(tmp_path, monkeypatch, capsys)
 # skew 自身的判据（哪个版本组合判哪一类）在 runtime 的 test_compose 里验；这里只验前端的接线：
 # 判定 → 退出码/提示，以及 block 时**资源 preflight 一次都不执行**。
 
-def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, capsys):
-    """block → 以退出码 2 结束，且资源 preflight 一次都没执行（决策 7 的次序：skew 先）。
+def test_skew_block_stops_submit_before_resource_preflight(tmp_path, monkeypatch, capsys):
+    """block → 以退出码 2 结束，且资源 preflight 一次都没执行、runs 表没碰（决策 7 的次序：skew 先）。
 
     次序不是审美：skew 的修复动作是部署方运行 `gherkai deploy`，那一步同时把资源建齐——先报「表/task-def
     不存在」只会把人引去查 --prefix，绕一圈回到同一个动作。
@@ -1097,27 +865,15 @@ def test_skew_block_stops_run_before_resource_preflight(tmp_path, monkeypatch, c
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(
         monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 2
-    assert preflight_calls == [], "block 时不该再探资源"
-    assert "版本 skew" in capsys.readouterr().err
-
-
-def test_skew_block_stops_submit_before_resource_preflight(tmp_path, monkeypatch, capsys):
-    record: list = []
-    _, _, preflight_calls = _patch_cloud_handles(
-        monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"])
     assert rc == 2
-    assert preflight_calls == []
+    assert preflight_calls == [], "block 时不该再探资源"
     assert not [r for r in record if r[0] == "ddb"], "block 时不该碰 runs 表"
     assert "版本 skew" in capsys.readouterr().err
 
 
 def test_skew_block_stops_status_before_reading_ddb(monkeypatch, capsys):
-    """status 同受闸（cloud 三个入口一致）：block 时连 DDB 都不读。"""
+    """status 同受闸（cloud 各入口一致）：block 时连 DDB 都不读。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
     rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
@@ -1132,31 +888,28 @@ def test_skew_warn_and_skip_pass_through_with_one_line(tmp_path, monkeypatch, ca
         record: list = []
         _, _, preflight_calls = _patch_cloud_handles(
             monkeypatch, record, skew=(verdict, f"提示：{verdict} 判定一行"))
-        monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-        rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                     "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+        rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                     "--ddb-table", "T", "--region", "us-east-1"])
         assert rc == 0, verdict
         assert len(preflight_calls) == 1, verdict          # 闸放行 → 资源 preflight 照常执行
         assert f"提示：{verdict} 判定一行" in capsys.readouterr().err
 
 
 def test_skew_ok_is_silent(tmp_path, monkeypatch, capsys):
-    """ok 这一类不打任何东西（同版本是常态，别在每次 run 上加噪声）。"""
+    """ok 这一类不打任何东西（同版本是常态，别在每次提交上加噪声）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record, skew=("ok", ""))
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0 and "版本" not in capsys.readouterr().err
 
 
 def test_skew_reads_stamp_with_resolved_prefix(tmp_path, monkeypatch):
-    """读戳用的是**已解析的 prefix**（与 subnet/sg 同一族路径 `/{prefix}backend/*`，故无需新增授权）。"""
+    """读戳用的是**已解析的 prefix**（与 variant 映射同一族路径 `/{prefix}backend/*`，故无需新增授权）。"""
     record: list = []
     _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
-            "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
+            "--ddb-table", "T", "--region", "us-east-1"])
     assert ("ssm", "read_backend_version", "stage-") in record
 
 
@@ -1202,7 +955,8 @@ def test_skew_read_failure_exits_2_naming_the_parameter(tmp_path, monkeypatch, c
 
 # ---- worker 镜像 variant 闸接线 ----
 # 解析本体（读 SSM 映射 / revision ACTIVE / ECR digest 存在）在 runtime 的 compose 测试里验；这里只验前端：
-# 次序（skew → 资源 preflight → variant）、退出码 2、解析结果进 definition 与 build_fargate_engines、打印与静音。
+# 次序（skew → 资源 preflight → variant）、退出码 2、解析结果进 definition、打印（ADR 0038「运行时与 preflight」的
+# 「选择进 definition」条与 preflight 条）。
 
 def _two_engine_feature(tmp_path: Path) -> Path:
     """两个 scope 各走一个引擎 → 本 run「真用到」两个引擎（验 engines 参数按 job 取、不探全注册表）。"""
@@ -1215,21 +969,18 @@ def _two_engine_feature(tmp_path: Path) -> Path:
     return feat
 
 
-def test_run_cloud_resolves_variant_into_definition_and_engines(tmp_path, monkeypatch, capsys):
-    """同步 run cloud：variant 解析结果同时落 definition（worker_variant/worker_task_defs）与
-    build_fargate_engines 的 worker_task_defs（ADR 0038 不变量「运行时只用 definition 里的显式 revision」）。"""
+def test_submit_cloud_resolves_default_variant_into_definition(tmp_path, monkeypatch, capsys):
+    """不给 --worker-variant：解析到部署级默认指针，人读的 variant 名与引擎 → revision ARN 一起落 definition
+    （云端推进器只用 definition 里的显式 revision 起 task，ADR 0038）。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0
-    # definition：人读的 variant 名（缺省为解析到的默认指针）+ 引擎 → revision ARN
+    assert made["variant"][0]["variant"] is None   # 没给 flag：交给解析取默认指针
     meta = _definition(made["ddb_tables"][0])
     assert meta["worker_variant"] == "base"
     assert meta["worker_task_defs"] == {"novaact": _stub_revision("novaact")}
-    # 起 task 的一侧拿到同一份映射（不是 family 名）
-    assert made["fargate"][0]["worker_task_defs"] == {"novaact": _stub_revision("novaact")}
 
 
 def test_submit_cloud_resolves_variant_into_definition(tmp_path, monkeypatch, capsys):
@@ -1250,9 +1001,8 @@ def test_variant_gate_only_probes_engines_the_run_uses(tmp_path, monkeypatch, ca
     单引擎 run 不问另一个引擎（单引擎团队不必为它凭空推镜像）；两引擎 run 两个都问、都进 definition。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0
     assert made["variant"][0]["engines"] == ["novaact"]
 
@@ -1272,10 +1022,9 @@ def test_variant_gate_reuses_the_one_stamp_read(tmp_path, monkeypatch, capsys):
     不再为提示语二次读同一个 SSM 参数。同时验 cli_version/prefix 传的是已解析值。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     monkeypatch.setattr(m, "_installed_version", lambda: "1.4.0")
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--prefix", "stage-",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0
     reads = [r for r in record if r[:2] == ("ssm", "read_backend_version")]
     assert len(reads) == 1, "戳该只读一次（skew 闸读、variant 解析复用）"
@@ -1287,26 +1036,17 @@ def test_variant_gate_reuses_the_one_stamp_read(tmp_path, monkeypatch, capsys):
 
 def test_variant_missing_exits_2_with_the_errors_message(tmp_path, monkeypatch, capsys):
     """variant 在某引擎缺映射 → 以退出码 2 结束且原样转述 WorkerVariantError 的提示语，**不回落默认**
-    （静默换一套确定性 step 集是 ADR 0038 明拒的）。run 与 submit 两个入口一致。"""
+    （静默换一套确定性 step 集是 ADR 0038 明拒的）；挡在写提交记录之前。"""
     from gherkai_runtime.compose import WorkerVariantError
 
     err = WorkerVariantError("variant 'login' 在引擎 midscene 尚无镜像：gherkai deploy push-worker …")
     record: list = []
-    _, made, _ = _patch_cloud_handles(monkeypatch, record, variant_err=err)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--worker-variant", "login",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 2
-    assert "push-worker" in capsys.readouterr().err
-    assert made["fargate"] == [], "拦下时不该构造 Fargate 引擎"
-
-    record2: list = []
-    _, made2, _ = _patch_cloud_handles(monkeypatch, record2, variant_err=err)
+    _patch_cloud_handles(monkeypatch, record, variant_err=err)
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--worker-variant", "login",
                  "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 2
     assert "push-worker" in capsys.readouterr().err
-    assert not [r for r in record2 if r[0] == "ddb"], "拦下时不该碰 runs 表（挡在 create_run 前）"
+    assert not [r for r in record if r[0] == "ddb"], "拦下时不该碰 runs 表（挡在 create_run 前）"
 
 
 def test_variant_resolution_read_failure_exits_2(tmp_path, monkeypatch, capsys):
@@ -1327,28 +1067,24 @@ def test_variant_resolution_read_failure_exits_2(tmp_path, monkeypatch, capsys):
 def test_skew_block_prevents_both_resource_preflight_and_variant(tmp_path, monkeypatch, capsys):
     """skew block 时资源 preflight 与 variant 解析都一次不执行——skew 的修复动作（deploy）是镜像重推的前置，
     反过来先报「variant 没推」会让用户先推一轮镜像、推完仍要重做（ADR 0038）。"""
-    for cmd in (["run", "--quiet"], ["submit"]):
-        record: list = []
-        _, made, preflight_calls = _patch_cloud_handles(
-            monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
-        monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-        rc = m.main([cmd[0], str(_write_feature(tmp_path)), "--backend", "cloud",
-                     "--ddb-table", "T", "--region", "us-east-1", *cmd[1:]])
-        assert rc == 2
-        assert preflight_calls == [] and made["variant"] == [], cmd[0]
+    record: list = []
+    _, made, preflight_calls = _patch_cloud_handles(
+        monkeypatch, record, skew=("block", "版本 skew：本机 CLI 新于后端"))
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
+    assert rc == 2
+    assert preflight_calls == [] and made["variant"] == []
 
 
 def test_resource_preflight_failure_prevents_variant_resolution(tmp_path, monkeypatch, capsys):
     """资源 preflight 不过时不再解析 variant（ADR 0038 的位置：既有 preflight 之后）——
     表/cluster 都不在的环境里报「variant 没推」是把人往错方向引。"""
-    for cmd in (["run", "--quiet"], ["submit"]):
-        record: list = []
-        _, made, _ = _patch_cloud_handles(monkeypatch, record, preflight_err="资源缺失：ECS cluster …")
-        monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-        rc = m.main([cmd[0], str(_write_feature(tmp_path)), "--backend", "cloud",
-                     "--ddb-table", "T", "--region", "us-east-1", *cmd[1:]])
-        assert rc == 2
-        assert made["variant"] == [], cmd[0]
+    record: list = []
+    _, made, _ = _patch_cloud_handles(monkeypatch, record, preflight_err="资源缺失：ECS cluster …")
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
+                 "--ddb-table", "T", "--region", "us-east-1"])
+    assert rc == 2
+    assert made["variant"] == []
 
 
 def test_status_does_not_resolve_variant(monkeypatch, capsys):
@@ -1368,7 +1104,7 @@ def test_status_does_not_resolve_variant(monkeypatch, capsys):
     assert made["variant"] == []
 
 
-# ---- 打印（可见性）与静音 ----
+# ---- 打印（可见性）----
 
 def test_variant_resolution_prints_one_line_per_engine(tmp_path, monkeypatch, capsys):
     """通过则每引擎一行「variant · digest · revision」（ADR 0038「通过则打印各引擎解析到的 variant / digest」）：
@@ -1381,26 +1117,6 @@ def test_variant_resolution_prints_one_line_per_engine(tmp_path, monkeypatch, ca
     err = capsys.readouterr().err
     for engine in ("novaact", "midscene"):
         assert f"{engine}: variant login · digest sha256:{'ab' * 6} · revision {_stub_revision(engine)}" in err
-
-
-def test_variant_print_suppressed_by_quiet(tmp_path, monkeypatch, capsys):
-    """`--quiet` 静音这几行（同它静音逐事件进度的口径）；解析本身照做（拿到映射、写 definition）。"""
-    record: list = []
-    _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
-    assert rc == 0
-    assert "novaact: variant" not in capsys.readouterr().err
-    assert len(made["variant"]) == 1  # 解析仍发生
-
-    record2: list = []
-    _patch_cloud_handles(monkeypatch, record2)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1"])
-    assert rc == 0
-    assert "novaact: variant base · digest sha256:" in capsys.readouterr().err
 
 
 # ---- 入口校验 + 本机后端忽略（ADR 0038）----
@@ -1430,22 +1146,20 @@ def test_worker_variant_valid_names_pass_entry_validation(tmp_path, monkeypatch,
     assert [c["variant"] for c in made["variant"]] == ["base", "login", "checkout-v2", "v1.2_x"]
 
 
-def test_local_backend_ignores_worker_variant_with_one_note(tmp_path, monkeypatch, capsys):
-    """本机后端忽略该 flag、只打一行提示（不拦、不校验——local 的确定性 step 直接从 steps 目录读、不经镜像）。"""
+def test_local_submit_ignores_worker_variant_with_one_note(tmp_path, monkeypatch, capsys):
+    """本机后端的 submit 忽略该 flag、只打一行提示（不拦、不校验——local 的确定性 step 直接从 steps 目录读、不经镜像）。
+    run 不收这个 flag，见 test_run_and_submit_do_not_accept_cloud_execution_flags。"""
+    import subprocess
+
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"),
-                 "--worker-variant", "login", "--quiet"])
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"),
+                 "--worker-variant", "login"])
     assert rc == 0
     assert "--worker-variant 不生效" in capsys.readouterr().err
     assert made["variant"] == []      # local 从不解析
     assert record == []               # 也没碰任何云端读
-
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r2"),
-                 "--worker-variant", "login"])
-    assert rc == 0
-    assert "--worker-variant 不生效" in capsys.readouterr().err
 
 
 def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, capsys):
@@ -1478,7 +1192,7 @@ def test_bad_default_pointer_name_exits_2_pointing_at_the_parameter(tmp_path, mo
 
 
 def test_status_cloud_terminal_prints_s3_and_ddb_locations(monkeypatch, capsys):
-    """cloud status 到终态打出与 `run --backend cloud` 相同的位置行（s3:// 报告与判定明细、ddb:// 元信息），
+    """cloud status 到终态打出与本机 run 结束时同一形态的位置行（s3:// 报告与判定明细、ddb:// 元信息），
     落点按 --prefix 推理出的桶/表与 --report-dir 前缀拼——用户不用自己拼 S3 路径。"""
     class _PassedTable:
         def get_item(self, **kw):
@@ -1521,13 +1235,12 @@ def _deadline_offset_s(meta: dict) -> float:
     return (datetime.fromisoformat(meta["deadline_at"]) - datetime.fromisoformat(meta["created_at"])).total_seconds()
 
 
-def test_cloud_run_and_submit_write_deadline_with_the_cloud_per_job_tail(tmp_path, monkeypatch, capsys):
-    """云端的 run 与 submit：期限是创建时刻加 900 秒、再加各 job 的预算与 210 秒之和，两个 job 各算一份；META 条目另把它摊成顶层属性。"""
+def test_cloud_submit_writes_deadline_with_the_cloud_per_job_tail(tmp_path, monkeypatch, capsys):
+    """云端 submit：期限是创建时刻加 900 秒、再加各 job 的预算与 210 秒之和，两个 job 各算一份；META 条目另把它摊成顶层属性。"""
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    rc = m.main(["run", str(_two_engine_feature(tmp_path)), "--backend", "cloud", "--default-job-timeout", "600",
-                 "--ddb-table", "T", "--s3-bucket", "B", "--region", "us-east-1", "--quiet"])
+    rc = m.main(["submit", str(_two_engine_feature(tmp_path)), "--backend", "cloud", "--default-job-timeout", "600",
+                 "--ddb-table", "T", "--region", "us-east-1"])
     assert rc == 0
     meta = _definition(made["ddb_tables"][0])
     assert _deadline_offset_s(meta) == 900 + 2 * (600 + 210)

@@ -1,6 +1,6 @@
 """definition 结构版本闸门在 CLI 的接线：status / explain / 本机接力读任何别的东西之前先核结构版本，
 不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性。另有缺戳例外的接线：带设备目标或会话预热地址的
-run 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
+云端 submit 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
 from __future__ import annotations
 
 import json
@@ -99,22 +99,20 @@ def test_cloud_status_and_explain_peek_meta_header_before_state(monkeypatch, cap
 
 
 def test_missing_stamp_blocks_runs_that_require_it_before_resource_preflight(tmp_path, monkeypatch, capsys):
-    """缺戳例外的接线：谓词为真的 run / submit 遇无版本戳后端以退出码 2 结束、资源检查一次不做；谓词为假（纯桌面）只警告放行。
+    """缺戳例外的接线：谓词为真的云端 submit 遇无版本戳后端以退出码 2 结束、资源检查一次不做；谓词为假（纯桌面）只警告放行。
     谓词本身在 compose（run_requires_backend_stamp），此处 patch 它来验接线。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: None)        # 无戳
     monkeypatch.setattr(m.compose, "check_version_skew", _real_check_version_skew)  # 验真判据，不用 _patch_skew 的假判定
     monkeypatch.setattr(m.compose, "run_requires_backend_stamp", lambda meta: True)
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    for cmd in ("run", "submit"):
-        assert m.main([cmd, str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1", "--quiet"] if cmd == "run"
-                      else [cmd, str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"]) == 2
-        err = capsys.readouterr().err
-        assert "没有版本戳" in err and "gherkai deploy" in err
+    argv = ["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"]
+    assert m.main(argv) == 2
+    err = capsys.readouterr().err
+    assert "没有版本戳" in err and "gherkai deploy" in err
     assert preflight_calls == []
     monkeypatch.setattr(m.compose, "run_requires_backend_stamp", lambda meta: False)
-    assert m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1", "--quiet"]) == 0
+    assert m.main(argv) == 0
     assert "没有版本戳" in capsys.readouterr().err   # 只警告
     assert len(preflight_calls) == 1
 

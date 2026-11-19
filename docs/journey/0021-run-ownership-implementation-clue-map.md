@@ -539,7 +539,7 @@
 #### 云端-6（doc，M）
 
 - 线索：编排进程一侧的权限按 0033 改：删去同步 run 的 ecs:RunTask、StopTask
-- 要做的：只改文档，code 里没有编排进程角色（stack 不建它）。docs/user-guide/cloud-backend.md「团队成员需要的最小云端权限」改成单级（submit、status --wait、settle-runs）：删去 run --backend cloud 一级，删去「调用 `<prefix>kicker` Lambda」，保留 lambda:GetFunction；加上处置所需的 runs 表条件写、报告桶 s3:GetObject（卸载的运行定义正文与被点名的明细）、报告前缀 s3:PutObject，以及 settle-runs 不给 run_id 时 list-runs 的两项。running-and-results.md「两个独立的选择」节的权限表、getting-started.md 的角色表、skill references/cloud-backend.md「1 分工」表同样改。
+- 要做的：只改文档，code 里没有编排进程角色（stack 不建它）。docs/user-guide/cloud-backend.md「团队成员需要的最小云端权限」改成单级（submit、status --wait、settle-runs）：删去 run --backend cloud 一级，删去「调用 `<prefix>kicker` Lambda」，保留 lambda:GetFunction；加上处置所需的 runs 表条件写、报告桶 s3:GetObject（卸载的运行定义正文与被点名的明细）、报告前缀 s3:PutObject，以及 settle-runs 不给 run_id 时 list-runs 的两项。running-and-results.md「怎么运行、在哪运行：三种组合」节的权限表、getting-started.md 的角色表、skill references/cloud-backend.md「1 分工」表同样改。
 - 文件：docs/user-guide/cloud-backend.md、docs/user-guide/running-and-results.md、docs/user-guide/getting-started.md、cli/gherkai_cli/skills/gherkai/references/cloud-backend.md
 - 先要有：删去 run --backend cloud（「云端只支持 submit」块）；删去 status --wait 的 kickoff（处置块）；settle-runs 与云端 status --wait 的处置（处置块）
 - 必须同批：对应的行为批：删 lambda:InvokeFunction 和删 kickoff 同批；删 run 一级和删 run --backend cloud 同批；加处置权限和 settle-runs 同批
@@ -548,153 +548,6 @@
 - 备注：这一条与「行为文档」块里三条重复：running-and-results.md 与 getting-started.md（0040 派生视图）、agent skill 的 references/cloud-backend.md、cloud-backend.md「最小云端权限」一节。排批时合并成一处。
   
   线索写的「删去同步 run 的 events 表 Query」只指 run 那一级；explain 补取仍要 events 表的 dynamodb:Query（0033 编排进程角色），不能一起删。0033 编排进程角色还没有登记 explain 读明细与 evidence 的 s3:GetObject，journey 的待定项里已经列了。
-
-## 云端只支持 submit：删去前台云端执行与只为它设的配置
-
-### 小结
-
-整体改动量：L。主体是删除，测试改写比生产代码的删除多。生产代码一侧：cli/__main__.py 的 `_cmd_run` 删去约 200 行云端分支，解析器删 4 至 8 个参数；compose.py 删 `resolve_network`、`_read_ssm_list`、`cloud_stop_bound_s`、`prune_empty_dirs`（待定），收窄 `resolve_cloud_target` 与 `build_fargate_engines`；fargate_engine.py 删约 250 行同步消费代码；schedule.py 删 stop_bound_s；errors.py 删 reason；names.py 两处与 stack.py 的 SSM 网络参数。测试一侧：test_backend_cloud.py 约 35 处、test_fargate_engine.py 约 30 处、test_compose.py、test_stack.py、test_schedule.py、test_termination_parity.py、test_project_config.py 都有删改。
-
-内部次序：云submit-1（入口拒绝并删 `_cmd_run` 云端分支）连同云submit-3 是根，其余各条都依赖它。云submit-2、4、5、6、7 必须与它同批落地，或排在它之后；其中 5、6 如果先落，会直接打坏仍然存在的 `run --backend cloud`（schedule 调 run_scope 时 AttributeError，或 stop_bound_s 报 TypeError），6 甚至会打坏本机 run，因为同一个调用点对两个后端都传 stop_bound_s。云submit-8 的 compose 一半依赖 1、7；stack 一半可以与 CLI 同批提交，重新部署之前多两个没人读的参数，没有影响，所以不必为它单独部署。9 与 11 与其余各条无关；10 等拍板。建议整块作为一批：先 1、3、7，再 2、4、5、6、8，同一次提交。
-
-对别的块的依赖：本块基本不依赖其他块，可以最先做，产品在这一批之后仍然可用，因为云端用户本来就有 submit。反过来，云端块里「handler 不按后台执行标记分流」（删 reconciler `_build` 的 `is_detached`、exit-observer 的 `_is_detached`、kicker 按 detached 过滤）必须排在本块之后：同步云端 run 还存在时去掉分流，推进器会去推进前台 run 的 task，出现两个推进器。本块落地之后所有云端 run 都带 detached 标记，那些过滤恒为真、无害，因此本块不需要等云端块，也不需要重新部署。settle-runs 加进 skew 闸、CONFIG_COMMANDS 加 settle-runs 属于 settle-runs 那一块。
-
-最大的风险：①测试覆盖悄悄变少。test_backend_cloud.py 里很多用例借 `run --backend cloud` 当载体，测 skew 三态与次序、variant 闸、两层命名、环境变量兜底、缺 boto3 以退出码 2 结束；test_fargate_engine.py 的 env 注入用例借 run_scope 跑。直接删会让 submit 与 start_scope 的这些闸和注入面失去测试，必须改用 submit 与 start_scope 测，不能只删。②fargate_engine.py 与 build_fargate_engines 随 core、runtime 打进 Lambda，真实效果只在重新部署之后可见，要与云端块的部署放在一起做一次云端 submit 的真实执行。③文档触点比「行为文档」块登记的多（见 missing），漏改会留下「run --backend cloud」的旧说法。
-
-### 线索没有覆盖的改动点
-
-- `_interrupt_prompt` 的 `cloud=` 形参与两句云端提示（cli/gherkai_cli/__main__.py `_interrupt_prompt`，以及 `_cmd_run` 里 `_on_interrupt` 的调用）在 run 只有本机后端之后成为死路径，应删去；依据 ADR 0016 决策 A、ADR 0024 终止契约「使用方中断」条（只剩本机两级）。
-- `compose.prune_empty_dirs` 唯一的调用方是 `_cmd_run` 云端分支（cli/gherkai_cli/__main__.py 第 3189 至 3190 行），删去之后它和 runtime/tests/test_compose.py 第 1136 至 1160 行的三个用例都成为死代码；ADR 0016 第 233 行 compose 职责清单列了「产物空壳清理 → compose.prune_empty_dirs」，删函数要同步改这一行（可能还有 ADR 0029 的组合根一行）。依据 ADR 0016 决策 A；改 ADR 须过复核。
-- `compose.build_fargate_engines` 的 `profile` 形参、`no_artifacts` 分支（GHERKAI_NO_ARTIFACTS）以及 ecs、s3、events 表三个句柄的惰性构造，在推进器 Lambda 成为唯一调用方之后都没有生产调用方（runtime/gherkai_runtime/compose.py；reconciler.py `_build` 的调用不传 profile 与 no_artifacts、三个句柄全部注入）；依据 ADR 0016 决策 C「Fargate 配置只在后端一侧装配」、ADR 0033「组合根接线（非 IaC）」。
-- `compose.preflight_cloud_resources` 的 `runs_table: str | None = None` 及其 docstring 里「runs 表仅落库需要（--no-report 下不探）」「同步 run 进程内推进、不依赖链、不传 lambda_fns」只为 run 云端分支而设（runtime/gherkai_runtime/compose.py 第 1877 至 1891 行）；剩下的调用方 submit 与 doctor 都传 runs_table，可以改为必给并改写 docstring；依据 ADR 0033 preflight 条、ADR 0016 决策 A。
-- 以「同步 run」「云端同步 run」为对象的 code 注释，线索没有点到：compose.py 第 262 行（`_UnavailableEngine`）、第 875 行（`cloud_artifact_locations` 的「同步 run --backend cloud 传自己的」）、第 1119 行、第 1555 与 1824、1843、1851 至 1874 行（WorkerResolution.stop_timeout_s 与停止后等待预算），core/gherkai_core/model.py 第 584 行（「同步 run 的 FargateEngine」），core/gherkai_core/ports.py 第 54 行（Fargate StopTask）与第 79 行（FargateEngine.run_scope），core/gherkai_core/project.py 第 230 行哨兵注释的②与第 244 行 `platform_exit_reason` 的「同步路径的 FargateEngine」，deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 第 102 行（「同步路径的 FargateEngine 共用同一份」）；依据 ADR 0016 决策 A、ADR 0034「Engine port 演进」。
-- `settings.LOCAL_ONLY_NOTICE_COMMANDS` 含 "run"（cli/gherkai_cli/settings.py 第 42 行）：配置文件同时给 backend=cloud 与 grace 时，run 先打一句「grace 本次未生效」再以退出码 2 结束，宜把 run 从这个名单里去掉；依据 ADR 0053 决策 3 与 ADR 0016 决策 A。
-- run 子命令的 help 文本还有云端说法：`--grace`（「--backend cloud 的停止宽限由部署侧……给了本 flag 直接以退出码 2 结束」）、`--quiet`（「云端后端的 worker 在云端运行、日志在 CloudWatch」）、`--backend`（「cloud 在云端（Fargate）起 worker」）、`--profile`（「云端执行的 worker 不使用它」）（cli/gherkai_cli/__main__.py `_build_parser` 的 run 一段）；依据 ADR 0016 决策 A；措辞受 test_user_facing_messages 护栏约束。
-- 测试块没有点名的测试：core/tests/test_termination_parity.py 的 `_sync_late_stop` 与 `test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound`（stop_bound_s），cli/tests/test_main.py 第 535 行 `assert o.stop_bound_s is None`，runtime/tests/test_compose.py 第 1783 行 `test_cloud_stop_bound_takes_max_stop_timeout_plus_ecs_stopped_lag`，core/tests/conftest.py 第 150 行附近为 `_probe_task` 设的 fake ecs，cli/tests/test_tunnel_cli.py 与 cli/tests/test_definition_schema.py 里各一处 run --backend cloud；另外 test_backend_cloud.py 里借 run 云端测 skew、variant、两层命名的用例要改用 submit 测，不能删；依据 ADR 0016 决策 A、ADR 0034 机制二「排空上界」条。
-- 「行为文档」块没有登记、却写着 run --backend cloud 或其前提的人读文档：docs/user-guide/faq.md 第 31 行（「run --backend cloud 仍要本机的命令进程在线」）；docs/user-guide/troubleshooting.md 第 65 行（「--backend cloud 的 run / submit 不查本机 worker」）、第 127 行与第 130 行（「run / submit --backend cloud 以退出码 2 结束」）；docs/internals/cloud-backend-carriers.md 第 96 行（前台 run --backend cloud 不回读 revision）、第 101 行（「已知盲区：run --backend cloud --no-report 不写 STATE」）、第 114 行（前台与 detached 靠 detached 标记分流）；agent skill 的 references/cloud-backend.md 第 31 行（「run --backend cloud 的并行度就是 --max-concurrency」）与 references/setup-and-diagnosis.md 第 19 行（「--backend cloud 的 run / submit 不看本机 worker」）。依据 ADR 0016 决策 A，以及 CLAUDE.md「每一批的提交带上它所改行为的文档」。
-
-### 逐条
-
-#### 云submit-1（mixed，L）
-
-- 线索：`run --backend cloud`（命令行给出，或项目配置 `[common]` 的 backend 为 cloud）以退出码 2 结束并指向 submit
-- 要做的：在 `_cmd_run` 开头（`_plan_and_preflight` 之前，保证没有副作用）判断 `args.backend == "cloud"`，以退出码 2 结束，用产品语言说明云端后端只能用 submit 提交，来源按 `settings.option_origin(args, "backend")` 点名是命令行选项还是配置文件。整段删去 `args.backend == "cloud"` 的分支，包括：拒绝 `--grace` 的块、`nova_act_timeout_s()` 预检、3a 段（skew 闸、`preflight_cloud_resources`、variant 闸、`cloud_stop_bound_s`、`_complete_cloud_definition`、`resolve_network` 及读 SSM 的报错、`cloud_fargate` 字典）、3b 的 `build_cloud_stores` 分支、`need_cloud` 和它的两处 botocore 兜底、`build_fargate_engines` 调用、`prune_empty_dirs` 调用。`min_grace` 恒按本机引擎自报值取，`stop_bound` 变量删去。`compose.cloud_stop_bound_s` 与 `ECS_STOPPED_LAG_MARGIN_S` 随之没有调用方，一并删去；settings.py 里讲「命令行显式值仍由入口拒绝」的注释同时改写。
-- 文件：cli/gherkai_cli/__main__.py、cli/gherkai_cli/settings.py、runtime/gherkai_runtime/compose.py、cli/tests/test_backend_cloud.py、cli/tests/test_project_config.py、cli/tests/test_tunnel_cli.py、cli/tests/test_definition_schema.py、runtime/tests/test_compose.py
-- 先要有：无
-- 必须同批：云submit-3（--backend 的接受面与 help）；云submit-6（stop_bound_s 只由这里注入，删了它才能删 stop_bound_s）；测试块中「前台云端 run 的测试删改」与 0053 键集护栏一条；行为文档块：「四种组合」改为三种、configuration.md、running-and-results.md 的「仅 --backend cloud」段、cloud-backend.md 最小权限一节删去 run 一级、契约页写明 run --backend cloud 以退出码 2 结束、skill 第 3 步与旗标表、docs/diagrams/run-execution.json 重出；CHANGELOG 未发行节的「云端前台 run」条目改写
-- 单独先落地的后果：单落这一条而测试不跟着改时，cli/tests/test_backend_cloud.py 里约 35 处 `run --backend cloud` 的用例变红（断言 Fargate 接线、stop_bound、--no-report 仍走 Fargate、云端退出码分层等），test_project_config.py 有 4 处、test_tunnel_cli.py 与 test_definition_schema.py 各 1 处也变红。产品一侧没有缺口：云端仍可经 submit 使用。
-- 验证：单测足够：改动是入口判断加删分支，不涉及 mock 之外的真实行为。要补的用例：命令行给出与配置文件给出 cloud 时都以退出码 2 结束，说明指向 submit 并点名来源；退出之前没有任何 AWS 调用、没有起隧道、没有上传（打桩 compose 断言零调用）。可选：跳板机上做一次本机 `run` 的真实执行，作为 `_cmd_run` 重排之后的冒烟，确认本机路径的行为没有变。
-- 备注：code 现状与线索相符。疑点与连带改动：①test_backend_cloud.py 里有不少用例只是借 `run --backend cloud` 当载体，测的是对两个命令都适用的闸：两层命名的 prefix 推导与单资源覆盖、AWS_DDB_TABLE 等环境变量兜底、缺 boto3 以退出码 2 结束、skew 三态与「skew 先于资源 preflight」的次序、variant 闸的打印与静音、`--worker-variant` 入口校验。这些要改用 submit 测，不能直接删，否则闸对 submit 的覆盖会变少。测试块里「前台云端 run 的测试删改」一条只写了 `fake_resolve_network` 与 `test_cloud_wires_fargate_engines`，工作量明显被低估。②`settings.LOCAL_ONLY_NOTICE_COMMANDS` 含 "run"：配置文件同时给了 backend=cloud 与 grace 时，`apply_project_config` 会先打一行「grace 本次未生效」，紧接着 run 以退出码 2 结束，这一行提示没有意义，宜把 run 从这个名单里去掉。③`_interrupt_prompt` 的 `cloud=` 形参及云端两句提示、`_per_job_tail_s` 被 run 调用时的云端分支、`_resolve_steps_dir_for_backend` 被 run 调用时的云端分支都变成死路径（后两个 submit 还要用，只是 run 一侧到不了）。④`WorkerResolution.stop_timeout_s` 只供 `cloud_stop_bound_s` 使用（doctor 走的是 `read_task_def_stop_timeout`），可以一并删去这个字段，或只改它的说明；「核对时补上的条目」块写的是改说明，删字段还是只改说明由实装定。⑤`compose.prune_empty_dirs` 只有 run 的云端分支调用，删了就没有调用方；但 ADR 0016 第 233 行的 compose 职责清单列了它，删函数要同步改那一行（见 missing）。
-
-#### 云submit-2（code，S）
-
-- 线索：失败退出码分层：退出码 2 只剩缺 boto3、云端 submit 的资源 preflight 不过与 create_run 抛 botocore 异常
-- 要做的：删掉 run 云端分支之后，`_cmd_run` 里只剩本机这一层：运行期异常照常冒出 schedule，进程以非零退出码结束；云端运行期 botocore 兜底（返回 1）随 `need_cloud` 一起删去。改写 `_cloud_skew_gate` 的 docstring：「五个 cloud 入口（run / submit / status / explain / list-runs）」去掉 run，同时删去「读戳与 subnet/sg 同一条 session/region 解析」。`run_requires_backend_stamp` 只剩 `_submit_cloud` 一个调用方。版本 skew 闸加上 settle-runs 入口，属于 settle-runs 那一块。
-- 文件：cli/gherkai_cli/__main__.py、runtime/gherkai_runtime/compose.py
-- 先要有：云submit-1（run 云端分支已删）
-- 必须同批：云submit-1
-- 单独先落地的后果：它是云submit-1 的派生：单独落地时只能改注释，不改变行为；如果先删 run 一侧的 botocore 兜底而云端分支还在，云端 run 运行期的存储异常会变成裸回溯。
-- 验证：单测足够：本机 run 运行期存储异常以非零退出码结束的既有用例保持通过（core/tests/test_schedule.py 的 `test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers`，其中「以退出码 1」改为非零的那一条在测试块里）。
-- 备注：「运行期失败的退出码是不是定成 1」在「写回时留下、实装之前要定的问题」里仍待定（0030 决定七只写了「非零」）。现在的 code 走的是 `_run_schedule()` 把异常直接抛出，Python 以 1 退出并带回溯；如果要的是「终端里有存储错误」而不是回溯，`_cmd_run` 需要补一个接住存储异常的地方，这件事线索没有写。`compose.check_backend_skew` 与 `read_backend_version` 的 docstring 里还有「对齐 resolve_network」「与 subnet/sg 同一条解析」的说法，归在云submit-8。
-
-#### 云submit-3（code，S）
-
-- 线索：`--backend` 的接受面：run 不收云端后端；settle-runs 与 status、list-runs 一样按三项定位参数选定后端
-- 要做的：run 子命令的 `--backend` 保留 `choices=["local","cloud"]`，拒绝放在 `_cmd_run` 里做（见云submit-1）；`--backend` 的 help 改为说明 cloud 只能用于 submit。run 的 `--grace` help 删去讲云端的半句，`--quiet` help 删去「云端后端的 worker 在云端运行、日志在 CloudWatch」，`--region`、`--profile` 的 help 删去「云端执行的 worker 不使用它」一类说法。settle-runs 的解析器属于 settle-runs 那一块。
-- 文件：cli/gherkai_cli/__main__.py
-- 先要有：无
-- 必须同批：云submit-1
-- 单独先落地的后果：只改 help 不改行为时，help 与实际行为不符（help 说不收 cloud，实际仍会在 Fargate 执行）。
-- 验证：单测足够（argparse 与 help 文本；test_user_facing_messages 护栏会扫这些字面量）。
-- 备注：线索写的「run 不收云端后端」有两种实现：argparse 的 choices 只留 local，或照收 cloud、在入口拒绝。ADR 0016 决策 A 与 0053 决策 3 要求「以退出码 2 结束并指向 submit」，而且配置文件给出时要与命令行相同。如果 choices 只留 local，配置文件里的 `[common] backend = 'cloud'` 在 run 上会经 `convert_config_value` 报「只能是 local 之一」，指不到 submit，status 与 submit 共用的那个键在 run 上也会变成配置错误。所以应当保留 choices、在入口拒绝。这一点线索没有写明，实装时注意。
-
-#### 云submit-4（code，S）
-
-- 线索：CLI 一侧组合根只装配 SubprocessEngine，`build_fargate_engines` 只由推进器 Lambda 一侧的组合根调用
-- 要做的：`build_engines` 不用改，它本来就只产 SubprocessEngine。`build_fargate_engines` 的 docstring 改为只由推进器 Lambda 调用（删去「`--backend cloud` 用它替代 build_engines」），region 来源写成推进器取部署所在区域。`--no-report` 的注释改为只跳过落库。`FargateEngine._put_job_and_run_task` 里「打 tag 的是编排进程（用运维凭证）」改为推进器 Lambda 的执行角色。可以一并收窄 `build_fargate_engines` 的签名：reconciler 的调用不传 `profile`、不传 `no_artifacts`，ecs、s3、events 表三个句柄都已注入，于是 `profile` 形参、`no_artifacts` 分支和三个句柄的惰性构造都没有生产调用方。
-- 文件：runtime/gherkai_runtime/compose.py、core/gherkai_core/adapters/fargate_engine.py、runtime/tests/test_compose.py
-- 先要有：云submit-1（run 不再调用 build_fargate_engines）
-- 必须同批：云submit-1
-- 单独先落地的后果：只改注释时无影响；如果在云submit-1 之前删 `no_artifacts` 或 `profile` 形参，`_cmd_run` 的云端分支会 TypeError。
-- 验证：单测足够（compose 接线测试，以及 deploy_aws/tests/test_lambda_handlers.py 里推进器装配的用例）；签名收窄会改变 Lambda 打包进去的 runtime 代码，下一次重新部署之后的云端 submit 真实执行顺带覆盖它。
-- 备注：code 现状：reconciler.py 的 `_build` 调用 `build_fargate_engines(..., region=region, ecs=..., s3=s3, ddb_events_table=...)`，确实不传 profile 与 no_artifacts。删 `no_artifacts` 时，`GHERKAI_NO_ARTIFACTS` 注入在云端随之消失，没有别的写入方，安全。Lambda 执行角色已有 `self._bucket.grant_read_write(fn)`，按 CDK 惯例应包含 PutObjectTagging，而且云端 submit 现在就由 Lambda 打 tag，所以这里只改注释、不用补权限。这一条是基于 CDK 惯例的推断，没有展开核对模板。
-
-#### 云submit-5（mixed，M）
-
-- 线索：FargateEngine 只留 start_scope：删去 `run_scope`、`FargateWorkerHandle`、`_read_events` 以及只服务同步消费的游标、断号宽限与退出码落值宽限
-- 要做的：fargate_engine.py 删去 `run_scope`、`FargateWorkerHandle`、`_read_events`、`_count_missing`、`_final_drain`、`_probe_task`、`_await_exit_code`、`TaskProbe`、`EC_GAP_GRACE_S`、`TASK_FAILED_TO_START`，以及构造参数 `poll_interval_s`、`gap_grace_s`、`missing_task_grace_polls`、`null_exit_grace_polls`；保留 events 表 schema 常量（PK_ATTR、SK_ATTR、BODY_ATTR、EXIT_SK、ITEM_TYPE_ATTR、EXIT_ITEM_TYPE、EXIT_CODE_ATTR、`events_pk`，DdbEventLog 与观察者在用）、`start_scope`、`_put_job_and_run_task`。模块头的四边缘表改成只讲 job-in 与 RunTask 注入，stop 与退出码两行改为由推进器的 StopTask 和观察者负责。不再 import `WorkerExitError`、`raise_for_worker_exit`、`PLATFORM_FAILED_EXIT`、`platform_exit_reason`。errors.py 里 `WorkerExitError.reason` 删了这条路径就没有产出方，宜删去这个关键字参数，schedule.py 第 557 行改为不读 `e.reason`。两个异常 docstring 里「两个 Engine adapter 共用」改为只由子进程 adapter 用。test_fargate_engine.py 改写。
-- 文件：core/gherkai_core/adapters/fargate_engine.py、core/gherkai_core/errors.py、core/gherkai_core/schedule.py、core/gherkai_core/project.py、core/gherkai_core/ports.py、core/tests/test_fargate_engine.py、core/tests/conftest.py、core/tests/test_schedule.py、runtime/gherkai_runtime/compose.py
-- 先要有：云submit-1（schedule 不再拿到 FargateEngine）
-- 必须同批：云submit-1；test_fargate_engine.py 的改写
-- 单独先落地的后果：先于云submit-1 单独落地，`run --backend cloud` 会在 schedule 调 `engine.run_scope` 时 AttributeError，每个 job 都记 engine_error，产品出现缺口；test_backend_cloud 不打桩 FargateEngine 的那些用例变红；test_fargate_engine.py 里约 30 个基于 run_scope 的用例变红。
-- 验证：本地单测要改写：注入 env（JOB_S3_URI、events 表、RUN_ID、SCOPE_ID、AWS_REGION、ARTIFACT_S3_*、SDK 落点、extra_env）、job-in 的 key 编码与 tag、放置失败报错这几类用例原本借 run_scope 跑，要改成直接调 start_scope，不能直接删，否则 start_scope 的注入面就没有测试了。真实验证：start_scope 随 core 打进 Lambda，代码只在重新部署之后生效，所以要在重新部署后做一次云端 submit 的真实执行（两个引擎各一个 job，确认 task 起得来、事件写进 events 表、退出记录到达、判定正常）。这一步宜与云端块的重新部署放在一起。
-- 备注：①core/tests/test_fargate_engine.py 有 50 个用例，绝大多数经 run_scope 驱动，其中 env 注入一类要改成 start_scope，事件读取、断号、退出码、MISSING 一类直接删；conftest.py 第 150 行附近讲 `_probe_task` 的 fixture 注释与 fake ecs 也要清理。②schedule.py 第 553 至 557 行 `except WorkerExitError as e: ... e.reason`：删掉 reason 之后 exit_reason 恒为 None，终结函数 255 那一行的归因只剩云端 tick 与观察者（经 TaskExited.reason）这一个来源。core/tests/test_schedule.py 的 `test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not` 随之删去或改写（「随实装改写的 code 注释」块第 328 行点名了它）。③project.py 第 230 行附近哨兵注释的②「同步 run --backend cloud 下 task 已 STOPPED 却始终取不到 exitCode」、第 244 行 `platform_exit_reason` 的「同步路径的 FargateEngine 都调它」，ports.py 第 54 行「Fargate StopTask」与第 79 行「FargateEngine.run_scope」，compose.py `_UnavailableEngine` 讲「两个后端的宿主入口不同（同步 run 走 run_scope）」的一段，都要一起改。`_UnavailableEngine.run_scope` 本机仍要用，保留。④线索写「WorkerExitError 的 reason 只由这条路径给出，随之核去留」：核过之后确认只有 `_await_exit_code` 产出 reason，可以删。
-
-#### 云submit-6（mixed，S）
-
-- 线索：`ScheduleOpts` 删去 `stop_bound_s`：停止后的等待预算就是 grace，不另设；优雅终止的机制层去掉 Fargate StopTask
-- 要做的：schedule.py 的 `ScheduleOpts` 删去 `stop_bound_s` 字段及其注释；`_Worker._run_once` 里 `stop_bound = self.opts.stop_bound_s if ... else grace_period_s` 改为直接用 `grace_period_s`；`schedule()` 入口删去 stop_bound_s 的有限正数校验；模块头与 `_Worker` 里讲「云端即再发一次 StopTask」「Fargate adapter 再发一次 StopTask」的注释改成只讲本机句柄。
-- 文件：core/gherkai_core/schedule.py、core/tests/test_schedule.py、core/tests/test_termination_parity.py、cli/tests/test_main.py
-- 先要有：云submit-1（run 不再注入 stop_bound_s）
-- 必须同批：云submit-1
-- 单独先落地的后果：先于云submit-1 单独落地，`_cmd_run` 传 `stop_bound_s=` 会 TypeError，本机 run 也会坏（同一个调用点对两个后端都传这个参数）。
-- 验证：单测足够：排空上界是 schedule 的纯逻辑，用注入的 fake clock 测，不依赖真实进程时序；本机句柄「等满 grace 即 SIGKILL」的行为没有改。
-- 备注：测试块没有点名的连带用例：core/tests/test_termination_parity.py 的 `_sync_late_stop(row, stop_bound_s)` 与 `test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound`（第 246 至 280 行），test_schedule.py 第 1217 至 1294 行的三个 stop_bound 用例，cli/tests/test_main.py 第 535 行 `assert o.stop_bound_s is None`。其中 parity 那个用例的前提是「收尾慢于 grace，由 stop_bound 兜住」，删去之后要重新判断这个场景在本机还成不成立（本机句柄超过 grace 就 SIGKILL，事件流随即结束），多半整条删去，而不是改参数。
-
-#### 云submit-7（mixed，S）
-
-- 线索：删去 run 解析器的 `--events-table`、`--cluster`、`--subnet`、`--security-group` 与项目配置 `[cloud]` 节的同名键
-- 要做的：`_build_parser` 删去 run 的四个参数；`settings.CLOUD_OPTIONS` 去掉 events_table、cluster、subnet、security_group，`[cloud]` 节接受集由差集推出，自动随之变小；`settings.config_layers` 的 docstring 删去 events-table、cluster 那一句。submit 解析器第 458 至 464 行的对照注释改为现行说法（云端后端只经 submit，事件表、cluster、网络由推进器的环境变量给出）。`_cmd_run` 里讲 region 的注释（第 2877 至 2883 行，「subprocess env + FargateEngine overrides + store 三处同源」）改为只说 subprocess env 与 store 同源。
-- 文件：cli/gherkai_cli/__main__.py、cli/gherkai_cli/settings.py、cli/tests/test_project_config.py、cli/tests/test_backend_cloud.py
-- 先要有：云submit-1（只有 run 的云端分支读这四个参数）
-- 必须同批：云submit-1；测试块：test_project_config.py 的 `CLOUD` 字面集合手动删这四项；行为文档块：configuration.md 的 `[cloud]` 键表与跨命令选项表（第 226、227 行的 --subnet、--security-group 等）
-- 单独先落地的后果：参数删了而云端分支还在时 `args.events_table` 报 AttributeError；`CLOUD` 字面集合不同步时键集差集护栏 `test_every_long_option_is_classified_and_the_derived_key_sets_match` 变红。
-- 验证：单测足够（argparse 与配置差集护栏）。补一条：配置文件 `[cloud]` 里写 events-table 时以退出码 2 结束（未知键）。不做向后兼容，正好由这条用例锁定。
-- 备注：线索与 code 相符。`resolve_cloud_target` 的 events_table、cluster 覆盖形参只有 `_cmd_run` 在传（doctor、submit、status、explain、list-runs、deploy_aws/cli.py、tunnel_host 都不传），归在云submit-8 删。CloudTarget 的 events_table、cluster 字段仍由 doctor、submit 的 preflight 与 explain 补取使用，保留。
-
-#### 云submit-8（mixed，M）
-
-- 线索：删去 SSM 的 subnets 与 security-groups：compose 删 `resolve_network`、`_read_ssm_list`
-- 要做的：compose.py 删 `resolve_network`、`_read_ssm_list`，删 `resolve_cloud_target` 的 `events_table`、`cluster` 覆盖形参（只按 prefix 推出），改 `_make_ssm_client`、`read_backend_version` 与 `build_fargate_engines` 的 docstring。runtime/names.py 删 `SUBNETS_KEY`、`SECURITY_GROUPS_KEY`，改 `ssm_path` 的 docstring。deploy_aws/names.py 删对它们的 re-export 与 `ssm_subnets_path`、`ssm_security_groups_path`。stack.py 删两个 StringListParameter 与 SubnetsSsmPath 输出；WorkerSg 与 `CfnOutput("Prefix")` 保留，挪进改了名的方法；推进器环境变量 SUBNETS、SECURITY_GROUPS、REGION 不动；模块头、`__init__`、`_network`、`_worker_subnet_ids`、`_one_task_def`、`_reconcile_lambdas`、`_worker_sg_id` 的注释改为「两个推进器共用同一份环境变量」。
-- 文件：runtime/gherkai_runtime/compose.py、runtime/gherkai_runtime/names.py、deploy_aws/gherkai_deploy_aws/names.py、deploy_aws/gherkai_deploy_aws/stack.py、runtime/tests/test_compose.py、deploy_aws/tests/test_stack.py、deploy_aws/DEVELOPMENT.md、docs/internals/cloud-backend-carriers.md
-- 先要有：云submit-1（resolve_network 只由 run 的云端分支调用）；云submit-7（--subnet、--security-group 已删）
-- 必须同批：测试块：test_compose.py 里 resolve_network 的四条与 `test_ssm_path_contains_prefix` 的 subnets 例子；test_stack.py 的 SSM 全集、按个数命名的两个用例、`test_worker_subnets_single_source_across_ssm_and_lambda_env`、`test_prefix_switches_whole_set`；CHANGELOG 未发行节：下次 deploy 会删掉两个 SSM 参数
-- 单独先落地的后果：compose 一侧先删而 run 云端分支还在时，`compose.resolve_network` 报 AttributeError。stack 一侧的 code 可以与 CLI 改动同一批落地：已部署的 stack 在重新部署之前多出两个没人读的参数，没有影响。反过来不行：如果 stack 已经重新部署、删掉了参数，而 CLI 仍有 run 的云端分支，`run --backend cloud` 读 SSM 会失败、以退出码 2 结束。所以 stack 的这一半要排在云submit-1 之后、或与它同批。
-- 验证：单测与 CDK synth 断言（test_stack.py）覆盖模板形态。真实验证要等重新部署：owner 执行 `gherkai deploy` 之后，确认 CloudFormation 删掉了 `/{prefix}backend/subnets` 与 `/{prefix}backend/security-groups`、stack 更新成功，再做一次云端 submit 的真实执行，确认推进器仍按 SUBNETS、SECURITY_GROUPS 环境变量把 task 起在原来的子网里。这一步与云端块的重新部署放在一起，不必单独部署一次。
-- 备注：①stack.py 的 `_ssm_network` 里还有 `CfnOutput(self, "Prefix")`，删 SSM 时要保留它，线索只写了 SubnetsSsmPath。②stack.py 第 279 至 282 行讲 assignPublicIp 的「两处取值改 DISABLED（compose.resolve_network 缺省与推进器 Lambda 的 ASSIGN_PUBLIC_IP env，跨组件联动）」要改成只剩推进器这一处。③test_stack.py 第 289 行的文档串「网络 2（subnets/security-groups，cli resolve_network 读）」与第 427、671、674 行都要改。④deploy_aws/DEVELOPMENT.md 第 66 行的参数族列举、docs/internals/cloud-backend-carriers.md 第 15 行的 SSM 一行，在「行为文档」块里已经登记。⑤`gherkai deploy` 的 VPC 三态比对、doctor 都不读 subnets 参数（已 grep 确认），删掉不影响部署命令。
-
-#### 云submit-9（doc，S）
-
-- 线索：可选：novaact worker 只写了命令行一侧怎样落实 region，补一句容器一侧取部署所在区域
-- 要做的：engines/novaact/gherkai_worker_novaact/run_scope.py 第 84 至 91 行 `REGION` 上方的注释，与 lib/workflow_setup.py `ensure_workflow_definition` 的 docstring，各补半句：容器里运行时 region 由推进器注入部署所在区域。只改注释，不改 code。
-- 文件：engines/novaact/gherkai_worker_novaact/run_scope.py、engines/novaact/gherkai_worker_novaact/lib/workflow_setup.py
-- 先要有：无
-- 必须同批：无
-- 单独先落地的后果：无
-- 验证：不需要验证，只改注释；措辞护栏测试会扫它。
-- 备注：code 现状与线索相符，两处都只讲组合根 `resolve_region` 那一路。
-
-#### 云submit-10（code，S）
-
-- 线索：待定：run 解析器其余标着 [--backend cloud] 的 `--prefix`、`--ddb-table`、`--s3-bucket`、`--worker-variant` 是否一起删
-- 要做的：需要拍板。如果删：`_build_parser` 去掉 run 的这四个参数；`_validate_worker_variant` 在 run 上不再有输入；configuration.md 跨命令选项表里 `--ddb-table`、`--s3-bucket` 两行列出的 run 去掉（「核对时补上的条目」块已登记）。`[cloud]` 节的键仍由 submit、status 等命令的同名选项推出，配置面不变。如果不删：这四个参数在 run 上永远不生效，help 要写明。
-- 文件：cli/gherkai_cli/__main__.py、cli/tests/test_project_config.py、docs/user-guide/configuration.md
-- 先要有：云submit-1
-- 必须同批：云submit-1
-- 单独先落地的后果：保留不删时：这四个参数在 run 上是摆设，run --backend cloud 已经在入口被拒，给了也没有效果；help 上的 [--backend cloud] 标注就与实际行为不符。
-- 验证：单测足够（argparse 与键集差集护栏）。
-- 备注：从 code 看，run 删掉云端分支之后，这四个参数在 run 里没有消费方（`_cloud_target` 只在算 region/profile 时用 prefix，而本机 run 只用 target.region 与 target.profile；ddb_table、s3_bucket 只喂云端名字），所以删去符合 ADR 0016 决策 A 的「命令行不带这批参数」。拿不准的一点：`--prefix` 在本机 run 里是否仍影响某条 SSM 读（例如本机后端读设备项目 ARN）。本机后端用的是选项、环境变量或配置文件给出的 project-arn，`_plan_and_preflight` 的本机分支不读 SSM，看起来没有影响；但没有逐行核过 `submission.complete_local_definition`。
-
-#### 云submit-11（adr，S）
-
-- 线索：ADR 里讲 run --backend cloud 的历史实测与发版验证记录保留原文，删去前台云端执行时不改写
-- 要做的：不改 code，只约束收尾时的残留检索：在 code、文档里 grep「run --backend cloud」时，0037「施工前现状实测」表的那一行、0042「验证」节里云端后端那一条、0043 的 v1.4.3 发版验证记录、0051「实测依据」表里「真部署后的 task role 策略」那一行都算豁免。
-- 文件：docs/adr/0037-distribution-and-packaging.md、docs/adr/0042-step-evidence-and-explain.md、docs/adr/0043-agent-skill-for-driving-gherkai.md、docs/adr/0051-device-session-lifecycle-and-app-distribution.md
-- 先要有：无
-- 必须同批：无
-- 单独先落地的后果：无
-- 验证：收尾时 grep「run --backend cloud」，命中只剩这四处豁免，加上 CHANGELOG 已发行节与 skills/gherkai-workspace 下的历史评测产物。
-- 备注：核对过：0037 第 18 行那一行写的是「装进干净 venv 后 `submit --backend cloud`」，不是 run，它出现在豁免名单里只是因为相邻的语境，不影响检索。skills/gherkai-workspace/ 下大量历史迭代的 transcript、review.html 与 skill 快照也命中「run --backend cloud」，它们是评测的历史产物，豁免名单没有写，收尾检索时要排除这个目录。
 
 ## 查看命令与机读输出
 
@@ -879,21 +732,20 @@
 
 ### 小结
 
-整体改动量 L：涉及 4 个包、约 20 个测试文件，几百行以上。线索列的只是受影响测试的一部分，下面 missing 里的连带改动（try_finalize 全量迁移、到期语义、job 级 skipped、load_all、stop_bound_s）比线索点名的更多。所有被点名的符号都在 code 里找到了，没有改名。
+整体改动量 L：涉及 4 个包、约 20 个测试文件，几百行以上。线索列的只是受影响测试的一部分，下面 missing 里的连带改动（try_finalize 全量迁移、到期语义、job 级 skipped、load_all）比线索点名的更多。所有被点名的符号都在 code 里找到了，没有改名。
 
 这一块本身没有独立的先后次序，各条跟着自己那一块的 code 批次走：
-- 测-7、测-8 不依赖 code，可以随任何一批落地。
+- 测-8 不依赖 code，可以随任何一批落地。
 - 测-1、测-2（moto 与本机部分）、测-4（本机部分）、测-5、测-6 跟着「状态取法与结束写」块。其中测-3 另跟「报告」块，测-2 的点名标识跟「判定明细」块。这是第一个大批，core 之内的测试量最大。
 - 测-12 的本机部分跟「本机推进器与锁」块的删接力，按次序约束要排在生命期锁与 run 处置之后或同批。
-- 测-9 分两半：--dry-run 跟「run 处置」块的 settle-runs，CLOUD 四个键跟「云端只支持 submit」块。
-- 测-11 分两半：前台云端 run 与 resolve_network 跟「云端只支持 submit」块，kickoff 跟「run 处置」块。kickoff 那一半按次序约束要与后端到期结束同批或在其后。
+- 测-9 跟「run 处置」块的 settle-runs（CLOUD 四个键那一半已随「云端只支持 submit」那一批做完）。
+- 测-11 只剩 kickoff，跟「run 处置」块，按次序约束要与后端到期结束同批或在其后（前台云端 run 与 resolve_network 那一半已随「云端只支持 submit」那一批做完）。
 - 测-10、测-12 的云端部分、测-4 的云端用例、测-2 的真 DDB 部分跟「云端后端」块，宜集中在同一次重新部署的批次里。
 
 最大的风险：
 1. 端口把 try_finalize 换成结束写入口之后，13 个测试文件里约 117 处调用要一起迁。到期语义也变了：pending 由结束写记 skipped，run 按取法得 aborted，不再是 ERROR，也不再留 pending。这会在 core、runtime、cli 三个包的测试里连锁变红，第一批必须把它们一起改完才能全绿。
-2. test_backend_cloud 约 30 个前台云端用例，只删不迁移会丢掉 submit 仍需要的覆盖（prefix、skew、variant、期限尾段）。
-3. 写入序号的条件、并发写入、几百个 job 的项大小上限，以及 DDB 一次写里区分「STATE 不存在」与「run 已结束」，都依赖 moto 之外的真实 DynamoDB 行为，必须在真表上执行。
-4. 有一条用例要等 owner 先定：结束写取哪一个来路的说明。在这之前，测-6 的「中断之后已过停止启动」用例写不完。
+2. 写入序号的条件、并发写入、几百个 job 的项大小上限，以及 DDB 一次写里区分「STATE 不存在」与「run 已结束」，都依赖 moto 之外的真实 DynamoDB 行为，必须在真表上执行。
+3. 有一条用例要等 owner 先定：结束写取哪一个来路的说明。在这之前，测-6 的「中断之后已过停止启动」用例写不完。
 
 ### 线索没有覆盖的改动点
 
@@ -903,11 +755,10 @@
 - core/tests/test_conditional_writes.py 的 test_ddb_job_write_does_not_report_ended_on_a_run_created_between_its_two_writes（639 行）要删（依据 0034 机制三③：前台 job 写是一次带条件的写）。它的前提是「第一次写被挡之后再写第二次」，回退写删去之后这个前提不在了。
 - core/tests/test_cloud_integration.py 的 test_ddb_job_write_on_finalized_run_lands_job_only_real（151 行）在真 DDB 上断言已结束的 run 照写 job，要改为写不成（依据 0054 决策五、0034 机制三③）。同一文件的 test_s3_result_store_round_trip_real 调 load_all，要改为按点名读（依据 0030 决定三「点名」条）。
 - ResultStore 去掉 load_all、改为点名读（依据 0030 决定三「点名」条、决定六 ResultStore 段），这一块没有列对应的测试改动。要改的：core/tests/test_s3_result_store.py（19 处）、test_persist.py（4 处）、test_local_result_store_atomic.py（含模块文档串「后写的盖掉先写的」）、test_stores.py；cli/tests/test_main.py（5 处）。
-- ScheduleOpts.stop_bound_s 与 compose.cloud_stop_bound_s 删去（依据 0034 机制二「排空上界」条、0016 决策 A），对应测试没有列。要改的：core/tests/test_termination_parity.py 的 test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound 与 test_grace_only_drain_bound_diverges_under_late_stop_tail；core/tests/test_schedule.py「停止后等待预算 stop_bound_s」一节（1217 行起）；runtime/tests/test_compose.py 的 test_cloud_stop_bound_takes_max_stop_timeout_plus_ecs_stopped_lag（1783 行）。
 - handler 分流与清扫的测试，线索没有列全（依据 0034 端到端 cloud 1b、0054 决策九第 1、2 条）。①deploy_aws/tests/test_lambda_handlers.py 的 test_kicker_timeout_path_skips_tick_when_not_detached（767 行）、test_exit_observer_skips_non_detached_run 与 test_exit_observer_records_exit_for_detached_run（1174、1182 行），以及全文件 _seed_run 的 detached 参数。②「已收尾的 run 再被触发时 handler 整体 no-op」一节（1021 行起，含 test_finished_run_is_not_reprojected_by_a_late_or_replayed_event、test_timeout_payload_on_a_finished_run_is_a_noop）：新设计下已结束的 run 要清扫（按 startedBy 列 task、逐个停掉），断言要改。③kicker 建两次一次性定时触发、到点复查墙钟、run 已结束时只清扫，需要新增用例。
 - deploy_aws/tests/test_stack.py 要新增定时触发与清扫的模板断言（依据 0054 决策九末段权限、0033 资源清单 15），test_reconciler_and_kicker_have_the_same_permission_face（989 行）随之核对。要断言的权限：Scheduler 资源域、推进 Lambda 角色上的 ecs:ListTasks、ecs:StopTask、scheduler:CreateSchedule 与 iam:PassRole。定时触发的名字形态与资源域在 journey 里标为待定，这些断言要等它定下。
 - cli 一侧接力与 detached 门控的用例，线索没有列（依据 0034 被拒方案「本机接力，及其改法」、0041 决策七「人读形态」、0054 决策八 status --wait 条）。cli/tests/test_main.py：test_status_wait_on_a_foreground_run_only_waits_and_never_relays（3339 行）、test_status_pending_hint_offers_relay_only_for_detached_runs（3392 行）、test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay（3879 行）。cli/tests/test_project_config.py：test_local_relay_host_reads_definition_not_the_config_file（901 行）。cli/tests/test_backend_cloud.py：test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached（764 行）、test_status_cloud_pending_hint_offers_relay_only_for_detached_runs_and_stays_quiet_when_the_marker_is_unreadable（793 行）、test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read（820 行）。
-- cli/tests/test_project_config.py 另有两处要改（依据 0016 决策 A、0035 被拒方案「保留 --tunnel-ttl，只允许调小」）。①test_cloud_run_uploads_installer_into_artifacts_bucket（883 行）走 run --backend cloud。②COMMON 名单里的 --tunnel-ttl，以及 test_config_errors_exit_2_naming_file_section_and_key 里「tunnel-ttl = 'x'」一行，要随隧道批删去。
+- cli/tests/test_project_config.py 另有一处要改（依据 0035 被拒方案「保留 --tunnel-ttl，只允许调小」）：COMMON 名单里的 --tunnel-ttl，以及 test_config_errors_exit_2_naming_file_section_and_key 里「tunnel-ttl = 'x'」一行，要随隧道批删去。
 - core/tests/test_project.py「投影写的 run 级 status」一节要改（依据 0031 决定三取法、0034 机制三「投影写的 run 状态按取法给出」段）：test_projected_run_status_pending_only_while_all_jobs_pending 的文档串写「终态归 finalize、try_finalize 这个 commit point 专属」；test_run_status_agrees_between_schedule_and_project_full 等对拍用例要随 projected_run_status、project_full 与新取法一起改。
 - 测试文件里描述接力的文档串与注释，按新设计改写或删去（依据 0034 被拒方案「本机接力，及其改法」）。涉及：core/tests/test_local_run_store_atomic.py 与 test_local_result_store_atomic.py 的模块文档串；core/tests/test_stores.py 573 行、900 至 934 行（变量名 relay，以及「status --wait 从此把这个后台 run 当成前台 run 只等不接力」一句）；core/tests/test_reconcile.py 176 行；core/tests/test_conditional_writes.py 710 行；runtime/tests/test_compose.py 273 行。收尾检索会扫到它们，但不能指望到那时才改：写着接力的用例在删接力那一批就要改。
 - 拿不准：deploy_aws/tests/test_lambda_handlers.py 的 test_starter_run_ids_from_direct_kick（160 行）测的是 kicker 收直接调用的 payload。status --wait 不再 invoke kicker 之后（0054 决策八、0034「推进器与触发源」第 2 条），_run_ids_from_runs_stream 里服务 kickoff 的那一路是否保留由实装定，这条用例随之删或改。
@@ -967,7 +818,7 @@
 - 必须同批：状态取法与结束写块对 finalize_job、DEADLINE_TIMEOUT_MESSAGE、schedule 与 RunPersistence.finalize 的改动
 - 单独先落地的后果：终结函数改了而矩阵不动：期限截断各行的 error/timeout 断言与 startswith(DEADLINE_TIMEOUT_MESSAGE) 红，到期用例的 ERROR 与 b pending 断言红。
 - 验证：矩阵本身单测够（两条路径都是纯函数或 FakeEngine）。它守的结论依赖真实执行，批级要核 0054 实测项 4（三种组合各一个期限落在执行中途的 run，status --json 与 explain 一致）与实测项 11 本机一侧（真实进程在截止时刻之后自行退出）；云端一侧要等重新部署。
-- 备注：跟着「状态取法与结束写」块（终结函数、结束写、前台不构造 skipped）走。疑点：「接力补写」这一行的输入（退出码未知、带超时标志、没有退出时刻）在新设计下仍会出现：云端 job 到点停止找不到 task 时经 DdbEventLog.record_timed_out_if_absent 补写（0054 实测项 12），所以这一行宜改名为云端补写的情形、保留，而不是删；test_crash_row_sync_side_really_exits_with_unknown_code 与 test_matrix_covers_expected_verdicts 按行名取这一行，要一起改。线索没写的连带：test_paths_agree_when_stop_tail_outlasts_grace_given_stop_bound 与 test_grace_only_drain_bound_diverges_under_late_stop_tail 依赖 ScheduleOpts.stop_bound_s，它随「云端只支持 submit」块删去，这两条要同批删改。到期用例里 background = done.result 也受报告块 TickResult 不带 result 的影响。
+- 备注：跟着「状态取法与结束写」块（终结函数、结束写、前台不构造 skipped）走。疑点：「接力补写」这一行的输入（退出码未知、带超时标志、没有退出时刻）在新设计下仍会出现：云端 job 到点停止找不到 task 时经 DdbEventLog.record_timed_out_if_absent 补写（0054 实测项 12），所以这一行宜改名为云端补写的情形、保留，而不是删；test_crash_row_sync_side_really_exits_with_unknown_code 与 test_matrix_covers_expected_verdicts 按行名取这一行，要一起改。到期用例里 background = done.result 也受报告块 TickResult 不带 result 的影响。
 
 #### 测-6（mixed，M）
 
@@ -979,17 +830,6 @@
 - 单独先落地的后果：code 先删 run_verdict/RunVerdict：test_project.py 第 28 行的 import 失败，整个模块收集出错；test_lifecycle_states.py 导入 _NON_VERDICT 同样失败。测试先改：新取法函数不存在，新用例红。
 - 验证：单测够（取法与 plan_next 都是纯函数）。
 - 备注：跟着「状态取法与结束写」块（删 run_verdict、新取法、plan_next 的未启动判据）走。所列符号都存在（test_schedule.py 1674、2494 行；test_project.py 392 行起的一节、477、626、646 行；test_lifecycle_states.py 16、63、83 至 85 行）。疑点：①test_user_interrupt_with_passed_and_aborted_marks_run_aborted 在新取法下照样得 aborted（a aborted、b passed 时取法给 aborted），可以保留、只改文档串，不必删。②test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted 的新期望取决于结束写取哪一个来路的说明（中断还是到期），journey「写回时留下、实装之前要定的问题」里这一条还没有定，这条用例在它定下之前写不完。③plan_next 按运行态判断未启动，签名可能要求 baseline 必给，test_project 里调 _plan 不带 baseline 的用例都受影响。test_project.py 另有「投影写的 run 级 status」一节（projected_run_status，文档串写「终态归 finalize」），线索没有列，见 missing。
-
-#### 测-7（test，S）
-
-- 线索：test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers 里「以退出码 1 报运行期」改为非零
-- 要做的：把文档串里「组合根据此以退出码 1 报运行期落库失败」改为「以非零退出码」。只改文档串，断言不变。
-- 文件：core/tests/test_schedule.py
-- 先要有：无
-- 必须同批：无
-- 单独先落地的后果：无
-- 验证：单测够（只改文档串）。
-- 备注：不跟哪一块的 code 改动，可以随任何一批落地，宜放在「云端只支持 submit」块的失败退出码分层那一批，与 0030 决定七对齐。用例在 719 行，原文是「以退出码 1 报运行期落库失败」。疑点：journey「写回时留下、实装之前要定的问题」第一条是本机 run 运行期失败的退出码要不要定成 1；owner 定成 1 时这条改动就不需要做。
 
 #### 测-8（test，S）
 
@@ -1005,35 +845,35 @@
 #### 测-9（mixed，S）
 
 - 线索：0053 键集差集护栏：排除名单加 settle-runs 的 --dry-run
-- 要做的：test_project_config.py：PER_CALL 加 --dry-run；CLOUD 去掉 --events-table、--cluster、--subnet、--security-group；test_config_grace_does_not_block_cloud_run_or_submit 去掉 run --backend cloud 一半（只留 submit，或断言 run 以退出码 2 结束）；文档串「八个读配置命令」改为九个。code 一侧同批改 settings.py：CONFIG_COMMANDS 加 settle-runs、PER_CALL_OPTIONS 加 dry_run、CLOUD_OPTIONS 去掉四个键。
+- 要做的：test_project_config.py：PER_CALL 加 --dry-run；文档串「八个读配置命令」改为九个。code 一侧同批改 settings.py：CONFIG_COMMANDS 加 settle-runs、PER_CALL_OPTIONS 加 dry_run。（CLOUD 去掉四个键与 grace 用例已随「云端只支持 submit」那一批做完。）
 - 文件：cli/tests/test_project_config.py、cli/gherkai_cli/settings.py
-- 先要有：settle-runs 子命令的解析器（run 处置块）；run 解析器删去四个参数、run 不收云端后端（云端只支持 submit 块）
-- 必须同批：加 --dry-run 与 CONFIG_COMMANDS：与 settle-runs 解析器同一批；删 CLOUD 四个键：与删 run 解析器四个参数、settings.CLOUD_OPTIONS 同一批；改 grace 用例：与 run --backend cloud 以退出码 2 结束同一批
-- 单独先落地的后果：settle-runs 上了而名单不改：差集用例报 --dry-run 未归类（PER_CALL_OPTIONS 不改时它还会被算进 [common]，keys[common] 与 COMMON 不等），变红。run 的四个参数删了而 CLOUD 字面集合不改：keys[cloud] 由 argparse 推出，少了四个键，变红。
+- 先要有：settle-runs 子命令的解析器（run 处置块）
+- 必须同批：与 settle-runs 解析器同一批
+- 单独先落地的后果：settle-runs 上了而名单不改：差集用例报 --dry-run 未归类（PER_CALL_OPTIONS 不改时它还会被算进 [common]，keys[common] 与 COMMON 不等），变红。
 - 验证：单测够（argparse 差集）。
-- 备注：分属两块：--dry-run 与 settle-runs 进配置命令跟「run 处置」块走；CLOUD 四个键与 grace 用例跟「云端只支持 submit」块走，所以这一条要拆到两批。依据核过：0053 第 22 行已把 settle-runs 列进读配置的命令，第 67 行已把 settle-runs 的 --dry-run 列进按次选择型。线索没写的连带：COMMON 里的 --tunnel-ttl 与 test_config_errors_exit_2_naming_file_section_and_key 参数里「tunnel-ttl = 'x'」一行要随隧道块删去；同一文件 test_cloud_run_uploads_installer_into_artifacts_bucket（883 行，run --backend cloud）与 test_local_relay_host_reads_definition_not_the_config_file（901 行，接力宿主）也要删改，见 missing。
+- 备注：跟「run 处置」块走。依据核过：0053 第 22 行已把 settle-runs 列进读配置的命令，第 67 行已把 settle-runs 的 --dry-run 列进按次选择型。线索没写的连带：COMMON 里的 --tunnel-ttl 与 test_config_errors_exit_2_naming_file_section_and_key 参数里「tunnel-ttl = 'x'」一行要随隧道块删去；同一文件 test_local_relay_host_reads_definition_not_the_config_file（接力宿主）也要删改，见 missing。
 
 #### 测-10（test，M）
 
 - 线索：部署模板测试：删 test_ssm_params_with_prefix_path
-- 要做的：test_stack.py：删 test_ssm_params_with_prefix_path；_BASE_SSM_PARAMS 去掉 subnets 与 security-groups，按个数命名的两个用例改名改数（six 改 four、seven 改 five）；test_worker_subnets_single_source_across_ssm_and_lambda_env 改为两个推进器 Lambda 的 SUBNETS 相同、由 subnet 资源的 Ref 拼成且不为空；test_prefix_switches_whole_set 去掉 subnets 断言、改 SSM 全集；test_exit_observer_can_read_runs_table_only 改为观察者对 runs 表没有任何权限；test_kicker_mapping_insert_filter 改为两条过滤（INSERT 且 item_type 为 STATE；新映像 status_group 不是 live 的 STATE）。
+- 要做的：test_stack.py：test_exit_observer_can_read_runs_table_only 改为观察者对 runs 表没有任何权限；test_kicker_mapping_insert_filter 改为两条过滤（INSERT 且 item_type 为 STATE；新映像 status_group 不是 live 的 STATE）。（删 SSM 子网与安全组参数那一半已随「云端只支持 submit」那一批做完。）
 - 文件：deploy_aws/tests/test_stack.py
-- 先要有：stack.py 删 _ssm_network 的两个 StringListParameter（云端只支持 submit 块）；exit-observer 不读 runs 表、删 RUNS_TABLE（云端后端块）；kicker 流过滤改两条（云端后端块）
-- 必须同批：云端后端块与「云端只支持 submit」块里改 stack.py 的各项，宜集中在同一个需要重新部署的批次
-- 单独先落地的后果：stack.py 删了 SSM 两参数而测试不改：_BASE_SSM_PARAMS 全集、按个数命名的两条、test_prefix_switches_whole_set、test_worker_subnets_single_source_across_ssm_and_lambda_env 都红。测试先改：对旧模板红。
-- 验证：模板形态用 CDK synth 的单测够。真实行为要在 owner 重新部署之后核：流上只有 STATE 新建与使 run 成为终态的写触发 kicker（0054 实测项 21）；CloudFormation 删掉两个 SSM 参数之后 submit、doctor 照常可用。
-- 备注：跟着「云端后端」块（kicker 过滤、观察者权限）与「云端只支持 submit」块（删 SSM 网络参数）走，两块都改 stack.py，宜合到同一次重新部署。所列用例都存在（267、288、300、421、661、901、875 行）。线索没写的连带：kicker 收到 STATE 新建时建两次一次性定时触发、结束即清扫，需要新的模板断言（Scheduler 资源或权限域、推进 Lambda 角色上 ecs:ListTasks、ecs:StopTask、scheduler:CreateSchedule 与给 Scheduler 的 iam:PassRole），test_reconciler_and_kicker_have_the_same_permission_face（989 行）也可能随之改；名字形态与资源域在 journey 里标为待定，这些断言要等它定下。见 missing。
+- 先要有：exit-observer 不读 runs 表、删 RUNS_TABLE（云端后端块）；kicker 流过滤改两条（云端后端块）
+- 必须同批：云端后端块里改 stack.py 的各项，宜集中在同一个需要重新部署的批次
+- 单独先落地的后果：测试先改：对旧模板红。
+- 验证：模板形态用 CDK synth 的单测够。真实行为要在 owner 重新部署之后核：流上只有 STATE 新建与使 run 成为终态的写触发 kicker（0054 实测项 21）；「云端只支持 submit」那一批删掉的两个 SSM 参数在这次重新部署时才真被 CloudFormation 删去，之后 submit、doctor 照常可用。
+- 备注：跟着「云端后端」块（kicker 过滤、观察者权限）走。线索没写的连带：kicker 收到 STATE 新建时建两次一次性定时触发、结束即清扫，需要新的模板断言（Scheduler 资源或权限域、推进 Lambda 角色上 ecs:ListTasks、ecs:StopTask、scheduler:CreateSchedule 与给 Scheduler 的 iam:PassRole），test_reconciler_and_kicker_have_the_same_permission_face（989 行）也可能随之改；名字形态与资源域在 journey 里标为待定，这些断言要等它定下。见 missing。
 
 #### 测-11（test，L）
 
 - 线索：前台云端 run 的测试删改：cli/tests/test_backend_cloud.py
-- 要做的：test_backend_cloud.py：删 _patch_cloud_handles 里的 fake_resolve_network 打桩、test_cloud_wires_fargate_engines 与其余前台云端 run 用例（约 30 个用例、44 处 run --backend cloud），改为一条断言 run --backend cloud 以退出码 2 结束并指向 submit；仍有价值的覆盖（prefix 推导、单项覆盖、skew 闸、variant 闸、期限尾段、产物落点）改用 submit 重写；删 status --wait kickoff 用例（test_status_wait_cloud_kicker_missing_fails_fast 等），改 test_submit_does_not_accept_events_table_or_cluster 的文档串。test_compose.py 删 resolve_network 四条，改 test_ssm_path_contains_prefix 的例子与注释。
-- 文件：cli/tests/test_backend_cloud.py、runtime/tests/test_compose.py
-- 先要有：run --backend cloud 以退出码 2 结束、删 _cmd_run 云端分支（云端只支持 submit 块）；删 compose.resolve_network、_read_ssm_list（云端只支持 submit 块）；删 _status_cloud 的卡住检测与 kickoff、compose._make_lambda_client（run 处置块）
-- 必须同批：前台云端 run 与 resolve_network 部分：与删 _cmd_run 云端分支、resolve_network 同批；kickoff 部分：与删 _STALL_KICK 同批，而那一批按次序约束要与后端到期结束（kicker 建两次定时触发）同批或在其后
-- 单独先落地的后果：_cmd_run 的云端分支删了而测试不动：约 30 个用例在 m.main(["run", ..., "--backend", "cloud"]) 上拿到 2，断言 0 或 1 的全红。kickoff 删了而测试不动：test_status_wait_cloud_kicker_missing_fails_fast 打桩 compose._make_lambda_client 失败。
-- 验证：CLI 形态单测够。云端真实验证要在重新部署之后：submit --backend cloud 加 status --wait 走到终态、不 invoke kicker；run --backend cloud 以退出码 2 结束（单测即可）。
-- 备注：跟着「云端只支持 submit」块（删前台云端 run、resolve_network）与「run 处置」块（删 status --wait 的 kickoff）走，两部分落地时机不同，要拆开。所列符号都存在（147、557、689 行；test_compose.py 1171 至 1229 行、1076 行）。风险：只删不迁移会丢掉 prefix、skew、variant、期限尾段在云端一侧的覆盖，这些对 submit 仍成立，要改写到 submit 上。线索没写的连带：test_compose.py 的 test_cloud_stop_bound_takes_max_stop_timeout_plus_ecs_stopped_lag（1783 行，cloud_stop_bound_s 随云端分支删去）；本文件 764、793、820 行三条按 detached 标记决定接力或提示的 status 用例；test_project_config.py 的 test_config_grace_does_not_block_cloud_run_or_submit 与 test_cloud_run_uploads_installer_into_artifacts_bucket。见 missing。
+- 要做的：test_backend_cloud.py：删 status --wait kickoff 用例（test_status_wait_cloud_kicker_missing_fails_fast 等）。（前台云端 run 用例的删改与改用 submit 重写、test_compose.py 的 resolve_network 各条已随「云端只支持 submit」那一批做完。）
+- 文件：cli/tests/test_backend_cloud.py
+- 先要有：删 _status_cloud 的卡住检测与 kickoff、compose._make_lambda_client（run 处置块）
+- 必须同批：与删 _STALL_KICK 同批，而那一批按次序约束要与后端到期结束（kicker 建两次定时触发）同批或在其后
+- 单独先落地的后果：kickoff 删了而测试不动：test_status_wait_cloud_kicker_missing_fails_fast 打桩 compose._make_lambda_client 失败。
+- 验证：CLI 形态单测够。云端真实验证要在重新部署之后：submit --backend cloud 加 status --wait 走到终态、不 invoke kicker。
+- 备注：跟着「run 处置」块（删 status --wait 的 kickoff）走。线索没写的连带：本文件按 detached 标记决定接力或提示的三条 status 用例（test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached 等），见 missing。
 
 #### 测-12（test，M）
 
@@ -1174,9 +1014,9 @@
 
 ### 小结
 
-这一块有 11 条，都是跟着别的块的 code 改动走的注释、文档串与 DEVELOPMENT.md 改写。改动量小：多数条 S，注释-5、注释-7、注释-11 是 M，合计约 200 到 300 行注释，散在 core、runtime、cli、deploy_aws 约 25 个文件里。只有注释-11 的 deadline.py 是真正的 code 改动（210 秒常量从 tunnel_host 搬进 deadline.py），也只有它可以先于对应块单独落地。其余每条都不能先落：注释描述的是目标行为，code 一天不改，先改注释就与 code 相反；也不能晚落：符号一删，注释就悬空。所以块内没有先后次序，每条随它所跟的块同一提交。
+这一块有 10 条（注释-10 已随「云端只支持 submit」那一批做完），都是跟着别的块的 code 改动走的注释、文档串与 DEVELOPMENT.md 改写。改动量小：多数条 S，注释-5、注释-7、注释-11 是 M，合计约 200 到 300 行注释，散在 core、runtime、cli、deploy_aws 约 25 个文件里。只有注释-11 的 deadline.py 是真正的 code 改动（210 秒常量从 tunnel_host 搬进 deadline.py），也只有它可以先于对应块单独落地。其余每条都不能先落：注释描述的是目标行为，code 一天不改，先改注释就与 code 相反；也不能晚落：符号一删，注释就悬空。所以块内没有先后次序，每条随它所跟的块同一提交。
 
-对别块的依赖与归属：注释-1、2、3、4、5 跟「状态取法与结束写」块（结束写入口、删 run_verdict、project_state 只推进、前台未启动的 job），注释-1、5、6 另跟「判定明细点名与落库写序」块，注释-2、3 另跟「报告」块。注释-7 本机那半跟「本机推进器、生命期锁」块的删接力和「run 处置」块；云端那半（_status_cloud、status help 的云端半句）跟 kickoff 删除走，受次序约束，要与后端到期结束 run 同批或在其后，也就是云端重新部署那一批。注释-8 跟「云端后端」块的流过滤与不分流（要重新部署），其中 test_main 那条跟本机 submit 新流程。注释-9 只是指针统一，随时可落，宜并进注释-8 那一批。注释-10 跟「云端只支持 submit」块删 FargateEngine.run_scope。注释-11 跟隧道块。
+对别块的依赖与归属：注释-1、2、3、4、5 跟「状态取法与结束写」块（结束写入口、删 run_verdict、project_state 只推进、前台未启动的 job），注释-1、5、6 另跟「判定明细点名与落库写序」块，注释-2、3 另跟「报告」块。注释-7 本机那半跟「本机推进器、生命期锁」块的删接力和「run 处置」块；云端那半（_status_cloud、status help 的云端半句）跟 kickoff 删除走，受次序约束，要与后端到期结束 run 同批或在其后，也就是云端重新部署那一批。注释-8 跟「云端后端」块的流过滤与不分流（要重新部署），其中 test_main 那条跟本机 submit 新流程。注释-9 只是指针统一，随时可落，宜并进注释-8 那一批。注释-11 跟隧道块。
 
 最大的风险是漏改和漂移。线索只列了一部分位置：仅「接力」一词，线索之外的 production code 命中就有二十多处，其中三处是用户可见文字，另有 detached 分流、try_finalize、run_verdict 与 _NON_VERDICT 的同类残留，见 missing。建议每批提交前按收尾审计的检索词对改到的文件做 grep 差集，不靠读。另一个风险是与 journey 0019 重叠：那份清单按文件列出了要加回的 ADR 指针，同样是「改到某文件时照做」。两份清单涉及同一批文件，每批改注释时应同时取 0019 里同一文件的条目，否则行为描述改了、指针没加回，或者反过来。注释-5 里 RunPersistence.begin 的理由取决于 preflight 去留，那是 owner 还没定的问题；注释-2 要写全「每条来路一句」，取决于「结束写取哪一个来路的说明」那个待定项。这两处要等答复。
 
@@ -1248,11 +1088,11 @@
 - 线索：「终态是 finalize 专属」「try_finalize」「判定真值的唯一权威是 jobs/*.json」一类说法改写
 - 要做的：run_store/local.py 模块头：「判定真值唯一权威是 jobs/*.json、run_state.json 是投影摘要」改为状态以运行态为准、明细对 scenario/step/归因负责（0030 决定三）；fcntl 一段的写入口名单去掉 try_finalize、加上结束写入口，去掉「status --wait 接力」。local 与 ddb 的 project_state 文档串，「终态是 finalize 专属」改为投影不写 job 终态、run 级只写 running。ports.RunStore 探活注释与 RunPersistence.begin 文档串里拿云端桶名错分裂退出码作理由的一段，按 run 只有本机后端之后的结论改写。NonTerminalSnapshot 的强制点改为保存一个 job 的明细之前。
 - 文件：core/gherkai_core/adapters/run_store/local.py、core/gherkai_core/adapters/run_store/ddb.py、core/gherkai_core/ports.py、core/gherkai_core/persist.py、core/gherkai_core/project.py
-- 先要有：状态投影只推进运行态（状态取法与结束写块第 6 条 project_state）；结束写入口（状态取法与结束写块第 4 条）；明细点名、去掉 load_all（判定明细点名与落库写序块第 1 条）；后台逐 job 写序（状态取法与结束写块第 7 条）；run --backend cloud 以退出码 2 结束（云端只支持 submit 块第 1 条），begin 理由才失效；owner 定 begin 与端口上 preflight 的去留（写回时留下的问题第 2 条）
+- 先要有：状态投影只推进运行态（状态取法与结束写块第 6 条 project_state）；结束写入口（状态取法与结束写块第 4 条）；明细点名、去掉 load_all（判定明细点名与落库写序块第 1 条）；后台逐 job 写序（状态取法与结束写块第 7 条）；begin 的理由随 run --backend cloud 以退出码 2 结束（已随「云端只支持 submit」那一批做完）失效；owner 定 begin 与端口上 preflight 的去留（写回时留下的问题第 2 条）
 - 必须同批：project_state 改为只推进运行态的那一批；RunPersistence.begin 的 preflight 去留定下之后那一批
 - 单独先落地的后果：测试不红。说法改成「状态以运行态为准、投影不写 job 终态」，可 project_state 仍把 job 终态投影写进库，注释与 code 相反。
 - 验证：单测够用：grep「finalize 专属」「判定真值」「唯一权威」「try_finalize」做差集。project_state 不写终态的行为由 test_conditional_writes 的对拍用例守。
-- 备注：跟「状态取法与结束写」块（project_state、结束写、逐 job 写序）和「判定明细点名」块走；begin 那段跟「云端只支持 submit」块与 preflight 待定项走。逐处核过，都还在：local.py 模块头第 7-17 行，local.py project_state 第 301-305 行，ddb.py project_state 第 374 行，ports.py 第 215-217 行，persist.py begin 第 85-87 行，project.py NonTerminalSnapshot 第 657-662 行。疑点：begin 那段改成什么，取决于 preflight 保不保留，这是 owner 还没定的问题，这一处要等答复。线索没列到的同类：ports.py RunStore 类文档串第 137-146 行（生命周期写成 try_finalize 作 commit point，还提到「接力者」）；ports.py ResultStore 文档串「判定真值唯一权威」与固定路径 jobs/<encoded_scope_id>.json；ReportStore 类文档串「可从 RunResult 完全重建、判定真值在 RunResult/ResultStore」；project.projected_run_status 文档串第 857-861 行（被 try_finalize 认成已 finalize、commit point 的专属性）；model.py RunState 文档串第 616-618 行「try_finalize 以条件写落定总 status」；persist.py 模块头第 12-14 行「commit-point 写序……RunStore.try_finalize 最后写」。
+- 备注：跟「状态取法与结束写」块（project_state、结束写、逐 job 写序）和「判定明细点名」块走；begin 那段跟 preflight 待定项走。逐处核过，都还在：local.py 模块头第 7-17 行，local.py project_state 第 301-305 行，ddb.py project_state 第 374 行，ports.py 第 215-217 行，persist.py begin 第 85-87 行，project.py NonTerminalSnapshot 第 657-662 行。疑点：begin 那段改成什么，取决于 preflight 保不保留，这是 owner 还没定的问题，这一处要等答复。线索没列到的同类：ports.py RunStore 类文档串第 137-146 行（生命周期写成 try_finalize 作 commit point，还提到「接力者」）；ports.py ResultStore 文档串「判定真值唯一权威」与固定路径 jobs/<encoded_scope_id>.json；ReportStore 类文档串「可从 RunResult 完全重建、判定真值在 RunResult/ResultStore」；project.projected_run_status 文档串第 857-861 行（被 try_finalize 认成已 finalize、commit point 的专属性）；model.py RunState 文档串第 616-618 行「try_finalize 以条件写落定总 status」；persist.py 模块头第 12-14 行「commit-point 写序……RunStore.try_finalize 最后写」。
 
 #### 注释-6（mixed，S）
 
@@ -1298,17 +1138,6 @@
 - 验证：单测够用：跑 deploy_aws/tests/test_stack.py，再跑 doc_rules_check 或悬空指针护栏确认指针目标存在。
 - 备注：这是指针统一，不依赖行为改动，可以排在任何一批；_grant_task_role 与 test_task_role_has_events_putitem_not_runs 两处随时可改。_reconcile_lambdas 第 639-640 行和 test_exit_observer_can_read_runs_table_only 第 903 行会随「云端后端」块第 3 条（观察者去掉 runs 表读权限）重写，建议并进那一批。已核实 0034 的「数据模型三件套」（第 22 行）与「命令形态」（第 33 行）都在；0024 第 278 行红线条指向「命令形态」。
 
-#### 注释-10（mixed，S）
-
-- 线索：指向 0024 已删「exitCode 落值延迟」条的注释改指 0024「控制面不走 events 表」条
-- 要做的：已经没有指针要改：所列位置现在都不指向「落值延迟」条（errors.py 指向 0024「退出码约定」与 0034 机制二「退出信息」，PLATFORM_FAILED_EXIT 与 exit_from_task 指向 0034 机制二「退出码缺失」）。剩下的是讲同步 FargateEngine 路径的行为描述，随 run_scope 删去：WorkerExitError 文档串「云端任务已停止却取不到退出码时 FargateEngine 直接抛本异常」，PLATFORM_FAILED_EXIT 注释第 ② 种与「FargateEngine 都 import」，platform_exit_reason 文档串「同步路径的 FargateEngine 都调它」，exit_from_task 文档串「同步路径的 FargateEngine 共用」，两条测试的文档串，core/DEVELOPMENT.md errors.py 一条。
-- 文件：core/gherkai_core/errors.py、core/gherkai_core/project.py、core/gherkai_core/schedule.py、deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py、core/tests/test_project.py、core/tests/test_schedule.py、core/DEVELOPMENT.md
-- 先要有：FargateEngine 只留 start_scope、WorkerExitError 的 reason 去留（云端只支持 submit 块第 5 条）
-- 必须同批：云端只支持 submit 块第 5 条（删 run_scope 与 FargateWorkerHandle）
-- 单独先落地的后果：测试不红；在 run_scope 删去之前改，注释会否认一条还在的 code 路径。
-- 验证：单测够用：grep「同步路径的 FargateEngine」「FargateEngine 直接抛」「同步云端路径」做差集；如果 WorkerExitError.reason 随之删去，test_schedule 那条用例要删或改，跑 core 测试确认。
-- 备注：跟「云端只支持 submit」块第 5 条走（删 FargateEngine.run_scope）。指针部分已经处理完：所列位置都不再指向 0024 的「落值延迟」条，0024 现在第 277 行的「控制面不走 events 表」条与 0034 机制二「退出码缺失」条都在。剩下的只有行为描述：errors.py 第 19-20 行、project.py 第 228-235 行与第 240-245 行、reconciler.py 第 102 行、test_project.py 第 172 行、test_schedule.py 第 1543-1544 行、core/DEVELOPMENT.md 第 32 行，都还在。schedule._Worker._run_once 第 554-557 行讲「adapter 落平台侧哨兵时写入的归因 reason」：如果 reason 只由 FargateEngine 给出、随之删去，这里就是 code 改动（exit_reason 不再取 e.reason），不只是注释；test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not 也随之删去。线索里说「时机见下『写回时留下、实装之前要定的问题』」，可那一节里没有关于 FargateEngine 一侧时机的条目，是 journey 内部的悬空引用。
-
 #### 注释-11（mixed，M）
 
 - 线索：隧道建在宿主进程里之后，以下行为描述随隧道实装改写
@@ -1324,22 +1153,21 @@
 
 ### 小结
 
-这一块 19 条全是文档（含 3 张图、评测 fixture 与 evals.json、契约页的生成副本与一处测试），本身没有生产 code，总量相当于几百行文档改写，最大的是 execution-and-reconciliation.md 的大面积重写（L）与 fixture 重录。每条都跟在别的块后面：①「状态取法与结束写」「判定明细点名」块 → 行为文档-1、2（写序部分）、6（键与取法）、8（fixture）、10（到期与中断条目）；②「本机推进器、生命期锁」的删本机接力 → 2、3、5（--max-concurrency）、7（第 8 节）、10（第 59–60 行）；③「run 处置」块 → 5、6、7、14、19 里讲 settle-runs 与处置权限的部分；④「云端后端」块（kicker 过滤、handler 不分流、清扫）→ 2 的 §7；⑤「云端只支持 submit」块 → 3（SSM 与子网）、5、6、7、9（run-execution）、10、18、19；⑥「隧道」块 → 11–17 与 12 的 4a 首行；⑦「词表与退役词」块 → 9（execution-timeout-chain）。有测试守、必须与 code 同提交的是：契约页（test_cli_json_contract 收集真渲染器的键与 doctor 项名，副本由 test_skill 比对）、skill 正文（test_skill 用真 parser 核 flag 归属，删 --tunnel-ttl 或 run 的云端选项时即红）、图（导出与图源一致、退役词扫描）、退役词入表（扫 CHANGELOG 与图源）。其余条目没有测试守，漏改不会变红，要靠收尾的残留检索。最大的风险：一是行为文档-2、3、5、6、7、10 这几条各跨三到六块，排批时必须按块拆开、各随各的 code 批，否则文档会先于或落后于 code；二是这一块的线索按「点名的段落」列，同一文件里随同一行为失真的其它段落有不少没被列入（见 missing），只按线索改会留下漂移；三是 fixture 重录与评测、权限表要真实执行（引擎与 Device Farm、Bedrock 评测、重新部署后用最小权限角色），单测不证。
+这一块 19 条全是文档（含 3 张图、评测 fixture 与 evals.json、契约页的生成副本与一处测试），本身没有生产 code，总量相当于几百行文档改写，最大的是 execution-and-reconciliation.md 的大面积重写（L）与 fixture 重录。每条都跟在别的块后面：①「状态取法与结束写」「判定明细点名」块 → 行为文档-1、2（写序部分）、6（键与取法）、8（fixture）、10（到期与中断条目）；②「本机推进器、生命期锁」的删本机接力 → 2、3、5（--max-concurrency）、7（第 8 节）、10（第 59–60 行）；③「run 处置」块 → 5、6、7、14、19 里讲 settle-runs 与处置权限的部分；④「云端后端」块（kicker 过滤、handler 不分流、清扫）→ 2 的 §7；⑤「云端只支持 submit」块已做完（3、5、6、7、9、10、19 里归它的部分已从各条删去，18 整条删去）；⑥「隧道」块 → 11–17 与 12 的 4a 首行；⑦「词表与退役词」块 → 9（execution-timeout-chain）。有测试守、必须与 code 同提交的是：契约页（test_cli_json_contract 收集真渲染器的键与 doctor 项名，副本由 test_skill 比对）、skill 正文（test_skill 用真 parser 核 flag 归属，删 --tunnel-ttl 或 run 的云端选项时即红）、图（导出与图源一致、退役词扫描）、退役词入表（扫 CHANGELOG 与图源）。其余条目没有测试守，漏改不会变红，要靠收尾的残留检索。最大的风险：一是行为文档-2、3、5、6、7、10 这几条各跨三到六块，排批时必须按块拆开、各随各的 code 批，否则文档会先于或落后于 code；二是这一块的线索按「点名的段落」列，同一文件里随同一行为失真的其它段落有不少没被列入（见 missing），只按线索改会留下漂移；三是 fixture 重录与评测、权限表要真实执行（引擎与 Device Farm、Bedrock 评测、重新部署后用最小权限角色），单测不证。
 
 ### 线索没有覆盖的改动点
 
 - docs/internals/artifacts-and-evidence.md 第 19–21 行（「判定读 jobs/*.json」「run_state.json 落后于 jobs/*.json…不一致时以 jobs/*.json 为准」「ref 的权威落盘处只有 jobs/*.json」）、第 34 行产物表 `jobs/<enc>.json` 一行（文件名带保存标识、由运行态点名）、第 75 行 report_refs 落在 jobs/*.json：随判定明细点名改为「先读运行态、按点名读那一份」。依据 0030 决定三「点名」条、决定六 ResultStore 段。跟「判定明细点名与落库写序」块。
 - docs/internals/cli-json-contract.md（与生成的 skill 副本）里线索没点名的几行：run 一节 artifacts.jobs_dir「文件名是 URL 编码的 scope_id」；status 一节 status 行（skipped 只在全部 job 都没有执行时出现、aborted 只来自被中断的同步 run）与 message 行（「这些 job 保持 pending」，说明只在没有 job 能承载时才有）；list-runs 一节 detached 行「status --wait 对它只等待、不接力」与 --status 不再接受 skipped；doctor 一节项名表加 report_dir.filesystem。依据 0031 决定三取法与「结束写」说明表、0030 决定三、0041 决策三、四、七、0054 决策八。
-- agent skill 里线索没覆盖的几处：SKILL.md 第 57 行「status --wait 只等待、不接力」；references/cloud-backend.md 第 31 行「run --backend cloud 的并行度就是 --max-concurrency」；references/setup-and-diagnosis.md 第 96 行到期一行（总状态记 error、job「没有执行」或保持 pending、job 记 timeout、「过了这个时刻才用 status --wait 接力」），新设计里被期限截断的执行中 job 记 aborted、pending 由结束写记 skipped、run 按取法为 aborted，处置由 settle-runs 或 status --wait 做。依据 0016 决策 A、0031 决定三、0034 机制二、0054 决策二、八。
-- docs/user-guide/cloud-backend.md 第 35 行（SSM 参数里的「子网与安全组 ID…供 run / submit 读取」）、第 43 行（「云端两种执行方式的差别…run --backend cloud 的任务由你自己的 CLI 进程拉起」）、第 45 行（run --backend cloud 的并行度不受上限约束）、第 124 行（run --backend cloud --no-report 时 revision 回收的例外）：随云端只支持 submit 与删 SSM 子网/安全组改写或删去。依据 0016 决策 A、0033「VPC 来源」与资源清单 11。
+- agent skill 里线索没覆盖的几处：SKILL.md 第 57 行「status --wait 只等待、不接力」；references/setup-and-diagnosis.md 第 96 行到期一行（总状态记 error、job「没有执行」或保持 pending、job 记 timeout、「过了这个时刻才用 status --wait 接力」），新设计里被期限截断的执行中 job 记 aborted、pending 由结束写记 skipped、run 按取法为 aborted，处置由 settle-runs 或 status --wait 做。依据 0016 决策 A、0031 决定三、0034 机制二、0054 决策二、八。
 - docs/user-guide/running-and-results.md 里属于新行为、线索没写的：命令表加 settle-runs 一行，退出码表加 settle-runs 一行及 run 与本机 submit 在报告目录不过边界检查、锁已被持有时以退出码 2 结束，「找回 run_id：list-runs」一节加「已运行」「允许运行至」两列与期限提示、删第 215 行「由前台 run 执行…只等待、不接力」的提示，不带 --wait 的 status 的期限提示。依据 0054 决策四、八、0041 决策七、0031 决定五。（同文件第 83、87、127、164 行的接力与到期描述已列在 0018「核对时补上的条目」末段，不在本块，排批时与本块合并。）
 - docs/user-guide/configuration.md 第 63–71 行配置键表与第 200 行以下跨命令选项表：settle-runs 读项目配置文件，--backend/--report-dir/--prefix/--ddb-table/--region 等定位参数的适用命令要加上 settle-runs。依据 0053 决策 1、0041 决策六、0054 决策八。
 - docs/user-guide/troubleshooting.md：要加报告目录文件系统类型不在清单里（如网络共享）或判断不了时以退出码 2 结束的症状行，与锁已被持有（同一个 run 已有进程在管）的症状行；第 138–142 行「提交后进度停住」一节改为用 settle-runs 或 status --wait 把管它的进程已不在或已过期限的 run 记为已结束。依据 0054 决策三、四、八。（到期与接力部分已列在 0018「核对时补上的条目」，新症状行没有列。）
-- docs/diagrams 下线索没写的图源改动（改完都要用 tools/build_diagrams.mjs 重出 SVG/HTML）：run-execution.json 里「status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进…云端仅在检测到停滞时唤醒推进函数」与「submit 派生 · 可被接力」两处；execution-timeout-chain.json 里「接力者按库里的领取时刻重算截止时刻，过了它 10 秒仍无退出记录即判超时」一句；execution-detached-gates.json 整张图（「两道拦截：云端后台推进为何不介入前台 run」）在 kicker 不看后台标记、handler 不分流之后不再成立，要删图或重画，连同 execution-and-reconciliation.md 第 157–159 行的嵌入与图注；configuration-env-inheritance.json 的「run --backend cloud：由本机 CLI 启动」一支（嵌在 configuration.md 第 19 行）。依据 0034 被拒方案「本机接力，及其改法」、端到端 cloud 1b、0016 决策 A、0045 决策七。
-- core/DEVELOPMENT.md 目录树里线索与「随实装改写的 code 注释」块都没覆盖的几条：第 34 行 schedule.py「run 级经 project.run_verdict」；第 38 行 persist.py「收尾用 try_finalize 带 run 级说明」；第 44 行 fargate_engine.py「现在的 code 另有同步 run …」（随 run_scope 删除）；第 46 行 event_log 的补写条件写与第 37 行 reconcile.py 里 record_timed_out_if_absent（随 EventLog 端口定去留）；第 51 行 result_store「每 job 一对象」（改为每次保存一份、由终态点名）。依据 0031 决定三、0030 决定三、0034「Engine port 演进」与被拒方案「本机接力」。
-- deploy_aws/DEVELOPMENT.md 里随「云端后端」块与「云端只支持 submit」块失真、线索没写的几处：第 35 行「同步 run 路径不消费 Stream、仍走 Query 轮询」；第 40 行 exit-observer「另读 runs 表以判断 run 是否 detached」；第 41 行 kicker「status --wait 的主动调起」与推进器权限（要加建 run 两次定时触发、按 startedBy 列 task 清扫）；第 44 行 runs 表 Stream filter「INSERT 且 NewImage.detached=true」（改两条过滤）；第 63 行 job-in「tag 由编排进程打」（改为推进器 Lambda）。依据 0034 端到端 cloud 1b、0054 决策九、0033 资源清单 13、15、0016 决策 C、0037 决策 3。
+- docs/diagrams 下线索没写的图源改动（改完都要用 tools/build_diagrams.mjs 重出 SVG/HTML）：run-execution.json 里「status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进…云端仅在检测到停滞时唤醒推进函数」与「submit 派生 · 可被接力」两处；execution-timeout-chain.json 里「接力者按库里的领取时刻重算截止时刻，过了它 10 秒仍无退出记录即判超时」一句；execution-detached-gates.json 整张图（后台标记的两道判断）在 kicker 不看后台标记、handler 不分流之后不再成立，要删图或重画，连同 execution-and-reconciliation.md 第 157–159 行的嵌入与图注。依据 0034 被拒方案「本机接力，及其改法」、端到端 cloud 1b、0045 决策七。
+- core/DEVELOPMENT.md 目录树里线索与「随实装改写的 code 注释」块都没覆盖的几条：第 34 行 schedule.py「run 级经 project.run_verdict」；第 38 行 persist.py「收尾用 try_finalize 带 run 级说明」；第 46 行 event_log 的补写条件写与第 37 行 reconcile.py 里 record_timed_out_if_absent（随 EventLog 端口定去留）；第 51 行 result_store「每 job 一对象」（改为每次保存一份、由终态点名）。依据 0031 决定三、0030 决定三与 0034 被拒方案「本机接力」。
+- deploy_aws/DEVELOPMENT.md 里随「云端后端」块失真、线索没写的几处：第 40 行 exit-observer「另读 runs 表以判断 run 是否 detached」；第 41 行 kicker「status --wait 的主动调起」与推进器权限（要加建 run 两次定时触发、按 startedBy 列 task 清扫）；第 44 行 runs 表 Stream filter「INSERT 且 NewImage.detached=true」（改两条过滤）。依据 0034 端到端 cloud 1b、0054 决策九、0033 资源清单 13、15。
 - runtime/DEVELOPMENT.md 与 cli/DEVELOPMENT.md 的模块与子命令清单：runtime 新增的生命期锁、边界检查、处置模块要登记一条；cli/DEVELOPMENT.md 第 18 行 argparse 子命令清单加 settle-runs，内部子命令 _reconcile 的说明（本机 submit 经标准输入与回报管道启动、自己建 run 取锁）随之改。依据 0054 决策三、四、六至八、0035 决策 3「本机 submit」。
-- CHANGELOG.md [Unreleased] 里新的使用者可见行为的条目：settle-runs 新命令、报告目录文件系统不在清单里时 run/submit/status --wait/settle-runs/doctor 以退出码 2 结束、doctor 新增 report_dir.filesystem、list-runs 新列与 deadline_at、run --json 的 jobs[]、status --wait 会把管它的进程已不在或已过期限的 run 记为已结束、run --backend cloud 以退出码 2 结束、index.html 显示由结束写结束的 job。线索只要求改写已有条目并加一句重构概述，owner「升级与迁移的细节不写」是否也排除这些新功能条目拿不准，要排批时问 owner。依据 0054 决策四、八、0041 决策三、四、七、0016 决策 A、0027「index.html 形态」。
+- CHANGELOG.md [Unreleased] 里新的使用者可见行为的条目：settle-runs 新命令、报告目录文件系统不在清单里时 run/submit/status --wait/settle-runs/doctor 以退出码 2 结束、doctor 新增 report_dir.filesystem、list-runs 新列与 deadline_at、run --json 的 jobs[]、status --wait 会把管它的进程已不在或已过期限的 run 记为已结束、index.html 显示由结束写结束的 job。线索只要求改写已有条目并加一句重构概述，owner「升级与迁移的细节不写」是否也排除这些新功能条目拿不准，要排批时问 owner。依据 0054 决策四、八、0041 决策三、四、七、0027「index.html 形态」。
 - docs/internals/architecture-overview.md 第 42 行「由每个 run 一个的本机后台进程、status --wait（接力）」的接力半句（线索只为「四种组合」点名这一行）；docs/internals/cloud-backend-carriers.md 第 11 行 stack 资源与 Scheduler 名字要补上 run 的两次一次性定时触发（名字定下之后）。依据 0034 被拒方案「本机接力」、0054 决策九、0033 资源清单 15。
 
 ### 逐条
@@ -1358,24 +1186,24 @@
 #### 行为文档-2（doc，L）
 
 - 线索：docs/internals/execution-and-reconciliation.md：收尾的写序（try_finalize、
-- 要做的：按新设计重写这篇的大部分：§1 第 14、16 行（detached 分界、四个 tick 宿主、接力者）、§3 表的 cloud 前台一列、§4a 第 58–68 行流程块（per-run 进程、status --wait 接力）、§5 第 91 与 96–101 行（run 级取值、try_finalize 提交点、jobs/*.json 写序、竞争收尾、两道判断、中途终止）、§6 第 140、143 行（接力判超时、补写）、§7 第 157–167 行（kicker 按 detached 过滤、handler 分流、权威指针）。新写法：逐 job 写序与点名、结束写、生命期锁与处置、kicker 两条过滤与清扫、三种组合。
+- 要做的：按新设计重写这篇的大部分：§1 第 14、16 行（detached 分界、四个 tick 宿主、接力者）、§4a 第 58–68 行流程块（per-run 进程、status --wait 接力）、§5 第 91 与 96–101 行（run 级取值、try_finalize 提交点、jobs/*.json 写序、竞争收尾、两道判断、中途终止）、§6 第 140、143 行（接力判超时、补写）、§7 第 157–167 行（kicker 按 detached 过滤、handler 分流、权威指针）。新写法：逐 job 写序与点名、结束写、生命期锁与处置、kicker 两条过滤与清扫。
 - 文件：docs/internals/execution-and-reconciliation.md
-- 先要有：「状态取法与结束写」块（结束写、逐 job 写序）；「判定明细点名与落库写序」块；「本机推进器、生命期锁与边界检查」块（含删本机接力）；「run 处置」块；「云端后端」块（kicker 两条过滤、handler 不分流、清扫、两次定时触发）；「云端只支持 submit」块（三种组合）
+- 先要有：「状态取法与结束写」块（结束写、逐 job 写序）；「判定明细点名与落库写序」块；「本机推进器、生命期锁与边界检查」块（含删本机接力）；「run 处置」块；「云端后端」块（kicker 两条过滤、handler 不分流、清扫、两次定时触发）
 - 必须同批：与上面每一块各自的实装批同一提交改对应小节
 - 单独先落地的后果：单独先改：文档描述的机制在 code 里还不存在；不改：每一批 code 落地之后这篇的相应小节立即失真。测试不受影响（第 167 行的「filter 必须区分写入者」「兜底/接力」条名指针已悬空，但没有测试守它）。
 - 验证：文档改动，按批核对 diff 与 code 一致；退役词入表之后 test_user_docs 会扫它。
-- 备注：一条跨六块，分批时要拆：§5 写序跟「状态取法与结束写」+「判定明细点名」；§1/§4a/§5 第 98、101 行/§6 接力部分跟「本机推进器、生命期锁」块删接力那一批与「run 处置」块；§7 与第 16、80 行 kickoff 跟「云端后端」块与「run 处置」块里删 _STALL_KICK 那一条；§3 表与「四种组合」跟「云端只支持 submit」块（与行为文档-18 重叠）；4a 首行隧道新次序见行为文档-12。§7 嵌的图 execution-detached-gates 整张所讲的「两道拦截」在新设计里不再成立，线索没写，见 missing。线索里的「local submit 的超时一行（per-run 进程）」对应第 140 行。
+- 备注：一条跨五块（「云端只支持 submit」那部分，即 §3 与三种组合，已做完），分批时要拆：§5 写序跟「状态取法与结束写」+「判定明细点名」；§1/§4a/§5 第 98、101 行/§6 接力部分跟「本机推进器、生命期锁」块删接力那一批与「run 处置」块；§7 与第 16、80 行 kickoff 跟「云端后端」块与「run 处置」块里删 _STALL_KICK 那一条；4a 首行隧道新次序见行为文档-12。§7 嵌的图 execution-detached-gates 整张所讲的「两道拦截」在新设计里不再成立，线索没写，见 missing。线索里的「local submit 的超时一行（per-run 进程）」对应第 140 行。
 
 #### 行为文档-3（doc，M）
 
 - 线索：技术文档：runtime/DEVELOPMENT.md 的 detached 一条（接力判超时
-- 要做的：runtime/DEVELOPMENT.md 第 58–64 行 detached 一条删去接力判超时 _recover_timed_out_claims 与指向 0054「本机接力的改法」的指针，第 35 行 compose 一条删 resolve_network；cli/DEVELOPMENT.md 第 56–60 行删子网/安全组解析与 run 的单项覆盖参数，第 122 行删 submit 不收这两个参数的对照，第 119–120 行「三个推进触发源之一（查询者到来即接力）」改写；deploy_aws/DEVELOPMENT.md 第 66 行 SSM 参数族删 subnets/security-groups，第 67 行 _worker_subnet_ids 的三个消费者改为两个推进器共用一份环境变量；cloud-backend-carriers.md 第 15 行 SSM 一行删两族并改族数。
-- 文件：runtime/DEVELOPMENT.md、cli/DEVELOPMENT.md、deploy_aws/DEVELOPMENT.md、docs/internals/cloud-backend-carriers.md
-- 先要有：「本机推进器、生命期锁」块的删本机接力（runtime detached、cli 接力描述两处）；「云端只支持 submit」块的删 run 云端参数与删 SSM subnets/security-groups（其余各处）
-- 必须同批：删本机接力那一批（接力部分）；删 resolve_network 与 SSM 两个参数的那一批（其余部分；deploy_aws 与 carriers 两处跟需要重新部署的那一批）
+- 要做的：runtime/DEVELOPMENT.md detached 一条删去接力判超时 _recover_timed_out_claims 与指向 0054「本机接力的改法」的指针；cli/DEVELOPMENT.md「三个推进触发源之一（查询者到来即接力）」改写。（resolve_network、子网与安全组、run 的单项覆盖参数、SSM 参数族、_worker_subnet_ids 与 carriers 的 SSM 一行已随「云端只支持 submit」那一批做完。）
+- 文件：runtime/DEVELOPMENT.md、cli/DEVELOPMENT.md
+- 先要有：「本机推进器、生命期锁」块的删本机接力
+- 必须同批：删本机接力那一批
 - 单独先落地的后果：只改文档：说明与 code 不符；测试不受影响。
-- 验证：文档改动，读 diff 即可；SSM 参数真的被删要在重新部署之后用 aws ssm get-parameters-by-path 看，但那是 code 批的验证。
-- 备注：一条跨两块：接力部分跟「本机推进器、生命期锁与边界检查」块（删本机接力）；resolve_network、子网/安全组、SSM 族、_worker_subnet_ids 跟「云端只支持 submit」块（SSM 删除那条要改 stack.py、需重新部署，宜放进云端集中批）。deploy_aws/DEVELOPMENT.md 第 67 行同一段还写着「两处 assignPublicIp：run --backend cloud 由 cli 起 task，取 resolve_network 的缺省 ENABLED」，也要改成只剩推进器一处，线索没点名。carriers 第 15 行写「这五族」「前六族」，删两族之后计数要跟着改。deploy_aws/DEVELOPMENT.md 里另有 kicker 过滤、exit-observer 读 runs 表、编排进程打 tag 等失真处，线索没有覆盖，见 missing。
+- 验证：文档改动，读 diff 即可。
+- 备注：跟「本机推进器、生命期锁与边界检查」块（删本机接力）。deploy_aws/DEVELOPMENT.md 里另有 kicker 过滤、exit-observer 读 runs 表等失真处，线索没有覆盖，见 missing。
 
 #### 行为文档-4（doc，S）
 
@@ -1391,18 +1219,18 @@
 #### 行为文档-5（doc，M）
 
 - 线索：用户指南：configuration.md 的 `[cloud]` 节键表去掉 events-table
-- 要做的：configuration.md 第 71 行 [cloud] 四键一行删去，第 224–229 行跨命令选项表删 run 的四个参数及说明，第 202 行 --max-concurrency 不再列 status（连同「接力」说明）；running-and-results.md 第 142 行「仅 --backend cloud」段改写（run 不收云端后端）；running-and-results.md 第 25–35 行权限表与 getting-started.md 第 5–12 行角色表按 0040 派生视图改成三种组合、本机与云端两级加 plan：云端一级为 submit、status --wait、settle-runs，去 lambda:InvokeFunction、留 lambda:GetFunction，加条件写、s3:GetObject 与写报告，推论改为不需要任何 ECS 写权限。
+- 要做的：configuration.md --max-concurrency 一行不再列 status（连同「接力」说明）；running-and-results.md 权限表与 getting-started.md 角色表的云端一级按 0040 派生视图改为 submit、status --wait、settle-runs：去 lambda:InvokeFunction、留 lambda:GetFunction，加条件写、s3:GetObject 与写报告，推论改为不需要任何 ECS 写权限。（[cloud] 四键、run 的云端参数、「仅 --backend cloud」段与三种组合已随「云端只支持 submit」那一批做完。）
 - 文件：docs/user-guide/configuration.md、docs/user-guide/running-and-results.md、docs/user-guide/getting-started.md
-- 先要有：「云端只支持 submit」块（删 run 的云端参数与 [cloud] 四键、run --backend cloud 以退出码 2 结束）；「本机推进器、生命期锁」块删 status 的 --max-concurrency；「run 处置」块（settle-runs、status --wait 处置、删 kickoff）
-- 必须同批：删 run 云端参数与 [cloud] 键的那一批；删 status --max-concurrency 的那一批；settle-runs 与删 kickoff 的那一批（权限表部分）
-- 单独先落地的后果：只改文档：用户照文档不给 run 云端参数，code 仍接受；权限表少了 lambda:InvokeFunction，按文档配权限的成员在 status --wait kickoff 时被拒。测试不受影响（test_user_docs 只查措辞与链接）。
-- 验证：选项与键的部分读 diff、对照 argparse 与 settings.CLOUD_OPTIONS 差集；权限表要真实验证：重新部署之后用一个只带文档所列权限的角色真实执行 submit、status --wait（含处置一次过期 run）、settle-runs，确认没有 AccessDenied。
-- 备注：一条跨三块：[cloud] 键表、选项表、「仅 --backend cloud」段跟「云端只支持 submit」块；--max-concurrency 跟删本机接力那一批；权限表跟「run 处置」块（新增处置权限）与「云端只支持 submit」块（去掉 run 一级），删 InvokeFunction 跟删 _STALL_KICK 那一条。getting-started.md 角色表第 7–12 行的「需要什么凭证」一列是权限的派生视图，现在写的是安装形态与凭证概述，要改多少拿不准，以 0040 决策 3 为准。configuration.md 第 69–70 行 [cloud] 的 prefix、ddb-table、s3-bucket、worker-variant 仍列 run，取决于「云端只支持 submit」块里的待定项（run 的 --prefix 等是否一起删）。settle-runs 进 configuration.md 的命令清单，线索没写，见 missing。
+- 先要有：「本机推进器、生命期锁」块删 status 的 --max-concurrency；「run 处置」块（settle-runs、status --wait 处置、删 kickoff）
+- 必须同批：删 status --max-concurrency 的那一批；settle-runs 与删 kickoff 的那一批（权限表部分）
+- 单独先落地的后果：只改文档：权限表少了 lambda:InvokeFunction，按文档配权限的成员在 status --wait kickoff 时被拒。测试不受影响（test_user_docs 只查措辞与链接）。
+- 验证：权限表要真实验证：重新部署之后用一个只带文档所列权限的角色真实执行 submit、status --wait（含处置一次过期 run）、settle-runs，确认没有 AccessDenied。
+- 备注：一条跨两块：--max-concurrency 跟删本机接力那一批；权限表跟「run 处置」块（新增处置权限），删 InvokeFunction 跟删 _STALL_KICK 那一条。getting-started.md 角色表「需要什么凭证」一列是权限的派生视图，现在写的是安装形态与凭证概述，要改多少拿不准，以 0040 决策 3 为准。settle-runs 进 configuration.md 的命令清单，线索没写，见 missing。
 
 #### 行为文档-6（mixed，M）
 
 - 线索：机读契约页与它的 skill 副本：写出 settle-runs 的 `--json`
-- 要做的：docs/internals/cli-json-contract.md 新增 settle-runs 一节（dry_run、runs[]、outcome、reason 与落点字段），run 一节写明 --backend cloud 以退出码 2 结束、指向 submit，run --json 顶层 status/message 按新取法改写并加 jobs[] 全部 job 的形状，status 一节加 deadline_at 与 jobs[] 的点名标识键，list-runs 加 deadline_at；改完用 tools/render_skill_contract.py 重新生成 skill 副本；cli/tests/test_cli_json_contract.py 里 test_run_json_top_level_message_is_always_present_and_documented_as_run_level 断言的「没有执行」原句随之改。
+- 要做的：docs/internals/cli-json-contract.md 新增 settle-runs 一节（dry_run、runs[]、outcome、reason 与落点字段），run --json 顶层 status/message 按新取法改写并加 jobs[] 全部 job 的形状，status 一节加 deadline_at 与 jobs[] 的点名标识键，list-runs 加 deadline_at；改完用 tools/render_skill_contract.py 重新生成 skill 副本；cli/tests/test_cli_json_contract.py 里 test_run_json_top_level_message_is_always_present_and_documented_as_run_level 断言的「没有执行」原句随之改。
 - 文件：docs/internals/cli-json-contract.md、cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md、cli/tests/test_cli_json_contract.py
 - 先要有：「查看命令与机读输出」块（run --json jobs[]、status --json 点名标识与 deadline_at、list-runs deadline_at、doctor report_dir.filesystem）；「run 处置」块的 settle-runs 命令；「状态取法与结束写」块（run 级取法与说明）；「判定明细点名」块（点名标识的键名）
 - 必须同批：每个新增 JSON 键的那一批 code：test_cli_json_contract 用真渲染器收集全部键名、逐个断言出现在本页对应节，漏写即红；副本：test_skill.py test_contract_copy_equals_transform_of_source 断言副本等于转换结果，源页改了必须同提交重新生成；doctor 项名：test_cli_json_contract 第 333 行逐个对照 doctor 的 name 值，加 report_dir.filesystem 的 code 批必须同提交写进契约页
@@ -1413,13 +1241,13 @@
 #### 行为文档-7（doc，S）
 
 - 线索：agent skill 正文按 0043 决策五骨架改：第 3 步写明云端后端的执行只经
-- 要做的：SKILL.md 第 3 节（第 32–36 行）写明云端后端只经 submit、run 只有本机后端，第 7 节表第 74 行云端一行去掉 run；第 5 节第 58 行与第 10 节去掉直接读 jobs/*.json 的说法，第 60 行 --scope 取值写成 --json 输出里的 scope_id；第 8 节第 80 行删「它同时是接力」；references/cloud-backend.md「1 分工」表按 0040 派生视图改（QA/CI 一行加 settle-runs）。
+- 要做的：SKILL.md 第 5 节与第 10 节去掉直接读 jobs/*.json 的说法，--scope 取值写成 --json 输出里的 scope_id；第 8 节删「它同时是接力」；references/cloud-backend.md「1 分工」表按 0040 派生视图改（QA/CI 一行加 settle-runs）。（第 3 节与第 7 节旗标表已随「云端只支持 submit」那一批做完。）
 - 文件：cli/gherkai_cli/skills/gherkai/SKILL.md、cli/gherkai_cli/skills/gherkai/references/cloud-backend.md
-- 先要有：「云端只支持 submit」块（run 不收云端后端）；「判定明细点名」块（jobs/ 文件名带保存标识）；「本机推进器、生命期锁」块的删本机接力；「run 处置」块的 settle-runs
-- 必须同批：删 run 云端选项的那一批：test_skill.py 的 test_flags_are_attached_to_the_right_subcommand 与 test_exclusive_claims_are_true 用真 parser 核对 skill 里每个 flag 的归属，第 74 行写「--worker-variant（仅 run / submit）」，run 若删 --worker-variant 而 skill 不改即红
-- 单独先落地的后果：只改 skill：agent 按新说法指导用户，但 code 里 run --backend cloud 仍可用、status --wait 仍接力，属于描述先行；测试不红。只改 code 不改 skill：parser 的 flag 归属一变 test_skill 即红。
+- 先要有：「判定明细点名」块（jobs/ 文件名带保存标识）；「本机推进器、生命期锁」块的删本机接力；「run 处置」块的 settle-runs
+- 必须同批：各条所属的实装批：test_skill.py 的 test_flags_are_attached_to_the_right_subcommand 与 test_exclusive_claims_are_true 用真 parser 核对 skill 里每个 flag 的归属，改 flag 的那一批要同提交改 skill
+- 单独先落地的后果：只改 skill：agent 按新说法指导用户，但 code 里 status --wait 仍接力，属于描述先行；测试不红。只改 code 不改 skill：parser 的 flag 归属一变 test_skill 即红。
 - 验证：test_skill 的 parser 对照与措辞护栏是单测；skill 行为变化按 0043 决策七的评测验证，是否要重跑评测由打磨批定。
-- 备注：一条跨四块：第 3 节与旗标表跟「云端只支持 submit」块；jobs/*.json 与 --scope 跟「判定明细点名」块；第 8 节接力跟删本机接力那一批；1 分工表跟「run 处置」块。线索写「第 8 步」，实际是第 8 节「退出码分流」第 80 行。线索没覆盖、同样要改的：SKILL.md 第 57 行「status --wait 只等待、不接力」，references/cloud-backend.md 第 31 行「run --backend cloud 的并行度」，references/setup-and-diagnosis.md 第 96 行到期一行（记 error、没有执行、接力），见 missing。
+- 备注：一条跨三块：jobs/*.json 与 --scope 跟「判定明细点名」块；第 8 节接力跟删本机接力那一批；1 分工表跟「run 处置」块。线索写「第 8 步」，实际是第 8 节「退出码分流」。线索没覆盖、同样要改的：SKILL.md「status --wait 只等待、不接力」，references/setup-and-diagnosis.md 到期一行（记 error、没有执行、接力），见 missing。
 
 #### 行为文档-8（mixed，M）
 
@@ -1435,24 +1263,24 @@
 #### 行为文档-9（doc，S）
 
 - 线索：图：docs/diagrams/run-execution.json 的三处「四种组合」改为三种组
-- 要做的：改 docs/diagrams/run-execution.json 第 105、487、489 行三处「四种组合」为三种组合，改 execution-timeout-chain.json 里「云端超时处置」「到点处置」两处标签；各用 tools/build_diagrams.mjs 重出 SVG 与 HTML，图源与产物同一提交。
-- 文件：docs/diagrams/run-execution.json、docs/diagrams/run-execution.svg、docs/diagrams/run-execution.html、docs/diagrams/execution-timeout-chain.json、docs/diagrams/execution-timeout-chain.svg、docs/diagrams/execution-timeout-chain.html
-- 先要有：「云端只支持 submit」块（run-execution 部分）；「词表与退役词」块（execution-timeout-chain 部分）
+- 要做的：改 execution-timeout-chain.json 里「云端超时处置」「到点处置」两处标签；用 tools/build_diagrams.mjs 重出 SVG 与 HTML，图源与产物同一提交。（run-execution.json 的三种组合已随「云端只支持 submit」那一批做完。）
+- 文件：docs/diagrams/execution-timeout-chain.json、docs/diagrams/execution-timeout-chain.svg、docs/diagrams/execution-timeout-chain.html
+- 先要有：「词表与退役词」块
 - 必须同批：加退役词表的那一提交：test_user_docs 扫图源，「超时处置」「到点处置」入表而图源不改即红；test_user_docs 的 test_diagram_exports_match_their_sources：改图源必须同提交重出 SVG/HTML
-- 单独先落地的后果：图源改了不重出产物：test_diagram_exports_match_their_sources 红；退役词入表而图不改：术语测试红；run-execution 先改成三种组合而 code 仍允许 run --backend cloud：图与产品不符，测试不红。
+- 单独先落地的后果：图源改了不重出产物：test_diagram_exports_match_their_sources 红；退役词入表而图不改：术语测试红。
 - 验证：单测（导出与图源一致、术语扫描）够；重出产物要本机有 Chrome 与 Playwright（archify 工具链）。
-- 备注：一条跨两块：run-execution 跟「云端只支持 submit」块，execution-timeout-chain 跟「词表与退役词」块。grep 核对：execution-timeout-chain.json 里命中的是「云端超时处置：从定时器到点到停止 worker」「到点处置」「是否停止由到点处置的一方现查状态决定」。线索没写到的图源改动：run-execution.json 另有「status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进…云端仅在检测到停滞时唤醒推进函数」「submit 派生 · 可被接力」两处接力与 kickoff；execution-timeout-chain.json 另有「接力者按库里的领取时刻重算截止时刻」一句；execution-detached-gates.json 整张图讲 detached 过滤与 handler 分流；configuration-env-inheritance.json 有「run --backend cloud：由本机 CLI 启动」一支。见 missing。
+- 备注：跟「词表与退役词」块。grep 核对：execution-timeout-chain.json 里命中的是「云端超时处置：从定时器到点到停止 worker」「到点处置」「是否停止由到点处置的一方现查状态决定」。线索没写到的图源改动：run-execution.json 另有「status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进…云端仅在检测到停滞时唤醒推进函数」「submit 派生 · 可被接力」两处接力与 kickoff；execution-timeout-chain.json 另有「接力者按库里的领取时刻重算截止时刻」一句；execution-detached-gates.json 整张图讲后台标记的两道判断。见 missing。
 
 #### 行为文档-10（doc，M）
 
 - 线索：CHANGELOG 未发行节：讲 status --wait 接力、到期记 error、中断记 abo
-- 要做的：CHANGELOG.md [Unreleased] 里第 59、60 行接力两条、第 23 行到期记 error 一条、第 17 行中断记 aborted 与 run --backend cloud 半句、第 49、70、71 行云端前台 run 的条目直接改写为新行为（或删去），不写对照，保留与已发行版本相比的「此前……」；另加一句 run 的推进、处置与状态取法做了重构；另加一句下次 deploy 时会删掉 /{prefix}backend/subnets 与 security-groups。
+- 要做的：CHANGELOG.md [Unreleased] 里接力两条、到期记 error 一条、中断记 aborted 一条直接改写为新行为（或删去），不写对照，保留与已发行版本相比的「此前……」；另加一句 run 的推进、处置与状态取法做了重构。（云端前台 run 的各条与删 SSM 两个参数的一句已随「云端只支持 submit」那一批做完。）
 - 文件：CHANGELOG.md
-- 先要有：「本机推进器、生命期锁」块删本机接力（第 59、60 行）；「状态取法与结束写」块的取法与终结函数 timeout 拆行（第 23、17 行）；「云端只支持 submit」块（第 17、49、70、71 行与 SSM 一句）
+- 先要有：「本机推进器、生命期锁」块删本机接力（接力两条）；「状态取法与结束写」块的取法与终结函数 timeout 拆行（到期与中断两条）
 - 必须同批：各条所描述行为的那一批（退役词「接力推进」入表时第 59、60 行若含它会被 test_user_docs 扫到，要同提交改）
 - 单独先落地的后果：只改 CHANGELOG：发行说明描述了未实装的行为；不改：每批 code 落地后条目与产品不符。测试只在退役词入表时可能红。
 - 验证：文档改动，读 diff；test_user_docs 与 test_release_notes 查措辞与链接。
-- 备注：一条跨三块，按条目所属的批拆开改。第 23 行写「被它截断的 job 判 error、归因 timeout」「run 总状态记 error」，新设计里被期限截断的执行中 job 记 aborted、没有归因，pending 记 skipped，run 按取法为 aborted，要整句重写。第 70 行「云端后端以退出码 1 结束」是前台云端 run 的情形。线索只要求改写已有条目并加一句重构概述；settle-runs、报告目录边界检查（不支持的文件系统以退出码 2 结束）、锁已被持有时以退出码 2 结束、list-runs 新列、run --json 的 jobs[]、doctor 新项这些新的使用者可见行为要不要各写一条，线索没说，拿不准 owner 的「升级与迁移的细节不写」是否也排除新功能条目，见 missing。
+- 备注：一条跨两块，按条目所属的批拆开改。到期一条写「被它截断的 job 判 error、归因 timeout」「run 总状态记 error」，新设计里被期限截断的执行中 job 记 aborted、没有归因，pending 记 skipped，run 按取法为 aborted，要整句重写。线索只要求改写已有条目并加一句重构概述；settle-runs、报告目录边界检查（不支持的文件系统以退出码 2 结束）、锁已被持有时以退出码 2 结束、list-runs 新列、run --json 的 jobs[]、doctor 新项这些新的使用者可见行为要不要各写一条，线索没说，拿不准 owner 的「升级与迁移的细节不写」是否也排除新功能条目，见 missing。
 
 #### 行为文档-11（doc，S）
 
@@ -1531,41 +1359,29 @@
 - 验证：要真实执行评测：按 0043 决策七的流程在 Bedrock 上跑 expose-local-app 与 tunnel-origin-mismatch 两条（with-skill 与 baseline 两臂），看新尺子下的通过率；单测不证。
 - 备注：跟「隧道」块，与行为文档-16 同批。是否加「公网入口到点在边缘关闭」的新评测要求由实装批定。
 
-#### 行为文档-18（doc，M）
-
-- 线索：「四种组合」的措辞改为三种组合（本机前台 run、本机后台 submit --
-- 要做的：把列出的各处「四种组合」改为三种组合：README.md 第 54、85 行，cli/README.md 第 32 行，runtime/README.md 第 42 行，docs/user-guide/README.md 第 11 行，running-and-results.md 第 3、7 行（第 7 行改写为云端后端只有后台），cloud-backend.md 第 155 行，local-app-testing.md 第 5 行，docs/internals/README.md 第 8 行（并去掉「云端 Lambda 为何不介入前台 run」），execution-and-reconciliation.md 第 3、31 行，deterministic-step-lifecycle.md 第 146 行，verdict-model.md 第 5 行，architecture-overview.md 第 35、42 行（「四条物理通道」一起改）。
-- 文件：README.md、cli/README.md、runtime/README.md、docs/user-guide/README.md、docs/user-guide/running-and-results.md、docs/user-guide/cloud-backend.md、docs/user-guide/local-app-testing.md、docs/user-guide/getting-started.md、docs/internals/README.md、docs/internals/execution-and-reconciliation.md、docs/internals/deterministic-step-lifecycle.md、docs/internals/verdict-model.md、docs/internals/architecture-overview.md
-- 先要有：「云端只支持 submit」块（run --backend cloud 以退出码 2 结束）
-- 必须同批：run 不收云端后端的那一批
-- 单独先落地的后果：只改文档：文档说云端只能 submit，code 仍接受 run --backend cloud；测试不受影响。
-- 验证：按线索的核对办法：在 README、各包 README、docs/user-guide、docs/internals、docs/diagrams 下 grep「四种组合」结果为 0（图的产物随图源重出）。
-- 备注：跟「云端只支持 submit」块。用 grep 对照线索的枚举，漏了三处：docs/user-guide/getting-started.md 第 3 行与第 50 行（图注「四种组合、结果落点、权限」），docs/internals/architecture-overview.md 第 40 行（「四种组合下事件所走的四条物理通道」）；线索的 grep 核对办法能兜住，但枚举不全。architecture-overview.md 第 42 行同时写着「status --wait 接力」，这半句属删本机接力。docs/diagrams 下的命中是 run-execution 三处（行为文档-9）。
-
 #### 行为文档-19（doc，S）
 
 - 线索：docs/user-guide/cloud-backend.md「团队成员需要的最小云端权限」一节
-- 要做的：cloud-backend.md 第 153–166 行改成单级：删「run --backend cloud」一级（第 158 行）；第 157 行 submit+status 一级删「调用 <prefix>kicker Lambda」、保留 lambda:GetFunction，加 runs 表条件写、报告桶 s3:GetObject（卸载的运行定义正文与被点名的明细）、报告前缀 s3:PutObject，settle-runs 不给 run_id 时另需 list-runs 两项，推论改为不需要任何 ECS 写权限；第 162 行 explain 括注改为「云端这一级要另加 events 表的 dynamodb:Query」；设备、list-runs、doctor 三段里「无论哪一级」「两级都用」「已含在上面两级里」「不在这两级里」改成单级说法。
+- 要做的：cloud-backend.md「团队成员需要的最小云端权限」一节（已改为单级）：submit + status 一级删「调用 <prefix>kicker Lambda」、保留 lambda:GetFunction，加 runs 表条件写、报告桶 s3:GetObject（卸载的运行定义正文与被点名的明细）、报告前缀 s3:PutObject，settle-runs 不给 run_id 时另需 list-runs 两项，推论改为不需要任何 ECS 写权限。（删 run --backend cloud 一级、explain 括注与单级说法已随「云端只支持 submit」那一批做完。）
 - 文件：docs/user-guide/cloud-backend.md
-- 先要有：「云端只支持 submit」块；「run 处置」块（settle-runs、status --wait 处置、删 kickoff 与 _make_lambda_client）
-- 必须同批：删 kickoff 与 run --backend cloud 的那一批，以及 settle-runs 上线那一批（两者若分批，本节要分两次改）
-- 单独先落地的后果：先改：按文档配权限的成员没有 lambda:InvokeFunction，现有 code 的 status --wait kickoff 会 AccessDenied；run --backend cloud 一级消失但 code 仍可用。不改：处置上线后成员缺条件写与 s3:GetObject，处置与 settle-runs 失败。
+- 先要有：「run 处置」块（settle-runs、status --wait 处置、删 kickoff 与 _make_lambda_client）
+- 必须同批：删 kickoff 的那一批，以及 settle-runs 上线那一批（两者若分批，本节要分两次改）
+- 单独先落地的后果：先改：按文档配权限的成员没有 lambda:InvokeFunction，现有 code 的 status --wait kickoff 会 AccessDenied。不改：处置上线后成员缺条件写与 s3:GetObject，处置与 settle-runs 失败。
 - 验证：要真实验证：重新部署之后，用一个只带本节所列权限的 IAM 角色真实执行 submit、status --wait（让它处置一个已过期限加 300 秒的 run）、settle-runs（带与不带 run_id）、explain 与 list-runs，确认没有 AccessDenied；单测不证 IAM。
-- 备注：跟「云端只支持 submit」块与「run 处置」块。与行为文档-5 的权限表同为 0040 决策 3 与 0033 编排进程角色的派生视图，宜同批改。0018 待定项「0033 编排进程角色没有登记 explain 读判定明细与 evidence 的 s3:GetObject」会影响本节 explain 一段的写法。同一篇第 35、43、45、124 行还写着 SSM 子网与安全组、run --backend cloud 的两种执行方式差别、并行度与 --no-report 的回收例外，线索没有覆盖，见 missing。
+- 备注：跟「run 处置」块。与行为文档-5 的权限表同为 0040 决策 3 与 0033 编排进程角色的派生视图，宜同批改。0018 待定项「0033 编排进程角色没有登记 explain 读判定明细与 evidence 的 s3:GetObject」会影响本节 explain 一段的写法。
 
 ## 收尾
 
 ### 小结
 
-这三小块的 code 改动不大，主要是收尾、跨块的连带改动与待定问题；写 code 的只有补-1、补-3、问-2 这几处，各在 S 到 M 之间。先后次序：收尾-1、收尾-2 必须排在所有实装批之后（0011 与 0051 的 Status 头那一句还要等隧道批）；补-x 各自挂在别的块的批上：补-1、补-6、补-7 随「云端只支持 submit」批，补-2、补-3、补-4 随「云端后端」批（补-3 与补-4 是那一批开工的前置决定，补-3 还要在重新部署之后真实执行核 IAM 与名字长度），补-8、补-9 随各自对应的行为改写批。问-x 里真正挡住开工的有六组：问-6 与问-12 挡状态取法与结束写批里前台收尾的来路与重试原因；问-1 挡落库写序批的保存失败出口；问-2 挡 begin 与端口 preflight 的清理；问-11 挡词表批的范围；问-14 挡 doctor 一行；问-16 挡 _status_cmd 与 status --wait 处置读不出运行态那一支。另有一些只涉及 ADR 或用户文档：问-3、问-4、问-7、问-13 只改 ADR；问-8 要先于用户文档权限表那一批定；问-15 已有缺省。有三条已经被处理掉、与线索不符：补-5 已在 b0cd6349 里改完；问-10 的模块头已不含「决策二」；问-5 核实为到得了，只需补前提。最大的风险在收尾的残留检索：它的检索面漏了 tools/ 与 engines/，词表漏了隧道与前台云端执行的一批旧说法；Status 头那一句的删除还缺一道「实测项已逐项核并内联」的审计。不补上这两点，删掉那一句之后 ADR 会宣称已实装，而证据与残留其实还没清。
+这三小块的 code 改动不大，主要是收尾、跨块的连带改动与待定问题；写 code 的只有补-3、问-2 这两处，各在 S 到 M 之间。先后次序：收尾-1、收尾-2 必须排在所有实装批之后（0011 与 0051 的 Status 头那一句还要等隧道批）；补-x 各自挂在别的块的批上：补-1、补-6、补-7 已随「云端只支持 submit」那一批做完、已删去，补-2、补-3、补-4 随「云端后端」批（补-3 与补-4 是那一批开工的前置决定，补-3 还要在重新部署之后真实执行核 IAM 与名字长度），补-8、补-9 随各自对应的行为改写批。问-x 里真正挡住开工的有六组：问-6 与问-12 挡状态取法与结束写批里前台收尾的来路与重试原因；问-1 挡落库写序批的保存失败出口；问-2 挡 begin 与端口 preflight 的清理；问-11 挡词表批的范围；问-14 挡 doctor 一行；问-16 挡 _status_cmd 与 status --wait 处置读不出运行态那一支。另有一些只涉及 ADR 或用户文档：问-3、问-4、问-7、问-13 只改 ADR；问-8 要先于用户文档权限表那一批定；问-15 已有缺省。有三条已经被处理掉、与线索不符：补-5 已在 b0cd6349 里改完；问-10 的模块头已不含「决策二」；问-5 核实为到得了，只需补前提。最大的风险在收尾的残留检索：它的检索面漏了 tools/ 与 engines/，词表漏了隧道与前台云端执行的一批旧说法；Status 头那一句的删除还缺一道「实测项已逐项核并内联」的审计。不补上这两点，删掉那一句之后 ADR 会宣称已实装，而证据与残留其实还没清。
 
 ### 线索没有覆盖的改动点
 
-- 收尾-2 的检索面漏了 tools/ 与 engines/。tools/ecs_task_timing.py 第 4–8 行的文档串讲同步态的 FargateEngine._probe_task 与 _await_exit_code、第 24 行写「--backend cloud 起一个 worker」，这些随 FargateEngine 只留 start_scope、run 不收云端后端而失效。engines/midscene/src/worker/error-text.test.mts 第 58 行有「jobs/*.json」。tools/ 是长期资产，注释同样守悬空指针红线。依据：0034「Engine port 演进」；0016 决策 A；CLAUDE.md「tools/ 是复用工具库」条。另应明确排除已被 .gitignore 忽略的 skills/gherkai-workspace/。
-- 收尾-2 的检索词表漏了隧道与前台云端执行的旧说法，它们都没有测试守。现有命中（不含 ADR 与 journey、含 tools 与 engines）：tunnel.json 31、tunnel-ttl 277（多数在被忽略的评测工作区里）、add-authtoken（tunnel.py、skill references、troubleshooting.md、local-app-testing.md、configuration.md）、「ngrok 可执行文件」56、「隧道已拆除」8、stop_tunnel 35、resolve_network 25、kickoff 22、_STALL_KICK 4、stop_bound 39、FargateWorkerHandle 14、_NON_VERDICT 17、jobs_without_verdict 10、relay_available 7、--events-table 37、--cluster 35、--subnet 36、--security-group 36、security-groups 14，以及入口页字面量「没有执行」（要按语境筛）。依据：0035 决策 1、决策 3；0016 决策 A；0033「VPC 来源」；0027「index.html 形态」。
+- 收尾-2 的检索面漏了 tools/ 与 engines/：engines/midscene/src/worker/error-text.test.mts 有「jobs/*.json」；tools/ 是长期资产，注释同样守悬空指针红线。依据：CLAUDE.md「tools/ 是复用工具库」条。另应明确排除已被 .gitignore 忽略的 skills/gherkai-workspace/。
+- 收尾-2 的检索词表漏了隧道的旧说法，它们都没有测试守（前台云端执行的旧说法已在「云端只支持 submit」那一批做过一次残留检索）。现有命中（不含 ADR 与 journey、含 tools 与 engines）：tunnel.json 31、tunnel-ttl 277（多数在被忽略的评测工作区里）、add-authtoken（tunnel.py、skill references、troubleshooting.md、local-app-testing.md、configuration.md）、「ngrok 可执行文件」56、「隧道已拆除」8、stop_tunnel 35、kickoff 22、_STALL_KICK 4、_NON_VERDICT 17、jobs_without_verdict 10、relay_available 7，以及入口页字面量「没有执行」（要按语境筛）。依据：0035 决策 1、决策 3；0027「index.html 形态」。
 - 删 Status 头「尚未实装」那一句之前，缺一道实测项审计：0054「实测项（实装时逐项核，结果内联回这里）」的 23 条，以及 0034 机制三、0035 决策 1 与决策 3、0041 决策七读量等写着「实装时核」的各项，要逐项确认已真实执行、判据型结果已内联、标题里「实装时逐项核」的过程说法已改。依据：CLAUDE.md 文档纪律「Journey 吸收进 ADR」与「绿≠对」；0054「实测项」节首。
 - 收尾缺 journey 自身的收口：实装全部完成后，把 docs/journey/0018-run-ownership-adr-writeback-plan.md 里的决策吸收进 ADR、过程留给提交记录，然后删去；「agent 可以自己执行 settle-runs」一条要在 journey 0013「skill 打磨批」登记指向 0043 决策五的指针。依据：CLAUDE.md「docs/journey/ 是任务推进的 staging 区」条（任务收尾即审计点）。
-- 删前台云端执行之后，runtime/gherkai_runtime/compose.py 的 WorkerResolution.stop_timeout_s 字段（第 1563 行，第 1815 行填值）与 ECS_STOPPED_LAG_MARGIN_S（第 1862 行）没有了使用方（唯一的消费者 cloud_stop_bound_s 只由 __main__.py 第 2972 行调用，doctor 走 read_task_def_stop_timeout），应连同字段一起删，不只是补-8 说的改写说明；_worker_container_stop_timeout 与 read_task_def_stop_timeout 文档串里「与云端同步 run 算停止后等待预算读的是同一个量」随之改，FARGATE_STOP_TIMEOUT_MAX_S 的注释同时要随隧道批改（tunnel_host 的每 job 余量移到 deadline.py）。依据：0016 决策 A；0034 机制二「排空上界」条；journey「留下的问题与缺省」第一条。
 
 ### 逐条
 
@@ -1590,17 +1406,6 @@
 - 单独先落地的后果：不能先做：现在就检索会命中大量还在工作的 code。现状基线（不含 ADR 与 journey）：try_finalize 138 行/24 个文件，jobs/*.json 212 行，run --backend cloud 60 行/42 个文件，接力 307 行/132 个文件，load_all 48 行，expected_claim_count 34 行，四种组合 47 行，超时处置 47 行/20 个文件。
 - 验证：同一个脚本再跑一遍，除豁免项外零命中；全量 pytest 加 tools/doc_rules_check.py 退出码 0。纯文本核对，单测就够。
 - 备注：检索面要注意三点。第一，skills/gherkai-workspace/ 已被 .gitignore 忽略（评测的历史输出，命中很多，比如 add-authtoken、tunnel-ttl），要明确排除，否则会误判。第二，线索列的面不含 tools/ 与 engines/（见 missing）。第三，词表不含隧道与前台云端执行的旧说法（见 missing）。claim_count 101 行里有合法的诊断键用法，「物化」49 行要按语境判断，与线索说的一致。
-
-#### 补-1（mixed，S）
-
-- 线索：待定：`run` 不收云端后端之后，`build_cloud_stores` 的第四返回值
-- 要做的：二选一。一是删：build_cloud_stores 改为返回 (run_store, result_store, report_store)，去掉内部的 make_artifacts，改 cli/gherkai_cli/__main__.py 的两处解包（_submit_cloud 第 2030 行附近、_cmd_explain 云端分支第 2697 行附近；_cmd_run 第 3008 行那一处随云端分支删去）、deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 第 488 行的解包，以及 runtime/tests/test_compose.py 与 cli/tests 里返回四元组的打桩；同步改 0016 第 170、184 行。二是留：只改 0016「第四返回值」一条的用途说法。
-- 文件：runtime/gherkai_runtime/compose.py、cli/gherkai_cli/__main__.py、deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py、runtime/tests/test_compose.py、cli/tests/test_main.py、cli/tests/test_tunnel_cli.py、docs/adr/0016-execution-architecture-core-lib-run-model.md
-- 先要有：删去 _cmd_run 的云端分支（make_artifacts 现在唯一的使用方在 __main__.py 第 3008 行）
-- 必须同批：云端只支持 submit 批（删 _cmd_run 云端分支）
-- 单独先落地的后果：在删云端 run 之前就删返回值，_cmd_run 的云端路径解包会失败；排在它之后则没有影响。Lambda 一侧只是解包从四元组改成三元组，已部署的 Lambda 自带部署时复制的包，不受 CLI 一侧改动影响，不需要为这一条单独重新部署。
-- 验证：单测够用（纯装配）：runtime/tests/test_compose.py、cli/tests、deploy_aws/tests/test_lambda_handlers.py 全绿。
-- 备注：code 现状：云端的三个调用方 _submit_cloud、_cmd_explain 与 Lambda 都丢弃第四项（_mk 或 _），只有 _cmd_run 第 3008 行在用。我的判断：显然的取法是删，理由同 journey 缺省「ADR 不为不存在的组合留参数」，WebUI 将来要用时再加。代价是两个 build_*_stores 不再对称（本机版仍给前台 run 用），0016 第 168 行「对称」的说法要相应改写。由 owner 定。
 
 #### 补-2（code，S）
 
@@ -1646,49 +1451,27 @@
 - 验证：读两处原文核对即可。
 - 备注：线索与现状不符：git log -S 显示两句都在 b0cd6349 里删改，线索写于那之前或没有同步。0027 第 167 行「cli 默认生成 RunReport」等各项在新设计下仍成立（报告改由结束那次写的写入方生成，不影响「默认生成」）。
 
-#### 补-6（code，S）
-
-- 线索：删 `[cloud]` 节四个键时一并改 cli/gherkai_cli/settings.py `config_layers` 文档串
-- 要做的：删去 settings.py 第 234 行 config_layers 文档串里「events-table / cluster 没有环境变量层…」那一句，与 CLOUD_OPTIONS（第 27 行）删掉 events_table、cluster、subnet、security_group 同一提交。
-- 文件：cli/gherkai_cli/settings.py
-- 先要有：删 run 解析器的四个参数与 [cloud] 同名键
-- 必须同批：CLOUD_OPTIONS 与 run 解析器删四个参数（云端只支持 submit 批），以及 cli/tests/test_project_config.py 的 CLOUD 集合
-- 单独先落地的后果：只改文档串没有影响；不改的话文档串说的是已不存在的键。
-- 验证：单测够用：cli/tests/test_project_config.py 的差集护栏。
-- 备注：同一文件里另有两处连带改动，线索没写：LOCAL_ONLY_NOTICE_COMMANDS 含 run（第 42 行）。run 在云端后端下改为以退出码 2 结束之后，给 run 打「grace 本次未生效」提示已经没有意义，只剩 submit。CONFIG_COMMANDS（第 19 行）要加 settle-runs，这一点测试块已写。
-
-#### 补-7（mixed，S）
-
-- 线索：同一待定项的位置补上 docs/user-guide/configuration.md 跨命令选项表里 `--ddb-table`
-- 要做的：若定为删 run 的 --prefix、--ddb-table、--s3-bucket、--worker-variant：configuration.md 第 195 行（--prefix）、第 205 行（--worker-variant）、第 222 行（--ddb-table）、第 223 行（--s3-bucket）四行的命令列去掉 run；第 224–229 行的 events-table、cluster 与「submit 只收…」说明随删四个参数改写。
-- 文件：docs/user-guide/configuration.md、cli/gherkai_cli/__main__.py、cli/gherkai_cli/settings.py、cli/tests/test_project_config.py
-- 先要有：定下 run 解析器上标 [--backend cloud] 的四个参数删不删（云端只支持 submit 块的待定条）
-- 必须同批：run 解析器参数的删除（同一提交改用户文档）
-- 单独先落地的后果：只改文档不改解析器的话，文档与 --help 不符。
-- 验证：单测：test_project_config 的差集护栏与 test_user_docs。
-- 备注：我的判断：显然的取法是全删。run 只有本机后端，这四个参数只在云端起作用，留着就是为不存在的组合留参数（0016 决策 A；journey「留下的问题与缺省」第一条同一口径）。删了之后 run --prefix 由 argparse 以退出码 2 拒绝，配置文件 [cloud] 节对 run 静默不生效，符合 0053 决策 3「本机后端下 [cloud] 整节静默不生效」。线索只点了 --ddb-table 与 --s3-bucket，--prefix 与 --worker-variant 两行同样列着 run。
-
 #### 补-8（mixed，M）
 
 - 线索：另随实装校准：docs/internals/verdict-model.md（run 级取法、job 级 skipped 来自结束写）
-- 要做的：各文档跟随对应的实装批改：verdict-model.md（run 级取法、job 级 skipped 来自结束写，第 102 行「排队中的 job 起 worker 前看到它即记 skipped」等）、troubleshooting.md、local-app-testing.md、running-and-results.md 里讲接力的各处（分别有 2、1、5 处「接力」）、deterministic-step-lifecycle.md 第 83 行「三处宿主…status --wait 接力者」；__main__.py _doctor_worker_grace 文档串（第 1069 行起）里讲 FargateWorkerHandle.stop 的说法；compose.py WorkerResolution 的 stop_timeout_s 说明（第 1553–1556 行）。
-- 文件：docs/internals/verdict-model.md、docs/user-guide/troubleshooting.md、docs/user-guide/local-app-testing.md、docs/internals/deterministic-step-lifecycle.md、docs/user-guide/running-and-results.md、cli/gherkai_cli/__main__.py、runtime/gherkai_runtime/compose.py
-- 先要有：状态取法与结束写批（verdict-model）；删接力批（各篇讲接力的段落）；FargateEngine 只留 start_scope 批（doctor 文档串、WorkerResolution）
+- 要做的：各文档跟随对应的实装批改：verdict-model.md（run 级取法、job 级 skipped 来自结束写，第 102 行「排队中的 job 起 worker 前看到它即记 skipped」等）、troubleshooting.md、local-app-testing.md、running-and-results.md 里讲接力的各处（分别有 2、1、5 处「接力」）、deterministic-step-lifecycle.md 第 83 行「三处宿主…status --wait 接力者」。（_doctor_worker_grace 文档串与 WorkerResolution.stop_timeout_s 两项已随「云端只支持 submit」那一批做完，字段连同填值删去。）
+- 文件：docs/internals/verdict-model.md、docs/user-guide/troubleshooting.md、docs/user-guide/local-app-testing.md、docs/internals/deterministic-step-lifecycle.md、docs/user-guide/running-and-results.md
+- 先要有：状态取法与结束写批（verdict-model）；删接力批（各篇讲接力的段落）
 - 必须同批：各自对应的实装批（每批提交带上它所改行为的文档）
 - 单独先落地的后果：提前改的话，文档描述的行为 code 里还没有。
 - 验证：doc_rules_check 加 pytest（test_user_docs 等）；纯文档，单测够用。
-- 备注：线索要的是改写 WorkerResolution.stop_timeout_s 的说明，code 现状是：删了 cloud_stop_bound_s（__main__.py 第 2972 行是它唯一的调用方）之后，stop_timeout_s 字段就没有使用方了（doctor 走 read_task_def_stop_timeout，不读它），应当连字段、compose.py 第 1815 行的填值与 ECS_STOPPED_LAG_MARGIN_S 一起删，而不只是改说明（见 missing）。_worker_container_stop_timeout 文档串（第 1824–1825 行）「两处读到的是同一个量」随之改。
+- 备注：无。
 
 #### 补-9（doc，S）
 
 - 线索：docs/internals/verdict-model.md 与 docs/internals/execution-and-reconciliation.md 里有三处指针
-- 要做的：按新行为改写两篇时，去掉三处已经悬空的条名：verdict-model.md 第 102 行「0031 决定一的注（aborted 只认主动中止…不认 timeout）」，execution-and-reconciliation.md 第 167 行「0034『filter 必须区分写入者』条与『兜底/接力』条」，以及第 140 行「0054 决策二『本机接力的改法』」。
+- 要做的：按新行为改写两篇时，去掉两处已经悬空的条名：verdict-model.md 第 102 行「0031 决定一的注（aborted 只认主动中止…不认 timeout）」，以及 execution-and-reconciliation.md 第 140 行「0054 决策二『本机接力的改法』」。（execution-and-reconciliation.md §7 的「0034『filter 必须区分写入者』条与『兜底/接力』条」已随「云端只支持 submit」那一批改指 0016 决策 A。）
 - 文件：docs/internals/verdict-model.md、docs/internals/execution-and-reconciliation.md
 - 先要有：状态取法与结束写批、删接力批、kicker 过滤改写批里对这两篇的改写
 - 必须同批：这两篇随行为改写的那几批
 - 单独先落地的后果：单独去掉指针是安全的，只是三处所在的句子本身也是旧行为，单改指针要再改一次。
 - 验证：差集法：从两篇抽出所有「ADR NNNN『条名』」，到对应 ADR 里 grep 条名，零缺失。
-- 备注：三处都已确认存在。第 140 行那一格整格都在讲接力判超时（「接力者按…补写」），删接力时整格重写，指针随之消失。
+- 备注：两处都已确认存在。第 140 行那一格整格都在讲接力判超时（「接力者按…补写」），删接力时整格重写，指针随之消失。
 
 #### 问-1（mixed，S）
 
@@ -1706,9 +1489,9 @@
 - 线索：RunPersistence.begin 在 create_run 之前调三个 store 的 preflight，run 只有本机后端之后全是 no-op
 - 要做的：若定为删：persist.py 第 98–104 行去掉三次 preflight 调用及文档串第 85–87 行的理由；ports.py 第 217、261、288 行的 preflight 方法与六个 adapter 的 preflight（run_store/result_store/report_store 的 local、ddb/s3）一并删，core/tests/test_persist.py 的假 store 随之改；0030 决定七「Store port 有 preflight()」一段改写或删去，保留一条被拒方案作护栏。
 - 文件：core/gherkai_core/persist.py、core/gherkai_core/ports.py、core/gherkai_core/adapters/run_store/local.py、core/gherkai_core/adapters/run_store/ddb.py、core/gherkai_core/adapters/result_store/local.py、core/gherkai_core/adapters/result_store/s3.py、core/gherkai_core/adapters/report_store/local.py、core/gherkai_core/adapters/report_store/s3.py、core/tests/test_persist.py、docs/adr/0030-realtime-persistence-seam.md
-- 先要有：删 _cmd_run 的云端分支（云端 store 经 RunPersistence.begin 的唯一路径）
-- 必须同批：云端只支持 submit 批
-- 单独先落地的后果：在云端 run 删之前删 preflight，云端前台 run 的桶名或表名错会从退出码 2 变成运行期失败。排在之后则没有影响。
+- 先要有：无（_cmd_run 的云端分支，即云端 store 经 RunPersistence.begin 的唯一路径，已随「云端只支持 submit」那一批删去）
+- 必须同批：无
+- 单独先落地的后果：无：云端前台 run 已删，删 preflight 不改变任何退出码。
 - 验证：单测够用：全部 preflight 调用方只剩 persist.py 第 100–103 行（grep 已核）；云端 submit 走 compose.preflight_cloud_resources，不经 Store.preflight。
 - 备注：挡住 begin 的清理与「随实装改写的 code 注释」块里 RunPersistence.begin 一条（「以云端桶名错分裂退出码为理由」）。我的判断：显然的取法是删。调用方只有 begin，本机 adapter 全是 no-op，留着就是不存在组合的接口面；以后 WebUI 在云端用 RunPersistence 时再加。由 owner 定。
 

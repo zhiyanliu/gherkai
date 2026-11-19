@@ -31,7 +31,7 @@
 | Status 头清理 | 全部 ADR 的 Status 头只留状态值与取代范围 | 已做，另一家模型分两份核落到位、都已闭合，见下「实装之前的一批：Status 头清理」 |
 | 实装摸底 | 「实装」一节的线索逐条对到 code：改动量、先后依赖、单独落地的后果、验证方式，另补出线索没有覆盖的改动点 | 已做，见 [0021](./0021-run-ownership-implementation-clue-map.md) |
 | ADR 补遗 | ADR 里还没有定的设计点随实装批次定：一批要用到的在这一批开工前落进 ADR，不整批定完再开工（owner 2026-11-19） | 按批取用：范围见「实装」一节末尾两块与 0021 各块的「线索没有覆盖的改动点」。把这些合并成一份清单的提取做到一半停下了，要用时重新做 |
-| 实装第一批 | 删去前台云端执行（`run --backend cloud` 以退出码 2 结束并指向 `submit`，连同只为它设的参数、配置键、引擎的同步消费与 SSM 网络参数） | 设计已定（0016 决策 A），待开工，做法见「实装」一节开头 |
+| 实装第一批 | 删去前台云端执行（`run --backend cloud` 以退出码 2 结束并指向 `submit`，连同只为它设的参数、配置键、引擎的同步消费与 SSM 网络参数） | 已落地：全量测试通过，两位独立复核的 10 条须处置意见都已改，跳板机真实执行已核；另一家模型核落到位的结果与欠下的云端真实执行见「实装」一节开头 |
 | 实装其余各批 | 状态取法与结束写、判定明细点名、报告；本机的边界检查、生命期锁、`submit` 新流程，run 处置与删去接力同批；隧道改用 SDK；云端后端集中一批并重新部署一次；收尾 | 未开始，各批开工前定它要用的设计点 |
 
 ## 另一家模型核落到位
@@ -203,6 +203,14 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 
 第一批（删去前台云端执行）的做法：范围是下面「云端只支持 submit」一块与 0021 同名小块（含它补出的改动点），连同「测试」「随实装改写的 code 注释」「行为文档」三块里跟着这一块走的条目。它不依赖别的块，不需要重新部署。两处原先标着待定的小取舍按「不为不存在的组合留参数」办，已告知 owner：`run` 解析器上其余几个只用于云端的参数（`--prefix`、`--ddb-table`、`--s3-bucket`、`--worker-variant`）逐个核对在本机 `run` 的路径上没有消费方之后一起删；`build_cloud_stores` 的第四返回值删去。分工按文件归属分四路同时改（cli、core、runtime 与 deploy_aws、文档与 skill），随后一位做跨包的集成与全量测试，再由独立的两位核落到位与测试覆盖有没有变少；之后在跳板机做真实执行（本机 `run`；云端 `submit` 加 `status --wait`；`run --backend cloud` 的出口），最后送另一家模型核落到位。
 
+第一批已落地。下面「云端只支持 submit」一块，以及「测试」「随实装改写的 code 注释」「行为文档」「核对时补上的条目」里归这一批的条目与半边已删去，原文在提交 c56c8925 的本文与 0021 里。
+
+- 核对：全量测试 4679 个通过；两位独立复核（是否照 ADR 做到位与残留；测试覆盖有没有变少）提了 19 条，其中须处置的 10 条都已改，包括补上两处缺的测试（推进器把 Fargate 配置交给起 task 的装配、`FargateEngine` 只有 `start_scope`）。
+- 复核里定下的一处行为：`run --backend cloud` 同时带着 `run` 已不收的云端参数（如 `--prefix`）时，仍给出指向 `submit` 的那一句、以退出码 2 结束；没有给云端后端而带这些参数时，由参数解析照常报不认识的参数。
+- 跳板机真实执行（Linux，nova 引擎，确定性 step 的 feature）：`run --backend cloud`、带云端参数的 `run --backend cloud`、配置文件把后端设为云端这三条路径都以退出码 2 结束并指向 `submit`；本机 `run` 通过；本机 `submit` 加 `status --wait` 通过；本机 `list-runs` 正常；对已部署后端的 `doctor --backend cloud` 与 `list-runs --backend cloud` 正常。
+- 欠下的真实执行，留到云端那一批重新部署之后：云端 `submit` 加 `status --wait`，以及云端 `status`、`explain` 读到记录之后的路径（已部署的后端里只有结构版本 1 的记录，现在的命令行在读头部时就以退出码 2 结束，后面的路径只有单测覆盖）。`stack.py` 删去两个 SSM 参数与 Lambda 里收窄的装配签名同样要到重新部署才生效。
+- 这一批没有动、仍把前台云端 run 当作存在的地方（按后台执行标记分流、kicker 的流过滤、`status --wait` 的 kickoff，含两句 Lambda 日志原文）留给各自的批次，0021 相应小块里已点名。
+
 下面是写回各批与删除过程文档之前的审计里记下的线索，不是完整清单；完整的实装分批对照 code 做。
 
 分批的次序约束：
@@ -255,20 +263,6 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 - 结束即清扫：run 到终态之后按 startedBy 列出仍在执行的 task 逐个停掉，可重复、不写 runs 表，流触发的按批内 run 去重；各入口（worker 事件、退出记录、定时触发）遇到已结束的 run 都只清扫、不推演不投影不认领不存明细；清扫放在「已结束的 run 跳过」之前，job 超时入口先看 run 是否已结束再看 job 状态；推进 Lambda 角色上列 task、停 task、建定时触发的权限随之核对（资源域待定时触发的名字定）（位置：lambdas/reconciler.py `handler`、`kicker_handler`、`_build`、`_tick_runs`、`_handle_timeout`；stack.py `_reconcile_lambdas`；依据：0054 决策九第 2 条与「落实时清扫的位置」段、末段权限；0034 端到端 cloud 第 3、4 步）
 - 编排进程一侧的权限按 0033 改：删去同步 run 的 ecs:RunTask、StopTask、DescribeTasks、iam:PassRole、events 表 Query 与 PutItem、job 上传与读 subnet、安全组的 SSM，删去 status --wait 的 lambda:InvokeFunction；加处置方（status --wait、settle-runs）的 runs 表条件写、报告桶 s3:GetObject（卸载的运行定义正文与被点名的明细）与报告前缀 s3:PutObject，settle-runs 不给 run_id 时另需 list-runs 的两项；列这份权限的文档随之改，见下「行为文档」块（位置：用户文档与 skill 的权限表；依据：0033 资源清单末段「编排进程角色」与 IAM 节；0040 决策 3）
 
-#### 云端只支持 submit：删去前台云端执行与只为它设的配置
-
-- `run --backend cloud`（命令行给出，或项目配置 `[common]` 的 backend 为 cloud）以退出码 2 结束并指向 submit；删去 `_cmd_run` 的云端分支：`compose.resolve_network` 的调用与读 SSM 失败的报错、cloud_fargate 装配、`build_fargate_engines` 调用、云端 `--no-report` 路径、拒绝云端 `--grace` 的逻辑（min_grace_s 取 0）与 stop_bound 注入、need_cloud 的 botocore 兜底；`doctor --backend cloud` 的 stopTimeout 比对保留（位置：cli/gherkai_cli/__main__.py `_cmd_run`；runtime/gherkai_runtime/compose.py `cloud_stop_bound_s`；cli/gherkai_cli/settings.py 讲云端拒绝 grace 的注释；依据：0016 决策 A「云端后端只支持 submit」；0053 决策 3；0030 决定七；0024「引擎自报下限」条）
-- 失败退出码分层：退出码 2 只剩缺 boto3、云端 submit 的资源 preflight 不过与 create_run 抛 botocore 异常；运行期失败为非零、只在本机 run 出现；preflight 与缺戳例外只剩 submit，版本 skew 闸的云端入口去掉 run、加上 settle-runs（位置：cli/gherkai_cli/__main__.py `_cmd_run`、`_cmd_submit`；依据：0030 决定七；0037 决策 6、决策 7「接线」条）
-- `--backend` 的接受面：run 不收云端后端；settle-runs 与 status、list-runs 一样按三项定位参数选定后端（位置：cli/gherkai_cli/__main__.py `_build_parser`；依据：0016 cli --backend 一节导语与决策 A；0041 决策六）
-- CLI 一侧组合根只装配 SubprocessEngine，`build_fargate_engines` 只由推进器 Lambda 一侧的组合根调用，Fargate 配置（cluster、events 表、桶、subnet、安全组、region）只来自 IaC 注入推进器 Lambda 的环境变量；`--no-report` 只跳过落库、不改执行引擎；job-in 由 start_scope 上传，打 tag 的是推进器 Lambda（位置：runtime/gherkai_runtime/compose.py `build_engines`、`build_fargate_engines`；依据：0016 决策 C；0033「组合根接线（非 IaC）」节；0037 决策 3）
-- FargateEngine 只留 start_scope：删去 `run_scope`、`FargateWorkerHandle`、`_read_events` 以及只服务同步消费的游标、断号宽限与退出码落值宽限和它们的注释（引 0024「读一致性」「事件流结束信号」「DynamoDB 作 events-out」的那些）；`WorkerExitError` 的 reason 只由这条路径给出，随之核去留；`WorkerExitError` 与 `WorkerNetworkError` 里「两个 Engine adapter 共用」的退出码翻译注释改为只由子进程 adapter 用（后台推进的退出码经 task_exited 与终结函数判定）；fargate_engine.py 模块头讲退出码的一行与 region docstring（改为推进器取部署所在区域）一并改；对应测试删改（位置：core/gherkai_core/adapters/fargate_engine.py `FargateEngine`、`FargateWorkerHandle`、`_read_events`；core/gherkai_core/errors.py `WorkerExitError`、`WorkerNetworkError`；core/tests/test_fargate_engine.py；依据：0034「Engine port 演进」与机制一；0024「远程传输演进」节；0028「core 层 job 重试」）
-- `ScheduleOpts` 删去 `stop_bound_s`：停止后的等待预算就是 grace，不另设；优雅终止的机制层去掉 Fargate StopTask（位置：core/gherkai_core/schedule.py `ScheduleOpts`、`_Worker`；依据：0034 机制二「排空上界」条；0026 接口段的 ScheduleOpts 说明与优雅终止）
-- 删去 run 解析器的 `--events-table`、`--cluster`、`--subnet`、`--security-group` 与项目配置 `[cloud]` 节的同名键；submit 解析器那段「不收这几个参数」的对照注释改为现行说法；`_cmd_run` 的 region 注释改为只说 subprocess env 与 store 同源（位置：cli/gherkai_cli/__main__.py `_build_parser`、`_cmd_run`；cli/gherkai_cli/settings.py `CLOUD_OPTIONS`；依据：0016 决策 A、决策 C region 条；0033「组合根接线（非 IaC）」节「Fargate 配置参数」条）
-- 删去 SSM 的 subnets 与 security-groups：compose 删 `resolve_network`、`_read_ssm_list`，`resolve_cloud_target` 的 events_table 与 cluster 覆盖形参没有别的调用方就删，`_make_ssm_client` 保留（`read_backend_version`、`read_device_farm_project` 还在用）并改它与 `read_backend_version` docstring 里「与 subnet/sg 同一条解析」的说法，`build_fargate_engines` docstring 的 region 来源改为推进器取部署所在区域；runtime 的 names.py 删 `SUBNETS_KEY`、`SECURITY_GROUPS_KEY` 并改 `ssm_path` docstring；deploy_aws 的 names.py 删对它们的 re-export 与 `ssm_subnets_path`、`ssm_security_groups_path`；stack.py 删 `_ssm_network` 里的两个 StringListParameter 与 SubnetsSsmPath 输出，WorkerSg 保留（方法改名），推进器环境变量里的 SUBNETS、SECURITY_GROUPS、REGION 保留，写着「cli 读」「resolve_network 缺省」「三个消费者」的注释一并改（模块 docstring、`__init__`、`_network`、`_worker_subnet_ids`、`_one_task_def` 的 region 注释、`_reconcile_lambdas`、`_worker_sg_id`）（位置：runtime/gherkai_runtime/compose.py；runtime/gherkai_runtime/names.py；deploy_aws/gherkai_deploy_aws/names.py；deploy_aws/gherkai_deploy_aws/stack.py；依据：0033「VPC 来源」节与资源清单 7、11；0038「SSM 参数与命名真源」；0016 决策 C region 条）
-- 可选：novaact worker 只写了命令行一侧怎样落实 region，补一句容器一侧取部署所在区域（位置：engines/novaact/gherkai_worker_novaact/run_scope.py；engines/novaact/gherkai_worker_novaact/lib/workflow_setup.py；依据：0016 决策 C region 条）
-- 待定：run 解析器其余标着 [--backend cloud] 的 `--prefix`、`--ddb-table`、`--s3-bucket`、`--worker-variant` 是否一起删，见下「写回时留下、实装之前要定的问题」（位置：cli/gherkai_cli/__main__.py `_build_parser`；依据：0016 决策 A）
-- ADR 里讲 run --backend cloud 的历史实测与发版验证记录保留原文，删去前台云端执行时不改写；全仓 grep run --backend cloud 时，这几处命中不算漏改。它们是：0037「施工前现状实测（历史快照）」表里「装进干净 venv 后 submit --backend cloud」一行；0042「验证」节里云端后端那一条（推两引擎 dev worker 镜像为 variant base 后 run --backend cloud 的故意失败断言）；0043「验证」节的 v1.4.3 发版验证记录；0051「实测依据」表里「真部署后的 task role 策略」一行。0041 决策二里 run --backend cloud --quiet 的那句执行记录与决策正文写在一起，已随「这个组合以退出码 2 结束」删去，不再补回。0016「版本切分」的 v1.2.0 行已经不含「接力收集」，「接力推进」进退役词表时，这一行不需要豁免。
-
 #### 查看命令与机读输出
 
 - `run --json` 新增 jobs[]：列出运行定义里的全部 job，状态与由结束写结束的 job 的说明取运行态，被点名的附上那一份明细的各键；run 在本次执行结束之前已被别处结束时，本次判出的结果不写进记录、不再存明细，不输出汇总，`--json` 的 stdout 为空，不生成报告，退出码 1（处理过使用方中断时按信号取 130 或 143）（位置：cli/gherkai_cli/__main__.py `_cmd_run`；cli/gherkai_cli/render.py `render_text`；core/gherkai_core/persist.py `RunPersistence.finalize`；依据：0041 决策三；0054 决策五「执行方服从记录」；0031 决定五）
@@ -293,11 +287,10 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 - 机制三删去的测试项对应的测试删或改：第 2 项的云端一半（run --backend cloud）、第 4 项的后半（已结束 run 上 job 写照样写成）、第 5 项的本机多推进器；本机认领竞态用例不再成立（本机锁内的结束写会把新认领的 job 记 aborted 并结束 run），删去或改写；实测项 7 只留云端用例，它的文档串改为「被写入序号的条件挡下」并换掉「推进方」「收尾写」「到期收尾」；「收尾写不带认领计数」的用例随之改（位置：core/tests/test_reconcile.py `test_expiry_loses_to_a_claim_that_landed_after_the_read`、`test_all_done_after_the_deadline_aggregates_without_the_claim_count_condition`；core/tests/test_cloud_reconcile.py `test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb`；依据：0034 机制三；0054 实测项 7 与决策二后台推进条「收尾与报告」）
 - 终止对拍矩阵去掉接力补写，加上期限截断与预算截断的分行（预算为 error 加 timeout，期限为 aborted）；到期用例文档串里「后台的运行态里 b 保持 pending」随结束写改（位置：core/tests/test_termination_parity.py `test_expiry_agrees_between_the_foreground_and_the_advancer` 等；依据：0034 机制二「双路径对拍是实施护栏」）
 - run_verdict 与按原因优先序的用例删改：`test_user_interrupt_with_passed_and_aborted_marks_run_aborted`、`test_interrupt_then_past_stop_start_reports_the_deadline_over_aborted` 与「使用方中断」「运行期限与这次 run 的记录」两节的分节注释；test_project.py 的「run 级裁决」一节与 `test_project_full_run_level_comes_from_the_shared_verdict`（写的是 0031 决定三被拒方案②）；`test_plan_next_past_stop_start_never_proposes_a_start` 与 `test_plan_next_past_stop_start_does_not_expire_while_a_recorded_job_is_still_pending` 的「未启动只指事件流里没有记录的 job」改为按运行态的 pending；另核 code 与测试注释里指向 0031 决定三已删内容（过滤名单、空判定集规则）的各处，按「0031 决定三」逐条查（位置：core/gherkai_core/model.py `_NON_VERDICT` 上方注释；core/gherkai_core/project.py `_aggregate`；core/tests/test_lifecycle_states.py、test_project.py、test_schedule.py、test_conditional_writes.py、test_reconcile.py；依据：0031 决定三；0054 决策二后台推进条「决策」）
-- `test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers` 里「以退出码 1 报运行期」改为非零（位置：core/tests/test_schedule.py；依据：0030 决定七）
 - core/tests/test_status_group.py 模块文档串与 `test_create_derives_group_from_the_initial_status` 以 0030 决定六为出处写「传入终态初始状态」，决定六已不写这一情形：写明这是函数层的性质，或把用例收窄到 pending，由实装批择一（位置：core/tests/test_status_group.py；依据：0030 决定六「runs 表只有一个 GSI」条的写入规则）
-- 0053 键集差集护栏：排除名单加 settle-runs 的 `--dry-run`，settle-runs 进读配置文件的命令清单；`CLOUD` 字面集合手动删去 `--events-table`、`--cluster`、`--subnet`、`--security-group`（差集护栏不会自动对齐）；`test_config_grace_does_not_block_cloud_run_or_submit` 随 run 不收云端后端改（位置：cli/tests/test_project_config.py `CLOUD`、`test_every_long_option_is_classified_and_the_derived_key_sets_match`；依据：0053 决策 1、3、6；0016 决策 A）
-- 部署模板测试：删 `test_ssm_params_with_prefix_path`；`_BASE_SSM_PARAMS` 去掉两项，按个数命名的 `test_ssm_parameter_set_without_device_farm_project_is_exactly_six` 与 `..._is_exactly_seven` 改名改数；`test_worker_subnets_single_source_across_ssm_and_lambda_env` 改为锁定两个推进器的 SUBNETS 相同、由 subnet 资源的 Ref 拼成且不为空；`test_prefix_switches_whole_set` 去掉 subnets 路径的断言并改 SSM 全集，否则直接变红；`test_exit_observer_can_read_runs_table_only` 随观察者不读 runs 表改；`test_kicker_mapping_insert_filter` 改为两条过滤（位置：deploy_aws/tests/test_stack.py；依据：0033「VPC 来源」节「三种取值统一走公有子网」段、资源清单 11、13；0054 决策九）
-- 前台云端 run 的测试删改：cli/tests/test_backend_cloud.py 的 `fake_resolve_network` 打桩、`test_cloud_wires_fargate_engines` 的 network_config 断言与前台云端 run 的用例，status --wait kickoff 的用例，`test_submit_does_not_accept_events_table_or_cluster` 文档串里的对照说法；runtime/tests/test_compose.py 的 resolve_network 四条与 `test_ssm_path_contains_prefix` 的 subnets 例子及其指向已删论证的注释（位置：如列；依据：0016 决策 A；0033 资源清单 11）
+- 0053 键集差集护栏：排除名单加 settle-runs 的 `--dry-run`，settle-runs 进读配置文件的命令清单（位置：cli/tests/test_project_config.py `test_every_long_option_is_classified_and_the_derived_key_sets_match`；依据：0053 决策 1、6）
+- 部署模板测试：`test_exit_observer_can_read_runs_table_only` 随观察者不读 runs 表改；`test_kicker_mapping_insert_filter` 改为两条过滤（位置：deploy_aws/tests/test_stack.py；依据：0033 资源清单 13；0054 决策九）
+- status --wait kickoff 的测试删改：cli/tests/test_backend_cloud.py 里 status --wait 调起 kicker 的用例（`test_status_wait_cloud_kicker_missing_fails_fast` 等），与删 kickoff 同批（依据：0054 决策八；0034「推进器与触发源」第 2 条）
 - 接力与 handler 分流的测试随 code 删：runtime/tests/test_detached_launcher.py 的 `test_relay_recovers_foreign_timed_out_claim`、`test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_jobs`、`test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write` 与讲接力判定条件的一节；cli/tests/test_definition_schema.py `test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback`；deploy_aws/tests/test_lambda_handlers.py「只推进 detached run（handler 侧分流）」一节；core/tests/test_sqlite_event_log.py `test_record_timed_out_if_absent_writes_only_when_there_is_no_exit_record` 随端口方法定（位置：如列；依据：0034 被拒方案「本机接力，及其改法」、端到端 cloud 1b）
 
 #### 隧道（0035）与两种 `submit` 的新流程
@@ -332,7 +325,6 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 - 接力的描述：reconcile.py 模块头触发源括注里的「status --wait 接力」（删掉之后可恢复指向 0034「推进器与触发源」）、`EventLog` 里讲本机接力恢复的两处、project.py `TaskExited` 的接力补写说法、detached.py 模块头与 `run_reconcile_loop`、`drive_local_reconcile`（含「接力者同样兜底拆」）、`build_local_reconcile` 的接力说明、`RunMeta` 与 `JobState.claimed_at` 注释和 `RunStore.try_claim_job` 里列的接力用途（claimed_at 只是截止时刻的起算点）、`LocalRunStore` 里「接力者」一句、`_cmd_status` 与 `_cmd_status_body` 的「两道闸」、`_render_status`、`_status_cloud`、`_submit_local` 与 status 子命令的 help（位置：core/gherkai_core/reconcile.py、project.py、model.py、ports.py、adapters/run_store/local.py；runtime/gherkai_runtime/detached.py；cli/gherkai_cli/__main__.py；依据：0034「推进器与触发源」、被拒方案「本机接力，及其改法」、「job timeout」节 JobState.claimed_at 条①）
 - 按 detached 分流的描述：ddb.py `is_detached` 文档串后半句（标记是执行环境属性、在 STATE 条目上的前半句保留）、ddb.py 模块头与 `_state_item` 的「kicker filter 认它」、exit_observer.py 模块头与 `_is_detached`、reconciler.py `_build` 与 `_run_ids_from_runs_stream`（status --wait kickoff 一格）、stack.py `_reconcile_lambdas`（三个 handler 自己分辨、kicker 靠流过滤的说明）、compose.py `build_cloud_stores` 的「触发 kicker 冷启动」一句、core/tests/test_ddb_run_store.py `test_detached_flag_on_state_item` 与 cli/tests/test_main.py `test_local_submit_marks_the_run_detached_and_foreground_run_does_not` 的文档串（位置：如列；依据：0034 端到端 cloud 1b「触发过滤不看后台执行标记」）
 - RunState 写入方的指针：stack.py `_grant_task_role` 与 `_reconcile_lambdas`、test_stack.py `test_task_role_has_events_putitem_not_runs` 与 `test_exit_observer_can_read_runs_table_only` 写「RunState 的写入方见 ADR 0034『数据模型三件套』」，与 0024 红线条所指的 0034「命令形态」表统一成同一个指向（两处所指都存在）（位置：如列；依据：0024「DynamoDB 作 events-out 传输」节红线条；0034「命令形态」「数据模型三件套」）
-- 指向 0024 已删「exitCode 落值延迟」条的注释改指 0024「控制面不走 events 表」条或 0034 机制二「退出码缺失」条，FargateEngine 一侧的随 run_scope 删去（时机见下「写回时留下、实装之前要定的问题」）（位置：core/gherkai_core/errors.py `WorkerExitError`；project.py `PLATFORM_FAILED_EXIT` 附近与 `platform_exit_reason`；schedule.py `_Worker._run_once`；deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py `exit_from_task`；core/tests/test_project.py `test_platform_exit_reason_joins_stop_code_and_reason_with_fallback`；core/tests/test_schedule.py `test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not`；core/DEVELOPMENT.md 目录树的 errors.py 一条；依据：0024「DynamoDB 作 events-out 传输」节；0034 机制二）
 - 隧道建在宿主进程里之后，以下行为描述随隧道实装改写；所在函数随实装删去的，注释一并删去：
     - deadline.py：模块头把云端每 job 尾段说成「隧道存活时间上限已在用的每 job 余量（tunnel_host.CLOUD_PER_JOB_MARGIN_S，210 秒）」，并从 tunnel_host import 这个常量；STARTUP_MARGIN_S 与 CLOUD_PER_JOB_TAIL_S 的注释拿隧道 TTL 作对照。改为 210 秒归期限算式所有，组成指向 0054 决策二「尾段与余量是预算的取值」一段。tunnel_host 的 TTL 常量删去之后，这个值改在 deadline.py 里定义。
     - tunnel_host.py：TTL 的记账常量、compute_watch_ttl_s；watch_run_and_stop_tunnel 文档串的「TTL 到点 → 拆隧道自杀」「不在此拆就没人拆」。
@@ -347,15 +339,15 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 #### 行为文档（随所改行为的实装批同一提交改）
 
 - core/DEVELOPMENT.md：架构决策列表里 0054 一行括注的「run 级裁决」「run 级终态不可变」改为「期限规则 run_deadline、生命期锁、终态不可变、执行方先认领再启动、run 处置」，与删 run_verdict 的实装同一提交；目录树的 run_store 一条写明认领计数只作 status --json 的诊断键，「条件写 try_claim_job/project_state/try_finalize」随结束写入口改（位置：core/DEVELOPMENT.md；依据：0054；0031 决定三；0034 机制三「run 级状态只进不退」条①）
-- docs/internals/execution-and-reconciliation.md：收尾的写序（try_finalize、jobs/*.json、竞争收尾）、local submit 的超时一行（per-run 进程）、触发过滤的叙述与指向「filter 必须区分写入者」「兜底/接力」条的权威指针、讲接力的各处都随实装对齐（位置：如列；依据：0034；0054）
-- 技术文档：runtime/DEVELOPMENT.md 的 detached 一条（接力判超时与指向 0054 决策二「本机接力的改法」的指针）与 compose 一条里的 resolve_network；cli/DEVELOPMENT.md 的「子网/安全组解析」与 run 的单项覆盖参数、submit 不收这两个参数的对照说法、讲接力的行为描述；deploy_aws/DEVELOPMENT.md 的 SSM 参数族与 `_worker_subnet_ids` 的三个消费者（改为两个推进器共用同一份环境变量）；docs/internals/cloud-backend-carriers.md SSM 参数一行去掉 subnets 与 security-groups（位置：如列；依据：0033「VPC 来源」；0034 被拒方案「本机接力，及其改法」；0016 决策 A、决策 C）
+- docs/internals/execution-and-reconciliation.md：收尾的写序（try_finalize、jobs/*.json、竞争收尾）、local submit 的超时一行（per-run 进程）、触发过滤的叙述（§7 与 execution-detached-gates 图现在写对后台标记恒放行的两道判断，随 handler 不分流与 kicker 的流过滤改）、讲接力的各处都随实装对齐（位置：如列；依据：0034；0054）
+- 技术文档：runtime/DEVELOPMENT.md 的 detached 一条（接力判超时与指向 0054 决策二「本机接力的改法」的指针）；cli/DEVELOPMENT.md 讲接力的行为描述（位置：如列；依据：0034 被拒方案「本机接力，及其改法」）
 - docs/internals/artifacts-and-evidence.md：explain 文本形态表里「诊断细节见 worker 日志」的条件补上只对运行态里带认领时刻的 job 给（位置：如列；依据：0042 决策四「记录缺口的两种情形」第一条）
-- 用户指南：configuration.md 的 `[cloud]` 节键表去掉 events-table、cluster、subnet、security-group，跨命令选项表去掉 run 的这四个参数及其说明，`--max-concurrency` 不再列 status；running-and-results.md 的「仅 --backend cloud」段随 run 不收云端后端改写；0040 的派生视图改为三种组合、本机与云端两级加 plan（云端一级为 submit、status --wait、settle-runs，去掉 lambda:InvokeFunction、保留 lambda:GetFunction，加处置所需的条件写、报告桶 s3:GetObject 与写报告，推论改为云端执行不需要任何 ECS 写权限）：running-and-results.md「两个独立的选择」节的权限表、getting-started.md「按角色选安装形态」的角色表（位置：docs/user-guide/configuration.md、running-and-results.md、getting-started.md；依据：0016 决策 A；0040 决策 3；0033 编排进程角色）
-- 机读契约页与它的 skill 副本：写出 settle-runs 的 `--json`（runs[]、outcome、reason）、run --backend cloud 以退出码 2 结束并指向 submit、status 与 list-runs 的 deadline_at、status --json 的点名标识、run --json 的 jobs[]；`test_run_json_top_level_message_is_always_present_and_documented_as_run_level` 锁定的「没有执行」一句随之改（位置：docs/internals/cli-json-contract.md；cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md；cli/tests/test_cli_json_contract.py；依据：0041 决策三、决策七；0054 决策八；0016 决策 A）
-- agent skill 正文按 0043 决策五骨架改：第 3 步写明云端后端的执行只经 submit（run 只有本机后端），旗标表里云端后端一行去掉 run；去掉直接读 jobs/*.json 的说法，`--scope` 的取值写成 `--json` 输出里的 scope_id；第 8 步删去「它同时是接力」；references/cloud-backend.md「1 分工」表同 0040 派生视图（位置：cli/gherkai_cli/skills/gherkai/SKILL.md 与 references/；依据：0043 决策五骨架 3、5、8；0040 决策 3）
+- 用户指南：configuration.md 跨命令选项表的 `--max-concurrency` 不再列 status；0040 派生视图的云端一级改为 submit、status --wait、settle-runs，去掉 lambda:InvokeFunction、保留 lambda:GetFunction，加处置所需的条件写、报告桶 s3:GetObject 与写报告，推论改为云端执行不需要任何 ECS 写权限：running-and-results.md「怎么运行、在哪运行：三种组合」节的权限表、getting-started.md「按角色选安装形态」的角色表（三种组合已改）（位置：docs/user-guide/configuration.md、running-and-results.md、getting-started.md；依据：0040 决策 3；0033 编排进程角色）
+- 机读契约页与它的 skill 副本：写出 settle-runs 的 `--json`（runs[]、outcome、reason）、status 与 list-runs 的 deadline_at、status --json 的点名标识、run --json 的 jobs[]；`test_run_json_top_level_message_is_always_present_and_documented_as_run_level` 锁定的「没有执行」一句随之改（位置：docs/internals/cli-json-contract.md；cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md；cli/tests/test_cli_json_contract.py；依据：0041 决策三、决策七；0054 决策八）
+- agent skill 正文按 0043 决策五骨架改：去掉直接读 jobs/*.json 的说法，`--scope` 的取值写成 `--json` 输出里的 scope_id；第 8 步删去「它同时是接力」；references/cloud-backend.md「1 分工」表同 0040 派生视图（位置：cli/gherkai_cli/skills/gherkai/SKILL.md 与 references/；依据：0043 决策五骨架 5、8；0040 决策 3）
 - 评测 fixture 随实装重录：文件集改为 run_meta.json、run_state.json、运行态点名的各份判定明细（文件名带保存标识）与被引用的 evidence 和截图；占位符覆盖面里的 report_refs[].ref 落在判定明细上；run_meta 的 steps_dir 由后台推进进程读回（位置：skills/gherkai-evals/fixtures/、skills/gherkai-evals/materialize.py；依据：0043 决策七「fixture 可搬迁契约」）
-- 图：docs/diagrams/run-execution.json 的三处「四种组合」改为三种组合，用 tools/build_diagrams.mjs 重出 SVG 与 HTML、与相应实装批同一提交；docs/diagrams/execution-timeout-chain.json 的「超时处置」「到点处置」随退役词入表改，同样重出 SVG 与 HTML、与加表的提交同一提交（位置：如列；依据：0045 决策七；0016 决策 A；CONTEXT「job 到点停止」）
-- CHANGELOG 未发行节：讲 status --wait 接力、到期记 error、中断记 aborted、云端前台 run 的条目直接改写为新行为，不写对照（这些条目描述的旧行为是本版未发行期间才加的，从来没有发行过，使用者手上没有它们，所以不能拿来当对照基准。和已发行版本行为相比的「此前……」照常保留，例如后台 run 超时原先记 engine_error 那一句）；另在 `[Unreleased]` 里提一句 run 的推进、处置与状态取法这一部分做了重构，升级与迁移的细节不写（owner 2026-11-18）；另提一句已部署的 stack 下次 deploy 时 CloudFormation 会删掉 `/{prefix}backend/subnets` 与 `/{prefix}backend/security-groups`，它们没有别的读者、不用迁移（位置：CHANGELOG.md `[Unreleased]`；依据：0033 资源清单 11；本文「owner 定的写回口径」）
+- 图：docs/diagrams/execution-timeout-chain.json 的「超时处置」「到点处置」随退役词入表改，用 tools/build_diagrams.mjs 重出 SVG 与 HTML、与加表的提交同一提交（位置：如列；依据：0045 决策七；CONTEXT「job 到点停止」）
+- CHANGELOG 未发行节：讲 status --wait 接力、到期记 error、中断记 aborted 的条目直接改写为新行为，不写对照（这些条目描述的旧行为是本版未发行期间才加的，从来没有发行过，使用者手上没有它们，所以不能拿来当对照基准。和已发行版本行为相比的「此前……」照常保留，例如后台 run 超时原先记 engine_error 那一句）；另在 `[Unreleased]` 里提一句 run 的推进、处置与状态取法这一部分做了重构，升级与迁移的细节不写（owner 2026-11-18）（位置：CHANGELOG.md `[Unreleased]`；依据：本文「owner 定的写回口径」）
 - CHANGELOG 未发行节的隧道条目随隧道实装批改写为新行为，不写对照。第一项：讲 `submit --backend cloud --expose-local` 的 `--tunnel-ttl` 默认值的那一条（按各 job 墙钟预算之和加 900 秒、再加每个 job 210 秒，链到 local-app-testing.md「存活时间上限」一节）删去，`--tunnel-ttl` 不再提供（`gherkai.toml` 的 `tunnel-ttl` 同样去掉）。第二项：改写为新行为，要点是隧道建在本机持有隧道的进程里（前台 `run` 的 CLI 进程、本机 `submit` 的后台推进进程、云端 `submit` 的本机守护进程），用 ngrok 官方的 Python SDK，不再需要 ngrok 可执行文件，使用者安装 `gherkai[tunnel]`，令牌只从环境变量 `NGROK_AUTHTOKEN` 读取；云端 `submit` 的守护进程在 run 到终态或到运行期限加 300 秒时退出，公网入口在同一时刻由边缘拒绝访问。第三项：同一节里讲「后台进程还没接管就失败时隧道立即拆掉」的那一条按新的宿主次序核对，改写或删去。（位置：CHANGELOG.md `[Unreleased]`；依据：0035 决策 1「前置条件」、决策 3「云端 `submit`」与「边缘到点拒绝」、被拒方案「保留 `--tunnel-ttl`，只允许调小」；0037 决策 2c）
 - docs/internals 里讲隧道的三处随隧道实装批同一提交改：
     - artifacts-and-evidence.md 产物表里 `tunnel.json` 一行（「隧道收尾凭据（pid）」，仅 local `submit` 且带 `--expose-local`）删去，不再有这个文件；
@@ -400,21 +392,7 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
     - 可以另加一条评测要求：说明公网入口到点在 ngrok 边缘关闭（0035 决策 3「边缘到点拒绝」），是否加由实装批定。
     - 同一文件 eval 22 的评测要求里「域名每个 run 都会换」一句，按 0035 决策 2「`plan` 输出替换前的原始地址」一条（地址随账号不同）一并核对。
     - 改过评测要求之后，在 evals.json 的 notes 里记下这一轮尺子的改动。
-- 「四种组合」的措辞改为三种组合（本机前台 run、本机后台 submit --backend local、云端后台 submit --backend cloud），与 run 不收云端后端的实装批同一提交改：
-    - 根 README.md 第 54 行的顺序说明与第 85 行导航表；
-    - cli/README.md 第 32 行与 runtime/README.md 第 42 行的指针行；
-    - docs/user-guide/README.md 第 11 行；
-    - docs/user-guide/running-and-results.md 第 3 行与第 7 行。第 7 行「两个互不影响的选择，四种组合都合法」要改写为云端后端只有后台，不能只改数字；
-    - docs/user-guide/cloud-backend.md 第 155 行；
-    - docs/user-guide/local-app-testing.md 第 5 行；
-    - docs/internals/README.md 第 8 行，同时去掉「云端 Lambda 为何不介入前台 run」；
-    - execution-and-reconciliation.md 第 3、31 行；
-    - deterministic-step-lifecycle.md 第 146 行（「run / submit × local / cloud 四种组合」）；
-    - verdict-model.md 第 5 行；
-    - architecture-overview.md 第 35、42 行，其中「四条物理通道」随组合数一起改。
-
-    CHANGELOG.md 已发行节里的同一说法是历史记录，不改。核对办法：在 README、各包 README、docs/user-guide、docs/internals 与 docs/diagrams 下 grep「四种组合」，结果应为 0（位置：如列；依据：0016 决策 A；0045 第 45 行与决策七）
-- docs/user-guide/cloud-backend.md「团队成员需要的最小云端权限」一节也是 0040 决策 3 与 0033 编排进程角色的派生视图，随这一批同时改。分级改成云端只有一级（submit、status --wait、settle-runs）。删去「run --backend cloud」一整级（events 表 Query、起停与查询 Fargate 任务、iam:PassRole、上传 job，以及「起任务的是你自己的进程」一句）。从「submit + status」一级里删去「调用 `<prefix>kicker` Lambda」，保留提交前检查用的 lambda:GetFunction。加上 run 处置所需的权限：runs 表的条件写，报告桶的 s3:GetObject（读卸载到 S3 的运行定义正文和被点名的判定明细），以及报告前缀的 s3:PutObject（写报告）；settle-runs 不给 run_id 时，另需 list-runs 的两项。结尾的推论改成云端执行不需要任何 ECS 写权限。explain 补取一段的括注改成「云端这一级要另加 events 表的 dynamodb:Query」。设备、list-runs、doctor 三段里「无论哪一级」「两级都用」「已含在上面两级里」「不在这两级里」的说法，一律改成单级的表述。依据：0040 决策 3；0033「资源清单」末段的编排进程角色；0054 决策八。
+- docs/user-guide/cloud-backend.md「团队成员需要的最小云端权限」一节也是 0040 决策 3 与 0033 编排进程角色的派生视图（已改为云端只有一级）。从「submit + status」一级里删去「调用 `<prefix>kicker` Lambda」，保留提交前检查用的 lambda:GetFunction。加上 run 处置所需的权限：runs 表的条件写，报告桶的 s3:GetObject（读卸载到 S3 的运行定义正文和被点名的判定明细），以及报告前缀的 s3:PutObject（写报告）；settle-runs 不给 run_id 时，另需 list-runs 的两项。结尾的推论改成云端执行不需要任何 ECS 写权限。依据：0040 决策 3；0033「资源清单」末段的编排进程角色；0054 决策八。
 
 #### 收尾
 
@@ -429,21 +407,18 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 
     逐处判断是改成现行说法还是删去。「超时处置」「到点处置」「接力推进」进 RETIRED_TERMS 之后由测试守，其余各词没有测试守，只能靠这次检索。claim_count 作诊断键、launcher 一类类名、「正交」一词另有合法用法，要按语境判断，不按字面判。「物化」也可能有与旧设计无关的用法，同样按语境判断。
 
-    豁免：已发行版本的 CHANGELOG 条目，以及 ADR 里保留原文的实测记录。
+    豁免：已发行版本的 CHANGELOG 条目，以及 ADR 里保留原文的实测记录。ADR 里讲 run --backend cloud 的历史实测与发版验证记录保留原文，删去前台云端执行时不改写；全仓 grep run --backend cloud 时，这几处命中不算漏改。它们是：0037「施工前现状实测（历史快照）」表里「装进干净 venv 后 submit --backend cloud」一行；0042「验证」节里云端后端那一条（推两引擎 dev worker 镜像为 variant base 后 run --backend cloud 的故意失败断言）；0043「验证」节的 v1.4.3 发版验证记录；0051「实测依据」表里「真部署后的 task role 策略」一行。0041 决策二里 run --backend cloud --quiet 的那句执行记录与决策正文写在一起，已随「这个组合以退出码 2 结束」删去，不再补回。0016「版本切分」的 v1.2.0 行已经不含「接力收集」，「接力推进」进退役词表时，这一行不需要豁免。
 
     指针编号类的旧号（「0054 决策三末段」、0054 实测项旧号等）已在写回时改完，由上面的条名差集覆盖，不进这张表。
 
 #### 核对时补上的条目
 
-- 待定：`run` 不收云端后端之后，`build_cloud_stores` 的第四返回值（云端的 make_artifacts）在 CLI 一侧没有使用方（status 用 `compose.cloud_artifact_locations`，submit 丢弃它）。删掉还是留给推进器 Lambda 与将来的 WebUI，由实装批或 owner 定，定了之后同步改 0016「装配两个后端都下沉 compose」里 build_cloud_stores 的签名与「第四返回值」两条（位置：runtime/gherkai_runtime/compose.py `build_cloud_stores`；cli/gherkai_cli/__main__.py `_submit_cloud`；依据：0016 决策 A）
-- 同上一条，并补：cli/gherkai_cli/__main__.py `_submit_cloud` 里 `detached=True` 的注释（「kicker filter 认它冷启动、同步 run 不带」），改为标记只供 `list-runs --json` 的 detached 键（依据：0034 端到端 cloud 1b）
+- cli/gherkai_cli/__main__.py `_submit_cloud` 里 `detached=True` 的注释（「kicker filter 认它冷启动」）随 kicker 的流过滤改为标记只供 `list-runs --json` 的 detached 键（依据：0034 端到端 cloud 1b）
 - 待定：run 两次定时触发的名字形态与 IAM 资源域定下之后，按新名字重核 0033「两层命名」节的 prefix 长度上限与 `prefix_max_len()`（取各名字空间里最紧的一个；超过 64 字符时 kicker 处理 STATE 新建的调用会失败、由流反复重试），并补齐 0033 资源清单 15 与 0054 决策九末段的登记（位置：runtime/gherkai_runtime/names.py `prefix_max_len`；deploy_aws/gherkai_deploy_aws/stack.py `_reconcile_lambdas`；依据：0033 资源清单 15 与「两层命名」；0054 决策九）
 - 待定：云端处置方按 CLI 的 `--report-dir` 读被点名的明细、写报告，推进器 Lambda 用 `REPORT_DIR`，两者只在 submit 的 preflight 比对过；处置一侧是否也比对报告前缀，交 owner 定（位置：处置的 runtime 实现；cli/gherkai_cli/__main__.py settle-runs 与 `_status_cloud`；依据：0054 决策七、八；0033 编排进程角色段）
 - 删 Status 头那句时一并核对 0027「现在做 / 留口子」的「本 ADR 上述全部决策均已实装」与 0041 决策七开头的「本条已实装」：code 跟上之前它们与 Status 头相抵，跟上之后才成立（位置：docs/adr/0027-runreport-aggregation-index.md「现在做」；docs/adr/0041-agent-facing-cli-affordances.md 决策七）
-- 删 `[cloud]` 节四个键时一并改 cli/gherkai_cli/settings.py `config_layers` 文档串里讲 events-table / cluster 的那一句（依据：0016 决策 A、决策 C）
-- 同一待定项的位置补上 docs/user-guide/configuration.md 跨命令选项表里 `--ddb-table`、`--s3-bucket` 两行列出的 `run`
-- 另随实装校准：docs/internals/verdict-model.md（run 级取法、job 级 skipped 来自结束写）、docs/user-guide/troubleshooting.md 与 local-app-testing.md（到期与接力；隧道的部分见上「隧道（0035）与两种 `submit` 的新流程」一块与「行为文档」块里讲隧道的各条）、docs/internals/deterministic-step-lifecycle.md（宿主）、docs/user-guide/running-and-results.md（接力与前台 run 提示）；cli/gherkai_cli/__main__.py `_cmd_doctor` 的 stopTimeout 文档串与 compose.py `WorkerResolution` 的 stop_timeout_s 说明随 FargateWorkerHandle 删去改写（依据：0031 决定三；0034 被拒方案「本机接力，及其改法」；0034「Engine port 演进」）
-- docs/internals/verdict-model.md 与 docs/internals/execution-and-reconciliation.md 里有三处指针所指的小节已经不在（0031 的「aborted 只认主动中止…不认 timeout」、0034「filter 必须区分写入者」、0054「本机接力的改法」），随这两篇按新行为改写时一并去掉；这类指针用「目标条名在改写之前的 ADR 里有、现在没有」的差集查
+- 另随实装校准：docs/internals/verdict-model.md（run 级取法、job 级 skipped 来自结束写）、docs/user-guide/troubleshooting.md 与 local-app-testing.md（到期与接力；隧道的部分见上「隧道（0035）与两种 `submit` 的新流程」一块与「行为文档」块里讲隧道的各条）、docs/internals/deterministic-step-lifecycle.md（宿主）、docs/user-guide/running-and-results.md（接力与前台 run 提示）（依据：0031 决定三；0034 被拒方案「本机接力，及其改法」）
+- docs/internals/verdict-model.md 与 docs/internals/execution-and-reconciliation.md 里有两处指针所指的小节已经不在（0031 的「aborted 只认主动中止…不认 timeout」、0054「本机接力的改法」），随这两篇按新行为改写时一并去掉；这类指针用「目标条名在改写之前的 ADR 里有、现在没有」的差集查
 
 #### 写回时留下、实装之前要定的问题
 

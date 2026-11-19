@@ -591,9 +591,9 @@ def test_run_meta_steps_dir_round_trip():
 def test_run_meta_worker_fields_round_trip():
     """RunMeta.worker_variant / worker_task_defs（ADR 0038）：带值往返不丢；None 写 null（键集固定，ADR 0037 决策 7；本机后端两者都为 None）。
 
-    载体在 definition 的理由与 max_concurrency 同源：起 task 的宿主
-    （同步 run 的 FargateEngine / kicker / reconciler）与提交进程分离，只有随 META 持久化才到得了推进器；
-    且「用的是哪套确定性 step 集」影响判定可复现性、本就属 run 定义。
+    载体在 definition 的理由与 max_concurrency 同源（ADR 0034 机制四「`max_concurrency` 随 definition 走 + 推进器侧 cap」段，
+    另见 ADR 0038「运行时与 preflight」节「选择进 definition」条）：起 task 的宿主（两个推进器 Lambda：kicker / reconciler）
+    与提交进程分离，只有随 META 持久化才到得了推进器；且「用的是哪套确定性 step 集」影响判定可复现性、本就属 run 定义。
     """
     import dataclasses
 

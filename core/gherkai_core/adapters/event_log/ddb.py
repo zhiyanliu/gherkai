@@ -7,10 +7,9 @@ events 表（FargateEngine 已实际运行过），本类只是**读**它们 + �
 **表 schema 复用现有 events 表**（[0024]/[0033]：PK=pk(run_id#scope_id) / SK=seq(NUMBER) / body=JSON行）——不加 GSI、
 不改 schema：
 - **读全量**：reconciler 有 RunMeta（definition 含全部 job.scope_id），故**逐 scope Query** `PK=run_id#scope_id`
-  拼出全 run records（复用 FargateEngine._read_events 的单 scope Query 形状）。DDB PK 复合、不能只按 run_id 前缀查，
-  但 scope_id 集合从 definition 已知，逐个 Query 即可、无需 GSI。
+  拼出全 run records。DDB PK 复合、不能只按 run_id 前缀查，但 scope_id 集合从 definition 已知，逐个 Query 即可、无需 GSI。
 - **task_exited 独立键空间**（机制一）：DDB SK 是 NUMBER、不能用字符串前缀 `exit#`，故用**保留高位数值 SK**
-  （`EXIT_SK`）——worker seq 从 1 递增、远不到它，故退出记录不入 worker 连续 seq 段、不参与断号检测（机制一等价落地）。
+  （`EXIT_SK`）——worker seq 从 1 递增、远不到它，故退出记录不入 worker 连续 seq 段、不会与 worker 的事件撞号（机制一等价落地）。
   用属性 `item_type='exit'` + `exit_code` 承载，另有可选的 `timed_out`、`reason`、`exited_at`（退出时刻，UTC 的 ISO 串），没有值时
   不写这个属性。键字段名/`EXIT_SK` 等 schema 常量单一事实源在 `fargate_engine`（见下 import）。
 """
@@ -36,7 +35,7 @@ from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_core.wire import event_from_line
 
 # 退出时刻属性名：只在退出记录（`EXIT_SK`）上出现，读写都在本模块，与同在退出记录上的 `timed_out`、`reason` 同样不进 fargate_engine
-# 的 schema 常量（同步路径的读端不读退出记录）
+# 的 schema 常量
 _EXITED_AT_ATTR = "exited_at"
 
 # events 表 TTL（[0033] 决定：events 是进度脚手架、只留 7 天）——写端（worker 的 EventSink）给每条 event item
@@ -58,14 +57,18 @@ class DdbEventLog:
         self._scope_ids = list(scope_ids)
 
     def records(self) -> list[EventRecord]:
-        """读某 run 全量 records（逐 scope Query worker 段 events + 取 task_exited）→ 供 project 全量重放。"""
+        """读某 run 全量 records（逐 scope Query worker 段 events + 取 task_exited）→ 供 project 全量重放。
+
+        按 `PK=run_id#scope_id` Query 即分流（只返回本 run 本 scope 的事件，不需要 dispatcher）；Query 是非破坏性读，重读无副作用、
+        不需要去重表；每次都是强一致的全量读、没有游标（ADR 0024「DynamoDB 作 events-out 传输」节「消费天然定向 + 天然幂等」条与
+        「读一致性」条）。"""
         from boto3.dynamodb.conditions import Key
 
         recs: list[EventRecord] = []
         for scope_id in self._scope_ids:
             pk = events_pk(self._run_id, scope_id)
             # 逐 scope 全量 Query（含翻页；SK 升序保序）。worker 段 + 可能的 task_exited 高位 item 都在同 PK 下。
-            # ConsistentRead：本读面是 reconcile 的投影输入，且 finalize 前的 _final_drain / 退出观察者写入紧接着
+            # ConsistentRead：本读面是 reconcile 的投影输入，worker 的尾事件与退出观察者的写入紧接着
             # 就要被读到——最终一致读可能漏掉刚写的尾事件，让投影把已完成 job 判成仍在运行（ADR 0030 决定六）。
             kwargs = {"KeyConditionExpression": Key(PK_ATTR).eq(pk), "ScanIndexForward": True, "ConsistentRead": True}
             while True:

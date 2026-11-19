@@ -29,7 +29,7 @@ gherkai explain <run_id>                  # 读这个 run 的每步证据，看�
 ## 文档
 
 - 装什么、要哪些 AWS 前置、第一次怎么完整运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/getting-started.md
-- 四种组合（执行方式 × 执行后端）、结果在哪、退出码什么意思：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
+- 三种组合（执行方式 × 执行后端，云端后端只有后台运行）、结果在哪、退出码什么意思：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
 - `.feature` 怎么写才能稳定运行：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/writing-features.md
 - 项目配置文件 `gherkai.toml`、环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
 - 报错了先看哪：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/troubleshooting.md

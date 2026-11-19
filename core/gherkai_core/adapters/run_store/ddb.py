@@ -176,7 +176,7 @@ def _run_state_from_item(item: dict) -> RunState:
         jobs=jobs,
         started_at=item.get("started_at"),
         ended_at=item.get("ended_at"),
-        # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（同步路径不做投影写）
+        # DDB Number → int（boto3 resource 层给 Decimal）；缺键 → None（还没有过投影写）
         high_water_mark=int(hwm) if hwm is not None else None,
         message=item.get("message"),
         claim_count=int(item.get("claim_count", 0)),  # Decimal → int；缺属性读作 0（同 serialize 的读端）

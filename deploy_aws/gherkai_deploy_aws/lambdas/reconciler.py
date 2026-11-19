@@ -99,7 +99,7 @@ def exit_from_task(task: dict) -> tuple[int, bool, str | None, _dt.datetime | No
     PutItem 同键幂等——超时处置对「已 STOPPED 却无退出记录」（事件丢投）落的记录，与迟到的观察者写入不互撞。
     exit_code：containers[] 首个带 exitCode 的（worker 是 essential 单容器）；**缺 → PLATFORM_FAILED_EXIT 哨兵**
     + reason=`stopCode: stoppedReason`（容器没能开始运行，机制二「退出码缺失」条）。哨兵与归因串的拼法都住 core
-    （`platform_exit_reason`，同步路径的 FargateEngine 共用同一份）。timed_out：stoppedReason
+    （`platform_exit_reason`）。timed_out：stoppedReason
     含本模块 StopTask 时写入的哨兵串，即发过超时的停止请求（「job timeout」节归因链）。exited_at：task 的执行停止时刻，见
     `_task_stopped_at`。只记事实：是否已过截止时刻由投影判断，观察者读不到运行态与运行定义，也不需要读（ADR 0054 决策二后台推进条
     「截止时刻与说明」）。
@@ -451,9 +451,9 @@ def _build(run_id: str):
     据此整体 no-op。
 
     **store 与 FargateEngine 装配都复用 compose（`build_cloud_stores` / `build_fargate_engines`，单一真源、
-    不重造）**——三层 store 的 prefix 规范化与 offloader 挂载、job-in 前缀 / artifact 落点 / container 名 /
-    SDK env 全与同步 cloud run 路径一致、零漂移（ADR 0016：compose 是组合根逻辑、WebUI/Lambda 都复用、
-    不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai（不再背 argparse/render）。
+    不重造）**——三层 store 的 prefix 规范化与 offloader 挂载与 submit 侧同一份；job-in 前缀 / artifact 落点 / container 名 /
+    SDK env 只在 `build_fargate_engines` 一处定义（ADR 0016：compose 是组合根逻辑、WebUI/Lambda 都复用、
+    不经 cli——组合根共享层即产品本体包）。Lambda 打包带上 gherkai_runtime（不背 argparse/render）。
 
     **worker task-def revision 只有一条来源**（ADR 0038）：definition 的 `meta.worker_task_defs`（提交侧 preflight 已把 variant
     解析成各引擎的显式 revision）。缺该字段的云端 definition 是定义违约，由 `_load_definition` 标 error、不推进——不按后端默认指针
@@ -484,8 +484,7 @@ def _build(run_id: str):
     # prefix，但写读两侧同构造零漂移）；**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
     # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会执行。
     # detached 不传（默认 False）：本 Lambda 只读已存在的 run，不 create_run、不写 detached 标记。
-    # 第四项 make_artifacts 是同步 run 打落点用的，云端推进器不打、丢弃。
-    run_store, result_store, report_store, _ = compose.build_cloud_stores(
+    run_store, result_store, report_store = compose.build_cloud_stores(
         table=runs_table_name, bucket=bucket, prefix=report_dir,
         ddb_table=runs_table, s3=s3)
     # `is_detached` 是 DDB adapter 上的方法、不在 RunStore 端口面上——云端后端这个 store 恒是 DDB 实现。
@@ -533,7 +532,7 @@ def _build(run_id: str):
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
         # 会话预热地址同理从 definition 读回（ADR 0051 决策 13）：丢了它，worker 就会按 definition 完整性判 precheck_failed
         session_warmup_url=meta.session_warmup_url,
-        ecs=boto3.client("ecs", region_name=region), s3=s3, ddb_events_table=events_table,
+        ecs=boto3.client("ecs", region_name=region), s3=s3,
     )
     # job timeout 到点触发器（ADR 0034「job timeout」节）：env 齐才装配（KICKER_ARN/SCHEDULER_ROLE_ARN 由
     # IaC 注入）；缺 → None，CloudLauncher 每次 launch 打降级日志（tick 防御扫仍兜）。

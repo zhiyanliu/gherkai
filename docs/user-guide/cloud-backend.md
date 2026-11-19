@@ -32,17 +32,17 @@ uv tool install 'gherkai[deploy-aws]'      # 部署包随 CLI 的 extra 一起�
 - **ECS 与 ECR**：`<prefix>cluster`、每个引擎一个 Fargate 任务定义（1 vCPU / 2 GB）与一个镜像仓库 `<prefix><engine>-worker`。
 - **Lambda 三个 + EventBridge 规则与到点调度**：让 `gherkai submit` 提交完即返回的 run 在云端自行推进与收敛，提交者的机器不必在线。
 - **网络与 IAM**：按 `--vpc` 取值给 worker 的子网与安全组（优先用公有子网加公网 IP 出网，不建 NAT 网关），每个引擎一个最小权限角色，后端的三个 Lambda 各有自己的角色。
-- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针、子网与安全组 ID，以及 Device Farm 项目 ARN（启用设备支持时才有），供 `run` / `submit` 读取。
+- **SSM 参数**（`/<prefix>backend/*`）：后端版本戳、生效的 VPC 取值、每个引擎的 worker 任务定义模板、worker 镜像映射与默认指针，以及 Device Farm 项目 ARN（启用设备支持时才有），供 `submit` 读取。
 
 stack 之外，`gherkai deploy` 还会在部署 stack 之前找到已有的或新建一个 Device Farm 项目 `<prefix>devices`，供带设备目标的云端 run 在其中建立远程访问会话。项目固定在 us-west-2（Device Farm 只在这个区域提供），不属于 stack，destroy 时保留，见[拆除与清理](#拆除与清理)。
 
 前缀原样接在每个资源名前面，分隔符要写进前缀里：`--prefix prod-` 得到 `prod-runs`，`--prefix prod` 得到 `prodruns`。前缀至多 32 个字符，更长的前缀在生成部署模板时即被拒绝，原因见下文「deploy 与 destroy 的选项」。
 
-团队成员查结果时同样按前缀找到这套后端：`status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。查询命令的用法见 [`running-and-results.md`](./running-and-results.md)。
+团队成员查结果时同样按前缀找到这套后端：`status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与提交这个 run 的 `submit` 一致，`--region` 也要指向同一个 region，否则查不到这个 run。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。查询命令的用法见 [`running-and-results.md`](./running-and-results.md)。
 
-云端两种执行方式的差别都源自「谁拉起 worker 任务」：`submit` 的任务由后端拉起；`run --backend cloud` 的任务由你自己的 CLI 进程拉起并等到运行结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由这一条决定。
+云端后端只有后台运行一种执行方式：用 `submit --backend cloud` 提交，worker 任务由后端拉起，提交者的机器不必在线（用 `--expose-local` 时除外）。`run` 只在本机后端执行，给出 `--backend cloud` 时以退出码 2 结束。下面的并发上限与[团队成员的最小权限](#团队成员需要的最小云端权限)两处都由「任务由后端拉起」这一点决定。
 
-`submit --backend cloud` 提交的一个 run，并行 job 数为 `min(提交时 --max-concurrency 的值, 部署侧上限 20)`；给的值超过上限时提交命令打印一行提示，并按 20 并行。`run --backend cloud` 的并行度就是 `--max-concurrency`，不受这个上限约束。
+`submit --backend cloud` 提交的一个 run，并行 job 数为 `min(提交时 --max-concurrency 的值, 部署侧上限 20)`；给的值超过上限时提交命令打印一行提示，并按 20 并行。
 
 ## 首次部署
 
@@ -81,7 +81,7 @@ gherkai deploy --vpc default --prefix gherkai-                         # 真部�
 | `--allow-vpc-change` | 放行一次 VPC 取值变更或首次登记（仅 `deploy`） |
 | `--require-approval {never,any-change,broadening}` | 透传 CDK 的 IAM 变更审批级别（仅 `deploy`；不给则用 CDK 自己的默认值） |
 | `--refresh-context` | 丢弃本机缓存的环境查询结果重新查询；默认复用缓存 |
-| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 的上限是 120 秒，更大的值在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。云端运行时的停止宽限由这个值决定；提交侧的 `--grace` 只对本机运行有效，`--backend cloud` 带了它会直接报错并以退出码 2 结束，写在 `gherkai.toml` 里的 `grace` 在云端只提示一句、不生效 |
+| `--stop-timeout N` | worker 容器从收到停止信号到被强制终止的宽限秒数（默认 120）。Fargate 的上限是 120 秒，更大的值在生成部署模板时即报错，stack 不会被改动，但 Device Farm 项目可能已经建立（部署命令在生成模板之前找回或新建 `<prefix>devices` 项目），destroy 时保留，见[拆除与清理](#拆除与清理)。云端运行时的停止宽限由这个值决定；`--grace` 只有 `run` 有，只对本机运行有效，写在 `gherkai.toml` 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
 | `--container-engine 名` | 用哪个容器引擎（默认 `docker`，也可用 `GHERKAI_CONTAINER_ENGINE`）；当前只支持 `docker`，别的名字以退出码 2 结束、不静默回落 |
 | `--provider NAME` | 用哪个部署 provider；装了一个时不必给 |
 | `--region R` / `--profile P` | 与 `run` / `submit` 同名同义 |
@@ -121,7 +121,7 @@ gherkai submit features/login.feature --backend cloud --worker-variant login   #
 
 - **重推同名 variant 直接放行**，只打印原 digest 到新 digest 的变化。正在运行的 run 手里的 revision 按 digest 指着旧镜像层，不受影响。
 - **variant 按版本隔离**：标签含 CLI 版本，旧版本的 variant 留在 ECR 作历史、不参与当前版本的解析。升级不重置默认指针。
-- **退休的旧 revision 顺带回收**：`push-worker` 与 `deploy` 末尾各回收一次，退休满 1 小时且没有未结束的 run 引用才真删，否则留到下一次。例外是 `run --backend cloud --no-report`：它不写运行记录，回收时看不到它正在使用的 revision；这样的 run 可能执行超过 1 小时时，执行期间不要重推它使用的 variant，也不要重新部署后端。滞留不影响使用，`list-workers` 看得到。`delete-worker` 尚未提供（执行会以退出码 2 结束并说明），旧版本 variant 的 ECR 标签目前请按需自行清理。
+- **退休的旧 revision 顺带回收**：`push-worker` 与 `deploy` 末尾各回收一次，退休满 1 小时且没有未结束的 run 引用才真删，否则留到下一次。滞留不影响使用，`list-workers` 看得到。`delete-worker` 尚未提供（执行会以退出码 2 结束并说明），旧版本 variant 的 ECR 标签目前请按需自行清理。
 
 ## 部署输出怎么读
 
@@ -152,18 +152,17 @@ CDK 成功完成资源部署之后，命令继续执行 worker 镜像的三步�
 
 ## 团队成员需要的最小云端权限
 
-同一套后端可以给团队成员两级不同大小的权限，凭证越少的那一级越适合 CI 与低权限机器。执行方式与执行后端四种组合的对照见 [`running-and-results.md`](./running-and-results.md)，这里只说云端两级的差别：
+云端后端只有后台运行一种执行方式，团队成员用它提交与查看 run 需要的权限只有一级，下面先列这一级，再列 `explain`、`list-runs` 与 `doctor` 各自另需的几项。执行方式与执行后端三种组合的对照见 [`running-and-results.md`](./running-and-results.md)。
 
 - **`submit` + `status`**：运行记录表读写、提交前对表、桶、集群、任务定义与后端 Lambda 的只读检查、调用 `<prefix>kicker` Lambda、读 `/<prefix>backend/*` 参数、产物桶 `s3:PutObject`（用例含多行参数时才触发），以及 variant 解析要的只读 `ecr:DescribeImages`、`ecs:DescribeTaskDefinition` 与 `ecs:ListTaskDefinitions`；后两项只能授在全部资源（`"Resource": "*"`）上，可用 `aws:RequestedRegion` 条件限定到后端所在的区域。`ecs:ListTaskDefinitions` 只在读取任务定义 revision 返回 `ClientException`、需要核对它是否仍可用时用到。**不需要任何 ECS 写权限**，worker 任务由后端的 Lambda 拉起。
-- **`run --backend cloud`**：运行记录表读写、events 表（`<prefix>events`）的 `dynamodb:Query`（逐 scope 读取执行事件）、同样的只读检查、读 `/<prefix>backend/*` 参数、variant 解析的只读权限（同上），再加起停与查询 Fargate 任务的权限、把 worker 的任务角色与执行角色传给 ECS 的权限（`iam:PassRole`）、以及上传 job 到产物桶的权限——起任务的是你自己的进程（见上「后端包含什么」），因此不需要调用 Lambda 的权限。
 
-无论哪一级，提交带设备目标或 `@app` 的 scope 时，都另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
+提交带设备目标或 `@app` 的 scope 时，另需读 `/<prefix>backend/device-farm-project` 参数（已含在上面的参数读权限里），以及产物桶 `apps/` 前缀的读、写、分段上传中止与打标签，和该前缀的列举。
 
-两级都用 `explain` 读证据：除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时需要 events 表（`<prefix>events`）的 `dynamodb:Query`（`run --backend cloud` 这一级已含，`submit` + `status` 这一级要另加）；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
+用 `explain` 读证据时，除判定明细与证据对象的读权限外，对被中止的 job 补取已执行 step 的记录时需要 events 表（`<prefix>events`）的 `dynamodb:Query`（上面这一级不含，要另加）；缺它时 `explain` 照常输出，只在那个 job 下说明没能补取的原因。events 表的记录只保留 7 天，过期后同样补不到、同样说明原因；判定明细与证据不受这个期限影响。
 
-两级都用 `gherkai list-runs --backend cloud` 列出 run 时，另需运行记录表索引上的 `dynamodb:Query`，资源要写成索引 ARN `arn:aws:dynamodb:<区域>:<账号>:table/<prefix>runs/index/status_group-run_id-index`（表 ARN 上的 `Query` 授权覆盖不到索引），以及表 ARN 上的 `dynamodb:BatchGetItem`（按 run_id 读回运行状态）；它读表结构用的 `dynamodb:DescribeTable` 与读版本戳用的参数读权限已含在上面两级里。`list-runs` 只读、不需要任何写权限，不用这个命令的成员可以不给这两项。
+用 `gherkai list-runs --backend cloud` 列出 run 时，另需运行记录表索引上的 `dynamodb:Query`，资源要写成索引 ARN `arn:aws:dynamodb:<区域>:<账号>:table/<prefix>runs/index/status_group-run_id-index`（表 ARN 上的 `Query` 授权覆盖不到索引），以及表 ARN 上的 `dynamodb:BatchGetItem`（按 run_id 读回运行状态）；它读表结构用的 `dynamodb:DescribeTable` 与读版本戳用的参数读权限已含在上面这一级里。`list-runs` 只读、不需要任何写权限，不用这个命令的成员可以不给这两项。
 
-无论哪一级，用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在这两级里，请有这项权限的人执行。
+用 `gherkai doctor --backend cloud` 自检设备支持时，另需 us-west-2 上的 `devicefarm:ListRemoteAccessSessions`，资源为部署建立的 Device Farm 项目 ARN（即 `/<prefix>backend/device-farm-project` 参数的值），用来列出项目里还没结束的远程访问会话；缺这一项时 doctor 的 `backend.devices.sessions` 行只说明缺什么、不影响退出码，不测设备的团队可以不给。停止会话需要的 `devicefarm:StopRemoteAccessSession` 不在上面这一级里，请有这项权限的人执行。
 
 ## 拆除与清理
 

@@ -148,6 +148,66 @@ def test_ddb_multi_scope_records(events_table):
     assert state.jobs["b"].status == Status.PASSED
 
 
+def test_ddb_records_read_only_the_listed_scopes(events_table):
+    """按 PK=run_id#scope_id 查询即分流（ADR 0024「消费天然定向 + 天然幂等」条）：同一张表里同 run 别的 scope 的事件不混入，
+    每条 record 的 scope_id 与事件自带的 scopeId 一致；重读一遍结果不变（Query 非破坏性）。"""
+    _put_worker_event(events_table, "run-1", "browse", 1, '{"type":"scope_started","scopeId":"browse"}')
+    _put_worker_event(events_table, "run-1", "browse", 2, '{"type":"scope_done","scopeId":"browse"}')
+    _put_worker_event(events_table, "run-1", "search", 1, '{"type":"scope_started","scopeId":"search"}')
+    _put_worker_event(events_table, "run-1", "search", 2, '{"type":"scope_done","scopeId":"search"}')
+    log = DdbEventLog(events_table, "run-1", ["browse"])
+    recs = log.records()
+    assert [(r.scope_id, r.event.scope_id) for r in recs] == [("browse", "browse"), ("browse", "browse")]
+    assert log.records() == recs
+
+
+def test_ddb_records_read_midscene_lowlevel_items_in_seq_order(events_table):
+    """跨引擎编组同构 + 升序读（ADR 0024）：Midscene worker 用低层 PutItemCommand 写（seq 显式 {N: 字符串}、body {S}），Nova worker
+    用 resource 层 put_item（原生 int）。低层写的 item 由 records() 读出、条数与类型都对，且按 seq 升序（跨 9/10 边界）。
+
+    守得住的：两种编组不兼容（如 seq 误写成 {S}）时 moto 拒写或读不出；读端误用降序时顺序断言变红。守不住的：漏写
+    ScanIndexForward——moto 默认即按排序键升序返回。moto 对 DDB 数据模型（N 键编组、排序键升序）保真，可用来验证。"""
+    import boto3
+
+    low = boto3.client("dynamodb", region_name="us-east-1")  # 低层 client：resource 的 meta.client 会把 {S:..} 再编组成 M
+    pk = events_pk("run-1", "browse")
+    for i in range(1, 11):
+        low.put_item(TableName="gherkai-events", Item={
+            "pk": {"S": pk}, "seq": {"N": str(i)},
+            "body": {"S": f'{{"type":"step_done","scenarioId":"sc:0","stepIndex":{i - 1},"status":"passed"}}'},
+        })
+    low.put_item(TableName="gherkai-events", Item={
+        "pk": {"S": pk}, "seq": {"N": "11"}, "body": {"S": '{"type":"scope_done","scopeId":"browse"}'}})
+    recs = DdbEventLog(events_table, "run-1", ["browse"]).records()
+    assert [r.seq for r in recs] == list(range(1, 12))
+    assert [r.event.type for r in recs] == ["step_done"] * 10 + ["scope_done"]
+    assert [r.event.step_index for r in recs[:10]] == list(range(10))
+
+
+def test_ddb_records_paginate_across_last_evaluated_key():
+    """records() 拉全所有页：DDB Query 单页上限 1MB，超出时返回 LastEvaluatedKey，不续 ExclusiveStartKey 就会静默丢掉后面的事件。
+    moto 难造 1MB 分页，这里用按有无 ExclusiveStartKey 返回不同页的假表。"""
+    pk = events_pk("run-1", "browse")
+
+    def _item(seq: int) -> dict:
+        return {"seq": seq, "body": f'{{"type":"step_done","scenarioId":"sc:0","stepIndex":{seq},"status":"passed"}}'}
+
+    class _PagingTable:
+        def __init__(self):
+            self.calls = []
+
+        def query(self, **kw):
+            self.calls.append(kw)
+            if "ExclusiveStartKey" not in kw:
+                return {"Items": [_item(1), _item(2)], "LastEvaluatedKey": {"pk": pk, "seq": 2}}
+            return {"Items": [_item(3), _item(4)]}
+
+    table = _PagingTable()
+    recs = DdbEventLog(table, "run-1", ["browse"]).records()
+    assert [r.event.step_index for r in recs] == [1, 2, 3, 4]
+    assert len(table.calls) == 2 and table.calls[1]["ExclusiveStartKey"] == {"pk": pk, "seq": 2}
+
+
 # ---------- CloudLauncher ----------
 
 # tick 认领时算出的截止时刻（认领时刻加预算，以运行期限封顶），随 launch 交出；CloudLauncher 把它原样交给 arm。
@@ -301,7 +361,7 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
 
 
 def test_ddb_event_log_queries_with_consistent_read():
-    """records() 是 reconcile 的投影输入：finalize 前 _final_drain / 退出观察者刚写的尾事件必须**立即**可读
+    """records() 是 reconcile 的投影输入：worker 与退出观察者刚写的尾事件必须**立即**可读
     （ADR 0030 决定六），最终一致读可能漏尾事件、把已完成 job 投成仍在运行——故 Query 必带 ConsistentRead。"""
     class _Rec:
         def __init__(self):

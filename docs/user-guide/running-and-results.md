@@ -1,10 +1,10 @@
 # 运行测试与查看结果
 
-运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端四种组合的选择、`plan` / `run` / `submit` / `status` / `list-runs` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，项目配置文件、环境变量与跨命令通用选项见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
+运行 `.feature`、查看结果与读退出码涉及以下内容：执行方式与执行后端三种组合的选择、`plan` / `run` / `submit` / `status` / `list-runs` / `explain` / `list-engines` / `list-deterministic` / `doctor` 的用途与常用选项、报告与证据的位置、费用量级、机读输出与 CI 用法。安装与 AWS 前置见 [`getting-started.md`](./getting-started.md)，`.feature` 的写法见 [`writing-features.md`](./writing-features.md)，`--expose-local` 测本机应用见 [`local-app-testing.md`](./local-app-testing.md)，云端后端的部署与维护见 [`cloud-backend.md`](./cloud-backend.md)，项目配置文件、环境变量与跨命令通用选项见 [`configuration.md`](./configuration.md)。任一命令的完整选项以 `gherkai <命令> --help` 为准。
 
-## 两个独立的选择：怎么运行、在哪运行
+## 怎么运行、在哪运行：三种组合
 
-执行方式与执行后端是两个互不影响的选择，四种组合都合法。
+执行方式与执行后端合起来有三种组合：本机前台（`run`）、本机后台（`submit --backend local`）、云端后台（`submit --backend cloud`）。云端后端只有后台运行：`run` 只在本机后端执行，`--backend cloud`（无论在命令行上给出还是写在项目配置文件里）会让 `run` 在开始执行之前以退出码 2 结束，并提示云端后端的执行用 `gherkai submit --backend cloud`。
 
 **怎么运行**
 
@@ -30,7 +30,6 @@
 | `run` / `submit`，`--backend local` | 本机 AWS 凭证与要用的引擎 worker | 自己的 AWS 账户 |
 | `submit` + `status`，`--backend cloud` | 运行记录表读写、若干只读检查、调用后端 Lambda；用例带 DataTable / DocString 时另需产物桶（`<前缀>artifacts`）的写权限，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签。不需要任何 ECS 写权限 | 部署方的 AWS 账户 |
 | `list-runs` | 本机后端不需要凭证；云端后端只需读权限：运行记录表与它的清单索引、版本戳参数与表结构的只读检查 | 本机后端不产生费用；云端后端只有少量读请求，记到部署方的 AWS 账户 |
-| `run`，`--backend cloud` | 运行记录表读写、若干只读检查、起停与查询 Fargate 任务、把 worker 的任务角色与执行角色传给 ECS（`iam:PassRole`）、上传 job 与写产物桶，有应用目标（`@app`）的 scope 时另需该桶 `apps/` 前缀的读、写、列举与打标签；不需要调用后端 Lambda——这条路径由本机命令进程自己起任务、自己推进 | 部署方的 AWS 账户 |
 
 完整的权限清单见 [`cloud-backend.md`](./cloud-backend.md)「团队成员需要的最小云端权限」。
 
@@ -82,7 +81,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 `status`、`list-runs` 与 `explain` 的 `--backend`、`--report-dir`、`--prefix` 必须与产生这个 run 的 `run` 或 `submit` 一致（前台运行与后台提交都算），云端后端下 `--region` 也要指向同一个 region，否则查不到这个 run：`status` 与 `explain` 以退出码 2 结束，`list-runs` 列出的是另一处的 run（常见为空清单）。云端后端的 `list-runs` 不读报告，不看 `--report-dir`。`status --wait` 既是查询也是接力：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态；本机后端下接力的并发上限按提交时的值走，提交记录里没有值才用 `status --max-concurrency` 给的值。接力只对 `submit` 提交的 run：对正在前台 `run` 的 run 执行 `status --wait`，它只等待那次运行结束再给判定、不接力推进（执行它的进程若已不在，它不会再到终态，按 Ctrl-C 停止等待即可）。`doctor` 的读法与按症状分表的处置见 [`troubleshooting.md`](./troubleshooting.md)。
 
-使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs`、`explain` 与 `run --backend cloud` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
+使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs` 与 `explain` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
 提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。云端后台读到不能执行的提交记录时把 run 置为 `error` 并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键）；超过允许运行的时间而有 job 没有执行的 run 同样有这一行（见下「允许运行的时间」）。只有这两类 run 有这一行，job 自身的失败原因看 `explain`。
 
@@ -104,9 +103,9 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 |---|---|---|
 | `--default-engine {midscene,novaact}` | `novaact` | 未标 `@engine` 的 scope 用哪个引擎；标了 tag 的 scope 不受影响 |
 | `--assertion-votes N` | `1` | AI 断言执行 N 次取多数票（如 3 或 5），用于降低判定抖动 |
-| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行；`run --backend cloud` 由本机命令进程直接调度，不受该上限约束 |
+| `--max-concurrency N` | `4` | 同时运行的 worker 上限，须 ≥ 1。并发只改同时开几个会话（桌面目标是浏览器会话，设备目标是远程访问会话），不改 job 数与总费用；配额紧时调低。`submit --backend cloud` 提交时若超过云端后端对单个 run 的并发上限（当前为 20，见 [`cloud-backend.md`](./cloud-backend.md)），命令会提示并按该上限并行 |
 | `--default-job-timeout S` | 按目标 | job 墙钟预算，单位为秒。不给时桌面 scope 为 300 秒，设备 scope 为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒；给 `<=0` 对任何目标都取最长的 7200 秒（2 小时）；给正值时不得超过 7200 秒，设备 scope 还不得低于获取预算加 180 秒；用例上标 `@timeout:<秒>` 可逐 scope 覆盖。超预算的 job 被停掉并判 error |
-| `--grace S` | 自动 | 仅 `run --backend local`：中止时留给 worker 收尾的秒数，收尾包括释放会话（桌面目标是云端浏览器会话，设备目标是远程访问会话）与保存产物；不给则按这个 run 用到的引擎自报的最短收尾宽限推导。比这个宽限更短时，worker 可能在释放会话或保存产物之前被强制终止，没释放的会话继续计费，所以给出更小的值时命令在开始执行前以退出码 2 结束。`--backend cloud` 不接受这个选项（给了直接以退出码 2 结束），云端的停止宽限在部署时定；写在 `gherkai.toml` 里的 `grace` 在云端后端下只提示一句、不生效 |
+| `--grace S` | 自动 | 仅 `run`：中止时留给 worker 收尾的秒数，收尾包括释放会话（桌面目标是云端浏览器会话，设备目标是远程访问会话）与保存产物；不给则按这个 run 用到的引擎自报的最短收尾宽限推导。比这个宽限更短时，worker 可能在释放会话或保存产物之前被强制终止，没释放的会话继续计费，所以给出更小的值时命令在开始执行前以退出码 2 结束。云端后端的停止宽限在部署时定，写在 `gherkai.toml` 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
 | `--fail-fast` | 关 | 仅 `run`：任一 job 出错即中止这个 run 的其余 job |
 
 单个 job 的网络故障只让那个 job 判 error，其余 job 继续；给了 `--fail-fast` 才会因此中止这个 run。
@@ -134,12 +133,12 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 |---|---|---|
 | `--report-dir DIR` | `reports` | 报告落点，每次 run 落 `DIR/<run_id>/`。`status` 与 `explain` 查同一个 run 要给同一个值。云端后端下它是后端的报告前缀，与部署侧不一致时 `submit` 在提交前以退出码 2 结束并点名两侧的值 |
 | `--no-report` | 关 | 仅 `run`：报告目录下什么都不落，也不收集引擎自己的报告产物。适合 CI 只看退出码或 JSON |
-| `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。在本机运行时 worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置；云端后端下没有本机 worker 日志 |
+| `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置 |
 | `--json` | 关 | 仅 `run`：标准输出只打机器可读 JSON、不打文本汇总；进度与诊断照常走标准错误，逐事件进度可用 `--quiet` 静音 |
 | `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整个 run 拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
 | `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器与设备上的浏览器（只用于网页目标，原生应用不适用），配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
 
-**仅 `--backend cloud`**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。仅 `run`：不给 `--subnet` / `--security-group` 时，Fargate 的子网与安全组按部署时写入的参数自动取用，一般不用给；`submit` 没有这两个选项，它提交的 run 用部署时写进后端的网络配置。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
+**云端后端（`submit --backend cloud`）**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。worker 任务所在的集群、子网与安全组用的是部署时写进后端的配置，提交时不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
 
 ## 退出码
 
@@ -147,7 +146,7 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或超过允许运行的时间而有 job 没有执行；`--backend cloud` 执行到一半时运行记录存储不可达也以这个退出码结束 | 开始执行前的配置或可达性问题 |
+| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或超过允许运行的时间而有 job 没有执行 | 开始执行前的配置或可达性问题；给出了云端后端（`run` 只在本机后端执行，云端后端用 `submit --backend cloud`） |
 | `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
 | `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或前台 `run` 被中断、run 级判定记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错 |
 | `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
@@ -159,7 +158,7 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 | `list-engines` | 这台机器的引擎环境什么样 | 恒 `0`（某个引擎没装正是要展示的信息，不算命令失败） | — | — |
 | `skill install` | agent skill 装上了吗 | 已安装（`--print` 则已打印正文） | — | `--dir` 不是目录、目标目录里已有不是本命令装的内容、包内 agent skill 缺失、写入失败 |
 
-前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；退出码为 130（Ctrl-C）或 143（SIGTERM），与各 job 的判定无关；有 job 记为 aborted 或 skipped 时，run 级判定记 `aborted`（同时超过了允许运行的时间而有 job 没有执行时记 `error`，见上「允许运行的时间」）。本机后端给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束；云端后端的停止宽限由部署配置决定，再按一次只会重发停止请求、不能缩短等待。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾；云端 worker 不做这项检测。
+前台 `run` 运行期间处理了中断时退出码不表示判定：按一次 Ctrl-C（或向 CLI 进程发 SIGTERM），CLI 请求全部 worker 停止并等它们释放会话，然后照常输出汇总与产物位置；退出码为 130（Ctrl-C）或 143（SIGTERM），与各 job 的判定无关；有 job 记为 aborted 或 skipped 时，run 级判定记 `aborted`（同时超过了允许运行的时间而有 job 没有执行时记 `error`，见上「允许运行的时间」）。给 worker 的释放宽限由 `--grace` 指定，到期强制结束 worker、再收集结果，再按一次 Ctrl-C 则立即强制结束。强制结束后会话可能来不及释放、继续计费，请到 AWS 控制台核对并手动停止（设备目标看 Device Farm 的远程访问会话，桌面目标看 AgentCore 的浏览器会话）。用 `kill -9` 结束本机 CLI 进程时 worker 收不到任何通知，通常在 CLI 退出后的几秒内检测到并开始释放会话；CLI 已退出但尚未被它的父进程回收、或进程号已被复用时，这项检测可能延后或不触发。释放完成所需的时间取决于当时正在执行的操作与收尾。
 
 分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。这条命令若只是在等待（所等的 run 由前台 `run` 推进），或这个 run 在云端后端，停止它不影响 run 的推进；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
@@ -217,7 +216,7 @@ gherkai list-runs --limit 50 --json > runs.json
 - **清单为空**：只打一行提示，点名所查的落点，并提示核对定位参数是否与执行 `run` 或 `submit` 时所用的一致。本机后端分两种说法，都给出解析后的目录：目录不存在时说「本机后端的报告目录 … 不存在，这里还没有 run」，目录存在而其中没有 run 时说「本机后端的报告目录 … 下没有任何 run」；云端后端说「云端后端里没有任何 run」并给出前缀、region 与运行记录表名。给了 `--status` 而没有这些状态的 run 时，两个后端都把「任何 run」换成「状态为 … 的 run」。
 - **`--json`**：一个 JSON 文档，顶层是所查的落点（`backend`；本机另有 `report_dir`，云端另有 `prefix`、`region`、`ddb_table`）与执行这次清单的 gherkai 版本 `cli_version`，加上 `runs` 数组；每项的 `cli_version` 是写出这个 run 的版本（读不到为 `null`），不为 `null` 且与顶层的相同，即由当前版本写出。清单为空时 `runs` 是空数组，不打人读提示。字段见 [`../internals/cli-json-contract.md`](../internals/cli-json-contract.md)。
 - **只读**：不推进任何 run、不启动任务。判定仍对具体的 run 用 `status --wait` 取；退出码见上「退出码」一节。
-- **不在清单里的**：`run --no-report` 的执行不留运行记录，两个后端的清单里都没有它。
+- **不在清单里的**：`run --no-report` 的执行不留运行记录，清单里没有它。
 - **云端后端下刚变化的 run**：状态、时刻与 job 数总是读取那一刻的值；刚提交或刚结束的 run 偶尔会在一次清单里缺席，稍后再列即可看到。
 
 ## 看失败原因：`explain`

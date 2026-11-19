@@ -62,7 +62,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | Midscene worker 无法启动，且 `node --version` 低于 22 | `@gherkai/worker-midscene` 要求 Node ≥ 22 | 把 Node 升到 22 或更高，再重装该包 |
 | `plan` 输出以「（标注降级）」开头的提示 | 某个引擎的 worker 不可用（没装、起不来或没有及时回应），只影响命中标注；worker 与命令行工具版本不一致不在此列，`plan` 以退出码 2 结束（见上） | 不阻塞 `plan`；需要标注时把那个 worker 装上 |
 
-只提交云端 run 的人不必装任何 worker：`--backend cloud` 的 `run` / `submit` 不查本机 worker。
+只提交云端 run 的人不必装任何 worker：`submit --backend cloud` 不查本机 worker。
 
 ## 凭证与 region
 
@@ -121,15 +121,17 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 
 | 症状 | 原因 | 处置 |
 |---|---|---|
+| `run` 以退出码 2 结束，`gherkai run 只在本机执行，不支持云端后端（… 给出的是 cloud）：要在云端后端执行，请用 gherkai submit --backend cloud 提交 …` | `run` 只在本机后端执行：命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud` | 云端后端用 `gherkai submit --backend cloud --prefix <前缀>` 提交、`gherkai status <run_id> --backend cloud --prefix <前缀> --wait` 等结果；要在本机前台运行，去掉 `--backend cloud`，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
+| `run` 以退出码 2 结束，`unrecognized arguments: --prefix …`（或 `--ddb-table`、`--s3-bucket`、`--worker-variant`） | 这几个选项只用于云端后端，`run` 只在本机后端执行、不收它们 | 要在云端后端执行，改用 `gherkai submit --backend cloud`，这几个选项照原样写在 `submit` 上；要在本机前台运行，去掉它们 |
 | cloud 命令以退出码 2 结束，提示「本机 CLI X 新于后端 Y」 | CLI 与后端不是同一版本，新 CLI 写的任务定义不能交给旧后端读 | 请部署方运行 `gherkai deploy` 把后端升级到同版本；也可以临时用 `uvx --from 'gherkai==<后端版本>' gherkai …` 提交，不改动本机安装。没有强行放行的开关。反过来，本机 CLI 旧于后端只提示、不拦截，用 `uv tool upgrade gherkai` 升级本机 CLI |
 | 提交以退出码 2 结束，`引擎 X 的 worker variant '…' 解析失败` | 当前 CLI 版本下，该引擎没有这个 variant 的镜像 | 临时改用 `--worker-variant base` 提交（部署方运行过本版本的 `gherkai deploy` 即有）；请部署方补推该 variant 的步骤见[云端后端](./cloud-backend.md)的「worker 镜像 variant」。报错说的是本机 CLI 旧于后端时，先升级 CLI，不要照旧版本推镜像 |
 | 提交以退出码 2 结束，提示后端没有默认 worker 镜像 variant 指针 | 这个 prefix 下的后端还没完成过本版本的初始化，或默认指针被清掉 | 请部署方运行一次 `gherkai deploy` 完成初始化；急用时提交者用 `--worker-variant base` 显式指定 |
-| `run` / `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
+| `submit --backend cloud` 以退出码 2 结束，`--backend cloud 资源缺失：<资源>（用 --prefix=… 拼出）不存在`；或自检的 `backend.resources` 标 `✗` | `--prefix` 与部署用的不一致，或该 prefix 下还没部署过 | 用部署方给的 prefix，并确认 region 与账户也是部署时那一套；`--report-dir` 同样要与提交时一致 |
 | 自检的 `backend.version` 标 `✗`，`读不到后端版本戳（prefix 配错或后端未部署？）` | 读这个参数本身失败：凭证、权限或网络不通 | 先按上一行核对 prefix 与 region，再确认当前凭证有读 SSM 参数的权限 |
 | 云端 job 判 `error`，报告里看不出原因 | 失败发生在容器里 | 用 `gherkai explain <run_id> --backend cloud` 看 job 的 `message` 与证据；worker 容器日志在 CloudWatch 日志组 `/<prefix>worker/<引擎>`，默认前缀下即 `/gherkai-worker/novaact` 与 `/gherkai-worker/midscene` |
-| `run` / `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端在 1.4.0 之前部署（那时的部署不写版本戳），之后没有升级过；它会丢掉这类 run 的设备目标或会话预热设置，结果可能被误判为通过 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
+| `submit --backend cloud` 以退出码 2 结束，`后端没有版本戳 … 带设备目标或使用 --expose-local 的 run 不能提交到它` | 这个后端在 1.4.0 之前部署（那时的部署不写版本戳），之后没有升级过；它会丢掉这类 run 的设备目标或会话预热设置，结果可能被误判为通过 | 请部署方运行 `gherkai deploy` 升级后端；没有使用 `--expose-local` 的桌面 run 不受影响 |
 | 提交以退出码 2 结束，`部署未启用设备支持` | 部署时没有建立 Device Farm 项目：部署版本早于本功能，或部署方没有 Device Farm 权限 | 请部署方用有 Device Farm 权限的凭证重新运行 `gherkai deploy`；之后 `doctor --backend cloud` 的 `backend.devices.project` 行应显示项目 ARN |
-| `list-runs --backend cloud` 以退出码 2 结束，`云端后端的 run 清单索引还在建立，暂时不能列出 run。…` | AWS 还在为运行记录表建立清单所用的索引 | 稍后重试；`run`、`submit` 与 `status` 不因清单索引尚未就绪而被拦截。长时间仍是这样时，请部署方检查索引的建立进度。 |
+| `list-runs --backend cloud` 以退出码 2 结束，`云端后端的 run 清单索引还在建立，暂时不能列出 run。…` | AWS 还在为运行记录表建立清单所用的索引 | 稍后重试；`submit` 与 `status` 不因清单索引尚未就绪而被拦截。长时间仍是这样时，请部署方检查索引的建立进度。 |
 | `list-runs --backend cloud` 以退出码 2 结束，`云端后端还没有 run 清单索引，不能列出 run。…`，或说索引 `正在被删除` | 这个后端还没有用当前版本部署，或索引被删除了 | 请部署方用当前版本的 `gherkai deploy` 重新部署后端 |
 | `list-runs --backend cloud` 以退出码 2 结束，`读取运行状态表 … 时重试 … 次后仍有 … 个 run 没有读回（通常是读取被限流）` | 读回运行状态时被限流，为免给出缺行的清单，这次没有列出 | 稍后重试 |
 | `list-runs --backend cloud 读不到运行状态表 …（表、索引、凭证、region 或权限）：…` | 表不存在（`--prefix`、`--ddb-table` 或 region 不对），或凭证缺列出 run 所需的权限 | 先按上面「资源缺失」一行核对前缀与 region；权限缺的是索引上的 `dynamodb:Query` 与表上的 `dynamodb:BatchGetItem`，见[云端后端](./cloud-backend.md)「团队成员需要的最小云端权限」 |

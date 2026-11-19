@@ -17,7 +17,7 @@
     `_CWD`）> 同 venv `-m`（仅 Python 引擎）> PATH 上 `gherkai-worker-<engine>` > `uvx` 按版本临时拉起（**仅 novaact**；
     midscene 无本级，理由见下）；解析结果是 `WorkerCmd`，四级均未命中时抛 `WorkerNotFoundError`，交由调用点分叉）/
     `is_pure_release`（版本是否为纯发行版，第四级的门槛之一；部署 provider 判断是否同步基础镜像时也用它）/ `build_engines`（local 后端）/
-    `build_fargate_engines`（cloud 后端，接受**显式 task-def revision ARN** 的映射，ADR 0038）/ `make_resolver`（把引擎映射包成 core 要的
+    `build_fargate_engines`（cloud 后端，只由推进器 Lambda 调用，ADR 0016 决策 C；接受**显式 task-def revision ARN** 的映射，ADR 0038）/ `make_resolver`（把引擎映射包成 core 要的
     `EngineResolver`）。注入 worker 的 env 由本模块独占（`GHERKAI_STEPS_DIR` / `GHERKAI_NO_ARTIFACTS` / `GHERKAI_EXTRA_HTTP_HEADERS` /
     `GHERKAI_SESSION_WARMUP_URL` / `RUN_ID`：前四个有值显式注入、无值显式清除，`RUN_ID` 是 `build_engines` 的必给参数、恒注入；`scrubbed_environ` 继承 `os.environ` 并先清除这些键，是每次注入的起点，
     `tools/e2e_harness.py` 也复用它）。`nova_act_timeout_s` 是 Nova 单 act 上界（注入的 `NOVA_ACT_TIMEOUT_S`）的单一取值点：惰性取值并缓存，
@@ -32,7 +32,7 @@
     `WorkerNotFoundError` 是它的子类。前两类在各调用点都不降级（命令以退出码 2 结束，doctor 记为失败项），只有 `plan` 对取不到降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
   - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
     region/profile 一处解析）/ `resolve_aws_identity`（profile 与 region 解析链的唯一实现，`resolve_cloud_target` 与本机后台宿主共用）/
-    `resolve_region` / `resolve_network`（读 SSM 的 subnet/sg）/ `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
+    `resolve_region` / `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
     None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
     自己的退出码层）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/ `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）/
     `events_db_path`·`build_local_event_log`·`build_cloud_event_log`（一个 run 的事件流落点与两个后端的读取入口）/
@@ -44,17 +44,12 @@
   - **版本与 variant**：`check_version_skew`·`check_backend_skew`（四个状态常量 `SKEW_OK` / `SKEW_WARN` / `SKEW_BLOCK` /
     `SKEW_SKIP`；六种比对结果（其中「后端没有版本戳」一种另有例外：带设备目标或会话预热地址的 run（由 `run_requires_backend_stamp` 判定）判为
     `SKEW_BLOCK`，ADR 0051 决策 13）如何映射到这四态、逐态措辞见 [`cli/DEVELOPMENT.md`](../cli/DEVELOPMENT.md) 的版本 skew 一节；ADR 0037 决策 7）/ `read_backend_version`
-    （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`，其中
-    `stop_timeout_s` 是该 revision 上 worker container 的 `stopTimeout`（秒；没设或 task-def 里找不到该 container 时为 None），取自校验
-    revision 仍为 ACTIVE 的那次 DescribeTaskDefinition、不另发 AWS 调用；失败抛 `WorkerVariantError`，消息本身是给使用方看的整句）/
-    `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/ `read_task_def_stop_timeout`（doctor cloud 侧的对照值，与
-    `stop_timeout_s` 按同一 container 名认、读的是同一个量）/ `cloud_stop_bound_s`（云端同步 run 的停止后等待预算，作
-    `ScheduleOpts.stop_bound_s` 传入 schedule：本 run 用到的各引擎 worker container 的 `stopTimeout` 取最大，没设的按 Fargate 平台上限
-    `FARGATE_STOP_TIMEOUT_MAX_S`（120 秒）计，再加 ECS 记下 STOPPED 那段滞后的经验余量 `ECS_STOPPED_LAG_MARGIN_S`（20 秒）；core 的排空余量不在其中，
-    本机后端不调用它）/ `new_run_id`·`now`·`now_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
+    （读后端版本戳，缺失时返回 None）/ `resolve_worker_variant`（提交侧解析 variant → 各引擎 revision，结果为 `WorkerResolution`；失败抛 `WorkerVariantError`，消息本身是给使用方看的整句）/
+    `read_worker_default`（部署级默认 variant 指针，doctor 也读它）/ `read_task_def_stop_timeout`（doctor cloud 侧读该 revision 上
+    worker container 的 `stopTimeout`，作 grace 下限比对的对照值；没设或 task-def 里找不到该 container 时为 None）/ `new_run_id`·`now`·`now_iso`·`run_duration_ms`（run_id 与时钟：`now` 是
     唯一的墙钟读取点，前台 `run` 把它作为调度循环的墙钟注入，`now_iso` 是它的记录写法；读回记录里的时刻用 core 的
     `serialize.instant_from_iso`）/
-    `load_feature`·`prune_empty_dirs`（入口共用的工具函数）。
+    `load_feature`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
   （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方写成收尾时用交还的结果写报告）+
@@ -90,8 +85,8 @@ uv sync                          # 仓库根：一次安装五个 workspace 成�
 uv run pytest -q runtime/tests   # 仓库根：只运行本包单测（`uv run pytest` 不带路径 = 覆盖全部成员）
 ```
 
-`build_cloud_stores` / `build_fargate_engines` 的 boto3 import 惰性收敛在 `_make_*` 钩子内：**纯 local 路径绝不
-触发该 import**（ADR 0016 窄腰 / 0030）。修改这些函数时须保持 `import boto3` 不上移到模块顶层。`devicefarm.py` 同理：boto3 只在 `_make_devicefarm_client` 内 import，CLI 与 deploy 的 `--help` 不为它拉起 AWS SDK。
+`build_cloud_stores` 与云端各入口（提交前检查、variant 解析、版本戳读取等）的 boto3 import 惰性收敛在 `_make_*` 钩子内：**纯 local 路径绝不
+触发该 import**（ADR 0016 窄腰 / 0030）。`build_fargate_engines` 不建句柄：`ecs` / `s3` 由推进器 Lambda 建好传入。修改这些函数时须保持 `import boto3` 不上移到模块顶层。`devicefarm.py` 同理：boto3 只在 `_make_devicefarm_client` 内 import，CLI 与 deploy 的 `--help` 不为它拉起 AWS SDK。
 
 worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行得出的约束：`uvx` 穿透 fd3，`npx -y` 会替换 fd
 并导致事件全部丢失（因此 midscene 无第四级）。细节与实测证据见 `resolve_worker_cmd` 的 docstring 与 ADR 0037 决策 3。

@@ -1,25 +1,18 @@
-"""FargateEngine adapter 单测。
+"""FargateEngine adapter 单测（ADR 0034「Engine port 演进」节、ADR 0024「远程传输演进」节）。
 
-**证据边界分流（CLAUDE.md「绿≠对」；moto ECS 状态机失真已实测确认，见 conftest.fargate docstring）**：
-- **moto 忠实、用 `fargate` fixture 测**：run_scope 调对 RunTask（env 注入 JOB_S3_URI/events 表/run_id/scope_id）+
-  PutObject job 到 S3；Query 迭代器增量拉 + last_seq 游标 + scope_done 终止；stop→StopTask。
-- **moto 失真（exitCode 恒 0、lastStatus 由 describe 次数驱动）→ 退出码语义用「构造 describe 响应 dict」的纯单测**测
-  `_probe_task` + 协议翻译 `wire.raise_for_worker_exit`（不经 moto、可造任意 exitCode）；真实 ECS 时序标定见 ADR 0032 真容器校准。
-
-对拍 test_subprocess_engine.py：同一 Engine port、同一 (WorkerHandle, Iterator[Event]) 形状。
+FargateEngine 只有 `start_scope`：上传 job 到 S3、发 RunTask、返回 task ARN。这里用 `fargate` fixture（moto）测 RunTask 的参数与
+env 注入、job 对象的键与 tag、放置失败的报错——moto 对这些编排调用忠实。task 能否真起来只有真部署之后的云端 submit 能证。
+读 events 表的一方是 `DdbEventLog`，其测试在 test_cloud_reconcile.py。
 """
 from __future__ import annotations
 
 import json
+from urllib.parse import quote
 
-import boto3
 import pytest
 
-from gherkai_core.adapters.fargate_engine import EXIT_SK, FargateEngine, FargateWorkerHandle, TaskProbe, events_pk
-from gherkai_core.errors import WorkerExitError, WorkerNetworkError
-from gherkai_core.model import Job, Scenario, Step, ScopeStarted, StepDone, ScopeDone, Status
-from gherkai_core.project import PLATFORM_FAILED_EXIT, platform_exit_reason
-from tests.fake_engine import FAR_DEADLINE
+from gherkai_core.adapters.fargate_engine import FargateEngine, events_pk
+from gherkai_core.model import Job, Scenario, Step
 
 
 _RUN_ID = "20260707T120000Z-abc123"
@@ -33,66 +26,31 @@ def _job(scope_id: str = "browse") -> Job:
     )
 
 
-def _put_event(events_table, run_id: str, scope_id: str, seq: int, event: dict) -> None:
-    """模拟 worker：往 events 表 PutItem 一条事件（PK=run_id#scope_id, SK=seq, body=JSON line）。"""
-    events_table.put_item(Item={
-        "pk": events_pk(run_id, scope_id),
-        "seq": seq,
-        "body": json.dumps(event, ensure_ascii=False),
-    })
-
-
 def _engine(fargate, run_id: str = _RUN_ID, region: str | None = None,
-            artifact_s3: tuple[str, str] | None = None, sdk_artifact_dir_env: dict | None = None) -> FargateEngine:
+            artifact_s3: tuple[str, str] | None = None, sdk_artifact_dir_env: dict | None = None,
+            extra_env: dict | None = None) -> FargateEngine:
     return FargateEngine(
-        ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
+        ecs_client=fargate["ecs"], s3_client=fargate["s3"],
         run_id=run_id, cluster=fargate["cluster"], task_definition=fargate["task_def"],
-        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{run_id}/jobs/"),
+        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{run_id}/jobs-in/"),
         events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
-        artifact_s3=artifact_s3, sdk_artifact_dir_env=sdk_artifact_dir_env, region=region,
-        poll_interval_s=0.01,  # 测试快轮询（不接 profile——容器用 task role）
+        artifact_s3=artifact_s3, sdk_artifact_dir_env=sdk_artifact_dir_env, extra_env=extra_env, region=region,
+        # 不接 profile——容器用 task role
     )
 
 
-def _stopped_ecs(container_name: str, exit_code: int = 0):
-    """假 ecs：describe_tasks 恒返回 STOPPED + 给定 exitCode——scope_done 路径读退出码用。
-
-    **必须换假 ecs（否则测试挂死）**：选「scope_done 后等 STOPPED 读码」（ADR 0024「事件流结束信号」，与 subprocess
-    无条件 proc.wait() 同构）后，_read_events 见 scope_done 会调 _await_exit_code 轮询 DescribeTasks 直到 STOPPED；
-    而 fargate fixture 把 moto `ecs::task` transition pin 成不推进（恒不 STOPPED，见 conftest），真 moto ecs 会令
-    _await_exit_code 死循环。故 run_scope（真 moto ecs 发 RunTask）后换假 ecs 供 STOPPED/exitCode。"""
-    class _StoppedEcs:
-        def describe_tasks(self, **kw):
-            return {"tasks": [{"lastStatus": "STOPPED",
-                               "containers": [{"name": container_name, "exitCode": exit_code}]}]}
-    return _StoppedEcs()
-
-
-def _delayed_stopped_ecs(container_name: str, running_polls: int, exit_code: int = 0):
-    """假 ecs：前 running_polls 次 describe_tasks 返回 RUNNING（exitCode 尚 null），之后才 STOPPED。
-
-    **模拟真实时序**（ADR 0032 结论 2：scope_done 先于 ECS 记录 executionStoppedAt ~11s）：worker 已 emit
-    scope_done、但 task 还没到 STOPPED——_probe_task 返回 (stopped=False, ...) → _await_exit_code 须 sleep 轮询等到 STOPPED。
-    `_stopped_ecs`（首次即 STOPPED）把这 ~11s 滞后塌缩为 0、测不出「轮询等 STOPPED」这个定义行为
-    （变异：把循环退化成单次读退出码，_stopped_ecs 下仍绿、但真 Fargate 每 scope 收尾拿 exitCode=None 崩）。"""
-    class _DelayedEcs:
-        def __init__(self):
-            self.calls = 0  # 供断言真的轮询了 running_polls+1 次
-        def describe_tasks(self, **kw):
-            self.calls += 1
-            if self.calls <= running_polls:
-                return {"tasks": [{"lastStatus": "RUNNING", "containers": [{"name": container_name}]}]}  # exitCode null
-            return {"tasks": [{"lastStatus": "STOPPED",
-                               "containers": [{"name": container_name, "exitCode": exit_code}]}]}
-    return _DelayedEcs()
-
-
-def _spy_run_task_env(fargate, monkeypatch, eng) -> dict:
-    """执行 run_scope、拦 run_task 抓 overrides env → 返回 {name: value} dict。"""
+def _spy_run_task(fargate, monkeypatch) -> dict:
+    """拦 ecs.run_task（仍转给 moto 真起 task），返回记下的那次调用参数。"""
     real = fargate["ecs"].run_task
-    captured = {}
+    captured: dict = {}
     monkeypatch.setattr(fargate["ecs"], "run_task", lambda **kw: captured.update(kw) or real(**kw))
-    eng.run_scope(_job("browse"))
+    return captured
+
+
+def _start_and_capture_env(fargate, monkeypatch, eng) -> dict:
+    """执行 start_scope、拦 run_task 抓 overrides env → 返回 {name: value} dict。"""
+    captured = _spy_run_task(fargate, monkeypatch)
+    eng.start_scope(_job("browse"))
     return {e["name"]: e["value"] for e in captured["overrides"]["containerOverrides"][0]["environment"]}
 
 
@@ -103,78 +61,74 @@ def test_events_pk_composite_run_id_scope_id():
     assert events_pk("run-A", "browse") != events_pk("run-B", "browse")
 
 
-# ---- run_scope：PutObject job + RunTask 注入 env（moto 忠实）----
-def test_run_scope_puts_job_to_s3(fargate):
+# ---- 对外只有 start_scope：云端后端只有后台推进（ADR 0016 决策 A；ADR 0034「Engine port 演进」节）----
+def test_fargate_engine_offers_only_start_scope_and_no_engine_port():
+    """FargateEngine 对外只有 start_scope，没有 `Engine` port 的 run_scope：它不能被注入 schedule 去同步消费 worker 的事件流，
+    云端 run 只由推进器从 events 表重放推进。重新加上返回事件迭代器的入口、或别的对外方法，本用例即红。"""
+    public = sorted(name for name, value in vars(FargateEngine).items() if callable(value) and not name.startswith("_"))
+    assert public == ["start_scope"]
+    assert not hasattr(FargateEngine, "run_scope")
+
+
+# ---- start_scope：PutObject job + RunTask 注入 env（moto 忠实）----
+def test_start_scope_puts_job_to_s3_and_returns_task_arn(fargate):
     eng = _engine(fargate)
-    job = _job()
-    # worker 尚未写事件；先只验 run_scope 的 job-in 侧（不消费迭代器、避免阻塞等 STOPPED）
-    handle, _events = eng.run_scope(job)
-    assert isinstance(handle, FargateWorkerHandle)
-    # job 已 PutObject 到 s3://bucket/<run_id>/jobs/<scope_id>.json，内容就是 job_to_line 的输出
-    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=f"{_RUN_ID}/jobs/browse.json")
+    task_arn = eng.start_scope(_job())
+    # 返回 moto 真起的那个 task 的 ARN（调用方不轮询、不读事件，只拿它）
+    tasks = fargate["ecs"].list_tasks(cluster=fargate["cluster"])["taskArns"]
+    assert task_arn in tasks
+    # job 已 PutObject 到 s3://bucket/<run_id>/jobs-in/<scope_id>.json，内容就是 job_to_line 的输出
+    obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=f"{_RUN_ID}/jobs-in/browse.json")
     body = obj["Body"].read().decode("utf-8").strip()
     assert json.loads(body)["scope"]["id"] == "browse"
 
 
-def test_run_scope_job_key_quotes_scope_id(fargate):
+def test_start_scope_job_key_quotes_scope_id(fargate):
     # scope_id 含 `/`:（如 feature 路径 features/x.feature:7）→ job key 用 quote(safe='')：/ 编码成 %2F、: 成 %3A，
     # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（实际运行暴露的一致性缺陷回归守卫）。
-    from urllib.parse import quote
     eng = _engine(fargate)
     sid = "features/deterministic_step.feature:7"
-    handle, _events = eng.run_scope(_job(sid))
-    expected_key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"  # features%2Fdeterministic_step.feature%3A7.json
+    eng.start_scope(_job(sid))
+    expected_key = f"{_RUN_ID}/jobs-in/{quote(sid, safe='')}.json"  # features%2Fdeterministic_step.feature%3A7.json
     obj = fargate["s3"].get_object(Bucket=fargate["bucket"], Key=expected_key)  # 能取到就说明 key 用了 quote
     assert json.loads(obj["Body"].read().decode("utf-8"))["scope"]["id"] == sid
     assert "%2F" in expected_key and "%3A" in expected_key  # 确认 / 和 : 都被编码（不造子前缀）
 
 
-def test_run_scope_job_in_tagged_for_lifecycle(fargate):
-    # job-in 对象打 tag gherkai=job-in，供桶按 tag 挂 S3 lifecycle 过期清理（ADR 0033；tag 而非 key 前缀，
-    # 因 run_id 在 key 中间、前缀 filter 框不住且会误伤 jobs/reports）。回归守卫：防将来漏打 tag → lifecycle 收不到、job-in 堆积。
+def test_start_scope_job_in_tagged_for_lifecycle(fargate):
+    # job-in 对象打 tag gherkai=job-in，供桶按 tag 挂 S3 lifecycle 过期清理（ADR 0033「job-in S3 对象生命周期」条；tag 而非
+    # key 前缀，因 run_id 在 key 中间、前缀 filter 框不住且会误伤 jobs/reports）。回归守卫：防将来漏打 tag → lifecycle 收不到、job-in 堆积。
     eng = _engine(fargate)
     sid = "features/x.feature:1"
-    eng.run_scope(_job(sid))
-    from urllib.parse import quote
-    key = f"{_RUN_ID}/jobs/{quote(sid, safe='')}.json"
+    eng.start_scope(_job(sid))
+    key = f"{_RUN_ID}/jobs-in/{quote(sid, safe='')}.json"
     tags = fargate["s3"].get_object_tagging(Bucket=fargate["bucket"], Key=key)["TagSet"]
     assert {"Key": "gherkai", "Value": "job-in"} in tags, f"job-in 对象缺 gherkai=job-in tag：{tags}"
 
 
-def test_run_scope_runtask_injects_env(fargate, monkeypatch):
-    # 拦 ecs.run_task 记录 env 注入（验 JOB_S3_URI/EVENTS_DDB_TABLE/RUN_ID/SCOPE_ID 都传对）
-    real_run_task = fargate["ecs"].run_task
-    captured = {}
-
-    def _spy(**kw):
-        captured.update(kw)
-        return real_run_task(**kw)
-
-    monkeypatch.setattr(fargate["ecs"], "run_task", _spy)
-    eng = _engine(fargate)
-    eng.run_scope(_job("browse"))
-    # env 注入在 containerOverrides
-    env = {e["name"]: e["value"] for e in captured["overrides"]["containerOverrides"][0]["environment"]}
+def test_start_scope_runtask_injects_env(fargate, monkeypatch):
+    # 拦 ecs.run_task 记录 env 注入（验 JOB_S3_URI/EVENTS_DDB_TABLE/RUN_ID/SCOPE_ID 都传对）与 RunTask 的其余参数
+    captured = _spy_run_task(fargate, monkeypatch)
+    _engine(fargate).start_scope(_job("browse"))
+    # env 注入在 containerOverrides，指名的是 worker container
+    override = captured["overrides"]["containerOverrides"][0]
+    assert override["name"] == fargate["container_name"]
+    env = {e["name"]: e["value"] for e in override["environment"]}
     assert env["RUN_ID"] == _RUN_ID
     assert env["SCOPE_ID"] == "browse"
     assert env["EVENTS_DDB_TABLE"] == fargate["events_table_name"]
-    assert env["JOB_S3_URI"] == f"s3://{fargate['bucket']}/{_RUN_ID}/jobs/browse.json"
+    assert env["JOB_S3_URI"] == f"s3://{fargate['bucket']}/{_RUN_ID}/jobs-in/browse.json"
     assert captured["launchType"] == "FARGATE"
-    assert captured["taskDefinition"] == fargate["task_def"]
+    assert captured["taskDefinition"] == fargate["task_def"]  # 原样传入的显式 revision ARN（ADR 0038），不做名字推导
+    assert captured["cluster"] == fargate["cluster"]
+    assert captured["networkConfiguration"] == {"awsvpcConfiguration": fargate["network_config"]}
+    assert captured["count"] == 1
 
 
-def test_runtask_injects_extra_env(fargate, monkeypatch):
+def test_start_scope_injects_extra_env(fargate, monkeypatch):
     # extra_env（ADR 0035）：组合根算好的通用附加 env（如 GHERKAI_EXTRA_HTTP_HEADERS）逐条注 RunTask overrides
-    eng = FargateEngine(
-        ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
-        run_id=_RUN_ID, cluster=fargate["cluster"], task_definition=fargate["task_def"],
-        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs/"),
-        events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
-        artifact_s3=None, sdk_artifact_dir_env={},  # 必给关键字（本例不测产物注入，显式给空）
-        extra_env={"GHERKAI_EXTRA_HTTP_HEADERS": '{"ngrok-skip-browser-warning": "1"}'},
-        poll_interval_s=0.01,
-    )
-    env = _spy_run_task_env(fargate, monkeypatch, eng)
+    eng = _engine(fargate, extra_env={"GHERKAI_EXTRA_HTTP_HEADERS": '{"ngrok-skip-browser-warning": "1"}'})
+    env = _start_and_capture_env(fargate, monkeypatch, eng)
     assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}'
 
 
@@ -185,11 +139,11 @@ def test_artifact_injection_kwargs_are_mandatory(fargate):
     显式给 None（不上传）/ 空 dict（无 SDK 落点）仍可构造：本条锁的是「不许省」，不是「不许为空」。
     """
     base = dict(
-        ecs_client=fargate["ecs"], s3_client=fargate["s3"], ddb_events_table=fargate["events_table"],
+        ecs_client=fargate["ecs"], s3_client=fargate["s3"],
         run_id=_RUN_ID, cluster=fargate["cluster"], task_definition=fargate["task_def"],
-        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs/"),
+        network_config=fargate["network_config"], job_s3=(fargate["bucket"], f"{_RUN_ID}/jobs-in/"),
         events_table_name=fargate["events_table_name"], container_name=fargate["container_name"],
-        artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.01,
+        artifact_s3=None, sdk_artifact_dir_env={},
     )
     assert FargateEngine(**base) is not None  # 前提：显式给空值照样构造得出
     for omitted in ("artifact_s3", "sdk_artifact_dir_env"):
@@ -197,718 +151,58 @@ def test_artifact_injection_kwargs_are_mandatory(fargate):
             FargateEngine(**{k: v for k, v in base.items() if k != omitted})  # type: ignore[call-arg]
 
 
-def test_runtask_sets_started_by_run_id(fargate, monkeypatch):
+def test_start_scope_sets_started_by_run_id(fargate, monkeypatch):
     # startedBy=run_id（ADR 0034「job timeout」节）：超时处置用 ListTasks(startedBy=run_id) 定位本 run 的
     # task（≤36 字符：run_id 形如 20260707T120000Z-abc123 共 23 字符）。
-    captured = {}
-    real = fargate["ecs"].run_task
-    monkeypatch.setattr(fargate["ecs"], "run_task", lambda **kw: captured.update(kw) or real(**kw))
+    captured = _spy_run_task(fargate, monkeypatch)
     _engine(fargate).start_scope(_job())
     assert captured["startedBy"] == _RUN_ID
 
 
-def test_run_scope_injects_region_never_profile(fargate, monkeypatch):
-    # region 非 None（组合根落实成具体字符串，ADR 0016 决策 C）→ overrides env 注入 AWS_REGION，与 core store 同源。
-    # Fargate 容器不继承本地 env、不吃 profile config，不注入 region 则 worker → NoRegionError/AgentCore InvalidRegionError。
+def test_start_scope_injects_region_never_profile(fargate, monkeypatch):
+    # region 非 None（部署所在区域，ADR 0016 决策 C）→ overrides env 注入 AWS_REGION，与推进器 store 句柄同一个 region。
+    # Fargate 容器不继承宿主 env、不吃 profile config，不注入 region 则 worker → NoRegionError/AgentCore InvalidRegionError。
     # **AWS_PROFILE 绝不注入**（正确的非对称）：容器用 task role，注入 profile 名会 ProfileNotFound 盖过 task role。
-    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, region="us-west-2"))
+    env = _start_and_capture_env(fargate, monkeypatch, _engine(fargate, region="us-west-2"))
     assert env["AWS_REGION"] == "us-west-2"
     assert "AWS_PROFILE" not in env  # FargateEngine 根本不接 profile 参数、绝不注入
 
 
-def test_run_scope_omits_region_when_none(fargate, monkeypatch):
+def test_start_scope_omits_region_when_none(fargate, monkeypatch):
     # region=None（真无 region）→ 不注入（不硬写空值、留 fail-loud）。AWS_PROFILE 同样从不注入。
-    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, region=None))
+    env = _start_and_capture_env(fargate, monkeypatch, _engine(fargate, region=None))
     assert "AWS_REGION" not in env
     assert "AWS_PROFILE" not in env
 
 
-def test_run_scope_injects_artifact_s3_env(fargate, monkeypatch):
+def test_start_scope_injects_artifact_s3_env(fargate, monkeypatch):
     # artifact_s3 非 None（cloud 必注入，ADR 0029）→ overrides env 注入 ARTIFACT_S3_BUCKET/PREFIX，worker
     # ArtifactUploader 据此上传→报 s3://→删本地。**不注入则容器盘停即销毁、产物必丢**（ADR 0029/0032）——这条守卫防回归。
-    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, artifact_s3=("bkt", "reports/rid-1/")))
+    env = _start_and_capture_env(fargate, monkeypatch, _engine(fargate, artifact_s3=("bkt", "reports/rid-1/")))
     assert env["ARTIFACT_S3_BUCKET"] == "bkt"
     assert env["ARTIFACT_S3_PREFIX"] == "reports/rid-1/"
 
 
-def test_run_scope_omits_artifact_s3_when_none(fargate, monkeypatch):
+def test_start_scope_omits_artifact_s3_when_none(fargate, monkeypatch):
     # artifact_s3=None（不上传，如无 report 落点）→ 不注入 ARTIFACT_S3_*（worker no-op 报 file://）。
-    env = _spy_run_task_env(fargate, monkeypatch, _engine(fargate, artifact_s3=None))
+    env = _start_and_capture_env(fargate, monkeypatch, _engine(fargate, artifact_s3=None))
     assert "ARTIFACT_S3_BUCKET" not in env
     assert "ARTIFACT_S3_PREFIX" not in env
 
 
-def test_run_scope_injects_sdk_artifact_dir_env(fargate, monkeypatch):
+def test_start_scope_injects_sdk_artifact_dir_env(fargate, monkeypatch):
     # SDK 产物落点 env（NOVA_LOGS_DIR 等）也须注入——**否则 worker ArtifactUploader run_dir=None→no-op→产物随容器盘销毁丢**
     # （实际运行暴露：只注 ARTIFACT_S3_* 不够，uploader 还要 SDK 落点 env 算 run_dir/相对 key）。这条守卫防回归。
-    env = _spy_run_task_env(fargate, monkeypatch,
-                            _engine(fargate, sdk_artifact_dir_env={"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid/nova-trajectories"}))
+    env = _start_and_capture_env(fargate, monkeypatch,
+                                 _engine(fargate, sdk_artifact_dir_env={"NOVA_LOGS_DIR": "/tmp/gherkai-run/rid/nova-trajectories"}))
     assert env["NOVA_LOGS_DIR"] == "/tmp/gherkai-run/rid/nova-trajectories"
 
 
-# ---- Query 迭代器：增量拉 + 保序 + scope_done 终止（moto DDB 忠实）----
-def test_read_events_yields_in_seq_order_until_scope_done(fargate):
-    eng = _engine(fargate)
-    job = _job("browse")
-    # 先把整个事件流写进 events 表（模拟 worker 已运行结束、事件都落了）——含 scope_done 作终止
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse", "sessionId": "s-1"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 4, {"type": "scope_done", "scopeId": "browse", "sessionId": "s-1"})
-    _, events = eng.run_scope(job)
-    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（干净退出 exit 0），见 _stopped_ecs docstring
-    got = list(events)  # scope_done（内容完整）+ STOPPED exit 0（终止）→ 迭代正常终止
-    assert [type(e).__name__ for e in got] == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
-    assert isinstance(got[0], ScopeStarted) and got[0].session_id == "s-1"
-    assert isinstance(got[2], StepDone) and got[2].status == Status.PASSED
-    assert isinstance(got[-1], ScopeDone)
-
-
-def test_read_events_only_this_scope_not_other(fargate):
-    # 天然定向（ADR 0024 核心）：Query PK=run_id#scope_id 只返回本 scope，别的 scope 的事件不混入
-    eng = _engine(fargate)
-    # 写两个 scope 的事件到同一表
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    _put_event(fargate["events_table"], _RUN_ID, "search", 1, {"type": "scope_started", "scopeId": "search"})
-    _put_event(fargate["events_table"], _RUN_ID, "search", 2, {"type": "scope_done", "scopeId": "search"})
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
-    got = list(events)
-    # 只拿到 browse 的（scope_started + scope_done 各一），无 search 的。强断言：每条 scope_id 都是 browse
-    # （ScopeStarted/ScopeDone 都带 scope_id；直接断言值，不用 getattr 默认+hasattr 过滤那种自我豁免的弱断言）。
-    assert len(got) == 2
-    assert [e.scope_id for e in got] == ["browse", "browse"]  # 无 search 混入（天然定向）
-    assert all(getattr(e, "scope_id", "browse") == "browse" for e in got if hasattr(e, "scope_id"))
-
-
-def test_read_events_incremental_across_polls(fargate):
-    # last_seq 游标：分批到达的事件按序拉全（模拟轮询间隙 worker 又写了新事件）
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-    _, events = eng.run_scope(_job("browse"))
-    it = iter(events)
-    assert isinstance(next(it), ScopeStarted)  # 拿到第一批
-    # 轮询间隙 worker 写了 scope_done
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    assert isinstance(next(it), ScopeDone)  # 下一轮 Query SK>1 拿到它、yield 出（此刻挂在 yield，尚未走到读退出码）
-    eng._ecs = _stopped_ecs(fargate["container_name"])  # 下个 next() 走 if saw_scope_done→_await_exit_code，须 STOPPED/exit 0
-    with pytest.raises(StopIteration):
-        next(it)  # 等 STOPPED 读 exit 0 → 正常终止
-
-
-def test_read_events_midscene_lowlevel_marshalling_and_ascending_read(fargate):
-    # 跨引擎编组同构 + 升序读（ADR 0024）：Midscene 那个引擎走**低层** PutItemCommand（attribute 显式 {N:String(seq)}/{S}），
-    # Nova 那个引擎走 resource.put_item（原生 int）——两条不同 API 层，都须落成 core Query 能读的**同构** item。现有测试的
-    # _put_event 走 resource（即 Nova 形态），此处补 Midscene 低层形态：直接经低层 client 写 {N:"..."}。
-    # **本测试真正锁住的（诚实边界，勿夸大）**：
-    #   ① 跨层编组同构——低层 client 写的 {N}/{S} item，core 的 resource.Table Query 能读出（len==11、类型对）。
-    #      若两个引擎编组不兼容（如 Midscene 误写 {S} 进 N-key），moto 直接 ClientError 拒；core 读不出则条数不等于 11。
-    #   ② 升序读——引擎若误用 ScanIndexForward=False（降序）本测试会红（实测变异确认）。
-    # **不锁的**：① 「漏 ScanIndexForward」不会红——moto 默认即按 sort-key 升序返回（本测试预写也是升序），故这条
-    #   决策靠此测试守不住（记账诚实，别声称锁了跨 9/10 数值重排）；② 「seq 误存 String」不由本测试兜——它全程手写
-    #   {N}、不调 EventSink，String-wire 回归由 event-sink 单测（seq.N 断言）+ events 表 N-key schema（moto 拒 {S} 入 N-key）兜。
-    # moto 对 DDB 数据模型（N-key 编组/拒 {S}、sort-key 升序）保真（已探针证实），非「绿≠对」被 mock 掉的真实时序，可用 moto 实际验证。
-    # 真低层 client（同一 moto 后端）：dynamodb **resource** 的 .meta.client 挂了高层序列化 handler、会把 {S:..} 再编组成 M，
-    # 故直接建低层 client 写原始 attribute-value，精确模拟 Midscene 的 PutItemCommand({N:String(seq)}) 线格式。
-    low = boto3.client("dynamodb", region_name="us-east-1")
-    pk = f"{_RUN_ID}#browse"
-    # 写 seq 1..11（跨 9/10 边界），末条 scope_done 终止；全部用 Midscene 低层 attribute 形态
-    for i in range(1, 11):
-        low.put_item(TableName=fargate["events_table_name"], Item={
-            "pk": {"S": pk}, "seq": {"N": str(i)},
-            "body": {"S": json.dumps({"type": "step_done", "scenarioId": "sc:0", "stepIndex": i - 1, "status": "passed"})},
-        })
-    low.put_item(TableName=fargate["events_table_name"], Item={
-        "pk": {"S": pk}, "seq": {"N": "11"},
-        "body": {"S": json.dumps({"type": "scope_done", "scopeId": "browse"})},
-    })
-    eng = _engine(fargate)
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
-    got = list(events)
-    # 11 条全读出（低层写的 item core 能 Query，说明跨层编组同构）、升序（step 0..9 依次——引擎误用降序读会红）
-    assert len(got) == 11
-    assert [type(e).__name__ for e in got] == ["StepDone"] * 10 + ["ScopeDone"]
-    assert [e.step_index for e in got[:10]] == list(range(10))  # 升序读（跨 9/10 边界；moto 默认即升序，故此断言守降序误用、不守漏 ScanIndexForward）
-
-
-# ---- STOPPED 兜底终止 + _final_drain（worker 崩溃没发 scope_done）----
-# 这条兜底路径（DescribeTasks STOPPED → _final_drain 强一致补末尾 → raise_for_worker_exit）不依赖真实 ECS 时序、
-# 全是确定性控制流 + 强一致 DDB Query（moto 可测），故**不在**真实 ECS 时序标定（ADR 0032 真容器校准）之列，须锁住「先 drain 后 raise」次序。
-# moto fargate fixture 的 ecs 被 pin 成 lastStatus 恒不推进（见 conftest），故这里用可控假 ecs 造 RUNNING→STOPPED 时序。
-def test_read_events_stopped_without_scope_done_drains_then_raises(fargate):
-    """worker 崩溃没发 scope_done：迭代器读完已落事件 → 见 STOPPED → 强一致 drain 补末尾 → raise 非零退出。"""
-    eng = _engine(fargate)
-    # 已落事件：seq 1（scope_started），**无 scope_done**（模拟 worker 中途崩）
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-
-    # 假 ecs：describe_tasks 首次调用（也就是主循环第二轮 not items 后查退出码那次）才「变 STOPPED」，并在此刻补写一条
-    # 末尾事件 seq 2（模拟：STOPPED 后强一致 drain 才看得到的、最终一致主循环漏掉的末尾 PutItem）。
-    state = {"describe_calls": 0}
-
-    class _StoppingEcs:
-        def describe_tasks(self, **kw):
-            state["describe_calls"] += 1
-            # 第一次被查退出码时：补末尾事件（仅 _final_drain 的强一致读能拿到）+ 返回 STOPPED/exitCode=137
-            _put_event(fargate["events_table"], _RUN_ID, "browse", 2,
-                       {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "error"})
-            return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": fargate["container_name"], "exitCode": 137}]}]}
-
-    _, events = eng.run_scope(_job("browse"))  # run_scope 用真 moto ecs 发 RunTask
-    eng._ecs = _StoppingEcs()  # 此后 _read_events 的 describe 走假 ecs（控 STOPPED 时序，moto 的 ecs 不推进 lastStatus）
-
-    got = []
-    with pytest.raises(RuntimeError, match="137"):
-        for e in events:
-            got.append(e)
-    # 先 yield 出 scope_started（主循环）+ 末尾 step_done（_final_drain 强一致补），再抛 —— 次序不可颠倒、drain 不可漏
-    assert [type(e).__name__ for e in got] == ["ScopeStarted", "StepDone"]
-    assert state["describe_calls"] >= 1  # 确实走了 STOPPED 兜底、非 scope_done 主判
-
-
-# ---- 退出观察者的 task_exited item 不得混进 worker 段（ADR 0034 机制一独立键空间 / ADR 0024 的单调 / 断号检测只作用于 worker 段）----
-# 同步 run 路径与 cloud 无状态路径**共用同一张 events 表**：退出观察者 Lambda 由「lastStatus=STOPPED」规则触发、
-# 不分同步/detached，故同步 run 的 task 停下后也会往**同 PK** 写一条 task_exited item（保留高位 SK、**无 body**）。
-# 读端若不把 Query 段界收在 worker 段，`it["body"]` 直接 KeyError('body')、异常穿出迭代器 → 本应 PASSED 的 job 被判
-# engine_error。触发窗口是真竞态：观察者 PutItem 可抢在 adapter 最后一次 Query 之前。
-def _put_exit_item(fargate, scope_id: str, exit_code: int = 0, run_id: str = _RUN_ID) -> None:
-    """预置一条退出观察者形状的 item——**用真写端 DdbEventLog.record_exit 造**（不手抄形状，写端演进本测试自动跟随）。"""
-    from gherkai_core.adapters.event_log import DdbEventLog
-    DdbEventLog(fargate["events_table"], run_id, [scope_id]).record_exit(scope_id, exit_code)
-
-
-def test_read_events_ignores_exit_item_alongside_worker_events(fargate):
-    """exit item 与 worker 事件同 PK 共存：主循环只读 worker 段、正常产出并按退出码收敛，不碰无 body 的 exit item。"""
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    _put_exit_item(fargate, "browse", exit_code=0)
-    # 前置断言：exit item 真在同 PK 下（否则本测试变成空操作、守不住任何东西）
-    assert fargate["events_table"].get_item(
-        Key={"pk": events_pk(_RUN_ID, "browse"), "seq": EXIT_SK})["Item"]["item_type"] == "exit"
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"])  # scope_done 后等 STOPPED 读码（见 _stopped_ecs docstring）
-    got = list(events)  # 不抛 KeyError('body')
-    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
-
-
-def test_read_events_ignores_exit_item_on_stopped_drain_path(fargate):
-    """worker 零事件退出 + exit item 已落：STOPPED 兜底路径（含 _final_drain 强一致终读）同样只读 worker 段。
-
-    主循环首轮 Query 空 → 探到 STOPPED → _final_drain 若不收段界会读到 exit item → KeyError；此处断言正常空收敛。
-    """
-    eng = _engine(fargate)
-    _put_exit_item(fargate, "browse", exit_code=0)
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=0)
-    assert list(events) == []  # 无 worker 事件、不抛（exit item 不入流）
-
-
-def test_final_drain_paginates_across_last_evaluated_key():
-    """_final_drain 终读须翻页：>1MB 尾部 DDB Query 分页返回 LastEvaluatedKey，不循环 ExclusiveStartKey 会丢事件。
-
-    构造假 events table（query 按有无 ExclusiveStartKey 返回不同页）——moto 难造 >1MB 分页，此处精确验
-    「首页带 LastEvaluatedKey → 续 ExclusiveStartKey 拉次页 → 拉全所有 item」的分页语义。
-    """
-    pk = f"{_RUN_ID}#browse"
-
-    def _line(seq: int) -> str:
-        return json.dumps({"type": "step_done", "scenarioId": "sc:0", "stepIndex": seq, "status": "passed"})
-
-    class _PagingTable:
-        def __init__(self):
-            self.calls = []  # 记录每次 query 是否带 ExclusiveStartKey
-
-        def query(self, **kw):
-            self.calls.append(kw)
-            if "ExclusiveStartKey" not in kw:
-                # 首页：seq 2,3 + LastEvaluatedKey（模拟 1MB 单页截断）
-                return {"Items": [{"seq": 2, "body": _line(2)}, {"seq": 3, "body": _line(3)}],
-                        "LastEvaluatedKey": {"pk": pk, "seq": 3}}
-            # 次页（带 ExclusiveStartKey）：seq 4,5，无 LastEvaluatedKey（末页）
-            return {"Items": [{"seq": 4, "body": _line(4)}, {"seq": 5, "body": _line(5)}]}
-
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._events = _PagingTable()
-    got = list(eng._final_drain(pk, last_seq=1))
-    # 两页全拉出（不因单次 query 只返首页而丢 seq 4,5）——分页守卫防回归
-    assert [e.step_index for e in got] == [2, 3, 4, 5]
-    assert len(eng._events.calls) == 2  # 翻了第二页
-    assert eng._events.calls[1]["ExclusiveStartKey"] == {"pk": pk, "seq": 3}  # 用首页 LastEvaluatedKey 续读
-
-
-def test_read_events_stopped_clean_exit_zero_terminates_without_raise(fargate):
-    """worker 干净退出（exitCode 0）但没发 scope_done：drain 后正常终止、不抛。"""
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-
-    class _StoppedCleanEcs:
-        def describe_tasks(self, **kw):
-            return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": fargate["container_name"], "exitCode": 0}]}]}
-
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _StoppedCleanEcs()
-    got = list(events)  # 不抛：exit 0 → raise_for_worker_exit 放行 → return
-    assert [type(e).__name__ for e in got] == ["ScopeStarted"]
-
-
-# ---- scope_done 后仍读退出码（ADR 0024「事件流结束信号」，与 subprocess 无条件 proc.wait() 同构）----
-# **本组守的是「scope_done 非终态、须等 STOPPED 读退出码」这条契约**：worker 可发完 scope_done 又在会话释放阶段
-# 非 0 退出（Midscene cleanupFailed→exit 1），若「读到 scope_done 即 break、不读码」则该退出被吞、job 误报 PASSED、
-# 会话泄漏不可观测（违 ADR 0024「会话释放失败可观测」）。
-def test_read_events_scope_done_then_nonzero_exit_raises(fargate):
-    """worker 发完 scope_done 又非 0 退出（会话释放失败，Midscene cleanupFailed→exit 1）：
-    scope_done 后等 STOPPED 读到 exit 1 → 抛 RuntimeError（泄漏可观测），**不因见 scope_done 就吞掉退出码**。"""
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=1)  # 发完 scope_done 又 exit 1（会话释放失败）
-    got = []
-    with pytest.raises(RuntimeError, match=r"exitCode=1\b") as ei:  # 非 0 退出必抛——与 subprocess 无条件 proc.wait()+rc 检查同构
-        for e in events:
-            got.append(e)
-    assert not isinstance(ei.value, WorkerNetworkError)  # exit 1 走 RuntimeError、非网络故障退出码 80（锁分类，别混进 WorkerNetworkError 子类）
-    # scope_done 已 yield（内容完整）、但终止判定读到 exit 1 → 抛（不吞、不误报 PASSED）
-    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
-
-
-def test_read_events_scope_done_waits_for_stopped_before_reading_exit(fargate, monkeypatch):
-    """**「scope_done 后轮询等 STOPPED 再读码」的核心守卫**：scope_done 先于 ECS STOPPED ~11s 到达（ADR 0032 结论 2），_await_exit_code
-    须**轮询等到 STOPPED** 才读 exitCode——不能读到 scope_done 就立刻读码（那时 _probe_task 返回 stopped=False、
-    还没退出码，若立即读会拿不到码，真 Fargate 每 scope 收尾崩）。
-
-    **前几个 assert 塌缩不了这个滞后**（其余 scope_done 测试用 _stopped_ecs 首次即 STOPPED、把滞后压成 0，故
-    「等 STOPPED」的轮询循环零覆盖——变异把循环退化成单次读退出码仍全绿）。本测试用 _delayed_stopped_ecs
-    造「前 2 次 RUNNING（exitCode null）、第 3 次才 STOPPED」的真实时序，锁死轮询：把 time.sleep 打桩计数（不真睡）。"""
-    sleeps = []
-    monkeypatch.setattr("gherkai_core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_started", "scopeId": "browse"})
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 2, {"type": "scope_done", "scopeId": "browse"})
-    _, events = eng.run_scope(_job("browse"))
-    ecs = _delayed_stopped_ecs(fargate["container_name"], running_polls=2, exit_code=0)  # 前 2 次 RUNNING、第 3 次 STOPPED
-    eng._ecs = ecs
-    got = list(events)  # scope_done 后轮询等 STOPPED、读到 exit 0 → 正常终止
-    assert [type(e).__name__ for e in got] == ["ScopeStarted", "ScopeDone"]
-    assert ecs.calls == 3          # 真轮询了 3 次（2 次 RUNNING→None + 1 次 STOPPED）——非首次即读
-    assert sleeps == [eng._poll] * 2  # 2 次 None 各 sleep 一个轮询周期（若循环退化成单次读，sleeps==[] → 本断言红）
-
-
-def test_read_events_scope_done_then_network_exit_raises_network_error(fargate):
-    """scope_done 后 exit 80（网络故障专用退出码，ADR 0028）→ 翻 WorkerNetworkError（与 subprocess/STOPPED 兜底同一分类）。"""
-    eng = _engine(fargate)
-    _put_event(fargate["events_table"], _RUN_ID, "browse", 1, {"type": "scope_done", "scopeId": "browse"})
-    _, events = eng.run_scope(_job("browse"))
-    eng._ecs = _stopped_ecs(fargate["container_name"], exit_code=80)
-    with pytest.raises(WorkerNetworkError):
-        list(events)
-
-
 # ---- run_task 放置失败（failures 非空）→ 明确异常，非裸 IndexError ----
-def test_run_scope_runtask_failure_raises_meaningful_error(fargate, monkeypatch):
-    """RunTask 容量不足/子网无 IP 等 → HTTP 200 + 空 tasks + failures。须翻成带 reason 的明确异常，非 IndexError。"""
+def test_start_scope_runtask_failure_raises_meaningful_error(fargate, monkeypatch):
+    """RunTask 容量不足/子网无 IP 等 → HTTP 200 + 空 tasks + failures。须翻成带 reason 与 detail 的明确异常，非 IndexError。"""
     monkeypatch.setattr(fargate["ecs"], "run_task",
                         lambda **kw: {"tasks": [], "failures": [{"reason": "RESOURCE:MEMORY", "detail": "no capacity"}]})
     eng = _engine(fargate)
-    with pytest.raises(RuntimeError, match="RESOURCE:MEMORY"):
-        eng.run_scope(_job("browse"))
-
-
-# ---- stop → StopTask（moto 忠实）----
-def test_handle_stop_calls_stop_task(fargate, monkeypatch):
-    eng = _engine(fargate)
-    handle, _ = eng.run_scope(_job())
-    called = {}
-    monkeypatch.setattr(fargate["ecs"], "stop_task", lambda **kw: called.update(kw) or {"task": {}})
-    handle.stop(grace_period_s=30.0)  # grace 被忽略（Fargate stopTimeout 决定，ADR 0024）——只验发了 StopTask
-    assert called["cluster"] == fargate["cluster"]
-    assert "task" in called
-
-
-# ---- 退出码解析 + 翻异常：moto exitCode 恒 0 失真 → 纯单测构造 describe 响应 dict ----
-class _FakeEcs:
-    """构造 describe_tasks 响应的假 ecs client（moto exitCode 恒 0、lastStatus 由 describe 次数驱动，测不了退出码语义）。"""
-    def __init__(self, describe_response):
-        self._resp = describe_response
-    def describe_tasks(self, **kw):
-        return self._resp
-
-
-def _engine_with_fake_ecs(describe_response, container_name="worker") -> FargateEngine:
-    # 只测 _probe_task（+ 退出码翻译的接线），不执行 run_scope；其余注入 None（不触及）
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._ecs = _FakeEcs(describe_response)
-    eng._cluster = "c"
-    eng._container = container_name
-    return eng
-
-
-def test_probe_task_not_stopped():
-    # 未 STOPPED → (stopped=False, exit_code=None)（调用方继续轮询等终态）；归因两项只在 STOPPED 时取
-    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "RUNNING", "stopCode": "UserInitiated",
-                                            "containers": [{"name": "worker"}]}]})
-    assert eng._probe_task("arn") == TaskProbe(stopped=False, exit_code=None)
-
-
-def test_probe_task_stopped_with_exit_code():
-    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]})
-    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=0)
-    eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 137}]}]})
-    assert eng2._probe_task("arn") == TaskProbe(stopped=True, exit_code=137)
-
-
-def test_probe_task_stopped_but_exit_code_null():
-    # STOPPED 但 exitCode=null（lastStatus 翻转与 exitCode 落值非原子，STOPPED 瞬间可能短暂 null）
-    # → (stopped=True, exit_code=None)：**两事实各自命名、不揉进单值**；调用方 _await_exit_code 据此有界多等几拍等落值、别当异常。
-    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": None}]}]})
-    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=None)
-    # STOPPED 但整个 containers 空（更极端的落值延迟）→ 同样 (True, None)、不崩
-    eng2 = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "containers": []}]})
-    assert eng2._probe_task("arn") == TaskProbe(stopped=True, exit_code=None)
-
-
-def test_probe_task_stopped_reads_stop_code_and_reason():
-    """已 STOPPED 时一并取 task 级 stopCode 与 stoppedReason：取不到退出码时据此提前落定、拼归因。"""
-    eng = _engine_with_fake_ecs({"tasks": [{"lastStatus": "STOPPED", "stopCode": "TaskFailedToStart",
-                                            "stoppedReason": "CannotPullContainerError: image not found",
-                                            "containers": [{"name": "worker"}]}]})
-    assert eng._probe_task("arn") == TaskProbe(stopped=True, exit_code=None, stop_code="TaskFailedToStart",
-                                               stopped_reason="CannotPullContainerError: image not found")
-
-
-def test_raise_for_worker_exit_maps_codes_with_fargate_label():
-    """码→异常的翻译已收进 `wire`（协议级、与 subprocess adapter 共用一份）：这里锁本 adapter 的调法
-    （`code_label="exitCode"` → 诊断行说 ECS 的话）。翻译语义本身的对拍在 test_wire.py。"""
-    from gherkai_core.wire import raise_for_worker_exit
-
-    raise_for_worker_exit(0, code_label="exitCode")  # 正常，不抛
-    with pytest.raises(WorkerNetworkError):
-        raise_for_worker_exit(80, code_label="exitCode")  # 网络故障专用退出码（ADR 0028）
-    with pytest.raises(RuntimeError, match=r"exitCode=1\b"):
-        raise_for_worker_exit(1, code_label="exitCode")   # 其余正非零
-
-
-# ---- _await_exit_code 对「STOPPED 但 exitCode 尚 null」的有界宽限----
-class _SeqEcs:
-    """按序返回 describe_tasks 响应的假 ecs（模拟 STOPPED 翻转后 exitCode 落值时序）。"""
-    def __init__(self, responses):
-        self._responses = list(responses)
-        self._i = 0
-    def describe_tasks(self, **kw):
-        r = self._responses[min(self._i, len(self._responses) - 1)]
-        self._i += 1
-        return r
-
-
-def _await_engine(responses, grace_polls=5, container_name="worker") -> FargateEngine:
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._ecs = _SeqEcs(responses)
-    eng._cluster = "c"
-    eng._container = container_name
-    eng._poll = 0.0  # 不真睡
-    eng._null_exit_grace_polls = grace_polls
-    return eng
-
-
-def _stopped_resp(exit_code, stop_code=None, stopped_reason=None):
-    c = {"name": "worker"}
-    if exit_code is not None:
-        c["exitCode"] = exit_code
-    task = {"lastStatus": "STOPPED", "containers": [c]}
-    if stop_code is not None:
-        task["stopCode"] = stop_code
-    if stopped_reason is not None:
-        task["stoppedReason"] = stopped_reason
-    return {"tasks": [task]}
-
-
-def test_await_exit_code_waits_out_null_then_reads_landed_code():
-    # STOPPED 但 exitCode 前 3 拍 null（落值延迟）、第 4 拍落值 0 → _await_exit_code 有界多等、读到落值 0（**不误报** error）。
-    eng = _await_engine([_stopped_resp(None)] * 3 + [_stopped_resp(0)], grace_polls=5)
-    assert eng._await_exit_code("arn") == 0  # 等到落值，不落平台侧哨兵
-
-
-def test_await_exit_code_null_beyond_grace_settles_as_platform_sentinel_with_reason():
-    """STOPPED 但 exitCode 恒 null 超过宽限拍数、stopCode 不是启动失败（容器真没报码，非落值延迟）→ 照常等满宽限后落平台侧哨兵 255，
-    reason 是 `stopCode: stoppedReason`（与退出观察者落的内容相同），不无限轮询。"""
-    resp = _stopped_resp(None, stop_code="EssentialContainerExited", stopped_reason="Essential container in task exited")
-    eng = _await_engine([resp] * 50, grace_polls=3)
-    with pytest.raises(WorkerExitError) as ei:
-        eng._await_exit_code("arn")
-    assert ei.value.exit_code == PLATFORM_FAILED_EXIT
-    assert ei.value.reason == "EssentialContainerExited: Essential container in task exited"
-    assert eng._ecs._i == 4  # 宽限 3 拍全部等过（第 4 拍落定）：非启动失败的 null 仍可能是落值延迟，不提前结束
-
-
-def test_await_exit_code_null_beyond_grace_without_any_reason_uses_fallback():
-    """stopCode 与 stoppedReason 都缺时归因取固定兜底句，与观察者同一份拼法（project.platform_exit_reason）。"""
-    eng = _await_engine([_stopped_resp(None)] * 50, grace_polls=2)
-    with pytest.raises(WorkerExitError) as ei:
-        eng._await_exit_code("arn")
-    assert ei.value.exit_code == PLATFORM_FAILED_EXIT and ei.value.reason == platform_exit_reason(None, None)
-
-
-def test_await_exit_code_task_failed_to_start_settles_without_grace(monkeypatch):
-    """stopCode 为 TaskFailedToStart（拉不到镜像、缺 secret）时 exitCode 永不落值：第一拍即落哨兵加归因，不空等宽限拍。"""
-    sleeps = []
-    monkeypatch.setattr("gherkai_core.adapters.fargate_engine.time.sleep", lambda s: sleeps.append(s))
-    resp = _stopped_resp(None, stop_code="TaskFailedToStart",
-                         stopped_reason="CannotPullContainerError: ref pull has been retried 1 time(s): not found")
-    eng = _await_engine([resp] * 50, grace_polls=5)
-    with pytest.raises(WorkerExitError) as ei:
-        eng._await_exit_code("arn")
-    assert ei.value.exit_code == PLATFORM_FAILED_EXIT
-    assert ei.value.reason == "TaskFailedToStart: CannotPullContainerError: ref pull has been retried 1 time(s): not found"
-    assert eng._ecs._i == 1 and sleeps == []  # 只探了一次、没有睡过一拍
-
-
-def test_await_exit_code_early_settle_keys_on_stop_code_not_reason_text():
-    """提前落定只按 stopCode 这个结构化字段判：stoppedReason 文本里出现同样字样也照常走宽限、等到落值即读到真码。"""
-    eng = _await_engine([_stopped_resp(None, stop_code="EssentialContainerExited", stopped_reason="TaskFailedToStart"),
-                         _stopped_resp(1)], grace_polls=5)
-    assert eng._await_exit_code("arn") == 1
-
-
-def test_await_exit_code_uses_given_first_probe_without_extra_describe():
-    """调用方交进来的已 STOPPED 探测结果当作第一拍：落值了即刻返回，不再多调一次 DescribeTasks。"""
-    eng = _await_engine([_stopped_resp(7)], grace_polls=5)
-    assert eng._await_exit_code("arn", TaskProbe(stopped=True, exit_code=0)) == 0
-    assert eng._ecs._i == 0
-
-
-def test_await_exit_code_null_then_nonzero_landed_preserved():
-    # 落值延迟后落到**非 0**（cleanupFailed→1、或 137 等）→ 如实返回该码（宽限不吞掉真实非 0 退出）。
-    eng = _await_engine([_stopped_resp(None), _stopped_resp(137)], grace_polls=5)
-    assert eng._await_exit_code("arn") == 137
-
-
-# ---- 流式期断号：游标只越过连续前缀 + 有界宽限 + 终读记洞 ----
-
-def _gap_engine(events_table, ecs, gap_grace_s: float, missing_grace_polls: int = 20) -> FargateEngine:
-    """裸构造：只装 _read_events 路径要用的属性（不起 RunTask）。"""
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._events, eng._ecs, eng._run_id, eng._cluster, eng._container = events_table, ecs, _RUN_ID, "c", "novaact-worker"
-    eng._poll, eng._gap_grace_s, eng._null_exit_grace_polls = 0.0, gap_grace_s, 5
-    eng._missing_task_grace_polls = missing_grace_polls
-    return eng
-
-
-def _ev_item(seq: int, ev: dict) -> dict:
-    import json as _json
-    return {"seq": seq, "body": _json.dumps(ev)}
-
-
-def test_read_events_gap_within_grace_waits_and_fills_in_order(caplog):
-    """最终一致读先看到 seq 3 却没 seq 2：游标停在 1、下轮 re-query 补到 2 后再往下——事件按 seq 顺序、一条不丢
-    （曾直接推到页内最大 seq、seq 2 被永久越过）。"""
-    import logging
-
-    class _Table:
-        def __init__(self):
-            self.calls = 0
-
-        def query(self, **kw):
-            self.calls += 1
-            if self.calls == 1:  # 副本滞后：seq 2 还没到、seq 3 已可见
-                return {"Items": [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
-                                  _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})]}
-            return {"Items": [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0}),
-                              _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"}),
-                              _ev_item(4, {"type": "scope_done", "scopeId": "browse"})]}
-
-    table = _Table()
-    eng = _gap_engine(table, _delayed_stopped_ecs("novaact-worker", running_polls=1), gap_grace_s=5.0)
-    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
-        got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
-    assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
-    assert table.calls == 2 and "断号" not in caplog.text  # 宽限内补齐，不算丢失
-
-
-def test_read_events_gap_beyond_grace_is_skipped_with_warning(caplog):
-    """洞在宽限后仍在，就是写者侧真丢（PutItem 失败、seq 已耗）→ 记警告、越过继续，流式读不无界停摆。"""
-    import logging
-
-    class _Table:
-        def query(self, **kw):
-            return {"Items": [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
-                              _ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"}),
-                              _ev_item(4, {"type": "scope_done", "scopeId": "browse"})]}
-
-    eng = _gap_engine(_Table(), _stopped_ecs("novaact-worker"), gap_grace_s=0.0)
-    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
-        got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
-    assert got == ["ScopeStarted", "StepDone", "ScopeDone"]
-    assert "有 1 条执行记录" in caplog.text and "执行明细会缺失" in caplog.text
-
-
-def test_final_drain_logs_real_holes_under_consistent_read(caplog):
-    """终读是强一致读，其中的断号无从补、只记警告（不等、不停）。"""
-    import logging
-
-    class _Table:
-        def query(self, **kw):
-            return {"Items": [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0}),
-                              _ev_item(5, {"type": "scope_done", "scopeId": "browse"})]}
-
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._events = _Table()
-    with caplog.at_level(logging.WARNING, logger="gherkai_core.adapters.fargate_engine"):
-        got = [type(e).__name__ for e in eng._final_drain(f"{_RUN_ID}#browse", 1)]
-    assert got == ["StepStarted", "ScopeDone"] and "scope browse" in caplog.text and "缺 2 条" in caplog.text
-
-
-def test_probe_task_missing_is_a_third_state_not_running():
-    """DescribeTasks 空 tasks + failures MISSING → missing=True（不是「未 STOPPED」）：ECS 最终一致下 RunTask 刚返回可短暂
-    查不到；持续 MISSING 则 task 已不在 ECS，再等永远等不到 STOPPED。"""
-    eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
-    assert eng._probe_task("arn") == TaskProbe(stopped=False, exit_code=None, missing=True)
-
-
-def test_await_exit_code_missing_task_beyond_grace_raises():
-    """持续 MISSING 超过有界宽限 → 抛可归因 RuntimeError（schedule 记 error），不再无上界轮询。"""
-    import pytest
-
-    eng = _engine_with_fake_ecs({"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]})
-    eng._poll, eng._missing_task_grace_polls, eng._null_exit_grace_polls = 0.0, 3, 5
-    with pytest.raises(RuntimeError, match="MISSING"):
-        eng._await_exit_code("arn")
-
-
-def test_await_exit_code_transient_missing_then_stopped_reads_code():
-    """MISSING 只是瞬时（最终一致）→ 宽限内恢复可见并 STOPPED → 正常读到码，不误报。"""
-    class _Ecs:
-        def __init__(self):
-            self.calls = 0
-
-        def describe_tasks(self, **kw):
-            self.calls += 1
-            if self.calls <= 2:
-                return {"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]}
-            return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "worker", "exitCode": 0}]}]}
-
-    eng = FargateEngine.__new__(FargateEngine)
-    eng._ecs, eng._cluster, eng._container = _Ecs(), "c", "worker"
-    eng._poll, eng._missing_task_grace_polls, eng._null_exit_grace_polls = 0.0, 5, 5
-    assert eng._await_exit_code("arn") == 0
-
-
-# ---- _read_events 的 MISSING 分支：有界抛 / 瞬时恢复 / 有进展即断连续 ----
-
-class _MissingThenStoppedEcs:
-    """前 missing_calls 次 describe → MISSING，之后 STOPPED exit 0。"""
-
-    def __init__(self, missing_calls: int):
-        self.missing_calls, self.calls = missing_calls, 0
-
-    def describe_tasks(self, **kw):
-        self.calls += 1
-        if self.calls <= self.missing_calls:
-            return {"tasks": [], "failures": [{"arn": "arn", "reason": "MISSING"}]}
-        return {"tasks": [{"lastStatus": "STOPPED", "containers": [{"name": "novaact-worker", "exitCode": 0}]}]}
-
-
-class _RoundsTable:
-    """按轮次给 Items（用尽后恒空）。"""
-
-    def __init__(self, rounds):
-        self.rounds, self.calls = list(rounds), 0
-
-    def query(self, **kw):
-        self.calls += 1
-        return {"Items": self.rounds.pop(0) if self.rounds else []}
-
-
-def test_read_events_persistent_missing_task_raises_after_grace():
-    """无事件 + DescribeTasks 恒 MISSING → 连续超过宽限即抛可归因 RuntimeError（曾把空 tasks 当「未 STOPPED」无上界轮询）。"""
-    import pytest
-
-    ecs = _MissingThenStoppedEcs(missing_calls=10**6)
-    eng = _gap_engine(_RoundsTable([]), ecs, gap_grace_s=5.0, missing_grace_polls=3)
-    with pytest.raises(RuntimeError, match="MISSING"):
-        list(eng._read_events("browse", "arn:task/1"))
-    assert ecs.calls == 4  # 宽限 3 拍 + 第 4 拍抛：有界，且是本闸门抛的
-
-
-def test_read_events_transient_missing_then_events_and_stopped():
-    """瞬时 MISSING（ECS 最终一致）→ 宽限内恢复 → 事件照常读、scope_done 后读到 exit 0，不误报。"""
-    table = _RoundsTable([[], [], [_ev_item(1, {"type": "scope_started", "scopeId": "browse"}),
-                                   _ev_item(2, {"type": "scope_done", "scopeId": "browse"})]])
-    eng = _gap_engine(table, _MissingThenStoppedEcs(missing_calls=2), gap_grace_s=5.0, missing_grace_polls=5)
-    got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
-    assert got == ["ScopeStarted", "ScopeDone"]
-
-
-def test_read_events_progress_resets_missing_count():
-    """「连续 MISSING」的连续性被有进展的轮次打断：事件/空轮交替、空轮都探到 MISSING，累计 3 次但从不连续 2 次，
-    宽限 1 拍也不该抛（曾只在探到非 MISSING 时归零、有进展的轮次不归零——累计口径与「连续」不符）。"""
-    rounds = [[_ev_item(1, {"type": "scope_started", "scopeId": "browse"})], [],
-              [_ev_item(2, {"type": "step_started", "scenarioId": "sc:0", "stepIndex": 0})], [],
-              [_ev_item(3, {"type": "step_done", "scenarioId": "sc:0", "stepIndex": 0, "status": "passed"})], [],
-              [_ev_item(4, {"type": "scope_done", "scopeId": "browse"})]]
-    eng = _gap_engine(_RoundsTable(rounds), _MissingThenStoppedEcs(missing_calls=3), gap_grace_s=5.0, missing_grace_polls=1)
-    got = [type(e).__name__ for e in eng._read_events("browse", "arn:task/1")]
-    assert got == ["ScopeStarted", "StepStarted", "StepDone", "ScopeDone"]
-
-
-# ---- 同步 run --backend cloud 下取不到退出码：schedule 经 FargateEngine 把 ECS 的归因写进 job message----
-
-class _NoExitCodeEcs:
-    """run_task 起一个 task；describe_tasks 恒返回 STOPPED、container 无 exitCode，带给定的 stopCode / stoppedReason。"""
-
-    def __init__(self, stop_code: str, stopped_reason: str):
-        self._task = {"lastStatus": "STOPPED", "stopCode": stop_code, "stoppedReason": stopped_reason,
-                      "containers": [{"name": "worker"}]}
-        self.describe_calls = 0
-
-    def run_task(self, **kw):
-        return {"tasks": [{"taskArn": "arn:aws:ecs:us-east-1:000000000000:task/c/1"}]}
-
-    def describe_tasks(self, **kw):
-        self.describe_calls += 1
-        return {"tasks": [dict(self._task)]}
-
-    def stop_task(self, **kw):
-        return {"task": {}}
-
-
-class _NullS3:
-    def put_object(self, **kw):
-        return {}
-
-
-def _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls: int):
-    from gherkai_core.model import RunMeta
-    from gherkai_core.schedule import ScheduleOpts, schedule
-
-    eng = FargateEngine(
-        ecs_client=ecs, s3_client=_NullS3(), ddb_events_table=_RoundsTable([]), run_id=_RUN_ID, cluster="c",
-        task_definition="arn:aws:ecs:us-east-1:000000000000:task-definition/w:1", network_config={},
-        job_s3=("b", "jobs-in/"), events_table_name="events", container_name="worker",
-        artifact_s3=None, sdk_artifact_dir_env={}, poll_interval_s=0.0, null_exit_grace_polls=null_exit_grace_polls,
-    )
-    res = schedule(RunMeta(run_id=_RUN_ID, created_at="", jobs=(_job("browse"),), deadline_at=FAR_DEADLINE), lambda _engine: eng, lambda _event: None,
-                   opts=ScheduleOpts(max_concurrency=1))
-    return res.jobs[0]
-
-
-def test_sync_run_task_failed_to_start_puts_stopped_reason_in_job_message():
-    """镜像拉不到（stopCode=TaskFailedToStart、无 exitCode）：不等落值宽限，job 判 ERROR，message 带退出码 255 与 ECS 的
-    stoppedReason，与 submit 路径观察者落的归因同一句；不再给出「详见 worker 日志」（容器没起来、没有 worker 日志可看）。"""
-    reason = "CannotPullContainerError: pull image manifest has been retried 1 time(s): not found"
-    ecs = _NoExitCodeEcs("TaskFailedToStart", reason)
-    jr = _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls=5)
-    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error")
-    assert "退出码 255" in jr.message and f"TaskFailedToStart: {reason}" in jr.message
-    assert "详见 worker 日志" not in jr.message
-    assert ecs.describe_calls == 1  # 见到 STOPPED 的那一拍即落定：没等宽限，也没为读码再调一次 DescribeTasks
-
-
-def test_sync_run_other_stop_code_null_exit_beyond_grace_puts_reason_in_job_message():
-    """其余 stopCode 下 exitCode 始终为空：照常等满宽限（仍可能是落值延迟）后落 255，message 带 `stopCode: stoppedReason`。"""
-    ecs = _NoExitCodeEcs("EssentialContainerExited", "Essential container in task exited")
-    jr = _schedule_one_job_on_fake_ecs(ecs, null_exit_grace_polls=3)
-    assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error")
-    assert "退出码 255" in jr.message and "EssentialContainerExited: Essential container in task exited" in jr.message
-    assert ecs.describe_calls == 1 + 3  # 见到 STOPPED 的一拍，加宽限内的 3 拍
+    with pytest.raises(RuntimeError, match="RESOURCE:MEMORY.*no capacity"):
+        eng.start_scope(_job("browse"))

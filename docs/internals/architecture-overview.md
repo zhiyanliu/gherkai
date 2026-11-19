@@ -32,24 +32,24 @@
 
 ![一次 run 的主干：parse → scope 分组 → begin → 驱动循环（启动 worker、逐 step 执行、事件与退出信号两条回传）→ 判定归约 → 报告与退出码](../diagrams/architecture-overview-run-lifecycle.svg)
 
-图注：两条回传的**物理通道**在四种组合下各不相同（本机管道 / 云端表、父进程 / 平台观察），本图只画两条回传的方向；通道与推进链的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
+图注：两条回传的**物理通道**在三种组合下各不相同（本机管道 / 云端表、父进程 / 平台观察），本图只画两条回传的方向；通道与推进链的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。
 
 1. **parse**：`.feature` 文本 → `Scenario` / `Step` 领域模型。第三方 Gherkin 解析器封装在 `parse.py` 之内，Background / Outline / DataTable / DocString 在这一步展开（[ADR 0025](../adr/0025-plan-module-feature-to-jobs.md)）。
 2. **scope 分组**：按 tag 把 scenario 归入 scope，校验 engine、timeout、device 与 app 的一致性，产出 `Job[]`。**一个 job 就是一个 scope**，也是调度与执行的最小单位。`plan` 另外对本次 plan 用到的**每个引擎**启动一到数次瞬时本机 worker（match 查询与能力自述，次数与缓存规则见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)），查询这些 step 文本各命中哪条确定性模式（某个引擎查询不到时只缺少该引擎的标注，不影响 plan 本体）。前两步纯本地、零费用。
 3. **begin**：写入 definition（run 元数据）与初始运行态。写入之前，`run` / `submit` 在组合根把设备目标的 job 填成具体值：设备请求（设备 ARN 或系统版本、计费方式、获取预算、Device Farm 项目 ARN；云端后端的项目 ARN 读部署写下的 SSM 参数）与 `@app` 应用条目的完整 S3 位置（安装包按内容哈希上传），写入前再做一次结构校验；`plan` 只构造不带设备请求的 job、不访问 AWS。推进器与 worker 只从 definition 读回这些值，不重新读取配置文件（[ADR 0048](../adr/0048-test-targets-device-and-ui-kind.md) 决策 3、[ADR 0053](../adr/0053-project-config-file.md) 决策 1）。此后一切写入都经 `RunStore` / `ResultStore`，落点由注入的 adapter 决定（见 §4）。
-4. **驱动**：`run` 采用 `schedule.py` 的在线循环（每个 worker 一个线程，`--max-concurrency` 即同时运行的 worker 数上限，也就是同时持有的会话（AgentCore 浏览器会话或 Device Farm 远程访问会话）数上限，缺省 4（`settings.DEFAULT_MAX_CONCURRENCY`））；`submit` 采用 `reconcile.py` 的无状态单步推进，由每个 run 一个的本机后台进程、`status --wait` 的接力者或云端 Lambda 反复调用。两种驱动的对照、四种组合的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。循环内反复发生以下两件事：
+4. **驱动**：`run` 采用 `schedule.py` 的在线循环（每个 worker 一个线程，`--max-concurrency` 即同时运行的 worker 数上限，也就是同时持有的会话（AgentCore 浏览器会话或 Device Farm 远程访问会话）数上限，缺省 4（`settings.DEFAULT_MAX_CONCURRENCY`））；`submit` 采用 `reconcile.py` 的无状态单步推进，由每个 run 一个的本机后台进程、`status --wait` 的接力者或云端 Lambda 反复调用。`run` 只有本机后端，云端后端只经 `submit`（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A）。两种驱动的对照、三种组合的详解见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md)。循环内反复发生以下两件事：
    - **每 scope 一个 worker**：核心经 `Engine` 启动 worker，worker 按测试目标建立会话（桌面为浏览器会话，设备为远程访问会话），逐 step 判断走哪条路径。step 派发的决策链、`steps/` 目录的两个真值源、worker 的两个非 job 入口（能力自述 `--capabilities`、正则匹配查询 `--match-steps`）见 [`deterministic-step-lifecycle.md`](./deterministic-step-lifecycle.md)。
-   - **事件流与退出信号**：核心对一个 worker 只看两类信息——worker 上报的逐条事件（`scope_started` / `step_done` / …），以及由父进程或平台观察到的进程退出信号（**退出永不由 worker 自报**）；判定要求两者同时成立（事件完整且进程干净终止）。四种组合下事件所走的四条物理通道、退出观察者由谁承担、job 超时如何处理，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §5-§6。
+   - **事件流与退出信号**：核心对一个 worker 只看两类信息——worker 上报的逐条事件（`scope_started` / `step_done` / …），以及由父进程或平台观察到的进程退出信号（**退出永不由 worker 自报**）；判定要求两者同时成立（事件完整且进程干净终止）。三种组合下事件所走的三条物理通道、退出观察者由谁承担、job 超时如何处理，见 [`execution-and-reconciliation.md`](./execution-and-reconciliation.md) §5-§6。
 5. **判定归约与报告**：一票 → step → scenario → job → run 四层归约，七个状态（五个终态，外加 `pending` / `running` 两个前置态）与各命令退出码的分工见 [`verdict-model.md`](./verdict-model.md)；判定真值、引擎产物、逐步证据与 RunReport 的落点、`explain` 解引用到哪一层，见 [`artifacts-and-evidence.md`](./artifacts-and-evidence.md)；`--json` 的字段级契约见 [`cli-json-contract.md`](./cli-json-contract.md)。
 
 ## 4. 本机与云端：同一条链的两种载体
 
-`--backend` 只替换 adapter，**不替换核心**：`parse` / 分组 / 归约 / 判定模型两个后端共用一份代码。
+`--backend` 只替换 adapter，**不替换核心**：`parse` / 分组 / 归约 / 判定模型两个后端共用一份代码。云端后端只有 `submit` 提交的后台 run（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A），下表云端一列都是后台的情形。
 
 | 面 | `--backend local`（缺省） | `--backend cloud` |
 |---|---|---|
 | worker 位置 | 本机子进程，事件经专用 fd 传输 | Fargate task（ECS cluster `{prefix}cluster`），job 输入放 S3，事件逐条写 DynamoDB |
-| 启动 worker 的 adapter | `adapters/subprocess_engine.py`（前台）、`runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（后台） | `adapters/fargate_engine.py`（前台）、`adapters/cloud_launcher.py`（后台） |
+| 启动 worker 的 adapter | `adapters/subprocess_engine.py`（前台）、`runtime/gherkai_runtime/detached.py` 的 `SubprocessLauncher`（后台） | `adapters/cloud_launcher.py` 经 `adapters/fargate_engine.py` 起 task（只有后台） |
 | 运行态与判定真值 | 文件树 `<report-dir>/<run_id>/`（缺省 `reports/`） | DynamoDB `{prefix}runs`（元数据与运行态两个 item）+ S3 `{prefix}artifacts`（判定真值与报告，key 镜像本机树的相对路径） |
 | 事件 | 前台在线消费，同时与后台推进一样写入 `events.db`（SQLite；`--no-report` 不写） | DynamoDB `{prefix}events`（worker `PutItem`，读侧 `Query`） |
 | `submit` 的推进器 | 本机 `setsid` 脱离出的后台进程，本机需保持开机 | 三个 Lambda（`{prefix}kicker` / `{prefix}reconciler` / `{prefix}exit-observer`）由两条表 Stream 与一条「ECS 任务已停止」事件规则串联（互不调用），提交后关机也能执行完毕 |

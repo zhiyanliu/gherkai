@@ -61,7 +61,7 @@
 
 ## 决策 5：术语单一真源与立新角色的门槛
 
-- 本 ADR 是角色名与边界的单一真源；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「两个独立的选择」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
+- 本 ADR 是角色名与边界的单一真源；派生视图在 `docs/user-guide/getting-started.md`「按角色选安装形态」表、`CONTEXT.md`「角色与权限」节词条组、`docs/user-guide/running-and-results.md`「怎么运行、在哪运行：三种组合」节的权限表（决策 3 的执行权限梯级）与 skill `references/cloud-backend.md`「分工」表，改这里再改那里。
 - **立新角色的门槛 = 有独立权限边界或独立产物**。「只提交不写 feature 的人」「只看结果的人」是 feature 作者的子集、不另立；「提交者」维持为权限类别，不升格为帽子。
 - 长期文档与 code 注释用正名；产品面文案里的角色词按 0039 说人话（「部署方」「写 step 的人」可用，不出现帽子矩阵与决策号）。
 
@@ -88,6 +88,6 @@
 
 ## 影响
 
-- 用户文档（0045 决策一 / 二 归位后）：`getting-started.md`「按角色选安装形态」表承载帽子与安装形态，并以产品语言写「一个人可以同时承担多个角色」（隐喻「帽子不是人」按 0045 决策六不进使用者面）；`running-and-results.md`「两个独立的选择」节承载执行权限梯级表（决策 3 的派生视图，不带 ADR 编号），角色表的「需要什么凭证」列指向它。
+- 用户文档（0045 决策一 / 二 归位后）：`getting-started.md`「按角色选安装形态」表承载帽子与安装形态，并以产品语言写「一个人可以同时承担多个角色」（隐喻「帽子不是人」按 0045 决策六不进使用者面）；`running-and-results.md`「怎么运行、在哪运行：三种组合」节承载执行权限梯级表（决策 3 的派生视图，不带 ADR 编号），角色表的「需要什么凭证」列指向它。
 - CONTEXT.md：加「角色与权限」节的词条组（使用方 vs contributor、发布方、owner、四顶帽子、执行权限梯级、提交者、两侧 AI agent 及使用者侧 / contributor 侧两条），指向本 ADR。
 - 0020「角色边界」节、0038「默认画像」句：加指向本 ADR 的指针；术语按决策 1。

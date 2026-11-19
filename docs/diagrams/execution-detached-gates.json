@@ -2,7 +2,7 @@
   "schema_version": 2,
   "diagram_type": "workflow",
   "meta": {
-    "title": "两道拦截：云端后台推进为何不介入前台 run",
+    "title": "两道判断：云端推进函数只处理带后台标记的 run",
     "output": "execution-detached-gates.html",
     "locale": "zh-CN",
     "quality_profile": "showcase",
@@ -185,7 +185,7 @@
       "col": 4,
       "type": "external",
       "label": "不写退出记录",
-      "sublabel": "避免混入前台",
+      "sublabel": "没有后台标记",
       "width": 176
     }
   ],
@@ -276,10 +276,10 @@
   "cards": [
     {
       "dot": "rose",
-      "title": "无拦截时的后果",
+      "title": "判断的对象",
       "items": [
-        "前台执行在云端后端同样写入这两张表，云端函数会被这些记录唤醒",
-        "结果是同一 scope 启动两个 task：前台已启动一个，云端后台推进另启动一个"
+        "云端后端只有 submit 提交的后台 run，建 run 时都写下后台标记",
+        "两道判断对这些 run 恒放行，没有后台标记的 run 才被挡下"
       ]
     },
     {
@@ -296,7 +296,7 @@
       "title": "另两个判点防范其他情形",
       "items": [
         "「是否已结束」防范的是改写已落定的结果",
-        "退出观察者这道防范的是无正文的退出记录混入前台 run 的事件流"
+        "退出观察者这道只为带后台标记的 run 写退出记录"
       ]
     }
   ]

@@ -14,25 +14,23 @@ if TYPE_CHECKING:
 class WorkerExitError(RuntimeError):
     """worker 进程以非零退出码结束（ADR 0024「退出码约定」/ 0034 机制二「退出信息」）。
 
-    `wire.raise_for_worker_exit` 把非零退出码翻成本异常（两个 Engine adapter 共用），`exit_code` 带原码：正码多为 worker 自报
-    （崩溃 / 会话清理失败的 1、Nova worker 加载使用方 steps 失败的 2、网络故障的 80）；本机子进程被信号强杀时为负码
-    （SIGKILL 为 -9），云端任务被强杀时 ECS 报正码（SIGKILL 为 137）。云端任务已停止却取不到退出码时，`FargateEngine` 直接抛本异常，
-    `exit_code` 取平台侧哨兵 255（`project.PLATFORM_FAILED_EXIT`），`reason` 带 ECS 给的归因（`stopCode: stoppedReason`）。
+    子进程 adapter 经 `wire.raise_for_worker_exit` 把非零退出码翻成本异常（ADR 0028「关键不变量:退出码携带 network 信号」节），
+    `exit_code` 带原码：正码多为 worker 自报（崩溃 / 会话清理失败的 1、Nova worker 加载使用方 steps 失败的 2、网络故障的 80）；
+    被信号强杀时为负码（SIGKILL 为 -9）。云端后端的退出码不经本异常：退出观察者把它写成退出记录，推进器在投影里交给终结函数
+    （缺退出码时落的平台侧哨兵与归因见 ADR 0034 机制二「退出码缺失」条）。
 
-    终结函数据 `exit_code` 判「退出码非零」一行；schedule 把 `reason` 作为退出原因交给终结函数，255 那一行把它接在消息之后。两者都是
-    有类型的字段，不从消息文本里解析。worker 自报的退出码与被信号强杀的退出码不带 `reason`（为 None），消息由终结函数按码给出。
+    终结函数据有类型的 `exit_code` 判「退出码非零」一行，不从消息文本里解析；消息由终结函数按码给出，异常消息不进 job 的说明。
     """
 
-    def __init__(self, exit_code: int, message: str, *, reason: str | None = None) -> None:
+    def __init__(self, exit_code: int, message: str) -> None:
         super().__init__(message)
         self.exit_code = exit_code
-        self.reason = reason
 
 
 class WorkerNetworkError(WorkerExitError):
     """worker 以「网络/SSL 瞬时故障」专用退出码退出（建连失败、重试耗尽，ADR 0028）。
 
-    `wire.raise_for_worker_exit` 把该退出码翻成本异常（两个 Engine adapter 共用）；schedule 据此把 job 记 error_type="network_error"，
+    子进程 adapter 经 `wire.raise_for_worker_exit` 把该退出码翻成本异常；schedule 据此把 job 记 error_type="network_error"，
     并在「会话未起（零 step_done）」时选择性重试整个 job。是 WorkerExitError 的子类（exit_code 恒为网络故障退出码）。
     """
 

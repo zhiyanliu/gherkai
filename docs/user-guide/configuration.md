@@ -18,7 +18,7 @@ gherkai 的项目配置文件、环境变量与跨命令选项清单如下：每
 
 ![环境变量从你设的地方流到本机 CLI 进程、它起的子进程与云端 worker 容器，四类边分别是继承、由 gherkai 注入、被选项覆盖、不传](../diagrams/configuration-env-inheritance.svg)
 
-图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承**指原样拿到上一级的值；**被覆盖**指起子进程时用解析后的选项值改写同名变量；**不传**指值到不了对面，要生效就设在对面；**由 gherkai 注入**指由启动这个进程的一方写入，优先于继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker` / `list-workers`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务在 `run --backend cloud` 下由本机 CLI 起，在 `submit --backend cloud` 下由后端起。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。项目配置文件不是环境变量：它只被本机 CLI 进程读取、解析成具体值后随提交记录走，不出现在这张图上。
+图注：你在 shell 里 export 的值由本机 CLI 进程继承，再传给它起的子进程；图里的「CLI 起的子进程」既指本机 worker 进程，也指部署时起的 cdk 子进程——两者都从 CLI 原样继承环境，也都会被 gherkai 注入的变量和解析后的选项值改写。云端 worker 容器不继承你的 shell，它的环境是 worker 镜像 `ENV` 里的值加上起这个任务的那一方注入的值。**继承**指原样拿到上一级的值；**被覆盖**指起子进程时用解析后的选项值改写同名变量；**不传**指值到不了对面，要生效就设在对面；**由 gherkai 注入**指由启动这个进程的一方写入，优先于继承来的值（含镜像 `ENV` 里的同名项），清单见下文「由 gherkai 注入的环境变量」。部署命令（`deploy` / `destroy` / `push-worker` / `list-workers`）本身也是本机 CLI 进程，只是通常在另一台机器上运行，上表把那台机器单列为「部署机」。云端任务由后端起：云端后端只有 `submit --backend cloud` 一种执行方式，提交之后由后端拉起 worker 任务并注入它的环境。哪个变量设在哪里生效，见下面各表的「在哪里设」栏。项目配置文件不是环境变量：它只被本机 CLI 进程读取、解析成具体值后随提交记录走，不出现在这张图上。
 
 ## 项目配置文件
 
@@ -66,9 +66,8 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 | `[common]` | `region`、`profile` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` |
 | `[common]` | `expose-local` | `run`、`plan`、`submit` |
 | `[common]` | `tunnel`、`grace`、`tunnel-ttl` | `tunnel`：`run`、`submit`；`grace`：`run`；`tunnel-ttl`：`submit` |
-| `[cloud]` | `prefix`、`ddb-table` | `run`、`submit`、`status`、`list-runs`、`explain`（`prefix` 也在 `doctor`） |
-| `[cloud]` | `s3-bucket`、`worker-variant` | `run`、`submit` |
-| `[cloud]` | `events-table`、`cluster`、`subnet`、`security-group` | `run`；`subnet` 与 `security-group` 写成字符串列表 |
+| `[cloud]` | `prefix`、`ddb-table` | `submit`、`status`、`list-runs`、`explain`（`prefix` 也在 `doctor`） |
+| `[cloud]` | `s3-bucket`、`worker-variant` | `submit` |
 
 **只影响本次调用的选项不进配置文件**：`--scope`、`--tags`、`--scenario`、`--step`、`--json`、`--quiet`、`--wait`、`--all`、`--full`、`--fail-fast`、`--no-report`、`list-deterministic` 的 `--engine`、`list-runs` 的 `--status` 与 `--limit`、`--config` 本身与位置参数。写进文件会让某次调用的范围、输出或中止方式在不显眼处改变。不认识的节或键以退出码 2 结束并点名文件、节与键，不静默忽略。
 
@@ -143,7 +142,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `GHERKAI_STEPS_DIR` | 你自己的确定性 step 目录，`--steps-dir` 没给时用它 | `./steps` 存在即用 | 本机 shell、variant 镜像 `ENV` |
 | `NO_COLOR` | 设为非空值即关闭人读输出里的颜色，包括本机 worker 日志行的来源前缀（`TERM=dumb` 同效）；标准输出不是终端时本来就不带颜色，`FORCE_COLOR` 为非空值时强制带颜色（如 `\| less -R`） | 未设 | 本机 shell |
 
-- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run`（两个后端都算）与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接力推进到结束时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。取值须是正整数秒，不是正整数（含空值）时，用到 Nova 的 `run`（两个后端都算）与 `submit --backend local` 在开始执行之前以退出码 2 结束并点名这个变量；只用 Midscene 的运行不受影响。
+- `NOVA_ACT_TIMEOUT_S` 由起 worker 的那一侧读取后注给 worker：`run` 与 `submit --backend local` 用发起命令的 shell 里的值；`submit --backend local` 提交的 run 之后由 `gherkai status --wait` 接力推进到结束时，用运行 `status` 的那个 shell 里的值；`submit --backend cloud` 的任务由云端起，固定用 120 秒。取值须是正整数秒，不是正整数（含空值）时，用到 Nova 的 `run` 与 `submit --backend local` 在开始执行之前以退出码 2 结束并点名这个变量；只用 Midscene 的运行不受影响。
 - `NOVA_ACT_TIMEOUT_S` 与 `NOVA_GRACE_MARGIN_S` 相加就是 Nova 引擎自报的最小停止宽限（默认 150 秒；Midscene 自报的是由它的收尾超时算出的 63.5 秒，不随环境变量变化），调大前者会同时抬高本机运行所允许的最小 `--grace`。
 - `NOVA_GRACE_MARGIN_S` 只影响本机运行所允许的最小 `--grace`。云端 worker 的停止宽限由部署时的 `gherkai deploy --stop-timeout` 决定。
 - `MIDSCENE_REPLANNING_CYCLE_LIMIT` 的取值须为正整数，不是正整数（含空值）时 Midscene worker 在建立任何会话之前报错退出并点名这个变量，桌面与设备目标都核对。设备上原生应用的翻页类动作每翻一页消耗一次规划，缺省值因此取 12；一条 AI step 在设备上因规划次数用尽而失败时，可以调大它或把这一步拆细。
@@ -191,9 +190,9 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 
 | 选项 | 出现在 | 跨命令差异 |
 |---|---|---|
-| `--backend {local,cloud}` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | 默认 `local`。查一个 run 的 `status` / `explain`、列 run 的 `list-runs` 要给与产生 run 的 `run` 或 `submit` 相同的值 |
-| `--prefix P` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `run` / `submit` / `status` / `list-runs` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。部署侧的前缀至多 32 个字符，见 [`cloud-backend.md`](./cloud-backend.md)「deploy 与 destroy 的选项」。多环境切换（`prod-` / `stage-`）用它 |
-| `--report-dir DIR` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run，本机后端的 `list-runs` 同样据它定位；云端后端的 `list-runs` 不用它，给了也忽略。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒；`run --backend cloud` 不做这项比对 |
+| `--backend {local,cloud}` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | 默认 `local`。`run` 只在本机后端执行：给出 `cloud`（命令行上或配置文件里）时以退出码 2 结束，云端后端用 `submit --backend cloud`。查一个 run 的 `status` / `explain`、列 run 的 `list-runs` 要给与产生 run 的 `run` 或 `submit` 相同的值 |
+| `--prefix P` | `submit`、`status`、`list-runs`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 在 `submit` / `status` / `list-runs` / `explain` / `doctor` 上只对云端后端起作用，部署命令用它给资源命名；两侧的值须一致。部署侧的前缀至多 32 个字符，见 [`cloud-backend.md`](./cloud-backend.md)「deploy 与 destroy 的选项」。多环境切换（`prod-` / `stage-`）用它 |
+| `--report-dir DIR` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` | `status` / `explain` 要给与 `submit` 相同的值才查得到这个 run，本机后端的 `list-runs` 同样据它定位；云端后端的 `list-runs` 不用它，给了也忽略。`submit --backend cloud` 下这个值还须与后端部署时设的报告前缀一致，不一致在提交前即被拒 |
 | `--steps-dir DIR` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` | 五个命令上同义；云端后端不生效（云端 worker 的 step 构建在镜像里） |
 | `--default-engine {midscene,novaact}` | `run`、`plan`、`submit` | 三个命令上同义 |
 | `--scope ID`、`--tags TAG[,TAG...]`、`--scenario SEL` | `run`、`plan`、`submit`；`--scenario` 也在 `explain` 上 | 前三个命令上同义，都是选这个 run 里哪些 scenario 要运行；`explain --scenario` 选的是看哪些 scenario 的证据，选择器写法与它们同一套 |
@@ -202,8 +201,8 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 为本机后端的 run 接力推进时起作用。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。取值须是 `http://主机[:端口]` 或 `https://主机[:端口]`，末尾的一个 `/` 会被去掉；其余形态（带路径、查询串、片段或用户信息）在三个命令上都以退出码 2 结束。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
-| `--worker-variant NAME` | `run`、`submit` | 两个命令上同义，只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
-| `--grace S` | `run` | 只有本机后端用它。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，`--backend cloud` 给这个选项会以退出码 2 结束；写在 gherkai.toml 里的 `grace` 在云端只提示一句、不生效 |
+| `--worker-variant NAME` | `submit` | 只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
+| `--grace S` | `run` | `run` 只在本机后端执行，用它给本机 worker 留收尾时间。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，写在 gherkai.toml 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
 | `--json` | `run`、`plan`、`status`、`list-runs`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |
 | `--quiet` | `run` | 只影响进度输出与本机 worker 日志的落点 |
 | `--region R`、`--profile P` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor`、`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers` | 优先于同义的环境变量（解析链见上）。云端 worker 只收 region，凭证用它自己的任务角色 |
@@ -213,17 +212,13 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 
 `--json` 输出里有哪些字段、字段怎么用，入口在 [`running-and-results.md`](./running-and-results.md)。
 
-## 云端资源名与网络的单项覆盖
+## 云端资源名的单项覆盖
 
-下面这些选项只在 `--backend cloud` 下起作用，用来单独覆盖某一个资源名或网络设置。一般只用 `--prefix`；这些单项覆盖用于资源名不按前缀约定的部署。
+下面这些选项只在 `--backend cloud` 下起作用，用来单独覆盖某一个资源名。一般只用 `--prefix`；这些单项覆盖用于资源名不按前缀约定的部署。
 
 | 选项 | 出现在 | 不给时用什么 | 环境变量 |
 |---|---|---|---|
-| `--ddb-table NAME` | `run`、`submit`、`status`、`list-runs`、`explain` | `<prefix>runs` | `AWS_DDB_TABLE` |
-| `--s3-bucket NAME` | `run`、`submit` | `<prefix>artifacts` | `AWS_S3_BUCKET` |
-| `--events-table NAME` | `run` | `<prefix>events` | 无 |
-| `--cluster NAME` | `run` | `<prefix>cluster` | 无 |
-| `--subnet ID` | `run` | 部署时写入的参数 `/<prefix>backend/subnets` | 无 |
-| `--security-group ID` | `run` | 部署时写入的参数 `/<prefix>backend/security-groups` | 无 |
+| `--ddb-table NAME` | `submit`、`status`、`list-runs`、`explain` | `<prefix>runs` | `AWS_DDB_TABLE` |
+| `--s3-bucket NAME` | `submit` | `<prefix>artifacts` | `AWS_S3_BUCKET` |
 
-`--subnet` 与 `--security-group` 可以重复给，表示多个子网或安全组。`submit` 只收 `--ddb-table` 与 `--s3-bucket`：它提交的 run 由云端后端拉起 worker，集群、events 表与网络用的是部署时写进后端的值。选云端 worker 镜像 variant 的 `--worker-variant` 见 [`cloud-backend.md`](./cloud-backend.md)。
+云端后端的 run 由后端拉起 worker，集群、events 表与网络用的是部署时写进后端的值，没有对应的单项覆盖。选云端 worker 镜像 variant 的 `--worker-variant` 见 [`cloud-backend.md`](./cloud-backend.md)。

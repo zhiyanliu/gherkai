@@ -38,8 +38,6 @@ from gherkai_runtime.names import (  # noqa: F401
     TAG_VARIANT,
     TAG_VERSION,
     SCHEDULE_NAME_MAX_LEN,
-    SECURITY_GROUPS_KEY,
-    SUBNETS_KEY,
     VPC_KEY,
     WORKER_DEFAULT_KEY,
     WORKER_IMAGE_ROOT_KEY,
@@ -77,16 +75,6 @@ def stack_name(prefix: str) -> str:
     **公式不得变更**：现网已部署的 stack 就叫这个名，改推导等于换 stack（旧 stack 遗留、新 stack 与旧资源撞名）。
     """
     return f"BackendStack-{prefix.rstrip('-') or 'default'}"
-
-
-def ssm_subnets_path(prefix: str) -> str:
-    """subnet ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SUBNETS_KEY) 的便捷形式）。"""
-    return ssm_path(prefix, SUBNETS_KEY)
-
-
-def ssm_security_groups_path(prefix: str) -> str:
-    """sg ID 列表的 SSM 路径（即 gherkai_runtime.names.ssm_path(prefix, SECURITY_GROUPS_KEY) 的便捷形式）。"""
-    return ssm_path(prefix, SECURITY_GROUPS_KEY)
 
 
 def ssm_version_path(prefix: str) -> str:

@@ -131,25 +131,24 @@ def ddb_run_store_offload(aws, arg_offloader):
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]), arg_offloader=arg_offloader)
 
 
-# events 表（ADR 0024「DynamoDB 作 events-out」）：PK=run_id#scope_id、SK=seq（Number）。FargateEngine 测试用。
+# events 表名（ADR 0024「DynamoDB 作 events-out 传输」节）：FargateEngine 只把它经 RunTask overrides 交给 worker、自己不读表，
+# 故 fargate fixture 不建这张表。
 _EVENTS_TABLE_NAME = "gherkai-events"
 
 
 @pytest.fixture
 def fargate(_fake_aws_creds):
-    """moto mock 下建全 FargateEngine 依赖：EC2 网络 + ECS FARGATE cluster/task-def + events 表 + S3 桶。
+    """moto mock 下建全 FargateEngine 依赖：EC2 网络 + ECS FARGATE cluster/task-def + S3 桶。
 
     **moto 5.2.2 ECS Fargate 坑规避（实测逼近所得，纯 setup、无 monkeypatch）**：
     - VPC 必开 `EnableDnsHostnames`，否则 run_task 建 ENI 时 `AttributeError: private_dns_name`；
     - task-def 顶层 + 每 container 都给整数 cpu/memory，否则 `TypeError: int += NoneType`；
     - awsvpcConfiguration 必显式给 securityGroups，否则 `KeyError`；
-    - **pin `ecs::task` transition**，否则每次 `describe_tasks` 都把 lastStatus 推进一格（RUNNING→…→STOPPED），
+    - **pin `ecs::task` transition**，否则 moto 每次读 task 都把 lastStatus 推进一格（RUNNING→…→STOPPED），
       测试非确定。teardown `unset_transition` 还原（该配置全局、不随 mock_aws 退出复位，须手动还原防污染后续测试）。
 
-    **moto ECS 状态机失真（绿≠对，务必知）**：container `exitCode` 恒 0、`lastStatus` 恒 PENDING、task.lastStatus
-    由 describe 次数驱动——**退出码/容器终止语义 moto 测不了**，FargateEngine 的退出码解析（`_probe_task` +
-    协议翻译 `wire.raise_for_worker_exit`）用**构造 describe 响应 dict** 的纯单测锁逻辑，真实时序已由真容器校准覆盖。moto 只忠实测
-    run_task/stop_task 编排 + DDB Query 迭代器。
+    **moto ECS 状态机失真（绿≠对，务必知）**：container `exitCode` 恒 0、task.lastStatus 由读取次数驱动——容器的运行与退出
+    moto 测不了。FargateEngine 只起 task、不读退出码，moto 只用来忠实测 run_task 的编排与 job 对象的上传；task 能否真起来要真部署之后验。
     """
     import boto3
     from moto.moto_api import state_manager
@@ -160,7 +159,6 @@ def fargate(_fake_aws_creds):
         try:
             ec2 = boto3.client("ec2", region_name=region)
             ecs = boto3.client("ecs", region_name=region)
-            ddb = boto3.resource("dynamodb", region_name=region)
             s3 = boto3.client("s3", region_name=region)
 
             vpc = ec2.create_vpc(CidrBlock="10.0.0.0/16")["Vpc"]["VpcId"]
@@ -182,26 +180,12 @@ def fargate(_fake_aws_creds):
                 }],
             )["taskDefinition"]["taskDefinitionArn"]
 
-            # events 表：PK=pk(run_id#scope_id, S) + SK=seq(N)
-            ddb.create_table(
-                TableName=_EVENTS_TABLE_NAME,
-                KeySchema=[
-                    {"AttributeName": "pk", "KeyType": "HASH"},
-                    {"AttributeName": "seq", "KeyType": "RANGE"},
-                ],
-                AttributeDefinitions=[
-                    {"AttributeName": "pk", "AttributeType": "S"},
-                    {"AttributeName": "seq", "AttributeType": "N"},
-                ],
-                BillingMode="PAY_PER_REQUEST",
-            )
             s3.create_bucket(Bucket=_BUCKET_NAME)
 
             yield {
-                "ec2": ec2, "ecs": ecs, "ddb": ddb, "s3": s3,
+                "ec2": ec2, "ecs": ecs, "s3": s3,
                 "cluster": cluster, "task_def": task_def,
                 "subnet": subnet, "sg": sg,
-                "events_table": ddb.Table(_EVENTS_TABLE_NAME),
                 "events_table_name": _EVENTS_TABLE_NAME,
                 "bucket": _BUCKET_NAME,
                 "container_name": "worker",

@@ -271,14 +271,14 @@ EX_WORKER_NETWORK = 80
 
 
 def raise_for_worker_exit(rc: int, *, code_label: str) -> None:
-    """worker 退出码 → 异常（协议翻译，各 Engine adapter 共用的单一事实源）。
+    """worker 退出码 → 异常（协议翻译的单一事实源，同步路径的子进程 adapter 调它，ADR 0028「关键不变量:退出码携带 network 信号」节）。
 
     80 → `WorkerNetworkError`（schedule 记 network_error、可重试整 job，ADR 0028）；其余非零（含负码：被信号强杀，
     SIGKILL 为 -9）→ `WorkerExitError`（带原码；进程非干净终止本身即终态信号，ADR 0034 机制二）；0 → 不抛。
-    终结函数据异常上的 exit_code 判「退出码非零」一行，不从消息文本解析。
+    终结函数据异常上的 exit_code 判「退出码非零」一行，不从消息文本解析。后台推进的退出码不经这里：观察者写成退出记录，
+    由终结函数在投影里判定（ADR 0034 机制二）。
 
-    code_label 只进消息文本：各传输的退出码字段名不同（子进程 `returncode` / ECS `exitCode`），诊断行
-    须说该传输的话（也是既有测试匹配的措辞）。
+    code_label 只进消息文本：诊断行说出退出码取自哪个字段（子进程 adapter 传 `returncode`，也是既有测试匹配的措辞）。
     """
     if rc == EX_WORKER_NETWORK:
         raise WorkerNetworkError(f"worker 建连失败（网络/SSL 瞬时故障），退出码 {rc}", rc)

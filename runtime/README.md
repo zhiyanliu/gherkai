@@ -1,6 +1,6 @@
 # gherkai-runtime
 
-gherkai 的运行时装配层：拉起两个 AI 引擎的 worker、解析云端资源名与网络、组装并推进一次 run，执行调度交给核心库 https://pypi.org/project/gherkai-core/ 。它是 gherkai 命令行与 AWS 部署包依赖的库，**一般不直接安装**——要运行测试请装命令行包 `gherkai`。要做另一个前端（Web 界面、自建调度服务、把执行嵌进现有平台）时才直接用它。
+gherkai 的运行时装配层：拉起两个 AI 引擎的 worker、解析云端资源名、组装并推进一次 run，执行调度交给核心库 https://pypi.org/project/gherkai-core/ 。它是 gherkai 命令行与 AWS 部署包依赖的库，**一般不直接安装**——要运行测试请装命令行包 `gherkai`。要做另一个前端（Web 界面、自建调度服务、把执行嵌进现有平台）时才直接用它。
 
 ## 安装
 
@@ -30,7 +30,7 @@ resolver = compose.make_resolver(engines)
 
 | 模块 | 提供什么 |
 |---|---|
-| `gherkai_runtime.compose` | 读 `.feature`、生成 run 身份、拉起本机或 Fargate 引擎 worker、选结果落点、解析云端资源名与网络、查引擎能力 |
+| `gherkai_runtime.compose` | 读 `.feature`、生成 run 身份、拉起本机或 Fargate 引擎 worker、选结果落点、解析云端资源名、查引擎能力 |
 | `gherkai_runtime.names` | 云端资源名、SSM 参数路径、worker 镜像 tag 的唯一命名实现 |
 | `gherkai_runtime.detached` / `tunnel` | 提交后在本机后台把一个 run 推到完成；把本机可达的被测应用暴露给云端浏览器 |
 | `gherkai_runtime.textui` | 人读输出的表格、树与状态颜色：表格按终端宽度排版，输出到非终端或设置了 `NO_COLOR` 时不带颜色 |
@@ -39,7 +39,7 @@ resolver = compose.make_resolver(engines)
 
 ## 文档
 
-- 四种组合（执行方式 × 执行后端）、结果与退出码：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
+- 三种组合（执行方式 × 执行后端，云端后端只有后台运行）、结果与退出码：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md
 - 环境变量与选项总表：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/configuration.md
 - 云端后端怎么部署：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md
 - 每版变更：https://github.com/zhiyanliu/gherkai/blob/HEAD/CHANGELOG.md

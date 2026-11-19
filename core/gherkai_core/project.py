@@ -226,14 +226,13 @@ def synthesize_skipped(result: JobResult, timing: Timing) -> None:
 # ============================================================================
 
 
-# 平台侧退出哨兵：task 已停止、平台却没有给出 worker 退出码的两种形态都落它——①观察者收到 STOPPED 却缺 exitCode（容器没能开始
-# 运行，如拉不到镜像；云端 tick 按观察者同一提取函数补写时同样；ADR 0034 机制二「退出码缺失」推论）；②同步 `run --backend cloud`
-# 下 task 已 STOPPED 却始终取不到 exitCode。
+# 平台侧退出哨兵：task 已停止、平台却没有给出 worker 退出码时落它（ADR 0034 机制二「退出码缺失」条）——观察者收到 STOPPED 却缺
+# exitCode（容器没能开始运行，如拉不到镜像），云端 tick 按观察者同一提取函数补写时同样。
 # 推进步骤起 job 失败时不落它：那时 worker 根本没有启动，补偿写退出码未知加启动失败的原因，与前台起 worker 失败交给终结函数的输入相同
 # （ADR 0054 决策二后台推进条「时刻」），两条路径对同一个启动异常给出同一句说明。
 # 非 0 即走「退出码非零 → ERROR」既有谓词；终结函数只在消息里按它给出平台侧归因的说法，判定不看具体值。选 255 避开 worker 真实语义码
-# （如网络故障退出码 80），只为日志/归因可辨识「这是平台侧没给出退出码、不是 worker 执行中崩溃」。core 单点定义，观察者 Lambda、云端 tick
-# 的补写与 FargateEngine 都 import 本常量、别各抄一份。
+# （如网络故障退出码 80），只为日志/归因可辨识「这是平台侧没给出退出码、不是 worker 执行中崩溃」。core 单点定义，观察者 Lambda 与云端 tick
+# 的补写都 import 本常量、别各抄一份。
 PLATFORM_FAILED_EXIT = 255
 
 
@@ -241,8 +240,8 @@ def platform_exit_reason(stop_code: str | None, stopped_reason: str | None) -> s
     """ECS 没给出退出码时随 `PLATFORM_FAILED_EXIT` 一起落的归因串：`stopCode: stoppedReason`，缺一项只用另一项，两项都缺时用固定的
     兜底句（ADR 0034 机制二「退出码缺失」条）。
 
-    唯一一份拼法：退出观察者与云端 tick 的补写（经 provider 包的同一提取函数）、同步路径的 `FargateEngine` 都调它，同一故障在同步与
-    无状态两条路径下得到逐字相同的归因（各拼一份即两处漂移，理由同哨兵常量）。"""
+    唯一一份拼法：退出观察者与云端 tick 的补写都经 provider 包的同一提取函数调它，同一故障不论由哪一方写下都得到逐字相同的归因
+    （各拼一份即两处漂移，理由同哨兵常量）。"""
     return ": ".join(x for x in (stop_code, stopped_reason) if x) or "平台未给出退出码与原因"
 
 
@@ -256,8 +255,8 @@ class TaskExited:
     失败补偿（退出码未知，带启动失败的原因），以及推进器宿主在超时处置中的补写（本机接力者在观察链丢失时、云端 tick 在两个 task
     列表都无踪时，补写判为超时的未知退出；云端 tick 遇到已停止却无退出记录的 task 时，按观察者同一提取函数补写）。
     走独立键空间（云端后端下是保留高位数值 SK 加属性 `item_type='exit'`——events 表 SK 是 NUMBER、字符串前缀结构上
-    不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占 worker 的连续数值 seq 段，故不参与 adapter 的
-    单调 seq/断号检测（机制一：免撞号覆盖 scope_done）。
+    不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占 worker 的连续数值 seq 段，也就不会与 worker 的事件
+    撞号、覆盖 scope_done（机制一）。
 
     写入方只记事实，不判断是否已过截止时刻：截止时刻要由运行态里的认领时刻与运行定义算出，云端的退出观察者只看 task 对象。判断只在
     投影里做一次（`_reduce_scope`），各执行方式共用（ADR 0054 决策二后台推进条「截止时刻与说明」）。
@@ -291,7 +290,8 @@ class EventRecord:
 
     worker 执行事件段：kind='event'，带 event（model.Event）+ seq（worker 段单调数值 SK）+ emit_ts（还原的
     worker emit 墙钟，供 reduce_event 算时长）。退出记录：kind='exit'，带 exited（TaskExited），无数值 seq。
-    统一成一个输入类型，让 project 一次遍历既归约执行事件、又消费退出记录判「两件都要」。
+    统一成一个输入类型，让 project 一次遍历既归约执行事件、又消费退出记录判「两件都要」：事件流内容完整与进程终止是两件事，判终态要
+    等到退出记录，scope_done 本身不是终态（ADR 0024「存活判定迁移 / 事件流结束信号」条；ADR 0034 机制二「终结函数与真值表」）。
     """
 
     scope_id: str
@@ -616,7 +616,7 @@ def finalize_job(
             error_type = "network_error"
             message = "worker 建连失败（网络/SSL 瞬时故障），退出码 80" + (f"：{exit_reason}" if exit_reason else "")
         elif exit_code == PLATFORM_FAILED_EXIT:
-            # 平台侧哨兵（观察者、同步云端路径的 FargateEngine 取不到退出码时落它，归因经 exit_reason 到这里）；本机 worker
+            # 平台侧哨兵（观察者或云端 tick 的补写取不到退出码时落它，归因经退出记录的 reason 到 exit_reason）；本机 worker
             # 真以 255 退出也走这行，措辞对两种来源都成立
             why = f"：{exit_reason}" if exit_reason else "——详见 worker 日志或部署侧日志"
             error_type, message = "engine_error", f"worker 未能启动或未正常结束（退出码 255；平台侧未取到退出码时也记为 255）{why}"

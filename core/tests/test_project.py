@@ -169,8 +169,8 @@ def test_platform_sentinel_exit_surfaces_reason_in_message():
 
 
 def test_platform_exit_reason_joins_stop_code_and_reason_with_fallback():
-    """ECS 没给退出码时的归因串只有这一份拼法（观察者、云端 tick 的补写与同步路径的 FargateEngine 共用）：
-    两项齐全用「: 」相连，缺一项只用另一项，两项都缺（或为空串）时取固定兜底句、绝不为空。"""
+    """ECS 没给退出码时的归因串只有这一份拼法（观察者与云端 tick 的补写共用，ADR 0034 机制二「退出码缺失」条，另见 ADR 0024「控制面不走
+    events 表」条）：两项齐全用「: 」相连，缺一项只用另一项，两项都缺（或为空串）时取固定兜底句、绝不为空。"""
     from gherkai_core.project import platform_exit_reason
 
     assert platform_exit_reason("TaskFailedToStart", "CannotPullContainerError: not found") == \

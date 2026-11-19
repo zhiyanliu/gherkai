@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1157 652" data-layout-contract="readable-v2" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" style="--flow-cycle: 6.403s; width: 1157px; height: 652px; min-width: 0px;" width="1157" height="652" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 1157 652" data-layout-contract="readable-v2" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-node-ui="" style="--flow-cycle: 6.123s; width: 1157px; height: 652px; min-width: 0px;" width="1157" height="652" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -399,300 +399,289 @@ svg[data-preset="editorial"] { --flow-halo-peak: 0.07; --flow-glow-peak: 0.28; -
 }
 @keyframes archify-relay-ripple { 
   0% { r: 2px; opacity: var(--flow-peak, 0.6); }
-  11.714%, 100% { r: 20px; opacity: 0; }
+  12.249%, 100% { r: 20px; opacity: 0; }
 }
 @keyframes archify-relay-comet-0 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  23.427% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  25.926%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  24.499% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  27.112%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-0 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  23.427% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  37.484%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  24.499% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  39.198%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-1 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  18.763% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  21.262%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  19.621% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  22.235%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-1 { 
-  0%, 5.629% { opacity: 0; }
-  18.763% { opacity: var(--flow-peak, 0.3); }
-  32.82%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 5.886% { opacity: 0; }
+  19.621% { opacity: var(--flow-peak, 0.3); }
+  34.32%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-2 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-2 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-3 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  11.992% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  14.491%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  12.54% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  15.153%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-3 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  11.992% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  26.048%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  12.54% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  27.239%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-4 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  14.725% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  17.224%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  15.398% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  18.011%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-4 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  14.725% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  28.781%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  15.398% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  30.097%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-5 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.64% { opacity: var(--flow-peak, 0.9); }
-  8.199% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  10.698%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.715% { opacity: var(--flow-peak, 0.9); }
+  8.574% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  11.187%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-5 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  8.199% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  22.255%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  8.574% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  23.273%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-6 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-6 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-7 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-7 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  6.56% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  6.86% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-8 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  11.51% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  14.009%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  12.037% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  14.65%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-8 { 
-  0%, 3.453% { opacity: 0; }
-  11.51% { opacity: var(--flow-peak, 0.3); }
-  25.567%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 3.611% { opacity: 0; }
+  12.037% { opacity: var(--flow-peak, 0.3); }
+  26.736%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-9 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-9 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-10 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  17.848% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  20.347%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  18.664% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  21.277%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-10 { 
-  0%, 5.354% { opacity: 0; }
-  17.848% { opacity: var(--flow-peak, 0.3); }
-  31.904%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 5.599% { opacity: 0; }
+  18.664% { opacity: var(--flow-peak, 0.3); }
+  33.363%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-11 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-11 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-12 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-12 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  6.56% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  6.86% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-13 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  11.958% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  14.457%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  12.505% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  15.118%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-13 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  11.958% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  26.015%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  12.505% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  27.204%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-14 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-14 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-15 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  10.933% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  13.432%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  11.433% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  14.046%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-15 { 
-  0%, 3.28% { opacity: 0; }
-  10.933% { opacity: var(--flow-peak, 0.3); }
-  24.989%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 3.43% { opacity: 0; }
+  11.433% { opacity: var(--flow-peak, 0.3); }
+  26.132%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-16 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  10.875% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  13.373%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.96% { opacity: var(--flow-peak, 0.9); }
+  11.372% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  13.985%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-16 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  10.875% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  24.931%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  11.372% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  26.071%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-17 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.874% { opacity: var(--flow-peak, 0.9); }
-  23.427% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  25.926%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  1.372% { opacity: var(--flow-peak, 0.9); }
+  6.86% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  9.473%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-17 { 
-  0%, 7.028% { opacity: 0; }
-  23.427% { opacity: var(--flow-peak, 0.3); }
-  37.484%, 100% { stroke-dashoffset: 0px; opacity: 0; }
-}
-@keyframes archify-relay-comet-18 { 
-  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  1.312% { opacity: var(--flow-peak, 0.9); }
-  6.56% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  9.059%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
-}
-@keyframes archify-relay-wake-18 { 
-  0%, 1.968% { opacity: 0; }
-  6.56% { opacity: var(--flow-peak, 0.3); }
-  20.616%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 2.058% { opacity: 0; }
+  6.86% { opacity: var(--flow-peak, 0.3); }
+  21.559%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-node-0 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  18.742% { filter: var(--ambient-node-base-filter, none); }
+  1.96%, 6.86% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  19.599% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-1 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  18.742% { filter: var(--ambient-node-base-filter, none); }
+  1.96%, 6.86% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  19.599% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-2 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  1.874%, 6.56% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  18.742% { filter: var(--ambient-node-base-filter, none); }
+  1.96%, 6.86% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  19.599% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-3 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  10.875% { filter: var(--ambient-node-base-filter, none); }
-  12.749%, 17.434% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  29.616% { filter: var(--ambient-node-base-filter, none); }
+  11.372% { filter: var(--ambient-node-base-filter, none); }
+  13.332%, 18.231% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  30.971% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-4 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  6.56% { filter: var(--ambient-node-base-filter, none); }
-  8.434%, 13.119% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  25.301% { filter: var(--ambient-node-base-filter, none); }
+  6.86% { filter: var(--ambient-node-base-filter, none); }
+  8.819%, 13.719% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  26.458% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-5 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  14.681% { filter: var(--ambient-node-base-filter, none); }
-  16.555%, 21.241% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  33.423% { filter: var(--ambient-node-base-filter, none); }
+  15.352% { filter: var(--ambient-node-base-filter, none); }
+  17.312%, 22.212% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  34.951% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-6 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  30.968% { filter: var(--ambient-node-base-filter, none); }
-  32.842%, 37.527% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  49.71% { filter: var(--ambient-node-base-filter, none); }
+  32.384% { filter: var(--ambient-node-base-filter, none); }
+  34.344%, 39.244% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  51.983% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-7 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  24.442% { filter: var(--ambient-node-base-filter, none); }
-  26.316%, 31.001% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  43.183% { filter: var(--ambient-node-base-filter, none); }
+  25.559% { filter: var(--ambient-node-base-filter, none); }
+  27.519%, 32.419% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  45.158% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-8 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  37.514% { filter: var(--ambient-node-base-filter, none); }
-  39.388%, 44.074% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  56.256% { filter: var(--ambient-node-base-filter, none); }
+  39.229% { filter: var(--ambient-node-base-filter, none); }
+  41.189%, 46.089% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  58.828% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-9 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  32.563% { filter: var(--ambient-node-base-filter, none); }
-  34.437%, 39.123% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  51.305% { filter: var(--ambient-node-base-filter, none); }
+  34.052% { filter: var(--ambient-node-base-filter, none); }
+  36.012%, 40.912% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  53.651% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-10 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  39.089% { filter: var(--ambient-node-base-filter, none); }
-  40.963%, 45.649% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  57.831% { filter: var(--ambient-node-base-filter, none); }
+  40.877% { filter: var(--ambient-node-base-filter, none); }
+  42.837%, 47.736% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  60.476% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-11 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  45.635% { filter: var(--ambient-node-base-filter, none); }
-  47.509%, 52.195% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  64.377% { filter: var(--ambient-node-base-filter, none); }
+  47.722% { filter: var(--ambient-node-base-filter, none); }
+  49.682%, 54.582% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  67.321% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-12 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  40.684% { filter: var(--ambient-node-base-filter, none); }
-  42.559%, 47.244% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  59.426% { filter: var(--ambient-node-base-filter, none); }
+  42.545% { filter: var(--ambient-node-base-filter, none); }
+  44.505%, 49.405% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  62.144% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-13 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  47.211% { filter: var(--ambient-node-base-filter, none); }
-  49.085%, 53.77% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  65.952% { filter: var(--ambient-node-base-filter, none); }
+  49.37% { filter: var(--ambient-node-base-filter, none); }
+  51.33%, 56.229% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  68.968% { filter: var(--ambient-node-base-filter, none); }
 }
 svg[data-node-ui] [data-node-id] &gt; rect:not(.c-mask) { stroke-width: 1.25px; }
 :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] &gt; rect:not(.c-mask).c-frontend { fill: color-mix(in srgb, var(--frontend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--frontend-stroke) 72%, var(--mask)); }
@@ -1053,7 +1042,7 @@ Brand names, logos, and trademarks remain the property of their respective
 owners. This notice records provenance and known terms; it does not grant rights
 that Archify does not hold, and it does not state that every packaged mark has
 been cleared for every commercial, promotional, or redistributive use.</metadata>
-        <title id="archify-diagram-title">执行与推进全景：run / submit × local / cloud</title>
+        <title id="archify-diagram-title">执行与推进全景：本机前台、本机后台与云端后台</title>
         <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
         <!-- Definitions -->
         <defs>
@@ -1103,7 +1092,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / 本机后端（local）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="176" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
-        <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / 同一份 core（四种组合共用）</text>
+        <text x="54" y="198" class="t-muted" font-size="10" font-weight="600">02 / 同一份 core（三种组合共用）</text>
 
         <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="300" width="1101" height="104" rx="10" class="c-lane" stroke-width="1"/>
         <text x="54" y="322" class="t-muted" font-size="10" font-weight="600">03 / 无状态单步推进</text>
@@ -1143,8 +1132,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <path data-edge-from="storeLocal" data-edge-to="settle" data-edge-label="全量重放定终态" data-edge-key="14" data-edge-id="e-store-settle" data-edge-role="async" data-composition-points="1062.8,145;1062.8,217" d="M 1062.8 145 L 1062.8 217" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="streamCloud" data-edge-to="settle" data-edge-label="唤醒推进至收敛" data-edge-key="15" data-edge-id="e-stream-settle" data-edge-role="async" data-composition-points="1062.8,465;1062.8,269" d="M 1062.8 465 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
         <path data-edge-from="entry" data-edge-to="stepOnce" data-edge-label="submit：落库即返回" data-edge-key="16" data-edge-id="e-submit" data-edge-role="branch" data-composition-points="118,269;118,290;208,290;208,367;224,367" d="M 118 269 L 118 282 Q 118 290 126 290 L 200 290 Q 208 290 208 298 L 208 359 Q 208 367 216 367 L 224 367" class="a-default" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle" data-edge-role="async" data-composition-points="808.8,465;808.8,289;1062.8,289;1062.8,269" d="M 808.8 465 L 808.8 297 Q 808.8 289 816.8 289 L 1054.8 289 Q 1062.8 289 1062.8 281 L 1062.8 269" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
-        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="17" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step: 12;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机后端（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机后端（local） › 入口与承载进程">
@@ -1194,8 +1182,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="1062.8" y="131" class="t-muted" font-size="8" text-anchor="middle">旁路原样落库</text>
         </g>
 
-        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（四种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（四种组合共用） › 入口与承载进程">
-          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（四种组合共用） › 入口与承载进程</title>
+        <g id="node-entry" data-node-id="entry" data-node-label="命令入口" tabindex="0" role="button" aria-label="聚焦命令入口，解析 · 分组 · 落定义, 同一份 core（三种组合共用） › 入口与承载进程" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="解析 · 分组 · 落定义" data-node-context="同一份 core（三种组合共用） › 入口与承载进程">
+          <title>命令入口 · 解析 · 分组 · 落定义 · 同一份 core（三种组合共用） › 入口与承载进程</title>
           <rect x="48" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="48" y="217" width="140" height="52" rx="8" class="c-frontend" data-animate="node" style="--step: 0; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(54 223) scale(0.6875)">
@@ -1208,8 +1196,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="118" y="255" class="t-muted" font-size="8" text-anchor="middle">解析 · 分组 · 落定义</text>
         </g>
 
-        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>前台在线循环 · 全程在线接收 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-foreLoop" data-node-id="foreLoop" data-node-label="前台在线循环" tabindex="0" role="button" aria-label="聚焦前台在线循环，全程在线接收, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="backend" data-node-sublabel="全程在线接收" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>前台在线循环 · 全程在线接收 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="226" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="226" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 1; --flow-node-name: archify-relay-node-4;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(232 223) scale(0.6875)">
@@ -1219,8 +1207,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="296" y="255" class="t-muted" font-size="8" text-anchor="middle">全程在线接收</text>
         </g>
 
-        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-dispatch" data-node-id="dispatch" data-node-label="起 worker" tabindex="0" role="button" aria-label="聚焦起 worker，每 scope 一个，并发闸门, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="messagebus" data-node-sublabel="每 scope 一个，并发闸门" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>起 worker · 每 scope 一个，并发闸门 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-mask"/>
           <rect x="422.4" y="217" width="144" height="52" rx="8" class="c-messagebus" data-animate="node" style="--step: 2; --flow-node-name: archify-relay-node-5;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="messagebus" class="semantic-sigil s-messagebus" transform="translate(428.4 223) scale(0.6875)">
@@ -1233,8 +1221,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="494.4" y="255" class="t-muted" font-size="8" text-anchor="middle">每 scope 一个，并发闸门</text>
         </g>
 
-        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（四种组合共用） › 驱动循环：每批事件推进一步">
-          <title>退出观察者 · 观察 worker 终止 · 同一份 core（四种组合共用） › 驱动循环：每批事件推进一步</title>
+        <g id="node-exitWatch" data-node-id="exitWatch" data-node-label="退出观察者" tabindex="0" role="button" aria-label="聚焦退出观察者，观察 worker 终止, 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="security" data-node-sublabel="观察 worker 终止" data-node-context="同一份 core（三种组合共用） › 驱动循环：每批事件推进一步">
+          <title>退出观察者 · 观察 worker 终止 · 同一份 core（三种组合共用） › 驱动循环：每批事件推进一步</title>
           <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="738.8" y="217" width="140" height="52" rx="8" class="c-security" data-animate="node" style="--step: 12; --flow-node-name: archify-relay-node-8;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="security" class="semantic-sigil s-security" transform="translate(744.8 223) scale(0.6875)">
@@ -1245,8 +1233,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="808.8" y="255" class="t-muted" font-size="8" text-anchor="middle">观察 worker 终止</text>
         </g>
 
-        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（四种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（四种组合共用） › 重放与收敛">
-          <title>收敛与提交点 · 一次落定终态 · 同一份 core（四种组合共用） › 重放与收敛</title>
+        <g id="node-settle" data-node-id="settle" data-node-label="收敛与提交点" tabindex="0" role="button" aria-label="聚焦收敛与提交点，一次落定终态, 同一份 core（三种组合共用） › 重放与收敛" aria-pressed="false" data-node-kind="backend" data-node-sublabel="一次落定终态" data-node-context="同一份 core（三种组合共用） › 重放与收敛">
+          <title>收敛与提交点 · 一次落定终态 · 同一份 core（三种组合共用） › 重放与收敛</title>
           <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="992.8" y="217" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-11;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(998.8 223) scale(0.6875)">
@@ -1383,11 +1371,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="114.80000000000001" y="283" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
           <text x="163" y="293" class="t-muted" font-size="8" text-anchor="middle">submit：落库即返回</text>
         </g>
-        <g data-edge-from="tableCloud" data-edge-to="settle" data-edge-label="前台：分段轮询" data-edge-key="17" data-edge-id="e-table-settle">
-          <rect x="897.1999999999999" y="282" width="77.2" height="14" rx="3" class="c-mask"/>
-          <text x="935.8" y="292" class="t-edge-dashed" font-size="8" text-anchor="middle">前台：分段轮询</text>
-        </g>
-        <g data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="18" data-edge-id="e-table-stream">
+        <g data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="17" data-edge-id="e-table-stream">
           <rect x="911.5999999999999" y="471" width="48.4" height="14" rx="3" class="c-mask"/>
           <text x="935.8" y="481" class="t-edge-dashed" font-size="8" text-anchor="middle">每批写入</text>
         </g>
@@ -1425,4 +1409,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=8b397152e8b55268369687c98d16163916d3dc0592e26f1b0301b2ecaab00cee -->
+<!-- gherkai:source-sha256=3b632afa67265393169ee2008fc8c94327637b4d2d869449e75dc00c23756752 -->

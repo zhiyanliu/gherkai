@@ -82,8 +82,9 @@ from gherkai_worker_novaact import evidence as _evidence  # step 级机读证据
 from gherkai_worker_novaact.user_steps import EX_STEPS_LOAD, UserStepsError, load_user_steps
 
 # region 不再硬编码兜底（ADR 0016 决策 C）：None 时不再抢在 profile config 前用错 region。**正常路径由组合根落实**——
-# 它按 region 的解析链（ADR 0016 决策 C，配置文件那一层见 ADR 0053 决策 2）把值定成具体字符串、经 AWS_REGION
-# env 注入 worker，故这里通常拿到具体 region。真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
+# 本机后端的组合根按 region 的解析链（ADR 0016 决策 C，配置文件那一层见 ADR 0053 决策 2）把值定成具体字符串、经 AWS_REGION
+# env 注入 worker；云端容器里由推进器的组合根经 RunTask overrides 注入部署所在区域。故这里通常拿到具体 region。
+# 真无 region（全 miss）→ None → fail-loud：boto client 抛 NoRegionError；
 # 尤其 AgentCore 那条路径（下方 _BrowserSession 里 bedrock-agentcore 的 BrowserClient）构造时的 validate_region
 # **不读 profile config、要显式字符串**，region=None 起会话直接失败（bedrock-agentcore 1.22.0 抛 InvalidRegionError，
 # 属 ValueError 子类；早先经 SDK 的 cdp_session 起会话时实测报 BrowserAuthError: 'You must specify a region.'——文案与

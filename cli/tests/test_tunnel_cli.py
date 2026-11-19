@@ -82,26 +82,20 @@ def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch):
     assert box["kwargs"]["extra_http_headers"] == {"ngrok-skip-browser-warning": "1"}
 
 
-def test_run_cloud_wires_session_warmup_url_into_fargate_engines(tmp_path, monkeypatch):
-    """同步云端 run：同一处接线的 Fargate 侧——预热地址进 build_fargate_engines，与 definition 同值（ADR 0051 决策 13）。"""
-    from test_backend_cloud import _patch_cloud_handles
+def test_cloud_submit_writes_session_warmup_url_into_the_definition(tmp_path, monkeypatch):
+    """云端 submit：预热地址与额外请求头写进提交记录，云端推进器照它注给 worker（ADR 0051 决策 13；起 task 的一侧在推进器 Lambda）。"""
+    from test_backend_cloud import _definition, _patch_cloud_handles
 
-    calls, box, record = [], {}, []
+    calls, record = [], []
     _patch_tunnel(monkeypatch, calls)
     _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
-
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
-        box["run_meta"] = run_meta
-        return RunResult(run_meta=run_meta, status=Status.PASSED,
-                         jobs=[JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs])
-
-    monkeypatch.setattr(m, "schedule", fake_schedule)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
-                 "--region", "us-east-1", "--quiet", "--expose-local", "http://localhost:3000"])
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 9})())  # 隧道守护进程不真起
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
+                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
     assert rc == 0
-    assert len(made["fargate"]) == 1
-    assert made["fargate"][0]["session_warmup_url"] == INFO.warmup_url == box["run_meta"].session_warmup_url
-    assert made["fargate"][0]["extra_http_headers"] == {"ngrok-skip-browser-warning": "1"}
+    meta = _definition(made["ddb_tables"][0])
+    assert meta["session_warmup_url"] == INFO.warmup_url
+    assert dict(meta["extra_http_headers"]) == {"ngrok-skip-browser-warning": "1"}
 
 
 def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
@@ -456,7 +450,7 @@ def _patch_cloud_commit(monkeypatch):
             pass
 
     monkeypatch.setattr(m.compose, "build_cloud_stores",
-                        lambda **kw: (_RunStore(), object(), object(), (lambda r, i: {})))
+                        lambda **kw: (_RunStore(), object(), object()))
 
 
 def test_submit_cloud_keeps_tunnel_after_daemon_fork(tmp_path, monkeypatch, capsys):

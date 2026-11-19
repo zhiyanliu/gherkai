@@ -494,7 +494,7 @@ def test_engine_absent_from_mapping_gets_throwing_placeholder(monkeypatch):
         run_id="r1", cluster="c", events_table="ev", bucket="b", report_dir="runs",
         network_config={"subnets": ["s"]},
         worker_task_defs={"novaact": "arn:aws:ecs:us-east-1:1:task-definition/t-novaact-worker:7"},
-        ecs=object(), s3=object(), ddb_events_table=object(),
+        ecs=object(), s3=object(),
     )
     assert engines["novaact"] == ("fake", "arn:aws:ecs:us-east-1:1:task-definition/t-novaact-worker:7")
     # 没解析的引擎恒在册（resolver 语义不变），但真去起它才抛——且抛的是带指引的结构化异常
@@ -511,7 +511,7 @@ def test_worker_task_defs_is_required():
         compose.build_fargate_engines(
             run_id="r1", cluster="c", events_table="ev", bucket="b",
             report_dir="runs", network_config={"subnets": ["s"]},
-            ecs=object(), s3=object(), ddb_events_table=object(),
+            ecs=object(), s3=object(),
         )
 
 

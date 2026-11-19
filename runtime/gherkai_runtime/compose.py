@@ -256,11 +256,11 @@ class _UnavailableEngine:
     该引擎、故 definition 里也没解析它的 worker revision」，是正常态）。装一个空占位项保住「引擎名恒在册」
     （resolver / list-engines 语义不变），把 miss 的报错推迟到实际要起它那一刻，且抛出的是带修复指引的
     结构化异常——而非 resolver 的「未知引擎」（那会把「没装/未解析」误导成「名字拼错」）。
-    正门仍是调用点 preflight：`run`/`submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`（local）/
-    解析 worker variant（cloud）、miss 即以退出码 2 结束。
+    正门仍是调用点 preflight：`run` 与本机 `submit` 先对本次 plan 用到的引擎 `resolve_worker_cmd`、云端 `submit`
+    先解析 worker variant，miss 即以退出码 2 结束。
 
-    **`run_scope` 与 `start_scope` 都抛**：两个后端的宿主入口不同（同步 run 走 `run_scope`、无状态推进器的
-    CloudLauncher 走 `start_scope`），只堵一个会让另一个后端退化成 `AttributeError`（丢掉带指引的异常）。
+    **`run_scope` 与 `start_scope` 都抛**：两个后端的宿主入口不同（本机后端的前台 run 与后台推进进程走 `run_scope`，
+    云端推进器的 CloudLauncher 走 `start_scope`），只堵一个会让另一个后端退化成 `AttributeError`（丢掉带指引的异常）。
     """
 
     def __init__(self, miss: Exception) -> None:
@@ -449,8 +449,8 @@ def build_engines(
     显式写进注入 env（`AWS_REGION`/`AWS_PROFILE`）覆盖继承值——使 `--region`/`--profile` 真贯通到 subprocess worker
     （EventSink/JobSource/ArtifactUploader/Nova Workflow/Midscene fromNodeProviderChain 建 client 都读它们）、与 core store
     同源、消除分叉。None 表示不写（真无值、fail-loud，对齐 store 宽容）。**subprocess 两个引擎都注入**（Midscene 同样要，见 `_env` 注释）。
-    注意：本函数**只建 subprocess 两个引擎**（local 执行）。cloud 执行由 `build_fargate_engines` 接管——组合根
-    （`__main__`）按 `--backend` 分流：cloud 走 `build_fargate_engines`（FargateEngine）、否则本函数（SubprocessEngine）。
+    注意：本函数**只建 subprocess 两个引擎**（本机执行），命令行一侧的组合根只装配它；云端后端的 `FargateEngine` 由
+    `build_fargate_engines` 装配，调用方是推进器 Lambda 一侧的组合根（ADR 0016 决策 A、决策 C）。
     **FargateEngine 侧只注入 region、不注入 profile**（容器用 task role，profile 是本机 `~/.aws` 概念、注入会
     ProfileNotFound 盖过 task role——正确的非对称，ADR 0016 决策 C）。
     """
@@ -850,7 +850,7 @@ def make_resolver(engines: dict[str, Engine]):
 
 # ============================================================================
 # 产物落点单点（ADR 0041 决策三「status --json 附加 artifacts」）：`artifacts` 四键的落点算式按后端各一份，
-# run 结束打印 / status 终态打印 / --json 都从这里拼（下方 Store 装配的 make_artifacts 复用它们）；
+# run 结束打印 / status 终态打印 / --json 都从这里拼（下方 build_local_stores 的 make_artifacts 复用本机那一份）；
 # 键义与「约定落点不等于已写成」的细节见两个函数的 docstring。
 # ============================================================================
 
@@ -872,9 +872,8 @@ def local_artifact_locations(report_dir: str, run_id: str) -> dict:
 def cloud_artifact_locations(*, bucket: str, report_prefix: str, table: str, run_id: str) -> dict:
     """云端后端一个 run 的产物落点：jobs_dir / report_index 为 s3://（对拍 S3ResultStore / S3ReportStore 的 key 布局
     `<report_prefix>/<run_id>/…`），run_meta / run_state 为 ddb:// 诊断指针（纯展示、不被解析）。单点理由同 local。
-    report_prefix：该 run 的产物前缀，**由调用方给、本函数只拼不校验**：同步 `run --backend cloud` 传自己的
-    `--report-dir`（同一进程既写又拼、自洽）；`status --backend cloud` 原样取提交者给的 `--report-dir`（该 flag 的
-    help 已写明须与 submit 一致）。与推进侧 Lambda `REPORT_DIR` env 的一致性比对是**提交侧探针**（`submit` /
+    report_prefix：该 run 的产物前缀，**由调用方给、本函数只拼不校验**：`status --backend cloud` 原样取提交者给的
+    `--report-dir`（该 flag 的 help 已写明须与 submit 一致）。与推进侧 Lambda `REPORT_DIR` env 的一致性比对是**提交侧探针**（`submit` /
     `doctor` 经 `preflight_cloud_resources` 比，ADR 0033「产物前缀一致性」条），查询侧不重做——故这里给的 s3://
     与本机后端一样是**约定落点**，不代表 key 已写成。"""
     pfx = _normalize_prefix(report_prefix)
@@ -904,11 +903,13 @@ def cloud_run_list_location(*, prefix: str, region: str | None, table: str) -> d
 
 
 # ============================================================================
-# Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端对称、都在 compose 可复用
-# （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。各返回：
-#   (run_store, result_store, report_store, make_artifacts)
-# make_artifacts(run_id, report_index) -> dict：把 --json 的 artifacts 落点指针按后端组装、全 URI 化
-#   （local file:// / cloud s3://+ddb://）；report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。
+# Store 装配（ADR 0016「cli backend 选择」/ 0030 决定六·七）：两个后端的装配都在 compose 可复用
+# （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。
+#   build_local_stores  -> (run_store, result_store, report_store, make_artifacts)
+#   build_cloud_stores  -> (run_store, result_store, report_store)
+# make_artifacts(run_id, report_index) -> dict：前台 run 结束时把 --json 的 artifacts 落点指针组装成 file:// URI；
+#   report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。前台 run 只有本机后端（ADR 0016 决策 A），
+#   云端没有它的使用方；云端 run 的落点由 `cloud_artifact_locations` 给出（status 终态打印用）。
 # ============================================================================
 
 
@@ -1035,19 +1036,18 @@ class CloudTarget:
 
 def resolve_cloud_target(
     *, prefix: str | None = None, region: str | None = None, profile: str | None = None,
-    runs_table: str | None = None, events_table: str | None = None,
-    bucket: str | None = None, cluster: str | None = None,
+    runs_table: str | None = None, bucket: str | None = None,
     config_prefix: str | None = None, config_runs_table: str | None = None, config_bucket: str | None = None,
     config_region: str | None = None, config_profile: str | None = None,
 ) -> CloudTarget:
     """把入口前端已解析的 flag 值解析成 `CloudTarget`（纯字符串推导 + region 落实，不连 AWS）。
 
     解析链逐资源不同、**有意非齐整**（保既有 CLI 行为，别为对称乱加 env 兜底）；配置文件层（ADR 0053 决策 2）一律排在
-    环境变量之后、默认名之前，由入口前端经 config_* 形参传入（有环境变量层的项才有这个形参；events_table / cluster 没有
-    环境变量层，配置值由入口前端直接当 flag 值传）：
+    环境变量之后、默认名之前，由入口前端经 config_* 形参传入：
     - prefix：flag > `AWS_RESOURCE_PREFIX` > 配置文件 > `DEFAULT_PREFIX`；
     - runs_table / bucket：flag > `AWS_DDB_TABLE` / `AWS_S3_BUCKET` > 配置文件 > prefix 默认名（历史 env 面）；
-    - events_table / cluster / 三 Lambda：flag（Lambda 无 flag）> prefix 默认名，**无 env 兜底**；
+    - events_table / cluster / 三 Lambda：只取 prefix 默认名，没有单资源覆盖、也没有 env 兜底（命令行不带这批参数，
+      推进器用的值由 IaC 注入它的环境变量，ADR 0016 决策 C）；
     - profile / region：经 `resolve_aws_identity`（取值顺序见其 docstring；region 落实成具体字符串）。
     """
     region, profile = resolve_aws_identity(region, profile, config_region=config_region, config_profile=config_profile)
@@ -1058,10 +1058,10 @@ def resolve_cloud_target(
         profile=profile,
         runs_table=(runs_table or os.environ.get("AWS_DDB_TABLE") or config_runs_table
                     or _names.default_name(prefix, _names.BASE_RUNS_TABLE)),
-        events_table=events_table or _names.default_name(prefix, _names.BASE_EVENTS_TABLE),
+        events_table=_names.default_name(prefix, _names.BASE_EVENTS_TABLE),
         bucket=(bucket or os.environ.get("AWS_S3_BUCKET") or config_bucket
                 or _names.default_name(prefix, _names.BASE_BUCKET)),
-        cluster=cluster or _names.default_name(prefix, _names.BASE_CLUSTER),
+        cluster=_names.default_name(prefix, _names.BASE_CLUSTER),
         kicker_lambda=_names.default_name(prefix, _names.BASE_KICKER_LAMBDA),
         reconciler_lambda=_names.default_name(prefix, _names.BASE_RECONCILER_LAMBDA),
         exit_observer_lambda=_names.default_name(prefix, _names.BASE_EXIT_OBSERVER_LAMBDA),
@@ -1087,7 +1087,7 @@ def _make_s3_client(*, region, profile):
 def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
                        region: str | None = None, profile: str | None = None,
                        detached: bool = False, ddb_table=None, s3=None):
-    """云端三层 store（RunStore→DDB、Result/ReportStore→S3）+ cloud artifacts descriptor（s3://+ddb://）。
+    """云端三层 store：RunStore→DDB、Result/ReportStore→S3，返回 (run_store, result_store, report_store)。
 
     DDB 吃 `resource.Table`、三个 S3 件套（ResultStore/ReportStore/offloader）**共享一个 client**（喂错句柄
     类型运行时才 AttributeError，ADR 0016）。offloader 生产默认挂载（解 DDB 400KB 限，ADR 0030 决定七）。
@@ -1096,9 +1096,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
     自带 boto3，库层 `gherkai-core[aws]`/`gherkai-runtime[aws]` extra 保留给库消费者；缺 boto3 抛 ImportError
     由 cli 归到退出码 2）。prefix 分隔符规范化避粘连 key。
 
-    **句柄可注入**（`ddb_table` / `s3`，同 `build_fargate_engines` 的注入惯例；未给则走 `_make_*` 钩子）：
-    Lambda 组合根要把同一个 s3 client 分给 engine、同一个 ddb resource 分给 events 表，注入让它复用这批
-    句柄而不必手工重造本函数的装配——重造的那份里 prefix 规范化与 offloader 挂载会各自漂。
+    **句柄可注入**（`ddb_table` / `s3`；未给则走 `_make_*` 钩子）：推进器 Lambda 的组合根要把同一个 s3 client
+    分给 engine、同一个 ddb resource 分给 events 表，注入让它复用这批句柄而不必手工重造本函数的装配——重造的那份里
+    prefix 规范化与 offloader 挂载会各自漂。
 
     返回的 RunStore 不能列举 run（没有注入列举索引名，调 `list_runs` 即报装配缺失）：列举须经 `build_cloud_run_list_store`，
     索引就绪检查只挂在那一条装配路径上（ADR 0041 决策七「索引就绪判据」）。
@@ -1116,23 +1116,12 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     offloader = S3StepArgumentOffloader(s3, bucket, pfx)
     # detached：无状态批量运行 submit 传 True → create_run 的 STATE 带 detached 标记、触发 kicker 冷启动；
-    # 同步 run 不传 → 不触发（否则双开推进器）。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
+    # 其余调用方（查询命令、推进器 Lambda）只读已存在的 run、不传。不注入列举用的索引名：列举只经 build_cloud_run_list_store，
     # 那条路径先过索引就绪检查；这里返回的 store 调 list_runs 即按装配缺失报错，不会绕过检查直接 Query。
     run_store: RunStore = DynamoDBRunStore(ddb_table, arg_offloader=offloader, detached=detached)
     result_store: ResultStore = S3ResultStore(s3, bucket, pfx)
     report_store: ReportStore = S3ReportStore(s3, bucket, pfx)
-
-    def make_artifacts(run_id: str, report_index) -> dict:
-        # 落点走 cloud_artifact_locations 单点（status 终态打印同一份）；report_index 以 finalize 返回值为准，
-        # None 表示 report 写失败被隔离 → 省略键
-        d = cloud_artifact_locations(bucket=bucket, report_prefix=prefix, table=table, run_id=run_id)
-        if report_index is not None:
-            d["report_index"] = str(report_index)
-        else:
-            d.pop("report_index", None)
-        return d
-
-    return run_store, result_store, report_store, make_artifacts
+    return run_store, result_store, report_store
 
 
 class RunListIndexUnavailable(RuntimeError):
@@ -1225,17 +1214,19 @@ def read_resource(uri: str, *, s3=None, region: str | None = None, profile: str 
 
 
 # ============================================================================
-# Fargate 执行接线：--backend cloud 时用 FargateEngine 替代 SubprocessEngine。
-# boto3 句柄钩子抽出供测试 monkeypatch（同 store 侧 _make_* 惯例）；import boto3 惰性收在钩子内。
+# Fargate 执行接线：云端后端的执行 adapter `FargateEngine` 只由推进器 Lambda 一侧的组合根经 `build_fargate_engines`
+# 装配，命令行一侧只装配 SubprocessEngine（ADR 0033「组合根接线（非 IaC）」节「执行 adapter 按组合根分」条；ADR 0016
+# 决策 A、决策 C）。下面几个 boto3 句柄钩子供命令行一侧的云端入口用（提交前检查、doctor、状态查询），抽出供测试
+# monkeypatch（同 store 侧 _make_* 惯例）；import boto3 惰性收在钩子内。
 # ============================================================================
 def _make_ecs_client(*, region, profile):
-    """boto3 ecs client（FargateEngine RunTask/StopTask/DescribeTasks）。"""
+    """boto3 ecs client（提交侧解析 worker variant、doctor 读 task-def 的 stopTimeout，都只读）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("ecs")
 
 
 def _make_ssm_client(*, region, profile):
-    """boto3 ssm client（读 subnet/sg 的确定性路径参数）。"""
+    """boto3 ssm client（读后端 SSM 参数：版本戳、worker variant 映射与默认指针、Device Farm 项目 ARN）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("ssm")
 
@@ -1255,55 +1246,21 @@ def _make_lambda_client(*, region, profile):
     return boto3.session.Session(profile_name=profile, region_name=region).client("lambda")
 
 
-def _read_ssm_list(ssm, path: str) -> list[str]:
-    """读一个 SSM StringList 参数 → list[str]（subnet/sg 的 ID 列表，CDK 写、cli 读）。
-
-    **空值 fail-fast（低频加固）**：正常路径 CDK 一定写非空（subnet 取自 `vpc.public_subnets or
-    private_subnets`、sg 写本 stack 新建的 worker 安全组 `WorkerSg` 的 id，均非空），故空值**几乎不可达**——只可能
-    来自配置异常（参数被改空 / 值为空串）。
-    但若不拦，空列表会一路传到 `awsvpcConfiguration` 的 subnets/securityGroups、拖到 **RunTask 才失败**且错误
-    不直观（不像"SSM 参数空"那么明确）。故在此就地 fail-fast、点名是哪个 SSM 路径空了，把不可达但代价高的
-    静默失败挡在源头（对齐本项目 preflight fail-fast 点名 prefix 的加固风格）。
-    """
-    resp = ssm.get_parameter(Name=path)
-    values = [v for v in resp["Parameter"]["Value"].split(",") if v]
-    if not values:
-        raise ValueError(
-            f"SSM 参数 {path!r} 为空（split 逗号过滤后无值）——预期 CDK 写入非空的 subnet/sg ID 列表。"
-            f"检查后端是否已部署（`gherkai deploy`）且该参数未被改空。"
-        )
-    return values
-
-
-def resolve_network(
-    *, prefix: str, subnets: list[str] | None, security_groups: list[str] | None,
-    assign_public_ip: str = "ENABLED", region=None, profile=None, ssm=None,
-) -> dict:
-    """Fargate awsvpcConfiguration：subnet/sg 未显式给 → 读含 prefix 的 SSM 路径（CDK 写的生成 ID）；
-    给了则用字面覆盖。ssm client 可注入（测试）；未注入且需读时惰性建。返回 FargateEngine 的 network_config 形状。"""
-    if subnets is None or security_groups is None:
-        if ssm is None:
-            ssm = _make_ssm_client(region=region, profile=profile)
-        if subnets is None:
-            subnets = _read_ssm_list(ssm, _names.ssm_path(prefix, _names.SUBNETS_KEY))
-        if security_groups is None:
-            security_groups = _read_ssm_list(ssm, _names.ssm_path(prefix, _names.SECURITY_GROUPS_KEY))
-    return {"subnets": subnets, "securityGroups": security_groups, "assignPublicIp": assign_public_ip}
-
-
 def build_fargate_engines(
     *, run_id: str, cluster: str, events_table: str, bucket: str, report_dir: str,
-    network_config: dict, worker_task_defs: Mapping[str, str],
-    region: str | None = None, profile: str | None = None,
+    network_config: dict, worker_task_defs: Mapping[str, str], ecs, s3,
+    region: str | None = None,
     extra_http_headers: dict[str, str] | None = None,
     session_warmup_url: str | None = None,
-    ecs=None, s3=None, ddb_events_table=None,
-    no_artifacts: bool = False,
 ) -> dict[str, Engine]:
     """每引擎一个 FargateEngine（对称 build_engines 的 SubprocessEngine dict；core 引擎无关，ADR 0026）。
 
-    `--backend cloud` 用它替代 build_engines——「cloud 即 Fargate 执行」从设计落到 CLI 的动作点。
-    boto3 句柄组合根注入（adapter 不自建，ADR 0016）。
+    调用方只有推进器 Lambda 一侧的组合根：云端后端只有 `submit`，起 worker task 的只有推进器，命令行一侧只装配
+    `build_engines`（ADR 0016 决策 A、决策 C；ADR 0033「组合根接线（非 IaC）」节）。cluster、events 表名、桶、子网、
+    安全组与 region 由调用方从 IaC 注入推进器的环境变量里读出（子网、安全组连同 assignPublicIp 组成 `network_config`）
+    后交进来，本函数不读环境变量。
+    boto3 句柄（`ecs` / `s3`）必给：由调用方建好注入、本函数不建（adapter 也不自建，ADR 0016），推进器据此把同一批
+    句柄分给 store 与 engine。
 
     **`worker_task_defs`（引擎 → task-def **revision** ARN）必给、无缺省**（ADR 0038 不变量「运行时只用
     definition 里的显式 revision，永不用 family 取最新」）：传 family 名会让 ECS 取该 family 最新 ACTIVE
@@ -1313,23 +1270,15 @@ def build_fargate_engines(
     云端推进器读到缺值按定义违约标 error、不回落默认指针，ADR 0037 决策 7）。
     映射里**没有的引擎装一个 `_UnavailableEngine` 空占位项**（一用即抛、点名该引擎）——本 run 没用到的引擎不该
     让装配失败，而真去起它时抛出的是带指引的异常、不是 `KeyError`。
-    - run_id：拼 events PK（`new_run_id()` 后注入，对称 store）。
-    - **profile 不传给 FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role；region 传（已落实成
-      具体字符串、经 RunTask overrides 注入 worker）。
+    - run_id：拼 events PK（推进器按被推进的 run 注入，对称 store）。
+    - region：推进器取部署所在区域（IaC 注入的 `REGION`），经 RunTask overrides 注入 worker；**profile 不传给
+      FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role。
     - job-in 落点为 (bucket, `<前缀><run_id>/jobs-in/`)，前缀是 report_dir 规范化后的值（`_normalize_prefix(report_dir)`）
       ——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、load_all 枚举它；job-in 独立前缀避撞 key + 误读）。
       artifact 上传落点为 (bucket, `<前缀><run_id>/`)——与 report 同前缀镜像 run 树。**artifact_s3 必注入**
       （云端后端唯一的上传落点注入点——local 的 `build_engines` 恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
-    句柄可注入（测试 monkeypatch），未注入则惰性建（区分 ecs/s3/ddb resource）。
     """
     from gherkai_core.adapters.fargate_engine import FargateEngine
-
-    if ecs is None:
-        ecs = _make_ecs_client(region=region, profile=profile)
-    if s3 is None:
-        s3 = _make_s3_client(region=region, profile=profile)
-    if ddb_events_table is None:
-        ddb_events_table = _make_ddb_table(events_table, region=region, profile=profile)
 
     pfx = _normalize_prefix(report_dir)
     # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json，
@@ -1355,8 +1304,6 @@ def build_fargate_engines(
     )
     if session_warmup_url:  # 会话预热地址随 definition 读回、经 RunTask overrides 进容器 env（ADR 0051 决策 13；0035 决策 5 明确不脱敏的一处）
         headers_env = {**headers_env, "GHERKAI_SESSION_WARMUP_URL": session_warmup_url}
-    if no_artifacts:  # `--backend cloud --no-report`：worker 不生成/不上报原生产物 → 也就不会有 S3 上传
-        headers_env = {**headers_env, "GHERKAI_NO_ARTIFACTS": "1"}
     # 引擎特定 env（同 headers 走 extra_env 注 RunTask overrides）：Nova 的 act timeout **双端同源**
     # （ADR 0024 grace 硬约束）——容器不继承本地 env、RunTask overrides 逐条枚举，故云端后端必须显式注，
     # 否则 worker 落回自带字面量：operator 调 NOVA_ACT_TIMEOUT_S 改不动容器内的单 act 上界，
@@ -1381,7 +1328,7 @@ def build_fargate_engines(
                 f"（提交时会按本 run 用到的引擎逐个解析 variant）。",
                 engine=engine))
         return FargateEngine(
-            ecs_client=ecs, s3_client=s3, ddb_events_table=ddb_events_table,
+            ecs_client=ecs, s3_client=s3,
             # 显式 revision ARN（ADR 0038 不变量）——**绝不传 family 名**。
             run_id=run_id, cluster=cluster, task_definition=revision_arn,
             network_config=network_config, job_s3=job_s3, events_table_name=events_table,
@@ -1412,8 +1359,8 @@ def read_backend_version(*, prefix: str, region=None, profile=None, ssm=None) ->
 
     **`ParameterNotFound` → 返回 None、不抛**：戳缺失是本机制之前部署环境的正常态，决策 7 判它「警告不拦」；
     若在此翻成异常一路以退出码 2 结束，所有现存部署会被 preflight 锁死（决策 7 明写要避免的那个后果）。其余 botocore
-    异常（凭证/region/权限/网络）照抛——由入口前端归到自己的退出码层（对齐 `resolve_network` 的处理）。
-    ssm client 可注入（测试）；未注入则惰性建，与 subnet/sg 同一条 session/region 解析（`_make_ssm_client`）。
+    异常（凭证/region/权限/网络）照抛——由入口前端归到自己的退出码层。
+    ssm client 可注入（测试）；未注入则经 `_make_ssm_client` 惰性建，与读其余后端 SSM 参数同一条 session/region 解析。
     """
     if ssm is None:
         ssm = _make_ssm_client(region=region, profile=profile)
@@ -1548,19 +1495,16 @@ def check_backend_skew(*, prefix: str, cli_version: str | None, region=None, pro
 class WorkerResolution:
     """一个引擎的 worker variant 解析结果（ADR 0038「运行时与 preflight」）。
 
-    `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；其余字段是解析途中顺带取回的事实，
-    都不进 RunTask。`digest` 供 preflight 打印「这次运行的到底是哪份镜像」——「用的是哪份可见、可查」是本 ADR 要解的
-    问题之一，故一起带回来、不让调用方二次读 SSM。`stop_timeout_s` 是该 revision 上 worker container 的 `stopTimeout`
-    （秒；没设或 task-def 里找不到该 container 为 None），取自校验 revision 仍为 ACTIVE 的那次 DescribeTaskDefinition，
-    供云端同步 run 算停止后等待预算（见 `cloud_stop_bound_s`），不另发 AWS 调用。（SSM 记录里的 `template_arn` 不带回：
-    解析侧无消费者，「从哪个模板派生」由 `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。）
+    `revision_arn` 是**唯一进 RunTask 的字段**（不变量：显式 revision、永不 family）；`digest` 是解析途中顺带取回的事实，
+    不进 RunTask，供 preflight 打印「这次运行的到底是哪份镜像」——「用的是哪份可见、可查」是本 ADR 要解的
+    问题之一，故一起带回来、不让调用方二次读 SSM。（SSM 记录里的 `template_arn` 不带回：解析侧无消费者，「从哪个模板派生」
+    由 `gherkai deploy list-workers` 从 SSM/血缘 tags 直读展示。）
     """
 
     engine: str
     variant: str
     revision_arn: str
     digest: str
-    stop_timeout_s: int | None = None
 
 
 class WorkerVariantError(Exception):
@@ -1810,9 +1754,7 @@ def resolve_worker_variant(
             raise
         if not resp.get("imageDetails"):
             raise _miss(engine, f"ECR 仓库 {repo} 里按 digest {digest} 找不到镜像")
-        out[engine] = WorkerResolution(
-            engine=engine, variant=variant, revision_arn=revision_arn, digest=digest,
-            stop_timeout_s=_worker_container_stop_timeout(td.get("taskDefinition", {}), engine))
+        out[engine] = WorkerResolution(engine=engine, variant=variant, revision_arn=revision_arn, digest=digest)
     return out
 
 
@@ -1821,8 +1763,7 @@ def _worker_container_stop_timeout(task_def: Mapping, engine: str) -> int | None
 
     container 按 `names.container_name(engine)` 认（与 IaC 同源，不取碰巧第一个 container 的值）；该 container 没设
     stopTimeout（ECS 允许不设、语义回落平台默认）、值不是数值，或 task-def 里找不到它 → None，不猜值。
-    doctor 的比对（`read_task_def_stop_timeout`）与云端同步 run 的停止后等待预算（`resolve_worker_variant` 带回的
-    `stop_timeout_s`）共用这一份认法，两处读到的是同一个量。
+    调用方是 doctor 的比对（`read_task_def_stop_timeout`）。
     """
     want = _names.container_name(engine)
     for c in task_def.get("containerDefinitions") or []:
@@ -1836,11 +1777,11 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
     """读某 task-def revision 上 worker container 的 `stopTimeout`（秒），它就是**云端后端真实的停止宽限**。
 
     只读、单次 `DescribeTaskDefinition`。调用方是 `doctor --backend cloud`：拿它跟本机 worker 自报的
-    grace 下限比对——Fargate 的 `FargateWorkerHandle.stop` 忽略运行期 grace，宽限由这个 task-def 期常量决定
+    grace 下限比对——云端停止 worker 只经推进器发的 `StopTask`，没有运行期 grace 参数，宽限由这个 task-def 期常量决定
     （部署方经 `gherkai deploy --stop-timeout` 设置、Fargate 硬上限 120s，ADR 0032 真容器校准结论 3/4）。
     故它是「下限满足不满足」这问题在 cloud 侧的对照值，与 subprocess 侧的运行期 grace 不是同一个量。
-    container 的认法与「没设或找不到即 None（调用方按「比不了」处置，不猜值）」见 `_worker_container_stop_timeout`，
-    与云端同步 run 算停止后等待预算时读的是同一个量。botocore 异常原样抛给调用方翻成一句诊断（doctor 的既有惯例）。
+    container 的认法与「没设或找不到即 None（调用方按「比不了」处置，不猜值）」见 `_worker_container_stop_timeout`。
+    botocore 异常原样抛给调用方翻成一句诊断（doctor 的既有惯例）。
     """
     if ecs is None:
         ecs = _make_ecs_client(region=region, profile=profile)
@@ -1848,34 +1789,13 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
     return _worker_container_stop_timeout(td, engine)
 
 
-# 云端同步 run 的停止后等待预算：调用方愿意从发出停止请求起、为
-# FargateEngine 的事件流结束等多久，属于客户端侧的取值、不是平台保证。取法覆盖两段——容器的停止宽限（task-def 期 stopTimeout，
-# FargateWorkerHandle.stop 只发 StopTask、忽略运行期 grace），加 ECS 记下 STOPPED 的控制面滞后（FargateEngine 无论读到
-# scope_done 还是发现 task 已停，都要等 DescribeTasks 报 STOPPED、读到 exitCode 才结束事件流）。
 # Fargate 平台对 stopTimeout 的上限（秒）。与 deploy_aws 里的同名常量同值，但 runtime 不依赖 deploy_aws、不跨包 import。
-# 有两处用途：本模块在 worker container 没设 stopTimeout（或找不到该 container）时取它作停止宽限，预算宁大勿小，取大只让
-# 真卡住的 worker 多等一会；tunnel_host.CLOUD_PER_JOB_MARGIN_S 按它给隧道守护 TTL 的每 job 余量里停止宽限一段记账（ADR 0035 决策 3）。
+# 用途：tunnel_host.CLOUD_PER_JOB_MARGIN_S 按它给隧道守护 TTL 的每 job 余量里停止宽限一段记账（ADR 0035 决策 3）。
 FARGATE_STOP_TIMEOUT_MAX_S = 120
-# ECS 记下 STOPPED 的滞后的经验余量（秒）：四次真容器中断里 executionStoppedAt 的滞后为 11.06~11.54 s、与引擎无关，
-# 20 s 在此之上再覆盖轮询间隔（0.5 s）与 exitCode 落值的有界多等（5 次轮询，约 2.5 s）。这是经验值、不是平台不变量：
-# ECS 的状态最终一致，滞后超出余量时由 schedule 按超出预算处理（会话记未确认、退出码记未知）。
-ECS_STOPPED_LAG_MARGIN_S = 20.0
-
-
-def cloud_stop_bound_s(resolutions: Iterable[WorkerResolution]) -> float:
-    """云端同步 run 的停止后等待预算（秒），作 `ScheduleOpts.stop_bound_s` 传入 schedule。
-
-    取本 run 用到的各引擎 worker container `stopTimeout` 的最大值（run 级单值，与 grace 按 run 取最大一致），没设或找不到
-    该 container 的引擎按 `FARGATE_STOP_TIMEOUT_MAX_S` 计，再加 `ECS_STOPPED_LAG_MARGIN_S`。只报引擎侧的事实、不含 core 的
-    排空余量（`DRAIN_MARGIN_S` 由 schedule 自己加）。`resolutions` 为空（plan 至少产一个 job，正常不会出现）时按平台上限计。
-    本机后端不调它：本机的等待预算就是 grace，schedule 缺省即如此取。
-    """
-    stop_timeouts = [r.stop_timeout_s if r.stop_timeout_s is not None else FARGATE_STOP_TIMEOUT_MAX_S for r in resolutions]
-    return float(max(stop_timeouts, default=FARGATE_STOP_TIMEOUT_MAX_S)) + ECS_STOPPED_LAG_MARGIN_S
 
 
 def preflight_cloud_resources(
-    *, prefix: str, events_table: str, bucket: str, cluster: str, runs_table: str | None = None,
+    *, prefix: str, runs_table: str, events_table: str, bucket: str, cluster: str,
     task_defs: list[str] | None = None, lambda_fns: list[str] | None = None,
     report_dir: str | None = None, declared_max_concurrency: int | None = None, on_warn=None,
     region=None, profile=None, ecs=None, s3=None, ddb=None, lam=None,
@@ -1884,11 +1804,10 @@ def preflight_cloud_resources(
     **点名 prefix** 的错误串（调用方据此以退出码 2 结束），全在返回 None。别运行到一半才因资源缺失而失败；错误要能指向「prefix 配错 /
     CDK 没部署」。
 
-    探**执行必需**（events 表 + cluster + 桶 + `task_defs`——本 run 用到引擎的 task-def）恒探；**runs 表仅落库
-    需要**——`runs_table=None`（`--no-report`）时不探（report 与执行正交：`--no-report
-    --backend cloud` 仍在 Fargate 上运行、不落库、故不碰 runs 表）；**`lambda_fns` 仅 detached submit 需要**——事件
-    驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功而 run 不按正常的链推进，挡在提交前
-    （同步 run 进程内推进、不依赖链、不传）。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
+    云端后端只有 `submit`，它建 run、交后端推进，故 runs 表 + events 表 + cluster + 桶 + `task_defs`（本 run 用到引擎的
+    task-def）恒探，`runs_table` 必给（ADR 0033「preflight fail-fast」节「preflight 探哪些资源」条）；`lambda_fns` 是
+    事件驱动链三 Lambda（kicker/reconciler/exit-observer），任一缺则提交成功而 run 不按正常的链推进，挡在提交前。
+    调用方是 `submit` 与 `doctor`，两者都传 `lambda_fns`。句柄可注入（测试）；未注入惰性建。探法全只读：DDB DescribeTable、
     S3 HeadBucket、ECS DescribeClusters/DescribeTaskDefinition、Lambda GetFunction。
     任一 botocore 异常都翻成「资源 X 不存在——是 --prefix 配错、还是后端未部署（`gherkai deploy`）？」。
 
@@ -1918,11 +1837,10 @@ def preflight_cloud_resources(
         return (f"--backend cloud 资源缺失：{resource_desc}（用 --prefix={prefix!r} 拼出）不存在——"
                 f"是 --prefix 配错、还是后端未部署（gherkai deploy）到本 region/账户？")
 
-    if runs_table is not None:  # 仅落库需要；--no-report 下 None、不探
-        try:
-            ddb.describe_table(TableName=runs_table)
-        except (ClientError, BotoCoreError):
-            return _hint(f"DynamoDB 表 {runs_table}")
+    try:
+        ddb.describe_table(TableName=runs_table)
+    except (ClientError, BotoCoreError):
+        return _hint(f"DynamoDB 表 {runs_table}")
     try:
         ddb.describe_table(TableName=events_table)
     except (ClientError, BotoCoreError):
@@ -1993,23 +1911,6 @@ def is_botocore_error(exc: BaseException) -> bool:
     except ImportError:  # pragma: no cover
         return False
     return isinstance(exc, (BotoCoreError, ClientError))
-
-
-def prune_empty_dirs(root: Path) -> None:
-    """自底向上删 root 下的空目录（含 root 自身若最终空）——只删空的（ADR 0029 cloud 收尾的防御性空壳清理）。
-
-    非空目录（残留产物/文件）自然保留（rmdir 抛出的 OSError 被吞掉），与 worker「上传失败保留本地」护栏自洽。
-    root 不存在则 no-op。用于云端后端收尾时防御性清理本机 run 根下的空目录：Fargate worker 在容器内写入产物，
-    本机 run 根通常不存在，这次调用多半是空操作。**本地落点是组合根算出来的、故清理归组合根**；
-    core 对本地文件系统无知（ADR 0016 窄腰），不该由 core/store 删。
-    """
-    if not root.exists():
-        return
-    for d, _subdirs, _files in os.walk(root, topdown=False):
-        try:
-            os.rmdir(d)  # 只删空目录；非空 → OSError → 吞掉、保留
-        except OSError:
-            pass
 
 
 def load_feature(path: Path) -> FeatureSource:

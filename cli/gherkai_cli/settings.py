@@ -24,8 +24,7 @@ CONFIG_COMMANDS = ("run", "plan", "submit", "status", "explain", "doctor", "list
 PER_CALL_OPTIONS = frozenset({"scope", "tags", "scenario", "step", "json", "quiet", "wait", "all", "full",
                                "fail_fast", "no_report", "engine", "status", "limit", "config"})
 # 只在 --backend cloud 下起作用的选项 → [cloud] 节；本机后端下 [cloud] 整节静默不生效（ADR 0053 决策 3）
-CLOUD_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "events_table", "cluster", "subnet", "security_group",
-                            "worker_variant"})
+CLOUD_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "worker_variant"})
 # 有环境变量层的选项：配置值**不写进 args**（否则配置越过环境变量，正是决策 2 要避免的），而是经各解析链的 config_* 形参
 # 插在环境变量之后（prefix / ddb-table / s3-bucket 在 compose.resolve_cloud_target，region / profile 在 resolve_aws_identity，
 # steps-dir 在 _steps_dir_or_error）
@@ -34,12 +33,13 @@ ENV_LAYER_OPTIONS = frozenset({"prefix", "ddb_table", "s3_bucket", "region", "pr
 # （GHERKAI_*），解析在设备请求解析那一步、不经本节的同词规则
 DEVICE_OPTIONS = {"android_device_arn": ("devices.android", "arn"), "ios_device_arn": ("devices.ios", "arn"),
                    "device_farm_project_arn": ("devices", "project-arn"), "app_bucket": ("devices", "app-bucket")}
-# 只对本机后端起作用的 [common] 键 → --backend cloud 下不写进 args、不做校验，只在 run / submit 上提示一句
-# （与 project-arn / app-bucket 同一形态：同一份项目文件要同时服务本机与云端，用不到的值不拦）。命令行上显式给出的值不受影响、
-# 仍由入口拒绝。值是提示里的理由（产品语言）。steps-dir 同属本机专用，但有环境变量层，
-# 它的提示在 steps 目录解析那一步。
+# 只对本机后端起作用的 [common] 键 → --backend cloud 下不写进 args、不做校验，只在 submit 上提示一句（ADR 0053 决策 3「只对本机后端
+# 起作用的 [common] 键」条；与 project-arn / app-bucket 同一形态：同一份项目文件要同时服务本机与云端，用不到的值不拦）。
+# run 不在提示名单里：run 只有本机后端，给出云端后端（命令行或 [common] backend）即由入口以退出码 2 结束并指向 submit
+# （ADR 0016 决策 A；ADR 0053 决策 3「[common] 的 backend 设为 cloud 时」条），这一句提示对它没有意义。
+# 值是提示里的理由（产品语言）。steps-dir 同属本机专用，但有环境变量层，它的提示在 steps 目录解析那一步。
 LOCAL_ONLY_OPTIONS = {"grace": "grace 只对本机运行起作用，云端 worker 的停止宽限由部署时的 gherkai deploy --stop-timeout 决定"}
-LOCAL_ONLY_NOTICE_COMMANDS = ("run", "submit")
+LOCAL_ONLY_NOTICE_COMMANDS = ("submit",)
 # 内建默认：argparse 侧这些选项改成 None 哨兵（分得出「使用方没给」），配置合成之后在这里补
 BUILTIN_DEFAULTS = {"default_engine": "novaact", "assertion_votes": 1, "max_concurrency": DEFAULT_MAX_CONCURRENCY,
                      "report_dir": "reports", "backend": "local", "tunnel": "ngrok"}
@@ -127,7 +127,7 @@ def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
     三类选项三种去向：①没有环境变量层的 → 配置值填进仍为 None 的 args 字段（选项已给则不动），最后补内建默认；
     ②有环境变量层的（ENV_LAYER_OPTIONS）→ 只做类型校验、存进 `args.config_values`，由各解析链经 config_* 形参放在环境变量
     之后；③ [cloud] 整节只在 --backend cloud 下生效，backend 自身先按「选项 > [common] > 内建」定下来；只对本机后端起作用的
-    [common] 键（LOCAL_ONLY_OPTIONS）在 --backend cloud 下跳过、不写进 args，run / submit 上各提示一句。
+    [common] 键（LOCAL_ONLY_OPTIONS）在 --backend cloud 下跳过、不写进 args，submit 上提示一句（run 给出云端后端由入口以退出码 2 结束）。
     [common] 里对当前命令不存在的键忽略（配置文件是项目级的，各命令只取自己有的那几项）。
     路径类值相对配置文件所在目录（决策 2）：steps-dir 恒绝对化；report-dir 只在本机后端下绝对化（云端是桶内键前缀、原样）。
     """
@@ -230,8 +230,7 @@ def identity_layers(args) -> dict:
 
 
 def config_layers(args) -> dict:
-    """`compose.resolve_cloud_target` 的配置文件层：身份两项加 prefix / ddb-table / s3-bucket（都有环境变量层，排在它之后）。
-    events-table / cluster 没有环境变量层，配置值已由 `apply_project_config` 直接填进 args、按选项值传入。"""
+    """`compose.resolve_cloud_target` 的配置文件层：身份两项加 prefix / ddb-table / s3-bucket（都有环境变量层，排在它之后）。"""
     vals = getattr(args, "config_values", {})
     return {**identity_layers(args), "config_prefix": vals.get("prefix"),
             "config_runs_table": vals.get("ddb_table"), "config_bucket": vals.get("s3_bucket")}

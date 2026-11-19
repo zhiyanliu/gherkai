@@ -581,7 +581,7 @@ class RunMeta:
     worker_variant: str | None = None
     # 引擎 → worker task-def **revision ARN**（ADR 0038 不变量「运行时只用 definition 里的显式 revision，
     # 永不用 family 取最新」）：提交侧 preflight 把 variant 解析成各引擎的精确 revision，写进 definition；
-    # 所有起 task 的宿主（同步 run 的 FargateEngine / kicker / reconciler）原样用它 RunTask，于是一个 run 内
+    # 起 task 的宿主（两个推进器 Lambda：kicker / reconciler）经 FargateEngine 原样用它 RunTask，于是一个 run 内
     # 镜像固定，期间别人重推同名 variant 不影响正在运行的 run。core 只搬运不消费（解析逻辑在组合根 compose）。
     # 载体是 definition：推进器与提交进程分离（ADR 0034），不随 META 持久化就到不了推进器。
     # None 表示本机后端；云端 definition 必有值，推进器读到 None 按定义违约标 error、不回落默认指针（ADR 0037 决策 7 不留兼容分支）。

@@ -158,16 +158,6 @@
       "variant": "security"
     },
     {
-      "id": "cli-cw",
-      "from": "cli",
-      "to": "cw",
-      "label": "注入",
-      "classification": "run --backend cloud",
-      "variant": "emphasis",
-      "labelDx": 108,
-      "labelDy": 36
-    },
-    {
       "id": "be-cw",
       "from": "be",
       "to": "cw",
@@ -222,8 +212,7 @@
       "dot": "amber",
       "title": "云端任务的启动方",
       "items": [
-        "run --backend cloud：由本机 CLI 启动，region 等信息由本机 CLI 注入",
-        "submit --backend cloud：由云端后端启动",
+        "云端后端只有 submit --backend cloud 一种执行方式：任务由云端后端启动，region 等信息由后端注入",
         "部署命令本身也是本机 CLI 进程，通常在另一台机器上执行"
       ]
     }

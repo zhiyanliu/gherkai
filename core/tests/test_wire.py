@@ -283,7 +283,7 @@ def test_unknown_event_type_raises():
 
 
 # ---- 退出码约定（out-of-band 协议通道，ADR 0024「退出码约定」/ 0028）----
-# 常量与翻译在 wire 一处、两个 Engine adapter 共用（曾各抄一份、靠「两处必须同值」的注释维持）：本组守那份单一事实源。
+# 常量与翻译只在 wire 一处，adapter 不另抄一份：本组守那份单一事实源。
 def test_ex_worker_network_value_is_protocol_pinned():
     """80 是跨语言约定值（两个引擎 worker 各自硬编码）——改这个数即改协议，须同步两 worker。"""
     from gherkai_core.wire import EX_WORKER_NETWORK
@@ -311,7 +311,7 @@ def test_raise_for_worker_exit_maps_codes():
 
 
 def test_raise_for_worker_exit_label_names_the_transport_field():
-    """两个 adapter 共用同一翻译、只换 code_label：消息说各自传输的字段名（子进程 returncode / ECS exitCode）。"""
+    """code_label 只进消息文本：诊断行说出调用方给的退出码字段名，翻译本身与它无关。"""
     import pytest
 
     from gherkai_core.errors import WorkerNetworkError

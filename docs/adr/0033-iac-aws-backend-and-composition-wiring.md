@@ -97,7 +97,7 @@ Fargate awsvpc 模式要 VPC 的 subnet/sg。**VPC 从哪来是部署决策、�
   - **为何 tag 而非前缀**：job-in 落 `<report_dir>/<run_id>/jobs-in/`（run_id 在 key 中间），S3 lifecycle 的 filter 是**纯前缀**、框不住中间的 run_id；且同 `<run_id>/` 前缀下还有判定真值 `jobs/` 与报告 `index/manifest`（长期保留、误删代价高），前缀规则会误伤。tag 精确只框 job-in——`FargateEngine._put_job_and_run_task` 上传时打 `Tagging="gherkai=job-in"`、CDK 桶挂 `LifecycleRule(tag_filters={"gherkai":"job-in"}, expiration=7d)`。判定真值/报告不打此 tag、不受影响。
   - **7 天**：对齐 events 表 TTL 心智（输入/协调类脚手架，留窗口供事后调查失败 run，之后自动清）。
   - **打 tag 在推进器、非 worker**：`put_object` 在 `FargateEngine`（推进器 Lambda 一侧的组合根注入的 s3_client、Lambda 执行角色的凭证，见「资源清单」10.）上跑，worker 只 `GetObject` 读——故**无需给 worker task role 加 `s3:PutObjectTagging`**（避免为清理反而扩 task role 权限，与「IAM 最小权限」一致）。
-  - **真跑验证**：cloud job 真跑后核实真 S3——job-in 对象带 `gherkai=job-in` tag、判定真值 `jobs/` 无 tag（lifecycle 精确不误伤）、桶 lifecycle rule 生效。护栏：core `test_run_scope_job_in_tagged_for_lifecycle` + iac `test_artifacts_bucket_job_in_lifecycle`（含「不得用 Prefix filter」负向护栏）。
+  - **真跑验证**：cloud job 真跑后核实真 S3——job-in 对象带 `gherkai=job-in` tag、判定真值 `jobs/` 无 tag（lifecycle 精确不误伤）、桶 lifecycle rule 生效。护栏：core `test_start_scope_job_in_tagged_for_lifecycle` + iac `test_artifacts_bucket_job_in_lifecycle`（含「不得用 Prefix filter」负向护栏）。
   - **已知边界（可接受）**：tag 过滤不追溯——部署此 lifecycle **之前**写的旧 job-in 对象无 tag、不被本规则清理；要清需一次性手动删（`aws s3api list-objects-v2 ... jobs-in/ | delete`），非本规则职责。
 
 ## 2 镜像：Nova / Midscene 各一（依赖环境本质不同）

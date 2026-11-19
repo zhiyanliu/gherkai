@@ -14,7 +14,7 @@ worker 事件（原始 ADR 0024 JSON 行 + worker 段单调 seq）+ 平台侧退
   reason（退出原因的归因串：本机只有 tick 的 launch 失败补偿写它，内容为「起 worker 失败：异常文本」，per-run 进程与
   `status --wait` 接力者推进时都可能写；观察到真实退出码的记录不带）+ exited_at（退出时刻，UTC 的 ISO 串，经
   `serialize.instant_to_iso` 写、`instant_from_iso` 读；NULL 表示没有可观察的退出时刻）。独立表即独立键空间（机制一：退出记录
-  不占 worker 数值 seq 段、不参与断号）。
+  不占 worker 数值 seq 段，续号用的 `max_seq` 只看 events 表）。
 
 并发：detached 下 per-run 进程写、reconciler 读（同进程内两职责）；`status --wait` 接力者在另一进程里同样启动 worker、写同一文件
 （事件、退出记录、为观察链已断的他人 claim 补写的超时退出记录），它不探测 per-run 进程是否存活、可能与之同时推进——同一 job

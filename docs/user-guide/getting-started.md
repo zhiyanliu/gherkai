@@ -1,6 +1,6 @@
 # 开始使用
 
-开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器（标了 `@device` 的 scope 改为操作 AWS Device Farm 上的 Android / iOS 真机，仅 Midscene 引擎）并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎只自带导航一条，判定类的由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端四种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
+开始使用 gherkai 要解决三个问题：安装什么、需要哪些 AWS 前置、第一次怎么完整运行。gherkai 把 `.feature` 里的每个 step 交给 AI 引擎，由引擎操作云端浏览器（标了 `@device` 的 scope 改为操作 AWS Device Farm 上的 Android / iOS 真机，仅 Midscene 引擎）并做出判定；需要精确判定的 step 由确定性 step 代码接管（引擎只自带导航一条，判定类的由项目自己写，见[编写确定性 step](./writing-deterministic-steps.md)）。各部件的归属见下面的 [AWS 前置](#aws-前置)。`.feature` 的写法见[编写 .feature](./writing-features.md)；执行方式与执行后端三种组合的差别与退出码见[运行测试与查看结果](./running-and-results.md)；云端后端的部署见[云端后端](./cloud-backend.md)；选项与环境变量总表见[配置](./configuration.md)；报错处置见[排错](./troubleshooting.md)。
 
 ## 按角色选安装形态
 
@@ -47,7 +47,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 
 ![你的机器与 AWS 账户各持有哪些部件：命令行与本机 worker 在你的机器上，云端 worker、浏览器会话、Device Farm 真机与模型服务在 AWS 账户里，被测应用在两者之外](../diagrams/getting-started-component-ownership.svg)
 
-图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话、真机与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；四种组合、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
+图注：**本机后端**指 `--backend local`（默认），**云端后端**指 `--backend cloud`。图上两个后端的差别只有一处——worker 在哪运行：云端后端运行的是同样两个引擎，对浏览器会话、真机与模型服务做同样的事。图上的「本机 worker」按引擎分开装，Nova Act 与 Midscene 各一份，见上面的[安装](#安装)。账户归属按后端不同：本机后端用你自己的账户，云端后端用部署方建后端的那个账户（可能是团队共用）；三种组合（云端后端只有后台运行）、结果落点、权限，以及哪种组合记到谁的账户，见[运行测试与查看结果](./running-and-results.md)。要开通哪些服务、模型在哪个 region 处理见下表。确定性 step 代码不在图上：本机后端由 worker 从本机目录加载，云端后端来自 worker 镜像，见[编写确定性 step](./writing-deterministic-steps.md)。被测应用不在公网时的隧道拓扑见[测本机应用](./local-app-testing.md)。
 
 - **凭证**走本机 AWS 默认凭证链：profile、环境变量、实例角色都可以，不需要额外的 API key。用 `--profile`、`AWS_PROFILE` 或项目配置文件 `gherkai.toml` 里 `[common]` 的 `profile` 指定 profile，按此顺序取第一个给出的。
 - **必须能解析出 region**，按此顺序解析：`--region` > `AWS_REGION` > `AWS_DEFAULT_REGION` > 项目配置文件 `gherkai.toml` 里 `[common]` 的 `region` > profile 配置里的 region。五处都没有时不会自动补一个 region：命令照常开始执行，引擎会在启动时因缺 region 报错，该 scope 判为 error。

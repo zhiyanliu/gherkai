@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg viewBox="0 0 1080 620" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-motion-choreography="stream" style="--flow-cycle: 4.643s; width: 1080px; height: 620px; min-width: 0px;" width="1080" height="620" xmlns="http://www.w3.org/2000/svg"><style>
+<svg viewBox="0 0 1080 620" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="classic" data-quality-profile="showcase" data-motion-choreography="stream" style="--flow-cycle: 4.014s; width: 1080px; height: 620px; min-width: 0px;" width="1080" height="620" xmlns="http://www.w3.org/2000/svg"><style>
 /*
 JetBrains Mono variable WOFF2 subsets from Google Fonts service revision v24.
 These fixed bytes are shared by the viewer and its SVG/raster exports.
@@ -399,137 +399,126 @@ svg[data-preset="editorial"] { --flow-halo-peak: 0.07; --flow-glow-peak: 0.28; -
 }
 @keyframes archify-relay-ripple { 
   0% { r: 2px; opacity: var(--flow-peak, 0.6); }
-  16.154%, 100% { r: 20px; opacity: 0; }
+  18.683%, 100% { r: 20px; opacity: 0; }
 }
 @keyframes archify-relay-comet-0 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  16% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  19.446%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  18.505% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  22.491%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-0 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  16% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  35.385%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  18.505% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  40.925%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-1 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  15.308% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  18.754%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  18.505% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  22.491%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-1 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  15.308% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  34.692%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  18.505% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  40.925%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-2 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  18.769% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  22.215%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  21.708% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  25.694%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-2 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  18.769% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  38.154%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  21.708% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  44.128%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-3 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  32.308% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  35.754%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  37.367% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  41.352%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-3 { 
-  0%, 9.692% { opacity: 0; }
-  32.308% { opacity: var(--flow-peak, 0.3); }
-  51.692%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 11.21% { opacity: 0; }
+  37.367% { opacity: var(--flow-peak, 0.3); }
+  59.786%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-4 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  32.308% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  35.754%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  20.107% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  24.093%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-4 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  32.308% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  51.692%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  20.107% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  42.527%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-5 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  17.385% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  20.831%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  23.31% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  27.295%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-5 { 
   0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  17.385% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  36.769%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  23.31% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
+  45.73%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-comet-6 { 
   0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  20.154% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  23.6%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
+  2.989% { opacity: var(--flow-peak, 0.9); }
+  37.367% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
+  41.352%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
 }
 @keyframes archify-relay-wake-6 { 
-  0% { stroke-dashoffset: var(--flow-len, 0px); opacity: var(--flow-peak, 0.3); animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  20.154% { stroke-dashoffset: 0px; opacity: var(--flow-peak, 0.3); }
-  39.538%, 100% { stroke-dashoffset: 0px; opacity: 0; }
-}
-@keyframes archify-relay-comet-7 { 
-  0% { stroke-dashoffset: calc(var(--flow-len, 0px) + var(--flow-shift, 0px)); opacity: 0; animation-timing-function: cubic-bezier(0.45, 0.05, 0.35, 1); }
-  2.585% { opacity: var(--flow-peak, 0.9); }
-  32.308% { stroke-dashoffset: var(--flow-shift, 0px); opacity: var(--flow-peak, 0.9); }
-  35.754%, 100% { stroke-dashoffset: var(--flow-shift, 0px); opacity: 0; }
-}
-@keyframes archify-relay-wake-7 { 
-  0%, 9.692% { opacity: 0; }
-  32.308% { opacity: var(--flow-peak, 0.3); }
-  51.692%, 100% { stroke-dashoffset: 0px; opacity: 0; }
+  0%, 11.21% { opacity: 0; }
+  37.367% { opacity: var(--flow-peak, 0.3); }
+  59.786%, 100% { stroke-dashoffset: 0px; opacity: 0; }
 }
 @keyframes archify-relay-node-0 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  2.585%, 9.046% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  25.846% { filter: var(--ambient-node-base-filter, none); }
+  2.989%, 10.463% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  29.893% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-1 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  2.585%, 9.046% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  25.846% { filter: var(--ambient-node-base-filter, none); }
+  2.989%, 10.463% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  29.893% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-2 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  2.585%, 9.046% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  25.846% { filter: var(--ambient-node-base-filter, none); }
+  2.989%, 10.463% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  29.893% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-3 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
   0% { filter: var(--ambient-node-base-filter, none); }
-  2.585%, 9.046% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  25.846% { filter: var(--ambient-node-base-filter, none); }
+  2.989%, 10.463% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  29.893% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-4 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  16% { filter: var(--ambient-node-base-filter, none); }
-  18.585%, 25.046% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  41.846% { filter: var(--ambient-node-base-filter, none); }
+  18.505% { filter: var(--ambient-node-base-filter, none); }
+  21.495%, 28.968% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  48.399% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-5 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  17.385% { filter: var(--ambient-node-base-filter, none); }
-  19.969%, 26.431% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  43.231% { filter: var(--ambient-node-base-filter, none); }
+  20.107% { filter: var(--ambient-node-base-filter, none); }
+  23.096%, 30.569% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  50% { filter: var(--ambient-node-base-filter, none); }
 }
 @keyframes archify-relay-node-6 { 
   0%, 100% { filter: var(--ambient-node-base-filter, none); }
-  32.308% { filter: var(--ambient-node-base-filter, none); }
-  34.892%, 41.354% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
-  58.154% { filter: var(--ambient-node-base-filter, none); }
+  37.367% { filter: var(--ambient-node-base-filter, none); }
+  40.356%, 47.829% { filter: var(--ambient-node-base-filter,) drop-shadow(0 0 10px var(--arrow-emphasis)); }
+  67.26% { filter: var(--ambient-node-base-filter, none); }
 }
 :root, svg { --bg: #020617; --grid: #1e293b; --canvas-dot: rgba(148, 163, 184, 0.16); --text: #ffffff; --text-muted: #94a3b8; --text-dim: #475569; --text-faint: #7d8da1; --panel: rgba(15, 23, 42, 0.5); --panel-border: #1e293b; --lane-fill: rgba(15, 23, 42, 0.22); --lane-stroke: #334155; --arrow: #94a3b8; --arrow-emphasis: #34d399; --mask: #0f172a; --frontend-fill: rgba(8, 51, 68, 0.4); --frontend-stroke: #22d3ee; --backend-fill: rgba(6, 78, 59, 0.4); --backend-stroke: #34d399; --database-fill: rgba(76, 29, 149, 0.4); --database-stroke: #a78bfa; --cloud-fill: rgba(120, 53, 15, 0.3); --cloud-stroke: #fbbf24; --security-fill: rgba(136, 19, 55, 0.4); --security-stroke: #fb7185; --messagebus-fill: rgba(251, 146, 60, 0.3); --messagebus-stroke: #fb923c; --external-fill: rgba(30, 41, 59, 0.5); --external-stroke: #94a3b8; --toolbar-bg: rgba(15, 23, 42, 0.8); --toolbar-border: #334155; --toolbar-text: #e2e8f0; --toolbar-hover: rgba(15, 23, 42, 0.95); --toolbar-menu-bg: #0f172a; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; }
 @media (prefers-color-scheme: light) { :root, svg { --bg: #f4f5f7; --grid: #e9edf2; --canvas-dot: #e2e7ec; --text: #111827; --text-muted: #5b6474; --text-dim: #9aa3b2; --text-faint: #6b7280; --panel: #ffffff; --panel-border: #e5e7eb; --lane-fill: rgba(248, 250, 252, 0.65); --lane-stroke: #cbd5e1; --arrow: #64748b; --arrow-emphasis: #059669; --mask: #ffffff; --frontend-fill: rgba(34, 211, 238, 0.15); --frontend-stroke: #0891b2; --backend-fill: rgba(52, 211, 153, 0.18); --backend-stroke: #059669; --database-fill: rgba(167, 139, 250, 0.2); --database-stroke: #7c3aed; --cloud-fill: rgba(251, 191, 36, 0.18); --cloud-stroke: #d97706; --security-fill: rgba(251, 113, 133, 0.15); --security-stroke: #e11d48; --messagebus-fill: rgba(251, 146, 60, 0.15); --messagebus-stroke: #ea580c; --external-fill: rgba(148, 163, 184, 0.18); --external-stroke: #64748b; --toolbar-bg: rgba(255, 255, 255, 0.92); --toolbar-border: #cbd5e1; --toolbar-text: #334155; --toolbar-hover: #ffffff; --toolbar-menu-bg: #ffffff; --flow-cycle: ; --flow-halo-peak: ; --flow-glow-peak: ; --flow-tail-peak: ; --flow-head-peak: ; --flow-wake-peak: ; --flow-ripple-peak: ; --flow-peak: ; } }
@@ -913,13 +902,12 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
 
         <!-- Flow paths -->
         <path data-edge-from="sh" data-edge-to="cli" data-edge-label="继承" data-edge-key="0" data-edge-id="sh-cli" data-composition-points="156,166;207.5,166;207.5,271;259,271" d="M 156 166 L 207.5 166 L 207.5 271 L 259 271" class="a-default" data-animate="edge" style="--step: 0;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="cli" data-edge-to="child" data-edge-label="继承" data-edge-key="1" data-edge-id="cli-child-env" data-composition-points="371,280;422.5,280;422.5,376;474,376" d="M 371 280 L 422.5 280 L 422.5 376 L 474 376" class="a-default" data-animate="edge" style="--step: 1;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="cli" data-edge-to="child" data-edge-label="继承" data-edge-key="1" data-edge-id="cli-child-env" data-composition-points="371,271;422.5,271;422.5,376;474,376" d="M 371 271 L 422.5 271 L 422.5 376 L 474 376" class="a-default" data-animate="edge" style="--step: 1;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="cli" data-edge-to="child" data-edge-label="注入" data-edge-key="2" data-edge-id="cli-child-inject" data-composition-points="371,271;450,271;450,330;530,330;530,356" d="M 371 271 L 450 271 L 450 330 L 530 330 L 530 356" class="a-emphasis" data-animate="edge" style="--step: 2;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="opt" data-edge-to="child" data-edge-label="被覆盖" data-edge-key="3" data-edge-id="opt-child" data-composition-points="156,499;315,499;315,394;474,394" d="M 156 499 L 315 499 L 315 394 L 474 394" class="a-security" data-animate="edge" style="--step: 3;" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
-        <path data-edge-from="cli" data-edge-to="cw" data-edge-label="注入" data-edge-key="4" data-edge-id="cli-cw" data-composition-points="371,262;904,262" d="M 371 262 L 904 262" class="a-emphasis" data-animate="edge" style="--step: 4;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="be" data-edge-to="cw" data-edge-label="注入" data-edge-key="5" data-edge-id="be-cw" data-composition-points="801,157;960,157;960,224" d="M 801 157 L 960 157 L 960 224" class="a-emphasis" data-animate="edge" style="--step: 5;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="img" data-edge-to="cw" data-edge-label="继承" data-edge-key="6" data-edge-id="img-cw" data-composition-points="801,385;960,385;960,282" d="M 801 385 L 960 385 L 960 282" class="a-default" data-animate="edge" style="--step: 6;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="sh" data-edge-to="cw" data-edge-label="不传" data-edge-key="7" data-edge-id="sh-cw" data-composition-points="156,148;530,148;530,244;904,244" d="M 156 148 L 530 148 L 530 244 L 904 244" class="a-dashed" data-animate="edge" style="--step: 7;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="be" data-edge-to="cw" data-edge-label="注入" data-edge-key="4" data-edge-id="be-cw" data-composition-points="801,157;960,157;960,224" d="M 801 157 L 960 157 L 960 224" class="a-emphasis" data-animate="edge" style="--step: 4;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="img" data-edge-to="cw" data-edge-label="继承" data-edge-key="5" data-edge-id="img-cw" data-composition-points="801,385;960,385;960,282" d="M 801 385 L 960 385 L 960 282" class="a-default" data-animate="edge" style="--step: 5;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="sh" data-edge-to="cw" data-edge-label="不传" data-edge-key="6" data-edge-id="sh-cw" data-composition-points="156,148;530,148;530,253;904,253" d="M 156 148 L 530 148 L 530 253 L 904 253" class="a-dashed" data-animate="edge" style="--step: 6;" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-opt" data-node-id="opt" data-node-label="命令行选项" tabindex="0" role="button" aria-label="聚焦命令行选项，解析后的值, 01 / 设置位置" aria-pressed="false" data-node-kind="external" data-node-sublabel="解析后的值" data-node-context="01 / 设置位置">
@@ -971,7 +959,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <g id="node-be" data-node-id="be" data-node-label="云端后端" tabindex="0" role="button" aria-label="聚焦云端后端，起云端任务, 04 / 云端后端与镜像" aria-pressed="false" data-node-kind="cloud" data-node-sublabel="起云端任务" data-node-context="04 / 云端后端与镜像">
           <title>云端后端 · 起云端任务 · 04 / 云端后端与镜像</title>
           <rect x="689" y="128" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="689" y="128" width="112" height="58" rx="6" class="c-cloud" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
+          <rect x="689" y="128" width="112" height="58" rx="6" class="c-cloud" data-animate="node" style="--step: 4; --flow-node-name: archify-relay-node-2;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="cloud" class="semantic-sigil s-cloud" transform="translate(695 134) scale(0.6875)">
             <path d="M4.3 12.5h7.3a2.4 2.4 0 0 0 .2-4.8 4 4 0 0 0-7.5-1.3A3.1 3.1 0 0 0 4.3 12.5Z"/>
           </g>
@@ -982,7 +970,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <g id="node-img" data-node-id="img" data-node-label="worker 镜像 ENV" tabindex="0" role="button" aria-label="聚焦worker 镜像 ENV，构建进 variant 镜像的值, 04 / 云端后端与镜像" aria-pressed="false" data-node-kind="database" data-node-sublabel="构建进 variant 镜像的值" data-node-tag="推镜像时定" data-node-context="04 / 云端后端与镜像">
           <title>worker 镜像 ENV · 构建进 variant 镜像的值 · 04 / 云端后端与镜像 · 推镜像时定</title>
           <rect x="689" y="356" width="112" height="58" rx="6" class="c-mask"/>
-          <rect x="689" y="356" width="112" height="58" rx="6" class="c-database" data-animate="node" style="--step: 6; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
+          <rect x="689" y="356" width="112" height="58" rx="6" class="c-database" data-animate="node" style="--step: 5; --flow-node-name: archify-relay-node-3;" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(695 357) scale(0.375)">
             <ellipse cx="8" cy="4" rx="5" ry="2"/>
             <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
@@ -1010,8 +998,8 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <text x="207.5" y="208.5" class="t-edge-default" font-size="8" text-anchor="middle">继承</text>
         </g>
         <g data-edge-from="cli" data-edge-to="child" data-edge-label="继承" data-edge-key="1" data-edge-id="cli-child-env">
-          <rect x="405.5" y="287" width="34" height="16" rx="4" class="c-mask"/>
-          <text x="422.5" y="298" class="t-edge-default" font-size="8" text-anchor="middle">继承</text>
+          <rect x="405.5" y="282.5" width="34" height="16" rx="4" class="c-mask"/>
+          <text x="422.5" y="293.5" class="t-edge-default" font-size="8" text-anchor="middle">继承</text>
         </g>
         <g data-edge-from="cli" data-edge-to="child" data-edge-label="注入" data-edge-key="2" data-edge-id="cli-child-inject">
           <rect x="473" y="309" width="34" height="16" rx="4" class="c-mask"/>
@@ -1021,23 +1009,18 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="294.3" y="425.5" width="41.4" height="16" rx="4" class="c-mask"/>
           <text x="315" y="436.5" class="t-edge-security" font-size="8" text-anchor="middle">被覆盖</text>
         </g>
-        <g data-edge-from="cli" data-edge-to="cw" data-edge-label="注入" data-edge-key="4" data-edge-id="cli-cw">
-          <rect x="692.95" y="277" width="105.1" height="27" rx="4" class="c-mask"/>
-          <text x="745.5" y="288" class="t-edge-emphasis" font-size="8" text-anchor="middle">注入</text>
-        <text x="745.5" y="299" class="t-dim" font-size="7" text-anchor="middle">run --backend cloud</text>
-        </g>
-        <g data-edge-from="be" data-edge-to="cw" data-edge-label="注入" data-edge-key="5" data-edge-id="be-cw">
+        <g data-edge-from="be" data-edge-to="cw" data-edge-label="注入" data-edge-key="4" data-edge-id="be-cw">
           <rect x="900.1" y="169.5" width="119.8" height="27" rx="4" class="c-mask"/>
           <text x="960" y="180.5" class="t-edge-emphasis" font-size="8" text-anchor="middle">注入</text>
         <text x="960" y="191.5" class="t-dim" font-size="7" text-anchor="middle">submit --backend cloud</text>
         </g>
-        <g data-edge-from="img" data-edge-to="cw" data-edge-label="继承" data-edge-key="6" data-edge-id="img-cw">
+        <g data-edge-from="img" data-edge-to="cw" data-edge-label="继承" data-edge-key="5" data-edge-id="img-cw">
           <rect x="943" y="312.5" width="34" height="16" rx="4" class="c-mask"/>
           <text x="960" y="323.5" class="t-edge-default" font-size="8" text-anchor="middle">继承</text>
         </g>
-        <g data-edge-from="sh" data-edge-to="cw" data-edge-label="不传" data-edge-key="7" data-edge-id="sh-cw">
-          <rect x="780" y="223" width="34" height="16" rx="4" class="c-mask"/>
-          <text x="797" y="234" class="t-edge-dashed" font-size="8" text-anchor="middle">不传</text>
+        <g data-edge-from="sh" data-edge-to="cw" data-edge-label="不传" data-edge-key="6" data-edge-id="sh-cw">
+          <rect x="780" y="232" width="34" height="16" rx="4" class="c-mask"/>
+          <text x="797" y="243" class="t-edge-dashed" font-size="8" text-anchor="middle">不传</text>
         </g>
 
         <!-- Legend -->
@@ -1065,4 +1048,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=4d56e3a29546d8807ea570608f8e8353e4ab87684e98201318b85de730078cb1 -->
+<!-- gherkai:source-sha256=c6be7554f53c3162eb36a5523535918a77f5b50ea024064ca85e7ad4fb0fc62e -->

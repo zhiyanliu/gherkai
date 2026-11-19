@@ -1,10 +1,9 @@
 #!/usr/bin/env python
 """ECS task 生命周期时间字段抓取（Fargate SIGTERM→退出耗时标定，ADR 0032 / 0024）。
 
-**为何独立成脚本、不改产品路径**：产品侧读 task 终态的两条路都**只取 lastStatus/exitCode、丢弃时间字段**（够判定
-即可）——同步态 `FargateEngine._probe_task`/`_await_exit_code`（core/gherkai_core/adapters/fargate_engine.py）产
-`TaskProbe(stopped, exit_code, missing)` 供 `_read_events` 轮询判存活/退出；detached cloud 态由退出观察者 Lambda 从
-EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py）。
+**为何独立成脚本、不改产品路径**：产品侧读 task 终态的路径**只取 exitCode 与停止原因、丢弃时间字段**（够判定即可）——
+退出观察者 Lambda 从 EventBridge 的 ECS STOPPED 事件读 `exitCode` 写 task_exited（ADR 0034 机制二，
+deploy_aws/gherkai_deploy_aws/lambdas/exit_observer.py），推进器在 job 到点停止时按同一份认法（`exit_from_task`）补写退出记录。
 grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟耗时**（`stoppingAt`/`executionStoppedAt`/`stoppedAt`
 的差），属一次性标定、非运行期判定；混进任一条判定路径都会污染其单一职责、且改产品路径需回归。故独立脚本纯读。
 
@@ -21,7 +20,7 @@ grace/stopTimeout 校准要的是 SIGTERM→退出的**真实墙钟耗时**（`s
 
 **取中断样本的用法**（协作停止路径：运行中发 StopTask 触发 SIGTERM，即 ADR 0032 校准表里的「中断样本」；
 无中断的 baseline 运行不需要这步——它只测 act 正常完成墙钟，见 tools/events_wallclock.py）：
-  1. `--backend cloud` 起一个 worker（或 e2e）；从 events 表见 step_started（act in-flight）。
+  1. `gherkai submit --backend cloud` 提交一个 run（或用 e2e）；从 events 表见 step_started（act in-flight）。
   2. `aws ecs list-tasks --cluster <cluster>` 拿 task ARN，`aws ecs stop-task` 手动停（触发 SIGTERM）。
   3. task STOPPED 后运行本脚本抓时间字段。或直接 `--wait` 让脚本轮询到 STOPPED 再吐（省得手动等）。
 

@@ -299,10 +299,10 @@ def test_plan_json_app_entry_is_exactly_alias_and_app_id():
     assert doc["jobs"][0]["target"] == {"device": "android", "ui_kind": "app", "app": {"alias": "shop", "app_id": "com.example.shop"}}
 
 
-@pytest.mark.parametrize("cmd", ["run", "submit"])
-def test_cloud_run_and_submit_reject_device_job_in_shared_prestep_before_touching_cloud(tmp_path, cmd, monkeypatch, capsys):
+def test_cloud_submit_rejects_device_job_in_shared_prestep_before_touching_cloud(tmp_path, monkeypatch, capsys):
     """设备选择接在 run / submit 的共享前置里（ADR 0053 决策 4）：没有任何来源指定设备的设备 job 在这里以退出码 2 被拒、消息是产品语言，
-    之后的云端解析一步都不走（删掉接线这条用例会撞到被禁的云端调用）。"""
+    之后的云端解析一步都不走（删掉接线这条用例会撞到被禁的云端调用）。本机 run 的同一拒绝见
+    test_project_config 的 test_unspecified_device_plan_warns_but_run_and_submit_exit_2_before_any_cloud_call。"""
     feat = tmp_path / "dev.feature"
     feat.write_text("@device:android\nFeature: F\n  Scenario: a\n    When \"做事\"\n", encoding="utf-8")
 
@@ -311,7 +311,7 @@ def test_cloud_run_and_submit_reject_device_job_in_shared_prestep_before_touchin
 
     monkeypatch.setattr(compose, "resolve_cloud_target", forbidden)
     monkeypatch.setattr(m, "_cloud_skew_gate", forbidden)
-    assert m.main([cmd, str(feat), "--backend", "cloud", "--prefix", "p-"]) == 2
+    assert m.main(["submit", str(feat), "--backend", "cloud", "--prefix", "p-"]) == 2
     err = capsys.readouterr().err
     assert "没有指定用哪台设备" in err and "[devices.android]" in err and "--android-device-arn" in err
     assert "当且仅当" not in err and "设备请求" not in err
@@ -531,8 +531,6 @@ def test_run_schedule_opts_mapping(tmp_path, monkeypatch, capsys):
     assert box["run_meta"].max_concurrency == 3
     # min_grace_s 也传给 core（核心不变量：core enforce grace≥此下限，ADR 0024 grace 硬约束）
     assert o.min_grace_s == FAKE_MIN_GRACE_S["novaact"]
-    # 本机后端不传停止后等待预算：None 表示 schedule 取 grace
-    assert o.stop_bound_s is None
 
 
 def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
@@ -873,6 +871,34 @@ def test_run_ended_elsewhere_after_an_interrupt_exits_by_signal(tmp_path, monkey
     assert m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports)]) == 143
     cap = capsys.readouterr()
     assert cap.out == "" and "在本次执行结束之前已被记为已结束" in cap.err
+
+
+def test_run_ended_elsewhere_exits_by_signal_even_when_the_record_cannot_be_read_back(tmp_path, monkeypatch, capsys):
+    """处理过使用方中断、收尾的条件写被挡、随后读回运行态又失败：仍走同一个出口，退出码按信号取（SIGTERM 为 143），
+    说明照常给出并写明记录没有读出来，判定明细的落点照常给出；没有未归类的异常。"""
+    import signal as _signal
+
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    reports = tmp_path / "reports"
+    end_locally = _end_locally(reports)
+
+    def end_it(run_id: str) -> None:
+        end_locally(run_id)
+
+        def failing_read(self, rid):
+            raise OSError("读取失败")
+
+        monkeypatch.setattr(LocalRunStore, "load_run_state", failing_read)   # 之后的读回失败
+
+    monkeypatch.setattr(m, "schedule", _schedule_ended_elsewhere(end_it, signum=_signal.SIGTERM))
+    rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 143 and cap.out == ""
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    assert (f"run {run_dir.name} 在本次执行结束之前已被记为已结束，本次执行没有覆盖这条记录，也没有生成报告；已得出的判定已写入。"
+            "记录里的状态这一次没有读出来。\n") in cap.err
+    assert "判定明细: " in cap.err and "Traceback" not in cap.err
 
 
 # ---- 前台执行遵守运行期限、服从记录：组合根的注入与到期收尾的输出 ----
@@ -1888,11 +1914,9 @@ def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypat
 
 
 def test_run_and_submit_share_one_steps_dir_help_text(capsys):
-    """`--steps-dir` 的 help 在 run/submit 两处是同一个常量（曾字节级抄两份）：措辞改一处即两处生效。
-
-    这两个子命令产提交记录、且值会随它到后台推进/接力进程，故要那两句补充（值随提交记录走 / 云端后端不
-    生效）；`plan`、`doctor` 等不产提交记录的子命令用不加补充的公共段（`doctor` 同样带 `--backend`，判据不
-    是它）。
+    """`--steps-dir` 的 help 在 run/submit 两处共用同一段措辞：run 的一段在公共段后加「值随提交记录走」，submit 的一段在 run 的一段
+    之后再加后台读回与云端后端不生效两句（run 只有本机后端，不写云端那句）；共有的部分只写一处，改一处即两处生效。
+    `plan`、`doctor` 等不产提交记录的子命令用不加补充的公共段（`doctor` 同样带 `--backend`，判据不是它）。
     """
     import argparse
 
@@ -1901,10 +1925,11 @@ def test_run_and_submit_share_one_steps_dir_help_text(capsys):
     def steps_dir_help(command: str) -> str:
         return next(a.help for a in sub.choices[command]._actions if "--steps-dir" in a.option_strings)
 
-    assert steps_dir_help("run") == steps_dir_help("submit") == m._STEPS_DIR_HELP_RUN_SUBMIT
-    assert m._STEPS_DIR_HELP_RUN_SUBMIT.startswith(m._STEPS_DIR_HELP)
+    assert steps_dir_help("run") == m._STEPS_DIR_HELP_RUN and steps_dir_help("submit") == m._STEPS_DIR_HELP_SUBMIT
+    assert m._STEPS_DIR_HELP_SUBMIT.startswith(m._STEPS_DIR_HELP_RUN) and m._STEPS_DIR_HELP_RUN.startswith(m._STEPS_DIR_HELP)
+    assert "--backend cloud" not in steps_dir_help("run") and "--backend cloud" in steps_dir_help("submit")
     assert steps_dir_help("plan").startswith(m._STEPS_DIR_HELP)
-    assert steps_dir_help("plan") != m._STEPS_DIR_HELP_RUN_SUBMIT
+    assert steps_dir_help("plan") != m._STEPS_DIR_HELP_RUN
     # doctor 也带 --backend，却只查环境、不产提交记录 → 恒用不加补充的公共段（守住「判据不是 --backend」）
     assert steps_dir_help("doctor") == m._STEPS_DIR_HELP
 
@@ -3164,7 +3189,7 @@ def _explain_cloud_stores(jr, state):
         def load_job_result(self, run_id, scope_id):
             return jr if scope_id == jr.scope_id else None
 
-    return _RunStore(), _ResultStore(), object(), (lambda run_id, report_index: {})
+    return _RunStore(), _ResultStore(), object()
 
 
 def _events_db_with_unfinished_scenario(root, run_id, scope_id: str, evidence_uri: str):
@@ -3553,7 +3578,7 @@ def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, 
     run_store = _explain_cloud_stores(None, state)[0]
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "build_cloud_stores",
-                        lambda **kw: (run_store, _NothingLanded(), object(), (lambda r, i: {})))
+                        lambda **kw: (run_store, _NothingLanded(), object()))
     rc = m.main(["explain", "r", "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"])
     err = capsys.readouterr().err
     assert rc == 0 and "判定明细尚未落地" in err
@@ -3760,16 +3785,12 @@ def test_run_second_interrupt_prints_release_warning(tmp_path, monkeypatch, caps
     assert "会话可能未释放" in err and "Device Farm" in err and "AgentCore" in err
 
 
-def test_interrupt_prompts_by_backend_and_level():
-    """两级提示按后端措辞：本机说宽限秒数与「立即结束 worker」；云端说宽限由部署配置决定、再次中断只重发停止请求；第二级都指向控制台。"""
-    local1 = m._interrupt_prompt(1, cloud=False, grace=63.5)
-    assert "释放宽限为 63.5 秒" in local1 and "再按一次 Ctrl-C" in local1 and "继续计费" in local1
-    cloud1 = m._interrupt_prompt(1, cloud=True, grace=63.5)
-    assert "部署配置" in cloud1 and "63.5" not in cloud1 and "重发停止请求" in cloud1 and "继续计费" in cloud1
-    local2 = m._interrupt_prompt(2, cloud=False, grace=63.5)
-    assert local2.startswith("再次收到中断信号，立即结束 worker") and "Device Farm" in local2 and "AgentCore" in local2
-    cloud2 = m._interrupt_prompt(2, cloud=True, grace=63.5)
-    assert "重发云端停止请求" in cloud2 and "立即结束" not in cloud2 and "Device Farm" in cloud2
+def test_interrupt_prompts_by_level():
+    """两级提示：首次说宽限秒数与「再按一次 Ctrl-C 会立即结束 worker」，第二级说立即结束 worker 并指向控制台核对两类会话。"""
+    first = m._interrupt_prompt(1, grace=63.5)
+    assert "释放宽限为 63.5 秒" in first and "再按一次 Ctrl-C" in first and "继续计费" in first
+    second = m._interrupt_prompt(2, grace=63.5)
+    assert second.startswith("再次收到中断信号，立即结束 worker") and "Device Farm" in second and "AgentCore" in second
 
 
 # ---- 零 scenario 批（ADR 0041 决策一）----

@@ -276,7 +276,7 @@ class Provider:
         parser.add_argument(
             "--prefix", default=None, metavar="P",
             help=f"资源名前缀（默认 gherkai-，或 AWS_RESOURCE_PREFIX；至多 {names.prefix_max_len()} 个字符）；"
-                 "须与 run/submit 的 --prefix 一致",
+                 "须与 submit 等云端命令的 --prefix 一致",
         )
         parser.add_argument(
             "--vpc", default=None, type=_vpc_flag, metavar="取值",
@@ -410,7 +410,7 @@ class Provider:
         （argparse 的经典坑）。SUPPRESS 表示子层没给就不产出这个属性、父层的值自然留住，两处给法都成立。
         """
         parser.add_argument("--prefix", default=argparse.SUPPRESS, metavar="P",
-                            help="资源名前缀（须与 `gherkai deploy` / run/submit 的 --prefix 一致）")
+                            help="资源名前缀（须与 `gherkai deploy` / submit 等云端命令的 --prefix 一致）")
         parser.add_argument("--region", default=argparse.SUPPRESS, metavar="R", help="AWS region")
         parser.add_argument("--profile", default=argparse.SUPPRESS, metavar="P", help="AWS profile")
 
@@ -1073,8 +1073,8 @@ class Provider:
     @staticmethod
     def _resolve_target(args):
         """prefix / region / profile 在选项、环境变量、默认值三层走与产品本体**同一条解析链**
-        （`compose.resolve_cloud_target`，ADR 0016 决策 C / 0033 两层命名），这三层上部署侧与 run/submit 侧的解析
-        结果相同。配置文件层只在运行侧生效、部署命令不读（ADR 0053 决策 1）：项目在配置文件里定了 prefix（或
+        （`compose.resolve_cloud_target`，ADR 0016 决策 C / 0033 两层命名），这三层上部署侧与 submit 等云端命令一侧的
+        解析结果相同。配置文件层只在运行侧生效、部署命令不读（ADR 0053 决策 1）：项目在配置文件里定了 prefix（或
         region / profile）时，两侧一致要靠部署方用对应选项或环境变量（如 `--prefix` / `AWS_RESOURCE_PREFIX`）
         显式给出同一值。惰性 import：`--help` 不该为此拉起 core。"""
         from gherkai_runtime import compose

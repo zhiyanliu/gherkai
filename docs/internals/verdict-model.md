@@ -2,7 +2,7 @@
 
 > 本文讲**判定如何被计算**（机制），不讨论为什么这样设计：设计决策与理由在各 ADR，本文只给指针；与代码或 ADR 不一致时以它们为准。一个 run 的「结论」要经过四层归约、两根正交的轴、七个状态，以及各命令语义不同的退出码。单个 ADR 各只覆盖其中一片（0014 投票、0031 状态与 severity、0034 脱离后的退出码等），本文是这些切片合成的全景视图。
 
-姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、四种组合的推进链见[执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件**见 [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法见 [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发见 [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶见 [cloud-backend-carriers](./cloud-backend-carriers.md)。
+姊妹页分工，本文不越界：worker 如何被启动、事件如何送到 core、超时计时由谁负责、三种组合的推进链见[执行与推进模型导览](./execution-and-reconciliation.md)；`status` / `error_type` / `votes` 在 `--json` 里的**字段名、类型、出现条件**见 [CLI `--json` 字段契约](./cli-json-contract.md)（本文不重复它的表）；每步证据的读法见 [artifacts-and-evidence](./artifacts-and-evidence.md)；确定性 step 的写法与派发见 [deterministic-step-lifecycle](./deterministic-step-lifecycle.md)；判定与运行态落在哪张表、哪个桶见 [cloud-backend-carriers](./cloud-backend-carriers.md)。
 
 ## 1. 四层归约：票 → step → scenario → job → run
 

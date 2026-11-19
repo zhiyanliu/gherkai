@@ -29,10 +29,12 @@ SCHEDULE_NAME_MAX_LEN = 64
 # task-def / container：按 job.engine 拼 `{prefix}{engine}-worker`（对称 EngineResolver 按 engine 选）。
 ENGINES = ("novaact", "midscene")
 
-# 后端 SSM 参数的相对键（全路径为 `ssm_path(prefix, 键)`）。
+# 后端 SSM 参数的相对键（全路径为 `ssm_path(prefix, 键)`；参数全集与各自的写者见 ADR 0038「SSM 参数与命名真源」）。
 # 调用点一律引常量、不写裸字面量——推送方/解析方/IaC/Lambda 拼的必须是同一个键。
 BACKEND_VERSION_KEY = "version"        # 后端版本戳（stack 资源随部署事务写；提交侧 skew 比对读）
 DEVICE_FARM_PROJECT_KEY = "device-farm-project"  # 云端 Device Farm 项目 ARN（deploy 找回或建立后写，ADR 0051 决策 10；提交侧填设备请求时读）
+VPC_KEY = "vpc"                      # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）
+WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
 
 # 安装包在产物桶里的布局与保留承诺（ADR 0051 决策 9）：键前缀、对象标签（部署侧按它配生命周期规则）、过期天数 E 与「已提交 run 引用的对象
 # 至少保留」天数 R；上传侧的复用窗口是 E 减 R。IaC 与上传侧共用这一处定义，改一处两侧同变。
@@ -40,10 +42,6 @@ APP_OBJECT_PREFIX = "apps/"
 APP_OBJECT_TAG = "gherkai=app"       # S3 Tagging 的查询串写法（k=v）
 APP_OBJECT_EXPIRE_DAYS = 14
 APP_OBJECT_RETAIN_DAYS = 7
-SUBNETS_KEY = "subnets"                # worker 子网 ID 列表
-SECURITY_GROUPS_KEY = "security-groups"  # worker 安全组 ID
-VPC_KEY = "vpc"                       # 生效的 VPC 取值（部署方三态比对读，ADR 0037 决策 6）
-WORKER_IMAGE_ROOT_KEY = "worker-image"  # `worker-image/<engine>/<tag>` 映射族的根（按路径列举时用；单条键走 worker_image_key）
 
 # 云端 Device Farm 项目（ADR 0051 决策 10、ADR 0033 资源清单第 11 条）：deploy 按项目名找回或建立，stack 校验 context 里的 ARN 并
 # 按它给 Midscene task role 授权，提交侧与 doctor 读 DEVICE_FARM_PROJECT_KEY。几处都引这里的常量与函数，调用点不写裸字面量。
@@ -102,8 +100,8 @@ def prefix_max_len() -> int:
 
 
 def ssm_path(prefix: str, key: str) -> str:
-    """`/{prefix}backend/<key>`：本部署**全部** SSM 参数的路径构造单点（网络 subnets/security-groups、
-    version/vpc、device-farm-project、worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`）。
+    """`/{prefix}backend/<key>`：本部署**全部** SSM 参数的路径构造单点（version/vpc、device-farm-project、
+    worker-template/worker-image/worker-default 皆经此；IAM 资源域按同一形态拼 `*`；参数全集见 ADR 0038「SSM 参数与命名真源」）。
     cli 已知 prefix 直接拼路径读、无循环依赖（ADR 0033）。"""
     return f"/{prefix}backend/{key}"
 

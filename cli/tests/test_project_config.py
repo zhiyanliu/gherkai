@@ -24,7 +24,7 @@ PER_CALL = {"--scope", "--tags", "--scenario", "--step", "--json", "--quiet", "-
             "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config"}
 COMMON = {"--default-engine", "--assertion-votes", "--max-concurrency", "--default-job-timeout", "--grace", "--expose-local",
           "--tunnel", "--tunnel-ttl", "--report-dir", "--steps-dir", "--backend", "--region", "--profile"}
-CLOUD = {"--prefix", "--ddb-table", "--s3-bucket", "--events-table", "--cluster", "--subnet", "--security-group", "--worker-variant"}
+CLOUD = {"--prefix", "--ddb-table", "--s3-bucket", "--worker-variant"}
 DEVICE = {"--android-device-arn": ("devices.android", "arn"), "--ios-device-arn": ("devices.ios", "arn"),
           "--device-farm-project-arn": ("devices", "project-arn"), "--app-bucket": ("devices", "app-bucket")}
 
@@ -123,6 +123,11 @@ def test_explicit_missing_config_exits_2_before_anything_else(tmp_path, monkeypa
     ("[common]\nmax-concurrency = '4'\n", "应为整数"),                      # 数字选项不收文本：TOML 里 "4" 是文本
     ("[common]\ndefault-job-timeout = 1" + "0" * 400 + "\n", "不是可接受的数字"),  # 自定义校验吞不下的数：不带解释器原文
     ("[common]\ntunnel-ttl = 'x'\n", "应为数字"),
+    # 事件表、cluster、子网与安全组不是 [cloud] 的键，写了即未知键：推进器的这几项取自部署注入的环境变量（ADR 0016 决策 C）
+    ("[cloud]\nevents-table = 'x'\n", "events-table"),
+    ("[cloud]\ncluster = 'x'\n", "cluster"),
+    ("[cloud]\nsubnet = ['subnet-1']\n", "subnet"),
+    ("[cloud]\nsecurity-group = ['sg-1']\n", "security-group"),
 ])
 def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch, capsys, body, needle):
     monkeypatch.chdir(tmp_path)
@@ -236,16 +241,17 @@ _GRACE_NOTICE = "[common] grace 本次未生效"
 
 @pytest.mark.parametrize("argv, body, applied, notice", [
     (["run", "F"], "[common]\ngrace = 300\n", 300.0, False),                                     # 本机后端照常生效
-    (["run", "F", "--backend", "cloud"], "[common]\ngrace = 300\n", None, True),                 # 云端：跳过、只提示
-    (["run", "F"], "[common]\nbackend = 'cloud'\ngrace = 300\n", None, True),                    # 后端由配置给出同样按云端处理
-    (["run", "F", "--backend", "cloud"], "[common]\ngrace = 'abc'\n", None, True),               # 用不到的值不做校验、不拦
+    (["run", "F", "--backend", "cloud"], "[common]\ngrace = 300\n", None, False),                # 云端：跳过；run 由入口以退出码 2 结束，不另提示
+    (["run", "F"], "[common]\nbackend = 'cloud'\ngrace = 300\n", None, False),                   # 后端由配置给出同样按云端处理
     (["submit", "F", "--backend", "cloud"], "[common]\ngrace = 300\n", None, True),              # submit 没有 --grace，云端照样提示
+    (["submit", "F", "--backend", "cloud"], "[common]\ngrace = 'abc'\n", None, True),            # 用不到的值不做校验、不拦
     (["submit", "F"], "[common]\ngrace = 300\n", None, False),                                    # 本机提交：对当前命令不适用，静默忽略
-    (["status", "r", "--backend", "cloud"], "[common]\ngrace = 300\n", None, False),             # 只在运行与提交两个命令上提示
+    (["status", "r", "--backend", "cloud"], "[common]\ngrace = 300\n", None, False),             # 只在提交命令上提示
 ])
 def test_config_grace_only_applies_to_local_backend(tmp_path, monkeypatch, capsys, argv, body, applied, notice):
-    """[common] grace 只对本机后端起作用：--backend cloud 下配置层跳过、不写进 args，run / submit 上提示一句，
-    不以退出码 2 结束；本机后端照常取文件里的值。"""
+    """[common] grace 只对本机后端起作用：--backend cloud 下配置层跳过、不写进 args、不做校验，submit 上提示一句
+    （ADR 0053 决策 3「只对本机后端起作用的 [common] 键」条）；本机后端照常取文件里的值。run 给出云端后端时由入口以退出码 2 结束、
+    指向 submit（同决策「[common] 的 backend 设为 cloud 时」条），配置层不为它提示。"""
     monkeypatch.chdir(tmp_path)
     _toml(tmp_path, body)
     parser = m._build_parser()
@@ -259,31 +265,36 @@ def test_config_grace_only_applies_to_local_backend(tmp_path, monkeypatch, capsy
         assert "只对本机运行起作用" in err and "gherkai deploy --stop-timeout" in err and str(tmp_path / "gherkai.toml") in err
 
 
-def test_config_grace_does_not_block_cloud_run_or_submit(tmp_path, monkeypatch, capsys):
-    """配置了 [common] grace 又给 --backend cloud：run 与 submit 都照常完成（退出码不是 2），开始前各打一行提示；run 的停止宽限
-    回落内建默认，文件里的值不进入 grace 校验。命令行上显式给 --grace 仍以退出码 2 结束，见 test_backend_cloud。"""
+def test_config_backend_cloud_makes_run_exit_2_and_leaves_cloud_submit_unblocked(tmp_path, monkeypatch, capsys):
+    """配置文件 [common] backend 设为 cloud（ADR 0053 决策 3「[common] 的 backend 设为 cloud 时」条；ADR 0016 决策 A）：run 与命令行给出
+    --backend cloud 时相同，以退出码 2 结束并指向 submit，说明点名配置文件与键、另说怎样在本机执行；一次云端调用都不发、不落库，
+    文件里的 grace 也不为 run 提示。给 --backend local 即照常在本机执行（选项优先于配置文件）。同一份文件下云端 submit 照常提交，
+    文件里的 grace 只提示一句、不拦。"""
     from test_backend_cloud import _patch_cloud_handles
 
     monkeypatch.chdir(tmp_path)
     for var in ("AWS_DDB_TABLE", "AWS_S3_BUCKET", "AWS_RESOURCE_PREFIX"):
         monkeypatch.delenv(var, raising=False)
-    _toml(tmp_path, "[common]\ngrace = 300\n")
-    _patch_cloud_handles(monkeypatch, [])
-    box, inner = {}, _fake_schedule_factory()
-
-    def capturing(run_meta, engines, sink, opts=None, **kw):
-        box["opts"] = opts
-        return inner(run_meta, engines, sink, opts=opts, **kw)
-
-    monkeypatch.setattr(m, "schedule", capturing)
+    cfg = _toml(tmp_path, "[common]\nbackend = 'cloud'\ngrace = 300\n")
+    record: list = []
+    _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
+    called = []
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: called.append(1))
     feat = str(_feature(tmp_path))
-    assert m.main(["run", feat, "--backend", "cloud", "--region", "us-east-1", "--quiet"]) == 0
+    reports = tmp_path / "reports"
+    assert m.main(["run", feat, "--report-dir", str(reports)]) == 2
+    err = capsys.readouterr().err
+    assert "gherkai run 只在本机执行" in err and "gherkai submit --backend cloud" in err
+    assert f"配置文件 {cfg.resolve()} 的 [common] backend" in err and "--backend local" in err
+    assert _GRACE_NOTICE not in err
+    assert called == [] and record == [] and preflight_calls == [] and not reports.exists()
+
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    assert m.main(["run", feat, "--backend", "local", "--report-dir", str(reports), "--quiet"]) == 0
+    capsys.readouterr()
+    assert m.main(["submit", feat, "--region", "us-east-1"]) == 0   # 后端由同一份配置给出：云端
     err = capsys.readouterr().err
     assert _GRACE_NOTICE in err and "gherkai deploy --stop-timeout" in err
-    assert "--grace 在云端不生效" not in err   # 不是对命令行选项的拒绝
-    assert box["opts"].grace_period_s == m.ScheduleOpts.grace_period_s and box["opts"].min_grace_s == 0.0
-    assert m.main(["submit", feat, "--backend", "cloud", "--region", "us-east-1"]) == 0
-    assert _GRACE_NOTICE in capsys.readouterr().err
 
 
 def test_report_dir_relative_to_config_dir_only_for_local_backend(tmp_path, monkeypatch):
@@ -878,24 +889,6 @@ def test_first_upload_failure_exits_2_with_product_message(tmp_path, monkeypatch
     assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--no-report"]) == 2
     err = capsys.readouterr().err
     assert "上传安装包" in err and "失败" in err and "NoSuchBucket" in err and "Traceback" not in err
-
-
-def test_cloud_run_uploads_installer_into_artifacts_bucket(tmp_path, monkeypatch, capsys):
-    from test_backend_cloud import _patch_cloud_handles
-
-    monkeypatch.chdir(tmp_path)
-    _android_env(monkeypatch)
-    monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
-    _app_project(tmp_path)
-    record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-    s3 = _UploadS3()
-    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
-    monkeypatch.setattr(compose, "read_device_farm_project", lambda **kw: "arn:aws:devicefarm:us-west-2:333333333333:project:cloud")
-    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
-    assert m.main(["run", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--backend", "cloud", "--region", "us-east-1", "--prefix", "p-",
-                   "--quiet", "--no-report"]) == 0
-    assert len(s3.uploads) == 1 and s3.uploads[0][1] == "p-artifacts" and s3.uploads[0][3] == {"Tagging": "gherkai=app"}
 
 
 def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch):

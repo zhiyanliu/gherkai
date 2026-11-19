@@ -717,8 +717,9 @@ def test_on_job_complete_exception_stops_inflight_workers_before_raise():
 
 
 def test_on_event_exception_propagates_as_is_without_verdict_and_stops_workers():
-    """on_event（实时落库）在运行期抛异常时冒泡出 schedule()，类型与对象都不变（组合根据此以退出码 1 报运行期
-    落库失败）；它不进「worker 异常」分支，故不给这个 job 产生 engine_error 判定；冒泡前本 worker 与其余运行中的 worker 都收到停止请求。"""
+    """on_event（实时落库）在运行期抛异常时冒泡出 schedule()，类型与对象都不变（组合根据此以非零退出码报运行期落库失败，ADR 0030
+    决定七「非零（run 已开始执行，只有本机 run）」条；冒泡的方式另见 ADR 0030 决定三）；它不进「worker 异常」分支，故不给这个 job
+    产生 engine_error 判定；冒泡前本 worker 与其余运行中的 worker 都收到停止请求。"""
 
     class _StoreDown(Exception):
         pass
@@ -1214,7 +1215,7 @@ def test_drain_bound_applies_before_deadline_under_fail_fast():
     assert (v.status, v.error_type) == (Status.ABORTED, None)
 
 
-# ---- 停止后等待预算 stop_bound_s：排空上界取首次停止请求时刻加等待预算、再加余量 ----
+# ---- 停止后的等待预算就是 grace：排空上界取首次停止请求时刻加 grace、再加余量（ADR 0034 机制二「停止后继续有界消费完整事件流」条）----
 
 class _StopWindowTime(_FakeTime):
     """停止前每次读单调时钟前进 1 ms；发出停止请求后时间停在请求时刻加 window 秒（两个读法都停在那里）。越过截止时刻由 `_JumpSink` 触发。
@@ -1238,21 +1239,19 @@ class _StopWindowTime(_FakeTime):
             self.frozen = self.t + self.window
 
 
-@pytest.mark.parametrize("grace, stop_bound, eof_in_bound", [
-    (1.0, None, False),  # 未给等待预算：取 grace，排空上界为请求后 1 + 5 = 6 秒，20 秒处到达的 EOF 在它之外（原行为）
-    (1.0, 30.0, True),  # 等待预算 30 秒：排空上界为请求后 35 秒，20 秒处的 EOF 在它之内
-    (30.0, None, True),  # 未给时取 grace：grace 30 秒同样等得到
-    (30.0, 1.0, False),  # 给了值就取它、不与 grace 取较大者：排空上界为请求后 6 秒
+@pytest.mark.parametrize("grace, eof_in_bound", [
+    (1.0, False),  # 排空上界为请求后 1 + 5 = 6 秒，20 秒处到达的 EOF 在它之外
+    (30.0, True),  # 排空上界为请求后 35 秒，20 秒处的 EOF 在它之内
 ])
-def test_stop_bound_sets_drain_window_for_eof_after_hurry_exit(grace, stop_bound, eof_in_bound):
+def test_grace_sets_drain_window_for_eof_after_hurry_exit(grace, eof_in_bound):
     """内容完整后 deadline 才到（催收尾）、EOF 在停止请求后 20 秒到达：在排空上界之内即干净退出、判 PASSED；在上界之外则退出信息
-    未知、内容完整被回落，按首次仲裁判 ERROR timeout——云端只取 grace 时同一组事实会与无状态路径的 PASSED 不一致。"""
+    未知、内容完整被回落，按首次仲裁判 ERROR timeout。"""
     scope = "p"
     clock = _StopWindowTime(window=20.0)
     engine = FakeEngine({scope: _passing_events(scope, "p:0")}, tail_after_stop={scope: []}, tail_delay_s=0.2,
                         on_stop=clock.on_stop)  # 发完事件后活着等停，收到停止请求后过一会儿才 EOF
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScopeDone),
-                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace, stop_bound_s=stop_bound))
+                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace))
     jr = res.jobs[0]
     assert engine.handles[scope].stopped and clock.frozen is not None  # 确实走了催收尾、时钟停在请求后 20 秒
     expected = (Status.PASSED, None) if eof_in_bound else (Status.ERROR, "timeout")
@@ -1261,11 +1260,11 @@ def test_stop_bound_sets_drain_window_for_eof_after_hurry_exit(grace, stop_bound
     assert len(engine.handles[scope].stop_graces) == (1 if eof_in_bound else 2)
 
 
-@pytest.mark.parametrize("stop_bound, closed_in_bound", [(None, False), (30.0, True)])
-def test_stop_bound_lets_late_session_closed_be_reduced(stop_bound, closed_in_bound):
-    """停止决定落在 scope 中途（超时）、confirmed 的 session_closed 在停止请求后 20 秒到达：在排空上界之内即被归约，未确认集为空、
-    job message 不带释放提示；未给等待预算（grace 1 秒，排空上界为请求后 6 秒）时它被丢弃，message 多出「未能确认停止」的提示。
-    两种情形的判定都是 ERROR timeout：停止原因在作出停止决定那一刻已落定，收尾到没到只影响会话记录与提示。"""
+@pytest.mark.parametrize("grace, closed_in_bound", [(1.0, False), (30.0, True)])
+def test_grace_lets_late_session_closed_be_reduced(grace, closed_in_bound):
+    """停止决定落在 scope 中途（超时）、confirmed 的 session_closed 在停止请求后 20 秒到达：在排空上界之内（grace 30 秒，上界为请求后
+    35 秒）即被归约，未确认集为空、job message 不带释放提示；grace 1 秒（排空上界为请求后 6 秒）时它被丢弃，message 多出「未能确认停止」
+    的提示。两种情形的判定都是 ERROR timeout：停止原因在作出停止决定那一刻已落定，收尾到没到只影响会话记录与提示。"""
     from gherkai_core.model import SessionClosed, SessionOpened
 
     scope = "n"
@@ -1275,7 +1274,7 @@ def test_stop_bound_lets_late_session_closed_be_reduced(stop_bound, closed_in_bo
     tail = [SessionClosed(scope_id=scope, name="s-1", release="confirmed", session_id="s-1")]
     engine = FakeEngine({scope: events}, tail_after_stop={scope: tail}, tail_delay_s=0.2, on_stop=clock.on_stop)
     res = schedule(_rm([_job(scope, timeout_s=5.0)]), FakeResolver(engine), _JumpSink(clock, ScenarioStarted),
-                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=1.0, stop_bound_s=stop_bound))
+                   opts=clock.opts(max_concurrency=1, heartbeat_interval_s=0.02, grace_period_s=grace))
     jr = res.jobs[0]
     assert (jr.status, jr.error_type) == (Status.ERROR, "timeout") and clock.frozen is not None
     if closed_in_bound:
@@ -1286,17 +1285,8 @@ def test_stop_bound_lets_late_session_closed_be_reduced(stop_bound, closed_in_bo
     assert len(engine.handles[scope].stop_graces) == (1 if closed_in_bound else 2)  # 到点退出才补发
 
 
-@pytest.mark.parametrize("bad", [float("inf"), float("nan"), 0.0, -1.0])
-def test_stop_bound_must_be_finite_positive(bad):
-    # 等待预算给了值须为有限正数（inf 会让排空永不到点），起任何 worker 前就拒，与 grace 同一处校验
-    engine = FakeEngine({"a": _passing_events("a", "a:0")})
-    with pytest.raises(ValueError, match="停止后等待预算"):
-        schedule(_rm([_job("a")]), FakeResolver(engine), CollectSink(), opts=ScheduleOpts(stop_bound_s=bad))
-    assert "a" not in engine.handles
-
-
 # ---- 终结处的补发停止请求（ADR 0034 机制二「停止调用自身也有界」条）：只在事件流没有正常结束时补发 ----
-# 排空上界到点退出与普通异常两种情形各有覆盖：上面两组等待预算测试的上界之外分支、test_generic_exception_still_stops_worker_*。
+# 排空上界到点退出与普通异常两种情形各有覆盖：上面两组排空上界测试的上界之外分支、test_generic_exception_still_stops_worker_*。
 
 @pytest.mark.parametrize("exit_kind", ["eof", "exit_code"])
 @pytest.mark.parametrize("trigger", ["deadline", "abort"])
@@ -1539,25 +1529,21 @@ def test_sigkill_negative_exit_code_is_error_not_clean():
     assert (jr.status, jr.error_type) == (Status.ERROR, "engine_error") and "退出码 -9" in jr.message
 
 
-def test_worker_exit_reason_field_reaches_job_message_but_exception_text_does_not():
-    """WorkerExitError 上有类型的 reason 作为退出原因交给终结函数（同步云端路径取不到退出码时，
-    adapter 落平台侧哨兵 255 并在 reason 带 ECS 归因）；异常消息文本不当归因，不带 reason 时 job message 里也不出现它。"""
+def test_worker_exit_error_text_does_not_reach_job_message():
+    """终结函数只看 WorkerExitError 上有类型的退出码：异常消息文本不当归因、不进 job message，消息由终结函数按码给出。"""
     from gherkai_core.errors import WorkerExitError
-    from gherkai_core.project import PLATFORM_FAILED_EXIT
 
-    def with_reason(job):
-        raise WorkerExitError(PLATFORM_FAILED_EXIT, "异常消息文本", reason="TaskFailedToStart: CannotPullContainerError: not found")
+    def exits(code):
+        def gen(job):
+            raise WorkerExitError(code, "异常消息文本")
+        return gen
 
-    def without_reason(job):
-        raise WorkerExitError(PLATFORM_FAILED_EXIT, "异常消息文本")
-
-    res = schedule(_rm([_job("r"), _job("n")]), FakeResolver(FakeEngine({"r": with_reason, "n": without_reason})), CollectSink(),
+    res = schedule(_rm([_job("s"), _job("n")]), FakeResolver(FakeEngine({"s": exits(255), "n": exits(3)})), CollectSink(),
                    opts=ScheduleOpts(max_concurrency=2))
     by = {jr.scope_id: jr for jr in res.jobs}
-    assert (by["r"].status, by["r"].error_type) == (Status.ERROR, "engine_error")
-    assert "退出码 255" in by["r"].message and by["r"].message.endswith("：TaskFailedToStart: CannotPullContainerError: not found")
-    assert (by["n"].status, by["n"].error_type) == (Status.ERROR, "engine_error")
-    assert "退出码 255" in by["n"].message and "异常消息文本" not in by["n"].message
+    for sid, code in (("s", 255), ("n", 3)):
+        assert (by[sid].status, by[sid].error_type) == (Status.ERROR, "engine_error")
+        assert f"退出码 {code}" in by[sid].message and "异常消息文本" not in by[sid].message
 
 
 def test_scope_done_after_nonzero_exit_is_error_and_zero_scenario_scope_done_is_error():

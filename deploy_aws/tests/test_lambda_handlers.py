@@ -85,7 +85,7 @@ def test_extract_timed_out_from_stopped_reason_sentinel():
     detail["stoppedReason"] = f"{reconciler.TIMEOUT_STOP_SENTINEL}: scope exceeded 300s budget"
     _r, _s, exit_code, timed_out, _reason, _at = exit_observer._extract(detail)
     assert exit_code == 143 and timed_out is True
-    # 普通 stop（如同步路径的 "core requested stop"）不含哨兵 → False
+    # reason 不含哨兵的 StopTask（如人工停止）→ False
     detail["stoppedReason"] = "core requested stop"
     assert exit_observer._extract(detail)[3] is False
 
@@ -1239,6 +1239,63 @@ def test_build_uses_definition_worker_task_defs_verbatim(cloud_env):
     _seed_run(cloud_env["runs"], detached=True)
     engines = reconciler._build("run-1")[3]._resolver("novaact")
     assert engines._task_def == _WORKER_REV
+
+
+def test_build_hands_the_deployed_fargate_config_to_the_worker_task(cloud_env, monkeypatch):
+    """推进器是起 worker task 的唯一装配方（ADR 0016 决策 C）：IaC 注入的 cluster、events 表、桶、报告前缀、子网、安全组、
+    assignPublicIp 与 region 经 `_build` 原样到达 RunTask 与 worker 的环境变量，job 对象落在 RunTask 指给 worker 的位置。
+
+    经 launcher 起一次 job、看 RunTask 收到什么（ECS 换成记录调用的假 client，S3 用 moto）。子网给两个，顺带验逗号拆分；
+    ASSIGN_PUBLIC_IP 与 REPORT_DIR 给出不同于缺省的值，漏读环境变量即红。"""
+    import json
+
+    import boto3
+
+    class _RecordingEcs:
+        def __init__(self) -> None:
+            self.run_task_calls: list[dict] = []
+
+        def run_task(self, **kw):
+            self.run_task_calls.append(kw)
+            return {"tasks": [{"taskArn": "arn:aws:ecs:us-east-1:000000000000:task/gherkai-cluster/t1"}], "failures": []}
+
+    ecs = _RecordingEcs()
+    ecs_regions: list = []
+    real_client = boto3.client
+
+    def _client(service, *a, **kw):
+        if service == "ecs":
+            ecs_regions.append(kw.get("region_name"))
+            return ecs
+        return real_client(service, *a, **kw)
+
+    monkeypatch.setattr(boto3, "client", _client)
+    monkeypatch.setenv("SUBNETS", "subnet-1,subnet-2")
+    monkeypatch.setenv("ASSIGN_PUBLIC_IP", "DISABLED")
+    monkeypatch.setenv("REPORT_DIR", "team/reports")
+    _seed_run(cloud_env["runs"], detached=True)
+
+    built = reconciler._build("run-1")
+    meta, launcher = built[0], built[3]
+    launcher.launch(meta.jobs[0], cutoff_at=_dt.datetime(2999, 1, 1, tzinfo=_dt.timezone.utc))
+
+    assert ecs_regions == ["us-east-1"]
+    (call,) = ecs.run_task_calls
+    assert call["cluster"] == "gherkai-cluster"
+    assert call["taskDefinition"] == _WORKER_REV
+    assert call["networkConfiguration"] == {"awsvpcConfiguration": {
+        "subnets": ["subnet-1", "subnet-2"], "securityGroups": ["sg-1"], "assignPublicIp": "DISABLED"}}
+    (override,) = call["overrides"]["containerOverrides"]
+    env = {e["name"]: e["value"] for e in override["environment"]}
+    assert env["EVENTS_DDB_TABLE"] == _EVENTS_TABLE
+    assert env["RUN_ID"] == "run-1" and env["SCOPE_ID"] == "a"
+    assert env["AWS_REGION"] == "us-east-1"
+    assert (env["ARTIFACT_S3_BUCKET"], env["ARTIFACT_S3_PREFIX"]) == (_BUCKET, "team/reports/run-1/")
+    assert env["JOB_S3_URI"] == f"s3://{_BUCKET}/team/reports/run-1/jobs-in/a.json"
+    # RunTask 指给 worker 的 job 对象确实写在那里（worker 只按这个地址读）
+    body = real_client("s3", region_name="us-east-1").get_object(
+        Bucket=_BUCKET, Key="team/reports/run-1/jobs-in/a.json")["Body"].read().decode("utf-8")
+    assert json.loads(body)["scope"]["id"] == "a"
 
 
 def test_build_reads_session_warmup_url_back_into_worker_env(cloud_env):

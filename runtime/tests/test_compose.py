@@ -1,7 +1,6 @@
 """compose（组合根逻辑）单测：不起任何子进程、零费用。"""
 from __future__ import annotations
 
-import json
 import sys
 from pathlib import Path
 
@@ -985,7 +984,7 @@ def test_bad_nova_act_timeout_only_disables_nova_fargate_leg(monkeypatch, fresh_
     engines = compose.build_fargate_engines(
         run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
         network_config={"subnets": ["subnet-x"]}, worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
-        region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+        region="us-west-2", ecs=object(), s3=object())
     assert engines["midscene"] == "fake" and len(captured) == 1
     assert "NOVA_ACT_TIMEOUT_S" not in captured[0]["extra_env"]
     with pytest.raises(ValueError, match="NOVA_ACT_TIMEOUT_S"):
@@ -1074,9 +1073,9 @@ def test_task_def_and_container_name():
 
 
 def test_ssm_path_contains_prefix():
-    # SSM 路径含 prefix（cli 已知 prefix 拼路径读 subnet/sg，无循环）
-    assert names.ssm_path("prod-", "subnets") == "/prod-backend/subnets"
-    assert names.ssm_path("gherkai-", "security-groups") == "/gherkai-backend/security-groups"
+    # SSM 路径含 prefix：提交侧已知 prefix 直接拼路径读版本戳、worker variant 映射等，无循环依赖（ADR 0033「两层命名」节）
+    assert names.ssm_path("prod-", names.BACKEND_VERSION_KEY) == "/prod-backend/version"
+    assert names.ssm_path("gherkai-", names.WORKER_DEFAULT_KEY) == "/gherkai-backend/worker-default"
 
 
 # ---- resolve_cloud_target：入口前端的 flag/env → 各资源终名 + region/profile（ADR 0033 / 0016 决策 C）----
@@ -1117,12 +1116,19 @@ def test_resolve_cloud_target_flags_win_over_env(monkeypatch):
     monkeypatch.setenv("AWS_PROFILE", "env-prof")
     monkeypatch.setenv("AWS_REGION", "eu-west-1")
     t = compose.resolve_cloud_target(prefix="prod-", runs_table="flag-runs", bucket="flag-bucket",
-                                     events_table="flag-events", cluster="flag-cluster",
                                      profile="flag-prof", region="ap-south-1")
     assert (t.prefix, t.profile, t.region) == ("prod-", "flag-prof", "ap-south-1")
-    assert (t.runs_table, t.bucket, t.events_table, t.cluster) == (
-        "flag-runs", "flag-bucket", "flag-events", "flag-cluster")
-    assert t.kicker_lambda == "prod-kicker"  # 单资源覆盖不影响别的资源仍按 prefix 推导
+    assert (t.runs_table, t.bucket) == ("flag-runs", "flag-bucket")
+    # 单资源覆盖不影响别的资源仍按 prefix 推导；events 表与 cluster 没有覆盖形参（推进器用的值由 IaC 注入，ADR 0016 决策 C）
+    assert (t.events_table, t.cluster, t.kicker_lambda) == ("prod-events", "prod-cluster", "prod-kicker")
+
+
+def test_resolve_cloud_target_takes_no_events_table_or_cluster_override():
+    # 命令行不带 events 表与 cluster 的单项覆盖（ADR 0016 决策 C）：形参不存在，传了即 TypeError、不被静默忽略
+    with pytest.raises(TypeError):
+        compose.resolve_cloud_target(prefix="prod-", region="us-west-2", events_table="x")
+    with pytest.raises(TypeError):
+        compose.resolve_cloud_target(prefix="prod-", region="us-west-2", cluster="x")
 
 
 def test_resolve_cloud_target_default_prefix_when_nothing_given(monkeypatch):
@@ -1133,103 +1139,11 @@ def test_resolve_cloud_target_default_prefix_when_nothing_given(monkeypatch):
     assert t.region is None and t.profile is None  # 真无 → fail-loud，不硬编码 east
 
 
-# ---- prune_empty_dirs（cloud 清本地空壳，ADR 0029）：只删空目录、非空保留 ----
-def test_prune_empty_dirs_removes_empty_tree(tmp_path):
-    # worker 上传后 rmtree 了子目录，run 根只剩空壳（含空中间目录）→ 整个删掉
-    run_dir = tmp_path / "reports" / "rid"
-    (run_dir / "nova-trajectories" / "sess").mkdir(parents=True)  # 全空
-    (run_dir / "midscene-run" / "report").mkdir(parents=True)     # 全空
-    compose.prune_empty_dirs(run_dir)
-    assert not run_dir.exists()  # 空壳整个清掉
-
-
-def test_prune_empty_dirs_keeps_nonempty(tmp_path):
-    # 某个引擎 flush 失败保留了产物（目录非空）→ 该目录及其祖先保留（护栏：不误删产物）
-    run_dir = tmp_path / "reports" / "rid"
-    kept = run_dir / "nova-trajectories" / "sess"
-    kept.mkdir(parents=True)
-    (kept / "act_0.html").write_text("残留产物")           # 非空
-    (run_dir / "midscene-run").mkdir(parents=True)          # 空
-    compose.prune_empty_dirs(run_dir)
-    assert run_dir.exists()                                  # 因含非空子树而保留
-    assert (kept / "act_0.html").exists()                   # 产物没被误删
-    assert not (run_dir / "midscene-run").exists()           # 空的那支仍被清
-
-
-def test_prune_empty_dirs_noop_when_missing(tmp_path):
-    compose.prune_empty_dirs(tmp_path / "nonexistent")  # 不存在 → no-op、不抛
-
-
 def test_is_botocore_error_classifies():
     from botocore.exceptions import ClientError
 
     assert compose.is_botocore_error(ClientError({"Error": {"Code": "X"}}, "Op"))
     assert not compose.is_botocore_error(ValueError("不是云端故障"))
-
-
-# ---- resolve_network：subnet/sg 覆盖 or 读 SSM ----
-def test_resolve_network_explicit_overrides_skip_ssm():
-    # 显式给 subnet/sg → 不读 SSM（ssm 注入一个一调用就抛异常的哨兵，验它没被调）
-    class _BoomSsm:
-        def get_parameter(self, **kw):
-            raise AssertionError("显式给 subnet/sg 时不该读 SSM")
-    net = compose.resolve_network(
-        prefix="prod-", subnets=["subnet-a", "subnet-b"], security_groups=["sg-1"],
-        assign_public_ip="DISABLED", ssm=_BoomSsm(),
-    )
-    assert net == {"subnets": ["subnet-a", "subnet-b"], "securityGroups": ["sg-1"], "assignPublicIp": "DISABLED"}
-
-
-def test_resolve_network_reads_ssm_when_missing():
-    # 未给 subnet/sg → 读含 prefix 的 SSM 路径（CDK 写的生成 ID，逗号分隔 StringList）
-    reads = []
-
-    class _FakeSsm:
-        def get_parameter(self, Name):
-            reads.append(Name)
-            val = "subnet-x,subnet-y" if Name.endswith("subnets") else "sg-z"
-            return {"Parameter": {"Value": val}}
-
-    net = compose.resolve_network(prefix="prod-", subnets=None, security_groups=None, ssm=_FakeSsm())
-    assert net["subnets"] == ["subnet-x", "subnet-y"]
-    assert net["securityGroups"] == ["sg-z"]
-    assert reads == ["/prod-backend/subnets", "/prod-backend/security-groups"]  # 路径含 prefix
-
-
-def test_resolve_network_partial_override_reads_only_missing():
-    # 只给 subnet、不给 sg → 只读 sg 的 SSM（subnet 用显式）
-    reads = []
-
-    class _FakeSsm:
-        def get_parameter(self, Name):
-            reads.append(Name)
-            return {"Parameter": {"Value": "sg-only"}}
-
-    net = compose.resolve_network(prefix="g-", subnets=["subnet-explicit"], security_groups=None, ssm=_FakeSsm())
-    assert net["subnets"] == ["subnet-explicit"]
-    assert net["securityGroups"] == ["sg-only"]
-    assert reads == ["/g-backend/security-groups"]  # 只读缺的那个
-
-
-def test_resolve_network_empty_ssm_fails_fast():
-    # 空值 fail-fast（低频加固）：SSM 参数空（值空串 → split 过滤后 []）→ 就地报错点名路径，
-    # 不把空列表传到 awsvpcConfiguration、拖到 RunTask 才失败。空串 / 纯逗号 两种空形态都拦。
-    import pytest
-
-    class _EmptySsm:
-        def __init__(self, val): self._val = val
-        def get_parameter(self, Name):
-            return {"Parameter": {"Value": self._val}}
-
-    for empty_val in ("", ",", ",,"):  # 空串 / 逗号无值——过滤后都是 []
-        with pytest.raises(ValueError, match="为空"):
-            compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(empty_val))
-    # 错误须点名是哪个 SSM 路径（subnets 先读、先报错）
-    try:
-        compose.resolve_network(prefix="g-", subnets=None, security_groups=None, ssm=_EmptySsm(""))
-        assert False, "应 fail-fast"
-    except ValueError as e:
-        assert "/g-backend/subnets" in str(e)  # 点名路径，便于排障
 
 
 # ---- build_fargate_engines（ADR 0033/0016 决策 A/C + 0038 显式 revision）----
@@ -1247,11 +1161,12 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
             captured.append(kwargs)
 
     monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
+    ecs, s3 = object(), object()
+    network = {"subnets": ["subnet-x"], "securityGroups": ["sg-1"], "assignPublicIp": "ENABLED"}
     engines = compose.build_fargate_engines(
         run_id="rid-1", cluster="prod-cluster", events_table="prod-events",
-        bucket="prod-artifacts", report_dir="runs", network_config={"subnets": ["subnet-x"]},
-        worker_task_defs=_REV, region="us-west-2", profile="myprof",
-        ecs=object(), s3=object(), ddb_events_table=object(),  # 注入句柄免惰性建
+        bucket="prod-artifacts", report_dir="runs", network_config=network,
+        worker_task_defs=_REV, region="us-west-2", ecs=ecs, s3=s3,
     )
     assert set(engines) == {"novaact", "midscene"}
     by_engine = {k["task_definition"]: k for k in captured}
@@ -1261,6 +1176,9 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["container_name"] == "novaact-worker"
     assert nova["run_id"] == "rid-1" and nova["cluster"] == "prod-cluster"
     assert nova["events_table_name"] == "prod-events"
+    assert nova["network_config"] is network       # 推进器从 env 读出的网络配置原样转交
+    # 调用方注入的句柄原样转交、本函数不另建（推进器把同一批句柄分给 store 与 engine）
+    assert nova["ecs_client"] is ecs and nova["s3_client"] is s3
     assert nova["region"] == "us-west-2"          # region 注入（决策 C）
     assert "profile" not in nova                    # **profile 不传 FargateEngine**（正确非对称，决策 C）
     # job_s3 = (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（避与 ResultStore 判定 key 撞，实际运行暴露）
@@ -1311,11 +1229,12 @@ def test_build_cloud_stores_uses_injected_handles_without_building_clients(monke
     monkeypatch.setattr(compose, "_make_ddb_table", _boom)
     monkeypatch.setattr(compose, "_make_s3_client", _boom)
     ddb_table, s3 = object(), object()
-    run_store, result_store, report_store, _mk = compose.build_cloud_stores(
+    stores = compose.build_cloud_stores(
         table="prod-runs", bucket="prod-artifacts", prefix="reports", region="us-west-2",
         ddb_table=ddb_table, s3=s3)
 
-    assert (run_store, result_store, report_store) == ("<run_store>", "<result_store>", "<report_store>")
+    # 只返回三层 store：前台 run 只有本机后端（ADR 0016 决策 A），云端没有 artifacts 落点工厂的使用方
+    assert stores == ("<run_store>", "<result_store>", "<report_store>")
     assert seen["run_store"][0] == (ddb_table,)     # DDB 吃注入的 resource.Table，不另建
     # 三个 S3 件套共享注入的那**一个** client（喂错句柄类型运行时才 AttributeError，ADR 0016），
     # prefix 规范化仍由本函数一处做（"reports" → "reports/"，避粘连 key）
@@ -1509,12 +1428,29 @@ def test_preflight_missing_events_table_names_prefix():
     assert "prod-events" in err and "--prefix='prod-'" in err and "gherkai deploy" in err  # 点名 prefix + 引导
 
 
+def test_preflight_runs_table_is_required_and_always_probed():
+    # 云端后端只有 submit，它建 run，runs 表恒探（ADR 0033「preflight fail-fast」节）：形参必给，缺表即点名
+    with pytest.raises(TypeError):
+        compose.preflight_cloud_resources(
+            prefix="prod-", events_table="prod-events", bucket="prod-artifacts", cluster="prod-cluster",
+            ddb=_FakeDdbClient({"prod-events"}), s3=_FakeS3Client({"prod-artifacts"}),
+            ecs=_FakeEcsClient({"prod-cluster"}))
+    err = compose.preflight_cloud_resources(
+        prefix="prod-", runs_table="prod-runs", events_table="prod-events",
+        bucket="prod-artifacts", cluster="prod-cluster",
+        ddb=_FakeDdbClient({"prod-events"}),  # runs 表缺
+        s3=_FakeS3Client({"prod-artifacts"}),
+        ecs=_FakeEcsClient({"prod-cluster"}),
+    )
+    assert err is not None and "prod-runs" in err and "--prefix='prod-'" in err
+
+
 def test_preflight_missing_task_def_names_prefix():
     # task-def 维度的 prefix 配错（原先漏到 RunTask 才失败、退出码 1 且不点名）→ 现 preflight 点名 fail-fast（ADR 0033）
     err = compose.preflight_cloud_resources(
-        prefix="prod-", events_table="prod-events", bucket="prod-artifacts", cluster="prod-cluster",
-        task_defs=["prod-novaact-worker"],
-        ddb=_FakeDdbClient({"prod-events"}), s3=_FakeS3Client({"prod-artifacts"}),
+        prefix="prod-", runs_table="prod-runs", events_table="prod-events", bucket="prod-artifacts",
+        cluster="prod-cluster", task_defs=["prod-novaact-worker"],
+        ddb=_FakeDdbClient({"prod-runs", "prod-events"}), s3=_FakeS3Client({"prod-artifacts"}),
         ecs=_FakeEcsClient({"prod-cluster"}),  # task-def 集为空 → 缺
     )
     assert err is not None
@@ -1524,9 +1460,9 @@ def test_preflight_missing_task_def_names_prefix():
 def test_preflight_missing_chain_lambda_names_prefix():
     # detached 链三 Lambda 任一缺即提交成功而 run 不按正常的链推进 → 挡在提交前（ADR 0033）
     err = compose.preflight_cloud_resources(
-        prefix="g-", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
+        prefix="g-", runs_table="g-runs", events_table="g-events", bucket="g-artifacts", cluster="g-cluster",
         lambda_fns=["g-kicker", "g-reconciler", "g-exit-observer"],
-        ddb=_FakeDdbClient({"g-events"}), s3=_FakeS3Client({"g-artifacts"}),
+        ddb=_FakeDdbClient({"g-runs", "g-events"}), s3=_FakeS3Client({"g-artifacts"}),
         ecs=_FakeEcsClient({"g-cluster"}),
         lam=_FakeLambdaClient({"g-kicker", "g-exit-observer"}),  # reconciler 缺
     )
@@ -1590,7 +1526,7 @@ def test_preflight_report_dir_ignores_exit_observer_env():
 
 
 def test_preflight_report_dir_not_checked_when_not_passed():
-    # 同步 run 不传 report_dir（也不传 lambda_fns）→ 一致性探针整体不生效，只探存在性
+    # 不传 report_dir（doctor 没给 --report-dir 时）→ 一致性探针整体不生效，只探存在性
     assert _preflight_report_dir(None, env_by_fn={"g-reconciler": {"REPORT_DIR": "whatever"}}) is None
 
 
@@ -1727,67 +1663,10 @@ def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
         "arn:td:7", engine="novaact", ecs=_StopTimeoutEcs([{"name": "other", "stopTimeout": 90}])) is None
 
 
-# ---- 云端同步 run 的停止后等待预算：stopTimeout 随 variant 解析带回 ----
-
-class _VariantAws:
-    """variant 解析要读的三个面（SSM 映射、ECS revision、ECR 镜像）的最小假替身：每个引擎的 revision 都 ACTIVE、镜像都在，
-    task-def 的 containerDefinitions 按引擎给定。只为验 stop_timeout_s 的取法；解析的 miss 分支由 moto 覆盖（test_worker_variant）。"""
-
-    def __init__(self, containers_by_engine: dict[str, list[dict]]):
-        self._containers = containers_by_engine
-        self.describes: list[str] = []
-        outer = self
-
-        class _Ssm:
-            def get_parameter(self, *, Name):
-                engine = next(e for e in outer._containers if f"/{e}/" in Name)
-                return {"Parameter": {"Value": json.dumps({"revision_arn": f"arn:td/{engine}:3", "digest": "sha256:0"})}}
-
-        class _Ecs:
-            def describe_task_definition(self, *, taskDefinition):
-                outer.describes.append(taskDefinition)
-                engine = taskDefinition.split("/")[1].split(":")[0]
-                return {"taskDefinition": {"status": "ACTIVE", "containerDefinitions": outer._containers[engine]}}
-
-        class _Ecr:
-            def describe_images(self, **kw):
-                return {"imageDetails": [{}]}
-
-        self.ssm, self.ecs, self.ecr = _Ssm(), _Ecs(), _Ecr()
-
-    def resolve(self):
-        return compose.resolve_worker_variant(
-            prefix="t-", variant="base", engines=sorted(self._containers), cli_version="1.5.0", backend_version="1.5.0",
-            ssm=self.ssm, ecs=self.ecs, ecr=self.ecr)
-
-
-@pytest.mark.parametrize("containers, expected", [
-    ([{"name": "sidecar", "stopTimeout": 5}, {"name": names.container_name("novaact"), "stopTimeout": 90}], 90),  # 按名认，不取第一个
-    ([{"name": names.container_name("novaact")}], None),  # 该 container 没设 stopTimeout
-    ([{"name": "not-the-worker", "stopTimeout": 60}], None),  # task-def 里找不到该 container
-], ids=["set", "unset", "container-absent"])
-def test_resolve_worker_variant_carries_worker_container_stop_timeout(containers, expected):
-    # 认法与 doctor 比对用的 read_task_def_stop_timeout 同一份；取自校验 revision 仍 ACTIVE 的那次 Describe，不另发调用
-    aws = _VariantAws({"novaact": containers, "midscene": [{"name": names.container_name("midscene"), "stopTimeout": 30}]})
-    got = aws.resolve()
-    assert {e: r.stop_timeout_s for e, r in got.items()} == {"novaact": expected, "midscene": 30}
-    assert sorted(aws.describes) == sorted(r.revision_arn for r in got.values())  # 每个引擎恰一次
-    assert compose.read_task_def_stop_timeout(got["novaact"].revision_arn, engine="novaact", ecs=aws.ecs) == expected
-
-
-def _res(engine: str, stop_timeout_s):
-    return compose.WorkerResolution(engine=engine, variant="base", revision_arn=f"arn:{engine}", digest="sha256:0",
-                                    stop_timeout_s=stop_timeout_s)
-
-
-def test_cloud_stop_bound_takes_max_stop_timeout_plus_ecs_stopped_lag():
-    # 各引擎 stopTimeout 取最大，再加 ECS 记下 STOPPED 的滞后余量；不含 core 的排空余量
-    assert compose.cloud_stop_bound_s([_res("novaact", 90), _res("midscene", 30)]) == 90 + compose.ECS_STOPPED_LAG_MARGIN_S
-    assert compose.cloud_stop_bound_s([_res("midscene", 30)]) == 30 + 20.0
-    # 没设 / 找不到 container（None）按 Fargate 平台上限 120 秒计：预算宁大勿小，即使别的引擎设得更小
-    assert compose.cloud_stop_bound_s([_res("novaact", None), _res("midscene", 30)]) == 120 + 20.0
+def test_fargate_stop_timeout_max_is_the_platform_cap():
+    # 与部署侧 BackendStack.FARGATE_STOP_TIMEOUT_MAX_S 同值的平台上限（Fargate stopTimeout ≤120 秒）；runtime 不跨包 import 部署包，
+    # 这里锁住取值，隧道守护的每 job 余量按它记账
     assert compose.FARGATE_STOP_TIMEOUT_MAX_S == 120
-    assert compose.cloud_stop_bound_s([]) == 120 + 20.0
 
 
 # ---- 版本 skew（ADR 0037 决策 7）：读戳 + 三态齐全 + 非纯净跳过 ----
@@ -1814,7 +1693,7 @@ def _client_error(code):
 def test_read_backend_version_reads_prefixed_path():
     ssm = _StampSsm("1.4.0")
     assert compose.read_backend_version(prefix="prod-", ssm=ssm) == "1.4.0"
-    assert ssm.reads == ["/prod-backend/version"]  # 路径含 prefix，与 subnet/sg 同族
+    assert ssm.reads == ["/prod-backend/version"]  # 路径含 prefix，与其余后端参数同一形态
 
 
 def test_read_backend_version_missing_parameter_is_none_not_raise():
@@ -2087,7 +1966,7 @@ def test_fargate_engines_leave_run_id_to_the_engine_adapter(monkeypatch):
     compose.build_fargate_engines(run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
                                   network_config={"subnets": ["subnet-x"]},
                                   worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
-                                  region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+                                  region="us-west-2", ecs=object(), s3=object())
     assert len(captured) == 2
     assert all(k["run_id"] == "rid-1" and "RUN_ID" not in k["extra_env"] for k in captured)
 
@@ -2105,7 +1984,7 @@ def test_fargate_engines_carry_session_warmup_url_in_extra_env_only_when_given(m
     monkeypatch.setattr(fe, "FargateEngine", _FakeFargate)
     common = dict(run_id="rid-1", cluster="c", events_table="e", bucket="b", report_dir="runs",
                   network_config={"subnets": ["subnet-x"]}, worker_task_defs={"novaact": "arn:rev:1", "midscene": "arn:rev:2"},
-                  region="us-west-2", ecs=object(), s3=object(), ddb_events_table=object())
+                  region="us-west-2", ecs=object(), s3=object())
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
     compose.build_fargate_engines(extra_http_headers={"ngrok-skip-browser-warning": "1"}, session_warmup_url=url, **common)
     assert all(k["extra_env"]["GHERKAI_SESSION_WARMUP_URL"] == url for k in captured)
