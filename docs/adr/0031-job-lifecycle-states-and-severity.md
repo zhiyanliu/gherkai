@@ -76,7 +76,7 @@ class Status(str, Enum):
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
   凡「等到终态 / 是否已终态」的消费方（CLI `status --wait` 轮询、`status` 退出码判定、`explain` 的「判定明细尚未落地」判断、隧道守护进程的退出判据、云端推进器 Lambda 的「已收尾 run 不再推演」跳过判据（`lambdas/reconciler.py`）、worker 清理 pass 的「未终态 run 仍引用」检查、`status` 文本输出只在终态打印产物位置、`explain` 的「run 仍在运行，以下为已完成部分」提示、保存明细之前的非终态即抛（见上「不变量的强制点」）——真值集即 `grep -rn TERMINAL_STATUSES`）一律引它，
   **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
-  隧道守护进程只能等到 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「守护进程的存活上限由运行期限推出」一条所定的存活上限才退出，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
+  隧道守护只能等满 TTL 才拆，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
   才需动（届时决定三的取法同批核对）。`TERMINAL_STATUSES` 恒等于 `_STATUS_SEVERITY` 的键集（决定二：severity 只给终态定义）。
 
 ## 决定二：severity 数值序，两层分清
