@@ -137,6 +137,32 @@ def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch,
     assert "gherkai.toml" in err and needle in err
 
 
+@pytest.mark.parametrize("argv", [["run"], ["run", "f.feature"], ["submit", "f.feature"]],
+                         ids=["run-without-feature", "run", "submit"])
+@pytest.mark.parametrize("key", ["steps-dir", "report-dir"])
+def test_config_path_that_cannot_be_resolved_is_a_config_error(tmp_path, monkeypatch, capsys, argv, key):
+    """配置文件里的路径解析不了（如含空字符）：以配置错误结束、退出码 2、点名文件与取值，解析路径的内部异常不冒到终端。
+    run 没有给 feature 时也是这一句：配置不可用排在缺少 features 之前。"""
+    monkeypatch.chdir(tmp_path)
+    _feature(tmp_path)
+    _toml(tmp_path, f'[common]\nbackend = "local"\n{key} = "\\u0000"\n')
+    assert m.main(argv) == 2
+    err = capsys.readouterr().err
+    assert "gherkai.toml" in err and "不是可用的路径" in err
+    assert "Traceback" not in err and "embedded null" not in err
+
+
+def test_app_entry_path_that_cannot_be_resolved_is_a_config_error(tmp_path, monkeypatch, capsys):
+    """`[apps.<别名>.<平台>]` 的 file 解析不了时同样是配置错误：退出码 2，点名文件与那一节，内部异常不冒到终端。"""
+    monkeypatch.chdir(tmp_path)
+    id_key = cfgmod.APP_ID_KEY["android"]
+    _toml(tmp_path, f'[apps.demo.android]\nfile = "\\u0000"\n{id_key} = "com.example.demo"\n')
+    assert m.main(["run", str(_feature(tmp_path))]) == 2
+    err = capsys.readouterr().err
+    assert "gherkai.toml" in err and "apps.demo.android" in err and "不是可用的路径" in err
+    assert "Traceback" not in err
+
+
 def test_config_numbers_keep_native_types_and_reasons_are_product_language():
     """按 TOML 原生类型校验（ADR 0053 决策 3）：整数给浮点选项成浮点、自定义校验函数拿到数字本身、整数选项收整数；内建类型失败时
     解释器的英文原文不进消息。"""

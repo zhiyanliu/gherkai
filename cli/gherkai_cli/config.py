@@ -37,6 +37,14 @@ class ConfigError(ValueError):
     """配置文件不可用（找不到显式给出的文件、不是合法 TOML、不认识的节或键、取值形态不对）。消息即给使用方看的整句。"""
 
 
+def _resolved(base: Path, value: str, *, label: str) -> Path:
+    """路径取值相对 base 绝对化。路径本身不可用（含空字符、符号链接成环等）时按配置错误报出，解析路径的内部异常不冒到终端。"""
+    try:
+        return (base / os.path.expanduser(value)).resolve()
+    except (ValueError, OSError, RuntimeError) as e:
+        raise ConfigError(f"{label}的路径 {value!r} 不是可用的路径，请改成一个有效的路径") from e
+
+
 @dataclass(frozen=True)
 class DevicePlatformConfig:
     """`[devices.<平台>]`：arn 与 os-version 恰给一个；billing-method 覆盖 `[devices]` 顶层的值。"""
@@ -83,7 +91,7 @@ class ProjectConfig:
         """路径类值相对配置文件所在目录绝对化（决策 2）；没有配置文件时原样返回（不该被调到，保险起见）。"""
         if self.base_dir is None:
             return value
-        return str((self.base_dir / os.path.expanduser(value)).resolve())
+        return str(_resolved(self.base_dir, value, label=f"配置文件 {self.path} 里"))
 
     def app_ids(self) -> dict[str, dict[str, str]]:
         """给 plan 层的纯数据表：别名 → 平台 → 包名或 bundle id（core 据此核对 @app，不带文件路径）。"""
@@ -105,7 +113,7 @@ def locate_config(explicit: str | None, *, env: Mapping[str, str] | None = None,
     cwd = Path.cwd() if cwd is None else cwd
     for raw, origin in ((explicit, "--config"), (env.get(CONFIG_ENV), f"环境变量 {CONFIG_ENV}")):
         if raw:
-            path = (cwd / os.path.expanduser(raw)).resolve()
+            path = _resolved(cwd, raw, label=f"{origin} 给出的配置文件")
             if not path.is_file():
                 raise ConfigError(f"配置文件 {path} 不存在或不是文件（来自 {origin}）")
             return path, origin
@@ -254,7 +262,7 @@ def _apps_section(raw, path: Path) -> dict[str, dict[str, AppPlatformConfig]]:
                 raise ConfigError(f"配置文件 {path} 的 {ewhere} 缺 {id_key}（{what}；要显式给出，不由安装包推断）")
             file_text = _text(etable["file"], ewhere, "file", path)
             entries[platform] = AppPlatformConfig(
-                file=(path.parent / os.path.expanduser(file_text)).resolve(),
+                file=_resolved(path.parent, file_text, label=f"配置文件 {path} 的 {ewhere} 里"),
                 app_id=_text(etable[id_key], ewhere, id_key, path),
             )
         if not entries:
