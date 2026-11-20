@@ -32,7 +32,8 @@ from gherkai_core.model import (
 from gherkai_core.parse import FeatureParseError
 from gherkai_core.persist import RunPersistence, result_without_record
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
-from gherkai_core.errors import DefinitionContractError, RunAlreadyEnded, UnsupportedDefinitionSchema
+from gherkai_core.errors import DefinitionContractError, NamedDetailMissing, RunAlreadyEnded, UnsupportedDefinitionSchema
+from gherkai_core.named_details import load_named_details
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 from gherkai_core.schedule import ScheduleOpts, schedule
 
@@ -2157,6 +2158,12 @@ def _cmd_status_body(args, interrupted: dict) -> int:
                 # 运行态在而提交记录不在：同样只说明、以退出码 2 结束，不写运行态（理由同上）
                 _progress(str(e))
                 return 2
+            except OSError as e:
+                # 排在上一支之后（提交记录缺失是 FileNotFoundError 的子类）：读写本机运行记录失败，保存判定明细已按退避重试用尽。
+                # 打一句说明、不打回溯，以退出码 2 结束（没有判出结果的操作失败）；不拆隧道：原来的后台推进进程可能仍在使用它
+                # （本机接力的过渡做法，随删去接力一并删去）
+                _progress(_advance_store_failure_notice(args.run_id, e, report_dir=args.report_dir, relay=True))
+                return 2
         else:
             _progress(_WAIT_WITHOUT_RELAY_NOTICE)
             interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE
@@ -2491,8 +2498,8 @@ def _explain_empty(args, state, *, hint: str) -> int:
 
 
 def _explain_without_detail(args, state, job_state) -> int:
-    """run 已结束、点名的 job 已结束而没有判定明细时的输出：只有运行态里的状态与说明，人读与 `--json` 出自同一份文档。恒以退出码 0 结束
-    （查询本身成功了，与 `_explain_empty` 同一取向）。"""
+    """参数给出的 job 已结束而运行态里没有点名判定明细时（由结束写结束）的输出：只有运行态里的状态与说明，人读与 `--json` 出自同一份
+    文档。恒以退出码 0 结束（查询本身成功了，与 `_explain_empty` 同一取向）。"""
     doc = render.explain_without_detail_to_dict(run_id=state.run_id, status=state.status.value, job_state=job_state)
     if args.json:
         print(json.dumps(doc, ensure_ascii=False, indent=2))
@@ -2543,14 +2550,15 @@ def _explain_recover(results, recover):
 
 
 def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, recover=None) -> int:
-    """local/cloud 共用的后半段：取判定明细 → 筛 scenario/step → 合成文档 → 打文本或 JSON。run 已结束、点名的 job 已结束而没有
-    判定明细时（由结束写结束），按运行态给出它的状态与说明（`_explain_without_detail`）。
+    """local/cloud 共用的后半段：取判定明细 → 筛 scenario/step → 合成文档 → 打文本或 JSON。参数给出的 job 已结束而运行态里没有
+    点名判定明细时（由结束写结束），按运行态给出它的状态与说明（`_explain_without_detail`）。
 
     `recover(scope_ids)` 读这些 scope 的事件流记录（ADR 0042 决策七），只在有被中止、带无记录 step 的 job 时才调；
     None 表示本路径不提供补取（测试用）。
 
-    带 `scope_id` 时只 `load_job_result`（云端是一次 GetObject），不带才 `load_all`（云端还需列举对象权限）
-    ——权限面按需求最小化。
+    明细只按运行态里各 job 点名的标识取，读法与前台收尾、后台报告共用一处（`named_details.load_named_details`）：云端每份一次
+    GetObject、不列举前缀，所以只要读对象的权限（ADR 0042 决策四「数据来源」段；ADR 0030 决定三「点名」条）。存储里没被点名的明细
+    （存下之后终态没有写成、由结束写结束的 job 先前存下的）不读、不展示。被点名的那一份读不到时打一句说明、以退出码 2 结束。
 
     `wait_hint` 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、cloud 用 --backend cloud
     --prefix），取法同 `_render_status`：本函数两路共用，定位信息只有调用方手里有（cloud 的 prefix 已解析、
@@ -2558,29 +2566,36 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     """
     run_id = args.run_id
     not_landed = f"判定明细尚未落地，可先用 {wait_hint} 等到终态"
-    # 先看运行态、再读明细（状态的权威是运行态，ADR 0030 决定三）：明细先于终态存下，一个 job 的明细已在而终态还没有写下时，
-    # 那份结果还没有被采用，不读、不展示
+    # 先看运行态、再读明细（状态的权威是运行态，ADR 0030 决定三）：只有记下 job 终态的那次写点名明细，未结束的 job 没有点名，
+    # 即使它的明细已先于终态存下，那份结果也还没有被采用，不读、不展示
     if args.scope_id:
         js = state.jobs.get(args.scope_id)
         if js is None:
-            # 建 run 时运行态即列出全部 job，运行态里没有的只会是 scope 写错
-            _progress(f"未找到 scope：{args.scope_id}（这个 run 的 scope：{'、'.join(state.jobs) or '无'}）")
+            # 建 run 时运行态即列出全部 job，运行态里没有的只会是 scope 写错。候选按 scope_id 排序，两个后端同一种次序
+            _progress(f"未找到 scope：{args.scope_id}（这个 run 的 scope：{'、'.join(sorted(state.jobs)) or '无'}）")
             return 2
         if js.status not in TERMINAL_STATUSES:
             # 这个 job 还没有结束：按「尚未落地」提示、退出码 0，不论别的 job 是否已有明细（ADR 0042 决策四「未终态的 run」段）
             return _explain_empty(args, state, hint=not_landed)
-        jr = result_store.load_job_result(run_id, args.scope_id)
-        if jr is None:
-            # 已结束而没有判定明细：由结束写结束的 job（没有启动，或 run 被结束时没有结果）。它的状态与说明只在运行态里
-            # （ADR 0031 决定三「结束写」小节），按运行态给出
+        if js.result_id is None:
+            # 已结束而没有点名明细：由结束写结束的 job（没有启动，或 run 被结束时没有结果；存储里即使留有它先前存下的一份也不读）。
+            # 它的状态与说明只在运行态里（ADR 0031 决定三「结束写」小节），按运行态给出
             return _explain_without_detail(args, state, js)
-        results = [jr]
+        named = [js]
     else:
-        results = [jr for jr in result_store.load_all(run_id)
-                   if (js := state.jobs.get(jr.scope_id)) is not None and js.status in TERMINAL_STATUSES]
+        # 只列运行态里点名了明细的 job，按 scope_id 排序（两个后端同一种次序）。由结束写结束的 job 不在其中，只有给出它的 scope_id
+        # 时才按运行态给出状态与说明；ADR 0042 决策四「数据来源」段要求以 job 定义为骨架一并列出它们，这里还没有做到
+        named = [state.jobs[sid] for sid in sorted(state.jobs) if state.jobs[sid].result_id is not None]
+    try:
+        details = load_named_details(run_id, named, result_store)
+    except NamedDetailMissing as e:
+        # 记录残缺（被点名的那一份不在存放处，或属于别的 job）：说明读不到哪一份、还能怎样看，退出码 2，不当作没有明细
+        _progress(f"{e}。这个 job 的状态仍可用 status 查看；要看它的判定明细，需要重新执行。")
+        return 2
+    results = [details[js.scope_id] for js in named]
     if not results:
-        # 判定明细在每个 job 得出结果时存下，run 未结束而零文件即还没有 job 得出结果；终态而零文件
-        # 也是正常结果（例子见 ADR 0034 机制三的「不经推进步骤的收尾」），同样只是「没得渲染」
+        # 运行态里没有点名明细的 job：run 未结束时即还没有 job 得出结果；终态时是每个 job 都由结束写结束（例子见 ADR 0034 机制三
+        # 的「不经推进步骤的收尾」），同样只是「没得渲染」
         return _explain_empty(args, state, hint=(not_landed if state.status not in TERMINAL_STATUSES
                                                 else "本 run 没有任何 job 的判定明细"))
 
@@ -2621,8 +2636,8 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
         print(json.dumps(doc, ensure_ascii=False, indent=2))
         return 0
     if state.status not in TERMINAL_STATUSES:
-        # run 未结束也能读到已完成的 job：前台与后台都在每个 job 得出结果时存下它的判定明细——说清「这只是已完成部分」，免得读者
-        # 以为剩下的没执行
+        # run 未结束也能读到已完成的 job：前台与后台都在每个 job 得出结果时存下它的判定明细、写下终态并点名——说清「这只是已完成
+        # 部分」，免得读者以为剩下的没执行
         _progress("run 仍在运行，以下为已完成部分")
     print(render.render_explain_text(doc, expand_passed=expand_passed, full=args.full))
     return 0
@@ -2671,8 +2686,9 @@ def _explain_cloud(args) -> int:
     """cloud explain：DDB 读 run 运行态、S3 读判定明细与证据。
 
     次序同 `_status_cloud`：`_cloud_target`（纯字符串推导与本机 profile 配置读取、不连 AWS）→ 版本 skew 闸门（先于任何云端读，
-    ADR 0037 决策 7）→ 装 store。权限面与 status 不同：同样要版本戳读 + runs 表 GetItem，
-    另需该桶的读对象权限（判定明细与证据），不带 scope_id 时还需列举对象；不需要 status --wait 的 Lambda 调用权限。
+    ADR 0037 决策 7）→ 装 store。权限面与 status 不同（ADR 0042 决策四「数据来源」段）：同样要版本戳读 + runs 表 GetItem，
+    另需该桶的读对象权限（判定明细与证据）；明细按运行态点名的标识逐份取、不列举前缀，不需要列举对象的权限；不需要 status --wait 的
+    Lambda 调用权限。没有列举权限时取一个不存在的键得到的是拒绝访问而不是键不存在，按缺读对象的权限报出，说法仍然属实。
     """
     target = _cloud_target(args, runs_table=args.ddb_table, **_config_layers(args))
     if isinstance(target, int):
@@ -2730,9 +2746,9 @@ def _explain_cloud(args) -> int:
     except Exception as e:
         if not compose.is_botocore_error(e):
             raise
-        # 证据读失败已在 _explain_read_evidence 内部吞成 evidence_missing，能到这里的是读判定明细本身失败
-        extra = "" if args.scope_id else "（不给 scope_id 时还需列举对象的权限）"
-        _progress(f"explain --backend cloud 读判定明细失败：需要读桶 {target.bucket} 里对象的权限{extra}；"
+        # 证据读失败已在 _explain_read_evidence 内部吞成 evidence_missing，能到这里的是读判定明细本身失败（被点名的键不存在而没有
+        # 列举权限时也到这里，见文档串）
+        _progress(f"explain --backend cloud 读判定明细失败：需要读桶 {target.bucket} 里对象的权限；"
                   f"--prefix/--report-dir/凭证/region 也一并核对。{e}")
         return 2
 
@@ -2750,7 +2766,8 @@ def _cmd_reconcile(args) -> int:
 
     读不到可用的运行定义时（结构版本不合、同版本下形态违约），本进程作为这个 run 的推进器，以结束写的 error 变体结束它：每个未结束的
     job 记 error，原因写进 run 级说明；随后拆隧道（与正常结束同一步），打印说明、以退出码 2 结束。`status --wait` 接力读不到运行定义时
-    不写（见 `_cmd_status_body`）。
+    不写（见 `_cmd_status_body`）。读写本机运行记录失败时（保存判定明细的退避重试用尽，或读写运行态失败）不结束这个 run，打印一句
+    说明、以退出码 1 结束（ADR 0030 决定三「保存明细失败」条）；这时不拆隧道，理由见那个分支的注释。
 
     **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
     `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉
@@ -2789,7 +2806,28 @@ def _cmd_reconcile(args) -> int:
         end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
         _progress(str(e))
         return 2
+    except OSError as e:
+        # 排在上一支之后：提交记录缺失（FileNotFoundError 的子类）有自己的出口。到这里的是读写本机运行记录的失败（磁盘满、没有写
+        # 权限、目录被删除），保存判定明细已在判定存储里按 1、2、4 秒退避重试用尽（ADR 0030 决定三「保存明细失败」条）。这个 run
+        # 没有结束、本进程不做结束写：打一句说明（写进 reconcile.log），不打回溯，以退出码 1 结束。不拆隧道：说明请使用方用
+        # status --wait 接着推进，接力方启动的 job 还要用这条隧道，隧道由接力走完之后拆（本机接力与按进程号拆隧道的过渡做法，
+        # 删去接力与把隧道建在后台推进进程里之后，这一段随之改写）
+        _progress(_advance_store_failure_notice(args.run_id, e, report_dir=args.report_dir, relay=False))
+        return 1
     return 0
+
+
+def _advance_store_failure_notice(run_id: str, error: OSError, *, report_dir, relay: bool) -> str:
+    """本机后台推进进程（relay 为 False）读写本机运行记录失败时的一句说明：发生了什么、记录在哪里、怎么办（ADR 0030 决定三「保存明细
+    失败」条）；`status --wait` 接力（relay 为 True）在同一情形下打同样内容的一句。两者都没有结束这个 run，执行中的 job 在记录里仍为
+    running。后台推进进程的说明给出接着推进的整条命令，接力的说明请使用方再执行同一条命令；「接着推进」的说法与接力的那一种随删去
+    本机接力改写。"""
+    run_dir = (Path(report_dir) / run_id).resolve()
+    who = "接力推进" if relay else "后台推进"
+    how = ("然后再执行同一条命令接着推进。" if relay
+           else f"然后用 {_status_cmd(run_id, report_dir=report_dir, wait=True)} 接着推进。")
+    return (f"run {run_id} 读写本机的运行记录失败，{who}已停止：{error}。记录在 {run_dir}，出错时执行中的 job 在记录里仍为 "
+            f"running。请检查这个目录所在磁盘的剩余空间与读写权限，{how}")
 
 
 def _cmd_tunnel_watch(args) -> int:
@@ -3148,10 +3186,11 @@ def _ended_elsewhere_notice(run_id: str, recorded) -> str:
 def _store_failure_notice(run_id: str, error: OSError, *, report_dir, run_ended: bool) -> str:
     """本机 `run` 运行期读写运行记录失败时的终端说明（ADR 0030 决定七「失败退出码分层」）：发生了什么、记录在哪里、怎么办。
 
-    存明细、写运行态与读回运行态都读写本机文件，失败表现为 OSError（磁盘满、没有写权限、目录被删除）。两种情形说法不同：
+    存明细、写运行态与读回记录都读写本机文件，失败表现为 OSError（磁盘满、没有写权限、目录被删除；运行态点名的那一份明细读不到时
+    同样是 OSError 的子类）。两种情形说法不同：
     - run_ended 为 False（失败在 run 成为终态之前）：执行中的 worker 已被停下，执行中的 job 在记录里仍为 running（没有启动的仍为
       pending），排除磁盘或权限问题之后需要重新执行。
-    - run_ended 为 True（本进程已使 run 成为终态，失败出在为组装汇总而读回运行态的那一次）：记录已是这个 run 的最终状态，只是汇总
+    - run_ended 为 True（本进程已使 run 成为终态，失败出在为组装汇总而读回运行态与被点名明细的那一次）：记录已是这个 run 的最终状态，只是汇总
       没有输出、报告没有生成，用 `status` 查看即可，不必重新执行。
     """
     run_dir = (Path(report_dir) / run_id).resolve()

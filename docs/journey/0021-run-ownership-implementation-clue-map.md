@@ -67,23 +67,15 @@
 
 第二批三笔都已实装：纯加法（取法、说明表、两个新的写入口）；前台改用新入口（`schedule` 返回执行事实 `Execution`、`RunPersistence` 逐 job 写终态并在需要时做结束写、run 的汇总从记录组装、期限截断记 aborted、`update_job_state` 只写 running 且不改写已结束的 run 与 job、`project_state` 不改写已写下的终态）；后台改用逐 job 写序（投影钳在 running；`tick` 每一轮为已有结果的 job 先存明细、再写终态，之后才做推进决策；`plan_next` 只有认领启动与到期的结束写两种动作；`try_finalize` 与 `expected_claim_count` 从端口删去；运行定义不可用时以结束写的 error 变体结束 run）。第三笔已集成、本机真实执行已核，待独立复核。原来「逐条」里的状态-4、6、7、11 都已做掉、删去。
 
-第三笔之后后台记录与目标设计余下的差：
-1. 判定明细保存失败没有退避重试：退避（1、2、4 秒，同一个标识）属于判定明细点名那一批。
-2. 明细没有点名，按 scope_id 覆盖同键。报告里这一次 tick 交给终态写的 job 用内存里的那一份，较早轮次写下终态的 job 按 scope_id 从判定存储读回。明细与终态出自同一份事件快照，接力补写超时退出之后、真实退出改写事件流的那种不一致已经消除。余下两种同类的残余，都由点名消除，点名那一批紧接第三笔：
-   - 两个推进方重叠时，读着旧运行态的一方会在先写成的一方之后为同一个 job 再存一份、覆盖同键；两者读到的事件不同时，存储里那一份可能与写下的终态不对应。
-   - `TickResult.details` 收的是这一次 tick 交给终态写的明细，其中可能有终态已由别的推进方写下、这次写跳过的 job；两个推进方读到不同的事件快照时（例如接力补写的超时退出与随后到达的真实退出），报告里这个 job 的状态取运行态，明细可能出自另一份快照。不为此改端口（不让终态写返回实际记下的 job）。
-   - 运行定义不可用的结束写落在某个推进方「明细已存下、终态写之前」时，存储里留着那份明细，运行态里这个 job 是 error，`explain` 按 scope_id 会读到它。只在两个推进方对同一份运行定义一个读得懂、一个读不懂时出现。
-3. DynamoDB 投影的形态（run 状态在把 job 写成 running 的那次逐 job 写里写、逐 job 写带 HWM 条件）与云端 `_mark` 的 error 变体只有 moto 的证据；Lambda 要等云端那一批重新部署才执行新 code，部署之后的核对项记在 0018「云端后端」一块。
+第三笔之后后台记录与目标设计余下的差（保存失败的退避重试与按 scope_id 覆盖同键的三种残余已随判定明细点名那一批做掉：每次保存各有自己的键，读者一律按运行态里的标识取，`TickResult` 连同 `details` 删去，结束写不点名）：
+1. DynamoDB 投影的形态（run 状态在把 job 写成 running 的那次逐 job 写里写、逐 job 写带 HWM 条件）与云端 `_mark` 的 error 变体只有 moto 的证据；Lambda 要等云端那一批重新部署才执行新 code，部署之后的核对项记在 0018「云端后端」一块。
    - 云端重读次数上限与投影写的关系有了一条固定先后的反例（另一家模型用 moto 与两个线程复现）：12 个 job 的 run，一方每次读运行态之后、整体替换之前，另一方落下一次投影写（标量一步加逐 job 写，各把写入序号加一），前者的 11 次尝试全部被挡、抛 `RunStateWriteContended`，后者下一轮读到完整事件之后提交，没有错的终态，也只有一方生成报告。实际的重叠里前者每次重试之间有退避（合计约 10 秒），远长于一次投影的耗时；但投影对库中已结束的 job 仍逐个发条件写，job 很多的 run 到后期每一轮的写次数与全部 job 数成正比。云端那一批定：重读次数上限、投影是否只为未结束的 job 发逐 job 写。
-4. 本机接力（`_recover_timed_out_claims`、`record_timed_out_if_absent`）仍在，在新 tick 下照常可用：接力补写的超时退出由下一轮的快照存下明细、以终态写记下，之后才到的真实退出不改变记录。删去留到本机推进器与生命期锁那一批。
-
-读回明细的前提：第三笔里会生成报告的结束写只有到期这一条来路，它只结束 pending 的 job，pending 的 job 没有存过明细，所以按 scope_id 读回的只有由执行结果结束的 job 的那一份。会结束执行中 job 的结束写（运行定义不可用的 error 变体）不生成报告。run 处置的结束写会把执行中的 job 记 aborted，存储里可能有它没被采用的明细，所以 run 处置在点名落地之前不复用按 scope_id 的读回。
+2. 本机接力（`_recover_timed_out_claims`、`record_timed_out_if_absent`）仍在，在新 tick 下照常可用：接力补写的超时退出由下一轮的快照存下明细、以终态写记下，之后才到的真实退出不改变记录。判定明细的保存重试同样覆盖接力（接力经同一个装配入口 `compose.local_result_store`）。删去留到本机推进器与生命期锁那一批。
 
 记下、不在第三笔处置的代价：
-- 退避重试落地之前，执行途中一次判定明细保存失败就让本机后台推进进程退出，执行中的 job 的 worker 随之退出、没有退出记录，结果丢失，要等接力补写成超时。
-- 条件写已在服务端生效而响应丢失、SDK 重发被写入序号挡下时，没有一方得知自己使 run 成为终态，报告缺失。与「终态写之后的中断」同一类，已写进 0034 机制三④的「代价」一条。
-- error 变体给每个未结束的 job 写一句原因，job 很多时可能超出单条记录的大小上限；异常从装配处冒出时，kicker 同一批里其它 run 的冷启动一并失败。与下面「云端那一批之前要定的」里结束写超出单条记录上限一条一起定。
-- 报告按 job 逐个读明细，耗时随 job 数增长（云端是逐个 S3 GetObject，按每次几十毫秒估，一千个 job 约二十秒）；到点触发的那次调用只留了 30 秒给处置加一次 tick，使 run 成为终态的那一次落在其中时，报告可能被调用超时截断。留到云端那一批重估。
+- 条件写已在服务端生效而响应丢失、SDK 重发被写入序号挡下时，没有一方得知自己使 run 成为终态，报告缺失。与「终态写之后的中断」同一类，已写进 0034 机制三④的「代价」一条；点名之后有一种可能的识别办法，记在「云端后端」小结。
+- error 变体给每个未结束的 job 写一句原因，job 很多时可能超出单条记录的大小上限；异常从装配处冒出时，kicker 同一批里其它 run 的冷启动一并失败。与下面「云端那一批之前要定的」里结束写超出单条记录上限一条一起定；上限按含 `result_id` 的项大小实测。
+- 报告一律按运行态里的标识逐个读回明细（判定明细点名那一批定的写法），耗时随 job 数增长（云端是逐个 S3 GetObject，按每次几十毫秒估，一千个 job 约二十秒）；与此前相比只多出使 run 成为终态的那一次 tick 写下终态的那几个 job（至多为并发上限个）。到点触发的那次调用只留了 30 秒给处置加一次 tick，使 run 成为终态的那一次落在其中时，报告可能被调用超时截断。留到云端那一批重估。
 
 另有几处按设计现状留到以后：
 - 重试注明的原因按检查次序取、结束写的来路按登记先后取，两者在同一个 run 里可能不同（见问-12）。
@@ -95,7 +87,6 @@
 - `explain` 点名「已结束而没有判定明细」的 job 时不理会 `--scenario` 与 `--step`，一律以 0 结束；有明细的分支在筛选没有命中时以 2 结束。输出形态（三个键）也是过渡的，explain 改造那一批按 0042 决策四改成以 job 定义为骨架时一并定筛选参数怎样处理。
 - `run` 在开始执行之前建 run 失败（`RunPersistence.begin` 的写失败，例如报告目录不可写）仍打回溯、以退出码 1 结束；按 0030 决定七的切分线它属于执行之前，应以退出码 2 结束并给一句说明。随本机建 run 改造那一批改。
 - 运行期读写记录失败的出口按 `OSError` 分类，有两个边角：记录文件被改坏引起的解析错误仍打回溯；标准错误的管道已关闭时写提示抛出的 `BrokenPipeError` 也被说成读写记录失败。
-- 前台保存明细失败的退避重试（0030 决定三「保存明细失败」条）没有做，见「判定明细点名与落库写序」一块。
 - 真实 DynamoDB 上 `update_job_state` 靠条件失败时带回的条目分辨原因，只有 moto 的证据；`core/tests/test_cloud_integration.py` 里改写的集成用例随云端那一批重新部署之后执行。
 
 云端那一批之前要定的：
@@ -114,49 +105,12 @@
 
 ### 小结
 
-整块改动量为 L：跨 core 的端口、两个 ResultStore adapter、JobState 与 serialize、两个 RunStore adapter、RunPersistence 与 reconcile，再加上 runtime 组合根与 CLI 的 explain 和测试，合计几百行。内部次序：点名-2（JobState 加字段，可以单独先落、无害）→ 点名-1 与点名-3 的 on_job_complete 一半（标识、按标识保存、终态点名、本机重试），这两条必须同一批，而且要和后台 tick 一侧的生成标识与终态写点名（tick 的逐 job 写序已随第二批第三笔落下）以及 explain 改为按运行态里的标识读（「查看命令」块）一起落，否则 submit 的 run 没有被点名的明细，explain 就读不到任何东西 → 点名-3 的 finalize 一半（改用结束写，从记录生成报告），要排在结束写入口与「报告」块从记录组装 RunResult 之后，或者同批。对别的块的依赖：结束写入口与 update_job_state 新语义（状态取法与结束写），从记录组装报告（报告），explain、status --json、run --json（查看命令），真实验证需要的生命期锁与 run 处置（本机推进器与 run 处置两块）。云端：Lambda 打包了 gherkai_core，改键、改 JobState、改 tick 写序之后，云端行为要等重新部署才变；CLI 一侧的 explain 先按新键读，就读不到旧 Lambda 写出的明细。所以这一块的 core 改动宜与云端那一批的重新部署对齐，或者在那之前接受云端 explain 暂不可用。最大的风险有三个：①删 load_all 与改键会造成过渡窗口，一定要与写入方和读者同批；②重试放在哪里：tick 与云端共用，重试只能放在本机一侧，标识还要在重试之间保持不变；③本机文件名长度（编码后的 scope_id 加标识可能超过 NAME_MAX）。
+这一块已随判定明细点名那一批做完（0018「实装」一节第三批）：端口只有 `save_job_result(run_id, result_id, job)`、`load_job_result(run_id, result_id)` 与 `preflight()`，`load_all` 删去，本机文件名与 S3 键只用标识；`JobState.result_id` 由带结果的终态写写下，serialize 与两个 RunStore adapter 读写它，DynamoDB 的整体替换原样带上（「local.py 重建 JobState」一说已过时，`project_state` 用 replace 保留）；两种写入方生成标识、按标识保存、终态写点名，云端重读再算沿用同一组标识；本机组合根套保存失败的退避重试；读者共用 `named_details.load_named_details`。原来「逐条」的点名-1、2、3 与「线索没有覆盖的改动点」四条都已做掉、删去（契约页与 skill 副本的 jobs_dir 一行、ports、s3、compose 的 job-in 前缀理由、detached、`_atomic` 的注释一并改了）。
 
-### 线索没有覆盖的改动点
-
-- 后台推进的终态写写不成、重读再算时，沿用已存的那一份及其标识，不再另存；改用别的结果时才另存一份。位置：core/gherkai_core/reconcile.py tick 的逐 job 写序（在「状态取法与结束写」块的新写法里）。依据：ADR 0030 决定三「被点名的那一份就是写成终态的那一方存的」条括注「写不成而重读再算时沿用这一份，改用别的结果先另存一份」。
-- 机读契约页与 skill 副本里 artifacts 的 jobs_dir 一行写着「每 job 一份 JSON，文件名是 URL 编码的 scope_id……单文件自包含」，与「每次保存一份、由终态点名、存放形态不是对外的约定」不符，要改写（status --json 的 artifacts 一行已随第二批第三笔改为每个 job 得出结果时写入）。位置：docs/internals/cli-json-contract.md 与 skill 副本 references/cli-json-contract.md 的 jobs_dir 一行。依据：ADR 0030 决定三「点名」条与「本机判定明细的落点」；ADR 0041 决策三「判定明细文件的存放形态不是对外的约定」。（「行为文档」块的契约页一条只列了 settle-runs、deadline_at、点名标识、run --json 的 jobs[]。）
-- 以 load_all 或「每 job 一份」为前提的 code 注释，「随实装改写的 code 注释」块没有列出：core/gherkai_core/ports.py 里 ResultStore 的 docstring（「判定真值唯一权威」「每 job 落 <encoded_scope_id>.json」）；core/gherkai_core/adapters/result_store/s3.py 的模块头与 load_all 的 docstring；runtime/gherkai_runtime/compose.py 第 1320 行与第 1336 到 1339 行 job-in 用独立前缀的理由（「load_all 枚举 jobs/」）；runtime/gherkai_runtime/detached.py 第 220 行「判定真值（jobs/*.json）由 tick 在收尾的条件写之前落」；core/gherkai_core/adapters/_atomic.py 模块头与 atomic_write_text 里「jobs/<urlencode 后的 scope_id>.json」的落点说法。依据：ADR 0030 决定三「点名」条、决定六 ResultStore 段。
-- 本机两种推进器的保存重试要放在本机这一侧（不放进 tick 与 S3ResultStore），线索没有写明。建议给 ResultStore 套一层由本机组合根装配的重试，或者从 tick 注入重试策略；退避用的 sleep 与标识工厂要可注入。位置：runtime/gherkai_runtime/compose.py build_local_stores、runtime/gherkai_runtime/detached.py build_local_reconcile、core/gherkai_core/persist.py。依据：ADR 0030 决定三「保存明细失败」条（云端由流的重试或之后的触发再做，本机两种推进器重试 3 次、用同一个标识）。
-
-### 逐条
-
-#### 点名-1（mixed，M）
-
-- 线索：明细每次保存一个新对象、键里带写入方生成的随机标识
-- 要做的：改 ResultStore 端口：save_job_result 增加写入方给出的标识参数（如 result_id），load_job_result 改为按标识取（是否还要 scope_id 视键形态而定），删去 load_all。LocalResultStore 改为每次保存写 <root>/<run_id>/jobs/<标识>.json（或 <quote(scope_id)>.<标识>.json），不再按 scope_id 覆盖同一个文件；S3ResultStore 的键改为 <prefix><run_id>/jobs/ 下带标识的一段，删去 list_objects_v2 翻页列举。两个 adapter 与端口的 docstring（「每 job 一份」「同 key 覆盖、幂等」「判定真值唯一权威」「CI 据 load_all 判退出码」）按 0030 决定三「点名」条改写。
-- 文件：core/gherkai_core/ports.py、core/gherkai_core/adapters/result_store/local.py、core/gherkai_core/adapters/result_store/s3.py、core/gherkai_core/persist.py、core/gherkai_core/reconcile.py、runtime/gherkai_runtime/compose.py、cli/gherkai_cli/__main__.py、core/tests/test_stores.py、core/tests/test_s3_result_store.py、core/tests/test_local_result_store_atomic.py、core/tests/test_cloud_integration.py、core/tests/test_persist.py、core/tests/test_reconcile.py、cli/tests/test_main.py
-- 先要有：写入方生成标识的位置（点名-3 的 RunPersistence.on_job_complete 与后台 tick 的逐 job 写序）
-- 必须同批：点名-2（运行态里的点名标识，否则读者无从取那一份）；点名-3（前台写入方生成并点名标识）；后台 tick 生成标识、终态写点名（逐 job 写序已随第二批第三笔落下，否则 submit 的 run 一份被点名的明细都没有）；查看命令块 explain 一条（_explain_emit 现在调 load_all 与按 scope_id 的 load_job_result）；机读契约页与 skill 副本里 jobs_dir 一行的说明（现写「每 job 一份 JSON，文件名是 URL 编码的 scope_id」）
-- 单独先落地的后果：删 load_all、改键之后 cli/gherkai_cli/__main__.py 的 _explain_emit 直接坏（AttributeError，或按 scope_id 取不到对象）；core/tests 里 test_stores、test_s3_result_store（含 1000 以上翻页、稳定排序两条用例）、test_local_result_store_atomic、test_persist（171、285、291、475 行用 load_all 断言）以及 cli/tests/test_main.py（848、990、1071 行用 load_all，3161、3547 行的假 store）都会变红。云端推进器 Lambda 打包了 gherkai_core，重新部署之前它仍按旧键写，CLI 一侧按新键读就读不到。
-- 验证：单测够用于 adapter 行为：本机文件与 moto S3 对拍：同一个 job 存两份、各自按标识读回，互不覆盖；标识不同的两份不串；scope_id 含 /、:、中文时键是单段。test_cloud_integration 里的真实 S3 往返（opt-in，不用重新部署）改成按标识存取。云端端到端要在重新部署之后核：Lambda 写出的明细键带标识，explain 按运行态里的标识读到它，而且编排进程角色上没有 s3:ListBucket 也能读（0030 决定六、0042 决策四）。
-- 备注：1）S3 键是否还带 scope_id 由实装定。本机文件名要考虑 NAME_MAX：现在文件名是 quote(scope_id)，中文一字就占 9 个字符，core/gherkai_core/adapters/_atomic.py 已经为接近 NAME_MAX 的这类文件名把 tmp 前缀截到 200 字符。如果在编码后的 scope_id 后面再接标识，长 scope_id 会更早遇到 ENAMETOOLONG；只用标识作文件名可以避开，读者也本来就从运行态拿 scope_id。2）runtime/gherkai_runtime/compose.py 第 1320 行与第 1336 到 1339 行讲 job-in 用 jobs-in/ 前缀的理由是「load_all 列出 jobs/ 前缀、会把 job-in 当判定读」。删了 load_all 这个理由就不成立了；独立前缀本身保留（生命周期规则按 tag 只框 job-in），注释要改写。3）core/gherkai_core/ports.py 里 ResultStore 的 docstring（「判定真值唯一权威」「每 job 落 <encoded_scope_id>.json」）与 s3.py 的模块头，「随实装改写的 code 注释」块没有列出。4）compose 的 local_artifact_locations 与 cloud_artifact_locations 里 jobs_dir 键可以保留（目录或前缀不变），但两份契约页对它的说明要改（见 missing）。5）skills/gherkai-evals/fixtures 下现存的 jobs/<scope>.json 与没有点名标识的 run_state.json，在新读法下 explain 读不到。重录已列在「行为文档」块，并且要和 explain 的改法同一批落地。
-
-#### 点名-2（mixed，S）
-
-- 线索：运行态每个 job 条目带点名的标识（未点名时省键）
-- 要做的：model.JobState 加一个可选字段（如 result_id: str | None = None）。serialize.run_state_to_dict 与 run_state_from_dict 对这个键按 omit-when-None 读写；ddb.py 的 _job_state_to_item 与 _job_state_from_item 加同一个键。LocalRunStore.project_state 里那段重建 JobState 的回填（local.py 第 332 到 335 行，现在只回填 session_id 与 claimed_at）要把库中的标识带上，或者等到投影不再写 job 终态之后再删这段回填。
-- 文件：core/gherkai_core/model.py、core/gherkai_core/serialize.py、core/gherkai_core/adapters/run_store/local.py、core/gherkai_core/adapters/run_store/ddb.py、core/tests/test_stores.py、core/tests/test_ddb_run_store.py、core/tests/test_conditional_writes.py、cli/tests/test_cli_json_contract.py、docs/internals/cli-json-contract.md、cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md
-- 先要有：无
-- 必须同批：机读契约页 status --json 的 jobs[] 加这个键的说明（status --json 直接输出 run_state_to_dict，这个键一出现就进机读输出；test_status_json_keys_are_documented 一旦构造带标识的 JobState 就要求契约页登记它）
-- 单独先落地的后果：无：字段缺省为 None，现在还没有写入方写它，落盘形态和 status --json 都不变。缺点是这段时间里有一个没人写的字段。
-- 验证：单测够：serialize 往返（有值写键、None 省键）、本机与 moto 两个 adapter 在 update_job_state 整项写之后读回带键、project_state 之后键还在、DDB 逐属性投影不碰它。单条 STATE 能放下几百个 job 的结束写（按实际 job 项大小，含标识）要在真实 DynamoDB 上核，已列在「测试」块，要等重新部署后经 Lambda 的代码做。
-- 备注：1）DDB 的 project_state 是逐属性 SET，没提到的属性天然保留，不用改。update_job_state 是整项 SET jobs.#sid = :js，只要 _job_state_to_item 带上这个键就会写进去。2）local 的 try_claim_job 重建 JobState 时只针对 pending 的 job，那时还没有标识，不受影响。3）cli/gherkai_cli/render.py 的 render_run_state 与 __main__.py 的人读 status 不需要显示这个键。4）字段名由实装定，0030 与 0041 都只说「点名的标识」，定名之后核对 0041 决策三的字段表。5）云端只有重新部署之后才会写出这个键（Lambda 打包了 core），CLI 一侧读到的是旧 Lambda 写出、不带键的条目，点名-1 的读者会因此读不到明细。
-
-#### 点名-3（mixed，L）
-
-- 线索：RunPersistence 按逐 job 写序：on_job_complete 先生成标识、存明细
-- 要做的：RunPersistence.on_job_complete：先生成随机标识（建议注入标识工厂），带这个标识 save_job_result；本机失败按 1、2、4 秒退避重试 3 次，每次用同一个标识，sleep 要可注入；成功之后再 update_job_state，写下带认领时刻与这个标识的终态 JobState。重试用尽就让异常冒出，schedule 先 _stop_all 再重抛，前台 run 以非零退出码结束。RunPersistence.finalize 去掉 try_finalize(result.status, message=...)：仍有未结束的 job 时调端口的结束写；判断使 run 成为终态的那次写是不是本进程写的（最后一次终态写，或这次结束写），是本进程写的才从记录组装 RunResult 生成报告；写不成时照旧抛 RunAlreadyEnded。本机后台推进进程的保存失败走同一套重试，但 reconcile.tick 也是云端 Lambda 在用、云端不重试，所以重试要放在本机这一侧：比如 compose.build_local_stores 与 detached.build_local_reconcile 给 ResultStore 套一层重试，或者从 tick 注入重试策略。重试用尽时异常穿过 run_reconcile_loop，后台推进进程退出。
-- 文件：core/gherkai_core/persist.py、core/gherkai_core/reconcile.py、runtime/gherkai_runtime/compose.py、runtime/gherkai_runtime/detached.py、cli/gherkai_cli/__main__.py、core/tests/test_persist.py、core/tests/test_reconcile.py、runtime/tests/test_detached_launcher.py、cli/tests/test_main.py
-- 先要有：端口的结束写入口（状态取法与结束写块，取代 try_finalize）；update_job_state 的新语义：run 已结束时写不成、终态只写一次、同一次写按取法写 run 状态（状态取法与结束写块）；点名-1（save_job_result 带标识）；点名-2（JobState 带标识）；从记录组装 RunResult 的那一处（报告块）
-- 必须同批：点名-1；点名-2；tick 一侧的生成标识、终态写点名与保存（逐 job 写序已随第二批第三笔落下，重试与前台同一套）；查看命令块 explain 改为按运行态里的标识读
-- 单独先落地的后果：只改 on_job_complete（标识、重试、点名）、finalize 先不动时，没有破窗：端口签名改动由点名-1 一起带进来，cli/tests/test_main.py 第 758 到 777 行断言 save_job_result 在每个 update_job_state 之前、try_finalize 在全部保存之后，仍然成立。finalize 改用结束写之后，前提是结束写入口已经在端口上，否则 core/tests/test_persist.py 与 cli/tests/test_main.py 里断言 try_finalize 的用例都会红。退出的那一半，现状本来就是「前台 run 保存失败就带着 running 的 job 退出、没有任何一方能结束它」，后台推进进程退出之后现在还能靠 status --wait 接力。只落这一条不会让产品比现在差，但「之后由 run 处置结束」要等 settle-runs 与 status --wait 处置上线才成立。
-- 验证：单测覆盖写序（保存先于终态写、标识一致）、重试次数与间隔（注入 sleep 与标识工厂）、三次都失败之后异常冒出、重试中途成功之后照常点名。0030 实测项 1、2 依赖真实进程与文件系统，单测不算证据，要在本机真实进程上核：真实的 gherkai run 与 gherkai submit --backend local（可以在跳板机上带引擎执行，也可以用 GHERKAI_WORKER_*_CMD 指向一个桩 worker），保存目录在中途短时不可写（注入一次失败）时，重试之后照常点名、进程不退出；一直不可写时，3 次重试之后进程退出、执行中的 job 留在 running，再由 status --wait 或 settle-runs 按「锁拿到了」一行处置。在存下明细之后、写下终态之前 SIGKILL 推进器，随后处置，explain 与报告不出现那份明细。后两项要等生命期锁与 run 处置上线才能核。
-- 备注：1）停手信号成立之后不存明细、不写终态，`finalize` 的结束写与从记录组装，已随第二批第二笔落下；余下的是标识、按标识保存、终态点名与本机重试。2）update_job_state 的返回值按 0030 决定四是「这次写之前 run 是否仍未结束」，从它看不出这次写是否使 run 成为终态。finalize 要知道「本进程的写使 run 成为终态」，可以这样推出：全部 job 的终态都由本进程写成并返回 True；或者让端口多返回一项。实装时要定，并核对 0030 决定四的签名注释。3）RunPersistence._lock 在退避期间一直持着，最长约 7 秒，会挡住其它 worker 线程的认领与 on_event 写；要考虑是否在锁外做保存与重试，同时保住同一进程里的写按调用次序落库。4）reconcile.tick 是本机与云端共用的。0030 决定三写的是「云端由流的重试或之后的触发再做」，重试不能放进 tick 本体，也不能放进 S3ResultStore。5）前台重试用尽之后现在会冒出原始 traceback。0030 只写「前台终端里另有存储错误」「非零退出码」，退出码要不要定成 1 是「写回时留下、实装之前要定的问题」里的第一条；产品面文案按 ADR 0039，要不要包成一句产品说明，拿不准。6）后台推进进程因异常退出时，drive_local_reconcile 里的 cleanup_tunnel 被跳过；隧道改到宿主进程里之后，这个问题随进程退出自然消失，在那之前要留意。7）位置里写的 reconcile.tick：逐 job 写序已随第二批第三笔落下（已有结果的 job 先存明细、再以一次终态写记下），这里余下的是 tick 一侧生成标识、终态写点名，以及报告改为按标识读明细（现在较早轮次的 job 按 scope_id 读回）。
+余下随别的块：
+- 0030 实测项 1 的「`status --wait` 按说明表『锁拿到了』一行处置」与实测项 2 的「随后被处置时 explain 与报告不出现那份明细、explain 从事件流补取」：要等生命期锁与 run 处置（见「run 处置」小结）与 explain 骨架（见「查看命令与机读输出」小结）。
+- 没被点名的明细只增不减，不读、不列、不清理；占用成为实际问题时按 0030「重议」条另议，到那时再定列举放在哪里。
+- 过渡状态与留给后面各批的事项分别记在「本机推进器、生命期锁与边界检查」「run 处置」「云端后端」「查看命令与机读输出」「隧道」各小结。
 
 ## 本机推进器、生命期锁与边界检查
 
@@ -177,6 +131,12 @@
 - 依赖真实操作系统行为的地方单测证明不了：目录 flock 在 macOS 与 Linux 上的语义、macOS 用 ctypes 调 fstatfs 的结构布局、Linux mountinfo 的解析、回报管道另一端关闭在两个平台上怎样查到。都要在 macOS 本机和跳板机（含容器）上用真实进程验证。
 - 处置不能早于锁上线。锁还没被持有时试拿一定成功，处置会把正在推进的 run 结束掉。
 - 隧道过渡期：没有 SDK 又删了接力之后，后台推进进程被 SIGKILL 时，ngrok 可执行文件没有任何一方去拆。
+
+判定明细点名那一批留下的过渡状态（只写在 code 的紧邻注释与这里，不进 ADR：本机接力在 0034 是被拒方案，隧道在 0035 的目标设计里随宿主进程消失），随删接力与隧道那两批删去：
+- 判定存储的装配入口 `compose.local_result_store` 由前台 `run`、后台推进进程与 `status --wait` 接力共用，接力同样带保存重试。
+- `status --wait` 接力在保存重试用尽或读写运行记录失败时打一句说明、以退出码 2 结束、不拆隧道（原来的后台推进进程可能仍在使用它）；`except OSError` 排在 `except detached.RunDefinitionMissing` 之后，「提交记录缺失」那一支照旧。
+- 后台推进进程（`_cmd_reconcile`）在同样的失败下打一句说明（写进 reconcile.log）、以退出码 1 结束，也不拆隧道：run 没有结束，说明请使用方用 `status --wait` 接着推进，接力方启动的 job 还要用这条隧道，隧道由接力走完之后拆。说明的后半句在删接力那一批随 run 处置改写。
+- 本机保存重试把后台一轮里「轮首取的时刻」与终态写之间的间隔拉长到每个 job 最多约 7 秒；两个推进方重叠时（后台推进进程与接力同时推进），run 的结束时刻可能早于另一方认领的 job 的认领时刻。只在判定存储写不进、又有接力同时推进时出现，本机只有一个推进器（生命期锁）之后消失，不在点名那一批处置。
 
 ### 线索没有覆盖的改动点
 
@@ -235,6 +195,11 @@
 对别的块的依赖：结束写入口（状态取法与结束写），生命期锁、试拿锁与边界检查（本机推进器与生命期锁），从记录组装报告（报告；它又依赖判定明细点名），写入序号与 kicker 定时触发（云端后端）。这一块在依赖链的末端。
 
 最大风险：生命期锁上线之前就接上「试拿锁拿到即处置」，会把正在执行的 run 结束（试拿锁永远成功）。这一点单测发现不了，靠真实进程才能暴露。其次是云端删 kickoff 早于后端到期结束，以及 dev 版本跳过 skew 闸时对没有写入序号的旧 STATE 做条件写。
+
+判定明细点名那一批之后：
+- 处置写成结束写之后直接调 `reconcile.write_report_from_record(meta, run_store, result_store, report_store, created_at=…)` 生成报告；明细一律按运行态里的标识读回（`named_details.load_named_details`），结束写不点名，处置记 aborted 的 job 存过的明细不被读，原来「处置不复用按 scope_id 的读回」的顾虑随之消失。
+- 0030 实测项 1 的后半（重试用尽、推进器退出之后，`status --wait` 按说明表「锁拿到了」一行处置）与实测项 2 的「随后被处置」（存下明细之后、写下终态之前被 SIGKILL，处置之后 explain 与报告不出现那份明细，explain 从事件流补取已执行的 step）归这一块与 explain 骨架。点名那一批只能核接力推进的形态：接力方另存一份并点名自己的那一份，被杀进程留下的那一份不被读。
+- `run` 发现 run 已被别处结束的出口现在在 stderr 给出判定明细目录的位置；点名之后目录里的文件名只是标识，其中可能有没被点名的一份。随这一块改为指向 `status` 与 `explain`（要先改 ADR 0054 决策五「说明与判定明细的位置写在 stderr」那一句）。
 
 ### 线索没有覆盖的改动点
 
@@ -313,7 +278,13 @@
 1. 写入序号：CLI（submit 的 create_run 写初值；status --wait 与 settle-runs 的结束写以序号为条件）和 Lambda（每次写加一）。新 CLI 配旧 Lambda 时，旧 Lambda 的写不加序号，新 CLI 的整体替换挡不住、可能盖掉 Lambda 刚写的 job 终态。所以云端处置要等 Lambda 重新部署之后才能用。
 2. 去掉 detached 分流：新后端配还能 `run --backend cloud` 的 CLI，会双开推进器（重复起 task、两方收尾），观察者也会给前台 run 写退出记录。所以 CLI 一侧删前台云端 run 要先于（或同于）这次部署。反方向没问题：新 CLI 的 submit 仍写 detached，旧后端照常触发。
 3. kickoff：新 CLI 删了 kickoff 而后端还没有到期结束时，推进链断开的云端 run 只能等用户一侧在期限加 300 秒之后处置。
-4. 点名明细（另一块）：旧 Lambda 不点名，新 CLI 的处置、报告与 explain 找不到明细。
+4. 点名明细（判定明细点名那一批已落 code，Lambda 侧要重新部署才生效）：旧 Lambda 不点名，新 CLI 的处置、报告与 explain 找不到明细，`status --json` 也没有 `result_id`。已部署的后端本来就读不了现在的提交记录，不做兼容；重新部署之前确认后端里没有执行中的 run（0018「云端后端」一块已记）。
+
+判定明细点名那一批留给这一块的：
+- 条件写已在服务端生效而响应丢失、SDK 重发被写入序号挡下时（0034 机制三④「代价」一条），点名之后可以凭本方的标识认出这次写已经落下：重读到的每个给出的 job 都是终态、标识都等于本方给出的值。要不要据此把 `ALREADY_ENDED` 改认成本方写成、判据够不够严（别的写入方不会写出相同的标识，但这一组 job 是不是这次写使 run 成为终态还要另判），在这一批定。
+- 带 `result_id` 的 STATE 条目大小：每个被点名的 job 约多 25 字节，按 0034 机制三②的样本估算单条记录容纳的 job 数约减少 8%；结束写能写成的 job 数上限要按含标识与 job 级说明的实际项大小在真 DynamoDB 上重测。
+- 报告逐个读明细的耗时与到点触发那次调用的 30 秒预算：见「状态取法与结束写」小结的代价一条。
+- 部署之后的核对项（Lambda 写带标识的键、两次调用重叠时 explain 与报告取写成终态那一方的、没有 `s3:ListBucket` 的 explain）记在 0018「云端后端」一块。
 
 版本 skew 闸在发行版之间能挡住版本不一致，但开发期各提交的版本号相同，挡不住「代码新、部署旧」。每个改了云端的批之后，要等 owner 重新部署，再做云端验证。
 
@@ -339,7 +310,7 @@
 - 线索：STATE 条目带写入序号，每次写加一；记下 job 终态的写与结束写以「序号等于读到的值」为条件
 - 要做的：DynamoDBRunStore 的 STATE 加一个数值属性，名字由实装定，下称 write_seq。create_run 的 `_state_item` 把它写成 0；try_claim_job、project_state 的标量一步与每次逐 job 写、update_job_state 的非终态写，都在 UpdateExpression 里给它加一。记下 job 终态的写与结束写改成：强一致读 STATE，在内存里按取法算出整份 jobs Map（带点名标识）、run status、status_group，成为终态时连同 ended_at 与 message，再写 `SET jobs = :jobs, write_seq = :n+1 …`，条件是 `write_seq = :n AND #st IN (pending, running)`；条件不成立就重读再算。删去 try_finalize 的 expected_claim_count 分支，删去 update_job_state 在 run 已结束时只写 job 的第二次写。认领计数（#cc）只作诊断键保留。
 - 文件：core/gherkai_core/adapters/run_store/ddb.py、core/gherkai_core/ports.py、core/gherkai_core/model.py、core/gherkai_core/adapters/run_store/local.py、core/tests/test_conditional_writes.py、core/tests/test_ddb_run_store.py、core/tests/test_cloud_integration.py、core/tests/test_status_group.py、core/tests/test_cloud_reconcile.py
-- 先要有：端口上的结束写入口与 update_job_state 新语义（状态取法块，方法名与参数在 ports.py 定）；run 状态取法函数（取代 run_verdict 与 projected_run_status）；JobState 带点名标识（判定明细点名块）：整体替换的 jobs Map 要带上它
+- 先要有：端口上的结束写入口与 update_job_state 新语义（状态取法块，方法名与参数在 ports.py 定）；run 状态取法函数（取代 run_verdict 与 projected_run_status）；JobState 带点名标识（判定明细点名块，已落下）：整体替换的 jobs Map 要带上它
 - 必须同批：local adapter 的同名端口改动：两端对拍在 test_conditional_writes.py 的同一组参数化里；reconcile.tick 改成逐 job 终态写，到期的结束写以这一轮读到的序号为条件（0034 实测项 7 的 DDB 用例 test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb）；「状态投影只推进运行态」：同一组 update_item 上要把 project_state 写 job 终态的分支删掉，run 级 running 从标量一步挪到逐 job 写；Lambda 重新部署：ddb.py 随 Lambda asset 打包，重新部署后才生效
 - 单独先落地的后果：只改 DDB 一侧时，test_conditional_writes 的 local 与 moto 对拍立即不一致，测试变红。只加「每次写加一」、不改条件时测试不红，但 ADR 要的保证没有兑现：回退写和 expected_claim_count 都还在。部署层面：CLI 立刻用上新 adapter，已部署的 Lambda 在重新部署之前仍是旧 adapter，写的时候不加序号。新 CLI 做云端处置的结束写时，以序号为条件挡不住旧 Lambda 在它读之后落下的终态写，整体替换会把那次终态盖掉。
 - 验证：moto 与本机对拍的单测只能证明表达式与条件写在 moto 里成立，不够。按 0034 机制三②的实测项，要在真 DynamoDB 上重做，用例加进 core/tests/test_cloud_integration.py（real_aws）：两个进程拿同一序号并发写，恰好一方写成，另一方重读重算后写成，恰好一方使 run 成为终态；几百个 job 的结束写与终态写都能写成（按实际 job 项大小，含点名标识）。重新部署之后，经 Lambda 再核一次只有一方生成报告。整体替换的写单位可以用 tools/ddb_capacity.py 核。
@@ -432,9 +403,14 @@
 1. 先做查看-3 与查看-5 的头部读取扩展（peek_definition_header 与 RunListing 带 deadline_at）。它们只读 META 和 run_meta.json 里已有的属性，不依赖新的写入设计，可以先落；两列与 deadline_at 键可以同批。
 2. 查看-4 的期限提示、FOREGROUND_RUN_NOTE 的删除、删 pending 接力提示，要与 run 处置块（settle-runs、status --wait 处置、300 秒常量）和删本机接力同批落，或排在它们之后。
 3. 查看-6 排在锁块的边界检查函数之后。
-4. 查看-7 与判定明细点名块（端口去掉 load_all）同批落，查看-8 随查看-7。
+4. 查看-7 的读法部分已随判定明细点名那一批落下（见查看-7 的进度），余下的骨架改造是 explain 骨架那一批，查看-8 随它。
 
-对别的块的依赖：状态取法与结束写（取法函数、结束写、JobState.message）、判定明细点名（JobState 标识、按标识读、去 load_all）、报告（从记录组装）、本机推进器与边界检查、run 处置（settle-runs、300 秒判断）、删本机接力。云端一侧，status 的点名键和 explain 读点名明细、补取 aborted job 的真实验证，要等推进器 Lambda 重新部署之后才能做。这一块的读取改动本身（META 投影、BatchGetItem 投影多带 deadline_at）只读已有属性，不需要重新部署。
+判定明细点名那一批之后 explain 的过渡缺口（如实记下，不写成符合 ADR；都留到 explain 以 job 定义为骨架的那一批）：
+- 不点名 scope 时只列运行态里被点名的 job，由结束写结束的 job 不列出；ADR 0042 决策四要求列出它的状态与说明，现在只有点名这个 scope 时才给（三个键，状态与说明取运行态）。契约页 explain 一节与用户文档按现状写了「不点名时不列出」。
+- 存过明细却由结束写结束的 job（两个推进方对运行定义一个读得懂、一个读不懂时的残余，以及以后由 run 处置结束的 job）只给状态与说明三个键，存储里那份没被点名的明细不读；它已执行的 step 要等骨架那一批从事件流补取。这是信息少了、不是错了：此前把残留明细当成判定列出，正是 0030 决定三拒绝的形态。
+- 不点名 scope 时的次序由「按编码后的文件名」改为「按 scope_id」，两个后端规则相同；按运行定义排序随骨架那一批做。
+
+对别的块的依赖：状态取法与结束写（取法函数、结束写、JobState.message）、报告（从记录组装）、本机推进器与边界检查、run 处置（settle-runs、300 秒判断）、删本机接力。云端一侧，status 的点名键和 explain 读点名明细、补取 aborted job 的真实验证，要等推进器 Lambda 重新部署之后才能做。这一块的读取改动本身（META 投影、BatchGetItem 投影多带 deadline_at）只读已有属性，不需要重新部署。
 
 最大的风险：
 - 由结束写结束的 job 没有 JobResult，RunResult 用什么数据结构承载这类 job，ADR 只写了输出语义、没有定。run --json、文本汇总、报告、explain 四处都要从同一份组装出来，定错会让这几处各写一份。
@@ -456,12 +432,13 @@
 #### 查看-3（mixed，M）
 
 - 线索：`status --json` 的 jobs[] 每项带这个 job 终态点名的明细标识
-- 要做的：jobs[] 的点名标识一项，只要 serialize.run_state_to_dict 写出 JobState 的点名键（点名块的线索），status --json 就会自动带上。deadline_at 要新增读取：把 RunStore.peek_definition_header 扩成同时返回 deadline_at（本机 run_meta.json 已经整份解析过；云端 META 的顶层已有 deadline_at，ProjectionExpression 加上这一项即可），_definition_header_gate 把头部交回调用方，_render_status 在 JSON 顶层加 deadline_at，读不到就省键。
+- 进度：jobs[] 的点名标识 `result_id` 已随判定明细点名那一批落下（serialize 写出即自动带上，契约页 status 一节与 test_status_json_keys_are_documented 同提交登记）；余下 deadline_at 一半，与查看-5 同批。
+- 要做的：deadline_at 要新增读取：把 RunStore.peek_definition_header 扩成同时返回 deadline_at（本机 run_meta.json 已经整份解析过；云端 META 的顶层已有 deadline_at，ProjectionExpression 加上这一项即可），_definition_header_gate 把头部交回调用方，_render_status 在 JSON 顶层加 deadline_at，读不到就省键。
 - 文件：core/gherkai_core/ports.py、core/gherkai_core/adapters/run_store/local.py、core/gherkai_core/adapters/run_store/ddb.py、cli/gherkai_cli/__main__.py、docs/internals/cli-json-contract.md、cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md、cli/tests/test_cli_json_contract.py、core/tests/test_stores.py、core/tests/test_ddb_run_store.py
-- 先要有：运行态的点名标识（判定明细点名块，JobState 与 serialize 的那一条）
-- 必须同批：契约页 status 一节加 deadline_at 与点名标识两行（test_status_json_keys_are_documented 按真渲染器收集键，文档漏写即红）
-- 单独先落地的后果：只做 deadline_at 时没有影响，契约页同一提交补上即可。点名标识要等点名块落地之后才出现。
-- 验证：单测够：本机文件 store 与 moto 上的头部读取都覆盖 deadline_at，契约护栏收集键名。云端 jobs Map 里真带点名键，要等推进器 Lambda 按新写序写下明细并点名之后，在重新部署的云端上执行 status --json 核一次。deadline_at 只读 META 上已有的属性，不需要重新部署。
+- 先要有：无
+- 必须同批：契约页 status 一节加 deadline_at 一行（test_status_json_keys_are_documented 按真渲染器收集键，文档漏写即红）
+- 单独先落地的后果：没有影响，契约页同一提交补上即可。
+- 验证：单测够：本机文件 store 与 moto 上的头部读取都覆盖 deadline_at，契约护栏收集键名。deadline_at 只读 META 上已有的属性，不需要重新部署。云端 jobs Map 里真带点名键的核对记在 0018「云端后端」一块。
 - 备注：头部读取扩成三项，要连带改 `_definition_header_gate` 和 `_definition_schema_gate` 的签名、`require_listing_header`，以及 list-runs 的 RunListing.header（查看-5 也要这次读取，两条宜同一批）。「_render_status 拿到 deadline_at」也是查看-4 的前提。status --json 的 RunState 部分要不要也带 job 级说明（JobState.message 写出之后会自动出现），ADR 0041 决策三没有提，契约页要写明。
 
 #### 查看-4（code，M）
@@ -500,14 +477,14 @@
 #### 查看-7（code，L）
 
 - 线索：explain：先经 RunStore 读运行定义与运行态
-- 进度：第二笔加了一个小分支：点名的 scope 在运行态里已结束而没有判定明细（由结束写结束的 job）时，按运行态给出状态与说明、以退出码 0 结束，`--json` 的 `scopes[]` 只有这一项三个键。其余照旧。
-- 要做的：_cmd_explain 与 _explain_cloud 在头部闸之后读 load_run_meta（job 定义）与 load_run_state，按运行态里各 job 的点名标识用 ResultStore 取那一份明细，删去 load_all。运行态里未结束的 job 不进文档；由结束写结束的 job 以 job 定义为骨架，状态与说明取运行态，记 aborted 的经 _explain_recover 从事件流补取已执行的 step。_explain_emit 的空文档与 scope_id 分支按运行态判断：没有已结束的 job 时退 0，只打「判定明细尚未落地」加整条 status --wait 命令；给了 scope_id 而它还没结束时退 0 并提示；scope_id 不在定义里才退 2，候选清单取自运行定义。删去「本 run 没有任何 job 的判定明细」，云端删去「不给 scope_id 时还需列举对象的权限」的说法。
+- 进度：第二笔加了一个小分支：点名的 scope 在运行态里已结束而没有判定明细（由结束写结束的 job）时，按运行态给出状态与说明、以退出码 0 结束，`--json` 的 `scopes[]` 只有这一项三个键。第三批之前的修补改为先看运行态：未结束的 job 不读、不展示。判定明细点名那一批落下了读法：只按运行态里的点名标识经 `named_details.load_named_details` 取那一份，`load_all` 删去；不点名 scope 时只列被点名的 job、按 scope_id 排序；「未找到 scope」的候选取运行态；被点名而读不到时打一句说明、以退出码 2 结束；云端说明删去「不给 scope_id 时还需列举对象的权限」。过渡缺口见本块小结。
+- 要做的（余下的骨架改造）：_cmd_explain 与 _explain_cloud 在头部闸之后读 load_run_meta（job 定义）。由结束写结束的 job 以 job 定义为骨架、不点名 scope 时同样列出，状态与说明取运行态，记 aborted 的经 _explain_recover 从事件流补取已执行的 step。_explain_emit 的空文档与 scope_id 分支按运行态判断：没有已结束的 job 时退 0，只打「判定明细尚未落地」加整条 status --wait 命令；给了 scope_id 而它还没结束时退 0 并提示；scope_id 不在定义里才退 2，候选清单取自运行定义；不点名 scope 时按运行定义的次序排列；scope 级 status 取运行态；无明细分支怎样处理 `--scenario` 与 `--step` 一并定（见「状态取法与结束写」小结「前几笔的复核与集成」一条）。删去「本 run 没有任何 job 的判定明细」。
 - 文件：cli/gherkai_cli/__main__.py、cli/gherkai_cli/render.py、cli/tests/test_main.py、cli/tests/test_render.py、docs/internals/cli-json-contract.md、docs/internals/verdict-model.md
-- 先要有：ResultStore 按点名标识读明细、端口去掉 load_all（判定明细点名块）；运行态的点名标识与 JobState 带 job 级说明（判定明细点名块、状态取法与结束写块）；结束写入口（由结束写记 aborted 或 skipped 的 job 要由它产生）
-- 必须同批：判定明细点名块的端口一条（它删去 load_all，explain 是 load_all 在 CLI 里唯一的调用方，两边要同一批）；用户文档与 0033 编排进程角色里 explain 的云端权限（不需要 s3:ListBucket）；若「判定明细尚未落地」的原文改了，同一提交改 0031 决定一·补里 TERMINAL_STATUSES 的消费方清单
-- 单独先落地的后果：在点名标识与结束写落地之前做不成：没有标识可按，运行态里也没有 job 说明。要是先删 load_all 而 explain 不改，explain 会坏（AttributeError）。test_main 里的 explain 用例大量依赖带 load_all 的假 ResultStore（如第 3161 行、第 3547 行），要整体改写。
+- 先要有：都已落下（按点名标识读明细、JobState 的点名标识与 job 级说明、结束写入口）
+- 必须同批：0033 编排进程角色里 explain 的云端权限（读对象，不需要 s3:ListBucket；登记与否见 0018「写回时留下、实装之前要定的问题」）；若「判定明细尚未落地」的原文改了，同一提交改 0031 决定一·补里 TERMINAL_STATUSES 的消费方清单
+- 单独先落地的后果：骨架改造可以单独一批：读法已经只按运行态取，改造只多读运行定义、多列出由结束写结束的 job，不影响已有的读者。
 - 验证：本机的骨架、补取、scope_id 各分支用单测（fake store 与真本机文件 store 加 SqliteEventLog）。云端两项依赖重新部署之后的真实后端：推进器按新写序点名明细；由后端到期结束或处置记 aborted 的 job 能从 events 表补取 step；以一份不含 s3:ListBucket 的真实 IAM 策略执行 explain 不带 scope_id，确认不再需要列举权限。
-- 备注：①现在 _definition_header_gate 只读头部；改读整份 load_run_meta 之后，同版本下的形态违约会在这里抛 DefinitionContractError（本机 run_meta_from_dict），要接住、以退出码 2 结束，否则用户终端会看到回溯。②由结束写结束的 job 没有 JobResult。最省事的做法是合成一个只有 job、status、message、空 scenarios 的 JobResult 交给 explain_to_dict，这样 _needs_recovery 与补取路径原样可用；它与报告块「从记录组装 RunResult」该是同一处组装，不要另写一份。③云端 load_run_meta 在运行定义卸载到 S3 时要多一次 GetObject，0042 决策四写的权限已含桶 s3:GetObject。④_explain_emit 的 docstring 讲「带 scope_id 只 load_job_result、不带才 load_all」，第 2627 至 2630 行的注释讲「后台 run 一次收尾尝试落下判定明细」，都随改。
+- 备注：①现在 _definition_header_gate 只读头部；改读整份 load_run_meta 之后，同版本下的形态违约会在这里抛 DefinitionContractError（本机 run_meta_from_dict），要接住、以退出码 2 结束，否则用户终端会看到回溯。②由结束写结束的 job 没有 JobResult。最省事的做法是合成一个只有 job、status、message、空 scenarios 的 JobResult 交给 explain_to_dict，这样 _needs_recovery 与补取路径原样可用；它与报告块「从记录组装 RunResult」该是同一处组装，不要另写一份。③云端 load_run_meta 在运行定义卸载到 S3 时要多一次 GetObject，0042 决策四写的权限已含桶 s3:GetObject。④_explain_emit 的 docstring 与按 load_all 读的注释已随判定明细点名那一批改。
 
 #### 查看-8（code，S）
 
@@ -529,7 +506,7 @@
 内部次序：先定 RunResult 怎样携带由结束写结束的 job，再改组装入口和调用方，渲染随后。两条必须在同一批落地。
 
 对别的块的依赖很重，基本排在最后：
-- 判定明细点名：按标识读明细，JobState 带标识。
+- 判定明细点名（已落下）：按标识读明细，JobState 带标识。
 - 结束写：JobState 带 job 级说明，前台没有启动的 job 由结束写记 skipped。
 - 状态取法：update_job_state 的新语义，后台逐 job 写序下 COMMITTED 的新含义。
 
@@ -551,11 +528,11 @@
 #### 报告-1（mixed，L）
 
 - 线索：报告只由使 run 成为终态的那次写的写入方生成，生成时从记录组装 RunResult
-- 进度：第二笔已落下组装与生成方：`project.assemble_run_result` 是唯一的组装处（每个 job 一个 `JobOutcome`，状态取运行态、有明细的附上明细），前台由 `RunPersistence.finalize` 在本进程使 run 成为终态之后读一次运行态组装，后台由收到 COMMITTED 的宿主经 `reconcile.write_report_from_record` 组装，`TickResult.result` 改为 `details`，`compose.run_duration_ms` 移进 core；index.html 与文本汇总按运行态显示由结束写结束的 job、删去「没有执行」（原报告-2）。余下：明细改为按运行态里点名的标识从 ResultStore 读（现在前台用本进程存下的、后台用这一轮的），处置方与云端后端到期写成结束写之后调用同一入口。
+- 进度：第二笔已落下组装与生成方：`project.assemble_run_result` 是唯一的组装处（每个 job 一个 `JobOutcome`，状态取运行态、有明细的附上明细），前台由 `RunPersistence.finalize` 在本进程使 run 成为终态之后读一次运行态组装，后台由收到 COMMITTED 的宿主经 `reconcile.write_report_from_record` 组装，`TickResult.result` 改为 `details`，`compose.run_duration_ms` 移进 core；index.html 与文本汇总按运行态显示由结束写结束的 job、删去「没有执行」（原报告-2）。判定明细点名那一批把明细改为一律按运行态里点名的标识从 ResultStore 读回（前台 finalize 与后台 `write_report_from_record(meta, run_store, result_store, report_store, created_at=…)` 都经 `named_details.load_named_details`），`TickResult` 连同 `details` 删去；下面备注③定为读不到即按记录残缺失败（前台走存储失败出口里「记录已是终态」的说明，后台在失败隔离之内不生成报告），备注④随之消失（前台不再用内存里的明细）。余下：处置方与云端后端到期写成结束写之后调用同一入口（run 处置批、云端批）；备注⑥ reconciler 的注释随处置批改。
 - 要做的：在 core 新增一处「从记录组装 RunResult」的函数：读 RunMeta 与 RunState，按运行定义的次序逐 job 处理。终态带点名标识的 job，按标识经 ResultStore 读那一份明细，状态改取运行态；终态不带标识的 job（由结束写结束）只带 Job 与运行态里的状态和说明。run 级 status、message 取运行态，合计四键用 project.run_totals 重算，run 级墙钟取 started_at 到 ended_at。用一个新入口取代 reconcile.finalize_report(result, report_store, created_at, run_duration_ms)，形如 write_report_from_record(run_id, run_store, result_store, report_store, created_at)：读记录、组装、ReportStore.write 整段放在失败隔离里（0034 机制三步骤④写明「为生成而读记录的那一次同样在隔离之内」）。删去 TickResult.result 及 __post_init__ 里「COMMITTED 必带结果」的不变量，COMMITTED 只表示这一方的写使 run 成为终态。调用方改为四处：RunPersistence.finalize（本进程的写使 run 成为终态时调用，返回 index 的 URI）、detached.run_reconcile_loop 的 COMMITTED 分支、reconciler._tick_runs 的 COMMITTED 分支，以及处置方（settle-runs、等待中的 status --wait 写成结束写之后）。两个宿主里单独读 RunState 求 duration 的那段隔离代码随之并入新入口。docstring 一并改：ReportStore 类与 write 的「可从 RunResult 完全重建」改为「从记录生成」，RunPersistence.finalize 删去「报告可后续从 RunResult 重建」，finalize_report、TickOutcome、TickResult、_finalize 步骤④、run_reconcile_loop 里讲「用 tick 交还的结果写报告」的说法，以及 compose.run_duration_ms docstring 里的「宿主在 finalize_report 前调」。
 - 文件：core/gherkai_core/reconcile.py、core/gherkai_core/persist.py、core/gherkai_core/ports.py、core/gherkai_core/model.py、core/gherkai_core/project.py、runtime/gherkai_runtime/detached.py、runtime/gherkai_runtime/compose.py、deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py、cli/gherkai_cli/__main__.py、core/tests/test_reconcile.py、core/tests/test_persist.py、runtime/tests/test_detached_launcher.py、deploy_aws/tests/test_lambda_handlers.py
-- 先要有：判定明细点名：ResultStore 按标识读明细（load_job_result 加标识参数、去掉 load_all），JobState 带点名标识，serialize 与两个 RunStore adapter 读写这个键；结束写入口与 JobState 的 job 级说明字段：由结束写结束的 job 的状态与说明要在运行态里（JobState 现在没有 message 字段）；update_job_state 的新语义：run 状态按取法随写落下，job 终态只写一次，写入方能确定这次写是否使 run 成为终态；后台推进的逐 job 写序：tick 的 COMMITTED 改为「记下最后一批终态的写或到期的结束写由本方写成」，不再由 _finalize 一次收尾给出
-- 必须同批：测试块里 K2 的三个测试（test_report_comes_from_the_committed_result_not_from_a_second_read_of_the_events、test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots、test_tick_runs_writes_the_report_from_the_committed_tick_result）；前台 run 的输出改为读记录（查看命令块里 run --json 的 jobs[]）：_cmd_run 的汇总与报告应当出自同一份组装结果；随所改行为的技术文档（core/DEVELOPMENT.md 的 project.py 与 reconcile.py 条目、docs/internals/artifacts-and-evidence.md 讲「可重建」的两处）
+- 先要有（都已落下）：判定明细点名：ResultStore 按标识读明细（load_job_result 加标识参数、去掉 load_all），JobState 带点名标识，serialize 与两个 RunStore adapter 读写这个键；结束写入口与 JobState 的 job 级说明字段：由结束写结束的 job 的状态与说明要在运行态里（JobState 现在没有 message 字段）；update_job_state 的新语义：run 状态按取法随写落下，job 终态只写一次，写入方能确定这次写是否使 run 成为终态；后台推进的逐 job 写序：tick 的 COMMITTED 改为「记下最后一批终态的写或到期的结束写由本方写成」，不再由 _finalize 一次收尾给出
+- 必须同批：测试块里 K2 的三个测试（test_report_comes_from_the_record_and_the_named_details_not_from_a_second_read_of_the_events、test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots、test_tick_runs_writes_the_report_from_the_record_when_its_tick_commits）；前台 run 的输出改为读记录（查看命令块里 run --json 的 jobs[]）：_cmd_run 的汇总与报告应当出自同一份组装结果；随所改行为的技术文档（core/DEVELOPMENT.md 的 project.py 与 reconcile.py 条目、docs/internals/artifacts-and-evidence.md 讲「可重建」的两处）
 - 单独先落地的后果：在点名之前单独落地：组装只能按 scope_id 读明细，而现在的 _finalize 不论条件写成不成都先存明细、覆盖同 key，云端两次调用重叠时报告可能取到没写成终态那一方的明细，与记录里的终态不一致（现在靠 TickResult.result 避开了这个问题，test_report_follows_the_committing_round 的文档串写明「B 落下的判定明细与 A 的谁留在存储里不在断言之内」）。在结束写之前单独落地：因期限没有启动的 job 在运行态里停在 pending，从记录组装出来就是 pending。test_reconcile 里构造 TickResult(COMMITTED, result) 与读 done.result 的用例、test_detached_launcher 与 test_lambda_handlers 里的报告用例、test_persist 的 finalize 用例都会变红。
 - 验证：组装逻辑（读哪一份明细、状态取运行态、次序、合计）、四处调用方各自在什么时候生成或不生成报告、失败隔离：单测就够，本机文件 adapter 与 moto 两侧都要有用例。「只有一方生成报告」依赖真实并发与条件写，单测不算证据：云端要在重新部署之后，经 Lambda 的代码在真 DynamoDB 上重做并发与几百个 job 的结束写（0034 机制三②的实测项）。本机要真实执行：后台推进进程在 job 结束之后被 SIGKILL，再由 settle-runs 处置，核对报告由处置方从记录生成，明细取被点名的那一份。还要在跳板机上带引擎真实执行一次前台 run 与一次 submit --backend local，核对报告里的 report_refs、合计与运行态一致。
 - 备注：①0030 决定四规定 update_job_state 返回的是「run 在这次写之前是否仍未结束」，不是「这次写是否使 run 成为终态」。RunPersistence.finalize 要回答「本进程的写使 run 成为终态」，只能自己推出（每个 job 都由本进程写成终态且返回 True，最后一次就是使 run 成为终态的那次；或者结束写写成），否则端口要多返回一项。要先定下来：处置方在前台两次写之间落下结束写时，靠读回判断会让两方都生成报告。tick 一侧有同样的问题。②墙钟口径：0024「三级执行时长」写的是同步 run 的 run 级时长由 schedule 整体包住，只有 detached 取 RunState 的 started_at 到 ended_at。从记录组装之后前台取哪一个没有写，要么前台把内存里测的时长传进来，要么改 0024。③被点名的明细读不出（文件缺失或损坏）时怎样处理没有写；按失败隔离处理就是没有报告，也可以把这个 job 当作没有明细来显示，要定。④组装结果里由执行结果结束的 job 按什么次序排没有写（0027 只规定由结束写结束的 job 排在后面、按运行定义的次序）；现在前台按完成先后，后台按 project_full 的次序。⑤RunPersistence.finalize(result, ended_at) 的 result 参数在新设计里不再用来生成报告，结束写要的是来路的说明，接口形态随结束写块一起定。⑥reconciler.py 第 506 行注释写「finalize_report 只有本 Lambda 与 detached 宿主两个调用点」，改完之后不成立（前台与处置方也调用），要改。⑦Lambda 一侧的改动要重新部署才会生效。core 的入口改名会迫使 reconciler.py 与它的测试在同一批里改，部署可以排在云端那一批。
@@ -564,11 +541,11 @@
 
 ### 小结
 
-整体改动量 L：涉及 4 个包、约 20 个测试文件，几百行以上。线索列的只是受影响测试的一部分，下面 missing 里的连带改动（try_finalize 全量迁移、到期语义、job 级 skipped、load_all）比线索点名的更多。所有被点名的符号都在 code 里找到了，没有改名。
+整体改动量 L：涉及 4 个包、约 20 个测试文件，几百行以上。线索列的只是受影响测试的一部分，下面 missing 里的连带改动（try_finalize 全量迁移、到期语义、job 级 skipped；load_all 的那两条已随判定明细点名那一批做掉、删去）比线索点名的更多。所有被点名的符号都在 code 里找到了，没有改名。
 
 这一块本身没有独立的先后次序，各条跟着自己那一块的 code 批次走：
 - 测-8 不依赖 code，可以随任何一批落地。
-- 测-2（moto 与本机部分）、测-4（本机部分）、测-5 跟着「状态取法与结束写」块（测-1、测-6 已随第二批做完、删去）。其中测-3 另跟「报告」块，测-2 的点名标识跟「判定明细」块。这是第一个大批，core 之内的测试量最大。
+- 测-2（moto 与本机部分）、测-4（本机部分）、测-5 跟着「状态取法与结束写」块（测-1、测-6 已随第二批做完、删去）。其中测-3 另跟「报告」块；测-2 里点名标识的两端对拍（第二次终态写不改写第一次的点名、结束写与执行中的写保留点名）已随判定明细点名那一批补上。这是第一个大批，core 之内的测试量最大。
 - 测-12 的本机部分跟「本机推进器与锁」块的删接力，按次序约束要排在生命期锁与 run 处置之后或同批。
 - 测-9 跟「run 处置」块的 settle-runs（CLOUD 四个键那一半已随「云端只支持 submit」那一批做完）。
 - 测-11 只剩 kickoff，跟「run 处置」块，按次序约束要与后端到期结束同批或在其后（前台云端 run 与 resolve_network 那一半已随「云端只支持 submit」那一批做完）。
@@ -578,8 +555,6 @@
 
 ### 线索没有覆盖的改动点
 
-- core/tests/test_cloud_integration.py 的 test_s3_result_store_round_trip_real 调 load_all，要改为按点名读（依据 0030 决定三「点名」条）。
-- ResultStore 去掉 load_all、改为点名读（依据 0030 决定三「点名」条、决定六 ResultStore 段），这一块没有列对应的测试改动。要改的：core/tests/test_s3_result_store.py（19 处）、test_persist.py（4 处）、test_local_result_store_atomic.py（含模块文档串「后写的盖掉先写的」）、test_stores.py；cli/tests/test_main.py（5 处）。
 - handler 分流与清扫的测试，线索没有列全（依据 0034 端到端 cloud 1b、0054 决策九第 1、2 条）。①deploy_aws/tests/test_lambda_handlers.py 的 test_kicker_timeout_path_skips_tick_when_not_detached（767 行）、test_exit_observer_skips_non_detached_run 与 test_exit_observer_records_exit_for_detached_run（1174、1182 行），以及全文件 _seed_run 的 detached 参数。②「已收尾的 run 再被触发时 handler 整体 no-op」一节（1021 行起，含 test_finished_run_is_not_reprojected_by_a_late_or_replayed_event、test_timeout_payload_on_a_finished_run_is_a_noop）：新设计下已结束的 run 要清扫（按 startedBy 列 task、逐个停掉），断言要改。③kicker 建两次一次性定时触发、到点复查墙钟、run 已结束时只清扫，需要新增用例。
 - deploy_aws/tests/test_stack.py 要新增定时触发与清扫的模板断言（依据 0054 决策九末段权限、0033 资源清单 15），test_reconciler_and_kicker_have_the_same_permission_face（989 行）随之核对。要断言的权限：Scheduler 资源域、推进 Lambda 角色上的 ecs:ListTasks、ecs:StopTask、scheduler:CreateSchedule 与 iam:PassRole。定时触发的名字形态与资源域在 journey 里标为待定，这些断言要等它定下。
 - cli 一侧接力与 detached 门控的用例，线索没有列（依据 0034 被拒方案「本机接力，及其改法」、0041 决策七「人读形态」、0054 决策八 status --wait 条）。cli/tests/test_main.py：test_status_wait_on_a_foreground_run_only_waits_and_never_relays（3339 行）、test_status_pending_hint_offers_relay_only_for_detached_runs（3392 行）、test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay（3879 行）。cli/tests/test_project_config.py：test_local_relay_host_reads_definition_not_the_config_file（901 行）。cli/tests/test_backend_cloud.py：test_status_wait_cloud_only_waits_for_a_run_that_is_not_detached（764 行）、test_status_cloud_pending_hint_offers_relay_only_for_detached_runs_and_stays_quiet_when_the_marker_is_unreadable（793 行）、test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read（820 行）。
@@ -723,6 +698,8 @@
 - SDK 与推进循环、读事件线程长期共存（实测项 13）。
 - 大量 submit 单测假定 submit 自己落库，要把测试接缝移到「启动后台推进进程」这一处，改写量容易低估。
 
+判定明细点名那一批留下的按进程号拆隧道的过渡状态（只写在 code 的紧邻注释与这里，不进 ADR）：后台推进进程在保存重试用尽或读写运行记录失败时的出口不拆隧道，`status --wait` 接力的同一出口也不拆，隧道由接力走完之后拆；隧道建在宿主进程里之后随进程退出消失，这两处不拆的说明随之删去（明细见「本机推进器、生命期锁与边界检查」小结的过渡状态）。
+
 ### 线索没有覆盖的改动点
 
 - 前台 run 与运行定义的次序：ADR 0035 决策 3「前台 run」与 0054 决策二「落点是运行定义」要求先取创建时刻、算期限，再起隧道（起隧道要用到点时刻），然后生成运行定义。现在 cli/gherkai_cli/__main__.py 的 _cmd_run 先 _setup_tunnel 再 _build_run_meta，而 _build_run_meta 内部自己 compose.now_iso() 取 created_at。要把 _build_run_meta 改为收调用方给的 created_at（云端还要合入 _worker_meta_fields），让 _cmd_run 与两种 submit 在起隧道之前取时刻；_cmd_run 里的 atexit.register(stop_tunnel, tunnel_info.pid) 改为注册关闭会话，上方「可手动结束来兜底」的注释随之改。这一块的线索只写了两种 submit，没写前台 run。
@@ -818,16 +795,15 @@
 
 ### 小结
 
-这一块余下 8 条（注释-10 已随「云端只支持 submit」那一批做完，注释-1、注释-4 已随第二批做完），都是跟着别的块的 code 改动走的注释、文档串与 DEVELOPMENT.md 改写。改动量小：多数条 S，注释-5、注释-7、注释-11 是 M，合计约 200 到 300 行注释，散在 core、runtime、cli、deploy_aws 约 25 个文件里。只有注释-11 的 deadline.py 是真正的 code 改动（210 秒常量从 tunnel_host 搬进 deadline.py），也只有它可以先于对应块单独落地。其余每条都不能先落：注释描述的是目标行为，code 一天不改，先改注释就与 code 相反；也不能晚落：符号一删，注释就悬空。所以块内没有先后次序，每条随它所跟的块同一提交。
+这一块余下 7 条（注释-10 已随「云端只支持 submit」那一批做完，注释-1、注释-4 已随第二批做完，注释-6 已随判定明细点名那一批做完），都是跟着别的块的 code 改动走的注释、文档串与 DEVELOPMENT.md 改写。改动量小：多数条 S，注释-5、注释-7、注释-11 是 M，合计约 200 到 300 行注释，散在 core、runtime、cli、deploy_aws 约 25 个文件里。只有注释-11 的 deadline.py 是真正的 code 改动（210 秒常量从 tunnel_host 搬进 deadline.py），也只有它可以先于对应块单独落地。其余每条都不能先落：注释描述的是目标行为，code 一天不改，先改注释就与 code 相反；也不能晚落：符号一删，注释就悬空。所以块内没有先后次序，每条随它所跟的块同一提交。
 
-对别块的依赖与归属：注释-2、5 跟「状态取法与结束写」块（结束写入口、project_state 只推进、前台未启动的 job），注释-5、6 另跟「判定明细点名与落库写序」块，注释-2 另跟「报告」块。注释-7 本机那半跟「本机推进器、生命期锁」块的删接力和「run 处置」块；云端那半（_status_cloud、status help 的云端半句）跟 kickoff 删除走，受次序约束，要与后端到期结束 run 同批或在其后，也就是云端重新部署那一批。注释-8 跟「云端后端」块的流过滤与不分流（要重新部署），其中 test_main 那条跟本机 submit 新流程。注释-9 只是指针统一，随时可落，宜并进注释-8 那一批。注释-11 跟隧道块。
+对别块的依赖与归属：注释-2、5 跟「状态取法与结束写」块（结束写入口、project_state 只推进、前台未启动的 job），注释-5 里归判定明细点名的部分与注释-6 已随那一批做掉，注释-2 另跟「报告」块。注释-7 本机那半跟「本机推进器、生命期锁」块的删接力和「run 处置」块；云端那半（_status_cloud、status help 的云端半句）跟 kickoff 删除走，受次序约束，要与后端到期结束 run 同批或在其后，也就是云端重新部署那一批。注释-8 跟「云端后端」块的流过滤与不分流（要重新部署），其中 test_main 那条跟本机 submit 新流程。注释-9 只是指针统一，随时可落，宜并进注释-8 那一批。注释-11 跟隧道块。
 
 最大的风险是漏改和漂移。线索只列了一部分位置：仅「接力」一词，线索之外的 production code 命中就有二十多处，其中三处是用户可见文字，另有 detached 分流、try_finalize、run_verdict 与 _NON_VERDICT 的同类残留，见 missing。建议每批提交前按收尾审计的检索词对改到的文件做 grep 差集，不靠读。另一个风险是与 journey 0019 重叠：那份清单按文件列出了要加回的 ADR 指针，同样是「改到某文件时照做」。两份清单涉及同一批文件，每批改注释时应同时取 0019 里同一文件的条目，否则行为描述改了、指针没加回，或者反过来。注释-5 里 RunPersistence.begin 的理由取决于 preflight 去留，那是 owner 还没定的问题；注释-2 要写全「每条来路一句」，取决于「结束写取哪一个来路的说明」那个待定项。这两处要等答复。
 
 ### 线索没有覆盖的改动点
 
 - core/gherkai_core/ports.py：模块头第 5 行「撑轮询接力」；RunStore 类文档串第 137-146 行，生命周期写成 try_finalize 作 commit point，写入方里有「接力者」（依据：0034「推进器与触发源」；0031 决定三「结束写」小节；0030 决定三）
-- core/gherkai_core/ports.py：ResultStore 类文档串「判定真值唯一权威」与固定路径 jobs/<encoded_scope_id>.json；ReportStore 类文档串「可从 RunResult 完全重建、判定真值在 RunResult/ResultStore」（依据：0030 决定三「点名」条与「状态以运行态为准」；0027「ReportStore 接口：整 run 一次写」）。报告块只列了 ReportStore.write 的文档串
 - core/gherkai_core/project.py projected_run_status 文档串第 857-861 行：「提前落 run 级终态会被 try_finalize 认成已 finalize」「commit point 的专属性」（依据：0034 机制三②；0031 决定三「结束写」小节）
 - core/gherkai_core/model.py：RunState 类文档串第 616-618 行「try_finalize 以条件写落定总 status」；第 197 行（severity 表）与第 222-226 行（TERMINAL_STATUSES 注释）拿 _NON_VERDICT 作对照，_NON_VERDICT 删去后悬空；Status 的 SKIPPED、ABORTED 行内注释第 187-188 行没有写到结束写的来路（到期、处置）（依据：0031 决定三与决定一的表；0054 决策二「一次前台执行可能因三种原因停下」段）
 - core/gherkai_core/persist.py：模块头第 12-14 行「commit-point 写序：ResultStore 先逐 job 落 → RunStore.try_finalize 最后写」；类文档串里「finalize（commit point）」；finalize 文档串第 185-186 行指向 project.run_verdict（依据：0030 决定三「逐 job 的提交点」；0031 决定三）
@@ -835,7 +811,6 @@
 - 「接力」的线索外命中（依据：0034「推进器与触发源」与被拒方案「本机接力，及其改法」）：core/gherkai_core/serialize.py 第 501 行；core/gherkai_core/adapters/_atomic.py 第 7 行；run_store/local.py 第 57、60 行（_atomic_write_json 文档串）与第 124-126 行（is_detached 文档串「status --wait 据此分流、接力推进」）；event_log/recording.py 第 8 行；event_log/__init__.py 第 4 行；event_log/sqlite.py 第 12、15、19、111 行；reconcile.py 第 112 行（finalize_report）；runtime/gherkai_runtime/compose.py 第 367、439、922 行（「三宿主」含 status --wait 接力者）；runtime/gherkai_runtime/names.py 第 18 行（--wait 推理出 kicker 名做 kickoff）；deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py 第 6、257、563、642 行；exit_observer.py 第 8 行；cli/gherkai_cli/__main__.py 第 1759、1765、1783、2319 行
 - 用户可见文字里的接力说法（依据：0054 决策八，status --wait 对前台与后台的 run 都会处置；0039）：cli/gherkai_cli/render.py 第 223-224 行 FOREGROUND_RUN_NOTE「status --wait 对它只等待、不接力」；cli/gherkai_cli/__main__.py 第 134-137 行 _STEPS_DIR_HELP_RUN_SUBMIT 的 help「本机后台推进/接力进程」（同一段的「[--backend cloud] 不生效」对 run 也失效，依据 0016 决策 A）；第 2744-2747 行 _definition_contract_message「本机不能读取或接力推进」。skill 副本 references/cli-json-contract.md 第 129 行 detached 一行的同一说法，要随契约页同批改
 - 按 detached 分流的线索外命中（依据：0034 端到端 cloud 1b「触发过滤不看后台执行标记」）：core/gherkai_core/adapters/run_store/ddb.py DynamoDBRunStore.__init__ 文档串第 207-210 行（detached 参数、kicker 只认它、同步 run 双开推进器）与 create_run 文档串第 226 行；deploy_aws/gherkai_deploy_aws/stack.py 模块文档串第 15-16 行（kicker 只收带 detached 标记的 INSERT）与第 183 行注释
-- core/gherkai_core/adapters/result_store/s3.py save_job_result 文档串第 46 行「追加语义即同 key 覆盖，幂等」（依据：0030 决定三「点名」条、决定六 ResultStore 段）
 - cli/gherkai_cli/render.py 第 143 行 run_tree 注释「run 级说明：没有任何 job 能承载的原因」，以及 render_run_state 里 run 级消息那一句（依据：0031 决定三「结束写」小节说明表；0037 决策 7）。0019 只记了加回指针，行为描述要改
 - 隧道相关的线索外连带（依据：0035 决策 3、被拒方案「保留 --tunnel-ttl，只允许调小」；0051 决策 13「边缘策略」）：runtime/tests/test_deadline.py 第 22-23 行与 tunnel_host 常量断言相等；cli/tests/test_backend_cloud.py 第 978-981 行用 tunnel_host 常量算 TTL；runtime/gherkai_runtime/tunnel.py 第 96 行「四条规则」注释（现在是 5 条，含到点拒绝）；tunnel_host.py 第 40-41 行第 ② 段「云端同步 run 的停止后等待预算」搬进 deadline.py 时要删（依据：0016 决策 A）
 - runtime/gherkai_runtime/compose.py 第 1851-1854 行 FARGATE_STOP_TIMEOUT_MAX_S 之上讲「云端同步 run 的停止后等待预算」的注释块：cloud_stop_bound_s 随 run 不收云端后端删去之后，这个常量仍留着（doctor 的 stopTimeout 比对、210 秒尾段），注释要改为现存的两种用途（依据：0016 决策 A；0054 决策二「尾段与余量是预算的取值」）
@@ -856,26 +831,14 @@
 #### 注释-5（code，M）
 
 - 线索：「终态是 finalize 专属」「try_finalize」「判定真值的唯一权威是 jobs/*.json」一类说法改写
-- 进度：随第二批第三笔已改的有 run_store/local.py 模块头的状态权威一段与写入口名单、两个 adapter 与端口的 project_state 文档串、NonTerminalSnapshot 的强制点、ports.RunStore 类文档串的 try_finalize 一段，projected_run_status 已删去；余下的是 fcntl 一段里的「`status --wait` 接力」、ports.ResultStore 与 ReportStore 文档串、RunPersistence.begin 与探活注释（等 preflight 的去留）。
+- 进度：随第二批第三笔已改的有 run_store/local.py 模块头的状态权威一段与写入口名单、两个 adapter 与端口的 project_state 文档串、NonTerminalSnapshot 的强制点、ports.RunStore 类文档串的 try_finalize 一段，projected_run_status 已删去；ports.ResultStore 文档串与 ReportStore 文档串的「可从 RunResult 完全重建」（改为从记录生成）已随判定明细点名那一批改；余下的是 fcntl 一段里的「`status --wait` 接力」、RunPersistence.begin 与探活注释（等 owner 定 preflight 的去留）。
 - 要做的：run_store/local.py 模块头：「判定真值唯一权威是 jobs/*.json、run_state.json 是投影摘要」改为状态以运行态为准、明细对 scenario/step/归因负责（0030 决定三）；fcntl 一段的写入口名单去掉 try_finalize、加上结束写入口，去掉「status --wait 接力」。local 与 ddb 的 project_state 文档串，「终态是 finalize 专属」改为投影不写 job 终态、run 级只写 running。ports.RunStore 探活注释与 RunPersistence.begin 文档串里拿云端桶名错分裂退出码作理由的一段，按 run 只有本机后端之后的结论改写。NonTerminalSnapshot 的强制点改为保存一个 job 的明细之前。
 - 文件：core/gherkai_core/adapters/run_store/local.py、core/gherkai_core/adapters/run_store/ddb.py、core/gherkai_core/ports.py、core/gherkai_core/persist.py、core/gherkai_core/project.py
-- 先要有：状态投影只推进运行态（状态取法与结束写块第 6 条 project_state）；结束写入口（状态取法与结束写块第 4 条）；明细点名、去掉 load_all（判定明细点名与落库写序块第 1 条）；后台逐 job 写序（状态取法与结束写块第 7 条）；begin 的理由随 run --backend cloud 以退出码 2 结束（已随「云端只支持 submit」那一批做完）失效；owner 定 begin 与端口上 preflight 的去留（写回时留下的问题第 2 条）
+- 先要有：状态投影只推进运行态（状态取法与结束写块第 6 条 project_state）；结束写入口（状态取法与结束写块第 4 条）；明细点名、去掉 load_all（判定明细点名那一批，已落下）；后台逐 job 写序（状态取法与结束写块第 7 条）；begin 的理由随 run --backend cloud 以退出码 2 结束（已随「云端只支持 submit」那一批做完）失效；owner 定 begin 与端口上 preflight 的去留（写回时留下的问题第 2 条）
 - 必须同批：project_state 改为只推进运行态的那一批；RunPersistence.begin 的 preflight 去留定下之后那一批
 - 单独先落地的后果：测试不红。说法改成「状态以运行态为准、投影不写 job 终态」，可 project_state 仍把 job 终态投影写进库，注释与 code 相反。
 - 验证：单测够用：grep「finalize 专属」「判定真值」「唯一权威」「try_finalize」做差集。project_state 不写终态的行为由 test_conditional_writes 的对拍用例守。
 - 备注：跟「状态取法与结束写」块（project_state、结束写、逐 job 写序）和「判定明细点名」块走；begin 那段跟 preflight 待定项走。逐处核过，都还在：local.py 模块头第 7-17 行，local.py project_state 第 301-305 行，ddb.py project_state 第 374 行，ports.py 第 215-217 行，persist.py begin 第 85-87 行，project.py NonTerminalSnapshot 第 657-662 行。疑点：begin 那段改成什么，取决于 preflight 保不保留，这是 owner 还没定的问题，这一处要等答复。线索没列到的同类：ports.py RunStore 类文档串第 137-146 行（生命周期写成 try_finalize 作 commit point，还提到「接力者」）；ports.py ResultStore 文档串「判定真值唯一权威」与固定路径 jobs/<encoded_scope_id>.json；ReportStore 类文档串「可从 RunResult 完全重建、判定真值在 RunResult/ResultStore」；project.projected_run_status 文档串第 857-861 行（被 try_finalize 认成已 finalize、commit point 的专属性）；model.py RunState 文档串第 616-618 行「try_finalize 以条件写落定总 status」；persist.py 模块头第 12-14 行「commit-point 写序……RunStore.try_finalize 最后写」。
-
-#### 注释-6（mixed，S）
-
-- 线索：明细「后写的盖掉先写的」「保存覆盖同 key」改为每次保存一份、由终态点名
-- 进度：reconcile._finalize 已随第二批第三笔删去，result_store/local.py 模块头已改为逐个落下这一轮已有结果的 job；余下的点名说法随判定明细点名那一批。
-- 要做的：result_store/local.py 模块头：「两个写者两种时序、finalize 分支在 commit 之前一次落下」改为逐 job「先存一份新的明细、再由终态写点名」。save_job_result 文档串去掉「两个推进器竞争收尾时先后各写一遍、后写的盖掉先写的」，改为每次保存一个新对象（文件名带保存标识），同一次保存的重试用同一个标识。reconcile._finalize 步骤②随逐 job 写序改写。test_local_result_store_atomic.py 模块文档串去掉 per-run 进程与 status --wait 接力竞争收尾的说法，原子写的理由改为 explain 读被点名的那一份。
-- 文件：core/gherkai_core/adapters/result_store/local.py、core/gherkai_core/reconcile.py、core/tests/test_local_result_store_atomic.py
-- 先要有：明细每次保存一份、键里带保存标识、终态点名（判定明细点名与落库写序块第 1、2 条）；后台推进逐 job 写序（状态取法与结束写块第 7 条）
-- 必须同批：判定明细点名与落库写序块第 1 条（ResultStore 键形态的改动）
-- 单独先落地的后果：测试不红；注释写的是一份一个对象，code 仍按 scope_id 覆盖同一个文件，与 code 不符。
-- 验证：只改注释，单测够用。test_local_result_store_atomic 起真实子进程读文件，键形态改了之后它的构造要能照常运行，跑这个测试确认仍有判别力（回退成 write_text 会红）。
-- 备注：跟「判定明细点名与落库写序」块走。逐处核过，都还在：result_store/local.py 模块头第 1-7 行与 save_job_result 第 33-39 行，reconcile.py 第 244-246 行，test_local_result_store_atomic.py 第 1-7 行。线索没列到的同类：core/gherkai_core/adapters/result_store/s3.py save_job_result 文档串第 46 行「追加语义即同 key 覆盖，幂等」，同样要改。连带：键里带标识之后，test_local_result_store_atomic 的写者要给同一个标识反复保存（按线索「本机对同一次保存的重试用同一个标识」），测试的构造才成立，所以可能不只是改文档串。
 
 #### 注释-7（code，M）
 
@@ -925,18 +888,17 @@
 
 ### 小结
 
-这一块 19 条全是文档（含 3 张图、评测 fixture 与 evals.json、契约页的生成副本与一处测试），本身没有生产 code，总量相当于几百行文档改写，最大的是 execution-and-reconciliation.md 的大面积重写（L）与 fixture 重录。每条都跟在别的块后面：①「状态取法与结束写」「判定明细点名」块 → 行为文档-1、2（写序部分）、6（键与取法）、8（fixture）、10（到期与中断条目）；②「本机推进器、生命期锁」的删本机接力 → 2、3、5（--max-concurrency）、7（第 8 节）、10（第 59–60 行）；③「run 处置」块 → 5、6、7、14、19 里讲 settle-runs 与处置权限的部分；④「云端后端」块（kicker 过滤、handler 不分流、清扫）→ 2 的 §7；⑤「云端只支持 submit」块已做完（3、5、6、7、9、10、19 里归它的部分已从各条删去，18 整条删去）；⑥「隧道」块 → 11–17 与 12 的 4a 首行；⑦「词表与退役词」块 → 9（execution-timeout-chain）。有测试守、必须与 code 同提交的是：契约页（test_cli_json_contract 收集真渲染器的键与 doctor 项名，副本由 test_skill 比对）、skill 正文（test_skill 用真 parser 核 flag 归属，删 --tunnel-ttl 或 run 的云端选项时即红）、图（导出与图源一致、退役词扫描）、退役词入表（扫 CHANGELOG 与图源）。其余条目没有测试守，漏改不会变红，要靠收尾的残留检索。最大的风险：一是行为文档-2、3、5、6、7、10 这几条各跨三到六块，排批时必须按块拆开、各随各的 code 批，否则文档会先于或落后于 code；二是这一块的线索按「点名的段落」列，同一文件里随同一行为失真的其它段落有不少没被列入（见 missing），只按线索改会留下漂移；三是 fixture 重录与评测、权限表要真实执行（引擎与 Device Farm、Bedrock 评测、重新部署后用最小权限角色），单测不证。
+这一块 19 条全是文档（含 3 张图、评测 fixture 与 evals.json、契约页的生成副本与一处测试），本身没有生产 code，总量相当于几百行文档改写，最大的是 execution-and-reconciliation.md 的大面积重写（L）与 fixture 重录。每条都跟在别的块后面：①「状态取法与结束写」「判定明细点名」块 → 行为文档-1、2（写序部分）、6（键与取法）、8（fixture，判定明细的新形态已转换，余下带引擎重录）、10（到期与中断条目）；②「本机推进器、生命期锁」的删本机接力 → 2、3、5（--max-concurrency）、7（第 8 节）、10（第 59–60 行）；③「run 处置」块 → 5、6、7、14、19 里讲 settle-runs 与处置权限的部分；④「云端后端」块（kicker 过滤、handler 不分流、清扫）→ 2 的 §7；⑤「云端只支持 submit」块已做完（3、5、6、7、9、10、19 里归它的部分已从各条删去，18 整条删去）；⑥「隧道」块 → 11–17 与 12 的 4a 首行；⑦「词表与退役词」块 → 9（execution-timeout-chain）。有测试守、必须与 code 同提交的是：契约页（test_cli_json_contract 收集真渲染器的键与 doctor 项名，副本由 test_skill 比对）、skill 正文（test_skill 用真 parser 核 flag 归属，删 --tunnel-ttl 或 run 的云端选项时即红）、图（导出与图源一致、退役词扫描）、退役词入表（扫 CHANGELOG 与图源）。其余条目没有测试守，漏改不会变红，要靠收尾的残留检索。最大的风险：一是行为文档-2、3、5、6、7、10 这几条各跨三到六块，排批时必须按块拆开、各随各的 code 批，否则文档会先于或落后于 code；二是这一块的线索按「点名的段落」列，同一文件里随同一行为失真的其它段落有不少没被列入（见 missing），只按线索改会留下漂移；三是 fixture 重录与评测、权限表要真实执行（引擎与 Device Farm、Bedrock 评测、重新部署后用最小权限角色），单测不证。
 
 ### 线索没有覆盖的改动点
 
-- docs/internals/artifacts-and-evidence.md 第 19–21 行（「判定读 jobs/*.json」「run_state.json 落后于 jobs/*.json…不一致时以 jobs/*.json 为准」「ref 的权威落盘处只有 jobs/*.json」）、第 34 行产物表 `jobs/<enc>.json` 一行（文件名带保存标识、由运行态点名）、第 75 行 report_refs 落在 jobs/*.json：随判定明细点名改为「先读运行态、按点名读那一份」。依据 0030 决定三「点名」条、决定六 ResultStore 段。跟「判定明细点名与落库写序」块。
-- docs/internals/cli-json-contract.md（与生成的 skill 副本）里线索没点名的几行：run 一节 artifacts.jobs_dir「文件名是 URL 编码的 scope_id」；status 一节 status 行（skipped 只在全部 job 都没有执行时出现、aborted 只来自被中断的同步 run）与 message 行（「这些 job 保持 pending」，说明只在没有 job 能承载时才有）；list-runs 一节 detached 行「status --wait 对它只等待、不接力」与 --status 不再接受 skipped；doctor 一节项名表加 report_dir.filesystem。依据 0031 决定三取法与「结束写」说明表、0030 决定三、0041 决策三、四、七、0054 决策八。
+- docs/internals/cli-json-contract.md（与生成的 skill 副本）里线索没点名的几行（run 一节 artifacts.jobs_dir 一行已随判定明细点名那一批改）：status 一节 status 行（skipped 只在全部 job 都没有执行时出现、aborted 只来自被中断的同步 run）与 message 行（「这些 job 保持 pending」，说明只在没有 job 能承载时才有）；list-runs 一节 detached 行「status --wait 对它只等待、不接力」与 --status 不再接受 skipped；doctor 一节项名表加 report_dir.filesystem。依据 0031 决定三取法与「结束写」说明表、0030 决定三、0041 决策三、四、七、0054 决策八。
 - agent skill 里线索没覆盖的几处：SKILL.md 第 57 行「status --wait 只等待、不接力」；references/setup-and-diagnosis.md 第 96 行到期一行（总状态记 error、job「没有执行」或保持 pending、job 记 timeout、「过了这个时刻才用 status --wait 接力」），新设计里被期限截断的执行中 job 记 aborted、pending 由结束写记 skipped、run 按取法为 aborted，处置由 settle-runs 或 status --wait 做。依据 0016 决策 A、0031 决定三、0034 机制二、0054 决策二、八。
 - docs/user-guide/running-and-results.md 里属于新行为、线索没写的：命令表加 settle-runs 一行，退出码表加 settle-runs 一行及 run 与本机 submit 在报告目录不过边界检查、锁已被持有时以退出码 2 结束，「找回 run_id：list-runs」一节加「已运行」「允许运行至」两列与期限提示、删第 215 行「由前台 run 执行…只等待、不接力」的提示，不带 --wait 的 status 的期限提示。依据 0054 决策四、八、0041 决策七、0031 决定五。（同文件第 83、87、127、164 行的接力与到期描述已列在 0018「核对时补上的条目」末段，不在本块，排批时与本块合并。）
 - docs/user-guide/configuration.md 第 63–71 行配置键表与第 200 行以下跨命令选项表：settle-runs 读项目配置文件，--backend/--report-dir/--prefix/--ddb-table/--region 等定位参数的适用命令要加上 settle-runs。依据 0053 决策 1、0041 决策六、0054 决策八。
 - docs/user-guide/troubleshooting.md：要加报告目录文件系统类型不在清单里（如网络共享）或判断不了时以退出码 2 结束的症状行，与锁已被持有（同一个 run 已有进程在管）的症状行；第 138–142 行「提交后进度停住」一节改为用 settle-runs 或 status --wait 把管它的进程已不在或已过期限的 run 记为已结束。依据 0054 决策三、四、八。（到期与接力部分已列在 0018「核对时补上的条目」，新症状行没有列。）
 - docs/diagrams 下线索没写的图源改动（改完都要用 tools/build_diagrams.mjs 重出 SVG/HTML）：run-execution.json 里「status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进…云端仅在检测到停滞时唤醒推进函数」与「submit 派生 · 可被接力」两处；execution-timeout-chain.json 里「接力者按库里的领取时刻重算截止时刻，过了它 10 秒仍无退出记录即判超时」一句；execution-detached-gates.json 整张图（后台标记的两道判断）在 kicker 不看后台标记、handler 不分流之后不再成立，要删图或重画，连同 execution-and-reconciliation.md 第 157–159 行的嵌入与图注。依据 0034 被拒方案「本机接力，及其改法」、端到端 cloud 1b、0045 决策七。
-- core/DEVELOPMENT.md 目录树里线索与「随实装改写的 code 注释」块都没覆盖的几条：第 34 行 schedule.py「run 级经 project.run_verdict」；第 38 行 persist.py「收尾用 try_finalize 带 run 级说明」；第 46 行 event_log 的补写条件写与第 37 行 reconcile.py 里 record_timed_out_if_absent（随 EventLog 端口定去留）；第 51 行 result_store「每 job 一对象」（改为每次保存一份、由终态点名）。依据 0031 决定三、0030 决定三与 0034 被拒方案「本机接力」。
+- core/DEVELOPMENT.md 目录树里线索与「随实装改写的 code 注释」块都没覆盖的几条：第 34 行 schedule.py「run 级经 project.run_verdict」；第 38 行 persist.py「收尾用 try_finalize 带 run 级说明」；第 46 行 event_log 的补写条件写与第 37 行 reconcile.py 里 record_timed_out_if_absent（随 EventLog 端口定去留）（result_store「每 job 一对象」与 reconcile、persist 的点名说法已随判定明细点名那一批改）。依据 0031 决定三、0030 决定三与 0034 被拒方案「本机接力」。
 - deploy_aws/DEVELOPMENT.md 里随「云端后端」块失真、线索没写的几处：第 40 行 exit-observer「另读 runs 表以判断 run 是否 detached」；第 41 行 kicker「status --wait 的主动调起」与推进器权限（要加建 run 两次定时触发、按 startedBy 列 task 清扫）；第 44 行 runs 表 Stream filter「INSERT 且 NewImage.detached=true」（改两条过滤）。依据 0034 端到端 cloud 1b、0054 决策九、0033 资源清单 13、15。
 - runtime/DEVELOPMENT.md 与 cli/DEVELOPMENT.md 的模块与子命令清单：runtime 新增的生命期锁、边界检查、处置模块要登记一条；cli/DEVELOPMENT.md 第 18 行 argparse 子命令清单加 settle-runs，内部子命令 _reconcile 的说明（本机 submit 经标准输入与回报管道启动、自己建 run 取锁）随之改。依据 0054 决策三、四、六至八、0035 决策 3「本机 submit」。
 - CHANGELOG.md [Unreleased] 里新的使用者可见行为的条目：settle-runs 新命令、报告目录文件系统不在清单里时 run/submit/status --wait/settle-runs/doctor 以退出码 2 结束、doctor 新增 report_dir.filesystem、list-runs 新列与 deadline_at、run --json 的 jobs[]、status --wait 会把管它的进程已不在或已过期限的 run 记为已结束、index.html 显示由结束写结束的 job。线索只要求改写已有条目并加一句重构概述，owner「升级与迁移的细节不写」是否也排除这些新功能条目拿不准，要排批时问 owner。依据 0054 决策四、八、0041 决策三、四、七、0027「index.html 形态」。
@@ -962,7 +924,7 @@
 - 进度：第二笔改了 §1 两种驱动里的中断与到期、§3 前台生命周期、§4c 的 run 级终态与收尾写序、§6 的到点归因；第三笔改了 §1 的推进步骤、§4a 流程块里的逐 job 写序与运行定义不可用、§4c 的后台写序（投影不写终态、先写终态后决策、运行定义不可用）与读者保证；点名、接力、锁与处置、kicker 过滤各处随各自的批。
 - 要做的：按新设计重写这篇的大部分：§1 第 14、16 行（detached 分界、四个 tick 宿主、接力者）、§4a 第 58–68 行流程块（per-run 进程、status --wait 接力）、§5 第 91 与 96–101 行（run 级取值、try_finalize 提交点、jobs/*.json 写序、竞争收尾、两道判断、中途终止）、§6 第 140、143 行（接力判超时、补写）、§7 第 157–167 行（kicker 按 detached 过滤、handler 分流、权威指针）。新写法：逐 job 写序与点名、结束写、生命期锁与处置、kicker 两条过滤与清扫。
 - 文件：docs/internals/execution-and-reconciliation.md
-- 先要有：「状态取法与结束写」块（结束写、逐 job 写序）；「判定明细点名与落库写序」块；「本机推进器、生命期锁与边界检查」块（含删本机接力）；「run 处置」块；「云端后端」块（kicker 两条过滤、handler 不分流、清扫、两次定时触发）
+- 先要有：「状态取法与结束写」块（结束写、逐 job 写序）；「判定明细点名与落库写序」块（已落下）；「本机推进器、生命期锁与边界检查」块（含删本机接力）；「run 处置」块；「云端后端」块（kicker 两条过滤、handler 不分流、清扫、两次定时触发）
 - 必须同批：与上面每一块各自的实装批同一提交改对应小节
 - 单独先落地的后果：单独先改：文档描述的机制在 code 里还不存在；不改：每一批 code 落地之后这篇的相应小节立即失真。测试不受影响（第 167 行的「filter 必须区分写入者」「兜底/接力」条名指针已悬空，但没有测试守它）。
 - 验证：文档改动，按批核对 diff 与 code 一致；退役词入表之后 test_user_docs 会扫它。
@@ -988,7 +950,7 @@
 - 必须同批：改 render.py 这一逻辑的实装批
 - 单独先落地的后果：只改文档：现在的 code 按「没有 step 记录」判断，文档会与 code 不符；测试不受影响。
 - 验证：文档改动，读 diff；对应 code 由单测覆盖。
-- 备注：跟「查看命令与机读输出」块的「诊断细节见 worker 日志」一条走。同一篇里第 19–21、75 行与产物表的 jobs/<enc>.json 一行把 jobs/*.json 写成判定真值、「不一致时以 jobs/*.json 为准」，第 48 行 tunnel.json 一行（行为文档-12 管）；前者随判定明细点名失真，线索没有覆盖，见 missing。
+- 备注：跟「查看命令与机读输出」块的「诊断细节见 worker 日志」一条走。同一篇里讲判定明细存放与读法的几处已随判定明细点名那一批改；第 48 行 tunnel.json 一行归行为文档-12。
 
 #### 行为文档-5（doc，M）
 
@@ -1004,36 +966,38 @@
 #### 行为文档-6（mixed，M）
 
 - 线索：机读契约页与它的 skill 副本：写出 settle-runs 的 `--json`
-- 进度：run 一节的 status、message、jobs[] 两种形态与末段，status 一节的 status 取值、message 与 jobs[].message，explain 一节没有明细的 scope，已随第二笔改（测试改写见 test_cli_json_contract.py）；余下 settle-runs、deadline_at、点名标识、doctor 新项与 list-runs 的 detached 一行。
+- 进度：run 一节的 status、message、jobs[] 两种形态与末段，status 一节的 status 取值、message 与 jobs[].message，explain 一节没有明细的 scope，已随第二笔改（测试改写见 test_cli_json_contract.py）；status 一节 jobs[] 的 `result_id`、artifacts 的 jobs_dir 一行、explain 一节退出码 2 的清单与 `scopes[]` 的说法已随判定明细点名那一批改（test_status_json_keys_are_documented 收得到 `result_id`）；余下 settle-runs、deadline_at、doctor 新项与 list-runs 的 detached 一行。
 - 要做的：docs/internals/cli-json-contract.md 新增 settle-runs 一节（dry_run、runs[]、outcome、reason 与落点字段），run --json 顶层 status/message 按新取法改写并加 jobs[] 全部 job 的形状，status 一节加 deadline_at 与 jobs[] 的点名标识键，list-runs 加 deadline_at；改完用 tools/render_skill_contract.py 重新生成 skill 副本；cli/tests/test_cli_json_contract.py 里 test_run_json_top_level_message_is_always_present_and_documented_as_run_level 断言的「没有执行」原句随之改。
 - 文件：docs/internals/cli-json-contract.md、cli/gherkai_cli/skills/gherkai/references/cli-json-contract.md、cli/tests/test_cli_json_contract.py
-- 先要有：「查看命令与机读输出」块（run --json jobs[]、status --json 点名标识与 deadline_at、list-runs deadline_at、doctor report_dir.filesystem）；「run 处置」块的 settle-runs 命令；「状态取法与结束写」块（run 级取法与说明）；「判定明细点名」块（点名标识的键名）
+- 先要有：「查看命令与机读输出」块（run --json jobs[]、status --json 点名标识与 deadline_at、list-runs deadline_at、doctor report_dir.filesystem）；「run 处置」块的 settle-runs 命令；「状态取法与结束写」块（run 级取法与说明）；「判定明细点名」块（点名标识的键名 `result_id`，已落下）
 - 必须同批：每个新增 JSON 键的那一批 code：test_cli_json_contract 用真渲染器收集全部键名、逐个断言出现在本页对应节，漏写即红；副本：test_skill.py test_contract_copy_equals_transform_of_source 断言副本等于转换结果，源页改了必须同提交重新生成；doctor 项名：test_cli_json_contract 第 333 行逐个对照 doctor 的 name 值，加 report_dir.filesystem 的 code 批必须同提交写进契约页
 - 单独先落地的后果：只改文档不改 code：契约页写了 code 不产出的键，测试不红（只查 code 键在文档里），但对读者是错的；只改 code 不改文档：test_cli_json_contract 红；只改源页不重生副本：test_skill 红。
 - 验证：单测够：test_cli_json_contract 与 test_skill 的差集护栏覆盖键名与副本一致；语义描述读 diff。
-- 备注：一条跨四块，按键所属的 code 批拆开写，各自同提交。线索没写到、同页也要改的：artifacts.jobs_dir 一行「文件名是 URL 编码的 scope_id」（随点名改为带保存标识）；status 一节 status 行「skipped 只在全部 job 都没有执行」「aborted 只来自被中断的同步 run」与 message 行「这些 job 保持 pending」（随状态取法改）；list-runs 一节 detached 行「status --wait 对它只等待、不接力」与 --status 不再接受 skipped；doctor 一节项名表加 report_dir.filesystem（线索放在「查看命令」块，但落在本页）。见 missing。test_run_json_top_level_message_... 的文档串与断言都要改写，不只换一句原文。
+- 备注：一条跨四块，按键所属的 code 批拆开写，各自同提交。线索没写到、同页也要改的：status 一节 status 行「skipped 只在全部 job 都没有执行」「aborted 只来自被中断的同步 run」与 message 行「这些 job 保持 pending」（随状态取法改）；list-runs 一节 detached 行「status --wait 对它只等待、不接力」与 --status 不再接受 skipped；doctor 一节项名表加 report_dir.filesystem（线索放在「查看命令」块，但落在本页）。见 missing。test_run_json_top_level_message_... 的文档串与断言都要改写，不只换一句原文。
 
 #### 行为文档-7（doc，S）
 
 - 线索：agent skill 正文按 0043 决策五骨架改：第 3 步写明云端后端的执行只经
-- 要做的：SKILL.md 第 5 节与第 10 节去掉直接读 jobs/*.json 的说法，--scope 取值写成 --json 输出里的 scope_id；第 8 节删「它同时是接力」；references/cloud-backend.md「1 分工」表按 0040 派生视图改（QA/CI 一行加 settle-runs）。（第 3 节与第 7 节旗标表已随「云端只支持 submit」那一批做完。）
+- 进度：SKILL.md 第 5 节去掉直接读 jobs/*.json 的说法、第 10 节「别解析」一条加上 `jobs/` 下的明细文件（一个 job 可能有多份、算数的那份由运行记录定），已随判定明细点名那一批做（最小修补）。正文已到 11999 字符，离 test_skill 的 12000 上限只剩 1 个字符，再加内容要先压缩。
+- 要做的：--scope 取值写成 --json 输出里的 scope_id（受字符上限所限，并进 skill 打磨批）；第 8 节删「它同时是接力」；references/cloud-backend.md「1 分工」表按 0040 派生视图改（QA/CI 一行加 settle-runs）。（第 3 节与第 7 节旗标表已随「云端只支持 submit」那一批做完。）
 - 文件：cli/gherkai_cli/skills/gherkai/SKILL.md、cli/gherkai_cli/skills/gherkai/references/cloud-backend.md
-- 先要有：「判定明细点名」块（jobs/ 文件名带保存标识）；「本机推进器、生命期锁」块的删本机接力；「run 处置」块的 settle-runs
+- 先要有：「本机推进器、生命期锁」块的删本机接力；「run 处置」块的 settle-runs
 - 必须同批：各条所属的实装批：test_skill.py 的 test_flags_are_attached_to_the_right_subcommand 与 test_exclusive_claims_are_true 用真 parser 核对 skill 里每个 flag 的归属，改 flag 的那一批要同提交改 skill
 - 单独先落地的后果：只改 skill：agent 按新说法指导用户，但 code 里 status --wait 仍接力，属于描述先行；测试不红。只改 code 不改 skill：parser 的 flag 归属一变 test_skill 即红。
 - 验证：test_skill 的 parser 对照与措辞护栏是单测；skill 行为变化按 0043 决策七的评测验证，是否要重跑评测由打磨批定。
-- 备注：一条跨三块：jobs/*.json 与 --scope 跟「判定明细点名」块；第 8 节接力跟删本机接力那一批；1 分工表跟「run 处置」块。线索写「第 8 步」，实际是第 8 节「退出码分流」。线索没覆盖、同样要改的：SKILL.md「status --wait 只等待、不接力」，references/setup-and-diagnosis.md 到期一行（记 error、没有执行、接力），见 missing。
+- 备注：余下跨两块：第 8 节接力跟删本机接力那一批；1 分工表跟「run 处置」块。线索写「第 8 步」，实际是第 8 节「退出码分流」。线索没覆盖、同样要改的：SKILL.md「status --wait 只等待、不接力」，references/setup-and-diagnosis.md 到期一行（记 error、没有执行、接力），见 missing。
 
 #### 行为文档-8（mixed，M）
 
 - 线索：评测 fixture 随实装重录：文件集改为 run_meta.json、run_state.json、运
-- 要做的：重录 skills/gherkai-evals/fixtures 下带录制报告的 4 个 run（wiki-search、job-failure、nova-zh、device-session-lost）：jobs/ 下的判定明细文件名带保存标识、run_state.json 每个 job 带点名的标识，占位符覆盖 report_refs[].ref；materialize.py 头注释第 15–16、36–38 行讲 jobs/*.json 的说法随之改。
+- 进度：判定明细点名那一批用一次性脚本（放系统临时目录、不进仓库）把带录制报告的 4 个 run（wiki-search、job-failure、nova-zh、device-session-lost）转成新形态：每个有明细的终态 job 生成一个 16 位小写十六进制标识，`jobs/` 下的文件改名为 `<标识>.json`（内容不变），run_state.json 的条目加 `result_id`；materialize.py 模块头讲 jobs/ 文件名的说法随之改，完整性检查另核 `explain --json` 列出的 job 恰是点名了明细的 job。这四个 run 的 job 都由执行结果结束、都有明细，转出的形态与产品写出的逐字段相同，评测基线的内容不变。转换之后用工作区的读法（`LocalRunStore` 读运行态、`named_details.load_named_details` 读明细）逐个核过：每个终态 job 都被点名、读得到且属于它，`jobs/` 下没有没被点名的文件。materialize.py 的完整性检查在这一批之前就过不了，与点名无关：四个 run 的 `run_meta.json` 是结构版本 1（录于 1.4.9.post169 与 post300），运行定义的结构版本升到 2 之后，`explain --json` 读头部时即以退出码 2 结束（「记录是第 1 版，本机只认第 2 版」）。改正有两条路：用一次性脚本把四份 `run_meta.json` 升到第 2 版（要补 `deadline_at` 与第 2 版的固定键，期限要按当时的预算推出），或等下面的重录一并解决；交 owner 定。四份 `run_state.json` 另缺顶层的 `claim_count`（产品现在写出它，读法缺键时按缺省读入，不挡读取），选一次性脚本时一并补上。**改正之前评测无法进行**：物化之后的完整性检查对四个 run 都以 `explain --json` 退出码 2 失败；pytest 不执行这项检查，全量测试绿不说明 fixture 可用。改正之后用当前 CLI 执行一次完整性检查，过了才算可用。
+- 要做的（余下）：带引擎重录这 4 个 run，放在隧道批与报告批之后：这两批还会改变录制出的形态（steps_dir 由后台推进进程读回、index.html 与 manifest 由记录生成），届时统一重录一次，免得两次改动评测内容。
 - 文件：skills/gherkai-evals/fixtures/wiki-search/reports/、skills/gherkai-evals/fixtures/job-failure/reports/、skills/gherkai-evals/fixtures/nova-zh/reports/、skills/gherkai-evals/fixtures/device-session-lost/reports/、skills/gherkai-evals/materialize.py
-- 先要有：「判定明细点名与落库写序」块（明细文件名与运行态点名键）；「隧道与两种 submit 的新流程」块（steps_dir 由后台推进进程读回那半句）；「报告」块（index.html/manifest 由记录生成，录出的报告形态随之变）
-- 必须同批：判定明细点名那一批：新 explain 只按运行态点名的标识读明细，旧 fixture 的 run_state 没有点名键，materialize 的 integrity_check（经真 CLI 执行 explain --json）会失败、评测无法进行
-- 单独先落地的后果：只重录 fixture、code 未改：新文件名旧 CLI 读不到（旧 CLI 按 scope_id 找 jobs/<enc>.json），评测坏；只改 code 不重录：pytest 不红（test_skill 只查路径与入库），但评测 harness 的完整性检查失败。
-- 验证：单测不够：要在带引擎的环境里真实执行一次录制（Nova Act 与 Midscene 都要用，device-session-lost 要 Device Farm 真机），按 0043 决策七的录制约束处理，然后执行 materialize.py 的完整性检查，并跑 test_skill 的 fixture 护栏。也可以拿拿不准的转换脚本把现有 fixture 改成新形态，但这样得不到真实写出的形态，以真录为准。
-- 备注：跟「判定明细点名与落库写序」块走；steps_dir 那半句跟本机 submit 新流程（「隧道与两种 submit」块）。线索说「运行态点名的各份判定明细（文件名带保存标识）」，S3 键与本机文件名是否还带 scope_id 由实装定，录制要等这一点定下。eval 27（triage-device-session-lost）的评测要求里列了 jobs/*.json 作为「先 explain 再读」的文件类，目录名不变就不用改，文件名带标识后仍匹配。重录有 AWS 与 Device Farm 费用，开发期不计。
+- 先要有：「隧道与两种 submit 的新流程」块（steps_dir 由后台推进进程读回那半句）；「报告」块（index.html/manifest 由记录生成，录出的报告形态随之变）
+- 必须同批：无（判定明细的新形态已转换，按新读法读得到；`run_meta.json` 的结构版本 1 仍挡住当前 CLI，见上「进度」）
+- 单独先落地的后果：无：重录只换成真实写出的形态。
+- 验证：要在带引擎的环境里真实执行一次录制（Nova Act 与 Midscene 都要用，device-session-lost 要 Device Farm 真机），按 0043 决策七的录制约束处理，然后执行 materialize.py 的完整性检查，并跑 test_skill 的 fixture 护栏。重录有 AWS 与 Device Farm 费用，开发期不计。
+- 备注：eval 27（triage-device-session-lost）的评测要求里列了 jobs/*.json 作为「先 explain 再读」的文件类，目录名不变，文件名改为标识后仍匹配，不用改。
 
 #### 行为文档-9（doc，S）
 

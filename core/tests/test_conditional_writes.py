@@ -20,6 +20,7 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
   「run 级状态只进不退」条③）：run 级为 pending 或 running 时 True、已是终态时 False 且运行态不变；DDB 侧因 STATE 不存在被挡之后并发建出的新记录不收到这次写。job 已是终态或不在运行态里时不写、
   返回值照样只看 run，两侧对拍在 test_ending_and_commit_writes.py。
 - 投影不改写库中已是终态的 job，同一等级的终态之间也不以投影为准。
+- 点名的标识（ADR 0030 决定三「点名」条）：执行中的写带标识是参数错误；认领、执行中的写与投影都不写标识，投影里带着的标识不落库。
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经各个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 结束写 `end_run` 与带结果的 job 终态写 `commit_job_states` 的语义对拍在 test_ending_and_commit_writes.py。
@@ -165,6 +166,46 @@ def test_job_write_of_a_state_other_than_running_is_rejected(run_store, job_stat
     with pytest.raises(ValueError):
         run_store.update_job_state("run-1", JobState("a", job_status, session_id="sess-a"))
     assert run_store.load_run_state("run-1") == before
+
+
+@pytest.mark.parametrize("claimed", [False, True], ids=["pending", "running"])
+def test_job_write_carrying_a_result_id_is_rejected(run_store, claimed):
+    """执行中的写不点名：带标识的 running 是参数错误，抛 ValueError、运行态不变（点名只由带结果的终态写写下，ADR 0030 决定三「点名」
+    条）。库中这个 job 是 pending 与 running 两种情形都一样。"""
+    meta = _meta()
+    run_store.create_run(meta, _initial(meta))
+    if claimed:
+        assert run_store.try_claim_job("run-1", "a", claimed_at="t0") is True
+    before = run_store.load_run_state("run-1")
+    with pytest.raises(ValueError, match="不点名"):
+        run_store.update_job_state("run-1", JobState("a", Status.RUNNING, session_id="sess-a", result_id="00000000000000a1"))
+    assert run_store.load_run_state("run-1") == before
+
+
+def test_claim_job_write_and_projection_leave_result_ids_alone(run_store):
+    """认领、执行中的写与投影都不写点名的标识：a 由终态写点名之后，认领 b、给 b 写会话、再写一次带着标识的投影（投影里 a 是另一个终态、
+    执行中的 b 也带一个标识，如同取自读到的运行态），a 的标识不变，b 仍没有标识。"""
+    from gherkai_core.run_status import CommitOutcome
+
+    meta = _meta("run-1", "a", "b", "c")
+    run_store.create_run(meta, _initial(meta, hwm=0))
+    assert run_store.try_claim_job("run-1", "a", claimed_at="t0") is True
+    assert run_store.commit_job_states("run-1", [JobState("a", Status.PASSED, claimed_at="t0", result_id="00000000000000a1")],
+                                       ended_at="never") is CommitOutcome.OPEN
+    named = run_store.load_run_state("run-1").jobs["a"]
+
+    assert run_store.try_claim_job("run-1", "b", claimed_at="t1") is True
+    assert run_store.update_job_state("run-1", JobState("b", Status.RUNNING, session_id="sess-b", claimed_at="t1")) is True
+    projected = RunState(run_id="run-1", status=Status.RUNNING, high_water_mark=3, jobs={
+        "a": JobState("a", Status.FAILED, session_id="other", result_id="00000000000000a9"),
+        "b": JobState("b", Status.RUNNING, session_id="sess-b2", result_id="00000000000000b9"),
+        "c": JobState("c", Status.PENDING)})
+    assert run_store.project_state("run-1", projected) is True
+
+    got = run_store.load_run_state("run-1")
+    assert got.jobs["a"] == named and named.result_id == "00000000000000a1"
+    assert got.jobs["b"] == JobState("b", Status.RUNNING, session_id="sess-b2", claimed_at="t1")
+    assert got.jobs["c"].result_id is None
 
 
 def test_job_write_on_finalized_run_changes_nothing(run_store):

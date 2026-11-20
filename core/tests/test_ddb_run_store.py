@@ -2,7 +2,8 @@
 
 对拍的是**后端无关的行为契约**（create/load round-trip、实时写生命周期、Map 单元素刷、未 create 报错、
 omit-null 时间戳）——即 test_stores.py 里 LocalRunStore 那批。物理落点断言（文件存在/JSON 是 list）是
-Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造数据。
+Local 专属、不在此。复用 test_stores 的 _sample_run/_initial_state 造数据。文末另有 DDB 一侧才有的两项：jobs Map 条目里点名标识的
+键，以及终态写被写入序号挡下、重读再算时点名的仍是同一个标识。
 """
 from __future__ import annotations
 
@@ -413,3 +414,61 @@ def test_create_run_writes_claim_count_zero_on_the_state_item(aws, ddb_run_store
     ddb_run_store.create_run(meta, state)
     item = aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": "cc", "item_type": "STATE"}, ConsistentRead=True)["Item"]
     assert item["claim_count"] == 0
+
+
+# ---- 点名的标识（ADR 0030 决定三「点名」条）：jobs Map 条目里的键，与重读再算时的沿用 ----
+def test_job_entries_carry_result_id_only_when_named(aws, ddb_run_store):
+    """STATE 的 jobs Map 里，被点名的 job 的条目带 `result_id`，没被点名的（未结束、由结束写结束）省键；读回与写下的标识相同。读原始
+    STATE，不经 load_run_state。"""
+    meta = _sample_run("rid-run").run_meta
+    sid0, sid1 = (j.scope_id for j in meta.jobs)
+    ddb_run_store.create_run(meta, _initial_state("rid-run", [sid0, sid1]))
+    assert ddb_run_store.try_claim_job("rid-run", sid0, claimed_at="2026-07-01T00:01:00Z") is True
+    assert ddb_run_store.commit_job_states("rid-run", [JobState(sid0, Status.PASSED, result_id="0123456789abcdef")],
+                                           ended_at="never") is CommitOutcome.OPEN
+    assert ddb_run_store.end_run("rid-run", RUN_ENDINGS["deadline"], ended_at="2026-07-01T00:05:00Z") is True
+
+    raw = aws["ddb"].Table(aws["table_name"]).get_item(Key={"run_id": "rid-run", "item_type": "STATE"})["Item"]["jobs"]
+    assert raw[sid0]["result_id"] == "0123456789abcdef"
+    assert "result_id" not in raw[sid1]
+    got = ddb_run_store.load_run_state("rid-run")
+    assert (got.jobs[sid0].result_id, got.jobs[sid1].result_id) == ("0123456789abcdef", None)
+
+
+def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws, monkeypatch):
+    """终态写读到 STATE 之后、发出写之前，另一个写入方认领了 b：整体替换被写入序号的条件挡下，重读再算之后写成，a 点名的仍是调用方给出
+    的那个标识（重读再算用的是同一组 JobState，不另生成标识），b 的认领也留下。先后靠包住被测表对象的 update_item 固定。"""
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+    table = aws["ddb"].Table(aws["table_name"])
+    store, other = DynamoDBRunStore(table), DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    meta = _sample_run("seq-run").run_meta
+    sid_a, sid_b = (j.scope_id for j in meta.jobs)
+    store.create_run(meta, _initial_state("seq-run", [sid_a, sid_b]))
+    assert store.try_claim_job("seq-run", sid_a, claimed_at="2026-07-01T00:01:00Z") is True
+
+    ccf = table.meta.client.exceptions.ConditionalCheckFailedException
+    real_update = table.update_item
+    log: list[str] = []
+
+    def update_item(**kwargs):
+        if not log:
+            assert other.try_claim_job("seq-run", sid_b, claimed_at="2026-07-01T00:02:00Z") is True  # 插在读与写之间
+            log.append("other")
+        try:
+            resp = real_update(**kwargs)
+        except ccf:
+            log.append("write-rejected")
+            raise
+        log.append("write-ok")
+        return resp
+
+    monkeypatch.setattr(table, "update_item", update_item)
+    given = JobState(sid_a, Status.PASSED, session_id="sess-a", result_id="00000000000000a1")
+    assert store.commit_job_states("seq-run", [given], ended_at="never") is CommitOutcome.OPEN
+
+    assert log == ["other", "write-rejected", "write-ok"]
+    got = store.load_run_state("seq-run")
+    assert got.jobs[sid_a] == JobState(sid_a, Status.PASSED, session_id="sess-a", claimed_at="2026-07-01T00:01:00Z",
+                                       result_id="00000000000000a1")
+    assert got.jobs[sid_b] == JobState(sid_b, Status.RUNNING, claimed_at="2026-07-01T00:02:00Z")

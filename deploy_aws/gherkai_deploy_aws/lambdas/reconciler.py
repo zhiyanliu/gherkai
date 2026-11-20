@@ -2,7 +2,7 @@
 
 events 表开 Stream（NEW_IMAGE），worker PutItem 执行事件 / 退出观察者写 task_exited → Stream 触发本 handler。
 它从 Stream records 提取涉及的 run_id 集（去重），对每个 run 调 gherkai_core.reconcile.tick 推进一步（读运行态与全量重放、
-投影写，为这一轮已有结果的 job 存明细、写终态，再由 plan_next 决定认领并起下一个 job 或做到期的结束写）。tick 幂等 +
+投影写，为这一轮已有结果的 job 各存一份带新标识的明细、写终态并点名它，再由 plan_next 决定认领并起下一个 job 或做到期的结束写）。tick 幂等 +
 CAS/HWM 条件写兜底——Stream 按分片并发触发多个本 handler 实例、叠加 status --wait 接力，全部安全（真 DDB 已验）。
 
 **cloud 组合根（Lambda 装配）**：cold-start 读 env 造 boto3 client + 三 store adapter + FargateEngine + CloudLauncher
@@ -488,6 +488,7 @@ def _build(run_id: str):
     # prefix，但写读两侧同构造零漂移）；**不含 run_id**——S3*Store 内部自拼 `{prefix}{run_id}/…`。
     # region 不传：它在 build_cloud_stores 里只喂建句柄的那两个钩子，而此处两个句柄都已注入、钩子不会执行。
     # detached 不传（默认 False）：本 Lambda 只读已存在的 run，不 create_run、不写 detached 标记。
+    # 判定存储是裸的 S3ResultStore，不套本机推进器的保存重试：保存失败让本次调用失败，由流的重试或之后的触发再做。
     run_store, result_store, report_store = compose.build_cloud_stores(
         table=runs_table_name, bucket=bucket, prefix=report_dir,
         ddb_table=runs_table, s3=s3)
@@ -602,20 +603,19 @@ def _tick_runs(run_ids: set[str], label: str, *, prebuilt: dict | None = None) -
         if built is None:
             continue
         meta, event_log, run_store, launcher, mc, rstore, pstore = built
-        # 判定明细由 tick 在写下这一轮各 job 的终态之前存进 rstore（ADR 0030 决定三「后台推进同守」条）；存明细或写运行态的异常
-        # 原样抛出 → 本次 invocation 失败 → events Stream 事件源重试本批（终态写之后再失败就没人重试了）。
+        # 判定明细由 tick 在写下这一轮各 job 的终态之前存进 rstore，每份带一个新标识，终态写点名它（ADR 0030 决定三「点名」条、
+        # 「后台推进同守」条）；rstore 不在进程内重试，存明细或写运行态的异常原样抛出 → 本次 invocation 失败 → events Stream 事件源
+        # 重试本批，重做的那一次另存一份、点名新的标识（终态写之后再失败就没人重试了）。
         outcome = tick(run_id, meta, event_log, run_store, launcher, mc, clock=compose.now, result_store=rstore)
-        if outcome.outcome is TickOutcome.ENDED:
+        if outcome is TickOutcome.ENDED:
             # 装配时的语义闸之后 run 已被别处结束（tick 读运行态之前，或这一方的终态写、结束写之前）：与那道闸同一处置，报告不改写
             print(f"{label}: run {run_id} 已结束，不再改写它的结果")
-        elif outcome.outcome is TickOutcome.COMMITTED:
+        elif outcome is TickOutcome.COMMITTED:
             # 报告从记录生成，入口是 core 唯一的一份，本机后台推进进程调的是同一个。生成在终态写之后执行、失败无人重试，抛出去还会让
             # 本次 invocation 失败、events Stream 本批重试耗尽后整批丢弃，同批其它 run 的事件随之丢失（同下面超时兜底检查的隔离
-            # 理由）；所以读运行态（强一致读，会因限流或瞬时 5xx 抛）、组装与写报告整段在入口的失败隔离之内（ADR 0034「端到端流程」
-            # cloud 第 ④ 步）。这一次 tick 交给终态写的明细用 tick 交回的那一份，较早轮次写下终态的 job 的明细由入口从 rstore 按
-            # scope_id 读回。
-            write_report_from_record(meta, run_store, outcome.details, pstore, result_store=rstore,
-                                     created_at=compose.now_iso())
+            # 理由）；所以读运行态（强一致读，会因限流或瞬时 5xx 抛）、按点名的标识读回明细、组装与写报告整段在入口的失败隔离之内
+            # （ADR 0034「端到端流程」cloud 第 ④ 步）。明细每份一次 GetObject，不列举前缀。
+            write_report_from_record(meta, run_store, rstore, pstore, created_at=compose.now_iso())
             print(f"{label}: run {run_id} done + committed")
         else:
             print(f"{label}: run {run_id} advanced (not done)")

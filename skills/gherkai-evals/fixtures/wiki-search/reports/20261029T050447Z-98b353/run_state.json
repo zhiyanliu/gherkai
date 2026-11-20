@@ -7,12 +7,14 @@
     {
       "scope_id": "search",
       "status": "failed",
-      "session_id": "01M630QWHYQXPABX31MPEWRX59"
+      "session_id": "01M630QWHYQXPABX31MPEWRX59",
+      "result_id": "e8dd0f5dce939525"
     },
     {
       "scope_id": "features/wiki_search.feature:13",
       "status": "passed",
-      "session_id": "01M630QWH4JHVBQBV7T3BBEDQW"
+      "session_id": "01M630QWH4JHVBQBV7T3BBEDQW",
+      "result_id": "8ae297b4deee91ef"
     }
   ]
 }

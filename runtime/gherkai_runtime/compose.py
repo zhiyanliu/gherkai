@@ -895,6 +895,7 @@ def cloud_run_list_location(*, prefix: str, region: str | None, table: str) -> d
 # （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。
 #   build_local_stores  -> (run_store, result_store, report_store, make_artifacts)
 #   build_cloud_stores  -> (run_store, result_store, report_store)
+#   local_result_store  -> 本机推进器用的判定存储（带保存重试），build_local_stores 与 detached.build_local_reconcile 共用
 # make_artifacts(run_id, report_index) -> dict：前台 run 结束时把 --json 的 artifacts 落点指针组装成 file:// URI；
 #   report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。前台 run 只有本机后端（ADR 0016 决策 A），
 #   云端没有它的使用方；云端 run 的落点由 `cloud_artifact_locations` 给出（status 终态打印用）。
@@ -928,18 +929,30 @@ def build_cloud_event_log(*, events_table: str, run_id: str, scope_ids: list[str
     return DdbEventLog(table, run_id, list(scope_ids))
 
 
+def local_result_store(root: str | Path) -> ResultStore:
+    """本机推进器用的判定存储：本机文件存储外面套保存失败的退避重试（ADR 0030 决定三「保存明细失败」条）。
+
+    本机的装配入口只有这一个：前台 run 与本机查询命令经 `build_local_stores`，后台推进进程与 status --wait 接力经
+    `detached.build_local_reconcile`，都调这里，推进器用的判定存储因此都带同一种重试。查询命令只读，读与探活原样转交给本机文件存储。
+    云端的组合根（`build_cloud_stores`）不套：云端保存失败让这次调用失败，由流的重试或之后的触发再做。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+
+    return RetryingResultStore(LocalResultStore(root))
+
+
 def build_local_stores(*, report_dir: str | Path, detached: bool = False):
     """本地文件三层 store + local artifacts descriptor（file:// 完整路径）。
 
-    落 <report_dir>/<run_id>/：RunStore(run_meta+run_state) + ResultStore(jobs/) + ReportStore(index/manifest)。
+    落 <report_dir>/<run_id>/：RunStore(run_meta+run_state) + ResultStore(jobs/，每次保存一个以标识命名的文件，用哪一份由运行态
+    点名) + ReportStore(index/manifest)。判定存储经 `local_result_store` 装配，带保存失败的退避重试。
     """
     from gherkai_core.adapters.report_store.local import LocalReportStore
-    from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
     root = Path(report_dir)
     run_store: RunStore = LocalRunStore(root, detached=detached)  # detached：submit 的组合根传 True，run_state.json 带标记（ADR 0034）
-    result_store: ResultStore = LocalResultStore(root)
+    result_store: ResultStore = local_result_store(root)
     report_store: ReportStore = LocalReportStore(root)
 
     def make_artifacts(run_id: str, report_index) -> dict:
@@ -1090,6 +1103,9 @@ def build_cloud_stores(*, table: str, bucket: str, prefix: str = "",
 
     返回的 RunStore 不能列举 run（没有注入列举索引名，调 `list_runs` 即报装配缺失）：列举须经 `build_cloud_run_list_store`，
     索引就绪检查只挂在那一条装配路径上（ADR 0041 决策七「索引就绪判据」）。
+
+    判定存储是裸的 `S3ResultStore`，不套本机推进器的保存重试（`local_result_store`）：云端保存失败让这次调用失败，由流的重试或
+    之后的触发再做，进程内不等待（ADR 0030 决定三「保存明细失败」条）。
     """
     from gherkai_core.adapters.report_store.s3 import S3ReportStore
     from gherkai_core.adapters.result_store.s3 import S3ResultStore
@@ -1262,17 +1278,17 @@ def build_fargate_engines(
     - region：推进器取部署所在区域（IaC 注入的 `REGION`），经 RunTask overrides 注入 worker；**profile 不传给
       FargateEngine**（正确的非对称，ADR 0016 决策 C）：容器用 task role。
     - job-in 落点为 (bucket, `<前缀><run_id>/jobs-in/`)，前缀是 report_dir 规范化后的值（`_normalize_prefix(report_dir)`）
-      ——**jobs-in/ 非 jobs/**（ResultStore 判定真值占 jobs/、load_all 枚举它；job-in 独立前缀避撞 key + 误读）。
+      ——**jobs-in/ 非 jobs/**：jobs/ 是判定明细的存放处，job-in 的键与判定明细的键分开（理由见函数体里 job_s3 上方的注释）。
       artifact 上传落点为 (bucket, `<前缀><run_id>/`)——与 report 同前缀镜像 run 树。**artifact_s3 必注入**
       （云端后端唯一的上传落点注入点——local 的 `build_engines` 恒不注入）：否则 Fargate 容器盘停即销毁、引擎产物（trajectory/report）必丢（ADR 0029「cloud 注入不是可选」/0032）。
     """
     from gherkai_core.adapters.fargate_engine import FargateEngine
 
     pfx = _normalize_prefix(report_dir)
-    # job-in 落点用 **jobs-in/**（**不是 jobs/**）：ResultStore 判定真值写在 <run_id>/jobs/<quote(scope_id)>.json，
-    # load_all 列出 jobs/ 前缀下的全部对象、逐个当判定读。job-in（输入）与 ResultStore（输出判定）的 scope_id 编码
-    # 相同，若共用 jobs/ 前缀，两者会撞 key、互相覆盖，job-in 对象还会被 load_all 当判定读。故 job-in 用独立前缀
-    # jobs-in/。（实际运行暴露。）
+    # job-in 落点用独立前缀 **jobs-in/**，不放进 jobs/：jobs/ 是判定明细的存放处，键是 <run_id>/jobs/<保存的标识>.json；
+    # job-in 是喂 worker 的输入，键按 scope_id 编码（FargateEngine 拼出 <run_id>/jobs-in/<quote(scope_id)>.json）。共用一个前缀时，
+    # 恰好由 16 个小写十六进制字符组成的 @scope 值会与某次保存的标识落成同一个键、互相覆盖，翻看 jobs/ 的人也分不出输入与明细；
+    # 分开前缀，两类键互不相交。桶的生命周期规则按对象 tag 只清理 job-in（ADR 0033「job-in S3 对象生命周期」条），不依赖前缀。
     job_s3 = (bucket, f"{pfx}{run_id}/jobs-in/")
     # 产物上传落点（ADR 0029）：prefix 为 <report_dir>/<run_id>/（run 树根，worker 拼产物相对路径；与 report 同前缀镜像
     # run 树）。**cloud 必注入**——否则容器盘停即销毁、产物必丢（ADR 0029「cloud 注入不是可选」）。

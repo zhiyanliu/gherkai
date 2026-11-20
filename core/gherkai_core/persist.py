@@ -10,16 +10,20 @@ Store **ports**（不含具体 adapter、不含执行 reducer）的服务，组�
 轮询停手信号（ADR 0054 决策五「执行方服从记录」）。schedule 返回执行事实（`schedule.Execution`），不给出 run 的状态；run 的结果由
 本服务从记录组装（`finalize`），没有记录的执行由 `result_without_record` 按同一套规则在内存里组装。
 
-逐 job 的提交点（ADR 0030 决定三）：由执行结果结束的 job 先存判定明细（ResultStore），再以终态写（`RunStore.commit_job_states`）
-记下它的终态，run 的状态在同一次写里按取法随之写下。schedule 返回之后仍有未结束的 job（到期、fail-fast 或使用方中断时没有启动的）
-由结束写（`RunStore.end_run`）结束，来路取执行事实交来的那一条。使 run 成为终态的那次写是本进程写成的，本服务才读一次运行态、组装
-run 的结果并生成报告；本次执行结束之前别处已把 run 结束时不覆盖已有的终态、不生成报告，抛 `RunAlreadyEnded`。
+逐 job 的提交点（ADR 0030 决定三）：由执行结果结束的 job 先存判定明细（ResultStore，存成带这次保存生成的标识的一份），再以终态写
+（`RunStore.commit_job_states`）记下它的终态并点名那一份（`JobState.result_id`，同决定三「点名」条），run 的状态在同一次写里按取法
+随之写下。schedule 返回之后仍有未结束的 job（到期、fail-fast 或使用方中断时没有启动的）由结束写（`RunStore.end_run`）结束，来路取
+执行事实交来的那一条。使 run 成为终态的那次写是本进程写成的，本服务才读一次运行态、按其中点名的标识从判定存储读回明细、组装 run 的
+结果并生成报告；本进程内存里的执行结果不参与组装，读法与后台报告、explain 相同（`named_details.load_named_details`）。本次执行结束
+之前别处已把 run 结束时不覆盖已有的终态、不生成报告，抛 `RunAlreadyEnded`。
 
 并发：写 RunStore 的路径有三条——认领与 RUNNING 中间态刷在 **worker 线程**（认领在起 worker 之前；RUNNING 经 on_event，在 schedule 的
 sink_lock **之外** fire，故落库不堵别的 worker 的进度显示）、job 终态写在 **主线程**（经 on_job_complete，在 schedule 等待 job 完成的
 循环里串行调用）。RunStore 的每个写入口对并发的别的写入方都是安全的（本机在文件锁内读改写，云端的每一次写都带条件），跨进程的别的写入方由它们
-挡住；本服务**自持一把锁**另有两个用处：护住进程内记下的代表会话、认领时刻与已写成终态的判定明细（`_session`、`_claimed_at`、
-`_committed`，读改写跨线程），并让同一进程里的写按调用次序依次落库。停手信号是一个线程安全的事件标志，读它不取锁、不碰存储。
+挡住；本服务**自持一把锁**另有两个用处：护住进程内记下的代表会话与认领时刻（`_session`、`_claimed_at`，读改写跨线程），并让同一
+进程里的写按调用次序依次落库。保存明细也在这把锁内（连同本机组合根给的判定存储在保存失败时的退避重试，最多约 7 秒）：停手信号的发布
+与「先看信号、再存明细」因此在同一把锁里；代价是重试期间别的 worker 线程的认领与执行中的写随之等待，只在判定存储写不进时出现
+（ADR 0030 决定三「保存明细失败」条）。停手信号是一个线程安全的事件标志，读它不取锁、不碰存储。
 """
 from __future__ import annotations
 
@@ -42,6 +46,7 @@ from gherkai_core.model import (
     SessionOpened,
     Status,
 )
+from gherkai_core.named_details import load_named_details, new_result_id
 from gherkai_core.ports import ReportStore, ResultStore, RunStore
 from gherkai_core.project import assemble_run_result, representative_session
 from gherkai_core.run_deadline import system_wall_clock
@@ -62,8 +67,9 @@ class RunPersistence:
     """编排 RunStore + ResultStore（+ 可选 ReportStore）随进度实时落库（ADR 0030），并向调度循环提供这次 run 的记录（实现
     `ports.RunRecord`，ADR 0054 决策五）。
 
-    生命周期：begin（run 开始）→ claim（每个 job 起 worker 之前）+ on_event（运行中刷 RUNNING）+ on_job_complete（job 完成写终态）
-    → finalize（schedule 返回之后：需要时做结束写，从记录组装 run 的结果并生成报告）。重试之前调 still_open；ended_elsewhere 随时可读。
+    生命周期：begin（run 开始）→ claim（每个 job 起 worker 之前）+ on_event（运行中刷 RUNNING）+ on_job_complete（job 完成：存明细，
+    写终态并点名它）→ finalize（schedule 返回之后：需要时做结束写，从记录组装 run 的结果并生成报告）。重试之前调 still_open；
+    ended_elsewhere 随时可读。
     注入点：on_event → schedule 的 on_event（sink_lock 外）；on_job_complete → schedule 的 on_job_complete（主线程）；本对象本身 →
     ScheduleOpts.record。
     begin 在 run 已存在时失败（RunStore.create_run 抛 FileExistsError，什么都不改）；finalize 在 run 已被别处记为已结束时
@@ -99,8 +105,6 @@ class RunPersistence:
         # 每个 scope 的认领时刻（记录里的 ISO 写法，ADR 0054 决策五）：认领写成时记下，此后开始执行与结束两次 job 状态写都带上——
         # 同一理由，adapter 的整项替换不带它就会把它抹掉。没有认领过的 job 没有这一项。
         self._claimed_at: dict[str, str] = {}
-        # 本进程存下判定明细、终态写也写成的 job（scope_id → 那一份明细）：组装 run 的结果时作为这些 job 的明细
-        self._committed: dict[str, JobResult] = {}
         self._ended_run = False  # 本进程的某次写使 run 成为终态（终态写返回 ENDED_RUN，或结束写写成）
         self._ended = threading.Event()  # 停手信号：已发现这个 run 被别处记为已结束
 
@@ -194,13 +198,15 @@ class RunPersistence:
 
     def on_job_complete(self, jr: JobResult) -> None:
         """每个由执行结果结束的 job 完成（在主线程等待 job 完成的循环里串行调用）：逐 job 的提交点——判定明细【先】存，再以终态写记下
-        这个 job 的终态，run 的状态在同一次写里随之写下（ADR 0030 决定三）。
+        这个 job 的终态并点名那一份，run 的状态在同一次写里随之写下（ADR 0030 决定三）。
 
         - jr 的状态不是终态即抛 ValueError、什么都不写：判定只有终态，强制点在保存明细之前（ADR 0031 决定一·补）。
         - 停手信号已成立（已发现 run 被别处结束）时不存明细、不写终态：迟到的结果不被采用（ADR 0054 决策五）。
-        - 终态写报告 run 在这次写之前已是终态（ALREADY_ENDED）即发出停手信号；调度循环在这个回调返回之后当场读进来。
-        - 终态写写成（OPEN 或 ENDED_RUN）时记下这份明细，组装 run 的结果时用它；这次写使 run 成为终态（ENDED_RUN）时另记下，收尾不再
-          做结束写。报告不在这里生成，留到 finalize。
+        - 否则在锁内看过停手信号之后生成一个标识（`named_details.new_result_id`），把明细存成带这个标识的一份；存不成即原样抛出，这个
+          job 这次不写终态（本机组合根给的判定存储先按退避重试，同一个标识，用尽才抛出；ADR 0030 决定三「保存明细失败」条）。
+        - 存成之后以终态写记下终态、点名这个标识（`JobState.result_id`）。终态写报告 run 在这次写之前已是终态（ALREADY_ENDED）即发出
+          停手信号，存下的那一份没被点名、不被读；调度循环在这个回调返回之后当场读进来。这次写使 run 成为终态（ENDED_RUN）时记下，
+          收尾不再做结束写。报告不在这里生成，留到 finalize，明细届时按运行态里的标识读回。
         没有启动的 job schedule 不回调，它们由收尾的结束写结束、没有判定明细。终态写带的会话取 jr 的代表会话，它为 None 时退回本服务已记
         的值，不用 None 覆盖（ADR 0051 决策 4）；认领时刻原样带上。
         """
@@ -208,17 +214,17 @@ class RunPersistence:
             raise ValueError(f"job {jr.scope_id} 的结果不是终态（{jr.status.value}），不能记下")
         with self._lock:
             if self._ended.is_set():
-                return
-            self._result_store.save_job_result(self._run_id, jr)  # 判定明细【先】
+                return  # 得知 run 已结束之后不存明细（ADR 0054 决策五）
+            result_id = new_result_id()
+            self._result_store.save_job_result(self._run_id, result_id, jr)  # 判定明细【先】，存成带这个标识的一份
             remembered = self._session.get(jr.scope_id, (None, False))[0]
             final = JobState(scope_id=jr.scope_id, status=jr.status, session_id=jr.session_id or remembered,
-                             claimed_at=self._claimed_at.get(jr.scope_id))
+                             claimed_at=self._claimed_at.get(jr.scope_id), result_id=result_id)
             outcome = self._run_store.commit_job_states(self._run_id, [final],
-                                                        ended_at=instant_to_iso(self._clock()))  # 终态【后】
+                                                        ended_at=instant_to_iso(self._clock()))  # 终态【后】，并点名这一份
             if outcome is CommitOutcome.ALREADY_ENDED:
-                self._ended.set()
+                self._ended.set()  # 存下的那一份没被点名、不被读
                 return
-            self._committed[jr.scope_id] = jr
             if outcome is CommitOutcome.ENDED_RUN:
                 self._ended_run = True
 
@@ -234,9 +240,12 @@ class RunPersistence:
            与没有记录时同一处检查）。结束写没有写成时读回一次：运行态
            不存在抛 FileNotFoundError（begin 之后不该发生）；已是终态说明别处恰在这之前结束了它，发出停手信号并抛 `RunAlreadyEnded`；
            仍未结束（有 running 的 job，而本进程的 job 都已结束）抛 RuntimeError。
-        4. 使 run 成为终态的那次写是本进程写成的：读一次运行态。终态之后运行态不再变，这次读到的就是定论。与本进程存下、终态写也写成的
-           那些判定明细（按运行定义的次序）一起组装 run 的结果（`project.assemble_run_result`，墙钟取 execution.duration_ms）：汇总、
-           `--json`、退出码与报告都出自它。这次读不在报告的失败隔离之内：读失败照常抛出，按运行期落库失败处理，不生成报告。
+        4. 使 run 成为终态的那次写是本进程写成的：读一次运行态。终态之后运行态不再变，这次读到的就是定论。各 job 的明细按其中点名的
+           标识从判定存储读回（`named_details.load_named_details`，与后台报告、explain 同一种读法；由结束写结束的 job 没有标识、不读），
+           不用本进程内存里的那一份：输出与随后的 status、explain、报告出自同一份记录（ADR 0027「RunResult 的组装只有一处」条）。再组装
+           run 的结果（`project.assemble_run_result`，墙钟取 execution.duration_ms）：汇总、`--json`、退出码与报告都出自它。读运行态与
+           读被点名明细的这一次不在报告的失败隔离之内：读失败照常抛出（被点名的那一份读不到抛 `NamedDetailMissing`，是 OSError 的子类），
+           按运行期落库失败处理，不生成报告；这时 `ended_run` 已为 True，调用方据此说明记录已是终态。
         5. 有报告落点时写报告（ReportStore.write），生成时刻与结束写的结束时刻取同一次读数。
 
         **写不成时不覆盖、不写报告**：本次执行结束之前别处已把 run 记为已结束时，已有的终态对所有写入方不可变（ADR 0054 决策五「结束时
@@ -244,8 +253,8 @@ class RunPersistence:
         所以都不写。
 
         **ReportStore.write 的失败被隔离**（ADR 0030 决定三「ReportStore.write 失败隔离」注）：报告是派生只读视图、可从记录重建、永不作
-        判定源。它抛异常（磁盘满/路径不可写等）时不击穿已到终态的 run：report_index 为 None，调用方照常输出汇总与退出码。结束写与读运行态
-        本身**不**在隔离之内：控制面没落或读不回是真问题，必须冒泡。
+        判定源。它抛异常（磁盘满/路径不可写等）时不击穿已到终态的 run：report_index 为 None，调用方照常输出汇总与退出码。结束写、读运行态
+        与读被点名明细本身**不**在隔离之内：记录没有写下或读不回是真问题，必须冒泡。
         """
         with self._lock:
             now = instant_to_iso(self._clock())
@@ -260,8 +269,8 @@ class RunPersistence:
             state = self._run_store.load_run_state(self._run_id)
             if state is None:
                 raise FileNotFoundError(f"run {self._run_id} 的运行状态不存在，无法给出结果")
-            details = [self._committed[j.scope_id] for j in execution.run_meta.jobs if j.scope_id in self._committed]
-            result = assemble_run_result(execution.run_meta, state, details, duration_ms=execution.duration_ms)
+            details = load_named_details(self._run_id, state.jobs.values(), self._result_store)
+            result = assemble_run_result(execution.run_meta, state, details.values(), duration_ms=execution.duration_ms)
             if self._report_store is None:
                 return FinalizedRun(result, None)
             try:

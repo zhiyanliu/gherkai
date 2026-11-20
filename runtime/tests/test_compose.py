@@ -1181,7 +1181,8 @@ def test_build_fargate_engines_per_engine_taskdef_and_region_no_profile(monkeypa
     assert nova["ecs_client"] is ecs and nova["s3_client"] is s3
     assert nova["region"] == "us-west-2"          # region 注入（决策 C）
     assert "profile" not in nova                    # **profile 不传 FargateEngine**（正确非对称，决策 C）
-    # job_s3 = (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（避与 ResultStore 判定 key 撞，实际运行暴露）
+    # job_s3 是 (bucket, "{report_dir}/{run_id}/jobs-in/")——**jobs-in/ 非 jobs/**（与判定明细的键分开，理由见 build_fargate_engines
+    # 里 job_s3 上方的注释）
     assert nova["job_s3"] == ("prod-artifacts", "runs/rid-1/jobs-in/")
     # artifact_s3 = (bucket, "{report_dir}/{run_id}/")——**cloud 必注入**（否则容器盘销毁产物必丢，ADR 0029）
     assert nova["artifact_s3"] == ("prod-artifacts", "runs/rid-1/")
@@ -1261,6 +1262,54 @@ def test_build_cloud_stores_builds_handles_when_not_injected(monkeypatch):
     assert seen["run_store"][0] == (made["ddb"],)               # 建出来的句柄就是喂进去的那个
     assert seen["result_store"][0] == (made["s3"], "prod-artifacts", "reports/")
     assert seen["run_store"][1]["detached"] is True             # submit 方式标记透传（ADR 0034）
+
+
+# ---- 判定存储的装配（ADR 0030 决定三「保存明细失败」条）：本机推进器套保存重试，云端不套 ----
+
+def _job_result(scope_id: str):
+    from gherkai_core.model import Job, JobResult, Status
+
+    return JobResult(job=Job(scope_id=scope_id, scope_name=scope_id, engine="novaact", scenarios=(), timeout_s=60.0),
+                     status=Status.PASSED)
+
+
+def test_local_result_store_is_the_file_store_wrapped_with_save_retries(tmp_path: Path):
+    """本机的装配入口给出带保存重试的判定存储，被包住的是 report_dir 下的本机文件存储：经它存下的一份，另起一个本机文件存储按同一个
+    标识读得回，文件名只由标识构成。重试本身的次数与间隔由判定存储自己的单测覆盖。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+
+    store = compose.local_result_store(tmp_path)
+    assert isinstance(store, RetryingResultStore)
+    jr = _job_result("features/a.feature:3")
+    store.save_job_result("run-1", "0123456789abcdef", jr)
+    assert [p.name for p in (tmp_path / "run-1" / "jobs").iterdir()] == ["0123456789abcdef.json"]
+    assert LocalResultStore(tmp_path).load_job_result("run-1", "0123456789abcdef") == jr
+    assert store.load_job_result("run-1", "0123456789abcdef") == jr  # 读原样转交
+
+
+def test_build_local_stores_takes_the_result_store_from_the_single_local_entry(tmp_path: Path, monkeypatch):
+    """前台 run 与本机查询命令的装配（`build_local_stores`）经 `local_result_store` 取判定存储、不另造一份：换掉那个入口，这里
+    拿到的就是换上的那一个，入参是 report_dir。后台推进进程那一侧（`detached.build_local_reconcile`）同样经它，见 runtime 的
+    推进进程用例；两侧都经同一入口，保存重试才对两种推进器一致。不换时拿到的是带重试的那一种。"""
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+
+    assert isinstance(compose.build_local_stores(report_dir=tmp_path)[1], RetryingResultStore)
+    seen: list = []
+    sentinel = object()
+    monkeypatch.setattr(compose, "local_result_store", lambda root: seen.append(root) or sentinel)
+    _run_store, result_store, _report_store, _make = compose.build_local_stores(report_dir=str(tmp_path))
+    assert result_store is sentinel and seen == [tmp_path]
+
+
+def test_build_cloud_stores_gives_the_bare_s3_result_store_without_save_retries():
+    """云端的组合根不套保存重试：判定存储就是 S3 adapter 本身。锁住「云端不在进程内重试」：保存失败让推进器的这次调用失败，由流的
+    重试或之后的触发再做；套上重试会让 Lambda 在一次调用里等待。不连 AWS：注入的句柄只被保存、不被调用。"""
+    from gherkai_core.adapters.result_store.s3 import S3ResultStore
+
+    _run_store, result_store, _report_store = compose.build_cloud_stores(
+        table="prod-runs", bucket="prod-artifacts", prefix="reports", ddb_table=object(), s3=object())
+    assert type(result_store) is S3ResultStore  # 不是任何包装（含保存重试的那一层）
 
 
 # ---- list-runs 的云端装配（ADR 0041 决策七）：索引就绪检查在装配路径上，DescribeTable 用 moto 模拟响应 ----

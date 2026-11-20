@@ -81,15 +81,16 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 
 `run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
 run 开始即写 definition 与初始全 pending 态，每个 scope 起 worker 之前先认领（`RunPersistence` 作为 `ScheduleOpts.record` 注入，
-认领时刻随认领写下），开始执行时写入 RUNNING，完成即先存该 scope 的判定明细、再以终态写记下它的终态（逐 job 的提交点）。
+认领时刻随认领写下），开始执行时写入 RUNNING，完成即生成一个标识、先存该 scope 的一份判定明细，再以终态写记下它的终态并点名那一份（逐 job 的提交点，ADR 0030 决定三）。
+判定存储由 `compose.build_local_stores` 经 `compose.local_result_store` 装配，保存失败时按 1、2、4 秒退避重试、同一个标识，重试在落库服务的锁内。
 调度循环的墙钟注入 `compose.now`，与写时间戳的 `compose.now_iso` 同一个读取点，`RunPersistence` 取结束时刻也用它（`clock=compose.now`）。
 `schedule` 返回执行事实 `Execution`（判出结果的 job、余下的 job 不再启动的来源、整体墙钟），不给 run 级状态。过了运行期限减 60 秒、
 fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finalize(execution)` 在本进程的终态写没有使 run 成为终态时按那条来路做
 结束写，把它们记为 skipped 并写下 run 级说明（ADR 0054 决策二第 1、3 条；ADR 0031 决定三「结束写」小节），本进程使 run 成为终态之后
-读一次运行态、从记录组装 `RunResult`，文本汇总、`--json`、退出码与报告都出自它。run 级在此之前已被别处记为终态时
+读一次运行态、按其中点名的标识读回各 job 的判定明细、从记录组装 `RunResult`，文本汇总、`--json`、退出码与报告都出自它。run 级在此之前已被别处记为终态时
 （认领被拒、job 状态写得知 run 已结束，调度循环随即停手，此后不存明细、不写终态），`finalize` 不覆盖它、不写报告，抛 `RunAlreadyEnded`，
 `run` 在 stderr 说明这一情形、stdout 不输出，以退出码 1 结束（处理过使用方中断时仍按信号取 130 或 143）。运行期读写运行记录失败
-（存明细、写运行态、收尾时读回运行态）时同样不输出汇总，stderr 给一句说明（发生了什么、记录在哪里、怎么办）、不打回溯，以非零退出码结束。
+（存明细的重试用尽、写运行态、收尾时读回运行态与被点名的明细，后者含那一份读不到）时同样不输出汇总，stderr 给一句说明（发生了什么、记录在哪里、怎么办）、不打回溯，以非零退出码结束。
 `--no-report` 时跳过整条落库（零落盘运行路径），只注入墙钟、不认领，运行期限照样生效；汇总由 `result_without_record(execution)`
 按同一组作用在内存里算出。
 

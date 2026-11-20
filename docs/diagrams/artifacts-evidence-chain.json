@@ -66,10 +66,10 @@
       "id": "verdict",
       "type": "database",
       "label": "判定真值",
-      "sublabel": "每个 job 一份 · 含证据指针",
+      "sublabel": "可有多份 · 含证据指针",
       "stage": 1,
       "row": 1,
-      "tag": "唯一权威",
+      "tag": "终态点名的一份算数",
       "width": 156,
       "yOffset": -24
     },

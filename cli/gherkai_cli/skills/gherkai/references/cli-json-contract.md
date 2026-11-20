@@ -70,7 +70,7 @@
 | 键 | 含义 |
 |---|---|
 | `run_meta` / `run_state` | 任务定义 / 运行态的落点 |
-| `jobs_dir` | 判定明细目录（每个有判定明细的 job 一份 JSON，文件名是 URL 编码的 scope_id；形状同前述 `jobs[]` 的一项，但**顶层 `scope_id` 换成内嵌的完整 `job` 定义**（同 `run_meta.jobs[]` 每项的形状）——scope 键取自 `job.scope_id`，单文件自包含、无需读 run_meta） |
+| `jobs_dir` | 判定明细的存放处：每次保存一个文件，同一个 job 可能有多份，用哪一份由运行状态记录点名（`status --json` 的 `jobs[].result_id`）；文件的存放形态不是对外的约定，读明细用 `explain --json` |
 | `report_index` | 报告首页 `index.html`；报告写失败被隔离时**省略** |
 | `worker_log` | worker 日志落点；仅 `--quiet` 时出现 |
 
@@ -106,7 +106,7 @@
 | `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
 | `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有两类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；`submit` 提交的 run 在后台读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，还没有结束的 job 都记 `error`，`jobs[].message` 是同一句。job 级原因看 `jobs[].message` 与 `explain --json` |
-| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**）、`message`（没有判定明细的 job 在 run 结束时写下的说明，如「这个 run 已超过允许运行的时间，job 没有启动」；没有时**省略**，其余 job 的原因看 `explain --json`） |
+| `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**）、`message`（没有判定明细的 job 在 run 结束时写下的说明，如「这个 run 已超过允许运行的时间，job 没有启动」；没有时**省略**，其余 job 的原因看 `explain --json`）、`result_id`（这个 job 的判定明细的标识：job 由执行结果结束时，写下它的终态的同一次写记下所用的那一份判定明细；没有判定明细的 job 与还没有结束的 job **省略**。读明细用 `explain --json`，不按它拼文件路径） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在每个 job 得出结果时写入，前台 `run` 与 `submit` 提交的 run 相同，run 还没结束时已结束的 job 即已有；没有启动的 job，以及这个 run 被结束时还没有结果的 job，没有判定明细 |
 
 ## `gherkai list-runs --json`
@@ -139,14 +139,14 @@
 ## `gherkai explain <run_id> [<scope_id>] --json`
 
 step 级证据视图：判定树（**骨架是提交时的 job 定义**）与每个 AI step 的机读证据（设备目标上另含判为 failed / error 的确定性与导航 step，其 `acts` 为空数组）。**不表判定**：退出码只有 `0`
-（渲染成功，即使全部 step 没有证据、判定明细尚未落地）与 `2`（参数错 / run 或 scope 不存在 / 云端不可用）；
+（渲染成功，即使全部 step 没有证据、判定明细尚未落地）与 `2`（参数错 / run 或 scope 不存在 / 运行状态记录点名的那一份判定明细读不到 / 云端不可用）；
 表判定的退出码由 `run` 或 `status --wait` 给出。`--json` 下 stdout 只有这一个文档，「run 仍在运行」这类提示一律不输出（机读侧从顶层 `status` 读运行态）。
 
 | 键 | 类型 | 含义 |
 |---|---|---|
 | `run_id` | string | |
 | `status` | 同 `status` 一节：`pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级运行态；未到终态时文档只含已落地的 job |
-| `scopes[]` | array | 每个 job 一项，见下；指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可少于该 run 的 job 数 |
+| `scopes[]` | array | 不给 `scope_id` 时每个有判定明细的 job 一项（由执行结果结束、运行状态记录点名了判定明细的 job），见下；没有判定明细的 job 不列出，它的状态与说明给出它的 `scope_id` 来看（见下），或看 `status --json` 的 `jobs[]`。指定 `--scenario` / `--step` 时**无一命中的 scope 整条不出现**（不产生空条目），此时条数可更少 |
 
 给了 `scope_id`、这个 run 已结束、而这个 job 已结束却没有判定明细（没有启动，或这个 run 被结束时它还没有结果）时，`scopes[]` 只有这一项，只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取自运行状态记录（没有说明时 `message` 为 null），退出码为 0；形状与 `run --json` 的 `jobs[]` 里没有判定明细的项相同。run 未结束时，点名的 job 已结束即照常给出它的判定明细（判定明细在每个 job 得出结果时写入）；还没有结束的 job 没有判定明细，按判定明细尚未落地处理（`scopes[]` 为空，退出码为 0）。
 

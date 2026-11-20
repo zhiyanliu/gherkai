@@ -7,12 +7,14 @@
     {
       "scope_id": "zh-novaact",
       "status": "failed",
-      "session_id": "01M630VS5A54B2X6YAD3V26QM7"
+      "session_id": "01M630VS5A54B2X6YAD3V26QM7",
+      "result_id": "969e52acad7e9f7b"
     },
     {
       "scope_id": "zh-midscene",
       "status": "passed",
-      "session_id": "01M630VQ171TEM6W7DX8MXPA3G"
+      "session_id": "01M630VQ171TEM6W7DX8MXPA3G",
+      "result_id": "0280f2b8f2db7a7e"
     }
   ]
 }

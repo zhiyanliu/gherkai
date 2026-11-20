@@ -3,7 +3,7 @@
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；实装只有子进程 adapter（云端起 task 的 FargateEngine 不走本 port）
 - RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询接力与无状态批量运行的条件写）
-- ResultStore   —— 数据面：每 scenario 判定真值、投票（追加为主）
+- ResultStore   —— 数据面：由执行结果结束的 job 的判定明细（每 scenario、step 的判定与投票），每次保存一份、用哪一份由运行态点名
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
 另有调度循环用的回调与能力类型（EngineResolver / Sink / JobSink / RunRecord），同样由组合根注入；RunRecord 的实现是 core 自己的落库服务
@@ -163,8 +163,9 @@ class RunStore(Protocol):
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """执行中的写（ADR 0030 决定四）：按 scope_id 写单个 job 的运行态（整项替换这个 job 的条目），写的是认领之后的 running 与会话血缘。
 
-        - **参数**：写入的 job 态只能是 RUNNING，否则抛 ValueError、不写（终态由 commit_job_states 与 end_run 写下，pending 只由
-          create_run 写下；校验是 `run_status.check_running_write`）。运行态不存在抛 FileNotFoundError（须先 create_run）。
+        - **参数**：写入的 job 态只能是 RUNNING、不带点名的标识，否则抛 ValueError、不写（终态由 commit_job_states 与 end_run 写下，
+          pending 只由 create_run 写下，点名只由 commit_job_states 写下；校验是 `run_status.check_running_write`）。运行态不存在抛
+          FileNotFoundError（须先 create_run）。
         - **条件**：run 未结束（ADR 0054 决策五），且库中这个 job 在运行态里、仍是 pending 或 running：已是终态的 job 不被改写（终态只
           写一次，ADR 0031 决定一·补），不在运行态里的 job 不写（不臆造 job，与认领、投影相同）。判断与写在同一次条件写里，本机在文件
           锁内，云端在同一次 update_item 的条件里，不先读后写（ADR 0034 机制三「run 级状态只进不退」条③）。
@@ -181,10 +182,12 @@ class RunStore(Protocol):
     def commit_job_states(self, run_id: str, job_states: Sequence[JobState], *, ended_at: str) -> CommitOutcome:
         """带结果的 job 终态写：把一个或多个由执行结果结束的 job 记为终态，一次条件写（ADR 0030 决定四）。
 
-        - **作用**：库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补）；其余给出的 job 与库中的条目按字段合并（ADR 0030
-          决定四）：状态取给出的终态；认领时刻以库中的为准，库中没有时取给出的；会话取给出的，没有给出时保留库中的，不以空值覆盖；
-          job 级说明只由结束写写下，给出的不写下。合并按写的那一刻库中的条目做：调用方准备参数之后别的写为这个 job 写下的认领时刻
-          留下，写下的会话只在给出的 job 没有会话时留下，两者都不被空值覆盖。同一次写里按取法写 run 状态（ADR 0031 决定三）；
+        - **作用**：库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补；别的写入方点名的标识原样保留）；其余给出的 job
+          与库中的条目按字段合并（ADR 0030 决定四）：状态取给出的终态；认领时刻以库中的为准，库中没有时取给出的；会话取给出的，没有
+          给出时保留库中的，不以空值覆盖；点名的标识取给出的（`JobState.result_id`，与这个终态出自同一个执行结果的那一份明细，ADR 0030
+          决定三「点名」条），给出的没有即不点名；job 级说明只由结束写写下，给出的不写下。合并按写的那一刻库中的条目做：调用方准备参数
+          之后别的写为这个 job 写下的认领时刻留下，写下的会话只在给出的 job 没有会话时留下，两者都不被空值覆盖；云端重读再算时用的仍是
+          给出的这组 JobState，点名的标识不变。同一次写里按取法写 run 状态（ADR 0031 决定三）；
           这次写使 run 成为终态时，同一次写下 ended_at（ISO 串，调用方经注入的时钟取，adapter 不取时钟）。认领计数、HWM、开始时刻与
           run 级说明不变。作用的定义是 `run_status.commit_applied`，两个 adapter 都按它算出要写下的运行态。
         - **条件**：run 未结束（ADR 0054 决策五）。判断只看写的那一刻的运行态：本机在文件锁内读、判断、写，云端以写入序号等于读到的
@@ -201,9 +204,10 @@ class RunStore(Protocol):
         """结束写：结束一个仍有未结束 job 的 run，一次条件写（ADR 0031 决定三「结束写」小节，ADR 0030 决定四）。
 
         - **作用**：运行态里是 pending 的 job 记 skipped、running 的记 aborted，各带 ending 给的一句说明；运行定义不可用的变体
-          （`ending.definition_unavailable`）把每个未结束的 job 记 error、说明同 run 级。会话与认领时刻原样保留，已是终态的 job 不变。
-          run 状态按取法随之成为终态，同一次写下 run 级说明（`ending.run_message`）与 ended_at（ISO 串，调用方给出）。认领计数、HWM
-          与开始时刻不变。判断只看运行态：不读事件，不写判定明细、不点名。作用的定义是 `run_status.ending_applied`。
+          （`ending.definition_unavailable`）把每个未结束的 job 记 error、说明同 run 级。会话与认领时刻原样保留，已是终态的 job 不变
+          （连同它们点名的标识；云端整体替换 jobs 时同样带上）。run 状态按取法随之成为终态，同一次写下 run 级说明（`ending.run_message`）
+          与 ended_at（ISO 串，调用方给出）。认领计数、HWM 与开始时刻不变。判断只看运行态：不读事件，不写判定明细、不点名。作用的定义是
+          `run_status.ending_applied`。
         - **条件**：run 未结束；不结束执行中 job 的来路（`ending.ends_running_jobs` 为 False：执行方自己到期、fail-fast、使用方中断）
           另要求运行态里没有 running 的 job。两项都按写下时的运行态判断：本机在文件锁内判断，云端以写入序号等于读到的值为条件、条件
           不成立即重读再算，重读的次数用尽时同终态写一样抛错、不写。
@@ -285,21 +289,33 @@ class RunStore(Protocol):
 
 
 class ResultStore(Protocol):
-    """数据面：每 job（即 scope）判定真值，追加为主（**判定真值唯一权威**；CI 读判定靠它）。
+    """数据面：由执行结果结束的 job 的判定明细，对 scenario、step 与归因负责（ADR 0016「留口子：核心注入接口」ResultStore 条）。
 
-    local adapter 是 LocalResultStore（每 job 落 <root>/<run_id>/jobs/<encoded_scope_id>.json）。
+    每次保存一份、带写入方给出的标识（`named_details.new_result_id`），同一个 job 可以有多份、互不覆盖；用哪一份由运行态里这个 job
+    的终态点名（`JobState.result_id`，ADR 0030 决定三「点名」条）。读者先读运行态、再按被点名的标识取那一份
+    （`named_details.load_named_details`）；端口不提供列举：列举入口一旦在端口上，生产 code 就能绕过点名去读没被采用的明细，没被点名
+    的明细不读、不列、不清理。job 与 run 的状态不取自这里，以运行态为准（ADR 0030 决定三「状态的权威是运行态」条）。
+
+    adapter：本机 `LocalResultStore`（`<root>/<run_id>/jobs/<标识>.json`），云端 `S3ResultStore`（`<prefix><run_id>/jobs/<标识>.json`）；
+    本机推进器的组合根在本机 adapter 外面套保存失败的退避重试（`RetryingResultStore`）。
     """
 
-    def save_job_result(self, run_id: str, job: JobResult) -> None: ...
-    def load_job_result(self, run_id: str, scope_id: str) -> JobResult | None: ...
-    def load_all(self, run_id: str) -> list[JobResult]: ...
+    def save_job_result(self, run_id: str, result_id: str, job: JobResult) -> None:
+        """存下带这个标识的一份明细，原子写：读者要么读不到，要么读到完整的一份。同一个标识再存一次即覆盖（只发生在同一次保存的
+        重试上，内容相同）。不带条件。"""
+        ...
+
+    def load_job_result(self, run_id: str, result_id: str) -> JobResult | None:
+        """按标识取那一份；这个标识下没有明细时返回 None。别的读取失败（权限、网络）照常抛出。"""
+        ...
+
     def preflight(self) -> None: ...  # 探活（ADR 0030 决定七）：云端探桶、local no-op
 
 
 class ReportStore(Protocol):
     """归集报告产物为一份**派生只读导航视图**（RunReport，ADR 0027）：manifest.json + index.html。
 
-    纯派生：可从记录（运行态加判定明细）重新组装出 RunResult 再生成，**永不作 CI 判定源**（状态的权威是运行态，ADR 0030 决定三）。
+    纯派生：从记录（运行态加被点名的判定明细）组装出 RunResult 再生成，**永不作 CI 判定源**（状态的权威是运行态，ADR 0030 决定三）。
     run 与各 job 的状态、说明取 RunResult 里的运行态；有判定明细的 job 另读 report_refs + 各级标识（scope_id/scenario_id/step
     index）与 status/时长/成本 + job 级 engine/session_id + job/step 级 error_type·message（失败原因原文；step 级 message 见 ADR 0042
     决策三）+ step 级 votes/shortcircuited 渲染「人看」视图，由结束写结束的 job 只有状态与说明；

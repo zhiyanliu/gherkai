@@ -150,8 +150,8 @@ def test_aggregate_to_dict_normalized_no_def_duplication():
 
 
 def test_result_store_single_job_file_is_self_contained():
-    # ResultStore 单 job 文件是自包含形态（include_job=True 默认）：嵌完整 def，
-    # CI 单独读一个 jobs/<scope_id>.json 不依赖 run_meta 即可重建（与聚合 normalize 形态相对）。
+    # 一份判定明细是自包含形态（include_job=True 默认）：嵌完整 def，读者按运行态里的标识取回一份之后
+    # 不读 run_meta 即可重建（与聚合 normalize 形态相对）。
     jr = _sample_run().details[0]
     d = job_result_to_dict(jr)                            # 默认 include_job=True
     assert "job" in d and "scenarios" in d["job"]         # 自包含：嵌完整 def
@@ -264,35 +264,53 @@ def test_run_state_omits_null_timestamps(tmp_path: Path):
     assert got is not None and got.started_at is None and got.ended_at is None  # 读回仍 None
 
 
-# ---- LocalResultStore：每 job 落盘 + scope_id 不透明编码 ----
+# ---- LocalResultStore：每次保存一个文件，文件名只由标识构成（ADR 0030 决定三「点名」条）；两个 adapter 共有的性质在
+# test_s3_result_store.py 对拍，这里只看本机的物理落点 ----
 def test_result_store_save_load_job(tmp_path: Path):
+    """每份明细存成 jobs/<标识>.json，按标识读回与存下的相等（判定明细与内嵌的 definition 都完整）；文件名里不带 scope_id，含 /、:
+    与中文的 scope_id 不影响落点。"""
     store = LocalResultStore(tmp_path / "runs")
     r = _sample_run("run-2")
+    ids = {jr.scope_id: f"{n:016x}" for n, jr in enumerate(r.details)}
     for jr in r.details:
-        store.save_job_result("run-2", jr)
-    # 含 /:中文 的 scope_id 都安全成文件名（可逆编码、不撞名、不当路径）
+        store.save_job_result("run-2", ids[jr.scope_id], jr)
     jobs_dir = tmp_path / "runs" / "run-2" / "jobs"
-    assert len(list(jobs_dir.glob("*.json"))) == 2
-    # 读回单 job（判定真值 + definition 完整）
-    j0 = store.load_job_result("run-2", "features/wiki.feature:6")
-    assert j0 is not None and j0.engine == "midscene" and j0.scope_name == "wiki"
-    j1 = store.load_job_result("run-2", "登录场景")
-    assert j1 is not None and j1.error_type == "assertion_failed"
-    # 读回全部
-    allj = store.load_all("run-2")
-    assert len(allj) == 2
+    assert sorted(p.name for p in jobs_dir.iterdir()) == sorted(f"{rid}.json" for rid in ids.values())
+    for jr in r.details:
+        got = store.load_job_result("run-2", ids[jr.scope_id])
+        assert got == jr and got.job.scenarios[0].steps[1].text == "搜索 OpenAI"
 
 
-def test_result_store_scope_id_not_path_traversal(tmp_path: Path):
-    # scope_id 含 / 不会被当路径（编码后是单个文件名，不会逃逸出 jobs/）
+def test_result_store_id_stays_one_file_under_jobs(tmp_path: Path):
+    """标识按不透明标识符编码成文件名里的一段：含 / 与 .. 的值（只可能出自被手改过的运行态）也只落成 jobs/ 之下的一个文件，不造子目录、
+    不逃出 jobs/，按同一个值读得回；scope_id 含 / 同样不进路径。"""
+    from urllib.parse import quote
+
     store = LocalResultStore(tmp_path / "runs")
     jr = JobResult(job=_job_def("a/b/c:9", "anchor", "midscene"), status=Status.PASSED)
-    store.save_job_result("run-3", jr)
-    jobs_dir = tmp_path / "runs" / "run-3" / "jobs"
-    files = list(jobs_dir.glob("*.json"))
-    assert len(files) == 1
-    assert "/" not in files[0].name.replace(".json", "")  # / 被编码，没造子目录
-    assert store.load_job_result("run-3", "a/b/c:9").scope_id == "a/b/c:9"
+    store.save_job_result("run-3", "../x/y", jr)
+    written = [p.relative_to(tmp_path) for p in tmp_path.rglob("*") if p.is_file()]
+    assert written == [Path("runs", "run-3", "jobs", quote("../x/y", safe="") + ".json")]
+    assert store.load_job_result("run-3", "../x/y") == jr
+
+
+def test_result_store_reads_none_when_the_file_is_gone_after_a_probe(tmp_path: Path, monkeypatch):
+    """读的是文件本身、接住 FileNotFoundError，不先探测存在再读：这里让存在性探测一律答「在」，固定出「探测时还在、读时已被删」的
+    先后，读回照样是 None，不冒出未归类的异常。"""
+    store = LocalResultStore(tmp_path / "runs")
+    store.save_job_result("run-g", "0000000000000001", JobResult(job=_job_def("s", "s", "midscene"), status=Status.PASSED))
+    monkeypatch.setattr(Path, "exists", lambda self, *a, **k: True)
+    monkeypatch.setattr(Path, "is_file", lambda self, *a, **k: True)
+    assert store.load_job_result("run-g", "0000000000000002") is None
+    assert store.load_job_result("run-missing", "0000000000000001") is None
+
+
+def test_result_store_load_lets_other_read_failures_through(tmp_path: Path):
+    """只有「这个标识下没有文件」读作 None；别的读取失败照常抛出（这里落点被一个目录占住，读它抛 IsADirectoryError）。"""
+    store = LocalResultStore(tmp_path / "runs")
+    (tmp_path / "runs" / "run-d" / "jobs" / "0000000000000001.json").mkdir(parents=True)
+    with pytest.raises(IsADirectoryError):
+        store.load_job_result("run-d", "0000000000000001")
 
 
 # ---- RunStore 生命周期写：create_run → update_job_state（执行中）→ commit_job_states（终态，最后一个使 run 成为终态；ADR 0030 决定四）----
@@ -855,6 +873,29 @@ def test_job_state_message_round_trips_and_is_omitted_when_none(tmp_path: Path):
     raw = json.loads((tmp_path / "runs" / "msg-run" / "run_state.json").read_text("utf-8"))
     assert {e["scope_id"]: "message" in e for e in raw["jobs"]} == {sid0: True, sid1: False}
     assert store.load_run_state("msg-run") == state
+
+
+def test_job_state_result_id_round_trips_and_is_omitted_when_none(tmp_path: Path):
+    """点名的标识（ADR 0030 决定三「点名」条）：有值时落进 job 条目、读回不丢；没有时 job 条目里不出现这个键、读回为 None（`status
+    --json` 输出的就是这份序列化，被点名的 job 才带这个键）。经 serialize 与本机 run_state.json 两层核对。"""
+    from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
+    meta = _sample_run("rid-run").run_meta
+    sid0, sid1 = meta.jobs[0].scope_id, meta.jobs[1].scope_id
+    state = RunState(run_id="rid-run", status=Status.ABORTED, ended_at="2026-11-20T02:00:00Z", message="run 级说明", jobs={
+        sid0: JobState(sid0, Status.PASSED, session_id="s0", claimed_at="2026-11-20T00:00:00Z", result_id="0123456789abcdef"),
+        sid1: JobState(sid1, Status.SKIPPED, message="这个 run 已超过允许运行的时间，job 没有启动"),
+    })
+    entries = {e["scope_id"]: e for e in run_state_to_dict(state)["jobs"]}
+    assert entries[sid0]["result_id"] == "0123456789abcdef"
+    assert "result_id" not in entries[sid1]
+    assert run_state_from_dict(run_state_to_dict(state)) == state
+
+    store = LocalRunStore(tmp_path / "runs")
+    store.create_run(meta, state)
+    raw = json.loads((tmp_path / "runs" / "rid-run" / "run_state.json").read_text("utf-8"))
+    assert {e["scope_id"]: e.get("result_id") for e in raw["jobs"]} == {sid0: "0123456789abcdef", sid1: None}
+    assert {e["scope_id"]: "result_id" in e for e in raw["jobs"]} == {sid0: True, sid1: False}
+    assert store.load_run_state("rid-run") == state
 
 
 def test_run_state_jobs_map_round_trip(tmp_path: Path):

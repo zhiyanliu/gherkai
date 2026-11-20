@@ -115,7 +115,9 @@ def test_run_writes_three_layer_artifacts(tmp_path, monkeypatch, capsys):
     assert (run_dir / "manifest.json").exists()
     assert (run_dir / "index.html").exists()
     assert (run_dir / "jobs").is_dir()
-    assert len(list((run_dir / "jobs").glob("*.json"))) == 1
+    # 判定明细一份一个文件，文件名就是运行态里这个 job 点名的标识
+    [job_state] = json.loads((run_dir / "run_state.json").read_text(encoding="utf-8"))["jobs"]
+    assert [p.name for p in (run_dir / "jobs").glob("*.json")] == [f"{job_state['result_id']}.json"]
     # 三层重构后不存在单一 run.json
     assert not (run_dir / "run.json").exists()
 
@@ -704,12 +706,14 @@ def test_malformed_feature_friendly_diagnostic(tmp_path, monkeypatch, capsys):
         assert "语法错误" in err and "Traceback" not in err  # 友好诊断、非 Python traceback
 
 
-# ---- 第四刀：实时写 commit-point 写序 ----
+# ---- 前台实时写的写序：逐 job 先存明细、再写终态并点名，收尾按点名读回（ADR 0030 决定三）----
 # 用 fake store 记录调用序（共享一个有序 log），注入真 RunPersistence 编排——测真实写序、非 mock 行为。
 # 注入点是 patch compose.build_local_stores（ADR 0016：local 装配下沉 compose 后的注入锚，取代旧的 m.Local*）。
-def _recording_build_local_stores(calls: list):
+def _recording_build_local_stores(calls: list, named: list):
     """返回一个替换 compose.build_local_stores 的 fake：产出三个记录调用的 fake store + make_artifacts。run store 在内存里持有
-    运行态，终态写与结束写对它的作用取 core 的那一处定义（`run_status.commit_applied`、`ending_applied`），与两个真 adapter 相同。"""
+    运行态，终态写与结束写对它的作用取 core 的那一处定义（`run_status.commit_applied`、`ending_applied`），与两个真 adapter 相同。
+    判定存储按标识存取，读回的就是那个标识下存的一份。named 依次记下 (哪一方, scope_id, 标识)：保存时记 "saved"，终态写里给出的
+    JobState 记 "committed"。"""
     from dataclasses import replace
 
     from gherkai_core.run_status import commit_applied, ending_applied
@@ -730,6 +734,7 @@ def _recording_build_local_stores(calls: list):
 
         def commit_job_states(self, run_id, job_states, *, ended_at):
             calls.append(("run", "commit_job_states", ",".join(js.scope_id for js in job_states)))
+            named.extend(("committed", js.scope_id, js.result_id) for js in job_states)
             new_state, outcome = commit_applied(self.state, job_states, ended_at=ended_at)
             if new_state is not None:
                 self.state = new_state
@@ -747,8 +752,19 @@ def _recording_build_local_stores(calls: list):
             return self.state
 
     class FakeResultStore:
+        def __init__(self):
+            self.saved = {}  # 标识 → 明细
+
         def preflight(self): calls.append(("result", "preflight", None))
-        def save_job_result(self, run_id, jr): calls.append(("result", "save_job_result", jr.scope_id))
+
+        def save_job_result(self, run_id, result_id, jr):
+            calls.append(("result", "save_job_result", jr.scope_id))
+            named.append(("saved", jr.scope_id, result_id))
+            self.saved[result_id] = jr
+
+        def load_job_result(self, run_id, result_id):
+            calls.append(("result", "load_job_result", result_id))
+            return self.saved.get(result_id)
 
     class FakeReportStore:
         def preflight(self): calls.append(("report", "preflight", None))
@@ -781,8 +797,9 @@ def _two_scope_feature(tmp_path: Path) -> Path:
 
 def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     calls: list = []
+    named: list = []
     # 注入 fake（patch compose.build_local_stores：cli 调它拿三 store → 喂给真 RunPersistence）
-    monkeypatch.setattr(m.compose, "build_local_stores", _recording_build_local_stores(calls))
+    monkeypatch.setattr(m.compose, "build_local_stores", _recording_build_local_stores(calls, named))
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())  # 每 job fire on_job_complete
 
     rc = m.main(["run", str(_two_scope_feature(tmp_path)), "--report-dir", str(tmp_path / "r"), "--quiet"])
@@ -803,17 +820,23 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     saves = [scope for (s, mth, scope) in calls if mth == "save_job_result"]
     commits = [scope for (s, mth, scope) in calls if mth == "commit_job_states"]
     assert sorted(saves) == ["a", "b"] and sorted(commits) == ["a", "b"]
-    # ③ 逐 job 的提交点（ADR 0030 决定三）：明细先存、这个 job 的终态写紧跟其后，中间没有别的写
+    # ②b 点名：终态写给出的 JobState 带的就是这个 job 那次保存用的标识，两个 job 的标识不同
+    saved = {sid: rid for (side, sid, rid) in named if side == "saved"}
+    committed = {sid: rid for (side, sid, rid) in named if side == "committed"}
+    assert committed == saved and len(set(saved.values())) == 2 and None not in saved.values()
+    # ③ 逐 job 的提交点：明细先存、这个 job 的终态写紧跟其后，中间没有别的写
     for scope in ("a", "b"):
         si = calls.index(("result", "save_job_result", scope))
         assert calls[si + 1] == ("run", "commit_job_states", scope)
-    # ④ 最后一个 job 的终态写使 run 成为终态：之后不再做结束写；为组装汇总读一次运行态，再生成报告
+    # ④ 最后一个 job 的终态写使 run 成为终态：之后不再做结束写；为组装汇总读一次运行态，再按其中点名的标识逐个读回明细
     assert ("run", "end_run") not in methods
     last_commit = max(i for i, (s, mth) in enumerate(methods) if mth == "commit_job_states")
     read_idx = methods.index(("run", "load_run_state"))
     assert last_commit < read_idx
-    # ⑤ ReportStore.write 最后（派生、永远最后）
-    assert methods[-1] == ("report", "write") and read_idx == len(methods) - 2
+    assert methods[read_idx + 1:read_idx + 3] == [("result", "load_job_result")] * 2
+    assert sorted(rid for (s, mth, rid) in calls if mth == "load_job_result") == sorted(saved.values())
+    # ⑤ ReportStore.write 最后（派生、永远最后），紧跟在读回明细之后
+    assert methods[-1] == ("report", "write") and read_idx == len(methods) - 4
 
 
 # ---- run 被别处结束：本机 run 执行中途另一个写入方结束了这个 run，前台服从记录（ADR 0054 决策五「执行方服从记录」）----
@@ -821,6 +844,13 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
 
 _ENDED_AT = "2026-11-15T00:00:00+00:00"
 _SETTLED = RUN_ENDINGS["settle-advancer-exited"]  # 处置「锁拿到了」那一行：另一个写入方用的结束写
+
+
+def _detail_files(run_dir: Path) -> list[str]:
+    """run 目录下全部判定明细文件的标识（文件名去掉扩展名），排序给出；目录不在时为空。端口不提供列举，用例直接看存放处，以确认
+    没有多存、也没有漏存。"""
+    jobs_dir = run_dir / "jobs"
+    return sorted(p.stem for p in jobs_dir.glob("*.json")) if jobs_dir.is_dir() else []
 
 
 def _schedule_ended_elsewhere(end_it, *, signum=None):
@@ -877,13 +907,16 @@ def test_run_keeps_the_recorded_end_when_the_run_was_ended_elsewhere(tmp_path, m
     assert "已得出的判定已写入" not in cap.err
     assert f"判定明细: {compose.local_artifact_locations(str(reports), run_id)['jobs_dir']}" in cap.err
     assert "Traceback" not in cap.err
-    # 记录是那次结束写的结果：a 是本次执行先写下的终态，b 是结束写记下的 skipped 与说明；b 判出的结果没有写进记录，也没有明细
+    # 记录是那次结束写的结果：a 是本次执行先写下的终态并点名了它的明细，b 是结束写记下的 skipped 与说明、不点名；b 判出的结果
+    # 没有写进记录，也没有存明细：明细目录里只有 a 被点名的那一份
     state = LocalRunStore(reports).load_run_state(run_id)
     assert (state.status, state.message, state.ended_at) == (Status.ABORTED, _SETTLED.run_message, _ENDED_AT)
     assert {sid: (js.status, js.message) for sid, js in state.jobs.items()} == {
         "a": (Status.PASSED, None), "b": (Status.SKIPPED, _SETTLED.skipped_message)}
+    assert state.jobs["a"].result_id is not None and state.jobs["b"].result_id is None
+    assert _detail_files(run_dir) == [state.jobs["a"].result_id]
     _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
-    assert [jr.scope_id for jr in result_store.load_all(run_id)] == ["a"]
+    assert result_store.load_job_result(run_id, state.jobs["a"].result_id).scope_id == "a"
     assert not (run_dir / "index.html").exists()
 
 
@@ -1145,8 +1178,10 @@ def test_run_past_the_deadline_ends_as_aborted_with_the_run_message(tmp_path, mo
         "a": (Status.ABORTED, None), "b": (Status.SKIPPED, _PAST_DEADLINE.skipped_message)}
     assert state.jobs["a"].claimed_at == instant_to_iso(_T0 + timedelta(seconds=1900)) and state.jobs["b"].claimed_at is None
     assert state.claim_count == 1
+    # a 的终态点名了它的明细，那也是明细目录里唯一的一份；b 由结束写结束，不点名
+    assert state.jobs["b"].result_id is None and _detail_files(run_dir) == [state.jobs["a"].result_id]
     _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
-    [jr] = result_store.load_all(run_dir.name)
+    jr = result_store.load_job_result(run_dir.name, state.jobs["a"].result_id)
     assert (jr.scope_id, jr.status, jr.error_type, jr.message) == ("a", Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)
     page = (run_dir / "index.html").read_text(encoding="utf-8")
     assert f"说明: {_PAST_DEADLINE.run_message}" in page and "<code>b</code> <b>skipped</b>" in page
@@ -1231,8 +1266,7 @@ def test_run_stops_when_another_writer_ends_the_run_mid_execution(tmp_path, monk
     assert (state.status, state.message, state.ended_at) == (Status.ABORTED, _SETTLED.run_message, _ENDED_AT)
     assert {sid: (js.status, js.message) for sid, js in state.jobs.items()} == {
         "a": (Status.ABORTED, _SETTLED.aborted_message), "b": (Status.SKIPPED, _SETTLED.skipped_message)}
-    _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
-    assert result_store.load_all(box["run_id"]) == []
+    assert all(js.result_id is None for js in state.jobs.values()) and _detail_files(reports / box["run_id"]) == []
     assert not (reports / box["run_id"] / "index.html").exists()
 
 
@@ -1264,9 +1298,11 @@ def test_run_json_lists_every_job_in_definition_order_after_fail_fast(tmp_path, 
     assert (doc["status"], doc["message"]) == ("error", fail_fast.run_message)
     assert [(j["scope_id"], j["status"]) for j in doc["jobs"]] == [("a", "error"), ("b", "skipped"), ("c", "skipped")]
     assert doc["jobs"][1:] == [{"scope_id": sid, "status": "skipped", "message": fail_fast.skipped_message} for sid in ("b", "c")]
-    _rs, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(reports))
+    from gherkai_core.adapters.run_store.local import LocalRunStore
     [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
-    assert [jr.scope_id for jr in result_store.load_all(run_dir.name)] == ["a"]
+    state = LocalRunStore(reports).load_run_state(run_dir.name)
+    assert [sid for sid, js in state.jobs.items() if js.result_id is not None] == ["a"]
+    assert _detail_files(run_dir) == [state.jobs["a"].result_id]
 
 
 def test_run_exit_code_and_output_take_the_run_status_from_the_record(tmp_path, monkeypatch, capsys):
@@ -1302,26 +1338,80 @@ def _disk_full(*_a, **_kw):
     raise OSError(28, "No space left on device")
 
 
+def _no_wait_save_retry(monkeypatch) -> list[float]:
+    """本机推进器的判定存储照组合根的装配（本机文件存储外面套保存失败的退避重试），只把等待换成不真等待、记下秒数；返回记下的等待。
+    磁盘写不进的用例因此不必真等 1、2、4 秒。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+
+    waits: list[float] = []
+    monkeypatch.setattr(m.compose, "local_result_store",
+                        lambda root: RetryingResultStore(LocalResultStore(root), sleep=waits.append))
+    return waits
+
+
 def test_run_storage_failure_mid_run_gives_one_sentence_and_exits_nonzero(tmp_path, monkeypatch, capsys):
-    """运行期落库失败（保存判定明细时磁盘写不进，ADR 0030 决定七）：不打回溯，stderr 一句说明（发生了什么、记录在哪里、怎么办），
-    stdout 为空（`--json` 也是），退出码 1；这个 job 在记录里留在 running，不生成报告。"""
+    """运行期落库失败（保存判定明细时磁盘一直写不进，ADR 0030 决定七）：保存按 1、2、4 秒退避重试，四次都用同一个标识，仍失败才放弃；
+    不打回溯，stderr 一句说明（发生了什么、记录在哪里、怎么办），stdout 为空（`--json` 也是），退出码 1；这个 job 在记录里留在
+    running、不点名，没有存下任何明细，不生成报告。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
-    monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
+    waits = _no_wait_save_retry(monkeypatch)
+    attempts: list[str] = []
+
+    def disk_full(self, run_id, result_id, job):
+        attempts.append(result_id)
+        _disk_full()
+
+    monkeypatch.setattr(LocalResultStore, "save_job_result", disk_full)
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     reports = tmp_path / "reports"
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--json"])
     cap = capsys.readouterr()
     assert rc == 1 and cap.out == "" and "Traceback" not in cap.err
+    assert waits == [1.0, 2.0, 4.0] and len(attempts) == 4 and len(set(attempts)) == 1
     [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
     run_id = run_dir.name
     assert f"run {run_id} 读写本机的运行记录失败，执行已停止，没有输出汇总：" in cap.err and "No space left on device" in cap.err
     assert f"记录在 {run_dir.resolve()}" in cap.err and f"gherkai status {run_id} --report-dir {reports}" in cap.err
     assert "磁盘的剩余空间与读写权限" in cap.err and "然后重新执行" in cap.err and "不必重新执行" not in cap.err
     state = LocalRunStore(reports).load_run_state(run_id)
-    assert state.status == Status.RUNNING and [js.status for js in state.jobs.values()] == [Status.RUNNING]
-    assert not (run_dir / "index.html").exists()
+    assert state.status == Status.RUNNING and [(js.status, js.result_id) for js in state.jobs.values()] == [(Status.RUNNING, None)]
+    assert _detail_files(run_dir) == [] and not (run_dir / "index.html").exists()
+
+
+def test_run_records_the_job_after_one_failed_save_and_names_the_retried_detail(tmp_path, monkeypatch, capsys, caplog):
+    """保存判定明细失败一次（磁盘一时写不进）：留一条警告，等 1 秒后用同一个标识再存一次即成，run 照常通过、退出码 0；终态点名的
+    就是重试所用的标识，明细目录里只有这一份，`--json` 的结果出自读回的那一份。"""
+    import logging
+
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    waits = _no_wait_save_retry(monkeypatch)
+    attempts: list[str] = []
+    real_save = LocalResultStore.save_job_result
+
+    def fail_once(self, run_id, result_id, job):
+        attempts.append(result_id)
+        if len(attempts) == 1:
+            _disk_full()
+        real_save(self, run_id, result_id, job)
+
+    monkeypatch.setattr(LocalResultStore, "save_job_result", fail_once)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    reports = tmp_path / "reports"
+    with caplog.at_level(logging.WARNING):
+        rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--json"])
+    cap = capsys.readouterr()
+    assert rc == 0 and json.loads(cap.out)["status"] == "passed", cap.err
+    assert waits == [1.0] and len(attempts) == 2 and attempts[0] == attempts[1]
+    assert [r.levelno for r in caplog.records if r.name.endswith("result_store.retrying")] == [logging.WARNING]
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    [js] = LocalRunStore(reports).load_run_state(run_dir.name).jobs.values()
+    assert (js.status, js.result_id) == (Status.PASSED, attempts[0])
+    assert _detail_files(run_dir) == [attempts[0]]
 
 
 def test_run_storage_failure_after_an_interrupt_exits_by_signal(tmp_path, monkeypatch, capsys):
@@ -1337,11 +1427,61 @@ def test_run_storage_failure_after_an_interrupt_exits_by_signal(tmp_path, monkey
         opts.on_interrupt(1)
         return inner(run_meta, engines, sink, opts, on_job_complete=on_job_complete, on_event=on_event)
 
+    waits = _no_wait_save_retry(monkeypatch)
     monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
     monkeypatch.setattr(m, "schedule", fake_schedule)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
     cap = capsys.readouterr()
     assert rc == 143 and cap.out == "" and "读写本机的运行记录失败" in cap.err and "Traceback" not in cap.err
+    assert waits == [1.0, 2.0, 4.0]  # 处理过中断也照常重试完（处理器只记标志）
+
+
+def test_run_interrupt_during_a_save_retry_that_fails_exits_by_the_storage_failure(tmp_path, monkeypatch, capsys):
+    """保存明细的退避重试期间收到中断、重试仍用尽：调度循环没有机会处置这次中断（存储异常从落库回调冒出 schedule，这一点由 core
+    的 schedule 测试核对），CLI 不打中断提示，退出码按运行期落库失败取 1、不按信号取（ADR 0030 决定三「前台在锁内重试」条的代价）。
+    先后由构造固定：信号在第一次保存尝试里发出。"""
+    import signal as _signal
+
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+
+    attempts: list[str] = []
+
+    def signal_then_disk_full(self, run_id, result_id, job):
+        attempts.append(result_id)
+        if len(attempts) == 1:
+            _signal.raise_signal(_signal.SIGINT)
+        _disk_full()
+
+    waits = _no_wait_save_retry(monkeypatch)
+    monkeypatch.setattr(LocalResultStore, "save_job_result", signal_then_disk_full)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())  # 像真 schedule 一样：落库回调抛出时不调 on_interrupt
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports")])
+    cap = capsys.readouterr()
+    assert rc == 1 and cap.out == "" and "Traceback" not in cap.err
+    assert "读写本机的运行记录失败" in cap.err and "收到中断信号" not in cap.err
+    assert waits == [1.0, 2.0, 4.0] and len(attempts) == 4  # 中断不打断重试（处理器只记标志）
+
+
+def test_run_named_detail_missing_at_wrap_up_takes_the_storage_failure_exit(tmp_path, monkeypatch, capsys):
+    """本进程的终态写使 run 成为终态之后，收尾按运行态点名的标识读回明细，那一份却读不到（存放处被外部删改）：按记录残缺处理，与读回
+    运行态失败同一出口（一句说明、不打回溯、stdout 为空、退出码 1），说明里写明是哪个 job 的明细读不到、记录已是最终状态、不必重新
+    执行；不把这个 job 当作没有明细来输出汇总，也不生成报告。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    monkeypatch.setattr(LocalResultStore, "load_job_result", lambda self, run_id, result_id: None)
+    monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--json"])
+    cap = capsys.readouterr()
+    assert rc == 1 and cap.out == "" and "Traceback" not in cap.err
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    run_id = run_dir.name
+    [js] = LocalRunStore(reports).load_run_state(run_id).jobs.values()
+    assert js.status == Status.PASSED and js.result_id is not None
+    assert f"run {run_id} 已结束，结果已写进本机的运行记录，但读回运行记录失败" in cap.err
+    assert f"job {js.scope_id} 的判定明细读不到" in cap.err and "不必重新执行" in cap.err
+    assert not (run_dir / "index.html").exists()
 
 
 def test_run_read_back_failure_after_the_run_ended_takes_the_storage_failure_exit(tmp_path, monkeypatch, capsys):
@@ -3212,18 +3352,27 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
                    report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
     st = run_status or (S.ABORTED if job_only else S.FAILED)
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
-    # 运行态经写入口得到：建 run（全 pending）→ 执行中的写记 running（run 随之为 running）→ 终态写记下这个 job 的终态（只有一个 job，
-    # run 随之成为终态）
+    # 运行态经写入口得到，写序同写入方：建 run（全 pending）→ 执行中的写记 running（run 随之为 running）→ 先存明细，终态写再记下这个
+    # job 的终态并点名那一份（只有一个 job，run 随之成为终态）。run_status 给 running 时明细已存下而终态还没有写，那一份不被点名
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
                          RunState(run_id=run_id, status=S.PENDING, jobs={job.scope_id: JobState(job.scope_id, S.PENDING)},
                                   started_at="t0"))
+    result_id = _save_detail(result_store, run_id, jr) if with_results else None
     if st == S.RUNNING:
         run_store.update_job_state(run_id, JobState(job.scope_id, S.RUNNING))
     elif st in m.TERMINAL_STATUSES:
-        assert run_store.commit_job_states(run_id, [JobState(job.scope_id, st)], ended_at="t9") == CommitOutcome.ENDED_RUN
-    if with_results:
-        result_store.save_job_result(run_id, jr)
+        assert run_store.commit_job_states(run_id, [JobState(job.scope_id, st, result_id=result_id)],
+                                           ended_at="t9") == CommitOutcome.ENDED_RUN
     return root, run_id
+
+
+def _save_detail(result_store, run_id: str, jr) -> str:
+    """像写入方那样存一份明细：生成一个标识、存成带它的一份，返回标识（终态写据它点名）。"""
+    from gherkai_core.named_details import new_result_id
+
+    result_id = new_result_id()
+    result_store.save_job_result(run_id, result_id, jr)
+    return result_id
 
 
 def _explain(capsys, root, run_id, *flags):
@@ -3412,8 +3561,8 @@ def test_explain_named_scope_ended_without_detail_shows_the_recorded_status(tmp_
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(a, b), deadline_at="2026-01-01T01:00:00+00:00"),
                          RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
                                   jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)}))
-    result_store.save_job_result(run_id, JobResult(job=a, status=Status.ERROR, error_type="engine_error", message="m"))
-    assert run_store.commit_job_states(run_id, [JobState("a", Status.ERROR)], ended_at="t9") == CommitOutcome.OPEN
+    rid = _save_detail(result_store, run_id, JobResult(job=a, status=Status.ERROR, error_type="engine_error", message="m"))
+    assert run_store.commit_job_states(run_id, [JobState("a", Status.ERROR, result_id=rid)], ended_at="t9") == CommitOutcome.OPEN
     fail_fast = RUN_ENDINGS["fail-fast"]
     assert run_store.end_run(run_id, fail_fast, ended_at="t9") is True
 
@@ -3476,8 +3625,8 @@ def test_explain_named_scope_still_running_after_another_job_landed_says_not_lan
                                   jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)}))
     assert run_store.try_claim_job(run_id, "a", claimed_at="2026-09-10T08:06:31+00:00") is True
     assert run_store.try_claim_job(run_id, "b", claimed_at="2026-09-10T08:06:31+00:00") is True
-    result_store.save_job_result(run_id, JobResult(job=b, status=Status.PASSED))
-    assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED)], ended_at="t5") == CommitOutcome.OPEN
+    rid = _save_detail(result_store, run_id, JobResult(job=b, status=Status.PASSED))
+    assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED, result_id=rid)], ended_at="t5") == CommitOutcome.OPEN
     state = run_store.load_run_state(run_id)
     assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (  # 构造的前提
         Status.RUNNING, Status.RUNNING, Status.PASSED)
@@ -3509,18 +3658,132 @@ def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, 
     assert doc["status"] == "running" and doc["scopes"] == []
 
 
+def _explain_two_job_run(tmp_path, run_id: str, scopes=("a", "b")):
+    """建一个 run，运行定义按 scopes 的次序列出 job，每个 job 都已认领、在执行；返回 (报告目录, run store, 判定存储, scope_id → Job)。"""
+    from gherkai_core.model import RunMeta, RunState
+
+    root = tmp_path / "reports"
+    jobs = {sid: _explain_job(scope_id=sid) for sid in scopes}
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=tuple(jobs.values()),
+                                 deadline_at="2026-09-10T09:06:30+00:00"),
+                         RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
+                                  jobs={sid: JobState(sid, Status.PENDING) for sid in scopes}))
+    for sid in scopes:
+        assert run_store.try_claim_job(run_id, sid, claimed_at="2026-09-10T08:06:31+00:00") is True
+    return root, run_store, result_store, jobs
+
+
 def test_explain_does_not_show_a_detail_saved_before_its_terminal_write(tmp_path, capsys):
-    """判定明细先于终态存下。明细已在而这个 job 的终态还没有写下（运行态里它仍在执行）时，这份结果还没有被采用：explain 先看运行态，
-    点名与不点名都按「判定明细尚未落地」提示、退出码 0，不把它当作已完成的部分展示；`--json` 的 scopes 为空、status 是运行态里的
-    running。已完成的 job 与仍在执行的 job 并存时的展示见上一条用例。"""
-    from gherkai_core.model import Status as S
-    root, run_id = _explain_run(tmp_path, run_status=S.RUNNING)   # 运行态里这个 job 是 running，明细文件已在
-    for flags in ((), ("features/login.feature:6",)):
+    """判定明细先于终态存下。a 的明细已存下而它的终态还没有写下（运行态里它仍在执行、没有点名），b 已结束并点名了它的那一份：
+    explain 先看运行态，不点名 scope 时只给出 b，不把 a 存下的那一份当作已完成的部分展示；点名 a 时按「判定明细尚未落地」提示、
+    退出码 0，`--json` 的 scopes 为空、status 是运行态里的 running。"""
+    run_id = "20260910T080630Z-9fa265"
+    root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id)
+    _save_detail(result_store, run_id, JobResult(job=jobs["a"], status=Status.FAILED, error_type="engine_error",
+                                                 message="还没有被采用的结果"))
+    rid = _save_detail(result_store, run_id, JobResult(job=jobs["b"], status=Status.PASSED))
+    assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED, result_id=rid)], ended_at="t5") == CommitOutcome.OPEN
+
+    rc, out, err = _explain(capsys, root, run_id)
+    assert rc == 0 and "以下为已完成部分" in err and "scope b" in out and "scope a" not in out
+    assert "还没有被采用的结果" not in out
+    rc, out, err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and err == "" and [sc["scope_id"] for sc in json.loads(out)["scopes"]] == ["b"]
+    rc, out, err = _explain(capsys, root, run_id, "a")
+    assert rc == 0 and out == "" and "判定明细尚未落地" in err and "已完成部分" not in err
+    rc, out, err = _explain(capsys, root, run_id, "a", "--json")
+    doc = json.loads(out)
+    assert rc == 0 and err == "" and doc["status"] == "running" and doc["scopes"] == []
+
+
+def test_explain_does_not_show_a_detail_left_by_a_job_the_ending_write_ended(tmp_path, capsys):
+    """a 的明细已存下、终态还没有写下时，run 被结束写的 error 变体结束（运行定义不可用）：a 在运行态里记 error、不点名，b 先前点名的
+    那一份原样保留。存储里 a 那份没被点名的明细在两种调用下都不出现：不点名 scope 时只给出 b；点名 a 时只给运行态里的状态与说明，
+    `--json` 只有三个键。"""
+    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, definition_unavailable_ending
+
+    run_id = "20260910T080630Z-9fa266"
+    root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id)
+    rid = _save_detail(result_store, run_id, JobResult(job=jobs["b"], status=Status.PASSED))
+    assert run_store.commit_job_states(run_id, [JobState("b", Status.PASSED, result_id=rid)], ended_at="t5") == CommitOutcome.OPEN
+    _save_detail(result_store, run_id, JobResult(job=jobs["a"], status=Status.FAILED, error_type="engine_error",
+                                                 message="没被采用的结果"))
+    assert run_store.end_run(run_id, definition_unavailable_ending(DEFINITION_CONTRACT_REASON), ended_at="t9") is True
+    state = run_store.load_run_state(run_id)
+    assert (state.jobs["a"].status, state.jobs["a"].result_id, state.jobs["b"].result_id) == (  # 构造的前提
+        Status.ERROR, None, rid)
+
+    rc, out, _err = _explain(capsys, root, run_id)
+    assert rc == 0 and "scope b" in out and "scope a" not in out and "没被采用的结果" not in out
+    rc, out, _err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and [sc["scope_id"] for sc in json.loads(out)["scopes"]] == ["b"]
+    rc, out, err = _explain(capsys, root, run_id, "a", "--json")
+    assert rc == 0 and err == "" and json.loads(out) == {"run_id": run_id, "status": "error", "scopes": [
+        {"scope_id": "a", "status": "error", "message": DEFINITION_CONTRACT_REASON}]}
+    rc, out, _err = _explain(capsys, root, run_id, "a")
+    assert rc == 0 and "scope a  status=error" in out and m.render._NO_DETAIL in out and "没被采用的结果" not in out
+
+
+def test_explain_reads_the_named_detail_when_a_job_has_several(tmp_path, capsys):
+    """同一个 job 存过两份明细（两个推进方各存一份）：运行态点名的是写成终态那一方存下的一份，后到的一方存下的那一份没被点名。两种
+    调用读的都是被点名的那一份。"""
+    run_id = "20260910T080630Z-9fa267"
+    root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id, scopes=("a",))
+    named = _save_detail(result_store, run_id, JobResult(job=jobs["a"], status=Status.FAILED, error_type="engine_error",
+                                                         message="写成终态那一方的结果"))
+    assert run_store.commit_job_states(run_id, [JobState("a", Status.FAILED, result_id=named)],
+                                       ended_at="t9") == CommitOutcome.ENDED_RUN
+    _save_detail(result_store, run_id, JobResult(job=jobs["a"], status=Status.PASSED))  # 后到的一方：终态已写下，它的这一份不被点名
+    assert len(_detail_files(root / run_id)) == 2  # 构造的前提：存放处里有两份
+    for flags in ((), ("a",)):
+        rc, out, _err = _explain(capsys, root, run_id, *flags, "--json")
+        [sc] = json.loads(out)["scopes"]
+        assert rc == 0 and (sc["scope_id"], sc["status"], sc["message"]) == ("a", "failed", "写成终态那一方的结果")
+
+
+def test_explain_lists_named_jobs_and_scope_candidates_by_scope_id(tmp_path, capsys):
+    """不点名 scope 时按 scope_id 的次序列出点名了明细的 job，「未找到 scope」的候选同样按 scope_id 排序、取自运行态：两个后端是同一
+    种次序，不随运行定义或存放处的次序变化（这里运行定义的次序是 b、a）。"""
+    run_id = "20260910T080630Z-9fa268"
+    root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id, scopes=("b", "a"))
+    finals = [JobState(sid, Status.PASSED, result_id=_save_detail(result_store, run_id, JobResult(job=jobs[sid], status=Status.PASSED)))
+              for sid in ("b", "a")]
+    assert run_store.commit_job_states(run_id, finals, ended_at="t9") == CommitOutcome.ENDED_RUN
+    rc, out, _err = _explain(capsys, root, run_id, "--json")
+    assert rc == 0 and [sc["scope_id"] for sc in json.loads(out)["scopes"]] == ["a", "b"]
+    rc, out, _err = _explain(capsys, root, run_id)
+    assert rc == 0 and out.index("scope a") < out.index("scope b")
+    rc, _out, err = _explain(capsys, root, run_id, "c")
+    assert rc == 2 and "未找到 scope：c（这个 run 的 scope：a、b）" in err
+
+
+def test_explain_exits_2_when_the_named_detail_cannot_be_read(tmp_path, capsys):
+    """运行态点名的那一份读不到（存放处里那个文件被删掉）：按记录残缺处理，点名与不点名 scope、人读与 `--json` 都以退出码 2 结束，
+    stderr 一句说明哪个 job 的明细读不到，stdout 为空，不当作没有明细给出状态与说明；没受影响的 job 照常可读。运行态被改成指向别的
+    job 的那一份时同样以退出码 2 结束，不把别的 job 的明细附上。"""
+    run_id = "20260910T080630Z-9fa269"
+    root, run_store, result_store, jobs = _explain_two_job_run(tmp_path, run_id)
+    ra, rb = (_save_detail(result_store, run_id, JobResult(job=jobs[sid], status=Status.PASSED)) for sid in ("a", "b"))
+    assert run_store.commit_job_states(run_id, [JobState("a", Status.PASSED, result_id=ra),
+                                                JobState("b", Status.PASSED, result_id=rb)], ended_at="t9") == CommitOutcome.ENDED_RUN
+    (root / run_id / "jobs" / f"{ra}.json").unlink()
+    for flags in ((), ("a",), ("--json",), ("a", "--json")):
         rc, out, err = _explain(capsys, root, run_id, *flags)
-        assert rc == 0 and out == "" and "判定明细尚未落地" in err and "已完成部分" not in err
-        rc, out, err = _explain(capsys, root, run_id, *flags, "--json")
-        doc = json.loads(out)
-        assert rc == 0 and err == "" and doc["status"] == "running" and doc["scopes"] == []
+        assert rc == 2 and out == "" and "Traceback" not in err, flags
+        assert f"job a 的判定明细读不到（标识 {ra}）" in err and "可能已被删除" in err, flags
+        assert "这个 job 的状态仍可用 status 查看" in err, flags  # 说明里带「怎么办」
+    rc, _out, _err = _explain(capsys, root, run_id, "b")
+    assert rc == 0
+
+    path = root / run_id / "run_state.json"
+    st = json.loads(path.read_text(encoding="utf-8"))
+    for j in st["jobs"]:
+        if j["scope_id"] == "a":
+            j["result_id"] = rb  # 绕过写入口改动运行态：a 指向 b 的那一份
+    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
+    rc, out, err = _explain(capsys, root, run_id, "a", "--json")
+    assert rc == 2 and out == "" and "属于 job b" in err
 
 
 def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
@@ -3540,8 +3803,14 @@ def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
     assert doc["scopes"][0]["aborted_hint"].startswith("本 job 被中止，无法从事件流补取") and "事件流记录" in doc["scopes"][0]["aborted_hint"]
 
 
+_CLOUD_RESULT_ID = "0123456789abcdef"  # 假云端运行态里点名的标识
+
+
 def _explain_cloud_stores(jr, state):
-    """假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。"""
+    """假的云端两 store（explain 只读 RunStore/ResultStore）：验接线与读路径，不连真 AWS。判定存储与真端口一样只有按标识取的读法、
+    没有列举入口；jr 存在运行态里这个 job 点名的标识下，别的标识下没有明细。"""
+    named = state.jobs[jr.scope_id].result_id if jr is not None else None
+
     class _RunStore:
         def peek_definition_header(self, run_id):
             return (DEFINITION_SCHEMA_VERSION, None)  # 结构版本闸先于运行态读（ADR 0037 决策 7）：本版本、放行
@@ -3550,11 +3819,8 @@ def _explain_cloud_stores(jr, state):
             return state
 
     class _ResultStore:
-        def load_all(self, run_id):
-            return [jr]
-
-        def load_job_result(self, run_id, scope_id):
-            return jr if scope_id == jr.scope_id else None
+        def load_job_result(self, run_id, result_id):
+            return jr if named is not None and result_id == named else None
 
     return _RunStore(), _ResultStore(), object()
 
@@ -3789,6 +4055,7 @@ def test_status_pending_hint_offers_relay_only_for_detached_runs(tmp_path, capsy
     st["status"] = "pending"
     for j in st["jobs"]:
         j["status"] = "pending"
+        j.pop("result_id", None)  # 没结束的 job 没有点名
     path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     assert m.main(["status", run_id, "--report-dir", str(root)]) == 0
     assert "可接力推进" not in capsys.readouterr().err
@@ -3815,6 +4082,87 @@ def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, ca
     assert rc == 1  # 终态 failed 的判定退出码
 
 
+# ---- 本机两种后台推进（后台推进进程、status --wait 接力）在保存判定明细一直失败时的出口 ----
+# 真实装配与真实推进步骤，只把引擎换成空表（不起 worker）、把判定存储的等待换成记录，把「真杀隧道进程」换成记录。
+
+
+def _detached_run_with_a_finished_job(tmp_path, monkeypatch) -> tuple[Path, str, list[int]]:
+    """本机 submit 提交一个只有一个 job 的 run（不真起后台推进进程），再摆成推进到一半的样子：这个 job 已认领、在执行，事件库里已有它
+    执行完的事件与退出记录，下一次推进即为它存明细、写终态。run 目录里有隧道交棒文件。返回 (报告目录, run_id, 被拆的隧道进程号)。"""
+    import subprocess
+
+    from gherkai_core.adapters.event_log import SqliteEventLog
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_runtime import tunnel as gtunnel
+
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    run_id = next(d for d in reports.iterdir() if d.is_dir()).name
+    store = LocalRunStore(reports)
+    [job] = store.load_run_meta(run_id).jobs
+    assert store.try_claim_job(run_id, job.scope_id, claimed_at=compose.now_iso()) is True
+    log = SqliteEventLog(compose.events_db_path(reports, run_id))
+    lines = [{"type": "scope_started", "scopeId": job.scope_id, "sessionId": "s-1"},
+             {"type": "scenario_done", "scenarioId": job.scenarios[0].id, "status": "passed"},
+             {"type": "scope_done", "scopeId": job.scope_id}]
+    for seq, line in enumerate(lines, start=1):
+        log.append_event(job.scope_id, seq, json.dumps(line), float(seq))
+    log.record_exit(job.scope_id, 0, exited_at=compose.now())
+    (reports / run_id / "tunnel.json").write_text('{"pid": 4545}', encoding="utf-8")
+    stopped: list[int] = []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+    monkeypatch.setattr(m.compose, "build_engines", lambda **kw: {})
+    return reports, run_id, stopped
+
+
+def _assert_left_running_and_tunnel_kept(reports: Path, run_id: str, stopped: list[int]) -> None:
+    """这个 job 没有写下终态、在记录里仍为 running、不点名，run 没有结束，没有存下任何明细、没有报告；隧道没有拆。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    state = LocalRunStore(reports).load_run_state(run_id)
+    assert state.status not in m.TERMINAL_STATUSES and state.ended_at is None
+    assert [(js.status, js.result_id) for js in state.jobs.values()] == [(Status.RUNNING, None)]
+    assert _detail_files(reports / run_id) == [] and not (reports / run_id / "index.html").exists()
+    assert stopped == [] and (reports / run_id / "tunnel.json").exists()
+
+
+def test_background_advancer_exits_1_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys):
+    """后台推进进程保存判定明细一直失败（磁盘写不进）：按 1、2、4 秒退避重试仍失败，进程打一句说明（发生了什么、记录在哪里、用哪条
+    命令接着推进）、不打回溯，以退出码 1 结束；这个 run 没有结束、不做结束写，隧道不拆（接着推进的一方还要用它）。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+
+    reports, run_id, stopped = _detached_run_with_a_finished_job(tmp_path, monkeypatch)
+    waits = _no_wait_save_retry(monkeypatch)
+    monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
+
+    rc = m.main(["_reconcile", run_id, "--report-dir", str(reports)])
+    err = capsys.readouterr().err
+    assert rc == 1 and "Traceback" not in err and waits == [1.0, 2.0, 4.0]
+    assert f"run {run_id} 读写本机的运行记录失败，后台推进已停止：" in err and "No space left on device" in err
+    assert f"记录在 {(reports / run_id).resolve()}，出错时执行中的 job 在记录里仍为 running" in err
+    assert "磁盘的剩余空间与读写权限" in err and f"然后用 gherkai status {run_id} --report-dir {reports} --wait 接着推进" in err
+    _assert_left_running_and_tunnel_kept(reports, run_id, stopped)
+
+
+def test_relay_exits_2_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys):
+    """`status --wait` 接力保存判定明细一直失败：重试用尽之后打一句说明、不打回溯，以退出码 2 结束（没有判出结果）；不写终态、不结束
+    这个 run，也不拆隧道（原来的后台推进进程可能仍在使用它）。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+
+    reports, run_id, stopped = _detached_run_with_a_finished_job(tmp_path, monkeypatch)
+    waits = _no_wait_save_retry(monkeypatch)
+    monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
+
+    rc = m.main(["status", run_id, "--wait", "--report-dir", str(reports)])
+    err = capsys.readouterr().err
+    assert rc == 2 and "Traceback" not in err and waits == [1.0, 2.0, 4.0]
+    assert f"run {run_id} 读写本机的运行记录失败，接力推进已停止：" in err and "No space left on device" in err
+    assert f"记录在 {(reports / run_id).resolve()}" in err and "然后再执行同一条命令接着推进" in err
+    _assert_left_running_and_tunnel_kept(reports, run_id, stopped)
+
+
 def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(monkeypatch, capsys):
     """云端：补取经 compose.build_cloud_event_log（events 表 Query）；表读不到或缺权限时只在 aborted_hint 写原因、退出码仍 0。"""
     from gherkai_core.model import JobResult, JobState, RunState
@@ -3822,7 +4170,8 @@ def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission
     from gherkai_core.wire import event_from_line
     job = _explain_job()
     jr = JobResult(job=job, status=Status.ABORTED, session_id="s-1", error_type="timeout", message="预算用尽")
-    state = RunState(run_id="r", status=Status.ABORTED, jobs={job.scope_id: JobState(job.scope_id, Status.ABORTED)}, ended_at="t9")
+    state = RunState(run_id="r", status=Status.ABORTED, ended_at="t9",
+                     jobs={job.scope_id: JobState(job.scope_id, Status.ABORTED, result_id=_CLOUD_RESULT_ID)})
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: _explain_cloud_stores(jr, state))
     asked = []
@@ -3908,8 +4257,8 @@ def test_explain_cloud_reads_evidence_from_s3(monkeypatch, capsys):
         ScenarioResult(scenario_id="features/login.feature:12", status=Status.FAILED, steps=[
             StepResult(index=2, status=Status.FAILED, votes=Votes(yes=0, total=1), message="断言未过",
                        report_refs=(ReportRef(kind="evidence", ref="s3://bkt/reports/r/ev.json", label="evidence"),))])])
-    state = RunState(run_id="r", status=Status.FAILED, jobs={job.scope_id: JobState(job.scope_id, Status.FAILED)},
-                     ended_at="t9")
+    state = RunState(run_id="r", status=Status.FAILED, ended_at="t9",
+                     jobs={job.scope_id: JobState(job.scope_id, Status.FAILED, result_id=_CLOUD_RESULT_ID)})
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
     monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: _explain_cloud_stores(jr, state))
     got = []
@@ -3936,11 +4285,8 @@ def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, 
                      jobs={job.scope_id: JobState(job.scope_id, Status.PENDING)})
 
     class _NothingLanded:
-        def load_all(self, run_id):
-            return []
-
-        def load_job_result(self, run_id, scope_id):
-            return None
+        def load_job_result(self, run_id, result_id):
+            raise AssertionError("运行态里没有点名明细的 job，不该读判定存储")
 
     run_store = _explain_cloud_stores(None, state)[0]
     monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
@@ -3950,6 +4296,37 @@ def test_explain_cloud_not_landed_hint_carries_cloud_locator_flags(monkeypatch, 
     err = capsys.readouterr().err
     assert rc == 0 and "判定明细尚未落地" in err
     assert "gherkai status r --backend cloud --prefix vfy- --wait" in err
+
+
+@pytest.mark.parametrize("scope", [None, "features/login.feature:6"], ids=["all-scopes", "one-scope"])
+def test_explain_cloud_detail_read_failure_asks_only_for_object_read_permission(monkeypatch, capsys, scope):
+    """云端读被点名的那一份失败（缺读对象的权限；没有列举权限时取一个不存在的键同样是拒绝访问）：点名与不点名 scope 都以退出码 2
+    结束，说明只要求读桶里对象的权限，不提列举权限；判定存储只按运行态点名的标识取了那一份。"""
+    from gherkai_core.model import JobState, RunState
+
+    job = _explain_job()
+    state = RunState(run_id="r", status=Status.FAILED, ended_at="t9",
+                     jobs={job.scope_id: JobState(job.scope_id, Status.FAILED, result_id=_CLOUD_RESULT_ID)})
+
+    class _Denied(Exception):
+        pass
+
+    reads: list[str] = []
+
+    class _DeniedStore:
+        def load_job_result(self, run_id, result_id):
+            reads.append(result_id)
+            raise _Denied("AccessDenied: GetObject")
+
+    run_store = _explain_cloud_stores(None, state)[0]
+    monkeypatch.setattr(m.compose, "check_backend_skew", lambda **kw: (compose.SKEW_OK, "", "1.4.1"))
+    monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: (run_store, _DeniedStore(), object()))
+    monkeypatch.setattr(m.compose, "is_botocore_error", lambda e: isinstance(e, _Denied))
+    rc = m.main(["explain", "r", *([scope] if scope else []), "--backend", "cloud", "--prefix", "vfy-", "--region", "us-east-1"])
+    err = capsys.readouterr().err
+    assert rc == 2 and "explain --backend cloud 读判定明细失败：需要读桶" in err and "里对象的权限" in err
+    assert "列举" not in err and "AccessDenied" in err
+    assert reads == [_CLOUD_RESULT_ID]
 
 
 def test_explain_filter_to_unrecorded_step_does_not_fake_job_verdict_block(tmp_path, capsys):

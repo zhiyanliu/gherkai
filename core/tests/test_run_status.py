@@ -154,6 +154,12 @@ def test_check_running_write_accepts_only_running():
             check_running_write(JobState("a", status))
 
 
+def test_check_running_write_rejects_a_result_id():
+    """执行中的写不点名：带标识的 running 是参数错误（点名只由带结果的终态写写下，ADR 0030 决定三「点名」条）。"""
+    with pytest.raises(ValueError, match="不点名"):
+        check_running_write(JobState("a", R, session_id="s", result_id="00000000000000a1"))
+
+
 # ---------- 没有记录的执行在内存里算出的运行态 ----------
 
 def _meta(*scope_ids: str) -> RunMeta:

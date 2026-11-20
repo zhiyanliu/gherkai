@@ -266,10 +266,13 @@ def test_plan_json_keys_are_documented():
 
 def test_status_json_keys_are_documented():
     st = M.RunState(run_id="r", status=M.Status.PASSED,
-                    jobs={"a": M.JobState("a", M.Status.PASSED, session_id="s", claimed_at="t")},
+                    jobs={"a": M.JobState("a", M.Status.PASSED, session_id="s", claimed_at="t",
+                                          result_id="0123456789abcdef")},
                     started_at="t0", ended_at="t9", high_water_mark=3, claim_count=1)
     doc = run_state_to_dict(st)
     assert doc["claim_count"] == 1  # 诊断用的认领计数随运行态输出
+    # 正向断言：由执行结果结束的 job 带点名的标识，键进差集（ADR 0041 决策三）；没有点名的 job 省键（见下两例）
+    assert doc["jobs"][0]["result_id"] == "0123456789abcdef"
     doc["artifacts"] = compose.cloud_artifact_locations(bucket="b", report_prefix="reports", table="t", run_id="r")
     _assert_documented(doc, section="status")
     # 推进器读不到可用的运行定义、以结束写的 error 变体结束 run 时的形态：run 级 `message`，未结束的 job 记 error、带同一句 job 级
@@ -278,6 +281,7 @@ def test_status_json_keys_are_documented():
                           started_at="t0", ended_at="t1", high_water_mark=0, message="m")
     doc_error = run_state_to_dict(st_error)
     assert "message" in doc_error and doc_error["jobs"][0]["message"] == "m"
+    assert "result_id" not in doc_error["jobs"][0]  # 由结束写结束的 job 没有点名
     _assert_documented(doc_error, section="status")
     # 结束写结束的 run：没有启动的 job 带 job 级说明 `jobs[].message`（只由结束写写下）
     doc_ended = run_state_to_dict(_sample_run_result().state)

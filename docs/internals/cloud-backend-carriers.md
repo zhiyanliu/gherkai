@@ -70,6 +70,7 @@
 | 退出码 2，提示后端没有版本戳、部署早于设备目标功能 | ② 未执行（旧部署没有版本戳，带隧道或设备目标的 run 要求后端先升级） | `compose.check_version_skew` 的缺戳分支 |
 | 带设备目标的云端 run 以退出码 2 结束，提示「部署未启用设备支持」 | ② 执行时没有建立 Device Farm 项目：部署所用的 CLI 早于设备目标功能，或部署方凭证没有 Device Farm 权限（deploy 只警告并按未启用设备支持部署）；用有 Device Farm 权限的凭证重新执行 `gherkai deploy` | `compose.read_device_farm_project` 读不到参数（提示语在 `submission.cloud_device_requests`）；降级分支在 `cli.Provider._resolve_device_farm_project_for_deploy` |
 | 云端 `submit` 的判定明细缺新字段（如 step 级 `message`），同版本本机 `run` 却有 | ② 未执行（**Lambda asset** 未重新上传；云端 `jobs/*.json` 由 asset 里那份 `gherkai_core` 投影产出） | [ADR 0042](../adr/0042-step-evidence-and-explain.md)「交付链」条 |
+| 云端 `submit` 的 run 已结束，`explain` 却读不到任何 job 的判定明细，`status --json` 的 `jobs[]` 没有 `result_id` | ② 未执行（**Lambda asset** 未重新上传：旧的推进器存明细时不点名，新的 CLI 只读运行态点名的那一份） | [ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定三「点名」条 |
 | 云端执行完没有证据 / step 行为仍是旧的 | ③ 未执行（**worker 镜像**未重新推送；发行版经 ② 的基础镜像同步，dev 树经 `push-worker`） | 同上 |
 | 默认 variant 在新版本尚无镜像：退出码 2，提示「引擎 `<engine>` 的 worker variant 'X' 解析失败（SSM 里没有这个（引擎，variant）的镜像映射，镜像标签 `<新版本>-X`）」 | ③ 未执行。**默认指针不随升级重置**（它记录的是团队意图，`init_default_pointer` 在参数已存在时不改动）：指针仍指向 `X`，而 `<新版本>-X` 尚未推送 | `workers.init_default_pointer`；提示语在 `compose._variant_miss_hint` |
 | 退出码 2，提示「读不到 worker task-def 模板（SSM `worker-template/<engine>`）」 | 本 prefix 从未执行过 `gherkai deploy`（或上次部署所用的 CLI 版本尚无镜像机制） | `workers._template_arn` |

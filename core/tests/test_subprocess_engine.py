@@ -789,8 +789,8 @@ def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path
     assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ABORTED, settled.run_message, "t5", 2)
     assert {sid: (js.status, js.message) for sid, js in state.jobs.items()} == {
         "a": (Status.ABORTED, settled.aborted_message), "b": (Status.ABORTED, settled.aborted_message)}
-    assert all(js.claimed_at is not None for js in state.jobs.values())
-    assert result_store.load_all("r") == []  # 得知 run 已结束之后不存明细
+    assert all(js.claimed_at is not None and js.result_id is None for js in state.jobs.values())
+    assert not (root / "r" / "jobs").exists()  # 得知 run 已结束之后不存明细：一份都没有，也没有被点名的
     pids = _wait_pids(pid_file, 2)
     assert len(pids) == 2, pids
     for pid in pids:

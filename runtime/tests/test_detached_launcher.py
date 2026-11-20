@@ -18,6 +18,7 @@ from pathlib import Path
 import pytest
 
 from gherkai_core.adapters.event_log import SqliteEventLog
+from gherkai_core.adapters.result_store.local import LocalResultStore
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
@@ -85,7 +86,7 @@ def test_single_job_passes_end_to_end(tmp_path):
     """真 spawn echo_worker(pass) → 事件落 SQLite → reconcile loop 推进到 passed 终态。"""
     meta, log, store, launcher = _setup(tmp_path, "pass", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     assert state.status == Status.PASSED
     assert state.jobs["a"].status == Status.PASSED
@@ -100,7 +101,7 @@ def test_two_jobs_concurrency_one(tmp_path):
     """max_concurrency=1：两 job 串行推进、都 passed。验 loop 起完一个再起下一个。"""
     meta, log, store, launcher = _setup(tmp_path, "pass", "a", "b")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     assert state.status == Status.PASSED
     assert state.jobs["a"].status == Status.PASSED
@@ -116,7 +117,7 @@ def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path):
 
     meta, log, store, launcher = _setup(tmp_path, "silent", "a", timeout_s=0.5, clock=compose.now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=compose.now)
+                       poll_interval_s=0.05, clock=compose.now, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     assert state.jobs["a"].status == Status.ERROR
@@ -136,7 +137,7 @@ def test_relay_recovers_foreign_timed_out_claim(tmp_path):
     # 模拟死 owner 遗留态：a 已被 claim（claimed_at 一小时前）、无退出记录、本 launcher 没起过它
     assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00Z") is True
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_one_hour_later)
+                       poll_interval_s=0.05, clock=_one_hour_later, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     exits = [r for r in log.records() if r.kind == "exit"]
@@ -164,7 +165,7 @@ def test_grace_query_failure_never_spawns_a_worker(tmp_path):
 
     launcher = SubprocessLauncher(lambda _name: _Spy(), log, min_grace_fn=_old_worker, clock=_now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path))
     assert spawned == []  # 下限取不到 → 一个 worker 都没起（无孤儿）
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
@@ -177,7 +178,7 @@ def test_crash_worker_finalizes_error(tmp_path):
     """echo_worker(crash) 非 0 退出 → task_exited 带非0 → project 判 error → 终态写记下 error，run 随之为 error（机制二真实运行）。"""
     meta, log, store, launcher = _setup(tmp_path, "crash", "a")
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     assert state.status == Status.ERROR
     # task_exited 记了真实非 0 退出码
@@ -187,9 +188,9 @@ def test_crash_worker_finalizes_error(tmp_path):
 
 def test_report_is_generated_from_the_record_after_the_commit(tmp_path):
     """这一方的写使 run 成为终态之后，推进循环从记录生成报告、只生成一次（ADR 0034 机制三「run 级状态只进不退」条④）：报告里
-    run 与 job 的状态就是记录里的运行态，两个 job 都带判定明细（使 run 成为终态的那一轮交给终态写的用 tick 交回的那一份，较早轮次
-    写下终态的从判定存储读回；两个 job 在哪一轮得出结果随真实进程的时序而定），run 级墙钟由运行态的开始与结束时刻算出。"""
-    from gherkai_core.adapters.result_store.local import LocalResultStore
+    run 与 job 的状态就是记录里的运行态；两个 job 的终态各点名一份判定明细（两个标识不同，文件名只由标识构成），报告附上的正是
+    按标识读回的那两份（ADR 0030 决定三「点名」条；两个 job 在哪一轮得出结果随真实进程的时序而定，读法不因此不同）；run 级墙钟由
+    运行态的开始与结束时刻算出。"""
     from gherkai_core.project import run_duration_ms
     from gherkai_runtime import compose
 
@@ -211,6 +212,11 @@ def test_report_is_generated_from_the_record_after_the_commit(tmp_path):
     assert result.state == recorded and result.status == Status.PASSED  # 状态取记录
     assert [o.scope_id for o in result.jobs] == ["a", "b"]  # 按运行定义的次序列出全部 job
     assert [(d.scope_id, d.status) for d in result.details] == [("a", Status.PASSED), ("b", Status.PASSED)]
+    named = {sid: recorded.jobs[sid].result_id for sid in ("a", "b")}
+    assert None not in named.values() and named["a"] != named["b"]
+    assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == sorted(f"{rid}.json" for rid in named.values())
+    saved = LocalResultStore(tmp_path)
+    assert list(result.details) == [saved.load_job_result("run-1", named[sid]) for sid in ("a", "b")]
     assert result.duration_ms is not None and result.duration_ms == run_duration_ms(recorded)
 
 
@@ -247,7 +253,7 @@ def test_loop_ends_normally_when_the_record_read_for_the_report_fails(tmp_path):
 
     # 不抛是第一件要钉的事（把这次读挪出失败隔离即 OSError 原样抛出）
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now, report_store=reports)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path), report_store=reports)
 
     assert store.raised == 1                    # 失败确实落在为生成报告而读的那一次上
     assert reports.results == []                # 读不到记录就不生成报告
@@ -293,7 +299,7 @@ def test_loop_ends_on_a_run_ended_by_the_definition_unavailable_ending_without_r
     store, reports = _BoundedReads(inner, limit=20), _RecordingReports()
 
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=2,
-                       poll_interval_s=0.01, clock=_now, report_store=reports)
+                       poll_interval_s=0.01, clock=_now, result_store=LocalResultStore(tmp_path), report_store=reports)
 
     assert store.reads == 1            # 一轮即停
     assert spawned == [] and reports.written == []
@@ -320,7 +326,7 @@ def test_loop_ends_without_report_when_its_commit_is_lost(tmp_path):
     meta, log, inner, launcher = _setup(tmp_path, "pass", "a")
     store, reports = _LosesCommit(inner), _RecordingReports()
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now, report_store=reports)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path), report_store=reports)
     assert store.results == [CommitOutcome.ALREADY_ENDED]
     assert reports.written == []
     state = inner.load_run_state("run-1")
@@ -334,14 +340,15 @@ def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path):
     meta, log, store, launcher = _setup(tmp_path, "pass", "a")
     first = _RecordingReports()
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_now, report_store=first)
+                       poll_interval_s=0.05, clock=_now, result_store=LocalResultStore(tmp_path), report_store=first)
     assert first.written == ["run-1"]
     before = store.load_run_state("run-1")
     assert before.status == Status.PASSED
 
     again, bounded = _RecordingReports(), _BoundedReads(store, limit=20)
     run_reconcile_loop("run-1", meta, log, bounded, launcher, max_concurrency=1,
-                       poll_interval_s=0.01, clock=_one_hour_later, report_store=again)
+                       poll_interval_s=0.01, clock=_one_hour_later, result_store=LocalResultStore(tmp_path),
+                       report_store=again)
 
     assert bounded.reads == 1          # 一轮即停
 
@@ -548,7 +555,7 @@ def test_run_state_timestamps_share_one_format(tmp_path):
                                     started_at=compose.now_iso(), high_water_mark=0))
     launcher = SubprocessLauncher(_echo_resolver("pass"), log, min_grace_fn=lambda _engine: 1.0, clock=compose.now)
     run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=compose.now)
+                       poll_interval_s=0.05, clock=compose.now, result_store=LocalResultStore(tmp_path))
     state = store.load_run_state("run-1")
     stamps = {"created_at": meta.created_at, "started_at": state.started_at,
               "ended_at": state.ended_at, "claimed_at": state.jobs["a"].claimed_at}
@@ -574,8 +581,11 @@ def test_drive_local_reconcile_drives_to_terminal_then_tears_down_tunnel(tmp_pat
 
     detached.drive_local_reconcile(str(tmp_path), "run-d", 1, region=None, profile=None, poll_interval_s=0.01)
 
-    assert LocalRunStore(tmp_path).load_run_state("run-d").status == Status.PASSED  # 推到终态
-    assert list((tmp_path / "run-d" / "jobs").glob("*.json"))  # 判定真值已落（tick 在 CAS 前写）
+    state = LocalRunStore(tmp_path).load_run_state("run-d")
+    assert state.status == Status.PASSED  # 推到终态
+    # 终态点名的那一份判定明细已存下（明细先于终态写）
+    result_id = state.jobs["a"].result_id
+    assert result_id is not None and LocalResultStore(tmp_path).load_job_result("run-d", result_id) is not None
     assert stopped == [4242] and not (tmp_path / "run-d" / "tunnel.json").exists()  # 拆了隧道、交棒文件已清
 
 
@@ -643,7 +653,6 @@ def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(
     并发上限排在后面，到了停止启动的时刻不再启动。期限一到推进进程按墙钟停下 a（真 echo_worker 收 SIGTERM 退出），a 记 aborted、
     说明是期限那一句、没有错误类型；b 由结束写记 skipped、带到期的说明、没有判定明细；run 状态按取法为 aborted、带 run 级的到期
     说明，报告生成。同一情形交给前台的调度循环（同一个 worker、同一种时钟），按同一套取法得到的结果逐项相同。"""
-    from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.schedule import ScheduleOpts, schedule
 
     ending = RUN_ENDINGS["deadline"]
@@ -662,7 +671,9 @@ def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(
     assert state.jobs["b"].message == ending.skipped_message
     exits = [r for r in log.records() if r.kind == "exit"]
     assert [(r.scope_id, r.exited.timed_out) for r in exits] == [("a", True)]  # 推进进程到点停下的 a；b 从没启动
-    assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == ["a.json"]  # b 没有判定明细
+    # a 的终态点名它的那一份；b 由结束写结束，没有判定明细、终态不点名
+    assert state.jobs["a"].result_id is not None and state.jobs["b"].result_id is None
+    assert [p.name for p in (tmp_path / "run-1" / "jobs").iterdir()] == [f"{state.jobs['a'].result_id}.json"]
     [background] = reports.results
     assert _verdict(background) == (Status.ABORTED, ending.run_message,
                                     [("a", Status.ABORTED, None, (None, DEADLINE_TIMEOUT_MESSAGE)),
@@ -680,9 +691,6 @@ def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_j
     墙钟早已过了它加 10 秒，第一轮即补写超时，a 因此记 aborted、说明是期限那一句；b 不认领、不启动，由到期的结束写记 skipped；run
     状态按取法为 aborted、带到期说明，报告由接力方生成。组合根照真实装配，只把引擎换成记录启动的替身、停止宽限的查询换成固定值
     （误启动 job 时启动调用落到替身上、被记下）。"""
-    import json
-
-    from gherkai_core.serialize import job_result_from_dict
     from gherkai_runtime import compose, detached
 
     now = compose.now()
@@ -722,8 +730,11 @@ def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_j
     [exit_rec] = [r for r in log.records() if r.kind == "exit"]
     assert (exit_rec.scope_id, exit_rec.exited.exit_code, exit_rec.exited.timed_out) == ("a", None, True)
     assert (tmp_path / "run-x" / "manifest.json").exists() and (tmp_path / "run-x" / "index.html").exists()
-    assert sorted(p.name for p in (tmp_path / "run-x" / "jobs").iterdir()) == ["a.json"]  # b 没有判定明细
-    jr = job_result_from_dict(json.loads((tmp_path / "run-x" / "jobs" / "a.json").read_text(encoding="utf-8")))
+    # a 的终态点名接力方存下的那一份；b 由结束写结束，没有判定明细、终态不点名
+    result_id = state.jobs["a"].result_id
+    assert result_id is not None and state.jobs["b"].result_id is None
+    assert [p.name for p in (tmp_path / "run-x" / "jobs").iterdir()] == [f"{result_id}.json"]
+    jr = LocalResultStore(tmp_path).load_job_result("run-x", result_id)
     assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)  # 起作用的是期限
 
 
@@ -805,8 +816,6 @@ def _by_thread(*, check, pump, other):
 
 def _run_in_thread(meta, log, store, launcher, clock, reports, tmp_path) -> threading.Thread:
     """在后台线程里推进 run-1 到结束（并发上限 1），报告记进 reports。"""
-    from gherkai_core.adapters.result_store.local import LocalResultStore
-
     loop = threading.Thread(target=run_reconcile_loop, args=("run-1", meta, log, store, launcher, 1), daemon=True,
                             kwargs={"poll_interval_s": 0.02, "clock": clock, "report_store": reports,
                                     "result_store": LocalResultStore(tmp_path)})
@@ -995,7 +1004,7 @@ def test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write(
 
     log = _RealExitLandsAfterTheCheck(inner_log)
     run_reconcile_loop("run-1", meta, log, _BoundedReads(store, limit=200), launcher, max_concurrency=1,
-                       poll_interval_s=0.001, clock=_one_hour_later)
+                       poll_interval_s=0.001, clock=_one_hour_later, result_store=LocalResultStore(tmp_path))
 
     assert log.exits == [("a", "timed-out-if-absent", False)]  # 补写确实发出了，只是没有写成
     [exit_rec] = [r.exited for r in inner_log.records() if r.kind == "exit"]
@@ -1045,21 +1054,16 @@ def test_relay_leaves_its_own_jobs_and_jobs_without_a_readable_claim_time(tmp_pa
     assert log.exits == [("lost", "timed-out-if-absent", True)]
 
 
-# ---------- 接力在逐 job 写序下：补写的超时退出成为终态的那一轮、报告读回较早轮次的明细 ----------
+# ---------- 接力在逐 job 写序下：补写的超时退出成为终态的那一轮、报告按点名读回各轮的明细 ----------
 
 
 def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exit_changes_neither(tmp_path):
     """接力补写的超时退出怎样成为终态：a 由已不在的推进进程认领、早已过了截止时刻加 10 秒，b 也由它认领、还没到截止时刻。第一轮
-    接力方为 a 补写超时的退出记录；下一轮 tick 按这一轮的事件为 a 存下判定明细（预算到点：error 加 timeout），再以终态写记下它，b 仍在
-    执行、run 仍未结束。a 的真实退出（退出码 0、内容完整、退出时刻在截止时刻之前，单看它会判为 passed）与 b 的结果在 a 的终态写落下
-    之后才写进事件库：真实退出覆盖了退出记录，但 a 在运行态里已是终态，之后的轮次不再为它存明细、写终态，记录与存下的明细都不变；b
-    得出结果的那一轮使 run 成为终态，报告里 a 的明细从判定存储读回，b 的用这一轮交回的那一份。全程只有推进循环一个线程，事件在 a 的
-    终态写落下之后、tick 拿到这次写的结果之前写入，先后因此固定。"""
-    import json
-
-    from gherkai_core.adapters.result_store.local import LocalResultStore
-    from gherkai_core.serialize import job_result_from_dict
-
+    接力方为 a 补写超时的退出记录；下一轮 tick 按这一轮的事件为 a 存下一份判定明细（预算到点：error 加 timeout），再以终态写记下它并
+    点名这一份，b 仍在执行、run 仍未结束。a 的真实退出（退出码 0、内容完整、退出时刻在截止时刻之前，单看它会判为 passed）与 b 的结果
+    在 a 的终态写落下之后才写进事件库：真实退出覆盖了退出记录，但 a 在运行态里已是终态，之后的轮次不再为它存明细、写终态，a 的点名与
+    那一份明细都不变，存放处只多出 b 的一份；b 得出结果的那一轮使 run 成为终态，报告里两个 job 的明细都按运行态里点名的标识读回（ADR
+    0030 决定三「点名」条）。全程只有推进循环一个线程，事件在 a 的终态写落下之后、tick 拿到这次写的结果之前写入，先后因此固定。"""
     meta, log, inner, launcher = _setup(tmp_path, "pass", "a", "b", timeout_s=60.0, clock=_one_hour_later)
     assert inner.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00+00:00") is True  # 截止 00:01:00，早已过
     assert inner.try_claim_job("run-1", "b", claimed_at="2026-07-19T00:59:30+00:00") is True  # 截止 01:00:30，还没到
@@ -1072,11 +1076,11 @@ def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exi
         log.record_exit(scope_id, 0, exited_at=exited_at)
 
     class _LateResults:
-        """代理真 RunStore：记下每次终态写给出的 job 与结果；第一次终态写落下之后、把结果交回 tick 之前，写下 a 的真实退出与 b 的
-        结果；其余原样转发。"""
+        """代理真 RunStore：记下每次终态写给出的 job 与结果、各 job 点名的标识；第一次终态写落下之后、把结果交回 tick 之前，写下 a 的
+        真实退出与 b 的结果；其余原样转发。"""
 
         def __init__(self, inner) -> None:
-            self._inner, self.commits = inner, []
+            self._inner, self.commits, self.named = inner, [], {}
 
         def __getattr__(self, name):
             return getattr(self._inner, name)
@@ -1084,6 +1088,7 @@ def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exi
         def commit_job_states(self, run_id, job_states, *, ended_at):
             outcome = self._inner.commit_job_states(run_id, job_states, ended_at=ended_at)
             self.commits.append(([js.scope_id for js in job_states], outcome))
+            self.named.update({js.scope_id: js.result_id for js in job_states})
             if len(self.commits) == 1:
                 # a 的退出时刻在它的截止时刻之前：这一条若被重新推演，a 会判为 passed；b 的退出时刻同样在它的截止时刻之前
                 finish("a", datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc))
@@ -1100,11 +1105,117 @@ def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exi
     assert (exit_a.exit_code, exit_a.timed_out) == (0, False)  # 真实退出确实覆盖了补写的那一条
     state = inner.load_run_state("run-1")
     assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.ERROR, Status.PASSED)
-    saved_a = job_result_from_dict(json.loads((tmp_path / "run-1" / "jobs" / "a.json").read_text(encoding="utf-8")))
+    # 运行态点名的就是两次终态写各自给出的标识；a 只存过一份，存放处共两份
+    assert {sid: js.result_id for sid, js in state.jobs.items()} == store.named and None not in store.named.values()
+    assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == sorted(
+        f"{rid}.json" for rid in store.named.values())
+    saved_a = LocalResultStore(tmp_path).load_job_result("run-1", state.jobs["a"].result_id)
     assert (saved_a.status, saved_a.error_type) == (Status.ERROR, "timeout")
     [result] = reports.results
     assert [(d.scope_id, d.status, d.error_type) for d in result.details] == [
         ("a", Status.ERROR, "timeout"), ("b", Status.PASSED, None)]
+
+
+# ---------- 判定存储的装配与保存明细失败（ADR 0030 决定三「保存明细失败」条）----------
+
+
+class _FlakySaves:
+    """代理判定存储：前 fail_first 次保存抛 OSError（磁盘写不进），之后原样转交；saves 依次记下每次保存的 (scope_id, 标识, 成败)。
+    读与探活原样转交。"""
+
+    def __init__(self, inner, *, fail_first: int) -> None:
+        self._inner, self._left, self.saves = inner, fail_first, []
+
+    def save_job_result(self, run_id, result_id, job):
+        if self._left > 0:
+            self._left -= 1
+            self.saves.append((job.scope_id, result_id, "failed"))
+            raise OSError(28, "No space left on device")
+        self._inner.save_job_result(run_id, result_id, job)
+        self.saves.append((job.scope_id, result_id, "saved"))
+
+    def load_job_result(self, run_id, result_id):
+        return self._inner.load_job_result(run_id, result_id)
+
+    def preflight(self) -> None:
+        self._inner.preflight()
+
+
+def test_build_local_reconcile_takes_the_result_store_from_the_single_local_entry(tmp_path, monkeypatch):
+    """后台推进进程与 status --wait 接力的装配经 `compose.local_result_store` 取判定存储，与前台 run 的 `build_local_stores` 是同一个
+    入口，保存失败的退避重试因此对两种推进器一致。换掉那个入口，这里拿到的就是换上的那一个、入参是 report_dir；不换时拿到的是带
+    重试的那一种。"""
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+    from gherkai_runtime import compose
+    from gherkai_runtime.detached import build_local_reconcile
+
+    _seed_for_build(tmp_path, "run-rs", max_concurrency=1)
+    built = build_local_reconcile(str(tmp_path), "run-rs", max_concurrency=1, region="us-east-1")
+    assert isinstance(built[5], RetryingResultStore)
+    seen: list = []
+    sentinel = object()
+    monkeypatch.setattr(compose, "local_result_store", lambda root: seen.append(root) or sentinel)
+    assert build_local_reconcile(str(tmp_path), "run-rs", max_concurrency=1, region="us-east-1")[5] is sentinel
+    assert seen == [tmp_path]
+
+
+def test_a_failed_save_is_retried_with_the_same_id_and_the_terminal_state_names_it(tmp_path):
+    """后台推进保存判定明细失败一次：判定存储等 1 秒之后再保存，两次用同一个标识；存成之后照常写下终态并点名这个标识，run 照常通过，
+    报告附上的就是这一份，推进循环不抛。判定存储照组合根的形态装配（本机文件存储外面套保存重试），等待换成记录。"""
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+
+    meta, log, store, launcher = _setup(tmp_path, "pass", "a")
+    flaky, sleeps, reports = _FlakySaves(LocalResultStore(tmp_path), fail_first=1), [], _CapturingReports()
+    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1, poll_interval_s=0.05, clock=_now,
+                       result_store=RetryingResultStore(flaky, sleep=sleeps.append), report_store=reports)
+
+    assert [(sid, outcome) for sid, _rid, outcome in flaky.saves] == [("a", "failed"), ("a", "saved")]
+    first_id, second_id = (rid for _sid, rid, _outcome in flaky.saves)
+    assert first_id == second_id and sleeps == [1.0]
+    state = store.load_run_state("run-1")
+    assert (state.status, state.jobs["a"].status, state.jobs["a"].result_id) == (Status.PASSED, Status.PASSED, first_id)
+    [result] = reports.results
+    assert list(result.details) == [LocalResultStore(tmp_path).load_job_result("run-1", first_id)]
+
+
+def test_drive_local_reconcile_stops_without_tearing_down_the_tunnel_when_saves_keep_failing(tmp_path, monkeypatch):
+    """保存判定明细一直失败（磁盘写不进）：重试 3 次（间隔 1、2、4 秒，四次都用同一个标识）之后 OSError 原样穿出推进的唯一入口，说明
+    与退出码由调用方给出；这个 job 不写终态、在记录里仍为 running、不点名，run 没有结束，不生成报告，也不拆隧道（随后用 status --wait
+    接着推进的一方还要用它）。组合根照真实装配，只把引擎换成 echo_worker、把判定存储的装配入口换成「一直失败的本机文件存储外面套
+    等待换成记录的重试」，桩掉「真杀 pid」这一 OS 边界。"""
+    from gherkai_core.adapters.result_store.retrying import RetryingResultStore
+    from gherkai_core.model import TERMINAL_STATUSES
+    from gherkai_runtime import compose, detached
+    from gherkai_runtime import tunnel as gtunnel
+
+    _seed_for_build(tmp_path, "run-f", max_concurrency=1)
+    (tmp_path / "run-f" / "tunnel.json").write_text('{"pid": 4545}', encoding="utf-8")
+    monkeypatch.setenv("AWS_REGION", "us-test-9")
+    env = {**os.environ, "WORKER_MODE": "pass"}
+    monkeypatch.setattr(compose, "build_engines",
+                        lambda **kw: {"novaact": SubprocessEngine(cmd=[sys.executable, _ECHO], env=env)})
+    stopped: list[int] = []
+    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+    stores: list[_FlakySaves] = []
+    sleeps: list[float] = []
+
+    def _always_failing(root):
+        stores.append(_FlakySaves(LocalResultStore(root), fail_first=1_000))
+        return RetryingResultStore(stores[-1], sleep=sleeps.append)
+
+    monkeypatch.setattr(compose, "local_result_store", _always_failing)
+
+    with pytest.raises(OSError, match="No space left on device"):
+        detached.drive_local_reconcile(str(tmp_path), "run-f", 1, region=None, profile=None, poll_interval_s=0.01)
+
+    [flaky] = stores
+    assert [outcome for _sid, _rid, outcome in flaky.saves] == ["failed"] * 4
+    assert len({rid for _sid, rid, _outcome in flaky.saves}) == 1 and sleeps == [1.0, 2.0, 4.0]
+    state = LocalRunStore(tmp_path).load_run_state("run-f")
+    assert state.status not in TERMINAL_STATUSES and state.ended_at is None
+    assert (state.jobs["a"].status, state.jobs["a"].result_id) == (Status.RUNNING, None)
+    assert not (tmp_path / "run-f" / "index.html").exists() and not (tmp_path / "run-f" / "manifest.json").exists()
+    assert stopped == [] and (tmp_path / "run-f" / "tunnel.json").exists()
 
 
 # ---------- 本机后台推进进程读不到可用的运行定义（与云端推进器同一种结束写）----------

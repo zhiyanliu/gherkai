@@ -1,11 +1,12 @@
 """reconciler（ADR 0034）：无状态批量运行的推进编排——被事件唤醒、幂等、并发安全。
 
-`tick(run_id, meta, …, clock=…)` 一步推进：取时刻 → 读库中运行态（已结束即停止推演）→ 读 EventLog 全量 records → project()
-推 RunState → 投影写（只前进、不越过 running）→ 为这一轮已有结果的 job 先存判定明细、再以一次终态写记下它们的终态，run 的状态随之
-写下 → plan_next() 在这一轮读到的运行态加上这次终态写的作用上作推进决策：对每个 start 动作重取时刻、未过停止启动的时刻才认领，认领
-成功即算出截止时刻、经注入的 Launcher 起 job；已过停止启动的时刻、没有执行中的 job 而仍有未启动的 job 时做到期的结束写。结果是
-`TickResult`，宿主据它决定继续推进、从记录生成报告后结束，还是直接结束（ADR 0034 机制三「run 级状态只进不退」条④；ADR 0054
-决策二后台推进条「决策」「收尾与报告」两项）。
+`tick(run_id, meta, …, clock=…, result_store=…)` 一步推进：取时刻 → 读库中运行态（已结束即停止推演）→ 读 EventLog 全量 records →
+project() 推 RunState → 投影写（只前进、不越过 running）→ 为这一轮已有结果的 job 各存一份带标识的判定明细、再以一次终态写记下它们的
+终态并点名各自的那一份，run 的状态随之写下 → plan_next() 在这一轮读到的运行态加上这次终态写的作用上作推进决策：对每个 start 动作重取
+时刻、未过停止启动的时刻才认领，认领成功即算出截止时刻、经注入的 Launcher 起 job；已过停止启动的时刻、没有执行中的 job 而仍有未启动的
+job 时做到期的结束写。结果是 `TickOutcome`，宿主据它决定继续推进、从记录生成报告后结束，还是直接结束（ADR 0034 机制三「run 级状态
+只进不退」条④；ADR 0054 决策二后台推进条「决策」「收尾与报告」两项）。报告经 `write_report_from_record` 从记录生成：读运行态，按其中
+点名的标识读回明细（ADR 0030 决定三「点名」条）。
 
 **无状态 + 幂等**：所有调度态在 EventLog / RunStore（持久），进程内不留。谁调 tick、何时调、并发调都安全
 （CAS + HWM 条件写兜底）——各触发源（cloud Stream / local per-run 进程 / status --wait 接力）
@@ -22,12 +23,13 @@ from __future__ import annotations
 
 import enum
 import logging
-from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import replace
 from datetime import datetime
 from typing import Protocol
 
-from gherkai_core.model import TERMINAL_STATUSES, Job, JobResult, JobState, RunMeta, RunState
+from gherkai_core.model import TERMINAL_STATUSES, Job, JobState, RunMeta, RunState
+from gherkai_core.named_details import load_named_details, new_result_id
 from gherkai_core.ports import ReportStore, ResultStore, RunStore
 from gherkai_core.project import assemble_run_result, plan_next, project, project_full, run_duration_ms
 from gherkai_core.run_deadline import deadline_of, job_cutoff, past_stop_start
@@ -47,29 +49,12 @@ class TickOutcome(enum.Enum):
     # 继续推进：这一次 tick 没有使 run 成为终态（其中可能已记下部分 job 的终态）；或读不到运行态；或到期的结束写没写成而重读的运行态
     # 仍未结束（写下时有执行中的 job：读取之后又有了新的认领）。宿主照常做超时处置并等下一轮。
     CONTINUE = "continue"
-    # 这一方的写使 run 成为终态：记下最后一批 job 终态的那次终态写，或到期的结束写，由这一方写成。这一次 tick 交给终态写的判定明细随
-    # `TickResult.details` 带出，宿主用它与记录生成报告（`write_report_from_record`）。
+    # 这一方的写使 run 成为终态：记下最后一批 job 终态的那次终态写，或到期的结束写，由这一方写成。推进步骤不交回判定明细，宿主从记录
+    # 生成报告（`write_report_from_record`：读运行态、按其中点名的标识读回明细）。
     COMMITTED = "committed"
     # run 已结束而使它成为终态的不是这一方：这一轮读到的运行态已是终态（读到即返回，不再推演、投影、认领，也不存明细），或终态写报告
     # run 在这次写之前已是终态，或到期的结束写没写成、重读到别人已写下的终态。宿主不生成报告：报告只由使 run 成为终态的那一方生成。
     ENDED = "ended"
-
-
-@dataclass(frozen=True)
-class TickResult:
-    """`tick` 交还宿主的结果：outcome 是三种结果之一；details 当且仅当 `COMMITTED` 时不为 None。
-
-    details 是这一次 tick（含同一轮的重做）存下并交给终态写的各 job 的判定明细，按运行定义的次序；这一次 tick 没有交给终态写任何 job
-    时为空元组（只会出在由到期的结束写使 run 成为终态的时候）。其中可能有终态已由别的推进器写下、这次写跳过的 job：两个推进器读到不同的
-    事件快照时（例如补写的超时退出与随后到达的真实退出），报告里这个 job 的状态取运行态，明细可能出自另一份快照。较早轮次写下终态的
-    job 不在其中，生成报告时从判定存储读回。宿主把它交给 `write_report_from_record`，状态从记录读，不再另读一次事件重算。"""
-
-    outcome: TickOutcome
-    details: tuple[JobResult, ...] | None = None
-
-    def __post_init__(self) -> None:
-        if (self.outcome is TickOutcome.COMMITTED) != (self.details is not None):
-            raise ValueError("只有这一方的写使 run 成为终态时才带判定明细")
 
 
 class EventLog(Protocol):
@@ -111,27 +96,21 @@ class Launcher(Protocol):
     def launch(self, job: Job, *, cutoff_at: datetime) -> None: ...
 
 
-def write_report_from_record(meta: RunMeta, run_store: RunStore, details: Iterable[JobResult],
-                             report_store: ReportStore | None, *, result_store: ResultStore | None,
-                             created_at: str) -> None:
+def write_report_from_record(meta: RunMeta, run_store: RunStore, result_store: ResultStore,
+                             report_store: ReportStore | None, *, created_at: str) -> None:
     """这一方的写使 run 成为终态之后，从记录生成 RunReport（派生视图，**永远最后**；ADR 0054 决策二后台推进条「收尾与报告」，ADR 0027
-    「ReportStore 接口：整 run 一次写」节）。
-    宿主只在 tick 返回 `TickOutcome.COMMITTED` 后调，details 是那次的 `TickResult.details`。
+    「ReportStore 接口：整 run 一次写」节）。宿主只在 tick 返回 `TickOutcome.COMMITTED` 后调。
 
-    一次读运行态、按它算 run 级墙钟（started_at 到 ended_at，`project.run_duration_ms`）、组装 run 的结果
-    （`project.assemble_run_result`：状态与 job 级说明取运行态，判定明细按下列来源附上），再写报告。判定明细的来源：
-    - details 里有的 job（这一次 tick 交给终态写的）用 details 里的那一份；
-    - 其余 job 在给了 result_store 时按 scope_id 从判定存储读回。较早轮次写下终态的 job，明细在那一轮的终态写之前已存下，库中已是终态的
-      job 之后不再被推进步骤选中、不再存明细，读回的就是那一轮存下的一份；没有存过明细的 job（由结束写结束的）读回为空、不带明细。
-      读回依赖一个前提：会生成报告的结束写只有到期这一条来路，它只结束 pending 的 job，pending 的 job 没有存过明细；结束执行中 job
-      的结束写（运行定义不可用的变体）之后不生成报告。run 处置不复用这条读回：它会结束执行中的 job，那些 job 可能存过与终态无关的明细。
-      两个推进器重叠时，按 scope_id 覆盖同键的保存可能让读回的那一份与写下的终态出自不同的事件快照；
-    - result_store 为 None 时只用 details。
-    result_store 是必传的关键字参数，调用方自己决定用不用判定存储。
+    一次读运行态、按它算 run 级墙钟（started_at 到 ended_at，`project.run_duration_ms`），按其中各 job 点名的标识从判定存储读回明细
+    （`named_details.load_named_details`，与前台收尾、explain 同一种读法，ADR 0030 决定三「点名」条），组装 run 的结果
+    （`project.assemble_run_result`：状态与 job 级说明取运行态），再写报告。由结束写结束的 job 没有标识、不读，只有状态与说明；存储里
+    没被点名的明细（别的推进方存下而终态由这一方写下的、存下之后终态写没写成的）不读。这一次推进与较早轮次写下终态的 job 读法相同，
+    推进步骤不交回明细：它交给终态写的明细里可能有终态由别的推进方写下的 job，按标识读回才与记录一致。
 
     整段在失败隔离之内：报告是派生只读视图，判定明细与终态在生成之前都已落下，读运行态、读回明细、组装与写报告的任何失败都不击穿已到
-    终态的 run，这一步的失败也没有人重试（ADR 0030 决定三「ReportStore.write 失败隔离」注）。运行态读不到时同样不生成报告。判定明细
-    不再另读一次事件重算：重算用的事件可能已经变了（接力方补写的未知退出之后又被真实的退出码覆盖）。
+    终态的 run，这一步的失败也没有人重试（ADR 0030 决定三「ReportStore.write 失败隔离」注）。运行态读不到、被点名的那一份读不到
+    （`NamedDetailMissing`）时同样不生成报告，日志里留一条警告。判定明细不另读一次事件重算：重算用的事件可能已经变了（接力方补写的
+    未知退出之后又被真实的退出码覆盖）。
     created_at：报告的生成时刻（记录里的写法）。report_store 为 None 时什么都不做：不读运行态，也不读回明细。
     **唯一一份**（云端推进器 Lambda 与本机后台推进进程都调用此处）。纯编排：不 import boto3。
     """
@@ -141,14 +120,8 @@ def write_report_from_record(meta: RunMeta, run_store: RunStore, details: Iterab
         state = run_store.load_run_state(meta.run_id)
         if state is None:
             raise FileNotFoundError(f"run {meta.run_id} 的运行状态不存在，无法生成报告")
-        in_hand = {jr.scope_id: jr for jr in details}
-        if result_store is not None:
-            for job in meta.jobs:
-                if job.scope_id not in in_hand:
-                    jr = result_store.load_job_result(meta.run_id, job.scope_id)
-                    if jr is not None:
-                        in_hand[job.scope_id] = jr
-        result = assemble_run_result(meta, state, in_hand.values(), duration_ms=run_duration_ms(state))
+        details = load_named_details(meta.run_id, state.jobs.values(), result_store)
+        result = assemble_run_result(meta, state, details.values(), duration_ms=run_duration_ms(state))
         report_store.write(meta.run_id, result, created_at=created_at)
     except Exception:
         # 派生视图的失败不击穿已到终态的 run；traceback 留在日志里供排障
@@ -164,9 +137,12 @@ def tick(
     max_concurrency: int,
     *,
     clock: Callable[[], datetime],
-    result_store: ResultStore | None = None,
-) -> TickResult:
-    """推进一步，返回 `TickResult`（三种结果的含义见 `TickOutcome`）。
+    result_store: ResultStore,
+) -> TickOutcome:
+    """推进一步，返回 `TickOutcome`（三种结果的含义见它的文档串）。
+
+    result_store：判定存储，必传（ADR 0034 机制三「run 级状态只进不退」条④ K3）。由执行结果结束的 job 都在这里存下一份明细、由终态写
+    点名，「由执行结果结束」与「由结束写结束」只看终态有没有点名（ADR 0030 决定三「点名」条），所以推进路径上没有不存明细的终态写。
 
     clock：宿主注入的墙钟，返回带时区的 datetime（组合根传 `compose.now`）。本函数在三处取它（ADR 0054 决策二后台推进条「时刻」）：
     - 每次读取运行态之前取一次，用于这一轮的推进决策（是否已过停止启动的时刻）与这一轮写下的结束时刻 ended_at；
@@ -180,12 +156,16 @@ def tick(
        run 已是终态即返回 `ENDED`，不读事件、不投影、不认领、不存明细（ADR 0034 机制三「run 级状态只进不退」条④）。
     2. 读 EventLog 全量 records，project() 纯推演出 RunState（含 HWM），再以 project_state() 投影写：投影只前进、不越过 running，
        不写 job 的终态（adapter 写的时候把事件推出的终态钳在 running）；写不成（stale 被挡、run 已结束）无害，返回值不看。
-    3. 记下这一轮已有结果的 job 的终态（选哪些 job 见 `_committable`）：先由 project_full 从同一份 records 给出它们的判定明细、配了
-       ResultStore 时逐个存下，再以一次终态写（`RunStore.commit_job_states`）记下它们的终态，会话与认领时刻取这一轮的投影。任一份明细
-       存不成即原样抛出：这一遍（从读运行态起算，重做是另一遍）一个终态都不写，也不认领、不做结束写，这一遍已存下明细的 job 一并留在
-       running，下一轮重存再写；重做那一遍存不成时，第一遍已写下的终态与已做的认领不收回（ADR 0034
-       机制三「run 级状态只进不退」条④ K3）。终态写的结果：使 run 成为终态即返回 `COMMITTED`；run 在这次写之前已是终态即返回
-       `ENDED`，不另读、不启动 job；run 仍未结束时，以这次写对 baseline 的作用（`run_status.commit_applied`）作推进决策用的运行态。
+    3. 记下这一轮已有结果的 job 的终态（选哪些 job 见 `_committable`）：project_full 从同一份 records 给出它们的判定明细，每个 job 各
+       生成一个标识（`named_details.new_result_id`）、存成带这个标识的一份，再以一次终态写（`RunStore.commit_job_states`）记下它们的
+       终态并点名各自的那一份（`JobState.result_id`），会话与认领时刻取这一轮的投影。云端的终态写被写入序号挡下、重读再算时用的仍是
+       这组 JobState，点名的标识不变（ADR 0030 决定三「被点名的那一份」条）。其中有 job 在库中已由别的推进方写下终态时，终态写跳过它，
+       它这一轮存下的那一份不被点名，库中点名的是写成终态那一方的。任一份明细存不成即原样抛出：这一遍（从读运行态起算，重做是另一遍）
+       一个终态都不写，也不认领、不做结束写，这一遍已存下明细的 job 一并留在 running、存下的那几份不被点名，下一轮另生成标识再存再写；
+       重做那一遍存不成时，第一遍已写下的终态与已做的认领不收回（ADR 0034 机制三「run 级状态只进不退」条④ K3）。本函数不等待、不重试：
+       本机推进器的组合根给出的判定存储自带保存失败的退避重试（同一个标识），云端由流的重试或之后的触发再做（ADR 0030 决定三「保存
+       明细失败」条）。终态写的结果：使 run 成为终态即返回 `COMMITTED`；run 在这次写之前已是终态即返回 `ENDED`，不另读、不启动
+       job；run 仍未结束时，以这次写对 baseline 的作用（`run_status.commit_applied`）作推进决策用的运行态。
     4. 推进决策（plan_next）只看运行态：这一轮读到的 baseline 加上第 3 步终态写的作用，不看投影。交给它之前 job 按运行定义的次序重排
        （ADR 0034 机制四）：存储不保证 jobs 的次序，并发上限靠各推进器对同一段 pending 前缀的认领碰撞来守，次序不一致时两次重叠的推进
        会各认领一个不同的 job。这一轮读运行态之后才被别处认领的 job 在其中仍是 pending，只多出一次被认领条件挡下的启动提议，或一次写下时有执行中的 job
@@ -197,7 +177,7 @@ def tick(
     6. 这一轮有认领因已过停止启动的时刻而没有做时，同一轮里从第 1 项起重做一次（重新取时刻、重新读取运行态与事件），按已过停止启动
        再决策（这一轮里先前认领成功的 job 与已记下的终态都在重新读到的运行态里，不再存、再写）：不拿轮首的快照做结束写，也不就此
        返回——云端没有别的东西会再触发一轮，停在这里的 run 满足到期的结束写却没有人做。重新决策只做一次，已过停止启动之后不会再提议
-       启动。重做那一遍使 run 成为终态时，交还的明细含两遍交给终态写的全部。
+       启动。
     其余情形返回 `CONTINUE`。baseline 读到之后才插入的终态不在这一次读取的判停之内：本轮的投影写与认领被条件挡下，终态写返回
     `ALREADY_ENDED`。
 
@@ -209,7 +189,6 @@ def tick(
     """
     deadline = deadline_of(meta)
     job_by_scope: dict[str, Job] = {j.scope_id: j for j in meta.jobs}
-    committed: dict[str, JobResult] = {}  # 这一次 tick 交给终态写的明细，跨重做保留
     replanned = False
     while True:
         now = clock()
@@ -218,9 +197,9 @@ def tick(
         # 首 tick 时 STATE 已由 create_run 建。手里的运行态可能比事件旧，写终态之前按 job 检查，见 `_committable`。
         baseline = run_store.load_run_state(run_id)
         if baseline is None:
-            return TickResult(TickOutcome.CONTINUE)
+            return TickOutcome.CONTINUE
         if baseline.status in TERMINAL_STATUSES:
-            return TickResult(TickOutcome.ENDED)
+            return TickOutcome.ENDED
         records = event_log.records()
         state = project(meta, records, baseline)
         # 投影写：stale 被挡、run 已结束时返回 False——无害，本 tick 只是没推进落库，下轮（或别的实例）会重推。
@@ -230,18 +209,21 @@ def tick(
         claims = _committable(baseline, state)
         if claims:
             results = project_full(meta, [r for r in records if r.scope_id in claims], claimed_at=claims)
-            if result_store is not None:
-                for jr in results:
-                    result_store.save_job_result(run_id, jr)  # 明细先存；任一份失败即原样抛出，这一轮不写终态、不启动 job
-            finals = [JobState(scope_id=jr.scope_id, status=jr.status, session_id=state.jobs[jr.scope_id].session_id,
-                               claimed_at=state.jobs[jr.scope_id].claimed_at) for jr in results]
+            finals: list[JobState] = []
+            for jr in results:
+                result_id = new_result_id()
+                # 明细先存，一个 job 一个标识；任一份失败即原样抛出：这一遍不写终态、不认领、不做结束写，已存下的几份都不被点名
+                result_store.save_job_result(run_id, result_id, jr)
+                js = state.jobs[jr.scope_id]
+                finals.append(JobState(scope_id=jr.scope_id, status=jr.status, session_id=js.session_id,
+                                       claimed_at=js.claimed_at, result_id=result_id))
             at = instant_to_iso(now)
+            # 一次终态写记下它们，各点名各自的那一份；云端被写入序号挡下时在 adapter 里重读再算，用的仍是这组 JobState（同一组标识）
             outcome = run_store.commit_job_states(run_id, finals, ended_at=at)
-            committed.update((jr.scope_id, jr) for jr in results)
             if outcome is CommitOutcome.ENDED_RUN:
-                return TickResult(TickOutcome.COMMITTED, _ordered(meta, committed))
+                return TickOutcome.COMMITTED
             if outcome is CommitOutcome.ALREADY_ENDED:
-                return TickResult(TickOutcome.ENDED)
+                return TickOutcome.ENDED
             applied, _ = commit_applied(baseline, finals, ended_at=at)
             assert applied is not None  # baseline 未结束，终态写的作用总能算出
             view = applied
@@ -252,7 +234,7 @@ def tick(
         refused = False
         for act in plan_next(view, max_concurrency, past_stop_start=stop_start):
             if act.kind == "expire":
-                return _end_expired(run_id, run_store, ended_at=now, details=_ordered(meta, committed))
+                return _end_expired(run_id, run_store, ended_at=now)
             # start：先确认 job 存在，再认领：防御跳过时不会留下一个已认领成 running 却无人启动的 job。
             job = job_by_scope.get(act.scope_id) if act.scope_id is not None else None
             if job is None:
@@ -267,7 +249,7 @@ def tick(
         if refused and not replanned:
             replanned = True
             continue
-        return TickResult(TickOutcome.CONTINUE)
+        return TickOutcome.CONTINUE
 
 
 def _launch(run_id: str, job: Job, launcher: Launcher, event_log: EventLog, clock: Callable[[], datetime],
@@ -306,20 +288,16 @@ def _committable(baseline: RunState, state: RunState) -> dict[str, datetime]:
     return out
 
 
-def _ordered(meta: RunMeta, committed: Mapping[str, JobResult]) -> tuple[JobResult, ...]:
-    """这一次 tick 交给终态写的明细，按运行定义的次序。"""
-    return tuple(committed[j.scope_id] for j in meta.jobs if j.scope_id in committed)
-
-
-def _end_expired(run_id: str, run_store: RunStore, *, ended_at: datetime, details: tuple[JobResult, ...]) -> TickResult:
+def _end_expired(run_id: str, run_store: RunStore, *, ended_at: datetime) -> TickOutcome:
     """到期的结束写：以「执行方自己到期」这条来路结束 run（`RunStore.end_run`，ADR 0054 决策二第 3 条与后台推进条「收尾与报告」），
-    运行态里是 pending 的 job 记 skipped、带到期的说明，run 随之成为终态。结束写的条件是写下时 run 未结束、没有 running 的 job。
+    运行态里是 pending 的 job 记 skipped、带到期的说明，run 随之成为终态。结束写的条件是写下时 run 未结束、没有 running 的 job。结束写
+    不点名：由它结束的 job 没有标识，已由终态写记下的 job 点名的标识原样保留。
 
-    写成即 `COMMITTED`，带着这一次 tick 交给终态写的明细。没写成时重读一次运行态：已是终态说明别人已经结束了它，返回 `ENDED`；仍未
-    结束（写下时有执行中的 job：读取之后有了新的认领）或读不到返回 `CONTINUE`，新认领的 job 照常在它的截止时刻被停下。"""
+    写成即 `COMMITTED`。没写成时重读一次运行态：已是终态说明别人已经结束了它，返回 `ENDED`；仍未结束（写下时有执行中的 job：读取之后
+    有了新的认领）或读不到返回 `CONTINUE`，新认领的 job 照常在它的截止时刻被停下。"""
     if run_store.end_run(run_id, RUN_ENDINGS["deadline"], ended_at=instant_to_iso(ended_at)):
-        return TickResult(TickOutcome.COMMITTED, details)
+        return TickOutcome.COMMITTED
     after = run_store.load_run_state(run_id)
     if after is not None and after.status in TERMINAL_STATUSES:
-        return TickResult(TickOutcome.ENDED)
-    return TickResult(TickOutcome.CONTINUE)
+        return TickOutcome.ENDED
+    return TickOutcome.CONTINUE

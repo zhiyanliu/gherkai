@@ -170,13 +170,18 @@ def _schema_version_attr(item: dict) -> int:
 
 
 def _job_state_to_item(js: JobState) -> dict:
-    """JobState → DDB Map entry（字段集同 serialize；session_id、claimed_at 与 job 级说明 message 用 omit-when-None，读回 .get 得
-    None，ADR 0030 决定五、决定六）。"""
+    """JobState → DDB Map entry（字段集同 serialize；session_id、claimed_at、点名的标识 result_id 与 job 级说明 message 用
+    omit-when-None，读回 .get 得 None，ADR 0030 决定五、决定六）。
+
+    jobs 的每一处写都经这里：建 run 的初始条目与执行中的写整项替换的条目没有标识（只由终态写写下）；终态写与结束写整体替换 jobs 时
+    （`_replace_state`），已点名的 job 的标识随条目一并写回，结束写因此不抹去此前各 job 的点名。"""
     d: dict = {"status": js.status.value}
     if js.session_id is not None:
         d["session_id"] = js.session_id
     if js.claimed_at is not None:
         d["claimed_at"] = js.claimed_at
+    if js.result_id is not None:
+        d["result_id"] = js.result_id
     if js.message is not None:
         d["message"] = js.message
     return d
@@ -184,7 +189,8 @@ def _job_state_to_item(js: JobState) -> dict:
 
 def _job_state_from_item(scope_id: str, m: dict) -> JobState:
     return JobState(scope_id=scope_id, status=Status(m["status"]),
-                    session_id=m.get("session_id"), claimed_at=m.get("claimed_at"), message=m.get("message"))
+                    session_id=m.get("session_id"), claimed_at=m.get("claimed_at"), result_id=m.get("result_id"),
+                    message=m.get("message"))
 
 
 def _state_scalars(state: RunState) -> dict:
@@ -335,7 +341,7 @@ class DynamoDBRunStore:
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """执行中的写（语义见 RunStore port）：按 scope_id 整项替换 STATE.jobs 里的一个条目（SET jobs.#sid=:js），只发**一次**
-        update_item。写入的不是 running 即抛 ValueError（`run_status.check_running_write`），不发写。
+        update_item。写入的不是 running、或带点名的标识，即抛 ValueError（`run_status.check_running_write`），不发写。
 
         #sid 用 ExpressionAttributeNames 承载任意 scope_id（含 / : 中文，绕开保留字/特殊字符）。
 
@@ -517,7 +523,8 @@ class DynamoDBRunStore:
         run 已结束（ALREADY_ENDED）时不写；给出的 job 在库中都已是终态时运行态不变，同样不写、返回 OPEN。否则发一次条件写（见
         `_replace_state`），写成即返回这一轮算出的结果，被挡下即重读再算：重读到 run 已结束返回 ALREADY_ENDED。每一轮都按这一轮读到的
         条目合并给出的 job（规则见 `run_status.commit_applied`）：读与写之间别的写为它写下的认领时刻在重读之后留下，写下的会话只在给出的
-        job 没有会话时留下，两者都不被空值覆盖。读不到 STATE 抛 FileNotFoundError；参数不合要求时 commit_applied 在任何写之前抛
+        job 没有会话时留下，两者都不被空值覆盖；每一轮用的都是同一组给出的 job，点名的标识因此不随重读改变。读不到 STATE 抛
+        FileNotFoundError；参数不合要求时 commit_applied 在任何写之前抛
         ValueError。重试用尽抛 `RunStateWriteContended`。"""
         job_states = tuple(job_states)
         for attempt in range(_REPLACE_MAX_RETRIES + 1):
@@ -562,7 +569,8 @@ class DynamoDBRunStore:
     def _replace_state(self, run_id: str, seen: dict, before: RunState, after: RunState) -> bool:
         """一次条件写：把 STATE 从读到的 `before` 改成 `after`。写成返回 True；条件不成立返回 False，不改任何东西。
 
-        写的内容：整体替换 jobs（不按 job 逐个写：逐个加条件的表达式随 job 数增长，ADR 0034 机制三②），run 状态连同状态分组（见 `status_group`；
+        写的内容：整体替换 jobs（不按 job 逐个写：逐个加条件的表达式随 job 数增长，ADR 0034 机制三②；每个条目带上它点名的标识，
+        见 `_job_state_to_item`），run 状态连同状态分组（见 `status_group`；
         run 在这次写里成为终态时分组随之由 live 换成终态值），`after` 与 `before` 不同的结束时刻与 run 级说明，写入序号加一。其余属性
         （开始时刻、HWM、认领计数、顶层附加属性）不提及、原样保留，两个纯函数也不改它们。
 

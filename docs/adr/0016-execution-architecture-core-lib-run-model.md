@@ -83,7 +83,7 @@
 > **三层 store 后端不对等——按访问模式各选、不建全网格**（v1.1 云端选型的定调）：三个 store 存的数据性质不同，天然后端也不同，**不是**每层都配 Local/DDB/S3 三个 adapter 的笛卡尔网格。
 > - **`RunStore`（记录型：小、频繁更新 pending→running→终态、要轮询/查询）→ DDB**。不会有 `S3RunStore`（S3 不适合频繁更新的小记录）。
 > - **`ReportStore`（文件型：manifest + `index.html`，给人看/serve/下载）→ S3**（静态托管 / presigned URL）。不会有 `DDBReportStore`（DDB 存 HTML 页荒谬）。
-> - **`ResultStore`（每个 job 的 `JobResult` JSON，每次保存一份）→ S3**（已定，[0030](./0030-realtime-persistence-seam.md) 决定六）：它两可——既像「记录」（`run_id`+`scope_id` 加点名的标识作键）又像「文件」（自包含 JSON blob）。读者先从运行态取 job 点名的标识，再按键直接取那一个对象（键形态见 [0030](./0030-realtime-persistence-seam.md) 决定六）→ S3 对象足够；将来若真需要「跨 scope 查询/过滤」（列出某 run 所有 failed scope 等）→ **加一个 DDB 索引层**，是加法不返工。
+> - **`ResultStore`（每个 job 的 `JobResult` JSON，每次保存一份）→ S3**（已定，[0030](./0030-realtime-persistence-seam.md) 决定六）：它两可——既像「记录」（`run_id` 加点名的标识作键）又像「文件」（自包含 JSON blob）。读者先从运行态取 job 点名的标识，再按键直接取那一个对象（键形态见 [0030](./0030-realtime-persistence-seam.md) 决定六）→ S3 对象足够；将来若真需要「跨 scope 查询/过滤」（列出某 run 所有 failed scope 等）→ **加一个 DDB 索引层**，是加法不返工。
 > 即云端 adapter 是「Run→DDB、Report→S3、Result 两选一」，而非九宫格。
 
 > **worker 产物持久化 ⊥ store（两条正交轴，别混）**：
@@ -101,7 +101,7 @@ core/gherkai_core/
     ├── fargate_engine.py                 ← 云端执行 adapter `FargateEngine`：只有 `start_scope`（job-in 走 S3、events-out 走 DDB events 表），不实装 `Engine` port，经 `cloud_launcher.py` 接入后台推进（0024/0032/0033；边界见 0034「Engine port 演进」节）
     ├── report_store/{local.py, s3.py}    ← RunReport 归集（manifest+index）（0027；s3 见 0030）
     ├── run_store/{local.py, ddb.py, arg_offload.py}  ← 控制面（ddb=DynamoDBRunStore、arg_offload=S3StepArgumentOffloader）（0030）
-    ├── result_store/{local.py, s3.py}    ← 数据面（s3=S3ResultStore）（0030）
+    ├── result_store/{local.py, s3.py, retrying.py}  ← 数据面（s3=S3ResultStore；retrying=本机组合根套在本地文件存储外的保存退避重试，非独立后端）（0030）
     ├── event_log/{sqlite.py, ddb.py, recording.py}  ← EventLog port（无状态批量运行的写模型：local SQLite / cloud DDB events 表）（0034）；recording.py 非 port 实装：把 SubprocessEngine 的原始事件行与退出记录旁路写进 SqliteEventLog（`make_raw_sink` 供 SubprocessLauncher 用，`EventRecordingEngine` 包本机同步 run 的引擎）（0042 决策七）
     ├── cloud_launcher.py                 ← Launcher port cloud 实装（ECS RunTask；对位 runtime/gherkai_runtime/detached.py 的 SubprocessLauncher）（0034）
     ├── _boto.py                          ← 云端 adapter 共享的 boto3 依赖守卫（非 port 实装，冗余兜底：主拦截在组合根）

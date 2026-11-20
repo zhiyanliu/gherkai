@@ -55,7 +55,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 1. `gherkai doctor`（首次或环境变过；cloud 后端加 `--backend cloud --prefix P`）。
 2. `gherkai plan <feature…>`：看分组、引擎路由、派发标注、筛选结果。纯本地、零费用。**plan 打出的 job 数就是这个 run 要开几个云端浏览器会话**，费用随 job 数与步数走。首次在这个项目实际运行、或 job 数明显超出人交代的范围（人只说一条、plan 列出一屏）时，先把分组与规模报给人再执行；只想验证刚写的那条就按第 6 条收窄到一条。
 3. `gherkai run <feature…>` 或 `gherkai submit <feature…>` + `gherkai status <run_id> --wait`。实际运行会产生 AWS 费用，先 `plan` 后运行。找不回 run_id 时用 `gherkai list-runs`（定位参数同 `status`）列出这个后端里的 run；提示列标「由前台 run 执行」的未结束 run，`status --wait` 只等待、不接力。
-4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（即使能直接读 `jobs/*.json` 与 evidence.json 也先用它：它把判定、原因、模型所见与截图位置拼成一份可复现的证据，手翻 JSON 容易漏）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成：每次 AI 调用的票值与错误、它看见与想了什么、截图在哪；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起，与文本步号一致，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json` 或 `jobs/*.json`（读法与禁忌见第 10 节）。
+4. 有用例没过，**第一个命令是 `gherkai explain <run_id>`**（即使能直接读 evidence.json 也先用它：它把判定、原因、模型所见与截图位置拼成一份可复现的证据，手翻 JSON 容易漏）：按书写顺序列每一步，失败 / 出错 / 跳过的步展开成：每次 AI 调用的票值与错误、它看见与想了什么、截图在哪；判定里已看出哪个 job 红了就直接 `gherkai explain <run_id> <scope_id>`（位置参数，值与重新运行时用的 `--scope` 同一个）；再往细走 `--scenario SEL` / `--step N`（0 起，与文本步号一致，须与 `--scenario` 同给）缩到一步，`--all` 连通过的步也展开，`--full` 逐帧全文，`--json` 拿完整证据。要更多再读 `--json`（禁忌见第 10 节）。
 5. 修：断言写法问题改 feature（只动要改的那一步、别增删其它行——未标 scope 的 scenario 用行号当 id，行号一漂，旧报告与 `--scope` 的值就都指不到了）；精确检查改成确定性 step；语言面问题换引擎；确是被测应用的 bug 就交给人定夺。**要说「是被测应用的 bug」之前先重新投票复核**：AI 断言默认只判一次（`explain` 里那步打 `votes 0/1` 就是只判了一次），判否也可能是模型这一次没看准——收窄到那一条再多投几票：`gherkai run <feature> --scope <scope_id> --assertion-votes 3`（票数作用于本 run 每条 AI 断言、费用随票数涨，所以务必先收窄）。三票一致判否才报 bug；出现分歧票就是抖动或断言措辞歧义，改成直白的语义陈述或落到确定性 step。**例外：Nova Act 引擎下非英文页面的词匹配判否是系统性的，重新投票只会增加费用、不要给 `--assertion-votes`，直接走第 2 节的三条出路。** **四种处置都按第 9 节汇报**——人要知道的不只「哪条是产品 bug」，还有「你替他改了什么、为什么」：改断言写法、换引擎都动了验收口径，不报等于悄悄放宽了这条用例。
 6. **收窄后重新运行**（`run` / `submit` / `plan` 同一套）：`--scope ID` 的值就是判定明细里的 `scope_id`，重新运行失败的 job 最直接；`--scenario SEL`（完整 scenario id、行号、或标题片段，区分大小写；Outline 声明行见第 4 节）；`--tags TAG[,TAG]`（一个值内的逗号表示任一命中，重复给表示都要命中，@ 可省）。`--scope` / `--scenario` 可重复、任一命中；`--tags` 重复给时都要命中；不同类同给时都要满足。筛成空集时以退出码 2 结束并列出全部候选，照着改。
 7. `steps/` 里任一文件加载失败，`plan` / `run` / `submit` 都会在起第一个 job 前整个 run 拒绝运行并以退出码 2 结束，错误点名文件与异常。先修那个文件，不是怀疑 feature。显式给的 `--steps-dir` 不存在同样以退出码 2 结束；缺省 `./steps` 不存在不算错。
@@ -109,7 +109,7 @@ job 级：
 ## 10 别做的事
 
 - 别把 `submit` 的退出码 0、或不带 `--wait` 的 `status` 退出码 0 当通过：判定只看 `run` 或 `status --wait` 的退出码（第 8 节）。
-- 别解析人读文本、HTML 报告或引擎原生 trajectory 文件：人读排版会变，报告是派生视图、文件名会变；机读用 `--json`，读证据用 `explain`。
+- 别解析人读文本、HTML 报告、引擎原生 trajectory 或 `jobs/` 下的明细文件：人读排版会变，报告是派生视图、文件名会变，一个 job 的明细可能有多份、算数的那份由运行记录定；机读用 `--json`，读证据与明细用 `explain`。
 - 别自己拼产物位置：顺判定明细里的 `ref`（产物指针）走，本机与 S3 两侧同一形式。
 - cloud 后端改了 steps 不 `push-worker` 等于没改：云端 worker 读的是镜像里那份，本机 `plan` 的标注不代表云端。
 - 别只写一侧的确定性 step：另一引擎上会静默落回 AI、run 还可能「通过」，执行前预检只查本次用到的引擎、不替你发现；两引擎都用时 `list-deterministic --engine` 各查一遍。

@@ -321,9 +321,24 @@ def test_cloud_launcher_requires_run_id_and_warns_only_for_missing_watch(caplog)
 
 _T0 = datetime(2030, 1, 1, tzinfo=timezone.utc)  # 假墙钟（远早于 FAR_DEADLINE）
 
+class _Results:
+    """记下每次保存的判定存储替身：ids 是 (scope_id, 标识)，按保存的次序；按标识读回。"""
+
+    def __init__(self) -> None:
+        self.ids: list[tuple[str, str]] = []
+        self._by_id: dict = {}
+
+    def save_job_result(self, run_id, result_id, jr):
+        self.ids.append((jr.scope_id, result_id))
+        self._by_id[result_id] = jr
+
+    def load_job_result(self, run_id, result_id):
+        return self._by_id.get(result_id)
+
+
 def test_tick_with_ddb_backend(events_table, ddb_run_store):
     """reconcile.tick 用 DdbEventLog + DynamoDBRunStore + CloudLauncher（fake engine）走通：起 job → 先存明细、再以终态写记下 job 的
-    终态，run 随之成为终态 → 再推进读到既有终态即停。"""
+    终态并点名那一份，run 随之成为终态 → 再推进读到既有终态即停。"""
     from gherkai_core.adapters.cloud_launcher import CloudLauncher
     from gherkai_core.reconcile import TickOutcome, tick
 
@@ -338,9 +353,10 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
         def start_scope(self, job): self.started.append(job.scope_id)
     eng = FakeEngine()
     launcher = CloudLauncher(lambda name: eng, run_id="run-1")
+    results = _Results()
 
     # tick1：起 a（认领 + launch）
-    tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0)
+    tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0, result_store=results)
     assert eng.started == ["a"]
     state = ddb_run_store.load_run_state("run-1")
     assert state.jobs["a"].status == Status.RUNNING
@@ -351,22 +367,17 @@ def test_tick_with_ddb_backend(events_table, ddb_run_store):
     _passed_worker_events(events_table, "a")
     log.record_exit("a", 0)
 
-    # tick2：投影把 a 写成 running（不写终态），终态写记下 a 的 passed，run 随之成为终态
-    saved = []
-
-    class _Results:
-        def save_job_result(self, run_id, jr):
-            saved.append(jr.scope_id)
-
+    # tick2：投影把 a 写成 running（不写终态），终态写记下 a 的 passed 并点名存下的那一份，run 随之成为终态
     done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=20),
-                result_store=_Results())
-    assert done.outcome is TickOutcome.COMMITTED and [jr.scope_id for jr in done.details] == ["a"] and saved == ["a"]
+                result_store=results)
+    assert done is TickOutcome.COMMITTED and [sid for sid, _ in results.ids] == ["a"]
     state = ddb_run_store.load_run_state("run-1")
-    assert (state.status, state.jobs["a"].status, state.jobs["a"].claimed_at) == (
-        Status.PASSED, Status.PASSED, instant_to_iso(_T0))
-    # 再 tick：读到既有终态即停，不再推演
-    assert tick("run-1", meta, log, ddb_run_store, launcher, 1,
-                clock=lambda: _T0 + timedelta(seconds=30)).outcome is TickOutcome.ENDED
+    assert (state.status, state.jobs["a"].status, state.jobs["a"].claimed_at, state.jobs["a"].result_id) == (
+        Status.PASSED, Status.PASSED, instant_to_iso(_T0), results.ids[0][1])
+    # 再 tick：读到既有终态即停，不再推演，也不再存明细
+    assert tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=30),
+                result_store=results) is TickOutcome.ENDED
+    assert len(results.ids) == 1
     assert ddb_run_store.load_run_state("run-1").ended_at == instant_to_iso(_T0 + timedelta(seconds=20))
 
 
@@ -410,34 +421,37 @@ def _expiry_setup(events_table, ddb_run_store):
         jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")}, started_at="t0", high_water_mark=0))
     launcher = CloudLauncher(lambda name: _FakeStartEngine(), run_id="run-1")
     log = DdbEventLog(events_table, "run-1", ["a", "b"])
-    tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0)  # 起 a
+    tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0, result_store=_Results())  # 起 a
     _passed_worker_events(events_table, "a")
     log.record_exit("a", 0)
     return meta, launcher
 
 
 def test_expiry_commits_on_ddb(events_table, ddb_run_store):
-    """云端后端上的到期：已过停止启动的时刻，最后一个执行中的 a 在这一轮得出结果，b 还没有启动。同一轮先以终态写记下 a，再做到期的
-    结束写：不认领 b，b 记 skipped 并带到期的说明，run 按取法记 aborted、带「已超过允许运行的时间」；交还的明细带这一轮记下终态的 a
-    （与本机对拍）。"""
+    """云端后端上的到期：已过停止启动的时刻，最后一个执行中的 a 在这一轮得出结果，b 还没有启动。同一轮先以终态写记下 a 并点名它的那一份，
+    再做到期的结束写：不认领 b，b 记 skipped 并带到期的说明、不点名，run 按取法记 aborted、带「已超过允许运行的时间」；结束写整体替换
+    jobs 时带上 a 已有的点名（与本机对拍）。"""
     from gherkai_core.reconcile import TickOutcome, tick
     from gherkai_core.run_status import RUN_ENDINGS
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)
     log = DdbEventLog(events_table, "run-1", ["a", "b"])
-    done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=41))
-    assert done.outcome is TickOutcome.COMMITTED and [jr.scope_id for jr in done.details] == ["a"]
+    results = _Results()
+    done = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=41),
+                result_store=results)
+    assert done is TickOutcome.COMMITTED and [sid for sid, _ in results.ids] == ["a"]
     ending = RUN_ENDINGS["deadline"]
     state = ddb_run_store.load_run_state("run-1")
     assert (state.status, state.message, state.jobs["a"].status, state.jobs["b"].status, state.jobs["b"].message) == (
         Status.ABORTED, ending.run_message, Status.PASSED, Status.SKIPPED, ending.skipped_message)
+    assert (state.jobs["a"].result_id, state.jobs["b"].result_id) == (results.ids[0][1], None)
 
 
 def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table, ddb_run_store):
     """到期的结束写与认领并发（云端的条件写）：一个推进器读到「没有执行中的、仍有未启动的」之后，另一个推进器的认领落下——前者的结束写
     按写下时的运行态判断（以写入序号为条件、不成立即重读再算），那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；
     run 没有结束、新认领的 job 仍是 running，同一轮得出结果的 a 已由终态写记下。与本机的同名用例对拍。"""
-    from gherkai_core.reconcile import TickOutcome, TickResult, tick
+    from gherkai_core.reconcile import TickOutcome, tick
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)
 
@@ -451,10 +465,81 @@ def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table,
             return recs
 
     log = _ClaimLandsAfterRead(events_table, "run-1", ["a", "b"])
-    outcome = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=41))
+    outcome = tick("run-1", meta, log, ddb_run_store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=41),
+                   result_store=_Results())
 
     assert log.landed is True
-    assert outcome == TickResult(TickOutcome.CONTINUE)
+    assert outcome is TickOutcome.CONTINUE
     state = ddb_run_store.load_run_state("run-1")
     assert (state.status, state.claim_count, state.jobs["a"].status, state.jobs["b"].status, state.message) == (
         Status.RUNNING, 2, Status.PASSED, Status.RUNNING, None)
+
+
+def test_commit_rejected_by_the_write_seq_names_the_same_id_after_rereading(aws, events_table, s3_result_store):
+    """云端的终态写被写入序号挡下、重读再算之后写成：运行态里点名的仍是推进步骤这一轮存下的那一份的标识（重读再算用的是同一组
+    JobState，不另生成标识、不另存一份；ADR 0030 决定三「被点名的那一份」条），按点名的标识从 S3 读回的正是 a 的那一份。固定先后：终态写
+    读到 STATE 之后、发出条件写之前，另一个推进方认领了 b（包住被测表对象的 update_item，只在终态写里插一次）。"""
+    from gherkai_core.adapters.cloud_launcher import CloudLauncher
+    from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+    from gherkai_core.named_details import load_named_details
+    from gherkai_core.reconcile import TickOutcome, tick
+
+    table = aws["ddb"].Table(aws["table_name"])
+    other = DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
+    ccf = table.meta.client.exceptions.ConditionalCheckFailedException
+    real_update = table.update_item
+    log_of_writes: list[str] = []
+
+    class _ArmedOnCommit(DynamoDBRunStore):
+        armed = False
+
+        def commit_job_states(self, run_id, job_states, *, ended_at):
+            self.armed = True
+            return super().commit_job_states(run_id, job_states, ended_at=ended_at)
+
+    store = _ArmedOnCommit(table)
+
+    def update_item(**kwargs):
+        if store.armed:
+            store.armed = False
+            assert other.try_claim_job("run-1", "b", claimed_at=instant_to_iso(_T0 + timedelta(seconds=5))) is True
+            log_of_writes.append("other")
+            try:
+                resp = real_update(**kwargs)
+            except ccf:
+                log_of_writes.append("write-rejected")
+                raise
+            log_of_writes.append("write-ok")
+            return resp
+        if log_of_writes == ["other", "write-rejected"]:
+            log_of_writes.append("reread-write")
+        return real_update(**kwargs)
+
+    table.update_item = update_item
+    meta = _meta("a", "b")
+    store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING, started_at="t0", high_water_mark=0,
+                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")}))
+    log = DdbEventLog(events_table, "run-1", ["a", "b"])
+    launcher = CloudLauncher(lambda name: _FakeStartEngine(), run_id="run-1")
+    saved: list[tuple[str, str]] = []
+
+    class _Recording:
+        def save_job_result(self, run_id, result_id, jr):
+            saved.append((jr.scope_id, result_id))
+            s3_result_store.save_job_result(run_id, result_id, jr)
+
+    tick("run-1", meta, log, store, launcher, 1, clock=lambda: _T0, result_store=_Recording())  # 起 a
+    _passed_worker_events(events_table, "a")
+    log.record_exit("a", 0)
+
+    outcome = tick("run-1", meta, log, store, launcher, 1, clock=lambda: _T0 + timedelta(seconds=20),
+                   result_store=_Recording())
+
+    assert outcome is TickOutcome.CONTINUE  # b 已被另一方认领：这一方的认领被挡下
+    assert log_of_writes == ["other", "write-rejected", "reread-write"]
+    (scope_id, result_id), = saved
+    state = store.load_run_state("run-1")
+    assert (state.jobs["a"].status, state.jobs["a"].result_id) == (Status.PASSED, result_id)
+    assert (state.jobs["b"].status, state.jobs["b"].result_id) == (Status.RUNNING, None)
+    details = load_named_details("run-1", state.jobs.values(), s3_result_store)
+    assert list(details) == ["a"] and (details["a"].scope_id, details["a"].status) == ("a", Status.PASSED)

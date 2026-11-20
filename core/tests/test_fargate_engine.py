@@ -85,7 +85,7 @@ def test_start_scope_puts_job_to_s3_and_returns_task_arn(fargate):
 
 def test_start_scope_job_key_quotes_scope_id(fargate):
     # scope_id 含 `/`:（如 feature 路径 features/x.feature:7）→ job key 用 quote(safe='')：/ 编码成 %2F、: 成 %3A，
-    # 不造 S3 假子前缀、与 S3ResultStore（同 quote）一致（实际运行暴露的一致性缺陷回归守卫）。
+    # 不造 S3 假子前缀，键里的 scope_id 恒为单段（实际运行暴露过的缺陷的回归守卫）。
     eng = _engine(fargate)
     sid = "features/deterministic_step.feature:7"
     eng.start_scope(_job(sid))

@@ -83,10 +83,9 @@ def test_mode_can_be_narrowed(tmp_path):
 def test_target_name_at_name_max_still_writable(tmp_path):
     """目标名顶到文件名长度上限时也要写得进：tmp 名不许比目标名长出一截。
 
-    per-scope 结果文件名由 scope_id percent-encode 而来（scope_id 是不透明标识符、显式允许中文，
-    每字 9 字符，ADR 0025「id 派生」），落点名会顶到上限。tmp 名若在完整目标名后再接随机段与后缀，
-    「非原子写时写得进」的落点会在建 tmp 时就 ENAMETOOLONG——而这条落盘路径上抛异常会掀掉整个 run
-    （结果落盘失败即停全部 worker 并重抛）。
+    这是通用防护：现在三面的落点名都远短于上限（判定明细的文件名只由保存的标识构成）。守的是原子写不比非原子写更早失败：tmp 名若
+    在完整目标名后再接随机段与后缀，「非原子写时写得进」的落点会在建 tmp 时就 ENAMETOOLONG。保存明细在这里失败时这个 job 这次不写
+    终态，本机重试用尽之后停掉全部 worker 并重抛（ADR 0030 决定三「保存明细失败」条与「回调异常的停机止血」）。
     """
     name_max = os.pathconf(str(tmp_path), "PC_NAME_MAX")
     path = tmp_path / ("x" * (name_max - len(".json")) + ".json")

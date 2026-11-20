@@ -13,6 +13,8 @@
 - 先后：在调用方读运行态与它的写之间插入另一方的写（认领、执行中的写、投影、处置的结束写、另一方的终态写），按固定次序构造，不靠
   线程竞争。
 - job 级说明：投影与认领保留库中的说明。
+- 点名的标识（ADR 0030 决定三「点名」条）：终态写取给出的标识；同一个 job 的第二次终态写不改写第一次的点名；之后的终态写与结束写
+  整体替换 jobs（云端）或整份写回（本机）时，先前点名的各 job 标识仍在，由结束写结束的 job 没有标识。
 本机写入口在同一把文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py；这里的两个写入口与其余写入口共用同一个锁内
 读改写的路径。云端的写入序号、插在 adapter 自己的读与写之间的写、写入次数与重读的次数上限见 test_ddb_write_seq.py。
 """
@@ -52,9 +54,9 @@ def _claim(store, scope_id, *, session=None, run_id="run-1") -> None:
         store.update_job_state(run_id, JobState(scope_id, Status.RUNNING, session_id=session, claimed_at=_CLAIMED))
 
 
-def _done(scope_id, status, *, session=None) -> JobState:
-    """由执行结果结束的 job 的终态（调用方带上会话与认领时刻）。"""
-    return JobState(scope_id, status, session_id=session, claimed_at=_CLAIMED)
+def _done(scope_id, status, *, session=None, result_id=None) -> JobState:
+    """由执行结果结束的 job 的终态（调用方带上会话与认领时刻；给出 result_id 时点名那一份明细）。"""
+    return JobState(scope_id, status, session_id=session, claimed_at=_CLAIMED, result_id=result_id)
 
 
 @pytest.fixture(params=["local", "ddb"])
@@ -564,3 +566,57 @@ def test_projection_and_claim_keep_the_job_message(run_store):
     got = run_store.load_run_state("run-1")
     assert got.jobs["a"] == JobState("a", Status.RUNNING, session_id="sess-a", message="说明 a")
     assert got.jobs["b"] == JobState("b", Status.RUNNING, claimed_at=_CLAIMED, message="说明 b")
+
+
+# ---------- 点名的标识：终态写写下、此后的写原样保留 ----------
+
+def test_commit_names_the_given_id_and_later_whole_writes_keep_every_name(run_store):
+    """a、b 由两次终态写各点名自己的一份；此后 c 的终态写与处置的结束写都整体改写 jobs（云端整体替换、本机整份写回），a、b 的标识
+    仍在；c 点名自己的一份；由结束写结束的 d（running，记 aborted）与 e（pending，记 skipped）没有标识。只有多个 job 的 run 才照得出
+    整体替换漏带标识。"""
+    _create(run_store, ("a", "b", "c", "d", "e"))
+    for sid in ("a", "b", "c", "d"):
+        _claim(run_store, sid, session=f"sess-{sid}")
+    assert run_store.commit_job_states("run-1", [_done("a", Status.PASSED, session="sess-a", result_id="00000000000000a1")],
+                                       ended_at="never") is CommitOutcome.OPEN
+    assert run_store.commit_job_states("run-1", [_done("b", Status.FAILED, result_id="00000000000000b1")],
+                                       ended_at="never") is CommitOutcome.OPEN
+    assert run_store.commit_job_states("run-1", [_done("c", Status.ERROR, result_id="00000000000000c1")],
+                                       ended_at="never") is CommitOutcome.OPEN
+    mid = run_store.load_run_state("run-1")
+    assert {sid: js.result_id for sid, js in mid.jobs.items()} == {
+        "a": "00000000000000a1", "b": "00000000000000b1", "c": "00000000000000c1", "d": None, "e": None}
+    assert mid.jobs["a"] == _done("a", Status.PASSED, session="sess-a", result_id="00000000000000a1")
+
+    assert run_store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at=_ENDED) is True
+
+    got = run_store.load_run_state("run-1")
+    assert {sid: js.result_id for sid, js in got.jobs.items()} == {
+        "a": "00000000000000a1", "b": "00000000000000b1", "c": "00000000000000c1", "d": None, "e": None}
+    assert {sid: got.jobs[sid] for sid in ("a", "b", "c")} == {sid: mid.jobs[sid] for sid in ("a", "b", "c")}
+    assert (got.jobs["d"].status, got.jobs["e"].status) == (Status.ABORTED, Status.SKIPPED)
+
+
+def test_a_second_commit_of_a_job_does_not_rename_its_detail(run_store):
+    """job 的终态只写一次，点名随之只写一次：另一个写入方为已是终态的 a 再写一次终态、带它自己存下的另一个标识，a 的标识仍是第一次
+    写下的；同一次写里的 b 照常点名它的标识。"""
+    _create(run_store, ("a", "b"))
+    _claim(run_store, "a")
+    _claim(run_store, "b")
+    assert run_store.commit_job_states("run-1", [_done("a", Status.PASSED, result_id="00000000000000a1")],
+                                       ended_at="never") is CommitOutcome.OPEN
+
+    assert run_store.commit_job_states("run-1", [_done("a", Status.FAILED, result_id="00000000000000a2"),
+                                                 _done("b", Status.PASSED, result_id="00000000000000b1")],
+                                       ended_at=_ENDED) is CommitOutcome.ENDED_RUN
+    got = run_store.load_run_state("run-1")
+    assert (got.jobs["a"].status, got.jobs["a"].result_id) == (Status.PASSED, "00000000000000a1")
+    assert got.jobs["b"].result_id == "00000000000000b1"
+
+
+def test_commit_without_an_id_leaves_the_job_unnamed(run_store):
+    """给出的终态不带标识时这个 job 不点名（终态写不要求标识）；读回的条目没有标识。"""
+    _create(run_store, ("a", "b"))
+    _claim(run_store, "a")
+    assert run_store.commit_job_states("run-1", [_done("a", Status.PASSED)], ended_at="never") is CommitOutcome.OPEN
+    assert run_store.load_run_state("run-1").jobs["a"] == _done("a", Status.PASSED)

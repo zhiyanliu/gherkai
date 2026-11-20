@@ -157,8 +157,9 @@ def ending_applied(state: RunState, ending: RunEnding, *, ended_at: str) -> RunS
 
     不成立的情形：run 已是终态；或这条来路不结束执行中的 job（`ending.ends_running_jobs` 为 False）而运行态里有 running 的 job。
     成立时，每个未结束的 job 写成终态并带一句说明：pending 的记 skipped、running 的记 aborted；运行定义不可用的变体都记 error、说明同
-    run 级。会话与认领时刻原样保留，已是终态的 job 不变。run 状态按取法随之成为终态，同一次写下 run 级说明与结束时刻；HWM、认领计数与
-    开始时刻不变。判断只看这份运行态与 ending 的结构字段，不看说明：不读事件，不涉及判定明细。"""
+    run 级。会话与认领时刻原样保留，已是终态的 job 不变（它们点名的标识随之保留）。结束写不点名：由它结束的 job 没有标识。run 状态按
+    取法随之成为终态，同一次写下 run 级说明与结束时刻；HWM、认领计数与开始时刻不变。判断只看这份运行态与 ending 的结构字段，不看说明：
+    不读事件，不涉及判定明细。"""
     if state.status in TERMINAL_STATUSES:
         return None
     if not ending.ends_running_jobs and any(js.status == Status.RUNNING for js in state.jobs.values()):
@@ -195,12 +196,16 @@ def _committed(current: JobState, given: JobState) -> JobState:
     - 状态取 given 的终态。
     - 认领时刻取库中的：认领那次写是它的来源；库中没有时取 given 的。
     - 会话取 given 的：它是产出这个结果的那次执行的会话；given 没有时保留库中的，不以空值覆盖。
+    - 点名的标识取 given 的（ADR 0030 决定三「点名」条）：它是与这个终态出自同一个执行结果的那一份明细。库中未结束的条目没有标识（只由
+      终态写写下，执行中的写不接受它，见 `check_running_write`）；given 没有标识（没有存明细）即不点名。
     - job 级说明保留库中的：它只由结束写写下，given 带的不写下。
     合并的依据是读到的这份条目（本机在锁内读，云端每次重读之后重算）。调用方准备参数之后、写成之前别的写为这个 job 写下的认领时刻因此
-    留下；那段时间里写下的会话只在 given 没有会话时留下，given 带了会话即取 given 的。两者都不被空值覆盖。"""
+    留下；那段时间里写下的会话只在 given 没有会话时留下，given 带了会话即取 given 的。两者都不被空值覆盖。云端重读再算时 given 不变，
+    点名的仍是同一个标识。"""
     return replace(current, status=given.status,
                    session_id=given.session_id if given.session_id is not None else current.session_id,
-                   claimed_at=current.claimed_at if current.claimed_at is not None else given.claimed_at)
+                   claimed_at=current.claimed_at if current.claimed_at is not None else given.claimed_at,
+                   result_id=given.result_id)
 
 
 def commit_applied(state: RunState, job_states: Sequence[JobState], *,
@@ -208,9 +213,10 @@ def commit_applied(state: RunState, job_states: Sequence[JobState], *,
     """带结果的 job 终态写对一份运行态的作用：返回要写下的运行态（没有写成时为 None）与这次写的结果。
 
     给出的每个 job 都要是终态，scope_id 不重复、都在这份运行态的 job 里，至少一个；不满足即抛 ValueError、不写任何东西。run 已是终态时
-    没有写成（ALREADY_ENDED）。否则库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补），其余给出的 job 按 `_committed`
-    的字段规则与库中的条目合并（ADR 0030 决定四）；run 状态按取法随之写下，成为终态时同一次写下结束时刻（ENDED_RUN），否则为 OPEN。
-    HWM、认领计数、开始时刻与 run 级说明不变。"""
+    没有写成（ALREADY_ENDED）。否则库中已是终态的 job 不被改写（终态只写一次，ADR 0031 决定一·补；别的写入方点名的标识原样保留），
+    其余给出的 job 按 `_committed` 的字段规则与库中的条目合并（ADR 0030 决定四），各点名各自给出的标识；run 状态按取法随之写下，成为
+    终态时同一次写下结束时刻（ENDED_RUN），否则为 OPEN。HWM、认领计数、开始时刻与 run 级说明不变。不要求给出的终态带标识：没有记录的
+    执行（`state_without_record`）不存明细，写下的终态不点名。"""
     job_states = tuple(job_states)
     if not job_states:
         raise ValueError("终态写至少要给出一个 job")
@@ -246,9 +252,13 @@ def check_new_run(meta: RunMeta) -> None:
 
 def check_running_write(job_state: JobState) -> None:
     """执行中的写（`RunStore.update_job_state`）的参数校验：写入的 job 态只能是 running，否则抛 ValueError、不写（ADR 0030 决定四）。
-    pending 只由建 run 写下，终态由终态写与结束写写下；与 `commit_applied` 对非终态抛错对称。"""
+    pending 只由建 run 写下，终态由终态写与结束写写下；与 `commit_applied` 对非终态抛错对称。带点名的标识同样抛 ValueError：点名只由
+    带结果的终态写写下（ADR 0030 决定三「点名」条），执行中的写整项替换 job 的条目，带进去的标识会随之后结束写的 `replace` 留在一个
+    由结束写结束的 job 上，读者会把它当成由执行结果结束。"""
     if job_state.status != Status.RUNNING:
         raise ValueError(f"执行中的写只记 running，job {job_state.scope_id} 的状态是 {job_state.status.value}")
+    if job_state.result_id is not None:
+        raise ValueError(f"执行中的写不点名判定明细，job {job_state.scope_id} 带了标识 {job_state.result_id}")
 
 
 # ============================================================================
@@ -273,7 +283,7 @@ def state_without_record(meta: RunMeta, results: Sequence[JobResult], stopped_by
 
     从全部 job 为 pending 的初始运行态出发：先把 results（判出结果的 job）经 `commit_applied` 记为终态；run 还没到终态时，余下的 job
     由 stopped_by 这条来路的结束写结束（`ending_applied`）。这时没有执行中的 job，结束写恒成立。会话取明细里的；没有认领写，认领时刻
-    为空。
+    为空；没有判定存储，终态不点名（明细就是调用方手里的 results）。
 
     参数错误抛 ValueError：仍有 job 没有结果而 stopped_by 给不出结束它们的来路（`ending_of_stop`，与有记录时同一处检查）；results
     不满足 `commit_applied` 的要求（不是终态、重复、不在运行定义里）。"""

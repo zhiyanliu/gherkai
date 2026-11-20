@@ -579,10 +579,12 @@ def _boom_sync(deadline_at: str, timeout_s: float, *, slow: bool):
 
 def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool):
     """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮以终态写记下这个 job，run 随之成为终态；slow 时启动调用拖过截止时刻
-    才失败。返回那一轮交还的判定明细、补写的退出记录与 run 成为终态之后的运行态。"""
+    才失败。返回按运行态点名读回的判定明细（与报告同一种读法）、补写的退出记录与 run 成为终态之后的运行态。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
+    from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import JobState, RunState
+    from gherkai_core.named_details import load_named_details
     from gherkai_core.reconcile import TickOutcome, tick
 
     job = _job(timeout_s, "desktop")
@@ -601,11 +603,12 @@ def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool)
     def clock():
         return _Clock.T0 + timedelta(seconds=now["t"])
 
-    assert tick("r", meta, log, store, Boom(), 1, clock=clock).outcome is TickOutcome.CONTINUE
-    done = tick("r", meta, log, store, Boom(), 1, clock=clock)
-    assert done.outcome is TickOutcome.COMMITTED
+    results = LocalResultStore(tmp_path)
+    assert tick("r", meta, log, store, Boom(), 1, clock=clock, result_store=results) is TickOutcome.CONTINUE
+    assert tick("r", meta, log, store, Boom(), 1, clock=clock, result_store=results) is TickOutcome.COMMITTED
     [exit_rec] = [r.exited for r in log.records() if r.kind == "exit"]
-    return done.details, exit_rec, store.load_run_state("r")
+    recorded = store.load_run_state("r")
+    return list(load_named_details("r", recorded.jobs.values(), results).values()), exit_rec, recorded
 
 
 @pytest.mark.parametrize("deadline_at, timeout_s, slow, status, message", [
@@ -633,10 +636,12 @@ def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path,
 def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
     """到期：a 结束之后已过停止启动的时刻，b 还没有启动。前台没有记录时组装出的结果（`persist.result_without_record`）与后台推进
     步骤写下的记录一致：a passed、b 由执行方自己到期这条来路的结束写记 skipped 并带说明，run 为 aborted、带 run 级说明；判定明细只有
-    a 的，b 没有（ADR 0054 决策二第 3 条、实测项 4）。"""
+    a 的，b 没有：后台记录里只有 a 被点名，按点名读回的也只有 a（ADR 0054 决策二第 3 条、实测项 4）。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
+    from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import JobState, RunState
+    from gherkai_core.named_details import load_named_details
     from gherkai_core.persist import result_without_record
     from gherkai_core.reconcile import TickOutcome, tick
 
@@ -664,15 +669,16 @@ def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
     def wall():
         return _Clock.T0 + timedelta(seconds=now["t"])
 
-    tick("r", meta, log, store, Launcher(), 1, clock=wall)  # 认领并启动 a
+    results = LocalResultStore(tmp_path)
+    tick("r", meta, log, store, Launcher(), 1, clock=wall, result_store=results)  # 认领并启动 a
     log.append_event("a", 1, '{"type":"scope_started","scopeId":"a","sessionId":"s"}', 1.0)
     log.append_event("a", 2, '{"type":"scenario_done","scenarioId":"a:0","status":"passed"}', 2.0)
     log.append_event("a", 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
     log.record_exit("a", 0)
     now["t"] = 1000.0
-    done = tick("r", meta, log, store, Launcher(), 1, clock=wall)
+    done = tick("r", meta, log, store, Launcher(), 1, clock=wall, result_store=results)
 
-    assert done.outcome is TickOutcome.COMMITTED
+    assert done is TickOutcome.COMMITTED
     assert sync.stopped_by == "deadline"
     foreground = result_without_record(sync, ended_at="t1")
     recorded = store.load_run_state("r")
@@ -681,4 +687,5 @@ def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
     assert [(o.scope_id, o.status, o.state.message) for o in foreground.jobs] \
         == [(sid, js.status, js.message) for sid, js in recorded.jobs.items()] \
         == [("a", Status.PASSED, None), ("b", Status.SKIPPED, ending.skipped_message)]
-    assert [jr.scope_id for jr in foreground.details] == [jr.scope_id for jr in done.details] == ["a"]
+    named = load_named_details("r", recorded.jobs.values(), results)
+    assert [jr.scope_id for jr in foreground.details] == list(named) == ["a"]

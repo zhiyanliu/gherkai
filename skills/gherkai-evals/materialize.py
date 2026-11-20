@@ -13,7 +13,8 @@
    调用里 54 次触到仓库，两臂 delta 因此只是下界。
 1. 把 `fixtures/<case>/` 拷到仓库外的一次性目录（缺省 `$TMPDIR/gherkai-eval-<case>-<随机>/`）；
 2. 把文本文件里的占位符 `{{FIXTURE_ROOT}}` 替换成舞台的绝对路径——fixture 入库时不得含产出机器的绝对路径，
-   `run_meta.json` 的 steps_dir、`jobs/*.json` 的 report_refs[].ref、evidence.json 的截图地址都以占位符存；
+   `run_meta.json` 的 steps_dir、判定明细（`jobs/<标识>.json`，用哪一份由 `run_state.json` 里各 job 的 `result_id` 点名）的
+   report_refs[].ref、evidence.json 的截图地址都以占位符存；
 3. 生成 `bin/gherkai` shim：unset AWS_PROFILE / AWS_REGION / AWS_DEFAULT_REGION、把 AWS_CONFIG_FILE 与
    AWS_SHARED_CREDENTIALS_FILE 指向舞台里的空文件、注入 GHERKAI_WORKER_MIDSCENE_CMD（指 `<dir>/midscene/dist/bin.mjs`，
    两臂对称、零 npm 零网络），再 exec `<dir>/venv/bin/gherkai`。只在启动器父进程 unset 无效——宿主用户级设置会给新会话
@@ -21,7 +22,8 @@
 4. 前置断言：舞台及其上溯路径、用户级目录下没有已装的 gherkai skill（dogfood 安装态与评测互斥）；
 5. 物化后隔离断言（恒开，`--no-check` 不关它）：舞台里没有任何文件含仓库根路径的字面量、舞台里找不到 SKILL.md
    （前者挡「顺着路径读原始教材」，后者挡「wheel 自带的 skill 混进 baseline 舞台」）；
-6. 物化后完整性断言（只挡物化真会造成的缺口）：对每个 run 执行 `explain --json`——有记录的 step 其 evidence_missing
+6. 物化后完整性断言（只挡物化真会造成的缺口）：对每个 run 执行 `explain --json`——列出的 job 恰是 `run_state.json` 里
+   带 `result_id` 的那些（explain 只按点名的标识读明细，漏点名的 job 会被静默略过）；有记录的 step 其 evidence_missing
    不得为 unreadable / unsupported_schema；至少一条 step 拿到非空 evidence；每个非 null 的 file:// 截图地址文件存在且非空。
 
 用法：
@@ -34,8 +36,8 @@
 
 `--snapshot` 是物化的逆操作（录 fixture 用）：拷贝 features/ steps/ reports/，把项目目录的绝对路径（含 file:// 形态）换成
 占位符，删掉 worker.log / reconcile.log（含绝对路径、对评测无用）与 events.db 及其 -wal / -shm（事件流 SQLite，二进制里带录制机路径与真实账号）、Midscene 原生报告 html，把截图裁成极小的合法 PNG（评测只要求文件存在且非空），
-最后扫一遍不得再有绝对路径。录制约束：录时 feature 必须用**相对路径**调用（scope_id / scenario_id 与 jobs/ 文件名里都带
-它，绝对路径进了文件名占位符救不了），且 cwd 为项目目录、`--report-dir reports`。
+最后扫一遍不得再有绝对路径。录制约束：录时 feature 必须用**相对路径**调用（scope_id / scenario_id 里都带
+它，证据目录名又由 scenario 键派生，绝对路径进了目录名占位符救不了），且 cwd 为项目目录、`--report-dir reports`。
 """
 from __future__ import annotations
 
@@ -280,6 +282,12 @@ def integrity_check(stage: Path, shim: Path) -> None:
         if proc.returncode != 0:
             fail(f"explain --json 退 {proc.returncode}（run {run_dir.name}）：{proc.stderr.strip()[:400]}")
         data = json.loads(proc.stdout)
+        state = json.loads((run_dir / "run_state.json").read_text(encoding="utf-8"))
+        named = sorted(j["scope_id"] for j in state.get("jobs", []) if j.get("result_id"))
+        listed = sorted(s.get("scope_id") for s in data.get("scopes", []))
+        if listed != named:
+            fail(f"run {run_dir.name}: explain 列出的 job {listed} 与 run_state.json 里点名了判定明细的 job {named} 不一致"
+                 "（fixture 的判定明细形态与 CLI 读法不符？）")
         got_evidence = False
         for scope in data.get("scopes", []):
             for sc in scope.get("scenarios", []):

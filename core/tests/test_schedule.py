@@ -1781,6 +1781,28 @@ def test_on_job_complete_timeout_error_propagates_and_stops_running_workers():
     assert engine.handles["a"].stopped  # 止血：冒泡前停掉仍在运行的 worker
 
 
+def test_interrupt_arriving_during_a_failing_on_job_complete_is_not_acted_on():
+    """中断在落库回调执行期间到达（本机保存明细失败、正在退避重试时按下 Ctrl-C），回调随后抛出存储异常：异常冒泡、仍在运行的 worker
+    照样被停下，这次中断不再被处置（不调 on_interrupt），组合根因此按运行期落库失败的出口取退出码（ADR 0030 决定三「前台在锁内重试」
+    条的代价）。先后由构造固定：a 一直在运行、等被停，b 先完成，中断级别在 b 的回调里才变为 1。"""
+    engine = FakeEngine({"b": _WHOLE_PASS, "a": _RUNNING_HALF}, tail_after_stop={"a": []})
+    level = [0]
+    acted: list[int] = []
+
+    def on_job_complete(jr):
+        assert jr.scope_id == "b"
+        level[0] = 1  # 信号处理器在回调执行期间记下了中断
+        raise OSError(28, "No space left on device")
+
+    with pytest.raises(OSError, match="No space left on device"):
+        schedule(_rm([_job("a"), _job("b")]), FakeResolver(engine), CollectSink(),
+                 opts=ScheduleOpts(max_concurrency=2, interrupt=lambda: level[0], on_interrupt=acted.append,
+                                   interrupt_poll_s=0.05),
+                 on_job_complete=on_job_complete)
+    assert acted == []
+    assert engine.handles["a"].stopped
+
+
 def test_force_requested_before_handle_returns_is_honored():
     """起 worker 期间（句柄尚未返回）到达的第二次中断不丢：句柄返回后的首次停止即用零宽限。"""
     import threading as _th

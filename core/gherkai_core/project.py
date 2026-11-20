@@ -725,9 +725,10 @@ def assemble_run_result(meta: RunMeta, state: RunState, details: Iterable[JobRes
     """从记录组装 run 的结果：运行态加判定明细（ADR 0030 决定三「状态的权威是运行态」条）。
 
     按运行定义逐个列出 job：状态与 job 级说明取 state 里的这一项，由执行结果结束的 job 附上 details 里同一 scope 的那一份明细；
-    details 里没有它的 job（由结束写结束的，或还没有结束的）不带明细。run 级状态与说明取 state，原生量与设备计量由各份明细合计（`run_totals`，设备两键
-    按运行定义判断出现与否）。details 里不在运行定义里的 scope 不出现；同一 scope 出现多份时取最后一份。duration_ms 由调用方给出：
-    前台是调度循环整体包住的墙钟，后台由运行态的起止算出（`run_duration_ms`）。
+    details 里没有它的 job（由结束写结束的，或还没有结束的）不带明细。details 每个 job 至多一份：有记录时是运行态点名的那一份
+    （`named_details.load_named_details` 按标识读回，前台收尾与后台报告相同，ADR 0030 决定三「点名」条），没有记录时（`run --no-report`）
+    是这次的执行结果。run 级状态与说明取 state，原生量与设备计量由各份明细合计（`run_totals`，设备两键按运行定义判断出现与否）。details
+    里不在运行定义里的 scope 不出现。duration_ms 由调用方给出：前台是调度循环整体包住的墙钟，后台由运行态的起止算出（`run_duration_ms`）。
 
     运行定义里的 job 不在 state 里即抛 ValueError（运行态与运行定义不对应）。"""
     by_scope = {jr.scope_id: jr for jr in details}

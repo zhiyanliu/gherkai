@@ -125,8 +125,9 @@ class FargateEngine:
         # ① job-in 走 S3（ADR 0024「远程传输演进」节通道表的 job 入口一行）：整 job 序列化（复用 wire.job_to_line）PutObject，env 只传小指针 JOB_S3_URI。
         # scope_id 用 quote(safe='')：/ 也编码成 %2F——否则 scope_id 里的 `/`（如 feature 路径）在 job_prefix 下
         # 造 S3 假子前缀（jobs-in/features%2F… 被拆成多级"目录"）。job-in 落 **独立前缀 jobs-in/**（组合根
-        # build_fargate_engines 注入、与 ResultStore 的 jobs/ 物理隔离、不撞 key）；worker 经 JOB_S3_URI 全指针
-        # GetObject 读、不 list/unquote 枚举，故 quote 的唯一作用是避假子前缀（编码沿用 ResultStore 的 quote(safe='') 惯例）。
+        # build_fargate_engines 注入、与判定明细的 jobs/ 前缀分开）；worker 经 JOB_S3_URI 全指针
+        # GetObject 读、不 list/unquote 枚举，故 quote 的唯一作用是避假子前缀（不透明标识符作键里的一段时的通行编码，判定明细的键对
+        # 它的标识用同一种编码）。
         job_key = f"{self._job_prefix}{quote(job.scope_id, safe='')}.json"
         # 打 tag `gherkai=job-in`：job-in 是喂 worker 的一次性输入（worker GetObject 读完即无用），桶按此 tag
         # 挂 S3 lifecycle 过期清理（ADR 0033「job-in S3 对象生命周期」条）。**用 tag 而非 key 前缀过滤**——job-in 落 `<prefix><run_id>/jobs-in/`，

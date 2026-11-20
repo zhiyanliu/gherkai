@@ -290,7 +290,7 @@ def job_result_to_dict(jr: JobResult, *, include_job: bool = True) -> dict:
     """JobResult → dict。两种形态，由 include_job 选，顶层 def 字段也随之不同（避免任一形态里出现冗余）：
 
     - include_job=True（默认，ResultStore 落单 job）：嵌完整 `job`(definition) → 文件**自包含**，
-      CI 单独读一个 jobs/<scope_id>.json 不依赖 run_meta 即可拿到完整 def。**不再另抄顶层 scope_id/
+      读者按运行态里的标识取回一份明细之后，不依赖 run_meta 即可拿到完整 def。**不再另抄顶层 scope_id/
       scope_name/engine**——def 已自包含，消费者从 `d["job"]["scope_id"]` 取（唯一真值源、无"读哪个"歧义）。
     - include_job=False（聚合 to_dict(RunResult)）：**不嵌** def——def 唯一地活在同一 dict 的 run_meta.jobs[]
       里（三层切分：definition 层）；jobs[] 的这一项只背判定 + **顶层 `scope_id` 作 join key**（消费端按它对到
@@ -530,6 +530,8 @@ def run_state_to_dict(state: RunState) -> dict:
     d["jobs"] = [
         {"scope_id": js.scope_id, "status": js.status.value, "session_id": js.session_id,
          **({"claimed_at": js.claimed_at} if js.claimed_at is not None else {}),  # omit-when-None（ADR 0034 job timeout）
+         # 点名的标识，只在终态点名了一份明细时出现，omit-when-None（ADR 0030 决定三「点名」条）
+         **({"result_id": js.result_id} if js.result_id is not None else {}),
          **({"message": js.message} if js.message is not None else {})}  # job 级说明，omit-when-None（ADR 0030 决定五）
         for js in state.jobs.values()
     ]
@@ -549,7 +551,7 @@ def run_state_from_dict(d: dict) -> RunState:
         jobs={
             j["scope_id"]: JobState(scope_id=j["scope_id"], status=Status(j["status"]),
                                     session_id=j.get("session_id"), claimed_at=j.get("claimed_at"),
-                                    message=j.get("message"))
+                                    result_id=j.get("result_id"), message=j.get("message"))
             for j in d.get("jobs", [])
         },
     )

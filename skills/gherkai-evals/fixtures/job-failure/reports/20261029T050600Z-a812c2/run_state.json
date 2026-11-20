@@ -7,17 +7,20 @@
     {
       "scope_id": "deep-dive",
       "status": "error",
-      "session_id": "01M630T3DW3TGFKFVJBTD3F1BE"
+      "session_id": "01M630T3DW3TGFKFVJBTD3F1BE",
+      "result_id": "15acf9c00036d061"
     },
     {
       "scope_id": "features/browse.feature:13:19",
       "status": "passed",
-      "session_id": "01M630T3B86EW7FYHZAPNTEYWD"
+      "session_id": "01M630T3B86EW7FYHZAPNTEYWD",
+      "result_id": "4b347bbebc945963"
     },
     {
       "scope_id": "features/browse.feature:13:20",
       "status": "passed",
-      "session_id": "01M630T3E5V95WDDV623VXNAC0"
+      "session_id": "01M630T3E5V95WDDV623VXNAC0",
+      "result_id": "97111d8fedb09309"
     }
   ]
 }

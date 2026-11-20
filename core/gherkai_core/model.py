@@ -620,6 +620,10 @@ class JobState:
     # 期限重算超时的说明，所以这一轮读到的运行态里缺它的 job，推进步骤这一轮不为它存明细、不写终态（ADR 0054 决策二第 2 条与后台推进
     # 条「快照」）。
     claimed_at: str | None = None
+    # 点名：这个 job 的终态点名的那一份判定明细的标识（ADR 0030 决定三「点名」条）。只由带结果的终态写写下，随终态只写一次、此后原样
+    # 保留；由结束写结束的 job 与未结束的 job 没有它。读者据它按标识取明细（`named_details.load_named_details`），分辨「由执行结果
+    # 结束」与「由结束写结束」只看有没有它。没有时为 None，落盘省键。
+    result_id: str | None = None
     # job 级说明：只由结束写写下（ADR 0031 决定三「结束写」小节，取值见 `run_status.RUN_ENDINGS`），由结束写结束的 job 没有判定明细，
     # 它的说明只在这里；由执行结果结束的 job 不带它，说明在判定明细里。只是描述，任何判断都不看它（ADR 0031 决定一「状态是一切计算的
     # 唯一依据」条）。没有时为 None，落盘省键。
@@ -631,8 +635,8 @@ class RunState:
     """一次 run 的**控制面运行态**（status/血缘/起止；执行后产生，ADR 0016 控制面）。
 
     与 RunMeta（definition）分开：definition 执行前确定、不变；运行态随执行产生。实时写下随进度增量更新（ADR 0030 决定四）：
-    create_run 写初始全 pending → 认领与执行中的写把 job 记为 running → 终态写（commit_job_states）把由执行结果结束的 job 记为终态，
-    结束写（end_run）结束余下未结束的 job。run 的 status 没有自己的写入逻辑，每次改变 job 状态的写在同一次写里按取法写它（ADR 0031
+    create_run 写初始全 pending → 认领与执行中的写把 job 记为 running → 终态写（commit_job_states）把由执行结果结束的 job 记为终态
+    并点名它的那一份判定明细（`JobState.result_id`），结束写（end_run）结束余下未结束的 job、不点名。run 的 status 没有自己的写入逻辑，每次改变 job 状态的写在同一次写里按取法写它（ADR 0031
     决定三「run 的状态字段没有自己的写入逻辑」条）。started_at/ended_at 按生命周期出现（create_run 填 started，使 run 成为终态的那次
     写填 ended）。
 

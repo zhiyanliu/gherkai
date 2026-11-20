@@ -6,8 +6,8 @@
 没设环境变量 → `real_aws` fixture skip（不误连）。用真凭证（default profile），每用例自清理写入的数据。
 
 **为何要连真**：moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致——本文件正是钉这些差异（也是 review
-时对抗验证过的疑点）：DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid` 单元素刷；S3 中文·斜杠 key 编码 /
-`load_all` 全量取回；StepArgument offload 真往返。单测（moto）已覆盖行为契约，这里只补「真后端语义」这一层。
+时对抗验证过的疑点）：DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid` 单元素刷；S3 按标识存取判定明细（含中文与
+斜杠的 scope_id，同一个 job 的两份互不覆盖）；StepArgument offload 真往返。单测（moto）已覆盖行为契约，这里只补「真后端语义」这一层。
 """
 from __future__ import annotations
 
@@ -185,28 +185,30 @@ def test_ddb_session_id_none_omitted_real(real_aws):
     assert js.status == Status.RUNNING and js.session_id is None
 
 
-# ---- S3ResultStore：真 S3 的 key 编码 + 全量取回 ----
+# ---- S3ResultStore：真 S3 上按标识存取 ----
 def test_s3_result_store_round_trip_real(real_aws):
-    """真 S3：save/load/load_all round-trip，含 /:中文 scope_id 的 quote 编码在真 S3 不撞名/不造子前缀。"""
+    """真 S3：每份明细以一个标识存下、按标识取回（含 /:中文 scope_id 的明细，键里只有标识）；同一个 job 以两个标识各存一份互不覆盖；
+    不存在的标识取回 None（测试凭证带列举权限时 S3 回 NoSuchKey）。"""
     store = _s3_result_store(real_aws)
     rid = _uniq("s3-rt")
     real_aws["cleanup_prefix"](f"{rid}/")  # 登记清理该 run 的所有对象
 
     run = _sample_run(rid)
+    ids = {jr.scope_id: f"{n:016x}" for n, jr in enumerate(run.details)}
     for jr in run.details:
-        store.save_job_result(rid, jr)
+        store.save_job_result(rid, ids[jr.scope_id], jr)
+    for jr in run.details:
+        assert store.load_job_result(rid, ids[jr.scope_id]) == jr
 
-    # 单个读回（含 /:）
-    j0 = store.load_job_result(rid, "features/wiki.feature:6")
-    assert j0 is not None and j0.engine == "midscene"
-    # 中文 scope_id 读回
-    j1 = store.load_job_result(rid, "登录场景")
-    assert j1 is not None and j1.error_type == "assertion_failed"
-    # 全量
-    allj = store.load_all(rid)
-    assert {jr.scope_id for jr in allj} == {"features/wiki.feature:6", "登录场景"}
-    # miss → None
-    assert store.load_job_result(rid, "不存在") is None
+    again = run.details[0]
+    store.save_job_result(rid, "00000000000000ff", again)
+    assert store.load_job_result(rid, "00000000000000ff") == again
+    assert store.load_job_result(rid, ids[again.scope_id]) == again  # 前一份仍在
+
+    listed = real_aws["s3"].list_objects_v2(Bucket=real_aws["bucket"], Prefix=f"{rid}/jobs/")
+    assert sorted(o["Key"] for o in listed["Contents"]) == sorted(
+        f"{rid}/jobs/{i}.json" for i in [*ids.values(), "00000000000000ff"])
+    assert store.load_job_result(rid, "ffffffffffffffff") is None  # 这个 run 下从没存过的标识
 
 
 # ---- StepArgument offload：真 S3 指针往返 ----

@@ -65,7 +65,6 @@ FORBIDDEN_REWRITES: dict[str, str] = {
     "`run_meta`（definition）": "`run_meta`（提交时固定的本次运行任务本身）",
     "本次 run 的 definition（提交时固定）": "本次 run 的任务定义（提交时固定）",
     "definition / 运行态的落点": "任务定义 / 运行态的落点",
-    "内嵌的完整 `job` definition": "内嵌的完整 `job` 定义",
 }
 
 # 仓库内路径的形态（`路径/文件.后缀` 反引号 token）：转换后不该再有——它在使用方项目里既打不开也 grep 不到。

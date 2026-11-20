@@ -608,9 +608,9 @@ def explain_to_dict(*, run_id: str, status: str | None, results: list[JobResult]
 
 
 def explain_without_detail_to_dict(*, run_id: str, status: str | None, job_state: JobState) -> dict:
-    """点名的 job 已结束而没有判定明细时的 explain 文档（由结束写结束的 job，ADR 0031 决定三「结束写」小节）：`scopes[]` 只有这一项，
-    只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取运行态（没有说明时 `message` 为 null）；没有 scenario、step 与证据，
-    与 `run --json` 的 `jobs[]` 里没有明细的项形状相同。"""
+    """参数给出的 job 已结束而运行态里没有点名判定明细时的 explain 文档（由结束写结束的 job，ADR 0031 决定三「结束写」小节）：
+    `scopes[]` 只有这一项，只带 `scope_id`、`status` 与 `message` 三个键，状态与说明取运行态（没有说明时 `message` 为 null）；没有
+    scenario、step 与证据，与 `run --json` 的 `jobs[]` 里没有明细的项形状相同。"""
     scope = {"scope_id": job_state.scope_id, "status": job_state.status.value, "message": job_state.message}
     return redact_deep({"run_id": run_id, "status": status, "scopes": [scope]})
 

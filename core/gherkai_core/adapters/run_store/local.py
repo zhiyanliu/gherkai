@@ -1,15 +1,16 @@
 """LocalRunStore（ADR 0016 控制面 / 0027 落点对齐）：落 run 的 definition + 运行态，可读回。
 
 三层切分（ADR 0016）：RunStore 存**控制面**——`RunMeta`（definition：run_id/created_at/执行哪些 job，
-执行前确定）+ `RunState`（运行态：总 status/各 job status/血缘，执行后产生）。**不存判定明细**
+执行前确定）+ `RunState`（运行态：总 status/各 job status/血缘/点名的标识，执行后产生）。**不存判定明细**
 （那是数据面、由 ResultStore 持有，避免与 jobs/*.json 冗余真值）。
 
 **跨文件读取契约（消解"信哪个"困惑）**：
 - definition 唯一真值在 run_meta.json。jobs/*.json 内嵌的 job def 是其**自包含副本**——非独立维护的第二真值、
-  不会漂移（两处都序列化同一次 plan 产出的同一个 Job 对象，共用 serialize.job_to_dict）。嵌它是为让 CI 读
-  单 scope 不依赖 run_meta（上云对象存储按 key 取单 job 同理）。
+  不会漂移（两处都序列化同一次 plan 产出的同一个 Job 对象，共用 serialize.job_to_dict）。嵌它是为让读者按运行态里的标识取回
+  一份明细之后，不再读 run_meta 也能还原它的 job 定义（云端对象存储按键取单份同理）。
 - **run 与各 job 的状态以 run_state.json 为准**（ADR 0030 决定三「状态的权威是运行态」条）：退出码、`status` 与 run 的汇总都读它。
-  jobs/*.json（数据面 ResultStore）是由执行结果结束的 job 的判定明细，对 scenario、step 与归因负责；由结束写结束的 job 没有明细。
+  jobs/*.json（数据面 ResultStore）是由执行结果结束的 job 的判定明细，对 scenario、step 与归因负责；每次保存一份、同一个 job 可能
+  有多份，用哪一份由 run_state.json 里这个 job 的终态点名（`result_id`，ADR 0030 决定三「点名」条）；由结束写结束的 job 没有明细。
 
 **写入口全部在同一把 fcntl 文件锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：create_run、update_job_state、
 try_claim_job、project_state、commit_job_states、end_run 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方
@@ -177,7 +178,7 @@ class LocalRunStore:
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """执行中的写（语义见 RunStore port）：按 scope_id 整项替换单个 job 的条目。run_state.json 不存在则报错（须先 create_run）；
-        写入的不是 running 即抛 ValueError（`run_status.check_running_write`），文件不被改动。
+        写入的不是 running、或带点名的标识，即抛 ValueError（`run_status.check_running_write`），文件不被改动。
 
         锁内读到 run 已结束、这个 job 不在 Map 里或已是终态时都不写：run 到终态之后不再接受任何写（ADR 0054 决策五），不臆造 job，
         终态只写一次（ADR 0031 决定一·补）。写成时 run 状态按锁内读到的整份运行态经取法算出（ADR 0031 决定三），与 job 在同一次读改写里

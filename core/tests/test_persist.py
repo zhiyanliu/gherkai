@@ -1,19 +1,22 @@
 """RunPersistence 应用服务直测（ADR 0030）：用 fake store 或本机 store 直接验 core 层不变量。
 
 四刀审计发现 RunPersistence 此前零直接单测（只经 cli 端到端间接覆盖）。这里把它的核心契约钉到 core 层：
-逐 job 的提交点（明细先存、终态写后写）/ on_event 只对 ScopeStarted 与非 attempted 的 SessionOpened 刷 RUNNING / finalize 的结束写
-（ADR 0031 决定三「结束写」小节）、从记录组装结果、无报告路径与报告失败隔离 / 别处已结束 run 时不覆盖、不写报告 / begin 初始投影 / aborted 血缘保留 / 认领与认领时刻的
+逐 job 的提交点（明细先存成带标识的一份、终态写后写并点名它，ADR 0030 决定三「点名」条）/ on_event 只对 ScopeStarted 与非 attempted
+的 SessionOpened 刷 RUNNING / finalize 的结束写（ADR 0031 决定三「结束写」小节）、从记录组装结果（明细按运行态里点名的标识读回，不用
+内存里的那一份）、无报告路径与报告失败隔离 / 别处已结束 run 时不覆盖、不写报告 / begin 初始投影 / aborted 血缘保留 / 认领与认领时刻的
 保留、重试之前的读、三处发现汇成的停手信号（ADR 0054 决策五）/ 没有记录的执行在内存里按同一套规则组装结果。
 末尾几条经 schedule 走完整的前台路径，验运行期限的结束写与「发现 run 已被别处结束之后不再写」。
 """
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime, timezone
 
 import pytest
 
-from gherkai_core.errors import RunAlreadyEnded
+from gherkai_core.errors import NamedDetailMissing, RunAlreadyEnded
 from gherkai_core.model import (
+    TERMINAL_STATUSES,
     Job,
     JobResult,
     JobState,
@@ -63,8 +66,13 @@ def _recording(*, commit: CommitOutcome = CommitOutcome.ENDED_RUN, end_run_lands
     """fake RunStore/ResultStore/ReportStore 共享一个有序 calls log：(store, method, 参数)。
 
     commit：commit_job_states 的返回值。end_run_lands：end_run 是否写成。recorded：load_run_state 读回的运行态。
-    run_open_at_job_write：update_job_state 报告的「这次写时 run 级是否仍未结束」。claim_lands：try_claim_job 是否写成。"""
+    run_open_at_job_write：update_job_state 报告的「这次写时 run 级是否仍未结束」。claim_lands：try_claim_job 是否写成。
+
+    点名与真 store 一致：终态写写成（返回的不是 ALREADY_ENDED）时记下各 job 给出的标识，读回的 recorded 里这些 job 是终态的即带上它；
+    没有点名时读回的就是 recorded 本身。判定存储按标识存取，存下的就是交来的那个对象。"""
     calls: list = []
+    named: dict[str, str] = {}
+    saved: dict[str, JobResult] = {}
 
     class FakeRunStore:
         def preflight(self): calls.append(("run", "preflight", None))
@@ -74,6 +82,8 @@ def _recording(*, commit: CommitOutcome = CommitOutcome.ENDED_RUN, end_run_lands
             return run_open_at_job_write
         def commit_job_states(self, run_id, job_states, *, ended_at):
             calls.append(("run", "commit_job_states", (tuple(job_states), ended_at)))
+            if commit is not CommitOutcome.ALREADY_ENDED:
+                named.update((js.scope_id, js.result_id) for js in job_states if js.result_id is not None)
             return commit
         def end_run(self, run_id, ending, *, ended_at):
             calls.append(("run", "end_run", (ending, ended_at)))
@@ -83,11 +93,20 @@ def _recording(*, commit: CommitOutcome = CommitOutcome.ENDED_RUN, end_run_lands
             return claim_lands
         def load_run_state(self, run_id):
             calls.append(("run", "load_run_state", None))
-            return recorded
+            if recorded is None or not named:
+                return recorded
+            return replace(recorded, jobs={
+                sid: replace(js, result_id=named[sid]) if sid in named and js.status in TERMINAL_STATUSES else js
+                for sid, js in recorded.jobs.items()})
 
     class FakeResultStore:
         def preflight(self): calls.append(("result", "preflight", None))
-        def save_job_result(self, run_id, jr): calls.append(("result", "save_job_result", jr.scope_id))
+        def save_job_result(self, run_id, result_id, jr):
+            calls.append(("result", "save_job_result", (result_id, jr.scope_id)))
+            saved[result_id] = jr
+        def load_job_result(self, run_id, result_id):
+            calls.append(("result", "load_job_result", result_id))
+            return saved.get(result_id)
 
     class FakeReportStore:
         def preflight(self): calls.append(("report", "preflight", None))
@@ -102,6 +121,17 @@ def _methods(calls) -> list[str]:
     return [m for (_, m, _) in calls]
 
 
+def _saved_ids(calls) -> dict[str, str]:
+    """calls 里各次保存明细用的标识：scope_id → result_id。"""
+    return {scope_id: result_id for (_, m, arg) in calls if m == "save_job_result" for (result_id, scope_id) in [arg]}
+
+
+def _job_files(root) -> list[str]:
+    """run r 的判定明细目录里的文件名（排序后）。"""
+    jobs_dir = root / "r" / "jobs"
+    return sorted(p.name for p in jobs_dir.iterdir()) if jobs_dir.exists() else []
+
+
 def _local(tmp_path, scope_ids=("s",), report_store=None):
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
@@ -113,15 +143,29 @@ def _local(tmp_path, scope_ids=("s",), report_store=None):
     return p, run_store, result_store, meta
 
 
-# ---- 决定三：on_job_complete 逐 job 的提交点——明细先存、终态写后写 ----
+# ---- 决定三：on_job_complete 逐 job 的提交点——明细先存、终态写后写并点名它 ----
 def test_on_job_complete_saves_result_before_commit():
     calls, run, result, report = _recording(commit=CommitOutcome.OPEN)
     p = RunPersistence("r", run, result, report, clock=lambda: _NOW)
     p.on_job_complete(_jr("a", Status.PASSED))
     # 数据面 save_job_result 严格早于控制面的终态写（逐 job 提交点的核心保证，ADR 0030 决定三）
     assert [(s, m) for (s, m, _) in calls] == [("result", "save_job_result"), ("run", "commit_job_states")]
+    result_id, scope_id = calls[0][2]
     (final,), ended_at = calls[1][2]
     assert (final.scope_id, final.status, ended_at) == ("a", Status.PASSED, _NOW_ISO)  # 结束时刻经注入的墙钟取
+    assert (scope_id, final.result_id) == ("a", result_id)  # 终态写点名的正是这次保存用的标识（ADR 0030 决定三「点名」条）
+
+
+def test_each_save_takes_its_own_id_and_the_terminal_write_names_it():
+    """每次保存各生成一个标识（ADR 0030 决定三「点名」条）：两个 job 的标识不同，每个 job 的终态写点名的是它自己那次保存的标识。"""
+    calls, run, result, report = _recording(commit=CommitOutcome.OPEN)
+    p = RunPersistence("r", run, result, report)
+    p.on_job_complete(_jr("a"))
+    p.on_job_complete(_jr("b", Status.ERROR))
+    saved = _saved_ids(calls)
+    committed = {js.scope_id: js.result_id for (_, m, arg) in calls if m == "commit_job_states" for js in arg[0]}
+    assert committed == saved and set(saved) == {"a", "b"}
+    assert saved["a"] != saved["b"]
 
 
 def test_on_job_complete_rejects_a_non_terminal_result_and_writes_nothing():
@@ -159,7 +203,8 @@ def test_finalize_without_report_store_gives_no_report_index():
     p.on_job_complete(_jr("a"))
     finalized = p.finalize(_execution(meta, [_jr("a")]))
     assert isinstance(finalized, FinalizedRun) and finalized.report_index is None
-    assert _methods(calls) == ["save_job_result", "commit_job_states", "load_run_state"]  # 终态写已结束 run：不做结束写
+    # 终态写已结束 run：不做结束写；读运行态之后按其中点名的标识读回明细
+    assert _methods(calls) == ["save_job_result", "commit_job_states", "load_run_state", "load_job_result"]
     assert (finalized.result.status, [o.status for o in finalized.result.jobs]) == (Status.PASSED, [Status.PASSED])
 
 
@@ -171,8 +216,8 @@ def test_finalize_with_report_store_returns_the_index_and_writes_the_report_last
     p.on_job_complete(_jr("a"))
     finalized = p.finalize(_execution(meta, [_jr("a")], duration_ms=4200.0))
     assert finalized.report_index == "file:///fake/r/index.html"
-    # 读运行态先、ReportStore.write 后（派生视图永远最后）；报告的生成时刻经注入的墙钟取
-    assert _methods(calls)[-2:] == ["load_run_state", "write"]
+    # 读运行态、读回被点名的明细在先，ReportStore.write 在后（派生视图永远最后）；报告的生成时刻经注入的墙钟取
+    assert _methods(calls)[-3:] == ["load_run_state", "load_job_result", "write"]
     written, created_at = calls[-1][2]
     assert written is finalized.result and created_at == _NOW_ISO
     assert written.duration_ms == 4200.0 and [jr.scope_id for jr in written.details] == ["a"]
@@ -213,6 +258,47 @@ def test_finalize_read_failure_after_the_run_ended_propagates_without_a_report()
     assert exc.value is boom and "write" not in _methods(calls)
 
 
+def test_finalize_takes_the_detail_named_in_the_run_state_not_the_result_in_memory(tmp_path):
+    """收尾的明细按运行态里点名的标识从判定存储读回，不用本进程内存里的执行结果（ADR 0030 决定三「点名」条，ADR 0027「RunResult 的
+    组装只有一处」条）。固定先后：本进程交来 a 的结果之前，另一个写入方已存下 a 的一份明细（error）并以终态写点名它；本进程随后为 a
+    另存一份（passed），终态写跳过已是终态的 a，这一份没被点名；b 的终态写使 run 成为终态。汇总里 a 的状态与明细都是被点名的那一份。
+    用真本机 store，点名与跳过都在 adapter 里。"""
+    p, run_store, result_store, meta = _local(tmp_path, ("a", "b"))
+    elsewhere = _jr("a", Status.ERROR)
+    result_store.save_job_result("r", "00000000000000e1", elsewhere)
+    assert run_store.commit_job_states("r", [JobState("a", Status.ERROR, result_id="00000000000000e1")],
+                                       ended_at="t1") is CommitOutcome.OPEN
+
+    p.on_job_complete(_jr("a", Status.PASSED))
+    p.on_job_complete(_jr("b"))
+    assert p.ended_run is True
+    finalized = p.finalize(_execution(meta, [_jr("a", Status.PASSED), _jr("b")]))
+
+    state = run_store.load_run_state("r")
+    assert state.jobs["a"].result_id == "00000000000000e1"
+    assert len(_job_files(tmp_path)) == 3  # a 有两份互不覆盖，b 一份
+    a, b = finalized.result.jobs
+    assert (a.status, a.detail.status) == (Status.ERROR, Status.ERROR)
+    assert (b.status, b.detail.status, state.jobs["b"].result_id is not None) == (Status.PASSED, Status.PASSED, True)
+    assert finalized.result.status == Status.ERROR
+
+
+def test_finalize_with_the_named_detail_gone_raises_and_the_record_stays_terminal(tmp_path):
+    """被点名的那一份读不到（这里是存放处里的文件被外部删去）：收尾抛 `NamedDetailMissing`（OSError 的子类，按运行期落库失败处理），
+    不把这个 job 当作没有明细，不生成报告；终态写已使 run 成为终态，`ended_run` 为 True，调用方据此说明记录已是终态。"""
+    calls, _, _, report = _recording()
+    p, run_store, _, meta = _local(tmp_path, ("s",), report_store=report)
+    p.on_job_complete(_jr("s"))
+    (path,) = (tmp_path / "r" / "jobs").iterdir()
+    path.unlink()
+
+    with pytest.raises(NamedDetailMissing) as exc:
+        p.finalize(_execution(meta, [_jr("s")]))
+    assert isinstance(exc.value, OSError)
+    assert (exc.value.scope_id, exc.value.result_id) == ("s", run_store.load_run_state("r").jobs["s"].result_id)
+    assert p.ended_run is True and "write" not in _methods(calls)
+
+
 @pytest.mark.parametrize("by", ["commit", "end-write"])
 def test_ended_run_tells_whether_this_process_made_the_run_terminal(by):
     """`ended_run` 只在本进程的某次写使 run 成为终态之后为真：终态写返回 ENDED_RUN，或收尾的结束写写成。之前（终态写返回 OPEN、
@@ -247,7 +333,8 @@ def test_ended_run_stays_false_when_the_failure_comes_before_the_run_ends():
 # ---- 收尾的结束写：仍有未结束的 job 时按执行事实交来的来路结束 run ----
 def test_finalize_ends_the_remaining_jobs_by_the_stop_source():
     """本进程的终态写没有使 run 成为终态（还有没有启动的 job）：以执行事实交来的来路做结束写（说明表里那一行），结束时刻经注入的墙钟
-    取；写成之后读一次运行态，组装结果并生成报告。没有启动的 job 没有明细。"""
+    取；写成之后读一次运行态，按其中点名的标识读回明细，组装结果并生成报告。没有启动的 job 由结束写结束、没有标识，不为它读判定存储，
+    也没有明细。"""
     meta = _meta("r", ["a", "b"])
     recorded = _state(meta, {"a": Status.PASSED, "b": Status.SKIPPED}, status=Status.ABORTED,
                       message=RUN_ENDINGS["deadline"].run_message)
@@ -256,7 +343,8 @@ def test_finalize_ends_the_remaining_jobs_by_the_stop_source():
     p.on_job_complete(_jr("a"))
     finalized = p.finalize(_execution(meta, [_jr("a")], stopped_by="deadline"))
     assert ("run", "end_run", (RUN_ENDINGS["deadline"], _NOW_ISO)) in calls
-    assert _methods(calls)[-3:] == ["end_run", "load_run_state", "write"]
+    assert _methods(calls)[-4:] == ["end_run", "load_run_state", "load_job_result", "write"]
+    assert [arg for (_, m, arg) in calls if m == "load_job_result"] == [_saved_ids(calls)["a"]]
     out = finalized.result
     assert (out.status, out.message) == (Status.ABORTED, RUN_ENDINGS["deadline"].run_message)
     assert [(o.scope_id, o.status, o.detail is not None) for o in out.jobs] == [("a", Status.PASSED, True), ("b", Status.SKIPPED, False)]
@@ -278,7 +366,7 @@ def test_finalize_without_a_usable_stop_source_is_an_internal_error(stopped_by):
 def test_finalize_end_write_refused_on_a_run_ended_elsewhere_keeps_the_record_and_writes_no_report(tmp_path):
     """本次执行结束之前别处已把 run 结束（这里是处置的结束写），而本进程直到收尾才碰到它：收尾的结束写被已有的终态挡下，读回之后发出
     停手信号、抛 RunAlreadyEnded（带读回的运行态）；已有的终态、结束时刻与说明不被覆盖，不生成报告。本次已存下、终态写也写成的那一份
-    明细原样在。用真 LocalRunStore，结束写的条件在 adapter 里。"""
+    明细原样在，别处的结束写保留了它的点名。用真 LocalRunStore，结束写的条件在 adapter 里。"""
     calls, _, _, report = _recording()
     p, run_store, result_store, meta = _local(tmp_path, ("a", "b"), report_store=report)
     p.on_job_complete(_jr("a", Status.PASSED))
@@ -294,7 +382,9 @@ def test_finalize_end_write_refused_on_a_run_ended_elsewhere_keeps_the_record_an
     assert (state.status, state.ended_at, state.message) == (Status.ABORTED, "t5", settled.run_message)
     assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.PASSED, Status.SKIPPED)
     assert not any(m == "write" for m in _methods(calls))  # 报告不生成
-    assert [jr.scope_id for jr in result_store.load_all("r")] == ["a"]
+    assert state.jobs["b"].result_id is None
+    assert result_store.load_job_result("r", state.jobs["a"].result_id).scope_id == "a"
+    assert _job_files(tmp_path) == [f"{state.jobs['a'].result_id}.json"]
 
 
 def test_finalize_end_write_refused_without_a_run_state_is_not_reported_as_ended():
@@ -347,7 +437,7 @@ def test_finalize_after_the_last_terminal_write_ended_the_run_does_not_use_the_s
     p.on_job_complete(_jr("a", Status.ERROR))
     finalized = p.finalize(_execution(meta, [_jr("a", Status.ERROR)], stopped_by="fail-fast"))
     assert "end_run" not in _methods(calls)
-    assert _methods(calls) == ["save_job_result", "commit_job_states", "load_run_state", "write"]
+    assert _methods(calls) == ["save_job_result", "commit_job_states", "load_run_state", "load_job_result", "write"]
     assert finalized.result.message is None
     assert finalized.result.status == recorded.status == Status.ERROR
 
@@ -363,13 +453,15 @@ def test_stop_signal_stops_saving_details_and_writing_terminal_states():
 
 
 def test_terminal_write_that_finds_the_run_ended_raises_the_stop_signal_and_finalize_raises():
-    """终态写报告 run 在这次写之前已是终态（ALREADY_ENDED）：发出停手信号；收尾不做结束写、不生成报告，读回一次运行态并抛 RunAlreadyEnded。"""
+    """终态写报告 run 在这次写之前已是终态（ALREADY_ENDED）：发出停手信号，此后交来的结果不再保存；收尾不做结束写、不生成报告，读回
+    一次运行态并抛 RunAlreadyEnded。"""
     meta = _meta("r", ["a", "b"])
     recorded = _state(meta, {"a": Status.ABORTED, "b": Status.SKIPPED}, status=Status.ABORTED)
     calls, run, result, report = _recording(commit=CommitOutcome.ALREADY_ENDED, recorded=recorded)
     p = RunPersistence("r", run, result, report)
     p.on_job_complete(_jr("a"))
     assert p.ended_elsewhere() is True
+    p.on_job_complete(_jr("b"))
     with pytest.raises(RunAlreadyEnded) as exc:
         p.finalize(_execution(meta, [_jr("a")], stopped_by="fail-fast"))
     assert exc.value.recorded is recorded
@@ -498,32 +590,28 @@ def test_aborted_with_none_session_does_not_resurrect_but_documents_edge(tmp_pat
 
 
 def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
-    """锁定「两面分离」——提交者实测会困惑的点：
-    job 处于 RUNNING 时，控制面 run_state.json 显示 running，但数据面 jobs/<scope>.json **还不存在**；
-    只有 job 完成（on_job_complete）出了判定，jobs/<scope>.json 才落。
-    数据面存的是判定真值，RUNNING 的 job 还没判定，故意不写半截——「jobs/ 里出现文件就表示判定已就绪」。"""
-    from urllib.parse import quote
-
+    """锁定「两面分离」（ADR 0016「三层切分」）——提交者实测会困惑的点：
+    job 处于 RUNNING 时，控制面 run_state.json 显示 running，数据面 jobs/ 下**还没有**这个 job 的明细，运行态里它也不带标识；
+    job 完成（on_job_complete）出了判定，才存下一份 `jobs/<标识>.json`，并由终态点名（ADR 0030 决定三「点名」条）：文件名只是标识、
+    与 scope_id 无关，读者按运行态里的标识取那一份，不从目录认出 job。RUNNING 的 job 还没判定，故意不写半截。"""
     p, run_store, result_store, _ = _local(tmp_path, ("s",))
-
-    jobs_dir = tmp_path / "r" / "jobs"
-    job_file = jobs_dir / (quote("s", safe="") + ".json")
 
     # —— RUNNING 阶段（job 开始运行、尚未完成）——
     p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
-    # 控制面：run_state 显示 running（进度可见）
-    assert run_store.load_run_state("r").jobs["s"].status == Status.RUNNING
-    # 数据面：jobs/<scope>.json **还不存在**（RUNNING 的 job 没判定，不写半截）——这正是提交者看到的现象
-    assert not job_file.exists()
-    assert result_store.load_all("r") == []
+    # 控制面：run_state 显示 running（进度可见），还没有点名
+    js = run_store.load_run_state("r").jobs["s"]
+    assert (js.status, js.result_id) == (Status.RUNNING, None)
+    # 数据面：还没有明细（RUNNING 的 job 没判定，不写半截）——这正是提交者看到的现象
+    assert _job_files(tmp_path) == []
 
     # —— complete 阶段（on_job_complete 出了判定）——
     p.on_job_complete(_jr("s", Status.PASSED))
-    # 数据面：现在才出现 jobs/<scope>.json（即判定就绪）
-    assert job_file.exists()
-    assert [jr.scope_id for jr in result_store.load_all("r")] == ["s"]
-    # 控制面：终态写写下终态
-    assert run_store.load_run_state("r").jobs["s"].status == Status.PASSED
+    # 控制面：终态写写下终态，并点名存下的那一份
+    js = run_store.load_run_state("r").jobs["s"]
+    assert js.status == Status.PASSED and js.result_id is not None
+    # 数据面：现在才出现一份明细，文件名就是被点名的标识
+    assert _job_files(tmp_path) == [f"{js.result_id}.json"]
+    assert result_store.load_job_result("r", js.result_id).scope_id == "s"
 
 
 def test_run_status_follows_the_terminal_writes_and_the_last_one_ends_the_run(tmp_path):
@@ -604,7 +692,8 @@ def test_claim_rejected_after_the_run_ended_elsewhere_raises_the_stop_signal(tmp
 
 @pytest.mark.parametrize("write", ["on_event", "on_job_complete"])
 def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_path, write):
-    """写 job 状态时 RunStore 报告 run 级已是终态（没有写成）：开始执行与结束两处的写都发出停手信号；别处的结束写记下的终态不被改写。"""
+    """写 job 状态时 RunStore 报告 run 级已是终态（没有写成）：开始执行与结束两处的写都发出停手信号；别处的结束写记下的终态不被改写。
+    结束那一处已先存下一份明细（写序是明细在先）：终态写没有写成，这一份没被点名，运行态里这个 job 不带标识。"""
     p, run_store, _, _ = _local(tmp_path)
     assert p.claim("s", _CLAIMED) is True
     settled = RUN_ENDINGS["settle-advancer-exited"]
@@ -616,8 +705,9 @@ def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_pat
         p.on_job_complete(_jr("s", Status.PASSED))
     assert p.ended_elsewhere() is True
     state = run_store.load_run_state("r")
-    assert (state.status, state.jobs["s"].status, state.jobs["s"].message) == (
-        Status.ABORTED, Status.ABORTED, settled.aborted_message)
+    assert (state.status, state.jobs["s"].status, state.jobs["s"].message, state.jobs["s"].result_id) == (
+        Status.ABORTED, Status.ABORTED, settled.aborted_message, None)
+    assert len(_job_files(tmp_path)) == (1 if write == "on_job_complete" else 0)
 
 
 def test_still_open_reads_the_run_level_status_and_raises_the_signal_on_terminal(tmp_path):
@@ -689,9 +779,10 @@ def test_deadline_finalize_ends_unstarted_jobs_by_the_end_write(tmp_path):
     state = run_store.load_run_state("r")
     assert (state.status, state.message, state.ended_at, state.claim_count) == (Status.ABORTED, ending.run_message, _NOW_ISO, 1)
     assert (state.jobs["a"].status, state.jobs["a"].claimed_at) == (Status.PASSED, instant_to_iso(base))
-    assert (state.jobs["b"].status, state.jobs["b"].message, state.jobs["b"].claimed_at) == (
-        Status.SKIPPED, ending.skipped_message, None)
-    assert [jr.scope_id for jr in result_store.load_all("r")] == ["a"]
+    assert (state.jobs["b"].status, state.jobs["b"].message, state.jobs["b"].claimed_at, state.jobs["b"].result_id) == (
+        Status.SKIPPED, ending.skipped_message, None, None)
+    assert _job_files(tmp_path) == [f"{state.jobs['a'].result_id}.json"]
+    assert result_store.load_job_result("r", state.jobs["a"].result_id).scope_id == "a"
     assert "b" not in engine.run_count
     assert (finalized.result.status, [jr.scope_id for jr in finalized.result.details]) == (Status.ABORTED, ["a"])
 

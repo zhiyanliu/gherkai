@@ -30,7 +30,7 @@
     `WorkerSelfDescribeError`；自述取到了、与命令行工具不兼容（身份位或载荷键不合契约，含协议版本不等；除 `engine` 身份位指错引擎那一项外，诊断都以
     `VERSION_MISMATCH_ADVICE` 那一句结尾）抛 `WorkerIncompatibleError`；取不到（起不来、超时、输出不是合法 JSON）抛 `WorkerUnavailableError`，定位不到的
     `WorkerNotFoundError` 是它的子类。前两类在各调用点都不降级（命令以退出码 2 结束，doctor 记为失败项），只有 `plan` 对取不到降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
-  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
+  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `local_result_store`（本机推进器用的判定存储：本地文件存储外面套 core 的 `RetryingResultStore`，保存失败按 1、2、4 秒退避重试；`build_local_stores` 与 `detached.build_local_reconcile` 都经它装配，云端的组合根不套，ADR 0030 决定三「保存明细失败」条）/ `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
     region/profile 一处解析）/ `resolve_aws_identity`（profile 与 region 解析链的唯一实现，`resolve_cloud_target` 与本机后台宿主共用）/
     `resolve_region` / `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
     None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
@@ -52,7 +52,7 @@
     `load_feature`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
-  （per-run 推进循环，`clock` 必传、组合根传 `compose.now`；按 `TickResult` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告，读运行态与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
+  （per-run 推进循环，`clock` 与判定存储必传，组合根传 `compose.now` 与经 `compose.local_result_store` 装配的判定存储；按 `tick` 返回的 `TickOutcome` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告（读运行态、按点名的标识读回判定明细），读运行态、读明细与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
   `end_run_for_unusable_definition`（后台推进进程读不到可用的运行定义时，以结束写的 error 变体结束这个 run，与云端推进器同一写法，句子取 core `run_status` 里的那几句；不存明细、不生成报告，`status --wait` 接力不调它）+
   `build_local_reconcile`·`drive_local_reconcile`（装配与驱动）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
   截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job

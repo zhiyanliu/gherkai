@@ -75,6 +75,29 @@ class RunAlreadyEnded(RuntimeError):
         self.recorded = recorded
 
 
+class NamedDetailMissing(FileNotFoundError):
+    """运行态里点名的那一份判定明细读不到（ADR 0030 决定三「点名」条），由 `named_details.load_named_details` 抛出。
+
+    两种情形：这个标识下没有明细（`found_scope_id` 为 None）；读回的那一份属于另一个 job（`found_scope_id` 是它的 scope_id）。正常
+    写序下被点名的那一份必已存下、且就是这个 job 的，读不到只会是存放处或运行记录被外部删改，所以按记录残缺处理，不把这个 job 当作没有
+    明细。是 OSError 的子类：前台收尾由此落进运行期读写记录失败的出口，explain 以退出码 2 结束并给出这句说明。
+
+    `run_id`、`scope_id`（运行态里的这个 job）、`result_id`（它点名的标识）与 `found_scope_id` 供调用方按需取用；消息是给使用方看的
+    整句，`str()` 即得。
+    """
+
+    def __init__(self, run_id: str, scope_id: str, result_id: str, *, found_scope_id: str | None = None) -> None:
+        if found_scope_id is None:
+            why = "运行记录指向的那一份不在判定明细的存放处，可能已被删除"
+        else:
+            why = f"运行记录指向的那一份属于 job {found_scope_id}，不是这个 job 的，运行记录或判定明细可能被改动过"
+        super().__init__(f"run {run_id} 中 job {scope_id} 的判定明细读不到（标识 {result_id}）：{why}")
+        self.run_id = run_id
+        self.scope_id = scope_id
+        self.result_id = result_id
+        self.found_scope_id = found_scope_id
+
+
 class FeatureContractError(ValueError):
     """用例契约违约（feature 写法或配置违约），拒绝运行（ADR 0019/0025）：engine 冲突、多 @scope 值、步骤关键字判不出等。
     按「是什么」命名而不按「在哪一步被发现」命名：parse 与 scope 两层都会抛，run 与 plan 都会遇到，不专属 plan 阶段。

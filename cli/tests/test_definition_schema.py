@@ -41,7 +41,7 @@ def _rewrite_schema(reports: Path, run_id: str, version, cli_version="9.9.0") ->
 
 def _as_detached_run_in_progress(reports: Path, run_id: str) -> Path:
     """把前台 run 产出的 seed 改成 submit 提交、推进到一半的形态：带后台执行的标记，run 与各 job 都在执行、没有结束时刻（模拟后台推进
-    进程中途被结束）。后台推进进程与接力只对这种 run 动作。返回运行态文件的路径。"""
+    进程中途被结束），执行中的 job 也就没有点名判定明细。后台推进进程与接力只对这种 run 动作。返回运行态文件的路径。"""
     path = reports / run_id / "run_state.json"
     st = json.loads(path.read_text(encoding="utf-8"))
     st["status"] = "running"
@@ -49,6 +49,7 @@ def _as_detached_run_in_progress(reports: Path, run_id: str) -> Path:
     st.pop("ended_at", None)
     for job in st["jobs"]:
         job["status"] = "running"
+        job.pop("result_id", None)
     path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
     return path
 
@@ -235,7 +236,8 @@ def test_background_advancer_ends_the_run_when_the_definition_is_unreadable_or_g
 @pytest.mark.parametrize("damage, told", [("not-json", "提交记录不完整"), ("deleted", "找不到这个 run 的提交记录")])
 def test_local_relay_does_not_end_a_run_whose_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, damage, told):
     """`status --wait` 接力读到不是合法 JSON 的提交记录，或提交记录已被删去：它不是这个 run 的推进器，以退出码 2 结束并说明，
-    不打回溯，运行态一个字节不变。"""
+    不打回溯，运行态一个字节不变。提交记录被删去不是读写运行记录的失败，说明里不出现存储失败的那一句（那一句会让使用方去查磁盘
+    与权限）。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
     state_path = _as_detached_run_in_progress(reports, run_id)
     path = reports / run_id / "run_meta.json"
@@ -247,6 +249,7 @@ def test_local_relay_does_not_end_a_run_whose_definition_is_unreadable_or_gone(t
     assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 2
     err = capsys.readouterr().err
     assert "Traceback" not in err and told in err
+    assert "读写本机的运行记录失败" not in err
     assert state_path.read_bytes() == before
 
 

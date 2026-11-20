@@ -2,8 +2,9 @@
 
 产出 <report_root>/<run_id>/{manifest.json, index.html}：
 - manifest.json 是薄信封（schema_version/run_id/created_at）+ report_index（扁平投影，便于 CI/WebUI 遍历）。
-  **不内嵌 result 真值副本**——靠 run_id 软引用那次 run，判定真值由 ResultStore 持有（report 是纯派生视图、
-  可删可重建、永不作判定源）。
+  **不内嵌 result 真值副本**——靠 run_id 软引用那次 run：状态在 RunStore 的运行态里，scenario 与 step 的判定明细在 ResultStore
+  里、由运行态点名（report 是纯派生视图、可删、可从记录重建、永不作判定源；ADR 0027「manifest.json 形态」与「职责边界」段，
+  ADR 0016「三层切分」）。
 - index.html 是最小人可导航入口：每条报告产物一行链接（引擎原生产物 + gherkai 自有 schema 的 step 级 evidence），点开看**原样**文件。
   摘要与判定明细树取 write 收到的 RunResult（由记录组装：状态取运行态，有判定明细的 job 附上明细）。
 
@@ -87,12 +88,13 @@ class LocalReportStore:
         index_entries = self._collect(result, run_dir)
 
         # manifest 是**纯派生导航视图**（ADR 0027）：不内嵌 result 真值副本——靠 run_id 软引用那次 run。
-        # 判定真值由 ResultStore（local 的 jobs/*.json 或 S3ResultStore 里结构相同的 key）持有，运行态/身份由 RunStore
-        # （local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有。这样 RunReport 是真·派生品（可删可重建、
-        # 永不作判定源），无真值冗余、无一致性风险。CI 要判定 → 用 run_id 找 ResultStore。
+        # 运行态与身份由 RunStore（local 的 run_meta.json + run_state.json 或 DynamoDBRunStore 的两 item）持有，run 与各 job 的状态以
+        # 运行态为准；scenario 与 step 的判定明细由 ResultStore（local 的 jobs/ 或 S3ResultStore 里同样布局的键）持有，每个 job 用哪一份
+        # 由运行态点名（ADR 0016「三层切分」；ADR 0030 决定三「点名」条与「状态的权威是运行态」条）。所以 RunReport 是纯派生品（可删、
+        # 可从记录重建、永不作判定源），没有真值冗余与一致性风险。CI 要判定，用 run_id 读运行态（`status --json`）。
         manifest = {
             "schema_version": SCHEMA_VERSION,
-            "run_id": run_id,        # 软引用那次 run（判定真值在 ResultStore 的 jobs/*.json，按此 id 取）
+            "run_id": run_id,        # 软引用那次 run（运行态与被点名的判定明细都按此 id 取）
             "created_at": created_at,
             "report_index": index_entries,
         }
