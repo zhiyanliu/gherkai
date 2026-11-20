@@ -3,7 +3,8 @@
 证据边界：隧道服务是登记进 `tunnel.PROVIDERS` 的假实现，只模仿口子的外部表面（前置检查的用例改为对 `tunnel._import_sdk` 打桩、走
 真实的 `NgrokTunnel`）；云端存储是记录调用的假句柄，不连 AWS、不联网。submit 与后台进程之间用真实的管道与线程
 （`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
-跨进程的会话与信号处置不在这些用例的证据之内（ADR 0035「实测项」）；进程入口另有两条用例真的启动子进程（不起隧道）。
+跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C 另有
+用例真的启动子进程（不起隧道）。
 """
 from __future__ import annotations
 
@@ -540,6 +541,13 @@ def test_local_submit_reports_when_the_advancer_exits_before_reporting(tmp_path,
     assert tunnel_service.closed and _run_dirs(reports) == [] and advanced == []
 
 
+def _stopped_waiting(reports: Path) -> str:
+    """本机 submit 等回报时被 Ctrl-C 打断的那一句：后台推进进程只在建 run 之前查一次提交命令是否还在，查过之后才被打断的照常建成，
+    所以这一句只说可能建立、请先确认，不说不再建立。"""
+    return ("已停止等待提交结果。这次提交可能仍会建立 run 并执行：后台推进进程在建立 run 之前查到提交命令已经退出时不建立、自行退出，"
+            f"查过之后照常建立并执行。请先用 gherkai list-runs --report-dir {reports} 确认，再决定是否重新提交。")
+
+
 def test_ctrl_c_while_waiting_lets_the_advancer_see_submit_gone_before_building_the_run(tmp_path, capsys,
                                                                                        inline_children, tunnel_service,
                                                                                        advanced, interrupt_submit):
@@ -552,8 +560,7 @@ def test_ctrl_c_while_waiting_lets_the_advancer_see_submit_gone_before_building_
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 130 and cap.out == ""
-    assert (f"{marker}后台推进进程还没有建立 run 的会自行退出、不再建立；已经建立的照常执行，"
-            f"可以用 gherkai list-runs --report-dir {reports} 找到它。") in cap.err
+    assert _stopped_waiting(reports) in cap.err.splitlines()
     assert inline_children.only().returncode == 2
     assert _run_dirs(reports) == [] and advanced == [] and tunnel_service.closed
 
@@ -587,7 +594,7 @@ def test_submit_gone_after_the_check_leaves_the_run_advancing_with_a_log_line(tm
                                                                               inline_children, tunnel_service, advanced,
                                                                               interrupt_submit):
     """Ctrl-C 落在后台推进进程查过 submit 之后（装配期间）：run 已经建成，回报写不出去，后台推进进程照常推进，只在 reconcile.log 记一句；
-    提交进程以 130 结束。"""
+    提交进程以 130 结束，说明与查之前被打断的同一句（它只说可能建立、请先确认）。"""
     marker = "已停止等待提交结果。"
     interrupt = interrupt_submit(marker)
     real_assemble = detached.assemble_local_run
@@ -600,7 +607,9 @@ def test_submit_gone_after_the_check_leaves_the_run_advancing_with_a_log_line(tm
     reports = tmp_path / "reports"
     rc = _main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
     inline_children.settle()
-    assert rc == 130 and capsys.readouterr().out == ""
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == ""
+    assert _stopped_waiting(reports) in cap.err.splitlines()
     (run_dir,) = _run_dirs(reports)
     log = (run_dir / "reconcile.log").read_text(encoding="utf-8")
     assert f"提交命令在收到提交结果之前已经退出；run {run_dir.name} 已经建立，照常执行。" in log
@@ -743,6 +752,39 @@ def test_background_entry_exits_2_silently_when_submit_left_before_handing_the_i
     finally:
         os.close(report_r)
     assert (proc.returncode, proc.stdout, proc.stderr, reported) == (2, b"", b"", b"")
+
+
+@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGTERM], ids=["SIGHUP", "SIGTERM"])
+@pytest.mark.parametrize("entry", ["_reconcile", "_tunnel_watch"])
+def test_background_entry_is_ended_by_the_signal_even_when_the_parent_ignores_it(entry, signum):
+    """启动方把这个信号设成了忽略（如经 nohup 启动的 submit 之于 SIGHUP），后台进程继承了它：入口进门即恢复成缺省处置，对它发这个
+    信号即结束它。真实进程、真实信号：父进程先设忽略再启动，标准输入保持打开、不交输入（后台进程停在读输入，不起隧道）；入口恢复处置
+    之前到达的信号会被忽略，所以每 0.2 秒发一次，直到它退出或到 10 秒。"""
+    report_r, report_w = os.pipe()
+    stdin_r, stdin_w = os.pipe()
+    env = {k: v for k, v in os.environ.items() if k != "NGROK_AUTHTOKEN"}
+    previous = signal.signal(signum, signal.SIG_IGN)
+    try:
+        proc = subprocess.Popen([sys.executable, "-P", "-m", "gherkai_cli", entry, "--report-fd", str(report_w)],
+                                stdin=stdin_r, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(report_w,),
+                                start_new_session=True, env=env)
+    finally:
+        signal.signal(signum, previous)
+        os.close(report_w)
+        os.close(stdin_r)
+    try:
+        deadline = time.monotonic() + 10
+        while proc.poll() is None and time.monotonic() < deadline:
+            proc.send_signal(signum)
+            try:
+                proc.wait(0.2)
+            except subprocess.TimeoutExpired:
+                pass
+    finally:
+        os.close(stdin_w)  # 没有被信号结束的，读到文件结束即以 2 退出
+        out, err = proc.communicate(timeout=60)
+        os.close(report_r)
+    assert (proc.returncode, out, err) == (-signum, b"", b"")
 
 
 def test_building_the_parser_does_not_import_the_tunnel_sdk():
@@ -1226,3 +1268,75 @@ def test_ctrl_c_while_printing_the_result_of_a_plain_cloud_submit(tmp_path, monk
     assert rc == 130 and cap.out == ""
     assert f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --backend cloud --prefix " in cap.err
     assert "隧道" not in cap.err
+
+
+# ---- 开始写出 run 标识之后到达的 Ctrl-C（ADR 0035 决策 3）----
+
+_SUBMIT_DRIVER = Path(__file__).with_name("_submit_driver.py")
+
+
+@pytest.mark.parametrize("backend", ["local", "cloud"])
+def test_ctrl_c_after_the_run_id_is_written_does_not_change_the_result(backend, tmp_path):
+    """真实进程、真实信号：submit 在标准输出写出 run 标识之后立刻收到 SIGINT，结果不变，退出码 0、标准输出恰为 run 标识。提交进程是
+    `_submit_driver.py`（后台进程是线程替身，回报经真实管道）：它写出第一行之后停在放行描述符上，用例读到这一行、发出 SIGINT、再放行，
+    信号落在标识已经写进管道、`print` 还没有返回的那一刻。"""
+    hold_r, hold_w = os.pipe()
+    env = {k: v for k, v in os.environ.items() if k != "NGROK_AUTHTOKEN"}
+    try:
+        proc = subprocess.Popen([sys.executable, str(_SUBMIT_DRIVER), backend, str(tmp_path), str(hold_r)],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                pass_fds=(hold_r,), cwd=tmp_path, env=env)
+    finally:
+        os.close(hold_r)
+    try:
+        first = proc.stdout.readline()
+        if first:
+            proc.send_signal(signal.SIGINT)
+            time.sleep(0.2)  # 让信号在放行之前送达
+    finally:
+        os.close(hold_w)  # 放行：提交进程读到文件结束，从写出的那一步接着执行
+    rest, err = proc.communicate(timeout=60)
+    assert (proc.returncode, first + rest) == (0, f"{FIXED_RUN_ID}\n".encode()), err.decode("utf-8", "replace")
+    if backend == "local":
+        assert (tmp_path / "reports" / FIXED_RUN_ID / "run_state.json").exists()
+
+
+def test_ignore_interrupts_from_here_ignores_sigint_in_the_main_thread_and_does_nothing_elsewhere():
+    """在主线程里把 SIGINT 的处置设为忽略；在别的线程里（测试从别的线程调用入口时）什么都不做、不抛错。"""
+    errors: list = []
+
+    def elsewhere():
+        try:
+            m._ignore_interrupts_from_here()
+        except BaseException as e:  # noqa: BLE001 —— 交给下面断言
+            errors.append(e)
+
+    t = threading.Thread(target=elsewhere)
+    t.start()
+    t.join(5)
+    assert errors == [] and signal.getsignal(signal.SIGINT) is signal.default_int_handler
+    m._ignore_interrupts_from_here()
+    assert signal.getsignal(signal.SIGINT) == signal.SIG_IGN  # 收尾的夹具恢复原处置
+
+
+@pytest.mark.parametrize("backend", ["local", "cloud"])
+def test_ctrl_c_that_surfaces_at_the_boundary_still_exits_130_with_nothing_written(backend, tmp_path, monkeypatch,
+                                                                                   capsys, inline_children,
+                                                                                   tunnel_service, advanced):
+    """边界之前已经到达、在设置忽略时才抛出的中断：仍走 130 的出口，标准输出为空，说明 run 已经提交。"""
+    if backend == "cloud":
+        _patch_cloud_handles(monkeypatch, [])
+    _fix_run_id(monkeypatch)
+    real_ignore = m._ignore_interrupts_from_here
+
+    def interrupted_then_ignore():
+        signal.raise_signal(signal.SIGINT)
+        real_ignore()
+
+    monkeypatch.setattr(m, "_ignore_interrupts_from_here", interrupted_then_ignore)
+    argv = _local_submit_argv(tmp_path) if backend == "local" else _cloud_submit_argv(tmp_path)
+    rc = _main([*argv, "--expose-local", ORIGIN])
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == ""
+    assert f"run {FIXED_RUN_ID} 已经提交，提交命令随后被中断。" in cap.err

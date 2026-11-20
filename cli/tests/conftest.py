@@ -17,25 +17,11 @@ import pytest
 
 from gherkai_runtime import compose
 
-from _fake_worker import FAKE_DETERMINISTIC_STEPS, FAKE_MIN_GRACE_S, FAKE_MODEL_ID
+from _fake_worker import fake_query_capabilities
 
 
 @pytest.fixture(autouse=True)
 def _stub_engine_capabilities(monkeypatch):
-    def fake_query_capabilities(engine: str, *, steps_dir=None, timeout_s: float = 60.0) -> dict:
-        if engine not in FAKE_MIN_GRACE_S:
-            raise ValueError(f"未知引擎 {engine!r}")  # 同 compose 定位链的引擎名校验
-        compose.resolve_worker_cmd(engine)  # 定位链照真走：miss → WorkerNotFoundError，同真查询的第一步
-        caps = {"schema_version": 2, "engine": engine, "min_grace_s": FAKE_MIN_GRACE_S[engine],
-                "targets": [{"device": "desktop", "ui_kinds": ["web"]}],  # 顶层 targets 必有（ADR 0049 决策 2）
-                "deterministic_steps": [dict(e) for e in FAKE_DETERMINISTIC_STEPS],
-                "model_id": FAKE_MODEL_ID[engine],
-                compose.SESSION_WARMUP_KEY: True}  # 两个真 worker 都声明会话预热支持（ADR 0051 决策 13）
-        # 真实现自己会按（引擎, steps 目录）缓存这份对象；替身照同一键写一份，好让「本机 run 每引擎只问一次」
-        # 那条**生产行为**（engine_min_grace 复用已有自述、不再问 worker）在替身之上照样被测到。
-        compose._CAPABILITIES_CACHE.setdefault((engine, None if steps_dir is None else str(steps_dir)), caps)
-        return caps
-
     monkeypatch.setattr(compose, "query_capabilities", fake_query_capabilities)
     # 进程内缓存跨用例泄漏 → 上一个用例的值（或真 worker 的值）污染下一个；两头都清。
     compose._CAPABILITIES_CACHE.clear()
@@ -64,6 +50,19 @@ def _no_real_tunnel_sdk(monkeypatch):
     yield
     if calls:
         pytest.fail(f"用例导入了真实的隧道 SDK（{len(calls)} 次）：请登记假的隧道服务，或经 NgrokTunnel(load_sdk=...) 注入假 SDK")
+
+
+@pytest.fixture(autouse=True)
+def _signal_dispositions_are_restored():
+    """入口改动的信号处置在每个用例之后恢复：submit 开始写出 run 标识时把 SIGINT 设为忽略、一直保持到进程退出，两种后台进程的入口
+    把 SIGTERM 与 SIGHUP 设为缺省处置。在测试进程里这些入口执行完并不退出，不恢复的话后面的用例收不到 Ctrl-C 的 KeyboardInterrupt，
+    靠真实 SIGINT 的用例会一直等下去。"""
+    import signal
+
+    saved = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}
+    yield
+    for s, handler in saved.items():
+        signal.signal(s, handler if handler is not None else signal.SIG_DFL)
 
 
 @pytest.fixture(autouse=True)

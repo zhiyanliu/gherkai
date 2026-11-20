@@ -691,6 +691,36 @@ def test_a_second_close_waits_until_the_first_one_has_finished():
     assert sdk.disconnect_returned.is_set() and sdk.disconnects == [PUBLIC_URL]
 
 
+def test_a_second_close_interrupted_by_ctrl_c_while_waiting_for_the_first_returns_without_raising():
+    """第一次关闭的 `disconnect` 阻塞着，主线程第二次关闭、在等前一次结束期间收到真实的 SIGINT：第二次调用不外抛、不再等就返回；
+    第一次照常完成，SDK 只被调用一次。"""
+    gate = threading.Event()
+    sdk = _FakeSdk(disconnect_gate=gate)
+    info = _start(sdk)
+    main = threading.main_thread().ident
+    assert threading.get_ident() == main  # SIGINT 只送到主线程
+    first = threading.Event()
+    threading.Thread(target=lambda: (info.close(), first.set()), daemon=True).start()
+    assert sdk.disconnect_entered.wait(1.0)
+
+    def interrupt():
+        time.sleep(0.1)  # 让主线程进入等待
+        signal.pthread_kill(main, signal.SIGINT)
+
+    threading.Thread(target=interrupt, daemon=True).start()
+    t0 = time.monotonic()
+    try:
+        _close_without_interrupt(info)
+        assert not first.is_set()  # 第二次调用没有等到第一次结束就返回了
+        assert time.monotonic() - t0 < tunnel.CLOSE_TIMEOUT_S
+    finally:
+        gate.set()
+    assert first.wait(1.0)
+    assert sdk.disconnect_returned.is_set() and sdk.disconnects == [PUBLIC_URL]
+    _close_without_interrupt(info)
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
 def test_tunnel_info_holds_the_listener_object():
     """返回的隧道事实持有 SDK 给出的监听对象（ADR 0035 决策 1）：不依赖「监听对象被回收之后隧道仍在线」。"""
     sdk = _FakeSdk()

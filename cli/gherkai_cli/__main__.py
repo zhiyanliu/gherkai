@@ -16,6 +16,7 @@ import shlex
 import signal
 import sqlite3
 import sys
+import threading
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import datetime
@@ -1724,6 +1725,17 @@ def _start_background(entry: str, *, owned: list[int]) -> tuple[int, int]:
     return stdin_w, report_r
 
 
+def _ignore_interrupts_from_here() -> None:
+    """submit 开始写出 run 标识之前调用：从这里到进程退出，SIGINT 的处置是忽略，命令的结果不再因 Ctrl-C 改变（ADR 0035 决策 3）。
+
+    边界：开始写出 run 标识之后到达的 Ctrl-C 不改变结果，照常以 0 结束；在此之前被打断的以 130 结束、标准输出为空。理由：到这一步
+    run 已经建成，标识即将交给调用方；已经写进管道的字节收不回来，所以结果在写之前定下，不让「标准输出里有标识、退出码却是 130」出现。
+    调用方把它放在接住 KeyboardInterrupt 的那个 try 里：调用之前已经到达、还没有抛出的中断在设置处置时抛出，仍走 130 的出口，什么都
+    没有写出。不在主线程（不能改信号处置）时什么都不做。"""
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
 def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None, str | None]",
                   per_job_tail_s: float) -> int:
     """本机 submit 的提交进程（ADR 0035 决策 3「本机 `submit`」）：以新会话启动后台推进进程，经它的标准输入交出建 run 所需的输入，
@@ -1731,9 +1743,9 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
 
     交出的是补全之后、隧道映射之前的 jobs，连同解析后的 region / profile、steps 目录、并发上限与每 job 尾段：后台推进进程不读配置
     文件（ADR 0053 决策 1），凡来自配置的值都按解析之后的值交出。标准输入的写端一直开到收到回报：后台推进进程在建 run 之前查这一端，
-    读到文件结束即不建 run。启动、写输入、等回报与输出结果期间被 Ctrl-C 打断时以 130 结束并说明（后台推进进程在另一个会话里，收不到
-    终端的信号），标准输出不输出；关闭标准输入在说明之前，还没有建 run 的后台推进进程随之不再建立。中断落在收到「建成」的回报之后时，
-    说明 run 已经提交、给出查进度的命令，与云端 submit 建 run 之后被中断的说法同型。
+    读到文件结束即不建 run。从启动到开始写出 run 标识之间被 Ctrl-C 打断时以 130 结束并说明（后台推进进程在另一个会话里，收不到
+    终端的信号），标准输出不输出；关闭标准输入在说明之前。中断落在收到「建成」的回报之后时，说明 run 已经提交、给出查进度的命令，
+    与云端 submit 建 run 之后被中断的说法同型。开始写出 run 标识之后到达的 Ctrl-C 不改变结果（`_ignore_interrupts_from_here`）。
     """
     region, profile = identity
     payload = handoff.encode_advancer_input(handoff.AdvancerInput(
@@ -1764,6 +1776,7 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
         if report.public_url is not None:
             _progress(_tunnel_established_line(args.expose_local, report.public_url))
         _progress(f"已提交（本机后台推进中）。查进度：{_status_cmd(report.run_id, report_dir=args.report_dir)}")
+        _ignore_interrupts_from_here()  # 之后到返回之间没有非零的出口
         print(report.run_id)
         return 0
     except KeyboardInterrupt:
@@ -1773,8 +1786,9 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
             _progress(f"run {report.run_id} 已经提交，提交命令随后被中断。"
                       f"查进度：{_status_cmd(report.run_id, report_dir=args.report_dir)}")
         else:
-            _progress("已停止等待提交结果。后台推进进程还没有建立 run 的会自行退出、不再建立；"
-                      f"已经建立的照常执行，可以用 {list_cmd} 找到它。")
+            # 后台推进进程只在建 run 之前查一次提交命令是否还在（ADR 0035 决策 3）：查过之后才被打断的，run 照常建成
+            _progress("已停止等待提交结果。这次提交可能仍会建立 run 并执行：后台推进进程在建立 run 之前查到提交命令已经退出时"
+                      f"不建立、自行退出，查过之后照常建立并执行。请先用 {list_cmd} 确认，再决定是否重新提交。")
         return 128 + signal.SIGINT
     finally:
         _close_owned(owned)
@@ -2063,8 +2077,9 @@ def _submit_cloud(args, prepped: Prepared) -> int:
     各道闸（版本 skew、资源 preflight、worker variant、设备请求与安装包）都在生成运行定义之前，所需的 job 与有没有隧道取自补全之前
     的 jobs 与命令行参数（ADR 0037 决策 7「在生成运行定义之前判断」）；闸拦下时守护进程还没有启动。守护进程回报之后、紧挨建 run
     之前查一次它还在不在，不在即不建 run、退出码 2；建 run 失败时先关闭它的标准输入、等它关闭会话退出（等待有时限）再报错、退出码 2。
-    建 run 之后交不出 run 的标识（守护进程这时才没了）照常输出 run 标识、退出码 0，另说明隧道已不再可用。从启动守护进程到输出结果之间
-    被 Ctrl-C 打断以 130 结束，按建 run 进行到哪一步说明（`_cloud_submit_interrupted`），标准输出不输出。
+    建 run 之后交不出 run 的标识（守护进程这时才没了）照常输出 run 标识、退出码 0，另说明隧道已不再可用。从启动守护进程到开始写出
+    run 标识之间被 Ctrl-C 打断以 130 结束，按建 run 进行到哪一步说明（`_cloud_submit_interrupted`），标准输出不输出；开始写出 run 标识
+    之后到达的 Ctrl-C 不改变结果（`_ignore_interrupts_from_here`）。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
     events Stream → reconciler 接管（补起后续、写下各 job 的终态）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
@@ -2190,6 +2205,7 @@ def _submit_cloud(args, prepped: Prepared) -> int:
                 _progress(f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（它退出之前如果有输出，原因在上面），"
                           "隧道已不再可用：这个 run 里要访问被测应用的 job 会失败。处理好原因之后请重新提交。")
             _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
+        _ignore_interrupts_from_here()  # 之后到返回之间没有非零的出口
         print(run_id)
         return 0
     except KeyboardInterrupt:
@@ -2913,15 +2929,24 @@ def _definition_contract_message(e: DefinitionContractError) -> str:
     return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
 
 
+def _restore_default_termination_signals() -> None:
+    """把 SIGTERM 与 SIGHUP 的处置恢复成缺省（结束进程），不装处理器：submit 启动的两种后台进程进门第一步调用（ADR 0035 决策 3）。
+    处置为忽略时会被子进程继承，如经 nohup 启动的 submit 把 SIGHUP 设成了忽略，不恢复的话对后台进程发这个信号结束不了它。"""
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, signal.SIG_DFL)
+
+
 def _cmd_reconcile(args) -> int:
     """本机后台推进进程的入口（本机 submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「本机 `submit`」）。
 
-    回报描述符进门即设为不可继承（之后起的 worker 拿不到它）；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即
-    以退出码 2 结束、不输出、不建 run；否则交给 `_advance_submitted`，返回它的退出码。两个描述符随进程退出关闭。
+    进门先把 SIGTERM 与 SIGHUP 恢复成缺省处置（`_restore_default_termination_signals`）。回报描述符随即设为不可继承（之后起的 worker
+    拿不到它）；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即以退出码 2 结束、不输出、不建 run；否则交给
+    `_advance_submitted`，返回它的退出码。两个描述符随进程退出关闭。
 
     **无 `--steps-dir` 等选项**：使用方 step 目录、并发上限、region / profile 都由 submit 按解析之后的值经标准输入交来，随运行定义
     走（`RunMeta.steps_dir`）；本进程 CWD 与提交进程可能不同，重解析 `./steps` 或读配置文件必分叉（ADR 0037 决策 4、ADR 0053 决策 1）。
     """
+    _restore_default_termination_signals()
     os.set_inheritable(args.report_fd, False)
     line = handoff.read_line(0)
     if not line:
@@ -3022,11 +3047,12 @@ def _advance_store_failure_notice(run_id: str, error: OSError, *, report_dir, re
 def _cmd_tunnel_watch(args) -> int:
     """云端 submit 的隧道守护进程入口（submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「云端 `submit`」）。
 
-    回报描述符进门即设为不可继承；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即以退出码 2 结束、不输出；
-    否则交给守护进程的主体 `tunnel_host.hold_tunnel_for_cloud_run`，返回它的退出码。主体收到 run 的标识之后把输出改接守护进程的
-    日志，各句经 `note` 以 `tunnel-watch:` 开头写进去（标准输出这时已是日志）。不装信号处理器：SIGTERM、SIGHUP 取缺省处置，进程
-    结束，隧道随之消失（ADR 0035 决策 3「寿命」）。
+    进门先把 SIGTERM 与 SIGHUP 恢复成缺省处置（`_restore_default_termination_signals`），不装信号处理器：收到这两个信号时进程结束，
+    隧道随之消失（ADR 0035 决策 3「寿命」）。回报描述符随即设为不可继承；从标准输入读一行输入，读到文件结束（submit 在交完输入之前
+    已不在）即以退出码 2 结束、不输出；否则交给守护进程的主体 `tunnel_host.hold_tunnel_for_cloud_run`，返回它的退出码。主体收到
+    run 的标识之后把输出改接守护进程的日志，各句经 `note` 以 `tunnel-watch:` 开头写进去（标准输出这时已是日志）。
     """
+    _restore_default_termination_signals()
     from gherkai_runtime import tunnel_host
 
     os.set_inheritable(args.report_fd, False)

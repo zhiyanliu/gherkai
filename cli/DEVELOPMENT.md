@@ -58,7 +58,8 @@ uv run gherkai status "$RUN_ID" --backend cloud --prefix dev- --wait
 可执行文件；发行版的使用者装带 tunnel 组件的 gherkai（如 `uv tool install 'gherkai[local,tunnel]'`）。两项缺一时 `run` 与 `submit` 在共用的
 前置检查里以退出码 `2` 结束（`_check_tunnel_prerequisites`，排在补全 definition 与上传安装包之前）。单测从不起真实隧道：`tests/conftest.py`
 的自动夹具把 `gherkai_runtime.tunnel._import_sdk` 换成一被调用即让用例失败的函数；后台进程的用例经 `tests/_inline_children.py` 替换
-`subprocess.Popen`：认出 `_reconcile` / `_tunnel_watch` 的启动命令，在同一进程的线程里执行真实的主体，两端之间是真实的管道。
+`subprocess.Popen`：认出 `_reconcile` / `_tunnel_watch` 的启动命令，在同一进程的线程里执行真实的主体，两端之间是真实的管道。要让提交
+进程本身是真实进程的用例（如对它发真实的 SIGINT）经 `tests/_submit_driver.py` 在子进程里执行一次建成的 `submit`，其中的后台进程仍是这个线程替身。
 
 云端后端只经 `submit` 执行，`run` 给出 `--backend cloud` 即以退出码 `2` 结束（ADR 0016 决策 A）。
 `--backend cloud` 的表 / 桶 / cluster / task-def / 三个 Lambda 与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，

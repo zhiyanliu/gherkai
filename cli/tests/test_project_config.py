@@ -1016,7 +1016,7 @@ def test_cloud_tunnel_daemon_reads_the_run_with_the_values_submit_resolved(tmp_p
     opened_by_daemon: list = []
     submit_side_make = compose._make_ddb_table
 
-    def make(table, *, region, profile, config=None):
+    def make(table, *, region, profile):
         t = submit_side_make(table, region=region, profile=profile)
         if threading.current_thread() is not threading.main_thread():   # 守护进程那一侧：这个 run 已经 passed
             opened_by_daemon.append((table, region, profile))

@@ -2,16 +2,17 @@
 
 证据边界：隧道服务是假的（登记进 `tunnel.PROVIDERS` 的假 provider，或注入假 SDK 的 `NgrokTunnel`），云端存储与墙钟是注入的；
 守护进程主体与 `submit` 一侧之间用真实的 `os.pipe` 与线程，`submit` 一侧用生产代码的 `handoff.WatchChannel`，管道的文件结束、EPIPE
-与非阻塞读都是真实的。SDK 与 ngrok 服务的真实行为、真实云端的读取不在这些用例的证据之内（ADR 0035「实测项」）。
+与非阻塞读都是真实的。一次读一直不返回时守护进程在到点时刻结束，用真实线程与真实时间（读阻塞在 Event 上）；被放弃的读不妨碍进程
+退出，用真实进程。SDK 与 ngrok 服务的真实行为、真实云端的读取不在这些用例的证据之内（ADR 0035「实测项」）。
 """
 from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
-import types
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -262,7 +263,7 @@ def test_watch_default_store_uses_the_handed_over_table_region_and_profile(monke
         def get_item(self, **kw):
             return {}
 
-    def make_table(table, *, region, profile, config=None):
+    def make_table(table, *, region, profile):
         made.append((table, region, profile))
         return _Table()
 
@@ -275,41 +276,117 @@ def test_watch_default_store_uses_the_handed_over_table_region_and_profile(monke
     assert end.reason == "past_closes_at" and notes == ["读不到这个 run，继续轮询"]
 
 
-class _RecordingBoto3Session:
-    """`boto3.session.Session` 的替身：记下会话参数与建资源时给的 botocore 设置，不联网。建出的表对任何读都答「没有这一项」。"""
+# ---- watch_cloud_run：一次读不返回时，到点时刻照样是上限（决策 3「云端 submit」）----
 
-    calls: list = []
+class _BlockedStore:
+    """读 run 状态时阻塞在一个 Event 上的假 RunStore（等待时释放解释器锁，同网络 IO）；放开之后答 `then`。"""
 
-    def __init__(self, *, profile_name=None, region_name=None) -> None:
-        self.calls.append(("session", profile_name, region_name))
+    def __init__(self, gate: threading.Event, then=None) -> None:
+        self.gate = gate
+        self.then = then if then is not None else _state(Status.PASSED)
+        self.reads = 0
+        self.entered = threading.Event()
 
-    def resource(self, name, *, config=None):
-        self.calls.append(("resource", name, config))
-        return types.SimpleNamespace(Table=lambda table: types.SimpleNamespace(name=table, get_item=lambda **kw: {}))
-
-    def client(self, name, *, config=None):
-        self.calls.append(("client", name, config))
-        return types.SimpleNamespace()
+    def load_run_state(self, run_id):
+        self.reads += 1
+        self.entered.set()
+        self.gate.wait(30)
+        return self.then
 
 
-def test_watch_default_store_bounds_each_read_with_short_timeouts_and_few_retries(monkeypatch):
-    """守护进程建表时带一份有界的 botocore 设置：连接与读取各 5 秒、失败之后至多重试 2 次，一次读不会在到点时刻之后再阻塞几分钟。
-    只有守护进程这一处带它：submit 与推进器经 `build_cloud_stores` 装配的表用 boto3 的缺省。"""
-    import boto3
+class _ClockedWait:
+    """注入的 `wait_read`：不真的等，把注入的墙钟向前拨这一段、记下段长，再看这次读是否已经回来；`release_at` 给出第几段之后放开读。"""
 
-    monkeypatch.setattr(_RecordingBoto3Session, "calls", [])
-    monkeypatch.setattr(boto3.session, "Session", _RecordingBoto3Session)
-    clock, notes = _Script(T0, CLOSES_AT + timedelta(seconds=1)), []
-    end = tunnel_host.watch_cloud_run("r1", runs_table="tbl", region="eu-west-1", profile="dev", closes_at=CLOSES_AT,
-                                      on_note=notes.append, clock=clock, sleep=lambda s: None)
-    assert end.reason == "past_closes_at" and notes == ["读不到这个 run，继续轮询"]
-    (session, (kind, name, config)) = _RecordingBoto3Session.calls
-    assert session == ("session", "dev", "eu-west-1") and (kind, name) == ("resource", "dynamodb")
-    assert (config.connect_timeout, config.read_timeout, config.retries) == (5, 5, {"max_attempts": 2})
+    def __init__(self, clock: _Clock, gate: threading.Event | None = None, release_at: int | None = None) -> None:
+        self.clock, self.gate, self.release_at = clock, gate, release_at
+        self.waits: list[float] = []
 
-    _RecordingBoto3Session.calls.clear()
-    compose.build_cloud_stores(table="tbl", bucket="b", region="eu-west-1", profile="dev")
-    assert [c for c in _RecordingBoto3Session.calls if c[0] == "resource"] == [("resource", "dynamodb", None)]
+    def __call__(self, event: threading.Event, timeout_s: float) -> bool:
+        self.waits.append(timeout_s)
+        self.clock.t += timedelta(seconds=timeout_s)
+        if self.release_at is not None and len(self.waits) == self.release_at:
+            self.gate.set()
+            return event.wait(5)
+        return event.is_set()
+
+
+def _real_clock() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@pytest.mark.parametrize("blocked", ["read", "assembly"])
+def test_watch_returns_at_closes_at_while_one_read_never_returns(blocked):
+    """读 run 的状态（或装配存储，如取凭证）一直不返回：守护进程按真实的墙钟在到点时刻返回「已过到点时刻」，不等这次读；期间分段
+    等了多次，没有起第二次读。真实线程、真实时间。"""
+    gate = threading.Event()
+    store = _BlockedStore(gate) if blocked == "read" else _Store([_state(Status.PASSED)])
+    opens: list[int] = []
+
+    def open_store():
+        opens.append(1)
+        if blocked == "assembly":
+            gate.wait(30)
+        return store
+
+    closes_at = _real_clock() + timedelta(seconds=0.4)
+    notes: list[str] = []
+    try:
+        started = time.monotonic()
+        end = tunnel_host.watch_cloud_run("r1", runs_table="tbl", region=None, profile=None, closes_at=closes_at,
+                                          on_note=notes.append, clock=_real_clock, poll_interval_s=0.05,
+                                          open_store=open_store)
+        elapsed = time.monotonic() - started
+        assert _real_clock() > closes_at
+    finally:
+        gate.set()
+    assert end == tunnel_host.WatchEnd(reason="past_closes_at", status=None)
+    assert 0.3 <= elapsed < 1.5
+    assert opens == [1] and store.reads == (1 if blocked == "read" else 0)
+    assert notes == []
+
+
+def test_watch_waits_for_a_pending_read_in_segments_and_rereads_the_clock():
+    """一次读没有回来：按轮询间隔与距到点时刻的余量取小分段等待（下限 0.05 秒），每段之后重读墙钟，过了到点时刻即结束；整个期间只有
+    这一次读。"""
+    gate = threading.Event()
+    store, clock, notes = _BlockedStore(gate), _Clock(CLOSES_AT - timedelta(seconds=12)), []
+    wait = _ClockedWait(clock)
+    try:
+        end = _watch(store, clock, notes, wait_read=wait)
+    finally:
+        gate.set()
+    assert end == tunnel_host.WatchEnd(reason="past_closes_at", status=None)
+    assert wait.waits == [5.0, 5.0, 2.0, 0.05] and clock.sleeps == []
+    assert store.reads == 1 and notes == []
+
+
+def test_watch_takes_a_read_that_returns_after_some_segments_by_the_usual_rules():
+    """读在第二段等待里回来、离到点时刻还远：照常处理它的结果（这里是终态）；没有另起一次读。"""
+    gate = threading.Event()
+    store, clock, notes = _BlockedStore(gate, then=_state(Status.FAILED)), _Clock(T0), []
+    wait = _ClockedWait(clock, gate=gate, release_at=2)
+    end = _watch(store, clock, notes, wait_read=wait)
+    assert end == tunnel_host.WatchEnd(reason="run_ended", status=Status.FAILED)
+    assert wait.waits == [5.0, 5.0] and store.reads == 1 and clock.sleeps == []
+
+
+def test_watch_abandoned_read_does_not_keep_the_process_alive():
+    """真实进程：到点时刻过了、那次读还卡着，watch_cloud_run 返回之后进程照常退出（读的线程是守护线程）。"""
+    code = (
+        "import threading\n"
+        "from datetime import datetime, timedelta, timezone\n"
+        "from gherkai_runtime import tunnel_host\n"
+        "class Stuck:\n"
+        "    def load_run_state(self, run_id):\n"
+        "        threading.Event().wait()\n"
+        "now = lambda: datetime.now(timezone.utc)\n"
+        "end = tunnel_host.watch_cloud_run('r1', runs_table='t', region=None, profile=None,\n"
+        "    closes_at=now() + timedelta(seconds=0.2), on_note=print, clock=now, poll_interval_s=0.05,\n"
+        "    open_store=Stuck)\n"
+        "print(end.reason)\n")
+    proc = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=30,
+                          stdin=subprocess.DEVNULL)
+    assert (proc.returncode, proc.stdout, proc.stderr) == (0, "past_closes_at\n", "")
 
 
 # ---- hold_tunnel_for_cloud_run：云端守护进程的主体（真实管道与线程）----

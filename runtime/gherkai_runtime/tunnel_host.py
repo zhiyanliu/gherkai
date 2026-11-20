@@ -16,9 +16,10 @@ WebUI）只负责 argparse、打印与退出码：
 from __future__ import annotations
 
 import os
+import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Final, Literal
@@ -30,21 +31,18 @@ from gherkai_runtime import compose, handoff
 from gherkai_runtime import tunnel as _tunnel
 
 if TYPE_CHECKING:
+    from gherkai_core.model import RunState
     from gherkai_core.ports import RunStore
 
 # 隧道模式恒注入的额外请求头（ADR 0035 决策 4）：ngrok 免费层对浏览器返回 interstitial 警告页（对自动化
 # 致命），带任意值的该头即绕过；付费户带着无害（服务端忽略）→ 不做付费检测、隧道模式下恒注入。
 TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 
-# 云端守护进程轮询 run 状态的间隔（秒，ADR 0035 决策 3「云端 `submit`」里「轮询」一条）。等 run 的标识时也按它分段等待、每段之后重读
-# 墙钟：等待的时限按单调时钟计，系统休眠的时段可能不计入，分段之后到点时刻照样按墙钟判断。
+# 云端守护进程轮询 run 状态的间隔（秒，ADR 0035 决策 3「云端 `submit`」里「轮询」一条）。等 run 的标识与等一次读的结果时也按它
+# 分段等待、每段之后重读墙钟：等待的时限按单调时钟计，系统休眠的时段可能不计入，分段之后到点时刻照样按墙钟判断。
 WATCH_POLL_INTERVAL_S: Final = 5.0
 # 每段等待的下限（秒）：离到点时刻只剩极短一段时也不空转。
 _MIN_WAIT_S: Final = 0.05
-# 守护进程单次读 run 状态的连接与读取时限（秒），与失败之后至多重试的次数（botocore 的 `max_attempts` 不含第一次请求），
-# 见 `_watch_read_config`。
-_WATCH_READ_TIMEOUT_S: Final = 5
-_WATCH_READ_MAX_RETRIES: Final = 2
 
 
 @dataclass(frozen=True)
@@ -105,24 +103,41 @@ def _bounded_wait_s(closes_at: datetime, now: datetime, poll_interval_s: float) 
     return max(_MIN_WAIT_S, min(poll_interval_s, remaining))
 
 
-def _watch_read_config():
-    """守护进程读 run 状态用的 botocore 设置：连接与读取各 5 秒，失败之后至多重试 2 次，网络不回应时一次读约半分钟即放弃。boto3 的
-    缺省（连接与读取各 60 秒、DynamoDB 多达 10 次重试）下，一次读可以阻塞十几分钟，守护进程在到点时刻之后仍持有会话；等 run 的标识
-    与轮询两个阶段以到点时刻为上限（ADR 0035 决策 3「云端 `submit`」），单次读也要有界。读失败按轮询的读失败处理，下一轮再读。"""
-    from botocore.config import Config
-
-    return Config(connect_timeout=_WATCH_READ_TIMEOUT_S, read_timeout=_WATCH_READ_TIMEOUT_S,
-                  retries={"max_attempts": _WATCH_READ_MAX_RETRIES})
-
-
 def _open_cloud_run_store(runs_table: str, *, region: str | None, profile: str | None) -> RunStore:
     """守护进程读 run 状态用的 RunStore：runs 表、region 与 profile 是 `submit` 解析之后交来的值，这里不再解析（守护进程不读配置
-    文件）。只读 STATE，不注入参数卸载与列举索引。单次读有界（`_watch_read_config`）；只有守护进程这一处这样装配，submit 与推进器
-    用 boto3 的缺省。"""
+    文件）。只读 STATE，不注入参数卸载与列举索引。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
-    return DynamoDBRunStore(compose._make_ddb_table(runs_table, region=region, profile=profile,
-                                                    config=_watch_read_config()))
+    return DynamoDBRunStore(compose._make_ddb_table(runs_table, region=region, profile=profile))
+
+
+@dataclass(eq=False)
+class _PendingRead:
+    """一次在守护线程里进行的读：装配存储（还没有装配时）并读 run 的状态。`done` 置位之前其余字段只由读的线程写，之后只由轮询读。"""
+
+    store: RunStore | None
+    done: threading.Event = field(default_factory=threading.Event)
+    state: RunState | None = None
+    error: BaseException | None = None
+
+
+def _start_read(run_id: str, store: RunStore | None, opener: Callable[[], RunStore]) -> _PendingRead:
+    """在一个守护线程里装配存储（`store` 为 None 时）并读一次 run 的状态，立即返回这次读。线程里的异常（含 BaseException）记进这次
+    读、不外抛，不经线程的缺省异常处理写到标准错误；被放弃的读的线程不妨碍进程退出。"""
+    pending = _PendingRead(store=store)
+
+    def _target() -> None:
+        try:
+            if pending.store is None:
+                pending.store = opener()
+            pending.state = pending.store.load_run_state(run_id)
+        except BaseException as e:  # noqa: BLE001 —— 交给轮询按种类处理或原样抛出
+            pending.error = e
+        finally:
+            pending.done.set()
+
+    threading.Thread(target=_target, name="gherkai-watch-read", daemon=True).start()
+    return pending
 
 
 def _one_line(text: str) -> str:
@@ -133,13 +148,20 @@ def watch_cloud_run(run_id: str, *, runs_table: str, region: str | None, profile
                     closes_at: datetime, on_note: Callable[[str], None],
                     clock: Callable[[], datetime] | None = None, sleep: Callable[[float], None] | None = None,
                     poll_interval_s: float = WATCH_POLL_INTERVAL_S,
-                    open_store: Callable[[], RunStore] | None = None) -> WatchEnd:
+                    open_store: Callable[[], RunStore] | None = None,
+                    wait_read: Callable[[threading.Event, float], bool] = threading.Event.wait) -> WatchEnd:
     """轮询云端 run 的状态，直到读到终态或墙钟严格晚于 `closes_at`（ADR 0035 决策 3「云端 `submit`」；到点时刻即运行期限加 300 秒）。
 
-    每轮先读墙钟（只读 `clock`，缺省在调用时取 `compose.now`），已过到点时刻即结束；否则读运行态，终态即结束。存储在第一次读之前装配，
-    装配失败与读失败同一处理，下一轮再装。读不到这个 run、读失败、恢复读到三种情形按种类判断：种类变化时经 `on_note` 记一句，同一种类
-    连续出现不重复记，判断只看种类、不看说明文字（这种情形可能一直持续到到点时刻，每轮记一句只会淹没日志）。只有 Exception 算读失败，
-    KeyboardInterrupt、SystemExit 照常抛出。每轮之后睡轮询间隔与距到点时刻的余量中较小的一段，下限 0.05 秒。"""
+    每轮先读墙钟（只读 `clock`，缺省在调用时取 `compose.now`），已过到点时刻即结束；否则起一次读，终态即结束。到点这个上限不依赖一次读
+    何时返回：装配存储与读运行态在一个守护线程里进行（`_start_read`），这里按轮询间隔与距到点时刻的余量中较小的一段分段等这次读的结果
+    （`wait_read(事件, 秒数)`，读完为 True），每段之后重读墙钟；墙钟过了到点时刻而这次读还没有回来时放弃它、结束。一次读可以不返回：
+    取凭证时 botocore 等 `credential_process` 不带时限，网络不回应时按 boto3 的缺省一次读也可以阻塞十几分钟。一次读没有回来之前不另起
+    一次读。
+
+    存储在第一次读之前装配，装配失败与读失败同一处理，下一轮再装。读不到这个 run、读失败、恢复读到三种情形按种类判断：种类变化时经
+    `on_note` 记一句，同一种类连续出现不重复记，判断只看种类、不看说明文字（这种情形可能一直持续到到点时刻，每轮记一句只会淹没日志）。
+    只有 Exception 算读失败，读里抛出的 KeyboardInterrupt、SystemExit 在这里照常抛出。每轮之后睡轮询间隔与距到点时刻的余量中较小的
+    一段，下限 0.05 秒。`wait_read` 供测试注入，缺省是 `threading.Event.wait`。"""
     read_clock = clock if clock is not None else compose.now
     do_sleep = sleep if sleep is not None else time.sleep
     opener = open_store if open_store is not None else (
@@ -148,21 +170,25 @@ def watch_cloud_run(run_id: str, *, runs_table: str, region: str | None, profile
     store: RunStore | None = None
     last_kind: _ReadKind = None
     while True:
-        if read_clock() > closes_at:
+        now = read_clock()
+        if now > closes_at:
             return WatchEnd(reason="past_closes_at", status=None)
+        read = _start_read(run_id, store, opener)
+        while not wait_read(read.done, _bounded_wait_s(closes_at, now, poll_interval_s)):
+            now = read_clock()
+            if now > closes_at:
+                return WatchEnd(reason="past_closes_at", status=None)  # 放弃还没有回来的这次读
+        store = read.store
         kind: _ReadKind = None
-        error: Exception | None = None
-        try:
-            if store is None:
-                store = opener()
-            state = store.load_run_state(run_id)
-        except Exception as e:  # noqa: BLE001 —— 瞬时的网络、限流与凭证问题都按读失败继续轮询，到点时刻是上限
-            kind, error = "read_error", e
-        else:
-            if state is None:
-                kind = "missing"
-            elif state.status in TERMINAL_STATUSES:
-                return WatchEnd(reason="run_ended", status=state.status)
+        error: BaseException | None = read.error
+        if error is not None:
+            if not isinstance(error, Exception):
+                raise error
+            kind = "read_error"  # 瞬时的网络、限流与凭证问题都按读失败继续轮询，到点时刻是上限
+        elif read.state is None:
+            kind = "missing"
+        elif read.state.status in TERMINAL_STATUSES:
+            return WatchEnd(reason="run_ended", status=read.state.status)
         if kind != last_kind:
             if kind == "missing":
                 on_note("读不到这个 run，继续轮询")

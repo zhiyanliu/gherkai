@@ -379,7 +379,8 @@ def _call_with_timeout(fn: Callable[[], _T], timeout_s: float, *, on_late: Calla
 
 class _SessionCloser:
     """关闭一个隧道会话：第一次调用时用 SDK 同步的 `disconnect(url)` 关闭，之后的调用不再动作；按 CLOSE_TIMEOUT_S 放弃等待；关闭期间的
-    任何异常都不外抛，含 KeyboardInterrupt（ADR 0035 决策 1）。并发调用时后来者等前一次的关闭结束（或到时放弃）才返回。
+    任何异常都不外抛，含 KeyboardInterrupt（ADR 0035 决策 1）。并发调用时后来者等前一次的关闭结束（或到时放弃）才返回；后来者在等待期间
+    被打断时不再等、同样不外抛。
 
     同时持有 SDK 给出的监听对象：实测这个对象不再被引用、被回收之后隧道仍在线，持有它是为了不依赖这一行为。不用监听对象自己的
     `close()`：它返回可等待对象，宿主都是同步代码；也不用 `kill()`：它关掉进程里全部会话。"""
@@ -392,17 +393,18 @@ class _SessionCloser:
         self._closed = False
 
     def __call__(self) -> None:
-        with self._lock:
-            if self._closed:
-                return
-            self._closed = True
-            try:
+        # 取锁、状态转换与等待关闭都在保护区里：后来者等锁期间同样可能被打断（POSIX 上等锁可以被信号打断）
+        try:
+            with self._lock:
+                if self._closed:
+                    return
+                self._closed = True
                 _call_with_timeout(lambda: self._sdk.disconnect(self._url), CLOSE_TIMEOUT_S, on_late=lambda _: None)
-            except BaseException:  # noqa: BLE001
-                # 关闭只是正常路径上的收尾动作：失败、到时或被打断，宿主进程退出时会话照样消失。被打断也不外抛：前台 run 在 atexit 里
-                # 关闭会话，这时 SIGINT 的处置已经恢复成 Python 的缺省处理，等待关闭期间按下 Ctrl-C 成为 KeyboardInterrupt，外抛就会
-                # 在使用者的终端上留下回溯
-                pass
+        except BaseException:  # noqa: BLE001
+            # 关闭只是正常路径上的收尾动作：失败、到时或被打断，宿主进程退出时会话照样消失。被打断也不外抛：前台 run 在 atexit 里
+            # 关闭会话，这时 SIGINT 的处置已经恢复成 Python 的缺省处理，等待关闭期间按下 Ctrl-C 成为 KeyboardInterrupt，外抛就会
+            # 在使用者的终端上留下回溯
+            pass
 
 
 def _upstream_addr(origin: str) -> str:

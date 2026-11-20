@@ -84,7 +84,8 @@
   与本机后台推进进程用它）与 `map_jobs_to_tunnel`（映射与隧道模式下恒同时给出的额外请求头 `TUNNEL_EXTRA_HTTP_HEADERS`；云端 `submit` 拿到
   守护进程回报的地址之后直接调用它）；会话预热地址在 `TunnelInfo.warmup_url`（经 `TunnelSetup.info` 取得）。云端 `submit` 的隧道守护进程的
   主体 `hold_tunnel_for_cloud_run`（起隧道、回报、等 run 的标识、轮询到终态或到点时刻、关闭会话；隐藏子命令 `_tunnel_watch` 的入口在 cli）
-  与它的轮询 `watch_cloud_run`（间隔 `WATCH_POLL_INTERVAL_S`，到点时刻即运行期限加 300 秒、按墙钟判断；读不到与读失败按情形的种类记一句）
+  与它的轮询 `watch_cloud_run`（间隔 `WATCH_POLL_INTERVAL_S`，到点时刻即运行期限加 300 秒、按墙钟判断；每次读在一个守护线程里进行，轮询分段
+  等它的结果，一次读不返回时照样在到点时刻结束；读不到与读失败按情形的种类记一句）
 - `handoff.py` —— `submit` 与它启动的两种后台进程（本机后台推进进程、云端隧道守护进程）之间的交接协议（ADR 0035 决策 3）：四种消息
   （`AdvancerInput` / `AdvancerReport` / `WatchInput` / `WatchReport`，各为一行 JSON）与编解码；原始描述符的读写（`read_line` / `write_all` /
   `wait_readable` / `close_quietly`，以及对端还在不在的判据 `peer_closed`：对一条由对端独占写端的管道的读端做一次非阻塞读）；回报之后把输出
