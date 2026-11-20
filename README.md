@@ -21,11 +21,12 @@ https://github.com/user-attachments/assets/5cfdb622-b0b4-4a3f-a783-d7d9dd8d8627
 ```bash
 uv tool install gherkai                     # 命令行工具（只提交云端 run 的人装这一个即可）
 uv tool install 'gherkai[local]'            # 加上本机运行的 Nova Act worker
+uv tool install 'gherkai[local,tunnel]'     # 再加隧道组件：用 --expose-local 测本机或内网里的应用
 npm i -g @gherkai/worker-midscene           # 本机运行的 Midscene worker（Node ≥ 22）
 uv tool install 'gherkai[deploy-aws]'       # 部署方：部署与维护云端后端
 ```
 
-需要 Python ≥ 3.13 与 [uv](https://docs.astral.sh/uv/)，以及一个开通了 AgentCore Browser 与所用引擎对应服务（Nova Act 服务 / Bedrock 上的默认模型）的 AWS 账户；在本机运行 Midscene worker 或部署云端后端另需 Node ≥ 22。前置要求与逐步说明见 [用户指南：开始使用](./docs/user-guide/getting-started.md)。
+需要 Python ≥ 3.13 与 [uv](https://docs.astral.sh/uv/)，以及一个开通了 AgentCore Browser 与所用引擎对应服务（Nova Act 服务 / Bedrock 上的默认模型）的 AWS 账户；在本机运行 Midscene worker 或部署云端后端另需 Node ≥ 22；用 `--expose-local` 测本机应用另需在环境变量 `NGROK_AUTHTOKEN` 里给出 ngrok 账号的令牌，不需要 ngrok 可执行文件。前置要求与逐步说明见 [用户指南：开始使用](./docs/user-guide/getting-started.md)。
 
 ## 30 秒上手
 

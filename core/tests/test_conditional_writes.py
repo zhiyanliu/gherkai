@@ -15,7 +15,7 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
   运行态不变、前台的执行中写在已收尾的 run 上写不成（ADR 0034 机制三「run 级状态只进不退」条③）、全 pending 的旧投影不把 run 级
   改回 pending（DDB 侧另断言 `update_job_state` 只发一次写）；run 已结束而 job 仍 pending 的记录（经端口写不出，直接改库造出）上，
   认领、执行中的写与投影只被 run 级那一项条件挡下，同样写不成。
-- 建 run 只在 run 不存在时成立：对已有的 run 再建抛 FileExistsError、不改任何东西（ADR 0054 决策五）。
+- 建 run 只在 run 不存在时成立：对已有的 run 再建抛 `RunAlreadyExists`（FileExistsError 的子类）、不改任何东西（ADR 0054 决策五）。
 - `update_job_state` 只写 running（写别的状态是参数错误）；返回 run 在这次写时是否仍未结束（ADR 0054 决策五，加 ADR 0034 机制三
   「run 级状态只进不退」条③）：run 级为 pending 或 running 时 True、已是终态时 False 且运行态不变；DDB 侧因 STATE 不存在被挡之后并发建出的新记录不收到这次写。job 已是终态或不在运行态里时不写、
   返回值照样只看 run，两侧对拍在 test_ending_and_commit_writes.py。
@@ -948,8 +948,10 @@ def test_finalized_run_keeps_message_against_later_projection_and_claim(run_stor
 # ---------- 建 run 只在 run 不存在时成立（ADR 0054 决策五）----------
 
 def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
-    """对已有的 run 再建抛 FileExistsError：definition 与运行态都不变——不论再建时给的 definition、初始运行态是否不同，
-    也不论这个 run 已推进到哪一步（这里已认领、已由结束写结束）。没有整份重写运行态的入口，终态不会被一次建 run 改回 pending。"""
+    """对已有的 run 再建抛 `RunAlreadyExists`（调用方据此判断「run 已存在」，它是 FileExistsError 的子类）：definition 与运行态
+    都不变——不论再建时给的 definition、初始运行态是否不同，也不论这个 run 已推进到哪一步（这里已认领、已由结束写结束）。没有
+    整份重写运行态的入口，终态不会被一次建 run 改回 pending。"""
+    from gherkai_core.errors import RunAlreadyExists
     from gherkai_core.run_status import RUN_ENDINGS
 
     meta = _meta()
@@ -959,8 +961,9 @@ def test_create_run_on_an_existing_run_fails_and_changes_nothing(run_store):
     meta_before, state_before = run_store.load_run_meta("run-1"), run_store.load_run_state("run-1")
 
     other = _meta("run-1", "x")
-    with pytest.raises(FileExistsError):
+    with pytest.raises(RunAlreadyExists) as exc:
         run_store.create_run(other, _initial(other))
+    assert exc.value.run_id == "run-1" and isinstance(exc.value, FileExistsError)
     assert run_store.load_run_meta("run-1") == meta_before
     assert run_store.load_run_state("run-1") == state_before
 

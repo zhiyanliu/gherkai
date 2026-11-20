@@ -7,10 +7,13 @@
 ```bash
 uv tool install gherkai                # 命令行本体，需 Python ≥ 3.13
 uv tool install 'gherkai[local]'       # 附带在本机运行 Nova Act 引擎所需的 worker
+uv tool install 'gherkai[local,tunnel]'  # 再附带隧道组件：用 --expose-local 测本机或内网里的应用
 npm i -g @gherkai/worker-midscene      # 在本机运行 Midscene 引擎所需的 worker，需 Node ≥ 22
 ```
 
 Midscene worker 与命令行须是同一个版本：用 `gherkai --version` 查版本号，再装 `npm i -g @gherkai/worker-midscene@<版本号>`。
+
+用 `--expose-local` 时，安装要带上 tunnel 组件（与已装的其它组件一并列出），并在环境变量 `NGROK_AUTHTOKEN` 里给出 ngrok 账号的令牌；机器上不需要 ngrok 可执行文件。
 
 ## 最小用法
 

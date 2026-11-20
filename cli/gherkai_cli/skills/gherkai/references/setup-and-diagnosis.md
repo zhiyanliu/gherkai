@@ -47,10 +47,10 @@
 
 ## 5 隧道（`--expose-local`）：前置、写法、排障
 
-**前置两样**，缺哪样都是 `run` / `submit --expose-local` 在起隧道时以退出码 2 结束，且 `doctor` 两样都不查（它不碰隧道）：
+**前置两样**，缺哪样都是 `run` / `submit --expose-local` 在开始执行之前以退出码 2 结束（不上传安装包、不起后台进程），且 `doctor` 两样都不查（它不碰隧道）：
 
-- **ngrok 可执行文件**装好且在 PATH 上（`ngrok version` 能正常执行；下载 https://ngrok.com/download ）。没装的报错点名找不到 ngrok 可执行文件。
-- **ngrok 账号的 authtoken**（免费账号即够）：`ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件，或环境变量 `NGROK_AUTHTOKEN`，任一处即可。排障别只看环境变量在不在——配置文件里配过就够。取值在 ngrok 控制台的 **Your Authtoken** 页；**API Keys** 页的值起不了隧道，两者都是长随机串、肉眼分不出，填错的表现是「隧道未就绪」、报错附带的 ngrok 日志会点明鉴权原因。
+- **带 tunnel 组件的 gherkai**：安装时加上 tunnel 组件，如 `uv tool install 'gherkai[local,tunnel]'`（已经装了别的组件的要一并列出），机器上不需要另装 ngrok。没装的报错说隧道组件没有安装；装了但无法加载的报错带上原因，重新安装即可。
+- **ngrok 账号的 authtoken**（免费账号即够），设进环境变量 `NGROK_AUTHTOKEN`：gherkai 只认这一处，ngrok 自己的配置文件里配过的不算。取值在 ngrok 控制台的 **Your Authtoken** 页；**API Keys** 页的值起不了隧道，两者都是长随机串、肉眼分不出，填错的表现是「隧道没有建成」，报错里 ngrok 的说明会点明鉴权原因。
 
 **取值只写到端口为止**：`--expose-local http://localhost:3000`，末尾多一个 `/` 可以接受（按不带斜杠处理）。带路径、查询串、片段或用户信息（`http://localhost:3000/app`、`http://user@localhost:3000`），或不以 `http://` / `https://` 开头的取值，`plan`、`run`、`submit` 都以退出码 2 结束，报错说这个取值「不是 origin」并给出写法；`run` / `submit` 在起隧道之前就拒绝，不产生费用。路径写进 step 文本，不写进选项值。
 
@@ -67,13 +67,13 @@
 - **一个 run 只能暴露一个地址**：重复给 `--expose-local` 不报错，只有最后一个生效，前面的地址不被替换。多个本机地址先收敛到同一个入口。
 - **被测应用收到的 Host 头是隧道分配的 ngrok 域名**，不是 localhost。校验 Host 的开发服务器会在框架层拒绝：Vite 的 `server.allowedHosts`、Django 的 `ALLOWED_HOSTS`、Rails 的 host authorization 都要放行隧道域名；域名以「隧道已建立」那行给出的公网地址为准：ngrok 给每个账号分配一个固定的开发域名，后缀视账号是 `.ngrok-free.dev` 或 `.ngrok-free.app`；放行这个域名，或用与它后缀一致的通配写法（如 `.ngrok-free.dev`）。症状是请求到了应用却返回 400 或「Blocked request / host not allowed」，本机直连正常。
 
-**隧道的持有与拆除**：`run` 由前台 CLI 进程持有，命令结束或 Ctrl-C 即拆；`submit` 由本机后台进程持有，run 到终态即拆；`submit --backend cloud` 由本机守护进程持有，到终态或 `--tunnel-ttl` 到点即拆。三种都要求**本机保持开机联网到 run 终态**。执行期间用 kill 命令（SIGTERM）结束 `run` 与 Ctrl-C 一样：先停止 worker、输出汇总，再拆隧道；`kill -9`，以及在开始执行之前或输出汇总期间收到的 SIGTERM，都不会拆隧道，此时到进程列表里结束 ngrok。隧道断了不自动重连，受影响的 scenario 以导航失败告终，修好后重新运行。
+**隧道由谁持有、何时关闭**：隧道建在持有它的 gherkai 进程里，随该进程退出而关闭，进程怎样退出（含 `kill -9`）都一样，不用另去结束什么。`run` 由执行命令的进程持有；`submit` 由它启动的本机后台进程持有，推进到 run 结束之后退出；`submit --backend cloud` 由本机的守护进程持有，读到 run 结束时退出，读不到时最晚在这个 run 允许运行的时间过后 5 分钟退出。三种都要求**本机保持开机联网到 run 终态**。隧道断了不自动重连，受影响的 scenario 以导航失败告终，修好后重新运行。
 
-**排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；本机后端 `submit` 的隧道进程号记在 `<report-dir>/<run_id>/tunnel.json`；`submit --backend cloud` 的隧道守护进程日志在系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`（提交时「隧道由守护进程持有」那一行给出完整路径）；起隧道的完整日志（ngrok 自己的日志）在系统临时目录里以 `gherkai-tunnel-` 开头、文件名不含 watch 的 `.log` 文件，按修改时间取最新；`submit` 若打出「隧道已拆除」，这个 run 已经不可用，别再等它的结果，修好报错后重新提交。
+**排障入口**：CLI 打的「隧道已建立」那行给出原始地址与替换后的公网地址（Host 放行要用它的域名）；`submit --backend cloud` 的隧道守护进程日志在系统临时目录的 `gherkai-tunnel-watch-<run_id>.log`（提交时「隧道由本机的后台进程持有」那一行给出完整路径）；`submit` 若说持有隧道的本机后台进程已经退出、隧道已不在，这个 run 里要访问被测应用的 job 会失败，别再等它的结果，修好报错后重新提交。
 
 **向用户说明隧道的安全边界**：隧道存活期间被测应用可从公网访问，gherkai 为每次运行生成专用的访问令牌与会话 cookie、由 ngrok 在边缘校验，不带会话 cookie 的请求到不了本机；step 文本里只有干净的隧道地址；令牌出现在提交记录 `run_meta.json` 的预热地址里（明文，运行要读回），引擎的浏览器访问过预热地址、引擎原生产物里也可能记下它；gherkai 自己写的失败消息、`explain` 输出与 AI 证据里令牌与签名类参数显示为 `***`；引擎原生产物、云端 CloudWatch 日志里由引擎 SDK 自己写出的内容、设备目标上 Device Farm 的会话录像与 Appium 日志不脱敏，报告与日志按内部资料对待；会话 cookie 会出现在被测应用的访问日志里；只把测试实例接上隧道。
 
-**预热失败的四种消息**（都在 `explain` 的 job 判定消息里，scope 没执行任何 step）：「隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受…」是令牌被拒（隧道已重建，或两侧隧道配置不一致），重新提交这次运行，仍出现时核对命令行工具与后端是否同版本；「隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie…」是会话 cookie 未通过校验（浏览器没有保存或没有带上会话 cookie，或隧道在预热期间重建），确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交；「隧道会话预热未能确认就绪（已尝试 3 次）…」是隧道已拆或浏览器到隧道入口的网络不通（预热的两个地址都由边缘直接响应，与本机应用是否在运行无关），确认隧道仍在后重新提交；「后端未传递会话预热地址，部署版本可能低于命令行工具…」是云端后端旧于命令行工具，请部署方 `gherkai deploy` 后重新提交。
+**预热失败的四种消息**（都在 `explain` 的 job 判定消息里，scope 没执行任何 step）：「隧道会话预热被拒绝：访问令牌或会话 cookie 不被边缘节点接受…」是令牌被拒（隧道已重建，或两侧隧道配置不一致），重新提交这次运行，仍出现时核对命令行工具与后端是否同版本；「隧道会话预热被拒绝：边缘节点没有收到有效的隧道会话 cookie…」是会话 cookie 未通过校验（浏览器没有保存或没有带上会话 cookie，或隧道在预热期间重建），确认隧道仍在、浏览器允许安全 cookie，必要时换浏览器或设备后重新提交；「隧道会话预热未能确认就绪（已尝试 3 次）…」是隧道已关闭或浏览器到隧道入口的网络不通（预热的两个地址都由边缘直接响应，与本机应用是否在运行无关），确认隧道仍在后重新提交；「后端未传递会话预热地址，部署版本可能低于命令行工具…」是云端后端旧于命令行工具，请部署方 `gherkai deploy` 后重新提交。
 
 ## 6 版本不一致（`--backend cloud` 退出码 2）
 
@@ -109,11 +109,11 @@
 | `list-runs --backend cloud` 以退出码 2 结束、说「还没有 run 清单索引」或索引「正在被删除」 | 后端还没有用当前版本部署，或索引被删 | 交部署方用当前版本的 `gherkai deploy` 重新部署（你不自己运行） |
 | `list-runs --backend cloud` 以退出码 2 结束、说重试后仍有 run 没有读回 | 读取被限流 | 稍后重试 |
 | `list-runs --backend cloud` 以退出码 2 结束、说读不到运行状态表 | 前缀、表名或 region 不对，或凭证缺索引上的 `dynamodb:Query`、表上的 `dynamodb:BatchGetItem` | 先核对 `--prefix` / `--region`；缺权限就交人补（清单见 https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/cloud-backend.md 「团队成员需要的最小云端权限」一节） |
-| `--expose-local` 起隧道失败 | 没装 ngrok、或 authtoken 没配（配置文件与环境变量都没有）、或填的是 API key、或本机没外网 | 第 5 节 |
+| `--expose-local` 以退出码 2 结束，说隧道组件没有安装、没有令牌或隧道没有建成 | 没装带 tunnel 组件的 gherkai、或没设 `NGROK_AUTHTOKEN`、或填的是 API key、或本机没外网 | 第 5 节 |
 | 以退出码 2 结束、说 `--expose-local` 的取值「不是 origin」 | 取值带了路径、查询串、片段或用户信息，或不以 `http://` / `https://` 开头 | 只写到端口为止（如 `http://localhost:3000`），路径留在 step 文本里（第 5 节） |
 | 隧道已建立，每条 scenario 第一步导航就失败，应用日志里没有请求 | 选项值与 feature 书写的地址不一致（localhost 对 `127.0.0.1`、端口、大小写），地址没被替换 | 第 5 节：`plan --expose-local` 回显与 step 文本逐字对照，改成一致 |
 | 请求到了应用，页面返回 400 或「host not allowed」，本机直连正常 | 开发服务器校验 Host，拒绝了隧道域名 | 第 5 节：放行隧道域名（通配写法） |
-| run 中途开始每条 scenario 都导航失败 | 隧道已拆：本机关机或断网，或 `--tunnel-ttl` 到点 | 保持开机联网；批量大时给更长的 `--tunnel-ttl` |
+| run 中途开始每条 scenario 都导航失败 | 隧道已不在：本机关机或断网，或持有隧道的 gherkai 进程退出了 | 保持开机联网到 run 终态，修好后重新运行 |
 | 收窄参数以退出码 2 结束并列出候选 | `--scope` / `--scenario` / `--tags` 筛成空集 | 从列出的候选里挑正确的值 |
 | cloud 命令以退出码 2 结束、说 CLI 新于后端 | 版本不一致 | 第 6 节 |
 | cloud 提交以退出码 2 结束、说 variant 没推过 | 某引擎缺该 `--worker-variant` | `gherkai deploy list-workers` 看有哪些；推它或换名（`references/cloud-backend.md`） |

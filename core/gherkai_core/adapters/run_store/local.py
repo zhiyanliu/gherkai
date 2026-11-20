@@ -33,6 +33,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
+from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import (
     CommitOutcome,
@@ -163,16 +164,19 @@ class LocalRunStore:
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
         """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json），只在 run 目录里还没有运行态时成立。
 
-        判据与两个文件的写在同一把文件锁内（ADR 0054 决策五）：运行态已在 → 抛 FileExistsError，两个文件都不碰。只有
+        判据与两个文件的写在同一把文件锁内（ADR 0054 决策五）：运行态已在时抛 `RunAlreadyExists`，两个文件都不碰。只有
         run_meta.json、没有运行态的目录（建 run 在两次写之间中断）照常建。写序同云端：definition 在前、运行态在后，运行态一出现，
-        definition 必已在。后台执行标记只在这里写下。"""
+        definition 必已在。后台执行标记只在这里写下。
+
+        报告目录里与 run 同名的不是目录（普通文件、悬空的符号链接）时，建目录抛的是普通的 FileExistsError：那是写记录失败，
+        不是 run 已存在，原样抛出、不译成 `RunAlreadyExists`。"""
         check_new_run(meta)  # 没有 job 的运行定义不建（先于建目录，不留空目录）
         run_dir = self._root / meta.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         path = run_dir / _STATE_FILE
         with self._run_lock(run_dir):
             if path.exists():
-                raise FileExistsError(f"run {meta.run_id} 已存在，不重新建立")
+                raise RunAlreadyExists(meta.run_id)
             _atomic_write_json(run_dir / _META_FILE, run_meta_to_dict(meta))
             self._write_state(path, initial_state, {"detached": True} if self._detached else {})
 

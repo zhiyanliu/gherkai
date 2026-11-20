@@ -1,8 +1,10 @@
 """项目配置文件 gherkai.toml（ADR 0053）的护栏：键集差集、定位、取值顺序（含「配置不越过环境变量」）、错误形态、
-设备段与应用段的形态、路径基准、doctor 的配置文件行。"""
+设备段与应用段的形态、路径基准、doctor 的配置文件行，以及后台宿主（本机后台推进进程、云端隧道守护进程、status --wait 接力）不读
+配置文件。"""
 from __future__ import annotations
 
 import json
+import os
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -14,6 +16,7 @@ from gherkai_cli import settings
 from gherkai_cli import device_selection as devsel
 from gherkai_runtime import compose
 
+from _inline_children import inline_children  # noqa: F401 —— 夹具：submit 启动的后台进程在线程里执行
 from test_main import _fake_locator, _fake_schedule_factory, _no_provider
 
 FEATURE = 'Feature: F\n  Scenario: a\n    When "做事"\n'
@@ -23,7 +26,7 @@ DEVICE_FEATURE = '@device:android\nFeature: F\n  Scenario: a\n    When "做事"\
 PER_CALL = {"--scope", "--tags", "--scenario", "--step", "--json", "--quiet", "--wait", "--all", "--full",
             "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config"}
 COMMON = {"--default-engine", "--assertion-votes", "--max-concurrency", "--default-job-timeout", "--grace", "--expose-local",
-          "--tunnel", "--tunnel-ttl", "--report-dir", "--steps-dir", "--backend", "--region", "--profile"}
+          "--tunnel", "--report-dir", "--steps-dir", "--backend", "--region", "--profile"}
 CLOUD = {"--prefix", "--ddb-table", "--s3-bucket", "--worker-variant"}
 DEVICE = {"--android-device-arn": ("devices.android", "arn"), "--ios-device-arn": ("devices.ios", "arn"),
           "--device-farm-project-arn": ("devices", "project-arn"), "--app-bucket": ("devices", "app-bucket")}
@@ -122,7 +125,6 @@ def test_explicit_missing_config_exits_2_before_anything_else(tmp_path, monkeypa
     ("[common]\nmax-concurrency = 'abc'\n", "应为整数"),                    # 内建类型的失败给产品语言理由
     ("[common]\nmax-concurrency = '4'\n", "应为整数"),                      # 数字选项不收文本：TOML 里 "4" 是文本
     ("[common]\ndefault-job-timeout = 1" + "0" * 400 + "\n", "不是可接受的数字"),  # 自定义校验吞不下的数：不带解释器原文
-    ("[common]\ntunnel-ttl = 'x'\n", "应为数字"),
     # 事件表、cluster、子网与安全组不是 [cloud] 的键，写了即未知键：推进器的这几项取自部署注入的环境变量（ADR 0016 决策 C）
     ("[cloud]\nevents-table = 'x'\n", "events-table"),
     ("[cloud]\ncluster = 'x'\n", "cluster"),
@@ -135,6 +137,22 @@ def test_config_errors_exit_2_naming_file_section_and_key(tmp_path, monkeypatch,
     assert m.main(["submit", str(_feature(tmp_path)), "--backend", "cloud"]) == 2
     err = capsys.readouterr().err
     assert "gherkai.toml" in err and needle in err
+
+
+def test_removed_tunnel_ttl_is_unknown_on_the_command_line_and_in_the_config_file(tmp_path, monkeypatch, capsys):
+    """submit 不再有 --tunnel-ttl（隧道随持有它的进程退出而关闭，ADR 0035 决策 3）：命令行上给它是不认识的参数，退出码 2；配置文件的
+    键由选项派生（ADR 0053 决策 6），同名的键随之成为不认识的键，同样以退出码 2 结束、点名文件、节与键，不提示可用的键里有它。"""
+    monkeypatch.chdir(tmp_path)
+    feat = str(_feature(tmp_path))
+    with pytest.raises(SystemExit) as ei:
+        m.main(["submit", feat, "--tunnel-ttl", "5"])
+    assert ei.value.code == 2
+    assert "unrecognized arguments: --tunnel-ttl 5" in capsys.readouterr().err
+    cfg = _toml(tmp_path, "[common]\ntunnel-ttl = 30\n")
+    assert m.main(["submit", feat]) == 2
+    err = capsys.readouterr().err
+    assert f"配置文件 {cfg.resolve()} 的 [common] 里有不认识的键 tunnel-ttl；" in err
+    assert err.count("tunnel-ttl") == 1 and "Traceback" not in err
 
 
 @pytest.mark.parametrize("argv", [["run"], ["run", "f.feature"], ["submit", "f.feature"]],
@@ -171,7 +189,7 @@ def test_config_numbers_keep_native_types_and_reasons_are_product_language():
     def conv(dest, raw):
         return settings.convert_config_value(settings.find_option_action(p, dest), raw, section="common", key=dest.replace("_", "-"), path="x.toml")
 
-    assert conv("tunnel_ttl", 30) == 30.0 and conv("default_job_timeout", 600) == 600.0 and conv("max_concurrency", 3) == 3
+    assert conv("grace", 30) == 30.0 and conv("default_job_timeout", 600) == 600.0 and conv("max_concurrency", 3) == 3
     received = []
     recording = SimpleNamespace(type=lambda v: received.append(type(v)) or v, choices=None, option_strings=["--x"], dest="x", nargs=None)
     assert settings.convert_config_value(recording, 30, section="common", key="x", path="x.toml") == 30
@@ -350,27 +368,33 @@ def test_local_run_from_subdir_lands_report_under_config_dir(tmp_path, monkeypat
     assert not (sub / "out").exists()
 
 
-def test_submit_local_passes_config_region_to_per_run_process(tmp_path, monkeypatch):
-    """per-run 进程不读配置文件：提交侧按「选项 > 环境变量 > 配置文件」解析后的 region 经 argv 传给它。"""
-    import subprocess
+def test_submit_local_hands_the_config_region_to_the_background_advancer(tmp_path, monkeypatch, capsys, inline_children):
+    """本机后台推进进程不读配置文件（ADR 0053 决策 1）：提交侧按「选项 > 环境变量 > 配置文件」解析后的 region 经标准输入交给它，
+    它装配引擎时用的就是这个值；它的工作目录里另有一份写着别的 region 的配置文件也不影响。"""
+    import gherkai_runtime.detached as detached
 
     monkeypatch.chdir(tmp_path)
     _toml(tmp_path, "[common]\nregion = 'eu-west-1'\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _toml(elsewhere, "[common]\nregion = 'sa-east-1'\n")
+    inline_children.before_child = lambda child: os.chdir(elsewhere)
     monkeypatch.delenv("AWS_REGION", raising=False)
     monkeypatch.delenv("AWS_DEFAULT_REGION", raising=False)
-    forked: list = []
+    engine_regions: list = []
+    monkeypatch.setattr(compose, "build_engines", lambda **kw: engine_regions.append(kw["region"]) or {})  # 不起 worker
+    monkeypatch.setattr(detached, "advance_local_run", lambda advancer, meta, **kw: None)
 
-    class _P:
-        pid = 1
+    def region_the_advancer_used() -> str:
+        os.chdir(tmp_path)   # 上一次的后台推进进程把工作目录换到了别处
+        assert m.main(["submit", str(_feature(tmp_path)), "--report-dir", str(tmp_path / "r")]) == 0, capsys.readouterr().err
+        inline_children.children[-1].wait()
+        return engine_regions[-1]
 
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _P())
-    assert m.main(["submit", str(_feature(tmp_path)), "--report-dir", str(tmp_path / "r")]) == 0
-    argv = forked[0]
-    assert argv[argv.index("--region") + 1] == "eu-west-1"
+    assert region_the_advancer_used() == "eu-west-1"
     monkeypatch.setenv("AWS_REGION", "ap-south-1")
-    assert m.main(["submit", str(_feature(tmp_path)), "--report-dir", str(tmp_path / "r")]) == 0
-    argv = forked[1]
-    assert argv[argv.index("--region") + 1] == "ap-south-1"   # 环境变量胜过配置文件
+    assert region_the_advancer_used() == "ap-south-1"   # 环境变量胜过配置文件
+    assert len(engine_regions) == 2
 
 
 # ---- doctor（决策 1）----
@@ -882,8 +906,9 @@ def test_arn_check_only_looks_at_service_and_resource_type_segments(tmp_path, mo
     assert _plan_json([str(_feature(tmp_path, DEVICE_FEATURE)), "--android-device-arn", odd], capsys)["devices"]["android"]["arn"] == odd
 
 
-def test_invalid_grace_or_ttl_is_rejected_before_any_aws_call(tmp_path, monkeypatch, capsys):
-    """本机后端的账号比对（STS）与安装包上传排在 run 的 --grace、submit 的 --tunnel-ttl 校验之后：配置错的 run 不该先上传再被拒。"""
+def test_invalid_grace_or_failed_engine_self_description_is_rejected_before_any_aws_call(tmp_path, monkeypatch, capsys):
+    """本机后端的账号比对（STS）与安装包上传排在 run 的 --grace 校验、submit 向引擎问停止宽限之后：配置错或引擎自述失败的 run 不该
+    先上传再被拒，submit 也不启动后台推进进程。"""
     import subprocess
 
     monkeypatch.chdir(tmp_path)
@@ -895,13 +920,20 @@ def test_invalid_grace_or_ttl_is_rejected_before_any_aws_call(tmp_path, monkeypa
 
     sts_calls = []
     monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: sts_calls.append(1))  # 记次数：抛 AssertionError 会被当成「核对失败」吞掉
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("不该走到 fork")))
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: (_ for _ in ()).throw(AssertionError("不该启动后台推进进程")))
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     feat = _feature(tmp_path, APP_FEATURE_TWO_SCOPES)
     assert m.main(["run", str(feat), "--no-report", "--grace", "0"]) == 2
     assert "--grace" in capsys.readouterr().err and s3.uploads == [] and sts_calls == []
-    assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r"), "--tunnel-ttl", "0"]) == 2
-    assert "--tunnel-ttl" in capsys.readouterr().err and s3.uploads == [] and sts_calls == []
+
+    def self_description_fails(engine):
+        raise RuntimeError("worker 没有在时限内答出能力自述")
+
+    monkeypatch.setattr(compose, "engine_min_grace", self_description_fails)
+    assert m.main(["submit", str(feat), "--report-dir", str(tmp_path / "r")]) == 2
+    err = capsys.readouterr().err
+    assert "引擎 novaact 的 worker 自述失败，拒绝提交：worker 没有在时限内答出能力自述" in err
+    assert s3.uploads == [] and sts_calls == [] and not (tmp_path / "r").exists()
 
 
 def test_first_upload_failure_exits_2_with_product_message(tmp_path, monkeypatch, capsys):
@@ -917,38 +949,108 @@ def test_first_upload_failure_exits_2_with_product_message(tmp_path, monkeypatch
     assert "上传安装包" in err and "失败" in err and "NoSuchBucket" in err and "Traceback" not in err
 
 
-def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch):
-    """提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
-    宿主代码结构上也不引用 CLI 的配置模块。"""
-    import inspect
-    import subprocess
-
+def _app_run_with_another_project_elsewhere(tmp_path: Path, monkeypatch) -> tuple[Path, Path, list]:
+    """带设备与应用的 run 的提交环境，外加另一个目录：那里的 gherkai.toml 给出别的项目 ARN、设备选择、应用桶与安装包。后台推进进程的
+    推进换成记录它收到的运行定义的函数，不起 worker。返回 (报告目录, 另一个目录, 推进收到的运行定义)。"""
     import gherkai_runtime.detached as detached
 
     monkeypatch.chdir(tmp_path)
     _android_env(monkeypatch)
     monkeypatch.delenv("GHERKAI_APP_BUCKET", raising=False)
     _app_project(tmp_path)
-    s3 = _UploadS3()
-    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: s3)
+    monkeypatch.setattr(compose, "_make_s3_client", lambda *, region, profile: _UploadS3())
     monkeypatch.setattr(compose, "probe_aws_identity", lambda **kw: {"account": "111111111111", "arn": "x", "region": "us-east-1"})
-
-    class _P:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _P())
-    reports = tmp_path / "r"
-    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0
-    run_id = next(d for d in reports.iterdir() if d.is_dir()).name
-    other = tmp_path / "elsewhere"
-    other.mkdir()
-    _toml(other, "[devices]\nproject-arn = 'arn:aws:devicefarm:us-west-2:999999999999:project:other'\n[devices.android]\nos-version = '99'\n")
-    monkeypatch.chdir(other)
     monkeypatch.setattr(compose, "build_engines", lambda **kw: {})  # 不起 worker
-    meta = detached.build_local_reconcile(str(reports), run_id, 1)[0]
+    advanced: list = []
+    monkeypatch.setattr(detached, "advance_local_run", lambda advancer, meta, **kw: advanced.append(meta))
+    other = tmp_path / "elsewhere"
+    (other / "build").mkdir(parents=True)
+    (other / "build" / "other.apk").write_bytes(b"other-apk-bytes")
+    _toml(other, ("[devices]\nproject-arn = 'arn:aws:devicefarm:us-west-2:999999999999:project:other'\n"
+                  "app-bucket = 'other-apps'\n[devices.android]\nos-version = '99'\n"
+                  "[apps.wiki]\nandroid = { file = 'build/other.apk', package = 'org.other' }\n"))
+    return tmp_path / "r", other, advanced
+
+
+def _assert_submitted_device_and_app_values(meta) -> None:
     for job in meta.jobs:
         assert job.device_request.project_arn == PROJECT_ARN and job.device_request.device_arn == DEV_ARN
-        assert job.target.app.bucket == "my-apps"
+        assert job.target.app.bucket == "my-apps" and job.target.app.app_id == "org.wikipedia"
+
+
+def test_local_background_advancer_uses_the_handed_over_device_and_app_values(tmp_path, monkeypatch, capsys,
+                                                                              inline_children):
+    """本机后台推进进程不读配置文件（ADR 0053 决策 1、决策 6 的护栏）：它在另一个工作目录（那里的 gherkai.toml 写着别的项目 ARN、
+    设备与应用）里建 run，写下的运行定义与推进用的那一份里的设备与应用值仍是提交时解析、经标准输入交来的。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    reports, other, advanced = _app_run_with_another_project_elsewhere(tmp_path, monkeypatch)
+    inline_children.before_child = lambda child: os.chdir(other)
+    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0, \
+        capsys.readouterr().err
+    inline_children.settle()
+    run_id = capsys.readouterr().out.strip()
+    assert Path.cwd() == other.resolve()   # 后台推进进程确实在另一个目录里建的 run
+    written = LocalRunStore(reports).load_run_meta(run_id)
+    _assert_submitted_device_and_app_values(written)
+    assert advanced == [written]
+
+
+def test_cloud_tunnel_daemon_reads_the_run_with_the_values_submit_resolved(tmp_path, monkeypatch, capsys,
+                                                                           inline_children):
+    """云端的隧道守护进程同样不读配置文件（ADR 0053 决策 1）：配置文件给的 runs 表、region 与 profile 由 submit 解析后经标准输入交来；
+    守护进程在另一个工作目录（那里的 gherkai.toml 写着别的值）里照这三个值打开 runs 表、读这个 run 的状态，读到终态即关闭会话。"""
+    import threading
+
+    from test_backend_cloud import ORIGIN, _install_fake_tunnel, _patch_cloud_handles
+
+    monkeypatch.chdir(tmp_path)
+    _toml(tmp_path, "[common]\nregion = 'eu-west-1'\nprofile = 'team'\n[cloud]\nddb-table = 'team-runs'\n")
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.mkdir()
+    _toml(elsewhere, "[common]\nregion = 'sa-east-1'\nprofile = 'other'\n[cloud]\nddb-table = 'other-runs'\n")
+    for v in ("AWS_RESOURCE_PREFIX", "AWS_DDB_TABLE", "AWS_S3_BUCKET", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE"):
+        monkeypatch.delenv(v, raising=False)
+    _patch_cloud_handles(monkeypatch, [])
+    service = _install_fake_tunnel(monkeypatch)
+    opened_by_daemon: list = []
+    submit_side_make = compose._make_ddb_table
+
+    def make(table, *, region, profile):
+        t = submit_side_make(table, region=region, profile=profile)
+        if threading.current_thread() is not threading.main_thread():   # 守护进程那一侧：这个 run 已经 passed
+            opened_by_daemon.append((table, region, profile))
+            t.get_item = lambda **kw: {"Item": {"run_id": kw["Key"]["run_id"], "item_type": "STATE", "status": "passed",
+                                                "jobs": {}}}
+        return t
+
+    monkeypatch.setattr(compose, "_make_ddb_table", make)
+    inline_children.watch_kwargs = {"poll_interval_s": 0.05}   # 不注入存储：守护进程按交来的值自己打开 runs 表
+    inline_children.before_child = lambda child: os.chdir(elsewhere)
+    assert m.main(["submit", str(_feature(tmp_path)), "--backend", "cloud", "--expose-local", ORIGIN]) == 0, \
+        capsys.readouterr().err
+    inline_children.settle()
+    run_id = capsys.readouterr().out.strip()
+    assert opened_by_daemon == [("team-runs", "eu-west-1", "team")]
+    child = inline_children.only()
+    assert child.notes[-1] == f"run {run_id} 已结束（passed），隧道已关闭"
+    assert child.returncode == 0 and service.closed
+
+
+def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch, capsys, inline_children):
+    """提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
+    宿主代码结构上也不引用 CLI 的配置模块。"""
+    import inspect
+
+    import gherkai_runtime.detached as detached
+
+    reports, other, _advanced = _app_run_with_another_project_elsewhere(tmp_path, monkeypatch)
+    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0, \
+        capsys.readouterr().err
+    inline_children.settle()
+    run_id = capsys.readouterr().out.strip()
+    monkeypatch.chdir(other)
+    _assert_submitted_device_and_app_values(detached.build_local_reconcile(str(reports), run_id, 1)[0])
     assert "gherkai_cli" not in inspect.getsource(detached)
 
 

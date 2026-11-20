@@ -604,7 +604,7 @@ class CommandSpan(NamedTuple):
 
     `words` 是 `gherkai` 之后、第一个 flag 之前的裸词（子命令与位置参数占位符混在一起，由调用方按自己那份
     parser 解析出子命令路径）；`flags` 是该跨内**全部** `--flag`（已去掉 `=值` 与收尾标点）。
-    只认同一个代码跨内的组合：跨越两个跨（`` `gherkai run` 加上 `--tunnel-ttl` ``）不构成「这个 flag 挂这个
+    只认同一个代码跨内的组合：跨越两个跨（`` `gherkai run` 加上 `--worker-variant` ``）不构成「这个 flag 挂这个
     子命令」的断言素材，散落的裸 flag 另做弱断言。
     """
 

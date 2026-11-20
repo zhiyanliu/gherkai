@@ -11,7 +11,7 @@
 | 执行方式 | 命令 | 特点 |
 |---|---|---|
 | 前台 | `gherkai run <feature...>` | CLI 全程在线，运行结束后直接输出判定与产物位置，退出码就是判定。CLI 进程结束（如终端关闭）这个 run 即停止；机器休眠时 CLI 随之暂停、唤醒后继续，休眠的时长计入各 job 的预算与允许运行的时间（见下「允许运行的时间」） |
-| 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 打印一个 `run_id` 后立即退出，后台继续执行；用 `status` 查进度，`status --wait` 等到运行结束并拿判定 |
+| 后台 | `gherkai submit <feature...>` 再 `gherkai status <run_id>` | `submit` 等这个 run 建好即打印一个 `run_id` 并退出，后台继续执行；用 `status` 查进度，`status --wait` 等到运行结束并拿判定 |
 
 **在哪运行、落在哪**（`--backend`）
 
@@ -20,7 +20,7 @@
 | `local`（默认） | 本机子进程 | `--report-dir` 指的本地目录 | 本机装好要用的引擎 worker，有 AWS 凭证 |
 | `cloud` | Fargate 容器 | 状态与提交记录落 DynamoDB，判定明细与报告落 S3 的产物桶（`<前缀>artifacts`） | 部署方先执行过 `gherkai deploy`，提交时给同一个 `--prefix` |
 
-`submit --backend local` 在本机起一个脱离 CLI 的后台进程推进，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这个 run 执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
+`submit --backend local` 在本机起一个脱离 CLI 的后台推进进程，由它建立这个 run 并执行到结束，本机要保持开机；`submit --backend cloud` 提交完即可关机，云端自己把这个 run 执行完；只有用 `--expose-local` 时例外——隧道在本机，要保持开机联网到这个 run 结束。
 
 下面各级需要的权限不同、费用记到的账户也不同（`plan` 不需要凭证，单列一行）。
 
@@ -70,7 +70,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 |---|---|---|
 | `gherkai plan <feature...>` | 用例预检：打印 scope / job 分组，逐步标注哪些步由确定性 step 执行（行尾给出该 step 的说明），未标注的步交给 AI；同时校验写法与配置。不连云、不产生费用 | `--scope` / `--tags` / `--scenario`、`--default-engine`、`--assertion-votes`、`--default-job-timeout`、`--steps-dir`、`--json` |
 | `gherkai run <feature...>` | 前台运行完这个 run，输出文本汇总，并把报告、运行元信息、判定明细三处位置输出到标准错误（stderr） | 见下「常用选项」 |
-| `gherkai submit <feature...>` | 提交这个 run 并立即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant`、`--tunnel-ttl` |
+| `gherkai submit <feature...>` | 提交这个 run，建好即返回，stdout 只有一个 `run_id` | `--backend`、`--max-concurrency`、`--report-dir`、`--prefix`、`--worker-variant` |
 | `gherkai status <run_id>` | 查这个 run 的进度与结果；到终态时同时输出三处产物位置 | `--wait`、`--backend`、`--report-dir`、`--prefix`、`--max-concurrency`、`--json` |
 | `gherkai list-runs` | 列出一个后端里的 run，用来找回 run_id：默认列出全部未结束的 run 与最近创建的 20 条已结束的 run。只读，见下「找回 run_id」 | `--backend`、`--report-dir`、`--prefix`、`--status`、`--limit`、`--json` |
 | `gherkai explain <run_id> [<scope_id>]` | 看每一步的证据：问了 AI 什么、AI 看见了什么、为什么这么判。用例没过时先运行这个命令 | `--scenario`、`--step`、`--all`、`--full`、`--json` |
@@ -83,7 +83,7 @@ gherkai explain "$RUN_ID"                                  # 有用例没过时�
 
 使用云端后端时 CLI 不能新于后端：CLI 与后端都是正式发行版本、且 CLI 比后端新时，`submit`、`status`、`list-runs` 与 `explain` 在读写云端之前即以退出码 2 结束。比对规则、后端没有版本戳时的处理与升级顺序见 [`cloud-backend.md`](./cloud-backend.md)「版本与升级」。
 
-提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。`submit` 提交的 run 在后台读到不能执行的提交记录时，把这个 run 与其中还没结束的 job 都记为 `error`，并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键，各 job 的 `message` 是同一句），这样的 run 没有报告；因超过允许运行的时间、`--fail-fast` 或中断而有 job 没有启动的 run 同样有这一行，说明余下的 job 为什么没有启动（见下「允许运行的时间」与「退出码」）。只有这几类 run 有这一行，job 自身的失败原因看 `explain`。
+提交记录带格式版本。`status`、`explain` 与本机后台接力读到的提交记录格式与本机 CLI 支持的不一致时以退出码 2 结束并点名写出它的版本：由更新版本写出的请升级本机 CLI，由更早版本写出的用那个版本查看（`uvx --from 'gherkai==<版本>' gherkai status …`）或用当前版本重新提交。**同一个报告目录不要混用 1.4 与 1.5 的 CLI 读写**：1.4 的 CLI 读 1.5 的记录会静默误判，1.5 的 CLI 读 1.4 的记录直接拒绝。`submit --backend cloud` 提交的 run 在云端读到不能执行的提交记录时，把这个 run 与其中还没结束的 job 都记为 `error`，并在 `status` 的 `message` 行里给出原因（`--json` 下是顶层 `message` 键，各 job 的 `message` 是同一句），这样的 run 没有报告；因超过允许运行的时间、`--fail-fast` 或中断而有 job 没有启动的 run 同样有这一行，说明余下的 job 为什么没有启动（见下「允许运行的时间」与「退出码」）。只有这几类 run 有这一行，job 自身的失败原因看 `explain`。
 
 ## 常用选项（`run` / `submit`）
 
@@ -136,7 +136,7 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 | `--quiet` | 关 | 仅 `run`：不输出逐事件进度，仍输出文本汇总。worker 日志改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），只打印一行位置 |
 | `--json` | 关 | 仅 `run`：标准输出只打机器可读 JSON、不打文本汇总；进度与诊断照常走标准错误，逐事件进度可用 `--quiet` 静音 |
 | `--steps-dir DIR` | `./steps` | 项目自己的确定性 step 目录，也可用环境变量 `GHERKAI_STEPS_DIR`。目录里任一文件加载失败即整个 run 拒绝运行。云端后端下不生效（云端 worker 的 step 构建在镜像里，只警告不拦），写法见 [`writing-deterministic-steps.md`](./writing-deterministic-steps.md) |
-| `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器与设备上的浏览器（只用于网页目标，原生应用不适用），配套的 `--tunnel`（两条命令都有）与 `--tunnel-ttl`（只有 `submit` 有）见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--expose-local ORIGIN` | — | 把本机可达的被测应用经隧道暴露给云端浏览器与设备上的浏览器（只用于网页目标，原生应用不适用），需要安装 gherkai 的 tunnel 组件并设置环境变量 `NGROK_AUTHTOKEN`；配套的 `--tunnel`（两条命令都有）与前置见 [`local-app-testing.md`](./local-app-testing.md) |
 
 **云端后端（`submit --backend cloud`）**：`--prefix P`（默认 `gherkai-`，兜底环境变量 `AWS_RESOURCE_PREFIX`）须与部署时一致，统一决定表、桶、集群等资源名；`--worker-variant NAME` 选云端 worker 镜像的 variant，不给则用部署时的默认指针，某个引擎缺这个 variant 直接以退出码 2 结束、不回落到默认，见 [`cloud-backend.md`](./cloud-backend.md)。worker 任务所在的集群、子网与安全组用的是部署时写进后端的配置，提交时不用给。单独覆盖某个资源名的选项见 [`configuration.md`](./configuration.md)。
 
@@ -146,10 +146,10 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 
 | 命令 | 退出码回答什么 | `0` | `1` | `2` |
 |---|---|---|---|---|
-| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或有 job 被中止、没有启动（`--fail-fast`、超过允许运行的时间）；这个 run 在本次执行结束之前已被别处记为已结束（这时不输出汇总，见下） | 开始执行前的配置或可达性问题；给出了云端后端（`run` 只在本机后端执行，云端后端用 `submit --backend cloud`） |
+| `run` | 判定 | 这个 run 全部通过 | 有用例失败或出错，或有 job 被中止、没有启动（`--fail-fast`、超过允许运行的时间）；这个 run 在本次执行结束之前已被别处记为已结束（这时不输出汇总，见下） | 开始执行前的配置或可达性问题，含起隧道失败与在报告目录里写这个 run 的记录失败；给出了云端后端（`run` 只在本机后端执行，云端后端用 `submit --backend cloud`） |
 | `status`（不带 `--wait`） | 查到了吗 | 查到了，含还没结束的 run | 读到的终态不是全部通过 | run 不存在、云端不可达、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
 | `status --wait` | 判定 | 运行结束且全部通过 | 运行结束但不是全部通过（有用例失败或出错，或有 job 被中止、没有启动，run 级记 `aborted`） | 同上，另加后端没部署或 `--prefix` 配错；本机后端下接着推进时读写运行记录失败（磁盘已满、报告目录没有写权限等，存判定明细时先重试三次） |
-| `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题 |
+| `submit` | 提交成功了吗 | 已提交，`run_id` 已打印 | — | 配置或可达性问题、起隧道失败、建立 run 失败；本机后端下后台推进进程在给出提交结果之前退出（这时 run 可能已经建立，见下） |
 | `plan` | 这个 run 能运行吗 | 能 | — | 配置错、写法错、`steps/` 里有文件加载失败 |
 | `list-runs` | 读到清单了吗 | 读到了；清单为空、或其中有无法读取的行，同样以退出码 0 结束 | — | 参数不合法（`--limit` 不是正整数、`--status` 不是 run 的状态值）、本机报告落点目录不可读、云端读不到（region 或凭证、运行记录表不存在或无权限、清单索引缺失或还在建立、读取被限流后重试仍未读全）、CLI 与后端版本不匹配 |
 | `explain` | 证据读出来了吗 | 渲染出来了，用例判失败也以退出码 0 结束；判定明细尚未写出同样如此 | — | 参数写错（例如 `--step` 没同时给 `--scenario`）、run 或 scope 查不到、运行记录指向的那一份判定明细读不到（被删除或移动）、云端读不到、CLI 与后端版本不匹配、提交记录的格式版本与本机 CLI 不一致或记录不完整 |
@@ -164,7 +164,11 @@ job 的墙钟预算从这个 job 被安排执行时起按系统时钟计，前�
 
 `submit --backend local` 的后台进程遇到同样的失败（存判定明细同样先重试三次）时，在 `reconcile.log` 里留一句说明后退出：说明写明记录在哪里，执行中的 job 在记录里仍为 `running`；排除磁盘或权限问题之后，用说明里给出的 `gherkai status <run_id> --wait` 命令接着推进。
 
-分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。这条命令若只是在等待（所等的 run 由前台 `run` 推进），或这个 run 在云端后端，停止它不影响 run 的推进；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
+`submit` 要等这个 run 建好才退出。本机后端下 run 由 `submit` 在本机起的后台推进进程建立（用了 `--expose-local` 时它先起隧道），`submit` 收到它的结果之后打出查进度的命令、在标准输出给出 `run_id`；后台推进进程在给出结果之前的输出（包括它出错退出时的原因）显示在 `submit` 的终端上，之后的写进 `reconcile.log`。云端后端下 `submit` 自己把 run 写进云端（用了 `--expose-local` 时先由本机的隧道守护进程起隧道，见 [`local-app-testing.md`](./local-app-testing.md)）。没有建成时 `submit` 给出原因、以退出码 2 结束，标准输出为空。本机后端下在报告目录里写这个 run 的记录失败时，与前台 `run` 是同一句说明；记录已经写下而准备执行用的文件失败时，说明这个 run 在记录里停在 `pending`、还没有开始执行。本机后端下后台推进进程在给出结果之前退出时，`submit` 说明它可能已经建立了这个 run，并给出查看用的 `gherkai list-runs` 命令，修好上面打出的原因之后重新提交。
+
+等待期间按 Ctrl-C，`submit` 以退出码 130 结束，标准输出为空，并按进行到哪一步说明：本机后端下，还没有建立 run 的后台推进进程自行退出、不再建立，已经建立的照常执行，用说明里给出的 `gherkai list-runs` 命令找到它；云端后端下，还没有开始建立 run 时说明没有建立，中断落在建立 run 的过程中时说明它可能已经写入云端并给出确认用的 `gherkai list-runs` 命令，已经建立时给出它的 `run_id` 与查进度的命令。
+
+分界线在于是否已经开始执行：开始执行前的一切（feature 读不到、写法或参数不合法、worker 没装、凭证与资源不对、起隧道失败、在报告目录里写这个 run 的记录失败）以退出码 2 结束，正常执行结束的判定退出码为 0 或 1；运行期间处理了中断则为 130 或 143。`status --wait` 的等待或接力被 Ctrl-C 停止时退出码同为 130，不表示判定。这条命令若只是在等待（所等的 run 由前台 `run` 推进），或这个 run 在云端后端，停止它不影响 run 的推进；本机后端下由这条命令接力的 run 若没有别的进程在推进，会停在当前状态，它起的 worker 自行收尾并释放会话，再执行同一条命令可继续。用 `--json` 时先按退出码分流，再解析 stdout。各判定状态的含义与聚合规则见 [`../internals/verdict-model.md`](../internals/verdict-model.md)。
 
 ## 结果在哪
 
@@ -182,7 +186,7 @@ reports/<run_id>/
 └─ worker.log          仅 `run --quiet` 且在本机运行时
 ```
 
-同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台进程日志 `reconcile.log`（后台运行迟迟不推进时先看它）；用了 `--expose-local` 时另有隧道记录 `tunnel.json`。状态以退出码与 `status --json`（读的是 `run_state.json`）为准，scenario 与 step 的明细用 `explain` 看，不要以 `index.html` 为准：它是由这些记录生成的展示视图。也不要按 `jobs/` 下有哪些文件来读明细：执行中断或两个进程同时推进时，那里可能留着没被采用的一份，`explain` 只读 `run_state.json` 记下的那一份。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
+同一目录下的 `events.db` 是这个 run 的事件记录（worker 报出的每条事件一行；`explain` 对被中止的 job 从这里补取已执行 step 的记录与证据），前台 `run` 与 `submit --backend local` 都写它，`--no-report` 不写；`submit --backend local` 还会留后台推进进程的日志 `reconcile.log`（后台运行迟迟不推进时先看它；后台推进进程给出提交结果之前的输出不在这里，在 `submit` 的终端上）。状态以退出码与 `status --json`（读的是 `run_state.json`）为准，scenario 与 step 的明细用 `explain` 看，不要以 `index.html` 为准：它是由这些记录生成的展示视图。也不要按 `jobs/` 下有哪些文件来读明细：执行中断或两个进程同时推进时，那里可能留着没被采用的一份，`explain` 只读 `run_state.json` 记下的那一份。纯确定性的用例不产生引擎产物，但每一步的判定与耗时都在判定明细里。
 
 设备目标的 scope 另在 `midscene-run/device/` 下按 scope 分目录，放这个 scope 的诊断文件 `device-session.json`（能力探测结论、所用的会话与设备、换台记录、从获取设备到释放各阶段的时刻，以及执行前失败的原因与释放时是否有会话未能确认停止）与判为 failed / error 的 step 的原始控件树 `page-source/step-NNNN.xml`（按采集次序编号）；两者写盘前都经过脱敏。会话在 Device Farm 控制台里的录像与日志由 AWS 保留 400 天，存放在 us-west-2（与运行用的 region 无关），到期自动删除（见 [Device Farm 的数据保留](https://docs.aws.amazon.com/devicefarm/latest/developerguide/data-protection.html)）；gherkai 不删除任何会话。要留得更久，自己从控制台或 API 归档；要提前删除，在 Device Farm 控制台删除对应的会话，或执行 `aws devicefarm delete-remote-access-session --region us-west-2 --arn <会话 ARN>`（只能删除已结束的会话），删除后报告与 `explain` 里指向这个会话的控制台链接随之失效。录像会录下设备屏幕上显示的全部内容，在被测应用里登录请使用专用的测试账号。安装包不经 Device Farm 上传，保留期由放它的 S3 桶决定（见[配置](./configuration.md)）。
 

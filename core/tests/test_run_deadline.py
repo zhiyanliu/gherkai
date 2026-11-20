@@ -43,6 +43,18 @@ def test_past_deadline_is_strictly_after_the_deadline(now, past):
     assert rd.past_deadline(now, DEADLINE) is past
 
 
+def test_overdue_at_is_three_hundred_seconds_after_the_deadline():
+    """期限加 300 秒：处置条件与隧道边缘的到点拒绝共用这一个时刻（ADR 0054 决策六、ADR 0051 决策 13）。"""
+    assert rd.OVERDUE_MARGIN_S == 300.0
+    assert rd.overdue_at(DEADLINE) == datetime(2026, 11, 15, 10, 5, 0, tzinfo=UTC)
+
+
+def test_overdue_at_keeps_the_instant_and_sub_seconds_across_time_zones():
+    east8 = timezone(timedelta(hours=8))
+    got = rd.overdue_at(datetime(2026, 11, 15, 18, 0, 0, 500000, tzinfo=east8))
+    assert got == datetime(2026, 11, 15, 10, 5, 0, 500000, tzinfo=UTC) and got.tzinfo is not None
+
+
 def test_comparisons_hold_across_time_zones():
     """同一个时刻换个时区写，结论不变：比较的是时刻，不是字面。"""
     east8 = timezone(timedelta(hours=8))

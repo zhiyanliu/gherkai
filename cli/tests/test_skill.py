@@ -72,7 +72,7 @@ NODES = _parser_nodes()
 ALL_FLAGS = {f for flags in NODES.values() for f in flags}
 TOP_LEVEL = {p[0] for p in NODES if len(p) == 1}
 # 排他性断言用的归属表：flag → 它出现在哪些**顶层**子命令的子树里。隐藏内部动词（`_reconcile` /
-# `_tunnel_watch`，help=SUPPRESS）不算——它们不在使用者面上，不该让一句「仅 run」变红。
+# `_tunnel_watch`，不在 `--help` 里列出）不算——它们不在使用者面上，不该让一句「仅 run」变红。
 OWNERS = {
     flag: {top for top in TOP_LEVEL if not top.startswith("_")
            and any(flag in flags for path, flags in NODES.items() if path[:1] == (top,))}
@@ -230,7 +230,7 @@ def test_bare_flags_exist_somewhere():
 # **书写约定**（skill 里的排他声明按这三种形态之一写，护栏按同序解析）：
 #   ① 散文/列头：「仅 `run` 可用 `--fail-fast` / `--quiet`」——标记之后到最近的 `；` / `）` / `|` / 行尾之间的 flag；
 #   ② 括注在 flag 之后：「`--worker-variant`（仅 `run` / `submit`）」——标记前**紧邻的那一个** flag；
-#   ③ 表格行：「| 仅 `submit` | `--tunnel-ttl` | 说明… |」——标记所在单元格的**下一格**里的 flag
+#   ③ 表格行：「| 仅 `run` | `--fail-fast` `--quiet` | 说明… |」——标记所在单元格的**下一格**里的 flag
 #      （「说明」格不算，否则 `只在 cloud + --expose-local 时有意义` 这种举例会被误当成排他声明）。
 # 三种形态按 ①→②→③ 取第一个能取到 flag 的：① 空且标记前有 flag → ②；都没有 → ③。
 # 「仅 `a` / `b`」表示这批 flag 恰好属这几个子命令（归属集相等，不是包含）。

@@ -13,7 +13,10 @@
 - artifacts 在 cloud 下是 s3://+ddb:// 形态；
 - **三道闸的次序与退出码**：版本 skew → 资源 preflight → worker 镜像 variant 解析，
   前一道拦下时后面的一次都不执行；variant miss 即以退出码 2 结束、不回落（ADR 0037 决策 7 / 0038）；解析结果进 definition
-  （ADR 0038「运行时与 preflight」的「选择进 definition」条）。
+  （ADR 0038「运行时与 preflight」的「选择进 definition」条）；
+- 带 `--expose-local` 时起不来守护进程、守护进程起隧道失败或在回报之前崩溃都以退出码 2 结束、不建 run；run 已存在时同样以
+  退出码 2 结束、不改原有的记录（ADR 0035 决策 3「云端 `submit`」）。守护进程在线程里以真实的管道执行（`_inline_children`），
+  隧道服务是假实现。
 """
 from __future__ import annotations
 
@@ -23,7 +26,9 @@ from pathlib import Path
 import pytest
 
 from gherkai_cli import __main__ as m
+from gherkai_runtime import tunnel as gtunnel
 
+from _inline_children import inline_children  # noqa: F401 —— 夹具：submit 启动的后台进程在线程里执行
 from test_main import _fake_schedule_factory
 
 
@@ -770,74 +775,132 @@ def test_status_wait_cloud_interrupted_by_ctrl_c_exits_130_with_a_notice(monkeyp
     assert rc == 130 and "已停止等待" in err and "Traceback" not in err
 
 
-def test_submit_cloud_forks_tunnel_watch_daemon(tmp_path, monkeypatch, capsys):
-    """cloud submit --expose-local：fork 隧道守护进程（_tunnel_watch，携带隧道 pid）并明示「本机保持开机」
-    （ADR 0035 决策 3——cloud submit 的 CLI 即退，守护是隧道唯一宿主）。"""
-    import subprocess
+# ---- 云端 submit 带 --expose-local：其余以退出码 2 结束的出口（ADR 0035 决策 3「云端 `submit`」）----
+# 守护进程以真实的管道与线程执行（`_inline_children`）。建成、守护进程在检查前后退出、建 run 撞 AWS 错与 Ctrl-C 的用例在
+# test_tunnel_cli；这里是起不来守护进程、它起隧道失败、它在回报之前崩溃与 run 已存在四个出口。
 
-    from gherkai_runtime import tunnel as gtunnel
+ORIGIN = "http://localhost:3000"
+_PUBLIC = "https://t.ngrok-free.app"
+_FIXED_RUN_ID = "20300102T030405Z-abcdef"
 
+
+class _FakeTunnelService:
+    """登记进 `tunnel.PROVIDERS` 的假隧道服务：只模仿口子的外部表面（前置检查、起隧道、返回对象的 close），记下起隧道与关闭。"""
+
+    def __init__(self) -> None:
+        self.starts: list = []
+        self.start_error: BaseException | None = None
+        self.closed = False
+
+    def provider(self) -> "_FakeTunnelService":
+        return self
+
+    def check_prerequisites(self) -> None:
+        pass
+
+    def start(self, local_origin, *, closes_at, timeout_s=gtunnel.START_TIMEOUT_S):
+        self.starts.append(closes_at)
+        if self.start_error is not None:
+            raise self.start_error
+        return gtunnel.TunnelInfo(url=_PUBLIC, local_origin=gtunnel.normalize_origin(local_origin),
+                                  warmup_url=gtunnel.warmup_url_for(_PUBLIC, "a" * 32), closer=self._close)
+
+    def _close(self) -> None:
+        self.closed = True
+
+
+def _install_fake_tunnel(monkeypatch) -> _FakeTunnelService:
+    service = _FakeTunnelService()
+    monkeypatch.setitem(gtunnel.PROVIDERS, "ngrok", service.provider)
+    return service
+
+
+def _cloud_submit_argv(tmp_path: Path, *extra: str) -> list[str]:
+    return ["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--region", "us-east-1",
+            *extra]
+
+
+def test_submit_cloud_cannot_start_the_tunnel_daemon(tmp_path, monkeypatch, capsys, inline_children):
+    """起不来隧道守护进程：一句说明、退出码 2、stdout 为空；没有起隧道，也没有碰 runs 表。"""
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
-                              warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-
-    class _Provider:
-        def start(self, origin, **kw):
-            return info
-
-    monkeypatch.setattr(gtunnel, "make_tunnel", lambda name: _Provider())
-    forked = []
-
-    class _FakeProc:
-        pid = 9
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000",
-                 "--default-job-timeout", "450"])
-    assert rc == 0
-    watch = [c for c in forked if "_tunnel_watch" in c]
-    assert len(watch) == 1
-    cmd = watch[0]
-    assert cmd[cmd.index("--tunnel-pid") + 1] == "777"
-    assert "--ddb-table" in cmd
-    # TTL 按 definition 算并显式传给守护（ADR 0035 决策 3；曾恒 1h 且无生产写入者 → 与 run 预算脱钩）
-    from gherkai_runtime import tunnel_host
-
-    # 单 job × --default-job-timeout：一次性余量 + 该 job 预算 + 一份每 job 余量
-    expected = tunnel_host.CLOUD_STARTUP_MARGIN_S + 450.0 + tunnel_host.CLOUD_PER_JOB_MARGIN_S
-    assert expected == 900.0 + 450.0 + 210.0
-    assert float(cmd[cmd.index("--ttl") + 1]) == expected
-    err = capsys.readouterr().err
-    assert f"{expected:.0f}s" in err  # submit 打印该 TTL（可见性）
-    assert "估算的上限" in err and "每个 job 210 秒" in err  # 默认值称为估算的上限，写明每 job 余量
-    assert "保持开机" in err  # 明示边界（关机就是隧道断）
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+    service = _install_fake_tunnel(monkeypatch)
+    inline_children.popen_error = OSError("Cannot allocate memory")
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert "无法启动持有隧道的本机后台进程：Cannot allocate memory。没有提交。" in cap.err
+    assert service.starts == [] and made["ddb_tables"] == []
 
 
-def test_submit_cloud_tunnel_ttl_flag_overrides_computed(tmp_path, monkeypatch, capsys):
-    """`--tunnel-ttl` 给了就用用户值（显式覆盖算出的 TTL，不再走 definition 计算）。"""
-    import subprocess
-
-    from gherkai_runtime import tunnel as gtunnel
-
+def test_submit_cloud_prints_the_daemons_tunnel_failure_as_is_and_builds_no_run(tmp_path, monkeypatch, capsys,
+                                                                               inline_children):
+    """守护进程起不来隧道：它回报那一句与退出码 2，submit 原样打出、退出码 2、stdout 为空，不建 run；会话没有建成，所以没有关闭调用。"""
     record: list = []
-    _patch_cloud_handles(monkeypatch, record)
-    info = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
-                              warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-    monkeypatch.setattr(gtunnel, "make_tunnel",
-                        lambda name: type("P", (), {"start": lambda self, o, **kw: info})())
-    forked = []
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda cmd, **kw: forked.append(cmd) or type("P", (), {"pid": 9})())
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000",
-                 "--tunnel-ttl", "120"])
-    assert rc == 0
-    cmd = [c for c in forked if "_tunnel_watch" in c][0]
-    assert float(cmd[cmd.index("--ttl") + 1]) == 120.0
-    err = capsys.readouterr().err
-    assert "TTL 兜底 120s（给定的 `--tunnel-ttl` 值）" in err and "估算" not in err  # 覆盖值不说成估算值
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+    service = _install_fake_tunnel(monkeypatch)
+    sentence = "隧道没有建成：authentication failed（ERR_NGROK_105）。"
+    service.start_error = gtunnel.TunnelError(sentence)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert sentence in cap.err.splitlines() and "已提交" not in cap.err
+    assert made["ddb_tables"] == [] and inline_children.only().returncode == 2 and not service.closed
+
+
+def test_submit_cloud_exits_2_when_the_daemon_exits_before_reporting(tmp_path, monkeypatch, capsys, inline_children):
+    """守护进程在回报之前崩溃：submit 读到回报管道的文件结束，说明它退出了、没有提交，退出码 2、stdout 为空，不建 run。"""
+    record: list = []
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+    service = _install_fake_tunnel(monkeypatch)
+    service.start_error = RuntimeError("boom")
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。" in cap.err
+    assert made["ddb_tables"] == []
+    inline_children.only().expect_error(RuntimeError)
+
+
+@pytest.mark.parametrize("expose", [True, False], ids=["tunneled", "plain"])
+def test_submit_cloud_run_already_exists_exits_2_after_releasing_the_daemon(expose, tmp_path, monkeypatch, capsys,
+                                                                           inline_children):
+    """云端已有同一个 run 标识的记录：建 run 不改任何东西，submit 打出「已经存在」那一句、退出码 2、stdout 为空。带隧道时打出这一句
+    之前已关闭守护进程的标准输入：守护进程没有收到 run 的标识，这时已关闭会话、退出。"""
+    _fake_s3, _made, _ = _patch_cloud_handles(monkeypatch, [])
+    service = _install_fake_tunnel(monkeypatch)
+    monkeypatch.setattr(m.compose, "new_run_id", lambda at=None: _FIXED_RUN_ID)
+    real_make = m.compose._make_ddb_table
+
+    def make_occupied(table, *, region, profile):
+        t = real_make(table, region=region, profile=profile)
+        t.get_item = lambda **kw: {"Item": {"run_id": kw["Key"]["run_id"]}}  # 这个 run 的条目已在
+        return t
+
+    monkeypatch.setattr(m.compose, "_make_ddb_table", make_occupied)
+    sentence = f"run {_FIXED_RUN_ID} 已经存在，没有重新建立。请重新执行这条命令。"
+    daemon_done_when_reported: list[bool] = []
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        if expose and a and str(a[0]) == sentence:
+            daemon_done_when_reported.append(inline_children.only().done.wait(5))
+        real_progress(*a, **k)
+
+    monkeypatch.setattr(m, "_progress", progress)
+    rc = m.main(_cloud_submit_argv(tmp_path, *(["--expose-local", ORIGIN] if expose else [])))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert sentence in cap.err.splitlines() and "已提交" not in cap.err
+    if expose:
+        child = inline_children.only()
+        assert daemon_done_when_reported == [True]
+        assert child.returncode == 0 and child.notes == [] and service.closed
+    else:
+        assert inline_children.children == [] and service.starts == []
 
 
 # ---- 云端后端与 worker 定位链 / steps 定制面的边界（ADR 0037 决策 3/4）----
@@ -1200,20 +1263,23 @@ def test_worker_variant_valid_names_pass_entry_validation(tmp_path, monkeypatch,
     assert [c["variant"] for c in made["variant"]] == ["base", "login", "checkout-v2", "v1.2_x"]
 
 
-def test_local_submit_ignores_worker_variant_with_one_note(tmp_path, monkeypatch, capsys):
+def test_local_submit_ignores_worker_variant_with_one_note(tmp_path, monkeypatch, capsys, inline_children):
     """本机后端的 submit 忽略该 flag、只打一行提示（不拦、不校验——local 的确定性 step 直接从 steps 目录读、不经镜像）。
-    run 不收这个 flag，见 test_run_and_submit_do_not_accept_cloud_execution_flags。"""
-    import subprocess
+    run 不收这个 flag，见 test_run_and_submit_do_not_accept_cloud_execution_flags。后台推进进程在线程里执行，推进换成记录调用的函数。"""
+    from gherkai_runtime import detached
 
     record: list = []
     _, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+    advanced: list = []
+    monkeypatch.setattr(detached, "advance_local_run", lambda advancer, meta, **kw: advanced.append(meta))
     rc = m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r"),
                  "--worker-variant", "login"])
+    inline_children.settle()
     assert rc == 0
     assert "--worker-variant 不生效" in capsys.readouterr().err
     assert made["variant"] == []      # local 从不解析
     assert record == []               # 也没碰任何云端读
+    assert len(advanced) == 1 and advanced[0].worker_variant is None
 
 
 def test_local_definition_omits_worker_variant_fields(tmp_path, monkeypatch, capsys):

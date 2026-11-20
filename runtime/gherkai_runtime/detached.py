@@ -1,13 +1,16 @@
-"""无状态批量运行的 local 执行接线（ADR 0034，本机后端）：SubprocessLauncher + per-run reconciler 进程。
+"""无状态批量运行的 local 执行接线（ADR 0034，本机后端）：SubprocessLauncher、推进循环与本机推进的装配。
 
 组合根职责（local 执行环境特有）：把 core 的 reconciler（纯编排）接到真 subprocess 世界——
 - **SubprocessLauncher**：机制四认领成功后被 reconciler 调，起一个 worker（复用 SubprocessEngine）、
   在独立线程里读它的 fd3 事件流旁路落 SqliteEventLog（赋 worker 段单调 seq）、worker 退出后 `handle.wait()`
   拿 exitcode 写 task_exited（扮演平台侧退出观察者，机制二 local 对位）；另按墙钟检查这个 job 的截止时刻，到点停 worker。
   worker 不改、对 SQLite 无知（0034）。
-- **per-run reconciler 进程**：`submit` 时 setsid fork 出来的轻进程，循环 tick 直到 run 收尾自退；读不到可用的运行定义时以结束写的
-  error 变体结束 run（`end_run_for_unusable_definition`）。`status --wait` 接力走同一个循环，另把别人认领、观察链已断的 job 判为
-  超时（`_recover_timed_out_claims`）；它读不到运行定义时不写。
+- **本机后台推进进程**：`submit` 以新会话启动的进程（入口与建 run 的调用序在命令行工具里）。它用自己生成的那份运行定义经
+  `assemble_local_run` 装配推进所需的各部分（在回报 `submit` 之前；装配不启动子进程），再经 `advance_local_run` 循环 tick 直到 run
+  收尾、退出，不从记录读回运行定义（ADR 0035 决策 3「本机 `submit`」）。
+- **`status --wait` 接力**：经 `drive_local_reconcile` 从记录读回运行定义（`build_local_reconcile`），同一套装配、同一个循环；读不到
+  运行定义时不写。推进循环每一轮另把别人认领、观察链已断的 job 判为超时（`_recover_timed_out_claims`，自家起的 job 不扫），接力
+  据此收敛原推进进程留下的 job。接力不持有隧道。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
@@ -20,7 +23,7 @@ import time
 from collections.abc import Collection
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from gherkai_core.adapters.event_log import SqliteEventLog, make_raw_sink
 from gherkai_core.adapters.run_store.local import LocalRunStore
@@ -29,7 +32,6 @@ from gherkai_core.model import Job, RunMeta, Status
 from gherkai_core.ports import ReportStore, ResultStore
 from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
 from gherkai_core.run_deadline import deadline_of, job_cutoff
-from gherkai_core.run_status import definition_unavailable_ending
 from gherkai_core.serialize import instant_from_iso, instant_to_iso
 from gherkai_runtime import compose
 from gherkai_runtime import names  # 叶子模块（零依赖，见其模块头）
@@ -49,9 +51,8 @@ _RECOVERY_MARGIN_S = 10.0
 
 
 class RunDefinitionMissing(FileNotFoundError):
-    """run 的运行态在而提交记录读不到（`build_local_reconcile`）：落点被删、写坏，或 --report-dir 指错。它是 FileNotFoundError 的
-    子类，查询命令照旧按「找不到」以退出码 2 结束；后台推进进程是这个 run 的推进器，据此以结束写的 error 变体结束它（与提交记录形态
-    违约同一种处理，ADR 0034 机制三「不经推进步骤的收尾」条）。"""
+    """run 的运行态在而提交记录读不到（`build_local_reconcile`，即 `status --wait` 接力从记录读回运行定义时）：落点被删、写坏，或
+    --report-dir 指错。它是 FileNotFoundError 的子类，查询命令照旧按「找不到」以退出码 2 结束；接力读不到运行定义时不写。"""
 
 
 class _ExitOrCutoff:
@@ -215,7 +216,7 @@ def run_reconcile_loop(
     poll_interval_s: float = 0.5,
     report_store: ReportStore | None = None,
 ) -> None:
-    """per-run 进程的推进循环：反复 tick 直到 run 收尾（ADR 0034「推进器与触发源」第 1 条）。
+    """本机推进的循环（后台推进进程与 `status --wait` 接力共用）：反复 tick 直到 run 收尾（ADR 0034「推进器与触发源」第 1 条）。
 
     clock：**必传**的墙钟（组合根传 `compose.now`；测试传 fake 保确定性），返回带时区的 datetime。tick 经它取时刻，接力判超时按它
     判断截止时刻是否已到，这里写进报告的时刻经 `serialize.instant_to_iso` 从它写出，同一份 RunState 里只有一种时间戳写法，故不留
@@ -225,14 +226,14 @@ def run_reconcile_loop(
     - `TickOutcome.ENDED`（run 已结束、使它成为终态的不是这一方）：不写报告、直接退出。循环只按 run 级的结果结束，不依赖「每个
       job 都会到终态」（ADR 0034 机制三「run 级状态只进不退」条④）；
     - `TickOutcome.CONTINUE`：做接力超时恢复，等一个轮询间隔再 tick。
-    退出后由调用方照常拆隧道（`drive_local_reconcile`）。推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再
-    认领；接力判超时为原推进进程认领、墙钟已过截止时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 补写超时的退出记录，下一轮 tick
-    先写下这些 job 的终态，没有执行中的 job 之后由到期的结束写结束这个 run，不启动任何 job。
+    推进进程已不在的 run 过了期限之后由 `status --wait` 进入本循环时，tick 不再认领；接力判超时为原推进进程认领、墙钟已过截止
+    时刻加 `_RECOVERY_MARGIN_S` 仍没有退出记录的 job 补写超时的退出记录，下一轮 tick 先写下这些 job 的终态，没有执行中的 job
+    之后由到期的结束写结束这个 run，不启动任何 job。
 
     result_store：**必传**的判定存储（组合根传 `compose.local_result_store` 装配的那一个，保存失败时退避重试；测试传临时目录里的
     本机文件存储或记录调用的替身），注入给 tick：每个 job 得出结果的那一轮，tick 为它生成一个标识、存下带这个标识的一份明细，再写下
     终态并点名它（ADR 0030 决定三「点名」条、「后台推进同守」条）。不留缺省：推进路径上没有「不存明细」这一支，否则由执行结果结束的
-    job 写下不点名的终态，读者会把它当成由结束写结束的。保存的重试用尽时异常原样抛出、本循环随之结束（见 `drive_local_reconcile`）。
+    job 写下不点名的终态，读者会把它当成由结束写结束的。保存的重试用尽时异常原样抛出、本循环随之结束，说明与退出码由调用方给出。
     report_store（可选，None 时不写报告）：RunReport（index/manifest）在这一方的写使 run 成为终态之后，由 `write_report_from_record`
     从记录生成（派生、失败隔离）：读运行态，各 job 的明细按运行态里点名的标识从 result_store 读回，由结束写结束的 job 没有明细、不读。
     """
@@ -243,9 +244,8 @@ def run_reconcile_loop(
             return
         if outcome is TickOutcome.COMMITTED:
             # 报告从记录生成，入口是 core 唯一的一份，云端推进器 Lambda 调的是同一个。生成在终态写之后、失败无人重试，抛出去会让本进程
-            # 带着未写的报告退出，还会跳过拆隧道那步（`drive_local_reconcile` 的 cleanup_tunnel 在本函数返回后才执行）；所以读运行态、
-            # 按点名的标识读回明细、组装与写报告整段在入口的失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034
-            # 机制三「run 级状态只进不退」条④）。
+            # 带着未写的报告、按推进失败退出，而 run 已经是终态；所以读运行态、按点名的标识读回明细、组装与写报告整段在入口的失败隔离
+            # 之内（ADR 0030 决定三「ReportStore.write 失败隔离」框，ADR 0034 机制三「run 级状态只进不退」条④）。
             write_report_from_record(meta, run_store, result_store, report_store, created_at=instant_to_iso(clock()))
             return
         _recover_timed_out_claims(run_id, meta, event_log, run_store, launcher.owned_scopes, now=clock())
@@ -254,15 +254,15 @@ def run_reconcile_loop(
 
 def drive_local_reconcile(report_dir: str, run_id: str, max_concurrency: int, *, region=None, profile=None,
                           poll_interval_s: float = 0.5) -> None:
-    """local 推进的**唯一入口**：装配 → tick 到 run 收尾 → 拆隧道。per-run 进程与
-    `status --wait` 接力都调这里——曾在 cli 两处逐字复写这三句装配，改一处漏一处就让接力者与 per-run 行为分叉。"""
+    """`status --wait` 接力的入口：从记录读回运行定义并装配（`build_local_reconcile`），再 tick 到 run 收尾。装配与后台推进进程是
+    同一个函数（`assemble_local_run`），两者对同一个 run 起的 worker 相同。
+
+    读不到运行定义抛 `RunDefinitionMissing`，读不懂时抛读端的异常（`UnsupportedDefinitionSchema`、`DefinitionContractError`），都在
+    装配之前、什么都不写。推进循环抛出时（保存判定明细的重试用尽、读写运行记录失败）异常原样交给调用方，说明与退出码由调用方给出。"""
     meta, log, store, launcher, mc, rstore, pstore = build_local_reconcile(
         report_dir, run_id, max_concurrency, region=region, profile=profile)
-    # 推进循环抛出时（保存判定明细的重试用尽、读写运行记录失败）异常原样交给调用方，不拆隧道：这个 run 没有结束，随后用
-    # status --wait 接着推进的一方启动的 job 还要用这条隧道，由它推进到结束之后再拆。说明与退出码由调用方给出。
     run_reconcile_loop(run_id, meta, log, store, launcher, mc, poll_interval_s=poll_interval_s,
                        clock=compose.now, result_store=rstore, report_store=pstore)
-    cleanup_tunnel(report_dir, run_id)  # 隧道收尾（有 tunnel.json 才动作，ADR 0035）；接力者同样兜底拆
 
 
 def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, owned_scopes: Collection[str], *,
@@ -306,63 +306,57 @@ def _recover_timed_out_claims(run_id: str, meta: RunMeta, event_log, run_store, 
 
 
 # ============================================================================
-# per-run 进程：从 run_id + 本地落点重建装配、运行 reconcile loop（submit setsid fork 它）
+# 本机推进的装配：后台推进进程用自己生成的运行定义，status --wait 接力从本地落点读回
 # ============================================================================
 
 
-def _paths(report_dir: str, run_id: str):
-    """local 无状态批量运行的落点：events SQLite 与 RunStore/ResultStore 同在 <report_dir>/<run_id>/（路径取 compose.events_db_path 单点）。"""
-    return Path(report_dir), compose.events_db_path(report_dir, run_id)
+class LocalAdvancer(NamedTuple):
+    """本机推进一个 run 所需的各部分（`assemble_local_run` 的结果），落点都在 `<report_dir>/<run_id>/`。"""
+
+    event_log: SqliteEventLog
+    run_store: LocalRunStore
+    launcher: SubprocessLauncher
+    result_store: ResultStore
+    report_store: ReportStore
 
 
-def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
-                          region: str | None = None, profile: str | None = None):
-    """从本地落点重建 per-run reconcile 所需的全部（meta 从 RunStore 读回、log/store/launcher 重建）。
+def assemble_local_run(meta: RunMeta, report_dir: str, *, region: str | None, profile: str | None) -> LocalAdvancer:
+    """按这份运行定义装配本机推进一个 run 所需的各部分（ADR 0034）：事件库、RunStore、启动器、判定存储与报告存储。
 
-    per-run 进程自包含、不依赖父进程内存（fork 后父可退）：definition 已由 submit 的 create_run 落 RunStore，
-    这里 load_run_meta 读回；SqliteEventLog/LocalRunStore 都是文件路径，从 report_dir+run_id 重建即同一份。
-    返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop
-    （后两个是判定明细与报告的落点，与 RunStore 同 <report_dir>/<run_id>/；判定存储经 `compose.local_result_store` 装配，
-    与前台 run 同一个入口，保存失败时退避重试）。
-    返回的 max_concurrency 优先取 meta（ADR 0034 机制四：随 definition 走），入参只作 meta 缺值时的回落——
-    per-run 进程与 `status --wait` 接力者同读 meta，接力者不再拿自己那侧的 flag 值覆盖 submit 时的声明。
-    worker cmd 走定位链（ADR 0037 决策 3，不再由仓库结构推导，故本函数不收 repo）；env 覆写对两宿主自然可见
-    （per-run 继承提交进程 env、接力者用自己的 env）。
+    两个调用方：本机后台推进进程用自己生成的那份运行定义，在建 run 之后、回报 `submit` 之前调用（装配失败时 `submit` 还没有输出
+    「已提交」，ADR 0035 决策 3「本机 `submit`」）；`status --wait` 接力经 `build_local_reconcile` 从记录读回运行定义之后调用。
+    请求头、预热地址、step 目录与 run 标识都取自传入的运行定义，本函数不从别处取它们。
+
+    **不启动子进程**：后台推进进程在回报之前调用它，回报之前起的子进程会继承接在 `submit` 标准错误上的描述符，经管道捕获 `submit`
+    输出的调用方要等那个子进程退出才读到文件结束（ADR 0035 决策 3「输出」）。引擎在这里只是装配好，launch 时才起 worker；停止宽限的
+    查询（`compose.engine_min_grace`，要起一次 worker 自述）同样只在 launch 时调用。事件库在这里建成，建库失败抛 `sqlite3.Error`
+    或 OSError，原样交给调用方。
     """
     # region/profile 的解析链与前台 run 同源（`compose.resolve_aws_identity`；顺序见 ADR 0016 决策 C 与 ADR 0053
-    # 决策 2）：配置文件那一层由 CLI 在 fork 或接力前解析好、经参数传入，本函数按 ADR 0053 决策 1 不读配置文件，
-    # 只补环境变量与 profile 的末段回落。此前原样透传 None：profile-only/config-only 的使用方下 worker env 不注入 AWS_REGION，
+    # 决策 2）：配置文件那一层由 CLI 在启动后台推进进程或接力之前解析好、经参数传入，本函数按 ADR 0053 决策 1 不读配置文件，
+    # 只补环境变量与 profile 的末段回落。原样透传 None 时，profile-only/config-only 的使用方下 worker env 不注入 AWS_REGION，
     # Nova worker 的 AgentCore validate_region 见 None 即崩（exit 1、零事件；detached 实际运行复现）。
-    # 单点在 `compose.resolve_aws_identity`（而非各调用方各写一份）：submit fork 的 per-run /
-    # status --wait 接力 / 手动 _reconcile 三路全覆盖。
+    # 单点在 `compose.resolve_aws_identity`（而非各调用方各写一份）：后台推进进程与 status --wait 接力两路都经这里。
     region, profile = compose.resolve_aws_identity(region, profile)
 
-    root, db_path = _paths(report_dir, run_id)
-    store = LocalRunStore(root)
-    meta = store.load_run_meta(run_id)
-    if meta is None:
-        # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里说明落点被删/写坏或 report_dir 指错。
-        # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性检查翻成退出码 2；这里兜住剩下的两条——
-        # run_state 在而 definition 缺（落点被删/写坏）的裸 traceback，以及 per-run 后台进程把它写进 reconcile.log。
-        raise RunDefinitionMissing(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
-                                f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")
-    log = SqliteEventLog(db_path)
+    root = Path(report_dir)
+    run_id = meta.run_id
+    log = SqliteEventLog(compose.events_db_path(root, run_id))
     # 产物落点 env 注入（同步 run 路径的 build_engines 一致）：nova/midscene 产物落 <report_dir>/<run_id>/ 下。
     nova_logs_dir = root / run_id / names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）
     midscene_run_dir = root / run_id / names.ARTIFACT_SUBDIR["midscene"]
     engines = compose.build_engines(
         nova_logs_dir=nova_logs_dir, midscene_run_dir=midscene_run_dir,
         region=region, profile=profile,
-        # 额外请求头随 definition 持久化（ADR 0035：submit 进程算好落 META，per-run 重建端读回注入）
+        # 额外请求头取自运行定义（ADR 0035 决策 4）
         extra_http_headers=dict(meta.extra_http_headers) if meta.extra_http_headers else None,
-        session_warmup_url=meta.session_warmup_url,  # 会话预热地址同理随 definition 走（ADR 0051 决策 13）
-        # 使用方 step 目录同理随 definition 走（ADR 0037 决策 4）：**读回、绝不在此重解析 `./steps`**——
-        # 本函数的两个宿主（per-run 进程 / `status --wait` 接力者）CWD 与提交进程各不相同，
-        # 重解析必让同一个 run 在三个宿主下用到不同的确定性 step 集，判定不可复现。
+        session_warmup_url=meta.session_warmup_url,  # 会话预热地址同样取自运行定义（ADR 0051 决策 13）
+        # 使用方 step 目录取运行定义里的绝对路径（ADR 0037 决策 4），**绝不在此按工作目录重解析 `./steps`**：status --wait 接力的
+        # 工作目录与提交进程各不相同，重解析会让同一个 run 在不同宿主下用到不同的确定性 step 集，判定不可复现。
         steps_dir=meta.steps_dir,
         # 本 run 的 id（ADR 0024「run_id + scope_id 注入 worker」条）：经 env RUN_ID 注给 worker，编码会话名的 run 段
         # （ADR 0051 决策 3、4）；取被推进的这个 run，宿主 shell 里的同名值由 build_engines 清掉
-        run_id=meta.run_id,
+        run_id=run_id,
     )
     resolver = compose.make_resolver(engines)
     launcher = SubprocessLauncher(resolver, log, min_grace_fn=compose.engine_min_grace, clock=compose.now)
@@ -370,48 +364,39 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     # compose.local_result_store：本机推进器用的判定存储只有这一个装配入口，保存失败的退避重试与前台 run 相同（ADR 0030 决定三
     # 「保存明细失败」条）
     from gherkai_core.adapters.report_store.local import LocalReportStore
-    result_store = compose.local_result_store(root)
-    report_store = LocalReportStore(root)
+    return LocalAdvancer(event_log=log, run_store=LocalRunStore(root), launcher=launcher,
+                         result_store=compose.local_result_store(root), report_store=LocalReportStore(root))
+
+
+def advance_local_run(advancer: LocalAdvancer, meta: RunMeta, *, poll_interval_s: float = 0.5) -> None:
+    """本机后台推进进程推进一个 run：用传入的运行定义与装配好的各部分循环 tick 到 run 收尾（`run_reconcile_loop`），不从记录读回
+    运行定义（ADR 0035 决策 3「本机 `submit`」）。
+
+    并发上限取 meta.max_concurrency：后台推进进程生成的运行定义恒带它，为 None 即 ValueError（调用方的装配错误），在推进之前抛出。
+    推进循环抛出时（保存判定明细的重试用尽、读写运行记录失败）异常原样交给调用方，说明与退出码由调用方给出。"""
+    if meta.max_concurrency is None:
+        raise ValueError(f"run {meta.run_id} 的运行定义没有并发上限，无法推进")
+    run_reconcile_loop(meta.run_id, meta, advancer.event_log, advancer.run_store, advancer.launcher, meta.max_concurrency,
+                       clock=compose.now, result_store=advancer.result_store, poll_interval_s=poll_interval_s,
+                       report_store=advancer.report_store)
+
+
+def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
+                          region: str | None = None, profile: str | None = None):
+    """`status --wait` 接力的装配：从本地落点读回运行定义（`LocalRunStore.load_run_meta`），再经 `assemble_local_run` 装配。
+
+    返回 (meta, log, store, launcher, max_concurrency, result_store, report_store) 供 run_reconcile_loop。读不到运行定义抛
+    `RunDefinitionMissing`，读不懂时抛读端的异常，都在装配之前。
+    返回的 max_concurrency 优先取 meta（ADR 0034 机制四：随 definition 走），入参只作 meta 缺值时的回落——接力者不拿自己那侧的
+    flag 值覆盖 submit 时的声明。worker cmd 走定位链（ADR 0037 决策 3）；env 覆写用接力者自己的 env。
+    """
+    meta = LocalRunStore(Path(report_dir)).load_run_meta(run_id)
+    if meta is None:
+        # 正常路径下建 run 时 definition 先于运行态写下，走到这里说明落点被删、写坏或 report_dir 指错。常见形态已由 status 的
+        # run 存在性检查翻成退出码 2；这里兜住剩下的一条：运行态在而 definition 缺。文案按产品语言给。
+        raise RunDefinitionMissing(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
+                                f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")
+    parts = assemble_local_run(meta, report_dir, region=region, profile=profile)
     effective_mc = meta.max_concurrency if meta.max_concurrency is not None else max_concurrency
-    return meta, log, store, launcher, effective_mc, result_store, report_store
-
-
-def end_run_for_unusable_definition(report_dir: str, run_id: str, reason: str) -> bool:
-    """本机后台推进进程读不到可用的运行定义时，以结束写的 error 变体结束这个 run（与云端推进器同一写法，ADR 0037 决策 7，ADR 0031
-    决定三「结束写」小节「运行定义不可用时」条）：每个未结束的 job（含执行中的）记 error，reason 写进 run 级说明与这些 job 的说明；
-    不存明细、不生成报告（报告按运行定义逐个列出 job，读不到运行定义就组装不出）。reason 取 `run_status` 里的几句之一。
-
-    只由 submit 启动的后台推进进程调用：它是这个 run 的推进器。`status --wait` 接力不调用，读不懂运行定义可能只是接力方的版本不同，
-    原来的推进进程可能仍在正常推进。返回是否写成：run 已被别处结束或运行态不存在时没有写成，运行态不变。"""
-    return LocalRunStore(Path(report_dir)).end_run(run_id, definition_unavailable_ending(reason),
-                                                   ended_at=instant_to_iso(compose.now()))
-
-
-# ============================================================================
-# 隧道收尾（ADR 0035 决策 3）：pid 经 tunnel.json 跨进程交棒（submit 写 → per-run/接力者收）
-# ============================================================================
-
-
-def write_tunnel_file(report_dir: str, run_id: str, info) -> None:
-    """local submit 落隧道收尾凭据：进程对象句柄跨进程传不过去，pid 落盘是唯一通道（ADR 0035）。"""
-    import json as _json
-
-    path = Path(report_dir) / run_id / "tunnel.json"
-    path.write_text(_json.dumps({"pid": info.pid, "url": info.url, "local_origin": info.local_origin},
-                                ensure_ascii=False), encoding="utf-8")
-
-
-def cleanup_tunnel(report_dir: str, run_id: str) -> None:
-    """收尾者（per-run 终态后 / status --wait 接力后）拆隧道：有 tunnel.json 才动作，幂等。"""
-    import json as _json
-
-    from gherkai_runtime.tunnel import stop_tunnel
-
-    path = Path(report_dir) / run_id / "tunnel.json"
-    if not path.exists():
-        return
-    try:
-        stop_tunnel(int(_json.loads(path.read_text(encoding="utf-8"))["pid"]))
-        path.unlink()
-    except (OSError, ValueError, KeyError):
-        pass  # 收尾是 best-effort：文件损坏/已被并发收尾者处理 → 不击穿主流程
+    return (meta, parts.event_log, parts.run_store, parts.launcher, effective_mc, parts.result_store,
+            parts.report_store)

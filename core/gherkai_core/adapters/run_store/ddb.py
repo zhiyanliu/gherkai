@@ -40,6 +40,7 @@ from collections.abc import Sequence
 
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
+from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
@@ -283,7 +284,7 @@ class DynamoDBRunStore:
         **写序 META→STATE 是契约**（ADR 0034）：kicker 由 STATE 的 INSERT 触发（detached 标记在 STATE 上），
         触发时 META 必已在——若标 META，kicker 可能在 STATE 落库前 tick、claim/投影全 CCF 空转。
 
-        **建 run 是条件写**（ADR 0054 决策五）：已存在即抛 FileExistsError，不改任何东西。两道检查：
+        **建 run 是条件写**（ADR 0054 决策五）：已存在即抛 `RunAlreadyExists`，不改任何东西。两道检查：
         1. 卸载 step 参数正文之前，以强一致读确认这个 run_id 下 META 与 STATE 都不存在（只取主键，不拖回 meta_json），任一已在
            即失败——已卸载到 S3 的正文不被重写。读用 GetItem，与 `status` 读运行态同一个动作。
         2. 两次 put 都带「条目不存在」的条件，任一被挡即失败。
@@ -299,7 +300,7 @@ class DynamoDBRunStore:
                 ExpressionAttributeNames={"#rid": "run_id"},
             )
             if "Item" in resp:
-                raise FileExistsError(f"run {run_id} 已存在，不重新建立")
+                raise RunAlreadyExists(run_id)
         meta_dict = run_meta_to_dict(meta)
         if self._arg_offloader is not None:
             # docString/dataTable 正文搬 S3、META 只留指针（解 DDB 400KB 限，ADR 0030 决定六）
@@ -320,7 +321,7 @@ class DynamoDBRunStore:
             self._table.put_item(Item=self._state_item(meta, initial_state),
                                  ConditionExpression="attribute_not_exists(run_id)")
         except ccf as e:
-            raise FileExistsError(f"run {run_id} 已存在，不重新建立") from e
+            raise RunAlreadyExists(run_id) from e
 
     def _state_item(self, meta: RunMeta, initial_state: RunState) -> dict:
         """create_run 的 STATE item：初始运行态原样写入，另带只在建 run 时写下的顶层标记与写入序号的初值 0。"""

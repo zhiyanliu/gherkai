@@ -1290,8 +1290,8 @@ def test_local_result_store_is_the_file_store_wrapped_with_save_retries(tmp_path
 
 def test_build_local_stores_takes_the_result_store_from_the_single_local_entry(tmp_path: Path, monkeypatch):
     """前台 run 与本机查询命令的装配（`build_local_stores`）经 `local_result_store` 取判定存储、不另造一份：换掉那个入口，这里
-    拿到的就是换上的那一个，入参是 report_dir。后台推进进程那一侧（`detached.build_local_reconcile`）同样经它，见 runtime 的
-    推进进程用例；两侧都经同一入口，保存重试才对两种推进器一致。不换时拿到的是带重试的那一种。"""
+    拿到的就是换上的那一个，入参是 report_dir。后台推进进程与 status --wait 接力那一侧（`detached.assemble_local_run`）同样经它，
+    见 runtime 的推进进程用例；两侧都经同一入口，保存重试才对两种推进器一致。不换时拿到的是带重试的那一种。"""
     from gherkai_core.adapters.result_store.retrying import RetryingResultStore
 
     assert isinstance(compose.build_local_stores(report_dir=tmp_path)[1], RetryingResultStore)
@@ -1716,7 +1716,7 @@ def test_read_task_def_stop_timeout_none_when_unset_or_container_absent():
 
 def test_fargate_stop_timeout_max_is_the_platform_cap():
     # 与部署侧 BackendStack.FARGATE_STOP_TIMEOUT_MAX_S 同值的平台上限（Fargate stopTimeout ≤120 秒）；runtime 不跨包 import 部署包，
-    # 这里锁住取值，隧道守护的每 job 余量按它记账
+    # 这里锁住取值，云端每个 job 的尾段里停止宽限那一段按它计
     assert compose.FARGATE_STOP_TIMEOUT_MAX_S == 120
 
 
@@ -1908,7 +1908,7 @@ def test_resolve_cloud_target_config_layer_after_env_before_default(monkeypatch)
     assert (t.prefix, t.runs_table, t.bucket) == ("flag-", "flag-runs", "flag-bucket")
 
 
-# ---- 缺戳例外（ADR 0037 决策 7）：带设备目标或会话预热地址的 run 遇无戳后端即 block ----
+# ---- 缺戳例外（ADR 0037 决策 7）：带设备目标或给了 --expose-local 的 run 遇无戳后端即 block ----
 
 def test_skew_missing_stamp_blocks_when_run_requires_it():
     verdict, msg = compose.check_version_skew(None, "1.5.0", prefix="g-", requires_stamp=True)
@@ -1920,15 +1920,39 @@ def test_skew_missing_stamp_blocks_when_run_requires_it():
 
 
 def test_run_requires_backend_stamp_predicate():
-    from gherkai_core.model import Job, RunMeta, Scenario, Step, Target
+    """在生成运行定义之前按各 job 的目标与有没有给 --expose-local 判断（ADR 0035 决策 3「云端 `submit`」）：桌面且不经隧道为假，
+    有任一设备目标或经隧道为真；混合目标同样为真。"""
+    from gherkai_core.model import Job, Scenario, Step, Target
 
     scs = (Scenario(id="f:1", name="n", steps=(Step(0, "When", "x"),)),)
     desktop = Job(scope_id="d", scope_name="d", engine="midscene", scenarios=scs, timeout_s=300.0)
     device = Job(scope_id="a", scope_name="a", engine="midscene", scenarios=scs, timeout_s=1500.0, target=Target(device="android", ui_kind="web"))
-    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,), deadline_at="2026-01-01T01:00:00+00:00")) is False
-    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop, device), deadline_at="2026-01-01T01:00:00+00:00")) is True
-    assert compose.run_requires_backend_stamp(RunMeta(run_id="r", created_at="t", jobs=(desktop,),
-                                                      session_warmup_url="https://h/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=T", deadline_at="2026-01-01T01:00:00+00:00")) is True
+    table = {
+        ((desktop,), False): False,
+        ((desktop,), True): True,
+        ((desktop, device), False): True,
+        ((device,), False): True,
+        ((device,), True): True,
+    }
+    for (jobs, tunneled), expected in table.items():
+        assert compose.run_requires_backend_stamp(jobs, tunneled=tunneled) is expected, (jobs, tunneled)
+    assert compose.run_requires_backend_stamp(iter([desktop, device]), tunneled=False) is True  # 只遍历一次的迭代器同样可用
+
+
+def test_new_run_id_takes_its_time_prefix_from_the_given_instant(monkeypatch):
+    """run_id 的时间前缀取传入的创建时刻（换算到 UTC、截到整秒），不另读钟（ADR 0027「run_id：归集索引的主键」）；没有传时读一次
+    `compose.now`；不带时区的时刻即 ValueError。前缀之后是随机尾，两次生成不同。"""
+    import re
+    from datetime import datetime, timedelta, timezone
+
+    at = datetime(2026, 11, 20, 13, 4, 5, 987000, tzinfo=timezone(timedelta(hours=8)))
+    first, second = compose.new_run_id(at), compose.new_run_id(at)
+    assert re.fullmatch(r"20261120T050405Z-[0-9a-f]{6}", first), first
+    assert first.split("-")[0] == second.split("-")[0] and first != second
+    monkeypatch.setattr(compose, "now", lambda: datetime(2031, 1, 2, 3, 4, 5, tzinfo=timezone.utc))
+    assert compose.new_run_id().startswith("20310102T030405Z-")
+    with pytest.raises(ValueError):
+        compose.new_run_id(datetime(2026, 11, 20, 13, 4, 5))
 
 
 def test_capabilities_schema_version_must_be_an_integer(monkeypatch, novaact_env_cmd, fresh_caps_cache):

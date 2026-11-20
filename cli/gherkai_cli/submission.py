@@ -270,7 +270,8 @@ def cloud_device_requests(args, target, prepared: "Prepared", jobs) -> "list | i
 def complete_local_definition(args, prepared: "Prepared") -> "list | int":
     """本机后端填完 definition（ADR 0048 决策 3）：项目 ARN 所属账号的比对（STS，只警告）、设备请求填入、安装包上传（S3）并补齐位置，
     最后做写 definition 之前的结构校验。这是本机路径上**仅有的两步 AWS 操作**（账号比对与安装包上传），调用方把它排在全部零副作用校验（含 `run` 的
-    `--grace`、`submit` 的 `--tunnel-ttl`）之后、起隧道与落库之前——配置错的 run 不该先上传几百 MB 再被拒。返回填完的 jobs 或退出码 2。"""
+    `--grace`）之后、起隧道与落库之前（本机 `submit` 是启动后台推进进程之前）——配置错的 run 不该先上传几百 MB 再被拒。返回填完的 jobs
+    或退出码 2。"""
     jobs = list(prepared.jobs)
     if prepared.local_project_arn is not None:
         warn_project_account(args, prepared.local_project_arn, prepared.local_project_source or "配置")

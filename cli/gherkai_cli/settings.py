@@ -122,8 +122,8 @@ def convert_config_value(action, raw, *, section: str, key: str, path):
 def apply_project_config(args, parser: argparse.ArgumentParser) -> int | None:
     """parse_args 之后、分派之前：读项目配置文件并合成取值顺序（ADR 0053 决策 2、3）。返回 2（配置文件不可用）或 None。
 
-    只对八个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值已在 definition 里，或由提交侧按解析后的值经
-    argv 传入）、`deploy` / `destroy` / `skill` / `list-engines` 不读。
+    只对八个读配置的命令做；`_reconcile` / `_tunnel_watch`（宿主不读文件：值由提交侧按解析后的值经标准输入交来）、
+    `deploy` / `destroy` / `skill` / `list-engines` 不读。
     三类选项三种去向：①没有环境变量层的 → 配置值填进仍为 None 的 args 字段（选项已给则不动），最后补内建默认；
     ②有环境变量层的（ENV_LAYER_OPTIONS）→ 只做类型校验、存进 `args.config_values`，由各解析链经 config_* 形参放在环境变量
     之后；③ [cloud] 整节只在 --backend cloud 下生效，backend 自身先按「选项 > [common] > 内建」定下来；只对本机后端起作用的

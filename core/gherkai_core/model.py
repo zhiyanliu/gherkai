@@ -580,9 +580,9 @@ class RunMeta:
     # 与部署侧 cap 取 min）。None 表示提交侧没有给出（推进器按各自口径回落）；落盘为 null（键集固定，ADR 0037 决策 7）。
     max_concurrency: int | None = None
     # 使用方确定性 step 目录的绝对路径（ADR 0037 决策 4）：提交侧（run/submit 的 CLI 进程）解析成绝对路径后填这里
-    # （取值顺序见该决策，配置文件那一层见 ADR 0053 决策 2），所有起 worker 的宿主（同步 run / local
-    # per-run 进程 / status --wait 接力者）从 definition 读回、经 env 注给 worker——三宿主 CWD 各不相同，
-    # 只有随 definition 走才对三者一致，且「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费
+    # （取值顺序见该决策，配置文件那一层见 ADR 0053 决策 2），所有起 worker 的本机宿主都取 definition 里的这个值、经 env 注给
+    # worker：前台 run 的进程与本机后台推进进程用自己生成的那份 definition，status --wait 接力从记录读回。各宿主的 CWD 不必相同，
+    # 只有随 definition 走才对它们一致，且「用到哪套确定性 step」影响判定可复现性、本就属 run 定义。core 只搬运不消费
     # （约定逻辑在组合根）。None 表示无使用方 step（worker 只有内建脚手架注册）；云端后端恒 None（steps 构建在定制镜像里，ADR 0038）。
     steps_dir: str | None = None
     # 本 run 用的 worker variant 名（ADR 0038「运行时与 preflight」）：**人读用**——回答「这次用的是哪套确定性
@@ -601,9 +601,9 @@ class RunMeta:
     # 写出这份 definition 的命令行工具版本（ADR 0037 决策 7）：**只记不比**——结构兼容靠 serialize 层的整数结构版本号判，这里只为
     # 让「读不了这份记录」的提示能点名由哪个版本写出。未装成包取不到版本时为 None。core 只搬运。
     cli_version: str | None = None
-    # 会话预热地址（ADR 0051 决策 13；本机 `--expose-local` 的隧道鉴权）：组合根起隧道时填入，推进器读回经 env
+    # 会话预热地址（ADR 0051 决策 13；本机 `--expose-local` 的隧道鉴权）：组合根起隧道之后填入，推进器从 definition 取出经 env
     # `GHERKAI_SESSION_WARMUP_URL` 注给 worker，worker 在第一个 scenario 之前导航一次换会话 cookie。载体是 definition 的理由
-    # 同 extra_http_headers：起 worker 的宿主与起隧道的 CLI 进程可能不同机器。None 表示不经隧道。core 只搬运、不解释语义；
+    # 同 extra_http_headers：起 worker 的宿主与持有隧道的本机进程可能不同机器。None 表示不经隧道。core 只搬运、不解释语义；
     # 带令牌，展示层按 ADR 0035 决策 5 脱敏。字段名与 env 名同词。
     session_warmup_url: str | None = field(default=None, repr=False)  # 含本次隧道令牌：不进 repr（打印 RunMeta 时不带出来）
 
@@ -657,7 +657,7 @@ class RunState:
     high_water_mark: int | None = None
     # run 级说明：run 结束的原因，随结束写（`RunStore.end_run`，句子取自 `run_status.RUN_ENDINGS`）的同一次条件写落库，让 `status`
     # 看得见原因（团队成员未必有 CloudWatch 的读权限）。写入方：执行方按运行期限、fail-fast 或使用方中断结束仍有 job 没有启动的 run
-    # 时（ADR 0031 决定三「结束写」小节的说明表；RunResult.message 取的就是它）；后台推进读不到可用的运行定义时（结构版本不是本后端
+    # 时（ADR 0031 决定三「结束写」小节的说明表；RunResult.message 取的就是它）；云端推进器读不到可用的运行定义时（结构版本不是本后端
     # 认的、定义违约、缺 worker 镜像版本），这几种情形经运行定义不可用的结束写写下。job 都由执行结果结束的 run 没有它。
     # 边界：job 级原因（判定、超时、中止、worker 退出）一律留在 job 上（判定明细与 explain）。omit-when-None（同 started_at）。
     message: str | None = None

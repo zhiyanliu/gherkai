@@ -9,12 +9,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shlex
 import signal
+import sqlite3
 import sys
+from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from gherkai_core.redact import redact_deep
@@ -30,14 +34,15 @@ from gherkai_core.model import (
     Status,
 )
 from gherkai_core.parse import FeatureParseError
-from gherkai_core.persist import RunPersistence, result_without_record
+from gherkai_core.persist import RunPersistence, initial_run_state, result_without_record
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
-from gherkai_core.errors import DefinitionContractError, NamedDetailMissing, RunAlreadyEnded, UnsupportedDefinitionSchema
+from gherkai_core.errors import DefinitionContractError, NamedDetailMissing, RunAlreadyEnded, RunAlreadyExists
 from gherkai_core.named_details import load_named_details
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 from gherkai_core.schedule import ScheduleOpts, schedule
 
 from gherkai_runtime import compose
+from gherkai_runtime import handoff
 from gherkai_runtime import names as _names
 
 from gherkai_cli import config as _config
@@ -129,13 +134,13 @@ _STEPS_DIR_HELP = (
     "你自己的确定性 step 目录（不给时依次取环境变量 GHERKAI_STEPS_DIR、配置文件的 steps-dir，都没有则 ./steps 存在即用）："
     "worker 启动时按路径排序递归加载其中的 step 定义文件，注册进它的确定性 step 注册表"
 )
-# `run` / `submit`（实际运行与提交那一侧）另加一句：值随提交记录走；`submit` 再加后台读回与云端后端不生效两句
+# `run` / `submit`（实际运行与提交那一侧）另加一句：值随提交记录走；`submit` 再加本机后台推进与接力用同一份、云端后端不生效两句
 # （`run` 只有本机后端，ADR 0016 决策 A）。`submit` 的一段在 `run` 的一段之后追加，共有的那句只写一处。判据不是「带 --backend」——
 # `doctor` 也带 --backend，但它只查环境、不产提交记录，故用不加补充的公共段。
 _STEPS_DIR_HELP_RUN = _STEPS_DIR_HELP + "。值随提交记录走"
 _STEPS_DIR_HELP_SUBMIT = (
     _STEPS_DIR_HELP_RUN
-    + "，本机后台推进/接力进程都读回同一份；"
+    + "，本机后台推进与 status --wait 接力都用这一份；"
       "[--backend cloud] 不生效（云端 worker 的 steps 构建在定制镜像里，警告不拦）"
 )
 
@@ -292,12 +297,14 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
              "更短的宽限可能让 worker 在释放会话（浏览器会话或远程访问会话）或保存产物之前被强制终止，"
              "给出小于该宽限的值直接以退出码 2 结束",
     )
-    # 隧道暴露本机应用的整套机制（令牌换 cookie 的鉴权、生命周期、谁负责拆）见 ADR 0035 与 ADR 0051 决策 13。
+    # 隧道暴露本机应用的整套机制（令牌换 cookie 的鉴权、隧道建在哪个进程里、随什么消失）见 ADR 0035 与 ADR 0051 决策 13。
     run.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
         help="把「本机可达」的被测应用经隧道暴露给云端浏览器与真机上的浏览器：值为 feature 中书写的原始 origin"
              "（如 http://localhost:3000，也可是局域网地址），gherkai 会起隧道并把 job 文本中作为地址出现的该值替换成隧道的公网地址；"
-             "访问受本次运行专用的会话保护（引擎的浏览器在第一个场景之前凭令牌换到会话 cookie），运行结束即拆除。需已配 ngrok authtoken（NGROK_AUTHTOKEN）",
+             "访问受本次运行专用的会话保护（引擎的浏览器在第一个场景之前凭令牌换到会话 cookie）；"
+             "隧道由执行这条命令的 gherkai 进程持有，随它退出而关闭。"
+             "需要安装 gherkai 的 tunnel 组件（gherkai[tunnel]）并设置环境变量 NGROK_AUTHTOKEN",
     )
     run.add_argument(
         "--tunnel", choices=sorted(_tunnel_providers()), default=None,
@@ -372,7 +379,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
 
     # ---- 无状态批量运行（ADR 0034）：submit 提交完就走 / status 轮询收集 ----
-    # 本机后端：submit setsid fork 一个 per-run 进程执行 reconcile loop（本机推进，无需常驻），CLI 立即退出。
+    # 本机后端：submit 以新会话启动后台推进进程，由它建 run 并推进到 run 结束（无需常驻）；submit 收到它的回报即退出。
     sm = sub.add_parser("submit", help="[后台运行] 提交 .feature 到后台运行、立即返回 run_id（提交完就走）")
     sm.add_argument("features", nargs="+", type=Path, help="一个或多个 .feature 路径")
     _add_config_flag(sm)
@@ -389,17 +396,12 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     )
     sm.add_argument(
         "--expose-local", default=None, metavar="ORIGIN",
-        help="经隧道暴露本机可达的被测应用（语义同 run；submit 后隧道由后台进程持有——local 下是本机后台进程、"
-             "cloud 下是隧道守护进程，本机需保持开机联网直到 run 终态）",
+        help="经隧道暴露本机可达的被测应用（语义同 run）。隧道由本机的后台进程持有，随它退出而关闭："
+             "本机后端是后台推进进程，云端后端是隧道守护进程；本机需保持开机联网直到 run 结束",
     )
     sm.add_argument(
         "--tunnel", choices=sorted(_tunnel_providers()), default=None,
         help="--expose-local 用的隧道 provider（默认 ngrok）",
-    )
-    sm.add_argument(
-        "--tunnel-ttl", type=float, default=None, metavar="S",
-        help="[cloud + --expose-local] 隧道守护进程的兜底 TTL 秒（默认为按这个 run 的任务量估算的上限：各 job 预算之和，"
-             "加一次性的启动余量与每个 job 的余量）；给了就用本值。TTL 到点无条件拆隧道，调小可能在 run 未完时断隧道",
     )
     sm.add_argument("--report-dir", default=None, metavar="DIR",
                     help="归集报告落点（默认 reports/）；云端后端须与后端部署的 REPORT_DIR 一致"
@@ -410,7 +412,7 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
                     help="AWS region（取值顺序同 run 的 --region）；本机发起的 AWS 调用与 worker 都用它")
     sm.add_argument("--profile", default=None, metavar="P",
                     help="AWS profile（取值顺序同 run 的 --profile）；用于本机发起的 AWS 调用与本机后端的 worker")
-    # backend：local（默认，per-run 进程本机推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
+    # backend：local（默认，本机后台推进进程推进）/ cloud（Fargate + 云端 Lambda 事件驱动链推进，ADR 0034）。
     sm.add_argument("--backend", choices=["local", "cloud"], default=None,
                     help="local 由本机后台进程推进（默认）；cloud 由已部署的云端后端推进，提交后即使本机关机也会执行到结束")
     sm.add_argument("--prefix", default=None, metavar="P",
@@ -500,27 +502,18 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     lr.add_argument("--region", default=None, metavar="R")
     lr.add_argument("--profile", default=None, metavar="P")
 
-    # _reconcile：per-run 进程入口（submit setsid fork 它，非使用方直接调）。执行 reconcile loop 到 run 收尾。
+    # _reconcile：本机后台推进进程的入口（本机 submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「本机 `submit`」）：
+    # 建 run 所需的输入经标准输入交来（handoff.AdvancerInput），结果经 --report-fd 指定的回报管道交回。
     # 内部入口**不传 help**：argparse 只为带 help 的子命令登记帮助条目，不传即不出现在 --help 的命令说明里；
     # 传 help=argparse.SUPPRESS 反而会以「==SUPPRESS==」漏出（Python 3.13 仍如此）。命令集的花括号列表另由末尾的 metavar 收窄。
     rc = sub.add_parser("_reconcile")
-    rc.add_argument("run_id")
-    rc.add_argument("--report-dir", default="reports")
-    rc.add_argument("--max-concurrency", type=int, default=DEFAULT_MAX_CONCURRENCY)
-    rc.add_argument("--region", default=None)
-    rc.add_argument("--profile", default=None)
+    rc.add_argument("--report-fd", type=int, required=True)
 
-    # _tunnel_watch：cloud submit 的隧道守护进程入口（submit setsid fork 它，非使用方直接调，ADR 0035 决策 3）：
-    # 轮询 run 终态即拆隧道；TTL 兜底自杀防泄漏。
+    # _tunnel_watch：云端 submit 的隧道守护进程入口（submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「云端 `submit`」）：
+    # 到点时刻、origin、runs 表等经标准输入交来（handoff.WatchInput），公网地址经 --report-fd 的回报管道交回，run 的标识随后
+    # 再经标准输入交来；主体在 tunnel_host.hold_tunnel_for_cloud_run。
     tw = sub.add_parser("_tunnel_watch")  # 同 _reconcile：不传 help（见上）
-    tw.add_argument("run_id")
-    tw.add_argument("--tunnel-pid", type=int, required=True)
-    # --ttl 必给、无默认：TTL 按 definition 算（submit 侧 tunnel_host.compute_watch_ttl_s，提交者可用
-    # submit --tunnel-ttl 覆盖）。给个「没有生产写入者的默认值」正是本 flag 曾恒为 1h 的病根，故不留默认。
-    tw.add_argument("--ttl", type=float, required=True)
-    tw.add_argument("--ddb-table", required=True)
-    tw.add_argument("--region", default=None)
-    tw.add_argument("--profile", default=None)
+    tw.add_argument("--report-fd", type=int, required=True)
 
     le = sub.add_parser("list-engines", help="列出可用引擎及其 spawn 命令")
     le.add_argument("--json", action="store_true", help="输出机器可读 JSON（每引擎 available/cmd/source/hint）")
@@ -660,7 +653,7 @@ def _preflight_worker_runtimes(jobs, steps_dir: str | None, *, require_session_w
       grace 下限」（ADR 0036「5.」），恒问一次后 `_cmd_run` 的 grace 下限（`compose.engine_min_grace`）命中同一份
       进程内缓存——本机 run 每引擎只 spawn 一次自述。
     - `require_session_warmup`（本机后端给了 `--expose-local`，ADR 0051 决策 13「能力与拒绝点」）：worker 自述不声明会话预热支持
-      （键缺失或为 false）即以退出码 2 拒绝——在起隧道之前，故不需要拆隧道。
+      （键缺失或为 false）即以退出码 2 拒绝，在起隧道之前。
     **只查本次用到的引擎**——另一个引擎没装不影响本次检查（dev 下 midscene 常态未装）。返回 2 或 None。
     云端后端不调用本函数：那个后端的 worker 在 Fargate 容器里运行，本机定位链无关。
     """
@@ -1220,7 +1213,7 @@ def _load_and_plan(args) -> "list | int":
             default_assertion_votes=args.assertion_votes,
             # 两层设定的缺省层（ADR 0019 @timeout / ADR 0034「job timeout」节）：标了 @timeout: 的 scope 按 tag 走；未标的用显式给出的
             # --default-job-timeout（None 即「未指定」，plan 层按目标补缺省；<=0 对任何目标取上限，三态原样传入、不在这里归一）。
-            # 载体在 definition（Job.timeout_s），三路推进器（同步 schedule / local per-run / cloud）各自 enforce。
+            # 载体在 definition（Job.timeout_s），三路推进器（同步 schedule / 本机后台推进进程 / cloud）各自 enforce。
             default_job_timeout_s=args.default_job_timeout,
             default_desktop_job_timeout_s=DEFAULT_DESKTOP_JOB_TIMEOUT_S,
             default_device_job_timeout_s=acquire_s + DEFAULT_DEVICE_JOB_TIMEOUT_EXTRA_S,
@@ -1265,10 +1258,10 @@ def _load_and_plan(args) -> "list | int":
 
 
 def _validate_max_concurrency(args) -> bool:
-    """`--max-concurrency` 入口校验（对齐 `--tunnel-ttl`/`--grace`/`--assertion-votes` 的入口校验惯例）。
+    """`--max-concurrency` 入口校验（对齐 `--grace`/`--assertion-votes` 的入口校验惯例）。
 
     <1 不是「慢一点」而是**永远不动**：并发闸取 min(声明, cap) 后 <=0 会让 `plan_next` 永不提议起 job——
-    三路推进器（同步 schedule / local per-run / cloud 推进器）都空转，run 提交出去却卡死在 pending。
+    三路推进器（同步 schedule / 本机后台推进进程 / cloud 推进器）都空转，run 提交出去却卡死在 pending。
     入口拦截（退出码 2「没开始执行就被拒」），不让坏值流进 definition。返回 False 表示调用方以退出码 2 结束。
 
     用 getattr 取值：`plan` 子命令没有这个 flag（纯本地不执行 job），取不到就不校验。
@@ -1395,11 +1388,37 @@ def _available_step_targets(caps: dict) -> "dict[str, list]":
     return {e["pattern"]: compose.available_targets(compose.step_targets(e), supported) for e in caps["deterministic_steps"]}
 
 
-def _setup_tunnel(args, jobs):
-    """`--expose-local` 的 argparse 侧接线：编排在 `gherkai_runtime.tunnel_host`（ADR 0035 决策 1/2/4）。
+def _check_tunnel_prerequisites(args) -> int | None:
+    """给了 `--expose-local` 时先查隧道的两项前置：隧道组件装好且能加载、设了令牌的环境变量（ADR 0035 决策 1「前置条件」）。
+    缺了打印那一句、返回 2；没给 `--expose-local` 时什么都不做（不导入隧道组件，装不装都没有影响，ADR 0037 决策 2c）。
 
-    返回 (jobs, headers, info)——未给 flag 时 (jobs, None, None)；隧道起不来返回退出码 2
-    （「没开始执行就被拒」层，与 preflight 同级）。
+    `run`、本机 `submit` 与云端 `submit` 经 `_plan_and_preflight` 共用这一处，排在补全运行定义、上传安装包与连云端之前，缺前置时
+    不上传、不起后台进程、不连 AWS；`plan` 不调（它不起隧道）。三种宿主起隧道时经同一处导入，同一情形给出同一句。"""
+    if not getattr(args, "expose_local", None):
+        return None
+    from gherkai_runtime import tunnel as _tunnel
+
+    try:
+        _tunnel.make_tunnel(args.tunnel).check_prerequisites()
+    except _tunnel.TunnelError as e:
+        _progress(str(e))
+        return 2
+    return None
+
+
+def _tunnel_established_line(origin: str, public_url: str) -> str:
+    """公网地址那一行（ADR 0035 决策 3「公网地址那一行」）：三种组合同一句。前台 `run` 在建成隧道时打出，两种 `submit` 由提交进程
+    在收到后台进程的回报之后打出。不报存活时长：隧道随持有它的进程退出而关闭，没有另一个时长。"""
+    return (f"隧道已建立：{origin} → {public_url}"
+            "（访问受本次运行专用的会话保护；持有隧道的 gherkai 进程退出时隧道随之关闭）")
+
+
+def _setup_tunnel(args, jobs, *, closes_at: datetime) -> "tuple[list, dict | None, object | None] | int":
+    """前台 `run` 的 `--expose-local`：起隧道并映射运行定义（编排在 `tunnel_host.start_tunnel_for_jobs`，ADR 0035 决策 1、2、4）。
+
+    `closes_at` 是本 run 的到点时刻（运行期限加 300 秒，`deadline.run_times` 算出），写进流量策略的到点拒绝。返回 (jobs, headers,
+    info)——没给 `--expose-local` 时 (jobs, None, None)；隧道起不来时原样打印那一句、返回 2（「没开始执行就被拒」，与运行前检查
+    同一层）。关闭会话由调用方登记（前台 `run` 经 atexit）。
     """
     if not getattr(args, "expose_local", None):
         return jobs, None, None
@@ -1408,28 +1427,27 @@ def _setup_tunnel(args, jobs):
 
     try:
         setup = tunnel_host.start_tunnel_for_jobs(
-            jobs, local_origin=args.expose_local, provider=args.tunnel)
+            jobs, local_origin=args.expose_local, provider=args.tunnel, closes_at=closes_at)
     except _tunnel.TunnelError as e:
-        _progress(f"--expose-local 隧道未就绪：{e}")
+        _progress(str(e))
         return 2
-    _progress(f"隧道已建立：{args.expose_local} → {setup.info.url}"
-              f"（访问受本次运行专用的会话保护，运行结束即拆除）")
-    return setup.jobs, setup.extra_http_headers, setup.info
+    _progress(_tunnel_established_line(args.expose_local, setup.info.url))
+    return list(setup.jobs), setup.extra_http_headers, setup.info
 
 
 def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
-    """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → steps 目录解析
+    """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → 隧道的前置检查 → steps 目录解析
     → 本机后端 worker 运行时 preflight → 设备选择与安装包定位（含本机后端的项目 ARN 与应用桶的取值）。
     成功返回 `Prepared`（全部已解析的输入）；任一步失败返回**退出码**（调用方原样返回）。
 
-    **整块只碰本机、不碰 AWS、不碰隧道/落库**（末步之前给了 steps 目录时会起本地瞬时 worker 子进程做自述——非执行 job）——
-    故排在调用方各自的选项校验、起隧道 / 探云端资源 / 落库之前，让配置错落在「没开始执行就被拒」层（各步自己的判据见
-    `_validate_max_concurrency` / `_validate_worker_variant` / `_load_and_plan` / `_resolve_steps_dir_for_backend` /
-    `_preflight_worker_runtimes` / `_device_selections` / `_app_entries`）。抽出的理由同 `_load_and_plan`：run 与 submit
-    曾各手抄一份、会漂移。
+    **整块只碰本机、不碰 AWS、不起隧道、不落库**（给了 `--expose-local` 时导入一次隧道组件做前置检查；末步之前给了 steps 目录时会起
+    本地瞬时 worker 子进程做自述——非执行 job）——故排在调用方各自的选项校验、起隧道 / 探云端资源 / 落库之前，让配置错落在
+    「没开始执行就被拒」层（各步自己的判据见 `_validate_max_concurrency` / `_validate_worker_variant` / `_load_and_plan` /
+    `_check_tunnel_prerequisites` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes` / `_device_selections` /
+    `_app_entries`）。抽出的理由同 `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
     本机后端**要碰 AWS 的两步**（项目 ARN 的账号比对、安装包上传）与随后的写前校验不在这里：它们在 `submission.complete_local_definition`，
-    由调用方在自己的选项校验（`run` 的 `--grace`、`submit` 的 `--tunnel-ttl`）之后、起隧道之前调——配置错的 run 不该先上传
-    几百 MB 再被拒。云端后端对应的两步在 `submission.complete_cloud_definition`，由云端 `submit` 在 skew 闸与资源 preflight 之后调。
+    由调用方在自己的选项校验（`run` 的 `--grace`）之后、起隧道之前调——配置错的 run 不该先上传几百 MB 再被拒。云端后端对应的两步在
+    `submission.complete_cloud_definition`，由云端 `submit` 在 skew 闸与资源 preflight 之后调。
     `list_jobs`：`run` 在计数行后再逐 job 打一行（scope/engine/scenario 数）；`submit` 只打计数行（进度看 `status`）。
     """
     if not _validate_max_concurrency(args):  # 最早：读 feature/起隧道/preflight 之前（真零副作用）
@@ -1439,6 +1457,11 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     jobs = _load_and_plan(args)  # votes/筛选值校验 + 读 feature + plan（前置失败返回退出码 2）
     if isinstance(jobs, int):
         return jobs
+    # 隧道的两项前置紧接 plan（origin 已在上一步归一化）：早于 steps 目录、worker 预检、设备选择、安装包与账号比对，
+    # 云端的各道闸都在本函数之后，缺前置时不连 AWS（ADR 0035 决策 1「前置条件」）
+    bad = _check_tunnel_prerequisites(args)
+    if bad is not None:
+        return bad
     # 进度走 stderr（不受 --json 开关；stdout 始终只放核心产出）
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
     if list_jobs:
@@ -1484,29 +1507,41 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     return prepared
 
 
-def _build_run_meta(args, jobs, steps_dir: "str | None", tunnel_headers: "dict | None", warmup_url: "str | None", *,
-                    per_job_tail_s: float) -> RunMeta:
-    """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + plan 产出的 jobs + 运行期限 + run 级执行参数。
+def _build_run_meta(jobs, *, times: "deadline.RunTimes", max_concurrency: int, steps_dir: "str | None",
+                    tunnel_headers: "dict | None", warmup_url: "str | None") -> RunMeta:
+    """组装 definition（ADR 0016/0027）：新 run_id + 创建时刻 + jobs + 运行期限 + run 级执行参数。
 
-    `run` 与 `submit` 共用（六个字段曾各抄一份）；run_id 在此生成，调用方从 `run_meta.run_id` 取回。
-    `steps_dir` 在云端后端恒 None（`_resolve_steps_dir_for_backend` 已清零）；`extra_http_headers` 是隧道
-    注入的额外请求头（ADR 0035 决策 4），空表归一成 None；`warmup_url` 是隧道的会话预热地址（ADR 0051 决策 13），
-    与额外请求头在隧道模式下恒成对出现、不经隧道都为 None。
-    `per_job_tail_s` 是运行期限算式里的每 job 尾段（ADR 0054 决策二）：调用方按后端与停止宽限取值（`_per_job_tail_s`），期限由
-    这里生成的创建时刻与各 job 的墙钟预算一并推出（`deadline.compute_deadline_at`），`--no-report` 的 run 同样带它。
+    三种建 run 的一方共用：前台 `run`、本机后台推进进程（`_advance_submitted`）、云端 `submit`；run_id 在此生成，调用方从
+    `run_meta.run_id` 取回。不读命令行参数、不读钟、不算期限：创建时刻与期限都在 `times` 里（`deadline.run_times` 由创建时刻那一次
+    读数算出，ADR 0054 决策二「落点是运行定义」），run_id 的时间前缀也取那一次读数（ADR 0027「run_id：归集索引的主键」）。
+    `steps_dir` 在云端后端恒 None（`_resolve_steps_dir_for_backend` 已清零）；`tunnel_headers` 是隧道注入的额外请求头（ADR 0035
+    决策 4），空表归一成 None；`warmup_url` 是隧道的会话预热地址（ADR 0051 决策 13），与额外请求头在隧道模式下恒成对出现、不经隧道
+    都为 None。云端的 worker variant 两个字段由调用方另行合入。
     """
-    from gherkai_runtime import deadline
-
-    created_at = compose.now_iso()
     return RunMeta(
-        run_id=compose.new_run_id(), created_at=created_at, jobs=tuple(jobs),
-        deadline_at=deadline.compute_deadline_at(created_at, jobs, per_job_tail_s=per_job_tail_s),
+        run_id=compose.new_run_id(times.created), created_at=times.created_at, jobs=tuple(jobs),
+        deadline_at=times.deadline_at,
         extra_http_headers=tuple(tunnel_headers.items()) if tunnel_headers else None,
-        max_concurrency=args.max_concurrency,
+        max_concurrency=max_concurrency,
         steps_dir=steps_dir,
         cli_version=_installed_version(),  # 写端版本只记不比（ADR 0037 决策 7）；未装成包为 None
         session_warmup_url=warmup_url,
     )
+
+
+def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: bool) -> str:
+    """本机建 run 失败时的一句（ADR 0030 决定七；前台 `run` 与本机后台推进进程同一函数、同一句，都以退出码 2 结束、不打回溯）。
+
+    三种情形分开说：run 已存在（只认 `RunAlreadyExists`：报告目录里与 run 同名的文件或悬空的符号链接抛的是普通的
+    FileExistsError，按写记录失败报出）；记录还没有写下（`created` 为假）；记录已写下、准备执行用的文件失败（建事件库、打开
+    `reconcile.log` 或前台 `--quiet` 的 worker 日志），这时 run 停在 pending、没有开始执行。"""
+    if isinstance(e, RunAlreadyExists):
+        return f"run {run_id} 已经存在，没有重新建立。请重新执行这条命令。"
+    if not created:
+        return (f"在报告目录 {report_dir} 里写这个 run 的记录失败：{e}。还没有开始执行；"
+                "请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。")
+    return (f"run {run_id} 的记录已经写下，但在报告目录 {report_dir} 里准备执行用的文件失败：{e}。"
+            "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录的读写权限与剩余空间后重新执行。")
 
 
 def _per_job_tail_s(backend: str, grace_s: float) -> float:
@@ -1621,147 +1656,120 @@ def _print_artifact_lines(locations: dict) -> None:
 
 
 def _cmd_submit(args) -> int:
-    """[无状态批量运行] 提交完就走（ADR 0034）：plan → 写 RunMeta+全 pending → 起首轮推进 → 打印 run_id → 立即退出。
+    """[后台运行] 提交完就走（ADR 0034、ADR 0035 决策 3）：共享前置 → 按后端分流 → 打印 run_id → 退出。
 
-    - **local**：setsid fork per-run 进程执行 reconcile loop 本机推进（无需常驻服务/云）；崩了 status --wait 接力。
-    - **cloud**：只 create_run 写 definition 到 DDB（不起 task）→ 之后云端 Lambda 事件驱动链推进
-      （runs Stream INSERT→kicker 起首批→events Stream→reconciler 逐个写下 job 的终态，直到 run 结束），**提交完真关机也能运行到结束**。
-      CLI 不留本机进程；submit 机器没有任何 ECS 写或执行权限（只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition / ListTaskDefinitions，
-      完整权限面见 `_submit_cloud` 里 create_run 前的注释）。
+    - **local**：补全运行定义之后以新会话启动本机后台推进进程，经它的标准输入交出建 run 所需的输入（`_submit_local`）；起隧道
+      （给了 `--expose-local` 时）、建 run 与推进都在后台推进进程里（`_advance_submitted`），提交进程收到它的回报即输出结果并退出。
+    - **cloud**：过云端各道闸、补全运行定义之后建 run（写 definition 到 DDB，不起 task），之后云端 Lambda 事件驱动链推进
+      （runs Stream INSERT→kicker 起首批→events Stream→reconciler 逐个写下 job 的终态，直到 run 结束），**提交完真关机也能运行到结束**；
+      给了 `--expose-local` 时另以新会话启动本机的隧道守护进程持有隧道（`_submit_cloud`）。submit 机器没有任何 ECS 写或执行权限
+      （只读探活与 variant 解析要 DescribeClusters / DescribeTaskDefinition / ListTaskDefinitions，完整权限面见 `_submit_cloud`
+      里 create_run 前的注释）。
     退出码表示提交成功与否（非 run 判定；判定由 status 查）。
     """
-    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → steps 目录 → 本机后端 worker preflight。
-    # 整块**排在起隧道之前**——早拒才真零副作用。
+    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → 隧道前置 → steps 目录 → 本机后端 worker preflight。
     prepped = _plan_and_preflight(args, list_jobs=False)  # 逐 job 明细归 run；submit 只打计数行（进度看 status）
     if isinstance(prepped, int):
         return prepped
-    jobs, steps_dir = prepped.jobs, prepped.steps_dir
-
-    # --tunnel-ttl 校验（对齐 --grace/--assertion-votes 的入口校验惯例，退出码 2「没开始执行就被拒」）：
-    # <=0 等于隧道刚起就被拆。**必须排在起隧道之前**——早拒才真零副作用（否则配置错也已起 ngrok）。
-    # isfinite 与 @timeout: 校验同一理由（float() 收 nan/inf；nan 使守护的 monotonic()<deadline 首轮即
-    # False → 隧道 submit 后立刻被拆，兜底反成失败源）。
-    import math as _math
-    if args.tunnel_ttl is not None and (not _math.isfinite(args.tunnel_ttl) or args.tunnel_ttl <= 0):
-        _progress(f"--tunnel-ttl={args.tunnel_ttl} 无效：须为有限正数（TTL 到点无条件拆隧道，<=0/nan/inf 均拒）")
-        return 2
-    identity = None  # 本机后端的 (region, profile)：交给 per-run 进程；云端后端由 _submit_cloud 自己解析
-    if args.backend != "cloud":
-        # AWS 身份先于填 definition、起隧道与落库解析：profile 名不存在时在这里以退出码 2 结束，不上传、不起隧道、不留 run 记录
-        identity = _aws_identity(args)
-        if isinstance(identity, int):
-            return identity
-        # 运行期限要用的停止宽限（ADR 0054 决策二）：只依赖 jobs 用到的引擎，排在上传安装包与起隧道之前，查不到能力自述时零副作用地拒绝
-        grace = _local_submit_grace(jobs)
-        if isinstance(grace, int):
-            return grace
-        # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、起隧道之前
-        jobs = _complete_local_definition(args, prepped)
-        if isinstance(jobs, int):
-            return jobs
-    else:
-        grace = 0.0  # 云端的每 job 尾段是固定值，不用停止宽限
-
-    # --expose-local：起隧道 + 映射 jobs（ADR 0035）。submit 的隧道生命周期交给后台宿主
-    # （本机后端是 per-run 进程、云端后端是隧道守护进程）；分流失败（preflight/落库不过）时在此拆掉防泄漏。
-    tunneled = _setup_tunnel(args, jobs)
-    if isinstance(tunneled, int):
-        return tunneled
-    jobs, tunnel_headers, tunnel_info = tunneled
-
-    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers,
-                               tunnel_info.warmup_url if tunnel_info is not None else None,  # steps_dir 与预热地址随 definition 到达宿主
-                               per_job_tail_s=_per_job_tail_s(args.backend, grace))
-    run_id = run_meta.run_id
-    from gherkai_core.model import JobState, RunState
-    initial = RunState(
-        run_id=run_id, status=Status.PENDING,
-        jobs={j.scope_id: JobState(scope_id=j.scope_id, status=Status.PENDING) for j in jobs},
-        started_at=compose.now_iso(), high_water_mark=0,
-    )
-
-    # 隧道交棒的分界线是后台宿主 fork 成功那一刻（本机后端是推进进程、云端后端是隧道守护进程），由被调方经
-    # `on_handoff` 通知。**分界线之前**没交上棒（返回非 0 或抛异常：解析 profile / 落库 / 建日志 / fork
-    # 本身失败）→ 隧道没有宿主，就地拆掉，否则脱离进程组的 agent 会永久把本机应用留在公网（ADR 0035 决策 3）。
-    # **「没交棒」不等于「没提交」**：云端后端 `create_run` 已过、只是守护没 fork 起来这一格，云端链已经接管这个
-    # run；本机后端同理（run 记录已在盘上、接力者会来推它）。这一格照样拆（没有任何收尾者，不拆就是永久公网
-    # 暴露），但必须打一行说清楚——否则提交者只看到一个栈、以为什么都没发生，而云端照常运行、照常计费。
-    # **分界线之后**即便收尾几行抛（stdout 是坏管道、Ctrl-C 恰落此窗）也不能拆：宿主已经在运行，拆了会让
-    # 剩余 job 在被测应用不可达下运行成假失败——兜底机制反成失败源，且真实产生 AWS 费用。
-    handed_off = False
-
-    def _mark_handoff() -> None:
-        nonlocal handed_off
-        handed_off = True
-
-    try:
-        if args.backend == "cloud":
-            rc_ = _submit_cloud(args, run_id, run_meta, initial,
-                                tunnel_info=tunnel_info, on_handoff=_mark_handoff, prepared=prepped)
-        else:
-            rc_ = _submit_local(args, run_id, run_meta, initial, identity=identity,
-                                tunnel_info=tunnel_info, on_handoff=_mark_handoff)
-    finally:
-        if tunnel_info is not None and not handed_off:
-            from gherkai_runtime.tunnel import stop_tunnel
-
-            stop_tunnel(tunnel_info.pid)  # 幂等（进程已不在则静默返回）；异常照常上抛、不吞
-            _progress("隧道已拆除（本机的被测应用不再对外暴露）。若上面已经打出提交成功，这个 run 就别再往下推"
-                      "——它要访问的地址已经失效、只会以导航失败告终：先修掉报出来的问题，再重新提交。")
-    return rc_
+    if args.backend == "cloud":
+        return _submit_cloud(args, prepped)
+    # AWS 身份先于填 definition 与启动后台推进进程解析：profile 名不存在时在这里以退出码 2 结束，不上传、不起后台进程
+    identity = _aws_identity(args)
+    if isinstance(identity, int):
+        return identity
+    # 运行期限要用的停止宽限（ADR 0054 决策二）：只依赖 jobs 用到的引擎，排在上传安装包之前，查不到能力自述时零副作用地拒绝
+    grace = _local_submit_grace(prepped.jobs)
+    if isinstance(grace, int):
+        return grace
+    # 本机后端填完 definition（账号比对、设备请求、安装包上传、写前校验）：全部零副作用校验之后、启动后台推进进程之前
+    jobs = _complete_local_definition(args, prepped)
+    if isinstance(jobs, int):
+        return jobs
+    return _submit_local(args, prepped, jobs, identity=identity, per_job_tail_s=_per_job_tail_s("local", grace))
 
 
-def _submit_local(args, run_id: str, run_meta, initial, *, identity: "tuple[str | None, str | None]",
-                  tunnel_info=None, on_handoff=None) -> int:
-    """local submit：create_run（文件）+ 建 events SQLite + setsid fork per-run 进程推进。
+def _close_owned(fds: list[int]) -> None:
+    """关闭并移出列表里的描述符：先移出再关，重复调用不会把同一个号关两次（号会被复用）。"""
+    while fds:
+        handoff.close_quietly(fds.pop())
 
-    `identity` 是调用方在落库之前经 `_aws_identity` 解析好的 (region, profile)：解析失败时调用方已以退出码 2 结束，
-    磁盘上不会留下没有推进进程的 run 记录。
 
-    `on_handoff`（给了就调）在 fork 成功那一刻通知调用方「隧道已有后台宿主」——它是 `_cmd_submit` 里
-    「未交棒即就地拆隧道」的分界线（ADR 0035 决策 3），故必须紧跟 Popen、不能等到本函数收尾。
+def _start_background(entry: str, *, owned: list[int]) -> tuple[int, int]:
+    """以新会话启动 submit 的一种后台进程（`_reconcile` 或 `_tunnel_watch`，ADR 0035 决策 3），返回 (它标准输入的写端, 回报管道的
+    读端)。这两个描述符一建出就放进 `owned`，由调用方关闭或转交给 `handoff.WatchChannel`；子进程用的那两端在这里关掉，写端因此只在
+    子进程里，它退出时调用方读到文件结束。`Popen` 失败抛 OSError。
+
+    - `-P`：不把当前目录放进模块搜索路径。后台进程继承使用方的项目目录（cwd 继承提交进程，ADR 0037 决策 3），不加时项目里与标准库
+      或隧道组件同名的文件会被优先导入（ADR 0035 决策 3「启动方式」）。
+    - 标准输出与标准错误都接提交进程的 fd 2：提交进程的标准输出只放 run 标识，后台进程接 fd 1 的话 `out=$(gherkai submit …)`
+      会一直等它。回报之前它的输出（崩溃的回溯）因此直接到使用者的终端，回报之后由它自己改接日志（`handoff.redirect_output`）。
+    - 标准输入是这里建的管道：写端按 PEP 446 不可继承、只在提交进程手里，后台进程据此判断提交进程还在不在。不用 `stdin=PIPE`：
+      那样同一个描述符另有一个 `Popen.stdin` 文件对象，回收时会再关一次。
+    - 回报管道的写端经 `pass_fds` 交给子进程，它进门即设为不可继承，之后起的子进程拿不到。
     """
     import subprocess as _sp
-    from gherkai_core.adapters.event_log import SqliteEventLog
 
-    report_root = Path(args.report_dir).resolve()
-    run_store, _rs, _rp, _mk = compose.build_local_stores(
-        report_dir=str(report_root),
-        detached=True,  # run_state.json 带 detached 标记 → status --wait 认它可接力（同步 run 不带；对位云端 STATE 的标记）
-    )
-    run_store.create_run(run_meta, initial)
-    SqliteEventLog(compose.events_db_path(report_root, run_id))  # 建库（schema），per-run/status/explain 共用（路径单点）
-    if tunnel_info is not None:
-        # 隧道收尾凭据落盘（ADR 0035 决策 3）：pid 经 tunnel.json 交给收尾者（per-run 终态后拆；
-        # per-run 崩了由 status --wait 接力拆）。进程对象句柄跨进程传不过去，落盘是唯一通道。
-        from gherkai_runtime.detached import write_tunnel_file
+    child_ends: list[int] = []
+    try:
+        stdin_r, stdin_w = os.pipe()
+        child_ends.append(stdin_r)
+        owned.append(stdin_w)
+        report_r, report_w = os.pipe()
+        owned.append(report_r)
+        child_ends.append(report_w)
+        _sp.Popen([sys.executable, "-P", "-m", "gherkai_cli", entry, "--report-fd", str(report_w)],
+                  stdin=stdin_r, stdout=2, stderr=2, pass_fds=(report_w,), start_new_session=True)
+    finally:
+        _close_owned(child_ends)
+    return stdin_w, report_r
 
-        write_tunnel_file(str(report_root), run_id, tunnel_info)
-        _progress(f"隧道由本机后台进程持有（pid 记录于 {report_root / run_id / 'tunnel.json'}）：run 终态即拆。")
 
-    # setsid fork per-run 进程（start_new_session=True 即脱离 CLI 进程组，CLI 退出不带走它，ADR 0034）。
-    cmd = [sys.executable, "-m", "gherkai_cli", "_reconcile", run_id,
-           "--report-dir", str(report_root), "--max-concurrency", str(args.max_concurrency)]
-    # region / profile 传**解析后的值**（`compose.resolve_aws_identity` 的结果，含配置文件层）：per-run 进程不读配置文件（ADR 0053 决策 1），
-    # 只传原始选项会让配置文件给的 region 到不了它；环境变量两边都看得见、传了也无害。
+def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None, str | None]",
+                  per_job_tail_s: float) -> int:
+    """本机 submit 的提交进程（ADR 0035 决策 3「本机 `submit`」）：以新会话启动后台推进进程，经它的标准输入交出建 run 所需的输入，
+    等它的回报，按回报输出结果并退出。提交进程自己不起隧道、不建 run。
+
+    交出的是补全之后、隧道映射之前的 jobs，连同解析后的 region / profile、steps 目录、并发上限与每 job 尾段：后台推进进程不读配置
+    文件（ADR 0053 决策 1），凡来自配置的值都按解析之后的值交出。标准输入的写端一直开到收到回报：后台推进进程在建 run 之前查这一端，
+    读到文件结束即不建 run。启动、写输入、等回报与输出结果期间被 Ctrl-C 打断时以 130 结束并说明（后台推进进程在另一个会话里，收不到
+    终端的信号）；关闭标准输入在说明之前，还没有建 run 的后台推进进程随之不再建立。
+    """
     region, profile = identity
-    if region:
-        cmd += ["--region", region]
-    if profile:
-        cmd += ["--profile", profile]
-    # per-run 的 stdout/stderr 落 <run_dir>/reconcile.log（曾全 DEVNULL：worker 崩溃 traceback 零落地，
-    # detached 排障只能手工复刻 per-run 前台重新运行——真实案例：worker region=None 崩、error 无任何线索）。
-    # 子进程持有 fd，父进程开完即交给 Popen；append 模式容多次接力追加。
-    log_f = open(report_root / run_id / "reconcile.log", "ab")
-    # cwd 继承提交进程、不再指向仓库根（分发后没有 repo，ADR 0037 决策 3）；per-run 所需路径都经参数/definition 传。
-    _sp.Popen(cmd, start_new_session=True,
-              stdin=_sp.DEVNULL, stdout=log_f, stderr=log_f)
-    if on_handoff is not None:
-        on_handoff()  # 紧跟 fork：往下每一行都可能抛，而此刻宿主已在运行、隧道不该再被拆
-    log_f.close()  # 子进程已持有 fd（Popen 继承），父进程侧句柄即关
-    _progress(f"已提交（本机后台推进中）。查进度：{_status_cmd(run_id, report_dir=args.report_dir)}")
-    print(run_id)
-    return 0
+    payload = handoff.encode_advancer_input(handoff.AdvancerInput(
+        jobs=tuple(jobs), steps_dir=prepped.steps_dir, max_concurrency=args.max_concurrency,
+        per_job_tail_s=per_job_tail_s, expose_local=args.expose_local or None, tunnel_provider=args.tunnel,
+        region=region, profile=profile, report_dir=str(Path(args.report_dir).resolve())))
+    list_cmd = _list_runs_cmd(report_dir=args.report_dir)
+    owned: list[int] = []
+    try:
+        try:
+            stdin_w, report_r = _start_background("_reconcile", owned=owned)
+        except OSError as e:
+            _progress(f"无法启动后台推进进程：{e}。没有提交。")
+            return 2
+        handoff.write_all(stdin_w, payload)  # 后台推进进程已不在时写不进，下面随即读到文件结束
+        line = handoff.read_line(report_r)
+        _close_owned(owned)
+        if not line:
+            _progress(f"后台推进进程在给出提交结果之前退出了（原因见上面的输出），提交没有完成。它退出之前可能已经建立了这个 run，"
+                      f"可以用 {list_cmd} 查看。修好上面报出的问题之后请重新提交。")
+            return 2
+        report = handoff.decode_advancer_report(line)
+        if report.exit_code != 0:
+            _progress(report.message)  # 后台推进进程给出的整句（起隧道失败、建 run 失败），原样输出
+            return report.exit_code
+        if report.public_url is not None:
+            _progress(_tunnel_established_line(args.expose_local, report.public_url))
+        _progress(f"已提交（本机后台推进中）。查进度：{_status_cmd(report.run_id, report_dir=args.report_dir)}")
+        print(report.run_id)
+        return 0
+    except KeyboardInterrupt:
+        _close_owned(owned)
+        _progress("已停止等待提交结果。后台推进进程还没有建立 run 的会自行退出、不再建立；"
+                  f"已经建立的照常执行，可以用 {list_cmd} 找到它。")
+        return 128 + signal.SIGINT
+    finally:
+        _close_owned(owned)
 
 
 def _schema_mismatch_message(found: int, writer: str | None, run_id: str) -> str:
@@ -1843,6 +1851,17 @@ def _status_cmd(run_id: str, *, report_dir=None, prefix: str | None = None, wait
     return " ".join(parts)
 
 
+def _list_runs_cmd(*, report_dir=None, prefix: str | None = None) -> str:
+    """打给使用方照抄执行的 `gherkai list-runs` 整条命令：本机给 report_dir，云端给 prefix；拼法与 `_status_cmd` 相同（每个值都经
+    shlex.quote）。用在提交结果不确定的说明里：run 可能已经建立而提交命令没有拿到它的标识，用它找回。"""
+    parts = ["gherkai", "list-runs"]
+    if report_dir is not None:
+        parts += ["--report-dir", shlex.quote(str(report_dir))]
+    if prefix is not None:
+        parts += ["--backend", "cloud", "--prefix", shlex.quote(prefix)]
+    return " ".join(parts)
+
+
 def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | None, str | None]":
     """cloud 路径的**第一道闸**：CLI 与后端的版本 skew 三态（ADR 0037 决策 7）。
     返回 `(退出码 or None, 后端版本戳 or None)`——放行时给 `(None, 戳)`，拦下时给 `(2, …)`。
@@ -1863,7 +1882,7 @@ def _cloud_skew_gate(target, *, requires_stamp: bool = False) -> "tuple[int | No
     try:
         verdict, msg, backend_version = compose.check_backend_skew(
             prefix=target.prefix, cli_version=_installed_version(), region=target.region, profile=target.profile,
-            requires_stamp=requires_stamp)  # 缺戳例外（决策 7）：带设备目标或会话预热地址的 run 遇无戳后端即拦
+            requires_stamp=requires_stamp)  # 缺戳例外（决策 7）：带设备目标或给了 --expose-local 的 run 遇无戳后端即拦
     except ImportError as e:
         _progress(f"--backend cloud 需要 boto3：{e}")
         return 2, None
@@ -1935,24 +1954,116 @@ def _worker_meta_fields(resolutions: dict) -> dict:
     }
 
 
-def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_handoff=None, prepared: Prepared) -> int:
-    """cloud submit：只 create_run 写 definition 到 DDB（不起 task）→ 云端 Lambda 事件驱动链接管推进。
+# 云端守护进程在回报之前退出、或建 run 之前查到它已不在时的一句（ADR 0035 决策 3「云端 `submit`」）
+_DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。"
 
-    `on_handoff` 语义同 `_submit_local`：这里的宿主是隧道守护进程，故只在它 fork 成功后调（没起隧道时
-    无棒可交、不调）。本函数各道闸的退出码 2 都在 fork 之前，`_cmd_submit` 侧「未交棒即拆」自然涵盖它们。
+
+@contextlib.contextmanager
+def _sigint_deferred():
+    """块内到达的 SIGINT 推迟到块结束之后，再按原来的处置处理（缺省即抛 KeyboardInterrupt）：块里的一步与记下它结果的那一句之间
+    不被中断隔开。云端 submit 交出 run 的标识用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随中断
+    关闭。块结束时恢复原处置，期间到达过 SIGINT 即再发一次给本进程。不在主线程（不能改信号处置）时照常执行、不推迟。块里只放不会
+    久等的一步：推迟期间 Ctrl-C 不起作用。"""
+    pending: list[int] = []
+    try:
+        previous = signal.signal(signal.SIGINT, lambda signum, _frame: pending.append(signum))
+    except ValueError:
+        yield
+        return
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous if previous is not None else signal.SIG_DFL)
+        if pending:
+            signal.raise_signal(signal.SIGINT)
+
+
+def _cloud_submit_interrupted(stage: str, run_id: "str | None", *, prefix: str, tunnel_lost: bool) -> str:
+    """云端 submit 在交接期间被 Ctrl-C 打断时的一句（ADR 0035 决策 3「云端 `submit`」），按建 run 进行到哪一步分三种说法：
+    `before`（还没有开始建 run）、`creating`（中断落在建 run 里面：建 run 是数次网络往返，记录可能已经写下、也可能没有）、
+    `created`（建 run 已经返回）。`tunnel_lost`：带隧道、且守护进程没有确认收到 run 的标识——它的标准输入随中断关闭，隧道随之关闭。"""
+    if stage == "before":
+        return "已停止提交，没有建立 run。"
+    if stage == "creating":
+        tail = "隧道已经关闭，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。" if tunnel_lost else ""
+        return f"提交被中断。run {run_id} 可能已经写入云端，可以用 {_list_runs_cmd(prefix=prefix)} 确认。{tail}"
+    tail = "隧道已经关闭，这个 run 里要访问被测应用的 job 会失败。" if tunnel_lost else ""
+    return f"run {run_id} 已经提交，提交命令随后被中断。{tail}查进度：{_status_cmd(run_id, prefix=prefix)}"
+
+
+def _start_tunnel_watch(args, target, times: "deadline.RunTimes") -> "handoff.WatchChannel | int":
+    """云端 submit 启动隧道守护进程并等它回报（ADR 0035 决策 3「云端 `submit`」）：以新会话启动 `_tunnel_watch`，经它的标准输入
+    交出到点时刻（运行期限加 300 秒）、origin、隧道服务、runs 表、region 与 profile，读一行回报。
+
+    建成即返回持有两个描述符（守护进程标准输入的写端、回报管道的读端）的 `handoff.WatchChannel`，由调用方 `release`；守护进程保持
+    回报管道的写端打开，调用方在建 run 之前据此查它还在不在。没有建成返回退出码：起不来守护进程、它在回报之前退出、回报里是起隧道
+    失败都是 2，等待期间被 Ctrl-C 打断是 130。没有建成的出口都先关闭两个描述符再说明：守护进程还在起隧道或已经建成时，读到标准
+    输入关闭即关闭会话、退出。"""
+    from gherkai_core.serialize import instant_to_iso
+
+    payload = handoff.encode_watch_input(handoff.WatchInput(
+        local_origin=args.expose_local, tunnel_provider=args.tunnel,
+        closes_at=instant_to_iso(times.tunnel_closes_at), runs_table=target.runs_table,
+        region=target.region, profile=target.profile))
+    owned: list[int] = []
+    try:
+        try:
+            stdin_w, report_r = _start_background("_tunnel_watch", owned=owned)
+        except OSError as e:
+            _close_owned(owned)
+            _progress(f"无法启动持有隧道的本机后台进程：{e}。没有提交。")
+            return 2
+        handoff.write_all(stdin_w, payload)  # 守护进程已不在时写不进，下面随即读到文件结束
+        line = handoff.read_line(report_r)
+        if not line:
+            _close_owned(owned)
+            _progress(_DAEMON_GONE_BEFORE_SUBMIT)
+            return 2
+        report = handoff.decode_watch_report(line)
+        if report.exit_code != 0:
+            _close_owned(owned)
+            _progress(report.message)  # 守护进程给出的整句（起隧道失败），原样输出
+            return report.exit_code
+        channel = handoff.WatchChannel(public_url=report.public_url, warmup_url=report.warmup_url,
+                                       stdin_fd=stdin_w, report_fd=report_r)
+        owned.clear()  # 两个描述符从这里起归句柄所有
+        return channel
+    except KeyboardInterrupt:
+        _close_owned(owned)
+        _progress(_cloud_submit_interrupted("before", None, prefix=target.prefix, tunnel_lost=False))
+        return 128 + signal.SIGINT
+    finally:
+        _close_owned(owned)
+
+
+def _submit_cloud(args, prepped: Prepared) -> int:
+    """cloud submit（ADR 0034；隧道见 ADR 0035 决策 3「云端 `submit`」）：过云端各道闸、补全运行定义 → 取创建时刻与期限 → 给了
+    `--expose-local` 时启动隧道守护进程、拿到公网地址 → 生成运行定义 → create_run 写 definition 到 DDB（不起 task）→ 把 run 的
+    标识交给守护进程 → 输出 run_id。之后云端 Lambda 事件驱动链接管推进。
+
+    各道闸（版本 skew、资源 preflight、worker variant、设备请求与安装包）都在生成运行定义之前，所需的 job 与有没有隧道取自补全之前
+    的 jobs 与命令行参数（ADR 0037 决策 7「在生成运行定义之前判断」）；闸拦下时守护进程还没有启动。守护进程回报之后、建 run 之前
+    查一次它还在不在，不在即不建 run、退出码 2；建 run 失败时先关闭它的标准输入（它随之关闭会话、退出）再报错、退出码 2。建 run
+    之后交不出 run 的标识（守护进程这时才没了）照常输出 run 标识、退出码 0，另说明隧道已不在。从启动守护进程到输出结果之间被
+    Ctrl-C 打断以 130 结束，按建 run 进行到哪一步说明（`_cloud_submit_interrupted`），标准输出不输出。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
     events Stream → reconciler 接管（补起后续、写下各 job 的终态）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
-    「runs 表写 + preflight」（见下正文注释）。CLI 写完即退、不留本机进程。
+    「runs 表写 + preflight」（见下正文注释）。
     """
+    from gherkai_runtime import deadline, tunnel_host
+
     # events 表/cluster 名不收 flag、一律按 prefix 推（判据见 _build_parser 里 submit 的 flag 面注释）：
     # 它们在这条路上只被下面的 preflight 探针消费，与写进提交记录的内容无关。
     target = _cloud_target(args, runs_table=args.ddb_table, bucket=args.s3_bucket, **_config_layers(args))
     if isinstance(target, int):
         return target
+    engines = sorted({j.engine for j in prepped.jobs})
 
-    # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）
-    skew_rc, backend_version = _cloud_skew_gate(target, requires_stamp=compose.run_requires_backend_stamp(run_meta))
+    # 版本 skew 先于资源 preflight（ADR 0037 决策 7 的次序）；戳一并拿回，供下面的 variant 解析（ADR 0038）。缺戳例外按各 job 的
+    # 目标与有没有给 --expose-local 对整次 run 判断：版本闸早于起隧道，这时还没有预热地址可看
+    skew_rc, backend_version = _cloud_skew_gate(
+        target, requires_stamp=compose.run_requires_backend_stamp(prepped.jobs, tunneled=bool(args.expose_local)))
     if skew_rc is not None:
         return skew_rc
 
@@ -1964,8 +2075,7 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
         err = compose.preflight_cloud_resources(
             prefix=target.prefix, events_table=target.events_table, bucket=target.bucket,
             cluster=target.cluster, runs_table=target.runs_table,
-            task_defs=[_names.task_def_name(target.prefix, e)
-                       for e in sorted({j.engine for j in run_meta.jobs})],
+            task_defs=[_names.task_def_name(target.prefix, e) for e in engines],
             lambda_fns=target.detached_chain_lambdas, report_dir=args.report_dir,
             # 声明超部署侧 cap 时提示（ADR 0034 机制四）：钳制不改产物落点、run 照常运行，故只警告、不以退出码 2 结束
             # （对照上面 REPORT_DIR 的退出码 2——判据是分岔后果：钳制是 no-op，产物写去别处不是）。
@@ -1981,71 +2091,95 @@ def _submit_cloud(args, run_id: str, run_meta, initial, *, tunnel_info=None, on_
 
     # worker 镜像 variant 解析（ADR 0038）：**在资源 preflight 之后**，把 variant 落成各引擎的精确 revision ARN
     # 写进 definition——云端推进器（kicker/reconciler）照 definition 起 task，故不写进去就到不了它们。
-    resolutions = _cloud_worker_variant_gate(
-        args, target, sorted({j.engine for j in run_meta.jobs}), backend_version=backend_version)
+    resolutions = _cloud_worker_variant_gate(args, target, engines, backend_version=backend_version)
     if isinstance(resolutions, int):
         return resolutions
-    run_meta = replace(run_meta, **_worker_meta_fields(resolutions))
-    # 填完 definition（设备请求读 SSM、安装包进产物桶、写前校验，ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、落库之前
-    filled = _complete_cloud_definition(args, target, prepared, run_meta.jobs)
+    # 填完 definition（设备请求读 SSM、安装包进产物桶、写前校验，ADR 0048 决策 3）：在 skew 闸与资源 preflight 之后、起隧道与落库
+    # 之前；收的是隧道映射之前的 job
+    filled = _complete_cloud_definition(args, target, prepped, prepped.jobs)
     if isinstance(filled, int):
         return filled
-    run_meta = replace(run_meta, jobs=tuple(filled))
+    # 创建时刻与期限（ADR 0054 决策二「落点是运行定义」）：补全运行定义之后、启动守护进程之前读一次钟，守护进程拿到的到点时刻与
+    # 写进运行定义的期限出自同一次读数
+    times = deadline.run_times(compose.now(), filled, per_job_tail_s=deadline.CLOUD_PER_JOB_TAIL_S)
 
-    # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读网络参数、不碰 ECS（ADR 0034）：
-    # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
-    # 「runs 表写 + preflight（探表/桶/cluster 可达）+ 版本戳与 variant 映射的 SSM 读」，带设备 scope 时另加 Device Farm 项目参数的
-    # SSM 读、带应用 scope 时另加产物桶 apps/ 前缀的读写与打标签（ADR 0051 决策 10，权限表登记在 ADR 0033）——无需 RunTask/PassRole，
-    # 契合「提交完就走、只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
-    run_store, _rs, _rp = compose.build_cloud_stores(
-        table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
-        region=target.region, profile=target.profile,
-        detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动
-    )
+    channel: "handoff.WatchChannel | None" = None
+    stage = "before"
+    run_id = None
+    handed: "bool | None" = None  # 守护进程是否收到了 run 的标识；None 表示还没有交
     try:
-        run_store.create_run(run_meta, initial)  # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
-    except Exception as e:
-        if compose.is_botocore_error(e):
+        headers = None
+        if args.expose_local:
+            channel = _start_tunnel_watch(args, target, times)
+            if isinstance(channel, int):
+                rc, channel = channel, None
+                return rc
+            filled, headers = tunnel_host.map_jobs_to_tunnel(
+                filled, local_origin=args.expose_local, public_url=channel.public_url)
+        run_meta = replace(
+            _build_run_meta(filled, times=times, max_concurrency=args.max_concurrency, steps_dir=prepped.steps_dir,
+                            tunnel_headers=headers, warmup_url=channel.warmup_url if channel is not None else None),
+            **_worker_meta_fields(resolutions))
+        run_id = run_meta.run_id
+        # 建 run 之前查一次守护进程还在不在（与本机后台推进进程查 submit 同一条判据）：不在即不建，免得留下一开始就没有隧道的 run
+        if channel is not None and channel.daemon_gone():
+            _progress(_DAEMON_GONE_BEFORE_SUBMIT)
+            return 2
+
+        # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读网络参数、不碰 ECS（ADR 0034）：
+        # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
+        # 「runs 表写 + preflight（探表/桶/cluster 可达）+ 版本戳与 variant 映射的 SSM 读」，带设备 scope 时另加 Device Farm 项目参数的
+        # SSM 读、带应用 scope 时另加产物桶 apps/ 前缀的读写与打标签（ADR 0051 决策 10，权限表登记在 ADR 0033）——无需 RunTask/PassRole，
+        # 契合「提交完就走、只需提交那一下的最小权限」（受限 CI runner / 临时凭证场景）。之后全程云端 Lambda 链推进、不依赖 submit 机器。
+        run_store, _rs, _rp = compose.build_cloud_stores(
+            table=target.runs_table, bucket=target.bucket, prefix=args.report_dir,
+            region=target.region, profile=target.profile,
+            detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动
+        )
+        stage = "creating"
+        try:
+            # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
+            run_store.create_run(run_meta, initial_run_state(run_meta, started_at=compose.now_iso()))
+        except RunAlreadyExists:
+            if channel is not None:
+                channel.release()  # 先关守护进程的标准输入（它随之关闭会话），再报错
+            _progress(f"run {run_id} 已经存在，没有重新建立。请重新执行这条命令。")
+            return 2
+        except Exception as e:
+            if not compose.is_botocore_error(e):
+                raise
+            if channel is not None:
+                channel.release()
             _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
             return 2
-        raise
+        stage = "created"
 
-    if tunnel_info is not None:
-        # 隧道守护进程（ADR 0035 决策 3）：cloud submit 的 CLI 立即退出、本机没有 per-run 进程——fork 一个
-        # 轻量守护持有隧道：轮询 run 终态即拆 + TTL 兜底自杀。日志落系统临时目录（诊断可寻）。
-        import subprocess as _sp
-        import tempfile as _tf
-
-        from gherkai_runtime import tunnel_host
-
-        # TTL 按 definition 算（tunnel_host.compute_watch_ttl_s）而非拍一个常数——TTL 短于 run 实际预算时
-        # 守护会在 run 还在执行时拆隧道，剩余 job 在被测应用不可达下继续运行、以假失败告终（ADR 0035 决策 3）。
-        # `--tunnel-ttl` 给了就用提交者给的值（显式覆盖算出的 TTL）。
-        ttl_s = (args.tunnel_ttl if args.tunnel_ttl is not None
-                 else tunnel_host.compute_watch_ttl_s(run_meta.jobs))
-        watch_log = Path(_tf.gettempdir()) / f"gherkai-tunnel-watch-{run_id}.log"
-        cmd = [sys.executable, "-m", "gherkai_cli", "_tunnel_watch", run_id,
-               "--tunnel-pid", str(tunnel_info.pid), "--ddb-table", target.runs_table,
-               "--ttl", str(ttl_s)]
-        if target.region:
-            cmd += ["--region", target.region]
-        if target.profile:
-            cmd += ["--profile", target.profile]
-        with open(watch_log, "ab") as lf:
-            _sp.Popen(cmd, start_new_session=True,  # cwd 继承提交进程（ADR 0037 决策 3），同 per-run 进程
-                      stdin=_sp.DEVNULL, stdout=lf, stderr=lf)
-        if on_handoff is not None:
-            on_handoff()  # 紧跟 fork：守护已接管隧道，往下几行抛也不能再拆
-        ttl_origin = ("给定的 `--tunnel-ttl` 值" if args.tunnel_ttl is not None else
-                      f"按任务量估算的上限：各 job 预算之和，加一次性 {tunnel_host.CLOUD_STARTUP_MARGIN_S:.0f} 秒"
-                      f"与每个 job {tunnel_host.CLOUD_PER_JOB_MARGIN_S:.0f} 秒；`--tunnel-ttl` 可覆盖")
-        _progress(f"隧道由守护进程持有（日志 {watch_log}）：run 终态即拆、TTL 兜底 {ttl_s:.0f}s（{ttl_origin}）。"
-                  f"注意：本机需保持开机联网直到 run 终态——关机会断隧道，测试将以导航失败告终。")
-        _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
-    else:
-        _progress(f"已提交到云端（提交记录已落库，云端已接管推进，可关机）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
-    print(run_id)
-    return 0
+        if channel is None:
+            _progress(f"已提交到云端（提交记录已落库，云端已接管推进，可关机）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
+        else:
+            # 写进守护进程与记下交没交成之间不被中断隔开：中断的说明据 handed 判断隧道还在不在
+            with _sigint_deferred():
+                handed = channel.hand_over(run_id)
+            if handed:
+                _progress(_tunnel_established_line(args.expose_local, channel.public_url))
+                _progress(f"隧道由本机的后台进程持有（日志 {handoff.watch_log_path(run_id)}），它在 run 结束时关闭隧道。"
+                          "注意：本机需保持开机联网直到 run 终态——关机或断网会断开隧道，之后要访问被测应用的 job 将以导航失败告终。")
+            else:
+                # 查过之后守护进程才没了：run 已经建成、由云端推进，与守护进程在 submit 退出之后才没了是同一种情形
+                _progress(f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（原因见上面的输出），隧道已不在："
+                          "这个 run 里要访问被测应用的 job 会失败。修好原因之后请重新提交。")
+            _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
+        print(run_id)
+        return 0
+    except KeyboardInterrupt:
+        if channel is not None:
+            channel.release()  # 先关守护进程的标准输入，再说明
+        _progress(_cloud_submit_interrupted(stage, run_id, prefix=target.prefix,
+                                            tunnel_lost=channel is not None and handed is not True))
+        return 128 + signal.SIGINT
+    finally:
+        if channel is not None:
+            channel.release()
 
 
 def _render_status(state, args, *, wait_hint: str, locations: dict, relay_available=None) -> int:
@@ -2090,7 +2224,7 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
 def _cmd_status(args) -> int:
     """[无状态批量运行] 查 run 进度/结果。
 
-    - local：读文件 RunState；--wait 则本机接力 tick 到终态（per-run 崩了人来查也能续、须运行到底）。
+    - local：读文件 RunState；--wait 则本机接力 tick 到终态（后台推进进程崩了人来查也能续、须运行到底）。
     - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（kickoff 一次即可，之后由云端链自行接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
@@ -2139,8 +2273,8 @@ def _cmd_status_body(args, interrupted: dict) -> int:
     # 推进器（认领、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
     if args.wait and state.status not in TERMINAL_STATUSES:
         if run_store.is_detached(args.run_id):
-            # 接力推进：per-run 进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。
-            # 与 per-run 进程同一入口（装配/推进/拆隧道三句只在 detached.drive_local_reconcile 写一份）。
+            # 接力推进：后台推进进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。接力经
+            # detached.drive_local_reconcile 从记录读回运行定义，装配与后台推进进程是同一个函数；接力不持有隧道。
             identity = _aws_identity(args)
             if isinstance(identity, int):
                 return identity
@@ -2151,7 +2285,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
                                                region=region, profile=profile)
             except DefinitionContractError as e:
                 # 结构版本不合已由上面的版本闸拦下；形态违约在这里。接力不是这个 run 的推进器：读不懂可能只是本机的版本不同，原来的
-                # 后台推进进程可能仍在正常推进，所以只打印同一句、以退出码 2 结束，不写运行态（后台推进进程的处理见 `_cmd_reconcile`）
+                # 后台推进进程可能仍在正常推进，所以只打印同一句、以退出码 2 结束，不写运行态
                 _progress(_definition_contract_message(e))
                 return 2
             except detached.RunDefinitionMissing as e:
@@ -2160,8 +2294,7 @@ def _cmd_status_body(args, interrupted: dict) -> int:
                 return 2
             except OSError as e:
                 # 排在上一支之后（提交记录缺失是 FileNotFoundError 的子类）：读写本机运行记录失败，保存判定明细已按退避重试用尽。
-                # 打一句说明、不打回溯，以退出码 2 结束（没有判出结果的操作失败）；不拆隧道：原来的后台推进进程可能仍在使用它
-                # （本机接力的过渡做法，随删去接力一并删去）
+                # 打一句说明、不打回溯，以退出码 2 结束（没有判出结果的操作失败）。接力不持有隧道，这里没有要关闭的会话
                 _progress(_advance_store_failure_notice(args.run_id, e, report_dir=args.report_dir, relay=True))
                 return 2
         else:
@@ -2755,66 +2888,101 @@ def _explain_cloud(args) -> int:
 
 def _definition_contract_message(e: DefinitionContractError) -> str:
     """本机读到同版本下形态违约的提交记录时打印的一句（ADR 0037 决策 7「definition 结构版本」段）。读到它的有 `status` / `explain`
-    读头、`status --wait` 接力与后台推进进程：读端与接力有退出码可交给使用方，打印这句、以退出码 2 结束，不写运行态；后台推进进程是
-    这个 run 的推进器，先以结束写的 error 变体结束 run（与云端推进器同一写法，见 ADR 0031 决定三「结束写」小节），再打印这句、以退出码
-    2 结束。"""
+    读头与 `status --wait` 接力：打印这句、以退出码 2 结束，不写运行态（接力不是这个 run 的推进器，读不懂可能只是本机的版本不同）。"""
     return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
 
 
 def _cmd_reconcile(args) -> int:
-    """per-run 进程入口（submit setsid fork 它，非使用方直接调）：执行 reconcile loop 到 run 收尾自退（ADR 0034）。
+    """本机后台推进进程的入口（本机 submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「本机 `submit`」）。
 
-    读不到可用的运行定义时（结构版本不合、同版本下形态违约），本进程作为这个 run 的推进器，以结束写的 error 变体结束它：每个未结束的
-    job 记 error，原因写进 run 级说明；随后拆隧道（与正常结束同一步），打印说明、以退出码 2 结束。`status --wait` 接力读不到运行定义时
-    不写（见 `_cmd_status_body`）。读写本机运行记录失败时（保存判定明细的退避重试用尽，或读写运行态失败）不结束这个 run，打印一句
-    说明、以退出码 1 结束（ADR 0030 决定三「保存明细失败」条）；这时不拆隧道，理由见那个分支的注释。
+    回报描述符进门即设为不可继承（之后起的 worker 拿不到它）；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即
+    以退出码 2 结束、不输出、不建 run；否则交给 `_advance_submitted`，返回它的退出码。两个描述符随进程退出关闭。
 
-    **无 `--steps-dir` flag**：使用方 step 目录随 definition 走（`RunMeta.steps_dir`），由
-    `build_local_reconcile` 从 RunStore 读回——本进程 CWD 与提交进程不同，重解析 `./steps` 必分叉
-    （ADR 0037 决策 4）。
+    **无 `--steps-dir` 等选项**：使用方 step 目录、并发上限、region / profile 都由 submit 按解析之后的值经标准输入交来，随运行定义
+    走（`RunMeta.steps_dir`）；本进程 CWD 与提交进程可能不同，重解析 `./steps` 或读配置文件必分叉（ADR 0037 决策 4、ADR 0053 决策 1）。
     """
-    from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, schema_mismatch_reason
-    from gherkai_runtime import detached
-
-    if not _validate_max_concurrency(args):  # 回落值同校验（meta 缺值时它就是并发闸）
+    os.set_inheritable(args.report_fd, False)
+    line = handoff.read_line(0)
+    if not line:
         return 2
-    report_root = Path(args.report_dir).resolve()
+    return _advance_submitted(handoff.decode_advancer_input(line), report_fd=args.report_fd, input_fd=0)
 
-    def end_for_unusable_definition(reason: str) -> None:
-        # 结束写失败（锁或文件不可用）时照样拆隧道：本进程随后带着异常退出，不再推进这个 run
-        try:
-            ended = detached.end_run_for_unusable_definition(str(report_root), args.run_id, reason)
-        finally:
-            detached.cleanup_tunnel(str(report_root), args.run_id)
-        if ended:  # 下面那句诊断是读端共用的，它不说这个 run 已被结束：这里补上（写进 reconcile.log）
-            _progress(f"run {args.run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。")
 
+def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd: int,
+                       redirect_output: "Callable[[int], None]" = handoff.redirect_output) -> int:
+    """本机后台推进进程的主体（ADR 0035 决策 3「本机 `submit`」）：建 run、回报 submit、推进到 run 结束，返回进程的退出码。
+
+    1. 取创建时刻，算出期限与到点时刻（`deadline.run_times`，只读一次钟）。
+    2. 给了 `expose_local` 即起隧道并映射运行定义；起不来即回报那一句与退出码 2，返回 2。
+    3. 生成运行定义：推进用的就是内存里的这一份，不从记录读回。
+    4. 查 submit 还在不在：对它交来的标准输入做一次非阻塞读，读到文件结束即已不在，不建 run、不输出，返回 2。
+    5. 建 run（运行态带后台执行标记，`status --wait` 据此认它可接力）；6. 装配推进所需的各部分（含建事件库，
+       `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步读写本机文件失败（OSError、sqlite3.Error）时先关闭会话，
+       再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻重试。
+    8. 回报建成（run 的标识与公网地址）。9. 把输出改接日志（`redirect_output`）；回报没有送达（submit 在第 4 步之后才退出）时在日志
+       里记一句，照常推进。10. 推进到 run 结束（`detached.advance_local_run`）；读写本机运行记录失败时记一句、返回 1。11. 返回 0。
+
+    回报之前不启动子进程、不往标准错误写字（崩溃的回溯除外）：这时标准输出与标准错误都接在 submit 的标准错误上，子进程会继承它，
+    调用方经管道捕获 submit 的输出时要等那个子进程退出才读到文件结束（ADR 0035 决策 3「输出」）。一切出口（含未捕获的异常）都在
+    `finally` 里关闭会话（`TunnelInfo.close()` 可以重复调用）；不装信号处理器，被信号结束时会话随进程消失。
+
+    两个描述符都归调用方关闭（进程入口里即进程退出），本函数不关：回报写端在返回之前一直开着，回报之前的异常把回溯写到 submit 的标准
+    错误之后 submit 才读到文件结束，它说「原因见上面的输出」才成立；回报之后它已不可继承，之后起的 worker 拿不到。云端守护进程的主体
+    （`tunnel_host.hold_tunnel_for_cloud_run`）是同一约定。`redirect_output` 供测试换成不改接描述符的替身。
+    """
+    from gherkai_runtime import deadline, detached, tunnel_host
+    from gherkai_runtime import tunnel as _tunnel
+
+    report_root = Path(inp.report_dir)
+    times = deadline.run_times(compose.now(), inp.jobs, per_job_tail_s=inp.per_job_tail_s)
+    info = None
     try:
-        detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
-                                       region=args.region, profile=args.profile)
-    except UnsupportedDefinitionSchema as e:
-        # 整读 definition 时结构版本不符：以结束写的 error 变体结束 run，打同一句、退出码 2（ADR 0037 决策 7「definition 结构版本」段，
-        # ADR 0034 机制三「不经推进步骤的收尾」条）
-        end_for_unusable_definition(schema_mismatch_reason(e.found, e.supported, e.cli_version))
-        _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
-        return 2
-    except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json，含改成不是合法的 JSON）：同上
-        end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
-        _progress(_definition_contract_message(e))
-        return 2
-    except detached.RunDefinitionMissing as e:  # 运行态在而提交记录不在（被删去）：同上，原因用形态违约的那一句
-        end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
-        _progress(str(e))
-        return 2
-    except OSError as e:
-        # 排在上一支之后：提交记录缺失（FileNotFoundError 的子类）有自己的出口。到这里的是读写本机运行记录的失败（磁盘满、没有写
-        # 权限、目录被删除），保存判定明细已在判定存储里按 1、2、4 秒退避重试用尽（ADR 0030 决定三「保存明细失败」条）。这个 run
-        # 没有结束、本进程不做结束写：打一句说明（写进 reconcile.log），不打回溯，以退出码 1 结束。不拆隧道：说明请使用方用
-        # status --wait 接着推进，接力方启动的 job 还要用这条隧道，隧道由接力走完之后拆（本机接力与按进程号拆隧道的过渡做法，
-        # 删去接力与把隧道建在后台推进进程里之后，这一段随之改写）
-        _progress(_advance_store_failure_notice(args.run_id, e, report_dir=args.report_dir, relay=False))
-        return 1
-    return 0
+        jobs, headers = inp.jobs, None
+        if inp.expose_local:
+            try:
+                setup = tunnel_host.start_tunnel_for_jobs(
+                    inp.jobs, local_origin=inp.expose_local, provider=inp.tunnel_provider,
+                    closes_at=times.tunnel_closes_at)
+            except _tunnel.TunnelError as e:
+                handoff.write_all(report_fd, handoff.encode_advancer_report(
+                    handoff.AdvancerReport(run_id=None, public_url=None, exit_code=2, message=str(e))))
+                return 2
+            jobs, headers, info = setup.jobs, setup.extra_http_headers, setup.info
+        meta = _build_run_meta(jobs, times=times, max_concurrency=inp.max_concurrency, steps_dir=inp.steps_dir,
+                               tunnel_headers=headers, warmup_url=info.warmup_url if info is not None else None)
+        if handoff.peer_closed(input_fd):
+            return 2  # 没有人会收到 run 的标识：在建 run 之前停下，没有记录要收拾（会话在 finally 里关闭）
+        created = False
+        try:
+            run_store = compose.build_local_stores(report_dir=report_root, detached=True)[0]
+            run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
+            created = True
+            advancer = detached.assemble_local_run(meta, str(report_root), region=inp.region, profile=inp.profile)
+            log_fd = handoff.open_log(report_root / meta.run_id / "reconcile.log")
+        except (OSError, sqlite3.Error) as e:  # 建事件库失败抛 sqlite3.OperationalError，它不是 OSError
+            if info is not None:
+                info.close()
+            handoff.write_all(report_fd, handoff.encode_advancer_report(handoff.AdvancerReport(
+                run_id=None, public_url=None, exit_code=2,
+                message=_run_record_failure(e, report_dir=report_root, run_id=meta.run_id, created=created))))
+            return 2
+        delivered = handoff.write_all(report_fd, handoff.encode_advancer_report(handoff.AdvancerReport(
+            run_id=meta.run_id, public_url=info.url if info is not None else None, exit_code=0, message=None)))
+        redirect_output(log_fd)
+        if not delivered:
+            # 检查之后 submit 才退出：run 已经建成，与 submit 收到回报之后、输出之前被结束相同，照常推进（ADR 0035 决策 3）
+            _progress(f"提交命令在收到提交结果之前已经退出；run {meta.run_id} 已经建立，照常执行。")
+        try:
+            detached.advance_local_run(advancer, meta)
+        except OSError as e:
+            # 保存判定明细的退避重试用尽，或读写运行态失败（ADR 0030 决定三「保存明细失败」条）：这个 run 没有结束、本进程不做结束写，
+            # 打一句说明（写进 reconcile.log）、不打回溯，以退出码 1 结束
+            _progress(_advance_store_failure_notice(meta.run_id, e, report_dir=report_root, relay=False))
+            return 1
+        return 0
+    finally:
+        if info is not None:
+            info.close()
 
 
 def _advance_store_failure_notice(run_id: str, error: OSError, *, report_dir, relay: bool) -> str:
@@ -2831,39 +2999,22 @@ def _advance_store_failure_notice(run_id: str, error: OSError, *, report_dir, re
 
 
 def _cmd_tunnel_watch(args) -> int:
-    """隧道守护进程入口（cloud submit setsid fork 它，非使用方直接调，ADR 0035 决策 3）。
+    """云端 submit 的隧道守护进程入口（submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「云端 `submit`」）。
 
-    守护主体在 `gherkai_runtime.tunnel_host.watch_run_and_stop_tunnel`（产品本体）；此处只接线 + 打印
-    （stdout 已被 submit 重定向到 /tmp 的守护日志，故诊断走 print 而非 _progress 的 stderr 惯例）。
-
-    **SIGTERM / SIGHUP 转为退出**：本进程是隧道唯一的宿主，缺省处置下被 `kill <pid>` 直接结束、主体的 finally 不执行，
-    ngrok agent（另开会话）会一直留在公网。信号处置是进程级全局状态，归进程入口装（与前台 run 把 `_InterruptState`
-    放在 CLI 同一取法），主体函数不碰它。处理器零 I/O（ADR 0024 记过的 stderr 重入问题），只抛 SystemExit：它是
-    BaseException，轮询里的 `except Exception` 吞不掉，异常穿过主体的 finally 把隧道拆掉；处理器先把两个信号改为忽略，
-    第二个信号不会打断 finally 里正在进行的拆除。SIGKILL 不兜（ngrok agent 是本机可见的独立进程，可手动结束）。
+    回报描述符进门即设为不可继承；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即以退出码 2 结束、不输出；
+    否则交给守护进程的主体 `tunnel_host.hold_tunnel_for_cloud_run`，返回它的退出码。主体收到 run 的标识之后把输出改接守护进程的
+    日志，各句经 `note` 以 `tunnel-watch:` 开头写进去（标准输出这时已是日志）。不装信号处理器：SIGTERM、SIGHUP 取缺省处置，进程
+    结束，隧道随之消失（ADR 0035 决策 3「寿命」）。
     """
     from gherkai_runtime import tunnel_host
 
-    stop_signals = (signal.SIGTERM, signal.SIGHUP)
-
-    def _stop(signum, _frame) -> None:
-        for sig in stop_signals:
-            signal.signal(sig, signal.SIG_IGN)
-        raise SystemExit(128 + signum)
-
-    for sig in stop_signals:
-        signal.signal(sig, _stop)
-    try:
-        reason = tunnel_host.watch_run_and_stop_tunnel(
-            args.run_id, tunnel_pid=args.tunnel_pid, runs_table=args.ddb_table, ttl_s=args.ttl,
-            region=args.region, profile=args.profile,
-            on_warn=lambda msg: print(f"tunnel-watch: {msg}"),
-        )
-    except SystemExit:
-        print(f"tunnel-watch: 收到停止信号，隧道已拆 run={args.run_id} pid={args.tunnel_pid}")
-        raise
-    print(f"tunnel-watch: 隧道已拆（{reason}）run={args.run_id} pid={args.tunnel_pid}")
-    return 0
+    os.set_inheritable(args.report_fd, False)
+    line = handoff.read_line(0)
+    if not line:
+        return 2
+    return tunnel_host.hold_tunnel_for_cloud_run(
+        handoff.decode_watch_input(line), report_fd=args.report_fd, input_fd=0,
+        note=lambda s: print(f"tunnel-watch: {s}", flush=True))
 
 
 def _cmd_run(args) -> int:
@@ -2887,7 +3038,7 @@ def _cmd_run(args) -> int:
     #     猜的常量——那等于让 core 的 grace 护栏形同废除）。
     #     显式给了过小 grace → 入口友好拒绝（对齐 votes 校验惯例，退出码 2「没开始执行就被拒」）。core 侧还有 enforce
     #     兜底（任何前端都受同一护栏），此处只为在 cli 给出清晰诊断、避免 core ValueError 冒到提交者面前。
-    #     **必须排在起隧道 / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——否则配置错也已起 ngrok、
+    #     **必须排在起隧道 / persistence.begin 之前**：只依赖 jobs，早拒才真「零副作用」——否则配置错也已起隧道、
     #     并落下永不 finalize 的半成品 run 记录。
     min_grace = 0.0
     for _engine in sorted({j.engine for j in jobs}):
@@ -2900,7 +3051,7 @@ def _cmd_run(args) -> int:
             return 2
     import math as _math
     if args.grace is not None and (not _math.isfinite(args.grace) or args.grace <= 0 or args.grace < min_grace):
-        # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效就是挂死），与 --tunnel-ttl / @timeout 的判据相同。
+        # nan/inf 同拒：inf 会让 SIGKILL 兜底永不触发（软停失效就是挂死），与 @timeout 的判据相同。
         _progress(
             f"--grace={args.grace} 无效：须为有限正数且 ≥ {min_grace}s"
             "（这是本 run 用到的引擎自己报的最短收尾宽限；更短时 worker 可能在释放会话或保存产物之前被强制终止）"
@@ -2924,25 +3075,29 @@ def _cmd_run(args) -> int:
     if isinstance(jobs, int):
         return jobs
 
-    # 2b) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。前台 run 的隧道
-    #     跟 CLI 进程走——atexit 拆（正常结束、Ctrl-C 都收；执行期间的 SIGTERM 由 _InterruptState 接住、协作停止后照常经 atexit 拆；
-    #     处理器装上之前（起隧道到开始执行之间）或卸下之后（finalize 与归集报告）收到的 SIGTERM、以及 SIGKILL 仍会直接结束进程，
-    #     这类泄漏靠 ngrok 进程在本机可见、可手动结束来兜底）。
-    tunneled = _setup_tunnel(args, jobs)
+    # 2b) 创建时刻与期限（ADR 0054 决策二「落点是运行定义」）：补全运行定义之后、起隧道之前读一次钟，期限与隧道边缘的到点时刻都由
+    #     这一次读数推出；本机后端的每 job 尾段取上面 2a 解析出的停止宽限。给不给 --expose-local、--no-report 都在这里取、都带期限。
+    from gherkai_runtime import deadline
+
+    times = deadline.run_times(compose.now(), jobs, per_job_tail_s=_per_job_tail_s("local", grace))
+
+    # 2c) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。隧道是本进程里的一个会话，本进程就是它的宿主：
+    #     正常路径上经 atexit 关闭（正常结束、Ctrl-C 都经过它）；宿主怎样退出（含未捕获的异常、被信号结束），隧道都随之消失
+    #     （ADR 0035 决策 3「寿命」）。
+    tunneled = _setup_tunnel(args, jobs, closes_at=times.tunnel_closes_at)
     if isinstance(tunneled, int):
         return tunneled
     jobs, tunnel_headers, tunnel_info = tunneled
     if tunnel_info is not None:
         import atexit
 
-        from gherkai_runtime.tunnel import stop_tunnel
-        atexit.register(stop_tunnel, tunnel_info.pid)
+        atexit.register(tunnel_info.close)
 
-    # 3) 组合根：构造 RunMeta（definition 先于执行，ADR 0016/0027；与 submit 同一份，见 _build_run_meta）
+    # 3) 组合根：构造 RunMeta（definition 先于执行，ADR 0016/0027；与本机后台推进进程、云端 submit 同一份，见 _build_run_meta）
     #    + 注入具体引擎 resolver（core 引擎无关）
-    #    运行期限（ADR 0054 决策二）在这里随 definition 一并定下：本机后端的每 job 尾段取上面 2a 解析出的停止宽限，`--no-report` 同样带期限
-    run_meta = _build_run_meta(args, jobs, steps_dir, tunnel_headers, tunnel_info.warmup_url if tunnel_info is not None else None,
-                               per_job_tail_s=_per_job_tail_s(args.backend, grace))
+    run_meta = _build_run_meta(jobs, times=times, max_concurrency=args.max_concurrency, steps_dir=steps_dir,
+                               tunnel_headers=tunnel_headers,
+                               warmup_url=tunnel_info.warmup_url if tunnel_info is not None else None)
     run_id = run_meta.run_id
     do_report = not args.no_report  # RunReport 默认生成；--no-report 跳过（零落盘运行路径）
     worker_log_fh = None  # --quiet 时打开的 worker 日志句柄，见 build_engines 处
@@ -2967,34 +3122,47 @@ def _cmd_run(args) -> int:
 
     # 3b) 落库：组合根注入本机三个 store adapter，RunPersistence 负责「随进度落库」的统一编排（ADR 0030 决定二）。
     #     --no-report 则不落库（零落盘运行路径）：persistence=None，schedule 不接回调、零落盘，执行照常。
+    #     建 run、--quiet 的 worker 日志与建事件库在同一个 try 里：读写本机文件失败（建事件库抛的 sqlite3.Error 不是 OSError）以
+    #     `_run_record_failure` 的一句、退出码 2 结束，不打回溯，与本机后台推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
     persistence: RunPersistence | None = None
     make_artifacts = None  # compose 返回的 artifacts 落点组装器（file:// URI）
-    if do_report:
-        run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
-        persistence = RunPersistence(
-            run_id, run_store=run_store, result_store=result_store, report_store=report_store,
-            # 终态写与结束写的结束时刻取自这里，与调度循环的墙钟是同一个读取点（ADR 0054 决策二「各执行方的落实」）
-            clock=compose.now,
-        )
-        # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
-        persistence.begin(run_meta, started_at=compose.now_iso())
-
-    # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。CLI 一侧只装配 SubprocessEngine（ADR 0033「组合根接线（非 IaC）」节
-    # 「执行 adapter 按组合根分」条）；--no-report 只跳过落库、执行引擎不变（同节「--no-report 只跳过落库、不改执行引擎」条）。
-    if args.quiet:
-        # --quiet 也管 worker 日志（ADR 0041 决策二）：落 <run_dir>/worker.log（--no-report 时落系统临时目录），
-        # 结束只打一行位置——agent 的上下文别被 SDK 的 think/act 流水灌满；人看流水就用默认取值、不给这个 flag。
-        import tempfile as _tf
-        worker_log_path = ((report_root / run_id / "worker.log") if do_report
-                           else Path(_tf.gettempdir()) / f"gherkai-worker-{run_id}.log")
-        worker_log_path.parent.mkdir(parents=True, exist_ok=True)
-        worker_log_fh = open(worker_log_path, "a", encoding="utf-8")
-    # 同步 run 也落事件流（ADR 0042 决策七）：与 submit 同一文件 <report_dir>/<run_id>/events.db，供 explain 对被中止 job 补取
-    # 已执行 step 的记录与证据；--no-report 的零落盘运行不写。
     event_log = None
-    if do_report:
-        from gherkai_core.adapters.event_log import SqliteEventLog as _SqliteEventLog
-        event_log = _SqliteEventLog(compose.events_db_path(report_root, run_id))
+    created = False
+    try:
+        if do_report:
+            run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
+            persistence = RunPersistence(
+                run_id, run_store=run_store, result_store=result_store, report_store=report_store,
+                # 终态写与结束写的结束时刻取自这里，与调度循环的墙钟是同一个读取点（ADR 0054 决策二「各执行方的落实」）
+                clock=compose.now,
+            )
+            # begin 必在 schedule 之前：写 definition + 初始全 pending 态（满足「提交即返回 runId」，ADR 0027）
+            persistence.begin(run_meta, started_at=compose.now_iso())
+            created = True
+        # CLI 一侧只装配 SubprocessEngine（ADR 0033「组合根接线（非 IaC）」节「执行 adapter 按组合根分」条）；--no-report 只跳过落库、
+        # 执行引擎不变（同节「--no-report 只跳过落库、不改执行引擎」条）。
+        if args.quiet:
+            # --quiet 也管 worker 日志（ADR 0041 决策二）：落 <run_dir>/worker.log（--no-report 时落系统临时目录），
+            # 结束只打一行位置——agent 的上下文别被 SDK 的 think/act 流水灌满；人看流水就用默认取值、不给这个 flag。
+            import tempfile as _tf
+            worker_log_path = ((report_root / run_id / "worker.log") if do_report
+                               else Path(_tf.gettempdir()) / f"gherkai-worker-{run_id}.log")
+            worker_log_path.parent.mkdir(parents=True, exist_ok=True)
+            worker_log_fh = open(worker_log_path, "a", encoding="utf-8")
+        # 同步 run 也落事件流（ADR 0042 决策七）：与 submit 同一文件 <report_dir>/<run_id>/events.db，供 explain 对被中止 job 补取
+        # 已执行 step 的记录与证据；--no-report 的零落盘运行不写。
+        if do_report:
+            from gherkai_core.adapters.event_log import SqliteEventLog as _SqliteEventLog
+            event_log = _SqliteEventLog(compose.events_db_path(report_root, run_id))
+    except (OSError, sqlite3.Error) as e:
+        if worker_log_fh is not None:
+            worker_log_fh.close()
+        if not do_report:
+            raise  # 没有记录可写：这里的失败只会是系统临时目录里的 worker 日志，不是写记录失败
+        _progress(_run_record_failure(e, report_dir=report_root, run_id=run_id, created=created))
+        return 2
+
+    # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
     engines = compose.build_engines(
         no_artifacts=not do_report,  # --no-report：worker 不生成/不上报原生产物（ADR 0037 决策 3）
         event_log=event_log,

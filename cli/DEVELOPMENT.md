@@ -15,7 +15,7 @@ WebUI 将来是另一个前端，**直接调 core、复用产品本体 `gherkai_
 
 ```
 cli/gherkai_cli/
-├── __main__.py   ← argparse 前端：run/submit/status/explain/list-runs/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**不应改用 `argparse.SUPPRESS`**——它会以「==SUPPRESS==」出现在 `--help` 里，理由见 `__main__.py` 该处注释；由 submit 以 setsid fork 启动、不供用户直接调用）：`_reconcile`（local 后端 per-run 推进进程入口，ADR 0034）/ `_tunnel_watch`（cloud submit 的隧道守护进程入口，ADR 0035 决策 3）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
+├── __main__.py   ← argparse 前端：run/submit/status/explain/list-runs/plan/list-engines/doctor/list-deterministic/deploy/destroy/skill（嵌套 `skill install`），外加两个内部隐藏子命令（靠不传 `help` + 收窄 subparsers 的 `metavar` 隐去，**不应改用 `argparse.SUPPRESS`**——它会以「==SUPPRESS==」出现在 `--help` 里，理由见 `__main__.py` 该处注释；由 submit 以新会话、`python -P -m gherkai_cli` 启动，经标准输入交出输入、经 `--report-fd` 给的回报管道收结果，交接协议在 `gherkai_runtime.handoff`，不供用户直接调用）：`_reconcile`（本机后台推进进程的入口，步骤 `_advance_submitted` 是建 run 的调用序：起隧道、生成运行定义、建 run、装配、回报、推进，ADR 0035 决策 3「本机 `submit`」）/ `_tunnel_watch`（云端 submit 的隧道守护进程的入口，主体是 `gherkai_runtime.tunnel_host.hold_tunnel_for_cloud_run`，ADR 0035 决策 3「云端 `submit`」）——解析 → 调 gherkai_runtime.compose/gherkai_core → 注入 RunPersistence 实时落库 → 调 render；定义退出码
 ├── config.py     ← 项目配置文件 gherkai.toml 的定位、读取与形态校验（ADR 0053）；不知道命令与 argparse
 ├── settings.py   ← 配置文件合成进命令行选项（选项 > 环境变量 > 配置文件 > 内建默认，ADR 0053 决策 2、3、6）；argparse 的私有访问集中于此
 ├── submission.py ← 提交准备（`Prepared`）与 definition 填完的两个入口（本机 / 云端），次序在此成契约：本机为账号比对 → 设备请求 → 安装包上传 → 写前校验，云端为读 SSM 取项目并填设备请求 → 安装包进产物桶 → 写前校验（ADR 0048 决策 3、0051 决策 9、0053）
@@ -29,7 +29,7 @@ cli/gherkai_cli/
                      由 `tools/render_skill_contract.py` 从 docs/internals/cli-json-contract.md 确定性生成（ADR 0043 决策四）
 ```
 
-组合根逻辑（compose/detached/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich；安装包上传到 S3 应用前缀也在 runtime（`gherkai_runtime.app_upload`，ADR 0051 决策 9），由 `submission.py` 调用；`doctor` 的云端自检列出未结束远程访问会话所用的 Device Farm 客户端同样在 runtime（`gherkai_runtime.devicefarm`，ADR 0051 决策 10「调用归属」）。
+组合根逻辑（compose/deadline/detached/handoff/names/tunnel/tunnel_host）位于平级的产品本体包 `runtime/gherkai_runtime/`，**不留在本包里**：Lambda 与 IaC 也要用它，留在前端里会迫使它们依赖 argparse 层（ADR 0016「演进」节）。cli 这个前端只剩 argparse 与标准 IO；表格、树与状态颜色的呈现件同样在 runtime（`gherkai_runtime.textui`，ADR 0047），cli 不直接 import rich；安装包上传到 S3 应用前缀也在 runtime（`gherkai_runtime.app_upload`，ADR 0051 决策 9），由 `submission.py` 调用；`doctor` 的云端自检列出未结束远程访问会话所用的 Device Farm 客户端同样在 runtime（`gherkai_runtime.devicefarm`，ADR 0051 决策 10「调用归属」）。
 
 已安装多个部署 provider（当前只有 aws 一个）时 `--provider <名>` 必给；只安装一个时可省略；未安装任何 provider 时报「装 `gherkai[deploy-aws]`」并以退出码 `2` 结束。
 
@@ -53,6 +53,12 @@ uv run gherkai deploy --prefix dev- --vpc default
 RUN_ID=$(uv run gherkai submit features/wikipedia_generic.feature --backend cloud --prefix dev-)
 uv run gherkai status "$RUN_ID" --backend cloud --prefix dev- --wait
 ```
+
+带 `--expose-local` 的真实执行：`uv sync` 已按根依赖装上 tunnel 组件（ngrok 的 Python SDK），另设环境变量 `NGROK_AUTHTOKEN`，不需要 ngrok
+可执行文件；发行版的使用者装带 tunnel 组件的 gherkai（如 `uv tool install 'gherkai[local,tunnel]'`）。两项缺一时 `run` 与 `submit` 在共用的
+前置检查里以退出码 `2` 结束（`_check_tunnel_prerequisites`，排在补全 definition 与上传安装包之前）。单测从不起真实隧道：`tests/conftest.py`
+的自动夹具把 `gherkai_runtime.tunnel._import_sdk` 换成一被调用即让用例失败的函数；后台进程的用例经 `tests/_inline_children.py` 替换
+`subprocess.Popen`：认出 `_reconcile` / `_tunnel_watch` 的启动命令，在同一进程的线程里执行真实的主体，两端之间是真实的管道。
 
 云端后端只经 `submit` 执行，`run` 给出 `--backend cloud` 即以退出码 `2` 结束（ADR 0016 决策 A）。
 `--backend cloud` 的表 / 桶 / cluster / task-def / 三个 Lambda 与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
@@ -123,7 +129,7 @@ fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finali
 
 ## 为何拆 `submit` / `status`
 
-`run` 要求 CLI 全程在线（网断或关机即中止）；`submit` 提交完就走：local 由脱离 CLI 的 per-run 进程推进，
+`run` 要求 CLI 全程在线（网断或关机即中止）；`submit` 提交完就走：local 由 submit 以新会话启动的本机后台推进进程建 run 并推进到结束，
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机；带 `--expose-local` 时例外，隧道由本机的守护进程持有，本机须保持开机联网到 run 终态，ADR 0035 决策 3）。
 `status --wait` 是三个推进触发源之一（查询者到来即接力），保证「推进即使中断、也能被查询者续到底」。
 
@@ -136,7 +142,7 @@ local 无此上限（worker 运行在发起 run 的本机、以本机凭证计�
 
 ## 退出码分层的切分线
 
-失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
+失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此；本机建 run 时写记录失败也是，前台 `run` 与后台推进进程用同一句 `_run_record_failure`）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
 「提交 + 判定」由此被拆开（ADR 0034）。执行前的配置错（投票次数、筛选值、读 feature、plan）以退出码 `2` 结束，这一判定只在 `_load_and_plan` 一处：`_cmd_plan` 直接调用，`_cmd_run` 与 `_cmd_submit` 经共享前置 `_plan_and_preflight` 调用；各写一份必然漂移。
 
@@ -152,11 +158,11 @@ deploy 会把自身版本写成后端的版本戳；四个 cloud 入口（`submi
 | 同版本 | 放行，不提示 |
 | **CLI 新于后端** | 退出码 `2`，**无放行 flag** |
 | CLI 旧于后端 | 警告不拦截（以 `uv tool upgrade gherkai` 升级即可） |
-| 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入；例外：`submit` 的 run 带设备目标或会话预热地址时以退出码 `2` 结束，**无放行 flag**（判据见 `compose.run_requires_backend_stamp`） |
+| 后端没有版本戳（早于本机制的部署） | 警告不拦截，并提示部署方执行一次 `gherkai deploy` 写入；例外：`submit` 的 run 带设备目标或给了 `--expose-local`（运行定义会带会话预热地址）时以退出码 `2` 结束，**无放行 flag**（判据见 `compose.run_requires_backend_stamp`） |
 | 任一侧是开发版（含 `.dev`/`.post`/`+`） | 跳过比对，输出一条警告（dev 版逐提交前进，逐字比对会把每次都判成 skew） |
 | 取不到本机 CLI 版本（未以包形式安装、从源码直接运行） | 跳过比对，输出一条警告 |
 
-判序（`compose.check_version_skew`）：先判后端有无版本戳，缺戳一律按「后端没有版本戳」一行处置，本机是开发版或取不到本机版本时也一样，带设备目标或会话预热地址的 run 照样以退出码 `2` 结束；其次判能否取到本机 CLI 版本，再判任一侧是否开发版，最后才比较 release 段。
+判序（`compose.check_version_skew`）：先判后端有无版本戳，缺戳一律按「后端没有版本戳」一行处置，本机是开发版或取不到本机版本时也一样，带设备目标或给了 `--expose-local` 的 run 照样以退出码 `2` 结束；其次判能否取到本机 CLI 版本，再判任一侧是否开发版，最后才比较 release 段。
 
 **不设放行口是有意的**：放行等于让新 CLI 写入的任务定义被旧后端读取，后果不可知且静默；以
 `uvx --from 'gherkai==<后端版本>' gherkai …` 按指定版本临时运行的成本为零。版本只有一处可调：`gherkai` 与后端被 `==`
@@ -180,7 +186,7 @@ deploy 选错取值，而取值一旦不符，就会合成「新建整套 VPC �
 - [0027](../docs/adr/0027-runreport-aggregation-index.md) RunReport 归集索引 / [0030](../docs/adr/0030-realtime-persistence-seam.md) 实时写接缝
 - [0033](../docs/adr/0033-iac-aws-backend-and-composition-wiring.md) 云端资源清单与命名契约（`destroy` 后表/桶/ECR 是 RETAIN）
 - [0034](../docs/adr/0034-detached-batch-reconciler.md) 无状态批量运行（submit/status、job timeout 两层声明与三路 enforce）
-- [0035](../docs/adr/0035-local-app-testing-via-tunnel.md) `--expose-local` 隧道（凭据轮换、谁负责拆、TTL 算法）
+- [0035](../docs/adr/0035-local-app-testing-via-tunnel.md) `--expose-local` 隧道（会话建在宿主进程里、三种组合的宿主与次序、submit 与后台进程的交接、边缘到点拒绝）
 - [0036](../docs/adr/0036-deterministic-capability-discovery.md) 确定性能力自述（`list-deterministic`、plan 标注）
 - [0037](../docs/adr/0037-distribution-and-packaging.md) 分发与打包（三名分离 / worker 定位链 / `steps/` 约定 / deploy 进 wheel / 版本 skew）
 - [0038](../docs/adr/0038-worker-image-delivery.md) worker 镜像交付（variant → 显式 task-def revision、被拒方案）

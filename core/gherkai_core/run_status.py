@@ -6,7 +6,8 @@
   判定到 job 判定的归约是另一条路径（`project._aggregate`）。
 - `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
   `definition_unavailable_ending` 带上读不到定义的原因，几种原因的句子同样只在这里（`schema_mismatch_reason`、
-  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），云端推进器与本机后台推进进程共用。
+  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），由云端推进器使用（本机后台推进进程用自己生成的运行定义；status --wait
+  接力从记录读回，读不出时不写）。
 - `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
   的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
 - `state_without_record`：没有记录的执行（`run --no-report`）按同一组作用在内存里算出的运行态（ADR 0031 决定五「数据源」）。
@@ -128,7 +129,7 @@ def definition_unavailable_ending(reason: str) -> RunEnding:
 
 
 # 读不到可用的运行定义时的几种原因（ADR 0037 决策 7）：产品语言的整句、长度有界，说清哪里不对与怎么办；契约异常的原文只进推进器的
-# 日志。云端推进器与本机后台推进进程取同一句，两种后台对同一情形给出同一说明。句中的「后端」对本机后端同样成立。
+# 日志。用它们的是云端推进器：它从记录读回运行定义，读不出时以结束写的 error 变体结束这个 run。
 DEFINITION_CONTRACT_REASON: Final = "提交记录不完整或形态不对，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
 NO_WORKER_IMAGES_REASON: Final = "提交记录没有记 worker 镜像版本，后端不能执行它；请用与后端同版本的 gherkai 重新提交"
 

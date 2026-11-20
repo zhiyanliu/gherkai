@@ -1,7 +1,7 @@
 """运行期限的规则（ADR 0054 决策二）：执行方把当前墙钟时刻与运行期限比较，判断还能否启动 job、执行中的 job 何时截止。
 
-期限 `RunMeta.deadline_at` 在建 run 时算出、写进运行定义，之后不变（算式在 `gherkai_runtime.deadline`）；这里只有拿它与当前时刻
-比较的规则。前台的调度循环与后台的推进步骤都用这一份，提前量与「是否已过」的判断不另写。到期时的说明不在这里：没有启动的 job 与
+期限 `RunMeta.deadline_at` 在建 run 时算出、写进运行定义，之后不变（算式在 `gherkai_runtime.deadline`）；这里是拿它与当前时刻
+比较的规则，以及由它推出的期限之后那个时刻（见文末）。前台的调度循环与后台的推进步骤都用这一份，提前量与「是否已过」的判断不另写。到期时的说明不在这里：没有启动的 job 与
 run 级的说明在结束写的说明表（`run_status.RUN_ENDINGS` 的执行方自己到期一行），被期限截断的 job 的说明在终结函数
 （`project.DEADLINE_TIMEOUT_MESSAGE`）。
 
@@ -13,12 +13,15 @@ datetime，不收 ISO 串；不带时区的 datetime 与带时区的比较时 Py
 才是同一个算法（ADR 0054 决策二「检查用墙钟」一段）。停止等待、排空这些时长不进记录，仍按单调时钟计，不在这里。
 
 「已过」一律指严格晚于，与 job 预算到点的判断（当前时刻大于截止时刻）同一取法。
+
+期限之后还有一个时刻：期限加 300 秒（`overdue_at`）。可以处置一个 run 的条件（ADR 0054 决策六）与隧道边缘的到点拒绝（ADR 0051
+决策 13「边缘策略」）都取它，code 里只有这一处算法，两处不各自加 300 秒。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from typing import Literal
+from typing import Final, Literal
 
 from gherkai_core.model import RunMeta
 from gherkai_core.serialize import instant_from_iso
@@ -26,6 +29,9 @@ from gherkai_core.serialize import instant_from_iso
 # 停止启动的提前量（秒）：当前时刻已过 deadline_at 减去它，就不再启动新的 job，同一个 job 的重试也不再启动。从发出启动到 job
 # 真正开始执行需要时间，卡着期限启动的 job 来不及被正常停止。
 STOP_START_LEAD_S = 60.0
+
+# 期限之后的余量（秒）：给时钟偏差与仍在的推进器按期限自己结束留出余地，不是收尾时长的上界（ADR 0054 决策六）。
+OVERDUE_MARGIN_S: Final = 300.0
 
 # 执行中的 job 被截断时起作用的是哪一个时刻：job 自己的墙钟预算（budget），还是 run 的期限（deadline）。终结函数据它判定内容不完整的
 # 超时 job：被预算截断的记 error 加 timeout，被期限截断的记 aborted（`project.finalize_job`）。
@@ -58,6 +64,11 @@ def past_deadline(now: datetime, deadline: datetime) -> bool:
     """当前时刻是否已过期限本身。执行中的 job 的截止时刻以期限封顶，各 job 是否到点按 `job_cutoff` 给出的时刻判断；本函数供不看
     具体 job 的判断使用。"""
     return now > deadline
+
+
+def overdue_at(deadline: datetime) -> datetime:
+    """期限加 300 秒（`OVERDUE_MARGIN_S`）：处置条件里的「已过期限加 300 秒」与隧道边缘到点拒绝的时刻都是它。"""
+    return deadline + timedelta(seconds=OVERDUE_MARGIN_S)
 
 
 @dataclass(frozen=True)

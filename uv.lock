@@ -748,15 +748,19 @@ deploy-aws = [
 local = [
     { name = "gherkai-worker-novaact" },
 ]
+tunnel = [
+    { name = "gherkai-runtime", extra = ["tunnel"] },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "gherkai-core", extras = ["aws"], editable = "core" },
     { name = "gherkai-deploy-aws", marker = "extra == 'deploy-aws'", editable = "deploy_aws" },
     { name = "gherkai-runtime", extras = ["aws"], editable = "runtime" },
+    { name = "gherkai-runtime", extras = ["tunnel"], marker = "extra == 'tunnel'", editable = "runtime" },
     { name = "gherkai-worker-novaact", marker = "extra == 'local'", editable = "engines/novaact" },
 ]
-provides-extras = ["deploy-aws", "local"]
+provides-extras = ["deploy-aws", "local", "tunnel"]
 
 [[package]]
 name = "gherkai-core"
@@ -814,6 +818,9 @@ aws = [
     { name = "botocore" },
     { name = "gherkai-core", extra = ["aws"] },
 ]
+tunnel = [
+    { name = "ngrok" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -821,10 +828,11 @@ requires-dist = [
     { name = "botocore", marker = "extra == 'aws'", specifier = ">=1.34" },
     { name = "gherkai-core", editable = "core" },
     { name = "gherkai-core", extras = ["aws"], marker = "extra == 'aws'", editable = "core" },
+    { name = "ngrok", marker = "extra == 'tunnel'", specifier = ">=1.8.0" },
     { name = "packaging", specifier = ">=24" },
     { name = "rich", specifier = ">=13" },
 ]
-provides-extras = ["aws"]
+provides-extras = ["aws", "tunnel"]
 
 [[package]]
 name = "gherkai-worker-novaact"
@@ -851,7 +859,7 @@ name = "gherkai-workspace"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "gherkai", extra = ["deploy-aws", "local"] },
+    { name = "gherkai", extra = ["deploy-aws", "local", "tunnel"] },
 ]
 
 [package.dev-dependencies]
@@ -864,7 +872,7 @@ dev = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "gherkai", extras = ["local", "deploy-aws"], editable = "cli" }]
+requires-dist = [{ name = "gherkai", extras = ["local", "deploy-aws", "tunnel"], editable = "cli" }]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1318,6 +1326,24 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/5f/b4/d9af4054a80a46e27bfec10ead824ac1d39a974179b47db4ad9844bc5658/mypy_boto3_s3-1.43.66.tar.gz", hash = "sha256:b2f74763e373b3f3d64cfcd2f00cdb1c10c8a4cefe6d4cdbc1ed4a6ade085c07", size = 78866, upload-time = "2026-08-07T00:17:38.354Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/bc/8ed7dad2bc1506732cc503ccbbc0fd48786d85900bb2c6577a26a634843b/mypy_boto3_s3-1.43.66-py3-none-any.whl", hash = "sha256:f9385e190d423690dbc161260dac02439e3b6c9841e992ba6a92d15c1050b3af", size = 86296, upload-time = "2026-08-07T00:17:36.388Z" },
+]
+
+[[package]]
+name = "ngrok"
+version = "1.8.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/24/fe/3fa55baaab3999b179320c5f2ecc67582facbf4258511fb3cc357c63b1ca/ngrok-1.8.0-cp310-abi3-macosx_10_12_x86_64.macosx_11_0_arm64.macosx_10_12_universal2.whl", hash = "sha256:127cf64d1e6c78ea774f505d14af1a7ca0db419459c71b19398853012ff7b106", size = 6946366, upload-time = "2026-11-17T13:15:55.026Z" },
+    { url = "https://files.pythonhosted.org/packages/95/c4/14daadea37150b9e3144277f5f81e7f86b2936d700632c017ffbea80360e/ngrok-1.8.0-cp310-abi3-macosx_10_12_x86_64.whl", hash = "sha256:7b2a84b66eb6accc700986b776e8207e8c257d46b1c5f349fb7a443c0cf13ab5", size = 3609588, upload-time = "2026-11-17T13:16:40.675Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/dd/88059bb87ebff32ee59781b29e7bcd960db498b538b0e2da63bd544fe367/ngrok-1.8.0-cp310-abi3-macosx_11_0_arm64.whl", hash = "sha256:9b67236ea5fa132d0ba6be3a27fa40b1d0dcb7651c73f1610b291b0cfbafeb78", size = 3354311, upload-time = "2026-11-17T13:16:12.434Z" },
+    { url = "https://files.pythonhosted.org/packages/5b/6e/59f7b26cc27419e2108c43aabfb8d9e1986f63ffadc66ca467e64b198b4f/ngrok-1.8.0-cp310-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:a89b26650969bfa5989f234bfdfa8f87872f176c4f7a0b14640a9bdc062a2def", size = 5415528, upload-time = "2026-11-17T13:20:16.073Z" },
+    { url = "https://files.pythonhosted.org/packages/e3/08/4055f0b6ad9cfa9a6b714d6306a31ba86a97016b3d4126f07d8f9d4b9a35/ngrok-1.8.0-cp310-abi3-manylinux_2_17_armv7l.manylinux2014_armv7l.whl", hash = "sha256:d2732ac029c4a4a3508a44a4bcd7928121cfdb73bddd02fab3e606c10d055f13", size = 4359513, upload-time = "2026-11-17T13:19:38.353Z" },
+    { url = "https://files.pythonhosted.org/packages/00/e9/e6e0477f9500a73d67ba23a6f6ce5eba9b7eb369090d88289662c484f623/ngrok-1.8.0-cp310-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9c027569d2859c74c11ce007fdd6e0279a84ae67b565260692a6b854b1f093d3", size = 3724232, upload-time = "2026-11-17T13:17:27.631Z" },
+    { url = "https://files.pythonhosted.org/packages/4a/8b/4a6fad4b14df075f13b847a12752ca6f7d442259888f7c5f0a75f2dc5ae6/ngrok-1.8.0-cp310-abi3-musllinux_1_2_aarch64.whl", hash = "sha256:6dba1177278596e21bed5eff6f9fd02560f348a4ce0022bf6075f0b700134e2a", size = 3504055, upload-time = "2026-11-17T13:19:36.23Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/49/8602ea980cab4aaa779ed5fbf6e292c2ff690dad69f357a084a52700dcef/ngrok-1.8.0-cp310-abi3-musllinux_1_2_x86_64.whl", hash = "sha256:293bc61321f472158b0ef083b976d561eb704143ce07b7175ae1b0ddaa12c361", size = 3823143, upload-time = "2026-11-17T13:19:55.672Z" },
+    { url = "https://files.pythonhosted.org/packages/08/e4/bef74152e77c9f3af030f4302332393a21df9c1e5848e6d8d069cb8ee114/ngrok-1.8.0-cp310-abi3-win32.whl", hash = "sha256:886ef9a65eb2ff21f699636ec2f0573e03ee859ce100ebb229c881fa43588227", size = 3102260, upload-time = "2026-11-17T13:17:13.904Z" },
+    { url = "https://files.pythonhosted.org/packages/4f/e5/e2227113ab8d197ec0eb9270ea6c052ddc53fb27c20dda99a4b5a7a1b1ff/ngrok-1.8.0-cp310-abi3-win_amd64.whl", hash = "sha256:b12dd8a0f8b11f189ade25aed923c4783f82d599c4011d383c6255d5f226fdde", size = 3657753, upload-time = "2026-11-17T13:16:14.618Z" },
+    { url = "https://files.pythonhosted.org/packages/09/72/7f174f184a8c0c6e4ebddaed481b99b9403653a84bdf2ea18d0806ade8a4/ngrok-1.8.0-cp310-abi3-win_arm64.whl", hash = "sha256:6c9edef2b9a32b2b0fc13831200f4722c061de6d90bae515a2216883d6db267f", size = 3378693, upload-time = "2026-11-17T13:16:44.159Z" },
 ]
 
 [[package]]

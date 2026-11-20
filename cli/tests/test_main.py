@@ -17,9 +17,10 @@ from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
 
 from gherkai_cli import __main__ as m
 from gherkai_cli import submission
-from gherkai_runtime import compose, textui
+from gherkai_runtime import compose, detached, textui
 
-from conftest import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
+from _inline_children import inline_children  # noqa: F401 —— 夹具：本机 submit 启动的后台推进进程在线程里执行
+from _fake_worker import FAKE_MIN_GRACE_S, FAKE_MODEL_ID  # 假 worker 自报的下限 / 模型 id（autouse 夹具注的那份）
 
 # 收集期取到的真实现：conftest 的 autouse 替身在用例运行时才装上，要让真契约校验参与的用例把它装回去
 _REAL_QUERY_CAPABILITIES = compose.query_capabilities
@@ -56,6 +57,21 @@ def _write_feature(tmp_path: Path) -> Path:
         "Feature: demo\n  Scenario: s\n    When \"做点啥\"\n", encoding="utf-8"
     )
     return feat
+
+
+@pytest.fixture
+def advanced(monkeypatch) -> list:
+    """本机 submit 的用例配合 `inline_children` 使用：后台推进进程照常建 run、回报，推进本身换成记录调用的函数（不起 worker），
+    依次记下它收到的运行定义。run 因此停在 pending、带后台执行标记，与刚提交还没有推进的 run 相同。"""
+    calls: list = []
+    monkeypatch.setattr(detached, "advance_local_run", lambda advancer, meta, **kw: calls.append(meta))
+    return calls
+
+
+def _submitted_run_dir(reports: Path) -> Path:
+    """本机 submit 之后报告目录里唯一的 run 目录。"""
+    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    return run_dir
 
 
 def test_json_output_is_single_parseable_document(tmp_path, monkeypatch, capsys):
@@ -169,7 +185,7 @@ def test_run_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys):
-    # 同上，submit 侧（坏值会随 definition 到达推进器 → 三路推进器全空转）。零副作用即没 fork per-run 进程、
+    # 同上，submit 侧（坏值会随 definition 到达推进器 → 三路推进器全空转）。零副作用即没启动后台推进进程、
     # 没写 run 目录（对齐 test_tunnel_cli 的「隧道一次都没起」断言风格：早拒才真零副作用）。
     import subprocess
 
@@ -181,7 +197,7 @@ def test_submit_rejects_max_concurrency_below_one(tmp_path, monkeypatch, capsys)
         rc = m.main(["submit", str(feat), "--max-concurrency", bad, "--report-dir", str(report_dir)])
         assert rc == 2, f"--max-concurrency {bad} 应退出码 2"
         assert "--max-concurrency" in capsys.readouterr().err
-    assert forked == []              # per-run 进程一次没 fork
+    assert forked == []              # 后台推进进程一次也没有启动
     assert not report_dir.exists()   # definition 也没落库
 
 
@@ -554,7 +570,7 @@ def test_run_grace_too_small_rejected(tmp_path, monkeypatch, capsys):
 
 def test_run_grace_nan_inf_rejected(tmp_path, monkeypatch, capsys):
     """--grace inf/nan 同拒（退出码 2）：inf 会让 SIGKILL 兜底永不触发、软停失效即挂死（ADR 0024/0026）；
-    与 --tunnel-ttl、@timeout 的「有限正数」判据相同。"""
+    与 @timeout 的「有限正数」判据相同。"""
     for bad in ("inf", "nan"):
         box = {}
         monkeypatch.setattr(m, "schedule", _capturing_schedule(Status.PASSED, box))
@@ -655,30 +671,27 @@ def test_run_writes_deadline_from_the_resolved_grace_even_with_no_report(tmp_pat
     assert _deadline_offset_s(box["run_meta"]) == 900 + 300 + 2 * grace + 10
 
 
-def test_local_submit_deadline_takes_the_largest_engine_grace(tmp_path, monkeypatch):
-    """本机 submit 没有 run 级的停止宽限：期限取这个 run 用到的各引擎自报宽限里最大的一个，每个 job 都按它算尾段。"""
-    import subprocess
-
+def test_local_submit_deadline_takes_the_largest_engine_grace(tmp_path, monkeypatch, inline_children, advanced):
+    """本机 submit 没有 run 级的停止宽限：期限取这个 run 用到的各引擎自报宽限里最大的一个，每个 job 都按它算尾段。宽限由提交进程算好
+    交给后台推进进程，写进它生成的运行定义，推进用的也是这一份。"""
     from gherkai_core.serialize import run_meta_from_dict
 
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
     _fake_locator(monkeypatch, available=("novaact", "midscene"))  # 两个引擎都在本机（运行前检查要找到 worker）
     feat = tmp_path / "two.feature"
     feat.write_text("Feature: F\n  @scope:a @engine:novaact\n  Scenario: s1\n    When \"做 A\"\n"
                     "  @scope:b @engine:midscene\n  Scenario: s2\n    When \"做 B\"\n", encoding="utf-8")
     reports = tmp_path / "reports"
     assert m.main(["submit", str(feat), "--report-dir", str(reports)]) == 0
-    [run_dir] = [d for d in reports.iterdir() if d.is_dir()]
+    inline_children.settle()
+    run_dir = _submitted_run_dir(reports)
     meta = run_meta_from_dict(json.loads((run_dir / "run_meta.json").read_text(encoding="utf-8")))
     grace = max(FAKE_MIN_GRACE_S.values())
     assert _deadline_offset_s(meta) == 900 + 2 * (300 + 2 * grace + 10)
+    assert advanced == [meta]
 
 
 def test_local_submit_exits_2_when_engine_grace_cannot_be_read(tmp_path, monkeypatch, capsys):
-    """本机 submit 取不到引擎自报宽限时与 run 一样拒绝：退出码 2、不 fork、不落库。"""
+    """本机 submit 取不到引擎自报宽限时与 run 一样拒绝：退出码 2、不启动后台推进进程、不落库。"""
     import subprocess
 
     forked = []
@@ -837,6 +850,81 @@ def test_realtime_commit_point_write_order(tmp_path, monkeypatch, capsys):
     assert sorted(rid for (s, mth, rid) in calls if mth == "load_job_result") == sorted(saved.values())
     # ⑤ ReportStore.write 最后（派生、永远最后），紧跟在读回明细之后
     assert methods[-1] == ("report", "write") and read_idx == len(methods) - 4
+
+
+# ---- 前台 run 建 run 失败：一句说明、退出码 2、不打回溯，不开始执行（ADR 0030 决定七）----
+# 与本机后台推进进程同一函数、同一句（`_run_record_failure`）。记录还没有写下、建事件库失败两种另见 test_tunnel_cli。
+
+_FIXED_RUN_ID = "20300102T030405Z-abcdef"
+
+
+class _RecordingTunnel:
+    """登记进 `tunnel.PROVIDERS` 的假隧道服务：只模仿口子的外部表面（前置检查、起隧道、返回对象的 close），记下关闭的次数。"""
+
+    url = "https://t.example.test"
+
+    def __init__(self) -> None:
+        self.closes = 0
+
+    def check_prerequisites(self) -> None:
+        pass
+
+    def start(self, local_origin, *, closes_at, timeout_s=None):
+        from gherkai_runtime import tunnel as gtunnel
+
+        return gtunnel.TunnelInfo(url=self.url, local_origin=gtunnel.normalize_origin(local_origin),
+                                  warmup_url=gtunnel.warmup_url_for(self.url, "a" * 32), closer=self._close)
+
+    def _close(self) -> None:
+        self.closes += 1
+
+
+def test_run_on_an_existing_run_exits_2_with_its_own_sentence_and_closes_the_session_at_exit(tmp_path, monkeypatch, capsys):
+    """前台 run 建 run 时这个 run 已经存在（报告目录里已有同一标识的运行态）：说「已经存在、没有重新建立」而不是写记录失败，退出码 2、
+    不打回溯、不开始执行，已有的运行态不被改动。隧道在建 run 之前已经建成：关闭会话登记在 atexit 上，命令返回时会话仍开着、进程退出时
+    关闭（ADR 0035 决策 3「寿命」）。"""
+    import atexit
+
+    from gherkai_runtime import tunnel as gtunnel
+
+    service = _RecordingTunnel()
+    monkeypatch.setitem(gtunnel.PROVIDERS, "ngrok", lambda: service)
+    registered: list = []
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **k: registered.append(fn) or fn)
+    monkeypatch.setattr(compose, "new_run_id", lambda at=None: _FIXED_RUN_ID)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("run 已存在时不该开始执行"))
+    reports = tmp_path / "reports"
+    existing = reports / _FIXED_RUN_ID / "run_state.json"
+    existing.parent.mkdir(parents=True)
+    existing.write_text("{}", encoding="utf-8")
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports),
+                 "--expose-local", "http://localhost:3000"])
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert f"run {_FIXED_RUN_ID} 已经存在，没有重新建立。请重新执行这条命令。" in cap.err.splitlines()
+    assert "写这个 run 的记录失败" not in cap.err and "Traceback" not in cap.err
+    assert existing.read_text(encoding="utf-8") == "{}"
+    closers = [fn for fn in registered if isinstance(getattr(fn, "__self__", None), gtunnel.TunnelInfo)]
+    assert len(closers) == 1 and service.closes == 0
+    closers[0]()
+    assert service.closes == 1
+
+
+def test_run_quiet_worker_log_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
+    """前台 run 的记录已写下、`--quiet` 的 worker 日志打不开（日志的位置被一个目录占着）：说明记录已写下、还没有开始执行、停在 pending，
+    退出码 2、不打回溯；与本机后台推进进程打不开 reconcile.log 是同一句。"""
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    monkeypatch.setattr(compose, "new_run_id", lambda at=None: _FIXED_RUN_ID)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("准备执行用的文件失败时不该开始执行"))
+    reports = tmp_path / "reports"
+    (reports / _FIXED_RUN_ID / "worker.log").mkdir(parents=True)
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--quiet"])
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert f"run {_FIXED_RUN_ID} 的记录已经写下，但在报告目录 {reports.resolve()} 里准备执行用的文件失败：" in cap.err
+    assert "还没有开始执行，这个 run 在记录里停在 pending。" in cap.err and "Traceback" not in cap.err
+    assert LocalRunStore(reports).load_run_state(_FIXED_RUN_ID).status == Status.PENDING
 
 
 # ---- run 被别处结束：本机 run 执行中途另一个写入方结束了这个 run，前台服从记录（ADR 0054 决策五「执行方服从记录」）----
@@ -1660,7 +1748,7 @@ def test_terminal_status_consumers_use_core_single_source():
     """终态真源不漂移（ADR 0031 决定一·补末条）：三处消费方全引 `gherkai_core.model.TERMINAL_STATUSES`、不各写白名单。
 
     跨 core/cli/gherkai 三栈的结构性护栏（cli 是唯一同时看得见三者的层）——曾有两份逐字副本，
-    新增终态漏改哪份、那份就永远判不到终态（`status --wait` 无限轮询 / 隧道守护只能等满 TTL 才拆）。
+    新增终态漏改哪份、那份就永远判不到终态（`status --wait` 无限轮询 / 隧道守护进程要等到期限加 300 秒才关闭隧道）。
     """
     from pathlib import Path
 
@@ -1859,29 +1947,20 @@ def test_default_engine_flag_has_choices():
 
 # ---- max_concurrency 随 definition 走（ADR 0034 机制四）----
 
-def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypatch):
+def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypatch, inline_children, advanced):
     """submit 把 --max-concurrency 落进 definition（推进器读 meta，不靠 flag 通道）。
 
-    fork 出的 per-run 进程仍收 flag（meta 缺值时的回落），但真源是落盘的 meta——推进器与提交进程可能分离
-    （云端后端在 Lambda、local 接力者是另一个 CLI 调用），flag 到不了它们。
+    后台推进进程的启动命令里没有这个选项：值随经标准输入交出的输入走，写进后台推进进程生成的运行定义，它推进用的也是这一份。
+    推进器与提交进程可能分离（云端后端在 Lambda、`status --wait` 接力是另一个 CLI 调用），它们只能从落盘的 meta 取到这个值。
     """
-    import subprocess
-
-    forked = []
-
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
     reports = tmp_path / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports),
                    "--max-concurrency", "3"]) == 0
-    run_dirs = [d for d in reports.iterdir() if d.is_dir()]
-    assert len(run_dirs) == 1
-    meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
+    inline_children.settle()
+    meta = json.loads((_submitted_run_dir(reports) / "run_meta.json").read_text(encoding="utf-8"))
     assert meta["max_concurrency"] == 3
-    argv = forked[0]
-    assert argv[argv.index("--max-concurrency") + 1] == "3"  # per-run 仍带 flag（回落值）；其后还带解析后的 region / profile
+    assert "--max-concurrency" not in inline_children.only().argv
+    assert [mt.max_concurrency for mt in advanced] == [3]
 
 
 def test_version_flag_prints_dist_version(capsys):
@@ -1940,7 +2019,7 @@ def test_run_unused_engine_miss_does_not_block(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_local_exits_2_when_worker_runtime_missing(tmp_path, monkeypatch, capsys):
-    """submit local 同 run（per-run 进程在本机 spawn worker）：提交前以退出码 2 结束、不 fork、不落库——否则「提交成功」
+    """submit local 同 run（后台推进进程在本机启动 worker）：提交前以退出码 2 结束、不启动后台推进进程、不落库——否则「提交成功」
     之后后台每个 job 都 engine_error，用户要去翻 reconcile.log 才知道是没装 worker。"""
     import subprocess
 
@@ -2077,16 +2156,9 @@ def test_steps_dir_explicit_but_missing_exits_2(tmp_path, monkeypatch, capsys):
     assert m.main(["list-deterministic"]) == 2
 
 
-def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
-    """submit 侧同 run：解析一次写进 definition——per-run 进程/接力者从 definition 读回（**不**收 flag，
-    也不重解析 `./steps`），三宿主才一致。"""
-    import subprocess
-
-    class _FakeProc:
-        pid = 1
-
-    forked = []
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
+def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch, inline_children, advanced):
+    """submit 侧同 run：提交进程解析一次，经交给后台推进进程的输入写进 definition——后台推进进程用这一份推进、接力者从 definition
+    读回（启动命令里**没有**这个选项，后台推进进程也不按自己的工作目录重解析 `./steps`），各宿主才一致。"""
     # 提交侧运行前检查会问一次能力自述（ADR 0037 决策 4）；本测只验持久化通道，那一跳由 conftest 的 autouse
     # 假替身盖住（不 spawn 真 worker）。
     steps = tmp_path / "steps"
@@ -2095,9 +2167,11 @@ def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     reports = tmp_path / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
-    meta = json.loads(next(reports.iterdir()).joinpath("run_meta.json").read_text(encoding="utf-8"))
+    inline_children.settle()
+    meta = json.loads((_submitted_run_dir(reports) / "run_meta.json").read_text(encoding="utf-8"))
     assert meta["steps_dir"] == str(steps.resolve())
-    assert "--steps-dir" not in forked[0]  # per-run 不收 flag：值只经 definition 传（单一通道）
+    assert "--steps-dir" not in inline_children.only().argv  # 启动命令不带它：值只经 definition 传（单一通道）
+    assert [mt.steps_dir for mt in advanced] == [str(steps.resolve())]
 
 
 def test_plan_and_list_deterministic_pass_steps_dir_to_worker(tmp_path, monkeypatch, capsys):
@@ -2305,18 +2379,16 @@ def test_artifact_lines_report_write_failure_falls_back_to_a_note(capsys):
     assert "判定明细: file:///tmp/x/r/jobs" in err  # 判定结果照旧落库、位置照打
 
 
-def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys):
+def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypatch, capsys, inline_children, advanced):
     """run 与 submit 共享同一段前置（plan → steps 目录 → 本机后端 worker 检查），唯一的输出差别是逐 job 明细：
     run 打（本机批量运行要看得见分组），submit 不打（提交完就走、进度看 status）。计数行两处相同。"""
-    import subprocess
-
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
     assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "r")]) == 0
     err = capsys.readouterr().err
     assert "plan: 1 job(s)" in err and "- scope=" in err
 
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "s")]) == 0
+    inline_children.settle()
     err = capsys.readouterr().err
     assert "plan: 1 job(s)" in err and "- scope=" not in err
 
@@ -3977,14 +4049,12 @@ def test_explain_recovered_steps_is_a_job_level_count_so_filtering_does_not_brin
     assert rc == 0 and "诊断细节见 worker 日志" not in out
 
 
-def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_path, monkeypatch):
-    """本机 submit 建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有。"""
-    import subprocess
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
+def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_path, monkeypatch, inline_children, advanced):
+    """本机 submit 的后台推进进程建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有。"""
     reports = tmp_path / "s"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
-    run_dir = next(d for d in reports.iterdir() if d.is_dir())
+    inline_children.settle()
+    run_dir = _submitted_run_dir(reports)
     assert json.loads((run_dir / "run_state.json").read_text(encoding="utf-8"))["detached"] is True
     # 前台 run 真走一遍 `run` 命令（假 schedule，不起 worker）：它建的 run_state.json 不带标记
     monkeypatch.setattr(m, "schedule", _fake_schedule_factory())
@@ -4083,75 +4153,86 @@ def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, ca
 
 
 # ---- 本机两种后台推进（后台推进进程、status --wait 接力）在保存判定明细一直失败时的出口 ----
-# 真实装配与真实推进步骤，只把引擎换成空表（不起 worker）、把判定存储的等待换成记录，把「真杀隧道进程」换成记录。
+# 真实装配与真实推进步骤，只把引擎换成空表（不起 worker）、把判定存储的等待换成记录；后台推进进程经 `inline_children` 在线程里执行。
 
 
-def _detached_run_with_a_finished_job(tmp_path, monkeypatch) -> tuple[Path, str, list[int]]:
-    """本机 submit 提交一个只有一个 job 的 run（不真起后台推进进程），再摆成推进到一半的样子：这个 job 已认领、在执行，事件库里已有它
-    执行完的事件与退出记录，下一次推进即为它存明细、写终态。run 目录里有隧道交棒文件。返回 (报告目录, run_id, 被拆的隧道进程号)。"""
-    import subprocess
-
+def _stage_a_finished_job(reports: Path, meta) -> None:
+    """把刚建成、只有一个 job 的 run 摆成推进到一半的样子：这个 job 已认领、在执行，事件库里已有它执行完的事件与退出记录，下一次
+    推进即为它存明细、写终态。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
     from gherkai_core.adapters.run_store.local import LocalRunStore
-    from gherkai_runtime import tunnel as gtunnel
 
-    _fake_locator(monkeypatch, available=("novaact", "midscene"))
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 1})())
-    reports = tmp_path / "reports"
-    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
-    run_id = next(d for d in reports.iterdir() if d.is_dir()).name
-    store = LocalRunStore(reports)
-    [job] = store.load_run_meta(run_id).jobs
-    assert store.try_claim_job(run_id, job.scope_id, claimed_at=compose.now_iso()) is True
-    log = SqliteEventLog(compose.events_db_path(reports, run_id))
+    [job] = meta.jobs
+    assert LocalRunStore(reports).try_claim_job(meta.run_id, job.scope_id, claimed_at=compose.now_iso()) is True
+    log = SqliteEventLog(compose.events_db_path(reports, meta.run_id))
     lines = [{"type": "scope_started", "scopeId": job.scope_id, "sessionId": "s-1"},
              {"type": "scenario_done", "scenarioId": job.scenarios[0].id, "status": "passed"},
              {"type": "scope_done", "scopeId": job.scope_id}]
     for seq, line in enumerate(lines, start=1):
         log.append_event(job.scope_id, seq, json.dumps(line), float(seq))
     log.record_exit(job.scope_id, 0, exited_at=compose.now())
-    (reports / run_id / "tunnel.json").write_text('{"pid": 4545}', encoding="utf-8")
-    stopped: list[int] = []
-    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
+
+
+def _submit_one_job(tmp_path: Path, monkeypatch, inline_children) -> tuple[Path, str, int]:
+    """本机 submit 提交一个只有一个 job 的 run（报告目录 tmp_path/reports），等后台推进进程结束；返回 (报告目录, run_id, 后台推进进程
+    的退出码)。推进换成什么由调用方先装好；引擎换成空表，真实推进不起 worker。"""
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
     monkeypatch.setattr(m.compose, "build_engines", lambda **kw: {})
-    return reports, run_id, stopped
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    inline_children.settle()
+    return reports, _submitted_run_dir(reports).name, inline_children.only().returncode
 
 
-def _assert_left_running_and_tunnel_kept(reports: Path, run_id: str, stopped: list[int]) -> None:
-    """这个 job 没有写下终态、在记录里仍为 running、不点名，run 没有结束，没有存下任何明细、没有报告；隧道没有拆。"""
+def _assert_left_running(reports: Path, run_id: str) -> None:
+    """这个 job 没有写下终态、在记录里仍为 running、不点名，run 没有结束，没有存下任何明细、没有报告。"""
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
     state = LocalRunStore(reports).load_run_state(run_id)
     assert state.status not in m.TERMINAL_STATUSES and state.ended_at is None
     assert [(js.status, js.result_id) for js in state.jobs.values()] == [(Status.RUNNING, None)]
     assert _detail_files(reports / run_id) == [] and not (reports / run_id / "index.html").exists()
-    assert stopped == [] and (reports / run_id / "tunnel.json").exists()
 
 
-def test_background_advancer_exits_1_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys):
-    """后台推进进程保存判定明细一直失败（磁盘写不进）：按 1、2、4 秒退避重试仍失败，进程打一句说明（发生了什么、记录在哪里、用哪条
-    命令接着推进）、不打回溯，以退出码 1 结束；这个 run 没有结束、不做结束写，隧道不拆（接着推进的一方还要用它）。"""
+def test_background_advancer_exits_1_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys,
+                                                                                            inline_children):
+    """后台推进进程保存判定明细一直失败（磁盘写不进）：按 1、2、4 秒退避重试仍失败，进程在 reconcile.log 里打一句说明（发生了什么、记录
+    在哪里、用哪条命令接着推进）、不打回溯，以退出码 1 结束；这个 run 没有结束、不做结束写。提交进程此前已收到回报，以 0 结束。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
 
-    reports, run_id, stopped = _detached_run_with_a_finished_job(tmp_path, monkeypatch)
+    reports = tmp_path / "reports"
+    real_advance = detached.advance_local_run
+
+    def advance_from_half_way(advancer, meta, **kw):  # 推进开始时这个 job 已由 worker 执行完：下一次推进要为它存明细
+        _stage_a_finished_job(reports, meta)
+        return real_advance(advancer, meta, **kw)
+
+    monkeypatch.setattr(detached, "advance_local_run", advance_from_half_way)
     waits = _no_wait_save_retry(monkeypatch)
     monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
 
-    rc = m.main(["_reconcile", run_id, "--report-dir", str(reports)])
-    err = capsys.readouterr().err
-    assert rc == 1 and "Traceback" not in err and waits == [1.0, 2.0, 4.0]
-    assert f"run {run_id} 读写本机的运行记录失败，后台推进已停止：" in err and "No space left on device" in err
-    assert f"记录在 {(reports / run_id).resolve()}，出错时执行中的 job 在记录里仍为 running" in err
-    assert "磁盘的剩余空间与读写权限" in err and f"然后用 gherkai status {run_id} --report-dir {reports} --wait 接着推进" in err
-    _assert_left_running_and_tunnel_kept(reports, run_id, stopped)
+    reports, run_id, returncode = _submit_one_job(tmp_path, monkeypatch, inline_children)
+    cap = capsys.readouterr()
+    assert cap.out == f"{run_id}\n" and "已提交（本机后台推进中）" in cap.err
+    log = (reports / run_id / "reconcile.log").read_text(encoding="utf-8")
+    assert returncode == 1 and "Traceback" not in log and waits == [1.0, 2.0, 4.0]
+    assert f"run {run_id} 读写本机的运行记录失败，后台推进已停止：" in log and "No space left on device" in log
+    assert f"记录在 {(reports / run_id).resolve()}，出错时执行中的 job 在记录里仍为 running" in log
+    assert "磁盘的剩余空间与读写权限" in log and f"然后用 gherkai status {run_id} --report-dir {reports} --wait 接着推进" in log
+    assert "读写本机的运行记录失败" not in cap.err  # 说明只进日志：提交进程的终端此时早已收到回报、退出
+    _assert_left_running(reports, run_id)
 
 
-def test_relay_exits_2_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys):
+def test_relay_exits_2_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys,
+                                                                              inline_children, advanced):
     """`status --wait` 接力保存判定明细一直失败：重试用尽之后打一句说明、不打回溯，以退出码 2 结束（没有判出结果）；不写终态、不结束
-    这个 run，也不拆隧道（原来的后台推进进程可能仍在使用它）。"""
+    这个 run。接力不持有隧道，没有要关闭的会话。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
 
-    reports, run_id, stopped = _detached_run_with_a_finished_job(tmp_path, monkeypatch)
+    reports, run_id, _ = _submit_one_job(tmp_path, monkeypatch, inline_children)
+    [meta] = advanced
+    _stage_a_finished_job(reports, meta)
+    capsys.readouterr()
     waits = _no_wait_save_retry(monkeypatch)
     monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
 
@@ -4160,7 +4241,7 @@ def test_relay_exits_2_with_one_sentence_when_saving_the_detail_keeps_failing(tm
     assert rc == 2 and "Traceback" not in err and waits == [1.0, 2.0, 4.0]
     assert f"run {run_id} 读写本机的运行记录失败，接力推进已停止：" in err and "No space left on device" in err
     assert f"记录在 {(reports / run_id).resolve()}" in err and "然后再执行同一条命令接着推进" in err
-    _assert_left_running_and_tunnel_kept(reports, run_id, stopped)
+    _assert_left_running(reports, run_id)
 
 
 def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(monkeypatch, capsys):
@@ -4390,7 +4471,7 @@ def test_help_hides_internal_entry_points(capsys):
     out = capsys.readouterr().out
     assert "_reconcile" not in out and "_tunnel_watch" not in out and "SUPPRESS" not in out, out
     assert "submit" in out and "status" in out  # 公开命令仍在
-    # 隐藏不等于禁用：内部入口照常可解析（submit fork 的子进程靠它）
+    # 隐藏不等于禁用：内部入口照常可解析（submit 启动的后台进程靠它）
     with pytest.raises(SystemExit) as e2:
         m.main(["_reconcile", "--help"])
     assert e2.value.code == 0
@@ -4640,16 +4721,12 @@ def test_missing_profile_exits_2_on_cloud_queries(tmp_path, cmd, monkeypatch, ca
     _assert_identity_error(capsys)
 
 
-def test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay(tmp_path, monkeypatch, capsys):
+def test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay(tmp_path, monkeypatch, capsys, inline_children,
+                                                                        advanced):
     """云端 submit 在 skew 闸之前、本机 status --wait 在接力推进之前，同样以退出码 2 结束。"""
-    import subprocess
-
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
     reports = tmp_path / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    inline_children.settle()
     run_id = capsys.readouterr().out.strip()
 
     _no_such_profile_env(tmp_path, monkeypatch)
@@ -4664,18 +4741,14 @@ def test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay(tmp_path
 
 # ---- 打给使用方照抄执行的 status 命令（ADR 0042 决策四）----
 
-def test_status_hints_quote_report_dir_with_spaces(tmp_path, monkeypatch, capsys):
+def test_status_hints_quote_report_dir_with_spaces(tmp_path, monkeypatch, capsys, inline_children, advanced):
     """submit 的查进度提示、status 与 explain 的 --wait 提示对 --report-dir 加 shell 引号：项目路径带空格时，
     shlex 切回来的 --report-dir 与原路径相等，命令能原样粘贴执行。"""
     import shlex
-    import subprocess
 
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
     reports = tmp_path / "My Project" / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    inline_children.settle()
     cap = capsys.readouterr()
     run_id = cap.out.strip()
     hints = [re.search(r"查进度：(gherkai status .*)$", cap.err, re.M).group(1)]
@@ -4687,38 +4760,6 @@ def test_status_hints_quote_report_dir_with_spaces(tmp_path, monkeypatch, capsys
         argv = shlex.split(hint)
         assert argv[:3] == ["gherkai", "status", run_id], hint
         assert argv[argv.index("--report-dir") + 1] == str(reports), hint
-
-
-# ---- 隧道守护进程的停止信号（ADR 0035 决策 3）----
-
-@pytest.mark.parametrize("signame", ["SIGTERM", "SIGHUP"])
-def test_tunnel_watch_turns_stop_signals_into_exit_that_still_stops_the_tunnel(signame, monkeypatch, capsys):
-    """隧道守护进程是 cloud submit 隧道的唯一宿主：被 kill 时 SIGTERM / SIGHUP 转为 SystemExit(128 + 信号号)，异常穿过主体的
-    finally 把隧道拆掉、日志留一行。缺省处置下进程直接结束、finally 不执行，ngrok agent 会留在公网。"""
-    import signal as _signal
-
-    from gherkai_runtime import tunnel_host
-
-    sig = getattr(_signal, signame)
-    stopped = []
-
-    def fake_watch(run_id, *, tunnel_pid, **kw):
-        try:
-            _signal.raise_signal(sig)
-            pytest.fail("停止信号应已转为退出")
-        finally:
-            stopped.append(tunnel_pid)
-
-    monkeypatch.setattr(tunnel_host, "watch_run_and_stop_tunnel", fake_watch)
-    saved = {s: _signal.getsignal(s) for s in (_signal.SIGTERM, _signal.SIGHUP)}
-    try:
-        with pytest.raises(SystemExit) as ei:
-            m.main(["_tunnel_watch", "r1", "--tunnel-pid", "4242", "--ddb-table", "t", "--ttl", "60"])
-    finally:
-        for s, h in saved.items():  # 处理器是守护进程级的全局状态，别留给后面的用例
-            _signal.signal(s, h)
-    assert ei.value.code == 128 + sig and stopped == [4242]
-    assert "收到停止信号，隧道已拆 run=r1 pid=4242" in capsys.readouterr().out
 
 
 # ---- list-runs ----

@@ -1,16 +1,26 @@
-"""tunnel 模块单测（ADR 0035）：origin 映射（纯逻辑）+ NgrokTunnel 编排（fake spawn/API，不真起 ngrok）。
+"""tunnel 模块单测（ADR 0035）：origin 映射与流量策略（纯逻辑）、NgrokTunnel 交给 SDK 的参数与失败的说法（假 SDK）、时限与关闭
+（真实线程与 Event）。
 
-绿即够的边界（CLAUDE.md「绿≠对·别过度」）：映射是纯函数、provider 编排的 fake 覆盖「参数拼装/
-轮询/超时/报错」逻辑；「ngrok 真起得来、URL 真可达」是真实边界，由真实运行验证（本机应用 + 真 AgentCore）。
+绿即够的边界（CLAUDE.md「绿≠对·别过度」）：映射与策略是纯函数；假 SDK 只模仿 SDK 的外部表面（`forward` 记录参数并返回只有 `url()`
+的对象，`disconnect` 记录调用，失败时抛装置真实记录到的异常形态），断言落在交给 SDK 的参数、TunnelError 的文字、时限内返回与迟到的
+监听被关闭上。SDK 真实是否这样表现（建成、到点拒绝、关闭之后公网不在线、等网络时释放解释器锁）是真实边界，由 ADR 0035 的实测项核，
+单测不算这部分的证据。测试从不起真实的隧道：`conftest.py` 的自动夹具拦下对真实 SDK 的导入。
 """
 from __future__ import annotations
 
-import io
+import gc
 import json
+import logging
 import os
 import re
 import shutil
+import signal
 import subprocess
+import sys
+import threading
+import time
+import weakref
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -19,7 +29,7 @@ import yaml
 from gherkai_core.model import Job, Scenario, Step, StepArgument
 from gherkai_runtime import tunnel
 from gherkai_runtime.tunnel import (
-    NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, normalize_origin, stop_tunnel, warmup_url_for,
+    NgrokTunnel, TunnelError, TunnelInfo, make_tunnel, map_origin_in_jobs, normalize_origin, policy_instant, warmup_url_for,
 )
 
 
@@ -28,13 +38,20 @@ from gherkai_runtime.tunnel import (
 FIXTURE = Path(__file__).resolve().parents[2] / "engines" / "fixtures" / "tunnel-warmup.json"
 
 
-def test_tunnel_info_carries_clean_url_and_token_only_in_warmup_url():
-    """隧道事实：url 干净、无凭据；预热地址形态精确；令牌不进 repr（ADR 0051 决策 13）。"""
-    info = TunnelInfo(url="https://abc.ngrok-free.app", pid=1, local_origin="http://localhost:3000",
-                      warmup_url=warmup_url_for("https://abc.ngrok-free.app", "f" * 32))
+def test_tunnel_info_carries_clean_url_and_keeps_token_and_closer_out_of_repr():
+    """隧道事实：url 干净、无凭据；预热地址形态精确；令牌与关闭函数不进 repr（ADR 0051 决策 13）；close() 交给关闭函数。"""
+    closed: list[int] = []
+
+    def closer_marker() -> None:
+        closed.append(1)
+
+    info = TunnelInfo(url="https://abc.ngrok-free.app", local_origin="http://localhost:3000",
+                      warmup_url=warmup_url_for("https://abc.ngrok-free.app", "f" * 32), closer=closer_marker)
     assert "@" not in info.url
     assert info.warmup_url == "https://abc.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "f" * 32
-    assert "f" * 32 not in repr(info)
+    assert "f" * 32 not in repr(info) and "closer_marker" not in repr(info)
+    info.close()
+    assert closed == [1]
 
 
 def test_edge_contract_constants_match_the_cross_language_fixture():
@@ -46,38 +63,49 @@ def test_edge_contract_constants_match_the_cross_language_fixture():
     assert tunnel.WARMUP_TITLES == fx["titles"] and tunnel.WARMUP_MARKERS == fx["markers"]
 
 
-# ---------- 流量策略（边缘契约的四条规则） ----------
+# ---------- 流量策略（到点拒绝加边缘鉴权的四条规则） ----------
 
-def test_traffic_policy_has_four_rules_cookie_spec_and_markers():
-    """ADR 0051 决策 13「边缘策略」：恰 4 条规则（免费层上限 5）、不含 basic-auth 与 remove-headers、Set-Cookie 精确等于规格、预热响应带
-    no-store 与 no-referrer、四个页面标记与四个标题都在、令牌与 cookie 值各出现在该出现的规则里。"""
-    policy = tunnel.render_traffic_policy("a" * 32, "b" * 32)
-    assert len(re.findall(r"^  - name:", policy, re.M)) == 4 and 4 <= tunnel.POLICY_RULE_LIMIT
+POLICY_CLOSES = datetime(2026, 11, 20, 10, 5, 0, tzinfo=timezone.utc)
+
+
+def _policy(token: str = "a" * 32, cookie: str = "b" * 32, closes_at: datetime = POLICY_CLOSES) -> str:
+    return tunnel.render_traffic_policy(token, cookie, closes_at=closes_at)
+
+
+def test_traffic_policy_has_five_rules_cookie_spec_and_markers():
+    """ADR 0051 决策 13「边缘策略」：恰 5 条规则（等于免费层上限）、不含 basic-auth 与 remove-headers、Set-Cookie 精确等于规格、每条
+    回答都带 no-store、预热响应另带 no-referrer、四个页面标记与四个标题都在、令牌与 cookie 值各出现在该出现的规则里。"""
+    policy = _policy()
+    assert len(re.findall(r"^  - name:", policy, re.M)) == 5 == tunnel.POLICY_RULE_LIMIT
     assert "basic-auth" not in policy and "remove-headers" not in policy
     assert 'set-cookie: "__Host-gherkai_tunnel=' + "b" * 32 + '; Secure; HttpOnly; Path=/; SameSite=None"' in policy
     assert "Domain=" not in policy and "Max-Age" not in policy
-    assert policy.count('cache-control: "no-store"') == 4 and 'referrer-policy: "no-referrer"' in policy
+    assert policy.count('cache-control: "no-store"') == 5 and 'referrer-policy: "no-referrer"' in policy
     for marker in tunnel.WARMUP_MARKERS.values():
         assert marker in policy, marker
     for title in tunnel.WARMUP_TITLES.values():
         assert title in policy, title
     assert "'" + "a" * 32 + "' in req.url.query_params['gherkai_tunnel_token']" in policy  # 令牌只在预热放行规则里比对
+    assert policy.count("a" * 32) == 1
     assert policy.count("b" * 32) == 3  # cookie 值：Set-Cookie、校验路径放行、总闸三处
     with pytest.raises(ValueError):
-        tunnel.render_traffic_policy("short", "b" * 32)  # 形态不对的秘密不进策略（模板替换无转义面）
+        tunnel.render_traffic_policy("short", "b" * 32, closes_at=POLICY_CLOSES)  # 形态不对的秘密不进策略（模板替换无转义面）
 
 
 def test_traffic_policy_parses_as_yaml_with_rule_order_statuses_and_gate_semantics():
-    """ngrok 读的是解析后的结构、不是字面量，所以按 YAML 解析后核：四条规则按序 warmup-ok / warmup-reject / check-ok / gate，
-    状态码 200 / 401 / 200 / 401；预热放行限 GET 且带令牌比对；no-referrer 只在预热放行页；校验路径放行是空响应体、只带 cache-control；
-    总闸只认 cookie、不认令牌（令牌只用来换一次 cookie，ADR 0051 决策 13）。"""
+    """ngrok 读的是解析后的结构、不是字面量，所以按 YAML 解析后核：五条规则按序 expired / warmup-ok / warmup-reject / check-ok / gate，
+    状态码 403 / 200 / 401 / 200 / 401；到点拒绝只看时刻、答固定正文；预热放行限 GET 且带令牌比对；no-referrer 只在预热放行页；校验路径
+    放行是空响应体、只带 cache-control；总闸只认 cookie、不认令牌（令牌只用来换一次 cookie，ADR 0051 决策 13）。"""
     token, cookie = "a" * 32, "b" * 32
-    rules = yaml.safe_load(tunnel.render_traffic_policy(token, cookie))["on_http_request"]
-    assert [r["name"] for r in rules] == ["warmup-ok", "warmup-reject", "check-ok", "gate"]
-    assert [r["actions"][0]["config"]["status_code"] for r in rules] == [200, 401, 200, 401]
+    rules = yaml.safe_load(_policy(token, cookie))["on_http_request"]
+    assert [r["name"] for r in rules] == ["expired", "warmup-ok", "warmup-reject", "check-ok", "gate"]
+    assert [r["actions"][0]["config"]["status_code"] for r in rules] == [403, 200, 401, 200, 401]
     assert all(len(r["actions"]) == 1 and r["actions"][0]["type"] == "custom-response" for r in rules)
     assert all(r["actions"][0]["config"]["headers"]["cache-control"] == "no-store" for r in rules)
-    ok, reject, check, gate = rules
+    expired, ok, reject, check, gate = rules
+    assert expired["expressions"] == [f"timestamp(time.now) >= timestamp('{policy_instant(POLICY_CLOSES)}')"]
+    assert expired["actions"][0]["config"]["content"] == tunnel.EXPIRED_TEXT == "GHERKAI TUNNEL EXPIRED"
+    assert expired["actions"][0]["config"]["headers"] == {"content-type": "text/plain; charset=utf-8", "cache-control": "no-store"}
     assert f"req.url.path == '{tunnel.WARMUP_PATH}'" in ok["expressions"] and "req.method == 'GET'" in ok["expressions"]
     assert f"'{token}' in req.url.query_params['{tunnel.TOKEN_PARAM}']" in ok["expressions"]
     assert ok["actions"][0]["config"]["headers"]["referrer-policy"] == "no-referrer"
@@ -88,6 +116,40 @@ def test_traffic_policy_parses_as_yaml_with_rule_order_statuses_and_gate_semanti
     assert tunnel.COOKIE_NAME in check["expressions"][1] and cookie in check["expressions"][1] and token not in check["expressions"][1]
     assert len(gate["expressions"]) == 1 and tunnel.CHECK_PATH in gate["expressions"][0] and cookie in gate["expressions"][0]
     assert token not in gate["expressions"][0]
+
+
+def test_only_the_expiry_rule_depends_on_the_closing_time():
+    """到点时刻只进第一条规则：换一个时刻，其余四条逐字不变。"""
+    a = _policy(closes_at=POLICY_CLOSES)
+    b = _policy(closes_at=POLICY_CLOSES + timedelta(days=3, seconds=7))
+    cut = "  - name: warmup-ok"
+    assert a != b and a[a.index(cut):] == b[b.index(cut):]
+
+
+@pytest.mark.parametrize("closes_at, written", [
+    (datetime(2026, 11, 20, 10, 5, 0, tzinfo=timezone.utc), "2026-11-20T10:05:00Z"),           # 整秒不变
+    (datetime(2026, 11, 20, 18, 5, 0, tzinfo=timezone(timedelta(hours=8))), "2026-11-20T10:05:00Z"),  # 换算成 UTC
+    (datetime(2026, 11, 20, 10, 5, 0, 1, tzinfo=timezone.utc), "2026-11-20T10:05:01Z"),        # 小数秒向上取整
+    (datetime(2026, 11, 20, 10, 5, 0, 999999, tzinfo=timezone.utc), "2026-11-20T10:05:01Z"),
+    (datetime(2026, 12, 31, 23, 59, 59, 500000, tzinfo=timezone.utc), "2027-01-01T00:00:00Z"),  # 进位跨日跨年
+])
+def test_policy_instant_is_utc_whole_seconds_rounded_up(closes_at, written):
+    assert policy_instant(closes_at) == written
+
+
+def test_policy_instant_and_policy_reject_a_naive_closing_time():
+    naive = datetime(2026, 11, 20, 10, 5, 0)
+    with pytest.raises(ValueError, match="须带时区"):
+        policy_instant(naive)
+    with pytest.raises(ValueError, match="须带时区"):
+        _policy(closes_at=naive)
+
+
+def test_policy_refuses_an_instant_that_could_break_the_string_literal(monkeypatch):
+    """写进策略之前按固定形态全匹配：形态不对的时刻（这里模拟一个带引号的值）不进策略。"""
+    monkeypatch.setattr(tunnel, "policy_instant", lambda t: "2026-11-20T10:05:00Z') || true || ('")
+    with pytest.raises(ValueError, match="写法不对"):
+        _policy()
 
 
 _NODE = shutil.which("node")
@@ -101,8 +163,9 @@ def test_warmup_page_script_classifies_only_401_as_denied(status, kind, marker_s
     """预热页脚本的分类（ADR 0051 决策 13）：校验响应 200 → READY；只有 401 → DENIED（确定性拒绝、worker 归 precheck_failed）；
     429、5xx 与请求失败 → ERROR（拿不准，worker 有界重试）。把生成的 <script> 交给 node 执行、注入桩 fetch 与桩 document，
     断言标题、正文标记与校验请求的形态——只核字面量守不住这段分支逻辑。"""
-    rules = yaml.safe_load(tunnel.render_traffic_policy("a" * 32, "b" * 32))["on_http_request"]
-    script = re.search(r"<script>(.*?)</script>", rules[0]["actions"][0]["config"]["content"], re.S).group(1)
+    rules = yaml.safe_load(_policy())["on_http_request"]
+    warmup_ok = next(r for r in rules if r["name"] == "warmup-ok")
+    script = re.search(r"<script>(.*?)</script>", warmup_ok["actions"][0]["config"]["content"], re.S).group(1)
     harness = (
         "const STATUS = process.env.S; const el = { textContent: '' }; const doc = { title: '', getElementById: () => el };\n"
         "globalThis.document = doc;\n"
@@ -240,186 +303,454 @@ def test_map_rejects_origin_with_path():
         map_origin_in_jobs([_job_with('打开 "http://localhost:3000/login"')], ORIGIN + "/login", BASE)
 
 
-# ---------- NgrokTunnel（fake spawn/API） ----------
+# ---------- NgrokTunnel（假 SDK：只模仿 SDK 的外部表面） ----------
 
-class _FakeProc:
-    def __init__(self, alive: bool = True):
-        self.pid = 4242
-        self._alive = alive
-
-    def poll(self):
-        return None if self._alive else 1
+CLOSES = datetime(2026, 11, 20, 10, 5, 0, tzinfo=timezone.utc)
+PUBLIC_URL = "https://xyz.ngrok-free.app"
 
 
-def _fake_popen_writing_log(url_value: str | None, spawned: dict, alive: bool = True):
-    """fake agent：spawn 时往 --log 指定的文件写 started tunnel 行（None 表示不写，覆盖超时路径）。"""
-    from pathlib import Path
+class _FakeListener:
+    def __init__(self, url: str) -> None:
+        self._url = url
 
-    def popen(cmd, **kw):
-        spawned["cmd"] = cmd
-        if "--traffic-policy-file" in cmd:  # 策略文件在 agent 就绪后即删，只能在 spawn 时刻读它（ADR 0035 决策 4）
-            pp = cmd[cmd.index("--traffic-policy-file") + 1]
-            spawned["policy"] = open(pp, encoding="utf-8").read()
-            spawned["policy_mode"] = os.stat(pp).st_mode & 0o777
-        if url_value is not None:
-            log = cmd[cmd.index("--log") + 1]
-            Path(log).write_text(
-                json.dumps({"lvl": "info", "msg": "started tunnel", "url": url_value}) + "\n",
-                encoding="utf-8")
-        return _FakeProc(alive=alive)
-
-    return popen
+    def url(self) -> str:
+        return self._url
 
 
-def test_ngrok_start_spawns_agent_with_policy_and_fresh_secrets():
-    """start：agent 命令带日志通道与流量策略文件；策略是四条规则的令牌换 cookie（不是 basic-auth）、文件 0600 且 agent 就绪后即删；
-    预热地址带本次令牌；两次 start 的令牌与 cookie 值都不同、各 128 位；不再有关掉鉴权的开关（ADR 0051 决策 13；0035「边界与不变量」）。"""
-    import os as _os
+class _FakeSdk:
+    """SDK 的外部表面：`forward(addr, **options)` 记录参数、返回只有 `url()` 的监听对象；`disconnect(url)` 记录调用。失败时抛装置
+    真实记录到的异常形态。`forward_gate` / `disconnect_gate` 让调用阻塞在一个 Event 上（等待时释放解释器锁，同 SDK 等网络时）。
+    自己只保留监听对象的弱引用，好让「谁持有它」可观察。"""
 
-    spawned: dict = {}
-    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None)
-    info = t.start("http://localhost:3000")
-    assert info.url == "https://xyz.ngrok-free.app" and info.pid == 4242
-    cmd = spawned["cmd"]
-    assert cmd[0] == "ngrok" and cmd[1] == "http" and cmd[2] == "http://localhost:3000"
-    assert "--log" in cmd and "--log-format" in cmd  # 日志文件通道（v3 无 --web-addr，实际运行暴露）
-    policy_path = cmd[cmd.index("--traffic-policy-file") + 1]
-    assert spawned["policy_mode"] == 0o600 and not _os.path.exists(policy_path)  # 就绪后即删：秘密不在磁盘停留
-    policy = spawned["policy"]
+    def __init__(self, url: str = PUBLIC_URL, *, forward_error: Exception | None = None,
+                 forward_gate: threading.Event | None = None, disconnect_error: Exception | None = None,
+                 disconnect_gate: threading.Event | None = None) -> None:
+        self.url = url
+        self.forward_error, self.forward_gate = forward_error, forward_gate
+        self.disconnect_error, self.disconnect_gate = disconnect_error, disconnect_gate
+        self.forwards: list[tuple[str, dict]] = []
+        self.forward_entered = threading.Event()
+        self.disconnects: list[str | None] = []
+        self.disconnect_entered = threading.Event()
+        self.disconnect_returned = threading.Event()
+        self.listener_refs: list[weakref.ref] = []
+
+    def forward(self, addr=None, **options):
+        self.forwards.append((addr, options))
+        self.forward_entered.set()
+        if self.forward_gate is not None:
+            self.forward_gate.wait(5.0)
+        if self.forward_error is not None:
+            raise self.forward_error
+        listener = _FakeListener(self.url)
+        self.listener_refs.append(weakref.ref(listener))
+        return listener
+
+    def disconnect(self, url=None):
+        self.disconnects.append(url)
+        self.disconnect_entered.set()
+        try:
+            if self.disconnect_gate is not None:
+                self.disconnect_gate.wait(5.0)
+            if self.disconnect_error is not None:
+                raise self.disconnect_error
+        finally:
+            self.disconnect_returned.set()
+
+
+def _start(sdk: _FakeSdk, origin: str = "http://localhost:3000", **kw) -> TunnelInfo:
+    return NgrokTunnel(load_sdk=lambda: sdk).start(origin, closes_at=CLOSES, **kw)
+
+
+def _cookie_in(policy: str) -> str:
+    return re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy).group(1)
+
+
+def test_start_hands_the_sdk_the_origin_env_token_and_this_runs_policy():
+    """交给 SDK 的参数（ADR 0035 决策 1）：上游地址是归一化之后的 origin；令牌经 `authtoken_from_env` 取、不显式传入；流量策略就是用
+    这次的令牌、cookie 与到点时刻渲染的那份。返回的地址来自监听对象，预热地址带这次的令牌，repr 里没有预热地址与关闭函数。"""
+    sdk = _FakeSdk()
+    info = _start(sdk, "http://localhost:3000/")
+    [(addr, options)] = sdk.forwards
+    assert addr == "http://localhost:3000"
+    assert set(options) == {"authtoken_from_env", "traffic_policy"} and options["authtoken_from_env"] is True
     token = info.warmup_url.rsplit("=", 1)[1]
-    assert info.warmup_url == f"https://xyz.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token={token}"
-    assert re.fullmatch(r"[0-9a-f]{32}", token) and token in policy and "basic-auth" not in policy
-    cookie = re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy).group(1)
-    assert len(cookie) == 32 and cookie != token
-    info2 = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start("http://localhost:3000")
-    assert info2.warmup_url != info.warmup_url
-    policy2 = spawned["policy"]
-    assert re.search(r"__Host-gherkai_tunnel=([0-9a-f]+);", policy2).group(1) != cookie  # cookie 值也每次不同，不只是令牌
+    cookie = _cookie_in(options["traffic_policy"])
+    assert re.fullmatch(r"[0-9a-f]{32}", token) and re.fullmatch(r"[0-9a-f]{32}", cookie) and cookie != token
+    assert options["traffic_policy"] == tunnel.render_traffic_policy(token, cookie, closes_at=CLOSES)
+    assert info.url == PUBLIC_URL and info.local_origin == "http://localhost:3000"
+    assert info.warmup_url == warmup_url_for(PUBLIC_URL, token)
+    assert token not in repr(info) and tunnel.WARMUP_PATH not in repr(info) and "closer" not in repr(info)
+    assert sdk.disconnects == []  # 建成之后不自行关闭：由宿主调 close()
+
+
+def test_each_start_uses_fresh_secrets_and_has_no_switch_to_turn_auth_off():
+    """令牌与 cookie 每次都换（ADR 0051 决策 13）；没有关掉鉴权的开关（ADR 0035「边界与不变量」）。"""
+    sdk = _FakeSdk()
+    a, b = _start(sdk), _start(sdk)
+    assert a.warmup_url != b.warmup_url
+    assert _cookie_in(sdk.forwards[0][1]["traffic_policy"]) != _cookie_in(sdk.forwards[1][1]["traffic_policy"])
     with pytest.raises(TypeError):
-        t.start("http://localhost:3000", with_auth=False)  # 曾有的开关已删：隧道模式恒带鉴权
+        NgrokTunnel(load_sdk=lambda: sdk).start("http://localhost:3000", closes_at=CLOSES, with_auth=False)
 
 
-def test_ngrok_start_exposes_normalized_origin():
-    """末尾斜杠在交给 ngrok 之前去掉：agent 的上游地址与 TunnelInfo.local_origin 都是归一化后的 origin。"""
-    spawned: dict = {}
-    info = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None).start(
-        "http://localhost:3000/")
-    assert spawned["cmd"][2] == "http://localhost:3000"
-    assert info.local_origin == "http://localhost:3000"
+@pytest.mark.parametrize("origin, addr, verify_off", [
+    ("http://localhost:3000", "http://localhost:3000", False),
+    ("https://127.0.0.1:8443", "https://127.0.0.1:8443", True),
+    ("HTTP://Example.test:3000", "http://Example.test:3000", False),   # 只有 scheme 转成小写
+    ("HTTPS://Example.test:8443/", "https://Example.test:8443", True),  # 判断是不是 https 看转换之后的那一份
+])
+def test_upstream_address_lowercases_scheme_and_https_skips_upstream_verification(origin, addr, verify_off):
+    """ADR 0035 决策 1「交给 SDK 的上游地址」：scheme 转小写、其余原样；https 的上游给 `verify_upstream_tls=False`，http 的不给这个键。
+    origin 本身保留书写形式（映射按书写形式逐字匹配）。"""
+    sdk = _FakeSdk()
+    info = _start(sdk, origin)
+    [(got_addr, options)] = sdk.forwards
+    assert got_addr == addr
+    if verify_off:
+        assert options["verify_upstream_tls"] is False
+    else:
+        assert "verify_upstream_tls" not in options
+    assert info.local_origin == normalize_origin(origin)
 
 
-def test_ngrok_start_rejects_non_origin_before_spawning():
-    """取值不是 origin：以 TunnelError 拒绝（调用方归退出码 2），不起 agent。"""
-    spawned: dict = {}
-    t = NgrokTunnel(popen=_fake_popen_writing_log("https://xyz.ngrok-free.app", spawned), sleep=lambda s: None)
+def test_start_rejects_a_non_origin_before_loading_the_sdk():
+    loads: list[int] = []
+
+    def load():
+        loads.append(1)
+        return _FakeSdk()
+
     with pytest.raises(TunnelError, match="不是 origin"):
-        t.start("http://localhost:3000/login")
-    assert "cmd" not in spawned
+        NgrokTunnel(load_sdk=load).start("http://localhost:3000/login", closes_at=CLOSES)
+    assert loads == []
 
 
-def test_ngrok_start_timeout_reports_authtoken_hint():
-    """日志里一直没有 started tunnel（agent 挂着不就绪）→ 超时 TunnelError，点名 authtoken 引导排错。"""
-    clock = {"t": 0.0}
-
-    def monotonic():
-        clock["t"] += 8.0  # 三跳即越过 20s deadline
-        return clock["t"]
-
-    spawned: dict = {}
-    t = NgrokTunnel(popen=_fake_popen_writing_log(None, spawned),
-                    sleep=lambda s: None, monotonic=monotonic)
-    with pytest.raises(TunnelError, match="authtoken"):
-        t.start("http://localhost:3000")
-    assert not os.path.exists(spawned["cmd"][spawned["cmd"].index("--traffic-policy-file") + 1])  # 失败路径同样不留策略文件
+def test_default_loader_is_looked_up_at_call_time(monkeypatch):
+    """不给 `load_sdk` 时在调用那一刻取模块里的 `_import_sdk`：`make_tunnel` 构造的实例同样经它导入。"""
+    sdk = _FakeSdk()
+    monkeypatch.setattr(tunnel, "_import_sdk", lambda: sdk)
+    monkeypatch.setenv("NGROK_AUTHTOKEN", "tok")
+    t = make_tunnel("ngrok")
+    t.check_prerequisites()
+    info = t.start("http://localhost:3000", closes_at=CLOSES)
+    assert info.url == PUBLIC_URL and len(sdk.forwards) == 1
 
 
-def test_ngrok_binary_missing_reports_install_hint():
-    seen: dict = {}
+# ---------- 启动失败的说法（ADR 0035 决策 1「启动失败的说法按原因分」第 3、4 种） ----------
 
-    def popen(cmd, **kw):
-        seen["policy"] = cmd[cmd.index("--traffic-policy-file") + 1]
-        raise FileNotFoundError("ngrok")
-
-    t = NgrokTunnel(popen=popen)
-    with pytest.raises(TunnelError, match="ngrok"):
-        t.start("http://localhost:3000")
-    assert not os.path.exists(seen["policy"])  # spawn 失败同样不留策略文件（finally 清理）
+_ADDRESS_IN_USE_TEXT = (
+    "隧道没有建成：这个 ngrok 账号上另一条在线的隧道占用了同一个地址（ERR_NGROK_334）。"
+    "请等那条隧道下线之后再试；如果它属于另一个带 --expose-local 的 gherkai 运行，持有它的进程退出之后它就会下线。")
+_RULE_LIMIT_DESC = ("Policy configuration has exceeded its rule per policy limit of 5. Please check "
+                    "https://ngrok.com/features/traffic-policy to view your options or contact us at support@ngrok.com.")
 
 
-def test_ngrok_policy_file_removed_when_rendering_fails(monkeypatch):
-    """策略写入阶段失败（渲染抛错）同样不留文件：try 紧接 mkstemp 之后，写入、spawn、等待就绪任一步失败都尝试删除。"""
-    created: list = []
-    real_mkstemp = tunnel.tempfile.mkstemp
-
-    def mkstemp(*a, **kw):
-        fd, path = real_mkstemp(*a, **kw)
-        created.append(path)
-        return fd, path
-
-    monkeypatch.setattr(tunnel.tempfile, "mkstemp", mkstemp)
-    monkeypatch.setattr(tunnel, "render_traffic_policy", lambda t, c: (_ for _ in ()).throw(RuntimeError("render failed")))
-    with pytest.raises(RuntimeError, match="render failed"):
-        NgrokTunnel(popen=lambda *a, **kw: pytest.fail("不该 spawn")).start("http://localhost:3000")
-    policies = [p for p in created if "gherkai-tunnel-policy-" in p]
-    assert len(policies) == 1 and not os.path.exists(policies[0])
-
-
-def test_ngrok_policy_file_lives_until_ready_then_removed():
-    """策略文件在 agent 就绪之前一直在（agent 启动时要读它），拿到 URL 之后才删：fake 延后两次轮询再写就绪行，
-    轮询期间断言文件仍在、返回后断言已删。防止把删除错放到 spawn 之后、就绪之前。"""
-    spawned: dict = {}
-    seen_during_poll: list = []
-
-    def popen(cmd, **kw):
-        spawned["cmd"] = cmd
-        spawned["log"] = cmd[cmd.index("--log") + 1]
-        spawned["policy"] = cmd[cmd.index("--traffic-policy-file") + 1]
-        return _FakeProc(alive=True)
-
-    def sleep(_s):
-        seen_during_poll.append(os.path.exists(spawned["policy"]))
-        if len(seen_during_poll) == 2:
-            Path(spawned["log"]).write_text(json.dumps({"lvl": "info", "msg": "started tunnel", "url": "https://late.ngrok-free.app"}) + "\n", encoding="utf-8")
-
-    info = NgrokTunnel(popen=popen, sleep=sleep).start("http://localhost:3000")
-    assert info.url == "https://late.ngrok-free.app"
-    assert seen_during_poll == [True, True] and not os.path.exists(spawned["policy"])
+@pytest.mark.parametrize("error, expected", [
+    # 装置记录到的真实形态：三项参数，第三项是错误码；334 的说明里带换行
+    (ValueError("failed to start listener",
+                "The endpoint 'https://x.ngrok-free.dev' is already online. Either\n1. stop your existing endpoint first, or\n"
+                "2. start both endpoints with `--pooling-enabled` to load balance between them.", "ERR_NGROK_334"),
+     _ADDRESS_IN_USE_TEXT),
+    (ValueError("failed to start listener", _RULE_LIMIT_DESC, "ERR_NGROK_2264"),
+     f"隧道没有建成：{_RULE_LIMIT_DESC}（ERR_NGROK_2264）。"),
+    (ValueError("failed to connect session", "line one\n  line two", "ERR_NGROK_105"),
+     "隧道没有建成：line one line two（ERR_NGROK_105）。"),
+    # 连不上隧道服务时的真实形态：两项参数、没有错误码
+    (ValueError("failed to connect session", "tls handshake error"),
+     "隧道没有建成：failed to connect session: tls handshake error。"),
+    (ValueError("a", "b", "not a code"), "隧道没有建成：a: b: not a code。"),  # 第三项不是错误码：不按错误码分类
+    (RuntimeError("x"), "隧道没有建成：x。"),
+    (RuntimeError(), "隧道没有建成：RuntimeError。"),
+    (TimeoutError("sdk's own timeout"), "隧道没有建成：sdk's own timeout。"),  # SDK 自己抛的 TimeoutError 不当作产品的时限
+])
+def test_start_failures_map_to_one_line_messages(error, expected):
+    sdk = _FakeSdk(forward_error=error)
+    with pytest.raises(TunnelError) as ei:
+        _start(sdk)
+    assert str(ei.value) == expected
+    assert sdk.disconnects == []  # 没有建成，没有要关闭的会话
 
 
-def test_ngrok_agent_detaches_from_cli_process_group(tmp_path):
-    """**真 spawn**（不 fake popen）：agent 必须落在自己的会话/进程组里（ADR 0035 决策 3）。
+def test_start_failure_message_masks_the_token_value(monkeypatch):
+    monkeypatch.setenv("NGROK_AUTHTOKEN", "2xSeCrEtToKeN")
+    sdk = _FakeSdk(forward_error=ValueError("failed to connect session", "token 2xSeCrEtToKeN is invalid", "ERR_NGROK_105"))
+    with pytest.raises(TunnelError) as ei:
+        _start(sdk)
+    assert str(ei.value) == "隧道没有建成：token *** is invalid（ERR_NGROK_105）。"
 
-    这条不能用 fake popen 验——「进程组归属」正是 mock 之外的真实行为（CLAUDE.md「绿≠对」）。它承重：
-    同组时 CLI 收终端广播的 SIGINT 会连带杀掉「还要交棒给后台宿主」的 agent（两个后台宿主本身也 setsid）。
-    用一个假 ngrok（写 started tunnel 行后 sleep）走真 subprocess.Popen 起来，只查 pgid、不碰网络。
-    """
-    import os
 
-    fake = tmp_path / "fake-ngrok"
-    fake.write_text(
-        '#!/bin/sh\n'
-        'while [ $# -gt 0 ]; do\n'
-        '  if [ "$1" = "--log" ]; then LOG="$2"; fi\n'
-        '  shift\n'
-        'done\n'
-        'printf \'%s\\n\' \'{"msg":"started tunnel","url":"https://fake.ngrok-free.app"}\' > "$LOG"\n'
-        'exec sleep 30\n',
-        encoding="utf-8")
-    fake.chmod(0o755)
+# ---------- 起隧道的时限与迟到的监听（ADR 0035 决策 1「起隧道的时限」） ----------
 
-    info = NgrokTunnel(binary=str(fake), sleep=lambda s: None).start("http://localhost:3000")
-    try:
-        assert info.url == "https://fake.ngrok-free.app"
-        assert os.getpgid(info.pid) != os.getpgid(0)  # 自成进程组，不吃终端广播的信号
-        assert os.getpgid(info.pid) == info.pid       # setsid 后自身即组长
-    finally:
-        stop_tunnel(info.pid)  # 宿主按 pid 收尾（唯一拆除面，ADR 0035 决策 1）
+def test_start_gives_up_after_timeout_and_closes_the_listener_that_arrives_late():
+    """`forward` 阻塞在一个 Event 上（释放解释器锁）：按时限放弃、给出超时那一句；随后放开，迟到建成的监听被关闭。"""
+    gate = threading.Event()
+    sdk = _FakeSdk(forward_gate=gate)
+    t0 = time.monotonic()
+    with pytest.raises(TunnelError) as ei:
+        _start(sdk, timeout_s=0.2)
+    elapsed = time.monotonic() - t0
+    assert 0.2 <= elapsed < 1.0
+    assert str(ei.value) == "隧道没有建成：0.2 秒内没有连上隧道服务。请确认本机能访问外网后重新执行。"
+    assert sdk.disconnects == []
+    gate.set()
+    assert sdk.disconnect_entered.wait(1.0)
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
+def test_call_with_timeout_returns_the_result_and_does_not_hand_it_to_on_late():
+    late: list = []
+    assert tunnel._call_with_timeout(lambda: "v", 1.0, on_late=late.append) == "v"
+    assert late == []
+
+
+def test_call_with_timeout_reraises_the_callees_error():
+    late: list = []
+    with pytest.raises(KeyError):
+        tunnel._call_with_timeout(lambda: {}["k"], 1.0, on_late=late.append)
+    assert late == []
+
+
+def test_call_with_timeout_hands_a_late_result_to_on_late_exactly_once():
+    gate, late_seen = threading.Event(), threading.Event()
+    late: list = []
+
+    def fn():
+        gate.wait(5.0)
+        return "late"
+
+    def on_late(v):
+        late.append(v)
+        late_seen.set()
+
+    with pytest.raises(TimeoutError):
+        tunnel._call_with_timeout(fn, 0.1, on_late=on_late)
+    assert late == []
+    gate.set()
+    assert late_seen.wait(1.0)
+    time.sleep(0.05)
+    assert late == ["late"]
+
+
+def test_call_with_timeout_writes_nothing_when_an_abandoned_call_fails(capfd):
+    """被放弃之后才失败的调用、以及抛错的 on_late，都不经线程的缺省异常处理写到标准错误：后台进程在回报之前不往标准错误写字。"""
+    gate, finished = threading.Event(), threading.Event()
+
+    def fn():
+        gate.wait(5.0)
+        try:
+            raise RuntimeError("late failure")
+        finally:
+            finished.set()
+
+    with pytest.raises(TimeoutError):
+        tunnel._call_with_timeout(fn, 0.05, on_late=lambda v: None)
+    gate.set()
+    assert finished.wait(1.0)
+
+    gate2, late_raised = threading.Event(), threading.Event()
+
+    def on_late(_v):
+        late_raised.set()
+        raise RuntimeError("on_late failure")
+
+    def fn2():
+        gate2.wait(5.0)
+        return "v"
+
+    with pytest.raises(TimeoutError):
+        tunnel._call_with_timeout(fn2, 0.05, on_late=on_late)
+    gate2.set()
+    assert late_raised.wait(1.0)
+    time.sleep(0.1)  # 让两个线程都走完
+    assert capfd.readouterr().err == ""
+
+
+def test_call_with_timeout_interrupted_while_waiting_still_closes_the_late_result():
+    """等待期间被 Ctrl-C 打断（真实的 SIGINT 送到主线程）：KeyboardInterrupt 照常传出，之后才到的结果交给 on_late，不留在宿主里
+    无人关闭。"""
+    gate, late_seen = threading.Event(), threading.Event()
+    entered = threading.Event()
+    late: list = []
+
+    def fn():
+        entered.set()
+        gate.wait(5.0)
+        return "late"
+
+    def on_late(v):
+        late.append(v)
+        late_seen.set()
+
+    main = threading.main_thread().ident
+    assert threading.get_ident() == main  # SIGINT 只送到主线程
+
+    def interrupt():
+        entered.wait(5.0)
+        time.sleep(0.05)
+        signal.pthread_kill(main, signal.SIGINT)
+
+    threading.Thread(target=interrupt, daemon=True).start()
+    with pytest.raises(KeyboardInterrupt):
+        tunnel._call_with_timeout(fn, 5.0, on_late=on_late)
+    gate.set()
+    assert late_seen.wait(1.0)
+    assert late == ["late"]
+
+
+# ---------- 关闭会话 ----------
+
+def test_close_disconnects_once_and_later_calls_do_nothing():
+    sdk = _FakeSdk()
+    info = _start(sdk)
+    info.close()
+    info.close()
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
+def test_close_swallows_disconnect_errors():
+    sdk = _FakeSdk(disconnect_error=RuntimeError("boom"))
+    info = _start(sdk)
+    info.close()  # 不外抛
+    info.close()
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
+def test_close_gives_up_when_disconnect_blocks(monkeypatch):
+    monkeypatch.setattr(tunnel, "CLOSE_TIMEOUT_S", 0.2)
+    gate = threading.Event()
+    sdk = _FakeSdk(disconnect_gate=gate)
+    info = _start(sdk)
+    t0 = time.monotonic()
+    info.close()
+    elapsed = time.monotonic() - t0
+    gate.set()
+    assert 0.2 <= elapsed < 1.0
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
+def test_a_second_close_waits_until_the_first_one_has_finished():
+    """两个线程同时关闭：后来者在前一次关闭结束之前不返回，SDK 只被调用一次。"""
+    gate = threading.Event()
+    sdk = _FakeSdk(disconnect_gate=gate)
+    info = _start(sdk)
+    first, second = threading.Event(), threading.Event()
+    threading.Thread(target=lambda: (info.close(), first.set()), daemon=True).start()
+    assert sdk.disconnect_entered.wait(1.0)
+    threading.Thread(target=lambda: (info.close(), second.set()), daemon=True).start()
+    assert not second.wait(0.2)
+    gate.set()
+    assert first.wait(1.0) and second.wait(1.0)
+    assert sdk.disconnect_returned.is_set() and sdk.disconnects == [PUBLIC_URL]
+
+
+def test_tunnel_info_holds_the_listener_object():
+    """返回的隧道事实持有 SDK 给出的监听对象（ADR 0035 决策 1）：不依赖「监听对象被回收之后隧道仍在线」。"""
+    sdk = _FakeSdk()
+    info = _start(sdk)
+    [ref] = sdk.listener_refs
+    gc.collect()
+    assert ref() is not None
+    del info
+    gc.collect()
+    assert ref() is None  # 只有隧道事实持有它
+
+
+# ---------- 前置检查与导入 SDK（ADR 0035 决策 1「前置条件」） ----------
+
+_NOT_INSTALLED_TEXT = ("--expose-local 要用的隧道组件没有安装。请在安装 gherkai 时加上 tunnel 组件后重新执行，"
+                       "例如 uv tool install 'gherkai[local,tunnel]'（已经装了别的组件的，要一并列出）。")
+_NO_TOKEN_TEXT = ("--expose-local 需要 ngrok 的令牌，但环境变量 NGROK_AUTHTOKEN 没有设置。"
+                  "请在 ngrok 控制台取得令牌，设置 NGROK_AUTHTOKEN 后重新执行。")
+
+
+def _raising(e: BaseException):
+    def load():
+        raise e
+    return load
+
+
+@pytest.mark.parametrize("error, expected", [
+    (ModuleNotFoundError("No module named 'ngrok'", name="ngrok"), _NOT_INSTALLED_TEXT),
+    (ModuleNotFoundError("No module named 'ngrok.ngrok'", name="ngrok.ngrok"),
+     "--expose-local 要用的隧道组件已经安装，但无法加载：No module named 'ngrok.ngrok'。请重新安装带 tunnel 组件的 gherkai 后重新执行。"),
+    (ImportError("dlopen failed: symbol not found"),
+     "--expose-local 要用的隧道组件已经安装，但无法加载：dlopen failed: symbol not found。请重新安装带 tunnel 组件的 gherkai 后重新执行。"),
+    (OSError("cannot map file"),
+     "--expose-local 要用的隧道组件已经安装，但无法加载：cannot map file。请重新安装带 tunnel 组件的 gherkai 后重新执行。"),
+    (RuntimeError("native runtime failed to initialize"),
+     "--expose-local 要用的隧道组件已经安装，但无法加载：native runtime failed to initialize。请重新安装带 tunnel 组件的 gherkai 后重新执行。"),
+    (SyntaxError("invalid syntax"),
+     "--expose-local 要用的隧道组件已经安装，但无法加载：invalid syntax。请重新安装带 tunnel 组件的 gherkai 后重新执行。"),
+])
+def test_sdk_load_failures_are_told_apart_by_exception_type(monkeypatch, error, expected):
+    """「没有装」与「装了但无法加载」只按异常类型分；前置检查与起隧道经同一处导入，给出同一句。"""
+    monkeypatch.setenv("NGROK_AUTHTOKEN", "tok")
+    with pytest.raises(TunnelError) as pre:
+        NgrokTunnel(load_sdk=_raising(error)).check_prerequisites()
+    with pytest.raises(TunnelError) as st:
+        NgrokTunnel(load_sdk=_raising(error)).start("http://localhost:3000", closes_at=CLOSES)
+    assert str(pre.value) == str(st.value) == expected
+
+
+@pytest.mark.parametrize("value", [None, "", "   "])
+def test_missing_or_empty_token_is_rejected_after_the_sdk_loads(monkeypatch, value):
+    if value is not None:
+        monkeypatch.setenv("NGROK_AUTHTOKEN", value)
+    loads: list[int] = []
+
+    def load():
+        loads.append(1)
+        return _FakeSdk()
+
+    with pytest.raises(TunnelError) as ei:
+        NgrokTunnel(load_sdk=load).check_prerequisites()
+    assert str(ei.value) == _NO_TOKEN_TEXT
+    assert loads == [1]
+
+
+def test_prerequisites_pass_with_sdk_and_token_without_touching_the_network(monkeypatch):
+    monkeypatch.setenv("NGROK_AUTHTOKEN", "tok")
+    sdk = _FakeSdk()
+    NgrokTunnel(load_sdk=lambda: sdk).check_prerequisites()
+    assert sdk.forwards == [] and sdk.disconnects == []
+
+
+def test_loading_the_sdk_silences_its_logging(monkeypatch, caplog, capfd):
+    """SDK 经 logging 发的日志不到使用者的终端或日志：导入之后 `ngrok` 这一族 logger 不向上传播，警告既不到根 logger、也不写标准错误。"""
+    logger = logging.getLogger("ngrok")
+    monkeypatch.setattr(logger, "propagate", True)
+    monkeypatch.setattr(logger, "handlers", [])
+    monkeypatch.setenv("NGROK_AUTHTOKEN", "tok")
+    t = NgrokTunnel(load_sdk=lambda: _FakeSdk())
+    t.check_prerequisites()
+    t.check_prerequisites()
+    assert logger.propagate is False and len(logger.handlers) == 1  # 重复导入不叠加处理器
+    with caplog.at_level(logging.WARNING):
+        logging.getLogger("ngrok.tunnel_ext").warning("error connecting to upstream")
+    assert [r for r in caplog.records if r.name.startswith("ngrok")] == []
+    assert capfd.readouterr().err == ""
+
+
+def test_importing_the_tunnel_module_does_not_import_the_sdk(tmp_path):
+    """顶层不导入 SDK（ADR 0037 决策 2c）：CLI 建解析器时就导入本模块。同一进程里别的用例可能已导入 SDK，所以在子进程里看。"""
+    code = ("import sys\n"
+            "import gherkai_runtime.tunnel as t\n"
+            "t.make_tunnel('ngrok')\n"
+            "t.normalize_origin('http://localhost:3000')\n"
+            "print('ngrok' in sys.modules)\n")
+    out = subprocess.run([sys.executable, "-c", code], cwd=tmp_path, capture_output=True, text=True, timeout=60,
+                         stdin=subprocess.DEVNULL)
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "False"
+
+
+def test_installed_sdk_has_the_functions_the_tunnel_calls():
+    """装了 SDK 时，真实模块上有本模块调用的两个函数（只看属性在不在，不调用、不联网）。绕开自动夹具：直接导入。"""
+    sdk = pytest.importorskip("ngrok")
+    assert hasattr(sdk, "forward") and hasattr(sdk, "disconnect")
 
 
 def test_make_tunnel_unknown_provider():
     with pytest.raises(TunnelError, match="未知隧道 provider"):
         make_tunnel("nope")
-
-
-def test_stop_tunnel_idempotent_on_dead_pid():
-    stop_tunnel(2 ** 22 + 12345)  # 大概率不存在的 pid：不抛即过（幂等收尾）

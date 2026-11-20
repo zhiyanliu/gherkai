@@ -122,7 +122,7 @@ gherkai run <features>            # 阻塞皮：同进程 schedule() 驱动循�
 ```
 submit(CLI)：plan 与补全运行定义 → 以新会话（setsid）启动后台推进进程（启动方式不把当前目录放进模块搜索路径，0037 决策 3），经它的标准输入一次交给它全部输入、另给一条回报管道 → 等到回报 → 输出结果并退出
 后台推进进程（观察者+reconciler 合一）：取创建时刻 → 起隧道（给了 --expose-local 时）→ 生成运行定义 → 查 submit 是否还在 → 建 run
-   → 装配推进所需的各部分（含建事件库）→ 打开 reconcile.log → 回报结果并关闭管道（各步见 0035 决策 3「本机 submit」一条）
+   → 装配推进所需的各部分（含建事件库）→ 打开 reconcile.log → 回报结果（各步见 0035 决策 3「本机 submit」一条）
    → 用内存里的这份运行定义推进到 run 结束：spawn worker 子进程
    · 读 worker 的 fd3 事件流、旁路落本地持久 events sink（SQLite，替易失 FD3 pipe）
    · proc.wait() 拿 exitcode 写 task_exited · 按墙钟检查各 job 的截止时刻、到点停 worker · 推演写本地 RunState · 记下已有结果的 job 的终态 · 启下一个 · tick 返回 `COMMITTED` 或 `ENDED` 即退出（机制三「run 级状态只进不退」条④）

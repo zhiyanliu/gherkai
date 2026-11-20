@@ -65,7 +65,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 | `[common]` | `steps-dir` | `run`、`plan`、`submit`、`doctor`、`list-deterministic` |
 | `[common]` | `region`、`profile` | `run`、`submit`、`status`、`list-runs`、`explain`、`doctor` |
 | `[common]` | `expose-local` | `run`、`plan`、`submit` |
-| `[common]` | `tunnel`、`grace`、`tunnel-ttl` | `tunnel`：`run`、`submit`；`grace`：`run`；`tunnel-ttl`：`submit` |
+| `[common]` | `tunnel`、`grace` | `tunnel`：`run`、`submit`；`grace`：`run` |
 | `[cloud]` | `prefix`、`ddb-table` | `submit`、`status`、`list-runs`、`explain`（`prefix` 也在 `doctor`） |
 | `[cloud]` | `s3-bucket`、`worker-variant` | `submit` |
 
@@ -163,11 +163,11 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 
 | 变量 | 作用 | 默认值 | 在哪里设 |
 |---|---|---|---|
-| `NGROK_AUTHTOKEN` | `--expose-local` 起 ngrok 隧道用的 authtoken；也可以改用 `ngrok config add-authtoken <token>` 写进 ngrok 自己的配置文件 | 无 | 本机 shell |
+| `NGROK_AUTHTOKEN` | `--expose-local` 起 ngrok 隧道用的 authtoken。gherkai 只从这个环境变量取令牌，不读 ngrok 命令行工具的配置文件；给了 `--expose-local` 而没有设置时，`run` 与 `submit` 在开始执行之前以退出码 2 结束 | 无 | 本机 shell（`submit` 在本机起的后台进程继承它） |
 | `GHERKAI_WORKER_NOVAACT_CMD`、`GHERKAI_WORKER_MIDSCENE_CMD` | 显式指定该引擎 worker 的拉起命令（自建 worker、或从源码目录运行）；值按 shell 词法拆分，引号不配对即报错，不会静默改用别的 worker | 无（按已安装的 worker 自动查找） | 本机 shell |
 | `GHERKAI_WORKER_NOVAACT_CWD`、`GHERKAI_WORKER_MIDSCENE_CWD` | 上一项命令的工作目录 | 无（继承当前目录） | 本机 shell |
 
-隧道的前置、限制与存活时间见 [`local-app-testing.md`](./local-app-testing.md)。
+隧道的另一项前置是安装 gherkai 时带上 tunnel 组件（`gherkai[tunnel]`）；前置、隧道何时关闭与限制见 [`local-app-testing.md`](./local-app-testing.md)。
 
 ### 部署机
 
@@ -200,7 +200,7 @@ region 依次取 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件
 | `--default-job-timeout S` | `run`、`plan`、`submit` | 三个命令上同义。`plan` 不实际运行 job，给它是为了让用例预检算出的 job 预算与实际运行一致 |
 | `--max-concurrency N` | `run`、`submit`、`status` | `run` / `submit` 上是这个 run 的并发上限；`status` 上只在 `--wait` 为本机后端的 run 接力推进时起作用。取值、云端上限与接力（含并发上限取哪个值）口径见 [`running-and-results.md`](./running-and-results.md) |
 | `--expose-local ORIGIN` | `run`、`plan`、`submit` | `run` / `submit` 上会启动隧道，`plan` 上只做标注、不启动隧道。取值须是 `http://主机[:端口]` 或 `https://主机[:端口]`，末尾的一个 `/` 会被去掉；其余形态（带路径、查询串、片段或用户信息）在三个命令上都以退出码 2 结束。前置与限制见 [`local-app-testing.md`](./local-app-testing.md) |
-| `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值。存活时间上限 `--tunnel-ttl` 只有 `submit` 有，见 [`local-app-testing.md`](./local-app-testing.md) |
+| `--tunnel {ngrok}` | `run`、`submit` | 两个命令上同义，选 `--expose-local` 用哪个隧道服务，当前只有 `ngrok` 一个取值，见 [`local-app-testing.md`](./local-app-testing.md) |
 | `--worker-variant NAME` | `submit` | 只在 `--backend cloud` 下起作用，本机后端忽略。variant 与默认指针见 [`cloud-backend.md`](./cloud-backend.md) |
 | `--grace S` | `run` | `run` 只在本机后端执行，用它给本机 worker 留收尾时间。云端的停止宽限在部署时由 `gherkai deploy --stop-timeout` 定，写在 gherkai.toml 里的 `grace` 在 `submit --backend cloud` 下只提示一句、不生效 |
 | `--json` | `run`、`plan`、`status`、`list-runs`、`explain`、`doctor`、`list-engines`、`list-deterministic`、`deploy list-workers` | 每个命令输出各自的 JSON 文档；`submit` 没有这个选项，它的输出本来就只有一个 `run_id` |

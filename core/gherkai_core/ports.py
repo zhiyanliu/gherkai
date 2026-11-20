@@ -153,8 +153,10 @@ class RunStore(Protocol):
 
     # —— 生命周期写入口 ——
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """写 definition 与初始运行态，只在这个 run 还不存在时成立（ADR 0054 决策五）：run 已存在则抛 FileExistsError、
-        不改任何东西（本机的判据是 run 目录里已有运行态文件，云端是 META 或 STATE 条目已在）。初始运行态原样写入，新建的
+        """写 definition 与初始运行态，只在这个 run 还不存在时成立（ADR 0054 决策五）：run 已存在则抛
+        `errors.RunAlreadyExists`（FileExistsError 的子类）、不改任何东西（本机的判据是 run 目录里已有运行态文件，云端是 META 或
+        STATE 条目已在）。调用方判断「run 已存在」只认这个类型：别的写失败照常抛出，其中也可能有普通的 FileExistsError（本机报告
+        目录里与 run 同名的不是目录），那是写记录失败。初始运行态原样写入（通常由 `persist.initial_run_state` 给出），新建的
         运行态各 job 为 pending、认领计数为 0。运行定义里没有 job 即抛 ValueError、不写（`run_status.check_new_run`）：run 的终态只由
         job 的终态写与结束写带出，没有 job 的 run 没有任何一次写能使它结束（ADR 0031 决定三「取法」）。
         """

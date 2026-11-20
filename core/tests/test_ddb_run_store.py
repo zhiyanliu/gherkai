@@ -11,6 +11,7 @@ import json
 
 import pytest
 
+from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import JobState, Status
 from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from tests.test_stores import _initial_state, _sample_run
@@ -311,7 +312,7 @@ def _snapshot(aws, run_id: str) -> tuple[dict | None, dict | None, dict[str, byt
 
 
 def test_create_run_on_existing_run_rewrites_neither_item_nor_offloaded_content(aws, ddb_run_store_offload):
-    """对已有的 run 再建：抛 FileExistsError，META、STATE 与已卸载到 S3 的正文都不变，也不多出对象。再建时给的 definition
+    """对已有的 run 再建：抛 `RunAlreadyExists`，META、STATE 与已卸载到 S3 的正文都不变，也不多出对象。再建时给的 definition
     正文不同、scope 更多，被重写就一定看得出来。"""
     meta, state = _doc_meta("dup", "第一版正文")
     ddb_run_store_offload.create_run(meta, state)
@@ -320,7 +321,7 @@ def test_create_run_on_existing_run_rewrites_neither_item_nor_offloaded_content(
     assert before[0] is not None and before[1] is not None and len(before[2]) == 1, "前提：两个条目与一个卸载对象都在"
 
     meta2, state2 = _doc_meta("dup", "第二版正文", extra_scope=True)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(RunAlreadyExists):
         ddb_run_store_offload.create_run(meta2, state2)
     assert _snapshot(aws, "dup") == before
     assert ddb_run_store_offload.load_run_meta("dup").jobs[0].scenarios[0].steps[0].argument.content == "第一版正文"
@@ -338,7 +339,7 @@ def test_create_run_fails_when_either_item_already_exists(aws, ddb_run_store_off
         aws["s3"].delete_object(Bucket=aws["bucket"], Key=o["Key"])
     before = _snapshot(aws, "half")
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(RunAlreadyExists):
         ddb_run_store_offload.create_run(*_doc_meta("half", "另一份正文"))
     assert _snapshot(aws, "half") == before
     assert before[2] == {}
@@ -366,7 +367,7 @@ def test_create_run_reads_strongly_consistently_before_offloading(aws, ddb_run_s
 
 def test_create_run_puts_are_conditional_when_another_writer_lands_after_the_check(aws, ddb_run_store_offload, monkeypatch):
     """检查与写之间另一方建了同一个 run_id（这里让检查读不到已有的条目来造出这个窗口）：两次 put 的「条目不存在」条件挡下本方，
-    抛 FileExistsError，META 与 STATE 仍是先建的那一方的内容。这个窗口里 S3 正文可能已被本方重写，属已知边界、不断言。"""
+    抛 `RunAlreadyExists`，META 与 STATE 仍是先建的那一方的内容。这个窗口里 S3 正文可能已被本方重写，属已知边界、不断言。"""
     meta, state = _doc_meta("race", "先到的正文")
     ddb_run_store_offload.create_run(meta, state)
     table = aws["ddb"].Table(aws["table_name"])
@@ -374,7 +375,7 @@ def test_create_run_puts_are_conditional_when_another_writer_lands_after_the_che
                                  for t in ("META", "STATE"))
 
     monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
-    with pytest.raises(FileExistsError):
+    with pytest.raises(RunAlreadyExists):
         ddb_run_store_offload.create_run(*_doc_meta("race", "后到的正文", extra_scope=True))
     monkeypatch.undo()
     assert table.get_item(Key={"run_id": "race", "item_type": "META"}, ConsistentRead=True)["Item"] == meta_before
@@ -383,7 +384,7 @@ def test_create_run_puts_are_conditional_when_another_writer_lands_after_the_che
 
 def test_create_run_state_put_is_conditional_on_its_own(aws, ddb_run_store_offload, monkeypatch):
     """STATE 那一次写自己带「条目不存在」的条件：让检查读不到已有的条目、META 又不在（META 的写因此成立），本方走到第二次写，
-    已有的 STATE 挡下它，抛 FileExistsError，STATE 仍是原来的内容（含已有的认领）。上一条用例在 META 的写上就被挡下，
+    已有的 STATE 挡下它，抛 `RunAlreadyExists`，STATE 仍是原来的内容（含已有的认领）。上一条用例在 META 的写上就被挡下，
     走不到这一次写。"""
     meta, state = _doc_meta("race2", "先到的正文")
     ddb_run_store_offload.create_run(meta, state)
@@ -401,7 +402,7 @@ def test_create_run_state_put_is_conditional_on_its_own(aws, ddb_run_store_offlo
 
     monkeypatch.setattr(ddb_run_store_offload._table, "get_item", lambda **kwargs: {})
     monkeypatch.setattr(ddb_run_store_offload._table, "put_item", put_item)
-    with pytest.raises(FileExistsError):
+    with pytest.raises(RunAlreadyExists):
         ddb_run_store_offload.create_run(*_doc_meta("race2", "后到的正文", extra_scope=True))
     monkeypatch.undo()
     assert puts == ["META", "STATE"], "前提：这一次确实走到了 STATE 的写"

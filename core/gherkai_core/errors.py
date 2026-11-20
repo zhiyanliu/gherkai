@@ -59,6 +59,19 @@ class DefinitionContractError(ValueError):
     写 definition 之前（组合根）与推进器读 definition 时各核一次；plan 形态的 Job 不走它（那一形态本来就没有设备请求）。"""
 
 
+class RunAlreadyExists(FileExistsError):
+    """建 run 时这个 run 已经存在（`RunStore.create_run`，ADR 0054 决策五）：本机是 run 目录里已有运行态，云端是 META 或 STATE 条目
+    已在；什么都没有改。
+
+    是 FileExistsError 的子类，但调用方判断「run 已存在」只认本类型：本机在报告目录里建 run 目录时遇到同名的文件或悬空的符号链接，
+    抛的是普通的 FileExistsError，那是写记录失败，不是 run 已存在。`run_id` 供调用方写进说明；消息是整句，`str()` 即得。
+    """
+
+    def __init__(self, run_id: str) -> None:
+        super().__init__(f"run {run_id} 已存在，不重新建立")
+        self.run_id = run_id
+
+
 class RunAlreadyEnded(RuntimeError):
     """前台执行收尾时 run 级已是终态：本次执行结束之前，别处已把这个 run 记为已结束（ADR 0054 决策五「执行方服从记录」）。
 

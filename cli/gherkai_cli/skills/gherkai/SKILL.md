@@ -35,8 +35,7 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 - `submit`：提交即返回，stdout 只打一个 `run_id`，退出码 0 只表示提交成功；判定看 `status <run_id> --wait`。local 后端由本机一个脱离 CLI 的后台进程推进（本机需开机）；cloud 后端由云端推进，提交后关机也会运行到结束。
 - **cloud 一条线**：依次执行 `doctor --backend cloud --prefix P`、`plan`、`submit --backend cloud --prefix P`、`status --backend cloud --prefix P --wait`、`explain --backend cloud --prefix P`。`plan` 不依赖后端、两个后端都要先执行一次；但它的确定性标注问的是**本机** steps，云端实际运行用的是 worker 镜像里那份（第 10 节）。`status` / `list-runs` / `explain` 的 `--backend` / `--report-dir` / `--prefix` 必须与**产生这个 run 的那条命令**（`run` 或 `submit`）逐字一致（云端 `list-runs` 不看 `--report-dir`）——本机 `run --report-dir out/` 之后也得 `explain <run_id> --report-dir out/`；不一致时 `status` / `explain` 以退出码 2 结束、说找不到这个 run，`list-runs` 列出的是另一处的 run（常见为空清单）。
 - **部署云端后端是部署方的事，你不自己运行 `gherkai deploy`**（改 AWS 资源与 IAM）。用 `doctor` 判缺什么，把该运行的命令与前置交给人；推定制 variant 镜像的 `gherkai deploy push-worker` 不改 IAM，你可以运行。细节见 `references/cloud-backend.md`。
-- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成隧道公网地址；选项值须与 feature 书写逐字一致（localhost 与 `127.0.0.1` 不互认）。`run` / `submit` / `plan` 都收（`plan` 只标注，不起隧道、不校验地址匹配）。前置是本机的 ngrok 与其 authtoken，`doctor` 不查、缺了在起隧道时失败；写法细则、Host 放行与排障见 `references/setup-and-diagnosis.md` 第 5 节。`submit` 后本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
-- **`--tunnel-ttl`（仅 `submit`）**——只在 cloud 后端且开了隧道时才有意义：隧道存活上限，缺省按这个 run 各 job 预算之和加余量估算；到点**无条件**拆隧道，调小会在 run 未完时断掉被测应用的入口，别调它。
+- **被测应用在本机 / 内网时**：浏览器在云端，`http://localhost:3000` 不可达。唯一做法是 `--expose-local <feature 里书写的原始 origin>`，feature 照写原始地址，提交时替换成隧道公网地址；选项值须与 feature 书写逐字一致（localhost 与 `127.0.0.1` 不互认）。`run` / `submit` / `plan` 都收（`plan` 只标注，不起隧道、不校验地址匹配）。前置是安装带 tunnel 组件的 gherkai，并设置 NGROK_AUTHTOKEN，`doctor` 不查、缺了在开始执行之前以退出码 2 结束；写法细则、Host 放行与排障见 `references/setup-and-diagnosis.md` 第 5 节。隧道随持有它的 gherkai 进程退出而关闭（`submit` 时是本机的后台进程）；`submit` 后本机须保持开机联网到 run 终态，这是「提交后关机也会运行到结束」的唯一例外。
 
 ## 4 编写 feature 与 steps
 
@@ -70,7 +69,6 @@ Midscene 对被测 UI 的语言不限。Nova Act 的支持范围是英文 UI：�
 |---|---|---|
 | `run` / `submit` 共用，多数 `plan` 也收 | `--default-engine` `--assertion-votes` `--default-job-timeout` `--steps-dir` `--scope` `--tags` `--scenario` `--expose-local`（这 8 个 `plan` 也收：用例预检要与实际运行一致就照样给）；`--max-concurrency` `--report-dir`（`plan` 不收） | `--assertion-votes 3` 查 AI 断言抖动；`--max-concurrency` 只改同时开几个会话、不改总账，scope 多且互不相干时调大；`--default-job-timeout` 只管未标 `@timeout` 的 scope。默认值都以 `--help` 为准，别背数字 |
 | 仅 `run` | `--fail-fast` `--quiet` `--no-report` `--grace` | `--quiet` 少占屏幕与上下文、worker 日志改落文件，判定明细与证据照落；`--no-report` 连 `explain` 一起废掉——判定明细与 AI 证据都不落盘，事后 `explain` 找不到这个 run，失败原因只剩本次输出里每步那一句，想细看只能再花钱重新运行，所以只在确定不用读失败原因的纯 CI 门禁上用；`--grace` 见第 10 节 |
-| 仅 `submit` | `--tunnel-ttl` | 见第 3 节 |
 | cloud 后端：`doctor` / `submit` / `status` / `list-runs` / `explain` 各要给（`plan` 不接受） | `--backend cloud` `--prefix` `--region` `--profile` `--worker-variant`（仅 `submit`） | `--backend` / `--prefix` / `--report-dir` 必须与产生这个 run 的那条命令逐字一致（第 3 节）；`--region` 要指同一个 region（换了就查不到），`--profile` 换成另一个指向同账号同 region 的 profile 不影响；`--worker-variant` 选云端 worker 镜像上的确定性 step 集，不给用部署侧默认指针 |
 | 查询类各自有 | `status --json`、`list-runs --json`、`explain --json`、`plan --json`、`doctor --json`、`list-engines --json`、`list-deterministic --json` | `run --json` 有、`submit` 没有：run_id 走 stdout，进度与判定看 `status --json` |
 

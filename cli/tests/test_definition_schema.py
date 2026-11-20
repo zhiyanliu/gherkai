@@ -1,7 +1,7 @@
 """definition 结构版本闸门在 CLI 的接线（ADR 0037 决策 7「definition 结构版本」段与「戳缺失」条的例外）：status / explain / 本机
-接力读任何别的东西之前先核结构版本，不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性。本机后台推进进程读
-不到可用的运行定义时另以结束写的 error 变体结束 run，接力不写。另有缺戳例外的接线：带设备目标或会话预热地址的云端 submit 遇无版本戳的
-后端在资源检查之前以退出码 2 结束。"""
+接力读任何别的东西之前先核结构版本，不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性；接力读不到可用的
+运行定义时以退出码 2 结束、不写。本机后台推进进程用自己生成的那份运行定义推进、不从记录读回，所以没有「读不到可用的运行定义」这一种
+情形。另有缺戳例外的接线：带设备目标或给了 --expose-local 的云端 submit 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
 from __future__ import annotations
 
 import json
@@ -12,11 +12,12 @@ import pytest
 from gherkai_cli import __main__ as m
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import Status
-from gherkai_core.run_status import DEFINITION_CONTRACT_REASON, schema_mismatch_reason
 from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
+from gherkai_runtime import detached
 
+from _inline_children import inline_children  # noqa: F401 —— 夹具：本机 submit 启动的后台推进进程在线程里执行
 from test_backend_cloud import _patch_cloud_handles, _write_feature
-from test_main import _fake_schedule_factory
+from test_main import _fake_schedule_factory, advanced  # noqa: F401 —— advanced 是夹具
 
 
 def _seed_local_run(tmp_path: Path, monkeypatch) -> tuple[Path, str]:
@@ -41,7 +42,7 @@ def _rewrite_schema(reports: Path, run_id: str, version, cli_version="9.9.0") ->
 
 def _as_detached_run_in_progress(reports: Path, run_id: str) -> Path:
     """把前台 run 产出的 seed 改成 submit 提交、推进到一半的形态：带后台执行的标记，run 与各 job 都在执行、没有结束时刻（模拟后台推进
-    进程中途被结束），执行中的 job 也就没有点名判定明细。后台推进进程与接力只对这种 run 动作。返回运行态文件的路径。"""
+    进程中途被结束），执行中的 job 也就没有点名判定明细。`status --wait` 只接力这种 run。返回运行态文件的路径。"""
     path = reports / run_id / "run_state.json"
     st = json.loads(path.read_text(encoding="utf-8"))
     st["status"] = "running"
@@ -60,14 +61,6 @@ def _drop_a_target_key(reports: Path, run_id: str) -> None:
     d = json.loads(path.read_text(encoding="utf-8"))
     d["jobs"][0].pop("target")
     path.write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
-
-
-def _assert_ended_by_the_definition_unavailable_ending(reports: Path, run_id: str, reason: str) -> None:
-    """run 与每个 job 都记 error，run 级说明与 job 级说明都是这句原因，带结束时刻。"""
-    state = LocalRunStore(reports).load_run_state(run_id)
-    assert (state.status, state.message) == (Status.ERROR, reason)
-    assert state.jobs and all((js.status, js.message) == (Status.ERROR, reason) for js in state.jobs.values())
-    assert state.ended_at is not None
 
 
 def test_fresh_run_writes_current_schema_and_status_explain_read_it(tmp_path, monkeypatch, capsys):
@@ -104,18 +97,36 @@ def test_older_schema_exits_2_pointing_at_the_writer_version(tmp_path, monkeypat
     assert "更早版本" in err and "gherkai==1.4.9" in err and "重新提交" in err
 
 
-def test_background_advancer_ends_the_run_with_the_error_ending_on_a_schema_mismatch(tmp_path, monkeypatch, capsys):
-    """后台推进进程（submit 启动的那个）读到结构版本不符的提交记录：它是这个 run 的推进器，以结束写的 error 变体结束 run，原因是与
-    云端推进器同一句；随后在日志里打印命令行的那一句、以退出码 2 结束，不是裸 traceback。"""
-    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
-    _rewrite_schema(reports, run_id, DEFINITION_SCHEMA_VERSION + 1)
-    _as_detached_run_in_progress(reports, run_id)
-    assert m.main(["_reconcile", run_id, "--report-dir", str(reports)]) == 2
-    err = capsys.readouterr().err
-    assert "更新版本" in err
-    assert f"run {run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。" in err
-    _assert_ended_by_the_definition_unavailable_ending(
-        reports, run_id, schema_mismatch_reason(DEFINITION_SCHEMA_VERSION + 1, DEFINITION_SCHEMA_VERSION, "9.9.0"))
+@pytest.mark.parametrize("damage", ["newer-schema", "not-json", "deleted"])
+def test_background_advancer_advances_the_definition_it_generated_without_reading_it_back(tmp_path, monkeypatch, capsys,
+                                                                                         inline_children, advanced, damage):
+    """本机后台推进进程用自己生成的那份运行定义推进，不从记录读回（ADR 0035 决策 3「本机 `submit`」）：建 run 之后记录里的运行定义被
+    改成更新的结构版本、写坏或删去，它照常回报建成，交给推进的仍是写下时的那一份，运行态不被改写成结束。读回记录、读不懂即说明的是
+    `status --wait` 接力（见下面接力的几条用例）。"""
+    reports = tmp_path / "reports"
+    real_assemble = detached.assemble_local_run
+    written: list = []
+
+    def assemble_then_damage(meta, report_dir, **kw):
+        parts = real_assemble(meta, report_dir, **kw)
+        written.append(LocalRunStore(reports).load_run_meta(meta.run_id))  # 建 run 写下的那一份
+        path = reports / meta.run_id / "run_meta.json"
+        if damage == "newer-schema":
+            _rewrite_schema(reports, meta.run_id, DEFINITION_SCHEMA_VERSION + 1)
+        elif damage == "not-json":
+            path.write_text("{", encoding="utf-8")
+        else:
+            path.unlink()
+        return parts
+
+    monkeypatch.setattr(detached, "assemble_local_run", assemble_then_damage)
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    inline_children.settle()
+    [meta] = written
+    assert capsys.readouterr().out == f"{meta.run_id}\n"
+    assert inline_children.only().returncode == 0 and advanced == [meta]
+    state = LocalRunStore(reports).load_run_state(meta.run_id)
+    assert (state.status, state.message, state.ended_at) == (Status.PENDING, None, None)
 
 
 def test_cloud_status_and_explain_peek_meta_header_before_state(monkeypatch, capsys):
@@ -142,21 +153,30 @@ def test_cloud_status_and_explain_peek_meta_header_before_state(monkeypatch, cap
 
 def test_missing_stamp_blocks_runs_that_require_it_before_resource_preflight(tmp_path, monkeypatch, capsys):
     """缺戳例外的接线：谓词为真的云端 submit 遇无版本戳后端以退出码 2 结束、资源检查一次不做；谓词为假（纯桌面）只警告放行。
-    谓词本身在 compose（run_requires_backend_stamp），此处 patch 它来验接线。"""
+    谓词本身在 compose（run_requires_backend_stamp），此处 patch 它来验接线：它收到的是这次 run 的 job 与有没有给 --expose-local。"""
     record: list = []
     _, _, preflight_calls = _patch_cloud_handles(monkeypatch, record)
     monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: None)        # 无戳
     monkeypatch.setattr(m.compose, "check_version_skew", _real_check_version_skew)  # 验真判据，不用 _patch_skew 的假判定
-    monkeypatch.setattr(m.compose, "run_requires_backend_stamp", lambda meta: True)
+    asked: list = []
+
+    def requires(answer: bool):
+        def predicate(jobs, *, tunneled):
+            asked.append(([j.scope_id for j in jobs], tunneled))
+            return answer
+        return predicate
+
+    monkeypatch.setattr(m.compose, "run_requires_backend_stamp", requires(True))
     argv = ["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--region", "us-east-1"]
     assert m.main(argv) == 2
     err = capsys.readouterr().err
     assert "没有版本戳" in err and "gherkai deploy" in err
     assert preflight_calls == []
-    monkeypatch.setattr(m.compose, "run_requires_backend_stamp", lambda meta: False)
+    monkeypatch.setattr(m.compose, "run_requires_backend_stamp", requires(False))
     assert m.main(argv) == 0
     assert "没有版本戳" in capsys.readouterr().err   # 只警告
     assert len(preflight_calls) == 1
+    assert len(asked) == 2 and all(scopes and tunneled is False for scopes, tunneled in asked)
 
 
 # `_patch_skew` 把 check_version_skew 换成了假的；缺戳例外要验真判据，取模块加载时的原函数
@@ -190,47 +210,6 @@ def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback
     err = capsys.readouterr().err
     assert "提交记录不完整" in err and "target" in err
     assert state_path.read_text(encoding="utf-8") == before
-
-
-def test_background_advancer_ends_the_run_with_the_error_ending_on_contract_violation(tmp_path, monkeypatch, capsys):
-    """后台推进进程读到同版本下形态违约的提交记录：以结束写的 error 变体结束 run，与云端推进器同一写法（ADR 0037 决策 7「definition
-    结构版本」段，ADR 0031 决定三「结束写」小节「运行定义不可用时」条）：执行中的 job 一并记 error，说明是产品语言的那一句，不带契约
-    异常的原文；随后拆隧道，在日志里打印带原文的那一句、以退出码 2 结束。这一写不生成报告：报告文件一个字节不变。"""
-    from gherkai_runtime import tunnel as gtunnel
-
-    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
-    _drop_a_target_key(reports, run_id)
-    _as_detached_run_in_progress(reports, run_id)
-    (reports / run_id / "tunnel.json").write_text('{"pid": 4545}', encoding="utf-8")
-    stopped: list[int] = []
-    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: stopped.append(pid))
-    report_files = {name: (reports / run_id / name).read_bytes() for name in ("index.html", "manifest.json")}
-
-    assert m.main(["_reconcile", run_id, "--report-dir", str(reports)]) == 2
-    err = capsys.readouterr().err
-    assert "提交记录不完整" in err and "target" in err
-    assert f"run {run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。" in err
-    _assert_ended_by_the_definition_unavailable_ending(reports, run_id, DEFINITION_CONTRACT_REASON)
-    assert stopped == [4545] and not (reports / run_id / "tunnel.json").exists()
-    assert {name: (reports / run_id / name).read_bytes() for name in report_files} == report_files
-
-
-@pytest.mark.parametrize("damage", ["not-json", "deleted"])
-def test_background_advancer_ends_the_run_when_the_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, damage):
-    """后台推进进程读到的提交记录不是合法的 JSON，或提交记录已被删去而运行态还在：与缺键的形态违约是同一种情形，同样以结束写的
-    error 变体结束 run，原因是同一句；以退出码 2 结束，不是裸 traceback。"""
-    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
-    _as_detached_run_in_progress(reports, run_id)
-    path = reports / run_id / "run_meta.json"
-    if damage == "not-json":
-        path.write_text("{", encoding="utf-8")
-    else:
-        path.unlink()
-    assert m.main(["_reconcile", run_id, "--report-dir", str(reports)]) == 2
-    err = capsys.readouterr().err
-    assert "Traceback" not in err
-    assert f"run {run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。" in err
-    _assert_ended_by_the_definition_unavailable_ending(reports, run_id, DEFINITION_CONTRACT_REASON)
 
 
 @pytest.mark.parametrize("damage, told", [("not-json", "提交记录不完整"), ("deleted", "找不到这个 run 的提交记录")])

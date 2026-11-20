@@ -164,14 +164,14 @@
       "slug": "expose-local-app",
       "fixture": "wiki-search",
       "prompt": "我们的被测应用跑在我这台电脑的 http://localhost:3000，云端浏览器根本访问不到。想用 gherkai 测它，feature 里地址该怎么写、命令怎么下、还要准备什么？先别真跑，给我完整方案。",
-      "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成干净的隧道公网地址（访问受本次运行专用的会话保护）；前置：本机装好 ngrok 且在 PATH、配好 authtoken（ngrok config add-authtoken 或 NGROK_AUTHTOKEN 任一）；submit 后隧道由本机进程持有、本机须开机联网到终态；--tunnel-ttl 调小会提前拆隧道；可先用 plan --expose-local 看标注。",
+      "expected_output": "feature 照写原始地址 http://localhost:3000；run / submit / plan 加 --expose-local http://localhost:3000（值 = feature 里书写的原始 origin），提交时替换成干净的隧道公网地址（访问受本次运行专用的会话保护）；前置：安装带 tunnel 组件的 gherkai（如 uv tool install 'gherkai[local,tunnel]'）、设置环境变量 NGROK_AUTHTOKEN；隧道随持有它的 gherkai 进程退出而关闭，submit 后隧道由本机后台进程持有、本机须开机联网到终态；可先用 plan --expose-local 看标注。",
       "expectations": [
         "feature 里照写原始地址 http://localhost:3000，不是让用户改成公网地址",
         "命令加 --expose-local http://localhost:3000（值是 feature 里书写的原始 origin），并说明 plan 也收这个 flag",
         "说明 plan 只标注该地址会在真跑时被替换、自己不起隧道",
-        "前置两条都提到：本机装 ngrok 并在 PATH 上、配好 authtoken（ngrok config add-authtoken 或环境变量 NGROK_AUTHTOKEN 任一即可）",
+        "前置两条都提到：安装带 tunnel 组件的 gherkai、设置环境变量 NGROK_AUTHTOKEN",
         "指出 submit 后隧道由本机进程持有，本机必须保持开机联网到 run 终态（字面点出「开机 / 联网」或等义表述）",
-        "提到 --tunnel-ttl 调小会在 run 未完时无条件拆隧道（或等义地说明 TTL 到点即拆）",
+        "说明隧道随持有它的 gherkai 进程退出而关闭（或等义地说明那个进程一退出公网地址就不可用）",
         "没有执行 gherkai run 或 gherkai submit（`--help` 与只读命令不算执行）",
         "最终答复本身就是一份完整汇报（结论 + 依据 + 下一步），不是「等后台任务」「稍后汇报」这类进度播报",
         "没有把评测舞台的脚手架（bin/gherkai shim、.eval-aws 下的空凭证文件、环境变量注入）当成用户的真实环境写进汇报或当成阻塞项上报"

@@ -6,7 +6,7 @@
 
 | 你要做的事                                                  | 角色             | 装什么                                                   | 需要什么凭证                                                                                                                                                       |
 |-------------------------------------------------------------|------------------|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 写 `.feature`、提交、看结果                                   | feature 作者（QA） | `gherkai`；要在本机运行再加下面两个 worker                | 写用例不需要凭证；运行用例需要的凭证随执行方式与执行后端而不同，见[运行测试与查看结果](./running-and-results.md)                                                     |
+| 写 `.feature`、提交、看结果                                   | feature 作者（QA） | `gherkai`；要在本机运行再加下面两个 worker；测本机或内网里的应用再加 tunnel 组件 | 写用例不需要凭证；运行用例需要的凭证随执行方式与执行后端而不同，见[运行测试与查看结果](./running-and-results.md)                                                     |
 | 写 `steps/` 里的确定性 step、在本机验证、构建定制 worker 镜像 | 测试开发         | `gherkai[local]` + `@gherkai/worker-midscene` + 容器引擎 | 本机 AWS 凭证；不需要云端写权限，镜像交部署方推                                                                                                                      |
 | 建立和维护共享的云端后端、推 worker 镜像                     | 部署方           | `gherkai[deploy-aws]` + Node ≥ 22 + 容器引擎             | AWS 账号的部署权限（CloudFormation、IAM 建角色与策略并 `PassRole`、ECR、ECS、Lambda、EventBridge、VPC、SSM 等；完整清单见[云端后端](./cloud-backend.md)）；运行用例的凭证同上 |
 | 参与 gherkai 本身的开发                                     | contributor      | 克隆仓库                                                 | 见 [`CONTRIBUTING.md`](../../CONTRIBUTING.md)                                                                                                                      |
@@ -18,6 +18,7 @@
 ```bash
 uv tool install gherkai                       # 命令行本体
 uv tool install 'gherkai[local]'              # 本体 + 在本机运行 Nova Act 引擎的 worker
+uv tool install 'gherkai[local,tunnel]'       # 再加 tunnel 组件：用 --expose-local 测本机或内网里的应用
 npm i -g @gherkai/worker-midscene             # 在本机运行 Midscene 引擎的 worker（需 Node ≥ 22）
 uv tool install 'gherkai[deploy-aws]'         # 部署方：gherkai deploy / destroy（另需 Node ≥ 22 与容器引擎）
 uvx gherkai --version                         # 免安装临时运行一次（uvx --from 'gherkai[local]' gherkai run …）
@@ -27,6 +28,8 @@ pipx install --python 3.13 --fetch-python missing gherkai   # 不用 uv 时改�
 pipx 那一行的 `--python 3.13` 是必要的：pipx 只在请求了某个版本、而本机又没有它时才下载解释器，不指定版本就会用默认解释器，默认解释器低于 3.13 时安装失败。
 
 Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene 的 worker 是 Node 包、走 npm。`npm i -g` 写入 npm 的全局目录：该目录属于系统时（如发行版自带的 Node 把全局包放在 `/usr/lib/node_modules`），安装与升级都要加 `sudo`，否则报 `EACCES`；不想用 `sudo` 就先把全局目录改到用户目录（`npm config set prefix ~/.npm-global`，并把其下的 `bin` 加进 PATH）。只用 `--backend cloud` 提交的人两个都不用装，worker 运行在云端。`gherkai list-engines` 打印本机检测到哪个引擎可用，缺的那个在同一行给出安装命令。用 pipx 或 uvx 装 extra 时，包名写成 `'gherkai[local]'`。
+
+tunnel 组件只在用 `--expose-local` 时需要，安装时要与已经装的其它组件一并列出（只往云端提交的人写 `'gherkai[tunnel]'`）；它是 ngrok 官方的 Python SDK，机器上不需要 ngrok 可执行文件，另需在环境变量 `NGROK_AUTHTOKEN` 里给出 ngrok 账号的令牌，见[测本机应用](./local-app-testing.md)。
 
 升级：`uv tool upgrade gherkai`（安装时带的 extra 会沿用）；Midscene worker 另外执行 `npm i -g @gherkai/worker-midscene@<CLI 版本>`。CLI 与 worker 要求同版本，CLI 与已部署的云端后端也要求同版本，不一致时的处置见[排错](./troubleshooting.md)。
 
@@ -41,7 +44,7 @@ Nova Act 的 worker 随 `[local]` extra 装进同一个 Python 环境，Midscene
 | Python                              | ≥ 3.13，配 [uv](https://docs.astral.sh/uv/)     | 命令行本体与 Nova Act worker                                                    |
 | Node.js                             | ≥ 22                                           | 在本机运行 Midscene worker；`gherkai deploy`                                     |
 | 容器引擎                            | docker                                         | `gherkai deploy`（同步官方 worker 基础镜像）；构建与推送定制 worker 镜像           |
-| [ngrok](https://ngrok.com/download) | 可执行文件在 PATH 上 + authtoken（免费账号即可） | 仅用 `--expose-local` 测本机可达的应用时，见[测本机应用](./local-app-testing.md) |
+| [ngrok](https://ngrok.com/) 账号     | tunnel 组件（`gherkai[tunnel]`）+ 环境变量 `NGROK_AUTHTOKEN`（免费账号即可）；不需要 ngrok 可执行文件 | 仅用 `--expose-local` 测本机可达的应用时，见[测本机应用](./local-app-testing.md) |
 
 ## AWS 前置
 

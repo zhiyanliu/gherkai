@@ -14,7 +14,10 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.run_status import RUN_ENDINGS
 
@@ -24,6 +27,7 @@ _TIMEOUT_S = 120
 _WORKER = r"""
 import json, sys, time, pathlib
 from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
 a = json.loads(sys.argv[1])
 store = LocalRunStore(a["root"])
@@ -60,7 +64,7 @@ elif role == "create":
         try:
             store.create_run(meta, state)
             outcomes.append("created")
-        except FileExistsError:
+        except RunAlreadyExists:
             outcomes.append("exists")
     print(json.dumps(outcomes))
 """
@@ -104,7 +108,7 @@ def _pending(run_id: str, scope_ids: list[str]) -> RunState:
 # ---------- 建 run 只在 run 目录里还没有运行态时成立 ----------
 
 def test_create_run_on_an_existing_run_leaves_both_files_byte_identical(tmp_path: Path):
-    """再建同一个 run 抛 FileExistsError，run_meta.json 与 run_state.json 逐字节不变（再建时给的 definition 与初始运行态都不同，
+    """再建同一个 run 抛 `RunAlreadyExists`，run_meta.json 与 run_state.json 逐字节不变（再建时给的 definition 与初始运行态都不同，
     被重写就一定看得出来）；后台执行标记也不因再建的实例带 detached 而出现或消失。"""
     store = LocalRunStore(tmp_path / "runs")
     store.create_run(_meta("r", ["a"]), _pending("r", ["a"]))
@@ -115,11 +119,32 @@ def test_create_run_on_an_existing_run_leaves_both_files_byte_identical(tmp_path
     for again in (LocalRunStore(tmp_path / "runs"), LocalRunStore(tmp_path / "runs", detached=True)):
         try:
             again.create_run(_meta("r", ["x", "y"], created_at="2099-01-01T00:00:00Z"), _pending("r", ["x", "y"]))
-        except FileExistsError:
+        except RunAlreadyExists:
             pass
         else:
             raise AssertionError("对已有的 run 再建应当失败")
         assert {name: (run_dir / name).read_bytes() for name in before} == before
+
+
+@pytest.mark.parametrize("occupant", ["file", "dangling-symlink"])
+def test_create_run_reports_a_non_directory_in_place_of_the_run_as_a_write_failure(tmp_path: Path, occupant: str):
+    """报告目录里与 run 同名的不是目录（普通文件、悬空的符号链接）：建 run 抛 FileExistsError，但不是 `RunAlreadyExists`——那是
+    写记录失败，不是 run 已存在（调用方按类型分开报）。占位的那一项原样留着，没有写下任何记录。"""
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    spot = runs / "r"
+    if occupant == "file":
+        spot.write_text("不是 run 目录", encoding="utf-8")
+    else:
+        spot.symlink_to(tmp_path / "nowhere")
+    with pytest.raises(FileExistsError) as exc:
+        LocalRunStore(runs).create_run(_meta("r", ["a"]), _pending("r", ["a"]))
+    assert not isinstance(exc.value, RunAlreadyExists)
+    if occupant == "file":
+        assert spot.read_text(encoding="utf-8") == "不是 run 目录"
+    else:
+        assert spot.is_symlink() and not spot.exists()
+    assert not (tmp_path / "nowhere").exists()
 
 
 def test_create_run_proceeds_while_the_run_directory_has_no_run_state(tmp_path: Path):

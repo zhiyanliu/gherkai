@@ -21,9 +21,9 @@
 | v1.0 核心库                  | parse + scope 分组 + schedule + 4 ports（Engine/Run/Result/ReportStore）+ 实时写编排；双引擎薄 worker、AgentCore 会话、投票治理、RunReport、网络韧性                                                                                          | ✅ 真 AWS 端到端 |
 | v1.1 云端                    | store adapter（DynamoDB/S3，StepArgument offload 以绕开 400KB 条目上限）+ Fargate/ECS 执行面（`FargateEngine` + `gherkai-deploy-aws` 的 CDK stack）；boto3 只在云端路径懒加载（库层 extra `[aws]`，CLI 硬依赖 `gherkai-runtime[aws]`，ADR 0032/0033/0037） | ✅ 真部署真运行  |
 | v1.2 无状态批量运行          | `submit` 提交即返回 + `status [--wait]`；local 后端 per-run 后台进程 + SQLite events；cloud 后端三 Lambda 事件驱动链（kicker / reconciler / exit-observer，DDB Stream + EventBridge）；job 墙钟预算作为最终保障（ADR 0034）                        | ✅               |
-| v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（终态即拆除，ADR 0035；鉴权原为 basic-auth 凭据每 run 轮换，v1.5 起改为令牌换 cookie，ADR 0051 决策 13）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
+| v1.3 本地应用测试 + 能力自述 | `--expose-local` ngrok 隧道（ADR 0035；v1.5 起隧道是宿主进程里经 ngrok 的 Python SDK 建立的会话、随宿主退出而关闭；鉴权原为 basic-auth 凭据每 run 轮换，v1.5 起改为令牌换 cookie，ADR 0051 决策 13）；`list-deterministic` / `plan` 派发标注（worker 注册表自述，ADR 0036）                                                                                         | ✅               |
 | v1.4 分发与打包              | uv workspace 五包 + PyPI/npm 发行、git tag 版本真源、`gherkai deploy` 内嵌 IaC、worker 镜像 variant 交付（ADR 0037 / 0038）                                                                                                                 | ✅ 已发行        |
-| v1.5 移动真机                | 测试目标模型（`@device` / `@app`）、Device Farm 远程访问会话、项目配置文件 `gherkai.toml`、确定性 step 多句柄、隧道令牌换 cookie（ADR 0048–0053） | 施工中          |
+| v1.5 移动真机                | 测试目标模型（`@device` / `@app`）、Device Farm 远程访问会话、项目配置文件 `gherkai.toml`、确定性 step 多句柄、隧道改用 SDK 与令牌换 cookie（ADR 0035、0048–0053） | 施工中          |
 
 v1 定位尚有一项验收未完成，前置条件是取得可用的真实业务系统：至少 3 个真实业务用例由 feature 作者零 step 代码写出并运行通过，同时记录每一处不得不写代码的破例。该项自 v0.x 顺延至今，目前只有探针用例（wikipedia / example.com）在验证方向。验收标准与顺延理由见 [ADR 0016](./docs/adr/0016-execution-architecture-core-lib-run-model.md)「版本切分」节，定位口径见 [ADR 0015](./docs/adr/0015-v1-positioning-smoke-not-regression.md)。
 
@@ -95,7 +95,7 @@ v1 定位尚有一项验收未完成，前置条件是取得可用的真实业�
 前置工具链：Python ≥ 3.13 + [uv](https://docs.astral.sh/uv/)；Node ≥ 22（Midscene worker 与 `gherkai deploy` 均需要）；改部署侧另需容器引擎（docker）。各项安装方法与版本要求见 [`docs/user-guide/getting-started.md`](./docs/user-guide/getting-started.md)。
 
 ```bash
-uv sync                                            # 五个 workspace 成员（core/runtime/cli + novaact worker + deploy-aws provider）一次装齐（共用根 .venv/）
+uv sync                                            # 五个 workspace 成员（core/runtime/cli + novaact worker + deploy-aws provider）连同隧道组件一次装齐（共用根 .venv/）
 (cd engines/midscene && npm ci && npm run build)   # Midscene worker（npm 包，Node ≥22）：装依赖 + 编译到 dist/
 # dev 态让 CLI 用本仓库的 midscene worker（发行版用户使用 `npm i -g @gherkai/worker-midscene`，不需此步）：
 export GHERKAI_WORKER_MIDSCENE_CMD="node $PWD/engines/midscene/dist/bin.mjs"
@@ -104,7 +104,7 @@ git config core.hooksPath tools/git-hooks          # 可选：本地提交闸门
 
 `uv sync` 把五个成员（`gherkai-core` / `gherkai-runtime` / `gherkai` / `gherkai-worker-novaact` / `gherkai-deploy-aws`）以 editable 装进仓库根的同一个 `.venv/`（ADR 0037：单一 workspace、单一 `uv.lock`）。此后**在仓库根**执行 `uv run gherkai <子命令>`（文档里的 `gherkai …` 示例在仓库内都写成 `uv run gherkai …`）。
 
-环境隔离：Python 成员与 Nova Act worker 都在仓库根 `.venv`（worker 与 CLI 同 venv 是设计选择：`python -m gherkai_worker_novaact` 无包装层、fd 直达，ADR 0037 决策 3），Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`，均不污染全局。AWS 凭证、需开通的服务、ngrok 等前置见 [`docs/user-guide/getting-started.md`](./docs/user-guide/getting-started.md)。
+环境隔离：Python 成员与 Nova Act worker 都在仓库根 `.venv`（worker 与 CLI 同 venv 是设计选择：`python -m gherkai_worker_novaact` 无包装层、fd 直达，ADR 0037 决策 3），Midscene worker 的 TS 依赖在 `engines/midscene/node_modules`，均不污染全局。AWS 凭证、需开通的服务、ngrok 等前置见 [`docs/user-guide/getting-started.md`](./docs/user-guide/getting-started.md)；隧道组件（ngrok 的 Python SDK）随根依赖装上，真实执行带 `--expose-local` 的命令另要设环境变量 `NGROK_AUTHTOKEN`。
 
 ## 在有凭证的机器上验证未发布的工作树
 

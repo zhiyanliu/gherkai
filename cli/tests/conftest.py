@@ -17,16 +17,7 @@ import pytest
 
 from gherkai_runtime import compose
 
-# 假 worker 自报的 grace 下限（秒）：值本身无所谓，只要两引擎不同、能看出「取 max」与「按引擎分别问」。
-FAKE_MIN_GRACE_S = {"novaact": 150.0, "midscene": 31.0}
-# 假注册表清单：内容无所谓，只要形状对（pattern/description/example）、条数可数——用例断言的是「清单出自自述对象」。
-FAKE_DETERMINISTIC_STEPS = [
-    {"pattern": '^"?(?P<url>https?://[^"]+)"?$', "description": "内建导航", "example": 'Given "https://x"', "keywords": ["Given", "When"],
-     "targets": [{"device": "desktop", "ui_kinds": ["web"]}]},
-    {"pattern": "页面地址匹配 \"(?P<re>[^\"]+)\"", "description": "断言地址", "example": '那么 页面地址匹配 "x"'},  # 旧形态：无 keywords 键
-]
-# 假自报模型 id：形状对（非空字符串）、两引擎不同即够——doctor 的模型行断言的是「这个值出自自述对象」。
-FAKE_MODEL_ID = {"novaact": "nova-act-v1.0", "midscene": "qwen.qwen3-vl-235b-a22b"}
+from _fake_worker import FAKE_DETERMINISTIC_STEPS, FAKE_MIN_GRACE_S, FAKE_MODEL_ID
 
 
 @pytest.fixture(autouse=True)
@@ -50,6 +41,29 @@ def _stub_engine_capabilities(monkeypatch):
     compose._CAPABILITIES_CACHE.clear()
     yield
     compose._CAPABILITIES_CACHE.clear()
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tunnel_sdk(monkeypatch):
+    """**测试从不起真实的隧道**：开发环境与 CI 都装了隧道组件（ngrok 的 SDK），误调用会联网、在 ngrok 账号上建会话。生产代码只经
+    `tunnel._import_sdk` 导入 SDK（前置检查与起隧道都经它）：这里把它换成记录调用并抛错的函数，被调用即说明某个用例走到了真实的
+    SDK；抛出的 AssertionError 可能被调用方的宽泛异常处理吞掉，所以收尾时另按调用次数判失败。夹具本身不导入 SDK。
+
+    要隧道的用例把假的隧道服务登记进 `tunnel.PROVIDERS`，或经 `NgrokTunnel(load_sdk=...)` / 自己对 `tunnel._import_sdk` 打桩注入假
+    SDK（覆盖这里的替身）。同时去掉环境变量 NGROK_AUTHTOKEN：用例的结果不随运行测试的机器有没有令牌而变。"""
+    from gherkai_runtime import tunnel
+
+    calls: list[str] = []
+
+    def _guarded_import_sdk():
+        calls.append("import")
+        raise AssertionError("测试不应导入真实的隧道 SDK：请登记假的隧道服务，或经 NgrokTunnel(load_sdk=...) 注入假 SDK")
+
+    monkeypatch.setattr(tunnel, "_import_sdk", _guarded_import_sdk)
+    monkeypatch.delenv("NGROK_AUTHTOKEN", raising=False)
+    yield
+    if calls:
+        pytest.fail(f"用例导入了真实的隧道 SDK（{len(calls)} 次）：请登记假的隧道服务，或经 NgrokTunnel(load_sdk=...) 注入假 SDK")
 
 
 @pytest.fixture(autouse=True)

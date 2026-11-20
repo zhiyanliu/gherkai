@@ -912,7 +912,7 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
         <path data-edge-from="image" data-edge-to="resolveName" data-edge-label="只按名称匹配" data-edge-key="2" data-edge-id="f-image-name" data-composition-points="383,385;462,385" d="M 383 385 L 462 385" class="a-emphasis" data-animate="edge" style="--step: 2;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="resolveDir" data-edge-to="defPath" data-edge-label="路径写入定义" data-edge-key="3" data-edge-id="f-dir-def" data-composition-points="598,157;677,157" d="M 598 157 L 677 157" class="a-default" data-animate="edge" style="--step: 3;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="resolveName" data-edge-to="defRevision" data-edge-label="结果写入定义" data-edge-key="4" data-edge-id="f-name-def" data-composition-points="598,385;677,385" d="M 598 385 L 677 385" class="a-emphasis" data-animate="edge" style="--step: 4;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
-        <path data-edge-from="defPath" data-edge-to="workerLocal" data-edge-label="读回后注入" data-edge-key="5" data-edge-id="f-def-local" data-composition-points="813,157;892,157" d="M 813 157 L 892 157" class="a-default" data-animate="edge" style="--step: 5;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="defPath" data-edge-to="workerLocal" data-edge-label="按定义注入" data-edge-key="5" data-edge-id="f-def-local" data-composition-points="813,157;892,157" d="M 813 157 L 892 157" class="a-default" data-animate="edge" style="--step: 5;" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="defRevision" data-edge-to="workerCloud" data-edge-label="启动容器" data-edge-key="6" data-edge-id="f-def-cloud" data-composition-points="813,385;892,385" d="M 813 385 L 892 385" class="a-emphasis" data-animate="edge" style="--step: 6;" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
 
         <!-- Nodes -->
@@ -1033,9 +1033,9 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           <rect x="602.1" y="364" width="70.8" height="16" rx="4" class="c-mask"/>
           <text x="637.5" y="375" class="t-edge-emphasis" font-size="8" text-anchor="middle">结果写入定义</text>
         </g>
-        <g data-edge-from="defPath" data-edge-to="workerLocal" data-edge-label="读回后注入" data-edge-key="5" data-edge-id="f-def-local">
+        <g data-edge-from="defPath" data-edge-to="workerLocal" data-edge-label="按定义注入" data-edge-key="5" data-edge-id="f-def-local">
           <rect x="822" y="136" width="61" height="16" rx="4" class="c-mask"/>
-          <text x="852.5" y="147" class="t-edge-default" font-size="8" text-anchor="middle">读回后注入</text>
+          <text x="852.5" y="147" class="t-edge-default" font-size="8" text-anchor="middle">按定义注入</text>
         </g>
         <g data-edge-from="defRevision" data-edge-to="workerCloud" data-edge-label="启动容器" data-edge-key="6" data-edge-id="f-def-cloud">
           <rect x="826.9" y="364" width="51.2" height="16" rx="4" class="c-mask"/>
@@ -1059,4 +1059,4 @@ been cleared for every commercial, promotional, or redistributive use.</metadata
           </g>
         </g>
       </svg>
-<!-- gherkai:source-sha256=1d035d927ece846b9ce8b4e17585eca7ef365a36d83f6ae4424b5b64f07e8a3d -->
+<!-- gherkai:source-sha256=1326686973e795aa915255a8ff77e78099af17250672f0c3315f35b8e908ffba -->

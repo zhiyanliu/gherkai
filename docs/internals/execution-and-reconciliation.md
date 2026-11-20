@@ -13,7 +13,7 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 两种驱动共享同一份 `core`（parse/plan/project/判定模型），但**一个 run 只属于一种驱动**。分界线是 `detached` 标记：`submit` 建 run 时写它（cloud 写在 runs 表的 STATE item 上，local 写在 run_state.json 顶层、每次写回保留）。前台 run 只在本机后端出现，云端后端的 run 都由 `submit` 提交、都带这个标记。cloud 的推进器是云端三 Lambda（它们对标记的两道判断见 §7）；local 由各 run 自己的 per-run 推进进程或 `status --wait` 的接力者推进，接力者是唯一会碰到别人 run 的一方，它同样只接力带标记的 run，对前台 run 只等待（§7 末段）。
 
-`reconcile.tick` 有**四个宿主**在不同场景下调用它：local 的 per-run 进程（即 `submit` 时 `setsid` fork 出的推进进程）、**local** `status --wait` 的接力者（cloud 的 `--wait` 只在检测到停滞时 invoke kicker，不在本机执行 `tick`，使 status 所在机器无需 ECS 权限，见 §4b）、cloud 的 kicker Lambda、cloud 的 reconciler Lambda。四处执行的是同一份代码，差别只在注入的 adapter（事件从 SQLite 还是 DDB 读、job 以子进程还是 ECS RunTask 启动）。
+`reconcile.tick` 有**四个宿主**在不同场景下调用它：local 的 per-run 进程（即 `submit` 以新会话启动的本机后台推进进程）、**local** `status --wait` 的接力者（cloud 的 `--wait` 只在检测到停滞时 invoke kicker，不在本机执行 `tick`，使 status 所在机器无需 ECS 权限，见 §4b）、cloud 的 kicker Lambda、cloud 的 reconciler Lambda。四处执行的是同一份代码，差别只在注入的 adapter（事件从 SQLite 还是 DDB 读、job 以子进程还是 ECS RunTask 启动）。
 
 ![执行与推进全景：run 的在线循环与 submit 的无状态推进共用同一份 core，只换事件通道与退出观察者](../diagrams/run-execution.svg)
 
@@ -25,8 +25,8 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 
 |           | **run（前台同步）**                                                                                                                                                        | **submit（后台运行）**                                                                                                                                                                                                                                             |
 |-----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **local** | CLI 进程内 `schedule()`；worker 是本机子进程（fd3 事件流直达）；超时由 schedule 循环内计时到点；关闭 CLI 即中止                                                            | **per-run 推进进程**（`setsid` 脱离 CLI）循环调用 `tick`；事件旁路落 SQLite；该进程同时担任退出观察者；本机需保持开机                                                                                                                                                  |
-| **cloud** | 不支持：`run` 给出云端后端即以退出码 2 结束，云端后端的执行只经 `submit`（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A） | **三 Lambda 事件驱动链**：kicker（冷启动）、reconciler（主推进）、exit-observer（退出观察），由事件串接、非调用链（§4b）；提交后关机也能执行至结束（例外：`--expose-local` 隧道模式下本机须保持开机联网，[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)） |
+| **local** | CLI 进程内 `schedule()`；worker 是本机子进程（fd3 事件流直达）；超时由 schedule 循环内计时到点；关闭 CLI 即中止                                                            | **per-run 推进进程**（`submit` 以新会话启动、脱离 CLI）自己建 run，再循环调用 `tick`；事件旁路落 SQLite；该进程同时担任退出观察者，带 `--expose-local` 时也是隧道的宿主；本机需保持开机 |
+| **cloud** | 不支持：`run` 给出云端后端即以退出码 2 结束，云端后端的执行只经 `submit`（[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md) 决策 A） | **三 Lambda 事件驱动链**：kicker（冷启动）、reconciler（主推进）、exit-observer（退出观察），由事件串接、非调用链（§4b）；提交后关机也能执行至结束（例外：`--expose-local` 隧道模式下隧道由本机的隧道守护进程持有，本机须保持开机联网，[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md)） |
 
 此处明确一个贯穿全文的粒度：**一个 job 即一个 scope**——一个 `@scope` 分组即一个调度/执行单位（上云后确立，[ADR 0017](../adr/0017-cloud-execution-fargate-over-runtime.md)），§6 超时定时器的 per-(run,scope) 即 per-job。三种组合的详细解剖在 §3-§4，横切机制（事件通道/退出观察/超时）在 §5-§6。三种组合的权威：[ADR 0016](../adr/0016-execution-architecture-core-lib-run-model.md)（决策 A：云端后端只支持 `submit`）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（两种驱动与后台运行全部决策）、[ADR 0026](../adr/0026-schedule-module.md)（同步 schedule）、[ADR 0032](../adr/0032-fargate-execution-environment.md)（Fargate 执行面）。
 
@@ -41,7 +41,7 @@ plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
   └─ 全部收敛 → schedule 交回执行事实(各 job 的判定、余下的 job 不再启动的来源) → finalize：最后一个 job 的终态写已使 run 成为终态则不再写，否则按来路做结束写(没有启动的 job 记 skipped、run 级写下原因)；读一次运行态、从记录组装汇总 → 文本汇总或 --json、退出码 + RunReport
 ```
 
-这条路径只有本机后端，Engine adapter 是 `SubprocessEngine`：spawn 本机 worker 子进程，事件走专用 fd（`EVENTS_FD`，三通道分离：事件、SDK 噪声、诊断各占一条）。云端的 `FargateEngine` 只有 `start_scope`（把 job JSON 放 S3、以 `RunTask` 启动容器，启动之后即返回、不等 task 结束），由云端推进器经启动器调用，不进这条路径（[ADR 0034](../adr/0034-detached-batch-reconciler.md)「Engine port 演进」节）。
+这条路径只有本机后端，Engine adapter 是 `SubprocessEngine`：spawn 本机 worker 子进程，事件走专用 fd（`EVENTS_FD`，三通道分离：事件、SDK 噪声、诊断各占一条）。云端的 `FargateEngine` 只有 `start_scope`（把 job JSON 放 S3、以 `RunTask` 启动容器，启动之后即返回、不等 task 结束），由云端推进器经启动器调用，不进这条路径（[ADR 0034](../adr/0034-detached-batch-reconciler.md)「Engine port 演进」节）。给了 `--expose-local` 时，begin 之前先取创建时刻、起隧道并把 job 文本里的 origin 换成公网地址：隧道是本进程里的一个会话，本进程怎样退出它都随之消失，正常路径上经 atexit 关闭（[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md) 决策 3「前台 `run`」）。
 
 另有三项能力只存在于前台驱动循环，后台运行**不具备**：`--fail-fast` 早停与使用方中断（Ctrl-C 或 SIGTERM；两者走同一条停止路径，都派生 skipped/aborted 态，见 [ADR 0024](../adr/0024-worker-core-protocol.md) 终止契约「使用方中断」条），以及 `schedule` 中针对 network 瞬时故障的 job 级重试通道（把整个 job 重新执行）——后者**当前在 `run` 上并未启用**（`ScheduleOpts.network_retry` 默认 0，CLI 未暴露该参数），网络抖动的实际处置见 [`verdict-model.md`](./verdict-model.md) §3c，门控与两层分工见 [ADR 0028](../adr/0028-transient-network-ssl-resilience.md)。后台执行下失败一律隔离、逐 job 各自收敛（[ADR 0026](../adr/0026-schedule-module.md) 失败隔离、[ADR 0031](../adr/0031-job-lifecycle-states-and-severity.md) 决定一）。
 
@@ -52,20 +52,20 @@ plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
 ### 4a. local 后端：per-run 推进进程
 
 ```
-submit:plan → 落 definition + 全 pending 初始态 → fork per-run 推进进程(setsid 脱离 CLI)→ CLI 返回 run_id
-per-run 进程:读回运行定义(读不到可用的运行定义时以结束写把 run 与未结束的 job 都记 error、不生成报告,以退出码 2 退出) → run_reconcile_loop 循环调用 tick
+submit:plan 与各项检查 → 补全 job(账号比对、设备请求、安装包上传) → 以新会话启动 per-run 推进进程,经它的标准输入交出建 run 所需的输入 → 等回报 → 输出 run_id 后返回
+per-run 进程:取创建时刻 → 起隧道(给了 --expose-local 时) → 生成运行定义 → 查 submit 是否还在(已不在即不建 run、退出) → 建 run(落 definition + 全 pending 初始态) → 装配、打开 reconcile.log → 回报 submit → run_reconcile_loop 循环调用 tick(用自己生成的那份运行定义,不从记录读回)
   ├─ tick 认领到 PENDING job(未过停止启动的时刻才认领) → SubprocessLauncher 启动本机 worker,收下这个 job 的截止时刻
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
   ├─ 每个执行中的 job 一个检查线程按墙钟比对截止时刻,到点停 worker(§6)
   ├─ worker 退出 → 本进程 handle.wait() 取 exitcode 写 task_exited(本进程同时担任"平台侧退出观察者")
   ├─ 每一轮 tick:job 一有结果即先存判定明细、再写下它的终态,随后才决定认领(写序见 §4c)
-  └─ 最后一个 job 的终态写,或到期(已过停止启动的时刻、没有执行中的、余下的都没有启动)的结束写使 run 成为终态 → 生成报告 → 拆除临时资源,退出
+  └─ 最后一个 job 的终态写,或到期(已过停止启动的时刻、没有执行中的、余下的都没有启动)的结束写使 run 成为终态 → 生成报告 → 关闭隧道会话(有隧道时),退出
 status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit 的 run)——per-run 进程若终止,接力者执行同一个 tick 把 run 推到收敛(过了期限才接力的 run 不再启动 job,原进程认领的 job 判超时后收尾,§6);接力者读不到可用的运行定义时以退出码 2 结束、不写
 ```
 
-要点：推进进程是 **per-run** 的（一个 run 一个，不是常驻守护进程）；`setsid` 使它在 CLI 与终端退出后继续存在；SQLite 里的事件表结构刻意镜像 DDB events 表（保持心智对称）。
+要点：推进进程是 **per-run** 的（一个 run 一个，不是常驻守护进程）；以新会话启动使它在 CLI 与终端退出后继续存在；一个本机 run 从建立到结束都在这一个进程里，步骤与次序同前台 `run`；SQLite 里的事件表结构刻意镜像 DDB events 表（保持心智对称）。submit 与它之间的交接（一行一条的消息、对端还在不在的判据）在 `gherkai_runtime.handoff`：回报之前它的输出接在 submit 的标准错误上、不启动子进程，回报之后改接 `reconcile.log`；起隧道、建 run 或装配失败时回报原因，submit 以退出码 2 结束。
 
-> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「端到端流程」节的 local 半边。
+> 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)「端到端流程」节的 local 半边、[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md) 决策 3「本机 `submit`」（建 run 的次序、交接与一方先退出时各怎样）。
 
 ### 4b. cloud 后端：三 Lambda 链
 
@@ -76,8 +76,9 @@ status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit �
 - **kicker**：冷启动器，但不是「只负责启动首批的精简实现」——它与 reconciler 同 code、同权限，执行完整的 `tick`。除 runs 表 Stream 外还有两个入口：`status --wait` 检测到停滞时的主动调起（kickoff invoke，用于从停滞中恢复），以及 job timeout 到点的定时器调起（§6）。
 - **reconciler**：主推进器。worker 每写入一批事件，Stream 即触发它执行一次 `tick`——事件既是数据也是「心跳」，推进由事件级联驱动，无常驻轮询。
 - **exit-observer**：把 ECS STOPPED 事件翻译成 events 表里的 `task_exited` 记录（即 cloud 后端中观察到 worker 终止的一方）。它的触发面是 IaC 部署时建好的 EventBridge rule（按本 cluster 过滤 ECS task 状态变更 → STOPPED）——**常驻订阅、不由任何一方启动**；三个 Lambda **之间**没有互相启动/调用关系，各自订阅自己的事件源，链条由事件串接；仅有的主动 invoke 都来自 Lambda 之外（`status --wait` 与超时定时器调起 kicker，见上条与 §6）。
+- **带 `--expose-local` 时的隧道守护进程**：推进全在云端，持有隧道的是本机的一个进程：submit 另以新会话启动本机的隧道守护进程（隐藏子命令 `_tunnel_watch`，主体 `tunnel_host.hold_tunnel_for_cloud_run`）。它起隧道、经回报管道交回公网地址与预热地址；submit 建 run 之前查一次它还在不在，建 run 之后经它的标准输入交出 run 的标识；它每 5 秒读一次 run 的状态，到终态或到运行期限加 300 秒（按墙钟）关闭会话、退出。它不推进 run，也不在上面三个 Lambda 的链上（[ADR 0035](../adr/0035-local-app-testing-via-tunnel.md) 决策 3「云端 `submit`」）。
 - 多宿主并发安全：`tick` 幂等，job 认领走 CAS 条件写（PENDING→RUNNING 只有一个写入方成功；run 已收尾后不再接受新的认领），投影落库走 HWM（投影只前进不后退的水位）与终态条件写；Stream 分片并发触发多个 Lambda 实例，叠加 `status --wait` 调起的 kicker，均安全。
-- **并发上限：声明随 definition 传递，部署侧只留一道 cap**（与超时预算同构，二者都属 run 的定义）。`run` 与 `submit` 都把 `--max-concurrency` 落进 definition（`RunMeta.max_concurrency`），detached 的推进器一律读 meta：local per-run 进程与 `status --wait` 接力者都以 meta 为准，各自的 flag 只在 meta 无值时回落，接力不会改变这个 run 的并行度。同步 `run` 在同一进程内直接用 flag（不存在传递通道问题），meta 仍照常写入，只为使 definition 如实记录该值。cloud 后端取 `min(definition 声明, 部署侧 cap)`，cap 取自 reconciler/kicker 的 Lambda env `MAX_CONCURRENCY`（由 IaC 设定，值见 `stack.BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY`），限制的是 worker（Fargate task）的并行数，语义为 per-run（单 run 内最多几个 job 并行），是**上限、不是真源**：cap 以内由提交侧决定；**local 无 cap**。声明超 cap 时不会静默按 cap 执行：`submit --backend cloud` 的 preflight 读取推进器 env 比对，超出即提示「本 run 将按 cap 并行，需要更高并发须改 IaC」，但**不阻断提交**（相比之下 `REPORT_DIR` 不一致会以退出码 2 结束）。旧 definition（无此值）按 1 处理，与该机制接通前的行为一致。为何 cap 归部署方、local 为何无 cap、为何超 cap 只提示不阻断，why 见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制四。
+- **并发上限：声明随 definition 传递，部署侧只留一道 cap**（与超时预算同构，二者都属 run 的定义）。`run` 与 `submit` 都把 `--max-concurrency` 落进 definition（`RunMeta.max_concurrency`），detached 的推进器一律按 definition：local per-run 进程用的是它自己生成的那份（值由 submit 经标准输入交来），`status --wait` 接力者以读回的 meta 为准、自己的 flag 只在 meta 无值时回落，接力不会改变这个 run 的并行度。同步 `run` 在同一进程内直接用 flag（不存在传递通道问题），meta 仍照常写入，只为使 definition 如实记录该值。cloud 后端取 `min(definition 声明, 部署侧 cap)`，cap 取自 reconciler/kicker 的 Lambda env `MAX_CONCURRENCY`（由 IaC 设定，值见 `stack.BackendStack.DEPLOY_SIDE_MAX_CONCURRENCY`），限制的是 worker（Fargate task）的并行数，语义为 per-run（单 run 内最多几个 job 并行），是**上限、不是真源**：cap 以内由提交侧决定；**local 无 cap**。声明超 cap 时不会静默按 cap 执行：`submit --backend cloud` 的 preflight 读取推进器 env 比对，超出即提示「本 run 将按 cap 并行，需要更高并发须改 IaC」，但**不阻断提交**（相比之下 `REPORT_DIR` 不一致会以退出码 2 结束）。旧 definition（无此值）按 1 处理，与该机制接通前的行为一致。为何 cap 归部署方、local 为何无 cap、为何超 cap 只提示不阻断，why 见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制四。
 
 > 权威：[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制一-四、端到端流程、重议闸门）、[ADR 0033](../adr/0033-iac-aws-backend-and-composition-wiring.md)（三 Lambda 的 IaC/权限/触发面）。
 
@@ -91,7 +92,7 @@ status [--wait]:只读投影查进度;--wait 还能接力推进(只对 submit �
 
 收尾一侧决定的是「什么时候能读到什么」：写序、由写序推出的读者保证、已终态 run 在两个后端的重入，以及落地之后由谁读取。
 
-- **后台的写序**：一次 `tick` 里依次是：① 投影写（只前进、不越过 `running`、不写 job 终态）→ ② 这一轮已有结果、带认领时刻的各 job 各生成一个标识、先存一份判定明细（`jobs/<标识>.json`，出自这一轮读到的同一份事件快照），任一份存不成即抛出，这一轮不写终态、也不认领与做结束写（本机推进器的判定存储在保存失败时先按 1、2、4 秒退避重试，同一个标识，仍失败才抛出；云端由流的重试或之后的触发再做）→ ③ 以一次终态写（`commit_job_states`）记下它们的终态，各点名自己那一份明细（`result_id`），记下最后一个 job 终态的那次写使 run 成为终态 → ④ 推进决策：在这一轮读到的运行态加上 ③ 的作用上认领并启动 pending 的 job；已过停止启动的时刻、没有执行中的 job 而仍有未启动的 job 时改做到期的结束写（`end_run`，没有启动的 job 记 skipped）→ ⑤ 使 run 成为终态的那次写（③ 或 ④ 的结束写）是**提交点**，之后由宿主写入派生的 RunReport（只在 `tick` 返回这一方的写使 run 成为终态之后才写，宿主经 `reconcile.write_report_from_record` 读一次运行态、按其中点名的标识读回各 job 的判定明细、组装后生成，读与写的失败都被隔离，不会回退已结束的 run；`tick` 开头读到 run 已是终态，或这一方的写因 run 已被别处结束而写不成时，宿主不写报告）。② 可以重做，每次保存都是带新标识的另一份、不覆盖已有的明细；重叠推进时后到的一方遇到库中已是终态的 job 不改写它，它存下的那一份没被点名、不被读（各记录的先后见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三的开头）。每个 job 的终态只写成一次，使 run 成为终态的写只有一方写成，⑤ 的报告只由这一方写一次；local per-run 进程与 cloud reconciler 共用 `core` 的同一个推进步骤。读不到可用的运行定义时不经推进步骤：后台推进以结束写把 run 与未结束的 job 都记 `error`，说明是读不到的原因，不存明细、不生成报告。前台 `run` 的写序见 §3：每个 job 结束时先存明细、再写它的终态，余下没有启动的 job 由结束写结束，报告同样由使 run 成为终态的一方从记录生成。
+- **后台的写序**：一次 `tick` 里依次是：① 投影写（只前进、不越过 `running`、不写 job 终态）→ ② 这一轮已有结果、带认领时刻的各 job 各生成一个标识、先存一份判定明细（`jobs/<标识>.json`，出自这一轮读到的同一份事件快照），任一份存不成即抛出，这一轮不写终态、也不认领与做结束写（本机推进器的判定存储在保存失败时先按 1、2、4 秒退避重试，同一个标识，仍失败才抛出；云端由流的重试或之后的触发再做）→ ③ 以一次终态写（`commit_job_states`）记下它们的终态，各点名自己那一份明细（`result_id`），记下最后一个 job 终态的那次写使 run 成为终态 → ④ 推进决策：在这一轮读到的运行态加上 ③ 的作用上认领并启动 pending 的 job；已过停止启动的时刻、没有执行中的 job 而仍有未启动的 job 时改做到期的结束写（`end_run`，没有启动的 job 记 skipped）→ ⑤ 使 run 成为终态的那次写（③ 或 ④ 的结束写）是**提交点**，之后由宿主写入派生的 RunReport（只在 `tick` 返回这一方的写使 run 成为终态之后才写，宿主经 `reconcile.write_report_from_record` 读一次运行态、按其中点名的标识读回各 job 的判定明细、组装后生成，读与写的失败都被隔离，不会回退已结束的 run；`tick` 开头读到 run 已是终态，或这一方的写因 run 已被别处结束而写不成时，宿主不写报告）。② 可以重做，每次保存都是带新标识的另一份、不覆盖已有的明细；重叠推进时后到的一方遇到库中已是终态的 job 不改写它，它存下的那一份没被点名、不被读（各记录的先后见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三的开头）。每个 job 的终态只写成一次，使 run 成为终态的写只有一方写成，⑤ 的报告只由这一方写一次；local per-run 进程与 cloud reconciler 共用 `core` 的同一个推进步骤。云端推进器读不到可用的运行定义时不经推进步骤：以结束写把 run 与未结束的 job 都记 `error`，说明是读不到的原因，不存明细、不生成报告；local per-run 进程用自己生成的运行定义、不从记录读回，没有这一情形（`status --wait` 接力读不到时以退出码 2 结束、不写，见 §4a）。前台 `run` 的写序见 §3：每个 job 结束时先存明细、再写它的终态，余下没有启动的 job 由结束写结束，报告同样由使 run 成为终态的一方从记录生成。
 - **由写序推出的读者保证**：**读到一个由执行结果结束的 job 的终态，即它点名的那一份判定明细已保存**（保存成功之后才写终态，[ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」的 K3；两个推进方重叠推进时的边界见同一条；由结束写结束的 job（没有启动的）没有判定明细，状态与说明只在运行态里，见 [ADR 0030](../adr/0030-realtime-persistence-seam.md) 决定三「commit point 的意义」）；RunReport 则是提交点之后的派生物，「已读到终态、报告文件尚缺」是合法状态（一直缺的情形见同一条的「已获接受的边界」），读者不应把它当判定真源。落点：local 后端下是 `--report-dir/<run_id>/`，cloud 后端下是 S3 桶里的 `<report_dir>/<run_id>/`；cloud `submit` 的 `--report-dir` 须与推进器侧一致（提交前探活会比对，不一致则以退出码 2 结束），否则 run 执行完成后在提交者给出的前缀下找不到结果。
 - **已终态 run 在两个后端的重入**：cloud 后端的云端推进器每次调用先读运行态，读到已提交终态即整体不动作（§7 里 reconciler 的第二道判；RunReport 缺失时的处理见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 端到端流程 cloud 一节标着「明确接受的代价」的一句）；local 后端的 `status --wait` 同守两道判断（只接力 submit 的 run、读到已终态不接力）；两个后端的 `tick` 自身也先读运行态，读到已收尾即停止推演，这一步覆盖宿主判断之后、`tick` 读取运行态之前插入的收尾（读取之后才发生的收尾，本轮仍继续处理），本机推进循环随之退出、不写报告；对前台 `run` 正在执行的 run，它只等待到终态、不接力。
 - **落地之后由谁读取**：`status` 读投影 RunState（`--json` 时另附 `artifacts` 键，给出报告 / 判定明细 / 元信息的约定落点；各键何时有内容见 [`cli-json-contract.md`](./cli-json-contract.md) 的字段表）；`explain` 读**运行态点名的那一份判定明细**（step 级失败原因与 `kind=evidence` 的证据指针；先读运行态、按各 job 的标识取，不列举存放处），回答「这一步为何如此判定」；对 aborted 或 error 且仍有无记录 step 的 job，另从事件流补取已执行完的 step 的记录与证据（[ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策七）。两者都受落地时机约束：两种运行方式都逐 job 落库，每个 job 得出结果的那一轮在写它的终态之前保存它的判定明细，run 还没结束时即可读到已完成的 job（后台推进的步骤、必要契约与已获接受的边界见 [ADR 0034](../adr/0034-detached-batch-reconciler.md) 机制三「run 级状态只进不退」条④「收尾各步的先后与之后会不会变」）；`explain` 在各种落地情形下给哪句提示见 [ADR 0042](../adr/0042-step-evidence-and-explain.md) 决策四。用法与退出码见 [`docs/user-guide/running-and-results.md`](../user-guide/running-and-results.md)，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)。
@@ -123,7 +124,7 @@ PK = run_id#scope_id
 
 **退出观察者三对位**（谁观察到 worker 终止）：前台由 Engine adapter 自行观察（subprocess 的 `proc.wait`）；local `submit` 下是 per-run 进程的 `handle.wait()`；cloud `submit` 下是 exit-observer Lambda。另有一个例外情形：worker 根本未启动（`launch` 抛异常）时不存在平台侧观察者，由 `tick` 自行补一条退出码未知、带「起 worker 失败」原因的退出记录，并记下失败的那一刻作退出时刻（它晚于这个 job 的截止时刻时投影按超时处理，与前台起 worker 失败的处理相同，见 §6），下一轮按「有退出记录、退出码未知 → error」收敛；若不补写，该 job 已被认领为 RUNNING 却永不会有事件与退出记录，整个 run 停滞。
 
-**诊断的落点**（事件流之外的另一条通道）：worker 的 stdout（引擎 SDK 噪声）与 stderr（worker 自身的诊断）默认带 `[worker <scope>:out|err]` 前缀透传到**推进器进程的 stderr**，落点随推进器而变：前台 `run` 直接输出到终端，加 `--quiet` 时改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），结束时只输出一行路径；cloud 后端 worker 在云端执行，日志在该 task 的 CloudWatch 日志组；local `submit` 的 per-run 推进进程自身的 stdout/stderr 落 `<report-dir>/<run_id>/reconcile.log`，worker 的透传行同落其中。判定归因只写入判定明细的 `message`。
+**诊断的落点**（事件流之外的另一条通道）：worker 的 stdout（引擎 SDK 噪声）与 stderr（worker 自身的诊断）默认带 `[worker <scope>:out|err]` 前缀透传到**推进器进程的 stderr**，落点随推进器而变：前台 `run` 直接输出到终端，加 `--quiet` 时改落 `<report-dir>/<run_id>/worker.log`（`--no-report` 时落系统临时目录），结束时只输出一行路径；cloud 后端 worker 在云端执行，日志在该 task 的 CloudWatch 日志组；local `submit` 的 per-run 推进进程回报 submit 之后的 stdout/stderr 落 `<report-dir>/<run_id>/reconcile.log`（回报之前接在 submit 的标准错误上），worker 的透传行同落其中。判定归因只写入判定明细的 `message`。
 
 > 权威：[ADR 0024](../adr/0024-worker-core-protocol.md)（事件协议/DDB 态、三通道）、[ADR 0034](../adr/0034-detached-batch-reconciler.md)（机制一：退出记录独立键空间；机制二：两件都要的收敛判据、launch 失败补偿）、[ADR 0041](../adr/0041-agent-facing-cli-affordances.md)（决策二：`--quiet` 的落点）。
 

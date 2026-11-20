@@ -55,6 +55,21 @@ from gherkai_core.schedule import Execution
 from gherkai_core.serialize import instant_to_iso
 
 
+def initial_run_state(meta: RunMeta, *, started_at: str) -> RunState:
+    """一个新 run 的初始运行态，交给 `RunStore.create_run`：各 job 与 run 都是 pending，started_at 照填（记录里的写法），ended_at、
+    run 级说明与 high_water_mark 都缺席（ended_at 由使 run 成为终态的那次写填；high_water_mark 只由后台推进的投影写写下，两个
+    adapter 都把缺席当作 0）。
+
+    建 run 的各处（前台执行的 `RunPersistence.begin`、本机后台推进进程、云端 submit）都用它，初始运行态只有这一种形态。云端 adapter
+    建 run 时另写的写入序号初值 0 不属于运行态模型，由 `DynamoDBRunStore` 写 STATE 条目时自带。"""
+    return RunState(
+        run_id=meta.run_id,
+        status=Status.PENDING,
+        jobs={job.scope_id: JobState(scope_id=job.scope_id, status=Status.PENDING) for job in meta.jobs},
+        started_at=started_at,
+    )
+
+
 @dataclass(frozen=True)
 class FinalizedRun:
     """`RunPersistence.finalize` 的结果：从记录组装出的 run 结果，与报告入口页的位置（没有报告落点、或写报告失败时为 None）。"""
@@ -72,7 +87,7 @@ class RunPersistence:
     ended_elsewhere 随时可读。
     注入点：on_event → schedule 的 on_event（sink_lock 外）；on_job_complete → schedule 的 on_job_complete（主线程）；本对象本身 →
     ScheduleOpts.record。
-    begin 在 run 已存在时失败（RunStore.create_run 抛 FileExistsError，什么都不改）；finalize 在 run 已被别处记为已结束时
+    begin 在 run 已存在时失败（RunStore.create_run 抛 `RunAlreadyExists`，什么都不改）；finalize 在 run 已被别处记为已结束时
     抛 `RunAlreadyEnded`。
 
     停手信号（ended_elsewhere）汇集三处发现：认领被拒、重试之前读到 run 级终态、写 job 状态时 RunStore 报告 run 级已结束（on_event 的
@@ -109,24 +124,15 @@ class RunPersistence:
         self._ended = threading.Event()  # 停手信号：已发现这个 run 被别处记为已结束
 
     def begin(self, run_meta: RunMeta, *, started_at: str) -> None:
-        """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始全 pending 运行态。
+        """run 开始（schedule 之前）：先探活三个 store，再写 definition + 初始运行态（`initial_run_state`）。
 
-        满足 ADR 0027「提交即返回 runId」——definition 必先于批量运行存在。各 job 摆 PENDING、总 PENDING、
-        started_at 填、ended_at 缺席（使 run 成为终态的那次写填）。
+        满足 ADR 0027「提交即返回 runId」——definition 必先于批量运行存在。
 
         **create_run 前先 preflight**：探底层可达（云端探表/桶，local no-op）。桶/表名错
         一律在此暴露（不管有无 offload 内容），组合根 gated except 归到退出码 2——消除「桶名错因是否有 offload
         内容分裂成退出码 2 还是退出码 1」的不一致。探活在 create_run（真写）之前、早于起 worker，不产生引擎费用。
         """
-        initial = RunState(
-            run_id=self._run_id,
-            status=Status.PENDING,
-            jobs={
-                job.scope_id: JobState(scope_id=job.scope_id, status=Status.PENDING)
-                for job in run_meta.jobs
-            },
-            started_at=started_at,
-        )
+        initial = initial_run_state(run_meta, started_at=started_at)
         with self._lock:
             # 探活先于任何写：三个 store 各探自己的后端（云端探表/桶失败即抛，local no-op）
             self._run_store.preflight()

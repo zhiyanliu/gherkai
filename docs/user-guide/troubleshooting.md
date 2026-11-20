@@ -148,12 +148,17 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `--expose-local 的取值 '…' 不是 origin：…`，随后提示只写到端口为止 | 取值要是 origin，即 `scheme://主机[:端口]`；这里含路径、查询串、片段、用户信息或空白字符，scheme 不是 `http` 或 `https`，缺少主机名，冒号之后缺少端口号或端口为 0，或主机、端口无法解析。提示里写明了是哪一种 | 只写到端口为止，例如 `http://localhost:3000`（末尾带一个斜杠也可以）；路径写在 feature 的 step 里 |
-| `--expose-local 隧道未就绪：找不到 ngrok 可执行文件` | ngrok 没装，或不在 PATH 上 | 装好 ngrok（https://ngrok.com/download ）并确认 `ngrok version` 能正常执行 |
-| `ngrok 隧道未就绪（…s 内拿不到公网 URL）`，提示 authtoken 未配置或无外网 | authtoken 没配，或本机连不上外网 | 运行 `ngrok config add-authtoken <token>`，或设 `NGROK_AUTHTOKEN`；两处任一即可。前置与限制见[测本机应用](./local-app-testing.md) |
+| `--expose-local 要用的隧道组件没有安装。…` | 安装 gherkai 时没有带上 tunnel 组件 | 重新安装并带上它，已经装的其它组件要一并列出：如 `uv tool install 'gherkai[local,tunnel]'`，只往云端提交时 `uv tool install 'gherkai[tunnel]'`。不需要安装 ngrok 可执行文件。前置见[测本机应用](./local-app-testing.md) |
+| `--expose-local 要用的隧道组件已经安装，但无法加载：…` | tunnel 组件的安装不完整或已损坏，冒号之后是加载时的错误 | 重新安装带 tunnel 组件的 gherkai，如 `uv tool install --reinstall 'gherkai[local,tunnel]'`（组件照上一行一并列出） |
+| `--expose-local 需要 ngrok 的令牌，但环境变量 NGROK_AUTHTOKEN 没有设置。…` | 执行这条命令的 shell 里没有设置 `NGROK_AUTHTOKEN`；gherkai 只从这个环境变量取令牌，`ngrok config add-authtoken` 写进 ngrok 配置文件的令牌不会被用到 | 在 ngrok dashboard 的 **Your Authtoken** 页取得令牌，`export NGROK_AUTHTOKEN=<token>` 后重新执行 |
+| `隧道没有建成：这个 ngrok 账号上另一条在线的隧道占用了同一个地址（ERR_NGROK_334）。…` | 新注册的 ngrok 账号同一时间只有一条隧道能在线，这个账号上已有一条在线：另一个带 `--expose-local` 的运行，或在别处起的 ngrok | 等那条隧道下线之后再试；它属于另一个带 `--expose-local` 的 gherkai 运行时，持有它的进程退出之后它就会下线（还没结束的 run 用 `gherkai list-runs` 查看） |
+| `隧道没有建成：…（ERR_NGROK_<数字>）。` | 隧道服务拒绝了这次连接，括号里是错误码、冒号之后是隧道服务给出的原因；常见的有令牌无效（`ERR_NGROK_105`，多半是填成了 **API Keys** 页上的值）、这个账号同时在线的会话数超出上限（`ERR_NGROK_108`） | 按原因处置：令牌无效时换成 **Your Authtoken** 页上的值；会话数超限时结束同一账号上别处的 ngrok 会话，或稍后再试 |
+| `隧道没有建成：…。`，不带错误码 | 连不上隧道服务等原因，冒号之后是隧道服务给出的说明 | 确认本机能访问外网（代理与防火墙放行 ngrok）后重新执行 |
+| `隧道没有建成：20 秒内没有连上隧道服务。请确认本机能访问外网后重新执行。` | 本机在时限内没有连上隧道服务：没有外网，或被代理、防火墙拦下 | 确认本机能访问外网后重新执行 |
 | 本机后端 `--expose-local` 以退出码 2 结束，提示「worker 不支持本机应用测试需要的会话预热」 | 引擎 worker 比命令行工具旧，不会在隧道上做会话预热 | 把 worker 与命令行工具装成同一个版本（`uv tool upgrade gherkai`；Midscene 侧 `npm i -g @gherkai/worker-midscene@<同版本>`） |
-| run 里每个 scope 都没执行任何 step，job 的消息以「隧道会话预热」或「后端未传递会话预热地址」开头 | 隧道的会话预热失败：令牌不被接受、会话 cookie 未通过校验、隧道已拆或浏览器到隧道入口的网络不通、云端后端旧于命令行工具 | 按消息处置，见[测本机应用](./local-app-testing.md)的「常见故障」 |
+| run 里每个 scope 都没执行任何 step，job 的消息以「隧道会话预热」或「后端未传递会话预热地址」开头 | 隧道的会话预热失败：令牌不被接受、会话 cookie 未通过校验、隧道已关闭或浏览器到隧道入口的网络不通、云端后端旧于命令行工具 | 按消息处置，见[测本机应用](./local-app-testing.md)的「常见故障」 |
 
-`gherkai doctor` 不查隧道前置。取值不是 origin 的错误 `plan` 就能报出，其余隧道问题只会在 `run` / `submit` 起隧道时暴露。隧道特有的其它症状见[测本机应用](./local-app-testing.md)的「常见故障」。
+以上起隧道的失败都以退出码 2 结束、不建立 run；gherkai 不另写隧道的日志文件，原因都在那一句说明里。`gherkai doctor` 不查隧道前置。取值不是 origin 的错误 `plan` 就能报出；没有安装 tunnel 组件与没有设置 `NGROK_AUTHTOKEN` 由 `run` / `submit` 在开始执行之前查出；其余隧道问题在起隧道时暴露。隧道特有的其它症状（含云端提交时隧道守护进程的几种报错）见[测本机应用](./local-app-testing.md)的「常见故障」。
 
 ## 项目配置文件与设备目标
 
@@ -182,6 +187,11 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
 | `没有可执行的 scenario：<文件> 里一个 scenario 都没有（常见原因：只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行）` | 没有加筛选，给定的 `.feature` 里也没有任何可执行的 scenario：文件为空、只有 Feature 头、只有 Background 或不含 scenario 的 Rule，或 Scenario Outline 的 Examples 没有数据行 | 补写 scenario，或给 Examples 补上数据行；同时核对传入的路径是否是要测的那批文件 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |
+| `在报告目录 … 里写这个 run 的记录失败：…。还没有开始执行；…`（前台 `run` 与 `submit --backend local` 同一句） | 报告目录没有写权限，或所在磁盘已满 | 检查这个目录的读写权限与剩余空间后重新执行 |
+| `run … 的记录已经写下，但在报告目录 … 里准备执行用的文件失败：…` | 记录写下之后，建事件记录或打开日志文件时失败（多为权限或磁盘空间）；这个 run 在记录里停在 `pending`，没有开始执行 | 检查这个目录的读写权限与剩余空间后重新执行；停在 `pending` 的那个 run 不必理会 |
+| `run … 已经存在，没有重新建立。请重新执行这条命令。` | 新建的 run 与报告目录或云端里已有的 run 撞了标识，极少出现 | 重新执行同一条命令 |
+| `submit --backend local` 打出 `后台推进进程在给出提交结果之前退出了（原因见上面的输出），提交没有完成。…` | `submit` 在本机起的后台推进进程在建好 run、给出结果之前出错退出了，原因打在这句之前 | 按上面的输出修好原因后重新提交；它退出之前可能已经建立了这个 run，用说明里给出的 `gherkai list-runs` 命令查看，这样的 run 没有后台进程在执行，不必等它的结果 |
+| `无法启动后台推进进程：…。没有提交。` | 本机起不了新进程（进程数或内存耗尽等，原因在冒号之后） | 处理报出的原因后重新提交 |
 
 ## 仍未定位到原因时
 

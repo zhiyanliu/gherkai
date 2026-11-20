@@ -28,7 +28,7 @@ from gherkai_core.model import (
     Status,
     Votes,
 )
-from gherkai_core.persist import FinalizedRun, RunPersistence, result_without_record
+from gherkai_core.persist import FinalizedRun, RunPersistence, initial_run_state, result_without_record
 from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from gherkai_core.schedule import Execution
 from gherkai_core.serialize import instant_to_iso
@@ -553,16 +553,46 @@ def test_finalize_after_the_stop_signal_still_reports_ended_elsewhere_when_the_r
 
 
 # ---- 决定二：begin 写初始全 pending 态，jobs Map 与 run_meta 对齐 ----
+def test_initial_run_state_is_all_pending_with_the_given_start():
+    """新 run 的初始运行态（建 run 的各处共用）：run 与各 job 都是 pending、job 的键集与运行定义一致，started_at 照填；结束时刻、
+    run 级说明、high_water_mark 与各 job 的会话、认领时刻、点名的标识都缺席，认领计数为 0。"""
+    state = initial_run_state(_meta("r", ["a", "b"]), started_at="2030-01-01T08:00:00+00:00")
+    assert state == RunState(run_id="r", status=Status.PENDING, started_at="2030-01-01T08:00:00+00:00",
+                             jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)})
+    assert (state.ended_at, state.message, state.high_water_mark, state.claim_count) == (None, None, None, 0)
+    assert all((js.session_id, js.claimed_at, js.result_id, js.message) == (None, None, None, None)
+               for js in state.jobs.values())
+
+
 def test_begin_writes_all_pending_initial_state():
     calls, run, result, report = _recording()
     p = RunPersistence("r", run, result, report)
-    p.begin(_meta("r", ["a", "b"]), started_at="t0")
-    # create_run 收到的 initial_state：总 pending、各 job pending、key 集与 run_meta 一致、起止按生命周期
+    meta = _meta("r", ["a", "b"])
+    p.begin(meta, started_at="t0")
+    # create_run 收到的 initial_state 就是 initial_run_state 给出的那一份：总 pending、各 job pending、key 集与 run_meta 一致
     initial = next(arg for (s, m, arg) in calls if m == "create_run")
+    assert initial == initial_run_state(meta, started_at="t0")
     assert initial.status == Status.PENDING
     assert set(initial.jobs.keys()) == {"a", "b"}
     assert all(js.status == Status.PENDING for js in initial.jobs.values())
     assert initial.started_at == "t0" and initial.ended_at is None
+
+
+def test_begin_on_an_existing_run_raises_run_already_exists_and_changes_nothing(tmp_path):
+    """对已有的 run 再 begin（真本机 store）：create_run 抛 `RunAlreadyExists`（调用方据此判断「run 已存在」），definition 与运行态
+    不变。"""
+    from gherkai_core.adapters.result_store.local import LocalResultStore
+    from gherkai_core.adapters.run_store.local import LocalRunStore
+    from gherkai_core.errors import RunAlreadyExists
+
+    meta = _meta("r", ["a"])
+    store = LocalRunStore(tmp_path)
+    RunPersistence("r", store, LocalResultStore(tmp_path)).begin(meta, started_at="t0")
+    before = (store.load_run_meta("r"), store.load_run_state("r"))
+    with pytest.raises(RunAlreadyExists) as exc:
+        RunPersistence("r", store, LocalResultStore(tmp_path)).begin(_meta("r", ["x"]), started_at="t1")
+    assert exc.value.run_id == "r"
+    assert (store.load_run_meta("r"), store.load_run_state("r")) == before
 
 
 # ---- 决定五 + 0031 决定一：aborted 的 session_id 经实时写路径保留（卖点：有现场可查）----

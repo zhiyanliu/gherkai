@@ -1,24 +1,46 @@
-"""--expose-local 的 CLI 接线测试（ADR 0035）：fake tunnel provider——不真起 ngrok、不连 AWS。
+"""--expose-local 与两种 submit 的交接在命令行一侧的测试（ADR 0035 决策 1 到 3）。
 
-「ngrok 真起得来 / 隧道 URL 真可达 / 浏览器凭令牌换到 cookie 后业务请求过边缘」是真实边界，由真实运行验证；
-此处锁「接线 + 映射 + 生命周期交棒」的纯逻辑。
+证据边界：隧道服务是登记进 `tunnel.PROVIDERS` 的假实现，只模仿口子的外部表面（前置检查的用例改为对 `tunnel._import_sdk` 打桩、走
+真实的 `NgrokTunnel`）；云端存储是记录调用的假句柄，不连 AWS、不联网。submit 与后台进程之间用真实的管道与线程
+（`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
+跨进程的会话与信号处置不在这些用例的证据之内（ADR 0035「实测项」）；进程入口另有两条用例真的启动子进程（不起隧道）。
 """
 from __future__ import annotations
 
-import json
+import atexit
+import os
+import signal
+import sqlite3
 import subprocess
+import sys
+import threading
+import types
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
 
 import gherkai_cli.__main__ as m
-from gherkai_core.model import JobResult, Status
+from gherkai_core import run_deadline
+from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.model import Job, JobResult, Scenario, Status, Step
 from gherkai_core.schedule import Execution
+from gherkai_core.serialize import instant_from_iso, instant_to_iso
+from gherkai_runtime import compose, detached, handoff
 from gherkai_runtime import tunnel as gtunnel
 
-INFO = gtunnel.TunnelInfo(url="https://t.ngrok-free.app", pid=777, local_origin="http://localhost:3000",
-                          warmup_url="https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+from _inline_children import inline_children  # noqa: F401 —— 夹具：后台进程在线程里执行
+from test_backend_cloud import _definition, _patch_cloud_handles
+
+ORIGIN = "http://localhost:3000"
+PUBLIC = "https://t.ngrok-free.app"
 TOKEN = "a" * 32
+WARMUP = gtunnel.warmup_url_for(PUBLIC, TOKEN)
+ESTABLISHED = f"隧道已建立：{ORIGIN} → {PUBLIC}（访问受本次运行专用的会话保护；持有隧道的 gherkai 进程退出时隧道随之关闭）"
+# 假墙钟的起点：整秒，远离真实时刻，用例若读了真实的钟就对不上
+T0 = datetime(2030, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+FAR_FUTURE = datetime(2100, 1, 1, tzinfo=timezone.utc)
+FIXED_RUN_ID = "20300102T030405Z-abcdef"
 
 
 def _write_feature(tmp_path: Path) -> Path:
@@ -27,146 +49,251 @@ def _write_feature(tmp_path: Path) -> Path:
     return f
 
 
-def _patch_tunnel(monkeypatch, calls: list):
-    class _Provider:
-        def start(self, origin, **kw):
-            calls.append(("start", origin))
-            return INFO
-
-    monkeypatch.setattr(gtunnel, "make_tunnel", lambda name: calls.append(("make", name)) or _Provider())
-    monkeypatch.setattr(gtunnel, "stop_tunnel", lambda pid: calls.append(("stop", pid)))
+def _run_dirs(root: Path) -> list[Path]:
+    return sorted(d for d in root.iterdir() if d.is_dir()) if root.exists() else []
 
 
-def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch):
-    """run --expose-local：job 文本中的 origin → 干净的隧道地址；skip 头与会话预热地址一起进 RunMeta（ADR 0035 决策 2/4；0051 决策 13）。"""
-    calls, box = [], {}
-    _patch_tunnel(monkeypatch, calls)
+class FakeTunnel:
+    """登记进 `tunnel.PROVIDERS` 的假隧道服务：只模仿口子的外部表面（前置检查、起隧道、返回对象的 close），记下调用与先后。
 
+    `events` 与假墙钟共用：起隧道记 ("start", closes_at)、第一次关闭记 ("close",)。close 照口子的约定可以重复调用、只有第一次动作。"""
+
+    def __init__(self) -> None:
+        self.events: list[tuple] = []
+        self.made = 0
+        self.starts: list[dict] = []
+        self.closed = False
+        self.start_error: BaseException | None = None
+        self.on_start = None  # 起隧道时（在起隧道的那个线程里）、返回之前调用
+
+    def provider(self) -> "FakeTunnel":
+        self.made += 1
+        return self
+
+    def check_prerequisites(self) -> None:
+        self.events.append(("prereq",))
+
+    def start(self, local_origin, *, closes_at, timeout_s=gtunnel.START_TIMEOUT_S):
+        self.events.append(("start", closes_at))
+        self.starts.append({"local_origin": local_origin, "closes_at": closes_at, "timeout_s": timeout_s})
+        if self.on_start is not None:
+            self.on_start()
+        if self.start_error is not None:
+            raise self.start_error
+        return gtunnel.TunnelInfo(url=PUBLIC, local_origin=gtunnel.normalize_origin(local_origin), warmup_url=WARMUP,
+                                  closer=self._close)
+
+    def _close(self) -> None:
+        if not self.closed:
+            self.closed = True
+            self.events.append(("close",))
+
+
+class Clock:
+    """`compose.now` 的替身：每读一次前进一秒，读数记进与假隧道服务共用的事件表，用来核对先后。"""
+
+    def __init__(self, events: list, t0: datetime = T0) -> None:
+        self.events = events
+        self.t = t0
+
+    def __call__(self) -> datetime:
+        t = self.t
+        self.t += timedelta(seconds=1)
+        self.events.append(("now", t))
+        return t
+
+
+@pytest.fixture
+def tunnel_service(monkeypatch) -> FakeTunnel:
+    fake = FakeTunnel()
+    monkeypatch.setitem(gtunnel.PROVIDERS, "ngrok", fake.provider)
+    return fake
+
+
+@pytest.fixture
+def advanced(monkeypatch) -> list:
+    """把后台推进进程的推进换成记录调用的函数：不起 worker，记下它收到的运行定义。"""
+    calls: list = []
+    monkeypatch.setattr(detached, "advance_local_run", lambda advancer, meta, **kw: calls.append((advancer, meta)))
+    return calls
+
+
+@pytest.fixture
+def interrupt_submit(monkeypatch):
+    """在后台进程的线程里给主线程（submit）发 SIGINT，等 submit 打出含 `marker` 的那一句之后再返回：Ctrl-C 落在 submit 等待期间。"""
+    main_ident = threading.main_thread().ident
+    seen: dict[str, threading.Event] = {}
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        real_progress(*a, **k)
+        text = " ".join(str(x) for x in a)
+        for marker, ev in seen.items():
+            if marker in text:
+                ev.set()
+
+    monkeypatch.setattr(m, "_progress", progress)
+
+    def make(marker: str):
+        ev = seen.setdefault(marker, threading.Event())
+
+        def interrupt() -> None:
+            signal.pthread_kill(main_ident, signal.SIGINT)
+            assert ev.wait(5), f"submit 没有在 5 秒内打出「{marker}」"
+        return interrupt
+    return make
+
+
+def _main(argv: list[str]) -> int:
+    """m.main，但 KeyboardInterrupt 漏出来即判失败（否则它会中止整个测试会话）。"""
+    try:
+        return m.main(argv)
+    except KeyboardInterrupt:
+        pytest.fail("Ctrl-C 没有被 submit 接住")
+
+
+def _local_submit_argv(tmp_path: Path, *extra: str) -> list[str]:
+    return ["submit", str(_write_feature(tmp_path)), "--report-dir", str(tmp_path / "reports"),
+            "--region", "us-east-1", *extra]
+
+
+def _cloud_submit_argv(tmp_path: Path, *extra: str) -> list[str]:
+    return ["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
+            "--region", "us-east-1", *extra]
+
+
+def _fake_schedule(box: dict):
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         box["run_meta"] = run_meta
-        results = [JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]
-        return Execution(run_meta=run_meta, results=tuple(results), stopped_by=None, duration_ms=0.0)
+        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
+                         results=tuple(JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs))
+    return fake_schedule
 
-    monkeypatch.setattr(m, "schedule", fake_schedule)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report",
-                 "--expose-local", "http://localhost:3000"])
+
+# ---- 前台 run（ADR 0035 决策 3「前台 `run`」）----
+
+def test_run_expose_local_maps_jobs_and_injects_headers(tmp_path, monkeypatch, capsys, tunnel_service):
+    """run --expose-local：job 文本中的 origin → 干净的隧道地址；skip 头与会话预热地址一起进 RunMeta（ADR 0035 决策 2/4；0051 决策 13）；
+    公网地址那一行是三种组合共用的那一句。"""
+    box: dict = {}
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", ORIGIN])
     assert rc == 0
     meta = box["run_meta"]
     step = meta.jobs[0].scenarios[0].steps[0]
-    assert "https://t.ngrok-free.app/login" in step.text  # 替换成干净的隧道地址，不内嵌凭据、不附令牌
+    assert f"{PUBLIC}/login" in step.text  # 替换成干净的隧道地址，不内嵌凭据、不附令牌
     assert "localhost:3000" not in step.text and TOKEN not in step.text
     assert dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
-    assert meta.session_warmup_url == INFO.warmup_url  # 预热地址随 definition 走
-    assert ("make", "ngrok") in calls and ("start", "http://localhost:3000") in calls
+    assert meta.session_warmup_url == WARMUP  # 预热地址随 definition 走
+    assert [s["local_origin"] for s in tunnel_service.starts] == [ORIGIN]
+    assert ESTABLISHED in capsys.readouterr().err.splitlines()
 
 
-def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch):
+def test_run_takes_the_creation_instant_before_starting_the_tunnel_and_closes_it_at_exit(tmp_path, monkeypatch,
+                                                                                          tunnel_service):
+    """前台 run 的次序（ADR 0035 决策 3「三种组合的宿主与次序」）：先取创建时刻，再起隧道，再生成运行定义；隧道的到点时刻是运行期限加
+    300 秒；run_id 的时间前缀取同一次读数。会话经 atexit 关闭：执行期间不关，退出时关（ADR 0035 决策 3「寿命」）。"""
+    box: dict = {}
+    registered: list = []
+    monkeypatch.setattr(compose, "now", Clock(tunnel_service.events))
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **k: registered.append(fn) or fn)
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", ORIGIN]) == 0
+    meta = box["run_meta"]
+    created = instant_from_iso(meta.created_at)
+    events = tunnel_service.events
+    assert events.index(("now", created)) < events.index(("start", tunnel_service.starts[0]["closes_at"]))
+    assert tunnel_service.starts[0]["closes_at"] == run_deadline.overdue_at(instant_from_iso(meta.deadline_at))
+    assert meta.run_id.startswith(created.strftime("%Y%m%dT%H%M%SZ"))
+    closers = [fn for fn in registered if isinstance(getattr(fn, "__self__", None), gtunnel.TunnelInfo)]
+    assert len(closers) == 1 and not tunnel_service.closed
+    closers[0]()
+    assert tunnel_service.closed
+
+
+def test_run_wires_session_warmup_url_into_local_engines(tmp_path, monkeypatch, tunnel_service):
     """同步本机 run：注给 build_engines 的预热地址与写进 definition 的是同一个值（ADR 0051 决策 13）——预热地址四处接线之一；
     丢了它 worker 会按 definition 完整性判 precheck_failed，而单测 fake 掉 schedule 后没有任何事能暴露这一处漏接。"""
-    calls, box = [], {}
-    _patch_tunnel(monkeypatch, calls)
+    box: dict = {}
     real_build = m.compose.build_engines
 
     def spy_build(**kwargs):
         box["kwargs"] = kwargs
         return real_build(run_id=kwargs["run_id"])
 
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
-        box["run_meta"] = run_meta
-        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
-                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
-
     monkeypatch.setattr(m.compose, "build_engines", spy_build)
-    monkeypatch.setattr(m, "schedule", fake_schedule)
-    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", "http://localhost:3000"]) == 0
-    assert box["kwargs"]["session_warmup_url"] == INFO.warmup_url == box["run_meta"].session_warmup_url
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", ORIGIN]) == 0
+    assert box["kwargs"]["session_warmup_url"] == WARMUP == box["run_meta"].session_warmup_url
     assert box["kwargs"]["extra_http_headers"] == {"ngrok-skip-browser-warning": "1"}
 
 
-def test_cloud_submit_writes_session_warmup_url_into_the_definition(tmp_path, monkeypatch):
-    """云端 submit：预热地址与额外请求头写进提交记录，云端推进器照它注给 worker（ADR 0051 决策 13；起 task 的一侧在推进器 Lambda）。"""
-    from test_backend_cloud import _definition, _patch_cloud_handles
-
-    calls, record = [], []
-    _patch_tunnel(monkeypatch, calls)
-    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: type("P", (), {"pid": 9})())  # 隧道守护进程不真起
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--ddb-table", "T", "--s3-bucket", "B",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
-    assert rc == 0
-    meta = _definition(made["ddb_tables"][0])
-    assert meta["session_warmup_url"] == INFO.warmup_url
-    assert dict(meta["extra_http_headers"]) == {"ngrok-skip-browser-warning": "1"}
-
-
-def test_run_without_expose_local_zero_change(tmp_path, monkeypatch):
-    """不给 --expose-local：不碰 tunnel 模块、meta 无 headers（默认路径零变化，ADR 0035 边界）。"""
-    calls, box = [], {}
-    _patch_tunnel(monkeypatch, calls)
-
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
-        box["run_meta"] = run_meta
-        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
-                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
-
-    monkeypatch.setattr(m, "schedule", fake_schedule)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report"])
-    assert rc == 0
-    assert calls == []
+def test_run_without_expose_local_zero_change(tmp_path, monkeypatch, tunnel_service):
+    """不给 --expose-local：隧道服务一次都没有构造（前置检查也不做），meta 无 headers（默认路径零变化，ADR 0035 边界）。"""
+    box: dict = {}
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--no-report"]) == 0
+    assert tunnel_service.made == 0
     assert box["run_meta"].extra_http_headers is None and box["run_meta"].session_warmup_url is None
 
 
-def test_run_tunnel_failure_exits_2(tmp_path, monkeypatch, capsys):
-    """隧道起不来（如 authtoken 缺失）→ 给退出码 2「没开始执行就被拒」，不产生引擎费用。"""
-    def boom(name):
-        raise gtunnel.TunnelError("ngrok 隧道未就绪…authtoken 未配置")
-
-    monkeypatch.setattr(gtunnel, "make_tunnel", boom)
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report",
-                 "--expose-local", "http://localhost:3000"])
+def test_run_tunnel_failure_prints_the_sentence_as_is_and_exits_2(tmp_path, monkeypatch, capsys, tunnel_service):
+    """隧道起不来：原样打印隧道给出的那一句（不另加前缀）、退出码 2，不开始执行；会话没有建成，所以没有关闭调用。"""
+    sentence = "隧道没有建成：authentication failed（ERR_NGROK_105）。"
+    tunnel_service.start_error = gtunnel.TunnelError(sentence)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("隧道起不来时不该开始执行"))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", ORIGIN])
     assert rc == 2
-    assert "authtoken" in capsys.readouterr().err
+    cap = capsys.readouterr()
+    assert sentence in cap.err.splitlines() and cap.out == ""
+    assert not tunnel_service.closed
 
 
-def test_submit_local_writes_tunnel_file_for_per_run_cleanup(tmp_path, monkeypatch):
-    """local submit：tunnel.json 落 run 目录（pid 交棒给 per-run/接力收尾者，ADR 0035 决策 3）。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    forked = []
-
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: forked.append(cmd) or _FakeProc())
-    rc = m.main(["submit", str(_write_feature(tmp_path)),
-                 "--report-dir", str(tmp_path / "reports"),
-                 "--expose-local", "http://localhost:3000"])
-    assert rc == 0
-    run_dirs = [d for d in (tmp_path / "reports").iterdir() if d.is_dir()]
-    assert len(run_dirs) == 1
-    tj = json.loads((run_dirs[0] / "tunnel.json").read_text(encoding="utf-8"))
-    assert tj["pid"] == 777 and tj["url"] == INFO.url
-    assert TOKEN not in (run_dirs[0] / "tunnel.json").read_text(encoding="utf-8")  # 收尾凭据只有 pid / url / origin，不带令牌
-    assert any("_reconcile" in c for c in forked[0])  # per-run 照常 fork（它是收尾宿主）
-    # definition 里的 URL 已替换成干净的隧道地址；预热地址（含令牌）只在 run_meta 里（per-run / 接力者读回注入 worker）
-    meta = json.loads((run_dirs[0] / "run_meta.json").read_text(encoding="utf-8"))
-    assert "https://t.ngrok-free.app/login" in json.dumps(meta, ensure_ascii=False)
-    assert meta["session_warmup_url"] == INFO.warmup_url
+def test_run_record_write_failure_exits_2_with_one_sentence(tmp_path, monkeypatch, capsys, tunnel_service):
+    """前台 run 建 run 写记录失败（报告目录的位置被一个文件占着）：一句说明、退出码 2、不打回溯，不开始执行（ADR 0030 决定七）；
+    与本机后台推进进程是同一句。"""
+    occupied = tmp_path / "reports"
+    occupied.write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("写记录失败时不该开始执行"))
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(occupied), "--expose-local", ORIGIN])
+    assert rc == 2
+    cap = capsys.readouterr()
+    assert f"在报告目录 {occupied} 里写这个 run 的记录失败：" in cap.err
+    assert "还没有开始执行；请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。" in cap.err
+    assert "Traceback" not in cap.err and cap.out == ""
 
 
-def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys):
+def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
+    """前台 run 的记录已写下、建事件库失败（sqlite3.Error 不是 OSError）：说明记录已写下、停在 pending，退出码 2、不打回溯。"""
+    from gherkai_core.adapters import event_log
+
+    def broken_event_log(path):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(event_log, "SqliteEventLog", broken_event_log)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("准备执行用的文件失败时不该开始执行"))
+    reports = tmp_path / "reports"
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    assert rc == 2
+    (run_dir,) = _run_dirs(reports)
+    err = capsys.readouterr().err
+    assert (f"run {run_dir.name} 的记录已经写下，但在报告目录 {reports} 里准备执行用的文件失败：unable to open database file。"
+            "还没有开始执行，这个 run 在记录里停在 pending。") in err
+    assert "Traceback" not in err
+    assert LocalRunStore(reports).load_run_state(run_dir.name).status == Status.PENDING
+
+
+def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys, tunnel_service):
     """run --json 的输出脱敏、落盘的 run 定义保留明文（ADR 0035 决策 5）。
 
     stdout 里预热地址的令牌是 `***`、判定消息里的 userinfo 是 `***@`；run_meta.json 要被推进器读回执行，令牌必须原样在；
     jobs/*.json 只被 status / explain 读、step 文本已不含秘密。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
+    import json
 
     def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
         results = []
         for j in run_meta.jobs:
-            jr = JobResult(job=j, status=Status.FAILED,
-                           message="页面停在 https://u1:p1@t.ngrok-free.app/login 未跳转")
+            jr = JobResult(job=j, status=Status.FAILED, message="页面停在 https://u1:p1@t.ngrok-free.app/login 未跳转")
             results.append(jr)
             if on_job_complete is not None:
                 on_job_complete(jr)
@@ -174,77 +301,42 @@ def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, mon
 
     monkeypatch.setattr(m, "schedule", fake_schedule)
     report_dir = tmp_path / "reports"
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--json", "--report-dir", str(report_dir),
-                 "--expose-local", "http://localhost:3000"])
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--json", "--report-dir", str(report_dir), "--expose-local", ORIGIN])
     assert rc == 1
     out = capsys.readouterr().out
     doc = json.loads(out)                                   # 脱敏后仍是单一可解析文档
     assert "u1:p1@" not in out and TOKEN not in out
     step_text = doc["run_meta"]["jobs"][0]["scenarios"][0]["steps"][0]["text"]
-    assert "https://t.ngrok-free.app/login" in step_text  # step 文本本就不含秘密
+    assert f"{PUBLIC}/login" in step_text  # step 文本本就不含秘密
     assert doc["run_meta"]["session_warmup_url"].endswith("gherkai_tunnel_token=***")  # 预热地址的令牌盖住
     assert doc["jobs"][0]["message"] == "页面停在 https://***@t.ngrok-free.app/login 未跳转"
     assert doc["artifacts"]["run_meta"].endswith("run_meta.json")   # 产物落点照常折进同一文档
-    run_dirs = [d for d in report_dir.iterdir() if d.is_dir()]
-    assert len(run_dirs) == 1
-    persisted = (run_dirs[0] / "run_meta.json").read_text(encoding="utf-8")
-    assert TOKEN in persisted  # 落盘的 definition 保留明文（推进器要读回注入 worker）
-    for jf in (run_dirs[0] / "jobs").glob("*.json"):
+    (run_dir,) = _run_dirs(report_dir)
+    assert TOKEN in (run_dir / "run_meta.json").read_text(encoding="utf-8")  # 落盘的 definition 保留明文
+    for jf in (run_dir / "jobs").glob("*.json"):
         assert TOKEN not in jf.read_text(encoding="utf-8")
 
 
-def test_expose_local_rejects_worker_without_session_warmup_before_starting_tunnel(tmp_path, monkeypatch, capsys):
+def test_expose_local_rejects_worker_without_session_warmup_before_starting_tunnel(tmp_path, monkeypatch, capsys,
+                                                                                   tunnel_service):
     """本机后端 --expose-local：worker 自述不声明会话预热支持 → 退出码 2，且隧道没有起（拒绝点在起隧道之前，ADR 0051 决策 13）。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    from gherkai_runtime import compose
-
     real = compose.query_capabilities
     monkeypatch.setattr(compose, "query_capabilities",
                         lambda engine, **kw: {k: v for k, v in real(engine, **kw).items() if k != compose.SESSION_WARMUP_KEY})
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", "http://localhost:3000"])
+    rc = m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--expose-local", ORIGIN])
     assert rc == 2
-    assert "会话预热" in capsys.readouterr().err and calls == []
+    assert "会话预热" in capsys.readouterr().err and tunnel_service.starts == []
 
 
-def test_tunnel_watch_entry_wires_argparse_to_host_and_prints(monkeypatch, capsys):
-    """_tunnel_watch 入口：argparse → tunnel_host.watch_run_and_stop_tunnel + 打印拆除原因。
-
-    守护主体（轮询终态 / TTL 兜底）的逻辑归 runtime/tests/test_tunnel_host.py；此处只锁「前端传对参数」。
-    """
-    from gherkai_runtime import tunnel_host
-
-    seen = {}
-
-    def fake_watch(run_id, **kw):
-        seen["run_id"] = run_id
-        seen.update(kw)
-        return "run 终态 passed"
-
-    monkeypatch.setattr(tunnel_host, "watch_run_and_stop_tunnel", fake_watch)
-    rc = m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777", "--ttl", "1500",
-                 "--ddb-table", "tbl", "--region", "us-east-1"])
-    assert rc == 0
-    assert seen["run_id"] == "r1" and seen["tunnel_pid"] == 777
-    assert seen["runs_table"] == "tbl" and seen["ttl_s"] == 1500.0 and seen["region"] == "us-east-1"
-    assert "run 终态 passed" in capsys.readouterr().out
-
-
-def test_tunnel_watch_requires_explicit_ttl():
-    """--ttl 无默认值（必给）：曾恒 1h 且无任何生产写入者、与 run 预算脱钩（ADR 0035 决策 3），不留幻影默认。"""
-    import pytest
-
-    with pytest.raises(SystemExit) as ei:
-        m.main(["_tunnel_watch", "r1", "--tunnel-pid", "777", "--ddb-table", "tbl"])
-    assert ei.value.code == 2
-
+# ---- plan 与入口校验（ADR 0035 决策 2）----
 
 def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
-    """plan：显示替换前原始地址 + 标注将映射（零副作用不起隧道，ADR 0035 决策 2）。"""
-    rc = m.main(["plan", str(_write_feature(tmp_path)), "--expose-local", "http://localhost:3000"])
+    """plan：显示替换前原始地址 + 标注将映射（零副作用不起隧道，ADR 0035 决策 2）；也不做隧道的前置检查——这里没有登记假的隧道服务，
+    导入 SDK 就会被自动夹具判失败。"""
+    rc = m.main(["plan", str(_write_feature(tmp_path)), "--expose-local", ORIGIN])
     assert rc == 0
     captured = capsys.readouterr()
-    assert "http://localhost:3000" in captured.out  # 原始地址（替换前）
+    assert ORIGIN in captured.out  # 原始地址（替换前）
     assert "原始地址" in captured.err  # 标注在 stderr（诊断面）
 
 
@@ -254,220 +346,711 @@ def test_plan_expose_local_annotates_not_replaces(tmp_path, capsys):
     ["submit"],
     ["submit", "--backend", "cloud"],
 ], ids=["plan", "run", "submit-local", "submit-cloud"])
-def test_expose_local_rejects_non_origin_value_at_entry_before_starting_tunnel(argv, tmp_path, monkeypatch, capsys):
+def test_expose_local_rejects_non_origin_value_at_entry_before_starting_tunnel(argv, tmp_path, monkeypatch, capsys,
+                                                                               tunnel_service, inline_children):
     """--expose-local 的取值带路径：plan / run / submit 在共享的入口校验阶段以退出码 2 结束，stderr 说明取值不是 origin，
-    隧道没有起、submit 没有落库也没有起后台进程（ADR 0035 决策 2）。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
+    隧道没有起、submit 没有起后台进程、也没有落库（ADR 0035 决策 2）。"""
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("取值不是 origin 时不该进入执行"))
-    monkeypatch.setattr(subprocess, "Popen", lambda *a, **k: pytest.fail("取值不是 origin 时不该起后台进程"))
     reports = tmp_path / "reports"
     extra = ["--report-dir", str(reports)] if argv[0] == "submit" else []
-    rc = m.main([argv[0], str(_write_feature(tmp_path)), *argv[1:], *extra,
-                 "--expose-local", "http://localhost:3000/login"])
+    rc = m.main([argv[0], str(_write_feature(tmp_path)), *argv[1:], *extra, "--expose-local", f"{ORIGIN}/login"])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "不是 origin" in err and "http://localhost:3000/login" in err and "Traceback" not in err
-    assert calls == []  # 隧道一次都没起
+    assert "不是 origin" in err and f"{ORIGIN}/login" in err and "Traceback" not in err
+    assert tunnel_service.starts == [] and inline_children.children == []
     assert not reports.exists()
 
 
-def test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(tmp_path, monkeypatch, capsys):
+def test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(tmp_path, monkeypatch, capsys, tunnel_service):
     """末尾恰好一个斜杠：plan 通过、标注行显示归一化后的 origin；run 起隧道与映射用的是同一个归一化值（ADR 0035 决策 2）。"""
     feat = _write_feature(tmp_path)
-    assert m.main(["plan", str(feat), "--expose-local", "http://localhost:3000/"]) == 0
-    assert "注：http://localhost:3000 将在" in capsys.readouterr().err
+    assert m.main(["plan", str(feat), "--expose-local", f"{ORIGIN}/"]) == 0
+    assert f"注：{ORIGIN} 将在" in capsys.readouterr().err
 
-    calls, box = [], {}
-    _patch_tunnel(monkeypatch, calls)
-
-    def fake_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
-        box["run_meta"] = run_meta
-        return Execution(run_meta=run_meta, stopped_by=None, duration_ms=0.0,
-                         results=tuple([JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs]))
-
-    monkeypatch.setattr(m, "schedule", fake_schedule)
-    assert m.main(["run", str(feat), "--no-report", "--expose-local", "http://localhost:3000/"]) == 0
-    assert ("start", "http://localhost:3000") in calls
-    assert "隧道已建立：http://localhost:3000 → " in capsys.readouterr().err
-    assert "https://t.ngrok-free.app/login" in box["run_meta"].jobs[0].scenarios[0].steps[0].text
+    box: dict = {}
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    assert m.main(["run", str(feat), "--no-report", "--expose-local", f"{ORIGIN}/"]) == 0
+    assert [s["local_origin"] for s in tunnel_service.starts] == [ORIGIN]
+    assert f"隧道已建立：{ORIGIN} → " in capsys.readouterr().err
+    assert f"{PUBLIC}/login" in box["run_meta"].jobs[0].scenarios[0].steps[0].text
 
 
-def test_submit_rejects_nonpositive_tunnel_ttl_before_starting_tunnel(tmp_path, monkeypatch, capsys):
-    """--tunnel-ttl <=0 → 以退出码 2 结束且**没起隧道**（早拒才真零副作用，对齐 --grace 的入口校验惯例）。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--expose-local", "http://localhost:3000", "--tunnel-ttl", "0"])
-    assert rc == 2
-    assert calls == []  # 隧道一次都没起
-    assert "--tunnel-ttl" in capsys.readouterr().err
+# ---- 隧道的前置检查（ADR 0035 决策 1「前置条件」）----
+
+def _forbid(what: str):
+    def forbidden(*a, **k):
+        pytest.fail(f"隧道的前置缺失时不该{what}")
+    return forbidden
 
 
-def test_submit_rejects_nonfinite_tunnel_ttl(tmp_path, monkeypatch, capsys):
-    """--tunnel-ttl nan/inf → 以退出码 2 结束（float() 会收下它们；nan 使守护的 monotonic()<deadline 首轮
-    即 False → 隧道 submit 后立刻被拆——与 @timeout: 的 isfinite 校验同一理由）。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    for bad in ("nan", "inf"):
-        rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                     "--expose-local", "http://localhost:3000", "--tunnel-ttl", bad])
-        assert rc == 2, f"--tunnel-ttl {bad} 应被拒"
-        assert calls == []  # 隧道一次都没起
-        assert "--tunnel-ttl" in capsys.readouterr().err
-
-
-# ---- 隧道就地拆：边界是后台宿主 fork 成功（ADR 0035 决策 3） ----
-def _stops(calls) -> list:
-    return [c for c in calls if c[0] == "stop"]
-
-
-def _patch_cloud_gates(monkeypatch, *, preflight_err=None):
-    """让 cloud submit 走到 preflight 这一步而不连 AWS：版本 skew 闸放行 + preflight 返回给定结果。
-
-    skew/preflight 各自的判据在别处验（runtime 的 compose 测试 / test_backend_cloud.py），此处只要它们别真去
-    读 SSM/探资源。
-    """
-    monkeypatch.setattr(m.compose, "read_backend_version", lambda **kw: "<stub 版本戳>")
-    monkeypatch.setattr(m.compose, "check_version_skew", lambda *a, **kw: ("ok", ""))
-    monkeypatch.setattr(m.compose, "preflight_cloud_resources", lambda **kw: preflight_err)
-
-
-def test_submit_local_store_failure_tears_down_tunnel(tmp_path, monkeypatch):
-    """local submit 落库抛（报告目录不可写/盘满）→ 隧道还没交棒给后台宿主，就地拆；异常照常上抛。
-
-    这条路上 tunnel.json 还没落盘，pid 无处可寻——不当场拆就没有任何接力者救得了，只能人手 kill。
-    """
-    import pytest
-
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-
-    def boom(**kw):
-        raise OSError("Read-only file system")
-
-    monkeypatch.setattr(m.compose, "build_local_stores", boom)
-    with pytest.raises(OSError):
-        m.main(["submit", str(_write_feature(tmp_path)),
-                "--report-dir", str(tmp_path / "reports"),
-                "--expose-local", "http://localhost:3000"])
-    assert _stops(calls) == [("stop", INFO.pid)]
-
-
-def test_submit_local_fork_failure_tears_down_tunnel(tmp_path, monkeypatch):
-    """local submit fork 推进进程抛 → 隧道无宿主（tunnel.json 在但没人读它），就地拆。"""
-    import pytest
-
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-
-    def boom(cmd, **kw):
-        raise OSError("Cannot allocate memory")
-
-    monkeypatch.setattr(subprocess, "Popen", boom)
-    with pytest.raises(OSError):
-        m.main(["submit", str(_write_feature(tmp_path)),
-                "--report-dir", str(tmp_path / "reports"),
-                "--expose-local", "http://localhost:3000"])
-    assert _stops(calls) == [("stop", INFO.pid)]
-
-
-def test_submit_local_failure_after_handoff_keeps_tunnel(tmp_path, monkeypatch):
-    """fork **成功之后**的收尾行抛（stdout 是坏管道、Ctrl-C 恰落此窗）→ **不拆**：宿主已经在运行，
-    拆了会让剩余 job 在被测应用不可达下运行成假失败（兜底反成失败源，还真实产生 AWS 费用）。"""
-    import builtins
-
-    import pytest
-
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-
-    class _FakeProc:
-        pid = 1
-
-    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: _FakeProc())
-    real_print = builtins.print
-
-    def only_stdout_breaks(*a, **kw):
-        if kw.get("file") is None:  # 进度走 stderr；打 run_id 那一次才是 stdout
-            raise BrokenPipeError("stdout 是坏管道")
-        real_print(*a, **kw)
-
-    monkeypatch.setattr(m, "print", only_stdout_breaks, raising=False)
-    with pytest.raises(BrokenPipeError):
-        m.main(["submit", str(_write_feature(tmp_path)),
-                "--report-dir", str(tmp_path / "reports"),
-                "--expose-local", "http://localhost:3000"])
-    assert _stops(calls) == []
-
-
-def test_submit_cloud_preflight_failure_tears_down_tunnel(tmp_path, monkeypatch, capsys):
-    """cloud submit 被 preflight 拦下（退出码 2，各道闸都在守护 fork 之前）→ 隧道无宿主可交棒，就地拆。"""
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    _patch_cloud_gates(monkeypatch, preflight_err="资源缺失：ECS cluster gherkai-cluster 不存在")
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+@pytest.mark.parametrize("missing", ["sdk", "token"])
+@pytest.mark.parametrize("argv", [["run", "--no-report"], ["submit"], ["submit", "--backend", "cloud"]],
+                         ids=["run", "submit-local", "submit-cloud"])
+def test_tunnel_prerequisites_are_checked_before_upload_background_process_and_aws(argv, missing, tmp_path, monkeypatch,
+                                                                                    capsys, inline_children):
+    """缺隧道组件或令牌：run、本机 submit、云端 submit 都在共享的前置里以退出码 2 结束，给出同一句；不补全运行定义（不上传、不比对
+    账号）、不解析 AWS 身份、不起后台进程、不落库，云端也没有解析后端。走真实的 NgrokTunnel，只对导入 SDK 那一处打桩。"""
+    if missing == "sdk":
+        def no_sdk():
+            raise ModuleNotFoundError("No module named 'ngrok'", name="ngrok")
+        monkeypatch.setattr(gtunnel, "_import_sdk", no_sdk)
+        sentence = ("--expose-local 要用的隧道组件没有安装。请在安装 gherkai 时加上 tunnel 组件后重新执行，"
+                    "例如 uv tool install 'gherkai[local,tunnel]'（已经装了别的组件的，要一并列出）。")
+    else:
+        sdk = types.SimpleNamespace(forward=_forbid("起隧道"), disconnect=_forbid("关闭会话"))
+        monkeypatch.setattr(gtunnel, "_import_sdk", lambda: sdk)
+        sentence = ("--expose-local 需要 ngrok 的令牌，但环境变量 NGROK_AUTHTOKEN 没有设置。"
+                    "请在 ngrok 控制台取得令牌，设置 NGROK_AUTHTOKEN 后重新执行。")
+    monkeypatch.setattr(m, "_complete_local_definition", _forbid("补全本机运行定义"))
+    monkeypatch.setattr(m, "_complete_cloud_definition", _forbid("补全云端运行定义"))
+    monkeypatch.setattr(m.compose, "resolve_aws_identity", _forbid("解析 AWS 身份"))
+    monkeypatch.setattr(m.compose, "resolve_cloud_target", _forbid("解析云端后端"))
+    monkeypatch.setattr(m, "schedule", _forbid("开始执行"))
+    reports = tmp_path / "reports"
+    rc = m.main([argv[0], str(_write_feature(tmp_path)), *argv[1:], "--report-dir", str(reports), "--expose-local", ORIGIN])
     assert rc == 2
     err = capsys.readouterr().err
-    assert "gherkai-cluster" in err
-    assert _stops(calls) == [("stop", INFO.pid)]
-    # 拆了必须说一声：这一格也可能是「已提交、只是没交上棒」（云端已接管、照常运行、照常计费），用户光看一个栈
-    # 或一行 rc=2 判断不出隧道已经没了。
-    assert "隧道已拆除" in err and "重新提交" in err
+    assert sentence in err.splitlines() and "Traceback" not in err
+    assert inline_children.children == [] and not reports.exists()
 
 
-def test_submit_cloud_target_resolution_failure_tears_down_tunnel(tmp_path, monkeypatch):
-    """--profile 打错这类解析失败是**抛**（不是退出码 2）、且在守护 fork 之前 → 同样就地拆。"""
-    import pytest
+# ---- 本机 submit：提交进程与后台推进进程（ADR 0035 决策 3「本机 `submit`」）----
 
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
+def test_local_submit_hands_over_to_the_advancer_which_builds_and_advances_the_run(tmp_path, monkeypatch, capsys,
+                                                                                    inline_children, tunnel_service,
+                                                                                    advanced):
+    """建成的一次：提交进程自己不建 run，以 `-P`、新会话启动后台推进进程，后台推进进程取创建时刻、起隧道、生成运行定义、建 run、
+    回报；提交进程的 stdout 只有 run 标识，stderr 有公网地址那一行与查进度的命令。推进用的是写进记录的那一份运行定义，推进结束后
+    会话被关闭。"""
+    monkeypatch.setattr(compose, "now", Clock(tunnel_service.events))
+    reports = tmp_path / "reports"
+    spawned: dict = {}
+    inline_children.on_spawn = lambda argv, kw: spawned.update(argv=argv, kw=kw, run_dirs=_run_dirs(reports))
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 0
+    (run_dir,) = _run_dirs(reports)
+    run_id = run_dir.name
+    assert cap.out == f"{run_id}\n"
+    assert ESTABLISHED in cap.err.splitlines()
+    assert f"已提交（本机后台推进中）。查进度：gherkai status {run_id} --report-dir {reports}" in cap.err
+    # 启动方式
+    argv, kw = spawned["argv"], spawned["kw"]
+    assert argv[:7] == [sys.executable, "-P", "-m", "gherkai_cli", "_reconcile", "--report-fd", argv[6]]
+    assert kw["pass_fds"] == (int(argv[6]),) and kw["stdout"] == 2 and kw["stderr"] == 2
+    assert kw["start_new_session"] is True
+    assert spawned["run_dirs"] == []  # 启动后台推进进程时还没有任何 run：提交进程自己不建 run
+    # 创建时刻先于起隧道；到点时刻是运行期限加 300 秒；run_id 的时间前缀取同一次读数
+    meta = LocalRunStore(reports).load_run_meta(run_id)
+    created = instant_from_iso(meta.created_at)
+    closes_at = tunnel_service.starts[0]["closes_at"]
+    assert tunnel_service.events.index(("now", created)) < tunnel_service.events.index(("start", closes_at))
+    assert closes_at == run_deadline.overdue_at(instant_from_iso(meta.deadline_at))
+    assert run_id.startswith(created.strftime("%Y%m%dT%H%M%SZ"))
+    assert meta.session_warmup_url == WARMUP and dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
+    assert f"{PUBLIC}/login" in meta.jobs[0].scenarios[0].steps[0].text
+    # 推进用的就是写进记录的那一份；运行态带后台执行标记（status --wait 据此认它可接力）
+    ((_advancer, advanced_meta),) = advanced
+    assert advanced_meta == meta
+    assert LocalRunStore(reports).is_detached(run_id)
+    assert (run_dir / "reconcile.log").exists() and (run_dir / "events.db").exists()
+    child = inline_children.only()
+    assert child.returncode == 0 and child.redirected.is_set()
+    assert tunnel_service.closed
 
-    def boom(**kw):
-        raise RuntimeError("The config profile (nope) could not be found")
 
-    monkeypatch.setattr(m.compose, "resolve_cloud_target", boom)
-    with pytest.raises(RuntimeError):
-        m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                "--profile", "nope", "--expose-local", "http://localhost:3000"])
-    assert _stops(calls) == [("stop", INFO.pid)]
-
-
-def _patch_cloud_commit(monkeypatch):
-    """再放行守护 fork 之前的最后两道：worker variant 解析与 runs 表写入（都不连 AWS）。
-
-    各自的判据在 test_backend_cloud.py 验；此处只为把用例推进到「守护已 fork」那一刻。
-    """
-    from gherkai_runtime.compose import WorkerResolution
-
-    monkeypatch.setattr(m.compose, "resolve_worker_variant",
-                        lambda *, engines, **kw: {
-                            e: WorkerResolution(engine=e, variant="base", revision_arn=f"arn:{e}:1",
-                                                digest="sha256:" + "0" * 64) for e in engines})
-
-    class _RunStore:
-        def create_run(self, meta, state):
-            pass
-
-    monkeypatch.setattr(m.compose, "build_cloud_stores",
-                        lambda **kw: (_RunStore(), object(), object()))
+def test_local_submit_without_expose_local_never_touches_the_tunnel(tmp_path, capsys, inline_children, tunnel_service,
+                                                                    advanced):
+    """不给 --expose-local：隧道服务一次都没有构造，没有公网地址那一行，照常建成。"""
+    reports = tmp_path / "reports"
+    rc = m.main(_local_submit_argv(tmp_path))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    (run_dir,) = _run_dirs(reports)
+    assert rc == 0 and cap.out == f"{run_dir.name}\n"
+    assert "隧道已建立" not in cap.err and tunnel_service.made == 0
+    assert LocalRunStore(reports).load_run_meta(run_dir.name).session_warmup_url is None
+    assert len(advanced) == 1
 
 
-def test_submit_cloud_keeps_tunnel_after_daemon_fork(tmp_path, monkeypatch, capsys):
-    """cloud submit 一路顺到守护 fork 成功 → **不拆**（对称于 local 的交棒边界用例）。
+def test_local_submit_tunnel_failure_is_reported_by_submit_and_builds_no_run(tmp_path, capsys, inline_children,
+                                                                             tunnel_service, advanced):
+    """后台推进进程起不来隧道：回报原因，提交进程原样打出那一句、退出码 2，stdout 为空；没有 run 目录，会话没有建成、没有关闭调用。"""
+    sentence = ("隧道没有建成：这个 ngrok 账号上另一条在线的隧道占用了同一个地址（ERR_NGROK_334）。"
+                "请等那条隧道下线之后再试；如果它属于另一个带 --expose-local 的 gherkai 运行，持有它的进程退出之后它就会下线。")
+    tunnel_service.start_error = gtunnel.TunnelError(sentence)
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert sentence in cap.err.splitlines() and "已提交" not in cap.err
+    assert _run_dirs(tmp_path / "reports") == [] and advanced == []
+    assert inline_children.only().returncode == 2 and not tunnel_service.closed
 
-    守护是云端后端隧道的唯一宿主：这里误拆等于让云端已接管的整个 run 的 job 在被测应用不可达下运行成假失败。
-    """
-    calls = []
-    _patch_tunnel(monkeypatch, calls)
-    _patch_cloud_gates(monkeypatch)
-    _patch_cloud_commit(monkeypatch)
-    forked = []
-    monkeypatch.setattr(subprocess, "Popen",
-                        lambda cmd, **kw: forked.append(cmd) or type("P", (), {"pid": 9})())
-    rc = m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud",
-                 "--region", "us-east-1", "--expose-local", "http://localhost:3000"])
+
+def test_local_submit_reports_when_the_advancer_exits_before_reporting(tmp_path, monkeypatch, capsys, inline_children,
+                                                                       tunnel_service, advanced):
+    """后台推进进程在回报之前崩溃（这里是生成运行定义时）：提交进程读到回报管道的文件结束，说明它退出了、可能已经建立 run、可以用
+    list-runs 查看，退出码 2；后台推进进程的 finally 照样关闭会话。"""
+    def boom(*a, **k):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(m, "_build_run_meta", boom)
+    reports = tmp_path / "reports"
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert ("后台推进进程在给出提交结果之前退出了（原因见上面的输出），提交没有完成。它退出之前可能已经建立了这个 run，"
+            f"可以用 gherkai list-runs --report-dir {reports} 查看。修好上面报出的问题之后请重新提交。") in cap.err
+    inline_children.only().expect_error(RuntimeError)
+    assert tunnel_service.closed and _run_dirs(reports) == [] and advanced == []
+
+
+def test_ctrl_c_while_waiting_lets_the_advancer_see_submit_gone_before_building_the_run(tmp_path, capsys,
+                                                                                       inline_children, tunnel_service,
+                                                                                       advanced, interrupt_submit):
+    """Ctrl-C 落在后台推进进程起隧道期间（它查 submit 是否还在之前）：提交进程关闭标准输入、说明已停止等待、以 130 结束；后台推进进程
+    查到标准输入读到文件结束，不建 run、不输出，关闭会话、以 2 退出。"""
+    marker = "已停止等待提交结果。"
+    tunnel_service.on_start = interrupt_submit(marker)
+    reports = tmp_path / "reports"
+    rc = _main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == ""
+    assert (f"{marker}后台推进进程还没有建立 run 的会自行退出、不再建立；已经建立的照常执行，"
+            f"可以用 gherkai list-runs --report-dir {reports} 找到它。") in cap.err
+    assert inline_children.only().returncode == 2
+    assert _run_dirs(reports) == [] and advanced == [] and tunnel_service.closed
+
+
+def test_submit_gone_after_the_check_leaves_the_run_advancing_with_a_log_line(tmp_path, monkeypatch, capsys,
+                                                                              inline_children, tunnel_service, advanced,
+                                                                              interrupt_submit):
+    """Ctrl-C 落在后台推进进程查过 submit 之后（装配期间）：run 已经建成，回报写不出去，后台推进进程照常推进，只在 reconcile.log 记一句；
+    提交进程以 130 结束。"""
+    marker = "已停止等待提交结果。"
+    interrupt = interrupt_submit(marker)
+    real_assemble = detached.assemble_local_run
+
+    def assemble_after_submit_left(*a, **k):
+        interrupt()
+        return real_assemble(*a, **k)
+
+    monkeypatch.setattr(detached, "assemble_local_run", assemble_after_submit_left)
+    reports = tmp_path / "reports"
+    rc = _main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    assert rc == 130 and capsys.readouterr().out == ""
+    (run_dir,) = _run_dirs(reports)
+    log = (run_dir / "reconcile.log").read_text(encoding="utf-8")
+    assert f"提交命令在收到提交结果之前已经退出；run {run_dir.name} 已经建立，照常执行。" in log
+    assert inline_children.only().returncode == 0 and len(advanced) == 1 and tunnel_service.closed
+
+
+def _fix_run_id(monkeypatch) -> None:
+    monkeypatch.setattr(compose, "new_run_id", lambda at=None: FIXED_RUN_ID)
+
+
+def _occupy_with_existing_run(reports: Path, monkeypatch) -> None:
+    _fix_run_id(monkeypatch)
+    (reports / FIXED_RUN_ID).mkdir(parents=True)
+    (reports / FIXED_RUN_ID / "run_state.json").write_text("{}", encoding="utf-8")
+
+
+def _occupy_with_a_file(reports: Path, monkeypatch) -> None:
+    _fix_run_id(monkeypatch)
+    reports.mkdir(parents=True)
+    (reports / FIXED_RUN_ID).write_text("not a directory", encoding="utf-8")
+
+
+def _break_assembly(reports: Path, monkeypatch) -> None:
+    _fix_run_id(monkeypatch)
+
+    def broken(*a, **k):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(detached, "assemble_local_run", broken)
+
+
+def _break_reconcile_log(reports: Path, monkeypatch) -> None:
+    _fix_run_id(monkeypatch)
+    real_assemble = detached.assemble_local_run
+
+    def assemble_then_block_the_log(meta, report_dir, **k):
+        parts = real_assemble(meta, report_dir, **k)
+        (Path(report_dir) / meta.run_id / "reconcile.log").mkdir()  # 日志的位置被一个目录占着：打开失败
+        return parts
+
+    monkeypatch.setattr(detached, "assemble_local_run", assemble_then_block_the_log)
+
+
+@pytest.mark.parametrize("arrange, expected", [
+    (_occupy_with_existing_run, f"run {FIXED_RUN_ID} 已经存在，没有重新建立。请重新执行这条命令。"),
+    (_occupy_with_a_file, "里写这个 run 的记录失败："),
+    (_break_assembly, f"run {FIXED_RUN_ID} 的记录已经写下，但在报告目录 {{reports}} 里准备执行用的文件失败：unable to open database file。"
+                      "还没有开始执行，这个 run 在记录里停在 pending。"),
+    (_break_reconcile_log, f"run {FIXED_RUN_ID} 的记录已经写下，但在报告目录 {{reports}} 里准备执行用的文件失败："),
+], ids=["run-exists", "record-not-written", "assembly-fails", "log-fails"])
+def test_local_submit_record_failures_are_reported_with_the_session_closed_first(arrange, expected, tmp_path,
+                                                                                 monkeypatch, capsys, inline_children,
+                                                                                 tunnel_service, advanced):
+    """建 run 的三类失败（run 已存在、记录还没有写下、记录已写下而装配或打开 reconcile.log 失败）：后台推进进程回报那一句，提交进程原样
+    打出、退出码 2、没有「已提交」，stdout 为空；后台推进进程写回报时会话已经关闭（先关会话再回报：submit 一退出使用者可能立刻重试）。"""
+    reports = tmp_path / "reports"
+    arrange(reports, monkeypatch)
+    closed_when_reported: list[bool] = []
+    real_write_all = handoff.write_all
+
+    def write_and_note(fd, data):
+        if threading.current_thread() is not threading.main_thread():  # 后台推进进程那一侧的写：只有回报
+            closed_when_reported.append(tunnel_service.closed)
+        return real_write_all(fd, data)
+
+    monkeypatch.setattr(handoff, "write_all", write_and_note)
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert expected.format(reports=reports) in cap.err and "已提交" not in cap.err and "Traceback" not in cap.err
+    assert closed_when_reported == [True]
+    assert inline_children.only().returncode == 2 and advanced == []
+    if arrange in (_break_assembly, _break_reconcile_log):
+        assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
+
+
+def test_local_submit_store_failure_while_advancing_is_logged_and_the_advancer_exits_1(tmp_path, monkeypatch, capsys,
+                                                                                      inline_children, tunnel_service):
+    """推进中读写本机运行记录失败：提交进程早已以 0 结束（已提交）；后台推进进程在 reconcile.log 记一句、以 1 退出，关闭会话。"""
+    def failing_advance(advancer, meta, **kw):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(detached, "advance_local_run", failing_advance)
+    reports = tmp_path / "reports"
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    assert rc == 0 and "已提交（本机后台推进中）" in capsys.readouterr().err
+    (run_dir,) = _run_dirs(reports)
+    log = (run_dir / "reconcile.log").read_text(encoding="utf-8")
+    assert f"run {run_dir.name} 读写本机的运行记录失败，后台推进已停止：No space left on device。" in log
+    assert inline_children.only().returncode == 1 and tunnel_service.closed
+
+
+def test_local_submit_cannot_start_the_advancer(tmp_path, capsys, inline_children, tunnel_service):
+    """起不来后台推进进程：一句说明、退出码 2，没有提交、没有起隧道。"""
+    inline_children.popen_error = OSError("Cannot allocate memory")
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert "无法启动后台推进进程：Cannot allocate memory。没有提交。" in cap.err
+    assert tunnel_service.starts == [] and _run_dirs(tmp_path / "reports") == []
+
+
+def test_advancer_uses_the_values_handed_over_and_reads_no_config_file(tmp_path, monkeypatch, capsys, inline_children,
+                                                                       advanced):
+    """后台推进进程不读配置文件（ADR 0053 决策 1）：配置文件给的 steps 目录与并发上限由 submit 解析后经标准输入交来；后台推进进程在另一个
+    工作目录（那里有别的配置文件与 steps 目录）里得到的仍是提交时的值。"""
+    project = tmp_path / "project"
+    (project / "mysteps").mkdir(parents=True)
+    (project / "gherkai.toml").write_text("[common]\nsteps-dir = 'mysteps'\nmax-concurrency = 3\n", encoding="utf-8")
+    elsewhere = tmp_path / "elsewhere"
+    (elsewhere / "steps").mkdir(parents=True)
+    (elsewhere / "gherkai.toml").write_text("[common]\nmax-concurrency = 7\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+    inline_children.before_child = lambda child: os.chdir(elsewhere)
+    reports = tmp_path / "reports"
+    rc = m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--region", "us-east-1"])
+    inline_children.settle()
     assert rc == 0, capsys.readouterr().err
-    assert any("_tunnel_watch" in c for c in forked)
-    assert _stops(calls) == []
+    (run_dir,) = _run_dirs(reports)
+    meta = LocalRunStore(reports).load_run_meta(run_dir.name)
+    assert meta.steps_dir == str((project / "mysteps").resolve()) and meta.max_concurrency == 3
+    assert advanced[0][1].steps_dir == meta.steps_dir
+
+
+# ---- 进程入口（真的启动子进程或读 fd 0，不起隧道）----
+
+@pytest.mark.parametrize("entry", ["_reconcile", "_tunnel_watch"])
+def test_background_entry_exits_2_silently_when_submit_left_before_handing_the_input(entry):
+    """后台进程读输入时读到文件结束（submit 在交完输入之前已不在）：不输出、不回报，以退出码 2 结束。真的以 `-P` 启动子进程。"""
+    report_r, report_w = os.pipe()
+    try:
+        proc = subprocess.run([sys.executable, "-P", "-m", "gherkai_cli", entry, "--report-fd", str(report_w)],
+                              stdin=subprocess.DEVNULL, capture_output=True, pass_fds=(report_w,), timeout=120)
+    finally:
+        os.close(report_w)
+    try:
+        reported = os.read(report_r, 4096)
+    finally:
+        os.close(report_r)
+    assert (proc.returncode, proc.stdout, proc.stderr, reported) == (2, b"", b"", b"")
+
+
+def test_building_the_parser_does_not_import_the_tunnel_sdk():
+    """隧道组件只在给了 --expose-local 时导入（ADR 0037 决策 2c）：导入命令行入口并建一次解析器之后 SDK 不在已导入的模块里。
+    同进程里别的用例可能已导入它，所以在子进程里查。"""
+    code = ("import sys, gherkai_runtime.tunnel, gherkai_cli.__main__ as m; m._build_parser(); "
+            "print('ngrok' in sys.modules)")
+    out = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, timeout=120, check=True)
+    assert out.stdout.strip() == "False"
+
+
+class _Fd0:
+    """把一条真实管道的读端接到本进程的 fd 0（测试结束时恢复）；`write` / `close_writer` 操作写端，关闭只做一次。"""
+
+    def __init__(self) -> None:
+        r, self._w = os.pipe()
+        self._saved = os.dup(0)
+        os.dup2(r, 0)
+        os.close(r)
+
+    def write(self, data: bytes) -> None:
+        assert handoff.write_all(self._w, data)
+
+    def close_writer(self) -> None:
+        if self._w is not None:
+            w, self._w = self._w, None
+            os.close(w)
+
+    def restore(self) -> None:
+        self.close_writer()
+        os.dup2(self._saved, 0)
+        os.close(self._saved)
+
+
+@pytest.fixture
+def fd0():
+    pipe = _Fd0()
+    try:
+        yield pipe
+    finally:
+        pipe.restore()
+
+
+def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_signal_handler(fd0, tunnel_service):
+    """`_tunnel_watch` 入口：回报描述符设为不可继承，从 fd 0 读输入、交给守护进程的主体；主体回报公网地址与预热地址，submit 没有交出
+    run 标识就关闭了标准输入时关闭会话、以 0 返回。入口不装信号处理器：SIGTERM、SIGHUP 仍是缺省处置（ADR 0035 决策 3）。"""
+    report_r, report_w = os.pipe()
+    os.set_inheritable(report_w, True)
+    fd0.write(handoff.encode_watch_input(handoff.WatchInput(
+        local_origin=ORIGIN, tunnel_provider="ngrok", closes_at=instant_to_iso(FAR_FUTURE), runs_table="T",
+        region="us-east-1", profile=None)))
+    reports: list = []
+
+    def read_report_then_close_stdin() -> None:
+        reports.append(handoff.read_line(report_r))
+        fd0.close_writer()
+
+    reader = threading.Thread(target=read_report_then_close_stdin, daemon=True)
+    reader.start()
+    try:
+        rc = m.main(["_tunnel_watch", "--report-fd", str(report_w)])
+        reader.join(5)
+        assert not os.get_inheritable(report_w)
+    finally:
+        os.close(report_w)
+        os.close(report_r)
+    assert rc == 0
+    report = handoff.decode_watch_report(reports[0])
+    assert (report.public_url, report.warmup_url, report.exit_code) == (PUBLIC, WARMUP, 0)
+    assert tunnel_service.closed
+    assert tunnel_service.starts[0]["closes_at"] == FAR_FUTURE
+    assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL and signal.getsignal(signal.SIGHUP) == signal.SIG_DFL
+
+
+def test_reconcile_entry_reads_its_input_from_stdin_and_reports_a_tunnel_failure(tmp_path, fd0, tunnel_service):
+    """`_reconcile` 入口：从 fd 0 读输入、交给后台推进进程的主体；起隧道失败时回报那一句与退出码 2，不建 run。"""
+    tunnel_service.start_error = gtunnel.TunnelError("隧道没有建成：x。")
+    job = Job(scope_id="s", scope_name="s", engine="novaact", timeout_s=300.0,
+              scenarios=(Scenario(id="t.feature:2", name="s", steps=(Step(0, "When", f"打开 {ORIGIN}/login"),)),))
+    reports = tmp_path / "reports"
+    fd0.write(handoff.encode_advancer_input(handoff.AdvancerInput(
+        jobs=(job,), steps_dir=None, max_concurrency=1, per_job_tail_s=310.0, expose_local=ORIGIN,
+        tunnel_provider="ngrok", region="us-east-1", profile=None, report_dir=str(reports))))
+    report_r, report_w = os.pipe()
+    try:
+        rc = m.main(["_reconcile", "--report-fd", str(report_w)])
+    finally:
+        os.close(report_w)
+    try:
+        report = handoff.decode_advancer_report(handoff.read_line(report_r))
+    finally:
+        os.close(report_r)
+    assert rc == 2
+    assert (report.run_id, report.exit_code, report.message) == (None, 2, "隧道没有建成：x。")
+    assert not reports.exists()
+
+
+# ---- 云端 submit 与隧道守护进程（ADR 0035 决策 3「云端 `submit`」）----
+
+@pytest.mark.parametrize("gate", ["skew", "preflight", "variant", "definition"])
+def test_cloud_gates_run_before_the_daemon_is_started(gate, tmp_path, monkeypatch, capsys, inline_children,
+                                                      tunnel_service):
+    """云端的各道闸（版本 skew、资源 preflight、worker variant、补全运行定义）任一拦下：退出码 2，守护进程没有启动、隧道没有起。"""
+    record: list = []
+    kwargs = {"skew": ("block", "后端版本更旧")} if gate == "skew" else {}
+    if gate == "preflight":
+        kwargs["preflight_err"] = "资源缺失：ECS cluster gherkai-cluster 不存在"
+    if gate == "variant":
+        kwargs["variant_err"] = compose.WorkerVariantError("这个 variant 没有推")
+    _patch_cloud_handles(monkeypatch, record, **kwargs)
+    if gate == "definition":
+        monkeypatch.setattr(m, "_complete_cloud_definition", lambda *a, **k: 2)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    assert rc == 2
+    assert inline_children.children == [] and tunnel_service.starts == []
+    assert ("ddb", "put_item") not in record
+
+
+@pytest.mark.parametrize("expose, expected", [(True, True), (False, False)], ids=["tunneled", "plain"])
+def test_cloud_version_gate_requires_a_stamp_when_expose_local_is_given(expose, expected, tmp_path, monkeypatch,
+                                                                       inline_children, tunnel_service):
+    """缺戳例外按有没有给 --expose-local 判断（版本闸早于起隧道，这时还没有预热地址可看，ADR 0037 决策 7）：桌面目标、不带隧道时不要求。"""
+    seen: list = []
+    _patch_cloud_handles(monkeypatch, [])
+    monkeypatch.setattr(m.compose, "check_version_skew", lambda *a, **kw: seen.append(kw) or ("ok", ""))
+    extra = ["--expose-local", ORIGIN] if expose else []
+    assert m.main(_cloud_submit_argv(tmp_path, *extra)) == 0
+    inline_children.settle()
+    assert [kw["requires_stamp"] for kw in seen] == [expected]
+
+
+def test_cloud_submit_with_tunnel_maps_the_definition_and_hands_the_run_id_to_the_daemon(tmp_path, monkeypatch, capsys,
+                                                                                         inline_children, tunnel_service):
+    """带隧道建成的一次：以 `-P`、新会话启动守护进程，它起隧道（到点时刻是运行期限加 300 秒）并回报；提交记录里的 job 已映射、带请求头
+    与预热地址；交出 run 标识之后守护进程照它轮询，读到终态即关闭会话。stdout 只有 run 标识，stderr 有公网地址那一行、守护进程那一句
+    （带日志位置）与查进度的命令。"""
+    record: list = []
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
+    spawned: dict = {}
+    inline_children.on_spawn = lambda argv, kw: spawned.update(argv=argv, kw=kw)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    meta = _definition(made["ddb_tables"][0])
+    run_id = meta["run_id"]
+    assert rc == 0 and cap.out == f"{run_id}\n"
+    argv, kw = spawned["argv"], spawned["kw"]
+    assert argv[:7] == [sys.executable, "-P", "-m", "gherkai_cli", "_tunnel_watch", "--report-fd", argv[6]]
+    assert kw["pass_fds"] == (int(argv[6]),) and kw["start_new_session"] is True
+    assert kw["stdout"] == 2 and kw["stderr"] == 2
+    assert meta["session_warmup_url"] == WARMUP
+    assert dict(meta["extra_http_headers"]) == {"ngrok-skip-browser-warning": "1"}
+    assert f"{PUBLIC}/login" in meta["jobs"][0]["scenarios"][0]["steps"][0]["text"]
+    assert tunnel_service.starts[0]["closes_at"] == run_deadline.overdue_at(instant_from_iso(meta["deadline_at"]))
+    watch_log = tmp_path / f"gherkai-tunnel-watch-{run_id}.log"
+    assert ESTABLISHED in cap.err.splitlines()
+    assert (f"隧道由本机的后台进程持有（日志 {watch_log}），它在 run 结束时关闭隧道。注意：本机需保持开机联网直到 run 终态——"
+            "关机或断网会断开隧道，之后要访问被测应用的 job 将以导航失败告终。") in cap.err
+    assert "已提交到云端（提交记录已落库，云端已接管推进）。查进度：gherkai status " in cap.err and "可关机" not in cap.err
+    child = inline_children.only()
+    assert child.returncode == 0 and tunnel_service.closed
+    assert child.notes[0].startswith(f"隧道已建立，等待 run {run_id} 结束（最晚到 ")
+    assert child.notes[-1] == f"run {run_id} 已结束（passed），隧道已关闭"
+    assert f"tunnel-watch: 隧道已建立，等待 run {run_id} 结束" in watch_log.read_text(encoding="utf-8")
+
+
+def test_cloud_submit_without_tunnel_starts_no_daemon(tmp_path, monkeypatch, capsys, inline_children, tunnel_service):
+    """不给 --expose-local：不启动守护进程、不碰隧道服务，提交记录里没有预热地址，提示可关机。"""
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
+    rc = m.main(_cloud_submit_argv(tmp_path))
+    cap = capsys.readouterr()
+    meta = _definition(made["ddb_tables"][0])
+    assert rc == 0 and cap.out == f"{meta['run_id']}\n"
+    assert "已提交到云端（提交记录已落库，云端已接管推进，可关机）" in cap.err
+    assert inline_children.children == [] and tunnel_service.made == 0 and meta["session_warmup_url"] is None
+
+
+def test_cloud_submit_builds_no_run_when_the_daemon_is_gone_before_the_check(tmp_path, monkeypatch, capsys,
+                                                                              inline_children, tunnel_service):
+    """守护进程回报之后、submit 建 run 之前退出（这里是它的墙钟已过到点时刻）：submit 对回报管道的读端读到文件结束，不建 run、退出码 2。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    inline_children.watch_kwargs["clock"] = lambda: FAR_FUTURE
+    real_gone = handoff.WatchChannel.daemon_gone
+
+    def gone_after_the_daemon_exits(self):
+        inline_children.only().wait()
+        return real_gone(self)
+
+    monkeypatch.setattr(handoff.WatchChannel, "daemon_gone", gone_after_the_daemon_exits)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。" in cap.err
+    assert ("ddb", "put_item") not in record
+    assert inline_children.only().returncode == 0 and tunnel_service.closed
+
+
+def test_cloud_submit_releases_the_daemon_before_reporting_a_failed_create(tmp_path, monkeypatch, capsys,
+                                                                           inline_children, tunnel_service):
+    """建 run 撞 AWS 错：退出码 2、一句诊断；打出诊断之前已关闭守护进程的标准输入（守护进程这时已关闭会话、退出）。"""
+    from botocore.exceptions import ClientError
+
+    _patch_cloud_handles(monkeypatch, [])
+    real_make = m.compose._make_ddb_table
+
+    def make_failing(table, *, region, profile):
+        t = real_make(table, region=region, profile=profile)
+
+        def boom_put(**kw):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "PutItem")
+
+        t.put_item = boom_put
+        return t
+
+    monkeypatch.setattr(m.compose, "_make_ddb_table", make_failing)
+    daemon_done_at_report: list[bool] = []
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        if a and "云端不可达" in str(a[0]):
+            daemon_done_at_report.append(inline_children.only().done.wait(5))
+        real_progress(*a, **k)
+
+    monkeypatch.setattr(m, "_progress", progress)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == "" and "已提交" not in cap.err
+    assert daemon_done_at_report == [True]
+    assert inline_children.only().returncode == 0 and tunnel_service.closed
+    assert inline_children.only().notes == []  # 守护进程没有收到 run 的标识
+
+
+def test_cloud_submit_still_succeeds_when_the_daemon_is_gone_after_the_check(tmp_path, monkeypatch, capsys,
+                                                                             inline_children, tunnel_service):
+    """查过之后守护进程才没了：run 已经建成、由云端推进，交出 run 标识写不进去；照常输出 run 标识、退出码 0，另说明隧道已不在。"""
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
+    gate = threading.Event()
+    real_now = compose.now
+    inline_children.watch_kwargs["clock"] = lambda: FAR_FUTURE if gate.is_set() else real_now()
+    real_hand_over = handoff.WatchChannel.hand_over
+
+    def hand_over_after_the_daemon_exits(self, run_id):
+        gate.set()
+        inline_children.only().wait()
+        return real_hand_over(self, run_id)
+
+    monkeypatch.setattr(handoff.WatchChannel, "hand_over", hand_over_after_the_daemon_exits)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    run_id = _definition(made["ddb_tables"][0])["run_id"]
+    assert rc == 0 and cap.out == f"{run_id}\n"
+    assert (f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（原因见上面的输出），隧道已不在："
+            "这个 run 里要访问被测应用的 job 会失败。修好原因之后请重新提交。") in cap.err
+    assert ESTABLISHED not in cap.err.splitlines()
+    assert "已提交到云端（提交记录已落库，云端已接管推进）。" in cap.err
+    assert tunnel_service.closed
+
+
+def test_ctrl_c_while_waiting_for_the_daemon_builds_no_run(tmp_path, monkeypatch, capsys, inline_children,
+                                                           tunnel_service, interrupt_submit):
+    """等守护进程回报时 Ctrl-C：「已停止提交，没有建立 run。」、130；守护进程回报写不出去，关闭会话、退出。"""
+    record: list = []
+    _patch_cloud_handles(monkeypatch, record)
+    tunnel_service.on_start = interrupt_submit("已停止提交，没有建立 run。")
+    rc = _main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == "" and "已停止提交，没有建立 run。" in cap.err
+    assert ("ddb", "put_item") not in record
+    assert inline_children.only().returncode == 0 and tunnel_service.closed
+
+
+class _InterruptedCreate:
+    """create_run 里被 Ctrl-C 打断的假 RunStore。"""
+
+    def create_run(self, meta, state):
+        raise KeyboardInterrupt
+
+
+@pytest.mark.parametrize("expose", [True, False], ids=["tunneled", "plain"])
+def test_ctrl_c_inside_create_run_says_the_run_may_exist(expose, tmp_path, monkeypatch, capsys, inline_children,
+                                                         tunnel_service):
+    """中断落在建 run 里面（给不给 --expose-local 都接）：说明 run 可能已经写入云端、给出确认用的命令，130，stdout 不输出；带隧道时
+    另说明隧道已经关闭，守护进程读到标准输入关闭即关闭会话。"""
+    _patch_cloud_handles(monkeypatch, [])
+    _fix_run_id(monkeypatch)
+    monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: (_InterruptedCreate(), object(), object()))
+    extra = ["--expose-local", ORIGIN] if expose else []
+    rc = _main(_cloud_submit_argv(tmp_path, *extra))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == ""
+    assert (f"提交被中断。run {FIXED_RUN_ID} 可能已经写入云端，可以用 gherkai list-runs --backend cloud --prefix "
+            in cap.err)
+    tunnel_clause = "隧道已经关闭，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。"
+    assert (tunnel_clause in cap.err) is expose
+    if expose:
+        assert inline_children.only().returncode == 0 and tunnel_service.closed
+
+
+def test_ctrl_c_after_create_run_before_handing_over_says_the_tunnel_closed(tmp_path, monkeypatch, capsys,
+                                                                            inline_children, tunnel_service):
+    """建 run 已经返回、交出 run 标识之前 Ctrl-C：说明 run 已经提交、隧道已经关闭，给出查进度的命令，130、stdout 不输出；
+    守护进程没有收到标识，读到标准输入关闭即关闭会话。"""
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
+
+    def interrupted_hand_over(self, run_id):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(handoff.WatchChannel, "hand_over", interrupted_hand_over)
+    rc = _main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    run_id = _definition(made["ddb_tables"][0])["run_id"]
+    assert rc == 130 and cap.out == ""
+    assert (f"run {run_id} 已经提交，提交命令随后被中断。隧道已经关闭，这个 run 里要访问被测应用的 job 会失败。"
+            f"查进度：gherkai status {run_id} --backend cloud --prefix ") in cap.err
+    child = inline_children.only()
+    assert child.returncode == 0 and child.notes == [] and tunnel_service.closed
+
+
+def test_ctrl_c_between_handing_over_and_noting_it_does_not_claim_the_tunnel_closed(tmp_path, monkeypatch, capsys,
+                                                                                    inline_children, tunnel_service):
+    """SIGINT 恰在 run 标识写进守护进程之后、submit 记下「交成了」之前到达：推迟到记下之后才按中断处理，所以说明里没有「隧道已随中断
+    关闭」——守护进程确实收到了标识，照常持有隧道到 run 结束。"""
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
+    real_hand_over = handoff.WatchChannel.hand_over
+
+    def hand_over_then_sigint(self, run_id):
+        delivered = real_hand_over(self, run_id)
+        signal.raise_signal(signal.SIGINT)
+        return delivered
+
+    monkeypatch.setattr(handoff.WatchChannel, "hand_over", hand_over_then_sigint)
+    rc = _main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    run_id = _definition(made["ddb_tables"][0])["run_id"]
+    assert rc == 130 and cap.out == ""
+    assert f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --backend cloud --prefix " in cap.err
+    assert "隧道已经关闭" not in cap.err
+    child = inline_children.only()
+    assert child.notes[0].startswith(f"隧道已建立，等待 run {run_id} 结束")
+    assert child.returncode == 0 and tunnel_service.closed
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler  # 推迟期间换上的处置已恢复
+
+
+def test_ctrl_c_while_printing_the_result_of_a_plain_cloud_submit(tmp_path, monkeypatch, capsys, inline_children):
+    """不带隧道、建 run 之后输出结果时 Ctrl-C：说明 run 已经提交、给出查进度的命令，不提隧道，130。"""
+    _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        if a and str(a[0]).startswith("已提交到云端"):
+            raise KeyboardInterrupt
+        real_progress(*a, **k)
+
+    monkeypatch.setattr(m, "_progress", progress)
+    rc = _main(_cloud_submit_argv(tmp_path))
+    cap = capsys.readouterr()
+    run_id = _definition(made["ddb_tables"][0])["run_id"]
+    assert rc == 130 and cap.out == ""
+    assert f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --backend cloud --prefix " in cap.err
+    assert "隧道" not in cap.err

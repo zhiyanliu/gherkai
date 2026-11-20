@@ -25,6 +25,7 @@ from importlib.metadata import version as _dist_version
 from pathlib import Path
 
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
+from gherkai_core.model import Job
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
 from gherkai_core.serialize import instant_to_iso
@@ -107,17 +108,23 @@ def engine_min_grace(engine_name: str) -> float:
     return float(query_capabilities(engine_name)["min_grace_s"])
 
 
-def new_run_id() -> str:
+def new_run_id(at: datetime | None = None) -> str:
     """生成一个 run_id（组合根职责，ADR 0027）。
 
-    对调用方不透明，只保证两点（ADR 0027「run_id：归集索引的主键」节）：**字典序即创建时间序**（创建时间取本机时钟，
-    精度到秒，同一秒内创建的 run 之间先后不定）与抗碰撞（随机尾）。`list-runs` 按 run_id 降序列出最近的 run、不另读时刻
+    at：创建时刻（带时区）；缺省时读一次 `now()`。建 run 的一方传它取的创建时刻那一次读数，不另读钟：本机后台推进进程里
+    创建时刻与生成运行定义之间隔着起隧道，另读一次会让 run_id 的时间前缀与记录里的 created_at 不是同一刻。
+
+    对调用方不透明，只保证两点（ADR 0027「run_id：归集索引的主键」节）：**字典序即创建时间序**（创建时间取 at 按 UTC 到秒，
+    同一秒内创建的 run 之间先后不定）与抗碰撞（随机尾）。`list-runs` 按 run_id 降序列出最近的 run、不另读时刻
     字段排序，依赖前一点（ADR 0041 决策七「排序」）：改格式时须保持定宽、按 UTC 由高位到低位排列的时间戳前缀。
     格式本身是 compose 实现细节、不入契约，形如 20260629T141207Z-a3f9c1。
     另保证不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id
     依赖这一点（scope_id 是用户文本、可能含 `#`），改格式时不得引入 `#`。
     """
-    ts = now().strftime("%Y%m%dT%H%M%SZ")
+    instant = now() if at is None else at
+    if instant.tzinfo is None:
+        raise ValueError(f"new_run_id 的创建时刻须带时区，收到 {instant!r}")
+    ts = instant.astimezone(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{ts}-{secrets.token_hex(3)}"
 
 
@@ -418,7 +425,7 @@ def build_engines(
 
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
     **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析在提交侧（取值顺序见该决策，
-    配置文件那一层见 ADR 0053 决策 2）、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运读回的值，**不自己解析
+    配置文件那一层见 ADR 0053 决策 2）、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运 definition 里的值，**不自己解析
     `./steps`**（三个宿主 CWD 各不相同，重解析必分叉）。None 表示无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
@@ -895,7 +902,7 @@ def cloud_run_list_location(*, prefix: str, region: str | None, table: str) -> d
 # （cli 是第一个调用者，WebUI 直接复用 build_local_stores / build_cloud_stores、不经 cli）。
 #   build_local_stores  -> (run_store, result_store, report_store, make_artifacts)
 #   build_cloud_stores  -> (run_store, result_store, report_store)
-#   local_result_store  -> 本机推进器用的判定存储（带保存重试），build_local_stores 与 detached.build_local_reconcile 共用
+#   local_result_store  -> 本机推进器用的判定存储（带保存重试），build_local_stores 与 detached.assemble_local_run 共用
 # make_artifacts(run_id, report_index) -> dict：前台 run 结束时把 --json 的 artifacts 落点指针组装成 file:// URI；
 #   report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。前台 run 只有本机后端（ADR 0016 决策 A），
 #   云端没有它的使用方；云端 run 的落点由 `cloud_artifact_locations` 给出（status 终态打印用）。
@@ -933,7 +940,7 @@ def local_result_store(root: str | Path) -> ResultStore:
     """本机推进器用的判定存储：本机文件存储外面套保存失败的退避重试（ADR 0030 决定三「保存明细失败」条）。
 
     本机的装配入口只有这一个：前台 run 与本机查询命令经 `build_local_stores`，后台推进进程与 status --wait 接力经
-    `detached.build_local_reconcile`，都调这里，推进器用的判定存储因此都带同一种重试。查询命令只读，读与探活原样转交给本机文件存储。
+    `detached.assemble_local_run`，都调这里，推进器用的判定存储因此都带同一种重试。查询命令只读，读与探活原样转交给本机文件存储。
     云端的组合根（`build_cloud_stores`）不套：云端保存失败让这次调用失败，由流的重试或之后的触发再做。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.result_store.retrying import RetryingResultStore
@@ -1000,7 +1007,7 @@ def resolve_aws_identity(region: str | None, profile: str | None, *, config_regi
     """AWS 身份解析链的唯一实现：profile 取 flag，缺则取 `AWS_PROFILE`，再缺取配置文件的 profile（ADR 0053 决策 2）；
     region 经 `resolve_region` 落实成具体字符串（配置文件层同样排在环境变量之后）。
 
-    `resolve_cloud_target` 与 `detached.build_local_reconcile` 都经此、不各写一份——两份就会漂移，
+    `resolve_cloud_target` 与 `detached.assemble_local_run` 都经此、不各写一份——两份就会漂移，
     而漂移的后果是同一个 run 在提交进程与后台宿主下拿到不同的 region/profile。
     解析顺序有依赖：profile 先定，region 的末级回落（profile config）要用它。
     region 可为 None（全 miss 即真无 region，按 `resolve_region` 的 fail-loud 口径原样透出、不在此兜）。
@@ -1409,10 +1416,12 @@ def _release_cmp(a: str, b: str) -> int | None:
     return (ra > rb) - (ra < rb)
 
 
-def run_requires_backend_stamp(meta) -> bool:
-    """这次 run 是否要求云端后端带版本戳（ADR 0037 决策 7 的缺戳例外）：带设备目标或会话预热地址即是——无戳的旧后端会丢掉
-    这两类字段，worker 只能把它变成空判定集或在 401 页上执行，旧归约端仍可能判 PASSED（ADR 0051 决策 13）。"""
-    return meta.session_warmup_url is not None or any(not j.target.is_desktop for j in meta.jobs)
+def run_requires_backend_stamp(jobs: Iterable[Job], *, tunneled: bool) -> bool:
+    """这次 run 是否要求云端后端带版本戳（ADR 0037 决策 7 的缺戳例外）：有 job 带设备目标，或给了 `--expose-local`（tunneled，
+    运行定义会带会话预热地址）即是——无戳的旧后端会丢掉这两类字段，worker 只能把它变成空判定集或在 401 页上执行，旧归约端仍可能
+    判 PASSED（ADR 0051 决策 13）。在生成运行定义之前按各 job 的目标与命令行参数对整次 run 判断（ADR 0035 决策 3「云端
+    `submit`」）：版本闸早于起隧道，那时还没有预热地址可看。"""
+    return tunneled or any(not j.target.is_desktop for j in jobs)
 
 
 def check_version_skew(ssm_version: str | None, cli_version: str | None, *, prefix: str,
@@ -1426,7 +1435,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None, *, pref
     判序——「无从比较」一律先于「比较结果」：
     1. **戳缺失**（`ssm_version` 为 None/空）→ 默认 warn + 提示部署方运行一次 `gherkai deploy` 写入（**不可一律判成退出码 2**，
        否则本机制之前部署的所有环境被 preflight 锁死，决策 7 明写要避免的后果）；**例外**：`requires_stamp=True`（本 run
-       带设备目标或会话预热地址，见 `run_requires_backend_stamp`）→ block、无放行口。两条缺戳消息都写出该部署的参数路径
+       带设备目标或给了 `--expose-local`，见 `run_requires_backend_stamp`）时判 block、无放行口。两条缺戳消息都写出该部署的参数路径
        `ssm_path(prefix, BACKEND_VERSION_KEY)`，使用方可直接复制去查（与 `_no_default_pointer_error` 同一写法），故 `prefix` 必给。
     2. **自身版本取不到**（`cli_version` 为 None：未装成包、从源码直接运行）→ skip。**`cli_version` 必给、不缺省成本包
        版本**：比的对象是「写任务定义那一方」（CLI）的版本，由调用点提供；editable 开发树里各包版本各自漂
@@ -1441,7 +1450,7 @@ def check_version_skew(ssm_version: str | None, cli_version: str | None, *, pref
     if not ssm_version:
         stamp_path = _names.ssm_path(prefix, _names.BACKEND_VERSION_KEY)
         if requires_stamp:
-            # 缺戳例外（决策 7）：带设备目标或会话预热地址的 run 不能提交给没有版本戳的旧后端——block 无放行口
+            # 缺戳例外（决策 7）：带设备目标或给了 --expose-local 的 run 不能提交给没有版本戳的旧后端——block 无放行口
             return SKEW_BLOCK, (
                 f"后端没有版本戳（SSM 参数 {stamp_path}），这个部署早于设备目标与会话预热功能，"
                 "带设备目标或使用 --expose-local 的 run 不能提交到它。请部署方先升级部署：gherkai deploy"
@@ -1794,7 +1803,7 @@ def read_task_def_stop_timeout(revision_arn: str, *, engine: str, region=None, p
 
 
 # Fargate 平台对 stopTimeout 的上限（秒）。与 deploy_aws 里的同名常量同值，但 runtime 不依赖 deploy_aws、不跨包 import。
-# 用途：tunnel_host.CLOUD_PER_JOB_MARGIN_S 按它给隧道守护 TTL 的每 job 余量里停止宽限一段记账（ADR 0035 决策 3）。
+# 用途：`deadline.CLOUD_PER_JOB_TAIL_S` 的停止宽限一段。
 FARGATE_STOP_TIMEOUT_MAX_S = 120
 
 

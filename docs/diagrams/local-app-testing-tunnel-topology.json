@@ -5,7 +5,15 @@
     "title": "隧道拓扑与流量方向",
     "output": "local-app-testing-tunnel-topology.html",
     "locale": "zh-CN",
-    "quality_profile": "showcase"
+    "quality_profile": "showcase",
+    "legend": {
+      "mode": "auto",
+      "entries": {
+        "backend": {
+          "label": "使用方一侧"
+        }
+      }
+    }
   },
   "components": [
     {
@@ -15,7 +23,7 @@
       "sublabel": "页面引用的外部域",
       "pos": [
         60,
-        90
+        40
       ],
       "size": [
         186,
@@ -28,8 +36,8 @@
       "label": "公网访问者",
       "sublabel": "不带凭据",
       "pos": [
-        360,
-        90
+        380,
+        40
       ],
       "size": [
         186,
@@ -43,7 +51,7 @@
       "sublabel": "两个后端共用",
       "pos": [
         60,
-        280
+        230
       ],
       "size": [
         186,
@@ -57,8 +65,8 @@
       "sublabel": "分配公网地址",
       "tag": "校验凭据",
       "pos": [
-        360,
-        280
+        380,
+        230
       ],
       "size": [
         186,
@@ -66,14 +74,14 @@
       ]
     },
     {
-      "id": "tunnel",
+      "id": "holder",
       "type": "backend",
-      "label": "隧道进程",
-      "sublabel": "出站长连",
-      "tag": "不开入站端口",
+      "label": "持有隧道的 gherkai 进程",
+      "sublabel": "run 命令或 submit 的后台进程",
+      "tag": "出站会话，不开入站端口",
       "pos": [
-        660,
-        280
+        700,
+        230
       ],
       "size": [
         186,
@@ -86,22 +94,8 @@
       "label": "被测应用",
       "sublabel": "本机或局域网主机",
       "pos": [
-        960,
-        280
-      ],
-      "size": [
-        186,
-        72
-      ]
-    },
-    {
-      "id": "cli",
-      "type": "frontend",
-      "label": "gherkai 命令行",
-      "sublabel": "启动隧道并换地址",
-      "pos": [
-        660,
-        440
+        1020,
+        230
       ],
       "size": [
         186,
@@ -130,8 +124,7 @@
       "kind": "region",
       "label": "CLI 所在机器",
       "wraps": [
-        "tunnel",
-        "cli"
+        "holder"
       ],
       "pad": 20
     }
@@ -145,24 +138,18 @@
       "variant": "emphasis"
     },
     {
-      "id": "into-tunnel",
+      "id": "into-session",
       "from": "edge",
-      "to": "tunnel",
+      "to": "holder",
       "label": "经隧道回本机",
       "variant": "emphasis"
     },
     {
       "id": "forward",
-      "from": "tunnel",
+      "from": "holder",
       "to": "app",
       "label": "转发到原始地址",
       "variant": "emphasis"
-    },
-    {
-      "id": "start-tunnel",
-      "from": "cli",
-      "to": "tunnel",
-      "label": "启动"
     },
     {
       "id": "direct-external",
@@ -187,8 +174,17 @@
       "title": "流量方向",
       "items": [
         "实线链是请求方向，响应沿同一路径返回",
-        "隧道为出站长连，本机不开入站端口",
-        "命令行负责启动隧道，不转发流量"
+        "隧道是 gherkai 进程里的一条会话，由这个进程向边缘发起出站连接，本机不开入站端口",
+        "没有独立的隧道进程，持有隧道的 gherkai 进程退出时隧道随之关闭"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "持有隧道的进程",
+      "items": [
+        "前台 run：执行这条命令的进程",
+        "本机 submit：后台推进进程",
+        "云端 submit：本机的隧道守护进程"
       ]
     },
     {

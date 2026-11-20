@@ -7,6 +7,7 @@ gherkai 的运行时装配层：拉起两个 AI 引擎的 worker、解析云端�
 ```bash
 uv add gherkai-runtime            # 或 pip install gherkai-runtime；需 Python ≥ 3.13
 uv add 'gherkai-runtime[aws]'     # 用到云端后端（DynamoDB / S3 / Fargate）时需要
+uv add 'gherkai-runtime[tunnel]'  # 用到 tunnel 模块的隧道（ngrok 的 Python SDK）时需要
 ```
 
 ## 最小用法
