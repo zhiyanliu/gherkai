@@ -1572,13 +1572,17 @@ def _allowed_filesystems_text() -> str:
 def _filesystem_rejected_message(check: "run_dir.BoundaryCheck") -> str:
     """本机后端的报告目录没有通过边界检查时的一句（ADR 0054 决策四）：前置检查里的那一次（`_check_report_dir_boundary`）与建 run 时被拒
     （`_run_record_failure` 收到的 `RunDirRejected`）同一函数，前台 `run` 与本机 `submit` 同一句。类型不在清单里时说出检测到的
-    类型（报告目录还不存在时另说按哪一层上级判断的）；判断不了时说出原因。原因、处理办法与清单三样都在句子里。"""
+    类型（报告目录还不存在时另说按哪一层上级判断的）；判断不了时说出原因。原因、处理办法与清单三样都在句子里。
+
+    判断不了时另给云端后端这条出路：原因可能在整台机器上（平台不是 macOS 或 Linux、读不到挂载信息），这时换哪个目录都判断不了。
+    这一句对判断不了的各种原因都一样，不按原因片段分支：原因片段只供人读。"""
     from gherkai_core.adapters.run_store import run_dir
 
     why = "在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。"
     move = f"请把报告目录（--report-dir 选项，或配置文件里的 report-dir）换到本机磁盘上的目录（{_allowed_filesystems_text()}）"
     if check.verdict is run_dir.Boundary.UNKNOWN:
-        return f"无法判断报告目录 {check.requested} 所在的文件系统（{check.unknown_reason}）：{why}{move}。"
+        return (f"无法判断报告目录 {check.requested} 所在的文件系统（{check.unknown_reason}）：{why}{move}"
+                "；仍然判断不了时可以改用云端后端。")
     if check.checked != check.requested:
         where = (f"报告目录 {check.requested} 还不存在，按最近一层已存在的上级 {check.checked} 判断，"
                  f"它所在的文件系统是 {check.fs_type}")
@@ -1618,6 +1622,26 @@ def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: b
         return _record_not_written_message(e, report_dir=report_dir)
     return (f"run {run_id} 的记录已经写下，但在报告目录 {report_dir} 里准备执行用的文件失败：{e}。"
             "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录的读写权限与剩余空间后重新执行。")
+
+
+# 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，以及建 run 期间改名之前
+_STOPPED_BEFORE_START = "已停止，没有开始执行。"
+
+
+def _run_creation_interrupted_message(report_root: "Path | None", run_id: str) -> str:
+    """前台 `run` 在建 run 的那一段（建 run、`--quiet` 的 worker 日志、建事件库）被 Ctrl-C 打断时的一句，按记录里的事实给出：这个 run
+    的运行态读得到（改名已经完成），说记录已经写下、停在 pending；读不到（改名之前被打断，或 `--no-report` 没有记录，这时
+    `report_root` 为 None），沿用 `_STOPPED_BEFORE_START`。不按 `persistence.begin` 是否返回判断：改名之后、`begin` 返回之前到达的
+    中断，run 已经建成而 begin 没有返回（ADR 0054 决策三）。读运行态本身失败时按读不到给出：两句都只说还没有开始执行，后一句不说
+    记录已写下。"""
+    if report_root is not None:
+        try:
+            state = compose.build_local_stores(report_dir=report_root)[0].load_run_state(run_id)
+        except (OSError, ValueError):
+            state = None
+        if state is not None:
+            return f"已停止：run {run_id} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
+    return _STOPPED_BEFORE_START
 
 
 def _per_job_tail_s(backend: str, grace_s: float) -> float:
@@ -3225,7 +3249,7 @@ def _cmd_run(args) -> int:
     except KeyboardInterrupt:
         # 起隧道期间按 Ctrl-C（最长为起隧道的时限）：还没有生成运行定义、没有落库，一句说明、130，与本机 submit 同一时段被中断时一样
         # 不打回溯。迟到建成的监听由起隧道的那个线程关闭，已经建成的会话随本进程退出消失
-        _progress("已停止，没有开始执行。")
+        _progress(_STOPPED_BEFORE_START)
         return 128 + signal.SIGINT
     if isinstance(tunneled, int):
         return tunneled
@@ -3269,6 +3293,8 @@ def _cmd_run(args) -> int:
     #     推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
     #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
     #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
+    #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：一句说明、130，不打回溯，按记录里的事实
+    #     分两种说法，见 _run_creation_interrupted_message。
     from gherkai_core.adapters.run_store import run_dir
 
     persistence: RunPersistence | None = None
@@ -3309,6 +3335,11 @@ def _cmd_run(args) -> int:
             raise  # 没有记录可写：这里的失败只会是系统临时目录里的 worker 日志，不是写记录失败
         _progress(_run_record_failure(e, report_dir=report_root, run_id=run_id, created=created))
         return 2
+    except KeyboardInterrupt:
+        if worker_log_fh is not None:
+            worker_log_fh.close()
+        _progress(_run_creation_interrupted_message(report_root if do_report else None, run_id))
+        return 128 + signal.SIGINT
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
     engines = compose.build_engines(

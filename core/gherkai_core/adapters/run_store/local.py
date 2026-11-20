@@ -22,8 +22,9 @@ project_state、commit_job_states、end_run 互斥，跨进程与进程内多线
 `status --wait` 接力）不靠调用方串行。短锁的锁文件 `.runstate.lock` 在第一次读改写时建出。它与生命期锁是两个对象（目录里的一个
 文件、目录本身），互不阻挡。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
 
-**名字规则**（`run_dir.is_run_name`）：run 标识即 run 目录的名字，不以点开头、不含路径分隔符、非空。create_run 拒绝不合规则的
-标识；按标识读写的各入口收到这样的标识按 run 不存在处理；list_runs 跳过名字不合规则的目录（含暂存目录与别的隐藏目录）。
+**名字规则**（`run_dir.is_run_name`）：run 标识即 run 目录的名字，不以点开头、不含路径分隔符、非空、按文件系统编码不超过
+255 字节。create_run 拒绝不合规则的标识；按标识读写的各入口收到这样的标识按 run 不存在处理；list_runs 跳过名字不合规则的目录
+（含暂存目录与别的隐藏目录）。
 
 **顶层附加键整体保留**（ADR 0030 决定四「local 的顶层附加键整体保留」）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
 如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
@@ -202,7 +203,8 @@ class LocalRunStore:
         if self._lock_holder is None:
             raise RuntimeError("这个 LocalRunStore 没有注入锁的持有者，不能建 run：只有推进 run 的进程构造带持有者的 store")
         if not run_dir.is_run_name(meta.run_id):
-            raise ValueError(f"run 标识 {meta.run_id!r} 不能用作本机 run 目录的名字：不能为空、不能以点开头、不能含路径分隔符")
+            raise ValueError(f"run 标识 {meta.run_id!r} 不能用作本机 run 目录的名字：不能为空、不能以点开头、不能含路径分隔符、"
+                             f"按文件系统编码不能超过 {run_dir.RUN_NAME_MAX_BYTES} 字节")
         extras = {"detached": True} if self._detached else {}
 
         def write(staging: Path) -> None:

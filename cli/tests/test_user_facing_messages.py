@@ -328,17 +328,64 @@ def test_no_internal_pointers_in_user_facing_text():
     )
 
 
+def _unknown_reasons() -> list[str]:
+    """边界检查判断不了时的全部原因片段：从 `run_dir.py` 的源码里取，凡交给 `FilesystemUnknown(...)` 的、凡作为 `BoundaryCheck(...)`
+    第五个参数（`unknown_reason`）的字符串都算。名字按模块里的常量取值；f-string 的插值处代入一段系统错误文字（`os.strerror` 给出的
+    那种）。从源码里取而不在这里列：新加的片段不会因为没有登记而漏过整句的检查。"""
+    import os
+
+    from gherkai_core.adapters.run_store import run_dir
+
+    tree = ast.parse(Path(run_dir.__file__).read_text(encoding="utf-8"))
+    sample_error = os.strerror(13)
+
+    def text_of(node: ast.expr) -> str | None:
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            return node.value
+        if isinstance(node, ast.Name):
+            value = getattr(run_dir, node.id, None)
+            return value if isinstance(value, str) else None
+        if isinstance(node, ast.JoinedStr):
+            return "".join(v.value if isinstance(v, ast.Constant) else sample_error for v in node.values)
+        return None
+
+    reasons: list[str] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            continue
+        if node.func.id == "FilesystemUnknown" and node.args:
+            arg = node.args[0]
+        elif node.func.id == "BoundaryCheck" and len(node.args) == 5:
+            arg = node.args[4]
+        else:
+            continue
+        text = text_of(arg)
+        if text is not None and text not in reasons:
+            reasons.append(text)
+    return reasons
+
+
+def test_every_unknown_reason_in_the_boundary_check_is_found():
+    """取原因片段的那一步没有失效：每个模块级的原因常量都取到了，另有带系统错误文字的那几种。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    reasons = _unknown_reasons()
+    assert {run_dir._OTHER_PLATFORM, run_dir._INCOMPLETE, run_dir._NO_MOUNT, run_dir._NO_QUERY} <= set(reasons), reasons
+    assert any(r.startswith("读不到挂载信息：") for r in reasons) and any(r.startswith("查询文件系统失败：") for r in reasons)
+
+
 def _report_dir_sentences() -> list[str]:
-    """本机建 run 被拒与失败时 cli 拼出的整句：报告目录不合要求的三种（类型不在清单里、还不存在而上级的类型不在清单里、判断不了）、
-    锁不可用、暂存目录连续被占用。原因片段本身是边界检查里的字面量，由上面的字面量扫描覆盖，这里取一个有代表性的。"""
+    """本机建 run 被拒与失败时 cli 拼出的整句：报告目录不合要求的几种（类型不在清单里、还不存在而上级的类型不在清单里、判断不了时
+    每一种原因各一句）、锁不可用、暂存目录连续被占用。"""
     import errno
 
     from gherkai_cli import __main__ as m
     from gherkai_core.adapters.run_store import run_dir
 
     checks = [run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports", "/r/reports", "nfs", None),
-              run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports", "/r", "smbfs", None),
-              run_dir.BoundaryCheck(run_dir.Boundary.UNKNOWN, "/r/reports", "/r", None, "读不到挂载信息：Permission denied")]
+              run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports", "/r", "smbfs", None)]
+    checks += [run_dir.BoundaryCheck(run_dir.Boundary.UNKNOWN, "/r/reports", "/r", None, reason)
+               for reason in _unknown_reasons()]
     failures = [run_dir.LifetimeLockUnavailable(errno.ENOLCK, "No locks available", "/r/reports"),
                 run_dir.StagingContended("/r/reports", run_dir.STAGING_ATTEMPTS)]
     rejected = [m._filesystem_rejected_message(c) for c in checks]
@@ -350,11 +397,11 @@ def _report_dir_sentences() -> list[str]:
 
 def test_report_dir_sentences_carry_no_internal_pointers_or_emphasis():
     """本机建 run 的拒绝与失败那几句是拼出来的（清单片段由放行清单拼出、原因片段来自边界检查），只扫字面量看不到整句：这里按实际
-    给出的整句再判一次禁词与强调记号，另核它们不带内部的类型名与系统调用名。"""
+    给出的整句再判一次禁词与强调记号，另核它们不带内部的类型名与系统调用名。判断不了的那一句对每一种原因片段各判一次。"""
     internal = re.compile(r"RunDirRejected|LifetimeLock|StagingContended|BoundaryCheck|flock|fstatfs|mountinfo|fdinfo"
                           r"|filesystem_type|check_fd|run_dir|STAGING|\bINSIDE\b|\bOUTSIDE\b|\bUNKNOWN\b")
     sentences = _report_dir_sentences()
-    assert len(set(sentences)) == len(sentences) == 5
+    assert len(set(sentences)) == len(sentences) == 2 + len(_unknown_reasons()) + 2
     for s in sentences:
         assert not FORBIDDEN.search(s) and not EMPHASIS.search(s) and not internal.search(s), s
 

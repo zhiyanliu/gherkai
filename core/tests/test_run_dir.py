@@ -14,6 +14,7 @@ import fcntl
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -83,6 +84,9 @@ def _same_inode(fd: int, path: Path) -> bool:
 @pytest.mark.parametrize("name, ok", [
     ("20260629T141207Z-a3f9c1", True), ("run-1", True), ("r", True),
     ("", False), (".x", False), (".gherkai-creating-0123456789abcdef", False), ("..", False), ("a/b", False),
+    # 长度按文件系统编码的字节数计，上限 255：多字节的字符按编码之后的长度算
+    ("a" * 255, True), ("a" * 256, False), ("a" * 300, False), ("é" * 127, True), ("é" * 128, False),
+    ("a\ud800", False),  # 按文件系统编码编不出来：不是 run 标识，也不抛编码错误
 ])
 def test_is_run_name(name, ok):
     assert run_dir.is_run_name(name) is ok
@@ -259,7 +263,10 @@ def test_darwin_read_back_that_fails_the_sanity_check_cannot_be_judged(monkeypat
 
 @pytest.mark.real_filesystem
 def test_the_detected_type_matches_an_independent_tool(tmp_path):
-    """真实的取法与系统自带工具对同一个目录给出的类型相同：macOS 由 df 取挂载点、mount 取它的类型，Linux 由 findmnt。"""
+    """真实的取法与系统自带工具对同一个目录给出的类型相同：macOS 由 df 取挂载点、mount 取它的类型，Linux 由 findmnt。精简的 Linux
+    环境（如容器）可能没有装 findmnt，这时取不到对照值，跳过。"""
+    if sys.platform == "linux" and shutil.which("findmnt") is None:
+        pytest.skip("这台机器上没有 findmnt（属于 util-linux），取不到对照值")
     fd = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
     try:
         detected = _REAL_FILESYSTEM_TYPE(fd)
@@ -277,6 +284,25 @@ def test_the_detected_type_matches_an_independent_tool(tmp_path):
         assert out.stdout.strip() == detected
     else:
         pytest.skip("只核 macOS 与 Linux")
+
+
+# 两个平台上不用挂载就有的、不在清单里的文件系统：macOS 的 /dev（devfs），Linux 的 /proc（proc）
+_PSEUDO_FILESYSTEM = {"darwin": ("/dev", "devfs"), "linux": ("/proc", "proc")}
+
+
+@pytest.mark.real_filesystem
+def test_the_real_detection_rejects_a_pseudo_filesystem_of_the_kernel():
+    """真实内核上的拒绝：真实的取法对 macOS 的 /dev 给出 devfs、对 Linux 的 /proc 给出 proc，边界检查判为不在边界之内。取法坏成
+    一律给出清单里的类型时，这条变红。"""
+    if sys.platform not in _PSEUDO_FILESYSTEM:
+        pytest.skip("只核 macOS 与 Linux")
+    path, expected = _PSEUDO_FILESYSTEM[sys.platform]
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert _REAL_FILESYSTEM_TYPE(fd) == expected
+    finally:
+        os.close(fd)
+    assert run_dir.check_report_dir(Path(path)) == run_dir.BoundaryCheck(Boundary.OUTSIDE, path, path, expected, None)
 
 
 # ============================================================================
@@ -452,6 +478,30 @@ def test_staging_directories_held_by_another_open_are_left_alone_and_a_new_name_
     finally:
         for fd in held:
             os.close(fd)
+
+
+def test_a_staging_name_already_taken_is_left_alone_and_a_new_name_is_tried(tmp_path, monkeypatch, lock_holder):
+    """暂存目录的名字已被占用（建它的那一次 mkdir 得到「已存在」，那个目录是别人的）：不动它，换名，建成；先前那个目录原样留着。
+    注入只换 `os.mkdir`：第一次对暂存名字真的先建出那个目录、在里面放一个文件，再抛「已存在」，像另一个进程抢先建了同名的目录。"""
+    real_mkdir = os.mkdir
+    taken: list[tuple[str, int]] = []
+
+    def mkdir(path, *args, **kwargs):
+        if _staging(path) and not taken:
+            real_mkdir(path, *args, **kwargs)
+            (Path(path) / "theirs").write_bytes(b"x")
+            taken.append((os.path.basename(os.fspath(path)), os.stat(path).st_ino))
+            raise FileExistsError(errno.EEXIST, os.strerror(errno.EEXIST), os.fspath(path))
+        return real_mkdir(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "mkdir", mkdir)
+    root = tmp_path / "runs"
+    LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    [(first, ino)] = taken
+    assert sorted(os.listdir(root)) == sorted([first, "r"])
+    assert os.stat(root / first).st_ino == ino and _tree(root / first) == {"theirs": b"x"}
+    [fd] = lock_holder.fds
+    assert _same_inode(fd, root / "r") and _try(root / "r") is LockState.HELD
 
 
 def test_three_held_staging_directories_end_in_contention(tmp_path, monkeypatch, lock_holder):

@@ -164,7 +164,7 @@ class RunStore(Protocol):
         本机实现另有三类失败（ADR 0054 决策三、四；类型在 `adapters/run_store/run_dir`）：报告目录所在的文件系统不合要求
         （`RunDirRejected`）、取生命期锁出错（`LifetimeLockUnavailable`）、建 run 用的暂存目录连续被别的进程占用
         （`StagingContended`）。本机实现还要求构造时注入锁的持有者（没有即 RuntimeError），并拒绝不能用作目录名的 run 标识
-        （空的、以点开头的、含路径分隔符的，ValueError），都什么都不建。
+        （空的、以点开头的、含路径分隔符的、按文件系统编码超过 255 字节的，ValueError），都什么都不建。
         """
         ...
 

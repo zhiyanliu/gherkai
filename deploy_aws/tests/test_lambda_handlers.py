@@ -200,8 +200,8 @@ def _host_independent_filesystem_type(monkeypatch):
 
 class _ReleaseAtOnce:
     """建 run 用的锁持有者：收到持生命期锁的描述符即关闭（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）。这里的用例只要
-    `create_run` 写下的记录，本机的生命期锁不在测试范围内，所以不留着它，用例结束之后也没有打开的描述符。边界检查用宿主真实的
-    文件系统类型。"""
+    `create_run` 写下的记录，本机的生命期锁不在测试范围内，所以不留着它，用例结束之后也没有打开的描述符。边界检查经上面的自动
+    夹具取本平台清单的第一项。"""
 
     def hold(self, fd: int) -> None:
         os.close(fd)

@@ -1,7 +1,7 @@
 """本机 run 目录的存储形态：名字规则、建 run 的暂存与改名、生命期锁、边界检查（ADR 0030 决定四，ADR 0054 决策三、四）。
 
 - **名字规则**（`is_run_name`）：run 标识即 run 目录的名字，读写两侧共用同一条规则。以点开头的名字留给暂存目录，列举与按
-  标识的读写都不认它们，建 run 也拒绝这样的标识。
+  标识的读写都不认它们，建 run 也拒绝这样的标识；按文件系统编码超过 `RUN_NAME_MAX_BYTES` 字节的名字同样不是 run 标识。
 - **建 run**（`create_run_dir`）：先对报告目录做一次边界检查；再在报告目录里建暂存目录（`STAGING_PREFIX` 加随机尾），以只读
   方式打开它，对这次打开的描述符做边界检查、取排他的 `flock`，核对名字仍指向打开的那个目录；然后写记录，写完才原子改名成
   run 标识，最后把描述符交给持有者。锁随这次打开留在改名之后的 run 目录上；取锁与写两个文件都在改名之前做，试拿的一方只碰以
@@ -35,6 +35,9 @@ from gherkai_core.errors import RunAlreadyExists
 
 STAGING_PREFIX: Final = ".gherkai-creating-"  # 后接 secrets.token_hex(8)
 STAGING_ATTEMPTS: Final = 3
+# 一层目录名的长度上限，按文件系统编码的字节数计：Linux 清单里的类型以 255 字节为限，APFS 以 255 个字符为限，取 255 字节在两个
+# 平台上都建得出。超过系统上限的名字建不出目录，按路径读写时系统调用以「文件名太长」失败
+RUN_NAME_MAX_BYTES: Final = 255
 # 本机后端放行的文件系统类型，按 sys.platform 分；有序，给使用者的说明里的清单按这个次序拼出。只收照 ADR 0054 决策三的理由
 # 实测过的类型，先实测再加（决策四「边界检查」一条）
 ALLOWED_FILESYSTEMS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
@@ -46,11 +49,19 @@ ALLOWED_FILESYSTEMS: Final[Mapping[str, tuple[str, ...]]] = MappingProxyType({
 _OTHER_PLATFORM = "这个平台不是 macOS 或 Linux"
 _INCOMPLETE = "系统返回的文件系统信息不完整"
 _NO_MOUNT = "挂载信息里找不到这个目录所在的挂载"
+_NO_QUERY = "查询文件系统失败：系统库里没有查询文件系统的接口"
 
 
 def is_run_name(name: str) -> bool:
-    """本机 run 目录的名字规则，读写两侧共用：非空、不以「.」开头、不含「/」（ADR 0030 决定四「run 标识即 run 目录的名字」条）。"""
-    return bool(name) and not name.startswith(".") and "/" not in name
+    """本机 run 目录的名字规则，读写两侧共用：非空、不以「.」开头、不含「/」、按文件系统编码不超过 `RUN_NAME_MAX_BYTES` 字节
+    （ADR 0030 决定四「run 标识即 run 目录的名字」条）。超长的名字按 run 不存在处理，读写入口因此不会以「文件名太长」失败；编码
+    不出来的名字同样不是 run 标识。"""
+    if not name or name.startswith(".") or "/" in name:
+        return False
+    try:
+        return len(os.fsencode(name)) <= RUN_NAME_MAX_BYTES
+    except UnicodeEncodeError:
+        return False
 
 
 # ---- 边界检查（ADR 0054 决策四） ----
@@ -119,7 +130,7 @@ def _darwin_fstatfs():
 def _darwin_fs_type(fd: int) -> str:
     fstatfs = _darwin_fstatfs()
     if fstatfs is None:
-        raise FilesystemUnknown("查询文件系统失败：系统库里没有 fstatfs")
+        raise FilesystemUnknown(_NO_QUERY)
     buf = _StatFS()
     if fstatfs(fd, ctypes.byref(buf)) != 0:
         raise FilesystemUnknown(f"查询文件系统失败：{os.strerror(ctypes.get_errno())}")

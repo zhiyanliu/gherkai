@@ -6,15 +6,21 @@
 
 - 调用或引用 `os.fork`、`os.forkpty`、`pty.fork`；
 - 导入或引用 `multiprocessing`、`concurrent.futures` 的进程池（`ProcessPoolExecutor` 与它所在的 `concurrent.futures.process`）；
+- 从 `os`、`pty` 一次导入全部名字（`from os import *`）：之后的裸名调用认不出来源；
 - `os.set_inheritable` 的第二个参数不是字面量 `False`；
 - `os.dup2`（复制出的号缺省可继承），只放行把日志接到标准输入、标准输出、标准错误的 `handoff.redirect_output`；`posix_spawn`
   的 `POSIX_SPAWN_DUP2` 同类；
-- `fcntl.fcntl` 的不带 CLOEXEC 的复制（`F_DUPFD`），以及 `F_SETFD` 设的值不是 `FD_CLOEXEC`（清掉 CLOEXEC）；
-- `subprocess` 与 `asyncio` 起子进程的各入口带 `close_fds`、而值不是字面量 `True`（收紧项：实测它单独不延长持有）。
+- `fcntl.fcntl` 的第二个参数不是 `fcntl` 模块的具名常量（数字写的命令认不出是不是复制或改标志），不带 CLOEXEC 的复制
+  （`F_DUPFD`），以及 `F_SETFD` 设的值不是 `FD_CLOEXEC`（清掉 CLOEXEC）；
+- `subprocess` 与 `asyncio` 起子进程的各入口，以及任何对象上名为 `subprocess_exec`、`subprocess_shell` 的方法（事件循环的
+  入口），带 `close_fds`、而值不是字面量 `True`，含按位置传给 `subprocess` 各入口的（收紧项：实测它单独不延长持有）；
+- 继承 `subprocess.Popen` 的类：子类可以改掉起子进程时对描述符的处理。
 
-名字经导入别名还原（`import subprocess as _sp`、`from os import fork as f` 都认得出）；没有经导入绑定的局部名不算。C 扩展里的
-写法与经 `getattr`、`**kwargs` 拼出的调用扫描看不见，由真实执行覆盖（ADR 0054 决策三）。扫描器本身另有逐条的正反用例，扫描面
-失效（目录不在、放行登记找不到对应的位置）即失败，不静默空扫。
+`posix` 模块按 `os` 认（`os` 的这些函数就来自它）。名字经导入别名还原（`import subprocess as _sp`、`from os import fork as f`
+都认得出）；没有经导入绑定的局部名不算。扫描看不见、由真实执行覆盖的写法（ADR 0054 决策三）：经 `getattr` 或 `*args`、`**kwargs`
+拼出的调用；把函数先赋给变量再调用（如 `inherit = os.set_inheritable`）；经别的模块转手取到的名字（如 `shutil.os.fork`）；经
+`ctypes` 调 libc；经 `importlib` 动态导入；C 扩展里的写法。扫描器本身另有逐条的正反用例，扫描面失效（目录不在、放行登记找不到
+对应的位置）即失败，不静默空扫。
 """
 from __future__ import annotations
 
@@ -33,10 +39,22 @@ DUP2_ALLOWED = {("runtime/gherkai_runtime/handoff.py", "redirect_output")}
 _FORK = {"os.fork", "os.forkpty", "pty.fork"}
 _PROCESS_POOL = {"concurrent.futures.ProcessPoolExecutor", "concurrent.futures.process"}
 _SPAWN_DUP2 = {"os.POSIX_SPAWN_DUP2"}
-_CHILD_ENTRIES = {
+_NO_STAR_IMPORT = {"os", "pty"}  # 从这些模块一次导入全部名字之后，fork 一类的裸名调用认不出来源
+# subprocess 的各入口：它们的位置参数都原样交给 Popen，close_fds 是第 8 个
+_SUBPROCESS_ENTRIES = {
     "subprocess.Popen", "subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output",
-    "asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell",
 }
+_CLOSE_FDS_INDEX = 7
+_CHILD_ENTRIES = _SUBPROCESS_ENTRIES | {"asyncio.create_subprocess_exec", "asyncio.create_subprocess_shell"}
+# 事件循环起子进程的方法：接收者是运行时才有的循环对象，名字经导入还原不出来，所以按方法名认，不论接收者
+_LOOP_CHILD_METHODS = {"subprocess_exec", "subprocess_shell"}
+
+
+def _canonical(name: str) -> str:
+    """`posix` 按 `os` 认：`os` 的进程与描述符函数就是从 `posix` 取来的同一批。"""
+    if name == "posix" or name.startswith("posix."):
+        return "os" + name[len("posix"):]
+    return name
 
 
 @dataclass
@@ -57,13 +75,13 @@ def _import_aliases(tree: ast.AST) -> dict[str, set[str]]:
         if isinstance(node, ast.Import):
             for a in node.names:
                 if a.asname:
-                    aliases.setdefault(a.asname, set()).add(a.name)
+                    aliases.setdefault(a.asname, set()).add(_canonical(a.name))
                 else:
                     top = a.name.split(".")[0]
-                    aliases.setdefault(top, set()).add(top)
+                    aliases.setdefault(top, set()).add(_canonical(top))
         elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
             for a in node.names:
-                aliases.setdefault(a.asname or a.name, set()).add(f"{node.module}.{a.name}")
+                aliases.setdefault(a.asname or a.name, set()).add(_canonical(f"{node.module}.{a.name}"))
     return aliases
 
 
@@ -98,6 +116,14 @@ class _Scanner(ast.NodeVisitor):
     visit_FunctionDef = _visit_function
     visit_AsyncFunctionDef = _visit_function
 
+    # ---- 类 ----
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        for base in node.bases:
+            if "subprocess.Popen" in self._names(base):
+                self._hit(node, "继承 subprocess.Popen 的类（子类可以改掉起子进程时对描述符的处理）")
+        self.generic_visit(node)
+
     # ---- 导入 ----
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -110,7 +136,9 @@ class _Scanner(ast.NodeVisitor):
             if _is_multiprocessing(node.module):
                 self._hit(node, f"从 {node.module} 导入")
             for a in node.names:
-                full = f"{node.module}.{a.name}"
+                if a.name == "*" and _canonical(node.module) in _NO_STAR_IMPORT:
+                    self._hit(node, f"从 {node.module} 导入全部名字（之后的裸名调用认不出来源）")
+                full = _canonical(f"{node.module}.{a.name}")
                 if full in _FORK | _PROCESS_POOL:
                     self._hit(node, f"导入 {full}")
 
@@ -146,19 +174,31 @@ class _Scanner(ast.NodeVisitor):
             self.scan.dup2_sites.add(site)
             if site not in DUP2_ALLOWED:
                 self._hit(node, "os.dup2（复制出的号缺省可继承）")
-        if "fcntl.fcntl" in names and len(node.args) >= 2:
-            cmd = self._names(node.args[1])
+        if "fcntl.fcntl" in names:
+            cmd = self._names(node.args[1]) if len(node.args) >= 2 else set()
+            if not any(n.startswith("fcntl.") and n[len("fcntl."):].isupper() for n in cmd):
+                # 数字写的命令（如 0 即 F_DUPFD、2 即 F_SETFD）或变量：认不出是不是复制描述符、改它的标志
+                self._hit(node, "fcntl.fcntl 的第二个参数不是 fcntl 模块的具名常量")
             if "fcntl.F_DUPFD" in cmd:
                 self._hit(node, "fcntl.fcntl 的 F_DUPFD（不带 CLOEXEC 的复制）")
             if "fcntl.F_SETFD" in cmd:
                 value = node.args[2] if len(node.args) > 2 else None
                 if value is None or "fcntl.FD_CLOEXEC" not in self._names(value):
                     self._hit(node, "fcntl.fcntl 的 F_SETFD 设的值不是 FD_CLOEXEC")
-        if names & _CHILD_ENTRIES:
+        entries = sorted(names & _CHILD_ENTRIES)
+        if not entries and isinstance(node.func, ast.Attribute) and node.func.attr in _LOOP_CHILD_METHODS:
+            entries = [node.func.attr]
+        if entries:
             self.scan.child_entries += 1
             for k in node.keywords:
                 if k.arg == "close_fds" and not (isinstance(k.value, ast.Constant) and k.value.value is True):
-                    self._hit(node, f"{sorted(names & _CHILD_ENTRIES)[0]} 带 close_fds 而值不是 True")
+                    self._hit(node, f"{entries[0]} 带 close_fds 而值不是 True")
+            positional = node.args[:_CLOSE_FDS_INDEX + 1]
+            if (names & _SUBPROCESS_ENTRIES and len(positional) > _CLOSE_FDS_INDEX
+                    and not any(isinstance(a, ast.Starred) for a in positional)):
+                value = positional[_CLOSE_FDS_INDEX]
+                if not (isinstance(value, ast.Constant) and value.value is True):
+                    self._hit(node, f"{entries[0]} 按位置传的 close_fds 不是 True")
         self.generic_visit(node)
 
 
@@ -220,6 +260,30 @@ def test_production_code_starts_children_only_through_exec():
     "import subprocess as _sp\n_sp.run(cmd, close_fds=False)",
     "from subprocess import check_output\ncheck_output(cmd, close_fds=keep)",
     "import asyncio\nasync def f():\n    await asyncio.create_subprocess_exec(cmd, close_fds=False)",
+    # posix 按 os 认
+    "import posix\nposix.fork()",
+    "import posix\nposix.forkpty()",
+    "from posix import fork\nfork()",
+    "import posix as _px\n_px.set_inheritable(fd, True)",
+    "import posix\nposix.dup2(a, b)",
+    # 一次导入全部名字
+    "from os import *\nfork()",
+    "from posix import *",
+    "from pty import *",
+    # fcntl 的命令不是具名常量
+    "import fcntl\nfcntl.fcntl(fd, 0, 3)",                   # 数字写的 F_DUPFD
+    "import fcntl\nfcntl.fcntl(fd, 2, 0)",                   # 数字写的 F_SETFD，清掉 CLOEXEC
+    "import fcntl\nfcntl.fcntl(fd, cmd, 0)",
+    "from fcntl import fcntl\nfcntl(fd, 2, 0)",
+    # 事件循环的入口，不论接收者
+    "async def f(loop):\n    await loop.subprocess_exec(factory, cmd, close_fds=False)",
+    "async def f(self):\n    await self._loop.subprocess_shell(factory, cmd, close_fds=keep)",
+    # 继承 Popen
+    "import subprocess\nclass P(subprocess.Popen):\n    pass",
+    "from subprocess import Popen as _P\nclass Q(_P):\n    pass",
+    # 按位置传的 close_fds
+    "import subprocess\nsubprocess.Popen(cmd, -1, None, None, None, None, None, False)",
+    "import subprocess\nsubprocess.run(cmd, -1, None, None, None, None, None, keep)",
 ])
 def test_scanner_flags_each_forbidden_form(source):
     """每一种被点名的写法（含经导入别名的、延迟导入的）都被认出来。"""
@@ -235,6 +299,13 @@ def test_scanner_flags_each_forbidden_form(source):
     "import fcntl\nfcntl.fcntl(fd, fcntl.F_SETFD, fcntl.FD_CLOEXEC)",
     "def fork():\n    pass\nfork()",                       # 没有经导入绑定的局部名
     "import os\nos.register_at_fork(after_in_child=f)",
+    "import fcntl\nfcntl.fcntl(fd, fcntl.F_GETFL)",
+    "import posix\nposix.getpid()",
+    "from os import path",
+    "async def f(loop):\n    await loop.subprocess_exec(factory, cmd)",
+    "import subprocess\nsubprocess.Popen(cmd, -1, None, None, None, None, None, True)",
+    "import subprocess\nsubprocess.Popen(*argv)",               # 拼出来的调用看不见，由真实执行覆盖
+    "import subprocess\nclass Holder:\n    proc: subprocess.Popen",
 ])
 def test_scanner_passes_allowed_forms(source):
     assert not scan_source("cli/gherkai_cli/example.py", source).hits, source

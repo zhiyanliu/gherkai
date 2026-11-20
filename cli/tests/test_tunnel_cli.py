@@ -3,11 +3,12 @@
 证据边界：隧道服务是登记进 `tunnel.PROVIDERS` 的假实现，只模仿口子的外部表面（前置检查的用例改为对 `tunnel._import_sdk` 打桩、走
 真实的 `NgrokTunnel`）；云端存储是记录调用的假句柄，不连 AWS、不联网。submit 与后台进程之间用真实的管道与线程
 （`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
-跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C 另有
-用例真的启动子进程（不起隧道）。
+跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C、前台 run
+建 run 期间到达的 Ctrl-C 另有用例真的启动子进程（不起隧道）。
 
-本机建 run 的边界检查与生命期锁（ADR 0054 决策三、四）在这里核前台 run 与本机 submit 两边同一情形同一句、会话先关再回报：取锁、换名、
-改名都在真实文件系统上执行，文件系统类型经 conftest 的替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的类型。
+本机建 run 的边界检查与生命期锁（ADR 0054 决策三、四）在这里核前台 run 与本机 submit 两边同一情形同一句、会话先关再回报、推进期间
+持锁：取锁、换名、改名都在真实文件系统上执行，文件系统类型经 conftest 的替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的
+类型；起真实子进程、带 `real_filesystem` 标记的用例取宿主真实的类型（含真实内核上被拒的那一种）。
 """
 from __future__ import annotations
 
@@ -334,6 +335,40 @@ def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pen
     assert LocalRunStore(reports).load_run_state(run_dir.name).status == Status.PENDING
 
 
+@pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
+def test_ctrl_c_while_creating_the_run_ends_run_by_what_the_record_shows(after, tmp_path, monkeypatch, capsys, lock_holder):
+    """前台 run 在建 run 期间按 Ctrl-C（KeyboardInterrupt 从建 run 里抛出）：一句说明、退出码 130，标准输出为空、不打回溯。说法按记录里的
+    事实：中断落在真实的改名之后，run 已经建成、停在 pending，锁仍由本进程的持有者持有，说明给出 run 标识；落在改名之前，报告目录里
+    什么都不留，与起隧道期间被中断是同一句。改名之后的那一种，建 run 的调用还没有返回。注入只换 `os.rename`。"""
+    _fix_run_id(monkeypatch)
+    real_rename = os.rename
+
+    def rename(src, dst, *a, **k):
+        if Path(src).name.startswith(run_dir.STAGING_PREFIX):
+            if after:
+                real_rename(src, dst, *a, **k)
+            raise KeyboardInterrupt
+        return real_rename(src, dst, *a, **k)
+
+    monkeypatch.setattr(os, "rename", rename)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
+    if after:
+        assert cap.err.splitlines()[-1] == (f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，"
+                                            "它在记录里停在 pending。")
+        assert os.listdir(reports) == [FIXED_RUN_ID]
+        assert sorted(os.listdir(reports / FIXED_RUN_ID)) == ["run_meta.json", "run_state.json"]
+        assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
+        (fd,) = lock_holder.fds
+        assert _same_inode(fd, reports / FIXED_RUN_ID)
+    else:
+        assert cap.err.splitlines()[-1] == "已停止，没有开始执行。"
+        assert os.listdir(reports) == [] and lock_holder.fds == []
+
+
 def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys, tunnel_service):
     """run --json 的输出脱敏、落盘的 run 定义保留明文（ADR 0035 决策 5）。
 
@@ -430,7 +465,7 @@ def test_expose_local_trailing_slash_is_normalized_for_plan_and_tunnel(tmp_path,
 
 def _forbid(what: str):
     def forbidden(*a, **k):
-        pytest.fail(f"隧道的前置缺失时不该{what}")
+        pytest.fail(f"前置检查不过时不该{what}")
     return forbidden
 
 
@@ -841,7 +876,8 @@ _REPORT_DIR_SITUATIONS = {
         _empty_report_dir),
     "unknown-before": (
         _unknowable, True,
-        lambda r: f"无法判断报告目录 {r} 所在的文件系统（读不到挂载信息：Permission denied）：{_NOT_KNOWABLE}{_MOVE}。",
+        lambda r: f"无法判断报告目录 {r} 所在的文件系统（读不到挂载信息：Permission denied）：{_NOT_KNOWABLE}{_MOVE}"
+                  "；仍然判断不了时可以改用云端后端。",
         _nothing_left),
     "rejected-at-create": (
         _foreign_once_created, False,
@@ -940,6 +976,107 @@ def test_report_dir_given_as_a_dangling_symlink_is_judged_and_created_at_the_lin
     assert {"run_meta.json", "run_state.json"} <= {p.name for p in run.iterdir()}
     assert link.is_symlink() and Path(os.readlink(link)) == target
     assert LocalRunStore(target).load_run_state(run.name) is not None
+
+
+@pytest.mark.parametrize("command", ["run", "submit"])
+def test_a_dangling_symlink_to_an_unsupported_filesystem_is_rejected_before_anything_is_prepared(
+        command, tmp_path, monkeypatch, capsys, inline_children, tunnel_service, advanced):
+    """报告目录是一个悬空的符号链接，目标在一个清单之外的文件系统上（目标的上级已存在、目标还不存在）：前置检查按解析之后的路径
+    判断，取目标最近一层已存在的上级，run 与本机 submit 在这里就给出那一句、退出码 2；补全运行定义的那一步没有被调用，没有起隧道，
+    submit 不启动后台推进进程（ADR 0054 决策四）。类型按目录的 inode 给出：只有目标的上级是 nfs，链接所在的目录在清单里。"""
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    target = foreign / "reports"
+    link = tmp_path / "reports-link"
+    link.symlink_to(target)
+    foreign_id = (os.stat(foreign).st_dev, os.stat(foreign).st_ino)
+    allowed = run_dir.ALLOWED_FILESYSTEMS[sys.platform][0]
+
+    def by_directory(fd):
+        st = os.fstat(fd)
+        return "nfs" if (st.st_dev, st.st_ino) == foreign_id else allowed
+
+    monkeypatch.setattr(run_dir, "filesystem_type", by_directory)
+    monkeypatch.setattr(m, "_complete_local_definition", lambda *a, **k: pytest.fail("前置检查被拒时不该补全运行定义"))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("前置检查被拒时不该开始执行"))
+    extra = ["--region", "us-east-1"] if command == "submit" else []
+    rc = m.main([command, str(_write_feature(tmp_path)), "--report-dir", str(link), *extra, "--expose-local", ORIGIN])
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1] == (
+        f"报告目录 {target} 还不存在，按最近一层已存在的上级 {foreign} 判断，它所在的文件系统是 nfs，本机后端不支持："
+        f"{_NOT_KNOWABLE}{_MOVE}；多台机器共用运行记录请用云端后端。")
+    assert tunnel_service.starts == [] and inline_children.children == []
+    assert not target.exists() and link.is_symlink()
+
+
+@pytest.mark.parametrize("command", ["run-no-report", "submit-cloud", "plan"])
+def test_commands_that_build_no_local_run_skip_the_report_dir_check(command, tmp_path, monkeypatch, capsys,
+                                                                    inline_children):
+    """不建本机 run 的命令不做报告目录的边界检查（ADR 0054 决策四）：文件系统类型一律取成清单之外的 nfs，`run --no-report` 照常开始
+    执行、以判定的退出码结束；云端 `submit` 越过这项检查，照常写下 run；`plan` 以退出码 0 结束。云端 submit 的报告目录取缺省的
+    相对路径，当前目录换到用例的临时目录。"""
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs")
+    monkeypatch.chdir(tmp_path)
+    feature = str(_write_feature(tmp_path))
+    if command == "run-no-report":
+        box: dict = {}
+        monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+        assert m.main(["run", feature, "--no-report", "--report-dir", str(tmp_path / "reports")]) == 0
+        assert "run_meta" in box
+    elif command == "submit-cloud":
+        record: list = []
+        _patch_cloud_handles(monkeypatch, record)
+        assert m.main(_cloud_submit_argv(tmp_path)) == 0
+        assert ("ddb", "put_item") in record
+    else:
+        assert m.main(["plan", feature]) == 0
+    assert "本机后端不支持" not in capsys.readouterr().err
+
+
+def _lock_seen_while_advancing(holder, run: Path) -> tuple[int, bool, run_dir.LockState]:
+    """推进中看到的生命期锁：持有者收下了几个描述符、只有一个时它是不是 run 目录，另开一次 run 目录取锁得到什么。"""
+    fds = list(holder.fds)
+    another = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        state = run_dir.try_lock(another).state
+    finally:
+        os.close(another)
+    return len(fds), len(fds) == 1 and _same_inode(fds[0], run), state
+
+
+def test_foreground_run_holds_the_lifetime_lock_while_advancing(tmp_path, monkeypatch, capsys, lock_holder):
+    """前台 run 推进期间持有生命期锁（ADR 0054 决策三）：调度循环执行的时候，本进程的持有者恰好收下一个描述符，它与 run 目录是同一个
+    inode，另开一次对 run 目录取锁得到「已被持有」。"""
+    reports = tmp_path / "reports"
+    seen: list = []
+
+    def schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        seen.append(_lock_seen_while_advancing(lock_holder, reports / run_meta.run_id))
+        results = tuple(JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs)
+        for jr in results:
+            on_job_complete(jr)
+        return Execution(run_meta=run_meta, results=results, stopped_by=None, duration_ms=0.0)
+
+    monkeypatch.setattr(m, "schedule", schedule)
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0, capsys.readouterr().err
+    assert seen == [(1, True, run_dir.LockState.HELD)]
+
+
+def test_local_advancer_holds_the_lifetime_lock_while_advancing(tmp_path, monkeypatch, capsys, inline_children,
+                                                                lock_holder):
+    """本机后台推进进程推进期间持有生命期锁（ADR 0054 决策三）：推进执行的时候，持有者恰好收下一个描述符，它与 run 目录是同一个
+    inode，另开一次对 run 目录取锁得到「已被持有」。后台推进进程的主体在线程里执行（`_inline_children`），持有者是同一个。"""
+    reports = tmp_path / "reports"
+    seen: list = []
+    monkeypatch.setattr(detached, "advance_local_run",
+                        lambda advancer, meta, **kw: seen.append(_lock_seen_while_advancing(lock_holder,
+                                                                                            reports / meta.run_id)))
+    rc = m.main(_local_submit_argv(tmp_path))
+    inline_children.settle()
+    assert rc == 0, capsys.readouterr().err
+    assert inline_children.only().returncode == 0
+    assert seen == [(1, True, run_dir.LockState.HELD)]
 
 
 def test_interrupt_right_after_the_rename_in_the_advancer_leaves_a_complete_run_still_locked(
@@ -1560,6 +1697,153 @@ def test_ctrl_c_while_printing_the_result_of_a_plain_cloud_submit(tmp_path, monk
     assert rc == 130 and cap.out == ""
     assert f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --backend cloud --prefix " in cap.err
     assert "隧道" not in cap.err
+
+
+# ---- 真实进程、真实内核上的边界检查（ADR 0054 决策四）----
+
+# 两个平台上不用挂载就有的、不在清单里的文件系统：macOS 的 /dev（devfs），Linux 的 /proc（proc）
+_PSEUDO_FILESYSTEM = {"darwin": ("/dev", "devfs"), "linux": ("/proc", "proc")}
+# 假 worker：经 GHERKAI_WORKER_<引擎>_CMD 起，能力自述原样给出参数里那份文件的内容，匹配查询逐条答作走 AI，别的入口以 3 退出
+_FAKE_WORKER = """\
+import json, sys
+caps, flag = sys.argv[1], sys.argv[2]
+if flag == "--capabilities":
+    print(open(caps, encoding="utf-8").read())
+elif flag == "--match-steps":
+    print(json.dumps([None for _ in json.load(sys.stdin)]))
+else:
+    sys.exit(3)
+"""
+
+
+def _isolated_child_env(tmp_path: Path) -> dict[str, str]:
+    """起真实子进程执行 gherkai 时的环境：两个引擎的 worker 都换成 `_FAKE_WORKER`（能力自述取 `_fake_worker` 里的值），不读配置文件
+    与 steps 目录的环境变量，不带隧道令牌；AWS 用假凭证、端点指向本机一个不监听的端口，子进程碰到 AWS 也只会在本机失败。"""
+    import json
+    import shlex
+
+    from _fake_worker import FAKE_DETERMINISTIC_STEPS, FAKE_MIN_GRACE_S, FAKE_MODEL_ID
+    from gherkai_core.wire import PROTOCOL_SCHEMA_VERSION
+
+    worker = tmp_path / "fake_worker.py"
+    worker.write_text(_FAKE_WORKER, encoding="utf-8")
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("NGROK_AUTHTOKEN", "GHERKAI_CONFIG", "GHERKAI_STEPS_DIR", "AWS_PROFILE")}
+    for engine, grace in FAKE_MIN_GRACE_S.items():
+        caps = tmp_path / f"caps-{engine}.json"
+        caps.write_text(json.dumps({
+            "schema_version": PROTOCOL_SCHEMA_VERSION, "engine": engine, "min_grace_s": grace,
+            "targets": [{"device": "desktop", "ui_kinds": ["web"]}], "deterministic_steps": FAKE_DETERMINISTIC_STEPS,
+            "model_id": FAKE_MODEL_ID[engine], compose.SESSION_WARMUP_KEY: True}), encoding="utf-8")
+        env[f"GHERKAI_WORKER_{engine.upper()}_CMD"] = shlex.join([sys.executable, str(worker), str(caps)])
+        env.pop(f"GHERKAI_WORKER_{engine.upper()}_CWD", None)
+    env.update(AWS_ENDPOINT_URL="http://127.0.0.1:9", AWS_ACCESS_KEY_ID="testing", AWS_SECRET_ACCESS_KEY="testing",
+               AWS_EC2_METADATA_DISABLED="true")
+    return env
+
+
+@pytest.mark.real_filesystem
+def test_run_in_a_real_process_rejects_a_report_dir_on_a_pseudo_filesystem_of_the_kernel(tmp_path):
+    """真实进程、真实内核：报告目录在 macOS 的 /dev（Linux 上是 /proc）之下一个不存在的位置，`gherkai run` 在前置检查里按最近一层
+    已存在的上级判断，以退出码 2 结束，标准输出为空，标准错误的末行是文件系统不受支持的那一句，什么都不建。子进程里没有测试的替身，
+    文件系统类型是真实取到的；worker 是假的（不会被问到：被拒发生在问 worker 之前）。"""
+    if sys.platform not in _PSEUDO_FILESYSTEM:
+        pytest.skip("只核 macOS 与 Linux")
+    base, fs_type = _PSEUDO_FILESYSTEM[sys.platform]
+    report_dir = Path(base) / f"gherkai-missing-{os.getpid()}-{time.monotonic_ns()}" / "reports"
+    assert not report_dir.parent.exists()
+    proc = subprocess.run([sys.executable, "-P", "-m", "gherkai_cli", "run", str(_write_feature(tmp_path)),
+                           "--report-dir", str(report_dir)],
+                          cwd=tmp_path, env=_isolated_child_env(tmp_path), stdin=subprocess.DEVNULL, capture_output=True,
+                          text=True, timeout=120)
+    assert (proc.returncode, proc.stdout) == (2, ""), proc.stderr
+    assert proc.stderr.splitlines()[-1] == (
+        f"报告目录 {report_dir} 还不存在，按最近一层已存在的上级 {base} 判断，它所在的文件系统是 {fs_type}，本机后端不支持："
+        f"{_NOT_KNOWABLE}{_MOVE}；多台机器共用运行记录请用云端后端。")
+    assert not report_dir.parent.exists()
+
+
+# 在建 run 里停下等 SIGINT 的前台 run：after 停在真实的改名之后，before 停在建出暂存目录之后（改名之前）；停下之前在工作目录里放
+# 一个 ready 文件。持有者是生产用的（这个进程里没有测试的替身），能力自述取 _fake_worker 的替身，不开始执行。只用 ASCII
+_INTERRUPTED_CREATE_DRIVER = r"""
+import os, sys, time
+from pathlib import Path
+mode, work, feature, tests_dir, run_id = sys.argv[1], Path(sys.argv[2]), sys.argv[3], sys.argv[4], sys.argv[5]
+sys.path.insert(0, tests_dir)
+import gherkai_cli.__main__ as m
+from gherkai_core.adapters.run_store import run_dir
+from gherkai_runtime import compose
+from _fake_worker import fake_query_capabilities
+compose.query_capabilities = fake_query_capabilities
+compose.new_run_id = lambda at=None: run_id
+real_rename, real_mkdir = os.rename, os.mkdir
+
+def pause():
+    (work / "ready").touch()
+    time.sleep(60)
+
+def rename(src, dst, *a, **k):
+    real_rename(src, dst, *a, **k)
+    if mode == "after" and Path(src).name.startswith(run_dir.STAGING_PREFIX):
+        pause()
+
+def mkdir(path, *a, **k):
+    real_mkdir(path, *a, **k)
+    if mode == "before" and Path(path).name.startswith(run_dir.STAGING_PREFIX):
+        pause()
+
+def no_schedule(*a, **k):
+    raise SystemExit(99)
+
+os.rename, os.mkdir, m.schedule = rename, mkdir, no_schedule
+sys.exit(m.main(["run", feature, "--report-dir", str(work / "reports")]))
+"""
+
+
+@pytest.mark.real_filesystem
+@pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
+def test_a_real_ctrl_c_while_creating_the_run_exits_130_with_one_sentence(after, tmp_path):
+    """真实进程、真实信号：前台 run 停在建 run 里（改名之后、或建出暂存目录之后）时收到 SIGINT，以 130 结束，标准输出为空、不打回溯，
+    末行按记录里的事实给出。改名之后的那一种，run 目录完整、收到信号之前锁被持有，进程退出之后锁随即拿得到；改名之前的那一种，报告
+    目录里什么都不留。"""
+    ready = tmp_path / "ready"
+    proc = subprocess.Popen(
+        [sys.executable, "-P", "-c", _INTERRUPTED_CREATE_DRIVER, "after" if after else "before", str(tmp_path),
+         str(_write_feature(tmp_path)), str(Path(__file__).parent), FIXED_RUN_ID],
+        cwd=tmp_path, env=_isolated_child_env(tmp_path), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 60
+        while not ready.exists():
+            assert proc.poll() is None, proc.communicate()
+            assert time.monotonic() < deadline, "子进程没有在时限内停到建 run 里"
+            time.sleep(0.02)
+        run = tmp_path / "reports" / FIXED_RUN_ID
+        if after:
+            fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                assert run_dir.try_lock(fd).state is run_dir.LockState.HELD
+            finally:
+                os.close(fd)
+        proc.send_signal(signal.SIGINT)
+        out, err = proc.communicate(timeout=60)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.communicate()
+    assert (proc.returncode, out, "Traceback" in err) == (130, "", False), err
+    if after:
+        assert err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
+        assert os.listdir(tmp_path / "reports") == [FIXED_RUN_ID]
+        assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
+        fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            assert run_dir.try_lock(fd).state is run_dir.LockState.ACQUIRED
+        finally:
+            os.close(fd)
+    else:
+        assert err.splitlines()[-1] == "已停止，没有开始执行。"
+        assert os.listdir(tmp_path / "reports") == []
 
 
 # ---- 开始写出 run 标识之后到达的 Ctrl-C（ADR 0035 决策 3）----

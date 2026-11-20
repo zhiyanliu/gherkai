@@ -220,9 +220,10 @@ def test_create_run_replaces_an_empty_directory_of_that_name(tmp_path: Path, loc
     assert set(store.load_run_state("r").jobs) == {"a"}
 
 
-@pytest.mark.parametrize("run_id", [".x", ".gherkai-creating-0123456789abcdef", "a/b", ""])
+@pytest.mark.parametrize("run_id", [".x", ".gherkai-creating-0123456789abcdef", "a/b", "", "a" * 256])
 def test_create_run_refuses_an_identifier_that_cannot_name_a_run_directory(tmp_path: Path, lock_holder, run_id: str):
-    """run 标识不能用作 run 目录的名字（以点开头、含路径分隔符、空）：ValueError，什么都不建，报告目录也不建。"""
+    """run 标识不能用作 run 目录的名字（以点开头、含路径分隔符、空、按文件系统编码超过 255 字节）：ValueError，什么都不建，报告目录
+    也不建。"""
     with pytest.raises(ValueError):
         LocalRunStore(tmp_path / "runs", lock_holder=lock_holder).create_run(_meta(run_id, ["a"]), _pending(run_id, ["a"]))
     assert os.listdir(tmp_path) == []
@@ -261,6 +262,24 @@ def test_entries_by_identifier_treat_a_name_outside_the_rule_as_no_run(tmp_path:
     assert store.project_state(name, state) is False
     assert store.end_run(name, RUN_ENDINGS["deadline"], ended_at="t") is False
     assert _snapshot(root) == before
+
+
+@pytest.mark.parametrize("name", ["a" * 256, "é" * 300], ids=["ascii", "multibyte"])
+def test_entries_by_identifier_treat_a_name_too_long_for_a_directory_as_no_run(tmp_path: Path, name: str):
+    """标识按文件系统编码超过 255 字节（长到不能作一层目录名）：按标识读的入口都按 run 不存在处理、写入口都写不成，不以「文件名
+    太长」的 OSError 失败；报告目录里什么都不多出来。"""
+    root = tmp_path / "runs"
+    root.mkdir()
+    store = LocalRunStore(root)
+    assert store.load_run_state(name) is None
+    assert store.load_run_meta(name) is None
+    assert store.peek_definition_header(name) is None
+    assert store.is_detached(name) is False
+    with pytest.raises(FileNotFoundError):
+        store.update_job_state(name, JobState("a", Status.RUNNING))
+    assert store.try_claim_job(name, "a") is False
+    assert store.end_run(name, RUN_ENDINGS["deadline"], ended_at="t") is False
+    assert os.listdir(root) == []
 
 
 @pytest.mark.real_filesystem

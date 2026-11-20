@@ -3635,6 +3635,17 @@ def test_explain_unknown_run_and_scope_exit_2(tmp_path, capsys):
     assert m.main(["explain", run_id, "features/login.feature:6", "--report-dir", str(root)]) == 0
 
 
+@pytest.mark.parametrize("command", ["status", "explain"])
+def test_an_identifier_too_long_for_a_directory_name_is_an_unknown_run(command, tmp_path, capsys):
+    """run 标识长到不能作一层目录名（按文件系统编码超过 255 字节，如手误粘贴了一大段）：与不存在的 run 一样给「未找到 run」、
+    退出码 2，不以「文件名太长」的回溯结束。报告目录存在，读入口确实会去找这个名字。"""
+    root = tmp_path / "reports"
+    root.mkdir()
+    long_id = "a" * 300
+    assert m.main([command, long_id, "--report-dir", str(root)]) == 2
+    assert f"未找到 run：{long_id}" in capsys.readouterr().err
+
+
 def test_explain_named_scope_ended_without_detail_shows_the_recorded_status(tmp_path, capsys):
     """点名的 job 已结束而没有判定明细（a 出错之后 b 没有启动，由 fail-fast 那一行的结束写记 skipped）：按运行态给出状态与说明，
     退出码 0，不报「未找到 scope」；`--json` 的 scopes[] 只有这一项的三个键。点名的 scope 不在这个 run 里时照旧以退出码 2 结束。"""
