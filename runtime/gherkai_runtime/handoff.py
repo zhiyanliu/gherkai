@@ -272,8 +272,9 @@ def watch_log_path(run_id: str) -> Path:
 class WatchChannel:
     """云端 `submit` 持有的守护进程句柄：守护进程标准输入的写端与回报管道的读端，外加守护进程回报的两个地址。
 
-    句柄拥有这两个描述符：`release` 关闭它们，调用方不要再经别的对象（如 `Popen.stdin` 的文件对象）持有或关闭同一个描述符，
-    否则同一个号会被关两次。`release` 之后 `daemon_gone` 与 `hand_over` 抛 ValueError，与读写已关闭的文件同一处理。"""
+    句柄拥有这两个描述符：`release` 关闭它们（可以先等守护进程退出，见 `release`），调用方不要再经别的对象（如 `Popen.stdin` 的
+    文件对象）持有或关闭同一个描述符，否则同一个号会被关两次。`release` 之后 `daemon_gone` 与 `hand_over` 抛 ValueError，与读写
+    已关闭的文件同一处理。"""
 
     public_url: str
     warmup_url: str = field(repr=False)   # 含令牌
@@ -295,13 +296,20 @@ class WatchChannel:
             raise ValueError(f"run 的标识须为不含换行的非空文本，现为 {run_id!r}")
         return write_all(self.stdin_fd, (run_id + "\n").encode("utf-8"))
 
-    def release(self) -> None:
-        """关闭标准输入的写端与回报管道的读端（守护进程还在等 run 的标识时随之读到文件结束、关闭会话退出）。可重复调用，只关一次。"""
+    def release(self, *, wait_s: float = 0.0) -> None:
+        """先关标准输入的写端（守护进程还在等 run 的标识时随之读到文件结束、关闭会话退出），再关回报管道的读端。可重复调用，只关一次。
+
+        `wait_s` 大于 0 时，两次关闭之间等守护进程退出，最多 `wait_s` 秒：它一直开着回报管道的写端，退出时读端读到文件结束
+        （`wait_readable`）。到时仍没有退出就不再等，照样关闭读端返回。等待期间被打断（如 KeyboardInterrupt）时读端照样关闭。"""
         if self._released:
             return
         self._released = True   # 先记下再关：关到一半被打断时，再次调用也不会把已经复用的号再关一次
         close_quietly(self.stdin_fd)
-        close_quietly(self.report_fd)
+        try:
+            if wait_s > 0:
+                wait_readable(self.report_fd, wait_s)
+        finally:
+            close_quietly(self.report_fd)
 
     def _require_open(self) -> None:
         if self._released:

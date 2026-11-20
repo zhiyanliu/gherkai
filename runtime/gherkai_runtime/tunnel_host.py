@@ -41,6 +41,10 @@ TUNNEL_EXTRA_HTTP_HEADERS = {"ngrok-skip-browser-warning": "1"}
 WATCH_POLL_INTERVAL_S: Final = 5.0
 # 每段等待的下限（秒）：离到点时刻只剩极短一段时也不空转。
 _MIN_WAIT_S: Final = 0.05
+# 守护进程单次读 run 状态的连接与读取时限（秒），与失败之后至多重试的次数（botocore 的 `max_attempts` 不含第一次请求），
+# 见 `_watch_read_config`。
+_WATCH_READ_TIMEOUT_S: Final = 5
+_WATCH_READ_MAX_RETRIES: Final = 2
 
 
 @dataclass(frozen=True)
@@ -101,12 +105,24 @@ def _bounded_wait_s(closes_at: datetime, now: datetime, poll_interval_s: float) 
     return max(_MIN_WAIT_S, min(poll_interval_s, remaining))
 
 
+def _watch_read_config():
+    """守护进程读 run 状态用的 botocore 设置：连接与读取各 5 秒，失败之后至多重试 2 次，网络不回应时一次读约半分钟即放弃。boto3 的
+    缺省（连接与读取各 60 秒、DynamoDB 多达 10 次重试）下，一次读可以阻塞十几分钟，守护进程在到点时刻之后仍持有会话；等 run 的标识
+    与轮询两个阶段以到点时刻为上限（ADR 0035 决策 3「云端 `submit`」），单次读也要有界。读失败按轮询的读失败处理，下一轮再读。"""
+    from botocore.config import Config
+
+    return Config(connect_timeout=_WATCH_READ_TIMEOUT_S, read_timeout=_WATCH_READ_TIMEOUT_S,
+                  retries={"max_attempts": _WATCH_READ_MAX_RETRIES})
+
+
 def _open_cloud_run_store(runs_table: str, *, region: str | None, profile: str | None) -> RunStore:
     """守护进程读 run 状态用的 RunStore：runs 表、region 与 profile 是 `submit` 解析之后交来的值，这里不再解析（守护进程不读配置
-    文件）。只读 STATE，不注入参数卸载与列举索引。"""
+    文件）。只读 STATE，不注入参数卸载与列举索引。单次读有界（`_watch_read_config`）；只有守护进程这一处这样装配，submit 与推进器
+    用 boto3 的缺省。"""
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
 
-    return DynamoDBRunStore(compose._make_ddb_table(runs_table, region=region, profile=profile))
+    return DynamoDBRunStore(compose._make_ddb_table(runs_table, region=region, profile=profile,
+                                                    config=_watch_read_config()))
 
 
 def _one_line(text: str) -> str:
@@ -211,7 +227,7 @@ def hold_tunnel_for_cloud_run(inp: handoff.WatchInput, *, report_fd: int, input_
     关闭。不装信号处理器，被信号结束时会话随进程消失。
 
     两个描述符都归调用方关闭（进程入口里即进程退出）：回报写端在本函数返回之前一直开着，异常路径上回溯因此先于文件结束写到 `submit`
-    的标准错误，`submit` 读到文件结束时说「原因见上面的输出」才成立。`clock`、`sleep`、`poll_interval_s`、`open_store` 原样交给
+    的标准错误，`submit` 读到文件结束时说「原因在上面」才成立。`clock`、`sleep`、`poll_interval_s`、`open_store` 原样交给
     `watch_cloud_run`（等 run 的标识时也只读这个 `clock`），测试经它们注入。"""
     read_clock = clock if clock is not None else compose.now
     closes_at = instant_from_iso(inp.closes_at)

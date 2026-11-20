@@ -11,6 +11,7 @@ import subprocess
 import tempfile
 import threading
 import time
+import types
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -167,6 +168,12 @@ def test_start_tunnel_for_jobs_closes_the_session_when_mapping_fails(world):
 
 # ---- watch_cloud_run：按墙钟与终态结束，按种类记一句（决策 3「云端 submit」）----
 
+def test_watch_poll_interval_is_five_seconds():
+    """守护进程轮询 run 状态的间隔 5 秒：这个取值写在 ADR 0035 决策 3「云端 `submit`」的「轮询」一条里，用户文档与变更记录也引用了它
+    （「每 5 秒查一次 run 的状态」）。其余用例只拿这个符号比较，取值变了只有这一条报出；改它时 ADR 与用户文档一并改。"""
+    assert tunnel_host.WATCH_POLL_INTERVAL_S == 5.0
+
+
 def test_watch_returns_run_ended_with_the_terminal_status():
     store, clock, notes = _Store([_state(Status.RUNNING), _state(Status.PENDING), _state(Status.FAILED)]), _Clock(T0), []
     assert _watch(store, clock, notes) == tunnel_host.WatchEnd(reason="run_ended", status=Status.FAILED)
@@ -255,7 +262,7 @@ def test_watch_default_store_uses_the_handed_over_table_region_and_profile(monke
         def get_item(self, **kw):
             return {}
 
-    def make_table(table, *, region, profile):
+    def make_table(table, *, region, profile, config=None):
         made.append((table, region, profile))
         return _Table()
 
@@ -266,6 +273,43 @@ def test_watch_default_store_uses_the_handed_over_table_region_and_profile(monke
                                       on_note=notes.append, clock=clock, sleep=lambda s: None)
     assert made == [("tbl", "eu-west-1", "dev")]
     assert end.reason == "past_closes_at" and notes == ["读不到这个 run，继续轮询"]
+
+
+class _RecordingBoto3Session:
+    """`boto3.session.Session` 的替身：记下会话参数与建资源时给的 botocore 设置，不联网。建出的表对任何读都答「没有这一项」。"""
+
+    calls: list = []
+
+    def __init__(self, *, profile_name=None, region_name=None) -> None:
+        self.calls.append(("session", profile_name, region_name))
+
+    def resource(self, name, *, config=None):
+        self.calls.append(("resource", name, config))
+        return types.SimpleNamespace(Table=lambda table: types.SimpleNamespace(name=table, get_item=lambda **kw: {}))
+
+    def client(self, name, *, config=None):
+        self.calls.append(("client", name, config))
+        return types.SimpleNamespace()
+
+
+def test_watch_default_store_bounds_each_read_with_short_timeouts_and_few_retries(monkeypatch):
+    """守护进程建表时带一份有界的 botocore 设置：连接与读取各 5 秒、失败之后至多重试 2 次，一次读不会在到点时刻之后再阻塞几分钟。
+    只有守护进程这一处带它：submit 与推进器经 `build_cloud_stores` 装配的表用 boto3 的缺省。"""
+    import boto3
+
+    monkeypatch.setattr(_RecordingBoto3Session, "calls", [])
+    monkeypatch.setattr(boto3.session, "Session", _RecordingBoto3Session)
+    clock, notes = _Script(T0, CLOSES_AT + timedelta(seconds=1)), []
+    end = tunnel_host.watch_cloud_run("r1", runs_table="tbl", region="eu-west-1", profile="dev", closes_at=CLOSES_AT,
+                                      on_note=notes.append, clock=clock, sleep=lambda s: None)
+    assert end.reason == "past_closes_at" and notes == ["读不到这个 run，继续轮询"]
+    (session, (kind, name, config)) = _RecordingBoto3Session.calls
+    assert session == ("session", "dev", "eu-west-1") and (kind, name) == ("resource", "dynamodb")
+    assert (config.connect_timeout, config.read_timeout, config.retries) == (5, 5, {"max_attempts": 2})
+
+    _RecordingBoto3Session.calls.clear()
+    compose.build_cloud_stores(table="tbl", bucket="b", region="eu-west-1", profile="dev")
+    assert [c for c in _RecordingBoto3Session.calls if c[0] == "resource"] == [("resource", "dynamodb", None)]
 
 
 # ---- hold_tunnel_for_cloud_run：云端守护进程的主体（真实管道与线程）----

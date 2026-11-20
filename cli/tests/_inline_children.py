@@ -14,6 +14,11 @@ submit 与它启动的后台进程之间的交接用真实的管道：替身认�
 - **崩溃**：主体抛出的异常记进 `InlineChild.error`，不打回溯；进程入口里它会打在 submit 的标准错误上、随后进程退出。用例要么用
   `expect_error` 认领它，要么收尾时判失败。
 
+另守一条输出约定：后台进程在改接输出之前不往标准错误写字，崩溃的回溯除外（ADR 0035 决策 3「输出」）。改接之前这个线程经
+`sys.stdout` / `sys.stderr` 写出的文字照常写到原来的流，同时记进 `InlineChild.output_before_redirect`；收尾时这段文字不为空即判失败，
+除非用例经 `expect_crash_before_report()` 声明这条用例里后台进程在回报之前崩溃、而它确实在改接之前以异常结束。经 `os.write` 直接写
+fd 2 的字节绕过这两个流，这里看不见。
+
 推进本身由用例把 `detached.advance_local_run` 换成记录调用的函数，不起 worker；守护进程的轮询经 `watch_kwargs` 注入存储与墙钟。
 """
 from __future__ import annotations
@@ -65,6 +70,7 @@ class InlineChild:
     error_claimed: bool = False
     log_fd: int | None = None
     notes: list = field(default_factory=list)
+    output_before_redirect: list = field(default_factory=list)  # 改接输出之前经 sys.stdout / sys.stderr 写出的文字
 
     def redirect(self, log_fd: int) -> None:
         """替代 `handoff.redirect_output`：收下日志描述符，此后这个线程的输出写进它。"""
@@ -72,9 +78,9 @@ class InlineChild:
         self.redirected.set()
 
     def note(self, s: str) -> None:
-        """守护进程主体的 `note`，与进程入口的写法相同：以 `tunnel-watch:` 开头写到标准输出（这时已是日志）。"""
+        """守护进程主体的 `note`：记下这一句，再交给进程入口用的同一个函数（以 `tunnel-watch:` 开头写到标准输出，这时已是日志）。"""
         self.notes.append(s)
-        print(f"tunnel-watch: {s}", flush=True)
+        m._tunnel_watch_note(s)
 
     def expect_error(self, kind: type[BaseException]) -> BaseException:
         assert isinstance(self.error, kind), f"后台进程应以 {kind.__name__} 结束，实际是 {self.error!r}"
@@ -86,15 +92,21 @@ class InlineChild:
 
 
 class _RoutedStream:
-    """按线程分流的输出流：改接过输出的后台进程线程写进它的日志描述符，其余线程写到原来的流。"""
+    """按线程分流的输出流：改接过输出的后台进程线程写进它的日志描述符，其余线程写到原来的流；还没有改接输出的后台进程线程写的字
+    另记进 `early` 里这个线程的那一份。"""
 
-    def __init__(self, default, routes: dict) -> None:
+    def __init__(self, default, routes: dict, early: dict) -> None:
         self._default = default
         self._routes = routes
+        self._early = early
 
     def write(self, s: str) -> int:
-        fd = self._routes.get(threading.get_ident())
+        ident = threading.get_ident()
+        fd = self._routes.get(ident)
         if fd is None:
+            early = self._early.get(ident)
+            if early is not None and s:
+                early.append(s)
             return self._default.write(s)
         os.write(fd, s.encode("utf-8"))
         return len(s)
@@ -117,7 +129,9 @@ class InlineChildren:
         self.before_child = None                  # 后台进程线程开始时调用 before_child(child)
         self.on_spawn = None                      # Popen 被调用、线程启动之前在调用方线程里调用 on_spawn(argv, kwargs)
         self.watch_kwargs: dict = {"open_store": TerminalStore, "poll_interval_s": 0.05}
+        self.crash_before_report = False          # 用例声明后台进程在回报之前崩溃：见 expect_crash_before_report
         self._routes: dict[int, int] = {}
+        self._early: dict[int, list] = {}         # 还没有改接输出的后台进程线程 → 它写出的文字
         self._streams = None
         self._real_popen = subprocess.Popen
         monkeypatch.setattr(subprocess, "Popen", self.popen)
@@ -167,6 +181,7 @@ class InlineChildren:
         return _Proc()
 
     def _run(self, child: InlineChild) -> None:
+        self._early[threading.get_ident()] = child.output_before_redirect
         try:
             if self.before_child is not None:
                 self.before_child(child)
@@ -186,6 +201,7 @@ class InlineChildren:
             child.error = e
         finally:
             self._routes.pop(threading.get_ident(), None)
+            self._early.pop(threading.get_ident(), None)
             handoff.close_quietly(child.report_fd)
             handoff.close_quietly(child.input_fd)
             if child.log_fd is not None:
@@ -196,13 +212,14 @@ class InlineChildren:
         def redirect(log_fd: int) -> None:
             child.redirect(log_fd)
             self._routes[threading.get_ident()] = log_fd
+            self._early.pop(threading.get_ident(), None)
         return redirect
 
     def _install_streams(self) -> None:
         if self._streams is None:
             self._streams = (sys.stdout, sys.stderr)
-            sys.stdout = _RoutedStream(sys.stdout, self._routes)
-            sys.stderr = _RoutedStream(sys.stderr, self._routes)
+            sys.stdout = _RoutedStream(sys.stdout, self._routes, self._early)
+            sys.stderr = _RoutedStream(sys.stderr, self._routes, self._early)
 
     # ---- 收尾 ----
 
@@ -221,6 +238,21 @@ class InlineChildren:
         for c in self.children:
             if c.error is not None and not c.error_claimed:
                 pytest.fail(f"后台进程 {c.entry} 意外崩溃：{c.error!r}")
+
+    def expect_crash_before_report(self) -> None:
+        """声明这条用例里后台进程在回报之前崩溃：进程里它的回溯写在 submit 的标准错误上，是改接输出之前唯一允许的输出。"""
+        self.crash_before_report = True
+
+    def check_output_before_redirect(self) -> None:
+        """后台进程在改接输出之前不往标准错误写字（崩溃的回溯除外，ADR 0035 决策 3「输出」）：写了即判失败，除非用例声明了回报之前的
+        崩溃、而这个后台进程确实在改接之前以异常结束。"""
+        for c in self.children:
+            text = "".join(c.output_before_redirect)
+            if not text:
+                continue
+            crashed_early = c.error is not None and not c.redirected.is_set()
+            if not (self.crash_before_report and crashed_early):
+                pytest.fail(f"后台进程 {c.entry} 在改接输出之前写了字：{text!r}")
 
     def close(self) -> None:
         for c in self.children:
@@ -252,5 +284,6 @@ def inline_children(monkeypatch, tmp_path):
         yield children
         children.settle()
         children.check_unclaimed_errors()
+        children.check_output_before_redirect()
     finally:
         children.close()

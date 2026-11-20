@@ -66,8 +66,10 @@ START_TIMEOUT_S: Final = 20.0
 CLOSE_TIMEOUT_S: Final = 5.0
 # 令牌只取这个环境变量，经 SDK 的 `authtoken_from_env` 取用，gherkai 不读出、不转交它的值（ADR 0035 决策 1「前置条件」）。
 TOKEN_ENV: Final = "NGROK_AUTHTOKEN"
-# SDK 的 logger 族名：SDK 经 Python 的 logging 发日志（子 logger `ngrok.tunnel_ext`），导入之后在这一层接到空处理器。
-_SDK_LOGGER: Final = "ngrok"
+# SDK 原生库用到的日志目标各族：原生库的日志经桥接交给 Python 的 logging，日志目标名换成 logger 名（`ngrok::tunnel_ext` 成为
+# `ngrok.tunnel_ext`，`muxado::heartbeat`、`rustls::client`、`tokio::runtime` 同理），所以 `ngrok` 之外的几族同样落在 logging 上。
+# 族名取自原生库里出现的日志目标；导入之后各族的根 logger 都接空处理器、不向上传播。
+_SDK_LOGGER_FAMILIES: Final = ("ngrok", "muxado", "rustls", "tokio")
 
 _T = TypeVar("_T")
 
@@ -291,7 +293,9 @@ def _load_sdk(load: Callable[[], Any]) -> Any:
     初始化出错等）都是「装了但无法加载」，不让其中一类落成回溯与别的退出码。
 
     SDK 经 Python 的 logging 发日志（被测应用连不上时每个请求一条警告，没有配置 logging 时写到标准错误）：这些不是产品的输出，使用者
-    从 job 的失败证据里看到同一原因，所以把这一族 logger 接到空处理器、不向上传播（ADR 0035 决策 1「公网地址是 SDK 调用的返回值」）。"""
+    从 job 的失败证据里看到同一原因，所以把原生库用到的各族 logger（`_SDK_LOGGER_FAMILIES`）都接到空处理器、不向上传播（ADR 0035
+    决策 1「公网地址是 SDK 调用的返回值」）。后台进程在回报之前不往标准错误写字（ADR 0035 决策 3「输出」），漏掉一族就会破坏这一条。
+    重复导入不重复加处理器。"""
     try:
         sdk = load()
     except ModuleNotFoundError as e:
@@ -300,10 +304,11 @@ def _load_sdk(load: Callable[[], Any]) -> Any:
         raise TunnelError(_cannot_load(e)) from e
     except Exception as e:
         raise TunnelError(_cannot_load(e)) from e
-    logger = logging.getLogger(_SDK_LOGGER)
-    if not any(isinstance(h, logging.NullHandler) for h in logger.handlers):
-        logger.addHandler(logging.NullHandler())
-    logger.propagate = False
+    for name in _SDK_LOGGER_FAMILIES:
+        logger = logging.getLogger(name)
+        if not any(isinstance(h, logging.NullHandler) for h in logger.handlers):
+            logger.addHandler(logging.NullHandler())
+        logger.propagate = False
     return sdk
 
 
@@ -373,8 +378,8 @@ def _call_with_timeout(fn: Callable[[], _T], timeout_s: float, *, on_late: Calla
 
 
 class _SessionCloser:
-    """关闭一个隧道会话：第一次调用时用 SDK 同步的 `disconnect(url)` 关闭，之后的调用不再动作；按 CLOSE_TIMEOUT_S 放弃等待；一切
-    Exception 都不外抛（ADR 0035 决策 1）。并发调用时后来者等前一次的关闭结束（或到时放弃）才返回。
+    """关闭一个隧道会话：第一次调用时用 SDK 同步的 `disconnect(url)` 关闭，之后的调用不再动作；按 CLOSE_TIMEOUT_S 放弃等待；关闭期间的
+    任何异常都不外抛，含 KeyboardInterrupt（ADR 0035 决策 1）。并发调用时后来者等前一次的关闭结束（或到时放弃）才返回。
 
     同时持有 SDK 给出的监听对象：实测这个对象不再被引用、被回收之后隧道仍在线，持有它是为了不依赖这一行为。不用监听对象自己的
     `close()`：它返回可等待对象，宿主都是同步代码；也不用 `kill()`：它关掉进程里全部会话。"""
@@ -393,8 +398,11 @@ class _SessionCloser:
             self._closed = True
             try:
                 _call_with_timeout(lambda: self._sdk.disconnect(self._url), CLOSE_TIMEOUT_S, on_late=lambda _: None)
-            except Exception:
-                pass  # 关闭是正常路径上的礼貌动作：失败或到时，宿主进程退出时会话照样消失
+            except BaseException:  # noqa: BLE001
+                # 关闭只是正常路径上的收尾动作：失败、到时或被打断，宿主进程退出时会话照样消失。被打断也不外抛：前台 run 在 atexit 里
+                # 关闭会话，这时 SIGINT 的处置已经恢复成 Python 的缺省处理，等待关闭期间按下 Ctrl-C 成为 KeyboardInterrupt，外抛就会
+                # 在使用者的终端上留下回溯
+                pass
 
 
 def _upstream_addr(origin: str) -> str:

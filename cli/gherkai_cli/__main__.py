@@ -1732,7 +1732,8 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
     交出的是补全之后、隧道映射之前的 jobs，连同解析后的 region / profile、steps 目录、并发上限与每 job 尾段：后台推进进程不读配置
     文件（ADR 0053 决策 1），凡来自配置的值都按解析之后的值交出。标准输入的写端一直开到收到回报：后台推进进程在建 run 之前查这一端，
     读到文件结束即不建 run。启动、写输入、等回报与输出结果期间被 Ctrl-C 打断时以 130 结束并说明（后台推进进程在另一个会话里，收不到
-    终端的信号）；关闭标准输入在说明之前，还没有建 run 的后台推进进程随之不再建立。
+    终端的信号），标准输出不输出；关闭标准输入在说明之前，还没有建 run 的后台推进进程随之不再建立。中断落在收到「建成」的回报之后时，
+    说明 run 已经提交、给出查进度的命令，与云端 submit 建 run 之后被中断的说法同型。
     """
     region, profile = identity
     payload = handoff.encode_advancer_input(handoff.AdvancerInput(
@@ -1741,6 +1742,7 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
         region=region, profile=profile, report_dir=str(Path(args.report_dir).resolve())))
     list_cmd = _list_runs_cmd(report_dir=args.report_dir)
     owned: list[int] = []
+    report: "handoff.AdvancerReport | None" = None
     try:
         try:
             stdin_w, report_r = _start_background("_reconcile", owned=owned)
@@ -1751,8 +1753,9 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
         line = handoff.read_line(report_r)
         _close_owned(owned)
         if not line:
-            _progress(f"后台推进进程在给出提交结果之前退出了（原因见上面的输出），提交没有完成。它退出之前可能已经建立了这个 run，"
-                      f"可以用 {list_cmd} 查看。修好上面报出的问题之后请重新提交。")
+            # 被信号结束的后台推进进程不留输出，所以「原因在上面」只在它有输出时成立
+            _progress(f"后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经"
+                      f"建立了这个 run，可以用 {list_cmd} 查看。处理好原因之后请重新提交。")
             return 2
         report = handoff.decode_advancer_report(line)
         if report.exit_code != 0:
@@ -1765,8 +1768,13 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
         return 0
     except KeyboardInterrupt:
         _close_owned(owned)
-        _progress("已停止等待提交结果。后台推进进程还没有建立 run 的会自行退出、不再建立；"
-                  f"已经建立的照常执行，可以用 {list_cmd} 找到它。")
+        if report is not None and report.exit_code == 0 and report.run_id:
+            # 已经收到「建成」的回报：run 已经提交，与云端 submit 建 run 之后被中断同一句
+            _progress(f"run {report.run_id} 已经提交，提交命令随后被中断。"
+                      f"查进度：{_status_cmd(report.run_id, report_dir=args.report_dir)}")
+        else:
+            _progress("已停止等待提交结果。后台推进进程还没有建立 run 的会自行退出、不再建立；"
+                      f"已经建立的照常执行，可以用 {list_cmd} 找到它。")
         return 128 + signal.SIGINT
     finally:
         _close_owned(owned)
@@ -1954,8 +1962,9 @@ def _worker_meta_fields(resolutions: dict) -> dict:
     }
 
 
-# 云端守护进程在回报之前退出、或建 run 之前查到它已不在时的一句（ADR 0035 决策 3「云端 `submit`」）
-_DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。"
+# 云端守护进程在回报之前退出、或建 run 之前查到它已不在时的一句（ADR 0035 决策 3「云端 `submit`」）。被信号结束的守护进程不留
+# 输出，所以「原因在上面」只在它有输出时成立
+_DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了，没有提交；它退出之前如果有输出，原因在上面。处理好原因之后请重新执行。"
 
 
 @contextlib.contextmanager
@@ -1981,13 +1990,14 @@ def _sigint_deferred():
 def _cloud_submit_interrupted(stage: str, run_id: "str | None", *, prefix: str, tunnel_lost: bool) -> str:
     """云端 submit 在交接期间被 Ctrl-C 打断时的一句（ADR 0035 决策 3「云端 `submit`」），按建 run 进行到哪一步分三种说法：
     `before`（还没有开始建 run）、`creating`（中断落在建 run 里面：建 run 是数次网络往返，记录可能已经写下、也可能没有）、
-    `created`（建 run 已经返回）。`tunnel_lost`：带隧道、且守护进程没有确认收到 run 的标识——它的标准输入随中断关闭，隧道随之关闭。"""
+    `created`（建 run 已经返回）。`tunnel_lost`：带隧道、且守护进程没有确认收到 run 的标识——它的标准输入随中断关闭，它随之关闭会话。
+    隧道那半句只说隧道已不再可用，不说原因与时刻：守护进程可能在中断之前已经退出，它关闭会话也可能在 submit 退出之后才完成。"""
     if stage == "before":
         return "已停止提交，没有建立 run。"
     if stage == "creating":
-        tail = "隧道已经关闭，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。" if tunnel_lost else ""
+        tail = "隧道已不再可用，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。" if tunnel_lost else ""
         return f"提交被中断。run {run_id} 可能已经写入云端，可以用 {_list_runs_cmd(prefix=prefix)} 确认。{tail}"
-    tail = "隧道已经关闭，这个 run 里要访问被测应用的 job 会失败。" if tunnel_lost else ""
+    tail = "隧道已不再可用，这个 run 里要访问被测应用的 job 会失败。" if tunnel_lost else ""
     return f"run {run_id} 已经提交，提交命令随后被中断。{tail}查进度：{_status_cmd(run_id, prefix=prefix)}"
 
 
@@ -2036,16 +2046,25 @@ def _start_tunnel_watch(args, target, times: "deadline.RunTimes") -> "handoff.Wa
         _close_owned(owned)
 
 
+def _release_after_the_daemon_exits(channel: "handoff.WatchChannel") -> None:
+    """建 run 失败的出口：关闭守护进程的标准输入，等它关闭会话、退出之后再返回，最多等关闭会话的时限（`tunnel.CLOSE_TIMEOUT_S`）
+    加 1 秒（ADR 0035 决策 3「云端 `submit`」）。先关会话再报错：报错之后使用者可能立刻重试，新注册的 ngrok 账号上这条会话还在线时，
+    重试会以地址已被占用失败。到时守护进程还没有退出就不再等：它关闭会话本身有时限，退出时会话随之消失。"""
+    from gherkai_runtime import tunnel as _tunnel
+
+    channel.release(wait_s=_tunnel.CLOSE_TIMEOUT_S + 1)
+
+
 def _submit_cloud(args, prepped: Prepared) -> int:
     """cloud submit（ADR 0034；隧道见 ADR 0035 决策 3「云端 `submit`」）：过云端各道闸、补全运行定义 → 取创建时刻与期限 → 给了
     `--expose-local` 时启动隧道守护进程、拿到公网地址 → 生成运行定义 → create_run 写 definition 到 DDB（不起 task）→ 把 run 的
     标识交给守护进程 → 输出 run_id。之后云端 Lambda 事件驱动链接管推进。
 
     各道闸（版本 skew、资源 preflight、worker variant、设备请求与安装包）都在生成运行定义之前，所需的 job 与有没有隧道取自补全之前
-    的 jobs 与命令行参数（ADR 0037 决策 7「在生成运行定义之前判断」）；闸拦下时守护进程还没有启动。守护进程回报之后、建 run 之前
-    查一次它还在不在，不在即不建 run、退出码 2；建 run 失败时先关闭它的标准输入（它随之关闭会话、退出）再报错、退出码 2。建 run
-    之后交不出 run 的标识（守护进程这时才没了）照常输出 run 标识、退出码 0，另说明隧道已不在。从启动守护进程到输出结果之间被
-    Ctrl-C 打断以 130 结束，按建 run 进行到哪一步说明（`_cloud_submit_interrupted`），标准输出不输出。
+    的 jobs 与命令行参数（ADR 0037 决策 7「在生成运行定义之前判断」）；闸拦下时守护进程还没有启动。守护进程回报之后、紧挨建 run
+    之前查一次它还在不在，不在即不建 run、退出码 2；建 run 失败时先关闭它的标准输入、等它关闭会话退出（等待有时限）再报错、退出码 2。
+    建 run 之后交不出 run 的标识（守护进程这时才没了）照常输出 run 标识、退出码 0，另说明隧道已不再可用。从启动守护进程到输出结果之间
+    被 Ctrl-C 打断以 130 结束，按建 run 进行到哪一步说明（`_cloud_submit_interrupted`），标准输出不输出。
 
     冷启动由 kicker Lambda 做：create_run 写 definition（INSERT）→ runs 表 Stream 触发 kicker → tick 起首批 →
     events Stream → reconciler 接管（补起后续、写下各 job 的终态）。submit 只写 runs 表、不起 task、没有 ECS 写或执行权限——机器权限收窄到只剩
@@ -2110,10 +2129,11 @@ def _submit_cloud(args, prepped: Prepared) -> int:
     try:
         headers = None
         if args.expose_local:
-            channel = _start_tunnel_watch(args, target, times)
-            if isinstance(channel, int):
-                rc, channel = channel, None
-                return rc
+            # 先放进临时变量、确认不是退出码再交给 channel：中断落在两者之间时，下面的处理只对句柄调 release
+            started = _start_tunnel_watch(args, target, times)
+            if isinstance(started, int):
+                return started
+            channel = started
             filled, headers = tunnel_host.map_jobs_to_tunnel(
                 filled, local_origin=args.expose_local, public_url=channel.public_url)
         run_meta = replace(
@@ -2121,10 +2141,6 @@ def _submit_cloud(args, prepped: Prepared) -> int:
                             tunnel_headers=headers, warmup_url=channel.warmup_url if channel is not None else None),
             **_worker_meta_fields(resolutions))
         run_id = run_meta.run_id
-        # 建 run 之前查一次守护进程还在不在（与本机后台推进进程查 submit 同一条判据）：不在即不建，免得留下一开始就没有隧道的 run
-        if channel is not None and channel.daemon_gone():
-            _progress(_DAEMON_GONE_BEFORE_SUBMIT)
-            return 2
 
         # **只 create_run 写 definition 到 runs 表**——不起任何 task、不读网络参数、不碰 ECS（ADR 0034）：
         # 冷启动由 kicker Lambda 做（runs 表 Stream 的 INSERT 触发它 tick 起首批）。submit 机器权限面因此收窄到
@@ -2136,20 +2152,25 @@ def _submit_cloud(args, prepped: Prepared) -> int:
             region=target.region, profile=target.profile,
             detached=True,  # STATE 带 detached 标记 → kicker filter 认它冷启动
         )
+        # 建 run 之前查一次守护进程还在不在（与本机后台推进进程查 submit 同一条判据）：不在即不建，免得留下一开始就没有隧道的 run。
+        # 紧挨建 run、在装配存储之后查，查过之后到建 run 之间不再有别的步骤
+        if channel is not None and channel.daemon_gone():
+            _progress(_DAEMON_GONE_BEFORE_SUBMIT)
+            return 2
         stage = "creating"
         try:
             # 写 definition（INSERT）→ runs Stream → kicker Lambda 冷启动
             run_store.create_run(run_meta, initial_run_state(run_meta, started_at=compose.now_iso()))
         except RunAlreadyExists:
             if channel is not None:
-                channel.release()  # 先关守护进程的标准输入（它随之关闭会话），再报错
+                _release_after_the_daemon_exits(channel)
             _progress(f"run {run_id} 已经存在，没有重新建立。请重新执行这条命令。")
             return 2
         except Exception as e:
             if not compose.is_botocore_error(e):
                 raise
             if channel is not None:
-                channel.release()
+                _release_after_the_daemon_exits(channel)
             _progress(f"submit --backend cloud 云端不可达（表/桶/凭证/region）：{e}")
             return 2
         stage = "created"
@@ -2166,14 +2187,14 @@ def _submit_cloud(args, prepped: Prepared) -> int:
                           "注意：本机需保持开机联网直到 run 终态——关机或断网会断开隧道，之后要访问被测应用的 job 将以导航失败告终。")
             else:
                 # 查过之后守护进程才没了：run 已经建成、由云端推进，与守护进程在 submit 退出之后才没了是同一种情形
-                _progress(f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（原因见上面的输出），隧道已不在："
-                          "这个 run 里要访问被测应用的 job 会失败。修好原因之后请重新提交。")
+                _progress(f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（它退出之前如果有输出，原因在上面），"
+                          "隧道已不再可用：这个 run 里要访问被测应用的 job 会失败。处理好原因之后请重新提交。")
             _progress(f"已提交到云端（提交记录已落库，云端已接管推进）。查进度：{_status_cmd(run_id, prefix=target.prefix)}")
         print(run_id)
         return 0
     except KeyboardInterrupt:
         if channel is not None:
-            channel.release()  # 先关守护进程的标准输入，再说明
+            channel.release()  # 先关守护进程的标准输入，再说明；不等它退出：使用者按 Ctrl-C 是要立刻停下
         _progress(_cloud_submit_interrupted(stage, run_id, prefix=target.prefix,
                                             tunnel_lost=channel is not None and handed is not True))
         return 128 + signal.SIGINT
@@ -2927,7 +2948,7 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     `finally` 里关闭会话（`TunnelInfo.close()` 可以重复调用）；不装信号处理器，被信号结束时会话随进程消失。
 
     两个描述符都归调用方关闭（进程入口里即进程退出），本函数不关：回报写端在返回之前一直开着，回报之前的异常把回溯写到 submit 的标准
-    错误之后 submit 才读到文件结束，它说「原因见上面的输出」才成立；回报之后它已不可继承，之后起的 worker 拿不到。云端守护进程的主体
+    错误之后 submit 才读到文件结束，它说「原因在上面」才成立；回报之后它已不可继承，之后起的 worker 拿不到。云端守护进程的主体
     （`tunnel_host.hold_tunnel_for_cloud_run`）是同一约定。`redirect_output` 供测试换成不改接描述符的替身。
     """
     from gherkai_runtime import deadline, detached, tunnel_host
@@ -3013,8 +3034,13 @@ def _cmd_tunnel_watch(args) -> int:
     if not line:
         return 2
     return tunnel_host.hold_tunnel_for_cloud_run(
-        handoff.decode_watch_input(line), report_fd=args.report_fd, input_fd=0,
-        note=lambda s: print(f"tunnel-watch: {s}", flush=True))
+        handoff.decode_watch_input(line), report_fd=args.report_fd, input_fd=0, note=_tunnel_watch_note)
+
+
+def _tunnel_watch_note(text: str) -> None:
+    """隧道守护进程记一句：以 `tunnel-watch:` 开头写到标准输出并立即冲刷。守护进程的主体只在收到 run 的标识、把输出改接日志之后调用它，
+    所以这一句写进守护进程的日志。"""
+    print(f"tunnel-watch: {text}", flush=True)
 
 
 def _cmd_run(args) -> int:
@@ -3084,7 +3110,13 @@ def _cmd_run(args) -> int:
     # 2c) --expose-local：起隧道 + 把 jobs 文本中的 origin 替换成公网 URL（ADR 0035）。隧道是本进程里的一个会话，本进程就是它的宿主：
     #     正常路径上经 atexit 关闭（正常结束、Ctrl-C 都经过它）；宿主怎样退出（含未捕获的异常、被信号结束），隧道都随之消失
     #     （ADR 0035 决策 3「寿命」）。
-    tunneled = _setup_tunnel(args, jobs, closes_at=times.tunnel_closes_at)
+    try:
+        tunneled = _setup_tunnel(args, jobs, closes_at=times.tunnel_closes_at)
+    except KeyboardInterrupt:
+        # 起隧道期间按 Ctrl-C（最长为起隧道的时限）：还没有生成运行定义、没有落库，一句说明、130，与本机 submit 同一时段被中断时一样
+        # 不打回溯。迟到建成的监听由起隧道的那个线程关闭，已经建成的会话随本进程退出消失
+        _progress("已停止，没有开始执行。")
+        return 128 + signal.SIGINT
     if isinstance(tunneled, int):
         return tunneled
     jobs, tunnel_headers, tunnel_info = tunneled

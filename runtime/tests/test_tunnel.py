@@ -482,6 +482,12 @@ def test_start_failure_message_masks_the_token_value(monkeypatch):
 
 # ---------- 起隧道的时限与迟到的监听（ADR 0035 决策 1「起隧道的时限」） ----------
 
+def test_start_timeout_default_is_twenty_seconds():
+    """起隧道的时限缺省 20 秒：这个取值写在 ADR 0035 决策 1「起隧道的时限」里，用户文档也引用了它（「20 秒内没有连上隧道服务」）。
+    其余用例只拿这个符号互相比较，取值变了只有这一条报出；改它时 ADR 与用户文档一并改。"""
+    assert tunnel.START_TIMEOUT_S == 20.0
+
+
 def test_start_gives_up_after_timeout_and_closes_the_listener_that_arrives_late():
     """`forward` 阻塞在一个 Event 上（释放解释器锁）：按时限放弃、给出超时那一句；随后放开，迟到建成的监听被关闭。"""
     gate = threading.Event()
@@ -616,6 +622,47 @@ def test_close_swallows_disconnect_errors():
     assert sdk.disconnects == [PUBLIC_URL]
 
 
+def _close_without_interrupt(info: TunnelInfo) -> None:
+    """调 close()；KeyboardInterrupt 漏出来即判失败（否则它会中止整个测试会话）。"""
+    try:
+        info.close()
+    except KeyboardInterrupt:
+        pytest.fail("close() 把 KeyboardInterrupt 抛了出来")
+
+
+def test_close_swallows_a_keyboard_interrupt_from_disconnect_and_does_nothing_afterwards():
+    """关闭期间的任何异常都不外抛，含 KeyboardInterrupt（ADR 0035 决策 1）：之后再调不再动作。"""
+    sdk = _FakeSdk(disconnect_error=KeyboardInterrupt())
+    info = _start(sdk)
+    _close_without_interrupt(info)
+    _close_without_interrupt(info)
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
+def test_close_interrupted_by_ctrl_c_while_waiting_returns_without_raising():
+    """等待关闭期间主线程收到真实的 SIGINT（前台 run 在 atexit 里关闭会话时按 Ctrl-C）：close() 不外抛、随即返回，不等到关闭的时限。"""
+    gate = threading.Event()
+    sdk = _FakeSdk(disconnect_gate=gate)
+    info = _start(sdk)
+    main = threading.main_thread().ident
+    assert threading.get_ident() == main  # SIGINT 只送到主线程
+
+    def interrupt():
+        sdk.disconnect_entered.wait(5.0)
+        time.sleep(0.05)
+        signal.pthread_kill(main, signal.SIGINT)
+
+    threading.Thread(target=interrupt, daemon=True).start()
+    t0 = time.monotonic()
+    try:
+        _close_without_interrupt(info)
+    finally:
+        gate.set()
+    assert time.monotonic() - t0 < tunnel.CLOSE_TIMEOUT_S
+    _close_without_interrupt(info)
+    assert sdk.disconnects == [PUBLIC_URL]
+
+
 def test_close_gives_up_when_disconnect_blocks(monkeypatch):
     monkeypatch.setattr(tunnel, "CLOSE_TIMEOUT_S", 0.2)
     gate = threading.Event()
@@ -716,20 +763,32 @@ def test_prerequisites_pass_with_sdk_and_token_without_touching_the_network(monk
     assert sdk.forwards == [] and sdk.disconnects == []
 
 
-def test_loading_the_sdk_silences_its_logging(monkeypatch, caplog, capfd):
-    """SDK 经 logging 发的日志不到使用者的终端或日志：导入之后 `ngrok` 这一族 logger 不向上传播，警告既不到根 logger、也不写标准错误。"""
-    logger = logging.getLogger("ngrok")
-    monkeypatch.setattr(logger, "propagate", True)
-    monkeypatch.setattr(logger, "handlers", [])
+_SDK_FAMILIES = ("ngrok", "muxado", "rustls", "tokio")
+
+
+def test_loading_the_sdk_silences_every_log_family_of_its_native_library(monkeypatch, capfd):
+    """SDK 原生库的日志经桥接落在 `ngrok`、`muxado`、`rustls`、`tokio` 几族 logger 上：导入之后各族都接空处理器、不向上传播，警告不写
+    标准错误（后台进程在回报之前不往标准错误写字，ADR 0035 决策 3「输出」）。
+
+    根 logger 的处理器在用例里清空，与没有配置 logging 的进程相同：这时 logging 用缺省处理器把警告写到标准错误，对照组的那一条因此
+    真的写了出来，说明这条用例看得见漏网的警告。"""
+    for name in (*_SDK_FAMILIES, ""):
+        logger = logging.getLogger(name)
+        monkeypatch.setattr(logger, "handlers", [])
+        if name:
+            monkeypatch.setattr(logger, "propagate", True)
     monkeypatch.setenv("NGROK_AUTHTOKEN", "tok")
     t = NgrokTunnel(load_sdk=lambda: _FakeSdk())
     t.check_prerequisites()
     t.check_prerequisites()
-    assert logger.propagate is False and len(logger.handlers) == 1  # 重复导入不叠加处理器
-    with caplog.at_level(logging.WARNING):
-        logging.getLogger("ngrok.tunnel_ext").warning("error connecting to upstream")
-    assert [r for r in caplog.records if r.name.startswith("ngrok")] == []
-    assert capfd.readouterr().err == ""
+    for name in _SDK_FAMILIES:
+        logger = logging.getLogger(name)
+        assert logger.propagate is False, name
+        assert [type(h) for h in logger.handlers] == [logging.NullHandler], name  # 重复导入不叠加处理器
+    for name in ("ngrok.tunnel_ext", "muxado.heartbeat", "rustls.client", "tokio.runtime"):
+        logging.getLogger(name).warning(f"{name}: simulated warning")
+    logging.getLogger("gherkai-test-control").warning("control")
+    assert capfd.readouterr().err == "control\n"
 
 
 def test_importing_the_tunnel_module_does_not_import_the_sdk(tmp_path):

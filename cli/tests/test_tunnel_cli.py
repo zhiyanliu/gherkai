@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import threading
+import time
 import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -249,6 +250,19 @@ def test_run_tunnel_failure_prints_the_sentence_as_is_and_exits_2(tmp_path, monk
     assert not tunnel_service.closed
 
 
+def test_ctrl_c_while_starting_the_tunnel_stops_run_with_one_sentence(tmp_path, monkeypatch, capsys, tunnel_service):
+    """前台 run 在起隧道期间按 Ctrl-C：一句「已停止，没有开始执行。」、退出码 130，不打回溯，不开始执行、不落库；与本机 submit 在同一
+    时段被中断时一样只给一句说明。"""
+    tunnel_service.start_error = KeyboardInterrupt()
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("起隧道被中断时不该开始执行"))
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--expose-local", ORIGIN])
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == ""
+    assert "已停止，没有开始执行。" in cap.err.splitlines() and "Traceback" not in cap.err
+    assert len(tunnel_service.starts) == 1 and not reports.exists()
+
+
 def test_run_record_write_failure_exits_2_with_one_sentence(tmp_path, monkeypatch, capsys, tunnel_service):
     """前台 run 建 run 写记录失败（报告目录的位置被一个文件占着）：一句说明、退出码 2、不打回溯，不开始执行（ADR 0030 决定七）；
     与本机后台推进进程是同一句。"""
@@ -421,8 +435,23 @@ def test_local_submit_hands_over_to_the_advancer_which_builds_and_advances_the_r
                                                                                     advanced):
     """建成的一次：提交进程自己不建 run，以 `-P`、新会话启动后台推进进程，后台推进进程取创建时刻、起隧道、生成运行定义、建 run、
     回报；提交进程的 stdout 只有 run 标识，stderr 有公网地址那一行与查进度的命令。推进用的是写进记录的那一份运行定义，推进结束后
-    会话被关闭。"""
+    会话被关闭。推进用的就是内存里生成的那一份（不从记录读回）：交给建 run、装配与推进的是同一个对象。"""
     monkeypatch.setattr(compose, "now", Clock(tunnel_service.events))
+    handed: dict[str, list] = {"create_run": [], "assemble": []}
+    real_create = LocalRunStore.create_run
+
+    def spy_create(self, meta, initial_state):
+        handed["create_run"].append(meta)
+        return real_create(self, meta, initial_state)
+
+    monkeypatch.setattr(LocalRunStore, "create_run", spy_create)
+    real_assemble = detached.assemble_local_run
+
+    def spy_assemble(meta, report_dir, **kw):
+        handed["assemble"].append(meta)
+        return real_assemble(meta, report_dir, **kw)
+
+    monkeypatch.setattr(detached, "assemble_local_run", spy_assemble)
     reports = tmp_path / "reports"
     spawned: dict = {}
     inline_children.on_spawn = lambda argv, kw: spawned.update(argv=argv, kw=kw, run_dirs=_run_dirs(reports))
@@ -450,9 +479,11 @@ def test_local_submit_hands_over_to_the_advancer_which_builds_and_advances_the_r
     assert run_id.startswith(created.strftime("%Y%m%dT%H%M%SZ"))
     assert meta.session_warmup_url == WARMUP and dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
     assert f"{PUBLIC}/login" in meta.jobs[0].scenarios[0].steps[0].text
-    # 推进用的就是写进记录的那一份；运行态带后台执行标记（status --wait 据此认它可接力）
+    # 推进用的就是写进记录的那一份，且是内存里的同一个对象（不读回）；运行态带后台执行标记（status --wait 据此认它可接力）
     ((_advancer, advanced_meta),) = advanced
     assert advanced_meta == meta
+    ((created_meta,), (assembled_meta,)) = handed["create_run"], handed["assemble"]
+    assert created_meta is assembled_meta and assembled_meta is advanced_meta
     assert LocalRunStore(reports).is_detached(run_id)
     assert (run_dir / "reconcile.log").exists() and (run_dir / "events.db").exists()
     child = inline_children.only()
@@ -497,13 +528,14 @@ def test_local_submit_reports_when_the_advancer_exits_before_reporting(tmp_path,
         raise RuntimeError("boom")
 
     monkeypatch.setattr(m, "_build_run_meta", boom)
+    inline_children.expect_crash_before_report()
     reports = tmp_path / "reports"
     rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == ""
-    assert ("后台推进进程在给出提交结果之前退出了（原因见上面的输出），提交没有完成。它退出之前可能已经建立了这个 run，"
-            f"可以用 gherkai list-runs --report-dir {reports} 查看。修好上面报出的问题之后请重新提交。") in cap.err
+    assert ("后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经建立了这个 run，"
+            f"可以用 gherkai list-runs --report-dir {reports} 查看。处理好原因之后请重新提交。") in cap.err
     inline_children.only().expect_error(RuntimeError)
     assert tunnel_service.closed and _run_dirs(reports) == [] and advanced == []
 
@@ -524,6 +556,31 @@ def test_ctrl_c_while_waiting_lets_the_advancer_see_submit_gone_before_building_
             f"可以用 gherkai list-runs --report-dir {reports} 找到它。") in cap.err
     assert inline_children.only().returncode == 2
     assert _run_dirs(reports) == [] and advanced == [] and tunnel_service.closed
+
+
+def test_ctrl_c_after_the_built_report_says_the_run_was_submitted(tmp_path, monkeypatch, capsys, inline_children,
+                                                                 tunnel_service, advanced):
+    """中断落在提交进程读到并解码了「建成」的回报之后、输出结果之前：run 已经提交，说明与云端 submit 建 run 之后被中断同型（run 的
+    标识与查进度的命令），130，标准输出不输出；后台推进进程照常推进。"""
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        if a and str(a[0]).startswith("隧道已建立"):   # 解码回报之后的第一句输出
+            raise KeyboardInterrupt
+        real_progress(*a, **k)
+
+    monkeypatch.setattr(m, "_progress", progress)
+    reports = tmp_path / "reports"
+    rc = _main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    (run_dir,) = _run_dirs(reports)
+    run_id = run_dir.name
+    assert rc == 130 and cap.out == ""
+    assert (f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --report-dir {reports}"
+            in cap.err.splitlines())
+    assert "已停止等待提交结果" not in cap.err
+    assert inline_children.only().returncode == 0 and len(advanced) == 1 and tunnel_service.closed
 
 
 def test_submit_gone_after_the_check_leaves_the_run_advancing_with_a_log_line(tmp_path, monkeypatch, capsys,
@@ -729,9 +786,11 @@ def fd0():
         pipe.restore()
 
 
-def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_signal_handler(fd0, tunnel_service):
-    """`_tunnel_watch` 入口：回报描述符设为不可继承，从 fd 0 读输入、交给守护进程的主体；主体回报公网地址与预热地址，submit 没有交出
-    run 标识就关闭了标准输入时关闭会话、以 0 返回。入口不装信号处理器：SIGTERM、SIGHUP 仍是缺省处置（ADR 0035 决策 3）。"""
+def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_signal_handler(fd0, tunnel_service,
+                                                                                               monkeypatch):
+    """`_tunnel_watch` 入口：回报描述符设为不可继承，从 fd 0 读输入、交给守护进程的主体（记日志的一句经 `_tunnel_watch_note`）；主体
+    回报公网地址与预热地址，submit 没有交出 run 标识就关闭了标准输入时关闭会话、以 0 返回。入口不装信号处理器：SIGTERM、SIGHUP 仍是
+    缺省处置（ADR 0035 决策 3）。"""
     report_r, report_w = os.pipe()
     os.set_inheritable(report_w, True)
     fd0.write(handoff.encode_watch_input(handoff.WatchInput(
@@ -745,6 +804,15 @@ def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_
 
     reader = threading.Thread(target=read_report_then_close_stdin, daemon=True)
     reader.start()
+    from gherkai_runtime import tunnel_host
+    notes_given: list = []
+    real_hold = tunnel_host.hold_tunnel_for_cloud_run
+
+    def spy_hold(inp, **kw):
+        notes_given.append(kw["note"])
+        return real_hold(inp, **kw)
+
+    monkeypatch.setattr(tunnel_host, "hold_tunnel_for_cloud_run", spy_hold)
     try:
         rc = m.main(["_tunnel_watch", "--report-fd", str(report_w)])
         reader.join(5)
@@ -757,11 +825,22 @@ def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_
     assert (report.public_url, report.warmup_url, report.exit_code) == (PUBLIC, WARMUP, 0)
     assert tunnel_service.closed
     assert tunnel_service.starts[0]["closes_at"] == FAR_FUTURE
+    assert notes_given == [m._tunnel_watch_note]
     assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL and signal.getsignal(signal.SIGHUP) == signal.SIG_DFL
 
 
+def test_tunnel_watch_note_writes_one_prefixed_line_to_stdout(capsys):
+    """守护进程记日志的一句：以 `tunnel-watch: ` 开头、一句一行，写到标准输出（收到 run 的标识之后它已是守护进程的日志），标准错误
+    不写。线程替身复用同一个函数，所以这里钉住的就是用例里守护进程日志的形态。"""
+    m._tunnel_watch_note("隧道已建立，等待 run r1 结束")
+    m._tunnel_watch_note("run r1 已结束（passed），隧道已关闭")
+    cap = capsys.readouterr()
+    assert cap.out == "tunnel-watch: 隧道已建立，等待 run r1 结束\ntunnel-watch: run r1 已结束（passed），隧道已关闭\n"
+    assert cap.err == ""
+
+
 def test_reconcile_entry_reads_its_input_from_stdin_and_reports_a_tunnel_failure(tmp_path, fd0, tunnel_service):
-    """`_reconcile` 入口：从 fd 0 读输入、交给后台推进进程的主体；起隧道失败时回报那一句与退出码 2，不建 run。"""
+    """`_reconcile` 入口：回报描述符设为不可继承，从 fd 0 读输入、交给后台推进进程的主体；起隧道失败时回报那一句与退出码 2，不建 run。"""
     tunnel_service.start_error = gtunnel.TunnelError("隧道没有建成：x。")
     job = Job(scope_id="s", scope_name="s", engine="novaact", timeout_s=300.0,
               scenarios=(Scenario(id="t.feature:2", name="s", steps=(Step(0, "When", f"打开 {ORIGIN}/login"),)),))
@@ -770,8 +849,10 @@ def test_reconcile_entry_reads_its_input_from_stdin_and_reports_a_tunnel_failure
         jobs=(job,), steps_dir=None, max_concurrency=1, per_job_tail_s=310.0, expose_local=ORIGIN,
         tunnel_provider="ngrok", region="us-east-1", profile=None, report_dir=str(reports))))
     report_r, report_w = os.pipe()
+    os.set_inheritable(report_w, True)
     try:
         rc = m.main(["_reconcile", "--report-fd", str(report_w)])
+        assert not os.get_inheritable(report_w)   # 进门即设为不可继承：之后起的 worker 拿不到回报写端
     finally:
         os.close(report_w)
     try:
@@ -880,14 +961,15 @@ def test_cloud_submit_builds_no_run_when_the_daemon_is_gone_before_the_check(tmp
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == ""
-    assert "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。" in cap.err
+    assert "持有隧道的本机后台进程退出了，没有提交；它退出之前如果有输出，原因在上面。处理好原因之后请重新执行。" in cap.err
     assert ("ddb", "put_item") not in record
     assert inline_children.only().returncode == 0 and tunnel_service.closed
 
 
 def test_cloud_submit_releases_the_daemon_before_reporting_a_failed_create(tmp_path, monkeypatch, capsys,
                                                                            inline_children, tunnel_service):
-    """建 run 撞 AWS 错：退出码 2、一句诊断；打出诊断之前已关闭守护进程的标准输入（守护进程这时已关闭会话、退出）。"""
+    """建 run 撞 AWS 错：退出码 2、一句诊断。submit 先关闭守护进程的标准输入、等它退出再打出诊断：这句打出时守护进程的主体已经关闭
+    会话、返回。替身不另加等待，这一点由 submit 自己的等待保证。"""
     from botocore.exceptions import ClientError
 
     _patch_cloud_handles(monkeypatch, [])
@@ -903,12 +985,12 @@ def test_cloud_submit_releases_the_daemon_before_reporting_a_failed_create(tmp_p
         return t
 
     monkeypatch.setattr(m.compose, "_make_ddb_table", make_failing)
-    daemon_done_at_report: list[bool] = []
+    daemon_at_report: list[tuple] = []
     real_progress = m._progress
 
     def progress(*a, **k):
         if a and "云端不可达" in str(a[0]):
-            daemon_done_at_report.append(inline_children.only().done.wait(5))
+            daemon_at_report.append((tunnel_service.closed, inline_children.only().returncode))
         real_progress(*a, **k)
 
     monkeypatch.setattr(m, "_progress", progress)
@@ -916,14 +998,70 @@ def test_cloud_submit_releases_the_daemon_before_reporting_a_failed_create(tmp_p
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == "" and "已提交" not in cap.err
-    assert daemon_done_at_report == [True]
+    assert daemon_at_report == [(True, 0)]   # 会话已关闭，主体已经返回
     assert inline_children.only().returncode == 0 and tunnel_service.closed
     assert inline_children.only().notes == []  # 守护进程没有收到 run 的标识
 
 
+def test_cloud_submit_stops_waiting_for_the_daemon_after_the_close_limit(tmp_path, monkeypatch, capsys,
+                                                                          inline_children, tunnel_service):
+    """建 run 失败、守护进程关闭会话一直没有完成（不退出）：submit 等到关闭会话的时限加 1 秒就不再等，照样报错、退出码 2。用例把
+    关闭会话的时限调成 0，等待即为 1 秒。"""
+    from botocore.exceptions import ClientError
+
+    _patch_cloud_handles(monkeypatch, [])
+    monkeypatch.setattr(gtunnel, "CLOSE_TIMEOUT_S", 0.0)
+    real_make = m.compose._make_ddb_table
+
+    def make_failing(table, *, region, profile):
+        t = real_make(table, region=region, profile=profile)
+
+        def boom_put(**kw):
+            raise ClientError({"Error": {"Code": "AccessDeniedException", "Message": "denied"}}, "PutItem")
+
+        t.put_item = boom_put
+        return t
+
+    monkeypatch.setattr(m.compose, "_make_ddb_table", make_failing)
+    unblock = threading.Event()
+    real_close = tunnel_service._close
+
+    def stuck_close():
+        unblock.wait(10)
+        real_close()
+
+    monkeypatch.setattr(tunnel_service, "_close", stuck_close)
+    seen: dict = {}
+    real_release = handoff.WatchChannel.release
+
+    def timed_release(self, *, wait_s=0.0):
+        seen.setdefault("release", (time.monotonic(), wait_s))
+        return real_release(self, wait_s=wait_s)
+
+    monkeypatch.setattr(handoff.WatchChannel, "release", timed_release)
+    real_progress = m._progress
+
+    def progress(*a, **k):
+        if a and "云端不可达" in str(a[0]):
+            seen["reported"] = (time.monotonic(), tunnel_service.closed)
+        real_progress(*a, **k)
+
+    monkeypatch.setattr(m, "_progress", progress)
+    try:
+        rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    finally:
+        unblock.set()
+    inline_children.settle()
+    assert rc == 2 and capsys.readouterr().out == ""
+    (released_at, wait_s), (reported_at, closed_when_reported) = seen["release"], seen["reported"]
+    assert wait_s == 1.0 and not closed_when_reported
+    assert 1.0 <= reported_at - released_at < 3.0
+    assert inline_children.only().returncode == 0 and tunnel_service.closed
+
+
 def test_cloud_submit_still_succeeds_when_the_daemon_is_gone_after_the_check(tmp_path, monkeypatch, capsys,
                                                                              inline_children, tunnel_service):
-    """查过之后守护进程才没了：run 已经建成、由云端推进，交出 run 标识写不进去；照常输出 run 标识、退出码 0，另说明隧道已不在。"""
+    """查过之后守护进程才没了：run 已经建成、由云端推进，交出 run 标识写不进去；照常输出 run 标识、退出码 0，另说明隧道已不再可用。"""
     _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
     gate = threading.Event()
     real_now = compose.now
@@ -941,11 +1079,44 @@ def test_cloud_submit_still_succeeds_when_the_daemon_is_gone_after_the_check(tmp
     cap = capsys.readouterr()
     run_id = _definition(made["ddb_tables"][0])["run_id"]
     assert rc == 0 and cap.out == f"{run_id}\n"
-    assert (f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（原因见上面的输出），隧道已不在："
-            "这个 run 里要访问被测应用的 job 会失败。修好原因之后请重新提交。") in cap.err
+    assert (f"run {run_id} 已经提交，但持有隧道的本机后台进程已经退出（它退出之前如果有输出，原因在上面），隧道已不再可用："
+            "这个 run 里要访问被测应用的 job 会失败。处理好原因之后请重新提交。") in cap.err
     assert ESTABLISHED not in cap.err.splitlines()
     assert "已提交到云端（提交记录已落库，云端已接管推进）。" in cap.err
     assert tunnel_service.closed
+
+
+def test_cloud_submit_checks_the_daemon_right_before_creating_the_run(tmp_path, monkeypatch, capsys, inline_children,
+                                                                      tunnel_service):
+    """建 run 之前查一次守护进程还在不在：查在装配存储之后、紧挨建 run，查过之后到建 run 之间不再装配别的东西。"""
+    _patch_cloud_handles(monkeypatch, [])
+    order: list[str] = []
+    real_build = m.compose.build_cloud_stores
+
+    def build(**kw):
+        order.append("build_cloud_stores")
+        run_store, result_store, report_store = real_build(**kw)
+        real_create = run_store.create_run
+
+        def create(meta, initial_state):
+            order.append("create_run")
+            return real_create(meta, initial_state)
+
+        run_store.create_run = create
+        return run_store, result_store, report_store
+
+    monkeypatch.setattr(m.compose, "build_cloud_stores", build)
+    real_gone = handoff.WatchChannel.daemon_gone
+
+    def gone(self):
+        order.append("daemon_gone")
+        return real_gone(self)
+
+    monkeypatch.setattr(handoff.WatchChannel, "daemon_gone", gone)
+    rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    assert rc == 0, capsys.readouterr().err
+    assert order == ["build_cloud_stores", "daemon_gone", "create_run"]
 
 
 def test_ctrl_c_while_waiting_for_the_daemon_builds_no_run(tmp_path, monkeypatch, capsys, inline_children,
@@ -973,7 +1144,7 @@ class _InterruptedCreate:
 def test_ctrl_c_inside_create_run_says_the_run_may_exist(expose, tmp_path, monkeypatch, capsys, inline_children,
                                                          tunnel_service):
     """中断落在建 run 里面（给不给 --expose-local 都接）：说明 run 可能已经写入云端、给出确认用的命令，130，stdout 不输出；带隧道时
-    另说明隧道已经关闭，守护进程读到标准输入关闭即关闭会话。"""
+    另说明隧道已不再可用，守护进程读到标准输入关闭即关闭会话。"""
     _patch_cloud_handles(monkeypatch, [])
     _fix_run_id(monkeypatch)
     monkeypatch.setattr(m.compose, "build_cloud_stores", lambda **kw: (_InterruptedCreate(), object(), object()))
@@ -984,15 +1155,15 @@ def test_ctrl_c_inside_create_run_says_the_run_may_exist(expose, tmp_path, monke
     assert rc == 130 and cap.out == ""
     assert (f"提交被中断。run {FIXED_RUN_ID} 可能已经写入云端，可以用 gherkai list-runs --backend cloud --prefix "
             in cap.err)
-    tunnel_clause = "隧道已经关闭，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。"
+    tunnel_clause = "隧道已不再可用，这个 run 如果已经写入，其中要访问被测应用的 job 会失败。"
     assert (tunnel_clause in cap.err) is expose
     if expose:
         assert inline_children.only().returncode == 0 and tunnel_service.closed
 
 
-def test_ctrl_c_after_create_run_before_handing_over_says_the_tunnel_closed(tmp_path, monkeypatch, capsys,
-                                                                            inline_children, tunnel_service):
-    """建 run 已经返回、交出 run 标识之前 Ctrl-C：说明 run 已经提交、隧道已经关闭，给出查进度的命令，130、stdout 不输出；
+def test_ctrl_c_after_create_run_before_handing_over_says_the_tunnel_is_unusable(tmp_path, monkeypatch, capsys,
+                                                                                  inline_children, tunnel_service):
+    """建 run 已经返回、交出 run 标识之前 Ctrl-C：说明 run 已经提交、隧道已不再可用，给出查进度的命令，130、stdout 不输出；
     守护进程没有收到标识，读到标准输入关闭即关闭会话。"""
     _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
 
@@ -1005,16 +1176,17 @@ def test_ctrl_c_after_create_run_before_handing_over_says_the_tunnel_closed(tmp_
     cap = capsys.readouterr()
     run_id = _definition(made["ddb_tables"][0])["run_id"]
     assert rc == 130 and cap.out == ""
-    assert (f"run {run_id} 已经提交，提交命令随后被中断。隧道已经关闭，这个 run 里要访问被测应用的 job 会失败。"
+    assert (f"run {run_id} 已经提交，提交命令随后被中断。隧道已不再可用，这个 run 里要访问被测应用的 job 会失败。"
             f"查进度：gherkai status {run_id} --backend cloud --prefix ") in cap.err
     child = inline_children.only()
     assert child.returncode == 0 and child.notes == [] and tunnel_service.closed
 
 
-def test_ctrl_c_between_handing_over_and_noting_it_does_not_claim_the_tunnel_closed(tmp_path, monkeypatch, capsys,
-                                                                                    inline_children, tunnel_service):
-    """SIGINT 恰在 run 标识写进守护进程之后、submit 记下「交成了」之前到达：推迟到记下之后才按中断处理，所以说明里没有「隧道已随中断
-    关闭」——守护进程确实收到了标识，照常持有隧道到 run 结束。"""
+def test_ctrl_c_between_handing_over_and_noting_it_does_not_claim_the_tunnel_is_unusable(tmp_path, monkeypatch, capsys,
+                                                                                          inline_children,
+                                                                                          tunnel_service):
+    """SIGINT 恰在 run 标识写进守护进程之后、submit 记下「交成了」之前到达：推迟到记下之后才按中断处理，所以说明里没有「隧道已不再
+    可用」——守护进程确实收到了标识，照常持有隧道到 run 结束。"""
     _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, [])
     real_hand_over = handoff.WatchChannel.hand_over
 
@@ -1030,7 +1202,7 @@ def test_ctrl_c_between_handing_over_and_noting_it_does_not_claim_the_tunnel_clo
     run_id = _definition(made["ddb_tables"][0])["run_id"]
     assert rc == 130 and cap.out == ""
     assert f"run {run_id} 已经提交，提交命令随后被中断。查进度：gherkai status {run_id} --backend cloud --prefix " in cap.err
-    assert "隧道已经关闭" not in cap.err
+    assert "隧道已不再可用" not in cap.err
     child = inline_children.only()
     assert child.notes[0].startswith(f"隧道已建立，等待 run {run_id} 结束")
     assert child.returncode == 0 and tunnel_service.closed

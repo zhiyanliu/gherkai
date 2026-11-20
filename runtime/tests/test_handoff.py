@@ -517,3 +517,55 @@ def test_release_closes_both_ends_once_and_is_idempotent(channel_pipes):
         ch.daemon_gone()
     with pytest.raises(ValueError):
         ch.hand_over("20261120T080000Z-a3f9c1")
+
+
+def _assert_both_ends_released(fds: dict) -> None:
+    """submit 一侧的两端都已关闭：守护进程一侧的标准输入读到文件结束，往回报管道写得到 EPIPE（回报写端还开着时）。"""
+    assert handoff.read_line(fds["stdin_r"]) == b""
+    if fds["report_w"] is not None:
+        assert handoff.write_all(fds["report_w"], b"x") is False
+
+
+def test_release_with_wait_returns_at_once_when_the_daemon_is_already_gone(channel_pipes):
+    """对端已关（回报写端已关闭）：release 不等待，随即关闭两端返回。"""
+    ch = _channel(channel_pipes)
+    _close(channel_pipes, "report_w")
+    t0 = time.monotonic()
+    ch.release(wait_s=5.0)
+    assert time.monotonic() - t0 < 1.0
+    _assert_both_ends_released(channel_pipes)
+
+
+def test_release_with_wait_closes_stdin_first_and_returns_once_the_daemon_exits(channel_pipes):
+    """对端在时限内关：守护进程读到标准输入关闭之后才关闭回报写端（退出）。release 先关标准输入、再等到回报管道读到文件结束才返回，
+    不等满时限。"""
+    ch = _channel(channel_pipes)
+    exited = threading.Event()
+
+    def daemon() -> None:
+        assert handoff.read_line(channel_pipes["stdin_r"]) == b""   # submit 关了标准输入
+        time.sleep(0.1)                                              # 关闭会话需要一点时间
+        w, channel_pipes["report_w"] = channel_pipes["report_w"], None
+        exited.set()
+        os.close(w)
+
+    t = threading.Thread(target=daemon, daemon=True)
+    t.start()
+    t0 = time.monotonic()
+    ch.release(wait_s=5.0)
+    elapsed = time.monotonic() - t0
+    assert exited.is_set() and 0.1 <= elapsed < 2.0
+    t.join(1.0)
+    _assert_both_ends_released(channel_pipes)
+
+
+def test_release_with_wait_gives_up_after_wait_s_when_the_daemon_does_not_exit(channel_pipes):
+    """对端不关：release 等满 `wait_s` 之后不再等，照样关闭两端返回。"""
+    ch = _channel(channel_pipes)
+    t0 = time.monotonic()
+    ch.release(wait_s=0.2)
+    elapsed = time.monotonic() - t0
+    assert 0.2 <= elapsed < 1.0
+    _assert_both_ends_released(channel_pipes)
+    ch.release(wait_s=0.2)   # 再调不再动作、不再等待
+    assert time.monotonic() - t0 - elapsed < 0.1

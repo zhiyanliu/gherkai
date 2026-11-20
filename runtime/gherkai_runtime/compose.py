@@ -1078,11 +1078,13 @@ def resolve_cloud_target(
 
 # —— 造 boto3 句柄的钩子：compose 内各装配函数与入口侧的直接消费者（status 的 runs 表句柄、explain 的 s3 client、
 # 隧道守护的 runs 表句柄）共用，同时是测试 monkeypatch 的锚点——验接线而不连真 AWS ——
-def _make_ddb_table(table: str, *, region, profile):
-    """boto3 dynamodb.Table 资源（DDB adapter 吃 resource.Table，非 client）。region/profile 走 Session。"""
+def _make_ddb_table(table: str, *, region, profile, config=None):
+    """boto3 dynamodb.Table 资源（DDB adapter 吃 resource.Table，非 client）。region/profile 走 Session。
+
+    `config` 是 botocore 的 `Config`（时限与重试），为 None 时用 boto3 的缺省；只有要给单次调用定上限的调用方传它。"""
     import boto3
     session = boto3.session.Session(profile_name=profile, region_name=region)
-    return session.resource("dynamodb").Table(table)
+    return session.resource("dynamodb", config=config).Table(table)
 
 
 def _make_s3_client(*, region, profile):

@@ -855,11 +855,12 @@ def test_submit_cloud_exits_2_when_the_daemon_exits_before_reporting(tmp_path, m
     _fake_s3, made, _ = _patch_cloud_handles(monkeypatch, record)
     service = _install_fake_tunnel(monkeypatch)
     service.start_error = RuntimeError("boom")
+    inline_children.expect_crash_before_report()
     rc = m.main(_cloud_submit_argv(tmp_path, "--expose-local", ORIGIN))
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == ""
-    assert "持有隧道的本机后台进程退出了（原因见上面的输出），没有提交。修好上面报出的问题之后请重新执行。" in cap.err
+    assert "持有隧道的本机后台进程退出了，没有提交；它退出之前如果有输出，原因在上面。处理好原因之后请重新执行。" in cap.err
     assert made["ddb_tables"] == []
     inline_children.only().expect_error(RuntimeError)
 
@@ -867,8 +868,9 @@ def test_submit_cloud_exits_2_when_the_daemon_exits_before_reporting(tmp_path, m
 @pytest.mark.parametrize("expose", [True, False], ids=["tunneled", "plain"])
 def test_submit_cloud_run_already_exists_exits_2_after_releasing_the_daemon(expose, tmp_path, monkeypatch, capsys,
                                                                            inline_children):
-    """云端已有同一个 run 标识的记录：建 run 不改任何东西，submit 打出「已经存在」那一句、退出码 2、stdout 为空。带隧道时打出这一句
-    之前已关闭守护进程的标准输入：守护进程没有收到 run 的标识，这时已关闭会话、退出。"""
+    """云端已有同一个 run 标识的记录：建 run 不改任何东西，submit 打出「已经存在」那一句、退出码 2、stdout 为空。带隧道时 submit 先关闭
+    守护进程的标准输入、等它退出再打出这一句：守护进程没有收到 run 的标识，这句打出时它的主体已经关闭会话、返回。替身不另加等待，
+    这一点由 submit 自己的等待保证。"""
     _fake_s3, _made, _ = _patch_cloud_handles(monkeypatch, [])
     service = _install_fake_tunnel(monkeypatch)
     monkeypatch.setattr(m.compose, "new_run_id", lambda at=None: _FIXED_RUN_ID)
@@ -881,12 +883,12 @@ def test_submit_cloud_run_already_exists_exits_2_after_releasing_the_daemon(expo
 
     monkeypatch.setattr(m.compose, "_make_ddb_table", make_occupied)
     sentence = f"run {_FIXED_RUN_ID} 已经存在，没有重新建立。请重新执行这条命令。"
-    daemon_done_when_reported: list[bool] = []
+    daemon_when_reported: list[tuple] = []
     real_progress = m._progress
 
     def progress(*a, **k):
         if expose and a and str(a[0]) == sentence:
-            daemon_done_when_reported.append(inline_children.only().done.wait(5))
+            daemon_when_reported.append((service.closed, inline_children.only().returncode))
         real_progress(*a, **k)
 
     monkeypatch.setattr(m, "_progress", progress)
@@ -897,7 +899,7 @@ def test_submit_cloud_run_already_exists_exits_2_after_releasing_the_daemon(expo
     assert sentence in cap.err.splitlines() and "已提交" not in cap.err
     if expose:
         child = inline_children.only()
-        assert daemon_done_when_reported == [True]
+        assert daemon_when_reported == [(True, 0)]   # 会话已关闭，主体已经返回
         assert child.returncode == 0 and child.notes == [] and service.closed
     else:
         assert inline_children.children == [] and service.starts == []
