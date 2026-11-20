@@ -20,7 +20,7 @@
 
 - 文件名 `gherkai.toml`。查找规则：`--config PATH`、环境变量 `GHERKAI_CONFIG`、当前目录下的 `gherkai.toml` 依次优先。缺省位置不存在不算错（等同于没有配置文件）；显式给出的路径不存在、或文件不是合法 TOML，以退出码 2 结束并点名文件与出错位置。
 - **读它的只有运行侧 CLI 进程**：`run`、`plan`、`submit`、`status`、`explain`、`doctor`、`list-deterministic`、`list-runs`（[0041](./0041-agent-facing-cli-affordances.md) 决策七）、`settle-runs`（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）。worker、云端后端（Fargate、Lambda）、部署命令（`deploy`、`destroy`、`deploy push-worker`、`deploy list-workers`）都不读。
-- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。所有启动 worker 的宿主一律从 definition 读回，不重新解析配置文件。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，两个本机宿主（前台 `run` 的进程与后台推进进程）与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
+- **解析发生在组合根，产物是具体值**：CLI 把配置文件、选项、环境变量合成后的结果写进 definition 与 Job（具名的设备请求：设备 ARN 或筛选条件、`billing_method`、获取预算、项目 ARN；应用条目的完整 S3 位置与包名或 bundle id，字段形态见 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。启动 worker 的宿主都用这次写下的那份 definition，不重新解析配置文件：本机的两个宿主（前台 `run` 的进程、后台推进进程）用自己生成的那份，不从记录读回，后台推进进程生成它所用的 Job 与各项值由 `submit` 按解析后的值经标准输入交来（[0035](./0035-local-app-testing-via-tunnel.md) 决策 3「本机 `submit`」一条）；云端推进器从记录读回。这沿用 [0037](./0037-distribution-and-packaging.md) 决策 4 对 `steps_dir` 的同一惯例：只有随 definition 走，两个本机宿主与云端宿主才对同一个 run 一致，提交之后修改配置文件也不会改变已提交 run 的判定条件。
 - 解析用 Python 标准库 `tomllib`（CLI 要求 Python 3.13 起），零新增依赖；CLI 只读不写，不提供 `config set` 一类改写命令。
 - `doctor` 显示本次加载的配置文件绝对路径，或「未使用配置文件」，便于排查「我改的配置为什么没生效」。
 
@@ -89,7 +89,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 ### 5. 与 ADR 0044 覆盖链的关系：worker 侧覆盖项不进配置文件
 
 - 引擎模型（`NOVA_MODEL_ID`、`MIDSCENE_MODEL_ID`、`MIDSCENE_MODEL_FAMILY`）、设备目标的重规划上限（[0052](./0052-appium-interface-adapter-and-platform-differences.md)）等 **worker 侧覆盖项**，继续走 [0044](./0044-engine-model-selection-and-override.md) 决策 2 的覆盖链：本机 shell 的环境变量、云端 variant 镜像的 `ENV`。`NOVA_ACT_TIMEOUT_S` 不在这条链上：它的单一真值在组合根（[0024](./0024-worker-core-protocol.md)「组合根持引擎特定的值」条），由起 worker 的那一侧从自己的环境变量读出后显式注入 worker（本机 spawn 与能力自述查询经子进程 env；云端由推进器 Lambda 起任务，经 RunTask overrides 注入、盖过镜像 `ENV`，取缺省 120），写进 variant 镜像的 `ENV` 不生效。配置文件不收这些键，`NOVA_ACT_TIMEOUT_S` 也不收。
-- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含后台推进进程）、推进器 Lambda 与能力自述这几个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的问题：每个注入面都是一个会漂的地方；配置文件不重新打开该决定。`NOVA_ACT_TIMEOUT_S` 不收另有一层理由：它的真值由起 worker 的那一侧自己持有——本机后端是 CLI 进程的环境变量，云端由推进器 Lambda 在发 RunTask 时注入，注入的值取自同一个组合根读数，而推进器 Lambda 的运行环境里没有这个变量，所以恒为代码缺省 120——云端运行下这个值当前不可配。将来若要可配，走 definition 固化（CLI 定值、写进 run definition、推进器只读，与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2 的设备请求同一取向），不走部署期给推进器 Lambda 设环境变量：那会让同一个值在本机与云端两条路各有真源、随部署而不随 run 变。配置文件只有 CLI 读。若配置文件收它，按决策 1 的惯例就得把值固化进 definition，让推进器 Lambda 与本机后台推进进程读回同一个值，等于新开一条跨宿主的传递通道，还要定它与宿主环境变量谁优先；收益只是少设一个环境变量。
+- 理由：配置文件只有 CLI 读（决策 1）。若让它承载 worker 侧覆盖项，CLI 就得把值注入本机 spawn（含后台推进进程）、推进器 Lambda 与能力自述这几个注入面，正是 [0044](./0044-engine-model-selection-and-override.md) 拒绝 run 级 `--model` 时指出的问题：每个注入面都是一个会漂的地方；配置文件不重新打开该决定。`NOVA_ACT_TIMEOUT_S` 不收另有一层理由：它的真值由起 worker 的那一侧自己持有——本机后端是 CLI 进程的环境变量，云端由推进器 Lambda 在发 RunTask 时注入，注入的值取自同一个组合根读数，而推进器 Lambda 的运行环境里没有这个变量，所以恒为代码缺省 120——云端运行下这个值当前不可配。将来若要可配，走 definition 固化（CLI 定值、写进 run definition、推进器只读，与 [0048](./0048-test-targets-device-and-ui-kind.md) 决策 2 的设备请求同一取向），不走部署期给推进器 Lambda 设环境变量：那会让同一个值在本机与云端两条路各有真源、随部署而不随 run 变。配置文件只有 CLI 读。若配置文件收它，按决策 1 的惯例就得把值固化进 definition，让推进器 Lambda 与本机后台推进进程都按 definition 里的同一个值注入，等于新开一条跨宿主的传递通道，还要定它与宿主环境变量谁优先；收益只是少设一个环境变量。
 - 配置文件也不收凭证与密钥：AWS 凭证走默认凭证链，`NGROK_AUTHTOKEN` 只留在环境变量（令牌的取法见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 1「前置条件」）。`gherkai.toml` 预期入库，密钥进去即泄漏。
 
 ### 6. 护栏
@@ -98,7 +98,7 @@ ios     = { file = "build/Wikipedia.ipa", bundle-id = "org.wikimedia.wikipedia" 
 - **云端 `report-dir` 不绝对化**：测试覆盖云端后端加配置文件 `report-dir` 的情形，断言交给前置检查与存储的值与文件里的原值逐字相同。
 - **设备段的形态**：测试覆盖平台子表 `arn` 与 `os-version` 二选一（都给以退出码 2 结束；平台有设备 scope 而任何来源都没有给出选择时，`run` / `submit` 以退出码 2 结束、`plan` 只警告，见决策 4）、`os-version` 写成 TOML 数字时的退出码 2 与加引号提示、`billing-method` 的平台覆盖、以及本机后端下 `project-arn` 账号与当前凭证账号不一致的告警文本；解析结果断言为 Job 里的具名设备请求（[0048](./0048-test-targets-device-and-ui-kind.md) 决策 3）。
 - **路径基准**：测试覆盖在子目录执行、`--config` 指向别处两种情形，断言 definition 里的路径以配置文件目录为基准。
-- **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成，后台推进进程在另一 CWD 下得到与提交时相同的设备与应用值。
+- **宿主不读文件**：测试断言 worker 注入 env 与 Job 载荷由 definition 生成；后台推进进程在另一 CWD 下得到与提交时相同的设备与应用值，因为它的输入由 `submit` 按解析后的值交来，它不读配置文件。
 
 ## 实测依据
 

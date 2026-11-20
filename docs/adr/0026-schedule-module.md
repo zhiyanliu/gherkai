@@ -55,7 +55,7 @@ opts = {                 // 时间单位统一为秒；代码字段名带 _s 后
 
 - `maxConcurrency` 默认 **4**（保守）：每个并行 worker = 一个远程会话（桌面为 AgentCore 浏览器会话、设备为 Device Farm 远程访问会话）+ 持续模型调用；并发越高，同时在线的会话和并行的模型调用越多，占用配额、抬高单位时间的消耗。总费用由 job 数与各 job 的原生用量决定，不随并发变化（见本节「CLI 默认值须与此对齐」条的实测；[0024](./0024-worker-core-protocol.md) cost）；例外是 fail-fast 早停时，并发越高，被中止前已产生的费用越多。超出上限的 job 排队，有 worker 退出腾出槽位再起下一个。
 - 是**注入参数 + 保守默认**，不写死——本地全量可调高、配额紧可调低。
-- **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。现 `run` / `submit` 的缺省，以及本机后台推进进程在 definition 缺值时的回落，都取 4（cloud 推进器取 definition 值与部署侧 cap 的较小者、definition 缺值按 1，见 [0034](./0034-detached-batch-reconciler.md) 机制四）。
+- **CLI 默认值须与此对齐**：CLI 曾把 `--max-concurrency` 默认写成 1（「护成本」直觉），但并发不改 job 数与模型调用量、只改墙钟——演示项目 20 个 job 经云端后端实测，串行 1756 秒、并发 4 时 443 秒，每个 job 的墙钟不变。现 `run` / `submit` 的缺省都取 4；本机后台推进进程的并发恒取自 `submit` 交来的输入（即 `submit` 解析出的值），不存在缺值时的回落（cloud 推进器取 definition 值与部署侧 cap 的较小者、definition 缺值按 1，见 [0034](./0034-detached-batch-reconciler.md) 机制四）。
 
 ### 失败隔离（默认隔离，可配 fail-fast）
 

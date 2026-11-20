@@ -76,7 +76,7 @@ class Status(str, Enum):
 - **「终态」有正向真源、定义取补：`core.model.TERMINAL_STATUSES = frozenset(Status) - {PENDING, RUNNING}`**。
   凡「等到终态 / 是否已终态」的消费方（CLI `status --wait` 轮询、`status` 退出码判定、`explain` 的「判定明细尚未落地」判断、隧道守护进程的退出判据、云端推进器 Lambda 的「已收尾 run 不再推演」跳过判据（`lambdas/reconciler.py`）、worker 清理 pass 的「未终态 run 仍引用」检查、`status` 文本输出只在终态打印产物位置、`explain` 的「run 仍在运行，以下为已完成部分」提示、保存明细之前的非终态即抛（见上「不变量的强制点」）——真值集即 `grep -rn TERMINAL_STATUSES`）一律引它，
   **不各自正列白名单**——正向白名单散写多份时，新增终态漏改哪份、那份就永远判不到终态（`--wait` 无限轮询、
-  隧道守护只能等满 TTL 才拆，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
+  隧道守护进程要等到运行期限加 300 秒才关闭隧道，均曾真实存在两份逐字副本）。取补而非正列即为此：新增终态自动入集，只有新增**前置态**
   才需动（届时决定三的取法同批核对）。`TERMINAL_STATUSES` 恒等于 `_STATUS_SEVERITY` 的键集（决定二：severity 只给终态定义）。
 
 ## 决定二：severity 数值序，两层分清
@@ -119,7 +119,7 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
   - 处置（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策六、七）。
   - 云端后端到期（怎样结束见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策九第 1 条，含前提）。
   - 以后的取消（条件在取消的设计里定）。
-- **运行定义不可用时**（云端推进器读不到可用的运行定义；本机后台推进进程同样处理），同一种写，但每个未结束的 job 记 `error`：这些 job 不是被中途结束，是没法执行；run 随之为 `error`。读不到的几种原因见 [0037](./0037-distribution-and-packaging.md) 决策 7；云端与本机后台在这种情形下得到同一结果，由 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 实测项的「对照」一组核对。
+- **运行定义不可用时**（云端推进器读不到可用的运行定义），同一种写，但每个未结束的 job 记 `error`：这些 job 不是被中途结束，是没法执行；run 随之为 `error`。读不到的几种原因见 [0037](./0037-distribution-and-packaging.md) 决策 7，结果由 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 实测项 23 核对。本机没有这种情形：本机的两个宿主（前台 `run` 的进程、后台推进进程）都是自己生成运行定义、自己建 run，推进时用内存里的那一份、不从记录读回；运行定义照旧写进 run 目录，供 `status`、`explain`、报告与处置方读。不读回的理由与被拒方案（本机后台推进进程从记录读回运行定义再推进）见 [0034](./0034-detached-batch-reconciler.md)「端到端流程」里 local 一节。
 - **结束写不写判定明细、不点名**：由结束写结束的 job 没有执行结果，状态与说明只在运行态里（明细与点名见 [0030](./0030-realtime-persistence-seam.md) 决定三）。`explain` 怎样给出这类 job 见 [0042](./0042-step-evidence-and-explain.md) 决策四、决策七，报告怎样显示见 [0027](./0027-runreport-aggregation-index.md)「index.html 形态」。
 
 说明文字按来路取：
@@ -133,7 +133,7 @@ run 的状态若与 job 的状态分开写——在某一刻汇总、单独写�
 | 处置：已过期限加 300 秒（含云端后端到期） | 已超过允许运行的时间 | 这个 run 已超过允许运行的时间，job 没有启动 | 这个 run 已超过允许运行的时间，job 没有结果 |
 | 运行定义不可用 | 读不到定义的原因（[0037](./0037-distribution-and-packaging.md) 决策 7 的几句） | 未结束的 job 都记 `error`，说明同 run 级 | 同左 |
 
-处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。说明表的各句在 core 里只有一处（`run_status.RUN_ENDINGS`），运行定义不可用那一行由调用方选取其中一句原因带入（`run_status.definition_unavailable_ending`）。几种原因的句子同样只在 core 一处（`run_status`：结构版本不合由 `schema_mismatch_reason` 给出，另有定义违约与缺 worker 镜像版本两句），云端推进器与本机后台推进进程共用，由此两种后台得到同一句说明（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 实测项 23）。本机后台推进进程读回运行定义失败只在记录被改坏时出现，句子照用：句中的「后端」对本机后端同样成立；结构版本不合那一句在本机不会出现，后台推进进程与提交它的是同一个解释器。说明只是描述（决定一「状态是一切计算的唯一依据」条）：结束写成立与否、job 与 run 记成什么，都不看说明有没有、是什么。参数形态的校验不在此列：说明表一行构造时核对哪几格带说明，与它的结构字段相符（`run_status.RunEnding`），这是对参数的约束，不改变任何判定。
+处置的各句末尾另加「（已记为已结束）」；两个条件同时成立的处置取「锁拿到了」那一行。说明表的各句在 core 里只有一处（`run_status.RUN_ENDINGS`），运行定义不可用那一行由调用方选取其中一句原因带入（`run_status.definition_unavailable_ending`）。几种原因的句子同样只在 core 一处（`run_status`：结构版本不合由 `schema_mismatch_reason` 给出，另有定义违约与缺 worker 镜像版本两句），由云端推进器选取（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 实测项 23）。说明只是描述（决定一「状态是一切计算的唯一依据」条）：结束写成立与否、job 与 run 记成什么，都不看说明有没有、是什么。参数形态的校验不在此列：说明表一行构造时核对哪几格带说明，与它的结构字段相符（`run_status.RunEnding`），这是对参数的约束，不改变任何判定。
 
 - **一次结束写只带一行说明，多条来路先后成立时取最先成立的那条**：例如前台已因 fail-fast 中止、或先收到使用方中断，之后又过了停止启动的时刻，结束写取 fail-fast 或使用方中断那一行。理由：最先成立的来路已经使余下的 job 不再启动，之后成立的来路不改变哪些 job 没有启动；这与中止的说明取最先成立的来源（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二「一次前台执行可能因三种原因停下」一段）是同一条原则。处置的两个条件在同一次判断里成立、没有先后，按上一段取「锁拿到了」那一行。先后按登记：停止启动的时刻在第一次被检查观察到时登记，fail-fast 与使用方中断在 run 的中止标志第一次登记来源时登记（0054 决策二），两者登记在同一处、只记第一次（[0026](./0026-schedule-module.md)「起 worker 与重试之前的检查」）。
 - **执行方自己到期、fail-fast、使用方中断这三条来路不结束执行中的 job，结束写另以没有 `running` 的 job 为条件**：这三条来路的条件本来就要求执行中的 job 都已结束（执行方自己到期见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策二第 3 条；fail-fast 与使用方中断是执行中的 job 停下、各自得出结果之后），说明表里它们的 `aborted` 一格因此不出现，也不为表里不出现的情形另造说明。条件按结束写写下时的运行态判断：写下时仍是 `running` 的 job（例如读运行态之后才落下、还没有结果的认领）不会被这次结束写记成 `aborted`，云端重叠推进时这样的 run 按继续推进处理（0054 决策二后台推进条「收尾与报告」）；条件不成立时结束写不写、返回未写成。理由：条件要在写下的那一刻成立，而调用方不经手写入序号（[0030](./0030-realtime-persistence-seam.md) 决定六「STATE item 带写入序号」条），所以条件随这次写一起判断。结束不结束执行中的 job 是说明表每一行的结构属性，在 core 里是 `run_status.RunEnding.ends_running_jobs`，与说明分开：结束写成立与否不看哪一句说明给没给出。处置的两行与运行定义不可用的变体结束执行中的 job，不带这个条件。
@@ -156,9 +156,9 @@ skipped/aborted（连同前置态 pending/running）是 core 内态、非 worker
 - **`run`**：按记录里的 run 状态，`passed` 为 0、其余为 1；处理过使用方中断时按信号取 130（SIGINT）或 143（SIGTERM）；run 在本次执行结束之前已被别处结束时为 1（不输出汇总与 `--json`，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五），同时处理过中断时仍按信号取；运行期读写记录失败时非零（不输出汇总，[0030](./0030-realtime-persistence-seam.md) 决定七），同时处理过中断时同样按信号取。
 - **`status --wait`**：一到终态即返回，`passed` 为 0、其余终态为 1（自己处置的同样，处置见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八），被 Ctrl-C 打断为 130。
 - **`status`**（不带 `--wait`）：未结束或 `passed` 为 0、其余终态为 1。
-- **`submit`**：退出码表示提交成功与否、不表示判定：已提交（run_id 已返回）为 0；判定由 `status --wait` 给出。
+- **`submit`**：退出码表示提交成功与否、不表示判定：已提交（run_id 已返回）为 0；判定由 `status --wait` 给出。等待提交结果时被 Ctrl-C 打断为 130，stdout 不输出 run 标识：本机 `submit` 等后台推进进程的回报时；云端 `submit` 等隧道守护进程的回报时，以及从开始建 run 到交出 run 标识之前（给不给 `--expose-local` 都是）。这时 run 可能已经建成，说明里给出找到它的命令；各情形下 run 是否已经建成、之后怎样，见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」。
 - **`settle-runs`**：执行完成为 0（含一个都没处理），跳过（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）不改变退出码；用法错误、后端不可达、给出的 run 不存在、报告目录不过边界检查（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四）、写入失败为 2。
-- **退出码 2**：开始执行之前的问题与查不到 run。另有四类，各在定义处写全：边界检查不过（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四「边界检查」一条；本机 `submit` 的情形见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」里「本机 `submit`」一条，`settle-runs` 的见上「`settle-runs`」一条）；锁已被持有、锁不可用（只对建 run 的一方，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三；本机 `submit` 的情形见该决策「谁在何时拿」）；本机后台推进进程在回报之前退出（由 `submit` 给出，[0035](./0035-local-app-testing-via-tunnel.md) 决策 3「后台推进进程在回报之前退出」一条）；`run` 给出云端后端（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。
+- **退出码 2**：开始执行之前的问题与查不到 run（落库一侧的几种，含本机建 run 时写记录失败，见 [0030](./0030-realtime-persistence-seam.md) 决定七「失败退出码分层」）。另有四类，各在定义处写全：边界检查不过（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策四「边界检查」一条；本机 `submit` 的情形见 [0035](./0035-local-app-testing-via-tunnel.md) 决策 3「三种组合的宿主与次序」里「本机 `submit`」一条，`settle-runs` 的见上「`settle-runs`」一条）；锁已被持有、锁不可用（只对建 run 的一方，[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策三；本机 `submit` 的情形见该决策「谁在何时拿」）；本机后台推进进程在回报之前退出（由 `submit` 给出，[0035](./0035-local-app-testing-via-tunnel.md) 决策 3「后台推进进程在回报之前退出」一条）；`run` 给出云端后端（[0016](./0016-execution-architecture-core-lib-run-model.md) 决策 A）。
 - 非 `passed` 的终态都以 1 结束：fail-fast 下 run 必为 `error`（aborted 有副作用、skipped 因别人崩才没跑，整批确实失败，CI 红）；记 `aborted` 的 run 没有执行完（决定三）。两者都不是可以放行的结论。
 
 ## 决定六：step 级短路——SKIPPED 下探到 step 级 + 正交 `shortcircuited` 布尔
