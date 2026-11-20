@@ -3396,7 +3396,7 @@ def test_explain_unknown_run_and_scope_exit_2(tmp_path, capsys):
     assert "未找到 run" in capsys.readouterr().err
     assert m.main(["explain", run_id, "no-such-scope", "--report-dir", str(root)]) == 2
     err = capsys.readouterr().err
-    assert "未找到 scope" in err and "features/login.feature:6" in err   # 列出本 run 已落地的 scope
+    assert "未找到 scope" in err and "features/login.feature:6" in err   # 列出这个 run 的 scope
     assert m.main(["explain", run_id, "features/login.feature:6", "--report-dir", str(root)]) == 0
 
 
@@ -3491,7 +3491,7 @@ def test_explain_named_scope_still_running_after_another_job_landed_says_not_lan
     rc, out, err = _explain(capsys, root, run_id)
     assert rc == 0 and "run 仍在运行，以下为已完成部分" in err and "scope b" in out and "scope a" not in out
     rc, _out, err = _explain(capsys, root, run_id, "c")
-    assert rc == 2 and "未找到 scope：c（本 run 已落地的 scope：b）" in err
+    assert rc == 2 and "未找到 scope：c（这个 run 的 scope：a、b）" in err
 
 
 def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, capsys):
@@ -3509,14 +3509,18 @@ def test_explain_detached_run_without_job_files_exits_0_with_one_hint(tmp_path, 
     assert doc["status"] == "running" and doc["scopes"] == []
 
 
-def test_explain_nonterminal_sync_run_says_partial(tmp_path, capsys):
-    """同步 run 中途已有落地的 job → 首行提示「以下为已完成部分」；--json 不打提示行。"""
+def test_explain_does_not_show_a_detail_saved_before_its_terminal_write(tmp_path, capsys):
+    """判定明细先于终态存下。明细已在而这个 job 的终态还没有写下（运行态里它仍在执行）时，这份结果还没有被采用：explain 先看运行态，
+    点名与不点名都按「判定明细尚未落地」提示、退出码 0，不把它当作已完成的部分展示；`--json` 的 scopes 为空、status 是运行态里的
+    running。已完成的 job 与仍在执行的 job 并存时的展示见上一条用例。"""
     from gherkai_core.model import Status as S
-    root, run_id = _explain_run(tmp_path, run_status=S.RUNNING)
-    rc, out, err = _explain(capsys, root, run_id)
-    assert rc == 0 and "run 仍在运行，以下为已完成部分" in err and "scenario features/login.feature:12" in out
-    rc, out, err = _explain(capsys, root, run_id, "--json")
-    assert rc == 0 and err == "" and json.loads(out)["status"] == "running"
+    root, run_id = _explain_run(tmp_path, run_status=S.RUNNING)   # 运行态里这个 job 是 running，明细文件已在
+    for flags in ((), ("features/login.feature:6",)):
+        rc, out, err = _explain(capsys, root, run_id, *flags)
+        assert rc == 0 and out == "" and "判定明细尚未落地" in err and "已完成部分" not in err
+        rc, out, err = _explain(capsys, root, run_id, *flags, "--json")
+        doc = json.loads(out)
+        assert rc == 0 and err == "" and doc["status"] == "running" and doc["scopes"] == []
 
 
 def test_explain_job_without_step_records_gets_a_job_block(tmp_path, capsys):
@@ -4349,11 +4353,15 @@ def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: boo
               started_at: str = "2026-11-10T08:00:00+00:00", ended_at: "str | None" = None, message: "str | None" = None) -> None:
     """用真 LocalRunStore 在 root 下写一个 run（run_meta.json 头带写出版本，run_state.json 按 detached 带标记）。"""
     from gherkai_core.adapters.run_store.local import LocalRunStore
-    from gherkai_core.model import JobState, RunMeta, RunState
+    from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Step
 
     jobs = {f"f.feature:{i}": JobState(f"f.feature:{i}", s) for i, s in enumerate(job_statuses)}
+    # 运行定义至少要有一个 job（建 run 的入口拒绝没有 job 的运行定义）；列举只读运行态里的 job，不看这里的定义
+    defined = tuple(Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=300.0,
+                        scenarios=(Scenario(id=sid, name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+                    for sid in (jobs or {"f.feature:0": None}))
     LocalRunStore(root, detached=detached).create_run(
-        RunMeta(run_id=run_id, created_at=started_at, jobs=(), cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00"),
+        RunMeta(run_id=run_id, created_at=started_at, jobs=defined, cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id=run_id, status=status, jobs=jobs, started_at=started_at, ended_at=ended_at, message=message))
 
 

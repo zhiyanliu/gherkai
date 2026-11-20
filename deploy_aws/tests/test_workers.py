@@ -1243,6 +1243,14 @@ def test_snapshot_reads_every_page_of_the_live_group_and_leaves_out_finished_run
     assert len(ddb.queried) > 1 and set(ddb.queried) == {(names.RUNS_STATUS_GROUP_GSI, names.STATUS_GROUP_LIVE)}
 
 
+def _defined_job(scope_id: str):
+    """运行定义里的一个 job（建 run 的入口拒绝没有 job 的运行定义）。"""
+    from gherkai_core.model import Job, Scenario, Step
+
+    return Job(scope_id=scope_id, scope_name=scope_id, engine="novaact", timeout_s=300.0,
+               scenarios=(Scenario(id=scope_id, name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+
+
 def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws):
     """跨组件：core 的 `DynamoDBRunStore` 真写端写出的 STATE 被真快照读到。建 run 后、换到 `running` 后都在 `live` 分组里，
     终态写记下最后一个 job、run 随之成为终态之后不在；META item 与不带 revision 的 run 不贡献 ARN（ADR 0038「不变量」清理 pass 条
@@ -1256,7 +1264,8 @@ def test_snapshot_sees_what_the_real_run_store_writes_until_the_run_finishes(aws
     store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
 
     def create(run_id: str, worker_task_defs: dict[str, str] | None) -> None:
-        meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(), worker_task_defs=worker_task_defs, deadline_at="2026-01-01T01:00:00+00:00")
+        meta = RunMeta(run_id=run_id, created_at="2026-09-08T00:00:00Z", jobs=(_defined_job("a.feature:3"),),
+                       worker_task_defs=worker_task_defs, deadline_at="2026-01-01T01:00:00+00:00")
         state = RunState(run_id=run_id, status=Status.PENDING,
                          jobs={"a.feature:3": JobState(scope_id="a.feature:3", status=Status.PENDING)})
         store.create_run(meta, state)
@@ -1292,7 +1301,8 @@ def test_cleanup_keeps_a_revision_while_its_run_is_pending_or_running_and_reclai
     store = DynamoDBRunStore(boto3.resource("dynamodb", region_name=REGION).Table(table))
     scope = "a.feature:3"
     store.create_run(
-        RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(), worker_task_defs={"novaact": arn}, deadline_at="2026-01-01T01:00:00+00:00"),
+        RunMeta(run_id="run-01", created_at="2026-09-08T09:00:00Z", jobs=(_defined_job(scope),), worker_task_defs={"novaact": arn},
+                deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id="run-01", status=Status.PENDING, jobs={scope: JobState(scope_id=scope, status=Status.PENDING)}))
 
     def one_pass(at: datetime):

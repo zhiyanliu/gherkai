@@ -182,7 +182,8 @@ def tick(
        不写 job 的终态（adapter 写的时候把事件推出的终态钳在 running）；写不成（stale 被挡、run 已结束）无害，返回值不看。
     3. 记下这一轮已有结果的 job 的终态（选哪些 job 见 `_committable`）：先由 project_full 从同一份 records 给出它们的判定明细、配了
        ResultStore 时逐个存下，再以一次终态写（`RunStore.commit_job_states`）记下它们的终态，会话与认领时刻取这一轮的投影。任一份明细
-       存不成即原样抛出：这一轮一个终态都不写，也不认领、不做结束写，同一轮已存下明细的 job 一并留在 running，下一轮重存再写（ADR 0034
+       存不成即原样抛出：这一遍（从读运行态起算，重做是另一遍）一个终态都不写，也不认领、不做结束写，这一遍已存下明细的 job 一并留在
+       running，下一轮重存再写；重做那一遍存不成时，第一遍已写下的终态与已做的认领不收回（ADR 0034
        机制三「run 级状态只进不退」条④ K3）。终态写的结果：使 run 成为终态即返回 `COMMITTED`；run 在这次写之前已是终态即返回
        `ENDED`，不另读、不启动 job；run 仍未结束时，以这次写对 baseline 的作用（`run_status.commit_applied`）作推进决策用的运行态。
     4. 推进决策（plan_next）只看运行态：这一轮读到的 baseline 加上第 3 步终态写的作用，不看投影。交给它之前 job 按运行定义的次序重排

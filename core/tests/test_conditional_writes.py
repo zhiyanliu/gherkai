@@ -479,13 +479,6 @@ def test_projection_lands_a_job_with_a_result_as_running(run_store, result):
     assert (got.status, got.ended_at, got.high_water_mark) == (Status.RUNNING, None, 4)
 
 
-def _no_jobs(run_store) -> RunState:
-    """零个 job 的 run（建 run 的入口不拒绝它）与它的投影。"""
-    meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(), deadline_at="2026-01-01T01:00:00+00:00")
-    run_store.create_run(meta, _initial(meta, hwm=0))
-    return RunState(run_id="run-1", status=Status.PASSED, jobs={}, high_water_mark=2)
-
-
 def _all_pending_before_any_claim(run_store) -> RunState:
     meta = _meta()
     run_store.create_run(meta, _initial(meta, hwm=0))
@@ -514,13 +507,52 @@ def _only_jobs_already_terminal(run_store) -> RunState:
                     jobs={"a": JobState("a", Status.ERROR, session_id="other"), "b": JobState("b", Status.RUNNING)})
 
 
-@pytest.mark.parametrize("seed", [_no_jobs, _all_pending_before_any_claim, _all_pending_after_a_claim,
-                                  _only_jobs_already_terminal],
-                         ids=["no-jobs", "all-pending", "all-pending-after-claim", "only-terminal-in-store"])
+def test_create_run_rejects_a_definition_without_jobs(run_store):
+    """建 run 的入口拒绝没有 job 的运行定义（两个 adapter 对拍，ADR 0031 决定三「取法」）：抛 ValueError，什么都不写。run 的终态只由
+    job 的终态写与结束写带出，没有 job 的 run 建得出来就没有任何一次写能使它结束。"""
+    meta = RunMeta(run_id="run-1", created_at="2026-07-19T00:00:00Z", jobs=(), deadline_at="2026-01-01T01:00:00+00:00")
+    with pytest.raises(ValueError, match="没有 job"):
+        run_store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING, jobs={}))
+    assert run_store.load_run_state("run-1") is None and run_store.load_run_meta("run-1") is None
+
+
+@pytest.mark.parametrize("side", ["local", "ddb"])
+@pytest.mark.parametrize("text, what", [("{", "不是合法的 JSON"), ("[1, 2]", "须为 JSON 对象")], ids=["truncated", "not-an-object"])
+def test_a_stored_definition_that_is_not_a_json_object_reads_as_a_contract_violation(side, text, what, tmp_path, aws):
+    """读得到提交记录而它不是一个 JSON 对象：与缺键、形态不对同属定义违约（抛 DefinitionContractError），不是一个未归类的解析异常，
+    推进器与读端据此按同一种情形处理（两个 adapter 对拍）。运行态不受影响，结束写仍写得成。"""
+    from gherkai_core.errors import DefinitionContractError
+    from gherkai_core.run_status import definition_unavailable_ending
+
+    meta = _meta()
+    if side == "local":
+        from gherkai_core.adapters.run_store.local import LocalRunStore
+
+        store = LocalRunStore(tmp_path)
+        store.create_run(meta, _initial(meta, hwm=0))
+        (tmp_path / "run-1" / "run_meta.json").write_text(text, encoding="utf-8")
+        with pytest.raises(DefinitionContractError, match=what):
+            store.peek_definition_header("run-1")
+    else:
+        from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
+
+        table = aws["ddb"].Table(aws["table_name"])
+        store = DynamoDBRunStore(table)
+        store.create_run(meta, _initial(meta, hwm=0))
+        table.update_item(Key={"run_id": "run-1", "item_type": "META"}, UpdateExpression="SET meta_json = :v",
+                          ExpressionAttributeValues={":v": text})
+    with pytest.raises(DefinitionContractError, match=what):
+        store.load_run_meta("run-1")
+    assert store.end_run("run-1", definition_unavailable_ending("原因"), ended_at="t1") is True
+    assert store.load_run_state("run-1").status is Status.ERROR
+
+
+@pytest.mark.parametrize("seed", [_all_pending_before_any_claim, _all_pending_after_a_claim, _only_jobs_already_terminal],
+                         ids=["all-pending", "all-pending-after-claim", "only-terminal-in-store"])
 def test_projection_writing_no_job_as_running_keeps_the_stored_run_status(run_store, seed):
-    """这次投影没有把任何 job 写成 running 时，run 级与库中原值相同，两个 adapter 对拍：零个 job（取法对空集给出 passed，投影仍不
-    写下终态）、投影里全部 pending（认领之前库中为 pending，认领之后为 running）、投影里已离开 pending 的 job 在库中都已是终态
-    （c 不在投影里、仍为 pending）。投影本身写成，HWM 前进，job 态不变或只多了会话。"""
+    """这次投影没有把任何 job 写成 running 时，run 级与库中原值相同，两个 adapter 对拍：投影里全部 pending（认领之前库中为
+    pending，认领之后为 running）、投影里已离开 pending 的 job 在库中都已是终态（c 不在投影里、仍为 pending）。投影本身写成，
+    HWM 前进，job 态不变或只多了会话。"""
     projected = seed(run_store)
     before = run_store.load_run_state("run-1")
     assert run_store.project_state("run-1", projected) is True

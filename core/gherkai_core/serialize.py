@@ -102,6 +102,21 @@ def _scenario_def_from_dict(d: dict) -> Scenario:
 DEFINITION_SCHEMA_VERSION = 2
 
 
+def definition_from_json(text: str) -> dict:
+    """存下的 definition 文本 → dict。读得到内容而它不是一个 JSON 对象，与缺键、形态不对同属定义违约（抛 DefinitionContractError），
+    读端与推进器按同一种情形处理；读取本身的失败（文件或网络）不在这里，由调用方原样抛出。"""
+    import json
+
+    from gherkai_core.errors import DefinitionContractError
+    try:
+        d = json.loads(text)
+    except ValueError as e:
+        raise DefinitionContractError(f"definition 不是合法的 JSON（{e}）") from e
+    if not isinstance(d, dict):
+        raise DefinitionContractError(f"definition 须为 JSON 对象，现为 {type(d).__name__}")
+    return d
+
+
 def definition_schema_version(d: dict) -> int:
     """从 definition 的 dict 读结构版本：缺键读作 0（早于结构版本号的写端）；不是整数即定义违约，显式 null 也是（云端读 META
     顶层属性按同一口径区分缺键与 null）。"""

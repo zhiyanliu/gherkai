@@ -19,7 +19,7 @@ import pytest
 from gherkai_core.adapters.run_store import ddb as ddb_module
 from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore, RunListingIncomplete
 from gherkai_core.adapters.run_store.local import LocalRunStore
-from gherkai_core.model import JobState, RunListing, RunMeta, RunState, Status
+from gherkai_core.model import Job, JobState, RunListing, RunMeta, RunState, Scenario, Status, Step
 from tests.test_stores import _initial_state
 
 _LIST_INDEX = "status_group-run_id-index"
@@ -27,7 +27,9 @@ _TABLE = "gherkai-runs-listing"
 
 
 def _meta(run_id: str, cli_version: str | None = "1.5.0") -> RunMeta:
-    return RunMeta(run_id=run_id, created_at="2026-07-01T00:00:00Z", jobs=(), cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00")
+    job = Job(scope_id="a.feature:3", scope_name="a.feature:3", engine="novaact", timeout_s=300.0,
+              scenarios=(Scenario(id="a.feature:3", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+    return RunMeta(run_id=run_id, created_at="2026-07-01T00:00:00Z", jobs=(job,), cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00")
 
 
 def _make(store, run_id: str, status: Status, *, cli_version: str | None = "1.5.0") -> None:

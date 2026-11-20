@@ -41,8 +41,9 @@ from collections.abc import Sequence
 from gherkai_core.adapters._boto import require_boto3
 from gherkai_core.adapters.run_store.arg_offload import has_pointers
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
-from gherkai_core.run_status import CommitOutcome, RunEnding, check_running_write, commit_applied, ending_applied
+from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
+    definition_from_json,
     require_definition_schema,
     require_listing_header,
     require_listing_state,
@@ -282,6 +283,7 @@ class DynamoDBRunStore:
         2. 两次 put 都带「条目不存在」的条件，任一被挡即失败。
         已知边界：第 1 道检查的读与第 2 道检查的写之间另一方建了同一个 run_id 时，条目仍只有一方写成（第 2 道检查挡住），
         但 S3 里的正文可能已被本方重写。run_id 由发起进程新生成、带随机尾，这个窗口不另设机制防护。"""
+        check_new_run(meta)  # 没有 job 的运行定义不建（先于任何读写）
         run_id = meta.run_id
         for item_type in (_META, _STATE):
             resp = self._table.get_item(
@@ -607,7 +609,7 @@ class DynamoDBRunStore:
         item = resp.get("Item")
         if item is None:
             return None
-        meta_dict = json.loads(item["meta_json"])
+        meta_dict = definition_from_json(item["meta_json"])
         # 结构版本先于一切（ADR 0037 决策 7）：参数还原要按本版本认的形状遍历 definition，别的版本写出的 META 可能让它先抛 KeyError，
         # 把「版本不合」变成一个裸异常、绕过调用方按 UnsupportedDefinitionSchema 的处置。
         require_definition_schema(meta_dict)

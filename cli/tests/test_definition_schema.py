@@ -214,6 +214,36 @@ def test_background_advancer_ends_the_run_with_the_error_ending_on_contract_viol
     assert {name: (reports / run_id / name).read_bytes() for name in report_files} == report_files
 
 
+@pytest.mark.parametrize("damage", ["not-json", "deleted"])
+def test_background_advancer_ends_the_run_when_the_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, damage):
+    """后台推进进程读到的提交记录不是合法的 JSON，或提交记录已被删去而运行态还在：与缺键的形态违约是同一种情形，同样以结束写的
+    error 变体结束 run，原因是同一句；以退出码 2 结束，不是裸 traceback。"""
+    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
+    _as_detached_run_in_progress(reports, run_id)
+    path = reports / run_id / "run_meta.json"
+    if damage == "not-json":
+        path.write_text("{", encoding="utf-8")
+    else:
+        path.unlink()
+    assert m.main(["_reconcile", run_id, "--report-dir", str(reports)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err
+    assert f"run {run_id} 已结束：这个 run 与还没有结束的 job 记为 error，原因写进了运行状态。" in err
+    _assert_ended_by_the_definition_unavailable_ending(reports, run_id, DEFINITION_CONTRACT_REASON)
+
+
+def test_local_relay_does_not_end_a_run_whose_definition_is_not_json(tmp_path, monkeypatch, capsys):
+    """`status --wait` 接力读到不是合法 JSON 的提交记录：它不是这个 run 的推进器，以退出码 2 结束并说明，运行态一个字节不变。"""
+    reports, run_id = _seed_local_run(tmp_path, monkeypatch)
+    state_path = _as_detached_run_in_progress(reports, run_id)
+    (reports / run_id / "run_meta.json").write_text("{", encoding="utf-8")
+    before = state_path.read_bytes()
+    assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 2
+    err = capsys.readouterr().err
+    assert "Traceback" not in err and "提交记录不完整" in err
+    assert state_path.read_bytes() == before
+
+
 @pytest.mark.parametrize("argv_head", [["status"], ["status", "--wait"], ["explain"]], ids=["status", "status-wait", "explain"])
 def test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(tmp_path, monkeypatch, capsys, argv_head):
     """读头阶段的形态违约（结构版本字段不是整数）：三个本机读端都以退出码 2 结束并说明，不是裸异常；运行态不被改动、不写 run 级消息

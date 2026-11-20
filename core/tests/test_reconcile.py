@@ -1088,6 +1088,43 @@ def test_replan_keeps_what_the_first_pass_committed(any_store, tmp_path):
     assert [state.jobs[s].status for s in ("a", "b", "c")] == [Status.PASSED, Status.ERROR, Status.SKIPPED]
 
 
+def test_a_save_failure_in_the_redo_pass_keeps_what_the_first_pass_wrote(any_store, tmp_path):
+    """保存失败的保护按「遍」算（从读运行态起算，同一轮的重做是另一遍）：重做那一遍有明细存不成时原样抛出，这一遍不写终态、不认领、
+    不做结束写；第一遍已写下的终态与已做的认领不收回（终态只写一次）。固定先后同上一条：第一遍记下 a、认领 b 而 b 启动失败，认领 c
+    之前已过停止启动的时刻；重做的那一遍为 b 存明细时失败。"""
+
+    class _BFails(FakeLauncher):
+        def launch(self, job, *, cutoff_at):
+            super().launch(job, cutoff_at=cutoff_at)
+            if job.scope_id == "b":
+                raise RuntimeError("boom: b")
+
+    class _CannotSaveB:
+        def __init__(self) -> None:
+            self.saved: list[str] = []
+
+        def save_job_result(self, run_id, jr):
+            if jr.scope_id == "b":
+                raise OSError("判定存储写不进")
+            self.saved.append(jr.scope_id)
+
+    meta, log, store = _setup(tmp_path, "a", "b", "c", deadline_at=_NEAR, store=any_store)
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1))  # 起 a
+    _done_events(log, "a")
+    store.clear()
+    rs = _CannotSaveB()
+    with pytest.raises(OSError, match="判定存储写不进"):
+        tick("run-1", meta, log, store, _BFails(), max_concurrency=2, clock=Clock(30, 31, 32, 50, 51), result_store=rs)
+
+    assert rs.saved == ["a"]
+    assert store.writes == ["project_state", "commit_job_states", "try_claim_job", "project_state"]  # 重做那一遍只有投影写
+    assert store.commits == [(("a", Status.PASSED),)]
+    state = store.load_run_state("run-1")
+    assert (state.status, state.ended_at) == (Status.RUNNING, None)
+    assert [state.jobs[s].status for s in ("a", "b", "c")] == [Status.PASSED, Status.RUNNING, Status.PENDING]
+    assert state.jobs["b"].claimed_at == _iso(31)
+
+
 def test_no_writes_and_no_event_reads_in_a_round_that_cannot_read_the_run_state(tmp_path):
     """读不到运行态的那一轮返回继续推进，不读事件、不写任何东西：认领、投影与结束写都写不成，终态写会抛错（ADR 0054 决策二后台推进条
     「收尾与报告」）。已过停止启动的时刻也不做到期的结束写。"""

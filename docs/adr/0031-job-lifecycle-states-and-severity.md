@@ -101,7 +101,7 @@ run 级：不按 severity 比较，按决定三的取法
 
 run 的状态若与 job 的状态分开写——在某一刻汇总、单独写一次，或在 job 之外直接结束 run（到期、处置、读不到运行定义）——记录里就会出现「run 已结束而 job 仍是 `pending` 或 `running`」「job 全部通过而 run 是 `error`」，只能靠 run 级说明解释记录。所以 run 的状态只由 job 的状态算出；一个仍有未结束 job 的 run 要结束，由结束写先把这些 job 写成终态（下「结束写」小节）。
 
-**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。零个 job 的 run 按取法为 `passed`；现在的命令行不新建零个 job 的 run：命令行入口以退出码 2 拒绝零个 scenario 的批次（[0041](./0041-agent-facing-cli-affordances.md) 决策一），端口不为它另设拒绝。
+**取法**：有 job 未结束时，全部是 `pending` 为 `pending`，否则为 `running`；全部结束时按序取第一条成立的：有 `error` 则 `error`；否则有 `failed` 则 `failed`；否则有 `aborted` 或 `skipped` 则 `aborted`（这个 run 没有执行完）；否则 `passed`。run 是终态当且仅当全部 job 是终态。没有零个 job 的 run：建 run 的入口（`RunStore.create_run`）拒绝没有 job 的运行定义，命令行在这之前已以退出码 2 拒绝零个 scenario 的批次（[0041](./0041-agent-facing-cli-affordances.md) 决策一）。理由：run 的终态只由 job 的终态写与结束写带出，没有 job 的 run 没有任何一次写能使它结束，建得出来就会一直停在未结束；取法对空清单给出的 `passed` 因此不对应任何记录。
 
 - **run 的状态字段没有自己的写入逻辑**：每次改变 job 状态的写在同一次写里按取法写 run 状态（云端连同状态分组），使 run 成为终态的那次写同时写下结束时刻。这些写入口见 [0030](./0030-realtime-persistence-seam.md) 决定四；取法要看全部 job，各写入口怎样在同一次写里按取法写出 run 状态见 [0034](./0034-detached-batch-reconciler.md) 机制三②。run 到终态之后运行态的任何写都不成立，规则、理由与依赖方见 [0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策五。
 - **scenario 判定到 job 判定的归约是另一条路径**：终结函数内容完整那一行按 scenario 判定取最重（任一 `error` 为 `error`，否则任一 `failed` 为 `failed`，否则 `passed`，即 `_aggregate`），喂进去的全是 worker 三态，永不含 skipped/aborted；scenario 判定集为空的情形由终结函数先判 error，见 [0034](./0034-detached-batch-reconciler.md) 机制二。

@@ -36,6 +36,7 @@ from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta,
 from gherkai_core.run_status import (
     CommitOutcome,
     RunEnding,
+    check_new_run,
     check_running_write,
     commit_applied,
     ending_applied,
@@ -43,6 +44,7 @@ from gherkai_core.run_status import (
 )
 from gherkai_core.serialize import (
     RUN_STATE_KEYS,
+    definition_from_json,
     definition_schema_version,
     require_listing_header,
     require_listing_state,
@@ -163,6 +165,7 @@ class LocalRunStore:
         判据与两个文件的写在同一把文件锁内（ADR 0054 决策五）：运行态已在 → 抛 FileExistsError，两个文件都不碰。只有
         run_meta.json、没有运行态的目录（建 run 在两次写之间中断）照常建。写序同云端：definition 在前、运行态在后，运行态一出现，
         definition 必已在。后台执行标记只在这里写下。"""
+        check_new_run(meta)  # 没有 job 的运行定义不建（先于建目录，不留空目录）
         run_dir = self._root / meta.run_id
         run_dir.mkdir(parents=True, exist_ok=True)
         path = run_dir / _STATE_FILE
@@ -205,14 +208,14 @@ class LocalRunStore:
         path = self._root / run_id / _META_FILE
         if not path.exists():
             return None
-        return run_meta_from_dict(json.loads(path.read_text(encoding="utf-8")))
+        return run_meta_from_dict(definition_from_json(path.read_text(encoding="utf-8")))
 
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
         """只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。"""
         path = self._root / run_id / _META_FILE
         if not path.exists():
             return None
-        d = json.loads(path.read_text(encoding="utf-8"))
+        d = definition_from_json(path.read_text(encoding="utf-8"))
         return definition_schema_version(d), d.get("cli_version")
 
     def load_run_state(self, run_id: str) -> RunState | None:

@@ -844,7 +844,8 @@ def plan_next(state: RunState, max_concurrency: int, *, past_stop_start: bool) -
       job 由它的截止时刻停下，它的退出带来下一轮）。
     - 未过时：running 少于 max_concurrency 且有 pending，按 state 里的次序对前若干个 pending 提议 start，补到并发上限。
     - 没有 pending 也没有 running 时返回空列表：run 在记下最后一个 job 终态的那次写里随之成为终态，不是一个单独的动作（ADR 0054
-      决策二第 4 条）。tick 只对未结束的 run 调用它，所以在 tick 里这种情形只出在零个 job 的 run 上，它没有任何动作。
+      决策二第 4 条）。tick 只对未结束的 run 调用它，未结束的 run 至少有一个未结束的 job（建 run 的入口拒绝没有 job 的运行定义），
+      所以在 tick 里走不到这一支。
     **只提议**——真正的并发闸是 adapter 的认领条件写（多 reconciler 实例并发提议同一 pending，只有条件写成功的那个真启，其余被拒
     跳过，机制四）。故这里可乐观提议、不怕多提：这一轮读运行态之后才被别处认领的 job 在 state 里仍是 pending，对它的提议被认领条件
     挡下，到期的结束写被它写下时的条件挡下。

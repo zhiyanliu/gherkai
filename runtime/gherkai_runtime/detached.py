@@ -47,6 +47,12 @@ _CUTOFF_CHECK_INTERVAL_S = 0.25
 _RECOVERY_MARGIN_S = 10.0
 
 
+class RunDefinitionMissing(FileNotFoundError):
+    """run 的运行态在而提交记录读不到（`build_local_reconcile`）：落点被删、写坏，或 --report-dir 指错。它是 FileNotFoundError 的
+    子类，查询命令照旧按「找不到」以退出码 2 结束；后台推进进程是这个 run 的推进器，据此以结束写的 error 变体结束它（与提交记录形态
+    违约同一种处理，ADR 0034 机制三「不经推进步骤的收尾」条）。"""
+
+
 class _ExitOrCutoff:
     """一个 job 的「看到 worker 退出」与「到点决定」之间的互斥（ADR 0054 决策二后台推进条「截止时刻与说明」）。
 
@@ -333,7 +339,7 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
         # 正常路径下 submit 的 create_run 早已落 RunStore，走到这里说明落点被删/写坏或 report_dir 指错。
         # 文案按产品语言给：常见形态已由 `_cmd_status` 的 run 存在性检查翻成退出码 2；这里兜住剩下的两条——
         # run_state 在而 definition 缺（落点被删/写坏）的裸 traceback，以及 per-run 后台进程把它写进 reconcile.log。
-        raise FileNotFoundError(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
+        raise RunDefinitionMissing(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
                                 f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")
     log = SqliteEventLog(db_path)
     # 产物落点 env 注入（同步 run 路径的 build_engines 一致）：nova/midscene 产物落 <report_dir>/<run_id>/ 下。

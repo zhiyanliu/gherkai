@@ -234,7 +234,7 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 - `explain` 点名的 scope 在运行态里已结束而没有判定明细时，按运行态给出状态与说明、以退出码 0 结束，其余改造留到第三笔。
 - 本机 `run` 运行期读写记录失败（存明细、写运行态、收尾时读回运行态）时，CLI 给一句产品语言的说明、不打回溯，以非零退出码结束（处理过中断时按信号取 130 或 143）；0030 决定七写的是「非零」，不写死成一个值。
 - 随 code 写进 ADR 的设计点：0026「接口」、「返回执行事实」条与「余下的 job 不再启动的来源只登记一处」条；0016「数据流向单向」与 RunResult 的构成；0030 决定一、决定二（`clock`、没有记录的执行）、决定三的时序块与失败隔离注、决定四 `update_job_state`、决定五、决定七；0031 决定三取法里零个 job 一句、「一次结束写只带一行说明」条末的登记先后、决定五 `run` 条、touch points；0027「RunResult 的组装只有一处」条；0024「三级执行时长」；0034 机制三③、④第 4 步与 core 拆分；0041 决策三 `run --json`；0054 决策二的指针。
-- 主会话对设计取舍的裁决：`schedule` 返回执行事实而不是汇总；由结束写结束的 job 不合成空的判定明细；前台为组装而读运行态的那一次不在报告的失败隔离之内；`update_job_state` 只收 running，不为「不带 job 级说明」另设校验；explain 的小分支这一笔做；零个 job 的 run、重试原因与结束写来路的取法差、`status` 人读输出显示 job 级说明三项这一笔不处理（记在 0021「状态取法与结束写」小结）。
+- 主会话对设计取舍的裁决：`schedule` 返回执行事实而不是汇总；由结束写结束的 job 不合成空的判定明细；前台为组装而读运行态的那一次不在报告的失败隔离之内；`update_job_state` 只收 running，不为「不带 job 级说明」另设校验；explain 的小分支这一笔做；重试原因与结束写来路的取法差、`status` 人读输出显示 job 级说明两项这一笔不处理（记在 0021「状态取法与结束写」小结）；零个 job 的 run 后来由 owner 定为在建 run 的入口拒绝，见第三笔。
 - 第三笔之前后台记录与目标设计的差（供核销）记在 0021「状态取法与结束写」小结。
 - 核对：全量测试通过；两位独立复核（设计与先后；测试与输出契约）提了 19 条，须处置的 7 条都已改（`explain` 的小分支只在 run 已结束时成立；运行期读写记录失败的说明按 run 是否已成终态分两种；其余是 ADR 与注释同 code 对齐）。主会话另改四处：没有结束写的来路这项检查挪到 `run_status.ending_of_stop`，有记录的收尾与没有记录的内存计算共用；停手信号成立之后读不到运行态时仍按「已被别处结束」出口；调度循环里「已被别处结束」先登记来源、再置标志；run 被别处结束而没有存下任何明细时，终端不再给出明细目录的位置。
 - 跳板机真实执行（Linux，nova 引擎，确定性 step，另加一条在 worker 里停留的慢 step），记录、`jobs/`、`index.html`、`run --json` 与退出码都与设计一致：
@@ -258,8 +258,8 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
 第三笔（后台改用逐 job 写序）：本机 `submit` 与云端 Lambda 共用的 `reconcile.tick` 按目标设计逐 job 写终态，投影不再写 job 终态，`try_finalize` 从端口删去。设计取舍随 code 写进各篇 ADR（见下面「随 code 写进 ADR 的设计点」一条），记下、不在这一笔处置的代价在 0021「状态取法与结束写」小结。要点：
 
 - `tick` 一轮：取时刻、读运行态（读不到即返回继续推进，不读事件、不写）；读事件、推演、投影写；对投影为终态、运行态里仍未结束且带认领时刻的 job（`_committable`，按 job 判断快照，取代整轮全有或全无的 `_claim_times`），先逐个存明细，再以一次 `commit_job_states` 记下它们的终态；随后才在「读到的运行态加上这次终态写的作用」（`run_status.commit_applied`，jobs 按运行定义的次序重排）上做推进决策；有认领因已过停止启动的时刻没做时重做一次，第一遍记下的终态不再存、再写。`_finalize` 与 `_claim_times` 删去。
-- `plan_next(state, max_concurrency, *, past_stop_start)`：动作只有 `start` 与 `expire`，删去 `finalize` 与 `recorded`；已过停止启动的时刻、没有 running 而仍有 pending 时提议到期的结束写；零个 job 的 run 没有任何动作。
-- 状态投影：两个 adapter 都把投影里的终态钳在 running，只在把某个 job 写成 running 时连带写 run 状态（本机不对整份 jobs 重算取法，零个 job 时也不写）；DynamoDB 的标量一步只推进 HWM，run 状态挪到把 job 写成 running 的那次逐 job 写里，逐 job 写另以 HWM 为条件。`projected_run_status` 删去。
+- `plan_next(state, max_concurrency, *, past_stop_start)`：动作只有 `start` 与 `expire`，删去 `finalize` 与 `recorded`；已过停止启动的时刻、没有 running 而仍有 pending 时提议到期的结束写。
+- 状态投影：两个 adapter 都把投影里的终态钳在 running，只在把某个 job 写成 running 时连带写 run 状态（本机不对整份 jobs 重算取法）；DynamoDB 的标量一步只推进 HWM，run 状态挪到把 job 写成 running 的那次逐 job 写里，逐 job 写另以 HWM 为条件。`projected_run_status` 删去。
 - `try_finalize` 与 `expected_claim_count` 从端口与两个 adapter 删去；测试里当准备步骤的用法按记录形态换成 `end_run` 的「run 已被别处结束」、`commit_job_states` 或 `end_run` 的 error 变体。
 - 运行定义不可用：云端 `_load_definition` 与本机 `submit` 启动的后台推进进程入口都以结束写的 error 变体结束 run（`detached.end_run_for_unusable_definition`）；`status --wait` 接力照旧以退出码 2 结束、不写。几句原因从 Lambda 挪进 core 的 `run_status`（`schema_mismatch_reason`、`DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），文字不改。这一写之后不生成报告。
 - 报告：`write_report_from_record` 多一个必传的 `result_store`，这一次 tick 交给终态写的明细用内存里的一份，较早轮次写下终态的 job 按 scope_id 从判定存储读回（过渡做法，点名落地之后改为按标识读）。
@@ -271,7 +271,17 @@ ADR 已经由另一家模型核过。owner 2026-11-19 定的做法：不再往�
   - 第一个 job 写下终态之后强杀后台推进进程，`status --wait` 接力：已认领的 b 在截止时刻加 10 秒之后被补写成超时、记 error，c 由接力方启动并通过，run 为 error、退出码 1，报告里三个 job 都有明细。
   - 把明细目录设为不可写：b 的结果存不成，后台推进进程带着回溯退出，b 留在 running、c 没有被启动；恢复之后接力存下 b 的明细、写下终态，再启动 c，run 通过。
   - 删去 run_meta.json 的一个键之后执行后台推进入口：退出码 2，run 与三个未结束的 job 都记 error、带同一句说明，没有报告。
-- 另一家模型核落到位待做。
+- owner 2026-11-20 的两处裁定：没有 job 的运行定义在建 run 的入口拒绝（命令行一直以退出码 2 拒绝零个 scenario 的批次，这次把同一条规则加到 `RunStore.create_run`，ADR 0031 决定三「取法」随之改写）；一轮里先写终态、后做推进决策维持（与原先「先认领启动、后写终态」相比，记录里执行中的 job 数始终不超过并发上限，判定存储写不进的那一轮不启动新的 job，代价是启动下一个 job 要等这一轮的保存与终态写做完）。
+- 另一家模型核这一笔，首轮十三条性质里九条成立，四项意见，流程处置是待取证（它的沙箱做不了本机真实进程的验证）。四项都采纳：
+  - 提交记录被删去，或存下的内容不是合法的 JSON 时，绕过了以 error 结束的那条路，run 停在未结束。改为与缺键同一种情形：读出来不是 JSON 对象按定义违约（`serialize.definition_from_json`），运行态在而提交记录不在同样以结束写的 error 变体结束（云端 `_load_definition`，本机后台推进进程入口经 `detached.RunDefinitionMissing`）；读取本身的失败原样抛出。ADR 0037 决策 7 写明范围。
+  - `explain` 在明细已存下、终态还没有写下时把那份结果当作已完成展示。改为先看运行态：job 未结束就不读、不展示它的明细，不点名时只展示运行态里已结束的 job 的明细。
+  - 简报里「明细存不成的那一轮不写终态、不认领」在同一轮重做时不成立（第一遍已写下的终态与已做的认领收不回）。没有调用方依赖这句，收窄为按「遍」算（从读运行态起算），ADR 0034 步骤 3 与 `tick` 的文档串照此改，补一条固定先后的用例。
+  - 简报里「其余推进方只返回 ENDED 或 CONTINUE」漏了云端重读用尽时抛 `RunStateWriteContended` 这条 ADR 已有的边界，收窄说法；它给的反例记进 0021，云端那一批之前定。
+- 处置之后补充的真实执行（跳板机，真实 nova worker 与后台推进进程）：
+  - 有 job 失败：`submit` 加 `status --wait`，run 为 failed、退出码 1，报告一份。
+  - 到期（后台推进进程的墙钟整体偏移，从期限前 80 秒起）：停止启动的时刻之前已认领的 b 照常执行完，它的终态写与到期的结束写落在同一轮，没有启动的 c 记 skipped，run 为 aborted 并带到期那一句，报告里两个 job 有明细、一个没有。
+  - 到期之后的接力（第一个 job 写下终态之后强杀后台推进进程，接力方的墙钟在期限之后 30 秒）：已认领的 b 被补写成超时、记 error，c 由到期的结束写记 skipped，run 为 error，退出码 1。
+  - 提交记录被改成不是合法的 JSON、被删去各一次：后台推进入口以退出码 2 结束、没有回溯，run 与三个未结束的 job 都记 error、带同一句说明，没有报告。
 
 云端那一批之前要定的（记在 0021）：结束写给每个未结束的 job 各写一句说明，job 很多时这一次写可能超过单条记录的大小上限，超出时怎样处理（按 job 数设上限并在计划阶段提示，或缩短每个 job 存下的内容）；运行定义不可用的 error 变体同样给每个未结束的 job 写一句原因，异常从装配处冒出时 kicker 同一批里其它 run 的冷启动一并失败；DynamoDB 上写不成重读的次数上限与持续投影的关系；报告按 job 逐个读明细的耗时与到点触发那次调用的剩余时间。
 

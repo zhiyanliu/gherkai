@@ -2554,27 +2554,26 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     """
     run_id = args.run_id
     not_landed = f"判定明细尚未落地，可先用 {wait_hint} 等到终态"
+    # 先看运行态、再读明细（状态的权威是运行态，ADR 0030 决定三）：明细先于终态存下，一个 job 的明细已在而终态还没有写下时，
+    # 那份结果还没有被采用，不读、不展示
     if args.scope_id:
+        js = state.jobs.get(args.scope_id)
+        if js is None:
+            # 建 run 时运行态即列出全部 job，运行态里没有的只会是 scope 写错
+            _progress(f"未找到 scope：{args.scope_id}（这个 run 的 scope：{'、'.join(state.jobs) or '无'}）")
+            return 2
+        if js.status not in TERMINAL_STATUSES:
+            # 这个 job 还没有结束：按「尚未落地」提示、退出码 0，不论别的 job 是否已有明细（ADR 0042 决策四「未终态的 run」段）
+            return _explain_empty(args, state, hint=not_landed)
         jr = result_store.load_job_result(run_id, args.scope_id)
         if jr is None:
-            js = state.jobs.get(args.scope_id)
-            if state.status in TERMINAL_STATUSES and js is not None and js.status in TERMINAL_STATUSES:
-                # run 已结束、这个 job 已结束而没有判定明细：只会是由结束写结束的 job（没有启动，或 run 被结束时没有结果）——前台与
-                # 后台都是每个 job 得出结果时先存明细、再写终态。它的状态与说明只在运行态里（ADR 0031 决定三「结束写」小节），按运行态
-                # 给出，不报「未找到 scope」
-                return _explain_without_detail(args, state, js)
-            if js is not None and js.status not in TERMINAL_STATUSES:
-                # 这个 job 在运行态里还没有结束，它的判定明细要到它得出结果、写下终态之前才存下：按「尚未落地」提示、退出码 0，不论
-                # 别的 job 是否已有明细（ADR 0042 决策四「未终态的 run」段）
-                return _explain_empty(args, state, hint=not_landed)
-            # 走到这里的只有运行态里没有这个 job 的情形（run 未结束时已结束的 job 都已有明细）：建 run 时运行态即列出全部 job，
-            # 只会是 scope 写错
-            available = [r.scope_id for r in result_store.load_all(run_id)]
-            _progress(f"未找到 scope：{args.scope_id}（本 run 已落地的 scope：{'、'.join(available) or '无'}）")
-            return 2
+            # 已结束而没有判定明细：由结束写结束的 job（没有启动，或 run 被结束时没有结果）。它的状态与说明只在运行态里
+            # （ADR 0031 决定三「结束写」小节），按运行态给出
+            return _explain_without_detail(args, state, js)
         results = [jr]
     else:
-        results = result_store.load_all(run_id)
+        results = [jr for jr in result_store.load_all(run_id)
+                   if (js := state.jobs.get(jr.scope_id)) is not None and js.status in TERMINAL_STATUSES]
     if not results:
         # 判定明细在每个 job 得出结果时存下，run 未结束而零文件即还没有 job 得出结果；终态而零文件
         # 也是正常结果（例子见 ADR 0034 机制三的「不经推进步骤的收尾」），同样只是「没得渲染」
@@ -2778,9 +2777,13 @@ def _cmd_reconcile(args) -> int:
         end_for_unusable_definition(schema_mismatch_reason(e.found, e.supported, e.cli_version))
         _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
         return 2
-    except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json）：同上
+    except DefinitionContractError as e:  # 同版本下形态违约（只会是人手改过的 run_meta.json，含改成不是合法的 JSON）：同上
         end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
         _progress(_definition_contract_message(e))
+        return 2
+    except detached.RunDefinitionMissing as e:  # 运行态在而提交记录不在（被删去）：同上，原因用形态违约的那一句
+        end_for_unusable_definition(DEFINITION_CONTRACT_REASON)
+        _progress(str(e))
         return 2
     return 0
 

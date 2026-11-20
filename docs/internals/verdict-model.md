@@ -14,7 +14,7 @@
 | **step** | AI 断言（`Then`）：`yes > N/2` → `passed`/`failed`，事件带 `votes={yes,total}`。确定性注册表命中（含内建导航）：`AssertionError`→`failed`、其它异常→`error`。`When`·`Given` 的 AI 动作步：正常返回→`passed`、抛异常→`error` | `_run_step`（Nova）/ `runStep`（Midscene） |
 | **scenario** | 任一 step `error`→`error`；任一 `failed`→`failed`；否则 `passed`。**被短路跳过的 step 不进入该列表** | worker 侧 `_aggregate` / `aggregate`；结论经 `scenario_done` 事件上报 |
 | **job**（即 scope） | 同步 `run` 与无状态批量运行共用一个终结函数与真值表（ADR 0034 机制二）：按行序取第一个命中——推进器首次仲裁落定的停止原因（timeout / abort，只约束内容不完整的 job）→ 退出码非零或未知 → 干净退出无 `scope_done` → `scope_done` 带 scope 级 error → scenario 判定集为空 → 各 scenario 归约；会话未确认停止时，非零退出、scope 级 error 与正常归约三处的归因改 `release_failed`、其余行只追加提示（§3c 图画的是同步路径的事件收场） | `project.finalize_job`（`schedule._Worker._run_once` 与 `project._reduce_scope` 只准备输入） |
-| **run** | 只由各 job 的状态得出：全部 job 都结束时按序取第一条成立的——有 job `error`→`error`；否则有 `failed`→`failed`；否则有 `aborted` 或 `skipped`→`aborted`（这个 run 没有执行完）；否则 `passed`。有 job 未结束时，全部 `pending` 为 `pending`，否则 `running`。零个 job 按取法为 `passed`（CLI 不新建零个 job 的 run，见 §4） | `run_status.run_status_of`（唯一实现；每次改变 job 状态的写在同一次写里按它写下 run 状态，见 §4） |
+| **run** | 只由各 job 的状态得出：全部 job 都结束时按序取第一条成立的——有 job `error`→`error`；否则有 `failed`→`failed`；否则有 `aborted` 或 `skipped`→`aborted`（这个 run 没有执行完）；否则 `passed`。有 job 未结束时，全部 `pending` 为 `pending`，否则 `running`。没有零个 job 的 run（建 run 的入口拒绝，见 §4） | `run_status.run_status_of`（唯一实现；每次改变 job 状态的写在同一次写里按它写下 run 状态，见 §4） |
 
 几点补充：
 
@@ -126,7 +126,7 @@ skipped = -1  <  passed = 0  <  failed = 1  <  error = 2  <  aborted = 3
 - **最后一个 job 的终态写**：全部 job 都由执行结果结束，run 随之成为终态，没有 run 级说明。前台是落库服务逐 job 的终态写（`RunStore.commit_job_states`），后台是推进步骤每一轮为已有结果的 job 写下终态（同一轮的合成一次写），记下最后一个 job 终态的那次写使 run 成为终态。
 - **结束写**（`RunStore.end_run`）：run 要结束而仍有未结束的 job 时，把运行态里是 `pending` 的 job 记 `skipped`、`running` 的记 `aborted`，各带说明表（`run_status.RUN_ENDINGS`）里的一句，run 级写下结束的原因。前台在执行中的 job 都结束之后，按调度循环交来的来路做：已过停止启动的时刻（「已超过允许运行的时间」）、fail-fast（「有 job 出错，余下的 job 不再启动（fail-fast）」）、使用方中断（「收到中断信号，余下的 job 不再启动」），几条先后成立时取最先登记的那一条；后台推进在到期时做（没有执行中的 job、仍有未启动的 job）。这三条来路都以写下时没有 `running` 的 job 为条件，所以它们的说明表里没有 `aborted` 那一格。后台推进读不到可用的运行定义时另做一种结束写：每个未结束的 job 都记 `error`，说明是读不到的原因，run 随之为 `error`，这一写之后不生成报告。
 
-由此 run 到终态时每个 job 都已是终态，记录里不会出现「run 已结束而 job 仍是 `pending`」。记 `aborted` 的 run 没有执行完（有 job 被中止或没有启动），已执行的 job 全部通过也不是 `passed`；fail-fast 的 run 必有一个 `error` 的 job，取 `error`；被使用方中断的 run 有 job 出错时同样取 `error`。零个 job 按取法为 `passed`，这只是函数层的取值：CLI 对零 scenario 批（筛选后为空或不加筛选）以退出码 2 拒绝，不新建零个 job 的 run。
+由此 run 到终态时每个 job 都已是终态，记录里不会出现「run 已结束而 job 仍是 `pending`」。记 `aborted` 的 run 没有执行完（有 job 被中止或没有启动），已执行的 job 全部通过也不是 `passed`；fail-fast 的 run 必有一个 `error` 的 job，取 `error`；被使用方中断的 run 有 job 出错时同样取 `error`。没有零个 job 的 run：CLI 对零 scenario 批（筛选后为空或不加筛选）以退出码 2 拒绝，建 run 的入口（`RunStore.create_run`）也拒绝没有 job 的运行定义；取法函数对空清单给出的 `passed` 不对应任何记录。
 
 run 的结果 `RunResult` 从记录组装（`project.assemble_run_result`，前台与后台各处共用这一处）：按运行定义列出全部 job，状态与说明取运行态，由执行结果结束的 job 附上它的判定明细，原生量合计只来自明细。`run` 的文本汇总与报告首页把没有判定明细的 job 列在有明细的之后，按运行态显示状态与说明；`run --json` 的 `jobs[]` 里它们只有 `scope_id`、`status` 与 `message`。没有记录的 `run --no-report` 从全部 `pending` 出发，按终态写与结束写对运行态的同一组作用（`run_status.commit_applied`、`ending_applied`）在内存里算出运行态，再经同一处组装。
 

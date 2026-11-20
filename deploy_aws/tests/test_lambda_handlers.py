@@ -1344,8 +1344,8 @@ def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes
     from gherkai_core.serialize import instant_from_iso
 
     class _Store:
-        def __init__(self, *, exc=None, meta=None):
-            self.exc, self.meta, self.ended = exc, meta, []
+        def __init__(self, *, exc=None, meta=None, state_exists=True):
+            self.exc, self.meta, self.ended, self.state_exists = exc, meta, [], state_exists
 
         def load_run_meta(self, run_id):
             if self.exc is not None:
@@ -1354,6 +1354,8 @@ def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes
 
         def end_run(self, run_id, ending, *, ended_at):
             instant_from_iso(ended_at)  # 记录写法的时刻，解析不了即抛
+            if not self.state_exists:
+                return False  # 运行态不在（或 run 已结束）：结束写不成立
             self.ended.append((run_id, ending.definition_unavailable, ending.ends_running_jobs))
             self.message = ending.run_message
             return True
@@ -1382,8 +1384,15 @@ def test_load_definition_ends_the_run_on_schema_or_contract_violation_and_passes
     ok = RunMeta(run_id="r", created_at="t", jobs=(), worker_task_defs={"novaact": "arn:rev:1"}, deadline_at="2999-01-01T00:00:00+00:00")
     s4 = _Store(meta=ok)
     assert reconciler._load_definition(s4, "r") is ok and s4.ended == []
+    # 提交记录不在而运行态在（记录被删去）：与形态违约同样以 error 结束，原因用同一句
+    capsys.readouterr()
     s5 = _Store(meta=None)
-    assert reconciler._load_definition(s5, "r") is None and s5.ended == []
+    assert reconciler._load_definition(s5, "r") is None and s5.ended == unavailable
+    assert s5.message == DEFINITION_CONTRACT_REASON
+    assert capsys.readouterr().out.startswith("reject: run r ")
+    # 运行态也不在（不属于这张表的 run、已被清理的 run）：结束写不成立，什么都不做、不打诊断行
+    s6 = _Store(meta=None, state_exists=False)
+    assert reconciler._load_definition(s6, "r") is None and s6.ended == [] and capsys.readouterr().out == ""
 
 
 def test_kicker_uses_definition_worker_task_defs(cloud_env):

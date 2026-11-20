@@ -33,7 +33,7 @@ def run_status_of(job_statuses: Iterable[Status]) -> Status:
     """run 状态的取法（ADR 0031 决定三「取法」）。
 
     有 job 未结束时，全部是 pending 为 pending，否则为 running。全部结束时按序取第一条成立的：有 error 则 error；否则有 failed 则
-    failed；否则有 aborted 或 skipped 则 aborted（这个 run 没有执行完）；否则 passed。零个 job 的 run 为 passed。结果是终态，当且仅当
+    failed；否则有 aborted 或 skipped 则 aborted（这个 run 没有执行完）；否则 passed。空清单给出 passed，它不对应任何记录（建 run 的入口拒绝没有 job 的运行定义，见 `check_new_run`）。结果是终态，当且仅当
     每个 job 都是终态。"""
     statuses = list(job_statuses)
     if any(s not in TERMINAL_STATUSES for s in statuses):
@@ -236,6 +236,14 @@ def commit_applied(state: RunState, job_states: Sequence[JobState], *,
     return replace(state, status=status, jobs=jobs), CommitOutcome.OPEN
 
 
+def check_new_run(meta: RunMeta) -> None:
+    """建 run（`RunStore.create_run`）的参数校验：运行定义里没有 job 即抛 ValueError、不写（ADR 0031 决定三「取法」）。run 的终态
+    只由 job 的终态写与结束写带出，没有 job 的 run 没有任何一次写能使它结束；命令行在这之前已以退出码 2 拒绝零个 scenario 的批次，
+    这里守的是直接调用端口的调用方。"""
+    if not meta.jobs:
+        raise ValueError(f"run {meta.run_id} 的运行定义里没有 job，不建立")
+
+
 def check_running_write(job_state: JobState) -> None:
     """执行中的写（`RunStore.update_job_state`）的参数校验：写入的 job 态只能是 running，否则抛 ValueError、不写（ADR 0030 决定四）。
     pending 只由建 run 写下，终态由终态写与结束写写下；与 `commit_applied` 对非终态抛错对称。"""
@@ -253,7 +261,7 @@ def ending_of_stop(stopped_by: StopSource | None) -> RunEnding:
     （`persist.RunPersistence.finalize`）与没有记录时的内存计算（`state_without_record`）共用这一处。
 
     stopped_by 为空（余下的 job 没有结束的来路）或为 ended-elsewhere（已被别处结束的 run 不由这次执行结束）时，执行事实与「仍有 job
-    没有结束」不相容，抛 ValueError。零个 job 的 run 属于前一种：没有任何一次写能使它结束（命令行入口拒绝零个 scenario 的批次）。"""
+    没有结束」不相容，抛 ValueError。"""
     if stopped_by is None or stopped_by == "ended-elsewhere":
         raise ValueError(f"仍有没有结束的 job，而这次执行没有给出可用于结束它们的来路（{stopped_by!r}）")
     return RUN_ENDINGS[stopped_by]

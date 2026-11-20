@@ -1305,10 +1305,12 @@ def test_build_cloud_run_list_store_checks_the_index_before_assembling(with_list
         store = compose.build_cloud_run_list_store(table="vfy-runs", ddb_table=table)
         assert store.list_runs([Status.PENDING, Status.RUNNING], limit=None) == []  # 注入了索引名：能对它 Query
         # 注入的是状态分组索引：建一个非终态 run，经 live 分组找得到
-        from gherkai_core.model import RunMeta, RunState
+        from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Step
 
-        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=(), deadline_at="2026-01-01T01:00:00+00:00"),
-                         RunState(run_id="r1", status=Status.RUNNING, jobs={}))
+        job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
+                  scenarios=(Scenario(id="a:1", name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
+        store.create_run(RunMeta(run_id="r1", created_at="2026-07-01T00:00:00Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
+                         RunState(run_id="r1", status=Status.RUNNING, jobs={"a": JobState("a", Status.RUNNING)}))
         assert [r.run_id for r in store.list_runs([Status.RUNNING], limit=None)] == ["r1"]
 
 

@@ -155,7 +155,8 @@ class RunStore(Protocol):
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
         """写 definition 与初始运行态，只在这个 run 还不存在时成立（ADR 0054 决策五）：run 已存在则抛 FileExistsError、
         不改任何东西（本机的判据是 run 目录里已有运行态文件，云端是 META 或 STATE 条目已在）。初始运行态原样写入，新建的
-        运行态各 job 为 pending、认领计数为 0。
+        运行态各 job 为 pending、认领计数为 0。运行定义里没有 job 即抛 ValueError、不写（`run_status.check_new_run`）：run 的终态只由
+        job 的终态写与结束写带出，没有 job 的 run 没有任何一次写能使它结束（ADR 0031 决定三「取法」）。
         """
         ...
 

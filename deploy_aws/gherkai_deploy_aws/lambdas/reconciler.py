@@ -435,7 +435,11 @@ def _load_definition(run_store, run_id: str):
     except DefinitionContractError as exc:
         return _mark(DEFINITION_CONTRACT_REASON, str(exc))
     if meta is None:
-        return None  # definition 不存在（META 尚未落库的极端窗口 / 别的 run）——忽略
+        # 提交记录不在。运行态在而提交记录不在只会是记录被删去（建 run 先写提交记录、后写运行态，见 DynamoDBRunStore.create_run）：
+        # 与形态违约同样以结束写的 error 变体结束。运行态也不在（不属于这张表的 run、已被清理的 run）时这次写不成立，什么都不做。
+        if run_store.end_run(run_id, definition_unavailable_ending(DEFINITION_CONTRACT_REASON), ended_at=compose.now_iso()):
+            print(f"reject: run {run_id} 不推进、标为 error——{DEFINITION_CONTRACT_REASON}；诊断：提交记录不存在")
+        return None
     if not meta.worker_task_defs:
         return _mark(NO_WORKER_IMAGES_REASON)
     return meta
