@@ -10,14 +10,67 @@
 「本机没装该引擎 → 跳过或退出码 2」那条分支变成测不出来的死路（doctor 的跳过情形正是它），且让本该跳过的用例继续
 往下走去碰真 AWS。故只换「问 worker」那一跳、不换「找 worker」那一跳；用例用 `_fake_locator` 之类的替身把
 定位链摆成想要的形状，这里跟着它走。
+
+**本机 run 目录**（ADR 0054 决策三、四）同一取向：
+- `lock_holder`（autouse）：把 `compose.process_lock_holder` 换成返回测试用的持有者。进程内的 `main(["run", …])`、
+  `_inline_children` 线程里的后台推进进程主体，以及用例自己经 `compose.process_lock_holder()` 建 run 的 store，都把生命期锁交给它；
+  它在用例结束时关闭收下的描述符，锁随之放开，不在测试进程里一直累积。要看锁的用例请求这个夹具，读它收下的描述符。
+- `_host_independent_filesystem_type`（autouse）：把边界检查取文件系统类型的那一步换成本平台清单的第一项，结论不依赖宿主的
+  文件系统。带 `real_filesystem` 标记的用例不替换（起真实子进程的用例，子进程里没有这个替换）；本平台不在清单里、或宿主的系统
+  临时目录取到的类型不在清单里时跳过，判断不了时照常执行（那多半是取法本身坏了，跳过会把它藏起来）。
 """
 from __future__ import annotations
 
+import os
+import sys
+from pathlib import Path
+
 import pytest
 
+from gherkai_core.adapters.run_store import run_dir
 from gherkai_runtime import compose
 
 from _fake_worker import fake_query_capabilities
+
+
+class ClosingLockHolder:
+    """测试用的持有者：记下收到的描述符，用例结束时由夹具关闭（锁随之放开）。生产用的持有者没有放开锁的方法。"""
+
+    def __init__(self) -> None:
+        self.fds: list[int] = []
+
+    def hold(self, fd: int) -> None:
+        self.fds.append(fd)
+
+    def close_all(self) -> None:
+        while self.fds:
+            try:
+                os.close(self.fds.pop())
+            except OSError:
+                pass
+
+
+@pytest.fixture(autouse=True)
+def lock_holder(monkeypatch):
+    holder = ClosingLockHolder()
+    monkeypatch.setattr(compose, "process_lock_holder", lambda: holder)
+    yield holder
+    holder.close_all()
+
+
+@pytest.fixture(autouse=True)
+def _host_independent_filesystem_type(request, monkeypatch):
+    if request.node.get_closest_marker("real_filesystem") is not None:
+        if sys.platform not in run_dir.ALLOWED_FILESYSTEMS:
+            pytest.skip(f"本机后端在 {sys.platform} 上不可用，跳过真实文件系统的用例")
+        tmp = request.getfixturevalue("tmp_path")
+        check = run_dir.check_report_dir(Path(tmp))
+        if check.verdict is run_dir.Boundary.OUTSIDE:
+            pytest.skip(f"宿主的系统临时目录 {tmp} 所在的文件系统是 {check.fs_type}，不在本平台的清单里，跳过真实文件系统的用例")
+        return
+    allowed = run_dir.ALLOWED_FILESYSTEMS.get(sys.platform)
+    if allowed:
+        monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: allowed[0])
 
 
 @pytest.fixture(autouse=True)

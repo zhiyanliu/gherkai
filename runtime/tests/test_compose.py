@@ -1,11 +1,18 @@
-"""compose（组合根逻辑）单测：不起任何子进程、零费用。"""
+"""compose（组合根逻辑）单测：零费用；除带 `real_filesystem` 标记、真起一个建 run 的子进程核对锁持有到进程退出的那一例之外，
+不起任何子进程。"""
 from __future__ import annotations
 
+import json
+import os
+import signal
+import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
 
+from gherkai_core.adapters.run_store import run_dir
 from gherkai_runtime import compose
 from gherkai_runtime import names
 from gherkai_core.scope import FeatureSource
@@ -1300,6 +1307,113 @@ def test_build_local_stores_takes_the_result_store_from_the_single_local_entry(t
     monkeypatch.setattr(compose, "local_result_store", lambda root: seen.append(root) or sentinel)
     _run_store, result_store, _report_store, _make = compose.build_local_stores(report_dir=str(tmp_path))
     assert result_store is sentinel and seen == [tmp_path]
+
+
+# ---- 本机建 run 的生命期锁：持有者由组合根交给 RunStore（ADR 0030 决定四「持锁的描述符交给注入的持有者」条，ADR 0054 决策三）----
+
+def _local_run(run_id: str):
+    """一个单 job 的运行定义与它的初始运行态。"""
+    from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+
+    job = Job(scope_id="a", scope_name="a", engine="midscene", timeout_s=300.0,
+              scenarios=(Scenario(id="a:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(job,), deadline_at="2999-01-01T00:00:00+00:00")
+    return meta, RunState(run_id=run_id, status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)}, started_at="t0")
+
+
+def _try_lock_by_name(path: Path) -> run_dir.LockState:
+    """按名字另开一次目录、不阻塞地取排他锁，随即关闭这次打开（拿到的锁随之放开）。"""
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        return run_dir.try_lock(fd).state
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("detached", [False, True])
+def test_build_local_stores_hands_the_lock_holder_to_the_run_store(tmp_path: Path, lock_holder, detached):
+    """build_local_stores 把 lock_holder 原样交给 RunStore：建 run 之后报告目录下只有这个 run 的目录；持锁的描述符在交进去的那个
+    持有者手里，打开的正是这个 run 目录（同一个 inode），另开一次取锁得到「已被持有」；持有者关掉它之后即拿得到，所以锁只在这一个
+    描述符上。detached 与它一起原样交给 RunStore：带它建的 run 的运行态带后台执行标记。"""
+    root = tmp_path / "reports"
+    run_store = compose.build_local_stores(report_dir=root, detached=detached, lock_holder=lock_holder)[0]
+    run_store.create_run(*_local_run("r1"))
+
+    assert os.listdir(root) == ["r1"]
+    [fd] = lock_holder.fds
+    held, named = os.fstat(fd), os.stat(root / "r1")
+    assert (held.st_dev, held.st_ino) == (named.st_dev, named.st_ino)
+    assert _try_lock_by_name(root / "r1") is run_dir.LockState.HELD
+    marker = json.loads((root / "r1" / "run_state.json").read_text(encoding="utf-8")).get("detached")
+    assert marker is (True if detached else None)
+    lock_holder.close_all()
+    assert _try_lock_by_name(root / "r1") is run_dir.LockState.ACQUIRED
+
+
+def test_build_local_stores_without_a_lock_holder_gives_a_run_store_that_cannot_create_runs(tmp_path: Path):
+    """查询命令的装配不传持有者：拿到的 RunStore 调 create_run 即 RuntimeError，什么都不建（报告目录也不建）；读面照常。"""
+    root = tmp_path / "reports"
+    run_store = compose.build_local_stores(report_dir=root)[0]
+    with pytest.raises(RuntimeError):
+        run_store.create_run(*_local_run("r1"))
+    assert os.listdir(tmp_path) == []
+    assert run_store.load_run_state("r1") is None
+
+
+# 建 run 的子进程：照前台 run 与后台推进进程的装配，经 build_local_stores 带 process_lock_holder() 建 run；随后丢掉 store 与持有者
+# 的全部引用、做一次垃圾回收，再把就绪消息原子写进 ready 文件，等着被杀。只用 ASCII，参数经一个 JSON 串传入
+_HOLDING_CREATOR = r"""
+import gc, json, os, sys, time
+from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+from gherkai_runtime import compose
+a = json.loads(sys.argv[1])
+job = Job(scope_id="a", scope_name="a", engine="midscene", timeout_s=300.0,
+          scenarios=(Scenario(id="a:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+meta = RunMeta(run_id="r1", created_at="t0", jobs=(job,), deadline_at="2999-01-01T00:00:00+00:00")
+state = RunState(run_id="r1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)}, started_at="t0")
+stores = compose.build_local_stores(report_dir=a["root"], detached=True, lock_holder=compose.process_lock_holder())
+stores[0].create_run(meta, state)
+del stores
+gc.collect()
+with open(a["ready"] + ".tmp", "w") as f:
+    f.write("ready")
+os.replace(a["ready"] + ".tmp", a["ready"])
+time.sleep(120)
+"""
+
+
+@pytest.mark.real_filesystem
+def test_a_run_created_with_the_process_lock_holder_stays_locked_until_the_process_exits(tmp_path: Path):
+    """process_lock_holder 给的持有者持锁到进程退出（ADR 0054 决策三「谁在何时拿」）：真实子进程经 build_local_stores 带它建 run，
+    丢掉 store 与持有者的全部引用、做过垃圾回收之后，另一个进程按 run 目录的名字试拿仍得到「已被持有」，子进程被暂停期间也一样；
+    子进程被 SIGKILL、回收之后 2 秒内即拿得到。子进程用宿主真实的文件系统类型做边界检查。"""
+    root, ready = tmp_path / "reports", tmp_path / "ready"
+    proc = subprocess.Popen([sys.executable, "-I", "-c", _HOLDING_CREATOR, json.dumps({"root": str(root), "ready": str(ready)})],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    try:
+        deadline = time.monotonic() + 30
+        while not ready.exists():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            assert time.monotonic() < deadline, "建 run 的子进程没有在时限内就绪"
+            time.sleep(0.01)
+        assert os.listdir(root) == ["r1"]
+        assert _try_lock_by_name(root / "r1") is run_dir.LockState.HELD
+        os.kill(proc.pid, signal.SIGSTOP)
+        _, status = os.waitpid(proc.pid, os.WUNTRACED)
+        assert os.WIFSTOPPED(status)
+        assert _try_lock_by_name(root / "r1") is run_dir.LockState.HELD
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=30)
+        deadline = time.monotonic() + 2.0
+        while _try_lock_by_name(root / "r1") is not run_dir.LockState.ACQUIRED:
+            assert time.monotonic() < deadline, "建 run 的进程被杀之后 2 秒内仍拿不到锁"
+            time.sleep(0.01)
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=30)
+        proc.stderr.close()
 
 
 def test_build_cloud_stores_gives_the_bare_s3_result_store_without_save_retries():

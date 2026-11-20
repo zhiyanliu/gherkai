@@ -785,7 +785,7 @@ def _recording_build_local_stores(calls: list, named: list):
             calls.append(("report", "write", None))
             return f"file:///fake/{run_id}/index.html"
 
-    def fake_build(*, report_dir):
+    def fake_build(*, report_dir, lock_holder=None):
         def make_artifacts(run_id, report_index):
             d = {"run_meta": f"file:///{run_id}/run_meta.json", "run_state": f"file:///{run_id}/run_state.json",
                  "jobs_dir": f"file:///{run_id}/jobs"}
@@ -912,13 +912,26 @@ def test_run_on_an_existing_run_exits_2_with_its_own_sentence_and_closes_the_ses
 
 def test_run_quiet_worker_log_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
     """前台 run 的记录已写下、`--quiet` 的 worker 日志打不开（日志的位置被一个目录占着）：说明记录已写下、还没有开始执行、停在 pending，
-    退出码 2、不打回溯；与本机后台推进进程打不开 reconcile.log 是同一句。"""
+    退出码 2、不打回溯；与本机后台推进进程打不开 reconcile.log 是同一句。日志的位置在真实的建 run 返回之后才被占上：事先在 run 目录里
+    放东西，建 run 会因为这个位置已有非空目录而得到「已经存在」。"""
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
     monkeypatch.setattr(compose, "new_run_id", lambda at=None: _FIXED_RUN_ID)
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("准备执行用的文件失败时不该开始执行"))
+    real_build = compose.build_local_stores
+
+    def build_then_block_the_log(**kw):
+        stores = real_build(**kw)
+        real_create = stores[0].create_run
+
+        def create_then_block(meta, initial_state):
+            real_create(meta, initial_state)
+            (Path(kw["report_dir"]) / meta.run_id / "worker.log").mkdir()
+        stores[0].create_run = create_then_block
+        return stores
+
+    monkeypatch.setattr(compose, "build_local_stores", build_then_block_the_log)
     reports = tmp_path / "reports"
-    (reports / _FIXED_RUN_ID / "worker.log").mkdir(parents=True)
     rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--quiet"])
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == ""
@@ -3397,11 +3410,9 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
         payload = evidence_text if evidence_text is not None else json.dumps(evidence, ensure_ascii=False)
     else:
         payload = json.dumps(_evidence_fixture(), ensure_ascii=False)
+    ev_path = None  # 证据文件在建 run 之后写进 run 目录：建 run 要求以 run 标识命名的位置还没有非空目录
     if evidence is not None or evidence_text is not None:
-        ev_dir = root / run_id / "evidence"
-        ev_dir.mkdir(parents=True, exist_ok=True)
-        ev_path = ev_dir / "evidence.json"
-        ev_path.write_text(payload, encoding="utf-8")
+        ev_path = root / run_id / "evidence" / "evidence.json"
         refs2.insert(0, ReportRef(kind="evidence", ref=ev_path.resolve().as_uri(), label="evidence"))
     scenarios = [] if job_only else [
         ScenarioResult(scenario_id="features/login.feature:12", status=S.FAILED, duration_ms=22600.0, steps=[
@@ -3423,12 +3434,15 @@ def _explain_run(tmp_path, *, evidence=..., run_status=None, with_results=True, 
                    message="job 墙钟预算用尽被停" if job_only else None,
                    report_refs=(ReportRef(kind="summary", ref="file:///tmp/summary.json", label="summary"),))
     st = run_status or (S.ABORTED if job_only else S.FAILED)
-    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root), lock_holder=compose.process_lock_holder())
     # 运行态经写入口得到，写序同写入方：建 run（全 pending）→ 执行中的写记 running（run 随之为 running）→ 先存明细，终态写再记下这个
     # job 的终态并点名那一份（只有一个 job，run 随之成为终态）。run_status 给 running 时明细已存下而终态还没有写，那一份不被点名
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(job,), deadline_at="2026-01-01T01:00:00+00:00"),
                          RunState(run_id=run_id, status=S.PENDING, jobs={job.scope_id: JobState(job.scope_id, S.PENDING)},
                                   started_at="t0"))
+    if ev_path is not None:
+        ev_path.parent.mkdir(parents=True)
+        ev_path.write_text(payload, encoding="utf-8")
     result_id = _save_detail(result_store, run_id, jr) if with_results else None
     if st == S.RUNNING:
         run_store.update_job_state(run_id, JobState(job.scope_id, S.RUNNING))
@@ -3629,7 +3643,7 @@ def test_explain_named_scope_ended_without_detail_shows_the_recorded_status(tmp_
     root = tmp_path / "reports"
     run_id = "20260910T080630Z-9fa262"
     a, b = _explain_job(scope_id="a"), _explain_job(scope_id="b")
-    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root), lock_holder=compose.process_lock_holder())
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(a, b), deadline_at="2026-01-01T01:00:00+00:00"),
                          RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
                                   jobs={"a": JobState("a", Status.PENDING), "b": JobState("b", Status.PENDING)}))
@@ -3659,7 +3673,7 @@ def test_explain_named_scope_still_running_while_the_run_is_running_says_not_lan
     root = tmp_path / "reports"
     run_id = "20260910T080630Z-9fa263"
     a, b = _explain_job(scope_id="a"), _explain_job(scope_id="b")
-    run_store, _result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store, _result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root), lock_holder=compose.process_lock_holder())
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(a, b),
                                  deadline_at="2026-09-10T09:06:30+00:00"),
                          RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
@@ -3690,7 +3704,7 @@ def test_explain_named_scope_still_running_after_another_job_landed_says_not_lan
     root = tmp_path / "reports"
     run_id = "20260910T080630Z-9fa264"
     a, b = _explain_job(scope_id="a"), _explain_job(scope_id="b")
-    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root), lock_holder=compose.process_lock_holder())
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=(a, b),
                                  deadline_at="2026-09-10T09:06:30+00:00"),
                          RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
@@ -3736,7 +3750,7 @@ def _explain_two_job_run(tmp_path, run_id: str, scopes=("a", "b")):
 
     root = tmp_path / "reports"
     jobs = {sid: _explain_job(scope_id=sid) for sid in scopes}
-    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root))
+    run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(root), lock_holder=compose.process_lock_holder())
     run_store.create_run(RunMeta(run_id=run_id, created_at="2026-09-10T08:06:30Z", jobs=tuple(jobs.values()),
                                  deadline_at="2026-09-10T09:06:30+00:00"),
                          RunState(run_id=run_id, status=Status.PENDING, started_at="t0",
@@ -4769,7 +4783,8 @@ _LR_CLI = "1.5.0"  # 用例里本 CLI 的版本（哪些 run 由当前版本写�
 
 def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: bool = False, cli_version: "str | None" = _LR_CLI,
               started_at: str = "2026-11-10T08:00:00+00:00", ended_at: "str | None" = None, message: "str | None" = None) -> None:
-    """用真 LocalRunStore 在 root 下写一个 run（run_meta.json 头带写出版本，run_state.json 按 detached 带标记）。"""
+    """用真 LocalRunStore 在 root 下写一个 run（run_meta.json 头带写出版本，run_state.json 按 detached 带标记）。生命期锁交给
+    这个用例的持有者（conftest 的 `lock_holder`），用例结束时放开。"""
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Step
 
@@ -4778,7 +4793,7 @@ def _seed_run(root: Path, run_id: str, status, job_statuses=(), *, detached: boo
     defined = tuple(Job(scope_id=sid, scope_name=sid, engine="novaact", timeout_s=300.0,
                         scenarios=(Scenario(id=sid, name="s", steps=(Step(index=0, keyword="Given", text="x"),)),))
                     for sid in (jobs or {"f.feature:0": None}))
-    LocalRunStore(root, detached=detached).create_run(
+    LocalRunStore(root, detached=detached, lock_holder=compose.process_lock_holder()).create_run(
         RunMeta(run_id=run_id, created_at=started_at, jobs=defined, cli_version=cli_version, deadline_at="2026-01-01T01:00:00+00:00"),
         RunState(run_id=run_id, status=status, jobs=jobs, started_at=started_at, ended_at=ended_at, message=message))
 

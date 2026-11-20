@@ -128,10 +128,10 @@ def _initial(*sids: str) -> RunState:
                     started_at=_iso(0), high_water_mark=0)
 
 
-def _setup(tmp_path, *sids: str, deadline_at: str = FAR_DEADLINE, store=None):
+def _setup(tmp_path, *sids: str, deadline_at: str = FAR_DEADLINE, store=None, lock_holder=None):
     meta = _meta(*sids, deadline_at=deadline_at)
     log = SqliteEventLog(tmp_path / "e.db")
-    store = store if store is not None else LocalRunStore(tmp_path)
+    store = store if store is not None else LocalRunStore(tmp_path, lock_holder=lock_holder)
     store.create_run(meta, _initial(*sids))
     return meta, log, store
 
@@ -200,15 +200,15 @@ class _Store:
 
 
 @pytest.fixture(params=["local", "ddb"])
-def any_store(request, tmp_path):
+def any_store(request, tmp_path, lock_holder):
     """两个 RunStore adapter 各来一遍（对拍），外面包一层 `_Store`：本机用 tmp_path，云端用 moto 建好的表。"""
     if request.param == "local":
-        return _Store(LocalRunStore(tmp_path))
+        return _Store(LocalRunStore(tmp_path, lock_holder=lock_holder))
     return _Store(request.getfixturevalue("ddb_run_store"))
 
 
-def test_first_tick_starts_up_to_concurrency(tmp_path):
-    meta, log, store = _setup(tmp_path, "a", "b", "c")
+def test_first_tick_starts_up_to_concurrency(tmp_path, lock_holder):
+    meta, log, store = _setup(tmp_path, "a", "b", "c", lock_holder=lock_holder)
     launcher = FakeLauncher()
     done = tick("run-1", meta, log, store, launcher, max_concurrency=2, clock=Clock(), result_store=_RecordingResultStore())
     assert done is TickOutcome.CONTINUE
@@ -219,10 +219,10 @@ def test_first_tick_starts_up_to_concurrency(tmp_path):
     assert len(running) == 2
 
 
-def test_each_claim_takes_its_own_time_and_launch_receives_the_cutoff(tmp_path):
+def test_each_claim_takes_its_own_time_and_launch_receives_the_cutoff(tmp_path, lock_holder):
     """每次认领之前另取一次时刻作认领时刻（ADR 0054 决策二后台推进条「时刻」）：靠后的认领不沿用轮首的时刻。写进运行态的认领时刻
     与算截止时刻的是同一个值；截止时刻是认领时刻加预算，随 launch 交出。"""
-    meta, log, store = _setup(tmp_path, "a", "b")
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     launcher = FakeLauncher()
     tick("run-1", meta, log, store, launcher, max_concurrency=2, clock=Clock(0, 1, 7), result_store=_RecordingResultStore())
     state = store.load_run_state("run-1")
@@ -230,17 +230,17 @@ def test_each_claim_takes_its_own_time_and_launch_receives_the_cutoff(tmp_path):
     assert launcher.cutoff_at == {"a": _at(301), "b": _at(307)}
 
 
-def test_cutoff_is_capped_by_the_run_deadline(tmp_path):
+def test_cutoff_is_capped_by_the_run_deadline(tmp_path, lock_holder):
     """截止时刻以运行期限封顶（ADR 0054 决策二第 2 条）：认领时刻加预算晚于期限时，交给 launch 的是期限本身。"""
-    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR)
+    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, lock_holder=lock_holder)
     launcher = FakeLauncher()
     tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(0, 1), result_store=_RecordingResultStore())
     assert launcher.cutoff_at == {"a": _at(100)}
 
 
-def test_tick_idempotent_no_double_launch(tmp_path):
+def test_tick_idempotent_no_double_launch(tmp_path, lock_holder):
     """重复 tick 不重复 launch（CAS 挡已 running，机制四）。"""
-    meta, log, store = _setup(tmp_path, "a", "b")
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     launcher, rs = FakeLauncher(), _RecordingResultStore()
     tick("run-1", meta, log, store, launcher, max_concurrency=2, clock=Clock(), result_store=rs)
     n1 = len(launcher.launched)
@@ -248,9 +248,9 @@ def test_tick_idempotent_no_double_launch(tmp_path):
     assert len(launcher.launched) == n1  # 没多起（a/b 已 running）
 
 
-def test_tick_starts_next_after_completion(tmp_path):
+def test_tick_starts_next_after_completion(tmp_path, lock_holder):
     """一个 job 完成（两件都要齐）后，同一轮先记下它的终态，再用腾出的并发位起下一个 pending。"""
-    meta, log, store = _setup(tmp_path, "a", "b", "c")
+    meta, log, store = _setup(tmp_path, "a", "b", "c", lock_holder=lock_holder)
     launcher, rs = FakeLauncher(), _RecordingResultStore()
     tick("run-1", meta, log, store, launcher, max_concurrency=2, clock=Clock(), result_store=rs)  # 起 a,b
     _done_events(log, "a")
@@ -259,10 +259,10 @@ def test_tick_starts_next_after_completion(tmp_path):
     assert store.load_run_state("run-1").jobs["a"].status == Status.PASSED
 
 
-def test_tick_commits_when_all_done(tmp_path):
+def test_tick_commits_when_all_done(tmp_path, lock_holder):
     """全部 job 两件都要齐 → 这一方的终态写使 run 成为终态：返回 COMMITTED，job 的终态点名这一轮存下的那一份明细，run 的状态按取法
     写下，ended_at 是这一轮读运行态之前取的时刻。"""
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)  # 起 a
     _done_events(log, "a")
@@ -274,9 +274,9 @@ def test_tick_commits_when_all_done(tmp_path):
     assert state.jobs["a"].result_id == rs.id_of("a")
 
 
-def test_tick_nonzero_exit_commits_error(tmp_path):
+def test_tick_nonzero_exit_commits_error(tmp_path, lock_holder):
     """job 非0退出（机制二）→ 该 job error → run 按取法为 error。"""
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
     _done_events(log, "a", exit_code=1)  # 内容 passed 但进程非干净退出
@@ -285,12 +285,12 @@ def test_tick_nonzero_exit_commits_error(tmp_path):
     assert store.load_run_state("run-1").status == Status.ERROR
 
 
-def test_tick_after_commit_reads_existing_terminal(tmp_path):
+def test_tick_after_commit_reads_existing_terminal(tmp_path, lock_holder):
     """run 成为终态之后再 tick：读到既有终态即停（ADR 0034 机制三「run 级状态只进不退」条④），终态只写一次（ended_at 仍首次）。
 
     两次结果都让宿主结束推进：首次是这一方的写使 run 成为终态（宿主写报告），第二次是 run 已结束（宿主不写报告）——
     status --wait 的接力不会因「别人已使 run 成为终态」永远等不到结束（据 status --wait 死循环的实际运行复现修正）。"""
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
     _done_events(log, "a")
@@ -304,8 +304,8 @@ def test_tick_after_commit_reads_existing_terminal(tmp_path):
 class _SpyRunStore(LocalRunStore):
     """真 LocalRunStore，另记下 tick 发出的写（投影、认领、终态写、结束写）。"""
 
-    def __init__(self, root) -> None:
-        super().__init__(root)
+    def __init__(self, root, **kwargs) -> None:
+        super().__init__(root, **kwargs)
         self.writes: list[str] = []
 
     def project_state(self, run_id, state):
@@ -335,14 +335,14 @@ class _CountingEventLog(SqliteEventLog):
         return super().records()
 
 
-def test_tick_on_an_ended_run_reads_existing_terminal(tmp_path):
+def test_tick_on_an_ended_run_reads_existing_terminal(tmp_path, lock_holder):
     """库中 run 已结束（这里是处置的结束写，两个 job 都没有启动、记 skipped）：tick 返回 ENDED，
     不读事件、不投影、不认领、不启动、不落判定真值（ADR 0034 机制三「run 级状态只进不退」条④）。
 
     不判停时，这一轮照常读事件、发出投影写，再提议启动（被认领条件挡下）。"""
     meta = _meta("a", "b")
     log = _CountingEventLog(tmp_path / "e.db")
-    store = _SpyRunStore(tmp_path)
+    store = _SpyRunStore(tmp_path, lock_holder=lock_holder)
     store.create_run(meta, _initial("a", "b"))
     assert store.end_run("run-1", RUN_ENDINGS["settle-advancer-exited"], ended_at="t1") is True
     store.writes.clear()
@@ -358,14 +358,14 @@ def test_tick_on_an_ended_run_reads_existing_terminal(tmp_path):
     assert store.load_run_state("run-1") == before
 
 
-def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path):
+def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path, lock_holder):
     """终态写写不成（并发推进器在本轮读 baseline 之后先使 run 成为终态）：终态写报告 run 在这次写之前已是终态，返回 ENDED、不另读，
     宿主不生成报告；这一方的明细照常先存下（写序不变），但没被点名；库中的终态与点名都是先写成的那一方的（ADR 0034 机制三「run 级
     状态只进不退」条④第 6 步与同条 K2，ADR 0030 决定三「被点名的那一份」条）。"""
 
     class _LosesCommit(LocalRunStore):
-        def __init__(self, root) -> None:
-            super().__init__(root)
+        def __init__(self, root, **kwargs) -> None:
+            super().__init__(root, **kwargs)
             self.results: list[CommitOutcome] = []
 
         def commit_job_states(self, run_id, job_states, *, ended_at):
@@ -375,7 +375,7 @@ def test_commit_lost_to_another_advancer_ends_without_a_result(tmp_path):
             self.results.append(super().commit_job_states(run_id, job_states, ended_at=ended_at))
             return self.results[-1]
 
-    meta, log, store = _setup(tmp_path, "a", store=_LosesCommit(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", store=_LosesCommit(tmp_path, lock_holder=lock_holder))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(), result_store=_RecordingResultStore())
     _done_events(log, "a")
     rs = _RecordingResultStore()
@@ -413,7 +413,7 @@ def test_commit_finding_the_run_ended_elsewhere_stops_without_claiming(any_store
     assert (state.jobs["a"].result_id, state.jobs["b"].result_id) == (None, None)
 
 
-def test_ending_inserted_after_baseline_read_continues_then_stops(tmp_path):
+def test_ending_inserted_after_baseline_read_continues_then_stops(tmp_path, lock_holder):
     """结束写插在本轮读 baseline 之后：本轮不在判停之内，投影写被终态守卫挡下、认领被条件挡下，返回 CONTINUE；
     下一轮读到终态即停（ADR 0034 机制三「run 级状态只进不退」条④末句）。"""
 
@@ -427,7 +427,7 @@ def test_ending_inserted_after_baseline_read_continues_then_stops(tmp_path):
                 assert self.end_run(run_id, RUN_ENDINGS["settle-advancer-exited"], ended_at="other") is True
             return state
 
-    meta, log, store = _setup(tmp_path, "a", store=_EndedRightAfterRead(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", store=_EndedRightAfterRead(tmp_path, lock_holder=lock_holder))
     launcher, rs = FakeLauncher(), _RecordingResultStore()
     store.armed = True
 
@@ -461,9 +461,9 @@ def _claimed(store) -> dict[str, datetime]:
     return {sid: instant_from_iso(js.claimed_at) for sid, js in store.load_run_state("run-1").jobs.items() if js.claimed_at}
 
 
-def test_launch_failure_does_not_wedge_run(tmp_path):
+def test_launch_failure_does_not_wedge_run(tmp_path, lock_holder):
     """launch 抛异常 → 补偿记退出 → 下轮判 ERROR 收敛，run 不 wedge（ADR 0034 机制二推论）。"""
-    meta, log, store = _setup(tmp_path, "a", "b")
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     boom, rs = BoomLauncher(), _RecordingResultStore()
     # tick1：两个 job 都被 claim、launch 都抛异常——异常不向外抛出、补偿落 task_exited
     assert tick("run-1", meta, log, store, boom, max_concurrency=2, clock=Clock(),
@@ -478,12 +478,12 @@ def test_launch_failure_does_not_wedge_run(tmp_path):
     assert boom.attempts == ["a", "b"]  # 不重复 launch（已 ERROR、plan_next 不再提议）
 
 
-def test_launch_failure_records_unknown_exit_with_the_same_reason_as_the_foreground(tmp_path):
+def test_launch_failure_records_unknown_exit_with_the_same_reason_as_the_foreground(tmp_path, lock_holder):
     """launch 抛错的补偿与前台起 worker 失败交给终结函数的输入相同：退出码未知、原因是「起 worker 失败：异常文本」，不再用平台哨兵
     退出码；退出时刻是失败时取的那一刻（截止时刻之前），不带超时标志；job 的说明就是这句原因，与前台逐字相同。"""
     from gherkai_core.project import project_full
 
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     tick("run-1", meta, log, store, BoomLauncher(), max_concurrency=1, clock=Clock(), result_store=_RecordingResultStore())
     (exit_rec,) = [r.exited for r in log.records() if r.kind == "exit"]
     assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.reason) == (None, False, "起 worker 失败：boom: a")
@@ -496,12 +496,12 @@ def test_launch_failure_records_unknown_exit_with_the_same_reason_as_the_foregro
     (FAR_DEADLINE, (Status.ERROR, "timeout", "job 超时（预算 300s，已中止）")),
     (_NEAR, (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)),
 ])
-def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_at, expected):
+def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_at, expected, lock_holder):
     """启动调用失败时再取一次时刻，记为退出时刻：补偿只记这个事实、不带超时标志，投影时它晚于这个 job 的截止时刻即按到点处理，与前台
     起 worker 失败的分支得到同一个判定；按起作用的那个截止时刻记：预算是 error 加 timeout，期限是 aborted（ADR 0031 决定一）。"""
     from gherkai_core.project import project_full
 
-    meta, log, store = _setup(tmp_path, "a", deadline_at=deadline_at)
+    meta, log, store = _setup(tmp_path, "a", deadline_at=deadline_at, lock_holder=lock_holder)
     clock = Clock(0, 1)
     tick("run-1", meta, log, store, BoomLauncher(clock, then=1000), max_concurrency=1, clock=clock,
          result_store=_RecordingResultStore())
@@ -511,7 +511,7 @@ def test_launch_failure_after_the_cutoff_projects_as_timeout(tmp_path, deadline_
     assert (jr.status, jr.error_type, jr.message) == expected
 
 
-def test_launch_failure_isolated_other_job_completes(tmp_path):
+def test_launch_failure_isolated_other_job_completes(tmp_path, lock_holder):
     """一个 job 起不来，另一个照常运行完成——失败隔离 + 聚合 ERROR。"""
 
     class HalfBoom:
@@ -523,7 +523,7 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
                 raise RuntimeError("boom: a")
             self.launched.append(job.scope_id)
 
-    meta, log, store = _setup(tmp_path, "a", "b")
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     hb, rs = HalfBoom(), _RecordingResultStore()
     tick("run-1", meta, log, store, hb, max_concurrency=2, clock=Clock(), result_store=rs)
     assert hb.launched == ["b"]  # b 照常起
@@ -540,8 +540,8 @@ def test_launch_failure_isolated_other_job_completes(tmp_path):
 # ADR 0034 机制三「run 级状态只进不退」条④的步骤）----------
 
 class _OrderRecordingRunStore(LocalRunStore):
-    def __init__(self, root, seq: list) -> None:
-        super().__init__(root)
+    def __init__(self, root, seq: list, **kwargs) -> None:
+        super().__init__(root, **kwargs)
         self.seq = seq
 
     def commit_job_states(self, run_id, job_states, *, ended_at):
@@ -550,12 +550,12 @@ class _OrderRecordingRunStore(LocalRunStore):
         return super().commit_job_states(run_id, job_states, ended_at=ended_at)
 
 
-def test_verdicts_are_saved_before_the_terminal_write(tmp_path):
+def test_verdicts_are_saved_before_the_terminal_write(tmp_path, lock_holder):
     """同一轮两个 job 都有结果：ResultStore 各 job 判定明细**先**落，再一次终态写记下这一轮的全部终态（ADR 0030 决定三「后台推进同守」
     条）——看到终态即保证它点名的那一份已存下；反序在 detached 下崩在中间就是永久缺失（无人重试）。每个 job 的明细各用一个标识，终态写
     给出的正是这些标识，运行态随之点名（同决定三「点名」条）。"""
     seq: list = []
-    meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq))
+    meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq, lock_holder=lock_holder))
     rs = _RecordingResultStore(seq)
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
     _done_events(log, "a"); _done_events(log, "b", base=10)
@@ -637,11 +637,11 @@ def test_proposed_starts_follow_the_definition_order_not_the_stored_order(any_st
     assert launcher.launched == ["a"]
 
 
-def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path):
+def test_verdict_write_failure_fails_tick_before_commit_and_retry_heals(tmp_path, lock_holder):
     """判定真值落库失败 → 异常原样抛出、**未**写终态（job 与 run 仍为 running，不点名）；下一轮 tick（触发源重试）成功落完并写下终态，
     点名的是这一轮存下的那一份。若反过来先写终态再落，失败发生在终态写之后就没有下一轮了。"""
     seq: list = []
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(), result_store=_RecordingResultStore())
     _done_events(log, "a")
     with pytest.raises(OSError):
@@ -666,12 +666,12 @@ class _FailsOnSecondSave(_RecordingResultStore):
         super().save_job_result(run_id, result_id, jr)
 
 
-def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path):
+def test_later_verdict_write_failure_leaves_the_run_uncommitted(tmp_path, lock_holder):
     """前一个 job 的判定已保存、后一个 job 的保存失败：异常原样抛出，这一轮没有发出终态写，两个 job 与 run 都仍为 running，已存下的那一份
     没被点名；重试的一轮另生成标识、保存完全部判定之后才写终态，点名的是重试这一轮的标识（ADR 0034 机制三「run 级状态只进不退」条④
     K3；ADR 0030 决定三「保存明细失败」条与「后台推进同守」条）。"""
     seq: list = []
-    meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq))
+    meta, log, store = _setup(tmp_path, "a", "b", store=_OrderRecordingRunStore(tmp_path, seq, lock_holder=lock_holder))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=_RecordingResultStore())
     _done_events(log, "a"); _done_events(log, "b", base=10)
     failing = _FailsOnSecondSave(seq)
@@ -762,10 +762,10 @@ def test_a_job_claimed_after_the_read_is_not_committed_this_round(any_store, tmp
 
 
 @pytest.mark.parametrize("claimed_at", [None, "t1", "2030-01-01T00:00:00"])
-def test_job_without_a_readable_claim_time_is_not_committed_this_round(tmp_path, claimed_at):
+def test_job_without_a_readable_claim_time_is_not_committed_this_round(tmp_path, claimed_at, lock_holder):
     """运行态里的认领时刻缺、读不出或不带时区的 job（ADR 0054 决策二后台推进条「快照」）：投影为终态也不存明细、不写终态，按继续推进
     处理；没有「按预算说明」的回落。对照：同样的事件、运行态里带认领时刻的 run 照常写下终态。"""
-    meta, log, store = _setup(tmp_path, "a", store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     store.update_job_state("run-1", JobState("a", Status.RUNNING, claimed_at=claimed_at))
     _done_events(log, "a")
     rs = _RecordingResultStore()
@@ -777,7 +777,7 @@ def test_job_without_a_readable_claim_time_is_not_committed_this_round(tmp_path,
 
     control_dir = tmp_path / "control"
     control_dir.mkdir()
-    meta, log, store = _setup(control_dir, "a", store=_SpyRunStore(control_dir))
+    meta, log, store = _setup(control_dir, "a", store=_SpyRunStore(control_dir, lock_holder=lock_holder))
     store.update_job_state("run-1", JobState("a", Status.RUNNING, claimed_at=_iso(0)))
     _done_events(log, "a")
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(6),
@@ -852,10 +852,10 @@ class _Report:
         self.written.append((run_id, result, created_at))
 
 
-def test_report_comes_from_the_record_and_the_named_details_not_from_a_second_read_of_the_events(tmp_path):
+def test_report_comes_from_the_record_and_the_named_details_not_from_a_second_read_of_the_events(tmp_path, lock_holder):
     """报告从记录组装：状态取运行态，判定明细取运行态点名的那一份；之后事件再变（接力方补写的未知退出被真实退出码覆盖之类），报告里的
     判定仍是记下终态时存下的那一份。run 级墙钟由运行态的起止算出。"""
-    meta, log, store = _setup(tmp_path, "a")
+    meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(), result_store=rs)
     _done_events(log, "a")
@@ -872,12 +872,12 @@ def test_report_comes_from_the_record_and_the_named_details_not_from_a_second_re
     assert created_at == "2030-01-01T00:00:06+00:00"
 
 
-def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path):
+def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path, lock_holder):
     """两个推进器读到不同的快照、竞争使 run 成为终态（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读
     事件之前，A 走完一轮并写成终态；B 随后按自己的快照（只有补写的未知退出，判超时）存下明细、发出终态写，终态写报告 run 已结束。A 写成、
     返回 COMMITTED；B 返回 ENDED；run 级的状态、说明与结束时刻是 A 写下的。两方的明细存进同一处、各用自己的标识，B 存下的那一份与 A 的
     互不覆盖（ADR 0034 机制三「判定明细」条），运行态点名 A 的那一份，从记录生成的报告只读它，是 A 的判定（ADR 0030 决定三「点名」条）。"""
-    meta, log_a, store = _setup(tmp_path, "a")
+    meta, log_a, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     tick("run-1", meta, log_a, store, FakeLauncher(), max_concurrency=1, clock=Clock(),
          result_store=_RecordingResultStore())  # 认领并启动 a
     _done_events(log_a, "a")  # A 读到的快照：完整的结果，判 passed
@@ -916,10 +916,10 @@ def test_report_follows_the_committing_round_when_two_advancers_read_different_s
         Status.PASSED, [Status.PASSED], [Status.PASSED])
 
 
-def test_report_reads_only_the_details_named_in_the_run_state(tmp_path):
+def test_report_reads_only_the_details_named_in_the_run_state(tmp_path, lock_holder):
     """报告的明细按运行态里点名的标识读回，较早轮次与最后一轮写下终态的 job 读法相同；由到期的结束写记 skipped 的 job 没有标识，一次都
     不读、报告里不带明细。"""
-    meta, log, store = _setup(tmp_path, "a", "b", "c", deadline_at=_NEAR)
+    meta, log, store = _setup(tmp_path, "a", "b", "c", deadline_at=_NEAR, lock_holder=lock_holder)
     rs = _RecordingResultStore(inner=LocalResultStore(tmp_path))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(0, 1, 2), result_store=rs)  # 起 a、b
     _done_events(log, "a")
@@ -940,7 +940,7 @@ def test_report_reads_only_the_details_named_in_the_run_state(tmp_path):
         ("a", Status.PASSED, True), ("b", Status.PASSED, True), ("c", Status.SKIPPED, False)]
 
 
-def test_report_generation_failures_are_isolated(tmp_path, caplog):
+def test_report_generation_failures_are_isolated(tmp_path, caplog, lock_holder):
     """生成报告的各步都在失败隔离之内（ADR 0030 决定三「ReportStore.write 失败隔离」注）：写报告失败、为组装而读运行态失败、运行态不存在、
     从判定存储读回明细失败、被点名的那一份读不到，都不击穿已到终态的 run，也不抛出，各留一条警告；没有报告落点时什么都不做、不读运行态，
     也不读回明细。"""
@@ -967,7 +967,7 @@ def test_report_generation_failures_are_isolated(tmp_path, caplog):
             self.loads += 1
             raise OSError("S3 不可达")
 
-    meta, log, store = _setup(tmp_path, "a", "b")
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     rs = LocalResultStore(tmp_path)
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
     _done_events(log, "a")
@@ -998,10 +998,10 @@ def test_report_generation_failures_are_isolated(tmp_path, caplog):
 
 # ---------- 接力补写的超时退出（ADR 0034「job timeout」节「`timed_out` 归因链」）----------
 
-def test_a_relay_written_timeout_is_committed_and_a_later_real_exit_changes_nothing(tmp_path):
+def test_a_relay_written_timeout_is_committed_and_a_later_real_exit_changes_nothing(tmp_path, lock_holder):
     """接力补写一条带超时标志、退出码未知的退出记录之后，下一轮由这一轮的快照存下明细（预算到点：error 加 timeout）再以终态写记下、
     点名它；之后才到的真实退出覆盖了退出记录，但运行态里这个 job 已是终态、不再被选中：记录、点名与存下的明细都不变，也不再另存一份。"""
-    meta, log, store = _setup(tmp_path, "a", "b", store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", "b", store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     rs = LocalResultStore(tmp_path)
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)  # 起 a、b
     assert log.record_timed_out_if_absent("a") is True
@@ -1023,11 +1023,11 @@ def test_a_relay_written_timeout_is_committed_and_a_later_real_exit_changes_noth
     assert _job_files(tmp_path) == [f"{named.result_id}.json"]
 
 
-def test_overlapping_advancers_leave_the_relay_timeout_in_the_run_state(tmp_path):
+def test_overlapping_advancers_leave_the_relay_timeout_in_the_run_state(tmp_path, lock_holder):
     """两个推进方重叠：认领方的一轮读完运行态（a 仍在执行）之后，接力方完整推进一轮，按补写的超时退出存下 a 的明细并记下终态（error）；
     随后 a 的真实退出（干净退出、内容完整）到达，认领方这一轮读到的是它，另存一份 passed 的明细，按旧的运行态为 a 发出终态写。运行态里
     a 的终态不变，run 仍未结束；a 点名的仍是接力方的那一份（error、超时），认领方存下的那一份不被点名，被点名的明细与终态一致。"""
-    meta, log, inner = _setup(tmp_path, "a", "b")
+    meta, log, inner = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
     shared = LocalResultStore(tmp_path)
     relay, owner_rs = _RecordingResultStore(inner=shared), _RecordingResultStore(inner=shared)
     tick("run-1", meta, log, inner, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=relay)  # 起 a、b
@@ -1058,12 +1058,12 @@ def test_overlapping_advancers_leave_the_relay_timeout_in_the_run_state(tmp_path
 # ---------- 到期处理：到期的结束写把未启动的 job 记 skipped 并带到期的说明，run 随之成为终态
 # （ADR 0054 决策二第 3 条与后台推进条）----------
 
-def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
+def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path, lock_holder):
     """已过停止启动的时刻，最后一个执行中的 job 在这一轮得出结果，仍有未启动的 job：不认领、不启动；同一轮先写下这个 job 的终态，
     再在加上这次写的作用的运行态上判出「没有执行中的 job」、做到期的结束写——写的次序是投影、终态写、结束写。结束写把未启动的 job
     记 skipped 并带到期的说明、不点名，run 按取法记 aborted、带「已超过允许运行的时间」；返回 COMMITTED，已记下的 job 点名的标识
     原样保留。"""
-    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     launcher, rs = FakeLauncher(), _RecordingResultStore()
     tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(0, 1), result_store=_RecordingResultStore())  # 起 a
     _done_events(log, "a")
@@ -1082,10 +1082,10 @@ def test_past_stop_start_claims_nothing_and_expires_the_run(tmp_path):
     assert (state.jobs["a"].result_id, state.jobs["b"].result_id) == (rs.id_of("a"), None)
 
 
-def test_all_done_after_the_deadline_ends_by_the_terminal_write(tmp_path):
+def test_all_done_after_the_deadline_ends_by_the_terminal_write(tmp_path, lock_holder):
     """没有执行中的、也没有未启动的 job：run 在记下各 job 终态的那次写里随之成为终态，不论是否已过期限，不做结束写、不带到期的说明
     （ADR 0054 决策二第 4 条）。"""
-    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1), result_store=rs)
     _done_events(log, "a")
@@ -1096,9 +1096,9 @@ def test_all_done_after_the_deadline_ends_by_the_terminal_write(tmp_path):
     assert (state.status, state.message) == (Status.PASSED, None)
 
 
-def test_past_stop_start_with_a_running_job_continues(tmp_path):
+def test_past_stop_start_with_a_running_job_continues(tmp_path, lock_holder):
     """已过停止启动的时刻而还有执行中的 job：不认领、不做结束写，继续推进，这一轮只有投影写；执行中的 job 由它的截止时刻停下。"""
-    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     launcher, rs = FakeLauncher(), _RecordingResultStore()
     tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(0, 1), result_store=rs)  # 起 a，a 仍在执行
     store.writes.clear()
@@ -1107,11 +1107,11 @@ def test_past_stop_start_with_a_running_job_continues(tmp_path):
     assert launcher.launched == ["a"] and store.writes == ["project_state"]
 
 
-def test_claim_refused_by_the_deadline_triggers_one_replan_in_the_same_round(tmp_path):
+def test_claim_refused_by_the_deadline_triggers_one_replan_in_the_same_round(tmp_path, lock_holder):
     """这一轮里有认领因已过停止启动的时刻而没有做（每次认领前重做检查）：同一轮里重新取时刻、重新读取运行态与事件、按已过停止启动再
     决策一次（ADR 0054 决策二后台推进条「时刻」），满足到期的结束写就当场做，不留给不会再来的下一轮。结束时刻取重新读取之前的
     那一次。"""
-    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR)
+    meta, log, store = _setup(tmp_path, "a", deadline_at=_NEAR, lock_holder=lock_holder)
     clock = Clock(0, 50, 51)  # 轮首未过停止启动的时刻（T0+40）；认领前已过；重新读取之前再取一次
     rs = _RecordingResultStore()
 
@@ -1125,7 +1125,7 @@ def test_claim_refused_by_the_deadline_triggers_one_replan_in_the_same_round(tmp
 
 
 @pytest.mark.parametrize("launch_fails, outcome", [(False, TickOutcome.CONTINUE), (True, TickOutcome.COMMITTED)])
-def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fails, outcome):
+def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fails, outcome, lock_holder):
     """重新决策时这一轮里先前认领成功的 job 计入：它在执行中就不做到期的结束写、继续推进；它的启动已失败（补写了退出记录）就在重做的
     那一遍存下它的明细、写下它的终态并点名，随后做到期的结束写，run 有 error 即记 error。重新决策只做一次：只多读一次时钟。"""
 
@@ -1135,7 +1135,7 @@ def test_replan_counts_the_jobs_claimed_earlier_in_the_round(tmp_path, launch_fa
             if launch_fails:
                 raise RuntimeError("boom")
 
-    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
+    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     clock = Clock(0, 1, 50, 51)
     launcher, rs = _Launcher(), _RecordingResultStore()
     done = tick("run-1", meta, log, store, launcher, max_concurrency=2, clock=clock, result_store=rs)
@@ -1221,11 +1221,11 @@ def test_a_save_failure_in_the_redo_pass_keeps_what_the_first_pass_wrote(any_sto
     assert (state.jobs["a"].result_id, state.jobs["b"].result_id) == (rs.id_of("a"), None)
 
 
-def test_no_writes_and_no_event_reads_in_a_round_that_cannot_read_the_run_state(tmp_path):
+def test_no_writes_and_no_event_reads_in_a_round_that_cannot_read_the_run_state(tmp_path, lock_holder):
     """读不到运行态的那一轮返回继续推进，不读事件、不写任何东西：认领、投影与结束写都写不成，终态写会抛错（ADR 0054 决策二后台推进条
     「收尾与报告」）。已过停止启动的时刻也不做到期的结束写，也不存明细。"""
     meta = _meta("a", deadline_at=_NEAR)
-    store = _SpyRunStore(tmp_path)  # 没有建 run：运行态读不到
+    store = _SpyRunStore(tmp_path, lock_holder=lock_holder)  # 没有建 run：运行态读不到
     log, launcher, rs = _CountingEventLog(tmp_path / "e.db"), FakeLauncher(), _RecordingResultStore()
     outcome = tick("run-1", meta, log, store, launcher, max_concurrency=1, clock=Clock(50), result_store=rs)
     assert outcome is TickOutcome.CONTINUE
@@ -1246,11 +1246,11 @@ class _ClaimLandsAfterRead(SqliteEventLog):
         return recs
 
 
-def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path):
+def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path, lock_holder):
     """到期的结束写与认领并发（本机）：一个推进器读到「没有执行中的、仍有未启动的」之后，另一个推进器的认领落下——前者的结束写按写下时的
     运行态判断，那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running，同一轮
     得出结果的 a 已由终态写记下。"""
-    meta, _, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path))
+    meta, _, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
     plain = SqliteEventLog(tmp_path / "e.db")
     rs = _RecordingResultStore()
     tick("run-1", meta, plain, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1), result_store=rs)  # 起 a

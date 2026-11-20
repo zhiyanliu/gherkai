@@ -48,9 +48,10 @@ def _ids(rows: list[RunListing]) -> list[str]:
 
 
 @pytest.fixture
-def local_root(tmp_path: Path) -> Path:
-    """同一报告落点下：四个终态 run、一个 detached 的 running、一个前台遗留的 pending，外加两样不是 run 的东西。"""
-    plain, detached = LocalRunStore(tmp_path), LocalRunStore(tmp_path, detached=True)
+def local_root(tmp_path: Path, lock_holder) -> Path:
+    """同一报告落点下：四个终态 run、一个 detached 的 running、一个前台遗留的 pending，外加四样不是 run 的东西。其中两个名字以点开头
+    的目录（建 run 的暂存目录、别的隐藏目录）里放着完整、可读的运行定义与运行态（pending、带后台执行标记），按名字跳过。"""
+    plain, detached = LocalRunStore(tmp_path, lock_holder=lock_holder), LocalRunStore(tmp_path, detached=True, lock_holder=lock_holder)
     _make(plain, "run-01", Status.PASSED, cli_version="1.4.0")
     _make(plain, "run-02", Status.PASSED)
     _make(plain, "run-03", Status.FAILED)
@@ -59,6 +60,9 @@ def local_root(tmp_path: Path) -> Path:
     _make(plain, "run-06", Status.PENDING)
     (tmp_path / "not-a-run").mkdir()  # 没有 run_state.json：跳过
     (tmp_path / "stray.txt").write_text("x", encoding="utf-8")  # 落点根下的文件：跳过
+    for hidden in (".gherkai-creating-0123456789abcdef", ".hidden"):
+        _make(detached, "run-07", Status.PENDING)
+        (tmp_path / "run-07").rename(tmp_path / hidden)
     return tmp_path
 
 
@@ -120,9 +124,9 @@ def test_local_list_runs_lists_every_unreadable_run_regardless_of_status_and_lim
     {"message": {"text": "m"}},                  # run 级 message 是对象
     {"jobs": [{"scope_id": "s", "status": 3}]},  # job 状态值不合法
 ])
-def test_local_list_runs_lists_wrongly_typed_state_fields_as_unreadable(tmp_path: Path, bad: dict):
+def test_local_list_runs_lists_wrongly_typed_state_fields_as_unreadable(tmp_path: Path, bad: dict, lock_holder):
     # 清单要输出的字段类型不对：列为无法读取，人读表格与 --json 都不会带出非字符串的值；提交记录头部照读
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     _make(store, "run-01", Status.PASSED)
     state = {"run_id": "run-01", "status": "passed", "started_at": "2026-07-01T00:00:00Z", "jobs": [], **bad}
     (tmp_path / "run-01" / "run_state.json").write_text(json.dumps(state), encoding="utf-8")
@@ -136,8 +140,8 @@ def test_local_list_runs_lists_wrongly_typed_state_fields_as_unreadable(tmp_path
                                      # 写端版本不是字符串：读作版本未知，不把数字转成版本串
                                      json.dumps({"schema_version": 1, "cli_version": 150}).encode(),
                                      json.dumps({"schema_version": 1, "cli_version": 1.5}).encode()])
-def test_local_list_runs_reads_unparseable_header_as_none(tmp_path: Path, content: bytes):
-    store = LocalRunStore(tmp_path)
+def test_local_list_runs_reads_unparseable_header_as_none(tmp_path: Path, content: bytes, lock_holder):
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     _make(store, "run-01", Status.PASSED)
     (tmp_path / "run-01" / "run_meta.json").write_bytes(content)
     [row] = store.list_runs([Status.PASSED], limit=None)
@@ -151,8 +155,8 @@ def test_local_list_runs_missing_root_is_empty_and_bad_limit_is_rejected(tmp_pat
 
 
 @pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 无视文件权限")
-def test_local_list_runs_does_not_swallow_access_failures(tmp_path: Path):
-    store = LocalRunStore(tmp_path)
+def test_local_list_runs_does_not_swallow_access_failures(tmp_path: Path, lock_holder):
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     _make(store, "run-01", Status.PASSED)
     meta_path = tmp_path / "run-01" / "run_meta.json"
     meta_path.chmod(0)
@@ -172,10 +176,10 @@ def test_local_list_runs_does_not_swallow_access_failures(tmp_path: Path):
 
 
 @pytest.mark.parametrize("error", [PermissionError, FileNotFoundError, NotADirectoryError, "ELOOP"])
-def test_local_list_runs_raises_when_an_entry_cannot_be_inspected(tmp_path: Path, monkeypatch, error):
+def test_local_list_runs_raises_when_an_entry_cannot_be_inspected(tmp_path: Path, monkeypatch, error, lock_holder):
     """判断条目是不是目录时的权限错误原样抛出（不当作「不是目录」跳过）；列出之后被删掉的条目（stat 报不存在）跳过；
     穿过文件的符号链接（ENOTDIR）与链接环（ELOOP）同样原样抛出——契约只跳过枚举后消失的条目，其余访问失败由 CLI 以退出码 2 结束。"""
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     _make(store, "run-01", Status.PASSED)
     _make(store, "run-02", Status.PASSED)
     blocked = os.fspath(tmp_path / "run-02")
@@ -198,9 +202,9 @@ def test_local_list_runs_raises_when_an_entry_cannot_be_inspected(tmp_path: Path
             store.list_runs([Status.PASSED], limit=None)
 
 
-def test_local_list_runs_keeps_rows_with_null_message_and_empty_jobs(tmp_path: Path):
+def test_local_list_runs_keeps_rows_with_null_message_and_empty_jobs(tmp_path: Path, lock_holder):
     """历史运行态的合法形态不被类型校验误判：message 与 ended_at 显式为 null、jobs 为空映射或空列表，都能读出、不是不可读行。"""
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     for rid, jobs in (("run-01", {}), ("run-02", [])):
         _make(store, rid, Status.PASSED)
         path = tmp_path / rid / "run_state.json"
@@ -325,13 +329,13 @@ def test_ddb_list_runs_lists_wrongly_typed_fields_as_unreadable_and_unknown_vers
 
 
 @pytest.mark.parametrize("backend", ["local", "ddb"])
-def test_explicit_null_schema_version_is_contract_violation_but_missing_key_reads_zero(request, tmp_path: Path, backend):
+def test_explicit_null_schema_version_is_contract_violation_but_missing_key_reads_zero(request, tmp_path: Path, backend, lock_holder):
     """头部的结构版本：缺键读作 0（早于结构版本号的写端），显式 null 是定义违约——两端同一口径。清单里违约的头部读作 None，
     缺键的照读 (0, 写端版本)；`peek_definition_header` 对违约抛 DefinitionContractError。"""
     from gherkai_core.errors import DefinitionContractError
 
     if backend == "local":
-        store = LocalRunStore(tmp_path)
+        store = LocalRunStore(tmp_path, lock_holder=lock_holder)
         for run_id in ("run-01", "run-02"):
             _make(store, run_id, Status.PASSED)
         (tmp_path / "run-01" / "run_meta.json").write_text(
@@ -359,7 +363,7 @@ def _two_ended_store(request, tmp_path: Path, monkeypatch, backend: str):
     Query 的 Limit 与每次 BatchGetItem 读回的 run_id。"""
     bad_jobs = [{"scope_id": "s", "status": "paused"}]
     if backend == "local":
-        store = LocalRunStore(tmp_path)
+        store = LocalRunStore(tmp_path, lock_holder=request.getfixturevalue("lock_holder"))
 
         def unreadable(run_id: str) -> None:
             _make(store, run_id, Status.PASSED)
@@ -421,7 +425,7 @@ def _non_terminal_store(request, tmp_path: Path, monkeypatch, backend: str):
     layout = {"r1": Status.PENDING, "r2": Status.RUNNING, "r3": Status.PASSED, "r4": Status.PENDING,
               "r5": Status.RUNNING, "r6": Status.PENDING}
     if backend == "local":
-        store, queries = LocalRunStore(tmp_path), None
+        store, queries = LocalRunStore(tmp_path, lock_holder=request.getfixturevalue("lock_holder")), None
     else:
         table = request.getfixturevalue("listing_table")
         store, queries = DynamoDBRunStore(table, list_index_name=_LIST_INDEX), []

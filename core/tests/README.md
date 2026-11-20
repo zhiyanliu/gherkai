@@ -24,6 +24,15 @@ uv run pytest -q           # 安静模式
 
 单测全程 moto mock、假凭证硬隔离（`conftest.py` 的 `_fake_aws_creds` autouse + `mock_aws`），**机器上有没有真 AWS 凭证都不影响、绝不出网连真 AWS**。
 
+### 本机 run 目录：持有者夹具与 `real_filesystem` 标记
+
+本机建 run 要求构造 `LocalRunStore` 时注入锁的持有者（ADR 0030 决定四），并对报告目录做文件系统类型的边界检查（ADR 0054 决策四）。`conftest.py` 为此提供两样：
+
+- `lock_holder` 夹具：要建 run 的 `LocalRunStore(..., lock_holder=lock_holder)` 传入它；它收下持锁的描述符，用例结束时关闭。只读的构造不必传。
+- 文件系统类型的自动替身：把 `run_dir.filesystem_type` 换成本平台清单的第一项，结论不依赖宿主的文件系统。
+
+带 `@pytest.mark.real_filesystem` 的用例不替换类型，用宿主真实的取法；起真实进程建 run 的用例都带这个标记（子进程里没有替换）。宿主的系统临时目录所在的类型取到了而不在清单里时这类用例跳过，判断不了时照常执行，取法本身出错就会失败。
+
 ## 集成测试（连真 DDB/S3，验证 moto 抓不到的真语义）
 
 moto 是模拟实现，与真 DDB/S3 在若干边界可能不一致（DDB 空串 SET / 保留字 / 空 Map / `SET jobs.#sid`；S3 按标识存取判定明细的往返与取不存在的键；offload 真往返）。集成测试连接真实后端验证这些差异（`test_cloud_integration.py`）。DDB 条件写的真实语义另由 `test_conditional_writes.py` 里的两条集成测试（`test_claim_is_exclusive_on_real_ddb`、`test_stale_projection_never_regresses_terminal_job_on_real_ddb`）复验：两个推进器认领同一个 pending job 时恰有一个成功；终态 job 不会被过期投影改回 running。

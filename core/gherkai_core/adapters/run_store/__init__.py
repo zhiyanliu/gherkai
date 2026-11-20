@@ -1,4 +1,5 @@
-"""RunStore adapters（ADR 0016）：local（本包 `local.py`）+ DynamoDB（`ddb.py`，ADR 0030 决定六）。
+"""RunStore adapters（ADR 0016）：local（本包 `local.py`；本机 run 目录的存储形态、建 run 与生命期锁在 `run_dir.py`，ADR 0054
+决策三、四）+ DynamoDB（`ddb.py`，ADR 0030 决定六）。
 
 云端类不在此处 re-export，消费方按模块路径直 import（`from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore`；
 `arg_offload.py` 的 `S3StepArgumentOffloader` 同）。**这是本包的排版惯例、不是 import 开销约束**：`ddb.py`/`arg_offload.py`

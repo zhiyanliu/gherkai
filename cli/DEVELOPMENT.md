@@ -60,6 +60,9 @@ uv run gherkai status "$RUN_ID" --backend cloud --prefix dev- --wait
 的自动夹具把 `gherkai_runtime.tunnel._import_sdk` 换成一被调用即让用例失败的函数；后台进程的用例经 `tests/_inline_children.py` 替换
 `subprocess.Popen`：认出 `_reconcile` / `_tunnel_watch` 的启动命令，在同一进程的线程里执行真实的主体，两端之间是真实的管道。要让提交
 进程本身是真实进程的用例（如对它发真实的 SIGINT）经 `tests/_submit_driver.py` 在子进程里执行一次建成的 `submit`，其中的后台进程仍是这个线程替身。
+本机建 run 另有两个自动夹具：`lock_holder` 把 `compose.process_lock_holder` 换成测试用的持有者，进程内的 `run`、线程替身里的后台推进进程
+主体与用例自己建 run 的 store 都把生命期锁交给它，用例结束时关闭收下的描述符；另一个把边界检查取文件系统类型的一步换成本平台清单的第一项。
+带 `real_filesystem` 标记的用例不替换类型（起真实子进程建 run 的用例都带它，子进程在脚本里自己构造持有者）。
 
 云端后端只经 `submit` 执行，`run` 给出 `--backend cloud` 即以退出码 `2` 结束（ADR 0016 决策 A）。
 `--backend cloud` 的表 / 桶 / cluster / task-def / 三个 Lambda 与 worker 镜像 variant 指针**全由 `gherkai deploy` 供给**，
@@ -84,6 +87,15 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 
 修改 `docs/internals/cli-json-contract.md` 后执行 `uv run python tools/render_skill_contract.py` 重新生成 skill 副本，否则 `test_skill.py` 的相等性断言会失败。
 
+另有一份静态守护 `tests/test_exec_only_children.py`，守的是持生命期锁的进程只经 exec 启动子进程（ADR 0054 决策三「不被子进程继承」与「前提」）：
+子进程只要还共用那次打开，持锁的进程退出之后锁仍在。它用 AST 扫 core、runtime、cli 三个生产包，逐个点名三类写法：fork 而不 exec（`os.fork`、
+`os.forkpty`、`pty.fork`、`multiprocessing`、进程池执行器）；把描述符变成可继承（`os.set_inheritable` 的第二个参数不是字面量 `False`、
+`fcntl.fcntl` 不带 CLOEXEC 的复制 `F_DUPFD` 或清掉 CLOEXEC 的 `F_SETFD`、`posix_spawn` 的 `POSIX_SPAWN_DUP2`，以及 `os.dup2`，后者只放行
+`handoff.redirect_output` 把日志接到标准输入、标准输出、标准错误的那一处，登记在测试里的 `DUP2_ALLOWED`）；`subprocess` 与 `asyncio`
+起子进程的各入口带 `close_fds` 而值不是字面量 `True`。名字经导入别名还原；C 扩展里的写法与经 `getattr`、`**kwargs` 拼出的调用扫描
+看不见，由真实执行覆盖。扫描器另有逐条的正反用例，扫描目录不在、放行登记找不到对应的调用都会失败，不会静默空扫。新写的 code 被它判
+失败时，先对照 ADR 0054 决策三的前提改写法；确实要在别处 `dup2` 的，先在 ADR 里定下，再改登记。
+
 ## 实时落库
 
 `run` 并非等到运行结束才一次性落盘：`__main__` 注入 core 的 `RunPersistence`（组合根注入三个 Store adapter），
@@ -101,7 +113,8 @@ fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finali
 `--no-report` 时跳过整条落库（零落盘运行路径），只注入墙钟、不认领，运行期限照样生效；汇总由 `result_without_record(execution)`
 按同一组作用在内存里算出。
 
-`run` 只有本机后端（ADR 0016 决策 A），文件落 `--report-dir`，三个 Store adapter 由 `compose.build_local_stores` 装配。
+`run` 只有本机后端（ADR 0016 决策 A），文件落解析之后的 `--report-dir`，三个 Store adapter 由 `compose.build_local_stores` 装配，带上
+`compose.process_lock_holder()`：建 run 时在暂存目录上取到的生命期锁交给它，持有到进程退出（ADR 0054 决策三）；本机后台推进进程同样如此。
 云端的 DynamoDB/S3 adapter 由 `submit --backend cloud` 与查询命令经 `compose.build_cloud_stores` 装配（表/桶需预先建好，由 `gherkai deploy` 供给），
 云端 run 的判定与报告由推进器 Lambda 写入。未来 WebUI 复用同一套 `gherkai_runtime.compose` 装配，cli 这个前端的接线不变。
 
@@ -143,7 +156,7 @@ local 无此上限（worker 运行在发起 run 的本机、以本机凭证计�
 
 ## 退出码分层的切分线
 
-失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此；本机建 run 时写记录失败也是，前台 `run` 与后台推进进程用同一句 `_run_record_failure`）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
+失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此；本机建 run 失败也是，即报告目录没有通过边界检查、给 run 的目录加锁失败、暂存目录连续被占用、run 已存在与写记录失败，前台 `run` 与后台推进进程经同一个 `_run_record_failure` 给出同一句；`run` 与本机 `submit` 另在共用的前置检查里对报告目录做一次边界检查（`_check_report_dir_boundary`，句子同出自 `_filesystem_rejected_message`，打不开报告目录时给写记录失败那一句），本机 `submit` 的这一次由提交进程自己做，不过时不启动后台推进进程）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
 「提交 + 判定」由此被拆开（ADR 0034）。执行前的配置错（投票次数、筛选值、读 feature、plan）以退出码 `2` 结束，这一判定只在 `_load_and_plan` 一处：`_cmd_plan` 直接调用，`_cmd_run` 与 `_cmd_submit` 经共享前置 `_plan_and_preflight` 调用；各写一份必然漂移。
 

@@ -37,4 +37,5 @@ testpaths = ["core/tests", "runtime/tests", "cli/tests", "engines/novaact/tests"
 addopts = "-m 'not integration' --timeout=60"
 markers = [
     "integration: 连真 AWS（DDB/S3）的集成测试，默认不执行；须 -m integration + 设 AWS_DDB_TABLE/AWS_S3_BUCKET",
+    "real_filesystem: 用宿主真实的文件系统类型做本机后端的边界检查（不替换 run_dir.filesystem_type）；宿主的系统临时目录取到的类型不在本平台的清单里时跳过",
 ]

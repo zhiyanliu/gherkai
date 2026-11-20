@@ -1407,6 +1407,30 @@ def _check_tunnel_prerequisites(args) -> int | None:
     return None
 
 
+def _check_report_dir_boundary(args) -> int | None:
+    """本机后端报告目录在前置检查里的那一次边界检查（ADR 0054 决策四「前置检查里的一次」）：报告目录所在的文件系统不在本平台的清单里、或判断
+    不了，打印 `_filesystem_rejected_message` 的那一句、返回 2；打开报告目录（或它最近一层已存在的上级）失败（路径上有文件、没有权限、
+    符号链接成环）打印写记录失败的那一句、返回 2。云端后端与 `run --no-report` 不建本机 run，什么都不做。
+
+    `run` 与本机 `submit` 经 `_plan_and_preflight` 共用这一处，排在补全运行定义、上传安装包、起隧道之前；本机 `submit` 由提交进程
+    自己做，不过时不启动后台推进进程。这一次只为早拒：判断只读、什么都不建，保证来自建 run 时对暂存目录同一次打开的判断与取锁
+    （`run_dir.create_run_dir`），前置检查之后报告目录被换掉也由那里挡住。路径与建 run 用的相同，都是解析之后的报告目录。"""
+    if args.backend == "cloud" or getattr(args, "no_report", False):
+        return None
+    from gherkai_core.adapters.run_store import run_dir
+
+    report_root = Path(args.report_dir).resolve()
+    try:
+        check = run_dir.check_report_dir(report_root)
+    except OSError as e:
+        _progress(_record_not_written_message(e, report_dir=report_root))
+        return 2
+    if check.verdict is not run_dir.Boundary.INSIDE:
+        _progress(_filesystem_rejected_message(check))
+        return 2
+    return None
+
+
 def _tunnel_established_line(origin: str, public_url: str) -> str:
     """公网地址那一行（ADR 0035 决策 3「公网地址那一行」）：三种组合同一句。前台 `run` 在建成隧道时打出，两种 `submit` 由提交进程
     在收到后台进程的回报之后打出。不报存活时长：隧道随持有它的进程退出而关闭，没有另一个时长。"""
@@ -1437,15 +1461,15 @@ def _setup_tunnel(args, jobs, *, closes_at: datetime) -> "tuple[list, dict | Non
 
 
 def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
-    """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → 隧道的前置检查 → steps 目录解析
-    → 本机后端 worker 运行时 preflight → 设备选择与安装包定位（含本机后端的项目 ARN 与应用桶的取值）。
+    """`run` 与 `submit` 的共享前置（同一序列，次序本身是判据）：入口 flag 校验 → plan → 隧道的前置检查 → 本机后端报告目录的
+    边界检查 → steps 目录解析 → 本机后端 worker 运行时 preflight → 设备选择与安装包定位（含本机后端的项目 ARN 与应用桶的取值）。
     成功返回 `Prepared`（全部已解析的输入）；任一步失败返回**退出码**（调用方原样返回）。
 
     **整块只碰本机、不碰 AWS、不起隧道、不落库**（给了 `--expose-local` 时导入一次隧道组件做前置检查；末步之前给了 steps 目录时会起
     本地瞬时 worker 子进程做自述——非执行 job）——故排在调用方各自的选项校验、起隧道 / 探云端资源 / 落库之前，让配置错落在
     「没开始执行就被拒」层（各步自己的判据见 `_validate_max_concurrency` / `_validate_worker_variant` / `_load_and_plan` /
-    `_check_tunnel_prerequisites` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes` / `_device_selections` /
-    `_app_entries`）。抽出的理由同 `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
+    `_check_tunnel_prerequisites` / `_check_report_dir_boundary` / `_resolve_steps_dir_for_backend` / `_preflight_worker_runtimes` /
+    `_device_selections` / `_app_entries`）。抽出的理由同 `_load_and_plan`：run 与 submit 曾各手抄一份、会漂移。
     本机后端**要碰 AWS 的两步**（项目 ARN 的账号比对、安装包上传）与随后的写前校验不在这里：它们在 `submission.complete_local_definition`，
     由调用方在自己的选项校验（`run` 的 `--grace`）之后、起隧道之前调——配置错的 run 不该先上传几百 MB 再被拒。云端后端对应的两步在
     `submission.complete_cloud_definition`，由云端 `submit` 在 skew 闸与资源 preflight 之后调。
@@ -1461,6 +1485,10 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     # 隧道的两项前置紧接 plan（origin 已在上一步归一化）：早于 steps 目录、worker 预检、设备选择、安装包与账号比对，
     # 云端的各道闸都在本函数之后，缺前置时不连 AWS（ADR 0035 决策 1「前置条件」）
     bad = _check_tunnel_prerequisites(args)
+    if bad is not None:
+        return bad
+    # 本机后端报告目录的边界检查（前置检查里的那一次）：同在不起隧道、不上传、不启动后台推进进程这一层，见 _check_report_dir_boundary
+    bad = _check_report_dir_boundary(args)
     if bad is not None:
         return bad
     # 进度走 stderr（不受 --json 开关；stdout 始终只放核心产出）
@@ -1530,17 +1558,64 @@ def _build_run_meta(jobs, *, times: "deadline.RunTimes", max_concurrency: int, s
     )
 
 
+_PLATFORM_NAMES = {"darwin": "macOS", "linux": "Linux"}  # 说明里的平台名，键同 run_dir.ALLOWED_FILESYSTEMS
+
+
+def _allowed_filesystems_text() -> str:
+    """说明里的清单片段，按 `run_dir.ALLOWED_FILESYSTEMS` 的次序拼出，如「macOS 支持 apfs；Linux 支持 ext4、tmpfs」。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    return "；".join(f"{_PLATFORM_NAMES.get(platform, platform)} 支持 {'、'.join(types)}"
+                     for platform, types in run_dir.ALLOWED_FILESYSTEMS.items())
+
+
+def _filesystem_rejected_message(check: "run_dir.BoundaryCheck") -> str:
+    """本机后端的报告目录没有通过边界检查时的一句（ADR 0054 决策四）：前置检查里的那一次（`_check_report_dir_boundary`）与建 run 时被拒
+    （`_run_record_failure` 收到的 `RunDirRejected`）同一函数，前台 `run` 与本机 `submit` 同一句。类型不在清单里时说出检测到的
+    类型（报告目录还不存在时另说按哪一层上级判断的）；判断不了时说出原因。原因、处理办法与清单三样都在句子里。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    why = "在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。"
+    move = f"请把报告目录（--report-dir 选项，或配置文件里的 report-dir）换到本机磁盘上的目录（{_allowed_filesystems_text()}）"
+    if check.verdict is run_dir.Boundary.UNKNOWN:
+        return f"无法判断报告目录 {check.requested} 所在的文件系统（{check.unknown_reason}）：{why}{move}。"
+    if check.checked != check.requested:
+        where = (f"报告目录 {check.requested} 还不存在，按最近一层已存在的上级 {check.checked} 判断，"
+                 f"它所在的文件系统是 {check.fs_type}")
+    else:
+        where = f"报告目录 {check.requested} 所在的文件系统是 {check.fs_type}"
+    return f"{where}，本机后端不支持：{why}{move}；多台机器共用运行记录请用云端后端。"
+
+
+def _record_not_written_message(e: BaseException, *, report_dir) -> str:
+    """写这个 run 的记录失败、记录还没有写下时的一句：`_run_record_failure` 在 `created` 为假时给它，前置检查里打不开报告目录时
+    （`_check_report_dir_boundary`）也给它。"""
+    return (f"在报告目录 {report_dir} 里写这个 run 的记录失败：{e}。还没有开始执行；"
+            "请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。")
+
+
 def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: bool) -> str:
     """本机建 run 失败时的一句（ADR 0030 决定七；前台 `run` 与本机后台推进进程同一函数、同一句，都以退出码 2 结束、不打回溯）。
 
-    三种情形分开说：run 已存在（只认 `RunAlreadyExists`：报告目录里与 run 同名的文件或悬空的符号链接抛的是普通的
-    FileExistsError，按写记录失败报出）；记录还没有写下（`created` 为假）；记录已写下、准备执行用的文件失败（建事件库、打开
-    `reconcile.log` 或前台 `--quiet` 的 worker 日志），这时 run 停在 pending、没有开始执行。"""
+    按这个次序分开说：报告目录没有通过边界检查（`RunDirRejected`，与前置检查里被拒时同一句）；给 run 的目录加锁失败
+    （`LifetimeLockUnavailable`，ADR 0054 决策三「结果的判读」）；暂存目录连续被另一个进程占着（`StagingContended`）；run 已存在
+    （只认 `RunAlreadyExists`：以 run 标识命名的位置被文件或符号链接占着时改名以别的错误失败，按写记录失败报出）；记录还没有写下
+    （`created` 为假）；记录已写下、准备执行用的文件失败（建事件库、打开 `reconcile.log` 或前台 `--quiet` 的 worker 日志），这时 run
+    停在 pending、没有开始执行。锁不可用是 OSError 的子类，所以排在写记录失败之前判断。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    if isinstance(e, run_dir.RunDirRejected):
+        return _filesystem_rejected_message(e.check)
+    if isinstance(e, run_dir.LifetimeLockUnavailable):
+        return (f"在报告目录 {report_dir} 里给这个 run 的目录加锁失败（{e.strerror}），没有建立 run：不能加锁的目录上无法确认"
+                "执行 run 的 gherkai 进程是否还在。请检查这个目录所在的文件系统与访问权限后重新执行。")
+    if isinstance(e, run_dir.StagingContended):
+        return (f"在报告目录 {report_dir} 里准备这个 run 的目录时，连续 {e.attempts} 次遇到另一个进程同时在处理同一个暂存目录，"
+                "没有建立 run。请稍后重新执行。")
     if isinstance(e, RunAlreadyExists):
         return f"run {run_id} 已经存在，没有重新建立。请重新执行这条命令。"
     if not created:
-        return (f"在报告目录 {report_dir} 里写这个 run 的记录失败：{e}。还没有开始执行；"
-                "请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。")
+        return _record_not_written_message(e, report_dir=report_dir)
     return (f"run {run_id} 的记录已经写下，但在报告目录 {report_dir} 里准备执行用的文件失败：{e}。"
             "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录的读写权限与剩余空间后重新执行。")
 
@@ -1668,7 +1743,8 @@ def _cmd_submit(args) -> int:
       里 create_run 前的注释）。
     退出码表示提交成功与否（非 run 判定；判定由 status 查）。
     """
-    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → 隧道前置 → steps 目录 → 本机后端 worker preflight。
+    # 共享前置（与 run 同一份，见 _plan_and_preflight）：入口校验 → plan → 隧道前置 → 本机后端报告目录的边界检查 → steps 目录 →
+    # 本机后端 worker preflight。
     prepped = _plan_and_preflight(args, list_jobs=False)  # 逐 job 明细归 run；submit 只打计数行（进度看 status）
     if isinstance(prepped, int):
         return prepped
@@ -2312,6 +2388,8 @@ def _cmd_status_body(args, interrupted: dict) -> int:
         if run_store.is_detached(args.run_id):
             # 接力推进：后台推进进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。接力经
             # detached.drive_local_reconcile 从记录读回运行定义，装配与后台推进进程是同一个函数；接力不持有隧道。
+            # 接力不试拿生命期锁、也不做边界检查：它只经运行态的短锁写，与推进进程持有的目录锁互不阻挡；后台推进进程仍在时两方同时
+            # 推进，认领靠短锁内的条件写互斥。
             identity = _aws_identity(args)
             if isinstance(identity, int):
                 return identity
@@ -2962,9 +3040,11 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     2. 给了 `expose_local` 即起隧道并映射运行定义；起不来即回报那一句与退出码 2，返回 2。
     3. 生成运行定义：推进用的就是内存里的这一份，不从记录读回。
     4. 查 submit 还在不在：对它交来的标准输入做一次非阻塞读，读到文件结束即已不在，不建 run、不输出，返回 2。
-    5. 建 run（运行态带后台执行标记，`status --wait` 据此认它可接力）；6. 装配推进所需的各部分（含建事件库，
-       `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步读写本机文件失败（OSError、sqlite3.Error）时先关闭会话，
-       再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻重试。
+    5. 建 run（边界检查、在暂存目录上取锁、写定义与运行态、改名成 run 标识，`LocalRunStore.create_run`；运行态带后台执行标记，
+       `status --wait` 据此认它可接力）；锁交给本进程的持有者，持有到进程退出。6. 装配推进所需的各部分（含建事件库，
+       `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步失败（读写本机文件失败、报告目录没有通过边界检查、取不到
+       锁、暂存目录连续被占用）时先关闭会话，再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻
+       重试。
     8. 回报建成（run 的标识与公网地址）。9. 把输出改接日志（`redirect_output`）；回报没有送达（submit 在第 4 步之后才退出）时在日志
        里记一句，照常推进。10. 推进到 run 结束（`detached.advance_local_run`）；读写本机运行记录失败时记一句、返回 1。11. 返回 0。
 
@@ -2976,10 +3056,11 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     错误之后 submit 才读到文件结束，它说「原因在上面」才成立；回报之后它已不可继承，之后起的 worker 拿不到。云端守护进程的主体
     （`tunnel_host.hold_tunnel_for_cloud_run`）是同一约定。`redirect_output` 供测试换成不改接描述符的替身。
     """
+    from gherkai_core.adapters.run_store import run_dir
     from gherkai_runtime import deadline, detached, tunnel_host
     from gherkai_runtime import tunnel as _tunnel
 
-    report_root = Path(inp.report_dir)
+    report_root = Path(inp.report_dir)  # 提交进程交来的是解析之后的路径
     times = deadline.run_times(compose.now(), inp.jobs, per_job_tail_s=inp.per_job_tail_s)
     info = None
     try:
@@ -3000,12 +3081,15 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             return 2  # 没有人会收到 run 的标识：在建 run 之前停下，没有记录要收拾（会话在 finally 里关闭）
         created = False
         try:
-            run_store = compose.build_local_stores(report_dir=report_root, detached=True)[0]
+            # 建 run 的 store 带本进程的持有者：在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）
+            run_store = compose.build_local_stores(report_dir=report_root, detached=True,
+                                                   lock_holder=compose.process_lock_holder())[0]
             run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
             created = True
             advancer = detached.assemble_local_run(meta, str(report_root), region=inp.region, profile=inp.profile)
             log_fd = handoff.open_log(report_root / meta.run_id / "reconcile.log")
-        except (OSError, sqlite3.Error) as e:  # 建事件库失败抛 sqlite3.OperationalError，它不是 OSError
+        # 建事件库失败抛 sqlite3.OperationalError，它不是 OSError；锁不可用是 OSError 的子类，另两种建 run 的拒绝不是
+        except (OSError, sqlite3.Error, run_dir.RunDirRejected, run_dir.StagingContended) as e:
             if info is not None:
                 info.close()
             handoff.write_all(report_fd, handoff.encode_advancer_report(handoff.AdvancerReport(
@@ -3078,8 +3162,8 @@ def _cmd_run(args) -> int:
         _progress(_run_cloud_backend_message(args))
         return 2
 
-    # 0/1/2) 共享前置（与 submit 同一份，见 _plan_and_preflight）：入口校验 → plan（+ 逐 job 明细）→
-    #        steps 目录 → 本机的 worker preflight。整块排在起隧道 / begin 之前。
+    # 0/1/2) 共享前置（与 submit 同一份，见 _plan_and_preflight）：入口校验 → plan（+ 逐 job 明细）→ 隧道前置 →
+    #        报告目录的边界检查 → steps 目录 → 本机的 worker preflight。整块排在起隧道 / begin 之前。
     prepped = _plan_and_preflight(args, list_jobs=True)  # run 逐 job 打一行（本机批量运行看得见分组）
     if isinstance(prepped, int):
         return prepped
@@ -3180,15 +3264,21 @@ def _cmd_run(args) -> int:
 
     # 3b) 落库：组合根注入本机三个 store adapter，RunPersistence 负责「随进度落库」的统一编排（ADR 0030 决定二）。
     #     --no-report 则不落库（零落盘运行路径）：persistence=None，schedule 不接回调、零落盘，执行照常。
-    #     建 run、--quiet 的 worker 日志与建事件库在同一个 try 里：读写本机文件失败（建事件库抛的 sqlite3.Error 不是 OSError）以
-    #     `_run_record_failure` 的一句、退出码 2 结束，不打回溯，与本机后台推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
+    #     建 run、--quiet 的 worker 日志与建事件库在同一个 try 里：读写本机文件失败（建事件库抛的 sqlite3.Error 不是 OSError）、报告目录
+    #     没有通过边界检查、取不到生命期锁、暂存目录连续被占用，都以 `_run_record_failure` 的一句、退出码 2 结束，不打回溯，与本机后台
+    #     推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
+    #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
+    #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
+    from gherkai_core.adapters.run_store import run_dir
+
     persistence: RunPersistence | None = None
     make_artifacts = None  # compose 返回的 artifacts 落点组装器（file:// URI）
     event_log = None
     created = False
     try:
         if do_report:
-            run_store, result_store, report_store, make_artifacts = compose.build_local_stores(report_dir=args.report_dir)
+            run_store, result_store, report_store, make_artifacts = compose.build_local_stores(
+                report_dir=report_root, lock_holder=compose.process_lock_holder())
             persistence = RunPersistence(
                 run_id, run_store=run_store, result_store=result_store, report_store=report_store,
                 # 终态写与结束写的结束时刻取自这里，与调度循环的墙钟是同一个读取点（ADR 0054 决策二「各执行方的落实」）
@@ -3212,7 +3302,7 @@ def _cmd_run(args) -> int:
         if do_report:
             from gherkai_core.adapters.event_log import SqliteEventLog as _SqliteEventLog
             event_log = _SqliteEventLog(compose.events_db_path(report_root, run_id))
-    except (OSError, sqlite3.Error) as e:
+    except (OSError, sqlite3.Error, run_dir.RunDirRejected, run_dir.StagingContended) as e:  # 锁不可用是 OSError 的子类
         if worker_log_fh is not None:
             worker_log_fh.close()
         if not do_report:

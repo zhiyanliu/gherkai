@@ -19,7 +19,7 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Iterable, Mapping
+from typing import TYPE_CHECKING, Iterable, Mapping
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 from pathlib import Path
@@ -29,6 +29,9 @@ from gherkai_core.model import Job
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
 from gherkai_core.scope import FeatureSource
 from gherkai_core.serialize import instant_to_iso
+
+if TYPE_CHECKING:
+    from gherkai_core.adapters.run_store import run_dir
 
 
 # Nova 单 act 时间上界（ADR 0024 act 有界返回）——**组合根持单一取值点** `nova_act_timeout_s()`，注入 worker 的
@@ -114,12 +117,16 @@ def new_run_id(at: datetime | None = None) -> str:
     at：创建时刻（带时区）；缺省时读一次 `now()`。建 run 的一方传它取的创建时刻那一次读数，不另读钟：本机后台推进进程里
     创建时刻与生成运行定义之间隔着起隧道，另读一次会让 run_id 的时间前缀与记录里的 created_at 不是同一刻。
 
-    对调用方不透明，只保证两点（ADR 0027「run_id：归集索引的主键」节）：**字典序即创建时间序**（创建时间取 at 按 UTC 到秒，
-    同一秒内创建的 run 之间先后不定）与抗碰撞（随机尾）。`list-runs` 按 run_id 降序列出最近的 run、不另读时刻
-    字段排序，依赖前一点（ADR 0041 决策七「排序」）：改格式时须保持定宽、按 UTC 由高位到低位排列的时间戳前缀。
-    格式本身是 compose 实现细节、不入契约，形如 20260629T141207Z-a3f9c1。
-    另保证不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id
-    依赖这一点（scope_id 是用户文本、可能含 `#`），改格式时不得引入 `#`。
+    对调用方不透明，只保证四点（ADR 0027「run_id：归集索引的主键」节），改格式时须保持：
+    - **字典序即创建时间序**（创建时间取 at 按 UTC 到秒，同一秒内创建的 run 之间先后不定）。`list-runs` 按 run_id 降序列出
+      最近的 run、不另读时刻字段排序，依赖这一点（ADR 0041 决策七「排序」）：改格式时须保持定宽、按 UTC 由高位到低位排列的
+      时间戳前缀。
+    - 抗碰撞（随机尾）。
+    - 不含 `#`：events 表的分区键是 `run_id#scope_id`，推进器 Lambda 的 `_run_ids_from_stream` 从左切取 run_id 依赖这一点
+      （scope_id 是用户文本、可能含 `#`）。
+    - 不以点开头：本机后端以点开头的名字留给建 run 的暂存目录，`LocalRunStore.create_run` 拒绝这样的标识（ADR 0030 决定四
+      「run 标识即 run 目录的名字」条）。
+    格式本身是 compose 实现细节、不入契约，形如 20260629T141207Z-a3f9c1（以数字开头）。
     """
     instant = now() if at is None else at
     if instant.tzinfo is None:
@@ -903,6 +910,7 @@ def cloud_run_list_location(*, prefix: str, region: str | None, table: str) -> d
 #   build_local_stores  -> (run_store, result_store, report_store, make_artifacts)
 #   build_cloud_stores  -> (run_store, result_store, report_store)
 #   local_result_store  -> 本机推进器用的判定存储（带保存重试），build_local_stores 与 detached.assemble_local_run 共用
+#   process_lock_holder -> 生命期锁的持有者，推进 run 的进程把它交给 build_local_stores，持锁到进程退出
 # make_artifacts(run_id, report_index) -> dict：前台 run 结束时把 --json 的 artifacts 落点指针组装成 file:// URI；
 #   report_index=None（report 写失败被隔离）则省略该键、不放裸 'None'。前台 run 只有本机后端（ADR 0016 决策 A），
 #   云端没有它的使用方；云端 run 的落点由 `cloud_artifact_locations` 给出（status 终态打印用）。
@@ -948,17 +956,34 @@ def local_result_store(root: str | Path) -> ResultStore:
     return RetryingResultStore(LocalResultStore(root))
 
 
-def build_local_stores(*, report_dir: str | Path, detached: bool = False):
+def process_lock_holder() -> run_dir.LockHolder:
+    """建 run 的进程用的生命期锁持有者（ADR 0054 决策三「持锁的描述符」）：收下的描述符不再关闭、也不交出，锁随进程退出释放。
+
+    「建 run 的进程从建 run 起持锁到进程退出」是组合根对进程的装配决定，所以由这里给出，core 只认注入的持有者（ADR 0030
+    决定四「持锁的描述符交给注入的持有者」条）。只有推进这个 run 的进程（前台 `run`、本机后台推进进程）把它交给
+    `build_local_stores`。每次调用新建一个；调用方不依赖各次返回的是不是同一个实例。测试替换这个函数，换上在用例结束时关闭
+    描述符的持有者。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    return run_dir.HoldUntilExit()
+
+
+def build_local_stores(*, report_dir: str | Path, detached: bool = False,
+                       lock_holder: run_dir.LockHolder | None = None):
     """本地文件三层 store + local artifacts descriptor（file:// 完整路径）。
 
     落 <report_dir>/<run_id>/：RunStore(run_meta+run_state) + ResultStore(jobs/，每次保存一个以标识命名的文件，用哪一份由运行态
     点名) + ReportStore(index/manifest)。判定存储经 `local_result_store` 装配，带保存失败的退避重试。
+
+    lock_holder 原样交给 `LocalRunStore`（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）：建 run 之后持生命期锁的描述符交给
+    它。推进这个 run 的进程传 `process_lock_holder()`；查询命令不传，它们拿到的 RunStore 调 `create_run` 即 RuntimeError，不能建 run。
     """
     from gherkai_core.adapters.report_store.local import LocalReportStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
     root = Path(report_dir)
-    run_store: RunStore = LocalRunStore(root, detached=detached)  # detached：submit 的组合根传 True，run_state.json 带标记（ADR 0034）
+    # detached：submit 的组合根传 True，run_state.json 带标记（ADR 0034）
+    run_store: RunStore = LocalRunStore(root, detached=detached, lock_holder=lock_holder)
     result_store: ResultStore = local_result_store(root)
     report_store: ReportStore = LocalReportStore(root)
 

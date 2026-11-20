@@ -24,7 +24,7 @@ moto 的条件写行为与真 DDB 可能有别（绿≠对边界）→ 真 DDB �
 - 认领计数：建 run 为 0，认领成功加一、失败与其它写入口不变，缺键读作 0（ADR 0034 机制三「run 级状态只进不退」条①）。
 - 运行态记录顶层的附加键（不属于 RunState 模型的键或属性）经各个写入口原样保留（ADR 0030 决定四「local 的顶层附加键整体保留」）。
 结束写 `end_run` 与带结果的 job 终态写 `commit_job_states` 的语义对拍在 test_ending_and_commit_writes.py。
-本机写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
+本机建 run 之后的写入口在文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py。
 """
 from __future__ import annotations
 
@@ -55,11 +55,11 @@ def _initial(meta: RunMeta, hwm: int | None = None) -> RunState:
 
 
 @pytest.fixture(params=["local", "ddb"])
-def run_store(request, tmp_path, aws):
+def run_store(request, tmp_path, aws, lock_holder):
     """两个 adapter 各来一遍（对拍）。local 用 tmp_path；ddb 用 moto aws fixture。"""
     if request.param == "local":
         from gherkai_core.adapters.run_store.local import LocalRunStore
-        return LocalRunStore(tmp_path)
+        return LocalRunStore(tmp_path, lock_holder=lock_holder)
     from gherkai_core.adapters.run_store.ddb import DynamoDBRunStore
     return DynamoDBRunStore(aws["ddb"].Table(aws["table_name"]))
 
@@ -559,7 +559,7 @@ def test_create_run_rejects_a_definition_without_jobs(run_store):
 
 @pytest.mark.parametrize("side", ["local", "ddb"])
 @pytest.mark.parametrize("text, what", [("{", "不是合法的 JSON"), ("[1, 2]", "须为 JSON 对象")], ids=["truncated", "not-an-object"])
-def test_a_stored_definition_that_is_not_a_json_object_reads_as_a_contract_violation(side, text, what, tmp_path, aws):
+def test_a_stored_definition_that_is_not_a_json_object_reads_as_a_contract_violation(side, text, what, tmp_path, aws, lock_holder):
     """读得到提交记录而它不是一个 JSON 对象：与缺键、形态不对同属定义违约（抛 DefinitionContractError），不是一个未归类的解析异常，
     推进器与读端据此按同一种情形处理（两个 adapter 对拍）。运行态不受影响，结束写仍写得成。"""
     from gherkai_core.errors import DefinitionContractError
@@ -569,7 +569,7 @@ def test_a_stored_definition_that_is_not_a_json_object_reads_as_a_contract_viola
     if side == "local":
         from gherkai_core.adapters.run_store.local import LocalRunStore
 
-        store = LocalRunStore(tmp_path)
+        store = LocalRunStore(tmp_path, lock_holder=lock_holder)
         store.create_run(meta, _initial(meta, hwm=0))
         (tmp_path / "run-1" / "run_meta.json").write_text(text, encoding="utf-8")
         with pytest.raises(DefinitionContractError, match=what):
@@ -1013,7 +1013,7 @@ def test_claim_count_is_left_alone_by_the_other_write_entries(run_store):
 
 
 @pytest.fixture
-def raw_run_store(request, tmp_path, aws):
+def raw_run_store(request, tmp_path, aws, lock_holder):
     """对拍用的 adapter，连同改写库中原始记录的两个手段（写顶层键、删掉认领计数），两端各一套。
 
     产出 (store, set_extra(run_id, key, value), get_extra(run_id, key), drop_claim_count(run_id))。本机直接改 run_state.json 的
@@ -1033,7 +1033,7 @@ def raw_run_store(request, tmp_path, aws):
             change(d)
             path(run_id).write_text(json.dumps(d), encoding="utf-8")
 
-        return (LocalRunStore(tmp_path),
+        return (LocalRunStore(tmp_path, lock_holder=lock_holder),
                 lambda run_id, key, value: edit(run_id, lambda d: d.__setitem__(key, value)),
                 lambda run_id, key: json.loads(path(run_id).read_text(encoding="utf-8")).get(key),
                 lambda run_id: edit(run_id, lambda d: d.pop("claim_count")))

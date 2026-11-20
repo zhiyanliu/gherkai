@@ -208,8 +208,8 @@ def test_job_result_round_trips_through_both_dict_forms():
 
 
 # ---- LocalRunStore：create_run(meta,state) → load_run_meta/load_run_state 往返 ----
-def test_run_store_create_load(tmp_path: Path):
-    store = LocalRunStore(tmp_path / "runs")
+def test_run_store_create_load(tmp_path: Path, lock_holder):
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     r = _sample_run("run-1")
     store.create_run(r.run_meta, r.state)
     run_dir = tmp_path / "runs" / "run-1"
@@ -234,9 +234,9 @@ def test_run_store_load_missing_returns_none(tmp_path: Path):
     assert store.load_run_state("nope") is None
 
 
-def test_run_state_timestamps_round_trip(tmp_path: Path):
+def test_run_state_timestamps_round_trip(tmp_path: Path, lock_holder):
     # started_at/ended_at 非 None 时也须经 create/load 完整保留（不止测 None 态）：直接造带时间戳的 RunState 测落盘往返。
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     meta = _sample_run("run-ts").run_meta
     state = RunState(
         run_id="run-ts", status=Status.PASSED,
@@ -251,11 +251,11 @@ def test_run_state_timestamps_round_trip(tmp_path: Path):
     assert got == state  # 全字段等价
 
 
-def test_run_state_omits_null_timestamps(tmp_path: Path):
+def test_run_state_omits_null_timestamps(tmp_path: Path, lock_holder):
     # omit-when-None：起止为 None（未取时钟的零落盘运行路径；正常 run 由 RunPersistence.begin/finalize 落起止，
     # ADR 0030）时，落盘 JSON **不写**这两个键（不是写 null）——避免"永远 null 的字段被当 bug"的体验
     # 噪音。round-trip 仍还原回 None。
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     r = _sample_run("run-null")  # 样例的运行态不带起止 → None
     store.create_run(r.run_meta, r.state)
     raw = json.loads((tmp_path / "runs" / "run-null" / "run_state.json").read_text("utf-8"))
@@ -323,8 +323,8 @@ def _initial_state(run_id: str, scope_ids: list[str]) -> RunState:
     )
 
 
-def test_realtime_write_lifecycle(tmp_path: Path):
-    store = LocalRunStore(tmp_path / "runs")
+def test_realtime_write_lifecycle(tmp_path: Path, lock_holder):
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     meta = _sample_run("rt-run").run_meta
     scope_ids = ["features/wiki.feature:6", "登录场景"]
 
@@ -785,7 +785,7 @@ def test_run_meta_cli_version_and_session_warmup_url_round_trip():
     assert run_meta_from_dict(d2) == meta2
 
 
-def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: Path):
+def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: Path, lock_holder):
     """运行期限（ADR 0054 决策二）是 definition 的固定键：原样写出、原样读回，本机落盘的 run_meta.json 里同样带着它。"""
     from gherkai_core.serialize import run_meta_from_dict, run_meta_to_dict
     r = _sample_run("dl")
@@ -793,7 +793,7 @@ def test_run_meta_deadline_at_round_trip_through_dict_and_local_store(tmp_path: 
     assert d["deadline_at"] == "2026-06-29T02:15:00+00:00"
     assert run_meta_from_dict(d) == r.run_meta
     assert run_meta_from_dict({**d, "deadline_at": "2026-06-29T10:15:00+08:00"}).deadline_at == "2026-06-29T10:15:00+08:00"  # 原样读回、不改写
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     store.create_run(r.run_meta, r.state)
     assert json.loads((tmp_path / "dl" / "run_meta.json").read_text(encoding="utf-8"))["deadline_at"] == r.run_meta.deadline_at
     assert store.load_run_meta("dl").deadline_at == r.run_meta.deadline_at
@@ -820,12 +820,12 @@ def test_report_run_meta_is_gated_by_definition_schema():
         run_meta_from_dict(doc["run_meta"])
 
 
-def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Path):
+def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Path, lock_holder):
     import dataclasses
 
     from gherkai_core.errors import UnsupportedDefinitionSchema
     r = _sample_run("pk")
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     store.create_run(dataclasses.replace(r.run_meta, cli_version="1.5.0"), r.state)
     assert store.peek_definition_header("pk") == (2, "1.5.0")
     assert store.peek_definition_header("nope") is None
@@ -838,9 +838,9 @@ def test_local_run_store_peeks_definition_header_without_full_read(tmp_path: Pat
         store.load_run_meta("pk")
 
 
-def test_job_state_claimed_at_round_trip(tmp_path: Path):
+def test_job_state_claimed_at_round_trip(tmp_path: Path, lock_holder):
     # JobState.claimed_at（timeout 起算点）：落盘/读回不丢；未 claim 的省键 → None
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     meta = _sample_run("ca-run").run_meta
     sid0, sid1 = meta.jobs[0].scope_id, meta.jobs[1].scope_id
     state = RunState(run_id="ca-run", status=Status.RUNNING, jobs={
@@ -853,7 +853,7 @@ def test_job_state_claimed_at_round_trip(tmp_path: Path):
     assert got.jobs[sid1].claimed_at is None
 
 
-def test_job_state_message_round_trips_and_is_omitted_when_none(tmp_path: Path):
+def test_job_state_message_round_trips_and_is_omitted_when_none(tmp_path: Path, lock_holder):
     """job 级说明（ADR 0030 决定五）：有值时落进 job 条目、读回不丢；没有时 job 条目里不出现这个键、读回为 None。经 serialize 与本机
     run_state.json 两层核对。"""
     from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
@@ -868,14 +868,14 @@ def test_job_state_message_round_trips_and_is_omitted_when_none(tmp_path: Path):
     assert "message" not in entries[sid1]
     assert run_state_from_dict(run_state_to_dict(state)) == state
 
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     store.create_run(meta, state)
     raw = json.loads((tmp_path / "runs" / "msg-run" / "run_state.json").read_text("utf-8"))
     assert {e["scope_id"]: "message" in e for e in raw["jobs"]} == {sid0: True, sid1: False}
     assert store.load_run_state("msg-run") == state
 
 
-def test_job_state_result_id_round_trips_and_is_omitted_when_none(tmp_path: Path):
+def test_job_state_result_id_round_trips_and_is_omitted_when_none(tmp_path: Path, lock_holder):
     """点名的标识（ADR 0030 决定三「点名」条）：有值时落进 job 条目、读回不丢；没有时 job 条目里不出现这个键、读回为 None（`status
     --json` 输出的就是这份序列化，被点名的 job 才带这个键）。经 serialize 与本机 run_state.json 两层核对。"""
     from gherkai_core.serialize import run_state_from_dict, run_state_to_dict
@@ -890,7 +890,7 @@ def test_job_state_result_id_round_trips_and_is_omitted_when_none(tmp_path: Path
     assert "result_id" not in entries[sid1]
     assert run_state_from_dict(run_state_to_dict(state)) == state
 
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     store.create_run(meta, state)
     raw = json.loads((tmp_path / "runs" / "rid-run" / "run_state.json").read_text("utf-8"))
     assert {e["scope_id"]: e.get("result_id") for e in raw["jobs"]} == {sid0: "0123456789abcdef", sid1: None}
@@ -898,9 +898,9 @@ def test_job_state_result_id_round_trips_and_is_omitted_when_none(tmp_path: Path
     assert store.load_run_state("rid-run") == state
 
 
-def test_run_state_jobs_map_round_trip(tmp_path: Path):
+def test_run_state_jobs_map_round_trip(tmp_path: Path, lock_holder):
     # RunState.jobs 是 Map（ADR 0030）：内存 dict → 落盘 list JSON → 读回仍是等价 Map
-    store = LocalRunStore(tmp_path / "runs")
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     meta = _sample_run("map-run").run_meta
     state = RunState(
         run_id="map-run", status=Status.PASSED,
@@ -992,13 +992,13 @@ def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
     assert {f.name for f in dataclasses.fields(RunState)} == RUN_STATE_KEYS
 
 
-def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path):
+def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path, lock_holder):
     """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
     create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写、`is_detached` 为 False，记录不存在也为 False。
     之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
     run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进 RunState 模型。"""
     r = _sample_run("run-d")
-    LocalRunStore(tmp_path / "runs", detached=True).create_run(
+    LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(
         r.run_meta, _initial_state("run-d", [j.scope_id for j in r.run_meta.jobs]))
     path = tmp_path / "runs" / "run-d" / "run_state.json"
     assert json.loads(path.read_text("utf-8"))["detached"] is True
@@ -1010,7 +1010,7 @@ def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path:
     assert not hasattr(relay.load_run_state("run-d"), "detached")
 
     meta = _sample_run("run-s").run_meta
-    sync = LocalRunStore(tmp_path / "runs")
+    sync = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     sync.create_run(meta, _initial_state("run-s", [j.scope_id for j in meta.jobs]))
     sync_path = tmp_path / "runs" / "run-s" / "run_state.json"
     assert "detached" not in json.loads(sync_path.read_text("utf-8"))
@@ -1022,12 +1022,12 @@ def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path:
     assert "detached" not in json.loads(sync_path.read_text("utf-8"))
 
 
-def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Path):
+def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Path, lock_holder):
     """写路径读不出旧文件不吞错：run_state.json 损坏时建 run 之外的五个写入口都抛出、文件原样不动，不会把损坏的文件当成「没有附加键」
     覆盖掉（那样后台执行标记会被悄悄去掉，status --wait 从此把这个后台 run 当成前台 run 只等不接力）；读路径保守地读作没有标记。"""
     meta = _sample_run("run-p").run_meta
     sid = meta.jobs[0].scope_id
-    LocalRunStore(tmp_path / "runs", detached=True).create_run(meta, _initial_state("run-p", [j.scope_id for j in meta.jobs]))
+    LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(meta, _initial_state("run-p", [j.scope_id for j in meta.jobs]))
     path = tmp_path / "runs" / "run-p" / "run_state.json"
     path.write_text("{not json", encoding="utf-8")
     relay = LocalRunStore(tmp_path / "runs")

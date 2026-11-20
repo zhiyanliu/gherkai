@@ -33,7 +33,7 @@ gherkai 执行一个 run 有**两种驱动模型**，按命令分流：
 ## 3. 前台 `run` 的生命周期
 
 ```
-plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
+plan(纯本地) → begin 建 run(先查报告目录,在暂存目录上取锁、写定义与全 pending 初始态,再改名成 run 标识) → schedule 循环:
   ├─ 按并发闸取 job：已过停止启动的时刻(期限减 60 秒)、已发现 run 被别处结束、或已因 fail-fast / 使用方中断而中止 → 不启动、留在 pending；否则认领(记认领时刻)后启动 worker(每 scope 一个)
   ├─ 逐行消费 worker 事件流 → ScopeStarted 或其前一条非 attempted 的 SessionOpened（桌面 job 在浏览器会话建好后、建连之前发，设备 job 在取设备期间即发）置 RUNNING+会话血缘(session id)、每 job 完成先存判定明细、再写这个 job 的终态(RunPersistence)；事件原始行与退出记录同时落 events.db（--no-report 不写）
   ├─ 静默停滞由心跳检出；墙钟到截止时刻(认领时刻加 job 预算，以运行期限封顶)即停 → handle.stop(SIGTERM→宽限→SIGKILL)
@@ -53,7 +53,7 @@ plan(纯本地) → begin(落 definition + 初始态) → schedule 循环:
 
 ```
 submit:plan 与各项检查 → 补全 job(账号比对、设备请求、安装包上传) → 以新会话启动 per-run 推进进程,经它的标准输入交出建 run 所需的输入 → 等回报 → 输出 run_id 后返回
-per-run 进程:取创建时刻 → 起隧道(给了 --expose-local 时) → 生成运行定义 → 查 submit 是否还在(已不在即不建 run、退出) → 建 run(落 definition + 全 pending 初始态) → 装配、打开 reconcile.log → 回报 submit → run_reconcile_loop 循环调用 tick(用自己生成的那份运行定义,不从记录读回)
+per-run 进程:取创建时刻 → 起隧道(给了 --expose-local 时) → 生成运行定义 → 查 submit 是否还在(已不在即不建 run、退出) → 建 run(先查报告目录,在暂存目录上取锁、写定义与全 pending 初始态,再改名成 run 标识) → 装配、打开 reconcile.log → 回报 submit → run_reconcile_loop 循环调用 tick(用自己生成的那份运行定义,不从记录读回)
   ├─ tick 认领到 PENDING job(未过停止启动的时刻才认领) → SubprocessLauncher 启动本机 worker,收下这个 job 的截止时刻
   ├─ worker 的 fd3 原始事件行经 raw_sink 旁路落 SQLite(events 的持久通道)
   ├─ 每个执行中的 job 一个检查线程按墙钟比对截止时刻,到点停 worker(§6)

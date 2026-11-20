@@ -391,3 +391,15 @@ def test_final_transcript_exemption_follows_the_manifest_hash(tmp_path):
     assert not final_transcript(narration)
     labels = {label for _, label, _ in scan("user-doc", narration)}
     assert {"口头语或自造复合词", "正文箭头", "内部指代", "裸 WP 编号", "退役旧名"} <= labels
+
+
+def test_supported_filesystem_list_in_user_docs_matches_the_code():
+    """本机后端支持的文件系统清单的真值在 `run_dir.ALLOWED_FILESYSTEMS`（ADR 0054 决策四）：用户文档里照写的那一句由它拼出，
+    清单改了而文档没有跟上即红。扫描面是讲报告目录要求的那一页与 CHANGELOG 的未发布段。"""
+    from gherkai_cli.__main__ import _allowed_filesystems_text
+
+    phrase = _allowed_filesystems_text()
+    page = (REPO / "docs" / "user-guide" / "running-and-results.md").read_text(encoding="utf-8")
+    unreleased = changelog_unreleased((REPO / "CHANGELOG.md").read_text(encoding="utf-8"))
+    assert phrase in page, f"running-and-results.md 里支持的文件系统清单应是：{phrase}"
+    assert phrase in unreleased, f"CHANGELOG.md 未发布段里支持的文件系统清单应是：{phrase}"

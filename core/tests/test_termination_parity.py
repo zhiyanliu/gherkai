@@ -300,13 +300,13 @@ IN_FLIGHT = [
 
 
 @pytest.mark.parametrize("events,expected", [r[1:] for r in IN_FLIGHT], ids=[r[0] for r in IN_FLIGHT])
-def test_in_flight_job_state_agrees(tmp_path, events, expected):
+def test_in_flight_job_state_agrees(tmp_path, events, expected, lock_holder):
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
     from gherkai_core.persist import RunPersistence
 
     meta = RunMeta(run_id="r", created_at="", jobs=(_job(),), deadline_at=FAR_DEADLINE)
-    run_store = LocalRunStore(tmp_path)
+    run_store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     persistence = RunPersistence("r", run_store, LocalResultStore(tmp_path))
     persistence.begin(meta, started_at="t0")
     for ev in events:
@@ -577,7 +577,7 @@ def _boom_sync(deadline_at: str, timeout_s: float, *, slow: bool):
                     opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, grace_period_s=1.0))
 
 
-def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool):
+def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool, lock_holder):
     """无状态路径的推进步骤 tick 起 job 失败（launch 抛出），下一轮以终态写记下这个 job，run 随之成为终态；slow 时启动调用拖过截止时刻
     才失败。返回按运行态点名读回的判定明细（与报告同一种读法）、补写的退出记录与 run 成为终态之后的运行态。"""
     from gherkai_core.adapters.event_log import SqliteEventLog
@@ -589,7 +589,7 @@ def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool)
 
     job = _job(timeout_s, "desktop")
     meta = RunMeta(run_id="r", created_at="", jobs=(job,), deadline_at=deadline_at)
-    store, log = LocalRunStore(tmp_path), SqliteEventLog(tmp_path / "e.db")
+    store, log = LocalRunStore(tmp_path, lock_holder=lock_holder), SqliteEventLog(tmp_path / "e.db")
     store.create_run(meta, RunState(run_id="r", status=Status.PENDING, jobs={SCOPE: JobState(SCOPE, Status.PENDING)},
                                     started_at="t0", high_water_mark=0))
     now = {"t": 0.0}
@@ -617,13 +617,13 @@ def _boom_stateless(tmp_path, deadline_at: str, timeout_s: float, *, slow: bool)
     (_NEAR, 5.0, True, Status.ERROR, "job 超时（预算 5s，已中止）"),
     (_NEAR, 7200.0, True, Status.ABORTED, DEADLINE_TIMEOUT_MESSAGE),
 ], ids=["起不来", "拖过预算才失败", "拖过预算才失败且期限更晚", "拖过期限才失败"])
-def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, status, message):
+def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path, deadline_at, timeout_s, slow, status, message, lock_holder):
     """起 worker 失败的 job（ADR 0054 决策二后台推进条「时刻」）：推进步骤补写的退出记录与前台交给终结函数的输入相同——退出码未知、带
     启动失败的原因。补写只记失败的那一刻作退出时刻、不带超时标志，投影按它是否晚于截止时刻判断，与前台起 worker 失败的分支是
     同一个判断——两条路径的判定、归因与说明逐项相同；拖过期限才失败的记 aborted。run 级两边都按取法由这个 job 的终态算出：前台没有
     记录时在内存里算出，后台是记下终态的写写下的记录，都没有 run 级说明。"""
     sync = _boom_sync(deadline_at, timeout_s, slow=slow)
-    stateless, exit_rec, recorded = _boom_stateless(tmp_path, deadline_at, timeout_s, slow=slow)
+    stateless, exit_rec, recorded = _boom_stateless(tmp_path, deadline_at, timeout_s, slow=slow, lock_holder=lock_holder)
     assert (exit_rec.exit_code, exit_rec.timed_out) == (None, False)
     assert exit_rec.exited_at == _Clock.T0 + timedelta(seconds=1000.0 if slow else 0.0)
     a, b = _comparable(sync.results[0]), _comparable(stateless[0])
@@ -633,7 +633,7 @@ def test_launch_failure_agrees_between_the_foreground_and_the_advancer(tmp_path,
     assert (foreground.status, foreground.message) == (recorded.status, recorded.message) == (status, None)
 
 
-def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
+def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path, lock_holder):
     """到期：a 结束之后已过停止启动的时刻，b 还没有启动。前台没有记录时组装出的结果（`persist.result_without_record`）与后台推进
     步骤写下的记录一致：a passed、b 由执行方自己到期这条来路的结束写记 skipped 并带说明，run 为 aborted、带 run 级说明；判定明细只有
     a 的，b 没有：后台记录里只有 a 被点名，按点名读回的也只有 a（ADR 0054 决策二第 3 条、实测项 4）。"""
@@ -657,7 +657,7 @@ def test_expiry_agrees_between_the_foreground_and_the_advancer(tmp_path):
                     opts=ScheduleOpts(max_concurrency=1, clock=clock, wall_clock=clock.wall, heartbeat_interval_s=0.02,
                                       grace_period_s=1.0))
 
-    store, log = LocalRunStore(tmp_path), SqliteEventLog(tmp_path / "e.db")
+    store, log = LocalRunStore(tmp_path, lock_holder=lock_holder), SqliteEventLog(tmp_path / "e.db")
     store.create_run(meta, RunState(run_id="r", status=Status.PENDING, high_water_mark=0, started_at="t0",
                                     jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")}))
     now = {"t": 0.0}

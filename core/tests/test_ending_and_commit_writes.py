@@ -15,8 +15,8 @@
 - job 级说明：投影与认领保留库中的说明。
 - 点名的标识（ADR 0030 决定三「点名」条）：终态写取给出的标识；同一个 job 的第二次终态写不改写第一次的点名；之后的终态写与结束写
   整体替换 jobs（云端）或整份写回（本机）时，先前点名的各 job 标识仍在，由结束写结束的 job 没有标识。
-本机写入口在同一把文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py；这里的两个写入口与其余写入口共用同一个锁内
-读改写的路径。云端的写入序号、插在 adapter 自己的读与写之间的写、写入次数与重读的次数上限见 test_ddb_write_seq.py。
+本机建 run 之后的写入口在同一把文件锁内互斥的结论靠真实进程核对，见 test_local_run_store_lock.py；这里的两个写入口与建 run 之后的
+其余写入口共用同一个锁内读改写的路径。云端的写入序号、插在 adapter 自己的读与写之间的写、写入次数与重读的次数上限见 test_ddb_write_seq.py。
 """
 from __future__ import annotations
 
@@ -60,11 +60,11 @@ def _done(scope_id, status, *, session=None, result_id=None) -> JobState:
 
 
 @pytest.fixture(params=["local", "ddb"])
-def run_store(request, tmp_path):
+def run_store(request, tmp_path, lock_holder):
     """两个 adapter 各来一遍（对拍）。本机用 tmp_path；云端用 moto 建好的表。"""
     if request.param == "local":
         from gherkai_core.adapters.run_store.local import LocalRunStore
-        return LocalRunStore(tmp_path)
+        return LocalRunStore(tmp_path, lock_holder=lock_holder)
     return request.getfixturevalue("ddb_run_store")
 
 

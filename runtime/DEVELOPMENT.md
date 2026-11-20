@@ -30,7 +30,11 @@
     `WorkerSelfDescribeError`；自述取到了、与命令行工具不兼容（身份位或载荷键不合契约，含协议版本不等；除 `engine` 身份位指错引擎那一项外，诊断都以
     `VERSION_MISMATCH_ADVICE` 那一句结尾）抛 `WorkerIncompatibleError`；取不到（起不来、超时、输出不是合法 JSON）抛 `WorkerUnavailableError`，定位不到的
     `WorkerNotFoundError` 是它的子类。前两类在各调用点都不降级（命令以退出码 2 结束，doctor 记为失败项），只有 `plan` 对取不到降级。自述对象里测试目标的读取与取交集由同组的纯函数提供（`worker_targets` / `step_targets`（step 未声明目标时视为只在桌面网页上有实现）/ `available_targets`·`unsupported_targets`（声明目标与支持目标的交集、差集）/ `target_supported`·`target_session_limit`，ADR 0049 决策 2、3），plan / list-deterministic / doctor / 执行前预检只调用这些函数、不各自取交集。
-  - **存储与云端目标装配**：`build_local_stores` / `build_cloud_stores` / `local_result_store`（本机推进器用的判定存储：本地文件存储外面套 core 的 `RetryingResultStore`，保存失败按 1、2、4 秒退避重试；`build_local_stores` 与 `detached.assemble_local_run` 都经它装配，云端的组合根不套，ADR 0030 决定三「保存明细失败」条）/ `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
+  - **存储与云端目标装配**：`build_local_stores`（关键字参数 `lock_holder` 原样交给 core 的 `LocalRunStore`：推进这个 run 的进程，即前台
+    `run` 与本机后台推进进程，传 `process_lock_holder()`，查询命令不传，拿到的 RunStore 不能建 run）/ `process_lock_holder`（建 run 的进程用的生命期锁
+    持有者，返回 core 的 `run_dir.HoldUntilExit`：收下的描述符不关闭也不交出，锁随进程退出释放；「从建 run 起持锁到进程退出」是组合根对进程的
+    装配决定，所以由这里给出，ADR 0054 决策三「持锁的描述符」、ADR 0030 决定四；每次调用新建一个，调用方不依赖是不是同一个实例）/
+    `build_cloud_stores` / `local_result_store`（本机推进器用的判定存储：本地文件存储外面套 core 的 `RetryingResultStore`，保存失败按 1、2、4 秒退避重试；`build_local_stores` 与 `detached.assemble_local_run` 都经它装配，云端的组合根不套，ADR 0030 决定三「保存明细失败」条）/ `resolve_cloud_target`（返回 `CloudTarget`：云资源的完整名称 +
     region/profile 一处解析）/ `resolve_aws_identity`（profile 与 region 解析链的唯一实现，`resolve_cloud_target` 与本机后台宿主共用）/
     `resolve_region` / `read_device_farm_project`（读 SSM 记录的云端 Device Farm 项目 ARN，参数不存在时返回
     None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
@@ -54,7 +58,7 @@
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
   （本机推进循环，后台推进进程与 `status --wait` 接力共用；`clock` 与判定存储必传，组合根传 `compose.now` 与经 `compose.local_result_store` 装配的判定存储；按 `tick` 返回的 `TickOutcome` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告（读运行态、按点名的标识读回判定明细），读运行态、读明细与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
   `assemble_local_run`（按传入的运行定义装配推进一个 run 所需的各部分：事件库、RunStore、启动器、判定存储与报告存储，结果是 `LocalAdvancer`；
-  不启动子进程，后台推进进程在回报 `submit` 之前调用它）+ `advance_local_run`（后台推进进程推进一个 run：用它自己生成的那份运行定义，
+  不启动子进程，后台推进进程在回报 `submit` 之前调用它；装配出的 RunStore 不带锁的持有者、不能建 run，后台推进进程在调用它之前已经建好 run）+ `advance_local_run`（后台推进进程推进一个 run：用它自己生成的那份运行定义，
   不从记录读回，ADR 0035 决策 3「本机 `submit`」）+ `build_local_reconcile`·`drive_local_reconcile`（`status --wait` 接力：从记录读回运行
   定义之后经 `assemble_local_run` 装配、再推进；读不到可用的运行定义时抛异常、什么都不写）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
   截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
@@ -107,6 +111,10 @@ uv run pytest -q runtime/tests   # 仓库根：只运行本包单测（`uv run p
 用例失败的函数、并去掉 `NGROK_AUTHTOKEN`；要用假 SDK 的用例经 `NgrokTunnel(load_sdk=...)` 注入。交接协议的用例用真实的 `os.pipe`
 与线程，`redirect_output` 这类改接本进程描述符的在子进程里验证。
 
+本机建 run 的用例同在 `tests/conftest.py`：夹具 `lock_holder` 是测试用的持有者，要建 run 的 `LocalRunStore` 与 `build_local_stores`
+传入它，它在用例结束时关闭收下的描述符（生产用的持有者没有放开锁的方法）；自动夹具把边界检查取文件系统类型的一步换成本平台清单的
+第一项，结论不依赖宿主的文件系统，带 `real_filesystem` 标记的用例不替换、用宿主真实的取法。规则与 core 的测试夹具相同。
+
 `build_cloud_stores` 与云端各入口（提交前检查、variant 解析、版本戳读取等）的 boto3 import 惰性收敛在 `_make_*` 钩子内：**纯 local 路径绝不
 触发该 import**（ADR 0016 窄腰 / 0030）。`build_fargate_engines` 不建句柄：`ecs` / `s3` 由推进器 Lambda 建好传入。修改这些函数时须保持 `import boto3` 不上移到模块顶层。`devicefarm.py` 同理：boto3 只在 `_make_devicefarm_client` 内 import，CLI 与 deploy 的 `--help` 不为它拉起 AWS SDK。
 
@@ -129,7 +137,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 - [0049](../docs/adr/0049-worker-capabilities-targets-keys.md) 能力自述的测试目标键（`compose` 的 targets 契约校验与交集）
 - [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话的生命周期与应用分发（`app_upload` 的应用前缀与保留承诺、`devicefarm` 的项目找回与会话列举）
 - [0053](../docs/adr/0053-project-config-file.md) 项目配置文件（region / profile 解析链里的配置文件层）
-- [0054](../docs/adr/0054-run-deadline-lifetime-lock-and-settling.md) 运行期限与生命期锁（`deadline` 的算式与建 run 的各个时刻）
+- [0054](../docs/adr/0054-run-deadline-lifetime-lock-and-settling.md) 运行期限与生命期锁（`deadline` 的算式与建 run 的各个时刻、`compose.process_lock_holder`）
 
 参与开发的总入口（环境、测试、发布链、文档地图）见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)；执行与推进的机理解读见
 [`docs/internals/`](../docs/internals/README.md)。

@@ -12,9 +12,18 @@
   jobs/*.json（数据面 ResultStore）是由执行结果结束的 job 的判定明细，对 scenario、step 与归因负责；每次保存一份、同一个 job 可能
   有多份，用哪一份由 run_state.json 里这个 job 的终态点名（`result_id`，ADR 0030 决定三「点名」条）；由结束写结束的 job 没有明细。
 
-**写入口全部在同一把 fcntl 文件锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：create_run、update_job_state、
-try_claim_job、project_state、commit_job_states、end_run 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方
-（前台执行者、后台推进进程、`status --wait` 接力）不靠调用方串行。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
+**建 run 经暂存目录与改名**（ADR 0030 决定四，做法在同包 `run_dir`）：create_run 先在报告目录里建暂存目录，在它上面取生命期锁
+（ADR 0054 决策三），把 run_meta.json、run_state.json 写进去，写完才原子改名成 run 标识，持锁的描述符交给构造时注入的持有者。
+暂存目录里的两个文件没有写序的约束：两个都写完才改名，按标识的读与列举不认以点开头的名字。建 run 不取运行态的短锁，「已存在」
+只由改名给出。
+
+**建 run 之后的各写入口在同一把 fcntl 短锁内完成读改写**（ADR 0030 决定三、ADR 0054 决策五）：update_job_state、try_claim_job、
+project_state、commit_job_states、end_run 互斥，跨进程与进程内多线程都成立；同一个 run 的各写入方（前台执行者、后台推进进程、
+`status --wait` 接力）不靠调用方串行。短锁的锁文件 `.runstate.lock` 在第一次读改写时建出。它与生命期锁是两个对象（目录里的一个
+文件、目录本身），互不阻挡。读面（load_run_state、list_runs、`status`）不持锁，靠原子写看到完整文件。
+
+**名字规则**（`run_dir.is_run_name`）：run 标识即 run 目录的名字，不以点开头、不含路径分隔符、非空。create_run 拒绝不合规则的
+标识；按标识读写的各入口收到这样的标识按 run 不存在处理；list_runs 跳过名字不合规则的目录（含暂存目录与别的隐藏目录）。
 
 **顶层附加键整体保留**（ADR 0030 决定四「local 的顶层附加键整体保留」）：run_state.json 里不属于 RunState 模型的顶层键（`serialize.RUN_STATE_KEYS` 之外，
 如后台执行标记 `detached`）只在 create_run 时写下，之后每个写入口从锁内读到的文件里原样带回，不逐个补回。
@@ -33,7 +42,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from gherkai_core.adapters._atomic import atomic_write_json
-from gherkai_core.errors import RunAlreadyExists
+from gherkai_core.adapters.run_store import run_dir
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import (
     CommitOutcome,
@@ -86,22 +95,37 @@ class LocalRunStore:
     `detached: true` 标记。标记是执行环境属性、不进 RunState 模型；之后的写回由「顶层附加键整体保留」承担（接力者与同步路径
     的实例不带 detached，它们的写不会丢掉标记，带 detached 的实例也不会给别的 run 补上标记）。读它只经 `is_detached`
     （对位 `DynamoDBRunStore.is_detached`）。
+
+    lock_holder（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）：create_run 建成之后把持生命期锁的描述符交给它。只有推进
+    这个 run 的进程（前台 `run`、本机后台推进进程）构造带持有者的 store；不带持有者的 store 调 create_run 即 RuntimeError，
+    只读命令与接力的 store 因此不能建 run。
     """
 
-    def __init__(self, root: str | Path, *, detached: bool = False) -> None:
+    def __init__(self, root: str | Path, *, detached: bool = False,
+                 lock_holder: run_dir.LockHolder | None = None) -> None:
         self._root = Path(root)
         self._detached = detached
+        self._lock_holder = lock_holder
 
-    def _state_path(self, run_id: str) -> Path:
-        return self._root / run_id / _STATE_FILE
+    def _run_dir(self, run_id: str) -> Path | None:
+        """run 标识对应的 run 目录；标识不合名字规则（`run_dir.is_run_name`）即 None，调用方一律按 run 不存在处理。"""
+        return self._root / run_id if run_dir.is_run_name(run_id) else None
+
+    def _state_path(self, run_id: str) -> Path | None:
+        d = self._run_dir(run_id)
+        return None if d is None else d / _STATE_FILE
+
+    def _meta_path(self, run_id: str) -> Path | None:
+        d = self._run_dir(run_id)
+        return None if d is None else d / _META_FILE
 
     @staticmethod
     @contextmanager
-    def _run_lock(run_dir: Path) -> Iterator[None]:
+    def _run_lock(directory: Path) -> Iterator[None]:
         """持 run 目录下锁文件的排他 fcntl 锁（跨进程互斥；同一进程里各自打开的描述符之间同样互斥）。run 目录须已存在。"""
         import fcntl
 
-        with open(run_dir / _LOCK_FILE, "w") as lf:
+        with open(directory / _LOCK_FILE, "w") as lf:
             fcntl.flock(lf, fcntl.LOCK_EX)
             try:
                 yield
@@ -120,12 +144,12 @@ class LocalRunStore:
 
     @staticmethod
     def _write_state(path: Path, state: RunState, extras: dict) -> None:
-        """写回 run_state.json：附加键在前、模型键在后（同名时模型键为准；附加键本来就不与模型键同名）。只在持锁时调用。"""
+        """写回 run_state.json：附加键在前、模型键在后（同名时模型键为准；附加键本来就不与模型键同名）。建 run 时写进暂存目录，此后只在持短锁时调用。"""
         _atomic_write_json(path, {**extras, **run_state_to_dict(state)})
 
     @staticmethod
-    def _marker_in(path: Path) -> bool:
-        if not path.exists():
+    def _marker_in(path: Path | None) -> bool:
+        if path is None or not path.exists():
             return False
         return json.loads(path.read_text(encoding="utf-8")).get("detached") is True
 
@@ -134,22 +158,23 @@ class LocalRunStore:
 
         **adapter-only 只读访问器、不在 RunStore port 上**（执行环境属性不进 core）。`status --wait` 据此分流：detached run
         才接力推进；同步 `run` 由进程内 schedule 推进，接力者碰它即双开推进器——与云端推进器「只碰 detached run」同一道闸。
-        文件缺失、读不出或没有标记 → False（读路径保守：读不出标记就当不可接力）。
+        文件缺失、读不出、没有标记或标识不合名字规则时返回 False（读路径保守：读不出标记就当不可接力）。
         """
         try:
             return self._marker_in(self._state_path(run_id))
         except (OSError, ValueError):
             return False
 
-    # ---- 写入口：全部在文件锁内读改写 ----
+    # ---- 写入口：建 run 经暂存目录与改名，之后的各写入口在文件锁内读改写 ----
 
     def _locked_rmw(self, run_id: str, mutate) -> bool | None:
         """在 run_state.json 上做跨进程原子读改写：持文件锁 → 读原文 → mutate(state) → (新 state | None) → 写回。
 
-        返回 True 表示写成；False 表示 mutate 返回 None（条件不成立），不写；None 表示运行态不存在，不写。条件写入口把后两种
-        都当作写不成，update_job_state 把 None 翻成 FileNotFoundError。写回时带上读到的附加键。"""
+        返回 True 表示写成；False 表示 mutate 返回 None（条件不成立），不写；None 表示运行态不存在（含标识不合名字规则），不写。
+        条件写入口把后两种都当作写不成，update_job_state 把 None 翻成 FileNotFoundError。写回时带上读到的附加键。锁文件在
+        这里第一次用到时建出（建 run 不取这把锁）。"""
         path = self._state_path(run_id)
-        if not path.exists():
+        if path is None or not path.exists():
             return None  # run 目录可能也不在：不为一次不存在的写建锁文件
         with self._run_lock(path.parent):
             raw = self._read_raw(path)
@@ -162,23 +187,28 @@ class LocalRunStore:
             return True
 
     def create_run(self, meta: RunMeta, initial_state: RunState) -> None:
-        """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json），只在 run 目录里还没有运行态时成立。
+        """run 开始：写 definition（run_meta.json）+ 初始运行态（run_state.json），只在以 run 标识命名的位置还没有非空目录时成立
+        （ADR 0054 决策五、ADR 0030 决定四）。
 
-        判据与两个文件的写在同一把文件锁内（ADR 0054 决策五）：运行态已在时抛 `RunAlreadyExists`，两个文件都不碰。只有
-        run_meta.json、没有运行态的目录（建 run 在两次写之间中断）照常建。写序同云端：definition 在前、运行态在后，运行态一出现，
-        definition 必已在。后台执行标记只在这里写下。
+        次序：没有 job 的运行定义即 ValueError（`run_status.check_new_run`）；没有注入持有者即 RuntimeError（编程错误）；run 标识
+        不合名字规则即 ValueError。三者都什么都不建。之后经 `run_dir.create_run_dir`：边界检查，在暂存目录上取锁，把两个文件写进
+        暂存目录，原子改名成 run 标识，描述符交给持有者。后台执行标记只在这里写下。
 
-        报告目录里与 run 同名的不是目录（普通文件、悬空的符号链接）时，建目录抛的是普通的 FileExistsError：那是写记录失败，
-        不是 run 已存在，原样抛出、不译成 `RunAlreadyExists`。"""
+        失败的类型（调用方据它分别说明）：报告目录不合要求 `run_dir.RunDirRejected`；取锁出错 `run_dir.LifetimeLockUnavailable`
+        （OSError 的子类）；暂存目录连续被占用 `run_dir.StagingContended`；目标已是非空目录 `errors.RunAlreadyExists`，什么都没改；其余
+        OSError（写两个文件失败，与 run 同名的位置被文件、符号链接或挂载点占着，建报告目录失败）是写记录失败，原样抛出，不是
+        `RunAlreadyExists`。"""
         check_new_run(meta)  # 没有 job 的运行定义不建（先于建目录，不留空目录）
-        run_dir = self._root / meta.run_id
-        run_dir.mkdir(parents=True, exist_ok=True)
-        path = run_dir / _STATE_FILE
-        with self._run_lock(run_dir):
-            if path.exists():
-                raise RunAlreadyExists(meta.run_id)
-            _atomic_write_json(run_dir / _META_FILE, run_meta_to_dict(meta))
-            self._write_state(path, initial_state, {"detached": True} if self._detached else {})
+        if self._lock_holder is None:
+            raise RuntimeError("这个 LocalRunStore 没有注入锁的持有者，不能建 run：只有推进 run 的进程构造带持有者的 store")
+        if not run_dir.is_run_name(meta.run_id):
+            raise ValueError(f"run 标识 {meta.run_id!r} 不能用作本机 run 目录的名字：不能为空、不能以点开头、不能含路径分隔符")
+        extras = {"detached": True} if self._detached else {}
+
+        def write(staging: Path) -> None:
+            _atomic_write_json(staging / _META_FILE, run_meta_to_dict(meta))
+            self._write_state(staging / _STATE_FILE, initial_state, extras)
+        run_dir.create_run_dir(self._root, meta.run_id, write, holder=self._lock_holder)
 
     def update_job_state(self, run_id: str, job_state: JobState) -> bool:
         """执行中的写（语义见 RunStore port）：按 scope_id 整项替换单个 job 的条目。run_state.json 不存在则报错（须先 create_run）；
@@ -209,30 +239,32 @@ class LocalRunStore:
         return open_at_write[0]
 
     def load_run_meta(self, run_id: str) -> RunMeta | None:
-        """读回 definition（RunMeta）；不存在返回 None。"""
-        path = self._root / run_id / _META_FILE
-        if not path.exists():
+        """读回 definition（RunMeta）；不存在（含标识不合名字规则）返回 None。"""
+        path = self._meta_path(run_id)
+        if path is None or not path.exists():
             return None
         return run_meta_from_dict(definition_from_json(path.read_text(encoding="utf-8")))
 
     def peek_definition_header(self, run_id: str) -> tuple[int, str | None] | None:
-        """只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在返回 None。"""
-        path = self._root / run_id / _META_FILE
-        if not path.exists():
+        """只读 definition 的结构版本与写端 CLI 版本（ADR 0037 决策 7）；run_meta.json 不存在（含标识不合名字规则）返回 None。"""
+        path = self._meta_path(run_id)
+        if path is None or not path.exists():
             return None
         d = definition_from_json(path.read_text(encoding="utf-8"))
         return definition_schema_version(d), d.get("cli_version")
 
     def load_run_state(self, run_id: str) -> RunState | None:
-        """读回运行态（RunState）；不存在返回 None。"""
-        raw = self._read_raw(self._state_path(run_id))
+        """读回运行态（RunState）；不存在（含标识不合名字规则）返回 None。"""
+        path = self._state_path(run_id)
+        raw = None if path is None else self._read_raw(path)
         return None if raw is None else run_state_from_dict(raw)
 
     def list_runs(self, statuses: Sequence[Status], *, limit: int | None) -> list[RunListing]:
         """列举（语义见 RunStore port；本机做法见 ADR 0041 决策七「本机实现」）：列报告落点下的子目录（目录名即 run_id），逐个读
         run_state.json，按读回的状态归入所请求的状态，每个状态按 run_id 降序取至多 `limit` 条。
 
-        没有 run_state.json 的目录跳过（不是 run 目录，或在写下运行态之前就中断的执行）。读回解析不了的（JSON 损坏、形态违约、
+        名字不合名字规则的（以点开头，含建 run 用的暂存目录与别的隐藏目录）先于读文件跳过：暂存目录在改名成 run 标识之前里面已有
+        运行态。没有 run_state.json 的目录跳过（不是 run 目录）。读回解析不了的（JSON 损坏、形态违约、
         状态值本版本不认识、清单要输出的字段类型不对）以 `state=None` 列出、不参与归入与截取，不论请求了哪些状态。报告落点目录不存在
         时返回空列表（落点在第一次落盘时才建立，区分「目录不存在」与「目录下没有 run」是调用方的事）；目录、条目或文件不可读一类
         OSError 原样抛出，只有列出之后被删掉的条目跳过。不建索引文件：运行态的真值只在各 run 目录里，清单与 `status` 读到的永远一致。
@@ -249,6 +281,8 @@ class LocalRunStore:
         by_status: dict[Status, list[tuple[str, RunState, bool]]] = {s: [] for s in wanted}
         unreadable: list[tuple[str, bool]] = []
         for entry in entries:
+            if not run_dir.is_run_name(entry.name):
+                continue
             # 显式 stat 判目录、不用 Path.is_dir：Python 3.14 起 is_dir 把任何 OSError 都读作「不是目录」，权限错误会被吞成
             # 「目录下没有 run」。只有列出之后被删掉的条目（含目标不存在的符号链接）跳过
             try:

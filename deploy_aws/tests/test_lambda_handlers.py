@@ -11,6 +11,7 @@ handler 源与本测试同住 provider 包（`gherkai_deploy_aws/lambdas/`，AWS
 """
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -186,6 +187,26 @@ from gherkai_core.model import (Job, JobState, RunMeta, RunState, Scenario, Stat
                                 StepArgument)
 
 
+@pytest.fixture(autouse=True)
+def _host_independent_filesystem_type(monkeypatch):
+    """建 run 时的边界检查不依赖宿主的文件系统：把取文件系统类型的那一步换成本平台清单的第一项。这里测的是处理器的逻辑，
+    报告目录落在哪种文件系统上由 core 的用例覆盖。"""
+    from gherkai_core.adapters.run_store import run_dir
+
+    allowed = run_dir.ALLOWED_FILESYSTEMS.get(sys.platform)
+    if allowed:
+        monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: allowed[0])
+
+
+class _ReleaseAtOnce:
+    """建 run 用的锁持有者：收到持生命期锁的描述符即关闭（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）。这里的用例只要
+    `create_run` 写下的记录，本机的生命期锁不在测试范围内，所以不留着它，用例结束之后也没有打开的描述符。边界检查用宿主真实的
+    文件系统类型。"""
+
+    def hold(self, fd: int) -> None:
+        os.close(fd)
+
+
 class _FakeSchedulerClient:
     """create_schedule 记录器（含 exceptions.ConflictException 形状，兼容 boto3 client 异常访问路径）。"""
 
@@ -250,7 +271,7 @@ def test_job_timeout_schedule_is_armed_at_the_cutoff_capped_by_the_run_deadline(
         job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
                   scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
         meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,), deadline_at=deadline_at)
-        store = LocalRunStore(tmp_path / sub)
+        store = LocalRunStore(tmp_path / sub, lock_holder=_ReleaseAtOnce())
         store.create_run(meta, RunState(run_id="run-1", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)},
                                         started_at="t0", high_water_mark=0))
         client = _FakeSchedulerClient()
@@ -290,7 +311,7 @@ def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exi
     job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
               scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
     meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,), deadline_at=deadline_at)
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=_ReleaseAtOnce())
     store.create_run(meta, RunState(
         run_id="run-1", status=Status.RUNNING,
         jobs={"a": JobState("a", status, claimed_at=claimed_at)},

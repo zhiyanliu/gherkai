@@ -5,13 +5,18 @@
 （`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
 跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C 另有
 用例真的启动子进程（不起隧道）。
+
+本机建 run 的边界检查与生命期锁（ADR 0054 决策三、四）在这里核前台 run 与本机 submit 两边同一情形同一句、会话先关再回报：取锁、换名、
+改名都在真实文件系统上执行，文件系统类型经 conftest 的替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的类型。
 """
 from __future__ import annotations
 
 import atexit
+import errno
 import os
 import signal
 import sqlite3
+import stat
 import subprocess
 import sys
 import threading
@@ -24,6 +29,7 @@ import pytest
 
 import gherkai_cli.__main__ as m
 from gherkai_core import run_deadline
+from gherkai_core.adapters.run_store import run_dir
 from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.model import Job, JobResult, Scenario, Status, Step
 from gherkai_core.schedule import Execution
@@ -264,18 +270,48 @@ def test_ctrl_c_while_starting_the_tunnel_stops_run_with_one_sentence(tmp_path, 
     assert len(tunnel_service.starts) == 1 and not reports.exists()
 
 
-def test_run_record_write_failure_exits_2_with_one_sentence(tmp_path, monkeypatch, capsys, tunnel_service):
-    """前台 run 建 run 写记录失败（报告目录的位置被一个文件占着）：一句说明、退出码 2、不打回溯，不开始执行（ADR 0030 决定七）；
-    与本机后台推进进程是同一句。"""
+def _report_dir_is_a_file(tmp_path: Path) -> tuple[Path, int]:
     occupied = tmp_path / "reports"
     occupied.write_text("not a directory", encoding="utf-8")
+    return occupied, errno.ENOTDIR
+
+
+def _report_dir_under_a_closed_directory(tmp_path: Path) -> tuple[Path, int]:
+    if os.geteuid() == 0:
+        pytest.skip("root 不受目录权限限制")
+    closed = tmp_path / "closed"
+    closed.mkdir(mode=0o000)
+    return closed / "reports", errno.EACCES
+
+
+def _report_dir_is_a_symlink_loop(tmp_path: Path) -> tuple[Path, int]:
+    (tmp_path / "loop-a").symlink_to(tmp_path / "loop-b")
+    (tmp_path / "loop-b").symlink_to(tmp_path / "loop-a")
+    return tmp_path / "loop-a", errno.ELOOP
+
+
+@pytest.mark.parametrize("arrange", [_report_dir_is_a_file, _report_dir_under_a_closed_directory,
+                                     _report_dir_is_a_symlink_loop], ids=["file", "no-permission", "symlink-loop"])
+@pytest.mark.parametrize("command", ["run", "submit"])
+def test_report_dir_that_cannot_be_opened_is_reported_before_the_tunnel_as_a_record_write_failure(
+        command, arrange, tmp_path, monkeypatch, capsys, tunnel_service, inline_children, advanced):
+    """报告目录打不开（位置被文件占着、上级没有权限、符号链接成环）：run 与本机 submit 在前置检查里给出写记录失败的同一句，退出码 2、
+    不打回溯（ADR 0054 决策四：这类失败按写记录失败报，不当作判断不了）；不补全运行定义、不起隧道，submit 不启动后台推进进程。"""
+    target, code = arrange(tmp_path)
+    monkeypatch.setattr(m, "_complete_local_definition", _forbid("补全本机运行定义"))
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("写记录失败时不该开始执行"))
-    rc = m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(occupied), "--expose-local", ORIGIN])
-    assert rc == 2
+    extra = ["--region", "us-east-1"] if command == "submit" else []
+    try:
+        rc = m.main([command, str(_write_feature(tmp_path)), "--report-dir", str(target), *extra, "--expose-local", ORIGIN])
+    finally:
+        if target.parent.name == "closed":
+            target.parent.chmod(0o755)
     cap = capsys.readouterr()
-    assert f"在报告目录 {occupied} 里写这个 run 的记录失败：" in cap.err
-    assert "还没有开始执行；请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。" in cap.err
-    assert "Traceback" not in cap.err and cap.out == ""
+    assert rc == 2 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1] == (
+        f"在报告目录 {target} 里写这个 run 的记录失败：[Errno {code}] {os.strerror(code)}: '{target}'。"
+        "还没有开始执行；请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。")
+    assert tunnel_service.starts == [] and inline_children.children == []
 
 
 def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
@@ -683,8 +719,264 @@ def test_local_submit_record_failures_are_reported_with_the_session_closed_first
     assert expected.format(reports=reports) in cap.err and "已提交" not in cap.err and "Traceback" not in cap.err
     assert closed_when_reported == [True]
     assert inline_children.only().returncode == 2 and advanced == []
+    assert not [n for n in os.listdir(reports) if n.startswith(run_dir.STAGING_PREFIX)]  # 暂存目录不留下
+    if arrange is _occupy_with_existing_run:
+        assert (reports / FIXED_RUN_ID / "run_state.json").read_text(encoding="utf-8") == "{}"
     if arrange in (_break_assembly, _break_reconcile_log):
         assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
+
+
+# ---- 报告目录的边界检查与生命期锁：run 与本机 submit 同一情形同一句（ADR 0054 决策三、四）----
+# 故障只注入在边界上的原语：取文件系统类型（`run_dir.filesystem_type`，测试的替换点）、`fcntl.flock`、`os.mkdir` 之后由另一次打开
+# 真的取锁；判断、取锁、换名与收拾都是生产代码在真实文件系统上执行。
+
+_PLATFORM_NAMES = {"darwin": "macOS", "linux": "Linux"}
+_FS_LIST = "；".join(f"{_PLATFORM_NAMES[p]} 支持 {'、'.join(types)}" for p, types in run_dir.ALLOWED_FILESYSTEMS.items())
+_NOT_KNOWABLE = "在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。"
+_MOVE = f"请把报告目录（--report-dir 选项，或配置文件里的 report-dir）换到本机磁盘上的目录（{_FS_LIST}）"
+
+
+def _same_inode(fd: int, path: Path) -> bool:
+    st, sp = os.fstat(fd), os.stat(path, follow_symlinks=False)
+    return (st.st_dev, st.st_ino) == (sp.st_dev, sp.st_ino)
+
+
+def _at_or_inside(fd: int, reports: Path) -> bool:
+    """fd 打开的是报告目录本身或它里面的一层（暂存目录）：按 inode 与目录里真实的条目比。"""
+    if not reports.is_dir():
+        return False
+    return any(_same_inode(fd, p) for p in (reports, *reports.iterdir()))
+
+
+def _foreign_everywhere(reports, monkeypatch, held):
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs")
+
+
+def _foreign_existing(reports, monkeypatch, held):
+    reports.mkdir()
+    _foreign_everywhere(reports, monkeypatch, held)
+
+
+def _unknowable(reports, monkeypatch, held):
+    def unknown(fd):
+        raise run_dir.FilesystemUnknown("读不到挂载信息：Permission denied")
+    monkeypatch.setattr(run_dir, "filesystem_type", unknown)
+
+
+def _foreign_once_created(reports, monkeypatch, held):
+    """前置检查与建 run 时对报告目录的检查都落在还不存在的报告目录的上级上、放行；报告目录建出之后，它与里面的暂存目录在另一种
+    文件系统上（如建出之后被挂上的网络盘）：对暂存目录描述符的那一次检查拒绝。"""
+    allowed = run_dir.ALLOWED_FILESYSTEMS[sys.platform][0]
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs" if _at_or_inside(fd, reports) else allowed)
+
+
+def _flock_unavailable(reports, monkeypatch, held):
+    import fcntl
+
+    real_flock = fcntl.flock
+
+    def flock(fd, operation):
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+        return real_flock(fd, operation)
+    monkeypatch.setattr(fcntl, "flock", flock)
+
+
+def _staging_held_by_another_open(reports, monkeypatch, held):
+    """每个暂存目录建出之后，另一次打开立刻真的取到排他锁（像清理方那样）：建 run 的一方取锁得到「已被持有」。"""
+    import fcntl
+
+    real_mkdir = os.mkdir
+
+    def mkdir(path, *a, **k):
+        real_mkdir(path, *a, **k)
+        if Path(path).name.startswith(run_dir.STAGING_PREFIX):
+            fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+            held.append(fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    monkeypatch.setattr(os, "mkdir", mkdir)
+
+
+def _run_id_taken_by_a_file(reports, monkeypatch, held):
+    reports.mkdir()
+    (reports / FIXED_RUN_ID).write_text("not a directory", encoding="utf-8")
+
+
+def _nothing_left(reports, held):
+    assert not reports.exists()
+
+
+def _empty_report_dir(reports, held):
+    assert os.listdir(reports) == []  # 报告目录是这次建出的；暂存目录已删去
+
+
+def _others_staging_untouched(reports, held):
+    names = sorted(os.listdir(reports))
+    assert len(names) == 3 and all(n.startswith(run_dir.STAGING_PREFIX) for n in names)
+    assert all(os.listdir(reports / n) == [] for n in names)
+    # 留下的正是另一次打开持有的那三个，锁仍在它们手里
+    assert sorted(os.fstat(fd).st_ino for fd in held) == sorted(os.stat(reports / n).st_ino for n in names)
+    for n in names:
+        fd = os.open(reports / n, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            assert run_dir.try_lock(fd).state is run_dir.LockState.HELD
+        finally:
+            os.close(fd)
+
+
+def _only_the_file(reports, held):
+    assert os.listdir(reports) == [FIXED_RUN_ID] and (reports / FIXED_RUN_ID).is_file()
+
+
+_REPORT_DIR_SITUATIONS = {
+    # id: (布置, 是否在前置检查里被拒, 那一句, 报告目录里留下什么)
+    "rejected-before-missing": (
+        _foreign_everywhere, True,
+        lambda r: f"报告目录 {r} 还不存在，按最近一层已存在的上级 {r.parent} 判断，它所在的文件系统是 nfs，本机后端不支持："
+                  f"{_NOT_KNOWABLE}{_MOVE}；多台机器共用运行记录请用云端后端。",
+        _nothing_left),
+    "rejected-before-existing": (
+        _foreign_existing, True,
+        lambda r: f"报告目录 {r} 所在的文件系统是 nfs，本机后端不支持：{_NOT_KNOWABLE}{_MOVE}；多台机器共用运行记录请用云端后端。",
+        _empty_report_dir),
+    "unknown-before": (
+        _unknowable, True,
+        lambda r: f"无法判断报告目录 {r} 所在的文件系统（读不到挂载信息：Permission denied）：{_NOT_KNOWABLE}{_MOVE}。",
+        _nothing_left),
+    "rejected-at-create": (
+        _foreign_once_created, False,
+        lambda r: f"报告目录 {r} 所在的文件系统是 nfs，本机后端不支持：{_NOT_KNOWABLE}{_MOVE}；多台机器共用运行记录请用云端后端。",
+        _empty_report_dir),
+    "lock-unavailable": (
+        _flock_unavailable, False,
+        lambda r: f"在报告目录 {r} 里给这个 run 的目录加锁失败（{os.strerror(errno.ENOLCK)}），没有建立 run：不能加锁的目录上"
+                  "无法确认执行 run 的 gherkai 进程是否还在。请检查这个目录所在的文件系统与访问权限后重新执行。",
+        _empty_report_dir),
+    "staging-contended": (
+        _staging_held_by_another_open, False,
+        lambda r: f"在报告目录 {r} 里准备这个 run 的目录时，连续 3 次遇到另一个进程同时在处理同一个暂存目录，没有建立 run。"
+                  "请稍后重新执行。",
+        _others_staging_untouched),
+    "run-id-taken-by-a-file": (
+        _run_id_taken_by_a_file, False,
+        lambda r: f"在报告目录 {r} 里写这个 run 的记录失败：[Errno {errno.ENOTDIR}] {os.strerror(errno.ENOTDIR)}: "
+                  f"'{r / FIXED_RUN_ID}'。还没有开始执行；请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。",
+        _only_the_file),
+}
+
+
+@pytest.fixture
+def other_opens():
+    """用例自己另开的描述符（模拟另一个进程持有暂存目录），用例结束时关闭。"""
+    fds: list[int] = []
+    yield fds
+    for fd in fds:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("command", ["run", "submit"])
+@pytest.mark.parametrize("situation", list(_REPORT_DIR_SITUATIONS))
+def test_report_dir_and_lock_failures_give_one_sentence_for_run_and_local_submit(
+        situation, command, tmp_path, monkeypatch, capsys, inline_children, tunnel_service, advanced, lock_holder,
+        other_opens):
+    """同一情形，前台 run 与本机 submit 给出逐字相同的一句（两种命令都与同一个期望句相等）、退出码 2，以 run 标识命名的目录没有出现，
+    持有者什么都没收到（ADR 0054 决策三、四）。前置检查里被拒的：不补全运行定义、不起隧道，submit 不启动后台推进进程。建 run 时才
+    失败的：前台的会话已建成、留给进程退出时关闭；后台推进进程先关会话、再回报。"""
+    arrange, before, sentence, leftover = _REPORT_DIR_SITUATIONS[situation]
+    reports = tmp_path / "reports"
+    _fix_run_id(monkeypatch)
+    arrange(reports, monkeypatch, other_opens)
+    if before:
+        monkeypatch.setattr(m, "_complete_local_definition", _forbid("补全本机运行定义"))
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 失败时不该开始执行"))
+    monkeypatch.setattr(atexit, "register", lambda fn, *a, **k: fn)
+    closed_when_reported: list[bool] = []
+    real_write_all = handoff.write_all
+
+    def write_and_note(fd, data):
+        if threading.current_thread() is not threading.main_thread():  # 后台推进进程那一侧的写：只有回报
+            closed_when_reported.append(tunnel_service.closed)
+        return real_write_all(fd, data)
+
+    monkeypatch.setattr(handoff, "write_all", write_and_note)
+    argv = (_local_submit_argv(tmp_path, "--expose-local", ORIGIN) if command == "submit"
+            else ["run", str(_write_feature(tmp_path)), "--report-dir", str(reports), "--expose-local", ORIGIN])
+    rc = m.main(argv)
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1] == sentence(reports)
+    assert not (reports / FIXED_RUN_ID).is_dir() and lock_holder.fds == []
+    leftover(reports, other_opens)
+    if before:
+        assert tunnel_service.starts == [] and inline_children.children == []
+    elif command == "submit":
+        assert inline_children.only().returncode == 2 and advanced == [] and closed_when_reported == [True]
+    else:
+        assert len(tunnel_service.starts) == 1 and not tunnel_service.closed  # 会话由 atexit 在进程退出时关闭
+
+
+@pytest.mark.parametrize("command", ["run", "submit"])
+def test_report_dir_given_as_a_dangling_symlink_is_judged_and_created_at_the_link_target(
+        command, tmp_path, monkeypatch, capsys, inline_children, advanced):
+    """报告目录经一个悬空的符号链接给出（链接的目标与它的上级都还不存在）：入口把报告目录解析成链接的目标，前台与后台都按目标最近
+    一层已存在的上级判断、在目标处建出目录与 run（ADR 0054 决策四）；链接本身不被改动。"""
+    target = tmp_path / "elsewhere" / "reports"
+    link = tmp_path / "reports-link"
+    link.symlink_to(target)
+
+    def schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        results = tuple(JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs)
+        for jr in results:
+            on_job_complete(jr)
+        return Execution(run_meta=run_meta, results=results, stopped_by=None, duration_ms=0.0)
+
+    monkeypatch.setattr(m, "schedule", schedule)
+    extra = ["--region", "us-east-1"] if command == "submit" else []
+    rc = m.main([command, str(_write_feature(tmp_path)), "--report-dir", str(link), *extra])
+    inline_children.settle()
+    assert rc == 0, capsys.readouterr().err
+    (run,) = _run_dirs(target)
+    assert {"run_meta.json", "run_state.json"} <= {p.name for p in run.iterdir()}
+    assert link.is_symlink() and Path(os.readlink(link)) == target
+    assert LocalRunStore(target).load_run_state(run.name) is not None
+
+
+def test_interrupt_right_after_the_rename_in_the_advancer_leaves_a_complete_run_still_locked(
+        tmp_path, monkeypatch, capsys, inline_children, tunnel_service, advanced, lock_holder):
+    """后台推进进程在改名成 run 标识之后、交给持有者之前收到中断（KeyboardInterrupt，对它发 SIGINT 时会这样）：按文件系统里的事实，
+    run 已建成，描述符照样交给持有者，锁不放（ADR 0054 决策三）。中断随后让后台推进进程在回报之前退出，submit 说它在给出提交结果
+    之前退出了、退出码 2；会话照样关闭。注入只换 `os.rename`：先真的改名，再抛出。"""
+    _fix_run_id(monkeypatch)
+    real_rename = os.rename
+
+    def rename_then_interrupt(src, dst, *a, **k):
+        real_rename(src, dst, *a, **k)
+        if Path(src).name.startswith(run_dir.STAGING_PREFIX):
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(os, "rename", rename_then_interrupt)
+    inline_children.expect_crash_before_report()
+    reports = tmp_path / "reports"
+    rc = m.main(_local_submit_argv(tmp_path, "--expose-local", ORIGIN))
+    inline_children.settle()
+    cap = capsys.readouterr()
+    assert rc == 2 and cap.out == ""
+    assert "后台推进进程在给出提交结果之前退出了" in cap.err
+    inline_children.only().expect_error(KeyboardInterrupt)
+    assert os.listdir(reports) == [FIXED_RUN_ID]
+    run = reports / FIXED_RUN_ID
+    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
+    (fd,) = lock_holder.fds
+    assert _same_inode(fd, run)
+    another = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        assert run_dir.try_lock(another).state is run_dir.LockState.HELD
+    finally:
+        os.close(another)
+    store = LocalRunStore(reports)
+    assert store.load_run_state(FIXED_RUN_ID).status == Status.PENDING and store.is_detached(FIXED_RUN_ID)
+    assert tunnel_service.closed and advanced == []
 
 
 def test_local_submit_store_failure_while_advancing_is_logged_and_the_advancer_exits_1(tmp_path, monkeypatch, capsys,
@@ -1275,11 +1567,11 @@ def test_ctrl_c_while_printing_the_result_of_a_plain_cloud_submit(tmp_path, monk
 _SUBMIT_DRIVER = Path(__file__).with_name("_submit_driver.py")
 
 
-@pytest.mark.parametrize("backend", ["local", "cloud"])
+@pytest.mark.parametrize("backend", [pytest.param("local", marks=pytest.mark.real_filesystem), "cloud"])
 def test_ctrl_c_after_the_run_id_is_written_does_not_change_the_result(backend, tmp_path):
     """真实进程、真实信号：submit 在标准输出写出 run 标识之后立刻收到 SIGINT，结果不变，退出码 0、标准输出恰为 run 标识。提交进程是
     `_submit_driver.py`（后台进程是线程替身，回报经真实管道）：它写出第一行之后停在放行描述符上，用例读到这一行、发出 SIGINT、再放行，
-    信号落在标识已经写进管道、`print` 还没有返回的那一刻。"""
+    信号落在标识已经写进管道、`print` 还没有返回的那一刻。本机后端的那一次在子进程里取真实的文件系统类型（`real_filesystem`）。"""
     hold_r, hold_w = os.pipe()
     env = {k: v for k, v in os.environ.items() if k != "NGROK_AUTHTOKEN"}
     try:
@@ -1298,7 +1590,13 @@ def test_ctrl_c_after_the_run_id_is_written_does_not_change_the_result(backend, 
     rest, err = proc.communicate(timeout=60)
     assert (proc.returncode, first + rest) == (0, f"{FIXED_RUN_ID}\n".encode()), err.decode("utf-8", "replace")
     if backend == "local":
-        assert (tmp_path / "reports" / FIXED_RUN_ID / "run_state.json").exists()
+        run = tmp_path / "reports" / FIXED_RUN_ID
+        assert (run / "run_state.json").exists()
+        fd = os.open(run, os.O_RDONLY | os.O_DIRECTORY)  # 建 run 的进程已退出、被回收：它持有的锁随之释放
+        try:
+            assert run_dir.try_lock(fd).state is run_dir.LockState.ACQUIRED
+        finally:
+            os.close(fd)
 
 
 def test_ignore_interrupts_from_here_ignores_sigint_in_the_main_thread_and_does_nothing_elsewhere():

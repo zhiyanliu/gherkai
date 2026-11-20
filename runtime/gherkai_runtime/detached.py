@@ -10,7 +10,8 @@
   收尾、退出，不从记录读回运行定义（ADR 0035 决策 3「本机 `submit`」）。
 - **`status --wait` 接力**：经 `drive_local_reconcile` 从记录读回运行定义（`build_local_reconcile`），同一套装配、同一个循环；读不到
   运行定义时不写。推进循环每一轮另把别人认领、观察链已断的 job 判为超时（`_recover_timed_out_claims`，自家起的 job 不扫），接力
-  据此收敛原推进进程留下的 job。接力不持有隧道。
+  据此收敛原推进进程留下的 job。接力不持有隧道；它构造的 `LocalRunStore` 不带锁的持有者（它不建 run，ADR 0030 决定四「持锁的
+  描述符交给注入的持有者」条），只经运行态的短锁写。
 
 守窄腰：gherkai_core.reconcile 对「怎么起 worker」无知（经 Launcher 注入）；本模块在产品本体包 gherkai_runtime（组合根共享层，
 ADR 0016「演进」节）、可 import SubprocessEngine/SqliteEventLog，core 不可。云端后端的 Launcher 是
@@ -327,6 +328,10 @@ def assemble_local_run(meta: RunMeta, report_dir: str, *, region: str | None, pr
     「已提交」，ADR 0035 决策 3「本机 `submit`」）；`status --wait` 接力经 `build_local_reconcile` 从记录读回运行定义之后调用。
     请求头、预热地址、step 目录与 run 标识都取自传入的运行定义，本函数不从别处取它们。
 
+    返回的 `run_store` 不带锁的持有者，不能建 run（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）：两个调用方都不在这里建 run。
+    后台推进进程在调用它之前已用 `compose.build_local_stores` 带着 `compose.process_lock_holder()` 建好 run，生命期锁由那一次交出的
+    持有者持到进程退出；接力推进的是别人建的 run。推进期间的写都经运行态的短锁，与持有者无关。
+
     **不启动子进程**：后台推进进程在回报之前调用它，回报之前起的子进程会继承接在 `submit` 标准错误上的描述符，经管道捕获 `submit`
     输出的调用方要等那个子进程退出才读到文件结束（ADR 0035 决策 3「输出」）。引擎在这里只是装配好，launch 时才起 worker；停止宽限的
     查询（`compose.engine_min_grace`，要起一次 worker 自述）同样只在 launch 时调用。事件库在这里建成，建库失败抛 `sqlite3.Error`
@@ -392,8 +397,8 @@ def build_local_reconcile(report_dir: str, run_id: str, max_concurrency: int,
     """
     meta = LocalRunStore(Path(report_dir)).load_run_meta(run_id)
     if meta is None:
-        # 正常路径下建 run 时 definition 先于运行态写下，走到这里说明落点被删、写坏或 report_dir 指错。常见形态已由 status 的
-        # run 存在性检查翻成退出码 2；这里兜住剩下的一条：运行态在而 definition 缺。文案按产品语言给。
+        # 建 run 时两个文件都写进暂存目录、写完才改名成 run 标识，走到这里说明落点被删、写坏或 report_dir 指错。常见形态已由
+        # status 的 run 存在性检查翻成退出码 2；这里兜住剩下的一条：运行态在而 definition 缺。文案按产品语言给。
         raise RunDefinitionMissing(f"找不到这个 run 的提交记录，无法继续推进：{run_id}"
                                 f"（产物目录被删或写坏？也确认 --report-dir 与提交时一致）")
     parts = assemble_local_run(meta, report_dir, region=region, profile=profile)

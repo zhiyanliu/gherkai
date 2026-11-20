@@ -734,7 +734,7 @@ def test_real_worker_is_stopped_at_the_run_deadline_and_the_queued_job_never_sta
     assert elapsed < 10.0, elapsed  # 在期限时刻停下，没有等 s1 自己的 7200 秒预算
 
 
-def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path):
+def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path, lock_holder):
     """前台执行期间另一个进程以结束写把 run 记为已结束（处置的那一行，真本机 store 与文件锁）：发起进程下一次写 job 状态时得知 run 级
     已结束，停手信号经等待循环读到，两个运行中的真 worker 收到停止请求退出、在执行事实里记 aborted（「这个 run 已被记为已结束」）。
     此后前台不存明细、不写终态，收尾不做结束写、抛 RunAlreadyEnded：记录保持那次结束写的结果（两个 job 记 aborted、带处置的说明），
@@ -754,7 +754,7 @@ def test_real_workers_are_stopped_when_the_run_is_found_ended_elsewhere(tmp_path
     root = tmp_path / "reports"
     pid_file = tmp_path / "pids"
     engine = SubprocessEngine(cmd=[sys.executable, _WORKER], env={**os.environ, "WORKER_MODE": "hang", "WORKER_PID_FILE": str(pid_file)})
-    run_store = LocalRunStore(root)
+    run_store = LocalRunStore(root, lock_holder=lock_holder)
     result_store = LocalResultStore(root)
     persistence = RunPersistence("r", run_store, result_store)
     meta = _rm([_job("a"), _job("b")], run_id="r")

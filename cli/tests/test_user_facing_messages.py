@@ -10,7 +10,8 @@
 
 覆盖面：五个生产包的 `.py`（AST 扫字面量）+ Midscene worker 的 `.mts` 源（去注释后扫行），外加 `features/steps/` 的
 确定性 step 模板（两种语言都扫：用户文档让使用方把它复制进自己的项目，里面的字面量随之成为使用方看到的文字）。
-测试自身的字面量不在扫描面内（测试不面向使用者）。开发者契约型异常（只在内部 code 误用内部 API 时抛，
+测试自身的字面量不在扫描面内（测试不面向使用者）。由几段字面量与清单拼成的整句（本机建 run 的拒绝与失败那几句），另按实际给出的
+整句再判一次。开发者契约型异常（只在内部 code 误用内部 API 时抛，
 永不因用户输入触发）可留一句点名内部符号的短诊断——但不带 ADR/决策字样，故同样能过本护栏。
 
 **第二条规则管格式**：同一扫描面上，字面量不写 markdown 强调记号（成对的 `**…**`）。终端与日志不渲染 markdown，
@@ -325,6 +326,37 @@ def test_no_internal_pointers_in_user_facing_text():
         "产品面文案带了内部指代（使用者手里没有仓库）。改成「发生了什么 / 一句产品语言的为什么 / 怎么办」，"
         "设计判据搬进紧邻的注释或 docstring：\n  " + "\n  ".join(hits)
     )
+
+
+def _report_dir_sentences() -> list[str]:
+    """本机建 run 被拒与失败时 cli 拼出的整句：报告目录不合要求的三种（类型不在清单里、还不存在而上级的类型不在清单里、判断不了）、
+    锁不可用、暂存目录连续被占用。原因片段本身是边界检查里的字面量，由上面的字面量扫描覆盖，这里取一个有代表性的。"""
+    import errno
+
+    from gherkai_cli import __main__ as m
+    from gherkai_core.adapters.run_store import run_dir
+
+    checks = [run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports", "/r/reports", "nfs", None),
+              run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports", "/r", "smbfs", None),
+              run_dir.BoundaryCheck(run_dir.Boundary.UNKNOWN, "/r/reports", "/r", None, "读不到挂载信息：Permission denied")]
+    failures = [run_dir.LifetimeLockUnavailable(errno.ENOLCK, "No locks available", "/r/reports"),
+                run_dir.StagingContended("/r/reports", run_dir.STAGING_ATTEMPTS)]
+    rejected = [m._filesystem_rejected_message(c) for c in checks]
+    # 建 run 时被拒与前置检查里被拒是同一句
+    assert [m._run_record_failure(run_dir.RunDirRejected(c), report_dir="/r/reports", run_id="r", created=False)
+            for c in checks] == rejected
+    return rejected + [m._run_record_failure(e, report_dir="/r/reports", run_id="r", created=False) for e in failures]
+
+
+def test_report_dir_sentences_carry_no_internal_pointers_or_emphasis():
+    """本机建 run 的拒绝与失败那几句是拼出来的（清单片段由放行清单拼出、原因片段来自边界检查），只扫字面量看不到整句：这里按实际
+    给出的整句再判一次禁词与强调记号，另核它们不带内部的类型名与系统调用名。"""
+    internal = re.compile(r"RunDirRejected|LifetimeLock|StagingContended|BoundaryCheck|flock|fstatfs|mountinfo|fdinfo"
+                          r"|filesystem_type|check_fd|run_dir|STAGING|\bINSIDE\b|\bOUTSIDE\b|\bUNKNOWN\b")
+    sentences = _report_dir_sentences()
+    assert len(set(sentences)) == len(sentences) == 5
+    for s in sentences:
+        assert not FORBIDDEN.search(s) and not EMPHASIS.search(s) and not internal.search(s), s
 
 
 def test_no_markdown_emphasis_in_user_facing_text():

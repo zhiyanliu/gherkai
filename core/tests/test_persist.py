@@ -132,11 +132,11 @@ def _job_files(root) -> list[str]:
     return sorted(p.name for p in jobs_dir.iterdir()) if jobs_dir.exists() else []
 
 
-def _local(tmp_path, scope_ids=("s",), report_store=None):
+def _local(tmp_path, scope_ids=("s",), report_store=None, *, lock_holder):
     from gherkai_core.adapters.result_store.local import LocalResultStore
     from gherkai_core.adapters.run_store.local import LocalRunStore
 
-    run_store, result_store = LocalRunStore(tmp_path), LocalResultStore(tmp_path)
+    run_store, result_store = LocalRunStore(tmp_path, lock_holder=lock_holder), LocalResultStore(tmp_path)
     p = RunPersistence("r", run_store, result_store, report_store, clock=lambda: _NOW)
     meta = _meta("r", list(scope_ids))
     p.begin(meta, started_at="t0")
@@ -223,7 +223,7 @@ def test_finalize_with_report_store_returns_the_index_and_writes_the_report_last
     assert written.duration_ms == 4200.0 and [jr.scope_id for jr in written.details] == ["a"]
 
 
-def test_finalize_isolates_report_write_failure(tmp_path):
+def test_finalize_isolates_report_write_failure(tmp_path, lock_holder):
     # ReportStore.write 失败不击穿已到终态的 run——终态写已落、判定明细在 ResultStore 安然无恙，故 write 抛异常被隔离：
     # report_index 为 None、不冒泡（报告可从记录重建）。
     class BoomReportStore:
@@ -231,7 +231,7 @@ def test_finalize_isolates_report_write_failure(tmp_path):
         def write(self, run_id, result, *, created_at=""):
             raise OSError("磁盘满，报告写不下")
 
-    p, run_store, _, meta = _local(tmp_path, ("s",), report_store=BoomReportStore())
+    p, run_store, _, meta = _local(tmp_path, ("s",), report_store=BoomReportStore(), lock_holder=lock_holder)
     p.on_job_complete(_jr("s"))
     finalized = p.finalize(_execution(meta, [_jr("s")]))
     assert finalized.report_index is None and finalized.result.status == Status.PASSED
@@ -258,12 +258,12 @@ def test_finalize_read_failure_after_the_run_ended_propagates_without_a_report()
     assert exc.value is boom and "write" not in _methods(calls)
 
 
-def test_finalize_takes_the_detail_named_in_the_run_state_not_the_result_in_memory(tmp_path):
+def test_finalize_takes_the_detail_named_in_the_run_state_not_the_result_in_memory(tmp_path, lock_holder):
     """收尾的明细按运行态里点名的标识从判定存储读回，不用本进程内存里的执行结果（ADR 0030 决定三「点名」条，ADR 0027「RunResult 的
     组装只有一处」条）。固定先后：本进程交来 a 的结果之前，另一个写入方已存下 a 的一份明细（error）并以终态写点名它；本进程随后为 a
     另存一份（passed），终态写跳过已是终态的 a，这一份没被点名；b 的终态写使 run 成为终态。汇总里 a 的状态与明细都是被点名的那一份。
     用真本机 store，点名与跳过都在 adapter 里。"""
-    p, run_store, result_store, meta = _local(tmp_path, ("a", "b"))
+    p, run_store, result_store, meta = _local(tmp_path, ("a", "b"), lock_holder=lock_holder)
     elsewhere = _jr("a", Status.ERROR)
     result_store.save_job_result("r", "00000000000000e1", elsewhere)
     assert run_store.commit_job_states("r", [JobState("a", Status.ERROR, result_id="00000000000000e1")],
@@ -283,11 +283,11 @@ def test_finalize_takes_the_detail_named_in_the_run_state_not_the_result_in_memo
     assert finalized.result.status == Status.ERROR
 
 
-def test_finalize_with_the_named_detail_gone_raises_and_the_record_stays_terminal(tmp_path):
+def test_finalize_with_the_named_detail_gone_raises_and_the_record_stays_terminal(tmp_path, lock_holder):
     """被点名的那一份读不到（这里是存放处里的文件被外部删去）：收尾抛 `NamedDetailMissing`（OSError 的子类，按运行期落库失败处理），
     不把这个 job 当作没有明细，不生成报告；终态写已使 run 成为终态，`ended_run` 为 True，调用方据此说明记录已是终态。"""
     calls, _, _, report = _recording()
-    p, run_store, _, meta = _local(tmp_path, ("s",), report_store=report)
+    p, run_store, _, meta = _local(tmp_path, ("s",), report_store=report, lock_holder=lock_holder)
     p.on_job_complete(_jr("s"))
     (path,) = (tmp_path / "r" / "jobs").iterdir()
     path.unlink()
@@ -363,12 +363,12 @@ def test_finalize_without_a_usable_stop_source_is_an_internal_error(stopped_by):
     assert _methods(calls) == ["save_job_result", "commit_job_states"]
 
 
-def test_finalize_end_write_refused_on_a_run_ended_elsewhere_keeps_the_record_and_writes_no_report(tmp_path):
+def test_finalize_end_write_refused_on_a_run_ended_elsewhere_keeps_the_record_and_writes_no_report(tmp_path, lock_holder):
     """本次执行结束之前别处已把 run 结束（这里是处置的结束写），而本进程直到收尾才碰到它：收尾的结束写被已有的终态挡下，读回之后发出
     停手信号、抛 RunAlreadyEnded（带读回的运行态）；已有的终态、结束时刻与说明不被覆盖，不生成报告。本次已存下、终态写也写成的那一份
     明细原样在，别处的结束写保留了它的点名。用真 LocalRunStore，结束写的条件在 adapter 里。"""
     calls, _, _, report = _recording()
-    p, run_store, result_store, meta = _local(tmp_path, ("a", "b"), report_store=report)
+    p, run_store, result_store, meta = _local(tmp_path, ("a", "b"), report_store=report, lock_holder=lock_holder)
     p.on_job_complete(_jr("a", Status.PASSED))
     settled = RUN_ENDINGS["settle-advancer-exited"]
     assert run_store.end_run("r", settled, ended_at="t5") is True
@@ -578,7 +578,7 @@ def test_begin_writes_all_pending_initial_state():
     assert initial.started_at == "t0" and initial.ended_at is None
 
 
-def test_begin_on_an_existing_run_raises_run_already_exists_and_changes_nothing(tmp_path):
+def test_begin_on_an_existing_run_raises_run_already_exists_and_changes_nothing(tmp_path, lock_holder):
     """对已有的 run 再 begin（真本机 store）：create_run 抛 `RunAlreadyExists`（调用方据此判断「run 已存在」），definition 与运行态
     不变。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
@@ -586,7 +586,7 @@ def test_begin_on_an_existing_run_raises_run_already_exists_and_changes_nothing(
     from gherkai_core.errors import RunAlreadyExists
 
     meta = _meta("r", ["a"])
-    store = LocalRunStore(tmp_path)
+    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
     RunPersistence("r", store, LocalResultStore(tmp_path)).begin(meta, started_at="t0")
     before = (store.load_run_meta("r"), store.load_run_state("r"))
     with pytest.raises(RunAlreadyExists) as exc:
@@ -596,9 +596,9 @@ def test_begin_on_an_existing_run_raises_run_already_exists_and_changes_nothing(
 
 
 # ---- 决定五 + 0031 决定一：aborted 的 session_id 经实时写路径保留（卖点：有现场可查）----
-def test_aborted_job_preserves_session_id_through_realtime_write(tmp_path):
+def test_aborted_job_preserves_session_id_through_realtime_write(tmp_path, lock_holder):
     # 用真 LocalRunStore（非 fake）验真合并语义：RUNNING 阶段刷了血缘，aborted 终态写不应清掉它。
-    p, run_store, _, _ = _local(tmp_path, ("s",))
+    p, run_store, _, _ = _local(tmp_path, ("s",), lock_holder=lock_holder)
     # ① ScopeStarted 刷 RUNNING + 血缘（worker 线程经 sink 的路径）
     p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
     # ② aborted 终态：in-flight 被掐的 jr 带 session_id（schedule 的 result 已从 ScopeStarted 累积，见 _reduce）
@@ -608,23 +608,23 @@ def test_aborted_job_preserves_session_id_through_realtime_write(tmp_path):
     assert js.session_id == "sess-1"  # 血缘保留——有现场可查（ADR 0031 决定一）
 
 
-def test_aborted_with_none_session_does_not_resurrect_but_documents_edge(tmp_path):
+def test_aborted_with_none_session_does_not_resurrect_but_documents_edge(tmp_path, lock_holder):
     # 边界（记录现状）：若 aborted 在任何 ScopeStarted 抵达前被掐，jr.session_id=None——终态写按字段合并，给出的会话为空时保留库中的，
     # 库中也没有（血缘从未到达）时就是 None。这是「血缘从未收到」的诚实结果，非 bug（无法保留从未到达的血缘）。
     # 正常 in-flight abort（上一个测试）jr 必带 session_id，不走这条。
-    p, run_store, _, _ = _local(tmp_path, ("s",))
+    p, run_store, _, _ = _local(tmp_path, ("s",), lock_holder=lock_holder)
     # 没有 ScopeStarted（血缘从未到达）→ 直接 aborted 终态、session_id=None
     p.on_job_complete(_jr("s", Status.ABORTED, session_id=None))
     js = run_store.load_run_state("r").jobs["s"]
     assert js.status == Status.ABORTED and js.session_id is None  # 诚实：从未收到血缘
 
 
-def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
+def test_running_phase_has_no_data_plane_file_until_complete(tmp_path, lock_holder):
     """锁定「两面分离」（ADR 0016「三层切分」）——提交者实测会困惑的点：
     job 处于 RUNNING 时，控制面 run_state.json 显示 running，数据面 jobs/ 下**还没有**这个 job 的明细，运行态里它也不带标识；
     job 完成（on_job_complete）出了判定，才存下一份 `jobs/<标识>.json`，并由终态点名（ADR 0030 决定三「点名」条）：文件名只是标识、
     与 scope_id 无关，读者按运行态里的标识取那一份，不从目录认出 job。RUNNING 的 job 还没判定，故意不写半截。"""
-    p, run_store, result_store, _ = _local(tmp_path, ("s",))
+    p, run_store, result_store, _ = _local(tmp_path, ("s",), lock_holder=lock_holder)
 
     # —— RUNNING 阶段（job 开始运行、尚未完成）——
     p.on_event(ScopeStarted(scope_id="s", session_id="sess-1"))
@@ -644,11 +644,11 @@ def test_running_phase_has_no_data_plane_file_until_complete(tmp_path):
     assert result_store.load_job_result("r", js.result_id).scope_id == "s"
 
 
-def test_run_status_follows_the_terminal_writes_and_the_last_one_ends_the_run(tmp_path):
+def test_run_status_follows_the_terminal_writes_and_the_last_one_ends_the_run(tmp_path, lock_holder):
     """前台 run 的 run 级状态由每次 job 状态写按取法随之写下（ADR 0031 决定三；ADR 0034 机制三「run 级状态只进不退」条③）：begin 后为
     pending；第一个 job 的终态写之后为 running（另一个 job 还没结束）；最后一个 job 的终态写使 run 成为终态（error：有 job 出错），结束
     时刻随这次写写下，收尾不再做结束写。RunPersistence 不另记「是否第一次」，推进由 RunStore 的写自身保证。"""
-    p, run_store, _, meta = _local(tmp_path, ("a", "b"))
+    p, run_store, _, meta = _local(tmp_path, ("a", "b"), lock_holder=lock_holder)
     assert run_store.load_run_state("r").status == Status.PENDING
     p.on_job_complete(_jr("a", Status.ERROR))
     state = run_store.load_run_state("r")
@@ -693,10 +693,10 @@ def test_on_event_only_attempted_sessions_write_nothing():
 
 # ---- ADR 0054 决策五：落库服务向调度循环提供认领、重试之前的读与停手信号；认领时刻在此后的写里保留 ----
 
-def test_claim_writes_the_claim_time_and_later_job_writes_keep_it(tmp_path):
+def test_claim_writes_the_claim_time_and_later_job_writes_keep_it(tmp_path, lock_holder):
     """认领写成：job 置为 running、认领计数加一、认领时刻按记录的写法（UTC 的 ISO 串）落库；此后开始执行与结束两次 job 状态写都带上它
     （执行中的写是整项替换，不带就会被抹掉；终态写按字段合并、以库中的为准），代表会话照常保留。"""
-    p, run_store, _, _ = _local(tmp_path)
+    p, run_store, _, _ = _local(tmp_path, lock_holder=lock_holder)
     assert p.claim("s", _CLAIMED) is True
     state = run_store.load_run_state("r")
     assert (state.status, state.claim_count) == (Status.RUNNING, 1)
@@ -710,9 +710,9 @@ def test_claim_writes_the_claim_time_and_later_job_writes_keep_it(tmp_path):
     assert p.ended_elsewhere() is False
 
 
-def test_claim_rejected_after_the_run_ended_elsewhere_raises_the_stop_signal(tmp_path):
+def test_claim_rejected_after_the_run_ended_elsewhere_raises_the_stop_signal(tmp_path, lock_holder):
     """别处已把 run 结束（这里是处置的结束写，s 被记 skipped）：认领被拒、job 不变（没有认领时刻），停手信号成立。"""
-    p, run_store, _, _ = _local(tmp_path)
+    p, run_store, _, _ = _local(tmp_path, lock_holder=lock_holder)
     assert run_store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t5") is True
     assert p.claim("s", _CLAIMED) is False
     assert p.ended_elsewhere() is True
@@ -721,10 +721,10 @@ def test_claim_rejected_after_the_run_ended_elsewhere_raises_the_stop_signal(tmp
 
 
 @pytest.mark.parametrize("write", ["on_event", "on_job_complete"])
-def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_path, write):
+def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_path, write, lock_holder):
     """写 job 状态时 RunStore 报告 run 级已是终态（没有写成）：开始执行与结束两处的写都发出停手信号；别处的结束写记下的终态不被改写。
     结束那一处已先存下一份明细（写序是明细在先）：终态写没有写成，这一份没被点名，运行态里这个 job 不带标识。"""
-    p, run_store, _, _ = _local(tmp_path)
+    p, run_store, _, _ = _local(tmp_path, lock_holder=lock_holder)
     assert p.claim("s", _CLAIMED) is True
     settled = RUN_ENDINGS["settle-advancer-exited"]
     assert run_store.end_run("r", settled, ended_at="t5") is True
@@ -740,9 +740,9 @@ def test_job_state_write_that_finds_the_run_ended_raises_the_stop_signal(tmp_pat
     assert len(_job_files(tmp_path)) == (1 if write == "on_job_complete" else 0)
 
 
-def test_still_open_reads_the_run_level_status_and_raises_the_signal_on_terminal(tmp_path):
+def test_still_open_reads_the_run_level_status_and_raises_the_signal_on_terminal(tmp_path, lock_holder):
     """重试之前的读：run 级未结束为 True、不发信号；已是终态为 False 并发出停手信号。"""
-    p, run_store, _, _ = _local(tmp_path)
+    p, run_store, _, _ = _local(tmp_path, lock_holder=lock_holder)
     assert p.still_open() is True and p.ended_elsewhere() is False
     assert run_store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t5") is True
     assert p.still_open() is False and p.ended_elsewhere() is True
@@ -773,7 +773,7 @@ def test_result_without_record_applies_the_terminal_writes_then_the_end_write():
 
 # ---- 经 schedule 走完整的前台路径 ----
 
-def test_deadline_finalize_ends_unstarted_jobs_by_the_end_write(tmp_path):
+def test_deadline_finalize_ends_unstarted_jobs_by_the_end_write(tmp_path, lock_holder):
     """经 schedule 的前台执行越过停止启动的时刻（真 LocalRunStore）：已执行的 job 落判定明细并保留认领时刻；没有启动的 job 不落判定
     明细、不认领，收尾的到期结束写把它记 skipped 并带到期的说明，run 按取法记 aborted、run 级说明是「已超过允许运行的时间」。写的次序：
     判定明细先于终态写，没有启动的 job 由结束写结束。"""
@@ -785,7 +785,7 @@ def test_deadline_finalize_ends_unstarted_jobs_by_the_end_write(tmp_path):
 
     t = {"s": 0.0}
     base = datetime(2030, 1, 1, tzinfo=timezone.utc)
-    p, run_store, result_store, _ = _local(tmp_path, ("a", "b"))
+    p, run_store, result_store, _ = _local(tmp_path, ("a", "b"), lock_holder=lock_holder)
     meta = RunMeta(run_id="r", created_at="t0", jobs=_meta("r", ["a", "b"]).jobs,
                    deadline_at=(base + timedelta(seconds=1000)).isoformat())
 
