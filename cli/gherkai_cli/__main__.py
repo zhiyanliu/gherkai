@@ -2153,6 +2153,10 @@ def _cmd_status_body(args, interrupted: dict) -> int:
                 # 后台推进进程可能仍在正常推进，所以只打印同一句、以退出码 2 结束，不写运行态（后台推进进程的处理见 `_cmd_reconcile`）
                 _progress(_definition_contract_message(e))
                 return 2
+            except detached.RunDefinitionMissing as e:
+                # 运行态在而提交记录不在：同样只说明、以退出码 2 结束，不写运行态（理由同上）
+                _progress(str(e))
+                return 2
         else:
             _progress(_WAIT_WITHOUT_RELAY_NOTICE)
             interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE

@@ -540,9 +540,9 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1795141164.0067706,
-    "seen": 1795142603.977377,
-    "ast_hash": "7236d069246cfb7f39484fee8ac98273",
+    "mtime": 1795143046.2009501,
+    "seen": 1795143086.7510881,
+    "ast_hash": "9dfd35be0a9d5ca809c1a8776e0ab57d",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -2394,9 +2394,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_definition_schema.py": {
-    "mtime": 1795142156.82086,
-    "seen": 1795142603.97739,
-    "ast_hash": "a4941e44c766a6266aebf8405e998c66",
+    "mtime": 1795143046.2011185,
+    "seen": 1795143086.7510998,
+    "ast_hash": "0e002dabaf76162a60a41eaa08ffccf7",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/device_selection.py": {
@@ -3018,9 +3018,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795142516.7626193,
-    "seen": 1795142603.977609,
-    "ast_hash": "f6eb7b934cb6e4e739deb7f4fc87cbe2",
+    "mtime": 1795143080.9526048,
+    "seen": 1795143086.751316,
+    "ast_hash": "d8191e680018b9a5aeb2fad4c3bf357b",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {

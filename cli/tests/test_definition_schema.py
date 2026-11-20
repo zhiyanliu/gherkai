@@ -232,15 +232,21 @@ def test_background_advancer_ends_the_run_when_the_definition_is_unreadable_or_g
     _assert_ended_by_the_definition_unavailable_ending(reports, run_id, DEFINITION_CONTRACT_REASON)
 
 
-def test_local_relay_does_not_end_a_run_whose_definition_is_not_json(tmp_path, monkeypatch, capsys):
-    """`status --wait` 接力读到不是合法 JSON 的提交记录：它不是这个 run 的推进器，以退出码 2 结束并说明，运行态一个字节不变。"""
+@pytest.mark.parametrize("damage, told", [("not-json", "提交记录不完整"), ("deleted", "找不到这个 run 的提交记录")])
+def test_local_relay_does_not_end_a_run_whose_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, damage, told):
+    """`status --wait` 接力读到不是合法 JSON 的提交记录，或提交记录已被删去：它不是这个 run 的推进器，以退出码 2 结束并说明，
+    不打回溯，运行态一个字节不变。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
     state_path = _as_detached_run_in_progress(reports, run_id)
-    (reports / run_id / "run_meta.json").write_text("{", encoding="utf-8")
+    path = reports / run_id / "run_meta.json"
+    if damage == "not-json":
+        path.write_text("{", encoding="utf-8")
+    else:
+        path.unlink()
     before = state_path.read_bytes()
     assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 2
     err = capsys.readouterr().err
-    assert "Traceback" not in err and "提交记录不完整" in err
+    assert "Traceback" not in err and told in err
     assert state_path.read_bytes() == before
 
 
