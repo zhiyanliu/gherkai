@@ -325,7 +325,11 @@ class HoldUntilExit:
       持有。
 
     钩子执行之前先核对这个号仍指向持锁的那个目录（设备号与 inode 与收下时相同）：这个号之后若被关闭并另作他用，钩子不关到别的打开。
-    不经解释器的 fork（C 扩展、`ctypes` 直接调系统库）不触发钩子，不在其内。登记之后撤不掉，钩子随进程存在到退出，与持有的期限相同。"""
+    不经解释器的 fork（C 扩展、`ctypes` 直接调系统库）不触发钩子，不在其内。登记之后撤不掉，钩子随进程存在到退出，与持有的期限相同。
+
+    已知的间隔：钩子在 `hold` 被调用时才登记，而锁在 `create_run_dir` 里更早就取到了。两者之间本进程别的线程 fork 而不 exec 出的
+    子进程没有这个钩子，会带着锁活过本进程（ADR 0054 决策三「已知的间隔」）。现在不可达：两种推进器在建 run 的这一段不 fork。往持锁
+    的进程里加会这样 fork 的线程之前，先按 ADR 0054「重议闸门」里「持锁的进程里出现 fork 而不 exec 的线程」一条处理。"""
 
     def __init__(self) -> None:
         self._held: list[int] = []  # 只记下，不关闭、不交出
@@ -470,7 +474,10 @@ def create_run_dir(root: Path, run_id: str, write: Callable[[Path], None], *, ho
     `_Staging.discard` 删去自己的暂存目录、关闭描述符（建出之后没有打开成功的那一个留给清理方）。
 
     调用方保证这一次调用不被异步的异常打断（前台 `run` 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置，ADR 0054
-    决策三）：保护区只处理同步的失败，改名成功之后到交给持有者之间没有会失败的步骤。"""
+    决策三）：保护区只处理同步的失败，改名成功之后到交给持有者之间没有会失败的步骤。
+
+    从在暂存目录上取到锁到 `holder.hold` 之间，别的线程 fork 而不 exec 出的子进程会带着锁（持有者的钩子这时还没有登记）：见
+    `HoldUntilExit` 文档串里「已知的间隔」与 ADR 0054 决策三同名一条。"""
     check = check_report_dir(root)
     if check.verdict is not Boundary.INSIDE:
         raise RunDirRejected(check)
