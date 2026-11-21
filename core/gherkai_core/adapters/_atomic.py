@@ -32,8 +32,8 @@ def hit_vanished_dir(error: OSError, directory: Path) -> bool:
 
     macOS 的 APFS 上，在一个正被删去的目录里建出文件（含 `tempfile.mkstemp`）或把文件改名进去，得到的可能是 EINVAL 而不是「不存在」
     （实测：另一个线程反复建出、删去目录时，这两步的失败里各有一部分是 EINVAL，其余是 ENOENT；只读的打开与改权限只得到 ENOENT）。
-    所以得到 EINVAL 时再看一次这个目录：已不在（或同名的已不是目录）即返回 True，调用方把它读作「不存在」；还在则返回 False，错误
-    原样处理。只给已经失败的操作归类，不在成功的路径上先查。"""
+    所以得到 EINVAL 时再看一次这个目录：这个名字已不在（或它的某一层上级已不是目录）即返回 True，调用方把它读作「不存在」；这个名字
+    还在则返回 False（不论它现在是什么），错误原样处理。只给已经失败的操作归类，不在成功的路径上先查。"""
     if error.errno != errno.EINVAL:
         return False
     try:

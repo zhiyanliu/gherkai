@@ -540,9 +540,9 @@
     "semantic_hash": ""
   },
   "cli/gherkai_cli/__main__.py": {
-    "mtime": 1795263392.8846512,
-    "seen": 1795263717.044328,
-    "ast_hash": "380504511b876c2543359ae5d54a32f4",
+    "mtime": 1795264320.182468,
+    "seen": 1795264674.793378,
+    "ast_hash": "f870b4e4f303f697b2ad42a2c243ebb6",
     "semantic_hash": ""
   },
   "cli/gherkai_cli/render.py": {
@@ -1518,9 +1518,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/_atomic.py": {
-    "mtime": 1795263166.0353951,
-    "seen": 1795263717.044357,
-    "ast_hash": "5d772c40885ae6c3238283723b437c5e",
+    "mtime": 1795264534.166962,
+    "seen": 1795264674.7934122,
+    "ast_hash": "4cf2df9b8e30dd175e46f4fa4eaae5f1",
     "semantic_hash": ""
   },
   "core/tests/test_atomic_write.py": {
@@ -2880,9 +2880,9 @@
     "semantic_hash": ""
   },
   ".claude/README.md": {
-    "mtime": 1795222440.3911264,
-    "seen": 1795224573.582418,
-    "ast_hash": "8e3a0147b0d6834f18feb6fd18bc3017",
+    "mtime": 1795263948.2312787,
+    "seen": 1795264674.793571,
+    "ast_hash": "e9a7f9a462cee69d658bbcfc7a35ee1a",
     "semantic_hash": ""
   },
   "core/tests/test_list_runs.py": {
@@ -3018,15 +3018,15 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795262204.8378353,
-    "seen": 1795263717.0445702,
-    "ast_hash": "d075b4e84212a9080574e46430d31b9e",
+    "mtime": 1795264667.7382724,
+    "seen": 1795264674.793619,
+    "ast_hash": "5c5a3e7a9d798282736d1dcbea5492a6",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {
-    "mtime": 1795263321.1767683,
-    "seen": 1795263717.04456,
-    "ast_hash": "758c8cc0060595983a6b4af21bc7bbda",
+    "mtime": 1795264293.8088584,
+    "seen": 1795264674.793609,
+    "ast_hash": "7d050fae3511acab3ea1dad79c3ce7dc",
     "semantic_hash": ""
   },
   "docs/journey/0019-comment-pointers-removed-pending-implementation.md": {
@@ -3144,9 +3144,9 @@
     "semantic_hash": ""
   },
   "cli/tests/test_settle_runs.py": {
-    "mtime": 1795262907.8190508,
-    "seen": 1795263717.0443509,
-    "ast_hash": "cccacfa6a8c13451bfba09c1655f83d9",
+    "mtime": 1795264319.0615249,
+    "seen": 1795264674.7934,
+    "ast_hash": "58b54ee06c91d854a45f798342d062da",
     "semantic_hash": ""
   },
   "runtime/gherkai_runtime/settle.py": {

@@ -2479,12 +2479,13 @@ def _cmd_status(args) -> int:
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
     被 Ctrl-C 打断：打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端（ADR 0039）。云端与不带 --wait 的本机
-    `status` 靠 KeyboardInterrupt，说明取 interrupted["notice"] 里记下的那一句。本机等待中的 --wait 在进入等待之前装上只记标志的处理器
+    `status` 靠 KeyboardInterrupt，说明取 interrupted["notice"] 里记下的那一句：云端是这个 run 仍在原处继续执行的那一句，本机是本命令
+    没有改动记录的那一句（本机的 `status` 不知道这个 run 是否还在执行，不说）。本机等待中的 --wait 在进入等待之前装上只记标志的处理器
     （`_wait_and_settle_locally`），之后的中断由它在检查点处理，说明按这次处置的结果给出（ADR 0054 决策八「中断」）；装上之前收到的
     中断照这里的说明，那时本命令还没有处置，是「没有改动」的那一句；恢复处理器之后才抛出的同样照这里的说明，本命令写成处置之后它已换成
     「已记为已结束」那一句。
     """
-    interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE}
+    interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE if args.backend == "cloud" else _local_status_interrupted_notice(args.run_id)}
     try:
         return _cmd_status_body(args, interrupted)
     except KeyboardInterrupt:
@@ -2492,7 +2493,8 @@ def _cmd_status(args) -> int:
         return 128 + signal.SIGINT
 
 
-# 云端 `status --wait` 与不带 --wait 的 `status` 被 Ctrl-C 打断时的说明（产品语言）；本机等待中的两句见 _local_wait_interrupted_notice
+# 云端的 `status`（带与不带 --wait）被 Ctrl-C 打断时的说明（产品语言）；本机的见 _local_status_interrupted_notice 与
+# _local_wait_interrupted_notice
 _INTERRUPTED_WAIT_NOTICE = "已停止等待。这个 run 仍在原处继续执行，稍后可再查。"
 # 本机 `status --wait` 的轮询间隔：每次轮询做一次处置，管它的进程退出之后，这个 run 至多晚这么久被记为已结束
 _LOCAL_WAIT_POLL_S = 1.0
@@ -2712,6 +2714,12 @@ def _settled_but_not_shown(r, message: str) -> str:
     并进以 2 结束的原因 message（ADR 0054 决策八「等待中的 status --wait」）。没有 JSON 文档，不说就无从得知这个 run 已被本命令改动。"""
     report = "" if r.report_written else f"（报告没有生成：{r.report_missing.detail}）"
     return f"本命令已把 run {r.run_id} 记为已结束{report}，但显示不了它：{message}"
+
+
+def _local_status_interrupted_notice(run_id: str) -> str:
+    """本机 `status` 在开始等待之前被 Ctrl-C 打断时的说明（不带 --wait 的，与带 --wait 而还在解析报告目录的）：这时本命令只读过记录。
+    不说这个 run 是否还在执行：本命令这时不知道。"""
+    return f"已停止，本命令没有改动 run {run_id} 的记录。"
 
 
 def _local_wait_interrupted_notice(run_id: str, *, settled: bool, report_dir, result=None) -> str:

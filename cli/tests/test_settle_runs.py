@@ -1045,6 +1045,28 @@ def test_status_wait_ctrl_c_during_the_settle_is_handled_after_it(signum, rc, tm
     assert _state(root, run_id).status is Status.ABORTED and (root / run_id / "index.html").is_file()
 
 
+@pytest.mark.parametrize("case", ["local-wait", "local-no-wait", "cloud"])
+def test_status_interrupted_before_any_wait_says_what_this_command_knows(case, tmp_path, capsys, holders, monkeypatch):
+    """`status` 在开始等待之前被 Ctrl-C 打断：本机（带 --wait 的在解析报告目录时，不带的在显示时）说明本命令没有改动这个 run 的记录，
+    不说它仍在执行（本命令这时不知道，它可能早已没有推进器）；云端说这个 run 仍在原处继续执行。都以 130 结束，标准输出为空。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+
+    def interrupt(*args, **kwargs):
+        raise KeyboardInterrupt
+
+    target = {"local-wait": "_local_report_root", "local-no-wait": "_show_local_status", "cloud": "_status_cloud"}[case]
+    monkeypatch.setattr(m, target, interrupt)
+    argv = {"local-wait": [run_id, "--report-dir", str(root), "--wait"], "local-no-wait": [run_id, "--report-dir", str(root)],
+            "cloud": [run_id, "--backend", "cloud"]}[case]
+    rc, out, err = _status(capsys, *argv)
+    assert (rc, out) == (130, "")
+    expected = ("已停止等待。这个 run 仍在原处继续执行，稍后可再查。" if case == "cloud"
+                else f"已停止，本命令没有改动 run {run_id} 的记录。")
+    assert err.splitlines() == [expected]
+
+
 @pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
 @pytest.mark.parametrize(("signum", "rc"), [(signal.SIGINT, 130), (signal.SIGTERM, 143)], ids=["SIGINT", "SIGTERM"])
 def test_status_wait_interrupted_during_a_settle_whose_report_cannot_be_written_says_why(machine, signum, rc, tmp_path, capsys,
