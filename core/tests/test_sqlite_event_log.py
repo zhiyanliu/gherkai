@@ -1,11 +1,15 @@
 """SqliteEventLog 测试（ADR 0034）：持久事件通道往返 + 与 project 联通。
 
 存原始 JSON 行→读回解析成 Event、退出记录独立键空间、max_seq 续号；records() 喂 project() 得正确 RunState。
-纯逻辑 + 本地 SQLite（无 AWS、无 mock 外真实行为）→ 绿即够。
+纯逻辑 + 本地 SQLite（无 AWS、无 mock 外真实行为）→ 绿即够。库文件路径的长度上限（`DB_PATH_MAX_BYTES`）是解释器自带的 SQLite
+的真实行为，用真实的长路径打开一次守住前提（ADR 0030 决定四「报告目录的路径长度」条）。
 """
 from __future__ import annotations
 
+import os
+
 from gherkai_core.adapters.event_log import SqliteEventLog
+from gherkai_core.adapters.event_log.sqlite import DB_PATH_MAX_BYTES
 from gherkai_core.model import Job, RunMeta, Scenario, Status, Step
 from gherkai_core.project import project
 
@@ -39,18 +43,8 @@ def test_exit_record_independent_keyspace(tmp_path):
     assert log.max_seq("a") == 1
 
 
-def test_has_exit_single_scope(tmp_path):
-    """has_exit 只看本 scope 的退出记录（对位 DdbEventLog.has_exit）：worker 事件不算、别的 scope 不串扰。"""
-    log = _log(tmp_path)
-    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
-    assert log.has_exit("a") is False
-    log.record_exit("a", None)  # exit_code=None（退出码未知，如启动失败补偿）也算「退出记录已在」
-    assert log.has_exit("a") is True
-    assert log.has_exit("b") is False
-
-
 def test_exit_code_none_stored(tmp_path):
-    """exit_code=None（退出码未知：启动失败补偿、补写的未知退出等）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034 机制二「退出码缺失」条）。"""
+    """exit_code=None（退出码未知：启动失败补偿、wait 取不到退出码等）可存、读回仍是 None——投影侧判 ERROR、不是宽限态（ADR 0034 机制二「退出码缺失」条）。"""
     log = _log(tmp_path)
     log.record_exit("a", None)
     exits = [r for r in log.records() if r.kind == "exit"]
@@ -117,23 +111,19 @@ def test_record_exit_exited_at_roundtrip(tmp_path):
     assert stored == {"a": "2026-07-19T00:00:01.250000+00:00", "b": None}
 
 
-def test_record_timed_out_if_absent_writes_only_when_there_is_no_exit_record(tmp_path):
-    """补写判为超时的未知退出：还没有退出记录时写成（退出码未知、带超时标志、不带退出时刻），返回
-    True；已有退出记录时不写、不报错，返回 False，原记录原样保留。之后到达的真实退出照旧经 record_exit 覆盖补写的那一条。"""
+def test_record_exit_overwrites_the_same_scope(tmp_path):
+    """退出记录按 scope 覆盖同键（INSERT OR REPLACE）：同一个 scope 后写的一条整条替换先写的一条（含超时标志与退出时刻），别的 scope
+    不受影响。"""
     from datetime import datetime, timezone
 
     log = _log(tmp_path)
     at = datetime(2026, 7, 19, tzinfo=timezone.utc)
-    log.record_exit("seen", 0, exited_at=at)
-    assert log.record_timed_out_if_absent("seen") is False
-    assert log.record_timed_out_if_absent("lost") is True
-    assert log.record_timed_out_if_absent("lost") is False  # 已有补写的那一条
+    log.record_exit("a", None, timed_out=True)
+    log.record_exit("b", 1)
+    log.record_exit("a", 0, exited_at=at)
     exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
-    assert (exits["seen"].exit_code, exits["seen"].timed_out, exits["seen"].exited_at) == (0, False, at)
-    assert (exits["lost"].exit_code, exits["lost"].timed_out, exits["lost"].exited_at) == (None, True, None)
-    log.record_exit("lost", 0, exited_at=at)  # 补写之后才到的真实退出
-    exits = {r.scope_id: r.exited for r in log.records() if r.kind == "exit"}
-    assert (exits["lost"].exit_code, exits["lost"].timed_out, exits["lost"].exited_at) == (0, False, at)
+    assert (exits["a"].exit_code, exits["a"].timed_out, exits["a"].exited_at) == (0, False, at)
+    assert (exits["b"].exit_code, exits["b"].timed_out) == (1, False)
 
 
 def test_records_reads_events_and_exits_from_one_snapshot(tmp_path, monkeypatch):
@@ -161,8 +151,8 @@ def test_records_reads_events_and_exits_from_one_snapshot(tmp_path, monkeypatch)
     monkeypatch.setattr(sqlite_mod, "event_from_line", interleaving_event_from_line)
     recs = reader.records()
     seqs = {r.seq for r in recs if r.kind == "event"}
-    has_exit = any(r.kind == "exit" for r in recs)
-    assert (3 in seqs) == has_exit
+    got_exit = any(r.kind == "exit" for r in recs)
+    assert (3 in seqs) == got_exit
 
 
 def test_every_call_closes_its_connection(tmp_path):
@@ -175,9 +165,42 @@ def test_every_call_closes_its_connection(tmp_path):
         log = _log(tmp_path)
         log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
         log.record_exit("a", 0)
-        log.record_timed_out_if_absent("a")
-        log.has_exit("a")
         log.records()
         log.max_seq("a")
         gc.collect()
     assert [w for w in caught if issubclass(w.category, ResourceWarning)] == []
+
+
+def _path_of_exactly(base, total: int, *, filename: str = "events.db"):
+    """base 之下一条按文件系统编码恰好 total 字节的库文件路径（base 先解析成真实路径：SQLite 按解析之后的真实路径计长度）。中间
+    各层名字不超过 200 字节，最后一层是 filename。"""
+    base = base.resolve()
+    fixed = len(os.fsencode(str(base / filename)))
+    room = total - fixed  # 中间各层连同各自前面的「/」共占的字节数
+    assert room >= 2, "前提：临时目录的路径比上限短"
+    parts = []
+    while room > 0:
+        take = min(201, room)  # 一层：「/」加至多 200 字节的名字
+        if room - take == 1:   # 不留下只够一个「/」的零头
+            take -= 1
+        parts.append("d" * (take - 1))
+        room -= take
+    path = base.joinpath(*parts, filename)
+    assert len(os.fsencode(str(path))) == total
+    return path
+
+
+def test_a_database_path_of_exactly_the_limit_opens_with_this_interpreters_sqlite(tmp_path):
+    """前提守护：当前解释器链接的 SQLite 打开恰好 `DB_PATH_MAX_BYTES` 字节的库文件路径成功（WAL 模式，写入与读回各一次）。报告目录
+    的长度上限由这个数推出；所用的 SQLite 上限更小时这条失败，470 字节之内的报告目录上也可能打不开事件库（ADR 0030 决定四「报告
+    目录的路径长度」条）。"""
+    import contextlib
+    import sqlite3
+
+    path = _path_of_exactly(tmp_path, DB_PATH_MAX_BYTES)
+    log = SqliteEventLog(path)
+    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a"}', 1.0)
+    log.record_exit("a", 0)
+    assert [r.kind for r in log.records()] == ["event", "exit"]
+    with contextlib.closing(sqlite3.connect(str(path))) as conn:
+        assert conn.execute("PRAGMA journal_mode").fetchone() == ("wal",)

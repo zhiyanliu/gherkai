@@ -101,7 +101,7 @@ MATRIX = [
     Row("停止后到达的 session_opened", [_opened("a"), ScopeStarted(scope_id=SCOPE, session_id="arn:a"), *_passed_scenario(0)],
         [_opened("t", origin="attempted", sid=None), _closed("t", release="unconfirmed", observed_s=None, sid=None), _closed("a")],
         1, timed_out=True, timeout_s=5.0),
-    Row("接力者直接落 timed_out（退出码未知）", [_opened("a"), ScopeStarted(scope_id=SCOPE, session_id="arn:a")], [], None,
+    Row("云端超时处置补写 timed_out（退出码未知）", [_opened("a"), ScopeStarted(scope_id=SCOPE, session_id="arn:a")], [], None,
         timed_out=True, timeout_s=5.0, crash=True),
     Row("无 ARN 的未知 Create 加取消", [_opened("t", origin="attempted", sid=None), _closed("t", release="unconfirmed", observed_s=None, sid=None),
                                      ScopeDone(scope_id=SCOPE, status=Status.ERROR, error_type="acquire_timeout", message="没拿到设备")], [], 1),
@@ -322,10 +322,10 @@ def test_in_flight_job_state_agrees(tmp_path, events, expected, lock_holder):
 
 
 def test_crash_row_sync_side_really_exits_with_unknown_code():
-    """「接力者直接落 timed_out」一行的同步侧输入确实是退出码未知：去掉超时处置后同一事件流按退出码未知归因（会话 a 未确认，
+    """「云端超时处置补写 timed_out」一行的同步侧输入确实是退出码未知：去掉超时处置后同一事件流按退出码未知归因（会话 a 未确认，
     归因改为 release_failed）且消息是 worker 异常（若 FakeEngine 没在事件发完后崩溃，同步侧会以退出码 0 结束、消息变成
     「没有报完这次运行的结果」，对拍只是碰巧相等）。"""
-    row = next(r for r in MATRIX if r.name == "接力者直接落 timed_out（退出码未知）")
+    row = next(r for r in MATRIX if r.name == "云端超时处置补写 timed_out（退出码未知）")
     plain = Row(row.name, row.events, row.tail, row.exit_code, timed_out=False, timeout_s=7200.0, crash=True, device=row.device)
     jr = _sync(plain)
     assert (jr.status, jr.error_type) == (Status.ERROR, "release_failed") and "worker 异常：" in jr.message  # a 未确认 → 归因改 release_failed，原因保留
@@ -393,8 +393,8 @@ def test_matrix_covers_expected_verdicts():
     opened_late = by["停止后到达的 session_opened"]
     assert opened_late.error_type == "timeout" and [s.origin for s in opened_late.sessions] == ["created", "attempted"]
     assert "结果未知的创建尝试：t" in opened_late.message and "未确认停止的会话" not in opened_late.message
-    relay = by["接力者直接落 timed_out（退出码未知）"]
-    assert relay.error_type == "timeout" and "未确认停止的会话：a" in relay.message
+    supplemented = by["云端超时处置补写 timed_out（退出码未知）"]
+    assert supplemented.error_type == "timeout" and "未确认停止的会话：a" in supplemented.message
     unknown = by["无 ARN 的未知 Create 加取消"]
     assert unknown.error_type == "release_failed" and "没拿到设备" in unknown.message and "结果未知的创建尝试：t" in unknown.message
     assert (unknown.device_observed_s, unknown.device_observed_missing) == (0.0, 0) and unknown.session_id is None

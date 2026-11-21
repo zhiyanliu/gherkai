@@ -55,6 +55,23 @@ def test_overdue_at_keeps_the_instant_and_sub_seconds_across_time_zones():
     assert got == datetime(2026, 11, 15, 10, 5, 0, 500000, tzinfo=UTC) and got.tzinfo is not None
 
 
+@pytest.mark.parametrize("now, past", [
+    (DEADLINE + 299 * S, False),
+    (datetime(2026, 11, 15, 10, 5, 0, tzinfo=UTC), False),  # 恰在期限加 300 秒：还没有「已过」
+    (datetime(2026, 11, 15, 10, 5, 0, 1, tzinfo=UTC), True),
+    (datetime(2026, 11, 15, 18, 5, 0, 1, tzinfo=timezone(timedelta(hours=8))), True),  # 同一个时刻换个时区写
+    (DEADLINE + 3600 * S, True),
+])
+def test_past_overdue_is_strictly_after_three_hundred_seconds_past_the_deadline(now, past):
+    """处置条件里的「已过期限加 300 秒」（ADR 0054 决策六）：严格晚于期限加 300 秒才算已过。期望值按 10:00:00 的期限手写。"""
+    assert rd.past_overdue(now, DEADLINE) is past
+
+
+def test_past_overdue_rejects_a_naive_wall_clock():
+    with pytest.raises(TypeError):
+        rd.past_overdue(datetime(2026, 11, 15, 11, 0, 0), DEADLINE)
+
+
 def test_comparisons_hold_across_time_zones():
     """同一个时刻换个时区写，结论不变：比较的是时刻，不是字面。"""
     east8 = timezone(timedelta(hours=8))

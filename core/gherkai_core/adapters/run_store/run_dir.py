@@ -1,8 +1,10 @@
-"""本机 run 目录的存储形态：名字规则、建 run 的暂存与改名、生命期锁、边界检查（ADR 0030 决定四，ADR 0054 决策三、四）。
+"""本机 run 目录的存储形态：名字规则、建 run 的暂存与改名、生命期锁、边界检查、试拿与清理暂存目录（ADR 0030 决定四，ADR 0054
+决策三、四）。
 
 - **名字规则**（`is_run_name`）：run 标识即 run 目录的名字，读写两侧共用同一条规则。以点开头的名字留给暂存目录，列举与按
   标识的读写都不认它们，建 run 也拒绝这样的标识；按文件系统编码超过 `RUN_NAME_MAX_BYTES` 字节的名字同样不是 run 标识。
-- **建 run**（`create_run_dir`）：先对报告目录做一次边界检查；再在报告目录里建暂存目录（`STAGING_PREFIX` 加随机尾），以只读
+  暂存目录的名字形态（`staging_name` 生成、`is_staging_name` 认）只在这里定义，建 run 的一方与清理方共用。
+- **建 run**（`create_run_dir`）：先对报告目录做一次边界检查；再在报告目录里建暂存目录（`staging_name`），以只读
   方式打开它，对这次打开的描述符做边界检查、取排他的 `flock`，核对名字仍指向打开的那个目录；然后写记录，写完才原子改名成
   run 标识，最后把描述符交给持有者。锁随这次打开留在改名之后的 run 目录上；取锁与写两个文件都在改名之前做，试拿的一方只碰以
   run 标识命名的目录（先改名、后取锁的问题见 ADR 0054「被拒方案」）。入口里只处理同步的失败：两种推进器在这一次调用期间推迟
@@ -11,8 +13,12 @@
   不指向它时，换一个名字重来，至多 `STAGING_ATTEMPTS` 次；都不成即 `StagingContended`。
 - **持有者**（`LockHolder`）：收下持锁的描述符。生产用的 `HoldUntilExit` 不关闭也不交出它，锁随进程退出释放；构造
   `LocalRunStore` 时注入，不带持有者的 store 不能建 run。
-- **边界检查**（`check_fd`、`check_report_dir`）：对打开的目录的描述符取文件系统类型（由内核解析路径），只放行
+- **边界检查**（`check_fd`、`check_report_dir`、`check_existing_dir`）：对打开的目录的描述符取文件系统类型（由内核解析路径），只放行
   `ALLOWED_FILESYSTEMS` 里本平台的类型；判断与取锁对同一次打开做。
+- **试拿**（`probe_run_dir`，处置的一方用）：以只读方式打开 run 目录，对这次打开做边界检查，过了才不阻塞地试拿，持有到块结束
+  （ADR 0054 决策三「谁在何时试拿」与「结果的判读」）。
+- **清理暂存目录**（`staging_names`、`sweep_staging_dir`，`settle-runs` 不给 run 标识时用）：只认 `is_staging_name` 的形态、本身是
+  目录的条目；打开、边界检查、试拿、核对名字仍指向打开的目录，都过了才持着锁删去（ADR 0054 决策三「谁在何时试拿」）。
 
 异常放在这里、不放 `gherkai_core.errors`：它们只属于本机 adapter。`RunAlreadyExists` 仍在 errors 里，由 `create_run_dir` 抛出。
 """
@@ -22,10 +28,13 @@ import ctypes
 import errno
 import functools
 import os
+import re
 import secrets
 import shutil
+import stat
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -34,10 +43,15 @@ from typing import Final, Protocol
 
 from gherkai_core.errors import RunAlreadyExists
 
-STAGING_PREFIX: Final = ".gherkai-creating-"  # 后接 secrets.token_hex(8)
+STAGING_PREFIX: Final = ".gherkai-creating-"
+# 暂存目录名字里随机尾的长度：16 个小写十六进制字符（64 位）。同一个报告目录里两个创建者的名字不相撞是前提（ADR 0054 决策三
+# 「删去自己的暂存目录只凭自己那次打开」一条），不为相撞另设防
+STAGING_TAIL_HEX: Final = 16
+_STAGING_TAIL = re.compile(f"[0-9a-f]{{{STAGING_TAIL_HEX}}}")
 STAGING_ATTEMPTS: Final = 3
-# 一层目录名的长度上限，按文件系统编码的字节数计：Linux 清单里的类型以 255 字节为限，APFS 以 255 个字符为限，取 255 字节在两个
-# 平台上都建得出。超过系统上限的名字建不出目录，按路径读写时系统调用以「文件名太长」失败
+# 一层目录名的长度上限，按文件系统编码的字节数计：Linux 清单里的类型以 255 字节为限，APFS 以 255 个 UTF-16 代码单元为限；一个字符的
+# UTF-8 字节数不少于它的 UTF-16 代码单元数，所以 255 字节之内的名字在两个平台上都建得出（ADR 0030 决定四「run 标识即 run 目录的
+# 名字」条）。只管一层名字：整条路径的长度由入口对报告目录的检查管（同一决定「报告目录的路径长度」条）
 RUN_NAME_MAX_BYTES: Final = 255
 # 本机后端放行的文件系统类型，按 sys.platform 分；有序，给使用者的说明里的清单按这个次序拼出。只收照 ADR 0054 决策三的理由
 # 实测过的类型，先实测再加（决策四「边界检查」一条）
@@ -55,14 +69,25 @@ _NO_QUERY = "查询文件系统失败：系统库里没有查询文件系统的�
 
 def is_run_name(name: str) -> bool:
     """本机 run 目录的名字规则，读写两侧共用：非空、不以「.」开头、不含「/」、按文件系统编码不超过 `RUN_NAME_MAX_BYTES` 字节
-    （ADR 0030 决定四「run 标识即 run 目录的名字」条）。超长的名字按 run 不存在处理，读写入口因此不会以「文件名太长」失败；编码
-    不出来的名字同样不是 run 标识。"""
+    （ADR 0030 决定四「run 标识即 run 目录的名字」条）。超长的名字按 run 不存在处理，读写入口因此不会因这一层名字太长而失败（整条
+    路径的长度不在这里管）；编码不出来的名字同样不是 run 标识。"""
     if not name or name.startswith(".") or "/" in name:
         return False
     try:
         return len(os.fsencode(name)) <= RUN_NAME_MAX_BYTES
     except UnicodeEncodeError:
         return False
+
+
+def staging_name() -> str:
+    """新的暂存目录名字：`STAGING_PREFIX` 加 `STAGING_TAIL_HEX` 个小写十六进制字符的随机尾。建 run 的一方只用它生成名字。"""
+    return STAGING_PREFIX + secrets.token_hex(STAGING_TAIL_HEX // 2)
+
+
+def is_staging_name(name: str) -> bool:
+    """name 是不是 `staging_name` 生成的形态：前缀之后恰好 `STAGING_TAIL_HEX` 个小写十六进制字符。清理方只认这个形态，使用者恰好
+    以前缀起名的目录（如 `.gherkai-creating-user-named`）不碰（ADR 0054 决策三「谁在何时试拿」）。"""
+    return name.startswith(STAGING_PREFIX) and _STAGING_TAIL.fullmatch(name[len(STAGING_PREFIX):]) is not None
 
 
 # ---- 边界检查（ADR 0054 决策四） ----
@@ -226,6 +251,21 @@ def check_report_dir(path: Path) -> BoundaryCheck:
             os.close(fd)
 
 
+def check_existing_dir(path: Path) -> BoundaryCheck | None:
+    """对一个应当已经存在的目录做边界检查，什么都不建：以只读方式打开 path 本身（不向上找上级），对描述符判断、关闭。打开得到
+    「不存在」（FileNotFoundError，含悬空的符号链接）返回 None；别的打开失败（路径上有文件、没有权限、符号链接成环）原样抛出，
+    与 `check_report_dir` 的取法相同（ADR 0054 决策四「边界检查」一条）。处置的一方据此判断报告目录：报告目录不存在时没有可处理的
+    run，不像建 run 那样改按上级判断。"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    except FileNotFoundError:
+        return None
+    try:
+        return check_fd(fd, requested=str(path), checked=str(path))
+    finally:
+        os.close(fd)
+
+
 # ---- 生命期锁（ADR 0054 决策三） ----
 
 class LockState(Enum):
@@ -357,7 +397,7 @@ def _claim_staging(root: Path, staging: _Staging) -> None:
     import fcntl
 
     for _ in range(STAGING_ATTEMPTS):
-        path = root / f"{STAGING_PREFIX}{secrets.token_hex(8)}"
+        path = root / staging_name()
         try:
             os.mkdir(path)
         except FileExistsError:
@@ -421,3 +461,127 @@ def create_run_dir(root: Path, run_id: str, write: Callable[[Path], None], *, ho
         staging.discard()
         raise
     holder.hold(staging.forget())
+
+
+# ---- 试拿：处置的一方打开 run 目录、做边界检查、不阻塞地试拿（ADR 0054 决策三「谁在何时试拿」「结果的判读」） ----
+
+class RunDirGone(Exception):
+    """这个名字下已没有 run 目录：打开得到「不存在」（FileNotFoundError 或 NotADirectoryError）。不是 OSError：它不是读写失败，
+    处置的一方按这个名字下已没有 run 处理（ADR 0054 决策八「处置的次序」）。"""
+
+
+@dataclass(frozen=True)
+class RunDirProbe:
+    """一次试拿的结果。`boundary` 是对这次打开的边界检查；`lock` 是试拿的结果，边界检查不过时为 None（没有试拿）。"""
+
+    boundary: BoundaryCheck
+    lock: LockAttempt | None
+
+
+@contextmanager
+def probe_run_dir(path: Path) -> Iterator[RunDirProbe]:
+    """以只读方式打开 run 目录 path（跟随符号链接：锁与随后按路径的写落在同一个目录上），对这次打开的描述符做边界检查，INSIDE 才
+    不阻塞地试拿；拿到的锁持有到块结束，块结束时关闭描述符、锁随之放开。
+
+    打开得到「不存在」抛 `RunDirGone`；别的打开失败（没有权限、描述符用尽、符号链接成环）原样抛出 OSError：没有打开成功就没有可做
+    边界检查与试拿的描述符，它是读写记录失败，不是锁不可用，也不是判断不了文件系统（ADR 0054 决策三「结果的判读」）。"""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)  # 不可继承（PEP 446）
+    except (FileNotFoundError, NotADirectoryError) as e:
+        raise RunDirGone(str(path)) from e
+    try:
+        check = check_fd(fd, requested=str(path), checked=str(path))
+        attempt = try_lock(fd) if check.verdict is Boundary.INSIDE else None
+        yield RunDirProbe(check, attempt)
+    finally:
+        os.close(fd)
+
+
+# ---- 清理暂存目录（ADR 0054 决策三「谁在何时试拿」，决策八「settle-runs」一条） ----
+
+class StagingOutcome(Enum):
+    REMOVED = "removed"
+    WOULD_REMOVE = "would_remove"
+    SKIPPED = "skipped"
+
+
+class StagingSkip(Enum):
+    """跳过一个暂存目录的原因。值即 `settle-runs --json` 里 `staging_dirs[].reason` 的取值。"""
+
+    HELD = "held"                                       # 另一个进程持有它的锁（建 run 的一方，或另一个清理方）
+    UNSUPPORTED_FILESYSTEM = "unsupported_filesystem"   # 对这次打开的边界检查不过
+    LOCK_UNAVAILABLE = "lock_unavailable"               # 取锁出错，且不是「已被持有」
+    UNOPENABLE = "unopenable"                           # 打开它（或读它的属性）以「不存在」之外的错误失败
+    REMOVE_FAILED = "remove_failed"                     # 持着锁删除时中途出错，已删去的部分不恢复
+
+
+@dataclass(frozen=True)
+class StagingSweep:
+    """对一个暂存目录的处理结果。判断只看 `outcome` 与 `skip`；`boundary`（UNSUPPORTED_FILESYSTEM 时）与 `error`（LOCK_UNAVAILABLE、
+    UNOPENABLE、REMOVE_FAILED 时，原错误）只供说明。"""
+
+    name: str
+    outcome: StagingOutcome
+    skip: StagingSkip | None = None
+    boundary: BoundaryCheck | None = None
+    error: OSError | None = None
+
+
+def staging_names(root: Path) -> list[str]:
+    """报告目录 root 里合 `is_staging_name` 形态的名字，按名字升序；不看它们是不是目录（`sweep_staging_dir` 逐个核）。root 不存在
+    返回空列表；别的列目录失败原样抛出。"""
+    try:
+        names = os.listdir(root)
+    except FileNotFoundError:
+        return []
+    return sorted(n for n in names if is_staging_name(n))
+
+
+def sweep_staging_dir(root: Path, name: str, *, dry_run: bool) -> StagingSweep | None:
+    """按协议清理 root 里名为 name 的暂存目录（ADR 0054 决策三「谁在何时试拿」）。返回 None 表示这个名字下已不是暂存目录，不列出：
+    名字不合 `is_staging_name` 的形态；不在了；不是真实的目录（文件、符号链接，不跟随）；打开时已不存在；拿到锁之后名字已不指向
+    打开的那个目录（建它的进程已改名成 run 并退出，或它被换掉，按旧名字删会删错）。
+
+    依次：读名字本身的属性（不跟随符号链接）；以只读方式打开；对这次打开做边界检查，不过即跳过；不阻塞地试拿，被持有、锁不可用都
+    跳过；核对名字仍指向打开的那个目录；`dry_run` 时到此为止、给出「会删除」；否则持着锁删去整个目录，删除中途出错即跳过并带上原错误，
+    已删去的部分不恢复，下一次接着删。最后关闭描述符，锁随之放开（只看不删的这一次拿到的锁也随即放开）。不看时间、不看内容。
+
+    持着锁时这个名字不会被建 run 的一方改名（它只改名自己持锁的暂存目录），也不会被另一个清理方删去（它试拿得到「已被持有」），
+    所以核对之后按名字删的就是打开的那个目录。"""
+    if not is_staging_name(name):
+        return None
+    path = root / name
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None
+    except OSError as e:
+        return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.UNOPENABLE, error=e)
+    if not stat.S_ISDIR(st.st_mode):
+        return None
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)  # 不可继承（PEP 446）
+    except (FileNotFoundError, NotADirectoryError):
+        return None
+    except OSError as e:
+        return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.UNOPENABLE, error=e)
+    try:
+        check = check_fd(fd, requested=str(path), checked=str(path))
+        if check.verdict is not Boundary.INSIDE:
+            return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.UNSUPPORTED_FILESYSTEM, boundary=check)
+        attempt = try_lock(fd)
+        if attempt.state is LockState.HELD:
+            return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.HELD)
+        if attempt.state is LockState.UNAVAILABLE:
+            return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.LOCK_UNAVAILABLE, error=attempt.error)
+        if not same_dir(fd, path):
+            return None
+        if dry_run:
+            return StagingSweep(name, StagingOutcome.WOULD_REMOVE)
+        try:
+            shutil.rmtree(path)
+        except OSError as e:
+            return StagingSweep(name, StagingOutcome.SKIPPED, StagingSkip.REMOVE_FAILED, error=e)
+        return StagingSweep(name, StagingOutcome.REMOVED)
+    finally:
+        os.close(fd)

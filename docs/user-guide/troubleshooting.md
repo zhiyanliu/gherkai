@@ -1,6 +1,6 @@
 # 排错
 
-报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、提交后进度停住、隧道、项目配置文件与设备目标；定位参数不一致、本机后端的报告目录不受支持、筛选筛成空集、给定的 `.feature` 里没有任何 scenario、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
+报错后的排查顺序：先按下面的读法看 `gherkai doctor` 的每一行；再按症状分类查原因与处置，分类有安装与版本、凭证与 region、模型、引擎与判定、确定性 step 加载、云端后端、run 一直停在 pending 或 running、隧道、项目配置文件与设备目标；定位参数不一致、本机后端的报告目录不受支持或路径太长、筛选筛成空集、给定的 `.feature` 里没有任何 scenario、`.feature` 语法错误这类其它以退出码 2 结束的情况另列。每条命令的完整用法与退出码见[运行测试与查看结果](./running-and-results.md)，环境变量与选项的总表见[配置](./configuration.md)，云端后端的部署与维护见[云端后端](./cloud-backend.md)。
 
 ## 先运行 gherkai doctor
 
@@ -71,7 +71,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `没解析出 region`（自检的 `aws.region` 行），或 worker 启动即报 `AWS_REGION 未设` | `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION`、配置文件 `[common]` 的 `region`、`--profile` / `AWS_PROFILE`（或配置文件的 `profile`）指的 profile 配置，五处都没有 region | 任选一处设上。缺失时不会替你选一个 region |
 | `凭证/region 不可用（--region / AWS_REGION / AWS_DEFAULT_REGION / 配置文件 [common] region、--profile / AWS_PROFILE / 配置文件 [common] profile）` | 本机凭证链取不到可用凭证，或 `--profile` / `AWS_PROFILE` / 配置文件 `[common]` 的 `profile` 给的 profile 名不存在 | 配好 AWS 凭证（profile、环境变量、实例角色皆可），或改正 profile 名。两个引擎都用 IAM 鉴权，不需要 API key |
 | 以退出码 2 结束，`AWS 身份不可用：--profile / AWS_PROFILE / 配置文件 [common] profile 指定的 profile 读不出来，或凭证链不可用：…` | `--profile`、`AWS_PROFILE` 或配置文件 `[common]` 的 `profile` 给的 profile 名不存在（拼错，或指向已删除的 profile），而 region 没有从 `--region`、`AWS_REGION`、`AWS_DEFAULT_REGION` 或配置文件 `[common]` 的 `region` 给出、只能从这个 profile 的配置里读；也可能是 AWS 的配置文件（默认 `~/.aws/config`）本身无法解析 | 改成本机已配置的 profile 名，或去掉它改用默认凭证链；AWS 配置文件无法解析时按报错里的路径修正。提示末尾附有 AWS SDK 的原始报错，写明是哪个 profile 读不出来，或哪个文件无法解析 |
-| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置)；其中 `status --wait` 对 `submit` 提交的 run 会接着推进，那时需要凭证 |
+| 本机运行也报凭证错 | 浏览器与模型都在云端，本机 `run` / `submit` 同样要凭证 | 配好凭证。不需要 AWS 凭证的命令只有几条，清单见[开始使用](./getting-started.md#aws-前置) |
 
 ## 模型
 
@@ -86,7 +86,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | job 判 `error`，归因是 `timeout`，说明是 `job 超时（预算 …s，已中止）` | 这个 job 的墙钟预算到点（未标 `@timeout` 的 scope 用 `--default-job-timeout`，桌面 scope 默认 300 秒，设备 scope 默认为获取预算（`[devices]` 的 `acquire-timeout-s`）加 900 秒）。前台 `run` 或 `submit --backend local` 运行期间机器休眠过，或执行它的进程被暂停过时，这段时长同样计入预算 | 因休眠或暂停到点的，原样重新运行即可，调大预算没有用。其余情形给慢的 scope 标一个大于当前预算的 `@timeout:<秒>`，或把 `--default-job-timeout` 调到大于当前预算：桌面 scope 如 `@timeout:600`；设备 scope 的缺省已是获取预算加 900 秒（获取预算为默认的 600 秒时是 1500 秒），给的值要比它大才算调高，且不得低于获取预算加 180 秒，否则在开始执行前就以退出码 2 被拒；预算最长 7200 秒（`--default-job-timeout 0` 即取这个值），超过同样被拒；也可以把长流程拆成多个 scope |
-| `run` 或 `status` 的说明是「已超过允许运行的时间」，有 job 记 `skipped`、说明「这个 run 已超过允许运行的时间，job 没有启动」；或 job 记 `aborted`，说明是 `这个 run 已超过允许运行的时间，job 被中止` | 这个 run 到了允许运行到的时刻（`run_meta.deadline_at`），见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」。这个时刻按全部 job 的预算串行累加，正常的 run 远在它之前结束；到达它多半是运行期间发起的机器休眠过、执行它的进程被暂停过、某次云端调用长时间没有返回，或 `submit` 的后台推进中断过、过了这个时刻才接力。总状态按各 job 的状态得出：有 job 出错为 `error`，否则有用例失败为 `failed`，否则为 `aborted` | 用 `--scope` 只重新运行 `skipped` 与 `aborted` 的 job，以及归因 `timeout` 的 job（休眠过的 run 里先到点的往往是 job 自己的预算，这样的 job 判 `error`、归因 `timeout`）。机读输出里找它们：`run --json` 的 `jobs` 与 `status --json` 的 `jobs[]` 都列出全部 job，按 `status` 挑出 `skipped` 与 `aborted`；归因 `timeout` 的看 `run --json` 里各 job 的 `error_type`，`status --json` 不带归因，用 `gherkai explain <run_id> --json` 里各 scope 的 `error_type` 看。运行期间让机器保持唤醒，后台推进停住时尽早用 `status --wait` 接力（见下「提交后进度停住」）。调大预算只在 job 本身确实需要更长时间时才有用 |
+| `run` 或 `status` 的说明是「已超过允许运行的时间」，有 job 记 `skipped`、说明「这个 run 已超过允许运行的时间，job 没有启动」；或 job 记 `aborted`，说明是 `这个 run 已超过允许运行的时间，job 被中止` | 这个 run 到了允许运行到的时刻（`run_meta.deadline_at`），见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」。这个时刻按全部 job 的预算串行累加，正常的 run 远在它之前结束；到达它多半是运行期间发起的机器休眠过、执行它的进程被暂停过、某次云端调用长时间没有返回，或云端后端的后台推进中断过、过了这个时刻才接着推进。说明末尾带「（已记为已结束）」的，是 `settle-runs` 或 `status --wait` 在允许运行的时间之后再过 5 分钟把它记为已结束的，执行中的 job 记 `aborted`、说明「这个 run 已超过允许运行的时间，job 没有结果（已记为已结束）」（见下「run 一直停在 pending 或 running」）。总状态按各 job 的状态得出：有 job 出错为 `error`，否则有用例失败为 `failed`，否则为 `aborted` | 用 `--scope` 只重新运行 `skipped` 与 `aborted` 的 job，以及归因 `timeout` 的 job（休眠过的 run 里先到点的往往是 job 自己的预算，这样的 job 判 `error`、归因 `timeout`）。机读输出里找它们：`run --json` 的 `jobs` 与 `status --json` 的 `jobs[]` 都列出全部 job，按 `status` 挑出 `skipped` 与 `aborted`；归因 `timeout` 的看 `run --json` 里各 job 的 `error_type`，`status --json` 不带归因，用 `gherkai explain <run_id> --json` 里各 scope 的 `error_type` 看。运行期间让机器保持唤醒，云端后端的后台推进停住时尽早用 `status --wait` 触发它接着推进（见下「run 一直停在 pending 或 running」）。调大预算只在 job 本身确实需要更长时间时才有用 |
 | 某一步记 `error` 并标 `(timeout)`，job 级归因为空 | Nova Act 的单次 AI 操作到点（默认 120 秒），不是 job 墙钟到点 | 把这一步的动作写得更细，或调高 `NOVA_ACT_TIMEOUT_S`，见[配置](./configuration.md)。调高 `--default-job-timeout` 对这种超时无效 |
 | Nova Act 引擎下，非英文页面上「正文里出现某个中文词」这类文本包含断言系统性判否（同一页面上的英文词仍可靠） | Nova Act 在非英文页面上不适合做这类文本断言，提高投票次数无效 | 按[编写 .feature](./writing-features.md)的「按引擎选写法」选一种改法：改用 Midscene 引擎、把断言改写成页面级语义陈述，或改成确定性 step |
 | 同一条 AI 断言两次运行的结论不同 | AI 判定本身会抖动 | 用 `--assertion-votes 3` 让每条 AI 断言判三次、取多数，或把这条判定改成确定性 step；取值与取舍见[编写 .feature](./writing-features.md)的「投票」 |
@@ -122,6 +122,7 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | 症状 | 原因 | 处置 |
 |---|---|---|
 | `run` 以退出码 2 结束，`gherkai run 只在本机执行，不支持云端后端（… 给出的是 cloud）：要在云端后端执行，请用 gherkai submit --backend cloud 提交 …` | `run` 只在本机后端执行：命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud` | 云端后端用 `gherkai submit --backend cloud --prefix <前缀>` 提交、`gherkai status <run_id> --backend cloud --prefix <前缀> --wait` 等结果；要在本机前台运行，去掉 `--backend cloud`，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
+| `settle-runs` 以退出码 2 结束，`这个版本的 gherkai settle-runs 只处理本机后端（--backend local）的 run，还不能处理云端后端的 run。` | 命令行给了 `--backend cloud`，或项目配置文件 `[common]` 的 `backend` 设为 `cloud`；这时没有访问云端 | 云端后端的 run 停住时用 `status --wait`（见下「run 一直停在 pending 或 running」）；要处理本机报告目录里的 run，配置文件里设了 `cloud` 时在命令行上给 `--backend local` |
 | `run` 以退出码 2 结束，`unrecognized arguments: --prefix …`（或 `--ddb-table`、`--s3-bucket`、`--worker-variant`） | 这几个选项只用于云端后端，`run` 只在本机后端执行、不收它们 | 要在云端后端执行，改用 `gherkai submit --backend cloud`，这几个选项照原样写在 `submit` 上；要在本机前台运行，去掉它们 |
 | cloud 命令以退出码 2 结束，提示「本机 CLI X 新于后端 Y」 | CLI 与后端不是同一版本，新 CLI 写的任务定义不能交给旧后端读 | 请部署方运行 `gherkai deploy` 把后端升级到同版本；也可以临时用 `uvx --from 'gherkai==<后端版本>' gherkai …` 提交，不改动本机安装。没有强行放行的开关。反过来，本机 CLI 旧于后端只提示、不拦截，用 `uv tool upgrade gherkai` 升级本机 CLI |
 | 提交以退出码 2 结束，`引擎 X 的 worker variant '…' 解析失败` | 当前 CLI 版本下，该引擎没有这个 variant 的镜像 | 临时改用 `--worker-variant base` 提交（部署方运行过本版本的 `gherkai deploy` 即有）；请部署方补推该 variant 的步骤见[云端后端](./cloud-backend.md)的「worker 镜像 variant」。报错说的是本机 CLI 旧于后端时，先升级 CLI，不要照旧版本推镜像 |
@@ -137,11 +138,20 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `list-runs --backend cloud 读不到运行状态表 …（表、索引、凭证、region 或权限）：…` | 表不存在（`--prefix`、`--ddb-table` 或 region 不对），或凭证缺列出 run 所需的权限 | 先按上面「资源缺失」一行核对前缀与 region；权限缺的是索引上的 `dynamodb:Query` 与表上的 `dynamodb:BatchGetItem`，见[云端后端](./cloud-backend.md)「团队成员需要的最小云端权限」 |
 | 以退出码 2 结束，`--grace 在云端不生效` | 云端的停止宽限由部署方在部署时用 `gherkai deploy --stop-timeout` 设定，运行时给这个选项不生效 | 去掉 `--grace`。`doctor --backend cloud` 的 `backend.worker.grace` 行会比对部署侧设的宽限够不够 |
 
-## 提交后进度停住
+## run 一直停在 pending 或 running
 
-`submit` 之后 `status` 长时间停在同一进度、也没有报错，说明后台推进已经停止：本机后端下是负责推进的后台进程已退出，云端后端下是负责推进的云端后台任务没有继续触发。用与 `submit` 相同的定位参数（`--backend`、`--report-dir`，云端后端还有 `--prefix`）运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条查询命令会接着把这个 run 推进到终态。
+`status` 或 `list-runs` 里一个 run 长时间停在 `pending` 或 `running`、进度不变也没有报错，说明执行它的那一方已经停下。
 
-过了允许运行的时间才接力的 run，`status --wait` 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。
+**本机后端**（前台 `run` 与 `submit --backend local` 都是）：执行这个 run 的 gherkai 进程已经退出（被结束、终端关闭、机器重启或出错退出）或被暂停，没有别的进程会接着执行它。后台推进进程出错退出时，原因在这个 run 目录里的 `reconcile.log`。用与产生这个 run 的命令相同的 `--report-dir` 执行下面任一条：
+
+- `gherkai settle-runs <run_id>`：执行它的进程已经退出，或已过了允许运行的时间之后再过 5 分钟时，把这个 run 记为已结束（执行中的 job 记 `aborted`、没有启动的记 `skipped`），然后照常可以 `status`、`explain`。不给 run_id 时处理这个报告目录里全部未结束的 run；先加 `--dry-run` 可以只看判断、不改动。
+- `gherkai status <run_id> --wait`：等待这个 run 结束，条件成立时同样把它记为已结束，再按判定给退出码。
+
+之后用 `--scope` 重新运行没有结果的 job。`settle-runs` 的结果是「跳过」、原因说执行它的进程还在时，这个 run 仍在执行或执行它的进程被暂停了：等它结束，或等到允许运行的时间之后再过 5 分钟。原因说运行状态记录读不出的，`settle-runs` 与 `status --wait` 都不改动它，确认不再需要之后可以手工移走这个 run 的目录；原因说由别的版本写出的，用写出它的那个版本处理。各原因的含义见[运行测试与查看结果](./running-and-results.md)「结束停住的 run」。
+
+**云端后端**：负责推进的云端后台任务没有继续触发。用与 `submit` 相同的定位参数（`--backend cloud`、`--prefix`、`--report-dir`）运行 `gherkai status <run_id> --wait`：后台推进停止或卡住时，这条命令会触发云端接着把这个 run 推进到终态。过了允许运行的时间才接着推进的 run 不再启动任何 job：此前已经启动、没有留下结束记录的 job 按到点处理（被允许运行的时间截断的记 `aborted`，自己的预算先到点的判超时）；还有 job 没有启动时，它们记 `skipped`，run 带说明「已超过允许运行的时间」结束，这些 job 要重新提交。总状态都按各 job 的状态给出（见[运行测试与查看结果](./running-and-results.md)「允许运行的时间」）。这个版本的 `settle-runs` 还不能处理云端后端的 run。
+
+**报告目录里有名字以 `.gherkai-creating-` 开头的目录**：这是建立 run 时用的暂存目录，建立 run 的进程在完成之前被强制结束时会留下它。它不是 run，不影响别的命令；不给 run_id 的 `gherkai settle-runs --report-dir <目录>` 会删去没有进程在使用的暂存目录，正在使用的跳过。
 
 ## 隧道（`--expose-local`）
 
@@ -187,14 +197,18 @@ gherkai doctor --json             # 机读 {ok, checks[]}
 | `没有 scenario 匹配 …`，随后列出这个 run 的全部候选 | `--scope` / `--tags` / `--scenario` 把范围筛成了空集 | 从列出的候选里挑正确的值 |
 | `没有可执行的 scenario：<文件> 里一个 scenario 都没有（常见原因：只有 Feature 头，或 Scenario Outline 的 Examples 没有数据行）` | 没有加筛选，给定的 `.feature` 里也没有任何可执行的 scenario：文件为空、只有 Feature 头、只有 Background 或不含 scenario 的 Rule，或 Scenario Outline 的 Examples 没有数据行 | 补写 scenario，或给 Examples 补上数据行；同时核对传入的路径是否是要测的那批文件 |
 | `feature 语法错误（gherkin 解析失败，含行:列）` | `.feature` 文件语法有误 | 按报出的行列改；写法见[编写 .feature](./writing-features.md) |
-| `报告目录 … 所在的文件系统是 …，本机后端不支持：在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。…`（报告目录还不存在时前半句是 `报告目录 … 还不存在，按最近一层已存在的上级 … 判断，它所在的文件系统是 …，本机后端不支持`），或 `无法判断报告目录 … 所在的文件系统（…）：…`；前台 `run` 与 `submit --backend local` 同一句 | 本机后端的报告目录不在受支持的本机文件系统上：网络文件系统（NFS、SMB）、FUSE 挂载、经虚拟机共享进来的目录（如 macOS 上的 Docker Desktop 从宿主挂载进容器的目录）等。判断不了时括号里写明原因，例如这台机器不是 macOS 或 Linux、读不到挂载信息 | 按说明把报告目录（`--report-dir` 选项，或配置文件里的 `report-dir`）换到清单里的本机文件系统上，在容器里执行时用容器自己的文件系统里的目录；之后的 `status`、`explain` 与 `list-runs` 给同一个值。多台机器要共用运行记录时用云端后端；判断不了、换了目录仍然判断不了时（原因在这台机器本身，如它不是 macOS 或 Linux、读不到挂载信息），同样改用云端后端。报告目录的全部要求见[运行测试与查看结果](./running-and-results.md)「本机后端的报告目录」 |
+| `报告目录 … 所在的文件系统是 …，本机后端不支持：在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。…`（报告目录还不存在时前半句是 `报告目录 … 还不存在，按最近一层已存在的上级 … 判断，它所在的文件系统是 …，本机后端不支持`），或 `无法判断报告目录 … 所在的文件系统（…）：…`；前台 `run` 与 `submit --backend local` 同一句，`settle-runs`（对报告目录）与 `status --wait`（对 run 的目录）给出同类说明 | 本机后端的报告目录不在受支持的本机文件系统上：网络文件系统（NFS、SMB）、FUSE 挂载、经虚拟机共享进来的目录（如 macOS 上的 Docker Desktop 从宿主挂载进容器的目录）等。判断不了时括号里写明原因，例如这台机器不是 macOS 或 Linux、读不到挂载信息 | 按说明把报告目录（`--report-dir` 选项，或配置文件里的 `report-dir`）换到清单里的本机文件系统上，在容器里执行时用容器自己的文件系统里的目录；之后的 `status`、`explain`、`list-runs` 与 `settle-runs` 给同一个值。多台机器要共用运行记录时用云端后端；判断不了、换了目录仍然判断不了时（原因在这台机器本身，如它不是 macOS 或 Linux、读不到挂载信息），同样改用云端后端。报告目录的全部要求见[运行测试与查看结果](./running-and-results.md)「本机后端的报告目录」 |
 | `在报告目录 … 里给这个 run 的目录加锁失败（…），没有建立 run：不能加锁的目录上无法确认执行 run 的 gherkai 进程是否还在。…` | 报告目录所在的文件系统或访问权限不允许给 run 的目录加锁，括号里是系统给出的原因 | 按说明检查这个目录所在的文件系统与访问权限后重新执行 |
 | `在报告目录 … 里准备这个 run 的目录时，连续 3 次遇到另一个进程同时在处理同一个暂存目录，没有建立 run。请稍后重新执行。` | 建立 run 时，gherkai 在报告目录里准备的目录连续几次都正被另一个进程处理，极少出现 | 稍后重新执行同一条命令 |
 | `在报告目录 … 里写这个 run 的记录失败：…。还没有开始执行；…`（前台 `run` 与 `submit --backend local` 同一句） | 报告目录没有写权限，或所在磁盘已满；在开始执行之前打不开报告目录（路径上有一层是文件而不是目录、没有权限）时也是这一句 | 检查这个目录的读写权限与剩余空间后重新执行 |
-| `run … 的记录已经写下，但在报告目录 … 里准备执行用的文件失败：…` | 记录写下之后，建事件记录或打开日志文件时失败（多为权限或磁盘空间）；这个 run 在记录里停在 `pending`，没有开始执行 | 检查这个目录的读写权限与剩余空间后重新执行；停在 `pending` 的那个 run 不必理会 |
+| `run … 的记录已经写下，但在报告目录 … 里准备执行用的文件失败：…` | 记录写下之后，建事件记录或打开日志文件时失败（多为权限或磁盘空间）；这个 run 在记录里停在 `pending`，没有开始执行 | 检查这个目录的读写权限与剩余空间，用说明里给出的 `gherkai settle-runs <run_id> --report-dir …` 把停在 `pending` 的那个 run 记为已结束，再重新执行（经 `submit` 报出的重新提交） |
 | `run … 已经存在，没有重新建立。请重新执行这条命令。` | 新建的 run 与报告目录或云端里已有的 run 撞了标识，极少出现 | 重新执行同一条命令 |
-| `submit --backend local` 打出 `后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。…` | `submit` 在本机起的后台推进进程在建好 run、给出结果之前退出了；它出错退出时原因打在这句之前，被系统或别的进程结束时（如 `kill -9`、内存不足）没有输出 | 有输出时按它处理好原因，没有输出时查看是什么结束了这个进程，然后重新提交；它退出之前可能已经建立了这个 run，用说明里给出的 `gherkai list-runs` 命令查看，这样的 run 没有后台进程在执行，不必等它的结果 |
+| `submit --backend local` 打出 `后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。…` | `submit` 在本机起的后台推进进程在建好 run、给出结果之前退出了；它出错退出时原因打在这句之前，被系统或别的进程结束时（如 `kill -9`、内存不足）没有输出 | 有输出时按它处理好原因，没有输出时查看是什么结束了这个进程，然后重新提交；它退出之前可能已经建立了这个 run，这样的 run 没有后台进程在执行，不必等它的结果：执行说明里给出的 `gherkai settle-runs --report-dir …`，把这个报告目录里执行它的进程已不在的 run 记为已结束，同时清理建立 run 时中断留下的暂存目录 |
 | `无法启动后台推进进程：…。没有提交。` | 本机起不了新进程（进程数或内存耗尽等，原因在冒号之后） | 处理报出的原因后重新提交 |
+| `报告目录 … 的路径太长…` | 本机后端的报告目录解析之后（换成绝对路径、展开其中的符号链接）超过 470 字节，按文件系统编码计（一个汉字通常占 3 字节）；每个 run 的记录、事件库与产物都放在它下面，路径再长就建不出或打不开。`run`、`submit --backend local`、`status`、`explain`、`list-runs`、`settle-runs` 在访问报告目录之前先查这一项，什么都不建 | 换一个路径较短的报告目录（`--report-dir` 选项，或配置文件里的 `report-dir`），之后的查询命令给同一个值 |
+| `报告目录 … 的路径里有一层名字太长…` | 报告目录路径里某一层的名字超过了所在文件系统允许的长度（还不存在、要由 gherkai 建出的那几层同样检查）；查法与上一行相同，什么都不建 | 换一个每层名字较短的报告目录 |
+| `run … 的运行状态记录读不出（…），本命令不能显示它：…`（不带 `--wait` 的 `status`；后台推进进程因此停下时，`reconcile.log` 里是 `run … 的运行状态记录读不出，后台推进已停止：…`） | 这个 run 的运行状态记录已损坏，或由别的版本写出 | 由别的版本写出的，用写出它的那个版本查看；确认不再需要之后可以手工移走这个 run 的目录。`settle-runs` 与 `status --wait` 都不改动这样的 run |
+| `读写报告目录 … 里的记录失败：…`（`settle-runs`），或 `读写 run … 的记录失败：…`（`status --wait`） | 读写 run 的记录时出错，多为权限或磁盘问题。`settle-runs` 就此停止，已处理的列在前面，出错的那个与其余的没有改动；`status --wait` 没有把这个 run 记为已结束 | 检查报告目录的读写权限与所在磁盘，再执行同一条命令 |
 
 ## 仍未定位到原因时
 

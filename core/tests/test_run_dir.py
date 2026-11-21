@@ -1,9 +1,11 @@
-"""本机 run 目录：边界检查、生命期锁、建 run 的暂存与改名（`adapters/run_store/run_dir`；ADR 0030 决定四，ADR 0054 决策三、四）。
+"""本机 run 目录：边界检查、生命期锁、建 run 的暂存与改名、处置方的试拿、清理暂存目录（`adapters/run_store/run_dir`；ADR 0030
+决定四，ADR 0054 决策三、四）。
 
-断言落在真实的文件系统与内核上：报告目录里有哪些名字、文件的字节、是不是同一个 inode、另开一次取锁得到什么。故障注入只换边界上的
-原语（`os.mkdir`、`os.open`、`os.replace`、`fcntl.flock`），被换的原语照样真实执行，或以同步的系统错误失败；模拟清理方或别的
-进程插进来时做的也是真实动作（真的删目录、换目录、另开一次取锁）。建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间
-推迟 SIGINT），那一侧的用例在 cli 的测试里。
+断言落在真实的文件系统与内核上：报告目录里有哪些名字、文件的字节、是不是同一个 inode、另开一次（或另一个进程）取锁得到什么。故障
+注入只换边界上的原语（`os.mkdir`、`os.open`、`os.replace`、`os.fstat`、`os.unlink`、`fcntl.flock`、取文件系统类型的那一步），被换的
+原语照样真实执行，或以同步的系统错误失败，或在那一刻停住、让另一方先走；模拟清理方或别的进程插进来时做的也是真实动作（真的删
+目录、换目录、另开一次取锁）。清理方与创建者的各种交错用真实的创建者进程（生产的 `create_run_dir`，在第一个暂存目录的指定几步
+停下）固定先后。建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT），那一侧的用例在 cli 的测试里。
 
 边界检查取文件系统类型的那一步由 conftest 换成本平台清单的第一项，结论不依赖宿主的文件系统；带 `real_filesystem` 标记的用例
 用宿主真实的类型，起真实进程的用例都带这个标记（子进程里没有替换）。
@@ -91,6 +93,28 @@ def _same_inode(fd: int, path: Path) -> bool:
 ])
 def test_is_run_name(name, ok):
     assert run_dir.is_run_name(name) is ok
+
+
+@pytest.mark.parametrize("name, ok", [
+    (".gherkai-creating-0123456789abcdef", True), (".gherkai-creating-ffffffffffffffff", True),
+    (".gherkai-creating-user-named", False),        # 使用者恰好以前缀起名的目录
+    (".gherkai-creating-0123456789ABCDEF", False),  # 大写不是生成的形态
+    (".gherkai-creating-0123456789abcde", False), (".gherkai-creating-0123456789abcdef0", False),  # 15、17 位
+    (".gherkai-creating-0123456789abcdeg", False), (".gherkai-creating-", False),
+    (".gherkai-creating-0123456789abcdef\n", False), ("x.gherkai-creating-0123456789abcdef", False),
+    ("0123456789abcdef", False), ("r", False), (".hidden", False),
+    (".gherkai-creating-٠١٢٣٤٥٦٧٨٩abcdef", False),  # 别的文字里的数字不是十六进制
+])
+def test_is_staging_name_accepts_only_the_generated_shape(name, ok):
+    assert run_dir.is_staging_name(name) is ok
+
+
+def test_every_generated_staging_name_has_the_recognized_shape():
+    """建 run 的一方生成的名字都合清理方认的形态（同一处定义），也都不是 run 标识（列举与按标识的读写不认它们）。"""
+    names = {run_dir.staging_name() for _ in range(2000)}
+    assert len(names) == 2000
+    assert all(run_dir.is_staging_name(n) and not run_dir.is_run_name(n) for n in names)
+    assert {len(n) for n in names} == {len(run_dir.STAGING_PREFIX) + run_dir.STAGING_TAIL_HEX}
 
 
 # ============================================================================
@@ -189,6 +213,37 @@ def test_check_report_dir_raises_other_open_failures_as_they_are(tmp_path):
     finally:
         unreadable.chmod(0o700)
         no_exec.chmod(0o700)
+
+
+def test_check_existing_dir_judges_the_directory_itself_and_reads_a_missing_one_as_none(tmp_path, monkeypatch):
+    """已存在的目录：对它本身判断（不向上找上级），类型不在清单里即 OUTSIDE；不存在（含悬空的符号链接）返回 None、不越过它去判断
+    上级；什么都不建。"""
+    (tmp_path / "exists").mkdir()
+    (tmp_path / "dangling").symlink_to(tmp_path / "nowhere")
+    before = _tree(tmp_path)
+    check = run_dir.check_existing_dir(tmp_path / "exists")
+    assert (check.verdict, check.requested, check.checked) == (Boundary.INSIDE, str(tmp_path / "exists"), str(tmp_path / "exists"))
+    assert run_dir.check_existing_dir(tmp_path / "missing" / "deeper") is None
+    assert run_dir.check_existing_dir(tmp_path / "dangling") is None
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs4")
+    assert run_dir.check_existing_dir(tmp_path / "exists").verdict is Boundary.OUTSIDE
+    assert _tree(tmp_path) == before
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 无视文件权限")
+def test_check_existing_dir_raises_other_open_failures_as_they_are(tmp_path):
+    """路径上有文件（ENOTDIR）、没有权限（EACCES）：原样抛出，不读作不存在。"""
+    (tmp_path / "file").write_text("x", encoding="utf-8")
+    unreadable = tmp_path / "unreadable"
+    unreadable.mkdir(mode=0o000)
+    try:
+        for path, code in [(tmp_path / "file", errno.ENOTDIR), (tmp_path / "file" / "sub", errno.ENOTDIR),
+                           (unreadable, errno.EACCES)]:
+            with pytest.raises(OSError) as exc:
+                run_dir.check_existing_dir(path)
+            assert exc.value.errno == code, (path, exc.value)
+    finally:
+        unreadable.chmod(0o700)
 
 
 # ---- 平台取法 ----
@@ -523,6 +578,8 @@ def test_three_held_staging_directories_end_in_contention(tmp_path, monkeypatch,
             LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
         assert (exc.value.root, exc.value.attempts) == (str(root), run_dir.STAGING_ATTEMPTS) == (str(root), 3)
         assert len(held) == 3 and len(_staging_names(root)) == 3 and "r" not in os.listdir(root)
+        # 建 run 的一方生成的名字正是清理方认的形态：三个都列得出
+        assert run_dir.staging_names(root) == _staging_names(root)
         assert lock_holder.fds == []
     finally:
         for fd in held:
@@ -831,3 +888,623 @@ def test_the_lock_survives_redirecting_the_standard_streams_when_it_was_opened_o
         assert fd >= 3
     finally:
         _stop(proc)
+
+
+# ============================================================================
+# 试拿：处置的一方打开 run 目录、做边界检查、不阻塞地试拿（ADR 0054 决策三「谁在何时试拿」「结果的判读」）
+# ============================================================================
+
+# 另一个进程试拿一次：不阻塞地取排他锁，打印 acquired 或 held，随即退出（拿到的锁随之放开）。只用 ASCII
+_TRY_IN_ANOTHER_PROCESS = r"""
+import errno, fcntl, os, sys
+fd = os.open(sys.argv[1], os.O_RDONLY | os.O_DIRECTORY)
+try:
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    print("acquired")
+except OSError as e:
+    print("held" if e.errno == errno.EWOULDBLOCK else "error %d" % e.errno)
+"""
+
+
+def _try_in_another_process(path: Path) -> str:
+    out = subprocess.run([sys.executable, "-I", "-c", _TRY_IN_ANOTHER_PROCESS, str(path)], capture_output=True, text=True,
+                         check=True, stdin=subprocess.DEVNULL, timeout=_TIMEOUT_S)
+    return out.stdout.strip()
+
+
+def _probe_state(path: Path) -> LockState:
+    with run_dir.probe_run_dir(path) as probe:
+        assert probe.boundary.verdict is Boundary.INSIDE
+        return probe.lock.state
+
+
+@pytest.mark.real_filesystem
+def test_probe_sees_the_creating_process_hold_the_lock_until_it_is_killed(tmp_path):
+    """建 run 的进程活着、被暂停时，试拿都得到「已被持有」；被 SIGKILL 之后拿得到。对这次打开做的边界检查用宿主真实的类型。"""
+    proc, _ = _start_creator(tmp_path, "hold")
+    run = tmp_path / "runs" / "r"
+    try:
+        with run_dir.probe_run_dir(run) as probe:
+            assert probe.boundary == run_dir.BoundaryCheck(Boundary.INSIDE, str(run), str(run), probe.boundary.fs_type, None)
+            assert probe.lock == run_dir.LockAttempt(LockState.HELD, None)
+        os.kill(proc.pid, signal.SIGSTOP)
+        _, status = os.waitpid(proc.pid, os.WUNTRACED)
+        assert os.WIFSTOPPED(status)
+        assert _probe_state(run) is LockState.HELD
+        os.kill(proc.pid, signal.SIGKILL)
+        proc.wait(timeout=_TIMEOUT_S)
+        deadline = time.monotonic() + 2.0
+        while _probe_state(run) is not LockState.ACQUIRED:
+            assert time.monotonic() < deadline, "建 run 的进程被杀之后两秒内仍拿不到锁"
+            time.sleep(0.01)
+    finally:
+        _stop(proc)
+
+
+@pytest.mark.real_filesystem
+def test_a_probe_holds_the_lock_until_its_block_ends(tmp_path, lock_holder):
+    """拿到的锁持有到块结束：块里同一进程另开一次、另一个进程试拿都得到「已被持有」；块结束之后另一个进程即拿得到（只判断不写的
+    处置方离开块即放开）。"""
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
+    store.create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()  # 建 run 的一方已不在
+    run = tmp_path / "runs" / "r"
+    with store.probe_run_dir("r") as probe:
+        assert probe.lock.state is LockState.ACQUIRED
+        assert _try(run) is LockState.HELD
+        assert _try_in_another_process(run) == "held"
+    assert _try_in_another_process(run) == "acquired"
+    assert _try(run) is LockState.ACQUIRED
+
+
+@pytest.mark.parametrize("occupant", ["missing", "file", "dangling-symlink"])
+def test_probe_reads_a_name_without_a_directory_as_gone(tmp_path, occupant):
+    """这个名字下没有目录（不存在、是文件、是悬空的符号链接）：抛 RunDirGone，不是 OSError；报告目录里什么都不多出来。"""
+    root = tmp_path / "runs"
+    root.mkdir()
+    if occupant == "file":
+        (root / "r").write_text("x", encoding="utf-8")
+    elif occupant == "dangling-symlink":
+        (root / "r").symlink_to(tmp_path / "nowhere")
+    before = _tree(tmp_path)
+    with pytest.raises(run_dir.RunDirGone) as exc:
+        with run_dir.probe_run_dir(root / "r"):
+            pass
+    assert not isinstance(exc.value, OSError)
+    with pytest.raises(run_dir.RunDirGone):
+        with LocalRunStore(root).probe_run_dir("r"):
+            pass
+    assert _tree(tmp_path) == before
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 无视文件权限")
+def test_probe_raises_other_open_failures_as_they_are_and_changes_nothing(tmp_path, lock_holder):
+    """run 目录没有读权限（0o300，运行态照样读得出）：打开得到 EACCES，原样抛出 PermissionError，不当作锁不可用、也不是「已不在」；
+    两个记录文件逐字节不变。"""
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
+    store.create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()
+    run = tmp_path / "runs" / "r"
+    before = {n: (run / n).read_bytes() for n in ("run_meta.json", "run_state.json")}
+    run.chmod(0o300)
+    try:
+        assert store.load_run_state("r") == _pending("r")  # 前提：运行态照样读得出
+        with pytest.raises(PermissionError) as exc:
+            with store.probe_run_dir("r"):
+                pass
+        assert exc.value.errno == errno.EACCES
+    finally:
+        run.chmod(0o700)
+    assert {n: (run / n).read_bytes() for n in before} == before
+
+
+def test_probe_does_not_try_the_lock_when_the_boundary_check_fails(tmp_path, monkeypatch, lock_holder):
+    """对这次打开的边界检查不过：不试拿（lock 为 None），块里另开一次照样拿得到；检查结果随探查给出。"""
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
+    store.create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs4")
+    run = tmp_path / "runs" / "r"
+    with store.probe_run_dir("r") as probe:
+        assert probe == run_dir.RunDirProbe(run_dir.BoundaryCheck(Boundary.OUTSIDE, str(run), str(run), "nfs4", None), None)
+        assert _try(run) is LockState.ACQUIRED
+
+
+def test_probe_reports_a_lock_error_other_than_held_as_unavailable(tmp_path, monkeypatch, lock_holder):
+    store = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
+    store.create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()
+
+    def flock(fd, op):
+        raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+
+    monkeypatch.setattr(fcntl, "flock", flock)
+    with store.probe_run_dir("r") as probe:
+        assert probe.lock.state is LockState.UNAVAILABLE and probe.lock.error.errno == errno.ENOLCK
+
+
+def test_probe_follows_a_symlinked_run_directory_to_the_directory_it_writes(tmp_path, lock_holder):
+    """run 目录的名字是指向一个目录的符号链接：打开跟随它，锁取在链接指向的那个目录上（之后按路径的写也落在那里）。"""
+    elsewhere = tmp_path / "elsewhere"
+    LocalRunStore(elsewhere, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()
+    root = tmp_path / "runs"
+    root.mkdir()
+    (root / "r").symlink_to(elsewhere / "r")
+    with LocalRunStore(root).probe_run_dir("r") as probe:
+        assert probe.lock.state is LockState.ACQUIRED
+        assert _try(elsewhere / "r") is LockState.HELD
+
+
+# ============================================================================
+# 清理暂存目录（ADR 0054 决策三「谁在何时试拿」）
+# ============================================================================
+
+
+def _make_staging(root: Path, files: int = 2, name: str = ".gherkai-creating-0123456789abcdef") -> Path:
+    """在 root 里放一个暂存目录形态的目录，里面有 files 个文件（像建 run 中途被强杀留下的）。"""
+    path = root / name
+    path.mkdir(parents=True)
+    for i in range(files):
+        (path / f"f{i:04d}").write_bytes(b"x")
+    return path
+
+
+def test_staging_names_lists_only_the_shape_and_reads_a_missing_root_as_empty(tmp_path):
+    root = tmp_path / "runs"
+    assert run_dir.staging_names(root) == []
+    _make_staging(root, name=".gherkai-creating-ffffffffffffffff")
+    _make_staging(root, name=".gherkai-creating-0123456789abcdef")
+    _make_staging(root, name=".gherkai-creating-user-named")
+    (root / "r").mkdir()
+    assert run_dir.staging_names(root) == [".gherkai-creating-0123456789abcdef", ".gherkai-creating-ffffffffffffffff"]
+    assert LocalRunStore(root).staging_names() == run_dir.staging_names(root)
+    (tmp_path / "file").write_text("x", encoding="utf-8")
+    with pytest.raises(NotADirectoryError):
+        run_dir.staging_names(tmp_path / "file")
+
+
+def test_sweep_removes_an_unheld_staging_directory_with_its_contents(tmp_path):
+    root = tmp_path / "runs"
+    path = _make_staging(root, files=3)
+    swept = LocalRunStore(root).sweep_staging_dir(path.name, dry_run=False)
+    assert swept == run_dir.StagingSweep(path.name, run_dir.StagingOutcome.REMOVED)
+    assert os.listdir(root) == []
+
+
+def test_a_dry_run_sweep_removes_nothing_and_lets_the_lock_go(tmp_path):
+    """只看不删：给出「会删除」，目录与里面的文件逐字节不变；拿到的锁随即放开，另一个进程立即拿得到。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root, files=3)
+    before = _tree(root)
+    swept = run_dir.sweep_staging_dir(root, path.name, dry_run=True)
+    assert swept == run_dir.StagingSweep(path.name, run_dir.StagingOutcome.WOULD_REMOVE)
+    assert _tree(root) == before
+    assert _try(path) is LockState.ACQUIRED
+
+
+def test_a_held_staging_directory_is_skipped_and_removed_once_released(tmp_path):
+    """另一次打开持有它的锁（另一个清理方，或正在建 run 的一方）：跳过、什么都不删；放开之后再清即删去。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root)
+    before = _tree(root)
+    other = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert run_dir.sweep_staging_dir(root, path.name, dry_run=False) == run_dir.StagingSweep(
+            path.name, run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.HELD)
+        assert _tree(root) == before
+    finally:
+        os.close(other)
+    assert run_dir.sweep_staging_dir(root, path.name, dry_run=False).outcome is run_dir.StagingOutcome.REMOVED
+    assert os.listdir(root) == []
+
+
+def test_a_staging_directory_outside_the_boundary_is_skipped_before_trying_the_lock(tmp_path, monkeypatch):
+    """对这次打开的边界检查不过：跳过并带上检查结果，什么都不删。另一次打开正持锁时结果仍是这一条（检查先于试拿）。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root)
+    before = _tree(root)
+    monkeypatch.setattr(run_dir, "filesystem_type", lambda fd: "nfs4")
+    other = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        fcntl.flock(other, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        swept = run_dir.sweep_staging_dir(root, path.name, dry_run=False)
+    finally:
+        os.close(other)
+    assert swept == run_dir.StagingSweep(path.name, run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.UNSUPPORTED_FILESYSTEM,
+                                         boundary=run_dir.BoundaryCheck(Boundary.OUTSIDE, str(path), str(path), "nfs4", None))
+    assert _tree(root) == before
+
+
+def test_a_lock_error_other_than_held_skips_the_staging_directory(tmp_path, monkeypatch):
+    root = tmp_path / "runs"
+    path = _make_staging(root)
+    before = _tree(root)
+
+    def flock(fd, op):
+        raise OSError(errno.ENOLCK, os.strerror(errno.ENOLCK))
+
+    monkeypatch.setattr(fcntl, "flock", flock)
+    swept = run_dir.sweep_staging_dir(root, path.name, dry_run=False)
+    assert (swept.outcome, swept.skip, swept.error.errno) == (
+        run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.LOCK_UNAVAILABLE, errno.ENOLCK)
+    assert _tree(root) == before
+
+
+def test_entries_that_are_not_staging_directories_are_neither_listed_nor_touched(tmp_path, lock_holder):
+    """形态不符的名字（使用者以前缀起名的目录、大写）、以暂存目录形态命名的文件与符号链接（链接指向的目录完好）、已经不在的名字、
+    run 目录（建它的进程已不在、锁拿得到）：清理方都返回 None、什么都不碰。"""
+    root = tmp_path / "runs"
+    LocalRunStore(root, lock_holder=lock_holder).create_run(_meta("r"), _pending("r"))
+    lock_holder.close_all()
+    _make_staging(root, name=".gherkai-creating-user-named")
+    _make_staging(root, name=".gherkai-creating-0123456789ABCDEF")
+    (root / ".gherkai-creating-aaaaaaaaaaaaaaaa").write_bytes(b"a file")
+    target = tmp_path / "target"
+    target.mkdir()
+    (target / "keep").write_bytes(b"k")
+    (root / ".gherkai-creating-bbbbbbbbbbbbbbbb").symlink_to(target)
+    before, target_before = _tree(root), _tree(target)
+    assert run_dir.staging_names(root) == [".gherkai-creating-aaaaaaaaaaaaaaaa", ".gherkai-creating-bbbbbbbbbbbbbbbb"]
+    held_target = os.open(target, os.O_RDONLY | os.O_DIRECTORY)  # 链接指向的目录正被持有：符号链接也不因此列成「被持有」
+    try:
+        fcntl.flock(held_target, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        for name in (".gherkai-creating-user-named", ".gherkai-creating-0123456789ABCDEF", ".gherkai-creating-aaaaaaaaaaaaaaaa",
+                     ".gherkai-creating-bbbbbbbbbbbbbbbb", ".gherkai-creating-cccccccccccccccc", "r"):
+            assert run_dir.sweep_staging_dir(root, name, dry_run=False) is None, name
+            assert LocalRunStore(root).sweep_staging_dir(name, dry_run=False) is None, name
+    finally:
+        os.close(held_target)
+    assert _tree(root) == before and _tree(target) == target_before
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 无视文件权限")
+def test_an_unopenable_staging_directory_is_skipped_with_the_error(tmp_path):
+    """没有读权限（0o300）：打开得到 EACCES，跳过并带上原错误，什么都不删。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root)
+    path.chmod(0o300)
+    try:
+        swept = run_dir.sweep_staging_dir(root, path.name, dry_run=False)
+    finally:
+        path.chmod(0o700)
+    assert (swept.outcome, swept.skip, swept.error.errno) == (
+        run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.UNOPENABLE, errno.EACCES)
+    assert sorted(os.listdir(path)) == ["f0000", "f0001"]
+
+
+@pytest.mark.skipif(hasattr(os, "geteuid") and os.geteuid() == 0, reason="root 无视文件权限")
+def test_a_removal_that_fails_midway_is_skipped_and_the_next_sweep_finishes_it(tmp_path):
+    """删除中途出错（里面有一个不可写的子目录，删它里面的文件得到 EACCES）：跳过并带上原错误，已删去的部分不恢复，删不掉的留着，锁随之
+    放开；原因消除之后下一次清理接着删去。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root, files=3)
+    sub = path / "sub"
+    sub.mkdir()
+    (sub / "inner").write_bytes(b"i")
+    sub.chmod(0o500)
+    try:
+        swept = run_dir.sweep_staging_dir(root, path.name, dry_run=False)
+        assert (swept.outcome, swept.skip) == (run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.REMOVE_FAILED)
+        assert isinstance(swept.error, PermissionError) and swept.error.errno == errno.EACCES
+        assert os.listdir(sub) == ["inner"]
+        assert _try(path) is LockState.ACQUIRED
+    finally:
+        sub.chmod(0o700)
+    assert run_dir.sweep_staging_dir(root, path.name, dry_run=False).outcome is run_dir.StagingOutcome.REMOVED
+    assert os.listdir(root) == []
+
+
+# ---- 清理方与创建者的交错：创建者是真实进程，执行生产的 create_run_dir，在第一个暂存目录的指定几步停下 ----
+
+# 创建者：把 os.mkdir、os.open、fcntl.flock 包一层（被包的原语照样真实执行），记下第一个暂存目录上的各步，在给定的几步停下：向标准
+# 输出写一行，等标准输入来一行再继续。建成之后报告做过的各步并持锁等着，标准输入再来一行才退出。只用 ASCII
+_STAGED_CREATOR = r"""
+import errno, fcntl, json, os, sys
+from pathlib import Path
+from gherkai_core.adapters.run_store import run_dir
+a = json.loads(sys.argv[1])
+stops = set(a["stops"])
+attempt = [0]
+steps = []
+real_mkdir, real_open, real_flock = os.mkdir, os.open, fcntl.flock
+
+def say(obj):
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+def wait_for_go():
+    if not sys.stdin.readline():
+        os._exit(3)
+
+def stop(phase, path):
+    if attempt[0] == 1 and phase in stops:
+        say({"stop": phase, "name": os.path.basename(os.fspath(path))})
+        wait_for_go()
+
+def is_staging(path):
+    return isinstance(path, (str, os.PathLike)) and run_dir.is_staging_name(os.path.basename(os.fspath(path)))
+
+def mkdir(path, *args, **kwargs):
+    real_mkdir(path, *args, **kwargs)
+    if is_staging(path):
+        attempt[0] += 1
+        steps.append(["mkdir", os.path.basename(os.fspath(path))])
+        stop("after-mkdir", path)
+
+def open_(path, flags, *args, **kwargs):
+    if not is_staging(path):
+        return real_open(path, flags, *args, **kwargs)
+    try:
+        fd = real_open(path, flags, *args, **kwargs)
+    except OSError as e:
+        steps.append(["open", errno.errorcode[e.errno]])
+        raise
+    steps.append(["open", "ok"])
+    stop("after-open", path)
+    return fd
+
+def flock(fd, op):
+    try:
+        real_flock(fd, op)
+    except OSError as e:
+        steps.append(["flock", "held" if e.errno == errno.EWOULDBLOCK else errno.errorcode[e.errno]])
+        raise
+    steps.append(["flock", "ok"])
+
+os.mkdir, os.open, fcntl.flock = mkdir, open_, flock
+
+class Holder:
+    def hold(self, fd):
+        steps.append(["hold"])
+
+def write(staging):
+    (staging / "run_meta.json").write_bytes(b"meta")
+    (staging / "run_state.json").write_bytes(b"state")
+    stop("before-rename", staging)
+
+run_dir.create_run_dir(Path(a["root"]), "r", write, holder=Holder())
+say({"done": steps})
+wait_for_go()
+"""
+
+
+class _StagedCreator:
+    """建 run 的真实子进程（`_STAGED_CREATOR`）：next() 取它的下一行消息，go() 放行，finish() 让建成之后的它退出。"""
+
+    def __init__(self, tmp_path: Path, stops: list[str]) -> None:
+        import queue
+        import threading
+
+        args = {"root": str(tmp_path / "runs"), "stops": stops}
+        self.proc = subprocess.Popen([sys.executable, "-I", "-c", _STAGED_CREATOR, json.dumps(args)],
+                                     stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        self._lines: queue.Queue = queue.Queue()
+        self._empty = queue.Empty
+        threading.Thread(target=self._pump, daemon=True).start()
+
+    def _pump(self) -> None:
+        for line in self.proc.stdout:
+            self._lines.put(json.loads(line))
+        self._lines.put(None)
+
+    def next(self) -> dict:
+        try:
+            msg = self._lines.get(timeout=_TIMEOUT_S)
+        except self._empty:
+            raise AssertionError("建 run 的子进程没有在时限内给出下一步") from None
+        if msg is None:
+            self.proc.wait(timeout=_TIMEOUT_S)
+            raise AssertionError(f"建 run 的子进程提前退出：{self.proc.stderr.read()}")
+        return msg
+
+    def go(self) -> None:
+        self.proc.stdin.write("go\n")
+        self.proc.stdin.flush()
+
+    def finish(self) -> None:
+        """让建成 run 之后等着的子进程退出，等它结束（锁随之放开）。"""
+        self.go()
+        assert self.proc.wait(timeout=_TIMEOUT_S) == 0, self.proc.stderr.read()
+
+    def close(self) -> None:
+        if self.proc.poll() is None:
+            self.proc.kill()
+        self.proc.wait(timeout=_TIMEOUT_S)
+        for stream in (self.proc.stdin, self.proc.stderr):
+            try:
+                stream.close()
+            except OSError:
+                pass
+
+
+def _built_run(root: Path) -> None:
+    """报告目录里只剩建成的 run：两个文件是创建者写的字节。"""
+    assert os.listdir(root) == ["r"]
+    assert {n: (root / "r" / n).read_bytes() for n in os.listdir(root / "r")} == {
+        "run_meta.json": b"meta", "run_state.json": b"state"}
+
+
+@pytest.mark.real_filesystem
+def test_a_sweep_between_the_creators_mkdir_and_open_makes_the_creator_retry_under_a_new_name(tmp_path):
+    """清理方在创建者建出暂存目录之后、打开之前删去它：清理方 removed；创建者打开得到「不存在」，换名，第二个名字建成 run。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["after-mkdir"])
+    try:
+        first = creator.next()["name"]
+        assert run_dir.sweep_staging_dir(root, first, dry_run=False) == run_dir.StagingSweep(first, run_dir.StagingOutcome.REMOVED)
+        creator.go()
+        steps = creator.next()["done"]
+        second = steps[2][1]
+        assert steps == [["mkdir", first], ["open", "ENOENT"], ["mkdir", second], ["open", "ok"], ["flock", "ok"], ["hold"]]
+        assert second != first
+        _built_run(root)
+        assert _try(root / "r") is LockState.HELD
+    finally:
+        creator.close()
+
+
+@pytest.mark.real_filesystem
+def test_a_sweep_between_the_creators_open_and_lock_makes_the_creator_retry_under_a_new_name(tmp_path):
+    """清理方在创建者打开之后、取锁之前拿到锁、删去、放开：创建者取锁成功而名字已不指向它打开的目录，换名建成。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["after-open"])
+    try:
+        first = creator.next()["name"]
+        assert run_dir.sweep_staging_dir(root, first, dry_run=False).outcome is run_dir.StagingOutcome.REMOVED
+        creator.go()
+        steps = creator.next()["done"]
+        second = steps[3][1]
+        assert steps == [["mkdir", first], ["open", "ok"], ["flock", "ok"],
+                         ["mkdir", second], ["open", "ok"], ["flock", "ok"], ["hold"]]
+        _built_run(root)
+    finally:
+        creator.close()
+
+
+@pytest.mark.real_filesystem
+@pytest.mark.parametrize("dry_run", [False, True], ids=["remove", "dry-run"])
+def test_a_creator_that_meets_the_sweepers_lock_gets_held_and_retries_under_a_new_name(tmp_path, monkeypatch, dry_run):
+    """清理方持着锁时创建者取锁：创建者得到「已被持有」，换名建成 run。真删的清理方随后删去被丢下的空目录；只看不删的放开之后留下
+    那个空的暂存目录，下一次真删时删去。清理方在核对名字（`same_dir` 里的 fstat）那一刻停住、放行创建者，等它建成再继续。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["after-open"])
+    try:
+        first = creator.next()["name"]
+        real_fstat = os.fstat
+        seen: list = []
+
+        def fstat(fd):
+            if not seen:
+                assert _try(root / first) is LockState.HELD  # 清理方此刻持锁
+                seen.append(fd)
+                creator.go()
+                seen.append(creator.next()["done"])
+            return real_fstat(fd)
+
+        monkeypatch.setattr(os, "fstat", fstat)
+        swept = run_dir.sweep_staging_dir(root, first, dry_run=dry_run)
+        monkeypatch.setattr(os, "fstat", real_fstat)
+        steps = seen[1]
+        second = steps[3][1]
+        assert steps == [["mkdir", first], ["open", "ok"], ["flock", "held"],
+                         ["mkdir", second], ["open", "ok"], ["flock", "ok"], ["hold"]]
+        if dry_run:
+            assert swept == run_dir.StagingSweep(first, run_dir.StagingOutcome.WOULD_REMOVE)
+            assert sorted(os.listdir(root)) == sorted([first, "r"]) and os.listdir(root / first) == []
+            assert run_dir.sweep_staging_dir(root, first, dry_run=False).outcome is run_dir.StagingOutcome.REMOVED
+        else:
+            assert swept == run_dir.StagingSweep(first, run_dir.StagingOutcome.REMOVED)
+        _built_run(root)
+        assert _try(root / "r") is LockState.HELD
+    finally:
+        creator.close()
+
+
+@pytest.mark.real_filesystem
+def test_a_staging_directory_whose_creator_is_writing_is_skipped_as_held(tmp_path):
+    """创建者写完两个文件、改名之前：清理方得到「已被持有」，什么都不删；创建者随后照常改名建成。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["before-rename"])
+    try:
+        first = creator.next()["name"]
+        before = _tree(root)
+        assert run_dir.sweep_staging_dir(root, first, dry_run=False) == run_dir.StagingSweep(
+            first, run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.HELD)
+        assert _tree(root) == before
+        creator.go()
+        assert creator.next()["done"][-1] == ["hold"]
+        _built_run(root)
+    finally:
+        creator.close()
+
+
+@pytest.mark.real_filesystem
+def test_a_descriptor_opened_before_the_creator_renamed_fails_the_check_and_deletes_nothing(tmp_path, monkeypatch):
+    """清理方在创建者持锁期间打开了暂存目录；在它试拿之前，创建者改名成 run 并退出：清理方此前打开的描述符拿到锁，但名字已不指向
+    它打开的目录，不删、不列出（返回 None）；run 目录与两个文件完好。清理方在对这次打开做边界检查的那一刻停住，等创建者建成并退出。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["before-rename"])
+    try:
+        first = creator.next()["name"]
+
+        def filesystem_type(fd):
+            creator.go()
+            assert creator.next()["done"][-1] == ["hold"]
+            creator.finish()
+            return _REAL_FILESYSTEM_TYPE(fd)
+
+        monkeypatch.setattr(run_dir, "filesystem_type", filesystem_type)
+        assert run_dir.sweep_staging_dir(root, first, dry_run=False) is None
+        _built_run(root)
+        assert _try(root / "r") is LockState.ACQUIRED  # 建 run 的进程已退出：上面的 None 不是因为拿不到锁
+    finally:
+        creator.close()
+
+
+@pytest.mark.real_filesystem
+def test_a_staging_directory_left_by_a_killed_creator_is_cleared_and_a_dry_run_leaves_it(tmp_path):
+    """创建者在改名之前被 SIGKILL：留下带两个文件的暂存目录，锁随进程释放；只看不删给出「会删除」、目录原样；真删时删去。"""
+    root = tmp_path / "runs"
+    creator = _StagedCreator(tmp_path, ["before-rename"])
+    try:
+        first = creator.next()["name"]
+        creator.proc.kill()
+        creator.proc.wait(timeout=_TIMEOUT_S)
+        before = _tree(root)
+        assert before == {first: None, f"{first}/run_meta.json": b"meta", f"{first}/run_state.json": b"state"}
+        assert run_dir.sweep_staging_dir(root, first, dry_run=True) == run_dir.StagingSweep(
+            first, run_dir.StagingOutcome.WOULD_REMOVE)
+        assert _tree(root) == before
+        assert run_dir.sweep_staging_dir(root, first, dry_run=False) == run_dir.StagingSweep(first, run_dir.StagingOutcome.REMOVED)
+        assert os.listdir(root) == []
+    finally:
+        creator.close()
+
+
+# 清理方：把 os.unlink 包一层（被包的原语照样真实执行），删到第 pause_after 个文件时报告并停住，等着被杀。只用 ASCII
+_PAUSING_SWEEPER = r"""
+import json, os, sys, time
+from pathlib import Path
+from gherkai_core.adapters.run_store import run_dir
+a = json.loads(sys.argv[1])
+real_unlink = os.unlink
+count = [0]
+
+def unlink(*args, **kwargs):
+    real_unlink(*args, **kwargs)
+    count[0] += 1
+    if count[0] == a["pause_after"]:
+        sys.stdout.write("paused\n")
+        sys.stdout.flush()
+        time.sleep(120)
+
+os.unlink = unlink
+run_dir.sweep_staging_dir(Path(a["root"]), a["name"], dry_run=False)
+"""
+
+
+@pytest.mark.real_filesystem
+def test_a_sweeper_killed_midway_leaves_the_rest_unlocked_and_the_next_sweep_removes_it(tmp_path):
+    """清理方在删除中途被 SIGKILL（300 个文件删到 100 个）：目录与余下的 200 个文件留下，锁随进程释放；下一次清理删去。"""
+    root = tmp_path / "runs"
+    path = _make_staging(root, files=300)
+    args = {"root": str(root), "name": path.name, "pause_after": 100}
+    proc = subprocess.Popen([sys.executable, "-I", "-c", _PAUSING_SWEEPER, json.dumps(args)],
+                            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        assert proc.stdout.readline() == "paused\n", proc.stderr.read()
+        assert _try(path) is LockState.HELD  # 删除期间持着锁
+        proc.kill()
+        proc.wait(timeout=_TIMEOUT_S)
+        assert len(os.listdir(path)) == 200
+        assert _try(path) is LockState.ACQUIRED
+        assert run_dir.sweep_staging_dir(root, path.name, dry_run=False).outcome is run_dir.StagingOutcome.REMOVED
+        assert os.listdir(root) == []
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.wait(timeout=_TIMEOUT_S)
+        proc.stdout.close()
+        proc.stderr.close()

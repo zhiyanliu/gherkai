@@ -112,8 +112,8 @@ class DdbEventLog:
     def has_exit(self, scope_id: str) -> bool:
         """单个 scope 有没有退出记录（**只读**，退出记录键位确定 → 单 item 点查、不走 records() 重放整 run）。
 
-        超时处置的「退出记录已在即让路」判断用（`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`，ADR 0034「job timeout」节被拒方案
-        「job 到点停止时由停止方直接写 task_exited」的护栏）：一个 scope 的问题不该逐 scope Query 整 run。**强一致读**——
+        云端超时处置的「退出记录已在即让路」判断直接调它（不经 `reconcile.EventLog` 协议；`deploy_aws/gherkai_deploy_aws/lambdas/reconciler.py`，
+        ADR 0034「job timeout」节被拒方案「job 到点停止时由停止方直接写 task_exited」的护栏）：一个 scope 的问题不该逐 scope Query 整 run。**强一致读**——
         判据正是「刚落的退出记录在不在」，最终一致读会漏看在途写、去 StopTask 一个已收敛的 job。
         """
         got = self._table.get_item(
@@ -150,7 +150,7 @@ class DdbEventLog:
     def record_timed_out_if_absent(self, scope_id: str) -> bool:
         """补写判为超时的未知退出（不带退出码与退出时刻，带 `timed_out`），只在这个 scope 还没有退出记录时写入：PutItem 带
         `attribute_not_exists` 条件，「没有」的判断与写入是同一次条件写。条件不成立（退出记录已在）时不报错、返回 False；写成返回 True。
-        云端超时处置找不到 task 时用它（对位 `SqliteEventLog.record_timed_out_if_absent`）：观察者恰在处置方查过之后、写入之前落下
+        云端超时处置找不到 task 时直接调它（不经 `reconcile.EventLog` 协议，推进步骤不补写）：观察者恰在超时处置查过之后、写入之前落下
         真实的退出记录时，补写不成立，观察到的退出不被盖掉（ADR 0034「job timeout」节「`timed_out` 归因链」）。"""
         try:
             self._table.put_item(

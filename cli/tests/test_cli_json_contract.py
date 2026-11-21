@@ -466,3 +466,45 @@ def test_explain_json_for_a_job_without_detail_is_documented():
     assert doc["scopes"] == [{"scope_id": "s.feature:3", "status": "skipped", "message": _FAIL_FAST.skipped_message}]
     _assert_documented(doc, section="explain")
     assert "只带 `scope_id`、`status` 与 `message` 三个键" in _sections()["explain"]
+
+
+def test_settle_runs_json_keys_are_documented(tmp_path, capsys):
+    """settle-runs 的样例取真实命令的 --json 输出（本机）：一个被处置的 run（带 `report_written`）、一个跳过的 run、一个会删去的与一个
+    被持有的暂存目录，所以 `runs[]` 与 `staging_dirs[]` 两种项的全部键都进差集。另核值的类型与取值集合：`outcome`、`reason` 只取契约页
+    列出的值，`report_written` 只在 settled 的项上、是布尔，跳过之外的暂存目录 `reason` 为 null。"""
+    import os
+
+    from test_settle_runs import _create, _hold_dir, _staging
+
+    root = tmp_path / "reports"
+    holders: list = []
+    try:
+        _create(root, "20300102T000000Z-aaaaaa", holders).release()
+        _create(root, "20300101T000000Z-aaaaaa", holders)
+        _staging(root, "0123456789abcdef")
+        busy_fd = _hold_dir(_staging(root, "fedcba9876543210"))
+        try:
+            assert m.main(["settle-runs", "--report-dir", str(root), "--json"]) == 0
+        finally:
+            os.close(busy_fd)
+    finally:
+        for h in holders:
+            h.release()
+    doc = json.loads(capsys.readouterr().out)
+    settled, skipped = doc["runs"]
+    assert set(settled) == {"run_id", "outcome", "reason", "report_written"} and set(skipped) == {"run_id", "outcome", "reason"}
+    assert {"backend", "report_dir", "dry_run", "staging_dirs"} <= set(doc) and len(doc["staging_dirs"]) == 2
+    _assert_documented(doc, section="settle-runs")
+    assert isinstance(doc["dry_run"], bool) and isinstance(settled["report_written"], bool)
+    reasons = {"other_version", "unreadable", "already_finished", "unsupported_filesystem", "advancer_exited", "past_deadline",
+               "lock_held", "undetermined"}
+    for r in doc["runs"]:
+        assert r["outcome"] in {"settled", "would_settle", "skipped"} and r["reason"] in reasons
+    for s in doc["staging_dirs"]:
+        assert s["outcome"] in {"removed", "would_remove", "skipped"}
+        assert (s["reason"] is None) == (s["outcome"] != "skipped")
+        assert s["reason"] in {None, "held", "unsupported_filesystem", "lock_unavailable", "unopenable", "remove_failed"}
+    section = _sections()["settle-runs"]
+    for value in sorted(reasons | {"settled", "would_settle", "skipped", "removed", "would_remove", "held", "lock_unavailable",
+                                   "unopenable", "remove_failed"}):
+        assert f"`{value}`" in section, f"契约页 settle-runs 一节没有写出取值 {value}"

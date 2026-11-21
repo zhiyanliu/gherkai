@@ -1,6 +1,6 @@
 """RetryingResultStore：本机推进器的判定存储，保存失败时退避重试（ADR 0030 决定三「保存明细失败」条）。
 
-本机的组合根在 `LocalResultStore` 外面套这一层：前台 `run`、后台推进进程与 `status --wait` 接力都经同一个装配入口拿到它。推进步骤
+本机的组合根在 `LocalResultStore` 外面套这一层：前台 `run` 与后台推进进程都经同一个装配入口拿到它。推进步骤
 （`reconcile.tick`）与落库服务（`persist.RunPersistence`）本身没有等待；云端的组合根不套，云端保存失败让这次调用失败，由流的重试或
 之后的触发重做。不放进推进步骤或 S3 adapter：两者都由云端共用，那里的等待关不掉。
 

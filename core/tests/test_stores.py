@@ -632,8 +632,8 @@ def test_run_meta_max_concurrency_round_trip():
 def test_run_meta_steps_dir_round_trip():
     """RunMeta.steps_dir：带值往返不丢；None 写 null（键集固定，ADR 0037 决策 7；没有使用方 step 时为 None，云端后端恒为 None）。
 
-    载体在 definition 的理由：起 worker 的三个 local 宿主（同步 run / per-run 进程 / `status --wait` 接力者）
-    CWD 各不相同，只有随 definition 走才对三者一致（core 只搬运、不消费语义）。
+    载体在 definition 的理由：起 worker 的两个 local 宿主（同步 run / 后台推进进程）
+    CWD 各不相同，只有随 definition 走才对两者一致（core 只搬运、不消费语义）。
     """
     import dataclasses
 
@@ -994,27 +994,28 @@ def test_run_state_keys_is_the_key_set_of_the_model_and_its_serialization():
 
 def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path: Path, lock_holder):
     """detached 标记（ADR 0034，本机侧对位 DDB STATE 的顶层属性）只在 create_run 时写下：submit 的组合根传 detached=True，
-    create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写、`is_detached` 为 False，记录不存在也为 False。
-    之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带 detached 的实例写后台
-    run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进 RunState 模型。"""
+    create_run 写出的 run_state.json 带顶层 `detached: true`；同步 run 的实例不写。list_runs 在同一次读里取出它（只作描述）。
+    之后的写不逐个补回它（ADR 0030 决定四「local 的顶层附加键整体保留」）：带 detached 的实例写一个前台 run，文件里仍没有标记；不带
+    detached 的实例（处置方一类）写后台 run，标记由附加键的通用保留规则留下（四个写入口各自的保留见 test_conditional_writes）。标记不进
+    RunState 模型。"""
     r = _sample_run("run-d")
     LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(
         r.run_meta, _initial_state("run-d", [j.scope_id for j in r.run_meta.jobs]))
     path = tmp_path / "runs" / "run-d" / "run_state.json"
     assert json.loads(path.read_text("utf-8"))["detached"] is True
-    relay = LocalRunStore(tmp_path / "runs")  # 接力者：不带 detached
-    assert relay.is_detached("run-d") is True
-    relay.update_job_state("run-d", JobState(scope_id="features/wiki.feature:6", status=Status.RUNNING))
-    assert relay.load_run_state("run-d").jobs["features/wiki.feature:6"].status == Status.RUNNING  # 前提：这次写写成了
+    other = LocalRunStore(tmp_path / "runs")  # 不带 detached 的实例
+    other.update_job_state("run-d", JobState(scope_id="features/wiki.feature:6", status=Status.RUNNING))
+    assert other.load_run_state("run-d").jobs["features/wiki.feature:6"].status == Status.RUNNING  # 前提：这次写写成了
     assert json.loads(path.read_text("utf-8"))["detached"] is True
-    assert not hasattr(relay.load_run_state("run-d"), "detached")
+    assert not hasattr(other.load_run_state("run-d"), "detached")
 
     meta = _sample_run("run-s").run_meta
     sync = LocalRunStore(tmp_path / "runs", lock_holder=lock_holder)
     sync.create_run(meta, _initial_state("run-s", [j.scope_id for j in meta.jobs]))
     sync_path = tmp_path / "runs" / "run-s" / "run_state.json"
     assert "detached" not in json.loads(sync_path.read_text("utf-8"))
-    assert sync.is_detached("run-s") is False and sync.is_detached("no-such-run") is False
+    listed = {row.run_id: row.detached for row in sync.list_runs([Status.PENDING, Status.RUNNING], limit=None)}
+    assert listed == {"run-d": True, "run-s": False}
     submit_instance = LocalRunStore(tmp_path / "runs", detached=True)
     submit_instance.update_job_state("run-s", JobState(scope_id=meta.jobs[0].scope_id, status=Status.RUNNING))
     assert submit_instance.try_claim_job("run-s", meta.jobs[1].scope_id) is True
@@ -1024,22 +1025,23 @@ def test_local_run_store_detached_marker_is_written_only_by_create_run(tmp_path:
 
 def test_local_run_store_write_entries_refuse_a_corrupted_run_state(tmp_path: Path, lock_holder):
     """写路径读不出旧文件不吞错：run_state.json 损坏时建 run 之外的五个写入口都抛出、文件原样不动，不会把损坏的文件当成「没有附加键」
-    覆盖掉（那样后台执行标记会被悄悄去掉，status --wait 从此把这个后台 run 当成前台 run 只等不接力）；读路径保守地读作没有标记。"""
+    覆盖掉（那样后台执行标记会被悄悄去掉，结束写还会在一份解析不了的运行态上写下终态）；列举把它列为读不出的一行。"""
     meta = _sample_run("run-p").run_meta
     sid = meta.jobs[0].scope_id
     LocalRunStore(tmp_path / "runs", detached=True, lock_holder=lock_holder).create_run(meta, _initial_state("run-p", [j.scope_id for j in meta.jobs]))
     path = tmp_path / "runs" / "run-p" / "run_state.json"
     path.write_text("{not json", encoding="utf-8")
-    relay = LocalRunStore(tmp_path / "runs")
-    assert relay.is_detached("run-p") is False  # 读路径保守
+    other = LocalRunStore(tmp_path / "runs")
+    [row] = other.list_runs([Status.PENDING, Status.RUNNING], limit=None)
+    assert (row.run_id, row.state, row.detached) == ("run-p", None, False)
     running = RunState(run_id="run-p", status=Status.RUNNING, high_water_mark=1,
                        jobs={sid: JobState(scope_id=sid, status=Status.RUNNING, session_id="s1")})
-    for write in (lambda: relay.update_job_state("run-p", JobState(scope_id=sid, status=Status.RUNNING)),
-                  lambda: relay.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z"),
-                  lambda: relay.project_state("run-p", running),
-                  lambda: relay.commit_job_states("run-p", [JobState(scope_id=sid, status=Status.FAILED)],
+    for write in (lambda: other.update_job_state("run-p", JobState(scope_id=sid, status=Status.RUNNING)),
+                  lambda: other.try_claim_job("run-p", sid, claimed_at="2026-06-29T00:01:00Z"),
+                  lambda: other.project_state("run-p", running),
+                  lambda: other.commit_job_states("run-p", [JobState(scope_id=sid, status=Status.FAILED)],
                                                   ended_at="2026-06-29T00:10:00Z"),
-                  lambda: relay.end_run("run-p", RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-06-29T00:10:00Z")):
+                  lambda: other.end_run("run-p", RUN_ENDINGS["settle-advancer-exited"], ended_at="2026-06-29T00:10:00Z")):
         with pytest.raises(ValueError):
             write()
         assert path.read_text(encoding="utf-8") == "{not json"

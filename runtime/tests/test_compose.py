@@ -275,9 +275,8 @@ def test_build_engines_scrubs_inherited_owned_env(monkeypatch, midscene_env_cmd)
     """组合根拥有的 worker env 先清后注（ADR 0037 决策 4/3 + ADR 0035 决策 4 + ADR 0051 决策 13 + ADR 0024「run_id + scope_id
     注入 worker」条）：入参说没有的四个键，宿主 shell 里的同名值**不得**越过组合根直达 worker；必给的 `RUN_ID` 只取入参的值。
 
-    真实触发形态：提交时既无 `--steps-dir`、也无 `./steps`，于是 definition 里 steps_dir 为 None；之后在 export 了
-    GHERKAI_STEPS_DIR 的 shell 里 `status <run> --wait` 接力推进——只做加法的注入会让 worker 加载接力者那台机器的
-    step 目录，本 run 用到的确定性 step 集与 definition 不符、判定不可复现。
+    真实触发形态：提交时既无 `--steps-dir`、也无 `./steps`，于是 definition 里 steps_dir 为 None，而起 worker 的进程继承的环境里
+    导出了 GHERKAI_STEPS_DIR——只做加法的注入会让 worker 加载那个目录，本 run 用到的确定性 step 集与 definition 不符、判定不可复现。
     """
     import os
 
@@ -1297,7 +1296,7 @@ def test_local_result_store_is_the_file_store_wrapped_with_save_retries(tmp_path
 
 def test_build_local_stores_takes_the_result_store_from_the_single_local_entry(tmp_path: Path, monkeypatch):
     """前台 run 与本机查询命令的装配（`build_local_stores`）经 `local_result_store` 取判定存储、不另造一份：换掉那个入口，这里
-    拿到的就是换上的那一个，入参是 report_dir。后台推进进程与 status --wait 接力那一侧（`detached.assemble_local_run`）同样经它，
+    拿到的就是换上的那一个，入参是 report_dir。后台推进进程那一侧（`detached.assemble_local_run`）同样经它，
     见 runtime 的推进进程用例；两侧都经同一入口，保存重试才对两种推进器一致。不换时拿到的是带重试的那一种。"""
     from gherkai_core.adapters.result_store.retrying import RetryingResultStore
 

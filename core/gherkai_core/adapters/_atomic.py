@@ -4,7 +4,7 @@
 （本项目实测：紧循环读同一被反复重写的文件，几十次读内即可稳定撞到空文件）。tmp 与目标同目录保证 rename 同分区原子。
 
 三面的并发读者都是**设计内的、真实存在的**（不是防御性假设）：
-- 控制面 `run_state.json`：per-run 推进进程在文件锁内写它时，`gherkai status` / 接力进程**无锁**读同一文件
+- 控制面 `run_state.json`：推进器在文件锁内写它时，`gherkai status`、`list-runs` 与处置方**无锁**读同一文件
   （读面不持 `.runstate.lock`，只写面互斥）。
 - 数据面 `jobs/*.json`：`explain` 被允许在 run 执行到一半时读已完成 job（ADR 0042 决策四），读者是另一个进程。
 - 报告面 `manifest.json` / `index.html`：报告写在 run 级终态写成之后（ADR 0030 决定三；后台 run 只由写成收尾的一方写一次，

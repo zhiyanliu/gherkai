@@ -10,7 +10,7 @@
 
 ## 模块
 
-包内十个模块（`__init__.py` 只有包说明、无逻辑）：
+包内十一个模块（`__init__.py` 只有包说明、无逻辑）：
 
 - `compose.py` —— 组合根/引擎注册表，按职责分四组：
   - **worker 拉起**：`resolve_worker_cmd`（四级 worker 定位链，ADR 0037 决策 3——env 覆写 `GHERKAI_WORKER_<ENGINE>_CMD`（+ 可选
@@ -40,6 +40,9 @@
     None）/ `preflight_cloud_resources`（提交前的资源存在性检查）/ `probe_aws_identity`（供 doctor 使用）/ `is_botocore_error`（入口据此把云端故障归到
     自己的退出码层）/ `read_resource`（`file://` 与 `s3://` 同一读入口）/ `local_artifact_locations`·`cloud_artifact_locations`（产物落点清单）/
     `events_db_path`·`build_local_event_log`·`build_cloud_event_log`（一个 run 的事件流落点与两个后端的读取入口）/
+    `report_dir_too_long`（本机后端报告目录的路径长度检查，通过为 None，不打印、什么都不建：总长超出 `REPORT_DIR_MAX_BYTES` 为
+    `ReportDirPathTooLong`（带字节数与上限），某一层名字被文件系统答「名字太长」为 `ReportDirNameTooLong`（带那一层的名字）；上限由
+    core 的 `sqlite.DB_PATH_MAX_BYTES`、`RUN_ID_BYTES` 与 `EVENTS_DB_NAME` 推出，推导在常量旁的注释里，ADR 0030 决定四「报告目录的路径长度」条）/
     `build_cloud_run_list_store`（`list-runs` 用的只读云端 RunStore：先经 `check_run_list_index` 按 DescribeTable 的 `IndexStatus` 判列举所读的状态分组索引
     是否就绪，缺失、`CREATING`、`DELETING` 与不认识的状态抛 `RunListIndexUnavailable`（消息是给使用方的整句），`ACTIVE` 与 `UPDATING` 放行；
     就绪检查只在这条装配路径上，不并入 `preflight_cloud_resources`，ADR 0041 决策七）/ `local_run_list_location`·`cloud_run_list_location`
@@ -56,15 +59,22 @@
     `load_feature`（入口共用的工具函数）。
 - `detached.py` —— local 无状态批量运行宿主（ADR 0034）：`SubprocessLauncher`（起 worker、旁路落事件与退出记录；构造时注入墙钟，
   每个执行中的 job 一个检查线程按墙钟比对 tick 交来的截止时刻、到点按停止宽限停 worker，ADR 0054 决策二）+ `run_reconcile_loop`
-  （本机推进循环，后台推进进程与 `status --wait` 接力共用；`clock` 与判定存储必传，组合根传 `compose.now` 与经 `compose.local_result_store` 装配的判定存储；按 `tick` 返回的 `TickOutcome` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告（读运行态、按点名的标识读回判定明细），读运行态、读明细与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
+  （本机后台推进进程的推进循环；`clock` 与判定存储必传，组合根传 `compose.now` 与经 `compose.local_result_store` 装配的判定存储；按 `tick` 返回的 `TickOutcome` 分支，只在这一方的写使 run 成为终态时经 core 的 `reconcile.write_report_from_record` 从记录生成报告（读运行态、按点名的标识读回判定明细），读运行态、读明细与写报告的失败都被隔离；run 级墙钟由 core 的 `project.run_duration_ms` 从运行态的起止算出）+
   `assemble_local_run`（按传入的运行定义装配推进一个 run 所需的各部分：事件库、RunStore、启动器、判定存储与报告存储，结果是 `LocalAdvancer`；
   不启动子进程，后台推进进程在回报 `submit` 之前调用它；装配出的 RunStore 不带锁的持有者、不能建 run，后台推进进程在调用它之前已经建好 run）+ `advance_local_run`（后台推进进程推进一个 run：用它自己生成的那份运行定义，
-  不从记录读回，ADR 0035 决策 3「本机 `submit`」）+ `build_local_reconcile`·`drive_local_reconcile`（`status --wait` 接力：从记录读回运行
-  定义之后经 `assemble_local_run` 装配、再推进；读不到可用的运行定义时抛异常、什么都不写）+ 接力判超时 `_recover_timed_out_claims`（别人认领的 job，墙钟严格晚于
-  截止时刻加固定余量 `_RECOVERY_MARGIN_S`（10 秒）仍无退出记录即判超时；补写的未知退出经 `record_timed_out_if_absent`，只在这个 job
-  还没有退出记录时写入；这个条件保证不了不抢在认领方催停的 worker 收尾之前补写；现行设计里管它的进程不在了的 run 不续、
-  由别的一方结束，这段接力随实装删除，见 ADR 0054 决策六）。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
+  不从记录读回，ADR 0035 决策 3「本机 `submit`」）。后台推进进程是它推进的 run 唯一的推进器，没有别的进程接着推进：它退出之后 run 不续，
+  由处置方结束（`settle.py`，ADR 0034「推进器与触发源」与被拒方案「本机接力，及其改法」）。本包的模块都不导入 cli 的包，后台推进进程因此
+  不读项目配置文件（ADR 0053 决策 1，结构断言在 `tests/test_detached_launcher.py`）。`_pump` 写退出记录时只记事实：超时标志只由检查线程置，退出时刻是拿到退出码之后读一次注入的墙钟；
   worker 在截止时刻之后自己退出时是否按超时处理由 core 的投影判断
+- `settle.py` —— run 处置的判定与动作（ADR 0054 决策六到八），等待中的 `status --wait` 与 `settle-runs` 两个入口都调它：`settle_run`
+  按决策八「处置的次序」做一次处置（读一次提交记录，别的版本写出的即 `other_version`；读运行态，读不出、已结束即给出结果；本机经
+  `LocalRunStore.probe_run_dir` 打开 run 目录、做边界检查、不阻塞地试拿；`decide` 由锁与期限取 reason，墙钟读一次、结束时刻共用这个读数；
+  结束写；写成之后经 core 的 `reconcile.generate_report_from_record` 按被处置的 run 标识生成报告；锁持有到报告生成之后），结果是
+  `SettleResult`（`outcome`、`reason` 与判定用到的结构化字段，报告是否生成与没有生成的原因 `ReportNotWritten` 的类别与说明分开）。这个名字下
+  已没有 run 抛 `RunGone`，别的读写失败（OSError）原样抛出，生成报告的失败隔离在处置之内、不记日志。`local_target` 装配本机的处置目标
+  （`SettleTarget`，`run_dirs` 为本机 run 目录的专属入口，云端没有锁时为 None）。不给 run 标识的一批：`unfinished_run_ids` 列出未结束与
+  运行态读不出的 run，`settle_unfinished` 逐个处置（列举之后被删去的略过），`clean_staging_dirs` 清理暂存目录；每一项连同记进
+  `BatchProgress` 都在调用方给的区间里（CLI 传推迟 SIGINT 的那一种），`BatchProgress.listed` 表示列举是否已完成
 - `deadline.py` —— 运行期限的算式（ADR 0054 决策二）：`compute_deadline_at` 在建 run 时由创建时刻、各 job 的墙钟预算与每 job 尾段算出
   `deadline_at`，写进运行定义；每 job 尾段在本机后端取 `local_per_job_tail_s`（`2 × G + 10` 秒，G 为停止宽限），在云端后端取
   `CLOUD_PER_JOB_TAIL_S`（210 秒，由超时触发的调度精度 60 秒、Fargate 停止宽限上限 120 秒与事件链尾延迟约 30 秒组成，最后一项是经验值、
@@ -137,7 +147,7 @@ worker 定位链第四级（`uvx`）与 fd 传递的相互作用是实际运行�
 - [0049](../docs/adr/0049-worker-capabilities-targets-keys.md) 能力自述的测试目标键（`compose` 的 targets 契约校验与交集）
 - [0051](../docs/adr/0051-device-session-lifecycle-and-app-distribution.md) 远程访问会话的生命周期与应用分发（`app_upload` 的应用前缀与保留承诺、`devicefarm` 的项目找回与会话列举）
 - [0053](../docs/adr/0053-project-config-file.md) 项目配置文件（region / profile 解析链里的配置文件层）
-- [0054](../docs/adr/0054-run-deadline-lifetime-lock-and-settling.md) 运行期限与生命期锁（`deadline` 的算式与建 run 的各个时刻、`compose.process_lock_holder`）
+- [0054](../docs/adr/0054-run-deadline-lifetime-lock-and-settling.md) 运行期限、生命期锁与 run 处置（`deadline` 的算式与建 run 的各个时刻、`compose.process_lock_holder`、`settle`）
 
 参与开发的总入口（环境、测试、发布链、文档地图）见根 [`CONTRIBUTING.md`](../CONTRIBUTING.md)；执行与推进的机理解读见
 [`docs/internals/`](../docs/internals/README.md)。

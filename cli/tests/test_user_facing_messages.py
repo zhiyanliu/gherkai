@@ -533,3 +533,81 @@ def test_emphasis_hits_carry_constant_name_for_registration():
 def test_forbidden_shape_for_pending_attempt_wording(text: str, hit: bool):
     """待核尝试一族的禁用形态：「待核尝试」与「记为待核」命中，「待核对」与裸词「待核」不命中。"""
     assert bool(FORBIDDEN.search(text)) is hit, text
+
+
+def _settle_sentences() -> list[str]:
+    """run 处置的两个入口拼出的整句（ADR 0054 决策八）：每一种 reason 在各种结构字段下的原因与「处置」一栏、等待中的说明、处置之后的那一句
+    （人读与 --json 两种）、暂存目录的原因、报告目录路径长度的两句、run 目录与报告目录不过边界检查时处置一侧的两句，以及管它的进程退出而
+    run 未结束的那个尾句。由结构化的结果经生产代码拼出，覆盖每一个选句的分支。"""
+    import errno
+    from datetime import datetime, timezone
+
+    from gherkai_cli import __main__ as m
+    from gherkai_cli import render
+    from gherkai_core.adapters.run_store import run_dir
+    from gherkai_core.errors import UnsupportedDefinitionSchema
+    from gherkai_runtime import compose, settle
+
+    R, O, D = settle.Reason, settle.Outcome, settle.DefinitionRead
+    deadline = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    unavailable = OSError(errno.ENOLCK, "No locks available")
+    readable = {"definition": D.READABLE, "deadline": deadline}
+    unreadable_defs = [{"definition": d} for d in (D.MISSING, D.MALFORMED)]
+    checks = [run_dir.BoundaryCheck(run_dir.Boundary.OUTSIDE, "/r/reports/x", "/r/reports/x", "nfs", None)]
+    checks += [run_dir.BoundaryCheck(run_dir.Boundary.UNKNOWN, "/r/reports/x", "/r/reports/x", None, reason)
+               for reason in _unknown_reasons()]
+    missing = [settle.ReportNotWritten(kind, f"说明片段 {i}") for i, kind in enumerate(settle.ReportMissing)]
+    results = [
+        settle.SettleResult("r", O.SKIPPED, R.OTHER_VERSION, D.OTHER_VERSION,
+                            definition_error=UnsupportedDefinitionSchema(9, 1, cli_version="9.9.0")),
+        settle.SettleResult("r", O.SKIPPED, R.OTHER_VERSION, D.OTHER_VERSION, definition_error=UnsupportedDefinitionSchema(0, 1)),
+        settle.SettleResult("r", O.SKIPPED, R.UNREADABLE, state_error=ValueError("坏了"), **readable),
+        settle.SettleResult("r", O.SKIPPED, R.ALREADY_FINISHED, **readable),
+        *[settle.SettleResult("r", O.SKIPPED, R.UNSUPPORTED_FILESYSTEM, boundary=c, **readable) for c in checks],
+        settle.SettleResult("r", O.SETTLED, R.ADVANCER_EXITED, report_written=True, **readable),
+        *[settle.SettleResult("r", O.SETTLED, R.ADVANCER_EXITED, report_written=False, report_missing=x, **readable)
+          for x in missing],
+        settle.SettleResult("r", O.WOULD_SETTLE, R.PAST_DEADLINE, **readable),
+        settle.SettleResult("r", O.SKIPPED, R.LOCK_HELD, lock=run_dir.LockState.HELD, **readable),
+        *[settle.SettleResult("r", O.SKIPPED, R.LOCK_HELD, lock=run_dir.LockState.HELD, **d) for d in unreadable_defs],
+        settle.SettleResult("r", O.SKIPPED, R.UNDETERMINED, lock=run_dir.LockState.UNAVAILABLE, lock_error=unavailable, **readable),
+        *[settle.SettleResult("r", O.SKIPPED, R.UNDETERMINED, lock=run_dir.LockState.UNAVAILABLE, lock_error=unavailable, **d)
+          for d in unreadable_defs],
+        *[settle.SettleResult("r", O.SKIPPED, R.UNDETERMINED, **d) for d in unreadable_defs],
+        settle.SettleResult("r", O.SKIPPED, R.WITHIN_DEADLINE, **readable),
+    ]
+    out: list[str] = []
+    for r in results:
+        out += [render.settle_reason_text(r), render.settle_outcome_text(r)]
+        if m._wait_notice_key(r) is not None:
+            out.append(m._wait_notice("r", r))
+        if r.outcome is O.SETTLED:
+            out += [s for s in (m._settled_notice(r, machine=False), m._settled_notice(r, machine=True))
+                    if s is not None]
+    sweeps = [run_dir.StagingSweep("n", run_dir.StagingOutcome.SKIPPED, skip, boundary=checks[0], error=unavailable)
+              for skip in run_dir.StagingSkip]
+    sweeps.append(run_dir.StagingSweep("n", run_dir.StagingOutcome.SKIPPED, run_dir.StagingSkip.UNSUPPORTED_FILESYSTEM,
+                                       boundary=checks[1]))
+    out += [render.staging_reason_text(s) for s in sweeps]
+    out += [m._report_dir_too_long_message(compose.ReportDirPathTooLong("/r/reports", 471, 470)),
+            m._report_dir_too_long_message(compose.ReportDirNameTooLong("/r/reports", "x" * 300))]
+    for c in checks:
+        out += [m._filesystem_rejected_message(c, subject=m._RUN_DIR, outcome=m._WAIT_REJECTED_OUTCOME),
+                m._filesystem_rejected_message(c, outcome=m._SETTLE_REJECTED_OUTCOME)]
+    out += [m._unended_run_remedy("r", report_dir="/r/reports", again=again) for again in (m._AGAIN_RUN, m._AGAIN_SUBMIT)]
+    out += [m._local_wait_interrupted_notice("r", settled=s, report_dir="/r/reports") for s in (False, True)]
+    return out
+
+
+def test_settle_sentences_carry_no_internal_pointers_or_emphasis():
+    """处置一侧拼出的整句同样按实际给出的样子判一次禁词与强调记号，另核它们不带内部的取值名、类型名与函数名（如 `lock_held`、
+    `ReportMissing`、`settle_run`）：说明只描述，取值名只出现在 --json 里。"""
+    internal = re.compile(r"advancer_exited|past_deadline|lock_held|undetermined|within_deadline|other_version|already_finished"
+                          r"|unsupported_filesystem|unreadable|would_settle|definition_unreadable|detail_missing|record_unreadable"
+                          r"|access_failed|SettleResult|ReportMissing|ReportNotWritten|DefinitionRead|RunGone|settle_run"
+                          r"|probe_run_dir|sweep_staging|StagingSkip|UnsupportedDefinitionSchema|REPORT_DIR_MAX_BYTES|flock"
+                          r"|\bINSIDE\b|\bOUTSIDE\b|\bUNKNOWN\b|\bNone\b")
+    sentences = _settle_sentences()
+    assert len(sentences) > 40
+    for s in sentences:
+        assert not FORBIDDEN.search(s) and not EMPHASIS.search(s) and not internal.search(s), s

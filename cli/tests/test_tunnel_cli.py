@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import atexit
 import errno
+import json
 import os
 import signal
 import sqlite3
@@ -317,7 +318,8 @@ def test_report_dir_that_cannot_be_opened_is_reported_before_the_tunnel_as_a_rec
 
 
 def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pending(tmp_path, monkeypatch, capsys):
-    """前台 run 的记录已写下、建事件库失败（sqlite3.Error 不是 OSError）：说明记录已写下、停在 pending，退出码 2、不打回溯。"""
+    """前台 run 的记录已写下、建事件库失败（sqlite3.Error 不是 OSError）：说明记录已写下、停在 pending，给出把它记为已结束的 settle-runs
+    整条命令再重新执行（经 submit 报出的那一句说重新提交），退出码 2、不打回溯。"""
     from gherkai_core.adapters import event_log
 
     def broken_event_log(path):
@@ -330,8 +332,10 @@ def test_run_event_store_failure_after_the_record_exits_2_and_leaves_the_run_pen
     assert rc == 2
     (run_dir,) = _run_dirs(reports)
     err = capsys.readouterr().err
-    assert (f"run {run_dir.name} 的记录已经写下，但在报告目录 {reports} 里准备执行用的文件失败：unable to open database file。"
-            "还没有开始执行，这个 run 在记录里停在 pending。") in err
+    assert err.splitlines()[-1] == (
+        f"run {run_dir.name} 的记录已经写下，但在报告目录 {reports} 里准备执行用的文件失败：unable to open database file。"
+        "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录所在磁盘的剩余空间与读写权限，再用 "
+        f"gherkai settle-runs {run_dir.name} --report-dir {reports} 把这个 run 记为已结束，然后重新执行。")
     assert "Traceback" not in err
     assert LocalRunStore(reports).load_run_state(run_dir.name).status == Status.PENDING
 
@@ -376,13 +380,28 @@ def _raise_sigint_at(when: str, monkeypatch) -> None:
         monkeypatch.setattr(os, "rename", rename)
 
 
+def _assert_ended_by_the_interrupt(reports: Path) -> None:
+    """建 run 之后、开始执行之前被中断的那个 run：由前台进程自己按说明表「使用方中断」一行结束（全部 job 记 skipped，run 记 aborted
+    与那一句），报告已生成；没有留下暂存目录。"""
+    assert os.listdir(reports) == [FIXED_RUN_ID]
+    state = LocalRunStore(reports).load_run_state(FIXED_RUN_ID)
+    assert (state.status, state.message) == (Status.ABORTED, "收到中断信号，余下的 job 不再启动")
+    assert [(js.status, js.message) for js in state.jobs.values()] == [(Status.SKIPPED, "收到中断信号，本 job 没有启动")]
+    assert state.ended_at is not None and (reports / FIXED_RUN_ID / "index.html").is_file()
+
+
+def _ended_by_the_interrupt_line(reports) -> str:
+    return (f"已停止：run {FIXED_RUN_ID} 已因中断记为已结束，没有 job 开始执行；"
+            f"可用 gherkai status {FIXED_RUN_ID} --report-dir {reports} 查看。")
+
+
 @pytest.mark.parametrize("when", ["before-the-call", "before-rename", "after-rename", "after-the-call"])
-def test_ctrl_c_around_creating_the_run_ends_run_with_what_the_record_shows(when, tmp_path, monkeypatch, capsys,
-                                                                            lock_holder):
-    """前台 run 在建 run 的那一段收到真实的 SIGINT：一句说明、退出码 130，标准输出为空、不打回溯。建 run 的那一次调用期间推迟 SIGINT，
-    所以信号在调用里（改名之前或之后）到达时 run 照常建成，调用返回之后才按中断处理，结果与信号在调用返回之后到达相同：末句说记录
-    已经写下、停在 pending，run 目录完整，持有者收到的描述符与 run 目录同 inode、另开一次取锁得到「已被持有」，没有留下暂存目录。
-    信号在调用开始之前到达时什么都没有建，与起隧道期间被中断是同一句。"""
+def test_ctrl_c_around_creating_the_run_ends_the_run_it_created(when, tmp_path, monkeypatch, capsys, lock_holder):
+    """前台 run 在建 run 的那一段收到真实的 SIGINT：退出码 130，标准输出为空、不打回溯。建 run 的那一次调用期间推迟 SIGINT，所以信号在
+    调用里（改名之前或之后）到达时 run 照常建成，调用返回之后才按中断处理，结果与信号在调用返回之后到达相同：这个进程持着锁、就是推进器，
+    由它自己按「使用方中断」那一行做结束写并生成报告（ADR 0035 决策 3「前台 `run`」一条），末句说这个 run 已因中断记为已结束；持有者
+    收到的描述符与 run 目录同 inode、进程退出之前另开一次取锁得到「已被持有」。信号在调用开始之前到达时什么都没有建，与起隧道期间被
+    中断是同一句。"""
     _fix_run_id(monkeypatch)
     _raise_sigint_at(when, monkeypatch)
     monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
@@ -395,11 +414,9 @@ def test_ctrl_c_around_creating_the_run_ends_run_with_what_the_record_shows(when
         assert cap.err.splitlines()[-1] == "已停止，没有开始执行。"
         assert (os.listdir(reports) if reports.exists() else []) == [] and lock_holder.fds == []
         return
-    assert cap.err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
-    assert os.listdir(reports) == [FIXED_RUN_ID]
+    assert cap.err.splitlines()[-1] == _ended_by_the_interrupt_line(reports)
+    _assert_ended_by_the_interrupt(reports)
     run = reports / FIXED_RUN_ID
-    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
-    assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
     (fd,) = lock_holder.fds
     assert _same_inode(fd, run)
     another = os.open(run, os.O_RDONLY | os.O_DIRECTORY)
@@ -407,6 +424,48 @@ def test_ctrl_c_around_creating_the_run_ends_run_with_what_the_record_shows(when
         assert run_dir.try_lock(another).state is run_dir.LockState.HELD
     finally:
         os.close(another)
+
+
+def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_write(tmp_path, monkeypatch, capsys):
+    """建 run 之后被中断、前台进程正在做那次结束写时又按了一次 Ctrl-C（这里在真实的结束写里发出）：推迟到结束写与生成报告做完，结果与
+    只按一次相同，不打回溯。"""
+    _fix_run_id(monkeypatch)
+    _raise_sigint_at("after-the-call", monkeypatch)
+    real_end_run = LocalRunStore.end_run
+
+    def end_run(self, run_id, ending, *, ended_at):
+        signal.raise_signal(signal.SIGINT)
+        return real_end_run(self, run_id, ending, ended_at=ended_at)
+
+    monkeypatch.setattr(LocalRunStore, "end_run", end_run)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1] == _ended_by_the_interrupt_line(reports)
+    _assert_ended_by_the_interrupt(reports)
+
+
+def test_end_write_failure_after_an_interrupt_before_execution_is_reported_without_a_traceback(tmp_path, monkeypatch,
+                                                                                               capsys):
+    """建 run 之后被中断、那次结束写本身失败（磁盘写不进）：按运行期落库失败的说明结束，退出码仍按信号取 130，不打回溯；run 停在
+    pending。"""
+    _fix_run_id(monkeypatch)
+    _raise_sigint_at("after-the-call", monkeypatch)
+
+    def end_run(self, run_id, ending, *, ended_at):
+        raise OSError(errno.ENOSPC, os.strerror(errno.ENOSPC))
+
+    monkeypatch.setattr(LocalRunStore, "end_run", end_run)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("建 run 被中断时不该开始执行"))
+    reports = tmp_path / "reports"
+    rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
+    cap = capsys.readouterr()
+    assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
+    assert cap.err.splitlines()[-1].startswith(f"run {FIXED_RUN_ID} 读写本机的运行记录失败，执行已停止，没有输出汇总：")
+    assert f"gherkai settle-runs {FIXED_RUN_ID} --report-dir {reports} 把这个 run 记为已结束，然后重新执行。" in cap.err
+    assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
 
 
 def test_run_json_masks_tunnel_credentials_but_run_meta_keeps_them(tmp_path, monkeypatch, capsys, tunnel_service):
@@ -591,12 +650,12 @@ def test_local_submit_hands_over_to_the_advancer_which_builds_and_advances_the_r
     assert run_id.startswith(created.strftime("%Y%m%dT%H%M%SZ"))
     assert meta.session_warmup_url == WARMUP and dict(meta.extra_http_headers) == {"ngrok-skip-browser-warning": "1"}
     assert f"{PUBLIC}/login" in meta.jobs[0].scenarios[0].steps[0].text
-    # 推进用的就是写进记录的那一份，且是内存里的同一个对象（不读回）；运行态带后台执行标记（status --wait 据此认它可接力）
+    # 推进用的就是写进记录的那一份，且是内存里的同一个对象（不读回）；运行态带后台执行标记（只作描述）
     ((_advancer, advanced_meta),) = advanced
     assert advanced_meta == meta
     ((created_meta,), (assembled_meta,)) = handed["create_run"], handed["assemble"]
     assert created_meta is assembled_meta and assembled_meta is advanced_meta
-    assert LocalRunStore(reports).is_detached(run_id)
+    assert json.loads((run_dir / "run_state.json").read_text(encoding="utf-8"))["detached"] is True
     assert (run_dir / "reconcile.log").exists() and (run_dir / "events.db").exists()
     child = inline_children.only()
     assert child.returncode == 0 and child.redirected.is_set()
@@ -634,8 +693,9 @@ def test_local_submit_tunnel_failure_is_reported_by_submit_and_builds_no_run(tmp
 
 def test_local_submit_reports_when_the_advancer_exits_before_reporting(tmp_path, monkeypatch, capsys, inline_children,
                                                                        tunnel_service, advanced):
-    """后台推进进程在回报之前崩溃（这里是生成运行定义时）：提交进程读到回报管道的文件结束，说明它退出了、可能已经建立 run、可以用
-    list-runs 查看，退出码 2；后台推进进程的 finally 照样关闭会话。"""
+    """后台推进进程在回报之前崩溃（这里是生成运行定义时）：提交进程读到回报管道的文件结束，说明它退出了、可能已经建立 run，给出不带
+    run 标识的 settle-runs 整条命令（把执行它的进程已不在的 run 记为已结束、同时清理暂存目录），退出码 2；后台推进进程的 finally 照样
+    关闭会话。"""
     def boom(*a, **k):
         raise RuntimeError("boom")
 
@@ -646,8 +706,10 @@ def test_local_submit_reports_when_the_advancer_exits_before_reporting(tmp_path,
     inline_children.settle()
     cap = capsys.readouterr()
     assert rc == 2 and cap.out == ""
-    assert ("后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经建立了这个 run，"
-            f"可以用 gherkai list-runs --report-dir {reports} 查看。处理好原因之后请重新提交。") in cap.err
+    assert cap.err.splitlines()[-1] == (
+        "后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经建立了这个 run："
+        f"可以用 gherkai settle-runs --report-dir {reports} 把执行它的进程已不在的 run 记为已结束，同时清理建立 run 时中断留下的暂存目录。"
+        "处理好原因之后请重新提交。")
     inline_children.only().expect_error(RuntimeError)
     assert tunnel_service.closed and _run_dirs(reports) == [] and advanced == []
 
@@ -768,7 +830,8 @@ def _break_reconcile_log(reports: Path, monkeypatch) -> None:
     (_occupy_with_existing_run, f"run {FIXED_RUN_ID} 已经存在，没有重新建立。请重新执行这条命令。"),
     (_occupy_with_a_file, "里写这个 run 的记录失败："),
     (_break_assembly, f"run {FIXED_RUN_ID} 的记录已经写下，但在报告目录 {{reports}} 里准备执行用的文件失败：unable to open database file。"
-                      "还没有开始执行，这个 run 在记录里停在 pending。"),
+                      "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录所在磁盘的剩余空间与读写权限，再用 "
+                      f"gherkai settle-runs {FIXED_RUN_ID} --report-dir {{reports}} 把这个 run 记为已结束，然后重新提交。"),
     (_break_reconcile_log, f"run {FIXED_RUN_ID} 的记录已经写下，但在报告目录 {{reports}} 里准备执行用的文件失败："),
 ], ids=["run-exists", "record-not-written", "assembly-fails", "log-fails"])
 def test_local_submit_record_failures_are_reported_with_the_session_closed_first(arrange, expected, tmp_path,
@@ -1835,8 +1898,9 @@ sys.exit(m.main(["run", feature, "--report-dir", str(work / "reports")]))
 @pytest.mark.parametrize("after", [True, False], ids=["after-rename", "before-rename"])
 def test_a_real_ctrl_c_while_creating_the_run_is_handled_after_the_run_is_created(after, tmp_path):
     """真实进程、真实信号：前台 run 停在建 run 的调用里（真实的改名之前或之后）时收到 SIGINT。调用期间推迟 SIGINT，所以进程不在这时
-    退出，发信号之前与之后锁都被持有（改名之前是暂存目录上的、之后是 run 目录上的）；放行之后建 run 照常完成，随后以 130 结束，标准
-    输出为空、不打回溯，末行说记录已经写下、停在 pending；run 目录完整，没有留下暂存目录，进程退出之后锁随即拿得到。两种时机结果相同。"""
+    退出，发信号之前与之后锁都被持有（改名之前是暂存目录上的、之后是 run 目录上的）；放行之后建 run 照常完成，随后由这个进程自己按
+    「使用方中断」那一行做结束写、生成报告，以 130 结束，标准输出为空、不打回溯，末行说这个 run 已因中断记为已结束；没有留下暂存目录，
+    进程退出之后锁随即拿得到。两种时机结果相同。"""
     reports = tmp_path / "reports"
     proc = subprocess.Popen(
         [sys.executable, "-P", "-c", _INTERRUPTED_CREATE_DRIVER, "after" if after else "before", str(tmp_path),
@@ -1854,11 +1918,9 @@ def test_a_real_ctrl_c_while_creating_the_run_is_handled_after_the_run_is_create
             proc.kill()
             proc.communicate()
     assert (proc.returncode, out, "Traceback" in err) == (130, "", False), err
-    assert err.splitlines()[-1] == f"已停止：run {FIXED_RUN_ID} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
-    assert os.listdir(reports) == [FIXED_RUN_ID]
-    run = reports / FIXED_RUN_ID
-    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
-    assert _lock_state_of(run) is run_dir.LockState.ACQUIRED
+    assert err.splitlines()[-1] == _ended_by_the_interrupt_line(reports)
+    _assert_ended_by_the_interrupt(reports)
+    assert _lock_state_of(reports / FIXED_RUN_ID) is run_dir.LockState.ACQUIRED
 
 
 # 本机后台推进进程的模块搜索路径上放的 sitecustomize：给 os.rename 打补丁，改名暂存目录之前在 PAUSE 目录里放一个 paused 文件，

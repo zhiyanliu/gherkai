@@ -44,6 +44,7 @@ from gherkai_core.errors import RunAlreadyExists
 from gherkai_core.model import TERMINAL_STATUSES, JobState, RunListing, RunMeta, RunState, Status
 from gherkai_core.run_status import CommitOutcome, RunEnding, check_new_run, check_running_write, commit_applied, ending_applied
 from gherkai_core.serialize import (
+    UNREADABLE_RECORD_ERRORS,
     definition_from_json,
     require_definition_schema,
     require_listing_header,
@@ -778,7 +779,7 @@ class DynamoDBRunStore:
                 continue
             try:
                 state = require_listing_state(_run_state_from_item(state_item))
-            except (ValueError, KeyError, TypeError, AttributeError):  # 形态违约、状态值不认识、字段类型不对
+            except UNREADABLE_RECORD_ERRORS:  # 形态违约、状态值不认识、字段类型不对
                 state = None
             meta_item = items.get((run_id, _META))
             try:

@@ -23,6 +23,7 @@ cost 只含 engine 报的原生量、不折美元（ADR 0024）；report_refs �
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Final
 
 from gherkai_core.model import (
     AppRef,
@@ -562,6 +563,12 @@ def run_state_from_dict(d: dict) -> RunState:
 # 键取值为空、不落键时，文件里的旧值会被当成附加键带回。测试比对这个集合与 run_state_to_dict 的产物。
 RUN_STATE_KEYS = frozenset({
     "run_id", "status", "started_at", "ended_at", "high_water_mark", "message", "claim_count", "jobs"})
+
+
+# 一份记录「读不出」的口径：读到了内容而解析不了时，上面各读端抛出的异常类别（JSON 损坏或编码不对、形态违约与定义违约、结构版本
+# 不认、状态值本版本不认识、字段类型不对）。读取本身的失败（OSError）不在其内，那是读不到这个后端。列举 run（两个 adapter）与处置
+# 判断运行态、提交记录读不读得出都按它，口径只在这一处登记（ADR 0041 决策七、ADR 0054 决策六）。
+UNREADABLE_RECORD_ERRORS: Final = (ValueError, KeyError, TypeError, AttributeError)
 
 
 def require_listing_state(state: RunState) -> RunState:

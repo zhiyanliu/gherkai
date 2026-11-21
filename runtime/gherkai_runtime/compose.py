@@ -8,6 +8,7 @@ WebUI 的 bootstrap 将来复用本模块——组合根逻辑（引擎注册表
 """
 from __future__ import annotations
 
+import errno
 import importlib.util
 import json
 import math
@@ -19,11 +20,12 @@ import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Iterable, Mapping
+from typing import TYPE_CHECKING, Final, Iterable, Mapping
 from importlib.metadata import PackageNotFoundError
 from importlib.metadata import version as _dist_version
 from pathlib import Path
 
+from gherkai_core.adapters.event_log.sqlite import DB_PATH_MAX_BYTES
 from gherkai_core.adapters.subprocess_engine import SubprocessEngine
 from gherkai_core.model import Job
 from gherkai_core.ports import Engine, ReportStore, ResultStore, RunStore
@@ -366,9 +368,9 @@ def _runtime_version() -> str | None:
 # 「run_id + scope_id 注入 worker」条）：**先清后注**，前四个有值显式注、无值显式清，`RUN_ID` 是 `build_engines` 的必给参数、恒注入
 # ——它们是组合根 → worker 的内部接线，只认本模块的入参、不认宿主 shell 的同名值。`GHERKAI_STEPS_DIR` / `GHERKAI_EXTRA_HTTP_HEADERS` /
 # `GHERKAI_SESSION_WARMUP_URL` 的值随 definition 持久化（`RunMeta.steps_dir` / `extra_http_headers` / `session_warmup_url`），宿主继承值
-# 越过它，同一个 run 在三个宿主（同步 `run`、local per-run 进程、`status --wait` 接力者）下就用到不同的确定性 step 集/请求头/预热地址、判定不可复现；
+# 越过它，worker 用到的确定性 step 集/请求头/预热地址就与 definition 记下的不同，判定不可复现；
 # `GHERKAI_NO_ARTIFACTS` 不进 definition（`--no-report` 只挂在同步 `run`、该方式什么都不落），清它挡的是另一件事：
-# 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。`RUN_ID` 是本 run 的 id（三个宿主都持有，与云端 RunTask overrides
+# 使用方没给 `--no-report`、却因宿主导出过该值而收不到产物。`RUN_ID` 是本 run 的 id（起 worker 的各宿主都持有，与云端 RunTask overrides
 # 同名）：worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），宿主 shell 里残留的值越过组合根会把会话记到别的 run 名下。
 # 本机只注它、不注 `SCOPE_ID` 与 `EVENTS_DDB_TABLE`，worker 的事件出口仍是 fd 态（ADR 0024）。
 # **只列 gherkai 自有键**：`NOVA_LOGS_DIR` / `MIDSCENE_RUN_DIR` 是 SDK 侧配置项，本模块的 None 取值按 `build_engines`
@@ -433,12 +435,12 @@ def build_engines(
     steps_dir（ADR 0037 决策 4）：使用方确定性 step 目录的**绝对路径**，经 env `GHERKAI_STEPS_DIR` 注给
     **两个** worker（worker 启动时排序递归加载、注册进自己那张注册表）。约定解析在提交侧（取值顺序见该决策，
     配置文件那一层见 ADR 0053 决策 2）、值随 definition（`RunMeta.steps_dir`）走——本函数只搬运 definition 里的值，**不自己解析
-    `./steps`**（三个宿主 CWD 各不相同，重解析必分叉）。None 表示无使用方 step（worker 只有内建脚手架）——
+    `./steps`**（各宿主的 CWD 不必相同，重解析会分叉）。None 表示无使用方 step（worker 只有内建脚手架）——
     此时宿主 shell 里继承来的同名 env 会被**清掉**、不得越过 definition（见 `_COMPOSE_OWNED_WORKER_ENV`）。
 
     run_id（ADR 0024「run_id + scope_id 注入 worker」条）：本 run 的 id，经 env `RUN_ID` 注给**两个** worker（与云端 RunTask overrides
-    同名），worker 用它编码会话名的 run 段（ADR 0051 决策 3、4）。起 worker 的本机宿主（同步 `run`、local per-run 进程、`status --wait`
-    接力者）都持有它；本机 worker 缺 `RUN_ID` 会在建会话前以 1 退出，故它是必给参数：漏传在装配点即报 TypeError，空值抛 ValueError，
+    同名），worker 用它编码会话名的 run 段（ADR 0051 决策 3、4）。起 worker 的两个本机宿主（同步 `run` 的进程、本机后台推进进程）都
+    持有它；本机 worker 缺 `RUN_ID` 会在建会话前以 1 退出，故它是必给参数：漏传在装配点即报 TypeError，空值抛 ValueError，
     不留到运行期。传入的须是 `RunMeta.run_id` 的同一个值，本函数不自动生成（另造一个会让会话名里的 run 段与 run 记录对不上）。
     宿主 shell 里继承来的同名值恒被这个值覆盖。本机不注 `SCOPE_ID`，事件出口仍是 fd 态。
 
@@ -924,8 +926,96 @@ def _normalize_prefix(prefix: str) -> str:
 
 def events_db_path(report_dir: str | Path, run_id: str) -> Path:
     """本机后端一个 run 的事件流落点：`<report_dir>/<run_id>/events.db`（ADR 0034；同步 `run` 自 ADR 0042 决策七起也写它）。
-    submit 的 per-run 进程、status --wait 的接力者、同步 run 的记录器与 explain 的补取都从这一个函数取路径。"""
-    return Path(report_dir) / run_id / "events.db"
+    本机后台推进进程、同步 run 的记录器与 explain 的补取都从这一个函数取路径。"""
+    return Path(report_dir) / run_id / EVENTS_DB_NAME
+
+
+# ============================================================================
+# 本机后端报告目录的路径长度（ADR 0030 决定四「报告目录的路径长度」条）：入口在第一次访问报告目录之前检查两项，任一不过即以一句说明、
+# 退出码 2 结束，什么都不建。①总长：解析之后的绝对路径按文件系统编码不超过 `REPORT_DIR_MAX_BYTES` 字节，只看字符串。②每一层名字
+# 不另定字节数，由文件系统回答（`report_dir_too_long`）。
+# ============================================================================
+
+# 一个 run 的事件库文件名（`events_db_path`）
+EVENTS_DB_NAME: Final = "events.db"
+# 产品生成的 run 标识按文件系统编码的字节数：`new_run_id` 的形态定宽，取任一时刻生成的一个即可（现值 23）
+RUN_ID_BYTES: Final = len(os.fsencode(new_run_id(datetime(2000, 1, 1, tzinfo=timezone.utc))))
+# 报告目录（解析之后）的字节数上限。推导：报告目录 R 之下产品构造的路径里最紧的一项是事件库，它的路径是 R、「/」、run 标识、「/」与事件库
+# 文件名依次相接，SQLite 按缺省构建时库文件路径至多 `DB_PATH_MAX_BYTES`（504）字节，所以 R 至多 504 − (1 + 23 + 1 + 9) = 470 字节；
+# `-journal`、`-wal`、`-shm` 文件由 SQLite 在它自己的上限里核。内核的整条路径上限更宽：R 之下最长的是判定明细的临时文件
+# `/<run_id>/jobs/<16 位标识>.json.<8 位随机串>.tmp`（64 字节），macOS 的 1023 字节要求 R 至多 959，Linux 的 4095 字节要求至多 4031。
+# run 标识的形态或事件库的文件名变了，这个数随之变；测试守住它与 SQLite、内核两项上限的关系。前提：所用 Python 链接的 SQLite 按缺省构建、
+# 库文件路径上限不小于 `DB_PATH_MAX_BYTES`
+REPORT_DIR_MAX_BYTES: Final = DB_PATH_MAX_BYTES - len(os.fsencode(f"/{'0' * RUN_ID_BYTES}/{EVENTS_DB_NAME}"))
+
+
+@dataclass(frozen=True)
+class ReportDirPathTooLong:
+    """报告目录的路径太长：`total_bytes` 是解析之后按文件系统编码的字节数，`limit_bytes` 是 `REPORT_DIR_MAX_BYTES`。"""
+
+    path: str
+    total_bytes: int
+    limit_bytes: int
+
+
+@dataclass(frozen=True)
+class ReportDirNameTooLong:
+    """报告目录的路径里有一层名字太长：`name` 是文件系统答「名字太长」的那一层（从最近一层已存在的上级往下，第一层这样的名字）。"""
+
+    path: str
+    name: str
+
+
+def report_dir_too_long(report_root: str | Path) -> ReportDirPathTooLong | ReportDirNameTooLong | None:
+    """本机后端报告目录的路径长度检查（ADR 0030 决定四「报告目录的路径长度」条），通过返回 None，不打印、什么都不建。report_root 是入口
+    解析之后的绝对路径（解析其中的符号链接），随后各步用的就是这同一个路径。
+
+    先核总长：按文件系统编码超过 `REPORT_DIR_MAX_BYTES` 字节即 `ReportDirPathTooLong`，只看字符串。再核每一层名字（`_name_too_long`）：
+    答「名字太长」的即 `ReportDirNameTooLong`。"""
+    path = Path(report_root)
+    total = len(os.fsencode(str(path)))
+    if total > REPORT_DIR_MAX_BYTES:
+        return ReportDirPathTooLong(str(path), total, REPORT_DIR_MAX_BYTES)
+    name = _name_too_long(path)
+    return None if name is None else ReportDirNameTooLong(str(path), name)
+
+
+def _name_too_long(path: Path) -> str | None:
+    """path 里文件系统答「名字太长」（`ENAMETOOLONG`）的第一层名字；没有即 None。
+
+    先找最近一层已存在的上级：从 path 起逐层向上以只读方式打开目录（取法同 `run_dir.check_report_dir`），打开得到「不存在」或「名字太长」
+    的取上一层，打开成功即是它。Linux 上已存在的上级之下紧接着超长的一层时，打开整条路径得到的是「名字太长」而不是「不存在」，所以两者都向上
+    越过；已存在的目录本身不会得到「名字太长」。再对它之下每一层还不存在的名字各问一次：以这一层名字直接接在那个上级之下打开，答「名字太长」
+    即是它，别的回答（「不存在」、恰好已有同名的条目）都说明这一层的名字可用。这些名字建出来时与那个上级在同一个文件系统上，问到的就是它们
+    将来的回答；只打开整条路径不够，内核遇到第一层不存在的名字即答「不存在」，看不到它后面更长的那一层。
+
+    向上找的途中遇到别的打开失败（路径上有文件、没有权限、符号链接成环）即返回 None：长度之外的问题不在这一项里判断，由随后的各步按各自
+    的说法报出。打开都带 `O_DIRECTORY`，路径上的命名管道得到 ENOTDIR、不会阻塞。"""
+    missing: list[str] = []
+    current = path
+    while True:
+        try:
+            fd = os.open(current, os.O_RDONLY | os.O_DIRECTORY)
+        except OSError as e:
+            if e.errno not in (errno.ENOENT, errno.ENAMETOOLONG):
+                return None
+            parent = current.parent
+            if parent == current:
+                return None
+            missing.append(current.name)
+            current = parent
+            continue
+        os.close(fd)
+        break
+    for name in reversed(missing):
+        try:
+            fd = os.open(current / name, os.O_RDONLY | os.O_DIRECTORY)
+        except OSError as e:
+            if e.errno == errno.ENAMETOOLONG:
+                return name
+            continue
+        os.close(fd)
+    return None
 
 
 def build_local_event_log(report_dir: str | Path, run_id: str):
@@ -947,7 +1037,7 @@ def build_cloud_event_log(*, events_table: str, run_id: str, scope_ids: list[str
 def local_result_store(root: str | Path) -> ResultStore:
     """本机推进器用的判定存储：本机文件存储外面套保存失败的退避重试（ADR 0030 决定三「保存明细失败」条）。
 
-    本机的装配入口只有这一个：前台 run 与本机查询命令经 `build_local_stores`，后台推进进程与 status --wait 接力经
+    本机的装配入口只有这一个：前台 run、本机查询命令与处置方经 `build_local_stores`，后台推进进程经
     `detached.assemble_local_run`，都调这里，推进器用的判定存储因此都带同一种重试。查询命令只读，读与探活原样转交给本机文件存储。
     云端的组合根（`build_cloud_stores`）不套：云端保存失败让这次调用失败，由流的重试或之后的触发再做。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
@@ -1277,7 +1367,7 @@ def probe_aws_identity(*, region, profile) -> dict:
 
 
 def _make_lambda_client(*, region, profile):
-    """boto3 lambda client（cloud status --wait 接力 invoke kicker Lambda 做 kickoff）。"""
+    """boto3 lambda client（云端 `status --wait` 检测到推进停住时 invoke kicker Lambda 触发继续推进）。"""
     import boto3
     return boto3.session.Session(profile_name=profile, region_name=region).client("lambda")
 

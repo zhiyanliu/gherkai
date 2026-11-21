@@ -39,7 +39,7 @@ from gherkai_core.persist import RunPersistence, initial_run_state, result_witho
 from gherkai_core.scope import PlanConfig, FeatureContractError, plan
 from gherkai_core.errors import DefinitionContractError, NamedDetailMissing, RunAlreadyEnded, RunAlreadyExists
 from gherkai_core.named_details import load_named_details
-from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION
+from gherkai_core.serialize import DEFINITION_SCHEMA_VERSION, UNREADABLE_RECORD_ERRORS
 from gherkai_core.schedule import ScheduleOpts, schedule
 
 from gherkai_runtime import compose
@@ -97,7 +97,7 @@ def _add_device_flags(p: argparse.ArgumentParser, *, project: bool) -> None:
 
 
 def _add_config_flag(p: argparse.ArgumentParser) -> None:
-    """八个读项目配置文件的子命令共用（名单是 `settings.CONFIG_COMMANDS`）。"""
+    """九个读项目配置文件的子命令共用（名单是 `settings.CONFIG_COMMANDS`）。"""
     p.add_argument("--config", default=None, metavar="FILE",
                    help="项目配置文件 gherkai.toml 的路径（不给时依次找环境变量 GHERKAI_CONFIG、当前目录的 gherkai.toml；"
                         "都没有就不用配置文件）。取值顺序：命令行选项 > 环境变量 > 配置文件 > 内建默认")
@@ -135,13 +135,13 @@ _STEPS_DIR_HELP = (
     "你自己的确定性 step 目录（不给时依次取环境变量 GHERKAI_STEPS_DIR、配置文件的 steps-dir，都没有则 ./steps 存在即用）："
     "worker 启动时按路径排序递归加载其中的 step 定义文件，注册进它的确定性 step 注册表"
 )
-# `run` / `submit`（实际运行与提交那一侧）另加一句：值随提交记录走；`submit` 再加本机后台推进与接力用同一份、云端后端不生效两句
+# `run` / `submit`（实际运行与提交那一侧）另加一句：值随提交记录走；`submit` 再加本机后台推进进程照它执行、云端后端不生效两句
 # （`run` 只有本机后端，ADR 0016 决策 A）。`submit` 的一段在 `run` 的一段之后追加，共有的那句只写一处。判据不是「带 --backend」——
 # `doctor` 也带 --backend，但它只查环境、不产提交记录，故用不加补充的公共段。
 _STEPS_DIR_HELP_RUN = _STEPS_DIR_HELP + "。值随提交记录走"
 _STEPS_DIR_HELP_SUBMIT = (
     _STEPS_DIR_HELP_RUN
-    + "，本机后台推进与 status --wait 接力都用这一份；"
+    + "，本机后台推进进程照它执行；"
       "[--backend cloud] 不生效（云端 worker 的 steps 构建在定制镜像里，警告不拦）"
 )
 
@@ -442,14 +442,13 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     st.add_argument("--backend", choices=["local", "cloud"], default=None, help="须与产生这个 run 的 run 或 submit 一致")
     st.add_argument("--report-dir", default=None, metavar="DIR",
                     help="run 落点（local）/ 后端报告前缀（cloud）——须与产生这个 run 的 run 或 submit 一致；终态时据此打印报告与判定明细位置")
-    # 两个后端接力形态不同：local 由本机这个进程亲自执行 reconcile.tick 推进；cloud 只 invoke kicker Lambda，
-    # 保 status 机器零 ECS 权限。help 里只讲提交者看得见的差别。
+    # 两个后端在等待期间做的事不同（ADR 0054 决策八「等待中的 status --wait」）：本机每次轮询做一次 run 处置，条件成立即把 run
+    # 记为已结束，不认领、不推进；云端检测到推进停住时调用 kicker（云端的处置随云端后端的改动另做）。help 里只讲使用者看得见的差别，
+    # 可以记为已结束的时刻与 settle-runs 的 help 同一种说法、同一个常量（render.overdue_phrase）。
     st.add_argument("--wait", action="store_true",
-                    help="轮询到 run 达终态再返回，并按判定给退出码。对 submit 提交的 run 还会接力推进（local 在本机接着把它推到底；"
-                         "cloud 检测卡住即触发云端接力）；对正在前台 run 的 run 只等待、不接力")
-    # 本 flag 只是回落值：RunMeta 带 max_concurrency 时以它为准（提交时定的并发闸才是这个 run 的口径）。
-    st.add_argument("--max-concurrency", type=int, default=None,
-                    help="[local --wait] 接力推进的并发上限：默认按提交时的值走，提交记录里没有值才用这里给的")
+                    help="轮询到 run 结束再返回，并按判定给退出码。本机后端的 run：执行它的 gherkai 进程已不在，或到了"
+                         f"{render.overdue_phrase()}仍未结束时，本命令把它记为已结束；"
+                         "云端后端的 run：检测到推进停住时触发云端继续推进")
     st.add_argument("--json", action="store_true", help="输出机器可读 JSON（这个 run 的运行态 + 产物落点）")
     st.add_argument("--prefix", default=None, metavar="P",
                     help="[cloud] 资源名前缀（据此定位这个 run 所在的云端后端；--wait 的接力也照它找）")
@@ -502,6 +501,26 @@ def _build_parser(*, provider: object | None = None, provider_error: str | None 
     lr.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
     lr.add_argument("--region", default=None, metavar="R")
     lr.add_argument("--profile", default=None, metavar="P")
+
+    # settle-runs：run 处置（ADR 0054 决策八「settle-runs」一条）。定位参数与 status 同名同义、同样读配置文件（ADR 0041 决策六）；
+    # 云端的四个定位参数已挂在这里，配置文件与命令行的解析面是目标形态，云端后端的处置随云端后端的改动另做。
+    se = sub.add_parser(
+        "settle-runs",
+        help=f"把执行它的 gherkai 进程已不在、或到了{render.overdue_phrase()}仍未结束的 run 记为已结束；"
+             "不给 run_id 时处理这个报告目录里全部未结束的 run，并清理建立 run 时中断留下的暂存目录（--dry-run 只判断、不改动）")
+    se.add_argument("run_id", nargs="?", default=None, help="只处理这一个 run（run 或 submit 打印的 run_id）；不给时处理全部未结束的 run")
+    _add_config_flag(se)
+    se.add_argument("--backend", choices=["local", "cloud"], default=None,
+                    help="处理哪个后端里的 run；须与产生这些 run 的 run 或 submit 一致")
+    se.add_argument("--report-dir", default=None, metavar="DIR",
+                    help="[local] run 落点，须与产生这些 run 的 run 或 submit 一致")
+    se.add_argument("--dry-run", action="store_true",
+                    help="只判断、不改动：列出会记为已结束的 run 与会删除的暂存目录，不写任何记录、不删任何目录")
+    se.add_argument("--json", action="store_true", help="输出机器可读 JSON（所查的落点 + 每个 run 与暂存目录的处理结果）")
+    se.add_argument("--prefix", default=None, metavar="P", help="[cloud] 资源名前缀（据此定位要处理的云端后端）")
+    se.add_argument("--ddb-table", default=None, metavar="NAME", help="[cloud] 运行状态表（DynamoDB）名")
+    se.add_argument("--region", default=None, metavar="R")
+    se.add_argument("--profile", default=None, metavar="P")
 
     # _reconcile：本机后台推进进程的入口（本机 submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「本机 `submit`」）：
     # 建 run 所需的输入经标准输入交来（handoff.AdvancerInput），结果经 --report-fd 指定的回报管道交回。
@@ -1407,19 +1426,38 @@ def _check_tunnel_prerequisites(args) -> int | None:
     return None
 
 
-def _check_report_dir_boundary(args) -> int | None:
-    """本机后端报告目录在前置检查里的那一次边界检查（ADR 0054 决策四「前置检查里的一次」）：报告目录所在的文件系统不在本平台的清单里、或判断
-    不了，打印 `_filesystem_rejected_message` 的那一句、返回 2；打开报告目录（或它最近一层已存在的上级）失败（路径上有文件、没有权限、
-    符号链接成环）打印写记录失败的那一句、返回 2。云端后端与 `run --no-report` 不建本机 run，什么都不做。
+def _local_report_root(args) -> "Path | int":
+    """本机后端的报告目录：解析成绝对路径（解析其中的符号链接，ADR 0054 决策四「边界检查」一条），再做路径长度的入口检查（ADR 0030
+    决定四「报告目录的路径长度」条，判据在 `compose.report_dir_too_long`）。不过即打印那一句、返回 2，什么都不建。
+
+    凡用本机报告目录的命令都经这一处取它，在第一次访问报告目录之前：`run`（生成记录时）与本机 `submit` 在前置检查里、判断报告目录
+    所在的文件系统之前（`_check_report_dir_boundary`）；本机的 `status`（含 `--wait`）、`explain`、`list-runs`、`settle-runs` 在云端
+    分支之后。云端后端（报告落点是键前缀）与 `run --no-report` 不经这里。"""
+    report_root = Path(args.report_dir).resolve()
+    too_long = compose.report_dir_too_long(report_root)
+    if too_long is not None:
+        _progress(_report_dir_too_long_message(too_long))
+        return 2
+    return report_root
+
+
+def _check_report_dir_boundary(args) -> "Path | int | None":
+    """本机后端报告目录在前置检查里的两项（ADR 0030 决定四「报告目录的路径长度」条；ADR 0054 决策四「前置检查里的一次」）：先经
+    `_local_report_root` 做路径长度的检查（超长路径的打开会得到「名字太长」，不先查就会被报成写记录失败）；再做边界检查——报告目录所在的
+    文件系统不在本平台的清单里、或判断不了，打印 `_filesystem_rejected_message` 的那一句、返回 2；打开报告目录（或它最近一层已存在的
+    上级）失败（路径上有文件、没有权限、符号链接成环）打印写记录失败的那一句、返回 2。都过了返回解析之后的报告目录，之后建 run 与交给
+    后台推进进程的都是这一个路径。云端后端与 `run --no-report` 不建本机 run，什么都不做、返回 None。
 
     `run` 与本机 `submit` 经 `_plan_and_preflight` 共用这一处，排在补全运行定义、上传安装包、起隧道之前；本机 `submit` 由提交进程
     自己做，不过时不启动后台推进进程。这一次只为早拒：判断只读、什么都不建，保证来自建 run 时对暂存目录同一次打开的判断与取锁
-    （`run_dir.create_run_dir`），前置检查之后报告目录被换掉也由那里挡住。路径与建 run 用的相同，都是解析之后的报告目录。"""
+    （`run_dir.create_run_dir`），前置检查之后报告目录被换掉也由那里挡住。"""
     if args.backend == "cloud" or getattr(args, "no_report", False):
         return None
     from gherkai_core.adapters.run_store import run_dir
 
-    report_root = Path(args.report_dir).resolve()
+    report_root = _local_report_root(args)
+    if isinstance(report_root, int):
+        return report_root
     try:
         check = run_dir.check_report_dir(report_root)
     except OSError as e:
@@ -1428,7 +1466,7 @@ def _check_report_dir_boundary(args) -> int | None:
     if check.verdict is not run_dir.Boundary.INSIDE:
         _progress(_filesystem_rejected_message(check))
         return 2
-    return None
+    return report_root
 
 
 def _tunnel_established_line(origin: str, public_url: str) -> str:
@@ -1487,10 +1525,11 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     bad = _check_tunnel_prerequisites(args)
     if bad is not None:
         return bad
-    # 本机后端报告目录的边界检查（前置检查里的那一次）：同在不起隧道、不上传、不启动后台推进进程这一层，见 _check_report_dir_boundary
-    bad = _check_report_dir_boundary(args)
-    if bad is not None:
-        return bad
+    # 本机后端报告目录的路径长度与边界检查（前置检查里的那一次）：同在不起隧道、不上传、不启动后台推进进程这一层，见
+    # _check_report_dir_boundary；过了即得到解析之后的报告目录，随 Prepared 交给建 run 的一方
+    report_root = _check_report_dir_boundary(args)
+    if isinstance(report_root, int):
+        return report_root
     # 进度走 stderr（不受 --json 开关；stdout 始终只放核心产出）
     _progress(f"plan: {len(jobs)} job(s)  (default_engine={args.default_engine})")
     if list_jobs:
@@ -1519,7 +1558,8 @@ def _plan_and_preflight(args, *, list_jobs: bool) -> "Prepared | int":
     entries = _app_entries(args, jobs)  # 安装包存在性（零 AWS）：两个后端都在提交前核
     if isinstance(entries, int):
         return entries
-    prepared = Prepared(jobs=jobs, steps_dir=steps_dir, device_selections=selections, app_entries=entries)
+    prepared = Prepared(jobs=jobs, steps_dir=steps_dir, device_selections=selections, app_entries=entries,
+                        report_root=report_root)
     if args.backend != "cloud":
         # 本机后端：项目 ARN 与应用桶的取值（选项 / 环境变量 / 配置文件，含 ARN 形态核对）在这里，零 AWS、缺失即以退出码 2 结束；
         # 要碰 AWS 的账号比对与上传、以及随后的写前校验在 submission.complete_local_definition（调用方在自己的选项校验之后调）。
@@ -1569,26 +1609,46 @@ def _allowed_filesystems_text() -> str:
                      for platform, types in run_dir.ALLOWED_FILESYSTEMS.items())
 
 
-def _filesystem_rejected_message(check: "run_dir.BoundaryCheck") -> str:
-    """本机后端的报告目录没有通过边界检查时的一句（ADR 0054 决策四）：前置检查里的那一次（`_check_report_dir_boundary`）与建 run 时被拒
-    （`_run_record_failure` 收到的 `RunDirRejected`）同一函数，前台 `run` 与本机 `submit` 同一句。类型不在清单里时说出检测到的
-    类型（报告目录还不存在时另说按哪一层上级判断的）；判断不了时说出原因。原因、处理办法与清单三样都在句子里。
+# 边界检查不过时说明里的对象与结果（`_filesystem_rejected_message` 的两个参数）：缺省是建 run 一侧对报告目录的那一句
+_REPORT_DIR = "报告目录"
+_RUN_DIR = "run 目录"
+_SETTLE_REJECTED_OUTCOME = "没有处理其中的 run"
+_WAIT_REJECTED_OUTCOME = "本命令不等待它，也没有改动它的记录"
+
+
+def _filesystem_rejected_message(check: "run_dir.BoundaryCheck", *, subject: str = _REPORT_DIR,
+                                 outcome: str = "没有建立 run") -> str:
+    """本机后端的目录没有通过边界检查时的一句（ADR 0054 决策四）：前置检查里的那一次（`_check_report_dir_boundary`）与建 run 时被拒
+    （`_run_record_failure` 收到的 `RunDirRejected`）同一函数、同一句，前台 `run` 与本机 `submit` 相同；`settle-runs` 对报告目录、
+    等待中的 `status --wait` 对 run 目录的那一次也经这里，只换说明里的对象（`subject`）与本命令因此没有做的事（`outcome`）。类型不在
+    清单里时说出检测到的类型（报告目录还不存在时另说按哪一层上级判断的）；判断不了时说出原因。原因、处理办法与清单三样都在句子里。
 
     判断不了时另给云端后端这条出路：原因可能在整台机器上（平台不是 macOS 或 Linux、读不到挂载信息），这时换哪个目录都判断不了。
     这一句对判断不了的各种原因都一样，不按原因片段分支：原因片段只供人读。"""
     from gherkai_core.adapters.run_store import run_dir
 
-    why = "在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，没有建立 run。"
+    why = f"在这样的目录上无法确认执行 run 的 gherkai 进程是否还在，{outcome}。"
     move = f"请把报告目录（--report-dir 选项，或配置文件里的 report-dir）换到本机磁盘上的目录（{_allowed_filesystems_text()}）"
     if check.verdict is run_dir.Boundary.UNKNOWN:
-        return (f"无法判断报告目录 {check.requested} 所在的文件系统（{check.unknown_reason}）：{why}{move}"
+        return (f"无法判断{subject} {check.requested} 所在的文件系统（{check.unknown_reason}）：{why}{move}"
                 "；仍然判断不了时可以改用云端后端。")
     if check.checked != check.requested:
-        where = (f"报告目录 {check.requested} 还不存在，按最近一层已存在的上级 {check.checked} 判断，"
+        where = (f"{subject} {check.requested} 还不存在，按最近一层已存在的上级 {check.checked} 判断，"
                  f"它所在的文件系统是 {check.fs_type}")
     else:
-        where = f"报告目录 {check.requested} 所在的文件系统是 {check.fs_type}"
+        where = f"{subject} {check.requested} 所在的文件系统是 {check.fs_type}"
     return f"{where}，本机后端不支持：{why}{move}；多台机器共用运行记录请用云端后端。"
+
+
+def _report_dir_too_long_message(too_long: "compose.ReportDirPathTooLong | compose.ReportDirNameTooLong") -> str:
+    """报告目录没有通过路径长度的入口检查时的一句（ADR 0030 决定四「报告目录的路径长度」条）：各命令、前台与后台同一句，两种情形
+    两句（路径太长；路径里有一层名字太长），选哪一句看结果的类型、不看文字。说出了什么问题与怎么办。"""
+    how = "请换一个路径较短的报告目录（--report-dir 选项，或配置文件里的 report-dir）。"
+    if isinstance(too_long, compose.ReportDirPathTooLong):
+        return (f"报告目录 {too_long.path} 的路径太长（解析之后共 {too_long.total_bytes} 字节）：本机后端只使用路径不超过 "
+                f"{too_long.limit_bytes} 字节的报告目录，每个 run 的记录、事件库与产物都放在它下面，路径再长就建不出或打不开。{how}")
+    return (f"报告目录 {too_long.path} 的路径里有一层名字太长（{too_long.name}）：所在的文件系统不接受这样长的名字，"
+            f"这个报告目录建不出来。{how}")
 
 
 def _record_not_written_message(e: BaseException, *, report_dir) -> str:
@@ -1598,14 +1658,38 @@ def _record_not_written_message(e: BaseException, *, report_dir) -> str:
             "请检查这个目录的读写权限与所在磁盘的剩余空间后重新执行。")
 
 
-def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: bool) -> str:
+def _settle_runs_cmd(run_id: "str | None" = None, *, report_dir) -> str:
+    """打给使用方照抄执行的 `gherkai settle-runs` 整条命令：给出 run 标识时只处理那一个，不给时处理全部未结束的 run 并清理暂存目录；
+    拼法与 `_status_cmd` 相同（每个值都经 shlex.quote）。"""
+    parts = ["gherkai", "settle-runs"]
+    if run_id is not None:
+        parts.append(shlex.quote(run_id))
+    parts += ["--report-dir", shlex.quote(str(report_dir))]
+    return " ".join(parts)
+
+
+def _unended_run_remedy(run_id: str, *, report_dir, again: str) -> str:
+    """管它的进程退出而 run 未结束的各出口共用的尾句（ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）：给出把这个 run 记为已
+    结束的 `settle-runs` 整条命令，前台与后台同一说法；`again` 是「执行」或「提交」，按这个 run 出自 `run` 还是 `submit` 取，这是
+    方式固有的差别。"""
+    return (f"请检查这个目录所在磁盘的剩余空间与读写权限，再用 {_settle_runs_cmd(run_id, report_dir=report_dir)} "
+            f"把这个 run 记为已结束，然后重新{again}。")
+
+
+# 出自 `run` 与出自 `submit` 的 run 在说明里怎样说「再来一次」（`_unended_run_remedy` 的 again）
+_AGAIN_RUN = "执行"
+_AGAIN_SUBMIT = "提交"
+
+
+def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: bool, again: str = _AGAIN_RUN) -> str:
     """本机建 run 失败时的一句（ADR 0030 决定七；前台 `run` 与本机后台推进进程同一函数、同一句，都以退出码 2 结束、不打回溯）。
 
     按这个次序分开说：报告目录没有通过边界检查（`RunDirRejected`，与前置检查里被拒时同一句）；给 run 的目录加锁失败
     （`LifetimeLockUnavailable`，ADR 0054 决策三「结果的判读」）；暂存目录连续被另一个进程占着（`StagingContended`）；run 已存在
     （只认 `RunAlreadyExists`：以 run 标识命名的位置被文件或符号链接占着时改名以别的错误失败，按写记录失败报出）；记录还没有写下
     （`created` 为假）；记录已写下、准备执行用的文件失败（建事件库、打开 `reconcile.log` 或前台 `--quiet` 的 worker 日志），这时 run
-    停在 pending、没有开始执行。锁不可用是 OSError 的子类，所以排在写记录失败之前判断。"""
+    停在 pending、没有开始执行，也没有推进器，说明给出把它记为已结束的 `settle-runs` 整条命令（`_unended_run_remedy`），`again`
+    按前台（执行）与经 `submit` 报出（提交）取。锁不可用是 OSError 的子类，所以排在写记录失败之前判断。"""
     from gherkai_core.adapters.run_store import run_dir
 
     if isinstance(e, run_dir.RunDirRejected):
@@ -1621,28 +1705,49 @@ def _run_record_failure(e: BaseException, *, report_dir, run_id: str, created: b
     if not created:
         return _record_not_written_message(e, report_dir=report_dir)
     return (f"run {run_id} 的记录已经写下，但在报告目录 {report_dir} 里准备执行用的文件失败：{e}。"
-            "还没有开始执行，这个 run 在记录里停在 pending。请检查这个目录的读写权限与剩余空间后重新执行。")
+            "还没有开始执行，这个 run 在记录里停在 pending。"
+            + _unended_run_remedy(run_id, report_dir=report_dir, again=again))
 
 
 # 前台 run 在开始执行之前被 Ctrl-C 打断、记录里没有这个 run 时的一句：起隧道期间，以及建 run 开始之前
 _STOPPED_BEFORE_START = "已停止，没有开始执行。"
 
 
-def _run_creation_interrupted_message(report_root: "Path | None", run_id: str) -> str:
-    """前台 `run` 在建 run 的那一段（建 run、`--quiet` 的 worker 日志、建事件库）被 Ctrl-C 打断时的一句，按记录里的事实给出：这个 run
-    的运行态读得到，说记录已经写下、停在 pending；读不到（建 run 还没有开始，或 `--no-report` 没有记录，这时 `report_root` 为
-    None），沿用 `_STOPPED_BEFORE_START`。建 run 的那一次调用期间推迟 SIGINT（`_sigint_deferred`，ADR 0054 决策三），所以中断不会
-    落在建 run 里面：期间按下的 Ctrl-C 在调用返回之后才成为 KeyboardInterrupt，这时 run 已经建成；建 run 本身失败而期间按过
-    Ctrl-C 的，抛出的同样是 KeyboardInterrupt，说法照样按记录里读到的给出。读运行态本身失败时按读不到给出：两句都只说还没有开始
-    执行，后一句不说记录已写下。"""
-    if report_root is not None:
-        try:
-            state = compose.build_local_stores(report_dir=report_root)[0].load_run_state(run_id)
-        except (OSError, ValueError):
-            state = None
-        if state is not None:
-            return f"已停止：run {run_id} 的记录已经写下，还没有开始执行，它在记录里停在 pending。"
-    return _STOPPED_BEFORE_START
+def _end_interrupted_before_start(persistence: RunPersistence, run_meta: RunMeta, *, report_dir) -> int:
+    """前台 `run` 建 run 之后、开始执行之前被 Ctrl-C 打断（ADR 0035 决策 3「前台 `run`」一条）：这个进程持着生命期锁、就是这个 run 的
+    推进器，由它自己做结束写，来路取使用方中断（ADR 0031 决定三「结束写」小节说明表「使用方中断」一行；已启动的 job 数为零，全部 job
+    记 skipped），写成之后生成报告，以 130 结束。走与执行期间被中断同一处收尾（`RunPersistence.finalize`），执行事实是零个判出结果的
+    job、余下的 job 因中断不再启动。
+
+    这一步期间再按 Ctrl-C 推迟到它做完（`_sigint_deferred`），推迟到期抛出的那一次在这里接住：本命令已经在按中断结束。结束写本身失败
+    时按运行期落库失败的说明结束（`_store_failure_notice`）；记录已被别处结束时照「已被别处结束」的说明结束；退出码都按信号取。标准
+    输出不输出（没有开始执行，没有汇总）。"""
+    from gherkai_core.schedule import Execution
+
+    run_id = run_meta.run_id
+    outcome: dict = {}
+    try:
+        with _sigint_deferred():
+            try:
+                persistence.finalize(Execution(run_meta=run_meta, results=(), stopped_by="interrupt", duration_ms=0.0))
+            except RunAlreadyEnded as e:
+                outcome["elsewhere"] = e
+            except OSError as e:
+                outcome["failure"] = e
+            except Exception as e:  # noqa: BLE001 —— 记下、块外原样抛出：推迟到期抛出的中断不会把它盖掉
+                outcome["other"] = e
+    except KeyboardInterrupt:
+        pass  # 这一步期间又按了 Ctrl-C：已经在按中断结束，结果照上面记下的给出
+    if "other" in outcome:
+        raise outcome["other"]
+    if "elsewhere" in outcome:
+        _progress(_ended_elsewhere_notice(run_id, outcome["elsewhere"].recorded))
+    elif "failure" in outcome:
+        _progress(_store_failure_notice(run_id, outcome["failure"], report_dir=report_dir, run_ended=persistence.ended_run))
+    else:
+        _progress(f"已停止：run {run_id} 已因中断记为已结束，没有 job 开始执行；可用 "
+                  f"{_status_cmd(run_id, report_dir=report_dir)} 查看。")
+    return 128 + signal.SIGINT
 
 
 def _per_job_tail_s(backend: str, grace_s: float) -> float:
@@ -1744,15 +1849,19 @@ def _cmd_plan(args) -> int:
     return 0
 
 
-def _print_artifact_lines(locations: dict) -> None:
+def _print_artifact_lines(locations: dict, *, report: bool = True) -> None:
     """产物落点三行（报告 / 运行元信息 / 判定明细）→ stderr：**`run` 结束与 `status` 终态共用这一份**
     （两处对标输出，两个后端的产物指针都可直接复制；曾各抄一份，文案或键名一改就分叉）。
 
     `locations` 是 compose 单点拼的落点表。缺 `report_index` 键表示报告写入被隔离的失败（ADR 0030 决定三）
     → 该行给「写失败」提示、不打裸值；`status` 侧拿的是 compose 给的约定落点、必有该键，故只有 `run` 会走到回落。
+    `report` 为假时不给报告那一行：`status --wait` 刚处置了这个 run 而报告没有生成，原因已另有一句说明（ADR 0054 决策七「报告」）。
     """
-    _progress(f"\n报告: {locations.get('report_index', '<报告写入失败，已跳过；判定结果不受影响、仍已落库>')}")
-    _progress(f"运行元信息: {locations['run_meta']}、{locations['run_state']}")
+    lead = "\n"
+    if report:
+        _progress(f"{lead}报告: {locations.get('report_index', '<报告写入失败，已跳过；判定结果不受影响、仍已落库>')}")
+        lead = ""
+    _progress(f"{lead}运行元信息: {locations['run_meta']}、{locations['run_state']}")
     _progress(f"判定明细: {locations['jobs_dir']}")
 
 
@@ -1852,7 +1961,7 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
     payload = handoff.encode_advancer_input(handoff.AdvancerInput(
         jobs=tuple(jobs), steps_dir=prepped.steps_dir, max_concurrency=args.max_concurrency,
         per_job_tail_s=per_job_tail_s, expose_local=args.expose_local or None, tunnel_provider=args.tunnel,
-        region=region, profile=profile, report_dir=str(Path(args.report_dir).resolve())))
+        region=region, profile=profile, report_dir=str(prepped.report_root)))  # 前置检查里解析并检查过的那一个
     list_cmd = _list_runs_cmd(report_dir=args.report_dir)
     owned: list[int] = []
     report: "handoff.AdvancerReport | None" = None
@@ -1867,8 +1976,11 @@ def _submit_local(args, prepped: Prepared, jobs, *, identity: "tuple[str | None,
         _close_owned(owned)
         if not line:
             # 被信号结束的后台推进进程不留输出，所以「原因在上面」只在它有输出时成立
-            _progress(f"后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经"
-                      f"建立了这个 run，可以用 {list_cmd} 查看。处理好原因之后请重新提交。")
+            # 这时 run 可能已经建成而没有推进器、提交命令不知道它的标识：给不带 run 标识的 settle-runs 整条命令，它同时清理建 run 中途
+            # 留下的暂存目录（ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）
+            _progress("后台推进进程在给出提交结果之前退出了，提交没有完成；它退出之前如果有输出，原因在上面。它退出之前可能已经"
+                      f"建立了这个 run：可以用 {_settle_runs_cmd(report_dir=args.report_dir)} 把执行它的进程已不在的 run "
+                      "记为已结束，同时清理建立 run 时中断留下的暂存目录。处理好原因之后请重新提交。")
             return 2
         report = handoff.decode_advancer_report(line)
         if report.exit_code != 0:
@@ -2087,9 +2199,12 @@ def _sigint_deferred():
     """块内到达的 SIGINT 推迟到块结束之后，再按原来的处置处理（缺省即抛 KeyboardInterrupt）：块里的一步与记下它结果的那一句之间
     不被中断隔开。云端 submit 交出 run 的标识用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随中断
     关闭。前台 run 与本机后台推进进程建 run 的那一次调用也用它（ADR 0054 决策三）：解释器可以在任意两条字节码之间抛出中断引起的
-    异常，建 run 的入口里取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上。块结束时恢复原处置，期间
-    到达过 SIGINT 即再发一次给本进程。不在主线程（不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C
-    不起作用。"""
+    异常，建 run 的入口里取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上。两个处置入口（`settle-runs`、
+    等待中的 `status --wait`）的每次处置连同记下它的结果、`settle-runs` 清理每个暂存目录与它的输出，以及前台 run 建 run 之后被中断时
+    的那次结束写也用它（ADR 0054 决策八「中断」）：说明按已经记下的结果给出，不按中断落在哪一步猜测。块结束时恢复原处置，期间
+    到达过 SIGINT 即再发一次给本进程：块里抛出的异常这时会被随之抛出的 KeyboardInterrupt 取代，要保留的结果在块内记下。不在主线程
+    （不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C 不起作用（处置的结束写要等运行态的短锁，另一个
+    写入方停在短锁之内时这一等没有上界，见 ADR 0054「边界与已知局限」）。"""
     pending: list[int] = []
     try:
         previous = signal.signal(signal.SIGINT, lambda signum, _frame: pending.append(signum))
@@ -2322,18 +2437,17 @@ def _submit_cloud(args, prepped: Prepared) -> int:
             channel.release()
 
 
-def _render_status(state, args, *, wait_hint: str, locations: dict, relay_available=None) -> int:
-    """渲染 RunState + pending 诊断提示 + 终态产物位置 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
+def _render_status(state, args, *, locations: dict, hint: "str | None" = None, report_written: bool = True) -> int:
+    """渲染 RunState + 调用方给出的提示 + 终态产物位置 + 退出码——**local/cloud 共享一份**（保两路一致，ADR 0034）。
 
-    state 已确认非 None（调用方先查）。wait_hint 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、
-    cloud 用 --backend cloud --prefix，触发逻辑同、只命令示例异）。locations 是该 run 的产物落点（compose 单点拼，
-    与 `run` 结束时打的同一份）：人读方式下只在终态输出那三行——报告在 run 结束之后才生成，未终态时输出的报告位置指向还不存在的文件。
+    state 已确认非 None（调用方先查）。locations 是该 run 的产物落点（compose 单点拼，与 `run` 结束时打的同一份）：人读方式下只在终态
+    输出那几行——报告在 run 结束之后才生成，未终态时输出的报告位置指向还不存在的文件；`report_written` 为假（本命令处置了这个 run、
+    报告没有生成，ADR 0054 决策七「报告」）时人读方式不给报告那一行。
     --json 机读：RunState 键形状不变，另**附加** `artifacts`（约定落点、无论终态都给，ADR 0041 决策三）；落点上有没有内容不由它表达，
     各键何时有内容以 CLI `--json` 契约页的字段表为准（出处登记见 ADR 0034 机制三「run 级状态只进不退」条④「收尾各步的先后与
-    之后会不会变」）。人读提示一律不打（pending 提示的触发条件见下方注释）。
+    之后会不会变」）。
+    `hint` 是调用方按它自己的条件算好的一句提示，只在不带 --wait、不是 --json 时打到 stderr，不改变输出里的状态值与退出码。
     退出码：PASSED→0 / pending·running（未达终态、非 --wait）→0（查询本身成功）/ 其余终态→1。
-    relay_available：零参回调，答「--wait 对这个 run 能不能接力」（detached run 才能）；只在 pending 提示的触发条件
-    成立时才调（云端是一次点查）。None 当 True（旧调用方）。
     """
     if args.json:
         from gherkai_core.serialize import run_state_to_dict
@@ -2343,17 +2457,9 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
     else:
         print(render.render_run_state(state))
         if state.status in TERMINAL_STATUSES:
-            _print_artifact_lines(locations)  # 与 `run` 结束时同一份（见其 docstring）
-    # 疑似卡住诊断（两路一致）：非 --wait、非 json、run 级 pending 且**所有 job 仍 pending** → 提示 --wait 接力
-    # （**只提示、不自动 kickoff/tick**——保「查看」纯只读无副作用；救活决定权留提交者，走 --wait）。认领在同一次写里
-    # 把 job 与 run 级都置为 running，投影不把 run 级写回 pending（ADR 0034 机制三「run 级状态只进不退」条），所以未收尾的
-    # run 级 pending 已意味着没有 job 离开 pending，后半条判据由前半条推出。后半条保留，只防旧版写者留下的
-    # 「run 级 pending 而 job 已 running」记录：那时认领只翻 job，Fargate 拉起的几十秒里读到的正是这一组合，
-    # 推进早已开始，提示「推进可能未启动」是误报（实际运行 submit 后连查三次撞见）。
-    all_jobs_pending = all(js.status == Status.PENDING for js in state.jobs.values())
-    if (not args.wait and not args.json and state.status == Status.PENDING and all_jobs_pending
-            and (relay_available is None or relay_available())):  # 前台 run 刚建 run 时同样全 pending，但没有可接力的推进器、不提示
-        _progress(f"提示：run 仍 pending。若已提交较久，推进可能未启动——`{wait_hint}` 可接力推进。")
+            _print_artifact_lines(locations, report=report_written)  # 与 `run` 结束时同一份（见其 docstring）
+        if hint is not None and not args.wait:
+            _progress(hint)
     if state.status == Status.PASSED:
         return 0
     if state.status not in TERMINAL_STATUSES:  # 未达终态（查询本身成功，判定退出码留给 --wait）
@@ -2362,14 +2468,16 @@ def _render_status(state, args, *, wait_hint: str, locations: dict, relay_availa
 
 
 def _cmd_status(args) -> int:
-    """[无状态批量运行] 查 run 进度/结果。
+    """[后台运行] 查 run 进度/结果。
 
-    - local：读文件 RunState；--wait 则本机接力 tick 到终态（后台推进进程崩了人来查也能续、须运行到底）。
-    - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda 做 kickoff 接力（kickoff 一次即可，之后由云端链自行接管）。
+    - local：读文件 RunState；--wait 则每次轮询做一次 run 处置（`settle.settle_run`），条件成立即把 run 记为已结束，到终态再按不带
+      --wait 的规则渲染（ADR 0054 决策八「等待中的 status --wait」）；不认领、不推进、不起 worker、不解析 AWS 身份。
+    - cloud：读 DDB RunState；--wait 则检测卡住时 invoke kicker Lambda（kickoff 一次即可，之后由云端链自行接管）。
     渲染+提示+退出码经 _render_status 共享（两路一致，ADR 0034）。
 
-    --wait 的等待或接力被 Ctrl-C 打断：按进入的分支打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端
-    （ADR 0039）。各分支进入等待前把自己的说明放进 interrupted["notice"]。
+    被 Ctrl-C 打断：打一句说明、以退出码 130 结束（同前台 run 的中断口径），不让回溯到用户终端（ADR 0039）。说明取 interrupted["notice"]
+    里已经记下的那一句：本机等待开始时是「没有改动」的那一句，本命令的处置写成时（与处置在同一个推迟 SIGINT 的区间里）换成「已记为
+    已结束」的那一句，所以说明不按中断落在哪一步猜测（ADR 0054 决策八「中断」）。
     """
     interrupted = {"notice": _INTERRUPTED_WAIT_NOTICE}
     try:
@@ -2379,94 +2487,178 @@ def _cmd_status(args) -> int:
         return 128 + signal.SIGINT
 
 
-# `status --wait` 被 Ctrl-C 打断时的说明（产品语言），按分支选用
+# 云端 `status --wait` 与不带 --wait 的 `status` 被 Ctrl-C 打断时的说明（产品语言）；本机等待中的两句见 _local_wait_interrupted_notice
 _INTERRUPTED_WAIT_NOTICE = "已停止等待。这个 run 仍在原处继续执行，稍后可再查。"
-_INTERRUPTED_RELAY_NOTICE = ("已停止接力。这个 run 若没有别的进程在推进，会停在当前状态；本命令起的 worker 察觉后自行收尾并释放会话。"
-                             "再执行同一条命令可继续推进。")
+# 本机 `status --wait` 的轮询间隔：每次轮询做一次处置，管它的进程退出之后，这个 run 至多晚这么久被记为已结束
+_LOCAL_WAIT_POLL_S = 1.0
 
 
 def _cmd_status_body(args, interrupted: dict) -> int:
-    from gherkai_runtime import detached
-
-    if not _validate_max_concurrency(args):  # --wait 接力的回落值同校验（meta 缺值时它就是并发闸）
-        return 2
     if args.backend == "cloud":
         return _status_cloud(args, interrupted)
+    report_root = _local_report_root(args)
+    if isinstance(report_root, int):
+        return report_root
+    if not args.wait:
+        return _show_local_status(args, compose.build_local_stores(report_dir=report_root)[0], report_root)
+    from gherkai_runtime import settle
 
-    report_root = Path(args.report_dir).resolve()
-    run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
+    target = settle.local_target(report_root)
+    interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=False, report_dir=args.report_dir)
+    done = _wait_and_settle(args, target, report_root, interrupted)
+    if isinstance(done, int):
+        return done
+    written = True
+    if done.outcome is settle.Outcome.SETTLED:
+        notice = _settled_notice(done, machine=args.json)
+        if notice is not None:
+            _progress(notice)
+        written = bool(done.report_written)
+    return _show_local_status(args, target.run_store, report_root, report_written=written)
 
-    # definition 的结构版本先于读任何别的东西（ADR 0037 决策 7）：别的版本写出的 run 目录连运行态的形状都不保证按本版本解释得了，
-    # 先读运行态会把「请升级」变成一个解析异常。run 不存在（读不到头）放过、落到下面的存在性检查。
-    bad = _definition_header_gate(run_store, args.run_id)
+
+def _show_local_status(args, run_store, report_root: Path, *, report_written: bool = True) -> int:
+    """本机 `status` 的显示，不带 --wait 与等待结束之后共用（ADR 0031 决定五「status」条）：版本闸 → 读运行态 → 渲染。不碰锁、不做
+    边界检查（ADR 0054 决策四「其余命令不碰锁，也不查」）。提交记录由别的版本写出或内容不合法、运行态解析不了、读记录失败、run 不存在，
+    都以一句说明、退出码 2 结束，不显示这个 run。`report_written` 交给 `_render_status`（本命令刚处置、报告没有生成时为假）。"""
+    try:
+        bad = _definition_header_gate(run_store, args.run_id)
+    except OSError as e:
+        _progress(_status_read_failure(args.run_id, report_root, e))
+        return 2
     if bad is not None:
         return bad
-    # run 存在性检查先于 --wait 接力：不存在的 run 走统一的「退出码 2 + 提示」，
-    # 别让 build_local_reconcile 的 FileNotFoundError 变成裸 traceback + 退出码 1
-    # （退出码契约：查不到 run → 2，见 docs/user-guide/running-and-results.md「退出码」）。
-    state = run_store.load_run_state(args.run_id)
+    try:
+        state = run_store.load_run_state(args.run_id)
+    except OSError as e:
+        _progress(_status_read_failure(args.run_id, report_root, e))
+        return 2
+    except UNREADABLE_RECORD_ERRORS as e:
+        _progress(f"run {args.run_id} 的运行状态记录读不出（{e}），本命令不能显示它："
+                  f"{render.unreadable_state_remedy(report_root / args.run_id)}。")
+        return 2
     if state is None:
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
+        _progress(_run_not_found(args.run_id))
         return 2
-
-    # --wait 的两道闸与云端推进器同构：①只接力 detached run——同步 `run` 由进程内 schedule 推进，接力者碰它即双开
-    # 推进器（认领、再起一个 worker）；②已到终态的 run 不再接力——终态即提交点，没有东西要推进，也不该拿事件流重放去改写已落的判定。
-    if args.wait and state.status not in TERMINAL_STATUSES:
-        if run_store.is_detached(args.run_id):
-            # 接力推进：后台推进进程崩了/慢了，人来查即自己 tick 到终态（状态全持久、tick 幂等，断点续）。接力经
-            # detached.drive_local_reconcile 从记录读回运行定义，装配与后台推进进程是同一个函数；接力不持有隧道。
-            # 接力不试拿生命期锁、也不做边界检查：它只经运行态的短锁写，与推进进程持有的目录锁互不阻挡；后台推进进程仍在时两方同时
-            # 推进，认领靠短锁内的条件写互斥。
-            identity = _aws_identity(args)
-            if isinstance(identity, int):
-                return identity
-            region, profile = identity
-            interrupted["notice"] = _INTERRUPTED_RELAY_NOTICE
-            try:
-                detached.drive_local_reconcile(str(report_root), args.run_id, args.max_concurrency,
-                                               region=region, profile=profile)
-            except DefinitionContractError as e:
-                # 结构版本不合已由上面的版本闸拦下；形态违约在这里。接力不是这个 run 的推进器：读不懂可能只是本机的版本不同，原来的
-                # 后台推进进程可能仍在正常推进，所以只打印同一句、以退出码 2 结束，不写运行态
-                _progress(_definition_contract_message(e))
-                return 2
-            except detached.RunDefinitionMissing as e:
-                # 运行态在而提交记录不在：同样只说明、以退出码 2 结束，不写运行态（理由同上）
-                _progress(str(e))
-                return 2
-            except OSError as e:
-                # 排在上一支之后（提交记录缺失是 FileNotFoundError 的子类）：读写本机运行记录失败，保存判定明细已按退避重试用尽。
-                # 打一句说明、不打回溯，以退出码 2 结束（没有判出结果的操作失败）。接力不持有隧道，这里没有要关闭的会话
-                _progress(_advance_store_failure_notice(args.run_id, e, report_dir=args.report_dir, relay=True))
-                return 2
-        else:
-            _progress(_WAIT_WITHOUT_RELAY_NOTICE)
-            interrupted["notice"] = _INTERRUPTED_WAIT_NOTICE
-            _wait_local_terminal(run_store, args.run_id)
-
-    state = run_store.load_run_state(args.run_id)
-    if state is None:  # 只等待的分支里记录中途被删会到这里（_wait_local_terminal 在记录消失时也返回）
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
-        return 2
-    return _render_status(state, args, wait_hint=_status_cmd(args.run_id, report_dir=args.report_dir, wait=True),
-                          locations=compose.local_artifact_locations(str(report_root), args.run_id),
-                          relay_available=lambda: run_store.is_detached(args.run_id))
+    return _render_status(state, args, locations=compose.local_artifact_locations(str(report_root), args.run_id),
+                          report_written=report_written)
 
 
-# `status --wait` 对不可接力的 run 的提示（产品语言）：不是 submit 提交到后台执行的 run，推进它的是别的进程。
-_WAIT_WITHOUT_RELAY_NOTICE = ("这个 run 没有后台执行的标记（通常是由前台 run 执行的）：本命令只等待它结束、不接力推进。"
-                              "执行它的进程若已不在，它不会再到终态，可按 Ctrl-C 停止等待。")
+def _wait_and_settle(args, target, report_root: Path, interrupted: dict):
+    """本机等待中的 `status --wait`（ADR 0054 决策八「等待中的 status --wait」）：每次轮询做一次处置（`settle.settle_run`，判定与动作
+    只在那里，`settle-runs` 调同一个），条件成立即处置；返回结束等待的那一次结果（本命令写成的 settled，或已结束），或以 2 结束时的退出码。
 
-
-def _wait_local_terminal(run_store, run_id: str, *, poll_interval_s: float = 1.0) -> None:
-    """只等待、不推进：轮询本机运行态到终态（或记录消失）。写端是原子替换文件，读不到半写的内容。"""
+    每次处置连同「本命令已写成」这一事实的登记都在推迟 SIGINT 的区间里（`_sigint_deferred`）：Ctrl-C 只落在两次处置之间、等待的间隔里
+    或处置之后，说明按 interrupted["notice"] 里已登记的给出。各出口：
+    - 别的版本写出的 run：版本不合的那一句、2（第一次处置读提交记录即给出这个结果，没有改动任何东西，所以它就是开始等待之前的那道闸；
+      提交记录不存在或内容不合法不在其内，按期限读不出接着等待）；
+    - run 不存在（含等待期间被删去）：未找到 run、2；run 目录不过边界检查：说明、2，不处置也不只读地等下去；
+    - 读写记录失败：说明本命令没有把它记为已结束、2；
+    - 其余跳过（锁被持有、锁不可用、运行态读不出）继续等待，按结构化的原因与错误码每种说明一次（`_wait_notice_key`），`--json` 下不说明。
+    """
     import time as _time
 
+    from gherkai_runtime import settle
+
+    noticed: set = set()
     while True:
-        state = run_store.load_run_state(run_id)
-        if state is None or state.status in TERMINAL_STATUSES:
-            return
-        _time.sleep(poll_interval_s)
+        try:
+            with _sigint_deferred():
+                r = settle.settle_run(target, args.run_id, clock=compose.now, dry_run=False)
+                if r.outcome is settle.Outcome.SETTLED:
+                    interrupted["notice"] = _local_wait_interrupted_notice(args.run_id, settled=True, report_dir=args.report_dir)
+        except settle.RunGone:
+            _progress(_run_not_found(args.run_id))
+            return 2
+        except OSError as e:
+            _progress(f"读写 run {args.run_id} 的记录失败：{e}。本命令没有把它记为已结束；"
+                      f"请检查报告目录 {report_root} 的读写权限后重新执行。")
+            return 2
+        if r.reason is settle.Reason.OTHER_VERSION:
+            e = r.definition_error  # UnsupportedDefinitionSchema：写端的结构版本与 CLI 版本
+            _progress(_schema_mismatch_message(e.found, e.cli_version, args.run_id))
+            return 2
+        if r.reason is settle.Reason.UNSUPPORTED_FILESYSTEM:
+            _progress(_filesystem_rejected_message(r.boundary, subject=_RUN_DIR, outcome=_WAIT_REJECTED_OUTCOME))
+            return 2
+        if r.outcome is settle.Outcome.SETTLED or r.reason is settle.Reason.ALREADY_FINISHED:
+            return r
+        key = _wait_notice_key(r)
+        if key is not None and key not in noticed:
+            noticed.add(key)
+            if not args.json:  # 等待中的说明是人读提示，--json 下不给（ADR 0041 决策三）
+                _progress(_wait_notice(args.run_id, r))
+        _time.sleep(_LOCAL_WAIT_POLL_S)
+
+
+def _wait_notice_key(r) -> "tuple | None":
+    """等待中的说明是否已给过，按结构化的事实判断、不按文字（ADR 0054 决策八「等待中的 status --wait」）：原因，加上决定选哪一句的
+    结构字段（提交记录读得怎样、加锁失败的错误码）。锁被持有而期限读得到是正常的等待，不说明，返回 None。"""
+    from gherkai_runtime import settle
+
+    if r.reason is settle.Reason.LOCK_HELD:
+        return None if r.deadline is not None else (r.reason, r.definition)
+    if r.reason is settle.Reason.UNDETERMINED:
+        return (r.reason, getattr(r.lock_error, "errno", None), r.deadline is None, r.definition)
+    if r.reason is settle.Reason.UNREADABLE:
+        return (r.reason,)
+    return None
+
+
+def _wait_notice(run_id: str, r) -> str:
+    """等待中的一句说明（只描述；何时给出由 `_wait_notice_key` 决定）。"""
+    from gherkai_runtime import settle
+
+    stop = "可按 Ctrl-C 停止等待。"
+    if r.reason is settle.Reason.UNREADABLE:
+        return (f"run {run_id} 的运行状态记录读不出（{r.state_error}）：本命令判断不了它，不会把它记为已结束，只继续等待；"
+                f"{render.unreadable_state_remedy(None)}；{stop}")
+    if r.reason is settle.Reason.LOCK_HELD:
+        return (f"run {run_id} 的提交记录{render.definition_problem(r)}，不知道它允许运行到什么时候：本命令只在执行它的 gherkai 进程"
+                f"退出之后把它记为已结束；{stop}")
+    lock = f"在 run 目录上加锁失败：{render.error_text(r.lock_error)}"
+    if r.deadline is not None:
+        return (f"无法确认执行 run {run_id} 的 gherkai 进程是否还在（{lock}）。到 {render.overdue_label(r.deadline)} 仍没有结束时，"
+                f"本命令把它记为已超过允许运行的时间；{stop}")
+    return (f"无法确认执行 run {run_id} 的 gherkai 进程是否还在（{lock}），它的提交记录也{render.definition_problem(r)}："
+            f"本命令只等它自己结束；{stop}")
+
+
+def _settled_notice(r, *, machine: bool) -> "str | None":
+    """本命令处置写成之后的一句：本命令已把它记为已结束及原因（人读提示，--json 下不给）；报告没有生成时一并说明原因，这一半是诊断、
+    --json 下也给（ADR 0054 决策八「等待中的 status --wait」，决策七「报告」）。两者都不需要时返回 None。`status --wait` 两种方式都用它；
+    `settle-runs` 的人读输出在表格里说明，只在 --json 下用它的机读那一种。"""
+    written = bool(r.report_written)
+    if machine and written:
+        return None
+    text = f"本命令已把 run {r.run_id} 记为已结束"
+    if not machine:
+        text += f"：{render.settle_reason_text(r)}"
+    if not written:
+        text += f"{'，' if machine else '；'}报告没有生成：{r.report_missing.detail}"
+    return text + "。"
+
+
+def _local_wait_interrupted_notice(run_id: str, *, settled: bool, report_dir) -> str:
+    """本机 `status --wait` 被 Ctrl-C 打断时的说明：本命令处置之前与之后各一句（ADR 0054 决策八「中断」）。"""
+    if settled:
+        return f"已停止：本命令已把 run {run_id} 记为已结束，可用 {_status_cmd(run_id, report_dir=report_dir)} 查看。"
+    return f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"
+
+
+def _status_read_failure(run_id: str, report_root: Path, e: OSError) -> str:
+    """本机 `status` 读这个 run 的记录本身失败（没有权限一类）时的一句。"""
+    return f"读取 run {run_id} 的记录失败：{e}。请检查报告目录 {report_root} 的读权限后重新执行。"
+
+
+def _run_not_found(run_id: str) -> str:
+    """本机按标识找不到 run 时的一句：status、explain、settle-runs 同一句（ADR 0041 决策六）。"""
+    return f"未找到 run：{run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）"
+
+
+# 云端 `status --wait` 对没有后台执行标记的 run 的提示（产品语言）：云端后端的 --wait 仍按标记分流，随云端后端的改动另做
+_WAIT_WITHOUT_RELAY_NOTICE = ("这个 run 没有后台执行的标记（通常是由前台 run 执行的）：本命令只等待它结束、不接力推进。"
+                              "执行它的进程若已不在，它不会再到终态，可按 Ctrl-C 停止等待。")
 
 
 def _status_cloud(args, interrupted: dict | None = None) -> int:
@@ -2564,16 +2756,22 @@ def _status_cloud(args, interrupted: dict | None = None) -> int:
     if state is None:
         _progress(f"未找到 run：{args.run_id}（--prefix/--ddb-table 是否与产生这个 run 的 run 或 submit 一致？）")
         return 2
-    return _render_status(state, args,
-                          wait_hint=_status_cmd(args.run_id, prefix=target.prefix, wait=True),
+    # 疑似卡住的提示（只提示、不自动 kickoff——「查看」保持只读）：不带 --wait、不是 --json、run 级 pending 且所有 job 仍 pending，
+    # 且是 submit 提交的 run 时才给。认领在同一次写里把 job 与 run 级都置为 running，所以后半条只防旧版写者留下的「run 级 pending 而
+    # job 已 running」记录（推进早已开始，提示会是误报）。读标记是一次点查，只在前面的条件都成立时才做。
+    hint = None
+    if (not args.wait and not args.json and state.status == Status.PENDING
+            and all(js.status == Status.PENDING for js in state.jobs.values()) and _relay_available()):
+        hint = (f"提示：run 仍 pending。若已提交较久，推进可能未启动——"
+                f"`{_status_cmd(args.run_id, prefix=target.prefix, wait=True)}` 可接力推进。")
+    return _render_status(state, args, hint=hint,
                           locations=compose.cloud_artifact_locations(
                               bucket=target.bucket, report_prefix=args.report_dir, table=target.runs_table,
-                              run_id=args.run_id),
-                          relay_available=_relay_available)
+                              run_id=args.run_id))
 
 
 # ============================================================================
-# list-runs（ADR 0041 决策七）：列出一个后端里的 run，找回 run_id。只读、零副作用（不接力推进、不起 task）；
+# list-runs（ADR 0041 决策七）：列出一个后端里的 run，找回 run_id。只读、零副作用（不推进、不处置、不碰锁、不起 task）；
 # 退出码只有 0（读到了清单，空清单与含「无法读取」行的清单也是 0）与 2（参数不合法或读不到这个后端），不表判定。
 # 默认清单的口径（列哪些状态、终态取几条、两次端口调用怎么合并）只在这里，端口与 adapter 不承载它。
 # ============================================================================
@@ -2650,7 +2848,9 @@ def _cmd_list_runs(args) -> int:
     if args.backend == "cloud":
         return _list_runs_cloud(args, wanted)
 
-    report_root = Path(args.report_dir).resolve()
+    report_root = _local_report_root(args)  # 解析与路径长度的入口检查，先于第一次访问报告目录
+    if isinstance(report_root, int):
+        return report_root
     location = compose.local_run_list_location(report_root)
     run_store, _rs, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
     try:
@@ -2698,6 +2898,156 @@ def _list_runs_cloud(args, wanted: frozenset) -> int:
     return _emit_run_list(args, location, items, empty_hint=(
         f"云端后端里没有{_run_noun(wanted)}（前缀 {location['prefix']}，region {location['region']}，运行状态表 {location['ddb_table']}）。"
         f"请核对 --prefix、--region、--profile 与 --ddb-table 是否与执行 run 或 submit 时所用的一致。"))
+
+
+# ============================================================================
+# settle-runs（ADR 0054 决策八「settle-runs」一条）：run 处置与清理暂存目录。判定与动作在 runtime 的 settle 模块（等待中的
+# `status --wait` 调同一个），这里只有调用序、推迟 SIGINT 的区间、输出与退出码。只接本机后端，云端后端的处置随云端后端的改动另做。
+# ============================================================================
+
+_SETTLE_CLOUD_NOT_YET = "这个版本的 gherkai settle-runs 只处理本机后端（--backend local）的 run，还不能处理云端后端的 run。"
+
+
+class _SettleBatch:
+    """一次 settle-runs 已经做到哪里：已处理的 run 与暂存目录（列举是否完成各自记在 `BatchProgress.listed` 里；只给 run 标识时不清理
+    暂存目录，`staging` 为 None）、报告目录是否不存在、读写记录失败时的原错误、输出是否已经开始。中途被打断或失败时，输出与说明都按
+    这里记下的事实给出。"""
+
+    def __init__(self, location: dict, *, runs, staging) -> None:
+        self.location = location
+        self.runs = runs
+        self.staging = staging
+        self.missing = False
+        self.failure: OSError | None = None
+        self.emitted = False
+
+    def processed(self) -> bool:
+        return bool(self.runs.items) or bool(self.staging is not None and self.staging.items)
+
+
+def _cmd_settle_runs(args) -> int:
+    """[处置] 把管它的进程已不在、或已过期限加 300 秒的未结束 run 记为已结束（ADR 0054 决策八「settle-runs」一条，退出码见 ADR 0031
+    决定五「settle-runs」条）。
+
+    云端后端在任何云端访问之前以一句说明、退出码 2 结束（这个版本只处理本机后端）。本机：报告目录先过路径长度的入口检查
+    （`_local_report_root`），再按 `_settle_runs_body` 处理。整个命令体包在中断处理里：每次处置与清理每个暂存目录都在推迟 SIGINT 的区间
+    里（由 settle 模块按 `per_item` 调用），输出只做一次、也在这样的区间里（`_emit_settle_runs`），已经开始输出之后不再输出第二次。被
+    Ctrl-C 打断时先输出已处理的部分，再说明其余没有处理、可以再执行同一条命令，以 130 结束。"""
+    batch: "_SettleBatch | None" = None
+    try:
+        if args.backend == "cloud":
+            _progress(_SETTLE_CLOUD_NOT_YET)
+            return 2
+        report_root = _local_report_root(args)
+        if isinstance(report_root, int):
+            return report_root
+        from gherkai_runtime import settle
+
+        batch = _SettleBatch(compose.local_run_list_location(report_root), runs=settle.BatchProgress(),
+                             staging=None if args.run_id is not None else settle.BatchProgress())
+        return _settle_runs_main(args, report_root, batch)
+    except KeyboardInterrupt:
+        if batch is not None:
+            _emit_settle_runs(args, report_root, batch)
+            if batch.failure is not None:
+                _progress(_settle_access_failure(report_root, batch.failure, processed=batch.processed()))
+        _progress("已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。" if batch is not None and batch.processed()
+                  else "已停止，没有改动任何记录；可以再执行同一条命令。")
+        return 128 + signal.SIGINT
+
+
+def _settle_runs_main(args, report_root: Path, batch: _SettleBatch) -> int:
+    """处理、输出、给退出码。读写记录失败（OSError）就此停止：先输出已处理的部分，再说明，以 2 结束；出错的那个 run 没有改动（结束写
+    之前的各步只读，结束写本身是原子写，之后生成报告的失败隔离在处置里）。输出期间收到的 Ctrl-C 在输出做完之后按中断结束。"""
+    try:
+        early = _settle_runs_body(args, report_root, batch)
+    except OSError as e:
+        batch.failure = e
+    else:
+        if early is not None:
+            return early
+    if _emit_settle_runs(args, report_root, batch):
+        raise KeyboardInterrupt
+    if batch.failure is not None:
+        _progress(_settle_access_failure(report_root, batch.failure, processed=batch.processed()))
+        return 2
+    return 0
+
+
+def _settle_runs_body(args, report_root: Path, batch: _SettleBatch) -> "int | None":
+    """settle-runs 的处理，结果逐项记进 batch。返回 None 表示照常输出；返回 2 表示以一句说明结束、不输出（给出的 run 不存在、报告目录
+    不过边界检查）。读写记录失败原样抛出 OSError。
+
+    报告目录先只读地做一次边界检查（`run_dir.check_existing_dir`：只把「不存在」当作不存在，别的打开失败是读写记录失败）：不存在时
+    没有可处理的 run，不给标识的照常结束，给了标识的按 run 不存在以 2 结束；不过即以 2 结束、不处理其中的 run（ADR 0054 决策四）。之后
+    给了 run 标识只处置那一个（这个名字下已没有 run、含不合名字规则的标识与暂存目录的名字，按 run 不存在以 2 结束）；不给时处置全部
+    未结束与运行态读不出的 run（列举之后被删去的略过），再清理暂存目录。"""
+    from gherkai_core.adapters.run_store import run_dir
+    from gherkai_runtime import settle
+
+    check = run_dir.check_existing_dir(report_root)
+    if check is None:
+        if args.run_id is not None:
+            _progress(_run_not_found(args.run_id))
+            return 2
+        batch.missing = batch.runs.listed = batch.staging.listed = True
+        return None
+    if check.verdict is not run_dir.Boundary.INSIDE:
+        _progress(_filesystem_rejected_message(check, outcome=_SETTLE_REJECTED_OUTCOME))
+        return 2
+    target = settle.local_target(report_root)
+    if args.run_id is not None:
+        batch.runs.listed = True
+        try:
+            with _sigint_deferred():
+                batch.runs.items.append(settle.settle_run(target, args.run_id, clock=compose.now, dry_run=args.dry_run))
+        except settle.RunGone:
+            _progress(_run_not_found(args.run_id))
+            return 2
+        return None
+    settle.settle_unfinished(target, batch.runs, clock=compose.now, dry_run=args.dry_run, per_item=_sigint_deferred)
+    settle.clean_staging_dirs(target, batch.staging, dry_run=args.dry_run, per_item=_sigint_deferred)
+    return None
+
+
+def _emit_settle_runs(args, report_root: Path, batch: _SettleBatch) -> bool:
+    """输出已处理的部分，只做一次（已经开始输出即不再输出）；输出在推迟 SIGINT 的区间里，返回输出期间是否收到过 Ctrl-C。`--json` 下
+    stdout 是一个对象（ADR 0054 决策八「settle-runs」一条的机读输出）；人读输出是表格，列举没有完成时不说这里没有未结束的 run。"""
+    from gherkai_runtime import settle
+
+    if batch.emitted:
+        return False
+    batch.emitted = True
+    runs = list(batch.runs.items)
+    staging = None if batch.staging is None else list(batch.staging.items)
+    if batch.missing:
+        empty = f"报告目录 {report_root} 不存在，这里还没有 run。"
+    elif batch.runs.listed:
+        empty = f"报告目录 {report_root} 里没有未结束的 run。"
+    else:
+        empty = None
+    try:
+        with _sigint_deferred():
+            if args.json:
+                print(json.dumps(render.settle_runs_to_dict(batch.location, dry_run=args.dry_run, runs=runs, staging=staging),
+                                 ensure_ascii=False, indent=2))
+                # 报告没有生成及其原因是诊断：--json 下写到标准错误（JSON 里只有 report_written 这一个布尔）
+                for notice in (_settled_notice(r, machine=True) for r in runs if r.outcome is settle.Outcome.SETTLED):
+                    if notice is not None:
+                        _progress(notice)
+            else:
+                text = render.render_settle_runs(runs, staging, empty_line=empty)
+                if text:
+                    print(text)
+    except KeyboardInterrupt:
+        return True
+    return False
+
+
+def _settle_access_failure(report_root: Path, e: OSError, *, processed: bool) -> str:
+    """settle-runs 读写记录失败、就此停止时的一句。"""
+    done = "上面列出的已处理完，出错的那个与其余的没有改动" if processed else "没有改动任何记录"
+    return (f"读写报告目录 {report_root} 里的记录失败：{e}。{done}；请检查这个目录的读写权限与所在磁盘，再执行一次同一条命令。")
 
 
 # ============================================================================
@@ -2835,7 +3185,7 @@ def _explain_emit(args, state, result_store, *, read_bytes, wait_hint: str, reco
     GetObject、不列举前缀，所以只要读对象的权限（ADR 0042 决策四「数据来源」段；ADR 0030 决定三「点名」条）。存储里没被点名的明细
     （存下之后终态没有写成、由结束写结束的 job 先前存下的）不读、不展示。被点名的那一份读不到时打一句说明、以退出码 2 结束。
 
-    `wait_hint` 是各自的 `status --wait` 接力命令示例（local 用 --report-dir、cloud 用 --backend cloud
+    `wait_hint` 是各自的 `status --wait` 整条命令（local 用 --report-dir、cloud 用 --backend cloud
     --prefix），取法同 `_render_status`：本函数两路共用，定位信息只有调用方手里有（cloud 的 prefix 已解析、
     不在 args 上），故必传、不在此自算——「怎么办」给出的命令要能原样运行成功。
     """
@@ -2933,13 +3283,15 @@ def _cmd_explain(args) -> int:
     if args.backend == "cloud":
         return _explain_cloud(args)
 
-    report_root = Path(args.report_dir).resolve()
+    report_root = _local_report_root(args)  # 解析与路径长度的入口检查，先于第一次访问报告目录
+    if isinstance(report_root, int):
+        return report_root
     run_store, result_store, _rp, _mk = compose.build_local_stores(report_dir=str(report_root))
     bad = _definition_header_gate(run_store, args.run_id)  # 先于读运行态（ADR 0037 决策 7）
     if bad is not None:
         return bad
     if (state := run_store.load_run_state(args.run_id)) is None:
-        _progress(f"未找到 run：{args.run_id}（--report-dir 是否与产生这个 run 的 run 或 submit 一致？）")
+        _progress(_run_not_found(args.run_id))
         return 2
     def recover(scope_ids):
         try:
@@ -3029,9 +3381,9 @@ def _explain_cloud(args) -> int:
 
 
 def _definition_contract_message(e: DefinitionContractError) -> str:
-    """本机读到同版本下形态违约的提交记录时打印的一句（ADR 0037 决策 7「definition 结构版本」段）。读到它的有 `status` / `explain`
-    读头与 `status --wait` 接力：打印这句、以退出码 2 结束，不写运行态（接力不是这个 run 的推进器，读不懂可能只是本机的版本不同）。"""
-    return f"这个 run 的提交记录不完整或形态不对，本机不能读取或接力推进：{e}（用写出它的那个版本查看，或重新提交）"
+    """本机读到同版本下形态违约的提交记录时打印的一句（ADR 0037 决策 7「definition 结构版本」段）。读到它的有 `status`（含处置之后的
+    `status --wait`）与 `explain` 读头：打印这句、以退出码 2 结束。"""
+    return f"这个 run 的提交记录不完整或形态不对，本机不能读取它：{e}（用写出它的那个版本查看，或重新提交）"
 
 
 def _restore_default_termination_signals() -> None:
@@ -3068,13 +3420,14 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     3. 生成运行定义：推进用的就是内存里的这一份，不从记录读回。
     4. 查 submit 还在不在：对它交来的标准输入做一次非阻塞读，读到文件结束即已不在，不建 run、不输出，返回 2。
     5. 建 run（边界检查、在暂存目录上取锁、写定义与运行态、改名成 run 标识，`LocalRunStore.create_run`；运行态带后台执行标记，
-       `status --wait` 据此认它可接力）；锁交给本进程的持有者，持有到进程退出。这一次调用期间推迟 SIGINT（`_sigint_deferred`），
+       只作描述）；锁交给本进程的持有者，持有到进程退出。这一次调用期间推迟 SIGINT（`_sigint_deferred`），
        期间到达的 SIGINT 在调用返回之后才抛出，本进程随之退出、不回报。6. 装配推进所需的各部分（含建事件库，
        `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步失败（读写本机文件失败、报告目录没有通过边界检查、取不到
        锁、暂存目录连续被占用）时先关闭会话，再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻
        重试。
     8. 回报建成（run 的标识与公网地址）。9. 把输出改接日志（`redirect_output`）；回报没有送达（submit 在第 4 步之后才退出）时在日志
-       里记一句，照常推进。10. 推进到 run 结束（`detached.advance_local_run`）；读写本机运行记录失败时记一句、返回 1。11. 返回 0。
+       里记一句，照常推进。10. 推进到 run 结束（`detached.advance_local_run`）；读写本机运行记录（含事件库）失败、或读到的运行态
+       解析不了时记一句、返回 1，这时 run 停在未结束（说明见下方两个分支）。11. 返回 0。
 
     回报之前不启动子进程、不往标准错误写字（崩溃的回溯除外）：这时标准输出与标准错误都接在 submit 的标准错误上，子进程会继承它，
     调用方经管道捕获 submit 的输出时要等那个子进程退出才读到文件结束（ADR 0035 决策 3「输出」）。一切出口（含未捕获的异常）都在
@@ -3124,7 +3477,8 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
                 info.close()
             handoff.write_all(report_fd, handoff.encode_advancer_report(handoff.AdvancerReport(
                 run_id=None, public_url=None, exit_code=2,
-                message=_run_record_failure(e, report_dir=report_root, run_id=meta.run_id, created=created))))
+                message=_run_record_failure(e, report_dir=report_root, run_id=meta.run_id, created=created,
+                                            again=_AGAIN_SUBMIT))))
             return 2
         delivered = handoff.write_all(report_fd, handoff.encode_advancer_report(handoff.AdvancerReport(
             run_id=meta.run_id, public_url=info.url if info is not None else None, exit_code=0, message=None)))
@@ -3134,10 +3488,19 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             _progress(f"提交命令在收到提交结果之前已经退出；run {meta.run_id} 已经建立，照常执行。")
         try:
             detached.advance_local_run(advancer, meta)
-        except OSError as e:
-            # 保存判定明细的退避重试用尽，或读写运行态失败（ADR 0030 决定三「保存明细失败」条）：这个 run 没有结束、本进程不做结束写，
-            # 打一句说明（写进 reconcile.log）、不打回溯，以退出码 1 结束
-            _progress(_advance_store_failure_notice(meta.run_id, e, report_dir=report_root, relay=False))
+        except (OSError, sqlite3.Error) as e:
+            # 保存判定明细的退避重试用尽、读写运行态失败（ADR 0030 决定三「保存明细失败」条），或事件库出错（sqlite3.Error 不是
+            # OSError）：这个 run 没有结束、本进程不做结束写，打一句说明（写进 reconcile.log）、不打回溯，以退出码 1 结束。说明给出把它
+            # 记为已结束的 settle-runs 整条命令（ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）
+            _progress(_advance_store_failure_notice(meta.run_id, e, report_dir=report_root))
+            return 1
+        except UNREADABLE_RECORD_ERRORS as e:
+            # 推进中读到的运行态解析不了：这样的 run 处置方也不结束（ADR 0054 决策六最后一条），说明取 settle-runs 对它的同一句、不说
+            # 可以记为已结束。是不是这一种按记录里的事实判断（再读一次运行态，解析不了才是），不按异常的类型猜：别的值错误原样抛出
+            if not _run_state_unreadable(report_root, meta.run_id):
+                raise
+            _progress(f"run {meta.run_id} 的运行状态记录读不出，后台推进已停止：{e}。"
+                      f"{render.unreadable_state_remedy((report_root / meta.run_id).resolve())}。")
             return 1
         return 0
     finally:
@@ -3145,17 +3508,24 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             info.close()
 
 
-def _advance_store_failure_notice(run_id: str, error: OSError, *, report_dir, relay: bool) -> str:
-    """本机后台推进进程（relay 为 False）读写本机运行记录失败时的一句说明：发生了什么、记录在哪里、怎么办（ADR 0030 决定三「保存明细
-    失败」条）；`status --wait` 接力（relay 为 True）在同一情形下打同样内容的一句。两者都没有结束这个 run，执行中的 job 在记录里仍为
-    running。后台推进进程的说明给出接着推进的整条命令，接力的说明请使用方再执行同一条命令；「接着推进」的说法与接力的那一种随删去
-    本机接力改写。"""
+def _run_state_unreadable(report_root: Path, run_id: str) -> bool:
+    """这个 run 的运行态现在是否解析不了（读得到内容而解析失败，`serialize.UNREADABLE_RECORD_ERRORS`）；读不到或读取本身失败都不算。"""
+    try:
+        compose.build_local_stores(report_dir=report_root)[0].load_run_state(run_id)
+    except UNREADABLE_RECORD_ERRORS:
+        return True
+    except OSError:
+        return False
+    return False
+
+
+def _advance_store_failure_notice(run_id: str, error: BaseException, *, report_dir) -> str:
+    """本机后台推进进程读写本机运行记录（含事件库）失败时的一句说明：发生了什么、记录在哪里、怎么办（ADR 0030 决定三「保存明细失败」
+    条）。这个 run 没有结束、执行中的 job 在记录里仍为 running，也没有推进器了：尾句给出把它记为已结束的 settle-runs 整条命令，再重新
+    提交（`_unended_run_remedy`，与前台 run 同一说法，ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）。"""
     run_dir = (Path(report_dir) / run_id).resolve()
-    who = "接力推进" if relay else "后台推进"
-    how = ("然后再执行同一条命令接着推进。" if relay
-           else f"然后用 {_status_cmd(run_id, report_dir=report_dir, wait=True)} 接着推进。")
-    return (f"run {run_id} 读写本机的运行记录失败，{who}已停止：{error}。记录在 {run_dir}，出错时执行中的 job 在记录里仍为 "
-            f"running。请检查这个目录所在磁盘的剩余空间与读写权限，{how}")
+    return (f"run {run_id} 读写本机的运行记录失败，后台推进已停止：{error}。记录在 {run_dir}，出错时执行中的 job 在记录里仍为 "
+            "running。" + _unended_run_remedy(run_id, report_dir=report_dir, again=_AGAIN_SUBMIT))
 
 
 def _cmd_tunnel_watch(args) -> int:
@@ -3281,7 +3651,8 @@ def _cmd_run(args) -> int:
     # - `--no-report` 方式：**真不生成**——不注入落点，并经 no_artifacts 令 worker 不产生/不上报引擎原生产物
     #   （Midscene 关 generateReport；Nova SDK 无关闭开关、不给目录时写进自己 mkdtemp 的临时目录、不上报）。
     #   曾一度改为「落系统临时目录、不清」，被否：提交者要的 --no-report 就是不生成 report。
-    report_root = Path(args.report_dir).resolve()
+    # 报告目录取前置检查里解析并检查过的那一个（`_check_report_dir_boundary`）；--no-report 时为 None、不用它
+    report_root = prepped.report_root
     if do_report:
         artifact_root = report_root / run_id
         nova_logs_dir: Path | None = artifact_root / _names.ARTIFACT_SUBDIR["novaact"]  # 子目录名单点（三宿主同名，ADR 0029）
@@ -3299,9 +3670,11 @@ def _cmd_run(args) -> int:
     #     推进进程同一句（ADR 0030 决定七）；隧道由 atexit 关闭。
     #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
     #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
-    #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：一句说明、130，不打回溯，按记录里的事实
-    #     分两种说法，见 _run_creation_interrupted_message。建 run 的那一次调用期间推迟 SIGINT（`_sigint_deferred`，与本机后台推进
-    #     进程同一种做法，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断不会落在建 run 里面。
+    #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：130，不打回溯。建 run 的那一次调用期间推迟
+    #     SIGINT（`_sigint_deferred`，与本机后台推进进程同一种做法，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断
+    #     不会落在建 run 里面，所以按 `created` 这一个事实分两种：建 run 还没有开始（或 --no-report）时什么都没有留下，一句「没有开始
+    #     执行」；已经建成时本进程持着锁、就是推进器，由它自己按使用方中断做结束写并生成报告（`_end_interrupted_before_start`，
+    #     ADR 0035 决策 3「前台 `run`」一条）。
     from gherkai_core.adapters.run_store import run_dir
 
     persistence: RunPersistence | None = None
@@ -3341,13 +3714,15 @@ def _cmd_run(args) -> int:
             worker_log_fh.close()
         if not do_report:
             raise  # 没有记录可写：这里的失败只会是系统临时目录里的 worker 日志，不是写记录失败
-        _progress(_run_record_failure(e, report_dir=report_root, run_id=run_id, created=created))
+        _progress(_run_record_failure(e, report_dir=report_root, run_id=run_id, created=created, again=_AGAIN_RUN))
         return 2
     except KeyboardInterrupt:
         if worker_log_fh is not None:
             worker_log_fh.close()
-        _progress(_run_creation_interrupted_message(report_root if do_report else None, run_id))
-        return 128 + signal.SIGINT
+        if not created:
+            _progress(_STOPPED_BEFORE_START)
+            return 128 + signal.SIGINT
+        return _end_interrupted_before_start(persistence, run_meta, report_dir=args.report_dir)
 
     # 组合根注入引擎 resolver（延后到此：需 run_id + store 装配后）。
     engines = compose.build_engines(
@@ -3544,7 +3919,8 @@ def _store_failure_notice(run_id: str, error: OSError, *, report_dir, run_ended:
     存明细、写运行态与读回记录都读写本机文件，失败表现为 OSError（磁盘满、没有写权限、目录被删除；运行态点名的那一份明细读不到时
     同样是 OSError 的子类）。两种情形说法不同：
     - run_ended 为 False（失败在 run 成为终态之前）：执行中的 worker 已被停下，执行中的 job 在记录里仍为 running（没有启动的仍为
-      pending），排除磁盘或权限问题之后需要重新执行。
+      pending），这个 run 停在未结束、没有推进器，尾句给出把它记为已结束的 `settle-runs` 整条命令再重新执行（`_unended_run_remedy`，
+      与后台推进进程同一说法，ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）。
     - run_ended 为 True（本进程已使 run 成为终态，失败出在为组装汇总而读回运行态与被点名明细的那一次）：记录已是这个 run 的最终状态，只是汇总
       没有输出、报告没有生成，用 `status` 查看即可，不必重新执行。
     """
@@ -3556,7 +3932,7 @@ def _store_failure_notice(run_id: str, error: OSError, *, report_dir, run_ended:
                 "查看也失败时，请检查这个目录的读权限。")
     return (f"run {run_id} 读写本机的运行记录失败，执行已停止，没有输出汇总：{error}。"
             f"记录在 {run_dir}，其中的状态可用 {status_cmd} 查看，"
-            "出错时执行中的 job 在记录里仍为 running。请检查这个目录所在磁盘的剩余空间与读写权限，然后重新执行。")
+            "出错时执行中的 job 在记录里仍为 running。" + _unended_run_remedy(run_id, report_dir=report_dir, again=_AGAIN_RUN))
 
 
 def _interrupt_prompt(level: int, *, grace: float) -> str:
@@ -3727,6 +4103,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_explain(args)
     if args.command == "list-runs":
         return _cmd_list_runs(args)
+    if args.command == "settle-runs":
+        return _cmd_settle_runs(args)
     if args.command == "_tunnel_watch":
         return _cmd_tunnel_watch(args)
     if args.command == "_reconcile":

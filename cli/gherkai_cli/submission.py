@@ -36,6 +36,8 @@ class Prepared:
     local_project_arn: str | None = None                          # 本机后端：Device Farm 项目 ARN（已核形态）；云端 None（读 SSM）
     local_project_source: str | None = None                       # 它的来源说明（账号比对的警告点名用）
     local_app_bucket: str | None = None                           # 本机后端：放安装包的桶；云端 None（产物桶）
+    # 本机后端生成记录时：解析之后、已过路径长度与边界检查的报告目录（建 run 与交给后台推进进程的都是它）；云端与 --no-report 为 None
+    report_root: "Path | None" = None
 
 
 def target_rejections(jobs, caps: dict) -> list[str]:

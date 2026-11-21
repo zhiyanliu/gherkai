@@ -650,6 +650,29 @@ def test_status_cloud_pending_hint_offers_relay_only_for_detached_runs_and_stays
         assert rc == 0 and ("可接力推进" in err) is expect_hint and "云端不可达" not in err
 
 
+def test_status_cloud_pending_run_with_a_claimed_job_does_not_hint(monkeypatch, capsys):
+    """云端 run 级仍 pending 但已有 job 为 running 时，推进已开始，不提示「可能未启动」。现行写者写不出这个组合（认领的同一次写即把
+    run 级置为 running，ADR 0034 机制三「run 级状态只进不退」条）；这条用例守的是提示判据的后半条，它为不采用该规则的写者留下的记录而
+    保留。同一个 submit 的 run 在全部 job 仍 pending 时有提示（对照），所以没有提示出自 job 的状态、不出自别的条件。"""
+
+    class _Table:
+        def __init__(self, jobs):
+            self.jobs = jobs
+
+        def get_item(self, **kw):
+            if kw["Key"]["item_type"] == "META":
+                return _META_HEADER
+            return {"Item": {"run_id": "r1", "item_type": "STATE", "status": "pending", "detached": True, "jobs": self.jobs}}
+
+    _patch_skew(monkeypatch)
+    claimed = {"a": {"scope_id": "a", "status": "running"}, "b": {"scope_id": "b", "status": "pending"}}
+    waiting = {"a": {"scope_id": "a", "status": "pending"}, "b": {"scope_id": "b", "status": "pending"}}
+    for jobs, expect_hint in ((claimed, False), (waiting, True)):
+        monkeypatch.setattr(m.compose, "_make_ddb_table", lambda t, *, region, profile, _tb=_Table(jobs): _tb)
+        rc = m.main(["status", "r1", "--backend", "cloud", "--region", "us-east-1"])
+        assert rc == 0 and ("可接力推进" in capsys.readouterr().err) is expect_hint
+
+
 def test_status_wait_cloud_exits_2_when_the_detached_marker_cannot_be_read(monkeypatch, capsys):
     """--wait 要先知道能不能接力：读标记遇到 AWS 错误时以退出码 2 结束并报云端不可达，不能当成不可接力静默等下去（那会让本该接力的
     submit run 看起来像挂住）；一次都不 invoke kicker。"""

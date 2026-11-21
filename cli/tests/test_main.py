@@ -1732,29 +1732,34 @@ _LOCS = {"report_index": "file:///tmp/x/r/index.html", "run_meta": "file:///tmp/
          "run_state": "file:///tmp/x/r/run_state.json", "jobs_dir": "file:///tmp/x/r/jobs"}
 
 
-def test_render_status_pending_hints_wait(capsys):
-    """pending + 非 --wait + 非 json → 打 --wait 接力提示（提示走 stderr）。退出码 0（查询本身成功）。"""
-    rc = m._render_status(_mk_state(Status.PENDING), _args(), wait_hint="gherkai status r --wait", locations=_LOCS)
-    err = capsys.readouterr().err
-    assert "仍 pending" in err and "gherkai status r --wait" in err
-    assert rc == 0
+def test_render_status_prints_the_given_hint_only_without_wait_and_json(capsys):
+    """调用方算好的提示只在不带 --wait、不是 --json 时打到 stderr；它不改变 stdout 与退出码。不给提示时什么都不打。"""
+    hint = "提示：这是调用方算好的一句"
+    rc = m._render_status(_mk_state(Status.PENDING), _args(), hint=hint, locations=_LOCS)
+    cap = capsys.readouterr()
+    assert rc == 0 and cap.err.splitlines() == [hint] and cap.out.splitlines()[0] == "run r: pending"
+    for args in (_args(wait=True), _args(json_=True)):
+        assert m._render_status(_mk_state(Status.PENDING), args, hint=hint, locations=_LOCS) == 0
+        assert hint not in capsys.readouterr().err
+    assert m._render_status(_mk_state(Status.PENDING), _args(), locations=_LOCS) == 0
+    assert capsys.readouterr().err == ""
 
 
 def test_render_status_running_no_hint(capsys):
-    """running → 不提示（在运行、正常）。退出码 0。"""
-    rc = m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x", locations=_LOCS)
-    assert "仍 pending" not in capsys.readouterr().err
+    """running、不给提示 → stderr 为空（未结束不打产物位置）。退出码 0。"""
+    rc = m._render_status(_mk_state(Status.RUNNING), _args(), locations=_LOCS)
+    assert capsys.readouterr().err == ""
     assert rc == 0
 
 
 def test_render_status_terminal_no_hint_and_exitcode(capsys):
-    """终态：passed→0、其余终态→1（含派生终态 skipped/aborted），均不提示。"""
-    assert m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x", locations=_LOCS) == 0
-    assert m._render_status(_mk_state(Status.FAILED), _args(), wait_hint="x", locations=_LOCS) == 1
-    assert m._render_status(_mk_state(Status.ERROR), _args(), wait_hint="x", locations=_LOCS) == 1
-    assert m._render_status(_mk_state(Status.SKIPPED), _args(), wait_hint="x", locations=_LOCS) == 1
-    assert m._render_status(_mk_state(Status.ABORTED), _args(), wait_hint="x", locations=_LOCS) == 1
-    assert "仍 pending" not in capsys.readouterr().err
+    """终态：passed→0、其余终态→1（含派生终态 skipped/aborted）。"""
+    assert m._render_status(_mk_state(Status.PASSED), _args(), locations=_LOCS) == 0
+    assert m._render_status(_mk_state(Status.FAILED), _args(), locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.ERROR), _args(), locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.SKIPPED), _args(), locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.ABORTED), _args(), locations=_LOCS) == 1
+    assert "提示" not in capsys.readouterr().err
 
 
 def test_terminal_status_consumers_use_core_single_source():
@@ -1780,26 +1785,20 @@ def test_render_status_shows_run_level_message_in_text_and_json(capsys):
     """run 级消息（ADR 0037 决策 7）：文本在状态行下多一行、--json 多一个键；没有消息时两处都没有。退出码不变（error 仍 1）。"""
     from gherkai_core.model import RunState
     told = RunState(run_id="r", status=Status.ERROR, jobs={}, message="提交记录不能由本后端执行：结构版本 2，本后端认 1")
-    assert m._render_status(told, _args(), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(told, _args(), locations=_LOCS) == 1
     out = capsys.readouterr().out
     assert out.splitlines()[0] == "run r: error" and "message=提交记录不能由本后端执行：结构版本 2，本后端认 1" in out
-    assert m._render_status(told, _args(json_=True), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(told, _args(json_=True), locations=_LOCS) == 1
     assert json.loads(capsys.readouterr().out)["message"] == told.message
-    assert m._render_status(_mk_state(Status.ERROR), _args(json_=True), wait_hint="x", locations=_LOCS) == 1
+    assert m._render_status(_mk_state(Status.ERROR), _args(json_=True), locations=_LOCS) == 1
     assert "message" not in json.loads(capsys.readouterr().out)
 
 
-def test_render_status_wait_pending_no_hint(capsys):
-    """--wait 下即使 pending 也不打提示（--wait 本身在接力、提示多余）。"""
-    m._render_status(_mk_state(Status.PENDING), _args(wait=True), wait_hint="x", locations=_LOCS)
-    assert "仍 pending" not in capsys.readouterr().err
-
-
 def test_render_status_json_no_hint(capsys):
-    """--json（机读）：pending 也不打人读提示，且 stdout 是可解析 JSON。"""
-    m._render_status(_mk_state(Status.PENDING), _args(json_=True), wait_hint="x", locations=_LOCS)
+    """--json（机读）：给了提示也不打，stderr 为空，stdout 是可解析 JSON。"""
+    m._render_status(_mk_state(Status.PENDING), _args(json_=True), hint="提示：x", locations=_LOCS)
     cap = capsys.readouterr()
-    assert "仍 pending" not in cap.err
+    assert cap.err == ""
     json.loads(cap.out)  # stdout 是纯 JSON
 
 
@@ -1964,7 +1963,7 @@ def test_submit_local_writes_max_concurrency_into_definition(tmp_path, monkeypat
     """submit 把 --max-concurrency 落进 definition（推进器读 meta，不靠 flag 通道）。
 
     后台推进进程的启动命令里没有这个选项：值随经标准输入交出的输入走，写进后台推进进程生成的运行定义，它推进用的也是这一份。
-    推进器与提交进程可能分离（云端后端在 Lambda、`status --wait` 接力是另一个 CLI 调用），它们只能从落盘的 meta 取到这个值。
+    推进器与提交进程可能分离（云端后端在 Lambda，本机是另一个后台进程），它们只能从运行定义取到这个值。
     """
     reports = tmp_path / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports),
@@ -2105,8 +2104,8 @@ def test_run_steps_dir_flag_resolves_absolute_and_persists(tmp_path, monkeypatch
     """`--steps-dir` → ①绝对化后注给 worker（build_engines 的 steps_dir → env GHERKAI_STEPS_DIR）
     ②写进 definition（`RunMeta.steps_dir`）。
 
-    绝对化：worker 是 cwd 与 CLI 不同的子进程；随 definition 走：本机后台推进/接力宿主的 CWD 与提交进程
-    不同，只有读回同一个值三宿主才用同一套确定性 step、判定才可复现。
+    绝对化：worker 是 cwd 与 CLI 不同的子进程；随 definition 走：本机后台推进进程的 CWD 与提交进程
+    可以不同，只有用同一个值，各宿主才用同一套确定性 step、判定才可复现。
     """
     steps = tmp_path / "mysteps"
     steps.mkdir()
@@ -2170,8 +2169,8 @@ def test_steps_dir_explicit_but_missing_exits_2(tmp_path, monkeypatch, capsys):
 
 
 def test_submit_local_persists_steps_dir_into_definition(tmp_path, monkeypatch, inline_children, advanced):
-    """submit 侧同 run：提交进程解析一次，经交给后台推进进程的输入写进 definition——后台推进进程用这一份推进、接力者从 definition
-    读回（启动命令里**没有**这个选项，后台推进进程也不按自己的工作目录重解析 `./steps`），各宿主才一致。"""
+    """submit 侧同 run：提交进程解析一次，经交给后台推进进程的输入写进 definition——后台推进进程用这一份推进（启动命令里**没有**
+    这个选项，后台推进进程也不按自己的工作目录重解析 `./steps`），各宿主才一致。"""
     # 提交侧运行前检查会问一次能力自述（ADR 0037 决策 4）；本测只验持久化通道，那一跳由 conftest 的 autouse
     # 假替身盖住（不 spawn 真 worker）。
     steps = tmp_path / "steps"
@@ -2343,30 +2342,29 @@ def test_differently_written_same_file_is_deduped_with_a_hint(tmp_path, monkeypa
     assert "忽略 1 个重复路径" in cap.err and "sub/../demo.feature" in cap.err
 
 
-def test_render_status_pending_run_with_claimed_job_does_not_hint(capsys):
-    """run 级仍 pending 但已有 job 为 running 时，推进已开始，不提示「可能未启动」。现行写者写不出这个组合（认领的同一次写
-    即把 run 级置为 running，ADR 0034 机制三「run 级状态只进不退」条）；这条用例守的是提示判据的后半条，它为不采用该规则的
-    写者留下的记录而保留。"""
-    from gherkai_core.model import JobState, RunState
-    state = RunState(run_id="r", status=Status.PENDING,
-                     jobs={"a": JobState("a", Status.RUNNING), "b": JobState("b", Status.PENDING)}, high_water_mark=0)
-    assert m._render_status(state, _args(), wait_hint="x", locations=_LOCS) == 0
-    assert "仍 pending" not in capsys.readouterr().err
-
-
 def test_render_status_terminal_prints_artifact_locations(capsys):
     """终态时对标 `run` 结束的三行：报告 / 运行元信息 / 判定明细（S3 或本地路径可直接复制）；未终态不打（报告还没生成）。"""
-    m._render_status(_mk_state(Status.PASSED), _args(), wait_hint="x", locations=_LOCS)
+    m._render_status(_mk_state(Status.PASSED), _args(), locations=_LOCS)
     err = capsys.readouterr().err
     assert "报告: file:///tmp/x/r/index.html" in err and "判定明细: file:///tmp/x/r/jobs" in err
     assert "运行元信息: file:///tmp/x/r/run_meta.json、file:///tmp/x/r/run_state.json" in err
-    m._render_status(_mk_state(Status.RUNNING), _args(), wait_hint="x", locations=_LOCS)
+    m._render_status(_mk_state(Status.RUNNING), _args(), locations=_LOCS)
     assert "报告:" not in capsys.readouterr().err
     # --json 形状不变：stdout 纯 RunState JSON，stderr 不掺位置行
-    m._render_status(_mk_state(Status.PASSED), _args(json_=True), wait_hint="x", locations=_LOCS)
+    m._render_status(_mk_state(Status.PASSED), _args(json_=True), locations=_LOCS)
     cap = capsys.readouterr()
     json.loads(cap.out)
     assert "报告:" not in cap.err
+
+
+def test_render_status_without_a_report_drops_only_the_report_line(capsys):
+    """本命令处置了这个 run 而报告没有生成时（report_written=False），人读方式只少报告那一行，另两行照旧、开头的空行留在第一行上；
+    --json 的 artifacts 照样给出报告的约定落点（它不表达那里有没有内容）。"""
+    m._render_status(_mk_state(Status.ABORTED), _args(), locations=_LOCS, report_written=False)
+    assert capsys.readouterr().err.splitlines() == [
+        "", "运行元信息: file:///tmp/x/r/run_meta.json、file:///tmp/x/r/run_state.json", "判定明细: file:///tmp/x/r/jobs"]
+    m._render_status(_mk_state(Status.ABORTED), _args(json_=True), locations=_LOCS, report_written=False)
+    assert json.loads(capsys.readouterr().out)["artifacts"] == _LOCS
 
 
 def test_run_terminal_prints_the_same_three_artifact_lines(tmp_path, monkeypatch, capsys):
@@ -2408,7 +2406,7 @@ def test_run_lists_each_job_but_submit_only_prints_the_count(tmp_path, monkeypat
 
 def test_run_and_submit_share_one_steps_dir_help_text(capsys):
     """`--steps-dir` 的 help 在 run/submit 两处共用同一段措辞：run 的一段在公共段后加「值随提交记录走」，submit 的一段在 run 的一段
-    之后再加后台读回与云端后端不生效两句（run 只有本机后端，不写云端那句）；共有的部分只写一处，改一处即两处生效。
+    之后再加本机后台推进进程照它执行与云端后端不生效两句（run 只有本机后端，不写云端那句）；共有的部分只写一处，改一处即两处生效。
     `plan`、`doctor` 等不产提交记录的子命令用不加补充的公共段（`doctor` 同样带 `--backend`，判据不是它）。
     """
     import argparse
@@ -4075,7 +4073,7 @@ def test_explain_recovered_steps_is_a_job_level_count_so_filtering_does_not_brin
 
 
 def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_path, monkeypatch, inline_children, advanced):
-    """本机 submit 的后台推进进程建的 run 的 run_state.json 带顶层 detached 标记（status --wait 据此接力）；前台 run 产出的没有。"""
+    """本机 submit 的后台推进进程建的 run 的 run_state.json 带顶层 detached 标记（只作描述）；前台 run 产出的没有。"""
     reports = tmp_path / "s"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
     inline_children.settle()
@@ -4089,95 +4087,7 @@ def test_local_submit_marks_the_run_detached_and_foreground_run_does_not(tmp_pat
     assert "detached" not in json.loads((fg_dir / "run_state.json").read_text(encoding="utf-8"))
 
 
-def test_status_wait_on_a_foreground_run_only_waits_and_never_relays(tmp_path, monkeypatch, capsys):
-    """前台 `run` 正在执行的 run（没有 detached 标记）上执行 status --wait：不接力推进（接力者会与前台进程双开推进器、再起一个 worker），
-    只轮询等它到终态，提示一句，再按判定给退出码（两道闸的第一道；第二道是终态）。"""
-    import time as _time
-    root, run_id = _explain_run(tmp_path)  # 终态 failed
-    path = root / run_id / "run_state.json"
-    final = path.read_text(encoding="utf-8")
-    st = json.loads(final)
-    st["status"] = "running"
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-
-    def boom(*a, **k):
-        raise AssertionError("前台 run 不该被接力推进")
-
-    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)
-    polls = []
-
-    def sleep(s):  # 前两个轮询间隔里 run 仍在进行，第三个间隔里「前台进程」把它推到终态——等待必须持续轮询，不是看一眼就返回
-        polls.append(s)
-        if len(polls) == 3:
-            path.write_text(final, encoding="utf-8")
-
-    monkeypatch.setattr(_time, "sleep", sleep)
-    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
-    err = capsys.readouterr().err
-    assert rc == 1 and polls == [1.0, 1.0, 1.0]
-    assert "只等待它结束、不接力推进" in err and "Ctrl-C" in err
-
-
-def test_status_wait_interrupted_by_ctrl_c_exits_130_with_a_notice_instead_of_a_traceback(tmp_path, monkeypatch, capsys):
-    """提示让用户按 Ctrl-C 停止等待，按下去就不能是一屏回溯：只等待的分支与接力分支各打一句说明、以退出码 130 结束（同前台 run 的中断）。"""
-    import time as _time
-    root, run_id = _explain_run(tmp_path)
-    path = root / run_id / "run_state.json"
-    st = json.loads(path.read_text(encoding="utf-8"))
-    st["status"] = "running"
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-
-    def interrupt(*a, **k):
-        raise KeyboardInterrupt
-
-    monkeypatch.setattr(_time, "sleep", interrupt)  # 前台 run 的记录：只等待分支在第一次轮询间隔里被打断
-    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
-    err = capsys.readouterr().err
-    assert rc == 130 and "已停止等待" in err and "Traceback" not in err
-    st["detached"] = True  # submit 的记录：接力分支里被打断
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", interrupt)
-    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
-    err = capsys.readouterr().err
-    assert rc == 130 and "已停止接力" in err and "再执行同一条命令可继续推进" in err
-
-
-def test_status_pending_hint_offers_relay_only_for_detached_runs(tmp_path, capsys):
-    """全 job pending 的提示「可接力推进」只对 submit 的 run 打：前台 run 刚建记录时同样全 pending，但它没有可接力的推进器。"""
-    root, run_id = _explain_run(tmp_path)
-    path = root / run_id / "run_state.json"
-    st = json.loads(path.read_text(encoding="utf-8"))
-    st["status"] = "pending"
-    for j in st["jobs"]:
-        j["status"] = "pending"
-        j.pop("result_id", None)  # 没结束的 job 没有点名
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-    assert m.main(["status", run_id, "--report-dir", str(root)]) == 0
-    assert "可接力推进" not in capsys.readouterr().err
-    st["detached"] = True
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-    assert m.main(["status", run_id, "--report-dir", str(root)]) == 0
-    assert "可接力推进" in capsys.readouterr().err
-
-
-def test_status_wait_does_not_reconcile_a_terminal_run(tmp_path, monkeypatch, capsys):
-    """status --wait 对已到终态的 run（含前台 run 产出的）不再接力推进：终态即提交点；此前它会拿事件流重放，前台 run 只有事件没有退出记录
-    时会在收尾聚合处抛出。"""
-    root, run_id = _explain_run(tmp_path)  # 终态 failed
-    path = root / run_id / "run_state.json"
-    st = json.loads(path.read_text(encoding="utf-8"))
-    st["detached"] = True  # 要守的是第二道闸：种子得是 submit 的 run，否则第一道闸（非 detached 不接力）就把接力挡掉了，测试会假绿
-    path.write_text(json.dumps(st, ensure_ascii=False), encoding="utf-8")
-
-    def boom(*a, **k):
-        raise AssertionError("终态 run 不该接力推进")
-
-    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile", boom)  # 主程序在函数内按模块引用它
-    rc = m.main(["status", run_id, "--report-dir", str(root), "--wait"])
-    assert rc == 1  # 终态 failed 的判定退出码
-
-
-# ---- 本机两种后台推进（后台推进进程、status --wait 接力）在保存判定明细一直失败时的出口 ----
+# ---- 本机后台推进进程在保存判定明细一直失败、推进中遇到事件库错误或读到解析不了的运行态时的出口 ----
 # 真实装配与真实推进步骤，只把引擎换成空表（不起 worker）、把判定存储的等待换成记录；后台推进进程经 `inline_children` 在线程里执行。
 
 
@@ -4222,7 +4132,8 @@ def _assert_left_running(reports: Path, run_id: str) -> None:
 def test_background_advancer_exits_1_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys,
                                                                                             inline_children):
     """后台推进进程保存判定明细一直失败（磁盘写不进）：按 1、2、4 秒退避重试仍失败，进程在 reconcile.log 里打一句说明（发生了什么、记录
-    在哪里、用哪条命令接着推进）、不打回溯，以退出码 1 结束；这个 run 没有结束、不做结束写。提交进程此前已收到回报，以 0 结束。"""
+    在哪里、用哪条 settle-runs 命令把它记为已结束再重新提交）、不打回溯，以退出码 1 结束；这个 run 没有结束、不做结束写。提交进程此前
+    已收到回报，以 0 结束。"""
     from gherkai_core.adapters.result_store.local import LocalResultStore
 
     reports = tmp_path / "reports"
@@ -4243,30 +4154,67 @@ def test_background_advancer_exits_1_with_one_sentence_when_saving_the_detail_ke
     assert returncode == 1 and "Traceback" not in log and waits == [1.0, 2.0, 4.0]
     assert f"run {run_id} 读写本机的运行记录失败，后台推进已停止：" in log and "No space left on device" in log
     assert f"记录在 {(reports / run_id).resolve()}，出错时执行中的 job 在记录里仍为 running" in log
-    assert "磁盘的剩余空间与读写权限" in log and f"然后用 gherkai status {run_id} --report-dir {reports} --wait 接着推进" in log
+    assert ("请检查这个目录所在磁盘的剩余空间与读写权限，再用 "
+            f"gherkai settle-runs {run_id} --report-dir {reports} 把这个 run 记为已结束，然后重新提交。") in log
     assert "读写本机的运行记录失败" not in cap.err  # 说明只进日志：提交进程的终端此时早已收到回报、退出
     _assert_left_running(reports, run_id)
 
 
-def test_relay_exits_2_with_one_sentence_when_saving_the_detail_keeps_failing(tmp_path, monkeypatch, capsys,
-                                                                              inline_children, advanced):
-    """`status --wait` 接力保存判定明细一直失败：重试用尽之后打一句说明、不打回溯，以退出码 2 结束（没有判出结果）；不写终态、不结束
-    这个 run。接力不持有隧道，没有要关闭的会话。"""
-    from gherkai_core.adapters.result_store.local import LocalResultStore
+@pytest.mark.parametrize("damage", ["events-db", "run-state"])
+def test_background_advancer_exits_1_with_one_sentence_when_the_record_breaks_while_advancing(
+        damage, tmp_path, monkeypatch, capsys, inline_children):
+    """推进中记录坏掉，后台推进进程同样只打一句说明（写进 reconcile.log）、不打回溯，以退出码 1 结束，run 停在未结束：
+    - 事件库不再是 SQLite 库（读事件得到 sqlite3.DatabaseError，不是 OSError）：读写记录失败的那一句，给出把它记为已结束的 settle-runs
+      整条命令，再重新提交；
+    - 运行态解析不了：这样的 run 处置方也不结束，说明取 settle-runs 对它的同一句（不改动它、确认不需要之后可以手工移走），不说可以
+      记为已结束。"""
+    reports = tmp_path / "reports"
+    real_advance = detached.advance_local_run
 
-    reports, run_id, _ = _submit_one_job(tmp_path, monkeypatch, inline_children)
-    [meta] = advanced
-    _stage_a_finished_job(reports, meta)
-    capsys.readouterr()
-    waits = _no_wait_save_retry(monkeypatch)
-    monkeypatch.setattr(LocalResultStore, "save_job_result", _disk_full)
+    def advance_after_breaking(advancer, meta, **kw):
+        run = reports / meta.run_id
+        if damage == "events-db":
+            compose.events_db_path(reports, meta.run_id).write_bytes(b"not a sqlite file at all, long enough to be read")
+        else:
+            (run / "run_state.json").write_text("{broken", encoding="utf-8")
+        return real_advance(advancer, meta, **kw)
 
-    rc = m.main(["status", run_id, "--wait", "--report-dir", str(reports)])
-    err = capsys.readouterr().err
-    assert rc == 2 and "Traceback" not in err and waits == [1.0, 2.0, 4.0]
-    assert f"run {run_id} 读写本机的运行记录失败，接力推进已停止：" in err and "No space left on device" in err
-    assert f"记录在 {(reports / run_id).resolve()}" in err and "然后再执行同一条命令接着推进" in err
-    _assert_left_running(reports, run_id)
+    monkeypatch.setattr(detached, "advance_local_run", advance_after_breaking)
+    reports, run_id, returncode = _submit_one_job(tmp_path, monkeypatch, inline_children)
+    log = (reports / run_id / "reconcile.log").read_text(encoding="utf-8")
+    assert returncode == 1 and "Traceback" not in log
+    if damage == "events-db":
+        assert f"run {run_id} 读写本机的运行记录失败，后台推进已停止：file is not a database。" in log
+        assert (f"再用 gherkai settle-runs {run_id} --report-dir {reports} 把这个 run 记为已结束，然后重新提交。") in log
+        from gherkai_core.adapters.run_store.local import LocalRunStore
+
+        assert LocalRunStore(reports).load_run_state(run_id).status not in m.TERMINAL_STATUSES
+    else:
+        try:
+            json.loads("{broken")
+        except ValueError as e:
+            why = str(e)
+        assert (f"run {run_id} 的运行状态记录读不出，后台推进已停止：{why}。settle-runs 与 status --wait 不改动这个 run 的记录，"
+                f"确认不需要之后可以手工移走 run 目录 {(reports / run_id).resolve()}。") in log
+        assert "settle-runs " + run_id not in log  # 不给把它记为已结束的命令
+
+
+def test_background_advancer_lets_a_value_error_that_is_not_about_the_record_through(tmp_path, monkeypatch, capsys,
+                                                                                     inline_children):
+    """推进中抛出的值错误，而运行态照样读得出：不是「运行态读不出」，原样抛出（进程以回溯结束），不打那一句。"""
+    def advance(advancer, meta, **kw):
+        raise ValueError("not about the record")
+
+    monkeypatch.setattr(detached, "advance_local_run", advance)
+    _fake_locator(monkeypatch, available=("novaact", "midscene"))
+    monkeypatch.setattr(m.compose, "build_engines", lambda **kw: {})
+    reports = tmp_path / "reports"
+    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
+    inline_children.settle()
+    child = inline_children.only()
+    assert str(child.expect_error(ValueError)) == "not about the record"
+    run_id = _submitted_run_dir(reports).name
+    assert "运行状态记录读不出" not in (reports / run_id / "reconcile.log").read_text(encoding="utf-8")
 
 
 def test_explain_cloud_recovers_from_events_table_and_reports_missing_permission(monkeypatch, capsys):
@@ -4746,44 +4694,45 @@ def test_missing_profile_exits_2_on_cloud_queries(tmp_path, cmd, monkeypatch, ca
     _assert_identity_error(capsys)
 
 
-def test_missing_profile_exits_2_on_cloud_submit_and_local_status_relay(tmp_path, monkeypatch, capsys, inline_children,
-                                                                        advanced):
-    """云端 submit 在 skew 闸之前、本机 status --wait 在接力推进之前，同样以退出码 2 结束。"""
-    reports = tmp_path / "reports"
-    assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
-    inline_children.settle()
-    run_id = capsys.readouterr().out.strip()
-
+def test_missing_profile_exits_2_on_cloud_submit_before_any_cloud_read(tmp_path, monkeypatch, capsys):
+    """云端 submit 在 skew 闸之前以退出码 2 结束。本机 status（含 --wait）不解析身份，见 test_settle_runs 里的同名用例。"""
     _no_such_profile_env(tmp_path, monkeypatch)
     monkeypatch.setattr(m, "_cloud_skew_gate", lambda *a, **k: pytest.fail("身份解析失败不该读云端"))
-    monkeypatch.setattr("gherkai_runtime.detached.drive_local_reconcile",
-                        lambda *a, **k: pytest.fail("身份解析失败不该接力推进"))
     assert m.main(["submit", str(_write_feature(tmp_path)), "--backend", "cloud", "--profile", _NO_SUCH_PROFILE]) == 2
-    _assert_identity_error(capsys)
-    assert m.main(["status", run_id, "--report-dir", str(reports), "--wait", "--profile", _NO_SUCH_PROFILE]) == 2
     _assert_identity_error(capsys)
 
 
 # ---- 打给使用方照抄执行的 status 命令（ADR 0042 决策四）----
 
 def test_status_hints_quote_report_dir_with_spaces(tmp_path, monkeypatch, capsys, inline_children, advanced):
-    """submit 的查进度提示、status 与 explain 的 --wait 提示对 --report-dir 加 shell 引号：项目路径带空格时，
-    shlex 切回来的 --report-dir 与原路径相等，命令能原样粘贴执行。"""
+    """submit 的查进度提示、explain 的 --wait 提示与记录写下之后准备执行用的文件失败时给出的 settle-runs 整条命令都对 --report-dir 加
+    shell 引号：项目路径带空格时，shlex 切回来的 --report-dir 与原路径相等，命令能原样粘贴执行。"""
     import shlex
+    import sqlite3
+
+    from gherkai_core.adapters import event_log
 
     reports = tmp_path / "My Project" / "reports"
     assert m.main(["submit", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 0
     inline_children.settle()
     cap = capsys.readouterr()
     run_id = cap.out.strip()
-    hints = [re.search(r"查进度：(gherkai status .*)$", cap.err, re.M).group(1)]
-    assert m.main(["status", run_id, "--report-dir", str(reports)]) == 0
-    hints.append(re.search(r"`(gherkai status .*? --wait)`", capsys.readouterr().err).group(1))
+    hints = [("status", run_id, re.search(r"查进度：(gherkai status .*)$", cap.err, re.M).group(1))]
     assert m.main(["explain", run_id, "--report-dir", str(reports)]) == 0
-    hints.append(re.search(r"可先用 (gherkai status .*? --wait) 等到终态", capsys.readouterr().err).group(1))
-    for hint in hints:
+    hints.append(("status", run_id, re.search(r"可先用 (gherkai status .*? --wait) 等到终态", capsys.readouterr().err).group(1)))
+
+    def broken_event_log(path):
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(event_log, "SqliteEventLog", broken_event_log)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("准备执行用的文件失败时不该开始执行"))
+    assert m.main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)]) == 2
+    err = capsys.readouterr().err
+    failed = re.search(r"run (\S+) 的记录已经写下", err).group(1)
+    hints.append(("settle-runs", failed, re.search(r"再用 (gherkai settle-runs .*?) 把这个 run 记为已结束", err).group(1)))
+    for verb, rid, hint in hints:
         argv = shlex.split(hint)
-        assert argv[:3] == ["gherkai", "status", run_id], hint
+        assert argv[:3] == ["gherkai", verb, rid], hint
         assert argv[argv.index("--report-dir") + 1] == str(reports), hint
 
 
@@ -4945,7 +4894,7 @@ def test_list_runs_local_wrongly_typed_fields_are_unreadable_rows_and_unknown_ve
     assert "提示" not in _table_row(out, "run_id")
 
 
-def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_leftovers(tmp_path, monkeypatch, capsys, request):
+def test_list_runs_local_text_table_marks_version_and_unreadable(tmp_path, monkeypatch, capsys, request):
     monkeypatch.setattr(m, "_installed_version", lambda: _LR_CLI)
     # 时刻列换算到本机时区显示：把本机时区钉在 UTC+8，断言才不随执行测试的机器变化
     import time as _time
@@ -4969,8 +4918,8 @@ def test_list_runs_local_text_table_marks_version_unreadable_and_foreground_left
     errored = _table_row(out, "20261110T100000Z-a00003")
     assert errored[5] == "未知" and errored[6] == "提交记录不完整"
     assert errored[4] == "1（pending 1）"  # 只有一种 job 状态、但与 run 的状态不同：同样括注
-    # 未结束的前台 run 才有遗留提示；submit 的 run（detached）没有
-    assert "不会再到终态" in _table_row(out, "20261110T060000Z-b00002")[6]
+    # 后台执行标记只作描述：未结束的前台 run 与 submit 的 run 都没有提示
+    assert _table_row(out, "20261110T060000Z-b00002")[6] == ""
     assert _table_row(out, "20261110T070000Z-b00001")[6] == ""
     broken = _table_row(out, "20261110T050000Z-c00001")
     assert broken == ["20261110T050000Z-c00001", m.render.UNREADABLE_RUN_STATUS, "-", "-", "-", "未知", ""]

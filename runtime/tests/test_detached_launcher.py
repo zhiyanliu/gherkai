@@ -131,22 +131,6 @@ def test_job_timeout_stops_worker_and_attributes_timeout(tmp_path, lock_holder):
     assert jr.session_id == "echo-sess"  # 血缘仍从 scope_started 捕获（超时不丢会话线索）
 
 
-def test_relay_recovers_foreign_timed_out_claim(tmp_path, lock_holder):
-    """接力恢复：他人 claim 的 RUNNING job（owner 进程已死、
-    无 handle 无观察链）过了截止时刻加 10 秒 → loop 防御扫补写一条判为超时的未知退出（不带退出时刻）收敛 ERROR，run 不永久 wedge。"""
-    meta, log, store, launcher = _setup(tmp_path, lock_holder, "pass", "a", timeout_s=60.0, clock=_one_hour_later)
-    # 模拟死 owner 遗留态：a 已被 claim（claimed_at 一小时前）、无退出记录、本 launcher 没起过它
-    assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00Z") is True
-    run_reconcile_loop("run-1", meta, log, store, launcher, max_concurrency=1,
-                       poll_interval_s=0.05, clock=_one_hour_later, result_store=LocalResultStore(tmp_path))
-    state = store.load_run_state("run-1")
-    assert state.status == Status.ERROR
-    exits = [r for r in log.records() if r.kind == "exit"]
-    assert len(exits) == 1 and exits[0].exited.timed_out is True
-    assert exits[0].exited.exit_code is None  # 无观察到的退出码——诚实留空（「码未知」分支被 timed_out 归因短路）
-    assert exits[0].exited.exited_at is None  # 也没有可观察的退出时刻
-
-
 def test_grace_query_failure_never_spawns_a_worker(tmp_path, lock_holder):
     """grace 下限现在要 spawn 一次 worker 自述才能取得、**会抛**（ADR 0024「引擎自报下限」：旧 worker 不认入口 /
     定位不到 / 答非契约）——launch 必须问在起 worker **之前**：抛在 run_scope 之后就是「worker 已起、_pump 没起」，
@@ -357,78 +341,34 @@ def test_loop_does_not_rewrite_the_report_of_a_committed_run(tmp_path, lock_hold
     assert store.load_run_state("run-1") == before
 
 
-def test_drive_local_reconcile_ends_for_an_already_terminal_run(tmp_path, monkeypatch, lock_holder):
-    """`status --wait` 接力的入口：run 已由结束写结束（这里是运行定义不可用的变体，run 与 job 都是 error）时推进结束，不起 worker、
-    不写报告、不改运行态（ADR 0034 机制三④）。推进放在线程里、限时等待：循环不结束时本例失败而不挂住。"""
-    import threading
-
-    from gherkai_runtime import compose, detached
-
-    _seed_for_build(tmp_path, lock_holder, "run-t", max_concurrency=1)
-    assert LocalRunStore(tmp_path).end_run("run-t", definition_unavailable_ending("提交记录不完整"), ended_at="t1") is True
-    before = LocalRunStore(tmp_path).load_run_state("run-t")
-    monkeypatch.setenv("AWS_REGION", "us-test-9")
-    spawned: list[str] = []
-
-    class _Spy:
-        def run_scope(self, job, **kw):
-            spawned.append(job.scope_id)
-            raise AssertionError("已结束的 run 不应启动任何 job")
-
-    monkeypatch.setattr(compose, "build_engines", lambda **kw: {"novaact": _Spy()})
-
-    worker = threading.Thread(
-        target=detached.drive_local_reconcile, args=(str(tmp_path), "run-t", 1),
-        kwargs={"region": None, "profile": None, "poll_interval_s": 0.01}, daemon=True)
-    worker.start()
-    worker.join(timeout=10)
-
-    assert not worker.is_alive(), "推进循环没有结束"
-    assert spawned == []
-    assert not (tmp_path / "run-t" / "index.html").exists() and not (tmp_path / "run-t" / "manifest.json").exists()
-    assert LocalRunStore(tmp_path).load_run_state("run-t") == before
-    assert before.jobs["a"].status == Status.ERROR
-
-
-# ---------- 本机推进的装配：后台推进进程与 status --wait 接力共用 `assemble_local_run`（ADR 0034）----------
-
-# 两种入口：advancer 是本机后台推进进程（`assemble_local_run`，用它自己生成、留在内存里的那份运行定义），relay 是 status --wait 接力
-# （`build_local_reconcile`，从记录读回）。装配是同一个函数，同一个 run 经两种入口得到的启动器相同，下面的装配用例对两者各验一次。
-_ENTRIES = ("advancer", "relay")
-
+# ---------- 本机推进的装配：后台推进进程经 `assemble_local_run`（ADR 0034）----------
 
 def _def(run_id: str, **fields) -> RunMeta:
     """一个单 job 的运行定义，其余字段按参数。"""
     return RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), deadline_at=_FAR, **fields)
 
 
-def _assembled(holder, entry: str, tmp_path, meta: RunMeta, *, region=None, profile=None, max_concurrency: int = 1):
-    """建好这个 run（两种入口都在建 run 之后装配），再经 entry 指定的入口装配，返回 `LocalAdvancer`。"""
+def _assembled(holder, tmp_path, meta: RunMeta, *, region=None, profile=None):
+    """建好这个 run（后台推进进程在建 run 之后装配），再经 `assemble_local_run` 装配，返回 `LocalAdvancer`。"""
     from gherkai_core.persist import initial_run_state
     from gherkai_runtime import detached
 
     LocalRunStore(tmp_path, lock_holder=holder).create_run(meta, initial_run_state(meta, started_at="t0"))
-    if entry == "advancer":
-        return detached.assemble_local_run(meta, str(tmp_path), region=region, profile=profile)
-    _m, log, store, launcher, _mc, result_store, report_store = detached.build_local_reconcile(
-        str(tmp_path), meta.run_id, max_concurrency, region=region, profile=profile)
-    return detached.LocalAdvancer(log, store, launcher, result_store, report_store)
+    return detached.assemble_local_run(meta, str(tmp_path), region=region, profile=profile)
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_resolves_region_like_foreground(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_resolves_region_like_foreground(tmp_path, monkeypatch, lock_holder):
     """region 走与前台 run 相同的解析链（ADR 0016 决策 C）：不显式给 --region 时 env/profile config 兜底、
     落实成字符串注入 worker env——曾原样透传 None：worker 里 AgentCore validate_region 见 None 即崩
     （exit 1 零事件，detached 实际运行复现）。"""
     monkeypatch.setenv("AWS_REGION", "us-test-9")
     monkeypatch.delenv("AWS_PROFILE", raising=False)
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-r"), region=None, profile=None)
+    parts = _assembled(lock_holder, tmp_path, _def("run-r"), region=None, profile=None)
     # 解析结果最终注进各引擎 worker 的 spawn env（与前台 run 同一注入面）
     assert parts.launcher._resolver("novaact")._env.get("AWS_REGION") == "us-test-9"
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_goes_through_resolve_aws_identity(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_goes_through_resolve_aws_identity(tmp_path, monkeypatch, lock_holder):
     """后台装配与前台 run 共用**同一个** region/profile 解析实现（ADR 0016 决策 C）：装配不自写一份。
 
     换掉 `compose.resolve_aws_identity` 即换掉后台这条链——两处各写一份时，改一处漏一处就让同一个 run 在
@@ -443,95 +383,60 @@ def test_assembly_goes_through_resolve_aws_identity(tmp_path, monkeypatch, entry
         return "us-test-1", "prof-x"
 
     monkeypatch.setattr(compose, "resolve_aws_identity", _fake_identity)
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-id"), region=None, profile=None)
+    parts = _assembled(lock_holder, tmp_path, _def("run-id"), region=None, profile=None)
     assert seen == [(None, None)]  # 入参原样交给唯一实现，不在装配里预处理
     eng = parts.launcher._resolver("novaact")  # 解析结果最终注进 worker spawn env
     assert eng._env.get("AWS_REGION") == "us-test-1"
     assert eng._env.get("AWS_PROFILE") == "prof-x"
 
 
-def _seed_for_build(tmp_path, holder, run_id: str, *, max_concurrency: int | None):
-    """落一个最小 run（单 pending job）供 build_local_reconcile 读回，meta 的 max_concurrency 按参数。"""
-    meta = RunMeta(run_id=run_id, created_at="t0", jobs=(_job("a"),), max_concurrency=max_concurrency, deadline_at=_FAR)
-    store = LocalRunStore(tmp_path, lock_holder=holder)
-    store.create_run(meta, RunState(run_id=run_id, status=Status.PENDING,
-                                    jobs={"a": JobState("a", Status.PENDING)},
-                                    started_at="t0", high_water_mark=0))
-
-
-def test_build_local_reconcile_prefers_meta_max_concurrency(tmp_path, lock_holder):
-    """并发上限以 definition 为准：入参 flag 与 meta 冲突时用 meta（ADR 0034 机制四）——`status --wait` 接力者
-    的 flag 值可能与 submit 时不同，接力不该悄悄改这个 run 的并行度。"""
-    from gherkai_runtime.detached import build_local_reconcile
-
-    _seed_for_build(tmp_path, lock_holder, "run-m", max_concurrency=3)
-    _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
-        str(tmp_path), "run-m", max_concurrency=1, region="us-east-1")
-    assert mc == 3
-
-
-def test_build_local_reconcile_falls_back_to_flag_when_meta_missing(tmp_path, lock_holder):
-    """对偶（防「恒取入参」的假绿反面）：meta 无值时回落入参 flag。"""
-    from gherkai_runtime.detached import build_local_reconcile
-
-    _seed_for_build(tmp_path, lock_holder, "run-f", max_concurrency=None)
-    _m, _l, _s, _launcher, mc, _rs, _rp = build_local_reconcile(
-        str(tmp_path), "run-f", max_concurrency=2, region="us-east-1")
-    assert mc == 2
-
-
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_injects_run_id_to_both_engines(tmp_path, monkeypatch, entry, lock_holder):
-    """本 run 的 id 经 env RUN_ID 注给两个 worker（ADR 0024「run_id + scope_id 注入 worker」条）：后台推进进程与 `status --wait`
-    接力者都经这里起 worker，worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），缺了它两个 worker 都在建会话前以 1 退出。
+def test_assembly_injects_run_id_to_both_engines(tmp_path, monkeypatch, lock_holder):
+    """本 run 的 id 经 env RUN_ID 注给两个 worker（ADR 0024「run_id + scope_id 注入 worker」条）：后台推进进程经这里起 worker，
+    worker 用它编码会话名的 run 段（ADR 0051 决策 3、4），缺了它两个 worker 都在建会话前以 1 退出。
     取值是被推进的这个 run，宿主 shell 里残留的同名值不得越过它；本机只注 RUN_ID，不注 SCOPE_ID，事件出口仍是 fd 态。"""
     monkeypatch.setenv("RUN_ID", "host-run")
     # Midscene worker 经定位链第一级指到占位命令：本例只看 spawn env，不起进程，也不依赖本机有没有构建过 Midscene worker
     monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node /fake/midscene-worker.mjs")
     monkeypatch.delenv("GHERKAI_WORKER_MIDSCENE_CWD", raising=False)
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-id-x"), region="us-east-1")
+    parts = _assembled(lock_holder, tmp_path, _def("run-id-x"), region="us-east-1")
     for engine in ("novaact", "midscene"):
         env = parts.launcher._resolver(engine)._env
         assert env is not None and env["RUN_ID"] == "run-id-x", engine
         assert "SCOPE_ID" not in env, engine
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_takes_steps_dir_from_definition(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_takes_steps_dir_from_definition(tmp_path, monkeypatch, lock_holder):
     """使用方 step 目录随 definition 走：装配取 meta.steps_dir、经 env 注给 worker，**绝不重解析 `./steps`**（ADR 0037 决策 4）——
-    `status --wait` 接力者的 CWD 与提交进程各不相同，重解析会让同一个 run 在不同宿主下用到不同的确定性 step 集、判定不可复现。
+    按装配时的工作目录重解析，用到的确定性 step 集就可能与定义里记下的不同、判定不可复现。
     """
     # 宿主 CWD 下另有一个 ./steps：必须**不被**用上（definition 是唯一真源）
     (tmp_path / "steps").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-s", steps_dir="/abs/user/steps"), region="us-east-1")
+    parts = _assembled(lock_holder, tmp_path, _def("run-s", steps_dir="/abs/user/steps"), region="us-east-1")
     assert parts.launcher._resolver("novaact")._env["GHERKAI_STEPS_DIR"] == "/abs/user/steps"
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_no_steps_dir_when_definition_has_none(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_no_steps_dir_when_definition_has_none(tmp_path, monkeypatch, lock_holder):
     """对偶（防「恒注入」假绿）：definition 无 steps_dir（未给/云端后端）时装配不注入该 env，即便宿主 CWD 下恰好有个 `./steps`
     （宿主不重解析约定）。"""
     (tmp_path / "steps").mkdir()
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("GHERKAI_STEPS_DIR", raising=False)
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-n"), region="us-east-1")
+    parts = _assembled(lock_holder, tmp_path, _def("run-n"), region="us-east-1")
     assert "GHERKAI_STEPS_DIR" not in parts.launcher._resolver("novaact")._env
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_host_env_steps_dir_does_not_leak(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_host_env_steps_dir_does_not_leak(tmp_path, monkeypatch, lock_holder):
     """宿主 shell 的 GHERKAI_STEPS_DIR **不得**越过 definition（装配一律取 definition 里的值）。
 
     与 `test_assembly_no_steps_dir_when_definition_has_none` 的区别正是漏检面：那条先 delenv 该 env，
-    恰好绕开继承路径。真实形态是提交时没有确定性 step
-    （definition steps_dir=None）、之后在 export 了该 env 的 shell 里 `status <run> --wait` 接力——若组合根只做
-    加法，worker 会加载接力者那台机器的 step 目录，本 run 的确定性 step 集与 definition 不符、判定不可复现。
+    恰好绕开继承路径。真实形态是提交时没有确定性 step（definition steps_dir=None），而后台推进进程继承的环境里导出了该 env——
+    若组合根只做加法，worker 会加载那个目录，本 run 的确定性 step 集与 definition 不符、判定不可复现。
     """
-    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/relay/steps")
+    monkeypatch.setenv("GHERKAI_STEPS_DIR", "/host/inherited/steps")
     monkeypatch.setenv("GHERKAI_NO_ARTIFACTS", "1")
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-leak"), region="us-east-1")
+    parts = _assembled(lock_holder, tmp_path, _def("run-leak"), region="us-east-1")
     env = parts.launcher._resolver("novaact")._env
     assert env is not None  # 本路径恒注入产物落点，env 必非 None
     assert "GHERKAI_STEPS_DIR" not in env
@@ -563,45 +468,7 @@ def test_run_state_timestamps_share_one_format(tmp_path, lock_holder):
         assert ts == instant_from_iso(ts).isoformat(), f"{name}={ts} 与 compose.now_iso 格式不同"
 
 
-def test_drive_local_reconcile_reads_the_definition_back_and_drives_to_terminal(tmp_path, monkeypatch, lock_holder):
-    """`status --wait` 接力的入口：从记录读回运行定义、装配、推到终态，报告由这一方生成（ADR 0034）。只把引擎替成 echo_worker，
-    其余真实运行。"""
-    from gherkai_runtime import compose, detached
-
-    _seed_for_build(tmp_path, lock_holder, "run-d", max_concurrency=1)
-    monkeypatch.setenv("AWS_REGION", "us-test-9")
-    env = {**os.environ, "WORKER_MODE": "pass"}
-    monkeypatch.setattr(compose, "build_engines",
-                        lambda **kw: {"novaact": SubprocessEngine(cmd=[sys.executable, _ECHO], env=env)})
-
-    detached.drive_local_reconcile(str(tmp_path), "run-d", 1, region=None, profile=None, poll_interval_s=0.01)
-
-    state = LocalRunStore(tmp_path).load_run_state("run-d")
-    assert state.status == Status.PASSED  # 推到终态
-    # 终态点名的那一份判定明细已存下（明细先于终态写）
-    result_id = state.jobs["a"].result_id
-    assert result_id is not None and LocalResultStore(tmp_path).load_job_result("run-d", result_id) is not None
-    assert (tmp_path / "run-d" / "manifest.json").exists() and (tmp_path / "run-d" / "index.html").exists()
-
-
-def test_drive_local_reconcile_writes_nothing_when_the_definition_is_missing(tmp_path, monkeypatch, lock_holder):
-    """接力读不到运行定义（运行态在而 run_meta.json 被删）：抛 `RunDefinitionMissing`（FileNotFoundError 的子类），在装配之前，
-    运行态不变、不建事件库。"""
-    from gherkai_runtime import compose, detached
-
-    _seed_for_build(tmp_path, lock_holder, "run-m", max_concurrency=1)
-    (tmp_path / "run-m" / "run_meta.json").unlink()
-    before = LocalRunStore(tmp_path).load_run_state("run-m")
-    monkeypatch.setattr(compose, "build_engines", lambda **kw: pytest.fail("读不到运行定义时不应装配"))
-
-    with pytest.raises(detached.RunDefinitionMissing):
-        detached.drive_local_reconcile(str(tmp_path), "run-m", 1, region="us-east-1", poll_interval_s=0.01)
-    assert LocalRunStore(tmp_path).load_run_state("run-m") == before
-    assert not compose.events_db_path(tmp_path, "run-m").exists()
-
-
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_takes_session_warmup_url_from_definition(tmp_path, monkeypatch, entry, lock_holder):
+def test_assembly_takes_session_warmup_url_from_definition(tmp_path, monkeypatch, lock_holder):
     """预热地址随 definition 走（ADR 0051 决策 13）：装配取运行定义里的值、注进两个引擎的 worker env；宿主进程继承的同名值不算
     （同一个 run 在各宿主下要用同一个值）。"""
     url = "https://t.ngrok-free.app/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=" + "a" * 32
@@ -609,21 +476,20 @@ def test_assembly_takes_session_warmup_url_from_definition(tmp_path, monkeypatch
     monkeypatch.setenv("GHERKAI_SESSION_WARMUP_URL", "https://leaked/.well-known/gherkai-tunnel-auth?gherkai_tunnel_token=x")
     monkeypatch.setenv("AWS_REGION", "us-test-9")
     monkeypatch.setenv("GHERKAI_WORKER_MIDSCENE_CMD", "node /nonexistent/midscene.mjs")  # 不找真 worker、只看注入面
-    launcher = _assembled(lock_holder, entry, tmp_path, meta, region=None, profile=None).launcher
+    launcher = _assembled(lock_holder, tmp_path, meta, region=None, profile=None).launcher
     for engine in ("novaact", "midscene"):
         env = launcher._resolver(engine)._env
         assert env["GHERKAI_SESSION_WARMUP_URL"] == url, engine
         assert env["GHERKAI_EXTRA_HTTP_HEADERS"] == '{"ngrok-skip-browser-warning": "1"}', engine
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_the_assembled_run_store_cannot_create_a_run(tmp_path, entry, lock_holder):
-    """两种入口装配出的 RunStore 都不带锁的持有者（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）：后台推进进程的 run 在装配
-    之前已经建好、锁在建它时交出的持有者手里，接力推进的是别人建的 run，两者都不经这个存储建 run。用它建一个新 run 即 RuntimeError，
-    报告目录里只有原来那个 run 的目录；推进的写照常经它落下。"""
+def test_the_assembled_run_store_cannot_create_a_run(tmp_path, lock_holder):
+    """装配出的 RunStore 不带锁的持有者（ADR 0030 决定四「持锁的描述符交给注入的持有者」条）：后台推进进程的 run 在装配之前已经
+    建好、锁在建它时交出的持有者手里，不经这个存储建 run。用它建一个新 run 即 RuntimeError，报告目录里只有原来那个 run 的目录；推进的
+    写照常经它落下。"""
     from gherkai_core.persist import initial_run_state
 
-    parts = _assembled(lock_holder, entry, tmp_path, _def("run-a"), region="us-east-1")
+    parts = _assembled(lock_holder, tmp_path, _def("run-a"), region="us-east-1")
     other = _def("run-b")
     with pytest.raises(RuntimeError):
         parts.run_store.create_run(other, initial_run_state(other, started_at="t0"))
@@ -670,7 +536,7 @@ def test_assemble_local_run_starts_no_child_process(tmp_path, monkeypatch, lock_
     parts = detached.assemble_local_run(meta, str(tmp_path), region=None, profile=None)
 
     assert compose.events_db_path(tmp_path, "run-p").is_file()
-    assert grace_queries == [] and parts.launcher.owned_scopes == set()
+    assert grace_queries == []
     for engine in ("novaact", "midscene"):
         assert parts.launcher._resolver(engine)._env["RUN_ID"] == "run-p", engine
     with pytest.raises(AssertionError, match="不应启动子进程"):
@@ -853,80 +719,7 @@ def test_advancer_stops_the_running_job_at_the_run_deadline_like_the_foreground(
     assert _verdict(_foreground_result(execution)) == _verdict(background)
 
 
-def test_relay_after_the_advancer_is_gone_ends_an_expired_run_without_starting_jobs(tmp_path, monkeypatch, lock_holder):
-    """推进进程已不在、过了期限之后的一次 `status --wait` 接力：经两者共用的入口推进，a 是原推进进程认领、观察链
-    已断的 job，b 没有启动过。a 的预算让它自己的截止时刻还在半小时之后，截止时刻由期限（一小时之前）封顶，接力方按封顶后的时刻判，
-    墙钟早已过了它加 10 秒，第一轮即补写超时，a 因此记 aborted、说明是期限那一句；b 不认领、不启动，由到期的结束写记 skipped；run
-    状态按取法为 aborted、带到期说明，报告由接力方生成。组合根照真实装配，只把引擎换成记录启动的替身、停止宽限的查询换成固定值
-    （误启动 job 时启动调用落到替身上、被记下）。"""
-    from gherkai_runtime import compose, detached
-
-    now = compose.now()
-    meta = RunMeta(run_id="run-x", created_at=instant_to_iso(now - timedelta(hours=3)),
-                   jobs=(_job("a", timeout_s=7200.0), _job("b", timeout_s=7200.0)),
-                   deadline_at=instant_to_iso(now - timedelta(hours=1)))
-    store = LocalRunStore(tmp_path, lock_holder=lock_holder)
-    store.create_run(meta, RunState(run_id="run-x", status=Status.RUNNING,
-                                    jobs={s: JobState(s, Status.PENDING) for s in ("a", "b")},
-                                    started_at=meta.created_at, high_water_mark=0))
-    assert store.try_claim_job("run-x", "a", claimed_at=instant_to_iso(now - timedelta(minutes=90))) is True
-    log = SqliteEventLog(compose.events_db_path(str(tmp_path), "run-x"))
-    log.append_event("a", 1, '{"type":"scope_started","scopeId":"a","sessionId":"echo-sess"}', 1.0)  # 原 worker 留下的
-
-    spawned: list[str] = []
-
-    class _Spy:
-        def run_scope(self, job, **kw):
-            spawned.append(job.scope_id)
-            raise AssertionError("到期之后不应启动任何 job")
-
-    monkeypatch.setenv("AWS_REGION", "us-test-9")
-    monkeypatch.setattr(compose, "build_engines", lambda **kw: {"novaact": _Spy()})
-    monkeypatch.setattr(compose, "engine_min_grace", lambda _engine: 5.0)
-    relay = threading.Thread(target=detached.drive_local_reconcile, args=(str(tmp_path), "run-x", 1),
-                             kwargs={"poll_interval_s": 0.01}, daemon=True)
-    relay.start()
-    relay.join(timeout=20)
-
-    assert not relay.is_alive(), "接力没有结束"
-    assert spawned == []
-    ending = RUN_ENDINGS["deadline"]
-    state = LocalRunStore(tmp_path).load_run_state("run-x")
-    assert (state.status, state.message) == (Status.ABORTED, ending.run_message)
-    assert (state.jobs["a"].status, state.jobs["b"].status) == (Status.ABORTED, Status.SKIPPED)
-    assert state.jobs["b"].message == ending.skipped_message
-    [exit_rec] = [r for r in log.records() if r.kind == "exit"]
-    assert (exit_rec.scope_id, exit_rec.exited.exit_code, exit_rec.exited.timed_out) == ("a", None, True)
-    assert (tmp_path / "run-x" / "manifest.json").exists() and (tmp_path / "run-x" / "index.html").exists()
-    # a 的终态点名接力方存下的那一份；b 由结束写结束，没有判定明细、终态不点名
-    result_id = state.jobs["a"].result_id
-    assert result_id is not None and state.jobs["b"].result_id is None
-    assert [p.name for p in (tmp_path / "run-x" / "jobs").iterdir()] == [f"{result_id}.json"]
-    jr = LocalResultStore(tmp_path).load_job_result("run-x", result_id)
-    assert (jr.status, jr.error_type, jr.message) == (Status.ABORTED, None, DEADLINE_TIMEOUT_MESSAGE)  # 起作用的是期限
-
-
-class _RecordsExits:
-    """代理真 EventLog：记下经它写的每条退出记录（接力方写没写、写了什么），其余原样转发。两个写入口都记：观察到的退出记为
-    (scope_id, 退出码, 关键字参数)，补写的未知退出记为 (scope_id, "timed-out-if-absent", 是否写成)。"""
-
-    def __init__(self, inner) -> None:
-        self._inner, self.exits = inner, []
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-    def record_exit(self, scope_id, exit_code, **kw):
-        self.exits.append((scope_id, exit_code, kw))
-        return self._inner.record_exit(scope_id, exit_code, **kw)
-
-    def record_timed_out_if_absent(self, scope_id):
-        written = self._inner.record_timed_out_if_absent(scope_id)
-        self.exits.append((scope_id, "timed-out-if-absent", written))
-        return written
-
-
-# ---------- 启动器记下退出时刻（ADR 0054 决策二后台推进条）、接力的判定条件与条件补写 ----------
+# ---------- 启动器记下退出时刻（ADR 0054 决策二后台推进条） ----------
 
 
 class _SettableClock:
@@ -1152,138 +945,6 @@ def test_a_cutoff_decided_before_the_exit_marks_the_exit_as_timed_out(tmp_path, 
                                     [("a", Status.ERROR, None, ("timeout", "job 超时（预算 60s，已中止）"))])
 
 
-def test_relay_keeps_a_real_exit_record_written_between_its_check_and_its_write(tmp_path, lock_holder):
-    """补写不覆盖已观察到的退出：接力方点查过「还没有退出记录」之后、补写之前，原推进进程写下了 a 的真实
-    退出记录与此前的事件（这里在点查返回之前写下）。补写是条件写、不成立，留下的是真实的那一条，a 保留完整的判定、run 按内容通过。
-    墙钟早已过了 a 的截止时刻加 10 秒，第一轮即点查退出记录。"""
-    meta, inner_log, store, launcher = _setup(tmp_path, lock_holder, "pass", "a", timeout_s=60.0, clock=_one_hour_later)
-    assert store.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00+00:00") is True
-    real_exit_at = datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc)
-
-    class _RealExitLandsAfterTheCheck(_RecordsExits):
-        def has_exit(self, scope_id):
-            seen = self._inner.has_exit(scope_id)
-            if not seen:  # 原推进进程恰在这时写下 worker 的事件与它观察到的退出
-                self._inner.append_event(scope_id, 1, '{"type":"scope_started","scopeId":"a","sessionId":"s"}', 1.0)
-                self._inner.append_event(scope_id, 2, '{"type":"scenario_done","scenarioId":"a:0","status":"passed"}', 2.0)
-                self._inner.append_event(scope_id, 3, '{"type":"scope_done","scopeId":"a"}', 3.0)
-                self._inner.record_exit(scope_id, 0, exited_at=real_exit_at)
-            return seen
-
-    log = _RealExitLandsAfterTheCheck(inner_log)
-    run_reconcile_loop("run-1", meta, log, _BoundedReads(store, limit=200), launcher, max_concurrency=1,
-                       poll_interval_s=0.001, clock=_one_hour_later, result_store=LocalResultStore(tmp_path))
-
-    assert log.exits == [("a", "timed-out-if-absent", False)]  # 补写确实发出了，只是没有写成
-    [exit_rec] = [r.exited for r in inner_log.records() if r.kind == "exit"]
-    assert (exit_rec.exit_code, exit_rec.timed_out, exit_rec.exited_at) == (0, False, real_exit_at)
-    state = store.load_run_state("run-1")
-    assert (state.status, state.jobs["a"].status) == (Status.PASSED, Status.PASSED)
-
-
-def _foreign_claims(tmp_path, holder, claims: dict[str, str | None], *, deadline_at: str = _FAR):
-    """建一个 run，claims 里的每个 job 都由别的推进方认领（本进程的启动器没有起过它）、认领时刻取给定的值，都没有退出记录；预算
-    60 秒。返回的事件库记下接力方经它写的每条退出记录。"""
-    meta, log, store, launcher = _setup(tmp_path, holder, "pass", *claims, timeout_s=60.0, deadline_at=deadline_at)
-    for sid, claimed_at in claims.items():
-        assert store.try_claim_job("run-1", sid, claimed_at=claimed_at) is True
-    return meta, _RecordsExits(log), store, launcher
-
-
-@pytest.mark.parametrize("deadline_at, cutoff", [
-    (_FAR, datetime(2026, 7, 19, 0, 1, tzinfo=timezone.utc)),
-    ("2026-07-19T00:00:30+00:00", datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc)),
-], ids=["budget", "capped-by-deadline"])
-def test_relay_writes_only_once_the_wall_clock_is_strictly_past_the_cutoff_plus_ten_seconds(tmp_path, deadline_at, cutoff, lock_holder):
-    """接力判超时的判定条件：墙钟严格晚于截止时刻加 10 秒、仍没有退出记录时才补写。截止时刻与认领方同一个算法：认领时刻加预算
-    （60 秒），期限更早时以期限封顶、按封顶后的时刻判。恰在截止时刻、恰在截止时刻加 10 秒时都不写，再晚一微秒即写。"""
-    from gherkai_runtime import detached
-
-    meta, log, store, launcher = _foreign_claims(tmp_path, lock_holder, {"a": "2026-07-19T00:00:00+00:00"}, deadline_at=deadline_at)
-    boundary = cutoff + timedelta(seconds=10)
-    for now in (cutoff, boundary):
-        detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes, now=now)
-    assert log.exits == []
-    detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes,
-                                       now=boundary + timedelta(microseconds=1))
-    assert log.exits == [("a", "timed-out-if-absent", True)]
-
-
-def test_relay_leaves_its_own_jobs_and_jobs_without_a_readable_claim_time(tmp_path, lock_holder):
-    """接力方不处置的两类执行中 job，墙钟都已远过截止时刻加 10 秒：本进程的启动器手里的 job（它的截止时刻检查在管），与认领时刻
-    缺失、不是时刻或不带时区的 job（没有起算点）。同一轮里认领时刻正常的别人的 job 照常补写，说明这一轮确实判过。"""
-    from gherkai_runtime import detached
-
-    claimed = "2026-07-19T00:00:00+00:00"
-    meta, log, store, launcher = _foreign_claims(tmp_path, lock_holder, {
-        "own": claimed, "missing": None, "garbled": "认领时刻", "naive": "2026-07-19T00:00:00", "lost": claimed})
-    launcher.owned_scopes.add("own")
-    detached._recover_timed_out_claims("run-1", meta, log, store, launcher.owned_scopes, now=_one_hour_later())
-    assert log.exits == [("lost", "timed-out-if-absent", True)]
-
-
-# ---------- 接力在逐 job 写序下：补写的超时退出成为终态的那一轮、报告按点名读回各轮的明细 ----------
-
-
-def test_a_relay_timed_out_exit_is_recorded_with_its_detail_and_a_later_real_exit_changes_neither(tmp_path, lock_holder):
-    """接力补写的超时退出怎样成为终态：a 由已不在的推进进程认领、早已过了截止时刻加 10 秒，b 也由它认领、还没到截止时刻。第一轮
-    接力方为 a 补写超时的退出记录；下一轮 tick 按这一轮的事件为 a 存下一份判定明细（预算到点：error 加 timeout），再以终态写记下它并
-    点名这一份，b 仍在执行、run 仍未结束。a 的真实退出（退出码 0、内容完整、退出时刻在截止时刻之前，单看它会判为 passed）与 b 的结果
-    在 a 的终态写落下之后才写进事件库：真实退出覆盖了退出记录，但 a 在运行态里已是终态，之后的轮次不再为它存明细、写终态，a 的点名与
-    那一份明细都不变，存放处只多出 b 的一份；b 得出结果的那一轮使 run 成为终态，报告里两个 job 的明细都按运行态里点名的标识读回（ADR
-    0030 决定三「点名」条）。全程只有推进循环一个线程，事件在 a 的终态写落下之后、tick 拿到这次写的结果之前写入，先后因此固定。"""
-    meta, log, inner, launcher = _setup(tmp_path, lock_holder, "pass", "a", "b", timeout_s=60.0, clock=_one_hour_later)
-    assert inner.try_claim_job("run-1", "a", claimed_at="2026-07-19T00:00:00+00:00") is True  # 截止 00:01:00，早已过
-    assert inner.try_claim_job("run-1", "b", claimed_at="2026-07-19T00:59:30+00:00") is True  # 截止 01:00:30，还没到
-
-    def finish(scope_id: str, exited_at: datetime) -> None:
-        """原推进进程起的 worker 内容完整地结束、以退出码 0 退出。"""
-        log.append_event(scope_id, 1, f'{{"type":"scope_started","scopeId":"{scope_id}","sessionId":"s-{scope_id}"}}', 1.0)
-        log.append_event(scope_id, 2, f'{{"type":"scenario_done","scenarioId":"{scope_id}:0","status":"passed"}}', 2.0)
-        log.append_event(scope_id, 3, f'{{"type":"scope_done","scopeId":"{scope_id}"}}', 3.0)
-        log.record_exit(scope_id, 0, exited_at=exited_at)
-
-    class _LateResults:
-        """代理真 RunStore：记下每次终态写给出的 job 与结果、各 job 点名的标识；第一次终态写落下之后、把结果交回 tick 之前，写下 a 的
-        真实退出与 b 的结果；其余原样转发。"""
-
-        def __init__(self, inner) -> None:
-            self._inner, self.commits, self.named = inner, [], {}
-
-        def __getattr__(self, name):
-            return getattr(self._inner, name)
-
-        def commit_job_states(self, run_id, job_states, *, ended_at):
-            outcome = self._inner.commit_job_states(run_id, job_states, ended_at=ended_at)
-            self.commits.append(([js.scope_id for js in job_states], outcome))
-            self.named.update({js.scope_id: js.result_id for js in job_states})
-            if len(self.commits) == 1:
-                # a 的退出时刻在它的截止时刻之前：这一条若被重新推演，a 会判为 passed；b 的退出时刻同样在它的截止时刻之前
-                finish("a", datetime(2026, 7, 19, 0, 0, 30, tzinfo=timezone.utc))
-                finish("b", _one_hour_later())
-            return outcome
-
-    store, reports = _LateResults(inner), _CapturingReports()
-    run_reconcile_loop("run-1", meta, log, _BoundedReads(store, limit=50), launcher, max_concurrency=2,
-                       poll_interval_s=0.001, clock=_one_hour_later,
-                       result_store=LocalResultStore(tmp_path), report_store=reports)
-
-    assert store.commits == [(["a"], CommitOutcome.OPEN), (["b"], CommitOutcome.ENDED_RUN)]
-    [exit_a] = [r.exited for r in log.records() if r.kind == "exit" and r.scope_id == "a"]
-    assert (exit_a.exit_code, exit_a.timed_out) == (0, False)  # 真实退出确实覆盖了补写的那一条
-    state = inner.load_run_state("run-1")
-    assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (Status.ERROR, Status.ERROR, Status.PASSED)
-    # 运行态点名的就是两次终态写各自给出的标识；a 只存过一份，存放处共两份
-    assert {sid: js.result_id for sid, js in state.jobs.items()} == store.named and None not in store.named.values()
-    assert sorted(p.name for p in (tmp_path / "run-1" / "jobs").iterdir()) == sorted(
-        f"{rid}.json" for rid in store.named.values())
-    saved_a = LocalResultStore(tmp_path).load_job_result("run-1", state.jobs["a"].result_id)
-    assert (saved_a.status, saved_a.error_type) == (Status.ERROR, "timeout")
-    [result] = reports.results
-    assert [(d.scope_id, d.status, d.error_type) for d in result.details] == [
-        ("a", Status.ERROR, "timeout"), ("b", Status.PASSED, None)]
-
-
 # ---------- 判定存储的装配与保存明细失败（ADR 0030 决定三「保存明细失败」条）----------
 
 
@@ -1309,20 +970,19 @@ class _FlakySaves:
         self._inner.preflight()
 
 
-@pytest.mark.parametrize("entry", _ENTRIES)
-def test_assembly_takes_the_result_store_from_the_single_local_entry(tmp_path, monkeypatch, entry, lock_holder):
-    """后台推进进程与 status --wait 接力的装配经 `compose.local_result_store` 取判定存储，与前台 run 的 `build_local_stores` 是同一个
-    入口，保存失败的退避重试因此对两种推进器一致。换掉那个入口，这里拿到的就是换上的那一个、入参是 report_dir；不换时拿到的是带
+def test_assembly_takes_the_result_store_from_the_single_local_entry(tmp_path, monkeypatch, lock_holder):
+    """后台推进进程的装配经 `compose.local_result_store` 取判定存储，与前台 run 的 `build_local_stores` 是同一个入口，保存失败的
+    退避重试因此对两种推进器一致。换掉那个入口，这里拿到的就是换上的那一个、入参是 report_dir；不换时拿到的是带
     重试的那一种。"""
     from gherkai_core.adapters.result_store.retrying import RetryingResultStore
     from gherkai_runtime import compose
 
-    assert isinstance(_assembled(lock_holder, entry, tmp_path / "plain", _def("run-rs"), region="us-east-1").result_store,
+    assert isinstance(_assembled(lock_holder, tmp_path / "plain", _def("run-rs"), region="us-east-1").result_store,
                       RetryingResultStore)
     seen: list = []
     sentinel = object()
     monkeypatch.setattr(compose, "local_result_store", lambda root: seen.append(root) or sentinel)
-    assert _assembled(lock_holder, entry, tmp_path / "swapped", _def("run-rs"), region="us-east-1").result_store is sentinel
+    assert _assembled(lock_holder, tmp_path / "swapped", _def("run-rs"), region="us-east-1").result_store is sentinel
     assert seen == [tmp_path / "swapped"]
 
 
@@ -1345,19 +1005,23 @@ def test_a_failed_save_is_retried_with_the_same_id_and_the_terminal_state_names_
     assert list(result.details) == [LocalResultStore(tmp_path).load_job_result("run-1", first_id)]
 
 
-def test_drive_local_reconcile_stops_when_saves_keep_failing(tmp_path, monkeypatch, lock_holder):
-    """保存判定明细一直失败（磁盘写不进）：重试 3 次（间隔 1、2、4 秒，四次都用同一个标识）之后 OSError 原样穿出接力的入口，说明
-    与退出码由调用方给出；这个 job 不写终态、在记录里仍为 running、不点名，run 没有结束，不生成报告。组合根照真实装配，只把引擎换成
-    echo_worker、把判定存储的装配入口换成「一直失败的本机文件存储外面套等待换成记录的重试」。"""
+def test_advance_local_run_stops_when_saves_keep_failing(tmp_path, monkeypatch, lock_holder):
+    """保存判定明细一直失败（磁盘写不进）：重试 3 次（间隔 1、2、4 秒，四次都用同一个标识）之后 OSError 原样穿出后台推进进程的推进
+    入口，说明与退出码由调用方给出；这个 job 不写终态、在记录里仍为 running、不点名，run 没有结束，不生成报告。组合根照真实装配，只把
+    引擎换成 echo_worker、把判定存储的装配入口换成「一直失败的本机文件存储外面套等待换成记录的重试」。"""
     from gherkai_core.adapters.result_store.retrying import RetryingResultStore
     from gherkai_core.model import TERMINAL_STATUSES
+    from gherkai_core.persist import initial_run_state
     from gherkai_runtime import compose, detached
 
-    _seed_for_build(tmp_path, lock_holder, "run-f", max_concurrency=1)
+    meta = _def("run-f", max_concurrency=1)
+    LocalRunStore(tmp_path, detached=True, lock_holder=lock_holder).create_run(
+        meta, initial_run_state(meta, started_at=compose.now_iso()))
     monkeypatch.setenv("AWS_REGION", "us-test-9")
     env = {**os.environ, "WORKER_MODE": "pass"}
     monkeypatch.setattr(compose, "build_engines",
                         lambda **kw: {"novaact": SubprocessEngine(cmd=[sys.executable, _ECHO], env=env)})
+    monkeypatch.setattr(compose, "engine_min_grace", lambda _engine: 1.0)
     stores: list[_FlakySaves] = []
     sleeps: list[float] = []
 
@@ -1366,9 +1030,10 @@ def test_drive_local_reconcile_stops_when_saves_keep_failing(tmp_path, monkeypat
         return RetryingResultStore(stores[-1], sleep=sleeps.append)
 
     monkeypatch.setattr(compose, "local_result_store", _always_failing)
+    parts = detached.assemble_local_run(meta, str(tmp_path), region=None, profile=None)
 
     with pytest.raises(OSError, match="No space left on device"):
-        detached.drive_local_reconcile(str(tmp_path), "run-f", 1, region=None, profile=None, poll_interval_s=0.01)
+        detached.advance_local_run(parts, meta, poll_interval_s=0.01)
 
     [flaky] = stores
     assert [outcome for _sid, _rid, outcome in flaky.saves] == ["failed"] * 4
@@ -1377,3 +1042,28 @@ def test_drive_local_reconcile_stops_when_saves_keep_failing(tmp_path, monkeypat
     assert state.status not in TERMINAL_STATUSES and state.ended_at is None
     assert (state.jobs["a"].status, state.jobs["a"].result_id) == (Status.RUNNING, None)
     assert not (tmp_path / "run-f" / "index.html").exists() and not (tmp_path / "run-f" / "manifest.json").exists()
+
+
+# ---------- 后台推进进程不读配置文件（ADR 0053 决策 1）----------
+
+
+def test_the_runtime_package_never_imports_the_cli_package():
+    """后台推进进程按运行定义推进、不读项目配置文件（ADR 0053 决策 1）：配置文件那一层由命令行工具在启动它之前解析好、经参数与运行
+    定义传入。结构上，本包的任何模块都不导入命令行工具的包（配置文件的读法在那里），推进与装配所在的 detached 模块连这个包名都不出现
+    （经字符串动态导入同样被挡住）。扫描面是本包目录下全部源文件，一个都没扫到时失败，不静默空扫。"""
+    import ast
+    import inspect
+
+    from gherkai_runtime import detached
+
+    root = Path(detached.__file__).resolve().parent
+    sources = sorted(root.glob("*.py"))
+    assert len(sources) >= 5, sources
+    offenders = []
+    for path in sources:
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"), filename=str(path))):
+            names = ([a.name for a in node.names] if isinstance(node, ast.Import)
+                     else [node.module or ""] if isinstance(node, ast.ImportFrom) else [])
+            offenders += [(path.name, n) for n in names if n == "gherkai_cli" or n.startswith("gherkai_cli.")]
+    assert offenders == []
+    assert "gherkai_cli" not in inspect.getsource(detached)

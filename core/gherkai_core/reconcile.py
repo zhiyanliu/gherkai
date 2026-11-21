@@ -6,11 +6,12 @@ project() 推 RunState → 投影写（只前进、不越过 running）→ 为�
 时刻、未过停止启动的时刻才认领，认领成功即算出截止时刻、经注入的 Launcher 起 job；已过停止启动的时刻、没有执行中的 job 而仍有未启动的
 job 时做到期的结束写。结果是 `TickOutcome`，宿主据它决定继续推进、从记录生成报告后结束，还是直接结束（ADR 0034 机制三「run 级状态
 只进不退」条④；ADR 0054 决策二后台推进条「决策」「收尾与报告」两项）。报告经 `write_report_from_record` 从记录生成：读运行态，按其中
-点名的标识读回明细（ADR 0030 决定三「点名」条）。
+点名的标识读回明细（ADR 0030 决定三「点名」条）；处置方经不记日志、失败原样抛出的 `generate_report_from_record` 生成。
 
 **无状态 + 幂等**：所有调度态在 EventLog / RunStore（持久），进程内不留。谁调 tick、何时调、并发调都安全
-（CAS + HWM 条件写兜底）——各触发源（cloud Stream / local per-run 进程 / status --wait 接力）
-共用这一个 tick。「是否已过停止启动的时刻」同样不记：每一轮按当前时刻判断（ADR 0054 决策二后台推进条「不记已过停止启动」）。
+（CAS + HWM 条件写兜底）——两个后端的推进器（云端由流与定时触发唤起的 Lambda，可以重叠；本机的后台推进进程，一个 run 至多一个，
+ADR 0034「推进器与触发源」）共用这一个 tick。「是否已过停止启动的时刻」同样不记：每一轮按当前时刻判断（ADR 0054 决策二后台推进条
+「不记已过停止启动」）。
 
 **时刻只经注入的时钟取**：tick 自己不读系统时钟，宿主注入与前台同一个读取点（组合根的 `compose.now`），返回带时区的 datetime；
 写进记录时经 `serialize.instant_to_iso`，与组合根写时间戳同一种写法。
@@ -42,8 +43,7 @@ logger = logging.getLogger("gherkai_core.reconcile")
 class TickOutcome(enum.Enum):
     """一次 `tick` 的结果（ADR 0034 机制三「run 级状态只进不退」条④；ADR 0054 决策二后台推进条「收尾与报告」）。
 
-    后两种都让宿主结束对这个 run 的推进（本机的推进循环与 status --wait 退出，云端这一次调用正常返回）；只有 `COMMITTED` 让宿主
-    生成 RunReport。
+    后两种都让宿主结束对这个 run 的推进（本机的推进循环退出，云端这一次调用正常返回）；只有 `COMMITTED` 让宿主生成 RunReport。
     """
 
     # 继续推进：这一次 tick 没有使 run 成为终态（其中可能已记下部分 job 的终态）；或读不到运行态；或到期的结束写没写成而重读的运行态
@@ -58,27 +58,19 @@ class TickOutcome(enum.Enum):
 
 
 class EventLog(Protocol):
-    """事件日志口（reconciler 读全量 records 重放）。写侧：`tick` 只在 launch 失败补偿时调
-    `record_exit`；其余退出记录来自退出观察者（本机 launcher 的 proc.wait、云端 exit-observer Lambda、本机同步 run 的
-    `EventRecordingEngine`）与推进器宿主的超时处置（本机接力恢复、云端 tick 对无踪 task 的补写，都经
-    `record_timed_out_if_absent`；云端 tick 遇已停止却缺退出记录的 task 时，按 DescribeTasks 结果补写，与观察者同一提取算法）；
-    worker 执行事件由 worker（云端）或 launcher 旁路（本机）写。各写入方只记事实，是否已过截止时刻由投影判断（`project._reduce_scope`）。"""
+    """事件日志口（reconciler 读全量 records 重放）。`tick` 只用这两个方法：读全量 records，以及 launch 失败补偿时的
+    `record_exit`。其余退出记录来自退出观察者（本机 launcher 的 proc.wait、云端 exit-observer Lambda、本机同步 run 的
+    `EventRecordingEngine`）与云端的超时处置（对无踪 task 的补写、遇已停止却缺退出记录的 task 时按 DescribeTasks 结果补写，与观察者
+    同一提取算法）；云端超时处置直接用 `DdbEventLog` 上的点查与条件补写，不经这个协议。worker 执行事件由 worker（云端）或 launcher
+    旁路（本机）写。各写入方只记事实，是否已过截止时刻由投影判断（`project._reduce_scope`）。"""
 
     def records(self) -> list: ...  # list[EventRecord]（gherkai_core.project）
-
-    # 单个 scope 有无退出记录（主键点查）——超时处置/接力恢复判「观察链是否已写」用，别为一个 scope 重放整 run。
-    def has_exit(self, scope_id: str) -> bool: ...
 
     # 覆盖同键（独立键空间，机制一）：观察到的退出、launch 失败补偿与云端按 task 对象的补写都经这里。timed_out：发过超时的停止
     # 请求（ADR 0034「job timeout」节归因链）。exited_at：退出时刻（带时区），写入方观察到退出的那一刻；没有可观察的退出时刻时为
     # None。两项都只是事实，写入方不比较截止时刻。
     def record_exit(self, scope_id: str, exit_code: int | None, *, timed_out: bool = False,
                     reason: str | None = None, exited_at: datetime | None = None) -> None: ...
-
-    # 补写判为超时的未知退出（退出码未知、带超时标志、不带退出时刻），只在这个 scope 还没有退出记录时写入：「没有」的判断与写入是
-    # 同一次条件写，已有记录时不写、不报错，返回 False（别的写入方已经写了，观察到的退出不被盖掉）；写成返回 True。之后到达的真实
-    # 退出照旧经 `record_exit` 覆盖这一条（ADR 0034「job timeout」节「`timed_out` 归因链」）。
-    def record_timed_out_if_absent(self, scope_id: str) -> bool: ...
 
 
 class Launcher(Protocol):
@@ -96,33 +88,46 @@ class Launcher(Protocol):
     def launch(self, job: Job, *, cutoff_at: datetime) -> None: ...
 
 
-def write_report_from_record(meta: RunMeta, run_store: RunStore, result_store: ResultStore,
-                             report_store: ReportStore | None, *, created_at: str) -> None:
-    """这一方的写使 run 成为终态之后，从记录生成 RunReport（派生视图，**永远最后**；ADR 0054 决策二后台推进条「收尾与报告」，ADR 0027
-    「ReportStore 接口：整 run 一次写」节）。宿主只在 tick 返回 `TickOutcome.COMMITTED` 后调。
+def generate_report_from_record(run_id: str, meta: RunMeta, run_store: RunStore, result_store: ResultStore,
+                                report_store: ReportStore, *, created_at: str) -> None:
+    """按 run_id 从记录生成 RunReport（派生视图，**永远最后**；ADR 0027「ReportStore 接口：整 run 一次写」节）。只由使 run 成为终态的
+    那次写的写入方调用：推进器经 `write_report_from_record`，处置方直接调它（ADR 0054 决策七「报告」）。
 
     一次读运行态、按它算 run 级墙钟（started_at 到 ended_at，`project.run_duration_ms`），按其中各 job 点名的标识从判定存储读回明细
     （`named_details.load_named_details`，与前台收尾、explain 同一种读法，ADR 0030 决定三「点名」条），组装 run 的结果
-    （`project.assemble_run_result`：状态与 job 级说明取运行态），再写报告。由结束写结束的 job 没有标识、不读，只有状态与说明；存储里
-    没被点名的明细（别的推进方存下而终态由这一方写下的、存下之后终态写没写成的）不读。这一次推进与较早轮次写下终态的 job 读法相同，
-    推进步骤不交回明细：它交给终态写的明细里可能有终态由别的推进方写下的 job，按标识读回才与记录一致。
+    （`project.assemble_run_result`：状态与 job 级说明取运行态，job 按 meta 逐个列出），再写报告。由结束写结束的 job 没有标识、不读，
+    只有状态与说明；存储里没被点名的明细（别的推进方存下而终态由这一方写下的、存下之后终态写没写成的）不读。判定明细不另读一次事件
+    重算：重算用的事件可能已经变了（云端补写的未知退出之后又被真实的退出码覆盖）。
+
+    读记录与写报告都按 run_id，组装用的运行定义也带这个标识，不取 meta 里的那一个：处置方按 run 目录的名字处置，复制出来的 run 目录
+    里两者不同（ADR 0054 决策七「报告」）。推进器生成的 run 两者相同。
+
+    任何失败原样抛出、不记日志：运行态不存在抛 FileNotFoundError，被点名的那一份读不到抛 `NamedDetailMissing`，运行态与运行定义
+    不对应抛 ValueError，读写存储的失败照原样。报告是否生成由调用方据此作结构化的结果（处置方要说明报告没有生成及其原因，不把
+    回溯打到终端，ADR 0039）。created_at：报告的生成时刻（记录里的写法）。纯编排：不 import boto3。"""
+    state = run_store.load_run_state(run_id)
+    if state is None:
+        raise FileNotFoundError(f"run {run_id} 的运行状态不存在，无法生成报告")
+    details = load_named_details(run_id, state.jobs.values(), result_store)
+    named = meta if meta.run_id == run_id else replace(meta, run_id=run_id)
+    result = assemble_run_result(named, state, details.values(), duration_ms=run_duration_ms(state))
+    report_store.write(run_id, result, created_at=created_at)
+
+
+def write_report_from_record(meta: RunMeta, run_store: RunStore, result_store: ResultStore,
+                             report_store: ReportStore | None, *, created_at: str) -> None:
+    """推进器的写使 run 成为终态之后，从记录生成 RunReport（`generate_report_from_record`，按 meta 里的 run 标识；ADR 0054 决策二
+    后台推进条「收尾与报告」）。宿主只在 tick 返回 `TickOutcome.COMMITTED` 后调。
 
     整段在失败隔离之内：报告是派生只读视图，判定明细与终态在生成之前都已落下，读运行态、读回明细、组装与写报告的任何失败都不击穿已到
     终态的 run，这一步的失败也没有人重试（ADR 0030 决定三「ReportStore.write 失败隔离」注）。运行态读不到、被点名的那一份读不到
-    （`NamedDetailMissing`）时同样不生成报告，日志里留一条警告。判定明细不另读一次事件重算：重算用的事件可能已经变了（接力方补写的
-    未知退出之后又被真实的退出码覆盖）。
-    created_at：报告的生成时刻（记录里的写法）。report_store 为 None 时什么都不做：不读运行态，也不读回明细。
-    **唯一一份**（云端推进器 Lambda 与本机后台推进进程都调用此处）。纯编排：不 import boto3。
+    （`NamedDetailMissing`）时同样不生成报告，日志里留一条带回溯的警告：两个宿主（云端推进器 Lambda、本机后台推进进程）的日志都不到
+    使用者的终端。report_store 为 None 时什么都不做：不读运行态，也不读回明细。纯编排：不 import boto3。
     """
     if report_store is None:
         return
     try:
-        state = run_store.load_run_state(meta.run_id)
-        if state is None:
-            raise FileNotFoundError(f"run {meta.run_id} 的运行状态不存在，无法生成报告")
-        details = load_named_details(meta.run_id, state.jobs.values(), result_store)
-        result = assemble_run_result(meta, state, details.values(), duration_ms=run_duration_ms(state))
-        report_store.write(meta.run_id, result, created_at=created_at)
+        generate_report_from_record(meta.run_id, meta, run_store, result_store, report_store, created_at=created_at)
     except Exception:
         # 派生视图的失败不击穿已到终态的 run；traceback 留在日志里供排障
         logger.warning("这个 run 的报告没有生成：run=%s", meta.run_id, exc_info=True)

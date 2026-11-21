@@ -2,7 +2,7 @@
 
 四个 port（关注点拆开，不揉成上帝 module）：
 - Engine        —— 真正运行一个 scope（spawn worker、讲 ADR 0024 协议）；实装只有子进程 adapter（云端起 task 的 FargateEngine 不走本 port）
-- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑轮询接力与无状态批量运行的条件写）
+- RunStore      —— 控制面：run/job 状态、血缘、起止（频繁读写，撑无状态批量运行与处置的条件写）
 - ResultStore   —— 数据面：由执行结果结束的 job 的判定明细（每 scenario、step 的判定与投票），每次保存一份、用哪一份由运行态点名
 - ReportStore   —— 归集报告产物为派生只读导航视图（RunReport：manifest + index，ADR 0027）
 
@@ -144,7 +144,7 @@ class RunStore(Protocol):
     worker 之前都先经 try_claim_job 认领（前台每个 job 只认领一次，ADR 0054 决策五），后台推进另用 project_state。
 
     **每个写入口对并发的别的写入方都是安全的**，调用方不靠进程内的锁保证正确：同一个 run 可能同时有多个写入方（前台执行者
-    之外，还有后台推进的多个实例与接力者），本机 adapter 建 run 之后的各写入口在文件锁内读改写、云端 adapter 的每一次写都带条件。
+    之外，还有云端后台推进的多个实例与处置方），本机 adapter 建 run 之后的各写入口在文件锁内读改写、云端 adapter 的每一次写都带条件。
     这不是事务保证：云端的 create_run 分两次写（definition 在前、运行态在后），project_state 先写标量、再逐 job 写；中间态对读的
     一方可见，中途失败时已写成的部分留在库里。本机的 create_run 先把两个文件写进暂存目录，写完才原子改名成 run 标识，列举与
     按标识的读写都不认以点开头的名字（ADR 0030 决定四）。**run 级终态不可变**
@@ -274,7 +274,7 @@ class RunStore(Protocol):
         认领成功时同一次写把认领计数加一（ADR 0034 机制三「run 级状态只进不退」条①）；认领失败不改它。
 
         claimed_at（ISO 串，调用方注入时钟）：CAS 成功时随写 JobState.claimed_at——job timeout 的起算点
-        （local 接力恢复 deadline / cloud tick 防御性超时扫 / status 显示时长）。
+        （本机后台推进进程的截止时刻检查 / cloud tick 防御性超时扫 / status 显示时长）。
         """
         ...
 

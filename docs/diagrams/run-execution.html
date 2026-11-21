@@ -5297,15 +5297,15 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <path data-edge-from="tableCloud" data-edge-to="streamCloud" data-edge-label="每批写入" data-edge-key="17" data-edge-id="e-table-stream" data-edge-role="async" data-composition-points="878.8,491;992.8,491" d="M 878.8 491 L 992.8 491" class="a-dashed" data-animate="edge" style="--step:12" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
-        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 可被接力, 本机后端（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 可被接力" data-node-context="本机后端（local） › 入口与承载进程">
-          <title>本机后台进程 · submit 派生 · 可被接力 · 本机后端（local） › 入口与承载进程</title>
+        <g id="node-bgProc" data-node-id="bgProc" data-node-label="本机后台进程" tabindex="0" role="button" aria-label="聚焦本机后台进程，submit 派生 · 自己建 run, 本机后端（local） › 入口与承载进程" aria-pressed="false" data-node-kind="backend" data-node-sublabel="submit 派生 · 自己建 run" data-node-context="本机后端（local） › 入口与承载进程">
+          <title>本机后台进程 · submit 派生 · 自己建 run · 本机后端（local） › 入口与承载进程</title>
           <rect x="48" y="93" width="140" height="52" rx="8" class="c-mask"/>
           <rect x="48" y="93" width="140" height="52" rx="8" class="c-backend" data-animate="node" style="--step:6" stroke-width="1.5"/>
           <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(54 99) scale(0.6875)">
             <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
           </g>
           <text data-node-label="" data-detail-anchor="" x="118" y="114" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">本机后台进程</text>
-          <text data-detail="context" x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">submit 派生 · 可被接力</text>
+          <text data-detail="context" x="118" y="131" class="t-muted" font-size="8" text-anchor="middle">submit 派生 · 自己建 run</text>
         </g>
 
         <g id="node-workerLocal" data-node-id="workerLocal" data-node-label="本机 worker" tabindex="0" role="button" aria-label="聚焦本机 worker，子进程, 本机后端（local） › 驱动循环：每批事件推进一步" aria-pressed="false" data-node-kind="external" data-node-sublabel="子进程" data-node-context="本机后端（local） › 驱动循环：每批事件推进一步">
@@ -5764,7 +5764,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>两处常见误读</h3>
         </div>
         <ul>
-          <li>status --wait 两个后端不同：本机 per-run 进程已终止时只有接力者在推进（退出它 run 即停滞，per-run 仍在则两者同时推进），云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
+          <li>status --wait 两个后端不同：本机只等待、不推进，执行它的进程已不在或超过允许运行的时间一段余量之后，把 run 记为已结束；云端仅在检测到停滞时唤醒推进函数、之后无需在线</li>
           <li>退出码由父进程 / 平台观察得到，不由 worker 上报</li>
         </ul>
       </div>

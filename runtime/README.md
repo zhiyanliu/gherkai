@@ -34,6 +34,7 @@ resolver = compose.make_resolver(engines)
 | `gherkai_runtime.compose` | 读 `.feature`、生成 run 身份、拉起本机或 Fargate 引擎 worker、选结果落点、解析云端资源名、查引擎能力 |
 | `gherkai_runtime.names` | 云端资源名、SSM 参数路径、worker 镜像 tag 的唯一命名实现 |
 | `gherkai_runtime.detached` / `tunnel` | 提交后在本机后台把一个 run 推到完成；把本机可达的被测应用暴露给云端浏览器 |
+| `gherkai_runtime.settle` | 判断一个停住的本机 run 能不能记为已结束（执行它的进程已不在，或已过允许运行的时间之后再过 5 分钟），能则把它记为已结束并生成报告 |
 | `gherkai_runtime.textui` | 人读输出的表格、树与状态颜色：表格按终端宽度排版，输出到非终端或设置了 `NO_COLOR` 时不带颜色 |
 
 引擎名是 `novaact` 与 `midscene`。运行时会启动 worker 子进程、读取环境变量、访问 AWS 服务，请在配好 AWS 凭证与 region 的环境里使用。云端资源需先由部署方执行 `gherkai deploy` 建好；调用方与已部署的后端应保持同一版本，规则见：https://github.com/zhiyanliu/gherkai/blob/HEAD/docs/user-guide/running-and-results.md 。

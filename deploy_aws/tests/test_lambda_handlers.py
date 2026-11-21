@@ -304,22 +304,49 @@ def test_timeout_watch_conflict_is_idempotent():
     watch.arm("run-1", "a", _dt.datetime(2026, 11, 8, 10, 1, tzinfo=_dt.timezone.utc))  # 不抛即过
 
 
-def _timeout_built(tmp_path, *, status=Status.RUNNING, claimed_at=None, with_exit=False,
-                   deadline_at="2999-01-01T00:00:00+00:00"):
-    """构造 _handle_timeout 需要的 built 元组（真 LocalRunStore + SqliteEventLog，meta 带 300 秒的 timeout 预算；运行期限缺省远在
-    任何时刻之后、不起作用）。"""
-    job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
-              scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
-    meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,), deadline_at=deadline_at)
-    store = LocalRunStore(tmp_path, lock_holder=_ReleaseAtOnce())
-    store.create_run(meta, RunState(
-        run_id="run-1", status=Status.RUNNING,
-        jobs={"a": JobState("a", status, claimed_at=claimed_at)},
-        started_at="t0", high_water_mark=0))
-    log = SqliteEventLog(tmp_path / "run-1" / "events.db")
-    if with_exit:
-        log.record_exit("a", 137)
-    return meta, log, store, None, 1, None, None
+@pytest.fixture
+def timeout_built(monkeypatch):
+    """构造 _handle_timeout 需要的 built 元组的函数：给定目录里的真 LocalRunStore，加 moto 内存表上的真 DdbEventLog（生产里云端超时
+    处置用的正是它，见 `reconciler._build`）；meta 带 300 秒的 timeout 预算，运行期限缺省远在任何时刻之后、不起作用。每次构造建一张
+    新的 events 表，同一条用例里的几次构造互不串扰。先盖假凭证、再 mock，绝不连真 AWS。"""
+    import itertools
+
+    import boto3
+    from moto import mock_aws
+
+    from gherkai_core.adapters.event_log import DdbEventLog
+
+    for k, v in {"AWS_ACCESS_KEY_ID": "testing", "AWS_SECRET_ACCESS_KEY": "testing",
+                 "AWS_SESSION_TOKEN": "testing", "AWS_DEFAULT_REGION": "us-east-1"}.items():
+        monkeypatch.setenv(k, v)
+    monkeypatch.delenv("AWS_ENDPOINT_URL", raising=False)
+    with mock_aws():
+        ddb = boto3.resource("dynamodb", region_name="us-east-1")
+        tables = itertools.count()
+
+        def build(root, *, status=Status.RUNNING, claimed_at=None, with_exit=False,
+                  deadline_at="2999-01-01T00:00:00+00:00"):
+            job = Job(scope_id="a", scope_name="a", engine="novaact", timeout_s=300.0,
+                      scenarios=(Scenario(id="a:1", name="s", steps=(Step(0, "Given", "x"),)),))
+            meta = RunMeta(run_id="run-1", created_at="t0", jobs=(job,), deadline_at=deadline_at)
+            store = LocalRunStore(root, lock_holder=_ReleaseAtOnce())
+            store.create_run(meta, RunState(
+                run_id="run-1", status=Status.RUNNING,
+                jobs={"a": JobState("a", status, claimed_at=claimed_at)},
+                started_at="t0", high_water_mark=0))
+            events = ddb.create_table(
+                TableName=f"gherkai-events-{next(tables)}",
+                KeySchema=[{"AttributeName": "pk", "KeyType": "HASH"},
+                           {"AttributeName": "seq", "KeyType": "RANGE"}],
+                AttributeDefinitions=[{"AttributeName": "pk", "AttributeType": "S"},
+                                      {"AttributeName": "seq", "AttributeType": "N"}],
+                BillingMode="PAY_PER_REQUEST")
+            log = DdbEventLog(events, "run-1", ["a"])
+            if with_exit:
+                log.record_exit("a", 137)
+            return meta, log, store, None, 1, None, None
+
+        yield build
 
 
 class _FakeEcs:
@@ -387,38 +414,38 @@ def _stopped_filler(n, *, exit_code=0):
              "exitCode": exit_code, "scope_id": f"other-{i}"} for i in range(n)]
 
 
-def test_handle_timeout_stops_matching_task(tmp_path, monkeypatch):
+def test_handle_timeout_stops_matching_task(timeout_built, tmp_path, monkeypatch):
     """仍 running + task 运行中 → StopTask(reason 含哨兵) → 让 STOPPED→exit_observer 既有链收敛（单一真源）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path), ecs_client=ecs)
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path), ecs_client=ecs)
     assert r == "stopped"
     assert len(ecs.stopped) == 1
     assert reconciler.TIMEOUT_STOP_SENTINEL in ecs.stopped[0]["reason"]
     assert ecs.stopped[0]["task"] == "arn:task/1"
 
 
-def test_handle_timeout_noop_when_job_terminal(tmp_path, monkeypatch):
+def test_handle_timeout_noop_when_job_terminal(timeout_built, tmp_path, monkeypatch):
     """到点时 job 已终态（正常运行结束）→ 幂等 no-op（不碰 ECS——schedule 到点即删，双方零残留）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, status=Status.PASSED), ecs_client=ecs)
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, status=Status.PASSED), ecs_client=ecs)
     assert r == "noop-not-running" and ecs.stopped == []
 
 
-def test_handle_timeout_noop_when_exit_in_flight(tmp_path, monkeypatch):
+def test_handle_timeout_noop_when_exit_in_flight(timeout_built, tmp_path, monkeypatch):
     """退出记录已在（投影在途）→ 不动手，让既有链收敛（不覆盖真退出记录——被拒方案护栏）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, with_exit=True), ecs_client=ecs)
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, with_exit=True), ecs_client=ecs)
     assert r == "noop-exit-in-flight" and ecs.stopped == []
 
 
-def test_handle_timeout_converges_directly_when_task_gone(tmp_path, monkeypatch):
+def test_handle_timeout_converges_directly_when_task_gone(timeout_built, tmp_path, monkeypatch):
     """task 无踪且无退出记录（STOPPED 事件丢投等）→ 补写一条判为超时的未知退出收敛：退出码未知、带超时标志、没有可观察的退出
-    时刻（对位 local 接力恢复；「到点 invoke 顺带兜事件丢投」的落点）。"""
+    时刻（「到点 invoke 顺带兜事件丢投」的落点）。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
-    built = _timeout_built(tmp_path, claimed_at="2026-08-13T00:00:00Z")
+    built = timeout_built(tmp_path, claimed_at="2026-08-13T00:00:00Z")
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=_FakeEcs(task_arns=[]))
     assert r == "converged-directly"
     exits = [rec for rec in built[1].records() if rec.kind == "exit"]
@@ -426,7 +453,7 @@ def test_handle_timeout_converges_directly_when_task_gone(tmp_path, monkeypatch)
     assert (exits[0].exited.exit_code, exits[0].exited.timed_out, exits[0].exited.exited_at) == (None, True, None)
 
 
-def test_handle_timeout_pages_task_lists_and_batches_describe(tmp_path, monkeypatch):
+def test_handle_timeout_pages_task_lists_and_batches_describe(timeout_built, tmp_path, monkeypatch):
     """STOPPED task 多于一页时也要定位到运行中的目标：ListTasks 翻页取全、DescribeTasks 每批不超上限、命中即停。
 
     ECS 保留已停止的 task 约 1 小时，故一个大 run 的 STOPPED 列表轻易超过单页 100 条；只取首页会把仍在运行的
@@ -434,19 +461,19 @@ def test_handle_timeout_pages_task_lists_and_batches_describe(tmp_path, monkeypa
     """
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"], tasks=_stopped_filler(120))
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path), ecs_client=ecs)
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path), ecs_client=ecs)
     assert r == "stopped"
     assert ecs.stopped and ecs.stopped[0]["task"] == "arn:task/1"
     assert all(len(batch) <= _FakeEcs.PAGE for batch in ecs.described)
     assert len(ecs.described) == 1  # 目标在首批就命中 → 不再往下 describe
 
 
-def test_handle_timeout_finds_stopped_target_on_second_page(tmp_path, monkeypatch):
+def test_handle_timeout_finds_stopped_target_on_second_page(timeout_built, tmp_path, monkeypatch):
     """目标落在 STOPPED 列表第二页、且没有退出记录 → 仍按 DescribeTasks 落它的真退出码，不臆造超时。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     target = {"arn": "arn:task/target", "lastStatus": "STOPPED", "desiredStatus": "STOPPED", "exitCode": 7}
     ecs = _FakeEcs(tasks=_stopped_filler(100) + [target])
-    built = _timeout_built(tmp_path)
+    built = timeout_built(tmp_path)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
     assert r == "converged-from-describe"
     exits = [rec for rec in built[1].records() if rec.kind == "exit"]
@@ -456,7 +483,7 @@ def test_handle_timeout_finds_stopped_target_on_second_page(tmp_path, monkeypatc
 
 # ---------- 到点处置先复查 deadline（ADR 0034「job timeout」节「到点不早于 deadline」条②）----------
 # Scheduler 只承诺 60 秒精度，带秒的 at() 可能在 deadline 所在那一分钟的开头触发。下面几条的 job 在 10:00:00 被
-# claim、预算 300 秒（`_timeout_built`），截止时刻是 10:05:00（运行期限远在其后）；时钟与等待经 now_fn / sleep_fn 注入。
+# claim、预算 300 秒（`timeout_built`），截止时刻是 10:05:00（运行期限远在其后）；时钟与等待经 now_fn / sleep_fn 注入。
 
 _CLAIMED = "2026-11-08T10:00:00+00:00"
 
@@ -490,14 +517,14 @@ class _Clock:
             self._during_sleep()
 
 
-def test_handle_timeout_waits_until_deadline_when_triggered_early(tmp_path, monkeypatch):
+def test_handle_timeout_waits_until_deadline_when_triggered_early(timeout_built, tmp_path, monkeypatch):
     """触发早于 deadline、剩余不超过 60 秒 → 先等到 deadline、重读状态，再停 task；等待期间尚未动 ECS。等满剩余的 45 秒醒来时读到的
     恰好是截止时刻本身，还不算已到（已到指严格晚于），再等一个固定的短时长，读到晚于截止时刻才停 task。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     stopped_during_wait: list[list] = []
     clock = _Clock("2026-11-08T10:04:15+00:00", during_sleep=lambda: stopped_during_wait.append(list(ecs.stopped)))
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1
     assert clock.slept == [45.0, reconciler._TIMEOUT_TIE_WAIT_S]  # 等到 deadline，恰好读到 deadline 时再等一次
@@ -509,26 +536,26 @@ def test_handle_timeout_waits_until_deadline_when_triggered_early(tmp_path, monk
     ("2026-11-08T10:05:00+00:00", [reconciler._TIMEOUT_TIE_WAIT_S]),
     ("2026-11-08T10:05:00.000001+00:00", []),
 ], ids=["exactly-at-the-cutoff", "one-microsecond-after"])
-def test_handle_timeout_stops_only_after_reading_a_time_strictly_later_than_the_cutoff(tmp_path, monkeypatch, now, slept):
+def test_handle_timeout_stops_only_after_reading_a_time_strictly_later_than_the_cutoff(timeout_built, tmp_path, monkeypatch, now, slept):
     """已到指读到的墙钟严格晚于截止时刻，与本机启动器的检查、投影比较退出时刻的取法相同（ADR 0054 决策二「已过」的定义）。触发时
     读到的恰好是截止时刻 10:05:00：不停 task，再等一个固定的短时长，醒来读到晚于截止时刻才停；晚 1 微秒即已到，不等待、直接停。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     stopped_during_wait: list[list] = []
     clock = _Clock(now, during_sleep=lambda: stopped_during_wait.append(list(ecs.stopped)))
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1
     assert clock.slept == slept
     assert stopped_during_wait == [[] for _ in slept]  # 等待期间没有停 task
 
 
-def test_handle_timeout_does_not_loop_forever_when_the_clock_stays_at_the_cutoff(tmp_path, monkeypatch, capsys):
+def test_handle_timeout_does_not_loop_forever_when_the_clock_stays_at_the_cutoff(timeout_built, tmp_path, monkeypatch, capsys):
     """墙钟停在截止时刻、等待之后不前进（出故障的系统时钟）：每次醒来读到的都恰好是截止时刻、都不算已到。各次等待计入同一份等待额度
     （60 秒），额度用完即不停 task、不写退出记录，返回 skip-early 并打一行诊断，不在循环里一直等下去。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED)
     clock = _Clock("2026-11-08T10:05:00+00:00", advance=False)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early"
@@ -542,12 +569,12 @@ def test_handle_timeout_does_not_loop_forever_when_the_clock_stays_at_the_cutoff
 
 @pytest.mark.parametrize("stuck_at", ["2026-11-08T10:04:59.999999+00:00", "2026-11-08T10:04:59.999000+00:00",
                                       "2026-11-08T10:04:59.500000+00:00"])
-def test_handle_timeout_wait_count_is_bounded_wherever_the_clock_is_stuck(tmp_path, monkeypatch, stuck_at):
+def test_handle_timeout_wait_count_is_bounded_wherever_the_clock_is_stuck(timeout_built, tmp_path, monkeypatch, stuck_at):
     """墙钟停在截止时刻之前不到一秒的位置：每次等待至少是固定量，等待次数不超过额度除以固定量，用完即不停 task、返回 skip-early。
     按剩余时长等待的话，剩余越小循环次数越多，每次醒来都要重读 job 状态与退出记录。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED)
     clock = _Clock(stuck_at, advance=False)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early"
@@ -557,22 +584,22 @@ def test_handle_timeout_wait_count_is_bounded_wherever_the_clock_is_stuck(tmp_pa
     assert sum(clock.slept) <= reconciler._TIMEOUT_EARLY_WAIT_MAX_S
 
 
-def test_handle_timeout_disposes_at_once_when_deadline_passed(tmp_path, monkeypatch):
+def test_handle_timeout_disposes_at_once_when_deadline_passed(timeout_built, tmp_path, monkeypatch):
     """触发时 deadline 已过（Scheduler 在那一分钟内偏晚）→ 不等待、直接处置。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     clock = _Clock("2026-11-08T10:05:20+00:00")
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1 and clock.slept == []
 
 
-def test_handle_timeout_skips_when_triggered_more_than_a_minute_early(tmp_path, monkeypatch, capsys):
+def test_handle_timeout_skips_when_triggered_more_than_a_minute_early(timeout_built, tmp_path, monkeypatch, capsys):
     """剩余超过 60 秒（早于 Scheduler 的文档精度）→ 不等待、不处置、不碰 ECS，打一行诊断；宁可不处置也不提前处置，
     保护交给防御扫与 status --wait。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED)
     clock = _Clock("2026-11-08T10:03:30+00:00")
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early"
@@ -582,23 +609,23 @@ def test_handle_timeout_skips_when_triggered_more_than_a_minute_early(tmp_path, 
     assert "timeout-skip: run=run-1 scope=a" in out and "90 秒" in out
 
 
-def test_handle_timeout_skips_when_the_invocation_cannot_wait_long_enough(tmp_path, monkeypatch):
+def test_handle_timeout_skips_when_the_invocation_cannot_wait_long_enough(timeout_built, tmp_path, monkeypatch):
     """剩余虽在 60 秒内、却超过本次调用可等的秒数（kicker 按 Lambda 剩余时间给出）→ 同样不处置：等不到 deadline 就动手
     即是提前处置。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     clock = _Clock("2026-11-08T10:04:20+00:00")
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    wait_budget_fn=lambda: 20.0, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "skip-early" and ecs.stopped == [] and clock.slept == []
 
 
-def test_handle_timeout_samples_the_wait_budget_after_the_state_reads(tmp_path, monkeypatch):
+def test_handle_timeout_samples_the_wait_budget_after_the_state_reads(timeout_built, tmp_path, monkeypatch):
     """等待额度临睡前才采样：复查前的读取慢时，已花掉的时间不再算进可等的额度。Lambda 剩余 70 秒、离 deadline 50 秒、
     一次读取 25 秒——提前采样会批准再等 25 秒、等完只剩 20 秒（低于处置预留）；临睡采样得到 15 秒的额度，等不到 deadline 即不处置。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED)
     clock = _Clock("2026-11-08T10:04:10+00:00")
     start = clock.now()
     store = built[2]
@@ -615,11 +642,11 @@ def test_handle_timeout_samples_the_wait_budget_after_the_state_reads(tmp_path, 
     assert r == "skip-early" and ecs.stopped == [] and clock.slept == []
 
 
-def test_handle_timeout_noop_when_job_finishes_during_wait(tmp_path, monkeypatch):
+def test_handle_timeout_noop_when_job_finishes_during_wait(timeout_built, tmp_path, monkeypatch):
     """等待期间 job 自行结束（观察者写下退出记录）→ 等完重读即 no-op，不停 task、不改写那条真退出记录。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED)
     clock = _Clock("2026-11-08T10:04:30+00:00", during_sleep=lambda: built[1].record_exit("a", 0))
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "noop-exit-in-flight" and ecs.stopped == [] and clock.slept == [30.0]
@@ -627,7 +654,7 @@ def test_handle_timeout_noop_when_job_finishes_during_wait(tmp_path, monkeypatch
     assert exits["a"].exit_code == 0 and exits["a"].timed_out is False
 
 
-def test_handle_timeout_waits_again_when_the_clock_is_turned_back_during_the_wait(tmp_path, monkeypatch):
+def test_handle_timeout_waits_again_when_the_clock_is_turned_back_during_the_wait(timeout_built, tmp_path, monkeypatch):
     """等待期间系统时钟被回拨：10:04:15 触发、等 45 秒，醒来读到的是 10:04:50，还没到截止时刻 10:05:00；在这次调用的等待额度
     （60 秒）之内接着等 10 秒，醒来恰好读到截止时刻本身，仍不算已到，再等一个固定的短时长，读到晚于截止时刻才停 task。发出停止之前
     必须有一次读到已过截止时刻（ADR 0054 决策二后台推进条「截止时刻与说明」）：醒来只重查状态与退出记录、不重读时钟时，会在截止时刻
@@ -637,7 +664,7 @@ def test_handle_timeout_waits_again_when_the_clock_is_turned_back_during_the_wai
     stopped_during_wait: list[list] = []
     clock = _Clock("2026-11-08T10:04:15+00:00", during_sleep=lambda: stopped_during_wait.append(list(ecs.stopped)),
                    rewind_s=[10.0])
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path, claimed_at=_CLAIMED), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and len(ecs.stopped) == 1
     assert clock.slept == [45.0, 10.0, reconciler._TIMEOUT_TIE_WAIT_S]
@@ -645,14 +672,14 @@ def test_handle_timeout_waits_again_when_the_clock_is_turned_back_during_the_wai
     assert clock.now() > _dt.datetime.fromisoformat("2026-11-08T10:05:00+00:00")
 
 
-def test_handle_timeout_does_not_stop_when_the_wait_quota_runs_out_before_the_cutoff(tmp_path, monkeypatch, capsys):
+def test_handle_timeout_does_not_stop_when_the_wait_quota_runs_out_before_the_cutoff(timeout_built, tmp_path, monkeypatch, capsys):
     """回拨之后在这次调用的等待额度之内等不到截止时刻：额度在第一次临睡前定下（60 秒与本次调用还能等的秒数取小），各次等待之和
     不超过它。只受 60 秒约束时回拨 30 秒，还要再等 30 秒，合计 75 秒；本次调用只能等 50 秒时回拨 10 秒，合计 55 秒。两种都超过额度：
     不再等待、不停 task、不写退出记录，返回 skip-early 并打一行诊断，交给之后的推进检查。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     for name, budget, rewind in (("cap", None, 30.0), ("budget", 50.0, 10.0)):
         ecs = _FakeEcs(task_arns=["arn:task/1"])
-        built = _timeout_built(tmp_path / name, claimed_at=_CLAIMED)
+        built = timeout_built(tmp_path / name, claimed_at=_CLAIMED)
         clock = _Clock("2026-11-08T10:04:15+00:00", rewind_s=[rewind])
         wait_budget_fn = (lambda b=budget: b) if budget is not None else None
         r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, wait_budget_fn=wait_budget_fn,
@@ -664,23 +691,23 @@ def test_handle_timeout_does_not_stop_when_the_wait_quota_runs_out_before_the_cu
         assert "timeout-skip: run=run-1 scope=a" in out and "已等过 45 秒仍未到" in out, name
 
 
-def test_handle_timeout_without_claimed_at_counts_as_reached(tmp_path, monkeypatch):
+def test_handle_timeout_without_claimed_at_counts_as_reached(timeout_built, tmp_path, monkeypatch):
     """JobState 缺 claimed_at 时无从复查 → 按已到处理：不等待、照常处置。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     clock = _Clock("2026-11-08T10:00:00+00:00")
-    r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path), ecs_client=ecs,
+    r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path), ecs_client=ecs,
                                    now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and clock.slept == []
 
 
-def test_handle_timeout_treats_an_unreadable_claim_time_as_reached(tmp_path, monkeypatch):
+def test_handle_timeout_treats_an_unreadable_claim_time_as_reached(timeout_built, tmp_path, monkeypatch):
     """认领时刻读不出或不带时区（不是本系统写出的值）时与缺认领时刻同一分支：无从复查，按已到处理，不抛到调用方。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     for i, claimed in enumerate(("2026-11-08T10:00:00", "not-a-time")):
         ecs = _FakeEcs(task_arns=["arn:task/1"])
         clock = _Clock("2026-11-08T10:00:00+00:00")
-        r = reconciler._handle_timeout("run-1", "a", _timeout_built(tmp_path / str(i), claimed_at=claimed), ecs_client=ecs,
+        r = reconciler._handle_timeout("run-1", "a", timeout_built(tmp_path / str(i), claimed_at=claimed), ecs_client=ecs,
                                        now_fn=clock.now, sleep_fn=clock.sleep)
         assert r == "stopped" and clock.slept == [], claimed
 
@@ -691,14 +718,14 @@ def test_handle_timeout_treats_an_unreadable_claim_time_as_reached(tmp_path, mon
 _EARLY_DEADLINE = "2026-11-08T10:02:00+00:00"
 
 
-def test_handle_timeout_rechecks_against_the_cutoff_capped_by_the_run_deadline(tmp_path, monkeypatch):
+def test_handle_timeout_rechecks_against_the_cutoff_capped_by_the_run_deadline(timeout_built, tmp_path, monkeypatch):
     """到点复查按封顶后的截止时刻：10:01:30 触发时离期限 30 秒，等过期限即停 task（只按预算算会离 10:05:00 还有 210 秒、判成过早
     而不处置；等满 30 秒恰好读到期限本身时再等一个固定的短时长）。停 task 的 reason 带哨兵串并说明是 run 的期限到了，观察者据哨兵串
     归因为超时。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(task_arns=["arn:task/1"])
     clock = _Clock("2026-11-08T10:01:30+00:00")
-    built = _timeout_built(tmp_path, claimed_at=_CLAIMED, deadline_at=_EARLY_DEADLINE)
+    built = timeout_built(tmp_path, claimed_at=_CLAIMED, deadline_at=_EARLY_DEADLINE)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now, sleep_fn=clock.sleep)
     assert r == "stopped" and clock.slept == [30.0, reconciler._TIMEOUT_TIE_WAIT_S]
     reason = ecs.stopped[0]["reason"]
@@ -706,7 +733,7 @@ def test_handle_timeout_rechecks_against_the_cutoff_capped_by_the_run_deadline(t
     assert reconciler.exit_from_task({"containers": [{"exitCode": 143}], "stoppedReason": reason}) == (143, True, None, None)
 
 
-def test_stop_reason_names_the_cutoff_that_took_effect(tmp_path, monkeypatch):
+def test_stop_reason_names_the_cutoff_that_took_effect(timeout_built, tmp_path, monkeypatch):
     """停 task 的 reason 按起作用的截止时刻分别写：job 自己的预算到点仍是原有的写法，期限封顶时说明是 run 的期限；认领时刻缺失、
     无从重算时只说到了时间上限。三种都以哨兵串开头。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
@@ -716,7 +743,7 @@ def test_stop_reason_names_the_cutoff_that_took_effect(tmp_path, monkeypatch):
                                        ("unknown", None, _EARLY_DEADLINE)):
         ecs = _FakeEcs(task_arns=["arn:task/1"])
         clock = _Clock("2026-11-08T10:06:00+00:00")
-        built = _timeout_built(tmp_path / name, claimed_at=claimed, deadline_at=deadline_at)
+        built = timeout_built(tmp_path / name, claimed_at=claimed, deadline_at=deadline_at)
         assert reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs, now_fn=clock.now,
                                           sleep_fn=clock.sleep) == "stopped"
         reasons[name] = ecs.stopped[0]["reason"]
@@ -726,7 +753,7 @@ def test_stop_reason_names_the_cutoff_that_took_effect(tmp_path, monkeypatch):
                        "unknown": f"{sentinel}: scope reached its time limit"}
 
 
-def test_scan_overdue_timeouts_uses_the_cutoff_capped_by_the_run_deadline(tmp_path, monkeypatch):
+def test_scan_overdue_timeouts_uses_the_cutoff_capped_by_the_run_deadline(timeout_built, tmp_path, monkeypatch):
     """防御扫按封顶后的截止时刻判断：认领 200 秒、预算 300 秒，只按预算算离截止还有 100 秒；运行期限已过去 150 秒，超过余量
     120 秒，于是进处置。期限只过去 100 秒时仍在余量之内，不碰。"""
     from gherkai_core.serialize import instant_to_iso
@@ -738,7 +765,7 @@ def test_scan_overdue_timeouts_uses_the_cutoff_capped_by_the_run_deadline(tmp_pa
     claimed = instant_to_iso(now - _dt.timedelta(seconds=200))
     for sub, past_s, expected in (("over", 150, ["a"]), ("within", 100, [])):
         calls.clear()
-        built = _timeout_built(tmp_path / sub, claimed_at=claimed,
+        built = timeout_built(tmp_path / sub, claimed_at=claimed,
                                deadline_at=instant_to_iso(now - _dt.timedelta(seconds=past_s)))
         reconciler._scan_overdue_timeouts("run-1", built)
         assert calls == expected, sub
@@ -795,25 +822,25 @@ def test_kicker_timeout_path_skips_tick_when_not_detached(monkeypatch):
     assert builds == ["run-1"]
 
 
-def test_scan_overdue_timeouts_only_over_budget(tmp_path, monkeypatch):
+def test_scan_overdue_timeouts_only_over_budget(timeout_built, tmp_path, monkeypatch):
     """防御扫（claimed_at ②）只处置「过了截止时刻加余量」的 RUNNING job：过期的进处置、未到期/无 claimed_at/认领时刻读不出的不碰。"""
     calls = []
     monkeypatch.setattr(reconciler, "_handle_timeout", lambda rid, sid, built: calls.append(sid))
     # claimed_at 在过去（相对真时钟必已超 300s 预算加余量）→ 处置
-    built = _timeout_built(tmp_path / "over", claimed_at="2026-08-13T00:00:00Z")
+    built = timeout_built(tmp_path / "over", claimed_at="2026-08-13T00:00:00Z")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == ["a"]
     # claimed_at 在未来（elapsed 为负，等价「未到期」）→ 不碰
     calls.clear()
-    built = _timeout_built(tmp_path / "fresh", claimed_at="2099-01-01T00:00:00Z")
+    built = timeout_built(tmp_path / "fresh", claimed_at="2099-01-01T00:00:00Z")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == []
     # 无 claimed_at（旧数据/未 claim）→ 不碰（无起算点不臆断）
-    built = _timeout_built(tmp_path / "nocl")
+    built = timeout_built(tmp_path / "nocl")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == []
     # 认领时刻不带时区（不是本系统写出的值）→ 同「无起算点」，不碰、不抛
-    built = _timeout_built(tmp_path / "naive", claimed_at="2026-08-13T00:00:00")
+    built = timeout_built(tmp_path / "naive", claimed_at="2026-08-13T00:00:00")
     reconciler._scan_overdue_timeouts("run-1", built)
     assert calls == []
 
@@ -1445,19 +1472,19 @@ def test_run_ids_scope_id_containing_hash_is_split_from_the_left():
     assert reconciler._run_ids_from_stream(event) == {"20260909T000000Z-a3f9c1"}
 
 
-def test_handle_timeout_leaves_a_stopping_task_to_the_observer(tmp_path, monkeypatch):
+def test_handle_timeout_leaves_a_stopping_task_to_the_observer(timeout_built, tmp_path, monkeypatch):
     """task 正在停止（desiredStatus=STOPPED、lastStatus 未到 STOPPED）→ 不在 RUNNING 列表里，但**不是**无踪：不动、
     不直写，等观察者的真退出记录（ADR 0034「job timeout」节）。曾按 RUNNING 列表判「无踪」直写 timed_out，与几秒后
     到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "DEPROVISIONING", "desiredStatus": "STOPPED"}])
-    built = _timeout_built(tmp_path)
+    built = timeout_built(tmp_path)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
     assert r == "noop-stopping" and ecs.stopped == []
     assert built[1].has_exit("a") is False  # 没直写
 
 
-def test_handle_timeout_converges_from_describe_when_task_already_stopped(tmp_path, monkeypatch):
+def test_handle_timeout_converges_from_describe_when_task_already_stopped(timeout_built, tmp_path, monkeypatch):
     """task 已 STOPPED 却无退出记录（STOPPED 事件丢投）→ 用与观察者同一提取函数从 DescribeTasks 落**真**退出记录
     （exit 0、非 timed_out、带 task 的执行停止时刻），不臆造 timeout；迟到的观察者写同内容同键、幂等。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
@@ -1465,7 +1492,7 @@ def test_handle_timeout_converges_from_describe_when_task_already_stopped(tmp_pa
     ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "STOPPED", "desiredStatus": "STOPPED",
                            "exitCode": 0, "stoppedReason": "Essential container in task exited",
                            "executionStoppedAt": stopped_at}])
-    built = _timeout_built(tmp_path)
+    built = timeout_built(tmp_path)
     r = reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs)
     assert r == "converged-from-describe" and ecs.stopped == []
     exits = {x.scope_id: x.exited for x in built[1].records() if x.kind == "exit"}
@@ -1473,12 +1500,12 @@ def test_handle_timeout_converges_from_describe_when_task_already_stopped(tmp_pa
     assert exits["a"].exited_at == stopped_at
 
 
-def test_handle_timeout_converges_from_describe_keeps_timeout_attribution_of_own_stop(tmp_path, monkeypatch):
+def test_handle_timeout_converges_from_describe_keeps_timeout_attribution_of_own_stop(timeout_built, tmp_path, monkeypatch):
     """上一轮已 StopTask（stoppedReason 带哨兵）、事件丢投、本轮再扫到它已 STOPPED → 落记录仍归因 timeout。"""
     monkeypatch.setenv("CLUSTER", "test-cluster")
     ecs = _FakeEcs(tasks=[{"arn": "arn:task/1", "lastStatus": "STOPPED", "desiredStatus": "STOPPED",
                            "exitCode": 143, "stoppedReason": f"{reconciler.TIMEOUT_STOP_SENTINEL}: scope exceeded 300s budget"}])
-    built = _timeout_built(tmp_path)
+    built = timeout_built(tmp_path)
     assert reconciler._handle_timeout("run-1", "a", built, ecs_client=ecs) == "converged-from-describe"
     exits = {x.scope_id: x.exited for x in built[1].records() if x.kind == "exit"}
     assert exits["a"].exit_code == 143 and exits["a"].timed_out is True

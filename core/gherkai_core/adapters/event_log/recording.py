@@ -5,8 +5,8 @@
 零新序列化；seq 按到达序在该 scope 内单调递增，从库里已有的 max_seq 续号（同一 scope 重试或继续运行时幂等）；emit_ts 取到达时刻。
 
 同步 run 的记录器也写**退出记录**：事件流自然结束或 worker 以非零退出码结束时按退出码写一条，被 schedule
-主动停止（stop）时在停止完成后写——这样同步 run 的 events.db 与 detached 的形态相同（事件加退出记录），`status --wait` 的接力推进与
-`explain` 的补取读到的是完整的事件流，不会把一个已结束的 job 当成仍在运行。
+主动停止（stop）时在停止完成后写——这样同步 run 的 events.db 与 detached 的形态相同（事件加退出记录），`explain` 的补取读到的是
+完整的事件流，不会把一个已结束的 job 当成仍在运行。
 """
 from __future__ import annotations
 

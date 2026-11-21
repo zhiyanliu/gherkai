@@ -254,8 +254,8 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
       「无踪」直写 timed_out，与几秒后到达的真退出记录同键互覆——恰在预算点运行结束的 passed job 可被终判成 timeout；
     - **已 STOPPED 却无退出记录**（STOPPED 事件丢投）→ 用与观察者同一提取函数 `exit_from_task` 从 task 对象落真退出
       记录（同内容同键、幂等，含 task 的执行停止时刻），不臆造 timed_out：task 在截止时刻之后自己异常退出的，由投影按退出时刻判为超时。
-    两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 补写一条判为超时的未知退出收敛（`record_timed_out_if_absent`）——对位 local
-    接力恢复，观察链已断时补写是唯一收敛路径。补写只在还没有退出记录时成立：观察者恰在上面的点查之后、补写之前落下真实的退出记录时
+    两个列表都无踪且无退出记录：预算已尽仍无确认完成 → 补写一条判为超时的未知退出收敛（`record_timed_out_if_absent`）——观察链已断时
+    补写是唯一收敛路径。补写只在还没有退出记录时成立：观察者恰在上面的点查之后、补写之前落下真实的退出记录时
     补写不成立，按退出记录已在返回。返回处置结果串（日志/测试断言用）。
     """
     import boto3
@@ -272,7 +272,7 @@ def _handle_timeout(run_id: str, scope_id: str, built, ecs_client=None, *, wait_
         js = state.jobs.get(scope_id) if state is not None else None
         if js is None or js.status != Status.RUNNING:
             return "noop-not-running", None  # 到点时 job 早收敛/未知 → 幂等 no-op（best-effort 边界）
-        # 只查本 scope（EventLog.has_exit 单点查）——一个 scope 的处置不该逐 scope 重放整 run 的 events。
+        # 只查本 scope（`DdbEventLog.has_exit` 单点查）——一个 scope 的处置不该逐 scope 重放整 run 的 events。
         if event_log.has_exit(scope_id):
             return "noop-exit-in-flight", None  # 退出记录已在、投影在途 → 让既有链收敛，不动手
         return None, js.claimed_at
@@ -448,8 +448,8 @@ def _load_definition(run_store, run_id: str):
 def _build(run_id: str):
     """cloud 组合根：读 env 造 boto3 + 装配（RunStore/EventLog/CloudLauncher + ResultStore/ReportStore）注入。
 
-    返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)——同 local
-    build_local_reconcile 的形状，供 tick 与生成报告使用。meta 从 RunStore 读回（definition）。
+    返回 (meta, event_log, run_store, launcher, max_concurrency, result_store, report_store)，供 tick 与生成报告使用；本机后台推进进程的
+    对应装配是 `detached.assemble_local_run`（它用自己生成的运行定义，不从记录读回）。meta 从 RunStore 读回（definition）。
     **None 表示本 run 云端推进器不该动**（非 detached / 已收尾 / definition 不在库，三支见下）——两个 handler
     据此整体 no-op。
 

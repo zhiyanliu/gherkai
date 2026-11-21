@@ -6,8 +6,8 @@
   判定到 job 判定的归约是另一条路径（`project._aggregate`）。
 - `RunEnding` 与 `RUN_ENDINGS`：结束写的说明表（ADR 0031 决定三「结束写」小节），各条来路的句子只在这里；运行定义不可用的变体由
   `definition_unavailable_ending` 带上读不到定义的原因，几种原因的句子同样只在这里（`schema_mismatch_reason`、
-  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），由云端推进器使用（本机后台推进进程用自己生成的运行定义；status --wait
-  接力从记录读回，读不出时不写）。
+  `DEFINITION_CONTRACT_REASON`、`NO_WORKER_IMAGES_REASON`），由云端推进器使用（本机的两种推进器用自己生成的运行定义，不从记录
+  读回）。
 - `ending_applied` 与 `commit_applied`：结束写（`RunStore.end_run`）与带结果的 job 终态写（`RunStore.commit_job_states`）对一份运行态
   的作用。两个 RunStore adapter 都用它们算出要写下的运行态，adapter 只负责写的条件与落盘，同一调用顺序下两端的落库结果相同。
 - `state_without_record`：没有记录的执行（`run --no-report`）按同一组作用在内存里算出的运行态（ADR 0031 决定五「数据源」）。

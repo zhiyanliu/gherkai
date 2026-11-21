@@ -12,6 +12,7 @@ job 写改回 running。
 """
 from __future__ import annotations
 
+import errno
 import json
 import os
 import subprocess
@@ -231,7 +232,7 @@ def test_create_run_refuses_an_identifier_that_cannot_name_a_run_directory(tmp_p
 
 
 def test_create_run_without_a_lock_holder_is_a_programming_error_and_creates_nothing(tmp_path: Path):
-    """不带持有者的 store（只读命令、接力）不能建 run：RuntimeError，什么都不建。"""
+    """不带持有者的 store（只读命令、处置方）不能建 run：RuntimeError，什么都不建。"""
     with pytest.raises(RuntimeError):
         LocalRunStore(tmp_path / "runs").create_run(_meta("r", ["a"]), _pending("r", ["a"]))
     assert os.listdir(tmp_path) == []
@@ -240,7 +241,7 @@ def test_create_run_without_a_lock_holder_is_a_programming_error_and_creates_not
 @pytest.mark.parametrize("name", [".gherkai-creating-0123456789abcdef", ".hidden", "nested/r"])
 def test_entries_by_identifier_treat_a_name_outside_the_rule_as_no_run(tmp_path: Path, name: str):
     """名字不合规则的目录里放着合法的运行定义与带后台执行标记的运行态（如改名之前的暂存目录）：按标识读的入口都按 run 不存在
-    处理，写入口都写不成，文件逐字节不变。"""
+    处理，试拿得到「这个名字下已没有 run」，写入口都写不成，文件逐字节不变。"""
     root = tmp_path / "runs"
     d = root / name
     d.mkdir(parents=True)
@@ -253,7 +254,9 @@ def test_entries_by_identifier_treat_a_name_outside_the_rule_as_no_run(tmp_path:
     assert store.load_run_state(name) is None
     assert store.load_run_meta(name) is None
     assert store.peek_definition_header(name) is None
-    assert store.is_detached(name) is False
+    with pytest.raises(run_dir.RunDirGone):
+        with store.probe_run_dir(name):
+            pass
     with pytest.raises(FileNotFoundError):
         store.update_job_state(name, JobState("a", Status.RUNNING))
     with pytest.raises(FileNotFoundError):
@@ -274,7 +277,9 @@ def test_entries_by_identifier_treat_a_name_too_long_for_a_directory_as_no_run(t
     assert store.load_run_state(name) is None
     assert store.load_run_meta(name) is None
     assert store.peek_definition_header(name) is None
-    assert store.is_detached(name) is False
+    with pytest.raises(run_dir.RunDirGone):
+        with store.probe_run_dir(name):
+            pass
     with pytest.raises(FileNotFoundError):
         store.update_job_state(name, JobState("a", Status.RUNNING))
     assert store.try_claim_job(name, "a") is False
@@ -324,7 +329,7 @@ def test_concurrent_job_writes_and_claims_in_separate_processes_lose_no_update(t
     for sid in claimed:
         assert state.jobs[sid] == JobState(sid, Status.RUNNING, claimed_at="2026-11-15T00:00:00Z"), state.jobs[sid]
     assert state.claim_count == len(claimed)
-    assert store.is_detached("r") is True
+    assert json.loads((tmp_path / "runs" / "r" / "run_state.json").read_text(encoding="utf-8"))["detached"] is True
 
 
 def test_terminal_status_survives_job_writes_racing_an_end_write_in_another_process(tmp_path: Path, lock_holder):
@@ -364,3 +369,199 @@ def test_terminal_status_survives_job_writes_racing_an_end_write_in_another_proc
         after = 0 if seen is None else int(seen.rsplit("-", 1)[1]) + 1
         assert all(r is False for r in got[after:]), (sid, seen, got)
     assert any(True in got and False in got for got in returns.values()), returns
+
+
+# ---------- 读到「不存在」即这个 run 不存在（ADR 0030 决定四「local 读到『不存在』即这个 run 不存在」条） ----------
+
+class _CloseAtOnce:
+    """建 run 用的持有者：收到持锁的描述符即关闭。这里的用例只要记录，不要生命期锁，几百个 run 也不占着描述符。"""
+
+    def hold(self, fd: int) -> None:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("occupant", ["deleted", "file"])
+def test_entries_by_identifier_read_a_vanished_run_directory_as_no_run(tmp_path: Path, occupant: str):
+    """run 目录已被删去、或同名的换成了一个文件：读运行定义、版本头与运行态都返回 None，条件写入口都写不成，执行中的写与带结果的终态写照
+    「运行态不存在」报错；不抛「不存在」之外的错误，报告目录里什么都不多出来（不为不存在的 run 建锁文件），占位的文件逐字节不变。"""
+    root = tmp_path / "runs"
+    store = LocalRunStore(root, lock_holder=_CloseAtOnce())
+    meta, state = _meta("r", ["a"]), _pending("r", ["a"])
+    store.create_run(meta, state)
+    import shutil
+    shutil.rmtree(root / "r")
+    if occupant == "file":
+        (root / "r").write_bytes(b"not a run")
+    before = _snapshot(root)
+    assert store.load_run_meta("r") is None
+    assert store.peek_definition_header("r") is None
+    assert store.load_run_state("r") is None
+    assert store.try_claim_job("r", "a") is False
+    assert store.project_state("r", state) is False
+    assert store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t") is False
+    with pytest.raises(FileNotFoundError):
+        store.update_job_state("r", JobState("a", Status.RUNNING))
+    with pytest.raises(FileNotFoundError):
+        store.commit_job_states("r", [JobState("a", Status.PASSED)], ended_at="t")
+    assert store.list_runs([Status.PENDING, Status.RUNNING], limit=None) == []
+    assert _snapshot(root) == before
+
+
+def test_reading_runs_while_they_are_being_deleted_never_fails_on_a_vanished_run(tmp_path: Path):
+    """一个线程逐个删去 run 目录，同时另一个线程反复列举、对列出的每个 run 读运行定义、版本头与运行态：列举与按标识的读遇到列举之后
+    被删去的 run 都读作不存在（略过、None），不抛出。用例确实形成了交错：至少有一次列出的 run 在随后的读里已不在。先查是否存在再打开
+    的读法在这里会偶发以 FileNotFoundError 失败（查与开之间目录被删去）。"""
+    import shutil
+    import threading
+
+    root = tmp_path / "runs"
+    store = LocalRunStore(root, lock_holder=_CloseAtOnce())
+    vanished_after_listing = 0
+    for round_ in range(20):
+        ids = [f"r{round_:02d}-{i:03d}" for i in range(120)]
+        for run_id in ids:
+            store.create_run(_meta(run_id, ["a"]), _pending(run_id, ["a"]))
+        deleter = threading.Thread(target=lambda: [shutil.rmtree(root / run_id) for run_id in ids])
+        deleter.start()
+        try:
+            while True:
+                rows = store.list_runs([Status.PENDING, Status.RUNNING], limit=None)
+                for row in rows:
+                    meta = store.load_run_meta(row.run_id)
+                    header = store.peek_definition_header(row.run_id)
+                    state = store.load_run_state(row.run_id)
+                    if meta is None or header is None or state is None:
+                        vanished_after_listing += 1
+                if not rows and not deleter.is_alive():
+                    break
+        finally:
+            deleter.join(timeout=_TIMEOUT_S)
+        assert os.listdir(root) == []
+    assert vanished_after_listing > 0
+
+
+def test_a_write_entry_meeting_a_directory_that_is_being_removed_reads_it_as_no_run(tmp_path: Path):
+    """另一个线程反复建出同名的 run 目录（里面是一份已结束的运行态）、再删去，同时反复做结束写与认领：打开短锁的锁文件那一步、锁内
+    读运行态那一步遇到正被删去的目录时都读作 run 不存在，写不成，不抛出（macOS 的 APFS 上建出锁文件的那次打开可能得到 EINVAL 而不是
+    ENOENT，见 `LocalRunStore._open_lock_file`）。运行态已结束，所以两个写入口在读到它时也不写：这里只核打开与读。先查运行态是否存在
+    再打开、或把 EINVAL 原样抛出，在这里都会偶发失败。"""
+    import shutil
+    import threading
+
+    from gherkai_core.serialize import run_state_to_dict
+
+    root = tmp_path / "runs"
+    root.mkdir()
+    store = LocalRunStore(root)
+    ended = json.dumps(run_state_to_dict(RunState(run_id="r", status=Status.PASSED, jobs={"a": JobState("a", Status.PASSED)},
+                                                  started_at="t0", ended_at="t1")))
+    stop = threading.Event()
+
+    def churn():
+        # 先在别的名字下备好完整的目录，再改名到位：读的一方看不到写了一半的运行态
+        while not stop.is_set():
+            shutil.rmtree(root / ".prep", ignore_errors=True)
+            try:
+                os.mkdir(root / ".prep")
+                (root / ".prep" / "run_state.json").write_text(ended, encoding="utf-8")
+                os.rename(root / ".prep", root / "r")
+            except OSError:
+                pass
+            shutil.rmtree(root / "r", ignore_errors=True)
+
+    churner = threading.Thread(target=churn)
+    churner.start()
+    try:
+        for _ in range(20000):
+            assert store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t") is False
+            assert store.try_claim_job("r", "a", claimed_at="t") is False
+    finally:
+        stop.set()
+        churner.join(timeout=_TIMEOUT_S)
+
+
+@pytest.mark.parametrize("case", ["removed-then-real-open", "removed-then-einval", "still-there-einval"])
+def test_a_run_directory_removed_right_before_the_lock_file_is_opened_reads_as_no_run(tmp_path: Path, monkeypatch, case: str):
+    """建 run 之后的写入口打开短锁的锁文件那一刻 run 目录已被删去：真实的打开得到「不存在」，或（macOS 的 APFS 上可能的）EINVAL，都读作
+    run 不存在：结束写与认领写不成，执行中的写照「运行态不存在」报错，什么都不建出。目录还在而打开以 EINVAL 失败时原样抛出，不吞成
+    「不存在」，运行态逐字节不变。注入只换那一次打开：按 case 先真的删去 run 目录，再照常打开或以同步的系统错误失败。"""
+    import builtins
+    import shutil
+
+    from gherkai_core.adapters.run_store import local as local_mod
+
+    root = tmp_path / "runs"
+    store = LocalRunStore(root, lock_holder=_CloseAtOnce())
+    real_open = builtins.open
+
+    def open_(path, *args, **kwargs):
+        if os.fspath(path).endswith(".runstate.lock"):
+            if case != "still-there-einval":
+                shutil.rmtree(root / "r")
+            if case != "removed-then-real-open":
+                raise OSError(errno.EINVAL, os.strerror(errno.EINVAL), os.fspath(path))
+        return real_open(path, *args, **kwargs)
+
+    monkeypatch.setattr(local_mod, "open", open_, raising=False)
+    writes = [lambda: store.end_run("r", RUN_ENDINGS["settle-advancer-exited"], ended_at="t"),
+              lambda: store.try_claim_job("r", "a", claimed_at="t"),
+              lambda: store.update_job_state("r", JobState("a", Status.RUNNING))]
+    for write in writes:
+        store.create_run(_meta("r", ["a"]), _pending("r", ["a"]))
+        before = (root / "r" / "run_state.json").read_bytes()
+        if case == "still-there-einval":
+            with pytest.raises(OSError) as exc:
+                write()
+            assert exc.value.errno == errno.EINVAL
+            assert (root / "r" / "run_state.json").read_bytes() == before
+            shutil.rmtree(root / "r")
+        elif write is writes[2]:
+            with pytest.raises(FileNotFoundError):
+                write()
+        else:
+            assert write() is False
+        assert os.listdir(root) == []
+
+
+@pytest.mark.parametrize("reader", ["load_run_meta", "peek_definition_header", "load_run_state", "list_runs-state",
+                                    "list_runs-header"])
+def test_a_run_directory_removed_right_before_a_record_is_read_reads_as_no_run(tmp_path: Path, monkeypatch, reader: str):
+    """读记录文件的那一刻 run 目录已被删去：读运行定义、版本头与运行态都返回 None；列举时读运行态得到「不存在」即略过这一项，读版本头
+    得到「不存在」时这一项照列、头部为空（与没有 run_meta.json 的 run 同一读法，ADR 0041 决策七「读不到为空」），别的 run 照常列出；
+    都不抛出。注入只换文件读取这一步：先真的删去 run 目录，再照常读。"""
+    import shutil
+
+    root = tmp_path / "runs"
+    store = LocalRunStore(root, lock_holder=_CloseAtOnce())
+    for run_id in ("r", "s"):
+        store.create_run(_meta(run_id, ["a"]), _pending(run_id, ["a"]))
+    target = "run_state.json" if reader in ("load_run_state", "list_runs-state") else "run_meta.json"
+    real_read_text, real_read_bytes = Path.read_text, Path.read_bytes
+    armed = [True]
+
+    def remove_first(path: Path) -> None:
+        if armed[0] and path.name == target and path.parent == root / "r":
+            armed[0] = False
+            shutil.rmtree(root / "r")
+
+    def read_text(self, *args, **kwargs):
+        remove_first(self)
+        return real_read_text(self, *args, **kwargs)
+
+    def read_bytes(self):
+        remove_first(self)
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_text", read_text)
+    monkeypatch.setattr(Path, "read_bytes", read_bytes)
+    if reader.startswith("list_runs"):
+        rows = {row.run_id: row for row in store.list_runs([Status.PENDING, Status.RUNNING], limit=None)}
+        if reader == "list_runs-state":
+            assert list(rows) == ["s"]
+        else:
+            assert sorted(rows) == ["r", "s"] and rows["r"].header is None and rows["r"].state == _pending("r", ["a"])
+        assert rows["s"].header is not None
+    else:
+        assert getattr(store, reader)("r") is None
+    assert armed == [False]  # 注入确实发生了
+    assert os.listdir(root) == ["s"]

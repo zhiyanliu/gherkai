@@ -1,6 +1,7 @@
 """reconciler tick 测试：推进编排 + 幂等 + CAS 起 job + 逐 job 写序 + 到期处理。
 
-用真 SqliteEventLog + RunStore（LocalRunStore，部分用例另以 moto 上的 DynamoDBRunStore 对拍）+ fake Launcher（记录被 launch 的 job，
+用真 SqliteEventLog + RunStore（LocalRunStore，部分用例另以 moto 上的 DynamoDBRunStore 对拍；以几个推进器重叠推进为前提的用例只用
+DynamoDBRunStore：本机一个 run 任何时刻至多一个推进器，ADR 0034「推进器与触发源」）+ fake Launcher（记录被 launch 的 job，
 不起真进程）+ 记下每次保存的判定存储（`_RecordingResultStore`，部分用例套在真 LocalResultStore 外面）与注入的假墙钟验证 tick 逻辑：
 - 首 tick 从全 pending 起首批（≤max_concurrency），每次认领前另取一次时刻作认领时刻，截止时刻随 launch 交出；
 - 逐 job 写序（ADR 0030 决定三、ADR 0034 机制三「run 级状态只进不退」条④的步骤）：每一轮为已有结果的 job 各存一份带标识的判定明细、
@@ -17,6 +18,7 @@
 """
 from __future__ import annotations
 
+import errno
 import logging
 from collections.abc import Callable
 from dataclasses import replace
@@ -30,7 +32,7 @@ from gherkai_core.adapters.run_store.local import LocalRunStore
 from gherkai_core.errors import NamedDetailMissing
 from gherkai_core.model import Job, JobResult, JobState, RunMeta, RunState, Scenario, Status, Step
 from gherkai_core.project import DEADLINE_TIMEOUT_MESSAGE
-from gherkai_core.reconcile import TickOutcome, tick, write_report_from_record
+from gherkai_core.reconcile import TickOutcome, generate_report_from_record, tick, write_report_from_record
 from gherkai_core.run_status import RUN_ENDINGS, CommitOutcome
 from gherkai_core.serialize import instant_to_iso
 from tests.fake_engine import FAR_DEADLINE
@@ -289,7 +291,7 @@ def test_tick_after_commit_reads_existing_terminal(tmp_path, lock_holder):
     """run 成为终态之后再 tick：读到既有终态即停（ADR 0034 机制三「run 级状态只进不退」条④），终态只写一次（ended_at 仍首次）。
 
     两次结果都让宿主结束推进：首次是这一方的写使 run 成为终态（宿主写报告），第二次是 run 已结束（宿主不写报告）——
-    status --wait 的接力不会因「别人已使 run 成为终态」永远等不到结束（据 status --wait 死循环的实际运行复现修正）。"""
+    宿主不会因「别人已使 run 成为终态」永远等不到结束。"""
     meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
@@ -723,12 +725,12 @@ def test_a_round_that_cannot_save_a_verdict_starts_no_job(any_store, tmp_path):
 # ---------- 按 job 判断快照（ADR 0054 决策二后台推进条「快照」）----------
 
 @pytest.mark.parametrize("deadline_at, at", [(FAR_DEADLINE, 10), (_NEAR, 41)], ids=["未过停止启动", "已过停止启动"])
-def test_a_job_claimed_after_the_read_is_not_committed_this_round(any_store, tmp_path, deadline_at, at):
-    """同一轮两个 job 都有结果，一个在这一轮读到的运行态里带认领时刻，另一个是读运行态之后才被别处认领的（读到的运行态里它是
-    pending、不带认领时刻）：只为前者存明细、写终态，后者这一轮不写明细、不写终态，下一轮读到新的运行态再写。后者在决策用的运行态里
+def test_a_job_claimed_after_the_read_is_not_committed_this_round(ddb_run_store, tmp_path, deadline_at, at):
+    """同一轮两个 job 都有结果，一个在这一轮读到的运行态里带认领时刻，另一个是读运行态之后才被另一个推进器认领的（云端多次调用重叠
+    推进；读到的运行态里它是 pending、不带认领时刻）：只为前者存明细、写终态，后者这一轮不写明细、不写终态，下一轮读到新的运行态再写。后者在决策用的运行态里
     仍是 pending：未过停止启动的时刻时多一次被认领条件挡下的启动提议；已过而没有别的执行中的 job 时多一次没写成的到期结束写（库中它
     是 running），重读之后继续推进。"""
-    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=deadline_at, store=any_store)
+    meta, log, store = _setup(tmp_path, "a", "b", deadline_at=deadline_at, store=_Store(ddb_run_store))
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1),
          result_store=_RecordingResultStore())  # 起 a
     _done_events(log, "a")
@@ -785,18 +787,19 @@ def test_job_without_a_readable_claim_time_is_not_committed_this_round(tmp_path,
     assert [jr.scope_id for jr in rs.saved] == ["a"]
 
 
-# ---------- 两个推进器重叠，各记一部分 job（ADR 0034 机制三「run 级状态只进不退」条④；ADR 0030 决定三「被点名的那一份」条）----------
+# ---------- 两个推进器重叠（云端多次调用），各记一部分 job（ADR 0034 机制三「run 级状态只进不退」条④；ADR 0030 决定三「被点名的那一份」
+# 条）----------
 
 @pytest.mark.parametrize("first", ["partial", "complete"])
-def test_overlapping_advancers_each_commit_a_part_and_exactly_one_commits_the_run(any_store, tmp_path, first):
-    """两个推进器读到的事件快照不同：P 只看到 a 有结果（passed），Q 看到 a（进程非干净退出，error）与 b 都有结果。固定先后：一方读完
+def test_overlapping_advancers_each_commit_a_part_and_exactly_one_commits_the_run(ddb_run_store, tmp_path, first):
+    """两个推进器（云端多次调用重叠推进）读到的事件快照不同：P 只看到 a 有结果（passed），Q 看到 a（进程非干净退出，error）与 b 都有结果。固定先后：一方读完
     运行态之后、写下终态之前，另一方走完一整轮。两方的明细存进同一处判定存储、各用自己的标识，互不覆盖。
 
     先写成的是 P（first=partial）时，P 记下 a、run 仍未结束，返回继续推进；Q 再写时 a 已是终态被跳过、记下 b 之后 run 成为终态，Q 返回
     COMMITTED。先写成的是 Q 时，Q 使 run 成为终态；P 的终态写返回 ALREADY_ENDED，P 返回 ENDED。两种先后下都恰有一方得到 COMMITTED，
     run 的结束时刻是它这一轮的轮首时刻；运行态里 a 点名的是先写成的那一方的标识，报告按点名读回的 a 正是那一份、与 a 的终态一致，后写
     一方为 a 存下的那一份不被读。"""
-    meta, log_p, store = _setup(tmp_path, "a", "b", store=any_store)
+    meta, log_p, store = _setup(tmp_path, "a", "b", store=_Store(ddb_run_store))
     tick("run-1", meta, log_p, store, FakeLauncher(), max_concurrency=2, clock=Clock(0, 1, 2),
          result_store=_RecordingResultStore())  # 起 a、b
     _done_events(log_p, "a")
@@ -853,7 +856,7 @@ class _Report:
 
 
 def test_report_comes_from_the_record_and_the_named_details_not_from_a_second_read_of_the_events(tmp_path, lock_holder):
-    """报告从记录组装：状态取运行态，判定明细取运行态点名的那一份；之后事件再变（接力方补写的未知退出被真实退出码覆盖之类），报告里的
+    """报告从记录组装：状态取运行态，判定明细取运行态点名的那一份；之后事件再变（云端补写的未知退出被真实退出码覆盖之类），报告里的
     判定仍是记下终态时存下的那一份。run 级墙钟由运行态的起止算出。"""
     meta, log, store = _setup(tmp_path, "a", lock_holder=lock_holder)
     rs = _RecordingResultStore()
@@ -872,12 +875,12 @@ def test_report_comes_from_the_record_and_the_named_details_not_from_a_second_re
     assert created_at == "2030-01-01T00:00:06+00:00"
 
 
-def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path, lock_holder):
-    """两个推进器读到不同的快照、竞争使 run 成为终态（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读
+def test_report_follows_the_committing_round_when_two_advancers_read_different_snapshots(tmp_path, ddb_run_store):
+    """两个推进器（云端多次调用重叠推进）读到不同的快照、竞争使 run 成为终态（ADR 0034 机制三「run 级状态只进不退」条④ K1、K2）。固定先后：B 读完运行态、读
     事件之前，A 走完一轮并写成终态；B 随后按自己的快照（只有补写的未知退出，判超时）存下明细、发出终态写，终态写报告 run 已结束。A 写成、
     返回 COMMITTED；B 返回 ENDED；run 级的状态、说明与结束时刻是 A 写下的。两方的明细存进同一处、各用自己的标识，B 存下的那一份与 A 的
     互不覆盖（ADR 0034 机制三「判定明细」条），运行态点名 A 的那一份，从记录生成的报告只读它，是 A 的判定（ADR 0030 决定三「点名」条）。"""
-    meta, log_a, store = _setup(tmp_path, "a", lock_holder=lock_holder)
+    meta, log_a, store = _setup(tmp_path, "a", store=ddb_run_store)
     tick("run-1", meta, log_a, store, FakeLauncher(), max_concurrency=1, clock=Clock(),
          result_store=_RecordingResultStore())  # 认领并启动 a
     _done_events(log_a, "a")  # A 读到的快照：完整的结果，判 passed
@@ -896,7 +899,7 @@ def test_report_follows_the_committing_round_when_two_advancers_read_different_s
             return super().records()
 
     log_b = _OtherAdvancerCommitsFirst(tmp_path / "b.db")
-    assert log_b.record_timed_out_if_absent("a") is True  # B 读到的快照：只有补写的未知退出，判超时
+    log_b.record_exit("a", None, timed_out=True)  # B 读到的快照：只有补写的未知退出（云端超时处置找不到 task 时），判超时
 
     outcome_b = tick("run-1", meta, log_b, store, FakeLauncher(), max_concurrency=1, clock=Clock(30), result_store=rs_b)
 
@@ -996,15 +999,90 @@ def test_report_generation_failures_are_isolated(tmp_path, caplog, lock_holder):
     assert counting.reads == 0 and untouched.loads == 0
 
 
-# ---------- 接力补写的超时退出（ADR 0034「job timeout」节「`timed_out` 归因链」）----------
+# ---------- 处置方生成报告：不记日志、失败原样交给调用方，按传入的 run 标识读写（ADR 0054 决策七「报告」）----------
 
-def test_a_relay_written_timeout_is_committed_and_a_later_real_exit_changes_nothing(tmp_path, lock_holder):
-    """接力补写一条带超时标志、退出码未知的退出记录之后，下一轮由这一轮的快照存下明细（预算到点：error 加 timeout）再以终态写记下、
-    点名它；之后才到的真实退出覆盖了退出记录，但运行态里这个 job 已是终态、不再被选中：记录、点名与存下的明细都不变，也不再另存一份。"""
-    meta, log, store = _setup(tmp_path, "a", "b", store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
+def _committed_two_job_run(tmp_path, lock_holder):
+    """一个两 job 都已由推进步骤记下终态、使 run 成为终态的本机 run（a 在较早一轮、b 在最后一轮）。"""
+    meta, log, store = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
+    rs = LocalResultStore(tmp_path)
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)
+    _done_events(log, "a")
+    tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(4), result_store=rs)
+    _done_events(log, "b", base=10)
+    assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(5),
+                result_store=rs) is TickOutcome.COMMITTED
+    return meta, store, rs
+
+
+def test_generating_the_report_raises_each_failure_as_it_is_and_logs_nothing(tmp_path, caplog, lock_holder):
+    """`generate_report_from_record` 不做失败隔离、不记日志：写报告失败、读运行态失败、运行态不存在、被点名的那一份读不到，各以原来的
+    异常抛出，什么报告都没写，日志里没有任何一条；都能读到时写出的报告与推进器那一路（`write_report_from_record`）的相同。"""
+
+    class _Boom:
+        def write(self, run_id, result, *, created_at):
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+    class _ReadFails(LocalRunStore):
+        def load_run_state(self, run_id):
+            raise PermissionError(errno.EACCES, "Permission denied")
+
+    meta, store, rs = _committed_two_job_run(tmp_path, lock_holder)
+    reports = _Report()
+    with caplog.at_level(logging.DEBUG):
+        with pytest.raises(OSError) as exc:
+            generate_report_from_record("run-1", meta, store, rs, _Boom(), created_at="t")
+        assert exc.value.errno == errno.ENOSPC
+        with pytest.raises(PermissionError):
+            generate_report_from_record("run-1", meta, _ReadFails(tmp_path), rs, reports, created_at="t")
+        with pytest.raises(FileNotFoundError):
+            generate_report_from_record("run-1", meta, LocalRunStore(tmp_path / "elsewhere"), rs, reports, created_at="t")
+        named = tmp_path / "run-1" / "jobs" / f"{store.load_run_state('run-1').jobs['b'].result_id}.json"
+        saved = named.read_bytes()
+        named.unlink()
+        with pytest.raises(NamedDetailMissing):
+            generate_report_from_record("run-1", meta, store, rs, reports, created_at="t")
+        named.write_bytes(saved)
+    assert reports.written == []
+    assert caplog.records == []
+
+    via_advancer = _Report()
+    generate_report_from_record("run-1", meta, store, rs, reports, created_at="t")
+    write_report_from_record(meta, store, rs, via_advancer, created_at="t")
+    assert reports.written == via_advancer.written and len(reports.written) == 1
+
+
+def test_the_report_follows_the_given_run_identifier_not_the_one_in_the_definition(tmp_path, lock_holder):
+    """复制出来的 run 目录里，提交记录的标识（原来那个 run 的）与目录名不同：按传入的标识读运行态与判定明细、写报告，报告里写的标识也是
+    它；原来那个标识的位置什么都不读、什么都不写。"""
+    import json
+    import shutil
+
+    from gherkai_core.adapters.report_store.local import LocalReportStore
+
+    meta, store, rs = _committed_two_job_run(tmp_path, lock_holder)
+    shutil.copytree(tmp_path / "run-1", tmp_path / "copy")
+    shutil.rmtree(tmp_path / "run-1")
+    copied = store.load_run_meta("copy")
+    assert copied.run_id == "run-1"  # 前提：提交记录里是原来那个 run 的标识
+
+    generate_report_from_record("copy", copied, store, rs, LocalReportStore(tmp_path), created_at="2030-01-01T00:00:09+00:00")
+
+    manifest = json.loads((tmp_path / "copy" / "manifest.json").read_text(encoding="utf-8"))
+    assert (manifest["run_id"], manifest["created_at"]) == ("copy", "2030-01-01T00:00:09+00:00")
+    assert "run_id: <code>copy</code>" in (tmp_path / "copy" / "index.html").read_text(encoding="utf-8")
+    assert not (tmp_path / "run-1").exists()
+
+
+# ---------- 补写的超时退出（云端超时处置找不到 task 时；ADR 0034「job timeout」节「`timed_out` 归因链」）----------
+
+def test_a_supplemented_timeout_is_committed_and_a_later_real_exit_changes_nothing(tmp_path, ddb_run_store):
+    """云端超时处置补写一条带超时标志、退出码未知的退出记录之后，下一轮由这一轮的快照存下明细（预算到点：error 加 timeout）再以终态写
+    记下、点名它；之后才到的真实退出覆盖了退出记录，但运行态里这个 job 已是终态、不再被选中：记录、点名与存下的明细都不变，也不再
+    另存一份。"""
+    meta, log, store = _setup(tmp_path, "a", "b", store=_Store(ddb_run_store))
     rs = LocalResultStore(tmp_path)
     tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=rs)  # 起 a、b
-    assert log.record_timed_out_if_absent("a") is True
+    log.record_exit("a", None, timed_out=True)
 
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(400),
                 result_store=rs) is TickOutcome.CONTINUE
@@ -1014,45 +1092,13 @@ def test_a_relay_written_timeout_is_committed_and_a_later_real_exit_changes_noth
     assert named.status == Status.ERROR
 
     _done_events(log, "a")  # 真实的退出（干净退出、内容完整）在补写之后到达，覆盖了退出记录
-    store.writes.clear()
+    store.clear()
     assert tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=2, clock=Clock(401),
                 result_store=rs) is TickOutcome.CONTINUE
     assert store.writes == ["project_state"]  # 没有终态写
     assert store.load_run_state("run-1").jobs["a"] == named
     assert rs.load_job_result("run-1", named.result_id) == saved
     assert _job_files(tmp_path) == [f"{named.result_id}.json"]
-
-
-def test_overlapping_advancers_leave_the_relay_timeout_in_the_run_state(tmp_path, lock_holder):
-    """两个推进方重叠：认领方的一轮读完运行态（a 仍在执行）之后，接力方完整推进一轮，按补写的超时退出存下 a 的明细并记下终态（error）；
-    随后 a 的真实退出（干净退出、内容完整）到达，认领方这一轮读到的是它，另存一份 passed 的明细，按旧的运行态为 a 发出终态写。运行态里
-    a 的终态不变，run 仍未结束；a 点名的仍是接力方的那一份（error、超时），认领方存下的那一份不被点名，被点名的明细与终态一致。"""
-    meta, log, inner = _setup(tmp_path, "a", "b", lock_holder=lock_holder)
-    shared = LocalResultStore(tmp_path)
-    relay, owner_rs = _RecordingResultStore(inner=shared), _RecordingResultStore(inner=shared)
-    tick("run-1", meta, log, inner, FakeLauncher(), max_concurrency=2, clock=Clock(), result_store=relay)  # 起 a、b
-    assert log.record_timed_out_if_absent("a") is True  # 接力方补写
-    owner = _Store(inner)
-    outcomes = {}
-
-    def relay_round_then_real_exit():
-        outcomes["relay"] = tick("run-1", meta, log, inner, FakeLauncher(), max_concurrency=2, clock=Clock(400),
-                                 result_store=relay)
-        assert inner.load_run_state("run-1").jobs["a"].status == Status.ERROR  # 接力方已按超时记下 a
-        _done_events(log, "a")  # 真实退出在接力方那一轮之后到达，覆盖补写的那一条
-
-    owner.after["load_run_state"] = relay_round_then_real_exit
-    outcomes["owner"] = tick("run-1", meta, log, owner, FakeLauncher(), max_concurrency=2, clock=Clock(401),
-                             result_store=owner_rs)
-
-    assert outcomes == {"relay": TickOutcome.CONTINUE, "owner": TickOutcome.CONTINUE}
-    assert owner.commits == [(("a", Status.PASSED),)]  # 认领方确实按真实退出、在旧的运行态上发出了终态写
-    assert [jr.status for jr in owner_rs.saved] == [Status.PASSED]
-    state = inner.load_run_state("run-1")
-    assert (state.status, state.jobs["a"].status, state.jobs["b"].status) == (Status.RUNNING, Status.ERROR, Status.RUNNING)
-    assert state.jobs["a"].result_id == relay.id_of("a") != owner_rs.id_of("a")
-    named = shared.load_job_result("run-1", state.jobs["a"].result_id)
-    assert (named.status, named.error_type) == (Status.ERROR, "timeout")
 
 
 # ---------- 到期处理：到期的结束写把未启动的 job 记 skipped 并带到期的说明，run 随之成为终态
@@ -1231,38 +1277,3 @@ def test_no_writes_and_no_event_reads_in_a_round_that_cannot_read_the_run_state(
     assert outcome is TickOutcome.CONTINUE
     assert store.writes == [] and log.record_reads == 0 and launcher.launched == [] and rs.saved == []
 
-
-class _ClaimLandsAfterRead(SqliteEventLog):
-    """读事件时另一个推进器的认领恰好落下：它在本轮读运行态之后、结束写之前认领了 scope（它的时钟落后，还没过停止启动的时刻）。"""
-
-    def __init__(self, path, store, scope: str) -> None:
-        super().__init__(path)
-        self._store, self._scope, self.landed = store, scope, False
-
-    def records(self):
-        recs = super().records()
-        if not self.landed:
-            self.landed = self._store.try_claim_job("run-1", self._scope, claimed_at=_iso(39))
-        return recs
-
-
-def test_expiry_loses_to_a_claim_that_landed_after_the_read(tmp_path, lock_holder):
-    """到期的结束写与认领并发（本机）：一个推进器读到「没有执行中的、仍有未启动的」之后，另一个推进器的认领落下——前者的结束写按写下时的
-    运行态判断，那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；run 没有结束、新认领的 job 仍是 running，同一轮
-    得出结果的 a 已由终态写记下。"""
-    meta, _, store = _setup(tmp_path, "a", "b", deadline_at=_NEAR, store=_SpyRunStore(tmp_path, lock_holder=lock_holder))
-    plain = SqliteEventLog(tmp_path / "e.db")
-    rs = _RecordingResultStore()
-    tick("run-1", meta, plain, store, FakeLauncher(), max_concurrency=1, clock=Clock(0, 1), result_store=rs)  # 起 a
-    _done_events(plain, "a")
-    log = _ClaimLandsAfterRead(tmp_path / "e.db", store, "b")
-
-    outcome = tick("run-1", meta, log, store, FakeLauncher(), max_concurrency=1, clock=Clock(41), result_store=rs)
-
-    assert log.landed is True
-    assert outcome is TickOutcome.CONTINUE
-    assert store.writes.count("end_run") == 1  # 结束写确实发出
-    state = store.load_run_state("run-1")
-    assert (state.status, state.claim_count, state.jobs["a"].status, state.jobs["b"].status) == (
-        Status.RUNNING, 2, Status.PASSED, Status.RUNNING)
-    assert state.message is None

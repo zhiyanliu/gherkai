@@ -51,7 +51,7 @@
 | `report_refs[]` | array | step 级产物指针：两引擎都有 `kind=evidence`（gherkai 自有格式的机读证据，由 `gherkai explain` 读取，见下节）；Nova 另有每次 act 的轨迹页 `kind=trajectory` |
 | `shortcircuited` | bool | true 表示上游 step error 后被跳过、未执行（此时 status 为 skipped）；status 为 skipped 而此值为 false 表示 worker 报告 scope 级 error 后这一步从未执行，由本工具补记 |
 
-`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status` / `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变；执行到期时的表现见顶层 `message`）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
+`run_meta`（definition；**键集固定**，不适用的值为 `null` 而不是省键）：`schema_version`（definition 的整数结构版本，当前为 2；`status`（`--wait` 时在开始等待之前）/ `explain` 读到不等于本机支持的版本以退出码 2 结束并提示升级或改用写出它的版本，`settle-runs` 把这样的 run 记为跳过、`reason` 为 `other_version`）、`cli_version`（写出这份记录的 gherkai 版本，只记录；取不到时 null）、`run_id`、`created_at`、`deadline_at`（这个 run 允许运行到的时刻，UTC 的 ISO 时刻；建 run 时由各 job 的墙钟预算推出，之后不变；执行到期时的表现见顶层 `message`）、`max_concurrency`、`steps_dir`（使用方确定性 step 目录的绝对路径；没有时 null；cloud 后端恒 null，steps 构建在镜像里）、
 `worker_variant` / `worker_task_defs`（cloud 后端：提交时解析的 variant 与各引擎 task-def revision ARN；local 后端 null）、
 `extra_http_headers`（`--expose-local` 注入的请求头，无则 null）、`session_warmup_url`（`--expose-local` 下本次 run 的会话预热地址，输出时令牌参数的值已替换为 `***`；无则 null）、`jobs[]`：
 
@@ -103,9 +103,9 @@
 | `run_id` | string | |
 | `status` | `pending` / `running` / `passed` / `failed` / `error` / `aborted` | run 级。全部 job 都结束时 run 到终态，取值由各 job 的状态得出，取法同 `run --json` 顶层的 `status`（有 job 为 `error` 则 `error`，否则有 `failed` 则 `failed`，否则有 `aborted` 或 `skipped` 则 `aborted`，否则 `passed`）；`submit` 提交的 run 在后台读到不能执行的提交记录时为 `error`（见 `message`）。未到终态时，只要有 job 离开 `pending`（被认领、开始执行或已有判定），run 级即为 `running`、不再回到 `pending`；所以 run 级为 `pending` 表示还没有 job 离开 `pending`。反过来不成立：run 级为 `running` 时 job 仍可能全为 `pending`，要查看各 job 当前记录的状态，读 `jobs[]` |
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | `ended_at` 只在终态出现 |
-| `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有（`submit` / `status --wait` / 云端推进链），同步 `run` 写出的 run_state 无此键 |
+| `high_water_mark` | int \| 省略 | 已处理到的事件水位（诊断用）；仅由后台推进写入的 run 有（`submit` 的本机后台推进与云端推进链），同步 `run` 写出的 run_state 无此键 |
 | `claim_count` | int | 这个 run 上 job 已被成功认领的次数（诊断用）；恒有，建 run 时为 0，每成功认领一个 job 加一 |
-| `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有两类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；`submit` 提交的 run 在后台读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，还没有结束的 job 都记 `error`，`jobs[].message` 是同一句。job 级原因看 `jobs[].message` 与 `explain --json` |
+| `message` | string \| 省略 | run 级说明：这个 run 在还有 job 没有结果时为什么结束，没有时省略。取值有三类：余下的 job 不再启动的原因，与 `run --json` 顶层的 `message` 同一组句子（「已超过允许运行的时间」由前台 `run` 写下，也由 `submit` 提交的 run 在后台推进到期时写下；fail-fast 与中断的两句只来自前台 `run`）；本机后端的 run 由 `settle-runs` 或 `status --wait` 记为已结束时写下的原因，「执行这个 run 的 gherkai 进程已退出（已记为已结束）」或「已超过允许运行的时间（已记为已结束）」，这时执行中的 job 记 `aborted`、没有启动的记 `skipped`，`jobs[].message` 是对应的那一句；`submit` 提交的 run 在后台读到不能执行的提交记录（结构版本不是后端认的、提交记录不完整、缺 worker 镜像版本）时写下的原因，这时 run 级为 `error`，还没有结束的 job 都记 `error`，`jobs[].message` 是同一句。job 级原因看 `jobs[].message` 与 `explain --json` |
 | `jobs[]` | array | `scope_id`、`status`（含 `pending` / `running` 前置态）、`session_id`（未建立会话时为 null，键恒在）、`claimed_at`（被认领的时刻：前台 `run` 在起 worker 之前认领，`submit` 提交的 run 在后台推进时认领；job 墙钟预算的起算点；未认领时**省略**）、`message`（没有判定明细的 job 在 run 结束时写下的说明，如「这个 run 已超过允许运行的时间，job 没有启动」；没有时**省略**，其余 job 的原因看 `explain --json`）、`result_id`（这个 job 的判定明细的标识：job 由执行结果结束时，写下它的终态的同一次写记下所用的那一份判定明细；没有判定明细的 job 与还没有结束的 job **省略**。读明细用 `explain --json`，不按它拼文件路径） |
 | `artifacts` | object | 与 `run` 同键（`run_meta` / `run_state` / `jobs_dir` / `report_index`）；是**约定落点**，不论 run 是否结束都给出，不表示落点上已有内容：报告在 run 结束之后才生成，结束之后也可能一直没有（例如报告写入失败，或 run 已记为结束、报告还没生成时中断）；判定明细在每个 job 得出结果时写入，前台 `run` 与 `submit` 提交的 run 相同，run 还没结束时已结束的 job 即已有；没有启动的 job，以及这个 run 被结束时还没有结果的 job，没有判定明细 |
 
@@ -130,11 +130,42 @@
 | `started_at` / `ended_at` | ISO 8601 \| 省略 | 无值时省略 |
 | `message` | string \| 省略 | 含义同 `status --json` 的 `message`，无值时省略 |
 | `job_counts` | object | 按 job 状态计数，形如 `{"passed": 2, "failed": 1}`：键取 job 级状态值 `pending` / `running` / `passed` / `failed` / `error` / `skipped` / `aborted`，只含出现的状态，缺的状态按 0 读。逐个 job 的状态用 `status --json` 的 `jobs[]` 取（形状不同，所以键名不复用） |
-| `detached` | bool | 运行态读得出的项恒有：true 表示由 `submit` 提交到后台执行的 run。未结束且为 false 的 run 由前台 `run` 执行：执行它的进程若已不在，它不会再到终态，`status --wait` 对它只等待、不接力 |
+| `detached` | bool | 运行态读得出的项恒有：true 表示这个 run 由 `submit` 提交，false 表示由前台 `run` 执行。只作描述，不参与任何判断：执行它的进程已不在的未结束 run，不论这一项取什么，都由 `settle-runs` 或 `status --wait` 以同一种方式记为已结束 |
 | `cli_version` | string \| null | 恒有：写出这个 run 的 gherkai 版本，读不到（提交记录不存在、其中没有版本或内容无法解析）时为 null。不为 null 且与顶层 `cli_version` 相同，即由当前版本写出 |
 | `unreadable` | `true` \| 省略 | 只在这个 run 的运行态无法解析时出现（可能由其它版本写出）。这样的项只含 `run_id`、`unreadable` 与 `cli_version`，其余键省略；它没有可用的状态，不参与 `--status` 过滤与 `--limit` 截取，找到即列出。用 `gherkai status <run_id>` 查看 |
 
 清单不带产物落点、任务定义的内容、事件水位与认领计数：对选中的 run 用 `status --json` 与 `explain --json` 取。云端后端按状态找 run 的那一步是最终一致的，刚结束或刚建的 run 偶尔会在一次清单里缺席，稍后再查即可见；各项的状态、时刻与 job 计数以读回的运行态为准。由更新版本写出、状态值当前所用的 gherkai 版本不认识的 run，本机后端列为 `unreadable`；云端后端只在这个状态值属于未结束的 run 时列为 `unreadable`（前提是写出它的版本沿用同一套索引规则），属于已结束的 run 时看不到。
+
+## `gherkai settle-runs [<run_id>] --json`
+
+一个对象：把执行它的 gherkai 进程已不在、或已过允许运行的时间之后再过 5 分钟仍没有结束的 run 记为已结束，逐个给出处置结果；不给 run_id 时另给出清理暂存目录的结果。`--dry-run` 只判断、不改动。**不表判定**，退出码：`0`（执行完成，含一个都没有处理与各种跳过）、`2`（给出的 run 不存在、报告目录的路径太长、报告目录所在的文件系统不受支持、给出了云端后端、读写记录失败）、`130`（被 Ctrl-C 打断）。读写记录失败（`2`）与被打断（`130`）时 stdout 同样有这一个对象，只含已处理的部分；其余以 `2` 结束的情形 stdout 为空。这个版本只处理本机后端。
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `backend` | `local` | 所查的后端，恒有；取值来源与 `list-runs` 相同 |
+| `report_dir` | string | 所查的报告目录（各层取值解析后的绝对路径；目录不存在时同样给出），与 `list-runs --json` 的 `report_dir` 同一取法 |
+| `dry_run` | bool | 恒有：这次是否只判断、不改动 |
+| `runs[]` | array | 处理过的 run，按 run_id 降序，每个 run 一项，见下；处理期间被删去的 run 不出现 |
+| `staging_dirs[]` | array \| 省略 | 只在不给 run_id 时出现：清理暂存目录的结果，按名字升序，见下；报告目录不存在时为空数组 |
+
+`runs[]` 每项：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `run_id` | string | 恒有 |
+| `outcome` | `settled` / `would_settle` / `skipped` | `settled`：已记为已结束；`would_settle`：`--dry-run` 下会记为已结束、没有改动；`skipped`：没有改动 |
+| `reason` | 见下 | 取第一条成立的：`other_version`（提交记录由别的版本的 gherkai 写出）、`unreadable`（运行状态记录读不出）、`already_finished`（已结束，含处理期间被别处先记为已结束）、`unsupported_filesystem`（run 目录所在的文件系统不受支持）、`advancer_exited`（执行它的 gherkai 进程已退出）、`past_deadline`（已过允许运行的时间之后再过 5 分钟）、`lock_held`（执行它的 gherkai 进程还在，或另一个 gherkai 命令正在处理它）、`undetermined`（无法确认执行它的进程是否还在，也还不能按时间记为已结束）。`advancer_exited` 与 `past_deadline` 的 `outcome` 是 `settled`（`--dry-run` 下 `would_settle`），其余都是 `skipped` |
+| `report_written` | bool \| 省略 | 只在 `outcome` 为 `settled` 时出现：报告是否生成。为 `false` 时原因写在标准错误（例如提交记录读不出，报告无从按它列出 job） |
+
+`staging_dirs[]` 每项（建立 run 时中断留下的暂存目录，名字以 `.gherkai-creating-` 开头）：
+
+| 键 | 类型 | 含义 |
+|---|---|---|
+| `name` | string | 暂存目录在报告目录里的名字 |
+| `outcome` | `removed` / `would_remove` / `skipped` | `removed`：已删去；`would_remove`：`--dry-run` 下会删去、没有改动；`skipped`：没有删去 |
+| `reason` | string \| null | `removed` 与 `would_remove` 时为 null；`skipped` 时为 `held`（另一个 gherkai 进程正在使用它）、`unsupported_filesystem`（所在的文件系统不受支持）、`lock_unavailable`（加锁失败）、`unopenable`（无法打开）、`remove_failed`（删除中途出错，已删去的部分不恢复，再执行一次会接着删） |
+
+暂存目录的各种跳过都不改变退出码。处理期间已不在、或已改名成 run 的暂存目录不出现。
 
 ## `gherkai explain <run_id> [<scope_id>] --json`
 

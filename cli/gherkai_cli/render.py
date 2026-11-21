@@ -6,9 +6,13 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import datetime, timezone
+from pathlib import Path
 
-from gherkai_core.model import TERMINAL_STATUSES, Event, Job, JobResult, JobState, RunListing, RunResult, RunState, SessionRecord, Status
+from gherkai_core.adapters.run_store import run_dir
+from gherkai_core.model import Event, Job, JobResult, JobState, RunListing, RunResult, RunState, SessionRecord, Status
 from gherkai_core.redact import redact_deep
+from gherkai_core.run_deadline import OVERDUE_MARGIN_S, overdue_at
+from gherkai_runtime import settle
 from gherkai_runtime.textui import DIM, Text, TreeNode, render_table, render_tree, status_text, styled  # rich 只经 textui 进来（ADR 0047 渲染面单点）
 from gherkai_core.serialize import to_dict  # 单一真理源（ADR 0027）：cli --json 与 manifest 共用
 # ReportRef → dict 与 jobs/*.json、run --json 同一份（单一序列化真源，ADR 0027）；explain 的 report_refs 原样搬。
@@ -224,9 +228,6 @@ def render_run_state(state: RunState) -> str:
 
 # ---- run 清单（list-runs，ADR 0041 决策七「写出版本的标记」）----
 
-# 非终态且没有后台执行标记的行：前台 run 的进程被强制结束或宿主失联后留下的 run 不会再到终态，status --wait 对它只等待、
-# 不接力（与 status --wait 的同一判据：detached 标记）
-FOREGROUND_RUN_NOTE = "由前台 run 执行：执行它的进程若已不在，它不会再到终态；status --wait 对它只等待、不接力"
 UNREADABLE_RUN_STATUS = "无法读取（可能由其它版本写出），用 status 查看"
 
 
@@ -290,8 +291,8 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
 
     job 列是 job 总数；各 job 的状态与 run 的状态不全相同时，括注各状态的个数（全相同时状态列已经说明，不重复）。
     版本列恒给出写出这个 run 的版本（读不到为「未知」），当前版本写出的在版本串后加 ` *`，表格上方一行图例点明当前版本
-    （同 `deploy list-workers` 标默认 variant 的写法）。提示列放 run 级 `message` 与前台执行遗留的提示，
-    没有任何一行有提示时整列不出现；job 级的原因不在运行态里，清单不列，用 `explain` 看。
+    （同 `deploy list-workers` 标默认 variant 的写法）。提示列放 run 级 `message`，没有任何一行有提示时整列不出现；后台执行标记
+    （`detached`）只作描述、不进提示；job 级的原因不在运行态里，清单不列，用 `explain` 看。
     运行态解析失败的行只有 run_id 与版本列有值。空清单由调用方打一行落点提示，不经这里。"""
     rows = []
     for item in items:
@@ -302,8 +303,6 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
             rows.append([item.run_id, UNREADABLE_RUN_STATUS, None, None, None, version, ""])
             continue
         notes = [_one_line(st.message)] if st.message else []
-        if st.status not in TERMINAL_STATUSES and not item.detached:
-            notes.append(FOREGROUND_RUN_NOTE)
         counts = run_job_counts(st)
         jobs = str(sum(counts.values()))
         if set(counts) - {st.status.value}:  # 有 job 的状态与 run 的状态不同才展开，否则只是把状态列再说一遍
@@ -316,6 +315,158 @@ def render_run_list(items: list[RunListing], *, cli_version: str | None) -> str:
         headers, rows = headers[:6], [r[:6] for r in rows]
         return legend + render_table(headers, rows, wrap=[1])
     return legend + render_table(headers, rows, wrap=[1, 6])
+
+
+# ---- run 处置（settle-runs 与等待中的 status --wait，ADR 0054 决策八）----
+# 原因的句子只在这里（两个入口共用）；取哪一句只看 reason 与结构字段（期限读不读得出、提交记录读得怎样、边界检查的结论、锁的结果），
+# 说明文字不参与任何判断。
+
+
+def overdue_phrase() -> str:
+    """可以按期限把 run 记为已结束的时刻的说法：「允许运行的时间之后再过 N 分钟」，N 由 `run_deadline.OVERDUE_MARGIN_S` 换算。原因的
+    说明与 `settle-runs`、`status --wait` 两个命令的帮助都用这一种说法（ADR 0054 决策八「settle-runs」一条）：期限之后、期限加这段时长
+    之前的 run 已超过允许运行的时间，还不能按期限处置，所以不说成允许运行的时间本身。"""
+    return f"允许运行的时间之后再过 {OVERDUE_MARGIN_S / 60:g} 分钟"
+
+
+def overdue_label(deadline: datetime) -> str:
+    """期限加 300 秒的时刻（`run_deadline.overdue_at`），换算到本机时区，供等待中的说明点名：到这个时刻仍没有结束就按期限处置。"""
+    return overdue_at(deadline).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _not_yet_overdue() -> str:
+    return f"还没有到可以记为已结束的时刻（{overdue_phrase()}）"
+
+
+# 提交记录读不出的两种情形（期限因此读不出）在说明里的说法；结构版本不认（别的版本写出）另有一句，见 settle_reason_text
+_DEFINITION_PROBLEM = {settle.DefinitionRead.MISSING: "不存在", settle.DefinitionRead.MALFORMED: "不完整或形态不对"}
+
+
+def definition_problem(r: settle.SettleResult) -> str:
+    """提交记录读不出时它怎么了（「不存在」或「不完整或形态不对」），按 `definition` 取；期限读得出时不调用。"""
+    return _DEFINITION_PROBLEM.get(r.definition, "读不出")
+
+
+def error_text(e: BaseException | None) -> str:
+    """原错误在说明里的写法：系统错误取它的文字（不带错误码与路径），其余取 str()。"""
+    return (getattr(e, "strerror", None) or str(e)) if e is not None else "原因未知"
+
+
+def unreadable_state_remedy(run_dir: Path | None) -> str:
+    """运行态读不出的 run 的「怎么办」（ADR 0054 决策八「settle-runs」一条，`unreadable`）：两个处置命令都不改动它，确认不需要之后可以
+    手工移走。settle-runs 的原因、等待中的 status --wait、不带 --wait 的 status 与后台推进进程因此退出时的说明都用这一句；给出 run 目录时
+    点名它，表格里一行一个 run 时不给。"""
+    where = "这个 run 目录" if run_dir is None else f" run 目录 {run_dir}"
+    return f"settle-runs 与 status --wait 不改动这个 run 的记录，确认不需要之后可以手工移走{where}"
+
+
+def settle_reason_text(r: settle.SettleResult) -> str:
+    """一次处置结果的原因（人读）：`settle-runs` 的原因列与 `status --wait` 处置之后那一句都取它。"""
+    R = settle.Reason
+    if r.reason is R.OTHER_VERSION:
+        e = r.definition_error
+        by = f"gherkai {e.cli_version}" if getattr(e, "cli_version", None) else "另一个版本的 gherkai（版本未知）"
+        return (f"提交记录由 {by} 写出（记录是第 {e.found} 版，本版本只认第 {e.supported} 版）：本版本不处理它，"
+                "请用写出它的版本处理")
+    if r.reason is R.UNREADABLE:
+        return f"运行状态记录读不出（{r.state_error}）：{unreadable_state_remedy(None)}"
+    if r.reason is R.ALREADY_FINISHED:
+        return "已结束"
+    if r.reason is R.UNSUPPORTED_FILESYSTEM:
+        b = r.boundary
+        if b.verdict is run_dir.Boundary.UNKNOWN:
+            return f"无法判断 run 目录所在的文件系统（{b.unknown_reason}），无法确认执行它的进程是否还在"
+        return f"run 目录所在的文件系统是 {b.fs_type}，本机后端不支持，无法确认执行它的进程是否还在"
+    if r.reason is R.ADVANCER_EXITED:
+        return "执行它的 gherkai 进程已退出"
+    if r.reason is R.PAST_DEADLINE:
+        return "已超过允许运行的时间"
+    if r.reason is R.LOCK_HELD:
+        head = "执行它的 gherkai 进程还在，或另一个 gherkai 命令正在处理它"
+        if r.deadline is not None:
+            return f"{head}；{_not_yet_overdue()}"
+        return f"{head}；提交记录{definition_problem(r)}，不知道它允许运行到什么时候"
+    if r.reason is R.UNDETERMINED:
+        if r.lock is run_dir.LockState.UNAVAILABLE:
+            head = f"无法确认执行它的进程是否还在（在 run 目录上加锁失败：{error_text(r.lock_error)}）"
+            if r.deadline is not None:
+                return f"{head}，也{_not_yet_overdue()}"
+            return f"{head}，提交记录也{definition_problem(r)}，不知道它允许运行到什么时候"
+        return f"提交记录{definition_problem(r)}，不知道它允许运行到什么时候"  # 没有锁的后端：只剩期限一条
+    return _not_yet_overdue()  # WITHIN_DEADLINE：没有锁的后端，期限读得出、还没有到
+
+
+_SETTLE_OUTCOME = {settle.Outcome.SETTLED: "已记为已结束", settle.Outcome.WOULD_SETTLE: "会记为已结束（--dry-run，没有改动）",
+                   settle.Outcome.SKIPPED: "跳过"}
+
+
+def settle_outcome_text(r: settle.SettleResult) -> str:
+    """一次处置结果的「处置」一栏；写成而报告没有生成时一并说明原因（ADR 0054 决策七「报告」）。"""
+    text = _SETTLE_OUTCOME[r.outcome]
+    if r.outcome is settle.Outcome.SETTLED and not r.report_written:
+        text += f"，报告没有生成：{r.report_missing.detail}"
+    return text
+
+
+def settle_result_to_dict(r: settle.SettleResult) -> dict:
+    """`settle-runs --json` 的 `runs[]` 一项：`run_id`、`outcome`、`reason`，`outcome` 为 settled 时另带 `report_written`。"""
+    d = {"run_id": r.run_id, "outcome": r.outcome.value, "reason": r.reason.value}
+    if r.outcome is settle.Outcome.SETTLED:
+        d["report_written"] = bool(r.report_written)
+    return d
+
+
+_STAGING_OUTCOME = {run_dir.StagingOutcome.REMOVED: "已删除", run_dir.StagingOutcome.WOULD_REMOVE: "会删除（--dry-run，没有改动）",
+                    run_dir.StagingOutcome.SKIPPED: "跳过"}
+
+
+def staging_reason_text(s: run_dir.StagingSweep) -> str | None:
+    """一个暂存目录的跳过原因（人读）；没有跳过时为 None（表格显示 -）。"""
+    S = run_dir.StagingSkip
+    if s.skip is None:
+        return None
+    if s.skip is S.HELD:
+        return "另一个 gherkai 进程正在使用它（正在建立 run，或另一个 settle-runs 正在处理）"
+    if s.skip is S.UNSUPPORTED_FILESYSTEM:
+        b = s.boundary
+        if b is not None and b.verdict is run_dir.Boundary.UNKNOWN:
+            return f"无法判断所在的文件系统（{b.unknown_reason}）"
+        return f"所在的文件系统是 {b.fs_type if b is not None else '未知'}，本机后端不支持"
+    if s.skip is S.LOCK_UNAVAILABLE:
+        return f"加锁失败：{error_text(s.error)}"
+    if s.skip is S.UNOPENABLE:
+        return f"无法打开：{error_text(s.error)}"
+    return f"删除时出错：{error_text(s.error)}；已删去的部分不恢复，再执行一次会接着删"
+
+
+def staging_sweep_to_dict(s: run_dir.StagingSweep) -> dict:
+    """`settle-runs --json` 的 `staging_dirs[]` 一项：`name`、`outcome`，`reason` 在跳过时是跳过的原因、否则为 null。"""
+    return {"name": s.name, "outcome": s.outcome.value, "reason": s.skip.value if s.skip is not None else None}
+
+
+def settle_runs_to_dict(location: dict, *, dry_run: bool, runs: list, staging: list | None) -> dict:
+    """`settle-runs --json` 整个文档：顶层是所查的落点（与 `list-runs` 同源）与 `dry_run`，加 `runs`（次序同处理的次序，即 run_id 降序）；
+    清理暂存目录时（本机、不给 run 标识）另有 `staging_dirs`（名字升序），否则不带这个键。"""
+    doc = {**location, "dry_run": dry_run, "runs": [settle_result_to_dict(r) for r in runs]}
+    if staging is not None:
+        doc["staging_dirs"] = [staging_sweep_to_dict(s) for s in staging]
+    return doc
+
+
+def render_settle_runs(runs: list, staging: list | None, *, empty_line: str | None) -> str:
+    """`settle-runs` 的人读输出（ADR 0047）：run 一张表；清理暂存目录且有项时另有一张。没有处理任何 run 时给 `empty_line`（调用方按列举
+    是否完成、报告目录是否存在选句，列举没有完成时为 None，不说没有）。两张表的 run_id 与名字是标识列、不折断，处置与原因可折行。"""
+    parts: list[str] = []
+    if runs:
+        parts.append(render_table(["run_id", "处置", "原因"],
+                                  [[r.run_id, settle_outcome_text(r), settle_reason_text(r)] for r in runs], wrap=[1, 2]))
+    elif empty_line is not None:
+        parts.append(empty_line)
+    if staging:
+        parts.append(render_table(["暂存目录（建立 run 时中断留下的）", "处置", "原因"],
+                                  [[s.name, _STAGING_OUTCOME[s.outcome], staging_reason_text(s)] for s in staging],
+                                  wrap=[1, 2]))
+    return "\n".join(parts)
 
 
 # ---- 用例预检（plan）渲染：纯本地、零费用，展示 .feature → scope/job 分组 ----

@@ -14,8 +14,8 @@ datetime，不收 ISO 串；不带时区的 datetime 与带时区的比较时 Py
 
 「已过」一律指严格晚于，与 job 预算到点的判断（当前时刻大于截止时刻）同一取法。
 
-期限之后还有一个时刻：期限加 300 秒（`overdue_at`）。可以处置一个 run 的条件（ADR 0054 决策六）与隧道边缘的到点拒绝（ADR 0051
-决策 13「边缘策略」）都取它，code 里只有这一处算法，两处不各自加 300 秒。
+期限之后还有一个时刻：期限加 300 秒（`overdue_at`）。可以处置一个 run 的条件（ADR 0054 决策六，判断是 `past_overdue`）与隧道边缘的
+到点拒绝（ADR 0051 决策 13「边缘策略」）都取它，code 里只有这一处算法，两处不各自加 300 秒。
 """
 from __future__ import annotations
 
@@ -69,6 +69,12 @@ def past_deadline(now: datetime, deadline: datetime) -> bool:
 def overdue_at(deadline: datetime) -> datetime:
     """期限加 300 秒（`OVERDUE_MARGIN_S`）：处置条件里的「已过期限加 300 秒」与隧道边缘到点拒绝的时刻都是它。"""
     return deadline + timedelta(seconds=OVERDUE_MARGIN_S)
+
+
+def past_overdue(now: datetime, deadline: datetime) -> bool:
+    """当前时刻是否已过期限加 300 秒（严格晚于 `overdue_at`）：可以处置一个 run 的两个条件之一（ADR 0054 决策六）。处置方各读自己的
+    墙钟，这个判断只看传入的时刻。"""
+    return now > overdue_at(deadline)
 
 
 @dataclass(frozen=True)

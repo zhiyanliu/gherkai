@@ -153,7 +153,7 @@ fail-fast 或使用方中断之后不再启动的 scope 留在 pending；`finali
 
 `run` 要求 CLI 全程在线（网断或关机即中止）；`submit` 提交完就走：local 由 submit 以新会话启动的本机后台推进进程建 run 并推进到结束，
 cloud 由云端 Lambda 事件驱动链推进（submit 机器无 ECS 写/执行权限，对 ECS 仅做 preflight 的只读探活，可立即关机；带 `--expose-local` 时例外，隧道由本机的守护进程持有，本机须保持开机联网到 run 终态，ADR 0035 决策 3）。
-`status --wait` 是三个推进触发源之一（查询者到来即接力），保证「推进即使中断、也能被查询者续到底」。
+本机的 run 只由持有生命期锁的那一个进程推进（前台是执行 `run` 的进程，后台是本机后台推进进程，ADR 0034「推进器与触发源」）；它退出之后 run 不续，只能由处置方记为已结束：`settle-runs` 与等待中的 `status --wait` 都调 runtime 的 `settle.settle_run`（判定与动作只在那里，ADR 0054 决策八），CLI 只有调用序、推迟 SIGINT 的区间（`_sigint_deferred`）、输出与退出码。云端 `status --wait` 仍在检测到推进停住时调用 kicker。
 
 `submit` 不收 `--events-table`/`--cluster`/`--subnet`/`--security-group`，CLI 的其它子命令也都不收：cloud submit 不起 task、也不读网络参数：它写 runs 表，
 对 SSM 只读版本戳与 variant 映射（带设备 scope 时另读 Device Farm 项目参数），对 ECS 与 ECR 只做只读调用（preflight 探活与 variant 解析），带应用 scope 时另把安装包写进产物桶的 `apps/` 前缀（完整权限面登记在 ADR 0033「编排进程角色」段与「设备目标增量」段）；events 表、cluster 与 Fargate 网络由 IaC 注入 reconciler/kicker Lambda 的 env，与提交记录无关。
@@ -164,7 +164,7 @@ local 无此上限（worker 运行在发起 run 的本机、以本机凭证计�
 
 ## 退出码分层的切分线
 
-失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此；本机建 run 失败也是，即报告目录没有通过边界检查、给 run 的目录加锁失败、暂存目录连续被占用、run 已存在与写记录失败，前台 `run` 与后台推进进程经同一个 `_run_record_failure` 给出同一句；`run` 与本机 `submit` 另在共用的前置检查里对报告目录做一次边界检查（`_check_report_dir_boundary`，句子同出自 `_filesystem_rejected_message`，打不开报告目录时给写记录失败那一句），本机 `submit` 的这一次由提交进程自己做，不过时不启动后台推进进程）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。
+失败分层的切分线是 run 是否已真正开始执行：开始执行之前的配置或可达性问题以退出码 `2` 结束（云端 `submit` 的提交前检查不过、建 run 时存储不可达同样如此；本机建 run 失败也是，即报告目录没有通过边界检查、给 run 的目录加锁失败、暂存目录连续被占用、run 已存在与写记录失败，前台 `run` 与后台推进进程经同一个 `_run_record_failure` 给出同一句；`run` 与本机 `submit` 另在共用的前置检查里先做报告目录的路径长度检查、再对报告目录做一次边界检查（`_check_report_dir_boundary`，句子同出自 `_report_dir_too_long_message` 与 `_filesystem_rejected_message`，打不开报告目录时给写记录失败那一句），本机 `submit` 的这一次由提交进程自己做，不过时不启动后台推进进程；凡用本机报告目录的命令都经 `_local_report_root` 解析报告目录并做路径长度检查，ADR 0030 决定四「报告目录的路径长度」条）；开始执行之后的失败只在本机 `run` 出现，stderr 给一句说明、不打回溯，以非零退出码结束（ADR 0030 决定七）。管它的进程退出而 run 未结束的各出口（前台 `run` 与后台推进进程读写记录失败、记录写下之后准备执行用的文件失败）共用 `_unended_run_remedy` 的尾句，给出把它记为已结束的 `settle-runs` 整条命令，前台说重新执行、经 `submit` 报出的说重新提交；本机 `submit` 在回报之前读到后台推进进程退出时不知道 run 标识，给不带标识的那一条（`_settle_runs_cmd`，它同时清理暂存目录；ADR 0054 决策八「管它的进程退出而 run 未结束的出口」）。
 `submit` 的退出码衡量「提交成功与否」，`status --wait` 衡量「该 run 的判定是否通过」：`run` 在一条命令里合并的
 「提交 + 判定」由此被拆开（ADR 0034）。执行前的配置错（投票次数、筛选值、读 feature、plan）以退出码 `2` 结束，这一判定只在 `_load_and_plan` 一处：`_cmd_plan` 直接调用，`_cmd_run` 与 `_cmd_submit` 经共享前置 `_plan_and_preflight` 调用；各写一份必然漂移。
 

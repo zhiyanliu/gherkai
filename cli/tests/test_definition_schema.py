@@ -1,7 +1,7 @@
-"""definition 结构版本闸门在 CLI 的接线（ADR 0037 决策 7「definition 结构版本」段与「戳缺失」条的例外）：status / explain / 本机
-接力读任何别的东西之前先核结构版本，不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性；接力读不到可用的
-运行定义时以退出码 2 结束、不写。本机后台推进进程用自己生成的那份运行定义推进、不从记录读回，所以没有「读不到可用的运行定义」这一种
-情形。另有缺戳例外的接线：带设备目标或给了 --expose-local 的云端 submit 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
+"""definition 结构版本闸门在 CLI 的接线（ADR 0037 决策 7「definition 结构版本」段与「戳缺失」条的例外）：status / explain 读任何别的
+东西之前先核结构版本，不等于本版本支持的即以退出码 2 结束并点名写端版本；云端只读 META 顶层两个属性。等待中的 status --wait 只拦别的
+版本写出的 run，提交记录不存在或内容不合法的按期限读不出接着等待、可以被处置，处置之后按不带 --wait 的显示规则结束。本机后台推进进程用
+自己生成的那份运行定义推进、不从记录读回，所以没有「读不到可用的运行定义」这一种情形。另有缺戳例外的接线：带设备目标或给了 --expose-local 的云端 submit 遇无版本戳的后端在资源检查之前以退出码 2 结束。"""
 from __future__ import annotations
 
 import json
@@ -42,7 +42,7 @@ def _rewrite_schema(reports: Path, run_id: str, version, cli_version="9.9.0") ->
 
 def _as_detached_run_in_progress(reports: Path, run_id: str) -> Path:
     """把前台 run 产出的 seed 改成 submit 提交、推进到一半的形态：带后台执行的标记，run 与各 job 都在执行、没有结束时刻（模拟后台推进
-    进程中途被结束），执行中的 job 也就没有点名判定明细。`status --wait` 只接力这种 run。返回运行态文件的路径。"""
+    进程中途被结束），执行中的 job 也就没有点名判定明细。返回运行态文件的路径。"""
     path = reports / run_id / "run_state.json"
     st = json.loads(path.read_text(encoding="utf-8"))
     st["status"] = "running"
@@ -75,12 +75,6 @@ def test_fresh_run_writes_current_schema_and_status_explain_read_it(tmp_path, mo
 def test_newer_schema_exits_2_naming_writer_and_upgrade(tmp_path, monkeypatch, capsys, cmd):
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
     _rewrite_schema(reports, run_id, DEFINITION_SCHEMA_VERSION + 1)
-    import gherkai_runtime.detached as detached
-
-    def boom(*a, **k):
-        raise AssertionError("结构版本不符时不该接力推进")
-
-    monkeypatch.setattr(detached, "drive_local_reconcile", boom)
     argv = [cmd, run_id, "--report-dir", str(reports)] + (["--wait"] if cmd == "status" else [])
     assert m.main(argv) == 2
     err = capsys.readouterr().err
@@ -101,8 +95,7 @@ def test_older_schema_exits_2_pointing_at_the_writer_version(tmp_path, monkeypat
 def test_background_advancer_advances_the_definition_it_generated_without_reading_it_back(tmp_path, monkeypatch, capsys,
                                                                                          inline_children, advanced, damage):
     """本机后台推进进程用自己生成的那份运行定义推进，不从记录读回（ADR 0035 决策 3「本机 `submit`」）：建 run 之后记录里的运行定义被
-    改成更新的结构版本、写坏或删去，它照常回报建成，交给推进的仍是写下时的那一份，运行态不被改写成结束。读回记录、读不懂即说明的是
-    `status --wait` 接力（见下面接力的几条用例）。"""
+    改成更新的结构版本、写坏或删去，它照常回报建成，交给推进的仍是写下时的那一份，运行态不被改写成结束。"""
     reports = tmp_path / "reports"
     real_assemble = detached.assemble_local_run
     written: list = []
@@ -198,39 +191,66 @@ def test_schema_gate_runs_before_the_state_file_is_parsed(tmp_path, monkeypatch,
         assert "更新版本" in capsys.readouterr().err
 
 
-def test_local_relay_reports_contract_violation_with_exit_2_instead_of_traceback(tmp_path, monkeypatch, capsys):
-    """`status --wait` 接力读到同版本下形态违约的提交记录：以退出码 2 结束并说明，不是裸 traceback；运行态不动，不写 run 级说明
-    （ADR 0037 决策 7「definition 结构版本」段，ADR 0031 决定三「结束写」小节「运行定义不可用时」条）。接力不是这个 run 的推进器：
-    读不懂可能只是本机的版本不同，原来的后台推进进程可能仍在正常推进。"""
+def _release_on_the_second_poll(monkeypatch, lock_holder) -> list:
+    """把等待中的轮询间隔换成不真等的函数：第二次轮询时放开 seed 那次 run 留下的锁（等于执行它的进程已退出）。"""
+    import time as _time
+
+    polls: list = []
+
+    def sleep(s):
+        polls.append(s)
+        if len(polls) == 2:
+            lock_holder.close_all()
+
+    monkeypatch.setattr(_time, "sleep", sleep)
+    return polls
+
+
+def test_status_wait_settles_a_run_with_a_contract_violating_definition_and_then_shows_like_status(
+        tmp_path, monkeypatch, capsys, lock_holder):
+    """`status --wait` 遇到同版本下形态违约的提交记录（不是别的版本写出，这里是一个 job 少了 target 键）：期限读不出、只凭锁，说明一次
+    之后接着等待；执行它的进程退出（锁放开）即处置，先说已记为已结束、报告没有生成，再按不带 --wait 的 status 的显示规则显示：显示只核
+    提交记录的头，头读得出，所以照常显示终态、以 1 结束，不打回溯（ADR 0054 决策八「等待中的 status --wait」）。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
+    capsys.readouterr()
     _drop_a_target_key(reports, run_id)
-    state_path = _as_detached_run_in_progress(reports, run_id)
-    before = state_path.read_text(encoding="utf-8")
-    assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 2
-    err = capsys.readouterr().err
-    assert "提交记录不完整" in err and "target" in err
-    assert state_path.read_text(encoding="utf-8") == before
+    _as_detached_run_in_progress(reports, run_id)
+    report = (reports / run_id / "index.html").read_bytes()  # seed 那次前台 run 结束时写的报告
+    polls = _release_on_the_second_poll(monkeypatch, lock_holder)
+    assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 1
+    cap = capsys.readouterr()
+    lines = cap.err.splitlines()
+    assert "Traceback" not in cap.err and polls == [1.0, 1.0]
+    assert lines[0].startswith(f"run {run_id} 的提交记录不完整或形态不对，不知道它允许运行到什么时候")
+    assert lines[1].startswith(f"本命令已把 run {run_id} 记为已结束：执行它的 gherkai 进程已退出；报告没有生成：")
+    assert not any(ln.startswith("报告:") for ln in lines)  # 报告没有生成：不给报告的位置
+    assert cap.out.splitlines()[0] == f"run {run_id}: aborted"
+    state = LocalRunStore(reports).load_run_state(run_id)
+    assert (state.status, state.message) == (Status.ABORTED, "执行这个 run 的 gherkai 进程已退出（已记为已结束）")
+    assert (reports / run_id / "index.html").read_bytes() == report  # 运行定义读不出：处置没有生成新的报告
 
 
-@pytest.mark.parametrize("damage, told", [("not-json", "提交记录不完整"), ("deleted", "找不到这个 run 的提交记录")])
-def test_local_relay_does_not_end_a_run_whose_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, damage, told):
-    """`status --wait` 接力读到不是合法 JSON 的提交记录，或提交记录已被删去：它不是这个 run 的推进器，以退出码 2 结束并说明，
-    不打回溯，运行态一个字节不变。提交记录被删去不是读写运行记录的失败，说明里不出现存储失败的那一句（那一句会让使用方去查磁盘
-    与权限）。"""
+@pytest.mark.parametrize("damage, told, shown", [("not-json", "提交记录不完整或形态不对", 2), ("deleted", "提交记录不存在", 1)])
+def test_status_wait_settles_a_run_whose_definition_is_unreadable_or_gone(tmp_path, monkeypatch, capsys, lock_holder,
+                                                                          damage, told, shown):
+    """提交记录不是合法 JSON，或已被删去：不是别的版本写出，期限读不出、只凭锁；等待中说明一次，执行它的进程退出即处置。之后显示时
+    沿用不带 --wait 的 status 的规则：提交记录不完整的以 2 结束，不存在的照常显示、按终态（aborted）以 1 结束。不出现读写记录失败的那一句、
+    不打回溯，报告没有生成。"""
     reports, run_id = _seed_local_run(tmp_path, monkeypatch)
-    state_path = _as_detached_run_in_progress(reports, run_id)
+    capsys.readouterr()
+    _as_detached_run_in_progress(reports, run_id)
     path = reports / run_id / "run_meta.json"
     if damage == "not-json":
         path.write_text("{", encoding="utf-8")
     else:
         path.unlink()
-    before = state_path.read_bytes()
-    assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == 2
+    _release_on_the_second_poll(monkeypatch, lock_holder)
+    assert m.main(["status", run_id, "--wait", "--report-dir", str(reports)]) == shown
     err = capsys.readouterr().err
-    assert "Traceback" not in err and told in err
-    assert "读写本机的运行记录失败" not in err
-    assert state_path.read_bytes() == before
-
+    assert "Traceback" not in err and "读写" not in err
+    assert err.splitlines()[0].startswith(f"run {run_id} 的{told}，不知道它允许运行到什么时候")
+    assert "报告没有生成" in err.splitlines()[1]
+    assert LocalRunStore(reports).load_run_state(run_id).status is Status.ABORTED
 
 @pytest.mark.parametrize("argv_head", [["status"], ["status", "--wait"], ["explain"]], ids=["status", "status-wait", "explain"])
 def test_header_stage_contract_violation_exits_2_and_leaves_the_run_untouched(tmp_path, monkeypatch, capsys, argv_head):

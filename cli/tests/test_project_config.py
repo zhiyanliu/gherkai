@@ -1,5 +1,5 @@
 """项目配置文件 gherkai.toml（ADR 0053）的护栏：键集差集、定位、取值顺序（含「配置不越过环境变量」）、错误形态、
-设备段与应用段的形态、路径基准、doctor 的配置文件行，以及后台宿主（本机后台推进进程、云端隧道守护进程、status --wait 接力）不读
+设备段与应用段的形态、路径基准、doctor 的配置文件行，以及两种后台进程（本机后台推进进程、云端隧道守护进程）不读
 配置文件。"""
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ DEVICE_FEATURE = '@device:android\nFeature: F\n  Scenario: a\n    When "做事"\
 
 # 三份名单，在测试里显式列出：新增选项必须有意识地归入其中一类（决策 6「键集差集」）
 PER_CALL = {"--scope", "--tags", "--scenario", "--step", "--json", "--quiet", "--wait", "--all", "--full",
-            "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config"}
+            "--fail-fast", "--no-report", "--engine", "--status", "--limit", "--config", "--dry-run"}
 COMMON = {"--default-engine", "--assertion-votes", "--max-concurrency", "--default-job-timeout", "--grace", "--expose-local",
           "--tunnel", "--report-dir", "--steps-dir", "--backend", "--region", "--profile"}
 CLOUD = {"--prefix", "--ddb-table", "--s3-bucket", "--worker-variant"}
@@ -62,8 +62,15 @@ def _no_match(engine, *a, **k):
 # ---- 键集差集（ADR 0053 决策 6）----
 
 def test_every_long_option_is_classified_and_the_derived_key_sets_match():
-    """八个读配置命令的每个长选项都落在四份名单之一；由 argparse 推出的 [common] / [cloud] 接受集恰等于名单（多一键或少一键都红）。"""
+    """九个读配置命令的每个长选项都落在四份名单之一；由 argparse 推出的 [common] / [cloud] 接受集恰等于名单（多一键或少一键都红）。"""
     parser = m._build_parser()
+    assert settings.CONFIG_COMMANDS == ("run", "plan", "submit", "status", "explain", "doctor", "list-deterministic", "list-runs",
+                                        "settle-runs")
+    # settle-runs 的定位参数与 status 同名、同样读配置文件（ADR 0054 决策八）：--dry-run 是按次选择型、不进配置文件
+    flags = {s for a in settings.subparser(parser, "settle-runs")._actions for s in a.option_strings if s.startswith("--")}
+    assert flags - {"--help"} == {"--config", "--backend", "--report-dir", "--dry-run", "--json", "--prefix", "--ddb-table",
+                                  "--region", "--profile"}
+    assert "--max-concurrency" not in {s for a in settings.subparser(parser, "status")._actions for s in a.option_strings}
     for name in settings.CONFIG_COMMANDS:
         flags = {s for a in settings.subparser(parser, name)._actions for s in a.option_strings if s.startswith("--")} - {"--help"}
         unclassified = flags - PER_CALL - COMMON - CLOUD - set(DEVICE)
@@ -981,8 +988,14 @@ def _assert_submitted_device_and_app_values(meta) -> None:
 def test_local_background_advancer_uses_the_handed_over_device_and_app_values(tmp_path, monkeypatch, capsys,
                                                                               inline_children):
     """本机后台推进进程不读配置文件（ADR 0053 决策 1、决策 6 的护栏）：它在另一个工作目录（那里的 gherkai.toml 写着别的项目 ARN、
-    设备与应用）里建 run，写下的运行定义与推进用的那一份里的设备与应用值仍是提交时解析、经标准输入交来的。"""
+    设备与应用）里建 run，写下的运行定义与推进用的那一份里的设备与应用值仍是提交时解析、经标准输入交来的。推进与装配所在的模块在结构上
+    也不引用 CLI 的配置模块。"""
+    import inspect
+
+    import gherkai_runtime.detached as detached
     from gherkai_core.adapters.run_store.local import LocalRunStore
+
+    assert "gherkai_cli" not in inspect.getsource(detached)
 
     reports, other, advanced = _app_run_with_another_project_elsewhere(tmp_path, monkeypatch)
     inline_children.before_child = lambda child: os.chdir(other)
@@ -1035,23 +1048,6 @@ def test_cloud_tunnel_daemon_reads_the_run_with_the_values_submit_resolved(tmp_p
     child = inline_children.only()
     assert child.notes[-1] == f"run {run_id} 已结束（passed），隧道已关闭"
     assert child.returncode == 0 and service.closed
-
-
-def test_local_relay_host_reads_definition_not_the_config_file(tmp_path, monkeypatch, capsys, inline_children):
-    """提交后换到带另一份 gherkai.toml 的目录，接力宿主从 definition 读回的设备与应用值仍是提交时的；
-    宿主代码结构上也不引用 CLI 的配置模块。"""
-    import inspect
-
-    import gherkai_runtime.detached as detached
-
-    reports, other, _advanced = _app_run_with_another_project_elsewhere(tmp_path, monkeypatch)
-    assert m.main(["submit", str(_feature(tmp_path, APP_FEATURE_TWO_SCOPES)), "--report-dir", str(reports)]) == 0, \
-        capsys.readouterr().err
-    inline_children.settle()
-    run_id = capsys.readouterr().out.strip()
-    monkeypatch.chdir(other)
-    _assert_submitted_device_and_app_values(detached.build_local_reconcile(str(reports), run_id, 1)[0])
-    assert "gherkai_cli" not in inspect.getsource(detached)
 
 
 def test_account_check_only_swallows_credential_and_network_failures(monkeypatch, capsys):

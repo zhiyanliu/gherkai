@@ -253,8 +253,8 @@ class TaskExited:
     **不是 worker 的 wire 事件**（不在 model.Event union、不进 wire.py 的 worker↔core 协议）——它
     主要由平台侧退出观察者产生：云端后端下是 ECS Task STOPPED 事件的极薄 Lambda（从事件 payload 读 exitCode），
     本机后端下是 per-run 进程 `proc.wait()`，本机同步 `run` 由 `EventRecordingEngine` 代写；另有 tick 的 launch
-    失败补偿（退出码未知，带启动失败的原因），以及推进器宿主在超时处置中的补写（本机接力者在观察链丢失时、云端 tick 在两个 task
-    列表都无踪时，补写判为超时的未知退出；云端 tick 遇到已停止却无退出记录的 task 时，按观察者同一提取函数补写）。
+    失败补偿（退出码未知，带启动失败的原因），以及云端推进器在超时处置中的补写（两个 task 列表都无踪时，补写判为超时的未知
+    退出；遇到已停止却无退出记录的 task 时，按观察者同一提取函数补写）。
     走独立键空间（云端后端下是保留高位数值 SK 加属性 `item_type='exit'`——events 表 SK 是 NUMBER、字符串前缀结构上
     不可行；本机后端下是独立 `exits` 表；见 ADR 0034 机制一），不占 worker 的连续数值 seq 段，也就不会与 worker 的事件
     撞号、覆盖 scope_done（机制一）。
@@ -275,7 +275,7 @@ class TaskExited:
     scope_id: str
     exit_code: int | None = None
     # 超时标志：发过超时的停止请求，或补写时已判为超时（ADR 0034「job timeout」节归因链）。本机启动器在检查线程到点发过停止时
-    # 带上；云端由 StopTask 的 reason 经 STOPPED 事件 detail.stoppedReason 的哨兵串还原；接力方与云端 tick 补写的未知退出带上。
+    # 带上；云端由 StopTask 的 reason 经 STOPPED 事件 detail.stoppedReason 的哨兵串还原；云端超时处置补写的未知退出带上。
     # 「退出时已过截止时刻」不由它表示，见 exited_at。
     timed_out: bool = False
     reason: str | None = None  # 退出归因（观察者落哨兵、tick 的 launch 失败补偿时带），见类 docstring
