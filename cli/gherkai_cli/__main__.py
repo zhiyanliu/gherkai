@@ -2198,10 +2198,10 @@ _DAEMON_GONE_BEFORE_SUBMIT = "持有隧道的本机后台进程退出了，没�
 def _sigint_deferred():
     """块内到达的 SIGINT 推迟到块结束之后，再按原来的处置处理（缺省即抛 KeyboardInterrupt）：块里的一步与记下它结果的那一句之间
     不被中断隔开。云端 submit 交出 run 的标识用它：中断落在写进守护进程与记下「交成了」之间时，说明会把已经交成的说成隧道已随中断
-    关闭。前台 run 与本机后台推进进程建 run 的那一次调用也用它（ADR 0054 决策三）：解释器可以在任意两条字节码之间抛出中断引起的
-    异常，建 run 的入口里取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上。两个处置入口（`settle-runs`、
-    等待中的 `status --wait`）的每次处置连同记下它的结果、`settle-runs` 清理每个暂存目录与它的输出，以及前台 run 建 run 之后被中断时
-    的那次结束写也用它（ADR 0054 决策八「中断」）：说明按已经记下的结果给出，不按中断落在哪一步猜测。块结束时恢复原处置，期间
+    关闭。前台 run 建 run 的那一次调用也用它（ADR 0054 决策三）：解释器可以在任意两条字节码之间抛出中断引起的异常，建 run 的入口里
+    取得描述符与记下它之间、改名与交给持有者之间的间隙在入口内部无法逐一补上；本机后台推进进程不用它，它对 SIGINT 取缺省处置、收到
+    即结束（`_restore_default_termination_signals`）。两个处置入口（`settle-runs`、等待中的 `status --wait`）的每次处置连同记下它的
+    结果、`settle-runs` 清理每个暂存目录与它的输出，以及前台 run 建 run 之后被中断时的那次结束写也用它（ADR 0054 决策八「中断」）：说明按已经记下的结果给出，不按中断落在哪一步猜测。块结束时恢复原处置，期间
     到达过 SIGINT 即再发一次给本进程：块里抛出的异常这时会被随之抛出的 KeyboardInterrupt 取代，要保留的结果在块内记下。不在主线程
     （不能改信号处置）时照常执行、不推迟。块里只放不会久等的一步：推迟期间 Ctrl-C 不起作用（处置的结束写要等运行态的短锁，另一个
     写入方停在短锁之内时这一等没有上界，见 ADR 0054「边界与已知局限」）。"""
@@ -3387,17 +3387,22 @@ def _definition_contract_message(e: DefinitionContractError) -> str:
 
 
 def _restore_default_termination_signals() -> None:
-    """把 SIGTERM 与 SIGHUP 的处置恢复成缺省（结束进程），不装处理器：submit 启动的两种后台进程进门第一步调用（ADR 0035 决策 3）。
-    处置为忽略时会被子进程继承，如经 nohup 启动的 submit 把 SIGHUP 设成了忽略，不恢复的话对后台进程发这个信号结束不了它。"""
-    for signum in (signal.SIGTERM, signal.SIGHUP):
+    """把 SIGTERM、SIGHUP 与 SIGINT 的处置设成缺省（结束进程），不装处理器：submit 启动的两种后台进程进门第一步调用（ADR 0035 决策 3）。
+    处置为忽略时会被子进程继承，如经 nohup 启动的 submit 把 SIGHUP 设成了忽略，不恢复的话对后台进程发这个信号结束不了它。SIGINT 同样
+    取缺省处置：后台进程在另一个会话里，收不到终端的 Ctrl-C，发给它的 SIGINT 与 SIGTERM 一样只是结束这个进程；不让它在解释器里变成
+    中断，也就没有走到一半的收尾。这三个信号的屏蔽一并解除：屏蔽字与忽略一样会被子进程继承，启动方屏蔽着它们时，不解除的话信号只会
+    挂起、结束不了这个进程。"""
+    signals = (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)
+    for signum in signals:
         signal.signal(signum, signal.SIG_DFL)
+    signal.pthread_sigmask(signal.SIG_UNBLOCK, signals)
 
 
 def _cmd_reconcile(args) -> int:
     """本机后台推进进程的入口（本机 submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「本机 `submit`」）。
 
-    进门先把 SIGTERM 与 SIGHUP 恢复成缺省处置（`_restore_default_termination_signals`）。回报描述符随即设为不可继承（之后起的 worker
-    拿不到它）；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即以退出码 2 结束、不输出、不建 run；否则交给
+    进门先把 SIGTERM、SIGHUP 与 SIGINT 设成缺省处置（`_restore_default_termination_signals`）。回报描述符随即设为不可继承（之后起的
+    worker 拿不到它）；从标准输入读一行输入，读到文件结束（submit 在交完输入之前已不在）即以退出码 2 结束、不输出、不建 run；否则交给
     `_advance_submitted`，返回它的退出码。两个描述符随进程退出关闭。
 
     **无 `--steps-dir` 等选项**：使用方 step 目录、并发上限、region / profile 都由 submit 按解析之后的值经标准输入交来，随运行定义
@@ -3420,11 +3425,11 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
     3. 生成运行定义：推进用的就是内存里的这一份，不从记录读回。
     4. 查 submit 还在不在：对它交来的标准输入做一次非阻塞读，读到文件结束即已不在，不建 run、不输出，返回 2。
     5. 建 run（边界检查、在暂存目录上取锁、写定义与运行态、改名成 run 标识，`LocalRunStore.create_run`；运行态带后台执行标记，
-       只作描述）；锁交给本进程的持有者，持有到进程退出。这一次调用期间推迟 SIGINT（`_sigint_deferred`），
-       期间到达的 SIGINT 在调用返回之后才抛出，本进程随之退出、不回报。6. 装配推进所需的各部分（含建事件库，
-       `detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步失败（读写本机文件失败、报告目录没有通过边界检查、取不到
-       锁、暂存目录连续被占用）时先关闭会话，再回报 `_run_record_failure` 的那一句与退出码 2：回报一到 submit 就退出，使用者可能立刻
-       重试。
+       只作描述）；锁交给本进程的持有者，持有到进程退出。这一次调用不被异步的异常打断：本进程对 SIGINT 取缺省处置（入口设好），
+       期间收到 SIGINT 即结束、不回报，留下的与被 SIGKILL 结束时相同（ADR 0054 决策三「锁取在暂存目录上、写完再改名」）。
+       6. 装配推进所需的各部分（含建事件库，`detached.assemble_local_run`）；7. 打开 `reconcile.log`。第 5 到 7 步失败（读写本机
+       文件失败、报告目录没有通过边界检查、取不到锁、暂存目录连续被占用）时先关闭会话，再回报 `_run_record_failure` 的那一句与退出码
+       2：回报一到 submit 就退出，使用者可能立刻重试。
     8. 回报建成（run 的标识与公网地址）。9. 把输出改接日志（`redirect_output`）；回报没有送达（submit 在第 4 步之后才退出）时在日志
        里记一句，照常推进。10. 推进到 run 结束（`detached.advance_local_run`）；读写本机运行记录（含事件库）失败、或读到的运行态
        解析不了时记一句、返回 1，这时 run 停在未结束（说明见下方两个分支）。11. 返回 0。
@@ -3465,10 +3470,9 @@ def _advance_submitted(inp: "handoff.AdvancerInput", *, report_fd: int, input_fd
             # 建 run 的 store 带本进程的持有者：在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）
             run_store = compose.build_local_stores(report_dir=report_root, detached=True,
                                                    lock_holder=compose.process_lock_holder())[0]
-            # 建 run 的那一次调用期间推迟 SIGINT，与前台 run 同一种做法（ADR 0054 决策三）：期间到达的 SIGINT 在调用返回之后才抛出
-            with _sigint_deferred():
-                run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
-                created = True
+            # 建 run 的那一次调用不推迟 SIGINT：本进程对它取缺省处置，收到即结束，调用里没有解释器层面的中断（ADR 0054 决策三）
+            run_store.create_run(meta, initial_run_state(meta, started_at=compose.now_iso()))
+            created = True
             advancer = detached.assemble_local_run(meta, str(report_root), region=inp.region, profile=inp.profile)
             log_fd = handoff.open_log(report_root / meta.run_id / "reconcile.log")
         # 建事件库失败抛 sqlite3.OperationalError，它不是 OSError；锁不可用是 OSError 的子类，另两种建 run 的拒绝不是
@@ -3531,8 +3535,8 @@ def _advance_store_failure_notice(run_id: str, error: BaseException, *, report_d
 def _cmd_tunnel_watch(args) -> int:
     """云端 submit 的隧道守护进程入口（submit 以新会话启动它，非使用方直接调，ADR 0035 决策 3「云端 `submit`」）。
 
-    进门先把 SIGTERM 与 SIGHUP 恢复成缺省处置（`_restore_default_termination_signals`），不装信号处理器：收到这两个信号时进程结束，
-    隧道随之消失（ADR 0035 决策 3「寿命」）。回报描述符随即设为不可继承；从标准输入读一行输入，读到文件结束（submit 在交完输入之前
+    进门先把 SIGTERM、SIGHUP 与 SIGINT 设成缺省处置（`_restore_default_termination_signals`），不装信号处理器：收到这三个信号时进程
+    结束，隧道随之消失（ADR 0035 决策 3「寿命」）。回报描述符随即设为不可继承；从标准输入读一行输入，读到文件结束（submit 在交完输入之前
     已不在）即以退出码 2 结束、不输出；否则交给守护进程的主体 `tunnel_host.hold_tunnel_for_cloud_run`，返回它的退出码。主体收到
     run 的标识之后把输出改接守护进程的日志，各句经 `note` 以 `tunnel-watch:` 开头写进去（标准输出这时已是日志）。
     """
@@ -3671,10 +3675,10 @@ def _cmd_run(args) -> int:
     #     建 run 的 store 带本进程的持有者：建 run 时在暂存目录上取到的生命期锁交给它、持有到进程退出（ADR 0054 决策三）。报告目录用
     #     解析之后的路径，与前置检查里的边界检查、本机后台推进进程相同（ADR 0054 决策四）。
     #     这一段里按 Ctrl-C（中断的处理器在后面才装上，这里收到的是 KeyboardInterrupt）：130，不打回溯。建 run 的那一次调用期间推迟
-    #     SIGINT（`_sigint_deferred`，与本机后台推进进程同一种做法，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断
-    #     不会落在建 run 里面，所以按 `created` 这一个事实分两种：建 run 还没有开始（或 --no-report）时什么都没有留下，一句「没有开始
-    #     执行」；已经建成时本进程持着锁、就是推进器，由它自己按使用方中断做结束写并生成报告（`_end_interrupted_before_start`，
-    #     ADR 0035 决策 3「前台 `run`」一条）。
+    #     SIGINT（`_sigint_deferred`，ADR 0054 决策三）：期间按下的 Ctrl-C 在调用返回之后才抛出，中断不会落在建 run 里面，所以按
+    #     `created` 这一个事实分两种：建 run 还没有开始（或 --no-report）时什么都没有留下，一句「没有开始执行」；已经建成时本进程
+    #     持着锁、就是推进器，由它自己按使用方中断做结束写并生成报告（`_end_interrupted_before_start`，ADR 0035 决策 3「前台 `run`」
+    #     一条）。
     from gherkai_core.adapters.run_store import run_dir
 
     persistence: RunPersistence | None = None

@@ -108,8 +108,8 @@ def _no_real_tunnel_sdk(monkeypatch):
 @pytest.fixture(autouse=True)
 def _signal_dispositions_are_restored():
     """入口改动的信号处置在每个用例之后恢复：submit 开始写出 run 标识时把 SIGINT 设为忽略、一直保持到进程退出，两种后台进程的入口
-    把 SIGTERM 与 SIGHUP 设为缺省处置。在测试进程里这些入口执行完并不退出，不恢复的话后面的用例收不到 Ctrl-C 的 KeyboardInterrupt，
-    靠真实 SIGINT 的用例会一直等下去。"""
+    把 SIGTERM、SIGHUP 与 SIGINT 设为缺省处置。在测试进程里这些入口执行完并不退出，不恢复的话后面的用例收不到 Ctrl-C 的
+    KeyboardInterrupt，靠真实 SIGINT 的用例会一直等下去。"""
     import signal
 
     saved = {s: signal.getsignal(s) for s in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)}

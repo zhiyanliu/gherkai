@@ -7,12 +7,14 @@
 - **建 run**（`create_run_dir`）：先对报告目录做一次边界检查；再在报告目录里建暂存目录（`staging_name`），以只读
   方式打开它，对这次打开的描述符做边界检查、取排他的 `flock`，核对名字仍指向打开的那个目录；然后写记录，写完才原子改名成
   run 标识，最后把描述符交给持有者。锁随这次打开留在改名之后的 run 目录上；取锁与写两个文件都在改名之前做，试拿的一方只碰以
-  run 标识命名的目录（先改名、后取锁的问题见 ADR 0054「被拒方案」）。入口里只处理同步的失败：两种推进器在这一次调用期间推迟
-  SIGINT（ADR 0054 决策三），调用不被异步的异常打断。
+  run 标识命名的目录（先改名、后取锁的问题见 ADR 0054「被拒方案」）。入口里只处理同步的失败：前台 `run` 在这一次调用期间推迟
+  SIGINT，后台推进进程对 SIGINT 取缺省处置、收到即结束（ADR 0054 决策三），调用不被异步的异常打断。
 - **换名**：暂存目录建不出（名字已被占用）、打开时已不存在、取锁得到「已被持有」（另一个进程正在处理它）、或拿到锁之后名字已
   不指向它时，换一个名字重来，至多 `STAGING_ATTEMPTS` 次；都不成即 `StagingContended`。
 - **持有者**（`LockHolder`）：收下持锁的描述符。生产用的 `HoldUntilExit` 不关闭也不交出它，锁随进程退出释放；构造
-  `LocalRunStore` 时注入，不带持有者的 store 不能建 run。
+  `LocalRunStore` 时注入，不带持有者的 store 不能建 run。锁不被子进程带着：经 exec 启动的子进程靠描述符不可继承，fork 而不 exec 的
+  子进程靠 `HoldUntilExit` 登记的 fork 钩子在子进程里关掉那一份；钩子先核对这个号仍指向持锁的目录（号被关闭并另作他用时不关到别的
+  打开），不经解释器的 fork 不触发它（ADR 0054 决策三「不被子进程继承」）。
 - **边界检查**（`check_fd`、`check_report_dir`、`check_existing_dir`）：对打开的目录的描述符取文件系统类型（由内核解析路径），只放行
   `ALLOWED_FILESYSTEMS` 里本平台的类型；判断与取锁对同一次打开做。
 - **试拿**（`probe_run_dir`，处置的一方用）：以只读方式打开 run 目录，对这次打开做边界检查，过了才不阻塞地试拿，持有到块结束
@@ -313,13 +315,40 @@ class LockHolder(Protocol):
 
 class HoldUntilExit:
     """生产用的持有者：收下的描述符不再关闭，锁随进程退出释放。没有放开的方法，也不交出描述符，所以锁描述符到不了子进程的
-    `pass_fds`（ADR 0054 决策三「不被子进程继承」）。"""
+    `pass_fds`，别处也拿不到这个号去把它设为可继承。
+
+    锁按打开的文件描述计，子进程手里还有这次打开的副本时，本进程退出之后锁仍在。子进程不带着它，按起子进程的方式分两条做法
+    （ADR 0054 决策三「不被子进程继承」）：
+    - 经 exec 启动的子进程（worker）：描述符不可继承，exec 时即没有它。
+    - fork 而不 exec 的子进程（直接 fork、fork 方式的 `multiprocessing`、停在 `preexec_fn` 里的子进程）：`hold` 收下描述符时登记一个
+      fork 之后在子进程里执行的钩子（`os.register_at_fork`），子进程里关掉自己这一份。关掉子进程里的副本不放开锁，锁仍由本进程的那一份
+      持有。
+
+    钩子执行之前先核对这个号仍指向持锁的那个目录（设备号与 inode 与收下时相同）：这个号之后若被关闭并另作他用，钩子不关到别的打开。
+    不经解释器的 fork（C 扩展、`ctypes` 直接调系统库）不触发钩子，不在其内。登记之后撤不掉，钩子随进程存在到退出，与持有的期限相同。"""
 
     def __init__(self) -> None:
         self._held: list[int] = []  # 只记下，不关闭、不交出
 
     def hold(self, fd: int) -> None:
         self._held.append(fd)
+        try:
+            st = os.fstat(fd)
+        except OSError:
+            # 取不到身份就无从在子进程里核对，不登记钩子。不把错误抛给建 run 的一方：改名已经完成，run 已经建成、锁由这个描述符持有
+            return
+        os.register_at_fork(after_in_child=functools.partial(_close_in_child, fd, (st.st_dev, st.st_ino)))
+
+
+def _close_in_child(fd: int, identity: tuple[int, int]) -> None:
+    """fork 之后在子进程里执行（`HoldUntilExit.hold` 登记）：fd 仍指向 identity（设备号与 inode）所指的目录才关闭它。核对不过、
+    任何 OSError 都什么也不做。"""
+    try:
+        st = os.fstat(fd)
+        if (st.st_dev, st.st_ino) == identity:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 # ---- 建 run 失败时的异常（本机 adapter 特有；调用方据类型分别说明，见 ADR 0031 决定五「退出码 2」） ----
@@ -440,8 +469,8 @@ def create_run_dir(root: Path, run_id: str, write: Callable[[Path], None], *, ho
     原样抛出，改名的错误把文件名换成 run 目录的路径；建暂存目录或打开它以别的错误失败时 OSError 原样抛出。这些失败都按
     `_Staging.discard` 删去自己的暂存目录、关闭描述符（建出之后没有打开成功的那一个留给清理方）。
 
-    调用方保证这一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT，ADR 0054 决策三）：保护区只处理同步的失败，改名
-    成功之后到交给持有者之间没有会失败的步骤。"""
+    调用方保证这一次调用不被异步的异常打断（前台 `run` 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置，ADR 0054
+    决策三）：保护区只处理同步的失败，改名成功之后到交给持有者之间没有会失败的步骤。"""
     check = check_report_dir(root)
     if check.verdict is not Boundary.INSIDE:
         raise RunDirRejected(check)
@@ -484,7 +513,10 @@ def probe_run_dir(path: Path) -> Iterator[RunDirProbe]:
     不阻塞地试拿；拿到的锁持有到块结束，块结束时关闭描述符、锁随之放开。
 
     打开得到「不存在」抛 `RunDirGone`；别的打开失败（没有权限、描述符用尽、符号链接成环）原样抛出 OSError：没有打开成功就没有可做
-    边界检查与试拿的描述符，它是读写记录失败，不是锁不可用，也不是判断不了文件系统（ADR 0054 决策三「结果的判读」）。"""
+    边界检查与试拿的描述符，它是读写记录失败，不是锁不可用，也不是判断不了文件系统（ADR 0054 决策三「结果的判读」）。
+
+    这里的描述符不登记 fork 钩子（与 `HoldUntilExit` 不同）：它只持有到块结束，处置的一方在块里做结束写与生成报告，不启动子进程；
+    描述符本身不可继承，经 exec 启动的子进程拿不到它。"""
     try:
         fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)  # 不可继承（PEP 446）
     except (FileNotFoundError, NotADirectoryError) as e:

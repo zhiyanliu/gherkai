@@ -5,13 +5,18 @@
 注入只换边界上的原语（`os.mkdir`、`os.open`、`os.replace`、`os.fstat`、`os.unlink`、`fcntl.flock`、取文件系统类型的那一步），被换的
 原语照样真实执行，或以同步的系统错误失败，或在那一刻停住、让另一方先走；模拟清理方或别的进程插进来时做的也是真实动作（真的删
 目录、换目录、另开一次取锁）。清理方与创建者的各种交错用真实的创建者进程（生产的 `create_run_dir`，在第一个暂存目录的指定几步
-停下）固定先后。建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT），那一侧的用例在 cli 的测试里。
+停下）固定先后。建 run 的那一次调用不被异步的异常打断（前台 run 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置），那一侧的
+用例在 cli 的测试里。
+
+生产用的持有者 `HoldUntilExit` 收下描述符时登记 fork 钩子，登记之后在进程里撤不掉：用到它的用例都在子进程里执行，测试进程里只用
+conftest 的测试持有者。
 
 边界检查取文件系统类型的那一步由 conftest 换成本平台清单的第一项，结论不依赖宿主的文件系统；带 `real_filesystem` 标记的用例
 用宿主真实的类型，起真实进程的用例都带这个标记（子进程里没有替换）。
 """
 from __future__ import annotations
 
+import contextlib
 import errno
 import fcntl
 import json
@@ -623,7 +628,8 @@ def test_a_staging_directory_removed_or_replaced_by_another_process_is_given_up(
 
 
 # ---- 同步的失败：建暂存目录、打开它、没取到锁的两个出口、写记录 ----
-# 建 run 的那一次调用不被异步的异常打断（两种推进器在调用期间推迟 SIGINT，那一侧的用例在 cli 的测试里），这里只核同步的失败
+# 建 run 的那一次调用不被异步的异常打断（前台 run 在调用期间推迟 SIGINT，后台推进进程对 SIGINT 取缺省处置，那一侧的用例在 cli 的
+# 测试里），这里只核同步的失败
 
 
 def test_a_failure_to_make_the_staging_directory_other_than_a_taken_name_is_raised_as_it_is(tmp_path, monkeypatch, lock_holder):
@@ -888,6 +894,196 @@ def test_the_lock_survives_redirecting_the_standard_streams_when_it_was_opened_o
         assert fd >= 3
     finally:
         _stop(proc)
+
+
+# ============================================================================
+# 真实进程：fork 而不 exec 的子进程不带着锁（ADR 0054 决策三「不被子进程继承」）
+# ============================================================================
+
+# 持有方子进程：用生产的 LocalRunStore 与 HoldUntilExit 建 run（持有者记下收到的号），再按 mode 起一个停住的子进程，就绪消息原子写进
+# work/ready.json，然后等着被杀。只用 ASCII，参数经一个 JSON 串传入。
+# - fork：os.fork，子进程把它在持锁的号上看到的东西（"closed"，或所指的设备号与 inode）写进 child.json 后停住；父进程等它写完再就绪。
+# - reuse：同 fork，只是 fork 之前先把持锁的号改接到 other 文件上（这个号被关闭并另作他用）。
+# - no-identity：同 fork，只是持有者收下描述符时 os.fstat 失败一次。
+# - mp-fork：multiprocessing 的 fork 上下文起一个停住的进程。
+# - preexec_fn：subprocess.Popen 带 preexec_fn，子进程停在 preexec_fn 里。Popen 在父进程里要等子进程 exec 之后才返回，所以就绪消息由
+#   调用 Popen 之前起的线程在子进程报出自己的进程号之后写出。
+_FORKING_CREATOR = r"""
+import json, os, subprocess, sys, threading, time
+from gherkai_core.adapters.run_store.local import LocalRunStore
+from gherkai_core.adapters.run_store.run_dir import HoldUntilExit
+from gherkai_core.model import Job, JobState, RunMeta, RunState, Scenario, Status, Step
+a = json.loads(sys.argv[1])
+work, mode = a["work"], a["mode"]
+job = Job(scope_id="a", scope_name="a", engine="midscene", timeout_s=300.0,
+          scenarios=(Scenario(id="a:1", name="sc", steps=(Step(0, "Given", "x"),)),))
+meta = RunMeta(run_id="r", created_at="t", jobs=(job,), deadline_at="2026-11-21T01:00:00+00:00")
+state = RunState(run_id="r", status=Status.PENDING, jobs={"a": JobState("a", Status.PENDING)}, started_at="t")
+held = []
+real_fstat = os.fstat
+
+def failing_fstat(fd):
+    raise OSError(5, "Input/output error")
+
+class Recording(HoldUntilExit):
+    def hold(self, fd):
+        held.append(fd)
+        if mode == "no-identity":
+            os.fstat = failing_fstat
+        try:
+            super().hold(fd)
+        finally:
+            os.fstat = real_fstat
+
+def put(name, obj):
+    path = os.path.join(work, name)
+    with open(path + ".tmp", "w") as f:
+        json.dump(obj, f)
+    os.replace(path + ".tmp", path)
+
+def wait_for(name):
+    path = os.path.join(work, name)
+    while not os.path.exists(path):
+        time.sleep(0.01)
+    with open(path) as f:
+        return json.load(f)
+
+def view(fd):
+    try:
+        st = os.fstat(fd)
+    except OSError:
+        return "closed"
+    return [st.st_dev, st.st_ino]
+
+LocalRunStore(a["root"], lock_holder=Recording()).create_run(meta, state)
+[fd] = held
+if mode == "reuse":
+    other = os.open(a["other"], os.O_RDONLY)
+    os.dup2(other, fd)
+    os.close(other)
+if mode in ("fork", "reuse", "no-identity"):
+    pid = os.fork()
+    if pid == 0:
+        put("child.json", view(fd))
+        time.sleep(120)
+        os._exit(0)
+    put("ready.json", {"child": pid, "view": wait_for("child.json")})
+elif mode == "mp-fork":
+    import multiprocessing
+    p = multiprocessing.get_context("fork").Process(target=time.sleep, args=(120,))
+    p.start()
+    put("ready.json", {"child": p.pid})
+elif mode == "preexec_fn":
+    def stay():
+        put("child.json", os.getpid())
+        time.sleep(120)
+
+    threading.Thread(target=lambda: put("ready.json", {"child": wait_for("child.json")}), daemon=True).start()
+    subprocess.Popen([sys.executable, "-c", "pass"], preexec_fn=stay)
+time.sleep(120)
+"""
+
+
+class _ForkingCreator:
+    """一个持有方子进程（以新会话启动）与它起的那个停住的子进程。`end` 结束两者：先杀持有方，再杀子进程与整个会话。"""
+
+    def __init__(self, tmp_path: Path, mode: str, **extra: str) -> None:
+        args = {"root": str(tmp_path / "runs"), "work": str(tmp_path), "mode": mode, **extra}
+        self._stderr = tmp_path / "creator.stderr"
+        with open(self._stderr, "w", encoding="utf-8") as err:
+            self.proc = subprocess.Popen([sys.executable, "-I", "-c", _FORKING_CREATOR, json.dumps(args)],
+                                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err,
+                                         start_new_session=True)
+        self.msg: dict = {}
+        ready = tmp_path / "ready.json"
+        deadline = time.monotonic() + _TIMEOUT_S
+        try:
+            while not ready.exists():
+                assert self.proc.poll() is None, self._stderr.read_text(encoding="utf-8")
+                assert time.monotonic() < deadline, "持有方子进程没有在时限内就绪"
+                time.sleep(0.01)
+            self.msg = json.loads(ready.read_text(encoding="utf-8"))
+        except BaseException:
+            self.end()
+            raise
+
+    def kill_creator(self) -> None:
+        os.kill(self.proc.pid, signal.SIGKILL)
+        self.proc.wait(timeout=_TIMEOUT_S)
+
+    def child_alive(self) -> bool:
+        try:
+            os.kill(self.msg["child"], 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def end(self) -> None:
+        if self.proc.poll() is None:
+            self.proc.kill()
+        self.proc.wait(timeout=_TIMEOUT_S)
+        if "child" in self.msg:
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(self.msg["child"], signal.SIGKILL)
+        with contextlib.suppress(OSError):
+            os.killpg(self.proc.pid, signal.SIGKILL)  # 会话里留下的其余进程
+
+
+@pytest.mark.real_filesystem
+@pytest.mark.parametrize("mode", ["fork", "mp-fork", "preexec_fn"])
+def test_a_child_forked_without_exec_does_not_keep_the_lock(tmp_path, mode):
+    """持有方建 run 之后以 fork 而不 exec 的方式起一个停住的子进程（直接 fork、fork 方式的 multiprocessing、停在 preexec_fn 里）：
+    持有方活着时试拿得到「已被持有」；持有方被 SIGKILL 之后子进程还在，锁随即拿得到。"""
+    creator = _ForkingCreator(tmp_path, mode)
+    run = tmp_path / "runs" / "r"
+    try:
+        assert _try(run) is LockState.HELD
+        creator.kill_creator()
+        assert creator.child_alive()
+        assert _acquired_within(run, 2.0)
+        assert creator.child_alive()
+    finally:
+        creator.end()
+
+
+@pytest.mark.real_filesystem
+def test_closing_the_copy_in_the_forked_child_does_not_release_the_lock(tmp_path):
+    """持有方活着时 fork 出的子进程里，持锁的号已经关闭；别的进程试拿仍得到「已被持有」：锁由持有方的那一份持有。"""
+    creator = _ForkingCreator(tmp_path, "fork")
+    try:
+        assert creator.msg["view"] == "closed"
+        assert creator.child_alive()
+        assert _try(tmp_path / "runs" / "r") is LockState.HELD
+        assert _try_in_another_process(tmp_path / "runs" / "r") == "held"
+    finally:
+        creator.end()
+
+
+@pytest.mark.real_filesystem
+def test_the_fork_hook_leaves_a_reused_number_open(tmp_path):
+    """持锁的号被关闭并另作他用（改接到另一个文件）之后 fork：子进程里这个号仍开着、仍指向那个文件，钩子核对身份不过即不关。"""
+    other = tmp_path / "other.txt"
+    other.write_text("x", encoding="utf-8")
+    creator = _ForkingCreator(tmp_path, "reuse", other=str(other))
+    try:
+        st = os.stat(other)
+        assert creator.msg["view"] == [st.st_dev, st.st_ino]
+    finally:
+        creator.end()
+
+
+@pytest.mark.real_filesystem
+def test_a_holder_that_cannot_read_the_identity_still_holds_and_registers_no_hook(tmp_path):
+    """持有者收下描述符时取不到它所指目录的身份（os.fstat 失败）：不报错，run 照常建成、锁照常持有；没有可核对的身份，不登记钩子，
+    fork 出的子进程里这个号仍开着。"""
+    creator = _ForkingCreator(tmp_path, "no-identity")
+    run = tmp_path / "runs" / "r"
+    try:
+        st = os.stat(run)
+        assert creator.msg["view"] == [st.st_dev, st.st_ino]
+        assert _try(run) is LockState.HELD
+    finally:
+        creator.end()
 
 
 # ============================================================================

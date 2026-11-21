@@ -4,8 +4,8 @@
 真实的 `NgrokTunnel`）；云端存储是记录调用的假句柄，不连 AWS、不联网。submit 与后台进程之间用真实的管道与线程
 （`_inline_children`）：两端都是生产代码，文件结束、EPIPE、非阻塞读与 Ctrl-C 的 SIGINT 都是真实的。SDK 与 ngrok 服务的真实行为、
 跨进程的会话不在这些用例的证据之内（ADR 0035「实测项」）；进程入口的读输入与信号处置、submit 写出 run 标识之后到达的 Ctrl-C、前台 run
-与本机后台推进进程建 run 期间到达的 SIGINT 另有用例真的启动子进程（不起隧道）。后台推进进程在线程里执行时不在主线程，建 run 期间
-不推迟 SIGINT，所以推迟只由真实进程的用例核。
+与本机后台推进进程建 run 期间到达的 SIGINT 另有用例真的启动子进程（不起隧道）。后台进程对 SIGINT 的缺省处置由进程入口设下，线程
+替身直接执行主体、不经入口，所以它只由真实进程的用例核。
 
 本机建 run 的边界检查与生命期锁（ADR 0054 决策三、四）在这里核前台 run 与本机 submit 两边同一情形同一句、会话先关再回报、推进期间
 持锁：取锁、换名、改名都在真实文件系统上执行，文件系统类型经 conftest 的替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的
@@ -1249,22 +1249,29 @@ def test_background_entry_exits_2_silently_when_submit_left_before_handing_the_i
     assert (proc.returncode, proc.stdout, proc.stderr, reported) == (2, b"", b"", b"")
 
 
-@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGTERM], ids=["SIGHUP", "SIGTERM"])
+@pytest.mark.parametrize("inherited", ["ignored", "blocked"])
+@pytest.mark.parametrize("signum", [signal.SIGHUP, signal.SIGTERM, signal.SIGINT], ids=["SIGHUP", "SIGTERM", "SIGINT"])
 @pytest.mark.parametrize("entry", ["_reconcile", "_tunnel_watch"])
-def test_background_entry_is_ended_by_the_signal_even_when_the_parent_ignores_it(entry, signum):
-    """启动方把这个信号设成了忽略（如经 nohup 启动的 submit 之于 SIGHUP），后台进程继承了它：入口进门即恢复成缺省处置，对它发这个
-    信号即结束它。真实进程、真实信号：父进程先设忽略再启动，标准输入保持打开、不交输入（后台进程停在读输入，不起隧道）；入口恢复处置
-    之前到达的信号会被忽略，所以每 0.2 秒发一次，直到它退出或到 10 秒。"""
+def test_background_entry_is_ended_by_the_signal_even_when_the_parent_ignores_or_blocks_it(entry, signum, inherited):
+    """启动方把这个信号设成了忽略（如经 nohup 启动的 submit 之于 SIGHUP），或屏蔽着它，后台进程继承了这份处置或屏蔽字：入口进门即
+    设成缺省处置并解除屏蔽，对它发这个信号即结束它。SIGINT 同样按缺省处置结束进程，不在解释器里变成中断：标准错误为空，没有回溯、
+    没有 KeyboardInterrupt。真实进程、真实信号：父进程先设忽略或屏蔽再启动，标准输入保持打开、不交输入（后台进程停在读输入，不起
+    隧道）；入口设好处置之前到达的信号会被忽略或挂起，所以每 0.2 秒发一次，直到它退出或到 10 秒。"""
     report_r, report_w = os.pipe()
     stdin_r, stdin_w = os.pipe()
     env = {k: v for k, v in os.environ.items() if k != "NGROK_AUTHTOKEN"}
-    previous = signal.signal(signum, signal.SIG_IGN)
+    if inherited == "ignored":
+        previous = signal.signal(signum, signal.SIG_IGN)
+        restore = lambda: signal.signal(signum, previous)  # noqa: E731
+    else:
+        before = signal.pthread_sigmask(signal.SIG_BLOCK, {signum})
+        restore = lambda: signal.pthread_sigmask(signal.SIG_SETMASK, before)  # noqa: E731
     try:
         proc = subprocess.Popen([sys.executable, "-P", "-m", "gherkai_cli", entry, "--report-fd", str(report_w)],
                                 stdin=stdin_r, stdout=subprocess.PIPE, stderr=subprocess.PIPE, pass_fds=(report_w,),
                                 start_new_session=True, env=env)
     finally:
-        signal.signal(signum, previous)
+        restore()
         os.close(report_w)
         os.close(stdin_r)
     try:
@@ -1326,8 +1333,8 @@ def fd0():
 def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_signal_handler(fd0, tunnel_service,
                                                                                                monkeypatch):
     """`_tunnel_watch` 入口：回报描述符设为不可继承，从 fd 0 读输入、交给守护进程的主体（记日志的一句经 `_tunnel_watch_note`）；主体
-    回报公网地址与预热地址，submit 没有交出 run 标识就关闭了标准输入时关闭会话、以 0 返回。入口不装信号处理器：SIGTERM、SIGHUP 仍是
-    缺省处置（ADR 0035 决策 3）。"""
+    回报公网地址与预热地址，submit 没有交出 run 标识就关闭了标准输入时关闭会话、以 0 返回。入口不装信号处理器：SIGTERM、SIGHUP、
+    SIGINT 都是缺省处置（ADR 0035 决策 3）。"""
     report_r, report_w = os.pipe()
     os.set_inheritable(report_w, True)
     fd0.write(handoff.encode_watch_input(handoff.WatchInput(
@@ -1363,7 +1370,7 @@ def test_tunnel_watch_entry_holds_the_tunnel_until_stdin_closes_and_installs_no_
     assert tunnel_service.closed
     assert tunnel_service.starts[0]["closes_at"] == FAR_FUTURE
     assert notes_given == [m._tunnel_watch_note]
-    assert signal.getsignal(signal.SIGTERM) == signal.SIG_DFL and signal.getsignal(signal.SIGHUP) == signal.SIG_DFL
+    assert [signal.getsignal(s) for s in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT)] == [signal.SIG_DFL] * 3
 
 
 def test_tunnel_watch_note_writes_one_prefixed_line_to_stdout(capsys):
@@ -1944,11 +1951,11 @@ if _dir:
 
 
 @pytest.mark.real_filesystem
-def test_a_real_sigint_while_the_advancer_creates_the_run_is_handled_after_the_run_is_created(tmp_path):
+def test_a_real_sigint_while_the_advancer_creates_the_run_ends_it_and_leaves_the_staging_directory(tmp_path):
     """真实进程、真实信号：本机后台推进进程（以 `-P`、新会话启动的 `_reconcile` 入口，测试一侧充当 submit：经标准输入交出输入、
-    读回报管道，标准输入的写端一直开着）停在建 run 的调用里、真实的改名之前时收到 SIGINT。调用期间推迟 SIGINT：它不在这时退出，
-    暂存目录上的锁仍被持有；放行之后建 run 照常完成，run 目录完整、没有留下暂存目录。随后它因中断退出、没有回报，提交的一方读到的是
-    回报管道的文件结束；进程退出之后 run 目录上的锁拿得到。"""
+    读回报管道，标准输入的写端一直开着）停在建 run 的调用里、真实的改名之前时收到 SIGINT。它对 SIGINT 取缺省处置，随即被这个信号
+    结束：标准错误没有回溯、没有 KeyboardInterrupt，没有回报，提交的一方读到的是回报管道的文件结束；报告目录里留下的是暂存目录
+    （与被 SIGKILL 结束时相同），没有以 run 标识命名的目录，暂存目录上的锁随进程退出拿得到。"""
     hook, pause, reports = tmp_path / "hook", tmp_path / "pause", tmp_path / "reports"
     hook.mkdir()
     pause.mkdir()
@@ -1975,23 +1982,23 @@ def test_a_real_sigint_while_the_advancer_creates_the_run_is_handled_after_the_r
         _wait_for_file(pause / "paused", proc, "停到建 run 的调用里")
         [staging] = os.listdir(reports)
         assert staging.startswith(run_dir.STAGING_PREFIX)
-        _signal_while_paused(proc, reports / staging, pause / "release")
-        out, err = proc.communicate(timeout=60)
+        assert _lock_state_of(reports / staging) is run_dir.LockState.HELD
+        proc.send_signal(signal.SIGINT)
+        out, err = proc.communicate(timeout=20)  # 被信号结束即刻返回；停在建 run 里没有结束的，到时限报出
         reported = handoff.read_line(report_r)
     finally:
+        (pause / "release").touch()  # 没有被信号结束的，放行之后照常执行，下面的断言报出
         if proc.poll() is None:
             proc.kill()
             proc.communicate()
         os.close(stdin_w)
         os.close(report_r)
-    assert (proc.returncode, out, reported) == (-signal.SIGINT, b"", b""), err.decode("utf-8", "replace")
-    assert b"KeyboardInterrupt" in err
-    [name] = os.listdir(reports)
-    assert run_dir.is_run_name(name)
-    run = reports / name
-    assert sorted(os.listdir(run)) == ["run_meta.json", "run_state.json"]
-    assert LocalRunStore(reports).load_run_state(name).status == Status.PENDING
-    assert _lock_state_of(run) is run_dir.LockState.ACQUIRED
+    text = err.decode("utf-8", "replace")
+    assert (proc.returncode, out, reported) == (-signal.SIGINT, b"", b""), text
+    assert "Traceback" not in text and "KeyboardInterrupt" not in text, text
+    assert os.listdir(reports) == [staging]
+    assert sorted(os.listdir(reports / staging)) == ["run_meta.json", "run_state.json"]
+    assert _lock_state_of(reports / staging) is run_dir.LockState.ACQUIRED
 
 
 # ---- 开始写出 run 标识之后到达的 Ctrl-C（ADR 0035 决策 3）----

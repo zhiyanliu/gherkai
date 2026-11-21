@@ -87,22 +87,14 @@ cd cli && uv run pytest -q # 只运行本包（cwd 决定收集范围）
 
 修改 `docs/internals/cli-json-contract.md` 后执行 `uv run python tools/render_skill_contract.py` 重新生成 skill 副本，否则 `test_skill.py` 的相等性断言会失败。
 
-另有一份静态守护 `tests/test_exec_only_children.py`，守的是持生命期锁的进程只经 exec 启动子进程（ADR 0054 决策三「不被子进程继承」与「前提」）：
-子进程只要还共用那次打开，持锁的进程退出之后锁仍在。它用 AST 扫 core、runtime、cli 三个生产包，按放行清单判断，清单之外的写法一律判失败，
-规则四条：不一次导入全部名字（`from X import *`，任何模块，含相对导入）；起进程只经 `subprocess` 的 `Popen`、`run`、`call`、`check_call`、
-`check_output`、`getoutput`、`getstatusoutput` 与 `asyncio` 的 `create_subprocess_exec`、`create_subprocess_shell`（任何对象上名为
-`subprocess_exec`、`subprocess_shell` 的方法同样算入口），标准库里别的起进程的接口引用即判失败（`os.fork`、`os.forkpty`、`os.system`、
-`os.popen`、`os.spawn` 开头的各函数、`os.posix_spawn`、`os.posix_spawnp`、`os.startfile`、进程池执行器；`pty`、`multiprocessing`、
-`_posixsubprocess` 导入即判失败）；这些入口上 `preexec_fn` 只许不出现或是字面量 `None`（按关键字传的在任何调用上都核，按位置传给
-`subprocess` 各入口的第 7 个参数同样核，它之前有展开的参数时判失败），`close_fds` 只许不出现或是字面量 `True`（按位置的第 8 个同样核），
-这些入口上展开的关键字参数（`**kwargs`）判失败，继承 `subprocess.Popen` 的类判失败；描述符一侧，`os.set_inheritable` 的第二个参数须是字面量 `False`，`os.dup2` 只放行
-`handoff.redirect_output` 把日志接到标准输入、标准输出、标准错误的那一处（登记在测试里的 `DUP2_ALLOWED`），`fcntl` 模块只放行
-`FCNTL_ALLOWED` 里的名字（`flock`、`lockf`、`fcntl` 与取锁、设标志用的常量），`fcntl.fcntl` 的命令只放行 `FCNTL_COMMANDS`（`F_DUPFD_CLOEXEC`、
-`F_GETFD`、`F_SETFD`、`F_GETFL`、`F_SETFL`），`F_SETFD` 设的值须是 `FD_CLOEXEC`。`posix` 模块按 `os` 认，名字经导入别名还原；经 `getattr`
-拼出的调用、这些入口之外的调用里展开的参数、先赋给变量再调用、经别的模块转手取到的名字、`ctypes` 调 libc、
-`importlib` 动态导入与 C 扩展里的写法扫描看不见，由真实执行覆盖。扫描器另有逐条的正反用例，扫描目录不在、放行登记找不到对应的调用、一个
-起子进程的调用都没认出来都会失败，不会静默空扫。新写的 code 被它判失败时，先对照 ADR 0054 决策三的前提改写法；确实要用清单之外的接口或
-在别处 `dup2` 的，先在 ADR 里定下，再改放行清单或登记。
+持生命期锁的进程起的子进程不带着锁（ADR 0054 决策三「不被子进程继承」）：锁按打开的文件描述计，子进程手里还有这次打开的副本时，
+持锁的进程退出之后锁仍在。按起子进程的方式有两条做法，都在 core 的 `run_dir.HoldUntilExit` 一侧，不依赖调用方怎样写：经 exec 启动的子进程
+（worker）靠描述符不可继承，exec 时即没有它；fork 而不 exec 的子进程（直接 fork、fork 方式的 `multiprocessing`、停在 `preexec_fn` 里的子进程）
+靠持有者收下描述符时用 `os.register_at_fork` 登记的钩子，fork 之后在子进程里核对这个号仍指向持锁的目录、是则关掉自己那一份。不经解释器的
+fork（C 扩展、`ctypes` 直接调系统库）不触发钩子，不在其内。守它的是 `core/tests/test_run_dir.py` 里真实进程的用例：持有方子进程建 run 之后
+以缺省方式经 exec、或以各种 fork 而不 exec 的方式起一个子进程，持有方被 SIGKILL 之后子进程还在、锁随即拿得到；另有钩子不放开持有方的锁、
+这个号另作他用之后不被钩子关掉两条。钩子登记之后在进程里撤不掉，所以用到生产持有者的用例都在子进程里执行，测试进程里由 conftest 换成
+测试用的持有者。
 
 ## 实时落库
 

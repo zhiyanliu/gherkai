@@ -124,7 +124,7 @@ advancer_exited / past_deadline 才往下:结束写(end_run,短锁 .runstate.loc
 - **先查后做之间的变化由结束写裁定**：只有结束写改记录，它自带 run 未结束的条件，所以前面各步读到的都只是判定依据。推进器在这之间写下终态、或两个处置方同时处置时，只有一方写成，另一方得到 `already_finished`；一方拿到锁、另一方因锁被它持有而按期限判断时，记下的是先写成的那一方的判定。读运行态之后任一步遇到「不存在」（打开 run 目录、读提交记录、结束写时这个名字下已没有目录或文件），都按这个名字下已没有 run 处理。
 - **期限的比较**只有一处算法：`run_deadline.past_overdue`（严格晚于 `overdue_at`，即期限加 `OVERDUE_MARGIN_S`），隧道的边缘到点拒绝取同一个时刻。
 - **两个入口怎样用结果**：`settle-runs` 逐个列出，跳过不改变退出码；不给 run 标识时对 `list_runs` 列出的全部未结束与运行态读不出的 run 依次处置，列举之后消失的略过。等待中的 `status --wait` 每轮做一次处置：`settled` 即在标准错误说明一句、照不带 `--wait` 的 `status` 渲染；`already_finished` 直接渲染；`unsupported_filesystem` 以退出码 2 结束；其余继续等待，等待中的说明按结构化的原因与错误码去重、每种只说一次。开始等待之前另过一次版本闸，只拦结构版本不认的提交记录。
-- **中断**：两个入口都把每次处置连同「记下这次的结果」放在推迟 SIGINT 的区间里（与建 run 同一种做法），`settle-runs` 清理暂存目录的每一项与最终的输出同样；Ctrl-C 因此只落在两次处置之间或等待的间隔里，说明按已记下的结果给出，不按阶段猜测。
+- **中断**：两个入口都把每次处置连同「记下这次的结果」放在推迟 SIGINT 的区间里（与前台 `run` 建 run 时同一种做法），`settle-runs` 清理暂存目录的每一项与最终的输出同样；Ctrl-C 因此只落在两次处置之间或等待的间隔里，说明按已记下的结果给出，不按阶段猜测。
 - **清理暂存目录**（只在 `settle-runs` 不给 run 标识时，处理完 run 之后）：`run_dir.staging_names` 列出名字是暂存目录形态的条目（前缀之后恰好 16 位小写十六进制，`run_dir.is_staging_name`，与建 run 一方的 `run_dir.staging_name` 同一处定义），逐个交给 `run_dir.sweep_staging_dir`：`lstat` 必须是真实目录（文件、符号链接不碰）→ 只读打开（已不在即不列出，别的失败记 `unopenable`）→ 边界检查 → 试拿（被持有记 `held`，锁不可用记 `lock_unavailable`）→ 拿到锁之后核对名字仍指向打开的那个目录（核对不过即已改名成 run 或被换掉，不删、不列出）→ `--dry-run` 到此放开锁，否则持着锁删去（中途出错记 `remove_failed`，下一次接着删）。各种跳过都不改变退出码。
 
 输出、退出码与各句说明见用户指南[运行测试与查看结果](../user-guide/running-and-results.md)「结束停住的 run」，`--json` 字段见 [`cli-json-contract.md`](./cli-json-contract.md)「`gherkai settle-runs`」一节。这个版本的 `settle-runs` 只接本机后端；云端的 `status --wait` 仍是 §4b 的检测停滞、调起 kicker。
