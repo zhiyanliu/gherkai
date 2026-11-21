@@ -72,9 +72,9 @@
     "semantic_hash": ""
   },
   "core/tests/test_cloud_reconcile.py": {
-    "mtime": 1795148522.434554,
-    "seen": 1795154123.587403,
-    "ast_hash": "fa5a1d21d42728b75774d6defbde4d9b",
+    "mtime": 1795276745.3442812,
+    "seen": 1795276802.609097,
+    "ast_hash": "a5f3cff235645cce7377b64ce8d4f18d",
     "semantic_hash": ""
   },
   "core/tests/test_conditional_writes.py": {
@@ -1260,9 +1260,9 @@
     "semantic_hash": ""
   },
   "cli/DEVELOPMENT.md": {
-    "mtime": 1795251986.6188283,
-    "seen": 1795255623.98619,
-    "ast_hash": "9df0b5d956d76749a00af411498ed542",
+    "mtime": 1795276745.3446133,
+    "seen": 1795276802.6092641,
+    "ast_hash": "9f3c1ec36f10de390daf927039e4a9d5",
     "semantic_hash": ""
   },
   "deploy_aws/DEVELOPMENT.md": {
@@ -3018,9 +3018,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0018-run-ownership-adr-writeback-plan.md": {
-    "mtime": 1795275832.0197842,
-    "seen": 1795276064.340384,
-    "ast_hash": "61aaab13811423e71a479642bfce86a3",
+    "mtime": 1795276792.5547795,
+    "seen": 1795276802.609312,
+    "ast_hash": "ea318db1d9983ab73a836ce53feedcca",
     "semantic_hash": ""
   },
   "docs/adr/0054-run-deadline-lifetime-lock-and-settling.md": {
@@ -3036,9 +3036,9 @@
     "semantic_hash": ""
   },
   "docs/journey/0021-run-ownership-implementation-clue-map.md": {
-    "mtime": 1795276030.0880384,
-    "seen": 1795276064.340385,
-    "ast_hash": "310d2a30d20a93c4df20e3bd11e84d1e",
+    "mtime": 1795276523.7019286,
+    "seen": 1795276802.609313,
+    "ast_hash": "b7b7ac9e250ce995384acda0a24dbc9e",
     "semantic_hash": ""
   },
   "core/gherkai_core/run_status.py": {
@@ -3126,9 +3126,9 @@
     "semantic_hash": ""
   },
   "core/gherkai_core/adapters/run_store/run_dir.py": {
-    "mtime": 1795276023.080517,
-    "seen": 1795276064.3401768,
-    "ast_hash": "7c954ff971f30053df2f6f3d8cfe517d",
+    "mtime": 1795276378.2480307,
+    "seen": 1795276802.6090822,
+    "ast_hash": "07c15f274c6fbb0a9e481fb062043aca",
     "semantic_hash": ""
   },
   "core/tests/test_run_dir.py": {

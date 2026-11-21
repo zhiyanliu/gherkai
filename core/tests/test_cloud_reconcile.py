@@ -450,7 +450,7 @@ def test_expiry_commits_on_ddb(events_table, ddb_run_store):
 def test_expiry_loses_to_a_claim_that_landed_after_the_read_on_ddb(events_table, ddb_run_store):
     """到期的结束写与认领并发（云端的条件写）：一个推进器读到「没有执行中的、仍有未启动的」之后，另一个推进器的认领落下——前者的结束写
     按写下时的运行态判断（以写入序号为条件、不成立即重读再算），那时已有 running 的 job，写不成；重读到 run 仍未结束，返回继续推进；
-    run 没有结束、新认领的 job 仍是 running，同一轮得出结果的 a 已由终态写记下。与本机的同名用例对拍。"""
+    run 没有结束、新认领的 job 仍是 running，同一轮得出结果的 a 已由终态写记下。"""
     from gherkai_core.reconcile import TickOutcome, tick
 
     meta, launcher = _expiry_setup(events_table, ddb_run_store)
