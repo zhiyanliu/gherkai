@@ -77,6 +77,7 @@ gherkai 的直接操作者越来越多是使用者侧 AI agent（Claude Code / C
 
 - **规则**：`status` / `explain` 查的是哪一个 run，由三项定位参数决定——执行后端（`--backend local|cloud`）、报告落点（本机后端的 `--report-dir`）、部署前缀（云端后端的 `--prefix`，连同它所在的 region 与 profile）。查询命令的这三项须与产生该 run 的 `run` / `submit` 逐项一致（本机的前台与后台执行、云端的提交后台执行都算），否则以退出码 2 结束并说未找到 run。云端后端的报告前缀（`--report-dir`）同样须与产生 run 的命令一致：`explain` 据它读判定明细。`doctor` 的云端项同理按这三项定位后端；`list-runs` 列的是哪一个后端里的 run，也由这三项决定（决策七）；`settle-runs` 处置的是哪一个后端里的 run，同样由这三项决定（[0054](./0054-run-deadline-lifetime-lock-and-settling.md) 决策八）：给了 run_id 而三项与产生它的命令不一致时，同样以退出码 2 结束并说未找到 run；不给时处理的是这三项选定的那个后端里的 run。
 - **为什么不跨后端搜、不猜**：run 的记录只存在于产生它的那个后端与落点——本机是 `--report-dir` 下的 run 目录与事件库，云端是 `<prefix>` 对应的 runs 表与产物桶（[0034](./0034-detached-batch-reconciler.md)）；CLI 不维护跨后端、跨目录的 run 索引，也不按 run_id 到处找：猜中是巧合，猜错会把另一个落点里同名 run 的判定当成这个 run 的。三项由使用方给出、与产生时相同，是唯一可靠的定位，所以不一致时直接拒绝、不降级成「找最像的」。
+- **输出里的本机路径一律是解析之后的绝对路径**：给使用者照抄执行的整条命令（查进度、列出 run、把 run 记为已结束）带的 `--report-dir`，以及输出里出现的报告目录、run 目录与各文件的位置，都用入口解析之后的绝对路径，不回显使用者原样给的写法。理由：这些命令是给人与 agent 照抄的，换了工作目录、或原来给的符号链接改了指向之后，相对路径与链接会指到别处，查不到这个 run 或查到另一个落点里的同名 run；机读输出的 `report_dir` 同一取法（决策七「机读形态」）。被拒：回显使用者原样给的写法（短，但只在原来的工作目录下成立）。
 - **本条是权威，其余处只给结论与指针**：本机与云端各自的定位旗标在 [0034](./0034-detached-batch-reconciler.md)「命令形态」节；`explain` 的输入在 [0042](./0042-step-evidence-and-explain.md) 决策四；agent skill 教 agent 保持三项一致在 [0043](./0043-agent-skill-for-driving-gherkai.md) 决策五第 3 条；用户指南运行篇与云端篇写同一句。CONTEXT.md「定位参数」词条指向本条。
 
 ### 七、列出 run：`list-runs`
