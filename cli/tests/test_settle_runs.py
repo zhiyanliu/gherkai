@@ -7,7 +7,8 @@ ADR 0031 决定五）。判定与动作在 runtime 的 settle 模块，它自己
 替身取本平台清单的第一项，只在要拒绝的用例里换成清单之外的类型；带 `real_filesystem` 标记、起真实子进程的用例取宿主真实的类型。
 故障注入只换边界上的原语（`fcntl.flock`、文件权限、`signal.raise_signal` 落在真实的写里、输出）。真实进程的用例核信号、进程退出与
 锁的释放：两种推进器被 SIGKILL 之后等待中的 `status --wait` 下一次轮询即处置，`settle-runs` 在处置期间与开始输出之前收到的真实
-SIGINT 只被记下，这次处置与输出照常做完。
+SIGINT 只被记下，这次处置与输出照常做完，启动时 SIGINT 已被忽略的 `status --wait` 收到 SIGINT 接着等待。标准输出写不进时收到的
+信号见 `test_output_under_interrupts`。
 """
 from __future__ import annotations
 
@@ -522,14 +523,15 @@ def test_settle_runs_that_stops_before_settling_any_listed_run_does_not_say_ther
 # 列举之前装上只记标志的处理器：Ctrl-C 只记下、不打断正在做的一项，每一项之前（于是列举之后与每一项之后）看一次，输出只做一次（ADR 0054
 # 决策八「中断」）。信号是真实的：`signal.raise_signal` 在主线程里发给本进程，命令装的处理器照常收到。
 
-def _signal_inside_end_run(monkeypatch, *, times: int = 1, signum: int = signal.SIGINT) -> list:
-    """在真实的结束写里给本进程发一次真实的信号（之后照常写）：处理器只记下，不打断这次结束写。返回记下各次结束写的列表。"""
+def _signal_inside_end_run(monkeypatch, *, times: int = 1, signum: int = signal.SIGINT, at: "int | None" = None) -> list:
+    """在真实的结束写里给本进程发一次真实的信号（之后照常写）：处理器只记下，不打断这次结束写。前 times 次结束写里各发一次；给了 at 时
+    只在第 at 次里发。返回记下各次结束写的列表。"""
     real_end_run = LocalRunStore.end_run
     calls: list = []
 
     def end_run(self, run_id, ending, *, ended_at):
         calls.append(run_id)
-        if len(calls) <= times:
+        if (len(calls) == at) if at is not None else (len(calls) <= times):
             signal.raise_signal(signum)
         return real_end_run(self, run_id, ending, ended_at=ended_at)
 
@@ -537,13 +539,10 @@ def _signal_inside_end_run(monkeypatch, *, times: int = 1, signum: int = signal.
     return calls
 
 
-@pytest.mark.parametrize("given", [False, True], ids=["all", "given-run-id"])
 @pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
-def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine, given, tmp_path, capsys, holders,
-                                                                         monkeypatch):
+def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine, tmp_path, capsys, holders, monkeypatch):
     """处置中途（结束写里）按下的 Ctrl-C 不打断这次处置（结束写写成、报告生成）：它出现在输出里，其余的 run 与暂存目录没有处理；先输出
-    已处理的部分（--json 下是单个对象），再说明，以 130 结束、不打回溯，命令结束之后信号的处置恢复原状。给了 run 标识时同样：那一个 run
-    出现在输出里、为已记为已结束。"""
+    已处理的部分（--json 下是单个对象），再说明，以 130 结束、不打回溯，命令结束之后信号的处置恢复原状。"""
     root = tmp_path / "reports"
     first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
     _create(root, first, holders).release()
@@ -551,20 +550,92 @@ def test_ctrl_c_during_a_settle_is_handled_after_it_and_the_rest_is_left(machine
     leftover = _staging(root, "0123456789abcdef")
     before = _bytes(root, second)
     calls = _signal_inside_end_run(monkeypatch)
-    rc, out, err = _settle(capsys, *([first] if given else []), "--report-dir", str(root), *(["--json"] if machine else []))
+    rc, out, err = _settle(capsys, "--report-dir", str(root), *(["--json"] if machine else []))
     assert rc == 130 and calls == [first] and "Traceback" not in err
     assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
     if machine:
-        expected = {"backend": "local", "report_dir": str(root.resolve()), "dry_run": False,
-                    "runs": [{"run_id": first, "outcome": "settled", "reason": "advancer_exited", "report_written": True}]}
-        if not given:
-            expected["staging_dirs"] = []
-        assert json.loads(out) == expected
+        assert json.loads(out) == {
+            "backend": "local", "report_dir": str(root.resolve()), "dry_run": False, "staging_dirs": [],
+            "runs": [{"run_id": first, "outcome": "settled", "reason": "advancer_exited", "report_written": True}]}
     else:
         assert _row(out, first) == [first, "已记为已结束", "执行它的 gherkai 进程已退出"] and second not in out
     assert _state(root, first).status is Status.ABORTED and (root / first / "index.html").is_file()
     assert _bytes(root, second) == before and leftover.is_dir()
     assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+def _signal_inside_sweep(monkeypatch, *, at: int = 1) -> list:
+    """在第 at 次真实的清理暂存目录里给本进程发一次真实的 SIGINT（之后照常清理）。返回记下各次清理的列表。"""
+    real_sweep = LocalRunStore.sweep_staging_dir
+    calls: list = []
+
+    def sweep(self, name, *, dry_run):
+        calls.append(name)
+        if len(calls) == at:
+            signal.raise_signal(signal.SIGINT)
+        return real_sweep(self, name, dry_run=dry_run)
+
+    monkeypatch.setattr(LocalRunStore, "sweep_staging_dir", sweep)
+    return calls
+
+
+@pytest.mark.parametrize("last", ["given-run-id", "last-run", "last-staging-dir"])
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_ctrl_c_during_the_last_item_does_not_change_the_result(last, machine, tmp_path, capsys, holders, monkeypatch):
+    """最后一项期间才收到的中断（这里在最后一项真实的结束写或清理里发出真实的 SIGINT）没有让命令少做事：每一项都处理完、出现在输出里，
+    没有停止的说明，退出码与没有中断时相同（0）。三种最后一项：给了 run 标识时那唯一的一次处置；不给时没有暂存目录、最后一个 run 的
+    处置；最后一个暂存目录的清理。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    given = [first] if last == "given-run-id" else []
+    staging = [_staging(root, "0123456789abcdef"), _staging(root, "fedcba9876543210")] if last == "last-staging-dir" else []
+    if last == "last-staging-dir":
+        calls = _signal_inside_sweep(monkeypatch, at=2)
+    else:
+        calls = _signal_inside_end_run(monkeypatch, at=1 if given else 2)
+    rc, out, err = _settle(capsys, *given, "--report-dir", str(root), *(["--json"] if machine else []))
+    assert (rc, err) == (0, "")
+    settled = [first] if given else [first, second]
+    assert calls == ([s.name for s in staging] if staging else settled)
+    if machine:
+        doc = json.loads(out)
+        assert [(r["run_id"], r["outcome"]) for r in doc["runs"]] == [(rid, "settled") for rid in settled]
+        assert doc.get("staging_dirs") == (None if given else [{"name": s.name, "outcome": "removed", "reason": None}
+                                                              for s in staging])
+    else:
+        assert all(_row(out, rid)[1] == "已记为已结束" for rid in settled)
+        assert all(_row(out, s.name)[1] == "已删除" for s in staging)
+    assert all(_state(root, rid).status is Status.ABORTED for rid in settled)
+    assert not any(s.exists() for s in staging)
+    assert signal.getsignal(signal.SIGINT) is signal.default_int_handler
+
+
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_ctrl_c_before_the_settle_of_a_given_run_changes_nothing(machine, tmp_path, capsys, holders, monkeypatch):
+    """给了 run 标识时，那一次处置之前同样看一次标志：装上处理器之后、处置之前收到的 Ctrl-C（这里在报告目录的边界检查里发出真实的
+    SIGINT）使它不处置，说明没有改动任何记录，以 130 结束；人读输出为空，--json 是 runs 为空数组的那一个对象；记录字节不变。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    before = _bytes(root, run_id)
+    real_check = run_dir.check_existing_dir
+
+    def check_existing_dir(path):
+        signal.raise_signal(signal.SIGINT)
+        return real_check(path)
+
+    monkeypatch.setattr(run_dir, "check_existing_dir", check_existing_dir)
+    settles = _count_settles(monkeypatch)
+    rc, out, err = _settle(capsys, run_id, "--report-dir", str(root), *(["--json"] if machine else []))
+    assert rc == 130 and settles == [] and "Traceback" not in err
+    assert err.splitlines() == ["已停止，没有改动任何记录；可以再执行同一条命令。"]
+    if machine:
+        assert json.loads(out) == {"backend": "local", "report_dir": str(root.resolve()), "dry_run": False, "runs": []}
+    else:
+        assert out == ""
+    assert _bytes(root, run_id) == before
 
 
 def test_sigterm_during_a_settle_is_handled_like_ctrl_c_and_exits_143(tmp_path, capsys, holders, monkeypatch):
@@ -586,15 +657,7 @@ def test_ctrl_c_while_cleaning_a_staging_dir_is_handled_after_that_one(tmp_path,
     暂存目录没有处理；先输出已处理的部分，再说明，以 130 结束。"""
     root = tmp_path / "reports"
     first, second = _staging(root, "0123456789abcdef"), _staging(root, "fedcba9876543210")
-    real_sweep = LocalRunStore.sweep_staging_dir
-    calls: list = []
-
-    def sweep(self, name, *, dry_run):
-        calls.append(name)
-        signal.raise_signal(signal.SIGINT)
-        return real_sweep(self, name, dry_run=dry_run)
-
-    monkeypatch.setattr(LocalRunStore, "sweep_staging_dir", sweep)
+    calls = _signal_inside_sweep(monkeypatch)
     rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
     assert rc == 130 and calls == [first.name]
     assert json.loads(out)["staging_dirs"] == [{"name": first.name, "outcome": "removed", "reason": None}]
@@ -647,7 +710,7 @@ def test_ctrl_c_before_the_first_settle_does_not_say_there_is_nothing(during, tm
 @pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
 def test_ctrl_c_just_before_the_output_still_prints_what_was_done(machine, tmp_path, capsys, holders, monkeypatch):
     """处理完全部各项之后、开始输出之前按下的 Ctrl-C（这里在进入输出的那一步发出真实的 SIGINT）：输出照常做一次，已处理的两个 run 与
-    删去的暂存目录都在里面（人读表格；--json 下是一个完整的对象），随后说明已处理完的那一句，以 130 结束。"""
+    删去的暂存目录都在里面（人读表格；--json 下是一个完整的对象）；这个中断没有让命令少做事，没有停止的说明，以 0 结束。"""
     root = tmp_path / "reports"
     first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
     _create(root, first, holders).release()
@@ -661,8 +724,7 @@ def test_ctrl_c_just_before_the_output_still_prints_what_was_done(machine, tmp_p
 
     monkeypatch.setattr(m, "_emit_settle_runs", emit)
     rc, out, err = _settle(capsys, "--report-dir", str(root), *(["--json"] if machine else []))
-    assert rc == 130 and "Traceback" not in err
-    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    assert (rc, err) == (0, "")
     if machine:
         doc = json.loads(out)
         assert [(r["run_id"], r["outcome"]) for r in doc["runs"]] == [(first, "settled"), (second, "settled")]
@@ -674,7 +736,8 @@ def test_ctrl_c_just_before_the_output_still_prints_what_was_done(machine, tmp_p
 
 
 def test_ctrl_c_while_printing_the_result_lets_the_output_finish_once(tmp_path, capsys, holders, monkeypatch):
-    """输出期间按下的 Ctrl-C 不打断输出：标准输出恰是一个完整的 JSON 对象（没有第二次输出），随后按中断结束、130。"""
+    """输出期间按下的 Ctrl-C 不打断输出：标准输出恰是一个完整的 JSON 对象（没有第二次输出）；它没有让命令少做事，没有停止的说明，以 0
+    结束。"""
     root = tmp_path / "reports"
     _create(root, "20300101T000000Z-aaaaaa", holders).release()
     real_print = builtins.print
@@ -689,10 +752,9 @@ def test_ctrl_c_while_printing_the_result_lets_the_output_finish_once(tmp_path, 
 
     monkeypatch.setattr(builtins, "print", print_)
     rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
-    assert rc == 130 and len(printed) == 1
+    assert (rc, err) == (0, "") and len(printed) == 1
     assert json.loads(out)["runs"] == [{"run_id": "20300101T000000Z-aaaaaa", "outcome": "settled",
                                         "reason": "advancer_exited", "report_written": True}]
-    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
 
 
 def test_a_record_failure_that_comes_with_an_interrupt_ends_as_the_failure(tmp_path, capsys, holders, monkeypatch):
@@ -1044,6 +1106,152 @@ def test_status_wait_record_failure_that_comes_with_an_interrupt_ends_as_the_fai
     assert _bytes(root, run_id) == before
 
 
+@pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
+def test_status_wait_ctrl_c_while_showing_the_run_does_not_change_the_result(machine, tmp_path, capsys, holders, monkeypatch):
+    """处置之后、显示期间才收到的 Ctrl-C（这里在生成显示内容的那一步发出真实的 SIGINT）没有让命令少做事：照常显示，按 run 的状态给退出码
+    （aborted 为 1），没有停止等待的说明。"""
+    from gherkai_core import serialize
+
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    real_text, real_doc = m.render.render_run_state, serialize.run_state_to_dict
+
+    def text(state):
+        signal.raise_signal(signal.SIGINT)
+        return real_text(state)
+
+    def doc(state):
+        signal.raise_signal(signal.SIGINT)
+        return real_doc(state)
+
+    monkeypatch.setattr(m.render, "render_run_state", text)
+    monkeypatch.setattr(serialize, "run_state_to_dict", doc)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait", *(["--json"] if machine else []))
+    assert rc == 1 and "已停止" not in err and "Traceback" not in err
+    if machine:
+        assert (json.loads(out)["status"], err) == ("aborted", "")
+    else:
+        assert out.splitlines()[0] == f"run {run_id}: aborted"
+        assert err.splitlines()[0] == f"本命令已把 run {run_id} 记为已结束：执行它的 gherkai 进程已退出。"
+
+
+# ---- 进入命令时已被忽略的信号；恢复处理器的次序 ----
+# 进入命令时已被设为忽略的信号不装处理器、保持忽略（非交互 shell 的后台作业即是如此）；恢复时先 SIGTERM、后 SIGINT，恢复 SIGINT 之后
+# 才到的 SIGINT 不会使 SIGTERM 留在只记标志的处理器上（ADR 0054 决策八「中断」）。信号都是真实的（`signal.raise_signal`）。
+
+@pytest.fixture
+def sigint_ignored():
+    """在用例期间把 SIGINT 设为忽略，像非交互 shell 起的后台作业那样；用例结束时恢复。"""
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        yield
+    finally:
+        signal.signal(signal.SIGINT, previous)
+
+
+def test_settle_runs_keeps_an_ignored_sigint_ignored(tmp_path, capsys, holders, monkeypatch, sigint_ignored):
+    """SIGINT 进入命令时已被忽略：第一个 run 的结束写里收到的 SIGINT 不被记下，两个 run 都处理完，以 0 结束、没有停止的说明；命令结束之后
+    SIGINT 仍是忽略。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    calls = _signal_inside_end_run(monkeypatch)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert (rc, err) == (0, "") and calls == [first, second]
+    assert [(r["run_id"], r["outcome"]) for r in json.loads(out)["runs"]] == [(first, "settled"), (second, "settled")]
+    assert signal.getsignal(signal.SIGINT) is signal.SIG_IGN
+
+
+def test_settle_runs_with_sigint_ignored_still_records_sigterm(tmp_path, capsys, holders, monkeypatch, sigint_ignored):
+    """只有被忽略的那一个保持忽略：SIGINT 被忽略、SIGTERM 没有，第一个 run 的结束写里收到的 SIGTERM 照常被记下，第二个 run 没有处理，
+    以 143 结束；命令结束之后 SIGINT 仍是忽略，SIGTERM 恢复原状。"""
+    root = tmp_path / "reports"
+    first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
+    _create(root, first, holders).release()
+    _create(root, second, holders).release()
+    before = signal.getsignal(signal.SIGTERM)
+    _signal_inside_end_run(monkeypatch, signum=signal.SIGTERM)
+    rc, out, err = _settle(capsys, "--report-dir", str(root), "--json")
+    assert rc == 143 and [r["run_id"] for r in json.loads(out)["runs"]] == [first]
+    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    assert _state(root, second).status is Status.RUNNING
+    assert signal.getsignal(signal.SIGINT) is signal.SIG_IGN and signal.getsignal(signal.SIGTERM) is before
+
+
+def test_status_wait_keeps_an_ignored_sigint_ignored(tmp_path, capsys, holders, monkeypatch, sigint_ignored):
+    """SIGINT 进入命令时已被忽略：等待的间隔里收到的 SIGINT 不使它停止等待；持有者放开之后的那次轮询照常处置并显示，退出码按 run 的
+    状态（1）；命令结束之后 SIGINT 仍是忽略。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    holder = _create(root, run_id, holders)
+
+    def on_poll(n):
+        signal.raise_signal(signal.SIGINT)
+        if n == 2:
+            holder.release()
+
+    polls = _polls(monkeypatch, on_poll)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    assert rc == 1 and polls == [1.0, 1.0] and "已停止" not in err
+    assert err.splitlines()[0] == f"本命令已把 run {run_id} 记为已结束：执行它的 gherkai 进程已退出。"
+    assert out.splitlines()[0] == f"run {run_id}: aborted"
+    assert signal.getsignal(signal.SIGINT) is signal.SIG_IGN
+
+
+def _sigint_right_after_restoring_it(monkeypatch) -> list:
+    """命令恢复 SIGINT 的那一次设置处置刚完成，就给本进程发一次真实的 SIGINT（信号恰在此刻到达）：原处置是缺省的处理器，它随即抛出
+    KeyboardInterrupt。只认装上只记标志的处理器之后、把 SIGINT 换回别的处理器的第一次（之后用例收尾时恢复处置的那一次不算）；返回
+    记下各次注入的列表。"""
+    real_signal = signal.signal
+    injected: list = []
+    armed: list = []
+
+    def set_disposition(signum, handler):
+        old = real_signal(signum, handler)
+        if signum == signal.SIGINT:
+            if isinstance(getattr(handler, "__self__", None), m._InterruptState):
+                armed.append(True)
+            elif armed and not injected:
+                injected.append(handler)
+                signal.raise_signal(signal.SIGINT)
+        return old
+
+    monkeypatch.setattr(signal, "signal", set_disposition)
+    return injected
+
+
+def test_status_wait_interrupted_right_after_restoring_says_what_it_did(tmp_path, capsys, holders, monkeypatch):
+    """本命令已把 run 记为已结束并显示之后，恢复处理器时恰在恢复 SIGINT 之后收到 SIGINT：两个信号的处置都已复原（先恢复 SIGTERM，
+    它不会留在只记标志的处理器上）；接住这个中断时的说明与刚显示的状态一致，说已把它记为已结束，不说没有改动记录；130。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    before = signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)
+    injected = _sigint_right_after_restoring_it(monkeypatch)
+    rc, out, err = _status(capsys, run_id, "--report-dir", str(root), "--wait")
+    assert injected == [before[0]]
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
+    assert rc == 130 and out.splitlines()[0] == f"run {run_id}: aborted"
+    assert err.splitlines()[-1] == f"已停止：本命令已把 run {run_id} 记为已结束，可用 gherkai status {run_id} --report-dir {root} 查看。"
+    assert "没有改动" not in err and _state(root, run_id).status is Status.ABORTED
+
+
+def test_settle_runs_interrupted_right_after_restoring_leaves_no_handler_behind(tmp_path, capsys, holders, monkeypatch):
+    """`settle-runs` 处理完、恢复处理器时恰在恢复 SIGINT 之后收到 SIGINT：这个中断落在命令的处理之外，以 KeyboardInterrupt 冒出 main；
+    两个信号的处置都已复原，SIGTERM 不留在只记标志的处理器上；输出在恢复之前已经写完。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders).release()
+    before = signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)
+    _sigint_right_after_restoring_it(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        m.main(["settle-runs", "--report-dir", str(root), "--json"])
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
+    assert [r["run_id"] for r in json.loads(capsys.readouterr().out)["runs"]] == [run_id]
+
+
 def test_status_wait_on_a_finished_run_neither_checks_the_filesystem_nor_tries_the_lock(tmp_path, capsys, holders, monkeypatch):
     """已结束的 run：直接渲染、按终态给退出码，不做边界检查、不碰锁（取文件系统类型一调用即失败，照样渲染）。"""
     root = tmp_path / "reports"
@@ -1379,6 +1587,37 @@ def test_status_wait_settles_a_run_whose_advancer_was_killed_on_its_next_poll(ad
     _wait_until(lambda: all(not _alive(int(n.split("-")[1])) for n in os.listdir(workers)), None, "等 worker 自行退出", 30)
 
 
+@pytest.mark.real_filesystem
+def test_status_wait_started_with_sigint_ignored_keeps_waiting_through_sigint(tmp_path, holders):
+    """真实进程、真实信号：像非交互 shell 起的后台作业那样，启动时 SIGINT 已被设为忽略（由启动它的一方设下、经 exec 继承）。等待中的
+    `status --wait` 收到 SIGINT 不停止、接着等待；收到没有被忽略的 SIGTERM 才停止，说明没有改动，以 143 结束。"""
+    root = tmp_path / "reports"
+    run_id = "20300101T000000Z-aaaaaa"
+    _create(root, run_id, holders)  # 测试进程持着锁：有进程在管这个 run，命令一直等待
+    before = _bytes(root, run_id)
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        waiting = subprocess.Popen(_cli("status", run_id, "--report-dir", str(root), "--wait"), cwd=tmp_path,
+                                   env=_child_env(tmp_path), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, text=True)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    try:
+        time.sleep(2.0)
+        assert waiting.poll() is None, waiting.communicate()
+        waiting.send_signal(signal.SIGINT)
+        time.sleep(1.0)
+        assert waiting.poll() is None, "被忽略的 SIGINT 停止了等待"
+        waiting.send_signal(signal.SIGTERM)
+        out, err = waiting.communicate(timeout=30)
+    finally:
+        if waiting.poll() is None:
+            _kill_and_reap(waiting)
+    assert (waiting.returncode, out, "Traceback" in err) == (143, "", False), err
+    assert err.splitlines()[-1] == f"已停止等待，本命令没有改动 run {run_id} 的记录；可以再执行同一条命令接着等待。"
+    assert _bytes(root, run_id) == before
+
+
 def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -1481,7 +1720,8 @@ def test_a_real_sigint_during_a_settle_waits_for_that_settle(tmp_path, holders):
 @pytest.mark.parametrize("machine", [False, True], ids=["text", "json"])
 def test_a_real_sigint_just_before_the_output_still_prints_what_was_done(machine, tmp_path, holders):
     """真实进程、真实信号：`settle-runs` 处理完两个 run 与一个暂存目录、停在开始输出之前时收到 SIGINT。它不在这时退出；放行之后输出照常
-    做一次（人读表格里有两个 run 与那个暂存目录；--json 下是含它们的单个对象），随后说明已处理完的那一句，以 130 结束、不打回溯。"""
+    做一次（人读表格里有两个 run 与那个暂存目录；--json 下是含它们的单个对象）；这个中断没有让命令少做事，没有停止的说明，以 0 结束、
+    不打回溯。"""
     root = tmp_path / "reports"
     first, second = "20300102T000000Z-aaaaaa", "20300101T000000Z-aaaaaa"
     _create(root, first, holders).release()
@@ -1489,8 +1729,7 @@ def test_a_real_sigint_just_before_the_output_still_prints_what_was_done(machine
     leftover = _staging(root, "0123456789abcdef")
     proc, pause = _start_paused_settle_runs(tmp_path, root, "output", *(["--json"] if machine else []))
     out, err = _signal_the_paused(proc, pause, "停到开始输出之前")
-    assert (proc.returncode, "Traceback" in err) == (130, False), err
-    assert err.splitlines() == ["已停止：上面列出的已处理完，其余的没有处理；可以再执行同一条命令。"]
+    assert (proc.returncode, err) == (0, ""), err
     if machine:
         doc = json.loads(out)
         assert [(r["run_id"], r["outcome"]) for r in doc["runs"]] == [(first, "settled"), (second, "settled")]

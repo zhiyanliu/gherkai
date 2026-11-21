@@ -138,7 +138,7 @@ run 的结果 `RunResult` 从记录组装（`project.assemble_run_result`，前�
 
 各命令每个退出码的含义见 [`running-and-results.md`](../user-guide/running-and-results.md)「退出码」，部署方命令 `deploy` / `destroy` 见 [`cloud-backend.md`](../user-guide/cloud-backend.md)「退出码与常见错误」；本节只讲判定从哪里来、CI 应接哪一条。
 
-归纳：**部署方命令之外，表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**（`deploy` / `destroy` 的 1 不表判定，表示账户可能已被改动）；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`settle-runs` 同样不表判定，跳过不改变退出码，被 Ctrl-C 打断时为 130；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
+归纳：**部署方命令之外，表达判定的只有 `run` 与 `status`，也只有它们会以退出码 1 结束**（`deploy` / `destroy` 的 1 不表判定，表示账户可能已被改动）；`submit`/`plan`/`explain`/`doctor`/`list-deterministic`/`skill install` 都是 0/2 的「成功 / 失败」；`settle-runs` 同样不表判定，跳过不改变退出码，被 Ctrl-C 打断、还有没处理的项时为 130（SIGTERM 为 143）；`list-engines` 恒 0（某个引擎未安装正是它要展示的信息）。
 
 `run` 表判定的退出码取从记录组装的 `RunResult.status`，即记录里的 run 状态：本进程的写使 run 成为终态之后，落库服务读一次运行态，汇总、`--json`、报告与退出码都出自这一次读（`--no-report` 不写记录，按同一套规则在内存里算出）；运行期间处理了使用方中断的 `run` 例外：以 130（Ctrl-C）或 143（SIGTERM）结束、不表判定；收尾时发现 run 在本次执行结束之前已被别处记为已结束的 `run` 也例外：不覆盖已有终态，以 1 结束、不按本次判定（处理过中断时仍为 130 或 143）；运行期间读写记录失败（含收尾时那一次读）的 `run` 同样例外：不输出汇总，终端给一句说明，以非零退出码结束（处理过中断时仍为 130 或 143）。`status` 的则取读回的落库 `RunState`。两路 `status`（local/cloud）共用同一个 `_render_status`，行为一致。
 

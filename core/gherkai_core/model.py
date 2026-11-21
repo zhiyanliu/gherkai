@@ -642,7 +642,7 @@ class RunState:
 
     **jobs 是 Map（scope_id → JobState），非 list**（ADR 0030 决定五）：实时按单个 job 刷状态需「按 scope_id
     定位」，list 只能按下标定位（DDB 更无法按属性值定位 list 元素）。Map 下各 scope 互不干扰、支持单元素更新。
-    内存模型是 Map；落盘 JSON 仍是 list（serialize 负责转换，保 run_state.json 向后兼容）。
+    落盘的 run_state.json 里 jobs 是 list，内存里是按 scope_id 的映射，两者由 serialize 转换。
     """
 
     run_id: str

@@ -488,6 +488,68 @@ def test_ctrl_c_before_the_first_job_without_a_record_says_nothing_started(tmp_p
     assert (rc, cap.out) == (130, "") and cap.err.splitlines()[-1] == "已停止，没有开始执行。"
 
 
+@pytest.mark.parametrize("record", [True, False], ids=["with-record", "no-report"])
+def test_an_interrupt_before_the_first_job_does_not_announce_the_start(record, tmp_path, monkeypatch, capsys):
+    """启动第一个 job 之前已收到中断（这里在装配引擎时发出真实的 SIGINT）：看标志在打出开场提示之前，标准错误里没有「开始运行：…（将产生
+    AWS 费用）」那一行，只有没有 job 开始执行的那一句。对照：没有中断时同一条命令打出这一行。"""
+    _fix_run_id(monkeypatch)
+    reports = tmp_path / "reports"
+    argv = ["run", str(_write_feature(tmp_path)), *(["--report-dir", str(reports)] if record else ["--no-report"])]
+
+    def passing_schedule(run_meta, engines, sink, opts=None, on_job_complete=None, on_event=None):
+        results = tuple(JobResult(job=j, status=Status.PASSED) for j in run_meta.jobs)
+        for jr in results:
+            if on_job_complete is not None:
+                on_job_complete(jr)
+        return Execution(run_meta=run_meta, results=results, stopped_by=None, duration_ms=0.0)
+
+    monkeypatch.setattr(m, "schedule", passing_schedule)
+    assert _main(argv) == 0
+    assert any("开始运行：" in line for line in capsys.readouterr().err.splitlines())
+    if record:
+        import shutil
+
+        shutil.rmtree(reports)
+    _raise_signal_at("assembling-engines", monkeypatch)
+    monkeypatch.setattr(m, "schedule", lambda *a, **k: pytest.fail("启动第一个 job 之前已收到中断时不该调用 schedule"))
+    rc = _main(argv)
+    cap = capsys.readouterr()
+    assert rc == 130 and "开始运行" not in cap.err
+    assert cap.err.splitlines()[-1] == (_ended_by_the_interrupt_line(reports) if record else "已停止，没有开始执行。")
+
+
+def test_run_keeps_an_ignored_sigint_ignored(tmp_path, monkeypatch, capsys):
+    """SIGINT 进入命令时已被忽略（像非交互 shell 起的后台作业）：起好隧道之后不为它装处理器，装配引擎时收到的真实 SIGINT 不被记下，照常
+    执行、输出汇总，按判定以 0 结束；命令结束之后 SIGINT 仍是忽略。"""
+    _raise_signal_at("assembling-engines", monkeypatch)
+    box: dict = {}
+    monkeypatch.setattr(m, "schedule", _fake_schedule(box))
+    previous = signal.signal(signal.SIGINT, signal.SIG_IGN)
+    try:
+        rc = _main(["run", str(_write_feature(tmp_path)), "--no-report", "--json"])
+        after = signal.getsignal(signal.SIGINT)
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    cap = capsys.readouterr()
+    assert rc == 0 and "run_meta" in box and json.loads(cap.out)["status"] == "passed"
+    assert "已停止" not in cap.err and after is signal.SIG_IGN
+
+
+def test_run_interrupted_right_after_restoring_leaves_no_handler_behind(tmp_path, monkeypatch, capsys):
+    """前台 `run` 执行结束、恢复处理器时恰在恢复 SIGINT 之后收到真实的 SIGINT：这个中断落在命令的处理之外，以 KeyboardInterrupt 冒出
+    main；两个信号的处置都已复原（先恢复 SIGTERM，它不留在只记标志的处理器上）；汇总在恢复之前已经写完。"""
+    from test_settle_runs import _sigint_right_after_restoring_it
+
+    monkeypatch.setattr(m, "schedule", _fake_schedule({}))
+    before = signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)
+    injected = _sigint_right_after_restoring_it(monkeypatch)
+    with pytest.raises(KeyboardInterrupt):
+        m.main(["run", str(_write_feature(tmp_path)), "--no-report", "--json"])
+    assert injected == [before[0]]
+    assert (signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)) == before
+    assert json.loads(capsys.readouterr().out)["status"] == "passed"
+
+
 def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_write(tmp_path, monkeypatch, capsys):
     """建 run 之后被中断、前台进程正在做那次结束写时又按了一次 Ctrl-C（这里在真实的结束写里发出）：只记下，不打断结束写与生成报告，
     结果与只按一次相同，不打回溯。"""
@@ -511,8 +573,8 @@ def test_ctrl_c_again_while_ending_the_interrupted_run_does_not_cut_the_end_writ
 
 def test_end_write_failure_after_an_interrupt_before_execution_is_reported_without_a_traceback(tmp_path, monkeypatch,
                                                                                                capsys):
-    """建 run 之后被中断、那次结束写本身失败（磁盘写不进）：不说已记为已结束，按运行期落库失败的说明结束，退出码仍按信号取 130，不打
-    回溯；run 停在 pending。"""
+    """建 run 之后被中断、那次结束写本身失败（磁盘写不进）：不说已记为已结束，也不说有 job 在记录里仍为 running（没有 job 启动过）；
+    一句说明发生了什么、记录停在未结束、给出把它记为已结束的 settle-runs 整条命令，退出码仍按信号取 130，不打回溯；run 停在 pending。"""
     _fix_run_id(monkeypatch)
     _raise_signal_at("after-the-call", monkeypatch)
 
@@ -525,9 +587,12 @@ def test_end_write_failure_after_an_interrupt_before_execution_is_reported_witho
     rc = _main(["run", str(_write_feature(tmp_path)), "--report-dir", str(reports)])
     cap = capsys.readouterr()
     assert rc == 130 and cap.out == "" and "Traceback" not in cap.err
-    assert cap.err.splitlines()[-1].startswith(f"run {FIXED_RUN_ID} 读写本机的运行记录失败，执行已停止，没有输出汇总：")
-    assert f"gherkai settle-runs {FIXED_RUN_ID} --report-dir {reports} 把这个 run 记为已结束，然后重新执行。" in cap.err
-    assert "已因中断记为已结束" not in cap.err
+    assert cap.err.splitlines()[-1] == (
+        f"已停止：run {FIXED_RUN_ID} 没有 job 开始执行，但把它记为已结束时读写本机的运行记录失败：[Errno {errno.ENOSPC}] "
+        f"{os.strerror(errno.ENOSPC)}。记录在 {reports / FIXED_RUN_ID}，这个 run 在记录里停在未结束（全部 job 仍为 pending），"
+        f"可用 gherkai status {FIXED_RUN_ID} --report-dir {reports} 查看。请检查这个目录所在磁盘的剩余空间与读写权限，再用 "
+        f"gherkai settle-runs {FIXED_RUN_ID} --report-dir {reports} 把这个 run 记为已结束，然后重新执行。")
+    assert "running" not in cap.err and "已因中断记为已结束" not in cap.err and "开始运行" not in cap.err
     assert LocalRunStore(reports).load_run_state(FIXED_RUN_ID).status == Status.PENDING
 
 
